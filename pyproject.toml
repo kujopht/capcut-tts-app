@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capcut-tts-api"
+version = "1.0.0"
+description = "Pure Python SDK and CLI for CapCut Common Task API (TTS & STT)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "CapCut API Contributors"}
+]
+keywords = ["capcut", "capcut-tts-api", "tts", "stt", "speech-to-text", "text-to-speech", "vod", "api"]
+dependencies = [
+    "requests>=2.25.0"
+]
+
+[project.scripts]
+capcut-tts-api = "capcut_tts_api.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["capcut_tts_api*"]

@@ -1,457 +1,419 @@
-# CapCut Common Task Client
+# CapCut TTS API Client & Python SDK (`capcut-tts-api`)
 
-Pure Python command-line client for CapCut common task workflows:
+A professional, pure Python module SDK and Command-Line Interface (CLI) for CapCut common task workflows:
 
-- Text to Speech (TTS)
-- Speech to Text / subtitle recognition (STT)
-- Audio upload for STT
-- Task polling for TTS and STT
+- **Text to Speech (TTS)**: High-quality audio generation using CapCut voice catalog with automatic `voice_type` and `resource_id` resolution.
+- **Speech to Text (STT)**: Automatic subtitle recognition and speech transcription.
+- **VOD Chunked Media Upload**: Multi-stage audio/video uploading with AWS SigV4 signing.
+- **Task Polling & Management**: Asynchronous task querying with automatic status polling.
+- **Subtitle Parser**: Structured extraction of timestamps, utterances, and word timings.
+- **Voice Library Catalog**: Helper tools to query and inspect available CapCut voices.
 
-This client does not call native libraries, does not load `.dylib` files, does not use C++ helpers, and does not use `ctypes`. Request construction, payload signing, upload signing, and VOD authorization are implemented in Python.
+> **Pure Python**: Zero native dependencies (`.dylib`, `.so`, `.dll`), no C++ binaries, and no `ctypes`. Request signing, payload encryption (RSA PKCS#1 v1.5), and VOD authentication (AWS SigV4) are implemented 100% natively in standard Python.
 
-> Use this tool only with accounts, devices, sessions, and media that you are authorized to use.
+> *Use this SDK and tool responsibly with authorized accounts, sessions, and media.*
 
-## Donate
+---
+
+## Donate / Ủng hộ
 
 If this project helps your work, you can support development with USDT on TRC20:
 
 ```text
 TL4sPkfSTVnmneKvvuCfa2wSDnADjxDqYV
 ```
-
-Network: TRC20
+Network: **TRC20**
 
 ---
 
-## English
+## English Documentation
 
 ### Features
 
-- Builds CapCut `/lv/v1/common_task/new` requests for TTS and STT.
-- Uploads local audio/video files to the CapCut text-recognition VOD space before STT.
-- Polls `/lv/v1/common_task/query` for task results.
-- Generates request body hashes with `x-ss-stub`.
-- Generates the common `sign` header used by the captured CapCut flow.
-- Generates the TTS inner payload RSA signature in pure Python.
-- Generates AWS SigV4 authorization for `ApplyUploadInner` and `CommitUploadInner` in pure Python.
-- Supports `--device-json` overrides for device/session values.
-
-### Requirements
-
-- Python 3.9+
-- `requests`
-
-Install dependency:
-
-```bash
-python3 -m pip install requests
-```
-
-### Device Configuration
-
-The script includes a default CapCut desktop device profile in `DEFAULT_DEVICE`. You can override any field by passing a JSON file:
-
-```bash
-python3 capcut_common_task_client.py tts-new \
-  --device-json device.json \
-  --text "Hello world"
-```
-
-Example `device.json`:
-
-```json
-{
-  "device_id": "7647183892936328721",
-  "iid": "7647185302080423697",
-  "tdid": "7647183892936328721",
-  "appvr": "8.7.0",
-  "version_name": "8.7.0",
-  "version_code": "8.7.0",
-  "lan": "vi-VN",
-  "loc": "VN",
-  "region": "VN"
-}
-```
-
-### Commands
-
-#### 1. Create a TTS Task
-
-```bash
-python3 capcut_common_task_client.py tts-new \
-  --text "Hello world"
-```
-
-Useful voice options:
-
-```bash
-python3 capcut_common_task_client.py tts-new \
-  --text "Hello world" \
-  --voice BV074_streaming \
-  --resource-id 7102355709945188865 \
-  --rate 1.0
-```
-
-The response contains a task `id` and `token`:
-
-```json
-{
-  "data": {
-    "tasks": [
-      {
-        "id": "...",
-        "status": "queueing",
-        "token": "..."
-      }
-    ]
-  }
-}
-```
-
-#### 2. Query a TTS Task
-
-```bash
-python3 capcut_common_task_client.py tts-query \
-  --task-id "TASK_ID" \
-  --token "TOKEN"
-```
-
-#### 3. Upload an Audio/Video File
-
-```bash
-python3 capcut_common_task_client.py upload-audio \
-  --audio-file 1.mp4
-```
-
-Example output:
-
-```json
-{
-  "vid": "v10639g5000...",
-  "md5": "6171f4249ae1561cab6c4e4f1e1d71fa",
-  "local_md5": "6171f4249ae1561cab6c4e4f1e1d71fa",
-  "duration_ms": 1008,
-  "format": "mp3",
-  "size": 20160,
-  "file_type": "audio",
-  "store_uri": "tos-alisg-v-37d494-sg/..."
-}
-```
-
-#### 4. Create an STT Task from an Uploaded File
-
-Use this when you already have `vid` and `md5` from `upload-audio`:
-
-```bash
-python3 capcut_common_task_client.py stt-new \
-  --audio-vid "VID_FROM_UPLOAD" \
-  --audio-md5 "MD5_FROM_UPLOAD" \
-  --duration-ms 1008 \
-  --language vi-VN
-```
-
-#### 5. Upload and Create STT in One Command
-
-```bash
-python3 capcut_common_task_client.py stt-file \
-  --audio-file 1.mp4 \
-  --language vi-VN
-```
-
-The command first uploads the media, then submits the STT task. The response contains a task `id` and `token`.
-
-#### 6. Query an STT Task
-
-```bash
-python3 capcut_common_task_client.py stt-query \
-  --task-id "TASK_ID" \
-  --token "TOKEN"
-```
-
-#### 7. Save Response to a File
-
-```bash
-python3 capcut_common_task_client.py stt-query \
-  --task-id "TASK_ID" \
-  --token "TOKEN" \
-  --out response.json
-```
-
-#### 8. Preview a Request Without Calling the API
-
-```bash
-python3 capcut_common_task_client.py stt-new \
-  --audio-vid "VID_FROM_UPLOAD" \
-  --audio-md5 "MD5_FROM_UPLOAD" \
-  --duration-ms 1000 \
-  --language vi-VN \
-  --dry-run
-```
-
-### How It Works
-
-#### TTS Flow
-
-1. Build SSML from `--text`, `--voice`, `--resource-id`, and `--rate`.
-2. Create the inner TTS payload.
-3. Generate the payload `sign` using RSA PKCS#1 v1.5 in pure Python.
-4. Wrap the payload in a CapCut common task body.
-5. Generate `x-ss-stub`, `x-khronos`, `device-time`, and request `sign`.
-6. POST to `/lv/v1/common_task/new`.
-7. Poll `/lv/v1/common_task/query` with the returned task `id` and `token`.
-
-#### STT File Flow
-
-1. Call `/lv/v1/upload_sign` to obtain temporary VOD credentials.
-2. Sign `ApplyUploadInner` with AWS SigV4.
-3. Upload the media bytes to the returned VOD upload host.
-4. Finish the upload with the part CRC32.
-5. Sign and call `CommitUploadInner` to receive the media `vid`, `md5`, and duration.
-6. Submit `/lv/v1/common_task/new` with `req_key=cc_audio_subtitle_asr`.
-7. Poll `/lv/v1/common_task/query` until the task succeeds.
-
-### Where Are the Subtitles?
-
-STT query responses store subtitles inside:
-
-```text
-data.tasks[0].payload
-```
-
-`payload` is itself a JSON string. Parse it, then read:
-
-```text
-payload.utterances[].text
-payload.utterances[].start_time
-payload.utterances[].end_time
-payload.utterances[].words[]
-```
-
-Quick extractor:
-
-```bash
-python3 - <<'PY'
-import json
-
-data = json.load(open("response.json", encoding="utf-8"))
-payload = json.loads(data["data"]["tasks"][0]["payload"])
-
-for item in payload.get("utterances", []):
-    print(f'[{item["start_time"]}ms -> {item["end_time"]}ms] {item["text"]}')
-PY
-```
-
-### Notes
-
-- `upload-audio` accepts media files such as `.mp3`, `.m4a`, and `.mp4` when CapCut's upload service can parse the media.
-- `duration_ms` is read from the upload commit result when using `stt-file`.
-- The removed device-generation flow is intentionally not part of this client. Device identity should be configured explicitly through `DEFAULT_DEVICE` or `--device-json`.
+- **High-Level Python SDK (`capcut_tts_api`)**: Clean, object-oriented API for seamless integration into Python applications.
+- **Automatic Voice & Resource ID Resolution**: Pass `voice="BV421_vivn_streaming"` (the `voice_type`), and the SDK automatically resolves the matching `resource_id` from `Voice.json`!
+- **Command Line Interface (`capcut-tts-api` CLI)**: Full-featured CLI command (`capcut-tts-api` or `python -m capcut_tts_api.cli`) for terminal usage and automation scripts.
+- **Pure Python Cryptography**: RSA PKCS#1 v1.5 encryption & AWS SigV4 signer implemented without external crypto C-extensions.
+- **Typed Data Models**: Dataclasses for `DeviceConfig`, `UploadResult`, `Utterance`, `Word`, `SubtitleResult`, and `VoiceInfo`.
 
 ---
 
-## Tiếng Việt
+### Installation
+
+Requires Python 3.9+.
+
+```bash
+# Option 1: Install as a Python package in editable mode
+python3 -m pip install -e .
+
+# Option 2: Direct dependency installation
+python3 -m pip install requests
+```
+
+---
+
+### Examples & Sample Files
+
+The repository includes ready-to-run example scripts in the `examples/` directory:
+
+- [examples/01_tts_basic.py](examples/01_tts_basic.py): Basic TTS generation with automatic voice_type resolution.
+- [examples/02_stt_transcribe.py](examples/02_stt_transcribe.py): Media file transcription and structured subtitle parsing.
+- [examples/03_voice_catalog.py](examples/03_voice_catalog.py): Searching, filtering, and listing available voices in catalog.
+- [examples/04_custom_device.py](examples/04_custom_device.py): Custom device identity configuration.
+- [device.json.example](device.json.example): Sample JSON file for overriding device identity.
+
+Run any example:
+
+```bash
+python examples/01_tts_basic.py
+python examples/03_voice_catalog.py
+```
+
+---
+
+### Python SDK Quickstart
+
+#### 1. Text to Speech (TTS)
+
+##### Automatic Voice & Resource ID Resolution
+
+Specify `voice` as `voice_type` (e.g. `"BV421_vivn_streaming"`, `"BV074_streaming"`). The SDK automatically looks up `Voice.json` and links the corresponding `resource_id`!
+
+```python
+from capcut_tts_api import CapCutClient
+
+client = CapCutClient()
+
+# Generate speech using voice_type (auto-resolves resource_id="7252594014782755330")
+response = client.generate_speech(
+    texts="Xin chào bạn! Chúc bạn một ngày vui vẻ.",
+    voice="BV421_vivn_streaming", # voice_type
+    rate="1.0",
+    wait=True
+)
+
+print(response)
+```
+
+##### Low-Level Async/Manual Polling Flow
+
+```python
+from capcut_tts_api import CapCutClient
+
+client = CapCutClient()
+
+# 1. Submit TTS task with voice_type (auto-resolves resource_id)
+task_res = client.create_tts_task(
+    texts=["Segment 1 of speech", "Segment 2 of speech"],
+    voice="BV074_streaming"
+)
+
+task = task_res["data"]["tasks"][0]
+task_id = task["id"]
+token = task["token"]
+
+# 2. Query task status manually
+query_res = client.query_tts_task(task_id, token)
+print(query_res)
+```
+
+---
+
+#### 2. Speech to Text (STT) & Subtitle Extraction
+
+##### Transcribe Local Media File (.mp3, .m4a, .mp4)
+
+```python
+from capcut_tts_api import CapCutClient
+
+client = CapCutClient()
+
+# Upload media, create STT task, and wait for completed result
+res = client.transcribe_file(
+    file_path="sample_audio.mp3",
+    language="vi-VN",
+    use_translation=False,
+    wait=True
+)
+
+# Parse structured subtitles directly from query response
+subtitles = client.extract_subtitles(res)
+
+print("Full Transcribed Text:", subtitles.full_text)
+for utterance in subtitles.utterances:
+    print(f"[{utterance.start_time}ms -> {utterance.end_time}ms] {utterance.text}")
+```
+
+---
+
+#### 3. Media Upload to CapCut VOD Space
+
+```python
+from capcut_tts_api import CapCutClient
+
+client = CapCutClient()
+
+# Upload audio/video to CapCut VOD storage
+upload_res = client.upload_audio("video.mp4")
+
+print(f"VID: {upload_res.vid}")
+print(f"MD5: {upload_res.md5}")
+print(f"Duration: {upload_res.duration_ms} ms")
+```
+
+---
+
+#### 4. Custom Device Configuration
+
+Override default device parameters programmatically:
+
+```python
+from capcut_tts_api import CapCutClient, DeviceConfig
+
+custom_device = DeviceConfig(
+    device_id="7647183892936328721",
+    iid="7647185302080423697",
+    appvr="8.7.0",
+    loc="VN",
+    lan="vi-VN"
+)
+
+client = CapCutClient(device=custom_device)
+```
+
+Or load from a JSON file (`device.json`):
+
+```python
+client = CapCutClient(device="device.json")
+```
+
+---
+
+#### 5. Inspecting Available Voices
+
+```python
+from capcut_tts_api import CapCutClient
+
+client = CapCutClient()
+
+# List Vietnamese voices from Voice.json catalog
+voices = client.list_voices(lang="vi-VN")
+
+for voice in voices:
+    print(f"{voice.display_name} ({voice.voice_type}) -> Resource ID: {voice.resource_id}")
+```
+
+---
+
+### Command-Line Interface (CLI) Guide
+
+You can run commands using `capcut-tts-api` (after `pip install -e .`) or `python -m capcut_tts_api.cli`:
+
+#### 1. List Available Voices
+
+```bash
+capcut-tts-api list-voices --language vi-VN
+# OR: python -m capcut_tts_api.cli list-voices --language vi-VN
+```
+
+#### 2. Create TTS Task (Auto-resolves resource_id from voice_type)
+
+```bash
+capcut-tts-api tts-new \
+  --text "Xin chào thế giới" \
+  --voice "BV421_vivn_streaming" \
+  --rate 1.0
+```
+
+#### 3. Query TTS Task
+
+```bash
+capcut-tts-api tts-query \
+  --task-id "TASK_ID" \
+  --token "TOKEN"
+```
+
+#### 4. Upload Audio File
+
+```bash
+capcut-tts-api upload-audio \
+  --audio-file 1.mp4
+```
+
+#### 5. Upload & Transcribe (STT) in One Step
+
+```bash
+capcut-tts-api stt-file \
+  --audio-file 1.mp4 \
+  --language vi-VN \
+  --out response.json
+```
+
+#### 6. Query STT Task
+
+```bash
+capcut-tts-api stt-query \
+  --task-id "TASK_ID" \
+  --token "TOKEN"
+```
+
+#### 7. Dry-Run Mode (Preview signed request without calling API)
+
+```bash
+capcut-tts-api tts-new \
+  --text "Dry run test" \
+  --voice "BV421_vivn_streaming" \
+  --dry-run
+```
+
+---
+
+### Module Architecture
+
+```text
+capcut-tts-api-main/
+├── capcut_tts_api/              # Core Python Package (capcut-tts-api)
+│   ├── __init__.py              # SDK exports & version metadata
+│   ├── config.py                # Base URLs, VOD constants, RSA public key
+│   ├── exceptions.py            # CapCut error hierarchy
+│   ├── models.py                # Strongly-typed dataclasses (DeviceConfig, Utterance, etc.)
+│   ├── signer.py                # RSA PKCS#1 v1.5, AWS SigV4, MD5 stubs & request signing
+│   ├── uploader.py              # Chunked VOD media uploader
+│   ├── client.py                # High-level CapCutClient SDK
+│   └── cli.py                   # Argument parser & CLI logic
+├── examples/                    # Runnable code examples
+│   ├── 01_tts_basic.py
+│   ├── 02_stt_transcribe.py
+│   ├── 03_voice_catalog.py
+│   └── 04_custom_device.py
+├── device.json.example          # Sample device profile JSON file
+├── Voice.json                   # Voice library catalog
+└── pyproject.toml               # PEP 517 build configuration
+```
+
+---
+
+## Tiếng Việt Documentation
 
 ### Donate / Ủng hộ
 
-Nếu project hữu ích cho công việc của bạn, có thể ủng hộ bằng USDT mạng TRC20:
+Nếu project hữu ích cho công việc của bạn, có thể ủng hộ phát triển qua USDT mạng TRC20:
 
 ```text
 TL4sPkfSTVnmneKvvuCfa2wSDnADjxDqYV
 ```
+Network: **TRC20**
 
-Network: TRC20
+---
 
-### Tính năng
+### Tính Năng Nổi Bật
 
-- Tạo request CapCut `/lv/v1/common_task/new` cho TTS và STT.
-- Upload file audio/video local lên VOD space dùng cho nhận diện phụ đề.
-- Query `/lv/v1/common_task/query` để lấy kết quả task.
-- Tạo `x-ss-stub` bằng MD5 của body.
-- Tạo header `sign` theo flow CapCut đã phân tích.
-- Tạo chữ ký RSA cho payload TTS bằng Python thuần.
-- Tạo AWS SigV4 cho `ApplyUploadInner` và `CommitUploadInner` bằng Python thuần.
-- Hỗ trợ override cấu hình thiết bị/session bằng `--device-json`.
+- **Package Python Module Chuẩn**: Tên package `capcut-tts-api` (Import `capcut_tts_api`).
+- **Tự động liên kết `voice_type` và `resource_id`**: Bạn chỉ cần truyền `voice_type` (ví dụ: `"BV421_vivn_streaming"`), SDK sẽ tự động khớp và điền `resource_id` (`"7252594014782755330"`) từ thư viện `Voice.json`.
+- **Python SDK hoàn chỉnh (`capcut_tts_api`)**: Thiết kế dạng module đối tượng (OOP) chuyên nghiệp.
+- **Command Line Interface (`capcut-tts-api` CLI)**: Giao diện dòng lệnh qua lệnh `capcut-tts-api` hoặc `python -m capcut_tts_api.cli`.
+- **Thuần Python 100%**: Mã hoá RSA PKCS#1 v1.5 và chữ ký AWS SigV4 chạy thuần bằng thư viện chuẩn của Python.
 
-### Yêu cầu
+---
 
-- Python 3.9+
-- `requests`
+### Hướng Dẫn Cài Đặt
 
-Cài dependency:
+Yêu cầu Python 3.9 trở lên.
 
 ```bash
+# Cài đặt module python vào môi trường
+python3 -m pip install -e .
+
+# Hoặc cài thư viện phụ thuộc
 python3 -m pip install requests
 ```
 
-### Cấu hình thiết bị
+---
 
-Script có sẵn profile thiết bị CapCut desktop trong `DEFAULT_DEVICE`. Có thể override bằng file JSON:
+### Hướng Dẫn Sử Dụng Python SDK
 
-```bash
-python3 capcut_common_task_client.py tts-new \
-  --device-json device.json \
-  --text "Xin chào"
+#### 1. Chuyển Đổi Văn Bản Thành Giọng Nói (TTS)
+
+```python
+from capcut_tts_api import CapCutClient
+
+client = CapCutClient()
+
+# Truyền voice_type (tự động khớp resource_id="7252594014782755330")
+result = client.generate_speech(
+    texts="Xin chào bạn! Chúc bạn một ngày tốt lành.",
+    voice="BV421_vivn_streaming", # voice_type trong Voice.json
+    rate="1.0",
+    wait=True
+)
+
+print(result)
 ```
 
-Ví dụ `device.json`:
+---
 
-```json
-{
-  "device_id": "7647183892936328721",
-  "iid": "7647185302080423697",
-  "tdid": "7647183892936328721",
-  "appvr": "8.7.0",
-  "version_name": "8.7.0",
-  "version_code": "8.7.0",
-  "lan": "vi-VN",
-  "loc": "VN",
-  "region": "VN"
-}
+#### 2. Nhận Diện Phụ Đề Từ File Âm Thanh/Video (STT)
+
+```python
+from capcut_tts_api import CapCutClient
+
+client = CapCutClient()
+
+# Upload file, tạo task STT và lấy phụ đề tự động
+res = client.transcribe_file(
+    file_path="bai_hat.mp3",
+    language="vi-VN",
+    wait=True
+)
+
+# Trích xuất danh sách phụ đề có mốc thời gian
+subtitles = client.extract_subtitles(res)
+
+print("Văn bản toàn bộ:", subtitles.full_text)
+for item in subtitles.utterances:
+    print(f"[{item.start_time}ms -> {item.end_time}ms] {item.text}")
 ```
 
-### Cách dùng
+---
 
-#### 1. Tạo task TTS
+#### 3. Tra Cứu Danh Sách Giọng Đọc (Voice Catalog)
 
-```bash
-python3 capcut_common_task_client.py tts-new \
-  --text "Xin chào"
+```python
+from capcut_tts_api import CapCutClient
+
+client = CapCutClient()
+
+# Lấy danh sách các giọng đọc Tiếng Việt
+voices = client.list_voices(lang="vi-VN")
+
+for v in voices:
+    print(f"{v.display_name} ({v.voice_type}) -> Resource ID: {v.resource_id}")
 ```
 
-Tuỳ chỉnh giọng đọc:
+---
+
+### Hướng Dẫn Dòng Lệnh (CLI)
+
+#### 1. Xem danh sách giọng đọc
 
 ```bash
-python3 capcut_common_task_client.py tts-new \
-  --text "Xin chào" \
-  --voice BV074_streaming \
-  --resource-id 7102355709945188865 \
-  --rate 1.0
+capcut-tts-api list-voices --language vi-VN
+# Hoặc: python -m capcut_tts_api.cli list-voices --language vi-VN
 ```
 
-Response sẽ có `id` và `token` của task.
-
-#### 2. Query task TTS
+#### 2. Tạo task TTS (Tự động tra cứu resource_id từ voice_type)
 
 ```bash
-python3 capcut_common_task_client.py tts-query \
-  --task-id "TASK_ID" \
-  --token "TOKEN"
+capcut-tts-api tts-new \
+  --text "Xin chào thế giới" \
+  --voice "BV421_vivn_streaming"
 ```
 
-#### 3. Upload file audio/video
+#### 3. Upload file và tạo task STT tự động
 
 ```bash
-python3 capcut_common_task_client.py upload-audio \
-  --audio-file 1.mp4
-```
-
-Kết quả trả về gồm `vid`, `md5`, `duration_ms`, `format`, `size`, `file_type`, và `store_uri`.
-
-#### 4. Tạo task STT từ file đã upload
-
-Khi đã có `vid` và `md5`:
-
-```bash
-python3 capcut_common_task_client.py stt-new \
-  --audio-vid "VID_FROM_UPLOAD" \
-  --audio-md5 "MD5_FROM_UPLOAD" \
-  --duration-ms 1008 \
-  --language vi-VN
-```
-
-#### 5. Upload rồi tạo STT bằng một lệnh
-
-```bash
-python3 capcut_common_task_client.py stt-file \
+capcut-tts-api stt-file \
   --audio-file 1.mp4 \
-  --language vi-VN
-```
-
-Lệnh này upload file trước, lấy `vid/md5/duration_ms`, rồi tự submit task STT.
-
-#### 6. Query task STT
-
-```bash
-python3 capcut_common_task_client.py stt-query \
-  --task-id "TASK_ID" \
-  --token "TOKEN"
-```
-
-#### 7. Lưu response ra file
-
-```bash
-python3 capcut_common_task_client.py stt-query \
-  --task-id "TASK_ID" \
-  --token "TOKEN" \
+  --language vi-VN \
   --out response.json
 ```
-
-#### 8. Xem request mà không gọi API
-
-```bash
-python3 capcut_common_task_client.py stt-new \
-  --audio-vid "VID_FROM_UPLOAD" \
-  --audio-md5 "MD5_FROM_UPLOAD" \
-  --duration-ms 1000 \
-  --language vi-VN \
-  --dry-run
-```
-
-### Cách thức hoạt động
-
-#### Flow TTS
-
-1. Tạo SSML từ `--text`, `--voice`, `--resource-id`, và `--rate`.
-2. Tạo payload TTS bên trong.
-3. Ký payload bằng RSA PKCS#1 v1.5 thuần Python.
-4. Đóng payload vào body common task.
-5. Tạo `x-ss-stub`, `x-khronos`, `device-time`, và header `sign`.
-6. POST tới `/lv/v1/common_task/new`.
-7. Query `/lv/v1/common_task/query` bằng `task_id` và `token`.
-
-#### Flow STT từ file
-
-1. Gọi `/lv/v1/upload_sign` để lấy credential VOD tạm thời.
-2. Ký `ApplyUploadInner` bằng AWS SigV4.
-3. Upload bytes của file lên VOD upload host.
-4. Finish upload bằng CRC32 của part.
-5. Ký và gọi `CommitUploadInner` để lấy `vid`, `md5`, và duration.
-6. Submit `/lv/v1/common_task/new` với `req_key=cc_audio_subtitle_asr`.
-7. Query `/lv/v1/common_task/query` đến khi task thành công.
-
-### Phụ đề nằm ở đâu?
-
-Response STT chứa phụ đề trong:
-
-```text
-data.tasks[0].payload
-```
-
-`payload` là JSON string. Parse string này rồi đọc:
-
-```text
-payload.utterances[].text
-payload.utterances[].start_time
-payload.utterances[].end_time
-payload.utterances[].words[]
-```
-
-Trích phụ đề nhanh:
-
-```bash
-python3 - <<'PY'
-import json
-
-data = json.load(open("response.json", encoding="utf-8"))
-payload = json.loads(data["data"]["tasks"][0]["payload"])
-
-for item in payload.get("utterances", []):
-    print(f'[{item["start_time"]}ms -> {item["end_time"]}ms] {item["text"]}')
-PY
-```
-
-### Ghi chú
-
-- `upload-audio` có thể dùng với `.mp3`, `.m4a`, `.mp4` nếu dịch vụ upload của CapCut đọc được media.
-- Với `stt-file`, `duration_ms` được lấy tự động từ kết quả commit upload.
-- Flow tạo thiết bị tự động đã bị loại bỏ. Cấu hình thiết bị nên được khai báo rõ bằng `DEFAULT_DEVICE` hoặc `--device-json`.

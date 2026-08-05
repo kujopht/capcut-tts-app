@@ -1,0 +1,69 @@
+# ============================================================
+#  Fanfic Audio Studio / CapCut TTS
+# ============================================================
+
+# --- Du lieu nhay cam: TUYET DOI khong commit ---
+device.json
+device*.json
+!device.json.example
+*.device.json
+*.token
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+# cookie / session
+*cookie*
+*cookies*
+*.session
+# bien moi truong
+.env
+.env.*
+*.env
+# cau hinh ca nhan sinh ra khi chay (QSettings dang file, xem FAS_SETTINGS_FILE)
+fas_settings.ini
+*settings.local.ini
+*.local.json
+
+# --- Ket qua chay app ---
+outputs/
+Fanfic Audio Studio/
+*.mp3
+*.m4a
+*.wav
+*.zip
+
+# --- Build / dong goi ---
+build/
+dist/
+installer_output/
+*.spec
+!installer.iss
+
+# --- Moi truong ao / Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Gradio (ban du phong) ---
+.gradio/
+flagged/
+gradio_cached_examples/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

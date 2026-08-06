@@ -1,0 +1,66 @@
+# Fanfic Audio Studio
+
+Kho này chứa **hai sản phẩm** dùng chung một pipeline TTS:
+
+| Phần | Vị trí | Trạng thái |
+|---|---|---|
+| Ứng dụng desktop Windows (PySide6) | `app.py`, `desktop_app/`, `capcut_tts_api/` | Đang chạy ổn định, đã có installer |
+| Nền tảng web (Next.js + FastAPI) | `web/`, `server/` | MVP kỹ thuật, riêng tư, **chưa thương mại** |
+
+## Quy tắc bắt buộc
+
+- **Không sửa `capcut_tts_api/`** trước khi chứng minh lỗi nằm ở đó. Đây là bản đã kiểm chứng.
+- **Backend web không được import GUI.** `server/` chỉ chạm tới `desktop_app.providers.*`, `desktop_app.text_chunker`, `desktop_app.models`, `desktop_app.output_manager` — đã xác minh không kéo theo PySide6.
+- **Mọi bí mật chỉ ở backend.** Trình duyệt chỉ biết `NEXT_PUBLIC_API_BASE`.
+- **Không tự đổi sang giọng khác** khi tổng hợp thất bại, ở cả desktop lẫn web.
+- **Không commit** model `.onnx`, audio, preview cache, `build/`, `dist/`, `installer_output/`, `node_modules/`, `.env`.
+- **Mọi báo cáo viết bằng tiếng Việt**, bảng so sánh dùng cột `Hạng mục | Trước khi sửa | Sau khi sửa`.
+- Không push GitHub khi chưa được yêu cầu.
+
+## Lệnh thường dùng
+
+### Desktop
+```bash
+.\.venv\Scripts\python.exe -m compileall -q app.py desktop_app tests
+QT_QPA_PLATFORM=offscreen .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
+.\run_app.bat            # mở app
+.\build_app.bat          # build EXE (onedir)
+```
+Installer: mở `installer.iss` bằng `C:\Users\robux\AppData\Local\Programs\Inno Setup 6\ISCC.exe`.
+
+### Backend web
+```bash
+.\.venv\Scripts\python.exe -m uvicorn server.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m unittest server.tests.test_api
+```
+
+### Web
+```bash
+cd web
+npm install
+npm run dev        # http://localhost:3000
+npm run typecheck
+npm run build
+npm test
+```
+
+## Kiến trúc TTS
+
+Mọi thứ đi qua `desktop_app/providers/registry.py::ProviderRegistry`:
+
+- `capcut` — bọc `desktop_app/tts_service.py` (không đổi hành vi)
+- `edge` — `edge-tts`, có thử lại khi dịch vụ trả rỗng
+- `piper` — chạy cục bộ, model `.onnx` + `.onnx.json` ở `%LOCALAPPDATA%\FanficAudioStudio\models\piper`
+
+Backend web bọc thêm một lớp mỏng ở `server/tts_bridge.py` — **không sao chép logic**, chỉ gọi lại chunker và registry.
+
+## Đặc thù môi trường máy này
+
+- Smart App Control **đang bật cưỡng chế**. EXE/DLL chưa ký có thể bị Code Integrity chặn ở lần chạy đầu (sự kiện 3033/3077). Ký số là việc sau MVP. **Không tắt Smart App Control** — thao tác này không thể hoàn tác.
+- `Documents` bị OneDrive chuyển hướng.
+- ffmpeg/ffprobe ở `%LOCALAPPDATA%\Microsoft\WinGet\Links\`.
+- Inno Setup nằm ở phạm vi người dùng, không phải `Program Files`.
+
+## Trạng thái
+
+Xem `docs/HANDOFF.md` để biết mốc nào đã xong và việc tiếp theo.

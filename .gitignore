@@ -75,3 +75,29 @@ gradio_cached_examples/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- Web MVP (Next.js) ---
+web/node_modules/
+web/.next/
+web/out/
+web/build/
+web/coverage/
+web/.turbo/
+web/.eslintcache
+web/next-env.d.ts
+web/*.tsbuildinfo
+web/.next/types/
+node_modules/
+
+# --- Backend web (FastAPI) ---
+server/__pycache__/
+server/.pytest_cache/
+server/var/
+server/.venv/
+
+# --- Bien moi truong: chan het TRU file mau ---
+.env
+.env.*
+!.env.example
+!web/.env.example
+!server/.env.example

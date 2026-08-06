@@ -6,11 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@eslint/eslintrc": "^3.3.6",
     "next": "^16.3.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"

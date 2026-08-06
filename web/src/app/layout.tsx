@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { SessionProvider } from "@/lib/session";
+import { NavAuth } from "@/components/NavAuth";
 
 export const metadata: Metadata = {
   title: "Fanfic Audio Studio",
@@ -13,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="vi">
       <body>
+        <SessionProvider>
         <a className="skip-link" href="#main">
           Bỏ qua điều hướng
         </a>
@@ -27,7 +30,7 @@ export default function RootLayout({
             <nav className="nav-links" aria-label="Điều hướng chính">
               <Link href="/library">Thư viện</Link>
               <Link href="/studio">Creator Studio</Link>
-              <Link href="/login">Đăng nhập</Link>
+              <NavAuth />
             </nav>
           </div>
         </header>
@@ -40,6 +43,7 @@ export default function RootLayout({
             thanh toán và chưa xác minh giấy phép cho giọng đọc chạy cục bộ.
           </p>
         </footer>
+        </SessionProvider>
       </body>
     </html>
   );

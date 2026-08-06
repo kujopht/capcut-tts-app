@@ -37,8 +37,8 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 |---|---|---|
 | 1 | Nền móng: `web/` + `server/`, mock adapter, healthcheck, landing | ✅ Xong |
 | 2 | TTS service, job API, idempotency, test | ✅ Xong phần backend |
-| 3 | Vertical slice giao diện | ⏳ Mới có landing page |
-| 4 | Appwrite + R2 adapter thật, README | ❌ Chưa bắt đầu |
+| 3 | Vertical slice giao diện | ✅ Đủ 5 trang, đã kiểm thử thật |
+| 4 | Appwrite + R2 adapter thật | ⚠️ Auth Appwrite + R2 xong; metadata Appwrite chưa |
 
 ### Đã xong
 
@@ -79,14 +79,28 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 `web/.env` — chỉ một biến công khai: `NEXT_PUBLIC_API_BASE`.
 
+## NỢ KỸ THUẬT — việc đầu tiên của phiên sau
+
+**`npx eslint .` còn 7 lỗi**, tất cả cùng một quy tắc mới của React 19 / Next 16:
+`react-hooks/set-state-in-effect` — gọi `setState()` trực tiếp trong `useEffect`.
+
+Vị trí: `chapters/[id]/page.tsx:48`, `library/page.tsx:28`, `novels/[id]/page.tsx:54`,
+`studio/page.tsx:62` và `:79`, `components/AudioPlayer.tsx:25`, `lib/session.tsx:39`.
+
+Mã vẫn chạy đúng (build, type-check và test đều xanh), nhưng quy tắc này cảnh báo
+việc render thừa. Cách sửa đúng là chuyển việc nạp dữ liệu sang `useReducer`
+hoặc tính state khởi tạo ngoài effect. **Không được tắt quy tắc cho xanh.**
+
 ## Kết quả kiểm thử gần nhất
 
 | Bộ | Kết quả |
 |---|---|
-| `server.tests.test_api` | 26/26 đạt |
+| `server/tests` (api + adapters) | 43/43 đạt |
 | `web` (`node --test`) | 9/9 đạt |
 | `npx tsc --noEmit` | Sạch |
-| `npx next build` | Thành công, 3 route tĩnh |
+| `npx eslint .` | **7 lỗi** — xem mục nợ kỹ thuật ở trên |
+| `npx next build` | Thành công, 7 route |
+| Vertical slice thật | Đăng ký → novel → chương → job Edge TTS → audio 27.504 byte → idempotency tái dùng job |
 | Desktop | Không chạy lại — `desktop_app/` không bị sửa dòng nào |
 
 ## Bẫy đã gặp

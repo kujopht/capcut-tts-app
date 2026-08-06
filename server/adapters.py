@@ -336,20 +336,23 @@ class MockMetadataStore:
 
 
 def build_identity(settings: Settings) -> IdentityAdapter:
+    """
+    Appwrite khi da cau hinh du, nguoc lai dung mock.
+
+    Da khai bao cau hinh ma cau hinh sai thi NEM LOI - tuyet doi khong am tham
+    lui ve mock, vi nguoi van hanh se tuong dang chay that.
+    """
     if settings.appwrite.configured:
-        # Ban that se duoc cai o Moc 4. Chua co thi khong duoc am tham dung mock:
-        # bao loi ro de nguoi van hanh biet cau hinh chua duoc dung.
-        raise NotImplementedError(
-            "Appwrite adapter chưa được cài đặt (Mốc 4). "
-            "Hãy bỏ cấu hình APPWRITE_* để dùng bản mock trong lúc phát triển."
-        )
+        from server.appwrite_adapter import AppwriteIdentityAdapter
+
+        return AppwriteIdentityAdapter(settings.appwrite)
     return MockIdentityAdapter()
 
 
 def build_storage(settings: Settings) -> StorageAdapter:
+    """R2 khi da cau hinh du, nguoc lai luu xuong dia cuc bo."""
     if settings.r2.configured:
-        raise NotImplementedError(
-            "R2 adapter chưa được cài đặt (Mốc 4). "
-            "Hãy bỏ cấu hình R2_* để dùng lưu trữ cục bộ trong lúc phát triển."
-        )
+        from server.r2_adapter import R2StorageAdapter
+
+        return R2StorageAdapter(settings.r2)
     return LocalStorageAdapter(settings.var_dir / "storage")

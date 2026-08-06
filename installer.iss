@@ -48,7 +48,14 @@ Name: "desktopicon"; Description: "Tao shortcut tren Desktop"; \
 Source: "dist\{#MyAppShortName}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\{#MyAppShortName}\*"; DestDir: "{app}"; \
     Flags: ignoreversion recursesubdirs createallsubdirs; \
-    Excludes: "device.json,*.token,*.secret,*.pem,*.key"
+    Excludes: "device.json,*.token,*.secret,*.pem,*.key,make_icon.py"
+
+; Bo chung chi goc cua certifi: BAT BUOC cho HTTPS (thu vien requests doc file
+; nay qua certifi.where()). Day la chung chi goc CONG KHAI, khong phai credential.
+; Phai them lai o day vi bo loc "*.pem" ben tren da loai no ra - neu thieu file
+; nay thi ban CAI DAT se loi SSL khi goi API, trong khi ban dist van chay binh thuong.
+Source: "dist\{#MyAppShortName}\_internal\certifi\cacert.pem"; \
+    DestDir: "{app}\_internal\certifi"; Flags: ignoreversion
 
 ; Tai lieu
 Source: "README_GUI.md"; DestDir: "{app}"; Flags: ignoreversion isreadme

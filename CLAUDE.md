@@ -30,9 +30,12 @@ Installer: mở `installer.iss` bằng `C:\Users\robux\AppData\Local\Programs\In
 
 ### Backend web
 ```bash
+.\.venv\Scripts\python.exe -m pip install -r server/requirements.txt
 .\.venv\Scripts\python.exe -m uvicorn server.main:app --reload --port 8000
-.\.venv\Scripts\python.exe -m unittest server.tests.test_api
+.\.venv\Scripts\python.exe -m unittest discover -s server/tests -t .
 ```
+Phụ thuộc backend ở `server/requirements.txt` (tách khỏi `requirements-gui.txt`,
+đã gồm `boto3` cho R2). Không cài gói nào bằng tay.
 
 ### Web
 ```bash

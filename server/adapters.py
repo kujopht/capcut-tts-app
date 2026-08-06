@@ -281,6 +281,20 @@ class MockMetadataStore:
     # -- job -----------------------------------------------------------------
 
     def create_job(self, job: TtsJob) -> TtsJob:
+        """Ghi job lan dau - day chinh la luc trang thai `pending` duoc luu."""
+        with self._lock:
+            self.jobs[job.job_id] = job
+            return job
+
+    def save_job(self, job: TtsJob) -> TtsJob:
+        """
+        Ghi lai trang thai job sau moi transition.
+
+        Ban mock luu cung mot doi tuong nen thao tac nay "co ve" thua - nhung
+        `AppwriteMetadataStore.save_job()` moi la ban that: khong goi thi moi
+        thay doi trang thai deu bien mat khi doc lai tu Appwrite. Giu chung
+        mot giao dien de job runner khong phai biet dang chay che do nao.
+        """
         with self._lock:
             self.jobs[job.job_id] = job
             return job

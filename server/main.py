@@ -13,6 +13,7 @@ Backend KHONG import GUI: da xac minh khong module PySide6 nao bi keo vao.
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -277,12 +278,52 @@ def get_chapter(chapter_id: str) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 
-def _run_job(job: TtsJob, text: str) -> None:
-    """Chay job o thread nen. Moi loi deu duoc ghi vao job, khong lam sap server."""
-    job.status = JobStatus.RUNNING
-    job.started_at = now_iso()
+def _mark_failed(job: TtsJob, kind: str, message: str) -> None:
+    """
+    Dua job ve `failed` va GHI LAI qua metadata adapter.
 
+    Khong bao gio de lai output do dang: `output_key` bi xoa nen tang tren
+    khong the hieu nham la da co audio dung.
+    """
+    job.status = JobStatus.FAILED
+    job.error_kind = kind
+    job.error_message = message
+    job.output_key = None
+    job.finished_at = job.finished_at or now_iso()
+    try:
+        store.save_job(job)
+    except Exception as exc:
+        # Het duong ghi. Van giu trang thai `failed` trong bo nho de client
+        # khong bao gio nhan duoc mot thanh cong gia.
+        job.error_message = (
+            f"{message} | Không lưu được trạng thái thất bại: {type(exc).__name__}"
+        )
+
+
+def _run_job(job: TtsJob, text: str) -> None:
+    """
+    Chay job o thread nen. Moi loi deu duoc ghi vao job, khong lam sap server.
+
+    MOI transition co y nghia deu di qua `store.save_job()` - cung mot giao dien
+    cho ban mock lan Appwrite, job runner khong bao gio goi thang Appwrite.
+    Chi doi thuoc tinh trong bo nho la khong du: ban mock van "dung" vi giu
+    cung tham chieu, con Appwrite se mat sach trang thai khi doc lai.
+
+    Trang thai `pending` da duoc luu tu truoc boi `store.create_job()`.
+
+    THU TU BAT BUOC: synthesize -> upload -> create_track -> luu `completed`.
+    `completed` chi duoc ghi sau khi file da nam trong kho va `output_key` da
+    duoc gan, nen khong bao gio co job `completed` ma khong co audio.
+
+    GIOI HAN da biet - CHUA co giao dich phan tan: kho file va kho metadata la
+    hai he thong tach roi. Neu ghi `completed` that bai NGAY SAU khi upload
+    xong, job se thanh `failed` nhung object da upload van nam lai trong kho
+    (rac vo hai, khong duoc cong bo vi `output_key` bi xoa). Doi lai la khong
+    bao gio bao thanh cong gia. Xem docs/HANDOFF.md muc "Giới hạn đã biết".
+    """
     def progress(done: int, total: int) -> None:
+        # Cap nhat trong bo nho thoi: ghi moi tick se dam nat Appwrite.
+        # Trang thai ben vung chi ghi o cac transition o duoi.
         job.done_parts = done
         job.total_parts = total
 
@@ -290,6 +331,11 @@ def _run_job(job: TtsJob, text: str) -> None:
     dest = settings.var_dir / "tts" / f"{job.job_id}.mp3"
 
     try:
+        # -- transition: pending -> running (luu TRUOC khi synthesis) --------
+        job.status = JobStatus.RUNNING
+        job.started_at = now_iso()
+        store.save_job(job)
+
         result = tts_bridge.synthesize_chapter(
             text=text,
             voice_id=job.voice_id,
@@ -298,16 +344,12 @@ def _run_job(job: TtsJob, text: str) -> None:
             chunk_chars=job.chunk_chars,
             on_progress=progress,
         )
-        # Dua file vao kho roi moi danh dau hoan tat
+
+        # -- dua file vao kho TRUOC, danh dau hoan tat SAU -------------------
         if isinstance(storage, LocalStorageAdapter):
             storage.put_file(output_key, dest)
-        else:  # pragma: no cover - duong di cua R2 o Moc 4
+        else:
             storage.put(output_key, dest.read_bytes())
-
-        job.output_key = output_key
-        job.total_parts = result["total_parts"]
-        job.done_parts = result["total_parts"]
-        job.status = JobStatus.COMPLETED
 
         store.create_track(AudioTrack(
             chapter_id=job.chapter_id,
@@ -317,16 +359,34 @@ def _run_job(job: TtsJob, text: str) -> None:
             content_hash=job.content_hash,
             size_bytes=result["size_bytes"],
         ))
+
+        # -- transition: running -> completed --------------------------------
+        # GHI BEN VUNG TRUOC, cong bo trong bo nho SAU. Neu doi thuoc tinh
+        # cua `job` truoc roi moi ghi, mot lan poll xen vao giua hai buoc se
+        # thay `completed` trong khi metadata chua he duoc luu.
+        finished_at = now_iso()
+        completed = replace(
+            job,
+            status=JobStatus.COMPLETED,
+            output_key=output_key,
+            total_parts=result["total_parts"],
+            done_parts=result["total_parts"],
+            finished_at=finished_at,
+        )
+        store.save_job(completed)
+
+        job.output_key = output_key
+        job.total_parts = result["total_parts"]
+        job.done_parts = result["total_parts"]
+        job.status = JobStatus.COMPLETED
+        job.finished_at = finished_at
     except tts_bridge.TtsBridgeError as exc:
-        job.status = JobStatus.FAILED
-        job.error_kind = exc.kind
-        job.error_message = exc.message
+        _mark_failed(job, exc.kind, exc.message)
     except Exception as exc:
-        job.status = JobStatus.FAILED
-        job.error_kind = "unexpected"
-        job.error_message = f"{type(exc).__name__}: {exc}"
+        # Bao gom ca truong hop `store.save_job(completed)` nem loi: job se la
+        # `failed`, tuyet doi khong phai `completed` gia.
+        _mark_failed(job, "unexpected", f"{type(exc).__name__}: {exc}")
     finally:
-        job.finished_at = now_iso()
         dest.unlink(missing_ok=True)
         with _job_lock:
             _job_threads.pop(job.job_id, None)
@@ -357,6 +417,8 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
     if existing is not None:
         return {"job": existing.to_dict(), "reused": True}
 
+    # transition: (khong co) -> pending. Ghi ben vung NGAY, truoc khi khoi
+    # dong thread, de job luon ton tai trong metadata backend du worker chet.
     job = store.create_job(TtsJob(
         owner_id=profile.user_id,
         chapter_id=chapter.chapter_id,
@@ -366,6 +428,10 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
         chunk_chars=payload.chunk_chars,
     ))
 
+    # Chup trang thai TRUOC khi khoi dong worker: neu doc sau `start()`, worker
+    # co the da doi sang `running` va phan hoi "vua tao" se mo ta sai.
+    created = job.to_dict()
+
     thread = threading.Thread(
         target=_run_job, args=(job, chapter.content), daemon=True,
         name=f"tts-job-{job.job_id}",
@@ -373,7 +439,7 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
     with _job_lock:
         _job_threads[job.job_id] = thread
     thread.start()
-    return {"job": job.to_dict(), "reused": False}
+    return {"job": created, "reused": False}
 
 
 @app.get("/api/jobs/{job_id}")

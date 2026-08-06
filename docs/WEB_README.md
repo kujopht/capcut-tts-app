@@ -11,6 +11,8 @@ Không cần Appwrite hay Cloudflare. Mặc định đã là mock.
 
 ```bash
 # Backend (cửa sổ 1)
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r server/requirements.txt
 .\.venv\Scripts\python.exe -m uvicorn server.main:app --reload --port 8000
 
 # Frontend (cửa sổ 2)
@@ -18,6 +20,11 @@ cd web
 npm install
 npm run dev            # http://localhost:3000
 ```
+
+Phụ thuộc backend nằm ở **`server/requirements.txt`** — tách riêng khỏi
+`requirements-gui.txt` của desktop để backend không kéo theo PySide6. File này
+đã khai báo sẵn `boto3` (cần cho R2), nên **không phải `pip install` thủ công**
+bất cứ gói nào. Ngoài Python, cần `ffmpeg` trong `PATH` để ghép MP3.
 
 Kiểm tra nhanh: `curl http://localhost:8000/api/health` phải trả
 `"data_backend": "mock"` và `"storage_backend": "local"`.
@@ -101,7 +108,9 @@ Chi tiết collection, thuộc tính, index và quyền: `docs/APPWRITE_SCHEMA.m
 1. Tạo bucket **private** — không bật public access.
 2. Tạo API token S3-compatible, lấy access key và secret.
 3. Điền bốn biến `R2_*`, đặt `STORAGE_BACKEND=r2`.
-4. `pip install boto3` (chưa có sẵn trong venv).
+4. `boto3` đã nằm trong `server/requirements.txt`; nếu venv được cài từ file đó
+   thì không cần làm gì thêm. Kiểm nhanh:
+   `.\.venv\Scripts\python.exe -c "import boto3"`
 5. Khởi động lại. `/api/health` phải trả `"storage_backend": "r2"`.
 
 ### Audio riêng tư được bảo vệ thế nào
@@ -113,6 +122,32 @@ Chi tiết collection, thuộc tính, index và quyền: `docs/APPWRITE_SCHEMA.m
 - Chỉ **sau khi** qua được kiểm tra đó, backend mới cấp URL ký hạn 5 phút (R2)
   hoặc stream trực tiếp (local).
 - Không bao giờ trả URL công khai cố định.
+
+## Vòng đời TTS job được lưu thế nào
+
+Mọi transition đều đi qua **một giao diện metadata duy nhất** (`create_job` /
+`save_job`). Job runner không bao giờ gọi thẳng Appwrite, nên bản mock và bản
+Appwrite hành xử như nhau.
+
+| Transition | Lưu ở đâu | Thời điểm |
+|---|---|---|
+| `pending` | `store.create_job()` | Ngay khi nhận request, **trước** khi khởi động worker |
+| `running` | `store.save_job()` | **Trước** khi gọi tổng hợp giọng |
+| `completed` | `store.save_job()` | **Sau** khi upload xong và đã gán `output_key` |
+| `failed` | `store.save_job()` | Ngay khi tổng hợp, upload hoặc ghi metadata hỏng |
+
+Thứ tự bắt buộc: **tổng hợp → upload → tạo `audio_track` → lưu `completed`**.
+Trạng thái `completed` được **ghi bền vững trước, công bố trong bộ nhớ sau**, nên
+một lần poll xen vào giữa cũng không thể thấy thành công chưa được lưu.
+
+Tiến độ từng đoạn (`done_parts`) chỉ cập nhật trong bộ nhớ — ghi mỗi tick sẽ làm
+ngập Appwrite mà không thêm giá trị nào.
+
+**Giới hạn — chưa có transaction phân tán.** Kho file và kho metadata là hai hệ
+thống tách rời. Nếu ghi `completed` hỏng ngay sau khi upload xong, job sẽ thành
+`failed` còn object đã upload vẫn nằm lại trong kho. Đó là rác vô hại: `output_key`
+bị xoá nên nó không bao giờ được công bố. Đổi lại là **không bao giờ báo thành
+công giả**. Dọn rác này cần một job quét định kỳ — chưa làm.
 
 ## Smoke test
 
@@ -141,7 +176,14 @@ cd web && npx next build    # production build
 ## Giới hạn hiện tại — đọc kỹ
 
 **"Adapter đã viết và test bằng mock" KHÔNG đồng nghĩa với "đã kiểm chứng trên
-tài khoản cloud thật".**
+tài khoản cloud thật".** Trạng thái chính xác:
+
+| Hạng mục | Trạng thái |
+|---|---|
+| Adapter đã hiện thực | ✅ Appwrite (identity + metadata), R2 storage |
+| Test tự động / mock | ✅ Đạt toàn bộ, chạy offline |
+| Runtime dependencies đã khai báo | ✅ `server/requirements.txt`, gồm `boto3` |
+| Kiểm chứng Appwrite/R2 thật | ❌ **Chưa** — cần tài khoản và credential do người vận hành tự cấu hình ngoài source |
 
 Những phần sau mới chỉ được test với client giả lập, **chưa từng chạy với
 credential thật**:

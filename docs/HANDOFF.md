@@ -1,6 +1,7 @@
 # HANDOFF — Fanfic Audio Studio Web MVP
 
-Cập nhật: 2026-08-06 · Branch `feature/web-mvp` · Mốc 4 đã xong
+Cập nhật: 2026-08-06 · Branch `feature/web-mvp` · Mốc 4: **code xong, chưa
+smoke-test cloud thật**
 
 Tài liệu này để một phiên khác tiếp tục được khi phiên hiện tại hết context.
 
@@ -30,6 +31,10 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
    trên không phải đổi.
 4. **Idempotency theo `job_fingerprint(content, voice, rate, chunk_chars)`.**
    Job `failed` không được tái dùng.
+5. **Mọi transition của TTS job đi qua một giao diện metadata duy nhất.**
+   `store.create_job()` lưu `pending`; `store.save_job()` lưu `running`,
+   `completed`, `failed`. Job runner **không bao giờ** gọi thẳng Appwrite.
+   Chi tiết thứ tự và giới hạn: `docs/WEB_README.md` mục "Vòng đời TTS job".
 
 ## Trạng thái các mốc
 
@@ -38,7 +43,16 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 | 1 | Nền móng: `web/` + `server/`, mock adapter, healthcheck, landing | ✅ Xong |
 | 2 | TTS service, job API, idempotency, test | ✅ Xong phần backend |
 | 3 | Vertical slice giao diện | ✅ Đủ 5 trang, đã kiểm thử thật |
-| 4 | Appwrite + R2 adapter, cấu hình, tài liệu | ✅ Xong (mock-tested, **chưa chạy cloud thật**) |
+| 4 | Appwrite + R2 adapter, cấu hình, tài liệu | ⚠️ Code xong, **chưa smoke-test cloud thật** |
+
+**Mốc 4 KHÔNG được coi là hoàn tất hoàn toàn.** Tách bạch cho rõ:
+
+| Hạng mục | Trạng thái |
+|---|---|
+| Adapter đã hiện thực | ✅ `AppwriteIdentityAdapter`, `AppwriteMetadataStore`, `R2StorageAdapter` |
+| Automated/mock tests | ✅ Đạt toàn bộ, chạy offline |
+| Runtime dependencies đã khai báo | ✅ `server/requirements.txt` (gồm `boto3>=1.34,<2.0`) |
+| Live Appwrite/R2 verification | ❌ Vẫn cần tài khoản và credential do **người vận hành** cấu hình ngoài source |
 
 ### Đã xong
 
@@ -47,8 +61,11 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 - `domain.py` — `Profile`, `Novel`, `Chapter`, `TtsJob`, `AudioTrack`; enum `PublishState`, `Tier`, `JobStatus`; đã chuẩn bị sẵn draft/published, quota, tier
 - `adapters.py` — `MockIdentityAdapter` (băm mật khẩu kèm salt), `LocalStorageAdapter` (ghi file tạm rồi đổi tên), `MockMetadataStore` (kiểm tra quyền sở hữu ở mọi truy vấn)
 - `tts_bridge.py` — bọc chunker + registry, ghép MP3 bằng ffmpeg, atomic rename, **không fallback giọng**
-- `main.py` — auth, novels, chapters, jobs, stream audio, healthcheck
-- `tests/test_api.py` — **26 test**, chạy offline hoàn toàn (pipeline TTS bị thay bằng bản giả lập)
+- `main.py` — auth, novels, chapters, jobs, stream audio, healthcheck; job runner lưu **mọi** transition qua metadata adapter
+- `requirements.txt` — phụ thuộc runtime của backend, tách khỏi `requirements-gui.txt`; **gồm `boto3>=1.34,<2.0`**
+- `tests/` — chạy offline hoàn toàn (pipeline TTS bị thay bằng bản giả lập):
+  `test_api.py`, `test_security.py`, `test_job_persistence.py` (vòng đời job),
+  `test_dependencies.py` (khai báo + import/startup verification)
 
 **Web `web/`**
 - Next.js 16 + TypeScript strict, giao diện tối
@@ -58,15 +75,15 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 
 ### Chưa làm — việc tiếp theo
 
-**Mốc 3 (ưu tiên):** các trang còn thiếu trong `web/src/app/`
-- `library/page.tsx` — danh sách truyện đã xuất bản
-- `novels/[id]/page.tsx` — chi tiết + danh sách chương
-- `chapters/[id]/page.tsx` — trình phát audio
-- `login/page.tsx` — đăng nhập/đăng ký
-- `studio/page.tsx` — Creator Studio: tạo novel/chương, chọn giọng, gửi job, theo dõi trạng thái
-- Mỗi trang cần đủ loading / empty / success / error
-
-**Mốc 4:** `AppwriteIdentityAdapter`, `R2StorageAdapter` (cần `boto3`), README hướng dẫn chuyển từ mock sang thật.
+1. **Smoke test Appwrite thật.** Cần người vận hành tạo project, API key và
+   database, rồi chạy `python -m scripts.setup_appwrite --dry-run` trước khi
+   chạy thật. Phải xác minh: cú pháp query, hành vi document permission, giới
+   hạn kích thước thuộc tính `content`.
+2. **Smoke test R2 thật.** Bucket private, token S3-compatible. Phải xác minh
+   presigned URL có phát được trực tiếp trong thẻ `<audio>` hay không.
+3. **Dọn object mồ côi.** Chưa có transaction phân tán, nên khi ghi `completed`
+   hỏng sau lúc upload, object vẫn nằm lại trong kho. Cần một job quét định kỳ.
+4. Chưa có thanh toán, lịch sử nghe, trừ quota, moderation.
 
 ## Biến môi trường
 
@@ -83,13 +100,19 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` (api + adapters + security) | 62/62 đạt |
+| `server/tests` (api + security + job persistence + dependencies) | 87 test: 86 đạt, 1 bỏ qua |
+| ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 86 đạt, 1 bỏ qua |
 | `web` (`node --test`) | 10/10 đạt |
 | `npx eslint .` | Sạch, exit 0 |
-| `npx tsc --noEmit` | Sạch |
+| `npx tsc --noEmit` | Sạch, exit 0 |
 | `npx next build` | Thành công, 7 route |
-| Vertical slice thật | Đăng ký → novel → chương → job Edge TTS → MP3 27.504 byte → idempotency tái dùng job |
+| Vertical slice thật (mock/local) | Đăng ký → novel → chương → job Edge TTS → MP3 **45.936 byte** → idempotency tái dùng job → ẩn danh bị chặn 401 |
 | Desktop | Không chạy lại — `desktop_app/` không bị sửa dòng nào |
+
+Test bị bỏ qua là test kiểm tra **thông báo lỗi khi thiếu `boto3`**; nay `boto3`
+đã nằm trong `server/requirements.txt` nên nó tự bỏ qua — đúng như thiết kế.
+
+Venv sạch cũng xác nhận backend **không kéo theo PySide6** và nạp được 452 giọng.
 
 ## Chưa kiểm chứng với cloud thật
 
@@ -97,6 +120,28 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 `scripts/setup_appwrite.py` mới chỉ được test bằng client giả lập. Cần
 credential thật để xác minh cú pháp query Appwrite, hành vi document
 permission, và việc presigned URL của R2 có phát được trong thẻ `<audio>`.
+
+Credential do **người vận hành** đặt trong `server/.env` (không được commit).
+Repo này không chứa và không bao giờ được chứa secret thật.
+
+## Giới hạn đã biết
+
+**Chưa có transaction phân tán giữa kho file và kho metadata.** Job runner đi
+theo thứ tự: tổng hợp → upload → tạo `audio_track` → lưu `completed`. Mỗi bước
+hỏng đều đẩy job sang `failed` và xoá `output_key`.
+
+| Bước hỏng | Job | Hệ quả còn lại |
+|---|---|---|
+| Tổng hợp giọng | `failed` | Không có gì được upload |
+| Upload | `failed` | Không có `audio_track`, không có `output_key` |
+| Ghi `completed` | `failed` | Object đã upload nằm lại làm rác; không bao giờ được công bố vì `output_key` bị xoá |
+
+Ưu tiên đã chọn: **thà báo `failed` còn hơn báo thành công giả.** Rác ở dòng
+cuối cần một job quét định kỳ để dọn — chưa làm.
+
+Tiến độ từng đoạn (`done_parts`) chỉ giữ trong bộ nhớ, không ghi mỗi tick để
+tránh làm ngập Appwrite. Worker chết giữa chừng sẽ để job kẹt ở `running` cho
+tới khi có cơ chế hồi phục — cũng chưa làm.
 
 ## Bẫy đã gặp
 

@@ -36,6 +36,14 @@ Fanfic Audio Studio/
 *.wav
 *.zip
 
+# --- Model TTS chay cuc bo (Piper) ---
+# Model that nam o %LOCALAPPDATA%\FanficAudioStudio\models\piper, KHONG bao gio
+# duoc commit vao repo (moi file vai chuc MB, va khong phai ma nguon).
+*.onnx
+*.onnx.json
+models/
+models.json
+
 # --- Build / dong goi ---
 build/
 dist/

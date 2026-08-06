@@ -67,6 +67,18 @@ from desktop_app.models import (
 )
 from desktop_app.output_manager import FFMPEG_HELP, find_ffmpeg
 from desktop_app.queue_manager import QueueManager, build_jobs, estimate_job_count
+from desktop_app.providers.base import (
+    PROVIDER_CAPCUT,
+    PROVIDER_EDGE,
+    PROVIDER_PIPER,
+    VoiceStatus,
+    format_checked_at,
+    provider_label,
+    status_badge,
+)
+from desktop_app.preview_player import PreviewPlayer
+from desktop_app.providers.recommended import PREVIEW_SENTENCE, RECOMMENDED_LABEL
+from desktop_app.providers.registry import build_default_registry
 from desktop_app.resources import app_icon_png, load_app_icon
 from desktop_app.settings_manager import (
     RATE_CHOICES,
@@ -88,6 +100,17 @@ from desktop_app.workers import (
     ZipWorker,
     job_snapshot,
 )
+
+#: Mau cho tung trang thai. LUON di kem chu (xem status_badge) de nguoi dung
+#: khong phai dua vao mau sac.
+_STATUS_COLOURS = {
+    VoiceStatus.AVAILABLE: "#3FB950",
+    VoiceStatus.DEGRADED: "#D29922",
+    VoiceStatus.UNAVAILABLE: "#F85149",
+    VoiceStatus.NOT_INSTALLED: "#8B949E",
+    VoiceStatus.CHECKING: "#58A6FF",
+    VoiceStatus.UNKNOWN: "",
+}
 
 # Logo sidebar: du de nhan dien, du nho de khong lay khong gian lam viec.
 SIDEBAR_LOGO_SIZE = 44
@@ -259,6 +282,12 @@ class MainWindow(QMainWindow):
         self._selected_voice_uids: set[str] = set()
         self._visible_voices: List[VoiceEntry] = []
         self._catalog_error: str = ""
+        self.registry = None
+        self._probe_worker = None
+        self._model_worker = None
+        self._preview_buttons: Dict[str, QPushButton] = {}
+        self._preview_cache_worker = None
+        self._preview_player = PreviewPlayer(self)
 
         self.queue: Optional[QueueManager] = None
         self.bridge = QueueBridge()
@@ -282,6 +311,8 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._connect_bridge()
+        self._preview_player.stopped.connect(self._on_preview_playback_stopped)
+        self._preview_player.failed.connect(self._on_preview_error)
         self._apply_theme(self.settings.theme)
         self._restore_window()
         self._load_catalog(initial=True)
@@ -325,8 +356,14 @@ class MainWindow(QMainWindow):
         self.queue_status_label.setObjectName("StatusPill")
         self.ffmpeg_status_label = QLabel("ffmpeg: —")
         self.ffmpeg_status_label.setObjectName("StatusPill")
+        self.provider_status_label = QLabel("Nguồn: đang kiểm tra...")
+        self.provider_status_label.setObjectName("StatusPill")
+        self.provider_status_label.setToolTip(
+            "Tình trạng từng nguồn giọng. Bấm \"Kiểm tra...\" để probe thật."
+        )
 
         status = self.statusBar()
+        status.addPermanentWidget(self.provider_status_label)
         status.addPermanentWidget(self.ffmpeg_status_label)
         status.addPermanentWidget(self.queue_status_label)
         status.addPermanentWidget(self.api_status_label)
@@ -578,6 +615,18 @@ class MainWindow(QMainWindow):
         filter_row.addWidget(QLabel("Ngôn ngữ:"))
         filter_row.addWidget(self.lang_filter, 1)
 
+        self.provider_filter = QComboBox()
+        for label, value in (
+            ("Tất cả", ""),
+            ("CapCut", PROVIDER_CAPCUT),
+            ("Edge", PROVIDER_EDGE),
+            ("Piper local", PROVIDER_PIPER),
+        ):
+            self.provider_filter.addItem(label, value)
+        self.provider_filter.currentIndexChanged.connect(self._refresh_voice_table)
+        filter_row.addWidget(QLabel("Nguồn:"))
+        filter_row.addWidget(self.provider_filter, 1)
+
         self.sort_combo = QComboBox()
         for key, label in SORT_MODES:
             self.sort_combo.addItem(label, key)
@@ -587,6 +636,14 @@ class MainWindow(QMainWindow):
         voice_layout.addLayout(filter_row)
 
         fav_row = QHBoxLayout()
+        self.recommended_check = QCheckBox(RECOMMENDED_LABEL)
+        self.recommended_check.setToolTip(
+            "Bộ giọng chọn sẵn cho audio fanfic. Độc lập với mục Yêu thích — "
+            "bật/tắt ở đây không đụng tới dấu ★ của bạn."
+        )
+        self.recommended_check.stateChanged.connect(self._refresh_voice_table)
+        fav_row.addWidget(self.recommended_check)
+
         self.fav_only_check = QCheckBox("Chỉ hiện ★ yêu thích")
         self.fav_only_check.stateChanged.connect(self._refresh_voice_table)
         fav_row.addWidget(self.fav_only_check)
@@ -597,9 +654,40 @@ class MainWindow(QMainWindow):
         fav_row.addWidget(reload_btn)
         voice_layout.addLayout(fav_row)
 
-        self.voice_table = QTableWidget(0, 6)
+        check_row = QHBoxLayout()
+        self.btn_check_selected = QPushButton("Kiểm tra giọng đang chọn")
+        self.btn_check_selected.setObjectName("Ghost")
+        self.btn_check_selected.setToolTip(
+            "Gọi thử đúng các giọng đang tick bằng câu ngắn 'Xin chào.'"
+        )
+        self.btn_check_selected.clicked.connect(self._check_selected_voices)
+        check_row.addWidget(self.btn_check_selected)
+
+        self.btn_check_visible = QPushButton("Kiểm tra tất cả giọng đang hiển thị")
+        self.btn_check_visible.setObjectName("Ghost")
+        self.btn_check_visible.setToolTip(
+            "Chạy nền, tuần tự từng giọng một, có thể huỷ bất cứ lúc nào"
+        )
+        self.btn_check_visible.clicked.connect(self._check_visible_voices)
+        check_row.addWidget(self.btn_check_visible)
+
+        self.btn_check_cancel = QPushButton("Huỷ")
+        self.btn_check_cancel.setObjectName("Ghost")
+        self.btn_check_cancel.setEnabled(False)
+        self.btn_check_cancel.clicked.connect(self._cancel_voice_check)
+        check_row.addWidget(self.btn_check_cancel)
+        check_row.addStretch(1)
+        voice_layout.addLayout(check_row)
+
+        self.check_progress = QLabel("")
+        self.check_progress.setObjectName("Hint")
+        self.check_progress.setVisible(False)
+        voice_layout.addWidget(self.check_progress)
+
+        self.voice_table = QTableWidget(0, 8)
         self.voice_table.setHorizontalHeaderLabels(
-            ["", "★", "Tên hiển thị", "Ngôn ngữ", "voice_type", "resource_id"]
+            ["", "★", "Tên hiển thị", "Nguồn", "Ngôn ngữ",
+             "Trạng thái", "Kiểm tra lúc", "Mã giọng"]
         )
         self.voice_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.voice_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -614,11 +702,16 @@ class MainWindow(QMainWindow):
         # Ten hien thi duoc uu tien khong gian; voice_type/resource_id dat rong
         # co dinh (co the keo tay) de ten dai khong "an" het cot ten.
         vheader.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        vheader.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        vheader.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
-        self.voice_table.setColumnWidth(4, 148)
-        vheader.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
-        self.voice_table.setColumnWidth(5, 104)
+        vheader.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.voice_table.setColumnWidth(3, 118)
+        vheader.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        vheader.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        vheader.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
+        self.voice_table.setColumnWidth(6, 132)
+        vheader.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
+        self.voice_table.setColumnWidth(7, 96)
+        vheader.setSectionResizeMode(8, QHeaderView.ResizeMode.Interactive)
+        self.voice_table.setColumnWidth(8, 150)
         vheader.setMinimumSectionSize(28)
         self.voice_table.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.voice_table.setWordWrap(False)
@@ -1022,6 +1115,58 @@ class MainWindow(QMainWindow):
         cat_layout.addWidget(self.catalog_note)
         outer.addWidget(cat_card)
 
+        # -- Model Piper Local --------------------------------------------------
+        piper_card, piper_layout = self._card("Model Piper Local")
+
+        piper_hint = QLabel(
+            "Piper chạy hoàn toàn trên máy. Mỗi giọng cần đúng một cặp file "
+            "<b>.onnx</b> và <b>.onnx.json</b>. Ứng dụng KHÔNG tự tải model."
+        )
+        piper_hint.setObjectName("Hint")
+        piper_hint.setWordWrap(True)
+        piper_layout.addWidget(piper_hint)
+
+        piper_row = QHBoxLayout()
+        piper_row.addWidget(QLabel("Giọng:"))
+        self.piper_voice_combo = QComboBox()
+        self.piper_voice_combo.currentIndexChanged.connect(self._refresh_piper_model_panel)
+        piper_row.addWidget(self.piper_voice_combo, 1)
+        piper_layout.addLayout(piper_row)
+
+        self.piper_status_label = QLabel("\u2014")
+        self.piper_status_label.setWordWrap(True)
+        piper_layout.addWidget(self.piper_status_label)
+
+        self.piper_path_label = QLabel("")
+        self.piper_path_label.setObjectName("Hint")
+        self.piper_path_label.setWordWrap(True)
+        self.piper_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        piper_layout.addWidget(self.piper_path_label)
+
+        piper_btn_row = QHBoxLayout()
+        self.btn_install_model = QPushButton("C\u00e0i/Thay model...")
+        self.btn_install_model.setToolTip(
+            "Ch\u1ecdn \u0111\u00fang hai file: m\u1ed9t .onnx v\u00e0 m\u1ed9t .onnx.json c\u1ee7a c\u00f9ng m\u1ed9t model"
+        )
+        self.btn_install_model.clicked.connect(self._install_piper_model)
+        piper_btn_row.addWidget(self.btn_install_model)
+
+        self.btn_open_models_dir = QPushButton("M\u1edf th\u01b0 m\u1ee5c model")
+        self.btn_open_models_dir.setObjectName("Ghost")
+        self.btn_open_models_dir.clicked.connect(self._open_piper_models_dir)
+        piper_btn_row.addWidget(self.btn_open_models_dir)
+        piper_btn_row.addStretch(1)
+        piper_layout.addLayout(piper_btn_row)
+
+        self.piper_install_progress = QLabel("")
+        self.piper_install_progress.setObjectName("Hint")
+        self.piper_install_progress.setVisible(False)
+        piper_layout.addWidget(self.piper_install_progress)
+
+        outer.addWidget(piper_card)
+
         save_row = QHBoxLayout()
         save_row.addStretch(1)
         save_btn = QPushButton("💾 Lưu cài đặt")
@@ -1150,7 +1295,7 @@ class MainWindow(QMainWindow):
         try:
             self.catalog.load(Path(configured) if configured else None)
             self._catalog_error = ""
-            removed = self.catalog.prune_favorites()
+            removed = 0
             note = f"Đã nạp {self.catalog.count} giọng từ {self.catalog.path}"
             if self.catalog.skipped_entries:
                 note += f" (bỏ qua {self.catalog.skipped_entries} bản ghi không hợp lệ)"
@@ -1168,13 +1313,39 @@ class MainWindow(QMainWindow):
             if not initial:
                 self.statusBar().showMessage(f"Lỗi Voice.json: {exc}", 8000)
 
+        # Hop nhat catalog: CapCut (Voice.json) + Edge + Piper local.
+        # Loi cua mot nguon KHONG duoc lam mat cac nguon con lai.
+        try:
+            self.registry = build_default_registry(
+                catalog=self.catalog, ffmpeg_path=self.settings.ffmpeg_path
+            )
+        except Exception as exc:
+            self._log("error", f"Không dựng được danh sách nguồn giọng: {exc}")
+            if self.registry is None:
+                from desktop_app.providers.registry import ProviderRegistry
+
+                self.registry = ProviderRegistry()
+        # Bo cac muc yeu thich khong con ton tai trong catalog HOP NHAT
+        known_ids = {v.id for v in self.registry.voices}
+        if known_ids:
+            stale = [f for f in self.catalog.favorites if f not in known_ids]
+            if stale:
+                self.catalog.set_favorites(
+                    [f for f in self.catalog.favorites if f in known_ids]
+                )
+                self._log("info", f"Đã bỏ {len(stale)} mục yêu thích không còn tồn tại")
+        for pid, err in (self.registry.catalog_errors or {}).items():
+            self._log("warn", f"{provider_label(pid)}: {err}")
+        self._update_provider_status()
+        self._reload_piper_voice_combo()
+
         # Nap lai bo loc ngon ngu
         if hasattr(self, "lang_filter"):
             self.lang_filter.blockSignals(True)
             current = self.lang_filter.currentData()
             self.lang_filter.clear()
             self.lang_filter.addItem("Tất cả", "")
-            for lang in self.catalog.languages():
+            for lang in self.registry.languages():
                 self.lang_filter.addItem(lang, lang)
             if current:
                 index = self.lang_filter.findData(current)
@@ -1185,35 +1356,48 @@ class MainWindow(QMainWindow):
         if initial:
             remembered = set(self.settings.last_selected_voices)
             self._selected_voice_uids = {
-                uid for uid in remembered if self.catalog.get(uid) is not None
+                uid for uid in remembered if self.registry.voice_by_id(uid) is not None
             }
         else:
             self._selected_voice_uids = {
-                uid for uid in self._selected_voice_uids if self.catalog.get(uid) is not None
+                uid for uid in self._selected_voice_uids
+                if self.registry.voice_by_id(uid) is not None
             }
 
         self._refresh_voice_table()
         self._refresh_all_summaries()
 
     def _refresh_voice_table(self) -> None:
-        if not hasattr(self, "voice_table"):
+        """Ve lai bang giong tu catalog DA HOP NHAT (CapCut + Edge + Piper)."""
+        if not hasattr(self, "voice_table") or self.registry is None:
             return
         query = self.voice_search.text() if hasattr(self, "voice_search") else ""
         language = self.lang_filter.currentData() if hasattr(self, "lang_filter") else ""
+        provider = self.provider_filter.currentData() if hasattr(self, "provider_filter") else ""
         favorites_only = self.fav_only_check.isChecked() if hasattr(self, "fav_only_check") else False
+        recommended_only = (
+            self.recommended_check.isChecked() if hasattr(self, "recommended_check") else False
+        )
         sort_mode = self.sort_combo.currentData() if hasattr(self, "sort_combo") else "name_asc"
 
-        voices = self.catalog.filter(
+        voices = self.registry.filter_voices(
             query=query or "",
             language=language or None,
+            provider=provider or None,
+            favorites=self.catalog.favorites,
             favorites_only=favorites_only,
+            recommended_only=recommended_only,
             sort_mode=sort_mode or "name_asc",
         )
         self._visible_voices = voices
 
         self.voice_table.blockSignals(True)
+        self._preview_buttons.clear()
+        self.voice_table.clearContents()
         self.voice_table.setRowCount(len(voices))
         for row, voice in enumerate(voices):
+            info = self.registry.status_of(voice)
+
             check = QTableWidgetItem()
             check.setFlags(
                 Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable
@@ -1232,18 +1416,52 @@ class MainWindow(QMainWindow):
             self.voice_table.setItem(row, 1, star)
 
             name_item = QTableWidgetItem(voice.label)
-            name_item.setToolTip(
-                f"{voice.label}\nvoice_type: {voice.voice_type}\n"
-                f"resource_id: {voice.resource_id or '(không có)'}\n"
-                f"ngôn ngữ: {voice.language or '(không có)'}"
-            )
+            tooltip = [voice.label]
+            if voice.description:
+                tooltip.append(voice.description)
+            tooltip.append(f"Nguồn: {voice.provider_label}")
+            tooltip.append(f"Mã giọng: {voice.engine_voice_id}")
+            # Edge/Piper KHONG hien resource_id cua CapCut
+            if voice.provider == PROVIDER_CAPCUT and voice.resource_id:
+                tooltip.append(f"resource_id: {voice.resource_id}")
+            if voice.model_path:
+                tooltip.append(f"Model: {voice.model_path}")
+            tooltip.append(f"Ngôn ngữ: {voice.language or '(không có)'}")
+            name_item.setToolTip("\n".join(tooltip))
             self.voice_table.setItem(row, 2, name_item)
-            self.voice_table.setItem(row, 3, QTableWidgetItem(voice.language or "—"))
-            self.voice_table.setItem(row, 4, QTableWidgetItem(voice.voice_type))
-            self.voice_table.setItem(row, 5, QTableWidgetItem(voice.resource_id or "—"))
+
+            # Cot "Nghe thu": chi dung nut o muc de xuat, de khong tao hang tram
+            # nut cho toan bo catalog.
+            if recommended_only:
+                self.voice_table.setCellWidget(row, 3, self._make_preview_button(voice))
+            else:
+                self.voice_table.removeCellWidget(row, 3)
+                dash = QTableWidgetItem("—")
+                dash.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.voice_table.setItem(row, 3, dash)
+
+            provider_item = QTableWidgetItem(voice.provider_label)
+            provider_item.setToolTip(f"Nguồn giọng: {voice.provider_label}")
+            self.voice_table.setItem(row, 4, provider_item)
+
+            self.voice_table.setItem(row, 5, QTableWidgetItem(voice.language or "—"))
+
+            # Cham mau LUON di kem chu, khong bao gio chi dua vao mau sac
+            status_item = QTableWidgetItem(status_badge(info.status, voice.provider))
+            status_item.setToolTip(info.tooltip(voice.label))
+            colour = _STATUS_COLOURS.get(info.status)
+            if colour:
+                status_item.setForeground(QColor(colour))
+            self.voice_table.setItem(row, 6, status_item)
+
+            checked_item = QTableWidgetItem(format_checked_at(info.checked_at))
+            checked_item.setToolTip(info.tooltip(voice.label))
+            self.voice_table.setItem(row, 7, checked_item)
+
+            self.voice_table.setItem(row, 8, QTableWidgetItem(voice.engine_voice_id or "—"))
         self.voice_table.blockSignals(False)
 
-        total = self.catalog.count
+        total = len(self.registry.voices)
         selected = len(self._selected_voice_uids)
         favorites = len(self.catalog.favorites)
         if self._catalog_error:
@@ -1252,6 +1470,332 @@ class MainWindow(QMainWindow):
             self.voice_count_label.setText(
                 f"Hiện {len(voices)}/{total} giọng · đã chọn {selected} · ★ {favorites}"
             )
+
+    # -- kiem tra kha dung ----------------------------------------------------
+
+    def _selected_voice_objects(self) -> List[Any]:
+        return self.registry.resolve(sorted(self._selected_voice_uids)) if self.registry else []
+
+    def _check_selected_voices(self) -> None:
+        voices = self._selected_voice_objects()
+        if not voices:
+            QMessageBox.information(
+                self, "Chưa chọn giọng",
+                "Hãy tick ít nhất một giọng trong bảng rồi bấm lại.",
+            )
+            return
+        self._start_probe(voices, force=True)
+
+    def _check_visible_voices(self) -> None:
+        voices = list(self._visible_voices)
+        if not voices:
+            QMessageBox.information(
+                self, "Không có giọng nào",
+                "Bảng đang trống, không có gì để kiểm tra.",
+            )
+            return
+        if len(voices) > 20:
+            answer = QMessageBox.question(
+                self,
+                "Kiểm tra nhiều giọng",
+                f"Sẽ kiểm tra lần lượt {len(voices)} giọng, mỗi giọng một lần gọi thật.\n"
+                "Việc này chạy nền và có thể huỷ bất cứ lúc nào.\n\nTiếp tục?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        # Khong force: giong nao con ket qua trong 30 phut thi bo qua
+        self._start_probe(voices, force=False)
+
+    def _start_probe(self, voices: List[Any], force: bool) -> None:
+        if self._probe_worker is not None and self._probe_worker.isRunning():
+            QMessageBox.information(
+                self, "Đang kiểm tra",
+                "Một lượt kiểm tra khác đang chạy. Hãy chờ hoặc bấm Huỷ.",
+            )
+            return
+        from desktop_app.workers import ProbeWorker
+
+        self.check_progress.setVisible(True)
+        self.check_progress.setText(f"Đang kiểm tra 0/{len(voices)}...")
+        self.btn_check_selected.setEnabled(False)
+        self.btn_check_visible.setEnabled(False)
+        self.btn_check_cancel.setEnabled(True)
+
+        worker = ProbeWorker(self.registry, voices, force=force, parent=self)
+        worker.progressed.connect(self._on_probe_progress)
+        worker.voiceChecked.connect(self._on_probe_voice_checked)
+        worker.finishedAll.connect(self._on_probe_finished)
+        self._probe_worker = worker
+        worker.start()
+
+    def _cancel_voice_check(self) -> None:
+        if self._probe_worker is not None:
+            self._probe_worker.request_stop()
+            self.check_progress.setText("Đang huỷ...")
+
+    def _on_probe_progress(self, done: int, total: int, label: str) -> None:
+        self.check_progress.setText(f"Đang kiểm tra {done}/{total}: {label}")
+
+    def _on_probe_voice_checked(self, voice_id: str, status: str, reason: str) -> None:
+        self._refresh_voice_table()
+        self._update_provider_status()
+        if reason:
+            self._log("warn", f"{voice_id}: {reason}")
+
+    def _on_probe_finished(self, checked: int, skipped: int, cancelled: bool) -> None:
+        self.btn_check_selected.setEnabled(True)
+        self.btn_check_visible.setEnabled(True)
+        self.btn_check_cancel.setEnabled(False)
+        parts = [f"đã kiểm tra {checked}"]
+        if skipped:
+            parts.append(f"bỏ qua {skipped} (kết quả còn hiệu lực)")
+        text = ("Đã huỷ — " if cancelled else "Xong — ") + ", ".join(parts)
+        self.check_progress.setText(text)
+        self._log("info", f"Kiểm tra giọng: {text}")
+        self._refresh_voice_table()
+        self._update_provider_status()
+        self._probe_worker = None
+
+    # -- quan ly model Piper Local -------------------------------------------
+
+    def _piper_voices(self) -> List[Any]:
+        """Cac giong Piper trong catalog, GIU NGUYEN thu tu (Ngoc Huyen dau tien)."""
+        if self.registry is None:
+            return []
+        return [v for v in self.registry.voices if v.provider == PROVIDER_PIPER]
+
+    def _reload_piper_voice_combo(self) -> None:
+        """Nap lai danh sach giong Piper; Ngoc Huyen dung dau va duoc chon mac dinh."""
+        if not hasattr(self, "piper_voice_combo"):
+            return
+        current = self.piper_voice_combo.currentData()
+        self.piper_voice_combo.blockSignals(True)
+        self.piper_voice_combo.clear()
+        for voice in self._piper_voices():
+            self.piper_voice_combo.addItem(voice.display_name or voice.voice_key, voice.id)
+        if current:
+            index = self.piper_voice_combo.findData(current)
+            if index >= 0:
+                self.piper_voice_combo.setCurrentIndex(index)
+        self.piper_voice_combo.blockSignals(False)
+        self._refresh_piper_model_panel()
+
+    def _selected_piper_voice(self):
+        if not hasattr(self, "piper_voice_combo") or self.registry is None:
+            return None
+        return self.registry.voice_by_id(self.piper_voice_combo.currentData())
+
+    def _piper_manager(self):
+        """PiperModelManager cua provider dang chay (dung chung thu muc model)."""
+        if self.registry is not None:
+            provider = self.registry.get(PROVIDER_PIPER)
+            if provider is not None and hasattr(provider, "manager"):
+                return provider.manager
+        from desktop_app.providers.piper_models import PiperModelManager
+
+        return PiperModelManager()
+
+    def _refresh_piper_model_panel(self) -> None:
+        """Cap nhat trang thai / duong dan model cua giong Piper dang chon."""
+        if not hasattr(self, "piper_status_label"):
+            return
+        voice = self._selected_piper_voice()
+        if voice is None:
+            self.piper_status_label.setText("Kh\u00f4ng c\u00f3 gi\u1ecdng Piper n\u00e0o trong catalog.")
+            self.piper_path_label.setText("")
+            self.btn_install_model.setEnabled(False)
+            return
+
+        self.btn_install_model.setEnabled(True)
+        model = self._piper_manager().find(voice.voice_key)
+        if model.installed:
+            self.piper_status_label.setText(
+                f"<b>{voice.display_name}</b> \u2014 \u0110\u00e3 c\u00e0i"
+            )
+            self.piper_path_label.setText(
+                f"Model: {model.onnx_path}\nC\u1ea5u h\u00ecnh: {model.config_path}"
+            )
+        else:
+            self.piper_status_label.setText(
+                f"<b>{voice.display_name}</b> \u2014 {model.status_reason}"
+            )
+            self.piper_path_label.setText(
+                f"Th\u01b0 m\u1ee5c model: {self._piper_manager().models_dir}"
+            )
+
+    def _open_piper_models_dir(self) -> None:
+        from desktop_app.providers.piper_models import ensure_models_dir
+
+        try:
+            target = ensure_models_dir()
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Kh\u00f4ng m\u1edf \u0111\u01b0\u1ee3c", f"Kh\u00f4ng t\u1ea1o \u0111\u01b0\u1ee3c th\u01b0 m\u1ee5c model: {exc}"
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
+    def _install_piper_model(self) -> None:
+        """Chon dung hai file model roi cai o thread nen."""
+        voice = self._selected_piper_voice()
+        if voice is None:
+            return
+
+        onnx_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Ch\u1ecdn file model .onnx cho {voice.display_name}",
+            "",
+            "Model Piper (*.onnx)",
+        )
+        if not onnx_path:
+            return
+
+        config_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Ch\u1ecdn file c\u1ea5u h\u00ecnh .onnx.json cho {voice.display_name}",
+            str(Path(onnx_path).parent),
+            "C\u1ea5u h\u00ecnh Piper (*.onnx.json)",
+        )
+        if not config_path:
+            QMessageBox.information(
+                self,
+                "Thi\u1ebfu file c\u1ea5u h\u00ecnh",
+                "C\u1ea7n \u0111\u1ee7 c\u1ea3 hai file: .onnx v\u00e0 .onnx.json. Ch\u01b0a c\u00e0i g\u00ec c\u1ea3.",
+            )
+            return
+
+        from desktop_app.workers import ModelInstallWorker
+
+        self.piper_install_progress.setVisible(True)
+        self.piper_install_progress.setText("\u0110ang chu\u1ea9n b\u1ecb...")
+        self.btn_install_model.setEnabled(False)
+
+        worker = ModelInstallWorker(
+            self._piper_manager(), voice.voice_key, onnx_path, config_path, parent=self
+        )
+        worker.statusChanged.connect(self.piper_install_progress.setText)
+        worker.finishedInstall.connect(self._on_model_installed)
+        self._model_worker = worker
+        worker.start()
+
+    def _on_model_installed(self, ok: bool, voice_key: str, message: str) -> None:
+        self.btn_install_model.setEnabled(True)
+        self.piper_install_progress.setText(message)
+        self._model_worker = None
+
+        if not ok:
+            self._log("error", f"C\u00e0i model Piper th\u1ea5t b\u1ea1i: {message}")
+            QMessageBox.warning(self, "Kh\u00f4ng c\u00e0i \u0111\u01b0\u1ee3c model", message)
+            self._refresh_piper_model_panel()
+            return
+
+        self._log("info", message)
+        # Model moi -> ket qua probe cu khong con y nghia. Chuyen ve UNKNOWN
+        # (chua kiem tra) chu KHONG tu dong synthesize.
+        voice_id = f"{PROVIDER_PIPER}:{voice_key}"
+        if self.registry is not None:
+            self.registry.store.invalidate(voice_id)
+            self.registry.refresh_catalog()
+        self._reload_piper_voice_combo()
+        self._refresh_voice_table()
+        self._update_provider_status()
+        QMessageBox.information(
+            self,
+            "\u0110\u00e3 c\u00e0i model",
+            f"{message}\n\nGi\u1ecdng hi\u1ec7n \u1edf tr\u1ea1ng th\u00e1i \"Ch\u01b0a ki\u1ec3m tra\". "
+            "H\u00e3y b\u1ea5m \"Ki\u1ec3m tra gi\u1ecdng \u0111ang ch\u1ecdn\" \u1edf trang T\u1ea1o TTS "
+            "\u0111\u1ec3 x\u00e1c nh\u1eadn model ch\u1ea1y \u0111\u01b0\u1ee3c.",
+        )
+
+    # -- nut "Nghe thu" o muc de xuat -----------------------------------------
+
+    PREVIEW_IDLE = "\u25b6 Nghe th\u1eed"
+    PREVIEW_BUSY = "\u0110ang t\u1ea1o\u2026"
+    PREVIEW_PLAYING = "\u25a0 D\u1eebng"
+
+    def _make_preview_button(self, voice) -> QPushButton:
+        """Nut nghe thu cho MOT dong. Khong can chon giong truoc khi bam."""
+        button = QPushButton()
+        button.setObjectName("Ghost")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        model_ready = voice.provider != PROVIDER_PIPER or voice.installed
+        if not model_ready:
+            # Piper chua co model: khoa nut va chi duong toi noi cai model
+            button.setText("\u2b07 Ch\u01b0a t\u1ea3i model")
+            button.setEnabled(False)
+            button.setToolTip(
+                "Ch\u01b0a t\u1ea3i model cho gi\u1ecdng n\u00e0y.\n"
+                "V\u00e0o C\u00e0i \u0111\u1eb7t \u2192 Model Piper Local \u2192 C\u00e0i/Thay model."
+            )
+        elif self._preview_player.is_playing(voice.id):
+            button.setText(self.PREVIEW_PLAYING)
+        elif self._preview_cache_worker is not None and getattr(
+            self._preview_cache_worker, "_voice", None
+        ) is not None and self._preview_cache_worker._voice.id == voice.id:
+            button.setText(self.PREVIEW_BUSY)
+            button.setEnabled(False)
+        else:
+            button.setText(self.PREVIEW_IDLE)
+            button.setToolTip(f"Nghe th\u1eed: {PREVIEW_SENTENCE}")
+
+        button.clicked.connect(lambda _checked=False, v=voice: self._on_preview_clicked(v))
+        self._preview_buttons[voice.id] = button
+        return button
+
+    def _set_preview_button(self, voice_id: str, text: str, enabled: bool = True) -> None:
+        button = self._preview_buttons.get(voice_id)
+        if button is not None:
+            button.setText(text)
+            button.setEnabled(enabled)
+
+    def _on_preview_clicked(self, voice) -> None:
+        """Bam nut: dang phat thi dung, chua thi tao/phat. Khong mo hop thoai nao."""
+        if self._preview_player.is_playing(voice.id):
+            self._preview_player.stop()
+            return
+
+        # Chi mot preview chay tai mot thoi diem
+        self._preview_player.stop()
+        if self._preview_cache_worker is not None and self._preview_cache_worker.isRunning():
+            self._preview_cache_worker.request_stop()
+            self._preview_cache_worker = None
+
+        if voice.provider == PROVIDER_PIPER and not voice.installed:
+            self._log("warn", f"{voice.label}: chưa tải model nên chưa nghe thử được")
+            return
+
+        from desktop_app.workers import CachedPreviewWorker
+
+        self._set_preview_button(voice.id, self.PREVIEW_BUSY, enabled=False)
+        worker = CachedPreviewWorker(self.registry, voice, PREVIEW_SENTENCE, parent=self)
+        worker.statusChanged.connect(lambda msg: self.statusBar().showMessage(msg, 4000))
+        worker.ready.connect(self._on_preview_ready)
+        worker.failed.connect(self._on_preview_error)
+        self._preview_cache_worker = worker
+        worker.start()
+
+    def _on_preview_ready(self, voice_id: str, path: str) -> None:
+        self._preview_cache_worker = None
+        if self._preview_player.play(voice_id, path):
+            self._set_preview_button(voice_id, self.PREVIEW_PLAYING, enabled=True)
+        else:
+            self._set_preview_button(voice_id, self.PREVIEW_IDLE, enabled=True)
+
+    def _on_preview_error(self, voice_id: str, message: str) -> None:
+        self._preview_cache_worker = None
+        self._set_preview_button(voice_id, self.PREVIEW_IDLE, enabled=True)
+        self._log("error", f"Nghe thử thất bại: {message}")
+        self.statusBar().showMessage(f"Nghe thử thất bại: {message}", 8000)
+
+    def _on_preview_playback_stopped(self, voice_id: str) -> None:
+        self._set_preview_button(voice_id, self.PREVIEW_IDLE, enabled=True)
+
+    def _update_provider_status(self) -> None:
+        """Thanh trang thai duoi cung: tinh trang tung nguon giong."""
+        if self.registry is None or not hasattr(self, "provider_status_label"):
+            return
+        self.provider_status_label.setText(self.registry.provider_status_line())
 
     def _on_voice_item_changed(self, item: QTableWidgetItem) -> None:
         if item.column() != 0:
@@ -1269,8 +1813,11 @@ class MainWindow(QMainWindow):
     def _update_voice_counter(self) -> None:
         if self._catalog_error:
             return
+        # Tong phai lay tu catalog DA HOP NHAT, khong phai rieng Voice.json cua
+        # CapCut - neu khong se ra con so vo ly kieu "452/127".
+        total = len(self.registry.voices) if self.registry is not None else 0
         self.voice_count_label.setText(
-            f"Hiện {len(self._visible_voices)}/{self.catalog.count} giọng · "
+            f"Hiện {len(self._visible_voices)}/{total} giọng · "
             f"đã chọn {len(self._selected_voice_uids)} · ★ {len(self.catalog.favorites)}"
         )
 
@@ -1315,7 +1862,7 @@ class MainWindow(QMainWindow):
         self._refresh_all_summaries()
 
     def _selected_voices(self) -> List[VoiceEntry]:
-        return self.catalog.resolve(sorted(self._selected_voice_uids))
+        return self.registry.resolve(sorted(self._selected_voice_uids))
 
     def _current_voice(self) -> Optional[VoiceEntry]:
         row = self.voice_table.currentRow()
@@ -1430,7 +1977,7 @@ class MainWindow(QMainWindow):
             self.input_table.setItem(row, 3, QTableWidgetItem(str(parts)))
 
             if item.voice_uids:
-                voices = self.catalog.resolve(item.voice_uids)
+                voices = self.registry.resolve(item.voice_uids)
                 assigned = f"{len(voices)} giọng riêng"
                 tooltip = "\n".join(v.label for v in voices)
             else:
@@ -1516,7 +2063,7 @@ class MainWindow(QMainWindow):
         for item in self.inputs:
             if not item.is_valid:
                 continue
-            voices = self.catalog.resolve(item.voice_uids) if item.voice_uids else common
+            voices = self.registry.resolve(item.voice_uids) if item.voice_uids else common
             if not voices:
                 continue
             jobs.extend(build_jobs([item], voices, chunk, rate))
@@ -1840,6 +2387,7 @@ class MainWindow(QMainWindow):
             voice=voice,
             device_path=self.settings.active_device_path(),
             rate=self.rate_combo.currentText().strip() or "1.0",
+            registry=self.registry,
         )
         worker.statusChanged.connect(self.preview_status.setText)
         worker.succeeded.connect(self._on_preview_ready)
@@ -1851,14 +2399,14 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _on_preview_ready(self, uid: str, path: str) -> None:
-        voice = self.catalog.get(uid)
+        voice = self.registry.voice_by_id(uid)
         name = voice.label if voice else uid
         self.preview_status.setText(f"✅ {name}: đã tạo file thử, đang mở...")
         self._log("info", f"Thử giọng thành công: {name} → {path}")
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _on_preview_failed(self, uid: str, kind: str, message: str) -> None:
-        voice = self.catalog.get(uid)
+        voice = self.registry.voice_by_id(uid)
         name = voice.label if voice else uid
         self.preview_status.setText(f"❌ {name}: [{kind}] {message}")
         self._log("error", f"Thử giọng thất bại ({name}) [{kind}]: {message}")

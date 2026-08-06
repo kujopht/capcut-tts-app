@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from desktop_app.models import (
     GAP_BETWEEN_JOBS,
@@ -41,6 +41,7 @@ from desktop_app.output_manager import (
     find_resume_parts,
     merge_job_audio,
 )
+from desktop_app.providers.base import ProviderCancelled, ProviderError
 from desktop_app.text_chunker import chunk_text, normalize_chunk_size
 from desktop_app.tts_service import CancelToken, StopRequested, TtsError, TtsService
 
@@ -108,15 +109,30 @@ class QueueManager:
     def __init__(
         self,
         outputs_root: Path | str,
-        service_factory: Callable[[], TtsService],
+        service_factory: Optional[Callable[[], TtsService]] = None,
         hooks: Optional[QueueHooks] = None,
         workers: int = 1,
         ffmpeg_path: str = "",
         gap_between_jobs: float = GAP_BETWEEN_JOBS,
         gap_between_parts: float = GAP_BETWEEN_PARTS,
+        registry_factory: Optional[Callable[[], Any]] = None,
+        store: Optional[Any] = None,
+        breaker: Optional[Any] = None,
     ):
+        """
+        Job duoc chay QUA ProviderRegistry, khong goi thang CapCutClient nua.
+
+        Moi worker dung mot registry RIENG (de session HTTP khong bi dung chung
+        giua cac luong) nhung chia se `store` va `breaker` de trang thai kha dung
+        va circuit breaker la toan cuc.
+        """
+        from desktop_app.providers.availability import AvailabilityStore, CircuitBreaker
+
         self.outputs_root = Path(outputs_root)
         self.service_factory = service_factory
+        self._registry_factory = registry_factory
+        self.store = store or AvailabilityStore()
+        self.breaker = breaker or CircuitBreaker()
         self.hooks = hooks or QueueHooks()
         self.workers = max(1, min(2, int(workers or 1)))
         self.ffmpeg_path = ffmpeg_path or ""
@@ -349,12 +365,29 @@ class QueueManager:
             return False
         return not self._stop_requested
 
+    def _make_registry(self):
+        """Registry rieng cho mot worker, dung chung store/breaker toan cuc."""
+        if self._registry_factory is not None:
+            registry = self._registry_factory()
+        else:
+            from desktop_app.providers.registry import build_default_registry
+
+            service = None
+            if self.service_factory is not None:
+                service = self.service_factory()
+            registry = build_default_registry(
+                service=service, ffmpeg_path=self.ffmpeg_path, refresh=False
+            )
+        registry.store = self.store
+        registry.breaker = self.breaker
+        return registry
+
     def _worker_loop(self, worker_id: int) -> None:
-        service: Optional[TtsService] = None
+        registry = None
         try:
-            service = self.service_factory()
+            registry = self._make_registry()
         except Exception as exc:
-            self.hooks.message("error", f"Không khởi tạo được kết nối API: {exc}")
+            self.hooks.message("error", f"Không khởi tạo được nguồn giọng: {exc}")
 
         first_job = True
         try:
@@ -379,7 +412,7 @@ class QueueManager:
                         break
                 first_job = False
 
-                if service is None:
+                if registry is None:
                     job.state = JobState.FAILED
                     job.error_kind = ErrorKind.UNEXPECTED.value
                     job.message = "Không có kết nối API"
@@ -387,7 +420,7 @@ class QueueManager:
                     continue
 
                 try:
-                    self._process_job(job, service)
+                    self._process_job(job, registry)
                 except Exception as exc:   # lop bao ve cuoi: khong de app chet
                     job.state = JobState.FAILED
                     job.error_kind = ErrorKind.UNEXPECTED.value
@@ -398,8 +431,8 @@ class QueueManager:
 
                 self._write_report()
         finally:
-            if service is not None:
-                service.close()
+            if registry is not None:
+                registry.close()
             self._finish_if_last(worker_id)
 
     def _finish_if_last(self, worker_id: int) -> None:
@@ -454,7 +487,7 @@ class QueueManager:
 
     # -- chay mot job ---------------------------------------------------------
 
-    def _process_job(self, job: Job, service: TtsService) -> None:
+    def _process_job(self, job: Job, registry: Any) -> None:
         job.state = JobState.RUNNING
         job.started_at = datetime.now().isoformat(timespec="seconds")
         started = time.monotonic()
@@ -520,7 +553,7 @@ class QueueManager:
 
             dest = Path(job.job_dir) / part.file_name
             try:
-                result = service.synthesize(
+                result = registry.synthesize(
                     text=part.text,
                     voice=job.voice,
                     dest=dest,
@@ -531,9 +564,11 @@ class QueueManager:
                 part.state = PartState.SUCCESS
                 part.file_path = result.file_path
                 part.file_size = result.file_size
-                part.task_id = result.task_id
-                part.token_masked = result.token_masked
-                part.audio_url_host = result.audio_host
+                # Chi CapCut co task_id/token/audio_host; Edge va Piper de trong
+                detail = getattr(result, "detail", None) or {}
+                part.task_id = detail.get("task_id")
+                part.token_masked = detail.get("token")
+                part.audio_url_host = detail.get("audio_host")
                 part.attempts = result.attempts
                 part.error_kind = None
                 part.error_message = ""
@@ -543,13 +578,13 @@ class QueueManager:
                 self.output_manager.write_manifest(job)
                 self.hooks.job_updated(job)
 
-            except StopRequested:
+            except (StopRequested, ProviderCancelled):
                 part.state = PartState.PENDING
                 part.finished_at = datetime.now().isoformat(timespec="seconds")
                 stopped = True
                 break
 
-            except TtsError as exc:
+            except (TtsError, ProviderError) as exc:
                 part.state = PartState.FAILED
                 part.error_kind = exc.kind.value
                 part.error_message = exc.message

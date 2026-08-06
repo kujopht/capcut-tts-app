@@ -127,6 +127,17 @@ class ErrorKind(str, Enum):
     STOPPED = "stopped"
     UNEXPECTED = "unexpected"
 
+    # -- he thong nhieu provider (Edge / Piper local) -------------------------
+    PROVIDER_NOT_INSTALLED = "provider_not_installed"
+    PROVIDER_UNKNOWN = "provider_unknown"
+    VOICE_NOT_FOUND = "voice_not_found"
+    MODEL_NOT_INSTALLED = "model_not_installed"
+    MODEL_INVALID = "model_invalid"
+    AUTH_ERROR = "auth_error"
+    RATE_LIMIT = "rate_limit"
+    CIRCUIT_OPEN = "circuit_open"
+    AUDIO_INVALID = "audio_invalid"
+
     @property
     def is_fatal_for_queue(self) -> bool:
         """403 va shark block: phai dung hang doi, khong gui tiep hang loat."""
@@ -162,6 +173,15 @@ ERROR_HINTS: Dict[str, str] = {
     ErrorKind.MERGE_ERROR: "Lỗi khi ghép file MP3.",
     ErrorKind.STOPPED: "Đã dừng theo yêu cầu người dùng.",
     ErrorKind.UNEXPECTED: "Lỗi ngoài dự kiến.",
+    ErrorKind.PROVIDER_NOT_INSTALLED: "Chưa cài gói phụ thuộc của nguồn giọng này.",
+    ErrorKind.PROVIDER_UNKNOWN: "Không nhận ra nguồn giọng.",
+    ErrorKind.VOICE_NOT_FOUND: "Nguồn không có giọng này.",
+    ErrorKind.MODEL_NOT_INSTALLED: "Chưa tải model. Hãy chọn file .onnx và .onnx.json trong Cài đặt.",
+    ErrorKind.MODEL_INVALID: "File model hỏng hoặc không đúng định dạng.",
+    ErrorKind.AUTH_ERROR: "Lỗi xác thực với nguồn giọng.",
+    ErrorKind.RATE_LIMIT: "Bị giới hạn tần suất. Hãy chờ rồi thử lại.",
+    ErrorKind.CIRCUIT_OPEN: "Nguồn vừa lỗi liên tiếp nên tạm ngưng 60 giây.",
+    ErrorKind.AUDIO_INVALID: "Dữ liệu audio trả về không hợp lệ.",
 }
 
 

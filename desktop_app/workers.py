@@ -11,6 +11,7 @@ nen cac hook cua QueueManager co the goi truc tiep tu worker thread.
 from __future__ import annotations
 
 import tempfile
+import threading
 import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -135,31 +136,45 @@ class PreviewWorker(QThread):
 
     def __init__(
         self,
-        voice: VoiceEntry,
+        voice,
         device_path: Optional[str] = None,
         rate: str = "1.0",
         text: str = PREVIEW_TEXT,
         parent=None,
+        registry=None,
     ):
         super().__init__(parent)
         self.voice = voice
         self.device_path = device_path
         self.rate = rate
         self.text = text or PREVIEW_TEXT
+        self.registry = registry
         self._cancel = CancelToken()
 
     def request_stop(self) -> None:
         self._cancel.set()
 
     def run(self) -> None:  # pragma: no cover - can mang thuc
-        service = TtsService(device_path=self.device_path)
+        """Nghe thu di QUA ProviderRegistry, khong goi thang CapCutClient nua."""
+        from desktop_app.providers.base import ProviderCancelled, ProviderError
+
+        registry = self.registry
+        owns_registry = False
+        if registry is None:
+            from desktop_app.providers.registry import build_default_registry
+
+            registry = build_default_registry(
+                service=TtsService(device_path=self.device_path), refresh=False
+            )
+            owns_registry = True
+
         try:
             temp_dir = Path(tempfile.gettempdir()) / "FanficAudioStudio_preview"
             temp_dir.mkdir(parents=True, exist_ok=True)
             dest = temp_dir / f"preview_{self.voice.slug}.mp3"
 
             self.statusChanged.emit(f"Đang thử giọng {self.voice.label}...")
-            service.synthesize(
+            registry.synthesize(
                 text=self.text,
                 voice=self.voice,
                 dest=dest,
@@ -168,9 +183,9 @@ class PreviewWorker(QThread):
                 progress=lambda msg: self.statusChanged.emit(f"{self.voice.label}: {msg}"),
             )
             self.succeeded.emit(self.voice.uid, str(dest))
-        except StopRequested:
+        except (StopRequested, ProviderCancelled):
             self.failed.emit(self.voice.uid, ErrorKind.STOPPED.value, "Đã hủy thử giọng.")
-        except TtsError as exc:
+        except (TtsError, ProviderError) as exc:
             self.failed.emit(self.voice.uid, exc.kind.value, exc.message)
         except Exception as exc:
             self.failed.emit(
@@ -179,7 +194,8 @@ class PreviewWorker(QThread):
                 f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-400:]}",
             )
         finally:
-            service.close()
+            if owns_registry:
+                registry.close()
 
 
 # -----------------------------------------------------------------------------
@@ -252,3 +268,189 @@ class LibraryWorker(QThread):
             self.loaded.emit([run.to_dict() for run in scan_runs(self.outputs_root)])
         except Exception as exc:
             self.failed.emit(f"Không đọc được thư viện kết quả: {exc}")
+
+
+# -----------------------------------------------------------------------------
+# Kiem tra kha dung cua giong (chay NEN, khong khoa giao dien)
+# -----------------------------------------------------------------------------
+
+
+class ProbeWorker(QThread):
+    """
+    Kiem tra that su mot hoac nhieu giong.
+
+    Yeu cau quan trong:
+    - Chay o thread rieng nen giao dien KHONG bao gio bi khoa.
+    - Tuan tu, concurrency = 1, co delay giua cac giong de khong spam API.
+    - Huy duoc giua chung.
+    - Bo qua giong da co ket qua con hieu luc (tru khi `force`).
+    """
+
+    progressed = Signal(int, int, str)      # (da_xong, tong, ten_giong)
+    voiceChecked = Signal(str, str, str)    # (voice_id, status_value, reason)
+    finishedAll = Signal(int, int, bool)    # (da_kiem_tra, bo_qua, bi_huy)
+
+    #: Nghi giua hai lan probe de khong dam lien tuc vao dich vu.
+    DELAY_SECONDS = 1.5
+
+    def __init__(self, registry, voices, force: bool = False, parent=None):
+        super().__init__(parent)
+        self._registry = registry
+        self._voices = list(voices)
+        self._force = bool(force)
+        self._stop = threading.Event()
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    def run(self) -> None:  # pragma: no cover - can moi truong Qt
+        from desktop_app.providers.base import ProviderCancelled
+
+        checked = 0
+        skipped = 0
+        total = len(self._voices)
+
+        for index, voice in enumerate(self._voices, start=1):
+            if self._stop.is_set():
+                self.finishedAll.emit(checked, skipped, True)
+                return
+
+            if not self._force and self._registry.store.is_fresh(voice.id):
+                skipped += 1
+                self.progressed.emit(index, total, voice.label)
+                continue
+
+            self.progressed.emit(index, total, voice.label)
+            try:
+                info = self._registry.probe(voice, cancel=self, force=self._force)
+            except ProviderCancelled:
+                self.finishedAll.emit(checked, skipped, True)
+                return
+            except Exception as exc:
+                # Provider hong KHONG duoc lam sap ung dung
+                self.voiceChecked.emit(voice.id, "unavailable", f"Lỗi ngoài dự kiến: {exc}")
+                checked += 1
+                continue
+
+            checked += 1
+            self.voiceChecked.emit(voice.id, info.status.value, info.reason)
+
+            if index < total and not self._stop.is_set():
+                # Delay co the bi cat ngang khi nguoi dung bam Huy
+                self._stop.wait(self.DELAY_SECONDS)
+
+        self.finishedAll.emit(checked, skipped, self._stop.is_set())
+
+    # -- giao dien giong CancelToken de provider huy giua chung ---------------
+
+    def is_set(self) -> bool:
+        return self._stop.is_set()
+
+    def raise_if_set(self) -> None:
+        if self._stop.is_set():
+            from desktop_app.providers.base import ProviderCancelled
+
+            raise ProviderCancelled("Đã huỷ kiểm tra")
+
+    def wait_cancel(self, seconds: float) -> bool:
+        return self._stop.wait(seconds)
+
+
+class ModelInstallWorker(QThread):
+    """
+    Cai model Piper o thread rieng.
+
+    Model Piper nang vai chuc MB nen viec sao chep + xac minh phai chay nen,
+    neu khong giao dien se dung hinh trong luc copy.
+    """
+
+    statusChanged = Signal(str)
+    finishedInstall = Signal(bool, str, str)   # (thanh_cong, voice_key, thong_diep)
+
+    def __init__(self, manager, voice_key: str, onnx_path, config_path, parent=None):
+        super().__init__(parent)
+        self._manager = manager
+        self._voice_key = voice_key
+        self._onnx = Path(onnx_path)
+        self._config = Path(config_path)
+
+    def run(self) -> None:  # pragma: no cover - can moi truong Qt
+        try:
+            self.statusChanged.emit("Đang kiểm tra cặp file model...")
+            from desktop_app.providers.piper_models import pair_stems_match
+
+            ok, reason = pair_stems_match(self._onnx, self._config)
+            if not ok:
+                self.finishedInstall.emit(False, self._voice_key, reason)
+                return
+
+            self.statusChanged.emit("Đang sao chép và xác minh model...")
+            ok, message = self._manager.install_from_files(
+                self._voice_key, self._onnx, self._config
+            )
+            self.finishedInstall.emit(bool(ok), self._voice_key, message)
+        except Exception as exc:
+            self.finishedInstall.emit(
+                False,
+                self._voice_key,
+                f"Lỗi ngoài dự kiến khi cài model: {type(exc).__name__}: {exc}",
+            )
+
+
+class CachedPreviewWorker(QThread):
+    """
+    Tao audio nghe thu, co CACHE.
+
+    Da co ban cache hop le thi phat luon, KHONG goi provider lai.
+    Toan bo viec goi TTS van di qua ProviderRegistry - khong sao chep logic TTS.
+    """
+
+    statusChanged = Signal(str)
+    ready = Signal(str, str)            # (voice_id, duong_dan_file)
+    failed = Signal(str, str)           # (voice_id, thong_bao_tieng_viet)
+
+    def __init__(self, registry, voice, text: str, parent=None):
+        super().__init__(parent)
+        self._registry = registry
+        self._voice = voice
+        self._text = text
+        self._cancel = CancelToken()
+
+    def request_stop(self) -> None:
+        self._cancel.set()
+
+    def run(self) -> None:  # pragma: no cover - can moi truong Qt
+        from desktop_app.providers.base import ProviderCancelled, ProviderError
+        from desktop_app.providers.preview_cache import (
+            cache_path,
+            cached_file,
+            ensure_cache_dir,
+        )
+
+        voice = self._voice
+        try:
+            hit = cached_file(voice.provider, voice.voice_key, self._text)
+            if hit is not None:
+                self.ready.emit(voice.id, str(hit))
+                return
+
+            ensure_cache_dir()
+            dest = cache_path(voice.provider, voice.voice_key, self._text)
+            self.statusChanged.emit(f"Đang tạo bản nghe thử cho {voice.label}...")
+
+            self._registry.synthesize(
+                text=self._text,
+                voice=voice,
+                dest=dest,
+                cancel=self._cancel,
+                rate="1.0",
+            )
+            self.ready.emit(voice.id, str(dest))
+
+        except ProviderCancelled:
+            self.failed.emit(voice.id, "Đã huỷ nghe thử.")
+        except ProviderError as exc:
+            self.failed.emit(voice.id, exc.message)
+        except Exception as exc:
+            # Provider hong KHONG duoc lam treo hay sap ung dung
+            self.failed.emit(voice.id, f"Lỗi ngoài dự kiến: {type(exc).__name__}: {exc}")

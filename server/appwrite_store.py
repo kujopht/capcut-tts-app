@@ -14,6 +14,7 @@ NGUYEN TAC:
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +39,74 @@ COL_TRACKS = "audio_tracks"
 
 REQUEST_TIMEOUT = 15.0
 
+#: Thuoc tinh THUC SU ton tai trong schema Appwrite (xem docs/APPWRITE_SCHEMA.md
+#: va scripts/setup_appwrite.py).
+#:
+#: `to_dict()` cua tang domain la hinh dang cua API, khong phai hinh dang luu
+#: tru: no kem ca cac truong TINH TOAN (`char_count` cua Chapter, `progress`
+#: cua TtsJob) ma frontend can. Gui thang len Appwrite thi bi tu choi:
+#:     Invalid document structure: Unknown attribute: "char_count"
+#: Loc o day de hai hinh dang do tach bach han.
+PERSISTED_FIELDS: Dict[str, tuple] = {
+    COL_NOVELS: (
+        "novel_id", "owner_id", "title", "description", "cover_key",
+        "state", "tags", "created_at", "updated_at",
+    ),
+    COL_CHAPTERS: (
+        "chapter_id", "novel_id", "owner_id", "title", "content",
+        "order_index", "state", "created_at", "updated_at",
+    ),
+    COL_JOBS: (
+        "job_id", "owner_id", "chapter_id", "voice_id", "content_hash",
+        "status", "output_key", "error_kind", "error_message",
+        "total_parts", "done_parts", "rate", "chunk_chars",
+        "created_at", "started_at", "finished_at",
+    ),
+    COL_TRACKS: (
+        "track_id", "chapter_id", "owner_id", "voice_id", "object_key",
+        "content_hash", "duration_seconds", "size_bytes", "created_at",
+    ),
+}
+
+
+# -----------------------------------------------------------------------------
+# Query
+# -----------------------------------------------------------------------------
+#
+# Appwrite tu ban 1.5 CHI nhan query dang JSON, gui qua tham so `queries[]`.
+# Cu phap chuoi cu (`equal("owner_id", ["x"])`) bi tra ve 400:
+#     Invalid query: Syntax error
+# Da kiem chung tren Appwrite Cloud 1.9.6.
+#
+# Ma hoa bang `json.dumps` con loai bo luon nguy co QUERY INJECTION: truoc day
+# gia tri duoc noi suy thang vao chuoi, mot `owner_id` chua dau nháy co the pha
+# vo cau truc query.
+
+
+def q_equal(attribute: str, *values: Any) -> str:
+    return json.dumps({"method": "equal", "attribute": attribute,
+                       "values": list(values)})
+
+
+def q_order_asc(attribute: str) -> str:
+    return json.dumps({"method": "orderAsc", "attribute": attribute})
+
+
+def q_order_desc(attribute: str) -> str:
+    return json.dumps({"method": "orderDesc", "attribute": attribute})
+
+
+def q_limit(count: int) -> str:
+    return json.dumps({"method": "limit", "values": [int(count)]})
+
+
+def persistable(collection: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Chi giu lai nhung truong that su co trong schema cua collection do."""
+    allowed = PERSISTED_FIELDS.get(collection)
+    if allowed is None:
+        return dict(data)
+    return {key: value for key, value in data.items() if key in allowed}
+
 
 class AppwriteMetadataStore:
     """Novels / chapters / tts_jobs / audio_tracks tren Appwrite."""
@@ -55,7 +124,8 @@ class AppwriteMetadataStore:
                 "APPWRITE_DATABASE_ID."
             )
         self._settings = settings
-        self._endpoint = settings.endpoint.rstrip("/")
+        # `api_base` da bo `/v1` o cuoi neu co - moi path duoi day tu them `/v1`
+        self._endpoint = settings.api_base
         self._db = settings.database_id
         self._client = client
 
@@ -131,7 +201,7 @@ class AppwriteMetadataStore:
                 owner_id: str, public_read: bool = False) -> Dict[str, Any]:
         return self._call("POST", self._docs(collection), payload={
             "documentId": doc_id,
-            "data": data,
+            "data": persistable(collection, data),
             "permissions": self._owner_permissions(owner_id, public_read),
         })
 
@@ -139,12 +209,12 @@ class AppwriteMetadataStore:
         return self._call("GET", f"{self._docs(collection)}/{doc_id}")
 
     def _list(self, collection: str, queries: List[str]) -> List[Dict[str, Any]]:
-        data = self._call("GET", self._docs(collection), params={"queries": queries})
+        data = self._call("GET", self._docs(collection), params={"queries[]": queries})
         return list(data.get("documents") or [])
 
     def _update(self, collection: str, doc_id: str, data: Dict[str, Any],
                 permissions: Optional[List[str]] = None) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {"data": data}
+        payload: Dict[str, Any] = {"data": persistable(collection, data)}
         if permissions is not None:
             payload["permissions"] = permissions
         return self._call("PATCH", f"{self._docs(collection)}/{doc_id}", payload=payload)
@@ -166,11 +236,11 @@ class AppwriteMetadataStore:
 
     def list_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False) -> List[Novel]:
-        queries: List[str] = ['orderDesc("created_at")']
+        queries: List[str] = [q_order_desc("created_at")]
         if owner_id:
-            queries.append(f'equal("owner_id", ["{owner_id}"])')
+            queries.append(q_equal("owner_id", owner_id))
         if published_only:
-            queries.append('equal("state", ["published"])')
+            queries.append(q_equal("state", "published"))
         return [_novel_from_doc(d) for d in self._list(COL_NOVELS, queries)]
 
     def publish_novel(self, novel_id: str, owner_id: str) -> Novel:
@@ -223,8 +293,8 @@ class AppwriteMetadataStore:
         return [
             _chapter_from_doc(d)
             for d in self._list(COL_CHAPTERS, [
-                f'equal("novel_id", ["{novel_id}"])',
-                'orderAsc("order_index")',
+                q_equal("novel_id", novel_id),
+                q_order_asc("order_index"),
             ])
         ]
 
@@ -247,9 +317,9 @@ class AppwriteMetadataStore:
                                 fingerprint: str) -> Optional[TtsJob]:
         """Idempotency: dua vao index to hop owner_id + chapter_id + content_hash."""
         docs = self._list(COL_JOBS, [
-            f'equal("owner_id", ["{owner_id}"])',
-            f'equal("chapter_id", ["{chapter_id}"])',
-            f'equal("content_hash", ["{fingerprint}"])',
+            q_equal("owner_id", owner_id),
+            q_equal("chapter_id", chapter_id),
+            q_equal("content_hash", fingerprint),
         ])
         for doc in docs:
             job = _job_from_doc(doc)
@@ -258,9 +328,9 @@ class AppwriteMetadataStore:
         return None
 
     def list_jobs(self, owner_id: str, chapter_id: Optional[str] = None) -> List[TtsJob]:
-        queries = [f'equal("owner_id", ["{owner_id}"])', 'orderDesc("created_at")']
+        queries = [q_equal("owner_id", owner_id), q_order_desc("created_at")]
         if chapter_id:
-            queries.append(f'equal("chapter_id", ["{chapter_id}"])')
+            queries.append(q_equal("chapter_id", chapter_id))
         return [_job_from_doc(d) for d in self._list(COL_JOBS, queries)]
 
     def save_job(self, job: TtsJob) -> TtsJob:
@@ -276,9 +346,9 @@ class AppwriteMetadataStore:
 
     def track_for_chapter(self, chapter_id: str) -> Optional[AudioTrack]:
         docs = self._list(COL_TRACKS, [
-            f'equal("chapter_id", ["{chapter_id}"])',
-            'orderDesc("created_at")',
-            'limit(1)',
+            q_equal("chapter_id", chapter_id),
+            q_order_desc("created_at"),
+            q_limit(1),
         ])
         return _track_from_doc(docs[0]) if docs else None
 

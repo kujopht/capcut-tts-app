@@ -164,17 +164,25 @@ def register(payload: RegisterIn) -> Dict[str, Any]:
         profile = identity.register(payload.email, payload.password, payload.display_name)
     except AuthError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    token = identity.login(payload.email, payload.password)
+    # `login` cung goi ra Appwrite va cung nem AuthError - de ngoai try thi
+    # loi se thanh 500 thay vi mot thong bao ro rang.
+    try:
+        token = identity.login(payload.email, payload.password)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return {"token": token, "profile": profile.to_dict()}
 
 
 @app.post("/api/auth/login")
 def login(payload: LoginIn) -> Dict[str, Any]:
+    # `profile_from_token` PHAI nam trong try: no cung goi ra Appwrite va cung
+    # nem AuthError. De ngoai thi loi xac thuc thanh 500 thay vi 401.
     try:
         token = identity.login(payload.email, payload.password)
+        profile = identity.profile_from_token(token)
     except AuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
-    return {"token": token, "profile": identity.profile_from_token(token).to_dict()}
+    return {"token": token, "profile": profile.to_dict()}
 
 
 @app.get("/api/auth/me")

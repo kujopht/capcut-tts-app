@@ -188,9 +188,14 @@ class TestAppwriteAdapterGuards(unittest.TestCase):
         admin = adapter._headers(admin=True)
         self.assertEqual(admin["X-Appwrite-Key"], "SIEUBIMAT")
 
-        # Khi dung JWT cua nguoi dung thi TUYET DOI khong gui API key
-        with_jwt = adapter._headers(jwt="jwt-cua-nguoi-dung")
-        self.assertNotIn("X-Appwrite-Key", with_jwt)
+        # Khi dung session cua nguoi dung thi TUYET DOI khong gui API key.
+        # Appwrite tu choi request vua co API key vua co danh tinh nguoi dung,
+        # va quan trong hon: request do phai chay dung quyen cua nguoi dung.
+        with_session = adapter._headers(session="session-cua-nguoi-dung")
+        self.assertNotIn("X-Appwrite-Key", with_session)
+        self.assertEqual(with_session["X-Appwrite-Session"], "session-cua-nguoi-dung")
+        self.assertNotIn("X-Appwrite-JWT", with_session,
+                         "session secret khong phai JWT - gui nhầm header thì Appwrite từ chối")
 
 
 class TestR2AdapterGuards(unittest.TestCase):

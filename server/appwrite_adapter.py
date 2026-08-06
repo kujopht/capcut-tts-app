@@ -71,17 +71,20 @@ class AppwriteIdentityAdapter:
                 f"APPWRITE_ENDPOINT phải bắt đầu bằng http:// hoặc https:// (nhận được: {endpoint!r})."
             )
         self._settings = settings
-        self._endpoint = endpoint
+        # `api_base` da bo `/v1` o cuoi neu co - moi path duoi day tu them `/v1`
+        self._endpoint = settings.api_base
 
     # -- ha tang --------------------------------------------------------------
 
-    def _headers(self, *, admin: bool = True, jwt: str = "") -> Dict[str, str]:
+    def _headers(self, *, admin: bool = True, session: str = "") -> Dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "X-Appwrite-Project": self._settings.project_id,
         }
-        if jwt:
-            headers["X-Appwrite-JWT"] = jwt
+        if session:
+            # Session secret cua NGUOI DUNG. Khong bao gio gui kem API key -
+            # request nay phai chay voi dung quyen cua nguoi dung do.
+            headers["X-Appwrite-Session"] = session
         elif admin:
             # API key CHI dung o phia server
             headers["X-Appwrite-Key"] = self._settings.api_key
@@ -93,14 +96,18 @@ class AppwriteIdentityAdapter:
         path: str,
         *,
         payload: Optional[Dict[str, Any]] = None,
-        jwt: str = "",
+        session: str = "",
         admin: bool = True,
     ) -> Dict[str, Any]:
         url = f"{self._endpoint}{path}"
         try:
-            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            # Client MOI moi lan, khong giu cookie: neu cookie phien truoc con
+            # sot lai, Appwrite se tra 403 "JWT and cookie used in the same
+            # request", va te hon la request co the chay bang danh tinh cu.
+            with httpx.Client(timeout=REQUEST_TIMEOUT, cookies=None) as client:
                 response = client.request(
-                    method, url, json=payload, headers=self._headers(admin=admin, jwt=jwt)
+                    method, url, json=payload,
+                    headers=self._headers(admin=admin, session=session),
                 )
         except httpx.HTTPError as exc:
             raise AuthError(f"Không kết nối được Appwrite: {exc}") from exc
@@ -162,19 +169,40 @@ class AppwriteIdentityAdapter:
         return profile
 
     def login(self, email: str, password: str) -> str:
+        """
+        Dang nhap, tra ve SESSION SECRET.
+
+        Phai goi KEM API key (`admin=True`, mac dinh). Da kiem chung tren
+        Appwrite that: goi khong kem key thi Appwrite tra ve session nhung
+        truong `secret` RONG - no dat cookie thay vi tra secret. Backend khong
+        dung cookie nen phai lay secret theo duong server-side nay.
+
+        TUYET DOI khong fallback sang `$id`: do la ma dinh danh phien, khong
+        phai credential, va Appwrite se tu choi no o moi request sau.
+        """
         data = self._request(
             "POST",
             "/v1/account/sessions/email",
             payload={"email": (email or "").strip().lower(), "password": password},
-            admin=False,
         )
-        secret = str(data.get("secret") or data.get("$id") or "")
+        secret = str(data.get("secret") or "")
         if not secret:
-            raise AuthError("Appwrite không trả về phiên đăng nhập.")
+            raise AuthError("Appwrite không trả về session secret.")
         return secret
 
     def profile_from_token(self, token: str) -> Profile:
-        data = self._request("GET", "/v1/account", jwt=(token or "").strip(), admin=False)
+        """
+        Xac minh session secret voi Appwrite va lay danh tinh tu ket qua.
+
+        Dung header `X-Appwrite-Session`, KHONG phai `X-Appwrite-JWT`: session
+        secret khong phai JWT, Appwrite tra loi "Invalid token: Incomplete
+        segments" neu gui nham cho.
+
+        Danh tinh LUON lay tu phan hoi cua Appwrite, khong bao gio tu client.
+        """
+        data = self._request(
+            "GET", "/v1/account", session=(token or "").strip(), admin=False
+        )
         user_id = str(data.get("$id") or "")
         if not user_id:
             raise AuthError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn.")

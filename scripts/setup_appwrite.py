@@ -23,6 +23,13 @@ from server.config import load_settings
 
 TIMEOUT = 30.0
 
+# Console Windows mac dinh la cp1252, khong ma hoa duoc tieng Viet co dau ->
+# script chet bang UnicodeEncodeError truoc khi lam duoc gi. Ep UTF-8 de lenh
+# trong tai lieu chay duoc ngay, khong bat nguoi van hanh dat PYTHONIOENCODING.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 #: (key, kieu, bat_buoc, kich_thuoc/tuy_chon)
 SCHEMA: Dict[str, Dict[str, Any]] = {
     "profiles": {
@@ -146,20 +153,33 @@ class Setup:
                 "APPWRITE_PROJECT_ID, APPWRITE_API_KEY, APPWRITE_DATABASE_ID."
             )
         self.cfg = settings.appwrite
-        self.endpoint = (self.cfg.endpoint or "https://<endpoint>").rstrip("/")
+        # `api_base` da bo `/v1` o cuoi neu co - moi path duoi day tu them `/v1`
+        self.endpoint = self.cfg.api_base or "https://<endpoint>"
         self.dry_run = dry_run
         self.created = 0
         self.skipped = 0
+
+    def _headers(self) -> Dict[str, str]:
+        return {
+            "Content-Type": "application/json",
+            "X-Appwrite-Project": self.cfg.project_id,
+            "X-Appwrite-Key": self.cfg.api_key,     # CHI o phia server
+        }
+
+    def _exists(self, path: str) -> bool:
+        """GET de kiem tra ton tai. Khong nem loi, chi tra True/False."""
+        if self.dry_run:
+            print(f"    [dry-run] GET {path}")
+            return False
+        with httpx.Client(timeout=TIMEOUT) as client:
+            response = client.get(f"{self.endpoint}{path}", headers=self._headers())
+        return response.status_code == 200
 
     def _call(self, method: str, path: str, payload: Optional[Dict] = None) -> Any:
         if self.dry_run:
             print(f"    [dry-run] {method} {path}")
             return None
-        headers = {
-            "Content-Type": "application/json",
-            "X-Appwrite-Project": self.cfg.project_id,
-            "X-Appwrite-Key": self.cfg.api_key,     # CHI o phia server
-        }
+        headers = self._headers()
         with httpx.Client(timeout=TIMEOUT) as client:
             response = client.request(
                 method, f"{self.endpoint}{path}", json=payload, headers=headers
@@ -181,11 +201,33 @@ class Setup:
     # -- cac buoc -------------------------------------------------------------
 
     def ensure_database(self) -> None:
+        """
+        Bao dam database ton tai.
+
+        KIEM TRA TRUOC KHI TAO. Appwrite Cloud tu ban 1.9 tao database kieu
+        `tablesdb`, va `POST /v1/databases` (kieu cu) tra ve 404 - nen khong
+        the dua vao 409 de biet "da co". Cac endpoint con lai cua API cu van
+        chay binh thuong tren database kieu moi.
+        """
         print(f"Database {self.cfg.database_id or '<APPWRITE_DATABASE_ID>'}")
-        result = self._call("POST", "/v1/databases", {
-            "databaseId": self.cfg.database_id,
-            "name": "Fanfic Audio Studio",
-        })
+        if self._exists(f"/v1/databases/{self.cfg.database_id}"):
+            self.skipped += 1
+            print("  đã có sẵn")
+            return
+
+        try:
+            result = self._call("POST", "/v1/databases", {
+                "databaseId": self.cfg.database_id,
+                "name": "Fanfic Audio Studio",
+            })
+        except SystemExit as exc:
+            raise SystemExit(
+                f"{exc}\n\n"
+                f"Không tạo được database qua API. Bản Appwrite Cloud mới không "
+                f"cho tạo database bằng endpoint cũ.\n"
+                f"Hãy vào Console tạo database với ID chính xác là "
+                f"'{self.cfg.database_id}' rồi chạy lại script này."
+            ) from exc
         print("  đã có sẵn" if result == "exists" else "  đã tạo")
 
     def ensure_collection(self, cid: str, spec: Dict[str, Any]) -> None:

@@ -1,7 +1,7 @@
 # HANDOFF — Fanfic Audio Studio Web MVP
 
-Cập nhật: 2026-08-06 · Branch `feature/web-mvp` · Mốc 4: **code xong, chưa
-smoke-test cloud thật**
+Cập nhật: 2026-08-06 · Branch `feature/web-mvp` · Mốc 4: **đã smoke-test
+Appwrite + R2 thật**
 
 Tài liệu này để một phiên khác tiếp tục được khi phiên hiện tại hết context.
 
@@ -56,16 +56,16 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 | 1 | Nền móng: `web/` + `server/`, mock adapter, healthcheck, landing | ✅ Xong |
 | 2 | TTS service, job API, idempotency, test | ✅ Xong phần backend |
 | 3 | Vertical slice giao diện | ✅ Đủ 5 trang, đã kiểm thử thật |
-| 4 | Appwrite + R2 adapter, cấu hình, tài liệu | ⚠️ Code xong, **chưa smoke-test cloud thật** |
+| 4 | Appwrite + R2 adapter, cấu hình, tài liệu | ✅ Xong, **đã kiểm chứng live** |
 
-**Mốc 4 KHÔNG được coi là hoàn tất hoàn toàn.** Tách bạch cho rõ:
+Tách bạch cho rõ:
 
 | Hạng mục | Trạng thái |
 |---|---|
 | Adapter đã hiện thực | ✅ `AppwriteIdentityAdapter`, `AppwriteMetadataStore`, `R2StorageAdapter` |
 | Automated/mock tests | ✅ Đạt toàn bộ, chạy offline |
 | Runtime dependencies đã khai báo | ✅ `server/requirements.txt` (gồm `boto3>=1.34,<2.0`) |
-| Live Appwrite/R2 verification | ❌ Vẫn cần tài khoản và credential do **người vận hành** cấu hình ngoài source |
+| Live Appwrite/R2 verification | ✅ Đã chạy trên Appwrite Cloud 1.9.6 + R2, môi trường dev. Bảy lỗi phát hiện và đã sửa — xem "Live smoke test" |
 
 ### Đã xong
 
@@ -91,12 +91,10 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 
 ### Chưa làm — việc tiếp theo
 
-1. **Smoke test Appwrite thật.** Cần người vận hành tạo project, API key và
-   database, rồi chạy `python -m scripts.setup_appwrite --dry-run` trước khi
-   chạy thật. Phải xác minh: cú pháp query, hành vi document permission, giới
-   hạn kích thước thuộc tính `content`.
-2. **Smoke test R2 thật.** Bucket private, token S3-compatible. Phải xác minh
-   presigned URL có phát được trực tiếp trong thẻ `<audio>` hay không.
+1. **Bấm tay trên giao diện với backend cloud.** Mới kiểm qua API; chưa mở
+   trình duyệt chạy `/library` → `/studio` với `DATA_BACKEND=appwrite`.
+2. **Chương dài và nhiều job song song.** Mới thử chương ngắn, chạy tuần tự.
+   Giới hạn 1.000.000 ký tự của thuộc tính `content` chưa chạm tới.
 3. **Dọn object mồ côi.** Chưa có transaction phân tán, nên khi ghi `completed`
    hỏng sau lúc upload, object vẫn nằm lại trong kho. Cần một job quét định kỳ.
 4. Chưa có thanh toán, lịch sử nghe, trừ quota, moderation.
@@ -116,8 +114,9 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` (api + security + job persistence + dependencies) | 87 test: 86 đạt, 1 bỏ qua |
-| ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 86 đạt, 1 bỏ qua |
+| `server/tests` | 182 test: 181 đạt, 1 bỏ qua |
+| ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 181 đạt, 1 bỏ qua |
+| Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
 | `web` (`node --test`) | 10/10 đạt |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
@@ -130,12 +129,7 @@ Test bị bỏ qua là test kiểm tra **thông báo lỗi khi thiếu `boto3`**
 
 Venv sạch cũng xác nhận backend **không kéo theo PySide6** và nạp được 452 giọng.
 
-## Chưa kiểm chứng với cloud thật
-
-`AppwriteIdentityAdapter`, `AppwriteMetadataStore`, `R2StorageAdapter` và
-`scripts/setup_appwrite.py` mới chỉ được test bằng client giả lập. Cần
-credential thật để xác minh cú pháp query Appwrite, hành vi document
-permission, và việc presigned URL của R2 có phát được trong thẻ `<audio>`.
+## Mức độ kiểm chứng
 
 Credential do **người vận hành** đặt trong `server/.env` (không được commit).
 Repo này không chứa và không bao giờ được chứa secret thật.
@@ -145,44 +139,75 @@ Repo này không chứa và không bao giờ được chứa secret thật.
 | Mức | Nghĩa là gì |
 |---|---|
 | **Mock persistence** | `MockMetadataStore` chỉ sống trong **vòng đời tiến trình**. Khởi động lại backend là mất sạch novels/chapters/jobs. Không phải kho bền vững, chỉ để phát triển và kiểm thử. |
-| **Appwrite adapter đã mock-test** | `AppwriteMetadataStore` được test bằng **client giả lập**: xác nhận đúng request, đúng payload `state`, đúng chuỗi permissions. Không hề chạm mạng. |
-| **Live Appwrite verification** | ❌ **Chưa làm.** Cần tài khoản thật để xác minh Appwrite có thực sự áp `read("any")` như mong đợi, document permission có chặn đúng người lạ, và cú pháp query có khớp phiên bản đang chạy hay không. |
+| **Appwrite adapter đã mock-test** | Test bằng **client giả lập**: đúng request, đúng payload, đúng chuỗi permissions. Không chạm mạng. |
+| **Live Appwrite verified** | ✅ **Đã chạy** trên Appwrite Cloud 1.9.6 — xem mục "Live smoke test" ở trên. |
+| **Live R2 verified** | ✅ **Đã chạy** — upload, `head`, `Content-Type`, presigned URL còn hạn/hết hạn, URL công khai bị chặn. |
 
-Nói riêng về **permissions khi xuất bản**: bộ test khẳng định adapter *gửi đi*
-đúng chuỗi quyền (`read("any")` công khai, `update`/`delete` chỉ chủ sở hữu).
-Việc Appwrite *thực thi* đúng chuỗi đó chỉ có thể kiểm chứng trên tài khoản thật.
+**Chưa xác minh** (cần môi trường/việc khác):
 
-## Checklist live smoke test — session hay JWT?
+- Hành vi ở **production**: chưa chạy với CORS production, chưa có domain thật.
+- **Tải và đồng thời**: mới chạy tuần tự vài request, chưa test nhiều job song song.
+- **Chương dài**: mới thử chương ngắn một đoạn; giới hạn 1.000.000 ký tự của
+  thuộc tính `content` chưa chạm tới.
+- **Giọng Piper cục bộ** qua backend web: chưa thử, và vẫn `commercial_ready: false`.
+- **Dọn object mồ côi**: chưa có job quét (xem "Giới hạn đã biết").
+- **Frontend đấu với backend cloud**: mới kiểm qua API, chưa bấm tay trên
+  giao diện với `DATA_BACKEND=appwrite`.
 
-**Chưa sửa gì. Cần bằng chứng từ live test trước.**
+## Live smoke test — ĐÃ CHẠY
 
-Nghi vấn từ đọc code: `AppwriteIdentityAdapter.login()` trả về `secret` của một
-**session** (`POST /v1/account/sessions/email`), nhưng `profile_from_token()`
-lại gửi chính giá trị đó qua header **`X-Appwrite-JWT`** tới `GET /v1/account`.
-JWT của Appwrite là thứ khác, tạo bằng `POST /v1/account/jwt`. Nếu Appwrite từ
-chối, mọi route cần đăng nhập sẽ trả 401.
+Chạy trên Appwrite Cloud **1.9.6** (region `sgp`) và Cloudflare R2, môi trường
+dev. Trước khi chạy: 0 collection, bucket 0 object.
 
-Hỏng theo hướng **từ chối** (fail closed) — không có leo thang đặc quyền.
+### Bảy lỗi chỉ lộ ra khi chạy thật
 
-Việc cần làm khi có credential, theo đúng thứ tự:
+| Lỗi | Triệu chứng | Bản sửa |
+|---|---|---|
+| `/v1` nhân đôi | Endpoint đã có `/v1`, code thêm `/v1/` nữa → mọi request nhận **trang 404 HTML** | `AppwriteSettings.api_base` chuẩn hoá một chỗ, nhận cả hai dạng |
+| Session secret gửi như JWT | `Failed to verify JWT. Invalid token: Incomplete segments` → mọi route cần đăng nhập hỏng | Tạo session **kèm API key** (không kèm thì `secret` rỗng), gửi qua `X-Appwrite-Session`. Bỏ fallback `$id` |
+| Cú pháp query cũ | `Invalid query: Syntax error` — Appwrite 1.5+ chỉ nhận JSON qua `queries[]` | Helper `q_equal`/`q_order_*`/`q_limit` dùng `json.dumps`; **đóng luôn lỗ query injection** |
+| Trường tính toán | `Unknown attribute: "char_count"` (và `progress` cũng vậy) | `persistable()` tách hình dạng lưu trữ khỏi hình dạng API |
+| `POST /v1/databases` 404 | Appwrite Cloud mới không cho tạo database qua API cũ | Kiểm tra tồn tại trước, báo rõ nếu thiếu |
+| Setup script crash | `UnicodeEncodeError` trên console cp1252 của Windows | Ép UTF-8 cho stdout/stderr |
+| Login trả 500 | `profile_from_token()` nằm ngoài `try` | Đưa vào `try` → 401 đúng nghĩa |
 
-1. `POST /api/auth/register` với tài khoản thử A → kỳ vọng 201. Ghi lại **status
-   code**, không ghi token.
-2. `POST /api/auth/login` → xem response của Appwrite có trường nào: `secret`,
-   `$id`, `providerAccessToken`? Ghi **tên trường**, không ghi giá trị.
-3. `GET /api/auth/me` với token vừa nhận → **đây là phép thử quyết định**.
-   - 200 → nghi vấn sai, không sửa gì.
-   - 401 → nghi vấn đúng. Đọc `message` của Appwrite để biết nó chờ loại
-     credential nào.
-4. Nếu 401, chọn bản sửa **theo bằng chứng**, không theo phỏng đoán:
-   - Appwrite chấp nhận header `X-Appwrite-Session` → đổi header trong
-     `profile_from_token()` (một dòng).
-   - Appwrite bắt buộc JWT → sau khi tạo session, gọi thêm `POST /v1/account/jwt`
-     rồi trả JWT về. Nhớ JWT hết hạn nhanh (~15 phút) nên frontend phải xử lý.
-5. Bổ sung regression test cho đường được chọn, rồi chạy lại kịch bản.
+### Kết quả đã kiểm chứng
 
-Ghi vào báo cáo: request, status code, message đã che secret. **Không** ghi
-token, JWT, session secret, email/mật khẩu thử.
+**Appwrite**: 5 collection, mọi thuộc tính `available`, đủ 11 index,
+`documentSecurity: True`, **quyền collection `[]`**. Setup idempotent (lần 1 tạo
+66; lần 2 tạo 0, bỏ qua 67). Đăng ký/đăng nhập/`/api/auth/me` đều 200; sai mật
+khẩu, token bịa, thiếu token đều **401**.
+
+**Phân quyền hai tài khoản A/B**: giả mạo `owner_id` không ăn · B không thêm
+chương vào truyện A (403) · B không publish truyện A (403) · danh sách riêng
+không lẫn · bản nháp không lọt thư viện công khai · nghe chương nháp: ẩn danh
+401, người khác 403.
+
+**Publish**: lưu thật trong Appwrite (`state: published`), quyền document đúng
+`read("user:…")` + `read("any")`, **không** `update`/`delete`/`create` cho
+client. Publish lại idempotent.
+
+**R2**: object 27.504 byte, `Content-Type: audio/mpeg`, MP3 hợp lệ. Database chỉ
+lưu object key, không byte nhị phân. Chủ sở hữu nhận **307** → presigned URL
+`X-Amz-Expires=300`; URL còn hạn tải được đủ 27.504 byte, hết hạn → **403**;
+URL công khai cố định **không** hoạt động. Quyền `audio_tracks` chỉ có `read`.
+
+**Vòng đời TTS**: `pending` ghi vào Appwrite ngay khi tạo → `running` →
+`completed` kèm `output_key`. Không đổi sang giọng khác.
+
+**Sau restart backend**: novel, trạng thái `published`, chương, job `completed`,
+`output_key`, audio metadata — còn nguyên. Phát audio vẫn được. Gửi lại cùng
+nội dung + giọng + thiết lập → **idempotency tái dùng đúng job cũ**.
+
+**Đường lỗi cũng tự kiểm chứng**: lần chạy đầu token R2 thiếu quyền ghi, job
+chuyển `running → failed`, **không** có `completed`, **không** có `output_key`.
+Đúng thiết kế — không báo thành công giả.
+
+### Còn lại trong môi trường dev
+
+Bucket còn **1 object** là audio của smoke test. Cố ý giữ: xoá sẽ để lại
+metadata mồ côi trong Appwrite. Object thăm dò đã xoá. Dữ liệu thử trong
+Appwrite (vài tài khoản, novel, chương) cũng giữ nguyên.
 
 ## Giới hạn đã biết
 

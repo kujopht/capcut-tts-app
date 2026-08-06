@@ -90,6 +90,24 @@ class AppwriteSettings:
     def configured(self) -> bool:
         return bool(self.endpoint and self.project_id and self.api_key and self.database_id)
 
+    @property
+    def api_base(self) -> str:
+        """
+        Goc API, KHONG kem `/v1`.
+
+        Appwrite cong bo endpoint da kem san `/v1` (vi du
+        `https://sgp.cloud.appwrite.io/v1`), con moi duong dan trong code deu
+        bat dau bang `/v1/`. Ghep thang se thanh `/v1/v1/...` va Appwrite tra
+        ve trang 404 HTML - dung nhu loi da gap khi chay that.
+
+        Chuan hoa o DUNG MOT CHO va chap nhan ca hai dang endpoint, co `/v1`
+        hay khong deu ra cung ket qua.
+        """
+        base = (self.endpoint or "").strip().rstrip("/")
+        if base.endswith("/v1"):
+            base = base[: -len("/v1")]
+        return base
+
 
 @dataclass(frozen=True)
 class R2Settings:

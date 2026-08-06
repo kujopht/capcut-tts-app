@@ -9,6 +9,17 @@ Ban Gradio cua giai doan truoc duoc giu lam phuong an du phong:
     python legacy_gradio_app.py      (hoac nhap dup run_gradio.bat)
 
 Chay:  python app.py                 (hoac nhap dup run_app.bat)
+
+Ngoai ra file nay con la cua ngo cho ban DONG LENH: neu tham so dau tien la mot
+lenh con (vi du `generate-arc`), ung dung KHONG mo cua so nao ma chay o che do
+headless. Nho vay Claude Code tao duoc audio cho mot arc da hoan tat bang dung
+mot lenh:
+
+    FanficAudioStudio.exe generate-arc --input arc-01.arc.json ^
+        --output D:\\audio --voice "Ngọc Huyền"
+
+Ban EXE rieng cho dong lenh (`FanficAudioStudioCLI.exe`, sinh tu `cli.py`) co
+console that nen dang tin cay hon khi can chuyen huong dau ra.
 """
 
 from __future__ import annotations
@@ -47,7 +58,37 @@ def _set_windows_taskbar_identity() -> None:
         pass
 
 
+def _requested_cli_command(argv: list[str]) -> str:
+    """
+    Tham so dong lenh co phai mot lenh con cua ban headless khong.
+
+    Chi nhan dung ten lenh o vi tri dau tien. Moi tham so khac (vi du duong dan
+    file do Windows truyen vao khi mo bang "Open with") deu duoc coi la khong
+    phai, va ung dung mo giao dien nhu binh thuong.
+    """
+    if len(argv) < 2:
+        return ""
+    from desktop_app.arc_cli import COMMANDS
+
+    candidate = argv[1].strip()
+    return candidate if candidate in COMMANDS else ""
+
+
+def _run_cli(argv: list[str]) -> int:
+    """Chay ban dong lenh, khong tao QApplication va khong mo cua so nao."""
+    from desktop_app.console_bridge import ensure_std_streams
+
+    ensure_std_streams()
+    from desktop_app.arc_cli import main as cli_main
+
+    return cli_main(argv[1:])
+
+
 def main() -> int:
+    command = _requested_cli_command(sys.argv)
+    if command:
+        return _run_cli(sys.argv)
+
     _set_windows_taskbar_identity()
 
     try:

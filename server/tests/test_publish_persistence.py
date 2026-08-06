@@ -397,10 +397,7 @@ class TestAppwritePublishWithMockedClient(unittest.TestCase):
         perms = self.fake.patches[0]["payload"]["permissions"]
 
         self.assertIn('read("any")', perms, "truyện đã xuất bản phải cho đọc công khai")
-        for owner_perm in (f'read("user:{self.OWNER}")',
-                           f'update("user:{self.OWNER}")',
-                           f'delete("user:{self.OWNER}")'):
-            self.assertIn(owner_perm, perms)
+        self.assertIn(f'read("user:{self.OWNER}")', perms)
 
         for forbidden in ('update("any")', 'delete("any")', 'write("any")',
                           'create("any")'):
@@ -409,6 +406,24 @@ class TestAppwritePublishWithMockedClient(unittest.TestCase):
         # Khong quyen nao khac ngoai `read` duoc cap cho pham vi cong khai
         public = [p for p in perms if p.endswith('("any")')]
         self.assertEqual(public, ['read("any")'])
+
+    def test_11b_owner_gets_no_direct_write_on_novel_document(self):
+        """
+        `novels.state` la truong do SERVER quyet dinh.
+
+        Chu so huu co session hop le van goi thang Appwrite duoc, nen khong
+        duoc cap `update`/`delete` o muc document.
+        """
+        store = self._store()
+        store.publish_novel(self.NOVEL, self.OWNER)
+        perms = self.fake.patches[0]["payload"]["permissions"]
+
+        self.assertNotIn(f'update("user:{self.OWNER}")', perms)
+        self.assertNotIn(f'delete("user:{self.OWNER}")', perms)
+        self.assertEqual(
+            [p.split("(")[0] for p in perms], ["read", "read"],
+            "chỉ được cấp quyền đọc",
+        )
 
     def test_12_draft_novel_is_not_publicly_readable(self):
         """Novel tao moi (draft) chi chu so huu doc/sua duoc."""

@@ -64,6 +64,26 @@ với thông báo rõ ràng — không bao giờ âm thầm quay về mock.
 
 ## Biến môi trường
 
+### Cấu hình được nạp thế nào
+
+`server/config.py` nạp `server/.env` bằng đường dẫn tính **theo vị trí module**,
+không theo thư mục làm việc — chạy từ repo root hay từ đâu cũng nạp đúng một
+file. Không cần `--env-file` cho uvicorn, và `python -m scripts.setup_appwrite`
+cũng thấy cùng cấu hình đó.
+
+**Thứ tự ưu tiên: `shell / CI / production` > `server/.env`.** Biến đã có trong
+môi trường tiến trình luôn thắng file (`override=False`), nên biến thật tiêm lúc
+triển khai không bao giờ bị một file `.env` cũ ghi đè.
+
+Không có file cũng không sao — backend chạy mock/local như thường. Muốn biết file
+đã có tác dụng chưa: `GET /api/health` trả `"env_file_loaded": true`.
+
+`FAS_ENV_FILE` có thể trỏ sang file khác; đặt chuỗi rỗng = không nạp file nào.
+Bộ test dùng đúng cơ chế này để chạy hermetic, không bao giờ chạm cloud thật.
+
+Việc nạp file **không làm mềm fail-fast**: đặt `DATA_BACKEND=appwrite` hay
+`STORAGE_BACKEND=r2` mà thiếu biến vẫn dừng ngay khi khởi động.
+
 ### `server/.env` — toàn bộ là **server-only**
 
 | Biến | Bắt buộc khi | Ghi chú |
@@ -142,15 +162,20 @@ Appwrite cho phép PATCH cả `data` lẫn `permissions` trong **một request**
 thao tác là **nguyên tử** — không có cửa sổ mà trạng thái đã đổi còn quyền thì
 chưa. Quyền được đặt thành:
 
-| Phạm vi | read | update | delete |
-|---|---|---|---|
-| Chủ sở hữu (`user:<id>`) | ✅ | ✅ | ✅ |
-| Công khai (`any`) | ✅ | ❌ | ❌ |
+| Phạm vi | read | create | update | delete |
+|---|---|---|---|---|
+| Chủ sở hữu (`user:<id>`) | ✅ | ❌ | ❌ | ❌ |
+| Công khai (`any`) | ✅ | ❌ | ❌ | ❌ |
+| Mức collection | — | ❌ | ❌ | ❌ |
 
-Bản nháp **không** có `read("any")` — chỉ chủ sở hữu đọc/sửa được. Quyền sửa
-không bao giờ được mở cho công khai. Mỗi lần publish đều áp lại quyền, nên nếu
-quyền bị lệch vì một lần sửa tay trên console Appwrite thì lần publish sau sẽ
-tự chữa.
+**Client chỉ được đọc.** Mọi thao tác ghi đi qua backend bằng API key, và API
+key bỏ qua document permission nên không mất chức năng nào. Bản nháp không có
+`read("any")`. Mỗi lần publish đều áp lại quyền, nên quyền bị lệch vì một lần
+sửa tay trên console Appwrite sẽ được lần publish sau tự chữa.
+
+Lý do không cấp quyền ghi cho chính chủ sở hữu: người dùng nắm session/JWT hợp
+lệ **gọi thẳng Appwrite API ngoài giao diện được**. Chi tiết từng trường
+server-authoritative: `docs/APPWRITE_SCHEMA.md`.
 
 API key chỉ nằm ở header của request phía server. Trình duyệt không bao giờ
 nhận được credential nào.

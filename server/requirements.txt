@@ -18,6 +18,11 @@ fastapi>=0.115,<1.0
 uvicorn>=0.30,<1.0
 pydantic>=2.7,<3.0
 
+# --- Bat buoc: nap server/.env ---
+# `server/config.py` nap file nay theo duong dan tinh tu vi tri module.
+# Thieu goi = file .env bi bo qua hoan toan va backend am tham chay mock.
+python-dotenv>=1.0,<2.0
+
 # --- Bat buoc: client HTTP ---
 # httpx: goi Appwrite REST (server/appwrite_adapter.py, server/appwrite_store.py)
 #        va la nen cua fastapi.testclient trong bo test.

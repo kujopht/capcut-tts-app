@@ -5,11 +5,34 @@ Tài liệu tạo database cho Fanfic Audio Studio. Tất cả nằm trong **m�
 
 ## Nguyên tắc phân quyền
 
-- Mọi collection dùng **document-level permissions**.
-- Khi tạo document, backend gán quyền cho đúng chủ sở hữu:
-  `read("user:<id>")`, `update("user:<id>")`, `delete("user:<id>")`.
+**Client chỉ được ĐỌC. Mọi thao tác ghi đi qua backend bằng API key.**
+
+- Mọi collection bật `documentSecurity: true` và dùng **document-level permissions**.
+- Quyền ở **mức collection là rỗng** — không cấp gì cho client. Quyền mức
+  collection áp dụng **thêm vào** quyền document, nên một quyền rộng ở đây sẽ
+  vô hiệu hoá toàn bộ mô hình phân quyền theo document.
+- Khi tạo document, backend chỉ gán `read("user:<id>")` cho chủ sở hữu.
 - Truyện đã xuất bản thêm `read("any")` để thư viện công khai đọc được.
-- **API key chỉ ở backend.** Frontend không bao giờ nhận key.
+- **Không bao giờ cấp `create` / `update` / `delete` cho client** — kể cả cho
+  chính chủ sở hữu.
+- **API key chỉ ở backend.** Frontend không bao giờ nhận key. API key bỏ qua
+  document permission nên backend vẫn ghi được bình thường.
+
+### Vì sao client không được quyền ghi
+
+Người dùng nắm session/JWT hợp lệ **có thể gọi thẳng Appwrite API ngoài giao
+diện**. Không được dựa vào việc "trình duyệt hiện không gọi Appwrite". Các
+collection đều chứa trường do **server** quyết định:
+
+| Collection | Trường server-authoritative | Nếu client ghi được thì sao |
+|---|---|---|
+| `profiles` | `tier`, `listened_minutes`, `tts_characters_used` | Tự nâng gói, tự xoá quota đã dùng |
+| `novels` | `state` | Tự xuất bản, hoặc đổi `owner_id` |
+| `tts_jobs` | `status`, `output_key` | Tự đánh dấu hoàn tất, trỏ sang file người khác |
+| `audio_tracks` | `object_key` | **Đổi sang key của người khác → `/api/audio/{chapter}` phục vụ audio của họ, vượt qua `_may_listen()`** |
+
+Nếu sau này cần cho sửa tên hiển thị hoặc avatar, phải làm qua **route của
+backend với danh sách trường được phép** — không bao giờ mở quyền ghi thẳng.
 
 ## Collections
 

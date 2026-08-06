@@ -21,9 +21,51 @@ from typing import List, Optional
 SERVER_ROOT = Path(__file__).resolve().parent
 DEFAULT_VAR_DIR = SERVER_ROOT / "var"
 
+#: File cau hinh cuc bo cua backend. Duong dan tinh theo VI TRI MODULE NAY,
+#: khong theo thu muc lam viec - chay tu repo root hay tu bat cu dau cung nap
+#: dung mot file. File KHONG duoc commit (.gitignore da chan).
+DEFAULT_ENV_FILE = SERVER_ROOT / ".env"
+
 
 def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
+
+
+def env_file_path() -> Optional[Path]:
+    """
+    File `.env` se duoc nap.
+
+    Mac dinh la `server/.env`. Bien `FAS_ENV_FILE` cho phep tro sang file khac
+    - bo test dung de tach khoi `server/.env` that tren may lap trinh vien.
+    Dat `FAS_ENV_FILE` thanh chuoi rong = khong nap file nao.
+    """
+    raw = os.environ.get("FAS_ENV_FILE")
+    if raw is None:
+        return DEFAULT_ENV_FILE
+    raw = raw.strip()
+    return Path(raw) if raw else None
+
+
+def load_env_file() -> Optional[Path]:
+    """
+    Nap file `.env` vao `os.environ`. Tra ve file da nap, hoac None.
+
+    THU TU UU TIEN: bien da co trong process environment LUON THANG file
+    (`override=False`). Nho vay bien that do CI / production / shell tiem vao
+    khong bao gio bi mot file `.env` cu ky ghi de.
+
+    Khong co file KHONG phai loi: che do mock/local van chay binh thuong.
+
+    Ham nay khong lam thay doi nguyen tac fail-fast. No chi dua gia tri TOI
+    duoc `Settings.validate()`; viec thieu/sai cau hinh van dung ngay o do.
+    """
+    path = env_file_path()
+    if path is None or not path.is_file():
+        return None
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=path, override=False)
+    return path
 
 
 class ConfigError(RuntimeError):
@@ -94,6 +136,11 @@ class Settings:
     #: khong duoc danh dau la san sang thuong mai.
     allow_unverified_local_voices: bool = True
 
+    #: Da nap duoc file `.env` hay chua. Bao ra o `/api/health` de nguoi van
+    #: hanh biet ngay file cau hinh co thuc su co tac dung khong - chinh la
+    #: cai bay da tung lam ca buoi kiem chung chay tren mock.
+    env_file_loaded: bool = False
+
     @property
     def is_development(self) -> bool:
         return self.environment.lower() in ("development", "dev", "local")
@@ -149,11 +196,19 @@ class Settings:
             "appwrite_configured": self.appwrite.configured,
             "r2_configured": self.r2.configured,
             "allow_unverified_local_voices": self.allow_unverified_local_voices,
+            "env_file_loaded": self.env_file_loaded,
         }
 
 
 def load_settings() -> Settings:
-    """Doc cau hinh tu bien moi truong."""
+    """
+    Doc cau hinh tu bien moi truong.
+
+    NAP `.env` TRUOC TIEN - truoc khi doc bat ky bien nao va truoc khi tang
+    tren chon adapter. Bien co san trong process environment van thang.
+    """
+    env_file = load_env_file()
+
     environment = _env("FAS_ENV", "development")
     var_dir = Path(_env("FAS_VAR_DIR")) if _env("FAS_VAR_DIR") else DEFAULT_VAR_DIR
 
@@ -185,6 +240,7 @@ def load_settings() -> Settings:
             bucket=_env("R2_BUCKET"),
         ),
         allow_unverified_local_voices=allow_unverified,
+        env_file_loaded=env_file is not None,
     )
 
 

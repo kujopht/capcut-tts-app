@@ -122,9 +122,18 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
     },
 }
 
-#: Quyen mac dinh o muc collection. Quyen chi tiet duoc gan tren TUNG document
-#: khi backend tao ban ghi (xem server/appwrite_store.py).
-COLLECTION_PERMISSIONS = ['create("users")']
+#: Quyen o muc COLLECTION: khong cap gi cho client.
+#:
+#: Truoc day day la `['create("users")']`, tuc la BAT KY nguoi dung da dang
+#: nhap nao cung tu tao document truc tiep qua Appwrite API duoc, o CA NAM
+#: collection - bo qua hoan toan backend. Quyen o muc collection ap dung
+#: THEM vao quyen tung document, nen no vo hieu hoa chinh mo hinh phan quyen
+#: theo document ma ta thiet ke.
+#:
+#: Moi thao tac GHI deu di qua backend bang API key, ma API key bo qua
+#: permission - nen de rong o day khong lam hong chuc nang nao.
+#: Quyen DOC van do tung document quyet dinh (documentSecurity=True).
+COLLECTION_PERMISSIONS: List[str] = []
 
 
 class Setup:

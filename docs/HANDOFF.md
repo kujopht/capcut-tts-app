@@ -35,7 +35,15 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
    `store.create_job()` lưu `pending`; `store.save_job()` lưu `running`,
    `completed`, `failed`. Job runner **không bao giờ** gọi thẳng Appwrite.
    Chi tiết thứ tự và giới hạn: `docs/WEB_README.md` mục "Vòng đời TTS job".
-6. **Có Protocol `MetadataStore` chính thức** trong `server/adapters.py`.
+6. **Client chỉ được ĐỌC trên Appwrite.** Quyền mức collection rỗng; document
+   chỉ cấp `read` cho chủ sở hữu (`read("any")` thêm khi đã xuất bản). Mọi ghi
+   đi qua backend bằng API key. Lý do và danh sách trường server-authoritative:
+   `docs/APPWRITE_SCHEMA.md`.
+7. **`server/.env` được nạp bằng `python-dotenv`** theo đường dẫn tính từ vị trí
+   module, không theo thư mục làm việc. Biến trong môi trường tiến trình luôn
+   thắng file. Bộ test chạy hermetic — `server/tests/__init__.py` ép mock/local
+   nên không bao giờ chạm cloud thật.
+8. **Có Protocol `MetadataStore` chính thức** trong `server/adapters.py`.
    `MockMetadataStore` và `AppwriteMetadataStore` cùng tuân theo một contract:
    kiểm quyền sở hữu ở phía server, `NotFoundError`/`PermissionDenied` thống
    nhất, và **ghi bền vững xong mới trả về**. Xuất bản truyện cũng đi qua đây:
@@ -71,6 +79,8 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 - `tests/` — chạy offline hoàn toàn (pipeline TTS bị thay bằng bản giả lập):
   `test_api.py`, `test_security.py`, `test_job_persistence.py` (vòng đời job),
   `test_publish_persistence.py` (xuất bản + permissions Appwrite bằng client giả lập),
+  `test_env_loading.py` (nạp `.env`, thứ tự ưu tiên, fail-fast, hermetic),
+  `test_profile_permissions.py` (quyền hai tầng, chống tự nâng tier/quota),
   `test_dependencies.py` (khai báo + import/startup verification)
 
 **Web `web/`**
@@ -141,6 +151,38 @@ Repo này không chứa và không bao giờ được chứa secret thật.
 Nói riêng về **permissions khi xuất bản**: bộ test khẳng định adapter *gửi đi*
 đúng chuỗi quyền (`read("any")` công khai, `update`/`delete` chỉ chủ sở hữu).
 Việc Appwrite *thực thi* đúng chuỗi đó chỉ có thể kiểm chứng trên tài khoản thật.
+
+## Checklist live smoke test — session hay JWT?
+
+**Chưa sửa gì. Cần bằng chứng từ live test trước.**
+
+Nghi vấn từ đọc code: `AppwriteIdentityAdapter.login()` trả về `secret` của một
+**session** (`POST /v1/account/sessions/email`), nhưng `profile_from_token()`
+lại gửi chính giá trị đó qua header **`X-Appwrite-JWT`** tới `GET /v1/account`.
+JWT của Appwrite là thứ khác, tạo bằng `POST /v1/account/jwt`. Nếu Appwrite từ
+chối, mọi route cần đăng nhập sẽ trả 401.
+
+Hỏng theo hướng **từ chối** (fail closed) — không có leo thang đặc quyền.
+
+Việc cần làm khi có credential, theo đúng thứ tự:
+
+1. `POST /api/auth/register` với tài khoản thử A → kỳ vọng 201. Ghi lại **status
+   code**, không ghi token.
+2. `POST /api/auth/login` → xem response của Appwrite có trường nào: `secret`,
+   `$id`, `providerAccessToken`? Ghi **tên trường**, không ghi giá trị.
+3. `GET /api/auth/me` với token vừa nhận → **đây là phép thử quyết định**.
+   - 200 → nghi vấn sai, không sửa gì.
+   - 401 → nghi vấn đúng. Đọc `message` của Appwrite để biết nó chờ loại
+     credential nào.
+4. Nếu 401, chọn bản sửa **theo bằng chứng**, không theo phỏng đoán:
+   - Appwrite chấp nhận header `X-Appwrite-Session` → đổi header trong
+     `profile_from_token()` (một dòng).
+   - Appwrite bắt buộc JWT → sau khi tạo session, gọi thêm `POST /v1/account/jwt`
+     rồi trả JWT về. Nhớ JWT hết hạn nhanh (~15 phút) nên frontend phải xử lý.
+5. Bổ sung regression test cho đường được chọn, rồi chạy lại kịch bản.
+
+Ghi vào báo cáo: request, status code, message đã che secret. **Không** ghi
+token, JWT, session secret, email/mật khẩu thử.
 
 ## Giới hạn đã biết
 

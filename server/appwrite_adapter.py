@@ -33,6 +33,27 @@ class AppwriteConfigError(RuntimeError):
     """Cau hinh Appwrite thieu hoac sai - bao ro thay vi im lang dung mock."""
 
 
+def profile_permissions(user_id: str) -> list:
+    """
+    Quyen tren document `profiles`: CHI DOC, va chi cho chinh chu ho so.
+
+    KHONG cap `update`/`delete` cho nguoi dung. `profiles` chua cac truong do
+    SERVER quyet dinh - `tier`, `listened_minutes`, `tts_characters_used` va
+    cac bo dem quota sau nay. Nguoi dung nam session/JWT hop le co the goi
+    thang Appwrite API ngoai giao dien; neu con quyen `update` thi ho tu nang
+    goi cua minh duoc.
+
+    Moi thay doi cac truong nay di qua backend bang API key, ma API key thi
+    bo qua document permission - nen bo `update`/`delete` khong lam hong chuc
+    nang nao.
+
+    Van giu `read` de nguoi dung doc duoc ho so cua chinh minh. Neu sau nay
+    can sua ten hien thi / avatar thi phai lam qua route cua backend voi
+    danh sach truong duoc phep - khong bao gio cap quyen ghi thang.
+    """
+    return [f'read("user:{user_id}")']
+
+
 class AppwriteIdentityAdapter:
     """Auth bang email/password qua Appwrite."""
 
@@ -129,18 +150,13 @@ class AppwriteIdentityAdapter:
             display_name=display_name or email.split("@")[0],
             tier=Tier.FREE,
         )
-        # Ghi ho so vao collection profiles; quyen doc/ghi thuoc chinh chu so huu
         self._request(
             "POST",
             f"/v1/databases/{self._settings.database_id}/collections/{COLLECTION_PROFILES}/documents",
             payload={
                 "documentId": user_id,
                 "data": profile.to_dict(),
-                "permissions": [
-                    f'read("user:{user_id}")',
-                    f'update("user:{user_id}")',
-                    f'delete("user:{user_id}")',
-                ],
+                "permissions": profile_permissions(user_id),
             },
         )
         return profile

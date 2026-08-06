@@ -128,10 +128,16 @@ class TestBackendSelection(unittest.TestCase):
         self._saved = {
             key: os.environ.get(key)
             for key in ("DATA_BACKEND", "STORAGE_BACKEND", "R2_ACCOUNT_ID",
-                        "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET")
+                        "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET",
+                        "APPWRITE_ENDPOINT", "APPWRITE_PROJECT_ID",
+                        "APPWRITE_API_KEY", "APPWRITE_DATABASE_ID",
+                        "FAS_ENV_FILE")
         }
         for key in self._saved:
             os.environ.pop(key, None)
+        # Tach khoi `server/.env` that tren may lap trinh vien: cac test nay
+        # noi ve MAC DINH khi khong co cau hinh, khong ve cau hinh cuc bo.
+        os.environ["FAS_ENV_FILE"] = ""
 
     def tearDown(self) -> None:
         for key, value in self._saved.items():

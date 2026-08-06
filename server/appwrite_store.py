@@ -102,11 +102,27 @@ class AppwriteMetadataStore:
 
     @staticmethod
     def _owner_permissions(owner_id: str, public_read: bool = False) -> List[str]:
-        perms = [
-            f'read("user:{owner_id}")',
-            f'update("user:{owner_id}")',
-            f'delete("user:{owner_id}")',
-        ]
+        """
+        Quyen tren document: CHI DOC. Khong client nao duoc ghi thang.
+
+        Truoc day co cap them `update`/`delete` cho chu so huu. Nhung cac
+        collection nay chua toan truong do SERVER quyet dinh:
+
+        - `novels.state`      - xuat ban hay chua
+        - `tts_jobs.status`   - va `output_key`
+        - `audio_tracks.object_key` - tro toi file audio nao
+
+        Nguoi dung nam session/JWT hop le goi thang Appwrite API duoc. Voi
+        quyen `update` tren `audio_tracks` cua chinh minh, ho chi can doi
+        `object_key` sang key cua nguoi khac la `/api/audio/{chapter}` se phuc
+        vu audio cua nguoi do - vuot qua ca `_may_listen()`.
+
+        Moi thao tac ghi deu di qua backend bang API key (API key bo qua
+        document permission), nen bo `update`/`delete` khong hong chuc nang.
+
+        `public_read` chi them quyen DOC cong khai cho truyen da xuat ban.
+        """
+        perms = [f'read("user:{owner_id}")']
         if public_read:
             perms.append('read("any")')
         return perms

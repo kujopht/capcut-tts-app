@@ -32,6 +32,11 @@ if not exist "assets\app_icon.ico" (
     echo Dang tao icon...
     ".venv\Scripts\python.exe" assets\make_icon.py
 )
+if not exist "assets\app_icon.png" (
+    echo [LOI] Thieu assets\app_icon.png - logo sidebar se khong hien thi.
+    pause
+    exit /b 1
+)
 
 echo.
 echo === Xoa ban build cu ===
@@ -50,10 +55,9 @@ REM Nguoi dung tu nhap device.json trong Cai dat; file duoc luu o AppData.
     --onedir ^
     --windowed ^
     --name "FanficAudioStudio" ^
-    --icon "assets\app_icon.ico" ^
+    --icon=assets\app_icon.ico ^
     --add-data "Voice.json;." ^
-    --add-data "assets\app_icon.ico;assets" ^
-    --add-data "assets\app_icon.png;assets" ^
+    --add-data "assets;assets" ^
     --hidden-import "desktop_app" ^
     --collect-submodules "desktop_app" ^
     --collect-submodules "capcut_tts_api" ^
@@ -83,6 +87,14 @@ if not "%EXITCODE%"=="0" (
 
 if not exist "dist\FanficAudioStudio\FanficAudioStudio.exe" (
     echo [LOI] Khong tim thay file EXE sau khi build.
+    pause
+    exit /b 1
+)
+
+echo === Kiem tra assets da duoc dong goi ===
+if not exist "dist\FanficAudioStudio\_internal\assets\app_icon.png" (
+    echo [LOI] Khong tim thay _internal\assets\app_icon.png trong ban build.
+    echo       Logo sidebar se khong hien thi. Kiem tra lai --add-data "assets;assets".
     pause
     exit /b 1
 )

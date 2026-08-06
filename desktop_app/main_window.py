@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QIcon
+from PySide6.QtGui import QColor, QDesktopServices, QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -67,6 +67,7 @@ from desktop_app.models import (
 )
 from desktop_app.output_manager import FFMPEG_HELP, find_ffmpeg
 from desktop_app.queue_manager import QueueManager, build_jobs, estimate_job_count
+from desktop_app.resources import app_icon_png, load_app_icon
 from desktop_app.settings_manager import (
     RATE_CHOICES,
     SettingsManager,
@@ -87,6 +88,9 @@ from desktop_app.workers import (
     ZipWorker,
     job_snapshot,
 )
+
+# Logo sidebar: du de nhan dien, du nho de khong lay khong gian lam viec.
+SIDEBAR_LOGO_SIZE = 44
 
 STATE_LABELS = {
     "pending": "Chờ",
@@ -266,6 +270,10 @@ class MainWindow(QMainWindow):
         self._library_runs: List[Dict[str, Any]] = []
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
+        # app.py da truyen icon vao; neu cua so duoc tao tu noi khac thi tu nap
+        # lai tu assets de title bar / Alt+Tab / Taskbar luon co icon.
+        if app_icon is None:
+            app_icon = load_app_icon()
         if app_icon is not None:
             self.setWindowIcon(app_icon)
         self.setMinimumSize(QSize(1100, 660))
@@ -332,9 +340,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 16, 12, 12)
         layout.setSpacing(4)
 
-        logo = QLabel("🎧 Fanfic Audio\nStudio")
-        logo.setObjectName("SidebarLogo")
-        layout.addWidget(logo)
+        layout.addWidget(self._build_brand())
         tag = QLabel(f"v{APP_VERSION} · offline desktop")
         tag.setObjectName("SidebarTag")
         layout.addWidget(tag)
@@ -359,6 +365,62 @@ class MainWindow(QMainWindow):
         self.sidebar_summary.setWordWrap(True)
         layout.addWidget(self.sidebar_summary)
         return bar
+
+    def _build_brand(self) -> QWidget:
+        """
+        Khu vuc thuong hieu gon o dau sidebar: logo + ten app + dong phu.
+
+        Co y giu nho (logo 44px) de khong an vao khong gian lam viec.
+        """
+        brand = QWidget()
+        brand.setObjectName("SidebarBrand")
+        brand.setToolTip(f"{APP_NAME} v{APP_VERSION}")
+        row = QHBoxLayout(brand)
+        row.setContentsMargins(2, 0, 2, 0)
+        row.setSpacing(10)
+
+        self.brand_logo = QLabel()
+        self.brand_logo.setObjectName("SidebarLogo")
+        self.brand_logo.setFixedSize(SIDEBAR_LOGO_SIZE, SIDEBAR_LOGO_SIZE)
+        self.brand_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._apply_brand_logo()
+        row.addWidget(self.brand_logo, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(1)
+
+        name = QLabel(APP_NAME)
+        name.setObjectName("SidebarBrandName")
+        name.setWordWrap(True)
+        text_col.addWidget(name)
+
+        subtitle = QLabel("Text to Speech")
+        subtitle.setObjectName("SidebarBrandSub")
+        text_col.addWidget(subtitle)
+
+        row.addLayout(text_col, 1)
+        return brand
+
+    def _apply_brand_logo(self) -> None:
+        """Nap assets/app_icon.png vao logo sidebar (co ho tro man hinh HiDPI)."""
+        png = app_icon_png()
+        if png is not None:
+            pixmap = QPixmap(str(png))
+            if not pixmap.isNull():
+                ratio = self.devicePixelRatioF() or 1.0
+                edge = max(1, int(round(SIDEBAR_LOGO_SIZE * ratio)))
+                scaled = pixmap.scaled(
+                    edge,
+                    edge,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                scaled.setDevicePixelRatio(ratio)
+                self.brand_logo.setPixmap(scaled)
+                return
+        # Khong co file logo -> van hien thi duoc, khong lam vo giao dien
+        self.brand_logo.setText("🎧")
 
     def _go_to_page(self, index: int) -> None:
         self.pages.setCurrentIndex(index)

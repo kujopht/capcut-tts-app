@@ -105,17 +105,34 @@ QMainWindow, QDialog {{
     border-right: 1px solid {c['border_soft']};
 }}
 
+#SidebarBrand {{
+    background-color: transparent;
+}}
+
 #SidebarLogo {{
-    font-size: 15px;
+    background-color: transparent;
+    font-size: 22px;
+}}
+
+#SidebarBrandName {{
+    background-color: transparent;
+    font-size: 14px;
     font-weight: 700;
     color: {c['text']};
-    padding: 4px 2px;
+}}
+
+#SidebarBrandSub {{
+    background-color: transparent;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    color: {c['text_dim']};
 }}
 
 #SidebarTag {{
     color: {c['text_faint']};
     font-size: 11px;
-    padding: 0 2px 6px 2px;
+    padding: 2px 2px 6px 2px;
 }}
 
 QPushButton#NavButton {{

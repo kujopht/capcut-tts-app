@@ -82,6 +82,38 @@ class TestSettingsIsolation(unittest.TestCase):
 
 
 @unittest.skipUnless(QT_AVAILABLE, "PySide6 không khả dụng")
+class TestAppIconResources(unittest.TestCase):
+    """Icon/logo phai tim thay duoc va tao ra QIcon khong rong."""
+
+    def test_icon_files_exist(self) -> None:
+        from desktop_app.resources import app_icon_ico, app_icon_png
+
+        for path in (app_icon_png(), app_icon_ico()):
+            self.assertIsNotNone(path)
+            self.assertTrue(path.is_file(), path)
+
+    def test_resource_path_is_relative_to_project(self) -> None:
+        from desktop_app.resources import PROJECT_DIR, resource_path
+
+        path = resource_path("assets", "app_icon.png")
+        self.assertEqual(path, PROJECT_DIR / "assets" / "app_icon.png")
+        self.assertTrue((PROJECT_DIR / "app.py").is_file())
+
+    def test_load_app_icon_not_null(self) -> None:
+        from desktop_app.resources import load_app_icon
+
+        icon = load_app_icon()
+        self.assertIsNotNone(icon)
+        self.assertFalse(icon.isNull())
+        self.assertTrue(icon.availableSizes())
+
+    def test_app_user_model_id_is_stable(self) -> None:
+        import app as entry
+
+        self.assertEqual(entry.APP_USER_MODEL_ID, "kujopht.FanficAudioStudio")
+
+
+@unittest.skipUnless(QT_AVAILABLE, "PySide6 không khả dụng")
 class TestThemeStylesheet(unittest.TestCase):
     def test_both_themes_build(self) -> None:
         from desktop_app.theme import THEME_DARK, THEME_LIGHT, build_stylesheet
@@ -129,6 +161,19 @@ class TestMainWindow(unittest.TestCase):
             self.window.deleteLater()
         except Exception:
             pass
+
+    def test_window_icon_set(self) -> None:
+        icon = self.window.windowIcon()
+        self.assertFalse(icon.isNull())
+        self.assertTrue(icon.availableSizes())
+
+    def test_sidebar_brand_shows_logo_image(self) -> None:
+        from desktop_app.main_window import SIDEBAR_LOGO_SIZE
+
+        pixmap = self.window.brand_logo.pixmap()
+        self.assertFalse(pixmap.isNull(), "Logo sidebar phải là ảnh, không phải chữ")
+        self.assertEqual(self.window.brand_logo.width(), SIDEBAR_LOGO_SIZE)
+        self.assertLessEqual(SIDEBAR_LOGO_SIZE, 48)
 
     def test_window_title_and_pages(self) -> None:
         self.assertIn("Fanfic Audio Studio", self.window.windowTitle())

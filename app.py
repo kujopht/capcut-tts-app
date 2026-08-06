@@ -24,39 +24,25 @@ if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
 
-def resource_path(*parts: str) -> Path:
-    """
-    Duong dan tai nguyen, dung ca khi chay tu source va khi da dong goi
-    bang PyInstaller (--onedir: tai nguyen nam trong sys._MEIPASS).
-    """
-    base = getattr(sys, "_MEIPASS", None)
-    root = Path(base) if base else PROJECT_DIR
-    return root.joinpath(*parts)
-
-
-def app_icon_path() -> Path | None:
-    for candidate in (
-        resource_path("assets", "app_icon.ico"),
-        PROJECT_DIR / "assets" / "app_icon.ico",
-    ):
-        if candidate.is_file():
-            return candidate
-    return None
+# AppUserModelID on dinh: Windows dua vao chuoi nay de gom cua so va shortcut
+# vao dung mot icon tren Taskbar.
+APP_USER_MODEL_ID = "kujopht.FanficAudioStudio"
 
 
 def _set_windows_taskbar_identity() -> None:
     """
     Dat AppUserModelID rieng de Windows hien dung icon cua app tren Taskbar
     (neu khong, Windows se gop vao icon cua python.exe).
+
+    Phai goi TRUOC khi tao QApplication. Tren he dieu hanh khac (hoac neu
+    ctypes/shell32 khong dung duoc) thi bo qua, khong lam app loi.
     """
     if os.name != "nt":
         return
     try:
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "FanficAudioStudio.DesktopApp.2"
-        )
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
     except Exception:
         pass
 
@@ -65,7 +51,6 @@ def main() -> int:
     _set_windows_taskbar_identity()
 
     try:
-        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication, QMessageBox
     except ImportError as exc:
         sys.stderr.write(
@@ -78,6 +63,7 @@ def main() -> int:
         return 2
 
     from desktop_app import APP_NAME, APP_ORG, APP_VERSION
+    from desktop_app.resources import load_app_icon
 
     QApplication.setApplicationName(APP_NAME)
     QApplication.setApplicationDisplayName(APP_NAME)
@@ -86,10 +72,10 @@ def main() -> int:
 
     app = QApplication(sys.argv)
 
-    icon = None
-    icon_file = app_icon_path()
-    if icon_file is not None:
-        icon = QIcon(str(icon_file))
+    # Dat icon cho toan bo ung dung ngay sau khi co QApplication, truoc khi
+    # tao cua so -> title bar / Alt+Tab / Taskbar deu dung icon nay.
+    icon = load_app_icon()
+    if icon is not None:
         app.setWindowIcon(icon)
 
     try:

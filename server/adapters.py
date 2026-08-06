@@ -15,6 +15,7 @@ import hashlib
 import os
 import shutil
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
@@ -24,6 +25,7 @@ from server.domain import (
     Chapter,
     Novel,
     Profile,
+    PublishState,
     TtsJob,
     new_id,
     now_iso,
@@ -67,6 +69,63 @@ class StorageAdapter(Protocol):
     def exists(self, key: str) -> bool: ...
     def size(self, key: str) -> int: ...
     def signed_url(self, key: str, expires_seconds: int = 3600) -> Optional[str]: ...
+
+
+class MetadataStore(Protocol):
+    """
+    Kho metadata: novels, chapters, tts_jobs, audio_tracks.
+
+    HAI ban hien thuc PHAI tuan theo cung contract nay - `MockMetadataStore`
+    (trong bo nho) va `AppwriteMetadataStore`. Tang route chi duoc goi qua day,
+    khong bao gio cham thang Appwrite.
+
+    CONTRACT chung cho moi thao tac GHI:
+    - Kiem tra quyen so huu o phia server. `user_id` do client gui len KHONG
+      bao gio duoc tin; chu so huu luon lay tu token da xac minh.
+    - Khong tim thay -> `NotFoundError`. Sai chu so huu -> `PermissionDenied`.
+    - Thao tac ghi phai BEN VUNG truoc khi tra ve. Goi xong ma doc lai phai
+      thay dung trang thai moi, khong phu thuoc object tam o tang tren.
+    """
+
+    # -- novel ---------------------------------------------------------------
+    def create_novel(self, novel: Novel) -> Novel: ...
+    def get_novel(self, novel_id: str) -> Novel: ...
+    def owned_novel(self, novel_id: str, owner_id: str) -> Novel: ...
+    def list_novels(self, owner_id: Optional[str] = None,
+                    published_only: bool = False) -> List[Novel]: ...
+
+    def publish_novel(self, novel_id: str, owner_id: str) -> Novel:
+        """
+        Chuyen novel sang `published` VA luu ben vung.
+
+        - Chi chu so huu moi duoc goi; nguoi khac -> `PermissionDenied`.
+        - IDEMPOTENT: goi lai tren novel da `published` khong loi, khong tao
+          du lieu trung, va tra ve chinh novel do.
+        - Ban Appwrite con mo them quyen doc cong khai; quyen update/delete
+          VAN chi thuoc chu so huu.
+        - Luu that bai thi NEM LOI - tuyet doi khong tra ve nhu da thanh cong.
+        """
+        ...
+
+    # -- chapter -------------------------------------------------------------
+    def create_chapter(self, chapter: Chapter) -> Chapter: ...
+    def get_chapter(self, chapter_id: str) -> Chapter: ...
+    def owned_chapter(self, chapter_id: str, owner_id: str) -> Chapter: ...
+    def list_chapters(self, novel_id: str) -> List[Chapter]: ...
+
+    # -- tts job -------------------------------------------------------------
+    def create_job(self, job: TtsJob) -> TtsJob: ...
+    def save_job(self, job: TtsJob) -> TtsJob: ...
+    def get_job(self, job_id: str) -> TtsJob: ...
+    def owned_job(self, job_id: str, owner_id: str) -> TtsJob: ...
+    def find_job_by_fingerprint(self, owner_id: str, chapter_id: str,
+                                fingerprint: str) -> Optional[TtsJob]: ...
+    def list_jobs(self, owner_id: str,
+                  chapter_id: Optional[str] = None) -> List[TtsJob]: ...
+
+    # -- audio track ---------------------------------------------------------
+    def create_track(self, track: AudioTrack) -> AudioTrack: ...
+    def track_for_chapter(self, chapter_id: str) -> Optional[AudioTrack]: ...
 
 
 # -----------------------------------------------------------------------------
@@ -217,6 +276,9 @@ class MockMetadataStore:
 
     Moi truy van deu kiem tra QUYEN SO HUU - dung mo hinh phan quyen ma Appwrite
     se ap dung o ban that.
+
+    KHONG PHAI kho ben vung. Du lieu chi song trong vong doi tien trinh: khoi
+    dong lai backend la mat sach. Chi dung cho phat trien va kiem thu cuc bo.
     """
 
     def __init__(self) -> None:
@@ -253,6 +315,26 @@ class MockMetadataStore:
         if published_only:
             items = [n for n in items if n.state.value == "published"]
         return sorted(items, key=lambda n: n.created_at, reverse=True)
+
+    def publish_novel(self, novel_id: str, owner_id: str) -> Novel:
+        """
+        Xuat ban novel - xem contract o `MetadataStore.publish_novel`.
+
+        Dung `replace()` roi moi gan lai vao kho, thay vi doi tai cho: neu co
+        loi xay ra giua chung thi ban ghi dang luu VAN NGUYEN VEN, khong bao
+        gio ket o trang thai nua voi. Day cung la cach ban Appwrite hanh xu
+        (PATCH thanh cong hoac khong doi gi ca).
+        """
+        with self._lock:
+            current = self.owned_novel(novel_id, owner_id)
+            # Idempotent: da `published` thi khong co gi de doi
+            if current.state == PublishState.PUBLISHED:
+                return current
+            published = replace(
+                current, state=PublishState.PUBLISHED, updated_at=now_iso()
+            )
+            self.novels[published.novel_id] = published
+            return published
 
     # -- chapter -------------------------------------------------------------
 
@@ -376,7 +458,7 @@ def build_storage(settings: Settings) -> StorageAdapter:
     return LocalStorageAdapter(settings.var_dir / "storage")
 
 
-def build_metadata_store(settings: Settings):
+def build_metadata_store(settings: Settings) -> MetadataStore:
     """Kho metadata: Appwrite khi DATA_BACKEND=appwrite, nguoc lai trong bo nho."""
     if settings.data_backend == "appwrite":
         from server.appwrite_store import AppwriteMetadataStore

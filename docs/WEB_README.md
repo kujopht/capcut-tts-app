@@ -54,7 +54,7 @@ Hệ thống **không tự đoán**. Bạn phải nói rõ muốn chạy chế �
 
 | Biến | Giá trị | Ý nghĩa |
 |---|---|---|
-| `DATA_BACKEND` | `mock` (mặc định) | Danh tính + metadata trong bộ nhớ |
+| `DATA_BACKEND` | `mock` (mặc định) | Danh tính + metadata trong bộ nhớ — **không bền vững**, khởi động lại là mất sạch |
 | | `appwrite` | Dùng Appwrite thật |
 | `STORAGE_BACKEND` | `local` (mặc định) | Lưu file xuống `server/var/storage` |
 | | `r2` | Cloudflare R2 |
@@ -122,6 +122,38 @@ Chi tiết collection, thuộc tính, index và quyền: `docs/APPWRITE_SCHEMA.m
 - Chỉ **sau khi** qua được kiểm tra đó, backend mới cấp URL ký hạn 5 phút (R2)
   hoặc stream trực tiếp (local).
 - Không bao giờ trả URL công khai cố định.
+
+## Xuất bản truyện được lưu thế nào
+
+`POST /api/novels/{id}/publish` đi trọn vẹn qua metadata adapter:
+**`store.publish_novel(novel_id, owner_id)`**. Route không tự đổi thuộc tính của
+novel — làm vậy thì bản mock "có vẻ" chạy được (dùng chung tham chiếu) còn
+Appwrite sẽ mất trắng thay đổi.
+
+- Chủ sở hữu **luôn** lấy từ token đã xác minh, không bao giờ từ body.
+- Không tồn tại → 404. Không phải chủ sở hữu → 403. Chưa đăng nhập → 401.
+- **Idempotent**: publish lại truyện đã xuất bản vẫn trả 200, không tạo bản ghi trùng.
+- Ghi metadata hỏng → **502**, không bao giờ trả 200 với trạng thái chỉ tồn tại
+  trong bộ nhớ tiến trình.
+
+### Quyền trên Appwrite sau khi xuất bản
+
+Appwrite cho phép PATCH cả `data` lẫn `permissions` trong **một request**, nên
+thao tác là **nguyên tử** — không có cửa sổ mà trạng thái đã đổi còn quyền thì
+chưa. Quyền được đặt thành:
+
+| Phạm vi | read | update | delete |
+|---|---|---|---|
+| Chủ sở hữu (`user:<id>`) | ✅ | ✅ | ✅ |
+| Công khai (`any`) | ✅ | ❌ | ❌ |
+
+Bản nháp **không** có `read("any")` — chỉ chủ sở hữu đọc/sửa được. Quyền sửa
+không bao giờ được mở cho công khai. Mỗi lần publish đều áp lại quyền, nên nếu
+quyền bị lệch vì một lần sửa tay trên console Appwrite thì lần publish sau sẽ
+tự chữa.
+
+API key chỉ nằm ở header của request phía server. Trình duyệt không bao giờ
+nhận được credential nào.
 
 ## Vòng đời TTS job được lưu thế nào
 

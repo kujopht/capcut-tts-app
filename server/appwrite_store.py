@@ -14,6 +14,7 @@ NGUYEN TAC:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -156,16 +157,35 @@ class AppwriteMetadataStore:
             queries.append('equal("state", ["published"])')
         return [_novel_from_doc(d) for d in self._list(COL_NOVELS, queries)]
 
-    def publish_novel(self, novel: Novel) -> Novel:
-        """Xuat ban: cap nhat trang thai VA mo quyen doc cong khai."""
-        novel.state = PublishState.PUBLISHED
-        novel.updated_at = now_iso()
-        self._update(
-            COL_NOVELS, novel.novel_id,
-            {"state": novel.state.value, "updated_at": novel.updated_at},
-            permissions=self._owner_permissions(novel.owner_id, public_read=True),
+    def publish_novel(self, novel_id: str, owner_id: str) -> Novel:
+        """
+        Xuat ban: cap nhat trang thai VA mo quyen doc cong khai.
+
+        NGUYEN TU: Appwrite cho phep PATCH ca `data` lan `permissions` trong
+        MOT request, nen khong ton tai cua so ma trang thai da doi con quyen
+        thi chua - hoac ca hai cung doi, hoac khong gi doi ca.
+
+        Quyen sau khi xuat ban: cong khai chi duoc `read`. `update`/`delete`
+        VAN chi thuoc chu so huu - khong bao gio mo quyen sua cho public.
+
+        IDEMPOTENT: goi lai tren novel da `published` van gui lai dung PATCH
+        do. PATCH khong tao ban ghi trung, va viec ap lai quyen giup TU CHUA
+        neu quyen bi lech vi mot lan sua tay tren console Appwrite.
+        """
+        current = self.owned_novel(novel_id, owner_id)    # 404 / 403 o day
+
+        # Dung `replace()` thay vi doi tai cho: chi cong bo ban `published`
+        # SAU KHI PATCH thanh cong. Neu `_update` nem loi thi khong co object
+        # nao mang trang thai `published` duoc tra ve.
+        published = replace(
+            current, state=PublishState.PUBLISHED, updated_at=now_iso()
         )
-        return novel
+        self._update(
+            COL_NOVELS, published.novel_id,
+            {"state": published.state.value, "updated_at": published.updated_at},
+            permissions=self._owner_permissions(published.owner_id, public_read=True),
+        )
+        return published
 
     # -- chapter -------------------------------------------------------------
 

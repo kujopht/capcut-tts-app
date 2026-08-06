@@ -225,14 +225,31 @@ def get_novel(novel_id: str) -> Dict[str, Any]:
 
 @app.post("/api/novels/{novel_id}/publish")
 def publish_novel(novel_id: str, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Xuat ban novel.
+
+    Toan bo thao tac nam trong metadata adapter duoc inject theo cau hinh:
+    kiem tra quyen so huu, doi trang thai va GHI BEN VUNG deu do store lam.
+    Route khong duoc tu doi thuoc tinh cua novel - lam vay thi ban mock "co ve"
+    chay duoc (cung tham chieu) con Appwrite se mat sach thay doi.
+
+    Chu so huu LUON lay tu token da xac minh, khong bao gio tu body.
+
+    IDEMPOTENT: publish lai novel da `published` van tra 200 voi cung novel.
+    """
     try:
-        novel = store.owned_novel(novel_id, profile.user_id)
+        novel = store.publish_novel(novel_id, profile.user_id)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except PermissionDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
-    novel.state = PublishState.PUBLISHED
-    novel.updated_at = now_iso()
+    except Exception as exc:
+        # Ghi metadata that bai -> BAO LOI. Tuyet doi khong tra ve 200 voi
+        # trang thai `published` chi ton tai trong bo nho tien trinh nay.
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Không lưu được trạng thái xuất bản: {type(exc).__name__}",
+        ) from exc
     return {"novel": novel.to_dict()}
 
 

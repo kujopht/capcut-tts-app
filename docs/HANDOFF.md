@@ -35,6 +35,11 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
    `store.create_job()` lưu `pending`; `store.save_job()` lưu `running`,
    `completed`, `failed`. Job runner **không bao giờ** gọi thẳng Appwrite.
    Chi tiết thứ tự và giới hạn: `docs/WEB_README.md` mục "Vòng đời TTS job".
+6. **Có Protocol `MetadataStore` chính thức** trong `server/adapters.py`.
+   `MockMetadataStore` và `AppwriteMetadataStore` cùng tuân theo một contract:
+   kiểm quyền sở hữu ở phía server, `NotFoundError`/`PermissionDenied` thống
+   nhất, và **ghi bền vững xong mới trả về**. Xuất bản truyện cũng đi qua đây:
+   `store.publish_novel(novel_id, owner_id)`.
 
 ## Trạng thái các mốc
 
@@ -59,12 +64,13 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 **Backend `server/`**
 - `config.py` — đọc env, không hard-code endpoint/secret, tự chọn mock khi thiếu credential
 - `domain.py` — `Profile`, `Novel`, `Chapter`, `TtsJob`, `AudioTrack`; enum `PublishState`, `Tier`, `JobStatus`; đã chuẩn bị sẵn draft/published, quota, tier
-- `adapters.py` — `MockIdentityAdapter` (băm mật khẩu kèm salt), `LocalStorageAdapter` (ghi file tạm rồi đổi tên), `MockMetadataStore` (kiểm tra quyền sở hữu ở mọi truy vấn)
+- `adapters.py` — Protocol `IdentityAdapter` / `StorageAdapter` / **`MetadataStore`**; `MockIdentityAdapter` (băm mật khẩu kèm salt), `LocalStorageAdapter` (ghi file tạm rồi đổi tên), `MockMetadataStore` (kiểm tra quyền sở hữu ở mọi truy vấn, **chỉ tồn tại trong vòng đời tiến trình**)
 - `tts_bridge.py` — bọc chunker + registry, ghép MP3 bằng ffmpeg, atomic rename, **không fallback giọng**
-- `main.py` — auth, novels, chapters, jobs, stream audio, healthcheck; job runner lưu **mọi** transition qua metadata adapter
+- `main.py` — auth, novels, chapters, jobs, stream audio, healthcheck; job runner lưu **mọi** transition qua metadata adapter; route publish gọi `store.publish_novel()` chứ không tự đổi object
 - `requirements.txt` — phụ thuộc runtime của backend, tách khỏi `requirements-gui.txt`; **gồm `boto3>=1.34,<2.0`**
 - `tests/` — chạy offline hoàn toàn (pipeline TTS bị thay bằng bản giả lập):
   `test_api.py`, `test_security.py`, `test_job_persistence.py` (vòng đời job),
+  `test_publish_persistence.py` (xuất bản + permissions Appwrite bằng client giả lập),
   `test_dependencies.py` (khai báo + import/startup verification)
 
 **Web `web/`**
@@ -123,6 +129,18 @@ permission, và việc presigned URL của R2 có phát được trong thẻ `<a
 
 Credential do **người vận hành** đặt trong `server/.env` (không được commit).
 Repo này không chứa và không bao giờ được chứa secret thật.
+
+### Ba mức độ khác nhau — đừng lẫn
+
+| Mức | Nghĩa là gì |
+|---|---|
+| **Mock persistence** | `MockMetadataStore` chỉ sống trong **vòng đời tiến trình**. Khởi động lại backend là mất sạch novels/chapters/jobs. Không phải kho bền vững, chỉ để phát triển và kiểm thử. |
+| **Appwrite adapter đã mock-test** | `AppwriteMetadataStore` được test bằng **client giả lập**: xác nhận đúng request, đúng payload `state`, đúng chuỗi permissions. Không hề chạm mạng. |
+| **Live Appwrite verification** | ❌ **Chưa làm.** Cần tài khoản thật để xác minh Appwrite có thực sự áp `read("any")` như mong đợi, document permission có chặn đúng người lạ, và cú pháp query có khớp phiên bản đang chạy hay không. |
+
+Nói riêng về **permissions khi xuất bản**: bộ test khẳng định adapter *gửi đi*
+đúng chuỗi quyền (`read("any")` công khai, `update`/`delete` chỉ chủ sở hữu).
+Việc Appwrite *thực thi* đúng chuỗi đó chỉ có thể kiểm chứng trên tài khoản thật.
 
 ## Giới hạn đã biết
 

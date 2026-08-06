@@ -312,7 +312,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._connect_bridge()
         self._preview_player.stopped.connect(self._on_preview_playback_stopped)
-        self._preview_player.failed.connect(self._on_preview_error)
+        self._preview_player.failed.connect(self._on_row_preview_error)
         self._apply_theme(self.settings.theme)
         self._restore_window()
         self._load_catalog(initial=True)
@@ -1770,19 +1770,19 @@ class MainWindow(QMainWindow):
         self._set_preview_button(voice.id, self.PREVIEW_BUSY, enabled=False)
         worker = CachedPreviewWorker(self.registry, voice, PREVIEW_SENTENCE, parent=self)
         worker.statusChanged.connect(lambda msg: self.statusBar().showMessage(msg, 4000))
-        worker.ready.connect(self._on_preview_ready)
-        worker.failed.connect(self._on_preview_error)
+        worker.ready.connect(self._on_row_preview_ready)
+        worker.failed.connect(self._on_row_preview_error)
         self._preview_cache_worker = worker
         worker.start()
 
-    def _on_preview_ready(self, voice_id: str, path: str) -> None:
+    def _on_row_preview_ready(self, voice_id: str, path: str) -> None:
         self._preview_cache_worker = None
         if self._preview_player.play(voice_id, path):
             self._set_preview_button(voice_id, self.PREVIEW_PLAYING, enabled=True)
         else:
             self._set_preview_button(voice_id, self.PREVIEW_IDLE, enabled=True)
 
-    def _on_preview_error(self, voice_id: str, message: str) -> None:
+    def _on_row_preview_error(self, voice_id: str, message: str) -> None:
         self._preview_cache_worker = None
         self._set_preview_button(voice_id, self.PREVIEW_IDLE, enabled=True)
         self._log("error", f"Nghe thử thất bại: {message}")

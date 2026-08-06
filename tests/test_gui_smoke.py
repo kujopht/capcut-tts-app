@@ -779,7 +779,7 @@ class TestMainWindow(unittest.TestCase):
         before = list(self.window.catalog.favorites)
         rows = self._recommended_rows()
         try:
-            self.window._on_preview_ready(rows[0].id, "khong_ton_tai.mp3")
+            self.window._on_row_preview_ready(rows[0].id, "khong_ton_tai.mp3")
             self.assertEqual(list(self.window.catalog.favorites), before)
         finally:
             self.window.recommended_check.setChecked(False)
@@ -811,7 +811,7 @@ class TestMainWindow(unittest.TestCase):
         rows = self._recommended_rows()
         try:
             voice_id = rows[0].id
-            self.window._on_preview_error(voice_id, "lỗi giả lập")
+            self.window._on_row_preview_error(voice_id, "lỗi giả lập")
             button = self.window._preview_buttons.get(voice_id)
             self.assertIsNotNone(button)
             self.assertEqual(button.text(), self.window.PREVIEW_IDLE)
@@ -832,6 +832,16 @@ class TestMainWindow(unittest.TestCase):
             self.assertIsNone(self.window._preview_cache_worker)
         finally:
             self.window.recommended_check.setChecked(False)
+
+    def test_row_preview_handlers_are_not_shadowed(self) -> None:
+        """Handler cua nut tren dong phai KHAC handler cua nut 'Thu giong' cu."""
+        self.assertTrue(hasattr(self.window, "_on_row_preview_ready"))
+        self.assertTrue(hasattr(self.window, "_on_row_preview_error"))
+        self.assertNotEqual(
+            self.window._on_row_preview_ready.__func__,
+            self.window._on_preview_ready.__func__,
+            "Hai luồng nghe thử không được dùng chung một handler",
+        )
 
     def test_preview_requires_explicit_click(self) -> None:
         """Khong co API nao duoc goi khi chi mo app / chon giong."""

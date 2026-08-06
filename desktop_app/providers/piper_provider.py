@@ -366,9 +366,12 @@ class PiperLocalProvider(BaseProvider):
             )
 
         tmp = dest.with_suffix(dest.suffix + ".part")
+        # Phai chi dinh "-f mp3": file tam co duoi .part nen ffmpeg khong tu
+        # doan duoc dinh dang dau ra tu ten file.
         cmd = [
             ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(wav_path), "-codec:a", "libmp3lame", "-q:a", "2", str(tmp),
+            "-i", str(wav_path), "-codec:a", "libmp3lame", "-q:a", "2",
+            "-f", "mp3", str(tmp),
         ]
         try:
             proc = subprocess.run(

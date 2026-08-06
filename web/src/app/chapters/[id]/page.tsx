@@ -22,30 +22,40 @@ export default function ChapterPage({
   const [error, setError] = useState("");
   const [missing, setMissing] = useState(false);
 
-  const load = useCallback(() => {
+  // Chi nap du lieu; moi setState deu nam trong callback bat dong bo.
+  const fetchChapter = useCallback(
+    () =>
+      api
+        .getChapter(id)
+        .then(async (r) => {
+          setChapter(r.chapter);
+          setAudio(r.audio);
+          try {
+            const parent = await api.getNovel(r.chapter.novel_id);
+            setNovel(parent.novel);
+          } catch {
+            /* thieu novel khong chan viec doc chuong */
+          }
+        })
+        .catch((e) => {
+          if (e?.status === 404) setMissing(true);
+          else setError(errorMessage(e));
+        })
+        .finally(() => setLoading(false)),
+    [id],
+  );
+
+  useEffect(() => {
+    void fetchChapter();
+  }, [fetchChapter]);
+
+  // Nut "Thu lai" la event handler nen dat state truc tiep o day la dung.
+  const retry = useCallback(() => {
     setLoading(true);
     setError("");
     setMissing(false);
-    api
-      .getChapter(id)
-      .then(async (r) => {
-        setChapter(r.chapter);
-        setAudio(r.audio);
-        try {
-          const parent = await api.getNovel(r.chapter.novel_id);
-          setNovel(parent.novel);
-        } catch {
-          /* thieu novel khong chan viec doc chuong */
-        }
-      })
-      .catch((e) => {
-        if (e?.status === 404) setMissing(true);
-        else setError(errorMessage(e));
-      })
-      .finally(() => setLoading(false));
-  }, [id]);
-
-  useEffect(load, [load]);
+    void fetchChapter();
+  }, [fetchChapter]);
 
   if (loading) return <Loading label="Đang tải chương..." />;
 
@@ -64,7 +74,7 @@ export default function ChapterPage({
     );
   }
 
-  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (error) return <ErrorState message={error} onRetry={retry} />;
   if (!chapter) return null;
 
   return (

@@ -15,17 +15,27 @@ export default function LibraryPage() {
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
 
-  const load = useCallback(() => {
+  // Chi nap du lieu; moi setState deu nam trong callback bat dong bo.
+  const fetchNovels = useCallback(
+    () =>
+      api
+        .listNovels(false)
+        .then((r) => setNovels(r.novels))
+        .catch((e) => setError(errorMessage(e)))
+        .finally(() => setLoading(false)),
+    [],
+  );
+
+  useEffect(() => {
+    void fetchNovels();
+  }, [fetchNovels]);
+
+  // Nut "Thu lai" la event handler nen dat state truc tiep o day la dung.
+  const retry = useCallback(() => {
     setLoading(true);
     setError("");
-    api
-      .listNovels(false)
-      .then((r) => setNovels(r.novels))
-      .catch((e) => setError(errorMessage(e)))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(load, [load]);
+    void fetchNovels();
+  }, [fetchNovels]);
 
   const tags = useMemo(() => {
     const all = new Set<string>();
@@ -89,7 +99,7 @@ export default function LibraryPage() {
       {loading ? (
         <Loading label="Đang tải thư viện..." />
       ) : error ? (
-        <ErrorState message={error} onRetry={load} />
+        <ErrorState message={error} onRetry={retry} />
       ) : novels.length === 0 ? (
         <EmptyState
           title="Chưa có truyện nào được xuất bản"

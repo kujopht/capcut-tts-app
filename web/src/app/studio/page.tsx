@@ -58,15 +58,21 @@ export default function StudioPage() {
   }, []);
 
   useEffect(() => {
-    if (sessionLoading || !profile) {
-      if (!sessionLoading) setLoading(false);
-      return;
-    }
-    setLoading(true);
-    Promise.all([loadNovels(), api.voices()])
-      .then(([, voiceResult]) => {
-        setVoices(voiceResult.voices);
-        const usable = voiceResult.voices.find((v) => v.installed);
+    if (sessionLoading) return;
+
+    // Ca truong hop "chua dang nhap" cung di qua chuoi bat dong bo, de khong
+    // co setState nao nam truc tiep trong than effect.
+    const bootstrap = async (): Promise<Voice[] | null> => {
+      if (!profile) return null;
+      const [, voiceResult] = await Promise.all([loadNovels(), api.voices()]);
+      return voiceResult.voices;
+    };
+
+    bootstrap()
+      .then((list) => {
+        if (!list) return;
+        setVoices(list);
+        const usable = list.find((v) => v.installed);
         if (usable) setSelectedVoice(usable.voice_id);
       })
       .catch((e) => setError(errorMessage(e)))
@@ -75,15 +81,29 @@ export default function StudioPage() {
 
   // Nap chuong khi doi novel
   useEffect(() => {
-    if (!selectedNovel) {
-      setChapters([]);
-      setSelectedChapter("");
-      return;
-    }
-    api
-      .getNovel(selectedNovel)
-      .then((r) => setChapters(r.chapters))
-      .catch((e) => setError(errorMessage(e)));
+    let cancelled = false;
+
+    const loadChapters = async (): Promise<Chapter[]> => {
+      if (!selectedNovel) return [];
+      return (await api.getNovel(selectedNovel)).chapters;
+    };
+
+    loadChapters()
+      .then((list) => {
+        if (cancelled) return;
+        setChapters(list);
+        // Bo chon chuong cu neu no khong con thuoc tieu thuyet dang chon
+        setSelectedChapter((prev) =>
+          list.some((c) => c.chapter_id === prev) ? prev : "",
+        );
+      })
+      .catch((e) => {
+        if (!cancelled) setError(errorMessage(e));
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedNovel]);
 
   // Dung polling khi roi trang

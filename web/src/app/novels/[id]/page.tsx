@@ -21,37 +21,47 @@ export default function NovelDetailPage({
   const [error, setError] = useState("");
   const [missing, setMissing] = useState(false);
 
-  const load = useCallback(() => {
+  // Chi nap du lieu; moi setState deu nam trong callback bat dong bo.
+  const fetchNovel = useCallback(
+    () =>
+      api
+        .getNovel(id)
+        .then(async (r) => {
+          setNovel(r.novel);
+          setChapters(r.chapters);
+          // Hoi trang thai audio cua tung chuong
+          const flags: Record<string, boolean> = {};
+          await Promise.all(
+            r.chapters.map(async (c) => {
+              try {
+                const detail = await api.getChapter(c.chapter_id);
+                flags[c.chapter_id] = Boolean(detail.audio);
+              } catch {
+                flags[c.chapter_id] = false;
+              }
+            }),
+          );
+          setAudioReady(flags);
+        })
+        .catch((e) => {
+          if (e?.status === 404) setMissing(true);
+          else setError(errorMessage(e));
+        })
+        .finally(() => setLoading(false)),
+    [id],
+  );
+
+  useEffect(() => {
+    void fetchNovel();
+  }, [fetchNovel]);
+
+  // Nut "Thu lai" la event handler nen dat state truc tiep o day la dung.
+  const retry = useCallback(() => {
     setLoading(true);
     setError("");
     setMissing(false);
-    api
-      .getNovel(id)
-      .then(async (r) => {
-        setNovel(r.novel);
-        setChapters(r.chapters);
-        // Hoi trang thai audio cua tung chuong
-        const flags: Record<string, boolean> = {};
-        await Promise.all(
-          r.chapters.map(async (c) => {
-            try {
-              const detail = await api.getChapter(c.chapter_id);
-              flags[c.chapter_id] = Boolean(detail.audio);
-            } catch {
-              flags[c.chapter_id] = false;
-            }
-          }),
-        );
-        setAudioReady(flags);
-      })
-      .catch((e) => {
-        if (e?.status === 404) setMissing(true);
-        else setError(errorMessage(e));
-      })
-      .finally(() => setLoading(false));
-  }, [id]);
-
-  useEffect(load, [load]);
+    void fetchNovel();
+  }, [fetchNovel]);
 
   if (loading) return <Loading label="Đang tải tiểu thuyết..." />;
 
@@ -70,7 +80,7 @@ export default function NovelDetailPage({
     );
   }
 
-  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (error) return <ErrorState message={error} onRetry={retry} />;
   if (!novel) return null;
 
   return (

@@ -35,14 +35,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   // Khoi phuc phien khi tai lai trang
   useEffect(() => {
     let cancelled = false;
-    if (!getToken()) {
-      setLoading(false);
-      return;
-    }
-    api
-      .me()
-      .then((r) => {
-        if (!cancelled) setProfile(r.profile);
+
+    // Truong hop "chua co token" cung phai di qua chuoi bat dong bo, de khong
+    // co setState nao nam truc tiep trong than effect.
+    const restore = async (): Promise<Profile | null> => {
+      if (!getToken()) return null;
+      return (await api.me()).profile;
+    };
+
+    restore()
+      .then((restored) => {
+        if (!cancelled && restored) setProfile(restored);
       })
       .catch(() => {
         // Token het han hoac backend chua chay -> coi nhu chua dang nhap
@@ -51,6 +54,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };

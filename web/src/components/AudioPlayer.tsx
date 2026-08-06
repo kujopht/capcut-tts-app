@@ -8,7 +8,7 @@
  * nhan de doc man hinh va trang thai loi bang tieng Viet.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 interface Props {
   src: string;
@@ -21,10 +21,15 @@ export function AudioPlayer({ src, title, subtitle }: Props) {
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
 
-  useEffect(() => {
+  // Doi sang bai khac thi dat lai trang thai NGAY TRONG RENDER. Day la cach
+  // React khuyen dung khi state phai theo prop, thay vi dong bo bang effect:
+  // React chay lai render truoc khi ve ra man hinh nen khong co nhap nhay.
+  const [lastSrc, setLastSrc] = useState(src);
+  if (lastSrc !== src) {
+    setLastSrc(src);
     setError("");
     setReady(false);
-  }, [src]);
+  }
 
   return (
     <section className="player" aria-label={`Trình phát: ${title}`}>

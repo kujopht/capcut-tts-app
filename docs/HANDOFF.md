@@ -1,6 +1,6 @@
 # HANDOFF — Fanfic Audio Studio Web MVP
 
-Cập nhật: 2026-08-06 · Branch `feature/web-mvp`
+Cập nhật: 2026-08-06 · Branch `feature/web-mvp` · Mốc 4 đã xong
 
 Tài liệu này để một phiên khác tiếp tục được khi phiên hiện tại hết context.
 
@@ -38,7 +38,7 @@ Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 | 1 | Nền móng: `web/` + `server/`, mock adapter, healthcheck, landing | ✅ Xong |
 | 2 | TTS service, job API, idempotency, test | ✅ Xong phần backend |
 | 3 | Vertical slice giao diện | ✅ Đủ 5 trang, đã kiểm thử thật |
-| 4 | Appwrite + R2 adapter thật | ⚠️ Auth Appwrite + R2 xong; metadata Appwrite chưa |
+| 4 | Appwrite + R2 adapter, cấu hình, tài liệu | ✅ Xong (mock-tested, **chưa chạy cloud thật**) |
 
 ### Đã xong
 
@@ -79,29 +79,24 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 `web/.env` — chỉ một biến công khai: `NEXT_PUBLIC_API_BASE`.
 
-## NỢ KỸ THUẬT — việc đầu tiên của phiên sau
-
-**`npx eslint .` còn 7 lỗi**, tất cả cùng một quy tắc mới của React 19 / Next 16:
-`react-hooks/set-state-in-effect` — gọi `setState()` trực tiếp trong `useEffect`.
-
-Vị trí: `chapters/[id]/page.tsx:48`, `library/page.tsx:28`, `novels/[id]/page.tsx:54`,
-`studio/page.tsx:62` và `:79`, `components/AudioPlayer.tsx:25`, `lib/session.tsx:39`.
-
-Mã vẫn chạy đúng (build, type-check và test đều xanh), nhưng quy tắc này cảnh báo
-việc render thừa. Cách sửa đúng là chuyển việc nạp dữ liệu sang `useReducer`
-hoặc tính state khởi tạo ngoài effect. **Không được tắt quy tắc cho xanh.**
-
 ## Kết quả kiểm thử gần nhất
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` (api + adapters) | 43/43 đạt |
-| `web` (`node --test`) | 9/9 đạt |
+| `server/tests` (api + adapters + security) | 62/62 đạt |
+| `web` (`node --test`) | 10/10 đạt |
+| `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch |
-| `npx eslint .` | **7 lỗi** — xem mục nợ kỹ thuật ở trên |
 | `npx next build` | Thành công, 7 route |
-| Vertical slice thật | Đăng ký → novel → chương → job Edge TTS → audio 27.504 byte → idempotency tái dùng job |
+| Vertical slice thật | Đăng ký → novel → chương → job Edge TTS → MP3 27.504 byte → idempotency tái dùng job |
 | Desktop | Không chạy lại — `desktop_app/` không bị sửa dòng nào |
+
+## Chưa kiểm chứng với cloud thật
+
+`AppwriteIdentityAdapter`, `AppwriteMetadataStore`, `R2StorageAdapter` và
+`scripts/setup_appwrite.py` mới chỉ được test bằng client giả lập. Cần
+credential thật để xác minh cú pháp query Appwrite, hành vi document
+permission, và việc presigned URL của R2 có phát được trong thẻ `<audio>`.
 
 ## Bẫy đã gặp
 

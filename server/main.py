@@ -28,6 +28,7 @@ from server.adapters import (
     NotFoundError,
     PermissionDenied,
     build_identity,
+    build_metadata_store,
     build_storage,
 )
 from server.config import get_settings
@@ -50,6 +51,7 @@ app = FastAPI(
 )
 
 settings = get_settings()
+settings.validate()   # FAIL FAST neu chon che do cloud ma cau hinh sai
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins or ["http://localhost:3000"],
@@ -60,7 +62,10 @@ app.add_middleware(
 
 identity = build_identity(settings)
 storage = build_storage(settings)
-store = MockMetadataStore()
+store = build_metadata_store(settings)
+
+#: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
+AUDIO_URL_TTL_SECONDS = 300
 
 #: Cac job dang chay nen. Job chay trong thread rieng de API tra ve ngay.
 _job_threads: Dict[str, threading.Thread] = {}
@@ -394,20 +399,52 @@ def list_jobs(chapter_id: Optional[str] = None,
 # -----------------------------------------------------------------------------
 
 
-@app.get("/api/audio/{chapter_id}")
-def stream_audio(chapter_id: str) -> Response:
+def _may_listen(chapter_id: str, authorization: Optional[str]) -> None:
     """
-    Tra ve audio cua mot chuong.
+    Kiem tra quyen nghe TRUOC khi tra bat ky byte audio nao.
 
-    Ban cuc bo stream qua backend. Khi doi sang R2, `storage.signed_url()` se
-    tra URL ky san va tang nay chuyen thanh redirect - giao dien khong doi.
+    Cho phep khi:
+      - chuong thuoc mot tieu thuyet DA XUAT BAN (ai cung nghe duoc), hoac
+      - nguoi goi da dang nhap va la CHU SO HUU chuong do.
+
+    Bucket duoc coi la private: khong bao gio tra URL cong khai co dinh.
     """
+    try:
+        chapter = store.get_chapter(chapter_id)
+        novel = store.get_novel(chapter.novel_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    if novel.state == PublishState.PUBLISHED:
+        return
+
+    # Ban nhap: bat buoc dang nhap va phai dung chu so huu
+    profile = current_profile(authorization)
+    if chapter.owner_id != profile.user_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Bạn không có quyền nghe chương này."
+        )
+
+
+@app.get("/api/audio/{chapter_id}")
+def stream_audio(
+    chapter_id: str, authorization: Optional[str] = Header(default=None)
+) -> Response:
+    """
+    Tra ve audio cua mot chuong, SAU KHI da kiem tra quyen.
+
+    Ban cuc bo stream qua backend. Voi R2, backend cap URL ky co han ngan
+    (mac dinh 5 phut) va chuyen huong - van la backend quyet dinh ai duoc nghe.
+    """
+    _may_listen(chapter_id, authorization)
+
     track = store.track_for_chapter(chapter_id)
     if track is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Chương này chưa có audio.")
 
-    url = storage.signed_url(track.object_key)
-    if url:  # pragma: no cover - duong di cua R2 o Moc 4
+    # URL ky chi duoc cap SAU khi da kiem tra quyen o tren
+    url = storage.signed_url(track.object_key, expires_seconds=AUDIO_URL_TTL_SECONDS)
+    if url:  # pragma: no cover - duong di cua R2, can credential that
         return Response(status_code=307, headers={"Location": url})
 
     try:

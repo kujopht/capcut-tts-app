@@ -29,12 +29,21 @@ def _settings(**kwargs) -> Settings:
 
 
 class TestAdapterSelection(unittest.TestCase):
-    def test_mock_when_no_credentials(self):
+    def test_mock_is_the_default(self):
         settings = _settings()
+        settings.validate()
         self.assertIsInstance(build_identity(settings), MockIdentityAdapter)
         self.assertIsInstance(build_storage(settings), LocalStorageAdapter)
-        self.assertEqual(settings.identity_mode, "mock")
-        self.assertEqual(settings.storage_mode, "mock")
+        self.assertEqual(settings.data_backend, "mock")
+        self.assertEqual(settings.storage_backend, "local")
+
+    def test_credentials_alone_do_not_switch_backend(self):
+        """Co credential nhung khong chon che do -> VAN la mock (tuong minh)."""
+        settings = _settings(appwrite=AppwriteSettings(
+            endpoint="https://x/v1", project_id="p", api_key="k", database_id="d",
+        ))
+        settings.validate()
+        self.assertIsInstance(build_identity(settings), MockIdentityAdapter)
 
     def test_partial_appwrite_config_stays_mock(self):
         """Thieu mot bien -> coi nhu chua cau hinh, khong nua voi."""
@@ -51,22 +60,53 @@ class TestAdapterSelection(unittest.TestCase):
         self.assertFalse(settings.r2.configured)
         self.assertIsInstance(build_storage(settings), LocalStorageAdapter)
 
-    def test_full_appwrite_config_does_not_fall_back_to_mock(self):
-        """Da khai bao du ma sai thi phai BAO LOI, khong duoc im lang dung mock."""
-        settings = _settings(appwrite=AppwriteSettings(
+    def test_appwrite_mode_with_bad_endpoint_fails_fast(self):
+        """Chon che do appwrite ma cau hinh sai thi BAO LOI, khong lui ve mock."""
+        settings = _settings(data_backend="appwrite", appwrite=AppwriteSettings(
             endpoint="khong-phai-url", project_id="p", api_key="k", database_id="d",
         ))
-        self.assertTrue(settings.appwrite.configured)
         from server.appwrite_adapter import AppwriteConfigError
 
         with self.assertRaises(AppwriteConfigError):
             build_identity(settings)
 
-    def test_full_r2_config_does_not_fall_back_to_mock(self):
-        settings = _settings(r2=R2Settings(
+    def test_appwrite_mode_without_config_fails_fast(self):
+        from server.config import ConfigError
+
+        settings = _settings(data_backend="appwrite")
+        with self.assertRaises(ConfigError) as ctx:
+            settings.validate()
+        self.assertIn("APPWRITE_ENDPOINT", str(ctx.exception))
+
+    def test_r2_mode_without_config_fails_fast(self):
+        from server.config import ConfigError
+
+        settings = _settings(storage_backend="r2")
+        with self.assertRaises(ConfigError) as ctx:
+            settings.validate()
+        self.assertIn("R2_ACCOUNT_ID", str(ctx.exception))
+
+    def test_unknown_backend_rejected(self):
+        from server.config import ConfigError
+
+        with self.assertRaises(ConfigError):
+            _settings(data_backend="postgres").validate()
+        with self.assertRaises(ConfigError):
+            _settings(storage_backend="s3").validate()
+
+    def test_production_rejects_cors_wildcard(self):
+        from server.config import ConfigError
+
+        settings = _settings(environment="production", cors_origins=["*"])
+        with self.assertRaises(ConfigError) as ctx:
+            settings.validate()
+        self.assertIn("wildcard", str(ctx.exception).lower())
+
+    def test_r2_mode_never_falls_back_to_local(self):
+        settings = _settings(storage_backend="r2", r2=R2Settings(
             account_id="acc", access_key_id="k", secret_access_key="s", bucket="b",
         ))
-        self.assertTrue(settings.r2.configured)
+        settings.validate()
         from server.r2_adapter import R2ConfigError
 
         try:

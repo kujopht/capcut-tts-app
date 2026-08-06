@@ -26,6 +26,10 @@ def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
 
 
+class ConfigError(RuntimeError):
+    """Cau hinh sai hoac thieu - dung ngay thay vi chay o che do khong mong muon."""
+
+
 def _env_list(name: str, default: str) -> List[str]:
     raw = _env(name, default)
     return [item.strip() for item in raw.split(",") if item.strip()]
@@ -67,11 +71,20 @@ class R2Settings:
         return f"https://{self.account_id}.r2.cloudflarestorage.com"
 
 
+#: Che do du lieu/luu tru. Tuong minh de khong bao gio "vo tinh" chay mock.
+DATA_BACKENDS = ("mock", "appwrite")
+STORAGE_BACKENDS = ("local", "r2")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Toan bo cau hinh backend."""
 
     environment: str = "development"
+    #: "mock" (mac dinh) hoac "appwrite"
+    data_backend: str = "mock"
+    #: "local" (mac dinh) hoac "r2"
+    storage_backend: str = "local"
     cors_origins: List[str] = field(default_factory=list)
     var_dir: Path = DEFAULT_VAR_DIR
     appwrite: AppwriteSettings = field(default_factory=AppwriteSettings)
@@ -87,11 +100,43 @@ class Settings:
 
     @property
     def storage_mode(self) -> str:
-        return "r2" if self.r2.configured else "mock"
+        return self.storage_backend
 
     @property
     def identity_mode(self) -> str:
-        return "appwrite" if self.appwrite.configured else "mock"
+        return self.data_backend
+
+    def validate(self) -> None:
+        """
+        Kiem tra cau hinh khi khoi dong. FAIL FAST: da chon che do cloud ma
+        thieu/sai bien thi dung han, TUYET DOI khong am tham lui ve mock.
+        """
+        if self.data_backend not in DATA_BACKENDS:
+            raise ConfigError(
+                f"DATA_BACKEND phải là một trong {DATA_BACKENDS}, nhận được {self.data_backend!r}."
+            )
+        if self.storage_backend not in STORAGE_BACKENDS:
+            raise ConfigError(
+                f"STORAGE_BACKEND phải là một trong {STORAGE_BACKENDS}, "
+                f"nhận được {self.storage_backend!r}."
+            )
+        if self.data_backend == "appwrite" and not self.appwrite.configured:
+            raise ConfigError(
+                "DATA_BACKEND=appwrite nhưng thiếu cấu hình. Cần đủ bốn biến: "
+                "APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID, APPWRITE_API_KEY, "
+                "APPWRITE_DATABASE_ID."
+            )
+        if self.storage_backend == "r2" and not self.r2.configured:
+            raise ConfigError(
+                "STORAGE_BACKEND=r2 nhưng thiếu cấu hình. Cần đủ bốn biến: "
+                "R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET."
+            )
+        # CORS: production khong duoc dung wildcard khi van gui credentials
+        if not self.is_development and "*" in self.cors_origins:
+            raise ConfigError(
+                "Không được dùng CORS wildcard '*' cùng credentials ở chế độ production. "
+                "Hãy liệt kê rõ origin trong FAS_CORS_ORIGINS."
+            )
 
     def describe(self) -> dict:
         """Tom tat cau hinh - KHONG bao gio chua gia tri bi mat."""
@@ -99,6 +144,8 @@ class Settings:
             "environment": self.environment,
             "identity": self.identity_mode,
             "storage": self.storage_mode,
+            "data_backend": self.data_backend,
+            "storage_backend": self.storage_backend,
             "appwrite_configured": self.appwrite.configured,
             "r2_configured": self.r2.configured,
             "allow_unverified_local_voices": self.allow_unverified_local_voices,
@@ -121,6 +168,8 @@ def load_settings() -> Settings:
 
     return Settings(
         environment=environment,
+        data_backend=_env("DATA_BACKEND", "mock").lower(),
+        storage_backend=_env("STORAGE_BACKEND", "local").lower(),
         cors_origins=_env_list("FAS_CORS_ORIGINS", "http://localhost:3000"),
         var_dir=var_dir,
         appwrite=AppwriteSettings(

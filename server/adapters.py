@@ -18,7 +18,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
-from server.config import Settings
+from server.config import ConfigError, Settings
 from server.domain import (
     AudioTrack,
     Chapter,
@@ -337,22 +337,35 @@ class MockMetadataStore:
 
 def build_identity(settings: Settings) -> IdentityAdapter:
     """
-    Appwrite khi da cau hinh du, nguoc lai dung mock.
+    Chon adapter danh tinh theo DATA_BACKEND (tuong minh).
 
-    Da khai bao cau hinh ma cau hinh sai thi NEM LOI - tuyet doi khong am tham
-    lui ve mock, vi nguoi van hanh se tuong dang chay that.
+    `appwrite` ma thieu/sai cau hinh thi NEM LOI - tuyet doi khong am tham lui
+    ve mock, vi nguoi van hanh se tuong dang chay that.
     """
-    if settings.appwrite.configured:
+    if settings.data_backend == "appwrite":
         from server.appwrite_adapter import AppwriteIdentityAdapter
 
         return AppwriteIdentityAdapter(settings.appwrite)
+    if settings.data_backend != "mock":
+        raise ConfigError(f"DATA_BACKEND không hợp lệ: {settings.data_backend!r}")
     return MockIdentityAdapter()
 
 
 def build_storage(settings: Settings) -> StorageAdapter:
-    """R2 khi da cau hinh du, nguoc lai luu xuong dia cuc bo."""
-    if settings.r2.configured:
+    """Chon adapter luu tru theo STORAGE_BACKEND (tuong minh)."""
+    if settings.storage_backend == "r2":
         from server.r2_adapter import R2StorageAdapter
 
         return R2StorageAdapter(settings.r2)
+    if settings.storage_backend != "local":
+        raise ConfigError(f"STORAGE_BACKEND không hợp lệ: {settings.storage_backend!r}")
     return LocalStorageAdapter(settings.var_dir / "storage")
+
+
+def build_metadata_store(settings: Settings):
+    """Kho metadata: Appwrite khi DATA_BACKEND=appwrite, nguoc lai trong bo nho."""
+    if settings.data_backend == "appwrite":
+        from server.appwrite_store import AppwriteMetadataStore
+
+        return AppwriteMetadataStore(settings.appwrite)
+    return MockMetadataStore()

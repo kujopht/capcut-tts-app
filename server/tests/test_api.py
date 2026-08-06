@@ -78,10 +78,10 @@ class TestHealth(ApiTestCase):
         for word in ("api_key", "secret", "access_key", "password"):
             self.assertNotIn(word, body, f"healthcheck không được lộ '{word}'")
 
-    def test_health_reports_mock_mode_without_credentials(self):
+    def test_health_reports_mock_mode_by_default(self):
         data = self.client.get("/api/health").json()
-        self.assertEqual(data["identity"], "mock")
-        self.assertEqual(data["storage"], "mock")
+        self.assertEqual(data["data_backend"], "mock")
+        self.assertEqual(data["storage_backend"], "local")
 
 
 class TestAuth(ApiTestCase):
@@ -249,6 +249,12 @@ class TestJobLifecycle(ApiTestCase):
         self.assertTrue(job["output_key"])
         self.assertEqual(job["progress"], 100)
         self.assertTrue(job["finished_at"])
+
+        # Truyen da xuat ban thi ai cung nghe duoc
+        novel_id = self.client.get(
+            f"/api/chapters/{chapter_id}"
+        ).json()["chapter"]["novel_id"]
+        self.client.post(f"/api/novels/{novel_id}/publish", headers=self._auth(token))
 
         audio = self.client.get(f"/api/audio/{chapter_id}")
         self.assertEqual(audio.status_code, 200)

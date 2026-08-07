@@ -53,31 +53,14 @@ export function NavAuth() {
 
   return (
     <div className="row" style={{ gap: "var(--s2)" }}>
-      <Link
-        href="/account"
-        className="row"
-        style={{ gap: "var(--s2)", textDecoration: "none", color: "inherit" }}
-      >
-        <span
-          aria-hidden="true"
-          style={{
-            width: 28,
-            height: 28,
-            display: "grid",
-            placeItems: "center",
-            borderRadius: "50%",
-            background: "var(--brand-soft)",
-            color: "var(--brand)",
-            fontSize: 12,
-            fontWeight: 700,
-            border: "1px solid var(--brand-line)",
-          }}
-        >
+      {/* Kich thuoc nam trong `globals.css` chu khong phai style inline: o
+          mobile ca lien ket nay phai cao it nhat 44px, ma inline style thi
+          media query khong voi toi duoc. */}
+      <Link href="/account" className="account-link">
+        <span className="avatar" aria-hidden="true">
           {name.slice(0, 2).toUpperCase()}
         </span>
-        <span className="hint truncate" style={{ maxWidth: 110 }}>
-          {name}
-        </span>
+        <span className="hint truncate account-name">{name}</span>
       </Link>
       <button type="button" className="btn btn-ghost btn-sm" onClick={signOut}>
         Đăng xuất

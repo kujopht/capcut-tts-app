@@ -275,7 +275,29 @@ button, input, select, textarea {
   white-space: nowrap;
   transition: background 0.15s var(--ease), color 0.15s var(--ease);
 }
+.nav-link { display: inline-flex; align-items: center; }
 .nav-link:hover { background: var(--bg-2); color: var(--text); }
+
+.account-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--r-full);
+}
+.avatar {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand);
+  border: 1px solid var(--brand-line);
+  font-size: 12px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.account-name { max-width: 110px; }
 .nav-link[aria-current="page"] {
   background: var(--brand-soft);
   color: var(--brand);
@@ -705,6 +727,7 @@ button, input, select, textarea {
 
 .list { display: flex; flex-direction: column; gap: var(--s2); }
 .list-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--s3);
@@ -716,6 +739,37 @@ button, input, select, textarea {
   text-decoration: none;
   transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
 }
+/* Lien ket tieu de PHU KIN ca hang.
+   Truoc day ca hang la mot the <a> nen vung bam rat rong. Nhung the <a> khong
+   duoc chua <button>, ma hang gio co nut nghe. Nen tieu de tro lai la mot lien
+   ket binh thuong, va lop `::after` trong suot nay keo vung bam cua no ra kin
+   hang — vung bam to nhu cu ma cau truc HTML van hop le.
+   Cac nut nam tren lop do (`z-index`) nen van bam duoc binh thuong. */
+.list-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+/* Nhom nut cuoi hang. Tren mobile ca nhom xuong dong rieng (xem @media) —
+   neu de chung hang thi tieu de chuong bi nen con vai ky tu. */
+.list-actions {
+  position: relative;   /* nam tren lop phu cua `.list-title` */
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 0 0 auto;
+}
+/* Hang dang mo trinh phat: vien sang len de biet dang nghe chuong nao, va
+   phai cho xuong dong de trinh phat co nguyen chieu ngang cua hang. */
+.list-item-open {
+  border-color: var(--brand-line);
+  background: var(--bg-2);
+  flex-wrap: wrap;
+  row-gap: var(--s3);
+}
+.list-player { position: relative; z-index: 1; width: 100%; }
 .list-item:hover { border-color: var(--line-strong); background: var(--bg-2); color: inherit; }
 .list-index {
   flex: 0 0 auto;
@@ -840,4 +894,23 @@ button, input, select, textarea {
   .toast-wrap { right: var(--s3); left: var(--s3); bottom: var(--s3); max-width: none; }
   .modal { padding: var(--s4); }
   .row-between { align-items: flex-start; }
+
+  /* --- vung bam ngon tay -------------------------------------------------
+     Huong dan cua Apple la 44x44. Chi ep o mobile: tren desktop con tro chuot
+     chinh xac hon nhieu, nut cao 44px chi lam giao dien nang ne.
+     Dat `min-height` chu khong phai `height` de nut co chu dai van cao them
+     duoc thay vi tran chu ra ngoai. */
+  .btn, .btn-sm, .chip, .seg-item, .nav-link, .account-link,
+  .brand { min-height: 44px; }
+  .btn-sm { padding: 8px 13px; }
+  .chip { padding: 8px 14px; }
+  .avatar { width: 34px; height: 34px; font-size: 13px; }
+
+  /* --- hang chuong -------------------------------------------------------
+     Nut o cuoi hang chen cho tieu de den muc chi con "Chuo...". Cho ca nhom
+     nut xuong dong rieng: tieu de duoc tron chieu ngang, va cac nut cach xa
+     nhau hon nen do bam nham. */
+  .list-item { flex-wrap: wrap; row-gap: var(--s3); }
+  .list-actions { width: 100%; justify-content: flex-end; }
+  .list-actions .btn { flex: 1 1 auto; }
 }

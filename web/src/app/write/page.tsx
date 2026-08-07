@@ -765,7 +765,7 @@ export default function WritePage() {
                             <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
                               <Link
                                 href={`/chapters/${chapter.chapter_id}`}
-                                className="truncate"
+                                className="truncate list-title"
                                 style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}
                               >
                                 {chapter.title}
@@ -774,45 +774,50 @@ export default function WritePage() {
                                 {formatNumber(chapter.char_count)} ký tự
                               </span>
                             </span>
-                            {audioByChapter[chapter.chapter_id] ? (
-                              <span className="badge badge-ok">Có audio</span>
-                            ) : (
+                            {/* Ca nhom nut nam trong `.list-actions` de o
+                                mobile chung xuong dong rieng — de chung hang
+                                thi tieu de chuong bi nen con "Chuo...". */}
+                            <span className="list-actions">
+                              {audioByChapter[chapter.chapter_id] ? (
+                                <span className="badge badge-ok">Có audio</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  onClick={() => makeAudio(chapter.chapter_id)}
+                                  disabled={
+                                    !voiceId ||
+                                    (job?.chapter_id === chapter.chapter_id &&
+                                      (job.status === "pending" || job.status === "running"))
+                                  }
+                                >
+                                  Tạo audio
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                className="btn btn-sm"
-                                onClick={() => makeAudio(chapter.chapter_id)}
-                                disabled={
-                                  !voiceId ||
-                                  (job?.chapter_id === chapter.chapter_id &&
-                                    (job.status === "pending" || job.status === "running"))
-                                }
+                                className="btn btn-sm btn-ghost"
+                                onClick={() => startEditChapter(chapter)}
+                                aria-label={`Sửa chương ${chapter.title}`}
                               >
-                                Tạo audio
+                                Sửa
                               </button>
-                            )}
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-ghost"
-                              onClick={() => startEditChapter(chapter)}
-                              aria-label={`Sửa chương ${chapter.title}`}
-                            >
-                              Sửa
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-danger"
-                              onClick={() =>
-                                setPendingDelete({
-                                  kind: "chapter",
-                                  id: chapter.chapter_id,
-                                  title: chapter.title,
-                                  hasAudio: Boolean(audioByChapter[chapter.chapter_id]),
-                                })
-                              }
-                              aria-label={`Xoá chương ${chapter.title}`}
-                            >
-                              Xoá
-                            </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-danger"
+                                onClick={() =>
+                                  setPendingDelete({
+                                    kind: "chapter",
+                                    id: chapter.chapter_id,
+                                    title: chapter.title,
+                                    hasAudio: Boolean(audioByChapter[chapter.chapter_id]),
+                                  })
+                                }
+                                aria-label={`Xoá chương ${chapter.title}`}
+                              >
+                                Xoá
+                              </button>
+                            </span>
                           </div>
                         ),
                       )}

@@ -183,6 +183,28 @@ export const api = {
       method: "POST",
     }),
 
+  unpublishNovel: (novelId: string) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}/unpublish`, {
+      method: "POST",
+    }),
+
+  /** Sua truyen. Chi gui truong can doi; `state` khong doi duoc qua day. */
+  updateNovel: (
+    novelId: string,
+    fields: { title?: string; description?: string; tags?: string[] },
+  ) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
+
+  /** Xoa truyen cung moi chuong, job, audio_track va object cua no. */
+  deleteNovel: (novelId: string) =>
+    request<{ deleted: boolean; removed: RemovedCounts }>(
+      `/api/novels/${novelId}`,
+      { method: "DELETE" },
+    ),
+
   createChapter: (
     novelId: string,
     title: string,
@@ -198,6 +220,22 @@ export const api = {
         order_index: orderIndex,
       }),
     }),
+
+  updateChapter: (
+    chapterId: string,
+    fields: { title?: string; content?: string; order_index?: number },
+  ) =>
+    request<{ chapter: Chapter }>(`/api/chapters/${chapterId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
+
+  /** Xoa chuong cung job, audio_track va object cua no. */
+  deleteChapter: (chapterId: string) =>
+    request<{ deleted: boolean; removed: RemovedCounts }>(
+      `/api/chapters/${chapterId}`,
+      { method: "DELETE" },
+    ),
 
   getChapter: (chapterId: string) =>
     request<{ chapter: Chapter; audio: AudioTrack | null }>(
@@ -235,6 +273,14 @@ export const api = {
       `/api/audio/${chapterId}/url${download ? "?download=true" : ""}`,
     ),
 };
+
+/** So luong da xoa, backend tra ve de doi soat. */
+export interface RemovedCounts {
+  chapters?: number;
+  tracks: number;
+  jobs: number;
+  objects: number;
+}
 
 export interface AudioLink {
   /** URL ky san (che do R2). Gan thang vao `<audio src>` hoac `<a href>`. */

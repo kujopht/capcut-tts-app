@@ -16,6 +16,10 @@
 # --- Bat buoc: HTTP API ---
 fastapi>=0.115,<1.0
 uvicorn>=0.30,<1.0
+# watchfiles: BAT BUOC cho `uvicorn --reload`. Thieu goi nay uvicorn lui ve
+# `StatReload` (do mtime dinh ky) — da gap that: sua route xong ma server van
+# phuc vu code cu, tra 404/405 nhu the code chua duoc viet.
+watchfiles>=0.21,<2.0
 pydantic>=2.7,<3.0
 
 # --- Bat buoc: nap server/.env ---

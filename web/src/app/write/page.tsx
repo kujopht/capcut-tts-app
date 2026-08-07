@@ -1,10 +1,14 @@
 "use client";
 
 /**
- * Khu vuc tac gia: tao truyen, viet chuong, tao audio cho chuong, xuat ban.
+ * Khu vuc tac gia: tao / sua / xoa truyen va chuong, tao audio, xuat ban.
  *
  * Kho chua cua Audio Studio bi loc ra o day — audio tao nhanh khong phai
  * truyen fanfic.
+ *
+ * Moi thao tac ghi deu: hien trang thai dang chay -> cap nhat giao dien NGAY
+ * khi backend tra ve -> toast thanh cong hoac loi. Thao tac xoa co modal xac
+ * nhan noi ro se mat nhung gi.
  */
 
 import Link from "next/link";
@@ -35,6 +39,20 @@ import {
 
 const POLL_MS = 1500;
 
+/** Thao tac xoa dang cho xac nhan. */
+type PendingDelete =
+  | { kind: "novel"; id: string; title: string }
+  | { kind: "chapter"; id: string; title: string; hasAudio: boolean }
+  | null;
+
+function parseTags(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
 export default function WritePage() {
   const { profile, loading: sessionLoading } = useSession();
   const toast = useToast();
@@ -52,15 +70,30 @@ export default function WritePage() {
   const [novelTags, setNovelTags] = useState("");
   const [creatingNovel, setCreatingNovel] = useState(false);
 
+  const [editingNovel, setEditingNovel] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [savingNovel, setSavingNovel] = useState(false);
+
   const [chapterTitle, setChapterTitle] = useState("");
   const [chapterText, setChapterText] = useState("");
   const [creatingChapter, setCreatingChapter] = useState(false);
 
+  const [editingChapterId, setEditingChapterId] = useState("");
+  const [chEditTitle, setChEditTitle] = useState("");
+  const [chEditText, setChEditText] = useState("");
+  const [savingChapter, setSavingChapter] = useState(false);
+
   const [voiceId, setVoiceId] = useState("");
   const [job, setJob] = useState<TtsJob | null>(null);
   const [jobChapterId, setJobChapterId] = useState("");
-  const [publishing, setPublishing] = useState(false);
-  const [confirmPublish, setConfirmPublish] = useState(false);
+  const [confirmPublish, setConfirmPublish] = useState<"publish" | "unpublish" | null>(
+    null,
+  );
+  const [togglingPublish, setTogglingPublish] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null);
+  const [deleting, setDeleting] = useState(false);
 
   /* ---------------------------------------------------------------- nap */
 
@@ -146,7 +179,7 @@ export default function WritePage() {
   const availableVoices = useMemo(() => usableVoices(voices), [voices]);
   const published = selected?.state === "published";
 
-  /* ------------------------------------------------------------- hanh vi */
+  /* ------------------------------------------------------------- truyen */
 
   const createNovel = useCallback(
     async (event: React.FormEvent) => {
@@ -154,12 +187,11 @@ export default function WritePage() {
       if (!novelTitle.trim()) return;
       setCreatingNovel(true);
       try {
-        const tags = novelTags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean)
-          .slice(0, 6);
-        const created = await api.createNovel(novelTitle.trim(), novelDesc.trim(), tags);
+        const created = await api.createNovel(
+          novelTitle.trim(),
+          novelDesc.trim(),
+          parseTags(novelTags),
+        );
         setNovels((current) => [created.novel, ...current]);
         setSelectedId(created.novel.novel_id);
         setNovelTitle("");
@@ -174,6 +206,65 @@ export default function WritePage() {
     },
     [novelTitle, novelDesc, novelTags, toast],
   );
+
+  const startEditNovel = useCallback(() => {
+    if (!selected) return;
+    setEditTitle(selected.title);
+    setEditDesc(selected.description);
+    setEditTags(selected.tags.join(", "));
+    setEditingNovel(true);
+  }, [selected]);
+
+  const saveNovel = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (!selected || !editTitle.trim()) return;
+      setSavingNovel(true);
+      try {
+        const result = await api.updateNovel(selected.novel_id, {
+          title: editTitle.trim(),
+          description: editDesc.trim(),
+          tags: parseTags(editTags),
+        });
+        setNovels((current) =>
+          current.map((n) => (n.novel_id === result.novel.novel_id ? result.novel : n)),
+        );
+        setEditingNovel(false);
+        toast.ok("Đã lưu thay đổi.");
+      } catch (cause) {
+        toast.error(errorMessage(cause));
+      } finally {
+        setSavingNovel(false);
+      }
+    },
+    [selected, editTitle, editDesc, editTags, toast],
+  );
+
+  const togglePublish = useCallback(async () => {
+    if (!selected || !confirmPublish) return;
+    const wantPublish = confirmPublish === "publish";
+    setTogglingPublish(true);
+    try {
+      const result = wantPublish
+        ? await api.publishNovel(selected.novel_id)
+        : await api.unpublishNovel(selected.novel_id);
+      setNovels((current) =>
+        current.map((n) => (n.novel_id === result.novel.novel_id ? result.novel : n)),
+      );
+      toast.ok(
+        wantPublish
+          ? "Đã xuất bản. Truyện hiện ra trong trang Khám phá."
+          : "Đã gỡ xuất bản. Truyện trở lại bản nháp.",
+      );
+      setConfirmPublish(null);
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setTogglingPublish(false);
+    }
+  }, [selected, confirmPublish, toast]);
+
+  /* ------------------------------------------------------------- chuong */
 
   const createChapter = useCallback(
     async (event: React.FormEvent) => {
@@ -200,6 +291,44 @@ export default function WritePage() {
     [selectedId, chapterTitle, chapterText, chapters.length, toast],
   );
 
+  const startEditChapter = useCallback(async (chapter: Chapter) => {
+    setEditingChapterId(chapter.chapter_id);
+    setChEditTitle(chapter.title);
+    setChEditText("");
+    try {
+      const detail = await api.getChapter(chapter.chapter_id);
+      setChEditText(detail.chapter.content ?? "");
+    } catch {
+      setChEditText("");
+    }
+  }, []);
+
+  const saveChapter = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (!editingChapterId || !chEditTitle.trim()) return;
+      setSavingChapter(true);
+      try {
+        const result = await api.updateChapter(editingChapterId, {
+          title: chEditTitle.trim(),
+          content: chEditText,
+        });
+        setChapters((current) =>
+          current.map((c) =>
+            c.chapter_id === result.chapter.chapter_id ? result.chapter : c,
+          ),
+        );
+        setEditingChapterId("");
+        toast.ok("Đã lưu chương.");
+      } catch (cause) {
+        toast.error(errorMessage(cause));
+      } finally {
+        setSavingChapter(false);
+      }
+    },
+    [editingChapterId, chEditTitle, chEditText, toast],
+  );
+
   const makeAudio = useCallback(
     async (chapterId: string) => {
       if (!voiceId) {
@@ -218,22 +347,55 @@ export default function WritePage() {
     [voiceId, toast],
   );
 
-  const doPublish = useCallback(async () => {
-    if (!selected) return;
-    setPublishing(true);
+  /* --------------------------------------------------------------- xoa */
+
+  const doDelete = useCallback(async () => {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
+    setDeleting(true);
     try {
-      const result = await api.publishNovel(selected.novel_id);
-      setNovels((current) =>
-        current.map((n) => (n.novel_id === result.novel.novel_id ? result.novel : n)),
-      );
-      toast.ok("Đã xuất bản. Truyện hiện ra trong trang Khám phá.");
-      setConfirmPublish(false);
+      if (target.kind === "novel") {
+        const result = await api.deleteNovel(target.id);
+        // Tinh danh sach con lai TRUOC roi moi dat trang thai. Ham cap nhat
+        // cua `setState` phai THUAN KHIET — goi mot setState khac ben trong no
+        // se bi React 19 chan, va khi do ca khoi nay dung giua chung: giao dien
+        // khong doi, khong toast, dau kho backend da xoa xong.
+        const left = novels.filter((n) => n.novel_id !== target.id);
+        setNovels(left);
+        setSelectedId(left[0]?.novel_id ?? "");
+        setChapters([]);
+        setAudioByChapter({});
+        setJob(null);
+        toast.ok(
+          `Đã xoá truyện cùng ${result.removed.chapters ?? 0} chương và ` +
+            `${result.removed.objects} file audio.`,
+        );
+      } else {
+        const result = await api.deleteChapter(target.id);
+        setChapters((current) => current.filter((c) => c.chapter_id !== target.id));
+        setAudioByChapter((current) => {
+          const next = { ...current };
+          delete next[target.id];
+          return next;
+        });
+        if (jobChapterId === target.id) {
+          setJob(null);
+          setJobChapterId("");
+        }
+        if (editingChapterId === target.id) setEditingChapterId("");
+        toast.ok(
+          result.removed.objects > 0
+            ? "Đã xoá chương và file audio của nó."
+            : "Đã xoá chương.",
+        );
+      }
+      setPendingDelete(null);
     } catch (cause) {
       toast.error(errorMessage(cause));
     } finally {
-      setPublishing(false);
+      setDeleting(false);
     }
-  }, [selected, toast]);
+  }, [pendingDelete, novels, jobChapterId, editingChapterId, toast]);
 
   /* --------------------------------------------------------------- render */
 
@@ -381,37 +543,129 @@ export default function WritePage() {
             ) : (
               <>
                 <section className="card stack">
-                  <div className="row-between">
-                    <div className="stack-2" style={{ minWidth: 0 }}>
-                      <h2 className="section-title">{selected.title}</h2>
-                      <span className="hint">
-                        {chapters.length} chương ·{" "}
-                        {published ? "đã xuất bản" : "bản nháp, chỉ mình bạn thấy"}
-                      </span>
-                    </div>
-                    <div className="row" style={{ gap: "var(--s2)" }}>
-                      <Link className="btn btn-sm" href={`/novels/${selected.novel_id}`}>
-                        Xem trang truyện
-                      </Link>
-                      {published ? (
-                        <span className="badge badge-ok">Đã xuất bản</span>
-                      ) : (
+                  {editingNovel ? (
+                    <form className="stack" onSubmit={saveNovel}>
+                      <h2 className="section-title">Sửa truyện</h2>
+                      <div className="field">
+                        <label className="label" htmlFor="w-edit-title">
+                          Tiêu đề
+                        </label>
+                        <input
+                          id="w-edit-title"
+                          className="input"
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          maxLength={200}
+                          required
+                        />
+                      </div>
+                      <div className="field">
+                        <label className="label" htmlFor="w-edit-desc">
+                          Mô tả
+                        </label>
+                        <textarea
+                          id="w-edit-desc"
+                          className="textarea"
+                          style={{ minHeight: 90 }}
+                          value={editDesc}
+                          onChange={(e) => setEditDesc(e.target.value)}
+                        />
+                      </div>
+                      <div className="field">
+                        <label className="label" htmlFor="w-edit-tags">
+                          Thẻ
+                        </label>
+                        <input
+                          id="w-edit-tags"
+                          className="input"
+                          value={editTags}
+                          onChange={(e) => setEditTags(e.target.value)}
+                        />
+                      </div>
+                      <div className="row">
+                        <button
+                          type="submit"
+                          className="btn btn-primary"
+                          disabled={savingNovel || !editTitle.trim()}
+                        >
+                          {savingNovel ? (
+                            <span className="spinner" aria-hidden="true" />
+                          ) : null}
+                          Lưu thay đổi
+                        </button>
                         <button
                           type="button"
-                          className="btn btn-primary btn-sm"
-                          onClick={() => setConfirmPublish(true)}
-                          disabled={chapters.length === 0}
+                          className="btn btn-ghost"
+                          onClick={() => setEditingNovel(false)}
+                          disabled={savingNovel}
                         >
-                          Xuất bản
+                          Huỷ
                         </button>
-                      )}
-                    </div>
-                  </div>
-                  {!published && chapters.length === 0 ? (
-                    <Alert kind="info">
-                      Thêm ít nhất một chương trước khi xuất bản.
-                    </Alert>
-                  ) : null}
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="row-between">
+                        <div className="stack-2" style={{ minWidth: 0 }}>
+                          <h2 className="section-title">{selected.title}</h2>
+                          <span className="hint">
+                            {chapters.length} chương ·{" "}
+                            {published ? "đã xuất bản" : "bản nháp, chỉ mình bạn thấy"}
+                          </span>
+                          {selected.description ? (
+                            <p className="hint clamp-2">{selected.description}</p>
+                          ) : null}
+                        </div>
+                        <div className="row" style={{ gap: "var(--s2)" }}>
+                          <Link
+                            className="btn btn-sm"
+                            href={`/novels/${selected.novel_id}`}
+                          >
+                            Xem trang truyện
+                          </Link>
+                          <button type="button" className="btn btn-sm" onClick={startEditNovel}>
+                            Sửa
+                          </button>
+                          {published ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              onClick={() => setConfirmPublish("unpublish")}
+                            >
+                              Gỡ xuất bản
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm"
+                              onClick={() => setConfirmPublish("publish")}
+                              disabled={chapters.length === 0}
+                            >
+                              Xuất bản
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-danger"
+                            onClick={() =>
+                              setPendingDelete({
+                                kind: "novel",
+                                id: selected.novel_id,
+                                title: selected.title,
+                              })
+                            }
+                          >
+                            Xoá
+                          </button>
+                        </div>
+                      </div>
+                      {!published && chapters.length === 0 ? (
+                        <Alert kind="info">
+                          Thêm ít nhất một chương trước khi xuất bản.
+                        </Alert>
+                      ) : null}
+                    </>
+                  )}
                 </section>
 
                 <section className="card stack">
@@ -443,38 +697,128 @@ export default function WritePage() {
                     <p className="hint">Chưa có chương nào.</p>
                   ) : (
                     <div className="list">
-                      {chapters.map((chapter, index) => (
-                        <div key={chapter.chapter_id} className="list-item">
-                          <span className="list-index" aria-hidden="true">
-                            {index + 1}
-                          </span>
-                          <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
-                            <Link
-                              href={`/chapters/${chapter.chapter_id}`}
-                              className="truncate"
-                              style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}
-                            >
-                              {chapter.title}
-                            </Link>
-                            <span className="hint">
-                              {formatNumber(chapter.char_count)} ký tự
+                      {chapters.map((chapter, index) =>
+                        editingChapterId === chapter.chapter_id ? (
+                          <form
+                            key={chapter.chapter_id}
+                            className="card card-tight stack"
+                            onSubmit={saveChapter}
+                          >
+                            <div className="field">
+                              <label className="label" htmlFor="w-ch-edit-title">
+                                Tiêu đề chương
+                              </label>
+                              <input
+                                id="w-ch-edit-title"
+                                className="input"
+                                value={chEditTitle}
+                                onChange={(e) => setChEditTitle(e.target.value)}
+                                maxLength={200}
+                                required
+                              />
+                            </div>
+                            <div className="field">
+                              <div className="label-row">
+                                <label className="label" htmlFor="w-ch-edit-text">
+                                  Nội dung
+                                </label>
+                                <span className="counter">
+                                  {formatNumber(chEditText.length)} ký tự
+                                </span>
+                              </div>
+                              <textarea
+                                id="w-ch-edit-text"
+                                className="textarea"
+                                value={chEditText}
+                                onChange={(e) => setChEditText(e.target.value)}
+                              />
+                            </div>
+                            {audioByChapter[chapter.chapter_id] ? (
+                              <Alert kind="warn">
+                                Chương này đã có audio. Sửa nội dung sẽ không tự
+                                tạo lại audio — hãy bấm Tạo audio sau khi lưu.
+                              </Alert>
+                            ) : null}
+                            <div className="row">
+                              <button
+                                type="submit"
+                                className="btn btn-primary btn-sm"
+                                disabled={savingChapter || !chEditTitle.trim()}
+                              >
+                                {savingChapter ? (
+                                  <span className="spinner" aria-hidden="true" />
+                                ) : null}
+                                Lưu chương
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setEditingChapterId("")}
+                                disabled={savingChapter}
+                              >
+                                Huỷ
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div key={chapter.chapter_id} className="list-item">
+                            <span className="list-index" aria-hidden="true">
+                              {index + 1}
                             </span>
-                          </span>
-                          {audioByChapter[chapter.chapter_id] ? (
-                            <span className="badge badge-ok">Có audio</span>
-                          ) : (
+                            <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
+                              <Link
+                                href={`/chapters/${chapter.chapter_id}`}
+                                className="truncate"
+                                style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}
+                              >
+                                {chapter.title}
+                              </Link>
+                              <span className="hint">
+                                {formatNumber(chapter.char_count)} ký tự
+                              </span>
+                            </span>
+                            {audioByChapter[chapter.chapter_id] ? (
+                              <span className="badge badge-ok">Có audio</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                onClick={() => makeAudio(chapter.chapter_id)}
+                                disabled={
+                                  !voiceId ||
+                                  (job?.chapter_id === chapter.chapter_id &&
+                                    (job.status === "pending" || job.status === "running"))
+                                }
+                              >
+                                Tạo audio
+                              </button>
+                            )}
                             <button
                               type="button"
-                              className="btn btn-sm"
-                              onClick={() => makeAudio(chapter.chapter_id)}
-                              disabled={!voiceId || (job?.chapter_id === chapter.chapter_id &&
-                                (job.status === "pending" || job.status === "running"))}
+                              className="btn btn-sm btn-ghost"
+                              onClick={() => startEditChapter(chapter)}
+                              aria-label={`Sửa chương ${chapter.title}`}
                             >
-                              Tạo audio
+                              Sửa
                             </button>
-                          )}
-                        </div>
-                      ))}
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-danger"
+                              onClick={() =>
+                                setPendingDelete({
+                                  kind: "chapter",
+                                  id: chapter.chapter_id,
+                                  title: chapter.title,
+                                  hasAudio: Boolean(audioByChapter[chapter.chapter_id]),
+                                })
+                              }
+                              aria-label={`Xoá chương ${chapter.title}`}
+                            >
+                              Xoá
+                            </button>
+                          </div>
+                        ),
+                      )}
                     </div>
                   )}
 
@@ -568,25 +912,75 @@ export default function WritePage() {
         </div>
       )}
 
+      {/* ------------------------------------------------ xac nhan xuat ban */}
       <ConfirmDialog
-        open={confirmPublish}
-        title="Xuất bản truyện này?"
-        body={
-          <>
-            <p>
-              Sau khi xuất bản, <strong>{selected?.title}</strong> sẽ hiện công
-              khai trong trang Khám phá và bất kỳ ai cũng nghe được audio của
-              các chương.
-            </p>
-            <p style={{ marginTop: "var(--s2)" }}>
-              Hiện chưa có chức năng gỡ xuất bản.
-            </p>
-          </>
+        open={confirmPublish !== null}
+        title={
+          confirmPublish === "unpublish"
+            ? "Gỡ xuất bản truyện này?"
+            : "Xuất bản truyện này?"
         }
-        confirmLabel="Xuất bản"
-        busy={publishing}
-        onConfirm={doPublish}
-        onCancel={() => setConfirmPublish(false)}
+        body={
+          confirmPublish === "unpublish" ? (
+            <>
+              <p>
+                <strong>{selected?.title}</strong> sẽ biến mất khỏi trang Khám
+                phá, và audio của các chương trở lại chế độ riêng tư.
+              </p>
+              <p style={{ marginTop: "var(--s2)" }}>
+                Nội dung không bị xoá — bạn xuất bản lại bất cứ lúc nào.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                Sau khi xuất bản, <strong>{selected?.title}</strong> sẽ hiện công
+                khai trong trang Khám phá và bất kỳ ai cũng nghe được audio của
+                các chương.
+              </p>
+              <p style={{ marginTop: "var(--s2)" }}>Bạn có thể gỡ xuất bản sau.</p>
+            </>
+          )
+        }
+        confirmLabel={confirmPublish === "unpublish" ? "Gỡ xuất bản" : "Xuất bản"}
+        busy={togglingPublish}
+        onConfirm={togglePublish}
+        onCancel={() => setConfirmPublish(null)}
+      />
+
+      {/* ----------------------------------------------------- xac nhan xoa */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        danger
+        title={pendingDelete?.kind === "novel" ? "Xoá cả truyện này?" : "Xoá chương này?"}
+        body={
+          pendingDelete?.kind === "novel" ? (
+            <>
+              <p>
+                <strong>{pendingDelete.title}</strong> sẽ bị xoá cùng{" "}
+                <strong>toàn bộ {chapters.length} chương</strong> và mọi file
+                audio đã tạo.
+              </p>
+              <p style={{ marginTop: "var(--s2)" }}>
+                Thao tác này <strong>không hoàn tác được</strong>.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                <strong>{pendingDelete?.title}</strong> sẽ bị xoá
+                {pendingDelete?.hasAudio ? " cùng file audio của nó" : ""}.
+              </p>
+              <p style={{ marginTop: "var(--s2)" }}>
+                Thao tác này <strong>không hoàn tác được</strong>.
+              </p>
+            </>
+          )
+        }
+        confirmLabel="Xoá vĩnh viễn"
+        busy={deleting}
+        onConfirm={doDelete}
+        onCancel={() => setPendingDelete(null)}
       />
     </div>
   );

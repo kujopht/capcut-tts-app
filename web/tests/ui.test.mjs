@@ -248,3 +248,94 @@ test("hai trang dung chung bo chon giong", () => {
     );
   }
 });
+
+/* ------------------------------------------------------- CRUD fanfic */
+
+test("lop api co du CRUD truyen va chuong", () => {
+  const api = read("../src/lib/api.ts");
+  for (const fn of [
+    "updateNovel:", "deleteNovel:", "unpublishNovel:",
+    "updateChapter:", "deleteChapter:",
+  ]) {
+    assert.ok(api.includes(fn), `lop api thieu ${fn}`);
+  }
+  assert.match(api, /method: "PATCH"/);
+  assert.match(api, /method: "DELETE"/);
+});
+
+test("khu vuc tac gia noi day du CRUD", () => {
+  const write = read("../src/app/write/page.tsx");
+  for (const call of [
+    "api.updateNovel(", "api.deleteNovel(", "api.publishNovel(",
+    "api.unpublishNovel(", "api.updateChapter(", "api.deleteChapter(",
+  ]) {
+    assert.ok(write.includes(call), `khu vuc tac gia chua goi ${call}`);
+  }
+});
+
+test("moi thao tac xoa deu phai qua modal xac nhan", () => {
+  const write = read("../src/app/write/page.tsx");
+  // Khong duoc goi thang api.delete* tu onClick
+  assert.ok(
+    !/onClick=\{\(\)\s*=>\s*api\.delete/.test(write),
+    "khong duoc xoa ngay khi bam, phai qua xac nhan",
+  );
+  assert.match(write, /setPendingDelete\(\{\s*\n?\s*kind: "novel"/s);
+  assert.match(write, /setPendingDelete\(\{\s*\n?\s*kind: "chapter"/s);
+  assert.match(write, /confirmLabel="Xoá vĩnh viễn"/);
+  assert.match(write, /danger/, "hop thoai xoa phai o dang canh bao");
+});
+
+test("xac nhan xoa noi ro se mat nhung gi", () => {
+  const write = read("../src/app/write/page.tsx");
+  assert.match(write, /toàn bộ \{chapters\.length\} chương/);
+  assert.match(write, /không hoàn tác được/);
+  assert.match(write, /file audio/);
+});
+
+test("nut xuat ban va go xuat ban deu co xac nhan rieng", () => {
+  const write = read("../src/app/write/page.tsx");
+  assert.match(write, /setConfirmPublish\("publish"\)/);
+  assert.match(write, /setConfirmPublish\("unpublish"\)/);
+  assert.match(write, /Gỡ xuất bản truyện này\?/);
+  assert.match(write, /Xuất bản truyện này\?/);
+});
+
+test("moi thao tac ghi deu co trang thai dang chay va toast", () => {
+  const write = read("../src/app/write/page.tsx");
+  for (const busy of [
+    "creatingNovel", "savingNovel", "creatingChapter", "savingChapter",
+    "togglingPublish", "deleting",
+  ]) {
+    assert.ok(write.includes(busy), `thieu trang thai dang chay: ${busy}`);
+  }
+  assert.match(write, /toast\.ok\(/);
+  assert.match(write, /toast\.error\(errorMessage\(cause\)\)/);
+});
+
+test("giao dien cap nhat ngay sau khi xoa, khong doi tai lai trang", () => {
+  const write = read("../src/app/write/page.tsx");
+  // Xoa truyen: bo khoi danh sach va chon lai truyen khac ngay trong bo nho
+  assert.match(write, /novels\.filter\(\(n\) => n\.novel_id !== target\.id\)/);
+  assert.match(write, /setSelectedId\(left\[0\]\?\.novel_id \?\? ""\)/);
+  // Xoa chuong: bo khoi danh sach chuong
+  assert.match(write, /current\.filter\(\(c\) => c\.chapter_id !== target\.id\)/);
+  // Khong duoc tai lai ca trang
+  assert.ok(!write.includes("location.reload"), "khong duoc tai lai trang");
+});
+
+test("sua truyen khong gui truong do server quyet dinh", () => {
+  const api = read("../src/lib/api.ts");
+  const block = api.slice(api.indexOf("updateNovel:"), api.indexOf("deleteNovel:"));
+  for (const field of ["state", "owner_id", "novel_id"]) {
+    assert.ok(!block.includes(`${field}?:`), `updateNovel khong duoc nhan ${field}`);
+  }
+});
+
+test("khong goi setState long trong ham cap nhat cua setState", () => {
+  // Bay da tung sap: setSelectedId nam trong updater cua setNovels khien React
+  // chan lai, backend xoa xong ma giao dien khong doi va khong co toast.
+  const write = read("../src/app/write/page.tsx");
+  const nested = /set[A-Z]\w*\(\((?:current|prev)\)\s*=>\s*\{[^}]*\bset[A-Z]\w*\(/s;
+  assert.ok(!nested.test(write), "hàm cập nhật của setState phải thuần khiết");
+});

@@ -71,6 +71,10 @@ class StorageAdapter(Protocol):
     def signed_url(self, key: str, expires_seconds: int = 3600,
                    download_name: Optional[str] = None) -> Optional[str]: ...
 
+    def delete(self, key: str) -> bool:
+        """Xoa mot object. Tra True neu da xoa, False neu von khong ton tai."""
+        ...
+
 
 class MetadataStore(Protocol):
     """
@@ -108,11 +112,26 @@ class MetadataStore(Protocol):
         """
         ...
 
+    def update_novel(self, novel_id: str, owner_id: str,
+                     fields: Dict[str, Any]) -> Novel:
+        """Sua truyen. Chi chu so huu; chi nhan cac truong nguoi dung duoc sua."""
+        ...
+
+    def unpublish_novel(self, novel_id: str, owner_id: str) -> Novel:
+        """Dua truyen ve ban nhap VA thu hoi quyen doc cong khai. Idempotent."""
+        ...
+
+    def delete_novel(self, novel_id: str, owner_id: str) -> None: ...
+
     # -- chapter -------------------------------------------------------------
     def create_chapter(self, chapter: Chapter) -> Chapter: ...
     def get_chapter(self, chapter_id: str) -> Chapter: ...
     def owned_chapter(self, chapter_id: str, owner_id: str) -> Chapter: ...
     def list_chapters(self, novel_id: str) -> List[Chapter]: ...
+
+    def update_chapter(self, chapter_id: str, owner_id: str,
+                       fields: Dict[str, Any]) -> Chapter: ...
+    def delete_chapter(self, chapter_id: str, owner_id: str) -> None: ...
 
     # -- tts job -------------------------------------------------------------
     def create_job(self, job: TtsJob) -> TtsJob: ...
@@ -124,9 +143,13 @@ class MetadataStore(Protocol):
     def list_jobs(self, owner_id: str,
                   chapter_id: Optional[str] = None) -> List[TtsJob]: ...
 
+    def delete_job(self, job_id: str) -> None: ...
+
     # -- audio track ---------------------------------------------------------
     def create_track(self, track: AudioTrack) -> AudioTrack: ...
     def track_for_chapter(self, chapter_id: str) -> Optional[AudioTrack]: ...
+    def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]: ...
+    def delete_track(self, track_id: str) -> None: ...
 
 
 # -----------------------------------------------------------------------------
@@ -256,6 +279,13 @@ class LocalStorageAdapter:
         target = self._path(key)
         return target.stat().st_size if target.is_file() else 0
 
+    def delete(self, key: str) -> bool:
+        target = self._path(key)
+        if not target.is_file():
+            return False
+        target.unlink()
+        return True
+
     def signed_url(self, key: str, expires_seconds: int = 3600,
                    download_name: Optional[str] = None) -> Optional[str]:
         """
@@ -338,7 +368,53 @@ class MockMetadataStore:
             self.novels[published.novel_id] = published
             return published
 
+    #: Chi nhung truong nay moi cho nguoi dung sua. `state`, `owner_id`,
+    #: `novel_id` deu do SERVER quyet dinh.
+    NOVEL_EDITABLE = ("title", "description", "tags")
+
+    def update_novel(self, novel_id: str, owner_id: str,
+                     fields: Dict[str, Any]) -> Novel:
+        with self._lock:
+            current = self.owned_novel(novel_id, owner_id)
+            allowed = {k: v for k, v in fields.items() if k in self.NOVEL_EDITABLE}
+            updated = replace(current, **allowed, updated_at=now_iso())
+            self.novels[novel_id] = updated
+            return updated
+
+    def unpublish_novel(self, novel_id: str, owner_id: str) -> Novel:
+        with self._lock:
+            current = self.owned_novel(novel_id, owner_id)
+            if current.state != PublishState.PUBLISHED:
+                return current
+            reverted = replace(
+                current, state=PublishState.DRAFT, updated_at=now_iso()
+            )
+            self.novels[novel_id] = reverted
+            return reverted
+
+    def delete_novel(self, novel_id: str, owner_id: str) -> None:
+        with self._lock:
+            self.owned_novel(novel_id, owner_id)
+            self.novels.pop(novel_id, None)
+
     # -- chapter -------------------------------------------------------------
+
+    #: `owner_id`, `novel_id`, `state` khong cho client sua.
+    CHAPTER_EDITABLE = ("title", "content", "order_index")
+
+    def update_chapter(self, chapter_id: str, owner_id: str,
+                       fields: Dict[str, Any]) -> Chapter:
+        with self._lock:
+            current = self.owned_chapter(chapter_id, owner_id)
+            allowed = {k: v for k, v in fields.items() if k in self.CHAPTER_EDITABLE}
+            updated = replace(current, **allowed, updated_at=now_iso())
+            self.chapters[chapter_id] = updated
+            return updated
+
+    def delete_chapter(self, chapter_id: str, owner_id: str) -> None:
+        with self._lock:
+            self.owned_chapter(chapter_id, owner_id)
+            self.chapters.pop(chapter_id, None)
 
     def create_chapter(self, chapter: Chapter) -> Chapter:
         with self._lock:
@@ -415,6 +491,10 @@ class MockMetadataStore:
             items = [j for j in items if j.chapter_id == chapter_id]
         return sorted(items, key=lambda j: j.created_at, reverse=True)
 
+    def delete_job(self, job_id: str) -> None:
+        with self._lock:
+            self.jobs.pop(job_id, None)
+
     # -- audio track ---------------------------------------------------------
 
     def create_track(self, track: AudioTrack) -> AudioTrack:
@@ -426,6 +506,14 @@ class MockMetadataStore:
         with self._lock:
             items = [t for t in self.tracks.values() if t.chapter_id == chapter_id]
         return sorted(items, key=lambda t: t.created_at, reverse=True)[0] if items else None
+
+    def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]:
+        with self._lock:
+            return [t for t in self.tracks.values() if t.chapter_id == chapter_id]
+
+    def delete_track(self, track_id: str) -> None:
+        with self._lock:
+            self.tracks.pop(track_id, None)
 
 
 # -----------------------------------------------------------------------------

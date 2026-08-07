@@ -102,6 +102,20 @@ class ChapterIn(BaseModel):
     order_index: int = 1
 
 
+class NovelPatch(BaseModel):
+    """Chi cac truong nguoi dung duoc sua. `state` doi qua publish/unpublish."""
+
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class ChapterPatch(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    content: Optional[str] = None
+    order_index: Optional[int] = None
+
+
 class JobIn(BaseModel):
     chapter_id: str
     voice_id: str
@@ -231,6 +245,104 @@ def get_novel(novel_id: str) -> Dict[str, Any]:
     }
 
 
+def _purge_chapter(chapter: Chapter) -> Dict[str, int]:
+    """
+    Xoa mot chuong cung TOAN BO thu phu thuoc vao no.
+
+    THU TU CO CHU DICH: metadata TRUOC, object trong kho SAU.
+
+    Neu lam nguoc lai va buoc thu hai hong, ta con lai `audio_track` tro toi
+    file khong con - trinh phat hong ma khong ai biet. Lam theo thu tu nay thi
+    truong hop xau nhat chi la object thua trong kho: khong route nao cham toi
+    duoc (da kiem chung live), chi ton dung luong. Xem docs/HANDOFF.md muc
+    "Xu ly mo coi".
+    """
+    removed = {"tracks": 0, "jobs": 0, "objects": 0}
+
+    tracks = store.tracks_for_chapter(chapter.chapter_id)
+    keys = [track.object_key for track in tracks if track.object_key]
+    for track in tracks:
+        store.delete_track(track.track_id)
+        removed["tracks"] += 1
+
+    for job in store.list_jobs(chapter.owner_id, chapter.chapter_id):
+        store.delete_job(job.job_id)
+        removed["jobs"] += 1
+
+    store.delete_chapter(chapter.chapter_id, chapter.owner_id)
+
+    # Chi con rac vo hai neu buoc nay hong -> khong de loi lam sap ca thao tac
+    for key in keys:
+        try:
+            if storage.delete(key):
+                removed["objects"] += 1
+        except Exception:
+            pass
+    return removed
+
+
+@app.patch("/api/novels/{novel_id}")
+def update_novel(novel_id: str, payload: NovelPatch,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Sua truyen. Chi chu so huu; `state` khong doi duoc qua day."""
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    if isinstance(fields.get("title"), str):
+        fields["title"] = fields["title"].strip()
+    try:
+        novel = store.update_novel(novel_id, profile.user_id, fields)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"novel": novel.to_dict()}
+
+
+@app.delete("/api/novels/{novel_id}")
+def delete_novel(novel_id: str,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Xoa truyen cung moi chuong, job, audio_track va object cua no.
+
+    Kiem quyen so huu TRUOC khi dong vao bat cu thu gi.
+    """
+    try:
+        novel = store.owned_novel(novel_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    removed = {"chapters": 0, "tracks": 0, "jobs": 0, "objects": 0}
+    for chapter in store.list_chapters(novel.novel_id):
+        counts = _purge_chapter(chapter)
+        removed["chapters"] += 1
+        for key in ("tracks", "jobs", "objects"):
+            removed[key] += counts[key]
+
+    store.delete_novel(novel.novel_id, profile.user_id)
+    return {"deleted": True, "removed": removed}
+
+
+@app.post("/api/novels/{novel_id}/unpublish")
+def unpublish_novel(novel_id: str,
+                    profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Gỡ xuất bản: về bản nháp và thu hồi quyền đọc công khai. Idempotent."""
+    try:
+        novel = store.unpublish_novel(novel_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Không lưu được trạng thái: {type(exc).__name__}",
+        ) from exc
+    return {"novel": novel.to_dict()}
+
+
 @app.post("/api/novels/{novel_id}/publish")
 def publish_novel(novel_id: str, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     """
@@ -296,6 +408,36 @@ def get_chapter(chapter_id: str) -> Dict[str, Any]:
         "chapter": chapter.to_dict(),
         "audio": track.to_dict() if track else None,
     }
+
+
+@app.patch("/api/chapters/{chapter_id}")
+def update_chapter(chapter_id: str, payload: ChapterPatch,
+                   profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    if isinstance(fields.get("title"), str):
+        fields["title"] = fields["title"].strip()
+    try:
+        chapter = store.update_chapter(chapter_id, profile.user_id, fields)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"chapter": chapter.to_dict()}
+
+
+@app.delete("/api/chapters/{chapter_id}")
+def delete_chapter(chapter_id: str,
+                   profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Xoa chuong cung job, audio_track va object cua no."""
+    try:
+        chapter = store.owned_chapter(chapter_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"deleted": True, "removed": _purge_chapter(chapter)}
 
 
 # -----------------------------------------------------------------------------

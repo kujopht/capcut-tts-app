@@ -86,6 +86,17 @@ class R2StorageAdapter:
         except Exception:
             return 0
 
+    def delete(self, key: str) -> bool:
+        """
+        Xoa mot object.
+
+        R2/S3 tra ve 204 ca khi key khong ton tai, nen kiem tra truoc de bao
+        dung "co xoa gi khong" — huu ich cho log doi soat.
+        """
+        existed = self.exists(key)
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+        return existed
+
     def signed_url(self, key: str, expires_seconds: int = 3600,
                    download_name: Optional[str] = None) -> Optional[str]:
         """

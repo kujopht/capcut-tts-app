@@ -219,6 +219,9 @@ class AppwriteMetadataStore:
             payload["permissions"] = permissions
         return self._call("PATCH", f"{self._docs(collection)}/{doc_id}", payload=payload)
 
+    def _delete(self, collection: str, doc_id: str) -> None:
+        self._call("DELETE", f"{self._docs(collection)}/{doc_id}")
+
     # -- novel ---------------------------------------------------------------
 
     def create_novel(self, novel: Novel) -> Novel:
@@ -273,7 +276,56 @@ class AppwriteMetadataStore:
         )
         return published
 
+    #: Chi nhung truong nay moi cho nguoi dung sua.
+    NOVEL_EDITABLE = ("title", "description", "tags")
+
+    def update_novel(self, novel_id: str, owner_id: str,
+                     fields: Dict[str, Any]) -> Novel:
+        current = self.owned_novel(novel_id, owner_id)
+        allowed = {k: v for k, v in fields.items() if k in self.NOVEL_EDITABLE}
+        updated = replace(current, **allowed, updated_at=now_iso())
+        # KHONG gui `permissions`: sua noi dung khong duoc dong toi pham vi
+        # hien thi. Doi cong khai/rieng tu chi qua publish/unpublish.
+        self._update(COL_NOVELS, novel_id,
+                     {**allowed, "updated_at": updated.updated_at})
+        return updated
+
+    def unpublish_novel(self, novel_id: str, owner_id: str) -> Novel:
+        """
+        Ve ban nhap VA thu hoi `read("any")` trong CUNG mot request PATCH.
+
+        Nguyen tu nhu publish: hoac ca trang thai lan quyen cung doi, hoac
+        khong gi doi ca. Idempotent.
+        """
+        current = self.owned_novel(novel_id, owner_id)
+        reverted = replace(current, state=PublishState.DRAFT, updated_at=now_iso())
+        self._update(
+            COL_NOVELS, novel_id,
+            {"state": reverted.state.value, "updated_at": reverted.updated_at},
+            permissions=self._owner_permissions(current.owner_id, public_read=False),
+        )
+        return reverted
+
+    def delete_novel(self, novel_id: str, owner_id: str) -> None:
+        self.owned_novel(novel_id, owner_id)
+        self._delete(COL_NOVELS, novel_id)
+
     # -- chapter -------------------------------------------------------------
+
+    CHAPTER_EDITABLE = ("title", "content", "order_index")
+
+    def update_chapter(self, chapter_id: str, owner_id: str,
+                       fields: Dict[str, Any]) -> Chapter:
+        current = self.owned_chapter(chapter_id, owner_id)
+        allowed = {k: v for k, v in fields.items() if k in self.CHAPTER_EDITABLE}
+        updated = replace(current, **allowed, updated_at=now_iso())
+        self._update(COL_CHAPTERS, chapter_id,
+                     {**allowed, "updated_at": updated.updated_at})
+        return updated
+
+    def delete_chapter(self, chapter_id: str, owner_id: str) -> None:
+        self.owned_chapter(chapter_id, owner_id)
+        self._delete(COL_CHAPTERS, chapter_id)
 
     def create_chapter(self, chapter: Chapter) -> Chapter:
         self._create(COL_CHAPTERS, chapter.chapter_id, chapter.to_dict(),
@@ -338,6 +390,9 @@ class AppwriteMetadataStore:
         self._update(COL_JOBS, job.job_id, job.to_dict())
         return job
 
+    def delete_job(self, job_id: str) -> None:
+        self._delete(COL_JOBS, job_id)
+
     # -- audio track ---------------------------------------------------------
 
     def create_track(self, track: AudioTrack) -> AudioTrack:
@@ -351,6 +406,15 @@ class AppwriteMetadataStore:
             q_limit(1),
         ])
         return _track_from_doc(docs[0]) if docs else None
+
+    def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]:
+        return [
+            _track_from_doc(d)
+            for d in self._list(COL_TRACKS, [q_equal("chapter_id", chapter_id)])
+        ]
+
+    def delete_track(self, track_id: str) -> None:
+        self._delete(COL_TRACKS, track_id)
 
 
 # -----------------------------------------------------------------------------

@@ -210,11 +210,44 @@ hosting nào. Các bước thủ công ở mục 8 của báo cáo staging.
 **Branch protection cho `main` chưa bật được**: cần GitHub Pro cho repo private,
 cả hai API đều trả 403. Cấu hình đã soạn sẵn ở mục 9 của báo cáo.
 
+## Triển khai staging — VẪN CHƯA DEPLOY (2026-08-08)
+
+Chi tiết: `docs/reports/staging/BAO_CAO_STAGING.md` mục 11–12.
+
+Tài nguyên staging đã được tạo ở phía nhà cung cấp, nhưng **credential chưa có
+trên máy phát triển**: `server/.env` vẫn trỏ vào **dev** (`print_config.py` cho
+thấy tiền tố định danh trùng **dev**), không có `RENDER_API_KEY`, không CLI
+Render/Cloudflare. Nên chưa chạy được migration staging, chưa deploy, chưa đọc
+được URL/SHA của service.
+
+**`deploy/render.yaml` đã validate**: 3 service, không secret viết sẵn, worker
+không có `healthCheckPath`, cả hai service Python đặt `FAS_INLINE_WORKER=false`.
+
+**`scripts/staging_smoke.py`** — smoke test một lệnh, chạy với bất kỳ bản triển
+khai nào qua HTTP API công khai (không cần credential kho dữ liệu), tự dọn
+fixture `[SMOKE]` trong `finally`:
+
+```bash
+PYTHONPATH=. python scripts/staging_smoke.py --api <URL backend> --web <URL frontend>
+```
+
+Đã chạy thử với backend + worker cục bộ dựng đúng hình dạng staging
+(`FAS_INLINE_WORKER=false`, `FAS_ENV=staging`, Appwrite + R2 + Edge TTS thật):
+**43/43 đạt**, `pending → running → completed`, file 553.248 byte, `attempts=1`.
+Fixture đã xoá, đối chiếu trước/sau: mất 0, sót 0.
+
+Một lỗi tự phát hiện và đã sửa: `rut_gon_url()` bản đầu chỉ bỏ query nên **in
+nguyên host và đường dẫn presigned URL** — lộ R2 account id, tên bucket,
+`owner_id`, `chapter_id`. Nay che cả host lẫn đường dẫn. Regression test 9 test,
+**5 hỏng** trên bản cũ.
+
+Cách đưa credential vào mà không phải dán vào chat: mục 12 của báo cáo staging.
+
 ## Kết quả kiểm thử gần nhất
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | **547 test: 546 đạt, 1 bỏ qua** (chạy 3 lần, kết quả ổn định) |
+| `server/tests` | **556 test: 555 đạt, 1 bỏ qua** (chạy 3 lần, kết quả ổn định) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
 | `web` (`node --test`) | **152/152 đạt** |
 | `npx eslint .` | Sạch, exit 0 |
@@ -265,7 +298,7 @@ Kết quả lần chạy gần nhất:
 | Python | 3.12.10 |
 | Gói cài từ `server/requirements.txt` | 39 gói, **không có PySide6**, không cài tay gói nào |
 | `PYTHONPATH` | Rỗng — không cần đặt thủ công |
-| `server/tests` | **547 test: 546 đạt, 1 bỏ qua** |
+| `server/tests` | **556 test: 555 đạt, 1 bỏ qua** |
 | `web` `npm test` | **152/152 đạt** |
 | `npx tsc --noEmit` | exit 0 |
 | `npx eslint .` | exit 0 |

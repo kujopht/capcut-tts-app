@@ -416,3 +416,119 @@ check ở trên) + *Require branches to be up to date before merging*, và **t�
 | 13 | Chưa kiểm ở tải cao; chưa benchmark chương 1.000.000 ký tự |
 | 14 | Reconciler chưa chạy tự động; chưa có cron |
 | 15 | Chưa có route xoá tài khoản người dùng |
+
+---
+
+## 11. Lượt triển khai ngày 2026-08-08 — VẪN CHƯA DEPLOY ĐƯỢC
+
+Bạn báo đã tạo Appwrite staging, R2 bucket staging và kết nối repo với Render.
+Nhưng **không credential nào trong số đó có mặt trên máy này**, nên các bước 4–7
+vẫn bị chặn.
+
+### Đã kiểm
+
+| Kiểm tra | Kết quả |
+|---|---|
+| local `HEAD` = remote `feature/web-mvp` | `79a8c57` cả hai |
+| CI cho `79a8c57` | 2 run, cả hai `success`, 4/4 job đạt |
+| Working tree | sạch |
+| `deploy/render.yaml` | **hợp lệ** — 3 service, không secret viết sẵn, worker không `healthCheckPath`, cả hai service Python đặt `FAS_INLINE_WORKER=false` |
+
+### Vì sao vẫn chặn
+
+| Thứ cần | Tình trạng trên máy này |
+|---|---|
+| Appwrite **staging** endpoint/project/database/API key | **không có** — `server/.env` sửa lần cuối 2026-08-06, `print_config.py` cho thấy tiền tố `project_id`/`database_id` và tên bucket **trùng khớp với dev**, không phải staging |
+| R2 **staging** account/bucket/access key | **không có** — cùng lý do trên |
+| Render API key hoặc CLI | **không có** — không biến `RENDER_*`, không `render` trong PATH, không `~/.render` |
+| Cloudflare token / `wrangler` | **không có** |
+
+Kết nối repo với Render ở phía dashboard **không** cấp cho môi trường này quyền
+gì: không có API key thì không liệt kê được service, không trigger được deploy,
+không đọc được URL hay SHA đang chạy.
+
+Theo yêu cầu, tôi **không** hỏi bạn dán secret vào chat. Mục 12 nêu cách đưa
+chúng vào mà không phải dán.
+
+### Đã làm được trong lượt này
+
+**`scripts/staging_smoke.py`** — smoke test chạy bằng **một lệnh** với bất kỳ bản
+triển khai nào, chỉ qua HTTP API công khai nên không cần credential kho dữ liệu:
+
+```bash
+PYTHONPATH=. python scripts/staging_smoke.py   --api https://fas-staging-api.onrender.com   --web https://fas-staging-web.onrender.com   --json bao-cao-smoke.json
+```
+
+Phủ: health/readiness, `environment=staging`, `inline_worker=false`, đăng
+ký/đăng nhập/đăng nhập lại, chặn ẩn danh và token bịa, novel/chapter và tính bền
+vững, TTS `pending → running → completed` (chứng minh **worker riêng** nhận, vì
+web không chạy job), tải file audio thật và kiểm MP3 frame header, phân quyền
+giữa hai tài khoản trên 8 đường, frontend phản hồi. **Tự dọn fixture `[SMOKE]`
+trong `finally`**, kể cả khi có bước hỏng.
+
+Đã chạy thử với backend + worker cục bộ dựng đúng hình dạng staging
+(`FAS_INLINE_WORKER=false`, `FAS_ENV=staging`, Appwrite + R2 + Edge TTS thật):
+**43/43 đạt**, chuỗi trạng thái `pending → running → completed` ở giây 6 và 79,
+file 553.248 byte, `attempts=1`. Fixture đã xoá, đối chiếu 6 tập hợp trước/sau:
+**mất 0, sót 0**.
+
+### Một lỗi tự phát hiện và đã sửa
+
+Bản đầu của `rut_gon_url()` chỉ bỏ query, nên nó **in nguyên host và đường dẫn
+presigned URL** ra log — lộ **R2 account id**, tên bucket, `owner_id`,
+`chapter_id` và hash nội dung. Đúng thứ mà yêu cầu "không in secret vào log"
+cấm.
+
+Nay che cả host lẫn đường dẫn, chỉ giữ đuôi tệp và cờ "có query hay không".
+Regression test `server/tests/test_staging_smoke_script.py` — 9 test; **5 hỏng**
+trên bản cũ. Quét lại toàn bộ 67 dòng đầu ra: **không còn dấu hiệu nào**.
+
+---
+
+## 12. Cách đưa credential vào mà không phải dán vào chat
+
+Chọn **một** trong hai.
+
+### Cách A — tệp cục bộ (đơn giản nhất)
+
+Tạo `server/.env.staging` với nội dung dưới đây, điền giá trị thật. Tệp này
+**đã bị `.gitignore` chặn** (đã kiểm: khớp luật `.env.*`), không bao giờ vào git.
+
+```
+FAS_ENV=staging
+FAS_INLINE_WORKER=false
+DATA_BACKEND=appwrite
+STORAGE_BACKEND=r2
+FAS_CORS_ORIGINS=<URL frontend staging>
+
+APPWRITE_ENDPOINT=<endpoint staging>
+APPWRITE_PROJECT_ID=<project id staging>
+APPWRITE_DATABASE_ID=<database id staging>
+APPWRITE_API_KEY=<api key staging>
+
+R2_ACCOUNT_ID=<account id>
+R2_BUCKET=<bucket staging>
+R2_ACCESS_KEY_ID=<access key id>
+R2_SECRET_ACCESS_KEY=<secret access key>
+```
+
+Rồi nhắn "đã tạo `server/.env.staging`". Tôi chạy migration bằng
+`FAS_ENV_FILE=server/.env.staging` và không hề in giá trị nào.
+
+### Cách B — biến môi trường trong phiên của bạn
+
+Trong Claude Code, gõ `!` rồi lệnh để nó chạy trong chính phiên này:
+
+```
+! $env:APPWRITE_PROJECT_ID = "..."   # và các biến còn lại
+```
+
+### Cho Render
+
+Cần **API key** để tôi deploy và đọc SHA/URL:
+
+1. https://dashboard.render.com/u/settings#api-keys → **Create API Key**
+2. Đặt vào biến môi trường: `RENDER_API_KEY`
+
+Không muốn cấp API key cũng được — khi đó bạn tự tạo ba service theo mục 8, rồi
+gửi tôi **URL** (không phải secret) để tôi chạy `staging_smoke.py`.

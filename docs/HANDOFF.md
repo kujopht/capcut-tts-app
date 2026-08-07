@@ -118,7 +118,7 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 | `server/tests` | 288 test: 287 đạt, 1 bỏ qua |
 | ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 181 đạt, 1 bỏ qua (đo ở mốc cũ) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `web` (`node --test`) | 73/73 đạt |
+| `web` (`node --test`) | 88/88 đạt |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
 | `npx next build` | Thành công, 7 route |
@@ -318,7 +318,8 @@ Nếu sau này muốn cho nó tự xoá, điều kiện tối thiểu:
 
 ## Bẫy đã gặp
 
-- Heredoc trong bash nuốt mất một dấu gạch chéo: `\\b` thành `\b` (backspace) trong template literal JS. Viết file test bằng công cụ Write thay vì heredoc.
+- **Heredoc trong bash nuốt mất một dấu gạch chéo** — kể cả dạng đã trích dẫn `<<'EOF'`. Đã mắc hai lần: `\\b` thành `\b` (backspace), và `\\${cls}` thành `\${cls}` — mà `\$` trong template literal JS là **đô-la thoát**, nên regex biến thành chuỗi văn bản `${cls}` không bao giờ khớp, tức là một assertion rỗng. Viết file test bằng công cụ Write, đừng dùng heredoc. Và đừng ghép chuỗi vào `new RegExp` khi có cách so khớp trực tiếp.
+- **Assertion phủ định dễ đạt vì lý do sai.** `!src.includes("api.getChapter(")` từng đạt cả trên code cũ, vì code cũ viết `api` xuống dòng rồi `.getChapter(`. Sau khi viết test mới, hãy chạy chính assertion đó lên bản code CŨ (`git show <commit>:<file>`) và xác nhận nó **thất bại** — không làm bước này thì không biết test có răng hay không.
 - **`uvicorn --reload` bỏ sót thay đổi.** Đã gặp ba lần: WatchFiles in ra "detected changes... Reloading..." rồi worker không khởi động lại, backend tiếp tục phục vụ code cũ. Triệu chứng là API thiếu hẳn trường vừa thêm. Cách chắc ăn: dừng hẳn rồi chạy lại. Lưu ý tiến trình **con** có thể sống sót sau khi giết tiến trình cha và vẫn giữ cổng 8000 — phải giết cả cây.
 - **Truy vấn `select` của Appwrite đặt thuộc tính dưới khoá `values`, không phải `attributes`.** Đặt sai thì Appwrite trả `Invalid query: No attributes selected`. Client giả lập trong test sẽ chấp nhận bất cứ hình dạng nào ta bịa ra, nên lỗi này chỉ lộ khi chạy thật — nay đã có test khoá lại ở `test_appwrite_protocol.py`.
 - **`_list()` không lật trang**, mà Appwrite mặc định chỉ trả 25 document → dữ liệu bị cắt âm thầm, không lỗi, không cảnh báo. `list_chapters` từng dính lỗi này: truyện trên 25 chương sẽ mất chương. Đã sửa bằng `_list_all()` (tự đặt `limit` + lật trang). Truy vấn nào có thể vượt 25 phải dùng `_list_all`, không dùng `_list`. Các truy vấn còn lại (`list_novels`, `list_jobs`) vẫn dùng `_list` — sẽ cắt ở 25 khi dữ liệu nhiều lên, **chưa sửa**.

@@ -663,3 +663,187 @@ test("danh sach chuong dung has_audio chu khong dung state rieng", () => {
   assert.match(src, /chapter\.has_audio \?/);
   assert.ok(!src.includes("audioReady"), "bo state trung gian da khong con can");
 });
+
+/* ===================================================================
+   M1 — vung bam tren mobile toi thieu 44x44
+   =================================================================== */
+
+/** Cat lay khoi `@media (max-width: 640px)` trong globals.css. */
+function mobileBlock() {
+  const css = read("../src/app/globals.css");
+  const start = css.indexOf("@media (max-width: 640px)");
+  assert.ok(start >= 0, "khong tim thay khoi mobile");
+  const open = css.indexOf("{", start);
+  let depth = 0;
+  for (let i = open; i < css.length; i += 1) {
+    if (css[i] === "{") depth += 1;
+    else if (css[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(open + 1, i);
+    }
+  }
+  throw new Error("khoi mobile khong dong ngoac");
+}
+
+test("moi lop bam duoc deu cao it nhat 44px o mobile", () => {
+  const block = mobileBlock();
+  const rule = block.match(/([^{}]*)\{[^{}]*min-height:\s*44px[^{}]*\}/);
+  assert.ok(rule, "khoi mobile khong co lop nao dat min-height 44px");
+  // Tach danh sach selector ra roi so khop CHINH XAC, thay vi ghep regex —
+  // ghep chuoi vao regex trong template literal rat de nuot mat dau gach cheo
+  // va bien thanh mot assertion khong bao gio doi duoc gi.
+  const selectors = rule[1]
+    .replace(/\/\*[\s\S]*?\*\//g, "")   // bo chu thich
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const cls of [".btn", ".btn-sm", ".chip", ".seg-item", ".nav-link",
+                     ".account-link", ".brand"]) {
+    assert.ok(
+      selectors.includes(cls),
+      `${cls} chua duoc nang len 44px o mobile (dang co: ${selectors.join(" ")})`,
+    );
+  }
+});
+
+test("dung min-height chu khong phai height co dinh", () => {
+  // `height: 44px` se cat cut nut co chu dai xuong hai dong
+  const block = mobileBlock();
+  assert.ok(
+    !/[^-]height:\s*44px/.test(block.replace(/min-height/g, "MIN")),
+    "phai dung min-height, khong duoc dat height cung",
+  );
+});
+
+test("chi ep 44px o mobile, khong ap len desktop", () => {
+  const css = read("../src/app/globals.css");
+  const before = css.slice(0, css.indexOf("@media (max-width: 640px)"));
+  assert.ok(
+    !/\.btn[^{]*\{[^}]*min-height:\s*44px/.test(before),
+    "khong duoc ep 44px o desktop — con tro chuot chinh xac hon nhieu",
+  );
+});
+
+test("nhom nut cuoi hang xuong dong rieng o mobile", () => {
+  const block = mobileBlock();
+  assert.match(block, /\.list-item\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(block, /\.list-actions\s*\{[^}]*width:\s*100%/);
+});
+
+test("hang chuong dung .list-actions o ca hai trang", () => {
+  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/app/write/page.tsx"]) {
+    assert.match(read(f), /className="list-actions"/, `${f} thieu .list-actions`);
+  }
+});
+
+test("kich thuoc lien ket tai khoan nam trong CSS chu khong phai style inline", () => {
+  const nav = read("../src/components/NavAuth.tsx");
+  // Media query khong voi toi duoc style inline — day la bai hoc cua H1
+  assert.match(nav, /className="account-link"/);
+  assert.match(nav, /className="avatar"/);
+  assert.ok(
+    !/width:\s*28\b/.test(nav),
+    "khong duoc dat lai kich thuoc avatar bang style inline",
+  );
+  const css = read("../src/app/globals.css");
+  assert.match(css, /\.avatar\s*\{/);
+  assert.match(css, /\.account-link\s*\{/);
+});
+
+/* ===================================================================
+   M2 — nghe tai cho o trang chi tiet truyen
+   =================================================================== */
+
+test("trang chi tiet truyen mo duoc trinh phat ngay trong hang", () => {
+  const src = read("../src/app/novels/[id]/page.tsx");
+  assert.match(src, /import \{ AudioPlayer \}/);
+  assert.match(src, /<AudioPlayer/);
+  assert.match(src, /compact/);
+});
+
+test("chi mot chuong phat cung luc", () => {
+  const src = read("../src/app/novels/[id]/page.tsx");
+  // Mot chuoi id, KHONG phai Set/mang — mo chuong khac thi chuong cu dong lai
+  assert.match(src, /useState\(""\)/);
+  assert.ok(
+    !/playing(Ids|Set)/.test(src),
+    "khong duoc giu nhieu chuong mo cung luc",
+  );
+  assert.match(src, /setPlayingId\(playing \? "" : chapter\.chapter_id\)/);
+});
+
+test("chi chuong CO audio moi hien nut nghe", () => {
+  const src = read("../src/app/novels/[id]/page.tsx");
+  assert.match(src, /chapter\.has_audio \?/);
+  const noAudio = src.slice(src.indexOf("chapter.has_audio ?"));
+  assert.match(noAudio, /Chưa có audio/);
+});
+
+test("hang khong con boc ca trong the <a>", () => {
+  const src = read("../src/app/novels/[id]/page.tsx");
+  // <a> khong duoc chua <button>; ban cu boc ca hang trong <Link className="list-item">
+  assert.ok(
+    !/<Link[^>]*className="list-item"/.test(src),
+    "the <a> khong duoc chua <button>",
+  );
+  assert.match(src, /className={`list-item\$\{/);
+});
+
+test("vung bam cua hang khong bi thu nho lai", () => {
+  const css = read("../src/app/globals.css");
+  // Lop phu trong suot keo vung bam cua lien ket tieu de ra kin ca hang
+  assert.match(css, /\.list-title::after\s*\{[^}]*position:\s*absolute/);
+  assert.match(css, /\.list-title::after\s*\{[^}]*inset:\s*0/);
+  assert.match(css, /\.list-item\s*\{[^}]*position:\s*relative/);
+  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/app/write/page.tsx"]) {
+    assert.match(read(f), /list-title/, `${f} thieu lop list-title`);
+  }
+});
+
+test("nut nam TREN lop phu nen van bam duoc", () => {
+  const css = read("../src/app/globals.css");
+  // Cat khoi lenh dau tien cua mot selector, khong ghep selector vao regex
+  const ruleFor = (cls) => {
+    const at = css.indexOf(cls + " {");
+    assert.notEqual(at, -1, `thieu ${cls}`);
+    return css.slice(at, css.indexOf("}", at) + 1);
+  };
+  for (const cls of [".list-actions", ".list-player"]) {
+    const rule = ruleFor(cls);
+    assert.match(rule, /z-index:\s*1/, `${cls} phai nam tren lop phu`);
+    assert.match(rule, /position:\s*relative/,
+      `${cls} can position de z-index co tac dung`);
+  }
+});
+
+test("hang dang phat cho xuong dong de trinh phat du rong", () => {
+  const css = read("../src/app/globals.css");
+  const rule = css.match(/\.list-item-open\s*\{[^}]*\}/);
+  assert.ok(rule, "thieu .list-item-open");
+  assert.match(rule[0], /flex-wrap:\s*wrap/);
+  assert.match(css, /\.list-player\s*\{[^}]*width:\s*100%/);
+});
+
+test("dung lai AudioPlayer san co, khong tu ve trinh phat moi", () => {
+  const src = read("../src/app/novels/[id]/page.tsx");
+  // Tai lai component nen nut tai MP3, retry 404 va che do kho cuc bo giu nguyen
+  assert.ok(!/<audio\b/.test(src), "phai dung AudioPlayer, khong tu dat the <audio>");
+  assert.ok(!/resolveAudio|audioLink/.test(src), "khong duoc tu goi lai lop audio");
+});
+
+test("khong them endpoint nao cho M2", () => {
+  const api = read("../src/lib/api.ts");
+  // Lay ten tai nguyen ngay sau /api/ — du de biet co endpoint moi hay khong,
+  // ma khong phu thuoc vao cach viet chuoi (nhay don, nhay kep hay backtick).
+  const found = new Set(
+    [...api.matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]),
+  );
+  assert.deepEqual(
+    [...found].sort(),
+    ["audio", "auth", "chapters", "health", "jobs", "novels", "voices"],
+    "M2 khong duoc them hay bo endpoint nao",
+  );
+  // Nghe tai cho dung dung duong da co, khong tao duong rieng
+  assert.match(api, /audioLink:/);
+  assert.match(api, /\/api\/audio\/\$\{chapterId\}\/url/);
+});

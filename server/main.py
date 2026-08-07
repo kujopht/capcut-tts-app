@@ -895,7 +895,25 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
         job.total_parts = total
 
     output_key = f"audio/{job.owner_id}/{job.chapter_id}/{job.content_hash}.mp3"
-    dest = settings.var_dir / "tts" / f"{job.job_id}.mp3"
+
+    # -- NHAN JOB TRUOC, roi moi nhan trach nhiem don dep -----------------------
+    #
+    # Cho nay tung nam TRONG `try`, va do la mot loi: duong `return` khi thua
+    # claim van di qua `finally`, nen worker THUA xoa tep tam va go ban ghi thread
+    # cua worker THANG. Worker thang sau do upload mot tep khong con ton tai, job
+    # thanh `failed` va khong sinh track nao. CI tren Linux do duoc ngay; tren
+    # Windows thi thua thoat nhanh hon nen cua so hep hon va thuong khong lo ra.
+    #
+    # Thua thi ra ve TAY TRANG: khong co gi la cua ta thi khong don gi.
+    if fence is None:
+        fence = store.claim_job(job, WORKER_ID, _lease_until())
+        if fence is None:
+            return
+
+    # Ten tep tam kem worker va lan thu, khong chi kem `job_id`. Hai worker chay
+    # cung mot job KHONG bao gio dung chung mot duong dan, ke ca khi chung chia
+    # se `var_dir` qua mot volume.
+    dest = settings.var_dir / "tts" / f"{job.job_id}-{WORKER_ID}-{fence}.mp3"
 
     # Heartbeat: lam moi lease theo chu ky trong khi synthesis dang chay. Khong
     # co no thi mot chuong dai se bi bo quet coi la "worker da chet" va chay lai
@@ -925,14 +943,7 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
 
     try:
         # -- transition: pending -> running ----------------------------------
-        # Nguoi goi chua nhan job (duong tao moi) thi nhan o day. Van la CLAIM
-        # NGUYEN TU chu khong phai `save_job` thuong: hai tien trinh cung khoi
-        # dong mot job se chi mot cai thang.
-        if fence is None:
-            fence = store.claim_job(job, WORKER_ID, _lease_until())
-            if fence is None:
-                # Worker khac dang chay job nay. Dung lai, KHONG goi TTS.
-                return
+        # Claim da xong o tren, TRUOC `try`. Tu day tro di ta la chu job.
         job.status = JobStatus.RUNNING
         job.started_at = job.started_at or now_iso()
         job.attempts = fence
@@ -1001,7 +1012,12 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
         beat_stop.set()
         dest.unlink(missing_ok=True)
         with _job_lock:
-            _job_threads.pop(job.job_id, None)
+            # Go DUNG ban ghi cua chinh minh. `_job_threads` khoa theo `job_id`,
+            # nen `pop` vo dieu kien se go ban ghi cua worker khac dang chay cung
+            # job do — job bien mat khoi so theo doi cua tien trinh du van dang
+            # chay.
+            if _job_threads.get(job.job_id) is threading.current_thread():
+                _job_threads.pop(job.job_id, None)
 
 
 def _older_than(stamp: Optional[str], seconds: int) -> bool:

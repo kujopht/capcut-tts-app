@@ -164,6 +164,134 @@ class TestTheInvalidVoicePathIsSafe(Base):
         self.assertIn("chưa có nội dung", r.json()["detail"])
 
 
+class TestTheLoserCleansUpNothing(Base):
+    """
+    LOI — worker THUA claim don dep do cua worker THANG.
+
+    Tai hien (tat dinh, khong dua vao timing): dat mot tep tam va mot ban ghi
+    `_job_threads` nhu the worker THANG dang giu, roi cho worker THUA chay
+    `_run_job` tren job co lease con han cua nguoi khac.
+
+    Hien tuong: duong `return` khi thua claim nam TRONG `try`, nen `finally` van
+    chay — no `dest.unlink()` va `_job_threads.pop(job_id)`. Worker thang sau do
+    upload mot tep khong con ton tai: job thanh `failed`, khong sinh track nao.
+
+    Do la ly do `TestOnlyOneSynthesisPerJob` do duoc tren Linux CI (0 track, job
+    `failed`) trong khi tren Windows thi worker thua thoat nhanh hon nen cua so
+    hep hon va thuong khong lo ra.
+    """
+
+    def a_job_owned_by_someone_else(self):
+        from datetime import datetime, timedelta, timezone
+
+        from server.domain import JobStatus, TtsJob, job_fingerprint
+
+        con_han = (datetime.now(timezone.utc)
+                   + timedelta(seconds=300)).isoformat(timespec="seconds")
+        nid = self.client.post("/api/novels", json={"title": "T"},
+                               headers=self.head).json()["novel"]["novel_id"]
+        cid = self.client.post(
+            "/api/chapters",
+            json={"novel_id": nid, "title": "C", "content": "Nội dung.",
+                  "order_index": 1},
+            headers=self.head).json()["chapter"]["chapter_id"]
+        owner = self.client.get("/api/auth/me",
+                                headers=self.head).json()["profile"]["user_id"]
+        return server_main.store.create_job(TtsJob(
+            owner_id=owner, chapter_id=cid, voice_id="mock:v1",
+            content_hash=job_fingerprint("Nội dung.", "mock:v1", "1.0", 2000),
+            status=JobStatus.RUNNING, lease_expires_at=con_han,
+            lease_owner="worker-thang", attempts=1))
+
+    def test_the_loser_does_not_delete_the_winner_temp_file(self):
+        import threading
+        from dataclasses import replace
+
+        job = self.a_job_owned_by_someone_else()
+        # Moi ten tep tam ma worker thang co the dang dung.
+        thu_muc = server_main.settings.var_dir / "tts"
+        thu_muc.mkdir(parents=True, exist_ok=True)
+        cua_thang = [
+            thu_muc / f"{job.job_id}.mp3",
+            thu_muc / f"{job.job_id}-worker-thang-1.mp3",
+        ]
+        for p in cua_thang:
+            p.write_bytes(b"tep tam cua worker thang")
+
+        server_main._run_job(replace(job, lease_owner=None), "Nội dung.")
+
+        for p in cua_thang:
+            self.assertTrue(p.exists(),
+                            f"worker thua da xoa {p.name} cua worker thang")
+            p.unlink(missing_ok=True)
+
+    def test_the_loser_does_not_unregister_the_winner_thread(self):
+        import threading
+        from dataclasses import replace
+
+        job = self.a_job_owned_by_someone_else()
+        canh = threading.current_thread()
+        with server_main._job_lock:
+            server_main._job_threads[job.job_id] = canh
+        try:
+            server_main._run_job(replace(job, lease_owner=None), "Nội dung.")
+            self.assertIs(server_main._job_threads.get(job.job_id), canh,
+                          "worker thua da go ban ghi thread cua worker thang")
+        finally:
+            with server_main._job_lock:
+                server_main._job_threads.pop(job.job_id, None)
+
+    def test_the_winner_still_cleans_up_after_itself(self):
+        """Sua xong khong duoc lam ro ri: nguoi thang van phai don cua minh."""
+        import threading
+        from dataclasses import replace
+
+        from server.domain import JobStatus, TtsJob, job_fingerprint
+
+        nid = self.client.post("/api/novels", json={"title": "T"},
+                               headers=self.head).json()["novel"]["novel_id"]
+        cid = self.client.post(
+            "/api/chapters",
+            json={"novel_id": nid, "title": "C", "content": "Nội dung.",
+                  "order_index": 1},
+            headers=self.head).json()["chapter"]["chapter_id"]
+        owner = self.client.get("/api/auth/me",
+                                headers=self.head).json()["profile"]["user_id"]
+        job = server_main.store.create_job(TtsJob(
+            owner_id=owner, chapter_id=cid, voice_id="mock:v1",
+            content_hash=job_fingerprint("Nội dung.", "mock:v1", "1.0", 2000),
+            status=JobStatus.PENDING, attempts=0))
+
+        with server_main._job_lock:
+            server_main._job_threads[job.job_id] = threading.current_thread()
+        server_main._run_job(replace(job), "Nội dung.")
+
+        self.assertNotIn(job.job_id, server_main._job_threads,
+                         "nguoi thang phai go ban ghi cua chinh minh")
+        con_lai = list((server_main.settings.var_dir / "tts").glob(
+            f"{job.job_id}*"))
+        self.assertEqual(con_lai, [], "nguoi thang phai xoa tep tam cua minh")
+
+    def test_the_temp_path_is_unique_per_worker_and_attempt(self):
+        import inspect
+
+        nguon = inspect.getsource(server_main._run_job)
+        self.assertIn('f"{job.job_id}-{WORKER_ID}-{fence}.mp3"', nguon,
+                      "ten tep tam phai kem worker va lan thu, khong chi job_id")
+
+    def test_the_claim_happens_before_the_try_block(self):
+        import inspect
+
+        nguon = inspect.getsource(server_main._run_job)
+        vi_tri_claim = nguon.find("store.claim_job(")
+        vi_tri_try = nguon.find("\n    try:")
+        self.assertGreater(vi_tri_claim, 0)
+        self.assertGreater(vi_tri_try, 0)
+        self.assertLess(vi_tri_claim, vi_tri_try,
+                        "claim phai xay ra TRUOC `try`, neu khong duong return "
+                        "khi thua se di qua `finally` va don do cua nguoi khac")
+
+
 class TestTheStaleTransactionClaimIsGone(unittest.TestCase):
     """
     Chu thich trong `server/main.py` tung khang dinh "Appwrite khong co

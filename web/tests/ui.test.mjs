@@ -367,24 +367,99 @@ test("logo la SVG nguyen ban, khong nhung anh ngoai", () => {
 });
 
 test("mot bieu tuong duy nhat cho ca hai khu vuc", () => {
-  // Cung bo hinh khoi o moi noi: component, favicon, va anh sinh phia may chu
+  // Ban DAY DU dung chung tung toa do o moi noi
   const key = 'd="M4.6 16.4 14.6 18 14.6 26.8 4.6 25.2Z"';
   for (const f of [
     "../src/components/Logo.tsx",
     "../src/components/BrandMark.tsx",
-    "../src/app/icon.svg",
+    "../public/brand/logo-mark.svg",
     "../public/brand/logo-full.svg",
   ]) {
     assert.ok(read(f).includes(key), `${f} dung hinh khac — phai la mot logo`);
   }
 });
 
+test("favicon la ban rut gon cua cung mot logo, khong phai logo khac", () => {
+  const favicon = read("../src/app/icon.svg");
+  const full = read("../public/brand/logo-mark.svg");
+
+  // Cung ngon ngu hinh: o bo tron gradient thuong hieu + hinh mau muc dam
+  for (const token of ['#7c8cff', '#4dd6c1', '#0b0d12', '<rect width="32" height="32"']) {
+    assert.ok(favicon.includes(token), `favicon thieu ${token}`);
+    assert.ok(full.includes(token), `logo day du thieu ${token}`);
+  }
+
+  // Ban favicon phai co KHOI DAY HON de con doc duoc o 16px.
+  // Lay be rong cua thanh song am (nhan ra qua rx rieng cua tung ban).
+  // String.raw: trong template literal thuong, `\d` bi nuot mat dau gach cheo
+  // va lop ky tu thanh [d.] — khong khop chu so nao.
+  const barWidth = (svg, rx) =>
+    Number(
+      new RegExp(String.raw`<rect[^>]*width="([\d.]+)"[^>]*rx="` + rx + `"`).exec(
+        svg,
+      )?.[1],
+    );
+
+  const wFavicon = barWidth(favicon, "2.2");
+  const wFull = barWidth(full, "1.6");
+  assert.ok(wFavicon > 0 && wFull > 0, `khong doc duoc be rong: ${wFavicon} / ${wFull}`);
+  assert.ok(
+    wFavicon > wFull,
+    `thanh song am cua favicon phai day hon: ${wFavicon} vs ${wFull}`,
+  );
+});
+
 test("bieu tuong ket hop trang sach va song am", () => {
+  // Ca hai ban deu la: 3 thanh song am + 2 trang sach
+  for (const [f, barRx, pageWidth] of [
+    ["../src/app/icon.svg", "2.2", "1.5"],
+    ["../public/brand/logo-mark.svg", "1.6", "1.8"],
+  ]) {
+    const svg = read(f);
+    assert.equal(
+      (svg.match(new RegExp(`<rect[^>]*rx="${barRx}"`, "g")) ?? []).length, 3,
+      `${f} phai co 3 thanh song am`,
+    );
+    assert.equal(
+      (svg.match(new RegExp(`<path[^>]*stroke-width="${pageWidth}"`, "g")) ?? []).length, 2,
+      `${f} phai co 2 trang sach`,
+    );
+  }
+});
+
+test("favicon khong chua chu", () => {
   const svg = read("../src/app/icon.svg");
-  // Ba thanh song am
-  assert.equal((svg.match(/<rect[^>]*rx="1\.6"/g) ?? []).length, 3);
-  // Hai trang sach
-  assert.equal((svg.match(/<path[^>]*stroke-width="1\.8"/g) ?? []).length, 2);
+  assert.ok(!/<text/.test(svg), "favicon khong duoc co chu");
+  // <title> la nhan cho doc man hinh, khong phai chu ve tren hinh
+  assert.match(svg, /<title>Fanfic Audio Studio<\/title>/);
+});
+
+test("co du bo favicon: ico, svg, png va apple-touch-icon", () => {
+  assert.ok(has("../src/app/favicon.ico"), "thieu favicon.ico");
+  assert.ok(has("../src/app/icon.svg"), "thieu icon.svg");
+  assert.ok(has("../src/app/apple-icon.tsx"), "thieu apple-touch-icon");
+  for (const s of [16, 32, 48, 192, 512]) {
+    assert.ok(has(`../public/brand/icon-${s}.png`), `thieu icon-${s}.png`);
+  }
+});
+
+test("favicon.ico chua du ba kich thuoc nho", () => {
+  const buf = readFileSync(new URL("../src/app/favicon.ico", import.meta.url));
+  assert.equal(buf.readUInt16LE(0), 0, "khong phai file ICO");
+  assert.equal(buf.readUInt16LE(2), 1, "khong phai file ICO");
+  const count = buf.readUInt16LE(4);
+  assert.equal(count, 3, "phai co 3 kich thuoc (16, 32, 48)");
+  // Byte 0 cua moi muc la chieu rong; 0 nghia la 256
+  const widths = [0, 1, 2].map((i) => buf.readUInt8(6 + i * 16) || 256).sort((a, b) => a - b);
+  assert.deepEqual(widths, [16, 32, 48]);
+});
+
+test("web manifest tro dung bo icon lon", () => {
+  const manifest = read("../src/app/manifest.ts");
+  assert.match(manifest, /\/brand\/icon-192\.png/);
+  assert.match(manifest, /\/brand\/icon-512\.png/);
+  assert.match(manifest, /purpose: "maskable"/);
+  assert.match(manifest, /theme_color: "#0b0d12"/);
 });
 
 test("ban mot mau va logo day du hop ca nen sang lan nen toi", () => {

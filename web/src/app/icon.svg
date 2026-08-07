@@ -1,17 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <title>Fanfic Audio Studio</title>
+  <!--
+    Ban RUT GON danh rieng cho favicon.
+    So voi logo day du: khoi day hon, khe giua hai trang sach rong hon, hinh
+    chiem nhieu dien tich o hon. Muc tieu la con doc duoc o 16px, noi moi chi
+    tiet duoi 1px deu bien mat. Khong co chu.
+  -->
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#7c8cff"/>
       <stop offset="1" stop-color="#4dd6c1"/>
     </linearGradient>
   </defs>
-  <rect width="32" height="32" rx="9" fill="url(#g)"/>
-  <g transform="translate(4.81 5.12) scale(0.7)" fill="#0b0d12" stroke="#0b0d12" stroke-linejoin="round">
-    <rect x="8.4" y="9.2" width="3.2" height="4.4" rx="1.6" stroke="none"/>
-    <rect x="14.4" y="3.4" width="3.2" height="10.2" rx="1.6" stroke="none"/>
-    <rect x="20.4" y="7.2" width="3.2" height="6.4" rx="1.6" stroke="none"/>
-    <path d="M4.6 16.4 14.6 18 14.6 26.8 4.6 25.2Z" stroke-width="1.8"/>
-    <path d="M27.4 16.4 17.4 18 17.4 26.8 27.4 25.2Z" stroke-width="1.8"/>
+  <rect width="32" height="32" rx="7" fill="url(#g)"/>
+  <g fill="#0b0d12" stroke="#0b0d12" stroke-linejoin="round">
+    <rect x="5.6"  y="9.8" width="4.4" height="5.2"  rx="2.2" stroke="none"/>
+    <rect x="13.8" y="3.6" width="4.4" height="11.4" rx="2.2" stroke="none"/>
+    <rect x="22.0" y="7.6" width="4.4" height="7.4"  rx="2.2" stroke="none"/>
+    <path d="M3.4 18.6 14.7 20.6 14.7 28 3.4 26Z"  stroke-width="1.5"/>
+    <path d="M28.6 18.6 17.3 20.6 17.3 28 28.6 26Z" stroke-width="1.5"/>
   </g>
 </svg>

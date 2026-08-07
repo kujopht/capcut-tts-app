@@ -86,18 +86,25 @@ class R2StorageAdapter:
         except Exception:
             return 0
 
-    def signed_url(self, key: str, expires_seconds: int = 3600) -> Optional[str]:
+    def signed_url(self, key: str, expires_seconds: int = 3600,
+                   download_name: Optional[str] = None) -> Optional[str]:
         """
         URL ky san, co han su dung.
 
         Bucket phai la PRIVATE: nguoi dung chi tai duoc qua URL ky nay, va
         backend la noi quyet dinh co cap URL hay khong.
+
+        `download_name` bat trinh duyet TAI VE thay vi phat trong tab, bang
+        `Content-Disposition: attachment`. Can cho nut "Tai MP3": thuoc tinh
+        `download` cua the <a> bi bo qua khi khac origin.
         """
+        params = {"Bucket": self._bucket, "Key": key}
+        if download_name:
+            safe = download_name.replace('"', "").replace("\\", "")
+            params["ResponseContentDisposition"] = f'attachment; filename="{safe}"'
         try:
             return self._client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": self._bucket, "Key": key},
-                ExpiresIn=int(expires_seconds),
+                "get_object", Params=params, ExpiresIn=int(expires_seconds),
             )
         except Exception:
             return None

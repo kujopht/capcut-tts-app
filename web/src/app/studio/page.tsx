@@ -1,15 +1,15 @@
 "use client";
 
 /**
- * Creator Studio - tron vong: tao novel -> tao chuong -> chon giong -> gui job
- * -> theo doi trang thai -> nghe audio.
+ * Audio Studio — dan van ban bat ky, chon giong va toc do, tao MP3.
  *
- * KHONG tu chuyen sang giong khac khi job that bai: loi duoc hien nguyen van
- * de nguoi dung tu quyet dinh.
+ * Backend chi nhan `chapter_id` nen moi lan tao la mot chuong trong kho chua
+ * rieng cua Studio (xem `lib/workspace.ts`). Kho do luon la ban nhap va bi loc
+ * khoi khu vuc Fanfic, nen audio o day KHONG tu bien thanh chuong fanfic.
  */
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type Chapter,
@@ -18,490 +18,520 @@ import {
   type Voice,
 } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
+import { useToast } from "@/lib/toast";
+import { defaultVoiceId, usableVoices } from "@/lib/voices";
+import { ensureStudioNovel } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
-import { Alert, EmptyState, JobBadge, Loading } from "@/components/states";
+import {
+  Alert,
+  EmptyState,
+  ErrorState,
+  JobBadge,
+  Loading,
+  ProgressBar,
+  SkeletonList,
+  formatDate,
+  formatNumber,
+} from "@/components/ui";
 
+/** Gioi han cua Studio — dat o day de tranh job chay qua lau. */
+const MAX_CHARS = 20_000;
+const WARN_AT = 0.85;
 const POLL_MS = 1500;
+
+const RATES = [
+  { value: "0.8", label: "Chậm" },
+  { value: "0.9", label: "Hơi chậm" },
+  { value: "1.0", label: "Bình thường" },
+  { value: "1.15", label: "Hơi nhanh" },
+  { value: "1.3", label: "Nhanh" },
+];
+
+interface HistoryItem {
+  job: TtsJob;
+  chapter: Chapter | undefined;
+}
 
 export default function StudioPage() {
   const { profile, loading: sessionLoading } = useSession();
+  const toast = useToast();
 
-  const [novels, setNovels] = useState<Novel[]>([]);
-  const [selectedNovel, setSelectedNovel] = useState<string>("");
-  const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [selectedChapter, setSelectedChapter] = useState<string>("");
+  const [workspace, setWorkspace] = useState<Novel | null>(null);
   const [voices, setVoices] = useState<Voice[]>([]);
-  const [selectedVoice, setSelectedVoice] = useState<string>("");
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [jobs, setJobs] = useState<TtsJob[]>([]);
+  const [booting, setBooting] = useState(true);
+  const [bootError, setBootError] = useState("");
 
-  const [novelTitle, setNovelTitle] = useState("");
-  const [novelDesc, setNovelDesc] = useState("");
-  const [chapterTitle, setChapterTitle] = useState("");
-  const [chapterContent, setChapterContent] = useState("");
+  const [title, setTitle] = useState("");
+  const [text, setText] = useState("");
+  const [voiceId, setVoiceId] = useState("");
+  const [rate, setRate] = useState("1.0");
 
-  const [job, setJob] = useState<TtsJob | null>(null);
-  const [reused, setReused] = useState(false);
-  const [audioChapterId, setAudioChapterId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [activeJob, setActiveJob] = useState<TtsJob | null>(null);
+  const [activeChapterId, setActiveChapterId] = useState("");
 
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const pollTimer = useRef<number | null>(null);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /* ---------------------------------------------------------- nap du lieu */
 
-  // -- nap du lieu ban dau --------------------------------------------------
-
-  const loadNovels = useCallback(async () => {
-    const r = await api.listNovels(true);
-    setNovels(r.novels);
-    return r.novels;
+  const bootstrap = useCallback(async () => {
+    const novel = await ensureStudioNovel();
+    const [detail, voiceList, jobList] = await Promise.all([
+      api.getNovel(novel.novel_id),
+      api.voices(),
+      api.listJobs(),
+    ]);
+    return { novel, detail, voiceList, jobList };
   }, []);
 
-  useEffect(() => {
-    if (sessionLoading) return;
-
-    // Ca truong hop "chua dang nhap" cung di qua chuoi bat dong bo, de khong
-    // co setState nao nam truc tiep trong than effect.
-    const bootstrap = async (): Promise<Voice[] | null> => {
-      if (!profile) return null;
-      const [, voiceResult] = await Promise.all([loadNovels(), api.voices()]);
-      return voiceResult.voices;
-    };
-
+  // Than effect KHONG duoc goi setState dong bo (react-hooks/set-state-in-effect):
+  // moi setState o day deu nam trong callback cua promise.
+  const load = useCallback(() => {
     bootstrap()
-      .then((list) => {
-        if (!list) return;
-        setVoices(list);
-        const usable = list.find((v) => v.installed);
-        if (usable) setSelectedVoice(usable.voice_id);
+      .then(({ novel, detail, voiceList, jobList }) => {
+        setWorkspace(novel);
+        setChapters(detail.chapters);
+        setVoices(voiceList.voices);
+        setJobs(jobList.jobs);
+        setVoiceId((current) => current || defaultVoiceId(voiceList.voices));
       })
-      .catch((e) => setError(errorMessage(e)))
-      .finally(() => setLoading(false));
-  }, [profile, sessionLoading, loadNovels]);
+      .catch((cause) => setBootError(errorMessage(cause)))
+      .finally(() => setBooting(false));
+  }, [bootstrap]);
 
-  // Nap chuong khi doi novel
+  /** Nut "Thu lai" — chay tu su kien nguoi dung nen dat trang thai truc tiep duoc. */
+  const retryBoot = useCallback(() => {
+    setBooting(true);
+    setBootError("");
+    load();
+  }, [load]);
+
   useEffect(() => {
-    let cancelled = false;
+    if (sessionLoading || !profile) return;
+    load();
+  }, [sessionLoading, profile, load]);
 
-    const loadChapters = async (): Promise<Chapter[]> => {
-      if (!selectedNovel) return [];
-      return (await api.getNovel(selectedNovel)).chapters;
-    };
+  /* ------------------------------------------------------------- theo doi */
 
-    loadChapters()
-      .then((list) => {
-        if (cancelled) return;
-        setChapters(list);
-        // Bo chon chuong cu neu no khong con thuoc tieu thuyet dang chon
-        setSelectedChapter((prev) =>
-          list.some((c) => c.chapter_id === prev) ? prev : "",
+  useEffect(() => {
+    if (!activeJob || activeJob.status === "completed" || activeJob.status === "failed") {
+      return;
+    }
+    const id = window.setTimeout(() => {
+      api
+        .getJob(activeJob.job_id)
+        .then((r) => {
+          setActiveJob(r.job);
+          if (r.job.status === "completed" || r.job.status === "failed") {
+            setJobs((current) => [
+              r.job,
+              ...current.filter((j) => j.job_id !== r.job.job_id),
+            ]);
+            if (r.job.status === "completed") toast.ok("Audio đã sẵn sàng.");
+            else toast.error("Tạo audio thất bại. Xem chi tiết bên dưới.");
+          }
+        })
+        .catch(() => {
+          /* mang chap chon — vong sau thu lai */
+        });
+    }, POLL_MS);
+    pollTimer.current = id;
+    return () => window.clearTimeout(id);
+  }, [activeJob, toast]);
+
+  /* ------------------------------------------------------------- dan xuat */
+
+  const availableVoices = useMemo(() => usableVoices(voices), [voices]);
+
+  const chapterById = useMemo(() => {
+    const map = new Map<string, Chapter>();
+    chapters.forEach((c) => map.set(c.chapter_id, c));
+    return map;
+  }, [chapters]);
+
+  const history = useMemo<HistoryItem[]>(() => {
+    const own = new Set(chapters.map((c) => c.chapter_id));
+    return jobs
+      .filter((job) => own.has(job.chapter_id))
+      .map((job) => ({ job, chapter: chapterById.get(job.chapter_id) }));
+  }, [jobs, chapters, chapterById]);
+
+  const chars = text.length;
+  const over = chars > MAX_CHARS;
+  const nearLimit = chars > MAX_CHARS * WARN_AT;
+  const canSubmit =
+    !submitting && chars > 0 && !over && Boolean(voiceId) && Boolean(workspace);
+
+  /* --------------------------------------------------------------- hanh vi */
+
+  const submit = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (!workspace || !canSubmit) return;
+      setSubmitting(true);
+      setFormError("");
+      try {
+        const name =
+          title.trim() ||
+          `${text.trim().slice(0, 40)}${text.trim().length > 40 ? "…" : ""}`;
+        const created = await api.createChapter(
+          workspace.novel_id,
+          name,
+          text,
+          chapters.length + 1,
         );
-      })
-      .catch((e) => {
-        if (!cancelled) setError(errorMessage(e));
-      });
+        const result = await api.createJob(
+          created.chapter.chapter_id,
+          voiceId,
+          rate,
+        );
+        setChapters((current) => [...current, created.chapter]);
+        setActiveChapterId(created.chapter.chapter_id);
+        setActiveJob(result.job);
+        setJobs((current) => [result.job, ...current]);
+        toast.push("info", "Đã đưa vào hàng đợi.");
+      } catch (cause) {
+        setFormError(errorMessage(cause));
+        toast.error("Không tạo được audio.");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [workspace, canSubmit, title, text, chapters.length, voiceId, rate, toast],
+  );
 
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedNovel]);
+  const retry = useCallback(
+    async (job: TtsJob) => {
+      try {
+        const result = await api.createJob(job.chapter_id, job.voice_id, job.rate);
+        setActiveChapterId(job.chapter_id);
+        setActiveJob(result.job);
+        setJobs((current) => [result.job, ...current]);
+        toast.push("info", "Đang thử lại…");
+      } catch (cause) {
+        toast.error(errorMessage(cause));
+      }
+    },
+    [toast],
+  );
 
-  // Dung polling khi roi trang
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+  const reset = useCallback(() => {
+    setActiveJob(null);
+    setActiveChapterId("");
+    setTitle("");
+    setText("");
   }, []);
 
-  // -- hanh dong -------------------------------------------------------------
+  /* --------------------------------------------------------------- render */
 
-  async function createNovel(event: React.FormEvent) {
-    event.preventDefault();
-    if (!novelTitle.trim()) {
-      setError("Tiểu thuyết phải có tiêu đề.");
-      return;
-    }
-    setBusy("novel");
-    setError("");
-    try {
-      const r = await api.createNovel(novelTitle.trim(), novelDesc.trim());
-      setNovelTitle("");
-      setNovelDesc("");
-      await loadNovels();
-      setSelectedNovel(r.novel.novel_id);
-      setNotice(`Đã tạo "${r.novel.title}".`);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function createChapter(event: React.FormEvent) {
-    event.preventDefault();
-    if (!selectedNovel) {
-      setError("Hãy chọn tiểu thuyết trước.");
-      return;
-    }
-    if (!chapterTitle.trim() || !chapterContent.trim()) {
-      setError("Chương cần có tiêu đề và nội dung.");
-      return;
-    }
-    setBusy("chapter");
-    setError("");
-    try {
-      const r = await api.createChapter(
-        selectedNovel,
-        chapterTitle.trim(),
-        chapterContent,
-        chapters.length + 1,
-      );
-      setChapterTitle("");
-      setChapterContent("");
-      const detail = await api.getNovel(selectedNovel);
-      setChapters(detail.chapters);
-      setSelectedChapter(r.chapter.chapter_id);
-      setNotice(`Đã thêm chương "${r.chapter.title}".`);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  function startPolling(jobId: string, chapterId: string) {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const r = await api.getJob(jobId);
-        setJob(r.job);
-        if (r.job.status === "completed" || r.job.status === "failed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
-          if (r.job.status === "completed") setAudioChapterId(chapterId);
-        }
-      } catch (e) {
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-        setError(errorMessage(e));
-      }
-    }, POLL_MS);
-  }
-
-  async function submitJob(event: React.FormEvent) {
-    event.preventDefault();
-    if (!selectedChapter || !selectedVoice) {
-      setError("Hãy chọn cả chương và giọng đọc.");
-      return;
-    }
-    setBusy("job");
-    setError("");
-    setNotice("");
-    setAudioChapterId("");
-    try {
-      const r = await api.createJob(selectedChapter, selectedVoice);
-      setJob(r.job);
-      setReused(r.reused);
-      if (r.job.status === "completed") {
-        setAudioChapterId(selectedChapter);
-      } else {
-        startPolling(r.job.job_id, selectedChapter);
-      }
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  // -- hien thi --------------------------------------------------------------
-
-  if (sessionLoading) return <Loading label="Đang kiểm tra phiên đăng nhập..." />;
-
-  if (!profile) {
+  if (sessionLoading) {
     return (
-      <EmptyState
-        icon="🔐"
-        title="Cần đăng nhập"
-        body="Creator Studio chỉ dành cho tài khoản đã đăng nhập."
-        action={
-          <Link href="/login" className="btn btn-primary">
-            Đăng nhập
-          </Link>
-        }
-      />
+      <div className="page">
+        <Loading label="Đang kiểm tra phiên đăng nhập…" />
+      </div>
     );
   }
 
-  if (loading) return <Loading label="Đang tải Creator Studio..." />;
-
-  const chapter = chapters.find((c) => c.chapter_id === selectedChapter);
-  const voice = voices.find((v) => v.voice_id === selectedVoice);
+  if (!profile) {
+    return (
+      <div className="page">
+        <h1 className="page-title">Audio Studio</h1>
+        <EmptyState
+          icon="🔐"
+          title="Cần đăng nhập để tạo audio"
+          hint="Audio bạn tạo là riêng tư và gắn với tài khoản của bạn."
+          action={
+            <Link className="btn btn-primary" href="/login">
+              Đăng nhập hoặc tạo tài khoản
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
-    <>
-      <h1 className="page-title">Creator Studio</h1>
-      <p className="page-sub">
-        Xin chào {profile.display_name} · gói {profile.tier}
-      </p>
-
-      {error ? <Alert kind="error">{error}</Alert> : null}
-      {notice ? <Alert kind="ok">{notice}</Alert> : null}
-
-      <div
-        style={{
-          display: "grid",
-          gap: 18,
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-        }}
-      >
-        {/* --- Tao novel --- */}
-        <form className="card" onSubmit={createNovel}>
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>1 · Tạo tiểu thuyết</h2>
-          <div className="field">
-            <label className="label" htmlFor="novel-title">
-              Tiêu đề
-            </label>
-            <input
-              id="novel-title"
-              className="input"
-              value={novelTitle}
-              onChange={(e) => setNovelTitle(e.target.value)}
-              placeholder="Ví dụ: Hải Tặc Mũ Rơm"
-            />
-          </div>
-          <div className="field">
-            <label className="label" htmlFor="novel-desc">
-              Mô tả
-            </label>
-            <input
-              id="novel-desc"
-              className="input"
-              value={novelDesc}
-              onChange={(e) => setNovelDesc(e.target.value)}
-              placeholder="Tuỳ chọn"
-            />
-          </div>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={busy === "novel"}
-          >
-            {busy === "novel" ? "Đang tạo..." : "Tạo tiểu thuyết"}
-          </button>
-
-          <hr
-            style={{
-              border: 0,
-              borderTop: "1px solid var(--border)",
-              margin: "18px 0",
-            }}
-          />
-
-          <label className="label" htmlFor="novel-select">
-            Tiểu thuyết của bạn ({novels.length})
-          </label>
-          {novels.length === 0 ? (
-            <p className="hint">Chưa có tiểu thuyết nào.</p>
-          ) : (
-            <select
-              id="novel-select"
-              className="select"
-              value={selectedNovel}
-              onChange={(e) => setSelectedNovel(e.target.value)}
-            >
-              <option value="">— Chọn tiểu thuyết —</option>
-              {novels.map((n) => (
-                <option key={n.novel_id} value={n.novel_id}>
-                  {n.title}
-                </option>
-              ))}
-            </select>
-          )}
-        </form>
-
-        {/* --- Tao chuong --- */}
-        <form className="card" onSubmit={createChapter}>
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>2 · Thêm chương</h2>
-          {!selectedNovel ? (
-            <p className="hint">Hãy chọn tiểu thuyết ở bước 1 trước.</p>
-          ) : null}
-          <div className="field">
-            <label className="label" htmlFor="chapter-title">
-              Tiêu đề chương
-            </label>
-            <input
-              id="chapter-title"
-              className="input"
-              value={chapterTitle}
-              onChange={(e) => setChapterTitle(e.target.value)}
-              disabled={!selectedNovel}
-              placeholder="Chương 1: Khởi đầu"
-            />
-          </div>
-          <div className="field">
-            <label className="label" htmlFor="chapter-content">
-              Nội dung
-            </label>
-            <textarea
-              id="chapter-content"
-              className="textarea"
-              value={chapterContent}
-              onChange={(e) => setChapterContent(e.target.value)}
-              disabled={!selectedNovel}
-              placeholder="Dán hoặc gõ nội dung chương ở đây..."
-            />
-            <p className="hint">
-              {chapterContent.length.toLocaleString("vi-VN")} ký tự
-            </p>
-          </div>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={!selectedNovel || busy === "chapter"}
-          >
-            {busy === "chapter" ? "Đang lưu..." : "Thêm chương"}
-          </button>
-        </form>
-      </div>
-
-      {/* --- Tao audio --- */}
-      <form className="card" onSubmit={submitJob} style={{ marginTop: 18 }}>
-        <h2 style={{ fontSize: 16, marginTop: 0 }}>3 · Tạo audio</h2>
-
-        <div
-          style={{
-            display: "grid",
-            gap: 14,
-            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          }}
-        >
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label" htmlFor="chapter-select">
-              Chương
-            </label>
-            <select
-              id="chapter-select"
-              className="select"
-              value={selectedChapter}
-              onChange={(e) => setSelectedChapter(e.target.value)}
-              disabled={chapters.length === 0}
-            >
-              <option value="">
-                {chapters.length === 0 ? "— Chưa có chương —" : "— Chọn chương —"}
-              </option>
-              {chapters.map((c) => (
-                <option key={c.chapter_id} value={c.chapter_id}>
-                  #{c.order_index} · {c.title}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label className="label" htmlFor="voice-select">
-              Giọng đọc ({voices.length})
-            </label>
-            <select
-              id="voice-select"
-              className="select"
-              value={selectedVoice}
-              onChange={(e) => setSelectedVoice(e.target.value)}
-            >
-              {voices.map((v) => (
-                <option
-                  key={v.voice_id}
-                  value={v.voice_id}
-                  disabled={!v.installed}
-                >
-                  {v.display_name} · {v.provider_label}
-                  {v.installed ? "" : " (chưa sẵn sàng)"}
-                </option>
-              ))}
-            </select>
-            {voice && !voice.commercial_ready ? (
-              <p className="hint" style={{ color: "var(--warn)" }}>
-                Giọng chạy cục bộ — chưa xác minh giấy phép, chỉ dùng để phát
-                triển.
-              </p>
-            ) : null}
-          </div>
+    <div className="page">
+      <header className="row-between">
+        <div className="stack-2">
+          <span className="eyebrow">Audio Studio</span>
+          <h1 className="page-title">Tạo audio từ văn bản</h1>
+          <p className="lead" style={{ maxWidth: 620 }}>
+            Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là
+            riêng tư và không trở thành chương fanfic.
+          </p>
         </div>
+        <Link className="btn" href="/library">
+          Thư viện audio của tôi
+        </Link>
+      </header>
 
-        <button
-          type="submit"
-          className="btn btn-primary"
-          style={{ marginTop: 16 }}
-          disabled={!selectedChapter || !selectedVoice || busy === "job"}
-        >
-          {busy === "job" ? "Đang gửi..." : "Gửi yêu cầu tạo audio"}
-        </button>
+      {bootError ? (
+        <ErrorState message={bootError} onRetry={retryBoot} />
+      ) : (
+        <div className="split">
+          {/* ------------------------------------------------ cot chinh */}
+          <section className="stack-5">
+            <form className="card stack" onSubmit={submit}>
+              <div className="field">
+                <label className="label" htmlFor="studio-title">
+                  Tên audio <span className="hint">(để trống sẽ tự đặt)</span>
+                </label>
+                <input
+                  id="studio-title"
+                  className="input"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Ví dụ: Chương mở đầu"
+                  maxLength={200}
+                />
+              </div>
 
-        {chapter ? (
-          <p className="hint" style={{ marginBottom: 0 }}>
-            Sẽ tạo audio cho “{chapter.title}” ·{" "}
-            {chapter.char_count.toLocaleString("vi-VN")} ký tự
-          </p>
-        ) : null}
-      </form>
+              <div className="field">
+                <div className="label-row">
+                  <label className="label" htmlFor="studio-text">
+                    Nội dung cần đọc
+                  </label>
+                  <span
+                    className={`counter${over ? " counter-over" : nearLimit ? " counter-warn" : ""}`}
+                    role="status"
+                  >
+                    {formatNumber(chars)} / {formatNumber(MAX_CHARS)} ký tự
+                  </span>
+                </div>
+                <textarea
+                  id="studio-text"
+                  className="textarea textarea-tall"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="Dán hoặc gõ văn bản tiếng Việt vào đây…"
+                  aria-describedby="studio-text-hint"
+                  aria-invalid={over}
+                />
+                <p className="hint" id="studio-text-hint">
+                  {over
+                    ? `Vượt quá ${formatNumber(MAX_CHARS)} ký tự. Hãy cắt bớt hoặc chia thành nhiều phần.`
+                    : "Văn bản dài hơn sẽ mất nhiều thời gian xử lý hơn."}
+                </p>
+              </div>
 
-      {/* --- Trang thai job --- */}
-      {job ? (
-        <section className="card" style={{ marginTop: 18 }} aria-live="polite">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <h2 style={{ fontSize: 16, margin: 0 }}>Trạng thái job</h2>
-            <JobBadge status={job.status} />
-            {reused ? (
-              <span className="badge">Dùng lại job đã có</span>
+              <div className="grid-2">
+                <div className="field">
+                  <label className="label" htmlFor="studio-voice">
+                    Giọng đọc
+                  </label>
+                  {booting ? (
+                    <div className="sk" style={{ height: 42 }} aria-hidden="true" />
+                  ) : availableVoices.length === 0 ? (
+                    <Alert kind="warn">
+                      Chưa có giọng đọc nào sẵn sàng. Kiểm tra lại cấu hình
+                      backend rồi tải lại trang.
+                    </Alert>
+                  ) : (
+                    <select
+                      id="studio-voice"
+                      className="select"
+                      value={voiceId}
+                      onChange={(e) => setVoiceId(e.target.value)}
+                    >
+                      {availableVoices.map((voice) => (
+                        <option key={voice.voice_id} value={voice.voice_id}>
+                          {voice.display_name} · {voice.provider_label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div className="field">
+                  <span className="label" id="studio-rate-label">
+                    Tốc độ đọc
+                  </span>
+                  <div
+                    className="seg"
+                    role="group"
+                    aria-labelledby="studio-rate-label"
+                    style={{ flexWrap: "wrap" }}
+                  >
+                    {RATES.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className="seg-item"
+                        aria-pressed={rate === option.value}
+                        onClick={() => setRate(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {formError ? <Alert kind="error">{formError}</Alert> : null}
+
+              <div className="row">
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-lg"
+                  disabled={!canSubmit}
+                >
+                  {submitting ? <span className="spinner" aria-hidden="true" /> : null}
+                  Tạo audio
+                </button>
+                {text ? (
+                  <button type="button" className="btn btn-ghost" onClick={reset}>
+                    Xoá nội dung
+                  </button>
+                ) : null}
+              </div>
+            </form>
+
+            {/* trang thai job dang chay */}
+            {activeJob ? (
+              <section className="card stack" aria-live="polite">
+                <div className="row-between">
+                  <h2 className="section-title">Tiến trình</h2>
+                  <JobBadge status={activeJob.status} />
+                </div>
+
+                {activeJob.status === "pending" ? (
+                  <>
+                    <ProgressBar percent={6} indeterminate label="Đang xếp hàng" />
+                    <p className="hint">Job đã nhận, đang chờ tới lượt xử lý.</p>
+                  </>
+                ) : null}
+
+                {activeJob.status === "running" ? (
+                  <>
+                    <ProgressBar
+                      percent={activeJob.progress || 8}
+                      indeterminate={!activeJob.total_parts}
+                      label="Đang tổng hợp giọng đọc"
+                    />
+                    <p className="hint">
+                      {activeJob.total_parts
+                        ? `Đã xong ${activeJob.done_parts}/${activeJob.total_parts} đoạn`
+                        : "Đang chuẩn bị…"}
+                    </p>
+                  </>
+                ) : null}
+
+                {activeJob.status === "completed" && activeChapterId ? (
+                  <>
+                    <AudioPlayer
+                      chapterId={activeChapterId}
+                      title={chapterById.get(activeChapterId)?.title ?? "Audio"}
+                    />
+                    <div className="row">
+                      <button type="button" className="btn" onClick={reset}>
+                        Tạo audio khác
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+
+                {activeJob.status === "failed" ? (
+                  <>
+                    <Alert kind="error">
+                      {activeJob.error_message || "Không rõ nguyên nhân."}
+                      {activeJob.error_kind ? (
+                        <span className="hint"> (mã: {activeJob.error_kind})</span>
+                      ) : null}
+                    </Alert>
+                    <p className="hint">
+                      Hệ thống không tự đổi sang giọng khác. Bạn có thể thử lại
+                      với cùng giọng, hoặc chọn giọng khác rồi tạo lại.
+                    </p>
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => retry(activeJob)}
+                      >
+                        Thử lại
+                      </button>
+                      <button type="button" className="btn btn-ghost" onClick={reset}>
+                        Bỏ qua
+                      </button>
+                    </div>
+                  </>
+                ) : null}
+              </section>
             ) : null}
-            {job.status === "running" || job.status === "pending" ? (
-              <span className="spinner" aria-hidden="true" />
-            ) : null}
-          </div>
+          </section>
 
-          <p className="hint" style={{ marginBottom: 6 }}>
-            Giọng: {job.voice_id} · tiến trình {job.progress}%
-            {job.total_parts ? ` (${job.done_parts}/${job.total_parts} phần)` : ""}
-          </p>
-
-          {reused ? (
-            <Alert kind="ok">
-              Nội dung, giọng và thiết lập không đổi nên hệ thống dùng lại job
-              trước — không gọi lại dịch vụ tạo audio.
-            </Alert>
-          ) : null}
-
-          {job.status === "failed" ? (
-            <Alert kind="error">
-              <strong>Tạo audio thất bại.</strong>{" "}
-              {job.error_message || "Không rõ nguyên nhân."}
-              {job.error_kind ? (
-                <span className="hint"> (mã lỗi: {job.error_kind})</span>
+          {/* ------------------------------------------------ cot phu */}
+          <aside className="stack sticky-side">
+            <section className="card stack">
+              <h2 className="section-title">Lịch sử audio</h2>
+              {booting ? (
+                <SkeletonList count={3} />
+              ) : history.length === 0 ? (
+                <p className="hint">
+                  Chưa có audio nào. Audio bạn tạo sẽ hiện ở đây.
+                </p>
+              ) : (
+                <div className="list">
+                  {history.slice(0, 8).map(({ job, chapter }) => (
+                    <div key={job.job_id} className="list-item" style={{ alignItems: "flex-start" }}>
+                      <div className="stack-2" style={{ flex: 1, minWidth: 0 }}>
+                        <strong className="truncate" style={{ fontSize: "var(--t-sm)" }}>
+                          {chapter?.title ?? "Audio"}
+                        </strong>
+                        <span className="hint">{formatDate(job.created_at)}</span>
+                        <div className="row" style={{ gap: "var(--s2)" }}>
+                          <JobBadge status={job.status} />
+                          {job.status === "completed" ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-ghost"
+                              onClick={() => {
+                                setActiveChapterId(job.chapter_id);
+                                setActiveJob(job);
+                              }}
+                            >
+                              Nghe lại
+                            </button>
+                          ) : null}
+                          {job.status === "failed" ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              onClick={() => retry(job)}
+                            >
+                              Thử lại
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {history.length > 8 ? (
+                <Link className="btn btn-block" href="/library">
+                  Xem tất cả ({history.length})
+                </Link>
               ) : null}
-              <br />
-              Hệ thống không tự đổi sang giọng khác — bạn hãy chọn giọng khác
-              rồi gửi lại nếu muốn.
-            </Alert>
-          ) : null}
+            </section>
 
-          {job.status === "completed" && audioChapterId ? (
-            <div style={{ marginTop: 12 }}>
-              <AudioPlayer
-                src={api.audioUrl(audioChapterId)}
-                title={chapter?.title ?? "Audio chương"}
-                subtitle={`Giọng: ${voice?.display_name ?? job.voice_id}`}
-              />
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-    </>
+            <section className="card stack-2">
+              <h2 className="section-title">Mẹo</h2>
+              <p className="hint">
+                Văn bản có dấu câu rõ ràng sẽ cho giọng đọc tự nhiên hơn.
+              </p>
+              <p className="hint">
+                Cùng một nội dung, cùng giọng và cùng tốc độ sẽ dùng lại audio
+                đã tạo trước đó thay vì tạo mới.
+              </p>
+            </section>
+          </aside>
+        </div>
+      )}
+    </div>
   );
 }

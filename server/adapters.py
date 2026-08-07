@@ -68,7 +68,8 @@ class StorageAdapter(Protocol):
     def get(self, key: str) -> bytes: ...
     def exists(self, key: str) -> bool: ...
     def size(self, key: str) -> int: ...
-    def signed_url(self, key: str, expires_seconds: int = 3600) -> Optional[str]: ...
+    def signed_url(self, key: str, expires_seconds: int = 3600,
+                   download_name: Optional[str] = None) -> Optional[str]: ...
 
 
 class MetadataStore(Protocol):
@@ -255,7 +256,8 @@ class LocalStorageAdapter:
         target = self._path(key)
         return target.stat().st_size if target.is_file() else 0
 
-    def signed_url(self, key: str, expires_seconds: int = 3600) -> Optional[str]:
+    def signed_url(self, key: str, expires_seconds: int = 3600,
+                   download_name: Optional[str] = None) -> Optional[str]:
         """
         Ban cuc bo khong co URL ky san.
 

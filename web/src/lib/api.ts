@@ -222,4 +222,25 @@ export const api = {
     ),
 
   audioUrl: (chapterId: string) => `${API_BASE}/api/audio/${chapterId}`,
+
+  /**
+   * Xin URL phat duoc cho mot chuong, SAU KHI backend kiem tra quyen.
+   *
+   * The `<audio src>` khong gui duoc header `Authorization`, con `fetch()`
+   * co header do thi chet o buoc redirect sang R2 vi bucket khong mo CORS.
+   * Nen phai lay URL ky duoi dang JSON roi tu gan vao `<audio>` / `<a>`.
+   */
+  audioLink: (chapterId: string, download = false) =>
+    request<AudioLink>(
+      `/api/audio/${chapterId}/url${download ? "?download=true" : ""}`,
+    ),
 };
+
+export interface AudioLink {
+  /** URL ky san (che do R2). Gan thang vao `<audio src>` hoac `<a href>`. */
+  url: string | null;
+  /** Che do kho cuc bo: phai stream qua backend kem token. */
+  stream_url: string | null;
+  expires_in: number | null;
+  size_bytes: number;
+}

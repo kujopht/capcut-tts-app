@@ -517,6 +517,46 @@ def _may_listen(chapter_id: str, authorization: Optional[str]) -> None:
         )
 
 
+@app.get("/api/audio/{chapter_id}/url")
+def audio_url(
+    chapter_id: str, download: bool = False,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """
+    Tra ve URL PHAT DUOC cho mot chuong, SAU KHI da kiem tra quyen.
+
+    VI SAO CAN ENDPOINT NAY: the `<audio src>` cua trinh duyet khong gui duoc
+    header `Authorization`, va `fetch()` co header do thi lai chet o buoc
+    redirect sang R2 vi bucket khong mo CORS. Da kiem chung tren trinh duyet
+    that: `fetch` -> "Failed to fetch", the `<audio>` -> MEDIA_ERR_SRC_NOT_SUPPORTED.
+    Nen frontend can nhan URL ky duoi dang JSON roi tu gan vao `<audio src>`
+    (the media khong doi CORS) hoac vao `<a href>` de tai ve.
+
+    Kiem tra quyen dung y het `/api/audio/{chapter_id}` - khong noi long gi.
+
+    `download=true` bat trinh duyet tai ve thay vi phat trong tab.
+    """
+    _may_listen(chapter_id, authorization)
+
+    track = store.track_for_chapter(chapter_id)
+    if track is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Chương này chưa có audio.")
+
+    name = f"{chapter_id}.mp3" if download else None
+    url = storage.signed_url(track.object_key,
+                             expires_seconds=AUDIO_URL_TTL_SECONDS,
+                             download_name=name)
+    return {
+        # Kho co URL ky (R2): gan thang vao <audio src> hoac <a href>.
+        "url": url,
+        # Kho cuc bo: khong co URL ky -> tang tren phai stream qua backend
+        # bang fetch co kem token (cung origin nen khong vuong CORS).
+        "stream_url": None if url else f"/api/audio/{chapter_id}",
+        "expires_in": AUDIO_URL_TTL_SECONDS if url else None,
+        "size_bytes": track.size_bytes,
+    }
+
+
 @app.get("/api/audio/{chapter_id}")
 def stream_audio(
     chapter_id: str, authorization: Optional[str] = Header(default=None)

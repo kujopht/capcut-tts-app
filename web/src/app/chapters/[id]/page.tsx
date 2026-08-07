@@ -1,13 +1,14 @@
 "use client";
 
-/** Trang chuong: trinh phat audio + noi dung chuong. */
+/** Doc chuong: trinh phat audio o tren, noi dung o duoi. */
 
 import Link from "next/link";
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback } from "react";
 import { api, type AudioTrack, type Chapter, type Novel } from "@/lib/api";
-import { errorMessage } from "@/lib/session";
+import { useSession } from "@/lib/session";
+import { useAsyncData } from "@/lib/useAsyncData";
 import { AudioPlayer } from "@/components/AudioPlayer";
-import { EmptyState, ErrorState, Loading } from "@/components/states";
+import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
 
 export default function ChapterPage({
   params,
@@ -15,119 +16,98 @@ export default function ChapterPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const [chapter, setChapter] = useState<Chapter | null>(null);
-  const [novel, setNovel] = useState<Novel | null>(null);
-  const [audio, setAudio] = useState<AudioTrack | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [missing, setMissing] = useState(false);
+  const { profile } = useSession();
 
-  // Chi nap du lieu; moi setState deu nam trong callback bat dong bo.
-  const fetchChapter = useCallback(
-    () =>
-      api
-        .getChapter(id)
-        .then(async (r) => {
-          setChapter(r.chapter);
-          setAudio(r.audio);
-          try {
-            const parent = await api.getNovel(r.chapter.novel_id);
-            setNovel(parent.novel);
-          } catch {
-            /* thieu novel khong chan viec doc chuong */
-          }
-        })
-        .catch((e) => {
-          if (e?.status === 404) setMissing(true);
-          else setError(errorMessage(e));
-        })
-        .finally(() => setLoading(false)),
-    [id],
-  );
+  const fetchChapter = useCallback(async () => {
+    const r = await api.getChapter(id);
+    const parent = await api
+      .getNovel(r.chapter.novel_id)
+      .then((detail) => detail.novel)
+      .catch(() => null);
+    return { chapter: r.chapter, audio: r.audio, novel: parent };
+  }, [id]);
 
-  useEffect(() => {
-    void fetchChapter();
-  }, [fetchChapter]);
+  const { data, loading, error, missing, reload } = useAsyncData(fetchChapter);
+  const chapter: Chapter | null = data?.chapter ?? null;
+  const audio: AudioTrack | null = data?.audio ?? null;
+  const novel: Novel | null = data?.novel ?? null;
 
-  // Nut "Thu lai" la event handler nen dat state truc tiep o day la dung.
-  const retry = useCallback(() => {
-    setLoading(true);
-    setError("");
-    setMissing(false);
-    void fetchChapter();
-  }, [fetchChapter]);
-
-  if (loading) return <Loading label="Đang tải chương..." />;
-
-  if (missing) {
+  if (loading) {
     return (
-      <EmptyState
-        icon="🔎"
-        title="Không tìm thấy chương"
-        body="Chương này có thể đã bị xoá hoặc đường dẫn không đúng."
-        action={
-          <Link href="/library" className="btn btn-primary">
-            Về thư viện
-          </Link>
-        }
-      />
+      <div className="page">
+        <div className="sk sk-title" style={{ height: 30, width: "45%" }} />
+        <SkeletonList count={3} />
+      </div>
     );
   }
 
-  if (error) return <ErrorState message={error} onRetry={retry} />;
-  if (!chapter) return null;
+  if (missing) {
+    return (
+      <div className="page">
+        <EmptyState
+          icon="🔍"
+          title="Không tìm thấy chương này"
+          action={
+            <Link className="btn btn-primary" href="/fanfic">
+              Về trang khám phá
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (error || !chapter) {
+    return (
+      <div className="page">
+        <ErrorState message={error || "Không tải được chương."} onRetry={reload} />
+      </div>
+    );
+  }
+
+  const isOwner = profile?.user_id === chapter.owner_id;
 
   return (
-    <>
-      <nav aria-label="Đường dẫn" style={{ marginTop: 24 }}>
+    <div className="page">
+      <nav aria-label="Đường dẫn">
         <Link href={`/novels/${chapter.novel_id}`} className="hint">
-          ← {novel?.title ?? "Về tiểu thuyết"}
+          ← {novel?.title ?? "Về truyện"}
         </Link>
       </nav>
 
-      <h1 className="page-title" style={{ marginTop: 12 }}>
-        {chapter.title}
-      </h1>
-      <p className="page-sub">
-        Chương {chapter.order_index}
-        {novel ? ` · ${novel.title}` : ""} ·{" "}
-        {chapter.char_count.toLocaleString("vi-VN")} ký tự
-      </p>
+      <header className="stack-2">
+        <h1 className="page-title">{chapter.title}</h1>
+        <span className="hint">{formatNumber(chapter.char_count)} ký tự</span>
+      </header>
 
       {audio ? (
-        <AudioPlayer
-          src={api.audioUrl(chapter.chapter_id)}
-          title={chapter.title}
-          subtitle={novel?.title}
-        />
+        <AudioPlayer chapterId={chapter.chapter_id} title={chapter.title} />
       ) : (
-        <div className="card">
-          <p className="state-title" style={{ marginTop: 0 }}>
-            Chương này chưa có audio
-          </p>
-          <p className="hint" style={{ marginBottom: 12 }}>
-            Vào Creator Studio, chọn giọng đọc và gửi yêu cầu tạo audio cho
-            chương này.
-          </p>
-          <Link href="/studio" className="btn btn-primary">
-            Tạo audio trong Creator Studio
-          </Link>
-        </div>
+        <EmptyState
+          icon="🎧"
+          title="Chương này chưa có audio"
+          hint={
+            isOwner
+              ? "Bạn có thể tạo audio cho chương trong khu vực tác giả."
+              : "Tác giả chưa tạo bản audio cho chương này."
+          }
+          action={
+            isOwner ? (
+              <Link className="btn btn-primary" href="/write">
+                Tạo audio cho chương
+              </Link>
+            ) : undefined
+          }
+        />
       )}
 
-      <section style={{ marginTop: 28 }} aria-label="Nội dung chương">
-        <h2 style={{ fontSize: 18 }}>Nội dung</h2>
+      <section className="card" aria-label="Nội dung chương">
         {chapter.content ? (
-          <article
-            className="card"
-            style={{ whiteSpace: "pre-wrap", lineHeight: 1.8 }}
-          >
-            {chapter.content}
-          </article>
+          <div className="prose">{chapter.content}</div>
         ) : (
           <p className="hint">Chương này chưa có nội dung.</p>
         )}
       </section>
-    </>
+    </div>
   );
 }

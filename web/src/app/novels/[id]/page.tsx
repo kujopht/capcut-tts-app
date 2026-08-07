@@ -1,12 +1,19 @@
 "use client";
 
-/** Chi tiet tieu thuyet: thong tin + danh sach chuong kem trang thai audio. */
+/** Chi tiet truyen: thong tin, danh sach chuong kem trang thai audio. */
 
 import Link from "next/link";
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback } from "react";
 import { api, type Chapter, type Novel } from "@/lib/api";
-import { errorMessage } from "@/lib/session";
-import { EmptyState, ErrorState, Loading } from "@/components/states";
+import { useSession } from "@/lib/session";
+import { useAsyncData } from "@/lib/useAsyncData";
+import {
+  EmptyState,
+  ErrorState,
+  SkeletonList,
+  formatDate,
+  formatNumber,
+} from "@/components/ui";
 
 export default function NovelDetailPage({
   params,
@@ -14,179 +21,146 @@ export default function NovelDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const [novel, setNovel] = useState<Novel | null>(null);
-  const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [audioReady, setAudioReady] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [missing, setMissing] = useState(false);
+  const { profile } = useSession();
 
-  // Chi nap du lieu; moi setState deu nam trong callback bat dong bo.
-  const fetchNovel = useCallback(
-    () =>
-      api
-        .getNovel(id)
-        .then(async (r) => {
-          setNovel(r.novel);
-          setChapters(r.chapters);
-          // Hoi trang thai audio cua tung chuong
-          const flags: Record<string, boolean> = {};
-          await Promise.all(
-            r.chapters.map(async (c) => {
-              try {
-                const detail = await api.getChapter(c.chapter_id);
-                flags[c.chapter_id] = Boolean(detail.audio);
-              } catch {
-                flags[c.chapter_id] = false;
-              }
-            }),
-          );
-          setAudioReady(flags);
-        })
-        .catch((e) => {
-          if (e?.status === 404) setMissing(true);
-          else setError(errorMessage(e));
-        })
-        .finally(() => setLoading(false)),
-    [id],
-  );
+  const fetchNovel = useCallback(async () => {
+    const r = await api.getNovel(id);
+    const flags = await Promise.all(
+      r.chapters.map((chapter) =>
+        api
+          .getChapter(chapter.chapter_id)
+          .then((detail) => [chapter.chapter_id, detail.audio !== null] as const)
+          .catch(() => [chapter.chapter_id, false] as const),
+      ),
+    );
+    return {
+      novel: r.novel,
+      chapters: r.chapters,
+      audioReady: Object.fromEntries(flags) as Record<string, boolean>,
+    };
+  }, [id]);
 
-  useEffect(() => {
-    void fetchNovel();
-  }, [fetchNovel]);
+  const { data, loading, error, missing, reload } = useAsyncData(fetchNovel);
+  const novel: Novel | null = data?.novel ?? null;
+  const chapters: Chapter[] = data?.chapters ?? [];
+  const audioReady: Record<string, boolean> = data?.audioReady ?? {};
 
-  // Nut "Thu lai" la event handler nen dat state truc tiep o day la dung.
-  const retry = useCallback(() => {
-    setLoading(true);
-    setError("");
-    setMissing(false);
-    void fetchNovel();
-  }, [fetchNovel]);
-
-  if (loading) return <Loading label="Đang tải tiểu thuyết..." />;
-
-  if (missing) {
+  if (loading) {
     return (
-      <EmptyState
-        icon="🔎"
-        title="Không tìm thấy tiểu thuyết"
-        body="Truyện này có thể đã bị xoá hoặc đường dẫn không đúng."
-        action={
-          <Link href="/library" className="btn btn-primary">
-            Về thư viện
-          </Link>
-        }
-      />
+      <div className="page">
+        <div className="sk sk-title" style={{ height: 32, width: "40%" }} />
+        <SkeletonList count={5} />
+      </div>
     );
   }
 
-  if (error) return <ErrorState message={error} onRetry={retry} />;
-  if (!novel) return null;
-
-  return (
-    <>
-      <nav aria-label="Đường dẫn" style={{ marginTop: 24 }}>
-        <Link href="/library" className="hint">
-          ← Thư viện
-        </Link>
-      </nav>
-
-      <header
-        style={{
-          display: "flex",
-          gap: 20,
-          marginTop: 14,
-          marginBottom: 28,
-          flexWrap: "wrap",
-        }}
-      >
-        <div
-          className="novel-cover"
-          aria-hidden="true"
-          style={{ width: 150, height: 150, borderRadius: 14, flexShrink: 0 }}
-        >
-          📖
-        </div>
-        <div style={{ flex: "1 1 300px" }}>
-          <h1 style={{ fontSize: 28, margin: "0 0 8px" }}>{novel.title}</h1>
-          <p style={{ color: "var(--text-dim)", marginTop: 0 }}>
-            {novel.description || "Chưa có mô tả."}
-          </p>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <span
-              className={
-                novel.state === "published" ? "badge badge-ok" : "badge"
-              }
-            >
-              {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
-            </span>
-            {novel.tags.map((t) => (
-              <span className="badge" key={t}>
-                {t}
-              </span>
-            ))}
-            <span className="badge">{chapters.length} chương</span>
-          </div>
-        </div>
-      </header>
-
-      <h2 style={{ fontSize: 18 }}>Danh sách chương</h2>
-
-      {chapters.length === 0 ? (
+  if (missing) {
+    return (
+      <div className="page">
         <EmptyState
-          icon="📄"
-          title="Truyện chưa có chương nào"
-          body="Vào Creator Studio để thêm chương đầu tiên."
+          icon="🔍"
+          title="Không tìm thấy truyện này"
+          hint="Truyện có thể đã bị xoá hoặc chưa được xuất bản."
           action={
-            <Link href="/studio" className="btn">
-              Mở Creator Studio
+            <Link className="btn btn-primary" href="/fanfic">
+              Về trang khám phá
             </Link>
           }
         />
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {chapters.map((chapter) => (
-            <li key={chapter.chapter_id} style={{ marginBottom: 10 }}>
-              <div
-                className="card"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 14,
-                  flexWrap: "wrap",
-                }}
-              >
-                <span
-                  className="hint"
-                  style={{ minWidth: 34 }}
-                  aria-hidden="true"
-                >
-                  #{chapter.order_index}
+      </div>
+    );
+  }
+
+  if (error || !novel) {
+    return (
+      <div className="page">
+        <ErrorState message={error || "Không tải được truyện."} onRetry={reload} />
+      </div>
+    );
+  }
+
+  const isOwner = profile?.user_id === novel.owner_id;
+
+  return (
+    <div className="page">
+      <nav aria-label="Đường dẫn">
+        <Link href="/fanfic" className="hint">
+          ← Khám phá Fanfic
+        </Link>
+      </nav>
+
+      <header className="card stack">
+        <div className="row-between">
+          <div className="stack-2" style={{ minWidth: 0, flex: "1 1 320px" }}>
+            <div className="row" style={{ gap: "var(--s2)" }}>
+              <span className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}>
+                {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
+              </span>
+              {novel.tags.map((tag) => (
+                <span key={tag} className="badge">
+                  {tag}
                 </span>
-                <div style={{ flex: "1 1 200px", minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{chapter.title}</div>
-                  <div className="hint">
-                    {chapter.char_count.toLocaleString("vi-VN")} ký tự
-                  </div>
-                </div>
+              ))}
+            </div>
+            <h1 className="page-title">{novel.title}</h1>
+            <p className="lead">{novel.description || "Chưa có mô tả."}</p>
+            <span className="hint">
+              {chapters.length} chương · cập nhật {formatDate(novel.updated_at)}
+            </span>
+          </div>
+          {isOwner ? (
+            <Link className="btn" href="/write">
+              Quản lý truyện
+            </Link>
+          ) : null}
+        </div>
+      </header>
+
+      <section className="stack" aria-label="Danh sách chương">
+        <h2 className="section-title">Danh sách chương</h2>
+        {chapters.length === 0 ? (
+          <EmptyState
+            icon="📄"
+            title="Truyện chưa có chương nào"
+            action={
+              isOwner ? (
+                <Link className="btn btn-primary" href="/write">
+                  Thêm chương đầu tiên
+                </Link>
+              ) : undefined
+            }
+          />
+        ) : (
+          <div className="list">
+            {chapters.map((chapter, index) => (
+              <Link
+                key={chapter.chapter_id}
+                href={`/chapters/${chapter.chapter_id}`}
+                className="list-item"
+              >
+                <span className="list-index" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
+                  <strong className="truncate" style={{ fontSize: "var(--t-sm)" }}>
+                    {chapter.title}
+                  </strong>
+                  <span className="hint">
+                    {formatNumber(chapter.char_count)} ký tự
+                  </span>
+                </span>
                 {audioReady[chapter.chapter_id] ? (
-                  <span className="badge badge-ok">Có audio</span>
+                  <span className="badge badge-ok">
+                    <span aria-hidden="true">🎧</span> Có audio
+                  </span>
                 ) : (
                   <span className="badge">Chưa có audio</span>
                 )}
-                <Link
-                  href={`/chapters/${chapter.chapter_id}`}
-                  className={
-                    audioReady[chapter.chapter_id] ? "btn btn-primary" : "btn"
-                  }
-                >
-                  {audioReady[chapter.chapter_id] ? "▶ Nghe" : "Mở chương"}
-                </Link>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
+              </Link>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

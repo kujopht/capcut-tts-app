@@ -1,12 +1,20 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { SessionProvider } from "@/lib/session";
-import { NavAuth } from "@/components/NavAuth";
+import { ToastProvider } from "@/lib/toast";
+import { NavAuth, NavLinks } from "@/components/NavAuth";
 
 export const metadata: Metadata = {
   title: "Fanfic Audio Studio",
-  description: "Nền tảng nghe audio tiểu thuyết và fanfic. Bản MVP riêng tư.",
+  description:
+    "Tạo audio từ văn bản bất kỳ và nghe fanfic bằng giọng đọc tiếng Việt.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#0b0d12",
 };
 
 export default function RootLayout({
@@ -16,33 +24,42 @@ export default function RootLayout({
     <html lang="vi">
       <body>
         <SessionProvider>
-        <a className="skip-link" href="#main">
-          Bỏ qua điều hướng
-        </a>
-        <header className="nav">
-          <div className="shell nav-inner">
-            <Link href="/" className="brand" aria-label="Fanfic Audio Studio — trang chủ">
-              <span className="brand-mark" aria-hidden="true">
-                ♪
-              </span>
-              <span>Fanfic Audio Studio</span>
-            </Link>
-            <nav className="nav-links" aria-label="Điều hướng chính">
-              <Link href="/library">Thư viện</Link>
-              <Link href="/studio">Creator Studio</Link>
-              <NavAuth />
-            </nav>
-          </div>
-        </header>
-        <main id="main" className="shell">
-          {children}
-        </main>
-        <footer className="shell" style={{ padding: "48px 20px", color: "var(--text-faint)", fontSize: 13 }}>
-          <p>
-            Bản MVP kỹ thuật, dùng riêng. Chưa sẵn sàng thương mại — chưa có
-            thanh toán và chưa xác minh giấy phép cho giọng đọc chạy cục bộ.
-          </p>
-        </footer>
+          <ToastProvider>
+            <a className="skip-link" href="#main">
+              Bỏ qua điều hướng
+            </a>
+
+            <header className="site-header">
+              <div className="wrap">
+                <Link href="/" className="brand">
+                  <span className="brand-mark" aria-hidden="true">
+                    ♫
+                  </span>
+                  <span>
+                    Fanfic <span className="brand-text-sub">Audio Studio</span>
+                  </span>
+                </Link>
+                <NavLinks />
+                <span className="spacer" />
+                <NavAuth />
+              </div>
+            </header>
+
+            <main id="main">
+              <div className="wrap">{children}</div>
+            </main>
+
+            <footer className="site-footer">
+              <div className="wrap row-between">
+                <span>
+                  Fanfic Audio Studio — bản MVP riêng tư, chưa thương mại.
+                </span>
+                <span className="hint">
+                  Giọng đọc chạy cục bộ chưa xác minh giấy phép thương mại.
+                </span>
+              </div>
+            </footer>
+          </ToastProvider>
         </SessionProvider>
       </body>
     </html>

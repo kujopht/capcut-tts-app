@@ -1,87 +1,116 @@
 "use client";
 
 /**
- * Trinh phat audio.
+ * Trinh phat audio + nut tai MP3.
  *
- * Dung the <audio> co san cua trinh duyet - khong them thu vien nao. Da co
- * san play/pause, tua, thoi luong va am luong; phan ben tren chi bo sung
- * nhan de doc man hinh va trang thai loi bang tieng Viet.
+ * Dung the <audio controls> co san cua trinh duyet (dieu khien ban phim,
+ * doc man hinh, tua — deu co san va dung chuan) nhung ep ve dark theme bang
+ * `color-scheme: dark` trong globals.css.
+ *
+ * URL phat KHONG phai la `/api/audio/{id}` — xem `lib/audio.ts` de biet vi sao.
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { audioFileName, resolveAudio, type PlayableAudio } from "@/lib/audio";
+import { errorMessage } from "@/lib/session";
+import { formatBytes } from "./ui";
 
-interface Props {
-  src: string;
+export function AudioPlayer({
+  chapterId,
+  title,
+  compact = false,
+}: {
+  chapterId: string;
   title: string;
-  subtitle?: string;
-}
-
-export function AudioPlayer({ src, title, subtitle }: Props) {
-  const ref = useRef<HTMLAudioElement | null>(null);
+  compact?: boolean;
+}) {
+  const [audio, setAudio] = useState<PlayableAudio | null>(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+  const revoke = useRef<(() => void) | null>(null);
 
-  // Doi sang bai khac thi dat lai trang thai NGAY TRONG RENDER. Day la cach
-  // React khuyen dung khi state phai theo prop, thay vi dong bo bang effect:
-  // React chay lai render truoc khi ve ra man hinh nen khong co nhap nhay.
-  const [lastSrc, setLastSrc] = useState(src);
-  if (lastSrc !== src) {
-    setLastSrc(src);
-    setError("");
-    setReady(false);
+  useEffect(() => {
+    let cancelled = false;
+
+    resolveAudio(chapterId)
+      .then((resolved) => {
+        if (cancelled) {
+          resolved.revoke?.();
+          return;
+        }
+        revoke.current = resolved.revoke;
+        setAudio(resolved);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(errorMessage(cause));
+      });
+
+    return () => {
+      cancelled = true;
+      revoke.current?.();
+      revoke.current = null;
+    };
+  }, [chapterId]);
+
+  if (error) {
+    return (
+      <div className="alert alert-error" role="alert">
+        <span aria-hidden="true">⛔</span>
+        <span>{error}</span>
+      </div>
+    );
   }
 
   return (
-    <section className="player" aria-label={`Trình phát: ${title}`}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div
-          aria-hidden="true"
-          style={{
-            width: 46,
-            height: 46,
-            borderRadius: 12,
-            background: "linear-gradient(135deg,#7c5cff,#4f8dff)",
-            display: "grid",
-            placeItems: "center",
-            fontSize: 20,
-            flexShrink: 0,
-          }}
-        >
-          ♪
+    <div className="player">
+      {!compact ? (
+        <div className="row-between">
+          <span className="row" style={{ gap: "var(--s2)" }}>
+            <span aria-hidden="true">🎧</span>
+            <strong style={{ fontSize: "var(--t-sm)" }}>{title}</strong>
+          </span>
+          {audio ? (
+            <span className="hint">{formatBytes(audio.sizeBytes)}</span>
+          ) : null}
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700 }}>{title}</div>
-          {subtitle ? <div className="hint">{subtitle}</div> : null}
-        </div>
-      </div>
-
-      {error ? (
-        <p className="alert alert-error" role="alert" style={{ marginTop: 12 }}>
-          {error}
-        </p>
       ) : null}
 
-      <audio
-        ref={ref}
-        src={src}
-        controls
-        preload="metadata"
-        aria-label={`Audio của ${title}`}
-        onCanPlay={() => setReady(true)}
-        onError={() =>
-          setError(
-            "Không phát được audio. File có thể chưa được tạo xong hoặc đã bị xoá.",
-          )
-        }
-      >
-        Trình duyệt của bạn không hỗ trợ phát audio.
-      </audio>
+      {audio ? (
+        <>
+          {/* Audio do chinh nguoi dung tao tu van ban ho nhap; "phu de" chinh
+              la van ban do va da hien ngay tren trang, nen khong can track. */}
+          <audio
+            controls
+            preload="metadata"
+            src={audio.playUrl}
+            aria-label={`Trình phát audio: ${title}`}
+            onCanPlay={() => setReady(true)}
+            onError={() =>
+              setError("Không phát được audio. File có thể đã hết hạn liên kết.")
+            }
+          >
+            Trình duyệt của bạn không hỗ trợ phát audio.
+          </audio>
 
-      {!ready && !error ? (
-        <p className="hint" style={{ marginTop: 8 }} role="status">
-          Đang tải audio...
-        </p>
-      ) : null}
-    </section>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <span className="hint" role="status">
+              {ready ? "Sẵn sàng phát" : "Đang chuẩn bị…"}
+            </span>
+            <a
+              className="btn btn-sm"
+              href={audio.downloadUrl}
+              download={audioFileName(title)}
+            >
+              <span aria-hidden="true">⬇</span> Tải MP3
+            </a>
+          </div>
+        </>
+      ) : (
+        <div className="row" role="status">
+          <span className="spinner" aria-hidden="true" />
+          <span className="hint">Đang lấy liên kết audio…</span>
+        </div>
+      )}
+    </div>
   );
 }

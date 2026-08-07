@@ -182,16 +182,30 @@ nhận được credential nào.
 
 ## Vòng đời TTS job được lưu thế nào
 
-Mọi transition đều đi qua **một giao diện metadata duy nhất** (`create_job` /
-`save_job`). Job runner không bao giờ gọi thẳng Appwrite, nên bản mock và bản
-Appwrite hành xử như nhau.
+Mọi transition đều đi qua **một giao diện metadata duy nhất**. Job runner không
+bao giờ gọi thẳng Appwrite, nên bản mock và bản Appwrite hành xử như nhau.
 
 | Transition | Lưu ở đâu | Thời điểm |
 |---|---|---|
 | `pending` | `store.create_job()` | Ngay khi nhận request, **trước** khi khởi động worker |
-| `running` | `store.save_job()` | **Trước** khi gọi tổng hợp giọng |
-| `completed` | `store.save_job()` | **Sau** khi upload xong và đã gán `output_key` |
-| `failed` | `store.save_job()` | Ngay khi tổng hợp, upload hoặc ghi metadata hỏng |
+| `running` | `store.claim_job()` | **Trước** khi gọi tổng hợp giọng |
+| `completed` | `store.save_job_fenced()` | **Sau** khi upload xong và đã gán `output_key` |
+| `failed` | `store.save_job_fenced()` | Ngay khi tổng hợp, upload hoặc ghi metadata hỏng |
+
+`claim_job` **là compare-and-set thật**, không phải đọc-rồi-ghi: Appwrite Cloud
+1.9.6 **có** transaction (`POST /v1/tablesdb/transactions`), và uniqueness của
+`rowId` được cưỡng chế bên trong transaction. Claim gói hai thao tác — tạo dòng
+`job_claims` với id tất định `"{job_id}-{attempt}"`, và cập nhật job sang
+`running` — nên chỉ một worker commit được. Kẻ thua nhận `None` và dừng, không
+gọi TTS. Chi tiết ở `docs/HANDOFF.md`.
+
+`attempts` đóng vai **fencing token**: mọi lần ghi sau claim phải kèm fence, nên
+một worker cũ hồi sinh không thể ghi đè kết quả của lượt chạy mới.
+
+**Sau khi đổi schema phải khởi động lại backend.**
+`AppwriteMetadataStore._supported_fields()` dò xem collection thật sự có thuộc
+tính nào rồi **nhớ trong suốt vòng đời tiến trình**. Tiến trình đang chạy sẽ
+không thấy trường vừa thêm — claim vẫn chạy nhưng ở nhánh không nguyên tử.
 
 Thứ tự bắt buộc: **tổng hợp → upload → tạo `audio_track` → lưu `completed`**.
 Trạng thái `completed` được **ghi bền vững trước, công bố trong bộ nhớ sau**, nên
@@ -200,11 +214,13 @@ một lần poll xen vào giữa cũng không thể thấy thành công chưa đ
 Tiến độ từng đoạn (`done_parts`) chỉ cập nhật trong bộ nhớ — ghi mỗi tick sẽ làm
 ngập Appwrite mà không thêm giá trị nào.
 
-**Giới hạn — chưa có transaction phân tán.** Kho file và kho metadata là hai hệ
+**Giới hạn — chưa có transaction phân tán *giữa R2 và Appwrite*.** (Trong nội bộ
+Appwrite thì transaction có, xem mục trên.) Kho file và kho metadata là hai hệ
 thống tách rời. Nếu ghi `completed` hỏng ngay sau khi upload xong, job sẽ thành
 `failed` còn object đã upload vẫn nằm lại trong kho. Đó là rác vô hại: `output_key`
 bị xoá nên nó không bao giờ được công bố. Đổi lại là **không bao giờ báo thành
-công giả**. Dọn rác này cần một job quét định kỳ — chưa làm.
+công giả**. Rác này dọn bằng `scripts/reconcile_audio.py` — mặc định chỉ đọc,
+muốn xoá phải truyền cả `--delete --yes-really-delete`.
 
 ## Smoke test
 

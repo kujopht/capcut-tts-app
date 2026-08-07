@@ -99,9 +99,32 @@ Index: `novel_id`; tổ hợp `novel_id,order_index`; `owner_id`.
 | `chunk_chars` | integer | | |
 | `created_at` | datetime | ✔ | |
 | `started_at` / `finished_at` | datetime | | |
+| `lease_expires_at` | datetime | | lease của worker đang giữ job |
+| `lease_owner` | string(64) | | id worker đang giữ |
+| `attempts` | integer | | **fencing token**, tăng mỗi lần claim |
 
 Index **quan trọng**: tổ hợp `owner_id,chapter_id,content_hash` — đây là index
-phục vụ idempotency. Thêm `status` để lọc job đang chạy.
+phục vụ idempotency. Thêm `status` để lọc job đang chạy, và `status_lease_idx`
+(`status`, `lease_expires_at`) cho bộ quét job kẹt.
+
+Ba trường lease đều **không bắt buộc**, nên dòng job cũ thiếu chúng vẫn đọc được.
+
+### `job_claims`
+
+Sổ ghi chép của bộ điều phối, **không chứa dữ liệu người dùng**. Nó tồn tại chỉ
+để biến claim thành thao tác nguyên tử: `$id` là `"{job_id}-{attempt}"` nên hai
+worker cùng nhắm một `attempt` sẽ đụng uniqueness ngay trong transaction.
+
+| Thuộc tính | Kiểu | Bắt buộc | Ghi chú |
+|---|---|---|---|
+| `job_id` | string(64) | ✔ | |
+| `attempt` | integer | ✔ | trùng `tts_jobs.attempts` |
+| `worker_id` | string(64) | ✔ | |
+| `created_at` | datetime | ✔ | |
+
+Index: `job_idx` trên `job_id`.
+
+**Rollback:** xoá collection này và ba trường lease ở trên. Không cần sửa mã.
 
 ### `audio_tracks`
 

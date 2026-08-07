@@ -101,6 +101,15 @@ Tách bạch cho rõ:
 3. **Tải cao.** Mới thử tối đa 5 job song song.
 4. ~~**Job kẹt ở `running`.**~~ ĐÃ SỬA — xem "Worker recovery" bên dưới.
 5. Chưa có thanh toán, lịch sử nghe, trừ quota, moderation.
+6. **Chưa có project/bucket Appwrite riêng cho test.** E2E cô lập ở tầng dữ liệu
+   (tài khoản mới + tiền tố `[E2E]` + đối chiếu ảnh chụp id trước/sau). Đủ cho MVP
+   riêng tư; **phải có** trước khi hệ thống chứa dữ liệu người dùng thật.
+7. **Chưa xoá được tài khoản test.** Không có route xoá tài khoản, nên tài khoản
+   `@example.test` còn lại trong Appwrite Auth dù dữ liệu đã sạch.
+8. **Reconciler chưa tự động.** Phải chạy tay, chưa có cron.
+9. **Job chạy trong thread của tiến trình web.** Restart web là giết luôn worker.
+   Recovery xử lý được (đã chứng minh live), nhưng deploy nhiều bản sao sẽ cần
+   worker tách riêng.
 
 ## Biến môi trường
 
@@ -113,13 +122,58 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 `web/.env` — chỉ một biến công khai: `NEXT_PUBLIC_API_BASE`.
 
+## E2E đầy đủ — ĐÃ CHẠY
+
+Báo cáo chi tiết: **`docs/reports/e2e/BAO_CAO_E2E.md`**. Ảnh chụp ở
+`docs/screenshots/e2e/`, báo cáo đối soát ở `docs/reports/e2e/*.json`.
+
+Chạy trên **production build** (`next build` + `next start`), Chromium thật qua
+Playwright, Appwrite + R2 + Edge TTS thật, **không stub** trong hành trình chính.
+
+| Hành trình | Kết quả |
+|---|---|
+| A — Xác thực và phân quyền | ĐẠT 31/31 |
+| B — Library, novel, chapter, validation | ĐẠT 27/27 + giao diện |
+| C — Phân trang và N+1 | ĐẠT 19/19 |
+| D — Studio và TTS | ĐẠT sau khi sửa 1 lỗi |
+| E — Dấu vân tay và cảnh báo audio cũ | ĐẠT 21/21 |
+| F — Recovery trong hành trình thực tế | ĐẠT 12/12 |
+| G — Reconciler | ĐẠT (4 chế độ) |
+| H — Responsive và bàn phím | ĐẠT (7 route × 2 viewport) |
+
+Số request API (đã loại static/source map/HMR) — **không** tăng theo số bản ghi:
+
+| Trang | 0 bản ghi | 26–27 bản ghi |
+|---|---|---|
+| `/library` | 4 | **4** |
+| `/studio` | — | **5** |
+| `/novels/{id}` (3 chương) | — | **2** |
+
+`/library` với 27 audio phát **0** request `/api/audio/*/url` — presigned URL chỉ
+sinh khi người dùng bấm nghe hoặc tải.
+
+Hai lỗi thật đã sửa trong lượt này (kèm regression test đã kiểm chứng là hỏng trên
+mã cũ):
+
+1. **`/studio` kẹt ở "Đang xử lý"** sau khi tải lại trang giữa lúc job chạy —
+   `activeJob` chỉ đặt trong hàm submit nên sau reload là `null`, vòng poll thoát
+   ngay. Sửa ở `web/src/app/studio/page.tsx`; test ở
+   `web/tests/e2e-regressions.test.mjs`.
+2. **Tiêu đề chỉ gồm khoảng trắng** lọt qua rồi lưu thành `''` (trong khi `""` bị
+   422). Sửa bằng `StringConstraints(strip_whitespace=True, ...)` ở
+   `server/main.py`; test ở `server/tests/test_e2e_regressions.py`.
+
+Dọn dẹp: 42 truyện / 42 chương / 42 job / 42 track / 41 object / 48 dòng
+`job_claims` fixture đã xoá. Đối chiếu ảnh chụp trước-sau: **mất 0, sót 0** ở cả
+sáu tập hợp — không đụng bản ghi nào có từ trước.
+
 ## Kết quả kiểm thử gần nhất
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | 505 test: 504 đạt, 1 bỏ qua (chạy 3 lần, kết quả ổn định) |
+| `server/tests` | **521 test: 520 đạt, 1 bỏ qua** (chạy 3 lần, kết quả ổn định) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `web` (`node --test`) | 149/149 đạt |
+| `web` (`node --test`) | **152/152 đạt** |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
 | `npx next build` | Thành công, 7 route |
@@ -168,8 +222,8 @@ Kết quả lần chạy gần nhất:
 | Python | 3.12.10 |
 | Gói cài từ `server/requirements.txt` | 39 gói, **không có PySide6**, không cài tay gói nào |
 | `PYTHONPATH` | Rỗng — không cần đặt thủ công |
-| `server/tests` | **505 test: 504 đạt, 1 bỏ qua** |
-| `web` `npm test` | 149/149 đạt |
+| `server/tests` | **521 test: 520 đạt, 1 bỏ qua** |
+| `web` `npm test` | **152/152 đạt** |
 | `npx tsc --noEmit` | exit 0 |
 | `npx eslint .` | exit 0 |
 | `npx next build` | Thành công |
@@ -468,6 +522,12 @@ trên schema **chưa** migrate — chỉ là chưa có claim nguyên tử.
 **Rollback:** xoá collection `job_claims` và ba thuộc tính vừa thêm. Không cần
 sửa mã: `_supported_fields()` sẽ tự thấy chúng biến mất. Không có dữ liệu người
 dùng nào nằm trong `job_claims` — nó thuần tuý là sổ ghi chép của bộ điều phối.
+
+> **Bắt buộc: đổi schema xong phải khởi động lại backend.**
+> `_supported_fields()` cache theo **vòng đời tiến trình**. Một tiến trình đang
+> chạy sẽ không bao giờ thấy trường vừa thêm, nên claim tiếp tục chạy ở nhánh
+> không nguyên tử mà không báo lỗi gì. Cả migration lẫn rollback đều phải kèm
+> một lần restart, và mọi phép đo E2E phải chạy trên tiến trình mới.
 
 ### Đã kiểm chứng thật
 

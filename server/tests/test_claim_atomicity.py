@@ -322,6 +322,139 @@ class TestOneJobMakesAtMostOneTrack(Base):
         self.assertEqual(report.mo_coi, [])
 
 
+# ==================================================== dung MOT lan tong hop
+
+
+class _WorkerPerThread:
+    """
+    Bao quanh kho that, thay `worker_id` bang danh tinh RIENG cua tung luong.
+
+    Vi sao can: `_run_job` doc `server_main.WORKER_ID` — mot hang so cua TIEN
+    TRINH. Ngoai doi moi worker la mot tien trinh nen id khac nhau; goi 10 luong
+    trong cung tien trinh thi ca 10 mang chung mot id, va `claim_job` se coi
+    "lease con han nhung chinh minh la chu" la duoc phep nhan lai. Do la tao tac
+    cua phep thu, khong phai hanh vi that.
+
+    Lop nay tra lai su that: moi luong mot danh tinh, thay o CA `claim_job` lan
+    `save_job_fenced` de nguoi thang van ghi duoc bang dung id ma no da nhan.
+    Moi thu con lai uy thac nguyen ven cho kho that.
+    """
+
+    def __init__(self, inner, fallback: str):
+        self._inner = inner
+        self._fallback = fallback
+
+    def _who(self) -> str:
+        return getattr(threading.current_thread(), "worker_name", self._fallback)
+
+    def claim_job(self, job, worker_id, lease_expires_at):
+        return self._inner.claim_job(job, self._who(), lease_expires_at)
+
+    def save_job_fenced(self, job, fence, worker_id):
+        return self._inner.save_job_fenced(job, fence, self._who())
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+class TestOnlyOneSynthesisPerJob(Base):
+    """
+    10 worker cung chay `_run_job` tren MOT job: chi duoc mot lan goi TTS.
+
+    Day la duong chay that — khong mo phong lai logic claim — nen no do dung thu
+    ma nguoi dung quan tam: goi TTS bao nhieu lan, sinh ra bao nhieu track va bao
+    nhieu file trong kho.
+
+    STUB CO CHU Y: `tts_bridge.synthesize_chapter` bi thay bang mot ham dem so
+    lan goi. Khong stub gi khac — claim, fencing, upload va ghi track deu la ma
+    that.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.store = _WorkerPerThread(self.store, server_main.WORKER_ID)
+        server_main.store = self.store
+        self._real_synth = server_main.tts_bridge.synthesize_chapter
+        self.so_lan_tong_hop = 0
+        self._dem_lock = threading.Lock()
+
+        def synthesize_dem(*, text, voice_id, dest, rate, chunk_chars, on_progress):
+            with self._dem_lock:
+                self.so_lan_tong_hop += 1
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"\xff\xfb" + b"0" * 400)
+            on_progress(1, 1)
+            return {"size_bytes": dest.stat().st_size, "total_parts": 1}
+
+        server_main.tts_bridge.synthesize_chapter = synthesize_dem
+
+    def tearDown(self) -> None:
+        server_main.tts_bridge.synthesize_chapter = self._real_synth
+        super().tearDown()
+
+    def dua(self, job: TtsJob) -> None:
+        """10 luong cung chay `_run_job`, hen nhau tai barrier."""
+        barrier = threading.Barrier(WORKERS)
+
+        def chay(i: int) -> None:
+            threading.current_thread().worker_name = f"worker-{i}"
+            barrier.wait()
+            # Moi worker giu BAN SAO cua rieng minh, dung nhu tien trinh rieng.
+            server_main._run_job(replace(job), "Nội dung.")
+
+        threads = [threading.Thread(target=chay, args=(i,), name=f"w{i}")
+                   for i in range(WORKERS)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        for t in threads:
+            self.assertFalse(t.is_alive(), "worker treo qua lau")
+
+    def files(self) -> List[Path]:
+        return [p for p in self.root.rglob("*") if p.is_file()]
+
+    def test_a_queued_job_is_synthesized_exactly_once(self):
+        self.dua(self.a_job(status=JobStatus.PENDING, lease=None, attempts=0))
+        self.assertEqual(self.so_lan_tong_hop, 1, "chi duoc tong hop MOT lan")
+        self.assertEqual(len(self.store.tracks_for_chapter(self.chapter_id)), 1)
+        self.assertEqual(len(self.files()), 1, "chi duoc mot object trong kho")
+
+    def test_a_stale_running_job_is_synthesized_exactly_once(self):
+        self.dua(self.a_job(status=JobStatus.RUNNING, lease=iso(-600)))
+        self.assertEqual(self.so_lan_tong_hop, 1)
+        self.assertEqual(len(self.store.tracks_for_chapter(self.chapter_id)), 1)
+        self.assertEqual(len(self.files()), 1)
+
+    def test_the_job_ends_completed_with_that_one_object(self):
+        job = self.a_job(status=JobStatus.PENDING, lease=None, attempts=0)
+        self.dua(job)
+        sau = self.store.get_job(job.job_id)
+        self.assertEqual(sau.status, JobStatus.COMPLETED)
+        self.assertEqual(sau.output_key, self.files()[0].relative_to(self.root)
+                         .as_posix())
+        self.assertIsNone(sau.lease_owner, "phai nha lease khi xong")
+
+    def test_a_live_lease_means_nobody_synthesizes(self):
+        """Job cua worker con song: 10 worker khac phai bo di, khong goi TTS."""
+        self.dua(self.a_job(status=JobStatus.RUNNING, lease=iso(600)))
+        self.assertEqual(self.so_lan_tong_hop, 0)
+        self.assertEqual(self.files(), [])
+
+    def test_it_holds_over_twenty_repeats(self):
+        for lan in range(REPEATS):
+            with self.subTest(lan=lan):
+                self.fresh_store()
+                self.store = _WorkerPerThread(self.store, server_main.WORKER_ID)
+                server_main.store = self.store
+                self.so_lan_tong_hop = 0
+                self.dua(self.a_job(status=JobStatus.PENDING, lease=None,
+                                    attempts=0))
+                self.assertEqual(self.so_lan_tong_hop, 1, f"lan {lan}")
+                self.assertEqual(
+                    len(self.store.tracks_for_chapter(self.chapter_id)), 1)
+
+
 # ==================================================== hinh dang request Appwrite
 
 

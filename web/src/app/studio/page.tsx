@@ -97,6 +97,17 @@ export default function StudioPage() {
         setVoices(voiceList.voices);
         setJobs(jobList.jobs);
         setVoiceId((current) => current || defaultVoiceId(voiceList.voices));
+        // Job con dang chay tu MOT PHIEN TRANG TRUOC. Khong nap lai no vao
+        // `activeJob` thi vong poll o duoi thoat ngay (`if (!activeJob) return`),
+        // va the trong "Lich su audio" se dung im o "Dang xu ly" mai mai — job
+        // da xong tu lau ma nguoi dung phai tu tai lai trang moi thay.
+        const dangChay = jobList.jobs.find(
+          (j) => j.status === "pending" || j.status === "running",
+        );
+        if (dangChay) {
+          setActiveJob((current) => current ?? dangChay);
+          setActiveChapterId((current) => current || dangChay.chapter_id);
+        }
       })
       .catch((cause) => setBootError(errorMessage(cause)))
       .finally(() => setBooting(false));

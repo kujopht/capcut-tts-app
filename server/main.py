@@ -17,12 +17,12 @@ import threading
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from server import tts_bridge
 from server.adapters import (
@@ -88,14 +88,22 @@ _job_lock = threading.RLock()
 # Cach lam: lease co han, worker dang chay tu lam moi (heartbeat). Het han nghia
 # la worker da chet, va chi luc do job moi duoc nhan lai.
 #
-# QUAN TRONG — tinh dung dan KHONG dua vao lease. Chay lai mot job la VO HAI vi:
+# CLAIM LA COMPARE-AND-SET THAT. Appwrite Cloud 1.9.6 CO transaction — mot ghi
+# chu cu o day tung noi la khong, dieu do sai. `store.claim_job()` goi hai thao
+# tac vao MOT transaction: `create` hang `job_claims` voi rowId tat dinh
+# "{job_id}-{attempt}" va `update` job row. Uniqueness cua rowId duoc cuong che
+# ben trong transaction, nen chi mot worker commit duoc; ke thua nhan None va
+# DUNG LAI, khong goi TTS. `attempts` dong vai fencing token cho moi lan ghi sau
+# do (`save_job_fenced`).
+#
+# DOI SCHEMA XONG PHAI RESTART: `AppwriteMetadataStore._supported_fields()` cache
+# theo vong doi tien trinh, nen tien trinh dang chay khong thay truong vua them.
+#
+# Tinh dung dan VAN khong chi dua vao lease. Chay lai mot job la VO HAI vi:
 #   - `output_key` la tat dinh theo `content_hash`, hai lan chay ghi cung mot khoa
 #     voi cung noi dung;
 #   - `store.create_track()` la TIM-HOAC-TAO theo `(chapter_id, content_hash)`,
 #     nen khong bao gio sinh hai track cho cung mot ket qua.
-# Lease chi de tranh lam viec thua. Do la ly do khong can compare-and-swap that
-# su (Appwrite khong co), va cung la ly do mot cu tranh lease hiem hoi neu co xay
-# ra cung khong lam sai du lieu.
 
 #: Lease song bao lau neu khong duoc lam moi. Phai DAI hon chu ky heartbeat kha
 #: nhieu, de mot lan tre mang khong lam job bi nguoi khac giat.
@@ -127,6 +135,16 @@ def _lease_until(seconds: int = JOB_LEASE_SECONDS) -> str:
 # -----------------------------------------------------------------------------
 
 
+#: Tieu de: CAT khoang trang TRUOC khi do do dai.
+#:
+#: `Field(min_length=1)` do do dai chuoi THO, nen `""` bi tu choi 422 con `"   "`
+#: lot qua roi duoc cat khi luu — cung mot gia tri hieu dung ma hai ket qua khac
+#: nhau, va thu nam trong kho la mot tieu de RONG. Rang buoc nay cat truoc roi
+#: moi do, nen ca hai deu bi tu choi giong nhau.
+TieuDe = Annotated[str, StringConstraints(
+    strip_whitespace=True, min_length=1, max_length=200)]
+
+
 class RegisterIn(BaseModel):
     email: str
     password: str = Field(min_length=8)
@@ -139,14 +157,14 @@ class LoginIn(BaseModel):
 
 
 class NovelIn(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
+    title: TieuDe
     description: str = ""
     tags: List[str] = Field(default_factory=list)
 
 
 class ChapterIn(BaseModel):
     novel_id: str
-    title: str = Field(min_length=1, max_length=200)
+    title: TieuDe
     content: str = ""
     order_index: int = 1
 
@@ -154,13 +172,13 @@ class ChapterIn(BaseModel):
 class NovelPatch(BaseModel):
     """Chi cac truong nguoi dung duoc sua. `state` doi qua publish/unpublish."""
 
-    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    title: Optional[TieuDe] = None
     description: Optional[str] = None
     tags: Optional[List[str]] = None
 
 
 class ChapterPatch(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    title: Optional[TieuDe] = None
     content: Optional[str] = None
     order_index: Optional[int] = None
 

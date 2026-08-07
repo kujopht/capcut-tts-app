@@ -1,0 +1,21 @@
+{
+  "che_do": "delete",
+  "an_han_gio": 0,
+  "tong_object": 44,
+  "da_tham_chieu": 43,
+  "dang_xu_ly": [],
+  "con_moi": [],
+  "mo_coi": [
+    {
+      "key": "audio/6a75c3e0101d54c241e9/chp_99e79333ea934898/e2e0000000000000000000000000000000000000000000000000000000mocoi.mp3",
+      "size_bytes": 502,
+      "modified_at": "2026-08-07T12:19:52+00:00"
+    }
+  ],
+  "ban_ghi_thieu_file": [],
+  "da_xoa": [
+    "audio/6a75c3e0101d54c241e9/chp_99e79333ea934898/e2e0000000000000000000000000000000000000000000000000000000mocoi.mp3"
+  ],
+  "bo_qua_khi_xoa": [],
+  "loi": []
+}

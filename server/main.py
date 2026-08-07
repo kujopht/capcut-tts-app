@@ -139,6 +139,26 @@ def current_profile(authorization: Optional[str] = Header(default=None)) -> Prof
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
 
 
+def optional_profile(authorization: Optional[str] = None) -> Optional[Profile]:
+    """
+    Ho so cua nguoi goi neu co token hop le, con lai la None. KHONG BAO GIO nem.
+
+    Dung cho cac route doc vua cong khai vua rieng tu: truyen da xuat ban thi ai
+    cung xem duoc, truyen nhap thi chi chu so huu. Neu dung `current_profile` o
+    day thi khach vang lai bi 401 ngay ca voi truyen cong khai; con neu khong
+    xac dinh nguoi goi thi khong the phan biet chu so huu voi nguoi la.
+
+    Token rac duoc coi nhu khong dang nhap, khong phai loi: nguoi dung het han
+    phien van doc duoc truyen cong khai nhu khach.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    try:
+        return identity.profile_from_token(authorization.split(" ", 1)[1].strip())
+    except AuthError:
+        return None
+
+
 # -----------------------------------------------------------------------------
 # Healthcheck
 # -----------------------------------------------------------------------------
@@ -268,16 +288,45 @@ def create_novel(payload: NovelIn, profile: Profile = Depends(current_profile)) 
     return {"novel": _novel_out(novel)}
 
 
+def _may_read(novel: Novel, viewer: Optional[Profile]) -> bool:
+    """Truyen da xuat ban thi ai cung doc duoc; chua thi chi chu so huu."""
+    if novel.state is PublishState.PUBLISHED:
+        return True
+    return viewer is not None and viewer.user_id == novel.owner_id
+
+
 @app.get("/api/novels/{novel_id}")
-def get_novel(novel_id: str) -> Dict[str, Any]:
+def get_novel(novel_id: str,
+              authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """
+    Truyen kem DANH SACH CHUONG, moi chuong da co san `has_audio`.
+
+    Truoc day trang chi tiet phai goi `/api/chapters/{id}` cho TUNG chuong chi
+    de biet chuong do da co audio chua — mot truyen 12 chuong ton 13 request, va
+    con so do tang tuyen tinh theo so chuong. Gop vao day thi luon la 1.
+
+    CO Y khong ky URL audio o day: trang danh sach chua phat gi ca, ky san N
+    duong dan la lam viec thua va rai ra nhung URL khong ai dung. Duong phat van
+    xin rieng qua `/api/audio/{id}/url` dung luc bam nghe.
+    """
     try:
         novel = store.get_novel(novel_id)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    # 404 chu khong phai 403: nguoi la khong can biet truyen nhap nay ton tai.
+    if not _may_read(novel, optional_profile(authorization)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tiểu thuyết.")
+
     chapters = store.list_chapters(novel_id)
+    with_audio = store.chapters_with_audio([c.chapter_id for c in chapters])
     return {
         "novel": _novel_out(novel),
-        "chapters": [c.to_dict(include_content=False) for c in chapters],
+        "chapters": [
+            {**c.to_dict(include_content=False),
+             "has_audio": c.chapter_id in with_audio}
+            for c in chapters
+        ],
     }
 
 
@@ -434,18 +483,39 @@ def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profil
 
 
 @app.get("/api/chapters/{chapter_id}")
-def get_chapter(chapter_id: str) -> Dict[str, Any]:
+def get_chapter(chapter_id: str,
+                authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """
+    Mot chuong kem audio va truyen cha.
+
+    Quyen doc bam theo TRUYEN CHA, giong `GET /api/novels/{id}`: chan o route
+    truyen ma bo ngo o day thi vo nghia, chi can biet id chuong la doc duoc het
+    noi dung cua mot truyen chua xuat ban.
+    """
     try:
         chapter = store.get_chapter(chapter_id)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
-    track = store.track_for_chapter(chapter_id)
+
     # Kem theo truyen cha: luong nghe can bia va ten truyen, va nho vay tang
     # tren khong phai goi them mot vong `/api/novels/{id}` nua.
     try:
         novel: Optional[Novel] = store.get_novel(chapter.novel_id)
     except NotFoundError:
         novel = None
+
+    viewer = optional_profile(authorization)
+    if novel is not None:
+        allowed = _may_read(novel, viewer)
+    else:
+        # Chuong mo coi (khong co truyen cha) khong sinh ra tu duong chay nao —
+        # xem docs/HANDOFF.md muc "Xu ly mo coi". Khong xac minh duoc trang thai
+        # xuat ban thi cho phia an toan: chi chu so huu doc duoc.
+        allowed = viewer is not None and viewer.user_id == chapter.owner_id
+    if not allowed:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
+
+    track = store.track_for_chapter(chapter_id)
     return {
         "chapter": chapter.to_dict(),
         "audio": track.to_dict() if track else None,

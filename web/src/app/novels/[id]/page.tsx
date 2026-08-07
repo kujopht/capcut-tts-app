@@ -24,27 +24,14 @@ export default function NovelDetailPage({
   const { id } = use(params);
   const { profile } = useSession();
 
-  const fetchNovel = useCallback(async () => {
-    const r = await api.getNovel(id);
-    const flags = await Promise.all(
-      r.chapters.map((chapter) =>
-        api
-          .getChapter(chapter.chapter_id)
-          .then((detail) => [chapter.chapter_id, detail.audio !== null] as const)
-          .catch(() => [chapter.chapter_id, false] as const),
-      ),
-    );
-    return {
-      novel: r.novel,
-      chapters: r.chapters,
-      audioReady: Object.fromEntries(flags) as Record<string, boolean>,
-    };
-  }, [id]);
+  // MOT request duy nhat, du truyen co bao nhieu chuong: `has_audio` da nam
+  // san trong danh sach chuong. Truoc day cho nay goi them `/api/chapters/{id}`
+  // cho tung chuong chi de doc mot gia tri boolean.
+  const fetchNovel = useCallback(() => api.getNovel(id), [id]);
 
   const { data, loading, error, missing, reload } = useAsyncData(fetchNovel);
   const novel: Novel | null = data?.novel ?? null;
   const chapters: Chapter[] = data?.chapters ?? [];
-  const audioReady: Record<string, boolean> = data?.audioReady ?? {};
 
   if (loading) {
     return (
@@ -156,7 +143,7 @@ export default function NovelDetailPage({
                     {formatNumber(chapter.char_count)} ký tự
                   </span>
                 </span>
-                {audioReady[chapter.chapter_id] ? (
+                {chapter.has_audio ? (
                   <span className="badge badge-ok">
                     <span aria-hidden="true">🎧</span> Có audio
                   </span>

@@ -137,6 +137,186 @@ class TestQueriesUseJsonFormat(unittest.TestCase):
         self.assertEqual(equals[0]["attribute"], "owner_id")
 
 
+class _PagingRecorder:
+    """Client gia lap co lat trang that, de kiem tra vong lap offset."""
+
+    def __init__(self, documents: List[Dict[str, Any]]):
+        self.calls: List[Dict[str, Any]] = []
+        self.documents = documents
+
+    def request(self, method, url, json=None, params=None, headers=None):
+        import json as _json
+
+        self.calls.append({"method": method, "url": url, "params": params})
+        limit, offset, wanted = 25, 0, None
+        for raw in (params or {}).get("queries[]", []):
+            q = _json.loads(raw)
+            if q["method"] == "limit":
+                limit = q["values"][0]
+            elif q["method"] == "offset":
+                offset = q["values"][0]
+            elif q["method"] == "equal" and q["attribute"] == "chapter_id":
+                wanted = set(q["values"])
+            elif q["method"] == "select" and not q.get("values"):
+                # Appwrite that tu choi truy van select rong
+                raise AssertionError("Invalid query: No attributes selected")
+        docs = [d for d in self.documents
+                if wanted is None or d["chapter_id"] in wanted]
+        page = docs[offset:offset + limit]
+        return {"total": len(docs), "documents": page}
+
+
+class TestBatchedAudioLookup(unittest.TestCase):
+    """
+    `chapters_with_audio` phai hoi theo LO, khong phai moi chuong mot truy van.
+
+    Day la ly do ky thuat cua ca thay doi nay: truoc kia trang chi tiet truyen
+    goi `/api/chapters/{id}` cho tung chuong.
+    """
+
+    def test_thirty_chapters_cost_one_request(self):
+        ids = [f"chp_{i}" for i in range(30)]
+        fake = _PagingRecorder([{"chapter_id": i} for i in ids])
+        store = AppwriteMetadataStore(SETTINGS, client=fake)
+
+        found = store.chapters_with_audio(ids)
+
+        self.assertEqual(found, set(ids))
+        self.assertEqual(len(fake.calls), 1, "30 chương chỉ được tốn 1 request")
+
+    def test_request_count_does_not_grow_with_chapter_count(self):
+        def calls_for(count: int) -> int:
+            ids = [f"chp_{i}" for i in range(count)]
+            fake = _PagingRecorder([{"chapter_id": i} for i in ids])
+            AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(ids)
+            return len(fake.calls)
+
+        self.assertEqual(calls_for(1), 1)
+        self.assertEqual(calls_for(25), 1)
+        self.assertEqual(calls_for(50), 1)
+
+    def test_it_is_an_in_query_not_one_equal_per_chapter(self):
+        ids = ["chp_a", "chp_b", "chp_c"]
+        fake = _PagingRecorder([])
+        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(ids)
+
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        equals = [q for q in queries if q["method"] == "equal"]
+        self.assertEqual(len(equals), 1)
+        self.assertEqual(equals[0]["values"], ids)
+
+    def test_explicit_limit_beats_the_appwrite_default_of_25(self):
+        """Khong dat limit thi truyen tren 25 chuong bi cat am tham."""
+        fake = _PagingRecorder([])
+        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(["chp_1"])
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        limits = [q["values"][0] for q in queries if q["method"] == "limit"]
+        self.assertEqual(len(limits), 1)
+        self.assertGreater(limits[0], 25)
+
+    def test_it_pages_when_one_chapter_has_many_tracks(self):
+        """Moi lan tao lai audio la mot ban ghi -> so track > so chuong."""
+        from server.appwrite_store import PAGE_SIZE
+
+        ids = ["chp_1", "chp_2"]
+        docs = [{"chapter_id": "chp_1"} for _ in range(PAGE_SIZE + 5)]
+        docs.append({"chapter_id": "chp_2"})
+        fake = _PagingRecorder(docs)
+
+        found = AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(ids)
+
+        self.assertEqual(found, {"chp_1", "chp_2"})
+        self.assertEqual(len(fake.calls), 2, "phải lật sang trang thứ hai")
+
+    def test_large_novel_is_split_into_batches_not_one_giant_query(self):
+        from server.appwrite_store import BATCH_IDS
+
+        ids = [f"chp_{i}" for i in range(BATCH_IDS * 3)]
+        fake = _PagingRecorder([])
+        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(ids)
+
+        self.assertEqual(len(fake.calls), 3)
+        for call in fake.calls:
+            queries = [json.loads(q) for q in call["params"]["queries[]"]]
+            equals = [q for q in queries if q["method"] == "equal"][0]
+            self.assertLessEqual(len(equals["values"]), BATCH_IDS)
+
+    def test_empty_input_touches_the_network_not_at_all(self):
+        fake = _PagingRecorder([{"chapter_id": "chp_1"}])
+        found = AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio([])
+        self.assertEqual(found, set())
+        self.assertEqual(fake.calls, [])
+
+    def test_only_the_chapter_id_attribute_is_requested(self):
+        fake = _PagingRecorder([])
+        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(["chp_1"])
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        selects = [q for q in queries if q["method"] == "select"]
+        self.assertEqual(selects[0]["values"], ["chapter_id"])
+
+    def test_select_puts_attributes_under_values_not_attributes(self):
+        """
+        Dat duoi khoa `attributes` thi Appwrite tra ve:
+            Invalid query: No attributes selected
+        Da gap that tren Appwrite Cloud 1.9.6 — khoa dung la `values`.
+        """
+        from server.appwrite_store import q_select
+
+        parsed = json.loads(q_select("chapter_id"))
+        self.assertEqual(parsed, {"method": "select", "values": ["chapter_id"]})
+        self.assertNotIn("attributes", parsed)
+
+    def test_chapters_without_audio_are_simply_absent(self):
+        fake = _PagingRecorder([{"chapter_id": "chp_2"}])
+        found = AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(
+            ["chp_1", "chp_2", "chp_3"])
+        self.assertEqual(found, {"chp_2"})
+
+    def test_duplicate_ids_do_not_multiply_the_query(self):
+        fake = _PagingRecorder([])
+        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(
+            ["chp_1", "chp_1", "chp_1"])
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        equals = [q for q in queries if q["method"] == "equal"][0]
+        self.assertEqual(equals["values"], ["chp_1"])
+
+    def test_a_long_novel_does_not_lose_chapters_to_the_default_limit(self):
+        """
+        Appwrite mac dinh chi tra 25 document. Khong lat trang thi truyen 40
+        chuong chi hien 25 — thieu du lieu ma khong co loi nao bao.
+        """
+        docs = [{"chapter_id": f"chp_{i}", "novel_id": "nov_1", "owner_id": "u",
+                 "title": f"C{i}", "content": "", "order_index": i,
+                 "state": "draft", "created_at": "", "updated_at": ""}
+                for i in range(140)]
+        fake = _PagingRecorder(docs)
+
+        chapters = AppwriteMetadataStore(SETTINGS, client=fake).list_chapters("nov_1")
+
+        self.assertEqual(len(chapters), 140, "mất chương vì không lật trang")
+        self.assertGreater(len(fake.calls), 1, "phải gọi nhiều trang")
+
+    def test_every_page_asks_for_an_explicit_limit(self):
+        fake = _PagingRecorder([])
+        AppwriteMetadataStore(SETTINGS, client=fake).list_chapters("nov_1")
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        methods = [q["method"] for q in queries]
+        self.assertIn("limit", methods)
+        self.assertIn("offset", methods)
+
+    def test_both_stores_offer_the_same_method(self):
+        """Mock va Appwrite phai cung giao dien — `main.py` khong duoc biet."""
+        import inspect
+
+        from server.adapters import MockMetadataStore
+
+        for cls in (MockMetadataStore, AppwriteMetadataStore):
+            method = getattr(cls, "chapters_with_audio", None)
+            self.assertTrue(callable(method), f"{cls.__name__} thiếu phương thức")
+            self.assertEqual(
+                list(inspect.signature(method).parameters), ["self", "chapter_ids"])
+
+
 class TestSessionAuthentication(unittest.TestCase):
     """
     Session secret KHONG phai JWT.

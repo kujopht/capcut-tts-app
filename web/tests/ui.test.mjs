@@ -611,3 +611,55 @@ test("CSS anh bia co du ba bien the", () => {
   }
   assert.match(css, /\.cover-image \{ background-size: cover/);
 });
+
+/* ===================================================================
+   N+1: trang chi tiet truyen chi duoc goi MOT request
+   =================================================================== */
+
+test("trang chi tiet truyen khong con goi API cho tung chuong", () => {
+  const src = read("../src/app/novels/[id]/page.tsx");
+  // Bat CA hai cach viet: `api.getChapter(` va `api` xuong dong roi `.getChapter(`
+  // — ban cu viet kieu thu hai, nen chi kiem tra chuoi lien nhau la vo nghia.
+  assert.ok(
+    !/\.getChapter\(/.test(src),
+    "khong duoc goi /api/chapters cho tung chuong nua",
+  );
+  assert.match(src, /api\.getNovel\(id\)/);
+});
+
+test("khong con vong lap goi API tren danh sach chuong", () => {
+  for (const f of ["../src/app/novels/[id]/page.tsx", "../src/app/write/page.tsx"]) {
+    const src = read(f);
+    // `chapters.map(... api.` la dau hieu cua N+1: mot request moi chuong
+    assert.ok(
+      !/chapters\.map\(\s*\([^)]*\)\s*=>\s*\n?\s*api\b/.test(src),
+      `${f} van goi API trong vong lap chuong`,
+    );
+  }
+});
+
+test("co bao nhieu chuong cung chi mot lan goi getNovel", () => {
+  const src = read("../src/app/novels/[id]/page.tsx");
+  const goi = src.match(/api\.get\w+\(/g) || [];
+  assert.equal(goi.length, 1, `phai dung 1 loi goi, dang co ${goi.length}`);
+});
+
+test("trang soan bai lay has_audio tu danh sach chuong", () => {
+  const src = read("../src/app/write/page.tsx");
+  assert.match(src, /c\.has_audio/);
+  assert.ok(
+    !/getChapter\([^)]*\)\s*\n?\s*\.then\(\(r\) => \[chapter\.chapter_id/.test(src),
+    "khong con doc audio bang cach hoi tung chuong",
+  );
+});
+
+test("has_audio khai bao tuy chon de khong pha client cu", () => {
+  const api = read("../src/lib/api.ts");
+  assert.match(api, /has_audio\?: boolean;/);
+});
+
+test("danh sach chuong dung has_audio chu khong dung state rieng", () => {
+  const src = read("../src/app/novels/[id]/page.tsx");
+  assert.match(src, /chapter\.has_audio \?/);
+  assert.ok(!src.includes("audioReady"), "bo state trung gian da khong con can");
+});

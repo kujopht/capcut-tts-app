@@ -252,7 +252,7 @@ class TestJobLifecycle(ApiTestCase):
 
         # Truyen da xuat ban thi ai cung nghe duoc
         novel_id = self.client.get(
-            f"/api/chapters/{chapter_id}"
+            f"/api/chapters/{chapter_id}", headers=self._auth(token)
         ).json()["chapter"]["novel_id"]
         self.client.post(f"/api/novels/{novel_id}/publish", headers=self._auth(token))
 

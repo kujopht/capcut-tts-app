@@ -278,7 +278,8 @@ class TestFailureTransitions(JobLifecycleTestCase):
         self.assertNotIn(JobStatus.COMPLETED.value, self.store.saved_statuses)
         # Va khong tao audio_track nao
         self.assertIsNone(
-            self.client.get(f"/api/chapters/{chapter_id}").json()["audio"]
+            self.client.get(f"/api/chapters/{chapter_id}",
+                            headers=self._auth(token)).json()["audio"]
         )
 
     def test_6_metadata_persistence_failure_is_not_reported_as_success(self):

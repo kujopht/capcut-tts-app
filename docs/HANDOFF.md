@@ -115,10 +115,10 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | 182 test: 181 đạt, 1 bỏ qua |
-| ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 181 đạt, 1 bỏ qua |
+| `server/tests` | 288 test: 287 đạt, 1 bỏ qua |
+| ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 181 đạt, 1 bỏ qua (đo ở mốc cũ) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `web` (`node --test`) | 10/10 đạt |
+| `web` (`node --test`) | 73/73 đạt |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
 | `npx next build` | Thành công, 7 route |
@@ -230,6 +230,33 @@ Bucket còn **1 object** là audio của smoke test. Cố ý giữ: xoá sẽ đ
 metadata mồ côi trong Appwrite. Object thăm dò đã xoá. Dữ liệu thử trong
 Appwrite (vài tài khoản, novel, chương) cũng giữ nguyên.
 
+## Quyền đọc truyện nháp — ĐÃ SỬA
+
+Trước đây `GET /api/novels/{id}` và `GET /api/chapters/{id}` **không kiểm tra
+quyền gì cả**. Chỉ cần biết id là người lạ đọc được toàn bộ truyện chưa xuất bản
+kèm nội dung mọi chương. Đo live: gọi không token trả về `200` với đủ 12 chương
+của một truyện `draft`.
+
+Quy tắc hiện tại, áp dụng cho **cả hai** route:
+
+| Người gọi | Truyện `published` | Truyện `draft` |
+|---|---|---|
+| Khách vãng lai | 200 | **404** |
+| Người dùng khác | 200 | **404** |
+| Chủ sở hữu | 200 | 200 |
+| Token hỏng/hết hạn | 200 | **404** (không phải 401) |
+
+Trả `404` chứ không phải `403`: người lạ không cần biết truyện nháp đó tồn tại.
+Token hỏng bị coi như chưa đăng nhập chứ không phải lỗi, để người hết phiên vẫn
+đọc được truyện công khai như khách.
+
+Chương không còn truyện cha (dữ liệu lẻ loi) thì chỉ chủ sở hữu đọc được — không
+xác minh được trạng thái xuất bản thì chọn phía an toàn.
+
+`GET /api/novels` (thư viện công khai) **không đổi**: vẫn chỉ liệt kê truyện đã
+xuất bản. Bộ test khoá lại toàn bộ bảng trên ở
+`server/tests/test_chapter_list_batching.py::TestReadAuthorization`.
+
 ## Giới hạn đã biết
 
 **Chưa có transaction phân tán giữa kho file và kho metadata.** Job runner đi
@@ -292,5 +319,8 @@ Nếu sau này muốn cho nó tự xoá, điều kiện tối thiểu:
 ## Bẫy đã gặp
 
 - Heredoc trong bash nuốt mất một dấu gạch chéo: `\\b` thành `\b` (backspace) trong template literal JS. Viết file test bằng công cụ Write thay vì heredoc.
+- **`uvicorn --reload` bỏ sót thay đổi.** Đã gặp ba lần: WatchFiles in ra "detected changes... Reloading..." rồi worker không khởi động lại, backend tiếp tục phục vụ code cũ. Triệu chứng là API thiếu hẳn trường vừa thêm. Cách chắc ăn: dừng hẳn rồi chạy lại. Lưu ý tiến trình **con** có thể sống sót sau khi giết tiến trình cha và vẫn giữ cổng 8000 — phải giết cả cây.
+- **Truy vấn `select` của Appwrite đặt thuộc tính dưới khoá `values`, không phải `attributes`.** Đặt sai thì Appwrite trả `Invalid query: No attributes selected`. Client giả lập trong test sẽ chấp nhận bất cứ hình dạng nào ta bịa ra, nên lỗi này chỉ lộ khi chạy thật — nay đã có test khoá lại ở `test_appwrite_protocol.py`.
+- **`_list()` không lật trang**, mà Appwrite mặc định chỉ trả 25 document → dữ liệu bị cắt âm thầm, không lỗi, không cảnh báo. `list_chapters` từng dính lỗi này: truyện trên 25 chương sẽ mất chương. Đã sửa bằng `_list_all()` (tự đặt `limit` + lật trang). Truy vấn nào có thể vượt 25 phải dùng `_list_all`, không dùng `_list`. Các truy vấn còn lại (`list_novels`, `list_jobs`) vẫn dùng `_list` — sẽ cắt ở 25 khi dữ liệu nhiều lên, **chưa sửa**.
 - Next.js 15.1.6 có CVE-2025-66478 — đã nâng lên 16.x.
 - `MergeResult` của desktop dùng thuộc tính `.path`, không phải `.output_path`.

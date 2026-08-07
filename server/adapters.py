@@ -17,7 +17,7 @@ import shutil
 import threading
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Set
 
 from server.config import ConfigError, Settings
 from server.domain import (
@@ -149,6 +149,21 @@ class MetadataStore(Protocol):
     def create_track(self, track: AudioTrack) -> AudioTrack: ...
     def track_for_chapter(self, chapter_id: str) -> Optional[AudioTrack]: ...
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]: ...
+
+    def chapters_with_audio(self, chapter_ids: Sequence[str]) -> Set[str]:
+        """
+        Trong so cac chuong duoc hoi, chuong nao DA co audio.
+
+        Ly do ton tai: danh sach chuong chi can biet CO hay KHONG, va hoi tung
+        chuong mot lam so truy van tang tuyen tinh theo so chuong. Ban cai dat
+        PHAI tra loi bang so truy van khong phu thuoc so chuong (hang so, hoac
+        theo lo) — day la ca ly do ky thuat cua ham nay.
+
+        - Danh sach rong -> tra ve tap rong, KHONG duoc goi kho.
+        - Chi tra ve id, khong tra ve URL ky: trang danh sach chua phat gi ca.
+        """
+        ...
+
     def delete_track(self, track_id: str) -> None: ...
 
 
@@ -510,6 +525,15 @@ class MockMetadataStore:
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]:
         with self._lock:
             return [t for t in self.tracks.values() if t.chapter_id == chapter_id]
+
+    def chapters_with_audio(self, chapter_ids: Sequence[str]) -> Set[str]:
+        """Mot luot duy nhat qua bang track — xem contract o `MetadataStore`."""
+        wanted = set(chapter_ids)
+        if not wanted:
+            return set()
+        with self._lock:
+            return {t.chapter_id for t in self.tracks.values()
+                    if t.chapter_id in wanted}
 
     def delete_track(self, track_id: str) -> None:
         with self._lock:

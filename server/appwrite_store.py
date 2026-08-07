@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 import httpx
 
@@ -98,6 +98,30 @@ def q_order_desc(attribute: str) -> str:
 
 def q_limit(count: int) -> str:
     return json.dumps({"method": "limit", "values": [int(count)]})
+
+
+def q_offset(count: int) -> str:
+    return json.dumps({"method": "offset", "values": [int(count)]})
+
+
+def q_select(*attributes: str) -> str:
+    """
+    Chi lay ve nhung thuoc tinh can dung, cho nhe duong truyen.
+
+    Danh sach thuoc tinh di trong `values`, KHONG phai `attributes` — dat sai
+    khoa thi Appwrite tra ve 'Invalid query: No attributes selected'. Da gap
+    that khi chay tren Appwrite Cloud 1.9.6.
+    """
+    return json.dumps({"method": "select", "values": list(attributes)})
+
+
+#: `equal` nhan mot mang gia tri, tuc la mot truy van IN. Appwrite gioi han do
+#: dai moi truy van, nen hoi theo lo thay vi nhoi ca nghin id vao mot lan.
+BATCH_IDS = 50
+
+#: So document toi da moi trang. Appwrite mac dinh chi tra 25 — khong dat tay
+#: thi mot truyen tren 25 chuong se bi cat am tham.
+PAGE_SIZE = 100
 
 
 def persistable(collection: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,6 +235,24 @@ class AppwriteMetadataStore:
     def _list(self, collection: str, queries: List[str]) -> List[Dict[str, Any]]:
         data = self._call("GET", self._docs(collection), params={"queries[]": queries})
         return list(data.get("documents") or [])
+
+    def _list_all(self, collection: str, queries: List[str]) -> List[Dict[str, Any]]:
+        """
+        Nhu `_list` nhung LAY HET, khong dung o 25 document dau tien.
+
+        Appwrite mac dinh tra ve 25 document. Truy van nao co the vuot con so do
+        ma goi thang `_list` se bi CAT AM THAM — khong loi, khong canh bao, chi
+        thieu du lieu. Mot truyen 40 chuong se chi hien 25 chuong.
+        """
+        out: List[Dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = self._list(collection, queries + [q_limit(PAGE_SIZE),
+                                                     q_offset(offset)])
+            out.extend(page)
+            if len(page) < PAGE_SIZE:
+                return out
+            offset += PAGE_SIZE
 
     def _update(self, collection: str, doc_id: str, data: Dict[str, Any],
                 permissions: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -342,9 +384,10 @@ class AppwriteMetadataStore:
         return chapter
 
     def list_chapters(self, novel_id: str) -> List[Chapter]:
+        """Lay HET chuong cua truyen — truyen dai khong duoc mat chuong."""
         return [
             _chapter_from_doc(d)
-            for d in self._list(COL_CHAPTERS, [
+            for d in self._list_all(COL_CHAPTERS, [
                 q_equal("novel_id", novel_id),
                 q_order_asc("order_index"),
             ])
@@ -412,6 +455,34 @@ class AppwriteMetadataStore:
             _track_from_doc(d)
             for d in self._list(COL_TRACKS, [q_equal("chapter_id", chapter_id)])
         ]
+
+    def chapters_with_audio(self, chapter_ids: Sequence[str]) -> Set[str]:
+        """
+        MOT truy van IN cho ca lo, thay vi mot truy van moi chuong.
+
+        `q_equal` nhan nhieu gia tri, va Appwrite hieu do la IN. Nho vay so
+        vong goi len Appwrite phu thuoc so LO (50 chuong mot lo) chu khong phu
+        thuoc so chuong — dung contract o `MetadataStore.chapters_with_audio`.
+
+        Van phai lat trang: mot chuong co the co nhieu track (moi lan tao lai
+        audio la mot ban ghi), nen so document tra ve khong bang so chuong hoi.
+        `q_select` cat bot, chi xin dung truong `chapter_id` can dung.
+        """
+        wanted = list(dict.fromkeys(chapter_ids))   # bo trung, giu thu tu
+        if not wanted:
+            return set()
+
+        found: Set[str] = set()
+        for start in range(0, len(wanted), BATCH_IDS):
+            batch = wanted[start:start + BATCH_IDS]
+            for doc in self._list_all(COL_TRACKS, [
+                q_equal("chapter_id", *batch),
+                q_select("chapter_id"),
+            ]):
+                chapter_id = doc.get("chapter_id")
+                if chapter_id:
+                    found.add(chapter_id)
+        return found
 
     def delete_track(self, track_id: str) -> None:
         self._delete(COL_TRACKS, track_id)

@@ -73,13 +73,15 @@ class TestNovelCoverField(CoverTestCase):
     def test_novel_response_has_cover_url(self):
         token = self.user()
         novel_id = self.novel(token)
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"]
         self.assertIn("cover_url", body)
 
     def test_no_cover_means_null_not_a_fake_image(self):
         token = self.user()
         novel_id = self.novel(token)
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"]
         self.assertIsNone(body["cover_url"])
         self.assertIsNone(body["cover_key"])
 
@@ -89,7 +91,8 @@ class TestNovelCoverField(CoverTestCase):
         novel_id = self.novel(token)
         self.set_cover(novel_id, "covers/abc.jpg")
 
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"]
         self.assertIn("X-Amz-Signature", body["cover_url"])
         self.assertIn("covers/abc.jpg", body["cover_url"])
 
@@ -98,7 +101,8 @@ class TestNovelCoverField(CoverTestCase):
         token = self.user()
         novel_id = self.novel(token)
         self.set_cover(novel_id, "covers/abc.jpg")
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"]
         self.assertIsNone(body["cover_url"])
         self.assertEqual(body["cover_key"], "covers/abc.jpg")
 
@@ -110,7 +114,8 @@ class TestNovelCoverField(CoverTestCase):
         places = {
             "tao moi": self.client.post("/api/novels", json={"title": "T2"},
                                         headers=self.auth(token)).json()["novel"],
-            "chi tiet": self.client.get(f"/api/novels/{novel_id}").json()["novel"],
+            "chi tiet": self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"],
             "danh sach cua toi":
                 self.client.get("/api/novels?mine=true",
                                 headers=self.auth(token)).json()["novels"][0],
@@ -141,20 +146,22 @@ class TestBackwardCompatible(CoverTestCase):
     def test_no_old_novel_field_was_removed_or_renamed(self):
         token = self.user()
         novel_id = self.novel(token)
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"]
         missing = self.OLD_NOVEL_FIELDS - set(body)
         self.assertEqual(missing, set(), f"mất trường cũ: {missing}")
 
     def test_only_cover_url_was_added(self):
         token = self.user()
         novel_id = self.novel(token)
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"]
         self.assertEqual(set(body) - self.OLD_NOVEL_FIELDS, {"cover_url"})
 
     def test_chapter_response_keeps_its_old_shape(self):
         token = self.user()
         chapter_id = self.chapter(token, self.novel(token))
-        body = self.client.get(f"/api/chapters/{chapter_id}").json()
+        body = self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token)).json()
         self.assertIn("chapter", body)
         self.assertIn("audio", body)          # van con, du la None
         self.assertEqual(set(body) - {"chapter", "audio"}, {"novel"})
@@ -165,7 +172,8 @@ class TestBackwardCompatible(CoverTestCase):
 
         token = self.user()
         novel_id = self.novel(token)
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"]
         self.assertNotIn("cover_url", PERSISTED_FIELDS[COL_NOVELS])
         self.assertNotIn("cover_url", persistable(COL_NOVELS, body))
 
@@ -181,7 +189,7 @@ class TestChapterCarriesItsNovel(CoverTestCase):
         novel_id = self.novel(token, "Hải Tặc Mũ Rơm")
         chapter_id = self.chapter(token, novel_id)
 
-        novel = self.client.get(f"/api/chapters/{chapter_id}").json()["novel"]
+        novel = self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token)).json()["novel"]
         self.assertEqual(novel["novel_id"], novel_id)
         self.assertEqual(novel["title"], "Hải Tặc Mũ Rơm")
         self.assertEqual(novel["state"], "draft")
@@ -195,26 +203,33 @@ class TestChapterCarriesItsNovel(CoverTestCase):
         chapter_id = self.chapter(token, novel_id)
         self.set_cover(novel_id, "covers/bia.png")
 
-        novel = self.client.get(f"/api/chapters/{chapter_id}").json()["novel"]
+        novel = self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token)).json()["novel"]
         self.assertIn("covers/bia.png", novel["cover_url"])
 
     def test_chapter_novel_is_a_summary_not_the_whole_record(self):
         """Chi vua du: khong ro ri `owner_id` hay mo ta dai."""
         token = self.user()
         chapter_id = self.chapter(token, self.novel(token))
-        novel = self.client.get(f"/api/chapters/{chapter_id}").json()["novel"]
+        novel = self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token)).json()["novel"]
         self.assertEqual(
             set(novel), {"novel_id", "title", "state", "cover_key", "cover_url"}
         )
         self.assertNotIn("owner_id", novel)
 
     def test_missing_parent_novel_does_not_break_the_chapter(self):
+        """
+        Mat truyen cha thi chuong van tra ve duoc, `novel` la None.
+
+        Goi bang token cua CHU SO HUU: khong co truyen cha thi khong xac minh
+        duoc trang thai xuat ban, nen route chi cho chu so huu doc. Phan quyen
+        do co bo test rieng o `test_chapter_list_batching.py`.
+        """
         token = self.user()
         novel_id = self.novel(token)
         chapter_id = self.chapter(token, novel_id)
         server_main.store.novels.pop(novel_id)      # mo phong du lieu le loi
 
-        body = self.client.get(f"/api/chapters/{chapter_id}")
+        body = self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token))
         self.assertEqual(body.status_code, 200)
         self.assertIsNone(body.json()["novel"])
         self.assertIsNotNone(body.json()["chapter"])
@@ -225,7 +240,7 @@ class TestChapterCarriesItsNovel(CoverTestCase):
         chapter_id = self.chapter(token, novel_id)
         self.client.post(f"/api/novels/{novel_id}/publish", headers=self.auth(token))
         self.assertEqual(
-            self.client.get(f"/api/chapters/{chapter_id}").json()["novel"]["state"],
+            self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token)).json()["novel"]["state"],
             "published",
         )
 

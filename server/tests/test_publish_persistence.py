@@ -218,7 +218,8 @@ class TestIdempotencyAndFailure(PublishTestCase):
         # Trang thai local KHONG duoc doi thanh published
         self.assertEqual(self.store.get_novel(novel_id).state, PublishState.DRAFT)
         self.assertEqual(
-            self.client.get(f"/api/novels/{novel_id}").json()["novel"]["state"],
+            self.client.get(f"/api/novels/{novel_id}", headers=self._auth(token))
+                .json()["novel"]["state"],
             PublishState.DRAFT.value,
         )
         # Va no khong duoc lot vao thu vien cong khai

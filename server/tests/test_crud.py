@@ -118,7 +118,8 @@ class TestUpdateNovel(CrudTestCase):
         novel_id = self.novel(token)
         self.client.patch(f"/api/novels/{novel_id}", json={"title": "Đã đổi"},
                           headers=self.auth(token))
-        again = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        again = self.client.get(f"/api/novels/{novel_id}",
+                                headers=self.auth(token)).json()["novel"]
         self.assertEqual(again["title"], "Đã đổi")
 
     def test_partial_update_keeps_other_fields(self):
@@ -127,7 +128,8 @@ class TestUpdateNovel(CrudTestCase):
         self.client.patch(f"/api/novels/{novel_id}",
                           json={"description": "Chỉ đổi mô tả"},
                           headers=self.auth(token))
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                               headers=self.auth(token)).json()["novel"]
         self.assertEqual(body["title"], "Giữ nguyên")
         self.assertEqual(body["tags"], ["thử"])
 
@@ -139,7 +141,8 @@ class TestUpdateNovel(CrudTestCase):
                           json={"title": "x", "state": "published"},
                           headers=self.auth(token))
         self.assertEqual(
-            self.client.get(f"/api/novels/{novel_id}").json()["novel"]["state"],
+            self.client.get(f"/api/novels/{novel_id}",
+                            headers=self.auth(token)).json()["novel"]["state"],
             "draft",
         )
 
@@ -154,7 +157,8 @@ class TestUpdateNovel(CrudTestCase):
         self.client.patch(f"/api/novels/{novel_id}",
                           json={"title": "x", "owner_id": other_id},
                           headers=self.auth(token))
-        body = self.client.get(f"/api/novels/{novel_id}").json()["novel"]
+        body = self.client.get(f"/api/novels/{novel_id}",
+                               headers=self.auth(token)).json()["novel"]
         self.assertEqual(body["owner_id"], owner_id)
 
     def test_empty_patch_is_rejected(self):
@@ -172,7 +176,8 @@ class TestUpdateNovel(CrudTestCase):
                               headers=self.auth(intruder))
         self.assertEqual(r.status_code, 403)
         self.assertNotEqual(
-            self.client.get(f"/api/novels/{novel_id}").json()["novel"]["title"],
+            self.client.get(f"/api/novels/{novel_id}",
+                            headers=self.auth(owner)).json()["novel"]["title"],
             "Chiếm",
         )
 
@@ -203,7 +208,8 @@ class TestUpdateChapter(CrudTestCase):
             headers=self.auth(token),
         )
         self.assertEqual(r.status_code, 200)
-        body = self.client.get(f"/api/chapters/{chapter_id}").json()["chapter"]
+        body = self.client.get(f"/api/chapters/{chapter_id}",
+                               headers=self.auth(token)).json()["chapter"]
         self.assertEqual(body["title"], "Chương đổi")
         self.assertEqual(body["content"], "Nội dung mới.")
         self.assertEqual(body["order_index"], 5)
@@ -214,7 +220,8 @@ class TestUpdateChapter(CrudTestCase):
         self.client.patch(f"/api/chapters/{chapter_id}",
                           json={"content": "abc"}, headers=self.auth(token))
         self.assertEqual(
-            self.client.get(f"/api/chapters/{chapter_id}").json()["chapter"]["char_count"],
+            self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token))
+                .json()["chapter"]["char_count"],
             3,
         )
 
@@ -236,7 +243,8 @@ class TestUpdateChapter(CrudTestCase):
                           json={"title": "x", "novel_id": second},
                           headers=self.auth(token))
         self.assertEqual(
-            self.client.get(f"/api/chapters/{chapter_id}").json()["chapter"]["novel_id"],
+            self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token))
+                .json()["chapter"]["novel_id"],
             first,
         )
 
@@ -251,7 +259,10 @@ class TestDeleteChapter(CrudTestCase):
         chapter_id = self.chapter(token, novel_id)
         r = self.client.delete(f"/api/chapters/{chapter_id}", headers=self.auth(token))
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(self.client.get(f"/api/chapters/{chapter_id}").status_code, 404)
+        # Token cua chu so huu: 404 phai la vi DA XOA, khong phai vi phan quyen.
+        self.assertEqual(
+            self.client.get(f"/api/chapters/{chapter_id}",
+                            headers=self.auth(token)).status_code, 404)
 
     def test_deleting_chapter_removes_audio_object_and_metadata(self):
         """Xoa phai NHAT QUAN: khong de lai track tro toi file da mat."""
@@ -289,7 +300,9 @@ class TestDeleteChapter(CrudTestCase):
 
         self.client.delete(f"/api/chapters/{drop}", headers=self.auth(token))
 
-        self.assertEqual(self.client.get(f"/api/chapters/{keep}").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/chapters/{keep}",
+                            headers=self.auth(token)).status_code, 200)
         self.assertIn(keep_key, self.stored_keys(), "không được xoá nhầm audio khác")
 
     def test_non_owner_cannot_delete_chapter(self):
@@ -298,14 +311,18 @@ class TestDeleteChapter(CrudTestCase):
         intruder = self.user("ke-la@example.com")
         r = self.client.delete(f"/api/chapters/{chapter_id}", headers=self.auth(intruder))
         self.assertEqual(r.status_code, 403)
-        self.assertEqual(self.client.get(f"/api/chapters/{chapter_id}").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/chapters/{chapter_id}",
+                            headers=self.auth(owner)).status_code, 200)
 
     def test_anonymous_cannot_delete_chapter(self):
         token = self.user("chu@example.com")
         chapter_id = self.chapter(token, self.novel(token))
         self.assertEqual(self.client.delete(f"/api/chapters/{chapter_id}").status_code,
                          401)
-        self.assertEqual(self.client.get(f"/api/chapters/{chapter_id}").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/chapters/{chapter_id}",
+                            headers=self.auth(token)).status_code, 200)
 
 
 # =============================================================== xoa truyen
@@ -326,10 +343,15 @@ class TestDeleteNovel(CrudTestCase):
         self.assertEqual(removed["tracks"], 2)
         self.assertEqual(removed["objects"], 2)
 
-        self.assertEqual(self.client.get(f"/api/novels/{novel_id}").status_code, 404)
+        # Goi kem token cua chu so huu: 404 o day phai chung minh DA XOA, chu
+        # khong phai chi chung minh khach vang lai khong duoc xem truyen nhap.
+        self.assertEqual(
+            self.client.get(f"/api/novels/{novel_id}",
+                            headers=self.auth(token)).status_code, 404)
         for chapter_id in (first, second):
             self.assertEqual(
-                self.client.get(f"/api/chapters/{chapter_id}").status_code, 404)
+                self.client.get(f"/api/chapters/{chapter_id}",
+                                headers=self.auth(token)).status_code, 404)
         for key in keys:
             self.assertNotIn(key, self.stored_keys())
 
@@ -358,7 +380,9 @@ class TestDeleteNovel(CrudTestCase):
 
         self.client.delete(f"/api/novels/{drop}", headers=self.auth(token))
 
-        self.assertEqual(self.client.get(f"/api/novels/{keep}").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/novels/{keep}",
+                            headers=self.auth(token)).status_code, 200)
         self.assertIn(keep_key, self.stored_keys())
 
     def test_non_owner_cannot_delete_novel(self):
@@ -367,7 +391,9 @@ class TestDeleteNovel(CrudTestCase):
         intruder = self.user("ke-la@example.com")
         r = self.client.delete(f"/api/novels/{novel_id}", headers=self.auth(intruder))
         self.assertEqual(r.status_code, 403)
-        self.assertEqual(self.client.get(f"/api/novels/{novel_id}").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/novels/{novel_id}",
+                            headers=self.auth(owner)).status_code, 200)
 
     def test_non_owner_deletion_touches_nothing(self):
         owner = self.user("chu@example.com")
@@ -379,7 +405,9 @@ class TestDeleteNovel(CrudTestCase):
         self.client.delete(f"/api/novels/{novel_id}", headers=self.auth(intruder))
 
         self.assertIn(key, self.stored_keys(), "không được xoá object của người khác")
-        self.assertEqual(self.client.get(f"/api/chapters/{chapter_id}").status_code, 200)
+        self.assertEqual(
+            self.client.get(f"/api/chapters/{chapter_id}",
+                            headers=self.auth(owner)).status_code, 200)
 
     def test_anonymous_cannot_delete_novel(self):
         novel_id = self.novel(self.user("chu@example.com"))
@@ -418,7 +446,8 @@ class TestPublishToggle(CrudTestCase):
         self.client.post(f"/api/novels/{novel_id}/publish", headers=self.auth(token))
         self.client.post(f"/api/novels/{novel_id}/unpublish", headers=self.auth(token))
         self.assertEqual(
-            self.client.get(f"/api/novels/{novel_id}").json()["novel"]["state"], "draft")
+            self.client.get(f"/api/novels/{novel_id}", headers=self.auth(token))
+                .json()["novel"]["state"], "draft")
 
     def test_unpublish_is_idempotent(self):
         token = self.user("chu@example.com")

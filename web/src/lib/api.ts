@@ -53,6 +53,14 @@ export interface Chapter {
   state: PublishState;
   char_count: number;
   content?: string;
+  /**
+   * Chuong da co ban audio chua. Backend tra san trong danh sach chuong cua
+   * `getNovel`, nen trang chi tiet khong phai hoi tung chuong mot nua.
+   *
+   * Tuy chon vi cac route khac (vi du `createChapter`) khong kem truong nay.
+   * Thieu thi coi nhu chua co audio.
+   */
+  has_audio?: boolean;
   created_at: string;
   updated_at: string;
 }

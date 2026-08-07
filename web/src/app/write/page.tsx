@@ -127,17 +127,15 @@ export default function WritePage() {
     if (!novelId) return;
     api
       .getNovel(novelId)
-      .then(async (detail) => {
+      .then((detail) => {
         setChapters(detail.chapters);
-        const flags = await Promise.all(
-          detail.chapters.map((chapter) =>
-            api
-              .getChapter(chapter.chapter_id)
-              .then((r) => [chapter.chapter_id, r.audio !== null] as const)
-              .catch(() => [chapter.chapter_id, false] as const),
+        // `has_audio` di kem san trong danh sach chuong. Van giu o state vi
+        // cho nay con tu cap nhat khi mot job vua xong hoac chuong bi xoa.
+        setAudioByChapter(
+          Object.fromEntries(
+            detail.chapters.map((c) => [c.chapter_id, Boolean(c.has_audio)]),
           ),
         );
-        setAudioByChapter(Object.fromEntries(flags));
       })
       .catch(() => {
         setChapters([]);

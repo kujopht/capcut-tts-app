@@ -160,7 +160,8 @@ class TestUploadLifecycle(SecurityTestCase):
     def test_completed_only_after_successful_upload(self):
         owner = self._user("owner@example.com")
         _, chapter_id = self._chapter_with_audio(owner)
-        detail = self.client.get(f"/api/chapters/{chapter_id}").json()
+        detail = self.client.get(f"/api/chapters/{chapter_id}",
+                                 headers=self._auth(owner)).json()
         self.assertIsNotNone(detail["audio"])
         self.assertTrue(detail["audio"]["object_key"])
 
@@ -189,7 +190,9 @@ class TestUploadLifecycle(SecurityTestCase):
         self.assertTrue(job["error_message"])
 
         # Va khong duoc tao audio_track nao
-        self.assertIsNone(self.client.get(f"/api/chapters/{chapter_id}").json()["audio"])
+        self.assertIsNone(
+            self.client.get(f"/api/chapters/{chapter_id}",
+                            headers=self._auth(owner)).json()["audio"])
 
 
 class TestR2AdapterWithMockedClient(unittest.TestCase):

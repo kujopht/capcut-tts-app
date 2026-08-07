@@ -91,13 +91,14 @@ Tách bạch cho rõ:
 
 ### Chưa làm — việc tiếp theo
 
-1. **Bấm tay trên giao diện với backend cloud.** Mới kiểm qua API; chưa mở
-   trình duyệt chạy `/library` → `/studio` với `DATA_BACKEND=appwrite`.
-2. **Chương dài và nhiều job song song.** Mới thử chương ngắn, chạy tuần tự.
-   Giới hạn 1.000.000 ký tự của thuộc tính `content` chưa chạm tới.
-3. **Dọn object mồ côi.** Chưa có transaction phân tán, nên khi ghi `completed`
-   hỏng sau lúc upload, object vẫn nằm lại trong kho. Cần một job quét định kỳ.
-4. Chưa có thanh toán, lịch sử nghe, trừ quota, moderation.
+1. **Đối soát object / metadata.** Chưa có công cụ nào. Đường sinh object mồ
+   côi là `create_track` hỏng sau khi upload xong; metadata mồ côi chỉ đến từ
+   xoá ngoài hệ thống. Đo live hai lần đều 0 mồ côi, nên đây là việc phòng xa
+   chứ chưa cấp bách. **Đang chờ chọn phương án** — xem "Xử lý mồ côi" bên dưới.
+2. **Chương dài.** Giới hạn 1.000.000 ký tự của thuộc tính `content` chưa chạm tới.
+3. **Tải cao.** Mới thử tối đa 5 job song song.
+4. **Job kẹt ở `running`.** Worker chết giữa chừng thì chưa có cơ chế hồi phục.
+5. Chưa có thanh toán, lịch sử nghe, trừ quota, moderation.
 
 ## Biến môi trường
 
@@ -150,9 +151,9 @@ Repo này không chứa và không bao giờ được chứa secret thật.
 - **Chương dài**: mới thử chương ngắn một đoạn; giới hạn 1.000.000 ký tự của
   thuộc tính `content` chưa chạm tới.
 - **Giọng Piper cục bộ** qua backend web: chưa thử, và vẫn `commercial_ready: false`.
-- **Dọn object mồ côi**: chưa có job quét (xem "Giới hạn đã biết").
-- **Frontend đấu với backend cloud**: mới kiểm qua API, chưa bấm tay trên
-  giao diện với `DATA_BACKEND=appwrite`.
+- **Đối soát mồ côi**: chưa có công cụ (xem "Xử lý mồ côi").
+- **Frontend đấu với backend cloud**: ✅ đã bấm tay 2026-08-07, xem
+  "Kiểm tra thủ công trên giao diện".
 
 ## Live smoke test — ĐÃ CHẠY
 
@@ -203,6 +204,26 @@ nội dung + giọng + thiết lập → **idempotency tái dùng đúng job cũ
 chuyển `running → failed`, **không** có `completed`, **không** có `output_key`.
 Đúng thiết kế — không báo thành công giả.
 
+### Kiểm tra thủ công trên giao diện — ĐÃ CHẠY
+
+Người vận hành tự thao tác trên trình duyệt ngày **2026-08-07**, backend ở chế
+độ `DATA_BACKEND=appwrite` + `STORAGE_BACKEND=r2`, web ở `localhost:3000`.
+**Toàn bộ các bước đều đạt:**
+
+| Bước | Nội dung |
+|---|---|
+| 1 | Đăng ký tài khoản mới trên `/login` (mật khẩu ≥ 8 ký tự theo yêu cầu Appwrite) |
+| 2 | Đăng xuất rồi đăng nhập lại bằng chính tài khoản đó |
+| 3 | Tạo truyện ở `/studio`, tiêu đề tiếng Việt có dấu → hiện nhãn **Bản nháp**, chưa lọt `/library` |
+| 4 | Thêm chương, dán nội dung tiếng Việt → hiện số ký tự |
+| 5 | Chọn giọng, gửi job TTS → trạng thái tự nhảy `pending` → `running` → `completed` |
+| 6 | Bấm phát nghe được; tải MP3 về máy; **cửa sổ ẩn danh bị chặn** khi truyện chưa xuất bản |
+| 7 | Xuất bản truyện → hiện trong `/library` → **cửa sổ ẩn danh nghe được** |
+
+Đây là mảnh cuối cùng chưa tự động hoá được. Với nó, luồng đầu-cuối của Mốc 3
+và Mốc 4 đã được kiểm chứng bằng **cả** API tự động **lẫn** thao tác người thật
+trên backend cloud.
+
 ### Còn lại trong môi trường dev
 
 Bucket còn **1 object** là audio của smoke test. Cố ý giữ: xoá sẽ để lại
@@ -217,16 +238,56 @@ hỏng đều đẩy job sang `failed` và xoá `output_key`.
 
 | Bước hỏng | Job | Hệ quả còn lại |
 |---|---|---|
-| Tổng hợp giọng | `failed` | Không có gì được upload |
-| Upload | `failed` | Không có `audio_track`, không có `output_key` |
-| Ghi `completed` | `failed` | Object đã upload nằm lại làm rác; không bao giờ được công bố vì `output_key` bị xoá |
+| Tổng hợp giọng | `failed` | Không upload gì. Sạch. |
+| Upload | `failed` | Không `audio_track`, không `output_key`. Sạch. |
+| Tạo `audio_track` | `failed` | **Object mồ côi**: đã upload nhưng không metadata nào trỏ tới. Không route nào chạm được (đã kiểm chứng live) — chỉ tốn dung lượng. |
+| Ghi `completed` | `failed` | `audio_track` **đã** tồn tại và trỏ tới object **thật** → chương vẫn phát được, nhưng job báo `failed`. Không mất dữ liệu, chỉ lệch trạng thái. |
 
-Ưu tiên đã chọn: **thà báo `failed` còn hơn báo thành công giả.** Rác ở dòng
-cuối cần một job quét định kỳ để dọn — chưa làm.
+Ưu tiên đã chọn: **thà báo `failed` còn hơn báo thành công giả.**
+
+**Đính chính** (bản trước ghi sai): dòng "ghi `completed` hỏng" **không** sinh
+object mồ côi, vì `create_track` đã chạy xong trước đó nên object vẫn được tham
+chiếu. Đường sinh object mồ côi thật sự là **`create_track` hỏng**.
+
+**Metadata mồ côi** (`audio_track` trỏ tới object không tồn tại) **không sinh ra
+từ bất kỳ đường nào trong code** — thứ tự upload → `create_track` bảo đảm điều
+đó. Nó chỉ đến từ bên ngoài: xoá thủ công trên console R2, lifecycle rule hết
+hạn, hoặc mất mát ở phía R2. Đo live hai lần đều cho **0 mồ côi cả hai chiều**.
 
 Tiến độ từng đoạn (`done_parts`) chỉ giữ trong bộ nhớ, không ghi mỗi tick để
 tránh làm ngập Appwrite. Worker chết giữa chừng sẽ để job kẹt ở `running` cho
 tới khi có cơ chế hồi phục — cũng chưa làm.
+
+## Xử lý mồ côi — đang chờ quyết định
+
+**Chưa triển khai gì.** Ghi lại phân tích để chọn có căn cứ.
+
+Mức độ cấp bách: **thấp**. Đo live hai lần đều 0 mồ côi cả hai chiều. Mỗi object
+chỉ 15–47 KB, và object mồ côi **không route nào chạm tới được** (đã kiểm chứng)
+nên chỉ tốn dung lượng, không phải vấn đề bảo mật.
+
+| # | Phương án | Ưu | Nhược |
+|---|---|---|---|
+| 1 | **Không làm gì** | Không thêm dòng code nào → không thêm rủi ro. Không tốn độ trễ. | Không phát hiện được gì. Object mồ côi tích tụ âm thầm. Nếu object bị xoá ngoài hệ thống, người dùng thấy trình phát hỏng câm lặng. |
+| 2 | **`HEAD` trước khi chuyển hướng** | Bắt đúng lúc đọc, trả 404 rõ ràng thay vì trình phát hỏng. | Thêm một round-trip R2 cho **mọi** lần phát (~50–150 ms) và gấp đôi số thao tác R2. **Tạo chế độ hỏng mới**: một cú `HEAD` trượt vì mạng chập chờn sẽ báo "không có audio" cho file hoàn toàn lành. Đổi "hiếm khi hỏng im lặng" lấy "thỉnh thoảng báo sai lúc bình thường". Không dọn được rác. |
+| 3 | **Job quét đối soát + xoá** | Phát hiện cả hai chiều. Dọn được rác. Không đụng vào độ trễ đường đọc. | **Là phương án duy nhất XOÁ dữ liệu** → bán kính thiệt hại lớn nhất. Có race chết người: quét đúng lúc một job vừa upload xong mà `create_track` chưa chạy → tưởng mồ côi → **xoá mất audio thật**. Cần thêm code, lịch chạy và giám sát. |
+| **3a** | **Đối soát CHỈ ĐỌC** (biến thể của 3) | Đọc thuần → gần như không có bán kính thiệt hại. Phát hiện đầy đủ cả hai chiều. Không đụng độ trễ. Là tiền đề bắt buộc cho bất kỳ bản tự xoá nào về sau. | Không tự dọn, phải người xử lý. Vẫn cần chỗ chạy định kỳ. |
+
+**Khuyến nghị: 3a — đối soát chỉ đọc.**
+
+Lý do: nó là phương án duy nhất *phát hiện được* mà **không** đánh đổi bằng rủi
+ro mới. Phương án 2 mua sự rõ ràng bằng một chế độ hỏng mới trên đường nóng;
+phương án 3 mua sự sạch sẽ bằng quyền xoá dữ liệu người dùng. Với hiện trạng 0
+mồ côi và rác chỉ tốn vài chục KB, **quyền xoá chưa xứng với rủi ro nó mang lại**.
+
+Nếu sau này muốn cho nó tự xoá, điều kiện tối thiểu:
+
+1. Báo cáo chỉ-đọc phải chạy sạch một thời gian đủ dài để tin được.
+2. Chỉ coi là mồ côi khi object **già hơn thời gian chạy job dài nhất** (ví dụ
+   24 giờ) — chặn đúng cái race ở trên.
+3. Chạy `--dry-run` trước, in ra đúng những gì sẽ xoá.
+4. Không bao giờ xoá `audio_track`; metadata mồ côi phải do người xem xét, vì
+   nó nghĩa là **đã mất dữ liệu** chứ không phải thừa dữ liệu.
 
 ## Bẫy đã gặp
 

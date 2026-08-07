@@ -20,7 +20,7 @@ export default function HomePage() {
       </section>
 
       <section className="grid-2" aria-label="Hai khu vực chính">
-        <Link href="/studio" className="feature" style={{ "--glow": "#7c8cff3d" } as React.CSSProperties}>
+        <Link href="/studio" className="feature feature-studio">
           <span className="feature-icon" aria-hidden="true">
             🎙️
           </span>
@@ -35,7 +35,7 @@ export default function HomePage() {
           </span>
         </Link>
 
-        <Link href="/fanfic" className="feature" style={{ "--glow": "#4dd6c133" } as React.CSSProperties}>
+        <Link href="/fanfic" className="feature feature-fanfic">
           <span className="feature-icon" aria-hidden="true">
             📚
           </span>

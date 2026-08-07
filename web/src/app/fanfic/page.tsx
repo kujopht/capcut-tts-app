@@ -1,45 +1,110 @@
 "use client";
 
-/** Kham pha fanfic: danh sach truyen da xuat ban, tim kiem va loc theo the. */
+/**
+ * Kham pha fanfic: danh sach truyen da xuat ban, tim kiem va loc theo the.
+ *
+ * TIM KIEM, LOC VA PHAN TRANG DEU DO BACKEND LAM. Ban truoc tai HET truyen ve
+ * roi loc bang JavaScript — du cho vai chuc truyen, khong du cho vai nghin.
+ *
+ * Kho chua cua Audio Studio khong can loc o day: no luon o trang thai ban nhap
+ * nen khong bao gio lot vao danh sach da xuat ban (xem `lib/workspace.ts`).
+ */
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Novel } from "@/lib/api";
-import { useSession } from "@/lib/session";
-import { useAsyncData } from "@/lib/useAsyncData";
+import { errorMessage, useSession } from "@/lib/session";
 import { fanficOnly } from "@/lib/workspace";
 import { EmptyState, ErrorState, SkeletonCards, formatDate } from "@/components/ui";
 import { NovelCover } from "@/components/NovelCover";
 
+/** So truyen moi trang. Backend chan tran tren o 60. */
+const PAGE_SIZE = 12;
+
+/** Cho nguoi dung go xong hay hoi backend — tranh mot request moi ky tu. */
+const DEBOUNCE_MS = 350;
+
 export default function FanficPage() {
   const { profile } = useSession();
+
   const [query, setQuery] = useState("");
   const [tag, setTag] = useState("");
+  const [page, setPage] = useState(0);
 
-  const fetchNovels = useCallback(
-    () => api.listNovels(false).then((r) => fanficOnly(r.novels)),
-    [],
-  );
-  const { data, loading, error, reload } = useAsyncData(fetchNovels);
-  const novels = useMemo(() => data ?? [], [data]);
+  const [novels, setNovels] = useState<Novel[]>([]);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const tags = useMemo(() => {
-    const all = new Set<string>();
-    novels.forEach((novel) => novel.tags.forEach((t) => all.add(t)));
-    return [...all].sort((a, b) => a.localeCompare(b, "vi"));
-  }, [novels]);
+  const [tags, setTags] = useState<string[]>([]);
 
-  const shown = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return novels.filter((novel) => {
-      const matchText =
-        !needle ||
-        novel.title.toLowerCase().includes(needle) ||
-        novel.description.toLowerCase().includes(needle);
-      const matchTag = !tag || novel.tags.includes(tag);
-      return matchText && matchTag;
-    });
-  }, [novels, query, tag]);
+  /** Bo qua phan hoi cua request cu neu nguoi dung da go tiep. */
+  const latest = useRef(0);
+
+  const fetchPage = useCallback(async () => {
+    const ticket = latest.current + 1;
+    latest.current = ticket;
+    setLoading(true);
+    setError("");
+    try {
+      const r = await api.browseNovels({
+        query,
+        tag,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+      });
+      if (latest.current !== ticket) return;   // da co request moi hon
+      // `fanficOnly` o day la LOP PHONG VE, khong phai bo loc: kho chua cua
+      // Audio Studio luon la ban nhap nen khong bao gio lot vao danh sach da
+      // xuat ban. Giu lai de bat buoc do thanh hien nhien trong code — no khong
+      // bao gio thuc su bo phan tu nao, nen khong lam lech so dem cua trang.
+      setNovels(fanficOnly(r.novels));
+      setTotal(r.total);
+      setHasMore(r.has_more);
+    } catch (cause) {
+      if (latest.current !== ticket) return;
+      setError(errorMessage(cause));
+      setNovels([]);
+      setTotal(0);
+      setHasMore(false);
+    } finally {
+      if (latest.current === ticket) setLoading(false);
+    }
+  }, [query, tag, page]);
+
+  useEffect(() => {
+    const id = window.setTimeout(fetchPage, DEBOUNCE_MS);
+    return () => window.clearTimeout(id);
+  }, [fetchPage]);
+
+  // Danh sach the lay mot lan, khong phu thuoc trang dang xem
+  useEffect(() => {
+    api
+      .novelTags()
+      .then((r) => setTags(r.tags))
+      .catch(() => setTags([]));
+  }, []);
+
+  /** Doi bo loc thi ve trang dau — trang 5 cua ket qua cu thuong khong ton tai. */
+  const changeQuery = (value: string) => {
+    setQuery(value);
+    setPage(0);
+  };
+  const changeTag = (value: string) => {
+    setTag(value);
+    setPage(0);
+  };
+  const clearFilters = () => {
+    setQuery("");
+    setTag("");
+    setPage(0);
+  };
+
+  const filtering = Boolean(query.trim() || tag);
+  const lastPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
+  const from = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const to = page * PAGE_SIZE + novels.length;
 
   return (
     <div className="page">
@@ -67,7 +132,7 @@ export default function FanficPage() {
             className="input"
             type="search"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => changeQuery(e.target.value)}
             placeholder="Tên truyện hoặc mô tả…"
           />
         </div>
@@ -81,7 +146,7 @@ export default function FanficPage() {
                 type="button"
                 className="chip"
                 aria-pressed={tag === ""}
-                onClick={() => setTag("")}
+                onClick={() => changeTag("")}
               >
                 Tất cả
               </button>
@@ -91,7 +156,7 @@ export default function FanficPage() {
                   type="button"
                   className="chip"
                   aria-pressed={tag === item}
-                  onClick={() => setTag(tag === item ? "" : item)}
+                  onClick={() => changeTag(tag === item ? "" : item)}
                 >
                   {item}
                 </button>
@@ -104,44 +169,39 @@ export default function FanficPage() {
       {loading ? (
         <SkeletonCards count={6} />
       ) : error ? (
-        <ErrorState message={error} onRetry={reload} />
+        <ErrorState message={error} onRetry={fetchPage} />
       ) : novels.length === 0 ? (
-        <EmptyState
-          icon="📚"
-          title="Chưa có truyện nào được xuất bản"
-          hint="Hãy là người đầu tiên: viết truyện rồi bấm xuất bản."
-          action={
-            <Link className="btn btn-primary" href={profile ? "/write" : "/login"}>
-              Bắt đầu viết
-            </Link>
-          }
-        />
-      ) : shown.length === 0 ? (
-        <EmptyState
-          icon="🔍"
-          title="Không tìm thấy truyện phù hợp"
-          hint="Thử từ khoá khác hoặc bỏ bớt bộ lọc."
-          action={
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                setQuery("");
-                setTag("");
-              }}
-            >
-              Xoá bộ lọc
-            </button>
-          }
-        />
+        filtering ? (
+          <EmptyState
+            icon="🔍"
+            title="Không tìm thấy truyện phù hợp"
+            hint="Thử từ khoá khác hoặc bỏ bớt bộ lọc."
+            action={
+              <button type="button" className="btn" onClick={clearFilters}>
+                Xoá bộ lọc
+              </button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon="📚"
+            title="Chưa có truyện nào được xuất bản"
+            hint="Hãy là người đầu tiên: viết truyện rồi bấm xuất bản."
+            action={
+              <Link className="btn btn-primary" href={profile ? "/write" : "/login"}>
+                Bắt đầu viết
+              </Link>
+            }
+          />
+        )
       ) : (
         <>
           <p className="hint" role="status">
-            {shown.length} truyện
-            {shown.length !== novels.length ? ` (lọc từ ${novels.length})` : ""}
+            {from}–{to} trong {total} truyện
+            {filtering ? " khớp bộ lọc" : ""}
           </p>
           <div className="grid">
-            {shown.map((novel) => (
+            {novels.map((novel) => (
               <Link
                 key={novel.novel_id}
                 href={`/novels/${novel.novel_id}`}
@@ -169,6 +229,30 @@ export default function FanficPage() {
               </Link>
             ))}
           </div>
+
+          {total > PAGE_SIZE ? (
+            <nav className="pager" aria-label="Phân trang">
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+              >
+                <span aria-hidden="true">←</span> Trang trước
+              </button>
+              <span className="hint" role="status">
+                Trang {page + 1} / {lastPage + 1}
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={!hasMore}
+              >
+                Trang sau <span aria-hidden="true">→</span>
+              </button>
+            </nav>
+          ) : null}
         </>
       )}
     </div>

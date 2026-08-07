@@ -77,7 +77,7 @@ export default function NovelDetailPage({
   return (
     <div className="page">
       <nav aria-label="Đường dẫn">
-        <Link href="/fanfic" className="hint">
+        <Link href="/fanfic" className="hint crumb">
           ← Khám phá Fanfic
         </Link>
       </nav>

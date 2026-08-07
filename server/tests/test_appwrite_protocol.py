@@ -328,6 +328,129 @@ class TestBatchedAudioLookup(unittest.TestCase):
                 list(inspect.signature(method).parameters), ["self", "chapter_ids"])
 
 
+class TestBrowseQuerySyntax(unittest.TestCase):
+    """
+    Cu phap truy van cho tim kiem va loc — ba dieu chi lo ra khi chay that,
+    da do truc tiep tren Appwrite Cloud 1.9.6.
+    """
+
+    def test_tag_filter_uses_contains_not_equal(self):
+        """
+        `equal` tren thuoc tinh MANG bi tu choi:
+            Cannot query equal on attribute "tags" because it is an array
+        """
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).find_novels(tag="one piece")
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        tag_queries = [q for q in queries
+                       if q.get("attribute") == "tags"]
+        self.assertEqual(len(tag_queries), 1)
+        self.assertEqual(tag_queries[0]["method"], "contains")
+        self.assertNotEqual(tag_queries[0]["method"], "equal")
+
+    def test_search_uses_contains_not_search(self):
+        """
+        `search` doi index fulltext ma schema khong co:
+            Searching by attribute "title" requires a fulltext index
+        """
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).find_novels(query="Luffy")
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        methods = [q["method"] for q in queries]
+        self.assertNotIn("search", methods)
+        self.assertIn("or", methods)
+
+    def test_or_nests_objects_not_json_strings(self):
+        """Long dang chuoi JSON thi Appwrite tra 'Server Error'."""
+        from server.appwrite_store import q_contains, q_or
+
+        parsed = json.loads(q_or(q_contains("title", "x"),
+                                 q_contains("description", "x")))
+        self.assertEqual(parsed["method"], "or")
+        self.assertEqual(len(parsed["values"]), 2)
+        for condition in parsed["values"]:
+            self.assertIsInstance(condition, dict,
+                                  "dieu kien phai la doi tuong, khong phai chuoi")
+            self.assertEqual(condition["method"], "contains")
+
+    def test_search_covers_both_title_and_description(self):
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).find_novels(query="Luffy")
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        or_query = next(q for q in queries if q["method"] == "or")
+        attrs = sorted(c["attribute"] for c in or_query["values"])
+        self.assertEqual(attrs, ["description", "title"])
+
+    def test_paging_sends_limit_and_offset(self):
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).find_novels(limit=10, offset=20)
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        limits = [q["values"][0] for q in queries if q["method"] == "limit"]
+        offsets = [q["values"][0] for q in queries if q["method"] == "offset"]
+        self.assertEqual(limits, [10])
+        self.assertEqual(offsets, [20])
+
+    def test_total_comes_from_appwrite_not_from_the_page_length(self):
+        """Appwrite tra `total` doc lap voi `limit` — da kiem chung khi chay."""
+        class TotalRecorder:
+            def request(self, method, url, json=None, params=None, headers=None):
+                return {"total": 137, "documents": [{
+                    "novel_id": "nov_1", "owner_id": "u", "title": "T",
+                    "description": "", "cover_key": None, "state": "published",
+                    "tags": [], "created_at": "", "updated_at": "",
+                }]}
+
+        items, total = AppwriteMetadataStore(
+            SETTINGS, client=TotalRecorder()).find_novels(limit=1)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(total, 137, "khong duoc lay do dai trang lam tong")
+
+    def test_no_paging_means_fetch_everything_with_pagination(self):
+        """`limit=None` phai lat trang, neu khong bi cat o 25 ban ghi."""
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).find_novels()
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        methods = [q["method"] for q in queries]
+        self.assertIn("limit", methods)
+        self.assertIn("offset", methods)
+
+    def test_tag_list_only_asks_for_the_tags_attribute(self):
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).novel_tags()
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        selects = [q for q in queries if q["method"] == "select"]
+        self.assertEqual(selects[0]["values"], ["tags"])
+
+    def test_published_filter_survives_search_and_tag(self):
+        """Tim kiem khong duoc lam mat dieu kien `state = published`."""
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).find_novels(
+            published_only=True, query="x", tag="y")
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        state = [q for q in queries
+                 if q["method"] == "equal" and q.get("attribute") == "state"]
+        self.assertEqual(len(state), 1)
+        self.assertEqual(state[0]["values"], ["published"])
+
+    def test_owner_filter_survives_search(self):
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).find_novels(
+            owner_id="usr_1", query="x")
+        queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
+        owner = [q for q in queries
+                 if q["method"] == "equal" and q.get("attribute") == "owner_id"]
+        self.assertEqual(owner[0]["values"], ["usr_1"])
+
+    def test_every_query_is_valid_json(self):
+        fake = _Recorder()
+        AppwriteMetadataStore(SETTINGS, client=fake).find_novels(
+            owner_id="usr_1", published_only=True, query="Luffy",
+            tag="one piece", limit=10, offset=10)
+        for raw in fake.calls[0]["params"]["queries[]"]:
+            parsed = json.loads(raw)      # phai la JSON hop le
+            self.assertIn("method", parsed)
+
+
 class TestSessionAuthentication(unittest.TestCase):
     """
     Session secret KHONG phai JWT.

@@ -26,9 +26,13 @@
   --brand-hover: #93a0ff;
   --brand-soft: #7c8cff1f;
   --brand-line: #7c8cff4d;
+  /* Quang sang phia sau the o trang chu. Dam hon `-soft` vi no phai thay duoc
+     qua mot lop mo lon. Dat o day de moi gia tri mau chi ton tai MOT cho. */
+  --brand-glow: #7c8cff3d;
 
   --accent: #4dd6c1;
   --accent-soft: #4dd6c11f;
+  --accent-glow: #4dd6c133;
 
   /* --- trang thai --- */
   --ok: #4ade80;
@@ -286,6 +290,26 @@ button, input, select, textarea {
   color: inherit;
   border-radius: var(--r-full);
 }
+
+/* Lien ket breadcrumb: chu nho, mot dong, nhung phai bam duoc bang ngon tay.
+   Neu them `padding` thi vung bam to len ma CHIEU CAO CUA HANG cung to theo.
+   Nen mo rong bang mot lop `::after` dat tuyet doi: no khong tham gia layout,
+   hang van cao ~20px, ma vung bam thi du 44px. */
+.crumb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+}
+.crumb::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 44px;
+}
 .avatar {
   width: 28px; height: 28px;
   display: grid; place-items: center;
@@ -377,9 +401,14 @@ button, input, select, textarea {
   content: "";
   position: absolute;
   inset: -40% 40% 55% -25%;
-  background: radial-gradient(closest-side, var(--glow, #7c8cff33), transparent);
+  background: radial-gradient(closest-side, var(--glow), transparent);
   pointer-events: none;
 }
+/* Mau quang dat bang CLASS chu khong phai style inline: media query va theme
+   khong voi toi duoc style inline (bai hoc cua H1), va gia tri mau thi chi nen
+   nam trong khoi token o dau file. */
+.feature-studio { --glow: var(--brand-glow); }
+.feature-fanfic { --glow: var(--accent-glow); }
 .feature:hover {
   transform: translateY(-4px);
   border-color: var(--line-strong);
@@ -727,6 +756,16 @@ button, input, select, textarea {
   background: #12151d80;
 }
 .empty-icon { font-size: 36px; opacity: 0.75; }
+
+/* Thanh phan trang. `space-between` de hai nut ra hai dau, so trang o giua —
+   o mobile chung tu xuong dong ma khong can quy tac rieng. */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
 
 .list { display: flex; flex-direction: column; gap: var(--s2); }
 .list-item {

@@ -67,7 +67,7 @@ export default function ChapterPage({
   return (
     <div className="page">
       <nav aria-label="Đường dẫn">
-        <Link href={`/novels/${chapter.novel_id}`} className="hint">
+        <Link href={`/novels/${chapter.novel_id}`} className="hint crumb">
           ← {novel?.title ?? "Về truyện"}
         </Link>
       </nav>

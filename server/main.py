@@ -272,16 +272,57 @@ def _novel_brief(novel: Novel) -> Dict[str, Any]:
     }
 
 
+#: Tran tren cho `limit`. Khong de client tu xin 10.000 ban ghi mot lan.
+MAX_PAGE_SIZE = 60
+
+
 @app.get("/api/novels")
-def list_novels(mine: bool = False, profile: Optional[Profile] = None,
+def list_novels(mine: bool = False, q: str = "", tag: str = "",
+                limit: Optional[int] = None, offset: int = 0,
                 authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
-    """Thu vien cong khai, hoac danh sach cua rieng minh khi `mine=true`."""
+    """
+    Thu vien cong khai, hoac danh sach cua rieng minh khi `mine=true`.
+
+    Tim kiem (`q`), loc the (`tag`) va phan trang (`limit`/`offset`) do KHO lam,
+    khong phai trinh duyet. Truoc day `/fanfic` tai het truyen ve roi loc bang
+    JavaScript — du cho vai chuc truyen, khong du cho vai nghin.
+
+    TUONG THICH NGUOC: `limit` mac dinh la None nghia la khong phan trang, tra
+    ve het y nhu truoc. Client cu (`mine=true` o trang tac gia, `ensureStudioNovel`)
+    khong doi hanh vi mot chut nao. Chi ai truyen `limit` moi duoc phan trang.
+    """
+    owner_id = None
     if mine:
-        owner = current_profile(authorization)
-        items = store.list_novels(owner_id=owner.user_id)
-    else:
-        items = store.list_novels(published_only=True)
-    return {"novels": [_novel_out(n) for n in items], "count": len(items)}
+        owner_id = current_profile(authorization).user_id
+
+    page_size = None if limit is None else max(1, min(limit, MAX_PAGE_SIZE))
+    items, total = store.find_novels(
+        owner_id=owner_id,
+        published_only=not mine,
+        query=q,
+        tag=tag,
+        limit=page_size,
+        offset=max(0, offset),
+    )
+    return {
+        "novels": [_novel_out(n) for n in items],
+        # `count` giu nguyen y nghia cu: so ban ghi TRONG PHAN HOI NAY
+        "count": len(items),
+        # `total` la so ban ghi khop dieu kien — de biet con trang sau hay khong
+        "total": total,
+        "limit": page_size,
+        "offset": max(0, offset),
+        "has_more": max(0, offset) + len(items) < total,
+    }
+
+
+# PHAI khai bao TRUOC `/api/novels/{novel_id}`: FastAPI so khop theo thu tu khai
+# bao, dat sau thi "tags" bi coi la mot `novel_id`.
+@app.get("/api/novels/tags")
+def list_novel_tags() -> Dict[str, Any]:
+    """Cac the dang co tren truyen DA XUAT BAN, cho bo loc o trang kham pha."""
+    tags = store.novel_tags(published_only=True)
+    return {"tags": tags, "count": len(tags)}
 
 
 @app.post("/api/novels", status_code=status.HTTP_201_CREATED)

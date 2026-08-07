@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
@@ -102,6 +102,34 @@ def q_limit(count: int) -> str:
 
 def q_offset(count: int) -> str:
     return json.dumps({"method": "offset", "values": [int(count)]})
+
+
+def q_contains(attribute: str, value: Any) -> Dict[str, Any]:
+    """
+    Chua chuoi con, hoac mang co chua phan tu.
+
+    Da kiem chung tren Appwrite Cloud 1.9.6:
+    - `equal` tren thuoc tinh MANG (nhu `tags`) bi tu choi:
+      'Cannot query equal on attribute "tags" because it is an array' — phai
+      dung `contains`.
+    - `search` doi INDEX FULLTEXT: 'Searching by attribute "title" requires a
+      fulltext index' — schema hien tai khong co, nen cung dung `contains`.
+    - `contains` khong phan biet hoa/thuong VA khong phan biet dau: tim "tac"
+      ra "Hải Tặc". Rat tien cho tieng Viet.
+
+    Tra ve DICT chu khong phai chuoi JSON, de con long vao `q_or` duoc.
+    """
+    return {"method": "contains", "attribute": attribute, "values": [value]}
+
+
+def q_or(*conditions: Dict[str, Any]) -> str:
+    """
+    Thoa MOT trong cac dieu kien.
+
+    Cac dieu kien phai long vao duoi dang DOI TUONG. Long dang chuoi JSON thi
+    Appwrite tra 'Server Error' — da gap that khi chay.
+    """
+    return json.dumps({"method": "or", "values": list(conditions)})
 
 
 def q_select(*attributes: str) -> str:
@@ -233,8 +261,21 @@ class AppwriteMetadataStore:
         return self._call("GET", f"{self._docs(collection)}/{doc_id}")
 
     def _list(self, collection: str, queries: List[str]) -> List[Dict[str, Any]]:
+        return self._page(collection, queries)[0]
+
+    def _page(self, collection: str,
+              queries: List[str]) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Nhu `_list` nhung tra kem TONG so ban ghi khop dieu kien.
+
+        Appwrite tra `total` doc lap voi `limit`/`offset` — da kiem chung: dat
+        `limit=1` van thay `total=3`. Nho vay biet duoc con trang sau hay khong
+        ma khong phai dem lai.
+        """
         data = self._call("GET", self._docs(collection), params={"queries[]": queries})
-        return list(data.get("documents") or [])
+        docs = list(data.get("documents") or [])
+        total = data.get("total")
+        return docs, int(total) if isinstance(total, int) else len(docs)
 
     def _list_all(self, collection: str, queries: List[str]) -> List[Dict[str, Any]]:
         """
@@ -281,12 +322,63 @@ class AppwriteMetadataStore:
 
     def list_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False) -> List[Novel]:
+        items, _ = self.find_novels(owner_id=owner_id, published_only=published_only)
+        return items
+
+    def find_novels(self, owner_id: Optional[str] = None,
+                    published_only: bool = False, query: str = "",
+                    tag: str = "", limit: Optional[int] = None,
+                    offset: int = 0) -> Tuple[List[Novel], int]:
+        """
+        Loc va phan trang HOAN TOAN o phia Appwrite.
+
+        Khong tai het ve roi loc: day la ca ly do ton tai cua L2 — trang kham
+        pha khong duoc keo ca nghin truyen ve trinh duyet.
+
+        Xem contract o `MetadataStore.find_novels`.
+        """
         queries: List[str] = [q_order_desc("created_at")]
         if owner_id:
             queries.append(q_equal("owner_id", owner_id))
         if published_only:
             queries.append(q_equal("state", "published"))
-        return [_novel_from_doc(d) for d in self._list(COL_NOVELS, queries)]
+        if tag:
+            # `tags` la mang -> phai `contains`, `equal` bi Appwrite tu choi
+            queries.append(json.dumps(q_contains("tags", tag)))
+        needle = query.strip()
+        if needle:
+            queries.append(q_or(q_contains("title", needle),
+                                q_contains("description", needle)))
+
+        if limit is None:
+            # Khong phan trang: lay het, nhung van phai lat trang vi Appwrite
+            # mac dinh chi tra 25 document.
+            items = [_novel_from_doc(d) for d in self._list_all(COL_NOVELS, queries)]
+            return items, len(items)
+
+        docs, total = self._page(COL_NOVELS, queries + [
+            q_limit(max(1, limit)),
+            q_offset(max(0, offset)),
+        ])
+        return [_novel_from_doc(d) for d in docs], total
+
+    def novel_tags(self, published_only: bool = True) -> List[str]:
+        """
+        Cac the dang co. Chi xin ve truong `tags`, va lat trang.
+
+        Mot vong quet toan bo truyen — nhung chi lay MOT truong, va chay mot lan
+        moi lan mo trang kham pha. Khi so truyen lon len den muc nay thanh van
+        de thi cach dung la mot collection `tags` rieng, chua lam.
+        """
+        queries: List[str] = [q_select("tags")]
+        if published_only:
+            queries.append(q_equal("state", "published"))
+        tags = set()
+        for doc in self._list_all(COL_NOVELS, queries):
+            for tag in doc.get("tags") or []:
+                if tag:
+                    tags.add(tag)
+        return sorted(tags, key=lambda t: t.casefold())
 
     def publish_novel(self, novel_id: str, owner_id: str) -> Novel:
         """

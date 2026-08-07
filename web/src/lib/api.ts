@@ -193,6 +193,30 @@ export const api = {
       `/api/novels${mine ? "?mine=true" : ""}`,
     ),
 
+  /**
+   * Trang kham pha: tim kiem, loc the va phan trang do BACKEND lam.
+   *
+   * `listNovels` o tren giu nguyen — khong truyen `limit` thi backend tra ve het
+   * y nhu truoc, nen trang tac gia va `ensureStudioNovel` khong doi gi.
+   */
+  browseNovels: (opts: {
+    query?: string;
+    tag?: string;
+    limit: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (opts.query?.trim()) params.set("q", opts.query.trim());
+    if (opts.tag) params.set("tag", opts.tag);
+    params.set("limit", String(opts.limit));
+    params.set("offset", String(opts.offset ?? 0));
+    return request<NovelPage>(`/api/novels?${params.toString()}`);
+  },
+
+  /** Cac the dang co, de dung bo loc ma khong phai tai het truyen ve. */
+  novelTags: () =>
+    request<{ tags: string[]; count: number }>("/api/novels/tags"),
+
   createNovel: (title: string, description: string, tags: string[] = []) =>
     request<{ novel: Novel }>("/api/novels", {
       method: "POST",
@@ -316,6 +340,18 @@ export const api = {
       `/api/audio/${chapterId}/url${download ? "?download=true" : ""}`,
     ),
 };
+
+/** Mot trang trong danh sach truyen. */
+export interface NovelPage {
+  novels: Novel[];
+  /** So truyen TRONG trang nay. */
+  count: number;
+  /** Tong so truyen khop dieu kien — de biet con trang sau hay khong. */
+  total: number;
+  limit: number | null;
+  offset: number;
+  has_more: boolean;
+}
 
 /** Phan truyen kem theo chuong: vua du de hien bia va ten. */
 export interface NovelBrief {

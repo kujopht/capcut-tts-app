@@ -125,13 +125,18 @@ export default function StudioPage() {
         .getJob(activeJob.job_id)
         .then((r) => {
           setActiveJob(r.job);
-          if (r.job.status === "completed" || r.job.status === "failed") {
-            setJobs((current) => [
-              r.job,
-              ...current.filter((j) => j.job_id !== r.job.job_id),
-            ]);
-            if (r.job.status === "completed") toast.ok("Audio đã sẵn sàng.");
-            else toast.error("Tạo audio thất bại. Xem chi tiết bên dưới.");
+          // Dong bo lich su o MOI vong poll, khong chi khi job ket thuc.
+          // Truoc day khung "Tien trinh" da hien "Dang xu ly" ma the trong
+          // "Lich su audio" van con "Dang xep hang" — hai cho noi hai dieu khac
+          // nhau ve cung mot job.
+          setJobs((current) => [
+            r.job,
+            ...current.filter((j) => j.job_id !== r.job.job_id),
+          ]);
+          // Toast thi CHI o trang thai ket thuc, neu khong se keu moi vong poll
+          if (r.job.status === "completed") toast.ok("Audio đã sẵn sàng.");
+          else if (r.job.status === "failed") {
+            toast.error("Tạo audio thất bại. Xem chi tiết bên dưới.");
           }
         })
         .catch(() => {

@@ -36,7 +36,11 @@ test("trang chu dung hai feature card, khong chia doi 50/50", () => {
   const home = read("../src/app/page.tsx");
   assert.match(home, /href="\/studio"/);
   assert.match(home, /href="\/fanfic"/);
-  assert.equal((home.match(/className="feature"/g) ?? []).length, 2);
+  // The co the mang them class mau quang, nen `className="feature"` chinh xac
+  // khong con khop. Dem `feature` theo sau boi DAU CACH hoac DAU NHAY —
+  // `\b` khong dung duoc vi no khop ca truoc dau gach noi, nen `feature-icon`
+  // va `feature-cta` cung bi tinh.
+  assert.equal((home.match(/className="feature[ "]/g) ?? []).length, 2);
 
   const css = read("../src/app/globals.css");
   assert.ok(

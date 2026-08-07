@@ -115,10 +115,10 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | 327 test: 326 đạt, 1 bỏ qua |
+| `server/tests` | 375 test: 374 đạt, 1 bỏ qua |
 | ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 181 đạt, 1 bỏ qua (đo ở mốc cũ) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `web` (`node --test`) | 115/115 đạt |
+| `web` (`node --test`) | 137/137 đạt |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
 | `npx next build` | Thành công, 7 route |
@@ -257,6 +257,22 @@ xác minh được trạng thái xuất bản thì chọn phía an toàn.
 xuất bản. Bộ test khoá lại toàn bộ bảng trên ở
 `server/tests/test_chapter_list_batching.py::TestReadAuthorization`.
 
+## Tìm kiếm và phân trang — cú pháp truy vấn Appwrite
+
+Ba điều đã đo trực tiếp trên Appwrite Cloud 1.9.6, đừng đoán lại:
+
+| Việc cần làm | Cú pháp SAI | Cú pháp ĐÚNG |
+|---|---|---|
+| Lọc theo thẻ (`tags` là mảng) | `equal` → *Cannot query equal on attribute "tags" because it is an array* | `contains` |
+| Tìm trong `title` | `search` → *Searching by attribute "title" requires a fulltext index* | `contains` |
+| Tìm `title` HOẶC `description` | `or` với điều kiện lồng dạng **chuỗi JSON** → *Server Error* | `or` với điều kiện lồng dạng **đối tượng** |
+
+`contains` **không phân biệt hoa/thường và không phân biệt dấu** — tìm `tac` ra
+`Hải Tặc`. Rất tiện cho tiếng Việt, và có nghĩa là chưa cần index fulltext.
+
+Phản hồi của Appwrite có `total` **độc lập với `limit`/`offset`**, nên biết được
+còn trang sau hay không mà không phải đếm lại.
+
 ## Cảnh báo "audio cũ" — đo bằng mốc thời gian, không phải mã băm
 
 `audio_outdated` so `chapter.updated_at` với `created_at` của track mới nhất.
@@ -280,6 +296,20 @@ Hai điều bắt buộc phải giữ:
   Dùng `_parse_iso()`.
 - **`reorder_chapters` không được bump `updated_at`.** Sắp xếp lại không sửa nội
   dung; bump ở đó thì mọi chương đều bị báo "audio cũ" oan sau một lần kéo thứ tự.
+
+### Hệ quả đã kiểm chứng: sửa nội dung rồi sửa **về như cũ** thì cờ không tắt
+
+Đo thật: sửa chương → cờ bật. Sửa nội dung **về đúng nguyên bản** → cờ **vẫn
+bật**, vì `updated_at` mới hơn track. Bấm "Tạo lại audio" lúc này trả
+`reused: true` (dấu vân tay job khớp job cũ) nên **không có track mới**, và cờ
+không bao giờ tắt. Người dùng làm đúng như app hướng dẫn mà không thấy gì đổi.
+
+Đây là **vấn đề còn lại chưa sửa**. Cách sửa đúng: so **dấu vân tay** thay vì mốc
+thời gian. Track lưu `content_hash` = `job_fingerprint(content, voice, rate,
+chunk_chars)` nhưng không lưu `rate`/`chunk_chars`; lấy được hai giá trị đó từ
+job có `content_hash` trùng, rồi tính lại dấu vân tay với nội dung HIỆN TẠI là so
+được chính xác. Tốn thêm một truy vấn `list_jobs` — chấp nhận được ở route chương,
+nhưng route danh sách thì không (sẽ thành N+1). Chưa làm.
 
 ## Giới hạn đã biết
 

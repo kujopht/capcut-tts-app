@@ -17,7 +17,7 @@ import shutil
 import threading
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Sequence, Set
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, Tuple
 
 from server.config import ConfigError, Settings
 from server.domain import (
@@ -98,6 +98,30 @@ class MetadataStore(Protocol):
     def owned_novel(self, novel_id: str, owner_id: str) -> Novel: ...
     def list_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False) -> List[Novel]: ...
+
+    def find_novels(self, owner_id: Optional[str] = None,
+                    published_only: bool = False, query: str = "",
+                    tag: str = "", limit: Optional[int] = None,
+                    offset: int = 0) -> Tuple[List[Novel], int]:
+        """
+        Tim truyen co LOC va PHAN TRANG, tra ve `(trang_hien_tai, tong_so)`.
+
+        `tong_so` la so ban ghi KHOP DIEU KIEN, khong phai so ban ghi tra ve —
+        giao dien can no de biet con trang sau hay khong.
+
+        - `query` khop ten HOAC mo ta. Khong phan biet hoa/thuong.
+        - `tag` khop mot the trong mang `tags`.
+        - `limit=None` nghia la khong phan trang: tra ve HET. Day la mac dinh de
+          `list_novels` va cac client cu khong doi hanh vi.
+        - Loc va phan trang PHAI lam o tang kho, khong duoc tai het ve roi loc:
+          ca ly do ton tai cua ham nay la de trang kham pha khong keo ca nghin
+          truyen ve trinh duyet.
+        """
+        ...
+
+    def novel_tags(self, published_only: bool = True) -> List[str]:
+        """Cac the dang co, da bo trung va sap theo bang chu cai."""
+        ...
 
     def publish_novel(self, novel_id: str, owner_id: str) -> Novel:
         """
@@ -378,13 +402,41 @@ class MockMetadataStore:
         return novel
 
     def list_novels(self, owner_id: Optional[str] = None, published_only: bool = False) -> List[Novel]:
+        items, _ = self.find_novels(owner_id=owner_id, published_only=published_only)
+        return items
+
+    def find_novels(self, owner_id: Optional[str] = None,
+                    published_only: bool = False, query: str = "",
+                    tag: str = "", limit: Optional[int] = None,
+                    offset: int = 0) -> Tuple[List[Novel], int]:
+        """Xem contract o `MetadataStore.find_novels`."""
         with self._lock:
             items = list(self.novels.values())
         if owner_id:
             items = [n for n in items if n.owner_id == owner_id]
         if published_only:
             items = [n for n in items if n.state.value == "published"]
-        return sorted(items, key=lambda n: n.created_at, reverse=True)
+        if tag:
+            items = [n for n in items if tag in n.tags]
+        needle = query.strip().casefold()
+        if needle:
+            items = [n for n in items
+                     if needle in n.title.casefold()
+                     or needle in (n.description or "").casefold()]
+
+        items.sort(key=lambda n: n.created_at, reverse=True)
+        total = len(items)
+        start = max(0, offset)
+        page = items[start:] if limit is None else items[start:start + max(0, limit)]
+        return page, total
+
+    def novel_tags(self, published_only: bool = True) -> List[str]:
+        with self._lock:
+            items = list(self.novels.values())
+        if published_only:
+            items = [n for n in items if n.state.value == "published"]
+        tags = {t for n in items for t in n.tags if t}
+        return sorted(tags, key=lambda t: t.casefold())
 
     def publish_novel(self, novel_id: str, owner_id: str) -> Novel:
         """

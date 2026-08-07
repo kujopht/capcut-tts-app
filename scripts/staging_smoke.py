@@ -84,6 +84,33 @@ def kt(ten: str, dieu_kien: Any, ghi_chu: str = "") -> bool:
 # ---------------------------------------------------------------- cac buoc
 
 
+def danh_thuc(base: str, ten: str, cho_toi_da: int) -> bool:
+    """
+    Danh thuc mot service dang ngu.
+
+    Web service goi Free cua Render NGU sau 15 phut khong co traffic; request
+    dau tien sau do mat khoang 50 giay. Khong cho thi smoke test se bao "khong
+    ket noi duoc" trong khi service hoan toan lanh manh — mot ket luan sai.
+
+    Day KHONG phai "tang timeout cho qua": no cho MOT dieu kien cu the (service
+    tra loi) chu khong ngu mot khoang co dinh, va no in ro da phai cho bao lau.
+    """
+    t0 = time.time()
+    lan = 0
+    while time.time() - t0 < cho_toi_da:
+        lan += 1
+        ma, _ = goi(base, "GET", "/api/health" if "/api" not in base else "/", timeout=60)
+        if ma and ma < 500:
+            cho = round(time.time() - t0)
+            if cho > 3:
+                print(f"     ({ten} vua tinh giac sau {cho}s, {lan} lan thu — "
+                      f"binh thuong voi goi Free)")
+            return True
+        time.sleep(3)
+    print(f"     ({ten} khong tra loi sau {cho_toi_da}s)")
+    return False
+
+
 def buoc_suc_khoe(api: str, sha_mong: Optional[str]) -> Dict[str, Any]:
     print("\n=== 1. Health / readiness ===")
     ma, h = goi(api, "GET", "/api/health")
@@ -251,7 +278,7 @@ def buoc_giao_dien(web: Optional[str]) -> None:
         kt("bo qua: chua truyen --web", True, "khong kiem duoc")
         return
     for duong in ("/", "/fanfic", "/login"):
-        ma, _ = goi(web, "GET", duong)
+        ma, _ = goi(web, "GET", duong, timeout=120)
         kt(f"GET {duong} tra 200", ma == 200, f"HTTP {ma}")
     print("     (kiem tra desktop 1440x900 / mobile 390x844 can trinh duyet that —")
     print("      xem muc tuong ung trong bao cao staging)")
@@ -278,10 +305,22 @@ def main(argv=None) -> int:
     p.add_argument("--voice", default="edge:vi-VN-HoaiMyNeural")
     p.add_argument("--job-timeout", type=int, default=600)
     p.add_argument("--json", metavar="FILE", help="ghi ket qua ra file JSON")
+    p.add_argument("--wake-timeout", type=int, default=120,
+                   help="cho service goi Free tinh giac bao lau (giay). "
+                        "Web service Free cua Render ngu sau 15 phut khong co "
+                        "traffic; request dau tien mat khoang 50 giay.")
     a = p.parse_args(argv)
 
     print(f"API = {a.api}")
     print(f"WEB = {a.web or '(khong kiem)'}")
+
+    # Danh thuc TRUOC khi tinh diem: mot service dang ngu khong phai la mot
+    # service hong.
+    print()
+    print("=== 0. Danh thuc (goi Free co the dang ngu) ===")
+    kt("backend tra loi", danh_thuc(a.api, "backend", a.wake_timeout))
+    if a.web:
+        kt("frontend tra loi", danh_thuc(a.web, "frontend", a.wake_timeout))
 
     tk: Dict[str, Any] = {}
     ids: Optional[Dict[str, str]] = None

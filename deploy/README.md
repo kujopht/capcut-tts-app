@@ -157,6 +157,65 @@ healthcheck là thêm một thứ có thể hỏng mà không được gì. Nh�
 
 ---
 
+## Hai Blueprint — chọn một
+
+| Tệp | Gói | Worker TTS | Khi nào dùng |
+|---|---|---|---|
+| `deploy/render.yaml` | trả phí (`starter`) | **Background Worker trên Render** | Khi đã sẵn sàng trả phí; worker luôn chạy trên hạ tầng |
+| **`deploy/render.free.yaml`** | **Free** | **chạy trên máy bạn** | Staging riêng tư, không cần thẻ |
+
+**Blueprint Path nhập trên Render:** `deploy/render.free.yaml`
+
+### Phương án Free — hình dạng thực tế
+
+```
+   trình duyệt
+        │
+        ▼
+ ┌──────────────────┐      ┌──────────────────┐
+ │ fas-staging-     │─────▶│ fas-staging-     │
+ │ web-free  (Free) │      │ api-free  (Free) │
+ └──────────────────┘      └────────┬─────────┘
+   ngủ sau 15 phút          ngủ sau 15 phút
+                                    │
+                            ┌───────▼────────┐      ┌──────────────────┐
+                            │    Appwrite    │◀────▶│  TTS worker      │
+                            │    staging     │ claim│  MÁY CỦA BẠN     │
+                            └────────────────┘      └────────┬─────────┘
+                            ┌────────────────┐               │ upload
+                            │   R2 staging   │◀──────────────┘
+                            └────────────────┘
+```
+
+Worker **không đi qua backend**. Nó nói chuyện thẳng với Appwrite và R2, nên
+backend ngủ cũng không làm job đang chạy dừng lại. Nhưng **tạo** job thì cần
+backend thức, vì `POST /api/jobs` đi qua nó.
+
+### Đánh đổi của gói Free
+
+| Điều | Hệ quả |
+|---|---|
+| Web service ngủ sau **15 phút** không có traffic | Request đầu tiên sau đó mất ~50 giây. Hai service nên lần mở đầu có thể tới ~100 giây. `staging_smoke.py` có `--wake-timeout` lo việc này |
+| 750 giờ instance/tháng cho cả tài khoản | Vì tự ngủ nên thực tế hiếm khi chạm trần |
+| 512 MB RAM mỗi service | Đủ cho backend FastAPI và Next.js ở quy mô staging |
+| Không có Background Worker | Worker chạy trên máy bạn — mục dưới |
+| Không có Cron Job | Reconciler chạy tay, xem `deploy/RUNBOOK.md` |
+| Máy bạn tắt = không có worker | Job nằm `pending` cho tới khi bật lại. **Không mất dữ liệu** — job đã bền vững trong Appwrite |
+
+### Vì sao frontend không phải "Static Site"
+
+Static Site của Render cần `output: 'export'`. Đã thử thật và build dừng ở:
+
+```
+Error: Page "/chapters/[id]" is missing "generateStaticParams()"
+       so it cannot be used with "output: export" config.
+```
+
+`/novels/[id]` và `/chapters/[id]` nhận id là dữ liệu người dùng lúc chạy, không
+thể liệt kê lúc build. Muốn thành Static Site phải đổi sang dạng query
+(`/novels?id=…`) — đổi URL công khai, đổi liên kết, đổi test. Web Service gói
+Free vẫn **miễn phí** và không phải sửa gì.
+
 ## So sánh nền tảng
 
 Repo **chưa từng chọn** nền tảng nào — không có `Dockerfile`, `vercel.json`,

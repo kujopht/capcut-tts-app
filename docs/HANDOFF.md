@@ -243,11 +243,36 @@ nguyên host và đường dẫn presigned URL** — lộ R2 account id, tên bu
 
 Cách đưa credential vào mà không phải dán vào chat: mục 12 của báo cáo staging.
 
+## Staging gói FREE — không cần thẻ
+
+**Blueprint Path nhập trên Render: `deploy/render.free.yaml`**
+
+`deploy/render.yaml` (trả phí) giữ nguyên. Bản Free có **2 service** (`plan: free`),
+**không** Background Worker — gói Free không hỗ trợ. Worker TTS chạy trên máy bạn:
+
+```powershell
+$env:FAS_ENV_FILE = "server/.env.staging"
+.\.venv\Scripts\python.exe -m server.worker --require-env staging
+```
+
+Frontend **không** thể là Static Site: `output: 'export'` báo
+`Page "/chapters/[id]" is missing "generateStaticParams()"`. Web Service gói Free
+vẫn miễn phí và không phải sửa app.
+
+Hai rào chắn chống trỏ nhầm tài nguyên: `--require-env` (worker thoát **mã 2**
+nếu `FAS_ENV` lệch — bắt đúng lỗi quên `FAS_ENV_FILE` và nạp `server/.env` của
+dev), và `Settings.validate()` chặn `FAS_ENV=staging` + `FAS_INLINE_WORKER=true`.
+
+Một lỗi thật đã sửa: **worker sập khi log tiếng Việt** trên console cp1252 của
+Windows. Nay ép UTF-8 lúc import.
+
+Chi tiết: `docs/reports/staging/BAO_CAO_STAGING.md` mục 13.
+
 ## Kết quả kiểm thử gần nhất
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | **556 test: 555 đạt, 1 bỏ qua** (chạy 3 lần, kết quả ổn định) |
+| `server/tests` | **577 test: 576 đạt, 1 bỏ qua** (chạy 3 lần, kết quả ổn định) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
 | `web` (`node --test`) | **152/152 đạt** |
 | `npx eslint .` | Sạch, exit 0 |
@@ -298,7 +323,7 @@ Kết quả lần chạy gần nhất:
 | Python | 3.12.10 |
 | Gói cài từ `server/requirements.txt` | 39 gói, **không có PySide6**, không cài tay gói nào |
 | `PYTHONPATH` | Rỗng — không cần đặt thủ công |
-| `server/tests` | **556 test: 555 đạt, 1 bỏ qua** |
+| `server/tests` | **577 test: 576 đạt, 1 bỏ qua** |
 | `web` `npm test` | **152/152 đạt** |
 | `npx tsc --noEmit` | exit 0 |
 | `npx eslint .` | exit 0 |

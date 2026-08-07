@@ -60,6 +60,91 @@ sai hình dạng của staging.
 
 ---
 
+## 2b. Worker cục bộ cho staging gói Free
+
+Gói Free của Render **không có Background Worker**, nên worker chạy trên máy bạn
+và nối thẳng vào Appwrite/R2 staging. Backend trên Render không tham gia đường
+này.
+
+### Chuẩn bị `server/.env.staging` một lần
+
+Tệp này **đã bị `.gitignore` chặn** (luật `.env.*`). Nội dung:
+
+```
+FAS_ENV=staging
+FAS_INLINE_WORKER=false
+DATA_BACKEND=appwrite
+STORAGE_BACKEND=r2
+
+APPWRITE_ENDPOINT=<endpoint staging>
+APPWRITE_PROJECT_ID=<project id staging>
+APPWRITE_DATABASE_ID=<database id staging>
+APPWRITE_API_KEY=<api key staging>
+
+R2_ACCOUNT_ID=<account id>
+R2_BUCKET=<bucket staging>
+R2_ACCESS_KEY_ID=<access key id>
+R2_SECRET_ACCESS_KEY=<secret access key>
+```
+
+`FAS_CORS_ORIGINS` không cần: worker không phục vụ request nào.
+
+### Chạy worker
+
+**PowerShell** (Windows):
+
+```powershell
+cd C:\Users\robux\Documents\CapCut-TTS-App
+$env:FAS_ENV_FILE = "server/.env.staging"
+.\.venv\Scripts\python.exe -m server.worker --require-env staging
+```
+
+**bash** (macOS/Linux/Git Bash):
+
+```bash
+cd /duong/dan/CapCut-TTS-App
+FAS_ENV_FILE=server/.env.staging ./.venv/bin/python -m server.worker --require-env staging
+```
+
+Kiểm nhịp ở một cửa sổ khác:
+
+```powershell
+$env:FAS_ENV_FILE = "server/.env.staging"
+.\.venv\Scripts\python.exe -m server.worker --check
+```
+
+### `--require-env staging` là rào chắn, không phải trang trí
+
+`server/config.py` mặc định nạp `server/.env` — tệp của máy phát triển, trỏ vào
+tài nguyên **dev**. Quên `FAS_ENV_FILE` thì worker sẽ **lặng lẽ** xử lý job của
+dev bằng credential dev, không có gì báo lỗi.
+
+`--require-env staging` biến im lặng đó thành một lần dừng hẳn: tệp dev ghi
+`FAS_ENV=development`, không khớp, worker thoát ngay với **mã 2** và in rõ lý do.
+
+Thử chính xác điều đó trước khi tin:
+
+```powershell
+# KHÔNG đặt FAS_ENV_FILE — cố ý nạp nhầm tệp dev
+.\.venv\Scripts\python.exe -m server.worker --require-env staging
+# mong đợi: thoát mã 2, "dung_vi_sai_moi_truong"
+```
+
+### Lớp rào chắn thứ hai
+
+`Settings.validate()` chặn cấu hình sai hình dạng: `FAS_ENV` là `staging` hoặc
+`production` mà `FAS_INLINE_WORKER` vẫn bật → **dừng ngay khi khởi động**. Muốn
+cố ý (chữa cháy tạm) phải đặt thêm `FAS_ALLOW_INLINE_WORKER_IN_REAL_ENV=true`.
+
+Nhờ vậy backend trên Render không thể vô tình tự chạy job TTS rồi bị Render ngủ
+giữa chừng.
+
+### Khi tắt máy
+
+Worker dừng, job đang chạy mất lease sau 90 giây. **Không mất dữ liệu**: job đã
+bền vững trong Appwrite, và lần sau bật worker lên nó sẽ nhận lại đúng một lần.
+Job mới tạo trong lúc worker tắt nằm `pending` cho tới khi có worker.
+
 ## 3. Restart worker
 
 ```bash

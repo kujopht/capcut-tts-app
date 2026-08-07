@@ -532,3 +532,117 @@ Cần **API key** để tôi deploy và đọc SHA/URL:
 
 Không muốn cấp API key cũng được — khi đó bạn tự tạo ba service theo mục 8, rồi
 gửi tôi **URL** (không phải secret) để tôi chạy `staging_smoke.py`.
+
+---
+
+## 13. Phương án staging GÓI FREE — không cần thẻ
+
+Bạn không muốn nhập thẻ. Đã chuẩn bị Blueprint riêng.
+
+**Blueprint Path nhập trên Render: `deploy/render.free.yaml`**
+
+`deploy/render.yaml` (bản trả phí) **giữ nguyên**, không sửa một dòng — có test khoá.
+
+### Khác biệt
+
+| | `render.yaml` | `render.free.yaml` |
+|---|---|---|
+| Gói | `starter` (trả phí) | **`free`** |
+| Số service | 3 | **2** |
+| Background Worker | có | **không** — gói Free không hỗ trợ |
+| Worker TTS chạy ở đâu | trên Render | **trên máy bạn** |
+| Cron reconciler | có mẫu | chạy tay |
+
+### Frontend KHÔNG phải Static Site — có bằng chứng
+
+Đã thử `output: 'export'` thật, build dừng ở:
+
+```
+Error: Page "/chapters/[id]" is missing "generateStaticParams()"
+       so it cannot be used with "output: export" config.
+```
+
+`/novels/[id]` và `/chapters/[id]` nhận id là dữ liệu người dùng lúc chạy, không
+liệt kê được lúc build. Muốn thành Static Site phải đổi sang dạng query
+(`/novels?id=…`) — đổi URL công khai, đổi liên kết, đổi test. **Web Service gói
+Free vẫn miễn phí** và không phải sửa gì.
+
+### Đánh đổi của gói Free
+
+| Điều | Hệ quả |
+|---|---|
+| Ngủ sau **15 phút** không traffic | Request đầu mất ~50 giây; hai service nên lần mở đầu có thể ~100 giây. `staging_smoke.py --wake-timeout` lo việc này |
+| 750 giờ instance/tháng | Vì tự ngủ nên hiếm khi chạm trần |
+| 512 MB RAM mỗi service | Đủ cho quy mô staging |
+| Không Background Worker | Worker chạy trên máy bạn |
+| Không Cron Job | Reconciler chạy tay |
+| Máy bạn tắt | Job nằm `pending`; **không mất dữ liệu** |
+
+**Backend ngủ KHÔNG làm job TTS dừng** — worker nói chuyện thẳng với Appwrite/R2,
+không qua backend. Nhưng **tạo** job thì cần backend thức.
+
+### Lệnh chạy worker cục bộ
+
+Chuẩn bị `server/.env.staging` một lần (đã kiểm: `.gitignore` chặn qua `.env.*`),
+nội dung ở `deploy/RUNBOOK.md` mục 2b.
+
+**PowerShell:**
+
+```powershell
+cd C:\Users\robux\Documents\CapCut-TTS-App
+$env:FAS_ENV_FILE = "server/.env.staging"
+.\.venv\Scripts\python.exe -m server.worker --require-env staging
+```
+
+**bash:**
+
+```bash
+FAS_ENV_FILE=server/.env.staging ./.venv/bin/python -m server.worker --require-env staging
+```
+
+Kiểm nhịp: `python -m server.worker --check`
+
+### Hai rào chắn chống trỏ nhầm tài nguyên
+
+**1. `--require-env staging` trên worker.** `server/config.py` mặc định nạp
+`server/.env` — tệp dev. Quên `FAS_ENV_FILE` thì worker sẽ **lặng lẽ** xử lý job
+của dev bằng credential dev. Cờ này biến im lặng đó thành một lần dừng hẳn: tệp
+dev ghi `FAS_ENV=development`, không khớp, worker **thoát mã 2**.
+
+Đã thử thật:
+
+```
+{"muc": "dung_vi_sai_moi_truong", "mong_doi": "staging", "thuc_te": "development",
+ "thong_diep": "FAS_ENV không khớp. Nhiều khả năng đang nạp nhầm file cấu hình…"}
+exit=2
+```
+
+**2. `Settings.validate()` chặn sai hình dạng.** `FAS_ENV` là `staging`/
+`production` mà `FAS_INLINE_WORKER` vẫn bật → **dừng ngay khi khởi động**. Ở gói
+Free điều này đặc biệt quan trọng: nếu web tự chạy job thì Render sẽ ngủ nó giữa
+chừng sau 15 phút. Đường thoát hiểm trong RUNBOOK vẫn còn, chỉ là phải tường
+minh bằng `FAS_ALLOW_INLINE_WORKER_IN_REAL_ENV=true`.
+
+### Lỗi phát hiện trong lượt này
+
+| Lỗi | Sửa | Test |
+|---|---|---|
+| **Worker sập khi log tiếng Việt** trên console cp1252 của Windows — `UnicodeEncodeError`. Chính thông báo "FAS_ENV không khớp" làm tiến trình sập trước khi kịp in lý do | Ép UTF-8 cho stdout/stderr lúc import, `errors="replace"` | 3 test |
+| Rào chắn mới đặt **trước** kiểm CORS nên che mất lỗi wildcard mà test cũ đang kiểm | Chuyển xuống cuối `validate()` — kiểm cấu hình thiếu/sai trước, kiểm hình dạng triển khai sau | test cũ xanh trở lại |
+
+### Đã kiểm
+
+| Hạng mục | Kết quả |
+|---|---|
+| `render.free.yaml` | YAML hợp lệ, 2 service, cả hai `plan: free`, **không** `type: worker`, không secret viết sẵn |
+| `render.yaml` (trả phí) | **không sửa** — test khoá lại: vẫn 3 service, vẫn có `worker` |
+| Rào chắn `--require-env` | thoát mã 2 khi lệch; 5/7 test hỏng trên bản chưa có rào chắn |
+| Rào chắn `validate()` | 2/6 test hỏng trên bản chưa có rào chắn |
+| `staging_smoke.py` với bước đánh thức | **44/44 đạt** trên stack cục bộ dựng đúng hình dạng Free |
+| Dữ liệu | đối chiếu 6 tập hợp trước/sau: **mất 0, sót 0** |
+
+### Vẫn còn chặn
+
+Credential staging vẫn **chưa có trên máy này** (`server/.env` sửa lần cuối
+2026-08-06, vẫn trỏ dev). Cần `server/.env.staging` — mục 12 — thì mới chạy được
+migration và smoke test trên staging thật.

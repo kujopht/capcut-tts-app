@@ -38,7 +38,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from server import main as api
 from server.config import get_settings
@@ -56,6 +56,27 @@ GRACE_SECONDS = int(os.environ.get("FAS_WORKER_GRACE_SECONDS", "120"))
 HEARTBEAT_FILE = get_settings().var_dir / "worker" / "heartbeat.json"
 
 _dung = threading.Event()
+
+
+def _ep_utf8() -> None:
+    """
+    Ep stdout/stderr ve UTF-8.
+
+    Console Windows mac dinh la cp1252. Mot dong log co dau tieng Viet se nem
+    `UnicodeEncodeError` va lam CHET worker — da gap that: thong bao
+    "FAS_ENV không khớp" lam tien trinh sap ngay truoc khi kip in ly do.
+
+    `errors="replace"` de mot ky tu la khong bao gio quan trong hon viec worker
+    con song.
+    """
+    for luong in (sys.stdout, sys.stderr):
+        try:
+            luong.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_ep_utf8()
 
 
 def _ghi(muc: str, **truong: Any) -> None:
@@ -99,9 +120,24 @@ def _xin_dung(signum: int, _frame: Any) -> None:
     _dung.set()
 
 
-def chay() -> int:
+def chay(doi_moi_truong: Optional[str] = None) -> int:
     settings = get_settings()
     settings.validate()          # FAIL FAST y het web
+
+    # CHONG TRO NHAM TAI NGUYEN.
+    #
+    # `server/config.py` mac dinh nap `server/.env` — file cua may lap trinh
+    # vien, tro vao tai nguyen DEV. Chay worker ma quen `FAS_ENV_FILE` thi no
+    # lang le xu ly job cua dev bang credential dev. Khong co gi bao loi ca.
+    #
+    # `--require-env staging` bien im lang do thanh mot lan dung han: file dev
+    # ghi `FAS_ENV=development`, khong khop, worker thoat ngay.
+    if doi_moi_truong and settings.environment.lower() != doi_moi_truong.lower():
+        _ghi("dung_vi_sai_moi_truong",
+             mong_doi=doi_moi_truong, thuc_te=settings.environment,
+             thong_diep=("FAS_ENV không khớp. Nhiều khả năng đang nạp nhầm file "
+                         "cấu hình — kiểm tra FAS_ENV_FILE."))
+        return 2
 
     if settings.inline_worker:
         # Khong phai loi, nhung phai noi ro: web cung dang tu chay job, nen se co
@@ -200,7 +236,22 @@ def kiem_tra() -> int:
     return 0 if tuoi <= STALE_SECONDS else 1
 
 
+def _doc_tham_so(argv):
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="python -m server.worker",
+        description="Tien trinh worker TTS. Chay rieng, khong nam trong web.")
+    p.add_argument("--check", action="store_true",
+                   help="Doc tep nhip roi thoat. Dung lam healthcheck.")
+    p.add_argument("--require-env", metavar="TEN",
+                   help="Thoat neu FAS_ENV khac TEN. Chong chay nham vao tai "
+                        "nguyen dev khi quen dat FAS_ENV_FILE.")
+    return p.parse_args(argv)
+
+
 if __name__ == "__main__":
-    if "--check" in sys.argv[1:]:
+    tham_so = _doc_tham_so(sys.argv[1:])
+    if tham_so.check:
         sys.exit(kiem_tra())
-    sys.exit(chay())
+    sys.exit(chay(tham_so.require_env))

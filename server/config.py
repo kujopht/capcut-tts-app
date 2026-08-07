@@ -189,6 +189,10 @@ class Settings:
     #: `pending` mai. `/api/health` bao ra `inline_worker` de thay ngay.
     inline_worker: bool = True
 
+    #: Cho phep `inline_worker` o moi truong that. Chi dat khi CO Y — xem
+    #: `deploy/RUNBOOK.md` muc "Rollback ve che do inline (khan cap)".
+    allow_inline_worker_in_real_env: bool = False
+
     #: Da nap duoc file `.env` hay chua. Bao ra o `/api/health` de nguoi van
     #: hanh biet ngay file cau hinh co thuc su co tac dung khong - chinh la
     #: cai bay da tung lam ca buoi kiem chung chay tren mock.
@@ -236,6 +240,28 @@ class Settings:
             raise ConfigError(
                 "Không được dùng CORS wildcard '*' cùng credentials ở chế độ production. "
                 "Hãy liệt kê rõ origin trong FAS_CORS_ORIGINS."
+            )
+
+        # Kiem CUOI CUNG co chu dich. Cac kiem o tren noi ve cau hinh THIEU hoac
+        # SAI; cai nay noi ve HINH DANG TRIEN KHAI. Dat truoc chung thi mot cau
+        # hinh vua thieu CORS vua sai hinh dang se bao nhAm cai it co ban hon —
+        # va no da tung che mat loi wildcard trong bo test.
+        #
+        # Moi truong THAT ma web van tu chay job: restart web se giet job dang
+        # chay, va mot request handler phai cho TTS chay xong. O goi Free cua
+        # Render con te hon — service ngu sau 15 phut, ngu ngay giua chung.
+        # Van cho phep, nhung phai TUONG MINH: xem `deploy/RUNBOOK.md` muc
+        # "Rollback ve che do inline (khan cap)".
+        if (not self.is_development and self.inline_worker
+                and not self.allow_inline_worker_in_real_env):
+            raise ConfigError(
+                f"FAS_ENV={self.environment!r} nhưng FAS_INLINE_WORKER vẫn bật. "
+                "Ở môi trường thật, web không được tự chạy job TTS: restart web "
+                "sẽ giết job đang chạy giữa chừng. "
+                "Cách đúng: đặt FAS_INLINE_WORKER=false và chạy một tiến trình "
+                "`python -m server.worker`. "
+                "Nếu thật sự cố ý (chữa cháy tạm), đặt thêm "
+                "FAS_ALLOW_INLINE_WORKER_IN_REAL_ENV=true."
             )
 
     def describe(self) -> dict:
@@ -295,6 +321,8 @@ def load_settings() -> Settings:
         ),
         allow_unverified_local_voices=allow_unverified,
         inline_worker=_env_bool("FAS_INLINE_WORKER", True),
+        allow_inline_worker_in_real_env=_env_bool(
+            "FAS_ALLOW_INLINE_WORKER_IN_REAL_ENV", False),
         env_file_loaded=env_file is not None,
     )
 

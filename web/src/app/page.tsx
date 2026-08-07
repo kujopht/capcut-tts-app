@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LogoMark } from "@/components/Logo";
 
 /** Trang chu: hai the tinh nang lon, khong chia doi man hinh 50/50. */
 
@@ -6,6 +7,7 @@ export default function HomePage() {
   return (
     <div className="page">
       <section className="stack" style={{ maxWidth: 720, paddingTop: "var(--s4)" }}>
+        <LogoMark size={62} title="Fanfic Audio Studio" />
         <span className="eyebrow">Nền tảng audio tiếng Việt</span>
         <h1 className="page-title">
           Biến chữ thành giọng đọc, và nghe fanfic mọi lúc

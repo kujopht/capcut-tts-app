@@ -4,11 +4,26 @@ import "./globals.css";
 import { SessionProvider } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { NavAuth, NavLinks } from "@/components/NavAuth";
+import { Logo } from "@/components/Logo";
+
+const DESCRIPTION =
+  "Tạo audio từ văn bản bất kỳ và nghe fanfic bằng giọng đọc tiếng Việt.";
 
 export const metadata: Metadata = {
-  title: "Fanfic Audio Studio",
-  description:
-    "Tạo audio từ văn bản bất kỳ và nghe fanfic bằng giọng đọc tiếng Việt.",
+  // `template` de moi trang tu dat tieu de rieng ma van giu ten san pham
+  title: { default: "Fanfic Audio Studio", template: "%s · Fanfic Audio Studio" },
+  description: DESCRIPTION,
+  applicationName: "Fanfic Audio Studio",
+  // `icon.svg`, `apple-icon.tsx` va `opengraph-image.tsx` trong cung thu muc
+  // duoc Next tu gan vao <head> — khong khai bao tay o day.
+  openGraph: {
+    type: "website",
+    siteName: "Fanfic Audio Studio",
+    title: "Fanfic Audio Studio",
+    description: DESCRIPTION,
+    locale: "vi_VN",
+  },
+  twitter: { card: "summary_large_image" },
 };
 
 export const viewport: Viewport = {
@@ -31,13 +46,8 @@ export default function RootLayout({
 
             <header className="site-header">
               <div className="wrap">
-                <Link href="/" className="brand">
-                  <span className="brand-mark" aria-hidden="true">
-                    ♫
-                  </span>
-                  <span>
-                    Fanfic <span className="brand-text-sub">Audio Studio</span>
-                  </span>
+                <Link href="/" className="brand" aria-label="Fanfic Audio Studio — trang chủ">
+                  <Logo size={30} />
                 </Link>
                 <NavLinks />
                 <span className="spacer" />

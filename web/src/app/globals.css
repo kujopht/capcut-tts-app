@@ -261,15 +261,7 @@ button, input, select, textarea {
   flex: 0 0 auto;
 }
 .brand:hover { color: var(--text); }
-.brand-mark {
-  width: 30px; height: 30px;
-  display: grid; place-items: center;
-  border-radius: 9px;
-  background: linear-gradient(140deg, var(--brand), var(--accent));
-  color: #0b0d12;
-  font-size: 16px;
-  box-shadow: var(--shadow-1);
-}
+.brand svg { flex: 0 0 auto; }
 .brand-text-sub { color: var(--text-3); font-weight: 500; }
 
 .nav-links { display: flex; align-items: center; gap: var(--s1); }

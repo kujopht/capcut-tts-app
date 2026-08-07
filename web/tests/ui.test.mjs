@@ -339,3 +339,87 @@ test("khong goi setState long trong ham cap nhat cua setState", () => {
   const nested = /set[A-Z]\w*\(\((?:current|prev)\)\s*=>\s*\{[^}]*\bset[A-Z]\w*\(/s;
   assert.ok(!nested.test(write), "hàm cập nhật của setState phải thuần khiết");
 });
+
+/* ------------------------------------------------- nhan dien thuong hieu */
+
+test("co du bon bien the logo", () => {
+  assert.ok(has("../src/components/Logo.tsx"), "thieu component logo");
+  assert.ok(has("../src/app/icon.svg"), "thieu favicon");
+  assert.ok(has("../public/brand/logo-mark.svg"), "thieu bieu tuong vuong");
+  assert.ok(has("../public/brand/logo-full.svg"), "thieu logo day du");
+  assert.ok(has("../public/brand/logo-mono.svg"), "thieu ban mot mau");
+  assert.ok(has("../src/app/apple-icon.tsx"), "thieu apple-touch-icon");
+  assert.ok(has("../src/app/opengraph-image.tsx"), "thieu anh Open Graph");
+});
+
+test("logo la SVG nguyen ban, khong nhung anh ngoai", () => {
+  for (const f of [
+    "../src/app/icon.svg",
+    "../public/brand/logo-full.svg",
+    "../public/brand/logo-mono.svg",
+  ]) {
+    const svg = read(f);
+    assert.match(svg, /^<svg[\s\S]*<\/svg>\s*$/, `${f} phai la SVG`);
+    assert.ok(!/<image\b/.test(svg), `${f} khong duoc nhung anh bitmap`);
+    assert.ok(!/href="http/.test(svg), `${f} khong duoc tai tai nguyen ngoai`);
+    assert.match(svg, /<title>/, `${f} thieu <title> cho doc man hinh`);
+  }
+});
+
+test("mot bieu tuong duy nhat cho ca hai khu vuc", () => {
+  // Cung bo hinh khoi o moi noi: component, favicon, va anh sinh phia may chu
+  const key = 'd="M4.6 16.4 14.6 18 14.6 26.8 4.6 25.2Z"';
+  for (const f of [
+    "../src/components/Logo.tsx",
+    "../src/components/BrandMark.tsx",
+    "../src/app/icon.svg",
+    "../public/brand/logo-full.svg",
+  ]) {
+    assert.ok(read(f).includes(key), `${f} dung hinh khac — phai la mot logo`);
+  }
+});
+
+test("bieu tuong ket hop trang sach va song am", () => {
+  const svg = read("../src/app/icon.svg");
+  // Ba thanh song am
+  assert.equal((svg.match(/<rect[^>]*rx="1\.6"/g) ?? []).length, 3);
+  // Hai trang sach
+  assert.equal((svg.match(/<path[^>]*stroke-width="1\.8"/g) ?? []).length, 2);
+});
+
+test("ban mot mau va logo day du hop ca nen sang lan nen toi", () => {
+  for (const f of ["../public/brand/logo-mono.svg", "../public/brand/logo-full.svg"]) {
+    assert.match(read(f), /prefers-color-scheme: dark/, `${f} thieu bien the nen toi`);
+  }
+});
+
+test("logo duoc dat o header, trang chu va trang dang nhap", () => {
+  assert.match(read("../src/app/layout.tsx"), /<Logo size=\{30\}/);
+  assert.match(read("../src/app/page.tsx"), /<LogoMark size=\{62\}/);
+  assert.match(read("../src/app/login/page.tsx"), /<LogoMark size=\{54\}/);
+});
+
+test("metadata co Open Graph va tieu de theo mau", () => {
+  const layout = read("../src/app/layout.tsx");
+  assert.match(layout, /template: "%s · Fanfic Audio Studio"/);
+  assert.match(layout, /openGraph:/);
+  assert.match(layout, /locale: "vi_VN"/);
+  assert.match(layout, /twitter: \{ card: "summary_large_image" \}/);
+});
+
+test("anh sinh phia may chu khai bao dung kich thuoc", () => {
+  const apple = read("../src/app/apple-icon.tsx");
+  assert.match(apple, /width: 180, height: 180/);
+  assert.match(apple, /contentType = "image\/png"/);
+
+  const og = read("../src/app/opengraph-image.tsx");
+  assert.match(og, /width: 1200, height: 630/);
+  assert.match(og, /export const alt/);
+});
+
+test("logo khong pha bo cuc header hien co", () => {
+  const css = read("../src/app/globals.css");
+  // Logo la SVG that nen o gia lap bang CSS phai bi go
+  assert.ok(!css.includes(".brand-mark {"), "còn CSS chết của ô giả lập cũ");
+  assert.match(css, /\.brand svg \{ flex: 0 0 auto; \}/, "logo phải không bị co");
+});

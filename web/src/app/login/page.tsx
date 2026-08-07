@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { Alert, Loading } from "@/components/ui";
+import { LogoMark } from "@/components/Logo";
 
 const MIN_PASSWORD = 8;
 
@@ -69,7 +70,8 @@ export default function LoginPage() {
 
   return (
     <div className="page" style={{ maxWidth: 460, margin: "0 auto", width: "100%" }}>
-      <header className="stack-2" style={{ textAlign: "center" }}>
+      <header className="stack-2" style={{ textAlign: "center", alignItems: "center" }}>
+        <LogoMark size={54} title="Fanfic Audio Studio" />
         <h1 className="page-title">
           {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}
         </h1>

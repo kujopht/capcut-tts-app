@@ -1,0 +1,105 @@
+# CI toi thieu cho nen tang web (`server/` + `web/`).
+#
+# KHONG can secret nao. Backend chay o che do mac dinh `DATA_BACKEND=mock` va
+# `STORAGE_BACKEND=local`, khong co `server/.env` nen khong cham toi Appwrite hay
+# R2. Da xac minh: 521 test dat khi `FAS_ENV_FILE` tro vao mot file rong.
+#
+# Ung dung desktop (`app.py`, `desktop_app/`, `capcut_tts_api/`) KHONG chay o day:
+# no can PySide6 va mot man hinh, con cai dat PySide6 tren CI se pha vo dung dieu
+# ma job `backend` phai chung minh — rang `server/requirements.txt` la du.
+
+name: CI
+
+on:
+  push:
+    branches: ["main", "feature/**"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Push moi huy lan chay cu cua cung branch — khong xep hang vo ich.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests (moi truong sach)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Runner la mot may sach, va day la venv rieng ngoai cay lam viec: khong co
+      # goi nao co san tu truoc, nen day dong thoi la phep thu
+      # "server/requirements.txt co du de chay backend hay khong".
+      - name: Tao venv ngoai cay lam viec
+        run: python -m venv "$RUNNER_TEMP/venv"
+
+      - name: Cai dat CHI tu server/requirements.txt
+        run: |
+          PY="$RUNNER_TEMP/venv/bin/python"
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install -r server/requirements.txt
+
+      # Backend web KHONG duoc keo theo GUI. Neu mot ngay nao do co ai them
+      # `import PySide6` vao `server/`, phep thu nay do ngay.
+      - name: Xac nhan khong keo theo PySide6
+        run: |
+          if "$RUNNER_TEMP/venv/bin/python" -m pip list --format=freeze \
+               | grep -Ei '^(PySide6|shiboken6)'; then
+            echo "::error::server/requirements.txt da keo theo PySide6"
+            exit 1
+          fi
+          echo "khong co PySide6 / shiboken6"
+
+      # PYTHONPATH de rong co y: neu can dat thu cong thi cach chay da sai.
+      - name: Chay server/tests
+        env:
+          PYTHONPATH: ""
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m unittest discover -s server/tests -t . -v
+
+      - name: Bien dich toan bo ma backend
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m compileall -q server scripts
+
+  web:
+    name: Web tests, TypeScript, ESLint, production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # `npm ci` chu khong `npm install`: khoa dung phien ban trong
+      # package-lock.json, nen CI khong bao gio chay tren mot cay khac may.
+      - name: Cai dat phu thuoc
+        run: npm ci
+
+      - name: Web tests
+        run: npm test
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: npx eslint .
+
+      # `NEXT_PUBLIC_API_BASE` co gia tri du phong trong `src/lib/api.ts`, nen
+      # build khong can bien nao. Chi la URL localhost — khong phai secret.
+      - name: Production build
+        run: npx next build

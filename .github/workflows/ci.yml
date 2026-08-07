@@ -59,6 +59,21 @@ jobs:
           fi
           echo "khong co PySide6 / shiboken6"
 
+      # Chung minh runtime TU NO da du: import duoc ca ung dung khi trong venv
+      # moi co dung `requirements.txt`. Buoc nay phai chay TRUOC khi cai bat ky
+      # goi test nao, neu khong no khong con chung minh dieu gi.
+      - name: Import ung dung chi voi phu thuoc runtime
+        env:
+          PYTHONPATH: ""
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -c "import server.main, server.worker; print('import OK')"
+
+      # Cong cu chi danh cho test. Tach rieng de khong lam ban tap phu thuoc
+      # runtime ma buoc tren vua kiem.
+      - name: Cai phu thuoc chi danh cho test
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -r server/requirements-dev.txt
+
       # PYTHONPATH de rong co y: neu can dat thu cong thi cach chay da sai.
       - name: Chay server/tests
         env:

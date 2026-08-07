@@ -175,6 +175,14 @@ class TestWorkerLoggingSurvivesAWindowsConsole(unittest.TestCase):
 
 
 class TestTheFreeBlueprintIsCoherent(unittest.TestCase):
+    """
+    `yaml` den tu `server/requirements-dev.txt`, KHONG phai `requirements.txt`.
+
+    Backend luc chay khong bao gio doc YAML. Nhet PyYAML vao tap phu thuoc
+    runtime chi de mot test doc duoc `deploy/*.yaml` la lam hong chinh phep thu
+    "requirements.txt du de chay backend" ma job CI ton tai vi no.
+    """
+
     def setUp(self) -> None:
         import pathlib
 

@@ -168,7 +168,7 @@ class _PagingRecorder:
 
 class TestBatchedAudioLookup(unittest.TestCase):
     """
-    `chapters_with_audio` phai hoi theo LO, khong phai moi chuong mot truy van.
+    `audio_by_chapter` phai hoi theo LO, khong phai moi chuong mot truy van.
 
     Day la ly do ky thuat cua ca thay doi nay: truoc kia trang chi tiet truyen
     goi `/api/chapters/{id}` cho tung chuong.
@@ -179,16 +179,16 @@ class TestBatchedAudioLookup(unittest.TestCase):
         fake = _PagingRecorder([{"chapter_id": i} for i in ids])
         store = AppwriteMetadataStore(SETTINGS, client=fake)
 
-        found = store.chapters_with_audio(ids)
+        found = store.audio_by_chapter(ids)
 
-        self.assertEqual(found, set(ids))
+        self.assertEqual(set(found), set(ids))
         self.assertEqual(len(fake.calls), 1, "30 chương chỉ được tốn 1 request")
 
     def test_request_count_does_not_grow_with_chapter_count(self):
         def calls_for(count: int) -> int:
             ids = [f"chp_{i}" for i in range(count)]
             fake = _PagingRecorder([{"chapter_id": i} for i in ids])
-            AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(ids)
+            AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(ids)
             return len(fake.calls)
 
         self.assertEqual(calls_for(1), 1)
@@ -198,7 +198,7 @@ class TestBatchedAudioLookup(unittest.TestCase):
     def test_it_is_an_in_query_not_one_equal_per_chapter(self):
         ids = ["chp_a", "chp_b", "chp_c"]
         fake = _PagingRecorder([])
-        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(ids)
+        AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(ids)
 
         queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
         equals = [q for q in queries if q["method"] == "equal"]
@@ -208,7 +208,7 @@ class TestBatchedAudioLookup(unittest.TestCase):
     def test_explicit_limit_beats_the_appwrite_default_of_25(self):
         """Khong dat limit thi truyen tren 25 chuong bi cat am tham."""
         fake = _PagingRecorder([])
-        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(["chp_1"])
+        AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(["chp_1"])
         queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
         limits = [q["values"][0] for q in queries if q["method"] == "limit"]
         self.assertEqual(len(limits), 1)
@@ -223,9 +223,9 @@ class TestBatchedAudioLookup(unittest.TestCase):
         docs.append({"chapter_id": "chp_2"})
         fake = _PagingRecorder(docs)
 
-        found = AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(ids)
+        found = AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(ids)
 
-        self.assertEqual(found, {"chp_1", "chp_2"})
+        self.assertEqual(set(found), {"chp_1", "chp_2"})
         self.assertEqual(len(fake.calls), 2, "phải lật sang trang thứ hai")
 
     def test_large_novel_is_split_into_batches_not_one_giant_query(self):
@@ -233,7 +233,7 @@ class TestBatchedAudioLookup(unittest.TestCase):
 
         ids = [f"chp_{i}" for i in range(BATCH_IDS * 3)]
         fake = _PagingRecorder([])
-        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(ids)
+        AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(ids)
 
         self.assertEqual(len(fake.calls), 3)
         for call in fake.calls:
@@ -243,16 +243,27 @@ class TestBatchedAudioLookup(unittest.TestCase):
 
     def test_empty_input_touches_the_network_not_at_all(self):
         fake = _PagingRecorder([{"chapter_id": "chp_1"}])
-        found = AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio([])
-        self.assertEqual(found, set())
+        found = AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter([])
+        self.assertEqual(found, {})
         self.assertEqual(fake.calls, [])
 
-    def test_only_the_chapter_id_attribute_is_requested(self):
+    def test_only_the_two_needed_attributes_are_requested(self):
+        """Khong keo ca `object_key`, `content_hash`… ve chi de dem."""
         fake = _PagingRecorder([])
-        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(["chp_1"])
+        AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(["chp_1"])
         queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
         selects = [q for q in queries if q["method"] == "select"]
-        self.assertEqual(selects[0]["values"], ["chapter_id"])
+        self.assertEqual(selects[0]["values"], ["chapter_id", "created_at"])
+
+    def test_it_returns_the_newest_track_time_per_chapter(self):
+        """Chuong tao lai audio nhieu lan -> phai lay ban MOI NHAT."""
+        fake = _PagingRecorder([
+            {"chapter_id": "chp_1", "created_at": "2026-08-01T00:00:00+00:00"},
+            {"chapter_id": "chp_1", "created_at": "2026-08-05T00:00:00+00:00"},
+            {"chapter_id": "chp_1", "created_at": "2026-08-03T00:00:00+00:00"},
+        ])
+        found = AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(["chp_1"])
+        self.assertEqual(found["chp_1"], "2026-08-05T00:00:00+00:00")
 
     def test_select_puts_attributes_under_values_not_attributes(self):
         """
@@ -268,13 +279,13 @@ class TestBatchedAudioLookup(unittest.TestCase):
 
     def test_chapters_without_audio_are_simply_absent(self):
         fake = _PagingRecorder([{"chapter_id": "chp_2"}])
-        found = AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(
+        found = AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(
             ["chp_1", "chp_2", "chp_3"])
-        self.assertEqual(found, {"chp_2"})
+        self.assertEqual(set(found), {"chp_2"})
 
     def test_duplicate_ids_do_not_multiply_the_query(self):
         fake = _PagingRecorder([])
-        AppwriteMetadataStore(SETTINGS, client=fake).chapters_with_audio(
+        AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(
             ["chp_1", "chp_1", "chp_1"])
         queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
         equals = [q for q in queries if q["method"] == "equal"][0]
@@ -311,7 +322,7 @@ class TestBatchedAudioLookup(unittest.TestCase):
         from server.adapters import MockMetadataStore
 
         for cls in (MockMetadataStore, AppwriteMetadataStore):
-            method = getattr(cls, "chapters_with_audio", None)
+            method = getattr(cls, "audio_by_chapter", None)
             self.assertTrue(callable(method), f"{cls.__name__} thiếu phương thức")
             self.assertEqual(
                 list(inspect.signature(method).parameters), ["self", "chapter_ids"])

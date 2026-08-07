@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import replace
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -114,6 +115,12 @@ class ChapterPatch(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=200)
     content: Optional[str] = None
     order_index: Optional[int] = None
+
+
+class ChapterOrderIn(BaseModel):
+    """Thu tu chuong moi, day du va dung mot lan."""
+
+    chapter_ids: List[str] = Field(min_length=1)
 
 
 class JobIn(BaseModel):
@@ -295,6 +302,61 @@ def _may_read(novel: Novel, viewer: Optional[Profile]) -> bool:
     return viewer is not None and viewer.user_id == novel.owner_id
 
 
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
+    """
+    Doc moc thoi gian ISO, tra None neu khong doc duoc.
+
+    KHONG so sanh hai moc thoi gian bang chuoi: `now_iso()` sinh ra
+    `2026-08-07T03:01:36+00:00` con Appwrite tra ve
+    `2026-08-07T03:01:36.000+00:00`. So sanh chuoi thi `+` (0x2B) nho hon
+    `.` (0x2E), nen ban khong co mili giay luon bi coi la som hon — sai thu tu
+    o dung cho quan trong nhat.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _audio_outdated(chapter: Chapter, audio_made_at: Optional[str]) -> bool:
+    """
+    Chuong co bi sua SAU KHI tao audio hay khong.
+
+    Day la mot canh bao CO THE, khong phai bang chung: no do "ban ghi chuong
+    duoc sua lan cuoi luc nao" so voi "audio tao luc nao". Sua rieng tieu de
+    cung lam moc nay nhay, nen co the bao oan.
+
+    Chon huong nay co chu dich. Bao oan thi nguoi dung ton mot lan doc canh bao;
+    bo sot thi nguoi dung tuong audio da khop noi dung moi trong khi khong phai
+    — dung cai loi M4 dang di sua. Nen tha bao oan.
+
+    Muon chinh xac tuyet doi thi phai luu ma bam CUA RIENG NOI DUNG cung track;
+    `AudioTrack.content_hash` hien tai la dau van tay cua noi dung + giong +
+    toc do + kich thuoc doan, khong tach ra duoc. Do la thay doi luoc do, chua
+    lam.
+
+    Khong doc duoc moc thoi gian -> tra False, khong doan bua.
+    """
+    if not audio_made_at:
+        return False
+    made = _parse_iso(audio_made_at)
+    edited = _parse_iso(chapter.updated_at)
+    if made is None or edited is None:
+        return False
+    return edited > made
+
+
+def _chapter_row(chapter: Chapter, audio_made_at: Optional[str]) -> Dict[str, Any]:
+    """Mot dong trong danh sach chuong: du de ve badge, khong kem noi dung."""
+    return {
+        **chapter.to_dict(include_content=False),
+        "has_audio": audio_made_at is not None,
+        "audio_outdated": _audio_outdated(chapter, audio_made_at),
+    }
+
+
 @app.get("/api/novels/{novel_id}")
 def get_novel(novel_id: str,
               authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
@@ -319,14 +381,10 @@ def get_novel(novel_id: str,
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tiểu thuyết.")
 
     chapters = store.list_chapters(novel_id)
-    with_audio = store.chapters_with_audio([c.chapter_id for c in chapters])
+    made_at = store.audio_by_chapter([c.chapter_id for c in chapters])
     return {
         "novel": _novel_out(novel),
-        "chapters": [
-            {**c.to_dict(include_content=False),
-             "has_audio": c.chapter_id in with_audio}
-            for c in chapters
-        ],
+        "chapters": [_chapter_row(c, made_at.get(c.chapter_id)) for c in chapters],
     }
 
 
@@ -382,6 +440,36 @@ def update_novel(novel_id: str, payload: NovelPatch,
     except PermissionDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     return {"novel": _novel_out(novel)}
+
+
+@app.post("/api/novels/{novel_id}/chapters/order")
+def reorder_chapters(novel_id: str, payload: ChapterOrderIn,
+                     profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Dat lai thu tu chuong bang MOT request.
+
+    Vi sao khong de frontend goi `PATCH /api/chapters/{id}` cho tung chuong: doi
+    thu tu mot danh sach n chuong se thanh n request — dung cai N+1 vua bo di o
+    trang chi tiet truyen. `PATCH` van dung duoc nhu cu cho client cu.
+
+    Danh sach phai gom DUNG cac chuong cua truyen, khong thieu khong thua. Lech
+    mot cai thi tra 400 va khong ghi gi ca — do la thu chan viec "sap xep lai"
+    ma lam roi mat mot chuong.
+    """
+    try:
+        chapters = store.reorder_chapters(novel_id, profile.user_id,
+                                          payload.chapter_ids)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    made_at = store.audio_by_chapter([c.chapter_id for c in chapters])
+    return {
+        "chapters": [_chapter_row(c, made_at.get(c.chapter_id)) for c in chapters],
+    }
 
 
 @app.delete("/api/novels/{novel_id}")
@@ -520,6 +608,9 @@ def get_chapter(chapter_id: str,
         "chapter": chapter.to_dict(),
         "audio": track.to_dict() if track else None,
         "novel": _novel_brief(novel) if novel else None,
+        # Chuong da sua sau khi tao audio -> audio CO THE khong con khop.
+        # Chi la canh bao, khong bao gio la ly do de xoa file audio.
+        "audio_outdated": _audio_outdated(chapter, track.created_at if track else None),
     }
 
 

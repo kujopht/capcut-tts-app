@@ -159,17 +159,29 @@ export default function NovelDetailPage({
 
                   <span className="list-actions">
                     {chapter.has_audio ? (
-                      <button
-                        type="button"
-                        className={`btn btn-sm${playing ? "" : " btn-primary"}`}
-                        aria-expanded={playing}
-                        onClick={() =>
-                          setPlayingId(playing ? "" : chapter.chapter_id)
-                        }
-                      >
-                        <span aria-hidden="true">{playing ? "✕" : "▶"}</span>
-                        {playing ? "Đóng" : "Nghe"}
-                      </button>
+                      <>
+                        {/* M4: audio con nghe duoc, chi la co the khong khop
+                            noi dung moi nhat. Noi ro thay vi im lang. */}
+                        {chapter.audio_outdated ? (
+                          <span
+                            className="badge badge-warn"
+                            title="Chương đã sửa sau khi tạo audio — audio có thể không còn khớp"
+                          >
+                            <span aria-hidden="true">⚠</span> Audio cũ
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          className={`btn btn-sm${playing ? "" : " btn-primary"}`}
+                          aria-expanded={playing}
+                          onClick={() =>
+                            setPlayingId(playing ? "" : chapter.chapter_id)
+                          }
+                        >
+                          <span aria-hidden="true">{playing ? "✕" : "▶"}</span>
+                          {playing ? "Đóng" : "Nghe"}
+                        </button>
+                      </>
                     ) : (
                       <span className="badge">Chưa có audio</span>
                     )}

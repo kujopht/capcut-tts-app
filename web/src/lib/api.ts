@@ -61,6 +61,14 @@ export interface Chapter {
    * Thieu thi coi nhu chua co audio.
    */
   has_audio?: boolean;
+  /**
+   * Chuong da duoc sua SAU KHI tao audio, nen audio CO THE khong con khop noi
+   * dung. La canh bao, khong phai bang chung: sua rieng tieu de cung lam co nay
+   * bat len. Khong bao gio duoc dung lam ly do de xoa file audio.
+   *
+   * Tuy chon de client cu van bien dich duoc.
+   */
+  audio_outdated?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -259,7 +267,23 @@ export const api = {
       audio: AudioTrack | null;
       /** Truyen cha, kem san de luong nghe co bia ma khong phai goi them. */
       novel?: NovelBrief | null;
+      /** Chuong sua sau khi tao audio -> audio co the khong con khop. */
+      audio_outdated?: boolean;
     }>(`/api/chapters/${chapterId}`),
+
+  /**
+   * Dat lai thu tu chuong bang MOT request.
+   *
+   * Gui CA danh sach id theo thu tu moi. Neu goi `updateChapter` cho tung chuong
+   * thi doi thu tu n chuong se thanh n request — dung cai N+1 da bo di o trang
+   * chi tiet truyen. Danh sach phai gom dung cac chuong cua truyen, khong thieu
+   * khong thua; lech mot cai thi backend tra 400 va khong ghi gi ca.
+   */
+  reorderChapters: (novelId: string, chapterIds: string[]) =>
+    request<{ chapters: Chapter[] }>(`/api/novels/${novelId}/chapters/order`, {
+      method: "POST",
+      body: JSON.stringify({ chapter_ids: chapterIds }),
+    }),
 
   createJob: (chapterId: string, voiceId: string, rate = "1.0") =>
     request<{ job: TtsJob; reused: boolean }>("/api/jobs", {

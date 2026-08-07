@@ -27,6 +27,7 @@ export default function ChapterPage({
   const chapter: Chapter | null = data?.chapter ?? null;
   const audio: AudioTrack | null = data?.audio ?? null;
   const novel: NovelBrief | null = data?.novel ?? null;
+  const audioOutdated = Boolean(data?.audio_outdated);
 
   if (loading) {
     return (
@@ -77,15 +78,39 @@ export default function ChapterPage({
       </header>
 
       {audio ? (
-        <div className="listen">
-          <NovelCover
-            novelId={chapter.novel_id}
-            title={novel?.title ?? chapter.title}
-            coverUrl={novel?.cover_url}
-            size="thumb"
-          />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <AudioPlayer chapterId={chapter.chapter_id} title={chapter.title} />
+        <div className="stack">
+          {/* M4: audio van phat duoc va van tai duoc — chi canh bao rang no
+              duoc tao truoc lan sua noi dung gan nhat. Chu so huu duoc chi
+              duong tao lai; nguoi doc chi can biet de khong ngo ngang. */}
+          {audioOutdated ? (
+            <div className="alert alert-warn" role="status">
+              <span aria-hidden="true">⚠</span>
+              <span className="stack-2">
+                <span>
+                  Chương này đã được sửa sau khi tạo audio, nên{" "}
+                  <strong>audio có thể không còn khớp</strong> với nội dung bên
+                  dưới. Bản audio hiện tại vẫn nghe và tải được.
+                </span>
+                {/* Nut that, khong phai lien ket trong cau: vung bam du to o
+                    mobile, va M4 yeu cau duong dan RO RANG sang cho tao lai. */}
+                {isOwner ? (
+                  <Link className="btn btn-sm" href="/write">
+                    Tạo lại audio trong khu vực tác giả
+                  </Link>
+                ) : null}
+              </span>
+            </div>
+          ) : null}
+          <div className="listen">
+            <NovelCover
+              novelId={chapter.novel_id}
+              title={novel?.title ?? chapter.title}
+              coverUrl={novel?.cover_url}
+              size="thumb"
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <AudioPlayer chapterId={chapter.chapter_id} title={chapter.title} />
+            </div>
           </div>
         </div>
       ) : (

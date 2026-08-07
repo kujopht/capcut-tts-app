@@ -706,13 +706,27 @@ test("moi lop bam duoc deu cao it nhat 44px o mobile", () => {
   }
 });
 
-test("dung min-height chu khong phai height co dinh", () => {
-  // `height: 44px` se cat cut nut co chu dai xuong hai dong
-  const block = mobileBlock();
+test("nut co CHU dung min-height chu khong phai height co dinh", () => {
+  // `height: 44px` se cat cut nut co chu dai xuong hai dong.
+  //
+  // Tru `.btn-icon`: nut chi chua mot mui nhon, vuong 44x44 la dung y muon va
+  // khong co chu nao de tran ra. Bo dong dinh nghia no ra roi moi kiem.
+  const block = mobileBlock()
+    .split("\n")
+    .filter((line) => !line.includes(".btn-icon"))
+    .join("\n");
   assert.ok(
     !/[^-]height:\s*44px/.test(block.replace(/min-height/g, "MIN")),
     "phai dung min-height, khong duoc dat height cung",
   );
+});
+
+test("nut bieu tuong vuong du 44x44 o mobile", () => {
+  const block = mobileBlock();
+  const icon = block.match(/\.btn-icon \{[^}]*\}/);
+  assert.ok(icon, "thieu ghi de .btn-icon o mobile");
+  assert.match(icon[0], /width:\s*44px/);
+  assert.match(icon[0], /height:\s*44px/);
 });
 
 test("chi ep 44px o mobile, khong ap len desktop", () => {

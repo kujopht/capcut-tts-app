@@ -456,33 +456,70 @@ class AppwriteMetadataStore:
             for d in self._list(COL_TRACKS, [q_equal("chapter_id", chapter_id)])
         ]
 
-    def chapters_with_audio(self, chapter_ids: Sequence[str]) -> Set[str]:
+    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, str]:
         """
         MOT truy van IN cho ca lo, thay vi mot truy van moi chuong.
 
         `q_equal` nhan nhieu gia tri, va Appwrite hieu do la IN. Nho vay so
         vong goi len Appwrite phu thuoc so LO (50 chuong mot lo) chu khong phu
-        thuoc so chuong — dung contract o `MetadataStore.chapters_with_audio`.
+        thuoc so chuong — dung contract o `MetadataStore.audio_by_chapter`.
 
         Van phai lat trang: mot chuong co the co nhieu track (moi lan tao lai
         audio la mot ban ghi), nen so document tra ve khong bang so chuong hoi.
-        `q_select` cat bot, chi xin dung truong `chapter_id` can dung.
+        `q_select` cat bot, chi xin hai truong that su dung toi.
         """
         wanted = list(dict.fromkeys(chapter_ids))   # bo trung, giu thu tu
         if not wanted:
-            return set()
+            return {}
 
-        found: Set[str] = set()
+        newest: Dict[str, str] = {}
         for start in range(0, len(wanted), BATCH_IDS):
             batch = wanted[start:start + BATCH_IDS]
             for doc in self._list_all(COL_TRACKS, [
                 q_equal("chapter_id", *batch),
-                q_select("chapter_id"),
+                q_select("chapter_id", "created_at"),
             ]):
                 chapter_id = doc.get("chapter_id")
-                if chapter_id:
-                    found.add(chapter_id)
-        return found
+                made_at = doc.get("created_at") or ""
+                if not chapter_id:
+                    continue
+                seen = newest.get(chapter_id)
+                if seen is None or made_at > seen:
+                    newest[chapter_id] = made_at
+        return newest
+
+    def reorder_chapters(self, novel_id: str, owner_id: str,
+                         chapter_ids: Sequence[str]) -> List[Chapter]:
+        """
+        Xem contract o `MetadataStore.reorder_chapters`.
+
+        Appwrite khong co PATCH nhieu document trong mot request, nen buoc ghi
+        van la N vong goi len Appwrite. Nhung TRINH DUYET chi gui MOT request —
+        do la cho quan trong, vi truoc day doi thu tu tu frontend se thanh N
+        request giong dung cai N+1 vua bo di.
+
+        Kiem tra tap chuong TRUOC KHI ghi bat ky document nao.
+        """
+        self.owned_novel(novel_id, owner_id)
+        existing = self.list_chapters(novel_id)
+        current = {c.chapter_id for c in existing}
+        wanted = list(dict.fromkeys(chapter_ids))
+        if set(wanted) != current or len(wanted) != len(chapter_ids):
+            raise ValueError(
+                "Danh sách thứ tự phải gồm đúng các chương của truyện này.")
+
+        by_id = {c.chapter_id: c for c in existing}
+        out: List[Chapter] = []
+        for position, chapter_id in enumerate(wanted, start=1):
+            chapter = by_id[chapter_id]
+            if chapter.order_index != position:
+                # CHI `order_index`. Khong gui `updated_at` — sap xep lai khong
+                # sua noi dung, ma `updated_at` la moc de biet audio con khop
+                # noi dung hay khong.
+                self._update(COL_CHAPTERS, chapter_id, {"order_index": position})
+                chapter = replace(chapter, order_index=position)
+            out.append(chapter)
+        return out
 
     def delete_track(self, track_id: str) -> None:
         self._delete(COL_TRACKS, track_id)

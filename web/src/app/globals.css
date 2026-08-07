@@ -578,6 +578,9 @@ button, input, select, textarea {
   font-size: var(--t-sm);
   line-height: var(--lh-normal);
 }
+/* Nut trong alert: `.stack-2` la flex column nen mac dinh nut se keo rong ca
+   khoi. Cho no chi rong bang chinh no. */
+.alert .stack-2 { align-items: flex-start; }
 .alert-error   { border-color: #f8717159; background: var(--danger-soft); color: #fecaca; }
 .alert-ok      { border-color: #4ade8059; background: var(--ok-soft);     color: #bbf7d0; }
 .alert-warn    { border-color: #fbbf2459; background: var(--warn-soft);   color: #fde68a; }
@@ -761,6 +764,26 @@ button, input, select, textarea {
   gap: var(--s2);
   flex: 0 0 auto;
 }
+/* Nut len/xuong doi thu tu chuong. Xep DOC de chiem it be ngang, va o lai canh
+   so thu tu ca tren mobile: day la dieu khien VI TRI, khac han nhom hanh dong
+   tren noi dung chuong o cuoi hang. */
+.list-move {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.btn-icon {
+  padding: 0;
+  width: 26px;
+  min-width: 26px;
+  height: 20px;
+  line-height: 1;
+  font-size: 12px;
+  border-radius: var(--r1);
+}
 /* Hang dang mo trinh phat: vien sang len de biet dang nghe chuong nao, va
    phai cho xuong dong de trinh phat co nguyen chieu ngang cua hang. */
 .list-item-open {
@@ -913,4 +936,10 @@ button, input, select, textarea {
   .list-item { flex-wrap: wrap; row-gap: var(--s3); }
   .list-actions { width: 100%; justify-content: flex-end; }
   .list-actions .btn { flex: 1 1 auto; }
+
+  /* Nut len/xuong: o desktop xep DOC cho gon, nhung o mobile xep doc thi hai
+     nut 44px chong len nhau thanh cot 88px — hang chuong cao qua. Cho nam
+     NGANG, moi nut du 44x44. */
+  .list-move { flex-direction: row; gap: var(--s2); }
+  .btn-icon { width: 44px; min-width: 44px; height: 44px; font-size: 15px; }
 }

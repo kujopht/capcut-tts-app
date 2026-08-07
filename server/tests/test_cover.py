@@ -164,7 +164,8 @@ class TestBackwardCompatible(CoverTestCase):
         body = self.client.get(f"/api/chapters/{chapter_id}", headers=self.auth(token)).json()
         self.assertIn("chapter", body)
         self.assertIn("audio", body)          # van con, du la None
-        self.assertEqual(set(body) - {"chapter", "audio"}, {"novel"})
+        self.assertEqual(set(body) - {"chapter", "audio"},
+                         {"novel", "audio_outdated"})
 
     def test_cover_field_is_not_persisted_as_an_unknown_attribute(self):
         """`cover_url` la truong tinh — khong duoc gui len Appwrite."""

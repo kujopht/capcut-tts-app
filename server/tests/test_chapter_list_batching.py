@@ -41,9 +41,9 @@ class CountingStore(MockMetadataStore):
         self._tick("track_for_chapter")
         return super().track_for_chapter(chapter_id)
 
-    def chapters_with_audio(self, chapter_ids: Sequence[str]) -> Set[str]:
-        self._tick("chapters_with_audio")
-        return super().chapters_with_audio(chapter_ids)
+    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, str]:
+        self._tick("audio_by_chapter")
+        return super().audio_by_chapter(chapter_ids)
 
     def list_chapters(self, novel_id: str):
         self._tick("list_chapters")
@@ -127,7 +127,7 @@ class TestNotLinearInChapters(BatchingTestCase):
         self.store.calls.clear()
         self.client.get(f"/api/novels/{novel_id}", headers=self.auth(token))
 
-        self.assertEqual(self.store.calls.get("chapters_with_audio"), 1)
+        self.assertEqual(self.store.calls.get("audio_by_chapter"), 1)
         self.assertIsNone(self.store.calls.get("track_for_chapter"))
         self.assertIsNone(self.store.calls.get("get_chapter"))
 
@@ -172,7 +172,7 @@ class TestNotLinearInChapters(BatchingTestCase):
                                headers=self.auth(token)).json()
         self.assertEqual(body["chapters"], [])
         # Van goi mot lan, nhung ban mock phai thoat som voi danh sach rong
-        self.assertEqual(self.store.chapters_with_audio([]), set())
+        self.assertEqual(self.store.audio_by_chapter([]), {})
 
 
 # ==================================================== has_audio dung su that
@@ -252,13 +252,17 @@ class TestBackwardCompatible(BatchingTestCase):
         "state", "char_count", "created_at", "updated_at",
     }
 
-    def test_only_has_audio_was_added_to_the_chapter_list(self):
+    def test_only_additive_fields_appear_in_the_chapter_list(self):
+        """Chi THEM truong, khong doi ten va khong bo truong nao."""
         token = self.user()
         novel_id = self.novel(token)
         self.chapters(token, novel_id, 1)
         chapter = self.client.get(f"/api/novels/{novel_id}",
                                   headers=self.auth(token)).json()["chapters"][0]
-        self.assertEqual(set(chapter) - self.OLD_CHAPTER_FIELDS, {"has_audio"})
+        self.assertEqual(self.OLD_CHAPTER_FIELDS - set(chapter), set(),
+                         "không được mất trường cũ")
+        self.assertEqual(set(chapter) - self.OLD_CHAPTER_FIELDS,
+                         {"has_audio", "audio_outdated"})
 
     def test_novel_response_keeps_its_two_top_level_keys(self):
         token = self.user()
@@ -267,14 +271,17 @@ class TestBackwardCompatible(BatchingTestCase):
                                headers=self.auth(token)).json()
         self.assertEqual(set(body), {"novel", "chapters"})
 
-    def test_single_chapter_route_is_unchanged(self):
+    def test_single_chapter_route_keeps_its_old_keys(self):
         """Client cu van goi duoc `/api/chapters/{id}` nhu truoc."""
         token = self.user()
         novel_id = self.novel(token)
         chapter_id = self.chapters(token, novel_id, 1)[0]
         body = self.client.get(f"/api/chapters/{chapter_id}",
                                headers=self.auth(token)).json()
-        self.assertEqual(set(body), {"chapter", "audio", "novel"})
+        for key in ("chapter", "audio", "novel"):
+            self.assertIn(key, body, f"mất khoá cũ {key}")
+        self.assertEqual(set(body) - {"chapter", "audio", "novel"},
+                         {"audio_outdated"})
 
     def test_has_audio_is_not_persisted_as_an_unknown_attribute(self):
         from server.appwrite_store import COL_CHAPTERS, PERSISTED_FIELDS, persistable

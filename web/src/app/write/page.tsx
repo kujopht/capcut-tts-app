@@ -61,6 +61,14 @@ export default function WritePage() {
   const [selectedId, setSelectedId] = useState("");
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [audioByChapter, setAudioByChapter] = useState<Record<string, boolean>>({});
+  /**
+   * Chuong nao co audio CO THE khong con khop noi dung (M4). Giu o state rieng
+   * vi cho nay con tu cap nhat ngay sau khi luu chuong hoac tao lai audio, chu
+   * khong doi lan tai lai danh sach.
+   */
+  const [staleByChapter, setStaleByChapter] = useState<Record<string, boolean>>({});
+  /** Dang luu thu tu chuong len backend (M3) — chan bam lien tuc. */
+  const [savingOrder, setSavingOrder] = useState(false);
   const [voices, setVoices] = useState<Voice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -136,10 +144,16 @@ export default function WritePage() {
             detail.chapters.map((c) => [c.chapter_id, Boolean(c.has_audio)]),
           ),
         );
+        setStaleByChapter(
+          Object.fromEntries(
+            detail.chapters.map((c) => [c.chapter_id, Boolean(c.audio_outdated)]),
+          ),
+        );
       })
       .catch(() => {
         setChapters([]);
         setAudioByChapter({});
+        setStaleByChapter({});
       });
   }, []);
 
@@ -159,6 +173,8 @@ export default function WritePage() {
           if (r.job.status === "completed") {
             toast.ok("Audio của chương đã sẵn sàng.");
             setAudioByChapter((current) => ({ ...current, [r.job.chapter_id]: true }));
+            // Vua tao lai xong thi audio khop noi dung hien tai -> tat canh bao
+            setStaleByChapter((current) => ({ ...current, [r.job.chapter_id]: false }));
           } else if (r.job.status === "failed") {
             toast.error("Tạo audio thất bại.");
           }
@@ -317,14 +333,64 @@ export default function WritePage() {
           ),
         );
         setEditingChapterId("");
-        toast.ok("Đã lưu chương.");
+        // M4: sua noi dung xong thi audio cu CO THE khong con khop. Danh dau
+        // ngay, khong doi lan tai lai danh sach — de nguoi dung thay canh bao
+        // dung luc ho vua bam Luu, khong phai mai sau moi biet.
+        if (audioByChapter[editingChapterId]) {
+          setStaleByChapter((current) => ({ ...current, [editingChapterId]: true }));
+          toast.push(
+            "info",
+            "Đã lưu chương. Audio hiện tại được giữ nguyên nhưng có thể không còn khớp.",
+          );
+        } else {
+          toast.ok("Đã lưu chương.");
+        }
       } catch (cause) {
         toast.error(errorMessage(cause));
       } finally {
         setSavingChapter(false);
       }
     },
-    [editingChapterId, chEditTitle, chEditText, toast],
+    [editingChapterId, chEditTitle, chEditText, audioByChapter, toast],
+  );
+
+  /* ------------------------------------------------------- M3: doi thu tu */
+
+  /**
+   * Doi cho mot chuong voi chuong lien ke, roi luu CA thu tu len backend.
+   *
+   * Dung nut len/xuong chu khong phai keo-tha: keo-tha bang HTML5 khong hoat
+   * dong tren man hinh cam ung ma khong co polyfill, con tu viet bang pointer
+   * event thi vua nhieu ma vua kho dung duoc bang ban phim. Nut len/xuong chay
+   * y nhu nhau tren desktop, mobile va ban phim.
+   *
+   * Cap nhat giao dien truoc cho phan hoi nhanh, nhung neu backend tu choi thi
+   * TRA LAI thu tu cu — khong de giao dien noi mot dieu ma kho noi dieu khac.
+   */
+  const moveChapter = useCallback(
+    async (index: number, direction: -1 | 1) => {
+      const target = index + direction;
+      if (savingOrder || target < 0 || target >= chapters.length) return;
+
+      const before = chapters;
+      const next = [...chapters];
+      [next[index], next[target]] = [next[target], next[index]];
+      setChapters(next);
+      setSavingOrder(true);
+      try {
+        const result = await api.reorderChapters(
+          selectedId,
+          next.map((c) => c.chapter_id),
+        );
+        setChapters(result.chapters);
+      } catch (cause) {
+        setChapters(before);
+        toast.error(errorMessage(cause));
+      } finally {
+        setSavingOrder(false);
+      }
+    },
+    [chapters, selectedId, savingOrder, toast],
   );
 
   const makeAudio = useCallback(
@@ -732,8 +798,14 @@ export default function WritePage() {
                             </div>
                             {audioByChapter[chapter.chapter_id] ? (
                               <Alert kind="warn">
-                                Chương này đã có audio. Sửa nội dung sẽ không tự
-                                tạo lại audio — hãy bấm Tạo audio sau khi lưu.
+                                <span>
+                                  <strong>Chương này đã có audio.</strong> Lưu nội
+                                  dung mới sẽ <strong>không</strong> tự tạo lại
+                                  audio, và audio hiện tại{" "}
+                                  <strong>không bị xoá</strong>. Bạn chọn: giữ
+                                  audio đang có, hoặc bấm <em>Tạo lại audio</em>{" "}
+                                  sau khi lưu để audio khớp nội dung mới.
+                                </span>
                               </Alert>
                             ) : null}
                             <div className="row">
@@ -759,6 +831,30 @@ export default function WritePage() {
                           </form>
                         ) : (
                           <div key={chapter.chapter_id} className="list-item">
+                            {/* M3: nut len/xuong. `.list-move` nam ngoai
+                                `.list-actions` de o mobile no o lai canh so thu
+                                tu — day la dieu khien vi tri, khong phai hanh
+                                dong tren noi dung chuong. */}
+                            <span className="list-move">
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-ghost btn-icon"
+                                onClick={() => moveChapter(index, -1)}
+                                disabled={index === 0 || savingOrder}
+                                aria-label={`Di chuyển ${chapter.title} lên trên`}
+                              >
+                                <span aria-hidden="true">↑</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-ghost btn-icon"
+                                onClick={() => moveChapter(index, 1)}
+                                disabled={index === chapters.length - 1 || savingOrder}
+                                aria-label={`Di chuyển ${chapter.title} xuống dưới`}
+                              >
+                                <span aria-hidden="true">↓</span>
+                              </button>
+                            </span>
                             <span className="list-index" aria-hidden="true">
                               {index + 1}
                             </span>
@@ -778,9 +874,7 @@ export default function WritePage() {
                                 mobile chung xuong dong rieng — de chung hang
                                 thi tieu de chuong bi nen con "Chuo...". */}
                             <span className="list-actions">
-                              {audioByChapter[chapter.chapter_id] ? (
-                                <span className="badge badge-ok">Có audio</span>
-                              ) : (
+                              {!audioByChapter[chapter.chapter_id] ? (
                                 <button
                                   type="button"
                                   className="btn btn-sm"
@@ -793,6 +887,28 @@ export default function WritePage() {
                                 >
                                   Tạo audio
                                 </button>
+                              ) : staleByChapter[chapter.chapter_id] ? (
+                                // M4: audio con nguyen nhung co the khong khop.
+                                // Badge noi ro, va nut ngay ben canh de tao lai.
+                                <>
+                                  <span className="badge badge-warn" title="Chương đã sửa sau khi tạo audio">
+                                    <span aria-hidden="true">⚠</span> Audio cũ
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() => makeAudio(chapter.chapter_id)}
+                                    disabled={
+                                      !voiceId ||
+                                      (job?.chapter_id === chapter.chapter_id &&
+                                        (job.status === "pending" || job.status === "running"))
+                                    }
+                                  >
+                                    Tạo lại audio
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="badge badge-ok">Có audio</span>
                               )}
                               <button
                                 type="button"

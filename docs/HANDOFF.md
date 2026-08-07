@@ -115,10 +115,10 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | 288 test: 287 đạt, 1 bỏ qua |
+| `server/tests` | 327 test: 326 đạt, 1 bỏ qua |
 | ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 181 đạt, 1 bỏ qua (đo ở mốc cũ) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `web` (`node --test`) | 88/88 đạt |
+| `web` (`node --test`) | 115/115 đạt |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
 | `npx next build` | Thành công, 7 route |
@@ -256,6 +256,30 @@ xác minh được trạng thái xuất bản thì chọn phía an toàn.
 `GET /api/novels` (thư viện công khai) **không đổi**: vẫn chỉ liệt kê truyện đã
 xuất bản. Bộ test khoá lại toàn bộ bảng trên ở
 `server/tests/test_chapter_list_batching.py::TestReadAuthorization`.
+
+## Cảnh báo "audio cũ" — đo bằng mốc thời gian, không phải mã băm
+
+`audio_outdated` so `chapter.updated_at` với `created_at` của track mới nhất.
+Đây là cảnh báo **có thể**, không phải bằng chứng: sửa riêng tiêu đề cũng làm cờ
+này bật, nên có thể báo oan.
+
+Chọn hướng này có chủ đích: báo oan thì người dùng tốn một lần đọc cảnh báo; bỏ
+sót thì người dùng tưởng audio đã khớp nội dung mới trong khi không phải — đúng
+cái lỗi M4 đang sửa.
+
+Muốn chính xác tuyệt đối thì phải lưu mã băm **của riêng nội dung** cùng track.
+`AudioTrack.content_hash` hiện tại là dấu vân tay của nội dung + giọng + tốc độ +
+kích thước đoạn (xem `job_fingerprint`), không tách ra được. Đó là thay đổi lược
+đồ Appwrite, chưa làm.
+
+Hai điều bắt buộc phải giữ:
+
+- **Không so sánh hai mốc thời gian bằng chuỗi.** `now_iso()` sinh
+  `...T03:01:36+00:00`, Appwrite trả `...T03:01:36.000+00:00`. So chuỗi thì `+`
+  (0x2B) nhỏ hơn `.` (0x2E), nên bản không có mili giây luôn bị coi là sớm hơn.
+  Dùng `_parse_iso()`.
+- **`reorder_chapters` không được bump `updated_at`.** Sắp xếp lại không sửa nội
+  dung; bump ở đó thì mọi chương đều bị báo "audio cũ" oan sau một lần kéo thứ tự.
 
 ## Giới hạn đã biết
 

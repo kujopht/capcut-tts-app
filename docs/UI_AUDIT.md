@@ -15,8 +15,8 @@ từ transcript.
 | H2 | 🟠 High | Trang chi tiết truyện có vấn đề N+1 | ✅ `15cbf71` |
 | M1 | 🟡 Medium | Vùng bấm nhỏ hơn khuyến nghị trên mobile | ✅ lượt này |
 | M2 | 🟡 Medium | Trang chi tiết truyện không nghe được tại chỗ | ✅ lượt này |
-| M3 | 🟡 Medium | Không có cách sắp xếp lại thứ tự chương | ⬜ chưa làm |
-| M4 | 🟡 Medium | Sửa nội dung chương không nhắc tạo lại audio đủ mạnh | ⬜ chưa làm |
+| M3 | 🟡 Medium | Không có cách sắp xếp lại thứ tự chương | ✅ lượt này |
+| M4 | 🟡 Medium | Sửa nội dung chương không nhắc tạo lại audio đủ mạnh | ✅ lượt này |
 | L1 | 🟢 Low | Ảnh bìa truyện chưa dùng | ✅ `afea269` |
 | L2 | 🟢 Low | Chưa có phân trang, tìm kiếm chạy phía client | ⬜ chưa làm |
 | L3 | 🟢 Low | Badge lịch sử ở Studio cập nhật trễ | ⬜ chưa làm |
@@ -25,6 +25,16 @@ từ transcript.
 Ngoài danh sách trên, quá trình sửa H2 còn phát hiện và sửa thêm: lỗ hổng cho
 người lạ đọc truyện nháp, `q_select` đặt sai khoá, và `list_chapters` mất chương
 khi truyện quá 25 chương. Xem `docs/HANDOFF.md`.
+
+## Phát hiện thêm khi làm M3–M4, CHƯA sửa
+
+**Liên kết văn bản trong câu chỉ cao 17px.** Breadcrumb `← Khám phá Fanfic` ở
+`/novels/[id]` và `← Hải Tặc Mũ Rơm` ở `/chapters/[id]` cao 17px ở khung 390px —
+dưới cả mức 24×24 của WCAG 2.5.8. Không phát hiện ở lượt M1 vì phép đo lúc đó
+chụp trang khi phần nội dung chính **chưa tải xong**, nên chỉ đo được các phần tử
+trong header. Chúng là liên kết văn bản chứ không phải nút, nên cách sửa (thêm
+`padding-block`, hoặc biến thành nút ở mobile) là một quyết định thiết kế riêng,
+không thuộc phạm vi M3–M4.
 
 ---
 

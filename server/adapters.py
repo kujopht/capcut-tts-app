@@ -133,6 +133,22 @@ class MetadataStore(Protocol):
                        fields: Dict[str, Any]) -> Chapter: ...
     def delete_chapter(self, chapter_id: str, owner_id: str) -> None: ...
 
+    def reorder_chapters(self, novel_id: str, owner_id: str,
+                         chapter_ids: Sequence[str]) -> List[Chapter]:
+        """
+        Dat lai `order_index` cua CA truyen theo dung thu tu `chapter_ids`.
+
+        - Chi chu so huu truyen; nguoi khac -> `PermissionDenied`.
+        - `chapter_ids` phai la DUNG tap chuong cua truyen do, khong thieu khong
+          thua. Lech mot cai -> `ValueError`, va KHONG duoc ghi gi ca. Rang buoc
+          nay la thu chan viec lam mat chuong: khong the "sap xep lai" ma vo tinh
+          bo roi mot chuong ra ngoai danh sach.
+        - Chi doi `order_index`. Tieu de, noi dung, audio va trang thai publish
+          khong duoc dong toi.
+        - Tra ve danh sach chuong sau khi doi, da sap theo thu tu moi.
+        """
+        ...
+
     # -- tts job -------------------------------------------------------------
     def create_job(self, job: TtsJob) -> TtsJob: ...
     def save_job(self, job: TtsJob) -> TtsJob: ...
@@ -150,17 +166,24 @@ class MetadataStore(Protocol):
     def track_for_chapter(self, chapter_id: str) -> Optional[AudioTrack]: ...
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]: ...
 
-    def chapters_with_audio(self, chapter_ids: Sequence[str]) -> Set[str]:
+    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, str]:
         """
-        Trong so cac chuong duoc hoi, chuong nao DA co audio.
+        Chuong nao DA co audio, va audio moi nhat tao luc nao.
 
-        Ly do ton tai: danh sach chuong chi can biet CO hay KHONG, va hoi tung
-        chuong mot lam so truy van tang tuyen tinh theo so chuong. Ban cai dat
-        PHAI tra loi bang so truy van khong phu thuoc so chuong (hang so, hoac
-        theo lo) — day la ca ly do ky thuat cua ham nay.
+        Tra ve `{chapter_id: created_at cua track moi nhat}`. Chuong khong co
+        audio thi khong xuat hien trong ket qua.
 
-        - Danh sach rong -> tra ve tap rong, KHONG duoc goi kho.
-        - Chi tra ve id, khong tra ve URL ky: trang danh sach chua phat gi ca.
+        Ly do ton tai: danh sach chuong can hai dieu — co audio hay khong, va
+        audio da cu hon lan sua noi dung gan nhat hay chua. Hoi tung chuong mot
+        lam so truy van tang tuyen tinh theo so chuong. Ban cai dat PHAI tra loi
+        bang so truy van khong phu thuoc so chuong (hang so, hoac theo lo) — day
+        la ca ly do ky thuat cua ham nay.
+
+        MOT truy van cho ca hai dieu, khong phai hai truy van.
+
+        - Danh sach rong -> tra ve dict rong, KHONG duoc goi kho.
+        - Chi tra ve moc thoi gian, khong tra ve URL ky: trang danh sach chua
+          phat gi ca.
         """
         ...
 
@@ -431,6 +454,29 @@ class MockMetadataStore:
             self.owned_chapter(chapter_id, owner_id)
             self.chapters.pop(chapter_id, None)
 
+    def reorder_chapters(self, novel_id: str, owner_id: str,
+                         chapter_ids: Sequence[str]) -> List[Chapter]:
+        """Xem contract o `MetadataStore.reorder_chapters`."""
+        self.owned_novel(novel_id, owner_id)
+        with self._lock:
+            current = {c.chapter_id for c in self.chapters.values()
+                       if c.novel_id == novel_id}
+            wanted = list(dict.fromkeys(chapter_ids))
+            if set(wanted) != current or len(wanted) != len(chapter_ids):
+                raise ValueError(
+                    "Danh sách thứ tự phải gồm đúng các chương của truyện này.")
+
+            # Ghi sau khi da kiem tra xong: sai mot cai thi khong doi gi ca.
+            #
+            # KHONG dong vao `updated_at`: sap xep lai khong sua noi dung chuong,
+            # ma `updated_at` chinh la moc dung de biet audio con khop noi dung
+            # hay khong (xem `_audio_outdated` trong main.py). Bump o day thi moi
+            # chuong deu bi bao "audio cu" oan sau mot lan keo thu tu.
+            for position, chapter_id in enumerate(wanted, start=1):
+                chapter = self.chapters[chapter_id]
+                self.chapters[chapter_id] = replace(chapter, order_index=position)
+            return [self.chapters[cid] for cid in wanted]
+
     def create_chapter(self, chapter: Chapter) -> Chapter:
         with self._lock:
             self.chapters[chapter.chapter_id] = chapter
@@ -526,14 +572,20 @@ class MockMetadataStore:
         with self._lock:
             return [t for t in self.tracks.values() if t.chapter_id == chapter_id]
 
-    def chapters_with_audio(self, chapter_ids: Sequence[str]) -> Set[str]:
+    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, str]:
         """Mot luot duy nhat qua bang track — xem contract o `MetadataStore`."""
         wanted = set(chapter_ids)
         if not wanted:
-            return set()
+            return {}
+        newest: Dict[str, str] = {}
         with self._lock:
-            return {t.chapter_id for t in self.tracks.values()
-                    if t.chapter_id in wanted}
+            for track in self.tracks.values():
+                if track.chapter_id not in wanted:
+                    continue
+                seen = newest.get(track.chapter_id)
+                if seen is None or track.created_at > seen:
+                    newest[track.chapter_id] = track.created_at
+        return newest
 
     def delete_track(self, track_id: str) -> None:
         with self._lock:

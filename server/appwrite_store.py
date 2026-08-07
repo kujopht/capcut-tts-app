@@ -23,6 +23,7 @@ import httpx
 from server.adapters import NotFoundError, PermissionDenied
 from server.config import AppwriteSettings
 from server.domain import (
+    AudioStamp,
     AudioTrack,
     Chapter,
     JobStatus,
@@ -485,6 +486,22 @@ class AppwriteMetadataStore:
             ])
         ]
 
+    def chapters_for_owner(self, owner_id: str) -> List[Chapter]:
+        """
+        MOI chuong cua mot nguoi dung, mot truy van (co lat trang).
+
+        Ly do ton tai: thu vien audio truoc day goi `/api/novels/{id}` cho TUNG
+        truyen chi de dung mot bang tra ten chuong — so request tang tuyen tinh
+        theo so truyen. Xem contract o `MetadataStore.chapters_for_owner`.
+        """
+        return [
+            _chapter_from_doc(d)
+            for d in self._list_all(COL_CHAPTERS, [
+                q_equal("owner_id", owner_id),
+                q_order_asc("order_index"),
+            ])
+        ]
+
     # -- job -----------------------------------------------------------------
 
     def create_job(self, job: TtsJob) -> TtsJob:
@@ -502,28 +519,68 @@ class AppwriteMetadataStore:
 
     def find_job_by_fingerprint(self, owner_id: str, chapter_id: str,
                                 fingerprint: str) -> Optional[TtsJob]:
-        """Idempotency: dua vao index to hop owner_id + chapter_id + content_hash."""
-        docs = self._list(COL_JOBS, [
+        """
+        Idempotency: dua vao index to hop owner_id + chapter_id + content_hash.
+
+        Lat trang: moi lan tao lai that bai la mot job nua cung dau van tay, nen
+        so ban ghi khong co tran tren. Cat o 25 thi mot job `completed` nam sau
+        25 job `failed` se bi bo qua, va he thong tao lai audio mot cach vo ich.
+        """
+        for doc in self._list_all(COL_JOBS, [
             q_equal("owner_id", owner_id),
             q_equal("chapter_id", chapter_id),
             q_equal("content_hash", fingerprint),
-        ])
-        for doc in docs:
+        ]):
             job = _job_from_doc(doc)
             if job.status != JobStatus.FAILED:
                 return job
         return None
 
     def list_jobs(self, owner_id: str, chapter_id: Optional[str] = None) -> List[TtsJob]:
+        """
+        Lich su job cua mot nguoi dung.
+
+        Lat trang: lich su nay chi tang len theo thoi gian, khong co tran tren.
+        Appwrite mac dinh chi tra 25 document, nen `_list` se lam thu vien audio
+        va lich su Studio mat ban ghi mot cach am tham.
+        """
         queries = [q_equal("owner_id", owner_id), q_order_desc("created_at")]
         if chapter_id:
             queries.append(q_equal("chapter_id", chapter_id))
-        return [_job_from_doc(d) for d in self._list(COL_JOBS, queries)]
+        return [_job_from_doc(d) for d in self._list_all(COL_JOBS, queries)]
 
     def save_job(self, job: TtsJob) -> TtsJob:
         """Ghi lai trang thai job sau khi chay xong."""
         self._update(COL_JOBS, job.job_id, job.to_dict())
         return job
+
+    def job_settings(self, owner_id: str,
+                     fingerprints: Sequence[str]) -> Dict[str, Tuple[str, int]]:
+        """
+        MOT truy van IN moi lo, khong phai mot truy van moi dau van tay.
+
+        Xem contract o `MetadataStore.job_settings`. Khong dung `q_select`: `rate`
+        va `chunk_chars` von co san trong schema job, nhung giu nguyen cach lay ca
+        document cho thong nhat voi `audio_by_chapter` va khoi rang buoc them.
+        """
+        wanted = list(dict.fromkeys(fingerprints))
+        if not wanted:
+            return {}
+        out: Dict[str, Tuple[str, int]] = {}
+        for start in range(0, len(wanted), BATCH_IDS):
+            batch = wanted[start:start + BATCH_IDS]
+            for doc in self._list_all(COL_JOBS, [
+                q_equal("owner_id", owner_id),
+                q_equal("content_hash", *batch),
+            ]):
+                fingerprint = str(doc.get("content_hash") or "")
+                if not fingerprint or fingerprint in out:
+                    continue
+                out[fingerprint] = (
+                    str(doc.get("rate") or "1.0"),
+                    int(doc.get("chunk_chars") or 0),
+                )
+        return out
 
     def delete_job(self, job_id: str) -> None:
         self._delete(COL_JOBS, job_id)
@@ -543,12 +600,21 @@ class AppwriteMetadataStore:
         return _track_from_doc(docs[0]) if docs else None
 
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]:
+        """
+        MOI track cua chuong.
+
+        Lat trang, va day la cho quan trong nhat: `_purge_chapter` dung ham nay
+        de lay danh sach object can xoa khoi kho. Cat o 25 thi track thu 26 tro
+        di khong bao gio duoc xoa — de lai object mo coi trong R2 mot cach am
+        tham. Moi lan tao lai audio la mot track nua, nen con so nay khong co
+        tran tren.
+        """
         return [
             _track_from_doc(d)
-            for d in self._list(COL_TRACKS, [q_equal("chapter_id", chapter_id)])
+            for d in self._list_all(COL_TRACKS, [q_equal("chapter_id", chapter_id)])
         ]
 
-    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, str]:
+    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, AudioStamp]:
         """
         MOT truy van IN cho ca lo, thay vi mot truy van moi chuong.
 
@@ -558,26 +624,33 @@ class AppwriteMetadataStore:
 
         Van phai lat trang: mot chuong co the co nhieu track (moi lan tao lai
         audio la mot ban ghi), nen so document tra ve khong bang so chuong hoi.
-        `q_select` cat bot, chi xin hai truong that su dung toi.
+
+        CO Y KHONG dung `q_select`: neu liet ke ten thuoc tinh thi truy van nay
+        se phu thuoc vao viec `rate`/`chunk_chars` da ton tai trong Appwrite chua,
+        va trien khai code truoc khi chay migration se lam ca trang truyen do.
+        Lay ca document thi khong co rang buoc thu tu do — track la ban ghi nho.
         """
         wanted = list(dict.fromkeys(chapter_ids))   # bo trung, giu thu tu
         if not wanted:
             return {}
 
-        newest: Dict[str, str] = {}
+        newest: Dict[str, AudioStamp] = {}
         for start in range(0, len(wanted), BATCH_IDS):
             batch = wanted[start:start + BATCH_IDS]
-            for doc in self._list_all(COL_TRACKS, [
-                q_equal("chapter_id", *batch),
-                q_select("chapter_id", "created_at"),
-            ]):
+            for doc in self._list_all(COL_TRACKS,
+                                      [q_equal("chapter_id", *batch)]):
                 chapter_id = doc.get("chapter_id")
-                made_at = doc.get("created_at") or ""
+                made_at = str(doc.get("created_at") or "")
                 if not chapter_id:
                     continue
                 seen = newest.get(chapter_id)
-                if seen is None or made_at > seen:
-                    newest[chapter_id] = made_at
+                if seen is not None and made_at <= seen.created_at:
+                    continue
+                newest[chapter_id] = AudioStamp(
+                    created_at=made_at,
+                    content_hash=str(doc.get("content_hash") or ""),
+                    voice_id=str(doc.get("voice_id") or ""),
+                )
         return newest
 
     def reorder_chapters(self, novel_id: str, owner_id: str,

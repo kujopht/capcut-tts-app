@@ -483,13 +483,15 @@ class TestTimestampComparison(Base):
     """
 
     def test_millisecond_form_is_compared_correctly(self):
-        from server.domain import Chapter
+        from server.domain import AudioStamp, Chapter
 
-        # Cung mot thoi diem, hai cach viet khac nhau
+        # Cung mot thoi diem, hai cach viet khac nhau. `AudioStamp` khong co
+        # `rate`/`chunk_chars` -> di duong DU PHONG, tuc la so moc thoi gian.
         chapter = Chapter(novel_id="n", owner_id="u", title="A",
                           updated_at="2026-08-07T03:01:36+00:00")
         self.assertFalse(
-            server_main._audio_outdated(chapter, "2026-08-07T03:01:36.000+00:00"),
+            server_main._audio_outdated(
+                chapter, AudioStamp(created_at="2026-08-07T03:01:36.000+00:00")),
             "cùng một thời điểm thì không được coi là audio cũ")
 
     def test_string_comparison_would_have_been_wrong(self):
@@ -499,18 +501,19 @@ class TestTimestampComparison(Base):
         self.assertTrue(khong_ms < co_ms, "so sánh chuỗi cho kết quả sai thứ tự")
 
     def test_unparseable_timestamp_does_not_raise_or_guess(self):
-        from server.domain import Chapter
+        from server.domain import AudioStamp, Chapter
 
         chapter = Chapter(novel_id="n", owner_id="u", title="A",
                           updated_at="khong-phai-thoi-gian")
-        self.assertFalse(server_main._audio_outdated(chapter, "2026-08-07T03:01:36+00:00"))
+        self.assertFalse(server_main._audio_outdated(
+            chapter, AudioStamp(created_at="2026-08-07T03:01:36+00:00")))
 
-    def test_missing_audio_time_means_not_outdated(self):
-        from server.domain import Chapter
+    def test_no_audio_means_not_outdated(self):
+        from server.domain import AudioStamp, Chapter
 
         chapter = Chapter(novel_id="n", owner_id="u", title="A")
         self.assertFalse(server_main._audio_outdated(chapter, None))
-        self.assertFalse(server_main._audio_outdated(chapter, ""))
+        self.assertFalse(server_main._audio_outdated(chapter, AudioStamp(created_at="")))
 
 
 if __name__ == "__main__":

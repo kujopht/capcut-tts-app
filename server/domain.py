@@ -194,7 +194,16 @@ class TtsJob:
 
 @dataclass
 class AudioTrack:
-    """Audio da hoan tat cua mot chuong."""
+    """
+    Audio da hoan tat cua mot chuong.
+
+    `content_hash` la DAU VAN TAY, khong phai ma bam cua rieng noi dung: no gom
+    ca noi dung, giong, toc do va kich thuoc doan (xem `job_fingerprint`).
+
+    Track KHONG luu `rate`/`chunk_chars`. Hai tham so do lay tu ban ghi
+    `tts_jobs` co cung `content_hash` — job da luu chung tu truoc, nen khong phai
+    them thuoc tinh nao vao `audio_tracks`. Xem `MetadataStore.job_settings`.
+    """
 
     chapter_id: str
     owner_id: str
@@ -218,6 +227,43 @@ class AudioTrack:
             "size_bytes": self.size_bytes,
             "created_at": self.created_at,
         }
+
+
+@dataclass(frozen=True)
+class AudioStamp:
+    """
+    Vua du de biet audio cua mot chuong con khop noi dung hay khong.
+
+    Dung cho DANH SACH chuong: lay ca `AudioTrack` ve thi khong can, ma tinh
+    tung chuong mot thi lai thanh N+1. Day la phan toi thieu cua track moi nhat.
+
+    `rate`/`chunk_chars` khong nam trong track — chung duoc GHEP VAO tu ban ghi
+    job co cung `content_hash`. Job da bi xoa thi hai truong nay la None va chi
+    con doan duoc bang moc thoi gian.
+    """
+
+    created_at: str
+    content_hash: str = ""
+    voice_id: str = ""
+    rate: Optional[str] = None
+    chunk_chars: Optional[int] = None
+
+    def with_settings(self, rate: Optional[str],
+                      chunk_chars: Optional[int]) -> "AudioStamp":
+        """Ban sao co them tham so render lay tu job."""
+        return AudioStamp(
+            created_at=self.created_at,
+            content_hash=self.content_hash,
+            voice_id=self.voice_id,
+            rate=rate,
+            chunk_chars=chunk_chars,
+        )
+
+    @property
+    def can_verify(self) -> bool:
+        """Co du tham so de TINH LAI dau van tay hay khong."""
+        return bool(self.content_hash and self.voice_id
+                    and self.rate is not None and self.chunk_chars is not None)
 
 
 def job_fingerprint(content: str, voice_id: str, rate: str, chunk_chars: int) -> str:

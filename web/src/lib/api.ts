@@ -217,6 +217,16 @@ export const api = {
   novelTags: () =>
     request<{ tags: string[]; count: number }>("/api/novels/tags"),
 
+  /**
+   * MOI chuong cua chinh minh, trong MOT request.
+   *
+   * Thu vien audio can mot bang tra "chapter_id -> ten chuong". Truoc day no goi
+   * `getNovel` cho TUNG truyen de dung bang do — nguoi co 40 truyen ton 42
+   * request. Duong nay khong kem noi dung chuong va khong ky URL audio nao.
+   */
+  myChapters: () =>
+    request<{ chapters: Chapter[]; count: number }>("/api/chapters?mine=true"),
+
   createNovel: (title: string, description: string, tags: string[] = []) =>
     request<{ novel: Novel }>("/api/novels", {
       method: "POST",

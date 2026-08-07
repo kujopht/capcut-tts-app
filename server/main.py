@@ -35,6 +35,7 @@ from server.adapters import (
 )
 from server.config import get_settings
 from server.domain import (
+    AudioStamp,
     AudioTrack,
     Chapter,
     JobStatus,
@@ -361,40 +362,80 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def _audio_outdated(chapter: Chapter, audio_made_at: Optional[str]) -> bool:
+def _audio_outdated(chapter: Chapter, stamp: Optional[AudioStamp]) -> bool:
     """
-    Chuong co bi sua SAU KHI tao audio hay khong.
+    Audio hien tai co con khop noi dung chuong hay khong.
 
-    Day la mot canh bao CO THE, khong phai bang chung: no do "ban ghi chuong
-    duoc sua lan cuoi luc nao" so voi "audio tao luc nao". Sua rieng tieu de
-    cung lam moc nay nhay, nen co the bao oan.
+    CACH DUNG — so DAU VAN TAY. `AudioTrack.content_hash` la
+    `job_fingerprint(noi dung, giong, toc do, kich thuoc doan)` tai luc render.
+    Tinh lai dau van tay do voi noi dung HIEN TAI va chinh cac tham so cua track
+    ay; khac nhau tuc la noi dung da doi.
 
-    Chon huong nay co chu dich. Bao oan thi nguoi dung ton mot lan doc canh bao;
-    bo sot thi nguoi dung tuong audio da khop noi dung moi trong khi khong phai
-    — dung cai loi M4 dang di sua. Nen tha bao oan.
+    Dung tham so CUA TRACK, khong dung gia tri mac dinh: mot track render o
+    `rate=1.5` ma dem so voi `rate=1.0` thi se bi bao cu vinh vien.
 
-    Muon chinh xac tuyet doi thi phai luu ma bam CUA RIENG NOI DUNG cung track;
-    `AudioTrack.content_hash` hien tai la dau van tay cua noi dung + giong +
-    toc do + kich thuoc doan, khong tach ra duoc. Do la thay doi luoc do, chua
-    lam.
+    Chinh xac, khong phai phong doan. Sua noi dung roi sua ve dung nguyen ban thi
+    dau van tay khop lai va canh bao TU TAT — dieu ma cach do bang moc thoi gian
+    khong lam duoc.
 
-    Khong doc duoc moc thoi gian -> tra False, khong doan bua.
+    CACH DU PHONG — track cu (tao truoc khi luu `rate`/`chunk_chars`) khong tinh
+    lai duoc dau van tay, nen quay ve so moc thoi gian: chuong sua sau khi tao
+    audio thi coi la co the khong khop. Bao oan (sua rieng tieu de cung nhay)
+    nhung khong bo sot. Khong xoa, khong ghi lai track cu de "nang cap" — du lieu
+    cu duoc doc nhu no von co.
     """
-    if not audio_made_at:
+    if stamp is None:
         return False
-    made = _parse_iso(audio_made_at)
+
+    if stamp.can_verify:
+        current = job_fingerprint(chapter.content, stamp.voice_id,
+                                  stamp.rate or "", stamp.chunk_chars or 0)
+        return current != stamp.content_hash
+
+    made = _parse_iso(stamp.created_at)
     edited = _parse_iso(chapter.updated_at)
     if made is None or edited is None:
         return False
     return edited > made
 
 
-def _chapter_row(chapter: Chapter, audio_made_at: Optional[str]) -> Dict[str, Any]:
+def _stamp_for(chapter: Chapter, track: Optional[AudioTrack]) -> Optional[AudioStamp]:
+    """`AudioStamp` cho MOT chuong, da ghep tham so render tu job."""
+    if track is None:
+        return None
+    stamp = AudioStamp(created_at=track.created_at,
+                       content_hash=track.content_hash,
+                       voice_id=track.voice_id)
+    found = store.job_settings(chapter.owner_id, [track.content_hash])
+    settings = found.get(track.content_hash)
+    return stamp.with_settings(*settings) if settings else stamp
+
+
+def _with_job_settings(owner_id: str,
+                       stamps: Dict[str, AudioStamp]) -> Dict[str, AudioStamp]:
+    """
+    Ghep `rate`/`chunk_chars` tu ban ghi job vao tung `AudioStamp`.
+
+    MOT truy van cho ca danh sach — khong phai mot truy van moi chuong, neu khong
+    lai thanh dung cai N+1 da bo di.
+    """
+    if not stamps:
+        return stamps
+    fingerprints = [s.content_hash for s in stamps.values() if s.content_hash]
+    settings_by_hash = store.job_settings(owner_id, fingerprints)
+    out: Dict[str, AudioStamp] = {}
+    for chapter_id, stamp in stamps.items():
+        found = settings_by_hash.get(stamp.content_hash)
+        out[chapter_id] = (stamp.with_settings(*found) if found else stamp)
+    return out
+
+
+def _chapter_row(chapter: Chapter, stamp: Optional[AudioStamp]) -> Dict[str, Any]:
     """Mot dong trong danh sach chuong: du de ve badge, khong kem noi dung."""
     return {
         **chapter.to_dict(include_content=False),
-        "has_audio": audio_made_at is not None,
-        "audio_outdated": _audio_outdated(chapter, audio_made_at),
+        "has_audio": stamp is not None,
+        "audio_outdated": _audio_outdated(chapter, stamp),
     }
 
 
@@ -422,10 +463,11 @@ def get_novel(novel_id: str,
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tiểu thuyết.")
 
     chapters = store.list_chapters(novel_id)
-    made_at = store.audio_by_chapter([c.chapter_id for c in chapters])
+    stamps = _with_job_settings(
+        novel.owner_id, store.audio_by_chapter([c.chapter_id for c in chapters]))
     return {
         "novel": _novel_out(novel),
-        "chapters": [_chapter_row(c, made_at.get(c.chapter_id)) for c in chapters],
+        "chapters": [_chapter_row(c, stamps.get(c.chapter_id)) for c in chapters],
     }
 
 
@@ -507,9 +549,10 @@ def reorder_chapters(novel_id: str, payload: ChapterOrderIn,
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-    made_at = store.audio_by_chapter([c.chapter_id for c in chapters])
+    stamps = _with_job_settings(
+        profile.user_id, store.audio_by_chapter([c.chapter_id for c in chapters]))
     return {
-        "chapters": [_chapter_row(c, made_at.get(c.chapter_id)) for c in chapters],
+        "chapters": [_chapter_row(c, stamps.get(c.chapter_id)) for c in chapters],
     }
 
 
@@ -611,6 +654,38 @@ def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profil
     return {"chapter": chapter.to_dict()}
 
 
+# PHAI khai bao TRUOC `/api/chapters/{chapter_id}`, neu khong "mine" bi coi la
+# mot `chapter_id`. Xem cach lam tuong tu o `/api/novels/tags`.
+@app.get("/api/chapters")
+def list_my_chapters(mine: bool = False,
+                     profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    MOI chuong cua nguoi dang dang nhap, trong MOT request.
+
+    Vi sao co route nay: thu vien audio truoc day goi `/api/novels/{id}` cho TUNG
+    truyen chi de dung mot bang tra "chapter_id -> ten chuong". Nguoi co 40 truyen
+    ton 42 request, va con so do tang tuyen tinh theo so truyen.
+
+    CHI chuong cua chinh minh. Khong co che do cong khai: danh sach chuong cua
+    mot truyen da xuat ban van lay qua `GET /api/novels/{id}`, noi da co san kiem
+    tra quyen doc.
+
+    CO Y khong kem noi dung chuong va khong ky URL audio nao: day la du lieu de
+    dung DANH SACH. Duong phat van xin rieng qua `/api/audio/{id}/url` dung luc
+    bam nghe.
+    """
+    if not mine:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Route này chỉ trả chương của chính bạn — cần `mine=true`.",
+        )
+    chapters = store.chapters_for_owner(profile.user_id)
+    return {
+        "chapters": [c.to_dict(include_content=False) for c in chapters],
+        "count": len(chapters),
+    }
+
+
 @app.get("/api/chapters/{chapter_id}")
 def get_chapter(chapter_id: str,
                 authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
@@ -651,7 +726,7 @@ def get_chapter(chapter_id: str,
         "novel": _novel_brief(novel) if novel else None,
         # Chuong da sua sau khi tao audio -> audio CO THE khong con khop.
         # Chi la canh bao, khong bao gio la ly do de xoa file audio.
-        "audio_outdated": _audio_outdated(chapter, track.created_at if track else None),
+        "audio_outdated": _audio_outdated(chapter, _stamp_for(chapter, track)),
     }
 
 

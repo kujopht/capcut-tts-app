@@ -247,23 +247,45 @@ class TestBatchedAudioLookup(unittest.TestCase):
         self.assertEqual(found, {})
         self.assertEqual(fake.calls, [])
 
-    def test_only_the_two_needed_attributes_are_requested(self):
-        """Khong keo ca `object_key`, `content_hash`… ve chi de dem."""
+    def test_it_does_not_select_attributes(self):
+        """
+        CO Y khong dung `q_select` o day.
+
+        `rate` va `chunk_chars` la thuoc tinh moi. Neu truy van liet ke ten thuoc
+        tinh thi no phu thuoc vao viec migration da chay chua, va trien khai code
+        truoc migration se lam ca trang truyen do. Lay ca document thi khong co
+        rang buoc thu tu do.
+        """
         fake = _PagingRecorder([])
         AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(["chp_1"])
         queries = [json.loads(q) for q in fake.calls[0]["params"]["queries[]"]]
         selects = [q for q in queries if q["method"] == "select"]
-        self.assertEqual(selects[0]["values"], ["chapter_id", "created_at"])
+        self.assertEqual(selects, [], "khong duoc rang buoc vao ten thuoc tinh")
 
-    def test_it_returns_the_newest_track_time_per_chapter(self):
+    def test_it_returns_the_newest_track_per_chapter(self):
         """Chuong tao lai audio nhieu lan -> phai lay ban MOI NHAT."""
         fake = _PagingRecorder([
-            {"chapter_id": "chp_1", "created_at": "2026-08-01T00:00:00+00:00"},
-            {"chapter_id": "chp_1", "created_at": "2026-08-05T00:00:00+00:00"},
-            {"chapter_id": "chp_1", "created_at": "2026-08-03T00:00:00+00:00"},
+            {"chapter_id": "chp_1", "created_at": "2026-08-01T00:00:00+00:00",
+             "content_hash": "cu", "voice_id": "v", "rate": "1.0", "chunk_chars": 2000},
+            {"chapter_id": "chp_1", "created_at": "2026-08-05T00:00:00+00:00",
+             "content_hash": "moi", "voice_id": "v", "rate": "1.0", "chunk_chars": 2000},
+            {"chapter_id": "chp_1", "created_at": "2026-08-03T00:00:00+00:00",
+             "content_hash": "giua", "voice_id": "v", "rate": "1.0", "chunk_chars": 2000},
         ])
         found = AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(["chp_1"])
-        self.assertEqual(found["chp_1"], "2026-08-05T00:00:00+00:00")
+        self.assertEqual(found["chp_1"].created_at, "2026-08-05T00:00:00+00:00")
+        self.assertEqual(found["chp_1"].content_hash, "moi")
+
+    def test_old_track_without_the_new_fields_stays_unverifiable(self):
+        """Track cu -> `can_verify` False, tang tren tu quay ve so moc thoi gian."""
+        fake = _PagingRecorder([
+            {"chapter_id": "chp_1", "created_at": "2026-08-01T00:00:00+00:00",
+             "content_hash": "h", "voice_id": "v"},      # khong co rate/chunk_chars
+        ])
+        found = AppwriteMetadataStore(SETTINGS, client=fake).audio_by_chapter(["chp_1"])
+        self.assertIsNone(found["chp_1"].rate)
+        self.assertIsNone(found["chp_1"].chunk_chars)
+        self.assertFalse(found["chp_1"].can_verify)
 
     def test_select_puts_attributes_under_values_not_attributes(self):
         """
@@ -449,6 +471,114 @@ class TestBrowseQuerySyntax(unittest.TestCase):
         for raw in fake.calls[0]["params"]["queries[]"]:
             parsed = json.loads(raw)      # phai la JSON hop le
             self.assertIn("method", parsed)
+
+
+class TestNoQueryStopsAt25(unittest.TestCase):
+    """
+    Bien 25 la gioi han MAC DINH CUA APPWRITE, khong phai cua code ta.
+
+    Kiem dieu nay o tang mock la vo nghia: `MockMetadataStore` loc bang Python nen
+    khong bao gio cat o 25. `_PagingRecorder` mo phong dung hanh vi that — khong
+    co truy van `limit` thi chi tra 25 document.
+    """
+
+    def docs(self, count: int, **extra):
+        return [{"$id": f"d{i:04d}", **extra} for i in range(count)]
+
+    def job_docs(self, count: int):
+        return [{
+            "job_id": f"job_{i:04d}", "owner_id": "usr_1", "chapter_id": "chp_1",
+            "voice_id": "v", "content_hash": f"h{i:04d}", "status": "completed",
+            "rate": "1.0", "chunk_chars": 2000,
+            "created_at": f"2026-08-07T00:{i // 60:02d}:{i % 60:02d}+00:00",
+        } for i in range(count)]
+
+    def track_docs(self, count: int):
+        return [{
+            "track_id": f"trk_{i:04d}", "chapter_id": "chp_1", "owner_id": "usr_1",
+            "voice_id": "v", "object_key": f"audio/{i}.mp3",
+            "content_hash": f"h{i:04d}", "size_bytes": 1,
+            "created_at": f"2026-08-07T00:{i // 60:02d}:{i % 60:02d}+00:00",
+        } for i in range(count)]
+
+    def test_the_fake_client_really_caps_at_25_without_a_limit(self):
+        """Neu cho nay sai thi moi test duoi day dat mot cach vo nghia."""
+        fake = _PagingRecorder(self.docs(40))
+        data = fake.request("GET", "/x", params={"queries[]": []})
+        self.assertEqual(len(data["documents"]), 25)
+        self.assertEqual(data["total"], 40)
+
+    def test_list_jobs_returns_every_job_past_25(self):
+        for count in (0, 1, 25, 26, 60, 137):
+            with self.subTest(count=count):
+                fake = _PagingRecorder(self.job_docs(count))
+                jobs = AppwriteMetadataStore(SETTINGS, client=fake).list_jobs("usr_1")
+                self.assertEqual(len(jobs), count)
+
+    def test_tracks_for_chapter_returns_every_track_past_25(self):
+        for count in (0, 1, 25, 26, 60):
+            with self.subTest(count=count):
+                fake = _PagingRecorder(self.track_docs(count))
+                tracks = AppwriteMetadataStore(
+                    SETTINGS, client=fake).tracks_for_chapter("chp_1")
+                self.assertEqual(len(tracks), count)
+
+    def test_find_job_by_fingerprint_looks_past_25_failed_attempts(self):
+        """
+        Job `completed` nam sau 25 job `failed` cung dau van tay van phai tim ra.
+
+        Khong thi he thong render lai audio da co — ton tien va thoi gian.
+        """
+        docs = self.job_docs(26)
+        for doc in docs[:25]:
+            doc["status"] = "failed"
+        for doc in docs:
+            doc["content_hash"] = "cung-mot-dau-van-tay"
+        docs[25]["status"] = "completed"
+        fake = _PagingRecorder(docs)
+
+        found = AppwriteMetadataStore(SETTINGS, client=fake).find_job_by_fingerprint(
+            "usr_1", "chp_1", "cung-mot-dau-van-tay")
+        self.assertIsNotNone(found, "bo sot job completed nam sau 25 job failed")
+        self.assertEqual(found.status.value, "completed")
+
+    def test_list_novels_returns_every_novel_past_25(self):
+        novel_docs = [{
+            "novel_id": f"nov_{i:04d}", "owner_id": "usr_1", "title": f"T{i}",
+            "description": "", "cover_key": None, "state": "published",
+            "tags": [], "created_at": "", "updated_at": "",
+        } for i in range(26)]
+        fake = _PagingRecorder(novel_docs)
+        items = AppwriteMetadataStore(SETTINGS, client=fake).list_novels(owner_id="usr_1")
+        self.assertEqual(len(items), 26)
+
+    def test_chapters_for_owner_returns_every_chapter_past_25(self):
+        chapter_docs = [{
+            "chapter_id": f"chp_{i:04d}", "novel_id": "nov_1", "owner_id": "usr_1",
+            "title": f"C{i}", "content": "", "order_index": i,
+            "state": "draft", "created_at": "", "updated_at": "",
+        } for i in range(26)]
+        fake = _PagingRecorder(chapter_docs)
+        items = AppwriteMetadataStore(
+            SETTINGS, client=fake).chapters_for_owner("usr_1")
+        self.assertEqual(len(items), 26)
+
+    def test_job_settings_returns_every_match_past_25(self):
+        fake = _PagingRecorder(self.job_docs(30))
+        found = AppwriteMetadataStore(SETTINGS, client=fake).job_settings(
+            "usr_1", [f"h{i:04d}" for i in range(30)])
+        self.assertEqual(len(found), 30)
+
+    def test_paging_keeps_the_order_the_query_asked_for(self):
+        fake = _PagingRecorder(self.job_docs(30))
+        jobs = AppwriteMetadataStore(SETTINGS, client=fake).list_jobs("usr_1")
+        ids = [j.job_id for j in jobs]
+        self.assertEqual(ids, sorted(ids), "lat trang khong duoc dao lon thu tu")
+
+    def test_paging_never_repeats_a_record(self):
+        fake = _PagingRecorder(self.job_docs(137))
+        jobs = AppwriteMetadataStore(SETTINGS, client=fake).list_jobs("usr_1")
+        self.assertEqual(len(jobs), len(set(j.job_id for j in jobs)))
 
 
 class TestSessionAuthentication(unittest.TestCase):

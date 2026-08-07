@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, Tuple
 
 from server.config import ConfigError, Settings
 from server.domain import (
+    AudioStamp,
     AudioTrack,
     Chapter,
     Novel,
@@ -153,6 +154,18 @@ class MetadataStore(Protocol):
     def owned_chapter(self, chapter_id: str, owner_id: str) -> Chapter: ...
     def list_chapters(self, novel_id: str) -> List[Chapter]: ...
 
+    def chapters_for_owner(self, owner_id: str) -> List[Chapter]:
+        """
+        MOI chuong cua mot nguoi dung, khong ke thuoc truyen nao.
+
+        Ban cai dat PHAI tra loi bang so truy van khong phu thuoc so truyen —
+        day la ly do ky thuat cua ham nay: truoc do thu vien audio goi
+        `/api/novels/{id}` cho tung truyen chi de tra ten chuong.
+
+        Chi tra ve chuong CUA `owner_id`, khong bao gio cua nguoi khac.
+        """
+        ...
+
     def update_chapter(self, chapter_id: str, owner_id: str,
                        fields: Dict[str, Any]) -> Chapter: ...
     def delete_chapter(self, chapter_id: str, owner_id: str) -> None: ...
@@ -183,6 +196,25 @@ class MetadataStore(Protocol):
     def list_jobs(self, owner_id: str,
                   chapter_id: Optional[str] = None) -> List[TtsJob]: ...
 
+    def job_settings(self, owner_id: str,
+                     fingerprints: Sequence[str]) -> Dict[str, Tuple[str, int]]:
+        """
+        `{content_hash: (rate, chunk_chars)}` cua cac job khop dau van tay.
+
+        Ly do ton tai: `AudioTrack.content_hash` la
+        `job_fingerprint(noi dung, giong, toc do, kich thuoc doan)`, nhung track
+        khong luu `rate`/`chunk_chars`. Job THI CO — nen ghep tu day, khong phai
+        them thuoc tinh vao `audio_tracks`.
+
+        Ban cai dat PHAI tra loi bang so truy van khong phu thuoc so dau van tay
+        (theo lo), neu khong danh sach chuong lai thanh N+1.
+
+        - Danh sach rong -> tra ve dict rong, KHONG duoc goi kho.
+        - Chi tra ve job CUA `owner_id`.
+        - Job da bi xoa thi dau van tay do khong xuat hien trong ket qua.
+        """
+        ...
+
     def delete_job(self, job_id: str) -> None: ...
 
     # -- audio track ---------------------------------------------------------
@@ -190,24 +222,23 @@ class MetadataStore(Protocol):
     def track_for_chapter(self, chapter_id: str) -> Optional[AudioTrack]: ...
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]: ...
 
-    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, str]:
+    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, AudioStamp]:
         """
-        Chuong nao DA co audio, va audio moi nhat tao luc nao.
+        Chuong nao DA co audio, va dau van tay cua audio moi nhat.
 
-        Tra ve `{chapter_id: created_at cua track moi nhat}`. Chuong khong co
+        Tra ve `{chapter_id: AudioStamp cua track moi nhat}`. Chuong khong co
         audio thi khong xuat hien trong ket qua.
 
         Ly do ton tai: danh sach chuong can hai dieu — co audio hay khong, va
-        audio da cu hon lan sua noi dung gan nhat hay chua. Hoi tung chuong mot
-        lam so truy van tang tuyen tinh theo so chuong. Ban cai dat PHAI tra loi
-        bang so truy van khong phu thuoc so chuong (hang so, hoac theo lo) — day
-        la ca ly do ky thuat cua ham nay.
+        audio con khop noi dung hien tai hay khong. Hoi tung chuong mot lam so
+        truy van tang tuyen tinh theo so chuong. Ban cai dat PHAI tra loi bang
+        so truy van khong phu thuoc so chuong (hang so, hoac theo lo) — day la
+        ca ly do ky thuat cua ham nay.
 
         MOT truy van cho ca hai dieu, khong phai hai truy van.
 
         - Danh sach rong -> tra ve dict rong, KHONG duoc goi kho.
-        - Chi tra ve moc thoi gian, khong tra ve URL ky: trang danh sach chua
-          phat gi ca.
+        - Khong tra ve URL ky: trang danh sach chua phat gi ca.
         """
         ...
 
@@ -551,6 +582,12 @@ class MockMetadataStore:
             items = [c for c in self.chapters.values() if c.novel_id == novel_id]
         return sorted(items, key=lambda c: c.order_index)
 
+    def chapters_for_owner(self, owner_id: str) -> List[Chapter]:
+        """Xem contract o `MetadataStore.chapters_for_owner`."""
+        with self._lock:
+            items = [c for c in self.chapters.values() if c.owner_id == owner_id]
+        return sorted(items, key=lambda c: (c.novel_id, c.order_index))
+
     # -- job -----------------------------------------------------------------
 
     def create_job(self, job: TtsJob) -> TtsJob:
@@ -604,6 +641,20 @@ class MockMetadataStore:
             items = [j for j in items if j.chapter_id == chapter_id]
         return sorted(items, key=lambda j: j.created_at, reverse=True)
 
+    def job_settings(self, owner_id: str,
+                     fingerprints: Sequence[str]) -> Dict[str, Tuple[str, int]]:
+        """Xem contract o `MetadataStore.job_settings`."""
+        wanted = set(fingerprints)
+        if not wanted:
+            return {}
+        out: Dict[str, Tuple[str, int]] = {}
+        with self._lock:
+            for job in self.jobs.values():
+                if job.owner_id != owner_id or job.content_hash not in wanted:
+                    continue
+                out.setdefault(job.content_hash, (job.rate, job.chunk_chars))
+        return out
+
     def delete_job(self, job_id: str) -> None:
         with self._lock:
             self.jobs.pop(job_id, None)
@@ -624,19 +675,24 @@ class MockMetadataStore:
         with self._lock:
             return [t for t in self.tracks.values() if t.chapter_id == chapter_id]
 
-    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, str]:
+    def audio_by_chapter(self, chapter_ids: Sequence[str]) -> Dict[str, AudioStamp]:
         """Mot luot duy nhat qua bang track — xem contract o `MetadataStore`."""
         wanted = set(chapter_ids)
         if not wanted:
             return {}
-        newest: Dict[str, str] = {}
+        newest: Dict[str, AudioStamp] = {}
         with self._lock:
             for track in self.tracks.values():
                 if track.chapter_id not in wanted:
                     continue
                 seen = newest.get(track.chapter_id)
-                if seen is None or track.created_at > seen:
-                    newest[track.chapter_id] = track.created_at
+                if seen is not None and track.created_at <= seen.created_at:
+                    continue
+                newest[track.chapter_id] = AudioStamp(
+                    created_at=track.created_at,
+                    content_hash=track.content_hash,
+                    voice_id=track.voice_id,
+                )
         return newest
 
     def delete_track(self, track_id: str) -> None:

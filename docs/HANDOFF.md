@@ -115,10 +115,10 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | 375 test: 374 đạt, 1 bỏ qua |
+| `server/tests` | 428 test: 427 đạt, 1 bỏ qua |
 | ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 181 đạt, 1 bỏ qua (đo ở mốc cũ) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `web` (`node --test`) | 137/137 đạt |
+| `web` (`node --test`) | 149/149 đạt |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
 | `npx next build` | Thành công, 7 route |
@@ -297,19 +297,29 @@ Hai điều bắt buộc phải giữ:
 - **`reorder_chapters` không được bump `updated_at`.** Sắp xếp lại không sửa nội
   dung; bump ở đó thì mọi chương đều bị báo "audio cũ" oan sau một lần kéo thứ tự.
 
-### Hệ quả đã kiểm chứng: sửa nội dung rồi sửa **về như cũ** thì cờ không tắt
+### ĐÃ SỬA: so dấu vân tay, không so mốc thời gian
 
-Đo thật: sửa chương → cờ bật. Sửa nội dung **về đúng nguyên bản** → cờ **vẫn
-bật**, vì `updated_at` mới hơn track. Bấm "Tạo lại audio" lúc này trả
-`reused: true` (dấu vân tay job khớp job cũ) nên **không có track mới**, và cờ
-không bao giờ tắt. Người dùng làm đúng như app hướng dẫn mà không thấy gì đổi.
+Cách đo bằng `updated_at` không bao giờ tắt được cảnh báo sau khi hoàn nguyên nội
+dung, vì hoàn nguyên cũng làm mốc thời gian mới hơn. Nay:
 
-Đây là **vấn đề còn lại chưa sửa**. Cách sửa đúng: so **dấu vân tay** thay vì mốc
-thời gian. Track lưu `content_hash` = `job_fingerprint(content, voice, rate,
-chunk_chars)` nhưng không lưu `rate`/`chunk_chars`; lấy được hai giá trị đó từ
-job có `content_hash` trùng, rồi tính lại dấu vân tay với nội dung HIỆN TẠI là so
-được chính xác. Tốn thêm một truy vấn `list_jobs` — chấp nhận được ở route chương,
-nhưng route danh sách thì không (sẽ thành N+1). Chưa làm.
+`AudioTrack.content_hash` là `job_fingerprint(nội dung, giọng, tốc độ, kích thước
+đoạn)`. Track không lưu `rate`/`chunk_chars`, nhưng **bản ghi job thì có** — và
+`track.content_hash == job.content_hash`. Nên lấy hai tham số đó từ job
+(`MetadataStore.job_settings`), tính lại dấu vân tay với nội dung **hiện tại**, rồi
+so. Chính xác, và **không cần thêm thuộc tính Appwrite nào**.
+
+Kiểm chứng live: sửa nội dung → cờ bật; hoàn nguyên đúng nguyên bản → cờ **tự
+tắt**; sửa riêng tiêu đề → cờ không bật.
+
+Bắt buộc dùng tham số **của chính track đó**, không dùng giá trị mặc định: một
+track render ở `rate=1.5` mà đem so với `rate=1.0` sẽ bị báo cũ vĩnh viễn.
+
+Cách dự phòng: job đã bị xoá (chương bị xoá sẽ dọn job) thì không tính lại được
+→ quay về so mốc thời gian như cũ. Báo oan nhưng không bỏ sót. Track cũ **không
+bị ghi lại hay xoá** để "nâng cấp".
+
+Một lần `job_settings` cho **cả danh sách** chương, không phải một lần mỗi chương
+— nếu không lại thành đúng cái N+1 đã bỏ đi.
 
 ## Giới hạn đã biết
 
@@ -376,6 +386,8 @@ Nếu sau này muốn cho nó tự xoá, điều kiện tối thiểu:
 - **Assertion phủ định dễ đạt vì lý do sai.** `!src.includes("api.getChapter(")` từng đạt cả trên code cũ, vì code cũ viết `api` xuống dòng rồi `.getChapter(`. Sau khi viết test mới, hãy chạy chính assertion đó lên bản code CŨ (`git show <commit>:<file>`) và xác nhận nó **thất bại** — không làm bước này thì không biết test có răng hay không.
 - **`uvicorn --reload` bỏ sót thay đổi.** Đã gặp ba lần: WatchFiles in ra "detected changes... Reloading..." rồi worker không khởi động lại, backend tiếp tục phục vụ code cũ. Triệu chứng là API thiếu hẳn trường vừa thêm. Cách chắc ăn: dừng hẳn rồi chạy lại. Lưu ý tiến trình **con** có thể sống sót sau khi giết tiến trình cha và vẫn giữ cổng 8000 — phải giết cả cây.
 - **Truy vấn `select` của Appwrite đặt thuộc tính dưới khoá `values`, không phải `attributes`.** Đặt sai thì Appwrite trả `Invalid query: No attributes selected`. Client giả lập trong test sẽ chấp nhận bất cứ hình dạng nào ta bịa ra, nên lỗi này chỉ lộ khi chạy thật — nay đã có test khoá lại ở `test_appwrite_protocol.py`.
-- **`_list()` không lật trang**, mà Appwrite mặc định chỉ trả 25 document → dữ liệu bị cắt âm thầm, không lỗi, không cảnh báo. `list_chapters` từng dính lỗi này: truyện trên 25 chương sẽ mất chương. Đã sửa bằng `_list_all()` (tự đặt `limit` + lật trang). Truy vấn nào có thể vượt 25 phải dùng `_list_all`, không dùng `_list`. Các truy vấn còn lại (`list_novels`, `list_jobs`) vẫn dùng `_list` — sẽ cắt ở 25 khi dữ liệu nhiều lên, **chưa sửa**.
+- **`_list()` không lật trang**, mà Appwrite mặc định chỉ trả 25 document → dữ liệu bị cắt âm thầm, không lỗi, không cảnh báo. Truy vấn nào có thể vượt 25 phải dùng `_list_all`, không dùng `_list`. Đã rà soát và sửa **toàn bộ**: `list_chapters`, `chapters_for_owner`, `find_novels`/`list_novels`, `list_jobs`, `tracks_for_chapter`, `find_job_by_fingerprint`, `audio_by_chapter`, `job_settings`, `novel_tags`. Chỗ duy nhất còn dùng `_list` là bên trong chính `_list_all` và `track_for_chapter` (có `q_limit(1)` nên không thể bị cắt). Có test đọc mã nguồn từng phương thức bằng `inspect` để bắt hàm mới viết sai ngay từ đầu.
+- **Kiểm giới hạn 25 ở tầng mock là vô nghĩa.** `MockMetadataStore` lọc bằng Python nên không bao giờ cắt. Test biên phải chạy ở tầng Appwrite với client giả lập **có mô phỏng giới hạn mặc định 25** — xem `_PagingRecorder` trong `test_appwrite_protocol.py`. Bộ test biên đầu tiên tôi viết chạy trên mock và đạt cả trên code còn lỗi.
+- **`tracks_for_chapter` bị cắt là mất dữ liệu, không chỉ là hiển thị thiếu.** `_purge_chapter` dùng nó để lấy danh sách object cần xoá khỏi R2; cắt ở 25 thì track thứ 26 trở đi không bao giờ được xoá — object mồ côi âm thầm.
 - Next.js 15.1.6 có CVE-2025-66478 — đã nâng lên 16.x.
 - `MergeResult` của desktop dùng thuộc tính `.path`, không phải `.output_path`.

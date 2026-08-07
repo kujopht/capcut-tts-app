@@ -38,23 +38,23 @@ export default function LibraryPage() {
   const [playing, setPlaying] = useState("");
 
   const gather = useCallback(async (): Promise<Row[]> => {
-    const [novelList, jobList] = await Promise.all([
+    // BA request, du co bao nhieu truyen. Ban truoc goi `getNovel` cho TUNG
+    // truyen chi de dung bang tra "chapter_id -> chuong + truyen": 16 truyen
+    // ton 20 request, va con so do tang tuyen tinh theo so truyen.
+    const [novelList, jobList, chapterList] = await Promise.all([
       api.listNovels(true),
       api.listJobs(),
+      api.myChapters(),
     ]);
-    const details = await Promise.all(
-      novelList.novels.map((novel) =>
-        api
-          .getNovel(novel.novel_id)
-          .then((detail) => ({ novel, chapters: detail.chapters }))
-          .catch(() => ({ novel, chapters: [] as Chapter[] })),
-      ),
-    );
 
+    const novelById = new Map(novelList.novels.map((n) => [n.novel_id, n]));
     const index = new Map<string, { chapter: Chapter; novel: Novel }>();
-    details.forEach(({ novel, chapters }) =>
-      chapters.forEach((chapter) => index.set(chapter.chapter_id, { chapter, novel })),
-    );
+    chapterList.chapters.forEach((chapter) => {
+      const novel = novelById.get(chapter.novel_id);
+      // Chuong khong tra ra truyen thi bo qua — hang khong co ten truyen thi
+      // hien ra chi lam nguoi dung boi roi.
+      if (novel) index.set(chapter.chapter_id, { chapter, novel });
+    });
 
     return jobList.jobs
       .filter((job) => job.status === "completed")

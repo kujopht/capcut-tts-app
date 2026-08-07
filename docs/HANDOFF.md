@@ -91,13 +91,15 @@ Tách bạch cho rõ:
 
 ### Chưa làm — việc tiếp theo
 
-1. **Đối soát object / metadata.** Chưa có công cụ nào. Đường sinh object mồ
-   côi là `create_track` hỏng sau khi upload xong; metadata mồ côi chỉ đến từ
-   xoá ngoài hệ thống. Đo live hai lần đều 0 mồ côi, nên đây là việc phòng xa
-   chứ chưa cấp bách. **Đang chờ chọn phương án** — xem "Xử lý mồ côi" bên dưới.
+1. ~~**Đối soát object / metadata.** Chưa có công cụ nào.~~ **ĐÃ CÓ** —
+   `scripts/reconcile_audio.py`, mặc định dry-run; xem mục "Đối soát object audio
+   mồ côi" bên dưới. Bối cảnh vẫn đúng: đường sinh object mồ côi là `create_track`
+   hỏng sau khi upload xong, còn metadata mồ côi chỉ đến từ xoá ngoài hệ thống.
+   Đo live vẫn 0 mồ côi cả hai chiều, nên công cụ này là để phòng xa và để đối
+   soát định kỳ, không phải để chữa một sự cố đang xảy ra.
 2. **Chương dài.** Giới hạn 1.000.000 ký tự của thuộc tính `content` chưa chạm tới.
 3. **Tải cao.** Mới thử tối đa 5 job song song.
-4. **Job kẹt ở `running`.** Worker chết giữa chừng thì chưa có cơ chế hồi phục.
+4. ~~**Job kẹt ở `running`.**~~ ĐÃ SỬA — xem "Worker recovery" bên dưới.
 5. Chưa có thanh toán, lịch sử nghe, trừ quota, moderation.
 
 ## Biến môi trường
@@ -115,8 +117,7 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | 428 test: 427 đạt, 1 bỏ qua |
-| ↑ cùng bộ, chạy trong **venv sạch** cài từ `server/requirements.txt` | 181 đạt, 1 bỏ qua (đo ở mốc cũ) |
+| `server/tests` | 481 test: 480 đạt, 1 bỏ qua (chạy 3 lần, kết quả ổn định) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
 | `web` (`node --test`) | 149/149 đạt |
 | `npx eslint .` | Sạch, exit 0 |
@@ -128,7 +129,18 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 Test bị bỏ qua là test kiểm tra **thông báo lỗi khi thiếu `boto3`**; nay `boto3`
 đã nằm trong `server/requirements.txt` nên nó tự bỏ qua — đúng như thiết kế.
 
-Venv sạch cũng xác nhận backend **không kéo theo PySide6** và nạp được 452 giọng.
+**Chưa chạy lại trong venv sạch.** Số liệu "181 đạt" của lần đo cũ đã bỏ khỏi bảng
+vì không còn đúng với 481 test hiện tại. Cần chạy lại trước khi deploy:
+
+```bash
+py -3.12 -m venv .venv-clean
+.venv-clean\Scripts\python.exe -m pip install -r server/requirements.txt
+.venv-clean\Scripts\python.exe -m unittest discover -s server/tests -t .
+```
+
+Mục đích của phép thử đó là xác nhận backend **không kéo theo PySide6** và
+`server/requirements.txt` đủ để chạy — hai điều không bộ test nào trong venv phát
+triển kiểm được.
 
 ## Mức độ kiểm chứng
 
@@ -320,6 +332,86 @@ bị ghi lại hay xoá** để "nâng cấp".
 
 Một lần `job_settings` cho **cả danh sách** chương, không phải một lần mỗi chương
 — nếu không lại thành đúng cái N+1 đã bỏ đi.
+
+## Worker recovery — job kẹt ở `running`
+
+### State machine
+
+```
+(không có) ──create_job──► pending ──claim──► running ──► completed
+                              ▲                 │  ▲
+                              │                 └──┘ heartbeat mỗi 30 giây
+                              │                 │
+                              └── quét lại ─────┤ lease hết hạn
+                                                └──► failed (hết lượt thử)
+```
+
+| Hằng số | Giá trị | Ý nghĩa |
+|---|---|---|
+| `JOB_LEASE_SECONDS` | 90 | lease sống bao lâu nếu không làm mới |
+| `JOB_HEARTBEAT_SECONDS` | 30 | chu kỳ worker làm mới lease |
+| `JOB_MAX_ATTEMPTS` | 3 | vượt thì `failed` với `error_kind = worker_lost` |
+| `JOB_SWEEP_SECONDS` | 60 | chu kỳ quét; lần đầu chạy ngay lúc khởi động |
+
+Lease phải dài hơn heartbeat **ít nhất gấp đôi** — có test khoá lại. Một nhịp trễ
+mạng không được làm job bị worker khác giật.
+
+### Điều quan trọng nhất: tính đúng đắn KHÔNG dựa vào lease
+
+Appwrite không có compare-and-swap, nên `_claim_stale_job` là ghi-rồi-đọc-lại chứ
+không phải CAS thật. Về lý thuyết hai worker vẫn có thể cùng thắng ở một cửa sổ
+rất hẹp. Điều đó **không làm sai dữ liệu**, vì:
+
+- `output_key` là tất định theo `content_hash` — hai lần chạy ghi cùng một khoá
+  với cùng nội dung;
+- `store.create_track()` là **tìm-hoặc-tạo** theo `(chapter_id, content_hash)`,
+  nên không bao giờ sinh hai track cho cùng một kết quả.
+
+Lease chỉ để tránh làm việc thừa. Đừng đổi `create_track` thành "luôn tạo mới" —
+đó là thứ đang giữ cho recovery đúng đắn.
+
+### Không bao giờ được làm
+
+- Đánh dấu **mọi** job `running` thành `failed` lúc khởi động. Job của worker khác
+  đang chạy bình thường sẽ bị phá.
+- Cho bộ quét gọi công cụ đối soát. Hai việc tách rời hoàn toàn: bộ quét chỉ đổi
+  trạng thái job, công cụ đối soát mới chạm vào file — và chỉ khi người vận hành
+  truyền cờ.
+
+### Đã kiểm chứng thật
+
+Kill `-9` backend giữa lúc job đang chạy trên Appwrite + R2 thật:
+
+| Giây | status | attempts | lease_owner |
+|---|---|---|---|
+| 0 | `running` | 1 | `37264-…` (worker đã chết) — **bỏ qua, lease còn hạn** |
+| 35 | `running` | 2 | `35904-…` (worker mới nhận) |
+| 85 | `completed` | 2 | `None` (đã nhả) |
+
+Đúng **một** track (3,2 MB), đúng một job. Lần quét thứ hai: `da_quet = 0`.
+
+## Đối soát object audio mồ côi
+
+`scripts/reconcile_audio.py` — **mặc định chỉ đọc**. Xoá cần **hai** cờ:
+`--delete --yes-really-delete`.
+
+`output_key` tất định: `audio/{owner_id}/{chapter_id}/{content_hash}.mp3`. Công
+thức này phải khớp chính xác với `main._run_job` — có test đọc mã nguồn của
+`_run_job` để hai chỗ không thể trôi nhau.
+
+| Loại | Xử lý |
+|---|---|
+| có `audio_track` trỏ tới | để yên |
+| khớp output key của job `pending`/`running` còn lease | **không bao giờ chạm** |
+| mới hơn thời gian ân hạn (24 giờ) | để yên |
+| còn lại | mồ côi — chỉ xoá khi có cả hai cờ |
+| `audio_track` trỏ tới object không tồn tại | **chỉ báo**, đây là MẤT DỮ LIỆU |
+
+Trước khi xoá từng object, kiểm tra tham chiếu **lại** một lần nữa: giữa lúc quét
+và lúc xoá có thể vừa có job hoàn tất. Lỗi một object không làm mất báo cáo cả
+lượt. Không tạo presigned URL nào.
+
+Báo cáo dry-run đã khử dữ liệu nhạy cảm: `docs/reports/`.
 
 ## Giới hạn đã biết
 

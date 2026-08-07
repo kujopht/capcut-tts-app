@@ -12,9 +12,11 @@ Backend KHONG import GUI: da xac minh khong module PySide6 nao bi keo vao.
 
 from __future__ import annotations
 
+import os
 import threading
+import uuid
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -73,6 +75,51 @@ AUDIO_URL_TTL_SECONDS = 300
 #: Cac job dang chay nen. Job chay trong thread rieng de API tra ve ngay.
 _job_threads: Dict[str, threading.Thread] = {}
 _job_lock = threading.RLock()
+
+# -----------------------------------------------------------------------------
+# Worker recovery
+# -----------------------------------------------------------------------------
+#
+# Job `running` khong co gi chung to worker con song. Truoc day mot worker chet
+# giua chung se de job ket `running` VINH VIEN, va te hon: `find_job_by_fingerprint`
+# chi loai `failed`, nen nguoi dung bam "Tao audio" se duoc tra lai chinh cai job
+# chet do, mai mai.
+#
+# Cach lam: lease co han, worker dang chay tu lam moi (heartbeat). Het han nghia
+# la worker da chet, va chi luc do job moi duoc nhan lai.
+#
+# QUAN TRONG — tinh dung dan KHONG dua vao lease. Chay lai mot job la VO HAI vi:
+#   - `output_key` la tat dinh theo `content_hash`, hai lan chay ghi cung mot khoa
+#     voi cung noi dung;
+#   - `store.create_track()` la TIM-HOAC-TAO theo `(chapter_id, content_hash)`,
+#     nen khong bao gio sinh hai track cho cung mot ket qua.
+# Lease chi de tranh lam viec thua. Do la ly do khong can compare-and-swap that
+# su (Appwrite khong co), va cung la ly do mot cu tranh lease hiem hoi neu co xay
+# ra cung khong lam sai du lieu.
+
+#: Lease song bao lau neu khong duoc lam moi. Phai DAI hon chu ky heartbeat kha
+#: nhieu, de mot lan tre mang khong lam job bi nguoi khac giat.
+JOB_LEASE_SECONDS = 90
+
+#: Chu ky lam moi lease tu trong worker.
+JOB_HEARTBEAT_SECONDS = 30
+
+#: So lan chay toi da cho mot job. Vuot thi `failed` kem thong bao ro rang.
+JOB_MAX_ATTEMPTS = 3
+
+#: Chu ky quet job ket. Lan quet dau chay ngay luc khoi dong.
+JOB_SWEEP_SECONDS = 60
+
+#: Danh tinh cua tien trinh nay. Hai worker khac nhau se co gia tri khac nhau,
+#: nen doc lease ra la biet job dang thuoc ai.
+WORKER_ID = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+_sweeper_stop = threading.Event()
+
+
+def _lease_until(seconds: int = JOB_LEASE_SECONDS) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat(
+        timespec="seconds")
 
 
 # -----------------------------------------------------------------------------
@@ -777,6 +824,9 @@ def _mark_failed(job: TtsJob, kind: str, message: str) -> None:
     job.error_message = message
     job.output_key = None
     job.finished_at = job.finished_at or now_iso()
+    # Nha lease: khong worker nao con giu job nay
+    job.lease_expires_at = None
+    job.lease_owner = None
     try:
         store.save_job(job)
     except Exception as exc:
@@ -817,11 +867,32 @@ def _run_job(job: TtsJob, text: str) -> None:
     output_key = f"audio/{job.owner_id}/{job.chapter_id}/{job.content_hash}.mp3"
     dest = settings.var_dir / "tts" / f"{job.job_id}.mp3"
 
+    # Heartbeat: lam moi lease theo chu ky trong khi synthesis dang chay. Khong
+    # co no thi mot chuong dai se bi bo quet coi la "worker da chet" va chay lai
+    # song song voi chinh no.
+    beat_stop = threading.Event()
+
+    def heartbeat() -> None:
+        while not beat_stop.wait(JOB_HEARTBEAT_SECONDS):
+            try:
+                store.save_job(replace(job, lease_expires_at=_lease_until(),
+                                       lease_owner=WORKER_ID))
+            except Exception:
+                # Mang chap chon: bo qua nhip nay. Lease con han tu nhip truoc.
+                pass
+
+    beater = threading.Thread(target=heartbeat, daemon=True,
+                              name=f"tts-beat-{job.job_id}")
+
     try:
         # -- transition: pending -> running (luu TRUOC khi synthesis) --------
         job.status = JobStatus.RUNNING
-        job.started_at = now_iso()
+        job.started_at = job.started_at or now_iso()
+        job.attempts = (job.attempts or 0) + 1
+        job.lease_owner = WORKER_ID
+        job.lease_expires_at = _lease_until()
         store.save_job(job)
+        beater.start()
 
         result = tts_bridge.synthesize_chapter(
             text=text,
@@ -859,6 +930,9 @@ def _run_job(job: TtsJob, text: str) -> None:
             total_parts=result["total_parts"],
             done_parts=result["total_parts"],
             finished_at=finished_at,
+            # Nha lease: job da xong, khong worker nao con giu no
+            lease_expires_at=None,
+            lease_owner=None,
         )
         store.save_job(completed)
 
@@ -874,9 +948,141 @@ def _run_job(job: TtsJob, text: str) -> None:
         # `failed`, tuyet doi khong phai `completed` gia.
         _mark_failed(job, "unexpected", f"{type(exc).__name__}: {exc}")
     finally:
+        beat_stop.set()
         dest.unlink(missing_ok=True)
         with _job_lock:
             _job_threads.pop(job.job_id, None)
+
+
+def _older_than(stamp: Optional[str], seconds: int) -> bool:
+    """Moc thoi gian da cu hon `seconds` giay chua. Doc khong duoc -> False."""
+    moment = _parse_iso(stamp)
+    if moment is None:
+        return False
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment < datetime.now(timezone.utc) - timedelta(seconds=seconds)
+
+
+def _claim_stale_job(job: TtsJob) -> bool:
+    """
+    Thu nhan mot job da het lease. True nghia la tien trinh nay duoc chay no.
+
+    Ghi lease cua minh roi DOC LAI de kiem: neu `lease_owner` khong con la minh
+    thi mot worker khac da nhan, va ta lui. Day khong phai compare-and-swap that
+    su — Appwrite khong co — nen ve ly thuyet hai worker van co the cung thang o
+    mot cua so rat hep.
+
+    Dieu do KHONG lam sai du lieu: `output_key` la tat dinh va `create_track` la
+    tim-hoac-tao, nen hai lan chay chi ton cong, khong sinh hai audio. Lease o day
+    la de tiet kiem, khong phai de bao dam tinh dung dan.
+    """
+    try:
+        store.save_job(replace(job, status=JobStatus.RUNNING,
+                               lease_owner=WORKER_ID,
+                               lease_expires_at=_lease_until()))
+        fresh = store.get_job(job.job_id)
+    except Exception:
+        return False
+    # Job da kip xong o dau do trong luc nay thi khong duoc chay lai
+    return fresh.lease_owner == WORKER_ID and not fresh.status.is_terminal
+
+
+def recover_stale_jobs() -> Dict[str, int]:
+    """
+    Tim job `running` da mat worker va xu ly dung mot lan.
+
+    IDEMPOTENT: chay lai bao nhieu lan cung duoc. Job con lease hop le bi bo qua,
+    job da `completed`/`failed` khong nam trong danh sach quet.
+
+    TUYET DOI KHONG danh dau moi job `running` thanh `failed` luc khoi dong — do
+    la cach lam pha du lieu cua nguoi dung dang co job chay binh thuong o mot
+    tien trinh khac.
+    """
+    report = {"da_quet": 0, "bo_qua_con_lease": 0, "chay_lai": 0,
+              "het_luot_thu": 0, "khong_nhan_duoc": 0, "bo_qua_con_moi": 0}
+    try:
+        candidates = list(store.list_jobs_by_status(JobStatus.RUNNING))
+        # `pending` cung co the bi bo roi: server chet NGAY SAU `create_job` va
+        # TRUOC khi thread kip doi sang `running`. Job do khong co lease nao ca,
+        # nen loc bang tuoi cua no.
+        for job in store.list_jobs_by_status(JobStatus.PENDING):
+            if _older_than(job.created_at, JOB_LEASE_SECONDS):
+                candidates.append(job)
+            else:
+                report["bo_qua_con_moi"] += 1
+    except Exception:
+        return report
+
+    for job in candidates:
+        report["da_quet"] += 1
+        if job.lease_is_live():
+            report["bo_qua_con_lease"] += 1
+            continue
+
+        if (job.attempts or 0) >= JOB_MAX_ATTEMPTS:
+            # Het luot: dung lai voi thong bao nguoi dung doc hieu duoc, thay vi
+            # de job xoay vong mai.
+            _mark_failed(
+                job, "worker_lost",
+                f"Đã thử tạo audio {job.attempts} lần nhưng lần nào tiến trình "
+                "cũng bị dừng giữa chừng. Hãy thử lại, hoặc chia chương thành "
+                "phần ngắn hơn.",
+            )
+            report["het_luot_thu"] += 1
+            continue
+
+        if not _claim_stale_job(job):
+            report["khong_nhan_duoc"] += 1
+            continue
+
+        # Doc lai chuong: noi dung co the da doi tu lan chay truoc.
+        try:
+            chapter = store.get_chapter(job.chapter_id)
+        except NotFoundError:
+            _mark_failed(job, "chapter_gone",
+                         "Chương của audio này đã bị xoá.")
+            continue
+
+        thread = threading.Thread(
+            target=_run_job, args=(job, chapter.content), daemon=True,
+            name=f"tts-recover-{job.job_id}",
+        )
+        with _job_lock:
+            _job_threads[job.job_id] = thread
+        thread.start()
+        report["chay_lai"] += 1
+    return report
+
+
+def _sweep_forever() -> None:
+    """Quet dinh ky. Lan dau chay ngay, sau do moi `JOB_SWEEP_SECONDS`."""
+    while True:
+        try:
+            recover_stale_jobs()
+        except Exception:
+            # Bo quet chet la mat recovery — khong duoc de mot loi le lam no dung
+            pass
+        if _sweeper_stop.wait(JOB_SWEEP_SECONDS):
+            return
+
+
+@app.on_event("startup")
+def start_job_sweeper() -> None:
+    """
+    Bat bo quet job ket khi backend khoi dong.
+
+    Chay trong thread nen: khoi dong khong duoc cho Appwrite tra loi. Bo quet
+    KHONG bao gio xoa du lieu va khong bao gio chay che do xoa cua cong cu doi
+    soat — hai viec do tach roi hoan toan.
+    """
+    threading.Thread(target=_sweep_forever, daemon=True,
+                     name="tts-job-sweeper").start()
+
+
+@app.on_event("shutdown")
+def stop_job_sweeper() -> None:
+    _sweeper_stop.set()
 
 
 @app.post("/api/jobs", status_code=status.HTTP_201_CREATED)
@@ -902,7 +1108,26 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
     )
     existing = store.find_job_by_fingerprint(profile.user_id, chapter.chapter_id, fingerprint)
     if existing is not None:
-        return {"job": existing.to_dict(), "reused": True}
+        # Job KET — `running` ma khong con worker nao giu. Truoc day nhanh nay tra
+        # lai chinh cai job chet do, mai mai: nguoi dung bam "Tao audio" va nhan
+        # ve mot job khong bao gio nhich. Nay thi nhan lai va chay tiep.
+        if existing.is_stale and (existing.attempts or 0) < JOB_MAX_ATTEMPTS:
+            if _claim_stale_job(existing):
+                thread = threading.Thread(
+                    target=_run_job, args=(existing, chapter.content), daemon=True,
+                    name=f"tts-resume-{existing.job_id}",
+                )
+                with _job_lock:
+                    _job_threads[existing.job_id] = thread
+                thread.start()
+        elif existing.is_stale:
+            _mark_failed(
+                existing, "worker_lost",
+                f"Đã thử tạo audio {existing.attempts} lần nhưng lần nào tiến "
+                "trình cũng bị dừng giữa chừng. Hãy thử lại, hoặc chia chương "
+                "thành phần ngắn hơn.",
+            )
+        return {"job": store.get_job(existing.job_id).to_dict(), "reused": True}
 
     # transition: (khong co) -> pending. Ghi ben vung NGAY, truoc khi khoi
     # dong thread, de job luon ton tai trong metadata backend du worker chet.

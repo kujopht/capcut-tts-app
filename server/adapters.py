@@ -15,15 +15,27 @@ import hashlib
 import os
 import shutil
 import threading
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, Tuple
+from datetime import datetime, timezone
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from server.config import ConfigError, Settings
 from server.domain import (
     AudioStamp,
     AudioTrack,
     Chapter,
+    JobStatus,
     Novel,
     Profile,
     PublishState,
@@ -31,6 +43,17 @@ from server.domain import (
     new_id,
     now_iso,
 )
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    """Mot object trong kho, chi phan metadata ma doi soat can."""
+
+    key: str
+    size_bytes: int
+    #: ISO 8601, UTC. Dung cho thoi gian an han — object vua upload khong duoc
+    #: coi la mo coi chi vi ban ghi metadata chua kip xuat hien.
+    modified_at: str
 
 
 class AuthError(Exception):
@@ -74,6 +97,18 @@ class StorageAdapter(Protocol):
 
     def delete(self, key: str) -> bool:
         """Xoa mot object. Tra True neu da xoa, False neu von khong ton tai."""
+        ...
+
+    def list_objects(self, prefix: str = "") -> Iterator["StoredObject"]:
+        """
+        Liet ke MOI object co khoa bat dau bang `prefix`.
+
+        Ban cai dat PHAI lat trang day du — S3/R2 tra toi da 1000 khoa moi lan.
+        Sinh dan (iterator) thay vi dung mot danh sach: kho co the chua rat nhieu
+        object, va cong cu doi soat chi can di qua mot luot.
+
+        KHONG tao presigned URL: doi soat chi doc metadata cua khoa.
+        """
         ...
 
 
@@ -217,8 +252,35 @@ class MetadataStore(Protocol):
 
     def delete_job(self, job_id: str) -> None: ...
 
+    def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
+        """
+        MOI job dang o mot trang thai, cua MOI nguoi dung.
+
+        Chi dung cho viec quet job ket luc khoi dong va theo chu ky. Khong co
+        route nao phoi bay ham nay ra ngoai — no doc du lieu cua tat ca nguoi
+        dung nen phai o lai trong tien trinh backend.
+
+        Ban cai dat phai lat trang: so job `running` khong co tran tren.
+        """
+        ...
+
     # -- audio track ---------------------------------------------------------
-    def create_track(self, track: AudioTrack) -> AudioTrack: ...
+
+    def create_track(self, track: AudioTrack) -> AudioTrack:
+        """
+        Ghi track, hoac TRA VE track da co neu trung `(chapter_id, content_hash)`.
+
+        TIM-HOAC-TAO chu khong phai luon tao moi. Day la thu lam cho viec chay
+        lai mot job tro nen VO HAI: hai worker cung xu ly mot job se cho ra cung
+        `content_hash` va cung `object_key` (khoa la tat dinh), nen ban thu hai
+        chi nhan lai track cua ban thu nhat thay vi tao them mot ban ghi.
+
+        Nho vay tinh dung dan cua recovery KHONG phu thuoc vao lease. Lease chi
+        de tranh lam viec thua.
+
+        KHONG bao gio ghi de track da co: ban ghi cu duoc tra ve nguyen ven.
+        """
+        ...
     def track_for_chapter(self, chapter_id: str) -> Optional[AudioTrack]: ...
     def tracks_for_chapter(self, chapter_id: str) -> List[AudioTrack]: ...
 
@@ -367,6 +429,24 @@ class LocalStorageAdapter:
             return self._path(key).is_file()
         except ValueError:
             return False
+
+    def list_objects(self, prefix: str = "") -> Iterator[StoredObject]:
+        """Di het cay thu muc. Bo qua file `.part` dang ghi do dang."""
+        if not self._root.is_dir():
+            return
+        for path in sorted(self._root.rglob("*")):
+            if not path.is_file() or path.name.endswith(".part"):
+                continue
+            key = path.relative_to(self._root).as_posix()
+            if prefix and not key.startswith(prefix):
+                continue
+            stat = path.stat()
+            yield StoredObject(
+                key=key,
+                size_bytes=stat.st_size,
+                modified_at=datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc).isoformat(timespec="seconds"),
+            )
 
     def size(self, key: str) -> int:
         target = self._path(key)
@@ -655,6 +735,12 @@ class MockMetadataStore:
                 out.setdefault(job.content_hash, (job.rate, job.chunk_chars))
         return out
 
+    def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
+        """Xem contract o `MetadataStore.list_jobs_by_status`."""
+        with self._lock:
+            items = [j for j in self.jobs.values() if j.status is status]
+        return sorted(items, key=lambda j: j.created_at)
+
     def delete_job(self, job_id: str) -> None:
         with self._lock:
             self.jobs.pop(job_id, None)
@@ -662,7 +748,12 @@ class MockMetadataStore:
     # -- audio track ---------------------------------------------------------
 
     def create_track(self, track: AudioTrack) -> AudioTrack:
+        """TIM-HOAC-TAO — xem contract o `MetadataStore.create_track`."""
         with self._lock:
+            for existing in self.tracks.values():
+                if (existing.chapter_id == track.chapter_id
+                        and existing.content_hash == track.content_hash):
+                    return existing
             self.tracks[track.track_id] = track
             return track
 

@@ -99,10 +99,21 @@ class Base(unittest.TestCase):
                                headers=self.auth(token)).json()
         return [c["title"] for c in body["chapters"]]
 
-    def give_audio(self, chapter_id: str, owner: str, made_at: str) -> AudioTrack:
+    def give_audio(self, chapter_id: str, owner: str, made_at: str,
+                   fingerprint: str = "") -> AudioTrack:
+        """
+        Gan mot track cho chuong.
+
+        `content_hash` phai KHAC NHAU giua cac lan goi. `create_track` la
+        tim-hoac-tao theo `(chapter_id, content_hash)`, nen hai track cung hash
+        se bi gop lai — dung nhu that: cung dau van tay nghia la cung audio.
+        Truoc day helper nay dat cung `content_hash="h"` cho moi lan, tuc la tao
+        ra du lieu khong the ton tai.
+        """
+        digest = fingerprint or f"h-{made_at}-{len(self.store.tracks)}"
         track = AudioTrack(
             chapter_id=chapter_id, owner_id=owner, voice_id="edge:x",
-            object_key=f"audio/{chapter_id}.mp3", content_hash="h",
+            object_key=f"audio/{chapter_id}-{digest}.mp3", content_hash=digest,
             size_bytes=10, created_at=made_at,
         )
         return self.store.create_track(track)

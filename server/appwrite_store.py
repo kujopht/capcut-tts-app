@@ -61,6 +61,10 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "job_id", "owner_id", "chapter_id", "voice_id", "content_hash",
         "status", "output_key", "error_kind", "error_message",
         "total_parts", "done_parts", "rate", "chunk_chars",
+        # Ba truong recovery. Chung co the CHUA ton tai trong Appwrite neu
+        # migration chua chay — xem `_supported_fields`, code tu bo chung ra
+        # thay vi lam vo viec tao audio.
+        "lease_expires_at", "lease_owner", "attempts",
         "created_at", "started_at", "finished_at",
     ),
     COL_TRACKS: (
@@ -181,6 +185,8 @@ class AppwriteMetadataStore:
         self._endpoint = settings.api_base
         self._db = settings.database_id
         self._client = client
+        #: Ten thuoc tinh that su co trong tung collection, hoi mot lan roi nho.
+        self._attrs_cache: Dict[str, Set[str]] = {}
 
     # -- ha tang --------------------------------------------------------------
 
@@ -250,11 +256,47 @@ class AppwriteMetadataStore:
             perms.append('read("any")')
         return perms
 
+    def _supported_fields(self, collection: str) -> Optional[Set[str]]:
+        """
+        Ten cac thuoc tinh THUC SU dang co trong collection, hoi Appwrite MOT lan.
+
+        Vi sao can: `PERSISTED_FIELDS` la thu ta MUON luu, con day la thu Appwrite
+        DANG co. Hai cai lech nhau khi code duoc trien khai truoc khi chay
+        `scripts/setup_appwrite.py`. Gui mot thuoc tinh chua ton tai thi Appwrite
+        tu choi CA document — tuc la khong tao duoc audio nua.
+
+        Loc theo danh sach nay thi thu tu trien khai code/schema khong con quan
+        trong: thieu thuoc tinh recovery thi chi mat tinh nang recovery.
+
+        Khong hoi duoc (mang loi, khong du quyen) -> tra None, va tang tren giu
+        nguyen hanh vi cu la gui het.
+        """
+        cached = self._attrs_cache.get(collection)
+        if cached is not None:
+            return cached or None
+        try:
+            data = self._call(
+                "GET", f"/v1/databases/{self._db}/collections/{collection}")
+        except Exception:
+            self._attrs_cache[collection] = set()
+            return None
+        names = {a.get("key") for a in (data.get("attributes") or []) if a.get("key")}
+        self._attrs_cache[collection] = names
+        return names or None
+
+    def _writable(self, collection: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """`persistable()` roi bo tiep nhung thuoc tinh Appwrite chua co."""
+        fields = persistable(collection, data)
+        available = self._supported_fields(collection)
+        if available is None:
+            return fields
+        return {k: v for k, v in fields.items() if k in available}
+
     def _create(self, collection: str, doc_id: str, data: Dict[str, Any],
                 owner_id: str, public_read: bool = False) -> Dict[str, Any]:
         return self._call("POST", self._docs(collection), payload={
             "documentId": doc_id,
-            "data": persistable(collection, data),
+            "data": self._writable(collection, data),
             "permissions": self._owner_permissions(owner_id, public_read),
         })
 
@@ -298,7 +340,7 @@ class AppwriteMetadataStore:
 
     def _update(self, collection: str, doc_id: str, data: Dict[str, Any],
                 permissions: Optional[List[str]] = None) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {"data": persistable(collection, data)}
+        payload: Dict[str, Any] = {"data": self._writable(collection, data)}
         if permissions is not None:
             payload["permissions"] = permissions
         return self._call("PATCH", f"{self._docs(collection)}/{doc_id}", payload=payload)
@@ -582,12 +624,32 @@ class AppwriteMetadataStore:
                 )
         return out
 
+    def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
+        """
+        Lat trang: so job `running` khong co tran tren.
+
+        Xem contract o `MetadataStore.list_jobs_by_status`.
+        """
+        return [
+            _job_from_doc(d)
+            for d in self._list_all(COL_JOBS, [
+                q_equal("status", status.value),
+                q_order_asc("created_at"),
+            ])
+        ]
+
     def delete_job(self, job_id: str) -> None:
         self._delete(COL_JOBS, job_id)
 
     # -- audio track ---------------------------------------------------------
 
     def create_track(self, track: AudioTrack) -> AudioTrack:
+        """TIM-HOAC-TAO — xem contract o `MetadataStore.create_track`."""
+        for doc in self._list_all(COL_TRACKS, [
+            q_equal("chapter_id", track.chapter_id),
+            q_equal("content_hash", track.content_hash),
+        ]):
+            return _track_from_doc(doc)
         self._create(COL_TRACKS, track.track_id, track.to_dict(), track.owner_id)
         return track
 
@@ -738,6 +800,11 @@ def _job_from_doc(doc: Dict[str, Any]) -> TtsJob:
         done_parts=int(doc.get("done_parts") or 0),
         rate=str(doc.get("rate") or "1.0"),
         chunk_chars=int(doc.get("chunk_chars") or 2000),
+        # Job cu (hoac Appwrite chua co thuoc tinh) -> None/0. `or` la an toan o
+        # day: khong co lease thi dung la "khong con worker nao giu".
+        lease_expires_at=doc.get("lease_expires_at"),
+        lease_owner=doc.get("lease_owner"),
+        attempts=int(doc.get("attempts") or 0),
         created_at=str(doc.get("created_at") or ""),
         started_at=doc.get("started_at"),
         finished_at=doc.get("finished_at"),

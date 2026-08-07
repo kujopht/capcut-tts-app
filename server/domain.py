@@ -159,6 +159,14 @@ class TtsJob:
     done_parts: int = 0
     rate: str = "1.0"
     chunk_chars: int = 2000
+    #: Heartbeat. Worker dang chay lam moi moc nay theo chu ky; het han nghia la
+    #: worker da chet. `None` = khong co lease (job cu, hoac Appwrite chua co
+    #: thuoc tinh nay). Xem `docs/HANDOFF.md` muc "Worker recovery".
+    lease_expires_at: Optional[str] = None
+    #: Tien trinh nao dang giu lease. De hai worker khong gianh cung mot job.
+    lease_owner: Optional[str] = None
+    #: Da thu chay bao nhieu lan. Vuot tran thi chuyen `failed`, khong thu mai.
+    attempts: int = 0
     job_id: str = field(default_factory=lambda: new_id("job"))
     created_at: str = field(default_factory=now_iso)
     started_at: Optional[str] = None
@@ -186,10 +194,37 @@ class TtsJob:
             "error_message": self.error_message,
             "rate": self.rate,
             "chunk_chars": self.chunk_chars,
+            "lease_expires_at": self.lease_expires_at,
+            "lease_owner": self.lease_owner,
+            "attempts": self.attempts,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }
+
+    def lease_is_live(self, now: Optional[datetime] = None) -> bool:
+        """
+        Con worker nao dang thuc su giu job nay hay khong.
+
+        Khong co lease -> coi la KHONG con song. Job cu (tao truoc khi co lease)
+        va job dang kep vinh vien deu roi vao day, dung nhu y muon: chung can
+        duoc recovery.
+        """
+        if not self.lease_expires_at:
+            return False
+        moment = now or datetime.now(timezone.utc)
+        try:
+            expires = datetime.fromisoformat(self.lease_expires_at)
+        except ValueError:
+            return False
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        return expires > moment
+
+    @property
+    def is_stale(self) -> bool:
+        """Dang `running` ma khong con worker nao giu — can recovery."""
+        return self.status is JobStatus.RUNNING and not self.lease_is_live()
 
 
 @dataclass

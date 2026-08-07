@@ -99,6 +99,22 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("done_parts", "integer", False, None),
             ("rate", "string", False, 16),
             ("chunk_chars", "integer", False, None),
+            # --- worker recovery ---------------------------------------------
+            # Ba thuoc tinh TUY CHON. Job tao truoc khi them chung se mang gia
+            # tri null, va code coi "khong co lease" = "khong con worker nao
+            # giu" — dung nhu y muon, vi job cu ket `running` chinh la thu can
+            # duoc recovery.
+            #
+            # Them thuoc tinh la thao tac CONG THEM: khong ghi lai ban ghi nao,
+            # khong pha du lieu cu, va chay lai script nay bao nhieu lan cung
+            # duoc (`_ensure_attribute` bo qua neu da co).
+            #
+            # ROLLBACK: xoa ba thuoc tinh nay. Gia tri trong do la trang thai
+            # dieu phoi, khong phai du lieu nguoi dung — mat di thi he thong chi
+            # tro lai hanh vi cu (khong co recovery), khong mat audio nao.
+            ("lease_expires_at", "datetime", False, None),
+            ("lease_owner", "string", False, 64),
+            ("attempts", "integer", False, None),
             ("created_at", "datetime", True, None),
             ("started_at", "datetime", False, None),
             ("finished_at", "datetime", False, None),
@@ -107,6 +123,8 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Index QUAN TRONG NHAT: phuc vu idempotency
             ("idempotency_idx", "key", ["owner_id", "chapter_id", "content_hash"]),
             ("status_idx", "key", ["status"]),
+            # Quet job ket: tim theo trang thai roi loc theo lease
+            ("status_lease_idx", "key", ["status", "lease_expires_at"]),
         ],
     },
     "audio_tracks": {

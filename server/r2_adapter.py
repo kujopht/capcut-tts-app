@@ -11,9 +11,10 @@ NGUYEN TAC:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from datetime import timezone
+from typing import Any, Iterator, Optional
 
-from server.adapters import NotFoundError
+from server.adapters import NotFoundError, StoredObject
 from server.config import R2Settings
 
 
@@ -96,6 +97,29 @@ class R2StorageAdapter:
         existed = self.exists(key)
         self._client.delete_object(Bucket=self._bucket, Key=key)
         return existed
+
+    def list_objects(self, prefix: str = "") -> Iterator[StoredObject]:
+        """
+        Liet ke moi object, LAT TRANG day du.
+
+        `list_objects_v2` tra toi da 1000 khoa moi lan va bao con nua bang
+        `IsTruncated` + `NextContinuationToken`. Goi mot lan roi thoi la mat sach
+        object thu 1001 tro di — dung loai loi cat am tham nhu gioi han 25 cua
+        Appwrite. Dung paginator cua boto3 de khong tu viet lai vong lap do.
+
+        KHONG tao presigned URL: chi doc metadata cua khoa.
+        """
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            for item in page.get("Contents") or []:
+                modified = item.get("LastModified")
+                yield StoredObject(
+                    key=str(item.get("Key") or ""),
+                    size_bytes=int(item.get("Size") or 0),
+                    modified_at=(modified.astimezone(timezone.utc)
+                                 .isoformat(timespec="seconds")
+                                 if modified is not None else ""),
+                )
 
     def signed_url(self, key: str, expires_seconds: int = 3600,
                    download_name: Optional[str] = None) -> Optional[str]:

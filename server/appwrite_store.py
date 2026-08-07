@@ -737,7 +737,26 @@ class AppwriteMetadataStore:
         ]
 
     def delete_job(self, job_id: str) -> None:
+        """
+        Xoa job VA cac dong `job_claims` cua no.
+
+        Khong don claim thi chung nam lai vinh vien: `job_claims` chi tang len,
+        khong bao gio giam, va moi lan nhan job lai them mot dong. Da thay that
+        — sau hai luot kiem thu, kho con lai hang chuc dong tro toi job khong con
+        ton tai.
+
+        Xoa job TRUOC. Neu buoc xoa claim hong, thu con lai la vai dong so ghi
+        chep khong ai doc; lam nguoc lai va buoc hai hong thi job da mat claim
+        van co the bi nhan lai voi `attempt` da dung.
+        """
         self._delete(COL_JOBS, job_id)
+        for doc in self._list_all(COL_CLAIMS, [q_equal("job_id", job_id)]):
+            try:
+                self._delete(COL_CLAIMS, doc["$id"])
+            except Exception:
+                # So ghi chep thua khong lam hong gi. Cong cu doi soat va lan xoa
+                # job sau se don not.
+                continue
 
     # -- audio track ---------------------------------------------------------
 

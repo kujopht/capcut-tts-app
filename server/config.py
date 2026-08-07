@@ -72,6 +72,27 @@ class ConfigError(RuntimeError):
     """Cau hinh sai hoac thieu - dung ngay thay vi chay o che do khong mong muon."""
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    """
+    Doc bien moi truong dang co bat/tat.
+
+    Gia tri KHONG hieu duoc -> ConfigError, khong am tham lay mac dinh. Dat
+    `FAS_INLINE_WORKER=flase` (sai chinh ta) ma he thong lang le chay o che do
+    inline la dung cai bay phai tranh.
+    """
+    raw = _env(name, "").lower()
+    if raw == "":
+        return default
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise ConfigError(
+        f"{name} phải là true/false (hoặc 1/0, yes/no, on/off), "
+        f"nhận được {raw!r}."
+    )
+
+
 def _env_list(name: str, default: str) -> List[str]:
     raw = _env(name, default)
     return [item.strip() for item in raw.split(",") if item.strip()]
@@ -154,6 +175,20 @@ class Settings:
     #: khong duoc danh dau la san sang thuong mai.
     allow_unverified_local_voices: bool = True
 
+    #: Tien trinh web co tu chay job TTS trong thread nen hay khong.
+    #:
+    #: `True` (mac dinh) — hanh vi cu, tien va cho may lap trinh vien: mot tien
+    #: trinh lam ca hai viec.
+    #:
+    #: `False` — web CHI phuc vu request. Job nam lai `pending` trong kho cho
+    #: `server/worker.py` nhan. Bat buoc dung o staging/production: restart web
+    #: khong duoc giet job dang chay, va mot request handler khong phai cho o
+    #: chay lau.
+    #:
+    #: CANH BAO VAN HANH: dat `False` ma khong chay worker nao thi job se nam
+    #: `pending` mai. `/api/health` bao ra `inline_worker` de thay ngay.
+    inline_worker: bool = True
+
     #: Da nap duoc file `.env` hay chua. Bao ra o `/api/health` de nguoi van
     #: hanh biet ngay file cau hinh co thuc su co tac dung khong - chinh la
     #: cai bay da tung lam ca buoi kiem chung chay tren mock.
@@ -215,6 +250,7 @@ class Settings:
             "r2_configured": self.r2.configured,
             "allow_unverified_local_voices": self.allow_unverified_local_voices,
             "env_file_loaded": self.env_file_loaded,
+            "inline_worker": self.inline_worker,
         }
 
 
@@ -258,6 +294,7 @@ def load_settings() -> Settings:
             bucket=_env("R2_BUCKET"),
         ),
         allow_unverified_local_voices=allow_unverified,
+        inline_worker=_env_bool("FAS_INLINE_WORKER", True),
         env_file_loaded=env_file is not None,
     )
 

@@ -815,8 +815,10 @@ class MockMetadataStore:
         return sorted(items, key=lambda j: j.created_at)
 
     def delete_job(self, job_id: str) -> None:
+        """Xoa job VA so ghi chep claim cua no — xem contract o Appwrite."""
         with self._lock:
             self.jobs.pop(job_id, None)
+            self._claims = {k for k in self._claims if k[0] != job_id}
 
     # -- audio track ---------------------------------------------------------
 

@@ -1,0 +1,119 @@
+# Mau cau hinh Render cho MOI TRUONG STAGING RIENG TU.
+#
+# CHUA DUOC KIEM CHUNG: lượt chuẩn bị này không có tài khoản Render nên chưa
+# apply thử lần nào. Hãy coi đây là điểm khởi đầu, không phải cấu hình đã chạy.
+#
+# KHONG CO GIA TRI SECRET NAO TRONG TEP NAY. `sync: false` nghia la Render se
+# hoi gia tri o giao dien va luu trong kho secret cua no, khong bao gio ghi vao
+# git.
+
+services:
+  # ---------------------------------------------------------------- backend
+  - type: web
+    name: fas-staging-api
+    runtime: python
+    plan: starter          # worker chay dai va web luon-bat deu can goi tra phi
+    region: singapore      # cung vung voi Appwrite sgp de giam do tre
+    branch: feature/web-mvp
+    autoDeploy: false      # deploy co chu y, khong theo moi lan push
+    buildCommand: pip install -r server/requirements.txt
+    startCommand: python -m uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health     # LIVENESS, khong cham Appwrite/R2
+    envVars:
+      - key: FAS_ENV
+        value: staging
+      - key: FAS_INLINE_WORKER
+        value: "false"               # BAT BUOC: web khong tu chay job
+      - key: DATA_BACKEND
+        value: appwrite
+      - key: STORAGE_BACKEND
+        value: r2
+      - key: FAS_CORS_ORIGINS
+        sync: false                  # origin cua frontend staging
+      - key: APPWRITE_ENDPOINT
+        sync: false
+      - key: APPWRITE_PROJECT_ID
+        sync: false                  # PROJECT STAGING, khong phai dev
+      - key: APPWRITE_DATABASE_ID
+        sync: false
+      - key: APPWRITE_API_KEY
+        sync: false                  # SECRET
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET
+        sync: false                  # BUCKET STAGING, khong phai dev
+      - key: R2_ACCESS_KEY_ID
+        sync: false                  # SECRET
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false                  # SECRET
+
+  # ----------------------------------------------------------------- worker
+  # `type: worker` — khong cong, khong healthCheckPath. Day chinh la kieu
+  # workload ma `server/worker.py` can, va la ly do chon Render.
+  - type: worker
+    name: fas-staging-worker
+    runtime: python
+    plan: starter
+    region: singapore
+    branch: feature/web-mvp
+    autoDeploy: false
+    buildCommand: pip install -r server/requirements.txt
+    startCommand: python -m server.worker
+    envVars:
+      - key: FAS_ENV
+        value: staging
+      - key: FAS_INLINE_WORKER
+        value: "false"
+      - key: DATA_BACKEND
+        value: appwrite
+      - key: STORAGE_BACKEND
+        value: r2
+      - key: FAS_WORKER_POLL_SECONDS
+        value: "3"
+      - key: FAS_WORKER_GRACE_SECONDS
+        value: "180"                 # dai hon thoi gian tong hop mot chuong dai
+      # Cung bo credential nhu backend. Neu cap duoc credential rieng cho worker
+      # thi tot hon: thu hoi duoc tung ben khi lo.
+      - key: APPWRITE_ENDPOINT
+        sync: false
+      - key: APPWRITE_PROJECT_ID
+        sync: false
+      - key: APPWRITE_DATABASE_ID
+        sync: false
+      - key: APPWRITE_API_KEY
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+
+  # --------------------------------------------------------------- frontend
+  - type: web
+    name: fas-staging-web
+    runtime: node
+    plan: starter
+    region: singapore
+    branch: feature/web-mvp
+    autoDeploy: false
+    rootDir: web
+    buildCommand: npm ci && npx next build
+    startCommand: npx next start --port $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Bien CONG KHAI duy nhat. Nam trong bundle, ai cung doc duoc.
+      # Dat bang URL cua fas-staging-api.
+      - key: NEXT_PUBLIC_API_BASE
+        sync: false
+
+# ----------------------------------------------------------------------------
+# GIU RIENG TU: Render khong co "password protect" san cho web service o goi
+# starter. Xem docs/reports/staging/BAO_CAO_STAGING.md muc "Giu staging rieng
+# tu" de biet cac cach lam va danh doi cua tung cach.
+#
+# RECONCILER: chay theo lich o che do CHI DOC. Render Cron Job la mot service
+# rieng; xem `deploy/reconcile-cron.md`. TUYET DOI khong bat che do xoa tu dong.

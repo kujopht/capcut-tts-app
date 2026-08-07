@@ -12,6 +12,7 @@ Backend KHONG import GUI: da xac minh khong module PySide6 nao bi keo vao.
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
@@ -239,13 +240,63 @@ def optional_profile(authorization: Optional[str] = None) -> Optional[Profile]:
 
 @app.get("/api/health")
 def health() -> Dict[str, Any]:
-    """Trang thai backend. KHONG bao gio tra ve gia tri bi mat."""
+    """
+    LIVENESS: tien trinh con song va tra loi duoc.
+
+    KHONG cham toi Appwrite hay R2 — mot su co tam thoi cua kho du lieu khong
+    duoc lam nen tang hosting giet tien trinh web dang lanh manh. Kiem tra ket
+    noi thuoc ve `/api/ready`.
+
+    KHONG bao gio tra ve gia tri bi mat.
+    """
     return {
         "status": "ok",
         "service": "fanfic-audio-api",
         "version": app.version,
         **settings.describe(),
     }
+
+
+@app.get("/api/ready")
+def ready() -> Response:
+    """
+    READINESS: cac phu thuoc co that su dung duoc khong.
+
+    Tra 200 khi ca kho metadata lan kho file deu tra loi; 503 khi khong. Nen
+    tang hosting dung duong nay de quyet dinh co dua traffic vao hay chua —
+    khac han `/api/health`, cai chi noi tien trinh con song.
+
+    Chi dung thao tac DOC, va khong bao gio tra ve gia tri bi mat: chi ten kho
+    va dat/khong dat.
+    """
+    ket_qua: Dict[str, Any] = {
+        "service": "fanfic-audio-api",
+        "version": app.version,
+        "inline_worker": settings.inline_worker,
+        "phu_thuoc": {},
+    }
+    tot = True
+
+    for ten, kiem in (
+        ("metadata", lambda: store.list_jobs_by_status(JobStatus.RUNNING)),
+        ("storage", lambda: next(iter(storage.list_objects(
+            prefix="audio/__readiness__/")), None)),
+    ):
+        try:
+            kiem()
+            ket_qua["phu_thuoc"][ten] = {"dat": True}
+        except Exception as exc:
+            tot = False
+            # Chi TEN loai loi. Thong diep co the chua endpoint hoac dinh danh.
+            ket_qua["phu_thuoc"][ten] = {"dat": False, "loai_loi": type(exc).__name__}
+
+    ket_qua["status"] = "ready" if tot else "not_ready"
+    return Response(
+        content=json.dumps(ket_qua, ensure_ascii=False),
+        media_type="application/json",
+        status_code=(status.HTTP_200_OK if tot
+                     else status.HTTP_503_SERVICE_UNAVAILABLE),
+    )
 
 
 @app.get("/api/voices")
@@ -1048,7 +1099,51 @@ def _claim_stale_job(job: TtsJob) -> Optional[int]:
         return None
 
 
-def recover_stale_jobs() -> Dict[str, int]:
+#: Tien trinh NAY co duoc phep chay job hay khong.
+#:
+#: Khac han `settings.inline_worker`, va su khac biet do quan trong: cai kia noi
+#: "WEB co tu chay job khong", con cai nay noi "TIEN TRINH NAY co chay job
+#: khong". Gop hai y do vao mot co la mot loi that: worker rieng cung doc
+#: `FAS_INLINE_WORKER=false`, nen no se nhan job roi khong chay, va moi vong quet
+#: lai dot them mot `attempts` cho den khi job `failed`. Da gap khi dien tap.
+_CAN_RUN_JOBS = settings.inline_worker
+
+
+def enable_job_execution() -> None:
+    """
+    Cho phep tien trinh nay chay job. CHI `server/worker.py` duoc goi.
+
+    Tien trinh web khong bao gio goi, nen o staging web chi phuc vu request.
+    """
+    global _CAN_RUN_JOBS
+    _CAN_RUN_JOBS = True
+
+
+def can_run_jobs() -> bool:
+    return _CAN_RUN_JOBS
+
+
+def _start_job_thread(job: TtsJob, text: str, fence: Optional[int],
+                      ten: str) -> bool:
+    """
+    Chay job trong thread nen cua CHINH tien trinh nay.
+
+    Tra ve False va khong lam gi khi tien trinh nay khong duoc phep chay job:
+    luc do job da nam ben vung o `pending`/`running` va `server/worker.py` se
+    nhan no. Day la MOT cho duy nhat quyet dinh dieu do, nen khong co duong nao
+    vo tinh spawn thread trong tien trinh web o staging.
+    """
+    if not _CAN_RUN_JOBS:
+        return False
+    thread = threading.Thread(target=_run_job, args=(job, text, fence),
+                              daemon=True, name=ten)
+    with _job_lock:
+        _job_threads[job.job_id] = thread
+    thread.start()
+    return True
+
+
+def recover_stale_jobs(pending_min_age_seconds: Optional[int] = None) -> Dict[str, int]:
     """
     Tim job `running` da mat worker va xu ly dung mot lan.
 
@@ -1059,15 +1154,27 @@ def recover_stale_jobs() -> Dict[str, int]:
     la cach lam pha du lieu cua nguoi dung dang co job chay binh thuong o mot
     tien trinh khac.
     """
+    # Job `pending` moi tinh: o che do inline, thread cua route dang lo no, nen
+    # bo quet phai cho du lau moi duoc gianh. O worker rieng thi KHONG co thread
+    # nao nhu vay — cho 90 giay moi bat dau doc mot job vua tao la vo ly, nen
+    # worker truyen 0.
+    nguong = (JOB_LEASE_SECONDS if pending_min_age_seconds is None
+              else max(0, pending_min_age_seconds))
     report = {"da_quet": 0, "bo_qua_con_lease": 0, "chay_lai": 0,
               "het_luot_thu": 0, "khong_nhan_duoc": 0, "bo_qua_con_moi": 0}
+    if not _CAN_RUN_JOBS:
+        # Tien trinh nay khong chay job duoc thi cung khong duoc NHAN job. Nhan
+        # ma khong chay se tang `attempts` moi vong quet va day job den `failed`
+        # trong khi khong he thu tong hop lan nao.
+        report["khong_duoc_phep_chay"] = 1
+        return report
     try:
         candidates = list(store.list_jobs_by_status(JobStatus.RUNNING))
         # `pending` cung co the bi bo roi: server chet NGAY SAU `create_job` va
         # TRUOC khi thread kip doi sang `running`. Job do khong co lease nao ca,
         # nen loc bang tuoi cua no.
         for job in store.list_jobs_by_status(JobStatus.PENDING):
-            if _older_than(job.created_at, JOB_LEASE_SECONDS):
+            if nguong == 0 or _older_than(job.created_at, nguong):
                 candidates.append(job)
             else:
                 report["bo_qua_con_moi"] += 1
@@ -1107,14 +1214,13 @@ def recover_stale_jobs() -> Dict[str, int]:
                          "Chương của audio này đã bị xoá.")
             continue
 
-        thread = threading.Thread(
-            target=_run_job, args=(job, chapter.content, fence), daemon=True,
-            name=f"tts-recover-{job.job_id}",
-        )
-        with _job_lock:
-            _job_threads[job.job_id] = thread
-        thread.start()
-        report["chay_lai"] += 1
+        if _start_job_thread(job, chapter.content, fence,
+                             f"tts-recover-{job.job_id}"):
+            report["chay_lai"] += 1
+        else:
+            # Khong the xay ra: da chan o dau ham. Neu co, dem rieng chu khong
+            # bao "da chay lai" cho mot thu khong chay.
+            report["khong_chay_duoc"] = report.get("khong_chay_duoc", 0) + 1
     return report
 
 
@@ -1138,7 +1244,14 @@ def start_job_sweeper() -> None:
     Chay trong thread nen: khoi dong khong duoc cho Appwrite tra loi. Bo quet
     KHONG bao gio xoa du lieu va khong bao gio chay che do xoa cua cong cu doi
     soat — hai viec do tach roi hoan toan.
+
+    KHI `inline_worker` TAT: khong bat bo quet o day. Recovery la viec cua
+    `server/worker.py`. Neu ca hai cung quet thi khong sai — claim nguyen tu lo
+    duoc — nhung web se giu job va chay TTS trong tien trinh phuc vu request,
+    dung cai ma viec tach worker nham loai bo.
     """
+    if not settings.inline_worker:
+        return
     threading.Thread(target=_sweep_forever, daemon=True,
                      name="tts-job-sweeper").start()
 
@@ -1177,13 +1290,8 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
         if existing.is_stale and (existing.attempts or 0) < JOB_MAX_ATTEMPTS:
             fence = _claim_stale_job(existing)
             if fence is not None:
-                thread = threading.Thread(
-                    target=_run_job, args=(existing, chapter.content, fence),
-                    daemon=True, name=f"tts-resume-{existing.job_id}",
-                )
-                with _job_lock:
-                    _job_threads[existing.job_id] = thread
-                thread.start()
+                _start_job_thread(existing, chapter.content, fence,
+                                  f"tts-resume-{existing.job_id}")
         elif existing.is_stale:
             _mark_failed(
                 existing, "worker_lost",
@@ -1208,13 +1316,7 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
     # co the da doi sang `running` va phan hoi "vua tao" se mo ta sai.
     created = job.to_dict()
 
-    thread = threading.Thread(
-        target=_run_job, args=(job, chapter.content), daemon=True,
-        name=f"tts-job-{job.job_id}",
-    )
-    with _job_lock:
-        _job_threads[job.job_id] = thread
-    thread.start()
+    _start_job_thread(job, chapter.content, None, f"tts-job-{job.job_id}")
     return {"job": created, "reused": False}
 
 

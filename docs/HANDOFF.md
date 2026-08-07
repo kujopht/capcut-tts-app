@@ -167,11 +167,54 @@ Dọn dẹp: 42 truyện / 42 chương / 42 job / 42 track / 41 object / 48 dòn
 `job_claims` fixture đã xoá. Đối chiếu ảnh chụp trước-sau: **mất 0, sót 0** ở cả
 sáu tập hợp — không đụng bản ghi nào có từ trước.
 
+## Chuẩn bị staging — ĐÃ LÀM, CHƯA DEPLOY
+
+Báo cáo đầy đủ: **`docs/reports/staging/BAO_CAO_STAGING.md`**.
+Cấu hình và runbook: **`deploy/`**.
+
+**TTS worker đã tách khỏi web.** Cờ `FAS_INLINE_WORKER` (mặc định `true`, giữ
+nguyên hành vi cũ). Đặt `false` ở staging/production thì web **chỉ** phục vụ
+request, còn `python -m server.worker` nhận job. Worker không sao chép logic —
+nó gọi lại đúng `recover_stale_jobs()` → `claim_job()` → `_run_job()`.
+
+Đã diễn tập trên Appwrite + R2 thật (fixture `[REHEARSAL]`, đã xoá sạch, đối
+chiếu trước/sau: mất 0 sót 0):
+
+| Kiểm tra | Kết quả |
+|---|---|
+| Web không chạy job khi đã tách | ĐẠT |
+| Worker riêng nhận và chạy | ĐẠT (~3 giây) |
+| **Restart web** giữa lúc worker chạy | ĐẠT — job hoàn tất, `attempts=1` |
+| **Kill worker** → web gián đoạn? | ĐẠT — web trả 200 ngay |
+| Lease còn hạn không bị giật | ĐẠT — worker mới bỏ qua 75 giây |
+| Sau khi lease hết hạn thì nhận lại | ĐẠT — `attempts=2`, cách nhau 126 giây |
+| Kết quả cuối | **1 track, 1 object** |
+
+**Chưa kiểm chứng được:** dừng sạch bằng SIGTERM — Windows không gửi được tín
+hiệu mềm cho tiến trình nền. Phải xác minh trên host Linux.
+
+Hai lỗi thật tìm được trong lượt này, cả hai đều hỏng trên mã cũ:
+
+1. **Worker nhận job rồi không chạy** — gộp "web có chạy job không" và "tiến
+   trình này có chạy job không" vào một cờ, nên worker tự cấm chính mình rồi đốt
+   `attempts` mỗi vòng quét cho tới khi job `failed` oan. Tách thành
+   `settings.inline_worker` và `main._CAN_RUN_JOBS`.
+2. **`delete_job` bỏ lại `job_claims`** — collection chỉ tăng không giảm; sau hai
+   lượt kiểm thử còn hàng chục dòng mồ côi. Nay dọn ở cả hai store.
+
+**Ba tài nguyên staging chưa tạo được** vì thiếu credential — API key Appwrite là
+service key phạm vi project (`GET /v1/projects` → 401), credential R2 giới hạn
+trong một bucket (`ListBuckets` → AccessDenied), và không có tài khoản/CLI
+hosting nào. Các bước thủ công ở mục 8 của báo cáo staging.
+
+**Branch protection cho `main` chưa bật được**: cần GitHub Pro cho repo private,
+cả hai API đều trả 403. Cấu hình đã soạn sẵn ở mục 9 của báo cáo.
+
 ## Kết quả kiểm thử gần nhất
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | **521 test: 520 đạt, 1 bỏ qua** (chạy 3 lần, kết quả ổn định) |
+| `server/tests` | **547 test: 546 đạt, 1 bỏ qua** (chạy 3 lần, kết quả ổn định) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
 | `web` (`node --test`) | **152/152 đạt** |
 | `npx eslint .` | Sạch, exit 0 |
@@ -222,7 +265,7 @@ Kết quả lần chạy gần nhất:
 | Python | 3.12.10 |
 | Gói cài từ `server/requirements.txt` | 39 gói, **không có PySide6**, không cài tay gói nào |
 | `PYTHONPATH` | Rỗng — không cần đặt thủ công |
-| `server/tests` | **521 test: 520 đạt, 1 bỏ qua** |
+| `server/tests` | **547 test: 546 đạt, 1 bỏ qua** |
 | `web` `npm test` | **152/152 đạt** |
 | `npx tsc --noEmit` | exit 0 |
 | `npx eslint .` | exit 0 |

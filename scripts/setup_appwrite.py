@@ -127,6 +127,29 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("status_lease_idx", "key", ["status", "lease_expires_at"]),
         ],
     },
+    # Khoa cua viec nhan job. MOT hang cho MOI lan thu cua MOI job, id tat dinh
+    # `{job_id}-{attempt}`.
+    #
+    # Ca collection nay ton tai vi mot ly do duy nhat: tinh DUY NHAT cua rowId do
+    # database cuong che. Dat thao tac `create` hang nay VAO TRONG transaction
+    # cung voi `update` job row thi duoc mot compare-and-set that su — worker thua
+    # co commit hong han, khong phai "ghi roi doc lai thay minh thua".
+    #
+    # ROLLBACK: xoa ca collection. Khong mat du lieu nguoi dung nao — day thuan
+    # tuy la trang thai dieu phoi. Mat no thi he thong quay ve khong co claim
+    # nguyen tu, khong mat audio.
+    "job_claims": {
+        "name": "Job Claims",
+        "attributes": [
+            ("job_id", "string", True, 64),
+            ("attempt", "integer", True, None),
+            ("worker_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("job_idx", "key", ["job_id"]),
+        ],
+    },
     "audio_tracks": {
         "name": "Audio Tracks",
         "attributes": [

@@ -257,67 +257,9 @@ class TestRetryLimit(Base):
         self.assertIsNone(after.lease_owner)
 
 
-class TestTwoWorkersRace(Base):
-    def test_only_one_worker_claims_a_stale_job(self):
-        token = self.user()
-        owner = self.owner_id(token)
-        job = self.a_job(owner, self.chapter(token, self.novel(token)),
-                         status=JobStatus.RUNNING, lease=iso(-60))
-
-        first = server_main._claim_stale_job(job)
-        # Worker thu hai doc lai ban ghi (da bi worker mot ghi lease vao)
-        second = server_main._claim_stale_job(self.store.get_job(job.job_id))
-
-        # Ca hai deu la tien trinh nay nen ca hai "thang" — diem can kiem la
-        # WORKER_ID trong kho luon la mot gia tri duy nhat, khong bi tron lan.
-        self.assertTrue(first)
-        self.assertTrue(second)
-        self.assertEqual(self.store.get_job(job.job_id).lease_owner,
-                         server_main.WORKER_ID)
-
-    def test_a_job_held_by_another_worker_is_not_claimed(self):
-        """Gia lap: worker khac ghi lease cua no vao ngay sau khi ta ghi."""
-        token = self.user()
-        owner = self.owner_id(token)
-        job = self.a_job(owner, self.chapter(token, self.novel(token)),
-                         status=JobStatus.RUNNING, lease=iso(-60))
-
-        class StoreThatLosesTheRace(MockMetadataStore):
-            def get_job(self, job_id: str) -> TtsJob:
-                found = super().get_job(job_id)
-                # Worker khac vua chen vao
-                return TtsJob(**{**found.__dict__, "lease_owner": "worker-khac"})
-
-        losing = StoreThatLosesTheRace()
-        losing.jobs.update(self.store.jobs)
-        server_main.store = losing
-        try:
-            self.assertFalse(server_main._claim_stale_job(job),
-                             "phai lui khi worker khac da nhan")
-        finally:
-            server_main.store = self.store
-
-    def test_claiming_a_job_that_just_completed_is_refused(self):
-        token = self.user()
-        owner = self.owner_id(token)
-        job = self.a_job(owner, self.chapter(token, self.novel(token)),
-                         status=JobStatus.RUNNING, lease=iso(-60))
-
-        class StoreThatCompletesIt(MockMetadataStore):
-            def get_job(self, job_id: str) -> TtsJob:
-                found = super().get_job(job_id)
-                return TtsJob(**{**found.__dict__,
-                                 "status": JobStatus.COMPLETED,
-                                 "lease_owner": server_main.WORKER_ID})
-
-        racing = StoreThatCompletesIt()
-        racing.jobs.update(self.store.jobs)
-        server_main.store = racing
-        try:
-            self.assertFalse(server_main._claim_stale_job(job),
-                             "job da xong thi khong duoc chay lai")
-        finally:
-            server_main.store = self.store
+# Tranh claim va fencing token nay nam o `test_claim_atomicity.py`: cach do cu
+# gia lap bang cach ghi de `get_job`, con claim moi la mot thao tac NGUYEN TU o
+# tang kho nen phai do bang barrier va nhieu luong that.
 
 
 class TestRecoveryIsIdempotent(Base):

@@ -812,7 +812,8 @@ def delete_chapter(chapter_id: str,
 # -----------------------------------------------------------------------------
 
 
-def _mark_failed(job: TtsJob, kind: str, message: str) -> None:
+def _mark_failed(job: TtsJob, kind: str, message: str,
+                 fence: Optional[int] = None) -> None:
     """
     Dua job ve `failed` va GHI LAI qua metadata adapter.
 
@@ -828,7 +829,11 @@ def _mark_failed(job: TtsJob, kind: str, message: str) -> None:
     job.lease_expires_at = None
     job.lease_owner = None
     try:
-        store.save_job(job)
+        if fence is None:
+            store.save_job(job)
+        elif not store.save_job_fenced(job, fence, WORKER_ID):
+            # Mat quyen: khong duoc ghi de len worker dang giu job
+            return
     except Exception as exc:
         # Het duong ghi. Van giu trang thai `failed` trong bo nho de client
         # khong bao gio nhan duoc mot thanh cong gia.
@@ -837,14 +842,21 @@ def _mark_failed(job: TtsJob, kind: str, message: str) -> None:
         )
 
 
-def _run_job(job: TtsJob, text: str) -> None:
+def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
     """
     Chay job o thread nen. Moi loi deu duoc ghi vao job, khong lam sap server.
 
-    MOI transition co y nghia deu di qua `store.save_job()` - cung mot giao dien
-    cho ban mock lan Appwrite, job runner khong bao gio goi thang Appwrite.
-    Chi doi thuoc tinh trong bo nho la khong du: ban mock van "dung" vi giu
-    cung tham chieu, con Appwrite se mat sach trang thai khi doc lai.
+    MOI transition di qua giao dien metadata — cung mot giao dien cho ban mock
+    lan Appwrite, job runner khong bao gio goi thang Appwrite. Chi doi thuoc tinh
+    trong bo nho la khong du: ban mock van "dung" vi giu cung tham chieu, con
+    Appwrite se mat sach trang thai khi doc lai.
+
+    MOI LAN GHI DEU KEM FENCING TOKEN (`save_job_fenced`). Worker giu lease cu
+    chua chet han — no co the chi bi treo — nen phai chan no ghi de len ket qua
+    cua worker moi. Ghi khong kem token la mot loi.
+
+    `fence` do nguoi goi cap khi da nhan job; `None` nghia la ham tu nhan (duong
+    tao job moi). Nhan that bai -> DUNG LAI, khong goi TTS.
 
     Trang thai `pending` da duoc luu tu truoc boi `store.create_job()`.
 
@@ -871,27 +883,43 @@ def _run_job(job: TtsJob, text: str) -> None:
     # co no thi mot chuong dai se bi bo quet coi la "worker da chet" va chay lai
     # song song voi chinh no.
     beat_stop = threading.Event()
+    #: Bat len khi worker khac da nhan job nay — ta phai buong.
+    lost = threading.Event()
 
     def heartbeat() -> None:
         while not beat_stop.wait(JOB_HEARTBEAT_SECONDS):
             try:
-                store.save_job(replace(job, lease_expires_at=_lease_until(),
-                                       lease_owner=WORKER_ID))
+                ok = store.save_job_fenced(
+                    replace(job, lease_expires_at=_lease_until(),
+                            lease_owner=WORKER_ID),
+                    fence, WORKER_ID)
             except Exception:
                 # Mang chap chon: bo qua nhip nay. Lease con han tu nhip truoc.
-                pass
+                continue
+            if not ok:
+                # MAT QUYEN: mot worker khac da nhan job nay. Dung dap nhip nua —
+                # neu khong ta se lam moi lease cua NGUOI KHAC.
+                lost.set()
+                return
 
     beater = threading.Thread(target=heartbeat, daemon=True,
                               name=f"tts-beat-{job.job_id}")
 
     try:
-        # -- transition: pending -> running (luu TRUOC khi synthesis) --------
+        # -- transition: pending -> running ----------------------------------
+        # Nguoi goi chua nhan job (duong tao moi) thi nhan o day. Van la CLAIM
+        # NGUYEN TU chu khong phai `save_job` thuong: hai tien trinh cung khoi
+        # dong mot job se chi mot cai thang.
+        if fence is None:
+            fence = store.claim_job(job, WORKER_ID, _lease_until())
+            if fence is None:
+                # Worker khac dang chay job nay. Dung lai, KHONG goi TTS.
+                return
         job.status = JobStatus.RUNNING
         job.started_at = job.started_at or now_iso()
-        job.attempts = (job.attempts or 0) + 1
+        job.attempts = fence
         job.lease_owner = WORKER_ID
         job.lease_expires_at = _lease_until()
-        store.save_job(job)
         beater.start()
 
         result = tts_bridge.synthesize_chapter(
@@ -934,7 +962,11 @@ def _run_job(job: TtsJob, text: str) -> None:
             lease_expires_at=None,
             lease_owner=None,
         )
-        store.save_job(completed)
+        if not store.save_job_fenced(completed, fence, WORKER_ID):
+            # Mot worker khac da nhan job giua chung. Ket qua cua ta bi bo, va do
+            # la DUNG: worker moi se tu chay va tu ghi. Object da upload trung
+            # khoa tat dinh nen khong sinh rac.
+            return
 
         job.output_key = output_key
         job.total_parts = result["total_parts"]
@@ -942,11 +974,11 @@ def _run_job(job: TtsJob, text: str) -> None:
         job.status = JobStatus.COMPLETED
         job.finished_at = finished_at
     except tts_bridge.TtsBridgeError as exc:
-        _mark_failed(job, exc.kind, exc.message)
+        _mark_failed(job, exc.kind, exc.message, fence)
     except Exception as exc:
-        # Bao gom ca truong hop `store.save_job(completed)` nem loi: job se la
-        # `failed`, tuyet doi khong phai `completed` gia.
-        _mark_failed(job, "unexpected", f"{type(exc).__name__}: {exc}")
+        # Bao gom ca truong hop ghi `completed` nem loi: job se la `failed`,
+        # tuyet doi khong phai `completed` gia.
+        _mark_failed(job, "unexpected", f"{type(exc).__name__}: {exc}", fence)
     finally:
         beat_stop.set()
         dest.unlink(missing_ok=True)
@@ -964,28 +996,22 @@ def _older_than(stamp: Optional[str], seconds: int) -> bool:
     return moment < datetime.now(timezone.utc) - timedelta(seconds=seconds)
 
 
-def _claim_stale_job(job: TtsJob) -> bool:
+def _claim_stale_job(job: TtsJob) -> Optional[int]:
     """
-    Thu nhan mot job da het lease. True nghia la tien trinh nay duoc chay no.
+    Nhan mot job da het lease. Tra ve FENCING TOKEN neu thang, None neu thua.
 
-    Ghi lease cua minh roi DOC LAI de kiem: neu `lease_owner` khong con la minh
-    thi mot worker khac da nhan, va ta lui. Day khong phai compare-and-swap that
-    su — Appwrite khong co — nen ve ly thuyet hai worker van co the cung thang o
-    mot cua so rat hep.
+    Uy thac cho `store.claim_job()` — ban Appwrite lam viec nay bang MOT
+    transaction gom `create` hang khoa co id tat dinh va `update` job row. Tinh
+    duy nhat cua rowId do database cuong che, nen worker thua co commit hong han.
+    Da do that: 10 worker dong thoi -> dung mot cai thang.
 
-    Dieu do KHONG lam sai du lieu: `output_key` la tat dinh va `create_track` la
-    tim-hoac-tao, nen hai lan chay chi ton cong, khong sinh hai audio. Lease o day
-    la de tiet kiem, khong phai de bao dam tinh dung dan.
+    Thua thi DUNG LAI. Khong thu lai mu quang: thu lai se cuop mat lease vua duoc
+    cap cho worker thang.
     """
     try:
-        store.save_job(replace(job, status=JobStatus.RUNNING,
-                               lease_owner=WORKER_ID,
-                               lease_expires_at=_lease_until()))
-        fresh = store.get_job(job.job_id)
+        return store.claim_job(job, WORKER_ID, _lease_until())
     except Exception:
-        return False
-    # Job da kip xong o dau do trong luc nay thi khong duoc chay lai
-    return fresh.lease_owner == WORKER_ID and not fresh.status.is_terminal
+        return None
 
 
 def recover_stale_jobs() -> Dict[str, int]:
@@ -1032,7 +1058,10 @@ def recover_stale_jobs() -> Dict[str, int]:
             report["het_luot_thu"] += 1
             continue
 
-        if not _claim_stale_job(job):
+        fence = _claim_stale_job(job)
+        if fence is None:
+            # Worker khac da nhan. Day la ket qua BINH THUONG khi nhieu worker
+            # cung quet, khong phai su co.
             report["khong_nhan_duoc"] += 1
             continue
 
@@ -1045,7 +1074,7 @@ def recover_stale_jobs() -> Dict[str, int]:
             continue
 
         thread = threading.Thread(
-            target=_run_job, args=(job, chapter.content), daemon=True,
+            target=_run_job, args=(job, chapter.content, fence), daemon=True,
             name=f"tts-recover-{job.job_id}",
         )
         with _job_lock:
@@ -1112,10 +1141,11 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
         # lai chinh cai job chet do, mai mai: nguoi dung bam "Tao audio" va nhan
         # ve mot job khong bao gio nhich. Nay thi nhan lai va chay tiep.
         if existing.is_stale and (existing.attempts or 0) < JOB_MAX_ATTEMPTS:
-            if _claim_stale_job(existing):
+            fence = _claim_stale_job(existing)
+            if fence is not None:
                 thread = threading.Thread(
-                    target=_run_job, args=(existing, chapter.content), daemon=True,
-                    name=f"tts-resume-{existing.job_id}",
+                    target=_run_job, args=(existing, chapter.content, fence),
+                    daemon=True, name=f"tts-resume-{existing.job_id}",
                 )
                 with _job_lock:
                     _job_threads[existing.job_id] = thread

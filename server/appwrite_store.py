@@ -37,8 +37,12 @@ COL_NOVELS = "novels"
 COL_CHAPTERS = "chapters"
 COL_JOBS = "tts_jobs"
 COL_TRACKS = "audio_tracks"
+COL_CLAIMS = "job_claims"
 
 REQUEST_TIMEOUT = 15.0
+
+#: Appwrite chi nhan `ttl` trong khoang 60..3600 giay — da do that.
+TRANSACTION_TTL_SECONDS = 60
 
 #: Thuoc tinh THUC SU ton tai trong schema Appwrite (xem docs/APPWRITE_SCHEMA.md
 #: va scripts/setup_appwrite.py).
@@ -623,6 +627,100 @@ class AppwriteMetadataStore:
                     int(doc.get("chunk_chars") or 0),
                 )
         return out
+
+    def claim_job(self, job: TtsJob, worker_id: str,
+                  lease_expires_at: str) -> Optional[int]:
+        """
+        Compare-and-set THAT SU bang mot transaction.
+
+        Da do truc tiep tren Appwrite Cloud 1.9.6:
+        - `POST /v1/tablesdb/transactions` nhan `ttl` trong khoang 60..3600;
+        - thao tac phai dung ten TablesDB (`tableId`/`rowId`), dung
+          `collectionId`/`documentId` thi bi tu choi 400;
+        - hai transaction cung cham mot hang -> cai thu hai nhan
+          `409 The transaction has a conflict`;
+        - 10 worker commit dong thoi -> DUNG MOT cai thanh cong.
+
+        Transaction nay gom HAI thao tac:
+          1. `create` hang khoa co id tat dinh `{job_id}-{attempt}` — tinh duy
+             nhat do database cuong che;
+          2. `update` job row (lease, attempts, status).
+
+        Vi (1) nam trong cung transaction voi (2), worker thua co commit hong HAN:
+        no khong ghi duoc lease va cung khong ghi duoc gi vao job. Do la ly do
+        day la CAS that su chu khong phai doc-roi-doc-lai.
+
+        Thua -> tra None. Nguoi goi phai DUNG LAI, khong thu lai mu quang.
+        """
+        current = self.get_job(job.job_id)
+        if current.status.is_terminal:
+            return None
+        if current.lease_is_live() and current.lease_owner != worker_id:
+            return None
+
+        fence = (current.attempts or 0) + 1
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+        except Exception:
+            return None
+        tx_id = tx.get("$id")
+        if not tx_id:
+            return None
+
+        operations = [
+            {"action": "create", "databaseId": self._db, "tableId": COL_CLAIMS,
+             "rowId": f"{job.job_id}-{fence}",
+             "data": {"job_id": job.job_id, "attempt": fence,
+                      "worker_id": worker_id, "created_at": now_iso()}},
+            {"action": "update", "databaseId": self._db, "tableId": COL_JOBS,
+             "rowId": job.job_id,
+             "data": {"status": JobStatus.RUNNING.value, "attempts": fence,
+                      "lease_owner": worker_id,
+                      "lease_expires_at": lease_expires_at}},
+        ]
+        try:
+            self._call("POST", f"/v1/tablesdb/transactions/{tx_id}/operations",
+                       payload={"operations": operations})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx_id}",
+                                payload={"commit": True})
+        except Exception:
+            # 409 conflict hoac bat ky loi nao khac -> coi nhu THUA. Day la ket
+            # qua binh thuong khi nhieu worker cung tranh, khong phai su co.
+            return None
+        return fence if result.get("status") == "committed" else None
+
+    def save_job_fenced(self, job: TtsJob, fence: int, worker_id: str) -> bool:
+        """
+        Ghi job chi khi nguoi goi con giu quyen. Xem contract o `MetadataStore`.
+
+        Doc lai truoc, roi ghi trong mot transaction: neu mot worker khac dang
+        nhan job nay cung luc, hai transaction cham cung hang va mot cai se nhan
+        409 — nen khong the co chuyen ca hai cung ghi de len nhau.
+        """
+        try:
+            current = self.get_job(job.job_id)
+        except NotFoundError:
+            return False
+        if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+            return False
+
+        data = persistable(COL_JOBS, replace(job, attempts=fence).to_dict())
+        available = self._supported_fields(COL_JOBS)
+        if available is not None:
+            data = {k: v for k, v in data.items() if k in available}
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+            self._call("POST", f"/v1/tablesdb/transactions/{tx['$id']}/operations",
+                       payload={"operations": [{
+                           "action": "update", "databaseId": self._db,
+                           "tableId": COL_JOBS, "rowId": job.job_id, "data": data}]})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx['$id']}",
+                                payload={"commit": True})
+        except Exception:
+            return False
+        return result.get("status") == "committed"
 
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """

@@ -59,6 +59,31 @@ class RecordingStore(MockMetadataStore):
         self.job_states.append((job.status.value, job.output_key))
         return super().save_job(job)
 
+    def claim_job(self, job, worker_id, lease_expires_at):
+        """
+        Nhan job la duong ghi `running` BEN VUNG.
+
+        Truoc day `pending -> running` di qua `save_job`; nay no di qua claim
+        nguyen tu. Van la mot lan ghi ben vung qua giao dien metadata, nen phai
+        duoc ghi nhan y het — neu khong cac assertion ve chuoi transition se bo
+        sot mat `running`.
+        """
+        fence = super().claim_job(job, worker_id, lease_expires_at)
+        if fence is not None:
+            self.calls.append("save_job:running")
+            self.job_states.append(("running", job.output_key))
+        return fence
+
+    def save_job_fenced(self, job: TtsJob, fence: int, worker_id: str) -> bool:
+        """Ghi kem fencing token — van la mot lan ghi ben vung."""
+        self.calls.append(f"save_job:{job.status.value}")
+        if self.fail_on_status and job.status.value == self.fail_on_status:
+            raise RuntimeError("metadata backend từ chối ghi")
+        ok = super().save_job_fenced(job, fence, worker_id)
+        if ok:
+            self.job_states.append((job.status.value, job.output_key))
+        return ok
+
     def create_track(self, track: AudioTrack) -> AudioTrack:
         self.calls.append("create_track")
         return super().create_track(track)

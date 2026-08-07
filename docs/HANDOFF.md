@@ -117,7 +117,7 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | 481 test: 480 đạt, 1 bỏ qua (chạy 3 lần, kết quả ổn định) |
+| `server/tests` | 505 test: 504 đạt, 1 bỏ qua (chạy 3 lần, kết quả ổn định) |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
 | `web` (`node --test`) | 149/149 đạt |
 | `npx eslint .` | Sạch, exit 0 |
@@ -129,18 +129,53 @@ Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 Test bị bỏ qua là test kiểm tra **thông báo lỗi khi thiếu `boto3`**; nay `boto3`
 đã nằm trong `server/requirements.txt` nên nó tự bỏ qua — đúng như thiết kế.
 
-**Chưa chạy lại trong venv sạch.** Số liệu "181 đạt" của lần đo cũ đã bỏ khỏi bảng
-vì không còn đúng với 481 test hiện tại. Cần chạy lại trước khi deploy:
+### Kiểm chứng trong venv sạch — ĐÃ CHẠY
 
-```bash
-py -3.12 -m venv .venv-clean
-.venv-clean\Scripts\python.exe -m pip install -r server/requirements.txt
-.venv-clean\Scripts\python.exe -m unittest discover -s server/tests -t .
+Mục đích: xác nhận backend **không kéo theo PySide6** và `server/requirements.txt`
+đủ để chạy — hai điều không bộ test nào trong venv phát triển kiểm được.
+
+Venv đặt **ngoài working tree** để không có gói nào rò rỉ vào và không có file nào
+lọt vào `git status`. Xoá `PYTHONPATH` để chứng minh không cần đường dẫn thủ công.
+
+```powershell
+# 1. Venv mới, ngoài repo
+Remove-Item -Recurse -Force $env:TEMP\fas-clean-venv -ErrorAction SilentlyContinue
+py -3.12 -m venv $env:TEMP\fas-clean-venv
+
+# 2. Chỉ cài từ file requirements trong repo, không cài tay gói nào
+& $env:TEMP\fas-clean-venv\Scripts\python.exe -m pip install --upgrade pip
+& $env:TEMP\fas-clean-venv\Scripts\python.exe -m pip install -r server/requirements.txt
+& $env:TEMP\fas-clean-venv\Scripts\python.exe -m pip list          # đối chiếu, phải không có PySide6
+
+# 3. Chạy test — không đặt PYTHONPATH
+$env:PYTHONPATH = $null
+Set-Location C:\Users\robux\Documents\CapCut-TTS-App
+& $env:TEMP\fas-clean-venv\Scripts\python.exe -m unittest discover -s server/tests -t . -v
+
+# 4. Phía web (Node, không liên quan venv)
+Set-Location web
+npm ci
+npm test
+npx tsc --noEmit
+npx eslint .
+npx next build
 ```
 
-Mục đích của phép thử đó là xác nhận backend **không kéo theo PySide6** và
-`server/requirements.txt` đủ để chạy — hai điều không bộ test nào trong venv phát
-triển kiểm được.
+Kết quả lần chạy gần nhất:
+
+| Hạng mục | Kết quả trong venv sạch |
+|---|---|
+| Python | 3.12.10 |
+| Gói cài từ `server/requirements.txt` | 39 gói, **không có PySide6**, không cài tay gói nào |
+| `PYTHONPATH` | Rỗng — không cần đặt thủ công |
+| `server/tests` | **505 test: 504 đạt, 1 bỏ qua** |
+| `web` `npm test` | 149/149 đạt |
+| `npx tsc --noEmit` | exit 0 |
+| `npx eslint .` | exit 0 |
+| `npx next build` | Thành công |
+
+Test bị bỏ qua vẫn là test thông báo lỗi khi thiếu `boto3` — nay `boto3` đã nằm
+trong `server/requirements.txt` nên nó tự bỏ qua, đúng thiết kế.
 
 ## Mức độ kiểm chứng
 
@@ -356,11 +391,49 @@ Một lần `job_settings` cho **cả danh sách** chương, không phải một
 Lease phải dài hơn heartbeat **ít nhất gấp đôi** — có test khoá lại. Một nhịp trễ
 mạng không được làm job bị worker khác giật.
 
-### Điều quan trọng nhất: tính đúng đắn KHÔNG dựa vào lease
+### Claim là CAS thật — bằng transaction của Appwrite
 
-Appwrite không có compare-and-swap, nên `_claim_stale_job` là ghi-rồi-đọc-lại chứ
-không phải CAS thật. Về lý thuyết hai worker vẫn có thể cùng thắng ở một cửa sổ
-rất hẹp. Điều đó **không làm sai dữ liệu**, vì:
+Ghi chú cũ ở đây nói "Appwrite không có compare-and-swap". **Sai.** Appwrite Cloud
+1.9.6 có transaction, đã kiểm chứng trực tiếp bằng REST:
+
+| Bước | Endpoint |
+|---|---|
+| Mở | `POST /v1/tablesdb/transactions` (`ttl` 60–3600 giây) |
+| Dàn thao tác | `POST /v1/tablesdb/transactions/{id}/operations` |
+| Chốt | `PATCH /v1/tablesdb/transactions/{id}` `{commit: true}` |
+
+Ba điều đã đo được, không phải suy đoán:
+
+- xung đột ghi-ghi trả **409**, nên transaction thua *không* commit được;
+- uniqueness của `rowId` được cưỡng chế **bên trong** transaction;
+- phần thao tác **bắt buộc dùng tên TablesDB** (`tableId`/`rowId`). Truyền
+  `collectionId`/`documentId` bị từ chối 400 — dù phần còn lại của kho vẫn đi qua
+  route tương thích `/v1/databases/.../documents`.
+
+`AppwriteMetadataStore.claim_job()` gói **hai** thao tác vào một transaction:
+
+1. `create` một dòng trong `job_claims` với `rowId = "{job_id}-{fence}"` — id tất
+   định, nên hai worker cùng nhắm `fence` giống nhau sẽ đụng uniqueness;
+2. `update` dòng job sang `running` với `attempts = fence`, `lease_owner`,
+   `lease_expires_at`.
+
+Kẻ thua thất bại ở bước 1 nên **cả** bước 2 cũng không xảy ra: không có chuyện
+worker thua ghi đè lease của worker thắng. `claim_job` trả `None` và người gọi
+**dừng hẳn** — không gọi TTS, không thử lại mù.
+
+Trước khi vào transaction, `claim_job` đọc lại job và kiểm tra: chưa terminal,
+lease đã hết hạn hoặc chính mình là chủ, chưa vượt `JOB_MAX_ATTEMPTS`.
+
+**Fencing token = `attempts`.** Mọi lần ghi sau claim đi qua
+`save_job_fenced(job, fence, worker_id)`; nếu `attempts` trong DB đã nhảy lên thì
+lần ghi bị từ chối. Nhờ vậy một worker cũ hồi sinh không thể đánh dấu
+`completed` đè lên lượt chạy mới. Heartbeat dùng cùng cơ chế và dựng cờ `lost`
+khi mất fence, để vòng xử lý tự dừng. Có test đọc mã nguồn chặn việc gọi thẳng
+`store.save_job(` trong `_run_job`.
+
+### Tính đúng đắn vẫn KHÔNG chỉ dựa vào lease
+
+Ngay cả khi claim hỏng, dữ liệu vẫn không sai, vì:
 
 - `output_key` là tất định theo `content_hash` — hai lần chạy ghi cùng một khoá
   với cùng nội dung;
@@ -378,17 +451,49 @@ Lease chỉ để tránh làm việc thừa. Đừng đổi `create_track` thàn
   trạng thái job, công cụ đối soát mới chạm vào file — và chỉ khi người vận hành
   truyền cờ.
 
+### Schema `job_claims` — migration và rollback
+
+`scripts/setup_appwrite.py` tạo:
+
+| Collection | Thuộc tính | Chỉ mục |
+|---|---|---|
+| `job_claims` (mới) | `job_id`, `attempt`, `worker_id`, `created_at` | `job_idx` trên `job_id` |
+| `tts_jobs` (bổ sung) | `lease_expires_at`, `lease_owner`, `attempts` — đều **optional** | `status_lease_idx` |
+
+Ba thuộc tính thêm vào `tts_jobs` đều optional nên **tương thích ngược**: dòng cũ
+không có chúng vẫn đọc được. `AppwriteMetadataStore._supported_fields()` dò một
+lần xem collection thật sự có thuộc tính nào rồi nhớ lại, nên mã mới chạy được
+trên schema **chưa** migrate — chỉ là chưa có claim nguyên tử.
+
+**Rollback:** xoá collection `job_claims` và ba thuộc tính vừa thêm. Không cần
+sửa mã: `_supported_fields()` sẽ tự thấy chúng biến mất. Không có dữ liệu người
+dùng nào nằm trong `job_claims` — nó thuần tuý là sổ ghi chép của bộ điều phối.
+
 ### Đã kiểm chứng thật
 
-Kill `-9` backend giữa lúc job đang chạy trên Appwrite + R2 thật:
+**Đua claim, 10 worker, trên Appwrite thật.** 5 lượt, mỗi lượt 10 tiến trình hẹn
+nhau ở một mốc thời gian chung: **đúng 1 worker thắng mỗi lượt**, 9 worker còn
+lại nhận `None` và dừng. Kiểm tra fencing riêng: worker cũ ghi `completed` với
+fence hết hạn → bị từ chối, job vẫn `running`, `output_key` vẫn `None`.
 
-| Giây | status | attempts | lease_owner |
-|---|---|---|---|
-| 0 | `running` | 1 | `37264-…` (worker đã chết) — **bỏ qua, lease còn hạn** |
-| 35 | `running` | 2 | `35904-…` (worker mới nhận) |
-| 85 | `completed` | 2 | `None` (đã nhả) |
+**Hai tiến trình OS độc lập.** PID 41012 (`worker-A`) và PID 47044 (`worker-B`)
+gọi `claim_job` tại cùng một mốc epoch: `worker-A` nhận `fence=1`, `worker-B`
+nhận `null`.
 
-Đúng **một** track (3,2 MB), đúng một job. Lần quét thứ hai: `da_quet = 0`.
+**Kill worker giữ lease giữa lúc đang xử lý** (Appwrite + R2 thật, chương 31.200
+ký tự chia 120 đoạn):
+
+| Mốc | status | attempts | tiến độ | lease_owner |
+|---|---|---|---|---|
+| Trước khi kill | `running` | 1 | 6/120 | `43372-d9345909` |
+| — | *kill `-Force` cả cây tiến trình* | | | |
+| Sau khi worker thay thế nhận | `running` | 2 | 31/120 | `41784-9ebf1e3f` |
+| Kết thúc | `completed` | 2 | 120/120 | `(trống)` — đã nhả |
+
+Sổ `job_claims` của job đó có **đúng hai** dòng, cách nhau **297 giây** — dài hơn
+lease 90 giây, tức worker thay thế chỉ nhận sau khi lease **thật sự** hết hạn,
+không giật của worker còn sống. Kết quả cuối: **1 track** (12.942.957 byte) và
+**1 object** trên R2. Fixture đã xoá sạch sau kiểm tra.
 
 ## Đối soát object audio mồ côi
 

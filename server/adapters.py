@@ -252,6 +252,40 @@ class MetadataStore(Protocol):
 
     def delete_job(self, job_id: str) -> None: ...
 
+    def claim_job(self, job: TtsJob, worker_id: str,
+                  lease_expires_at: str) -> Optional[int]:
+        """
+        Nhan mot job de chay. Tra ve FENCING TOKEN neu thang, `None` neu thua.
+
+        Fencing token la so lan thu (`attempts`) sau khi nhan. Moi ghi ve sau
+        phai kem token nay — xem `save_job_fenced`.
+
+        PHAI NGUYEN TU. Doc-roi-kiem-roi-ghi la KHONG dat: hai worker cung doc
+        thay job ket, ca hai cung ghi, ca hai cung tuong minh thang.
+
+        Ban Appwrite: MOT transaction gom `create` hang khoa co id tat dinh
+        `{job_id}-{attempt}` VA `update` job row. Tinh duy nhat cua rowId do
+        database cuong che, nam ben trong transaction, nen worker thua co commit
+        hong han va update job cung khong duoc ap dung.
+
+        Thua thi DUNG LAI: khong goi TTS, khong thu lai mu quang (thu lai se
+        cuop mat lease vua duoc cap cho worker thang).
+        """
+        ...
+
+    def save_job_fenced(self, job: TtsJob, fence: int, worker_id: str) -> bool:
+        """
+        Ghi job, NHUNG chi khi nguoi goi con giu quyen.
+
+        Tra ve False (khong ghi gi) neu `attempts` da khac `fence` hoac
+        `lease_owner` da khac `worker_id` — nghia la mot worker khac da nhan job
+        nay roi.
+
+        Vi sao can: worker cu chua chet han, chi bi treo. No tinh day va co ghi
+        `completed` de len ket qua cua worker moi. Fence chan dieu do.
+        """
+        ...
+
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """
         MOI job dang o mot trang thai, cua MOI nguoi dung.
@@ -492,6 +526,9 @@ class MockMetadataStore:
         self.chapters: Dict[str, Chapter] = {}
         self.jobs: Dict[str, TtsJob] = {}
         self.tracks: Dict[str, AudioTrack] = {}
+        #: `(job_id, attempt)` da co worker nhan. Vai tro y het tinh duy nhat cua
+        #: rowId ben Appwrite: mot lan thu chi mot worker duoc nhan.
+        self._claims: Set[Tuple[str, int]] = set()
 
     # -- novel ---------------------------------------------------------------
 
@@ -734,6 +771,42 @@ class MockMetadataStore:
                     continue
                 out.setdefault(job.content_hash, (job.rate, job.chunk_chars))
         return out
+
+    def claim_job(self, job: TtsJob, worker_id: str,
+                  lease_expires_at: str) -> Optional[int]:
+        """
+        Xem contract o `MetadataStore.claim_job`.
+
+        Trong bo nho thi `self._lock` chinh la thu cuong che tinh duy nhat: ca
+        khoi kiem-va-ghi nam gon trong mot lan giu khoa, khong the xen ngang.
+        """
+        with self._lock:
+            current = self.jobs.get(job.job_id)
+            if current is None or current.status.is_terminal:
+                return None
+            if current.lease_is_live() and current.lease_owner != worker_id:
+                return None
+            fence = (current.attempts or 0) + 1
+            key = (job.job_id, fence)
+            if key in self._claims:
+                return None            # da co worker khac nhan dung lan thu nay
+            self._claims.add(key)
+            self.jobs[job.job_id] = replace(
+                current, status=JobStatus.RUNNING, attempts=fence,
+                lease_owner=worker_id, lease_expires_at=lease_expires_at,
+            )
+            return fence
+
+    def save_job_fenced(self, job: TtsJob, fence: int, worker_id: str) -> bool:
+        """Xem contract o `MetadataStore.save_job_fenced`."""
+        with self._lock:
+            current = self.jobs.get(job.job_id)
+            if current is None:
+                return False
+            if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+                return False
+            self.jobs[job.job_id] = replace(job, attempts=fence)
+            return True
 
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """Xem contract o `MetadataStore.list_jobs_by_status`."""

@@ -12,6 +12,7 @@ import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { isStudioNovel } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
+import { NovelCover } from "@/components/NovelCover";
 import {
   EmptyState,
   ErrorState,
@@ -192,7 +193,13 @@ export default function LibraryPage() {
           {shown.map((row) => (
             <article key={row.job.job_id} className="card stack">
               <div className="row-between">
-                <div className="stack-2" style={{ minWidth: 0 }}>
+                <NovelCover
+                  novelId={row.novel.novel_id}
+                  title={row.fromStudio ? row.chapter.title : row.novel.title}
+                  coverUrl={row.novel.cover_url}
+                  size="thumb"
+                />
+                <div className="stack-2" style={{ minWidth: 0, flex: 1 }}>
                   <div className="row" style={{ gap: "var(--s2)" }}>
                     <span className={`badge ${row.fromStudio ? "badge-brand" : "badge-info"}`}>
                       {row.fromStudio ? "Audio Studio" : "Fanfic"}

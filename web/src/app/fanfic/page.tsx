@@ -9,6 +9,7 @@ import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { fanficOnly } from "@/lib/workspace";
 import { EmptyState, ErrorState, SkeletonCards, formatDate } from "@/components/ui";
+import { NovelCover } from "@/components/NovelCover";
 
 export default function FanficPage() {
   const { profile } = useSession();
@@ -146,9 +147,11 @@ export default function FanficPage() {
                 href={`/novels/${novel.novel_id}`}
                 className="card card-flush card-link"
               >
-                <div className="cover" aria-hidden="true">
-                  📖
-                </div>
+                <NovelCover
+                  novelId={novel.novel_id}
+                  title={novel.title}
+                  coverUrl={novel.cover_url}
+                />
                 <div className="stack-2" style={{ padding: "var(--s4)" }}>
                   <strong className="clamp-2">{novel.title}</strong>
                   <p className="hint clamp-3">

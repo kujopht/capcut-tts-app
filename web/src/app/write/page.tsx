@@ -678,8 +678,7 @@ export default function WritePage() {
                         </label>
                         <select
                           id="w-voice"
-                          className="select"
-                          style={{ width: "auto", minWidth: 200 }}
+                          className="select select-inline"
                           value={voiceId}
                           onChange={(e) => setVoiceId(e.target.value)}
                         >

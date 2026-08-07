@@ -4,11 +4,12 @@
 
 import Link from "next/link";
 import { use, useCallback } from "react";
-import { api, type AudioTrack, type Chapter, type Novel } from "@/lib/api";
+import { api, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
+import { NovelCover } from "@/components/NovelCover";
 
 export default function ChapterPage({
   params,
@@ -18,19 +19,14 @@ export default function ChapterPage({
   const { id } = use(params);
   const { profile } = useSession();
 
-  const fetchChapter = useCallback(async () => {
-    const r = await api.getChapter(id);
-    const parent = await api
-      .getNovel(r.chapter.novel_id)
-      .then((detail) => detail.novel)
-      .catch(() => null);
-    return { chapter: r.chapter, audio: r.audio, novel: parent };
-  }, [id]);
+  // Backend tra kem `novel` trong chinh phan hoi cua chuong, nen khong con
+  // phai goi them mot vong `/api/novels/{id}` chi de lay ten va anh bia.
+  const fetchChapter = useCallback(() => api.getChapter(id), [id]);
 
   const { data, loading, error, missing, reload } = useAsyncData(fetchChapter);
   const chapter: Chapter | null = data?.chapter ?? null;
   const audio: AudioTrack | null = data?.audio ?? null;
-  const novel: Novel | null = data?.novel ?? null;
+  const novel: NovelBrief | null = data?.novel ?? null;
 
   if (loading) {
     return (
@@ -81,7 +77,17 @@ export default function ChapterPage({
       </header>
 
       {audio ? (
-        <AudioPlayer chapterId={chapter.chapter_id} title={chapter.title} />
+        <div className="listen">
+          <NovelCover
+            novelId={chapter.novel_id}
+            title={novel?.title ?? chapter.title}
+            coverUrl={novel?.cover_url}
+            size="thumb"
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <AudioPlayer chapterId={chapter.chapter_id} title={chapter.title} />
+          </div>
+        </div>
       ) : (
         <EmptyState
           icon="🎧"

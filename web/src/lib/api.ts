@@ -30,6 +30,14 @@ export interface Novel {
   title: string;
   description: string;
   cover_key: string | null;
+  /**
+   * URL xem duoc cua anh bia, do backend cap (trinh duyet khong co credential
+   * cua kho nen khong tu dung tu `cover_key` duoc). `null` khi truyen chua co
+   * bia — luc do giao dien dung anh du phong.
+   *
+   * Tuy chon de client cu (chua biet truong nay) van bien dich duoc.
+   */
+  cover_url?: string | null;
   state: PublishState;
   tags: string[];
   created_at: string;
@@ -238,9 +246,12 @@ export const api = {
     ),
 
   getChapter: (chapterId: string) =>
-    request<{ chapter: Chapter; audio: AudioTrack | null }>(
-      `/api/chapters/${chapterId}`,
-    ),
+    request<{
+      chapter: Chapter;
+      audio: AudioTrack | null;
+      /** Truyen cha, kem san de luong nghe co bia ma khong phai goi them. */
+      novel?: NovelBrief | null;
+    }>(`/api/chapters/${chapterId}`),
 
   createJob: (chapterId: string, voiceId: string, rate = "1.0") =>
     request<{ job: TtsJob; reused: boolean }>("/api/jobs", {
@@ -273,6 +284,15 @@ export const api = {
       `/api/audio/${chapterId}/url${download ? "?download=true" : ""}`,
     ),
 };
+
+/** Phan truyen kem theo chuong: vua du de hien bia va ten. */
+export interface NovelBrief {
+  novel_id: string;
+  title: string;
+  state: PublishState;
+  cover_key: string | null;
+  cover_url: string | null;
+}
 
 /** So luong da xoa, backend tra ve de doi soat. */
 export interface RemovedCounts {

@@ -209,6 +209,42 @@ def me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 
+def _cover_url(novel: Novel) -> Optional[str]:
+    """
+    URL xem duoc cua anh bia, hoac None neu truyen chua co bia.
+
+    Trinh duyet khong co credential cua kho nen khong tu dung URL tu
+    `cover_key` duoc — phai do backend cap, giong het duong audio.
+
+    Kho khong cap URL ky (che do cuc bo) thi tra None: tang tren se dung anh
+    bia du phong. Khong bao gio tra ve mot anh gia.
+    """
+    if not novel.cover_key:
+        return None
+    return storage.signed_url(novel.cover_key, expires_seconds=AUDIO_URL_TTL_SECONDS)
+
+
+def _novel_out(novel: Novel) -> Dict[str, Any]:
+    """
+    Novel cho API.
+
+    THEM `cover_url` vao ben canh `cover_key` da co — chi them, khong doi ten
+    va khong bo truong nao, nen client cu van chay nguyen.
+    """
+    return {**novel.to_dict(), "cover_url": _cover_url(novel)}
+
+
+def _novel_brief(novel: Novel) -> Dict[str, Any]:
+    """Phan truyen kem theo chuong: vua du de hien bia va ten o luong nghe."""
+    return {
+        "novel_id": novel.novel_id,
+        "title": novel.title,
+        "state": novel.state.value,
+        "cover_key": novel.cover_key,
+        "cover_url": _cover_url(novel),
+    }
+
+
 @app.get("/api/novels")
 def list_novels(mine: bool = False, profile: Optional[Profile] = None,
                 authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
@@ -218,7 +254,7 @@ def list_novels(mine: bool = False, profile: Optional[Profile] = None,
         items = store.list_novels(owner_id=owner.user_id)
     else:
         items = store.list_novels(published_only=True)
-    return {"novels": [n.to_dict() for n in items], "count": len(items)}
+    return {"novels": [_novel_out(n) for n in items], "count": len(items)}
 
 
 @app.post("/api/novels", status_code=status.HTTP_201_CREATED)
@@ -229,7 +265,7 @@ def create_novel(payload: NovelIn, profile: Profile = Depends(current_profile)) 
         description=payload.description.strip(),
         tags=payload.tags,
     ))
-    return {"novel": novel.to_dict()}
+    return {"novel": _novel_out(novel)}
 
 
 @app.get("/api/novels/{novel_id}")
@@ -240,7 +276,7 @@ def get_novel(novel_id: str) -> Dict[str, Any]:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     chapters = store.list_chapters(novel_id)
     return {
-        "novel": novel.to_dict(),
+        "novel": _novel_out(novel),
         "chapters": [c.to_dict(include_content=False) for c in chapters],
     }
 
@@ -296,7 +332,7 @@ def update_novel(novel_id: str, payload: NovelPatch,
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except PermissionDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
-    return {"novel": novel.to_dict()}
+    return {"novel": _novel_out(novel)}
 
 
 @app.delete("/api/novels/{novel_id}")
@@ -340,7 +376,7 @@ def unpublish_novel(novel_id: str,
             status.HTTP_502_BAD_GATEWAY,
             f"Không lưu được trạng thái: {type(exc).__name__}",
         ) from exc
-    return {"novel": novel.to_dict()}
+    return {"novel": _novel_out(novel)}
 
 
 @app.post("/api/novels/{novel_id}/publish")
@@ -370,7 +406,7 @@ def publish_novel(novel_id: str, profile: Profile = Depends(current_profile)) ->
             status.HTTP_502_BAD_GATEWAY,
             f"Không lưu được trạng thái xuất bản: {type(exc).__name__}",
         ) from exc
-    return {"novel": novel.to_dict()}
+    return {"novel": _novel_out(novel)}
 
 
 # -----------------------------------------------------------------------------
@@ -404,9 +440,16 @@ def get_chapter(chapter_id: str) -> Dict[str, Any]:
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     track = store.track_for_chapter(chapter_id)
+    # Kem theo truyen cha: luong nghe can bia va ten truyen, va nho vay tang
+    # tren khong phai goi them mot vong `/api/novels/{id}` nua.
+    try:
+        novel: Optional[Novel] = store.get_novel(chapter.novel_id)
+    except NotFoundError:
+        novel = None
     return {
         "chapter": chapter.to_dict(),
         "audio": track.to_dict() if track else None,
+        "novel": _novel_brief(novel) if novel else None,
     }
 
 

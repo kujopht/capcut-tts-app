@@ -469,6 +469,15 @@ button, input, select, textarea {
 
 .range { width: 100%; accent-color: var(--brand); cursor: pointer; }
 
+/* Select nam cung hang voi nhan (vi du chon giong doc o khu tac gia).
+   `max-width: 100%` la phan quan trong: khong co no thi `min-width` day ca
+   trang rong ra va sinh cuon ngang tren dien thoai. */
+.select-inline {
+  width: auto;
+  min-width: 220px;
+  max-width: 100%;
+}
+
 .counter { font-size: var(--t-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .counter-warn { color: var(--warn); }
 .counter-over { color: var(--danger); font-weight: 650; }
@@ -649,6 +658,13 @@ button, input, select, textarea {
 
 /* ------------------------------------------------------------ audio */
 
+/* Hang trong luong nghe: bia nho ben trai, trinh phat chiem phan con lai. */
+.listen {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+
 .player {
   display: flex;
   flex-direction: column;
@@ -713,14 +729,40 @@ button, input, select, textarea {
   font-variant-numeric: tabular-nums;
 }
 
+/* Anh bia: hai lop chong len nhau. Lop duoi la anh du phong, lop tren la bia
+   that. Bia hong thi lop tren khong ve gi va lop duoi lo ra. */
 .cover {
-  aspect-ratio: 3 / 2;
-  display: grid;
-  place-items: center;
-  font-size: 40px;
-  background: linear-gradient(150deg, var(--bg-3), var(--bg-1));
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--bg-2);
   border-bottom: 1px solid var(--line-soft);
 }
+.cover-card  { aspect-ratio: 3 / 2; }
+.cover-wide  { aspect-ratio: 16 / 6; border-radius: var(--r3); border-bottom: 0; }
+.cover-thumb {
+  width: 56px; height: 56px; flex: 0 0 auto;
+  border-radius: var(--r2); border-bottom: 0;
+}
+
+.cover-fallback,
+.cover-image {
+  position: absolute;
+  inset: 0;
+}
+.cover-fallback { display: grid; place-items: center; }
+.cover-image { background-size: cover; background-position: center; }
+
+.cover-initial {
+  font-weight: 750;
+  font-size: 40px;
+  color: #0b0d12;
+  opacity: 0.82;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.cover-wide  .cover-initial { font-size: 54px; }
+.cover-thumb .cover-initial { font-size: 22px; }
 
 .divider { height: 1px; background: var(--line-soft); border: 0; margin: 0; }
 
@@ -791,6 +833,7 @@ button, input, select, textarea {
   .grid-2 { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
   .feature { min-height: 0; padding: var(--s5); }
   .card { padding: var(--s4); }
+  .select-inline { min-width: 0; width: 100%; }
   .textarea { min-height: 150px; }
   .textarea-tall { min-height: 200px; }
   .btn-lg { padding: 11px 18px; }

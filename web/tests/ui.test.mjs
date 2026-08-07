@@ -498,3 +498,116 @@ test("logo khong pha bo cuc header hien co", () => {
   assert.ok(!css.includes(".brand-mark {"), "còn CSS chết của ô giả lập cũ");
   assert.match(css, /\.brand svg \{ flex: 0 0 auto; \}/, "logo phải không bị co");
 });
+
+/* ------------------------------------------------- H1: tran ngang mobile */
+
+test("khong con kich thuoc cung gay tran ngang", () => {
+  // Bay da tung sap: <select> co minWidth 200 noi tuyen day /write rong 578px
+  // trong khung 375px tren dien thoai.
+  for (const f of [
+    "../src/app/write/page.tsx",
+    "../src/app/studio/page.tsx",
+    "../src/app/library/page.tsx",
+    "../src/app/fanfic/page.tsx",
+    "../src/app/novels/[id]/page.tsx",
+    "../src/app/chapters/[id]/page.tsx",
+  ]) {
+    const src = read(f);
+    // `minWidth: 0` la nguoc lai — no CHO PHEP co lai, phai giu
+    const xau = [...src.matchAll(/minWidth:\s*(\d+)/g)].filter((m) => m[1] !== "0");
+    assert.equal(xau.length, 0, `${f} con minWidth cung: ${xau.map((m) => m[1])}`);
+    assert.ok(!/width:\s*"auto"/.test(src), `${f} con width auto noi tuyen`);
+  }
+});
+
+test("select trong hang co lop rieng, co lai duoc tren mobile", () => {
+  const css = read("../src/app/globals.css");
+  assert.match(css, /\.select-inline \{[^}]*max-width: 100%/s, "thieu max-width");
+  assert.match(
+    css,
+    /@media \(max-width: 640px\)[\s\S]*\.select-inline \{ min-width: 0; width: 100%; \}/,
+    "mobile phai cho select chiem tron hang",
+  );
+  assert.match(read("../src/app/write/page.tsx"), /className="select select-inline"/);
+});
+
+/* ------------------------------------------------------------ anh bia */
+
+test("co component anh bia dung chung", () => {
+  assert.ok(has("../src/components/NovelCover.tsx"));
+  const src = read("../src/components/NovelCover.tsx");
+  assert.match(src, /export function NovelCover/);
+  assert.match(src, /size = "card"/);
+});
+
+test("anh bia du phong sinh tu du lieu, khong phai anh gia", () => {
+  const src = read("../src/components/NovelCover.tsx");
+  // Khong duoc tro toi bat ky anh nao ben ngoai
+  assert.ok(!/https?:\/\//.test(src), "khong duoc nhung URL anh");
+  assert.ok(!/placeholder|unsplash|picsum|dummy/i.test(src), "khong dung anh gia");
+  // Mau du phong sinh tu ham bam cua id -> on dinh
+  const logic = read("../src/lib/cover.ts");
+  assert.match(logic, /export function paletteFor/);
+  assert.match(logic, /hash \* 31/);
+});
+
+test("anh du phong on dinh: cung id luon ra cung mau", async () => {
+  const { paletteFor, coverInitial } = await import("../src/lib/cover.ts");
+  assert.deepEqual(paletteFor("nov_abc"), paletteFor("nov_abc"));
+  assert.notDeepEqual(paletteFor("nov_abc"), paletteFor("nov_xyz"));
+  assert.equal(coverInitial("hải tặc"), "H");
+  assert.equal(coverInitial("   "), "?");
+  assert.equal(coverInitial(""), "?");
+});
+
+test("bia that nam tren, bia du phong nam duoi", () => {
+  const src = read("../src/components/NovelCover.tsx");
+  // Lop du phong LUON duoc ve; lop bia that chi them khi co URL.
+  // Bia hong thi lop tren khong ve gi va lop duoi lo ra — khong can bat loi.
+  assert.ok(
+    src.indexOf("cover-fallback") < src.indexOf("cover-image"),
+    "lop du phong phai o duoi",
+  );
+  assert.match(src, /coverUrl \? \(/);
+  assert.ok(!/<img[\s/>]/.test(src), "phai dung background-image, khong dung the anh");
+});
+
+test("anh bia duoc dung o ca bon noi", () => {
+  for (const f of [
+    "../src/app/fanfic/page.tsx",        // kham pha
+    "../src/app/novels/[id]/page.tsx",   // chi tiet truyen
+    "../src/app/chapters/[id]/page.tsx", // luong nghe
+    "../src/app/library/page.tsx",       // thu vien
+  ]) {
+    assert.match(read(f), /<NovelCover/, `${f} chua dung anh bia`);
+  }
+  // Emoji 📖 cu da duoc thay het
+  assert.ok(!read("../src/app/fanfic/page.tsx").includes("📖"));
+});
+
+test("luong nghe lay bia tu chinh phan hoi cua chuong", () => {
+  const src = read("../src/app/chapters/[id]/page.tsx");
+  assert.match(src, /api\.getChapter\(id\)/);
+  assert.ok(
+    !src.includes("api.getNovel("),
+    "khong con goi them /api/novels — backend da tra kem truyen",
+  );
+  assert.match(src, /coverUrl=\{novel\?\.cover_url\}/);
+});
+
+test("lop api khai bao truong moi la tuy chon", () => {
+  const api = read("../src/lib/api.ts");
+  // `?:` de client cu chua biet truong nay van bien dich duoc
+  assert.match(api, /cover_url\?: string \| null;/);
+  assert.match(api, /export interface NovelBrief/);
+  assert.match(api, /novel\?: NovelBrief \| null;/);
+});
+
+test("CSS anh bia co du ba bien the", () => {
+  const css = read("../src/app/globals.css");
+  for (const cls of [".cover-card", ".cover-wide", ".cover-thumb", ".cover-fallback",
+                     ".cover-image", ".cover-initial"]) {
+    assert.ok(css.includes(cls), `thieu ${cls}`);
+  }
+  assert.match(css, /\.cover-image \{ background-size: cover/);
+});

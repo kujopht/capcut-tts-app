@@ -69,6 +69,11 @@ htmlcov/
 flagged/
 gradio_cached_examples/
 
+# --- Cong cu kiem tra giao dien bang trinh duyet ---
+# Playwright MCP do snapshot va log console vao day moi lan chay. Anh nao dang
+# giu lam bang chung thi chep tay sang docs/screenshots/.
+.playwright-mcp/
+
 # --- IDE / OS ---
 .vscode/
 .idea/

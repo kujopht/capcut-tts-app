@@ -14,6 +14,7 @@ import {
   formatDate,
   formatNumber,
 } from "@/components/ui";
+import { NovelCover } from "@/components/NovelCover";
 
 export default function NovelDetailPage({
   params,
@@ -90,6 +91,12 @@ export default function NovelDetailPage({
       </nav>
 
       <header className="card stack">
+        <NovelCover
+          novelId={novel.novel_id}
+          title={novel.title}
+          coverUrl={novel.cover_url}
+          size="wide"
+        />
         <div className="row-between">
           <div className="stack-2" style={{ minWidth: 0, flex: "1 1 320px" }}>
             <div className="row" style={{ gap: "var(--s2)" }}>

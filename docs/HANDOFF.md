@@ -295,7 +295,7 @@ Chi tiết: `docs/reports/staging/BAO_CAO_STAGING.md` mục 13.
 | `server/tests` | **641 test: 640 đạt, 1 bỏ qua** |
 | `tests` (desktop) | **371/371 đạt** |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `scripts/staging_smoke.py` (77 kiểm tra) | **77/77 đạt, `attempts=1`**, dọn sạch |
+| `scripts/staging_smoke.py` trên staging THẬT | **82/82 đạt, `attempts=1`**, dọn sạch (77 nếu bỏ `--web`) |
 | `web` (`node --test`) | **156/156 đạt** |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
@@ -888,9 +888,12 @@ Mục 8 quan trọng hơn vẻ ngoài của nó: chương smoke cũ chỉ 3 câu
 nên `_concat_mp3` chưa bao giờ chạy. Một máy **thiếu ffmpeg vẫn cho 61/61 xanh**
 rồi hỏng ở chương dài thật. Piper chạy cục bộ nên mục này không tốn quota.
 
-Đã chạy thật (backend cục bộ dùng đúng cấu hình staging, Appwrite + R2 + worker
-thật): **77/77**, job Ngọc Huyền `total_parts=2`, `attempts=1`, MP3 187 KB, dọn
-sạch 2 chương / 2 track / 2 job / 2 object.
+Đã chạy trên **staging thật** (Render `8001cfc` + Appwrite + R2 + worker
+laptop): **82/82**, job Ngọc Huyền `total_parts=2`, `attempts=1`, MP3 192 KB,
+dọn sạch 2 chương / 2 track / 2 job / 2 object.
+
+Tổng là 82 khi có `--web` (kiểm cả frontend) và 77 khi không — khác số kiểm
+tra, không phải khác kết quả.
 
 ### Worker 24/7 trên VM — đã chuẩn bị, CHƯA triển khai
 

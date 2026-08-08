@@ -133,7 +133,9 @@ PYTHONPATH=. FAS_ENV_FILE=server/.env.staging python scripts/staging_smoke.py \
   --web https://fas-staging-web-free.onrender.com
 ```
 
-Phải ra **77/77** và `attempts=1`.
+Phải ra **82/82** và `attempts=1` — lệnh trên có `--web`, tức là kiểm cả
+frontend. Bỏ `--web` thì tổng là **77**; khác số kiểm tra, không phải
+khác kết quả.
 
 Bộ nghiệm thu **có** chạy một job bằng giọng chạy trên worker
 (`piper:ngochuyen`) với `chunk_chars` nhỏ, cố ý ép ra **nhiều đoạn** để đường

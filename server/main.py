@@ -348,6 +348,38 @@ def me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return {"profile": profile.to_dict()}
 
 
+@app.post("/api/auth/logout")
+def logout(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """
+    Ket thuc phien o PHIA MAY CHU.
+
+    Truoc day khong co duong nay: nut "Dang xuat" chi xoa token trong
+    localStorage, con session secret van song nguyen o Appwrite. Nguoi dung
+    thay man hinh dang nhap va tin rang minh da thoat, trong khi credential van
+    dung duoc — tren may dung chung thi "dang xuat" khong bao ve duoc gi.
+
+    KHONG dung `current_profile`: dang xuat mot token da het han phai thanh
+    cong, khong phai 401. Muc tieu la "phien nay khong con dung duoc", va voi
+    token hong thi dieu do da dung san.
+
+    Luon tra 200 de client xoa token cuc bo mot cach dut khoat. `da_huy_phien`
+    cho biet may chu co that su huy duoc phien hay khong.
+    """
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+
+    da_huy = False
+    if token:
+        try:
+            da_huy = bool(identity.logout(token))
+        except AuthError:
+            # Token khong hop le: phien von da khong dung duoc. Khong phai loi.
+            da_huy = False
+
+    return {"da_huy_phien": da_huy}
+
+
 # -----------------------------------------------------------------------------
 # Novel
 # -----------------------------------------------------------------------------

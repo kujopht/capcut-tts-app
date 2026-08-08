@@ -99,6 +99,28 @@ class TestTheScriptCleansUpAfterItself(unittest.TestCase):
         self.assertIn("[SMOKE]", self.nguon,
                       "fixture phai co tien to de nhan ra va don duoc")
 
+    def test_it_forces_utf8_before_printing_anything(self):
+        """
+        LOI DA GAP: script sap tren console cp1252 cua Windows.
+
+        Mot dong ket qua co dau — tieu de chuong "[SMOKE] Chương đã sửa" — nem
+        `UnicodeEncodeError` trong `kt()`. Cho do nam NGOAI khoi `try` cua
+        `main()`, nen `ids` chua kip tra ve va buoc don dep khong biet phai xoa
+        gi: fixture nam lai tren staging.
+        """
+        self.assertIn('reconfigure(encoding="utf-8"', self.nguon)
+        self.assertIn('errors="replace"', self.nguon,
+                      "mot ky tu la khong duoc quan trong hon viec chay het bai")
+        self.assertIn("\n_ep_utf8()\n", self.nguon,
+                      "phai goi ngay khi nap module, truoc moi lan in")
+
+    def test_vietnamese_output_is_encodable(self):
+        """Chinh chuoi da lam sap script truoc day."""
+        cau = "[SMOKE] Chương đã sửa"
+        self.assertTrue(cau.encode("utf-8"))
+        with self.assertRaises(UnicodeEncodeError):
+            cau.encode("cp1252")
+
     def test_it_never_prints_a_token(self):
         """Khong duoc in `token`, `tok_a`, `tok_b` ra man hinh."""
         for dong in self.nguon.splitlines():

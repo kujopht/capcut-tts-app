@@ -82,6 +82,23 @@ class IdentityAdapter(Protocol):
     def login(self, email: str, password: str) -> str: ...
     def profile_from_token(self, token: str) -> Profile: ...
 
+    def logout(self, token: str) -> bool:
+        """
+        Huy phien o PHIA MAY CHU. Sau lenh nay, `token` phai het gia tri.
+
+        Tra ve True neu THAT SU vua huy mot phien dang song, False neu token
+        von da khong dung duoc. Gia tri nay di thang ra `/api/auth/logout`, nen
+        no phai dung — bao "da huy" cho mot token rac la noi doi.
+
+        Xoa token o trinh duyet thoi la CHUA du: credential van song, va ai
+        nhat duoc no (may dung chung, log, lich su) van dung tiep duoc. Nut
+        "Dang xuat" hua rang phien da ket thuc, nen phien PHAI ket thuc that.
+
+        IDEMPOTENT: goi voi token da het han hoac khong hop le thi im lang tra
+        ve, khong nem. Nguoi dung bam "Dang xuat" hai lan khong duoc nhan loi.
+        """
+        ...
+
 
 class StorageAdapter(Protocol):
     """Luu file lon. Ban that se la Cloudflare R2 qua API tuong thich S3."""
@@ -405,9 +422,10 @@ class MockIdentityAdapter:
                 raise AuthError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn.")
             return self._profiles[user_id]
 
-    def logout(self, token: str) -> None:
+    def logout(self, token: str) -> bool:
+        """Xem contract o `IdentityAdapter.logout`."""
         with self._lock:
-            self._tokens.pop((token or "").strip(), None)
+            return self._tokens.pop((token or "").strip(), None) is not None
 
 
 # -----------------------------------------------------------------------------

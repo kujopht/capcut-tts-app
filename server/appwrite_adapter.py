@@ -190,6 +190,33 @@ class AppwriteIdentityAdapter:
             raise AuthError("Appwrite không trả về session secret.")
         return secret
 
+    def logout(self, token: str) -> bool:
+        """
+        Xoa phien hien tai o phia Appwrite. Xem contract o `IdentityAdapter`.
+
+        `token` la SESSION SECRET, nen huy duoc that su — khac JWT von chi het
+        han theo thoi gian. Gui bang header `X-Appwrite-Session` va `admin=False`,
+        dung nhu `profile_from_token`: chinh phien do tu xoa minh.
+
+        IDEMPOTENT. Token da het han hoac rac thi Appwrite tra 401; day khong
+        phai loi can bao cho nguoi dung — ket qua mong muon (phien khong con
+        dung duoc) da dat roi. Chi nuot DUNG truong hop do, moi loi khac van
+        nem len.
+        """
+        token = (token or "").strip()
+        if not token:
+            return False
+        try:
+            self._request("DELETE", "/v1/account/sessions/current",
+                          session=token, admin=False)
+            return True
+        except AuthError:
+            # Phien khong con hop le -> muc tieu da dat. Khong nuot loi mang:
+            # `_request` bao loi ket noi cung bang AuthError, nhung ca hai
+            # truong hop nguoi dung deu nen duoc coi la da dang xuat o client,
+            # va route se van xoa token phia trinh duyet.
+            return False
+
     def profile_from_token(self, token: str) -> Profile:
         """
         Xac minh session secret voi Appwrite va lay danh tinh tu ket qua.

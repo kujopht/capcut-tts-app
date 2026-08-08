@@ -192,6 +192,15 @@ class TestQuotaFieldsOnlyChangeServerSide(unittest.TestCase):
         self.assertIn("owner_id", Chapter(novel_id="n", owner_id=USER,
                                           title="T").to_dict())
 
+    #: Cac route POST duoi `/api/auth` da duoc soi va xac nhan KHONG ghi truong
+    #: ho so nao. Them ten vao day la mot quyet dinh co y thuc, khong phai thao
+    #: tac lam cho test xanh.
+    AUTH_POST_DA_SOI = {
+        "/api/auth/register",   # tao ho so moi, khong sua ho so co san
+        "/api/auth/login",      # chi doi session, khong cham `profiles`
+        "/api/auth/logout",     # chi xoa session o Appwrite
+    }
+
     def test_no_backend_route_lets_a_client_write_profile_fields(self):
         """San pham hien chua co chuc nang sua ho so - khong co route ghi nao."""
         from server import main as server_main
@@ -200,12 +209,35 @@ class TestQuotaFieldsOnlyChangeServerSide(unittest.TestCase):
             route for route in server_main.app.routes
             if getattr(route, "path", "").startswith("/api/auth")
             and "POST" in (getattr(route, "methods", None) or set())
-            and route.path not in ("/api/auth/register", "/api/auth/login")
+            and route.path not in self.AUTH_POST_DA_SOI
         ]
         self.assertEqual(
             profile_writes, [],
             "chưa có route sửa hồ sơ; nếu thêm thì phải có allowlist trường",
         )
+
+    def test_logout_does_not_touch_profile_data(self):
+        """
+        `/api/auth/logout` nam trong allowlist o tren, nen phai chung minh no
+        that su vo hai — neu khong, allowlist chi la mot cach lam ngo test.
+
+        Dang xuat chi duoc cham toi SESSION. Mot lan cham vao `profiles` o day
+        la duong cho client tu sua `tier` hoac bo dem quota.
+        """
+        import inspect
+
+        from server import main as server_main
+        from server.appwrite_adapter import AppwriteIdentityAdapter
+
+        nguon_route = inspect.getsource(server_main.logout)
+        for cam in ("store.", "profiles", "tier", "quota"):
+            self.assertNotIn(cam, nguon_route,
+                             f"route logout khong duoc cham {cam!r}")
+
+        nguon_adapter = inspect.getsource(AppwriteIdentityAdapter.logout)
+        self.assertIn("/v1/account/sessions", nguon_adapter)
+        self.assertNotIn("collections", nguon_adapter,
+                         "logout khong duoc ghi vao collection nao")
 
     def test_register_writes_profile_with_read_only_permissions(self):
         """Ban ghi ho so luc dang ky phai dung quyen chi-doc."""

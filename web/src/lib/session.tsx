@@ -23,7 +23,11 @@ interface SessionValue {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
-  signOut: () => void;
+  /**
+   * Bất đồng bộ vì nó phải gọi máy chủ huỷ phiên. Nơi gọi có thể bỏ qua
+   * Promise — token phía trình duyệt luôn được xoá, kể cả khi lời gọi hỏng.
+   */
+  signOut: () => Promise<void>;
 }
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -75,9 +79,21 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const signOut = useCallback(() => {
-    setToken(null);
-    setProfile(null);
+  const signOut = useCallback(async () => {
+    // Báo máy chủ huỷ phiên TRƯỚC, vì lời gọi cần chính token sắp bị xoá.
+    //
+    // Lỗi mạng KHÔNG được giữ người dùng ở trạng thái đã đăng nhập: dọn phía
+    // trình duyệt trong `finally` để nút "Đăng xuất" luôn có tác dụng thấy
+    // được. Máy chủ hụt một lần huỷ thì phiên vẫn hết hạn theo thời gian.
+    try {
+      await api.logout();
+    } catch {
+      // Không có gì hữu ích để nói với người dùng ở đây, và giữ họ đăng nhập
+      // vì một lần mạng chập là tệ hơn hẳn.
+    } finally {
+      setToken(null);
+      setProfile(null);
+    }
   }, []);
 
   const value = useMemo<SessionValue>(

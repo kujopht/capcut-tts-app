@@ -186,6 +186,15 @@ export const api = {
 
   me: () => request<{ profile: Profile }>("/api/auth/me"),
 
+  /**
+   * Kết thúc phiên ở phía máy chủ.
+   *
+   * Xoá token trong localStorage thôi là chưa đủ: session secret vẫn sống ở
+   * Appwrite, và ai nhặt được nó vẫn dùng tiếp được.
+   */
+  logout: () =>
+    request<{ da_huy_phien: boolean }>("/api/auth/logout", { method: "POST" }),
+
   voices: () => request<{ voices: Voice[]; count: number }>("/api/voices"),
 
   listNovels: (mine = false) =>

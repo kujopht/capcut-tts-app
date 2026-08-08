@@ -1,0 +1,89 @@
+# Unit systemd cho TTS worker — chạy 24/7 trên VM Linux (Google Cloud Compute).
+#
+# Cài đặt: xem deploy/RUNBOOK-WORKER.md. Tệp này KHÔNG chứa giá trị bí mật nào;
+# secret nằm ở /etc/fanfic-audio/worker.env với quyền 0600, không bao giờ vào git.
+#
+# VÌ SAO LÀ systemd CHỨ KHÔNG PHẢI DOCKER/CRON:
+#   * repository này đã triển khai bằng tiến trình trần (deploy/Procfile), không
+#     có image nào để dựng — thêm Docker chỉ để chạy một tiến trình Python là
+#     thêm một tầng phải bảo trì;
+#   * worker là tiến trình CHẠY DÀI có trạng thái trong bộ nhớ (lease, thread
+#     job). Cron khởi động một bản mới mỗi lần chạy, và hai bản chồng nhau là
+#     đúng cái vòng này vừa sửa xong;
+#   * tự khởi động sau reboot, tự restart khi crash và dừng sạch bằng SIGTERM
+#     đều có sẵn ở systemd, không phải viết.
+
+[Unit]
+Description=Fanfic Audio Studio — TTS worker (staging)
+Documentation=file:/opt/fanfic-audio/deploy/RUNBOOK-WORKER.md
+# `network-online` chứ không phải `network`: worker gọi Appwrite và R2 ngay ở
+# vòng quét đầu tiên. Có route mà chưa có DNS thì vòng đầu lỗi vô ích.
+After=network-online.target
+Wants=network-online.target
+# Sập 5 lần trong 5 phút thì dừng hẳn thay vì quay vòng. Crash liên tục là lỗi
+# cấu hình, và một tiến trình restart mãi chỉ làm log ngập mà không ai để ý.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=fanfic
+Group=fanfic
+WorkingDirectory=/opt/fanfic-audio
+
+# SECRET CHỈ ĐẾN TỪ ĐÂY. Không có `Environment=` nào mang giá trị nhạy cảm, nên
+# `systemctl show` và `ps auxe` không lộ gì. Tệp này do người vận hành tạo tay
+# trên VM (chmod 0600, chown fanfic:fanfic) và KHÔNG nằm trong repository.
+EnvironmentFile=/etc/fanfic-audio/worker.env
+
+# Không bí mật — để ở đây cho rõ ràng, và để `worker.env` chỉ còn đúng secret.
+Environment=PYTHONPATH=/opt/fanfic-audio
+Environment=PYTHONUNBUFFERED=1
+# Tệp nhịp nằm trong StateDirectory bên dưới, không nằm trong repo.
+Environment=FAS_VAR_DIR=/var/lib/fanfic-audio
+
+# `--require-env staging` là rào chắn chống trỏ nhầm tài nguyên: nếu worker.env
+# bị thay bằng cấu hình dev/production thì worker thoát ngay với mã 2 thay vì
+# lặng lẽ xử lý job của môi trường khác.
+ExecStart=/opt/fanfic-audio/.venv/bin/python -m server.worker --require-env staging
+
+Restart=always
+RestartSec=10
+# Mã 2 = "FAS_ENV không khớp". Đó là lỗi cấu hình, restart bao nhiêu lần cũng
+# không tự khỏi — dừng hẳn để người vận hành thấy.
+RestartPreventExitStatus=2
+
+# DỪNG SẠCH. Worker bắt SIGTERM, ngừng nhận job mới, rồi chờ job đang chạy xong
+# trong FAS_WORKER_GRACE_SECONDS (mặc định 120s). TimeoutStopSec phải DÀI HƠN
+# con số đó, nếu không systemd sẽ SIGKILL đúng lúc worker đang chờ tử tế — và
+# job đang tổng hợp bị giết giữa chừng, phải chờ hết lease mới có ai nhận lại.
+KillSignal=SIGTERM
+TimeoutStopSec=150
+# Chỉ giết tiến trình chính; các thread job nằm trong chính nó.
+KillMode=mixed
+
+# /var/lib/fanfic-audio — systemd tự tạo, tự chown, còn nguyên sau reboot.
+StateDirectory=fanfic-audio
+StateDirectoryMode=0750
+
+# -- rào chắn quyền ----------------------------------------------------------
+# Worker chỉ cần đọc mã nguồn và ghi vào StateDirectory. Không cần gì hơn.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# ProtectSystem=strict khoá toàn bộ hệ thống ở chế độ chỉ đọc; đây là ngoại lệ
+# duy nhất được mở ra để ghi.
+ReadWritePaths=/var/lib/fanfic-audio
+
+# journald. Worker in mỗi sự kiện một dòng JSON và KHÔNG BAO GIỜ in nội dung
+# chương, token hay khoá object đầy đủ — xem `server/worker.py::_ghi`.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fanfic-worker
+
+[Install]
+WantedBy=multi-user.target

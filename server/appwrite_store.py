@@ -655,7 +655,13 @@ class AppwriteMetadataStore:
         current = self.get_job(job.job_id)
         if current.status.is_terminal:
             return None
-        if current.lease_is_live() and current.lease_owner != worker_id:
+        if current.lease_is_live():
+            # KE CA khi lease la cua chinh `worker_id`. Xem contract o
+            # `MetadataStore.claim_job`: bo quet doc danh sach job qua Appwrite,
+            # ban doc do co the cu hon lan claim vua roi, nen mot tien trinh
+            # hoan toan co the tu nhan lai job MA CHINH NO dang chay va sinh ra
+            # thread thu hai. Uniqueness cua `rowId` khong cuu duoc: lan nay
+            # `attempt` la mot so KHAC nen khong dung do voi hang khoa nao.
             return None
 
         fence = (current.attempts or 0) + 1
@@ -689,6 +695,38 @@ class AppwriteMetadataStore:
             # qua binh thuong khi nhieu worker cung tranh, khong phai su co.
             return None
         return fence if result.get("status") == "committed" else None
+
+    def renew_lease(self, job_id: str, fence: int, worker_id: str,
+                    lease_expires_at: str) -> bool:
+        """
+        Gia han lease. Xem contract o `MetadataStore.renew_lease`.
+
+        Chi hai truong di trong payload. So voi `save_job_fenced` thi day khong
+        phai toi uu duong truyen ma la tinh dung dan: heartbeat khong nam giu
+        trang thai moi nhat cua job (progress, output_key, transition vua ghi),
+        nen moi truong no gui deu la mot ban cu co kha nang lui nguoc du lieu.
+        """
+        try:
+            current = self.get_job(job_id)
+        except NotFoundError:
+            return False
+        if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+            return False
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+            self._call("POST", f"/v1/tablesdb/transactions/{tx['$id']}/operations",
+                       payload={"operations": [{
+                           "action": "update", "databaseId": self._db,
+                           "tableId": COL_JOBS, "rowId": job_id,
+                           "data": {"lease_expires_at": lease_expires_at,
+                                    "lease_owner": worker_id}}]})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx['$id']}",
+                                payload={"commit": True})
+        except Exception:
+            # Mang chap chon. Nguoi goi coi nhu nhip nay lo, lease cu con han.
+            return False
+        return result.get("status") == "committed"
 
     def save_job_fenced(self, job: TtsJob, fence: int, worker_id: str) -> bool:
         """

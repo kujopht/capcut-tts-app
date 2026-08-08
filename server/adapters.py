@@ -287,6 +287,38 @@ class MetadataStore(Protocol):
 
         Thua thi DUNG LAI: khong goi TTS, khong thu lai mu quang (thu lai se
         cuop mat lease vua duoc cap cho worker thang).
+
+        LEASE CON SONG THI TU CHOI, KE CA VOI CHINH CHU LEASE. Truoc day dieu
+        kien la `lease_is_live() and lease_owner != worker_id`, tuc la mot worker
+        van nhan lai duoc job MA CHINH NO dang chay. Do khong phai chuyen ly
+        thuyet: `recover_stale_jobs()` quet moi 3 giay va doc danh sach job qua
+        Appwrite, ban doc do co the con cu hon lan claim vua roi vai giay. Khi
+        ay bo quet thay job "chua ai giu", goi lai `claim_job` voi CUNG
+        `worker_id`, duoc cap fence 2, va tien trinh khoi dong THREAD THU HAI
+        tong hop lai chinh chuong do. Da do that tren staging: mot job duy nhat
+        ket thuc voi `attempts=2` va hai lan goi TTS. Vi `output_key` tat dinh
+        va `create_track` la tim-hoac-tao nen khong ai thay du lieu hong — chi
+        ton mot lan quota va gap doi thoi gian.
+
+        Muon lam moi lease thi dung `renew_lease`, khong phai `claim_job`.
+        """
+        ...
+
+    def renew_lease(self, job_id: str, fence: int, worker_id: str,
+                    lease_expires_at: str) -> bool:
+        """
+        Gia han lease cho job DANG chay. Tra ve False khi da mat quyen.
+
+        Chi ghi `lease_expires_at` va `lease_owner`, TUYET DOI khong ghi gi khac.
+        Truoc day heartbeat dung `save_job_fenced()` voi mot ban sao `TtsJob`
+        chup tu luc khoi dong thread, tuc la moi 30 giay lai dap NGUYEN CA HANG
+        bang trang thai cu. Do la mot lan ghi de mu: da do tren staging thay no
+        keo `status` tu `running` nguoc ve `pending`, va bat ky truong nao worker
+        chua kip cap nhat trong bo nho cung bi lui theo.
+
+        Cung dieu kien fence nhu `save_job_fenced`: `attempts` phai bang `fence`
+        va `lease_owner` phai bang `worker_id`. False nghia la worker khac da
+        nhan job — nguoi goi phai BUONG, khong duoc ghi tiep.
         """
         ...
 
@@ -300,6 +332,10 @@ class MetadataStore(Protocol):
 
         Vi sao can: worker cu chua chet han, chi bi treo. No tinh day va co ghi
         `completed` de len ket qua cua worker moi. Fence chan dieu do.
+
+        Dung cho cac TRANSITION (running/completed/failed). Gia han lease thi
+        dung `renew_lease` — ghi ca hang chi de doi mot moc thoi gian la thua va
+        co hai.
         """
         ...
 
@@ -802,7 +838,10 @@ class MockMetadataStore:
             current = self.jobs.get(job.job_id)
             if current is None or current.status.is_terminal:
                 return None
-            if current.lease_is_live() and current.lease_owner != worker_id:
+            if current.lease_is_live():
+                # KE CA khi `lease_owner == worker_id`. Xem contract: tu nhan lai
+                # job cua chinh minh la duong dan toi hai thread cung tong hop
+                # mot chuong.
                 return None
             fence = (current.attempts or 0) + 1
             key = (job.job_id, fence)
@@ -814,6 +853,22 @@ class MockMetadataStore:
                 lease_owner=worker_id, lease_expires_at=lease_expires_at,
             )
             return fence
+
+    def renew_lease(self, job_id: str, fence: int, worker_id: str,
+                    lease_expires_at: str) -> bool:
+        """Xem contract o `MetadataStore.renew_lease`."""
+        with self._lock:
+            current = self.jobs.get(job_id)
+            if current is None:
+                return False
+            if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+                return False
+            # CHI hai truong lease. `replace` tren ban ghi DANG CO trong kho, chu
+            # khong phai tren mot ban sao cua nguoi goi.
+            self.jobs[job_id] = replace(current,
+                                        lease_expires_at=lease_expires_at,
+                                        lease_owner=worker_id)
+            return True
 
     def save_job_fenced(self, job: TtsJob, fence: int, worker_id: str) -> bool:
         """Xem contract o `MetadataStore.save_job_fenced`."""

@@ -163,6 +163,7 @@ healthcheck là thêm một thứ có thể hỏng mà không được gì. Nh�
 |---|---|---|---|
 | `deploy/render.yaml` | trả phí (`starter`) | **Background Worker trên Render** | Khi đã sẵn sàng trả phí; worker luôn chạy trên hạ tầng |
 | **`deploy/render.free.yaml`** | **Free** | **chạy trên máy bạn** | Staging riêng tư, không cần thẻ |
+| `deploy/fanfic-worker.service` | Free (web) + VM sẵn có | **systemd trên VM Linux** | Khi cần worker 24/7 mà không muốn trả phí Render. Xem `deploy/RUNBOOK-WORKER.md` |
 
 **Blueprint Path nhập trên Render:** `deploy/render.free.yaml`
 

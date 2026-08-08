@@ -108,10 +108,24 @@ _job_lock = threading.RLock()
 
 #: Lease song bao lau neu khong duoc lam moi. Phai DAI hon chu ky heartbeat kha
 #: nhieu, de mot lan tre mang khong lam job bi nguoi khac giat.
-JOB_LEASE_SECONDS = 90
+#:
+#: Do dai cua CHUONG khong lien quan gi o day: mot chuong ba tieng dong ho van
+#: chi can lease 90 giay, mien la heartbeat con dap. Chinh so nay chi khi mang
+#: toi VM cham den muc hai nhip lien tiep cung truot.
+JOB_LEASE_SECONDS = int(os.environ.get("FAS_JOB_LEASE_SECONDS", "90"))
 
 #: Chu ky lam moi lease tu trong worker.
-JOB_HEARTBEAT_SECONDS = 30
+JOB_HEARTBEAT_SECONDS = int(os.environ.get("FAS_JOB_HEARTBEAT_SECONDS", "30"))
+
+# Lease phai chiu duoc HAI nhip truot lien tiep, tuc la dai gap ba chu ky. Ngan
+# hon thi lease het han giua hai lan dap, va mot job dang chay binh thuong se bi
+# bo quet nhan lai — dung cai loi ma ca vong nay sinh ra de tranh.
+if JOB_LEASE_SECONDS < JOB_HEARTBEAT_SECONDS * 3:
+    raise RuntimeError(
+        f"FAS_JOB_LEASE_SECONDS={JOB_LEASE_SECONDS} quá ngắn so với "
+        f"FAS_JOB_HEARTBEAT_SECONDS={JOB_HEARTBEAT_SECONDS}. "
+        "Lease phải dài ít nhất gấp ba chu kỳ nhịp."
+    )
 
 #: So lan chay toi da cho mot job. Vuot thi `failed` kem thong bao ro rang.
 JOB_MAX_ATTEMPTS = 3
@@ -1008,10 +1022,8 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
     def heartbeat() -> None:
         while not beat_stop.wait(JOB_HEARTBEAT_SECONDS):
             try:
-                ok = store.save_job_fenced(
-                    replace(job, lease_expires_at=_lease_until(),
-                            lease_owner=WORKER_ID),
-                    fence, WORKER_ID)
+                ok = store.renew_lease(job.job_id, fence, WORKER_ID,
+                                       _lease_until())
             except Exception:
                 # Mang chap chon: bo qua nhip nay. Lease con han tu nhip truoc.
                 continue
@@ -1042,6 +1054,19 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
             chunk_chars=job.chunk_chars,
             on_progress=progress,
         )
+
+        # -- da mat quyen thi BUONG ngay, truoc khi cham vao kho --------------
+        #
+        # `lost` bat len khi mot nhip heartbeat bi tu choi, tuc la job da thuoc
+        # ve worker khac. Truoc day co nay duoc dat nhung KHONG AI DOC: ta van
+        # upload, van goi `create_track`, roi moi bi `save_job_fenced` chan o
+        # buoc cuoi. Ket qua van dung (khoa object tat dinh, track tim-hoac-tao)
+        # nhung do la lam viec thua tren du lieu ma minh khong con quyen.
+        #
+        # Ra ve TAY TRANG, KHONG goi `_mark_failed`: job khong that bai, no chi
+        # doi chu. Ghi `failed` o day la dap len worker dang chay that.
+        if lost.is_set():
+            return
 
         # -- dua file vao kho TRUOC, danh dau hoan tat SAU -------------------
         if isinstance(storage, LocalStorageAdapter):
@@ -1170,6 +1195,16 @@ def _start_job_thread(job: TtsJob, text: str, fence: Optional[int],
     thread = threading.Thread(target=_run_job, args=(job, text, fence),
                               daemon=True, name=ten)
     with _job_lock:
+        # CHOT CHAN CUOI CUNG trong tien trinh nay.
+        #
+        # `claim_job` da tu choi cap fence khi lease con song, nhung do la mot
+        # kiem tra qua mang: giua luc doc va luc ghi van con khe. Cho nay thi
+        # khong — `_job_lock` la khoa trong bo nho, va MOI duong khoi dong job
+        # (route tao job, bo quet recovery, duong chay lai) deu di qua day. Neu
+        # tien trinh nay dang chay job do roi thi tu choi han.
+        dang_chay = _job_threads.get(job.job_id)
+        if dang_chay is not None and dang_chay.is_alive():
+            return False
         _job_threads[job.job_id] = thread
     thread.start()
     return True
@@ -1217,6 +1252,26 @@ def recover_stale_jobs(pending_min_age_seconds: Optional[int] = None) -> Dict[st
         report["da_quet"] += 1
         if job.lease_is_live():
             report["bo_qua_con_lease"] += 1
+            continue
+
+        # TIEN TRINH NAY DANG CHAY JOB DO ROI -> bo qua, va bo qua TRUOC khi
+        # nhan.
+        #
+        # `job` o day den tu mot lan doc danh sach qua Appwrite. Ban doc do co
+        # the cu hon lan claim vua roi vai giay, nen `lease_is_live()` o tren
+        # noi "chua ai giu" trong khi thuc te chinh ta dang tong hop. Truoc day
+        # bo quet cu the ma nhan tiep: `claim_job` thay `lease_owner` la chinh
+        # minh nen dong y, `attempts` len 2, va mot thread thu hai bat dau goi
+        # TTS cho cung mot chuong. Da do that tren staging.
+        #
+        # Kiem tra o day chu khong chi trong `_start_job_thread` vi thu tu quan
+        # trong: nhan xong roi moi phat hien thi da dot mat mot luot `attempts`
+        # va cuop lease cua chinh thread dang chay.
+        with _job_lock:
+            dang_chay = _job_threads.get(job.job_id)
+        if dang_chay is not None and dang_chay.is_alive():
+            report["bo_qua_dang_chay_o_day"] = (
+                report.get("bo_qua_dang_chay_o_day", 0) + 1)
             continue
 
         if (job.attempts or 0) >= JOB_MAX_ATTEMPTS:
@@ -1319,12 +1374,36 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
         # Job KET — `running` ma khong con worker nao giu. Truoc day nhanh nay tra
         # lai chinh cai job chet do, mai mai: nguoi dung bam "Tao audio" va nhan
         # ve mot job khong bao gio nhich. Nay thi nhan lai va chay tiep.
-        if existing.is_stale and (existing.attempts or 0) < JOB_MAX_ATTEMPTS:
+        if (existing.is_stale and (existing.attempts or 0) < JOB_MAX_ATTEMPTS
+                and _CAN_RUN_JOBS):
+            # `_CAN_RUN_JOBS` phai duoc hoi TRUOC KHI NHAN, khong phai sau.
+            #
+            # O staging/production, tien trinh web chay voi
+            # FAS_INLINE_WORKER=false: no khong chay job. Truoc day nhanh nay
+            # van nhan job — `_claim_stale_job` khong he hoi ai duoc phep chay —
+            # roi `_start_job_thread` tra False va khong lam gi. Cai gia la mot
+            # luot `attempts` bi dot va mot lease 90 giay cap cho mot tien trinh
+            # se khong bao gio dung den, tuc la worker that phai dung ngoai cho
+            # het lease. Bam "Tao audio" du ba lan la job `failed` voi ly do
+            # "worker cu bi dung giua chung" — trong khi chua he co lan tong hop
+            # nao. Cung mot loi da duoc chan o `recover_stale_jobs`, cho nay bi
+            # bo sot.
             fence = _claim_stale_job(existing)
             if fence is not None:
                 _start_job_thread(existing, chapter.content, fence,
                                   f"tts-resume-{existing.job_id}")
-        elif existing.is_stale:
+        elif existing.is_stale and (existing.attempts or 0) >= JOB_MAX_ATTEMPTS:
+            # Dieu kien HET LUOT phai viet ra o day, khong duoc dua vao viec
+            # "nhanh tren khong khop". Nhanh tren con hoi ca `_CAN_RUN_JOBS`,
+            # nen neu chi de `elif existing.is_stale` thi tren tien trinh web
+            # (khong chay job duoc) MOI job ket deu roi thang vao day va bi danh
+            # `failed` — ke ca job moi thu mot lan, von hoan toan cuu duoc.
+            #
+            # Nhanh nay thi tien trinh web VAN duoc lam, va co chu y: day chi la
+            # mot lan ghi trang thai, khong nhan job va khong dot `attempts`.
+            # Job da het luot thu va khong con lease, nen khong worker nao dang
+            # giu no. Neu de danh cho bo quet thi luc worker chet nguoi dung se
+            # thay mot job "dang chay" vinh vien khong loi giai thich.
             _mark_failed(
                 existing, "worker_lost",
                 f"Đã thử tạo audio {existing.attempts} lần nhưng lần nào tiến "

@@ -66,6 +66,10 @@ Gói Free của Render **không có Background Worker**, nên worker chạy trê
 và nối thẳng vào Appwrite/R2 staging. Backend trên Render không tham gia đường
 này.
 
+> Muốn worker chạy 24/7 mà không phụ thuộc máy cá nhân: xem
+> **`deploy/RUNBOOK-WORKER.md`** — unit systemd cho VM Linux, tự lên sau reboot,
+> tự restart khi crash, dừng sạch, và healthcheck theo lịch.
+
 ### Chuẩn bị `server/.env.staging` một lần
 
 Tệp này **đã bị `.gitignore` chặn** (luật `.env.*`). Nội dung:

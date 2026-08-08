@@ -272,14 +272,16 @@ Chi tiết: `docs/reports/staging/BAO_CAO_STAGING.md` mục 13.
 
 | Bộ | Kết quả |
 |---|---|
-| `server/tests` | **577 test: 576 đạt, 1 bỏ qua** (chạy 3 lần, kết quả ổn định) |
+| `server/tests` | **641 test: 640 đạt, 1 bỏ qua** |
+| `tests` (desktop) | **371/371 đạt** |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `web` (`node --test`) | **152/152 đạt** |
+| `scripts/staging_smoke.py` trên staging | **61/61 đạt, `attempts=1`**, dọn sạch |
+| `web` (`node --test`) | **156/156 đạt** |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
-| `npx next build` | Thành công, 7 route |
+| `npx next build` | Thành công, 13 route |
 | Vertical slice thật (mock/local) | Đăng ký → novel → chương → job Edge TTS → MP3 **45.936 byte** → idempotency tái dùng job → ẩn danh bị chặn 401 |
-| Desktop | Không chạy lại — `desktop_app/` không bị sửa dòng nào |
+| Desktop | `desktop_app/` không bị sửa dòng nào; vẫn chạy lại để chắc |
 
 Test bị bỏ qua là test kiểm tra **thông báo lỗi khi thiếu `boto3`**; nay `boto3`
 đã nằm trong `server/requirements.txt` nên nó tự bỏ qua — đúng như thiết kế.
@@ -538,13 +540,60 @@ Một lần `job_settings` cho **cả danh sách** chương, không phải một
 
 | Hằng số | Giá trị | Ý nghĩa |
 |---|---|---|
-| `JOB_LEASE_SECONDS` | 90 | lease sống bao lâu nếu không làm mới |
-| `JOB_HEARTBEAT_SECONDS` | 30 | chu kỳ worker làm mới lease |
+| `JOB_LEASE_SECONDS` | 90 | lease sống bao lâu nếu không làm mới (`FAS_JOB_LEASE_SECONDS`) |
+| `JOB_HEARTBEAT_SECONDS` | 30 | chu kỳ worker làm mới lease (`FAS_JOB_HEARTBEAT_SECONDS`) |
 | `JOB_MAX_ATTEMPTS` | 3 | vượt thì `failed` với `error_kind = worker_lost` |
 | `JOB_SWEEP_SECONDS` | 60 | chu kỳ quét; lần đầu chạy ngay lúc khởi động |
 
-Lease phải dài hơn heartbeat **ít nhất gấp đôi** — có test khoá lại. Một nhịp trễ
-mạng không được làm job bị worker khác giật.
+Lease phải dài **ít nhất gấp ba** chu kỳ nhịp. `server/main.py` cưỡng chế lúc nạp
+module: sai thì tiến trình dừng ngay chứ không chạy với cấu hình tự phá. Một nhịp
+trễ mạng không được làm job bị worker khác giật.
+
+### Một job bị tổng hợp HAI LẦN — đã sửa (2026-08-08)
+
+Quan sát trên staging: một job TTS duy nhất kết thúc với `attempts=2`. Không ai
+bấm hai lần, không có worker thứ hai, job không thất bại lần nào.
+
+Nguyên nhân gốc gồm **hai mảnh**, phải có cả hai mới xảy ra:
+
+1. `claim_job` chỉ từ chối khi lease còn sống **và** thuộc về worker *khác*.
+   Lease của chính mình thì nó cấp fence mới.
+2. `recover_stale_jobs` quyết định dựa trên một lần đọc danh sách job qua
+   Appwrite. Bản đọc đó trễ hơn lần claim vừa rồi vài giây, nên nó thấy "chưa ai
+   giữ".
+
+Ghép lại: bộ quét đọc phải ảnh cũ → hỏi `claim_job` → `claim_job` đồng ý vì
+người hỏi chính là chủ lease → `attempts` lên 2 → **thread thứ hai gọi TTS cho
+cùng một chương**.
+
+Đo trực tiếp trên staging trước khi sửa:
+
+```
+claim lần 1 (worker A)                       -> fence=1
+claim lần 2 (VẪN worker A, lease còn sống)   -> fence=2   ← lẽ ra phải là None
+claim lần 3 (worker B, lease còn sống)       -> None      ← đúng
+```
+
+Vì sao không ai phát hiện sớm hơn: `output_key` tất định theo `content_hash` và
+`create_track` là tìm-hoặc-tạo, nên kết quả **cuối cùng** vẫn đúng — một track,
+một object. Chỉ có quota và thời gian bị đội lên.
+
+Bốn thay đổi:
+
+| Hạng mục | Trước khi sửa | Sau khi sửa |
+|---|---|---|
+| `claim_job` khi lease còn sống | Từ chối worker khác, **cho phép chính chủ** | Từ chối tất cả, kể cả chính chủ |
+| Heartbeat gia hạn lease | `save_job_fenced` với bản sao `TtsJob` cũ → **đập đè cả hàng** | `renew_lease` chỉ ghi `lease_expires_at` và `lease_owner` |
+| Cờ `lost` khi mất quyền | Được đặt nhưng **không ai đọc** — vẫn upload, vẫn tạo track | Buông ngay trước khi chạm vào kho |
+| `create_job` trên tiến trình không chạy job được | Vẫn nhận job → đốt `attempts`, giữ lease 90s vô ích | Hỏi `_CAN_RUN_JOBS` **trước khi** nhận |
+
+Bản `save_job_fenced` cũ dùng làm heartbeat còn kéo `status` từ `running` lùi về
+`pending` — đo được trên staging. Đó là hệ quả của việc ghi cả hàng từ một ảnh
+chụp lúc khởi động thread.
+
+Khoá lại bằng `server/tests/test_lease_hardening.py` (17 test). Bốn test trong
+đó đỏ khi hoàn nguyên bản vá và xanh sau khi vá — đã kiểm chứng, không phải suy
+đoán.
 
 ### Claim là CAS thật — bằng transaction của Appwrite
 
@@ -697,6 +746,41 @@ hỏng đều đẩy job sang `failed` và xoá `output_key`.
 **Đính chính** (bản trước ghi sai): dòng "ghi `completed` hỏng" **không** sinh
 object mồ côi, vì `create_track` đã chạy xong trước đó nên object vẫn được tham
 chiếu. Đường sinh object mồ côi thật sự là **`create_track` hỏng**.
+
+### Độ dài chương — đã đo, chưa đặt hạn mức
+
+`chunk_chars` mặc định 2000. Đo bằng `desktop_app.text_chunker.chunk_text`:
+60.000 ký tự → 32 đoạn; 1.000.000 ký tự → 525 đoạn.
+
+**Trần cứng duy nhất** là cột `content` của Appwrite: 1.000.000 ký tự
+(`scripts/setup_appwrite.py`). Ngoài nó ra thì hiện **không có** giới hạn nào:
+
+* `ChapterIn.content` không đặt `max_length`;
+* `Profile.tier` và `tts_characters_used` đã có trong `server/domain.py` nhưng
+  **chưa chỗ nào đọc tới** — không có hạn mức TTS theo người dùng;
+* không có điểm nối lại giữa chừng: worker chết ở đoạn 400/525 thì lần chạy lại
+  bắt đầu từ đoạn 1.
+
+**Lease không còn là giới hạn** sau vòng làm cứng — nhịp gia hạn mỗi 30 giây
+suốt thời gian tổng hợp. Có test: `test_lease_hardening.py::JobDaiHonLease`.
+
+Đặt hạn mức là quyết định sản phẩm, chưa làm. Chi tiết ở
+`deploy/RUNBOOK-WORKER.md` mục 8.
+
+### Worker 24/7 trên VM — đã chuẩn bị, CHƯA triển khai
+
+`deploy/fanfic-worker.service` + `.env.example` + healthcheck timer + runbook
+(`deploy/RUNBOOK-WORKER.md`). Bất biến của bộ tệp được khoá bằng
+`server/tests/test_worker_deploy.py` — đáng kể nhất là `TimeoutStopSec` phải dài
+hơn `FAS_WORKER_GRACE_SECONDS`, nếu không systemd sẽ SIGKILL đúng lúc worker
+đang chờ job cuối kết thúc.
+
+**Chưa chạy trên VM nào.** Cần quyền SSH, thông tin VM và URL clone — xem
+`deploy/RUNBOOK-WORKER.md` mục 9.
+
+Một cái bẫy đáng nhớ: **VM phải có ffmpeg**. Chương ra nhiều hơn một đoạn thì
+`tts_bridge` ghép bằng ffmpeg. Chương một đoạn thì chỉ đổi tên tệp — nên
+`staging_smoke.py` (chương 3 câu) sẽ **xanh trên một VM thiếu ffmpeg**.
 
 **Metadata mồ côi** (`audio_track` trỏ tới object không tồn tại) **không sinh ra
 từ bất kỳ đường nào trong code** — thứ tự upload → `create_track` bảo đảm điều

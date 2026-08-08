@@ -109,5 +109,181 @@ class TestTheScriptCleansUpAfterItself(unittest.TestCase):
                 self.assertNotIn(cam, hep, f"dong print lo token: {hep[:80]}")
 
 
+class TestLoginFailureDoesNotCrashTheScript(unittest.TestCase):
+    """
+    LOI DA GAP tren staging that: `KeyError: 'token'`.
+
+    Khi API key Appwrite thieu scope `users.write`, `/api/auth/register` tra
+    `400 {"detail": "... missing scopes ..."}` va `/api/auth/login` tra `401`.
+    Ca hai phan hoi do KHONG co khoa `token`. Script luc do doc thang
+    `r["token"]` nen nem `KeyError` va sap giua chung.
+
+    Hau qua that su khong phai dong traceback, ma la: `main()` sap TRUOC khi toi
+    `finally`, nen buoc don dep khong chay va fixture `[SMOKE]` nam lai tren
+    staging cho lan chay sau doc phai.
+    """
+
+    def setUp(self) -> None:
+        self.mod = nap_script()
+        self.mod.KET_QUA.clear()
+        self.addCleanup(setattr, self.mod, "goi", self.mod.goi)
+        self.da_goi = []
+
+    def gia_lap(self, dang_nhap_hong=False, dang_nhap_lai_hong=False):
+        """
+        Backend gia. Ghi lai moi request de kiem buoc don dep co chay khong.
+
+        Phan hoi loi dung DUNG hinh dang that cua FastAPI: `{"detail": ...}`,
+        khong co khoa `token`.
+        """
+        dem = {"n": 0}
+
+        def goi(base, method, path, payload=None, token=None, timeout=300):
+            self.da_goi.append((method, path))
+            if path == "/api/auth/register":
+                return 201, {"token": "tok-gia", "profile": {"user_id": "u1"}}
+            if path == "/api/auth/login":
+                dem["n"] += 1
+                if (payload or {}).get("password") == "sai-mat-khau":
+                    return 401, {"detail": "Sai mat khau."}
+                if dang_nhap_hong or (dang_nhap_lai_hong and dem["n"] > 1):
+                    return 401, {"detail": "Khong dang nhap duoc."}
+                return 200, {"token": "tok-gia", "profile": {"user_id": "u1"}}
+            if path == "/api/health":
+                return 200, {"environment": "staging", "inline_worker": False,
+                             "data_backend": "appwrite", "storage_backend": "r2"}
+            if path == "/api/ready":
+                return 200, {"status": "ready",
+                             "phu_thuoc": {"metadata": {"dat": True},
+                                           "storage": {"dat": True}}}
+            if path == "/api/novels" and method == "POST":
+                if not (payload or {}).get("title", "").strip():
+                    return 422, {"detail": "Tieu de trong."}
+                return 201, {"novel": {"novel_id": "nov_gia"}}
+            if path == "/api/chapters" and method == "POST":
+                return 201, {"chapter": {"chapter_id": "chp_gia"}}
+            if method == "DELETE" and path.startswith("/api/novels/"):
+                return 200, {"removed": {"chapters": 1}}
+            if path.startswith("/api/novels?mine=true"):
+                return 200, {"novels": []}
+            if path.startswith("/api/novels/"):
+                return 200, {"novel": {"title": "x"}, "chapters": [{}]}
+            # Job va audio phai co hinh dang THAT. Tra `{}` cho qua loa thi
+            # `buoc_tts` nem `KeyError: 'job'` va phep thu se do mot loi cua
+            # chinh ban gia lap, khong phai cua san pham.
+            if path == "/api/jobs" and method == "POST":
+                return 201, {"job": {"job_id": "job_gia", "status": "pending"}}
+            if path.startswith("/api/jobs/"):
+                return 200, {"job": {"job_id": "job_gia", "status": "completed",
+                                     "attempts": 1, "done_parts": 1,
+                                     "total_parts": 1}}
+            if path.startswith("/api/audio/") and path.endswith("/url"):
+                return 200, {"url": "https://vi-du.test/a.mp3?X-Amz-Signature=z"}
+            if path.startswith("/api/audio/"):
+                return 403, {"detail": "Không có quyền."}
+            return 200, {}
+
+        return goi
+
+    # -- chung minh loi CU that su ton tai --------------------------------
+
+    def test_the_old_direct_index_raised_keyerror(self):
+        """
+        Tai hien hanh vi CU tren dung hinh dang phan hoi that.
+
+        Khong co phep thu nay thi cac test duoi chi chung minh "ma moi chay
+        duoc", chu khong chung minh no SUA cai gi.
+        """
+        phan_hoi = {"detail": "Khong dang nhap duoc."}
+        with self.assertRaises(KeyError) as nc:
+            _ = phan_hoi["token"]
+        self.assertEqual(nc.exception.args[0], "token")
+
+    def test_the_source_no_longer_indexes_token_directly(self):
+        """
+        Xet MA, khong xet chu thich.
+
+        Ban dau phep thu nay quet ca tep va bat phai chinh dong chu thich dang
+        giai thich loi — mot khang dinh sai, no se bao dong ngay ca khi ma da
+        dung.
+        """
+        import io
+        import tokenize
+
+        nguon = (GOC / "scripts" / "staging_smoke.py").read_text(encoding="utf-8")
+        ma = []
+        for tok in tokenize.generate_tokens(io.StringIO(nguon).readline):
+            if tok.type not in (tokenize.COMMENT, tokenize.STRING):
+                ma.append(tok.string)
+        chi_ma = " ".join(ma)
+        self.assertNotIn('r [ "token" ]', chi_ma.replace('r["token"]', 'r [ "token" ]'),
+                         "phan hoi loi khong co khoa `token`")
+        for dong in nguon.splitlines():
+            hep = dong.split("#", 1)[0]
+            self.assertNotIn('r["token"]', hep,
+                             f"con doc thang khoa token: {dong.strip()[:70]}")
+        self.assertIn('r.get("token"', nguon)
+
+    # -- hanh vi MOI ------------------------------------------------------
+
+    def test_a_failed_login_raises_the_specific_error_not_keyerror(self):
+        self.mod.goi = self.gia_lap(dang_nhap_hong=True)
+        with self.assertRaises(self.mod.KhongDangNhapDuoc):
+            self.mod.buoc_xac_thuc("http://vi-du.test")
+
+    def test_the_guard_is_not_a_blanket_except(self):
+        """Bat `Exception` chung se nuot ca loi that. Chi duoc bat DUNG mot loai."""
+        import inspect
+
+        nguon = inspect.getsource(self.mod.main)
+        self.assertIn("except KhongDangNhapDuoc", nguon)
+        for rong in ("except Exception", "except BaseException", "except:"):
+            self.assertNotIn(rong, nguon, f"khong duoc bat {rong} o main()")
+
+    def test_a_successful_login_still_returns_the_token(self):
+        self.mod.goi = self.gia_lap()
+        tk = self.mod.buoc_xac_thuc("http://vi-du.test")
+        self.assertEqual(tk["tok_a"], "tok-gia")
+        self.assertEqual(tk["tok_b"], "tok-gia")
+
+    def test_main_does_not_crash_when_login_fails(self):
+        self.mod.goi = self.gia_lap(dang_nhap_hong=True)
+        try:
+            ma = self.mod.main(["--api", "http://vi-du.test",
+                                "--wake-timeout", "1"])
+        except KeyError as exc:
+            self.fail(f"van con KeyError: {exc}")
+        self.assertEqual(ma, 1, "co buoc hong thi phai thoat khac 0")
+
+    # -- cho thu hai: dang nhap "refresh" trong buoc noi dung --------------
+
+    def test_the_refresh_login_failure_still_returns_ids_for_cleanup(self):
+        """
+        Cho thu hai cung loai loi: `tok2 = r["token"]` trong `buoc_noi_dung`.
+
+        Luc do novel va chapter DA duoc tao. Sap o day nghia la `ids` khong bao
+        gio duoc tra ve, nen `main()` khong biet phai xoa gi.
+        """
+        self.mod.goi = self.gia_lap(dang_nhap_lai_hong=True)
+        tk = {"a": "a@example.test", "mk": "mk", "dau": "abcd1234",
+              "tok_a": "tok-gia", "tok_b": "tok-gia"}
+        ids = self.mod.buoc_noi_dung("http://vi-du.test", tk)
+        self.assertEqual(ids, {"novel": "nov_gia", "chapter": "chp_gia"},
+                         "phai tra ve id de con don duoc")
+
+    def test_cleanup_runs_even_when_the_refresh_login_fails(self):
+        self.mod.goi = self.gia_lap(dang_nhap_lai_hong=True)
+        self.mod.main(["--api", "http://vi-du.test", "--wake-timeout", "1"])
+        da_xoa = [d for m, d in self.da_goi
+                  if m == "DELETE" and d.startswith("/api/novels/")]
+        self.assertTrue(da_xoa, "phai goi DELETE de don fixture [SMOKE]")
+
+    def test_nothing_is_deleted_when_nothing_was_created(self):
+        self.mod.goi = self.gia_lap(dang_nhap_hong=True)
+        self.mod.main(["--api", "http://vi-du.test", "--wake-timeout", "1"])
+        self.assertEqual([d for m, d in self.da_goi if m == "DELETE"], [],
+                         "chua tao gi thi khong co gi de xoa")
+
+
 if __name__ == "__main__":
     unittest.main()

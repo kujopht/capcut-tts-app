@@ -32,6 +32,10 @@ from typing import Any, Dict, Optional, Tuple
 KET_QUA = []
 
 
+class KhongDangNhapDuoc(RuntimeError):
+    """Khong lay duoc token — dung som nhung van phai don dep."""
+
+
 def rut_gon_url(url: str) -> str:
     """
     Mo ta mot presigned URL ma KHONG lo gi.
@@ -147,7 +151,22 @@ def buoc_xac_thuc(api: str) -> Dict[str, Any]:
 
     ma, r = goi(api, "POST", "/api/auth/login", {"email": tk["a"], "password": tk["mk"]})
     kt("dang xuat roi dang nhap lai", ma == 200 and "token" in r, f"HTTP {ma}")
-    tk["tok_a"] = r["token"]
+    # `.get` chu khong truy cap thang bang khoa: dang nhap hong thi phan hoi la
+    # `{"detail": ...}`, khong co khoa `token`, va cach cu nem KeyError lam ca
+    # script sap giua chung — luc do buoc don dep khong chay va fixture
+    # `[SMOKE]` nam lai tren staging cho lan sau doc phai.
+    #
+    # KHONG lui ve token cua buoc dang ky. Lui nhu vay thi script chay tiep nhu
+    # the khong co gi xay ra, trong khi dieu vua duoc khang dinh — "dang xuat
+    # roi dang nhap lai duoc" — da that bai. Sai o dau thi dung o day.
+    tk["tok_a"] = r.get("token", "")
+
+    if not tk.get("tok_a"):
+        # Khong co token thi moi buoc sau deu se hong theo, va thong bao that su
+        # huu ich da nam o dong tren roi. Dung som, nhung van di qua `finally`
+        # cua `main()` de don nhung gi da tao.
+        raise KhongDangNhapDuoc(
+            "khong lay duoc token cho tai khoan A — cac buoc sau bi bo qua")
 
     ma, _ = goi(api, "POST", "/api/auth/login",
                 {"email": tk["a"], "password": "sai-mat-khau"})
@@ -179,9 +198,19 @@ def buoc_noi_dung(api: str, tk: Dict[str, Any]) -> Dict[str, str]:
     cid = r["chapter"]["chapter_id"]
 
     # "Refresh" = doc lai tu server bang mot token MOI, khong dua vao bo nho client.
-    _, r = goi(api, "POST", "/api/auth/login",
-               {"email": tk["a"], "password": tk["mk"]})
-    tok2 = r["token"]
+    #
+    # CUNG MOT LOAI LOI voi cho o `buoc_xac_thuc`: dang nhap hong thi phan hoi
+    # la `{"detail": ...}` chu khong co `token`, va `r["token"]` se nem
+    # KeyError giua chung. Luc do `ids` chua duoc tra ve, nen `main()` khong
+    # biet novel/chapter vua tao la gi va KHONG xoa duoc chung — fixture
+    # `[SMOKE]` nam lai tren staging.
+    ma_dn, r = goi(api, "POST", "/api/auth/login",
+                   {"email": tk["a"], "password": tk["mk"]})
+    tok2 = r.get("token", "")
+    if not kt("dang nhap lai de doc lai du lieu", bool(tok2), f"HTTP {ma_dn}"):
+        # Khong doc lai duoc thi khong khang dinh duoc gi ve tinh ben vung.
+        # Van tra ve `ids` de nhung thu vua tao con duoc don.
+        return {"novel": nid, "chapter": cid}
     ma, r = goi(api, "GET", f"/api/novels/{nid}", None, tok2)
     kt("doc lai sau khi dang nhap lai: du lieu con nguyen",
        ma == 200 and len(r.get("chapters", [])) == 1, f"HTTP {ma}")
@@ -331,6 +360,9 @@ def main(argv=None) -> int:
         buoc_tts(a.api, tk, ids, a.voice, a.job_timeout)
         buoc_phan_quyen(a.api, tk, ids)
         buoc_giao_dien(a.web)
+    except KhongDangNhapDuoc as exc:
+        print()
+        print(f"  DUNG SOM: {exc}")
     finally:
         # Don du co buoc nao hong: khong de fixture lai tren staging.
         if tk.get("tok_a"):

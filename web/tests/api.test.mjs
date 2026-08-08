@@ -37,6 +37,23 @@ test("trang thai job khop voi backend", () => {
   assert.match(src, /"pending" \| "running" \| "completed" \| "failed"/);
 });
 
-test("voice co co danh dau commercial_ready", () => {
-  assert.match(src, /commercial_ready: boolean/);
+/*
+ * `commercial_ready` da bi thay bang `public_enabled`.
+ *
+ * Ten cu la mot phan doan ve GIAY PHEP, thu ma may chu khong biet va khong nen
+ * doan. `public_enabled` la mot su that ky thuat: giong nay co nam trong danh
+ * sach trang o `server/tts_bridge.py` hay khong.
+ */
+test("voice co co danh dau public_enabled", () => {
+  assert.match(src, /public_enabled: boolean/);
+  assert.doesNotMatch(src, /commercial_ready: boolean/);
+});
+
+/*
+ * Model Piper nam tren may worker, khong nam trong tien trinh API. Tren Render
+ * khong co file `.onnx` nao nen `installed` o do LUON false — loc theo mot
+ * minh no thi Ngoc Huyen khong bao gio hien ra du da duoc duyet.
+ */
+test("voice co co runs_on_worker de phan biet model o dau", () => {
+  assert.match(src, /runs_on_worker: boolean/);
 });

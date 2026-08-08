@@ -22,7 +22,14 @@ import {
 } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
-import { defaultVoiceId, usableVoices } from "@/lib/voices";
+import {
+  ALL_VOICES_LABEL,
+  RECOMMENDED_LABEL,
+  defaultVoiceId,
+  usableVoices,
+  voiceOptionLabel,
+  voiceSections,
+} from "@/lib/voices";
 import { fanficOnly } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import {
@@ -191,6 +198,8 @@ export default function WritePage() {
     [novels, selectedId],
   );
   const availableVoices = useMemo(() => usableVoices(voices), [voices]);
+  // Hai muc, cung mot bo ban ghi. Xem `voiceSections`.
+  const voiceGroups = useMemo(() => voiceSections(voices), [voices]);
   const published = selected?.state === "published";
 
   /* ------------------------------------------------------------- truyen */
@@ -746,11 +755,27 @@ export default function WritePage() {
                           value={voiceId}
                           onChange={(e) => setVoiceId(e.target.value)}
                         >
-                          {availableVoices.map((voice) => (
-                            <option key={voice.voice_id} value={voice.voice_id}>
-                              {voice.display_name}
-                            </option>
-                          ))}
+                          {/* Hai mục, MỘT `<select>` — xem `voiceSections`. */}
+                          <optgroup label={RECOMMENDED_LABEL}>
+                            {voiceGroups.recommended.map((voice) => (
+                              <option
+                                key={`goi-y-${voice.voice_id}`}
+                                value={voice.voice_id}
+                              >
+                                {voiceOptionLabel(voice)}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label={ALL_VOICES_LABEL}>
+                            {voiceGroups.all.map((voice) => (
+                              <option
+                                key={voice.voice_id}
+                                value={voice.voice_id}
+                              >
+                                {voiceOptionLabel(voice)}
+                              </option>
+                            ))}
+                          </optgroup>
                         </select>
                       </div>
                     ) : null}

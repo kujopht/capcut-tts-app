@@ -85,8 +85,30 @@ export interface Voice {
   status: string;
   status_label: string;
   status_reason: string;
-  /** Giong chay cuc bo chua xac minh giay phep -> false. */
-  commercial_ready: boolean;
+  /**
+   * Giong nay dang duoc phuc vu nguoi dung hay khong.
+   *
+   * Thay cho `commercial_ready` truoc day. Ten cu la mot phan doan ve GIAY
+   * PHEP — thu ma may chu khong biet va khong nen doan. Day la mot su that ky
+   * thuat: no den tu danh sach trang o `server/tts_bridge.py`.
+   */
+  public_enabled: boolean;
+  /**
+   * Model nam tren may worker, khong nam trong tien trinh API.
+   *
+   * Voi giong nay, `installed` cua API KHONG noi len dieu gi: Render khong co
+   * file `.onnx` nao nen no luon false. Dung co nay de quyet dinh hien thi.
+   */
+  runs_on_worker: boolean;
+  /** Thuoc muc "Giong de xuat" (bay giong do chu du an chon trong app desktop). */
+  recommended: boolean;
+  /**
+   * Thu tu trong muc de xuat, tinh tu 0. `null` khi khong thuoc muc do.
+   *
+   * Do MAY CHU cap, lay tu `desktop_app/providers/recommended.py`. Frontend
+   * khong duoc tu sap xep lai.
+   */
+  recommended_order: number | null;
 }
 
 export interface TtsJob {

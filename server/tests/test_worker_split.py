@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from server import main as server_main
+from server.tests.voice_stub import dung_registry_gia
 from server.adapters import LocalStorageAdapter, MockIdentityAdapter, MockMetadataStore
 from server.config import ConfigError, _env_bool
 from server.domain import JobStatus, TtsJob, job_fingerprint
@@ -23,6 +24,7 @@ from server.domain import JobStatus, TtsJob, job_fingerprint
 
 class Base(unittest.TestCase):
     def setUp(self) -> None:
+        dung_registry_gia(self)
         server_main.identity = MockIdentityAdapter()
         server_main.store = MockMetadataStore()
         self._storage = server_main.storage

@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 #: Thu muc du lieu runtime cua backend (audio tam, kho file mock).
 #: Nam trong server/var/ va da duoc .gitignore chan.
@@ -171,9 +171,37 @@ class Settings:
     appwrite: AppwriteSettings = field(default_factory=AppwriteSettings)
     r2: R2Settings = field(default_factory=R2Settings)
 
-    #: Giong/model chay cuc bo chua xac minh giay phep. CHI bat o development;
-    #: khong duoc danh dau la san sang thuong mai.
+    #: KHONG con la cong chan cho giong cuc bo — xem `local_voices` ngay duoi.
+    #:
+    #: Giu lai vi `/api/health` van bao ra no va vi no mo ta dung mot su that ve
+    #: moi truong. Nhung mot co BAT-TAT-TAT-CA la dung cai co the vo tinh mo mot
+    #: giong chua ai kiem tra: doi mot bien moi truong la ca ba giong Piper
+    #: built-in cung hien ra, ke ca hai giong khong co model. Quyet dinh giong
+    #: nao duoc phuc vu phai la mot DANH SACH, khong phai mot boolean.
     allow_unverified_local_voices: bool = True
+
+    #: Danh sach TRANG voice_id cuc bo duoc phuc vu. Mac dinh dung mot giong.
+    #:
+    #: Doc tu `FAS_LOCAL_VOICES` (ngan cach bang dau phay). `server/tts_bridge.py`
+    #: con giao them mot vong nua: id nao khong thuoc bo NghiTTS trong catalog
+    #: thi bi bo qua, nen mot lan go nham khong bien thanh mot giong la duoc
+    #: cong bo.
+    #:
+    #: `piper:ngochuyen` la mac dinh vi no la giong DUY NHAT da probe that tren
+    #: may nay: nap duoc model, sinh MP3 22050 Hz doc duoc, co tieng noi that.
+    #: Hai giong NghiTTS con lai chua co model nen khong duoc quang ba — quang
+    #: ba mot giong khong worker nao chay duoc chi tao ra job nam mai.
+    local_voices: Tuple[str, ...] = ("piper:ngochuyen",)
+
+    #: Ngon ngu duoc phuc vu tren WEB. Doc tu `FAS_PUBLIC_VOICE_LANGUAGES`.
+    #:
+    #: So khop theo TIEN TO ma ngon ngu, nen "vi" bat duoc ca "vi-VN".
+    #:
+    #: Day la pham vi cua RIENG web. Registry van giu du 452 giong moi thu
+    #: tieng — desktop app va ma cu van dung chung registry do, va xoa giong
+    #: nuoc ngoai khoi registry la pha ho. Mo lai them ngon ngu sau nay chi la
+    #: doi mot bien moi truong, khong phai sua ma nguon.
+    public_voice_languages: Tuple[str, ...] = ("vi",)
 
     #: Tien trinh web co tu chay job TTS trong thread nen hay khong.
     #:
@@ -275,9 +303,43 @@ class Settings:
             "appwrite_configured": self.appwrite.configured,
             "r2_configured": self.r2.configured,
             "allow_unverified_local_voices": self.allow_unverified_local_voices,
+            # Bao ra de nguoi van hanh thay NGAY giong cuc bo nao dang duoc
+            # phuc vu, thay vi phai doan tu bien moi truong. Day la id giong,
+            # khong phai bi mat.
+            "local_voices": list(self.local_voices),
+            "public_voice_languages": list(self.public_voice_languages),
             "env_file_loaded": self.env_file_loaded,
             "inline_worker": self.inline_worker,
         }
+
+
+def _local_voices() -> Tuple[str, ...]:
+    """
+    Doc `FAS_LOCAL_VOICES`. Khong dat -> giu mac dinh cua `Settings`.
+
+    Dat bang chuoi RONG la co y tat het giong cuc bo, khac han voi khong dat.
+    Phan biet duoc hai cai do la quan trong: "tat het" phai lam duoc ma khong
+    can sua ma nguon.
+    """
+    raw = os.environ.get("FAS_LOCAL_VOICES")
+    if raw is None:
+        return Settings.local_voices
+    return tuple(v.strip() for v in raw.split(",") if v.strip())
+
+
+def _public_voice_languages() -> Tuple[str, ...]:
+    """
+    Doc `FAS_PUBLIC_VOICE_LANGUAGES`. Khong dat -> giu mac dinh.
+
+    Chuoi RONG nghia la KHONG GIOI HAN ngon ngu — khac han `FAS_LOCAL_VOICES`,
+    o do chuoi rong nghia la tat het. Hai bien, hai y nghia nguoc nhau, va do la
+    co y: mot ben la danh sach cho phep (rong = khong cho ai), ben kia la bo loc
+    thu hep (rong = khong loc gi).
+    """
+    raw = os.environ.get("FAS_PUBLIC_VOICE_LANGUAGES")
+    if raw is None:
+        return Settings.public_voice_languages
+    return tuple(v.strip().lower() for v in raw.split(",") if v.strip())
 
 
 def load_settings() -> Settings:
@@ -320,6 +382,8 @@ def load_settings() -> Settings:
             bucket=_env("R2_BUCKET"),
         ),
         allow_unverified_local_voices=allow_unverified,
+        local_voices=_local_voices(),
+        public_voice_languages=_public_voice_languages(),
         inline_worker=_env_bool("FAS_INLINE_WORKER", True),
         allow_inline_worker_in_real_env=_env_bool(
             "FAS_ALLOW_INLINE_WORKER_IN_REAL_ENV", False),

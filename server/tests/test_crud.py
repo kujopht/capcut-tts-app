@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 from fastapi.testclient import TestClient
 
 from server import main as server_main
+from server.tests.voice_stub import dung_registry_gia
 from server import tts_bridge
 from server.adapters import LocalStorageAdapter, MockIdentityAdapter, MockMetadataStore
 
@@ -35,6 +36,7 @@ def _fake_synthesize(text, voice_id, dest, rate="1.0", chunk_chars=2000,
 
 class CrudTestCase(unittest.TestCase):
     def setUp(self) -> None:
+        dung_registry_gia(self)
         server_main.identity = MockIdentityAdapter()
         server_main.store = MockMetadataStore()
         self._real_storage = server_main.storage

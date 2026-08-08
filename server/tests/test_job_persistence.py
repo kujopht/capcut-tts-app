@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from fastapi.testclient import TestClient
 
 from server import main as server_main
+from server.tests.voice_stub import dung_registry_gia
 from server import tts_bridge
 from server.adapters import LocalStorageAdapter, MockIdentityAdapter, MockMetadataStore
 from server.domain import AudioTrack, JobStatus, TtsJob
@@ -122,6 +123,7 @@ class BrokenStorage(LocalStorageAdapter):
 
 class JobLifecycleTestCase(unittest.TestCase):
     def setUp(self) -> None:
+        dung_registry_gia(self)
         self.calls: List[str] = []
         self._tmp = tempfile.mkdtemp()
 

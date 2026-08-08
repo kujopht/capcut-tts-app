@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 from fastapi.testclient import TestClient
 
 from server import main as server_main
+from server.tests.voice_stub import dung_registry_gia
 from server import tts_bridge
 from server.adapters import LocalStorageAdapter, MockIdentityAdapter, MockMetadataStore
 
@@ -51,6 +52,7 @@ class SignedStorage(LocalStorageAdapter):
 
 class AudioUrlTestCase(unittest.TestCase):
     def setUp(self) -> None:
+        dung_registry_gia(self)
         server_main.identity = MockIdentityAdapter()
         server_main.store = MockMetadataStore()
         self._real_storage = server_main.storage
@@ -176,6 +178,7 @@ class TestSignedStorageShape(AudioUrlTestCase):
     """Kho co URL ky (R2) -> tra URL de gan thang vao <audio src>."""
 
     def setUp(self) -> None:
+        dung_registry_gia(self)
         super().setUp()
         server_main.storage = SignedStorage(Path(tempfile.mkdtemp()))
         SignedStorage.last_download_name = None

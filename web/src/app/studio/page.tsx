@@ -19,7 +19,14 @@ import {
 } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
-import { defaultVoiceId, usableVoices } from "@/lib/voices";
+import {
+  ALL_VOICES_LABEL,
+  RECOMMENDED_LABEL,
+  defaultVoiceId,
+  usableVoices,
+  voiceOptionLabel,
+  voiceSections,
+} from "@/lib/voices";
 import { ensureStudioNovel } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import {
@@ -161,6 +168,8 @@ export default function StudioPage() {
   /* ------------------------------------------------------------- dan xuat */
 
   const availableVoices = useMemo(() => usableVoices(voices), [voices]);
+  // Hai muc, cung mot bo ban ghi. Xem `voiceSections`.
+  const voiceGroups = useMemo(() => voiceSections(voices), [voices]);
 
   const chapterById = useMemo(() => {
     const map = new Map<string, Chapter>();
@@ -353,11 +362,30 @@ export default function StudioPage() {
                       value={voiceId}
                       onChange={(e) => setVoiceId(e.target.value)}
                     >
-                      {availableVoices.map((voice) => (
-                        <option key={voice.voice_id} value={voice.voice_id}>
-                          {voice.display_name} · {voice.provider_label}
-                        </option>
-                      ))}
+                      {/*
+                        Hai mục, MỘT `<select>`. Bảy giọng đề xuất xuất hiện lại
+                        trong "Tất cả giọng tiếng Việt" — đó là chủ ý: hai cách
+                        trình bày cùng một bộ bản ghi, không nhân bản voice nào.
+                        Vì cùng một `value`, chọn ở mục này đồng bộ ngay với mục
+                        kia mà không cần trạng thái thứ hai.
+                      */}
+                      <optgroup label={RECOMMENDED_LABEL}>
+                        {voiceGroups.recommended.map((voice) => (
+                          <option
+                            key={`goi-y-${voice.voice_id}`}
+                            value={voice.voice_id}
+                          >
+                            {voiceOptionLabel(voice)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label={ALL_VOICES_LABEL}>
+                        {voiceGroups.all.map((voice) => (
+                          <option key={voice.voice_id} value={voice.voice_id}>
+                            {voiceOptionLabel(voice)}
+                          </option>
+                        ))}
+                      </optgroup>
                     </select>
                   )}
                 </div>
@@ -417,7 +445,18 @@ export default function StudioPage() {
                 {activeJob.status === "pending" ? (
                   <>
                     <ProgressBar percent={6} indeterminate label="Đang xếp hàng" />
-                    <p className="hint">Job đã nhận, đang chờ tới lượt xử lý.</p>
+                    {/*
+                      Giọng Ngọc Huyền chạy trên máy worker, không chạy trên
+                      máy chủ. Máy đó tắt thì job nằm `pending` — không hỏng,
+                      không bị đổi sang giọng khác, và sẽ được xử lý khi máy
+                      bật lại. Phải nói ra điều đó: một thanh tiến trình quay
+                      mãi mà không giải thích thì người dùng chỉ biết là hỏng.
+                    */}
+                    <p className="hint">
+                      {activeJob.voice_id.startsWith("piper:")
+                        ? "Job đã nhận và đang chờ máy tạo giọng. Giọng này xử lý trên máy riêng — nếu máy đang tắt, job vẫn được giữ nguyên và sẽ chạy khi máy bật lại. Bạn có thể đóng trang này."
+                        : "Job đã nhận, đang chờ tới lượt xử lý."}
+                    </p>
                   </>
                 ) : null}
 

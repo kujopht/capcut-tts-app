@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 from fastapi.testclient import TestClient
 
 from server import main as server_main
+from server.tests.voice_stub import dung_registry_gia
 from server import reconcile
 from server.adapters import (
     LocalStorageAdapter,
@@ -45,6 +46,7 @@ def hours_ago(hours: float) -> str:
 
 class Base(unittest.TestCase):
     def setUp(self) -> None:
+        dung_registry_gia(self)
         server_main.identity = MockIdentityAdapter()
         self.store = MockMetadataStore()
         server_main.store = self.store
@@ -440,6 +442,7 @@ class TestJobResponseStaysCompatible(Base):
 
 class ReconcileBase(Base):
     def setUp(self) -> None:
+        dung_registry_gia(self)
         super().setUp()
         self.token = self.user()
         self.owner = self.owner_id(self.token)

@@ -1366,6 +1366,18 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
     if not (chapter.content or "").strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chương này chưa có nội dung.")
 
+    # CUNG danh sach trang ma `/api/voices` dung. Mot giong bi an khoi danh
+    # sach nhung van submit job duoc la lo hong kinh dien — va la trang thai
+    # cua he thong nay truoc day: `/api/voices` loc giong cuc bo, con
+    # `POST /api/jobs` khong he kiem tra `voice_id`.
+    #
+    # Kiem o day, TRUOC khi tao job: job da ghi xuong roi moi tu choi thi
+    # nguoi dung se thay mot job `failed` thay vi mot loi doc duoc.
+    try:
+        tts_bridge.ensure_voice_public(payload.voice_id, settings)
+    except tts_bridge.TtsBridgeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, exc.message) from exc
+
     fingerprint = job_fingerprint(
         chapter.content, payload.voice_id, payload.rate, payload.chunk_chars
     )

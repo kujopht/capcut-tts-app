@@ -14,6 +14,7 @@ from typing import Any, Dict
 from fastapi.testclient import TestClient
 
 from server import main as server_main
+from server.tests.voice_stub import dung_registry_gia
 from server import tts_bridge
 from server.adapters import MockIdentityAdapter, MockMetadataStore
 from server.domain import JobStatus, job_fingerprint
@@ -34,6 +35,7 @@ class ApiTestCase(unittest.TestCase):
     """Moi test dung mot server sach de khong phu thuoc thu tu chay."""
 
     def setUp(self) -> None:
+        dung_registry_gia(self)
         server_main.identity = MockIdentityAdapter()
         server_main.store = MockMetadataStore()
         self._real_synth = tts_bridge.synthesize_chapter

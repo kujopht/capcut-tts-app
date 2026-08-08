@@ -64,8 +64,16 @@ export default function RootLayout({
                 <span>
                   Fanfic Audio Studio — bản MVP riêng tư, chưa thương mại.
                 </span>
+                {/*
+                  Câu cũ ở đây là "Giọng đọc chạy cục bộ chưa xác minh giấy
+                  phép thương mại." Chủ dự án đã cho phép công bố các giọng
+                  NghiTTS và chịu trách nhiệm về quyền sử dụng, nên câu đó
+                  không còn đúng. Thay bằng một sự thật kỹ thuật người dùng
+                  cần biết: một số giọng xử lý trên máy riêng, nên có thể phải
+                  chờ.
+                */}
                 <span className="hint">
-                  Giọng đọc chạy cục bộ chưa xác minh giấy phép thương mại.
+                  Một số giọng được xử lý trên máy riêng nên có thể phải chờ.
                 </span>
               </div>
             </footer>

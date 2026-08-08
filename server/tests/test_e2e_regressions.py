@@ -7,6 +7,7 @@ phai tu suy doan. Docstring ghi lai buoc tai hien.
 
 from __future__ import annotations
 
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -116,14 +117,19 @@ class TestTitleIsTrimmedBeforeItIsMeasured(Base):
 
 class TestTheInvalidVoicePathIsSafe(Base):
     """
-    KHONG phai loi, nhung phai khoa lai hanh vi: giong khong ton tai lam job
-    THAT BAI voi `voice_not_found`, TUYET DOI khong tu doi sang giong khac.
+    Giong khong dung duoc thi TUYET DOI khong duoc thay bang giong khac.
 
-    Da xac minh tren backend that: job `failed`, `error_kind='voice_not_found'`,
-    `voice_id` giu nguyen, khong sinh audio.
+    Y DO GIU NGUYEN, CHO CHAN DOI SOM HON. Truoc day route tao job khong he
+    xem `voice_id`: job duoc ghi xuong kho, chay o thread nen, roi that bai voi
+    `error_kind='voice_not_found'`. Nay pham vi giong duoc cuong che NGAY o
+    route (`ensure_voice_public`), nen mot id khong dung duoc bi tu choi 400
+    truoc khi co job nao ton tai.
+
+    Ca hai deu khong doi giong. Nhung tra loi ngay tai cho la thu nguoi dung
+    doc duoc, con mot job `failed` vai giay sau thi khong.
     """
 
-    def test_a_missing_voice_fails_the_job_without_substituting(self):
+    def test_a_missing_voice_is_rejected_and_creates_no_job(self):
         nid = self.client.post("/api/novels", json={"title": "T"},
                                headers=self.head).json()["novel"]["novel_id"]
         cid = self.client.post(
@@ -134,21 +140,25 @@ class TestTheInvalidVoicePathIsSafe(Base):
         r = self.client.post("/api/jobs",
                              json={"chapter_id": cid, "voice_id": "khong:ton-tai"},
                              headers=self.head)
-        self.assertIn(r.status_code, (200, 201, 202), r.text[:200])
-        job_id = r.json()["job"]["job_id"]
 
-        # Job chay o thread nen. Doi CHINH thread do ket thuc — khong sleep bua.
-        luong = server_main._job_threads.get(job_id)
-        if luong is not None:
-            luong.join(timeout=30)
-            self.assertFalse(luong.is_alive(), "job treo qua lau")
+        self.assertEqual(r.status_code, 400, r.text[:200])
+        self.assertIn("khong:ton-tai", r.json()["detail"],
+                      "thông báo phải nói rõ id nào bị từ chối")
 
-        sau = self.client.get(f"/api/jobs/{job_id}", headers=self.head).json()["job"]
-        self.assertEqual(sau["status"], "failed")
-        self.assertEqual(sau["error_kind"], "voice_not_found")
-        self.assertEqual(sau["voice_id"], "khong:ton-tai",
-                         "khong duoc thay bang giong khac")
-        self.assertIsNone(sau["output_key"])
+        # KHONG co job nao duoc tao — va do la diem chinh. Mot job rac nam lai
+        # o trang thai `failed` cho mot id bia dat la thu khong ai can.
+        con_lai = self.client.get("/api/jobs", headers=self.head).json()
+        self.assertEqual(con_lai["count"], 0, con_lai)
+
+    def test_no_substitute_voice_is_ever_chosen(self):
+        """Tu choi thi phai tu choi han, khong duoc lang le doi sang giong khac."""
+        nguon = inspect.getsource(server_main.create_job)
+        vi_tri = nguon.index("ensure_voice_public")
+        # Doan ngay sau lan kiem tra: chi duoc nem HTTPException, khong duoc gan
+        # lai `payload.voice_id` thanh mot giong nao khac.
+        sau = nguon[vi_tri:vi_tri + 400]
+        self.assertIn("HTTPException", sau)
+        self.assertNotIn("voice_id =", sau)
 
     def test_a_chapter_with_no_content_cannot_start_a_job(self):
         nid = self.client.post("/api/novels", json={"title": "T"},

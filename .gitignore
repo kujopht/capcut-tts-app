@@ -98,6 +98,10 @@ node_modules/
 server/__pycache__/
 server/.pytest_cache/
 server/var/
+# Moi thu muc runtime cua worker, ke ca ban rieng cua tung moi truong.
+# `FAS_VAR_DIR` cua production tro vao `server/var-production/` — trong do co
+# tep nhip va tep audio tam. Khong bao gio commit du lieu runtime.
+server/var-*/
 server/.venv/
 
 # --- Bien moi truong: chan het TRU file mau ---

@@ -747,7 +747,32 @@ hỏng đều đẩy job sang `failed` và xoá `output_key`.
 object mồ côi, vì `create_track` đã chạy xong trước đó nên object vẫn được tham
 chiếu. Đường sinh object mồ côi thật sự là **`create_track` hỏng**.
 
-### Độ dài chương — đã đo, chưa đặt hạn mức
+### Hạn mức — đã đặt (2026-08-08)
+
+| Hạn mức | Giá trị | Biến | Cưỡng chế ở đâu |
+|---|---|---|---|
+| Độ dài nội dung chương | 100.000 ký tự | `FAS_MAX_CHAPTER_CHARS` | `ChapterIn` và `ChapterPatch` → 422 |
+| Job đang xếp hàng mỗi người | 3 | `FAS_MAX_ACTIVE_JOBS` | `POST /api/jobs` → 429 |
+
+Trước vòng này **không có hạn mức nào ở máy chủ**. `/studio` có rào 20.000 ký
+tự nhưng đó là rào ở trình duyệt — gọi thẳng API là đi qua, và `/write` không
+có rào nào cả. Trần duy nhất là cột `content` của Appwrite: 1.000.000 ký tự =
+525 đoạn = vài tiếng CPU trên máy worker cho **một** lần bấm nút.
+
+Trần job xếp hàng tính **theo từng người** và **không** chặn nhánh dùng-lại-job
+-cũ (nhánh đó không tạo thêm việc cho worker). Nó là ràng buộc lịch sự, không
+phải rào bảo mật — thứ thật sự bảo vệ máy worker là concurrency Piper bằng 1.
+
+`web/src/lib/limits.ts` chép lại con số để giao diện báo trước;
+`server/tests/test_limits.py` đọc chính file đó và so hai số, nên chúng không
+trôi khỏi nhau được.
+
+**Vẫn chưa có**: hạn mức TTS theo người dùng. `Profile.tier` và
+`tts_characters_used` có trong domain nhưng **chưa chỗ nào ghi** — cần thêm
+trường mốc chu kỳ vào schema Appwrite, tức là một lần migration. Đó là quyết
+định sản phẩm (con số, chu kỳ, chuyện gì xảy ra khi chạm trần), chưa làm.
+
+### Độ dài chương — số đo của chunker
 
 `chunk_chars` mặc định 2000. Đo bằng `desktop_app.text_chunker.chunk_text`:
 60.000 ký tự → 32 đoạn; 1.000.000 ký tự → 525 đoạn.

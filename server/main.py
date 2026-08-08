@@ -159,6 +159,28 @@ def _lease_until(seconds: int = JOB_LEASE_SECONDS) -> str:
 TieuDe = Annotated[str, StringConstraints(
     strip_whitespace=True, min_length=1, max_length=200)]
 
+#: Do dai toi da cua NOI DUNG mot chuong, tinh bang ky tu.
+#:
+#: Truoc day khong co gioi han nao o may chu. Trang `/studio` co mot rao 20.000
+#: ky tu nhung do la rao O TRINH DUYET — goi thang `POST /api/chapters` la di
+#: qua, va trang `/write` thi khong co rao nao ca. Tran duy nhat la cot
+#: `content` cua Appwrite: 1.000.000 ky tu, tuc la 525 doan, tuc la vai tieng
+#: CPU tren may worker cho MOT lan bam nut.
+#:
+#: 100.000 ky tu la khoang 53 doan, uoc chung hai tieng ruoi audio — da rong
+#: rai hon mot chuong fanfic dai (60.000 ky tu, 32 doan) kha nhieu. Doi duoc
+#: bang `FAS_MAX_CHAPTER_CHARS` khi co may manh hon.
+MAX_CHAPTER_CHARS = int(os.environ.get("FAS_MAX_CHAPTER_CHARS", "100000"))
+
+#: Bao nhieu job cua CUNG mot nguoi duoc xep hang cung luc.
+#:
+#: Giong Piper chay tren dung MOT may, va concurrency cua no la 1. Khong co
+#: tran nay thi mot nguoi dung xep 50 chuong la worker ban ca ngay, con moi
+#: nguoi khac cho sau lung ho — khong ai hong gi, nhung dich vu coi nhu dung.
+MAX_ACTIVE_JOBS = int(os.environ.get("FAS_MAX_ACTIVE_JOBS", "3"))
+
+NoiDungChuong = Annotated[str, StringConstraints(max_length=MAX_CHAPTER_CHARS)]
+
 
 class RegisterIn(BaseModel):
     email: str
@@ -180,7 +202,7 @@ class NovelIn(BaseModel):
 class ChapterIn(BaseModel):
     novel_id: str
     title: TieuDe
-    content: str = ""
+    content: NoiDungChuong = ""
     order_index: int = 1
 
 
@@ -194,7 +216,9 @@ class NovelPatch(BaseModel):
 
 class ChapterPatch(BaseModel):
     title: Optional[TieuDe] = None
-    content: Optional[str] = None
+    # CUNG rang buoc voi `ChapterIn`. Chan luc tao ma khong chan luc sua thi
+    # chi la mot buoc vong: tao chuong ngan roi PATCH mot trieu ky tu vao.
+    content: Optional[NoiDungChuong] = None
     order_index: Optional[int] = None
 
 
@@ -1423,6 +1447,23 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
                 "thành phần ngắn hơn.",
             )
         return {"job": store.get_job(existing.job_id).to_dict(), "reused": True}
+
+    # TRAN SO JOB DANG XEP HANG cua chinh nguoi nay.
+    #
+    # SAU nhanh dung-lai-job-cu o tren, co y: nhanh do khong tao them viec cho
+    # worker nao ca, chan no chi lam nguoi dung khong xem lai duoc audio da co.
+    #
+    # Dem o day chi la mot anh chup — hai request song song deu co the thay 2 va
+    # cung tao job thu 3. Chap nhan duoc: day la ran de lich su chu khong phai
+    # rao bao mat. Thu that su bao ve may worker la concurrency Piper bang 1.
+    dang_xep = sum(1 for j in store.list_jobs(profile.user_id)
+                   if j.status in (JobStatus.PENDING, JobStatus.RUNNING))
+    if dang_xep >= MAX_ACTIVE_JOBS:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            f"Bạn đang có {dang_xep} audio chờ xử lý. Hãy đợi xong bớt rồi tạo "
+            f"tiếp (tối đa {MAX_ACTIVE_JOBS} cùng lúc).",
+        )
 
     # transition: (khong co) -> pending. Ghi ben vung NGAY, truoc khi khoi
     # dong thread, de job luon ton tai trong metadata backend du worker chet.

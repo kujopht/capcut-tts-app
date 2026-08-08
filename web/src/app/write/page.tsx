@@ -22,6 +22,7 @@ import {
 } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
+import { MAX_CHAPTER_CHARS } from "@/lib/limits";
 import {
   ALL_VOICES_LABEL,
   RECOMMENDED_LABEL,
@@ -810,8 +811,16 @@ export default function WritePage() {
                                 <label className="label" htmlFor="w-ch-edit-text">
                                   Nội dung
                                 </label>
-                                <span className="counter">
-                                  {formatNumber(chEditText.length)} ký tự
+                                <span
+                                  className="counter"
+                                  style={
+                                    chEditText.length > MAX_CHAPTER_CHARS
+                                      ? { color: "var(--danger, #f66)" }
+                                      : undefined
+                                  }
+                                >
+                                  {formatNumber(chEditText.length)} /{" "}
+                                  {formatNumber(MAX_CHAPTER_CHARS)} ký tự
                                 </span>
                               </div>
                               <textarea
@@ -1028,8 +1037,16 @@ export default function WritePage() {
                       <label className="label" htmlFor="w-ch-text">
                         Nội dung
                       </label>
-                      <span className="counter">
-                        {formatNumber(chapterText.length)} ký tự
+                      <span
+                        className="counter"
+                        style={
+                          chapterText.length > MAX_CHAPTER_CHARS
+                            ? { color: "var(--danger, #f66)" }
+                            : undefined
+                        }
+                      >
+                        {formatNumber(chapterText.length)} /{" "}
+                        {formatNumber(MAX_CHAPTER_CHARS)} ký tự
                       </span>
                     </div>
                     <textarea

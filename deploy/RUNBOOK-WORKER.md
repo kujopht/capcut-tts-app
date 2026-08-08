@@ -33,8 +33,10 @@ Windows. Ba hệ quả đo được:
   `ffmpeg -c copy`. Thiếu ffmpeg thì job hỏng với `MERGE_ERROR`.
 
   Cái bẫy: chương ngắn chỉ có **một** đoạn, và một đoạn thì chỉ đổi tên tệp,
-  không gọi ffmpeg. Nên `scripts/staging_smoke.py` — dùng chương 3 câu — sẽ
-  **xanh trên một VM thiếu ffmpeg**. Kiểm tra thẳng:
+  không gọi ffmpeg. `scripts/staging_smoke.py` từng dính đúng bẫy này — chương
+  3 câu nên nó **xanh trên một VM thiếu ffmpeg**. Nay mục 8 của bộ nghiệm thu
+  cố ý ép ra nhiều đoạn nên lỗi này bị bắt; nhưng thêm `--skip-local-voice` là
+  bẫy quay lại. Kiểm tra thẳng cho chắc:
 
   ```bash
   ffmpeg -version | head -1
@@ -131,7 +133,16 @@ PYTHONPATH=. FAS_ENV_FILE=server/.env.staging python scripts/staging_smoke.py \
   --web https://fas-staging-web-free.onrender.com
 ```
 
-Phải ra **61/61** và `attempts=1`.
+Phải ra **77/77** và `attempts=1`.
+
+Bộ nghiệm thu **có** chạy một job bằng giọng chạy trên worker
+(`piper:ngochuyen`) với `chunk_chars` nhỏ, cố ý ép ra **nhiều đoạn** để đường
+ghép ffmpeg thật sự được chạy. Đó là lý do mục 2 nói ffmpeg là bắt buộc —
+trước đây chương smoke chỉ có một đoạn nên một máy thiếu ffmpeg vẫn cho kết
+quả xanh.
+
+Máy tạo giọng đang tắt thì thêm `--skip-local-voice`; nhưng khi đó đường ghép
+ffmpeg **không** được kiểm, nên đừng dùng cờ này để nghiệm thu một máy mới.
 
 ---
 
@@ -193,7 +204,7 @@ Không ra gì là đúng.
 |---|---|---|
 | Service `failed`, exit code 2 | `FAS_ENV` khác `staging` — nạp nhầm cấu hình | Sửa `worker.env`. `RestartPreventExitStatus=2` cố tình **không** restart: lỗi cấu hình restart bao nhiêu lần cũng không khỏi |
 | `activating` rồi sập lặp lại, dừng sau 5 lần | `StartLimitBurst` chặn | `journalctl -u fanfic-worker -n 50`, sửa, rồi `systemctl reset-failed fanfic-worker` |
-| Job hỏng với `MERGE_ERROR` | Thiếu ffmpeg | `apt-get install ffmpeg`. Smoke test **không** bắt được lỗi này (chương 1 đoạn) |
+| Job hỏng với `MERGE_ERROR` | Thiếu ffmpeg | `apt-get install ffmpeg`. Mục 8 của bộ nghiệm thu bắt được — trừ khi chạy với `--skip-local-voice` |
 | Worker `active` nhưng không nhận job | Vòng quét treo | Timer healthcheck tự restart trong ~3 phút. Kiểm tay: `journalctl -u fanfic-worker-health -n 20` |
 | Job kết `running` mãi | Worker chết mà lease chưa hết | Tự khỏi sau 90s: bộ quét nhận lại. Quá 3 lần thì job `failed` kèm lý do đọc được |
 | `attempts` > 1 với job chạy bình thường | **Đã sửa** ở vòng này. Nếu tái xuất hiện thì lease/heartbeat lại hỏng — xem `server/tests/test_lease_hardening.py` |

@@ -372,8 +372,152 @@ def buoc_tts(api: str, tk: Dict[str, Any], ids: Dict[str, str],
     return jid
 
 
+def buoc_danh_sach_giong(api: str, giong_cuc_bo: str) -> None:
+    """
+    `/api/voices` phai dung pham vi san pham: CHI tieng Viet, dung bay giong de xuat.
+
+    Kiem hoan toan qua HTTP — khong import `desktop_app`, de script chay duoc tu
+    bat ky may nao chi voi URL.
+    """
+    print("\n=== 6. Danh sach giong: pham vi tieng Viet + muc de xuat ===")
+    ma, r = goi(api, "GET", "/api/voices")
+    if not kt("lay duoc danh sach giong", ma == 200, vi_sao(ma, r)):
+        return
+    vs = r.get("voices", [])
+    kt("co giong de dung", len(vs) > 7, f"{len(vs)} giong")
+
+    ngoai = sorted({v.get("language", "") for v in vs
+                    if not str(v.get("language", "")).lower().startswith("vi")})
+    kt("KHONG co giong nao khac tieng Viet", not ngoai,
+       f"lot ra: {ngoai}" if ngoai else "toan bo vi-*")
+
+    dx = sorted((v for v in vs if v.get("recommended")),
+                key=lambda v: v.get("recommended_order", 99))
+    kt("dung bay giong de xuat", len(dx) == 7, f"{len(dx)} giong")
+    kt("thu tu de xuat lien tuc tu 0",
+       [v.get("recommended_order") for v in dx] == list(range(len(dx))),
+       str([v.get("recommended_order") for v in dx]))
+    if dx:
+        print("        " + " | ".join(v.get("display_name", "?") for v in dx))
+
+    # Giong cuc bo: khong co thi hoac chua deploy ma moi, hoac FAS_LOCAL_VOICES
+    # da tat. Ca hai deu la dieu nguoi van hanh phai biet, khong duoc im lang.
+    cb = next((v for v in vs if v.get("voice_id") == giong_cuc_bo), None)
+    kt(f"{giong_cuc_bo} duoc chao ban", cb is not None,
+       "co" if cb else "khong thay — chua deploy ma moi, hoac FAS_LOCAL_VOICES da tat")
+    if cb:
+        # `installed` cua API luon False (model nam tren may worker), nen giao
+        # dien phai doc `runs_on_worker`. Neu co nay mat thi bo chon giong o web
+        # se lang le bo qua giong nay.
+        kt("giong cuc bo duoc danh dau chay tren worker",
+           cb.get("runs_on_worker") is True, f"runs_on_worker={cb.get('runs_on_worker')}")
+    kt("moi giong deu co co public_enabled",
+       all("public_enabled" in v for v in vs))
+
+
+def buoc_tu_choi_giong(api: str, tk: Dict[str, Any], ids: Dict[str, str]) -> None:
+    """
+    Gui thang mot `voice_id` ngoai pham vi -> 400, va KHONG tao job nao.
+
+    Day la cho de lo hong quay lai: `/api/voices` loc o mot noi, con
+    `POST /api/jobs` kiem o noi khac. Neu hai ben lech nhau thi buoc nay do.
+    """
+    print("\n=== 7. Giong ngoai pham vi bi tu choi ===")
+    tok = tk["tok_a"]
+    _, truoc = goi(api, "GET", "/api/jobs", None, tok)
+    so_truoc = truoc.get("count", 0)
+
+    for vid in ("edge:en-US-AriaNeural", "piper:mot-giong-bia-dat"):
+        ma, r = goi(api, "POST", "/api/jobs",
+                    {"chapter_id": ids["chapter"], "voice_id": vid}, tok)
+        kt(f"tu choi {vid}", ma == 400,
+           f"HTTP {ma} {str(r.get('detail', r))[:70]}")
+
+    _, sau = goi(api, "GET", "/api/jobs", None, tok)
+    kt("khong job nao duoc tao tu cac lan bi tu choi",
+       sau.get("count", 0) == so_truoc,
+       f"truoc={so_truoc} sau={sau.get('count')}")
+
+
+def buoc_giong_cuc_bo(api: str, tk: Dict[str, Any], ids: Dict[str, str],
+                      giong: str, cho_toi_da: int) -> None:
+    """
+    Mot job THAT bang giong chay tren may worker, chia NHIEU DOAN.
+
+    Hai lo hong ma buoc nay bit lai, ca hai deu lam `61/61` xanh gia:
+
+      1. Bo nghiem thu cu chi chay giong di qua mang (Edge/CapCut). Duong giong
+         cuc bo — nap model, ONNX, WAV->MP3 — chua bao gio duoc cham toi.
+      2. Chuong smoke chi 3 cau = MOT doan, nen `_concat_mp3` khong bao gio
+         chay. Mot may thieu ffmpeg van cho 61/61 xanh, roi hong o chuong dai
+         that. `chunk_chars` nho o day ep ra nhieu doan de duong ghep bi chay.
+
+    Piper chay cuc bo nen buoc nay KHONG ton quota cua nha cung cap nao.
+    """
+    print("\n=== 8. Giong cuc bo (nhieu doan, co ghep ffmpeg) ===")
+    tok = tk["tok_a"]
+
+    # Du dai de chia duoc >= 2 doan voi `chunk_chars` nho. Van ngan de mot lan
+    # chay khong keo dai: Piper tren CPU khoang 0,14 giay tinh toan cho moi
+    # giay audio.
+    van = ("Con thuyền nhỏ trôi giữa màn sương sớm. "
+           "Tiếng mái chèo khua nước đều đặn vang lên trong tĩnh lặng. "
+           "Phía xa, ngọn hải đăng vẫn kiên nhẫn quét những vòng sáng cuối cùng. "
+           "Người lái đò khẽ hát một khúc dân ca quen thuộc. ") * 2
+    ma, r = goi(api, "POST", "/api/chapters",
+                {"novel_id": ids["novel"], "title": "[SMOKE] Chương giọng cục bộ",
+                 "content": van, "order_index": 2}, tok)
+    if not kt("tao chuong cho giong cuc bo", ma in (200, 201), vi_sao(ma, r)):
+        return
+    cid = r["chapter"]["chapter_id"]
+    ids["chapter_cuc_bo"] = cid
+
+    ma, r = goi(api, "POST", "/api/jobs",
+                {"chapter_id": cid, "voice_id": giong, "chunk_chars": 300}, tok)
+    if not kt(f"tao job voi {giong}", ma in (200, 201, 202), vi_sao(ma, r)):
+        return
+    jid = r["job"]["job_id"]
+
+    cuoi, j = None, {}
+    t0 = time.time()
+    while time.time() - t0 < cho_toi_da:
+        _, r = goi(api, "GET", f"/api/jobs/{jid}", None, tok)
+        j = r.get("job", {})
+        if j.get("status") != cuoi:
+            cuoi = j.get("status")
+            print(f"        t+{round(time.time() - t0):>4}s  {cuoi}  "
+                  f"{j.get('done_parts')}/{j.get('total_parts')}", flush=True)
+        if cuoi in ("completed", "failed"):
+            break
+        time.sleep(3)
+
+    if not kt("job giong cuc bo hoan tat", cuoi == "completed",
+              f"trang thai cuoi={cuoi} error_kind={j.get('error_kind')!r}"):
+        print("     (worker cuc bo co dang chay khong? job nam `pending` la "
+              "dung thiet ke khi may tao giong dang tat)")
+        return
+
+    kt("chia duoc NHIEU doan (duong ghep ffmpeg da chay)",
+       (j.get("total_parts") or 0) >= 2, f"total_parts={j.get('total_parts')}")
+    kt("chi chay dung mot lan", (j.get("attempts") or 0) == 1,
+       f"attempts={j.get('attempts')}")
+
+    ma, r = goi(api, "GET", f"/api/audio/{cid}/url", None, tok)
+    kt("xin duoc URL audio giong cuc bo", ma == 200, f"HTTP {ma}")
+    try:
+        with urllib.request.urlopen(r.get("url", ""), timeout=300) as x:
+            noi_dung = x.read()
+        kt("tai duoc audio giong cuc bo", len(noi_dung) > 10_000,
+           f"{len(noi_dung)} byte")
+        kt("la MP3 that",
+           noi_dung[:3] == b"ID3" or noi_dung[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"),
+           f"byte dau: {noi_dung[:3].hex()}")
+    except Exception as exc:
+        kt("tai duoc audio giong cuc bo", False, type(exc).__name__)
+
+
 def buoc_phan_quyen(api: str, tk: Dict[str, Any], ids: Dict[str, str]) -> None:
-    print("\n=== 6. Phan quyen giua hai tai khoan ===")
+    print("\n=== 9. Phan quyen giua hai tai khoan ===")
     b = tk["tok_b"]
     n, c = ids["novel"], ids["chapter"]
     for ten, ma_thuc, mong in (
@@ -393,7 +537,7 @@ def buoc_phan_quyen(api: str, tk: Dict[str, Any], ids: Dict[str, str]) -> None:
 
 
 def buoc_giao_dien(web: Optional[str], api: str) -> None:
-    print("\n=== 7. Frontend phan hoi va tro dung API ===")
+    print("\n=== 10. Frontend phan hoi va tro dung API ===")
     if not web:
         kt("bo qua: chua truyen --web", True, "khong kiem duoc")
         return
@@ -448,7 +592,7 @@ def buoc_dang_xuat(api: str, tk: Dict[str, Any]) -> None:
     nhat duoc no van dung tiep duoc. Chay CUOI CUNG vi no lam token cua A het
     gia tri — moi buoc can token phai xong truoc.
     """
-    print("\n=== 8. Dang xuat va het quyen ===")
+    print("\n=== 11. Dang xuat va het quyen ===")
     tok = tk.get("tok_a", "")
     ma, _ = goi(api, "GET", "/api/auth/me", None, tok)
     if not kt("truoc khi dang xuat: token con dung duoc", ma == 200, f"HTTP {ma}"):
@@ -472,16 +616,28 @@ def buoc_dang_xuat(api: str, tk: Dict[str, Any]) -> None:
 
 
 def don_dep(api: str, tk: Dict[str, Any], ids: Optional[Dict[str, str]]) -> None:
-    print("\n=== 9. Don fixture ===")
+    print("\n=== 12. Don fixture ===")
     if not ids:
         kt("khong co fixture nao de don", True)
         return
     ma, r = goi(api, "DELETE", f"/api/novels/{ids['novel']}", None, tk.get("tok_a"))
+    da_xoa = r.get("removed", {}) or {}
     kt("xoa truyen [SMOKE] va moi thu phu thuoc", ma in (200, 204),
-       f"HTTP {ma} {json.dumps(r.get('removed', {}), ensure_ascii=False)}")
+       f"HTTP {ma} {json.dumps(da_xoa, ensure_ascii=False)}")
+
+    # Doi soat theo SO chuong da tao, khong doan. Buoc giong cuc bo tao them
+    # chuong thu hai; neu no khong nam trong danh sach vua xoa thi audio va
+    # object cua no o lai tren staging ma khong ai bao.
+    mong = 2 if ids.get("chapter_cuc_bo") else 1
+    kt("xoa dung so chuong da tao", da_xoa.get("chapters") == mong,
+       f"mong {mong}, xoa {da_xoa.get('chapters')}")
+
     _, r = goi(api, "GET", "/api/novels?mine=true", None, tk.get("tok_a"))
     kt("tai khoan A khong con truyen nao", r.get("novels") == [],
        f"con {len(r.get('novels', []))}")
+    _, r = goi(api, "GET", "/api/jobs", None, tk.get("tok_a"))
+    kt("khong con job nao cua tai khoan A", r.get("count") == 0,
+       f"con {r.get('count')}")
 
 
 def don_tai_khoan(tk: Dict[str, Any]) -> None:
@@ -498,7 +654,7 @@ def don_tai_khoan(tk: Dict[str, Any]) -> None:
     Bo qua im lang neu khong co credential: script van phai chay duoc tu bat ky
     dau chi voi HTTP API cong khai.
     """
-    print("\n=== 10. Don tai khoan fixture (can credential Appwrite) ===")
+    print("\n=== 13. Don tai khoan fixture (can credential Appwrite) ===")
     can = [(uid, em) for uid, em in tk.get("tai_khoan", []) if uid]
     if not can:
         kt("khong ghi duoc user id nao de don", False, "cac buoc tren da hong?")
@@ -550,6 +706,12 @@ def main(argv=None) -> int:
     p.add_argument("--web", help="URL goc cua frontend")
     p.add_argument("--sha", help="SHA mong doi, chi de ghi vao bao cao")
     p.add_argument("--voice", default="edge:vi-VN-HoaiMyNeural")
+    p.add_argument("--local-voice", default="piper:ngochuyen",
+                   help="giong chay tren may worker, dung cho buoc nhieu doan")
+    p.add_argument("--skip-local-voice", action="store_true",
+                   help="bo qua job giong cuc bo. CHI dung khi may tao giong "
+                        "dang tat — bo qua thi duong ghep ffmpeg khong duoc "
+                        "kiem, va mot may thieu ffmpeg van cho ket qua xanh.")
     p.add_argument("--job-timeout", type=int, default=600)
     p.add_argument("--json", metavar="FILE", help="ghi ket qua ra file JSON")
     p.add_argument("--wake-timeout", type=int, default=120,
@@ -577,6 +739,13 @@ def main(argv=None) -> int:
         tk = buoc_xac_thuc(a.api)
         ids = buoc_noi_dung(a.api, tk)
         buoc_tts(a.api, tk, ids, a.voice, a.job_timeout)
+        buoc_danh_sach_giong(a.api, a.local_voice)
+        buoc_tu_choi_giong(a.api, tk, ids)
+        if a.skip_local_voice:
+            kt("bo qua job giong cuc bo (--skip-local-voice)", True,
+               "may tao giong dang tat?")
+        else:
+            buoc_giong_cuc_bo(a.api, tk, ids, a.local_voice, a.job_timeout)
         buoc_phan_quyen(a.api, tk, ids)
         buoc_giao_dien(a.web, a.api)
         buoc_dang_xuat(a.api, tk)

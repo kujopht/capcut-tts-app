@@ -275,7 +275,7 @@ Chi tiết: `docs/reports/staging/BAO_CAO_STAGING.md` mục 13.
 | `server/tests` | **641 test: 640 đạt, 1 bỏ qua** |
 | `tests` (desktop) | **371/371 đạt** |
 | Live Appwrite + R2 | Đạt — xem mục "Live smoke test" |
-| `scripts/staging_smoke.py` trên staging | **61/61 đạt, `attempts=1`**, dọn sạch |
+| `scripts/staging_smoke.py` (77 kiểm tra) | **77/77 đạt, `attempts=1`**, dọn sạch |
 | `web` (`node --test`) | **156/156 đạt** |
 | `npx eslint .` | Sạch, exit 0 |
 | `npx tsc --noEmit` | Sạch, exit 0 |
@@ -828,6 +828,24 @@ Concurrency Piper = **1 job**, khoá ở cấp job (`tts_bridge._PIPER_LOCK`).
 `commercial_ready` đã đổi thành `public_enabled` — tên cũ là một phán đoán về
 giấy phép, thứ máy chủ không biết. Chủ dự án đã cho phép công bố các giọng
 NghiTTS và chịu trách nhiệm về quyền sử dụng.
+
+### Bộ nghiệm thu nay phủ cả đường giọng cục bộ (2026-08-08)
+
+`scripts/staging_smoke.py` lên **77 kiểm tra**, thêm ba mục:
+
+| Mục | Bịt lỗ hổng gì |
+|---|---|
+| 6. Danh sách giọng | `/api/voices` chỉ tiếng Việt, đúng 7 giọng đề xuất đúng thứ tự, `piper:ngochuyen` có `runs_on_worker` |
+| 7. Giọng ngoài phạm vi | gửi thẳng `edge:en-US-AriaNeural` → 400, và **không job nào được tạo** |
+| 8. Giọng cục bộ | job Ngọc Huyền với `chunk_chars` nhỏ → **nhiều đoạn**, ép đường ghép ffmpeg chạy |
+
+Mục 8 quan trọng hơn vẻ ngoài của nó: chương smoke cũ chỉ 3 câu = **một đoạn**,
+nên `_concat_mp3` chưa bao giờ chạy. Một máy **thiếu ffmpeg vẫn cho 61/61 xanh**
+rồi hỏng ở chương dài thật. Piper chạy cục bộ nên mục này không tốn quota.
+
+Đã chạy thật (backend cục bộ dùng đúng cấu hình staging, Appwrite + R2 + worker
+thật): **77/77**, job Ngọc Huyền `total_parts=2`, `attempts=1`, MP3 187 KB, dọn
+sạch 2 chương / 2 track / 2 job / 2 object.
 
 ### Worker 24/7 trên VM — đã chuẩn bị, CHƯA triển khai
 

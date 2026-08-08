@@ -309,3 +309,68 @@ class TestLoginFailureDoesNotCrashTheScript(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheAcceptanceCoversTheLocalVoicePath(unittest.TestCase):
+    """
+    Hai lo hong khien `61/61 xanh` khong chung minh duoc thu no tuong chung minh.
+
+      1. Bo nghiem thu cu CHI chay giong di qua mang (Edge/CapCut). Duong giong
+         cuc bo — nap model ONNX, WAV -> MP3 — chua bao gio duoc cham toi, du
+         do la duong duy nhat chay tren may nguoi dung.
+      2. Chuong smoke chi 3 cau = MOT doan, nen `_concat_mp3` khong bao gio
+         chay. Mot may THIEU ffmpeg van cho 61/61 xanh roi hong o chuong dai
+         that — dung cai bay da ghi trong `deploy/RUNBOOK-WORKER.md` nhung
+         chinh bo nghiem thu lai khong bat duoc.
+    """
+
+    def setUp(self) -> None:
+        self.nguon = (GOC / "scripts" / "staging_smoke.py").read_text(
+            encoding="utf-8")
+
+    def test_co_buoc_chay_giong_cuc_bo(self) -> None:
+        self.assertIn("def buoc_giong_cuc_bo(", self.nguon)
+        self.assertIn("buoc_giong_cuc_bo(a.api", self.nguon)
+
+    def test_buoc_do_ep_ra_NHIEU_doan(self) -> None:
+        """`chunk_chars` nho la thu duy nhat ep duong ghep ffmpeg phai chay."""
+        than = _than_ham(self.nguon, "buoc_giong_cuc_bo")
+        self.assertIn('"chunk_chars"', than)
+        self.assertIn("total_parts", than)
+        self.assertIn(">= 2", than)
+
+    def test_buoc_do_doi_dung_mot_lan_chay(self) -> None:
+        than = _than_ham(self.nguon, "buoc_giong_cuc_bo")
+        self.assertIn('(j.get("attempts") or 0) == 1', than)
+
+    def test_danh_sach_giong_duoc_kiem_pham_vi(self) -> None:
+        than = _than_ham(self.nguon, "buoc_danh_sach_giong")
+        self.assertIn("/api/voices", than)
+        self.assertIn('startswith("vi")', than)
+        self.assertIn("recommended", than)
+        self.assertIn("== 7", than)
+
+    def test_giong_ngoai_pham_vi_bi_kiem(self) -> None:
+        than = _than_ham(self.nguon, "buoc_tu_choi_giong")
+        self.assertIn("ma == 400", than)
+        # Va phai chung minh KHONG job nao duoc tao — tu choi ma van ghi job
+        # xuong kho thi van la hong.
+        self.assertIn("khong job nao duoc tao", than)
+
+    def test_bo_qua_giong_cuc_bo_phai_noi_ro_cai_gia(self) -> None:
+        """Co `--skip-local-voice` phai ghi ro no lam mat kiem tra gi."""
+        self.assertIn("--skip-local-voice", self.nguon)
+        i = self.nguon.index("--skip-local-voice", self.nguon.index("add_argument"))
+        self.assertIn("ffmpeg", self.nguon[i:i + 400])
+
+    def test_don_dep_doi_soat_ca_chuong_thu_hai(self) -> None:
+        than = _than_ham(self.nguon, "don_dep")
+        self.assertIn("chapter_cuc_bo", than)
+        self.assertIn('da_xoa.get("chapters")', than)
+
+
+def _than_ham(nguon: str, ten: str) -> str:
+    """Than cua mot ham cap module, cat den `\ndef ` ke tiep."""
+    i = nguon.index(f"def {ten}(")
+    j = nguon.find("\ndef ", i + 1)
+    return nguon[i:j if j > 0 else len(nguon)]

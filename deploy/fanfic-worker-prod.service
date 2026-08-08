@@ -1,0 +1,117 @@
+# Unit systemd cho TTS worker PRODUCTION trên Google Compute Engine.
+#
+# Cài bằng `scripts/install_gce_worker.sh`. Xem `deploy/RUNBOOK-PRODUCTION.md`.
+#
+# TỆP NÀY KHÔNG CHỨA GIÁ TRỊ BÍ MẬT NÀO. Secret nằm ở
+# /etc/fanfic-audio/worker-prod.env, quyền 0600, không bao giờ vào git.
+#
+# ============================================================================
+#  KHÁC GÌ `fanfic-worker.service` (bản staging)
+# ============================================================================
+#
+#  | Hạng mục            | staging                  | production (tệp này)        |
+#  |---------------------|--------------------------|-----------------------------|
+#  | `--require-env`     | staging                  | **production**              |
+#  | EnvironmentFile     | worker.env               | **worker-prod.env**         |
+#  | StateDirectory      | fanfic-audio             | **fanfic-audio-prod**       |
+#  | FAS_PIPER_MODELS_DIR| (không đặt)              | **/opt/fanfic-models/…**    |
+#
+#  Hai unit chạy song song trên cùng một máy được: `StateDirectory` khác nhau
+#  nên `FAS_VAR_DIR` khác nhau, nên **tệp nhịp không ghi đè nhau**. Dùng chung
+#  thư mục là `--check` của cả hai cùng vô nghĩa.
+#
+# ============================================================================
+#  VÌ SAO `User=fanfic` CHỨ KHÔNG PHẢI TÊN NGƯỜI DÙNG CỦA VM
+# ============================================================================
+#
+#  systemd bắt buộc `User=` là một giá trị cụ thể — không có biến nào ở đây.
+#  Có ba cách, và cách này ít tệ nhất:
+#
+#   1. Ghi cứng tên đăng nhập của người vận hành (`User=robux`). Hỏng ngay khi
+#      đổi người, đổi VM, hay cài bằng tài khoản dịch vụ. Và worker sẽ chạy với
+#      quyền của một tài khoản có sudo — không cần thiết.
+#   2. Sinh unit từ template lúc cài (`sed` thay `@USER@`). Được, nhưng tệp
+#      trong repo không còn là thứ chạy thật, và khó đối chiếu khi sự cố.
+#   3. **Người dùng hệ thống riêng, tên cố định** — cách đang dùng.
+#      `install_gce_worker.sh` tạo `fanfic` nếu chưa có: không login được
+#      (`--shell /usr/sbin/nologin`), không sudo, chỉ đủ quyền đọc mã và ghi
+#      vào StateDirectory.
+#
+#  Nhờ vậy tệp này là hằng số, giống nhau trên mọi VM, và quyền ở mức tối thiểu.
+
+[Unit]
+Description=Fanfic Audio Studio — TTS worker (PRODUCTION)
+Documentation=file:/opt/fanfic-audio/deploy/RUNBOOK-PRODUCTION.md
+# `network-online` chứ không phải `network`: worker gọi Appwrite và R2 ngay ở
+# vòng quét đầu tiên.
+After=network-online.target
+Wants=network-online.target
+# Sập 5 lần trong 5 phút thì dừng hẳn. Crash liên tục là lỗi cấu hình, và một
+# tiến trình restart mãi chỉ làm log ngập mà không ai để ý.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=fanfic
+Group=fanfic
+WorkingDirectory=/opt/fanfic-audio
+
+# SECRET CHỈ ĐẾN TỪ ĐÂY. Không `Environment=` nào mang giá trị nhạy cảm, nên
+# `systemctl show` và `ps auxe` không lộ gì.
+EnvironmentFile=/etc/fanfic-audio/worker-prod.env
+
+# Không bí mật — để ở đây cho rõ, và để tệp env chỉ còn đúng secret.
+Environment=PYTHONPATH=/opt/fanfic-audio
+Environment=PYTHONUNBUFFERED=1
+Environment=FAS_VAR_DIR=/var/lib/fanfic-audio-prod
+Environment=FAS_INLINE_WORKER=false
+# Model NghiTTS. `PiperModelManager` đọc đúng biến này (`MODELS_DIR_ENV`);
+# không đặt thì nó tìm trong thư mục dữ liệu người dùng và sẽ không thấy gì.
+Environment=FAS_PIPER_MODELS_DIR=/opt/fanfic-models/nghitts/piper-tts
+
+# `--require-env production` là rào chắn chống trỏ nhầm tài nguyên: nếu tệp env
+# bị thay bằng cấu hình staging thì worker thoát ngay với mã 2 thay vì lặng lẽ
+# xử lý job của môi trường khác.
+ExecStart=/opt/fanfic-audio/.venv/bin/python -m server.worker --require-env production
+
+Restart=always
+RestartSec=10
+# Mã 2 = "FAS_ENV không khớp". Lỗi cấu hình, restart bao nhiêu lần cũng không
+# tự khỏi — dừng hẳn để người vận hành thấy.
+RestartPreventExitStatus=2
+
+# DỪNG SẠCH. Worker bắt SIGTERM, ngừng nhận job mới, rồi chờ job đang chạy xong
+# trong FAS_WORKER_GRACE_SECONDS. TimeoutStopSec phải DÀI HƠN con số đó, nếu
+# không systemd sẽ SIGKILL đúng lúc worker đang chờ tử tế.
+KillSignal=SIGTERM
+TimeoutStopSec=300
+KillMode=mixed
+
+# /var/lib/fanfic-audio-prod — systemd tự tạo, tự chown, còn nguyên sau reboot.
+StateDirectory=fanfic-audio-prod
+StateDirectoryMode=0750
+
+# -- rào chắn quyền ----------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# `ProtectSystem=strict` khoá toàn hệ thống ở chế độ chỉ đọc. Đây là ngoại lệ
+# DUY NHẤT được mở ra để ghi.
+#
+# Thư mục model KHÔNG nằm trong danh sách này — có chủ ý. Worker chỉ đọc model;
+# cho nó quyền ghi là mở đường cho một tiến trình bị chiếm sửa được model.
+ReadWritePaths=/var/lib/fanfic-audio-prod
+
+# Worker KHÔNG mở cổng nào. Nó không phục vụ request, nên không cần cổng vào,
+# và VM không cần mở 80/443 cho nó.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fanfic-worker-prod
+
+[Install]
+WantedBy=multi-user.target

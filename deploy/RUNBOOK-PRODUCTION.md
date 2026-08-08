@@ -213,6 +213,80 @@ Dòng `khoi_dong` trong log phải có `environment=production`,
 
 ---
 
+## 5b. Worker production trên Google Compute Engine
+
+Thay cho worker laptop ở mục 5. VM: `fanfic-worker-prod`, `asia-southeast1-b`,
+`e2-standard-2`, Ubuntu 24.04 Minimal.
+
+### Cài
+
+```bash
+# 1. Tệp env — NGƯỜI VẬN HÀNH tự tạo. Script cài KHÔNG tạo, KHÔNG sửa.
+sudo install -d -m 0750 /etc/fanfic-audio
+sudo install -m 0600 /dev/null /etc/fanfic-audio/worker-prod.env
+sudo -e /etc/fanfic-audio/worker-prod.env      # dán cấu hình production
+
+# 2. Kiểm model (chỉ đọc)
+/opt/fanfic-audio/.venv/bin/python   /opt/fanfic-audio/scripts/validate_nghitts_models.py   --models-dir /opt/fanfic-models/nghitts/piper-tts
+
+# 3. Cài unit — KHÔNG khởi động
+sudo /opt/fanfic-audio/scripts/install_gce_worker.sh --install-only
+
+# 4. Chỉ khi thật sự muốn worker bắt đầu nhận job THẬT
+sudo /opt/fanfic-audio/scripts/install_gce_worker.sh --enable-and-start
+```
+
+Bước 3 và 4 tách nhau có chủ ý: cài đặt là thao tác an toàn, còn khởi động
+worker production nghĩa là nó bắt đầu **nhận job thật** và ghi vào Appwrite/R2
+production.
+
+### Kiểm tra
+
+```bash
+systemctl is-active fanfic-worker-prod && systemctl is-enabled fanfic-worker-prod
+journalctl -u fanfic-worker-prod -n 30 --no-pager
+
+sudo -u fanfic env PYTHONPATH=/opt/fanfic-audio   FAS_VAR_DIR=/var/lib/fanfic-audio-prod   /opt/fanfic-audio/.venv/bin/python -m server.worker --check
+```
+
+Dòng `khoi_dong` phải có `environment=production`, `inline_worker=false`,
+`chay_job_duoc=true`.
+
+### Đo tốc độ trên chính VM
+
+```bash
+/opt/fanfic-audio/.venv/bin/python /opt/fanfic-audio/scripts/benchmark_piper.py   --models-dir /opt/fanfic-models/nghitts/piper-tts --all --repeat 3   --json /tmp/bench.json
+```
+
+Không dùng hàng đợi production. Xem `docs/GCE-WORKER-CAPACITY.md`.
+
+---
+
+## 5c. Checklist bảo mật / vận hành cho worker VM
+
+| Mục | Trạng thái | Ghi chú |
+|---|---|---|
+| VM **không cần** inbound HTTP | ✅ theo thiết kế | Worker không mở cổng nào; nó chỉ gọi ra |
+| **Không** mở 80/443 trên firewall | ⬜ bạn kiểm | Không có gì lắng nghe — mở là tăng bề mặt tấn công vô ích |
+| Chạy dưới người dùng **không phải root** | ✅ `User=fanfic` | Người dùng hệ thống, `nologin`, không sudo |
+| Secret **không** nằm trong repo | ✅ | `EnvironmentFile=/etc/fanfic-audio/worker-prod.env`; test cấm mọi `Environment=` mang secret |
+| Quyền tệp env **0600** | ⬜ bạn đặt | Script cài chỉ **cảnh báo**, không tự sửa quyền tệp secret |
+| Credential chỉ ở worker host | ⬜ bạn kiểm | Đừng chép `worker-prod.env` sang máy khác |
+| Thư mục model **không** cho service ghi | ✅ | `ReadWritePaths` chỉ có StateDirectory; có test |
+| Log **không** in secret | ✅ | `_ghi()` chỉ in định danh; `settings.describe()` chỉ có cờ boolean |
+| SSH bằng khoá, không mật khẩu | ⬜ bạn kiểm | Mặc định của GCE |
+| Không chạy service nào khác trên VM | ⬜ bạn kiểm | VM chỉ để chạy worker |
+
+Nếu nghi ngờ log đã lộ gì:
+
+```bash
+journalctl -u fanfic-worker-prod --since '7 days ago' | grep -Ei 'key|secret|token|password'
+```
+
+Không ra gì là đúng.
+
+---
+
 ## 6. Xác minh sau khi deploy — trước khi nghiệm thu
 
 ```bash

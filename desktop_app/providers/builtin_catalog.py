@@ -72,6 +72,62 @@ PIPER_BUILTIN: List[Dict[str, str]] = [
         "language": "vi-VN",
         "gender": "Male",
     },
+    # ------------------------------------------------------------------
+    # Phần còn lại của bộ NghiTTS (22 giọng).
+    #
+    # `display_name` GIỮ NGUYÊN TÊN KỸ THUẬT, và `gender` để trống. Đó là
+    # chủ ý, không phải làm cho xong:
+    #
+    #   * Tách `banmai` thành "Ban Mai" hay `minhthu` thành "Minh Thư" là
+    #     ĐOÁN ranh giới từ và ĐOÁN dấu. Đoán sai thì tên hiển thị sai với
+    #     người dùng cuối, và không có nguồn nào để đối chiếu.
+    #   * Vài tên trông như tên người thật (`mytam2`, `tranthanh3870`,
+    #     `thanhphuong2`). Gán tên hiển thị dạng người thật cho một giọng
+    #     tổng hợp là chuyện định danh, không phải chuyện thẩm mỹ — xem
+    #     `docs/GCE-WORKER-CAPACITY.md` mục rủi ro.
+    #   * Ba giọng phía trên giữ nguyên tên và giới tính CŨ để không phá
+    #     tương thích ngược.
+    #
+    # TODO: khi có bảng tên chính thức từ nguồn model, cập nhật
+    # `display_name`/`gender` ở ĐÂY — đây là nơi duy nhất khai báo.
+    #
+    # `voice_key` == tên tệp `.onnx` (không đuôi). Ánh xạ tất định, không
+    # cần bảng tra riêng: `<voice_key>.onnx` + `<voice_key>.onnx.json`.
+    # Bộ NghiTTS dùng một `config.json` chung và symlink từng
+    # `<voice_key>.onnx.json` trỏ vào đó — `Path.is_file()` đi theo symlink
+    # nên không phải xử lý gì thêm.
+] + [
+    {
+        "voice_key": khoa,
+        "display_name": khoa,          # TODO: tên hiển thị chính thức
+        "description": "Piper Local (NghiTTS)",
+        "language": "vi-VN",
+        "gender": "",                  # không đoán
+    }
+    for khoa in (
+        "adam1",
+        "banmai",
+        "chieuthanh",
+        "duyoryx3175",
+        "lacphi",
+        "maiphuong",
+        "manhdung",
+        "minhkhang",
+        "minhquang",
+        "minhthu",
+        "mytam2",
+        "mytam2794",
+        "ngochuyennew",
+        "ngocngan3701",
+        "phuongtrang",
+        "taian2",
+        "taian4",
+        "thanhphuong2",
+        "thientam",
+        "tranthanh3870",
+        "vietthao3886",
+        "yannew",
+    )
 ]
 
 #: Giong Piper duoc uu tien lam mac dinh khi da cai model hop le.

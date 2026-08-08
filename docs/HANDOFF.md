@@ -934,6 +934,39 @@ dọn sạch 2 chương / 2 track / 2 job / 2 object.
 Tổng là 82 khi có `--web` (kiểm cả frontend) và 77 khi không — khác số kiểm
 tra, không phải khác kết quả.
 
+### Kiến trúc production — $0 cho MVP (2026-08-08)
+
+```
+Cloudflare Workers (Free)  →  Render Free Web Service  →  Appwrite prod + R2 fanfic-prod
+   frontend Next.js/OpenNext      fas-prod-api                        ▲
+                                                                      │ claim job
+                                                       TTS worker trên LAPTOP
+```
+
+Chi tiết và lệnh: **`deploy/RUNBOOK-PRODUCTION.md`**. Blueprint:
+`deploy/render.prod.yaml` — **một** service, `plan: free`.
+
+| Thành phần | Nơi chạy | Phí |
+|---|---|---|
+| Frontend | Cloudflare Workers Free, qua `@opennextjs/cloudflare` | $0 |
+| API | Render Free Web Service | $0 |
+| TTS worker | laptop, `server/.env.production` | $0 |
+
+**Vì sao frontend không xuất tĩnh:** `/novels/[id]` và `/chapters/[id]` nhận id
+là dữ liệu người dùng lúc chạy; `output: 'export'` bắt mọi route động phải khai
+`generateStaticParams()`. Đã thử thật và build dừng ở đúng lỗi đó.
+
+**Đánh đổi đã chấp nhận:** API Free ngủ sau 15 phút (request đầu ~50 giây);
+laptop tắt thì **không audio nào được tạo** — kể cả Edge/CapCut, vì mọi job đều
+đi qua worker. API ngủ **không** làm dừng job đang chạy.
+
+**Ngọc Huyền tắt trên production** (`FAS_LOCAL_VOICES=""`), còn 26 giọng Việt.
+Bật lại sau khi worker laptop hoặc Modal được nghiệm thu — chỉ là biến môi
+trường, không sửa mã.
+
+**Hai worker trên cùng một laptop phải khác `FAS_VAR_DIR`**, nếu không chúng ghi
+đè tệp nhịp của nhau và `--check` thành vô nghĩa.
+
 ### Worker 24/7 trên VM — đã chuẩn bị, CHƯA triển khai
 
 `deploy/fanfic-worker.service` + `.env.example` + healthcheck timer + runbook

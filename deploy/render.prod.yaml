@@ -1,4 +1,4 @@
-# Blueprint PRODUCTION trên Render — phương án (C).
+# Blueprint PRODUCTION trên Render — CHỈ backend API.
 #
 # Blueprint Path khi nhập trên Render:  deploy/render.prod.yaml
 #
@@ -6,74 +6,58 @@
 # hỏi giá trị ở giao diện và giữ trong kho secret của nó, không bao giờ vào git.
 #
 # ============================================================================
-#  PHƯƠNG ÁN (C) — production KHÔNG phụ thuộc máy cá nhân
+#  KIẾN TRÚC — ba nơi, ba nhà cung cấp, $0
 # ============================================================================
 #
-#  * Worker chạy TRÊN RENDER, không phải trên laptop. Đây là khác biệt lớn nhất
-#    so với `render.free.yaml`: ở gói Free không có Background Worker nên **mọi**
-#    job — kể cả Edge và CapCut — phải chờ laptop bật. Ở đây thì không.
+#      Cloudflare Workers (Free)          ← frontend Next.js qua OpenNext
+#              │  HTTPS
+#              ▼
+#      Render Free Web Service            ← CHỈ dịch vụ này nằm trong tệp này
+#              │
+#              ▼
+#      Appwrite production + R2 fanfic-prod
+#              ▲
+#              │ claim job
+#      TTS worker trên LAPTOP             ← không phải Render
 #
-#  * Giọng Piper (Ngọc Huyền) **TẮT** trên production: `FAS_LOCAL_VOICES=""`.
-#    Còn 26 giọng Việt (24 CapCut + 2 Edge). Bật lại sau khi có GPU đám mây.
-#
-#  VÌ SAO PHẢI TẮT PIPER Ở ĐÂY, chứ không phải "cứ để đó cho tiện":
-#  `recover_stale_jobs()` nhận BẤT KỲ job `pending` nào — worker không lọc được
-#  theo provider. Nếu Ngọc Huyền vẫn được chào bán mà worker Render không có
-#  model, worker này sẽ giành job đó, hỏng `MODEL_NOT_INSTALLED`, và sau 3 lần
-#  job `failed` vĩnh viễn. Tắt ở tầng danh sách trắng là cách duy nhất hiện nay
-#  để hai thứ đó không gặp nhau mà không phải sửa mã.
-#
-#  Worker này cài từ `server/requirements.txt` — KHÔNG có `piper-tts`. Đó là
-#  lớp phòng thủ thứ hai, độc lập với biến môi trường.
+#  Staging tách hoàn toàn: project Appwrite khác, bucket R2 khác, worker khác.
 #
 # ============================================================================
-#  TÁCH KHỎI STAGING — bốn thứ phải khác, không được dùng chung
+#  VÌ SAO CHỈ CÒN MỘT SERVICE
 # ============================================================================
 #
-#  | Thứ            | Vì sao không được dùng chung                              |
-#  |----------------|-----------------------------------------------------------|
-#  | Appwrite       | **PROJECT** riêng, không phải database riêng. Appwrite Auth |
-#  |                | quản lý user theo PROJECT — dùng chung nghĩa là tài khoản   |
-#  |                | staging đăng nhập được vào production.                      |
-#  | R2 bucket      | `reconcile_audio.py` có chế độ xoá, và bộ nghiệm thu xoá    |
-#  |                | object nó tạo. Dùng chung = một lần chạy ở staging xoá      |
-#  |                | nhầm object production.                                     |
-#  | API key/token  | Cấp riêng, scope riêng. Lộ bên nào chỉ mất bên đó.          |
-#  | Worker state   | Worker Render có filesystem riêng nên `FAS_VAR_DIR` không   |
-#  |                | đụng laptop. (Nếu sau này chạy hai worker trên CÙNG một     |
-#  |                | máy thì BẮT BUỘC đặt `FAS_VAR_DIR` khác nhau — nếu không    |
-#  |                | chúng ghi đè tệp nhịp của nhau và `--check` thành vô nghĩa.)|
+#  Bản trước của tệp này khai ba service `plan: starter` (~$21/tháng). Không cần:
+#
+#  * **Frontend** → Cloudflare Workers Free. Next.js chạy qua
+#    `@opennextjs/cloudflare`. Xem `web/wrangler.jsonc` và `deploy/RUNBOOK-PRODUCTION.md`.
+#
+#  * **Worker TTS** → laptop, dùng `server/.env.production`. Gói Free của Render
+#    không có Background Worker, và MVP chấp nhận việc audio chỉ được tạo khi
+#    laptop bật.
+#
+#  * **API** → Render Free. Đánh đổi đã biết và chấp nhận: service **ngủ sau 15
+#    phút** không có traffic, request đầu tiên sau đó mất khoảng 50 giây.
+#
+#  ⚠️ HỆ QUẢ CỦA API NGỦ, cần biết trước để khỏi tưởng là lỗi: **tạo** job cần
+#  API thức (`POST /api/jobs` đi qua nó). Nhưng job đã nằm trong hàng đợi thì
+#  worker laptop nói chuyện thẳng với Appwrite — API ngủ **không** làm dừng job
+#  đang chạy.
 #
 # ============================================================================
-#  ⚠️  ffmpeg — PHẢI XÁC MINH TRƯỚC KHI TIN
+#  BLUEPRINT VỚI MỘT SERVICE — hoàn toàn hợp lệ
 # ============================================================================
 #
-#  Chương ra **nhiều hơn một đoạn** thì `server/tts_bridge.py::_concat_mp3`
-#  ghép bằng `ffmpeg -c copy`. Với `chunk_chars` mặc định 2000, gần như mọi
-#  chương thật đều nhiều đoạn. Thiếu ffmpeg → job hỏng `MERGE_FFMPEG_MISSING`.
-#
-#  `_find_ffmpeg()` gọi `find_ffmpeg(None)`, và hàm đó chỉ tra `shutil.which`
-#  (tức PATH). **Không có biến môi trường nào trỏ đường dẫn ffmpeg.** Nên
-#  ffmpeg bắt buộc phải nằm trên PATH của tiến trình worker.
-#
-#  Repo này chưa từng chạy worker trên Render, nên KHÔNG khẳng định runtime
-#  Python của Render có sẵn ffmpeg hay không. Kiểm trước, đừng đoán:
-#
-#      Render → service worker → Shell → `which ffmpeg && ffmpeg -version`
-#
-#  Có sẵn  → giữ nguyên `buildCommand` bên dưới.
-#  Không có → xem `deploy/RUNBOOK-PRODUCTION.md` mục 5 để biết hai cách bổ sung
-#             ffmpeg, cả hai đều ở tầng triển khai và KHÔNG phải sửa mã.
+#  Render không đòi Blueprint phải có nhiều service; danh sách một phần tử là
+#  hợp lệ. Nếu vì lý do nào đó bạn muốn tạo tay thay vì dùng Blueprint, mục 4
+#  của `deploy/RUNBOOK-PRODUCTION.md` có đủ từng ô cần điền.
 #
 # ============================================================================
 
 services:
-  # ---------------------------------------------------------------- backend
   - type: web
     name: fas-prod-api
     runtime: python
-    plan: starter            # KHÔNG dùng Free cho production: ngủ sau 15 phút,
-                             # request đầu tiên mất ~50 giây.
+    plan: free
     region: singapore        # cùng vùng với Appwrite sgp
     branch: main
     autoDeploy: false        # deploy có chủ ý, không theo mọi lần push
@@ -84,28 +68,36 @@ services:
       - key: FAS_ENV
         value: production
       # BẮT BUỘC. `Settings.validate()` dừng ngay nếu môi trường thật mà web
-      # vẫn tự chạy job.
+      # vẫn tự chạy job. Gói Free lại càng không được: service ngủ giữa chừng
+      # sẽ giết job đang tổng hợp.
       - key: FAS_INLINE_WORKER
         value: "false"
       - key: DATA_BACKEND
         value: appwrite
       - key: STORAGE_BACKEND
         value: r2
-      # --- phương án (C): tắt giọng chạy cục bộ -------------------------
-      # Chuỗi RỖNG = không phục vụ giọng cục bộ nào. Khác hẳn "không đặt"
+      # --- chính sách giọng: giữ đúng cấu hình hiện có -------------------
+      # Chuỗi RỖNG = không phục vụ giọng chạy cục bộ nào. Khác hẳn "không đặt"
       # (không đặt thì mặc định là `piper:ngochuyen`).
       #
-      # XÁC MINH SAU KHI DEPLOY: `GET /api/health` phải trả `"local_voices": []`.
-      # Nếu Render bỏ qua biến rỗng thì nó sẽ trả `["piper:ngochuyen"]` — lúc đó
-      # đặt giá trị `none` thay cho chuỗi rỗng (mọi id không thuộc bộ NghiTTS
-      # đều bị loại ở vòng lọc thứ hai, nên kết quả vẫn là rỗng).
+      # Ngọc Huyền hiện TẮT trên production. Bật lại sau khi worker laptop
+      # hoặc Modal được nghiệm thu — đổi biến này, không phải sửa mã.
+      #
+      # XÁC MINH SAU DEPLOY: `GET /api/health` phải trả `"local_voices": []`.
+      # Nếu Render bỏ qua biến rỗng thì nó sẽ trả `["piper:ngochuyen"]`; khi đó
+      # đặt giá trị `none` (id ngoài bộ NghiTTS bị loại ở vòng lọc thứ hai nên
+      # kết quả vẫn rỗng).
       - key: FAS_LOCAL_VOICES
         value: ""
       - key: FAS_PUBLIC_VOICE_LANGUAGES
         value: vi
       # --- định danh và secret: hỏi ở giao diện --------------------------
+      # URL Worker trên Cloudflare, ví dụ https://fanfic-web.<tài-khoản>.workers.dev
+      # Sau khi gắn fanfic.world thì thêm origin đó vào, cách nhau bằng dấu phẩy.
+      # TUYỆT ĐỐI không dùng "*": backend gửi kèm credentials, và
+      # `Settings.validate()` sẽ dừng ngay.
       - key: FAS_CORS_ORIGINS
-        sync: false          # URL của fas-prod-web. TUYỆT ĐỐI không dùng "*".
+        sync: false
       - key: APPWRITE_ENDPOINT
         sync: false
       - key: APPWRITE_PROJECT_ID
@@ -117,90 +109,20 @@ services:
       - key: R2_ACCOUNT_ID
         sync: false
       - key: R2_BUCKET
-        sync: false          # BUCKET PRODUCTION, không phải staging
+        sync: false          # fanfic-prod, không phải bucket staging
       - key: R2_ACCESS_KEY_ID
         sync: false          # SECRET
       - key: R2_SECRET_ACCESS_KEY
         sync: false          # SECRET
-
-  # ----------------------------------------------------------------- worker
-  # `type: worker` — không cổng, không `healthCheckPath`. Đây chính là kiểu
-  # workload mà `server/worker.py` cần.
-  - type: worker
-    name: fas-prod-worker
-    runtime: python
-    plan: starter
-    region: singapore
-    branch: main
-    autoDeploy: false
-    # `server/requirements.txt` — KHÔNG phải `requirements-worker.txt`.
-    # Bản kia ghim `piper-tts`, thứ worker production cố ý không có.
-    buildCommand: pip install -r server/requirements.txt
-    # `--require-env production` là rào chắn chống trỏ nhầm tài nguyên: nạp
-    # nhầm cấu hình staging thì worker thoát ngay với mã 2 thay vì lặng lẽ xử
-    # lý job của môi trường khác.
-    startCommand: python -m server.worker --require-env production
-    envVars:
-      - key: FAS_ENV
-        value: production
-      - key: FAS_INLINE_WORKER
-        value: "false"
-      - key: DATA_BACKEND
-        value: appwrite
-      - key: STORAGE_BACKEND
-        value: r2
-      - key: FAS_LOCAL_VOICES
-        value: ""            # xem ghi chú ở service API
-      # Chờ job đang chạy bao lâu khi Render gửi tín hiệu dừng. Dài hơn thời
-      # gian tổng hợp một chương dài thì deploy lại không bỏ job giữa chừng.
-      - key: FAS_WORKER_GRACE_SECONDS
-        value: "180"
-      # Cùng bộ credential với backend. Nếu cấp được credential riêng cho
-      # worker thì tốt hơn: thu hồi được từng bên khi lộ.
-      - key: APPWRITE_ENDPOINT
-        sync: false
-      - key: APPWRITE_PROJECT_ID
-        sync: false
-      - key: APPWRITE_DATABASE_ID
-        sync: false
-      - key: APPWRITE_API_KEY
-        sync: false
-      - key: R2_ACCOUNT_ID
-        sync: false
-      - key: R2_BUCKET
-        sync: false
-      - key: R2_ACCESS_KEY_ID
-        sync: false
-      - key: R2_SECRET_ACCESS_KEY
-        sync: false
-
-  # --------------------------------------------------------------- frontend
-  - type: web
-    name: fas-prod-web
-    runtime: node
-    plan: starter
-    region: singapore
-    branch: main
-    autoDeploy: false
-    rootDir: web
-    buildCommand: npm ci && npx next build
-    startCommand: npx next start --port $PORT
-    healthCheckPath: /
-    envVars:
-      - key: NODE_VERSION
-        value: "22"
-      # Biến CÔNG KHAI duy nhất. Nằm trong bundle, ai cũng đọc được.
-      # Đặt bằng URL của fas-prod-api.
-      #
-      # LƯU Ý: `NEXT_PUBLIC_*` được nướng vào bundle LÚC BUILD, không đọc lúc
-      # chạy. Đổi giá trị này thì phải build lại frontend, restart không đủ.
-      - key: NEXT_PUBLIC_API_BASE
-        sync: false
 
 # ----------------------------------------------------------------------------
-# CHƯA GẮN CUSTOM DOMAIN. Dùng *.onrender.com trước. Khi gắn domain riêng thì
-# phải cập nhật CẢ `FAS_CORS_ORIGINS` (API) LẪN `NEXT_PUBLIC_API_BASE` (web),
-# rồi BUILD LẠI frontend.
+# KHÔNG có `type: worker` và KHÔNG có service frontend ở đây — đó là chủ ý, xem
+# phần đầu tệp.
 #
-# RECONCILER: chạy theo lịch ở chế độ CHỈ ĐỌC. Xem `deploy/reconcile-cron.md`.
-# TUYỆT ĐỐI không bật chế độ xoá tự động trên production.
+# CHƯA GẮN fanfic.world. Dùng *.onrender.com và *.workers.dev trước; gắn tên
+# miền sau khi nghiệm thu. Khi gắn thì phải cập nhật CẢ `FAS_CORS_ORIGINS` (ở
+# đây) LẪN `NEXT_PUBLIC_API_BASE` (lúc build frontend), rồi BUILD LẠI frontend —
+# `NEXT_PUBLIC_*` được nướng vào bundle lúc build, không đọc lúc chạy.
+#
+# RECONCILER: chạy tay theo `deploy/reconcile-cron.md`, chế độ CHỈ ĐỌC. Gói Free
+# không có Cron Job, và tuyệt đối không bật chế độ xoá tự động trên production.

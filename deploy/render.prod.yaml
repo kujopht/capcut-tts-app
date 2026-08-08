@@ -1,0 +1,206 @@
+# Blueprint PRODUCTION trên Render — phương án (C).
+#
+# Blueprint Path khi nhập trên Render:  deploy/render.prod.yaml
+#
+# KHÔNG CÓ GIÁ TRỊ SECRET NÀO TRONG TỆP NÀY. `sync: false` nghĩa là Render sẽ
+# hỏi giá trị ở giao diện và giữ trong kho secret của nó, không bao giờ vào git.
+#
+# ============================================================================
+#  PHƯƠNG ÁN (C) — production KHÔNG phụ thuộc máy cá nhân
+# ============================================================================
+#
+#  * Worker chạy TRÊN RENDER, không phải trên laptop. Đây là khác biệt lớn nhất
+#    so với `render.free.yaml`: ở gói Free không có Background Worker nên **mọi**
+#    job — kể cả Edge và CapCut — phải chờ laptop bật. Ở đây thì không.
+#
+#  * Giọng Piper (Ngọc Huyền) **TẮT** trên production: `FAS_LOCAL_VOICES=""`.
+#    Còn 26 giọng Việt (24 CapCut + 2 Edge). Bật lại sau khi có GPU đám mây.
+#
+#  VÌ SAO PHẢI TẮT PIPER Ở ĐÂY, chứ không phải "cứ để đó cho tiện":
+#  `recover_stale_jobs()` nhận BẤT KỲ job `pending` nào — worker không lọc được
+#  theo provider. Nếu Ngọc Huyền vẫn được chào bán mà worker Render không có
+#  model, worker này sẽ giành job đó, hỏng `MODEL_NOT_INSTALLED`, và sau 3 lần
+#  job `failed` vĩnh viễn. Tắt ở tầng danh sách trắng là cách duy nhất hiện nay
+#  để hai thứ đó không gặp nhau mà không phải sửa mã.
+#
+#  Worker này cài từ `server/requirements.txt` — KHÔNG có `piper-tts`. Đó là
+#  lớp phòng thủ thứ hai, độc lập với biến môi trường.
+#
+# ============================================================================
+#  TÁCH KHỎI STAGING — bốn thứ phải khác, không được dùng chung
+# ============================================================================
+#
+#  | Thứ            | Vì sao không được dùng chung                              |
+#  |----------------|-----------------------------------------------------------|
+#  | Appwrite       | **PROJECT** riêng, không phải database riêng. Appwrite Auth |
+#  |                | quản lý user theo PROJECT — dùng chung nghĩa là tài khoản   |
+#  |                | staging đăng nhập được vào production.                      |
+#  | R2 bucket      | `reconcile_audio.py` có chế độ xoá, và bộ nghiệm thu xoá    |
+#  |                | object nó tạo. Dùng chung = một lần chạy ở staging xoá      |
+#  |                | nhầm object production.                                     |
+#  | API key/token  | Cấp riêng, scope riêng. Lộ bên nào chỉ mất bên đó.          |
+#  | Worker state   | Worker Render có filesystem riêng nên `FAS_VAR_DIR` không   |
+#  |                | đụng laptop. (Nếu sau này chạy hai worker trên CÙNG một     |
+#  |                | máy thì BẮT BUỘC đặt `FAS_VAR_DIR` khác nhau — nếu không    |
+#  |                | chúng ghi đè tệp nhịp của nhau và `--check` thành vô nghĩa.)|
+#
+# ============================================================================
+#  ⚠️  ffmpeg — PHẢI XÁC MINH TRƯỚC KHI TIN
+# ============================================================================
+#
+#  Chương ra **nhiều hơn một đoạn** thì `server/tts_bridge.py::_concat_mp3`
+#  ghép bằng `ffmpeg -c copy`. Với `chunk_chars` mặc định 2000, gần như mọi
+#  chương thật đều nhiều đoạn. Thiếu ffmpeg → job hỏng `MERGE_FFMPEG_MISSING`.
+#
+#  `_find_ffmpeg()` gọi `find_ffmpeg(None)`, và hàm đó chỉ tra `shutil.which`
+#  (tức PATH). **Không có biến môi trường nào trỏ đường dẫn ffmpeg.** Nên
+#  ffmpeg bắt buộc phải nằm trên PATH của tiến trình worker.
+#
+#  Repo này chưa từng chạy worker trên Render, nên KHÔNG khẳng định runtime
+#  Python của Render có sẵn ffmpeg hay không. Kiểm trước, đừng đoán:
+#
+#      Render → service worker → Shell → `which ffmpeg && ffmpeg -version`
+#
+#  Có sẵn  → giữ nguyên `buildCommand` bên dưới.
+#  Không có → xem `deploy/RUNBOOK-PRODUCTION.md` mục 5 để biết hai cách bổ sung
+#             ffmpeg, cả hai đều ở tầng triển khai và KHÔNG phải sửa mã.
+#
+# ============================================================================
+
+services:
+  # ---------------------------------------------------------------- backend
+  - type: web
+    name: fas-prod-api
+    runtime: python
+    plan: starter            # KHÔNG dùng Free cho production: ngủ sau 15 phút,
+                             # request đầu tiên mất ~50 giây.
+    region: singapore        # cùng vùng với Appwrite sgp
+    branch: main
+    autoDeploy: false        # deploy có chủ ý, không theo mọi lần push
+    buildCommand: pip install -r server/requirements.txt
+    startCommand: python -m uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health      # LIVENESS — không chạm Appwrite/R2
+    envVars:
+      - key: FAS_ENV
+        value: production
+      # BẮT BUỘC. `Settings.validate()` dừng ngay nếu môi trường thật mà web
+      # vẫn tự chạy job.
+      - key: FAS_INLINE_WORKER
+        value: "false"
+      - key: DATA_BACKEND
+        value: appwrite
+      - key: STORAGE_BACKEND
+        value: r2
+      # --- phương án (C): tắt giọng chạy cục bộ -------------------------
+      # Chuỗi RỖNG = không phục vụ giọng cục bộ nào. Khác hẳn "không đặt"
+      # (không đặt thì mặc định là `piper:ngochuyen`).
+      #
+      # XÁC MINH SAU KHI DEPLOY: `GET /api/health` phải trả `"local_voices": []`.
+      # Nếu Render bỏ qua biến rỗng thì nó sẽ trả `["piper:ngochuyen"]` — lúc đó
+      # đặt giá trị `none` thay cho chuỗi rỗng (mọi id không thuộc bộ NghiTTS
+      # đều bị loại ở vòng lọc thứ hai, nên kết quả vẫn là rỗng).
+      - key: FAS_LOCAL_VOICES
+        value: ""
+      - key: FAS_PUBLIC_VOICE_LANGUAGES
+        value: vi
+      # --- định danh và secret: hỏi ở giao diện --------------------------
+      - key: FAS_CORS_ORIGINS
+        sync: false          # URL của fas-prod-web. TUYỆT ĐỐI không dùng "*".
+      - key: APPWRITE_ENDPOINT
+        sync: false
+      - key: APPWRITE_PROJECT_ID
+        sync: false          # PROJECT PRODUCTION, không phải staging
+      - key: APPWRITE_DATABASE_ID
+        sync: false
+      - key: APPWRITE_API_KEY
+        sync: false          # SECRET
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET
+        sync: false          # BUCKET PRODUCTION, không phải staging
+      - key: R2_ACCESS_KEY_ID
+        sync: false          # SECRET
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false          # SECRET
+
+  # ----------------------------------------------------------------- worker
+  # `type: worker` — không cổng, không `healthCheckPath`. Đây chính là kiểu
+  # workload mà `server/worker.py` cần.
+  - type: worker
+    name: fas-prod-worker
+    runtime: python
+    plan: starter
+    region: singapore
+    branch: main
+    autoDeploy: false
+    # `server/requirements.txt` — KHÔNG phải `requirements-worker.txt`.
+    # Bản kia ghim `piper-tts`, thứ worker production cố ý không có.
+    buildCommand: pip install -r server/requirements.txt
+    # `--require-env production` là rào chắn chống trỏ nhầm tài nguyên: nạp
+    # nhầm cấu hình staging thì worker thoát ngay với mã 2 thay vì lặng lẽ xử
+    # lý job của môi trường khác.
+    startCommand: python -m server.worker --require-env production
+    envVars:
+      - key: FAS_ENV
+        value: production
+      - key: FAS_INLINE_WORKER
+        value: "false"
+      - key: DATA_BACKEND
+        value: appwrite
+      - key: STORAGE_BACKEND
+        value: r2
+      - key: FAS_LOCAL_VOICES
+        value: ""            # xem ghi chú ở service API
+      # Chờ job đang chạy bao lâu khi Render gửi tín hiệu dừng. Dài hơn thời
+      # gian tổng hợp một chương dài thì deploy lại không bỏ job giữa chừng.
+      - key: FAS_WORKER_GRACE_SECONDS
+        value: "180"
+      # Cùng bộ credential với backend. Nếu cấp được credential riêng cho
+      # worker thì tốt hơn: thu hồi được từng bên khi lộ.
+      - key: APPWRITE_ENDPOINT
+        sync: false
+      - key: APPWRITE_PROJECT_ID
+        sync: false
+      - key: APPWRITE_DATABASE_ID
+        sync: false
+      - key: APPWRITE_API_KEY
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+
+  # --------------------------------------------------------------- frontend
+  - type: web
+    name: fas-prod-web
+    runtime: node
+    plan: starter
+    region: singapore
+    branch: main
+    autoDeploy: false
+    rootDir: web
+    buildCommand: npm ci && npx next build
+    startCommand: npx next start --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Biến CÔNG KHAI duy nhất. Nằm trong bundle, ai cũng đọc được.
+      # Đặt bằng URL của fas-prod-api.
+      #
+      # LƯU Ý: `NEXT_PUBLIC_*` được nướng vào bundle LÚC BUILD, không đọc lúc
+      # chạy. Đổi giá trị này thì phải build lại frontend, restart không đủ.
+      - key: NEXT_PUBLIC_API_BASE
+        sync: false
+
+# ----------------------------------------------------------------------------
+# CHƯA GẮN CUSTOM DOMAIN. Dùng *.onrender.com trước. Khi gắn domain riêng thì
+# phải cập nhật CẢ `FAS_CORS_ORIGINS` (API) LẪN `NEXT_PUBLIC_API_BASE` (web),
+# rồi BUILD LẠI frontend.
+#
+# RECONCILER: chạy theo lịch ở chế độ CHỈ ĐỌC. Xem `deploy/reconcile-cron.md`.
+# TUYỆT ĐỐI không bật chế độ xoá tự động trên production.

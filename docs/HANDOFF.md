@@ -120,6 +120,26 @@ Tách bạch cho rõ:
 
 Appwrite chỉ bật khi đủ **cả 4** biến; R2 cũng vậy.
 
+### Núm điều chỉnh — đều có mặc định dùng được, chỉ đụng khi có lý do đo được
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `FAS_LOCAL_VOICES` | `piper:ngochuyen` | Giọng chạy trên máy worker được phục vụ. Chuỗi **rỗng = tắt hết** |
+| `FAS_PUBLIC_VOICE_LANGUAGES` | `vi` | Ngôn ngữ web phục vụ, khớp theo tiền tố. Chuỗi **rỗng = không giới hạn** |
+| `FAS_MAX_CHAPTER_CHARS` | `100000` | Độ dài nội dung một chương |
+| `FAS_MAX_ACTIVE_JOBS` | `3` | Job đang xếp hàng mỗi người |
+| `FAS_JOB_LEASE_SECONDS` | `90` | Lease sống bao lâu nếu không gia hạn |
+| `FAS_JOB_HEARTBEAT_SECONDS` | `30` | Chu kỳ gia hạn lease (lease phải ≥ 3 lần số này) |
+| `FAS_WORKER_POLL_SECONDS` | `3` | Chu kỳ quét job của worker |
+| `FAS_WORKER_GRACE_SECONDS` | `120` | Chờ job đang chạy khi dừng worker |
+
+Hai biến đầu có ý nghĩa **ngược nhau** khi để rỗng, và đó là chủ ý: một bên là
+danh sách cho phép (rỗng = không cho ai), bên kia là bộ lọc thu hẹp (rỗng =
+không lọc gì).
+
+`/api/health` báo ra `local_voices` và `public_voice_languages` để người vận
+hành thấy ngay cấu hình đang có tác dụng, thay vì phải đoán.
+
 `web/.env` — chỉ một biến công khai: `NEXT_PUBLIC_API_BASE`.
 
 ## E2E đầy đủ — ĐÃ CHẠY

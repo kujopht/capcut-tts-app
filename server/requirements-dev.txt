@@ -1,0 +1,17 @@
+# Phu thuoc CHI DANH CHO TEST — khong phai runtime.
+#
+# Vi sao tach khoi `server/requirements.txt`: job `backend` tren CI ton tai de
+# chung minh MOT dieu — `server/requirements.txt` la du de chay backend, va no
+# khong keo theo PySide6. Nhet mot goi chi test dung vao do la lam hong chinh
+# phep thu ay.
+#
+# Thu tu tren CI:
+#   1. cai `requirements.txt`      -> phu thuoc runtime
+#   2. kiem khong co PySide6
+#   3. `import server.main`        -> chung minh runtime tu no da du
+#   4. cai `requirements-dev.txt`  -> them cong cu cho test
+#   5. chay test
+
+# Doc `deploy/*.yaml` trong test cau hinh trien khai. Backend luc chay khong
+# bao gio doc YAML.
+PyYAML>=6.0,<7.0

@@ -1,0 +1,108 @@
+# ============================================================
+#  Fanfic Audio Studio / CapCut TTS
+# ============================================================
+
+# --- Du lieu nhay cam: TUYET DOI khong commit ---
+device.json
+device*.json
+!device.json.example
+*.device.json
+*.token
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+# cookie / session
+*cookie*
+*cookies*
+*.session
+# bien moi truong
+.env
+.env.*
+*.env
+# cau hinh ca nhan sinh ra khi chay (QSettings dang file, xem FAS_SETTINGS_FILE)
+fas_settings.ini
+*settings.local.ini
+*.local.json
+
+# --- Ket qua chay app ---
+outputs/
+Fanfic Audio Studio/
+*.mp3
+*.m4a
+*.wav
+*.zip
+
+# --- Model TTS chay cuc bo (Piper) ---
+# Model that nam o %LOCALAPPDATA%\FanficAudioStudio\models\piper, KHONG bao gio
+# duoc commit vao repo (moi file vai chuc MB, va khong phai ma nguon).
+*.onnx
+*.onnx.json
+models/
+models.json
+
+# --- Build / dong goi ---
+build/
+dist/
+installer_output/
+*.spec
+!installer.iss
+
+# --- Moi truong ao / Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Gradio (ban du phong) ---
+.gradio/
+flagged/
+gradio_cached_examples/
+
+# --- Cong cu kiem tra giao dien bang trinh duyet ---
+# Playwright MCP do snapshot va log console vao day moi lan chay. Anh nao dang
+# giu lam bang chung thi chep tay sang docs/screenshots/.
+.playwright-mcp/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Web MVP (Next.js) ---
+web/node_modules/
+web/.next/
+web/out/
+web/build/
+web/coverage/
+web/.turbo/
+web/.eslintcache
+web/next-env.d.ts
+web/*.tsbuildinfo
+web/.next/types/
+node_modules/
+
+# --- Backend web (FastAPI) ---
+server/__pycache__/
+server/.pytest_cache/
+server/var/
+server/.venv/
+
+# --- Bien moi truong: chan het TRU file mau ---
+.env
+.env.*
+!.env.example
+!web/.env.example
+!server/.env.example

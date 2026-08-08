@@ -1,0 +1,18 @@
+# Lịch chạy healthcheck của TTS worker.
+
+[Unit]
+Description=Kiểm tra nhịp TTS worker mỗi 2 phút
+
+[Timer]
+# Chờ 2 phút sau khi boot: worker cần thời gian khởi động và ghi nhịp đầu tiên.
+# Kiểm tra ngay lúc boot thì lần nào cũng thấy "nhịp cũ" và restart oan.
+OnBootSec=2min
+OnUnitActiveSec=2min
+# Ngưỡng nhịp cũ mặc định là 60s. Kiểm tra mỗi 2 phút nghĩa là worker treo bị
+# phát hiện trong vòng tối đa ~3 phút. Dày hơn không giúp gì: mỗi lần restart
+# đều bỏ dở một job và phải chờ hết lease mới có người nhận lại.
+AccuracySec=10s
+Unit=fanfic-worker-health.service
+
+[Install]
+WantedBy=timers.target

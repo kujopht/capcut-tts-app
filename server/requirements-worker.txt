@@ -1,0 +1,31 @@
+# Phụ thuộc của TIẾN TRÌNH WORKER (`python -m server.worker`).
+#
+#     pip install -r server/requirements-worker.txt
+#
+# VÌ SAO TÁCH KHỎI `server/requirements.txt`:
+#
+# `server/requirements.txt` là thứ Render dựng cho tiến trình web. Tiến trình
+# đó KHÔNG chạy job TTS (`FAS_INLINE_WORKER=false`), nên nó không cần Piper —
+# và `piper-tts` kéo theo `onnxruntime`, khoảng vài chục MB, trên một service
+# gói Free chỉ có 512 MB RAM. Cài vào đó là trả giá mà không được gì.
+#
+# Ngược lại, worker BẮT BUỘC phải có. Nó là nơi duy nhất thật sự nạp model và
+# chạy inference.
+
+-r requirements.txt
+
+# --- Piper local: giọng Ngọc Huyền (`piper:ngochuyen`) ---
+#
+# GHIM CHÍNH XÁC, không phải `>=`. `PiperLocalProvider._synthesize_wav` dò lần
+# lượt vài chữ ký API khác nhau vì các bản Piper không tương thích với nhau:
+# 1.6 dùng `synthesize_wav(text, wav_file, syn_config=SynthesisConfig(...))`,
+# bản cũ hơn nhận `length_scale` trực tiếp. Một bản mới bỏ `synthesize_wav` là
+# giọng chết ngay, và nó chỉ lộ ra lúc chạy thật.
+#
+# 1.6.0 là bản ĐÃ probe thật trên máy này: nạp model 2,3 giây, sinh MP3
+# 22050 Hz đọc được, có tiếng nói thật.
+#
+# Model KHÔNG nằm trong repository — nó ở
+# `%LOCALAPPDATA%\FanficAudioStudio\models\piper\ngochuyen.onnx` (60,57 MB).
+# `.gitignore` chặn `*.onnx`, `*.onnx.json`, `models/` và `models.json`.
+piper-tts==1.6.0

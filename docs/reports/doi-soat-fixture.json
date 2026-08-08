@@ -1,0 +1,62 @@
+{
+  "dry_run": {
+    "che_do": "dry-run",
+    "an_han_gio": 24,
+    "tong_object": 4,
+    "da_tham_chieu": 1,
+    "dang_xu_ly": [
+      "audio/usr_fixture/chp_fx/50e472538738398827dcf83d30e42a36ab0833157e6fb7f05b5d626cd4a22e62.mp3"
+    ],
+    "con_moi": [
+      "audio/usr_fixture/chp_fx/hash-vua-upload.mp3"
+    ],
+    "mo_coi": [
+      {
+        "key": "audio/usr_fixture/chp_fx/hash-mo-coi.mp3",
+        "size_bytes": 200,
+        "modified_at": "2026-08-04T10:24:58+00:00"
+      }
+    ],
+    "ban_ghi_thieu_file": [
+      {
+        "track_id": "trk_907d961f77b74d28",
+        "chapter_id": "chp_fx",
+        "object_key": "audio/usr_fixture/chp_fx/hash-mat-file.mp3"
+      }
+    ],
+    "da_xoa": [],
+    "bo_qua_khi_xoa": [],
+    "loi": []
+  },
+  "che_do_xoa": {
+    "che_do": "delete",
+    "an_han_gio": 24,
+    "tong_object": 4,
+    "da_tham_chieu": 1,
+    "dang_xu_ly": [
+      "audio/usr_fixture/chp_fx/50e472538738398827dcf83d30e42a36ab0833157e6fb7f05b5d626cd4a22e62.mp3"
+    ],
+    "con_moi": [
+      "audio/usr_fixture/chp_fx/hash-vua-upload.mp3"
+    ],
+    "mo_coi": [
+      {
+        "key": "audio/usr_fixture/chp_fx/hash-mo-coi.mp3",
+        "size_bytes": 200,
+        "modified_at": "2026-08-04T10:24:58+00:00"
+      }
+    ],
+    "ban_ghi_thieu_file": [
+      {
+        "track_id": "trk_907d961f77b74d28",
+        "chapter_id": "chp_fx",
+        "object_key": "audio/usr_fixture/chp_fx/hash-mat-file.mp3"
+      }
+    ],
+    "da_xoa": [
+      "audio/usr_fixture/chp_fx/hash-mo-coi.mp3"
+    ],
+    "bo_qua_khi_xoa": [],
+    "loi": []
+  }
+}

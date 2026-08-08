@@ -1,0 +1,11 @@
+# Ba workload tach roi. Xem deploy/README.md.
+#
+# `worker` KHONG mo cong va KHONG phai request handler — no la tien trinh chay
+# dai. Dat no vao serverless handler se lam lease het han giua chung va job xoay
+# vong vo ich.
+#
+# Ca `web` lan `worker` deu phai co FAS_INLINE_WORKER=false o staging/production.
+
+web: python -m uvicorn server.main:app --host 0.0.0.0 --port $PORT
+worker: python -m server.worker
+frontend: cd web && npx next start --port $PORT

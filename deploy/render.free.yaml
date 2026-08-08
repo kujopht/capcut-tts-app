@@ -1,0 +1,117 @@
+# Blueprint STAGING trên gói FREE của Render — KHÔNG cần thẻ, không trả phí.
+#
+# Blueprint Path khi nhập trên Render:  deploy/render.free.yaml
+#
+# Khác `deploy/render.yaml` (bản trả phí) ở đúng hai điểm:
+#   1. cả hai service dùng `plan: free`;
+#   2. KHÔNG có Background Worker — gói Free không hỗ trợ. TTS worker chạy trên
+#      máy bạn và nối thẳng vào Appwrite/R2 staging. Xem deploy/RUNBOOK.md mục
+#      "Worker cục bộ cho staging gói Free".
+#
+# KHÔNG CÓ GIÁ TRỊ SECRET NÀO TRONG TỆP NÀY. `sync: false` nghĩa là Render sẽ
+# hỏi giá trị ở giao diện và giữ trong kho secret của nó, không bao giờ vào git.
+#
+# ------------------------------------------------------------------------
+#  ĐÁNH ĐỔI CỦA GÓI FREE — biết trước để khỏi tưởng là lỗi
+# ------------------------------------------------------------------------
+#  * Web service Free **ngủ sau 15 phút không có traffic**. Request đầu tiên sau
+#    khi ngủ mất khoảng 50 giây. Cả hai service đều vậy, nên lần mở đầu tiên có
+#    thể chờ tới ~100 giây. `scripts/staging_smoke.py --wake-timeout` lo việc
+#    đánh thức này.
+#  * 750 giờ instance mỗi tháng dùng chung cho cả tài khoản. Hai service chạy
+#    liên tục sẽ vượt; nhưng vì chúng tự ngủ nên thực tế hiếm khi chạm trần.
+#  * 512 MB RAM mỗi service.
+#  * **Backend ngủ KHÔNG làm job TTS dừng**: worker chạy trên máy bạn và nói
+#    chuyện thẳng với Appwrite/R2, không đi qua backend.
+#  * Nhưng **tạo** job thì cần backend thức, vì `POST /api/jobs` đi qua nó.
+#
+# ------------------------------------------------------------------------
+#  VÌ SAO FRONTEND KHÔNG PHẢI "Static Site"
+# ------------------------------------------------------------------------
+#  Static Site của Render cần `output: 'export'` của Next. Đã thử thật và build
+#  dừng ở:
+#
+#      Error: Page "/chapters/[id]" is missing "generateStaticParams()"
+#             so it cannot be used with "output: export" config.
+#
+#  `/novels/[id]` và `/chapters/[id]` nhận id là dữ liệu người dùng lúc chạy,
+#  không thể liệt kê lúc build. Muốn thành Static Site thì phải đổi sang dạng
+#  query (`/novels?id=…`) — đổi URL công khai, đổi liên kết, đổi test. Không làm
+#  trong lượt này. Web Service gói Free vẫn miễn phí và không phải sửa gì.
+
+services:
+  # ---------------------------------------------------------------- backend
+  - type: web
+    name: fas-staging-api-free
+    runtime: python
+    plan: free
+    region: singapore          # cùng vùng với Appwrite sgp
+    branch: feature/web-mvp
+    autoDeploy: false          # deploy có chủ ý, không theo mọi lần push
+    buildCommand: pip install -r server/requirements.txt
+    startCommand: python -m uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health      # LIVENESS — không chạm Appwrite/R2
+    envVars:
+      - key: FAS_ENV
+        value: staging
+      # BẮT BUỘC. Ở gói Free không có Background Worker, nên nếu để `true` thì
+      # job TTS sẽ chạy trong chính tiến trình web — và Render sẽ ngủ nó giữa
+      # chừng sau 15 phút. `Settings.validate()` chặn thẳng: FAS_ENV=staging mà
+      # FAS_INLINE_WORKER=true sẽ làm backend dừng ngay khi khởi động.
+      - key: FAS_INLINE_WORKER
+        value: "false"
+      - key: DATA_BACKEND
+        value: appwrite
+      - key: STORAGE_BACKEND
+        value: r2
+      - key: FAS_CORS_ORIGINS
+        sync: false            # URL của fas-staging-web-free
+      - key: APPWRITE_ENDPOINT
+        sync: false
+      - key: APPWRITE_PROJECT_ID
+        sync: false            # PROJECT STAGING, không phải dev
+      - key: APPWRITE_DATABASE_ID
+        sync: false
+      - key: APPWRITE_API_KEY
+        sync: false            # SECRET
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET
+        sync: false            # BUCKET STAGING, không phải dev
+      - key: R2_ACCESS_KEY_ID
+        sync: false            # SECRET
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false            # SECRET
+
+  # --------------------------------------------------------------- frontend
+  - type: web
+    name: fas-staging-web-free
+    runtime: node
+    plan: free
+    region: singapore
+    branch: feature/web-mvp
+    autoDeploy: false
+    rootDir: web
+    buildCommand: npm ci && npx next build
+    startCommand: npx next start --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Biến CÔNG KHAI duy nhất. Nằm trong bundle, ai cũng đọc được.
+      # Đặt bằng URL của fas-staging-api-free.
+      - key: NEXT_PUBLIC_API_BASE
+        sync: false
+
+# ----------------------------------------------------------------------------
+# KHÔNG CÓ `type: worker` Ở ĐÂY — đó là chủ ý, không phải thiếu sót.
+# Gói Free của Render không có Background Worker. Worker chạy trên máy bạn:
+#
+#   PowerShell:
+#     $env:FAS_ENV_FILE = "server/.env.staging"
+#     .\.venv\Scripts\python.exe -m server.worker --require-env staging
+#
+# `--require-env staging` là rào chắn: nạp nhầm `server/.env` (dev) thì worker
+# thoát ngay với mã 2 thay vì lặng lẽ xử lý job của dev.
+#
+# RECONCILER: gói Free không có Cron Job. Chạy tay theo `deploy/RUNBOOK.md`.

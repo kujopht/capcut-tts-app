@@ -1,0 +1,54 @@
+# ============================================================
+#  Fanfic Audio Studio - phu thuoc RUNTIME cua backend web (server/)
+#
+#  Cai dat:
+#      python -m venv .venv
+#      .\.venv\Scripts\python.exe -m pip install -r server/requirements.txt
+#
+#  File nay TACH RIENG khoi requirements-gui.txt: backend KHONG duoc keo theo
+#  PySide6/gradio/pyinstaller. Da xac minh `server.tts_bridge` chi cham toi
+#  phan Python thuan cua `desktop_app`.
+#
+#  Chua co nhom dev rieng - toan bo muc duoi day deu la runtime. Bo test chay
+#  bang `unittest` co san trong thu vien chuan nen khong can them goi nao.
+# ============================================================
+
+# --- Bat buoc: HTTP API ---
+fastapi>=0.115,<1.0
+uvicorn>=0.30,<1.0
+# watchfiles: BAT BUOC cho `uvicorn --reload`. Thieu goi nay uvicorn lui ve
+# `StatReload` (do mtime dinh ky) — da gap that: sua route xong ma server van
+# phuc vu code cu, tra 404/405 nhu the code chua duoc viet.
+watchfiles>=0.21,<2.0
+pydantic>=2.7,<3.0
+
+# --- Bat buoc: nap server/.env ---
+# `server/config.py` nap file nay theo duong dan tinh tu vi tri module.
+# Thieu goi = file .env bi bo qua hoan toan va backend am tham chay mock.
+python-dotenv>=1.0,<2.0
+
+# --- Bat buoc: client HTTP ---
+# httpx: goi Appwrite REST (server/appwrite_adapter.py, server/appwrite_store.py)
+#        va la nen cua fastapi.testclient trong bo test.
+httpx>=0.27,<1.0
+# requests: provider CapCut (capcut_tts_api).
+requests>=2.25.0
+
+# --- Bat buoc: luu tru Cloudflare R2 (STORAGE_BACKEND=r2) ---
+# Day la RUNTIME dependency, khong phai goi cai tay. `server/r2_adapter.py`
+# import lazy nen thieu goi chi hong che do r2, nhung moi truong trien khai
+# van phai co san de STORAGE_BACKEND=r2 khoi tao duoc.
+# Rang buoc theo major: boto3 giu API on dinh trong 1.x, chi doi o 2.0.
+boto3>=1.34,<2.0
+
+# --- Nguon giong Edge TTS (provider "edge") ---
+# Pin theo minor de khong bi vo API giua chung.
+edge-tts>=7.2.8,<8.0
+
+# --- Tuy chon: nguon giong Piper chay cuc bo (provider "piper") ---
+# Backend van chay binh thuong khi CHUA cai; giong Piper se bao "Chưa cài gói".
+# Bo comment dong duoi neu muon dung giong cuc bo.
+# piper-tts>=1.6.0,<2.0
+
+# --- Ngoai Python ---
+# ffmpeg phai co trong PATH de ghep cac doan MP3 (server/tts_bridge.py).

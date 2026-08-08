@@ -1,0 +1,421 @@
+/**
+ * Lop goi backend.
+ *
+ * BAO MAT: trinh duyet CHI biet URL cua backend. Moi bi mat (Appwrite API key,
+ * R2 access key) nam o server va khong bao gio duoc gui xuong day.
+ */
+
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+
+const TOKEN_KEY = "fas.token";
+
+export type Tier = "free" | "listener_pro" | "creator_pro" | "ultra";
+export type PublishState = "draft" | "published" | "archived";
+export type JobStatus = "pending" | "running" | "completed" | "failed";
+
+export interface Profile {
+  user_id: string;
+  email: string;
+  display_name: string;
+  tier: Tier;
+  listened_minutes: number;
+  tts_characters_used: number;
+  created_at: string;
+}
+
+export interface Novel {
+  novel_id: string;
+  owner_id: string;
+  title: string;
+  description: string;
+  cover_key: string | null;
+  /**
+   * URL xem duoc cua anh bia, do backend cap (trinh duyet khong co credential
+   * cua kho nen khong tu dung tu `cover_key` duoc). `null` khi truyen chua co
+   * bia — luc do giao dien dung anh du phong.
+   *
+   * Tuy chon de client cu (chua biet truong nay) van bien dich duoc.
+   */
+  cover_url?: string | null;
+  state: PublishState;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Chapter {
+  chapter_id: string;
+  novel_id: string;
+  owner_id: string;
+  title: string;
+  order_index: number;
+  state: PublishState;
+  char_count: number;
+  content?: string;
+  /**
+   * Chuong da co ban audio chua. Backend tra san trong danh sach chuong cua
+   * `getNovel`, nen trang chi tiet khong phai hoi tung chuong mot nua.
+   *
+   * Tuy chon vi cac route khac (vi du `createChapter`) khong kem truong nay.
+   * Thieu thi coi nhu chua co audio.
+   */
+  has_audio?: boolean;
+  /**
+   * Chuong da duoc sua SAU KHI tao audio, nen audio CO THE khong con khop noi
+   * dung. La canh bao, khong phai bang chung: sua rieng tieu de cung lam co nay
+   * bat len. Khong bao gio duoc dung lam ly do de xoa file audio.
+   *
+   * Tuy chon de client cu van bien dich duoc.
+   */
+  audio_outdated?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Voice {
+  voice_id: string;
+  provider: string;
+  provider_label: string;
+  display_name: string;
+  description: string;
+  language: string;
+  gender: string;
+  installed: boolean;
+  status: string;
+  status_label: string;
+  status_reason: string;
+  /**
+   * Giong nay dang duoc phuc vu nguoi dung hay khong.
+   *
+   * Thay cho `commercial_ready` truoc day. Ten cu la mot phan doan ve GIAY
+   * PHEP — thu ma may chu khong biet va khong nen doan. Day la mot su that ky
+   * thuat: no den tu danh sach trang o `server/tts_bridge.py`.
+   */
+  public_enabled: boolean;
+  /**
+   * Model nam tren may worker, khong nam trong tien trinh API.
+   *
+   * Voi giong nay, `installed` cua API KHONG noi len dieu gi: Render khong co
+   * file `.onnx` nao nen no luon false. Dung co nay de quyet dinh hien thi.
+   */
+  runs_on_worker: boolean;
+  /** Thuoc muc "Giong de xuat" (bay giong do chu du an chon trong app desktop). */
+  recommended: boolean;
+  /**
+   * Thu tu trong muc de xuat, tinh tu 0. `null` khi khong thuoc muc do.
+   *
+   * Do MAY CHU cap, lay tu `desktop_app/providers/recommended.py`. Frontend
+   * khong duoc tu sap xep lai.
+   */
+  recommended_order: number | null;
+}
+
+export interface TtsJob {
+  job_id: string;
+  owner_id: string;
+  chapter_id: string;
+  voice_id: string;
+  content_hash: string;
+  status: JobStatus;
+  progress: number;
+  total_parts: number;
+  done_parts: number;
+  output_key: string | null;
+  error_kind: string | null;
+  error_message: string;
+  rate: string;
+  chunk_chars: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface AudioTrack {
+  track_id: string;
+  chapter_id: string;
+  object_key: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+/** Loi API kem thong bao tieng Viet de hien thi thang cho nguoi dung. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string | null): void {
+  if (typeof window === "undefined") return;
+  if (token) window.localStorage.setItem(TOKEN_KEY, token);
+  else window.localStorage.removeItem(TOKEN_KEY);
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("Content-Type", "application/json");
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  } catch {
+    throw new ApiError(
+      "Không kết nối được máy chủ. Hãy kiểm tra backend đã chạy chưa.",
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    let message = `Máy chủ trả về lỗi ${response.status}.`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") message = body.detail;
+    } catch {
+      /* giu thong bao mac dinh */
+    }
+    throw new ApiError(message, response.status);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+export const api = {
+  health: () => request<Record<string, unknown>>("/api/health"),
+
+  register: (email: string, password: string, displayName = "") =>
+    request<{ token: string; profile: Profile }>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password, display_name: displayName }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<{ token: string; profile: Profile }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+
+  me: () => request<{ profile: Profile }>("/api/auth/me"),
+
+  /**
+   * Kết thúc phiên ở phía máy chủ.
+   *
+   * Xoá token trong localStorage thôi là chưa đủ: session secret vẫn sống ở
+   * Appwrite, và ai nhặt được nó vẫn dùng tiếp được.
+   */
+  logout: () =>
+    request<{ da_huy_phien: boolean }>("/api/auth/logout", { method: "POST" }),
+
+  voices: () => request<{ voices: Voice[]; count: number }>("/api/voices"),
+
+  listNovels: (mine = false) =>
+    request<{ novels: Novel[]; count: number }>(
+      `/api/novels${mine ? "?mine=true" : ""}`,
+    ),
+
+  /**
+   * Trang kham pha: tim kiem, loc the va phan trang do BACKEND lam.
+   *
+   * `listNovels` o tren giu nguyen — khong truyen `limit` thi backend tra ve het
+   * y nhu truoc, nen trang tac gia va `ensureStudioNovel` khong doi gi.
+   */
+  browseNovels: (opts: {
+    query?: string;
+    tag?: string;
+    limit: number;
+    offset?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (opts.query?.trim()) params.set("q", opts.query.trim());
+    if (opts.tag) params.set("tag", opts.tag);
+    params.set("limit", String(opts.limit));
+    params.set("offset", String(opts.offset ?? 0));
+    return request<NovelPage>(`/api/novels?${params.toString()}`);
+  },
+
+  /** Cac the dang co, de dung bo loc ma khong phai tai het truyen ve. */
+  novelTags: () =>
+    request<{ tags: string[]; count: number }>("/api/novels/tags"),
+
+  /**
+   * MOI chuong cua chinh minh, trong MOT request.
+   *
+   * Thu vien audio can mot bang tra "chapter_id -> ten chuong". Truoc day no goi
+   * `getNovel` cho TUNG truyen de dung bang do — nguoi co 40 truyen ton 42
+   * request. Duong nay khong kem noi dung chuong va khong ky URL audio nao.
+   */
+  myChapters: () =>
+    request<{ chapters: Chapter[]; count: number }>("/api/chapters?mine=true"),
+
+  createNovel: (title: string, description: string, tags: string[] = []) =>
+    request<{ novel: Novel }>("/api/novels", {
+      method: "POST",
+      body: JSON.stringify({ title, description, tags }),
+    }),
+
+  getNovel: (novelId: string) =>
+    request<{ novel: Novel; chapters: Chapter[] }>(`/api/novels/${novelId}`),
+
+  publishNovel: (novelId: string) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}/publish`, {
+      method: "POST",
+    }),
+
+  unpublishNovel: (novelId: string) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}/unpublish`, {
+      method: "POST",
+    }),
+
+  /** Sua truyen. Chi gui truong can doi; `state` khong doi duoc qua day. */
+  updateNovel: (
+    novelId: string,
+    fields: { title?: string; description?: string; tags?: string[] },
+  ) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
+
+  /** Xoa truyen cung moi chuong, job, audio_track va object cua no. */
+  deleteNovel: (novelId: string) =>
+    request<{ deleted: boolean; removed: RemovedCounts }>(
+      `/api/novels/${novelId}`,
+      { method: "DELETE" },
+    ),
+
+  createChapter: (
+    novelId: string,
+    title: string,
+    content: string,
+    orderIndex = 1,
+  ) =>
+    request<{ chapter: Chapter }>("/api/chapters", {
+      method: "POST",
+      body: JSON.stringify({
+        novel_id: novelId,
+        title,
+        content,
+        order_index: orderIndex,
+      }),
+    }),
+
+  updateChapter: (
+    chapterId: string,
+    fields: { title?: string; content?: string; order_index?: number },
+  ) =>
+    request<{ chapter: Chapter }>(`/api/chapters/${chapterId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
+
+  /** Xoa chuong cung job, audio_track va object cua no. */
+  deleteChapter: (chapterId: string) =>
+    request<{ deleted: boolean; removed: RemovedCounts }>(
+      `/api/chapters/${chapterId}`,
+      { method: "DELETE" },
+    ),
+
+  getChapter: (chapterId: string) =>
+    request<{
+      chapter: Chapter;
+      audio: AudioTrack | null;
+      /** Truyen cha, kem san de luong nghe co bia ma khong phai goi them. */
+      novel?: NovelBrief | null;
+      /** Chuong sua sau khi tao audio -> audio co the khong con khop. */
+      audio_outdated?: boolean;
+    }>(`/api/chapters/${chapterId}`),
+
+  /**
+   * Dat lai thu tu chuong bang MOT request.
+   *
+   * Gui CA danh sach id theo thu tu moi. Neu goi `updateChapter` cho tung chuong
+   * thi doi thu tu n chuong se thanh n request — dung cai N+1 da bo di o trang
+   * chi tiet truyen. Danh sach phai gom dung cac chuong cua truyen, khong thieu
+   * khong thua; lech mot cai thi backend tra 400 va khong ghi gi ca.
+   */
+  reorderChapters: (novelId: string, chapterIds: string[]) =>
+    request<{ chapters: Chapter[] }>(`/api/novels/${novelId}/chapters/order`, {
+      method: "POST",
+      body: JSON.stringify({ chapter_ids: chapterIds }),
+    }),
+
+  createJob: (chapterId: string, voiceId: string, rate = "1.0") =>
+    request<{ job: TtsJob; reused: boolean }>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        chapter_id: chapterId,
+        voice_id: voiceId,
+        rate,
+      }),
+    }),
+
+  getJob: (jobId: string) => request<{ job: TtsJob }>(`/api/jobs/${jobId}`),
+
+  listJobs: (chapterId?: string) =>
+    request<{ jobs: TtsJob[]; count: number }>(
+      `/api/jobs${chapterId ? `?chapter_id=${chapterId}` : ""}`,
+    ),
+
+  audioUrl: (chapterId: string) => `${API_BASE}/api/audio/${chapterId}`,
+
+  /**
+   * Xin URL phat duoc cho mot chuong, SAU KHI backend kiem tra quyen.
+   *
+   * The `<audio src>` khong gui duoc header `Authorization`, con `fetch()`
+   * co header do thi chet o buoc redirect sang R2 vi bucket khong mo CORS.
+   * Nen phai lay URL ky duoi dang JSON roi tu gan vao `<audio>` / `<a>`.
+   */
+  audioLink: (chapterId: string, download = false) =>
+    request<AudioLink>(
+      `/api/audio/${chapterId}/url${download ? "?download=true" : ""}`,
+    ),
+};
+
+/** Mot trang trong danh sach truyen. */
+export interface NovelPage {
+  novels: Novel[];
+  /** So truyen TRONG trang nay. */
+  count: number;
+  /** Tong so truyen khop dieu kien — de biet con trang sau hay khong. */
+  total: number;
+  limit: number | null;
+  offset: number;
+  has_more: boolean;
+}
+
+/** Phan truyen kem theo chuong: vua du de hien bia va ten. */
+export interface NovelBrief {
+  novel_id: string;
+  title: string;
+  state: PublishState;
+  cover_key: string | null;
+  cover_url: string | null;
+}
+
+/** So luong da xoa, backend tra ve de doi soat. */
+export interface RemovedCounts {
+  chapters?: number;
+  tracks: number;
+  jobs: number;
+  objects: number;
+}
+
+export interface AudioLink {
+  /** URL ky san (che do R2). Gan thang vao `<audio src>` hoac `<a href>`. */
+  url: string | null;
+  /** Che do kho cuc bo: phai stream qua backend kem token. */
+  stream_url: string | null;
+  expires_in: number | null;
+  size_bytes: number;
+}

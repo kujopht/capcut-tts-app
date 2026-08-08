@@ -767,6 +767,68 @@ suốt thời gian tổng hợp. Có test: `test_lease_hardening.py::JobDaiHonLe
 Đặt hạn mức là quyết định sản phẩm, chưa làm. Chi tiết ở
 `deploy/RUNBOOK-WORKER.md` mục 8.
 
+### Phạm vi giọng của web — chỉ tiếng Việt (2026-08-08)
+
+Bản web hiện tại chỉ phục vụ **giọng tiếng Việt**: 27 giọng (CapCut 24, Edge 2,
+Piper 1). Registry **vẫn giữ đủ 452 giọng** mọi thứ tiếng — desktop app dùng
+chung registry đó. Cái bị thu hẹp là *phạm vi công bố của web*, qua
+`FAS_PUBLIC_VOICE_LANGUAGES` (mặc định `vi`), nên mở lại ngôn ngữ khác chỉ là
+đổi một biến.
+
+Cưỡng chế **ở máy chủ**, không chỉ lọc ở frontend: `/api/voices` và
+`POST /api/jobs` dùng cùng một vị ngữ. Gửi thẳng một `voice_id` nước ngoài →
+400 kèm lý do đọc được, và không bao giờ tự đổi sang giọng Việt khác.
+
+Worker **không** áp giới hạn ngôn ngữ — có chủ ý: job cũ đang `pending` từ
+trước khi thu hẹp phạm vi vẫn phải chạy xong.
+
+### Mục "Giọng đề xuất" — bảy giọng, lấy từ app desktop
+
+| # | Tên hiển thị | `voice_id` | Provider |
+|---|---|---|---|
+| 1 | Cô Gái Hoạt Ngôn | `capcut:BV074_streaming\|7102355709945188865` | CapCut |
+| 2 | Giọng Bé | `capcut:BV074_streaming_dsp\|7550087831092251920` | CapCut |
+| 3 | Giọng Nữ Phổ Thông | `capcut:vi_female_huong\|7264854897953083905` | CapCut |
+| 4 | Mai | `capcut:BV562_streaming\|7483736254694035984` | CapCut |
+| 5 | Nhỏ Ngọt Ngào | `capcut:BV421_vivn_streaming\|7252594014782755330` | CapCut |
+| 6 | Hoài My | `edge:vi-VN-HoaiMyNeural` | Edge TTS |
+| 7 | Ngọc Huyền (mới) | `piper:ngochuyen` | Piper local |
+
+**Nguồn chuẩn: `desktop_app/providers/recommended.py`** — backend đọc thẳng
+`RECOMMENDED_CODES` từ đó, không gõ tay lại (có test cấm). Đối chiếu bằng mã ổn
+định `(provider, engine_voice_id)`, **không** bằng tên hiển thị.
+
+Lưu ý về `voice_id` CapCut: phần sau dấu `|` là `resource_id` lấy từ
+`Voice.json`. Đổi `Voice.json` là đổi id — thêm một lý do nữa để đối chiếu bằng
+mã ổn định chứ không phải bằng id đầy đủ.
+
+Giao diện: hai mục trong **một** `<select>` (`optgroup`), nên chọn ở mục này
+đồng bộ ngay với mục kia và không nhân bản bản ghi voice nào. Mặc định **vẫn là
+Hoài My** — Ngọc Huyền chưa được đặt làm mặc định.
+
+### Giọng Ngọc Huyền — đã probe thật trên máy này (2026-08-08)
+
+| Hạng mục | Số đo |
+|---|---|
+| Nạp model (lần đầu) | 2,3 giây |
+| RAM sau khi nạp | +121 MB (đỉnh tiến trình 182 MB) |
+| Tổng hợp "Xin chào." | 126 ms ổn định (lần đầu 199 ms — có warm-up) |
+| Audio ra | MP3 22050 Hz mono, 0,882 giây, rms 0,188 |
+| Thiết bị | **CPU** — `onnxruntime` bản CPU, không CUDA |
+
+12/12 kiểm tra đạt: model nạp được, Smart App Control **không** chặn
+`espeakbridge.pyd`, audio có tiếng nói thật, tệp tạm được dọn.
+
+Cưỡng chế: `FAS_LOCAL_VOICES` (mặc định `piper:ngochuyen`) **giao với** vũ trụ
+NghiTTS suy từ catalog — không biến môi trường nào mở được một giọng cục bộ nằm
+ngoài bộ đó. Thay cho cờ boolean bật-tắt-tất-cả cũ.
+
+Concurrency Piper = **1 job**, khoá ở cấp job (`tts_bridge._PIPER_LOCK`).
+
+`commercial_ready` đã đổi thành `public_enabled` — tên cũ là một phán đoán về
+giấy phép, thứ máy chủ không biết. Chủ dự án đã cho phép công bố các giọng
+NghiTTS và chịu trách nhiệm về quyền sử dụng.
+
 ### Worker 24/7 trên VM — đã chuẩn bị, CHƯA triển khai
 
 `deploy/fanfic-worker.service` + `.env.example` + healthcheck timer + runbook

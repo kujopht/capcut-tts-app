@@ -1,209 +1,280 @@
-# Runbook — dựng production (phương án C)
+# Runbook — dựng production ($0 cho MVP)
 
-Production **không phụ thuộc máy cá nhân**: worker chạy trên Render. Giọng Piper
-(Ngọc Huyền) **tắt** ở phiên bản này; còn 26 giọng Việt (24 CapCut + 2 Edge).
+Ba nơi, ba nhà cung cấp, **không tốn phí ở mức MVP**:
 
-Staging **không bị đụng tới** ở bất kỳ bước nào dưới đây.
+```
+      Cloudflare Workers (Free)            ← frontend Next.js qua OpenNext
+              │  HTTPS
+              ▼
+      Render Free Web Service              ← fas-prod-api (FastAPI)
+              │
+              ▼
+      Appwrite production + R2 fanfic-prod
+              ▲
+              │ claim job
+      TTS worker trên LAPTOP                ← không phải Render
+```
 
-> **Chưa có gì được tạo.** Tài liệu này là danh sách thao tác tay. Việc tạo
-> project Appwrite, bucket R2 và service Render đều cần đăng nhập console —
-> không có API nào làm thay được từ máy phát triển.
+**Staging tách hoàn toàn**: project Appwrite khác, bucket R2 khác, worker khác,
+tệp env khác. Không thao tác nào dưới đây chạm tới staging.
+
+> **Chưa deploy gì.** Tài liệu này là danh sách thao tác tay. Việc tạo service
+> Render và deploy Cloudflare đều cần đăng nhập console — không có API nào làm
+> thay được từ máy phát triển.
 
 ---
 
-## 0. Nguyên tắc không được vi phạm
+## 0. Đánh đổi đã chấp nhận
+
+| Điều | Hệ quả |
+|---|---|
+| Render **Free** cho API | Service **ngủ sau 15 phút** không traffic; request đầu tiên sau đó mất ~50 giây |
+| Worker chạy trên **laptop** | Không bật máy thì **không audio nào được tạo** — kể cả Edge/CapCut |
+| **Ngọc Huyền tắt** trên production | Còn 26 giọng Việt (24 CapCut + 2 Edge) |
+
+**API ngủ KHÔNG làm dừng job đang chạy.** Tạo job thì cần API thức
+(`POST /api/jobs` đi qua nó), nhưng job đã vào hàng đợi thì worker nói chuyện
+thẳng với Appwrite.
+
+## 1. Nguyên tắc không được vi phạm
 
 | Không bao giờ | Vì sao |
 |---|---|
-| Dùng chung **project** Appwrite với staging | Appwrite Auth quản lý user theo **project**. Dùng chung = tài khoản staging đăng nhập được vào production. Database riêng **không** đủ. |
-| Dùng chung **bucket** R2 với staging | `reconcile_audio.py` có chế độ xoá và bộ nghiệm thu xoá object nó tạo. Một lần chạy ở staging sẽ xoá nhầm object production. |
-| Đặt `FAS_CORS_ORIGINS=*` | `Settings.validate()` **dừng ngay** — backend gửi kèm credentials nên wildcard là lỗ hổng, không phải tiện lợi. |
-| Đặt bất kỳ secret nào vào `NEXT_PUBLIC_*` | Mọi biến `NEXT_PUBLIC_*` nằm trong bundle, ai cũng đọc được. |
-| Để `FAS_INLINE_WORKER=true` | `validate()` dừng ngay. Restart web sẽ giết job đang chạy. |
+| Dùng chung **project** Appwrite với staging | Appwrite Auth quản lý user theo **project**. Dùng chung = tài khoản staging đăng nhập được vào production. |
+| Dùng chung **bucket** R2 với staging | `reconcile_audio.py` có chế độ xoá và bộ nghiệm thu xoá object nó tạo. |
+| Đặt `FAS_CORS_ORIGINS=*` | `Settings.validate()` **dừng ngay** — backend gửi kèm credentials. |
+| Đặt secret vào `NEXT_PUBLIC_*` | Mọi biến `NEXT_PUBLIC_*` nằm trong bundle, ai cũng đọc được. |
+| Để `FAS_INLINE_WORKER=true` | `validate()` dừng ngay. Service Free ngủ giữa chừng sẽ giết job. |
+| Dùng chung `FAS_VAR_DIR` giữa hai worker | Hai worker ghi đè **tệp nhịp** của nhau; `--check` thành vô nghĩa. |
 
 ---
 
-## 1. Appwrite production
+## 2. Tài nguyên đã có và đã xác minh
 
-1. Console Appwrite → **Create project** (khác project staging). Vùng **sgp**
-   cho khớp với Render region `singapore`.
-2. Trong project mới → **Databases** → tạo database, ghi lại `databaseId`.
-3. **Settings → API keys → Create API key**, scope tối thiểu:
-   `users.read`, `users.write`, `sessions.write`, `databases.read`,
-   `databases.write`, `collections.*`, `documents.*`.
-4. Tạo schema — script **idempotent**, không có thao tác xoá nào:
+| Hạng mục | Trạng thái |
+|---|---|
+| Appwrite production | project riêng, đã dọn sạch |
+| Schema | **khớp HEAD `main`** — không cần migration |
+| Auth users / 6 bảng | **0** |
+| R2 `fanfic-prod` | **0 object** |
+| Cách ly | credential production **không** vào được bucket staging (403) |
+| `server/.env.production` | đã có, `validate()` ĐẠT |
+| `server/.env` (dev) | đã trỏ lại staging — không còn chạm production |
 
-   ```bash
-   PYTHONPATH=. FAS_ENV_FILE=server/.env.production \
-     python scripts/setup_appwrite.py
-   ```
+---
 
-   Lần chạy thứ hai trở đi phải ra `tạo mới 0, bỏ qua (đã có) N`.
+## 3. Frontend — Cloudflare Workers
 
-> ⚠️ **Sau migration PHẢI restart backend và worker.**
-> `AppwriteMetadataStore._supported_fields()` nhớ schema theo **vòng đời tiến
-> trình**. Tiến trình đang chạy sẽ không bao giờ thấy trường vừa thêm, và claim
-> tiếp tục chạy ở nhánh **không nguyên tử** mà không báo lỗi gì. Đây là lỗi im
-> lặng nguy hiểm nhất trong hệ thống.
+### Vì sao không xuất tĩnh
 
-## 2. R2 production
-
-1. Cloudflare → R2 → **Create bucket**, ví dụ `fanfic-prod`. **Private**, không
-   bật public access.
-2. **Manage R2 API Tokens** → tạo token **chỉ có quyền trên bucket này**.
-3. Ghi lại `account_id`, `bucket`, `access_key_id`, `secret_access_key`.
-
-`account_id` **trùng** với staging là bình thường — một tài khoản Cloudflare
-dùng chung account id cho mọi bucket. Cô lập nằm ở **bucket** và **token**.
-
-## 3. `server/.env.production` (trên máy bạn, không commit)
-
-Chỉ dùng để chạy migration và nghiệm thu từ máy phát triển. Render giữ bản của
-riêng nó. `.gitignore` đã chặn `.env.*`.
+`/novels/[id]` và `/chapters/[id]` nhận id là dữ liệu người dùng lúc chạy.
+`output: 'export'` bắt mọi route động phải khai `generateStaticParams()`, mà id
+không thể liệt kê lúc build. Đã thử thật, lỗi nguyên văn:
 
 ```
-FAS_ENV=production
-FAS_INLINE_WORKER=false
-DATA_BACKEND=appwrite
-STORAGE_BACKEND=r2
-FAS_LOCAL_VOICES=
-FAS_PUBLIC_VOICE_LANGUAGES=vi
-
-APPWRITE_ENDPOINT=
-APPWRITE_PROJECT_ID=
-APPWRITE_DATABASE_ID=
-APPWRITE_API_KEY=
-
-R2_ACCOUNT_ID=
-R2_BUCKET=
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
+Error: Page "/chapters/[id]" is missing "generateStaticParams()"
+so it cannot be used with "output: export" config.
 ```
 
-Kiểm không trỏ nhầm staging — lệnh này **chỉ in tiền tố**, không in secret:
+Muốn xuất tĩnh thì phải đổi sang dạng query (`/novels?id=…`) — đổi URL công
+khai, đổi liên kết, đổi test. Không làm. Vì vậy: **OpenNext trên Workers**.
+
+### Tệp cấu hình
+
+| Tệp | Vai trò |
+|---|---|
+| `web/open-next.config.ts` | Cấu hình adapter. Không khai cache/queue/tag — ứng dụng không dùng ISR |
+| `web/wrangler.jsonc` | Worker: `nodejs_compat`, assets, `compatibility_date` khớp workerd |
+| `web/package.json` | Thêm `cf:build`, `cf:preview`, `cf:deploy`, `cf-typegen` |
+
+`npm run dev` **giữ nguyên** `next dev` — quy trình phát triển không đổi.
+
+### Lệnh
 
 ```bash
-FAS_ENV_FILE=server/.env.production PYTHONPATH=. python scripts/print_config.py
+cd web
+
+# Xem thử tại chỗ (build + wrangler dev)
+NEXT_PUBLIC_API_BASE=https://<url-api>.onrender.com npm run cf:preview
+
+# Deploy thật
+NEXT_PUBLIC_API_BASE=https://<url-api>.onrender.com npm run cf:deploy
 ```
 
-Đối chiếu `project_id` và `bucket` **phải khác** staging.
+PowerShell:
 
-## 4. Render — ba service
+```powershell
+cd web
+$env:NEXT_PUBLIC_API_BASE = "https://<url-api>.onrender.com"
+npm run cf:deploy
+```
 
-Blueprint: **`deploy/render.prod.yaml`**. Nhập Blueprint Path đó trên Render,
-rồi điền các biến `sync: false` ở giao diện.
+⚠️ `NEXT_PUBLIC_API_BASE` được **nướng vào bundle lúc build**, không đọc lúc
+chạy. Đổi URL API thì phải **build lại**, restart không đủ. Đã kiểm: URL truyền
+qua env xuất hiện đúng trong bundle, và không còn vết URL staging.
 
-| Service | Loại | Ghi chú |
+Lần đầu `wrangler` sẽ hỏi đăng nhập Cloudflare.
+
+---
+
+## 4. Backend — Render Free
+
+Blueprint: **`deploy/render.prod.yaml`** (một service, `plan: free`).
+
+Nhập Blueprint Path đó trên Render, rồi điền 9 biến `sync: false`:
+
+| Biến | Giá trị |
+|---|---|
+| `FAS_CORS_ORIGINS` | URL Worker Cloudflare. **Không** wildcard |
+| `APPWRITE_ENDPOINT` `APPWRITE_PROJECT_ID` `APPWRITE_DATABASE_ID` | từ `server/.env.production` |
+| `APPWRITE_API_KEY` | **secret** |
+| `R2_ACCOUNT_ID` `R2_BUCKET` | `R2_BUCKET` = `fanfic-prod` |
+| `R2_ACCESS_KEY_ID` `R2_SECRET_ACCESS_KEY` | **secret** |
+
+Có ràng buộc vòng: API cần URL Worker cho CORS, Worker cần URL API lúc build.
+Thứ tự: **tạo API trước** (chưa cần CORS) → build/deploy Worker với URL API →
+quay lại điền `FAS_CORS_ORIGINS` → **restart API**.
+
+`autoDeploy: false` nên push không tự deploy — phải bấm **Manual Deploy**.
+
+### Nếu muốn tạo tay thay vì Blueprint
+
+New → Web Service → repo này → Branch `main` → Region `Singapore` → Runtime
+`Python` → Plan `Free` →
+Build `pip install -r server/requirements.txt` →
+Start `python -m uvicorn server.main:app --host 0.0.0.0 --port $PORT` →
+Health check path `/api/health` → rồi thêm 9 biến ở trên cộng bốn biến cố định:
+`FAS_ENV=production`, `FAS_INLINE_WORKER=false`, `DATA_BACKEND=appwrite`,
+`STORAGE_BACKEND=r2`, `FAS_LOCAL_VOICES=` (rỗng), `FAS_PUBLIC_VOICE_LANGUAGES=vi`.
+
+---
+
+## 5. TTS worker production trên laptop
+
+Chạy **song song** với worker staging. Hai worker **không thể** lấy nhầm job
+của nhau: mỗi worker chỉ nhìn thấy database mà env của nó trỏ tới, và hai môi
+trường dùng hai project Appwrite khác nhau. Đó là cách ly thật, không phải quy ước.
+
+### `FAS_VAR_DIR` bắt buộc phải khác
+
+`HEARTBEAT_FILE = var_dir/worker/heartbeat.json`. Hai worker dùng chung thư mục
+sẽ **ghi đè tệp nhịp của nhau** và `--check` trở nên vô nghĩa.
+
+### Yêu cầu trên máy
+
+* **ffmpeg trong PATH** — chương ra nhiều hơn một đoạn thì `_concat_mp3` ghép
+  bằng ffmpeg. `_find_ffmpeg()` chỉ tra `shutil.which`, **không có biến môi
+  trường nào trỏ đường dẫn**. Kiểm: `ffmpeg -version`.
+* Phụ thuộc Python: `server/requirements.txt` (đã có trong `.venv`). Edge và
+  CapCut không cần model cục bộ.
+* **Không** cần `piper-tts`: Ngọc Huyền đang tắt trên production.
+
+### Chạy (PowerShell)
+
+```powershell
+cd C:\Users\robux\Documents\CapCut-TTS-App
+
+$env:FAS_ENV_FILE = "server/.env.production"
+$env:PYTHONPATH   = "."
+$env:FAS_VAR_DIR  = "C:\Users\robux\Documents\CapCut-TTS-App\server\var-production"
+
+.\.venv\Scripts\python.exe -m server.worker --require-env production
+```
+
+`--require-env production` là rào chắn: nạp nhầm cấu hình staging thì worker
+thoát ngay với **mã 2** thay vì lặng lẽ xử lý job của môi trường khác.
+
+### Kiểm tra sức khoẻ (cửa sổ PowerShell khác)
+
+```powershell
+cd C:\Users\robux\Documents\CapCut-TTS-App
+
+$env:FAS_ENV_FILE = "server/.env.production"
+$env:PYTHONPATH   = "."
+$env:FAS_VAR_DIR  = "C:\Users\robux\Documents\CapCut-TTS-App\server\var-production"
+
+.\.venv\Scripts\python.exe -m server.worker --check
+```
+
+Mong đợi: `{"trang_thai": "dang_chay", "tuoi_nhip_giay": <nhỏ>, ...}`, mã thoát 0.
+
+### Đối chiếu với worker staging
+
+| | staging | production |
 |---|---|---|
-| `fas-prod-api` | Web | `healthCheckPath=/api/health` |
-| `fas-prod-worker` | **Worker** | không cổng, không healthcheck |
-| `fas-prod-web` | Web | `rootDir: web` |
+| `FAS_ENV_FILE` | `server/.env.staging` | `server/.env.production` |
+| `--require-env` | `staging` | `production` |
+| `FAS_VAR_DIR` | mặc định (`server/var`) | `server/var-production` |
+| Appwrite project | staging | production |
+| R2 bucket | `fanfic-staging` | `fanfic-prod` |
 
-Thứ tự: **API trước** (để có URL) → điền `NEXT_PUBLIC_API_BASE` cho web và
-`FAS_CORS_ORIGINS` cho API → worker lúc nào cũng được.
+Dòng `khoi_dong` trong log phải có `environment=production`,
+`inline_worker=false`, `chay_job_duoc=true`.
 
-Cả ba đặt `plan: starter`, **không dùng Free**: service Free ngủ sau 15 phút và
-request đầu tiên mất ~50 giây; gói Free cũng không có Background Worker.
+---
 
-## 5. ⚠️ ffmpeg trên worker — xác minh trước khi tin
-
-Chương ra **nhiều hơn một đoạn** thì `_concat_mp3` ghép bằng `ffmpeg -c copy`.
-Với `chunk_chars` mặc định 2000, gần như mọi chương thật đều nhiều đoạn. Thiếu
-ffmpeg → job hỏng `MERGE_FFMPEG_MISSING`.
-
-`_find_ffmpeg()` gọi `find_ffmpeg(None)`, và hàm đó **chỉ tra `shutil.which`**.
-Không có biến môi trường nào trỏ đường dẫn ffmpeg — nó **bắt buộc** phải nằm
-trên PATH của tiến trình worker.
-
-**Kiểm trước, đừng đoán.** Render → `fas-prod-worker` → Shell:
+## 6. Xác minh sau khi deploy — trước khi nghiệm thu
 
 ```bash
-which ffmpeg && ffmpeg -version | head -1
+curl -s https://<url-api>.onrender.com/api/health
+curl -s https://<url-api>.onrender.com/api/ready
 ```
 
-**Có** → không phải làm gì.
-
-**Không có** → hai cách, cả hai ở tầng triển khai, **không sửa mã ứng dụng**:
-
-* **Cách 1 — ffmpeg tĩnh trong buildCommand.** Đổi `buildCommand` của worker
-  thành: cài requirements, tải một bản ffmpeg tĩnh vào `./bin`, rồi đổi
-  `startCommand` thành `PATH="$PWD/bin:$PATH" python -m server.worker
-  --require-env production`. Nhẹ nhất, nhưng thêm một lần tải từ nguồn ngoài
-  vào quy trình build — hãy ghim URL và kiểm tổng kiểm tra.
-* **Cách 2 — runtime Docker.** `runtime: docker` với một Dockerfile nhỏ
-  `apt-get install -y ffmpeg`. Chắc chắn và tự chứa hơn, đổi lại build chậm
-  hơn và thêm một tệp phải bảo trì.
-
-Chọn cách nào cũng được, nhưng **phải chọn trước khi có người dùng thật** —
-nếu không, chương ngắn thì chạy còn chương dài thì hỏng, và triệu chứng đó rất
-dễ bị đọc nhầm thành lỗi TTS.
-
-## 6. Xác minh sau khi deploy — trước khi chạy nghiệm thu
-
-```bash
-curl -s https://fas-prod-api.onrender.com/api/health
-curl -s https://fas-prod-api.onrender.com/api/ready
-```
-
-Phải đúng **tất cả**:
-
-| Trường | Giá trị bắt buộc | Sai thì nghĩa là |
+| Trường | Bắt buộc | Sai thì nghĩa là |
 |---|---|---|
 | `environment` | `production` | Trỏ nhầm môi trường |
 | `inline_worker` | `false` | Web đang tự chạy job |
 | `data_backend` / `storage_backend` | `appwrite` / `r2` | Đang dùng kho giả |
-| **`local_voices`** | **`[]`** | Ngọc Huyền vẫn được chào bán mà worker không có model → job sẽ `failed` sau 3 lần |
+| **`local_voices`** | **`[]`** | Ngọc Huyền vẫn được chào bán mà worker không có model |
 | `public_voice_languages` | `["vi"]` | Sai phạm vi giọng |
 | `/api/ready` → `status` | `ready` | Không nối được Appwrite hoặc R2 |
 
-Nếu `local_voices` trả `["piper:ngochuyen"]` thì Render đã bỏ qua biến rỗng —
-đặt `FAS_LOCAL_VOICES=none` thay cho chuỗi rỗng rồi deploy lại (id không thuộc
-bộ NghiTTS bị loại ở vòng lọc thứ hai, kết quả vẫn là rỗng).
-
-Kiểm CORS **và** kiểm rằng origin lạ bị chặn:
+CORS — origin hợp lệ phải được chấp nhận, origin lạ phải bị chặn:
 
 ```bash
-curl -s -o /dev/null -D - -X OPTIONS https://fas-prod-api.onrender.com/api/auth/login \
-  -H "Origin: https://fas-prod-web.onrender.com" \
+curl -s -o /dev/null -D - -X OPTIONS https://<url-api>.onrender.com/api/auth/login \
+  -H "Origin: https://<worker>.workers.dev" \
   -H "Access-Control-Request-Method: POST" | grep -i access-control-allow-origin
 
-curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS https://fas-prod-api.onrender.com/api/auth/login \
+curl -s -o /dev/null -w '%{http_code}\n' -X OPTIONS https://<url-api>.onrender.com/api/auth/login \
   -H "Origin: https://ke-tan-cong.example" -H "Access-Control-Request-Method: POST"
 ```
 
-Dòng đầu phải trả đúng origin của web production; dòng sau phải là **400**.
+Dòng đầu phải trả đúng origin Worker; dòng sau phải là **400**.
 
-Kiểm bundle frontend không còn `localhost` — bộ nghiệm thu làm sẵn việc này.
+---
 
 ## 7. Nghiệm thu production — ĐỌC KỸ TRƯỚC KHI CHẠY
 
 ```bash
 PYTHONPATH=. FAS_ENV_FILE=server/.env.production python scripts/staging_smoke.py \
-  --api https://fas-prod-api.onrender.com \
-  --web https://fas-prod-web.onrender.com \
+  --api https://<url-api>.onrender.com \
+  --web https://<worker>.workers.dev \
   --skip-local-voice
 ```
 
 **Bộ này TẠO VÀ XOÁ dữ liệu thật** trong Appwrite/R2 production: 2 tài khoản,
-1 truyện, 1 chương, 1 job TTS, 1 object. Nó tự dọn trong `finally`, kể cả khi
-có bước hỏng. Vì vậy:
+1 truyện, 1 chương, 1 job TTS, 1 object. Nó tự dọn trong `finally`. Vì vậy chạy
+**ngay sau khi deploy, TRƯỚC khi có người dùng thật**.
 
-* chạy **ngay sau khi deploy, TRƯỚC khi có người dùng thật**;
-* `--skip-local-voice` là bắt buộc ở phương án C — Ngọc Huyền đã tắt, không bỏ
-  qua thì bước đó sẽ hỏng đúng như thiết kế. Tổng khi đó là **77** kiểm tra.
+`--skip-local-voice` là bắt buộc khi Ngọc Huyền đang tắt.
 
 > ⚠️ **Bước dọn tài khoản sẽ không chạy.** `don_tai_khoan()` chỉ xoá khi
-> `FAS_ENV=staging` — một rào chắn cố ý để không bao giờ xoá nhầm tài khoản
-> production. Với `FAS_ENV=production` nó bỏ qua và **để lại 2 tài khoản
-> `@example.test`**. Phải xoá tay theo đúng ID mà bộ nghiệm thu đã in ra.
+> `FAS_ENV=staging` — rào chắn cố ý để không bao giờ xoá nhầm tài khoản
+> production. Nó sẽ để lại **2 tài khoản `@example.test`**; phải xoá tay theo
+> đúng ID mà bộ nghiệm thu in ra.
 
 **`--skip-local-voice` bỏ qua bước duy nhất ép đường ghép ffmpeg chạy.** Nên
-mục 5 phải xong trước, nếu không 77/77 xanh vẫn chưa chứng minh được chương dài
-tạo được audio.
+phải tự kiểm `ffmpeg -version` trên máy chạy worker.
+
+---
 
 ## 8. Sau khi production xanh
 
-* Bật reconciler ở chế độ **chỉ đọc** theo `deploy/reconcile-cron.md`. Không
-  bao giờ bật xoá tự động trên production.
-* Custom domain: chưa làm ở phase này.
-* Ngọc Huyền: chờ phase Modal/GPU rồi mới bật lại `FAS_LOCAL_VOICES`.
+* Gắn **fanfic.world**: thêm Custom Domain cho Worker trên Cloudflare, rồi cập
+  nhật `FAS_CORS_ORIGINS` (Render) **và** `NEXT_PUBLIC_API_BASE` (build lại
+  frontend). Chưa làm ở lượt này.
+* **Thu hồi API key cũ** (tên `' cl'`, 105 scope) sau khi key production chạy ổn.
+* Bật lại **Ngọc Huyền**: đổi `FAS_LOCAL_VOICES=piper:ngochuyen` sau khi worker
+  laptop hoặc Modal được nghiệm thu. Chỉ là biến môi trường, không sửa mã.
+* Reconciler: chạy tay, chế độ **chỉ đọc**, theo `deploy/reconcile-cron.md`.

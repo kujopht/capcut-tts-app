@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // Worker sinh ra bởi `opennextjs-cloudflare build`. Không sửa tay tệp đó.
+  "main": ".open-next/worker.js",
+  "name": "fanfic-web",
+
+  // Bằng đúng ngày build của workerd đang cài (1.20260801.1). Đặt ngày TƯƠNG LAI
+  // so với runtime thì wrangler từ chối; đặt quá cũ thì mất các bản vá hành vi.
+  "compatibility_date": "2026-08-01",
+
+  // `nodejs_compat` là BẮT BUỘC: Next dựng trên các API Node (Buffer, stream,
+  // async_hooks) mà Workers không có sẵn.
+  //
+  // `global_fetch_strictly_public` làm `fetch()` trong Worker đi ra Internet
+  // công khai thay vì vòng ngược vào chính Worker. Ứng dụng này gọi API backend
+  // ở tên miền khác, nên đó là hành vi mong muốn.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  }
+
+  // CỐ Ý KHÔNG KHAI, và mỗi thứ vì một lý do:
+  //
+  //   r2_buckets (NEXT_INC_CACHE_R2_BUCKET)
+  //     Cache tăng dần chỉ có ích khi dùng ISR/revalidate. Ứng dụng này không
+  //     có `revalidate`, không `generateMetadata` động, không server action —
+  //     mọi trang tương tác đều là client component tự gọi API. Khai thêm là
+  //     tạo một bucket phải bảo trì mà không được gì.
+  //
+  //   services (WORKER_SELF_REFERENCE)
+  //     Chỉ cần cho hàng đợi revalidate của ISR. Không dùng ISR thì không cần.
+  //
+  //   images (IMAGES)
+  //     Không chỗ nào import `next/image` — đã kiểm bằng grep toàn bộ `src/`.
+  //
+  // Cần ISR hoặc next/image sau này thì thêm lại theo template chính chủ ở
+  // node_modules/@opennextjs/cloudflare/templates/wrangler.jsonc.
+}

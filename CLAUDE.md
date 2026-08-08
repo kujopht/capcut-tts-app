@@ -5,7 +5,7 @@ Kho này chứa **hai sản phẩm** dùng chung một pipeline TTS:
 | Phần | Vị trí | Trạng thái |
 |---|---|---|
 | Ứng dụng desktop Windows (PySide6) | `app.py`, `desktop_app/`, `capcut_tts_api/` | Đang chạy ổn định, đã có installer |
-| Nền tảng web (Next.js + FastAPI) | `web/`, `server/` | MVP kỹ thuật, riêng tư, **chưa thương mại** |
+| Nền tảng web (Next.js + FastAPI) | `web/`, `server/` | Staging đã deploy và nghiệm thu; **production chưa deploy**, chưa thương mại |
 
 ## Quy tắc bắt buộc
 

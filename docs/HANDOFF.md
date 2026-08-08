@@ -1,15 +1,43 @@
 # HANDOFF — Fanfic Audio Studio Web MVP
 
-Cập nhật: 2026-08-06 · Branch `feature/web-mvp` · Mốc 4: **đã smoke-test
-Appwrite + R2 thật**
+Cập nhật: 2026-08-08 · Branch `feature/web-mvp` · HEAD `14f4a31`
 
 Tài liệu này để một phiên khác tiếp tục được khi phiên hiện tại hết context.
+
+## Trạng thái hiện tại — đọc mục này trước
+
+| Hạng mục | Trạng thái |
+|---|---|
+| Repository | **PUBLIC** |
+| Staging (Render) | **ĐÃ DEPLOY** commit `8001cfc`, cả API lẫn web đều Live |
+| Nghiệm thu staging | **82/82 đạt** với `--web`, trên hạ tầng thật |
+| CI của HEAD `14f4a31` | **XANH** |
+| PR #1 → `main` | **CHƯA MERGE** |
+| Production | **CHƯA DEPLOY** — chưa có môi trường production nào được dựng |
+
+Phân biệt hai commit, vì chúng khác nhau và dễ nhầm:
+
+* **`8001cfc`** — mã đang **chạy** trên staging. Toàn bộ kết quả nghiệm thu
+  82/82 là của bản này.
+* **`14f4a31`** — HEAD hiện tại. So với `8001cfc` nó **chỉ thêm tài liệu**
+  (`docs/HANDOFF.md`, `deploy/RUNBOOK-WORKER.md`), không đụng một dòng mã thực
+  thi nào. Vì vậy kết quả 82/82 vẫn áp dụng cho HEAD.
+
+**82 hay 77?** 82 là tổng số kiểm tra khi chạy kèm `--web` (kiểm cả frontend).
+Bỏ `--web` thì còn 77. Khác **số kiểm tra**, không phải khác kết quả.
+
+**Chưa làm, để phase sau:**
+
+* **Hạn mức TTS theo chu kỳ cho từng người dùng.** `Profile.tier` và
+  `tts_characters_used` có trong domain nhưng chưa chỗ nào ghi. Xem mục "Hạn
+  mức" bên dưới để biết cái gì *đã* có.
+* **Chạy NghiTTS/Piper trên GPU đám mây (Modal hoặc tương đương).** Chưa khảo
+  sát, chưa dựng gì. Hiện Ngọc Huyền chạy CPU trên laptop Windows.
 
 ## Bối cảnh
 
 Desktop app đã hoàn thiện và có installer. Nay xây thêm nền tảng web dùng chung
-pipeline TTS. **Bản MVP riêng tư — chưa thương mại**, chưa có thanh toán, chưa
-xác minh giấy phép cho giọng chạy cục bộ.
+pipeline TTS. Chưa có thanh toán, chưa có hạn mức theo người dùng.
 
 Checkpoint desktop: `15f215d`. Toàn bộ `desktop_app/`, `capcut_tts_api/`,
 `app.py`, `build_app.bat`, `installer.iss` **không bị sửa** trong công việc web.
@@ -187,7 +215,11 @@ Dọn dẹp: 42 truyện / 42 chương / 42 job / 42 track / 41 object / 48 dòn
 `job_claims` fixture đã xoá. Đối chiếu ảnh chụp trước-sau: **mất 0, sót 0** ở cả
 sáu tập hợp — không đụng bản ghi nào có từ trước.
 
-## Chuẩn bị staging — ĐÃ LÀM, CHƯA DEPLOY
+## Chuẩn bị staging — ĐÃ LÀM (nay đã deploy)
+
+> **Ghi chú lịch sử.** Mục này viết khi staging chưa được deploy. Nay staging
+> đã chạy `8001cfc` trên Render và nghiệm thu 82/82 — xem "Trạng thái hiện tại"
+> ở đầu tài liệu. Phần dưới giữ nguyên vì nó mô tả *cách* mọi thứ được dựng.
 
 Báo cáo đầy đủ: **`docs/reports/staging/BAO_CAO_STAGING.md`**.
 Cấu hình và runbook: **`deploy/`**.
@@ -227,10 +259,17 @@ service key phạm vi project (`GET /v1/projects` → 401), credential R2 giới
 trong một bucket (`ListBuckets` → AccessDenied), và không có tài khoản/CLI
 hosting nào. Các bước thủ công ở mục 8 của báo cáo staging.
 
-**Branch protection cho `main` chưa bật được**: cần GitHub Pro cho repo private,
-cả hai API đều trả 403. Cấu hình đã soạn sẵn ở mục 9 của báo cáo.
+**Branch protection cho `main`** — trước đây không bật được vì repo private cần
+GitHub Pro (cả hai API đều trả 403). **Repo nay đã PUBLIC, nên rào này miễn phí
+và bật được.** Chưa bật. Cấu hình đã soạn sẵn ở mục 9 của báo cáo; nên bật
+trước khi merge PR đầu tiên vào `main`.
 
-## Triển khai staging — VẪN CHƯA DEPLOY (2026-08-08)
+## Triển khai staging — ĐÃ DEPLOY (2026-08-08)
+
+> **Ghi chú lịch sử.** Mục này viết lúc chưa có credential trên máy phát
+> triển. Trở ngại đó đã qua: staging chạy `8001cfc`, cả `fas-staging-api-free`
+> lẫn `fas-staging-web-free` đều Live, nghiệm thu 82/82. Phần dưới giữ nguyên
+> làm bản ghi những gì đã chặn lúc đó.
 
 Chi tiết: `docs/reports/staging/BAO_CAO_STAGING.md` mục 11–12.
 

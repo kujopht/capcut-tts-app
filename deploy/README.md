@@ -4,9 +4,9 @@ Tài liệu này mô tả **ba workload tách rời** và cách chạy chúng. N
 khoá vào một nền tảng cụ thể: repo chưa từng chọn nền tảng nào, và việc chọn phụ
 thuộc vào tài khoản của bạn.
 
-> Lượt chuẩn bị này **chưa deploy**. Ba tài nguyên staging (Appwrite project,
-> R2 bucket, hosting) cần credential mà môi trường hiện tại không có — xem
-> `docs/reports/staging/BAO_CAO_STAGING.md` để biết chính xác các bước thủ công.
+> **Staging đã deploy** (commit `8001cfc`, Render, nghiệm thu 82/82).
+> **Production thì chưa** — chưa có môi trường production nào được dựng.
+> Lịch sử các bước thủ công: `docs/reports/staging/BAO_CAO_STAGING.md`.
 
 ---
 

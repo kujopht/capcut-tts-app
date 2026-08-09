@@ -56,6 +56,19 @@ _ep_utf8()
 
 KET_QUA = []
 
+#: Ai dang goi. GUI O MOI REQUEST.
+#:
+#: Cloudflare chan thang User-Agent mac dinh cua urllib (`Python-urllib/3.12`)
+#: bang 403 truoc khi request toi duoc ung dung — do bang tay: cung mot URL,
+#: urllib mac dinh tra 403 con `curl` tra 200, va header `server` la
+#: `cloudflare`. Frontend hoan toan lanh manh; chi la client khong tu gioi thieu.
+#:
+#: KHONG gia lam trinh duyet. Mao danh Chrome de di qua rao chong bot la noi doi
+#: voi ha tang cua chinh minh, va se vo hieu ngay khi rao do sieu chat hon. Mot
+#: chuoi trung thuc, co ten cong cu va duong dan nguon, cung duoc chap nhan —
+#: da kiem: `fanfic-audio-smoke/1.0` tra 200.
+USER_AGENT = "fanfic-audio-smoke/1.0 (+https://github.com/kujopht/capcut-tts-app)"
+
 
 class KhongDangNhapDuoc(RuntimeError):
     """Khong lay duoc token — dung som nhung van phai don dep."""
@@ -90,6 +103,7 @@ def goi_tho(base: str, method: str, path: str,
     audio — hai thu khong phai JSON.
     """
     req = urllib.request.Request(base.rstrip("/") + path, method=method)
+    req.add_header("User-Agent", USER_AGENT)
     if token:
         req.add_header("Authorization", "Bearer " + token)
     try:
@@ -106,6 +120,7 @@ def goi(base: str, method: str, path: str, payload: Any = None,
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(base.rstrip("/") + path, data=data, method=method)
     req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", USER_AGENT)
     if token:
         req.add_header("Authorization", "Bearer " + token)
     try:
@@ -174,11 +189,13 @@ def danh_thuc(base: str, ten: str, cho_toi_da: int, duong: str = "/") -> bool:
     return False
 
 
-def buoc_suc_khoe(api: str, sha_mong: Optional[str]) -> Dict[str, Any]:
+def buoc_suc_khoe(api: str, sha_mong: Optional[str],
+                  moi_truong: str) -> Dict[str, Any]:
     print("\n=== 1. Health / readiness ===")
     ma, h = goi(api, "GET", "/api/health")
     kt("GET /api/health tra 200", ma == 200, f"HTTP {ma}")
-    kt("moi truong la staging", h.get("environment", "").lower() == "staging",
+    kt(f"moi truong la {moi_truong}",
+       h.get("environment", "").lower() == moi_truong.lower(),
        f"environment={h.get('environment')!r}")
     kt("web KHONG tu chay job", h.get("inline_worker") is False,
        f"inline_worker={h.get('inline_worker')}")
@@ -372,7 +389,8 @@ def buoc_tts(api: str, tk: Dict[str, Any], ids: Dict[str, str],
     return jid
 
 
-def buoc_danh_sach_giong(api: str, giong_cuc_bo: str) -> None:
+def buoc_danh_sach_giong(api: str, giong_cuc_bo: str,
+                         suc_khoe: Dict[str, Any]) -> None:
     """
     `/api/voices` phai dung pham vi san pham: CHI tieng Viet, dung bay giong de xuat.
 
@@ -393,7 +411,21 @@ def buoc_danh_sach_giong(api: str, giong_cuc_bo: str) -> None:
 
     dx = sorted((v for v in vs if v.get("recommended")),
                 key=lambda v: v.get("recommended_order", 99))
-    kt("dung bay giong de xuat", len(dx) == 7, f"{len(dx)} giong")
+
+    # SO GIONG DE XUAT SUY TU CAU HINH, khong go cung 7.
+    #
+    # App desktop khai bay giong de xuat, trong do DUNG MOT giong chay cuc bo
+    # (`piper:ngochuyen`). Production tat giong cuc bo (`FAS_LOCAL_VOICES=""`),
+    # nen o do dung con sau — va do la ket qua DUNG, khong phai loi. Go cung 7
+    # se bien mot cau hinh hop le thanh mot lan do that bai.
+    #
+    # `local_voices` lay tu `/api/health`, tuc la tu chinh may chu dang kiem,
+    # chu khong phai tu gia dinh cua script.
+    cuc_bo_bat = [v for v in (suc_khoe.get("local_voices") or [])
+                  if str(v).startswith("piper:")]
+    mong = 7 if cuc_bo_bat else 6
+    kt(f"dung {mong} giong de xuat", len(dx) == mong,
+       f"{len(dx)} giong (local_voices={list(suc_khoe.get('local_voices') or [])})")
     kt("thu tu de xuat lien tuc tu 0",
        [v.get("recommended_order") for v in dx] == list(range(len(dx))),
        str([v.get("recommended_order") for v in dx]))
@@ -640,16 +672,34 @@ def don_dep(api: str, tk: Dict[str, Any], ids: Optional[Dict[str, str]]) -> None
        f"con {r.get('count')}")
 
 
-def don_tai_khoan(tk: Dict[str, Any]) -> None:
+#: Hau to bat buoc cua email tai khoan fixture. Xem `don_tai_khoan`.
+HAU_TO_FIXTURE = "@example.test"
+
+
+def don_tai_khoan(tk: Dict[str, Any], moi_truong: str) -> None:
     """
-    Xoa hai tai khoan fixture — CHI khi chay tu may co credential Appwrite.
+    Xoa cac tai khoan fixture do CHINH luot chay nay tao ra.
 
     Vi sao can: khong co route xoa tai khoan trong ung dung, nen moi lan chay
-    smoke test lai bo lai hai tai khoan. Sau vai chuc lan la mot dong rac phai
-    don tay.
+    lai bo lai hai tai khoan. Sau vai chuc lan la mot dong rac phai don tay.
 
-    XOA THEO ID DA GHI LAI, khong tim theo `@example.test`, khong xoa ca
-    collection. Tai khoan khong nam trong danh sach nay khong bi cham toi.
+    BA DIEU KIEN, phai dat CA BA moi xoa:
+
+      1. `user_id` nam trong danh sach ID ma luot nay ghi lai luc dang ky;
+      2. email doc tu Appwrite KHOP CHINH XAC email da ghi;
+      3. email ket thuc bang `@example.test`.
+
+    Dieu 1 loai moi tai khoan khong phai do luot nay tao. Dieu 2 chan truong
+    hop id bi ghi nham hoac bi tai su dung. Dieu 3 la luoi cuoi cung: du hai
+    dieu tren cung sai thi mot tai khoan nguoi dung that van khong the bi xoa,
+    vi khong ai dang ky bang ten mien do.
+
+    TUYET DOI khong tim theo mau, khong xoa ca collection, khong wildcard.
+
+    `moi_truong` phai KHOP voi `FAS_ENV` cua tep cau hinh dang nap. Truoc day
+    buoc nay chi chay khi `FAS_ENV=staging`, nen chay tren production se lang le
+    bo lai hai tai khoan. Nay production don duoc, nhung van phai TUYEN BO ro
+    bang `--environment production` — khong co duong nao don nham moi truong.
 
     Bo qua im lang neu khong co credential: script van phai chay duoc tu bat ky
     dau chi voi HTTP API cong khai.
@@ -668,9 +718,9 @@ def don_tai_khoan(tk: Dict[str, Any]) -> None:
         from server.config import load_settings
 
         s = load_settings()
-        if s.environment.lower() != "staging":
-            kt("bo qua don tai khoan: FAS_ENV khong phai staging", True,
-               f"FAS_ENV={s.environment!r}")
+        if s.environment.lower() != moi_truong.lower():
+            kt("bo qua don tai khoan: FAS_ENV khong khop --environment", True,
+               f"FAS_ENV={s.environment!r}, mong {moi_truong!r}")
             return
         kho = AppwriteMetadataStore(s.appwrite)
     except Exception as exc:
@@ -685,8 +735,15 @@ def don_tai_khoan(tk: Dict[str, Any]) -> None:
         except Exception:
             kt(f"tai khoan {em} da khong con", True)
             continue
-        if str(u.get("email") or "") != em:
+        thuc_te = str(u.get("email") or "")
+        if thuc_te != em:
             kt(f"KHONG xoa {uid}: email khong khop", False, "dung de an toan")
+            continue
+        if not thuc_te.endswith(HAU_TO_FIXTURE):
+            # Luoi cuoi cung. Neu roi vao day thi mot trong hai dieu kien tren
+            # da sai o dau do — dung lai va bao, khong xoa.
+            kt(f"KHONG xoa {uid}: email khong phai {HAU_TO_FIXTURE}", False,
+               "dung de an toan")
             continue
         try:
             kho._call("DELETE", f"/v1/users/{uid}")
@@ -705,6 +762,10 @@ def main(argv=None) -> int:
     p.add_argument("--api", required=True, help="URL goc cua backend, vi du https://fas-staging-api.onrender.com")
     p.add_argument("--web", help="URL goc cua frontend")
     p.add_argument("--sha", help="SHA mong doi, chi de ghi vao bao cao")
+    p.add_argument("--environment", default="staging",
+                   help="Moi truong MONG DOI o /api/health. Dat `production` khi "
+                        "kiem ban production. Gia tri nay con quyet dinh buoc "
+                        "don tai khoan duoc phep chay o dau.")
     p.add_argument("--voice", default="edge:vi-VN-HoaiMyNeural")
     p.add_argument("--local-voice", default="piper:ngochuyen",
                    help="giong chay tren may worker, dung cho buoc nhieu doan")
@@ -735,11 +796,11 @@ def main(argv=None) -> int:
     tk: Dict[str, Any] = {}
     ids: Optional[Dict[str, str]] = None
     try:
-        buoc_suc_khoe(a.api, a.sha)
+        suc_khoe = buoc_suc_khoe(a.api, a.sha, a.environment)
         tk = buoc_xac_thuc(a.api)
         ids = buoc_noi_dung(a.api, tk)
         buoc_tts(a.api, tk, ids, a.voice, a.job_timeout)
-        buoc_danh_sach_giong(a.api, a.local_voice)
+        buoc_danh_sach_giong(a.api, a.local_voice, suc_khoe)
         buoc_tu_choi_giong(a.api, tk, ids)
         if a.skip_local_voice:
             kt("bo qua job giong cuc bo (--skip-local-voice)", True,
@@ -756,7 +817,7 @@ def main(argv=None) -> int:
         # Don du co buoc nao hong: khong de fixture lai tren staging.
         if tk.get("tok_a"):
             don_dep(a.api, tk, ids)
-        don_tai_khoan(tk)
+        don_tai_khoan(tk, a.environment)
 
     hong = [t for t, ok, _ in KET_QUA if not ok]
     print(f"\n{'=' * 60}")

@@ -167,8 +167,10 @@ test("L4: trang chu khong con hex va khong con style inline", () => {
   const src = home();
   assert.ok(!/#7c8cff3d|#4dd6c133/.test(src), "van con hex trong JSX");
   assert.ok(!/"--glow"/.test(src), "khong duoc dat bien CSS bang style inline");
-  assert.match(src, /className="feature feature-studio"/);
-  assert.match(src, /className="feature feature-fanfic"/);
+  // Hai the tinh nang cu da bien mat cung ban thiet ke lai huong fanfic-first.
+  // Quy tac o day KHONG doi: trang chu van khong duoc chua mot style inline
+  // nao ca — media query khong voi toi chung duoc.
+  assert.ok(!/style=\{\{/.test(src), "trang chu con style inline");
 });
 
 test("L4: mau quang nam trong khoi token", () => {

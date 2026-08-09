@@ -11,12 +11,13 @@
  */
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api, type Novel } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { fanficOnly } from "@/lib/workspace";
-import { EmptyState, ErrorState, SkeletonCards, formatDate } from "@/components/ui";
-import { NovelCover } from "@/components/NovelCover";
+import { EmptyState, ErrorState, SkeletonCards } from "@/components/ui";
+import { StoryCard } from "@/components/StoryCard";
 
 /** So truyen moi trang. Backend chan tran tren o 60. */
 const PAGE_SIZE = 12;
@@ -24,11 +25,30 @@ const PAGE_SIZE = 12;
 /** Cho nguoi dung go xong hay hoi backend — tranh mot request moi ky tu. */
 const DEBOUNCE_MS = 350;
 
+/**
+ * `useSearchParams` bat trang phai co ranh gioi Suspense khi Next dung san
+ * trang. Thieu no thi `next build` bao loi chu khong phai loi luc chay.
+ */
 export default function FanficPage() {
+  return (
+    <Suspense fallback={<SkeletonCards count={6} />}>
+      <FanficBrowser />
+    </Suspense>
+  );
+}
+
+function FanficBrowser() {
   const { profile } = useSession();
 
-  const [query, setQuery] = useState("");
-  const [tag, setTag] = useState("");
+  /*
+    Nhan `?q=` va `?tag=` tu URL — o tim o header dieu huong sang day chu
+    khong tu tim (xem `components/SiteSearch.tsx`), va the o trang chu cung
+    tro toi `?tag=`. Chi doc mot lan lam GIA TRI KHOI TAO: sau do o tim tren
+    trang nay lam chu trang thai, neu khong thi go phim se bi URL keo nguoc.
+  */
+  const params = useSearchParams();
+  const [query, setQuery] = useState(() => params.get("q") ?? "");
+  const [tag, setTag] = useState(() => params.get("tag") ?? "");
   const [page, setPage] = useState(0);
 
   const [novels, setNovels] = useState<Novel[]>([]);
@@ -200,33 +220,14 @@ export default function FanficPage() {
             {from}–{to} trong {total} truyện
             {filtering ? " khớp bộ lọc" : ""}
           </p>
-          <div className="grid">
+          {/*
+            CUNG `StoryCard` voi trang chu. Truoc day the o day duoc viet
+            rieng, nen hai trang cung hien mot truyen bang hai hinh dang khac
+            nhau — nguoi dung bam tu trang chu sang day thay nhu doi trang.
+          */}
+          <div className="story-grid">
             {novels.map((novel) => (
-              <Link
-                key={novel.novel_id}
-                href={`/novels/${novel.novel_id}`}
-                className="card card-flush card-link"
-              >
-                <NovelCover
-                  novelId={novel.novel_id}
-                  title={novel.title}
-                  coverUrl={novel.cover_url}
-                />
-                <div className="stack-2" style={{ padding: "var(--s4)" }}>
-                  <strong className="clamp-2">{novel.title}</strong>
-                  <p className="hint clamp-3">
-                    {novel.description || "Chưa có mô tả."}
-                  </p>
-                  <div className="row" style={{ gap: "var(--s2)" }}>
-                    {novel.tags.slice(0, 3).map((item) => (
-                      <span key={item} className="badge">
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                  <span className="hint">{formatDate(novel.updated_at)}</span>
-                </div>
-              </Link>
+              <StoryCard key={novel.novel_id} novel={novel} />
             ))}
           </div>
 

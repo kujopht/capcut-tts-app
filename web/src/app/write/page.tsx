@@ -621,8 +621,7 @@ export default function WritePage() {
                 </label>
                 <textarea
                   id="w-desc"
-                  className="textarea"
-                  style={{ minHeight: 90 }}
+                  className="textarea textarea-short"
                   value={novelDesc}
                   onChange={(e) => setNovelDesc(e.target.value)}
                 />
@@ -683,8 +682,7 @@ export default function WritePage() {
                         </label>
                         <textarea
                           id="w-edit-desc"
-                          className="textarea"
-                          style={{ minHeight: 90 }}
+                          className="textarea textarea-short"
                           value={editDesc}
                           onChange={(e) => setEditDesc(e.target.value)}
                         />
@@ -724,7 +722,7 @@ export default function WritePage() {
                   ) : (
                     <>
                       <div className="row-between">
-                        <div className="stack-2" style={{ minWidth: 0 }}>
+                        <div className="stack-2 min0">
                           <h2 className="section-title">{selected.title}</h2>
                           <span className="hint">
                             {chapters.length} chương ·{" "}
@@ -734,7 +732,7 @@ export default function WritePage() {
                             <p className="hint clamp-2">{selected.description}</p>
                           ) : null}
                         </div>
-                        <div className="row" style={{ gap: "var(--s2)" }}>
+                        <div className="row row-tight">
                           <Link
                             className="btn btn-sm"
                             href={`/novels/${selected.novel_id}`}
@@ -790,7 +788,7 @@ export default function WritePage() {
                   <div className="row-between">
                     <h2 className="section-title">Chương</h2>
                     {availableVoices.length > 0 ? (
-                      <div className="row" style={{ gap: "var(--s2)" }}>
+                      <div className="row row-tight">
                         <label className="hint" htmlFor="w-voice">
                           Giọng đọc
                         </label>
@@ -936,11 +934,10 @@ export default function WritePage() {
                             <span className="list-index" aria-hidden="true">
                               {index + 1}
                             </span>
-                            <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
+                            <span className="stack-2 grow">
                               <Link
                                 href={`/chapters/${chapter.chapter_id}`}
                                 className="truncate list-title"
-                                style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}
                               >
                                 {chapter.title}
                               </Link>
@@ -1136,7 +1133,7 @@ export default function WritePage() {
                 <strong>{selected?.title}</strong> sẽ biến mất khỏi trang Khám
                 phá, và audio của các chương trở lại chế độ riêng tư.
               </p>
-              <p style={{ marginTop: "var(--s2)" }}>
+              <p className="mt-2">
                 Nội dung không bị xoá — bạn xuất bản lại bất cứ lúc nào.
               </p>
             </>
@@ -1147,7 +1144,7 @@ export default function WritePage() {
                 khai trong trang Khám phá và bất kỳ ai cũng nghe được audio của
                 các chương.
               </p>
-              <p style={{ marginTop: "var(--s2)" }}>Bạn có thể gỡ xuất bản sau.</p>
+              <p className="mt-2">Bạn có thể gỡ xuất bản sau.</p>
             </>
           )
         }
@@ -1170,7 +1167,7 @@ export default function WritePage() {
                 <strong>toàn bộ {chapters.length} chương</strong> và mọi file
                 audio đã tạo.
               </p>
-              <p style={{ marginTop: "var(--s2)" }}>
+              <p className="mt-2">
                 Thao tác này <strong>không hoàn tác được</strong>.
               </p>
             </>
@@ -1180,7 +1177,7 @@ export default function WritePage() {
                 <strong>{pendingDelete?.title}</strong> sẽ bị xoá
                 {pendingDelete?.hasAudio ? " cùng file audio của nó" : ""}.
               </p>
-              <p style={{ marginTop: "var(--s2)" }}>
+              <p className="mt-2">
                 Thao tác này <strong>không hoàn tác được</strong>.
               </p>
             </>

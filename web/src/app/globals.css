@@ -29,7 +29,15 @@
   /* --- chu --- */
   --text: #eceff7;
   --text-2: #a9b3c9;
-  --text-3: #6d7893;
+  /*
+    Mau chu cap BA (`.hint`, `.story-meta`, chu phu trong the).
+
+    DO DUOC: ban truoc la `#6d7893` va chi dat ty le 4.01 tren `--bg-2` — duoi
+    nguong WCAG AA 4.5 cho chu thuong, va `.hint` thi nam trong the o khap noi.
+    `#7e8aa6` dat 5.11 tren `--bg-2` va 5.75 tren nen trang, van con du nhat de
+    lui ve sau so voi `--text-2`.
+  */
+  --text-3: #7e8aa6;
 
   /*
     HAI mau nhan: tim va lo. Ca bang mau con lai deu dan xuat tu day.
@@ -224,10 +232,22 @@ button, input, select, textarea {
 .stack-2 { display: flex; flex-direction: column; gap: var(--s2); }
 .stack-5 { display: flex; flex-direction: column; gap: var(--s5); }
 .row     { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+/* Hang chat hon — nhom nut nho hoac nhan di kem nhau. Truoc day moi cho tu
+   viet `style={{ gap: "var(--s2)" }}`, va style inline thi media query khong
+   voi toi. */
+.row-tight { gap: var(--s2); }
+/* O co the CO LAI trong mot hang flex. Khong co `min-width: 0`, mot chuoi dai
+   khong ngat duoc se day ca hang rong ra thay vi bi cat. */
+.min0 { min-width: 0; }
+.grow { flex: 1; min-width: 0; }
 .row-between {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--s4); flex-wrap: wrap;
 }
+/* `.row` da can giua san; cai nay chi day hai dau ra xa nhau. */
+.row-spread { justify-content: space-between; }
+/* Doan van dung ngay duoi mot doan khac trong hop thoai. */
+.mt-2 { margin-top: var(--s2); }
 .spacer { flex: 1 1 auto; }
 
 .grid {
@@ -704,6 +724,8 @@ button, input, select, textarea {
 .input::placeholder, .textarea::placeholder { color: var(--text-3); }
 .textarea { min-height: 200px; resize: vertical; line-height: var(--lh-normal); }
 .textarea-tall { min-height: 300px; }
+/* O nhap vai dong — mo ta truyen, khong phai noi dung chuong. */
+.textarea-short { min-height: 90px; }
 .select {
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%),
@@ -738,6 +760,9 @@ button, input, select, textarea {
   border: 1px solid var(--line);
   border-radius: var(--r-full);
 }
+/* Nhieu muc hon mot hang chua het (vi du nam muc toc do doc o Audio Studio).
+   Bo goc tron lai vi mot khoi nhieu dong ma bo tron 999px trong rat la. */
+.seg-wrap { flex-wrap: wrap; border-radius: var(--r3); }
 .seg-item {
   padding: 6px 15px;
   border: none;
@@ -930,6 +955,7 @@ button, input, select, textarea {
   animation: modal-in 0.2s var(--ease);
 }
 .modal h2 { font-size: var(--t-md); }
+.modal-body { font-size: var(--t-sm); }
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--s2); flex-wrap: wrap; }
 
 /* ------------------------------------------------------------ audio */
@@ -950,6 +976,7 @@ button, input, select, textarea {
   border: 1px solid var(--line);
   background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
 }
+.player-title { font-size: var(--t-sm); min-width: 0; }
 /* Widget audio goc cua trinh duyet mac dinh la theme sang -> ep ve dark */
 .player audio {
   width: 100%;
@@ -1336,10 +1363,42 @@ button, input, select, textarea {
   font-weight: 650;
   line-height: var(--lh-tight);
   color: var(--text);
+  /* `clamp-2` cat theo CHIEU DOC. Mot tu dai khong co dau cach — ten truyen go
+     lien, mot URL — thi khong ngat duoc va tran ra khoi the theo chieu NGANG.
+     `anywhere` cho phep ngat giua tu, va chi khi that su can. */
+  overflow-wrap: anywhere;
   transition: color 0.18s var(--ease);
 }
 
 .story-tags { display: flex; flex-wrap: wrap; gap: var(--s2); }
+
+/*
+  Hang the trong THE TRUYEN nam tren MOT hang, cat bot phan thua.
+
+  Chieu cao mot o luoi do o cao nhat quyet dinh. Ba the tieng Viet trong mot cot
+  ~210px de xuong hai dong, va luc do ca hang bi keo cao theo mot the — luoi
+  trong nhu rang cua. The o day la NHAN phu; ten va mo ta moi la thu nguoi doc
+  can, va ca hai deu duoc giu nguyen.
+
+  Chi ap cho `.story-card`: o hero va o cac trang khac, the van xuong dong duoc.
+*/
+.story-card .story-tags {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  /* Mo dan o mep phai. Cat thang giua mot the ("Giả tưở") doc ra nhu loi hien
+     thi; mo dan thi doc ra la "con nua" — dung y. */
+  mask-image: linear-gradient(to right, #000 84%, transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 84%, transparent);
+}
+/*
+  Va tung the phai giu nguyen be rong cua no.
+
+  Chi dat `nowrap` cho khoi la CHUA DU: khoi thoi xuong dong, nhung cac the bi
+  co lai va chu BEN TRONG chung ngat thanh hai dong — "Đời thường" thanh "Đời"
+  / "thường", va hang the lai cao gap doi. `flex: 0 0 auto` giu the o kich
+  thuoc that, roi `overflow: hidden` cua khoi cat bot cai nao khong vua.
+*/
+.story-card .story-tags > * { flex: 0 0 auto; white-space: nowrap; }
 
 /*
   Chip trong the truyen la NHAN, khong phai nut — khong hover, khong bam, va
@@ -1686,6 +1745,17 @@ button, input, select, textarea {
 }
 
 /*
+  Cho DUNG CHO cua con so khi chua biet tong. Dung font thuong, khong dung
+  `--font-mono`: font deu net lam mot cau chu gian ra tung ky tu va doc nhu bi
+  loi — no sinh ra de giu chu so thang hang, khong phai de viet cau.
+*/
+.job-waiting {
+  font-size: var(--t-base);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+/*
   Khung tien do. Vien tim mo va mot quang rat nhe khi job DANG chay — day la
   thu duy nhat tren trang dang chuyen dong, nen no duoc phep hut mat.
 
@@ -1774,6 +1844,10 @@ button, input, select, textarea {
   overflow-wrap: break-word;
 }
 .reader-head { max-width: 68ch; }
+/* Moi khoi cua trang doc di theo CUNG mot cot: dau chuong, khu nghe, chu, va
+   loi ra. Mot khoi rong het trang canh mot cot chu hep trong nhu bi lac. */
+.reader-col { max-width: 68ch; }
+.reader-foot { max-width: 68ch; }
 /* Doan dau tien khong thut dong; cac doan sau cach nhau bang khoang trang chu
    khong phai thut — de doc hon tren man hinh. */
 
@@ -1969,7 +2043,38 @@ button, input, select, textarea {
   .hero-story { grid-template-columns: minmax(0, 1fr); }
   .footer-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .footer-brand { grid-column: 1 / -1; max-width: none; }
-  .input-search { width: 150px; }
+
+  /* --- header xuong dong TU DAY, khong doi toi 640px ---------------------
+     DO DUOC o 768px: ca chin route deu tran ngang 188px. Thuong hieu + bon
+     muc + o tim + menu + tai khoan khong du cho tren mot hang, ma
+     `.site-header .wrap` luc do chua duoc phep xuong dong nen no day ca trang
+     rong ra thay vi tu gap lai.
+
+     BA hang, khong phai bon: thuong hieu va tai khoan dung CHUNG hang dau,
+     roi o tim, roi thanh dieu huong cuon ngang. Dieu huong xuong duoi cung vi
+     no la thu duy nhat cuon duoc ma khong mat gi. */
+  .site-header .wrap {
+    flex-wrap: wrap;
+    padding-top: var(--s2);
+    padding-bottom: var(--s2);
+    gap: var(--s2);
+  }
+  .site-header .brand { order: 1; }
+  /* `.spacer` la `flex: 1 1 auto` — de nguyen thi no an het cho con lai cua
+     hang dau va day tai khoan xuong mot hang rieng. Day tai khoan sang phai
+     bang `margin-left` thay vi bang mot o dem. */
+  .site-header .spacer { display: none; }
+  .nav-right { order: 2; margin-left: auto; }
+  .site-search { order: 3; width: 100%; }
+  .input-search { width: 100%; }
+  .nav-links {
+    order: 4;
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
 
   /* --- cac bo cuc moi cua ban thiet ke lai --------------------------------
      Tat ca deu la luoi hai/ba cot o desktop. O be rong nay, cot phai bi ep
@@ -1999,20 +2104,7 @@ button, input, select, textarea {
   .wrap { padding: 0 var(--s4); }
   .page { padding: var(--s5) 0 var(--s7); gap: var(--s4); }
 
-  .site-header .wrap {
-    flex-wrap: wrap;
-    padding-top: var(--s2);
-    padding-bottom: var(--s2);
-    gap: var(--s2);
-  }
-  .nav-links {
-    order: 3;
-    width: 100%;
-    overflow-x: auto;
-    padding-bottom: 2px;
-    scrollbar-width: none;
-  }
-  .nav-links::-webkit-scrollbar { display: none; }
+  /* Header da gop hang tu breakpoint 900px — xem khoi o tren. */
 
   .grid { grid-template-columns: minmax(0, 1fr); }
   .grid-2 { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
@@ -2024,22 +2116,40 @@ button, input, select, textarea {
      ha nguong xuong 140px. */
   .story-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--s3); }
 
-  /*
-     The trong the truyen: MOT hang, cat bot phan thua.
-
-     O cot rong ~160px, ba the xuong ba dong rieng va day the truyen cao gap
-     ruoi — luoi trong nhu rang cua. Cat bot thi mat mot phan thong tin, nhung
-     the o day la NHAN phu; ten va mo ta moi la thu nguoi doc can.
-  */
-  .story-card .story-tags { flex-wrap: nowrap; overflow: hidden; }
+  /* `.story-card .story-tags` gio la quy tac CHUNG, khong con rieng mobile —
+     luoi o desktop cung bi rang cua vi cung mot ly do. */
   .hero-story { padding: var(--s4); gap: var(--s4); }
   .footer-grid { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
 
-  /* O tim chiem tron mot hang rieng, dat TRUOC thanh nav cuon ngang. */
-  .site-search { order: 2; width: 100%; }
-  .input-search { width: 100%; }
-  .nav-links { order: 4; }
-  .nav-right { order: 3; }
+  /* Thu tu hang trong header da dat o breakpoint 900px — khong lap lai.
+
+     O 390px, thuong hieu (~205px) cong khu tai khoan (~150px) vua vuot qua
+     358px cho co — DO DUOC, lech dung vai pixel — nen tai khoan bi day xuong
+     mot hang rieng va header cao 225px, tuc mot phan tu man hinh cho mot
+     thanh DINH.
+
+     Bo ten tai khoan di la du: anh dai dien van con, va ten van hien ngay
+     trong menu khi mo ra. */
+  .account-name { display: none; }
+  /* Duoi 380px, rieng ten thuong hieu cung khong du cho canh khu tai khoan.
+     Bo chu phu, giu "Fanfic" va bieu tuong. */
+  @media (max-width: 380px) {
+    .brand-text-sub { display: none; }
+  }
+
+  /*
+    KHONG DINH tren dien thoai.
+
+    Ngay ca sau khi gom con ba hang, header van cao 173px — mot phan nam man
+    hinh 844px. Day la trang de DOC: giu mot thanh dieu huong luon hien suot
+    ca chuong truyen la doi mot phan nam cho doc lay mot thu nguoi dung hiem
+    khi can giua chung. Cuon len la thay lai ngay.
+
+    Tren may tinh bang tro len thi header chi cao mot hang, va o do dinh la
+    dung.
+  */
+  .site-header { position: static; }
+
   .menu-panel { min-width: 216px; }
   .card { padding: var(--s4); }
   .select-inline { min-width: 0; width: 100%; }

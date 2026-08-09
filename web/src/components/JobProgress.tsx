@@ -66,9 +66,18 @@ export function JobProgress({
             />
           </div>
           <div className="job-figures">
-            <span className="job-percent">
-              {tien_do.biet_tong ? `${tien_do.percent}%` : tien_do.nhan}
-            </span>
+            {/*
+              `.job-percent` la font DEU NET, danh cho CHU SO — no giu "37%" va
+              "38%" rong bang nhau nen con so khong nhay ngang moi nhip cap
+              nhat. Do chu thuong vao do thi chu bi gian ra tung ky tu va doc
+              nhu bi loi. Khi chua biet tong, day la mot CAU chu khong phai mot
+              con so, nen no dung kieu chu khac.
+            */}
+            {tien_do.biet_tong ? (
+              <span className="job-percent">{tien_do.percent}%</span>
+            ) : (
+              <span className="job-waiting">{tien_do.nhan}</span>
+            )}
             {tien_do.chi_tiet ? (
               <span className="hint">{tien_do.chi_tiet}</span>
             ) : null}

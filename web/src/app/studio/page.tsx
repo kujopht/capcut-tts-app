@@ -391,9 +391,12 @@ export default function StudioPage() {
                   {booting ? (
                     <div className="sk" style={{ height: 42 }} aria-hidden="true" />
                   ) : availableVoices.length === 0 ? (
+                    // Nguoi dung KHONG sua duoc cau hinh may chu, nen bao ho di
+                    // "kiem tra lai cau hinh backend" la mot loi khuyen vo dung.
+                    // Noi dieu ho lam duoc: thu lai, va bao neu van vay.
                     <Alert kind="warn">
-                      Chưa có giọng đọc nào sẵn sàng. Kiểm tra lại cấu hình
-                      backend rồi tải lại trang.
+                      Hiện chưa có giọng đọc nào sẵn sàng. Hãy tải lại trang sau
+                      ít phút; nếu vẫn vậy thì máy chủ giọng đọc đang bảo trì.
                     </Alert>
                   ) : (
                     <select
@@ -439,11 +442,10 @@ export default function StudioPage() {
                     Tốc độ đọc
                   </span>
                   <div
-                    className="seg"
+                    className="seg seg-wrap"
                     role="group"
                     aria-labelledby="studio-rate-label"
-                    style={{ flexWrap: "wrap" }}
-                  >
+                                      >
                     {RATES.map((option) => (
                       <button
                         key={option.value}
@@ -514,8 +516,8 @@ export default function StudioPage() {
                         */
                         <p className="hint">
                           {activeJob.voice_id.startsWith("piper:")
-                            ? "Job đã nhận và đang xếp hàng chờ máy chủ tạo giọng. Máy chủ xử lý lần lượt từng job nên có thể phải chờ; job vẫn được giữ nguyên và không bị đổi sang giọng khác. Bạn có thể đóng trang này."
-                            : "Job đã nhận, đang chờ tới lượt xử lý."}
+                            ? "Đã nhận yêu cầu và đang xếp hàng chờ máy chủ tạo giọng. Máy chủ xử lý lần lượt từng bản nên có thể phải chờ; bản của bạn vẫn được giữ nguyên và không bị đổi sang giọng khác. Bạn có thể đóng trang này."
+                            : "Đã nhận yêu cầu, đang chờ tới lượt xử lý."}
                         </p>
                       ) : null}
 

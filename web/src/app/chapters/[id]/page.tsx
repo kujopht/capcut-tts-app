@@ -80,8 +80,14 @@ export default function ChapterPage({
         </span>
       </header>
 
+      {/*
+        Khu nghe di theo CUNG cot voi chu. Truoc day no rong het trang trong
+        khi chu chi rong 68 ky tu, va o trang chua co audio thi mot hop rong
+        1130px cho mot cau ngan chiem het man hinh dau tien — nguoi doc phai
+        cuon qua no moi toi duoc chuong.
+      */}
       {audio ? (
-        <div className="stack">
+        <div className="stack reader-col">
           {/* M4: audio van phat duoc va van tai duoc — chi canh bao rang no
               duoc tao truoc lan sua noi dung gan nhat. Chu so huu duoc chi
               duong tao lai; nguoi doc chi can biet de khong ngo ngang. */}
@@ -117,22 +123,24 @@ export default function ChapterPage({
           </div>
         </div>
       ) : (
-        <EmptyState
-          icon="🎧"
-          title="Chương này chưa có audio"
-          hint={
-            isOwner
-              ? "Bạn có thể tạo audio cho chương trong khu vực tác giả."
-              : "Tác giả chưa tạo bản audio cho chương này."
-          }
-          action={
-            isOwner ? (
-              <Link className="btn btn-primary" href="/write">
-                Tạo audio cho chương
-              </Link>
-            ) : undefined
-          }
-        />
+        <div className="reader-col">
+          <EmptyState
+            icon="🎧"
+            title="Chương này chưa có audio"
+            hint={
+              isOwner
+                ? "Bạn có thể tạo audio cho chương trong khu vực tác giả."
+                : "Tác giả chưa tạo bản audio cho chương này."
+            }
+            action={
+              isOwner ? (
+                <Link className="btn btn-primary" href="/write">
+                  Tạo audio cho chương
+                </Link>
+              ) : undefined
+            }
+          />
+        </div>
       )}
 
       {/*

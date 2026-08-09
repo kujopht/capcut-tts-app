@@ -22,13 +22,25 @@ import { readFileSync } from "node:fs";
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const css = () => read("../src/app/globals.css");
 
-/** Than cua mot quy tac CSS, de rang buoc noi ve DUNG khoi do. */
+/**
+ * Than cua mot quy tac CSS, de rang buoc noi ve DUNG khoi do.
+ *
+ * Tim tu DAU DONG chu khong phai `indexOf` tran: `.story-title {` cung khop
+ * duoc voi duoi cua `.story-card:hover .story-title {`, va bai test se soi
+ * nham mot quy tac khac han. Da do that.
+ */
 function rule(selector) {
   const text = css();
-  const at = text.indexOf(`${selector} {`);
+  const at = text.search(
+    new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{`, "m"),
+  );
   assert.notEqual(at, -1, `khong tim thay quy tac ${selector}`);
   return text.slice(at, text.indexOf("}", at));
 }
+
+/** Bo chu thich truoc khi quet — xem `job-recovery.test.mjs`. */
+const codeOnly = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 /* ============================================================ khoi token */
 
@@ -313,5 +325,123 @@ test("truyen dang chon co tin hieu NGOAI mau sac", () => {
 test("muc dang xem tren thanh dieu huong cung vay", () => {
   // Vach duoi chu la tin hieu hinh dang, khong phai mau.
   assert.match(css(), /\.nav-link\[aria-current="page"\]::after/);
+});
+
+/* ================================ nhung loi CHI thay duoc khi mo trinh duyet */
+
+test("header gop hang tu 900px, KHONG doi toi 640px", () => {
+  /*
+    DO DUOC tren trinh duyet that: o 768px, ca CHIN route deu tran ngang dung
+    188px. Thuong hieu + bon muc + o tim + menu + tai khoan khong du cho tren
+    mot hang, ma `.site-header .wrap` luc do chua duoc phep xuong dong nen no
+    day ca trang rong ra thay vi tu gap lai.
+  */
+  const text = css();
+  const tablet = text.slice(
+    text.indexOf("@media (max-width: 900px)"),
+    text.indexOf("@media (max-width: 640px)"),
+  );
+  assert.match(tablet, /\.site-header \.wrap \{[^}]*flex-wrap: wrap/,
+    "header chưa được phép xuống dòng ở breakpoint 900px");
+  assert.match(tablet, /\.site-search \{ order: 3; width: 100%; \}/);
+  assert.match(tablet, /\.nav-links \{\s*order: 4;/);
+});
+
+test("thuong hieu va tai khoan dung CHUNG hang dau", () => {
+  // `.spacer` la `flex: 1 1 auto`; de nguyen thi no an het cho con lai cua
+  // hang dau va day tai khoan xuong mot hang rieng — header thanh BON hang.
+  const text = css();
+  const tablet = text.slice(
+    text.indexOf("@media (max-width: 900px)"),
+    text.indexOf("@media (max-width: 640px)"),
+  );
+  assert.match(tablet, /\.site-header \.spacer \{ display: none; \}/);
+  assert.match(tablet, /\.nav-right \{ order: 2; margin-left: auto; \}/);
+});
+
+test("header KHONG dinh tren dien thoai", () => {
+  // Ngay ca khi gom con ba hang no van cao 173px — mot phan nam man hinh
+  // 844px. Trang de DOC thi cho doc quan trong hon.
+  const text = css();
+  const mobile = text.slice(text.indexOf("@media (max-width: 640px)"));
+  assert.match(mobile, /\.site-header \{ position: static; \}/);
+  // Nhung tren may tinh bang tro len thi VAN dinh.
+  assert.match(rule(".site-header"), /position: sticky/);
+});
+
+test("ten truyen dai khong dau cach KHONG tran ra khoi the", () => {
+  // `clamp-2` cat theo chieu DOC. Mot tu dai khong ngat duoc thi tran theo
+  // chieu NGANG — do duoc tren trinh duyet that.
+  assert.match(rule(".story-title"), /overflow-wrap: anywhere/);
+});
+
+test("hang the trong the truyen nam MOT hang o MOI be rong", () => {
+  /*
+    Chieu cao mot o luoi do o cao nhat quyet dinh. Ba the tieng Viet trong cot
+    ~210px de xuong hai dong, va luc do ca hang bi keo cao theo mot the.
+
+    Quy tac phai o NGOAI moi `@media` — luoi o desktop bi rang cua vi dung mot
+    ly do voi mobile.
+  */
+  const text = css();
+  const truoc_media = text.slice(0, text.indexOf("@media (prefers-reduced-motion"));
+  const than = rule(".story-card .story-tags");
+  assert.ok(truoc_media.includes(".story-card .story-tags"),
+    "quy tắc chỉ áp cho mobile — lưới desktop vẫn răng cưa");
+  assert.match(than, /flex-wrap: nowrap/);
+  assert.match(than, /overflow: hidden/);
+});
+
+test("va tung THE giu nguyen be rong cua no", () => {
+  /*
+    Dat `nowrap` cho khoi la CHUA DU: khoi thoi xuong dong, nhung cac the bi co
+    lai va chu BEN TRONG chung ngat thanh hai dong — "Đời thường" thanh "Đời" /
+    "thường", va hang the lai cao gap doi. Thay tren anh chup that sau khi sua
+    loi rang cua.
+  */
+  const than = rule(".story-card .story-tags > *");
+  assert.match(than, /flex: 0 0 auto/);
+  assert.match(than, /white-space: nowrap/);
+});
+
+test("chu 'Đang chuẩn bị…' KHONG dung font cua CON SO", () => {
+  /*
+    `.job-percent` la font DEU NET, sinh ra de giu "37%" va "38%" rong bang
+    nhau. Do mot CAU chu vao do thi chu bi gian ra tung ky tu va doc nhu bi
+    loi — thay rat ro tren anh chup that.
+  */
+  const src = read("../src/components/JobProgress.tsx");
+  assert.match(src, /<span className="job-waiting">\{tien_do\.nhan\}<\/span>/);
+  assert.ok(
+    !/className="job-percent">\s*\{tien_do\.biet_tong \?/.test(src),
+    "chữ chờ vẫn dùng chung class với con số",
+  );
+  assert.doesNotMatch(rule(".job-waiting"), /--font-mono/);
+});
+
+/* ============================================ ngon ngu san pham, khong ky thuat */
+
+test("KHONG lo thuat ngu backend ra giao dien", () => {
+  // Nguoi dung khong biet "job" la gi, va ho cung khong sua duoc "cau hinh
+  // backend" — noi vay la mot loi khuyen vo dung.
+  for (const f of [
+    "../src/app/studio/page.tsx",
+    "../src/app/write/page.tsx",
+    "../src/app/library/page.tsx",
+    "../src/app/page.tsx",
+  ]) {
+    const ma = codeOnly(read(f));
+    // Chi soi CHUOI hien ra man hinh.
+    for (const m of ma.matchAll(/"([^"\n]{12,})"/g)) {
+      const chuoi = m[1];
+      if (!/[àáâãèéêìíòóôõùúýăđ]/i.test(chuoi)) continue;
+      for (const cam of ["job", "worker", "poll", "fingerprint", "backend"]) {
+        assert.ok(
+          !new RegExp(`\\b${cam}\\b`, "i").test(chuoi),
+          `${f} lộ thuật ngữ "${cam}" ra giao diện: ${chuoi.slice(0, 60)}`,
+        );
+      }
+    }
+  }
 });
 

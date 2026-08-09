@@ -51,7 +51,7 @@ export function PageHeader({
 
 export function Loading({ label = "Đang tải…" }: { label?: string }) {
   return (
-    <div className="row" role="status" style={{ color: "var(--text-2)" }}>
+    <div className="row muted" role="status">
       <span className="spinner" aria-hidden="true" />
       <span>{label}</span>
     </div>
@@ -283,7 +283,7 @@ export function ConfirmDialog({
         ref={panel}
       >
         <h2 id="confirm-title">{title}</h2>
-        <div className="muted" style={{ fontSize: "var(--t-sm)" }}>
+        <div className="muted modal-body">
           {body}
         </div>
         <div className="modal-actions">

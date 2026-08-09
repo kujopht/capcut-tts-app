@@ -1090,6 +1090,44 @@ button, input, select, textarea {
 .hero-title a:hover { color: var(--brand-hover); }
 .hero-cover { text-decoration: none; }
 
+/* --------------------------------------------- dang nhap bang nha cung cap */
+
+/*
+  Nut nha cung cap dung MOT kieu cho ca Google lan Facebook, va deu la kieu
+  cua Fanfic World. Co y khong bat chuoc nut chinh chu cua ho: hai nut voi hai
+  ngon ngu thiet ke khac nhau nam canh nhau trong y nhu hai manh dan vao, con
+  bieu tuong thi da du de nhan ra.
+*/
+.btn-provider {
+  gap: var(--s3);
+  background: var(--bg-2);
+  border-color: var(--line-strong);
+}
+.btn-provider:hover { background: var(--bg-3); }
+
+/* Vach "hoặc" giua hai duong dang nhap. */
+.or-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--text-3);
+  font-size: var(--t-sm);
+}
+.or-line::before,
+.or-line::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.auth-callback {
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+  text-align: center;
+}
+
 /* ---------------------------------------------------------------- footer */
 
 .footer-grid {

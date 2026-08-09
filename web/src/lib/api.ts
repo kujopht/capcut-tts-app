@@ -217,6 +217,30 @@ export const api = {
   logout: () =>
     request<{ da_huy_phien: boolean }>("/api/auth/logout", { method: "POST" }),
 
+  /**
+   * Dia chi bat dau dang nhap bang Google/Facebook.
+   *
+   * Tra ve CHUOI chu khong phai Promise, va do la chu y: buoc nay phai la mot
+   * lan DIEU HUONG cua trinh duyet (`window.location.href = ...`), khong phai
+   * `fetch`. Sau no la mot chuoi chuyen tiep qua Appwrite roi qua nha cung
+   * cap, va chuoi do phai xay ra trong thanh dia chi cua nguoi dung.
+   */
+  oauthStartUrl: (provider: "google" | "facebook", next: string) =>
+    `${API_BASE}/api/auth/oauth/${provider}?next=${encodeURIComponent(next)}`,
+
+  /**
+   * Doi cap dung-mot-lan tu URL callback lay token cua ung dung.
+   *
+   * Tra ve DUNG hinh dang ma `login`/`register` tra ve. Khong co he thong
+   * phien thu hai: sau buoc nay, nguoi dung Google khong khac nguoi dung mat
+   * khau.
+   */
+  exchangeOAuth: (userId: string, secret: string) =>
+    request<{ token: string; profile: Profile }>("/api/auth/oauth/exchange", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId, secret }),
+    }),
+
   voices: () => request<{ voices: Voice[]; count: number }>("/api/voices"),
 
   listNovels: (mine = false) =>

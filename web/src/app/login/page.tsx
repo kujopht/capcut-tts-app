@@ -10,6 +10,8 @@ import { useToast } from "@/lib/toast";
 import { Alert, Loading } from "@/components/ui";
 import { LogoMark } from "@/components/Logo";
 import { safeNext } from "@/lib/nav";
+import { api } from "@/lib/api";
+import { FacebookIcon, GoogleIcon } from "@/components/ProviderIcons";
 
 const MIN_PASSWORD = 8;
 
@@ -37,6 +39,9 @@ function LoginForm() {
   */
   const params = useSearchParams();
   const next = safeNext(params.get("next"));
+  // `?error=oauth` do backend dat khi nha cung cap tu choi. Chi la mot co,
+  // khong mang chi tiet nao tu Appwrite.
+  const oauthError = params.get("error") === "oauth";
   const toast = useToast();
   const { profile, loading, signIn, signUp } = useSession();
 
@@ -128,6 +133,45 @@ function LoginForm() {
         >
           Đăng ký
         </button>
+      </div>
+
+      {/*
+        OAuth dat TRUOC form email. Voi phan lon nguoi dung, mot lan bam la
+        xong, con go email + mat khau moi la duong dai — dat duong ngan o duoi
+        la bat ho doc qua ca cai ho khong dung.
+
+        Day la DIEU HUONG that (`window.location.href`), khong phai `fetch`:
+        buoc sau la mot chuoi chuyen tiep qua Appwrite roi qua nha cung cap,
+        va no phai xay ra trong thanh dia chi.
+      */}
+      <div className="card stack-2">
+        {oauthError ? (
+          <Alert kind="error">
+            Đăng nhập bằng nhà cung cấp không thành công. Vui lòng thử lại.
+          </Alert>
+        ) : null}
+        <button
+          type="button"
+          className="btn btn-block btn-provider"
+          onClick={() => {
+            window.location.href = api.oauthStartUrl("google", next);
+          }}
+        >
+          <GoogleIcon /> Tiếp tục với Google
+        </button>
+        <button
+          type="button"
+          className="btn btn-block btn-provider"
+          onClick={() => {
+            window.location.href = api.oauthStartUrl("facebook", next);
+          }}
+        >
+          <FacebookIcon /> Tiếp tục với Facebook
+        </button>
+      </div>
+
+      <div className="or-line" role="separator">
+        <span>hoặc</span>
       </div>
 
       <form className="card stack" onSubmit={submit}>

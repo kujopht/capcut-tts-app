@@ -99,6 +99,53 @@ class IdentityAdapter(Protocol):
         """
         ...
 
+    # -- OAuth ---------------------------------------------------------------
+    #
+    # Danh tinh OAuth do APPWRITE so huu. Backend khong tu sinh id rieng cho
+    # nguoi dung Google/Facebook: nguoi dung chinh danh cua Fanfic van la
+    # Appwrite user id, nen truyen, audio va quota cu van gan dung nguoi.
+
+    def oauth_start_url(self, provider: str, success: str, failure: str) -> str:
+        """
+        URL de DAY TRINH DUYET toi, bat dau dang nhap bang `provider`.
+
+        KHONG goi mang. Chi dung chuoi — buoc tiep theo phai xay ra trong
+        trinh duyet cua nguoi dung, khong phai o backend.
+
+        `provider` da duoc route kiem theo DANH SACH TRANG truoc khi toi day.
+        Ghep thang tham so tu URL vao day la mot open redirect.
+        """
+        ...
+
+    def exchange_oauth_token(self, user_id: str, secret: str) -> str:
+        """
+        Doi cap `userId`/`secret` DUNG MOT LAN lay tu callback thanh session
+        secret — cung loai token ma `login()` tra ve.
+
+        Day la ly do ca luong nay ton tai: sau buoc nay, nguoi dung dang nhap
+        bang Google trong y het nguoi dung dang nhap bang mat khau, va khong co
+        he thong phien thu hai nao duoc sinh ra.
+
+        Nem `AuthError` khi cap nay thieu, sai, het han hoac da dung roi. Thong
+        diep nem ra KHONG duoc chua secret.
+        """
+        ...
+
+    def ensure_profile(self, profile: Profile) -> Profile:
+        """
+        Bao dam ho so ung dung ton tai cho nguoi dung nay.
+
+        Nguoi dang nhap bang Google/Facebook KHONG di qua `register()`, nen ho
+        khong co ban ghi ho so nao. Ham nay lap cho trong do, dung CUNG schema
+        va cung gia tri mac dinh (`tier=FREE`) ma dang ky thuong dung — khong
+        co bang rieng cho nguoi dung OAuth.
+
+        TIM-HOAC-TAO, khong bao gio ghi de: ho so da co thi tra ve NGUYEN VEN.
+        Nguoi dung doi ten hien thi trong Fanfic roi mot thang sau dang nhap
+        bang Google khong duoc bi Google dat lai ten ho.
+        """
+        ...
+
 
 class StorageAdapter(Protocol):
     """Luu file lon. Ban that se la Cloudflare R2 qua API tuong thich S3."""
@@ -420,6 +467,7 @@ class MockIdentityAdapter:
         self._by_email: Dict[str, str] = {}          # email -> user_id
         self._passwords: Dict[str, tuple] = {}       # user_id -> (salt, hash)
         self._tokens: Dict[str, str] = {}            # token -> user_id
+        self._oauth_tokens: Dict[str, str] = {}      # secret dung-1-lan -> user_id
 
     def register(self, email: str, password: str, display_name: str = "") -> Profile:
         email = (email or "").strip().lower()
@@ -462,6 +510,60 @@ class MockIdentityAdapter:
         """Xem contract o `IdentityAdapter.logout`."""
         with self._lock:
             return self._tokens.pop((token or "").strip(), None) is not None
+
+    # -- OAuth ---------------------------------------------------------------
+
+    def oauth_start_url(self, provider: str, success: str, failure: str) -> str:
+        """
+        Xem contract o `IdentityAdapter`.
+
+        Mang CA `success` lan `failure` y nhu ban that, du ban mock khong dung
+        toi `failure`: bo test kiem duoc route co truyen du hai duong hay
+        khong, va mot ban gia lam roi tham so se lam phep kiem do thanh vo
+        nghia ma van xanh.
+        """
+        from urllib.parse import urlencode
+
+        query = urlencode({"success": success, "failure": failure})
+        return f"https://mock-oauth.invalid/{provider}?{query}"
+
+    def seed_oauth_token(self, user_id: str, secret: str) -> None:
+        """
+        CHI DANH CHO TEST: gia lap mot cap dung-mot-lan ma Appwrite se cap.
+
+        Khong nam trong `IdentityAdapter` — day khong phai hanh vi cua ban
+        that, chi la cach dung san boi canh cho bo test.
+        """
+        with self._lock:
+            self._oauth_tokens[secret] = user_id
+
+    def exchange_oauth_token(self, user_id: str, secret: str) -> str:
+        """Xem contract o `IdentityAdapter`."""
+        user_id = (user_id or "").strip()
+        secret = (secret or "").strip()
+        if not user_id or not secret:
+            raise AuthError("Thiếu thông tin đăng nhập từ nhà cung cấp.")
+        with self._lock:
+            # `pop` chu khong phai `get`: cap nay dung MOT LAN. Dung lai lan hai
+            # phai hong — neu khong, mot secret lot ra ngoai (lich su trinh
+            # duyet, log proxy) van con doi duoc thanh phien.
+            owner = self._oauth_tokens.pop(secret, None)
+            if owner is None or owner != user_id:
+                raise AuthError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn.")
+            token = new_id("tok")
+            self._tokens[token] = user_id
+            return token
+
+    def ensure_profile(self, profile: Profile) -> Profile:
+        """Xem contract o `IdentityAdapter`. TIM-HOAC-TAO, khong ghi de."""
+        with self._lock:
+            existing = self._profiles.get(profile.user_id)
+            if existing is not None:
+                return existing
+            self._profiles[profile.user_id] = profile
+            if profile.email:
+                self._by_email.setdefault(profile.email, profile.user_id)
+            return profile
 
 
 # -----------------------------------------------------------------------------

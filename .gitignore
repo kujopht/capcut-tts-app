@@ -118,3 +118,14 @@ web/cloudflare-env.d.ts
 # Bien moi truong cuc bo cua wrangler — CO THE CHUA SECRET.
 .dev.vars
 .dev.vars.*
+
+# Thu muc runtime rieng cua tung moi truong worker (FAS_VAR_DIR).
+# Dat o day thay vi canh `server/var/` de khong dam vao cung mot vung voi
+# PR #4 — hai lan them cung mot quy tac o hai cho khac nhau thi merge sach.
+server/var-*/
+
+# --- Artefact benchmark / validate model (khong bao gio commit) ---
+bench_piper_*/
+benchmark-*.csv
+benchmark-*.json
+models-report-*.json

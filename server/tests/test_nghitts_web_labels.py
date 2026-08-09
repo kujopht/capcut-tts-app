@@ -326,19 +326,32 @@ class GiongDeXuatPhaiThucSuDuocPhucVu(unittest.TestCase):
                           f"'{provider}:{khoa}' được đề xuất nhưng không có "
                           "trong catalog NghiTTS — sẽ không bao giờ hiện ra")
 
-    def test_cau_hinh_mac_dinh_tu_nhat_quan(self) -> None:
+    def test_hai_giong_NghiTTS_duoc_de_xuat_dung_thu_tu(self) -> None:
         """
-        Mac dinh cua `Settings` phai tu du: moi giong NghiTTS duoc de xuat deu
-        phai nam trong `local_voices` mac dinh. Neu khong, mot ban trien khai
-        khong dat `FAS_LOCAL_VOICES` se co muc de xuat thieu giong.
-        """
-        from server.config import Settings
+        Yeu cau san pham: "Ngọc Huyền" truoc, "Ngọc Huyền (Mới)" NGAY SAU.
 
-        cho_phep = tts_bridge.allowed_local_voice_ids(Settings())
-        for provider, khoa in RECOMMENDED_CODES:
-            if provider != tts_bridge.LOCAL_PROVIDER:
-                continue
-            self.assertIn(f"{provider}:{khoa}", cho_phep)
+        So khop theo THU TU chu khong theo tap hop: `recommended_order` sinh tu
+        chi so trong `RECOMMENDED_FANFIC_VOICES`, va giao dien sap xep theo con
+        so do. Doi cho hai muc do trong tuple se khong lam test tap-hop nao do.
+        """
+        de_xuat = sorted(
+            [v for v in tts_bridge.list_voices(CauHinhGia()) if v["recommended"]],
+            key=lambda v: v["recommended_order"])
+        piper = [(v["voice_id"], v["display_name"]) for v in de_xuat
+                 if v["provider"] == tts_bridge.LOCAL_PROVIDER]
+        self.assertEqual(piper, [("piper:ngochuyen", "Ngọc Huyền"),
+                                 ("piper:ngochuyennew", "Ngọc Huyền (Mới)")])
+
+    def test_hai_giong_do_lien_nhau_va_dung_cuoi(self) -> None:
+        thu_tu = [f"{p}:{k}" for p, k in RECOMMENDED_CODES]
+        self.assertEqual(thu_tu[-2:], ["piper:ngochuyen", "piper:ngochuyennew"])
+
+    def test_de_xuat_van_nam_trong_muc_day_du(self) -> None:
+        """Muc de xuat la mot CACH TRINH BAY, khong phai mot danh sach rieng."""
+        vs = tts_bridge.list_voices(CauHinhGia())
+        ids = {v["voice_id"] for v in vs}
+        for i in ("piper:ngochuyen", "piper:ngochuyennew"):
+            self.assertIn(i, ids)
 
     def test_de_xuat_hien_ra_khi_danh_sach_trang_du(self) -> None:
         de_xuat = [v for v in tts_bridge.list_voices(CauHinhGia())
@@ -347,6 +360,34 @@ class GiongDeXuatPhaiThucSuDuocPhucVu(unittest.TestCase):
                     if p == tts_bridge.LOCAL_PROVIDER]
         self.assertEqual(sorted(v["voice_id"] for v in de_xuat),
                          sorted(mong_doi))
+
+    def test_danh_sach_trang_HEP_thi_giong_de_xuat_bien_mat_LANG_LE(self) -> None:
+        """
+        Bai test nay khoa lai mot HE QUA, khong phai mot mong muon.
+
+        Truoc day o day co bai `test_cau_hinh_mac_dinh_tu_nhat_quan`: no doi moi
+        giong NghiTTS duoc de xuat phai nam trong `Settings.local_voices` mac
+        dinh. Dieu do dung khi chi co MOT giong NghiTTS duoc de xuat. Nay co
+        hai, con mac dinh (va staging) van co y chi bat `piper:ngochuyen` —
+        noi lam giong duy nhat da probe that.
+
+        NOI RONG mac dinh de bai test cu xanh lai la sai huong: no se lam moi
+        moi truong khong dat `FAS_LOCAL_VOICES` chao ban mot giong ma worker o
+        do co the khong co model, va job se nam mai.
+
+        Nen thay vi ep hai ben bang nhau, khoa lai dung cai bay: danh sach
+        trang hep hon thi giong de xuat bi loc di TRUOC khi muc de xuat duoc
+        dung, va khong co log nao noi vi sao.
+        """
+        chi_mot = CauHinhGia("piper:ngochuyen")
+        de_xuat = [v["voice_id"] for v in tts_bridge.list_voices(chi_mot)
+                   if v["recommended"] and v["provider"] == "piper"]
+        self.assertEqual(de_xuat, ["piper:ngochuyen"])
+
+        du_ca_hai = CauHinhGia("piper:ngochuyen", "piper:ngochuyennew")
+        de_xuat = [v["voice_id"] for v in tts_bridge.list_voices(du_ca_hai)
+                   if v["recommended"] and v["provider"] == "piper"]
+        self.assertEqual(de_xuat, ["piper:ngochuyen", "piper:ngochuyennew"])
 
 
 if __name__ == "__main__":

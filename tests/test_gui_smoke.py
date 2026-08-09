@@ -645,15 +645,16 @@ class TestMainWindow(unittest.TestCase):
         from desktop_app.providers.recommended import RECOMMENDED_LABEL
 
         self.assertEqual(self.window.recommended_check.text(), RECOMMENDED_LABEL)
-        self.assertIn("(7)", self.window.recommended_check.text())
+        self.assertIn("(8)", self.window.recommended_check.text())
         self.assertFalse(self.window.recommended_check.isChecked())
 
-    def test_recommended_filter_shows_exactly_seven(self) -> None:
+    def test_recommended_filter_shows_every_recommended_voice(self) -> None:
         from desktop_app.providers.recommended import RECOMMENDED_CODES
 
         self.window.recommended_check.setChecked(True)
         try:
-            self.assertEqual(self.window.voice_table.rowCount(), 7)
+            self.assertEqual(self.window.voice_table.rowCount(),
+                             len(RECOMMENDED_CODES))
             codes = [(v.provider, v.engine_voice_id) for v in self.window._visible_voices]
             self.assertEqual(codes, list(RECOMMENDED_CODES))
         finally:

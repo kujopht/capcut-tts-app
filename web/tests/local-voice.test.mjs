@@ -210,26 +210,39 @@ test("ke ca khi may chu gui trang thai hong, nhan NghiTTS van chi la ten", async
   assert.equal(nhan, "Mai Phương");
 });
 
-test("CapCut va Edge VAN giu ten bo giong trong nhan", async () => {
-  // Co chu dich, khong phai bo sot. Hai ben co giong TRUNG TEN nhau — chinh
-  // su trung ten do tung lam trang web chon nham mot giong CapCut khi di tim
-  // giong Edge "HoaiMy". Bo hau to o day la lam hai dong trong y het nhau.
+test("nhan giong Edge CHI la ten, khong hau to", async () => {
   const { voiceOptionLabel } = await import("../src/lib/voices.ts");
-  assert.equal(
-    voiceOptionLabel(
-      voice("edge:vi-VN-HoaiMyNeural", {
-        display_name: "Hoài My",
-        provider_label: "Edge TTS",
-      }),
-    ),
-    "Hoài My · Edge TTS",
+  for (const [id, ten] of [
+    ["edge:vi-VN-HoaiMyNeural", "Hoài My"],
+    ["edge:vi-VN-NamMinhNeural", "Nam Minh"],
+  ]) {
+    const nhan = voiceOptionLabel(
+      voice(id, { display_name: ten, provider_label: "Edge TTS" }),
+    );
+    assert.equal(nhan, ten);
+    assert.ok(!nhan.includes("Edge TTS"), nhan);
+    assert.ok(!nhan.includes("·"), nhan);
+  }
+});
+
+test("CapCut VAN giu hau to, va do la thu phan biet hai cap trung ten", async () => {
+  // Co chu dich, khong phai bo sot. Trong bo 51 giong co hai cap trung ten
+  // bac qua provider: "Ban Mai" (NghiTTS/CapCut) va "Nam Minh" (Edge/CapCut).
+  // Hau to "· CapCut" la thu DUY NHAT con phan biet chung.
+  const { voiceOptionLabel } = await import("../src/lib/voices.ts");
+
+  const capcut = voiceOptionLabel(
+    voice("capcut:x", { display_name: "Nam Minh", provider_label: "CapCut" }),
   );
-  assert.equal(
-    voiceOptionLabel(
-      voice("capcut:x", { display_name: "Hoài My", provider_label: "CapCut" }),
-    ),
-    "Hoài My · CapCut",
+  const edge = voiceOptionLabel(
+    voice("edge:vi-VN-NamMinhNeural", {
+      display_name: "Nam Minh",
+      provider_label: "Edge TTS",
+    }),
   );
+  assert.equal(capcut, "Nam Minh · CapCut");
+  assert.equal(edge, "Nam Minh");
+  assert.notEqual(capcut, edge, "hai dòng trùng tên phải phân biệt được");
 });
 
 test("chi hien trang thai khi that su co van de", async () => {
@@ -345,6 +358,105 @@ test("fixture production: CapCut va Edge khong mat giong nao", async () => {
   assert.equal(all.filter((v) => v.provider === "edge").length, 2);
 });
 
+test("fixture production: KHONG nhan nao lo ten ky thuat ra cho nguoi dung", async () => {
+  // Quet TOAN BO 51 dong, khong chi giong NghiTTS. Cac test o tren kiem tung
+  // provider mot; cai nay bat truong hop mot provider moi (hoac mot truong
+  // metadata moi) lot vao nhan ma khong ai nho kiem.
+  const { voiceOptionLabel, voiceSections } = await import(
+    "../src/lib/voices.ts"
+  );
+  const CAM = [
+    "NghiTTS",
+    "Edge TTS",
+    "Piper local",
+    "Piper",
+    "piper:",
+    "edge:",
+    "máy riêng",
+    "Chưa tải model",
+    "Chạy trên máy chủ",
+    "not_installed",
+  ];
+  for (const v of voiceSections(FIXTURE).all) {
+    const nhan = voiceOptionLabel(v);
+    for (const cam of CAM) {
+      assert.ok(!nhan.includes(cam), `"${nhan}" (${v.voice_id}) chứa "${cam}"`);
+    }
+  }
+});
+
+test("fixture production: chi CapCut con hau to provider", async () => {
+  const { voiceOptionLabel, voiceSections } = await import(
+    "../src/lib/voices.ts"
+  );
+  for (const v of voiceSections(FIXTURE).all) {
+    const nhan = voiceOptionLabel(v);
+    if (v.provider === "capcut") {
+      assert.equal(nhan, `${v.display_name} · CapCut`, v.voice_id);
+    } else {
+      assert.equal(nhan, v.display_name, v.voice_id);
+    }
+  }
+});
+
+test("fixture production: khong hai dong nao trong y het nhau", async () => {
+  // Ly do THAT SU khien CapCut giu hau to. Co hai cap trung `display_name`
+  // bac qua provider — "Ban Mai" (NghiTTS/CapCut) va "Nam Minh" (Edge/CapCut)
+  // — va hau to "· CapCut" la thu duy nhat con phan biet chung. Bo not no thi
+  // danh sach co hai cap dong khong the phan biet.
+  const { voiceOptionLabel, voiceSections } = await import(
+    "../src/lib/voices.ts"
+  );
+  const nhan = voiceSections(FIXTURE).all.map(voiceOptionLabel);
+  const trung = nhan.filter((n, i) => nhan.indexOf(n) !== i);
+  assert.deepEqual(trung, [], `nhãn trùng nhau: ${trung.join(", ")}`);
+});
+
+test("fixture production: ca hai giong Ngoc Huyen nam trong muc de xuat", async () => {
+  const { voiceSections, voiceOptionLabel } = await import(
+    "../src/lib/voices.ts"
+  );
+  const { recommended, all } = voiceSections(FIXTURE);
+
+  // So khop theo THU TU chu khong theo tap hop: yeu cau la "Ngọc Huyền" truoc,
+  // "Ngọc Huyền (Mới)" NGAY SAU. Mot test tap-hop se khong thay neu hai muc
+  // bi doi cho.
+  const piper = recommended.filter((v) => v.provider === "piper");
+  assert.deepEqual(
+    piper.map((v) => [v.voice_id, voiceOptionLabel(v)]),
+    [
+      ["piper:ngochuyen", "Ngọc Huyền"],
+      ["piper:ngochuyennew", "Ngọc Huyền (Mới)"],
+    ],
+  );
+
+  for (const v of piper) {
+    assert.equal(v.recommended, true, v.voice_id);
+    assert.equal(typeof v.recommended_order, "number", v.voice_id);
+  }
+
+  // Muc de xuat la mot CACH TRINH BAY. Ca hai van phai co trong muc day du,
+  // va phai la CUNG tham chieu — khong nhan ban ban ghi nao.
+  for (const v of piper) {
+    assert.ok(all.includes(v), `${v.voice_id} thiếu trong mục đầy đủ`);
+  }
+});
+
+test("fixture production: muc de xuat lien tuc va dung thu tu may chu", async () => {
+  const { voiceSections } = await import("../src/lib/voices.ts");
+  const { recommended } = voiceSections(FIXTURE);
+  assert.equal(recommended.length, 8);
+  assert.deepEqual(
+    recommended.map((v) => v.recommended_order),
+    [0, 1, 2, 3, 4, 5, 6, 7],
+  );
+  // Hai giong NghiTTS dung cuoi, lien nhau.
+  assert.deepEqual(
+    recommended.slice(-2).map((v) => v.voice_id),
+    ["piper:ngochuyen", "piper:ngochuyennew"],
+  );
+});
+
 test("fixture production: metadata provider VAN con trong API", () => {
   // Bo ten bo giong khoi NHAN HIEN THI la viec cua giao dien. API van phai
   // bao ra metadata — day la ranh gioi giua hai tang.
@@ -402,6 +514,24 @@ test("NghiTTS duoc de xuat thi vao muc de xuat nhu provider khac", async () => {
     ["piper:ngochuyen", "edge:x"],
     "thứ tự do máy chủ cấp, không ưu tiên/hạ bậc theo provider",
   );
+});
+
+test("khong trang nao tu dung ten giong — tat ca di qua voiceOptionLabel", () => {
+  // Cac test tren kiem HAM dung nhan. Bai nay kiem rang khong ai di vong qua
+  // no: mot cho render thang `voice.display_name` hay `voice.provider_label`
+  // se thoat khoi moi quy tac o `voices.ts` va khong bo test nao o tren bat
+  // duoc. Quet toan bo `src/app` va `src/components`, khong chi hai trang.
+  const files = [
+    "../src/app/studio/page.tsx",
+    "../src/app/write/page.tsx",
+    "../src/app/layout.tsx",
+  ];
+  for (const p of files) {
+    const src = read(p);
+    for (const cam of ["voice.display_name", "voice.provider_label"]) {
+      assert.ok(!src.includes(cam), `${p} render thẳng ${cam}`);
+    }
+  }
 });
 
 test("hai trang deu co dung HAI muc chon giong", () => {

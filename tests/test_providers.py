@@ -968,7 +968,7 @@ class TestRecommendedFanficVoices(unittest.TestCase):
         self.codes = RECOMMENDED_CODES
 
     def _catalog(self):
-        """Catalog gia lap chua ca 7 giong de xuat + vai giong nhieu."""
+        """Catalog gia lap chua DU cac giong de xuat + vai giong nhieu."""
         from desktop_app.providers.recommended import RECOMMENDED_FANFIC_VOICES
 
         voices = []
@@ -991,10 +991,11 @@ class TestRecommendedFanficVoices(unittest.TestCase):
     def test_section_exists_with_label(self):
         from desktop_app.providers.recommended import RECOMMENDED_COUNT, RECOMMENDED_LABEL
 
-        self.assertEqual(RECOMMENDED_COUNT, 7)
-        self.assertEqual(RECOMMENDED_LABEL, "\u0110\u1ec1 xu\u1ea5t Audio Fanfic (7)")
+        # Bay -> tam: them `piper:ngochuyennew` vao muc de xuat.
+        self.assertEqual(RECOMMENDED_COUNT, 8)
+        self.assertEqual(RECOMMENDED_LABEL, "\u0110\u1ec1 xu\u1ea5t Audio Fanfic (8)")
 
-    def test_exactly_seven_codes_in_order(self):
+    def test_exactly_eight_codes_in_order(self):
         expected = [
             (PROVIDER_CAPCUT, "BV074_streaming"),
             (PROVIDER_CAPCUT, "BV074_streaming_dsp"),
@@ -1002,18 +1003,21 @@ class TestRecommendedFanficVoices(unittest.TestCase):
             (PROVIDER_CAPCUT, "BV562_streaming"),
             (PROVIDER_CAPCUT, "BV421_vivn_streaming"),
             (PROVIDER_EDGE, "vi-VN-HoaiMyNeural"),
+            # Hai giong NghiTTS, LIEN NHAU va dung thu tu nay:
+            # "Ngọc Huyền" truoc, "Ngọc Huyền (Mới)" ngay sau.
             (PROVIDER_PIPER, "ngochuyen"),
+            (PROVIDER_PIPER, "ngochuyennew"),
         ]
         self.assertEqual(list(self.codes), expected)
 
     def test_no_duplicate_codes(self):
         self.assertEqual(len(self.codes), len(set(self.codes)))
 
-    def test_filter_returns_exactly_seven_in_order(self):
+    def test_filter_returns_exactly_eight_in_order(self):
         from desktop_app.providers.recommended import filter_recommended
 
         result = filter_recommended(self._catalog())
-        self.assertEqual(len(result), 7)
+        self.assertEqual(len(result), len(self.codes))
         self.assertEqual([(v.provider, v.engine_voice_id) for v in result], list(self.codes))
 
     def test_duplicate_catalog_entries_do_not_duplicate_result(self):

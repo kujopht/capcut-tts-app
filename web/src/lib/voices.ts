@@ -40,16 +40,26 @@ export function usableVoices(voices: Voice[]): Voice[] {
 export const NGHITTS_PROVIDER = "piper";
 
 /**
- * Giong nay co thuoc bo NghiTTS khong.
+ * Provider mà nhãn hiển thị CHỈ là tên giọng, không hậu tố.
  *
- * Nhan dien theo `provider`, KHONG theo `runs_on_worker`. Hai co nay hom nay
- * trung nhau nhung tra loi hai cau hoi khac han: `provider` la DANH TINH cua
- * bo giong, con `runs_on_worker` la NOI chay. Them mot provider chay tren
- * worker sau nay se lam cach nhan dien theo `runs_on_worker` gan nham nhan
- * NghiTTS cho no.
+ * Nhận diện theo `provider`, KHÔNG theo `runs_on_worker`. Hai cờ này hôm nay
+ * trùng nhau với NghiTTS nhưng trả lời hai câu hỏi khác hẳn: `provider` là
+ * DANH TÍNH của bộ giọng, còn `runs_on_worker` là NƠI chạy.
+ *
+ * CapCut cố ý KHÔNG nằm trong danh sách này, và không phải vì bỏ sót. Trong
+ * bộ 51 giọng có hai cặp trùng `display_name` bắc qua provider:
+ *
+ *     "Ban Mai"   — NghiTTS  vs  CapCut
+ *     "Nam Minh"  — Edge     vs  CapCut
+ *
+ * Hậu tố "· CapCut" là thứ DUY NHẤT còn phân biệt hai dòng đó. Bỏ nốt nó thì
+ * danh sách có hai cặp dòng trông y hệt nhau, và người dùng không có cách nào
+ * biết mình đang chọn giọng nào.
  */
-export function isNghiTtsVoice(voice: Voice): boolean {
-  return voice.provider === NGHITTS_PROVIDER;
+const PROVIDER_KHONG_HAU_TO = new Set([NGHITTS_PROVIDER, "edge"]);
+
+function chiHienTen(voice: Voice): boolean {
+  return PROVIDER_KHONG_HAU_TO.has(voice.provider);
 }
 
 /** Nhan cua hai muc trong bo chon giong. Mot cho khai bao duy nhat. */
@@ -88,23 +98,21 @@ export function voiceSections(voices: Voice[]): {
 /**
  * Nhan mot dong trong bo chon giong.
  *
- * Giong NghiTTS chi hien TEN, khong hau to gi. Cac model nay da co bang ten
- * chinh thuc ("Ngọc Huyền (Mới)", "Mai Phương", ...), nen ten tu no da du ro;
- * dan them ten bo giong hay trang thai vao chi lam dong dai ra. Phu chu
- * "máy riêng" cung da bo tu truoc: no co tu thoi worker chay tren laptop chu
- * du an, con production chay 24/7 tren Google Compute Engine.
+ * Giong NghiTTS va Edge chi hien TEN, khong hau to gi. Ca hai deu da co ten
+ * tieng Viet dat dung ("Ngọc Huyền (Mới)", "Hoài My"), nen ten tu no da du ro;
+ * dan them ten bo giong hay trang thai vao chi lam dong dai ra ma khong noi
+ * them dieu gi nguoi dung can. Phu chu "máy riêng" cung da bo tu truoc: no co
+ * tu thoi worker chay tren laptop chu du an, con production chay 24/7 tren
+ * Google Compute Engine.
  *
- * `provider_label` VAN duoc giu cho CapCut va Edge, va co ly do cu the: ho co
- * giong TRUNG TEN nhau. Chinh su trung ten do tung lam trang web chon nham
- * mot giong CapCut khi di tim giong Edge "HoaiMy", va CapCut tra ve
- * `TTSInvalidSpeaker` — xem ghi chu dau tep. Bo hau to o do la lam hai dong
- * trong danh sach trong y het nhau.
+ * CapCut VAN giu hau to — xem `PROVIDER_KHONG_HAU_TO` de biet vi sao: no la
+ * thu duy nhat con phan biet hai cap giong trung ten.
  *
  * `provider_label` van co trong API (`/api/voices`) cho ai can no; day chi la
  * quyet dinh KHONG dua no vao ten hien thi.
  */
 export function voiceOptionLabel(voice: Voice): string {
-  if (isNghiTtsVoice(voice)) return voice.display_name;
+  if (chiHienTen(voice)) return voice.display_name;
 
   const phan = [voice.display_name, voice.provider_label];
   // Chi hien trang thai khi no NOI LEN MOT VAN DE.

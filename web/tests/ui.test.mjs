@@ -24,23 +24,43 @@ test("du cac route cua hai khu vuc san pham", () => {
   }
 });
 
-test("header co du bon muc dieu huong", () => {
+test("thanh dieu huong chinh dung BA muc doc/nghe, theo dung thu tu", () => {
   const nav = read("../src/components/NavAuth.tsx");
-  for (const target of ["/studio", "/fanfic", "/library"]) {
-    assert.ok(nav.includes(target), `header thieu link ${target}`);
-  }
-  assert.match(nav, /\/account/, "header thieu khu vuc tai khoan");
+  // Thu tu la mot quyet dinh san pham, khong phai chuyen thu hang muc: day la
+  // nen tang doc/nghe fanfic. So khop theo VI TRI chu khong phai theo tap hop.
+  const order = [...nav.matchAll(/href: "([^"]+)", label: "([^"]+)"/g)].map(
+    (m) => [m[1], m[2]],
+  );
+  assert.deepEqual(order, [
+    ["/", "Trang chủ"],
+    ["/fanfic", "Khám phá"],
+    ["/library", "Thư viện"],
+  ]);
 });
 
-test("trang chu dung hai feature card, khong chia doi 50/50", () => {
+test("Audio Studio ra khoi thanh chinh nhung VAN toi duoc tu header", () => {
+  const nav = read("../src/components/NavAuth.tsx");
+  // Ra khoi `LINKS`...
+  const links = nav.slice(nav.indexOf("const LINKS"), nav.indexOf("export function NavLinks"));
+  assert.ok(!links.includes("/studio"), "/studio vẫn nằm trong thanh chính");
+  // ...nhung khong bien mat: no o menu ben phai. Xoa han se lam nguoi dung
+  // khong con duong nao vao cong cu tu header.
+  assert.match(nav, /href="\/studio"/, "header mất lối vào Audio Studio");
+  assert.match(nav, /\/account/, "header thiếu khu vực tài khoản");
+});
+
+test("trang chu la trang KHAM PHA TRUYEN, khong phai landing gioi thieu cong cu", () => {
   const home = read("../src/app/page.tsx");
-  assert.match(home, /href="\/studio"/);
-  assert.match(home, /href="\/fanfic"/);
-  // The co the mang them class mau quang, nen `className="feature"` chinh xac
-  // khong con khop. Dem `feature` theo sau boi DAU CACH hoac DAU NHAY —
-  // `\b` khong dung duoc vi no khop ca truoc dau gach noi, nen `feature-icon`
-  // va `feature-cta` cung bi tinh.
-  assert.equal((home.match(/className="feature[ "]/g) ?? []).length, 2);
+  // Phai that su lay truyen ve — truoc day trang chu khong goi mot API nao.
+  assert.match(home, /api\.browseNovels/, "trang chủ không lấy truyện");
+  assert.match(home, /StoryHero/);
+  assert.match(home, /StoryCard/);
+  // Hai the tinh nang cu da bien mat: chung dat cong cu ngang hang voi noi
+  // dung, dung thu ma ban thiet ke lai nay bo di.
+  assert.equal((home.match(/className="feature[ "]/g) ?? []).length, 0);
+
+  // Va KHONG duoc goi `getNovel` tung truyen de dem chuong: do la N+1.
+  assert.ok(!home.includes("api.getNovel("), "trang chủ gọi getNovel — N+1");
 
   const css = read("../src/app/globals.css");
   assert.ok(
@@ -472,10 +492,18 @@ test("ban mot mau va logo day du hop ca nen sang lan nen toi", () => {
   }
 });
 
-test("logo duoc dat o header, trang chu va trang dang nhap", () => {
-  assert.match(read("../src/app/layout.tsx"), /<Logo size=\{30\}/);
-  assert.match(read("../src/app/page.tsx"), /<LogoMark size=\{62\}/);
+test("logo duoc dat o header, footer va trang dang nhap", () => {
+  // Trang chu KHONG con logo khong lo. No dan bang mot TRUYEN — do la ca y
+  // nghia cua ban thiet ke lai. Thuong hieu van co mat o header va footer,
+  // hai cho xuat hien tren MOI trang.
+  const layout = read("../src/app/layout.tsx");
+  assert.match(layout, /<Logo size=\{30\}/, "header thieu logo");
+  assert.match(layout, /<Logo size=\{26\}/, "footer thieu logo");
   assert.match(read("../src/app/login/page.tsx"), /<LogoMark size=\{54\}/);
+  assert.ok(
+    !read("../src/app/page.tsx").includes("LogoMark"),
+    "trang chu khong nen dan bang logo nua",
+  );
 });
 
 test("metadata co Open Graph va tieu de theo mau", () => {
@@ -578,12 +606,17 @@ test("bia that nam tren, bia du phong nam duoi", () => {
 
 test("anh bia duoc dung o ca bon noi", () => {
   for (const f of [
-    "../src/app/fanfic/page.tsx",        // kham pha
     "../src/app/novels/[id]/page.tsx",   // chi tiet truyen
     "../src/app/chapters/[id]/page.tsx", // luong nghe
     "../src/app/library/page.tsx",       // thu vien
+    "../src/components/StoryCard.tsx",   // the truyen dung chung
   ]) {
     assert.match(read(f), /<NovelCover/, `${f} chua dung anh bia`);
+  }
+  // Kham pha va trang chu KHONG goi thang `NovelCover` nua — ca hai di qua
+  // `StoryCard`, nen mot truyen trong giong nhau o hai noi.
+  for (const f of ["../src/app/fanfic/page.tsx", "../src/app/page.tsx"]) {
+    assert.match(read(f), /<StoryCard/, `${f} chua dung the truyen chung`);
   }
   // Emoji 📖 cu da duoc thay het
   assert.ok(!read("../src/app/fanfic/page.tsx").includes("📖"));
@@ -757,8 +790,8 @@ test("hang chuong dung .list-actions o ca hai trang", () => {
 test("kich thuoc lien ket tai khoan nam trong CSS chu khong phai style inline", () => {
   const nav = read("../src/components/NavAuth.tsx");
   // Media query khong voi toi duoc style inline — day la bai hoc cua H1
-  assert.match(nav, /className="account-link"/);
-  assert.match(nav, /className="avatar"/);
+  assert.match(nav, /"account-link"/);
+  assert.match(nav, /"avatar"/);
   assert.ok(
     !/width:\s*28\b/.test(nav),
     "khong duoc dat lai kich thuoc avatar bang style inline",

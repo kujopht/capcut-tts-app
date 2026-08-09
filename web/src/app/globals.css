@@ -906,6 +906,224 @@ button, input, select, textarea {
   flex: 0 0 auto;
 }
 
+/* =====================================================================
+   VO SITE HUONG DOC TRUYEN
+   Header co tim kiem + menu cong cu, the truyen uu tien bia, footer that.
+   ===================================================================== */
+
+/* ------------------------------------------------- o tim trong header */
+
+.site-search { display: flex; align-items: center; gap: var(--s2); }
+
+.input-search {
+  width: 200px;
+  height: 34px;
+  padding: 0 var(--s3);
+  font-size: var(--t-sm);
+  border-radius: var(--r-full);
+  background: var(--bg-1);
+}
+.input-search::-webkit-search-cancel-button { filter: invert(0.6); }
+
+/* ------------------------------------------------ menu cong cu / tai khoan */
+
+.menu { position: relative; }
+
+.menu-panel {
+  position: absolute;
+  top: calc(100% + var(--s2));
+  right: 0;
+  z-index: 40;
+  min-width: 208px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-3);
+  animation: fade-in 0.14s var(--ease);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  padding: var(--s3);
+  border: 0;
+  border-radius: var(--r2);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+.menu-item:hover { background: var(--bg-3); color: var(--text); }
+
+.menu-sep {
+  height: 1px;
+  margin: var(--s1) var(--s2);
+  background: var(--line-soft);
+}
+
+.nav-right { gap: var(--s2); }
+
+/* --------------------------------------------------------- dau muc trang */
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s4);
+}
+
+.section-more {
+  flex: 0 0 auto;
+  font-size: var(--t-sm);
+  color: var(--brand);
+}
+.section-more:hover { color: var(--brand-hover); }
+
+/* ------------------------------------------------------------- the truyen */
+
+/*
+  Rong toi thieu 210px chu khong phai 280px nhu `.grid` chung: the truyen la
+  mot cot bia doc, khong phai mot khoi van ban. O man hinh rong, mot hang 5-6
+  bia cho cam giac ke truyen; 3 the to thi giong trang gioi thieu san pham.
+*/
+.story-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: var(--s4);
+}
+
+/*
+  CA the la mot link, nen quy tac `a { text-decoration }` o dau tep se gach
+  chan CA mo ta lan ngay cap nhat — do bang trinh duyet that: the truyen trong
+  nhu mot doan van ban bi gach chan tu tren xuong duoi.
+
+  Bo gach chan o day la DUNG chu khong pha quy tac "link phai nhin ra duoc":
+  toan bo the da la mot vung bam co vien, co nen rieng va co hieu ung hover.
+*/
+.story-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r3);
+  background: var(--bg-1);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.18s var(--ease), transform 0.18s var(--ease),
+    box-shadow 0.18s var(--ease);
+}
+.story-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-2);
+}
+.story-card:hover .story-title { color: var(--brand-hover); }
+
+.story-body { display: flex; flex-direction: column; gap: var(--s2); }
+
+.story-title {
+  font-size: var(--t-base);
+  font-weight: 650;
+  line-height: var(--lh-tight);
+  color: var(--text);
+  transition: color 0.18s var(--ease);
+}
+
+.story-tags { display: flex; flex-wrap: wrap; gap: var(--s2); }
+
+/*
+  Chip trong the truyen la NHAN, khong phai nut — khong hover, khong bam, va
+  nho hon chip dieu huong. Quan trong o mobile: khoi M1 nang MOI `.chip` len
+  44px vi chip thuong la vung bam; nhan thi khong, va 44px se lam the truyen
+  phinh ra vo co.
+*/
+.chip-static {
+  cursor: default;
+  padding: 3px 9px;
+  font-size: var(--t-xs);
+}
+
+.story-meta {
+  margin-top: auto;
+  font-size: var(--t-xs);
+  color: var(--text-3);
+}
+
+/* ------------------------------------------------------------------ hero */
+
+/*
+  Bia rong ben trai, chu ben phai. KHONG chia doi 50/50: khoi chu can cho de
+  tho, con bia thi da du suc hut o ty le 16:6.
+*/
+.hero-story {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: center;
+  padding: var(--s5);
+  border: 1px solid var(--line);
+  border-radius: var(--r4);
+  background:
+    linear-gradient(180deg, var(--bg-1), var(--bg-2));
+  box-shadow: var(--shadow-2);
+}
+
+.hero-cover { display: block; border-radius: var(--r3); overflow: hidden; }
+
+.hero-body { display: flex; flex-direction: column; gap: var(--s3); }
+
+.hero-title {
+  font-size: var(--t-xl);
+  line-height: var(--lh-tight);
+  font-weight: 700;
+}
+.hero-title a { color: var(--text); text-decoration: none; }
+.hero-title a:hover { color: var(--brand-hover); }
+.hero-cover { text-decoration: none; }
+
+/* ---------------------------------------------------------------- footer */
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
+  gap: var(--s5);
+  padding-top: var(--s5);
+  padding-bottom: var(--s4);
+}
+
+.footer-brand { max-width: 320px; }
+
+.footer-col { display: flex; flex-direction: column; gap: var(--s2); }
+
+.footer-title {
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+.footer-link {
+  font-size: var(--t-sm);
+  color: var(--text-2);
+}
+.footer-link:hover { color: var(--text); }
+
+.footer-note {
+  padding-top: var(--s3);
+  padding-bottom: var(--s4);
+  border-top: 1px solid var(--line-soft);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -921,6 +1139,12 @@ button, input, select, textarea {
   .split, .split-narrow { grid-template-columns: minmax(0, 1fr); }
   .sticky-side { position: static; }
   :root { --t-3xl: 36px; --t-2xl: 29px; --t-xl: 23px; }
+
+  /* Hero xep doc: bia tren, chu duoi. Hai cot o be rong nay lam ca hai chat. */
+  .hero-story { grid-template-columns: minmax(0, 1fr); }
+  .footer-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .footer-brand { grid-column: 1 / -1; max-width: none; }
+  .input-search { width: 150px; }
 }
 
 /* ------------------------------------------------------------ mobile */
@@ -948,6 +1172,21 @@ button, input, select, textarea {
   .grid { grid-template-columns: minmax(0, 1fr); }
   .grid-2 { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
   .feature { min-height: 0; padding: var(--s5); }
+
+  /* --- vo huong doc truyen ---------------------------------------------
+     Luoi truyen KHONG ve mot cot: hai cot bia hep van doc duoc ten va van
+     cho thay nhieu truyen hon trong mot man hinh — dung y cua trang. Chi
+     ha nguong xuong 140px. */
+  .story-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--s3); }
+  .hero-story { padding: var(--s4); gap: var(--s4); }
+  .footer-grid { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
+
+  /* O tim chiem tron mot hang rieng, dat TRUOC thanh nav cuon ngang. */
+  .site-search { order: 2; width: 100%; }
+  .input-search { width: 100%; }
+  .nav-links { order: 4; }
+  .nav-right { order: 3; }
+  .menu-panel { min-width: 216px; }
   .card { padding: var(--s4); }
   .select-inline { min-width: 0; width: 100%; }
   .textarea { min-height: 150px; }
@@ -963,9 +1202,11 @@ button, input, select, textarea {
      Dat `min-height` chu khong phai `height` de nut co chu dai van cao them
      duoc thay vi tran chu ra ngoai. */
   .btn, .btn-sm, .chip, .seg-item, .nav-link, .account-link,
-  .brand { min-height: 44px; }
+  .brand, .menu-item, .input-search { min-height: 44px; }
   .btn-sm { padding: 8px 13px; }
   .chip { padding: 8px 14px; }
+  /* Nhan trong the truyen KHONG phai vung bam — xem `.chip-static`. */
+  .chip-static { min-height: 0; padding: 3px 9px; }
   .avatar { width: 34px; height: 34px; font-size: 13px; }
 
   /* --- hang chuong -------------------------------------------------------

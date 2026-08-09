@@ -195,13 +195,18 @@ class AppwriteMetadataStore:
         """:param client: cho phep test tiem client gia lap thay cho httpx."""
         from server.appwrite_adapter import AppwriteConfigError
 
-        #: Bang `job_locks` da co trong Appwrite chua.
+        #: Duong khoa job da duoc CHUNG MINH chay chua. Ba trang thai:
         #:
-        #: Bat dau bang True va chi tat khi `create_job_once` that su khong doc
-        #: duoc hang khoa — tuc la doan mo duoc suy ra tu HANH VI THAT chu
-        #: khong tu mot lan probe rieng luc khoi dong. `/api/health` bao ra co
-        #: nay de nguoi van hanh biet minh dang o che do nao.
-        self._job_lock_ready = True
+        #:   None  — chua biet: chua co lan tao job nao di qua duong nay
+        #:   True  — mot giao dich khoa DA commit thanh cong
+        #:   False — da thu va HONG; he thong dang chay o duong cu, khong khoa
+        #:
+        #: KHONG duoc khoi tao `True`. Ban truoc lam vay, va co do da NOI DOI:
+        #: `/api/health` bao `job_lock_ready=true` ngay sau khi deploy, trong
+        #: khi duong khoa chua he duoc thu — roi moi lan tao job deu hong am
+        #: tham. Mot co tien kiem chi dung SAU khi da hong thi vo dung dung o
+        #: luc can no nhat.
+        self._job_lock_ready = None
 
         if not settings.configured:
             raise AppwriteConfigError(
@@ -607,14 +612,32 @@ class AppwriteMetadataStore:
                             "tableId": COL_JOB_LOCKS, "rowId": row_id,
                             "data": {"job_id": job.job_id,
                                      "owner_id": job.owner_id,
-                                     "created_at": now_iso()}},
+                                     "created_at": now_iso()},
+                            "permissions": self._owner_permissions(job.owner_id)},
                            {"action": "create", "databaseId": self._db,
                             "tableId": COL_JOBS, "rowId": job.job_id,
-                            "data": job.to_dict()},
+                            # `_writable` chu KHONG phai `to_dict()` tho.
+                            #
+                            # `to_dict()` la hinh dang cua API, khong phai hinh
+                            # dang luu tru: no kem `progress`, mot thuoc tinh
+                            # DAN XUAT khong co cot tuong ung. Appwrite tu choi
+                            # ca giao dich voi "Unknown attribute: progress",
+                            # va vi loi bi nuot o `except` ben duoi, he thong
+                            # lang le lui ve duong cu — khoa KHONG BAO GIO duoc
+                            # ghi. Da do that tren production: 44 job, 0 hang
+                            # `job_locks`.
+                            "data": self._writable(COL_JOBS, job.to_dict()),
+                            # Hang job co rowSecurity; thieu quyen thi chinh
+                            # chu so huu doc khong ra. Moi duong ghi khac deu
+                            # di qua `_create`, von luon gan quyen nay.
+                            "permissions": self._owner_permissions(job.owner_id)},
                        ]})
             result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx['$id']}",
                                 payload={"commit": True})
             if result.get("status") == "committed":
+                # Chi bay gio moi duoc khang dinh duong khoa chay: mot giao
+                # dich da commit that.
+                self._job_lock_ready = True
                 return job, True
         except Exception:
             pass
@@ -622,12 +645,23 @@ class AppwriteMetadataStore:
         # Khong commit duoc. Hai kha nang, va chung can hai cach xu ly khac han:
         #   1. mot request khac da thang -> hang khoa TON TAI, doc ra job cua ho;
         #   2. bang `job_locks` chua co -> khong doc duoc, lui ve hanh vi cu.
+        # Toi day nghia la giao dich khong commit duoc. HAI ly do rat khac nhau,
+        # va chung noi nguoc nhau ve suc khoe cua duong khoa:
+        #
+        #   * mot request khac da THANG — hang khoa TON TAI. Day la bang chung
+        #     duong khoa DANG CHAY dung nhu thiet ke, khong phai su co;
+        #   * bang chua co / cau hinh sai — khong doc duoc hang nao.
+        #
+        # Nen phai doc truoc roi moi ket luan, chu khong ha co ngay.
         try:
             khoa = self._get(COL_JOB_LOCKS, row_id)
         except Exception:
             self._job_lock_ready = False
             self._create(COL_JOBS, job.job_id, job.to_dict(), job.owner_id)
             return job, True
+
+        # Doc duoc hang khoa => co ai do da ghi duoc no => duong khoa chay.
+        self._job_lock_ready = True
 
         cua_ho = str(khoa.get("job_id") or "")
         giu_khoa = None

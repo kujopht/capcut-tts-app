@@ -733,6 +733,12 @@ class MockMetadataStore:
         #: (owner, chapter, fingerprint) -> job_id. Ban trong bo nho cua
         #: hang khoa `job_locks` ben Appwrite.
         self._job_locks: Dict[Tuple[str, str, str], str] = {}
+
+        #: Khoa cua ban mock la mot `threading.RLock` trong cung tien trinh:
+        #: no khong the "chua duoc tao" hay hong vi mang. Khai bao tuong minh
+        #: `True` de `/api/health` o che do mock khong bao "chua biet" mot
+        #: cach vo co — day la mot su that ve kien truc, khong phai lac quan.
+        self._job_lock_ready = True
         self._lock = threading.RLock()
         self.novels: Dict[str, Novel] = {}
         self.chapters: Dict[str, Chapter] = {}

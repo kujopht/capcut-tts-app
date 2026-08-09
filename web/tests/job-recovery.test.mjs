@@ -105,6 +105,64 @@ test("poll MOI job dang chay, khong chi cai dang duoc nhin", () => {
   assert.match(src, /Promise\.all\(ids\.map\(/);
 });
 
+/* ============================================ vong poll phai THUC SU lap */
+
+test("vong poll co nhip dem trong dependency, khong chi chay mot lan", () => {
+  /*
+    LOI DA LEN PRODUCTION: effect chi phu thuoc `[dangChayKey, toast]`. Sau
+    moi lan poll, `setJobs()` tao object moi nhung `dangChayKey` van la CUNG
+    MOT CHUOI (van dung mot `job_id` do), nen dependency khong doi va effect
+    khong chay lai — khong co `setTimeout` nao duoc dat tiep.
+
+    Ket qua: poll dung MOT nhip, bat duoc `pending -> running` roi dung han.
+    Job xong sau 7 giay ma giao dien ket o "Đang xử lý" mai mai.
+  */
+  const src = write();
+  const at = src.indexOf("const id = window.setTimeout(");
+  assert.notEqual(at, -1, "khong tim thay vong poll");
+  const sau = src.slice(at, at + 1800);
+
+  assert.match(sau, /setTick\(\(t\) => t \+ 1\)/,
+    "không có nhịp đếm — vòng poll sẽ chết sau một nhịp");
+  assert.match(src, /\}, \[dangChayKey, tick, toast\]\)/,
+    "nhịp đếm phải nằm trong dependency của effect");
+});
+
+test("nhip dem duoc dat NGOAI vong lap ket qua va khong dieu kien", () => {
+  // Mot lan mang chap (moi request deu `catch` thanh null) van phai dat duoc
+  // nhip ke tiep, neu khong mot loi thoang qua se giet vong poll y het loi cu.
+  const src = write();
+  const at = src.indexOf("setTick((t) => t + 1)");
+  assert.notEqual(at, -1);
+  const truoc = src.slice(Math.max(0, at - 400), at);
+  // Dau `}` dong vong `for` phai nam TRUOC `setTick`.
+  assert.ok(truoc.includes("}"), "setTick nằm trong vòng lặp kết quả");
+  assert.ok(!/if \([^)]*\)\s*setTick/.test(src), "setTick bị đặt sau điều kiện");
+});
+
+test("job ket thuc thi vong poll TU DUNG", () => {
+  // `dangChay` chi giu `pending`/`running`; het job dang chay thi
+  // `dangChayKey` rong va effect thoat ngay o dong dau.
+  const src = write();
+  assert.match(src, /if \(!dangChayKey\) return;/);
+  assert.match(src, /j\.status === "pending" \|\| j\.status === "running"/);
+});
+
+test("completed thi cap nhat audio va tat canh bao ngay trong nhip do", () => {
+  const src = write();
+  const at = src.indexOf('moi.status === "completed"');
+  assert.notEqual(at, -1);
+  const khoi = src.slice(at, at + 400);
+  assert.match(khoi, /setAudioByChapter/);
+  assert.match(khoi, /setStaleByChapter/);
+});
+
+test("failed thi bao loi cho nguoi dung", () => {
+  const src = write();
+  assert.match(src, /moi\.status === "failed"/);
+  assert.match(src, /toast\.error\("Tạo audio thất bại\."\)/);
+});
+
 /* ================================================== tien do that, khong bia */
 
 test("tien do hien PHAN TRAM va SO PHAN khi da biet tong", () => {

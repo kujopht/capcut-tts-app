@@ -418,6 +418,23 @@ def synthesize_chapter(
     if not chunks:
         raise TtsBridgeError(ErrorKind.EMPTY_TEXT.value, "Không chia được nội dung thành phần nào.")
 
+    # BAO TONG SO PHAN NGAY, truoc khi tong hop phan dau tien.
+    #
+    # Truoc day `on_progress` chi duoc goi SAU khi moi phan xong, nen trong
+    # suot phan dau tien `total_parts` van la 0 — va giao dien khong co gi de
+    # hien ngoai mot thanh chay vo dinh. Voi chuong MOT PHAN thi do la toan bo
+    # thoi gian chay: nguoi dung khong bao gio thay mot con so nao.
+    #
+    # Do that tren production: chuong 12.689 ky tu -> 7 phan, chay 112 giay,
+    # va man hinh dung im o "Đang chia chương thành các phần…" suot 112 giay
+    # roi nhay thang sang hoan tat.
+    #
+    # Goi TRUOC `with khoa` chu khong phai trong `_tong_hop_cac_doan`: job Piper
+    # co the phai xep hang sau `_PIPER_LOCK`. Bao tong o day thi nguoi dang cho
+    # thay "0 / 7 phần" — dung su that va co ich hon mot thanh chay vo nghia.
+    if on_progress:
+        on_progress(0, len(chunks))
+
     # `with khoa` BAO NGOAI `try/finally`, khong nam trong: don dep tep tam
     # khong can giu khoa, va giu them mot nhip nao cung la chan job Piper ke
     # tiep vo co.

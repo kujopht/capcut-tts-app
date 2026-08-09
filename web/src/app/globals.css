@@ -1617,11 +1617,103 @@ button, input, select, textarea {
 */
 .job-percent {
   font-family: var(--font-mono);
-  font-size: var(--t-md);
-  font-weight: 650;
+  font-size: var(--t-lg);
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+
+/*
+  Khung tien do. Vien tim mo va mot quang rat nhe khi job DANG chay — day la
+  thu duy nhat tren trang dang chuyen dong, nen no duoc phep hut mat.
+
+  Trang thai do `job.status` quyet dinh o `components/JobProgress.tsx`; cho nay
+  chi to mau theo. KHONG suy ra tien do tu CSS.
+*/
+.job-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  background: linear-gradient(180deg, var(--bg-1), #0c0e15);
+  box-shadow: var(--edge);
+  transition: border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.job-box-live {
+  border-color: var(--brand-line);
+  box-shadow: var(--lift-brand), var(--edge);
+}
+.job-box-done { border-color: #4ade8040; }
+.job-box-failed { border-color: #f8717140; }
+
+/* Hang duoi thanh: ty le ben trai, so phan ben phai. */
+.job-figures {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+/* ------------------------------------------------- chon truyen o cot trai */
+
+/*
+  Mot truyen trong danh sach ben trai cua khu vuc tac gia. La `<button>` that,
+  khong phai `<div>` gan `onClick`: ban phim di toi duoc, Enter/Space chay
+  duoc, va trinh doc man hinh doc ra dung la mot nut.
+*/
+.novel-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  background: var(--bg-1);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.novel-pick:hover { border-color: var(--line-strong); background: var(--bg-2); }
+/* Truyen dang chon: vien tim va mot vach doc ben trai. Vach doc la thu doc
+   duoc ngay ca khi nguoi dung khong phan biet duoc mau. */
+.novel-pick[aria-current="true"] {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+  box-shadow: inset 3px 0 0 var(--brand);
+}
+.novel-pick-title { font-size: var(--t-sm); max-width: 100%; }
+
+/* ------------------------------------------------- lich su o cot ben phai */
+
+/*
+  Muc lich su trong Audio Studio. Xep DOC ba dong — ten, ngay, hanh dong — chu
+  khong dan ngang: cot ben phai chi rong ~300px, va ba thu tren mot hang thi
+  ten audio bi nen con vai ky tu.
+*/
+.hist-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--s3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r2);
+  background: var(--bg-1);
+  transition: border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.hist-item:hover { border-color: var(--line-strong); }
+/* Muc dang xem o khung tien do ben trai — noi hai cho voi nhau. */
+.hist-item-on { border-color: var(--brand-line); background: var(--bg-2); }
+.hist-title { font-size: var(--t-sm); }
+.hist-actions { gap: var(--s2); }
 
 /* --------------------------------------------- dang nhap bang nha cung cap */
 

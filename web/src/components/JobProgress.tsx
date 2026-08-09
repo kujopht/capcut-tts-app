@@ -17,6 +17,14 @@ import type { TtsJob } from "@/lib/api";
 import { tienDoJob } from "@/lib/jobs";
 import { JobBadge, ProgressBar } from "./ui";
 
+/** Trang thai job -> hau to lop cua khung. CHI de to mau, khong suy ra so. */
+const VE_THEO: Record<string, string> = {
+  pending: "job-box-live",
+  running: "job-box-live",
+  completed: "job-box-done",
+  failed: "job-box-failed",
+};
+
 export function JobProgress({
   job,
   tieuDe,
@@ -31,9 +39,13 @@ export function JobProgress({
   const tien_do = tienDoJob(job);
   // Job that bai thi khong ve thanh: trang goi se hien Alert kem nguyen nhan.
   const co_thanh = job.status !== "failed";
+  const xong = job.status === "completed";
 
   return (
-    <div className="stack-2" aria-live="polite">
+    <div
+      className={`job-box ${VE_THEO[job.status] ?? "job-box-live"}`}
+      aria-live="polite"
+    >
       <div className="row-between">
         <span className="hint">{tieuDe ?? "Tiến trình tạo audio"}</span>
         <JobBadge status={job.status} />
@@ -41,12 +53,19 @@ export function JobProgress({
 
       {co_thanh ? (
         <>
-          <ProgressBar
-            percent={tien_do.percent}
-            indeterminate={!tien_do.biet_tong}
-            label={tien_do.nhan}
-          />
-          <div className="row-between">
+          {/*
+            `progress-done` tat vet sang chay tren thanh. Mot vet sang vinh
+            vien sau khi job da xong la nhieu loan: no noi rang con viec dang
+            chay trong khi khong con.
+          */}
+          <div className={xong ? "progress-done" : undefined}>
+            <ProgressBar
+              percent={tien_do.percent}
+              indeterminate={!tien_do.biet_tong}
+              label={tien_do.nhan}
+            />
+          </div>
+          <div className="job-figures">
             <span className="job-percent">
               {tien_do.biet_tong ? `${tien_do.percent}%` : tien_do.nhan}
             </span>

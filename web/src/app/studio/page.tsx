@@ -38,6 +38,7 @@ import {
   ErrorState,
   JobBadge,
   Loading,
+  PageHeader,
   SkeletonList,
   formatDate,
   formatNumber,
@@ -322,19 +323,16 @@ export default function StudioPage() {
 
   return (
     <div className="page">
-      <header className="row-between">
-        <div className="stack-2">
-          <span className="eyebrow">Audio Studio</span>
-          <h1 className="page-title">Tạo audio từ văn bản</h1>
-          <p className="lead" style={{ maxWidth: 620 }}>
-            Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là
-            riêng tư và không trở thành chương fanfic.
-          </p>
-        </div>
-        <Link className="btn" href="/library">
-          Thư viện audio của tôi
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow="Audio Studio"
+        title="Tạo audio từ văn bản"
+        lead="Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là riêng tư và không trở thành chương fanfic."
+        action={
+          <Link className="btn" href="/library">
+            Thư viện audio của tôi
+          </Link>
+        }
+      />
 
       {bootError ? (
         <ErrorState message={bootError} onRetry={retryBoot} />
@@ -484,8 +482,12 @@ export default function StudioPage() {
 
             {/* trang thai job dang chay */}
             {activeJob ? (
-              <section className="card stack">
-                <h2 className="section-title">Tiến trình</h2>
+              // KHONG boc them mot `.card` nua: `<JobProgress>` da la mot khung
+              // co vien roi, va the long the trong nhu mot loi bo cuc.
+              <section className="stack-2" aria-labelledby="studio-tien-trinh">
+                <h2 className="section-title" id="studio-tien-trinh">
+                  Tiến trình
+                </h2>
 
                 {/*
                   CUNG mot khung tien do voi `/write` — xem
@@ -584,35 +586,38 @@ export default function StudioPage() {
               ) : (
                 <div className="list">
                   {history.slice(0, 8).map(({ job, chapter }) => (
-                    <div key={job.job_id} className="list-item" style={{ alignItems: "flex-start" }}>
-                      <div className="stack-2" style={{ flex: 1, minWidth: 0 }}>
-                        <strong className="truncate" style={{ fontSize: "var(--t-sm)" }}>
-                          {chapter?.title ?? "Audio"}
-                        </strong>
-                        <span className="hint">{formatDate(job.created_at)}</span>
-                        <div className="row" style={{ gap: "var(--s2)" }}>
-                          <JobBadge status={job.status} />
-                          {job.status === "completed" ? (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-ghost"
-                              // `activeJob` duoc suy ra tu `activeChapterId`,
-                              // nen chi can tro toi chuong la du.
-                              onClick={() => setActiveChapterId(job.chapter_id)}
-                            >
-                              Nghe lại
-                            </button>
-                          ) : null}
-                          {job.status === "failed" ? (
-                            <button
-                              type="button"
-                              className="btn btn-sm"
-                              onClick={() => retry(job)}
-                            >
-                              Thử lại
-                            </button>
-                          ) : null}
-                        </div>
+                    <div
+                      key={job.job_id}
+                      className={`hist-item${
+                        job.chapter_id === activeChapterId ? " hist-item-on" : ""
+                      }`}
+                    >
+                      <strong className="truncate hist-title">
+                        {chapter?.title ?? "Audio"}
+                      </strong>
+                      <span className="hint">{formatDate(job.created_at)}</span>
+                      <div className="row hist-actions">
+                        <JobBadge status={job.status} />
+                        {job.status === "completed" ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            // `activeJob` duoc suy ra tu `activeChapterId`,
+                            // nen chi can tro toi chuong la du.
+                            onClick={() => setActiveChapterId(job.chapter_id)}
+                          >
+                            Nghe lại
+                          </button>
+                        ) : null}
+                        {job.status === "failed" ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => retry(job)}
+                          >
+                            Thử lại
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   ))}

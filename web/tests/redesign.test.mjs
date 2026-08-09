@@ -170,6 +170,56 @@ test("do tre cua hieu ung vao trang la CLASS, khong phai style inline", () => {
   assert.ok(!/style=\{\{/.test(read("../src/app/page.tsx")));
 });
 
+/* ======================== ban thiet ke lai KHONG dung vao hanh vi job */
+
+test("JobProgress van lay MOI con so tu tienDoJob", () => {
+  /*
+    Day la rang buoc quan trong nhat cua ca ban thiet ke lai. Khung tien do
+    duoc ve lai — vien, quang, vet sang — nhung khong duoc tu suy ra mot con
+    so nao. Neu no bat dau tinh toan thi `/write` va `/studio` lai co hai
+    nguon su that, dung kieu lech da mat ba PR de go.
+  */
+  const src = read("../src/components/JobProgress.tsx");
+  assert.match(src, /const tien_do = tienDoJob\(job\);/);
+  assert.match(src, /percent=\{tien_do\.percent\}/);
+  assert.match(src, /indeterminate=\{!tien_do\.biet_tong\}/);
+  assert.ok(!/progress \|\| \d/.test(src), "khung tiến độ bịa tỷ lệ");
+  assert.ok(!/job\.done_parts|job\.total_parts|job\.progress\b/.test(src),
+    "khung tiến độ đọc thẳng trường của job thay vì qua tienDoJob");
+});
+
+test("lop mau cua khung chi theo status, khong theo con so", () => {
+  const src = read("../src/components/JobProgress.tsx");
+  assert.match(src, /VE_THEO: Record<string, string>/);
+  assert.match(src, /VE_THEO\[job\.status\]/);
+  for (const cls of ["job-box-live", "job-box-done", "job-box-failed"]) {
+    assert.ok(read("../src/app/globals.css").includes(`.${cls}`),
+      `thiếu quy tắc .${cls}`);
+  }
+});
+
+test("hai trang VAN dung hook va khung chung sau khi ve lai", () => {
+  for (const [ten, f] of [
+    ["/write", "../src/app/write/page.tsx"],
+    ["/studio", "../src/app/studio/page.tsx"],
+  ]) {
+    const src = read(f);
+    assert.match(src, /useJobTracker\(/, `${ten} mất hook chung`);
+    assert.match(src, /<JobProgress\b/, `${ten} mất khung chung`);
+    assert.match(src, /api\.listJobs\(\)/, `${ten} mất đường khôi phục sau F5`);
+  }
+});
+
+test("ve lai KHONG mang style inline tro lai hai trang cong cu", () => {
+  // Ba dong mau lap lai bang `style` inline o `/write` da duoc doi thanh
+  // `.novel-pick`. Media query khong voi toi style inline duoc.
+  const write = read("../src/app/write/page.tsx");
+  assert.match(write, /className="novel-pick"/);
+  assert.ok(!/borderColor:\s*\n?\s*novel\.novel_id === selectedId/.test(write));
+  assert.match(read("../src/app/globals.css"),
+    /\.novel-pick\[aria-current="true"\]/);
+});
+
 test("thanh tien do co vet sang khi CHAY, va thoi khi xong", () => {
   const text = css();
   assert.match(text, /\.progress-bar::after/, "thanh tiến độ không có vệt sáng");

@@ -43,6 +43,7 @@ import {
   EmptyState,
   ErrorState,
   Loading,
+  PageHeader,
   SkeletonList,
   formatNumber,
 } from "@/components/ui";
@@ -549,15 +550,16 @@ export default function WritePage() {
 
   return (
     <div className="page">
-      <header className="row-between">
-        <div className="stack-2">
-          <span className="eyebrow">Khu vực tác giả</span>
-          <h1 className="page-title">Viết và xuất bản</h1>
-        </div>
-        <Link className="btn" href="/fanfic">
-          Xem trang khám phá
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow="Khu vực tác giả"
+        title="Viết và xuất bản"
+        lead="Tạo truyện, thêm chương, tạo audio cho từng chương. Truyện nằm ở bản nháp cho tới khi bạn tự xuất bản."
+        action={
+          <Link className="btn" href="/fanfic">
+            Xem trang khám phá
+          </Link>
+        }
+      />
 
       {error ? (
         <ErrorState message={error} onRetry={retryLoad} />
@@ -574,30 +576,23 @@ export default function WritePage() {
               ) : (
                 <div className="list">
                   {novels.map((novel) => (
+                    // Mau va trang thai dang chon do CSS quyet dinh, khong con
+                    // `style` inline: media query khong voi toi style inline,
+                    // va ba dong mau lap lai o day la ba cho de lech.
                     <button
                       key={novel.novel_id}
                       type="button"
-                      className="list-item"
+                      className="novel-pick"
                       aria-current={novel.novel_id === selectedId ? "true" : undefined}
-                      style={{
-                        textAlign: "left",
-                        cursor: "pointer",
-                        borderColor:
-                          novel.novel_id === selectedId ? "var(--brand-line)" : undefined,
-                        background:
-                          novel.novel_id === selectedId ? "var(--brand-soft)" : undefined,
-                      }}
                       onClick={() => setSelectedId(novel.novel_id)}
                     >
-                      <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
-                        <strong className="truncate" style={{ fontSize: "var(--t-sm)" }}>
-                          {novel.title}
-                        </strong>
-                        <span
-                          className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}
-                        >
-                          {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
-                        </span>
+                      <strong className="truncate novel-pick-title">
+                        {novel.title}
+                      </strong>
+                      <span
+                        className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}
+                      >
+                        {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
                       </span>
                     </button>
                   ))}

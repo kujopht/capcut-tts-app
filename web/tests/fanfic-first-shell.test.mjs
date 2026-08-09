@@ -257,6 +257,11 @@ test("hex duy nhat trong layout la themeColor, va no BUOC phai la hex", () => {
   // hardcode thu hai lot vao.
   const layout = read("../src/app/layout.tsx");
   const hex = layout.match(/#[0-9a-fA-F]{6,8}\b/g) ?? [];
-  assert.deepEqual(hex, ["#0b0d12"]);
-  assert.match(layout, /themeColor: "#0b0d12"/);
+  assert.deepEqual(hex, ["#08090f"]);
+  assert.match(layout, /themeColor: "#08090f"/);
+
+  // Va no phai BANG DUNG `--bg`. Lech nhau thi thanh trinh duyet vien mot mau
+  // khac han nen trang — thay ro nhat tren dien thoai.
+  const css = read("../src/app/globals.css");
+  assert.match(css, /--bg: #08090f;/, "themeColor không còn khớp `--bg`");
 });

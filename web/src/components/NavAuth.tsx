@@ -21,12 +21,16 @@ import { useSession } from "@/lib/session";
  *
  * `/fanfic` giu nguyen duong dan, chi mang nhan "Khám phá": doi duong dan se
  * lam hong moi lien ket da chia se.
+ *
+ * `cta` KHONG doi thu tu hay cau truc — no chi doi CACH VE. "Viết truyện" van
+ * la muc thu tu trong danh sach nay; no duoc ve thanh mot nut co vien tim thay
+ * vi mot lien ket tron, de nguoi luot qua thay ngay rang ho tu viet duoc.
  */
 const LINKS = [
   { href: "/", label: "Trang chủ" },
   { href: "/fanfic", label: "Khám phá" },
   { href: "/library", label: "Thư viện" },
-  { href: "/write", label: "Viết truyện" },
+  { href: "/write", label: "Viết truyện", cta: true },
 ];
 
 export function NavLinks() {
@@ -44,7 +48,7 @@ export function NavLinks() {
           <Link
             key={link.href}
             href={link.href}
-            className="nav-link"
+            className={link.cta ? "nav-link nav-cta" : "nav-link"}
             aria-current={active ? "page" : undefined}
           >
             {link.label}

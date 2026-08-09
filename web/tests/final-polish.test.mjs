@@ -194,9 +194,14 @@ test("L4: trang chu khong con hex va khong con style inline", () => {
 });
 
 test("L4: mau quang nam trong khoi token", () => {
+  // Y cua bai nay la CHO DAT mau, khong phai chinh gia tri mau: quang phai
+  // duoc dinh nghia mot lan trong khoi token roi dung lai qua `var()`. Ban
+  // thiet ke lai doi tim/lo, nen gia tri doi theo; rang buoc thi giu nguyen.
   const text = css();
-  assert.match(text, /--brand-glow: #7c8cff3d;/);
-  assert.match(text, /--accent-glow: #4dd6c133;/);
+  assert.match(text, /--brand-glow: #[0-9a-f]{6,8};/,
+    "quang thương hiệu không còn là token");
+  assert.match(text, /--accent-glow: #[0-9a-f]{6,8};/,
+    "quang phụ không còn là token");
   assert.match(rule(".feature-studio"), /var\(--brand-glow\)/);
   assert.match(rule(".feature-fanfic"), /var\(--accent-glow\)/);
 });

@@ -4,6 +4,7 @@ import "./globals.css";
 import { SessionProvider } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { NavAuth, NavLinks } from "@/components/NavAuth";
+import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { Logo } from "@/components/Logo";
 
@@ -32,7 +33,10 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0b0d12",
+  // Bang DUNG `--bg` o `globals.css`. Doi nen trang thi phai doi ca o day —
+  // trinh duyet doc gia tri nay truoc khi co CSS nao chay nen khong dung
+  // `var()` duoc, va lech nhau thi thanh trinh duyet vien mot mau khac than.
+  themeColor: "#08090f",
 };
 
 export default function RootLayout({
@@ -53,7 +57,7 @@ export default function RootLayout({
               KHONG con o thanh chinh — no nam trong menu ben phai, va
               `/studio` giu nguyen duong dan lan chuc nang.
             */}
-            <header className="site-header">
+            <SiteHeader>
               <div className="wrap">
                 <Link href="/" className="brand" aria-label="Fanfic World — trang chủ">
                   <Logo size={30} />
@@ -63,7 +67,7 @@ export default function RootLayout({
                 <SiteSearch />
                 <NavAuth />
               </div>
-            </header>
+            </SiteHeader>
 
             <main id="main">
               <div className="wrap">{children}</div>

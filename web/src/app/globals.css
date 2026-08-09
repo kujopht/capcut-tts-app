@@ -6,33 +6,57 @@
 
 :root {
   /* --- nen: 4 tang do sau --- */
-  --bg: #0b0d12;
-  --bg-1: #12151d;
-  --bg-2: #171b25;
-  --bg-3: #1e2330;
+  --bg: #08090f;
+  --bg-1: #0f1119;
+  --bg-2: #151824;
+  --bg-3: #1d2130;
+
+  /*
+    Be mat kinh. Dung cho header va cac lop noi TREN noi dung — no phai nua
+    trong suot thi `backdrop-filter` moi co gi de lam mo. Card thuong KHONG
+    dung cai nay: card nam trong luong trang, lam mo nen o do chi ton GPU ma
+    khong ai nhin ra.
+  */
+  --glass: #0f1119b8;
+  --glass-strong: #0f1119e6;
+  --blur: 18px;
 
   /* --- vien --- */
-  --line: #262c3a;
-  --line-soft: #1c212c;
-  --line-strong: #39415480;
+  --line: #242939;
+  --line-soft: #191d29;
+  --line-strong: #3a4157a6;
 
   /* --- chu --- */
-  --text: #e9edf5;
-  --text-2: #a8b2c5;
-  --text-3: #6f7b91;
+  --text: #eceff7;
+  --text-2: #a9b3c9;
+  --text-3: #6d7893;
 
-  /* --- thuong hieu --- */
-  --brand: #7c8cff;
-  --brand-hover: #93a0ff;
-  --brand-soft: #7c8cff1f;
-  --brand-line: #7c8cff4d;
+  /*
+    HAI mau nhan: tim va lo. Ca bang mau con lai deu dan xuat tu day.
+
+    Tim la mau hanh dong (nut chinh, muc dang xem, tieu diem). Lo la mau bo tro
+    (dau muc, quang, phia cuoi thanh tien do). Khong dao nguoc vai tro giua hai
+    mau o cac trang khac nhau — nguoi dung hoc mau nhanh hon hoc chu.
+  */
+  --brand: #8b6cff;
+  --brand-hover: #a78bfa;
+  --brand-deep: #6d4aef;
+  --brand-soft: #8b6cff1f;
+  --brand-line: #8b6cff52;
   /* Quang sang phia sau the o trang chu. Dam hon `-soft` vi no phai thay duoc
      qua mot lop mo lon. Dat o day de moi gia tri mau chi ton tai MOT cho. */
-  --brand-glow: #7c8cff3d;
+  --brand-glow: #8b6cff40;
 
-  --accent: #4dd6c1;
-  --accent-soft: #4dd6c11f;
-  --accent-glow: #4dd6c133;
+  --accent: #22d3ee;
+  --accent-hover: #67e8f9;
+  --accent-soft: #22d3ee1f;
+  --accent-line: #22d3ee52;
+  --accent-glow: #22d3ee33;
+
+  /* Chu dat TREN nen tim/lo dac. Gan den chu khong phai den tuyen doi. */
+  --on-brand: #0a0713;
+
+  --grad-brand: linear-gradient(135deg, var(--brand), var(--accent));
 
   /* --- trang thai --- */
   --ok: #4ade80;
@@ -63,8 +87,28 @@
 
   /* --- do sau --- */
   --shadow-1: 0 1px 2px #00000040;
-  --shadow-2: 0 4px 16px #00000059;
-  --shadow-3: 0 12px 40px #00000073;
+  --shadow-2: 0 6px 22px #0000006b;
+  --shadow-3: 0 18px 50px #00000085;
+  /* Vien sang mot pixel o mep tren — thu lam be mat toi trong nhu co khoi
+     thay vi nhu mot o mau. Chong len `box-shadow` chu khong thay the no. */
+  --edge: inset 0 1px 0 #ffffff0d;
+
+  /* Quang. Chi dung o be mat DANG hoat dong (nut chinh, job dang chay), khong
+     rai deu — quang o khap noi thi khong con la nhan manh. */
+  --lift-brand: 0 8px 28px #8b6cff2e;
+  --lift-accent: 0 8px 28px #22d3ee26;
+
+  /* --- chieu cao dieu khien: mot thang duy nhat --- */
+  --h-sm: 32px;
+  --h-md: 38px;
+  --h-lg: 46px;
+  --h-input: 42px;
+
+  /* --- nhip chuyen dong --- */
+  --dur-fast: 140ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+  --ring: 0 0 0 3px var(--brand-soft);
 
   /* --- chu --- */
   --font: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
@@ -102,11 +146,20 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/*
+  Ba quang lon, gan nhu khong thay duoc tung cai mot. Y do la lam nen KHONG
+  phang: mot mau xam dac o toan man hinh trong nhu mot bang dieu khien, con
+  vai do lech mau rat nhe thi trong nhu co chieu sau.
+
+  `fixed` de quang khong troi theo khi cuon — chung thuoc ve CUA SO, khong
+  thuoc ve trang.
+*/
 body {
   margin: 0;
   background:
-    radial-gradient(1100px 600px at 15% -10%, #7c8cff14, transparent 60%),
-    radial-gradient(900px 500px at 95% 0%, #4dd6c10f, transparent 55%),
+    radial-gradient(1200px 680px at 12% -12%, #8b6cff1a, transparent 62%),
+    radial-gradient(1000px 560px at 92% -4%, #22d3ee14, transparent 58%),
+    radial-gradient(900px 900px at 50% 120%, #6d4aef0f, transparent 60%),
     var(--bg);
   background-attachment: fixed;
   color: var(--text);
@@ -238,19 +291,35 @@ button, input, select, textarea {
 
 /* ------------------------------------------------------------ header */
 
+/*
+  Header khong co vien duoi cung mot mau tu tren xuong duoi. Thay vao do la
+  mot vach mo dan hai dau: o giua thi ro, hai ben tan ra. Vien dac ngang man
+  hinh chia trang thanh hai khoi roi rac; vach mo dan thi giu cam giac lien
+  tuc ma van tach duoc thanh dieu huong khoi noi dung.
+*/
 .site-header {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: #0b0d12d9;
-  backdrop-filter: blur(14px);
-  border-bottom: 1px solid var(--line-soft);
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(
+      90deg, transparent, var(--line) 22%, var(--line) 78%, transparent
+    ) 1;
+  transition: background var(--dur) var(--ease);
+}
+/* Cuon xuong thi nen dac hon — noi dung troi qua duoi khong con doc xuyen. */
+.site-header[data-scrolled="true"] {
+  background: var(--glass-strong);
+  box-shadow: 0 1px 0 #0000004d, 0 8px 28px #00000038;
 }
 .site-header .wrap {
   display: flex;
   align-items: center;
   gap: var(--s4);
-  min-height: 62px;
+  min-height: 66px;
 }
 
 .brand {
@@ -270,17 +339,76 @@ button, input, select, textarea {
 
 .nav-links { display: flex; align-items: center; gap: var(--s1); }
 .nav-link {
-  padding: 7px 13px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
   border-radius: var(--r-full);
   color: var(--text-2);
   text-decoration: none;
   font-size: var(--t-sm);
   font-weight: 550;
   white-space: nowrap;
-  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+  transition: background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
-.nav-link { display: inline-flex; align-items: center; }
-.nav-link:hover { background: var(--bg-2); color: var(--text); }
+.nav-link:hover { background: #ffffff0a; color: var(--text); }
+
+/*
+  Muc dang xem: mot vach sang NGAN duoi chu, khong phai mot vien quanh nut.
+
+  Ban truoc to ca nen muc dang xem bang `--brand-soft`. O mot thanh co bon muc
+  thi khoi mau do to ngang mot cai nut, va mat doc no truoc ca ten san pham.
+  Vach duoi thi doc duoc ngay ma khong tranh cho voi thu khac.
+*/
+.nav-link[aria-current="page"] {
+  color: var(--text);
+  background: transparent;
+}
+.nav-link[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--grad-brand);
+}
+
+/*
+  "Viết truyện" la loi keu goi, khong phai mot muc dieu huong.
+
+  No van nam trong `LINKS` — thu tu san pham khong doi, va bo test khoa lai
+  dung thu tu do. Cai doi la CACH VE: vien tim, chu sang, va mot dau cham nho.
+  Nguoi doc luot qua thanh nay phai thay ngay rang ho co the tu viet.
+*/
+.nav-cta {
+  color: var(--text);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  font-weight: 620;
+}
+.nav-cta:hover {
+  background: #8b6cff2e;
+  border-color: var(--brand);
+  color: var(--text);
+}
+.nav-cta::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--grad-brand);
+  flex: 0 0 auto;
+}
+/* Dang o `/write` thi bo vach duoi — ca cai nut da la tin hieu roi. */
+.nav-cta[aria-current="page"] {
+  background: #8b6cff33;
+  border-color: var(--brand);
+}
+.nav-cta[aria-current="page"]::after { display: none; }
 
 .account-link {
   display: inline-flex;
@@ -311,21 +439,25 @@ button, input, select, textarea {
   height: 44px;
 }
 .avatar {
-  width: 28px; height: 28px;
+  width: 30px; height: 30px;
   display: grid; place-items: center;
   border-radius: 50%;
-  background: var(--brand-soft);
-  color: var(--brand);
-  border: 1px solid var(--brand-line);
+  background: var(--grad-brand);
+  color: var(--on-brand);
+  border: 0;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 750;
+  letter-spacing: -0.02em;
   flex: 0 0 auto;
+  box-shadow: var(--lift-brand);
 }
+.account-link {
+  padding: 3px;
+  padding-right: var(--s2);
+  transition: background var(--dur-fast) var(--ease);
+}
+.account-link:hover { background: #ffffff0a; }
 .account-name { max-width: 110px; }
-.nav-link[aria-current="page"] {
-  background: var(--brand-soft);
-  color: var(--brand);
-}
 
 .site-footer {
   border-top: 1px solid var(--line-soft);
@@ -351,27 +483,35 @@ button, input, select, textarea {
 /* ------------------------------------------------------------ card */
 
 .card {
-  background: linear-gradient(180deg, var(--bg-1), var(--bg));
+  position: relative;
+  background: linear-gradient(168deg, var(--bg-1), #0c0e15);
   border: 1px solid var(--line);
   border-radius: var(--r3);
   padding: var(--s5);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-1), var(--edge);
 }
 .card-tight { padding: var(--s4); }
 .card-flush { padding: 0; overflow: hidden; }
+
+/* Card duoc nhan manh: vien tim mo va mot quang rat nhe. Dung cho khoi dang
+   la trong tam cua trang, khong dung cho ca luoi. */
+.card-glow {
+  border-color: var(--brand-line);
+  box-shadow: var(--lift-brand), var(--edge);
+}
 
 .card-link {
   display: block;
   color: inherit;
   text-decoration: none;
-  transition: transform 0.18s var(--ease), border-color 0.18s var(--ease),
-    box-shadow 0.18s var(--ease);
+  transition: transform var(--dur) var(--ease),
+    border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .card-link:hover {
   color: inherit;
   transform: translateY(-3px);
   border-color: var(--line-strong);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--shadow-2), var(--edge);
 }
 .card-link:focus-visible { transform: translateY(-3px); }
 
@@ -448,7 +588,8 @@ button, input, select, textarea {
   align-items: center;
   justify-content: center;
   gap: var(--s2);
-  padding: 9px 16px;
+  min-height: var(--h-md);
+  padding: 8px 16px;
   border-radius: var(--r2);
   border: 1px solid var(--line);
   background: var(--bg-2);
@@ -458,28 +599,53 @@ button, input, select, textarea {
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
-  transition: background 0.15s var(--ease), border-color 0.15s var(--ease),
-    transform 0.1s var(--ease), opacity 0.15s var(--ease);
+  box-shadow: var(--edge);
+  transition: background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    transform 90ms var(--ease), box-shadow var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
 }
 .btn:hover:not(:disabled) { background: var(--bg-3); border-color: var(--line-strong); color: var(--text); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn:active:not(:disabled) { transform: translateY(1px) scale(0.988); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/*
+  Nut chinh la be mat DUY NHAT trong trang duoc phep ruc. Do la ly do no doc
+  duoc ngay ma khong can to hon cac nut khac: mot trang chi nen co mot viec
+  quan trong nhat.
+*/
 .btn-primary {
-  background: linear-gradient(180deg, var(--brand), #6675f5);
+  background: linear-gradient(135deg, var(--brand), var(--brand-deep));
   border-color: transparent;
-  color: #080a10;
+  color: #fff;
+  box-shadow: var(--lift-brand), inset 0 1px 0 #ffffff2e;
 }
 .btn-primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, var(--brand-hover), var(--brand));
-  color: #080a10;
+  background: linear-gradient(135deg, var(--brand-hover), var(--brand));
+  color: #fff;
+  box-shadow: 0 10px 32px #8b6cff45, inset 0 1px 0 #ffffff33;
 }
-.btn-ghost { background: transparent; border-color: transparent; color: var(--text-2); }
-.btn-ghost:hover:not(:disabled) { background: var(--bg-2); color: var(--text); }
+.btn-primary:disabled { box-shadow: none; }
+
+/* Nut phu cap hai: vien tim, nen trong. Dung khi hai hanh dong ngang nhau ve
+   tam quan trong nhung chi mot cai la buoc tiep theo tu nhien. */
+.btn-outline {
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+  color: var(--brand-hover);
+}
+.btn-outline:hover:not(:disabled) {
+  background: #8b6cff2e;
+  border-color: var(--brand);
+  color: var(--text);
+}
+
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-2); box-shadow: none; }
+.btn-ghost:hover:not(:disabled) { background: #ffffff0a; color: var(--text); }
 .btn-danger { border-color: #f8717159; color: var(--danger); background: var(--danger-soft); }
 .btn-danger:hover:not(:disabled) { background: #f8717126; color: var(--danger); }
-.btn-lg { padding: 12px 22px; font-size: var(--t-base); border-radius: var(--r3); }
-.btn-sm { padding: 6px 11px; font-size: var(--t-xs); }
+.btn-lg { min-height: var(--h-lg); padding: 12px 24px; font-size: var(--t-base); border-radius: var(--r3); }
+.btn-sm { min-height: var(--h-sm); padding: 5px 11px; font-size: var(--t-xs); }
 .btn-block { width: 100%; }
 
 /* ------------------------------------------------------------ form */
@@ -490,19 +656,22 @@ button, input, select, textarea {
 
 .input, .textarea, .select {
   width: 100%;
-  padding: 10px 13px;
-  background: var(--bg);
+  padding: 10px 14px;
+  background: #0b0d14;
   border: 1px solid var(--line);
   border-radius: var(--r2);
   color: var(--text);
-  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
+  transition: border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
+.input, .select { min-height: var(--h-input); }
 .input:hover, .textarea:hover, .select:hover { border-color: var(--line-strong); }
 .input:focus, .textarea:focus, .select:focus {
   outline: none;
   border-color: var(--brand);
   background: var(--bg-1);
-  box-shadow: 0 0 0 3px var(--brand-soft);
+  box-shadow: var(--ring);
 }
 .input::placeholder, .textarea::placeholder { color: var(--text-3); }
 .textarea { min-height: 200px; resize: vertical; line-height: var(--lh-normal); }
@@ -552,8 +721,12 @@ button, input, select, textarea {
   cursor: pointer;
   transition: background 0.15s var(--ease), color 0.15s var(--ease);
 }
-.seg-item[aria-pressed="true"] { background: var(--brand); color: #080a10; }
-.seg-item:hover:not([aria-pressed="true"]) { color: var(--text); }
+.seg-item[aria-pressed="true"] {
+  background: linear-gradient(135deg, var(--brand), var(--brand-deep));
+  color: #fff;
+  box-shadow: 0 2px 10px #8b6cff40;
+}
+.seg-item:hover:not([aria-pressed="true"]) { color: var(--text); background: #ffffff0a; }
 
 /* ------------------------------------------------------------ badge */
 
@@ -617,23 +790,44 @@ button, input, select, textarea {
 
 /* ------------------------------------------------------------ progress */
 
+/*
+  CHI LA TRINH BAY. Be rong den tu `tienDoJob` o `lib/jobs.ts`, va cho nay
+  khong duoc tu suy ra mot con so nao — xem `components/JobProgress.tsx`.
+*/
 .progress {
-  height: 7px;
+  position: relative;
+  height: 9px;
   border-radius: var(--r-full);
-  background: var(--bg-3);
+  background: #0b0d14;
   overflow: hidden;
   border: 1px solid var(--line-soft);
+  box-shadow: inset 0 1px 3px #00000073;
 }
 .progress-bar {
+  position: relative;
   height: 100%;
   border-radius: var(--r-full);
-  background: linear-gradient(90deg, var(--brand), var(--accent));
-  transition: width 0.4s var(--ease);
+  background: var(--grad-brand);
+  box-shadow: 0 0 14px #8b6cff6b;
+  transition: width var(--dur-slow) var(--ease);
 }
+/* Vet sang chay tren phan DA XONG: bao rang job con song, ke ca khi ty le
+   dung yen mot luc vi phan hien tai dai. */
+.progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #ffffff40, transparent);
+  animation: sheen 2.1s var(--ease) infinite;
+}
+/* Xong roi thi thoi chay — mot vet sang vinh vien la nhieu loan. */
+.progress-done .progress-bar::after { display: none; }
 .progress-indeterminate .progress-bar {
   width: 38% !important;
   animation: slide 1.5s ease-in-out infinite;
 }
+.progress-indeterminate .progress-bar::after { display: none; }
 
 /* ------------------------------------------------------------ skeleton */
 
@@ -896,6 +1090,21 @@ button, input, select, textarea {
 @keyframes modal-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes toast-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
 @keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes menu-in  { from { opacity: 0; transform: translateY(-6px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes rise     { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+/* Vet sang chay ngang mot lan — dung cho thanh tien do DANG chay, de phan
+   biet "dang lam" voi "dung o 40% vi hong". */
+@keyframes sheen    { from { transform: translateX(-100%); } to { transform: translateX(280%); } }
+
+/*
+  Khoi noi dung hien len khi trang nap. Do tre dat bang bien `--i` tren tung
+  phan tu, KHONG bang `:nth-child` — thu tu DOM va thu tu thi giac khong phai
+  luc nao cung trung nhau, va `:nth-child` thi khong noi ra duoc y do.
+*/
+.rise {
+  animation: rise var(--dur-slow) var(--ease) backwards;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
 
 .spinner {
   width: 15px; height: 15px;
@@ -934,15 +1143,18 @@ button, input, select, textarea {
   top: calc(100% + var(--s2));
   right: 0;
   z-index: 40;
-  min-width: 208px;
+  min-width: 216px;
   display: flex;
   flex-direction: column;
   padding: var(--s1);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r3);
-  background: var(--bg-2);
-  box-shadow: var(--shadow-3);
-  animation: fade-in 0.14s var(--ease);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  box-shadow: var(--shadow-3), var(--edge);
+  transform-origin: top right;
+  animation: menu-in var(--dur-fast) var(--ease);
 }
 
 .menu-item {

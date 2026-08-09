@@ -348,7 +348,9 @@ class TestTheAcceptanceCoversTheLocalVoicePath(unittest.TestCase):
         self.assertIn("/api/voices", than)
         self.assertIn('startswith("vi")', than)
         self.assertIn("recommended", than)
-        self.assertIn("== 7", than)
+        # So giong de xuat suy tu `local_voices` may chu bao ra, khong go cung.
+        # Xem `TestProductionMode.test_so_giong_de_xuat_suy_tu_cau_hinh`.
+        self.assertIn("len(dx) == mong", than)
 
     def test_giong_ngoai_pham_vi_bi_kiem(self) -> None:
         than = _than_ham(self.nguon, "buoc_tu_choi_giong")
@@ -374,3 +376,99 @@ def _than_ham(nguon: str, ten: str) -> str:
     i = nguon.index(f"def {ten}(")
     j = nguon.find("\ndef ", i + 1)
     return nguon[i:j if j > 0 else len(nguon)]
+
+
+class TestTheScriptIdentifiesItself(unittest.TestCase):
+    """
+    Cloudflare chan thang User-Agent mac dinh cua urllib.
+
+    Do bang tay tren Worker production: cung mot URL, `Python-urllib/3.12` tra
+    **403** voi header `server: cloudflare`, con `curl` tra 200. Frontend hoan
+    toan lanh manh — chi la client khong tu gioi thieu. Ba route `/`, `/fanfic`,
+    `/login` cung hong theo, keo luon buoc kiem bundle.
+    """
+
+    def setUp(self) -> None:
+        self.nguon = (GOC / "scripts" / "staging_smoke.py").read_text(encoding="utf-8")
+
+    def test_co_khai_user_agent(self) -> None:
+        self.assertIn("USER_AGENT", self.nguon)
+
+    def test_ca_hai_ham_goi_deu_gui_user_agent(self) -> None:
+        """Thieu o mot trong hai la mot nua bai kiem tra van 403."""
+        for ten in ("goi", "goi_tho"):
+            than = _than_ham(self.nguon, ten)
+            self.assertIn('add_header("User-Agent", USER_AGENT)', than,
+                          f"{ten}() khong gui User-Agent")
+
+    def test_KHONG_gia_lam_trinh_duyet(self) -> None:
+        """
+        Mao danh Chrome de di qua rao chong bot la noi doi voi ha tang cua
+        chinh minh, va se vo hieu ngay khi rao do sieu chat hon. Da do: mot
+        chuoi trung thuc cung duoc chap nhan.
+        """
+        mod = nap_script()
+        ua = mod.USER_AGENT
+        for cam in ("Mozilla", "Chrome", "Safari", "AppleWebKit", "Gecko"):
+            self.assertNotIn(cam, ua, f"User-Agent gia lam trinh duyet: {cam}")
+        self.assertIn("fanfic-audio-smoke", ua)
+
+
+class TestProductionMode(unittest.TestCase):
+    """
+    Chay bo nghiem thu tren production khac staging o ba cho, va ca ba tung
+    lam mot lan chay hop le bi bao la that bai.
+    """
+
+    def setUp(self) -> None:
+        self.nguon = (GOC / "scripts" / "staging_smoke.py").read_text(encoding="utf-8")
+
+    def test_co_tham_so_environment(self) -> None:
+        self.assertIn('"--environment"', self.nguon)
+        self.assertIn('default="staging"', self.nguon)
+
+    def test_moi_truong_mong_doi_khong_con_go_cung_staging(self) -> None:
+        than = _than_ham(self.nguon, "buoc_suc_khoe")
+        self.assertIn("moi_truong", than)
+        self.assertNotIn('== "staging"', than,
+                         "van con so sanh cung voi chuoi 'staging'")
+
+    def test_so_giong_de_xuat_suy_tu_cau_hinh(self) -> None:
+        """
+        Production tat giong cuc bo nen chi con 6 giong de xuat — ket qua DUNG,
+        khong phai loi. Go cung 7 bien mot cau hinh hop le thanh mot lan do
+        that bai.
+        """
+        than = _than_ham(self.nguon, "buoc_danh_sach_giong")
+        self.assertIn("local_voices", than,
+                      "phai suy so giong tu cau hinh may chu bao ra")
+        self.assertNotIn("len(dx) == 7", than, "van con go cung 7")
+
+    def test_don_tai_khoan_chay_duoc_o_production(self) -> None:
+        than = _than_ham(self.nguon, "don_tai_khoan")
+        self.assertIn("moi_truong.lower()", than)
+        self.assertNotIn('!= "staging"', than,
+                         "van chi cho don khi FAS_ENV=staging")
+
+    def test_don_tai_khoan_van_giu_du_BA_dieu_kien(self) -> None:
+        """
+        Noi long moi truong KHONG duoc noi long dieu kien xoa. Ba dieu kien:
+        id do luot nay ghi lai, email khop chinh xac, va hau to @example.test.
+        """
+        than = _than_ham(self.nguon, "don_tai_khoan")
+        self.assertIn('tk.get("tai_khoan", [])', than)      # 1: theo ID da ghi
+        self.assertIn("!= em", than)                        # 2: email khop
+        self.assertIn("HAU_TO_FIXTURE", than)               # 3: hau to
+        self.assertIn("endswith(HAU_TO_FIXTURE)", than)
+
+    def test_khong_bao_gio_xoa_theo_mau(self) -> None:
+        than = _than_ham(self.nguon, "don_tai_khoan")
+        for cam in ("search", "startswith(", "queries", "*"):
+            self.assertNotIn(f'"{cam}"', than,
+                             f"co dau hieu xoa theo mau: {cam}")
+
+    def test_van_don_trong_finally(self) -> None:
+        than = _than_ham(self.nguon, "main")
+        sau = than[than.index("finally:"):]
+        self.assertIn("don_dep(", sau)
+        self.assertIn("don_tai_khoan(", sau)

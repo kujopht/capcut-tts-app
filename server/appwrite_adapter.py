@@ -12,6 +12,7 @@ NGUYEN TAC:
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 import httpx
 
@@ -239,6 +240,90 @@ class AppwriteIdentityAdapter:
             display_name=str(data.get("name") or ""),
             tier=Tier.FREE,
         )
+
+    # -- OAuth ----------------------------------------------------------------
+
+    def oauth_start_url(self, provider: str, success: str, failure: str) -> str:
+        """
+        Xem contract o `IdentityAdapter.oauth_start_url`.
+
+        Dung LUONG TOKEN (`/v1/account/tokens/oauth2/...`), khong phai luong
+        session. Khac biet quan trong: luong session ket thuc bang mot COOKIE
+        tren ten mien Appwrite, ma backend nay khong dung cookie va frontend
+        thi o ten mien khac. Luong token thi tra ve `userId` + `secret` tren
+        URL callback, va backend doi chung lay session secret — dung loai token
+        ma `login()` da tra ve.
+
+        `project` di o QUERY chu khong o header: buoc nay la mot lan dieu huong
+        cua trinh duyet, va trinh duyet thi khong gan header cua ta duoc.
+        """
+        query = urlencode({
+            "project": self._settings.project_id,
+            "success": success,
+            "failure": failure,
+        })
+        return f"{self._endpoint}/v1/account/tokens/oauth2/{provider}?{query}"
+
+    def exchange_oauth_token(self, user_id: str, secret: str) -> str:
+        """
+        Xem contract o `IdentityAdapter.exchange_oauth_token`.
+
+        Goi KEM API key (`admin=True`), cung ly do nhu `login()`: khong kem key
+        thi Appwrite dat cookie va tra ve `secret` RONG.
+        """
+        user_id = (user_id or "").strip()
+        secret = (secret or "").strip()
+        if not user_id or not secret:
+            raise AuthError("Thiếu thông tin đăng nhập từ nhà cung cấp.")
+        try:
+            data = self._request(
+                "POST",
+                "/v1/account/sessions/token",
+                payload={"userId": user_id, "secret": secret},
+            )
+        except AuthError as exc:
+            # KHONG chuyen tiep thong diep goc cua Appwrite. No co the nhac lai
+            # tham so vua gui — tuc la chinh cai secret — va thong diep loi thi
+            # di thang ra trinh duyet va vao log.
+            raise AuthError(
+                "Đăng nhập bằng nhà cung cấp không thành công. Vui lòng thử lại."
+            ) from exc
+        session_secret = str(data.get("secret") or "")
+        if not session_secret:
+            raise AuthError("Appwrite không trả về session secret.")
+        return session_secret
+
+    def ensure_profile(self, profile: Profile) -> Profile:
+        """
+        Xem contract o `IdentityAdapter.ensure_profile`. TIM-HOAC-TAO.
+
+        Doc truoc roi moi ghi, va KHONG bao gio `PATCH`: ho so da co phai tra
+        ve nguyen ven. Nguoi dung doi ten hien thi trong Fanfic roi sau do dang
+        nhap bang Google khong duoc bi Google dat lai ten ho.
+        """
+        path = (f"/v1/databases/{self._settings.database_id}"
+                f"/collections/{COLLECTION_PROFILES}/documents/{profile.user_id}")
+        try:
+            self._request("GET", path)
+            return profile
+        except AuthError:
+            # Chua co -> tao. `_request` bien MOI loi >=400 thanh AuthError, nen
+            # o day khong phan biet duoc 404 voi loi khac; buoc tao ngay duoi se
+            # nem tiep neu that su hong.
+            pass
+        self._request(
+            "POST",
+            (f"/v1/databases/{self._settings.database_id}"
+             f"/collections/{COLLECTION_PROFILES}/documents"),
+            payload={
+                "documentId": profile.user_id,
+                # CUNG schema va cung gia tri mac dinh voi dang ky thuong —
+                # khong co bang rieng cho nguoi dung OAuth.
+                "data": profile.to_dict(),
+                "permissions": profile_permissions(profile.user_id),
+            },
+        )
+        return profile
 
     def healthcheck(self) -> bool:
         """Kiem tra cau hinh co dung khong. Loi thi nem ra, khong nuot."""

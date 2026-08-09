@@ -24,6 +24,15 @@ interface SessionValue {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   /**
+   * Nhan mot phien da duoc backend cap san.
+   *
+   * Dung cho luong OAuth: trang callback doi cap dung-mot-lan lay
+   * `{token, profile}` — DUNG hinh dang ma `signIn` nhan duoc — roi giao lai
+   * cho day. Khong co he thong phien thu hai, va khong co duong nao khac
+   * ghi vao `localStorage`.
+   */
+  adoptSession: (token: string, profile: Profile) => void;
+  /**
    * Bất đồng bộ vì nó phải gọi máy chủ huỷ phiên. Nơi gọi có thể bỏ qua
    * Promise — token phía trình duyệt luôn được xoá, kể cả khi lời gọi hỏng.
    */
@@ -79,6 +88,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const adoptSession = useCallback((token: string, next: Profile) => {
+    setToken(token);
+    setProfile(next);
+  }, []);
+
   const signOut = useCallback(async () => {
     // Báo máy chủ huỷ phiên TRƯỚC, vì lời gọi cần chính token sắp bị xoá.
     //
@@ -97,8 +111,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<SessionValue>(
-    () => ({ profile, loading, signIn, signUp, signOut }),
-    [profile, loading, signIn, signUp, signOut],
+    () => ({ profile, loading, signIn, signUp, signOut, adoptSession }),
+    [profile, loading, signIn, signUp, signOut, adoptSession],
   );
 
   return (

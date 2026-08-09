@@ -58,7 +58,7 @@ test("Audio Studio giu nguyen chuc nang, chi doi cho dung trong dieu huong", () 
 
 /* ============================================================ dieu huong */
 
-test("thanh chinh khong con Audio Studio, nhung menu ben phai thi co", () => {
+test("thanh chinh khong con Audio Studio, nhung menu Cong cu thi co", () => {
   const nav = read("../src/components/NavAuth.tsx");
   const links = nav.slice(
     nav.indexOf("const LINKS"),
@@ -67,9 +67,15 @@ test("thanh chinh khong con Audio Studio, nhung menu ben phai thi co", () => {
   assert.ok(!links.includes("/studio"));
   assert.ok(!links.includes("Audio Studio"));
 
-  const menu = nav.slice(nav.indexOf("function UserMenu"));
-  assert.match(menu, /href="\/studio"/, "menu thiếu Audio Studio");
-  assert.match(menu, /Audio Studio/);
+  // Audio Studio la mot CONG CU rieng, khong phai mot khu vuc san pham. Cho
+  // cua no la menu "Công cụ" — tach han khoi menu tai khoan.
+  const tools = nav.slice(
+    nav.indexOf("function ToolsMenu"),
+    nav.indexOf("function AccountMenu"),
+  );
+  assert.match(tools, /Công cụ/);
+  assert.match(tools, /href="\/studio"/, "menu Công cụ thiếu Audio Studio");
+  assert.match(tools, /Audio Studio/);
 });
 
 test("menu ben phai dung duoc bang ban phim va bang doc man hinh", () => {

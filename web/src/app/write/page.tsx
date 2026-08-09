@@ -13,6 +13,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   api,
   type Chapter,
@@ -31,6 +32,7 @@ import {
   voiceOptionLabel,
   voiceSections,
 } from "@/lib/voices";
+import { loginHref } from "@/lib/nav";
 import { fanficOnly } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import {
@@ -62,6 +64,7 @@ function parseTags(raw: string): string[] {
 }
 
 export default function WritePage() {
+  const router = useRouter();
   const { profile, loading: sessionLoading } = useSession();
   const toast = useToast();
 
@@ -138,6 +141,21 @@ export default function WritePage() {
     if (sessionLoading || !profile) return;
     load();
   }, [sessionLoading, profile, load]);
+
+  /*
+    Chua dang nhap -> sang thang trang dang nhap, KEM noi can quay lai.
+
+    "Viết truyện" la mot muc dieu huong chinh nen khach vang lai VAN thay va
+    VAN bam duoc — no khong bi an di. Cai khac la sau khi dang nhap ho quay
+    lai dung `/write` chu khong bi tha ve trang chu.
+
+    `router.replace` chu khong phai `push`: nut Back phai dua nguoi dung ve
+    trang truoc do, khong phai ve mot trang se lai day ho sang dang nhap.
+  */
+  useEffect(() => {
+    if (sessionLoading || profile) return;
+    router.replace(loginHref("/write"));
+  }, [sessionLoading, profile, router]);
 
   const loadChapters = useCallback((novelId: string) => {
     if (!novelId) return;
@@ -482,18 +500,18 @@ export default function WritePage() {
   }
 
   if (!profile) {
+    /*
+      Da dieu huong sang `/login?next=/write` o effect ben tren. Man hinh nay
+      chi la thu nguoi dung thay trong khoanh khac chuyen trang.
+
+      KHONG dung `EmptyState` kem nut "Đăng nhập" nhu truoc: sau khi dang nhap
+      no dua nguoi dung ve trang chu, va ho phai tu tim duong quay lai day.
+      "Viết truyện" nay la mot muc dieu huong chinh — bam vao no ma phai di hai
+      chang moi toi noi thi no khong con giong mot khu vuc san pham.
+    */
     return (
       <div className="page">
-        <h1 className="page-title">Khu vực tác giả</h1>
-        <EmptyState
-          icon="🔐"
-          title="Cần đăng nhập để viết truyện"
-          action={
-            <Link className="btn btn-primary" href="/login">
-              Đăng nhập
-            </Link>
-          }
-        />
+        <Loading label="Đang chuyển tới trang đăng nhập…" />
       </div>
     );
   }

@@ -3,17 +3,46 @@
 /** Dang nhap / dang ky. Mot form, doi che do bang nut chuyen. */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { Alert, Loading } from "@/components/ui";
 import { LogoMark } from "@/components/Logo";
+import { safeNext } from "@/lib/nav";
+import { api } from "@/lib/api";
+import { FacebookIcon, GoogleIcon } from "@/components/ProviderIcons";
+import { FACEBOOK_LOGIN_ENABLED, GOOGLE_LOGIN_ENABLED } from "@/lib/oauth";
 
 const MIN_PASSWORD = 8;
 
+/**
+ * `useSearchParams` bat trang phai co ranh gioi Suspense khi Next dung san
+ * trang. Thieu no thi `next build` bao loi chu khong phai loi luc chay.
+ */
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="page"><Loading /></div>}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  /*
+    Noi can quay lai sau khi dang nhap. TRUOC DAY trang nay luon day nguoi
+    dung sang `/studio` — dung o thoi Audio Studio la mat tien, sai bay gio:
+    ai bam "Viết truyện" roi dang nhap se bi tha vao mot cong cu khac han.
+
+    `safeNext` chan open redirect. Xem ghi chu o `lib/nav.ts` — kiem o day la
+    CHUA DU, backend cung phai kiem vi no nhan `next` truc tiep tu URL.
+  */
+  const params = useSearchParams();
+  const next = safeNext(params.get("next"));
+  // `?error=oauth` do backend dat khi nha cung cap tu choi. Chi la mot co,
+  // khong mang chi tiet nao tu Appwrite.
+  const oauthError = params.get("error") === "oauth";
   const toast = useToast();
   const { profile, loading, signIn, signUp } = useSession();
 
@@ -26,8 +55,8 @@ export default function LoginPage() {
 
   // Da dang nhap thi khong o lai trang nay
   useEffect(() => {
-    if (!loading && profile) router.replace("/studio");
-  }, [loading, profile, router]);
+    if (!loading && profile) router.replace(next);
+  }, [loading, profile, router, next]);
 
   const submit = useCallback(
     async (event: React.FormEvent) => {
@@ -50,14 +79,14 @@ export default function LoginPage() {
           await signUp(email, password, displayName);
           toast.ok("Tạo tài khoản thành công.");
         }
-        router.replace("/studio");
+        router.replace(next);
       } catch (cause) {
         setError(errorMessage(cause));
       } finally {
         setBusy(false);
       }
     },
-    [email, password, displayName, mode, signIn, signUp, router, toast],
+    [email, password, displayName, mode, signIn, signUp, router, toast, next],
   );
 
   if (loading) {
@@ -105,6 +134,54 @@ export default function LoginPage() {
         >
           Đăng ký
         </button>
+      </div>
+
+      {/*
+        OAuth dat TRUOC form email. Voi phan lon nguoi dung, mot lan bam la
+        xong, con go email + mat khau moi la duong dai — dat duong ngan o duoi
+        la bat ho doc qua ca cai ho khong dung.
+
+        Day la DIEU HUONG that (`window.location.href`), khong phai `fetch`:
+        buoc sau la mot chuoi chuyen tiep qua Appwrite roi qua nha cung cap,
+        va no phai xay ra trong thanh dia chi.
+      */}
+      <div className="card stack-2">
+        {oauthError ? (
+          <Alert kind="error">
+            Đăng nhập bằng nhà cung cấp không thành công. Vui lòng thử lại.
+          </Alert>
+        ) : null}
+        {GOOGLE_LOGIN_ENABLED ? (
+          <button
+            type="button"
+            className="btn btn-block btn-provider"
+            onClick={() => {
+              window.location.href = api.oauthStartUrl("google", next);
+            }}
+          >
+            <GoogleIcon /> Tiếp tục với Google
+          </button>
+        ) : null}
+        {/*
+          Facebook dang TAT. Nut nay KHONG bi xoa — no doc co o `lib/oauth.ts`,
+          va toan bo phan hien thuc phia sau van con nguyen. Bat lai la doi mot
+          bien moi truong chu khong phai viet lai ma nguon.
+        */}
+        {FACEBOOK_LOGIN_ENABLED ? (
+          <button
+            type="button"
+            className="btn btn-block btn-provider"
+            onClick={() => {
+              window.location.href = api.oauthStartUrl("facebook", next);
+            }}
+          >
+            <FacebookIcon /> Tiếp tục với Facebook
+          </button>
+        ) : null}
+      </div>
+
+      <div className="or-line" role="separator">
+        <span>hoặc</span>
       </div>
 
       <form className="card stack" onSubmit={submit}>

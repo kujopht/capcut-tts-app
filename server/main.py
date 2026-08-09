@@ -19,6 +19,7 @@ import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List, Optional
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -416,6 +417,113 @@ def logout(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any
             da_huy = False
 
     return {"da_huy_phien": da_huy}
+
+
+# -----------------------------------------------------------------------------
+# OAuth (Google / Facebook)
+# -----------------------------------------------------------------------------
+
+#: DANH SACH TRANG. Ten provider di thang vao URL cua Appwrite, nen nhan bat
+#: ky chuoi nao la mo mot open redirect: `?provider=..%2F..%2Fevil` se dua
+#: nguoi dung ra khoi Appwrite. Chi hai gia tri nay duoc phep.
+OAUTH_PROVIDERS = ("google", "facebook")
+
+
+def _duong_dan_noi_bo(raw: str) -> str:
+    """
+    Loc tham so `next`. Tra ve duong dan noi bo an toan, hoac "/".
+
+    PHAI kiem O DAY chu khong chi o trinh duyet. Route nay nhan `next` truc
+    tiep tu URL va NHUNG no vao dia chi ma Appwrite se dieu huong trinh duyet
+    toi — khong kiem la mot open redirect that su, tren chinh duong dang nhap.
+    Doi chieu: `web/src/lib/nav.ts` lam dung viec nay o phia trinh duyet.
+
+    Tung dang bi tu choi, moi dang vi mot ly do:
+      `https://x.tld`  tuyet doi, ra ngoai mien
+      `//x.tld`        "protocol-relative": trinh duyet hieu la mien khac
+      `/\\x.tld`        mot so trinh duyet chuan hoa `\\` thanh `/` -> `//`
+      `write`          thieu `/` dau, de ghep nham khi noi chuoi
+    """
+    value = (raw or "").strip()
+    if not value or not value.startswith("/"):
+        return "/"
+    if value.startswith("//") or "\\" in value:
+        return "/"
+    if value == "/login" or value.startswith("/login?"):
+        return "/"      # dang nhap xong lai ve trang dang nhap = vong lap
+    return value
+
+
+class OAuthExchangeIn(BaseModel):
+    """Cap dung-mot-lan lay tu URL callback. KHONG BAO GIO duoc ghi ra log."""
+
+    user_id: str = Field(min_length=1, max_length=128)
+    secret: str = Field(min_length=1, max_length=1024)
+
+
+@app.get("/api/auth/oauth/{provider}")
+def oauth_start(provider: str, next: str = "/") -> Response:
+    """
+    Bat dau dang nhap bang Google/Facebook.
+
+    Tra ve 307 de TRINH DUYET tu di tiep. Khong `fetch` duoc duong nay: buoc
+    sau la mot chuoi dieu huong qua Appwrite roi qua Google/Facebook, va no
+    phai xay ra trong thanh dia chi cua nguoi dung.
+    """
+    provider = (provider or "").lower()
+    if provider not in OAUTH_PROVIDERS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Nhà cung cấp đăng nhập không được hỗ trợ.")
+
+    # Facebook dang TAT theo cau hinh (`FAS_FACEBOOK_LOGIN`).
+    #
+    # Chi an cai nut o trang dang nhap la chua du: duong dan nay van goi duoc
+    # bang tay, va mot duong dang nhap "khong ai thay" thi cung khong ai theo
+    # doi khi no hong. Chan o day de trang thai tat la THAT.
+    #
+    # Phan hien thuc VAN CON nguyen — adapter, luong doi token, cau hinh
+    # Appwrite. Bat lai chi la doi mot bien moi truong.
+    if provider == "facebook" and not settings.facebook_login_enabled:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Đăng nhập bằng Facebook tạm thời chưa khả dụng.")
+
+    dich = _duong_dan_noi_bo(next)
+    web = settings.web_base_url.rstrip("/")
+    thanh_cong = (f"{web}/auth/callback"
+                  f"?provider={provider}&next={quote(dich, safe='')}")
+    that_bai = f"{web}/login?error=oauth&provider={provider}"
+
+    try:
+        url = identity.oauth_start_url(provider, thanh_cong, that_bai)
+    except AuthError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    return Response(status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+                    headers={"Location": url})
+
+
+@app.post("/api/auth/oauth/exchange")
+def oauth_exchange(payload: OAuthExchangeIn) -> Dict[str, Any]:
+    """
+    Doi cap dung-mot-lan tu callback lay token cua ung dung.
+
+    Tra ve DUNG hinh dang ma `/api/auth/login` tra ve — `{token, profile}` —
+    nen phia trinh duyet khong co he thong phien thu hai nao. Nguoi dung dang
+    nhap bang Google, sau buoc nay, khong khac gi nguoi dung dang nhap bang mat
+    khau.
+
+    Ho so ung dung duoc lap cho neu chua co: nguoi dung OAuth khong di qua
+    `/api/auth/register` nen ho khong co ban ghi ho so nao.
+    """
+    try:
+        token = identity.exchange_oauth_token(payload.user_id, payload.secret)
+        profile = identity.profile_from_token(token)
+        profile = identity.ensure_profile(profile)
+    except AuthError as exc:
+        # Thong diep da duoc adapter lam sach. KHONG them chi tiet o day:
+        # `user_id` va `secret` khong duoc ro ri ra phan hoi hay log.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    return {"token": token, "profile": profile.to_dict()}
 
 
 # -----------------------------------------------------------------------------

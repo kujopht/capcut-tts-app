@@ -199,6 +199,10 @@ class TestQuotaFieldsOnlyChangeServerSide(unittest.TestCase):
         "/api/auth/register",   # tao ho so moi, khong sua ho so co san
         "/api/auth/login",      # chi doi session, khong cham `profiles`
         "/api/auth/logout",     # chi xoa session o Appwrite
+        # Doi cap OAuth dung-mot-lan lay session. CO ghi `profiles`, nhung chi
+        # TAO khi chua co va KHONG BAO GIO ghi de — chung minh o
+        # `test_oauth_exchange_only_creates_never_overwrites` ngay duoi.
+        "/api/auth/oauth/exchange",
     }
 
     def test_no_backend_route_lets_a_client_write_profile_fields(self):
@@ -215,6 +219,40 @@ class TestQuotaFieldsOnlyChangeServerSide(unittest.TestCase):
             profile_writes, [],
             "chưa có route sửa hồ sơ; nếu thêm thì phải có allowlist trường",
         )
+
+    def test_oauth_exchange_only_creates_never_overwrites(self):
+        """
+        `/api/auth/oauth/exchange` nam trong allowlist o tren, nen phai chung
+        minh no that su vo hai — neu khong, allowlist chi la mot cach lam ngo
+        test.
+
+        Nguoi dang nhap bang Google khong di qua `/api/auth/register` nen ho
+        chua co ho so; route nay lap cho do. Cai KHONG duoc phep la ghi de:
+        nguoi dung doi ten hien thi trong Fanfic roi mot thang sau dang nhap
+        bang Google khong duoc bi Google dat lai ten ho, va `tier` thi khong
+        bao gio duoc client quyet dinh.
+        """
+        import inspect
+
+        from server import main as server_main
+        from server.appwrite_adapter import AppwriteIdentityAdapter
+
+        nguon_route = inspect.getsource(server_main.oauth_exchange)
+        # Route khong tu cham kho: no uy quyen cho adapter.
+        for cam in ("store.", "tier", "quota"):
+            self.assertNotIn(cam, nguon_route,
+                             f"route exchange khong duoc cham {cam!r}")
+
+        nguon = inspect.getsource(AppwriteIdentityAdapter.ensure_profile)
+        # TIM truoc roi moi TAO.
+        self.assertIn('self._request("GET", path)', nguon)
+        self.assertIn('"POST"', nguon)
+        # Va tuyet doi khong sua ban ghi da co.
+        for cam in ('"PATCH"', '"PUT"', '"DELETE"'):
+            self.assertNotIn(cam, nguon,
+                             f"ensure_profile khong duoc dung {cam}")
+        # Ban ghi moi phai dung quyen chi-doc y nhu dang ky thuong.
+        self.assertIn("profile_permissions(profile.user_id)", nguon)
 
     def test_logout_does_not_touch_profile_data(self):
         """

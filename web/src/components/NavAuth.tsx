@@ -1,6 +1,6 @@
 "use client";
 
-/** Dieu huong chinh + khu vuc tai khoan. Tach client de dung duoc phien. */
+/** Dieu huong chinh + cong cu + khu vuc tai khoan. Tach client de dung phien. */
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -8,21 +8,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 
 /**
- * Ba muc chinh, va chi ba.
+ * Bon muc chinh, DUNG THU TU NAY.
  *
- * Audio Studio DA RA KHOI thanh nay. No van song o `/studio` voi nguyen ven
- * chuc nang; cho cua no bay gio la menu ben phai (xem `UserMenu`). Ly do la
- * chuyen san pham chu khong phai thu hang muc: day la nen tang doc/nghe
- * fanfic, va Audio Studio la cong cu phu manh — de no o vi tri dau tien thi
- * nguoi doc lan dau vao se tuong day la mot trang tao giong noi.
+ * "Viết truyện" (`/write`) la mot khu vuc san pham ngang hang voi "Khám phá"
+ * va "Thư viện", khong phai mot muc trong menu tai khoan. Giau no di la noi
+ * rang viet truyen la viec phu — trong khi khong co tac gia thi khong co gi
+ * de doc.
  *
- * `/fanfic` giu nguyen duong dan, chi doi NHAN thanh "Khám phá". Doi duong
- * dan se lam hong moi lien ket da chia se.
+ * Audio Studio KHONG nam o day. No la mot CONG CU rieng (`/studio`): dan van
+ * ban bat ky, chon giong, tai MP3 — khong lien quan den viec quan ly truyen.
+ * Cho cua no la menu "Công cụ".
+ *
+ * `/fanfic` giu nguyen duong dan, chi mang nhan "Khám phá": doi duong dan se
+ * lam hong moi lien ket da chia se.
  */
 const LINKS = [
   { href: "/", label: "Trang chủ" },
   { href: "/fanfic", label: "Khám phá" },
   { href: "/library", label: "Thư viện" },
+  { href: "/write", label: "Viết truyện" },
 ];
 
 export function NavLinks() {
@@ -52,19 +56,17 @@ export function NavLinks() {
 }
 
 /**
- * Menu ben phai: cong cu + tai khoan.
+ * Menu bat/tat dung duoc bang ban phim.
  *
- * Audio Studio LUON co mat o day, ke ca khi chua dang nhap. `/studio` tu no
- * da xu ly truong hop chua dang nhap (hien loi moi dang nhap chu khong sap),
- * nen an muc nay di chi lam nguoi dung khong tim thay cong cu chu khong bao ve
- * duoc gi.
+ * Tach thanh hook vi header co HAI menu — "Công cụ" va tai khoan — va ca hai
+ * can dung mot hanh vi: Escape dong VA tra tieu diem ve nut mo (neu khong,
+ * tieu diem roi ve `<body>` va nguoi dung ban phim mat cho dung), bam ra
+ * ngoai cung dong.
  */
-function UserMenu() {
-  const { profile, loading, signOut } = useSession();
+function useMenu() {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-
   const close = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
@@ -75,8 +77,6 @@ function UserMenu() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       close();
-      // Tra tieu diem ve nut mo — neu khong, tieu diem roi ve `<body>` va
-      // nguoi dung ban phim mat cho dung.
       buttonRef.current?.focus();
     };
     document.addEventListener("mousedown", onDown);
@@ -87,81 +87,97 @@ function UserMenu() {
     };
   }, [open, close]);
 
+  return { open, setOpen, close, boxRef, buttonRef };
+}
+
+/**
+ * Menu "Công cụ".
+ *
+ * LUON co mat, ke ca khi chua dang nhap. `/studio` tu no da xu ly truong hop
+ * chua dang nhap; an muc nay di chi lam nguoi dung khong tim thay cong cu chu
+ * khong bao ve duoc gi.
+ */
+function ToolsMenu() {
+  const { open, setOpen, close, boxRef, buttonRef } = useMenu();
+
+  return (
+    <div className="menu" ref={boxRef}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="btn btn-ghost btn-sm"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Công cụ
+      </button>
+      {open ? (
+        <div className="menu-panel" role="menu" aria-label="Công cụ">
+          <Link href="/studio" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">🎙</span> Audio Studio
+          </Link>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Menu tai khoan. Chi hien khi da dang nhap; con lai la nut "Đăng nhập". */
+function AccountMenu() {
+  const { profile, loading, signOut } = useSession();
+  const { open, setOpen, close, boxRef, buttonRef } = useMenu();
+
   if (loading) {
     return <span className="sk" style={{ width: 92, height: 30 }} aria-hidden="true" />;
   }
 
-  const name = profile ? profile.display_name || profile.email.split("@")[0] : "";
+  if (!profile) {
+    return (
+      <Link className="btn btn-primary btn-sm" href="/login">
+        Đăng nhập
+      </Link>
+    );
+  }
 
-  const toggle = () => setOpen((v) => !v);
+  const name = profile.display_name || profile.email.split("@")[0];
 
   return (
     <div className="menu" ref={boxRef}>
       {/*
-        Hai nut RIENG BIET chu khong mot nut voi `className` tinh theo dieu
-        kien. Kich thuoc cua `.account-link` va `.avatar` do CSS quyet dinh —
-        media query khong voi toi style inline duoc, va mot `className` ghep
-        chuoi lam quy tac do kho tra nguoc khi doc.
+        Kich thuoc cua `.account-link` va `.avatar` do CSS quyet dinh — media
+        query khong voi toi style inline duoc.
       */}
-      {profile ? (
-        <button
-          ref={buttonRef}
-          type="button"
-          className="account-link"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={toggle}
-        >
-          <span className="avatar" aria-hidden="true">
-            {name.slice(0, 2).toUpperCase()}
-          </span>
-          <span className="hint truncate account-name">{name}</span>
-        </button>
-      ) : (
-        <button
-          ref={buttonRef}
-          type="button"
-          className="btn btn-ghost btn-sm"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={toggle}
-        >
-          Công cụ
-        </button>
-      )}
-
+      <button
+        ref={buttonRef}
+        type="button"
+        className="account-link"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="avatar" aria-hidden="true">
+          {name.slice(0, 2).toUpperCase()}
+        </span>
+        <span className="hint truncate account-name">{name}</span>
+      </button>
       {open ? (
-        <div className="menu-panel" role="menu" aria-label="Công cụ và tài khoản">
-          <Link href="/studio" className="menu-item" role="menuitem" onClick={close}>
-            <span aria-hidden="true">🎙️</span> Audio Studio
+        <div className="menu-panel" role="menu" aria-label="Tài khoản">
+          <Link href="/account" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">👤</span> Tài khoản
           </Link>
-          {profile ? (
-            <>
-              <Link href="/write" className="menu-item" role="menuitem" onClick={close}>
-                <span aria-hidden="true">✍️</span> Khu vực tác giả
-              </Link>
-              <div className="menu-sep" role="separator" />
-              <Link
-                href="/account"
-                className="menu-item"
-                role="menuitem"
-                onClick={close}
-              >
-                <span aria-hidden="true">👤</span> Tài khoản
-              </Link>
-              <button
-                type="button"
-                className="menu-item"
-                role="menuitem"
-                onClick={() => {
-                  close();
-                  signOut();
-                }}
-              >
-                <span aria-hidden="true">↩</span> Đăng xuất
-              </button>
-            </>
-          ) : null}
+          <div className="menu-sep" role="separator" />
+          <button
+            type="button"
+            className="menu-item"
+            role="menuitem"
+            onClick={() => {
+              close();
+              signOut();
+            }}
+          >
+            <span aria-hidden="true">↩</span> Đăng xuất
+          </button>
         </div>
       ) : null}
     </div>
@@ -169,16 +185,10 @@ function UserMenu() {
 }
 
 export function NavAuth() {
-  const { profile, loading } = useSession();
-
   return (
     <div className="row nav-right">
-      <UserMenu />
-      {!loading && !profile ? (
-        <Link className="btn btn-primary btn-sm" href="/login">
-          Đăng nhập
-        </Link>
-      ) : null}
+      <ToolsMenu />
+      <AccountMenu />
     </div>
   );
 }

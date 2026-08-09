@@ -168,6 +168,17 @@ class Settings:
     storage_backend: str = "local"
     cors_origins: List[str] = field(default_factory=list)
 
+    #: Co bat/tat dang nhap bang Facebook. Doc tu `FAS_FACEBOOK_LOGIN`.
+    #:
+    #: MAC DINH TAT. Toan bo phan hien thuc Facebook VAN CON — adapter, route,
+    #: cau hinh Appwrite, credential o Meta — chi la khong chao ban ra ngoai.
+    #: Bat lai la doi mot bien moi truong, khong phai viet lai ma nguon.
+    #:
+    #: Tat o day cung dong luon `/api/auth/oauth/facebook`. Chi an cai nut la
+    #: chua du: duong dan do van goi duoc bang tay, va mot duong dang nhap
+    #: "khong ai thay" thi cung khong ai theo doi khi no hong.
+    facebook_login_enabled: bool = False
+
     #: Goc cua giao dien web. Doc tu `FAS_WEB_BASE_URL`.
     #:
     #: Backend can biet cho nay de dung URL callback cho OAuth: Appwrite se
@@ -320,6 +331,8 @@ class Settings:
             # khong phai bi mat.
             "local_voices": list(self.local_voices),
             "public_voice_languages": list(self.public_voice_languages),
+            # Bao ra de nguoi van hanh thay ngay duong dang nhap nao dang mo.
+            "facebook_login_enabled": self.facebook_login_enabled,
             "env_file_loaded": self.env_file_loaded,
             "inline_worker": self.inline_worker,
         }
@@ -381,6 +394,7 @@ def load_settings() -> Settings:
         storage_backend=_env("STORAGE_BACKEND", "local").lower(),
         cors_origins=_env_list("FAS_CORS_ORIGINS", "http://localhost:3000"),
         web_base_url=_env("FAS_WEB_BASE_URL", "http://localhost:3000").rstrip("/"),
+        facebook_login_enabled=_env_bool("FAS_FACEBOOK_LOGIN", False),
         var_dir=var_dir,
         appwrite=AppwriteSettings(
             endpoint=_env("APPWRITE_ENDPOINT"),

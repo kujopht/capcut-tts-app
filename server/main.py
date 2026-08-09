@@ -475,6 +475,19 @@ def oauth_start(provider: str, next: str = "/") -> Response:
         raise HTTPException(status.HTTP_404_NOT_FOUND,
                             "Nhà cung cấp đăng nhập không được hỗ trợ.")
 
+    # Facebook dang TAT theo cau hinh (`FAS_FACEBOOK_LOGIN`).
+    #
+    # Chi an cai nut o trang dang nhap la chua du: duong dan nay van goi duoc
+    # bang tay, va mot duong dang nhap "khong ai thay" thi cung khong ai theo
+    # doi khi no hong. Chan o day de trang thai tat la THAT.
+    #
+    # Phan hien thuc VAN CON nguyen — adapter, luong doi token, cau hinh
+    # Appwrite. Bat lai chi la doi mot bien moi truong.
+    if provider == "facebook" and not settings.facebook_login_enabled:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Đăng nhập bằng Facebook tạm thời chưa khả dụng.")
+
     dich = _duong_dan_noi_bo(next)
     web = settings.web_base_url.rstrip("/")
     thanh_cong = (f"{web}/auth/callback"

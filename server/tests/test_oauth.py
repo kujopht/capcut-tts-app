@@ -57,9 +57,21 @@ class BatDauOAuth(DungIdentityGia):
         self.assertEqual(r.status_code, 307)
         self.assertTrue(r.headers.get("location"))
 
-    def test_facebook_cung_vay(self) -> None:
+    def test_facebook_dang_TAT_nen_khong_bat_dau_duoc(self) -> None:
+        """
+        Truoc day bai nay doi 307 y nhu Google. Facebook nay bi TAT theo quyet
+        dinh san pham (`FAS_FACEBOOK_LOGIN`), nen 404 moi la dung.
+
+        Phan biet HAI loai 404, va do la diem chinh: thong diep phai noi
+        "tạm thời chưa khả dụng" chu KHONG phai "không được hỗ trợ". Neu ai do
+        lo tay xoa Facebook khoi `OAUTH_PROVIDERS`, ket qua van la 404 nhung
+        thong diep se khac — va bai nay do.
+
+        Chi tiet day du o `FacebookDangTat`.
+        """
         r = self.c.get("/api/auth/oauth/facebook", follow_redirects=False)
-        self.assertEqual(r.status_code, 307)
+        self.assertEqual(r.status_code, 404)
+        self.assertIn("tạm thời chưa khả dụng", r.json()["detail"])
 
     def test_provider_la_bi_tu_choi(self) -> None:
         """
@@ -273,6 +285,101 @@ class DuongEmailKhongDoi(DungIdentityGia):
         self.assertEqual(
             self.c.get("/api/auth/me",
                        headers={"Authorization": f"Bearer {token}"}).status_code, 401)
+
+
+class FacebookDangTat(DungIdentityGia):
+    """
+    Facebook bi TAT theo quyet dinh san pham, khong phai vi hong.
+
+    Diem mau chot cua ca nhom test nay: TAT khong duoc phep nghia la XOA. Neu
+    ai do "don dep" bang cach go phan hien thuc di, ngay bat lai se thanh mot
+    lan viet lai — va cac test duoi day phai do truoc khi dieu do xay ra.
+    """
+
+    def test_mac_dinh_la_TAT(self) -> None:
+        from server.config import Settings
+
+        self.assertFalse(Settings().facebook_login_enabled)
+
+    def test_duong_bat_dau_Facebook_tra_404(self) -> None:
+        """
+        An cai nut o giao dien la CHUA DU: duong nay van goi duoc bang tay.
+        """
+        r = self.c.get("/api/auth/oauth/facebook", follow_redirects=False)
+        self.assertEqual(r.status_code, 404)
+        self.assertIn("Facebook", r.json()["detail"])
+
+    def test_Google_KHONG_bi_anh_huong(self) -> None:
+        r = self.c.get("/api/auth/oauth/google?next=/write", follow_redirects=False)
+        self.assertEqual(r.status_code, 307)
+
+    def test_bat_lai_chi_bang_MOT_bien_moi_truong(self) -> None:
+        """
+        Chung minh phan hien thuc con nguyen: doi dung mot co la Facebook chay
+        lai, khong phai viet lai gi.
+        """
+        from dataclasses import replace
+
+        cu = server_main.settings
+        server_main.settings = replace(cu, facebook_login_enabled=True)
+        self.addCleanup(lambda: setattr(server_main, "settings", cu))
+
+        r = self.c.get("/api/auth/oauth/facebook?next=/write",
+                       follow_redirects=False)
+        self.assertEqual(r.status_code, 307)
+        self.assertIn("facebook", r.headers["location"])
+
+    def test_doi_token_KHONG_phu_thuoc_nha_cung_cap(self) -> None:
+        """
+        `/api/auth/oauth/exchange` khong biet nguoi dung den tu dau, va do la
+        chu y: tat mot nha cung cap khong duoc lam hong phien cua nhung nguoi
+        da dang nhap bang no truoc do.
+        """
+        import inspect
+
+        nguon = inspect.getsource(server_main.oauth_exchange)
+        for cam in ("facebook", "google", "provider"):
+            self.assertNotIn(cam, nguon)
+
+    def test_Facebook_van_nam_trong_danh_sach_provider(self) -> None:
+        """Danh sach trang giu nguyen — cai thay doi la CO, khong phai ma."""
+        self.assertIn("facebook", server_main.OAUTH_PROVIDERS)
+
+    def test_adapter_khong_he_biet_toi_co_nay(self) -> None:
+        """
+        Co la quyet dinh SAN PHAM, cuong che o tang route. Adapter chi biet
+        cach noi chuyen voi Appwrite. Tron co xuong adapter se lam viec bat lai
+        phai sua hai cho.
+        """
+        import inspect
+
+        from server.appwrite_adapter import AppwriteIdentityAdapter
+
+        nguon = inspect.getsource(AppwriteIdentityAdapter)
+        self.assertNotIn("facebook_login_enabled", nguon)
+
+    def test_giao_dien_va_may_chu_noi_CUNG_mot_dieu(self) -> None:
+        """
+        `web/src/lib/oauth.ts` chep lai co de giao dien biet co ve nut hay
+        khong. Hai gia tri o hai ngon ngu se troi khoi nhau neu khong ai giu,
+        va hau qua thi im lang: nut hien ra nhung bam vao thi 404.
+
+        Cung khuon voi `test_limits.py`, va vi cung mot ly do.
+        """
+        import re
+        from pathlib import Path
+
+        from server.config import Settings
+
+        duong = (Path(__file__).resolve().parents[2]
+                 / "web" / "src" / "lib" / "oauth.ts")
+        self.assertTrue(duong.is_file(), "thiếu web/src/lib/oauth.ts")
+        khop = re.search(r"FACEBOOK_LOGIN_ENABLED\s*:\s*boolean\s*=\s*(true|false)",
+                         duong.read_text(encoding="utf-8"))
+        self.assertIsNotNone(khop, "không đọc được cờ ở giao diện")
+        self.assertEqual(khop.group(1) == "true",
+                         Settings().facebook_login_enabled,
+                         "cờ ở giao diện và ở máy chủ đã lệch nhau")
 
 
 class HopDongAdapter(unittest.TestCase):

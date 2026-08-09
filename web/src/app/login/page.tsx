@@ -12,6 +12,7 @@ import { LogoMark } from "@/components/Logo";
 import { safeNext } from "@/lib/nav";
 import { api } from "@/lib/api";
 import { FacebookIcon, GoogleIcon } from "@/components/ProviderIcons";
+import { FACEBOOK_LOGIN_ENABLED, GOOGLE_LOGIN_ENABLED } from "@/lib/oauth";
 
 const MIN_PASSWORD = 8;
 
@@ -150,24 +151,33 @@ function LoginForm() {
             Đăng nhập bằng nhà cung cấp không thành công. Vui lòng thử lại.
           </Alert>
         ) : null}
-        <button
-          type="button"
-          className="btn btn-block btn-provider"
-          onClick={() => {
-            window.location.href = api.oauthStartUrl("google", next);
-          }}
-        >
-          <GoogleIcon /> Tiếp tục với Google
-        </button>
-        <button
-          type="button"
-          className="btn btn-block btn-provider"
-          onClick={() => {
-            window.location.href = api.oauthStartUrl("facebook", next);
-          }}
-        >
-          <FacebookIcon /> Tiếp tục với Facebook
-        </button>
+        {GOOGLE_LOGIN_ENABLED ? (
+          <button
+            type="button"
+            className="btn btn-block btn-provider"
+            onClick={() => {
+              window.location.href = api.oauthStartUrl("google", next);
+            }}
+          >
+            <GoogleIcon /> Tiếp tục với Google
+          </button>
+        ) : null}
+        {/*
+          Facebook dang TAT. Nut nay KHONG bi xoa — no doc co o `lib/oauth.ts`,
+          va toan bo phan hien thuc phia sau van con nguyen. Bat lai la doi mot
+          bien moi truong chu khong phai viet lai ma nguon.
+        */}
+        {FACEBOOK_LOGIN_ENABLED ? (
+          <button
+            type="button"
+            className="btn btn-block btn-provider"
+            onClick={() => {
+              window.location.href = api.oauthStartUrl("facebook", next);
+            }}
+          >
+            <FacebookIcon /> Tiếp tục với Facebook
+          </button>
+        ) : null}
       </div>
 
       <div className="or-line" role="separator">

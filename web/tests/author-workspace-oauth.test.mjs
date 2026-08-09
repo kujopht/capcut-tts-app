@@ -152,12 +152,48 @@ test("trang dang nhap KHONG con day nguoi dung sang /studio", () => {
 
 /* ====================================================== OAuth: giao dien */
 
-test("trang dang nhap co ca hai nut nha cung cap", () => {
+test("nut nha cung cap doc CO, khong go cung", async () => {
   const login = read("../src/app/login/page.tsx");
+  // Ca hai nut van co trong ma nguon — cai quyet dinh hien hay khong la CO.
   assert.match(login, /Tiếp tục với Google/);
   assert.match(login, /Tiếp tục với Facebook/);
   assert.match(login, /<GoogleIcon \/>/);
   assert.match(login, /<FacebookIcon \/>/);
+  assert.match(login, /GOOGLE_LOGIN_ENABLED \? \(/);
+  assert.match(login, /FACEBOOK_LOGIN_ENABLED \? \(/);
+});
+
+test("Google HIEN, Facebook KHONG hien", async () => {
+  const { GOOGLE_LOGIN_ENABLED, FACEBOOK_LOGIN_ENABLED } = await import(
+    "../src/lib/oauth.ts"
+  );
+  assert.equal(GOOGLE_LOGIN_ENABLED, true);
+  assert.equal(FACEBOOK_LOGIN_ENABLED, false);
+});
+
+test("TAT Facebook KHONG co nghia la XOA", () => {
+  // Neu ai do "don dep" bang cach go phan hien thuc di, ngay bat lai se thanh
+  // mot lan viet lai. Bai nay do truoc khi dieu do xay ra.
+  assert.match(
+    read("../src/components/ProviderIcons.tsx"),
+    /export function FacebookIcon/,
+    "đã xoá icon Facebook",
+  );
+  assert.match(
+    read("../src/lib/api.ts"),
+    /"google" \| "facebook"/,
+    "lớp api không còn nhận facebook",
+  );
+});
+
+test("dang nhap bang email/mat khau VAN hien, khong bi co nao chi phoi", () => {
+  const login = read("../src/app/login/page.tsx");
+  // Form email nam NGOAI moi nhanh dieu kien cua co.
+  const form = login.indexOf('<form className="card stack" onSubmit={submit}>');
+  assert.ok(form > 0, "mất form email/mật khẩu");
+  assert.match(login, /id="login-email"/);
+  assert.match(login, /id="login-password"/);
+  assert.match(login, /hoặc/, "mất vạch ngăn giữa hai đường đăng nhập");
 });
 
 test("dang ky bang email VAN con", () => {

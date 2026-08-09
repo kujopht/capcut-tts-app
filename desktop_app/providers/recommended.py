@@ -24,7 +24,7 @@ from desktop_app.providers.base import (
     Voice,
 )
 
-#: Bay giong de xuat, THEO DUNG THU TU hien thi.
+#: Cac giong de xuat, THEO DUNG THU TU hien thi.
 #:
 #: Moi muc: (provider, engine_voice_id, ten_tham_khao)
 #: `ten_tham_khao` CHI de doc code cho de hieu - viec doi chieu chi dung
@@ -33,7 +33,19 @@ from desktop_app.providers.base import (
 #: LUU Y ve "Nhỏ Ngọt Ngào": yeu cau ban dau ghi ma `BV421_yinv_streaming`,
 #: nhung Voice.json thuc te KHONG co ma do (khong co ma nao chua "yinv").
 #: Ma that cua dung giong nay la `BV421_vivn_streaming` - da doi chieu truc tiep
-#: trong Voice.json. Dung ma that de danh sach du bay giong.
+#: trong Voice.json.
+#:
+#: HAI giong NghiTTS dung cuoi va DUNG THU TU NAY: "Ngọc Huyền" truoc,
+#: "Ngọc Huyền (Mới)" ngay sau. `list_voices()` cua backend sinh
+#: `recommended_order` tu chinh chi so trong tuple nay, va giao dien web sap
+#: xep theo con so do — nen thu tu o day la thu tu nguoi dung nhin thay.
+#:
+#: CANH BAO VAN HANH: nam trong danh sach nay KHONG du de mot giong cuc bo
+#: hien ra. No con phai nam trong `FAS_LOCAL_VOICES` cua moi truong do, neu
+#: khong `voice_is_public()` loc no di TRUOC khi muc de xuat duoc dung — muc
+#: ngan di mot dong va khong co log nao noi vi sao. Production bat ca 25 giong
+#: NghiTTS nen ca hai deu hien; mot moi truong chi bat `piper:ngochuyen` se
+#: chi thay mot.
 RECOMMENDED_FANFIC_VOICES: Tuple[Tuple[str, str, str], ...] = (
     (PROVIDER_CAPCUT, "BV074_streaming", "Cô Gái Hoạt Ngôn"),
     (PROVIDER_CAPCUT, "BV074_streaming_dsp", "Giọng Bé"),
@@ -41,7 +53,8 @@ RECOMMENDED_FANFIC_VOICES: Tuple[Tuple[str, str, str], ...] = (
     (PROVIDER_CAPCUT, "BV562_streaming", "Mai"),
     (PROVIDER_CAPCUT, "BV421_vivn_streaming", "Nhỏ Ngọt Ngào"),
     (PROVIDER_EDGE, "vi-VN-HoaiMyNeural", "Hoài My"),
-    (PROVIDER_PIPER, "ngochuyen", "Ngọc Huyền (mới)"),
+    (PROVIDER_PIPER, "ngochuyen", "Ngọc Huyền"),
+    (PROVIDER_PIPER, "ngochuyennew", "Ngọc Huyền (Mới)"),
 )
 
 #: Chi (provider, engine_voice_id) - dung de doi chieu.

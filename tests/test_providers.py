@@ -968,7 +968,7 @@ class TestRecommendedFanficVoices(unittest.TestCase):
         self.codes = RECOMMENDED_CODES
 
     def _catalog(self):
-        """Catalog gia lap chua ca 7 giong de xuat + vai giong nhieu."""
+        """Catalog gia lap chua DU cac giong de xuat + vai giong nhieu."""
         from desktop_app.providers.recommended import RECOMMENDED_FANFIC_VOICES
 
         voices = []
@@ -991,10 +991,11 @@ class TestRecommendedFanficVoices(unittest.TestCase):
     def test_section_exists_with_label(self):
         from desktop_app.providers.recommended import RECOMMENDED_COUNT, RECOMMENDED_LABEL
 
-        self.assertEqual(RECOMMENDED_COUNT, 7)
-        self.assertEqual(RECOMMENDED_LABEL, "\u0110\u1ec1 xu\u1ea5t Audio Fanfic (7)")
+        # Bay -> tam: them `piper:ngochuyennew` vao muc de xuat.
+        self.assertEqual(RECOMMENDED_COUNT, 8)
+        self.assertEqual(RECOMMENDED_LABEL, "\u0110\u1ec1 xu\u1ea5t Audio Fanfic (8)")
 
-    def test_exactly_seven_codes_in_order(self):
+    def test_exactly_eight_codes_in_order(self):
         expected = [
             (PROVIDER_CAPCUT, "BV074_streaming"),
             (PROVIDER_CAPCUT, "BV074_streaming_dsp"),
@@ -1002,18 +1003,21 @@ class TestRecommendedFanficVoices(unittest.TestCase):
             (PROVIDER_CAPCUT, "BV562_streaming"),
             (PROVIDER_CAPCUT, "BV421_vivn_streaming"),
             (PROVIDER_EDGE, "vi-VN-HoaiMyNeural"),
+            # Hai giong NghiTTS, LIEN NHAU va dung thu tu nay:
+            # "Ngọc Huyền" truoc, "Ngọc Huyền (Mới)" ngay sau.
             (PROVIDER_PIPER, "ngochuyen"),
+            (PROVIDER_PIPER, "ngochuyennew"),
         ]
         self.assertEqual(list(self.codes), expected)
 
     def test_no_duplicate_codes(self):
         self.assertEqual(len(self.codes), len(set(self.codes)))
 
-    def test_filter_returns_exactly_seven_in_order(self):
+    def test_filter_returns_exactly_eight_in_order(self):
         from desktop_app.providers.recommended import filter_recommended
 
         result = filter_recommended(self._catalog())
-        self.assertEqual(len(result), 7)
+        self.assertEqual(len(result), len(self.codes))
         self.assertEqual([(v.provider, v.engine_voice_id) for v in result], list(self.codes))
 
     def test_duplicate_catalog_entries_do_not_duplicate_result(self):
@@ -1022,7 +1026,7 @@ class TestRecommendedFanficVoices(unittest.TestCase):
         catalog = self._catalog()
         catalog += self._catalog()          # nhan doi toan bo catalog
         result = filter_recommended(catalog)
-        self.assertEqual(len(result), 7)
+        self.assertEqual(len(result), len(self.codes))
 
     def test_unavailable_voices_still_listed(self):
         """Giong chua kiem tra / chua kha dung VAN phai hien."""
@@ -1035,16 +1039,18 @@ class TestRecommendedFanficVoices(unittest.TestCase):
         result = filter_recommended(registry.voices)
         for voice in result:
             self.assertNotEqual(registry.status_of(voice).status, VoiceStatus.AVAILABLE)
-        self.assertEqual(len(result), 7)
+        self.assertEqual(len(result), len(self.codes))
 
-    def test_ngochuyen_listed_even_without_model(self):
+    def test_giong_NghiTTS_listed_even_without_model(self):
         from desktop_app.providers.recommended import filter_recommended
 
         result = filter_recommended(self._catalog())
         piper = [v for v in result if v.provider == PROVIDER_PIPER]
-        self.assertEqual(len(piper), 1)
-        self.assertFalse(piper[0].installed)
-        self.assertEqual(piper[0].engine_voice_id, "ngochuyen")
+        # HAI giong NghiTTS, dung thu tu: "Ngọc Huyền" roi "Ngọc Huyền (Mới)".
+        self.assertEqual([v.engine_voice_id for v in piper],
+                         ["ngochuyen", "ngochuyennew"])
+        for v in piper:
+            self.assertFalse(v.installed)
 
     def test_matching_is_by_code_not_display_name(self):
         """Doi ten hien thi KHONG duoc lam mat giong khoi danh sach."""
@@ -1054,7 +1060,7 @@ class TestRecommendedFanficVoices(unittest.TestCase):
 
         catalog = [replace(v, display_name="TEN DA DOI") for v in self._catalog()]
         result = filter_recommended(catalog)
-        self.assertEqual(len(result), 7)
+        self.assertEqual(len(result), len(self.codes))
 
     def test_registry_filter_recommended_only(self):
         registry = ProviderRegistry(
@@ -1062,7 +1068,7 @@ class TestRecommendedFanficVoices(unittest.TestCase):
         )
         registry.refresh_catalog()
         result = registry.filter_voices(recommended_only=True)
-        self.assertEqual(len(result), 7)
+        self.assertEqual(len(result), len(self.codes))
         self.assertEqual([(v.provider, v.engine_voice_id) for v in result], list(self.codes))
 
     def test_selected_voice_keeps_provider_and_key(self):
@@ -1082,12 +1088,14 @@ class TestRecommendedFanficVoices(unittest.TestCase):
             providers=[FakeProvider(PROVIDER_CAPCUT, self._catalog())]
         )
         registry.refresh_catalog()
-        self.assertEqual(len(registry.filter_voices(recommended_only=True)), 7)
+        self.assertEqual(len(registry.filter_voices(recommended_only=True)),
+                         len(self.codes))
         registry.refresh_catalog()
-        self.assertEqual(len(registry.filter_voices(recommended_only=True)), 7)
+        self.assertEqual(len(registry.filter_voices(recommended_only=True)),
+                         len(self.codes))
 
     def test_real_catalog_has_every_recommended_code(self):
-        """Bay ma nay phai TON TAI that trong catalog cua ung dung."""
+        """Moi ma de xuat phai TON TAI that trong catalog cua ung dung."""
         from desktop_app.providers.capcut_provider import CapCutProvider
         from desktop_app.providers.edge_provider import EdgeTTSProvider
         from desktop_app.providers.piper_provider import PiperLocalProvider

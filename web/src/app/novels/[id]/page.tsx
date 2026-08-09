@@ -82,36 +82,56 @@ export default function NovelDetailPage({
         </Link>
       </nav>
 
-      <header className="card stack">
-        <NovelCover
-          novelId={novel.novel_id}
-          title={novel.title}
-          coverUrl={novel.cover_url}
-          size="wide"
-        />
-        <div className="row-between">
-          <div className="stack-2" style={{ minWidth: 0, flex: "1 1 320px" }}>
-            <div className="row" style={{ gap: "var(--s2)" }}>
-              <span className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}>
-                {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
-              </span>
-              {novel.tags.map((tag) => (
-                <span key={tag} className="badge">
-                  {tag}
-                </span>
-              ))}
-            </div>
-            <h1 className="page-title">{novel.title}</h1>
-            <p className="lead">{novel.description || "Chưa có mô tả."}</p>
-            <span className="hint">
-              {chapters.length} chương · cập nhật {formatDate(novel.updated_at)}
+      {/*
+        Bia va chu nam CANH nhau tren man hinh rong, chong len nhau o mobile
+        (xem `.novel-head`). Ban cu xep bia 16:6 nam tren roi chu ben duoi: o
+        desktop, bia rong 1180px chiem gan het man hinh dau tien va day ten
+        truyen xuong duoi nep gap.
+      */}
+      <header className="novel-head">
+        <div className="novel-head-cover">
+          <NovelCover
+            novelId={novel.novel_id}
+            title={novel.title}
+            coverUrl={novel.cover_url}
+            size="card"
+          />
+        </div>
+
+        <div className="stack-2 novel-head-body">
+          <div className="row novel-head-tags">
+            <span className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}>
+              {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
             </span>
+            {novel.tags.map((tag) => (
+              <span key={tag} className="badge">
+                {tag}
+              </span>
+            ))}
           </div>
-          {isOwner ? (
-            <Link className="btn" href="/write">
-              Quản lý truyện
-            </Link>
-          ) : null}
+          <h1 className="page-title">{novel.title}</h1>
+          <p className="lead lead-narrow">
+            {novel.description || "Chưa có mô tả."}
+          </p>
+          <span className="hint">
+            {chapters.length} chương · cập nhật {formatDate(novel.updated_at)}
+          </span>
+
+          <div className="row novel-head-actions">
+            {chapters.length > 0 ? (
+              <Link
+                className="btn btn-primary"
+                href={`/chapters/${chapters[0].chapter_id}`}
+              >
+                Đọc từ đầu
+              </Link>
+            ) : null}
+            {isOwner ? (
+              <Link className="btn" href="/write">
+                Quản lý truyện
+              </Link>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -144,11 +164,10 @@ export default function NovelDetailPage({
                   <span className="list-index" aria-hidden="true">
                     {index + 1}
                   </span>
-                  <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
+                  <span className="stack-2 list-main">
                     <Link
                       href={`/chapters/${chapter.chapter_id}`}
                       className="truncate list-title"
-                      style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}
                     >
                       {chapter.title}
                     </Link>

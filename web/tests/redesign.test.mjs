@@ -227,3 +227,91 @@ test("thanh tien do co vet sang khi CHAY, va thoi khi xong", () => {
     "xong rồi mà vệt sáng vẫn chạy");
   assert.match(text, /\.progress-indeterminate \.progress-bar::after/);
 });
+
+test("reduced-motion tat CA hai thu ma rut thoi luong khong tat duoc", () => {
+  /*
+    Rut thoi luong ve 0.01ms la chua du:
+      - hieu ung nhac len van NHAY mot buoc toi vi tri moi;
+      - vet sang lap vo han van chay DUNG mot vong roi dung o giua thanh, de
+        lai mot vach sang lo lung.
+  */
+  const text = css();
+  const at = text.indexOf("@media (prefers-reduced-motion: reduce)");
+  const than = text.slice(at, at + 1200);
+  assert.match(than, /\.story-card:hover/, "hiệu ứng nhấc thẻ truyện chưa tắt");
+  assert.match(than, /\.quick-card:hover/, "hiệu ứng nhấc thẻ lối tắt chưa tắt");
+  assert.match(than, /\.progress-bar::after \{ display: none; \}/,
+    "vệt sáng còn đọng lại giữa thanh");
+  assert.match(than, /\.rise \{ animation: none; \}/);
+});
+
+/* ================================================================ mobile */
+
+test("moi bo cuc luoi moi deu xuong dong o mobile", () => {
+  const text = css();
+  const at = text.indexOf("@media (max-width: 640px)");
+  assert.notEqual(at, -1);
+  const mobile = text.slice(at);
+  for (const cls of [
+    ".home-hero",
+    ".cta-band",
+    ".audio-row",
+    ".account-hero",
+    ".novel-head",
+    ".reader",
+    ".quick-grid",
+  ]) {
+    assert.ok(mobile.includes(cls), `${cls} không có quy tắc mobile`);
+  }
+});
+
+test("nhom nut cua hang audio xuong dong rieng o mobile", () => {
+  // Ba thu tren mot hang o man hinh 375px thi ten audio bi nen con vai ky tu.
+  const text = css();
+  const mobile = text.slice(text.indexOf("@media (max-width: 640px)"));
+  const at = mobile.indexOf(".audio-row-actions");
+  assert.notEqual(at, -1);
+  assert.match(mobile.slice(at, at + 160), /grid-column: 1 \/ -1/);
+});
+
+test("bia truyen KHONG tran ca be ngang khi da xuong dong", () => {
+  // Mot bia 3:2 rong ca man hinh cao hon ca khung nhin — nguoi dung phai cuon
+  // mot man hinh chi de thay ten truyen.
+  const text = css();
+  const tablet = text.slice(
+    text.indexOf("@media (max-width: 900px)"),
+    text.indexOf("@media (max-width: 640px)"),
+  );
+  assert.match(tablet, /\.novel-head-cover \{ max-width: \d+px; \}/);
+});
+
+test("nut bam moi du 44px o mobile", () => {
+  const text = css();
+  const mobile = text.slice(text.indexOf("@media (max-width: 640px)"));
+  const at = mobile.indexOf("min-height: 44px");
+  assert.notEqual(at, -1);
+  assert.match(mobile.slice(Math.max(0, at - 220), at), /\.novel-pick/,
+    "nút chọn truyện chưa đủ vùng bấm");
+});
+
+/* ========================================================= doc duoc */
+
+test("cot chu khi doc chuong hep lai theo KY TU, khong theo pixel", () => {
+  // `ch` co gian theo co chu, nen o mobile cot tu hep lai thay vi bi ep o mot
+  // con so cung.
+  const doc = rule(".reader");
+  assert.match(doc, /max-width: \d+ch/);
+  assert.match(rule(".reader .prose"), /line-height: 1\.9/);
+});
+
+test("truyen dang chon co tin hieu NGOAI mau sac", () => {
+  // Khong duoc dung mau lam tin hieu duy nhat.
+  const chon = rule('.novel-pick[aria-current="true"]');
+  assert.match(chon, /inset 3px 0 0/, "chỉ đổi màu, không có vạch dọc");
+});
+
+test("muc dang xem tren thanh dieu huong cung vay", () => {
+  // Vach duoi chu la tin hieu hinh dang, khong phai mau.
+  assert.match(css(), /\.nav-link\[aria-current="page"\]::after/);
+});
+

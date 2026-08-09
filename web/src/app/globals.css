@@ -1658,6 +1658,75 @@ button, input, select, textarea {
   gap: var(--s3);
 }
 
+/* ============================================================ trang truyen */
+
+/*
+  Bia doc ben trai, chu ben phai. Ban cu xep bia 16:6 nam TREN roi chu ben
+  duoi: o desktop, mot dai bia rong 1180px chiem gan het man hinh dau tien va
+  day chinh ten truyen xuong duoi nep gap.
+*/
+.novel-head {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: start;
+  padding: var(--s5);
+  border: 1px solid var(--line);
+  border-radius: var(--r4);
+  background:
+    radial-gradient(640px 280px at 100% 0%, #8b6cff1a, transparent 70%),
+    linear-gradient(160deg, var(--bg-1), #0c0e15);
+  box-shadow: var(--shadow-1), var(--edge);
+}
+.novel-head-cover .cover {
+  border-radius: var(--r3);
+  border-bottom: 0;
+  box-shadow: var(--shadow-2);
+}
+.novel-head-body { min-width: 0; }
+.novel-head-tags { gap: var(--s2); }
+.novel-head-actions { margin-top: var(--s2); }
+
+/* Cot giua cua mot hang chuong. Truoc day la `style` inline o hai trang. */
+.list-main { flex: 1; min-width: 0; }
+.list-title { font-weight: 600; font-size: var(--t-sm); }
+
+/* ============================================================ doc chuong */
+
+/*
+  Cot chu hep hon phan con lai cua trang.
+
+  ~68 ky tu mot dong la nguong mat con lan duoc tu cuoi dong nay sang dau dong
+  sau ma khong lac. Ca be rong 1180px thi doc mot chuong dai rat met — day la
+  ly do bao giay in mot cot hep chu khong tran ca kho giay.
+*/
+.reader {
+  max-width: 68ch;
+  padding: var(--s6) 0;
+}
+.reader .prose {
+  font-size: var(--t-md);
+  line-height: 1.9;
+  color: #dde3f0;
+  /* Chu Viet co nhieu dau; `break-word` giu cac tu dai khong tran ra ngoai o
+     man hinh hep. */
+  overflow-wrap: break-word;
+}
+.reader-head { max-width: 68ch; }
+/* Doan dau tien khong thut dong; cac doan sau cach nhau bang khoang trang chu
+   khong phai thut — de doc hon tren man hinh. */
+
+.reader-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding-top: var(--s5);
+  border-top: 1px solid var(--line-soft);
+}
+
+.listen-player { flex: 1; min-width: 0; }
+
 /* ------------------------------------------------- chon truyen o cot trai */
 
 /*
@@ -1813,7 +1882,19 @@ button, input, select, textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  .card-link:hover, .feature:hover { transform: none; }
+  /*
+    Rut ngan thoi luong la CHUA DU cho hai thu: mot phan tu bi dich cho, va
+    mot vet sang lap vo han.
+
+    Hieu ung "nhac len khi ro chuot" van nhay mot buoc du thoi luong bang 0 —
+    phai bo han `transform`. Con vet sang tren thanh tien do thi
+    `animation-iteration-count: 1` van cho no chay DUNG mot vong roi dung o
+    giua thanh, de lai mot vach sang lo lung. Giau han di.
+  */
+  .card-link:hover, .feature:hover, .story-card:hover, .quick-card:hover,
+  .story-card:hover .cover-image { transform: none; }
+  .progress-bar::after { display: none; }
+  .rise { animation: none; }
 }
 
 /* ------------------------------------------------------------ tablet */
@@ -1828,6 +1909,26 @@ button, input, select, textarea {
   .footer-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .footer-brand { grid-column: 1 / -1; max-width: none; }
   .input-search { width: 150px; }
+
+  /* --- cac bo cuc moi cua ban thiet ke lai --------------------------------
+     Tat ca deu la luoi hai/ba cot o desktop. O be rong nay, cot phai bi ep
+     con vai chuc pixel — cho chung xuong dong thay vi bop lai. */
+  .novel-head { grid-template-columns: minmax(0, 1fr); }
+  /* Bia khong duoc chiem tron be rong khi da xuong dong: mot bia 3:2 rong ca
+     man hinh cao hon ca khung nhin. */
+  .novel-head-cover { max-width: 280px; }
+
+  .account-hero { grid-template-columns: auto minmax(0, 1fr); }
+  /* Goi cuoc xuong dong rieng va can TRAI — can phai o mot hang rieng trong
+     nhu bi bo quen o goc. */
+  .account-hero-plan {
+    grid-column: 1 / -1;
+    align-items: flex-start;
+    text-align: left;
+    max-width: none;
+  }
+
+  .home-hero { padding: var(--s6) var(--s5); }
 }
 
 /* ------------------------------------------------------------ mobile */
@@ -1885,7 +1986,7 @@ button, input, select, textarea {
      Dat `min-height` chu khong phai `height` de nut co chu dai van cao them
      duoc thay vi tran chu ra ngoai. */
   .btn, .btn-sm, .chip, .seg-item, .nav-link, .account-link,
-  .brand, .menu-item, .input-search { min-height: 44px; }
+  .brand, .menu-item, .input-search, .novel-pick { min-height: 44px; }
   .btn-sm { padding: 8px 13px; }
   .chip { padding: 8px 14px; }
   /* Nhan trong the truyen KHONG phai vung bam — xem `.chip-static`. */
@@ -1905,4 +2006,44 @@ button, input, select, textarea {
      NGANG, moi nut du 44x44. */
   .list-move { flex-direction: row; gap: var(--s2); }
   .btn-icon { width: 44px; min-width: 44px; height: 44px; font-size: 15px; }
+
+  /* --- cac bo cuc moi cua ban thiet ke lai ------------------------------- */
+
+  /* Dai mo dau: chu xuong co, va hai nut tran ca be ngang de bam de. */
+  .home-hero { padding: var(--s5) var(--s4); }
+  .home-hero-title { font-size: var(--t-2xl); max-width: none; }
+  .home-hero .btn-lg { flex: 1 1 auto; }
+  .cta-band { padding: var(--s5) var(--s4); }
+
+  /* Hang audio: bia va ten tren mot hang, nhom nut xuong dong rieng chiem
+     tron be ngang — giong hang chuong o tren, va vi cung mot ly do. */
+  .audio-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--s3);
+  }
+  .audio-row-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+  .audio-row-actions .btn { flex: 1 1 auto; }
+
+  /* Danh thiep tai khoan: anh dai dien nho lai, moi thu ve mot cot. */
+  .account-hero {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--s4);
+    gap: var(--s3);
+  }
+  .account-avatar { width: 52px; height: 52px; font-size: 18px; }
+
+  .novel-head { padding: var(--s4); }
+  .novel-head-cover { max-width: none; }
+  .novel-head-actions .btn { flex: 1 1 auto; }
+
+  /* Doc chuong: cot chu da hep san boi `ch`, chi can bo bot khoang tren duoi. */
+  .reader { padding: var(--s4) 0; }
+  .reader .prose { font-size: var(--t-base); line-height: 1.85; }
+  .reader-foot .btn { flex: 1 1 auto; }
+
+  .filter-bar { padding: var(--s3); }
+  .quick-grid { grid-template-columns: minmax(0, 1fr); }
 }

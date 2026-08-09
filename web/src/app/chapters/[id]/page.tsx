@@ -72,9 +72,12 @@ export default function ChapterPage({
         </Link>
       </nav>
 
-      <header className="stack-2">
+      <header className="stack-2 reader-head">
         <h1 className="page-title">{chapter.title}</h1>
-        <span className="hint">{formatNumber(chapter.char_count)} ký tự</span>
+        <span className="hint">
+          {formatNumber(chapter.char_count)} ký tự
+          {novel ? ` · ${novel.title}` : ""}
+        </span>
       </header>
 
       {audio ? (
@@ -108,7 +111,7 @@ export default function ChapterPage({
               coverUrl={novel?.cover_url}
               size="thumb"
             />
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="listen-player">
               <AudioPlayer chapterId={chapter.chapter_id} title={chapter.title} />
             </div>
           </div>
@@ -132,13 +135,39 @@ export default function ChapterPage({
         />
       )}
 
-      <section className="card" aria-label="Nội dung chương">
+      {/*
+        Cot chu hep hon phan con lai cua trang. Mot dong dai ~68 ky tu la nguong
+        mat con lan duoc tu cuoi dong nay sang dau dong sau ma khong lac; ca be
+        rong 1180px thi doc mot chuong dai rat met.
+      */}
+      <section className="reader" aria-label="Nội dung chương">
         {chapter.content ? (
           <div className="prose">{chapter.content}</div>
         ) : (
           <p className="hint">Chương này chưa có nội dung.</p>
         )}
       </section>
+
+      {/*
+        Loi ra o CUOI chuong. Nguoi vua doc xong dang o day, khong phai o dau
+        trang — bat ho cuon nguoc len de tim duong sang chuong sau la mot viec
+        thua.
+
+        KHONG co nut "chuong truoc / chuong sau": `GET /api/chapters/{id}` tra
+        ve `NovelBrief`, tuc la KHONG mang danh sach chuong anh em. Bia hai nut
+        do se phai goi them mot vong `/api/novels/{id}` moi lan mo chuong. Ghi
+        lai trong bao cao thay vi tu them.
+      */}
+      {novel ? (
+        <nav className="reader-foot" aria-label="Điều hướng chương">
+          <Link className="btn" href={`/novels/${novel.novel_id}`}>
+            <span aria-hidden="true">←</span> Danh sách chương
+          </Link>
+          <Link className="btn btn-ghost" href="/fanfic">
+            Khám phá truyện khác
+          </Link>
+        </nav>
+      ) : null}
     </div>
   );
 }

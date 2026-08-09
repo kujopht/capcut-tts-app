@@ -112,8 +112,13 @@ test("o tim nam trong header, khong phai mot thanh khong lo giua trang", () => {
   // Trang chu KHONG duoc tu dung o tim thu hai.
   assert.ok(!read("../src/app/page.tsx").includes("SiteSearch"));
 
+  // Y cua rang buoc la o tim phai NHO va co chan tren, khong phai mot con so
+  // cu the: ban thiet ke lai gop o tim va nut "Tìm" thanh mot cum co chung
+  // vien, nen be rong cua rieng o nhap doi theo.
   const rule = css().match(/\.input-search\s*\{[^}]*\}/)?.[0] ?? "";
-  assert.match(rule, /width:\s*200px/, "ô tìm ở header phải nhỏ, không tràn");
+  const rong = Number(rule.match(/width:\s*(\d+)px/)?.[1] ?? 0);
+  assert.ok(rong > 0 && rong <= 240,
+    `ô tìm ở header phải nhỏ, không tràn — đang là ${rong || "không đặt"}px`);
 });
 
 test("o tim chi DIEU HUONG, khong nhan ban duong tim thu hai", () => {

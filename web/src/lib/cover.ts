@@ -6,14 +6,24 @@
  * khong phai tu thu tu render hay so ngau nhien.
  */
 
-/** Cac cap mau du phong — deu lay tu bang mau thuong hieu trong globals.css. */
+/**
+ * Cac cap mau du phong — deu lay tu bang mau thuong hieu trong globals.css.
+ *
+ * Ban truoc dung mau ruc: vang `#fbbf24`, do `#f87171`, xanh la `#4ade80`. Tren
+ * mot nen gan den, sau tam bia nhu vay trong nhu den neon, va chung hut mat
+ * manh hon chinh ten truyen ngay ben duoi.
+ *
+ * Sau khi doi sang tim/lo, day la cac sac do TOI hon va deu nam trong ho tim →
+ * lo → xanh bien. Van du khac nhau de nhan ra truyen quen, nhung khong con
+ * tranh cho voi chu. `.cover-fallback` con phu them mot lop toi o duoi.
+ */
 export const COVER_PALETTE = [
-  ["#7c8cff", "#4dd6c1"],
-  ["#4dd6c1", "#60a5fa"],
-  ["#60a5fa", "#7c8cff"],
-  ["#fbbf24", "#f87171"],
-  ["#f87171", "#7c8cff"],
-  ["#4ade80", "#4dd6c1"],
+  ["#6d4aef", "#22d3ee"],
+  ["#22d3ee", "#3b82f6"],
+  ["#3b82f6", "#8b6cff"],
+  ["#a855f7", "#6d4aef"],
+  ["#0ea5e9", "#6d4aef"],
+  ["#14b8a6", "#3b82f6"],
 ] as const;
 
 export function paletteFor(seed: string): readonly [string, string] {

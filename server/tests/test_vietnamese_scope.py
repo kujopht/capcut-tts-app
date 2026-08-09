@@ -1,12 +1,13 @@
 """
-Pham vi giong cua WEB: chi tieng Viet, va muc "Giọng đề xuất" dung bay giong.
+Pham vi giong cua WEB: chi tieng Viet, va muc "Giọng đề xuất" dung danh
+sach do app desktop khai bao.
 
 Quyet dinh san pham: ban web hien tai chi phuc vu giong tieng Viet. Registry
 VAN giu du 452 giong moi thu tieng — desktop app dung chung registry do, va xoa
 giong nuoc ngoai khoi registry la pha ho. Cai bi thu hep la PHAM VI CONG BO cua
 web, bang cau hinh, nen mo lai ngon ngu khac sau nay chi la doi mot bien.
 
-Bay giong de xuat KHONG duoc go tay o day. Nguon duy nhat la
+Danh sach de xuat KHONG duoc go tay o day. Nguon duy nhat la
 `desktop_app/providers/recommended.py` — chinh danh sach chu du an da chon trong
 app desktop. Moi test o duoi doi chieu voi nguon do chu khong voi mot ban chep.
 

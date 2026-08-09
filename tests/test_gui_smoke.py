@@ -667,7 +667,7 @@ class TestMainWindow(unittest.TestCase):
         self.window.recommended_check.setChecked(False)
         self.assertEqual(list(self.window.catalog.favorites), before)
 
-    def test_recommended_includes_ngochuyen_without_model(self) -> None:
+    def test_recommended_includes_NghiTTS_without_model(self) -> None:
         from desktop_app.providers.base import VoiceStatus
 
         self.window.recommended_check.setChecked(True)
@@ -675,22 +675,25 @@ class TestMainWindow(unittest.TestCase):
             piper_rows = [
                 v for v in self.window._visible_voices if v.provider == "piper"
             ]
-            self.assertEqual(len(piper_rows), 1)
-            voice = piper_rows[0]
-            self.assertEqual(voice.engine_voice_id, "ngochuyen")
-            info = self.window.registry.status_of(voice)
-            self.assertEqual(info.status, VoiceStatus.NOT_INSTALLED)
+            # HAI giong NghiTTS, dung thu tu khai bao.
+            self.assertEqual([v.engine_voice_id for v in piper_rows],
+                             ["ngochuyen", "ngochuyennew"])
+            for voice in piper_rows:
+                info = self.window.registry.status_of(voice)
+                self.assertEqual(info.status, VoiceStatus.NOT_INSTALLED)
         finally:
             self.window.recommended_check.setChecked(False)
 
     def test_recommended_survives_status_refresh(self) -> None:
+        from desktop_app.providers.recommended import RECOMMENDED_COUNT
+
         self.window.recommended_check.setChecked(True)
         try:
             self.window._refresh_voice_table()
-            self.assertEqual(self.window.voice_table.rowCount(), 7)
+            self.assertEqual(self.window.voice_table.rowCount(), RECOMMENDED_COUNT)
             self.window._update_provider_status()
             self.window._refresh_voice_table()
-            self.assertEqual(self.window.voice_table.rowCount(), 7)
+            self.assertEqual(self.window.voice_table.rowCount(), RECOMMENDED_COUNT)
         finally:
             self.window.recommended_check.setChecked(False)
 
@@ -701,10 +704,12 @@ class TestMainWindow(unittest.TestCase):
         return list(self.window._visible_voices)
 
     def test_every_recommended_voice_has_preview_button(self) -> None:
+        from desktop_app.providers.recommended import RECOMMENDED_COUNT
+
         rows = self._recommended_rows()
         try:
-            self.assertEqual(len(rows), 7)
-            for index in range(7):
+            self.assertEqual(len(rows), RECOMMENDED_COUNT)
+            for index in range(len(rows)):
                 button = self.window.voice_table.cellWidget(index, 3)
                 self.assertIsNotNone(button, f"dòng {index} thiếu nút nghe thử")
                 self.assertTrue(button.text())

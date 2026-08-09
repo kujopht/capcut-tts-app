@@ -100,7 +100,7 @@ export interface Voice {
    * file `.onnx` nao nen no luon false. Dung co nay de quyet dinh hien thi.
    */
   runs_on_worker: boolean;
-  /** Thuoc muc "Giong de xuat" (bay giong do chu du an chon trong app desktop). */
+  /** Thuoc muc "Giong de xuat" (danh sach do chu du an chon trong app desktop). */
   recommended: boolean;
   /**
    * Thu tu trong muc de xuat, tinh tu 0. `null` khi khong thuoc muc do.

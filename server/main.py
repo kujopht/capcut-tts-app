@@ -310,13 +310,18 @@ def health() -> Dict[str, Any]:
         "service": "fanfic-audio-api",
         "version": app.version,
         **settings.describe(),
-        # Bang `job_locks` da co chua. `False` nghia la `create_job_once` dang
-        # lui ve hanh vi cu (tao thang, khong khoa) — tuc la lo hong dong thoi
-        # da quay lai, va nguoi van hanh can biet NGAY chu khong doi toi luc
-        # thay nam dong trung nhau trong thu vien.
+        # Duong khoa job da duoc CHUNG MINH chay chua. BA trang thai, va su
+        # khac nhau giua chung la quan trong:
         #
-        # Ban mock luon co khoa (mot `threading.Lock` trong bo nho).
-        "job_lock_ready": bool(getattr(store, "_job_lock_ready", True)),
+        #   null  — chua biet: chua co lan tao job nao di qua duong nay
+        #   true  — mot giao dich khoa da commit that
+        #   false — da thu va hong; dang chay o duong cu, KHONG co khoa
+        #
+        # Truoc day cho nay ep ve `bool(...)`, nen "chua biet" hien ra thanh
+        # `false`, va co khoi tao lac quan `True` thi hien thanh `true` khi
+        # chua he thu gi. Ca hai deu khien mot lan kiem `/api/health` ngay sau
+        # deploy tra loi sai — da xay ra that.
+        "job_lock_ready": getattr(store, "_job_lock_ready", None),
     }
 
 

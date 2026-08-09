@@ -233,6 +233,25 @@ export default function WritePage() {
   // Khoa on dinh cho effect: mang moi moi lan render se lam effect chay lai vo tan.
   const dangChayKey = dangChay.map((j) => j.job_id).sort().join(",");
 
+  /*
+    NHIP DEM, va no la thu lam vong poll THUC SU LAP.
+
+    Ban truoc chi phu thuoc `[dangChayKey, toast]`. Sau moi lan poll,
+    `setJobs()` tao object moi nen `dangChay` duoc tinh lai — nhung
+    `dangChayKey` van la CUNG MOT CHUOI (van dung mot `job_id` do). Dependency
+    khong doi thi effect khong chay lai, nen khong co `setTimeout` nao duoc dat
+    tiep: vong poll chet sau DUNG MOT nhip.
+
+    Hau qua tren production: poll bat duoc `pending -> running` (luc do
+    `total_parts` con 0), roi dung han. Job xong sau 7 giay nhung giao dien
+    dung mai o "Đang xử lý / Đang chia chương thành các phần…".
+
+    `tick` nhich sau MOI lan poll, ke ca khi khong co gi doi, nen dependency
+    luon thay doi. Khi khong con job nao chay, `dangChayKey` rong va effect
+    thoat ngay — vong dung lai dung luc.
+  */
+  const [tick, setTick] = useState(0);
+
   useEffect(() => {
     if (!dangChayKey) return;
     const ids = dangChayKey.split(",");
@@ -252,11 +271,15 @@ export default function WritePage() {
               toast.error("Tạo audio thất bại.");
             }
           }
+          // Dat NGOAI vong lap va khong dieu kien: mot lan mang chap (moi
+          // request deu `catch` thanh null) cung phai dat duoc nhip ke tiep,
+          // neu khong mot loi mang thoang qua se giet vong poll y het loi cu.
+          setTick((t) => t + 1);
         },
       );
     }, POLL_MS);
     return () => window.clearTimeout(id);
-  }, [dangChayKey, toast]);
+  }, [dangChayKey, tick, toast]);
 
   /* ---------------------------------------------------------------- suy */
 

@@ -21,7 +21,6 @@ import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import {
   ALL_VOICES_LABEL,
-  NGHITTS_LABEL,
   RECOMMENDED_LABEL,
   defaultVoiceId,
   usableVoices,
@@ -364,27 +363,20 @@ export default function StudioPage() {
                       onChange={(e) => setVoiceId(e.target.value)}
                     >
                       {/*
-                        Ba mục, MỘT `<select>`. Bảy giọng đề xuất và 25 giọng
-                        NghiTTS xuất hiện lại trong "Tất cả giọng tiếng Việt" —
-                        đó là chủ ý: ba cách trình bày cùng một bộ bản ghi,
-                        không nhân bản voice nào. Vì cùng một `value`, chọn ở
-                        mục này đồng bộ ngay với mục kia mà không cần trạng thái
-                        thứ hai.
+                        Hai mục, MỘT `<select>`. Bảy giọng đề xuất xuất hiện
+                        lại trong "Tất cả giọng tiếng Việt" — đó là chủ ý: hai
+                        cách trình bày cùng một bộ bản ghi, không nhân bản
+                        voice nào. Vì cùng một `value`, chọn ở mục này đồng bộ
+                        ngay với mục kia mà không cần trạng thái thứ hai.
+
+                        Đã từng có mục thứ ba dành riêng cho NghiTTS; bỏ đi
+                        theo yêu cầu sản phẩm. Giọng NghiTTS nằm trong "Tất cả
+                        giọng tiếng Việt" như mọi provider khác.
                       */}
                       <optgroup label={RECOMMENDED_LABEL}>
                         {voiceGroups.recommended.map((voice) => (
                           <option
                             key={`goi-y-${voice.voice_id}`}
-                            value={voice.voice_id}
-                          >
-                            {voiceOptionLabel(voice)}
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label={NGHITTS_LABEL}>
-                        {voiceGroups.nghitts.map((voice) => (
-                          <option
-                            key={`nghitts-${voice.voice_id}`}
                             value={voice.voice_id}
                           >
                             {voiceOptionLabel(voice)}

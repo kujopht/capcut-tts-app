@@ -26,9 +26,45 @@ dung duoc. Do la ly do phai khoa lai.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
+from desktop_app.providers.builtin_catalog import NGHITTS_DISPLAY_NAMES
 from desktop_app.providers.recommended import RECOMMENDED_CODES
 from server import tts_bridge
+
+#: Bang ten chinh thuc do chu du an cung cap, chep NGUYEN VAN vao bo test.
+#:
+#: Co y KHONG import tu `builtin_catalog` roi so voi chinh no — lam vay thi bo
+#: test chi chung minh "ma nguon bang chinh no", va mot lan go nham dau sac se
+#: di qua ma khong ai thay. Doi ten hien thi phai sua o HAI cho, va do la muc
+#: dich.
+TEN_CHINH_THUC = {
+    "adam1": "Adam",
+    "banmai": "Ban Mai",
+    "calmwoman3688": "Nữ Điềm Đạm",
+    "chieuthanh": "Chiêu Thanh",
+    "deepman3909": "Nam Trầm",
+    "duyoryx3175": "Duy Oryx",
+    "lacphi": "Lạc Phi",
+    "maiphuong": "Mai Phương",
+    "manhdung": "Mạnh Dũng",
+    "minhkhang": "Minh Khang",
+    "minhquang": "Minh Quang",
+    "minhthu": "Minh Thư",
+    "mytam2": "Mỹ Tâm 1",
+    "mytam2794": "Mỹ Tâm 2",
+    "ngochuyen": "Ngọc Huyền",
+    "ngochuyennew": "Ngọc Huyền (Mới)",
+    "ngocngan3701": "Ngọc Ngân",
+    "phuongtrang": "Phương Trang",
+    "taian2": "Tài An 1",
+    "taian4": "Tài An 2",
+    "thanhphuong2": "Thanh Phương",
+    "thientam": "Thiên Tâm",
+    "tranthanh3870": "Trần Thanh",
+    "vietthao3886": "Việt Thảo",
+    "yannew": "Yan (Mới)",
+}
 
 
 class CauHinhGia:
@@ -88,6 +124,40 @@ class NhanCuaGiongNghiTTS(unittest.TestCase):
             self.assertNotIn("Sẵn sàng", v["status_label"] or "")
             self.assertNotEqual(v["status"], "available")
 
+    def test_display_name_dung_bang_ten_chinh_thuc(self) -> None:
+        thuc_te = {v["voice_id"]: v["display_name"] for v in self.piper}
+        mong_doi = {f"piper:{k}": t for k, t in TEN_CHINH_THUC.items()}
+        self.assertEqual(thuc_te, mong_doi)
+
+    def test_khong_con_ten_ky_thuat_lam_ten_hien_thi(self) -> None:
+        """
+        Truoc day 22 giong lay CHINH `voice_key` lam `display_name`, nen giao
+        dien hien "adam1", "maiphuong". Nay da co bang ten that.
+        """
+        for v in self.piper:
+            khoa = v["voice_id"].split(":", 1)[1]
+            self.assertNotEqual(v["display_name"], khoa, v["voice_id"])
+
+    def test_ten_hien_thi_khong_lap_lai_ten_bo_giong(self) -> None:
+        for v in self.piper:
+            for cam in ("NghiTTS", "Piper", "piper", "máy riêng"):
+                self.assertNotIn(cam, v["display_name"], v["voice_id"])
+
+    def test_ten_hien_thi_khong_trung_nhau(self) -> None:
+        """Hai dong trung ten trong mot `<select>` la khong chon duoc dung."""
+        ten = [v["display_name"] for v in self.piper]
+        self.assertEqual(len(set(ten)), len(ten), "có tên hiển thị trùng nhau")
+
+    def test_hoan_doi_hau_to_moi_dung_huong(self) -> None:
+        """
+        `ngochuyen` truoc day mang ten "Ngọc Huyền (mới)". Bang ten chinh thuc
+        chuyen hau to do sang `ngochuyennew`. Day la mot HOAN DOI, khong phai
+        doi ten mot chieu — khoa lai de khong ai vo tinh doi nguoc.
+        """
+        theo_id = {v["voice_id"]: v["display_name"] for v in self.piper}
+        self.assertEqual(theo_id["piper:ngochuyen"], "Ngọc Huyền")
+        self.assertEqual(theo_id["piper:ngochuyennew"], "Ngọc Huyền (Mới)")
+
     def test_voice_id_van_la_khoa_ben_vung(self) -> None:
         """
         Doi nhan hien thi KHONG duoc dong toi `voice_id`: khoa do da nam trong
@@ -113,6 +183,31 @@ class NhanCuaGiongNghiTTS(unittest.TestCase):
                       "`status_of()` phải nằm trong nhánh KHÔNG-cục-bộ")
 
 
+class DoiTenKhongDuocDongToiKhoa(unittest.TestCase):
+    """
+    `voice_key` == ten tep `.onnx` tren may chu tong hop, va `voice_id` xay tu
+    no. Doi ten hien thi ma lo tay vao day thi worker tim khong ra model va moi
+    job hong `MODEL_NOT_INSTALLED` — mot cach hong ma bo test nhan chi doc ten
+    hien thi se khong bat duoc.
+    """
+
+    KHOA_MONG_DOI = frozenset(TEN_CHINH_THUC)
+
+    def test_bo_voice_key_khong_doi(self) -> None:
+        from desktop_app.providers.builtin_catalog import PIPER_BUILTIN
+
+        self.assertEqual({i["voice_key"] for i in PIPER_BUILTIN},
+                         self.KHOA_MONG_DOI)
+
+    def test_bang_ten_phu_dung_bo_khoa_do(self) -> None:
+        self.assertEqual(set(NGHITTS_DISPLAY_NAMES), self.KHOA_MONG_DOI)
+
+    def test_voice_id_xay_tu_voice_key_khong_qua_bang_tra_nao(self) -> None:
+        self.assertEqual(
+            {f"piper:{k}" for k in self.KHOA_MONG_DOI},
+            set(tts_bridge.nghitts_voice_ids()))
+
+
 class KhongDungToiCapCutVaEdge(unittest.TestCase):
     """Yeu cau ro rang: khong xoa va khong doi giong nao khac."""
 
@@ -134,6 +229,56 @@ class KhongDungToiCapCutVaEdge(unittest.TestCase):
         for v in khac:
             self.assertNotEqual(v["provider_label"], "NghiTTS", v["voice_id"])
             self.assertFalse(v["runs_on_worker"], v["voice_id"])
+
+    def test_tong_so_giong_dung_51(self) -> None:
+        """24 CapCut + 2 Edge + 25 NghiTTS."""
+        from collections import Counter
+
+        dem = Counter(v["provider"] for v in self.vs)
+        self.assertEqual(dict(dem), {"capcut": 24, "edge": 2, "piper": 25})
+        self.assertEqual(len(self.vs), 51)
+
+    def test_metadata_provider_van_giu_nguyen(self) -> None:
+        """
+        Bo nhan bo giong khoi TEN HIEN THI la viec cua giao dien. API van phai
+        bao ra `provider`, `provider_label` va `runs_on_worker` — giao dien
+        khac (hoac ban sau) con can chung de phan biet.
+        """
+        piper = [v for v in self.vs if v["provider"] == "piper"]
+        for v in piper:
+            self.assertEqual(v["provider_label"], "NghiTTS")
+            self.assertTrue(v["runs_on_worker"])
+
+
+class FixtureChoBoTestWeb(unittest.TestCase):
+    """
+    `web/tests/fixtures/voices-production.json` la ban chup `/api/voices` voi
+    dung 25 giong production. Bo test web doc no de kiem nhan hien thi ma
+    khong phai chay Python.
+
+    Mot fixture chep tay se troi khoi may chu sau vai lan sua, va troi mot cach
+    IM LANG: bo test web van xanh trong khi no dang kiem mot su that da cu.
+    Bai test nay la day noi giua hai ben.
+    """
+
+    DUONG_DAN = (Path(__file__).resolve().parents[2]
+                 / "web" / "tests" / "fixtures" / "voices-production.json")
+
+    def test_fixture_khop_voi_may_chu(self) -> None:
+        import json
+
+        thuc_te = tts_bridge.list_voices(CauHinhGia())
+        trong_tep = json.loads(self.DUONG_DAN.read_text(encoding="utf-8"))
+        khoa = lambda v: v["voice_id"]                      # noqa: E731
+        self.assertEqual(
+            sorted(trong_tep, key=khoa), sorted(thuc_te, key=khoa),
+            "fixture đã trôi khỏi `list_voices()` — sinh lại nó, đừng sửa tay")
+
+    def test_fixture_du_51_giong(self) -> None:
+        import json
+
+        self.assertEqual(
+            len(json.loads(self.DUONG_DAN.read_text(encoding="utf-8"))), 51)
 
 
 class GiongDeXuatPhaiThucSuDuocPhucVu(unittest.TestCase):

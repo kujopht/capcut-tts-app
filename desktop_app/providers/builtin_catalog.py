@@ -50,46 +50,83 @@ EDGE_BUILTIN: List[Dict[str, str]] = [
 #: theo `<voice_key>.onnx` nhu truoc.
 #:
 #: THU TU o day chinh la thu tu hien thi trong catalog.
+#: Ten hien thi CHINH THUC cua tung model NghiTTS, do chu du an cung cap.
+#:
+#: DAY LA NOI KHAI BAO DUY NHAT. Truoc do `display_name` bang chinh
+#: `voice_key` vi khong co bang doi chieu nao, va tu tach `banmai` thanh
+#: "Ban Mai" la DOAN ranh gioi tu lan DOAN dau. Nay da co bang that nen
+#: khong con phai doan.
+#:
+#: KHOA cua bang nay la `voice_key`, tuc la ten tep `.onnx` (khong duoi), va
+#: no KHONG doi. `voice_id` (`piper:<voice_key>`) da nam trong job va track
+#: da tao, va gop phan sinh `output_key` tren R2 — doi ten hien thi khong
+#: duoc dong toi no.
+#:
+#: Luu y mot hoan doi CO Y: truoc day `ngochuyen` mang ten "Ngọc Huyền (mới)".
+#: Nay `ngochuyen` la "Ngọc Huyền" con hau to "(Mới)" chuyen sang model
+#: `ngochuyennew`, dung nhu bang chu du an dua. `voice_id` cua ca hai giu
+#: nguyen, nen job cu van tro dung model cu.
+NGHITTS_DISPLAY_NAMES: Dict[str, str] = {
+    "adam1": "Adam",
+    "banmai": "Ban Mai",
+    "calmwoman3688": "Nữ Điềm Đạm",
+    "chieuthanh": "Chiêu Thanh",
+    "deepman3909": "Nam Trầm",
+    "duyoryx3175": "Duy Oryx",
+    "lacphi": "Lạc Phi",
+    "maiphuong": "Mai Phương",
+    "manhdung": "Mạnh Dũng",
+    "minhkhang": "Minh Khang",
+    "minhquang": "Minh Quang",
+    "minhthu": "Minh Thư",
+    "mytam2": "Mỹ Tâm 1",
+    "mytam2794": "Mỹ Tâm 2",
+    "ngochuyen": "Ngọc Huyền",
+    "ngochuyennew": "Ngọc Huyền (Mới)",
+    "ngocngan3701": "Ngọc Ngân",
+    "phuongtrang": "Phương Trang",
+    "taian2": "Tài An 1",
+    "taian4": "Tài An 2",
+    "thanhphuong2": "Thanh Phương",
+    "thientam": "Thiên Tâm",
+    "tranthanh3870": "Trần Thanh",
+    "vietthao3886": "Việt Thảo",
+    "yannew": "Yan (Mới)",
+}
+
 PIPER_BUILTIN: List[Dict[str, str]] = [
     {
         "voice_key": "ngochuyen",
-        "display_name": "Ngọc Huyền (mới)",
-        "description": "Giọng nữ review phim — Piper Local",
+        "display_name": NGHITTS_DISPLAY_NAMES["ngochuyen"],
+        "description": "Giọng nữ review phim — NghiTTS",
         "language": "vi-VN",
         "gender": "Female",
     },
     {
         "voice_key": "calmwoman3688",
-        "display_name": "Giọng nữ điềm đạm (calmwoman3688)",
-        "description": "Giọng nữ điềm đạm — Piper Local",
+        "display_name": NGHITTS_DISPLAY_NAMES["calmwoman3688"],
+        "description": "Giọng nữ điềm đạm — NghiTTS",
         "language": "vi-VN",
         "gender": "Female",
     },
     {
         "voice_key": "deepman3909",
-        "display_name": "Giọng nam trầm (deepman3909)",
-        "description": "Giọng nam trầm — Piper Local",
+        "display_name": NGHITTS_DISPLAY_NAMES["deepman3909"],
+        "description": "Giọng nam trầm — NghiTTS",
         "language": "vi-VN",
         "gender": "Male",
     },
     # ------------------------------------------------------------------
     # Phần còn lại của bộ NghiTTS (22 giọng).
     #
-    # `display_name` GIỮ NGUYÊN TÊN KỸ THUẬT, và `gender` để trống. Đó là
-    # chủ ý, không phải làm cho xong:
+    # `gender` VẪN để trống, và vẫn là chủ ý. Bảng tên chính thức chỉ nói
+    # tên hiển thị; nó không nói giới tính. Suy giới tính từ tên là đoán, và
+    # đoán sai thì bộ lọc giọng nam/nữ sau này lọc sai. Ba giọng phía trên
+    # giữ `gender` CŨ vì chúng đã có từ trước và đã được kiểm chứng.
     #
-    #   * Tách `banmai` thành "Ban Mai" hay `minhthu` thành "Minh Thư" là
-    #     ĐOÁN ranh giới từ và ĐOÁN dấu. Đoán sai thì tên hiển thị sai với
-    #     người dùng cuối, và không có nguồn nào để đối chiếu.
-    #   * Vài tên trông như tên người thật (`mytam2`, `tranthanh3870`,
-    #     `thanhphuong2`). Gán tên hiển thị dạng người thật cho một giọng
-    #     tổng hợp là chuyện định danh, không phải chuyện thẩm mỹ — xem
-    #     `docs/GCE-WORKER-CAPACITY.md` mục rủi ro.
-    #   * Ba giọng phía trên giữ nguyên tên và giới tính CŨ để không phá
-    #     tương thích ngược.
-    #
-    # TODO: khi có bảng tên chính thức từ nguồn model, cập nhật
-    # `display_name`/`gender` ở ĐÂY — đây là nơi duy nhất khai báo.
+    # Rủi ro định danh vẫn còn: `mytam2`, `tranthanh3870`, `thanhphuong2`
+    # trùng dạng tên người nổi tiếng, và bảng tên chính thức làm chúng hiện
+    # rõ hơn chứ không làm nó biến mất — xem `docs/GCE-WORKER-CAPACITY.md`.
     #
     # `voice_key` == tên tệp `.onnx` (không đuôi). Ánh xạ tất định, không
     # cần bảng tra riêng: `<voice_key>.onnx` + `<voice_key>.onnx.json`.
@@ -99,8 +136,8 @@ PIPER_BUILTIN: List[Dict[str, str]] = [
 ] + [
     {
         "voice_key": khoa,
-        "display_name": khoa,          # TODO: tên hiển thị chính thức
-        "description": "Piper Local (NghiTTS)",
+        "display_name": NGHITTS_DISPLAY_NAMES[khoa],
+        "description": "NghiTTS",
         "language": "vi-VN",
         "gender": "",                  # không đoán
     }

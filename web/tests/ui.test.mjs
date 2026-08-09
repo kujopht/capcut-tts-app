@@ -146,7 +146,10 @@ test("Audio Studio co du cac dieu khien bat buoc", () => {
   assert.match(studio, /MAX_CHARS/, "phai hien gioi han ky tu");
   assert.match(studio, /ký tự/, "phai hien so ky tu");
   assert.match(studio, /RATES/, "phai chon duoc toc do");
-  assert.match(studio, /api\.createJob\(\s*\n?\s*created\.chapter\.chapter_id,\s*\n?\s*voiceId,\s*\n?\s*rate,?\s*\n?\s*\)/s,
+  // `chapterId` chu khong phai `created.chapter.chapter_id`: bam lai voi cung
+  // noi dung thi dung lai chuong cu, de khoa van tay o backend nhan ra hai lan
+  // bam la mot. Rate van phai di kem.
+  assert.match(studio, /api\.createJob\(chapterId, voiceId, rate\)/,
     "phai gui rate len backend");
   assert.match(studio, /Thử lại/, "job that bai phai co nut thu lai");
   assert.match(studio, /Lịch sử audio/, "phai co lich su");

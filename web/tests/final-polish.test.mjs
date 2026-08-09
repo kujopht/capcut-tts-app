@@ -132,31 +132,51 @@ test("L2: listNovels cu khong bi doi — tuong thich nguoc", () => {
    ===================================================================== */
 
 test("L3: lich su duoc dong bo o MOI vong poll", () => {
+  /*
+    Truoc day `/studio` giu mot mang `jobs` rieng va phai tu dong bo trong
+    vong poll — co luc khung "Tien trinh" da hien "Dang xu ly" ma the trong
+    "Lich su audio" van con "Dang xep hang".
+
+    Gio lich su duoc SUY RA tu ban do cua `useJobTracker`, cai duoc ghi lai o
+    moi nhip. Hai cho khong the noi hai dieu khac nhau nua vi chung la mot.
+  */
   const src = studio();
-  const at = src.indexOf("api\n        .getJob(");
-  const body = src.slice(at > 0 ? at : src.indexOf(".getJob("), src.indexOf(".catch(", src.indexOf(".getJob(")));
-  assert.match(body, /setJobs\(\(current\) => \[/);
-  // Truoc day `setJobs` nam TRONG dieu kien "da ket thuc"
+  assert.match(src, /const history = useMemo<HistoryItem\[\]>\(\(\) => \{/);
+  assert.match(src, /return Object\.values\(jobs\)/,
+    "lich su phai lay tu vong theo doi, khong giu mang rieng");
   assert.ok(
-    !/if \(r\.job\.status === "completed" \|\| r\.job\.status === "failed"\) \{\s*\n\s*setJobs/.test(body),
-    "setJobs khong duoc nam trong dieu kien ket thuc",
+    !/const \[jobs, setJobs\] = useState/.test(src),
+    "/studio van giu mang job rieng — se lech voi khung tien do",
   );
 });
 
-test("L3: toast van chi keu o trang thai ket thuc", () => {
+test("L3: toast van chi keu o trang thai ket thuc", async () => {
+  /*
+    Neu khong co dieu kien, toast se keu o MOI nhip poll trong suot luc job
+    chay. Dieu kien do gio nam o `gopNhipPoll`, va no chat hon ban cu: chi bao
+    khi job VUA chuyen sang trang thai ket thuc, nen mot job da xong tu truoc
+    cung khong keu lai. Kiem bang cach chay that, khong quet ma nguon.
+  */
+  const { gopNhipPoll } = await import("../src/lib/jobs.ts");
+  const dang_chay = { job_id: "j1", chapter_id: "c1", status: "running" };
+  const xong = { job_id: "j1", chapter_id: "c1", status: "completed" };
+
+  let ban_do = gopNhipPoll({}, [dang_chay]);
+  assert.equal(ban_do.xong.length, 0, "job dang chay ma da keu toast");
+
+  ban_do = gopNhipPoll(ban_do.jobs, [dang_chay]);
+  assert.equal(ban_do.xong.length + ban_do.hong.length, 0, "keu toast giua chung");
+
+  ban_do = gopNhipPoll(ban_do.jobs, [xong]);
+  assert.equal(ban_do.xong.length, 1, "xong ma khong bao");
+
+  ban_do = gopNhipPoll(ban_do.jobs, [xong]);
+  assert.equal(ban_do.xong.length, 0, "bao lai o nhip sau");
+
+  // Va o `/studio` moi trang thai ket thuc chi co DUNG mot toast.
   const src = studio();
-  const at = src.indexOf(".getJob(");
-  const body = src.slice(at, src.indexOf(".catch(", at));
-  // Ca hai toast phai di kem dieu kien trang thai — neu khong se keu moi vong
-  // poll (2 giay mot lan) trong suot luc job dang chay.
-  assert.match(body, /if \(r\.job\.status === "completed"\) toast\.ok/);
-  assert.match(body, /else if \(r\.job\.status === "failed"\)/);
-  const toastLines = body.split("\n").filter((l) => /toast\.(ok|error|push)\(/.test(l));
-  assert.equal(toastLines.length, 2, `chi duoc 2 loi goi toast: ${toastLines}`);
-  for (const line of toastLines) {
-    assert.match(line, /r\.job\.status ===|toast\.error\("Tạo audio thất bại/,
-      `toast khong co dieu kien: ${line.trim()}`);
-  }
+  assert.match(src, /onCompleted: \(\) => toast\.ok\("Audio đã sẵn sàng\."\)/);
+  assert.match(src, /onFailed: \(\) => toast\.error\("Tạo audio thất bại/);
 });
 
 /* =====================================================================

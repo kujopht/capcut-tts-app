@@ -44,14 +44,15 @@ test("Audio Studio giu nguyen chuc nang, chi doi cho dung trong dieu huong", () 
   for (const dau_hieu of [
     "MAX_CHARS",          // gioi han ky tu
     ".createJob(",        // tao job that
-    ".getJob(",           // theo doi tien trinh
+    "useJobTracker",      // theo doi tien trinh — dung chung voi `/write`
     "ensureStudioNovel",  // kho chua rieng cua Studio
     "voiceSections",      // bo chon giong
     "AudioPlayer",        // nghe tai cho
     "Lịch sử audio",
   ]) {
-    // So khop `.getJob(` chu khong phai `api.getJob`: vong poll viet la
-    // `api\n  .getJob(...)`, nen chuoi lien tuc `api.getJob` khong ton tai.
+    // Vong poll da chuyen sang `lib/useJobTracker.ts` de `/studio` va `/write`
+    // dung chung mot ban. `/studio` khong con tu goi `getJob` nua — do la chu
+    // y, va `job-progress-shared.test.mjs` khoa lai chinh cho do.
     assert.ok(studio.includes(dau_hieu), `Audio Studio mất "${dau_hieu}"`);
   }
 });

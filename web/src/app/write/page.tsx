@@ -18,7 +18,6 @@ import {
   api,
   type Chapter,
   type Novel,
-  type TtsJob,
   type Voice,
 } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
@@ -33,22 +32,20 @@ import {
   voiceSections,
 } from "@/lib/voices";
 import { loginHref } from "@/lib/nav";
-import { dangChayDauTien, moiNhatTheoChuong } from "@/lib/jobs";
+import { dangChayDauTien } from "@/lib/jobs";
+import { useJobTracker } from "@/lib/useJobTracker";
 import { fanficOnly } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
+import { JobProgress } from "@/components/JobProgress";
 import {
   Alert,
   ConfirmDialog,
   EmptyState,
   ErrorState,
-  JobBadge,
   Loading,
-  ProgressBar,
   SkeletonList,
   formatNumber,
 } from "@/components/ui";
-
-const POLL_MS = 1500;
 
 /** Thao tac xoa dang cho xac nhan. */
 type PendingDelete =
@@ -116,7 +113,21 @@ export default function WritePage() {
     `focusChapterId` chi quyet dinh khung "Tien trinh" o duoi dang noi ve
     chuong nao. No la chuyen TRINH BAY; `jobs` moi la trang thai that.
   */
-  const [jobs, setJobs] = useState<Record<string, TtsJob>>({});
+  const {
+    jobs,
+    khoiPhuc: khoiPhucJob,
+    theoDoi: theoDoiJob,
+    quenChuong: quenJobCuaChuong,
+    quenHet: quenHetJob,
+  } = useJobTracker({
+    onCompleted: (moi) => {
+      toast.ok("Audio của chương đã sẵn sàng.");
+      setAudioByChapter((current) => ({ ...current, [moi.chapter_id]: true }));
+      // Vua tao lai xong thi audio khop noi dung hien tai -> tat canh bao
+      setStaleByChapter((current) => ({ ...current, [moi.chapter_id]: false }));
+    },
+    onFailed: () => toast.error("Tạo audio thất bại."),
+  });
   const [focusChapterId, setFocusChapterId] = useState("");
   const job = focusChapterId ? (jobs[focusChapterId] ?? null) : null;
   const [confirmPublish, setConfirmPublish] = useState<"publish" | "unpublish" | null>(
@@ -150,12 +161,12 @@ export default function WritePage() {
         setVoices(voiceList.voices);
         setVoiceId((current) => current || defaultVoiceId(voiceList.voices));
         setSelectedId((current) => current || mine[0]?.novel_id || "");
-        setJobs(moiNhatTheoChuong(jobList.jobs));
+        khoiPhucJob(jobList.jobs);
         setFocusChapterId((current) => current || dangChayDauTien(jobList.jobs));
       })
       .catch((cause) => setError(errorMessage(cause)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [khoiPhucJob]);
 
   /** Nut "Thu lai" chay tu su kien nguoi dung. */
   const retryLoad = useCallback(() => {
@@ -214,72 +225,14 @@ export default function WritePage() {
     loadChapters(selectedId);
   }, [selectedId, loadChapters]);
 
-  /* ------------------------------------------------------------ theo doi */
-
   /*
-    Theo doi MOI job dang chay, khong chi cai dang duoc nhin.
+    Vong theo doi nam o `useJobTracker` — dung MOT ban cho ca `/write` va
+    `/studio`. Truoc day moi trang tu viet lay, va do la ly do `/studio` khong
+    duoc huong cac ban va ve tien do cua trang nay.
 
-    Backend cho toi `MAX_ACTIVE_JOBS` job mot luc, nen chi poll mot cai la
-    nhung cai con lai dung im o trang thai cu cho toi khi nguoi dung bam vao
-    chung. So request van nho: toi da la so job dang chay, khong phai so chuong.
+    Hook theo doi MOI job dang chay, khong chi cai dang duoc nhin: backend cho
+    toi `MAX_ACTIVE_JOBS` job mot luc.
   */
-  const dangChay = useMemo(
-    () =>
-      Object.values(jobs).filter(
-        (j) => j.status === "pending" || j.status === "running",
-      ),
-    [jobs],
-  );
-  // Khoa on dinh cho effect: mang moi moi lan render se lam effect chay lai vo tan.
-  const dangChayKey = dangChay.map((j) => j.job_id).sort().join(",");
-
-  /*
-    NHIP DEM, va no la thu lam vong poll THUC SU LAP.
-
-    Ban truoc chi phu thuoc `[dangChayKey, toast]`. Sau moi lan poll,
-    `setJobs()` tao object moi nen `dangChay` duoc tinh lai — nhung
-    `dangChayKey` van la CUNG MOT CHUOI (van dung mot `job_id` do). Dependency
-    khong doi thi effect khong chay lai, nen khong co `setTimeout` nao duoc dat
-    tiep: vong poll chet sau DUNG MOT nhip.
-
-    Hau qua tren production: poll bat duoc `pending -> running` (luc do
-    `total_parts` con 0), roi dung han. Job xong sau 7 giay nhung giao dien
-    dung mai o "Đang xử lý / Đang chia chương thành các phần…".
-
-    `tick` nhich sau MOI lan poll, ke ca khi khong co gi doi, nen dependency
-    luon thay doi. Khi khong con job nao chay, `dangChayKey` rong va effect
-    thoat ngay — vong dung lai dung luc.
-  */
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!dangChayKey) return;
-    const ids = dangChayKey.split(",");
-    const id = window.setTimeout(() => {
-      Promise.all(ids.map((jid) => api.getJob(jid).catch(() => null))).then(
-        (ket_qua) => {
-          for (const r of ket_qua) {
-            if (!r) continue;
-            const moi = r.job;
-            setJobs((current) => ({ ...current, [moi.chapter_id]: moi }));
-            if (moi.status === "completed") {
-              toast.ok("Audio của chương đã sẵn sàng.");
-              setAudioByChapter((current) => ({ ...current, [moi.chapter_id]: true }));
-              // Vua tao lai xong thi audio khop noi dung hien tai -> tat canh bao
-              setStaleByChapter((current) => ({ ...current, [moi.chapter_id]: false }));
-            } else if (moi.status === "failed") {
-              toast.error("Tạo audio thất bại.");
-            }
-          }
-          // Dat NGOAI vong lap va khong dieu kien: mot lan mang chap (moi
-          // request deu `catch` thanh null) cung phai dat duoc nhip ke tiep,
-          // neu khong mot loi mang thoang qua se giet vong poll y het loi cu.
-          setTick((t) => t + 1);
-        },
-      );
-    }, POLL_MS);
-    return () => window.clearTimeout(id);
-  }, [dangChayKey, tick, toast]);
 
   /* ---------------------------------------------------------------- suy */
 
@@ -500,14 +453,14 @@ export default function WritePage() {
       }
       try {
         const result = await api.createJob(chapterId, voiceId);
-        setJobs((current) => ({ ...current, [chapterId]: result.job }));
+        theoDoiJob(result.job);
         setFocusChapterId(chapterId);
         toast.push("info", result.reused ? "Dùng lại audio đã tạo." : "Đang tạo audio…");
       } catch (cause) {
         toast.error(errorMessage(cause));
       }
     },
-    [voiceId, toast],
+    [voiceId, theoDoiJob, toast],
   );
 
   /* --------------------------------------------------------------- xoa */
@@ -528,7 +481,7 @@ export default function WritePage() {
         setSelectedId(left[0]?.novel_id ?? "");
         setChapters([]);
         setAudioByChapter({});
-        setJobs({});
+        quenHetJob();
         setFocusChapterId("");
         toast.ok(
           `Đã xoá truyện cùng ${result.removed.chapters ?? 0} chương và ` +
@@ -542,11 +495,7 @@ export default function WritePage() {
           delete next[target.id];
           return next;
         });
-        setJobs((current) => {
-          const next = { ...current };
-          delete next[target.id];
-          return next;
-        });
+        quenJobCuaChuong(target.id);
         if (focusChapterId === target.id) setFocusChapterId("");
         if (editingChapterId === target.id) setEditingChapterId("");
         toast.ok(
@@ -561,7 +510,15 @@ export default function WritePage() {
     } finally {
       setDeleting(false);
     }
-  }, [pendingDelete, novels, focusChapterId, editingChapterId, toast]);
+  }, [
+    pendingDelete,
+    novels,
+    focusChapterId,
+    editingChapterId,
+    quenHetJob,
+    quenJobCuaChuong,
+    toast,
+  ]);
 
   /* --------------------------------------------------------------- render */
 
@@ -1067,9 +1024,10 @@ export default function WritePage() {
                   )}
 
                   {job ? (
-                    <div className="stack-2" aria-live="polite">
-                      <div className="row-between">
-                        <span className="hint">
+                    <JobProgress
+                      job={job}
+                      tieuDe={
+                        <>
                           Tiến trình tạo audio
                           {focusChapterId
                             ? ` · ${
@@ -1077,73 +1035,39 @@ export default function WritePage() {
                                   ?.title ?? "Chương"
                               }`
                             : ""}
-                        </span>
-                        <JobBadge status={job.status} />
-                      </div>
-                      {job.status === "pending" || job.status === "running" ? (
-                        <>
-                          {/*
-                            KHONG bia ty le. Truoc khi worker bao `total_parts`
-                            thi khong ai biet chuong se ra bao nhieu doan, nen
-                            thanh chay vo dinh moi la su that; dat dai mot con
-                            so "6%" cho do trong la noi doi voi nguoi dung.
-                          */}
-                          <ProgressBar
-                            percent={job.total_parts ? job.progress : 0}
-                            indeterminate={!job.total_parts}
-                            label={
-                              job.total_parts
-                                ? `Đang xử lý · ${job.progress}%`
-                                : "Đang chuẩn bị…"
-                            }
-                          />
-                          {job.total_parts ? (
-                            <div className="row-between">
-                              <span className="job-percent">{job.progress}%</span>
-                              <span className="hint">
-                                {job.done_parts} / {job.total_parts} phần
-                              </span>
-                            </div>
-                          ) : (
-                            /*
-                              "Đang chuẩn bị…" chu khong phai "Đang chia chương
-                              thành các phần…". Cau cu MO TA SAI viec dang xay
-                              ra: chia chuong la thao tac trong bo nho, xong
-                              trong mot phan nghin giay. Thu that su dien ra o
-                              day la cho — cho worker nhan job, hoac cho
-                              `_PIPER_LOCK` khi mot job khac dang chay.
-                            */
-                            <span className="hint">Đang chuẩn bị…</span>
-                          )}
                         </>
-                      ) : null}
-                      {job.status === "failed" ? (
+                      }
+                      ghiChu={
                         <>
-                          <Alert kind="error">
-                            {job.error_message || "Không rõ nguyên nhân."}
-                          </Alert>
-                          <div className="row">
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-primary"
-                              onClick={() => makeAudio(job.chapter_id)}
-                            >
-                              Thử lại
-                            </button>
-                          </div>
+                          {job.status === "failed" ? (
+                            <>
+                              <Alert kind="error">
+                                {job.error_message || "Không rõ nguyên nhân."}
+                              </Alert>
+                              <div className="row">
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-primary"
+                                  onClick={() => makeAudio(job.chapter_id)}
+                                >
+                                  Thử lại
+                                </button>
+                              </div>
+                            </>
+                          ) : null}
+                          {job.status === "completed" && focusChapterId ? (
+                            <AudioPlayer
+                              chapterId={focusChapterId}
+                              title={
+                                chapters.find((c) => c.chapter_id === focusChapterId)
+                                  ?.title ?? "Chương"
+                              }
+                              compact
+                            />
+                          ) : null}
                         </>
-                      ) : null}
-                      {job.status === "completed" && focusChapterId ? (
-                        <AudioPlayer
-                          chapterId={focusChapterId}
-                          title={
-                            chapters.find((c) => c.chapter_id === focusChapterId)?.title ??
-                            "Chương"
-                          }
-                          compact
-                        />
-                      ) : null}
-                    </div>
+                      }
+                    />
                   ) : null}
                 </section>
 

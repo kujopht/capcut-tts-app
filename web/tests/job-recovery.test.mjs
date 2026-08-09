@@ -10,6 +10,10 @@
  *   1. backend khong con cho hai request cung tao mot job (test o Python);
  *   2. `/write` tim lai job tu KHO sau khi tai lai trang;
  *   3. `/library` chi hien mot ban hien hanh cho moi chuong.
+ *
+ * Phan vong theo doi da chuyen sang `lib/useJobTracker.ts` de `/studio` dung
+ * chung — cac bai lien quan toi no nam o `job-progress-shared.test.mjs`. Cho
+ * nay chi con giu duong DAU DAY cua `/write`.
  */
 
 import { test } from "node:test";
@@ -18,6 +22,7 @@ import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const write = () => read("../src/app/write/page.tsx");
+const tracker = () => read("../src/lib/useJobTracker.ts");
 
 /**
  * Bo chu thich truoc khi quet.
@@ -34,7 +39,7 @@ const codeOnly = (src) =>
 test("/write hoi KHO khi nap trang, khong doi nguoi dung bam lai", () => {
   const src = write();
   assert.match(src, /api\.listJobs\(\)/, "không hỏi kho về job đang chạy");
-  assert.match(src, /setJobs\(moiNhatTheoChuong\(jobList\.jobs\)\)/);
+  assert.match(src, /khoiPhucJob\(jobList\.jobs\)/);
 });
 
 test("khoi phuc dung MOT request, khong N+1", () => {
@@ -93,15 +98,15 @@ test("moiNhatTheoChuong khong tron job cua hai chuong", async () => {
 /* ============================================== job theo tung chuong */
 
 test("job duoc giu theo chuong, khong phai MOT job toan cuc", () => {
-  const src = write();
+  const src = tracker();
   assert.match(src, /useState<Record<string, TtsJob>>\(\{\}\)/,
     "vẫn giữ một job toàn cục — hai chương cùng xếp hàng sẽ đè nhau");
-  assert.ok(!/const \[job, setJob\] = useState<TtsJob \| null>/.test(src));
+  assert.ok(!/const \[job, setJob\] = useState<TtsJob \| null>/.test(write()));
 });
 
 test("poll MOI job dang chay, khong chi cai dang duoc nhin", () => {
-  const src = write();
-  assert.match(src, /Object\.values\(jobs\)\.filter\(/);
+  const src = tracker();
+  assert.match(src, /Object\.values\(jobs\)\.filter\(dangChayJob\)/);
   assert.match(src, /Promise\.all\(ids\.map\(/);
 });
 
@@ -117,89 +122,51 @@ test("vong poll co nhip dem trong dependency, khong chi chay mot lan", () => {
     Ket qua: poll dung MOT nhip, bat duoc `pending -> running` roi dung han.
     Job xong sau 7 giay ma giao dien ket o "Đang xử lý" mai mai.
   */
-  const src = write();
+  const src = tracker();
   const at = src.indexOf("const id = window.setTimeout(");
   assert.notEqual(at, -1, "khong tim thay vong poll");
   const sau = src.slice(at, at + 1800);
 
   assert.match(sau, /setTick\(\(t\) => t \+ 1\)/,
     "không có nhịp đếm — vòng poll sẽ chết sau một nhịp");
-  assert.match(src, /\}, \[dangChayKey, tick, toast\]\)/,
+  assert.match(src, /\}, \[dangChayKey, tick, pollMs\]\)/,
     "nhịp đếm phải nằm trong dependency của effect");
 });
 
 test("nhip dem duoc dat NGOAI vong lap ket qua va khong dieu kien", () => {
   // Mot lan mang chap (moi request deu `catch` thanh null) van phai dat duoc
   // nhip ke tiep, neu khong mot loi thoang qua se giet vong poll y het loi cu.
-  const src = write();
+  const src = codeOnly(tracker());
+  const mo = src.indexOf("(ket_qua) => {");
   const at = src.indexOf("setTick((t) => t + 1)");
-  assert.notEqual(at, -1);
-  const truoc = src.slice(Math.max(0, at - 400), at);
-  // Dau `}` dong vong `for` phai nam TRUOC `setTick`.
-  assert.ok(truoc.includes("}"), "setTick nằm trong vòng lặp kết quả");
-  assert.ok(!/if \([^)]*\)\s*setTick/.test(src), "setTick bị đặt sau điều kiện");
+  assert.ok(mo !== -1 && at > mo, "khong tim thay than cua `.then`");
+
+  const than = src.slice(mo, at);
+  assert.ok(!/\bfor \(/.test(than), "setTick nằm trong vòng lặp kết quả");
+  assert.ok(!/\bif \(/.test(than), "setTick bị đặt sau điều kiện");
 });
 
 test("job ket thuc thi vong poll TU DUNG", () => {
-  // `dangChay` chi giu `pending`/`running`; het job dang chay thi
-  // `dangChayKey` rong va effect thoat ngay o dong dau.
-  const src = write();
+  // `khoaTheoDoi` chi giu `pending`/`running`; het job dang chay thi khoa rong
+  // va effect thoat ngay o dong dau.
+  const src = tracker();
   assert.match(src, /if \(!dangChayKey\) return;/);
-  assert.match(src, /j\.status === "pending" \|\| j\.status === "running"/);
+  assert.match(read("../src/lib/jobs.ts"),
+    /const CHUA_XONG: JobStatus\[\] = \["pending", "running"\];/);
 });
 
 test("completed thi cap nhat audio va tat canh bao ngay trong nhip do", () => {
   const src = write();
-  const at = src.indexOf('moi.status === "completed"');
+  const at = src.indexOf("onCompleted:");
   assert.notEqual(at, -1);
-  const khoi = src.slice(at, at + 400);
+  const khoi = src.slice(at, at + 500);
   assert.match(khoi, /setAudioByChapter/);
   assert.match(khoi, /setStaleByChapter/);
 });
 
 test("failed thi bao loi cho nguoi dung", () => {
   const src = write();
-  assert.match(src, /moi\.status === "failed"/);
-  assert.match(src, /toast\.error\("Tạo audio thất bại\."\)/);
-});
-
-/* ================================================== tien do that, khong bia */
-
-test("tien do hien PHAN TRAM va SO PHAN khi da biet tong", () => {
-  const src = write();
-  assert.match(src, /\{job\.progress\}%/);
-  assert.match(src, /\{job\.done_parts\} \/ \{job\.total_parts\} phần/);
-});
-
-test("KHONG bia ty le khi chua biet total_parts", () => {
-  // Ban cu dat `percent={job.progress || 6}` — mot con so 6% khong den tu dau
-  // ca, chi de thanh tien trinh trong "co dong tinh".
-  const src = write();
-  assert.ok(!/job\.progress \|\| 6/.test(src), "vẫn bịa 6%");
-  assert.match(src, /percent=\{job\.total_parts \? job\.progress : 0\}/);
-  assert.match(src, /indeterminate=\{!job\.total_parts\}/);
-});
-
-test("truoc khi biet tong thi noi 'Đang chuẩn bị…'", () => {
-  /*
-    Cau cu la "Đang chia chương thành các phần…", va no MO TA SAI viec dang
-    xay ra: chia chuong la thao tac trong bo nho, xong trong mot phan nghin
-    giay. Thu that su dien ra o day la CHO — cho worker nhan job, hoac cho
-    `_PIPER_LOCK` khi mot job khac dang chay.
-  */
-  // `codeOnly`: chu thich ngay canh doan sua co trich nguyen van cau cu de
-  // giai thich vi sao no bi bo — quet ca tep se bat trung chinh loi giai thich.
-  const src = codeOnly(write());
-  assert.match(src, /Đang chuẩn bị…/);
-  assert.ok(!src.includes("Đang chia chương thành các phần"),
-    "vẫn còn câu mô tả sai việc đang xảy ra");
-});
-
-test("khi da biet tong thi nhan cua thanh tien trinh mang % that", () => {
-  const src = write();
-  assert.match(src, /`Đang xử lý · \$\{job\.progress\}%`/);
-  // Va van co dong "x / y phần" ben duoi.
-  assert.match(src, /\{job\.done_parts\} \/ \{job\.total_parts\} phần/);
+  assert.match(src, /onFailed: \(\) => toast\.error\("Tạo audio thất bại\."\)/);
 });
 
 /* ========================================== thu vien: mot dong moi chuong */

@@ -9,7 +9,7 @@
  */
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   type Chapter,
@@ -19,6 +19,8 @@ import {
 } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
+import { dangChayJob } from "@/lib/jobs";
+import { useJobTracker } from "@/lib/useJobTracker";
 import {
   ALL_VOICES_LABEL,
   RECOMMENDED_LABEL,
@@ -29,13 +31,13 @@ import {
 } from "@/lib/voices";
 import { ensureStudioNovel } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
+import { JobProgress } from "@/components/JobProgress";
 import {
   Alert,
   EmptyState,
   ErrorState,
   JobBadge,
   Loading,
-  ProgressBar,
   SkeletonList,
   formatDate,
   formatNumber,
@@ -44,7 +46,13 @@ import {
 /** Gioi han cua Studio — dat o day de tranh job chay qua lau. */
 const MAX_CHARS = 20_000;
 const WARN_AT = 0.85;
-const POLL_MS = 1500;
+
+/** Van ban da gui di, de biet lan bam sau co phai CUNG mot noi dung khong. */
+interface DaGui {
+  title: string;
+  text: string;
+  chapterId: string;
+}
 
 const RATES = [
   { value: "0.8", label: "Chậm" },
@@ -66,7 +74,6 @@ export default function StudioPage() {
   const [workspace, setWorkspace] = useState<Novel | null>(null);
   const [voices, setVoices] = useState<Voice[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [jobs, setJobs] = useState<TtsJob[]>([]);
   const [booting, setBooting] = useState(true);
   const [bootError, setBootError] = useState("");
 
@@ -77,10 +84,22 @@ export default function StudioPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
-  const [activeJob, setActiveJob] = useState<TtsJob | null>(null);
   const [activeChapterId, setActiveChapterId] = useState("");
+  const [daGui, setDaGui] = useState<DaGui | null>(null);
 
-  const pollTimer = useRef<number | null>(null);
+  /*
+    CUNG mot vong theo doi voi `/write` — xem `lib/useJobTracker.ts`.
+
+    Truoc day trang nay tu viet lay: chi theo doi DUNG MOT job, va ve tien do
+    bang `percent={activeJob.progress || 8}` — mot con so 8% khong den tu dau
+    ca. Cac ban va cua `/write` khong bao gio toi day duoc vi khong co gi dung
+    chung de sua mot lan.
+  */
+  const { jobs, khoiPhuc: khoiPhucJob, theoDoi: theoDoiJob } = useJobTracker({
+    onCompleted: () => toast.ok("Audio đã sẵn sàng."),
+    onFailed: () => toast.error("Tạo audio thất bại. Xem chi tiết bên dưới."),
+  });
+  const activeJob = activeChapterId ? (jobs[activeChapterId] ?? null) : null;
 
   /* ---------------------------------------------------------- nap du lieu */
 
@@ -102,23 +121,28 @@ export default function StudioPage() {
         setWorkspace(novel);
         setChapters(detail.chapters);
         setVoices(voiceList.voices);
-        setJobs(jobList.jobs);
         setVoiceId((current) => current || defaultVoiceId(voiceList.voices));
-        // Job con dang chay tu MOT PHIEN TRANG TRUOC. Khong nap lai no vao
-        // `activeJob` thi vong poll o duoi thoat ngay (`if (!activeJob) return`),
-        // va the trong "Lich su audio" se dung im o "Dang xu ly" mai mai — job
-        // da xong tu lau ma nguoi dung phai tu tai lai trang moi thay.
-        const dangChay = jobList.jobs.find(
-          (j) => j.status === "pending" || j.status === "running",
-        );
-        if (dangChay) {
-          setActiveJob((current) => current ?? dangChay);
-          setActiveChapterId((current) => current || dangChay.chapter_id);
+        /*
+          KHOI PHUC SAU F5 — va sau ca khi nguoi dung roi trang roi quay lai.
+
+          KHO MOI LA NGUON SU THAT: `listJobs()` la mot request cho TAT CA job,
+          khong doc `job_id` tu localStorage. Job dang chay tu mot phien truoc
+          duoc nap thang vao vong theo doi, nen tien do chay tiep va khi xong
+          thi tu cap nhat — khong can F5 lan nua.
+        */
+        khoiPhucJob(jobList.jobs);
+        const dangChay = jobList.jobs.filter(dangChayJob);
+        if (dangChay.length > 0) {
+          // Cai chay lau nhat truoc: no gan xong nhat.
+          const som_nhat = dangChay.reduce((a, b) =>
+            a.created_at <= b.created_at ? a : b,
+          );
+          setActiveChapterId((current) => current || som_nhat.chapter_id);
         }
       })
       .catch((cause) => setBootError(errorMessage(cause)))
       .finally(() => setBooting(false));
-  }, [bootstrap]);
+  }, [bootstrap, khoiPhucJob]);
 
   /** Nut "Thu lai" — chay tu su kien nguoi dung nen dat trang thai truc tiep duoc. */
   const retryBoot = useCallback(() => {
@@ -132,39 +156,6 @@ export default function StudioPage() {
     load();
   }, [sessionLoading, profile, load]);
 
-  /* ------------------------------------------------------------- theo doi */
-
-  useEffect(() => {
-    if (!activeJob || activeJob.status === "completed" || activeJob.status === "failed") {
-      return;
-    }
-    const id = window.setTimeout(() => {
-      api
-        .getJob(activeJob.job_id)
-        .then((r) => {
-          setActiveJob(r.job);
-          // Dong bo lich su o MOI vong poll, khong chi khi job ket thuc.
-          // Truoc day khung "Tien trinh" da hien "Dang xu ly" ma the trong
-          // "Lich su audio" van con "Dang xep hang" — hai cho noi hai dieu khac
-          // nhau ve cung mot job.
-          setJobs((current) => [
-            r.job,
-            ...current.filter((j) => j.job_id !== r.job.job_id),
-          ]);
-          // Toast thi CHI o trang thai ket thuc, neu khong se keu moi vong poll
-          if (r.job.status === "completed") toast.ok("Audio đã sẵn sàng.");
-          else if (r.job.status === "failed") {
-            toast.error("Tạo audio thất bại. Xem chi tiết bên dưới.");
-          }
-        })
-        .catch(() => {
-          /* mang chap chon — vong sau thu lai */
-        });
-    }, POLL_MS);
-    pollTimer.current = id;
-    return () => window.clearTimeout(id);
-  }, [activeJob, toast]);
-
   /* ------------------------------------------------------------- dan xuat */
 
   const availableVoices = useMemo(() => usableVoices(voices), [voices]);
@@ -177,18 +168,49 @@ export default function StudioPage() {
     return map;
   }, [chapters]);
 
+  /*
+    Lich su lay thang tu vong theo doi, nen no tu cap nhat o moi nhip poll:
+    khung "Tien trinh" va the trong "Lich su audio" khong con noi hai dieu khac
+    nhau ve cung mot job, va khi job xong thi ca hai doi cung luc — khong can F5.
+
+    Mot dong moi CHUONG, khong phai moi job: bam "Thu lai" tao job moi cho cung
+    chuong do, va hai dong cho cung mot doan van la thu nguoi dung khong hieu.
+  */
   const history = useMemo<HistoryItem[]>(() => {
     const own = new Set(chapters.map((c) => c.chapter_id));
-    return jobs
+    return Object.values(jobs)
       .filter((job) => own.has(job.chapter_id))
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
       .map((job) => ({ job, chapter: chapterById.get(job.chapter_id) }));
   }, [jobs, chapters, chapterById]);
 
   const chars = text.length;
   const over = chars > MAX_CHARS;
   const nearLimit = chars > MAX_CHARS * WARN_AT;
+
+  /*
+    CHONG TAO TRUNG.
+
+    Moi lan bam la Studio tao mot CHUONG moi, nen khoa van tay o backend
+    (`job_locks`, theo `owner + chapter + content_hash`) khong the nhan ra hai
+    lan bam la cung mot noi dung: chuong khac nhau thi van tay khac nhau. Bam
+    hai lan la ra hai chuong va hai job that.
+
+    Nen o day phai nho lai chuong da tao cho DUNG noi dung nay. Bam lai ma
+    chua sua gi thi dung lai chuong cu, va luc do backend moi nhin thay cung
+    mot van tay va tra ve chinh job dang chay. Backend van la trong tai cuoi.
+  */
+  const khongDoi =
+    daGui !== null && daGui.title === title.trim() && daGui.text === text;
+  const dangChoJobNay = Boolean(activeJob && dangChayJob(activeJob) && khongDoi);
+
   const canSubmit =
-    !submitting && chars > 0 && !over && Boolean(voiceId) && Boolean(workspace);
+    !submitting &&
+    !dangChoJobNay &&
+    chars > 0 &&
+    !over &&
+    Boolean(voiceId) &&
+    Boolean(workspace);
 
   /* --------------------------------------------------------------- hanh vi */
 
@@ -199,25 +221,34 @@ export default function StudioPage() {
       setSubmitting(true);
       setFormError("");
       try {
-        const name =
-          title.trim() ||
-          `${text.trim().slice(0, 40)}${text.trim().length > 40 ? "…" : ""}`;
-        const created = await api.createChapter(
-          workspace.novel_id,
-          name,
-          text,
-          chapters.length + 1,
+        const ten = title.trim();
+        /*
+          Noi dung khong doi thi DUNG LAI chuong cu thay vi tao chuong moi —
+          day la thu cho phep khoa van tay o backend nhan ra hai lan bam la mot.
+          Doi mot chu thoi la sang chuong moi, va do la dung: audio khac thi
+          ban ghi khac.
+        */
+        let chapterId = khongDoi ? daGui.chapterId : "";
+        if (!chapterId) {
+          const name =
+            ten || `${text.trim().slice(0, 40)}${text.trim().length > 40 ? "…" : ""}`;
+          const created = await api.createChapter(
+            workspace.novel_id,
+            name,
+            text,
+            chapters.length + 1,
+          );
+          chapterId = created.chapter.chapter_id;
+          setChapters((current) => [...current, created.chapter]);
+        }
+        const result = await api.createJob(chapterId, voiceId, rate);
+        setDaGui({ title: ten, text, chapterId });
+        setActiveChapterId(chapterId);
+        theoDoiJob(result.job);
+        toast.push(
+          "info",
+          result.reused ? "Dùng lại audio đã tạo." : "Đã đưa vào hàng đợi.",
         );
-        const result = await api.createJob(
-          created.chapter.chapter_id,
-          voiceId,
-          rate,
-        );
-        setChapters((current) => [...current, created.chapter]);
-        setActiveChapterId(created.chapter.chapter_id);
-        setActiveJob(result.job);
-        setJobs((current) => [result.job, ...current]);
-        toast.push("info", "Đã đưa vào hàng đợi.");
       } catch (cause) {
         setFormError(errorMessage(cause));
         toast.error("Không tạo được audio.");
@@ -225,7 +256,19 @@ export default function StudioPage() {
         setSubmitting(false);
       }
     },
-    [workspace, canSubmit, title, text, chapters.length, voiceId, rate, toast],
+    [
+      workspace,
+      canSubmit,
+      khongDoi,
+      daGui,
+      title,
+      text,
+      chapters.length,
+      voiceId,
+      rate,
+      theoDoiJob,
+      toast,
+    ],
   );
 
   const retry = useCallback(
@@ -233,19 +276,18 @@ export default function StudioPage() {
       try {
         const result = await api.createJob(job.chapter_id, job.voice_id, job.rate);
         setActiveChapterId(job.chapter_id);
-        setActiveJob(result.job);
-        setJobs((current) => [result.job, ...current]);
+        theoDoiJob(result.job);
         toast.push("info", "Đang thử lại…");
       } catch (cause) {
         toast.error(errorMessage(cause));
       }
     },
-    [toast],
+    [theoDoiJob, toast],
   );
 
   const reset = useCallback(() => {
-    setActiveJob(null);
     setActiveChapterId("");
+    setDaGui(null);
     setTitle("");
     setText("");
   }, []);
@@ -427,8 +469,10 @@ export default function StudioPage() {
                   className="btn btn-primary btn-lg"
                   disabled={!canSubmit}
                 >
-                  {submitting ? <span className="spinner" aria-hidden="true" /> : null}
-                  Tạo audio
+                  {submitting || dangChoJobNay ? (
+                    <span className="spinner" aria-hidden="true" />
+                  ) : null}
+                  {dangChoJobNay ? "Đang tạo audio…" : "Tạo audio"}
                 </button>
                 {text ? (
                   <button type="button" className="btn btn-ghost" onClick={reset}>
@@ -440,93 +484,89 @@ export default function StudioPage() {
 
             {/* trang thai job dang chay */}
             {activeJob ? (
-              <section className="card stack" aria-live="polite">
-                <div className="row-between">
-                  <h2 className="section-title">Tiến trình</h2>
-                  <JobBadge status={activeJob.status} />
-                </div>
+              <section className="card stack">
+                <h2 className="section-title">Tiến trình</h2>
 
-                {activeJob.status === "pending" ? (
-                  <>
-                    <ProgressBar percent={6} indeterminate label="Đang xếp hàng" />
-                    {/*
-                      Giọng NghiTTS tổng hợp trên máy chủ riêng, và máy đó xử
-                      lý MỘT job tại một thời điểm (khoá `_PIPER_LOCK` ở cấp
-                      job — xem `docs/GCE-WORKER-CAPACITY.md`). Nên chờ là
-                      chuyện bình thường chứ không phải hỏng, và một thanh tiến
-                      trình quay mãi mà không giải thích thì người dùng chỉ
-                      biết là hỏng.
+                {/*
+                  CUNG mot khung tien do voi `/write` — xem
+                  `components/JobProgress.tsx`. Truoc day cho nay tu ve lay: mot
+                  thanh vo dinh voi 6% hoac 8% bia ra, va khong bao gio hien
+                  phan tram that du backend da bao du `done_parts`/`total_parts`.
+                */}
+                <JobProgress
+                  job={activeJob}
+                  tieuDe="Tiến trình tạo audio"
+                  ghiChu={
+                    <>
+                      {activeJob.status === "pending" ? (
+                        /*
+                          Giọng NghiTTS tổng hợp trên máy chủ riêng, và máy đó
+                          xử lý MỘT job tại một thời điểm (khoá `_PIPER_LOCK` ở
+                          cấp job — xem `docs/GCE-WORKER-CAPACITY.md`). Nên chờ
+                          là chuyện bình thường chứ không phải hỏng, và một
+                          thanh tiến trình quay mãi mà không giải thích thì
+                          người dùng chỉ biết là hỏng.
 
-                      Câu cũ nói giọng này xử lý trên máy cá nhân và có thể
-                      đang không bật. Đúng khi worker còn chạy trên laptop chủ
-                      dự án; production chạy 24/7 trên Google Compute Engine
-                      nên nó không còn đúng. Vẫn KHÔNG hứa thời gian: máy chủ
-                      có thể quá tải hoặc chết thật, và job dài thì hàng đợi
-                      dài theo.
-                    */}
-                    <p className="hint">
-                      {activeJob.voice_id.startsWith("piper:")
-                        ? "Job đã nhận và đang xếp hàng chờ máy chủ tạo giọng. Máy chủ xử lý lần lượt từng job nên có thể phải chờ; job vẫn được giữ nguyên và không bị đổi sang giọng khác. Bạn có thể đóng trang này."
-                        : "Job đã nhận, đang chờ tới lượt xử lý."}
-                    </p>
-                  </>
-                ) : null}
-
-                {activeJob.status === "running" ? (
-                  <>
-                    <ProgressBar
-                      percent={activeJob.progress || 8}
-                      indeterminate={!activeJob.total_parts}
-                      label="Đang tổng hợp giọng đọc"
-                    />
-                    <p className="hint">
-                      {activeJob.total_parts
-                        ? `Đã xong ${activeJob.done_parts}/${activeJob.total_parts} đoạn`
-                        : "Đang chuẩn bị…"}
-                    </p>
-                  </>
-                ) : null}
-
-                {activeJob.status === "completed" && activeChapterId ? (
-                  <>
-                    <AudioPlayer
-                      chapterId={activeChapterId}
-                      title={chapterById.get(activeChapterId)?.title ?? "Audio"}
-                    />
-                    <div className="row">
-                      <button type="button" className="btn" onClick={reset}>
-                        Tạo audio khác
-                      </button>
-                    </div>
-                  </>
-                ) : null}
-
-                {activeJob.status === "failed" ? (
-                  <>
-                    <Alert kind="error">
-                      {activeJob.error_message || "Không rõ nguyên nhân."}
-                      {activeJob.error_kind ? (
-                        <span className="hint"> (mã: {activeJob.error_kind})</span>
+                          KHÔNG hứa thời gian: máy chủ có thể quá tải hoặc chết
+                          thật, và job dài thì hàng đợi dài theo.
+                        */
+                        <p className="hint">
+                          {activeJob.voice_id.startsWith("piper:")
+                            ? "Job đã nhận và đang xếp hàng chờ máy chủ tạo giọng. Máy chủ xử lý lần lượt từng job nên có thể phải chờ; job vẫn được giữ nguyên và không bị đổi sang giọng khác. Bạn có thể đóng trang này."
+                            : "Job đã nhận, đang chờ tới lượt xử lý."}
+                        </p>
                       ) : null}
-                    </Alert>
-                    <p className="hint">
-                      Hệ thống không tự đổi sang giọng khác. Bạn có thể thử lại
-                      với cùng giọng, hoặc chọn giọng khác rồi tạo lại.
-                    </p>
-                    <div className="row">
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() => retry(activeJob)}
-                      >
-                        Thử lại
-                      </button>
-                      <button type="button" className="btn btn-ghost" onClick={reset}>
-                        Bỏ qua
-                      </button>
-                    </div>
-                  </>
-                ) : null}
+
+                      {activeJob.status === "completed" && activeChapterId ? (
+                        <>
+                          <AudioPlayer
+                            chapterId={activeChapterId}
+                            title={chapterById.get(activeChapterId)?.title ?? "Audio"}
+                          />
+                          <div className="row">
+                            <button type="button" className="btn" onClick={reset}>
+                              Tạo audio khác
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
+
+                      {activeJob.status === "failed" ? (
+                        <>
+                          <Alert kind="error">
+                            {activeJob.error_message || "Không rõ nguyên nhân."}
+                            {activeJob.error_kind ? (
+                              <span className="hint">
+                                {" "}
+                                (mã: {activeJob.error_kind})
+                              </span>
+                            ) : null}
+                          </Alert>
+                          <p className="hint">
+                            Hệ thống không tự đổi sang giọng khác. Bạn có thể thử
+                            lại với cùng giọng, hoặc chọn giọng khác rồi tạo lại.
+                          </p>
+                          <div className="row">
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={() => retry(activeJob)}
+                            >
+                              Thử lại
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={reset}
+                            >
+                              Bỏ qua
+                            </button>
+                          </div>
+                        </>
+                      ) : null}
+                    </>
+                  }
+                />
               </section>
             ) : null}
           </section>
@@ -556,10 +596,9 @@ export default function StudioPage() {
                             <button
                               type="button"
                               className="btn btn-sm btn-ghost"
-                              onClick={() => {
-                                setActiveChapterId(job.chapter_id);
-                                setActiveJob(job);
-                              }}
+                              // `activeJob` duoc suy ra tu `activeChapterId`,
+                              // nen chi can tro toi chuong la du.
+                              onClick={() => setActiveChapterId(job.chapter_id)}
                             >
                               Nghe lại
                             </button>

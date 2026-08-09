@@ -9,6 +9,12 @@ import { readFileSync } from "node:fs";
 
 const studio = readFileSync(
   new URL("../src/app/studio/page.tsx", import.meta.url), "utf8");
+// Vong theo doi da chuyen sang hook dung chung voi `/write` — cac rang buoc ve
+// nhip poll gio kiem o day. Hanh vi phai giu nguyen, chi doi cho o.
+const tracker = readFileSync(
+  new URL("../src/lib/useJobTracker.ts", import.meta.url), "utf8");
+const jobsLib = readFileSync(
+  new URL("../src/lib/jobs.ts", import.meta.url), "utf8");
 
 /*
  * LOI 1 — /studio ket o "Dang xu ly" sau khi tai lai trang giua luc job chay.
@@ -23,34 +29,42 @@ const studio = readFileSync(
  * thoat ngay va khong bao gio hoi lai backend.
  */
 test("job dang chay tu phien truoc duoc nap lai de vong poll tiep tuc", () => {
-  const i = studio.indexOf("setJobs(jobList.jobs)");
+  const i = studio.indexOf("khoiPhucJob(jobList.jobs)");
   assert.ok(i > 0, "khong tim thay cho nap danh sach job luc khoi tao");
 
-  // Doan ngay sau khi nap danh sach phai tim job chua ket thuc va dat lam
-  // `activeJob`. Chi xet 900 ky tu ke tiep de rang buoc that su noi ve CHO NAY.
+  // Doan ngay sau khi nap danh sach phai tim job chua ket thuc va tro toi
+  // chuong cua no. Chi xet 900 ky tu ke tiep de rang buoc that su noi ve CHO NAY.
   const sau = studio.slice(i, i + 900);
-  assert.match(sau, /jobList\.jobs\.find\(/,
+  assert.match(sau, /jobList\.jobs\.filter\(dangChayJob\)/,
     "phai do trong danh sach vua nap xem con job nao chua ket thuc");
-  assert.match(sau, /"pending"/, "job dang xep hang cung phai duoc theo doi tiep");
-  assert.match(sau, /"running"/, "job dang chay phai duoc theo doi tiep");
-  assert.match(sau, /setActiveJob\(/,
-    "phai dat lai `activeJob`, neu khong vong poll khong bao gio chay");
+  assert.match(sau, /setActiveChapterId\(/,
+    "phai tro toi chuong cua job do, neu khong khung tien do khong hien gi");
+
+  // `dangChayJob` giu ca hai trang thai chua ket thuc.
+  assert.match(jobsLib, /const CHUA_XONG: JobStatus\[\] = \["pending", "running"\];/,
+    "job dang xep hang cung phai duoc theo doi tiep");
+
+  // Va `khoiPhucJob` dua ca danh sach vao vong theo doi, nen poll chay lai.
+  assert.match(tracker, /const khoiPhuc = useCallback\(\(danh_sach: TtsJob\[\]\) => \{/);
+  assert.match(tracker, /setJobs\(moiNhatTheoChuong\(danh_sach\)\);/);
 });
 
 test("nap lai khong duoc de len job nguoi dung dang theo doi", () => {
-  const i = studio.indexOf("jobList.jobs.find(");
+  const i = studio.indexOf("jobList.jobs.filter(dangChayJob)");
   const sau = studio.slice(i, i + 400);
-  // `current ?? dangChay` — giu nguyen job hien tai neu da co. Neu ghi de vo
+  // `current || ...` — giu nguyen chuong dang xem neu da co. Neu ghi de vo
   // dieu kien, mot lan `load()` xen vao se keo nguoi dung ve job khac.
-  assert.match(sau, /setActiveJob\(\(current\) => current \?\? /,
+  assert.match(sau, /setActiveChapterId\(\(current\) => current \|\| /,
     "chi dat khi chua theo doi job nao");
 });
 
 test("vong poll van dung o trang thai ket thuc", () => {
-  // Khong duoc "sua" bang cach poll mai mai. Dieu kien dung phai con nguyen.
-  assert.match(studio,
-    /if \(!activeJob \|\| activeJob\.status === "completed" \|\| activeJob\.status === "failed"\)/,
+  // Khong duoc "sua" bang cach poll mai mai. Dieu kien dung phai con nguyen —
+  // gio no nam o hook dung chung: khoa rong thi effect thoat ngay dong dau.
+  assert.match(tracker, /if \(!dangChayKey\) return;/,
     "job da ket thuc thi phai ngung poll");
+  assert.match(jobsLib, /\.filter\(dangChayJob\)\s*\n\s*\.map\(\(j\) => j\.job_id\)/,
+    "khoa theo doi phai loc bo job da ket thuc");
 });
 
 

@@ -3,17 +3,40 @@
 /** Dang nhap / dang ky. Mot form, doi che do bang nut chuyen. */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { Alert, Loading } from "@/components/ui";
 import { LogoMark } from "@/components/Logo";
+import { safeNext } from "@/lib/nav";
 
 const MIN_PASSWORD = 8;
 
+/**
+ * `useSearchParams` bat trang phai co ranh gioi Suspense khi Next dung san
+ * trang. Thieu no thi `next build` bao loi chu khong phai loi luc chay.
+ */
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="page"><Loading /></div>}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  /*
+    Noi can quay lai sau khi dang nhap. TRUOC DAY trang nay luon day nguoi
+    dung sang `/studio` — dung o thoi Audio Studio la mat tien, sai bay gio:
+    ai bam "Viết truyện" roi dang nhap se bi tha vao mot cong cu khac han.
+
+    `safeNext` chan open redirect. Xem ghi chu o `lib/nav.ts` — kiem o day la
+    CHUA DU, backend cung phai kiem vi no nhan `next` truc tiep tu URL.
+  */
+  const params = useSearchParams();
+  const next = safeNext(params.get("next"));
   const toast = useToast();
   const { profile, loading, signIn, signUp } = useSession();
 
@@ -26,8 +49,8 @@ export default function LoginPage() {
 
   // Da dang nhap thi khong o lai trang nay
   useEffect(() => {
-    if (!loading && profile) router.replace("/studio");
-  }, [loading, profile, router]);
+    if (!loading && profile) router.replace(next);
+  }, [loading, profile, router, next]);
 
   const submit = useCallback(
     async (event: React.FormEvent) => {
@@ -50,14 +73,14 @@ export default function LoginPage() {
           await signUp(email, password, displayName);
           toast.ok("Tạo tài khoản thành công.");
         }
-        router.replace("/studio");
+        router.replace(next);
       } catch (cause) {
         setError(errorMessage(cause));
       } finally {
         setBusy(false);
       }
     },
-    [email, password, displayName, mode, signIn, signUp, router, toast],
+    [email, password, displayName, mode, signIn, signUp, router, toast, next],
   );
 
   if (loading) {

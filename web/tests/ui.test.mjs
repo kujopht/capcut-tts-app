@@ -24,10 +24,14 @@ test("du cac route cua hai khu vuc san pham", () => {
   }
 });
 
-test("thanh dieu huong chinh dung BA muc doc/nghe, theo dung thu tu", () => {
+test("thanh dieu huong chinh dung BON muc, theo dung thu tu", () => {
   const nav = read("../src/components/NavAuth.tsx");
-  // Thu tu la mot quyet dinh san pham, khong phai chuyen thu hang muc: day la
-  // nen tang doc/nghe fanfic. So khop theo VI TRI chu khong phai theo tap hop.
+  // Thu tu la mot quyet dinh san pham, khong phai chuyen thu hang muc. So khop
+  // theo VI TRI chu khong phai theo tap hop.
+  //
+  // "Viết truyện" ngang hang voi "Khám phá" va "Thư viện": khong co tac gia
+  // thi khong co gi de doc, nen giau no trong menu tai khoan la noi rang viec
+  // do la phu.
   const order = [...nav.matchAll(/href: "([^"]+)", label: "([^"]+)"/g)].map(
     (m) => [m[1], m[2]],
   );
@@ -35,6 +39,7 @@ test("thanh dieu huong chinh dung BA muc doc/nghe, theo dung thu tu", () => {
     ["/", "Trang chủ"],
     ["/fanfic", "Khám phá"],
     ["/library", "Thư viện"],
+    ["/write", "Viết truyện"],
   ]);
 });
 

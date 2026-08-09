@@ -85,6 +85,19 @@ test("trang studio noi ro job dang cho may tao giong", () => {
   );
 });
 
+test("giao dien KHONG con gia dinh worker chay tren may nguoi dung", () => {
+  // Production chay worker 24/7 tren Google Compute Engine. Moi cau con noi
+  // "máy riêng" / "máy đang tắt" / "khi máy bật lại" deu la tan du cua thoi
+  // worker chay tren laptop, va deu goi y sai rang nguoi dung phai co may cua
+  // rieng ho. Quet CA HAI tep vi ca hai deu tung noi cau do.
+  for (const p of ["../src/app/studio/page.tsx", "../src/app/layout.tsx"]) {
+    const src = read(p);
+    for (const cam of ["máy riêng", "máy đang tắt", "khi máy bật lại"]) {
+      assert.ok(!src.includes(cam), `${p} còn câu "${cam}"`);
+    }
+  }
+});
+
 test("giao dien noi ro he thong KHONG tu doi sang giong khac", () => {
   // Quy tac cung cua ca he thong (CLAUDE.md): tong hop that bai hay worker tat
   // deu khong duoc am tham doi giong. Nguoi dung phai duoc noi dieu do — neu
@@ -107,6 +120,7 @@ test("giao dien noi ro he thong KHONG tu doi sang giong khac", () => {
 
 const voice = (voice_id, extra = {}) => ({
   voice_id,
+  provider: voice_id.split(":")[0],
   installed: true,
   runs_on_worker: false,
   recommended: false,
@@ -149,13 +163,38 @@ test("hai muc dung CHUNG ban ghi, khong nhan ban voice nao", async () => {
   assert.equal(all.length, 2, "muc day du phai chua ca giong de xuat");
 });
 
-test("giong chay tren may rieng duoc noi ro trong nhan", async () => {
+test("nhan KHONG con noi 'máy riêng'", async () => {
+  // Cau do dung khi worker con chay tren laptop chu du an. Production chay
+  // 24/7 tren Google Compute Engine, nen no vua sai vua goi y rang nguoi dung
+  // phai co may cua rieng ho.
   const { voiceOptionLabel } = await import("../src/lib/voices.ts");
-  assert.match(
-    voiceOptionLabel(voice("piper:ngochuyen", { runs_on_worker: true })),
+  assert.doesNotMatch(
+    voiceOptionLabel(
+      voice("piper:ngochuyen", {
+        runs_on_worker: true,
+        provider_label: "NghiTTS",
+      }),
+    ),
     /máy riêng/,
   );
-  assert.doesNotMatch(voiceOptionLabel(voice("edge:x")), /máy riêng/);
+});
+
+test("nhan giong NghiTTS lay ten bo giong tu MAY CHU", async () => {
+  const { voiceOptionLabel } = await import("../src/lib/voices.ts");
+
+  // `provider_label` do `server/tts_bridge.py` dat. Frontend khong suy ra ten
+  // bo giong — mot cho quyet dinh duy nhat.
+  const nhan = voiceOptionLabel(
+    voice("piper:banmai", {
+      display_name: "banmai",
+      provider_label: "NghiTTS",
+      runs_on_worker: true,
+      status: "worker",
+      status_label: "Chạy trên máy chủ",
+    }),
+  );
+  assert.equal(nhan, "banmai · NghiTTS");
+  assert.doesNotMatch(nhan, /Piper local|Chưa tải model/);
 });
 
 test("chi hien trang thai khi that su co van de", async () => {
@@ -184,10 +223,75 @@ test("chi hien trang thai khi that su co van de", async () => {
   );
 });
 
-test("hai trang deu co du hai muc chon giong", () => {
+/* ------------------------------------------------------ muc rieng cho NghiTTS */
+
+test("nhan muc la 'NghiTTS', khong phai ten ky thuat", async () => {
+  const { NGHITTS_LABEL } = await import("../src/lib/voices.ts");
+  assert.equal(NGHITTS_LABEL, "NghiTTS");
+  // "Piper" la ten thu vien tong hop, khong phai ten bo giong. Nguoi dung
+  // khong co viec gi phai biet no.
+  assert.doesNotMatch(NGHITTS_LABEL, /Piper|local/i);
+});
+
+test("muc NghiTTS gom dung cac giong provider piper", async () => {
+  const { voiceSections } = await import("../src/lib/voices.ts");
+
+  const vs = [
+    voice("piper:ngochuyen", { runs_on_worker: true, installed: false }),
+    voice("piper:banmai", { runs_on_worker: true, installed: false }),
+    voice("edge:vi-VN-HoaiMyNeural"),
+    voice("capcut:BV074_streaming"),
+  ];
+  const { nghitts, all } = voiceSections(vs);
+
+  assert.deepEqual(
+    nghitts.map((v) => v.voice_id),
+    ["piper:ngochuyen", "piper:banmai"],
+  );
+  // Muc day du VAN chua ca giong NghiTTS — ba cach trinh bay, mot bo ban ghi.
+  assert.equal(all.length, 4);
+  assert.equal(nghitts[0], vs[0], "phai la CUNG tham chieu, khong nhan ban");
+});
+
+test("muc NghiTTS giu thu tu may chu tra ve", async () => {
+  const { voiceSections } = await import("../src/lib/voices.ts");
+
+  // May chu sinh danh sach tu `builtin_catalog.PIPER_BUILTIN`: ba giong cu
+  // (da co ten hien thi that) dung truoc, phan con lai theo bang chu cai.
+  // Frontend sap xep lai la lam hong chu y do.
+  const thu_tu = ["piper:ngochuyen", "piper:calmwoman3688", "piper:adam1"];
+  const { nghitts } = voiceSections(
+    thu_tu.map((id) => voice(id, { runs_on_worker: true, installed: false })),
+  );
+  assert.deepEqual(
+    nghitts.map((v) => v.voice_id),
+    thu_tu,
+  );
+});
+
+test("nhan dien NghiTTS theo provider chu KHONG theo runs_on_worker", async () => {
+  const { voiceSections, isNghiTtsVoice } = await import("../src/lib/voices.ts");
+
+  // Hai co nay hom nay trung nhau. Chung tra loi hai cau hoi khac han:
+  // `provider` la DANH TINH bo giong, `runs_on_worker` la NOI chay. Neu sau
+  // nay co provider thu hai chay tren worker, nhan dien theo `runs_on_worker`
+  // se gan nham nhan NghiTTS cho no.
+  const providerKhac = voice("khac:v1", {
+    runs_on_worker: true,
+    installed: false,
+  });
+  assert.equal(isNghiTtsVoice(providerKhac), false);
+
+  const { nghitts, all } = voiceSections([providerKhac]);
+  assert.deepEqual(nghitts, []);
+  assert.equal(all.length, 1, "van phai chon duoc, chi la khong thuoc muc do");
+});
+
+test("hai trang deu co du ba muc chon giong", () => {
   for (const p of ["../src/app/studio/page.tsx", "../src/app/write/page.tsx"]) {
     const src = read(p);
     assert.match(src, /optgroup label={RECOMMENDED_LABEL}/, p);
+    assert.match(src, /optgroup label={NGHITTS_LABEL}/, p);
     assert.match(src, /optgroup label={ALL_VOICES_LABEL}/, p);
     // MOT the `<select>` duy nhat -> chon o muc nay dong bo ngay voi muc kia,
     // khong co trang thai thu hai nao de lech. Dem THE DONG: chuoi "<select"

@@ -87,6 +87,31 @@ def reset_registry() -> None:
 #: Provider chay TREN MAY worker chu khong qua mang.
 LOCAL_PROVIDER = "piper"
 
+#: Ten bo giong hien cho NGUOI DUNG WEB.
+#:
+#: `voice.provider_label` la "Piper local" — dung cho app desktop, o do model
+#: THAT SU nam tren may nguoi dung. Tren web thi no sai hai lan: nguoi dung web
+#: khong cai gi ca, va model nam tren may chu tong hop (GCE), khong phai "local"
+#: cua ho.
+#:
+#: `voice_id` VAN la `piper:<model>` — do la khoa ben vung, da nam trong job va
+#: track da tao. Doi nhan hien thi khong duoc dong toi khoa do.
+LOCAL_PROVIDER_PUBLIC_LABEL = "NghiTTS"
+
+#: Trang thai bao ra cho giong chay tren worker.
+#:
+#: KHONG duoc dung `registry.status_of()` cho nhung giong nay. Ham do soi HE
+#: THONG TEP CUA CHINH TIEN TRINH NAY; tien trinh API tren Render khong co tep
+#: `.onnx` nao nen no luon tra "not_installed" kem loi khuyen "hay chon file
+#: .onnx trong Cai dat" — mot cau vo nghia voi nguoi dung web va SAI trong
+#: production, noi model da cai san tren may chu GCE.
+#:
+#: Su that ma tien trinh API biet chac chi co bay nhieu: giong nay duoc duyet
+#: phuc vu, va noi tong hop la may chu. No KHONG biet dia cua worker, nen cung
+#: khong duoc hua "san sang".
+WORKER_STATUS = "worker"
+WORKER_STATUS_LABEL = "Chạy trên máy chủ"
+
 
 def nghitts_voice_ids() -> frozenset:
     """
@@ -241,20 +266,30 @@ def list_voices(settings: Any = None) -> List[Dict[str, Any]]:
         is_local = voice.provider == LOCAL_PROVIDER
         if not voice_is_public(voice, settings):
             continue
-        info = registry.status_of(voice)
         vi_tri = thu_tu.get(voice_code(voice))
+        if is_local:
+            # Khong goi `status_of()`: xem ghi chu o `WORKER_STATUS`. Bo qua no
+            # con tranh luon mot lan soi dia moi giong moi lan goi `/api/voices`.
+            nhan_provider = LOCAL_PROVIDER_PUBLIC_LABEL
+            trang_thai, nhan_trang_thai, ly_do = (
+                WORKER_STATUS, WORKER_STATUS_LABEL, "")
+        else:
+            nhan_provider = voice.provider_label
+            info = registry.status_of(voice)
+            trang_thai, nhan_trang_thai, ly_do = (
+                info.status.value, info.status.label, info.reason)
         out.append({
             "voice_id": voice.id,
             "provider": voice.provider,
-            "provider_label": voice.provider_label,
+            "provider_label": nhan_provider,
             "display_name": voice.display_name or voice.engine_voice_id,
             "description": voice.description,
             "language": voice.language,
             "gender": voice.gender,
             "installed": voice.installed,
-            "status": info.status.value,
-            "status_label": info.status.label,
-            "status_reason": info.reason,
+            "status": trang_thai,
+            "status_label": nhan_trang_thai,
+            "status_reason": ly_do,
             # Giong nay dang duoc phuc vu nguoi dung hay khong. Truoc day cho
             # nay la `commercial_ready`, mot phan doan ve GIAY PHEP — thu ma ma
             # nguon khong biet va khong nen doan. Day la mot su that ky thuat:

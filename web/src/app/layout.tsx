@@ -65,15 +65,22 @@ export default function RootLayout({
                   Fanfic Audio Studio — bản MVP riêng tư, chưa thương mại.
                 </span>
                 {/*
-                  Câu cũ ở đây là "Giọng đọc chạy cục bộ chưa xác minh giấy
-                  phép thương mại." Chủ dự án đã cho phép công bố các giọng
-                  NghiTTS và chịu trách nhiệm về quyền sử dụng, nên câu đó
-                  không còn đúng. Thay bằng một sự thật kỹ thuật người dùng
-                  cần biết: một số giọng xử lý trên máy riêng, nên có thể phải
-                  chờ.
+                  Câu này đã đổi hai lần, mỗi lần vì một sự thật đã thay đổi:
+
+                  1. "Giọng đọc chạy cục bộ chưa xác minh giấy phép thương
+                     mại." — chủ dự án đã cho phép công bố các giọng NghiTTS
+                     và chịu trách nhiệm về quyền sử dụng.
+                  2. Câu thay thế nói một số giọng xử lý trên máy cá nhân nên
+                     có thể phải chờ — đúng khi worker còn chạy trên laptop
+                     chủ dự án. Production chạy worker 24/7 trên Google Compute
+                     Engine, nên cách nói đó vừa sai vừa gợi ý rằng người dùng
+                     phải có máy của riêng họ.
+
+                  Câu hiện tại chỉ nói điều còn đúng: xếp hàng là có thật, và
+                  đóng trang không làm mất job.
                 */}
                 <span className="hint">
-                  Một số giọng được xử lý trên máy riêng nên có thể phải chờ.
+                  Giọng NghiTTS xử lý trên máy chủ và có thể phải xếp hàng.
                 </span>
               </div>
             </footer>

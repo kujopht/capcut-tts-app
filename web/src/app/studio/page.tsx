@@ -21,6 +21,7 @@ import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import {
   ALL_VOICES_LABEL,
+  NGHITTS_LABEL,
   RECOMMENDED_LABEL,
   defaultVoiceId,
   usableVoices,
@@ -363,16 +364,27 @@ export default function StudioPage() {
                       onChange={(e) => setVoiceId(e.target.value)}
                     >
                       {/*
-                        Hai mục, MỘT `<select>`. Bảy giọng đề xuất xuất hiện lại
-                        trong "Tất cả giọng tiếng Việt" — đó là chủ ý: hai cách
-                        trình bày cùng một bộ bản ghi, không nhân bản voice nào.
-                        Vì cùng một `value`, chọn ở mục này đồng bộ ngay với mục
-                        kia mà không cần trạng thái thứ hai.
+                        Ba mục, MỘT `<select>`. Bảy giọng đề xuất và 25 giọng
+                        NghiTTS xuất hiện lại trong "Tất cả giọng tiếng Việt" —
+                        đó là chủ ý: ba cách trình bày cùng một bộ bản ghi,
+                        không nhân bản voice nào. Vì cùng một `value`, chọn ở
+                        mục này đồng bộ ngay với mục kia mà không cần trạng thái
+                        thứ hai.
                       */}
                       <optgroup label={RECOMMENDED_LABEL}>
                         {voiceGroups.recommended.map((voice) => (
                           <option
                             key={`goi-y-${voice.voice_id}`}
+                            value={voice.voice_id}
+                          >
+                            {voiceOptionLabel(voice)}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label={NGHITTS_LABEL}>
+                        {voiceGroups.nghitts.map((voice) => (
+                          <option
+                            key={`nghitts-${voice.voice_id}`}
                             value={voice.voice_id}
                           >
                             {voiceOptionLabel(voice)}
@@ -446,15 +458,23 @@ export default function StudioPage() {
                   <>
                     <ProgressBar percent={6} indeterminate label="Đang xếp hàng" />
                     {/*
-                      Giọng Ngọc Huyền chạy trên máy worker, không chạy trên
-                      máy chủ. Máy đó tắt thì job nằm `pending` — không hỏng,
-                      không bị đổi sang giọng khác, và sẽ được xử lý khi máy
-                      bật lại. Phải nói ra điều đó: một thanh tiến trình quay
-                      mãi mà không giải thích thì người dùng chỉ biết là hỏng.
+                      Giọng NghiTTS tổng hợp trên máy chủ riêng, và máy đó xử
+                      lý MỘT job tại một thời điểm (khoá `_PIPER_LOCK` ở cấp
+                      job — xem `docs/GCE-WORKER-CAPACITY.md`). Nên chờ là
+                      chuyện bình thường chứ không phải hỏng, và một thanh tiến
+                      trình quay mãi mà không giải thích thì người dùng chỉ
+                      biết là hỏng.
+
+                      Câu cũ nói giọng này xử lý trên máy cá nhân và có thể
+                      đang không bật. Đúng khi worker còn chạy trên laptop chủ
+                      dự án; production chạy 24/7 trên Google Compute Engine
+                      nên nó không còn đúng. Vẫn KHÔNG hứa thời gian: máy chủ
+                      có thể quá tải hoặc chết thật, và job dài thì hàng đợi
+                      dài theo.
                     */}
                     <p className="hint">
                       {activeJob.voice_id.startsWith("piper:")
-                        ? "Job đã nhận và đang chờ máy tạo giọng. Giọng này xử lý trên máy riêng — nếu máy đang tắt, job vẫn được giữ nguyên và sẽ chạy khi máy bật lại. Bạn có thể đóng trang này."
+                        ? "Job đã nhận và đang xếp hàng chờ máy chủ tạo giọng. Máy chủ xử lý lần lượt từng job nên có thể phải chờ; job vẫn được giữ nguyên và không bị đổi sang giọng khác. Bạn có thể đóng trang này."
                         : "Job đã nhận, đang chờ tới lượt xử lý."}
                     </p>
                   </>

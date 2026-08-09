@@ -28,11 +28,16 @@ from desktop_app.providers.builtin_catalog import (
 from server import tts_bridge
 
 
-#: Ba giọng có TRƯỚC khi mở rộng catalog. Không được đổi.
+#: Ba giọng có TRƯỚC khi mở rộng catalog.
+#:
+#: `voice_key` và `gender` KHÔNG được đổi: khoá đã nằm trong cấu hình vận hành
+#: và trong job/track đã tạo. `display_name` thì đã đổi một lần, theo bảng tên
+#: chính thức của chủ dự án — tên hiển thị là thứ người dùng đọc, không phải
+#: thứ hệ thống tra cứu.
 CU = {
-    "ngochuyen": ("Ngọc Huyền (mới)", "Female"),
-    "calmwoman3688": ("Giọng nữ điềm đạm (calmwoman3688)", "Female"),
-    "deepman3909": ("Giọng nam trầm (deepman3909)", "Male"),
+    "ngochuyen": "Female",
+    "calmwoman3688": "Female",
+    "deepman3909": "Male",
 }
 
 #: 22 giọng thêm mới trong lượt mở rộng.
@@ -70,10 +75,13 @@ class TuongThichNguoc(unittest.TestCase):
         for khoa in CU:
             self.assertIn(f"piper:{khoa}", ids)
 
-    def test_ba_id_cu_van_dung_ten_va_gioi_tinh(self) -> None:
+    def test_ba_id_cu_van_dung_gioi_tinh(self) -> None:
+        """
+        `gender` của ba giọng này đã được kiểm chứng từ trước, nên giữ nguyên.
+        Chỉ `display_name` đổi theo bảng tên chính thức.
+        """
         theo_khoa = {m["voice_key"]: m for m in PIPER_BUILTIN}
-        for khoa, (ten, gt) in CU.items():
-            self.assertEqual(theo_khoa[khoa]["display_name"], ten, khoa)
+        for khoa, gt in CU.items():
             self.assertEqual(theo_khoa[khoa]["gender"], gt, khoa)
 
     def test_ba_id_cu_van_dung_dau_danh_sach(self) -> None:
@@ -88,24 +96,39 @@ class TuongThichNguoc(unittest.TestCase):
 
 class KhongDoanMetadata(unittest.TestCase):
 
-    def test_giong_moi_giu_ten_ky_thuat(self) -> None:
-        for m in PIPER_BUILTIN:
-            if m["voice_key"] in MOI:
-                self.assertEqual(
-                    m["display_name"], m["voice_key"],
-                    f"{m['voice_key']}: tên hiển thị bị đặt tay — nếu có bảng "
-                    "tên chính thức thì cập nhật cả test này")
+    def test_ten_hien_thi_lay_tu_bang_ten_chinh_thuc(self) -> None:
+        """
+        Truoc day bai test nay khoa dieu NGUOC LAI: `display_name` phai BANG
+        `voice_key`, vi khong co bang doi chieu nao va tu tach `banmai` thanh
+        "Ban Mai" la doan ranh gioi tu lan doan dau.
 
-    def test_giong_moi_khong_gan_gioi_tinh(self) -> None:
+        Chu du an da cung cap bang ten chinh thuc, nen tien de do het hieu luc.
+        Cai con phai khoa la: ten den TU BANG, chu khong phai go tay tung muc —
+        go tay thi hai cho lech nhau ma khong ai thay.
+        """
+        from desktop_app.providers.builtin_catalog import NGHITTS_DISPLAY_NAMES
+
+        for m in PIPER_BUILTIN:
+            self.assertEqual(m["display_name"],
+                             NGHITTS_DISPLAY_NAMES[m["voice_key"]],
+                             m["voice_key"])
+
+    def test_giong_moi_van_KHONG_gan_gioi_tinh(self) -> None:
+        """
+        Bang ten chinh thuc chi noi TEN HIEN THI. No khong noi gioi tinh, va
+        suy gioi tinh tu ten van la doan — doan sai thi bo loc giong nam/nu
+        sau nay loc sai.
+        """
         for m in PIPER_BUILTIN:
             if m["voice_key"] in MOI:
                 self.assertEqual(m["gender"], "", m["voice_key"])
 
-    def test_co_ghi_chu_TODO_cho_ten_hien_thi(self) -> None:
-        import inspect
-        from desktop_app.providers import builtin_catalog
+    def test_bang_ten_phu_dung_ca_catalog(self) -> None:
+        """Thieu mot khoa la `NGHITTS_DISPLAY_NAMES[khoa]` nem KeyError luc nap."""
+        from desktop_app.providers.builtin_catalog import NGHITTS_DISPLAY_NAMES
 
-        self.assertIn("TODO", inspect.getsource(builtin_catalog))
+        self.assertEqual(set(NGHITTS_DISPLAY_NAMES),
+                         {m["voice_key"] for m in PIPER_BUILTIN})
 
 
 class AnhXaTepTatDinh(unittest.TestCase):

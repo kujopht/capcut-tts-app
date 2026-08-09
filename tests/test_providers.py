@@ -733,10 +733,23 @@ class TestNgocHuyenVoice(unittest.TestCase):
         self.assertIn("ngochuyen", keys)
 
     def test_display_name_and_description(self):
+        """
+        Ten hien thi doi theo bang ten chinh thuc cua bo NghiTTS.
+
+        Luu y HOAN DOI: `ngochuyen` truoc mang ten "Ngọc Huyền (mới)"; hau to
+        do nay thuoc ve model `ngochuyennew`. `voice_key` cua ca hai khong doi
+        nen model va tep `.onnx` van la nhung thu cu.
+        """
         provider = PiperLocalProvider(module=None, manager=self.manager)
         voice = next(v for v in provider.list_voices() if v.voice_key == "ngochuyen")
-        self.assertEqual(voice.display_name, "Ngọc Huyền (mới)")
-        self.assertEqual(voice.description, "Giọng nữ review phim — Piper Local")
+        self.assertEqual(voice.display_name, "Ngọc Huyền")
+        self.assertEqual(voice.description, "Giọng nữ review phim — NghiTTS")
+
+    def test_ngochuyennew_giu_hau_to_moi(self):
+        provider = PiperLocalProvider(module=None, manager=self.manager)
+        voice = next(v for v in provider.list_voices()
+                     if v.voice_key == "ngochuyennew")
+        self.assertEqual(voice.display_name, "Ngọc Huyền (Mới)")
 
     def test_catalog_order_is_ngochuyen_first(self):
         provider = PiperLocalProvider(module=None, manager=self.manager)
@@ -782,7 +795,7 @@ class TestNgocHuyenVoice(unittest.TestCase):
         self.assertEqual(provider.default_voice_key(), "ngochuyen")
         default = provider.default_voice()
         self.assertIsNotNone(default)
-        self.assertEqual(default.display_name, "Ngọc Huyền (mới)")
+        self.assertEqual(default.display_name, "Ngọc Huyền")
 
     def test_preferred_over_other_installed_models(self):
         """Da cai calmwoman truoc, cai them Ngoc Huyen thi Ngoc Huyen thanh mac dinh."""

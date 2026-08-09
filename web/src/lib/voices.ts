@@ -52,52 +52,60 @@ export function isNghiTtsVoice(voice: Voice): boolean {
   return voice.provider === NGHITTS_PROVIDER;
 }
 
-/** Nhan cua ba muc trong bo chon giong. Mot cho khai bao duy nhat. */
+/** Nhan cua hai muc trong bo chon giong. Mot cho khai bao duy nhat. */
 export const RECOMMENDED_LABEL = "Giọng đề xuất";
-export const NGHITTS_LABEL = "NghiTTS";
 export const ALL_VOICES_LABEL = "Tất cả giọng tiếng Việt";
 
 /**
- * Chia giong thanh ba muc de hien thi.
+ * Chia giong thanh hai muc de hien thi.
  *
- * KHONG nhan ban `Voice` nao: day chi la BA CACH TRINH BAY cung mot bo ban
- * ghi. Mot giong NghiTTS duoc de xuat co mat o ca ba muc, va vi ca ba muc cung
- * nam trong MOT `<select>`, viec chon o muc nay tu dong dong bo voi muc kia —
- * khong co trang thai thu hai nao de lech.
+ * KHONG nhan ban `Voice` nao: day chi la HAI CACH TRINH BAY cung mot bo ban
+ * ghi. Giong duoc de xuat co mat o ca hai muc, va vi ca hai muc cung nam trong
+ * MOT `<select>`, viec chon o muc nay tu dong dong bo voi muc kia — khong co
+ * trang thai thu hai nao de lech.
+ *
+ * KHONG co muc rieng cho NghiTTS. Da tung co mot muc nhu vay; bo di theo yeu
+ * cau san pham. Giong NghiTTS nam trong "Tất cả giọng tiếng Việt" nhu moi
+ * provider khac, va neu duoc de xuat thi cung xuat hien o muc de xuat nhu moi
+ * provider khac. Day thuan tuy la thay doi TRINH BAY: `provider`,
+ * `provider_label` va duong di cua job khong doi.
  *
  * Thu tu muc de xuat do MAY CHU quyet dinh (`recommended_order`, lay tu
  * `desktop_app/providers/recommended.py`). Frontend khong duoc tu sap xep lai:
  * thu tu do la lua chon cua chu du an trong app desktop cu.
- *
- * Muc NghiTTS giu THU TU MAY CHU TRA VE, khong sap xep lai. May chu sinh danh
- * sach tu `builtin_catalog.PIPER_BUILTIN`, va thu tu do co y nghia: ba giong
- * co (da co ten hien thi that) dung truoc, phan con lai theo bang chu cai.
  */
 export function voiceSections(voices: Voice[]): {
   recommended: Voice[];
-  nghitts: Voice[];
   all: Voice[];
 } {
   const usable = usableVoices(voices);
   const recommended = usable
     .filter((v) => v.recommended && v.recommended_order !== null)
     .sort((a, b) => (a.recommended_order ?? 0) - (b.recommended_order ?? 0));
-  return { recommended, nghitts: usable.filter(isNghiTtsVoice), all: usable };
+  return { recommended, all: usable };
 }
 
 /**
  * Nhan mot dong trong bo chon giong.
  *
- * KHONG con phu chu "máy riêng". Cau do co tu thoi worker chay tren laptop cua
- * chu du an, khi "may co the dang tat" la mot su that nguoi dung can biet.
- * Production chay worker 24/7 tren Google Compute Engine, nen no khong con
- * dung — va no goi y sai rang nguoi dung phai co may cua rieng ho.
+ * Giong NghiTTS chi hien TEN, khong hau to gi. Cac model nay da co bang ten
+ * chinh thuc ("Ngọc Huyền (Mới)", "Mai Phương", ...), nen ten tu no da du ro;
+ * dan them ten bo giong hay trang thai vao chi lam dong dai ra. Phu chu
+ * "máy riêng" cung da bo tu truoc: no co tu thoi worker chay tren laptop chu
+ * du an, con production chay 24/7 tren Google Compute Engine.
  *
- * `provider_label` cua giong NghiTTS do MAY CHU dat (xem
- * `LOCAL_PROVIDER_PUBLIC_LABEL`), khong phai frontend suy ra. Mot cho quyet
- * dinh duy nhat.
+ * `provider_label` VAN duoc giu cho CapCut va Edge, va co ly do cu the: ho co
+ * giong TRUNG TEN nhau. Chinh su trung ten do tung lam trang web chon nham
+ * mot giong CapCut khi di tim giong Edge "HoaiMy", va CapCut tra ve
+ * `TTSInvalidSpeaker` — xem ghi chu dau tep. Bo hau to o do la lam hai dong
+ * trong danh sach trong y het nhau.
+ *
+ * `provider_label` van co trong API (`/api/voices`) cho ai can no; day chi la
+ * quyet dinh KHONG dua no vao ten hien thi.
  */
 export function voiceOptionLabel(voice: Voice): string {
+  if (isNghiTtsVoice(voice)) return voice.display_name;
+
   const phan = [voice.display_name, voice.provider_label];
   // Chi hien trang thai khi no NOI LEN MOT VAN DE.
   //

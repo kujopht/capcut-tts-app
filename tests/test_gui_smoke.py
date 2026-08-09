@@ -498,7 +498,9 @@ class TestMainWindow(unittest.TestCase):
 
         voice = self.window.registry.voice_by_id("piper:ngochuyen")
         self.assertIsNotNone(voice)
-        self.assertEqual(voice.display_name, "Ngọc Huyền (mới)")
+        # Ten theo bang ten chinh thuc NghiTTS. Hau to "(Mới)" nay thuoc ve
+        # model `ngochuyennew`; `voice_id` cua ca hai khong doi.
+        self.assertEqual(voice.display_name, "Ngọc Huyền")
         info = self.window.registry.status_of(voice)
         self.assertEqual(info.status, VoiceStatus.NOT_INSTALLED)
 

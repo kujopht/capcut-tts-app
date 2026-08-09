@@ -25,7 +25,6 @@ import { useToast } from "@/lib/toast";
 import { MAX_CHAPTER_CHARS } from "@/lib/limits";
 import {
   ALL_VOICES_LABEL,
-  NGHITTS_LABEL,
   RECOMMENDED_LABEL,
   defaultVoiceId,
   usableVoices,
@@ -757,21 +756,11 @@ export default function WritePage() {
                           value={voiceId}
                           onChange={(e) => setVoiceId(e.target.value)}
                         >
-                          {/* Ba mục, MỘT `<select>` — xem `voiceSections`. */}
+                          {/* Hai mục, MỘT `<select>` — xem `voiceSections`. */}
                           <optgroup label={RECOMMENDED_LABEL}>
                             {voiceGroups.recommended.map((voice) => (
                               <option
                                 key={`goi-y-${voice.voice_id}`}
-                                value={voice.voice_id}
-                              >
-                                {voiceOptionLabel(voice)}
-                              </option>
-                            ))}
-                          </optgroup>
-                          <optgroup label={NGHITTS_LABEL}>
-                            {voiceGroups.nghitts.map((voice) => (
-                              <option
-                                key={`nghitts-${voice.voice_id}`}
                                 value={voice.voice_id}
                               >
                                 {voiceOptionLabel(voice)}

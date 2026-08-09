@@ -18,6 +18,7 @@ import {
   ErrorState,
   JobBadge,
   Loading,
+  PageHeader,
   SkeletonList,
   formatDate,
   formatNumber,
@@ -145,19 +146,16 @@ export default function LibraryPage() {
 
   return (
     <div className="page">
-      <header className="row-between">
-        <div className="stack-2">
-          <span className="eyebrow">Thư viện</span>
-          <h1 className="page-title">Audio của tôi</h1>
-          <p className="lead" style={{ maxWidth: 600 }}>
-            Tất cả audio đã tạo, gồm cả bản tạo nhanh ở Audio Studio và audio
-            của các chương fanfic.
-          </p>
-        </div>
-        <Link className="btn btn-primary" href="/studio">
-          Tạo audio mới
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow="Thư viện"
+        title="Audio của tôi"
+        lead="Tất cả audio đã tạo, gồm cả bản tạo nhanh ở Audio Studio và audio của các chương fanfic."
+        action={
+          <Link className="btn btn-primary" href="/studio">
+            Tạo audio mới
+          </Link>
+        }
+      />
 
       {!loading && !error && rows.length > 0 ? (
         <div className="seg" role="group" aria-label="Lọc theo nguồn">
@@ -216,23 +214,30 @@ export default function LibraryPage() {
           <p className="hint" role="status">
             {shown.length} bản audio
           </p>
-          {shown.map((row) => (
-            <article key={row.job.job_id} className="card stack">
-              <div className="row-between">
+          {shown.map((row) => {
+            const dangNghe = playing === row.chapter.chapter_id;
+            return (
+              <article
+                key={row.job.job_id}
+                className={`audio-row${dangNghe ? " audio-row-open" : ""}`}
+              >
                 <NovelCover
                   novelId={row.novel.novel_id}
                   title={row.fromStudio ? row.chapter.title : row.novel.title}
                   coverUrl={row.novel.cover_url}
                   size="thumb"
                 />
-                <div className="stack-2" style={{ minWidth: 0, flex: 1 }}>
-                  <div className="row" style={{ gap: "var(--s2)" }}>
-                    <span className={`badge ${row.fromStudio ? "badge-brand" : "badge-info"}`}>
+
+                <div className="audio-row-body">
+                  <div className="row audio-row-tags">
+                    <span
+                      className={`badge ${row.fromStudio ? "badge-brand" : "badge-info"}`}
+                    >
                       {row.fromStudio ? "Audio Studio" : "Fanfic"}
                     </span>
                     <JobBadge status={row.job.status} />
                   </div>
-                  <strong>{row.chapter.title}</strong>
+                  <strong className="audio-row-title">{row.chapter.title}</strong>
                   <span className="hint">
                     {row.fromStudio ? (
                       <>
@@ -250,32 +255,41 @@ export default function LibraryPage() {
                     )}
                   </span>
                 </div>
-                <div className="row" style={{ gap: "var(--s2)" }}>
+
+                <div className="row audio-row-actions">
                   {!row.fromStudio ? (
-                    <Link className="btn btn-sm" href={`/chapters/${row.chapter.chapter_id}`}>
+                    <Link
+                      className="btn btn-sm"
+                      href={`/chapters/${row.chapter.chapter_id}`}
+                    >
                       Mở chương
                     </Link>
                   ) : null}
                   <button
                     type="button"
-                    className="btn btn-sm btn-primary"
-                    aria-expanded={playing === row.chapter.chapter_id}
+                    className={`btn btn-sm ${dangNghe ? "" : "btn-primary"}`}
+                    aria-expanded={dangNghe}
                     onClick={() =>
-                      setPlaying(
-                        playing === row.chapter.chapter_id ? "" : row.chapter.chapter_id,
-                      )
+                      setPlaying(dangNghe ? "" : row.chapter.chapter_id)
                     }
                   >
-                    {playing === row.chapter.chapter_id ? "Đóng" : "Nghe"}
+                    {dangNghe ? "Đóng" : "Nghe"}
                   </button>
                 </div>
-              </div>
 
-              {playing === row.chapter.chapter_id ? (
-                <AudioPlayer chapterId={row.chapter.chapter_id} title={row.chapter.title} />
-              ) : null}
-            </article>
-          ))}
+                {/* Trinh phat chiem tron mot hang rieng ben duoi — xem
+                    `.audio-row` o `globals.css`. */}
+                {dangNghe ? (
+                  <div className="audio-row-player">
+                    <AudioPlayer
+                      chapterId={row.chapter.chapter_id}
+                      title={row.chapter.title}
+                    />
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
         </div>
       )}
     </div>

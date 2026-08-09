@@ -9,6 +9,44 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { JobStatus } from "@/lib/api";
 
+/* ------------------------------------------------------------- dau trang */
+
+/**
+ * Dau trang: nhan nho, tieu de, mo ta, va cho dat hanh dong ben phai.
+ *
+ * Truoc day moi trang tu ghep `<header className="row-between">` kem
+ * `style={{ maxWidth: 620 }}` inline. Bay cho lam cung mot viec la bay lan de
+ * lech, va style inline thi media query khong voi toi — o dien thoai doan mo
+ * ta van bi ep o 620px.
+ */
+export function PageHeader({
+  eyebrow,
+  title,
+  lead,
+  action,
+  id,
+}: {
+  eyebrow?: string;
+  title: string;
+  lead?: React.ReactNode;
+  action?: React.ReactNode;
+  /** Dat khi trang can `aria-labelledby` tro toi tieu de nay. */
+  id?: string;
+}) {
+  return (
+    <header className="page-head">
+      <div className="stack-2 page-head-body">
+        {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
+        <h1 className="page-title" id={id}>
+          {title}
+        </h1>
+        {lead ? <p className="lead lead-narrow">{lead}</p> : null}
+      </div>
+      {action ? <div className="row page-head-actions">{action}</div> : null}
+    </header>
+  );
+}
+
 /* ------------------------------------------------------------ trang thai */
 
 export function Loading({ label = "Đang tải…" }: { label?: string }) {

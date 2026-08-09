@@ -261,11 +261,27 @@ button, input, select, textarea {
 
 .page-title {
   font-size: var(--t-2xl);
-  background: linear-gradient(180deg, var(--text), #b9c2d6);
+  letter-spacing: -0.028em;
+  background: linear-gradient(180deg, var(--text), #9aa5bd);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
+
+/* Dau trang — xem `components/ui.tsx::PageHeader`. `align-items: flex-start`
+   de nut ben phai khong bi keo xuong giua khi doan mo ta dai. */
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+.page-head-body { min-width: 0; }
+.page-head-actions { flex: 0 0 auto; }
+/* Doan mo ta do rong theo CHU chu khong theo pixel: `ch` co gian theo co chu,
+   nen o mobile no tu hep lai thay vi bi ep o mot con so cung. */
+.lead-narrow { max-width: 62ch; }
 .section-title { font-size: var(--t-lg); }
 .eyebrow {
   font-size: var(--t-xs);
@@ -1317,6 +1333,175 @@ button, input, select, textarea {
 .hero-title a:hover { color: var(--brand-hover); }
 .hero-cover { text-decoration: none; }
 
+/* ============================================================= tai khoan */
+
+.account-hero {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s5);
+  padding: var(--s5) var(--s6);
+  border: 1px solid var(--line);
+  border-radius: var(--r4);
+  background:
+    radial-gradient(600px 260px at 0% 0%, #8b6cff24, transparent 70%),
+    linear-gradient(160deg, var(--bg-1), #0c0e15);
+  box-shadow: var(--shadow-1), var(--edge);
+}
+.account-hero-body { min-width: 0; }
+.account-hero-plan { align-items: flex-end; text-align: right; max-width: 34ch; }
+
+.account-avatar {
+  width: 64px; height: 64px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--grad-brand);
+  color: var(--on-brand);
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  flex: 0 0 auto;
+  box-shadow: var(--lift-brand);
+}
+
+/* So dem: luoi tu xuong mot cot o dien thoai. `.row` cu de chung tran ra
+   ngoai khi con so dai. */
+.stat-grid {
+  display: grid;
+  gap: var(--s3);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+.stat { min-width: 0; }
+
+/* Loi tat: the co bieu tuong, khong phai mot hang nut xam. */
+.quick-grid {
+  display: grid;
+  gap: var(--s3);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.quick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  background: linear-gradient(180deg, var(--bg-1), #0c0e15);
+  color: inherit;
+  text-decoration: none;
+  box-shadow: var(--edge);
+  transition: transform var(--dur) var(--ease),
+    border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.quick-card:hover {
+  color: inherit;
+  transform: translateY(-3px);
+  border-color: var(--brand-line);
+  box-shadow: var(--shadow-2), var(--edge);
+}
+.quick-icon {
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border-radius: var(--r2);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  font-size: 18px;
+  margin-bottom: var(--s1);
+}
+
+/* ========================================================= hang audio */
+
+/*
+  Mot ban audio trong thu vien. Luoi BON o, khong phai `.card` long
+  `row-between`: cach cu phai dung `style` inline (`flex: 1`, `minWidth: 0`) o
+  ba cho de chu dai khong day nut ra ngoai. O day be ngang do luoi quyet dinh,
+  nen `minmax(0, 1fr)` lam viec do mot lan.
+
+  Hang thu hai danh cho trinh phat, va no chi ton tai khi dang nghe.
+*/
+.audio-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r3);
+  background: linear-gradient(180deg, var(--bg-1), #0c0e15);
+  box-shadow: var(--edge);
+  transition: border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.audio-row:hover { border-color: var(--line-strong); }
+/* Dang nghe: vien tim de biet hang nao dang phat khi cuon qua danh sach dai. */
+.audio-row-open {
+  border-color: var(--brand-line);
+  background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+}
+
+.audio-row-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.audio-row-tags { gap: var(--s2); }
+.audio-row-title {
+  font-size: var(--t-base);
+  line-height: var(--lh-tight);
+}
+.audio-row-actions { flex: 0 0 auto; gap: var(--s2); }
+/* Tron ca be ngang cua hang, ke ca khi bia va nut chiem hai cot kia. */
+.audio-row-player { grid-column: 1 / -1; }
+
+/* ============================================================== thanh loc */
+
+/*
+  Khong dung `.card`: bo loc khong phai mot the noi dung, no la mot thanh dieu
+  khien. Nen nhat hon va vien mem hon de no lui ve sau, nhuong su chu y cho
+  luoi truyen ngay ben duoi.
+*/
+.filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  padding: var(--s4);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r3);
+  background: #0f111980;
+}
+
+/* O nhap co bieu tuong dat chong len ben trai. */
+.input-icon { position: relative; }
+.input-icon .input { padding-left: 40px; }
+.input-icon-mark {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/*
+  Duong ray the: cuon NGANG chu khong xuong dong.
+
+  Voi vai chuc the, mot khoi chip nhieu dong cao bang ca man hinh va day het
+  truyen xuong duoi nep gap. Cuon ngang giu bo loc o dung mot hang.
+*/
+.chip-rail {
+  display: flex;
+  gap: var(--s2);
+  overflow-x: auto;
+  padding-bottom: var(--s1);
+  scrollbar-width: thin;
+  /* Cac chip khong bi bop lai khi tong be ngang vuot qua khung. */
+  scroll-snap-type: x proximity;
+}
+.chip-rail > * { flex: 0 0 auto; scroll-snap-align: start; }
+.chip-rail::-webkit-scrollbar { height: 6px; }
+.chip-rail::-webkit-scrollbar-thumb {
+  background: var(--line); border-radius: var(--r-full);
+}
+
 /* ==================================================== dai mo dau trang chu */
 
 /*
@@ -1468,6 +1653,26 @@ button, input, select, textarea {
   height: 1px;
   background: var(--line);
 }
+
+/*
+  Trang dang nhap: mot cot hep dat giua. Truoc day be rong, can le va can chu
+  deu la `style` inline — media query khong voi toi chung, nen o dien thoai cot
+  van bi ep o 460px du man hinh chi rong 375.
+*/
+.auth-page {
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+}
+.auth-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  text-align: center;
+}
+.auth-seg { align-self: center; }
+.auth-foot { text-align: center; }
 
 .auth-callback {
   align-items: center;

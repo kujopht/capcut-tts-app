@@ -50,29 +50,42 @@ export default function AccountPage() {
 
   return (
     <div className="page">
-      <header className="stack-2">
-        <span className="eyebrow">Tài khoản</span>
-        <h1 className="page-title">
-          {profile.display_name || profile.email.split("@")[0]}
-        </h1>
-        <p className="hint">{profile.email}</p>
-      </header>
-
-      <section className="card stack">
-        <div className="row-between">
-          <h2 className="section-title">Gói hiện tại</h2>
+      {/*
+        Danh thiep: anh dai dien, ten, email, goi. Bon manh thong tin nay truoc
+        day nam o bon khoi roi rac; gom lai mot cho thi doc duoc trong mot lan
+        nhin, va do la ca viec cua trang tai khoan.
+      */}
+      <header className="account-hero">
+        <span className="account-avatar" aria-hidden="true">
+          {(profile.display_name || profile.email).slice(0, 2).toUpperCase()}
+        </span>
+        <div className="stack-2 account-hero-body">
+          <span className="eyebrow">Tài khoản</span>
+          <h1 className="page-title">
+            {profile.display_name || profile.email.split("@")[0]}
+          </h1>
+          <p className="hint">{profile.email}</p>
+        </div>
+        <div className="stack-2 account-hero-plan">
           <span className="badge badge-brand">
             {TIER_LABEL[profile.tier] ?? profile.tier}
           </span>
+          <span className="hint">
+            Bản MVP riêng tư — chưa có thanh toán và chưa trừ hạn mức thực tế.
+          </span>
         </div>
-        <p className="hint">
-          Bản MVP riêng tư — chưa có thanh toán và chưa trừ hạn mức thực tế.
-        </p>
-      </section>
+      </header>
 
-      <section className="stack">
-        <h2 className="section-title">Sử dụng</h2>
-        <div className="row">
+      <section className="stack" aria-labelledby="acc-su-dung">
+        <h2 className="section-title" id="acc-su-dung">
+          Sử dụng
+        </h2>
+        {/*
+          KHONG ve thanh tien do hay cap do o day. Ca ba con so deu la so DEM,
+          khong co han muc nao de chia cho — ve mot thanh "đã dùng 40%" se phai
+          bia ra cai mau so.
+        */}
+        <div className="stat-grid">
           <div className="stat">
             <span className="stat-value">
               {formatNumber(profile.tts_characters_used)}
@@ -95,17 +108,31 @@ export default function AccountPage() {
         </p>
       </section>
 
-      <section className="card stack">
-        <h2 className="section-title">Lối tắt</h2>
-        <div className="row">
-          <Link className="btn" href="/studio">
-            Audio Studio
+      <section className="stack" aria-labelledby="acc-loi-tat">
+        <h2 className="section-title" id="acc-loi-tat">
+          Lối tắt
+        </h2>
+        <div className="quick-grid">
+          <Link className="quick-card" href="/write">
+            <span className="quick-icon" aria-hidden="true">
+              ✍️
+            </span>
+            <strong>Khu vực tác giả</strong>
+            <span className="hint">Tạo truyện, thêm chương, xuất bản.</span>
           </Link>
-          <Link className="btn" href="/library">
-            Thư viện audio
+          <Link className="quick-card" href="/studio">
+            <span className="quick-icon" aria-hidden="true">
+              🎙
+            </span>
+            <strong>Audio Studio</strong>
+            <span className="hint">Dán văn bản bất kỳ và tạo MP3.</span>
           </Link>
-          <Link className="btn" href="/write">
-            Khu vực tác giả
+          <Link className="quick-card" href="/library">
+            <span className="quick-icon" aria-hidden="true">
+              🎧
+            </span>
+            <strong>Thư viện audio</strong>
+            <span className="hint">Mọi bản audio bạn đã tạo.</span>
           </Link>
         </div>
       </section>

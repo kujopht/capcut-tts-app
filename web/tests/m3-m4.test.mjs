@@ -170,8 +170,17 @@ test("M4: luu noi dung xong thi canh bao bat len ngay", () => {
 
 test("M4: tao lai audio xong thi canh bao tat", () => {
   const src = write();
-  assert.match(src,
-    /setStaleByChapter\(\(current\) => \(\{ \.\.\.current, \[r\.job\.chapter_id\]: false \}\)\)/);
+  // Bam Y NGHIA chu khong bam ten bien: vong poll da doi tu mot job toan cuc
+  // sang `Record<chapter_id, TtsJob>`, nen bien trong callback doi ten. Hanh vi
+  // can giu la: job hoan tat -> tat canh bao "Audio cũ" cho DUNG chuong do.
+  const at = src.indexOf('=== "completed"');
+  assert.notEqual(at, -1, "khong tim thay nhanh xu ly job hoan tat");
+  const khoi = src.slice(at, at + 600);
+  assert.match(
+    khoi,
+    /setStaleByChapter\(\(current\) => \(\{ \.\.\.current, \[\w+\.chapter_id\]: false \}\)\)/,
+    "job hoàn tất phải tắt cảnh báo audio cũ cho đúng chương",
+  );
 });
 
 test("M4: cho nguoi dung CHON giu audio hay tao lai", () => {

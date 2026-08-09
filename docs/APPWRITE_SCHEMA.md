@@ -124,6 +124,41 @@ worker cùng nhắm một `attempt` sẽ đụng uniqueness ngay trong transacti
 
 Index: `job_idx` trên `job_id`.
 
+### `job_locks`
+
+Cùng ý tưởng với `job_claims`, nhưng chặn một lỗi khác: **hai request cùng tạo
+một job**.
+
+`$id` là băm tất định của `(owner_id, chapter_id, fingerprint)`, và hàng khoá
+được tạo trong **cùng transaction** với hàng `tts_jobs`. Uniqueness của `$id`
+được cưỡng chế bên trong transaction, nên chỉ một request commit được — không
+có khe hở nào giữa "tạo khoá" và "tạo job".
+
+Đây là bản vá cho một lỗi đã xảy ra thật trên production: idempotency cũ là
+đọc-rồi-ghi không nguyên tử, và năm request trong 2 giây đều đọc thấy "chưa có"
+rồi đều tạo một job cho **cùng một chương**. Năm lần chạy TTS, năm dòng trong
+thư viện. (Thiệt hại chỉ là metadata: `output_key` tất định theo `content_hash`
+và `create_track` là tìm-hoặc-tạo, nên cả năm ghi đè cùng một object và chỉ
+sinh một `audio_tracks`.)
+
+| Thuộc tính | Kiểu | Bắt buộc | Ghi chú |
+|---|---|---|---|
+| `job_id` | string(64) | ✔ | job đang giữ khoá |
+| `owner_id` | string(64) | ✔ | |
+| `created_at` | datetime | ✔ | |
+
+Không cần index: mọi truy cập đều theo `$id`.
+
+**Job `failed` không giữ khoá.** Khi hàng khoá trỏ tới một job đã thất bại,
+lần tạo tiếp theo chiếm lại khoá — nếu không thì nút "Thử lại" sẽ không bao giờ
+tạo được gì. `find_job_by_fingerprint` bỏ qua `failed` vì đúng lý do đó.
+
+> **CHƯA TẠO BẢNG NÀY THÌ HỆ THỐNG VẪN CHẠY.** `create_job_once` lùi về hành vi
+> cũ (tạo thẳng, không khoá) và đặt cờ `job_lock_ready=false` — tức là lỗ hổng
+> đồng thời quay lại cho tới khi migration chạy. Đây là lựa chọn có ý: giữ hệ
+> thống chạy được trước khi bảng kịp tạo, chứ không phải một trạng thái chấp
+> nhận được lâu dài.
+
 **Rollback:** xoá collection này và ba trường lease ở trên. Không cần sửa mã.
 
 ### `audio_tracks`

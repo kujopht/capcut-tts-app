@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -130,6 +131,22 @@ if JOB_LEASE_SECONDS < JOB_HEARTBEAT_SECONDS * 3:
 
 #: So lan chay toi da cho mot job. Vuot thi `failed` kem thong bao ro rang.
 JOB_MAX_ATTEMPTS = 3
+
+#: Tiet che luu tien do. Chi ghi khi DU MOT trong hai dieu kien.
+#:
+#: Callback tien do chay mot lan MOI DOAN. Mot chuong 100.000 ky tu la hon 50
+#: doan, va moi lan ghi Appwrite la mot transaction ba luot goi — ghi moi tick
+#: la dam nat kho vi mot con so ma nguoi dung khong kip doc.
+#:
+#: Nguoc lai, KHONG ghi gi ca cung sai, va do la trang thai cu: tien do chi
+#: song trong bo nho worker, con `GET /api/jobs/{id}` doc tu kho, nen thanh
+#: tien trinh dung im o 0% suot ca job va tai lai trang la mat sach.
+#:
+#: 3 giay khop voi nhip poll 1500ms cua giao dien: nguoi dung thay so nhay it
+#: nhat moi hai lan poll. 5% de mot chuong ngan (it doan, moi doan la mot buoc
+#: nhay lon) van cap nhat kip du chua den 3 giay.
+JOB_PROGRESS_SECONDS = 3.0
+JOB_PROGRESS_PERCENT = 5
 
 #: Chu ky quet job ket. Lan quet dau chay ngay luc khoi dong.
 JOB_SWEEP_SECONDS = 60
@@ -293,6 +310,13 @@ def health() -> Dict[str, Any]:
         "service": "fanfic-audio-api",
         "version": app.version,
         **settings.describe(),
+        # Bang `job_locks` da co chua. `False` nghia la `create_job_once` dang
+        # lui ve hanh vi cu (tao thang, khong khoa) — tuc la lo hong dong thoi
+        # da quay lai, va nguoi van hanh can biet NGAY chu khong doi toi luc
+        # thay nam dong trung nhau trong thu vien.
+        #
+        # Ban mock luon co khoa (mot `threading.Lock` trong bo nho).
+        "job_lock_ready": bool(getattr(store, "_job_lock_ready", True)),
     }
 
 
@@ -1089,6 +1113,63 @@ def _mark_failed(job: TtsJob, kind: str, message: str,
         )
 
 
+def _progress_sink(job: TtsJob, fence: int):
+    """
+    Tao callback tien do co TIET CHE ghi ben vung.
+
+    Bo nho luon duoc cap nhat ngay — day la thu `/api/jobs` doc khi job chay
+    tren cung tien trinh web. Kho ben vung thi chi ghi khi dang ghi, vi
+    `GET /api/jobs/{id}` o production doc tu kho, va worker lai o mot may khac.
+
+    GHI KHI DU MOT TRONG BA:
+      * `total_parts` vua duoc biet — con so nay den mot lan va giao dien can
+        no NGAY de chuyen tu thanh chay vo dinh sang thanh co ty le;
+      * da qua `JOB_PROGRESS_SECONDS` tu lan ghi truoc;
+      * ty le da nhich them `JOB_PROGRESS_PERCENT` diem tro len.
+
+    Dieu kien theo PHAN TRAM la de chuong ngan van muot: 4 doan thi moi doan
+    la 25%, va cho du 3 giay se lam thanh tien trinh nhay giat.
+
+    Ghi hong (mang chap, mat lease) KHONG lam job that bai: tien do la thong
+    tin phu, con `save_job_fenced` o cac transition moi la thu quyet dinh ket
+    qua. Mat mot lan ghi thi lan sau ghi con so moi hon.
+    """
+    trang_thai = {"luc": 0.0, "phan_tram": -1, "da_biet_tong": False}
+
+    def progress(done: int, total: int) -> None:
+        # Bo nho truoc, va luon luon.
+        job.done_parts = done
+        job.total_parts = total
+
+        bay_gio = time.monotonic()
+        phan_tram = int(round(100.0 * done / total)) if total else 0
+        lan_dau_biet_tong = bool(total) and not trang_thai["da_biet_tong"]
+
+        nen_ghi = (
+            lan_dau_biet_tong
+            or bay_gio - trang_thai["luc"] >= JOB_PROGRESS_SECONDS
+            or phan_tram - trang_thai["phan_tram"] >= JOB_PROGRESS_PERCENT
+        )
+        if not nen_ghi:
+            return
+
+        # Cap nhat moc TRUOC khi goi mang: neu lan ghi nay treo lau, cac tick
+        # ke tiep khong duoc don nhau xep hang cho no.
+        trang_thai["luc"] = bay_gio
+        trang_thai["phan_tram"] = phan_tram
+        if total:
+            trang_thai["da_biet_tong"] = True
+
+        try:
+            store.save_progress(job.job_id, fence, WORKER_ID, done, total)
+        except Exception:
+            # Tien do la thong tin phu. Mot lan ghi hong khong duoc lam hong ca
+            # job — ket qua that do cac transition quyet dinh.
+            pass
+
+    return progress
+
+
 def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
     """
     Chay job o thread nen. Moi loi deu duoc ghi vao job, khong lam sap server.
@@ -1117,12 +1198,6 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
     (rac vo hai, khong duoc cong bo vi `output_key` bi xoa). Doi lai la khong
     bao gio bao thanh cong gia. Xem docs/HANDOFF.md muc "Giới hạn đã biết".
     """
-    def progress(done: int, total: int) -> None:
-        # Cap nhat trong bo nho thoi: ghi moi tick se dam nat Appwrite.
-        # Trang thai ben vung chi ghi o cac transition o duoi.
-        job.done_parts = done
-        job.total_parts = total
-
     output_key = f"audio/{job.owner_id}/{job.chapter_id}/{job.content_hash}.mp3"
 
     # -- NHAN JOB TRUOC, roi moi nhan trach nhiem don dep -----------------------
@@ -1138,6 +1213,10 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
         fence = store.claim_job(job, WORKER_ID, _lease_until())
         if fence is None:
             return
+
+    # Sink tien do PHAI dung sau khi co `fence` that: moi lan ghi ben vung deu
+    # kem fencing token, va o tren `fence` con co the la None.
+    progress = _progress_sink(job, fence)
 
     # Ten tep tam kem worker va lan thu, khong chi kem `job_id`. Hai worker chay
     # cung mot job KHONG bao gio dung chung mot duong dan, ke ca khi chung chia
@@ -1575,18 +1654,36 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
 
     # transition: (khong co) -> pending. Ghi ben vung NGAY, truoc khi khoi
     # dong thread, de job luon ton tai trong metadata backend du worker chet.
-    job = store.create_job(TtsJob(
-        owner_id=profile.user_id,
-        chapter_id=chapter.chapter_id,
-        voice_id=payload.voice_id,
-        content_hash=fingerprint,
-        rate=payload.rate,
-        chunk_chars=payload.chunk_chars,
-    ))
+    # transition: (khong co) -> pending, KEM KHOA TAT DINH.
+    #
+    # `find_job_by_fingerprint` o tren la doc-roi-ghi, va giua hai buoc do co
+    # mot khe ho. Da lot qua khe ho do tren production: nam request trong 2
+    # giay deu doc thay "chua co" va deu tao mot job cho CUNG mot chuong —
+    # nam hang `tts_jobs` cung fingerprint, nam lan chay TTS.
+    #
+    # `create_job_once` dong khe ho: hang khoa co `rowId` tat dinh nam cung
+    # transaction voi hang job, nen chi mot request commit duoc. Ke thua nhan
+    # ve job CUA NGUOI THANG va khong duoc khoi dong thread nao.
+    job, vua_tao = store.create_job_once(
+        TtsJob(
+            owner_id=profile.user_id,
+            chapter_id=chapter.chapter_id,
+            voice_id=payload.voice_id,
+            content_hash=fingerprint,
+            rate=payload.rate,
+            chunk_chars=payload.chunk_chars,
+        ),
+        fingerprint,
+    )
 
     # Chup trang thai TRUOC khi khoi dong worker: neu doc sau `start()`, worker
     # co the da doi sang `running` va phan hoi "vua tao" se mo ta sai.
     created = job.to_dict()
+
+    if not vua_tao:
+        # Thua cuoc. TUYET DOI khong khoi dong thread: nguoi thang da lam viec
+        # do, va hai thread cho cung mot job la dung cai loi vong nay chan.
+        return {"job": created, "reused": True}
 
     _start_job_thread(job, chapter.content, None, f"tts-job-{job.job_id}")
     return {"job": created, "reused": False}
@@ -1608,6 +1705,61 @@ def list_jobs(chapter_id: Optional[str] = None,
               profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     items = store.list_jobs(profile.user_id, chapter_id)
     return {"jobs": [j.to_dict() for j in items], "count": len(items)}
+
+
+#: Thu tu uu tien khi chon "job dang ke nhat" cua mot chuong.
+#:
+#: Job DANG CHAY thang moi thu khac, ke ca mot job hoan tat moi hon: cai nguoi
+#: dung can thay sau khi tai lai trang la thanh tien trinh, khong phai ket qua
+#: cu. `running` truoc `pending` vi no da co tien do that de hien.
+_UU_TIEN_JOB = {
+    JobStatus.RUNNING: 0,
+    JobStatus.PENDING: 1,
+    JobStatus.COMPLETED: 2,
+    JobStatus.FAILED: 3,
+}
+
+
+@app.get("/api/chapters/{chapter_id}/jobs/latest")
+def latest_job_for_chapter(
+    chapter_id: str,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Job dang ke nhat cua mot chuong — de giao dien tim lai sau khi tai lai trang.
+
+    VI SAO CAN: `/write` truoc day giu job DUY NHAT trong state cua React. Tai
+    lai trang la mat `job_id`, du job that van dang chay tren worker. Nguoi
+    dung khong con duong nao theo doi no, va cach duy nhat de "thay lai tien
+    trinh" la bam tao lai — tuc la xep them mot job nua cho mot viec dang chay.
+
+    KHO MOI LA NGUON SU THAT, khong phai localStorage: trinh duyet co the bi
+    xoa du lieu, mo o may khac, hoac giu mot `job_id` da bi worker khac thay
+    the sau khi lease chet.
+
+    Tra ve `null` khi chuong chua co job nao — do KHONG phai loi.
+    """
+    # Quyen: `_load_chapter` da kiem chuong ton tai; con so huu thi kiem o day.
+    # Loc theo `owner_id` mot lan nua o `list_jobs` la lop thu hai, khong thua:
+    # mot chuong co the doi chu so huu trong tuong lai, con job thi khong.
+    try:
+        chapter = store.get_chapter(chapter_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    if chapter.owner_id != profile.user_id:
+        # 404 chu khong phai 403: nguoi la khong duoc biet chuong nay co ton tai.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
+
+    items = store.list_jobs(profile.user_id, chapter_id)
+    if not items:
+        return {"job": None}
+
+    # Hai buoc, moi buoc mot tieu chi. Gop ca hai vao mot khoa `sorted` thi
+    # phai dao nguoc chuoi thoi gian — mot meo de go sai va kho doc lai.
+    uu_tien = min(_UU_TIEN_JOB.get(j.status, 9) for j in items)
+    ung_vien = [j for j in items if _UU_TIEN_JOB.get(j.status, 9) == uu_tien]
+    chon = max(ung_vien, key=lambda j: j.created_at)
+    return {"job": chon.to_dict()}
 
 
 # -----------------------------------------------------------------------------

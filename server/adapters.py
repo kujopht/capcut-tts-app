@@ -369,6 +369,59 @@ class MetadataStore(Protocol):
         """
         ...
 
+    def create_job_once(self, job: TtsJob, fingerprint: str) -> Tuple[TtsJob, bool]:
+        """
+        Tao job, NHUNG chi mot lan cho moi `(owner, chapter, fingerprint)`.
+
+        Tra ve `(job, da_tao_moi)`. `da_tao_moi=False` nghia la mot request
+        khac da thang cuoc — job tra ve la CUA HO, va nguoi goi TUYET DOI khong
+        duoc chay TTS cho no.
+
+        VI SAO CAN — mot loi da xay ra that tren production: idempotency cu la
+        DOC-ROI-GHI khong nguyen tu (`find_job_by_fingerprint()` roi
+        `create_job()`). Nam request gan nhu dong thoi deu doc thay "chua co" va
+        deu tao mot job. Bang chung trong kho: nam hang `tts_jobs` cung
+        fingerprint, tao trong 2 giay, cho MOT chuong.
+
+        (Thiet hai chi la metadata: `output_key` tat dinh theo `content_hash` va
+        `create_track` la tim-hoac-tao, nen ca nam lan ghi de cung mot object va
+        chi sinh mot track. Cai mat that su la CONG: TTS chay nam lan.)
+
+        Chan bang mot HANG KHOA co `rowId` TAT DINH dan xuat tu bo ba tren, tao
+        trong CUNG transaction voi hang job. Uniqueness cua `rowId` duoc cuong
+        che ben trong transaction, nen ke thua khong ghi duoc gi ca — khong co
+        khe ho nao giua "tao khoa" va "tao job".
+
+        Nguoi goi VAN nen goi `find_job_by_fingerprint()` truoc: no bat duoc
+        truong hop pho bien (tai lai trang roi bam lai sau vai phut) ma khong
+        ton mot transaction nao.
+        """
+        ...
+
+    def save_progress(self, job_id: str, fence: int, worker_id: str,
+                      done_parts: int, total_parts: int) -> bool:
+        """
+        Luu tien do cua job DANG chay. Tra ve False khi da mat quyen.
+
+        Chi ghi `done_parts` va `total_parts`, cung ly do voi `renew_lease`:
+        worker khong nam giu trang thai moi nhat cua ca hang, nen moi truong
+        thua no gui deu la mot ban cu co kha nang lui nguoc du lieu.
+
+        KHONG luu `progress`. No la thuoc tinh DAN XUAT
+        (`TtsJob.progress_percent`) tinh tu hai truong tren, nen khong the troi
+        khoi chung — mot con so phan tram luu rieng thi co the.
+
+        VI SAO CAN: truoc day tien do chi song trong bo nho cua tien trinh
+        worker. `GET /api/jobs/{id}` doc tu kho ben vung, nen nguoi dung thay
+        thanh tien trinh dung im o 0% suot ca job; tai lai trang thi mat sach.
+
+        Nguoi goi PHAI tu tiet che nhip goi — xem `_progress_sink` trong
+        `server/main.py`. Ghi moi tick se dam nat Appwrite.
+
+        Cung dieu kien fence nhu `save_job_fenced`.
+        """
+        ...
+
     def save_job_fenced(self, job: TtsJob, fence: int, worker_id: str) -> bool:
         """
         Ghi job, NHUNG chi khi nguoi goi con giu quyen.
@@ -677,6 +730,9 @@ class MockMetadataStore:
     """
 
     def __init__(self) -> None:
+        #: (owner, chapter, fingerprint) -> job_id. Ban trong bo nho cua
+        #: hang khoa `job_locks` ben Appwrite.
+        self._job_locks: Dict[Tuple[str, str, str], str] = {}
         self._lock = threading.RLock()
         self.novels: Dict[str, Novel] = {}
         self.chapters: Dict[str, Chapter] = {}
@@ -869,6 +925,31 @@ class MockMetadataStore:
             self.jobs[job.job_id] = job
             return job
 
+    def create_job_once(self, job: TtsJob, fingerprint: str) -> Tuple[TtsJob, bool]:
+        """Xem contract o `MetadataStore.create_job_once`."""
+        khoa = (job.owner_id, job.chapter_id, fingerprint)
+        with self._lock:
+            # `self._lock` o day dong vai tro cua transaction ben Appwrite: hai
+            # request khong the cung di qua doan nay.
+            chu_cu = self._job_locks.get(khoa)
+            if chu_cu is not None:
+                da_co = self.jobs.get(chu_cu)
+                # Job THAT BAI khong giu khoa nua: nguoi dung phai thu lai
+                # duoc. `find_job_by_fingerprint` cung bo qua `failed` vi dung
+                # ly do do — khoa ma chat hon no thi bam "Thử lại" se khong bao
+                # gio tao duoc gi.
+                #
+                # Khoa mo coi (job da bi xoa) cung roi vao day.
+                if da_co is not None and da_co.status != JobStatus.FAILED:
+                    return da_co, False
+            self._job_locks[khoa] = job.job_id
+
+        # Ghi QUA `create_job()`, khong ghi thang vao `self.jobs`: cac test
+        # double ke thua lop nay va ghi de `create_job` de theo doi thu tu ghi.
+        # Ghi thang se di vong qua ho, va ban ghi `pending` bien mat khoi so
+        # theo doi cua ho ma khong ai thay.
+        return self.create_job(job), True
+
     def save_job(self, job: TtsJob) -> TtsJob:
         """
         Ghi lai trang thai job sau moi transition.
@@ -970,6 +1051,21 @@ class MockMetadataStore:
             self.jobs[job_id] = replace(current,
                                         lease_expires_at=lease_expires_at,
                                         lease_owner=worker_id)
+            return True
+
+    def save_progress(self, job_id: str, fence: int, worker_id: str,
+                      done_parts: int, total_parts: int) -> bool:
+        """Xem contract o `MetadataStore.save_progress`."""
+        with self._lock:
+            current = self.jobs.get(job_id)
+            if current is None:
+                return False
+            if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+                return False
+            # CHI hai truong tien do, tren ban ghi DANG CO trong kho.
+            self.jobs[job_id] = replace(current,
+                                        done_parts=max(0, int(done_parts)),
+                                        total_parts=max(0, int(total_parts)))
             return True
 
     def save_job_fenced(self, job: TtsJob, fence: int, worker_id: str) -> bool:

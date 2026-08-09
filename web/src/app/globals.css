@@ -1090,6 +1090,21 @@ button, input, select, textarea {
 .hero-title a:hover { color: var(--brand-hover); }
 .hero-cover { text-decoration: none; }
 
+/* --------------------------------------------------- tien do tao audio */
+
+/*
+  Con so phan tram doc duoc tu xa. Dung `--font-mono` de chu so khong nhay
+  ngang khi ty le doi: font ty le lam "37%" va "38%" rong khac nhau, va o nhip
+  cap nhat vai giay mot lan thi cai nhay do rat de thay.
+*/
+.job-percent {
+  font-family: var(--font-mono);
+  font-size: var(--t-md);
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 /* --------------------------------------------- dang nhap bang nha cung cap */
 
 /*

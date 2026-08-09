@@ -1091,7 +1091,11 @@ export default function WritePage() {
                           <ProgressBar
                             percent={job.total_parts ? job.progress : 0}
                             indeterminate={!job.total_parts}
-                            label="Đang tạo audio"
+                            label={
+                              job.total_parts
+                                ? `Đang xử lý · ${job.progress}%`
+                                : "Đang chuẩn bị…"
+                            }
                           />
                           {job.total_parts ? (
                             <div className="row-between">
@@ -1101,7 +1105,15 @@ export default function WritePage() {
                               </span>
                             </div>
                           ) : (
-                            <span className="hint">Đang chia chương thành các phần…</span>
+                            /*
+                              "Đang chuẩn bị…" chu khong phai "Đang chia chương
+                              thành các phần…". Cau cu MO TA SAI viec dang xay
+                              ra: chia chuong la thao tac trong bo nho, xong
+                              trong mot phan nghin giay. Thu that su dien ra o
+                              day la cho — cho worker nhan job, hoac cho
+                              `_PIPER_LOCK` khi mot job khac dang chay.
+                            */
+                            <span className="hint">Đang chuẩn bị…</span>
                           )}
                         </>
                       ) : null}

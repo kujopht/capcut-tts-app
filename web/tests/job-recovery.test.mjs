@@ -180,9 +180,26 @@ test("KHONG bia ty le khi chua biet total_parts", () => {
   assert.match(src, /indeterminate=\{!job\.total_parts\}/);
 });
 
-test("truoc khi biet tong thi noi ro dang lam gi", () => {
+test("truoc khi biet tong thi noi 'Đang chuẩn bị…'", () => {
+  /*
+    Cau cu la "Đang chia chương thành các phần…", va no MO TA SAI viec dang
+    xay ra: chia chuong la thao tac trong bo nho, xong trong mot phan nghin
+    giay. Thu that su dien ra o day la CHO — cho worker nhan job, hoac cho
+    `_PIPER_LOCK` khi mot job khac dang chay.
+  */
+  // `codeOnly`: chu thich ngay canh doan sua co trich nguyen van cau cu de
+  // giai thich vi sao no bi bo — quet ca tep se bat trung chinh loi giai thich.
+  const src = codeOnly(write());
+  assert.match(src, /Đang chuẩn bị…/);
+  assert.ok(!src.includes("Đang chia chương thành các phần"),
+    "vẫn còn câu mô tả sai việc đang xảy ra");
+});
+
+test("khi da biet tong thi nhan cua thanh tien trinh mang % that", () => {
   const src = write();
-  assert.match(src, /Đang chia chương thành các phần/);
+  assert.match(src, /`Đang xử lý · \$\{job\.progress\}%`/);
+  // Va van co dong "x / y phần" ben duoi.
+  assert.match(src, /\{job\.done_parts\} \/ \{job\.total_parts\} phần/);
 });
 
 /* ========================================== thu vien: mot dong moi chuong */

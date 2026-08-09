@@ -38,8 +38,25 @@ COL_CHAPTERS = "chapters"
 COL_JOBS = "tts_jobs"
 COL_TRACKS = "audio_tracks"
 COL_CLAIMS = "job_claims"
+#: Khoa tat dinh chan hai request cung tao mot job. Xem `create_job_once`.
+COL_JOB_LOCKS = "job_locks"
 
 REQUEST_TIMEOUT = 15.0
+
+
+def _job_lock_id(owner_id: str, chapter_id: str, fingerprint: str) -> str:
+    """
+    `rowId` TAT DINH cho hang khoa cua mot job.
+
+    Bam thay vi noi chuoi: Appwrite gioi han do dai `rowId` (36 ky tu) va cam
+    mot so ky tu, con ba dau vao gop lai thi dai hon nhieu.
+
+    Chi de CHONG TRUNG, khong phai de bao mat.
+    """
+    import hashlib
+
+    thong = f"{owner_id}{chapter_id}{fingerprint}".encode()
+    return "lock" + hashlib.sha256(thong).hexdigest()[:28]
 
 #: Appwrite chi nhan `ttl` trong khoang 60..3600 giay — da do that.
 TRANSACTION_TTL_SECONDS = 60
@@ -177,6 +194,14 @@ class AppwriteMetadataStore:
     def __init__(self, settings: AppwriteSettings, client: Any = None):
         """:param client: cho phep test tiem client gia lap thay cho httpx."""
         from server.appwrite_adapter import AppwriteConfigError
+
+        #: Bang `job_locks` da co trong Appwrite chua.
+        #:
+        #: Bat dau bang True va chi tat khi `create_job_once` that su khong doc
+        #: duoc hang khoa — tuc la doan mo duoc suy ra tu HANH VI THAT chu
+        #: khong tu mot lan probe rieng luc khoi dong. `/api/health` bao ra co
+        #: nay de nguoi van hanh biet minh dang o che do nao.
+        self._job_lock_ready = True
 
         if not settings.configured:
             raise AppwriteConfigError(
@@ -554,6 +579,75 @@ class AppwriteMetadataStore:
         self._create(COL_JOBS, job.job_id, job.to_dict(), job.owner_id)
         return job
 
+    def create_job_once(self, job: TtsJob, fingerprint: str):
+        """
+        Tao job kem KHOA TAT DINH. Xem contract o `MetadataStore.create_job_once`.
+
+        Hang khoa va hang job duoc tao trong CUNG mot transaction. Uniqueness
+        cua `rowId` khoa duoc cuong che ben trong transaction, nen ke thua
+        khong ghi duoc gi ca — khong co khe ho giua "tao khoa" va "tao job", va
+        khi khoa da ton tai thi job cung chac chan da ton tai.
+
+        Cung khuon voi `claim_job`, va vi cung mot ly do: doc-roi-ghi khong
+        chan duoc hai request cham nhau trong cung mot phan giay.
+
+        TUONG THICH NGUOC: neu bang `job_locks` chua duoc tao trong Appwrite,
+        transaction se hong va ta LUI VE hanh vi cu (tao thang, khong khoa).
+        Lui ve mot hanh vi kem an toan hon la co y va co gioi han: no giu he
+        thong chay duoc truoc khi migration kip chay, va `/api/health` bao ra
+        co `job_lock_ready` de nguoi van hanh thay ngay minh dang o che do nao.
+        """
+        row_id = _job_lock_id(job.owner_id, job.chapter_id, fingerprint)
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+            self._call("POST", f"/v1/tablesdb/transactions/{tx['$id']}/operations",
+                       payload={"operations": [
+                           {"action": "create", "databaseId": self._db,
+                            "tableId": COL_JOB_LOCKS, "rowId": row_id,
+                            "data": {"job_id": job.job_id,
+                                     "owner_id": job.owner_id,
+                                     "created_at": now_iso()}},
+                           {"action": "create", "databaseId": self._db,
+                            "tableId": COL_JOBS, "rowId": job.job_id,
+                            "data": job.to_dict()},
+                       ]})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx['$id']}",
+                                payload={"commit": True})
+            if result.get("status") == "committed":
+                return job, True
+        except Exception:
+            pass
+
+        # Khong commit duoc. Hai kha nang, va chung can hai cach xu ly khac han:
+        #   1. mot request khac da thang -> hang khoa TON TAI, doc ra job cua ho;
+        #   2. bang `job_locks` chua co -> khong doc duoc, lui ve hanh vi cu.
+        try:
+            khoa = self._get(COL_JOB_LOCKS, row_id)
+        except Exception:
+            self._job_lock_ready = False
+            self._create(COL_JOBS, job.job_id, job.to_dict(), job.owner_id)
+            return job, True
+
+        cua_ho = str(khoa.get("job_id") or "")
+        giu_khoa = None
+        try:
+            giu_khoa = self.get_job(cua_ho)
+        except NotFoundError:
+            pass                    # khoa mo coi: job da bi xoa
+
+        # Job THAT BAI khong giu khoa nua: nguoi dung phai thu lai duoc.
+        # `find_job_by_fingerprint` cung bo qua `failed` vi dung ly do do.
+        if giu_khoa is not None and giu_khoa.status != JobStatus.FAILED:
+            return giu_khoa, False
+
+        # Doc quyen lai: tro khoa sang job moi, roi tao job.
+        self._call("PATCH",
+                   f"/v1/tablesdb/{self._db}/tables/{COL_JOB_LOCKS}/rows/{row_id}",
+                   payload={"data": {"job_id": job.job_id}})
+        self._create(COL_JOBS, job.job_id, job.to_dict(), job.owner_id)
+        return job, True
+
     def get_job(self, job_id: str) -> TtsJob:
         return _job_from_doc(self._get(COL_JOBS, job_id))
 
@@ -725,6 +819,41 @@ class AppwriteMetadataStore:
                                 payload={"commit": True})
         except Exception:
             # Mang chap chon. Nguoi goi coi nhu nhip nay lo, lease cu con han.
+            return False
+        return result.get("status") == "committed"
+
+    def save_progress(self, job_id: str, fence: int, worker_id: str,
+                      done_parts: int, total_parts: int) -> bool:
+        """
+        Luu tien do. Xem contract o `MetadataStore.save_progress`.
+
+        Dung mot khuon voi `renew_lease` ngay tren, va vi cung mot ly do: chi
+        hai truong di trong payload. `save_job_fenced` gui ca hang tu mot ban
+        sao trong bo nho cua worker, nen dung no o day se lui nguoc bat ky
+        truong nao vua duoc ghi boi mot duong khac.
+
+        `progress` KHONG di kem: no la thuoc tinh dan xuat, khong phai cot.
+        """
+        try:
+            current = self.get_job(job_id)
+        except NotFoundError:
+            return False
+        if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+            return False
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+            self._call("POST", f"/v1/tablesdb/transactions/{tx['$id']}/operations",
+                       payload={"operations": [{
+                           "action": "update", "databaseId": self._db,
+                           "tableId": COL_JOBS, "rowId": job_id,
+                           "data": {"done_parts": max(0, int(done_parts)),
+                                    "total_parts": max(0, int(total_parts))}}]})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx['$id']}",
+                                payload={"commit": True})
+        except Exception:
+            # Mang chap chon. Mat mot lan ghi tien do la vo hai: lan sau se ghi
+            # con so moi hon, va cac transition van ghi day du.
             return False
         return result.get("status") == "committed"
 

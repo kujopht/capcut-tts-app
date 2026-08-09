@@ -150,6 +150,23 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("job_idx", "key", ["job_id"]),
         ],
     },
+    # Khoa TAT DINH chan hai request cung tao mot job.
+    #
+    # `$id` la bam cua (owner_id, chapter_id, fingerprint), va hang khoa duoc
+    # tao trong CUNG transaction voi hang job — nen chi mot request commit
+    # duoc. Ban va cho mot loi da xay ra that: nam request trong 2 giay deu doc
+    # thay "chua co" roi deu tao mot job cho cung mot chuong.
+    #
+    # KHONG co index: moi truy cap deu theo `$id`.
+    "job_locks": {
+        "name": "Job Locks",
+        "attributes": [
+            ("job_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [],
+    },
     "audio_tracks": {
         "name": "Audio Tracks",
         "attributes": [
@@ -319,9 +336,25 @@ class Setup:
         })
         print(f"    * index {name} {keys}: {'đã có' if result == 'exists' else 'đã tạo'}")
 
-    def run(self) -> None:
+    def run(self, only: str = "") -> None:
+        """
+        :param only: chi cham DUNG mot collection. Bo trong = tat ca.
+
+        Co `--only` ton tai cho migration co pham vi hep: chay ca script tren
+        mot production dang song van an toan (moi buoc deu idempotent), nhung
+        no van ban ra hang chuc request POST vao cac bang khong lien quan. Khi
+        viec duoc cho phep chi la "tao mot bang", pham vi chay nen dung bang
+        pham vi duoc cho phep.
+        """
+        if only and only not in SCHEMA:
+            raise SystemExit(f"Không có collection {only!r} trong SCHEMA. "
+                             f"Chọn một trong: {', '.join(SCHEMA)}")
+        # `ensure_database` chi DOC khi database da co, nen no vo hai; giu lai
+        # de script khong chay tren mot database khong ton tai.
         self.ensure_database()
         for cid, spec in SCHEMA.items():
+            if only and cid != only:
+                continue
             self.ensure_collection(cid, spec)
         print(f"\nHoàn tất — tạo mới {self.created}, bỏ qua (đã có) {self.skipped}.")
         print("Chạy lại script này bất cứ lúc nào đều an toàn.")
@@ -331,7 +364,15 @@ def main(argv: List[str]) -> int:
     dry_run = "--dry-run" in argv
     if dry_run:
         print("Chế độ thử: không gọi Appwrite, chỉ in các bước sẽ chạy.\n")
-    Setup(dry_run=dry_run).run()
+    only = ""
+    for i, tham_so in enumerate(argv):
+        if tham_so == "--only" and i + 1 < len(argv):
+            only = argv[i + 1]
+        elif tham_so.startswith("--only="):
+            only = tham_so.split("=", 1)[1]
+    if only:
+        print(f"Chỉ chạm collection: {only}")
+    Setup(dry_run=dry_run).run(only=only)
     return 0
 
 

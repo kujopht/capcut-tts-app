@@ -386,6 +386,18 @@ export const api = {
 
   getJob: (jobId: string) => request<{ job: TtsJob }>(`/api/jobs/${jobId}`),
 
+  /**
+   * Job dang ke nhat cua MOT chuong — de tim lai sau khi tai lai trang.
+   *
+   * Dung khi chi quan tam mot chuong. Khoi phuc CA trang thi dung `listJobs()`
+   * (mot request cho tat ca): goi ham nay trong vong lap la N+1, va
+   * `tests/correctness-scale.test.mjs` khoa lai chinh cho do.
+   */
+  latestJobForChapter: (chapterId: string) =>
+    request<{ job: TtsJob | null }>(
+      `/api/chapters/${chapterId}/jobs/latest`,
+    ),
+
   listJobs: (chapterId?: string) =>
     request<{ jobs: TtsJob[]; count: number }>(
       `/api/jobs${chapterId ? `?chapter_id=${chapterId}` : ""}`,

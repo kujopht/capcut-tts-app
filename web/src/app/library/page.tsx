@@ -56,8 +56,34 @@ export default function LibraryPage() {
       if (novel) index.set(chapter.chapter_id, { chapter, novel });
     });
 
-    return jobList.jobs
-      .filter((job) => job.status === "completed")
+    /*
+      MOT DONG cho moi chuong, la ban HIEN HANH.
+
+      Truoc day moi job `completed` la mot dong. Tren production da co mot
+      chuong voi NAM job hoan tat cung fingerprint (nguoi dung bam nut nhieu
+      lan trong 2 giay), va thu vien hien nam dong trong y het nhau — khong
+      cach nao biet chung khac nhau o dau, vi chung KHONG khac nhau: ca nam
+      tro ve cung mot object R2 va cung mot AudioTrack.
+
+      Loi goc da duoc sua o backend (`create_job_once`). Nhung du lieu cu van
+      con, va nguoi dung khong co loi gi de phai nhin nam dong do — nen o day
+      chi giu ban moi nhat cua moi chuong.
+
+      Doi giong hay sua noi dung roi tao lai cung roi vao day: nguoi dung thay
+      ban MOI NHAT, dung thu ho vua tao. Lich su phien ban audio la mot tinh
+      nang rieng, chua lam; khi lam thi no phai co giao dien noi ro tung ban
+      khac nhau o dau, chu khong phai nhung dong trung nhau.
+    */
+    const moi_nhat = new Map<string, (typeof jobList.jobs)[number]>();
+    for (const job of jobList.jobs) {
+      if (job.status !== "completed") continue;
+      const dang_co = moi_nhat.get(job.chapter_id);
+      if (!dang_co || job.created_at > dang_co.created_at) {
+        moi_nhat.set(job.chapter_id, job);
+      }
+    }
+
+    return [...moi_nhat.values()]
       .map((job) => {
         const found = index.get(job.chapter_id);
         if (!found) return null;

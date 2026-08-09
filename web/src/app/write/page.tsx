@@ -33,6 +33,7 @@ import {
   voiceSections,
 } from "@/lib/voices";
 import { loginHref } from "@/lib/nav";
+import { dangChayDauTien, moiNhatTheoChuong } from "@/lib/jobs";
 import { fanficOnly } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import {
@@ -105,8 +106,19 @@ export default function WritePage() {
   const [savingChapter, setSavingChapter] = useState(false);
 
   const [voiceId, setVoiceId] = useState("");
-  const [job, setJob] = useState<TtsJob | null>(null);
-  const [jobChapterId, setJobChapterId] = useState("");
+  /*
+    Job theo TUNG CHUONG, khong phai mot job toan cuc.
+
+    Truoc day `/write` giu dung mot `job` trong state. Hai chuong cung xep
+    hang thi cai sau de len cai truoc, va nguoi dung mat dau vet cua chuong
+    dau — trong khi backend cho toi `MAX_ACTIVE_JOBS` job mot luc.
+
+    `focusChapterId` chi quyet dinh khung "Tien trinh" o duoi dang noi ve
+    chuong nao. No la chuyen TRINH BAY; `jobs` moi la trang thai that.
+  */
+  const [jobs, setJobs] = useState<Record<string, TtsJob>>({});
+  const [focusChapterId, setFocusChapterId] = useState("");
+  const job = focusChapterId ? (jobs[focusChapterId] ?? null) : null;
   const [confirmPublish, setConfirmPublish] = useState<"publish" | "unpublish" | null>(
     null,
   );
@@ -118,13 +130,28 @@ export default function WritePage() {
 
   // Than effect KHONG duoc goi setState dong bo — xem `load` cua Audio Studio.
   const load = useCallback(() => {
-    Promise.all([api.listNovels(true), api.voices()])
-      .then(([novelList, voiceList]) => {
+    /*
+      `listJobs()` la request THU BA, va no la cach khoi phuc job sau khi tai
+      lai trang.
+
+      MOT request cho TAT CA chuong, khong phai mot request moi chuong: duong
+      `/api/chapters/{id}/jobs/latest` co ton tai va huu ich khi chi can hoi ve
+      dung mot chuong, nhung goi no trong vong lap la N+1 —
+      `tests/correctness-scale.test.mjs` dang khoa lai chinh cho do.
+
+      KHO MOI LA NGUON SU THAT. Khong doc `job_id` tu localStorage: trinh duyet
+      co the bi xoa du lieu, mo o may khac, hoac giu mot `job_id` da bi worker
+      khac thay the sau khi lease chet.
+    */
+    Promise.all([api.listNovels(true), api.voices(), api.listJobs()])
+      .then(([novelList, voiceList, jobList]) => {
         const mine = fanficOnly(novelList.novels);
         setNovels(mine);
         setVoices(voiceList.voices);
         setVoiceId((current) => current || defaultVoiceId(voiceList.voices));
         setSelectedId((current) => current || mine[0]?.novel_id || "");
+        setJobs(moiNhatTheoChuong(jobList.jobs));
+        setFocusChapterId((current) => current || dangChayDauTien(jobList.jobs));
       })
       .catch((cause) => setError(errorMessage(cause)))
       .finally(() => setLoading(false));
@@ -189,26 +216,47 @@ export default function WritePage() {
 
   /* ------------------------------------------------------------ theo doi */
 
+  /*
+    Theo doi MOI job dang chay, khong chi cai dang duoc nhin.
+
+    Backend cho toi `MAX_ACTIVE_JOBS` job mot luc, nen chi poll mot cai la
+    nhung cai con lai dung im o trang thai cu cho toi khi nguoi dung bam vao
+    chung. So request van nho: toi da la so job dang chay, khong phai so chuong.
+  */
+  const dangChay = useMemo(
+    () =>
+      Object.values(jobs).filter(
+        (j) => j.status === "pending" || j.status === "running",
+      ),
+    [jobs],
+  );
+  // Khoa on dinh cho effect: mang moi moi lan render se lam effect chay lai vo tan.
+  const dangChayKey = dangChay.map((j) => j.job_id).sort().join(",");
+
   useEffect(() => {
-    if (!job || job.status === "completed" || job.status === "failed") return;
+    if (!dangChayKey) return;
+    const ids = dangChayKey.split(",");
     const id = window.setTimeout(() => {
-      api
-        .getJob(job.job_id)
-        .then((r) => {
-          setJob(r.job);
-          if (r.job.status === "completed") {
-            toast.ok("Audio của chương đã sẵn sàng.");
-            setAudioByChapter((current) => ({ ...current, [r.job.chapter_id]: true }));
-            // Vua tao lai xong thi audio khop noi dung hien tai -> tat canh bao
-            setStaleByChapter((current) => ({ ...current, [r.job.chapter_id]: false }));
-          } else if (r.job.status === "failed") {
-            toast.error("Tạo audio thất bại.");
+      Promise.all(ids.map((jid) => api.getJob(jid).catch(() => null))).then(
+        (ket_qua) => {
+          for (const r of ket_qua) {
+            if (!r) continue;
+            const moi = r.job;
+            setJobs((current) => ({ ...current, [moi.chapter_id]: moi }));
+            if (moi.status === "completed") {
+              toast.ok("Audio của chương đã sẵn sàng.");
+              setAudioByChapter((current) => ({ ...current, [moi.chapter_id]: true }));
+              // Vua tao lai xong thi audio khop noi dung hien tai -> tat canh bao
+              setStaleByChapter((current) => ({ ...current, [moi.chapter_id]: false }));
+            } else if (moi.status === "failed") {
+              toast.error("Tạo audio thất bại.");
+            }
           }
-        })
-        .catch(() => undefined);
+        },
+      );
     }, POLL_MS);
     return () => window.clearTimeout(id);
-  }, [job, toast]);
+  }, [dangChayKey, toast]);
 
   /* ---------------------------------------------------------------- suy */
 
@@ -429,8 +477,8 @@ export default function WritePage() {
       }
       try {
         const result = await api.createJob(chapterId, voiceId);
-        setJobChapterId(chapterId);
-        setJob(result.job);
+        setJobs((current) => ({ ...current, [chapterId]: result.job }));
+        setFocusChapterId(chapterId);
         toast.push("info", result.reused ? "Dùng lại audio đã tạo." : "Đang tạo audio…");
       } catch (cause) {
         toast.error(errorMessage(cause));
@@ -457,7 +505,8 @@ export default function WritePage() {
         setSelectedId(left[0]?.novel_id ?? "");
         setChapters([]);
         setAudioByChapter({});
-        setJob(null);
+        setJobs({});
+        setFocusChapterId("");
         toast.ok(
           `Đã xoá truyện cùng ${result.removed.chapters ?? 0} chương và ` +
             `${result.removed.objects} file audio.`,
@@ -470,10 +519,12 @@ export default function WritePage() {
           delete next[target.id];
           return next;
         });
-        if (jobChapterId === target.id) {
-          setJob(null);
-          setJobChapterId("");
-        }
+        setJobs((current) => {
+          const next = { ...current };
+          delete next[target.id];
+          return next;
+        });
+        if (focusChapterId === target.id) setFocusChapterId("");
         if (editingChapterId === target.id) setEditingChapterId("");
         toast.ok(
           result.removed.objects > 0
@@ -487,7 +538,7 @@ export default function WritePage() {
     } finally {
       setDeleting(false);
     }
-  }, [pendingDelete, novels, jobChapterId, editingChapterId, toast]);
+  }, [pendingDelete, novels, focusChapterId, editingChapterId, toast]);
 
   /* --------------------------------------------------------------- render */
 
@@ -995,15 +1046,41 @@ export default function WritePage() {
                   {job ? (
                     <div className="stack-2" aria-live="polite">
                       <div className="row-between">
-                        <span className="hint">Tiến trình tạo audio</span>
+                        <span className="hint">
+                          Tiến trình tạo audio
+                          {focusChapterId
+                            ? ` · ${
+                                chapters.find((c) => c.chapter_id === focusChapterId)
+                                  ?.title ?? "Chương"
+                              }`
+                            : ""}
+                        </span>
                         <JobBadge status={job.status} />
                       </div>
                       {job.status === "pending" || job.status === "running" ? (
-                        <ProgressBar
-                          percent={job.progress || 6}
-                          indeterminate={!job.total_parts}
-                          label="Đang tạo audio"
-                        />
+                        <>
+                          {/*
+                            KHONG bia ty le. Truoc khi worker bao `total_parts`
+                            thi khong ai biet chuong se ra bao nhieu doan, nen
+                            thanh chay vo dinh moi la su that; dat dai mot con
+                            so "6%" cho do trong la noi doi voi nguoi dung.
+                          */}
+                          <ProgressBar
+                            percent={job.total_parts ? job.progress : 0}
+                            indeterminate={!job.total_parts}
+                            label="Đang tạo audio"
+                          />
+                          {job.total_parts ? (
+                            <div className="row-between">
+                              <span className="job-percent">{job.progress}%</span>
+                              <span className="hint">
+                                {job.done_parts} / {job.total_parts} phần
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="hint">Đang chia chương thành các phần…</span>
+                          )}
+                        </>
                       ) : null}
                       {job.status === "failed" ? (
                         <>
@@ -1021,11 +1098,11 @@ export default function WritePage() {
                           </div>
                         </>
                       ) : null}
-                      {job.status === "completed" && jobChapterId ? (
+                      {job.status === "completed" && focusChapterId ? (
                         <AudioPlayer
-                          chapterId={jobChapterId}
+                          chapterId={focusChapterId}
                           title={
-                            chapters.find((c) => c.chapter_id === jobChapterId)?.title ??
+                            chapters.find((c) => c.chapter_id === focusChapterId)?.title ??
                             "Chương"
                           }
                           compact

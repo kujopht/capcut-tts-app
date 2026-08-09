@@ -445,7 +445,7 @@
     "description": "Giọng nữ review phim — NghiTTS",
     "display_name": "Ngọc Huyền",
     "gender": "Female",
-    "installed": true,
+    "installed": false,
     "language": "vi-VN",
     "provider": "piper",
     "provider_label": "NghiTTS",

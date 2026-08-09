@@ -264,21 +264,49 @@ class FixtureChoBoTestWeb(unittest.TestCase):
     DUONG_DAN = (Path(__file__).resolve().parents[2]
                  / "web" / "tests" / "fixtures" / "voices-production.json")
 
-    def test_fixture_khop_voi_may_chu(self) -> None:
+    #: Truong DUY NHAT bi loai khoi phep so, va vi mot ly do cu the.
+    #:
+    #: `installed` tra loi "TIEN TRINH NAY co tep model khong" — no phu thuoc
+    #: dia cua may dang chay. May cua nguoi phat trien co model `ngochuyen`
+    #: nen no `True`; may CI khong co nen `False`. Dua no vao phep so thi
+    #: fixture khong the dung dong thoi o ca hai noi, va bo test se do o dung
+    #: mot ben — da xay ra that.
+    #:
+    #: Loai no ra la AN TOAN vi giao dien khong doc no cho giong NghiTTS:
+    #: `usableVoices()` dung `installed || runs_on_worker`, va `runs_on_worker`
+    #: moi la co dung cho giong chay tren may chu tong hop.
+    BO_QUA = ("installed",)
+
+    def _doc(self) -> list:
         import json
 
-        thuc_te = tts_bridge.list_voices(CauHinhGia())
-        trong_tep = json.loads(self.DUONG_DAN.read_text(encoding="utf-8"))
-        khoa = lambda v: v["voice_id"]                      # noqa: E731
+        return json.loads(self.DUONG_DAN.read_text(encoding="utf-8"))
+
+    def test_fixture_khop_voi_may_chu(self) -> None:
+        def chuan(ds):
+            return sorted(
+                [{k: v for k, v in m.items() if k not in self.BO_QUA}
+                 for m in ds],
+                key=lambda v: v["voice_id"])
+
         self.assertEqual(
-            sorted(trong_tep, key=khoa), sorted(thuc_te, key=khoa),
+            chuan(self._doc()), chuan(tts_bridge.list_voices(CauHinhGia())),
             "fixture đã trôi khỏi `list_voices()` — sinh lại nó, đừng sửa tay")
 
-    def test_fixture_du_51_giong(self) -> None:
-        import json
+    def test_fixture_mo_phong_may_KHONG_co_model(self) -> None:
+        """
+        Fixture phai chup dung hinh dang cua tien trinh API tren Render: khong
+        co tep `.onnx` nao. Sinh no tren may CO model se ghi `installed=True`
+        cho giong do, va bo test web se vo tinh khang dinh mot dieu chi dung
+        tren may cua mot nguoi.
+        """
+        piper = [v for v in self._doc() if v["provider"] == "piper"]
+        self.assertEqual(len(piper), 25)
+        for v in piper:
+            self.assertFalse(v["installed"], v["voice_id"])
 
-        self.assertEqual(
-            len(json.loads(self.DUONG_DAN.read_text(encoding="utf-8"))), 51)
+    def test_fixture_du_51_giong(self) -> None:
+        self.assertEqual(len(self._doc()), 51)
 
 
 class GiongDeXuatPhaiThucSuDuocPhucVu(unittest.TestCase):

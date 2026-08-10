@@ -224,9 +224,6 @@ body {
   background-size: cover;
   background-position: var(--diem, center);
   background-repeat: no-repeat;
-  /* Anh goc sang va bao hoa hon muc mot nen can. Ha xuong o day thay vi sua
-     tep — de doi lai, va de doc ra rang day la mot quyet dinh. */
-  filter: saturate(0.85) brightness(0.9);
 }
 
 /*
@@ -240,27 +237,35 @@ body {
 */
 .page-bg::after {
   background:
-    radial-gradient(125% 90% at 50% 0%, transparent 0%, #08090f 82%),
-    linear-gradient(180deg, #08090f00 0%, #08090f 88%),
-    rgb(8 9 15 / var(--toi, 0.82));
+    radial-gradient(125% 95% at 50% 8%, transparent 0%, #06070d 88%),
+    linear-gradient(180deg, #06070d00 0%, #06070dcc 72%, #06070d 100%),
+    rgb(6 7 13 / var(--toi, 0.62));
 }
 
 /*
-  Muc toi rieng cho tung trang, va moi con so deu co ly do:
+  Muc toi rieng cho tung tam, va con so KHONG phai chon bang mat.
+
+  Do sang trung binh cua tung tam rat khac nhau — `02-explore-sky-kingdom`
+  sang 150/255 con `08-login-starlight-gate` chi 41. Phu cung mot muc len ca
+  tam se cho ra tam thi trang xoa, tam thi den kit.
+
+  Nen moi muc phu duoc tinh nguoc tu do sang MONG MUON sau khi phu:
+      toi = 1 - mong_muon / do_sang_that
+  Mong muon dat theo VAI TRO cua trang:
 
     doc chuong / viet truyen   toi nhat — chu dai, doc lau
     kham pha / thu vien        toi vua — luoi the phai quet mat nhanh
     trang chu / dang nhap      nhat nhat — noi dung ngan, khong khi duoc phep
                                la thu nguoi ta thay truoc
 */
-.page-bg[data-bg="home"]    { --anh: url("/artwork/backgrounds/01-home-neon-night.webp");      --toi: 0.72; --diem: center 30%; }
-.page-bg[data-bg="explore"] { --anh: url("/artwork/backgrounds/02-explore-cyber-rain.webp");   --toi: 0.84; --diem: center 35%; }
-.page-bg[data-bg="reader"]  { --anh: url("/artwork/backgrounds/03-reader-moonlit-shrine.webp"); --toi: 0.88; --diem: center 25%; }
-.page-bg[data-bg="studio"]  { --anh: url("/artwork/backgrounds/04-studio-audio-nebula.webp");  --toi: 0.82; --diem: center 40%; }
-.page-bg[data-bg="write"]   { --anh: url("/artwork/backgrounds/05-write-creator-room.webp");   --toi: 0.88; --diem: center 45%; }
-.page-bg[data-bg="library"] { --anh: url("/artwork/backgrounds/06-library-starry-archive.webp"); --toi: 0.82; --diem: center 30%; }
-.page-bg[data-bg="account"] { --anh: url("/artwork/backgrounds/07-account-sakura-night.webp"); --toi: 0.76; --diem: center 30%; }
-.page-bg[data-bg="auth"]    { --anh: url("/artwork/backgrounds/08-auth-starry-sky.webp");      --toi: 0.70; --diem: center 35%; }
+.page-bg[data-bg="home"] { --anh: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor-sm.webp"); --toi: 0.71; --diem: center 42%; }
+.page-bg[data-bg="explore"] { --anh: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom-sm.webp"); --toi: 0.83; --diem: center 38%; }
+.page-bg[data-bg="reader"] { --anh: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine-sm.webp"); --toi: 0.51; --diem: center 22%; }
+.page-bg[data-bg="studio"] { --anh: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop-sm.webp"); --toi: 0.69; --diem: center 45%; }
+.page-bg[data-bg="write"] { --anh: url("/artwork/fantasy-backgrounds/05-write-creators-room.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/05-write-creators-room-sm.webp"); --toi: 0.74; --diem: center 50%; }
+.page-bg[data-bg="library"] { --anh: url("/artwork/fantasy-backgrounds/06-library-arcane-archive.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/06-library-arcane-archive-sm.webp"); --toi: 0.39; --diem: center 40%; }
+.page-bg[data-bg="account"] { --anh: url("/artwork/fantasy-backgrounds/07-account-blossom-realm.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/07-account-blossom-realm-sm.webp"); --toi: 0.6; --diem: center 32%; }
+.page-bg[data-bg="auth"] { --anh: url("/artwork/fantasy-backgrounds/08-login-starlight-gate.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/08-login-starlight-gate-sm.webp"); --toi: 0.27; --diem: center 38%; }
 
 /*
   Hat sang troi rat cham — CHI o trang chu, dang nhap va tai khoan.
@@ -326,6 +331,18 @@ button, input, select, textarea {
 }
 
 /* ------------------------------------------------------------ bo cuc */
+
+/*
+  Cac lop trang tri duoc phep TOA RA ngoai khoi chu — vi du mang toi sau ten
+  chuong toa 80px sang hai ben de mep no mo han. O man hinh rong thi khong sao,
+  nhung o 375px thi 80px do loi ra ngoai khung nhin va sinh cuon ngang. DO
+  DUOC: trang doc chuong tran 49px o ca ba be rong dien thoai.
+
+  `clip` chu KHONG phai `hidden`: `hidden` bien phan tu thanh mot vung cuon
+  duoc va lam hong `position: sticky` cua cac phan tu ben trong. `clip` chi cat,
+  khong tao vung cuon.
+*/
+main { overflow-x: clip; }
 
 .wrap {
   width: 100%;
@@ -2360,9 +2377,22 @@ body.co-mini { padding-bottom: 74px; }
   du hep de mat khong lac khi xuong dong, va chuong fanfic thi doan ngan nen
   cai gia phai tra thap hon van xuoi dai.
 */
+/*
+  Than bai co MAT NEN RIENG, gan dac.
+
+  Lop phu cua tranh nen la `fixed` — no khong toi dan theo do cuon, nen khi
+  nguoi doc keo xuong giua chuong thi den mieu van sang y nguyen sau chu. Mot
+  mat nen rieng o day la thu bien khu doc thanh mot vung LANG that su, khong
+  phu thuoc vi tri cuon.
+
+  Bo goc va mo dan hai dau de no khong trong nhu mot hop dan de len tranh.
+*/
 .reader {
+  position: relative;
   max-width: 720px;
-  padding: var(--s6) 0;
+  padding: var(--s6) var(--s5);
+  border-radius: var(--r4);
+  background: linear-gradient(180deg, #070912e0, #070912f2 12%, #070912f2 88%, #070912e0);
 }
 .reader .prose {
   font-size: var(--t-md);
@@ -2378,6 +2408,26 @@ body.co-mini { padding-bottom: 74px; }
 .reader-col,
 .reader-foot,
 .reader-crumb { max-width: 720px; }
+
+/*
+  Mang toi mem sau ten chuong va duong dan.
+
+  Mat trang trong tam `03-reader-moonlit-shrine` roi dung vao vung nay, va chu
+  cap ba tren mot vung sang thi doc rat met — thay ro khi do that. Lop nay toa
+  ra NGOAI khoi chu va mo dan het, nen no khong doc ra la mot cai hop; chi la
+  cho do toi hon mot chut.
+
+  Chi o day, khong dat cho ca trang: lam toi ca tam thi mat luon buc tranh.
+*/
+.reader-head { position: relative; }
+.reader-head::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -40px -80px -30px -60px;
+  background: radial-gradient(70% 100% at 30% 50%, #06070dcc, transparent 72%);
+  pointer-events: none;
+}
 /* Doan dau tien khong thut dong; cac doan sau cach nhau bang khoang trang chu
    khong phai thut — de doc hon tren man hinh. */
 
@@ -2489,6 +2539,18 @@ body.co-mini { padding-bottom: 74px; }
   width: 100%;
   max-width: 460px;
   margin: 0 auto;
+}
+/*
+  The dang nhap NOI tren tam tranh. Day la trang co nen ro nhat cua ca site,
+  nen mot cai the dac o giua se cat doi buc tranh; kinh thi cho no ngoi len
+  tren ma van thay duoc cai cong sao phia sau.
+*/
+.auth-page .card {
+  isolation: isolate;
+  background: #0d1018cc;
+  backdrop-filter: blur(var(--blur-the)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.3);
+  border-color: var(--kinh-vien);
 }
 .auth-head {
   display: flex;
@@ -2647,9 +2709,14 @@ body.co-mini { padding-bottom: 74px; }
     --blur-the: 8px;
   }
 
-  /* Anh nen o dien thoai: bo bot bo loc mau. Mot lop nua tren moi khung hinh
-     la thu khong dang tra o may yeu. */
-  .page-bg::before { filter: none; }
+  /*
+    Anh nen o dien thoai dung ban RONG 960px thay vi ban goc 1672px.
+
+    O man 390px, mot tam 1672px la ~3-4 lan so diem anh that su dung toi. Ban
+    nho nang khoang 110-160 KB thay vi 340-470 KB — cung mot khung hinh, mot
+    phan ba luu luong.
+  */
+  .page-bg::before { background-image: var(--anh-nho, var(--anh)); }
   .wrap { padding: 0 var(--s4); }
   .page { padding: var(--s5) 0 var(--s7); gap: var(--s4); }
 

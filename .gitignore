@@ -129,3 +129,8 @@ bench_piper_*/
 benchmark-*.csv
 benchmark-*.json
 models-report-*.json
+
+# Tranh nen goc dang PNG (~21 MB). Ban WebP canh chung MOI la thu duoc phuc vu;
+# CSS khong bao gio tro toi `.png`. Giu tep goc tren dia de con nguon, nhung
+# khong bat kho git ganh 21 MB cho thu khong ai tai ve.
+web/public/artwork/fantasy-backgrounds/*.png

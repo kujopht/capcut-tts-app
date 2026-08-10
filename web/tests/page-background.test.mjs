@@ -115,7 +115,7 @@ test("duong dan la se dung tam mac dinh, khong de trong", async () => {
 
 /* ============================================================== lop phu */
 
-test("moi tam co lop phu, va trang doc chuong TOI NHAT", () => {
+test("muc phu nam trong khoang da dat cho tung trang", () => {
   const text = css();
   const muc = {};
   for (const m of text.matchAll(
@@ -126,38 +126,40 @@ test("moi tam co lop phu, va trang doc chuong TOI NHAT", () => {
   assert.equal(Object.keys(muc).length, 8, "có tấm chưa đặt mức tối");
 
   /*
-    Muc phu KHONG chon bang mat: no duoc tinh nguoc tu do sang THAT cua tung
-    tam (do bang Pillow) va do sang mong muon sau khi phu.
+    Huong my thuat: DE TRANH THO. Muc phu ha han so ban truoc, va de doc gio
+    den tu hai thu khac — mang toi CUC BO sau chu tieu de, va be mat kinh cua
+    cac khoi noi. Lam toi ca trang chi vi mot vung chu la cach de nhat nhung
+    cung la cach giet buc tranh.
 
-        tam                       do sang    muc phu    con lai
-        02-explore-sky-kingdom      150        0.83        26
-        01-home-sunny-harbor        119        0.71        34
-        04-studio-sky-workshop       85        0.69        26
-        07-account-blossom-realm     80        0.60        32
-        05-write-creators-room       76        0.74        20
-        06-library-arcane-archive    46        0.39        28
-        03-reader-moonlit-shrine     45        0.51        22
-        08-login-starlight-gate      41        0.27        30
-
-    Nen bai test nay kiem KET QUA chu khong kiem muc phu: moi trang phai cho ra
-    mot nen co do sang gan nhau, va trang co vai tro doc lau thi toi hon.
+    Khoang duoi day do chu du an dat, khong phai do toi chon.
   */
-  const SANG = {
-    home: 119, explore: 150, reader: 45, studio: 85,
-    write: 76, library: 46, account: 80, auth: 41,
+  const KHOANG = {
+    home:    [0.30, 0.38],
+    explore: [0.38, 0.45],
+    library: [0.35, 0.42],
+    studio:  [0.45, 0.52],
+    write:   [0.50, 0.58],
+    account: [0.32, 0.40],
+    auth:    [0.25, 0.35],
+    reader:  [0.35, 0.42],
   };
-  const con_lai = {};
   for (const [ten, v] of Object.entries(muc)) {
-    assert.ok(v > 0.2 && v < 0.9, `${ten} tối ${v} — ngoài khoảng hợp lý`);
-    con_lai[ten] = Math.round(SANG[ten] * (1 - v));
+    const [min, max] = KHOANG[ten];
+    assert.ok(v >= min && v <= max,
+      `${ten} phủ ${v}, cần trong ${min}–${max}`);
   }
-  for (const [ten, v] of Object.entries(con_lai)) {
-    assert.ok(v >= 18 && v <= 36,
-      `${ten} còn lại ${v}/255 — quá ${v < 18 ? "tối, tranh biến mất" : "sáng, chữ khó đọc"}`);
-  }
-  // Khu vuc tac gia toi nhat: form la thu phai doc duoc truoc tien.
-  assert.equal(con_lai.write, Math.min(...Object.values(con_lai)),
-    "khu vực tác giả phải là nền tối nhất");
+  // Khu vuc tac gia van phai toi nhat: form la thu phai doc duoc truoc tien.
+  assert.equal(muc.write, Math.max(...Object.values(muc)));
+  // Trang dang nhap nhat nhat — the dang nhap noi tren mot tam tranh lon.
+  assert.equal(muc.auth, Math.min(...Object.values(muc)));
+});
+
+test("co mang toi CUC BO sau chu tieu de trang", () => {
+  // Day la thu thay cho viec lam toi ca trang. Khong co no, tieu de nam truc
+  // tiep tren tranh sang (02-explore sang 150/255) se mat tuong phan.
+  const text = css();
+  assert.match(text, /\.page-head::before/, "thiếu mảng tối sau tiêu đề trang");
+  assert.match(text, /\.reader-head::before/, "thiếu mảng tối sau tên chương");
 });
 
 test("co vignette chu khong chi mot lop toi phang", () => {
@@ -166,12 +168,12 @@ test("co vignette chu khong chi mot lop toi phang", () => {
   // `.page-bg::before,` phia tren cung chua chuoi nay.
   // Co HAI quy tac `.page-bg::after`: mot khoi gop dat `content`/`inset`,
   // mot khoi rieng dat lop phu. Tim theo NOI DUNG chu khong theo ten.
-  const moc = text.indexOf("rgb(6 7 13 / var(--toi");
+  const moc = text.indexOf("rgb(5 7 15 / var(--toi");
   assert.notEqual(moc, -1, "khong tim thay lop toi phang");
   const than = text.slice(text.lastIndexOf(".page-bg::after", moc),
                           text.indexOf("}", moc));
   assert.match(than, /radial-gradient/, "thiếu vignette");
-  assert.match(than, /rgb\(6 7 13 \/ var\(--toi/, "thiếu lớp tối phẳng");
+  assert.match(than, /rgb\(5 7 15 \/ var\(--toi/, "thiếu lớp tối phẳng");
 });
 
 /* ============================================== KHONG phai bia truyen */
@@ -245,16 +247,36 @@ test("hat sang tat han khi nguoi dung chon giam chuyen dong", () => {
 
 /* ============================================== kinh dung co chung muc */
 
-test("kinh chi ap cho cac khoi NOI, khong phai moi the", () => {
+test("kinh la MOT cong thuc gop, ap cho danh sach be mat co gioi han", () => {
   const text = css();
-  const so_lan = (text.match(/backdrop-filter: blur\(var\(--blur-the\)\)/g) ?? []).length;
-  // Moi khoi khai CA `backdrop-filter` lan `-webkit-backdrop-filter`, nen so
-  // dem la GAP DOI so be mat. 16 = 8 be mat.
-  assert.ok(so_lan >= 8 && so_lan <= 24, `${so_lan / 2} bề mặt kính — quá nhiều/ít`);
-  // The truyen trong luoi va than bai KHONG duoc lam mo nen.
-  for (const sel of [".story-card {", ".reader {", ".card {"]) {
-    const at = text.indexOf(sel);
-    const than = text.slice(at, text.indexOf("}", at));
-    assert.ok(!/backdrop-filter/.test(than), `${sel} bị biến thành kính`);
+  // Chi mot cho khai co che kinh — truoc day moi be mat tu khai lay va de lech.
+  const so_khai = (text.match(/backdrop-filter: blur\(var\(--blur-the\)\)/g) ?? []).length;
+  assert.ok(so_khai <= 4, `${so_khai} chỗ khai báo kính — phải gộp về một`);
+
+  const at = text.indexOf(".kinh,");
+  assert.notEqual(at, -1, "không có công thức kính gộp");
+  const chon = text.slice(at, text.indexOf("{", at));
+  const be_mat = chon.split(",").map((x) => x.trim()).filter(Boolean);
+  assert.ok(be_mat.length <= 10, `${be_mat.length} bề mặt kính — quá nhiều`);
+
+  // The truyen trong luoi, than bai va `.card` thuong KHONG duoc la kinh.
+  for (const cam of [".story-card", ".reader", ".card"]) {
+    assert.ok(!be_mat.includes(cam), `${cam} bị biến thành kính`);
   }
+});
+
+test("KHONG lam mo ca tam tranh nen", () => {
+  // Lam mo toan man hinh giet chat luong tranh va rat dat tren dien thoai.
+  const text = css();
+  const at = text.indexOf(".page-bg::before {");
+  const than = text.slice(at, text.indexOf("}", at));
+  assert.ok(!/blur\(/.test(than), "tranh nền bị làm mờ toàn màn hình");
+});
+
+test("the thuong co CHIEU SAU de tach khoi tranh nen", () => {
+  const text = css();
+  assert.match(text, /--do-sau: 0 12px 32px/, "thiếu token chiều sâu");
+  const at = text.indexOf(".card {");
+  const than = text.slice(at, text.indexOf("}", at));
+  assert.match(than, /box-shadow: var\(--do-sau\)/);
 });

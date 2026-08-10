@@ -26,12 +26,52 @@ export const COVER_PALETTE = [
   ["#14b8a6", "#3b82f6"],
 ] as const;
 
-export function paletteFor(seed: string): readonly [string, string] {
+/** Ham bam dung chung cho ca mau lan dau an — cung mot truyen, cung ket qua. */
+function bam(seed: string): number {
   let hash = 0;
   for (let i = 0; i < seed.length; i += 1) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   }
-  return COVER_PALETTE[hash % COVER_PALETTE.length];
+  return hash;
+}
+
+export function paletteFor(seed: string): readonly [string, string] {
+  return COVER_PALETTE[bam(seed) % COVER_PALETTE.length];
+}
+
+/**
+ * Cac dau an cho bia du phong.
+ *
+ * KHONG dung chu cai dau cua ten truyen nua. Mot chu "V" to giua tam bia doc
+ * ra la "cho nay chua lam xong" — no la mot cho trong duoc dan nhan, khong
+ * phai mot thiet ke. Nam hinh duoi day la nhung hinh CO NGHIA trong the loai:
+ * sao, sach, la ban, rune, mat trang.
+ *
+ * Van ON DINH theo `novel_id`: cung mot truyen luon ra cung mot dau an, de
+ * nguoi doc nhan ra truyen quen o moi trang.
+ */
+export const COVER_SIGILS = ["sao", "sach", "laban", "rune", "trang"] as const;
+
+export type CoverSigil = (typeof COVER_SIGILS)[number];
+
+export function sigilFor(seed: string): CoverSigil {
+  /*
+    Ham bam RIENG, khong phai mot phep dich bit cua ham bam mau.
+
+    Ban dau dung `bam(seed) >>> 3`. Voi sau truyen thuc te thi BA trong sau ra
+    cung mot dau an — do duoc tren anh chup. Nguyen nhan: dich bit giu nguyen
+    phan lon cau truc cua so goc, nen hai gia tri gan nhau van roi vao cung mot
+    o sau khi chia lay du.
+
+    So nhan khac va mot buoc tron bit o cuoi tra ket qua rai deu hon nhieu.
+  */
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i += 1) {
+    h = (h ^ seed.charCodeAt(i)) >>> 0;
+    h = (h * 0x01000193) >>> 0;
+  }
+  h ^= h >>> 15;
+  return COVER_SIGILS[(h >>> 0) % COVER_SIGILS.length];
 }
 
 /** Chu cai dau tien co nghia cua tieu de, dung cho anh du phong. */

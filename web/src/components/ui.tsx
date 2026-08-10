@@ -21,12 +21,15 @@ import type { JobStatus } from "@/lib/api";
  */
 export function PageHeader({
   eyebrow,
+  icon,
   title,
   lead,
   action,
   id,
 }: {
   eyebrow?: string;
+  /** Bieu tuong dat truoc nhan nho. Tuy chon — khong phai dau trang nao cung can. */
+  icon?: React.ReactNode;
   title: string;
   lead?: React.ReactNode;
   action?: React.ReactNode;
@@ -36,7 +39,12 @@ export function PageHeader({
   return (
     <header className="page-head">
       <div className="stack-2 page-head-body">
-        {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
+        {eyebrow ? (
+          <span className="eyebrow eyebrow-icon">
+            {icon}
+            {eyebrow}
+          </span>
+        ) : null}
         <h1 className="page-title" id={id}>
           {title}
         </h1>

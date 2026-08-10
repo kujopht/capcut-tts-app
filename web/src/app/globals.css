@@ -30,9 +30,17 @@
     `--kinh` dam hon `--glass` cua header: mot khoi noi dung phai doc duoc,
     con header thi chi la mot vach mong.
   */
-  --kinh: #080a14b8;
-  --kinh-vien: #ffffff1f;
-  --blur-the: 13px;
+  /*
+    KINH — muc tieu la nhin ra RANH GIOI, khong phai mot mang suong.
+    Ban truoc qua toi va vien qua mo nen ba tang (nen / ranh gioi / noi dung)
+    nhoe vao nhau.
+  */
+  --kinh: #080a14a3;
+  --kinh-vien: #ffffff21;
+  /* Vet sang mong o mep tren — thu lam be mat trong nhu KINH chu khong phai
+     mot o mau mo. */
+  --kinh-sang: inset 0 1px 0 #ffffff14;
+  --blur-the: 12px;
   /* Do sau cua be mat noi. Mem va thap, khong phai bong do kieu bang dieu
      khien SaaS lo lung giua trang. */
   --do-sau: 0 12px 32px #00000047;
@@ -198,14 +206,9 @@ body {
 /* ==================================================== tranh nen theo trang */
 
 /*
-  MOT phan tu `fixed` nam duoi toan bo noi dung — xem `components/PageBackground.tsx`.
+  Khung chua HAI lop tranh — xem `components/PageBackground.tsx`.
 
-  Ba lop chong len nhau:
-    ::before  tranh
-    ::after   lop phu toi + vignette
-    (body)    cac quang mau van o duoi cung
-
-  `z-index: -1` cho phan tu nay: con am se ve TREN nen cua body nhung DUOI moi
+  `z-index: -1` cho khung nay: con am se ve TREN nen cua body nhung DUOI moi
   noi dung trong luong. Nho vay khong phai gan `z-index` cho header/main/footer.
 */
 .page-bg {
@@ -216,79 +219,115 @@ body {
   overflow: hidden;
 }
 
-.page-bg::before,
-.page-bg::after {
+/* --dur-nen: khop voi `THOI_LUONG` o `PageBackground.tsx`. */
+:root { --dur-nen: 420ms; }
+
+/*
+  MOT lop tranh. Co the co hai lop cung luc trong luc chuyen canh — mot dang mo
+  ra, mot dang hien vao — va khong bao gio nhieu hon hai.
+*/
+.page-bg-lop {
+  position: absolute;
+  inset: 0;
+}
+
+.page-bg-lop::before,
+.page-bg-lop::after {
   content: "";
   position: absolute;
   inset: 0;
 }
 
-.page-bg::before {
+/*
+  Lop anh. `--mo` la do mo RIENG cua tung trang — chi lam mo LOP ANH nay, khong
+  bao gio lam mo ca ung dung.
+
+  `scale` di kem `--mo`: lam mo mot anh keo mau o bien vao trong va lo ra mot
+  vien nhat quanh khung. Phong to du de vien do nam ngoai man hinh.
+*/
+.page-bg-lop::before {
   background-image: var(--anh);
   background-size: cover;
   background-position: var(--diem, center);
   background-repeat: no-repeat;
+  filter: blur(var(--mo, 0px));
+  transform: scale(var(--phong, 1));
 }
 
 /*
-  Lop phu. HAI thanh phan, va ca hai deu can:
-
-    1. mot lop toi PHANG (`--toi`) — thu quyet dinh chu co doc duoc khong;
-    2. mot vignette — toi dan ra bon goc, giu mat o giua trang.
-
-  Khong co vignette thi anh cat ngang deu tit o mep va trong nhu mot tam anh
-  dan vao; co no thi trong nhu anh sang tu giua ra.
+  Lop phu. Ba thanh phan, va ca ba deu can:
+    1. vignette rat nhe — hut mat vao giua, khong bit bon goc;
+    2. toi dan xuong duoi — dinh trang de tranh tho, chan trang thi lang;
+    3. mot lop phang, muc do tung trang quyet dinh.
 */
-.page-bg::after {
+.page-bg-lop::after {
   background:
-    /* Vignette rat nhe — chi hut mat vao giua, khong bit bon goc. */
     radial-gradient(140% 110% at 50% 20%, transparent 45%, #05070fa6 100%),
-    /* Toi dan xuong duoi: dinh trang de tranh tho, chan trang thi lang. */
     linear-gradient(180deg, #05070f00 0%, #05070f4d 55%, #05070fd9 100%),
-    /* Lop phang, muc do tung trang quyet dinh. */
     rgb(5 7 15 / var(--toi, 0.4));
 }
 
 /*
-  Muc toi rieng cho tung tam, va con so KHONG phai chon bang mat.
+  CHUYEN CANH: tam moi hien dan vao, tam cu mo dan ra.
 
-  Do sang trung binh cua tung tam rat khac nhau — `02-explore-sky-kingdom`
-  sang 150/255 con `08-login-starlight-gate` chi 41. Phu cung mot muc len ca
-  tam se cho ra tam thi trang xoa, tam thi den kit.
-
-  Nen moi muc phu duoc tinh nguoc tu do sang MONG MUON sau khi phu:
-      toi = 1 - mong_muon / do_sang_that
-  Mong muon dat theo VAI TRO cua trang:
-
-    doc chuong / viet truyen   toi nhat — chu dai, doc lau
-    kham pha / thu vien        toi vua — luoi the phai quet mat nhanh
-    trang chu / dang nhap      nhat nhat — noi dung ngan, khong khi duoc phep
-                               la thu nguoi ta thay truoc
+  Tam moi cung thu nho tu 1.015 ve 1 — mot chuyen dong rat nho lam canh nhu
+  "lang xuong" thay vi "bat ra". KHONG dich chuyen ngang: mot cu truot ngang o
+  lop nen doc ra la mot loi bo cuc.
 */
-.page-bg[data-bg="home"] { --anh: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor-sm.webp"); --toi: 0.34; --diem: center 42%; }
-.page-bg[data-bg="explore"] { --anh: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom-sm.webp"); --toi: 0.42; --diem: center 38%; }
-.page-bg[data-bg="reader"] { --anh: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine-sm.webp"); --toi: 0.38; --diem: center 22%; }
-.page-bg[data-bg="studio"] { --anh: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop-sm.webp"); --toi: 0.48; --diem: center 45%; }
-.page-bg[data-bg="write"] { --anh: url("/artwork/fantasy-backgrounds/05-write-creators-room.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/05-write-creators-room-sm.webp"); --toi: 0.54; --diem: center 50%; }
-.page-bg[data-bg="library"] { --anh: url("/artwork/fantasy-backgrounds/06-library-arcane-archive.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/06-library-arcane-archive-sm.webp"); --toi: 0.38; --diem: center 40%; }
-.page-bg[data-bg="account"] { --anh: url("/artwork/fantasy-backgrounds/07-account-blossom-realm.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/07-account-blossom-realm-sm.webp"); --toi: 0.36; --diem: center 32%; }
-.page-bg[data-bg="auth"] { --anh: url("/artwork/fantasy-backgrounds/08-login-starlight-gate.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/08-login-starlight-gate-sm.webp"); --toi: 0.3; --diem: center 38%; }
+.page-bg-lop[data-vao] { animation: nen-vao var(--dur-nen) var(--ease) both; }
+.page-bg-lop[data-ra]  { animation: nen-ra  var(--dur-nen) var(--ease) both; }
+
+@keyframes nen-vao {
+  from { opacity: 0; transform: none; }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes nen-ra {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+/* Phong to nam o lop ANH de no khong danh nhau voi `scale` cua `--phong`. */
+.page-bg-lop[data-vao]::before { animation: nen-lang var(--dur-nen) var(--ease) both; }
+@keyframes nen-lang {
+  from { transform: scale(calc(var(--phong, 1) * 1.015)); }
+  to   { transform: scale(var(--phong, 1)); }
+}
+
+/*
+  Muc phu, do mo va diem canh cua tung tam.
+
+  Do sang trung binh cac tam rat khac nhau (`02-explore` sang 150/255,
+  `08-login` chi 41) nen muc phu khong the dat chung mot con so.
+
+  `--mo` chi ap cho LOP ANH:
+    home / explore / login   0    — tranh phai ro, day la mat tien
+    library / account        2-3px — chi lam mem, giu chi tiet
+    studio / write           6px  — form la thu chinh, tranh lui han ve sau
+    reader                   0    — vung quanh trinh phat de sac, than bai da
+                                    co mat nen rieng
+*/
+.page-bg-lop[data-bg="home"]    { --anh: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor.webp");      --anh-nho: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor-sm.webp");      --toi: 0.34; --diem: center 42%; --mo: 0px;   --phong: 1; }
+.page-bg-lop[data-bg="explore"] { --anh: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom-sm.webp");    --toi: 0.42; --diem: center 38%; --mo: 0px;   --phong: 1; }
+.page-bg-lop[data-bg="reader"]  { --anh: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine.webp");  --anh-nho: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine-sm.webp");  --toi: 0.38; --diem: center 22%; --mo: 0px;   --phong: 1; }
+.page-bg-lop[data-bg="studio"]  { --anh: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop-sm.webp");    --toi: 0.46; --diem: center 45%; --mo: 6px;   --phong: 1.04; }
+.page-bg-lop[data-bg="write"]   { --anh: url("/artwork/fantasy-backgrounds/05-write-creators-room.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/05-write-creators-room-sm.webp");    --toi: 0.5;  --diem: center 50%; --mo: 6px;   --phong: 1.04; }
+.page-bg-lop[data-bg="library"] { --anh: url("/artwork/fantasy-backgrounds/06-library-arcane-archive.webp"); --anh-nho: url("/artwork/fantasy-backgrounds/06-library-arcane-archive-sm.webp"); --toi: 0.38; --diem: center 40%; --mo: 2.5px; --phong: 1.02; }
+.page-bg-lop[data-bg="account"] { --anh: url("/artwork/fantasy-backgrounds/07-account-blossom-realm.webp");  --anh-nho: url("/artwork/fantasy-backgrounds/07-account-blossom-realm-sm.webp");  --toi: 0.36; --diem: center 32%; --mo: 3px;   --phong: 1.02; }
+.page-bg-lop[data-bg="auth"]    { --anh: url("/artwork/fantasy-backgrounds/08-login-starlight-gate.webp");   --anh-nho: url("/artwork/fantasy-backgrounds/08-login-starlight-gate-sm.webp");   --toi: 0.30; --diem: center 38%; --mo: 0px;   --phong: 1; }
 
 /*
   Hat sang troi rat cham — CHI o trang chu, dang nhap va tai khoan.
 
-  BA lop `radial-gradient` lam ca hieu ung, khong mot phan tu DOM nao: vai
-  tram the `<div>` cho vai tram dom sang la mot cai gia vo ly, va canvas thi
-  con dat hon nua cho thu nay.
+  BA lop `radial-gradient` lam ca hieu ung, khong mot phan tu DOM nao: vai tram
+  the `<div>` cho vai tram dom sang la mot cai gia vo ly.
 
   KHONG bao gio dat len trang doc chuong: khong duoc co gi chuyen dong sau mot
   doan van dai.
 */
-.page-bg[data-bg="home"] > .hat,
-.page-bg[data-bg="auth"] > .hat,
-.page-bg[data-bg="account"] > .hat {
-  position: absolute;
-  inset: -10%;
+.hat { position: absolute; inset: -10%; opacity: 0; }
+.hat[data-bg="home"],
+.hat[data-bg="auth"],
+.hat[data-bg="account"] {
+  opacity: 1;
   background-image:
     radial-gradient(1.6px 1.6px at 18% 24%, #ffffff5c, transparent),
     radial-gradient(1.2px 1.2px at 62% 12%, #a78bfa6b, transparent),
@@ -487,6 +526,22 @@ main { overflow-x: clip; }
   text-transform: uppercase;
   color: var(--brand);
 }
+/* Nhan nho kem bieu tuong. `align-items: center` chu khong phai `baseline`:
+   hinh ve khong co duong co so nen canh theo baseline se lam no tut xuong. */
+.eyebrow-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.eyebrow-icon svg { color: var(--brand-hover); flex: 0 0 auto; }
+
+/* Bieu tuong dat truoc mot dau muc trong trang. */
+.section-title-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.section-title-icon svg { color: var(--brand-hover); flex: 0 0 auto; }
 /*
   Chu nam TRUC TIEP tren tranh — tieu de trang, dau muc, va cac dong ghi chu o
   cap `.page` — deu khong co the nao do lung. Mot bong chu mem giu chung doc
@@ -532,8 +587,8 @@ main { overflow-x: clip; }
   position: sticky;
   top: 0;
   z-index: 50;
-  background: var(--glass);
-  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  background: #080a14a8;
+  backdrop-filter: blur(var(--blur)) saturate(1.2);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
   border-bottom: 1px solid transparent;
   border-image: linear-gradient(
@@ -543,8 +598,8 @@ main { overflow-x: clip; }
 }
 /* Cuon xuong thi nen dac hon — noi dung troi qua duoi khong con doc xuyen. */
 .site-header[data-scrolled="true"] {
-  background: var(--glass-strong);
-  box-shadow: 0 1px 0 #0000004d, 0 8px 28px #00000038;
+  background: #070911d9;
+  box-shadow: 0 1px 0 #0000005c, 0 10px 34px #00000052;
 }
 .site-header .wrap {
   display: flex;
@@ -765,10 +820,10 @@ main { overflow-x: clip; }
     nam sau trong tep nen se de len phan `background` o day.
   */
   isolation: isolate;
-  backdrop-filter: blur(var(--blur-the)) saturate(1.35);
-  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.35);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.2);
   border: 1px solid var(--kinh-vien);
-  box-shadow: var(--do-sau), var(--edge);
+  box-shadow: var(--do-sau), var(--kinh-sang);
 }
 
 .card-link {
@@ -1428,24 +1483,26 @@ main { overflow-x: clip; }
   -webkit-backdrop-filter: blur(2px);
 }
 
-.cover-initial {
-  font-weight: 750;
-  font-size: 40px;
-  color: #fff;
-  opacity: 0.95;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  text-shadow: 0 2px 10px #00000073;
+/*
+  Dau an thay cho chu cai dau. Xem `components/StoryCoverFallback.tsx`.
+
+  `currentColor` de mau den tu day — mot dau an dung duoc tren moi cap mau nen
+  ma khong phai khai bao lai tung truong hop.
+*/
+.cover-sigil {
+  width: 52%;
+  height: 52%;
+  color: #ffffffe6;
+  filter: drop-shadow(0 2px 8px #00000073);
 }
-.cover-wide  .cover-initial { font-size: 54px; }
-/* O co thumb (56px) thi huy hieu va hoa van chi thanh nhieu — bo di, giu mot
-   chu cai gon. Chi tiet chi co nghia khi con du cho de nhin ra. */
-.cover-thumb .cover-initial { font-size: 22px; }
+/* O co thumb (56px) thi khung huy hieu va hoa van chi thanh nhieu — bo di, giu
+   mot dau an gon. Chi tiet chi co nghia khi con du cho de nhin ra. */
 .cover-thumb .cover-crest {
-  width: auto; max-width: none; aspect-ratio: auto;
+  width: 62%; max-width: none;
   background: none; border: 0; box-shadow: none; backdrop-filter: none;
 }
 .cover-thumb .cover-pattern { display: none; }
+.cover-thumb .cover-sigil { width: 100%; height: 100%; }
 
 .divider { height: 1px; background: var(--line-soft); border: 0; margin: 0; }
 
@@ -1767,7 +1824,7 @@ main { overflow-x: clip; }
   border-radius: var(--r4);
   background:
     radial-gradient(680px 300px at 100% 0%, #22d3ee14, transparent 70%),
-    linear-gradient(160deg, #0e1222a6, #080a14b3);
+    linear-gradient(160deg, #0e1222a3, #080a14a8);
   box-shadow: var(--shadow-2), var(--edge);
 }
 
@@ -1798,7 +1855,7 @@ main { overflow-x: clip; }
   border-radius: var(--r4);
   background:
     radial-gradient(600px 260px at 0% 0%, #8b6cff24, transparent 70%),
-    linear-gradient(160deg, #0a0d1aa6, #070910b3);
+    linear-gradient(160deg, #0a0d1aa3, #070910a8);
   box-shadow: var(--shadow-1), var(--edge);
 }
 .account-hero-body { min-width: 0; }
@@ -1948,7 +2005,7 @@ main { overflow-x: clip; }
   padding: var(--s4);
   border: 1px solid var(--kinh-vien);
   border-radius: var(--r3);
-  background: #080a14a6;
+  background: #080a14a3;
 }
 
 /* O nhap co bieu tuong dat chong len ben trai. */
@@ -2006,7 +2063,7 @@ main { overflow-x: clip; }
   padding: var(--s7) var(--s6);
   border: 1px solid var(--line);
   border-radius: var(--r4);
-  background: linear-gradient(150deg, #0c1020a6, #080a1499 55%, #06080fa6);
+  background: linear-gradient(150deg, #0c1020a3, #080a1494 55%, #06080fa3);
   box-shadow: var(--shadow-2), var(--edge);
 }
 
@@ -2085,7 +2142,7 @@ main { overflow-x: clip; }
   border: 1px solid var(--brand-line);
   background:
     radial-gradient(720px 240px at 12% 0%, #8b6cff29, transparent 70%),
-    linear-gradient(180deg, #0a0d1aa6, #070910b3);
+    linear-gradient(180deg, #0a0d1aa3, #070910a8);
   box-shadow: var(--edge);
 }
 .cta-band-body { display: flex; flex-direction: column; gap: var(--s2); max-width: 62ch; }
@@ -2177,7 +2234,7 @@ main { overflow-x: clip; }
   border-radius: var(--r4);
   background:
     radial-gradient(640px 280px at 100% 0%, #8b6cff1a, transparent 70%),
-    linear-gradient(160deg, #0a0d1aa6, #070910b3);
+    linear-gradient(160deg, #0a0d1aa3, #070910a8);
   box-shadow: var(--shadow-1), var(--edge);
 }
 .novel-head-cover .cover {
@@ -2217,7 +2274,7 @@ main { overflow-x: clip; }
   border-radius: var(--r4);
   background:
     radial-gradient(620px 260px at 0% 0%, #8b6cff26, transparent 70%),
-    linear-gradient(150deg, #0e1222a6, #080a14b3);
+    linear-gradient(150deg, #0e1222a3, #080a14a8);
   box-shadow: var(--shadow-2), var(--edge);
 }
 .listen-hero-cover .cover {
@@ -2697,7 +2754,7 @@ body.co-mini { padding-bottom: 74px; }
   tren ma van thay duoc cai cong sao phia sau.
 */
 /* Co che kinh da o lop gop tren; day chi dat sac nen rieng. */
-.auth-page .card { background: #080a14bf; }
+.auth-page .card { background: #080a14ad; }
 .auth-head {
   display: flex;
   flex-direction: column;
@@ -2778,6 +2835,12 @@ body.co-mini { padding-bottom: 74px; }
   /* Hieu ung vao trang va doi tab: BO han phan DICH CHO, giu lai phan hien ra.
      Rut thoi luong ve 0 van con mot buoc nhay; `transform: none` thi khong. */
   .page, .doi-tab { animation: none; }
+
+  /* Chuyen canh nen: bo phan PHONG TO, giu mot lan mo/hien rat ngan de khong
+     giat. Doi anh tuc thi cung duoc, nhung mot cu nhay giua hai tam sang toi
+     khac nhau con kho chiu hon chinh chuyen dong. */
+  :root { --dur-nen: 90ms; }
+  .page-bg-lop[data-vao]::before { animation: none; }
   .story-card:hover { filter: none; }
 }
 
@@ -2867,7 +2930,7 @@ body.co-mini { padding-bottom: 74px; }
     nho nang khoang 110-160 KB thay vi 340-470 KB — cung mot khung hinh, mot
     phan ba luu luong.
   */
-  .page-bg::before { background-image: var(--anh-nho, var(--anh)); }
+  .page-bg-lop::before { background-image: var(--anh-nho, var(--anh)); }
   .wrap { padding: 0 var(--s4); }
   .page { padding: var(--s5) 0 var(--s7); gap: var(--s4); }
 

@@ -22,7 +22,8 @@
  * Khi backend co bia that, chi can truyen `coverUrl` — khong phai sua gi o day.
  */
 
-import { coverInitial, paletteFor } from "@/lib/cover";
+import { paletteFor } from "@/lib/cover";
+import { StoryCoverFallback } from "@/components/StoryCoverFallback";
 
 export function NovelCover({
   novelId,
@@ -48,7 +49,8 @@ export function NovelCover({
         {/* Hoa van mo o nen — CSS thuan, khong tep anh nao. */}
         <span className="cover-pattern" />
         <span className="cover-crest">
-          <span className="cover-initial">{coverInitial(title)}</span>
+          {/* KHONG con chu cai dau. Xem `StoryCoverFallback` de biet vi sao. */}
+          <StoryCoverFallback seed={novelId || title} />
         </span>
       </div>
       {coverUrl ? (

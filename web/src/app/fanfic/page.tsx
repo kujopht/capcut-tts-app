@@ -22,6 +22,7 @@ import {
   PageHeader,
   SkeletonCards,
 } from "@/components/ui";
+import { IconCompass } from "@/components/Icons";
 import { StoryCard } from "@/components/StoryCard";
 
 /** So truyen moi trang. Backend chan tran tren o 60. */
@@ -135,6 +136,7 @@ function FanficBrowser() {
     <div className="page">
       <PageHeader
         eyebrow="Fanfic"
+        icon={<IconCompass />}
         title="Khám phá truyện"
         lead="Những truyện đã được tác giả xuất bản. Mỗi chương có thể kèm bản audio để bạn vừa đọc vừa nghe."
         action={

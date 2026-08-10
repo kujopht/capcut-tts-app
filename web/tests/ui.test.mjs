@@ -650,8 +650,10 @@ test("lop api khai bao truong moi la tuy chon", () => {
 
 test("CSS anh bia co du ba bien the", () => {
   const css = read("../src/app/globals.css");
+  //  thay cho : bia du phong khong con chu cai
+  // dau, ma la mot dau an hinh hoc — xem `components/StoryCoverFallback.tsx`.
   for (const cls of [".cover-card", ".cover-wide", ".cover-thumb", ".cover-fallback",
-                     ".cover-image", ".cover-initial"]) {
+                     ".cover-image", ".cover-sigil"]) {
     assert.ok(css.includes(cls), `thieu ${cls}`);
   }
   assert.match(css, /\.cover-image \{ background-size: cover/);

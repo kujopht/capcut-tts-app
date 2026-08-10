@@ -23,6 +23,7 @@ import {
   formatDate,
   formatNumber,
 } from "@/components/ui";
+import { IconLibrary } from "@/components/Icons";
 
 type Source = "all" | "studio" | "fanfic";
 
@@ -148,6 +149,7 @@ export default function LibraryPage() {
     <div className="page">
       <PageHeader
         eyebrow="Thư viện"
+        icon={<IconLibrary />}
         title="Audio của tôi"
         lead="Tất cả audio đã tạo, gồm cả bản tạo nhanh ở Audio Studio và audio của các chương fanfic."
         action={

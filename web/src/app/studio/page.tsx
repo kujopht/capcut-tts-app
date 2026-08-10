@@ -43,6 +43,7 @@ import {
   formatDate,
   formatNumber,
 } from "@/components/ui";
+import { IconMic , IconHistory, IconBulb } from "@/components/Icons";
 
 /** Gioi han cua Studio — dat o day de tranh job chay qua lau. */
 const MAX_CHARS = 20_000;
@@ -325,6 +326,7 @@ export default function StudioPage() {
     <div className="page">
       <PageHeader
         eyebrow="Audio Studio"
+        icon={<IconMic />}
         title="Tạo audio từ văn bản"
         lead="Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là riêng tư và không trở thành chương fanfic."
         action={
@@ -578,7 +580,9 @@ export default function StudioPage() {
           {/* ------------------------------------------------ cot phu */}
           <aside className="stack sticky-side">
             <section className="card stack">
-              <h2 className="section-title">Lịch sử audio</h2>
+              <h2 className="section-title section-title-icon">
+                <IconHistory size={17} /> Lịch sử audio
+              </h2>
               {booting ? (
                 <SkeletonList count={3} />
               ) : history.length === 0 ? (
@@ -633,7 +637,9 @@ export default function StudioPage() {
             </section>
 
             <section className="card stack-2">
-              <h2 className="section-title">Mẹo</h2>
+              <h2 className="section-title section-title-icon">
+                <IconBulb size={17} /> Mẹo
+              </h2>
               <p className="hint">
                 Văn bản có dấu câu rõ ràng sẽ cho giọng đọc tự nhiên hơn.
               </p>

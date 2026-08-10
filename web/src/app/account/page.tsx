@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useSession } from "@/lib/session";
 import { ConfirmDialog, EmptyState, Loading, formatDate, formatNumber } from "@/components/ui";
+import { IconSparkles, IconCompass } from "@/components/Icons";
 
 const TIER_LABEL: Record<string, string> = {
   free: "Miễn phí",
@@ -77,8 +78,8 @@ export default function AccountPage() {
       </header>
 
       <section className="stack" aria-labelledby="acc-su-dung">
-        <h2 className="section-title" id="acc-su-dung">
-          Sử dụng
+        <h2 className="section-title section-title-icon" id="acc-su-dung">
+          <IconSparkles size={17} /> Sử dụng
         </h2>
         {/*
           KHONG ve thanh tien do hay cap do o day. Ca ba con so deu la so DEM,
@@ -109,8 +110,8 @@ export default function AccountPage() {
       </section>
 
       <section className="stack" aria-labelledby="acc-loi-tat">
-        <h2 className="section-title" id="acc-loi-tat">
-          Lối tắt
+        <h2 className="section-title section-title-icon" id="acc-loi-tat">
+          <IconCompass size={17} /> Lối tắt
         </h2>
         <div className="quick-grid">
           <Link className="quick-card" href="/write">

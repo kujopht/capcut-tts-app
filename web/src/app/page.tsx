@@ -37,6 +37,7 @@ import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { StoryCard, StoryHero } from "@/components/StoryCard";
 import { EmptyState, ErrorState, SkeletonCards } from "@/components/ui";
+import { IconFlame, IconTag } from "@/components/Icons";
 
 /** Mot truyen cho hero + 12 the ben duoi. */
 const HERO_COUNT = 1;
@@ -137,8 +138,8 @@ export default function HomePage() {
           {rest.length > 0 ? (
             <section className="stack-5 rise rise-2" aria-labelledby="home-moi">
               <div className="section-head">
-                <h2 className="section-title" id="home-moi">
-                  Truyện mới
+                <h2 className="section-title section-title-icon" id="home-moi">
+                  <IconFlame size={18} /> Truyện mới
                 </h2>
                 <Link href="/fanfic" className="section-more">
                   Xem tất cả <span aria-hidden="true">→</span>
@@ -154,8 +155,8 @@ export default function HomePage() {
 
           {data && data.tags.length > 0 ? (
             <section className="stack-2" aria-labelledby="home-the">
-              <h2 className="section-title" id="home-the">
-                Khám phá theo thẻ
+              <h2 className="section-title section-title-icon" id="home-the">
+                <IconTag size={17} /> Khám phá theo thẻ
               </h2>
               <p className="hint">
                 Thẻ do chính tác giả đặt khi xuất bản truyện.

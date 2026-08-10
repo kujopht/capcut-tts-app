@@ -39,3 +39,30 @@ export function tenNen(duong_dan: string): string {
   }
   return MAC_DINH;
 }
+
+/**
+ * Ten tep cua tung tam.
+ *
+ * Nam o day chu khong chi trong CSS vi `PageBackground` phai NAP TRUOC anh moi
+ * bang `new Image()` truoc khi chuyen canh — khong nap truoc thi trinh duyet ve
+ * mot khung trong trong luc tai, va nguoi dung thay mot nhay den.
+ *
+ * Bo test doi soat bang nay voi cac `url()` trong `globals.css`, nen hai cho
+ * khong the lech nhau ma khong ai biet.
+ */
+const TEP: Record<string, string> = {
+  home: "01-home-sunny-harbor",
+  explore: "02-explore-sky-kingdom",
+  reader: "03-reader-moonlit-shrine",
+  studio: "04-studio-sky-workshop",
+  write: "05-write-creators-room",
+  library: "06-library-arcane-archive",
+  account: "07-account-blossom-realm",
+  auth: "08-login-starlight-gate",
+};
+
+/** Duong dan tam LON. Ban cho dien thoai do CSS chon qua media query. */
+export function anhNen(ten: string): string {
+  const tep = TEP[ten] ?? TEP[MAC_DINH];
+  return `/artwork/fantasy-backgrounds/${tep}.webp`;
+}

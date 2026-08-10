@@ -47,6 +47,7 @@ import {
   SkeletonList,
   formatNumber,
 } from "@/components/ui";
+import { IconFeather } from "@/components/Icons";
 
 /** Thao tac xoa dang cho xac nhan. */
 type PendingDelete =
@@ -552,6 +553,7 @@ export default function WritePage() {
     <div className="page">
       <PageHeader
         eyebrow="Khu vực tác giả"
+        icon={<IconFeather />}
         title="Viết và xuất bản"
         lead="Tạo truyện, thêm chương, tạo audio cho từng chương. Truyện nằm ở bản nháp cho tới khi bạn tự xuất bản."
         action={

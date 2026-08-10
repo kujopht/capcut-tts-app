@@ -95,7 +95,10 @@ test("KHONG trang nao hardcode mau tim/lo moi", () => {
 test("header la lop kinh mo va biet trang da cuon chua", () => {
   const head = rule(".site-header");
   assert.match(head, /backdrop-filter: blur\(var\(--blur\)\)/);
-  assert.match(head, /background: var\(--glass\)/);
+  // Nen doi tu token  sang mot gia tri sang hon o phase L: muc tieu
+  // la nhin ra RANH GIOI kinh, khong phai mot mang suong. Rang buoc giu nguyen
+  // y: header phai nua trong suot de tranh nen lot qua.
+  assert.match(head, /background: #[0-9a-f]{6,8};/, "header khong con nua trong suot");
   // Dac them khi da cuon — luc do moi co chu chay qua duoi.
   assert.match(css(), /\.site-header\[data-scrolled="true"\]/);
 

@@ -119,7 +119,7 @@ test("muc phu nam trong khoang da dat cho tung trang", () => {
   const text = css();
   const muc = {};
   for (const m of text.matchAll(
-    /\.page-bg\[data-bg="([^"]+)"\][^\n]*--toi: ([\d.]+);/g,
+    /\.page-bg-lop\[data-bg="([^"]+)"\][^\n]*--toi: ([\d.]+);/g,
   )) {
     muc[m[1]] = Number(m[2]);
   }
@@ -170,7 +170,7 @@ test("co vignette chu khong chi mot lop toi phang", () => {
   // mot khoi rieng dat lop phu. Tim theo NOI DUNG chu khong theo ten.
   const moc = text.indexOf("rgb(5 7 15 / var(--toi");
   assert.notEqual(moc, -1, "khong tim thay lop toi phang");
-  const than = text.slice(text.lastIndexOf(".page-bg::after", moc),
+  const than = text.slice(text.lastIndexOf(".page-bg-lop::after", moc),
                           text.indexOf("}", moc));
   assert.match(than, /radial-gradient/, "thiếu vignette");
   assert.match(than, /rgb\(5 7 15 \/ var\(--toi/, "thiếu lớp tối phẳng");
@@ -226,14 +226,21 @@ test("dien thoai lam mo NHE hon", () => {
 
 test("hat sang CHI o ba trang, va KHONG o trang doc chuong", () => {
   const text = css();
-  const at = text.indexOf("> .hat,");
-  assert.notEqual(at, -1, "không có lớp hạt");
-  const khoi = text.slice(text.lastIndexOf(".page-bg[", at), text.indexOf("}", at));
+  const at = text.indexOf('.hat[data-bg="home"]');
+  assert.notEqual(at, -1, "khong co lop hat");
+  const khoi = text.slice(at, text.indexOf("}", at));
   for (const ten of ["home", "auth", "account"]) {
     assert.ok(khoi.includes(`data-bg="${ten}"`), `thiếu hạt ở ${ten}`);
   }
   // Khong duoc co gi chuyen dong sau mot doan van dai.
   assert.ok(!khoi.includes('data-bg="reader"'), "hạt sáng nằm sau chương truyện");
+
+  // Va mac dinh la TAT — chi ba trang tren duoc bat.
+  const mac_dinh = text.slice(
+    text.indexOf(".hat {"),
+    text.indexOf("}", text.indexOf(".hat {")),
+  );
+  assert.match(mac_dinh, /opacity: 0/, "hạt sáng bật ở mọi trang");
 });
 
 test("hat sang tat han khi nguoi dung chon giam chuyen dong", () => {
@@ -265,12 +272,22 @@ test("kinh la MOT cong thuc gop, ap cho danh sach be mat co gioi han", () => {
   }
 });
 
-test("KHONG lam mo ca tam tranh nen", () => {
-  // Lam mo toan man hinh giet chat luong tranh va rat dat tren dien thoai.
+test("lam mo la QUYET DINH TUNG TRANG, khong phai mot con so co dinh", () => {
+  /*
+    Ban truoc cam han `blur` tren lop anh. Huong moi CO dung lam mo, nhung chi
+    o hai trang lam viec (`studio`, `write`) va rat nhe o hai trang khac — con
+    mat tien thi phai sac. Nen rang buoc doi tu "khong bao gio mo" sang "mo la
+    mot bien so tung trang".
+
+    Chi tiet tung muc nam o `route-crossfade.test.mjs`.
+  */
   const text = css();
-  const at = text.indexOf(".page-bg::before {");
+  const at = text.indexOf(".page-bg-lop::before {");
   const than = text.slice(at, text.indexOf("}", at));
-  assert.ok(!/blur\(/.test(than), "tranh nền bị làm mờ toàn màn hình");
+  assert.match(than, /filter: blur\(var\(--mo, 0px\)\)/,
+    "độ mờ không phải biến số từng trang");
+  // Mac dinh la 0: mot tam khong khai `--mo` thi phai SAC, khong bi mo nhe nham.
+  assert.match(than, /var\(--mo, 0px\)/);
 });
 
 test("the thuong co CHIEU SAU de tach khoi tranh nen", () => {
@@ -280,3 +297,4 @@ test("the thuong co CHIEU SAU de tach khoi tranh nen", () => {
   const than = text.slice(at, text.indexOf("}", at));
   assert.match(than, /box-shadow: var\(--do-sau\)/);
 });
+

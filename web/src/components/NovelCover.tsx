@@ -48,10 +48,9 @@ export function NovelCover({
       >
         {/* Hoa van mo o nen — CSS thuan, khong tep anh nao. */}
         <span className="cover-pattern" />
-        <span className="cover-crest">
-          {/* KHONG con chu cai dau. Xem `StoryCoverFallback` de biet vi sao. */}
-          <StoryCoverFallback seed={novelId || title} />
-        </span>
+        {/* Ca bo cuc dau an — dau an lon mo phia sau, khung huy hieu, dau an nho
+            ro net. Xem `StoryCoverFallback`; o day khong con thao ra tung lop. */}
+        <StoryCoverFallback seed={novelId || title} />
       </div>
       {coverUrl ? (
         <div

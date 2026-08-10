@@ -239,7 +239,8 @@ function FanficBrowser() {
         )
       ) : (
         <>
-          <p className="hint" role="status">
+          {/* Cung mot loi trinh bay voi dong dem o Thu vien — xem `.hang-muc`. */}
+          <p className="hint hang-muc" role="status">
             {from}–{to} trong {total} truyện
             {filtering ? " khớp bộ lọc" : ""}
           </p>

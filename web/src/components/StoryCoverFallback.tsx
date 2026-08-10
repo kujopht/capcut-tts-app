@@ -18,7 +18,7 @@
  * o day, va khong co truong API nao duoc bia ra bay gio.
  */
 
-import { sigilFor, type CoverSigil } from "@/lib/cover";
+import { boCucFor, type CoverSigil } from "@/lib/cover";
 
 /**
  * Cac dau an. Dung `currentColor` de mau den tu CSS — nho vay mot dau an dung
@@ -91,16 +91,80 @@ const HINH: Record<CoverSigil, React.ReactNode> = {
   ),
 };
 
-export function StoryCoverFallback({ seed }: { seed: string }) {
+/**
+ * Dau an LON, mo, nam sau dau an chinh — nhu mot hinh KHAC tren be mat.
+ *
+ * BA quyet dinh o day deu la de sua mot ban truoc trong ra nhu loi ve:
+ *
+ *   1. NET, khong phai khoi dac. `fill="none" stroke="currentColor"` tren the
+ *      `<g>` bien moi dau an — ke ca cac hinh dac nhu sao va mat trang — thanh
+ *      mot hinh ve bang net. Ban dac phong to 2.15 lan cho ra mot mang sang lon
+ *      co mep cat ngang giua tam bia, va cai mep do di thang qua khung huy hieu:
+ *      no doc ra nhu mot loi ket xuat, khong phai mot hoa van.
+ *
+ *   2. LECH TAM. Dat dung giua thi no chi la ban phong to cua dau an nho nam
+ *      truoc no — hai vong tron dong tam. Lech xuong duoi-phai thi hai lop co
+ *      quan he bo cuc voi nhau.
+ *
+ *   3. TRAN MEP. `preserveAspectRatio="xMidYMid slice"` cho hinh phu kin tam bia
+ *      3:2 va bi cat o mep, thay vi ngoi gon trong mot o vuong giua. Bi cat la
+ *      dung y: mot hoa van chay ra ngoai khung trong ra rong hon chinh tam bia.
+ */
+function DauAnSau({ hinh, goc }: { hinh: CoverSigil; goc: number }) {
   return (
     <svg
-      className="cover-sigil"
+      className="cover-sigil-sau"
       viewBox="0 0 64 64"
+      preserveAspectRatio="xMidYMid slice"
       aria-hidden="true"
       focusable="false"
-      fill="currentColor"
     >
-      {HINH[sigilFor(seed)]}
+      <g
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        transform={`translate(44 42) rotate(${goc}) scale(2.35) translate(-32 -32)`}
+      >
+        {HINH[hinh]}
+      </g>
     </svg>
+  );
+}
+
+/**
+ * Ca BO CUC cua bia du phong, khong chi mot hinh.
+ *
+ * Nam lop, tu duoi len:
+ *
+ *   1. gradient theo `novel_id`            — `.cover-fallback` (o `NovelCover`)
+ *   2. dom sang + vet cheo mo              — `.cover-pattern`
+ *   3. dau an LON mo phia sau              — `.cover-sigil-sau`
+ *   4. dau an nho ro net trong khung huy hieu — `.cover-crest` + `.cover-sigil`
+ *   5. quang mep + lop toi dan             — `.cover-fallback::after`
+ *
+ * Khung huy hieu nam O DAY chu khong o `NovelCover`: ca bo cuc bia du phong la
+ * MOT thu, va khi backend co bia that thi `NovelCover` chi can phu
+ * `.cover-image` len tren — khong ai phai thao ra tung lop.
+ */
+export function StoryCoverFallback({ seed }: { seed: string }) {
+  const { truoc, sau, goc } = boCucFor(seed);
+  return (
+    <>
+      <DauAnSau hinh={sau} goc={goc} />
+      <span className="cover-crest">
+        {/* KHONG con chu cai dau. Xem ghi chu o dau tep de biet vi sao. */}
+        <svg
+          className="cover-sigil"
+          viewBox="0 0 64 64"
+          aria-hidden="true"
+          focusable="false"
+          fill="currentColor"
+        >
+          {HINH[truoc]}
+        </svg>
+      </span>
+    </>
   );
 }

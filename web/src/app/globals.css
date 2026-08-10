@@ -86,6 +86,33 @@
   --accent-line: #22d3ee52;
   --accent-glow: #22d3ee33;
 
+  /*
+    Sac thu BA: vang huyen ao.
+
+    Tim la mau hanh dong, lo la mau bo tro. Vang KHONG phai mau thu ba de chia
+    viec — no la mau CHI TIET. Vai tro duy nhat cua no: noi rang giao dien nay
+    thuoc ve the gioi trong tranh, chu khong phai mot bang dieu khien SaaS dat
+    truoc mot tam hinh nen dep.
+
+    Vi vay: khong nut vang, khong the vang, khong chu vang. Chi net 1px o goc
+    the, duong ngan sau dau muc, va mot vet sang mep khi ro chuot. Neu co luc
+    nao nhin vao mot trang ma thay "trang nay mau vang" thi da dung qua nhieu.
+
+    `--vang` va `--vang-sang` la hai gia tri do du an dat.
+  */
+  --vang: #d8b56a;
+  --vang-sang: #e4c982;
+  /* Net trang trí — dam nhat trong ba, vi no la thu nam tren be mat kinh. */
+  --vang-net: #d8b56a4d;
+  --vang-vien: #d8b56a5c;
+  --vang-mo: #d8b56a1f;
+  /*
+    Net GOC dam hon net duong ngan mot chut. Ly do do duoc: duong ngan nam sau
+    mot dau muc tren the toi, con net goc nam tren be mat kinh SANG nhat cua
+    site (`.listen-hero`, `.account-hero`) va o 30% thi no bien mat han o day.
+  */
+  --vang-goc: #d8b56a75;
+
   /* Chu dat TREN nen tim/lo dac. Gan den chu khong phai den tuyen doi. */
   --on-brand: #0a0713;
 
@@ -286,6 +313,31 @@ body {
 .page-bg-lop[data-vao] { animation: nen-vao var(--dur-nen) var(--ease) both; }
 .page-bg-lop[data-ra]  { animation: nen-ra  var(--dur-nen) var(--ease) both; }
 
+/*
+  MOT chuyen dong lien tuc duy nhat trong ca site, va chi o TRANG CHU.
+
+  Ben cang tho rat cham: 1 -> 1.015 trong 54 giay, roi lui lai. Bien do nho hon
+  ca mot lan cuon chuot, nen khong ai "thay no dang chay" — chi thay canh khong
+  chet. Do la toan bo muc dich.
+
+  KHONG dat o cac trang lam viec: mot khung nen dang bo ra vao phia sau mot form
+  hay mot chuong truyen la thu lam met mat sau nam phut.
+
+  Vi sao khai CA HAI hieu ung trong mot khai bao: `[data-vao]` da dat `animation`
+  cho lop nay. Mot quy tac rieng cho trang chu se GHI DE khai bao do va lop nen
+  mat luon hieu ung hien vao. Nen phai liet ke ca hai, va cho cai thu hai tre
+  dung bang thoi luong chuyen canh de hai thu khong tranh `transform`.
+*/
+.page-bg-lop[data-bg="home"][data-vao] {
+  animation:
+    nen-vao var(--dur-nen) var(--ease) both,
+    tho-nen 54s ease-in-out var(--dur-nen) infinite alternate;
+}
+@keyframes tho-nen {
+  from { transform: scale(1); }
+  to   { transform: scale(1.015); }
+}
+
 @keyframes nen-vao {
   from { opacity: 0; transform: none; }
   to   { opacity: 1; transform: none; }
@@ -308,12 +360,10 @@ body {
   Do sang trung binh cac tam rat khac nhau (`02-explore` sang 150/255,
   `08-login` chi 41) nen muc phu khong the dat chung mot con so.
 
-  `--mo` chi ap cho LOP ANH:
-    home / explore / login   0    — tranh phai ro, day la mat tien
-    library / account        2-3px — chi lam mem, giu chi tiet
-    studio / write           6px  — form la thu chinh, tranh lui han ve sau
-    reader                   0    — vung quanh trinh phat de sac, than bai da
-                                    co mat nen rieng
+  `--mo` gio la 0px o CA TAM tam. Bang tren tung ghi cac gia tri khac nhau cho
+  tung trang (studio/write 6px, library/account 2-3px) — bo di rồi: lam mo tranh
+  la nem di chinh chi tiet tao ban sac. Bien duoc giu lai nhu mot moc de bo test
+  doi soat, va de neu sau nay co ai doi thi test do ngay.
 */
 .page-bg-lop[data-bg="home"]    { --anh: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor.webp");      --anh-nho: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor-sm.webp");      --toi: 0.34; --diem: center 42%; --mo: 0px; }
 .page-bg-lop[data-bg="explore"] { --anh: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom-sm.webp");    --toi: 0.42; --diem: center 38%; --mo: 0px; }
@@ -537,7 +587,43 @@ main { overflow-x: clip; }
 /* Doan mo ta do rong theo CHU chu khong theo pixel: `ch` co gian theo co chu,
    nen o mobile no tu hep lai thay vi bi ep o mot con so cung. */
 .lead-narrow { max-width: 62ch; }
-.section-title { font-size: var(--t-lg); }
+/* Dau muc nang len 700: tren mot tam tranh manh, 650 doc ra nhe han chinh cai
+   nen. Khong tang CO chu — chi tang do dam va do sang. */
+.section-title { font-size: var(--t-lg); font-weight: 700; color: var(--text); }
+
+/*
+  HANG DANH MUC: mot dau vien vang nho, mot nhan, roi mot duong ngan tan dan.
+
+  Dung cho nhung dong nhan KHONG phai tieu de — vd "1 bản audio" o Thu vien. O
+  do noi dung thua, va mot dong chu cap ba tro troi giua trang doc ra nhu trang
+  chua tai xong. Cung mot chu, dat trong mot khung nhu the nay, thi doc ra la
+  "cho nay dung la nhu vay".
+
+  KHONG bia ra noi dung de lap cho trong: van dung con so that, chi la trinh bay
+  no cho co chu y.
+*/
+.hang-muc {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.hang-muc::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  transform: rotate(45deg);
+  background: var(--vang);
+  opacity: 0.72;
+}
+.hang-muc::after {
+  content: "";
+  flex: 1 1 auto;
+  min-width: 20px;
+  height: 1px;
+  background: linear-gradient(90deg,
+    var(--vang-net) 0, var(--vang-mo) 22%, #ffffff0f 46%, transparent 82%);
+}
 .eyebrow {
   font-size: var(--t-xs);
   font-weight: 650;
@@ -554,13 +640,38 @@ main { overflow-x: clip; }
 }
 .eyebrow-icon svg { color: var(--brand-hover); flex: 0 0 auto; }
 
-/* Bieu tuong dat truoc mot dau muc trong trang. */
+/*
+  DAU MUC KIEU HUYEN AO: dau an + chu + mot duong ngan tan dan.
+
+  Ba thanh phan, khong hon. Truoc day dau muc chi la chu dam — dung, doc duoc,
+  nhung khong khac gi dau muc cua bat ky bang dieu khien nao. Duong ngan la thu
+  bien no thanh mot cai bang hieu: mat di theo chu, gap mot net vang mo, roi tan
+  vao trang.
+
+  `display: flex` chu khong phai `inline-flex`: duong ngan can biet cho con lai
+  cua hang de an het. Voi `inline-flex` no khong co gi de an.
+
+  KHONG dung ky tu ─ hay │ nao — do la chu, va trinh doc man hinh se doc chung.
+*/
 .section-title-icon {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--s2);
 }
 .section-title-icon svg { color: var(--brand-hover); flex: 0 0 auto; }
+.section-title-icon::after {
+  content: "";
+  flex: 1 1 auto;
+  min-width: 20px;
+  height: 1px;
+  margin-left: 2px;
+  /*
+    Sang nhat o dau (ngay sau chu) roi tan. Hai chang: mot net vang mo, roi mot
+    net trang cuc mo — de duong ngan khong doc ra la mot thanh mau don sac.
+  */
+  background: linear-gradient(90deg,
+    var(--vang-net) 0, var(--vang-mo) 22%, #ffffff0f 46%, transparent 82%);
+}
 /*
   Chu nam TRUC TIEP tren tranh — tieu de trang, dau muc, va cac dong ghi chu o
   cap `.page` — deu khong co the nao do lung. Mot bong chu mem giu chung doc
@@ -1498,7 +1609,18 @@ main { overflow-x: clip; }
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, #00000014, #0000006e);
+  /*
+    Lop TOI + VIGNETTE. Truoc day chi la mot lop toi dan tu tren xuong; them mot
+    vignette hinh tron lam tam bia co CHIEU SAU — sang o giua, tram o bon goc —
+    thay vi la mot mang mau phang co mot hinh dan len.
+  */
+  background:
+    radial-gradient(120% 96% at 50% 34%, transparent 32%, #00000052 78%, #0000007a),
+    linear-gradient(180deg, #00000014, #0000006e);
+  /* Quang mep: mot vet sang o dinh, mot net vang cuc mo o day. */
+  box-shadow:
+    inset 0 1px 0 #ffffff2b,
+    inset 0 -1px 0 #d8b56a2b;
 }
 .cover-image { background-size: cover; background-position: center; }
 
@@ -1538,8 +1660,16 @@ main { overflow-x: clip; }
   max-width: 96px;
   border-radius: 50%;
   background: #0000002e;
-  border: 1.5px solid #ffffff4d;
-  box-shadow: 0 0 0 4px #ffffff14, inset 0 1px 0 #ffffff40;
+  border: 1.5px solid #ffffff59;
+  /*
+    Vong vien ngoai co MOT net vang rat mo. Cong dung khong phai trang tri: dau
+    an lon phia sau cung ve bang net trang, va hai vong tron cung sac canh nhau
+    thi mat khong biet cai nao la lop truoc. Mot net khac mau tach hai lop ra.
+  */
+  box-shadow:
+    0 0 0 4px #ffffff14,
+    0 0 0 5px #d8b56a30,
+    inset 0 1px 0 #ffffff40;
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
 }
@@ -1556,6 +1686,28 @@ main { overflow-x: clip; }
   color: #ffffffe6;
   filter: drop-shadow(0 2px 8px #00000073);
 }
+/*
+  DAU AN LON mo phia sau — lop 3 cua bia du phong.
+
+  Do mo 9%: o muc nay no khong doc ra la mot hinh ve, ma la mot vet cham noi
+  tren be mat. Do la dung y — no lam viec cua mot HOA VAN NEN, va neu ro han thi
+  no tranh cho voi dau an nho o giua.
+
+  Khong `z-index`: no phai nam DUOI lop toi cua `.cover-fallback::after`, con
+  khung huy hieu thi da co `z-index: 1` de len tren lop do.
+*/
+.cover-sigil-sau {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: #ffffff;
+  opacity: 0.2;
+  pointer-events: none;
+}
+/* O co thumb (56px) thi mot dau an lon mo chi lam ban be mat: hai hinh long vao
+   nhau trong 56px khong con doc ra hinh nao ca. */
+.cover-thumb .cover-sigil-sau { display: none; }
 /* O co thumb (56px) thi khung huy hieu va hoa van chi thanh nhieu — bo di, giu
    mot dau an gon. Chi tiet chi co nghia khi con du cho de nhin ra. */
 .cover-thumb .cover-crest {
@@ -2176,29 +2328,22 @@ main { overflow-x: clip; }
   padding: var(--s7) var(--s6);
   border: 1px solid var(--line);
   border-radius: var(--r4);
-  background: linear-gradient(150deg, #0c1020a3, #080a1494 55%, #06080fa3);
-  box-shadow: var(--shadow-2), var(--edge);
-}
+  /*
+    Hai quang mau la LOP NEN, khong phai hai pseudo-element.
 
-/* Hai quang mau dat SAU noi dung. `z-index: -1` cung `isolation` o tren giu
-   chung nam trong the, khong troi ra sau cac khoi khac. */
-.home-hero::before,
-.home-hero::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  border-radius: 50%;
-  pointer-events: none;
-}
-.home-hero::before {
-  width: 460px; height: 460px;
-  top: -220px; left: -120px;
-  background: radial-gradient(closest-side, #8b6cff3d, transparent);
-}
-.home-hero::after {
-  width: 420px; height: 420px;
-  bottom: -240px; right: -80px;
-  background: radial-gradient(closest-side, #22d3ee2e, transparent);
+    Truoc day chung la `::before` va `::after` dat `z-index: -1`. Hoat dong dung,
+    nhung chung an het CA HAI pseudo cua the — va hoa van huyen ao (net goc, mep
+    sang) can mot cai. Nen quang chuyen thanh lop nen: `background` ve trong
+    border-box va bi cat o day y nhu `overflow: hidden` da lam, nen ket qua thi
+    giac khong doi.
+  */
+  background:
+    radial-gradient(closest-side, #8b6cff3d, transparent)
+      -120px -220px / 460px 460px no-repeat,
+    radial-gradient(closest-side, #22d3ee2e, transparent)
+      right -80px bottom -240px / 420px 420px no-repeat,
+    linear-gradient(150deg, #0c1020a3, #080a1494 55%, #06080fa3);
+  box-shadow: var(--shadow-2), var(--edge);
 }
 
 .home-hero-title {
@@ -2378,6 +2523,8 @@ main { overflow-x: clip; }
 .listen-col { max-width: 820px; }
 
 .listen-hero {
+  /* Moc cho hoa van goc — xem khoi "hoa van huyen ao" o cuoi tep. */
+  position: relative;
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
   gap: var(--s5);
@@ -2937,6 +3084,134 @@ body.co-mini { padding-bottom: 74px; }
   border-top: 1px solid var(--line-soft);
 }
 
+/* ==================================================== hoa van huyen ao
+   Muc tieu cua ca khoi nay: giao dien THUOC VE the gioi trong tranh.
+
+   Truoc khoi nay, tranh nen la huyen ao con ban than giao dien la mot bang
+   dieu khien hien dai binh thuong dat len tren. Hai thu khong cung mot the
+   gioi, va cho vach ra thay ro nhat la o cac be mat kinh: chung sach, vuong,
+   va khong co dau vet nao cua noi chung dang dung.
+
+   Nguyen tac: hoa van la 10-15% CUOI CUNG cua ban sac, khong phai lop son
+   phu len tat ca. Cu the la:
+
+     - CHI cac be mat LON duoc trang tri. Mot the truyen trong luoi sau cai
+       khong duoc co net goc — muoi cai khung cham tro canh nhau thi khong
+       con cai nao la trang tri nua;
+     - net day 1px, mau `--vang-net` (do mo 30%), va nam cach mep 12px. O
+       khoang cach ngoi doc binh thuong no gan nhu khong thay; nhin gan thi
+       thay. Do dung la muc dich;
+     - khong mot hoa van nao chuyen dong.
+   ==================================================================== */
+
+/*
+  Net GOC + MEP SANG cho cac be mat lon.
+
+  Ve bang cac lop `background-image` tren MOT pseudo-element, khong phai bang
+  nhieu the con:
+
+    lop 1  mep sang o dinh the — sang nhat o giua, tan ve hai dau
+    lop 2  net ngang goc tren-trai
+    lop 3  net doc  goc tren-trai
+    lop 4  net ngang goc duoi-phai
+    lop 5  net doc  goc duoi-phai
+
+  Hai goc DOI DIEN chu khong phai bon goc: bon goc doc ra la mot cai khung
+  tranh, hai goc doc ra la mot dau hieu. Va it hon thi de lam dung hon.
+*/
+.home-hero::after,
+.listen-hero::after,
+.account-hero::after,
+/* The dang nhap — CHI cai form, khong ke the "Tiep tuc voi Google" phia tren:
+   hai khung cham tro xep doc canh nhau tren mot trang la mot khung qua nhieu. */
+.auth-page > form.card::after,
+/* Studio: khoi soan van ban. Write: "Truyen cua toi" va khoi truyen dang chon.
+   `:first-child` chu khong phai moi the — cac the con lai trong cung cot
+   (Lich su, Meo, Them chuong) la khoi PHU va khong duoc cham tro. */
+.split > .stack-5 > .card:first-child::after,
+.split-narrow > .stack-5 > .card:first-child::after,
+.split-narrow > .stack > .card:first-child::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  /* Net nam TREN be mat nhung duoi con tro: khong bao gio chan mot cu bam. */
+  pointer-events: none;
+  background-image:
+    linear-gradient(90deg, transparent, #ffffff2b 18%,
+      var(--vang-goc) 50%, #ffffff2b 82%, transparent),
+    /*
+      Moi net GIU nguyen do dam nua dau roi moi tan. Ban dau chung tan tu diem
+      xuat phat (`gold, transparent`) — do duoc bang cach nhuom do: net 22px chi
+      con thay khoang 6px dau, nen "net goc" doc ra la mot dau cham, khong phai
+      mot net.
+    */
+    linear-gradient(90deg,  var(--vang-goc) 0, var(--vang-goc) 46%, transparent),
+    linear-gradient(180deg, var(--vang-goc) 0, var(--vang-goc) 46%, transparent),
+    linear-gradient(270deg, var(--vang-goc) 0, var(--vang-goc) 46%, transparent),
+    linear-gradient(0deg,   var(--vang-goc) 0, var(--vang-goc) 46%, transparent);
+  background-size:
+    100% 1px,
+    26px 1px, 1px 26px,
+    26px 1px, 1px 26px;
+  background-position:
+    center top,
+    left 14px top 12px, left 12px top 14px,
+    right 14px bottom 12px, right 12px bottom 14px;
+  background-repeat: no-repeat;
+}
+
+/*
+  Ro chuot vao mot THE BAM DUOC: mot vet vang o mep tren.
+
+  Chon MOT chi tiet, khong phai hai. Ban dau toi de ca vet vang lan mot vet
+  sang quet ngang; hai thu cung luc tren mot luoi sau the doc ra nhu quang cao.
+  Vet quet giu rieng cho nut chinh — cho ma mot trang chi co mot cai.
+
+  `--kinh-sang` la vet sang mep tren san co cua moi the; o day chi doi sac cua
+  no sang vang, nen khong them mot lop ve nao.
+*/
+.story-card:hover,
+.quick-card:hover,
+.card-link:hover,
+.novel-pick:hover {
+  border-color: var(--vang-vien);
+  box-shadow:
+    0 0 0 1px #8b6cff2b,
+    0 14px 34px #00000080,
+    0 0 22px #8b6cff26,
+    inset 0 1px 0 #e4c9823d;
+}
+/* Muc dang chon thi KHONG doi theo chuot: no dang o trang thai khac va vien
+   tim la thu noi dieu do. Vang o day se lam hai tin hieu danh nhau. */
+.novel-pick[aria-current="true"]:hover {
+  border-color: var(--brand);
+  box-shadow: var(--lift-brand), var(--edge);
+}
+
+/*
+  Nut chinh: mot vet sang trong long va mot net vang cuc mo o mep duoi.
+
+  Net vang o MEP DUOI chu khong phai mep tren: mep tren da co vet sang trang
+  (`inset 0 1px 0`), va dat hai net sang canh nhau thi nut doc ra nhu bi vien
+  hai lop. Mep duoi thi doc ra nhu anh sang do tu ben duoi len — cung huong voi
+  bong do cua ca he thong.
+*/
+.btn-primary {
+  box-shadow:
+    var(--lift-brand),
+    inset 0 1px 0 #ffffff3d,
+    inset 0 -1px 0 #d8b56a3d;
+}
+.btn-primary:hover:not(:disabled) {
+  box-shadow:
+    0 10px 32px #8b6cff4d,
+    0 0 0 1px #d8b56a2b,
+    inset 0 1px 0 #ffffff47,
+    inset 0 -1px 0 #e4c9824d;
+}
+.btn-primary:disabled { box-shadow: none; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -2972,6 +3247,10 @@ body.co-mini { padding-bottom: 74px; }
      khac nhau con kho chiu hon chinh chuyen dong. */
   :root { --dur-nen: 90ms; }
   .page-bg-lop[data-vao]::before { animation: none; }
+  /* Nhip tho cua nen trang chu: BO han. Giu lai mot lan hien vao rat ngan. */
+  .page-bg-lop[data-bg="home"][data-vao] {
+    animation: nen-vao var(--dur-nen) var(--ease) both;
+  }
   .story-card:hover { filter: none; }
 }
 

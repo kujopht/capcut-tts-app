@@ -79,3 +79,50 @@ export function coverInitial(title: string): string {
   const first = title.trim().charAt(0);
   return first ? first.toLocaleUpperCase("vi") : "?";
 }
+
+/**
+ * Bo cuc cua bia du phong: dau an LON mo phia sau, goc nghieng cua no, va sac
+ * quang o mep.
+ *
+ * VI SAO CAN THEM MOT LOP: bia du phong truoc do la "mot mang gradient cong mot
+ * hinh nho o giua". Hai truyen khac nhau chi khac o mau va o hinh giua, nen ca
+ * luoi truyen doc ra nhu mot bo the sinh tu mot cai khuon. Mot dau an lon mo
+ * phia sau tao ra BO CUC — va vi no chon rieng, hai truyen cung dau an giua van
+ * trong ra khac nhau.
+ *
+ * Dau an sau LUON khac dau an truoc: hai hinh giong nhau long vao nhau chi
+ * trong ra nhu mot hinh bi ve hai lan.
+ *
+ * Van ON DINH theo `novel_id` — cung mot truyen, cung mot bia, o moi trang.
+ */
+export const COVER_GOC = [-14, -6, 0, 8, 16] as const;
+
+export type CoverBoCuc = {
+  /** Dau an nho, ro net, nam giua. */
+  truoc: CoverSigil;
+  /** Dau an lon, mo, nam sau — luon khac `truoc`. */
+  sau: CoverSigil;
+  /** Goc nghieng cua dau an sau, do. */
+  goc: number;
+};
+
+export function boCucFor(seed: string): CoverBoCuc {
+  const truoc = sigilFor(seed);
+  /*
+    Mot ham bam THU BA cho lop sau. Neu dung lai `sigilFor` voi mot hat giong
+    ghep chuoi thi hai thu se tuong quan voi nhau — do la dung loi da mac o
+    `sigilFor` ban dau, chi o mot cho khac.
+  */
+  let h = 0x2545f491;
+  for (let i = 0; i < seed.length; i += 1) {
+    h = (h + seed.charCodeAt(i) * (i + 7)) >>> 0;
+    h = (h ^ (h << 13)) >>> 0;
+    h = (h ^ (h >>> 17)) >>> 0;
+  }
+  const khac = COVER_SIGILS.filter((s) => s !== truoc);
+  return {
+    truoc,
+    sau: khac[h % khac.length],
+    goc: COVER_GOC[(h >>> 8) % COVER_GOC.length],
+  };
+}

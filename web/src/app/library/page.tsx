@@ -215,7 +215,10 @@ export default function LibraryPage() {
         // `key` doi theo tab dang chon: React thay phan tu nen hieu ung truot
         // vao tu chay lai. Danh sach van hien NGAY, khong cho hieu ung xong.
         <div className="stack doi-tab" key={source}>
-          <p className="hint" role="status">
+          {/* `hang-muc`: dau vien vang + nhan + duong ngan. Thu vien thuong chi
+              co vai ban audio, va mot dong chu tro troi giua trang doc ra nhu
+              trang chua tai xong. Van la con so that — chi trinh bay co chu y. */}
+          <p className="hint hang-muc" role="status">
             {shown.length} bản audio
           </p>
           {shown.map((row) => {

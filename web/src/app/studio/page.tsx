@@ -339,7 +339,7 @@ export default function StudioPage() {
       {bootError ? (
         <ErrorState message={bootError} onRetry={retryBoot} />
       ) : (
-        <div className="split">
+        <div className="split page-lam-viec">
           {/* ------------------------------------------------ cot chinh */}
           <section className="stack-5">
             <form className="card stack" onSubmit={submit}>
@@ -581,7 +581,7 @@ export default function StudioPage() {
           <aside className="stack sticky-side">
             <section className="card stack">
               <h2 className="section-title section-title-icon">
-                <IconHistory size={17} /> Lịch sử audio
+                <IconHistory size={19} /> Lịch sử audio
               </h2>
               {booting ? (
                 <SkeletonList count={3} />
@@ -638,7 +638,7 @@ export default function StudioPage() {
 
             <section className="card stack-2">
               <h2 className="section-title section-title-icon">
-                <IconBulb size={17} /> Mẹo
+                <IconBulb size={19} /> Mẹo
               </h2>
               <p className="hint">
                 Văn bản có dấu câu rõ ràng sẽ cho giọng đọc tự nhiên hơn.

@@ -264,7 +264,7 @@ test("kinh la MOT cong thuc gop, ap cho danh sach be mat co gioi han", () => {
   assert.notEqual(at, -1, "không có công thức kính gộp");
   const chon = text.slice(at, text.indexOf("{", at));
   const be_mat = chon.split(",").map((x) => x.trim()).filter(Boolean);
-  assert.ok(be_mat.length <= 10, `${be_mat.length} bề mặt kính — quá nhiều`);
+  assert.ok(be_mat.length <= 14, `${be_mat.length} bề mặt kính — quá nhiều`);
 
   // The truyen trong luoi, than bai va `.card` thuong KHONG duoc la kinh.
   for (const cam of [".story-card", ".reader", ".card"]) {
@@ -272,27 +272,28 @@ test("kinh la MOT cong thuc gop, ap cho danh sach be mat co gioi han", () => {
   }
 });
 
-test("lam mo la QUYET DINH TUNG TRANG, khong phai mot con so co dinh", () => {
+test("tranh nen luon SAC — chi tiet la thu tao ban sac", () => {
   /*
-    Ban truoc cam han `blur` tren lop anh. Huong moi CO dung lam mo, nhung chi
-    o hai trang lam viec (`studio`, `write`) va rat nhe o hai trang khac — con
-    mat tien thi phai sac. Nen rang buoc doi tu "khong bao gio mo" sang "mo la
-    mot bien so tung trang".
+    Rang buoc nay da doi HAI lan, va lan nay la lan cuoi:
 
-    Chi tiet tung muc nam o `route-crossfade.test.mjs`.
+      phase I-K  cam han `blur` tren lop anh
+      phase L    cho lam mo tung trang (6px o studio/write) — SAI, chu du an
+                 khong muon, va no nem di chinh chi tiet cua tranh
+      phase M    cam lai, va de doc den tu mang toi cuc bo + be mat kinh
+
+    Chi tiet day du nam o `route-crossfade.test.mjs`.
   */
   const text = css();
   const at = text.indexOf(".page-bg-lop::before {");
-  const than = text.slice(at, text.indexOf("}", at));
-  assert.match(than, /filter: blur\(var\(--mo, 0px\)\)/,
-    "độ mờ không phải biến số từng trang");
-  // Mac dinh la 0: mot tam khong khai `--mo` thi phai SAC, khong bi mo nhe nham.
-  assert.match(than, /var\(--mo, 0px\)/);
+  // `codeOnly`: chu thich ngay trong khoi do co trich `filter: blur` de noi vi
+  // sao KHONG dung no — quet ca khoi se bat trung chinh loi giai thich.
+  const than = codeOnly(text.slice(at, text.indexOf("}", at)));
+  assert.ok(!/filter: blur/.test(than), "tranh nền bị làm mờ");
 });
 
 test("the thuong co CHIEU SAU de tach khoi tranh nen", () => {
   const text = css();
-  assert.match(text, /--do-sau: 0 12px 32px/, "thiếu token chiều sâu");
+  assert.match(text, /--do-sau: 0 8px 32px/, "thiếu token chiều sâu");
   const at = text.indexOf(".card {");
   const than = text.slice(at, text.indexOf("}", at));
   assert.match(than, /box-shadow: var\(--do-sau\)/);

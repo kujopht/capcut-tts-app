@@ -11,6 +11,7 @@ import { AudioEngineProvider } from "@/components/AudioEngine";
 import { ChapterPlayer } from "@/components/ChapterPlayer";
 import { MiniPlayer } from "@/components/MiniPlayer";
 import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
+import { IconBook } from "@/components/Icons";
 
 export default function ChapterPage({
   params,
@@ -77,7 +78,8 @@ export default function ChapterPage({
 
       <header className="stack-2 reader-head">
         <h1 className="page-title">{chapter.title}</h1>
-        <span className="hint">
+        <span className="hint eyebrow-icon">
+          <IconBook size={16} />
           {formatNumber(chapter.char_count)} ký tự
           {novel ? ` · ${novel.title}` : ""}
         </span>

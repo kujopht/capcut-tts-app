@@ -17,6 +17,7 @@
 
 import { useAudioEngine, dongHo, TOC_DO } from "./AudioEngine";
 import { NovelCover } from "./NovelCover";
+import { IconHeadphones } from "./Icons";
 import { formatBytes } from "./ui";
 
 export function ChapterPlayer({
@@ -58,7 +59,9 @@ export function ChapterPlayer({
       </div>
 
       <div className="listen-hero-body">
-        <span className="eyebrow">Đang nghe</span>
+        <span className="eyebrow eyebrow-icon">
+          <IconHeadphones size={17} /> Đang nghe
+        </span>
         <h2 className="listen-hero-title">{chapterTitle}</h2>
         <p className="hint listen-hero-novel">{novelTitle}</p>
 

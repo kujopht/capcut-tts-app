@@ -66,11 +66,27 @@ const HINH: Record<CoverSigil, React.ReactNode> = {
       />
     </>
   ),
-  // Trang khuyet kem sao — "dem", "yen tinh".
+  /*
+    Trang khuyet kem sao — "dem", "yen tinh".
+
+    Ve bang HAI vong tron va `fill-rule="evenodd"`, khong phai bang hai cung noi
+    tiep nhau. Ban truoc dung `A20 ... A16` giua hai diem cach nhau 40 don vi:
+    day cung 40 lon hon duong kinh 32 cua cung thu hai, nen theo dung dac ta SVG
+    trinh duyet phai NONG ban kinh len cho vua — ca hai cung thanh r=20 va hinh
+    ra mot dia tron dac, khong con la luoi liem. Loi nay chi thay duoc khi do
+    that: o co 64px tren mot the bia, mot dia tron mo doc ra nhu mot cho trong.
+
+    Vong trong lech sang phai 9 don vi va lon hon ban kinh vong ngoai tru be day
+    luoi liem, nen hai dau luoi liem duoc cat gon thay vi vut nhon ra.
+  */
   trang: (
     <>
-      <path d="M40 12 A20 20 0 1 0 40 52 A16 16 0 1 1 40 12 Z" />
-      <path d="M46 22 L48 27 L53 29 L48 31 L46 36 L44 31 L39 29 L44 27 Z" opacity="0.8" />
+      <path
+        fillRule="evenodd"
+        d="M32 12 A20 20 0 1 1 32 52 A20 20 0 1 1 32 12 Z
+           M41 15 A17 17 0 1 1 41 49 A17 17 0 1 1 41 15 Z"
+      />
+      <path d="M50 16 L51.6 20.4 L56 22 L51.6 23.6 L50 28 L48.4 23.6 L44 22 L48.4 20.4 Z" opacity="0.8" />
     </>
   ),
 };

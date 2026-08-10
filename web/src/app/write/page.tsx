@@ -47,7 +47,7 @@ import {
   SkeletonList,
   formatNumber,
 } from "@/components/ui";
-import { IconFeather } from "@/components/Icons";
+import { IconFeather , IconBook, IconLibrary } from "@/components/Icons";
 
 /** Thao tac xoa dang cho xac nhan. */
 type PendingDelete =
@@ -568,11 +568,13 @@ export default function WritePage() {
       ) : loading ? (
         <SkeletonList count={4} />
       ) : (
-        <div className="split-narrow">
+        <div className="split-narrow page-lam-viec">
           {/* --------------------------------------------- cot trai: truyen */}
           <aside className="stack">
             <section className="card stack">
-              <h2 className="section-title">Truyện của tôi</h2>
+              <h2 className="section-title section-title-icon">
+                <IconBook size={19} /> Truyện của tôi
+              </h2>
               {novels.length === 0 ? (
                 <p className="hint">Chưa có truyện nào. Tạo truyện đầu tiên bên dưới.</p>
               ) : (
@@ -788,7 +790,9 @@ export default function WritePage() {
 
                 <section className="card stack">
                   <div className="row-between">
-                    <h2 className="section-title">Chương</h2>
+                    <h2 className="section-title section-title-icon">
+                      <IconLibrary size={19} /> Chương
+                    </h2>
                     {availableVoices.length > 0 ? (
                       <div className="row row-tight">
                         <label className="hint" htmlFor="w-voice">
@@ -1066,7 +1070,9 @@ export default function WritePage() {
                 </section>
 
                 <form className="card stack" onSubmit={createChapter}>
-                  <h2 className="section-title">Thêm chương</h2>
+                  <h2 className="section-title section-title-icon">
+                    <IconFeather size={19} /> Thêm chương
+                  </h2>
                   <div className="field">
                     <label className="label" htmlFor="w-ch-title">
                       Tiêu đề chương

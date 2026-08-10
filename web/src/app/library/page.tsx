@@ -23,7 +23,7 @@ import {
   formatDate,
   formatNumber,
 } from "@/components/ui";
-import { IconLibrary } from "@/components/Icons";
+import { IconLibrary , IconMic } from "@/components/Icons";
 
 type Source = "all" | "studio" | "fanfic";
 
@@ -154,7 +154,7 @@ export default function LibraryPage() {
         lead="Tất cả audio đã tạo, gồm cả bản tạo nhanh ở Audio Studio và audio của các chương fanfic."
         action={
           <Link className="btn btn-primary" href="/studio">
-            Tạo audio mới
+            <IconMic size={17} /> Tạo audio mới
           </Link>
         }
       />

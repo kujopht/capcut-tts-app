@@ -73,15 +73,39 @@ test("bang ten tep o lib KHOP voi cac url trong CSS", () => {
 
 /* ============================================================== do mo */
 
-test("do mo chi ap cho LOP ANH, khong cho ca ung dung", () => {
+test("tranh nen KHONG bao gio bi lam mo", () => {
+  /*
+    HOI QUY DA XAY RA: phase L lam mo 6px o `/studio` va `/write`, 2.5-3px o
+    `/library` va `/account`, de form va danh sach noi len. Cach do lam hong
+    chinh buc tranh — chi tiet (kinh vien vong, khinh khi cau, ke sach, hoa anh
+    dao) la thu tao ban sac, va lam mo la nem no di.
+
+    De doc phai den tu MANG TOI CUC BO va BE MAT KINH.
+
+    `backdrop-filter` TREN TAM KINH thi duoc phep — do la thu lam nen kinh. Cai
+    bi cam la `filter: blur` tren chinh lop tranh.
+  */
   const text = css();
   const at = text.indexOf(".page-bg-lop::before {");
-  const than = text.slice(at, text.indexOf("}", at));
-  assert.match(than, /filter: blur\(var\(--mo, 0px\)\)/);
-  // Phong to di kem do mo: lam mo keo mau o bien vao va lo ra mot vien nhat.
-  assert.match(than, /transform: scale\(var\(--phong, 1\)\)/);
+  // `codeOnly`: chu thich trong khoi do co trich `filter: blur` de noi vi sao
+  // KHONG dung no.
+  const than = codeOnly(text.slice(at, text.indexOf("}", at)));
+  assert.match(than, /filter: none/, "lớp tranh vẫn có bộ lọc");
+  assert.ok(!/filter: blur/.test(than), "tranh nền bị làm mờ");
 
-  // Va KHONG co `filter: blur` nao dat tren `body`, `main` hay `.page`.
+  // Va moi tam deu khai 0px — de neu ai doi thi bai test nay do ngay.
+  const mo = {};
+  for (const m of text.matchAll(
+    /\.page-bg-lop\[data-bg="([^"]+)"\][^\n]*--mo: ([\d.]+)px;/g,
+  )) {
+    mo[m[1]] = Number(m[2]);
+  }
+  assert.equal(Object.keys(mo).length, 8, "có tấm chưa khai độ mờ");
+  for (const [ten, v] of Object.entries(mo)) {
+    assert.equal(v, 0, `${ten} mờ ${v}px — mọi tấm phải sắc`);
+  }
+
+  // Va KHONG `filter: blur` nao tren `body`, `main` hay `.page`.
   for (const sel of ["\nbody {", "\nmain {", "\n.page {"]) {
     const a = text.indexOf(sel);
     if (a === -1) continue;
@@ -90,42 +114,92 @@ test("do mo chi ap cho LOP ANH, khong cho ca ung dung", () => {
   }
 });
 
-test("do mo tung trang dung nhu da dat", () => {
+test("de doc den tu MANG TOI CUC BO, khong tu lam mo", () => {
+  // Thu thay cho do mo: mot mang toi dat ngay sau khu lam viec. Tranh o mep
+  // trang van sac nguyen; chi vung co chu la toi hon.
   const text = css();
-  const mo = {};
-  for (const m of text.matchAll(
-    /\.page-bg-lop\[data-bg="([^"]+)"\][^\n]*--mo: ([\d.]+)px;/g,
-  )) {
-    mo[m[1]] = Number(m[2]);
-  }
-  assert.equal(Object.keys(mo).length, 8, "có tấm chưa đặt độ mờ");
-
-  // Mat tien phai SAC: tranh la thu tao ban sac.
-  for (const ten of ["home", "explore", "auth", "reader"]) {
-    assert.equal(mo[ten], 0, `${ten} bị làm mờ — phải sắc`);
-  }
-  // Trang lam viec: tranh lui ve sau de form la thu chinh.
-  for (const ten of ["studio", "write"]) {
-    assert.ok(mo[ten] >= 5 && mo[ten] <= 8, `${ten} mờ ${mo[ten]}px, cần 5–8`);
-  }
-  // Hai trang con lai chi lam mem, giu chi tiet.
-  for (const ten of ["library", "account"]) {
-    assert.ok(mo[ten] > 0 && mo[ten] <= 4, `${ten} mờ ${mo[ten]}px, cần 0–4`);
+  assert.match(text, /\.page-lam-viec::before/, "thiếu mảng tối sau khu làm việc");
+  for (const f of ["../src/app/studio/page.tsx", "../src/app/write/page.tsx"]) {
+    assert.match(read(f), /page-lam-viec/, `${f} không dùng mảng tối cục bộ`);
   }
 });
 
-test("moi tam co lam mo thi PHAI phong to theo", () => {
-  // Lam mo keo mau o bien anh vao trong va lo ra mot vien nhat quanh khung.
+test("chu nam TRUC TIEP tren tranh deu co mot cach chong nhoe", () => {
+  /*
+    Bo do mo xong thi lo ra mot loai loi: nhung khoi chu KHONG boc trong the nao
+    ca. Do duoc tren anh chup that:
+
+      - footer (`/library`, `/account`) — khong the, khong kinh, va tren tam ke
+        sach sang / troi chieu cam thi chu cap ba bien mat;
+      - dong ghi chu cuoi mot muc o `/account` — nam giua hai luoi the, do thang
+        len hoa anh dao;
+      - tieu de `/login` — trang co lop phu nhat nhat (0.30).
+
+    Ba cho, hai cach chua: MANG TOI cuc bo cho khoi lon, BONG CHU cho dong le.
+  */
   const text = css();
-  for (const m of text.matchAll(
-    /\.page-bg-lop\[data-bg="([^"]+)"\][^\n]*--mo: ([\d.]+)px; --phong: ([\d.]+);/g,
-  )) {
-    const [, ten, mo, phong] = m;
-    if (Number(mo) > 0) {
-      assert.ok(Number(phong) > 1,
-        `${ten} mờ ${mo}px nhưng không phóng to — sẽ lộ viền`);
-    }
-  }
+
+  assert.match(text, /\.site-footer::before/, "footer không có mảng tối");
+  assert.match(text, /\.auth-head::before/, "khối tiêu đề /login không có mảng tối");
+  assert.match(text, /\.page > section:not\(\.card\) > \.hint/,
+    "ghi chú cuối mục không được cấp bóng chữ");
+
+  /*
+    Mang toi cua footer phai TAN o CA HAI dau. Ban dau tri no cat thang o mep
+    duoi, va khi trang ngan hon khung nhin thi footer khong nam o day man hinh —
+    ket qua la mot dai bang den ngang giua tranh. Do la loi da do duoc mot lan.
+  */
+  const at = text.indexOf(".site-footer::before");
+  const than = text.slice(at, text.indexOf("}", at));
+  assert.match(than, /inset: 0 0 -\d+px 0/, "mảng tối footer không tràn xuống dưới");
+  const diem = [...than.matchAll(/#05070f([0-9a-f]{2})/g)].map((m) => m[1]);
+  assert.equal(diem.at(0), "00", "mảng tối footer không tan ở mép trên");
+  assert.equal(diem.at(-1), "00", "mảng tối footer không tan ở mép dưới");
+});
+
+test("tieu de trang du sang de canh tieu de chuong khong nhin nhu bi tat", () => {
+  /*
+    `.page-title` to bang gradient qua `background-clip: text`, nghia la mot
+    `text-shadow` KHONG cuu duoc no — bong ve phia sau lop gradient, khong phia
+    sau net chu. Nen thu duy nhat con lai la ban than gradient phai du sang.
+
+    Ban truoc ket o `#9aa5bd`: nua duoi net chu xam han nua tren, va canh tieu
+    de chuong (chu dac) o trang doc thi moi tieu de khac doc ra nhu dang mo dan.
+  */
+  const text = css();
+  const at = text.indexOf(".page-title {");
+  const than = text.slice(at, text.indexOf("}", at));
+  const cuoi = than.match(/linear-gradient\(180deg, var\(--text\)[^,]*, (#[0-9a-f]{6})/);
+  assert.ok(cuoi, "không tìm thấy gradient của tiêu đề trang");
+  // Do sang tuong doi cua diem cuoi. `#9aa5bd` -> 0.39; nguong 0.55 loai no ra.
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(cuoi[1].slice(i, i + 2), 16) / 255);
+  const kenh = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const L = 0.2126 * kenh(r) + 0.7152 * kenh(g) + 0.0722 * kenh(b);
+  assert.ok(L > 0.55, `điểm cuối gradient sáng ${L.toFixed(2)}, cần > 0.55`);
+});
+
+test("hang dieu huong cuon duoc o mobile thi phai NOI ra la cuon duoc", () => {
+  /*
+    O 390px hang nay cuon ngang va thanh cuon bi an, nen the cuoi ("Viết truyện")
+    bi cat giua chu. Khong co vet mo thi no doc ra la mot loi bo cuc chu khong
+    phai la "con nua o ben phai".
+  */
+  const text = css();
+  const at = text.indexOf(".nav-links {", text.indexOf("@media"));
+  const than = text.slice(at, text.indexOf("}", at));
+  assert.match(than, /overflow-x: auto/);
+  assert.match(than, /-webkit-mask-image: linear-gradient\(to right/,
+    "thiếu vệt mờ ở mép phải — cần cả tiền tố -webkit- cho Safari");
+  assert.match(than, /^\s*mask-image: linear-gradient\(to right/m,
+    "thiếu mask-image không tiền tố");
+});
+
+test("lam mo tren TAM KINH thi duoc phep — do la thu khac", () => {
+  // Phan biet nay la quan trong: `backdrop-filter` lam nen mot tam kinh, con
+  // `filter: blur` pha chinh buc tranh.
+  const text = css();
+  assert.match(text, /backdrop-filter: blur\(var\(--blur-the\)\)/,
+    "không còn bề mặt kính nào");
 });
 
 /* ============================================================ giam chuyen dong */
@@ -216,4 +290,57 @@ test("moi dau an dung currentColor de dung duoc tren moi cap mau nen", () => {
   assert.match(src, /fill="currentColor"/);
   const rule = css().match(/\.cover-sigil \{[^}]*\}/)?.[0] ?? "";
   assert.match(rule, /color:/, "dấu ấn không được cấp màu");
+});
+
+test("KHONG cung SVG nao co ban kinh nho hon nua day cung", () => {
+  /*
+    LOI DA XAY RA: dau an mat trang ve bang `M40 12 A20 ... A16 16 ... 40 52`.
+    Hai diem cach nhau 40 don vi, nhung cung thu hai khai ban kinh 16 — duong
+    kinh 32, be hon day cung. Dac ta SVG buoc trinh duyet NONG ban kinh len cho
+    vua, nen ca hai cung thanh r=20 va hinh ra mot dia tron dac.
+
+    Khong mot cong cu nao bao loi: SVG hop le, React vui ve, TypeScript vui ve,
+    ESLint vui ve. Chi mot nguoi nhin vao bia moi thay "mat trang" la mot cai dia.
+    Nen chinh phep tinh do phai thanh mot bai test.
+  */
+  const src = read("../src/components/StoryCoverFallback.tsx");
+  const loi = [];
+  for (const d of [...src.matchAll(/\sd="([^"]+)"/g)].map((m) => m[1])) {
+    // Chi doc cac lenh tuyet doi `M x y` va `A rx ry rot laf sf x y` — du cho
+    // moi duong trong tep nay, va khong bia ra mot bo phan tich SVG day du.
+    const so = d.replace(/\s+/g, " ").trim();
+    let x = 0, y = 0;
+    for (const lenh of so.match(/[MA][^MAZz]*/g) ?? []) {
+      const n = (lenh.slice(1).match(/-?[\d.]+/g) ?? []).map(Number);
+      if (lenh[0] === "M") { [x, y] = n; continue; }
+      for (let i = 0; i + 6 < n.length + 1; i += 7) {
+        const [rx, ry, , , , x2, y2] = n.slice(i, i + 7);
+        const day = Math.hypot(x2 - x, y2 - y);
+        if (day > 2 * Math.min(rx, ry) + 1e-9) {
+          loi.push(`cung tới (${x2},${y2}): dây ${day.toFixed(1)} > 2r ${2 * Math.min(rx, ry)}`);
+        }
+        x = x2; y = y2;
+      }
+    }
+  }
+  assert.deepEqual(loi, [], `cung bị nong bán kính:\n  ${loi.join("\n  ")}`);
+});
+
+test("the loi tat o /account dung icon SVG, KHONG emoji", () => {
+  /*
+    Ba the nay tung dung `✍️ 🎙 🎧`. Chung nam ngay canh `IconSparkles` va
+    `IconCompass` o dau muc — mot emoji mau giua cac icon mot net doc ra nhu rac,
+    va tren Windows/Android thi ba emoji do khong cung mot bo net nao ca.
+  */
+  const src = read("../src/app/account/page.tsx");
+  const khoi = src.slice(src.indexOf("quick-grid"), src.indexOf("</section>", src.indexOf("quick-grid")));
+  assert.ok(
+    !/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u.test(khoi),
+    "thẻ lối tắt còn emoji",
+  );
+  for (const icon of ["IconFeather", "IconMic", "IconHeadphones"]) {
+    assert.ok(khoi.includes(`<${icon} `), `thẻ lối tắt thiếu ${icon}`);
+  }
+  // Va o cha thi mau phai den tu CSS, khong tu thuoc tinh tren tung the.
+  assert.match(css(), /\.quick-icon \{[^}]*color: var\(--brand-hover\)/s);
 });

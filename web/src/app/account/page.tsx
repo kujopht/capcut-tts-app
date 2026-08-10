@@ -6,7 +6,13 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useSession } from "@/lib/session";
 import { ConfirmDialog, EmptyState, Loading, formatDate, formatNumber } from "@/components/ui";
-import { IconSparkles, IconCompass } from "@/components/Icons";
+import {
+  IconSparkles,
+  IconCompass,
+  IconFeather,
+  IconMic,
+  IconHeadphones,
+} from "@/components/Icons";
 
 const TIER_LABEL: Record<string, string> = {
   free: "Miễn phí",
@@ -79,7 +85,7 @@ export default function AccountPage() {
 
       <section className="stack" aria-labelledby="acc-su-dung">
         <h2 className="section-title section-title-icon" id="acc-su-dung">
-          <IconSparkles size={17} /> Sử dụng
+          <IconSparkles size={19} /> Sử dụng
         </h2>
         {/*
           KHONG ve thanh tien do hay cap do o day. Ca ba con so deu la so DEM,
@@ -111,26 +117,26 @@ export default function AccountPage() {
 
       <section className="stack" aria-labelledby="acc-loi-tat">
         <h2 className="section-title section-title-icon" id="acc-loi-tat">
-          <IconCompass size={17} /> Lối tắt
+          <IconCompass size={19} /> Lối tắt
         </h2>
         <div className="quick-grid">
           <Link className="quick-card" href="/write">
             <span className="quick-icon" aria-hidden="true">
-              ✍️
+              <IconFeather size={19} />
             </span>
             <strong>Khu vực tác giả</strong>
             <span className="hint">Tạo truyện, thêm chương, xuất bản.</span>
           </Link>
           <Link className="quick-card" href="/studio">
             <span className="quick-icon" aria-hidden="true">
-              🎙
+              <IconMic size={19} />
             </span>
             <strong>Audio Studio</strong>
             <span className="hint">Dán văn bản bất kỳ và tạo MP3.</span>
           </Link>
           <Link className="quick-card" href="/library">
             <span className="quick-icon" aria-hidden="true">
-              🎧
+              <IconHeadphones size={19} />
             </span>
             <strong>Thư viện audio</strong>
             <span className="hint">Mọi bản audio bạn đã tạo.</span>

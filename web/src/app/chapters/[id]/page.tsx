@@ -3,13 +3,14 @@
 /** Doc chuong: trinh phat audio o tren, noi dung o duoi. */
 
 import Link from "next/link";
-import { use, useCallback } from "react";
+import { use, useCallback, useRef } from "react";
 import { api, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
-import { AudioPlayer } from "@/components/AudioPlayer";
+import { AudioEngineProvider } from "@/components/AudioEngine";
+import { ChapterPlayer } from "@/components/ChapterPlayer";
+import { MiniPlayer } from "@/components/MiniPlayer";
 import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
-import { NovelCover } from "@/components/NovelCover";
 
 export default function ChapterPage({
   params,
@@ -18,6 +19,8 @@ export default function ChapterPage({
 }) {
   const { id } = use(params);
   const { profile } = useSession();
+  /** Trinh phat lon — thanh nho theo doi phan tu nay de biet khi nao noi len. */
+  const mocPhat = useRef<HTMLDivElement | null>(null);
 
   // Backend tra kem `novel` trong chinh phan hoi cua chuong, nen khong con
   // phai goi them mot vong `/api/novels/{id}` chi de lay ten va anh bia.
@@ -66,7 +69,7 @@ export default function ChapterPage({
 
   return (
     <div className="page">
-      <nav aria-label="Đường dẫn">
+      <nav aria-label="Đường dẫn" className="reader-crumb">
         <Link href={`/novels/${chapter.novel_id}`} className="hint crumb">
           ← {novel?.title ?? "Về truyện"}
         </Link>
@@ -87,41 +90,47 @@ export default function ChapterPage({
         cuon qua no moi toi duoc chuong.
       */}
       {audio ? (
-        <div className="stack reader-col">
-          {/* M4: audio van phat duoc va van tai duoc — chi canh bao rang no
-              duoc tao truoc lan sua noi dung gan nhat. Chu so huu duoc chi
-              duong tao lai; nguoi doc chi can biet de khong ngo ngang. */}
-          {audioOutdated ? (
-            <div className="alert alert-warn" role="status">
-              <span aria-hidden="true">⚠</span>
-              <span className="stack-2">
-                <span>
-                  Chương này đã được sửa sau khi tạo audio, nên{" "}
-                  <strong>audio có thể không còn khớp</strong> với nội dung bên
-                  dưới. Bản audio hiện tại vẫn nghe và tải được.
+        <AudioEngineProvider
+          chapterId={chapter.chapter_id}
+          title={chapter.title}
+        >
+          <div className="stack listen-col" ref={mocPhat}>
+            {/* M4: audio van phat duoc va van tai duoc — chi canh bao rang no
+                duoc tao truoc lan sua noi dung gan nhat. Chu so huu duoc chi
+                duong tao lai; nguoi doc chi can biet de khong ngo ngang. */}
+            {audioOutdated ? (
+              <div className="alert alert-warn" role="status">
+                <span aria-hidden="true">⚠</span>
+                <span className="stack-2">
+                  <span>
+                    Chương này đã được sửa sau khi tạo audio, nên{" "}
+                    <strong>audio có thể không còn khớp</strong> với nội dung
+                    bên dưới. Bản audio hiện tại vẫn nghe và tải được.
+                  </span>
+                  {/* Nut that, khong phai lien ket trong cau: vung bam du to o
+                      mobile, va M4 yeu cau duong dan RO RANG sang cho tao lai. */}
+                  {isOwner ? (
+                    <Link className="btn btn-sm" href="/write">
+                      Tạo lại audio trong khu vực tác giả
+                    </Link>
+                  ) : null}
                 </span>
-                {/* Nut that, khong phai lien ket trong cau: vung bam du to o
-                    mobile, va M4 yeu cau duong dan RO RANG sang cho tao lai. */}
-                {isOwner ? (
-                  <Link className="btn btn-sm" href="/write">
-                    Tạo lại audio trong khu vực tác giả
-                  </Link>
-                ) : null}
-              </span>
-            </div>
-          ) : null}
-          <div className="listen">
-            <NovelCover
+              </div>
+            ) : null}
+
+            <ChapterPlayer
               novelId={chapter.novel_id}
-              title={novel?.title ?? chapter.title}
+              novelTitle={novel?.title ?? chapter.title}
               coverUrl={novel?.cover_url}
-              size="thumb"
+              chapterTitle={chapter.title}
             />
-            <div className="listen-player">
-              <AudioPlayer chapterId={chapter.chapter_id} title={chapter.title} />
-            </div>
           </div>
-        </div>
+
+          {/* Thanh nho DUNG chung the `<audio>` voi trinh phat tren — xem
+              `components/AudioEngine.tsx`. No chi noi len khi trinh phat lon
+              da cuon khuat VA nguoi dung da tung bam phat. */}
+          <MiniPlayer moc={mocPhat} />
+        </AudioEngineProvider>
       ) : (
         <div className="reader-col">
           <EmptyState

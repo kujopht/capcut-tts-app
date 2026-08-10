@@ -221,12 +221,20 @@ export default function LibraryPage() {
                 key={row.job.job_id}
                 className={`audio-row${dangNghe ? " audio-row-open" : ""}`}
               >
-                <NovelCover
-                  novelId={row.novel.novel_id}
-                  title={row.fromStudio ? row.chapter.title : row.novel.title}
-                  coverUrl={row.novel.cover_url}
-                  size="thumb"
-                />
+                {/* Bia kem mot dau phat mo o goc: hang nay la mot ban AUDIO,
+                    khong phai mot truyen de doc. Dau nay lam ro dieu do ngay
+                    truoc khi mat kip doc toi nut ben phai. */}
+                <div className="audio-thumb">
+                  <NovelCover
+                    novelId={row.novel.novel_id}
+                    title={row.fromStudio ? row.chapter.title : row.novel.title}
+                    coverUrl={row.novel.cover_url}
+                    size="thumb"
+                  />
+                  <span className="audio-thumb-mark" aria-hidden="true">
+                    ▶
+                  </span>
+                </div>
 
                 <div className="audio-row-body">
                   <div className="row audio-row-tags">
@@ -273,6 +281,7 @@ export default function LibraryPage() {
                       setPlaying(dangNghe ? "" : row.chapter.chapter_id)
                     }
                   >
+                    <span aria-hidden="true">{dangNghe ? "✕" : "▶"}</span>
                     {dangNghe ? "Đóng" : "Nghe"}
                   </button>
                 </div>

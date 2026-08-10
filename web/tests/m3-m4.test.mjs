@@ -201,9 +201,10 @@ test("M4: trang doc chuong canh bao ngay tren trinh phat", () => {
   assert.match(src, /alert alert-warn/);
   assert.match(src, /audio có thể không còn khớp/);
   assert.match(src, /vẫn nghe và tải được/, "phai noi ro audio van dung duoc");
-  // Canh bao phai o TRUOC trinh phat trong DOM
+  // Canh bao phai o TRUOC trinh phat trong DOM. Trinh phat cua trang doc gio
+  // la `<ChapterPlayer>` — rang buoc khong doi, chi doi ten thanh phan.
   assert.ok(
-    src.indexOf("alert alert-warn") < src.indexOf("<AudioPlayer"),
+    src.indexOf("alert alert-warn") < src.indexOf("<ChapterPlayer"),
     "canh bao phai nam tren trinh phat",
   );
 });

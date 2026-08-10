@@ -308,12 +308,21 @@ test("nut bam moi du 44px o mobile", () => {
 
 /* ========================================================= doc duoc */
 
-test("cot chu khi doc chuong hep lai theo KY TU, khong theo pixel", () => {
-  // `ch` co gian theo co chu, nen o mobile cot tu hep lai thay vi bi ep o mot
-  // con so cung.
+test("cot chu khi doc chuong co chan tren, va CA trang dat giua", () => {
+  /*
+    Ban dau cot chu dat theo `ch` (68ch ~ 560px), la nguong doc de kinh dien.
+    Chu du an yeu cau 700-800px, nen gio la 720px — rong hon mot chut nhung
+    van co chan tren, va chuong fanfic thi doan ngan.
+
+    Phan quan trong hon la CA trang doc dat giua: truoc day moi khoi bam le
+    trai cua khung 1180px va ben phai con mot mang trong rong bang ca cot chu.
+  */
   const doc = rule(".reader");
-  assert.match(doc, /max-width: \d+ch/);
+  const px = Number(doc.match(/max-width: (\d+)px/)?.[1] ?? 0);
+  assert.ok(px >= 700 && px <= 800, `cột chữ ${px || "không đặt"}px, cần 700–800`);
   assert.match(rule(".reader .prose"), /line-height: 1\.9/);
+  assert.match(css(), /\.reader-crumb \{ margin-inline: auto; \}|margin-inline: auto;/,
+    "trang đọc không được căn giữa");
 });
 
 test("truyen dang chon co tin hieu NGOAI mau sac", () => {

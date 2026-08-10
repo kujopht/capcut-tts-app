@@ -614,10 +614,10 @@ test("bia that nam tren, bia du phong nam duoi", () => {
 
 test("anh bia duoc dung o ca bon noi", () => {
   for (const f of [
-    "../src/app/novels/[id]/page.tsx",   // chi tiet truyen
-    "../src/app/chapters/[id]/page.tsx", // luong nghe
-    "../src/app/library/page.tsx",       // thu vien
-    "../src/components/StoryCard.tsx",   // the truyen dung chung
+    "../src/app/novels/[id]/page.tsx",     // chi tiet truyen
+    "../src/components/ChapterPlayer.tsx", // luong nghe o trang doc chuong
+    "../src/app/library/page.tsx",         // thu vien
+    "../src/components/StoryCard.tsx",     // the truyen dung chung
   ]) {
     assert.match(read(f), /<NovelCover/, `${f} chua dung anh bia`);
   }
@@ -754,11 +754,12 @@ test("moi lop bam duoc deu cao it nhat 44px o mobile", () => {
 test("nut co CHU dung min-height chu khong phai height co dinh", () => {
   // `height: 44px` se cat cut nut co chu dai xuong hai dong.
   //
-  // Tru `.btn-icon`: nut chi chua mot mui nhon, vuong 44x44 la dung y muon va
-  // khong co chu nao de tran ra. Bo dong dinh nghia no ra roi moi kiem.
+  // Tru `.btn-icon` va `.play-btn-sm`: ca hai chi chua MOT ky hieu, vuong
+  // 44x44 la dung y muon va khong co chu nao de tran ra. Bo dong dinh nghia
+  // chung ra roi moi kiem.
   const block = mobileBlock()
     .split("\n")
-    .filter((line) => !line.includes(".btn-icon"))
+    .filter((line) => !line.includes(".btn-icon") && !line.includes(".play-btn-sm"))
     .join("\n");
   assert.ok(
     !/[^-]height:\s*44px/.test(block.replace(/min-height/g, "MIN")),

@@ -1561,6 +1561,25 @@ button, input, select, textarea {
   background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
 }
 
+/* Bia kem dau phat o goc — hang nay la mot ban AUDIO, khong phai truyen de doc. */
+.audio-thumb { position: relative; flex: 0 0 auto; }
+.audio-thumb-mark {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand), var(--brand-deep));
+  color: #fff;
+  font-size: 9px;
+  border: 2px solid var(--bg-1);
+  box-shadow: 0 2px 8px #8b6cff59;
+}
+.audio-row-open .audio-thumb-mark { background: var(--grad-brand); }
+
 .audio-row-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .audio-row-tags { gap: var(--s2); }
 .audio-row-title {
@@ -1822,6 +1841,246 @@ button, input, select, textarea {
 .list-main { flex: 1; min-width: 0; }
 .list-title { font-weight: 600; font-size: var(--t-sm); }
 
+/* ========================================================== khu vuc nghe */
+
+/*
+  Khoi nghe o dau trang chuong.
+
+  Ban truoc la mot the `<audio controls>` mac dinh trong mot hop nho: no chay,
+  nhung khong noi duoc dang nghe CAI GI, va trong nhu mot tien ich cam vao chu
+  khong phai mot phan cua truyen.
+
+  Khoi nay RONG hon cot chu — do la co y. Cot chu hep de doc de; khoi nghe thi
+  la mot cai the, va mot cai the hep bang cot chu trong nhu bi ep.
+*/
+.listen-col { max-width: 820px; }
+
+.listen-hero {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: center;
+  padding: var(--s5);
+  border: 1px solid var(--brand-line);
+  border-radius: var(--r4);
+  background:
+    radial-gradient(620px 260px at 0% 0%, #8b6cff26, transparent 70%),
+    linear-gradient(150deg, var(--bg-2), var(--bg-1));
+  box-shadow: var(--shadow-2), var(--edge);
+}
+.listen-hero-cover .cover {
+  border-radius: var(--r3);
+  border-bottom: 0;
+  box-shadow: var(--shadow-2);
+}
+.listen-hero-body { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.listen-hero-title {
+  font-size: var(--t-xl);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+.listen-hero-novel { margin-bottom: var(--s2); }
+
+/* ---------------------------------------------------------- nut phat lon */
+
+/*
+  Nut phat la thu TO NHAT va SANG NHAT trong khoi. Do la viec chinh cua trang
+  nay, va mot nut chinh 38px nam canh mot thanh thoi gian dai thi khong doc ra
+  duoc dieu do.
+*/
+.play-btn {
+  width: 62px;
+  height: 62px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand), var(--brand-deep));
+  color: #fff;
+  cursor: pointer;
+  box-shadow: var(--lift-brand), inset 0 1px 0 #ffffff2e;
+  transition: transform 90ms var(--ease), box-shadow var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+.play-btn:hover:not(:disabled) { box-shadow: 0 12px 34px #8b6cff52, inset 0 1px 0 #ffffff33; }
+.play-btn:active:not(:disabled) { transform: scale(0.94); }
+.play-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+.play-btn-sm { width: 40px; height: 40px; }
+/* Chu "▶" cua font khong can quang hoc — no lech sang trai trong vong tron. */
+.play-glyph { font-size: 19px; line-height: 1; transform: translateX(1px); }
+.play-btn-sm .play-glyph { font-size: 13px; }
+
+/* -------------------------------------------------------- thanh thoi gian */
+
+.listen-controls { display: flex; align-items: center; gap: var(--s4); }
+.listen-track { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.listen-times {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--t-xs);
+}
+
+/*
+  `<input type=range>` chu khong phai mot thanh tu ve. Trinh duyet cho san:
+  mui ten tua duoc, Home/End nhay dau/cuoi, trinh doc man hinh doc ra dung la
+  mot thanh truot. Mot `<div onClick>` khong co thu nao trong so do.
+*/
+.seek, .vol {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+/*
+  Phan DA phat duoc to mau, phan con lai de toi.
+
+  Ty le den tu bien `--p` do component dat — cung cach `<ProgressBar>` dat be
+  rong. Khong co no thi chi con moi nut truot bao vi tri, va o mot thanh dai
+  600px thi mot cham 15px la tin hieu qua yeu.
+*/
+.seek::-webkit-slider-runnable-track,
+.vol::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-soft);
+  background:
+    linear-gradient(90deg, var(--brand) var(--p, 0%), #0b0d14 var(--p, 0%));
+}
+.seek::-moz-range-track,
+.vol::-moz-range-track {
+  height: 6px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-soft);
+  background:
+    linear-gradient(90deg, var(--brand) var(--p, 0%), #0b0d14 var(--p, 0%));
+}
+.seek::-webkit-slider-thumb,
+.vol::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--brand-hover);
+  border: 2px solid var(--bg);
+  box-shadow: 0 2px 8px #8b6cff59;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.seek::-moz-range-thumb,
+.vol::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--brand-hover);
+  border: 2px solid var(--bg);
+  box-shadow: 0 2px 8px #8b6cff59;
+}
+.seek:hover::-webkit-slider-thumb,
+.vol:hover::-webkit-slider-thumb { transform: scale(1.2); }
+.seek:disabled, .vol:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ------------------------------------------------------- dieu khien phu */
+
+.listen-extra {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  padding-top: var(--s2);
+}
+.listen-speed, .listen-vol { display: inline-flex; align-items: center; gap: var(--s2); }
+.listen-vol .vol { width: 96px; }
+.select-mini {
+  width: auto;
+  min-height: var(--h-sm);
+  padding: 3px 30px 3px 10px;
+  font-size: var(--t-xs);
+  background-position: calc(100% - 14px) 52%, calc(100% - 9px) 52%;
+}
+
+/* ============================================================ thanh nho */
+
+/*
+  Dinh o DAY man hinh. Khong che chu: no chi cao ~64px va noi len sau khi trinh
+  phat lon da cuon khuat, luc do nguoi dung dang doc chu khong con nhin trinh
+  phat.
+
+  `padding-bottom` cong them vung an toan cua may co thanh cu chi — khong co no
+  thi nut phat nam duoi vach vuot cua iPhone.
+*/
+.mini {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 30px #00000059;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  animation: mini-len var(--dur) var(--ease);
+}
+@keyframes mini-len { from { transform: translateY(100%); } to { transform: none; } }
+
+.mini-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding-top: var(--s3);
+  padding-bottom: var(--s3);
+}
+.mini-title {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  max-width: 32ch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.mini-title:hover { color: var(--brand-hover); }
+.mini-title .truncate { max-width: 100%; }
+.mini-time { font-size: var(--t-xs); font-weight: 500; }
+.mini-seek { flex: 1; min-width: 0; }
+
+/* Vach tien do sat mep tren — doc duoc ca khi thanh truot bi thu hep. */
+.mini-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ffffff14;
+}
+.mini-bar-fill {
+  height: 100%;
+  background: var(--grad-brand);
+  transition: width var(--dur) linear;
+}
+
+/*
+  Chua cho o cuoi trang khi thanh nho dang hien.
+
+  `.mini` la `position: fixed` nen khong chiem cho trong luong. Khong chua thi
+  no de len phan cuoi trang va dong cuoi chan trang bi khuat vinh vien du da
+  cuon het co. Lop nay do `<MiniPlayer>` bat/tat.
+*/
+body.co-mini { padding-bottom: 74px; }
+
 /* ============================================================ doc chuong */
 
 /*
@@ -1831,8 +2090,43 @@ button, input, select, textarea {
   sau ma khong lac. Ca be rong 1180px thi doc mot chuong dai rat met — day la
   ly do bao giay in mot cot hep chu khong tran ca kho giay.
 */
+/*
+  CA trang doc di theo mot cot dat GIUA.
+
+  Truoc day moi khoi bam le trai cua khung 1180px, nen ben phai con mot mang
+  trong rong bang ca cot chu — trang trong nhu bi lech. Dat giua thi khoang
+  trong chia deu hai ben va doc ra la mot trang bao, khong phai mot loi bo cuc.
+*/
+/*
+  `width: 100%` la BAT BUOC o day, khong phai thua.
+
+  `.page` la flex column. Mot flex item mac dinh duoc keo cang het be ngang
+  (`align-items: stretch`) — NHUNG dat `margin-inline: auto` la mat luon: item
+  chuyen sang co lai vua noi dung roi moi can giua. DO DUOC: dau chuong tut con
+  493px va loi ra con 341px, ca hai tu can giua trong khi chu ben trong van can
+  trai. `width: 100%` tra lai be rong cot, con `margin-inline` chi con lam mot
+  viec la dat cot do vao giua.
+*/
+.reader,
+.reader-head,
+.reader-col,
+.reader-foot,
+.listen-col,
+.reader-crumb {
+  width: 100%;
+  margin-inline: auto;
+}
+
+/*
+  720px cho cot chu.
+
+  Nguong doc de kinh dien la 45-75 ky tu mot dong (~560px o co chu nay). 720px
+  rong hon mot chut — khoang 88 ky tu — va do la con so chu du an yeu cau. Van
+  du hep de mat khong lac khi xuong dong, va chuong fanfic thi doan ngan nen
+  cai gia phai tra thap hon van xuoi dai.
+*/
 .reader {
-  max-width: 68ch;
+  max-width: 720px;
   padding: var(--s6) 0;
 }
 .reader .prose {
@@ -1843,11 +2137,12 @@ button, input, select, textarea {
      man hinh hep. */
   overflow-wrap: break-word;
 }
-.reader-head { max-width: 68ch; }
-/* Moi khoi cua trang doc di theo CUNG mot cot: dau chuong, khu nghe, chu, va
-   loi ra. Mot khoi rong het trang canh mot cot chu hep trong nhu bi lac. */
-.reader-col { max-width: 68ch; }
-.reader-foot { max-width: 68ch; }
+/* Dau chuong, chu va loi ra dung chung mot be rong; khu nghe rong hon mot
+   chut vi no la mot cai the, va mot cai the hep bang cot chu trong nhu bi ep. */
+.reader-head,
+.reader-col,
+.reader-foot,
+.reader-crumb { max-width: 720px; }
 /* Doan dau tien khong thut dong; cac doan sau cach nhau bang khoang trang chu
    khong phai thut — de doc hon tren man hinh. */
 
@@ -2219,10 +2514,40 @@ button, input, select, textarea {
   .novel-head-cover { max-width: none; }
   .novel-head-actions .btn { flex: 1 1 auto; }
 
-  /* Doc chuong: cot chu da hep san boi `ch`, chi can bo bot khoang tren duoi. */
+  /* Doc chuong: cot chu da bi khung mang hep lai roi, chi bo bot khoang. */
   .reader { padding: var(--s4) 0; }
   .reader .prose { font-size: var(--t-base); line-height: 1.85; }
   .reader-foot .btn { flex: 1 1 auto; }
+
+  /* --- khu nghe tren dien thoai ------------------------------------------
+     Bia nam TREN, chu va dieu khien o duoi. Hai cot o 375px thi bia con hon
+     100px va thanh thoi gian con vai chuc pixel — ca hai deu vo dung. */
+  .listen-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s4);
+    padding: var(--s4);
+  }
+  /* Bia khong cao qua mot phan ba man hinh: nguoi dung vao day de NGHE, va
+     nut phat phai o trong tam voi ngay khi mo trang. */
+  .listen-hero-cover { max-width: 180px; }
+  .listen-hero-title { font-size: var(--t-lg); }
+
+  /* Nut phat giu nguyen co lon — no la viec chinh cua trang. */
+  .listen-controls { gap: var(--s3); }
+  .listen-extra { gap: var(--s3); row-gap: var(--s2); }
+  .listen-vol { flex: 1 1 auto; }
+  .listen-vol .vol { width: auto; flex: 1; }
+
+  /* Thanh nho: ten va thoi gian mot ben, thanh truot xuong dong rieng — ba
+     thu tren mot hang o 375px thi thanh truot con khong bam duoc. */
+  .mini-wrap { flex-wrap: wrap; gap: var(--s3); }
+  /* 40px la duoi nguong cham 44px — do duoc tren dien thoai. */
+  .play-btn-sm { width: 44px; height: 44px; }
+  /* Thanh nho o day cao hon vi thanh truot xuong dong rieng — chua them cho
+     cho khop, neu khong chan trang van bi khuat. */
+  body.co-mini { padding-bottom: 104px; }
+  .mini-title { flex: 1; max-width: none; }
+  .mini-seek { flex: 1 0 100%; }
 
   .filter-bar { padding: var(--s3); }
   .quick-grid { grid-template-columns: minmax(0, 1fr); }

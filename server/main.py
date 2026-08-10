@@ -39,6 +39,14 @@ from server.adapters import (
     build_storage,
 )
 from server.config import get_settings
+from server.creator import (
+    AuthorStateError,
+    RANK_TIERS,
+    UsernameError,
+    UsernameTaken,
+    suggest_username,
+)
+from server.creator_service import CreatorService
 from server.domain import (
     AudioStamp,
     AudioTrack,
@@ -71,6 +79,14 @@ app.add_middleware(
 identity = build_identity(settings)
 storage = build_storage(settings)
 store = build_metadata_store(settings)
+
+#: Tang service cua tac gia. MOT the hien, dung chung identity va store voi
+#: cac route khac — khong co duong ghi thu hai vao trang thai tac gia.
+#:
+#: Cac ham DUYET/TU CHOI/TREO cua no KHONG co route nao goi toi. Xem ghi chu o
+#: dau `server/creator_service.py`: du an chua co co che phan quyen quan tri,
+#: va mot endpoint duyet khong duoc bao ve la mot cai cong mo.
+creators = CreatorService(identity, store)
 
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
@@ -936,7 +952,21 @@ def publish_novel(novel_id: str, profile: Profile = Depends(current_profile)) ->
     Chu so huu LUON lay tu token da xac minh, khong bao gio tu body.
 
     IDEMPOTENT: publish lai novel da `published` van tra 200 voi cung novel.
+
+    CONG CHAN: chi tac gia da duyet duoc xuat ban. Tao va sua ban nhap thi ai
+    cung lam duoc — cong chi nam o day, khong o cac route khac. Tra 403 kem
+    thong diep dung trang thai de giao dien mo dung luong tiep theo (dang ky /
+    dang cho / gui lai / bi treo) thay vi hien mot loi chung.
+
+    Cong nay chi co hieu luc khi `FAS_AUTHOR_GATE` duoc bat, va no MAC DINH TAT.
+    Ly do nam o `Settings.author_gate_enabled`: bat truoc khi chay migration
+    grandfather la khoa toan bo tac gia hien co ra khoi cong viec cua ho.
     """
+    if settings.author_gate_enabled:
+        try:
+            creators.assert_can_publish(profile)
+        except AuthorStateError as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     try:
         novel = store.publish_novel(novel_id, profile.user_id)
     except NotFoundError as exc:
@@ -1865,3 +1895,182 @@ def stream_audio(
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     return Response(content=data, media_type="audio/mpeg")
+
+
+# -----------------------------------------------------------------------------
+# Tac gia: don, ho so cong khai, tim kiem, uy tin
+# -----------------------------------------------------------------------------
+#
+# KHONG co route DUYET / TU CHOI / TREO o day, va do la mot quyet dinh an toan
+# chu khong phai mot viec con thieu. Du an chua co co che phan quyen quan tri:
+# khong vai tro, khong bang admin, khong xac thuc hai buoc. Mo mot endpoint
+# duyet ma khong co cai do la tang mot cai cong — bat ky ai doan duoc duong dan
+# deu tu phong minh lam tac gia.
+#
+# Cac thao tac do nam o `CreatorService`, duoc kiem thu day du, va cho trang
+# quan tri. Xem `docs/AUTHOR_RANK.md` muc "Viec con lai".
+
+
+class UsernameIn(BaseModel):
+    username: Annotated[str, StringConstraints(min_length=1, max_length=40)]
+
+
+class BioIn(BaseModel):
+    bio: Annotated[str, StringConstraints(max_length=400)] = ""
+
+
+class ApplyIn(BaseModel):
+    pen_name: Annotated[str, StringConstraints(min_length=1, max_length=60)]
+    bio: Annotated[str, StringConstraints(max_length=400)] = ""
+    genres: List[Annotated[str, StringConstraints(max_length=40)]] = Field(
+        default_factory=list)
+    intro: Annotated[str, StringConstraints(min_length=1, max_length=1000)]
+    accepted_rules: bool = False
+
+
+class ListenIn(BaseModel):
+    """
+    Bao cao mot lan nghe.
+
+    `listened_seconds` do TRINH DUYET gui, nen no KHONG duoc tin: may chu con ap
+    nguong, chan tu nghe, va chan tinh lai trong 24 gio. Mot client noi doi "toi
+    nghe 9999 giay" cung chi doi duoc mot lan tinh moi 24 gio cho moi chuong —
+    va do la tran ma he thong chap nhan o V1.
+    """
+
+    chapter_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    listened_seconds: float = Field(ge=0, le=86_400)
+
+
+@app.get("/api/creator/me")
+def creator_me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Trang thai tac gia cua chinh minh, trong MOT lan goi."""
+    data = creators.creator_state(profile)
+    if not data["username"]:
+        # Mot GOI Y de dien san vao o nhap, khong phai mot cai ten duoc gan tu
+        # dong. Nguoi dung con sua duoc truoc khi no thanh cong khai.
+        data["username_suggestion"] = suggest_username(
+            profile.display_name, profile.email, identity.all_usernames())
+    return data
+
+
+@app.get("/api/creator/ranks")
+def creator_ranks() -> Dict[str, Any]:
+    """
+    Bang hang, de giao dien ve duoc thang bac ma khong nhung nguong vao code.
+
+    Nguong la CHINH SACH va no se doi. Mot ban frontend cu dang chay trong tab
+    cua ai do khong duoc phep ve mot hang khac voi hang may chu cong nhan.
+    """
+    return {"tiers": [{"key": t.key, "title": t.title,
+                       "min_listens": t.min_listens, "level": t.level}
+                      for t in RANK_TIERS]}
+
+
+@app.put("/api/creator/username")
+def set_username(payload: UsernameIn,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    try:
+        updated = creators.set_username(profile, payload.username)
+    except UsernameTaken as exc:
+        # Phai bat TRUOC `UsernameError`: `UsernameTaken` la con cua no.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except UsernameError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except AuthError as exc:
+        # Ban mock nem AuthError khi index duy nhat cua kho chan — cung mot nghia.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"profile": updated.to_dict()}
+
+
+@app.put("/api/creator/bio")
+def set_bio(payload: BioIn,
+            profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"profile": creators.set_bio(profile, payload.bio).to_dict()}
+
+
+@app.post("/api/creator/apply", status_code=status.HTTP_201_CREATED)
+def apply_author(payload: ApplyIn,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    try:
+        app_row = creators.apply(
+            profile,
+            pen_name=payload.pen_name,
+            bio=payload.bio,
+            genres=payload.genres,
+            intro=payload.intro,
+            accepted_rules=payload.accepted_rules,
+        )
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_public_dict(),
+            "author_status": app_row.status.value}
+
+
+@app.get("/api/users/{username}")
+def public_profile_route(username: str) -> Dict[str, Any]:
+    """
+    Trang cong khai cua mot nguoi dung. KHONG can dang nhap.
+
+    404 cho ca hai truong hop "khong ton tai" va "co nhung chua chon username":
+    phan biet ra thi thanh mot cach do xem ai da dang ky.
+    """
+    data = creators.public_profile_by_username(username)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    return {"profile": data}
+
+
+@app.get("/api/search/people")
+def search_people(q: str = "", kind: str = "users",
+                  limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+    """
+    Tim nguoi. `kind=authors` thi CHI tac gia da duyet.
+
+    Tim o MAY CHU: tai het nguoi dung ve roi loc o trinh duyet la vua cham vua
+    la mot cach tai ca danh ba nguoi dung ve may khach.
+    """
+    limit = max(1, min(50, limit))
+    offset = max(0, offset)
+    return creators.search_people(q, authors_only=(kind == "authors"),
+                                  limit=limit, offset=offset)
+
+
+@app.post("/api/listens")
+def record_listen(payload: ListenIn,
+                  authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """
+    Ghi nhan mot lan nghe. May chu la nguon su that cho uy tin tac gia.
+
+    KHONG bat buoc dang nhap: khach an danh van goi duoc, va nhan lai
+    `credited=false` voi ly do. Tra 401 se lam trinh phat cua khach hien loi cho
+    mot viec ho khong lam gi sai.
+
+    Tra ve DUY NHAT `credited` va `reason` — khong tra ve so lan nghe moi cua tac
+    gia: nguoi nghe khong can biet, va tra ve thi thanh mot cach dem uy tin cua
+    nguoi khac bang cach bam Phat.
+    """
+    listener: Optional[str] = None
+    try:
+        listener = current_profile(authorization).user_id
+    except HTTPException:
+        listener = None
+
+    try:
+        chapter = store.get_chapter(payload.chapter_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    # Do dai lay tu TRACK o may chu, khong tu client: nguong tinh theo ti le cho
+    # chuong ngan phu thuoc vao no, va de client tu khai do dai la mo mot cach
+    # ha nguong xuong con vai giay.
+    track = store.track_for_chapter(payload.chapter_id)
+    duration = float(track.duration_seconds) if track else 0.0
+
+    return creators.record_listen(
+        listener_id=listener,
+        chapter_id=payload.chapter_id,
+        author_id=chapter.owner_id,
+        listened_seconds=float(payload.listened_seconds),
+        duration_seconds=duration,
+    )

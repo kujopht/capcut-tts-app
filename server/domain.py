@@ -47,6 +47,22 @@ class Tier(str, Enum):
     ULTRA = "ultra"
 
 
+class AuthorStatus(str, Enum):
+    """
+    Duoc phep XUAT BAN cong khai hay khong. Day la moderation, KHONG phai uy tin.
+
+    `none` la mac dinh cua moi nguoi dung moi: ho van viet va sua ban nhap duoc,
+    chi khong dua truyen ra cong khai duoc. Xem `server/creator.py` de biet bang
+    cac buoc chuyen hop le va vi sao khong co buoc `none -> approved`.
+    """
+
+    NONE = "none"
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SUSPENDED = "suspended"
+
+
 class JobStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -73,8 +89,22 @@ class Profile:
     listened_minutes: int = 0
     tts_characters_used: int = 0
     created_at: str = field(default_factory=now_iso)
+    #: Ten CONG KHAI, dang chuan (xem `creator.validate_username`). Chuoi rong =
+    #: chua chon. Nguoi chua chon thi KHONG co trang cong khai — ta khong tu gan
+    #: cho ho mot cai ten lay tu email.
+    username: str = ""
+    #: Gioi thieu ngan, hien tren trang cong khai.
+    bio: str = ""
+    #: Moderation. Xem `AuthorStatus`.
+    author_status: AuthorStatus = AuthorStatus.NONE
 
     def to_dict(self) -> Dict[str, Any]:
+        """
+        Hinh dang RIENG TU — chi tra ve cho chinh chu qua `/api/auth/me`.
+
+        Co `email` va `author_status` o day. Ban CONG KHAI di qua
+        `creator.public_profile()`, va do la mot danh sach cho phep rieng.
+        """
         return {
             "user_id": self.user_id,
             "email": self.email,
@@ -82,6 +112,131 @@ class Profile:
             "tier": self.tier.value,
             "listened_minutes": self.listened_minutes,
             "tts_characters_used": self.tts_characters_used,
+            "created_at": self.created_at,
+            "username": self.username,
+            "bio": self.bio,
+            "author_status": self.author_status.value,
+        }
+
+
+@dataclass
+class AuthorApplication:
+    """
+    Don xin lam tac gia.
+
+    MOT don moi nguoi dung: khi nop lai sau khi bi tu choi, ban ghi nay duoc ghi
+    de va `attempts` tang len. Ly do khong luu lich su nhieu don: giai doan nay
+    khong co trang quan tri de doc lich su, va mot bang cu lon dan ma khong ai
+    doc la mot bang no ky thuat.
+
+    `reviewer_note` la ghi chu cua nguoi duyet. No CO hien cho nguoi nop (ho can
+    biet vi sao bi tu choi de sua), nen dung viet gi vao day ma khong muon ho doc.
+    """
+
+    user_id: str
+    pen_name: str
+    bio: str = ""
+    genres: List[str] = field(default_factory=list)
+    intro: str = ""
+    #: Da doc va dong y quy dinh xuat ban. Khong tich thi khong nop duoc.
+    accepted_rules: bool = False
+    status: AuthorStatus = AuthorStatus.PENDING
+    reviewer_note: str = ""
+    attempts: int = 1
+    application_id: str = field(default_factory=lambda: new_id("app"))
+    created_at: str = field(default_factory=now_iso)
+    updated_at: str = field(default_factory=now_iso)
+    #: Luc nguoi duyet ra quyet dinh. Dung de tinh thoi gian cho nop lai.
+    decided_at: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "application_id": self.application_id,
+            "user_id": self.user_id,
+            "pen_name": self.pen_name,
+            "bio": self.bio,
+            "genres": list(self.genres),
+            "intro": self.intro,
+            "accepted_rules": self.accepted_rules,
+            "status": self.status.value,
+            "reviewer_note": self.reviewer_note,
+            "attempts": self.attempts,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "decided_at": self.decided_at,
+        }
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        """
+        Ban tra cho CHINH CHU don.
+
+        Bo `user_id` va `application_id`: nguoi nop khong can hai khoa noi bo do
+        de lam gi, va moi khoa lo ra la mot thu ai do co the thu doan.
+        """
+        data = self.to_dict()
+        for khoa in ("user_id", "application_id"):
+            data.pop(khoa, None)
+        return data
+
+
+@dataclass
+class AuthorStats:
+    """
+    Ban TONG HOP cua uy tin mot tac gia.
+
+    Vi sao can mot bang rieng thay vi dem lai tu bang su kien moi lan co ai mo
+    trang: dem lai la mot phep quet toan bang cho MOI lan hien mot huy hieu. Voi
+    mot tac gia co mot van lan nghe, mot trang tim kiem hien muoi tac gia se
+    thanh muoi phep quet. Bang nay duoc CONG THEM mot don vi moi khi co mot lan
+    nghe hop le, nen doc no la mot lan doc mot hang.
+
+    Doi lai, no co the LECH neu mot buoc cong bi mat. `scripts/` co san mot lenh
+    dung lai tu bang su kien — xem `docs/AUTHOR_RANK.md`.
+    """
+
+    user_id: str
+    qualified_listens: int = 0
+    published_novels: int = 0
+    updated_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "user_id": self.user_id,
+            "qualified_listens": self.qualified_listens,
+            "published_novels": self.published_novels,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class ListenCredit:
+    """
+    MOT lan nghe hop le da duoc tinh.
+
+    `credit_id` la khoa TAT DINH tu (nguoi nghe, chuong, ngay UTC) — xem
+    `creator.credit_key`. Chinh tinh duy nhat cua khoa la co che chong dua: hai
+    request cung luc thi mot cai thang, cai kia va vao xung dot khoa.
+
+    Bang nay la NGUON su that de dung lai `AuthorStats` khi can.
+    """
+
+    listener_id: str
+    author_id: str
+    chapter_id: str
+    #: So thu tu ngay UTC — xem `creator.dedupe_day_bucket`.
+    day_bucket: int = 0
+    listened_seconds: float = 0.0
+    credit_id: str = ""
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "credit_id": self.credit_id,
+            "listener_id": self.listener_id,
+            "author_id": self.author_id,
+            "chapter_id": self.chapter_id,
+            "day_bucket": self.day_bucket,
+            "listened_seconds": self.listened_seconds,
             "created_at": self.created_at,
         }
 

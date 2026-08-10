@@ -42,8 +42,83 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("listened_minutes", "integer", False, None),
             ("tts_characters_used", "integer", False, None),
             ("created_at", "datetime", True, None),
+            # --- danh tinh CONG KHAI + moderation tac gia (V2) ----------------
+            # Ba thuoc tinh nay CHUA duoc ap len production. Chung o day de
+            # `--dry-run` in ra dung ke hoach, va de mot lan chay script sau nay
+            # tao chung. Ma nguon KHONG phu thuoc vao viec chung da ton tai:
+            # `AppwriteIdentityAdapter` loc theo thuoc tinh that su co, nen
+            # trien khai code truoc schema chi lam mat tinh nang, khong lam vo
+            # duong dang ky.
+            ("username", "string", False, 24),
+            ("bio", "string", False, 400),
+            ("author_status", "enum", False,
+             ["none", "pending", "approved", "rejected", "suspended"]),
         ],
-        "indexes": [("email_unique", "unique", ["email"])],
+        "indexes": [
+            ("email_unique", "unique", ["email"]),
+            # Rang buoc THAT cho tinh duy nhat cua username. Phep kiem o tang
+            # service la de tra ve thong bao doc duoc; cai chan duoc mot cuoc dua
+            # giua hai request la index nay.
+            ("username_unique", "unique", ["username"]),
+        ],
+    },
+    # --- V2: tac gia ---------------------------------------------------------
+    # CHUA ap len production. Xem `docs/AUTHOR_RANK.md` muc "Ke hoach migration".
+    "author_applications": {
+        "name": "Author applications",
+        "attributes": [
+            ("application_id", "string", True, 64),
+            # MOT don moi nguoi dung — nop lai thi ghi de. `rowId` la `user_id`.
+            ("user_id", "string", True, 64),
+            ("pen_name", "string", True, 60),
+            ("bio", "string", False, 400),
+            ("genres", "string", False, 40),        # mang
+            ("intro", "string", False, 1000),
+            ("accepted_rules", "boolean", False, None),
+            ("status", "enum", True,
+             ["none", "pending", "approved", "rejected", "suspended"]),
+            ("reviewer_note", "string", False, 1000),
+            ("attempts", "integer", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+            ("decided_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("user_unique", "unique", ["user_id"]),
+            # Cho trang quan tri: liet ke don dang cho, cu lau nhat truoc.
+            ("status_created_idx", "key", ["status", "created_at"]),
+        ],
+    },
+    "author_stats": {
+        "name": "Author stats",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("qualified_listens", "integer", False, None),
+            ("published_novels", "integer", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        # `rowId` la `user_id`, nen mot ban tong hop moi tac gia.
+        "indexes": [("user_unique", "unique", ["user_id"])],
+    },
+    "listen_credits": {
+        "name": "Listen credits",
+        "attributes": [
+            ("credit_id", "string", True, 64),
+            ("listener_id", "string", True, 64),
+            ("author_id", "string", True, 64),
+            ("chapter_id", "string", True, 64),
+            ("day_bucket", "integer", False, None),
+            ("listened_seconds", "double", False, None),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # Chong farm: `rowId` la khoa TAT DINH tu (nguoi nghe, chuong, ngay
+            # UTC) — xem `creator.credit_key`. Chinh tinh duy nhat cua rowId la
+            # co che chan dua, y nhu `job_locks`.
+            ("listener_chapter_idx", "key", ["listener_id", "chapter_id"]),
+            # Dem lai de doi soat `author_stats` khi nghi no lech.
+            ("author_idx", "key", ["author_id"]),
+        ],
     },
     "novels": {
         "name": "Novels",
@@ -187,6 +262,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
     },
 }
 
+#: Cac thuoc tinh la MANG. Appwrite doi co `array: true` luc tao; thieu no thi
+#: thuoc tinh thanh chuoi don va buoc ghi dau tien bi tu choi.
+ARRAY_ATTRIBUTES = frozenset({"tags", "genres"})
+
 #: Quyen o muc COLLECTION: khong cap gi cho client.
 #:
 #: Truoc day day la `['create("users")']`, tuc la BAT KY nguoi dung da dang
@@ -309,12 +388,14 @@ class Setup:
         payload: Dict[str, Any] = {"key": key, "required": required}
         if kind == "string":
             path, payload["size"] = f"{base}/attributes/string", extra
-            if key == "tags":
+            if key in ARRAY_ATTRIBUTES:
                 payload["array"] = True
         elif kind == "email":
             path = f"{base}/attributes/email"
         elif kind == "enum":
             path, payload["elements"] = f"{base}/attributes/enum", extra
+        elif kind == "boolean":
+            path = f"{base}/attributes/boolean"
         elif kind == "integer":
             path = f"{base}/attributes/integer"
         elif kind == "double":

@@ -179,6 +179,22 @@ class Settings:
     #: "khong ai thay" thi cung khong ai theo doi khi no hong.
     facebook_login_enabled: bool = False
 
+    #: Co bat CONG CHAN XUAT BAN theo trang thai tac gia. Doc tu `FAS_AUTHOR_GATE`.
+    #:
+    #: MAC DINH TAT, va day khong phai su rut re — day la thu tu trien khai bat
+    #: buoc. Moi ho so dang ton tai deu co `author_status = "none"`, ke ca nhung
+    #: nguoi da xuat ban muoi truyen. Bat cong nay TRUOC khi chay migration
+    #: grandfather la khoa toan bo tac gia hien co ra khoi chinh cong viec cua ho,
+    #: va no am tham: ho bam "Xuat ban" va nhan mot loi 403.
+    #:
+    #: Thu tu dung:
+    #:   1. trien khai ma nguon nay (cong TAT — khong ai thay gi doi)
+    #:   2. chay `scripts.grandfather_authors --apply`
+    #:   3. doi soat, roi moi dat `FAS_AUTHOR_GATE=1`
+    #:
+    #: Xem `docs/AUTHOR_RANK.md` muc "Ke hoach migration".
+    author_gate_enabled: bool = False
+
     #: Goc cua giao dien web. Doc tu `FAS_WEB_BASE_URL`.
     #:
     #: Backend can biet cho nay de dung URL callback cho OAuth: Appwrite se
@@ -333,6 +349,7 @@ class Settings:
             "public_voice_languages": list(self.public_voice_languages),
             # Bao ra de nguoi van hanh thay ngay duong dang nhap nao dang mo.
             "facebook_login_enabled": self.facebook_login_enabled,
+            "author_gate_enabled": self.author_gate_enabled,
             "env_file_loaded": self.env_file_loaded,
             "inline_worker": self.inline_worker,
         }
@@ -395,6 +412,7 @@ def load_settings() -> Settings:
         cors_origins=_env_list("FAS_CORS_ORIGINS", "http://localhost:3000"),
         web_base_url=_env("FAS_WEB_BASE_URL", "http://localhost:3000").rstrip("/"),
         facebook_login_enabled=_env_bool("FAS_FACEBOOK_LOGIN", False),
+        author_gate_enabled=_env_bool("FAS_AUTHOR_GATE", False),
         var_dir=var_dir,
         appwrite=AppwriteSettings(
             endpoint=_env("APPWRITE_ENDPOINT"),

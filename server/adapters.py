@@ -34,8 +34,12 @@ from server.config import ConfigError, Settings
 from server.domain import (
     AudioStamp,
     AudioTrack,
+    AuthorApplication,
+    AuthorStats,
+    AuthorStatus,
     Chapter,
     JobStatus,
+    ListenCredit,
     Novel,
     Profile,
     PublishState,
@@ -564,6 +568,78 @@ class MockIdentityAdapter:
         with self._lock:
             return self._tokens.pop((token or "").strip(), None) is not None
 
+    # -- ho so cong khai -----------------------------------------------------
+    #
+    # `username`, `bio`, `author_status` song CUNG CHO voi ho so, khong o mot
+    # bang rieng: chung la thuoc tinh cua danh tinh, va tach ra thi moi lan doc
+    # mot ho so lai la hai lan doc.
+
+    def get_profile(self, user_id: str) -> Profile:
+        with self._lock:
+            profile = self._profiles.get(user_id)
+            if profile is None:
+                raise NotFoundError("Không tìm thấy hồ sơ.")
+            return profile
+
+    def save_profile(self, profile: Profile) -> Profile:
+        """
+        Ghi de ho so. Kiem TRUNG username ngay o day.
+
+        Vi sao kiem o tang luu tru chu khong chi o route: day la cho duy nhat
+        thay duoc TAT CA username, va mot cho goi quen kiem la du de hai nguoi
+        cung mot ten. Ban Appwrite dat rang buoc nay bang mot index `unique`.
+        """
+        with self._lock:
+            if profile.username:
+                for khac in self._profiles.values():
+                    if (khac.user_id != profile.user_id
+                            and khac.username == profile.username):
+                        raise AuthError("Tên người dùng này đã có người dùng.")
+            self._profiles[profile.user_id] = profile
+            return profile
+
+    def profile_by_username(self, username: str) -> Optional[Profile]:
+        ten = (username or "").strip().lower()
+        if not ten:
+            return None
+        with self._lock:
+            for profile in self._profiles.values():
+                if profile.username == ten:
+                    return profile
+            return None
+
+    def search_profiles(self, query: str, limit: int = 20,
+                        offset: int = 0) -> Tuple[List[Profile], int]:
+        """
+        Tim theo ten hien thi VA username. Tra ve `(trang, tong)`.
+
+        CHI nguoi da co username: chua chon username thi chua co trang cong
+        khai, nen hien ho trong ket qua tim kiem la dua nguoi dung toi mot lien
+        ket khong mo duoc.
+
+        Sap xep TAT DINH (username tang dan) chu khong theo thu tu tu dien cua
+        dict: phan trang tren mot thu tu khong on dinh thi trang 2 co the lap
+        lai hoac bo sot ban ghi cua trang 1.
+        """
+        from server.creator import normalize_username
+
+        can = normalize_username(query)
+        tho = (query or "").strip().lower()
+        with self._lock:
+            khop = [
+                p for p in self._profiles.values()
+                if p.username
+                and (not can
+                     or can in p.username
+                     or tho in (p.display_name or "").lower())
+            ]
+        khop.sort(key=lambda p: p.username)
+        return khop[offset:offset + limit], len(khop)
+
+    def all_usernames(self) -> List[str]:
+        with self._lock:
+            return [p.username for p in self._profiles.values() if p.username]
+
     # -- OAuth ---------------------------------------------------------------
 
     def oauth_start_url(self, provider: str, success: str, failure: str) -> str:
@@ -747,6 +823,13 @@ class MockMetadataStore:
         #: `(job_id, attempt)` da co worker nhan. Vai tro y het tinh duy nhat cua
         #: rowId ben Appwrite: mot lan thu chi mot worker duoc nhan.
         self._claims: Set[Tuple[str, int]] = set()
+
+        #: Tac gia. MOT don moi nguoi dung — nop lai thi ghi de, xem
+        #: `AuthorApplication`.
+        self._applications: Dict[str, AuthorApplication] = {}
+        self._stats: Dict[str, AuthorStats] = {}
+        #: credit_id (tat dinh) -> ban ghi. Xem `create_credit_once`.
+        self._credits: Dict[str, ListenCredit] = {}
 
     # -- novel ---------------------------------------------------------------
 
@@ -1141,6 +1224,90 @@ class MockMetadataStore:
     def delete_track(self, track_id: str) -> None:
         with self._lock:
             self.tracks.pop(track_id, None)
+
+    # -- tac gia: don, thong ke, luot nghe ------------------------------------
+    #
+    # Ba bang, ba vai ro rang:
+    #
+    #   applications  moderation — ai duoc xuat ban
+    #   stats         ban TONG HOP de doc nhanh (uy tin)
+    #   credits       nguon SU THAT cua tung lan nghe hop le
+    #
+    # `stats` co the dung lai tu `credits` bat cu luc nao; chieu nguoc lai thi
+    # khong. Do la ly do `credits` la bang duoc ghi truoc, va `stats` chi la mot
+    # phep cong theo sau.
+
+    def get_application(self, user_id: str) -> Optional[AuthorApplication]:
+        with self._lock:
+            return self._applications.get(user_id)
+
+    def save_application(self, app: AuthorApplication) -> AuthorApplication:
+        with self._lock:
+            app.updated_at = now_iso()
+            self._applications[app.user_id] = app
+            return app
+
+    def list_applications(self, status: Optional[AuthorStatus] = None,
+                          limit: int = 50,
+                          offset: int = 0) -> Tuple[List[AuthorApplication], int]:
+        """
+        Danh sach don cho TRANG QUAN TRI sau nay. Chua co route nao goi toi.
+
+        Sap theo `created_at` tang dan: nguoi cho lau nhat duoc xem truoc. Do la
+        thu tu duy nhat khong lam ai bi bo quen vinh vien.
+        """
+        with self._lock:
+            rows = list(self._applications.values())
+        if status is not None:
+            rows = [r for r in rows if r.status is status]
+        rows.sort(key=lambda r: (r.created_at, r.user_id))
+        return rows[offset:offset + limit], len(rows)
+
+    def get_stats(self, user_id: str) -> AuthorStats:
+        """Chua co hang thi tra ve ban RONG, khong nem loi: mot tac gia chua ai
+        nghe van la mot tac gia hop le, va uy tin cua ho dung bang khong."""
+        with self._lock:
+            return self._stats.get(user_id) or AuthorStats(user_id=user_id)
+
+    def save_stats(self, stats: AuthorStats) -> AuthorStats:
+        with self._lock:
+            stats.updated_at = now_iso()
+            self._stats[stats.user_id] = stats
+            return stats
+
+    def add_qualified_listen(self, author_id: str, delta: int = 1) -> AuthorStats:
+        with self._lock:
+            stats = self._stats.get(author_id) or AuthorStats(user_id=author_id)
+            stats.qualified_listens = max(0, stats.qualified_listens + delta)
+            stats.updated_at = now_iso()
+            self._stats[author_id] = stats
+            return stats
+
+    def create_credit_once(self, credit: ListenCredit) -> bool:
+        """
+        Ghi mot lan tinh, va tra ve `False` neu khoa da ton tai.
+
+        `credit_id` la khoa TAT DINH theo (nguoi nghe, chuong, ngay UTC). Tinh
+        duy nhat cua no la co che chong dua: hai request cung luc thi chi mot
+        cai tao duoc hang. Ban Appwrite dat cung rang buoc bang `rowId`.
+        """
+        with self._lock:
+            if credit.credit_id in self._credits:
+                return False
+            self._credits[credit.credit_id] = credit
+            return True
+
+    def last_credit_at(self, listener_id: str, chapter_id: str) -> Optional[str]:
+        """Moc cua lan tinh GAN NHAT cho cap nay, de kiem cua so 24 gio truot."""
+        with self._lock:
+            moc = [c.created_at for c in self._credits.values()
+                   if c.listener_id == listener_id and c.chapter_id == chapter_id]
+        return max(moc) if moc else None
+
+    def count_credits(self, author_id: str) -> int:
+        """Dem lai tu bang su that — dung de doi soat `stats` khi nghi no lech."""
+        with self._lock:
+            return sum(1 for c in self._credits.values() if c.author_id == author_id)
 
 
 # -----------------------------------------------------------------------------

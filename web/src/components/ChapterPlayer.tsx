@@ -63,9 +63,15 @@ export function ChapterPlayer({
         <p className="hint listen-hero-novel">{novelTitle}</p>
 
         <div className="listen-controls">
+          {/*
+            `is-playing` chi de CHAY MOT NHIP SONG khi bat dau phat — CSS chay
+            `animation` khi lop vua duoc them, nen no tu dong chi phat mot lan.
+            Khong mang y nghia trang thai nao khac; trang thai that nam o
+            `aria-label` va o dong `role="status"` ben duoi.
+          */}
           <button
             type="button"
-            className="play-btn"
+            className={`play-btn${t.dangPhat ? " is-playing" : ""}`}
             onClick={d.batTat}
             disabled={chua_the_bam}
             aria-label={t.dangPhat ? "Tạm dừng" : "Phát"}

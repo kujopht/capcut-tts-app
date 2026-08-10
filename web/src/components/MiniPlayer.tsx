@@ -66,10 +66,12 @@ export function MiniPlayer({
   return (
     <div className="mini" role="region" aria-label="Trình phát thu gọn">
       <div className="wrap mini-wrap">
+        {/* `is-playing` cung dieu khien quang cua ca thanh — xem `.mini:has()`
+            o `globals.css`. Dung thi thanh nay lui ve lam mot vach lang. */}
         <button
           ref={nut}
           type="button"
-          className="play-btn play-btn-sm"
+          className={`play-btn play-btn-sm${t.dangPhat ? " is-playing" : ""}`}
           onClick={d.batTat}
           aria-label={t.dangPhat ? "Tạm dừng" : "Phát"}
         >

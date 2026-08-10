@@ -21,6 +21,19 @@
   --glass-strong: #0f1119e6;
   --blur: 18px;
 
+  /*
+    Be mat KINH cho cac khoi noi. Dung co chung muc: chi nhung khoi that su
+    "noi tren" tranh nen moi duoc kinh — dai mo dau, thanh loc, khu nghe, danh
+    thiep tai khoan. Bien moi cai the thanh kinh thi vua ton GPU vua lam ca
+    trang mo mit, va luc do khong con gi la "noi" nua.
+
+    `--kinh` dam hon `--glass` cua header: mot khoi noi dung phai doc duoc,
+    con header thi chi la mot vach mong.
+  */
+  --kinh: #10131ccc;
+  --kinh-vien: #ffffff14;
+  --blur-the: 14px;
+
   /* --- vien --- */
   --line: #242939;
   --line-soft: #191d29;
@@ -176,6 +189,106 @@ body {
   line-height: var(--lh-normal);
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
+}
+
+/* ==================================================== tranh nen theo trang */
+
+/*
+  MOT phan tu `fixed` nam duoi toan bo noi dung — xem `components/PageBackground.tsx`.
+
+  Ba lop chong len nhau:
+    ::before  tranh
+    ::after   lop phu toi + vignette
+    (body)    cac quang mau van o duoi cung
+
+  `z-index: -1` cho phan tu nay: con am se ve TREN nen cua body nhung DUOI moi
+  noi dung trong luong. Nho vay khong phai gan `z-index` cho header/main/footer.
+*/
+.page-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.page-bg::before,
+.page-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.page-bg::before {
+  background-image: var(--anh);
+  background-size: cover;
+  background-position: var(--diem, center);
+  background-repeat: no-repeat;
+  /* Anh goc sang va bao hoa hon muc mot nen can. Ha xuong o day thay vi sua
+     tep — de doi lai, va de doc ra rang day la mot quyet dinh. */
+  filter: saturate(0.85) brightness(0.9);
+}
+
+/*
+  Lop phu. HAI thanh phan, va ca hai deu can:
+
+    1. mot lop toi PHANG (`--toi`) — thu quyet dinh chu co doc duoc khong;
+    2. mot vignette — toi dan ra bon goc, giu mat o giua trang.
+
+  Khong co vignette thi anh cat ngang deu tit o mep va trong nhu mot tam anh
+  dan vao; co no thi trong nhu anh sang tu giua ra.
+*/
+.page-bg::after {
+  background:
+    radial-gradient(125% 90% at 50% 0%, transparent 0%, #08090f 82%),
+    linear-gradient(180deg, #08090f00 0%, #08090f 88%),
+    rgb(8 9 15 / var(--toi, 0.82));
+}
+
+/*
+  Muc toi rieng cho tung trang, va moi con so deu co ly do:
+
+    doc chuong / viet truyen   toi nhat — chu dai, doc lau
+    kham pha / thu vien        toi vua — luoi the phai quet mat nhanh
+    trang chu / dang nhap      nhat nhat — noi dung ngan, khong khi duoc phep
+                               la thu nguoi ta thay truoc
+*/
+.page-bg[data-bg="home"]    { --anh: url("/artwork/backgrounds/01-home-neon-night.webp");      --toi: 0.72; --diem: center 30%; }
+.page-bg[data-bg="explore"] { --anh: url("/artwork/backgrounds/02-explore-cyber-rain.webp");   --toi: 0.84; --diem: center 35%; }
+.page-bg[data-bg="reader"]  { --anh: url("/artwork/backgrounds/03-reader-moonlit-shrine.webp"); --toi: 0.88; --diem: center 25%; }
+.page-bg[data-bg="studio"]  { --anh: url("/artwork/backgrounds/04-studio-audio-nebula.webp");  --toi: 0.82; --diem: center 40%; }
+.page-bg[data-bg="write"]   { --anh: url("/artwork/backgrounds/05-write-creator-room.webp");   --toi: 0.88; --diem: center 45%; }
+.page-bg[data-bg="library"] { --anh: url("/artwork/backgrounds/06-library-starry-archive.webp"); --toi: 0.82; --diem: center 30%; }
+.page-bg[data-bg="account"] { --anh: url("/artwork/backgrounds/07-account-sakura-night.webp"); --toi: 0.76; --diem: center 30%; }
+.page-bg[data-bg="auth"]    { --anh: url("/artwork/backgrounds/08-auth-starry-sky.webp");      --toi: 0.70; --diem: center 35%; }
+
+/*
+  Hat sang troi rat cham — CHI o trang chu, dang nhap va tai khoan.
+
+  BA lop `radial-gradient` lam ca hieu ung, khong mot phan tu DOM nao: vai
+  tram the `<div>` cho vai tram dom sang la mot cai gia vo ly, va canvas thi
+  con dat hon nua cho thu nay.
+
+  KHONG bao gio dat len trang doc chuong: khong duoc co gi chuyen dong sau mot
+  doan van dai.
+*/
+.page-bg[data-bg="home"] > .hat,
+.page-bg[data-bg="auth"] > .hat,
+.page-bg[data-bg="account"] > .hat {
+  position: absolute;
+  inset: -10%;
+  background-image:
+    radial-gradient(1.6px 1.6px at 18% 24%, #ffffff5c, transparent),
+    radial-gradient(1.2px 1.2px at 62% 12%, #a78bfa6b, transparent),
+    radial-gradient(1.4px 1.4px at 84% 46%, #67e8f95c, transparent),
+    radial-gradient(1.1px 1.1px at 34% 68%, #ffffff47, transparent),
+    radial-gradient(1.5px 1.5px at 72% 82%, #a78bfa52, transparent),
+    radial-gradient(1.2px 1.2px at 8% 88%, #67e8f947, transparent);
+  animation: troi 46s linear infinite;
+}
+@keyframes troi {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(2%, -3%, 0); }
 }
 
 h1, h2, h3, h4 {
@@ -548,6 +661,20 @@ button, input, select, textarea {
   box-shadow: var(--lift-brand), var(--edge);
 }
 
+/*
+  Be mat kinh. Ap CO CHUNG MUC — xem ghi chu o token `--kinh`.
+
+  `isolation: isolate` la bat buoc khi co `backdrop-filter`: khong co no,
+  mot so trinh duyet lam mo ca cac phan tu anh em nam duoi trong cung tang.
+*/
+.kinh {
+  isolation: isolate;
+  background: var(--kinh);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  border-color: var(--kinh-vien);
+}
+
 .card-link {
   display: block;
   color: inherit;
@@ -674,6 +801,38 @@ button, input, select, textarea {
   box-shadow: 0 10px 32px #8b6cff45, inset 0 1px 0 #ffffff33;
 }
 .btn-primary:disabled { box-shadow: none; }
+
+/*
+  Vet sang chay ngang MOT LAN khi ro chuot vao nut chinh.
+
+  Chay mot lan roi thoi, khong lap: mot vet sang lap vo han tren mot cai nut
+  la thu keo mat di khoi noi dung, va o mot trang co nhieu nut thi thanh ra
+  ca man hinh nhap nhay.
+*/
+.btn-primary { position: relative; overflow: hidden; }
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 45%;
+  left: -60%;
+  background: linear-gradient(90deg, transparent, #ffffff2e, transparent);
+  transform: skewX(-18deg);
+  pointer-events: none;
+  opacity: 0;
+}
+.btn-primary:hover:not(:disabled)::after {
+  animation: sweep 620ms var(--ease) 1;
+}
+@keyframes sweep {
+  from { left: -60%; opacity: 1; }
+  to   { left: 115%;  opacity: 1; }
+}
+
+/* Bam xuong: thu nho mot chut. Phan hoi tuc thi, khong rung, khong nay. */
+.btn-primary:active:not(:disabled),
+.btn-outline:active:not(:disabled) { transform: scale(0.98); }
 
 /* Nut phu cap hai: vien tim, nen trong. Dung khi hai hanh dong ngang nhau ve
    tam quan trong nhung chi mot cai la buoc tiep theo tu nhien. */
@@ -860,7 +1019,9 @@ button, input, select, textarea {
   position: relative;
   height: 100%;
   border-radius: var(--r-full);
-  background: var(--grad-brand);
+  /* LO -> TIM theo huong doc: phan da xong bat dau bang mau mat hon roi dam
+     dan ve phia dau muc. Nguoc voi `--grad-brand` (tim -> lo) la co y. */
+  background: linear-gradient(90deg, var(--accent), var(--brand));
   box-shadow: 0 0 14px #8b6cff6b;
   transition: width var(--dur-slow) var(--ease);
 }
@@ -1181,11 +1342,19 @@ button, input, select, textarea {
 .rise-2 { animation-delay: 120ms; }
 .rise-3 { animation-delay: 180ms; }
 
+/*
+  Vong quay lo -> tim.
+
+  Dung `conic-gradient` kem `mask` chu khong phai `border-top-color`: vien mot
+  mau chi to duoc DUNG mot canh, con o day ca vong chuyen mau lien tuc. `mask`
+  khoet ruot de no thanh mot vong tron chu khong phai mot dia dac.
+*/
 .spinner {
-  width: 15px; height: 15px;
-  border: 2px solid var(--line-strong);
-  border-top-color: var(--brand);
+  width: 16px; height: 16px;
   border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0%, var(--accent) 45%, var(--brand) 85%, transparent 100%);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 0);
   animation: spin 0.7s linear infinite;
   flex: 0 0 auto;
 }
@@ -1344,17 +1513,33 @@ button, input, select, textarea {
   transition: border-color var(--dur) var(--ease),
     transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
+/*
+  Ro chuot vao: nhac len 2px, vien sang len tim, va mot quang MONG.
+
+  Khong phai mot vang hao lon: quang o day chi la mot vong 1px cong mot bong
+  do ngan. Mot the truyen trong luoi sau cai la mot phan tu trong danh sach,
+  khong phai mot bang quang cao — no chi can bao "bam duoc".
+*/
 .story-card:hover {
-  border-color: var(--brand-line);
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-2), 0 0 0 1px #8b6cff1f, var(--edge);
+  border-color: #8b6cff7a;
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 1px #8b6cff2e,
+    0 10px 26px #00000073,
+    0 0 20px #8b6cff1f,
+    var(--edge);
 }
 .story-card:hover .story-title { color: var(--brand-hover); }
-/* Bia nhu len rat nhe khi ro chuot vao ca the — du de thay la the "song",
-   khong du de chu ben duoi bi xo. */
+/* Bia sang len va nhu len rat nhe — du de thay la the "song", khong du de chu
+   ben duoi bi xo. */
 .story-card .cover { border-radius: var(--r2); border-bottom: 0; }
-.story-card .cover-image { transition: transform var(--dur-slow) var(--ease); }
+.story-card .cover-image,
+.story-card .cover-fallback {
+  transition: transform var(--dur-slow) var(--ease), filter var(--dur) var(--ease);
+}
 .story-card:hover .cover-image { transform: scale(1.04); }
+.story-card:hover .cover-image,
+.story-card:hover .cover-fallback { filter: brightness(1.08); }
 
 .story-body { display: flex; flex-direction: column; gap: var(--s2); }
 
@@ -1436,8 +1621,10 @@ button, input, select, textarea {
   border-radius: var(--r4);
   background:
     radial-gradient(680px 300px at 100% 0%, #22d3ee14, transparent 70%),
-    linear-gradient(160deg, var(--bg-2), var(--bg-1));
+    linear-gradient(160deg, #151824cc, #0f1119c4);
   box-shadow: var(--shadow-2), var(--edge);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.4);
 }
 
 .hero-cover { display: block; border-radius: var(--r3); overflow: hidden; }
@@ -1467,8 +1654,10 @@ button, input, select, textarea {
   border-radius: var(--r4);
   background:
     radial-gradient(600px 260px at 0% 0%, #8b6cff24, transparent 70%),
-    linear-gradient(160deg, var(--bg-1), #0c0e15);
+    linear-gradient(160deg, #0f1119cc, #0c0e15cc);
   box-shadow: var(--shadow-1), var(--edge);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.4);
 }
 .account-hero-body { min-width: 0; }
 .account-hero-plan { align-items: flex-end; text-align: right; max-width: 34ch; }
@@ -1602,9 +1791,11 @@ button, input, select, textarea {
   flex-direction: column;
   gap: var(--s4);
   padding: var(--s4);
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--kinh-vien);
   border-radius: var(--r3);
-  background: #0f111980;
+  background: #0f1119a6;
+  backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.4);
 }
 
 /* O nhap co bieu tuong dat chong len ben trai. */
@@ -1662,8 +1853,10 @@ button, input, select, textarea {
   padding: var(--s7) var(--s6);
   border: 1px solid var(--line);
   border-radius: var(--r4);
-  background: linear-gradient(150deg, #141828, var(--bg-1) 55%, #0c0e15);
+  background: linear-gradient(150deg, #141828cc, #0f1119b8 55%, #0c0e15cc);
   box-shadow: var(--shadow-2), var(--edge);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.4);
 }
 
 /* Hai quang mau dat SAU noi dung. `z-index: -1` cung `isolation` o tren giu
@@ -1741,8 +1934,10 @@ button, input, select, textarea {
   border: 1px solid var(--brand-line);
   background:
     radial-gradient(720px 240px at 12% 0%, #8b6cff29, transparent 70%),
-    linear-gradient(180deg, var(--bg-1), #0c0e15);
+    linear-gradient(180deg, #0f1119cc, #0c0e15cc);
   box-shadow: var(--edge);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.4);
 }
 .cta-band-body { display: flex; flex-direction: column; gap: var(--s2); max-width: 62ch; }
 .cta-band h2 { font-size: var(--t-lg); }
@@ -1797,6 +1992,14 @@ button, input, select, textarea {
   border-color: var(--brand-line);
   box-shadow: var(--lift-brand), var(--edge);
 }
+
+/* Khu nghe: vien sang len khi DANG phat, tro lai binh thuong khi dung. Day la
+   thu duy nhat tren trang dang chuyen dong, nen no duoc phep hut mat. */
+.listen-hero { transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.listen-hero:has(.play-btn.is-playing) {
+  border-color: #8b6cff8a;
+  box-shadow: 0 0 0 1px #22d3ee1f, 0 14px 44px #8b6cff2e, var(--edge);
+}
 .job-box-done { border-color: #4ade8040; }
 .job-box-failed { border-color: #f8717140; }
 
@@ -1825,8 +2028,10 @@ button, input, select, textarea {
   border-radius: var(--r4);
   background:
     radial-gradient(640px 280px at 100% 0%, #8b6cff1a, transparent 70%),
-    linear-gradient(160deg, var(--bg-1), #0c0e15);
+    linear-gradient(160deg, #0f1119cc, #0c0e15cc);
   box-shadow: var(--shadow-1), var(--edge);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.4);
 }
 .novel-head-cover .cover {
   border-radius: var(--r3);
@@ -1865,8 +2070,10 @@ button, input, select, textarea {
   border-radius: var(--r4);
   background:
     radial-gradient(620px 260px at 0% 0%, #8b6cff26, transparent 70%),
-    linear-gradient(150deg, var(--bg-2), var(--bg-1));
+    linear-gradient(150deg, #151824cc, #0f1119c4);
   box-shadow: var(--shadow-2), var(--edge);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.4);
 }
 .listen-hero-cover .cover {
   border-radius: var(--r3);
@@ -1889,6 +2096,7 @@ button, input, select, textarea {
   duoc dieu do.
 */
 .play-btn {
+  position: relative;
   width: 62px;
   height: 62px;
   flex: 0 0 auto;
@@ -1905,6 +2113,26 @@ button, input, select, textarea {
 }
 .play-btn:hover:not(:disabled) { box-shadow: 0 12px 34px #8b6cff52, inset 0 1px 0 #ffffff33; }
 .play-btn:active:not(:disabled) { transform: scale(0.94); }
+
+/*
+  Mot nhip song MOT LAN khi bat dau phat.
+
+  Lop `is-playing` do `<ChapterPlayer>` gan khi `dangPhat` thanh `true`. CSS
+  chi chay `animation` khi lop VUA duoc them, nen no tu dong chi phat mot lan
+  moi lan bam — dung thu can. `forwards` de vong song tan het roi bien mat.
+*/
+.play-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.play-btn.is-playing::after { animation: nhip 900ms var(--ease) 1 forwards; }
+@keyframes nhip {
+  from { box-shadow: 0 0 0 0 #8b6cff8a; }
+  to   { box-shadow: 0 0 0 18px #8b6cff00; }
+}
 .play-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 .play-btn-sm { width: 40px; height: 40px; }
 /* Chu "▶" cua font khong can quang hoc — no lech sang trai trong vong tron. */
@@ -1947,7 +2175,8 @@ button, input, select, textarea {
   border-radius: var(--r-full);
   border: 1px solid var(--line-soft);
   background:
-    linear-gradient(90deg, var(--brand) var(--p, 0%), #0b0d14 var(--p, 0%));
+    linear-gradient(90deg, var(--accent) 0%, var(--brand) var(--p, 0%),
+      #0b0d14 var(--p, 0%));
 }
 .seek::-moz-range-track,
 .vol::-moz-range-track {
@@ -1955,7 +2184,8 @@ button, input, select, textarea {
   border-radius: var(--r-full);
   border: 1px solid var(--line-soft);
   background:
-    linear-gradient(90deg, var(--brand) var(--p, 0%), #0b0d14 var(--p, 0%));
+    linear-gradient(90deg, var(--accent) 0%, var(--brand) var(--p, 0%),
+      #0b0d14 var(--p, 0%));
 }
 .seek::-webkit-slider-thumb,
 .vol::-webkit-slider-thumb {
@@ -2021,10 +2251,15 @@ button, input, select, textarea {
   background: var(--glass-strong);
   backdrop-filter: blur(var(--blur)) saturate(1.5);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--kinh-vien);
   box-shadow: 0 -8px 30px #00000059;
   padding-bottom: env(safe-area-inset-bottom, 0);
   animation: mini-len var(--dur) var(--ease);
+  transition: box-shadow var(--dur) var(--ease);
+}
+/* Quang CHI khi dang phat. Dung thi thanh nay lui ve lam mot vach lang. */
+.mini:has(.play-btn.is-playing) {
+  box-shadow: 0 -8px 30px #00000059, 0 -1px 0 #8b6cff5c, 0 -12px 40px #8b6cff1f;
 }
 @keyframes mini-len { from { transform: translateY(100%); } to { transform: none; } }
 
@@ -2068,7 +2303,7 @@ button, input, select, textarea {
 }
 .mini-bar-fill {
   height: 100%;
-  background: var(--grad-brand);
+  background: linear-gradient(90deg, var(--accent), var(--brand));
   transition: width var(--dur) linear;
 }
 
@@ -2325,6 +2560,12 @@ body.co-mini { padding-bottom: 74px; }
   .story-card:hover .cover-image { transform: none; }
   .progress-bar::after { display: none; }
   .rise { animation: none; }
+
+  /* Cac hieu ung cua ban them nen: hat troi, vet sang quet qua nut, nhip song
+     cua nut phat. Ca ba deu phai BIEN MAT chu khong phai chay nhanh hon. */
+  .hat { display: none; }
+  .btn-primary::after { display: none; }
+  .play-btn.is-playing::after { animation: none; }
 }
 
 /* ------------------------------------------------------------ tablet */
@@ -2395,7 +2636,20 @@ body.co-mini { padding-bottom: 74px; }
 /* ------------------------------------------------------------ mobile */
 
 @media (max-width: 640px) {
-  :root { --t-2xl: 25px; --t-xl: 20px; --t-lg: 18px; }
+  :root {
+    --t-2xl: 25px; --t-xl: 20px; --t-lg: 18px;
+    /*
+      Lam mo nen la thao tac TON NHAT tren dien thoai: may phai ve lai vung mo
+      moi khung hinh khi cuon. Ha ban kinh xuong con mot nua giu duoc cam giac
+      kinh ma re hon han; be mat van doc ra la trong suot nho mau nen.
+    */
+    --blur: 10px;
+    --blur-the: 8px;
+  }
+
+  /* Anh nen o dien thoai: bo bot bo loc mau. Mot lop nua tren moi khung hinh
+     la thu khong dang tra o may yeu. */
+  .page-bg::before { filter: none; }
   .wrap { padding: 0 var(--s4); }
   .page { padding: var(--s5) 0 var(--s7); gap: var(--s4); }
 

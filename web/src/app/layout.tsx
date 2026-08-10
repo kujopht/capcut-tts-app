@@ -4,6 +4,7 @@ import "./globals.css";
 import { SessionProvider } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { NavAuth, NavLinks } from "@/components/NavAuth";
+import { PageBackground } from "@/components/PageBackground";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { Logo } from "@/components/Logo";
@@ -47,6 +48,10 @@ export default function RootLayout({
       <body>
         <SessionProvider>
           <ToastProvider>
+            {/* Lop tranh nen — mot phan tu `fixed` nam duoi tat ca. Ve TRUOC
+                lien ket bo qua de no khong bao gio chen vao thu tu tieu diem. */}
+            <PageBackground />
+
             <a className="skip-link" href="#main">
               Bỏ qua điều hướng
             </a>

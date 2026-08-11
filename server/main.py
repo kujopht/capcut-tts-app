@@ -91,6 +91,12 @@ creators = CreatorService(identity, store)
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
 
+#: Cac phu thuoc CUA RIENG V2. Thieu chung thi tinh nang tac gia khong dung duoc,
+#: nhung doc/nghe/tao audio van chay — nen chung duoc BAO RA o `/api/ready` ma
+#: KHONG lam dich vu bi danh dau "chua san sang".
+V2_PHU_THUOC = frozenset({"tac_gia", "uy_tin", "luot_nghe", "nhat_ky",
+                          "ho_so_cong_khai"})
+
 #: Cac job dang chay nen. Job chay trong thread rieng de API tra ve ngay.
 _job_threads: Dict[str, threading.Thread] = {}
 _job_lock = threading.RLock()
@@ -365,14 +371,37 @@ def ready() -> Response:
         ("metadata", lambda: store.list_jobs_by_status(JobStatus.RUNNING)),
         ("storage", lambda: next(iter(storage.list_objects(
             prefix="audio/__readiness__/")), None)),
+        # --- V2: bon bang tac gia -----------------------------------------
+        #
+        # KHONG lam `/api/ready` tra 503 khi thieu (xem `tot_v2` ben duoi): mot
+        # ban trien khai truoc migration van phuc vu doc/nghe/tao audio binh
+        # thuong, va tu choi nhan traffic vi mot tinh nang chua bat la lam hong
+        # nhieu han sua.
+        #
+        # Nhung PHAI bao ra. Truoc day thieu bang la mot loi 500 chung o
+        # `/api/creator/me`, va nguoi van hanh khong co cach nao biet nguyen
+        # nhan la "chua chay migration" thay vi "code hong".
+        ("tac_gia", lambda: store.list_applications(limit=1)),
+        ("uy_tin", lambda: store.get_stats("__readiness__")),
+        ("luot_nghe", lambda: store.last_credit_at("__readiness__", "__x__")),
+        ("nhat_ky", lambda: store.list_events(limit=1)),
+        ("ho_so_cong_khai", lambda: identity.profile_by_username("__readiness__")),
     ):
         try:
             kiem()
             ket_qua["phu_thuoc"][ten] = {"dat": True}
         except Exception as exc:
-            tot = False
+            # Bon bang V2 KHONG lam ca dich vu thanh "chua san sang" — xem ghi
+            # chu o danh sach tren.
+            if ten not in V2_PHU_THUOC:
+                tot = False
             # Chi TEN loai loi. Thong diep co the chua endpoint hoac dinh danh.
-            ket_qua["phu_thuoc"][ten] = {"dat": False, "loai_loi": type(exc).__name__}
+            ket_qua["phu_thuoc"][ten] = {
+                "dat": False,
+                "loai_loi": type(exc).__name__,
+                **({"ghi_chu": "Cần chạy `python -m scripts.setup_appwrite`"}
+                   if ten in V2_PHU_THUOC else {}),
+            }
 
     ket_qua["status"] = "ready" if tot else "not_ready"
     return Response(

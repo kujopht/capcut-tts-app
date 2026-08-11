@@ -474,10 +474,22 @@ class CreatorService:
                 profile.author_status = AuthorStatus.APPROVED
                 self._identity.save_profile(profile)
 
+        dem: Dict[str, int] = {}
+        for hang in ke_hoach:
+            dem[hang["action"]] = dem.get(hang["action"], 0) + 1
+
         return {
             "dry_run": dry_run,
+            # Chu so huu KHAC NHAU co it nhat mot truyen da xuat ban.
             "candidates": len(ai),
-            "would_approve": sum(1 for k in ke_hoach if k["action"] == "duyet"),
+            "would_approve": dem.get("duyet", 0),
+            "already_approved": dem.get("bo_qua_da_duyet", 0),
+            "skipped_suspended": dem.get("bo_qua_dang_bi_treo", 0),
+            "missing_profile": dem.get("bo_qua_khong_tim_thay_ho_so", 0),
+            # Cac hang khong roi vao nhom nao o tren — hien tai khong co, nhung
+            # neu mot nhanh moi duoc them ma quen dem thi con so nay lo ra ngay
+            # thay vi im lang bien mat khoi bao cao.
+            "unclassified": len(ke_hoach) - sum(dem.values()),
             "plan": ke_hoach,
         }
 

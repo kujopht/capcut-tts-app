@@ -63,8 +63,20 @@ def main(argv: List[str]) -> int:
     for hang in ket_qua["plan"]:
         print(f"  {hang['user_id']:24} {hang['novels']:>3} truyện  ->  {hang['action']}")
     print()
-    print(f"Ứng viên          : {ket_qua['candidates']}")
-    print(f"Sẽ công nhận      : {ket_qua['would_approve']}")
+    print(f"Chủ sở hữu có truyện đã xuất bản : {ket_qua['candidates']}")
+    print(f"  đã là tác giả                  : {ket_qua['already_approved']}")
+    print(f"  SẼ CÔNG NHẬN                   : {ket_qua['would_approve']}")
+    print(f"  bỏ qua — đang bị tạm dừng      : {ket_qua['skipped_suspended']}")
+    print(f"  bỏ qua — không tìm thấy hồ sơ  : {ket_qua['missing_profile']}")
+    if ket_qua["unclassified"]:
+        # Mot nhanh moi duoc them ma quen dem. Bao ra thay vi de no bien mat.
+        print(f"  KHÔNG PHÂN LOẠI ĐƯỢC          : {ket_qua['unclassified']}")
+
+    if ket_qua["missing_profile"]:
+        print()
+        print("CẢNH BÁO: có truyện đã xuất bản mà không đọc được hồ sơ chủ sở hữu.")
+        print("Xem lại những dòng `bo_qua_khong_tim_thay_ho_so` ở trên trước khi")
+        print("chạy --apply: đó có thể là tài khoản đã xoá, hoặc một lỗi đọc.")
 
     if not ap_dung:
         print()

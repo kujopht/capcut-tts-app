@@ -4032,3 +4032,217 @@ body.co-mini { padding-bottom: 74px; }
   /* Huy hieu xuong dong thay vi ep ten nguoi con vai ky tu. */
   .tim-hh { display: none; }
 }
+
+/* ============================================================ khu quan tri
+
+   DAY LA MOT BE MAT LAM VIEC. Van dung he mau va he icon cua Fanfic World —
+   nguoi quan tri phai cam thay minh o cung mot san pham — nhung KHONG hat sang,
+   KHONG hoa van goc, KHONG tranh nen lon. Nguoi ta o day de doc mot hang doi va
+   ra quyet dinh, khong phai de ngam.
+   ========================================================================== */
+
+/*
+  Mang toi RIENG cho khu quan tri.
+
+  Dam han cac trang khac: o day nguoi ta doc mot hang doi va ra quyet dinh, va
+  mot buc tranh sau lung mot bang du lieu la thu tranh cho voi chinh du lieu do.
+  Tranh van con — de nguoi quan tri biet minh o cung mot san pham — nhung lui han
+  ve sau.
+*/
+.admin-page { max-width: 1240px; position: relative; }
+.admin-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: #05070fbf;
+}
+.admin-dau { margin-bottom: var(--s5); }
+.admin-tieu-de { font-size: var(--t-xl); }
+
+.admin-khung {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: start;
+}
+
+.admin-nav {
+  position: sticky;
+  top: 86px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s2);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  background: #080a14c4;
+}
+.admin-muc {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 9px 12px;
+  border-radius: var(--r2);
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: var(--t-sm);
+  font-weight: 550;
+  border-left: 2px solid transparent;
+}
+.admin-muc:hover { background: #ffffff0a; color: var(--text); }
+.admin-muc svg { color: var(--text-3); flex: 0 0 auto; }
+.admin-muc[aria-current="page"] {
+  background: var(--brand-soft);
+  border-left-color: var(--brand);
+  color: var(--text);
+}
+.admin-muc[aria-current="page"] svg { color: var(--brand-hover); }
+
+.admin-than { min-width: 0; }
+.admin-luoi { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.admin-o-ghi { margin-top: 4px; }
+.admin-rong { text-align: center; color: var(--text-3); padding: var(--s6); }
+
+/* Loi nhac o dau bang: mot hang doi dang cho la thu duy nhat can hanh dong. */
+.admin-nhac {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s4);
+  color: inherit;
+  text-decoration: none;
+  border-color: var(--vang-vien);
+  background: #d8b56a0f;
+}
+.admin-nhac svg { color: var(--vang-sang); flex: 0 0 auto; }
+.admin-nhac .hint { margin-left: auto; }
+
+/* -- nhan TRANG THAI KIEM DUYET -------------------------------------------
+   Mau co nghia co dinh, va KHONG bao gio dung lai cho hang tac gia: hang la uy
+   tin, trang thai la quyen. Ve chung giong nhau la moi nguoi doc bang nham hai
+   thu, va nham o mot bang quan tri la nham mot quyet dinh. */
+.tt {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: var(--r-full);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.tt-trong  { color: var(--text-3); background: #ffffff0a; border-color: var(--line); }
+.tt-cho    { color: #fbbf24; background: #fbbf2414; border-color: #fbbf2440; }
+.tt-duyet  { color: #4ade80; background: #4ade8014; border-color: #4ade8040; }
+.tt-tuchoi { color: #f87171; background: #f8717114; border-color: #f8717140; }
+.tt-treo   { color: #fb923c; background: #fb923c14; border-color: #fb923c40; }
+
+/* -- hang doi don ---------------------------------------------------------- */
+.admin-doi {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: var(--s4);
+  align-items: start;
+}
+.admin-ds { list-style: none; margin: 0; padding: 0; display: flex;
+  flex-direction: column; gap: 6px; }
+.admin-hang {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 10px 12px;
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #0b0e18b8;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.admin-hang:hover { border-color: var(--line-strong); }
+.admin-hang[aria-current="true"] {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.admin-avt {
+  flex: 0 0 auto;
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--grad-brand);
+  color: var(--on-brand);
+  font-size: 11px; font-weight: 700;
+}
+.admin-hang-chu {
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 0; flex: 1 1 auto;
+}
+.admin-hang-chu > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-chi-tiet { min-width: 0; }
+.admin-van { white-space: pre-wrap; line-height: var(--lh-normal); }
+.admin-loc { align-self: flex-start; }
+
+/* -- bang -------------------------------------------------------------- */
+/* Boc trong mot khung cuon RIENG: mot bang sau cot khong ep vua 390px duoc, va
+   de no day ca trang rong ra thi moi trang khac cung tran theo. */
+.admin-bang-boc {
+  overflow-x: auto;
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  background: #080a14c4;
+}
+.admin-bang { width: 100%; border-collapse: collapse; font-size: var(--t-sm); }
+.admin-bang th,
+.admin-bang td {
+  padding: 10px var(--s3);
+  text-align: left;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+.admin-bang th {
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+  font-weight: 650;
+  white-space: nowrap;
+}
+.admin-bang tbody tr:last-child td { border-bottom: 0; }
+.admin-bang tbody tr:hover { background: #ffffff05; }
+.admin-so { text-align: right; }
+.admin-nguoi { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.admin-email { color: var(--text-2); }
+.admin-thao-tac { flex-wrap: nowrap; gap: 6px; }
+
+/* -- nhat ky ----------------------------------------------------------- */
+.admin-nhat-ky { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px; }
+.admin-su-kien {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 9px 12px;
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r2);
+  background: #0b0e18b8;
+}
+.admin-luc { margin-left: auto; flex: 0 0 auto; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  /* Cot dieu huong thanh mot hang cuon ngang o tren. */
+  .admin-khung { grid-template-columns: minmax(0, 1fr); }
+  .admin-nav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .admin-nav::-webkit-scrollbar { display: none; }
+  .admin-muc { border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .admin-muc[aria-current="page"] { border-left: 0; border-bottom-color: var(--brand); }
+  /* Hang doi: danh sach tren, chi tiet duoi. */
+  .admin-doi { grid-template-columns: minmax(0, 1fr); }
+  .admin-su-kien { flex-wrap: wrap; }
+  .admin-luc { margin-left: 0; }
+}

@@ -34,12 +34,16 @@ MAT_KHAU = "matkhau123"
 #: Sau tinh huong ma giao dien phai ve KHAC NHAU. Thieu mot cai la mot trang thai
 #: khong ai nhin thay truoc khi nguoi that roi vao no.
 NGUOI = [
+    # Quan tri. Chi la mot nguoi dung binh thuong — quyen den tu BIEN MOI TRUONG
+    # `FAS_ADMIN_USER_IDS`, ma script nay dat sau khi biet `user_id` that.
+    ("admin@fanfic.local", "Quản Trị Viên", "quantri", "none", 0, 0),
     ("doc@fanfic.local", "Người Đọc Thầm Lặng", "nguoidoc", "none", 0, 0),
     ("cho@fanfic.local", "Hạ Vũ", "havu", "pending", 0, 1),
     ("moi@fanfic.local", "Tân Nguyệt", "tannguyet", "approved", 12, 1),
     ("giua@fanfic.local", "Nam Kujo", "namkujo", "approved", 380, 3),
     ("cao@fanfic.local", "Vọng Thư Nhân", "vongthunhan", "approved", 24_500, 4),
     ("tuchoi@fanfic.local", "Tiểu Mặc", "tieumac", "rejected", 0, 0),
+    ("treo@fanfic.local", "Dạ Hành", "dahanh", "suspended", 95, 2),
 ]
 
 TRUYEN = [
@@ -84,8 +88,13 @@ def nap(settings) -> None:
                 intro="Tôi viết fanfic đã vài năm, chủ yếu về băng Mũ Rơm.",
                 accepted_rules=True,
             )
-        if trang_thai == "approved":
+        if trang_thai in ("approved", "suspended"):
             svc.approve(profile.user_id, note="Ổn.")
+        if trang_thai == "suspended":
+            # Treo CHI chan xuat ban moi. Truyen da dang van cong khai — day cung
+            # la mot tinh huong phai nhin duoc tren giao dien quan tri.
+            svc.suspend(profile.user_id,
+                        note="Tạm dừng để rà soát một chương bị báo cáo.")
         elif trang_thai == "rejected":
             svc.reject(
                 profile.user_id,
@@ -107,7 +116,11 @@ def nap(settings) -> None:
                 title=tieu_de if i == 3 else f"{tieu_de} ({ten})",
                 description=mo_ta,
                 tags=list(the),
-                state=(PublishState.PUBLISHED if trang_thai == "approved"
+                # Tac gia BI TREO van giu truyen da xuat ban — do la ca diem cua
+                # persona nay: giao dien quan tri phai cho thay treo KHONG go
+                # noi dung xuong.
+                state=(PublishState.PUBLISHED
+                       if trang_thai in ("approved", "suspended")
                        else PublishState.DRAFT),
             ))
             store.create_chapter(Chapter(
@@ -146,6 +159,21 @@ def main(argv: List[str]) -> int:
         return 2
 
     nap(settings)
+
+    # Quyen quan tri den tu CAU HINH, khong tu du lieu. `user_id` cua ban mock
+    # duoc sinh ngau nhien moi lan chay, nen phai dat sau khi tao xong ho so.
+    #
+    # `replace` chu khong phai phep gan: `Settings` la frozen dataclass, va do la
+    # co y — cau hinh khong duoc doi giua duong chay.
+    from dataclasses import replace as _replace
+    from server import main as server_main
+
+    admin = server_main.identity.profile_by_username("quantri")
+    server_main.settings = _replace(server_main.settings,
+                                    admin_user_ids=(admin.user_id,))
+    print()
+    print(f"Quản trị: admin@fanfic.local  (user_id {admin.user_id})")
+    print("Quyền đến từ FAS_ADMIN_USER_IDS — không phải từ một cột trong bảng.")
 
     print(f"Kho mock đã có dữ liệu mẫu. Đăng nhập bằng mật khẩu: {MAT_KHAU}")
     for email, ten, username, tt, nghe, _ in NGUOI:

@@ -276,7 +276,7 @@ test("cac endpoint cu con nguyen, chi them dung mot cai", () => {
   */
   assert.deepEqual(
     [...found].sort(),
-    ["audio", "auth", "chapters", "creator", "health", "jobs",
+    ["admin", "audio", "auth", "chapters", "creator", "health", "jobs",
      "listens", "novels", "search", "users", "voices"],
     "khong duoc them ho tai nguyen moi",
   );

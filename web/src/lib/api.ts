@@ -608,3 +608,134 @@ export interface AudioLink {
   expires_in: number | null;
   size_bytes: number;
 }
+
+// ---------------------------------------------------------------- quản trị
+//
+// Mọi thứ dưới đây yêu cầu quyền quản trị **ở máy chủ**. Giao diện không bao giờ
+// là nơi quyết định: người dùng thường gọi các hàm này sẽ nhận 403 và một thân
+// rỗng. Xem `server/main.py` mục QUAN TRI.
+
+export interface AdminOverview {
+  pending_applications: number;
+  approved_authors: number;
+  rejected_applications: number;
+  suspended_authors: number;
+  published_novels: number;
+  users_with_username: number;
+  qualified_listens: number;
+}
+
+/** Danh tính kèm theo đơn / hàng tác giả. CÓ `email` — đây là đường quản trị. */
+export interface AdminUser {
+  user_id: string;
+  email: string;
+  display_name: string;
+  username: string;
+  author_status: AuthorStatus;
+  created_at: string;
+  qualified_listens: number;
+  published_novels?: number;
+  rank?: RankProgress;
+  bio?: string;
+  application?: AdminApplication | null;
+  events?: ModerationEvent[];
+  novels?: Novel[];
+}
+
+export interface AdminApplication {
+  application_id: string;
+  user_id: string;
+  pen_name: string;
+  bio: string;
+  genres: string[];
+  intro: string;
+  accepted_rules: boolean;
+  status: AuthorStatus;
+  reviewer_note: string;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+  user?: AdminUser | null;
+}
+
+export interface ModerationEvent {
+  event_id: string;
+  action:
+    | "author_approved"
+    | "author_rejected"
+    | "author_suspended"
+    | "author_restored";
+  target_user_id: string;
+  actor_id: string;
+  note: string;
+  created_at: string;
+}
+
+export interface AdminNovel extends Novel {
+  chapters: number;
+  owner: { display_name: string; username: string } | null;
+}
+
+export const adminApi = {
+  overview: () => request<AdminOverview>("/api/admin/overview"),
+
+  applications: (status = "", limit = 25, offset = 0) =>
+    request<{ applications: AdminApplication[]; total: number }>(
+      `/api/admin/author-applications?status_filter=${status}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  application: (userId: string) =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/author-applications/${encodeURIComponent(userId)}`,
+    ),
+
+  approve: (userId: string, note = "") =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/author-applications/${encodeURIComponent(userId)}/approve`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  reject: (userId: string, note: string) =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/author-applications/${encodeURIComponent(userId)}/reject`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  authors: (limit = 25, offset = 0) =>
+    request<{ authors: AdminUser[]; total: number }>(
+      `/api/admin/authors?limit=${limit}&offset=${offset}`,
+    ),
+
+  suspend: (userId: string, note: string) =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/authors/${encodeURIComponent(userId)}/suspend`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  restore: (userId: string, note = "") =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/authors/${encodeURIComponent(userId)}/restore`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  users: (q = "", limit = 25, offset = 0) =>
+    request<{ users: AdminUser[]; total: number }>(
+      `/api/admin/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`,
+    ),
+
+  user: (userId: string) =>
+    request<{ user: AdminUser }>(`/api/admin/users/${encodeURIComponent(userId)}`),
+
+  novels: (q = "", state = "", limit = 25, offset = 0) =>
+    request<{ novels: AdminNovel[]; total: number }>(
+      `/api/admin/novels?q=${encodeURIComponent(q)}&state=${state}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  events: (limit = 50) =>
+    request<{ events: ModerationEvent[]; total: number }>(
+      `/api/admin/events?limit=${limit}`,
+    ),
+};

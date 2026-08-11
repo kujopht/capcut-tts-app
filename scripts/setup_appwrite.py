@@ -120,6 +120,28 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("author_idx", "key", ["author_id"]),
         ],
     },
+    "moderation_events": {
+        "name": "Moderation events",
+        # CHI THEM. Khong co duong sua hay xoa o bat ky tang nao — mot nhat ky
+        # sua duoc la mot nhat ky khong dung de lam gi.
+        "attributes": [
+            ("event_id", "string", True, 64),
+            ("action", "enum", True,
+             ["author_approved", "author_rejected", "author_suspended",
+              "author_restored"]),
+            ("target_user_id", "string", True, 64),
+            # Rong = he thong (vd migration grandfather), khong phai mot nguoi.
+            ("actor_id", "string", False, 64),
+            ("note", "string", False, 1000),
+            # `datetime` cua Appwrite giu duoc micro giay — can dung the: hai
+            # thao tac trong cung mot giay phai doc ra dung thu tu.
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("target_created_idx", "key", ["target_user_id", "created_at"]),
+            ("created_idx", "key", ["created_at"]),
+        ],
+    },
     "novels": {
         "name": "Novels",
         "attributes": [

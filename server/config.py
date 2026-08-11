@@ -195,6 +195,27 @@ class Settings:
     #: Xem `docs/AUTHOR_RANK.md` muc "Ke hoach migration".
     author_gate_enabled: bool = False
 
+    #: Cac `user_id` duoc quyen QUAN TRI. Doc tu `FAS_ADMIN_USER_IDS`, ngan cach
+    #: bang dau phay. MAC DINH RONG — khong ai la quan tri.
+    #:
+    #: VI SAO O BIEN MOI TRUONG chu khong phai mot cot trong bang `profiles`:
+    #:
+    #:   1. Khong the LEO THANG qua ung dung. Moi duong ghi cua he thong deu di
+    #:      qua Appwrite; neu quyen quan tri la mot truong du lieu thi bat ky lo
+    #:      hong ghi nao — mot route quen kiem, mot quyen document dat sai — deu
+    #:      tro thanh mot duong tu phong minh lam quan tri. Mot bien moi truong
+    #:      thi khong co API nao cham toi duoc.
+    #:   2. KHONG can migration. Bat quyen quan tri khong doi mot dong du lieu
+    #:      nao, va tat no cung vay.
+    #:   3. Doi danh sach la mot thao tac VAN HANH co chu y: sua bien roi khoi
+    #:      dong lai, co dau vet trong lich su cau hinh.
+    #:
+    #: Danh doi: doi quan tri phai khoi dong lai tien trinh. Voi mot he thong co
+    #: mot hoac hai quan tri thi do la cai gia dung.
+    #:
+    #: Xem `docs/ADMIN.md` de biet cach tao quan tri dau tien cho production.
+    admin_user_ids: tuple = ()
+
     #: Goc cua giao dien web. Doc tu `FAS_WEB_BASE_URL`.
     #:
     #: Backend can biet cho nay de dung URL callback cho OAuth: Appwrite se
@@ -350,6 +371,9 @@ class Settings:
             # Bao ra de nguoi van hanh thay ngay duong dang nhap nao dang mo.
             "facebook_login_enabled": self.facebook_login_enabled,
             "author_gate_enabled": self.author_gate_enabled,
+            # CHI so luong, KHONG bao gio la danh sach: `/api/health` la
+            # cong khai, va lo ra `user_id` cua quan tri la chi dung dich.
+            "admin_count": len(self.admin_user_ids),
             "env_file_loaded": self.env_file_loaded,
             "inline_worker": self.inline_worker,
         }
@@ -413,6 +437,9 @@ def load_settings() -> Settings:
         web_base_url=_env("FAS_WEB_BASE_URL", "http://localhost:3000").rstrip("/"),
         facebook_login_enabled=_env_bool("FAS_FACEBOOK_LOGIN", False),
         author_gate_enabled=_env_bool("FAS_AUTHOR_GATE", False),
+        admin_user_ids=tuple(
+            x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()
+        ),
         var_dir=var_dir,
         appwrite=AppwriteSettings(
             endpoint=_env("APPWRITE_ENDPOINT"),

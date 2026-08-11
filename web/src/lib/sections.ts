@@ -64,6 +64,9 @@ const BANG: ReadonlyArray<readonly [RegExp, ViTri]> = [
   // khong phai mot khu vuc rieng tren truc.
   [/^\/u\//, "long"],
   [/^\/creator\//, "long"],
+  // `/admin` KHONG nam tren truc: no khong phai mot khu vuc cua the gioi
+  // truyen, va mot cu quay may khi vao khu quan tri la sai nhip.
+  [/^\/admin/, "long"],
   [/^\/login/, "ngoai"],
   [/^\/auth\//, "ngoai"],
 ];

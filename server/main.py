@@ -2074,3 +2074,171 @@ def record_listen(payload: ListenIn,
         listened_seconds=float(payload.listened_seconds),
         duration_seconds=duration,
     )
+
+
+# -----------------------------------------------------------------------------
+# QUAN TRI
+# -----------------------------------------------------------------------------
+#
+# MOI route duoi day di qua `Depends(admin_profile)`. Khong mot route nao tu
+# kiem quyen bang tay, va khong mot route nao duoc phep quen — do la ca ly do
+# phep kiem nam trong MOT phu thuoc thay vi trong tung than ham.
+#
+# Ai la quan tri do BIEN MOI TRUONG quyet dinh (`FAS_ADMIN_USER_IDS`), khong
+# phai mot cot trong bang. Xem `Settings.admin_user_ids`: mot truong du lieu thi
+# bat ky lo hong ghi nao cung tro thanh duong tu phong minh lam quan tri; mot
+# bien moi truong thi khong co API nao cham toi duoc.
+#
+# Giao dien KHONG bao gio la noi quyet dinh. `/admin` chi ve nhung gi cac route
+# nay tra ve, va mot nguoi dung thuong go thang duong dan se nhan 403 kem mot
+# than rong.
+
+
+def admin_profile(profile: Profile = Depends(current_profile)) -> Profile:
+    """
+    Ho so cua nguoi goi, VA nguoi do phai la quan tri.
+
+    Hai ma khac nhau, va khac biet do la co y:
+      401  chua dang nhap        -> `current_profile` nem
+      403  dang nhap nhung khong phai quan tri
+
+    Tra 404 cho ca hai se giau duoc su ton tai cua khu quan tri, nhung doi lai
+    la mot nguoi quan tri that go nham tai khoan se khong hieu vi sao khong vao
+    duoc. Khu nay khong bi mat, no chi bi khoa.
+    """
+    if profile.user_id not in settings.admin_user_ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Khu vực quản trị.")
+    return profile
+
+
+class NoteIn(BaseModel):
+    note: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+@app.get("/api/admin/overview")
+def admin_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return creators.admin_overview()
+
+
+@app.get("/api/admin/author-applications")
+def admin_applications(status_filter: str = "", limit: int = 25, offset: int = 0,
+                       admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return creators.admin_applications(status=status_filter or None,
+                                       limit=max(1, min(100, limit)),
+                                       offset=max(0, offset))
+
+
+@app.get("/api/admin/author-applications/{user_id}")
+def admin_application(user_id: str,
+                      admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    data = creators.admin_application(user_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn.")
+    return {"application": data}
+
+
+@app.post("/api/admin/author-applications/{user_id}/approve")
+def admin_approve(user_id: str, payload: NoteIn,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Duyet don. Goi thang tang service da duoc kiem thu — route KHONG lap lai
+    mot dong logic nghiep vu nao.
+    """
+    try:
+        app_row = creators.approve(user_id, note=payload.note,
+                                   actor_id=admin.user_id)
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_dict()}
+
+
+@app.post("/api/admin/author-applications/{user_id}/reject")
+def admin_reject(user_id: str, payload: NoteIn,
+                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Tu choi don. `note` la BAT BUOC o tang service — mot lan tu choi khong ly do
+    la mot cai cua dong im lang, va nguoi nop se doc duoc ghi chu nay.
+    """
+    try:
+        app_row = creators.reject(user_id, note=payload.note,
+                                  actor_id=admin.user_id)
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_dict()}
+
+
+@app.get("/api/admin/authors")
+def admin_authors(limit: int = 25, offset: int = 0,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return creators.admin_authors(limit=max(1, min(100, limit)),
+                                  offset=max(0, offset))
+
+
+@app.post("/api/admin/authors/{user_id}/suspend")
+def admin_suspend(user_id: str, payload: NoteIn,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Tam dung quyen xuat ban.
+
+    KHONG cham vao noi dung da co: truyen da xuat ban van cong khai, ban nhap van
+    con, chuong va audio khong bi xoa. Chi cac lan xuat ban MOI bi chan. Xem
+    `docs/ADMIN.md` muc "Treo tac gia lam gi va KHONG lam gi".
+    """
+    try:
+        app_row = creators.suspend(user_id, note=payload.note,
+                                   actor_id=admin.user_id)
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_dict()}
+
+
+@app.post("/api/admin/authors/{user_id}/restore")
+def admin_restore(user_id: str, payload: NoteIn,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    try:
+        app_row = creators.restore(user_id, note=payload.note,
+                                   actor_id=admin.user_id)
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_dict()}
+
+
+@app.get("/api/admin/users")
+def admin_users(q: str = "", limit: int = 25, offset: int = 0,
+                admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """Tim nguoi dung. Ket qua CO `email` — day la duong quan tri."""
+    return creators.admin_users(query=q, limit=max(1, min(100, limit)),
+                                offset=max(0, offset))
+
+
+@app.get("/api/admin/users/{user_id}")
+def admin_user(user_id: str,
+               admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    data = creators.admin_user(user_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    return {"user": data}
+
+
+@app.get("/api/admin/novels")
+def admin_novels(q: str = "", state: str = "", limit: int = 25, offset: int = 0,
+                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Duyet truyen — CHI DOC.
+
+    Khong co route go xuong hay xoa: backend chua co luong takedown nao an toan,
+    va dat mot nut xoa len mot luong chua thiet ke la cach nhanh nhat de mat noi
+    dung cua nguoi khac. Xem `docs/ADMIN.md` muc "Viec con lai".
+    """
+    return creators.admin_novels(query=q, state=state,
+                                 limit=max(1, min(100, limit)),
+                                 offset=max(0, offset))
+
+
+@app.get("/api/admin/events")
+def admin_events(limit: int = 50, offset: int = 0,
+                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """Nhat ky kiem duyet. CHI THEM — khong co route sua hay xoa."""
+    return creators.admin_events(limit=max(1, min(200, limit)),
+                                 offset=max(0, offset))

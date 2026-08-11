@@ -180,6 +180,52 @@ class AuthorApplication:
 
 
 @dataclass
+class ModerationEvent:
+    """
+    MOT thao tac kiem duyet da xay ra. Chi ghi, khong bao gio sua.
+
+    VI SAO CAN: cac ham duyet/treo doi trang thai cua nguoi khac, va sau ba
+    thang khong ai nho duoc ai da bam, luc nao, va vi sao. Ban ghi don chi giu
+    trang thai CUOI CUNG — no bi ghi de moi lan co quyet dinh moi.
+
+    KHONG BAO GIO ra API cong khai. `note` co the chua nhan xet noi bo cua nguoi
+    duyet, va `actor_id` cho biet ai dang lam quan tri.
+    """
+
+    #: `author_approved` | `author_rejected` | `author_suspended` |
+    #: `author_restored`. Chuoi on dinh, di vao API quan tri va vao test.
+    action: str
+    #: Nguoi BI tac dong.
+    target_user_id: str
+    #: Nguoi THUC HIEN. Rong = he thong (vd migration grandfather).
+    actor_id: str = ""
+    note: str = ""
+    event_id: str = field(default_factory=lambda: new_id("mev"))
+    #: MOC THOI GIAN DAY DU, den micro giay — KHONG dung `now_iso()`.
+    #:
+    #: `now_iso()` cat o giay, va mot nguoi quan tri bam Duyet roi Treo trong
+    #: cung mot giay se tao ra hai ban ghi CUNG moc. Luc do thu tu doc ra tuy
+    #: thuoc vao phep sap xep, va nhat ky co the ke nguoc cau chuyen — "phuc hoi"
+    #: hien truoc "treo". Da do duoc bang test truoc khi ai kip doc nham.
+    #:
+    #: Cac ban ghi khac giu `now_iso()`: chung khong duoc doc theo THU TU trong
+    #: cung mot giay, con nhat ky thi co.
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "event_id": self.event_id,
+            "action": self.action,
+            "target_user_id": self.target_user_id,
+            "actor_id": self.actor_id,
+            "note": self.note,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
 class AuthorStats:
     """
     Ban TONG HOP cua uy tin mot tac gia.

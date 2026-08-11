@@ -74,6 +74,7 @@ test("vang la mau CHI TIET, khong bao gio la mau nen cua mot be mat", () => {
       '.hh-hang[data-bac="5"]',
       '.hh-hang[data-bac="6"]',
       ".ghi-chu-duyet {",    // khoi trich dan ghi chu cua nguoi duyet
+      ".admin-nhac {",       // loi nhac "co N don dang cho" o khu quan tri
     ];
     const truoc = dong.slice(Math.max(0, i - 14), i).join("\n");
     if (CHO_PHEP.some((ten) => truoc.includes(ten))) return;

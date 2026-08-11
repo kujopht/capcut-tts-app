@@ -40,6 +40,7 @@ from server.domain import (
     Chapter,
     JobStatus,
     ListenCredit,
+    ModerationEvent,
     Novel,
     Profile,
     PublishState,
@@ -830,6 +831,8 @@ class MockMetadataStore:
         self._stats: Dict[str, AuthorStats] = {}
         #: credit_id (tat dinh) -> ban ghi. Xem `create_credit_once`.
         self._credits: Dict[str, ListenCredit] = {}
+        #: Nhat ky kiem duyet. CHI THEM, khong bao gio sua hay xoa.
+        self._events: List[ModerationEvent] = []
 
     # -- novel ---------------------------------------------------------------
 
@@ -1308,6 +1311,27 @@ class MockMetadataStore:
         """Dem lai tu bang su that — dung de doi soat `stats` khi nghi no lech."""
         with self._lock:
             return sum(1 for c in self._credits.values() if c.author_id == author_id)
+
+    # -- nhat ky kiem duyet ---------------------------------------------------
+
+    def record_event(self, event: ModerationEvent) -> ModerationEvent:
+        """CHI THEM. Khong co duong sua hay xoa, va do la ca muc dich."""
+        with self._lock:
+            self._events.append(event)
+            return event
+
+    def list_events(self, target_user_id: str = "", limit: int = 50,
+                    offset: int = 0) -> Tuple[List[ModerationEvent], int]:
+        """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra"."""
+        with self._lock:
+            rows = [e for e in self._events
+                    if not target_user_id or e.target_user_id == target_user_id]
+        # Dao TRUOC roi moi sap xep: `sorted` cua Python on dinh, nen hai ban ghi
+        # cung moc thoi gian se giu thu tu ghi dao nguoc — tuc la cai ghi sau
+        # dung truoc. Mot lop bao ve nua ben canh moc micro giay.
+        rows.reverse()
+        rows.sort(key=lambda e: e.created_at, reverse=True)
+        return rows[offset:offset + limit], len(rows)
 
 
 # -----------------------------------------------------------------------------

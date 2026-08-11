@@ -398,25 +398,35 @@ class ListenRouteTest(Base):
 
 
 class NoAdminEndpointTest(Base):
-    def test_KHONG_co_route_nao_duyet_don(self):
+    def test_duong_duyet_CHI_ton_tai_duoi_khu_quan_tri(self):
         """
-        Rang buoc AN TOAN, khong phai mot viec con thieu.
+        Bai test nay da doi mot lan, va lich su cua no la phan quan trong nhat.
 
-        Du an chua co co che phan quyen quan tri: khong vai tro, khong bang admin,
-        khong xac thuc hai buoc. Mot endpoint duyet khong duoc bao ve la mot cai
-        cong mo — bat ky ai doan duoc duong dan deu tu phong minh lam tac gia.
+        BAN TRUOC: cam MOI route co chua `approve`/`reject`/`suspend`/`admin`.
+        Luc do du an chua co co che phan quyen quan tri nao, va mot endpoint duyet
+        khong duoc bao ve la mot cai cong mo — bat ky ai doan duoc duong dan deu
+        tu phong minh lam tac gia. Bai test do da DO dung vao lan them khu quan
+        tri, y nhu no duoc viet ra de lam.
 
-        Neu ban sau nay THAT SU them trang quan tri, bai test nay se do, va do la
-        luc phai doc lai `docs/AUTHOR_RANK.md` muc "Viec con lai" truoc khi xoa no.
+        BAN NAY: cho phep chung ton tai, nhung CHI duoi `/api/admin/*`, va
+        `test_admin.py::test_moi_route_admin_deu_duoc_bao_ve` kiem tung cai co
+        `Depends(admin_profile)` hay khong.
+
+        Nghia la: mot route duyet nam ngoai `/api/admin/` van bi cam — do la cach
+        de nhat de vo tinh mo lai cai cong cu.
         """
-        cam = ("approve", "reject", "suspend", "restore", "moderation", "admin")
-        duong = [getattr(r, "path", "") for r in server_main.app.routes]
-        for d in duong:
+        cam = ("approve", "reject", "suspend", "restore", "moderation")
+        for r in server_main.app.routes:
+            d = getattr(r, "path", "")
+            if d.startswith("/api/admin/"):
+                continue
             for tu in cam:
-                self.assertNotIn(tu, d.lower(), f"{d} trông như một cổng duyệt")
+                self.assertNotIn(tu, d.lower(),
+                                 f"{d} là cổng duyệt nằm NGOÀI khu quản trị")
 
     def test_cac_ham_duyet_VAN_ton_tai_o_tang_service(self):
-        # Chung phai co that, du chua co route: trang quan tri se goi dung chung.
+        # Trang quan tri goi DUNG nhung ham nay — khong nhan ban logic nghiep vu
+        # vao than route. Xem `main.py` muc QUAN TRI.
         for ten in ("approve", "reject", "suspend", "restore",
                     "pending_applications", "grandfather_existing_authors"):
             self.assertTrue(callable(getattr(self.svc, ten, None)), ten)

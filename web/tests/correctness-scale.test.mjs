@@ -115,7 +115,7 @@ test("khong them ho tai nguyen moi", () => {
   */
   assert.deepEqual(
     [...found].sort(),
-    ["audio", "auth", "chapters", "creator", "health", "jobs",
+    ["admin", "audio", "auth", "chapters", "creator", "health", "jobs",
      "listens", "novels", "search", "users", "voices"],
     "chi duoc dung lai cac ho da co",
   );

@@ -906,7 +906,7 @@ test("khong them endpoint nao cho M2", () => {
   */
   assert.deepEqual(
     [...found].sort(),
-    ["audio", "auth", "chapters", "creator", "health", "jobs",
+    ["admin", "audio", "auth", "chapters", "creator", "health", "jobs",
      "listens", "novels", "search", "users", "voices"],
     "M2 khong duoc them hay bo endpoint nao",
   );

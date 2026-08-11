@@ -40,6 +40,7 @@ from server.domain import (
     AuthorStats,
     AuthorStatus,
     ListenCredit,
+    ModerationEvent,
     Profile,
     PublishState,
     now_iso,
@@ -215,11 +216,14 @@ class CreatorService:
     # co co che phan quyen quan tri, va mot endpoint duyet khong duoc bao ve la
     # mot cai cong mo. Chung o day, duoc kiem thu, cho trang quan tri.
 
-    def approve(self, user_id: str, *, note: str = "") -> AuthorApplication:
+    def approve(self, user_id: str, *, note: str = "",
+                actor_id: str = "") -> AuthorApplication:
         """Duyet. `pending -> approved`."""
-        return self._decide(user_id, AuthorStatus.APPROVED, note)
+        return self._decide(user_id, AuthorStatus.APPROVED, note,
+                            actor_id, "author_approved")
 
-    def reject(self, user_id: str, *, note: str = "") -> AuthorApplication:
+    def reject(self, user_id: str, *, note: str = "",
+               actor_id: str = "") -> AuthorApplication:
         """
         Tu choi. `pending -> rejected`.
 
@@ -228,24 +232,29 @@ class CreatorService:
         """
         if not (note or "").strip():
             raise AuthorStateError("Cần ghi chú lý do khi từ chối đơn.")
-        return self._decide(user_id, AuthorStatus.REJECTED, note)
+        return self._decide(user_id, AuthorStatus.REJECTED, note,
+                            actor_id, "author_rejected")
 
-    def suspend(self, user_id: str, *, note: str = "") -> AuthorApplication:
+    def suspend(self, user_id: str, *, note: str = "",
+                actor_id: str = "") -> AuthorApplication:
         """
         Tam dung quyen xuat ban. `approved -> suspended`.
 
         KHONG go xuat ban cac truyen da co: mot tac gia bi treo van con doc gia,
         va rut truyen cua ho khoi tay nguoi doc la mot hinh phat danh vao nguoi
-        khac. Chi chan xuat ban MOI.
+        khac. Chi chan xuat ban MOI. Ban nhap, chuong va audio deu khong bi cham.
         """
-        return self._decide(user_id, AuthorStatus.SUSPENDED, note)
+        return self._decide(user_id, AuthorStatus.SUSPENDED, note,
+                            actor_id, "author_suspended")
 
-    def restore(self, user_id: str, *, note: str = "") -> AuthorApplication:
+    def restore(self, user_id: str, *, note: str = "",
+                actor_id: str = "") -> AuthorApplication:
         """Phuc hoi sau khi treo. `suspended -> approved`."""
-        return self._decide(user_id, AuthorStatus.APPROVED, note)
+        return self._decide(user_id, AuthorStatus.APPROVED, note,
+                            actor_id, "author_restored")
 
-    def _decide(self, user_id: str, moi: AuthorStatus,
-                note: str) -> AuthorApplication:
+    def _decide(self, user_id: str, moi: AuthorStatus, note: str,
+                actor_id: str = "", hanh_dong: str = "") -> AuthorApplication:
         profile = self._identity.get_profile(user_id)
         cu = profile.author_status
         if not can_transition(cu, moi):
@@ -268,6 +277,16 @@ class CreatorService:
         app.decided_at = now_iso()
         self._store.save_application(app)
         self._set_status(profile, moi)
+
+        # Ghi nhat ky SAU khi da doi trang thai thanh cong. Ghi truoc thi mot buoc
+        # chuyen bi tu choi van de lai mot dong "da duyet" trong nhat ky.
+        if hanh_dong:
+            self._store.record_event(ModerationEvent(
+                action=hanh_dong,
+                target_user_id=user_id,
+                actor_id=actor_id,
+                note=(note or "").strip(),
+            ))
         return app
 
     def _set_status(self, profile: Profile, status: AuthorStatus) -> Profile:
@@ -461,3 +480,180 @@ class CreatorService:
             "would_approve": sum(1 for k in ke_hoach if k["action"] == "duyet"),
             "plan": ke_hoach,
         }
+
+    # =========================================================== QUAN TRI
+    #
+    # Cac ham duoi day phuc vu `/api/admin/*`. Chung KHONG tu kiem quyen: viec do
+    # nam o tang route (`Depends(admin_profile)`), va gop hai trach nhiem vao mot
+    # cho la cach chac chan de mot ngay nao do co cho goi thang ma quen kiem.
+    #
+    # Doi lai, MOI ham o day deu tra ve du lieu RIENG TU (email, trang thai duyet,
+    # ghi chu noi bo). Khong bao gio goi chung tu mot route cong khai.
+
+    def admin_overview(self) -> Dict[str, Any]:
+        """
+        So lieu cho bang dieu khien. CHI nhung con so dem duoc RE.
+
+        Khong bia them chi so nao: mot con so sai tren mot bang quan tri con te
+        han khong co con so nao, vi no duoc dung de ra quyet dinh.
+        """
+        cho, _ = self._store.list_applications(status=AuthorStatus.PENDING,
+                                               limit=1000)
+        tat_ca, _ = self._store.list_applications(limit=1000)
+        dem = {"pending": 0, "approved": 0, "rejected": 0, "suspended": 0}
+        for app in tat_ca:
+            if app.status.value in dem:
+                dem[app.status.value] += 1
+
+        nguoi, tong_nguoi = self._identity.search_profiles("", limit=1000)
+        truyen = self._store.list_novels(owner_id=None, published_only=True)
+
+        return {
+            "pending_applications": len(cho),
+            "approved_authors": dem["approved"],
+            "rejected_applications": dem["rejected"],
+            "suspended_authors": dem["suspended"],
+            "published_novels": len(truyen),
+            # `search_profiles` CHI tra nguoi da chon username — do la mot su
+            # that ve du lieu, khong phai mot phep dem thieu. Dat ten cho dung.
+            "users_with_username": tong_nguoi,
+            "qualified_listens": sum(
+                self._store.get_stats(p.user_id).qualified_listens for p in nguoi
+            ),
+        }
+
+    def admin_applications(self, status: Optional[str] = None, limit: int = 25,
+                           offset: int = 0) -> Dict[str, Any]:
+        """Hang doi don, kem danh tinh cua nguoi nop de khong phai goi N lan."""
+        loc = None
+        if status:
+            try:
+                loc = AuthorStatus(status)
+            except ValueError:
+                loc = None
+        rows, total = self._store.list_applications(status=loc, limit=limit,
+                                                    offset=offset)
+        return {
+            "applications": [self._kem_nguoi(app) for app in rows],
+            "total": total, "limit": limit, "offset": offset,
+        }
+
+    def admin_application(self, user_id: str) -> Optional[Dict[str, Any]]:
+        app = self._store.get_application(user_id)
+        return self._kem_nguoi(app) if app else None
+
+    def _kem_nguoi(self, app: AuthorApplication) -> Dict[str, Any]:
+        data = app.to_dict()
+        try:
+            profile = self._identity.get_profile(app.user_id)
+        except Exception:
+            data["user"] = None
+            return data
+        stats = self._store.get_stats(app.user_id)
+        data["user"] = {
+            "user_id": profile.user_id,
+            # `email` CHI o duong quan tri. Khong bao gio o `/api/users/*`.
+            "email": profile.email,
+            "display_name": profile.display_name,
+            "username": profile.username,
+            "author_status": profile.author_status.value,
+            "created_at": profile.created_at,
+            "qualified_listens": stats.qualified_listens,
+        }
+        return data
+
+    def admin_authors(self, limit: int = 25, offset: int = 0) -> Dict[str, Any]:
+        """
+        Tac gia da duyet VA dang bi treo.
+
+        Ca hai o cung mot cho co y: nguoi quan tri di tim "nhung ai dang co quyen
+        xuat ban, va ai vua bi dung" — tach thanh hai trang bat ho nho mot cai
+        trang nay nam o dau.
+        """
+        nguoi, _ = self._identity.search_profiles("", limit=1000)
+        loc = [p for p in nguoi if p.author_status in
+               (AuthorStatus.APPROVED, AuthorStatus.SUSPENDED)]
+        loc.sort(key=lambda p: -self._store.get_stats(p.user_id).qualified_listens)
+        trang = loc[offset:offset + limit]
+        return {
+            "authors": [self._the_tac_gia(p) for p in trang],
+            "total": len(loc), "limit": limit, "offset": offset,
+        }
+
+    def _the_tac_gia(self, profile: Profile) -> Dict[str, Any]:
+        stats = self._store.get_stats(profile.user_id)
+        truyen = self._store.list_novels(owner_id=profile.user_id,
+                                         published_only=True)
+        return {
+            "user_id": profile.user_id,
+            "email": profile.email,
+            "display_name": profile.display_name,
+            "username": profile.username,
+            "author_status": profile.author_status.value,
+            "created_at": profile.created_at,
+            "qualified_listens": stats.qualified_listens,
+            "published_novels": len(truyen),
+            "rank": rank_progress(stats.qualified_listens),
+        }
+
+    def admin_users(self, query: str = "", limit: int = 25,
+                    offset: int = 0) -> Dict[str, Any]:
+        rows, total = self._identity.search_profiles(query, limit=limit,
+                                                     offset=offset)
+        return {
+            "users": [self._the_tac_gia(p) for p in rows],
+            "total": total, "limit": limit, "offset": offset,
+        }
+
+    def admin_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Chi tiet mot nguoi dung, KEM don va nhat ky kiem duyet cua ho."""
+        try:
+            profile = self._identity.get_profile(user_id)
+        except Exception:
+            return None
+        data = self._the_tac_gia(profile)
+        data["bio"] = profile.bio
+        app = self._store.get_application(user_id)
+        data["application"] = app.to_dict() if app else None
+        su_kien, _ = self._store.list_events(target_user_id=user_id, limit=25)
+        data["events"] = [e.to_dict() for e in su_kien]
+        data["novels"] = [
+            n.to_dict() for n in self._store.list_novels(owner_id=user_id)
+        ]
+        return data
+
+    def admin_novels(self, query: str = "", state: str = "", limit: int = 25,
+                     offset: int = 0) -> Dict[str, Any]:
+        """
+        Duyet truyen cho quan tri — CHI DOC.
+
+        KHONG co thao tac go xuong hay xoa o day: backend chua co luong takedown
+        nao an toan (xem `docs/ADMIN.md` muc "Viec con lai"), va dat mot cai nut
+        xoa len mot luong chua thiet ke la cach nhanh nhat de mat noi dung cua
+        nguoi khac.
+        """
+        rows = self._store.list_novels(owner_id=None, published_only=False)
+        if state in ("draft", "published"):
+            rows = [n for n in rows if n.state.value == state]
+        if query:
+            tu = query.strip().lower()
+            rows = [n for n in rows if tu in n.title.lower()]
+        rows.sort(key=lambda n: n.updated_at, reverse=True)
+        trang = rows[offset:offset + limit]
+
+        ra = []
+        for n in trang:
+            d = n.to_dict()
+            d["chapters"] = len(self._store.list_chapters(n.novel_id))
+            try:
+                chu = self._identity.get_profile(n.owner_id)
+                d["owner"] = {"display_name": chu.display_name,
+                              "username": chu.username}
+            except Exception:
+                d["owner"] = None
+            ra.append(d)
+        return {"novels": ra, "total": len(rows), "limit": limit, "offset": offset}
+
+    def admin_events(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+        rows, total = self._store.list_events(limit=limit, offset=offset)
+        return {"events": [e.to_dict() for e in rows], "total": total}

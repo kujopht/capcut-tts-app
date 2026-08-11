@@ -26,6 +26,11 @@ const NEN: Array<[RegExp, string]> = [
   [/^\/u\//, "explore"],
   // Dang ky tac gia: cung tam voi khu vuc tac gia.
   [/^\/creator\//, "write"],
+  // Khu quan tri: dung tam TOI NHAT (`write`, phu 0.50) va co them mot
+  // mang toi rieng — day la mot be mat lam viec, khong phai mot khung
+  // canh. Khong khai thi no roi vao nhanh mac dinh `auth` va duoc ve
+  // bang tranh cong sao kem sao bang troi qua.
+  [/^\/admin/, "write"],
   [/^\/chapters\//, "reader"],
   [/^\/studio/, "studio"],
   [/^\/write/, "write"],

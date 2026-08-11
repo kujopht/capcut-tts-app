@@ -941,11 +941,6 @@ main { overflow-x: clip; }
   thi khoi mau do to ngang mot cai nut, va mat doc no truoc ca ten san pham.
   Vach duoi thi doc duoc ngay ma khong tranh cho voi thu khac.
 */
-.nav-link[aria-current="page"] {
-  color: var(--text);
-  background: transparent;
-}
-
 /*
   MOT vach dung chung, TRUOT tu muc cu sang muc moi.
 
@@ -1016,11 +1011,25 @@ main { overflow-x: clip; }
 */
 .nav-link[aria-current="page"] {
   font-weight: 650;
-  background: linear-gradient(100deg, var(--sac-1, var(--text)),
-                              var(--sac-2, var(--brand-hover)));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  /* Vien thuoc lo nen roi — muc dang xem khong to nen cua rieng no. */
+  background: transparent;
+  /*
+    MAU DAC, khong dung `background-clip: text`.
+
+    LOI DA XAY RA: ban truoc to chu bang mot gradient qua `background-clip: text`
+    cong `color: transparent`. O muc "Viết truyện" — von la mot CTA co quy tac
+    `.nav-cta` rieng dat `background` cua no — quy tac do ghi de gradient nhung
+    KHONG ghi de `color`, nen chu con lai trong suot tren mot nen dac: nhan bien
+    mat hoan toan.
+
+    Bai hoc chung: `background-clip: text` bien mot thuoc tinh TRANG TRI
+    (`background`) thanh thu quyet dinh chu co nhin thay hay khong. Bat ky quy
+    tac nao cham vao `background` sau do deu lam mat chu, va no mat AM THAM.
+
+    Mot mau dac thi khong bao gio bien mat. Sac cua khu vuc van doi dung — do la
+    dieu thuc su can — chi la khong con chuyen hai tong.
+  */
+  color: var(--sac-2, var(--brand-hover));
 }
 /* Lan do dau tien: hien NGAY tai cho. Mot cu truot tu goc trai man hinh vao luc
    moi mo trang doc ra nhu mot loi ve. */

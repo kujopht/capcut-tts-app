@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 import { viTri } from "@/lib/sections";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
-import { NavIndicator } from "@/components/NavIndicator";
+import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -44,6 +44,17 @@ export function NavLinks() {
   */
   const hop = useRef<HTMLElement | null>(null);
   /*
+    Bang `href -> phan tu`, do chinh cac muc tu dang ky khi duoc gan vao DOM.
+
+    Vien thuoc do TU BANG NAY chu khong tim bang `querySelector`: mot phep tim
+    trong DOM doc trang thai ma React co the cap nhat o mot lan ve den sau, con
+    bang thi duoc dien ngay o buoc gan tham chieu. Xem `NavIndicator`.
+
+    `useRef` chu khong `useState`: dien bang khong duoc keo theo mot lan ve moi,
+    va noi dung cua no on dinh sau lan gan dau tien.
+  */
+  const bang = useRef<BangMuc>(new Map());
+  /*
     `href` cua muc dang xem — tinh MOT lan o day, dung cho ca `aria-current` lan
     vien thuoc. Truyen `pathname` roi de vien thuoc tu do DOM se dua voi chu ky
     ve cua React; da do duoc dieu do tren trinh duyet.
@@ -66,6 +77,10 @@ export function NavLinks() {
             href={link.href}
             className={link.cta ? "nav-link nav-cta" : "nav-link"}
             aria-current={active ? "page" : undefined}
+            ref={(el) => {
+              if (el) bang.current.set(link.href, el);
+              else bang.current.delete(link.href);
+            }}
             /* Sac cua khu vuc, cung nguon token voi vien thuoc. */
             style={
               active
@@ -85,7 +100,7 @@ export function NavLinks() {
         ve vach cua no bang `::after`, nen doi trang la vach bien mat roi mot
         vach khac xuat hien — khong co gi noi hai trang thai voi nhau.
       */}
-      <NavIndicator bao={hop} moc={dangXem} />
+      <NavIndicator bao={hop} bang={bang} moc={dangXem} />
     </nav>
   );
 }

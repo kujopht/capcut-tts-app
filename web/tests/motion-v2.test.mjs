@@ -483,3 +483,55 @@ test("MOI hieu ung khong khi deu nam trong .canh-troi", () => {
       `lớp không khí "${m[1]}" nằm ngoài .canh-troi`);
   }
 });
+
+/* ================================================ hoi quy: nhan muc dang xem */
+
+test("nhan muc dang xem KHONG BAO GIO trong suot", () => {
+  /*
+    LOI DA XAY RA tren `/write`: nhan duoc to bang gradient qua
+    `background-clip: text` cong `color: transparent`. Muc "Viết truyện" la mot
+    CTA co quy tac `.nav-cta` rieng dat `background` cua no; quy tac do ghi de
+    gradient nhung KHONG ghi de `color`, nen chu con lai trong suot tren mot nen
+    dac — nhan bien mat hoan toan.
+
+    Bai hoc chung: `background-clip: text` bien mot thuoc tinh TRANG TRI thanh
+    thu quyet dinh chu co nhin thay hay khong, va no mat AM THAM.
+  */
+  // `codeOnly`: chinh chu thich trong khoi do giai thich vi sao KHONG dung
+  // `background-clip: text`, nen quet ca khoi se bat trung loi giai thich.
+  const than = codeOnly(khoi(css(), '.nav-link[aria-current="page"] {'));
+  assert.ok(!/background-clip/.test(than),
+    "nhãn mục đang xem lại phụ thuộc background-clip: text");
+  assert.ok(!/color: transparent/.test(than), "nhãn mục đang xem trong suốt");
+  assert.match(than, /color: var\(--sac-2/, "nhãn không có màu đặc");
+});
+
+test("vien thuoc do tu BANG THAM CHIEU, khong tu querySelector", () => {
+  /*
+    Doc trang thai DOM (`[aria-current]`, `a[href=...]`) la doc mot thu React co
+    the cap nhat o mot lan ve den sau. Bang tham chieu thi duoc dien ngay o buoc
+    gan tham chieu.
+  */
+  const src = read("../src/components/NavIndicator.tsx");
+  assert.match(src, /bang\.current\.get\(moc\)/);
+  assert.ok(!/querySelector/.test(codeOnly(src)),
+    "vẫn tìm mục đang xem bằng querySelector");
+  assert.match(src, /useLayoutEffect/, "đo bằng useEffect — sẽ trễ một khung");
+  assert.match(src, /ResizeObserver/);
+  assert.ok(!/requestAnimationFrame/.test(codeOnly(src)),
+    "còn phụ thuộc rAF — không chạy khi tab bị ẩn");
+});
+
+test("doc bao.current BEN TRONG callback, khong o than effect", () => {
+  /*
+    React gan ref TU DUOI LEN: `NavIndicator` la con cua the `<nav>`, nen o lan
+    commit dau tien layout effect cua no chay TRUOC khi ref cua `<nav>` duoc gan.
+    Doc `bao.current` o than effect thay `null` va thoat som — roi khong bao gio
+    chay lai. Trieu chung: TAI THANG `/library` thi vien thuoc khong hien ra.
+  */
+  const src = read("../src/components/NavIndicator.tsx");
+  const at = src.indexOf("const do_lai = () => {");
+  const than = src.slice(at, src.indexOf("queueMicrotask", at));
+  assert.match(than, /const hop = bao\.current;/,
+    "không đọc bao.current bên trong callback");
+});

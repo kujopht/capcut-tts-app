@@ -1973,27 +1973,14 @@ main { overflow-x: clip; }
   box-shadow: var(--ring);
 }
 
-.input-search {
-  width: 190px;
-  min-height: 0;
-  height: 32px;
-  padding: 0 var(--s3);
-  font-size: var(--t-sm);
-  border: 0;
-  border-radius: var(--r-full);
-  background: transparent;
-}
-/* Vien cua ca cum da lam viec nay roi — hai vien long nhau thi ron. */
-.input-search:hover,
-.input-search:focus { border: 0; background: transparent; box-shadow: none; }
-.input-search::-webkit-search-cancel-button { filter: invert(0.6); }
+/*
+  Be RONG cua o tim o header. Van la mot con so nho co y: day la trang de DOC
+  truyen, va mot thanh tim to chiem cho cua bia va ten truyen.
 
-.site-search-go {
-  min-height: 0;
-  height: 30px;
-  border-radius: var(--r-full);
-  padding: 0 var(--s3);
-}
+  `.input-search` cua ban truoc (mot o nhap that trong header) da bi bo — header
+  gio la mot NUT mo overlay, xem `.tim-nut`.
+*/
+.input-search { width: 190px; }
 
 /* ------------------------------------------------ menu cong cu / tai khoan */
 
@@ -3699,4 +3686,349 @@ body.co-mini { padding-bottom: 74px; }
 
   .filter-bar { padding: var(--s3); }
   .quick-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ==================================================== huy hieu tac gia va hang
+
+   HAI huy hieu noi HAI chuyen khac nhau, nen chung phai PHAN BIET DUOC BANG MAT:
+
+     tac gia   VIEN LIEN + ngoi but      — da duoc duyet (moderation)
+     hang      KHONG vien + dau an hinh  — uy tin (so luot nghe hop le)
+
+   Mot tac gia hang cao van co the bi treo. Dung hang de ngu y "da duoc kiem
+   duyet" la sai — xem `docs/AUTHOR_RANK.md`.
+   ========================================================================== */
+
+.hh-tacgia,
+.hh-hang {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 7px;
+  border-radius: var(--r-full);
+  font-size: var(--t-xs);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.hh-tacgia svg,
+.hh-hang svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.hh-sm { padding: 2px 8px 2px 6px; font-size: 11px; }
+.hh-sm svg { width: 13px; height: 13px; }
+
+/*
+  Huy hieu TAC GIA. Vien lien la tin hieu chinh — no doc ra la "co mot cai khung
+  quanh nguoi nay", tuc la co ai do da xac nhan.
+*/
+.hh-tacgia {
+  color: var(--vang-sang);
+  background: #d8b56a14;
+  border: 1px solid var(--vang-vien);
+  box-shadow: inset 0 1px 0 #e4c9822b;
+}
+
+/*
+  Huy hieu HANG. KHONG vien lien — chi mot nen rat mo. Do dam tang theo bac, va
+  HINH cung doi theo bac: mot he huy hieu chi khac nhau o mau thi nguoi khong
+  phan biet duoc mau se thay sau cai giong het nhau.
+*/
+.hh-hang {
+  color: var(--text-2);
+  background: #ffffff0a;
+  border: 1px solid transparent;
+}
+.hh-hang[data-bac="1"] { color: #9fb0cc; }
+.hh-hang[data-bac="2"] { color: #8fd6e8; background: #22d3ee0f; }
+.hh-hang[data-bac="3"] { color: #a78bfa; background: #8b6cff14; }
+.hh-hang[data-bac="4"] { color: #c4b5fd; background: #8b6cff1f; }
+.hh-hang[data-bac="5"] {
+  color: #e4c982;
+  background: #d8b56a14;
+  box-shadow: 0 0 14px #d8b56a1f;
+}
+.hh-hang[data-bac="6"] {
+  color: #f3e3b8;
+  background: linear-gradient(135deg, #d8b56a24, #8b6cff1f);
+  box-shadow: 0 0 18px #d8b56a2b, inset 0 1px 0 #ffffff1f;
+}
+
+/* Thanh tien toi hang sau. Khong ve khi da o hang cao nhat. */
+.rank-thanh {
+  height: 6px;
+  border-radius: var(--r-full);
+  background: #ffffff0f;
+  border: 1px solid var(--line-soft);
+  overflow: hidden;
+}
+.rank-thanh > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--grad-brand);
+  transition: width var(--dur) var(--ease);
+}
+
+/* ============================================ dang ky tac gia + trang ca nhan */
+
+/* Quy dinh xuat ban: mot danh sach ngan, khong phai mot ban dieu khoan. */
+.quy-dinh {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+}
+.quy-dinh li::marker { color: var(--vang); }
+
+/* The loai: nut bat/tat, KHONG phai checkbox an trong mot cai nhan. */
+.the-chon { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.chip-chon {
+  border-color: var(--brand-line);
+  background: var(--brand-soft);
+  color: var(--brand-hover);
+}
+
+/* O tich dong y: vung bam la CA dong chu, khong chi cai o vuong 13px. */
+.dong-y {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  cursor: pointer;
+  font-size: var(--t-sm);
+  color: var(--text-2);
+}
+.dong-y input { margin-top: 2px; flex: 0 0 auto; accent-color: var(--brand); }
+
+/*
+  Ghi chu cua nguoi duyet. Ve nhu mot loi trich dan chu khong nhu mot canh bao
+  do: day la mot cau noi cua nguoi khac gui cho tac gia, khong phai mot loi he
+  thong.
+*/
+.ghi-chu-duyet {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  border-left: 2px solid var(--vang-vien);
+  border-radius: 0 var(--r2) var(--r2) 0;
+  background: #d8b56a0f;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  line-height: var(--lh-normal);
+}
+
+.don-tom-tat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px var(--s4);
+  margin: 0;
+  font-size: var(--t-sm);
+}
+.don-tom-tat dt { color: var(--text-3); }
+.don-tom-tat dd { margin: 0; color: var(--text-2); }
+
+.textarea-sm { min-height: 84px; }
+
+/* -- trang ca nhan cong khai ---------------------------------------------- */
+
+.ho-so-ten { font-family: var(--font-mono); }
+.ho-so-hh { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0; }
+.ho-so-bio { margin-top: var(--s1); }
+.ho-so-so { align-items: flex-end; text-align: right; }
+.ho-so-dem {
+  font-size: var(--t-2xl);
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+@media (max-width: 900px) {
+  /* Cot so lieu xuong duoi thay vi bi ep con vai chuc pixel. */
+  .ho-so-hero { grid-template-columns: auto minmax(0, 1fr); }
+  .ho-so-so { grid-column: 1 / -1; align-items: flex-start; text-align: left; }
+}
+
+/* Cong xuat ban khi chua duoc duyet: mot nhan trang thai + mot dong giai thich,
+   khong phai mot cai nut bi lam mo. Nut mo doc ra la "hong"; nhan trang thai doc
+   ra la "chua toi luc". */
+.cong-xb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+/* Ten cong khai da chon: mot the gon, KHONG phai mot o nhap bi khoa. O nhap bi
+   khoa doc ra la "cho nay hong"; mot the doc ra la "xong roi". */
+.ten-cong-khai .ten-lon {
+  font-size: var(--t-lg);
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.creator-dinh { align-items: center; }
+
+/* ================================================== tim kiem toan cuc
+
+   O tim o header gio la mot NUT MO overlay. Ve NHU mot o nhap chu khong nhu mot
+   cai nut: nguoi ta tim mot o de go, va mot cai nut ghi "Tim kiem" thi mat luot
+   qua khong nhan ra.
+   ========================================================================== */
+
+.tim-nut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 0 10px 0 14px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  background: #0b0e18a3;
+  color: var(--text-3);
+  font-size: var(--t-sm);
+  cursor: text;
+  transition: border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+.tim-nut:hover { border-color: var(--line-strong); background: #0b0e18cc; }
+.tim-nut-chu { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tim-phim {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #ffffff0a;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.tim-lop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: center;
+  /* KHONG dat giua theo chieu doc: hop tim nam gan dinh de no khong nhay len
+     xuong khi so ket qua doi. */
+  padding: 10vh var(--s4) var(--s4);
+  background: #05070fb8;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.tim-hop {
+  width: min(680px, 100%);
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r4);
+  background: #080a14e8;
+  overflow: hidden;
+}
+.tim-dau {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line-soft);
+}
+.tim-dau > svg { color: var(--brand-hover); flex: 0 0 auto; }
+.tim-o {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--t-md);
+  outline: none;
+}
+.tim-o::placeholder { color: var(--text-3); }
+
+.tim-than { overflow-y: auto; padding: var(--s2) 0; }
+.tim-trong {
+  padding: var(--s6) var(--s4);
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--t-sm);
+}
+.tim-nhom {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: var(--s2) var(--s4) 4px;
+  font-size: var(--t-xs);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.tim-nhom svg { color: var(--brand); }
+
+.tim-kq {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s4);
+  color: inherit;
+  text-decoration: none;
+  border-left: 2px solid transparent;
+}
+/*
+  Muc dang chon: mot vach doc + nen sang. KHONG dung `:hover` lam tin hieu duy
+  nhat — nguoi dung ban phim khong co con tro, va ho phai thay minh dang o dau.
+*/
+.tim-kq.la-chon {
+  background: #ffffff0d;
+  border-left-color: var(--brand);
+}
+.tim-kq:hover { color: inherit; }
+/*
+  Bia trong ket qua tim.
+
+  `flex: 0 0 44px` VA `width: 44px` tren chinh cai bia ben trong: `.cover-thumb`
+  co kich thuoc rieng cua no, va mot the cha chi khai `width` khong ep duoc con.
+  Do la loi da do duoc tren anh chup — bia tran ra de len chu, va moi ten truyen
+  mat chu cai dau ("ua Hai Tac" thay vi "Vua Hai Tac").
+*/
+.tim-bia { flex: 0 0 44px; width: 44px; }
+.tim-bia .cover { width: 44px; }
+.tim-avatar {
+  flex: 0 0 auto;
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--grad-brand);
+  color: var(--on-brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+.tim-chu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.tim-chu > strong,
+.tim-chu > .hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tim-hh { display: flex; gap: 6px; flex: 0 0 auto; }
+
+.tim-chan {
+  padding: var(--s3) var(--s4);
+  border-top: 1px solid var(--line-soft);
+}
+
+@media (max-width: 640px) {
+  /* O dien thoai, overlay chiem gan het man hinh: mot hop nho o giua thi ban
+     phim ao che mat mot nua ket qua. */
+  .tim-lop { padding: 0; }
+  .tim-hop { width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; }
+  /* Huy hieu xuong dong thay vi ep ten nguoi con vai ky tu. */
+  .tim-hh { display: none; }
 }

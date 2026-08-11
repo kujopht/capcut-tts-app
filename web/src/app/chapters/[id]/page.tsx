@@ -10,6 +10,7 @@ import { useAsyncData } from "@/lib/useAsyncData";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { ChapterPlayer } from "@/components/ChapterPlayer";
 import { MiniPlayer } from "@/components/MiniPlayer";
+import { ListenReporter } from "@/components/ListenReporter";
 import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
 import { IconBook } from "@/components/Icons";
 
@@ -132,6 +133,10 @@ export default function ChapterPage({
               `components/AudioEngine.tsx`. No chi noi len khi trinh phat lon
               da cuon khuat VA nguoi dung da tung bam phat. */}
           <MiniPlayer moc={mocPhat} />
+
+          {/* Dem thoi gian nghe THAT va bao len may chu de tinh uy tin cho tac
+              gia. Khong ve gi ca — xem `components/ListenReporter.tsx`. */}
+          <ListenReporter chapterId={chapter.chapter_id} />
         </AudioEngineProvider>
       ) : (
         <div className="reader-col">

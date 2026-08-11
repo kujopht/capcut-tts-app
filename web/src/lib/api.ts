@@ -22,6 +22,92 @@ export interface Profile {
   listened_minutes: number;
   tts_characters_used: number;
   created_at: string;
+  /** Tên công khai, dạng chuẩn. Chuỗi rỗng = chưa chọn. */
+  username: string;
+  bio: string;
+  author_status: AuthorStatus;
+}
+
+/**
+ * Được phép **xuất bản công khai** hay không. Đây là moderation, KHÔNG phải uy
+ * tín — xem `docs/AUTHOR_RANK.md`.
+ *
+ * Giá trị này chỉ có ở hồ sơ **của chính mình**. Hồ sơ công khai của người khác
+ * chỉ lộ đúng một bit: `is_author`.
+ */
+export type AuthorStatus =
+  | "none"
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "suspended";
+
+/** Một bậc hạng. Ngưỡng do máy chủ cấp — KHÔNG nhúng vào frontend. */
+export interface RankTier {
+  key: string;
+  title: string;
+  min_listens: number;
+  level: number;
+}
+
+/** Hạng hiện tại + chặng đường tới hạng sau. Máy chủ tính. */
+export interface RankProgress {
+  key: string;
+  title: string;
+  level: number;
+  qualified_listens: number;
+  next_key: string | null;
+  next_title: string | null;
+  next_at: number | null;
+  remaining: number;
+  percent: number;
+}
+
+export interface AuthorApplication {
+  pen_name: string;
+  bio: string;
+  genres: string[];
+  intro: string;
+  accepted_rules: boolean;
+  status: AuthorStatus;
+  reviewer_note: string;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+}
+
+/** Trạng thái khu Creator của chính mình, trong MỘT lần gọi. */
+export interface CreatorState {
+  author_status: AuthorStatus;
+  can_publish: boolean;
+  can_apply: boolean;
+  apply_blocked_reason: string;
+  username: string;
+  bio: string;
+  application: AuthorApplication | null;
+  rank?: RankProgress;
+  qualified_listens?: number;
+  published_novels?: number;
+  /** Chỉ có khi chưa chọn username. Là GỢI Ý, không phải tên được gán. */
+  username_suggestion?: string;
+}
+
+/**
+ * Hồ sơ **công khai** của một người.
+ *
+ * Danh sách cho phép ở backend (`creator.public_profile`) quyết định có gì ở
+ * đây. Không bao giờ có email, tier, quota, hay trạng thái duyệt.
+ */
+export interface PublicProfile {
+  user_id: string;
+  username: string;
+  display_name: string;
+  bio?: string;
+  is_author: boolean;
+  rank?: RankProgress;
+  published_novels?: number;
+  novels?: Novel[];
 }
 
 export interface Novel {
@@ -207,6 +293,73 @@ export const api = {
     }),
 
   me: () => request<{ profile: Profile }>("/api/auth/me"),
+
+  // ---------------------------------------------------------------- tác giả
+
+  creatorMe: () => request<CreatorState>("/api/creator/me"),
+
+  /** Bảng hạng. KHÔNG cần đăng nhập — giao diện vẽ thang bậc trước cả khi biết
+      người dùng là ai. Ngưỡng là chính sách và nó sẽ đổi; một bản frontend cũ
+      đang chạy trong tab của ai đó không được vẽ một hạng khác với hạng máy chủ
+      công nhận. */
+  ranks: () => request<{ tiers: RankTier[] }>("/api/creator/ranks"),
+
+  setUsername: (username: string) =>
+    request<{ profile: Profile }>("/api/creator/username", {
+      method: "PUT",
+      body: JSON.stringify({ username }),
+    }),
+
+  setBio: (bio: string) =>
+    request<{ profile: Profile }>("/api/creator/bio", {
+      method: "PUT",
+      body: JSON.stringify({ bio }),
+    }),
+
+  applyAuthor: (payload: {
+    pen_name: string;
+    bio?: string;
+    genres?: string[];
+    intro: string;
+    accepted_rules: boolean;
+  }) =>
+    request<{ application: AuthorApplication; author_status: AuthorStatus }>(
+      "/api/creator/apply",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  publicProfile: (username: string) =>
+    request<{ profile: PublicProfile }>(
+      `/api/users/${encodeURIComponent(username)}`,
+    ),
+
+  /**
+   * Tìm người ở **máy chủ**.
+   *
+   * Tải hết người dùng về rồi lọc ở trình duyệt là vừa chậm vừa là một cách tải
+   * cả danh bạ người dùng về máy khách.
+   */
+  searchPeople: (q: string, kind: "users" | "authors" = "users",
+                 limit = 8, offset = 0) =>
+    request<{ people: PublicProfile[]; total: number; limit: number; offset: number }>(
+      `/api/search/people?q=${encodeURIComponent(q)}&kind=${kind}` +
+      `&limit=${limit}&offset=${offset}`,
+    ),
+
+  /**
+   * Báo một lần nghe. Máy chủ là nguồn sự thật cho uy tín tác giả.
+   *
+   * KHÔNG bắt buộc đăng nhập: khách ẩn danh vẫn gọi được và nhận lại
+   * `credited: false`. Không bao giờ trả về số lượt nghe của tác giả.
+   */
+  reportListen: (chapterId: string, listenedSeconds: number) =>
+    request<{ credited: boolean; reason: string }>("/api/listens", {
+      method: "POST",
+      body: JSON.stringify({
+        chapter_id: chapterId,
+        listened_seconds: Math.max(0, Math.round(listenedSeconds)),
+      }),
+    }),
 
   /**
    * Kết thúc phiên ở phía máy chủ.

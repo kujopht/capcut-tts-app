@@ -121,12 +121,29 @@ test("o tim nam trong header, khong phai mot thanh khong lo giua trang", () => {
     `ô tìm ở header phải nhỏ, không tràn — đang là ${rong || "không đặt"}px`);
 });
 
-test("o tim chi DIEU HUONG, khong nhan ban duong tim thu hai", () => {
+test("tim kiem khong nhan ban duong LOC thu hai", () => {
+  /*
+    Rang buoc nay da doi hinh nhung khong doi noi dung.
+
+    Ban truoc: o tim o header CHI dieu huong sang `/fanfic?q=`, va bai test cam
+    no goi API. V2 co mot overlay hien ket qua ngay, nen no PHAI goi API —
+    nhung moi quan tam that su van y nguyen: khong duoc co mot duong LOC thu hai.
+
+    Cu the:
+      - overlay goi dung `browseNovels`, tuc la dung endpoint ma `/fanfic` dung;
+      - no KHONG tu loc o trinh duyet;
+      - va no luon co duong giao lai cho `/fanfic?q=` de xem day du.
+  */
+  const overlay = read("../src/components/SearchOverlay.tsx");
+  assert.match(overlay, /api\.browseNovels\(\{ query: tu/,
+    "overlay không dùng lại đường tìm của backend");
+  assert.match(overlay, /\/fanfic\?q=\$\{encodeURIComponent\(tu\)\}/,
+    "overlay không giao lại cho trang Khám phá");
+  assert.ok(!/\.filter\(/.test(overlay),
+    "overlay tự lọc ở trình duyệt — đó là đường lọc thứ hai");
+
+  // Va o header van chi la mot cai nut mo overlay, khong tu tim gi ca.
   const search = read("../src/components/SiteSearch.tsx");
-  assert.match(search, /\/fanfic\?q=/);
-  assert.match(search, /encodeURIComponent/);
-  // Toan bo tim/loc/phan trang da do BACKEND lam o `/fanfic`. Goi thang API o
-  // day la tao duong thu hai, va hai duong se lech nhau.
   assert.ok(!search.includes("api."), "SiteSearch không được tự gọi API");
 });
 

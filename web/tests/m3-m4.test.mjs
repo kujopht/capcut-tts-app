@@ -270,9 +270,14 @@ test("M3\\/M4 khong pha M1: khoi mobile van nang vung bam len 44px", () => {
 
 test("cac endpoint cu con nguyen, chi them dung mot cai", () => {
   const found = new Set([...api().matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]));
+  /*
+    Bon ho MOI cua V2 — `creator`, `users`, `search`, `listens`. Bai test nay van
+    la mot cai chot: no khong cam them ho, no bat MOI lan them phai di qua day.
+  */
   assert.deepEqual(
     [...found].sort(),
-    ["audio", "auth", "chapters", "health", "jobs", "novels", "voices"],
+    ["audio", "auth", "chapters", "creator", "health", "jobs",
+     "listens", "novels", "search", "users", "voices"],
     "khong duoc them ho tai nguyen moi",
   );
   // Duong doi thu tu nam duoi `novels`, khong phai mot ho moi

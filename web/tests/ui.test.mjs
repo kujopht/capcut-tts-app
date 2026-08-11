@@ -900,9 +900,14 @@ test("khong them endpoint nao cho M2", () => {
   const found = new Set(
     [...api.matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]),
   );
+  /*
+    Bon ho MOI cua V2 — `creator`, `users`, `search`, `listens`. Bai test nay van
+    la mot cai chot: no khong cam them ho, no bat MOI lan them phai di qua day.
+  */
   assert.deepEqual(
     [...found].sort(),
-    ["audio", "auth", "chapters", "health", "jobs", "novels", "voices"],
+    ["audio", "auth", "chapters", "creator", "health", "jobs",
+     "listens", "novels", "search", "users", "voices"],
     "M2 khong duoc them hay bo endpoint nao",
   );
   // Nghe tai cho dung dung duong da co, khong tao duong rieng

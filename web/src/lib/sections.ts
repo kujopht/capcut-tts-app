@@ -60,6 +60,10 @@ const BANG: ReadonlyArray<readonly [RegExp, ViTri]> = [
   // vuc rieng. Xem `Huong` va `viTri`.
   [/^\/novels\//, "long"],
   [/^\/chapters\//, "long"],
+  // Trang ca nhan va dang ky tac gia deu la trang BEN TRONG mot khu vuc,
+  // khong phai mot khu vuc rieng tren truc.
+  [/^\/u\//, "long"],
+  [/^\/creator\//, "long"],
   [/^\/login/, "ngoai"],
   [/^\/auth\//, "ngoai"],
 ];

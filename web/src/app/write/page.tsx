@@ -22,6 +22,7 @@ import {
 } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
+import { CongXuatBan, useTrangThaiCreator } from "@/components/PublishGate";
 import { MAX_CHAPTER_CHARS } from "@/lib/limits";
 import {
   ALL_VOICES_LABEL,
@@ -67,6 +68,11 @@ export default function WritePage() {
   const router = useRouter();
   const { profile, loading: sessionLoading } = useSession();
   const toast = useToast();
+  /*
+    Trang thai tac gia, nap MOT lan cho ca trang. Chi nut xuat ban doc toi no —
+    xem `components/PublishGate.tsx`.
+  */
+  const { trangThai: creator } = useTrangThaiCreator(Boolean(profile));
 
   const [novels, setNovels] = useState<Novel[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -755,14 +761,17 @@ export default function WritePage() {
                               Gỡ xuất bản
                             </button>
                           ) : (
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              onClick={() => setConfirmPublish("publish")}
-                              disabled={chapters.length === 0}
-                            >
-                              Xuất bản
-                            </button>
+                            /*
+                              CONG CHAN XUAT BAN. Chi NUT nay doi theo trang thai
+                              tac gia — tao truyen, sua truyen, them chuong, tao
+                              audio deu khong di qua day. Ai cung viet duoc, chi
+                              khong ai cung dua ra cong khai duoc.
+                            */
+                            <CongXuatBan
+                              trangThai={creator}
+                              coTheXuatBan={chapters.length > 0}
+                              onXuatBan={() => setConfirmPublish("publish")}
+                            />
                           )}
                           <button
                             type="button"

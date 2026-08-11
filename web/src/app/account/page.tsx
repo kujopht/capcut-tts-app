@@ -12,7 +12,9 @@ import {
   IconFeather,
   IconMic,
   IconHeadphones,
+  IconKey,
 } from "@/components/Icons";
+import { CreatorSection } from "@/components/CreatorSection";
 
 const TIER_LABEL: Record<string, string> = {
   free: "Miễn phí",
@@ -114,6 +116,12 @@ export default function AccountPage() {
           Hai chỉ số đầu do máy chủ quản lý và hiện chưa được cập nhật tự động.
         </p>
       </section>
+
+      {/*
+        KHU CREATOR. Dat TRUOC "Lối tắt": voi mot nguoi da la tac gia, hang va so
+        luot nghe la thu ho vao trang nay de xem; con loi tat thi ho da thuoc.
+      */}
+      <CreatorSection />
 
       <section className="stack" aria-labelledby="acc-loi-tat">
         <h2 className="section-title section-title-icon" id="acc-loi-tat">

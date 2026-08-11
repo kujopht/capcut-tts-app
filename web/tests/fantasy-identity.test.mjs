@@ -56,21 +56,49 @@ test("vang la mau CHI TIET, khong bao gio la mau nen cua mot be mat", () => {
     // dau la ten mau, cai sau la mot net day mot pixel.
     if (!/^\s*background(-color|-image)?:\s*[^;]*(var\(--vang|#(d8b56a|e4c982))/i.test(d)) return;
     /*
-      Hai ngoai le da ghi nhan, ca hai deu la NET chu khong phai be mat:
-        `.hang-muc::before`  dau vien 5x5px
-        `.sao-bang`          vet sang day 1.5px o trang dang nhap
+      DANH SACH CHO PHEP, khong phai mot phep noi long.
+
+      Luat that su la: vang khong bao gio la nen cua mot NUT, mot THE, hay mot
+      TRANG. Cac cho duoi day deu nho hon the — mot net, mot huy hieu cao 22px,
+      mot khoi trich dan — va deu la cho de bai dat vang ("huy hieu tac gia:
+      vang mem, quang nhe"; "hang: mau tiet che").
+
+      Them mot ten vao danh sach nay phai la mot viec CO Y. Do la ca cong dung
+      cua no: mot ngay nao do co ai to nen mot cai the bang vang, va bai test se
+      do thay vi im lang cho qua.
     */
+    const CHO_PHEP = [
+      ".hang-muc::before",   // dau vien 5x5px sau nhan muc
+      ".sao-bang {",         // vet sang day 1.5px o trang dang nhap
+      ".hh-tacgia {",        // huy hieu tac gia — chinh cho de bai dat vang
+      '.hh-hang[data-bac="5"]',
+      '.hh-hang[data-bac="6"]',
+      ".ghi-chu-duyet {",    // khoi trich dan ghi chu cua nguoi duyet
+    ];
     const truoc = dong.slice(Math.max(0, i - 14), i).join("\n");
-    if (/\.hang-muc::before|\.sao-bang \{/.test(truoc)) return;
+    if (CHO_PHEP.some((ten) => truoc.includes(ten))) return;
     nen_vang.push(`${i + 1}: ${d.trim()}`);
   });
   assert.deepEqual(nen_vang, [], `vàng bị dùng làm nền:\n  ${nen_vang.join("\n  ")}`);
 
-  // Va KHONG bao gio la mau CHU.
-  assert.ok(
-    !/color:\s*var\(--vang/.test(text.replace(/border-color:[^;]*;/g, "")),
-    "vàng bị dùng làm màu chữ",
-  );
+  /*
+    Va KHONG bao gio la mau CHU cua noi dung.
+
+    Hai ngoai le, ca hai deu la NHAN chu khong phai van ban: chu "Tác giả" trong
+    chinh huy hieu, va dau cham dau dong 4px cua danh sach quy dinh. Mot doan van
+    mau vang thi ca trang doi ton — do la thu bai test nay chan.
+  */
+  const CHU_CHO_PHEP = [".hh-tacgia {", ".quy-dinh li::marker"];
+  const dong_chu = text.replace(/border-color:[^;]*;/g, "").split("\n");
+  const chu_vang = [];
+  dong_chu.forEach((d, i) => {
+    if (!/^\s*color:\s*var\(--vang/.test(d)) return;
+    const truoc = dong_chu.slice(Math.max(0, i - 8), i).join("\n");
+    if (CHU_CHO_PHEP.some((ten) => truoc.includes(ten))) return;
+    chu_vang.push(`${i + 1}: ${d.trim()}`);
+  });
+  assert.deepEqual(chu_vang, [],
+    `vàng bị dùng làm màu chữ:\n  ${chu_vang.join("\n  ")}`);
 });
 
 test("so lan dung vang co GIOI HAN — day la 10-15% cuoi, khong phai lop son", () => {
@@ -79,13 +107,15 @@ test("so lan dung vang co GIOI HAN — day la 10-15% cuoi, khong phai lop son", 
     them vang vao ba muoi cho thi bai test nay do, va nguoi sua se phai doc lai
     doan tren truoc khi nang nguong.
 
-    Hien tai: 15 lan dung bien + 12 gia tri hex truc tiep.
+    Tran duoc nang MOT lan, khi V2 them huy hieu tac gia va sau bac hang — do la
+    cho de bai dat vang tuong minh, va sau bac thi can sau sac do. Lan nang nay
+    phai kem mot ly do; lan sau cung vay.
   */
   const text = css();
   const bien = (text.match(/var\(--vang[a-z-]*\)/g) ?? []).length;
   const hex = (text.match(/#(d8b56a|e4c982)/gi) ?? []).length;
-  assert.ok(bien + hex <= 34,
-    `vàng xuất hiện ${bien + hex} lần (biến ${bien} + hex ${hex}) — cần ≤ 34`);
+  assert.ok(bien + hex <= 48,
+    `vàng xuất hiện ${bien + hex} lần (biến ${bien} + hex ${hex}) — cần ≤ 48`);
 
   // Va tim VAN la mau chinh: no phai xuat hien nhieu han vang han han.
   const tim = (text.match(/#8b6cff|var\(--brand/gi) ?? []).length;

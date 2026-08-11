@@ -107,9 +107,16 @@ test("endpoint chuong cua toi khong kem noi dung, khong kem URL audio", () => {
 
 test("khong them ho tai nguyen moi", () => {
   const found = new Set([...api().matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]));
+  /*
+    Bon ho MOI cua V2 — `creator`, `users`, `search`, `listens`. Bai test nay
+    van la mot cai chot: no khong cam them ho, no bat MOI lan them phai di qua
+    day. Mot ho tai nguyen moi la mot be mat API moi, va no phai duoc ai do co y
+    viet vao danh sach nay chu khong tu xuat hien.
+  */
   assert.deepEqual(
     [...found].sort(),
-    ["audio", "auth", "chapters", "health", "jobs", "novels", "voices"],
+    ["audio", "auth", "chapters", "creator", "health", "jobs",
+     "listens", "novels", "search", "users", "voices"],
     "chi duoc dung lai cac ho da co",
   );
 });

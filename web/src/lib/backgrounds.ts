@@ -21,6 +21,11 @@ const NEN: Array<[RegExp, string]> = [
   // Trang truyen dung CUNG tam voi trang kham pha: ca hai deu la buoc DUYET,
   // chua phai buoc doc. Trang doc chuong moi doi sang den trang mieu.
   [/^\/novels\//, "explore"],
+  // Trang ca nhan: cung the gioi voi trang kham pha — day la cho de TIM
+  // ra nguoi khac, khong phai mot cong dang nhap.
+  [/^\/u\//, "explore"],
+  // Dang ky tac gia: cung tam voi khu vuc tac gia.
+  [/^\/creator\//, "write"],
   [/^\/chapters\//, "reader"],
   [/^\/studio/, "studio"],
   [/^\/write/, "write"],

@@ -10,9 +10,10 @@ Module nay la Python thuan: khong FastAPI, khong Qt, khong mang.
 
 from __future__ import annotations
 
+import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -21,19 +22,52 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+#: Khoa va moc cuoi cung da phat ra, cho `now_iso_us`.
+_moc_lock = threading.Lock()
+_moc_cuoi: Optional[datetime] = None
+
+
 def now_iso_us() -> str:
     """
-    Moc thoi gian den MICRO GIAY.
+    Moc thoi gian den MICRO GIAY, va TANG NGHIEM NGAT trong mot tien trinh.
 
     Dung cho moi ban ghi duoc doc theo THU TU: nhat ky kiem duyet, bai dang,
     binh luan, thong bao. `now_iso()` cat o giay, va hai bai dang trong cung
-    mot giay se co cung moc — luc do thu tu bang tin tuy thuoc vao phep sap
-    xep, va no co the ke nguoc cau chuyen.
+    mot giay se co cung moc — luc do thu tu tuy thuoc vao phep sap xep, va no
+    co the ke nguoc cau chuyen.
+
+    HAI dieu o ham nay khong hien nhien, va ca hai deu duoc mot bai test do ra:
+
+    1. `timespec="microseconds"` — DAT TUONG MINH, khong dung mac dinh.
+
+       `datetime.isoformat()` BO phan thap phan khi `microsecond == 0`. Luc do
+       mot moc thanh "12:00:00+00:00" ben canh "12:00:00.500000+00:00", va so
+       sanh CHUOI dat chung nguoc thu tu: '+' (0x2B) nho hon '.' (0x2E). Mot
+       ban ghi roi dung vao micro giay tron se nhay len dau danh sach.
+
+    2. TANG NGHIEM NGAT — moc moi luon lon hon moc truoc.
+
+       Hai ban ghi tao trong CUNG mot micro giay (chuyen thuong xay ra tren kho
+       trong bo nho, noi khong co do tre mang) se co moc GIONG NHAU, va luc do
+       thu tu roi ve phep pha the — mot `post_id` sinh ngau nhien. Ket qua la
+       ba binh luan hien ra theo mot thu tu ngau nhien, khong phai thu tu chung
+       duoc viet. Da do duoc bang test truoc khi ai kip doc nham.
+
+       Chi dam bao trong MOT tien trinh. Hai tien trinh cung ghi (uvicorn +
+       worker) van co the trung moc, va luc do thu tu la tuy y — dieu do chap
+       nhan duoc: hai su kien cach nhau duoi mot micro giay thi khong co "truoc"
+       va "sau" nao co y nghia voi nguoi doc.
 
     Cac ban ghi KHONG duoc doc theo thu tu (ho so, truyen, chuong) giu
     `now_iso()`: chung khong can, va moc ngan thi de doc hon khi go loi.
     """
-    return datetime.now(timezone.utc).isoformat()
+    global _moc_cuoi
+    with _moc_lock:
+        moc = datetime.now(timezone.utc)
+        if _moc_cuoi is not None and moc <= _moc_cuoi:
+            moc = _moc_cuoi + timedelta(microseconds=1)
+        _moc_cuoi = moc
+    return moc.isoformat(timespec="microseconds")
 
 
 def new_id(prefix: str) -> str:
@@ -289,9 +323,12 @@ class ModerationEvent:
     #:
     #: Cac ban ghi khac giu `now_iso()`: chung khong duoc doc theo THU TU trong
     #: cung mot giay, con nhat ky thi co.
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    #:
+    #: Truoc day day la `datetime.now(timezone.utc).isoformat()` viet thang, va
+    #: no mang hai bay ma `now_iso_us()` da bit lai: moc roi vao micro giay tron
+    #: se mat phan thap phan (roi so sanh chuoi dat no nguoc thu tu), va hai
+    #: thao tac trong cung mot micro giay se trung moc. Xem `now_iso_us`.
+    created_at: str = field(default_factory=now_iso_us)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

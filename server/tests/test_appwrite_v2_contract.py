@@ -80,6 +80,16 @@ class FakeAppwrite:
             bang[doc].update(dict(json.get("data") or {}))
             return {"$id": doc, **bang[doc]}
 
+        if method == "DELETE":
+            # Appwrite tra 404 khi xoa hang khong ton tai, va tang kho dua vao
+            # dieu do de biet "co that su xoa duoc gi khong" — xem
+            # `AppwriteSocialStore._xoa_neu_co`.
+            if doc not in bang:
+                raise _Loi404("Document not found")
+            bang.pop(doc)
+            self.perms.pop(f"{col}/{doc}", None)
+            return {}
+
         raise AssertionError(f"chưa mô phỏng: {method} {url}")
 
     # -- truy van ------------------------------------------------------------
@@ -110,6 +120,17 @@ class FakeAppwrite:
                             giu.append(r)
                             break
                 rows = giu
+            elif m == "greaterThanEqual":
+                # So sanh CHUOI ISO cung dinh dang chinh la so sanh thoi gian —
+                # xem `appwrite_social.q_greater_equal`.
+                rows = [r for r in rows
+                        if vals and str(r.get(attr, "")) >= str(vals[0])]
+            elif m == "select":
+                # Appwrite that CHI tra ve nhung thuoc tinh duoc chon. Ban gia
+                # lap phai bat chuoc dieu do: mot doan ma doc mot truong khong
+                # nam trong `select` se chay tot o day roi hong o that.
+                giu = set(vals) | {"$id"}
+                rows = [{k: v for k, v in r.items() if k in giu} for r in rows]
             elif m == "orderAsc":
                 order = (attr, False)
             elif m == "orderDesc":

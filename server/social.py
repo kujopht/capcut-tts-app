@@ -35,6 +35,20 @@ REPORT_DETAIL_MAX_CHARS = 500
 MODERATION_NOTE_MAX_CHARS = 1000
 
 
+#: Cac ky tu DIEU KHIEN HUONG DOC. Chung khong ve ra gi, nhung chung doi thu tu
+#: hien thi cua nhung ky tu xung quanh — nen mot chuoi chua chung co the hien ra
+#: nguoc han noi dung that.
+#:
+#: Danh sach nay CO TINH la hep: dung nhom bidi, khong phai ca the loai Unicode
+#: `Cf`. `U+200D` (ZWJ) va `U+200C` (ZWNJ) cung o trong `Cf` va deu can thiet —
+#: ZWJ ghep emoji gia dinh thanh mot hinh, ZWNJ can cho vai he chu viet.
+_BIDI = frozenset(
+    "‎‏"                          # LRM, RLM
+    "‪‫‬‭‮"        # LRE, RLE, PDF, LRO, RLO
+    "⁦⁧⁨⁩"              # LRI, RLI, FSI, PDI
+)
+
+
 class SocialError(ValueError):
     """Vi pham chinh sach xa hoi. Tang route doi thanh 400/422."""
 
@@ -49,9 +63,15 @@ def clean_text(raw: str, *, toi_da: int, ten: str, bat_buoc: bool = True) -> str
 
     Ba viec, theo dung thu tu nay:
 
-      1. Bo ky tu dieu khien (tru xuong dong va tab). Chung khong hien thi duoc
-         va mot so co the lam roi thu tu hien thi cua chuoi — `U+202E` (dao
-         chieu doc) la vi du kinh dien.
+      1. Bo ky tu dieu khien (tru xuong dong va tab) VA nhom dieu khien huong
+         doc. Nhom thu hai la thu de bo sot: chung deu >= U+0020 nen mot bo loc
+         "bo ky tu duoi 32" khong bat duoc cai nao.
+
+         `U+202E` (dao chieu doc) lam mot chuoi HIEN RA khac han noi dung that
+         cua no — mot binh luan co the doc thanh mot cau nguoc lai. Ta bo DUNG
+         nhom bidi (`_BIDI`) chu khong bo ca the loai Unicode `Cf`: `U+200D`
+         (ZWJ) cung o trong `Cf`, va no la thu ghep emoji gia dinh thanh mot
+         hinh. Bo ca nhom thi mot emoji bien thanh ba.
       2. Gom bon dong trong tro len thanh hai. Mot bai dang toan dong trong
          chiem ca man hinh cua nguoi khac trong bang tin, va do la mot dang spam
          khong can mot he thong chong spam nao de chan.
@@ -63,7 +83,8 @@ def clean_text(raw: str, *, toi_da: int, ten: str, bat_buoc: bool = True) -> str
     text = str(raw or "")
     text = "".join(
         ch for ch in text
-        if ch in ("\n", "\t") or (ord(ch) >= 32 and ord(ch) != 127)
+        if ch in ("\n", "\t")
+        or (ord(ch) >= 32 and ord(ch) != 127 and ch not in _BIDI)
     )
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()

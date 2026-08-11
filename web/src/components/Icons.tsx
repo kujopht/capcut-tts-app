@@ -181,3 +181,23 @@ export function IconTag(p: Props) {
     </Svg>
   );
 }
+
+/** Khien — khu kiem duyet noi dung. */
+export function IconShield(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M12 3.2 5.4 5.7v5.1c0 4 2.7 7.6 6.6 9 3.9-1.4 6.6-5 6.6-9V5.7L12 3.2Z" />
+      <path d="M9.2 12.1l2 2 3.6-3.9" />
+    </Svg>
+  );
+}
+
+/** Cai loa/bang tin — khu bai dang. */
+export function IconMegaphone(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 10.5v3a1.5 1.5 0 0 0 1.5 1.5H7l2.6 3.4a1 1 0 0 0 1.8-.6V6.2a1 1 0 0 0-1.8-.6L7 9H5.5A1.5 1.5 0 0 0 4 10.5Z" />
+      <path d="M14.4 9.1a4 4 0 0 1 0 5.8M17 6.8a7.5 7.5 0 0 1 0 10.4" />
+    </Svg>
+  );
+}

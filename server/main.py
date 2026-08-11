@@ -853,10 +853,20 @@ def get_novel(novel_id: str,
     chapters = store.list_chapters(novel_id)
     stamps = _with_job_settings(
         novel.owner_id, store.audio_by_chapter([c.chapter_id for c in chapters]))
-    return {
+    ra: Dict[str, Any] = {
         "novel": _novel_out(novel),
         "chapters": [_chapter_row(c, stamps.get(c.chapter_id)) for c in chapters],
     }
+    # Trang thai theo doi ghep vao CUNG lan goi nay, chi voi truyen DA XUAT BAN
+    # (ban nhap khong theo doi duoc — xem `SocialService.follow_story`).
+    #
+    # Ghep vao day chu khong de frontend hoi them: nut "Theo dõi truyện" khong
+    # duoc phep nhay tu "chua biet" sang "dang theo doi" sau khi trang da ve
+    # xong. Cung ly do voi `social` o `/api/users/{username}`.
+    if novel.state is PublishState.PUBLISHED:
+        ra["follow"] = social.story_follow_state(
+            novel_id, optional_profile(authorization))
+    return ra
 
 
 def _purge_chapter(chapter: Chapter) -> Dict[str, int]:
@@ -2087,16 +2097,32 @@ def apply_author(payload: ApplyIn,
 
 
 @app.get("/api/users/{username}")
-def public_profile_route(username: str) -> Dict[str, Any]:
+def public_profile_route(
+    username: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
     """
     Trang cong khai cua mot nguoi dung. KHONG can dang nhap.
 
     404 cho ca hai truong hop "khong ton tai" va "co nhung chua chon username":
     phan biet ra thi thanh mot cach do xem ai da dang ky.
+
+    `social` duoc ghep vao CUNG mot lan goi thay vi de frontend hoi them.
+    Ly do khong phai tiet kiem mot request: hai lan goi tao ra hai trang thai
+    tai, va giao dien phai ve ca hai — cai thu hai luon la cai bi quen. Nut
+    "Theo dõi" khong duoc phep nhay tu "chua biet" sang "dang theo doi" sau khi
+    trang da ve xong.
+
+    Nguoi xem la TUY CHON: khach vang lai van thay so lieu, chi khong thay co
+    "dang theo doi" (no luon `false`).
     """
     data = creators.public_profile_by_username(username)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    viewer = optional_profile(authorization)
+    ho_so = identity.profile_by_username(username)
+    if ho_so is not None:
+        data["social"] = social.profile_social(ho_so, viewer)
     return {"profile": data}
 
 

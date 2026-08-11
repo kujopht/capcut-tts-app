@@ -37,12 +37,17 @@ test("'Viết truyện' nam trong dieu huong chinh, ngang hang cac muc khac", as
   const order = [...nav.matchAll(/href: "([^"]+)", label: "([^"]+)"/g)].map(
     (m) => [m[1], m[2]],
   );
-  assert.deepEqual(order, [
-    ["/", "Trang chủ"],
-    ["/fanfic", "Khám phá"],
-    ["/library", "Thư viện"],
-    ["/write", "Viết truyện"],
-  ]);
+  // Thu tu day du duoc ghim o `ui.test.mjs`. Bai nay chi giu MOT dieu: "Viết
+  // truyện" nam trong thanh chinh, ngang hang cac muc khac — khong phai bi giau
+  // trong menu tai khoan. Ghim ca danh sach o hai cho la hai cho phai sua moi
+  // lan them mot muc.
+  assert.ok(
+    order.some(([href, label]) => href === "/write" && label === "Viết truyện"),
+    "'Viết truyện' không có trong thanh điều hướng chính",
+  );
+  assert.equal(order[0][0], "/", "'Trang chủ' phải đứng đầu");
+  assert.equal(order.at(-1)?.[0], "/write",
+    "'Viết truyện' đứng cuối hàng — nó là điểm đến, không phải điểm ghé qua");
 });
 
 test("route cu khong doi: /write va /studio deu con", () => {

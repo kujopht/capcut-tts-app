@@ -72,7 +72,18 @@ test("moi ham API quan tri deu nam duoi /api/admin/", () => {
   const src = api();
   const at = src.indexOf("export const adminApi");
   assert.notEqual(at, -1, "thiếu adminApi");
-  const than = src.slice(at);
+  /*
+    CAT o `export` KE TIEP, khong quet tu day den cuoi tep.
+
+    Ban truoc lay `src.slice(at)` va dua vao mot gia dinh AM THAM: `adminApi` la
+    thu cuoi cung trong tep. Gia dinh do vo ngay khi tang xa hoi duoc noi vao
+    sau no — bai test bat `/api/limits` roi bao "khong nam trong khu quan tri",
+    trong khi `/api/limits` chua bao gio la mot duong quan tri.
+
+    Mot bai test noi dung thu no dinh noi thi phai TU CAT lay pham vi cua no.
+  */
+  const sau = src.indexOf("\nexport ", at + 1);
+  const than = sau === -1 ? src.slice(at) : src.slice(at, sau);
   const duong = [...than.matchAll(/request<[^>]*>\(\s*`?"?(\/api\/[^`"?]+)/g)]
     .map((m) => m[1]);
   assert.ok(duong.length >= 8, `chỉ thấy ${duong.length} đường`);

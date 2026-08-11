@@ -54,8 +54,13 @@ function khoi(text, moc) {
 
 test("truc la mot hanh trinh, khong phai thu tu tinh co cua mot cai menu", async () => {
   const { TRUC } = await import("../src/lib/sections.ts");
+  // "community" nam GIUA "explore" va "library", khong o cuoi: truc nay la
+  // hanh trinh doc -> nghe -> viet, va bang tin thuoc nua DOC. Dat no sau
+  // `write`/`studio` se lam mot cu bam tu "Khám phá" sang "Cộng đồng" quay may
+  // di qua ca khu sang tac.
   assert.deepEqual([...TRUC],
-    ["home", "explore", "library", "write", "studio", "account"]);
+    ["home", "explore", "community", "library", "write", "studio",
+     "account"]);
 });
 
 test("moi duong dan roi dung khu vuc", async () => {

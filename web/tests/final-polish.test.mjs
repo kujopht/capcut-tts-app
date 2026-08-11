@@ -2,6 +2,7 @@
 // L4 (mau hardcode) va vung bam breadcrumb.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { kiemHoEndpoint } from "./_ho-endpoint.mjs";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -279,19 +280,8 @@ test("khong pha M2/M3/M4: cac tinh nang van con", () => {
 });
 
 test("cac ho endpoint khong doi, chi them duong duoi novels", () => {
-  const found = new Set([...api().matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]));
-  /*
-    Bon ho MOI cua V2 — `creator`, `users`, `search`, `listens`. Bai test nay
-    van la mot cai chot: no khong cam them ho, no bat MOI lan them phai di qua
-    day. Mot ho tai nguyen moi la mot be mat API moi, va no phai duoc ai do co y
-    viet vao danh sach nay chu khong tu xuat hien.
-  */
-  assert.deepEqual(
-    [...found].sort(),
-    ["admin", "audio", "auth", "chapters", "creator", "health", "jobs",
-     "listens", "novels", "search", "users", "voices"],
-    "khong duoc them ho tai nguyen moi",
-  );
+  // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`.
+  kiemHoEndpoint(api());
   assert.match(api(), /\/api\/novels\/tags/);
 });
 

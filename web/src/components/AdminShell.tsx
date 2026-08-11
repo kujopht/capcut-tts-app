@@ -33,6 +33,8 @@ import {
   IconFeather,
   IconHistory,
   IconKey,
+  IconMegaphone,
+  IconShield,
   IconUser,
 } from "@/components/Icons";
 
@@ -42,6 +44,10 @@ const MUC = [
   { href: "/admin/authors", nhan: "Tác giả", icon: IconKey },
   { href: "/admin/users", nhan: "Người dùng", icon: IconUser },
   { href: "/admin/stories", nhan: "Truyện", icon: IconBook },
+  // Kiem duyet xa hoi. "Báo cáo" dat TRUOC "Bài đăng": hang doi bao cao la cua
+  // vao thuong ngay cua nguoi kiem duyet, con danh sach bai la duong tra cuu.
+  { href: "/admin/reports", nhan: "Báo cáo", icon: IconShield },
+  { href: "/admin/posts", nhan: "Bài đăng", icon: IconMegaphone },
   { href: "/admin/events", nhan: "Nhật ký", icon: IconHistory },
 ];
 

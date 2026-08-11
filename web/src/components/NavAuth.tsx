@@ -8,6 +8,7 @@ import { viTri } from "@/lib/sections";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
+import { NotificationBell } from "@/components/NotificationBell";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -31,6 +32,7 @@ import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 const LINKS = [
   { href: "/", label: "Trang chủ" },
   { href: "/fanfic", label: "Khám phá" },
+  { href: "/community", label: "Cộng đồng" },
   { href: "/library", label: "Thư viện" },
   { href: "/write", label: "Viết truyện", cta: true },
 ];
@@ -238,6 +240,9 @@ export function NavAuth() {
   return (
     <div className="row nav-right">
       <ToolsMenu />
+      {/* Chuông đứng TRƯỚC menu tài khoản: nó là thứ người ta nhìn thường
+          xuyên hơn, và đặt nó sau avatar sẽ đẩy nó ra rìa màn hình ở mobile. */}
+      <NotificationBell />
       <AccountMenu />
     </div>
   );

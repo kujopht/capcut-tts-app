@@ -1,6 +1,7 @@
 // N+1 o thu vien audio, va cac khai bao kem theo cua ba ban sua lan nay.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { kiemHoEndpoint } from "./_ho-endpoint.mjs";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -106,19 +107,10 @@ test("endpoint chuong cua toi khong kem noi dung, khong kem URL audio", () => {
    ================================================================ */
 
 test("khong them ho tai nguyen moi", () => {
-  const found = new Set([...api().matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]));
-  /*
-    Bon ho MOI cua V2 — `creator`, `users`, `search`, `listens`. Bai test nay
-    van la mot cai chot: no khong cam them ho, no bat MOI lan them phai di qua
-    day. Mot ho tai nguyen moi la mot be mat API moi, va no phai duoc ai do co y
-    viet vao danh sach nay chu khong tu xuat hien.
-  */
-  assert.deepEqual(
-    [...found].sort(),
-    ["admin", "audio", "auth", "chapters", "creator", "health", "jobs",
-     "listens", "novels", "search", "users", "voices"],
-    "chi duoc dung lai cac ho da co",
-  );
+  // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`. Truoc day cung
+  // mot danh sach duoc chep tay o BON bai test, va them mot ho endpoint lam do
+  // bon cho cung luc.
+  kiemHoEndpoint(api());
 });
 
 test("cac ham api cu con nguyen", () => {

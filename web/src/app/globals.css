@@ -4438,3 +4438,531 @@ body.co-mini { padding-bottom: 74px; }
   .sao-tinh:nth-child(n + 3) { display: none; }
   .sao-bang:nth-child(n + 3) { display: none; }
 }
+
+/* ==========================================================================
+   TẦNG XÃ HỘI
+   ==========================================================================
+   Không có gì ở đây vẽ lại bố cục trang. Mọi thứ dựa lên `.card`, `.btn`,
+   `.badge`, `.stat` đã có — khối này chỉ thêm những hình dạng chưa từng có:
+   một bài đăng, một chuỗi bình luận, một cái chuông, một bộ tab.
+
+   CHUYỂN ĐỘNG ở đây cố tình DÈ DẶT. Bảng tin là nơi người ta cuộn, và mọi thứ
+   nảy lên khi xuất hiện sẽ làm cả trang đọc ra như đang rung. Xem khối
+   `prefers-reduced-motion` ở cuối tệp — nó tắt hết. */
+
+/* -- sắc của khu Cộng đồng ------------------------------------------------- */
+/* Cùng hệ token với các khu khác. Xanh mòng két: khu này không phải nơi đọc
+   (tím) cũng không phải nơi sáng tác (vàng) — nó là quảng trường ở giữa. */
+:root {
+  --sac-community-1: #2dd4bf;
+  --sac-community-2: #5eead4;
+}
+
+/* -- một bài đăng ---------------------------------------------------------- */
+
+.bai-dang {
+  display: grid;
+  gap: 10px;
+}
+
+.bai-dau {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bai-dau-chu {
+  display: grid;
+  min-width: 0;
+}
+
+.bai-ten {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--t-md);
+  font-weight: 650;
+  min-width: 0;
+}
+
+.bai-ten a { color: inherit; text-decoration: none; }
+.bai-ten a:hover { color: var(--brand-hover); }
+
+.bai-chu {
+  margin: 0;
+  /* `pre-wrap` giữ xuống dòng người dùng gõ. Không có nó thì một bài viết thành
+     một khối chữ liền, và người viết sẽ tưởng chỗ này ăn mất định dạng. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
+.bai-anh {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  /* Ảnh do người dùng gửi có tỉ lệ bất kỳ. Chặn chiều cao để một ảnh dọc rất
+     dài không đẩy cả bảng tin xuống ba màn hình. */
+  max-height: 70vh;
+  object-fit: contain;
+  background: var(--bg-2);
+}
+
+.bai-truyen {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--t-sm);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.bai-truyen:hover { border-color: var(--brand); color: var(--brand-hover); }
+
+.bai-day {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.bai-so-bl { padding: 0 8px; }
+
+/* Đã thích: chỉ ĐỔI MÀU, không phóng to.
+   Một trái tim nảy lên trong bảng tin đọc ra như một hiệu ứng trò chơi, và nó
+   xảy ra ở mọi cú bấm — thứ dễ chịu lần đầu thành thứ gây mệt lần thứ mười. */
+.da-thich { color: var(--danger); }
+.da-thich:hover { color: var(--danger); }
+
+.bai-sua { display: grid; gap: 8px; }
+
+/* -- hộp soạn bài ---------------------------------------------------------- */
+
+.soan-bai { display: grid; gap: 10px; }
+
+.soan-bai-o {
+  resize: vertical;
+  min-height: 76px;
+  line-height: 1.6;
+}
+
+.soan-bai-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Ô chọn tệp thật bị ẩn, nhãn thành nút. `opacity:0` + kích thước 0 chứ không
+   `display:none`: một ô `display:none` không nhận được tiêu điểm bàn phím, nên
+   người dùng Tab sẽ không tới được nút chọn ảnh. */
+.soan-bai-tep {
+  position: relative;
+  cursor: pointer;
+}
+
+.soan-bai-tep input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.soan-bai-truyen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.soan-bai-truyen select { max-width: 200px; }
+
+.soan-bai-anh {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.soan-bai-anh img {
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+}
+
+.soan-bai-ghi-chu { margin: 0; }
+
+/* -- bình luận ------------------------------------------------------------- */
+
+.binh-luan-khoi {
+  display: grid;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.binh-luan-go { display: grid; gap: 6px; }
+.binh-luan-go textarea { resize: vertical; min-height: 58px; }
+
+.binh-luan-ds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.binh-luan-nhanh { display: grid; gap: 8px; }
+
+.binh-luan {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+}
+
+/* Trả lời thụt vào MỘT bậc, và chỉ một — đúng một cấp là tất cả những gì tồn
+   tại (xem `social.REPLY_MAX_DEPTH`). Vạch dọc bên trái nói rõ quan hệ mà không
+   cần thêm chữ nào. */
+.binh-luan.tra-loi {
+  margin-left: 20px;
+  border-left: 2px solid var(--line);
+  background: transparent;
+}
+
+.binh-luan.da-go { opacity: 0.7; font-style: italic; }
+
+.binh-luan-dau {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--t-sm);
+}
+
+.binh-luan-ten { font-weight: 650; color: var(--text); text-decoration: none; }
+.binh-luan-ten:hover { color: var(--brand-hover); }
+
+.binh-luan-chu {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.binh-luan-day { display: flex; gap: 2px; flex-wrap: wrap; }
+
+/* -- nút theo dõi ---------------------------------------------------------- */
+
+.theo-doi {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.theo-doi-so { font-variant-numeric: tabular-nums; }
+
+/* Đang theo dõi: viền đặc thay vì nền đặc. Nút này ở trạng thái "đã bật" phần
+   lớn thời gian, và một nút nền đặc luôn hiện sẽ hút mắt khỏi nội dung. */
+.dang-theo-doi { border-color: var(--brand); color: var(--brand-hover); }
+
+/* -- chuông thông báo ------------------------------------------------------ */
+
+.bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.bell:hover { border-color: var(--line); background: var(--bg-2); }
+.bell:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.bell-dot {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.bell-panel {
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(70vh, 460px);
+  overflow-y: auto;
+}
+
+.bell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.bell-empty { padding: 14px 12px; }
+
+.bell-item {
+  display: grid;
+  gap: 2px;
+  align-items: start;
+  white-space: normal;
+  text-align: left;
+}
+
+.bell-text { line-height: 1.45; }
+.bell-preview { color: var(--muted); font-style: italic; }
+.bell-luc { font-size: var(--t-xs); }
+
+/* Chưa đọc: một vạch bên trái, không phải một nền màu.
+   Nền màu trên nhiều dòng liền nhau làm cả bảng trông như đang báo lỗi. */
+.bell-moi { border-left: 2px solid var(--brand); }
+
+/* -- trang thông báo ------------------------------------------------------- */
+
+.tb-ds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.tb-muc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--card);
+}
+
+.tb-moi { border-left: 3px solid var(--brand); }
+
+.tb-lien-ket {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.tb-lien-ket:hover .tb-chu { color: var(--brand-hover); }
+.tb-chu { line-height: 1.5; }
+.tb-xem { color: var(--muted); font-style: italic; }
+
+/* -- tab của trang cá nhân ------------------------------------------------- */
+
+.ho-so-tabs { margin-top: 4px; }
+
+.tab-hang {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab-nut {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  border: 0;
+  /* Vạch dưới trong suốt SẴN, không thêm vào khi chọn: nếu thêm thì cả hàng
+     nhảy lên 2px ở lần chọn đầu tiên. */
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab-nut:hover { color: var(--text); }
+.tab-nut:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+.tab-chon {
+  color: var(--text);
+  border-bottom-color: var(--sac-2, var(--brand));
+}
+
+.tab-so {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ba con số + nút theo dõi ở đầu trang cá nhân. */
+.ho-so-so-hang {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 6px 0 0;
+  font-size: var(--t-sm);
+  color: var(--muted);
+}
+
+.ho-so-so-hang strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -- hộp thoại báo cáo ----------------------------------------------------- */
+
+.lop-phu {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.55);
+  /* Không làm mờ nền: `backdrop-filter` trên cả màn hình là một phép dựng lại
+     đắt, và trên máy yếu nó làm hộp thoại xuất hiện giật. */
+}
+
+.hop-thoai {
+  display: grid;
+  gap: 12px;
+  width: min(460px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--card);
+}
+
+.hop-thoai:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.hop-thoai h2 { margin: 0; }
+.hop-thoai textarea { resize: vertical; }
+
+.bao-cao-ly-do {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.radio-hang {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  cursor: pointer;
+}
+
+/* Vùng bấm được cao ít nhất 34px — ngón tay trên điện thoại không nhắm được một
+   cái nút radio 13px. */
+.radio-hang input { width: 16px; height: 16px; }
+
+/* -- kiểm duyệt xã hội (quản trị) ----------------------------------------- */
+
+.bc-the { border-left: 3px solid var(--warn); }
+
+.bc-dau { gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.bc-mo-ta { margin: 0; color: var(--muted); font-style: italic; }
+
+.bc-noi-dung {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--line);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--bg-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.bc-day { align-items: center; }
+
+.admin-bai-chu {
+  display: block;
+  color: var(--text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.admin-bai-chu:hover { color: var(--brand-hover); }
+
+/* -- mobile ---------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  /* Ảnh bài thấp hơn trên điện thoại: 70vh ở đây là gần cả màn hình, và người
+     dùng phải cuộn qua một ảnh mới tới bình luận. */
+  .bai-anh { max-height: 50vh; }
+
+  .binh-luan.tra-loi { margin-left: 12px; }
+
+  .soan-bai-truyen { width: 100%; }
+  .soan-bai-truyen select { max-width: none; flex: 1; }
+
+  .soan-bai-anh img { max-width: 100%; }
+
+  /* Ba con số xuống dòng thay vì tràn ngang. */
+  .ho-so-so-hang { gap: 10px 14px; }
+
+  /* Bảng thông báo rộng gần hết màn hình, neo theo mép phải của thanh header. */
+  .bell-panel { width: calc(100vw - 20px); }
+
+  .tb-muc { flex-wrap: wrap; }
+
+  /* Hàng tab cuộn ngang được nếu có thêm tab sau này, và không có thanh cuộn
+     hiện ra làm lệch chiều cao. */
+  .tab-hang {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tab-hang::-webkit-scrollbar { display: none; }
+}
+
+/* -- tôn trọng lựa chọn giảm chuyển động ---------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .bai-dang,
+  .tb-muc,
+  .binh-luan,
+  .bell-panel,
+  .hop-thoai {
+    animation: none !important;
+    transition: none !important;
+  }
+}

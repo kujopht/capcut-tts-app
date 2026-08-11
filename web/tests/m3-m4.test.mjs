@@ -4,6 +4,7 @@
 // nen file nay tu duoc nhan.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { kiemHoEndpoint } from "./_ho-endpoint.mjs";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -269,17 +270,8 @@ test("M3\\/M4 khong pha M1: khoi mobile van nang vung bam len 44px", () => {
 });
 
 test("cac endpoint cu con nguyen, chi them dung mot cai", () => {
-  const found = new Set([...api().matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]));
-  /*
-    Bon ho MOI cua V2 — `creator`, `users`, `search`, `listens`. Bai test nay van
-    la mot cai chot: no khong cam them ho, no bat MOI lan them phai di qua day.
-  */
-  assert.deepEqual(
-    [...found].sort(),
-    ["admin", "audio", "auth", "chapters", "creator", "health", "jobs",
-     "listens", "novels", "search", "users", "voices"],
-    "khong duoc them ho tai nguyen moi",
-  );
+  // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`.
+  kiemHoEndpoint(api());
   // Duong doi thu tu nam duoi `novels`, khong phai mot ho moi
   assert.match(api(), /novels\/\$\{novelId\}\/chapters\/order/);
 });

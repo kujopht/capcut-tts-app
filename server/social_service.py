@@ -153,6 +153,21 @@ class SocialService:
         self._store.unfollow_story(story_follow_key(actor.user_id, novel_id))
         return self._trang_thai_theo_doi_truyen(actor.user_id, novel_id)
 
+    def story_follow_state(self, novel_id: str,
+                           viewer: Optional[Profile] = None) -> Dict[str, Any]:
+        """
+        Trang thai theo doi mot truyen, cho trang chi tiet truyen.
+
+        Nhan nguoi xem TUY CHON: khach vang lai van thay so nguoi theo doi, chi
+        `following` luon `false`. Hai duong di chung mot ham de con so hien ra
+        khong the lech giua nguoi da dang nhap va nguoi chua.
+        """
+        if viewer is None:
+            dem = self._store.story_follower_counts([novel_id])
+            return {"following": False,
+                    "follower_count": int(dem.get(novel_id, 0))}
+        return self._trang_thai_theo_doi_truyen(viewer.user_id, novel_id)
+
     def _trang_thai_theo_doi_nguoi(self, viewer_id: str,
                                    target_id: str) -> Dict[str, Any]:
         dem = self._store.follower_counts([target_id])

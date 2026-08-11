@@ -1,6 +1,7 @@
 // Regression cho hai lo hong giao dien da phat hien va sua o lan nay.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { kiemHoEndpoint } from "./_ho-endpoint.mjs";
 import { readFileSync, existsSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -24,7 +25,7 @@ test("du cac route cua hai khu vuc san pham", () => {
   }
 });
 
-test("thanh dieu huong chinh dung BON muc, theo dung thu tu", () => {
+test("thanh dieu huong chinh dung NAM muc, theo dung thu tu", () => {
   const nav = read("../src/components/NavAuth.tsx");
   // Thu tu la mot quyet dinh san pham, khong phai chuyen thu hang muc. So khop
   // theo VI TRI chu khong phai theo tap hop.
@@ -38,6 +39,7 @@ test("thanh dieu huong chinh dung BON muc, theo dung thu tu", () => {
   assert.deepEqual(order, [
     ["/", "Trang chủ"],
     ["/fanfic", "Khám phá"],
+    ["/community", "Cộng đồng"],
     ["/library", "Thư viện"],
     ["/write", "Viết truyện"],
   ]);
@@ -893,23 +895,13 @@ test("dung lai AudioPlayer san co, khong tu ve trinh phat moi", () => {
   assert.ok(!/resolveAudio|audioLink/.test(src), "khong duoc tu goi lai lop audio");
 });
 
-test("khong them endpoint nao cho M2", () => {
-  const api = read("../src/lib/api.ts");
-  // Lay ten tai nguyen ngay sau /api/ — du de biet co endpoint moi hay khong,
-  // ma khong phu thuoc vao cach viet chuoi (nhay don, nhay kep hay backtick).
-  const found = new Set(
-    [...api.matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]),
-  );
-  /*
-    Bon ho MOI cua V2 — `creator`, `users`, `search`, `listens`. Bai test nay van
-    la mot cai chot: no khong cam them ho, no bat MOI lan them phai di qua day.
-  */
-  assert.deepEqual(
-    [...found].sort(),
-    ["admin", "audio", "auth", "chapters", "creator", "health", "jobs",
-     "listens", "novels", "search", "users", "voices"],
-    "M2 khong duoc them hay bo endpoint nao",
-  );
+test("khong them ho endpoint nao ma khong di qua day", () => {
+
+  // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`.
+
+  const api = read("../src/lib/api.ts");
+  kiemHoEndpoint(api);
+
   // Nghe tai cho dung dung duong da co, khong tao duong rieng
   assert.match(api, /audioLink:/);
   assert.match(api, /\/api\/audio\/\$\{chapterId\}\/url/);

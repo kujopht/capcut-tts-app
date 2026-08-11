@@ -16,9 +16,10 @@ import { use, useCallback } from "react";
 import { api, type PublicProfile } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
-import { StoryCard } from "@/components/StoryCard";
 import { EmptyState, ErrorState, Loading, formatNumber } from "@/components/ui";
-import { IconBook, IconHeadphones, IconUser } from "@/components/Icons";
+import { IconHeadphones, IconUser } from "@/components/Icons";
+import { FollowButton } from "@/components/FollowButton";
+import { ProfileTabs } from "./ProfileTabs";
 
 export default function PublicProfilePage({
   params,
@@ -58,6 +59,7 @@ export default function PublicProfilePage({
 
   const p: PublicProfile = data.profile;
   const truyen = p.novels ?? [];
+  const xh = p.social;
 
   return (
     <div className="page">
@@ -87,6 +89,32 @@ export default function PublicProfilePage({
           ) : null}
 
           {p.bio ? <p className="lead lead-narrow ho-so-bio">{p.bio}</p> : null}
+
+          {/*
+            Ba con so, va MOT nut. Nut khong hien khi dang xem trang cua chinh
+            minh: mot nut "Theo doi" tro vao chinh nguoi dang bam la vo nghia, va
+            backend cung tu choi no.
+          */}
+          {xh ? (
+            <p className="ho-so-so-hang">
+              <span>
+                <strong>{formatNumber(xh.follower_count)}</strong> người theo dõi
+              </span>
+              <span>
+                <strong>{formatNumber(xh.following_count)}</strong> đang theo dõi
+              </span>
+              <span>
+                <strong>{formatNumber(xh.post_count)}</strong> bài viết
+              </span>
+              {xh.is_self ? null : (
+                <FollowButton
+                  kind="user"
+                  targetId={p.user_id}
+                  initialFollowing={xh.following}
+                />
+              )}
+            </p>
+          ) : null}
         </div>
 
         {p.is_author && p.rank ? (
@@ -101,29 +129,13 @@ export default function PublicProfilePage({
         ) : null}
       </header>
 
-      <section className="stack" aria-labelledby="ho-so-truyen">
-        <h2 className="section-title section-title-icon" id="ho-so-truyen">
-          <IconBook size={19} /> Truyện đã xuất bản
-        </h2>
+      <ProfileTabs
+        userId={p.user_id}
+        novels={truyen}
+        isAuthor={p.is_author}
+        postCount={xh?.post_count ?? 0}
+      />
 
-        {truyen.length === 0 ? (
-          <EmptyState
-            icon="📖"
-            title={
-              p.is_author
-                ? "Chưa có truyện nào được xuất bản"
-                : "Người này chưa xuất bản truyện nào"
-            }
-            hint="Bản nháp không hiện ở trang công khai."
-          />
-        ) : (
-          <div className="story-grid">
-            {truyen.map((n) => (
-              <StoryCard key={n.novel_id} novel={n} />
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   );
 }

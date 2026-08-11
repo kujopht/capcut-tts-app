@@ -15,6 +15,7 @@ import {
   IconKey,
 } from "@/components/Icons";
 import { CreatorSection } from "@/components/CreatorSection";
+import { AccountSocial } from "@/components/AccountSocial";
 
 const TIER_LABEL: Record<string, string> = {
   free: "Miễn phí",
@@ -121,6 +122,8 @@ export default function AccountPage() {
         KHU CREATOR. Dat TRUOC "Lối tắt": voi mot nguoi da la tac gia, hang va so
         luot nghe la thu ho vao trang nay de xem; con loi tat thi ho da thuoc.
       */}
+      <AccountSocial />
+
       <CreatorSection />
 
       <section className="stack" aria-labelledby="acc-loi-tat">

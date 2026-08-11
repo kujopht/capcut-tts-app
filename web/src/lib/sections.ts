@@ -28,6 +28,14 @@
 export const TRUC = [
   "home",
   "explore",
+  // "Cộng đồng" nằm giữa "Khám phá" và "Thư viện", không phải ở cuối trục.
+  //
+  // Trục này là hành trình đọc → nghe → viết, và bảng tin thuộc về nửa ĐỌC:
+  // người ta ghé cộng đồng để biết có gì mới của người mình theo dõi, rồi từ đó
+  // đi vào truyện. Đặt nó sau `write`/`studio` sẽ khiến một cú bấm từ "Khám phá"
+  // sang "Cộng đồng" quay máy đi qua cả khu sáng tác — sai nhịp so với việc
+  // người dùng thực sự đang làm.
+  "community",
   "library",
   "write",
   "studio",
@@ -52,6 +60,7 @@ export type Huong = -1 | 0 | 1;
 const BANG: ReadonlyArray<readonly [RegExp, ViTri]> = [
   [/^\/$/, "home"],
   [/^\/fanfic/, "explore"],
+  [/^\/community/, "community"],
   [/^\/library/, "library"],
   [/^\/write/, "write"],
   [/^\/studio/, "studio"],
@@ -64,6 +73,9 @@ const BANG: ReadonlyArray<readonly [RegExp, ViTri]> = [
   // khong phai mot khu vuc rieng tren truc.
   [/^\/u\//, "long"],
   [/^\/creator\//, "long"],
+  // Mot bai dang le, va trang thong bao: ben TRONG khu cong dong.
+  [/^\/posts\//, "long"],
+  [/^\/notifications/, "long"],
   // `/admin` KHONG nam tren truc: no khong phai mot khu vuc cua the gioi
   // truyen, va mot cu quay may khi vao khu quan tri la sai nhip.
   [/^\/admin/, "long"],

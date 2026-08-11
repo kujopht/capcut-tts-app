@@ -15,6 +15,7 @@ import {
   formatNumber,
 } from "@/components/ui";
 import { NovelCover } from "@/components/NovelCover";
+import { FollowButton } from "@/components/FollowButton";
 import { AudioPlayer } from "@/components/AudioPlayer";
 
 export default function NovelDetailPage({
@@ -130,6 +131,26 @@ export default function NovelDetailPage({
               <Link className="btn" href="/write">
                 Quản lý truyện
               </Link>
+            ) : null}
+            {/*
+              Theo dõi truyện — để được thông báo khi có chương mới.
+
+              KHÔNG hiện với chủ sở hữu: một tác giả tự theo dõi truyện của mình
+              thì backend cũng không gửi thông báo (xem `notify_new_chapter`),
+              nên cái nút đó là một lời hứa suông.
+
+              Cũng không hiện với bản nháp: `data.follow` chỉ có mặt với truyện
+              đã xuất bản, nên phép kiểm này đi theo đúng sự thật của backend
+              thay vì đoán lại nó ở đây.
+            */}
+            {!isOwner && data?.follow ? (
+              <FollowButton
+                kind="story"
+                targetId={novel.novel_id}
+                initialFollowing={data.follow.following}
+                initialCount={data.follow.follower_count}
+                label="Theo dõi truyện"
+              />
             ) : null}
           </div>
         </div>

@@ -108,6 +108,13 @@ export interface PublicProfile {
   rank?: RankProgress;
   published_novels?: number;
   novels?: Novel[];
+  /**
+   * Số liệu xã hội, ghép sẵn vào cùng một lần gọi.
+   *
+   * Tuỳ chọn để một client cũ (chưa biết trường này) vẫn biên dịch được — cùng
+   * lý do với `Novel.cover_url`.
+   */
+  social?: ProfileSocial;
 }
 
 export interface Novel {
@@ -442,7 +449,13 @@ export const api = {
     }),
 
   getNovel: (novelId: string) =>
-    request<{ novel: Novel; chapters: Chapter[] }>(`/api/novels/${novelId}`),
+    request<{
+      novel: Novel;
+      chapters: Chapter[];
+      /** Trạng thái theo dõi, ghép sẵn. Vắng mặt với bản nháp — bản nháp không
+          theo dõi được. Tuỳ chọn để client cũ vẫn biên dịch. */
+      follow?: FollowState;
+    }>(`/api/novels/${novelId}`),
 
   publishNovel: (novelId: string) =>
     request<{ novel: Novel }>(`/api/novels/${novelId}/publish`, {
@@ -737,5 +750,452 @@ export const adminApi = {
   events: (limit = 50) =>
     request<{ events: ModerationEvent[]; total: number }>(
       `/api/admin/events?limit=${limit}`,
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Tầng xã hội
+// ---------------------------------------------------------------------------
+//
+// MỌI kiểu ở đây khớp với `to_public_dict()` của `server/domain.py`, không phải
+// với `to_dict()`. Khác biệt đó là chủ ý và nó có ý nghĩa bảo mật: bản công khai
+// là một **danh sách cho phép**, nên `removed_by`, `removed_reason` và
+// `image_key` không bao giờ xuống tới trình duyệt.
+
+/** Thẻ tác giả gọn — cùng hình dạng với kết quả tìm kiếm. */
+export interface AuthorCard {
+  user_id: string;
+  username: string;
+  display_name: string;
+  is_author: boolean;
+  rank?: RankProgress;
+  published_novels?: number;
+}
+
+export type PostKind = "post" | "story_update";
+export type ContentState = "visible" | "removed";
+
+export interface Post {
+  post_id: string;
+  author_user_id: string;
+  kind: PostKind;
+  novel_id: string;
+  text: string;
+  /** `has_image`, KHÔNG phải `image_key`: khóa đối tượng thô không bao giờ ra
+      khỏi backend — nó không dùng trực tiếp được (kho là riêng tư) và nó lộ cấu
+      trúc không gian tên. */
+  has_image: boolean;
+  image_width: number;
+  image_height: number;
+  /** URL đã ký, ngắn hạn. Vắng mặt khi bài không có ảnh. */
+  image_url?: string;
+  state: ContentState;
+  like_count: number;
+  comment_count: number;
+  created_at: string;
+  updated_at: string;
+  author?: AuthorCard;
+  /** Người đang xem đã thích chưa. `false` với khách vãng lai. */
+  liked: boolean;
+  /** Người đang xem có sửa được không. MÁY CHỦ vẫn là nơi cưỡng chế — cờ này
+      chỉ để giao diện khỏi hiện một cái nút chắc chắn sẽ trả 403. */
+  can_edit: boolean;
+  /** Chỉ có với `story_update`. */
+  novel?: { novel_id: string; title: string; cover_key: string | null };
+}
+
+export interface Comment {
+  comment_id: string;
+  post_id: string;
+  /** Chuỗi rỗng khi bình luận đã bị gỡ — xem `Comment.to_public_dict`. */
+  author_user_id: string;
+  parent_id: string;
+  text: string;
+  state: ContentState;
+  reply_count: number;
+  created_at: string;
+  updated_at: string;
+  author?: AuthorCard;
+  replies?: Comment[];
+}
+
+export type NotificationKind =
+  | "follow"
+  | "post_like"
+  | "post_comment"
+  | "comment_reply"
+  | "story_chapter"
+  | "author_approved"
+  | "author_rejected";
+
+export interface Notification {
+  notification_id: string;
+  kind: NotificationKind;
+  actor_id: string;
+  subject_id: string;
+  subject_kind: string;
+  preview: string;
+  read: boolean;
+  created_at: string;
+  actor?: AuthorCard;
+}
+
+export type ReportReason =
+  | "spam"
+  | "harassment"
+  | "inappropriate"
+  | "copyright"
+  | "other";
+
+export interface FollowState {
+  following: boolean;
+  follower_count: number;
+}
+
+export interface LikeState {
+  liked: boolean;
+  like_count: number;
+}
+
+export interface FeedPage {
+  items: Post[];
+  total: number;
+  limit: number;
+  offset: number;
+  /** Bài của người mình theo dõi có được ưu tiên hay không. `false` = đang xem
+      bảng tin khám phá vì chưa theo dõi ai. */
+  personalized: boolean;
+  /** Danh sách người theo dõi đã bị cắt vì vượt trần truy vấn. Giao diện NÓI RÕ
+      điều này thay vì im lặng bỏ bớt. */
+  following_truncated: boolean;
+}
+
+export interface CommentPage {
+  items: Comment[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface NotificationPage {
+  items: Notification[];
+  total: number;
+  unread: number;
+  limit: number;
+  offset: number;
+}
+
+/** Tóm tắt xã hội của chính mình, cho `/account`. */
+export interface AccountSocial {
+  follower_count: number;
+  following_count: number;
+  post_count: number;
+  followed_stories: number;
+  unread_notifications: number;
+  /** Chỉ tác giả ĐÃ DUYỆT mới có ba trường dưới đây. */
+  rank?: RankProgress;
+  qualified_listens?: number;
+  published_novels?: number;
+}
+
+/** Phần xã hội của một trang cá nhân. */
+export interface ProfileSocial {
+  follower_count: number;
+  following_count: number;
+  post_count: number;
+  following: boolean;
+  is_self: boolean;
+}
+
+/** Giới hạn do MÁY CHỦ quyết định. Xem `src/lib/limits.ts`. */
+export interface ServerLimits {
+  max_chapter_chars: number;
+  max_active_jobs: number;
+  post_max_chars: number;
+  comment_max_chars: number;
+  report_detail_max_chars: number;
+  post_max_images: number;
+  image: Record<
+    string,
+    {
+      max_bytes: number;
+      max_edge: number;
+      mime: string[];
+      preferred_mime: string[];
+    }
+  >;
+  rate: Record<string, { count: number; minutes: number }>;
+}
+
+export const social = {
+  limits: () => request<ServerLimits>("/api/limits"),
+
+  // -- theo dõi -------------------------------------------------------------
+
+  followUser: (userId: string) =>
+    request<FollowState>(`/api/users/${encodeURIComponent(userId)}/follow`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unfollowUser: (userId: string) =>
+    request<FollowState>(`/api/users/${encodeURIComponent(userId)}/follow`, {
+      method: "DELETE",
+    }),
+
+  followStory: (novelId: string) =>
+    request<FollowState>(`/api/novels/${encodeURIComponent(novelId)}/follow`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unfollowStory: (novelId: string) =>
+    request<FollowState>(`/api/novels/${encodeURIComponent(novelId)}/follow`, {
+      method: "DELETE",
+    }),
+
+  // -- bảng tin và bài đăng -------------------------------------------------
+
+  feed: (limit = 20, offset = 0) =>
+    request<FeedPage>(`/api/feed?limit=${limit}&offset=${offset}`),
+
+  userPosts: (userId: string, limit = 20, offset = 0) =>
+    request<FeedPage>(
+      `/api/users/${encodeURIComponent(userId)}/posts` +
+        `?limit=${limit}&offset=${offset}`,
+    ),
+
+  post: (postId: string) =>
+    request<{ post: Post }>(`/api/posts/${encodeURIComponent(postId)}`),
+
+  createPost: (payload: {
+    text: string;
+    kind?: PostKind;
+    novel_id?: string;
+    image_base64?: string;
+    image_mime?: string;
+    image_width?: number;
+    image_height?: number;
+  }) =>
+    request<{ post: Post }>("/api/posts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  editPost: (postId: string, text: string) =>
+    request<{ post: Post }>(`/api/posts/${encodeURIComponent(postId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text }),
+    }),
+
+  deletePost: (postId: string) =>
+    request<{ deleted: boolean }>(`/api/posts/${encodeURIComponent(postId)}`, {
+      method: "DELETE",
+    }),
+
+  // -- thích ----------------------------------------------------------------
+
+  like: (postId: string) =>
+    request<LikeState>(`/api/posts/${encodeURIComponent(postId)}/like`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unlike: (postId: string) =>
+    request<LikeState>(`/api/posts/${encodeURIComponent(postId)}/like`, {
+      method: "DELETE",
+    }),
+
+  // -- bình luận ------------------------------------------------------------
+
+  comments: (postId: string, limit = 20, offset = 0) =>
+    request<CommentPage>(
+      `/api/posts/${encodeURIComponent(postId)}/comments` +
+        `?limit=${limit}&offset=${offset}`,
+    ),
+
+  createComment: (postId: string, text: string, parentId = "") =>
+    request<{ comment: Comment }>(
+      `/api/posts/${encodeURIComponent(postId)}/comments`,
+      { method: "POST", body: JSON.stringify({ text, parent_id: parentId }) },
+    ),
+
+  replies: (commentId: string, limit = 20, offset = 0) =>
+    request<CommentPage>(
+      `/api/comments/${encodeURIComponent(commentId)}/replies` +
+        `?limit=${limit}&offset=${offset}`,
+    ),
+
+  editComment: (commentId: string, text: string) =>
+    request<{ comment: Comment }>(
+      `/api/comments/${encodeURIComponent(commentId)}`,
+      { method: "PATCH", body: JSON.stringify({ text }) },
+    ),
+
+  deleteComment: (commentId: string) =>
+    request<{ deleted: boolean }>(
+      `/api/comments/${encodeURIComponent(commentId)}`,
+      { method: "DELETE" },
+    ),
+
+  // -- thông báo ------------------------------------------------------------
+
+  notifications: (unread = false, limit = 20, offset = 0) =>
+    request<NotificationPage>(
+      `/api/notifications?unread=${unread}&limit=${limit}&offset=${offset}`,
+    ),
+
+  /** Chỉ con số, cho cái chuông. Nhẹ hơn danh sách — nó chạy ở mọi trang. */
+  unreadCount: () => request<{ unread: number }>("/api/notifications/unread"),
+
+  markRead: (notificationId: string) =>
+    request<{ unread: number }>(
+      `/api/notifications/${encodeURIComponent(notificationId)}/read`,
+      { method: "POST", body: "{}" },
+    ),
+
+  markAllRead: () =>
+    request<{ marked: number; unread: number }>(
+      "/api/notifications/read-all",
+      { method: "POST", body: "{}" },
+    ),
+
+  // -- báo cáo --------------------------------------------------------------
+
+  report: (payload: {
+    target_kind: "post" | "comment";
+    target_id: string;
+    reason: ReportReason;
+    detail?: string;
+  }) =>
+    request<{ reported: boolean; created: boolean }>("/api/reports", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // -- của chính mình -------------------------------------------------------
+
+  accountSocial: () => request<AccountSocial>("/api/account/social"),
+};
+
+// ---------------------------------------------------------------------------
+// Kiểm duyệt xã hội (quản trị)
+// ---------------------------------------------------------------------------
+//
+// Các kiểu ở đây khớp với `to_dict()` — bản QUẢN TRỊ, có `state`, `removed_by`
+// và ghi chú nội bộ. Đó là cả mục đích của những màn hình này.
+
+export type ReportStatus = "open" | "resolved" | "dismissed";
+
+/** Bản quản trị của một bài — có thêm trường kiểm duyệt. */
+export interface AdminPost extends Omit<Post, "liked" | "can_edit" | "has_image"> {
+  image_key: string;
+  image_mime: string;
+  image_bytes: number;
+  removed_by: string;
+  removed_reason: string;
+  open_reports: number;
+}
+
+export interface AdminComment extends Omit<Comment, "replies"> {
+  removed_by: string;
+  removed_reason: string;
+  open_reports: number;
+}
+
+export interface ContentReport {
+  report_id: string;
+  reporter_id: string;
+  target_kind: "post" | "comment";
+  target_id: string;
+  target_owner_id: string;
+  reason: ReportReason;
+  detail: string;
+  status: ReportStatus;
+  /** Ghi chú NỘI BỘ. Chỉ ra ở đường quản trị. */
+  resolution_note: string;
+  resolved_by: string;
+  created_at: string;
+  updated_at: string;
+  /** Nội dung bị báo cáo, ghép sẵn để màn hình này không phải gọi thêm. `null`
+      khi nội dung đã bị chính chủ xoá thật. */
+  content: (AdminPost & AdminComment) | null;
+  reporter?: AuthorCard;
+  target_owner?: AuthorCard;
+}
+
+export interface SocialOverview {
+  open_reports: number;
+  total_reports: number;
+  total_posts: number;
+  removed_posts: number;
+}
+
+export const adminSocial = {
+  overview: () => request<SocialOverview>("/api/admin/social/overview"),
+
+  reports: (status = "open", targetKind = "", limit = 25, offset = 0) =>
+    request<{
+      items: ContentReport[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      `/api/admin/reports?status_filter=${encodeURIComponent(status)}` +
+        `&target_kind=${encodeURIComponent(targetKind)}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  resolveReport: (reportId: string, dismiss: boolean, note = "") =>
+    request<{ report: ContentReport }>(
+      `/api/admin/reports/${encodeURIComponent(reportId)}/resolve`,
+      { method: "POST", body: JSON.stringify({ dismiss, note }) },
+    ),
+
+  posts: (q = "", limit = 25, offset = 0) =>
+    request<{
+      items: AdminPost[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      `/api/admin/posts?q=${encodeURIComponent(q)}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  /** GỠ, không xoá. Hàng vẫn còn — xem `domain.ContentState`. */
+  removePost: (postId: string, reason: string) =>
+    request<{ post: AdminPost }>(
+      `/api/admin/posts/${encodeURIComponent(postId)}/remove`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  restorePost: (postId: string) =>
+    request<{ post: AdminPost }>(
+      `/api/admin/posts/${encodeURIComponent(postId)}/restore`,
+      { method: "POST", body: "{}" },
+    ),
+
+  postComments: (postId: string, limit = 50, offset = 0) =>
+    request<{
+      items: AdminComment[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      `/api/admin/posts/${encodeURIComponent(postId)}/comments` +
+        `?limit=${limit}&offset=${offset}`,
+    ),
+
+  removeComment: (commentId: string, reason: string) =>
+    request<{ comment: AdminComment }>(
+      `/api/admin/comments/${encodeURIComponent(commentId)}/remove`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  restoreComment: (commentId: string) =>
+    request<{ comment: AdminComment }>(
+      `/api/admin/comments/${encodeURIComponent(commentId)}/restore`,
+      { method: "POST", body: "{}" },
     ),
 };

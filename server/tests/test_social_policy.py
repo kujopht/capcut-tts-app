@@ -198,8 +198,32 @@ class ChinhSachAnhTest(unittest.TestCase):
         for cs in CHINH_SACH_ANH.values():
             self.assertNotIn("image/svg+xml", cs.mime)
 
-    def test_mot_anh_moi_bai(self):
-        self.assertEqual(POST_MAX_IMAGES, 1)
+    def test_bon_anh_moi_bai_va_co_tran_tong(self):
+        """V3: bon anh — luoi 2x2 don gian nhat con dep. Va mot tran TONG."""
+        from server.social import POST_TOTAL_MEDIA_BYTES, kiem_bo_anh
+
+        self.assertEqual(POST_MAX_IMAGES, 4)
+        kiem_bo_anh("post", [{"so_byte": 500_000}] * 4)      # 2 MB — vua
+        with self.assertRaises(SocialError):
+            kiem_bo_anh("post", [{"so_byte": 1}] * 5)         # qua so luong
+        with self.assertRaises(SocialError):
+            kiem_bo_anh("post", [{"so_byte": 900_000}] * 4)   # qua tong 3 MB
+
+    def test_kiem_timestamp(self):
+        """Moc audio: theo thoi luong THAT khi biet, tran hop ly khi khong."""
+        from server.social import kiem_timestamp
+
+        self.assertIsNone(kiem_timestamp(None, 120.0))
+        self.assertEqual(kiem_timestamp(0, 120.0), 0)         # dau chuong HOP LE
+        self.assertEqual(kiem_timestamp(120_000, 120.0), 120_000)
+        with self.assertRaises(SocialError):
+            kiem_timestamp(-1, 120.0)
+        with self.assertRaises(SocialError):
+            kiem_timestamp(130_000, 120.0)                    # vuot thoi luong
+        # Khong biet thoi luong: chi con tran hop ly 12 gio.
+        self.assertEqual(kiem_timestamp(3_600_000, None), 3_600_000)
+        with self.assertRaises(SocialError):
+            kiem_timestamp(13 * 3600 * 1000, None)
 
     def test_tu_choi_mime_la(self):
         with self.assertRaises(SocialError):

@@ -210,6 +210,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("image_width", "integer", False, None),
             ("image_height", "integer", False, None),
             ("image_bytes", "integer", False, None),
+            # V3: toi da BON anh, luu MOT cot JSON — them mot bang con chi de
+            # dem bon hang la them mot vong mang cho moi bai tren bang tin.
+            # 6000 ky tu du cho 4 muc metadata day du (moi muc ~120 ky tu).
+            ("images_json", "string", False, 6000),
             # `removed` la kiem duyet, KHONG phai xoa: hang o lai de mot quyet
             # dinh bi khieu nai con xem lai duoc. Xem `domain.ContentState`.
             ("state", "enum", True, ["visible", "removed"]),
@@ -257,6 +261,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Rong = binh luan goc. DUNG mot cap tra loi — xem
             # `social.REPLY_MAX_DEPTH` de biet vi sao khong phai mot cay.
             ("parent_id", "string", False, 64),
+            # V3: binh luan chuong/audio. `""` (hoac NULL o hang cu) = binh
+            # luan bai dang; "chapter" = binh luan chuong. String chu khong
+            # enum: enum Appwrite khong nhan chuoi rong lam gia tri.
+            ("target_kind", "string", False, 20),
+            # Moc audio dinh kem, mili giay. NULL = khong dinh kem — 0 la mot
+            # moc HOP LE (dau chuong) nen khong dung 0 lam "khong co".
+            ("timestamp_ms", "integer", False, None),
+            ("spoiler", "boolean", False, None),
             ("text", "string", False, 1000),
             ("state", "enum", True, ["visible", "removed"]),
             ("reply_count", "integer", False, None),
@@ -272,6 +284,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("parent_created_idx", "key", ["parent_id", "created_at"]),
             # Han muc chong spam: dem binh luan cua mot nguoi trong mot gio.
             ("author_created_idx", "key", ["author_user_id", "created_at"]),
+            # Khu quan tri duyet theo LOAI, moi nhat truoc —
+            # `list_comments_all(target_kind=...)`.
+            ("kind_created_idx", "key", ["target_kind", "created_at"]),
         ],
     },
     "notifications": {
@@ -286,7 +301,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("user_id", "string", True, 64),
             ("kind", "enum", True,
              ["follow", "post_like", "post_comment", "comment_reply",
-              "story_chapter", "author_approved", "author_rejected"]),
+              "story_chapter",
+              # V3: co nguoi binh luan vao mot CHUONG cua minh.
+              "chapter_comment",
+              "author_approved", "author_rejected"]),
             # Rong = he thong (vd don duoc duyet), khong phai mot nguoi.
             ("actor_id", "string", False, 64),
             ("subject_id", "string", False, 64),

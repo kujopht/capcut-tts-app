@@ -117,14 +117,24 @@ class FakeAppwrite:
                 # het, neu khong loai loi nay chi lo ra khi chay that.
                 if len(d.get("values") or []) < 2:
                     raise _Loi400("Or queries require at least two queries")
-                giu = []
-                for r in rows:
-                    for dk in d.get("values") or []:
-                        a, v = dk.get("attribute"), (dk.get("values") or [""])[0]
-                        if str(v).lower() in str(r.get(a, "")).lower():
-                            giu.append(r)
-                            break
-                rows = giu
+
+                # Danh gia TUNG LOAI dieu kien con, khong coi tat ca la
+                # `contains`: `list_comments_all` dung `or(equal, isNull)`, va
+                # mot ban gia lap chi biet contains se cho no "chay tot" o test
+                # roi hong o that.
+                def _khop(r, dk):
+                    a = dk.get("attribute")
+                    vs = dk.get("values") or []
+                    m2 = dk.get("method")
+                    if m2 == "isNull":
+                        return r.get(a) is None
+                    if m2 == "equal":
+                        return r.get(a) in vs
+                    return bool(vs) and str(vs[0]).lower() in str(
+                        r.get(a, "")).lower()
+
+                rows = [r for r in rows
+                        if any(_khop(r, dk) for dk in d.get("values") or [])]
             elif m == "greaterThanEqual":
                 # So sanh CHUOI ISO cung dinh dang chinh la so sanh thoi gian —
                 # xem `appwrite_social.q_greater_equal`.

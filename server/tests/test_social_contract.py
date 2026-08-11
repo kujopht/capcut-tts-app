@@ -499,6 +499,108 @@ class HopDongXaHoi(unittest.TestCase):
                 self.assertTrue(kho.delete_comment(bl.comment_id))
                 self.assertFalse(kho.delete_comment(bl.comment_id))
 
+    def test_binh_luan_chuong_round_trip_du_truong_V3(self):
+        """`target_kind`/`timestamp_ms`/`spoiler` phai song sot qua kho that."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                bl = Comment(post_id="chp_1", author_user_id="u1", text="X",
+                             target_kind="chapter", timestamp_ms=0,
+                             spoiler=True)
+                kho.create_comment(bl)
+                doc = kho.get_comment(bl.comment_id)
+                self.assertEqual(doc.target_kind, "chapter")
+                # 0 la moc HOP LE — mot phep `or` nuot no la loi kinh dien.
+                self.assertEqual(doc.timestamp_ms, 0)
+                self.assertTrue(doc.spoiler)
+                # Khong dinh kem -> None, khong phai 0.
+                bl2 = Comment(post_id="chp_1", author_user_id="u1", text="Y",
+                              target_kind="chapter")
+                kho.create_comment(bl2)
+                self.assertIsNone(kho.get_comment(bl2.comment_id).timestamp_ms)
+
+    def test_newest_first_dao_dung_thu_tu(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                for i in range(3):
+                    kho.create_comment(Comment(post_id="chp_1",
+                                               author_user_id="u1",
+                                               text=f"C{i}",
+                                               created_at=now_iso_us()))
+                moi, _ = kho.list_comments("chp_1", newest_first=True)
+                cu, _ = kho.list_comments("chp_1")
+                self.assertEqual(moi[0].text, "C2")
+                self.assertEqual(cu[0].text, "C0")
+
+    def test_xem_truoc_binh_luan_nhieu_bai_mot_luot(self):
+        """`comments_for_posts`: 2 cai MOI NHAT moi bai, hien cu->moi, bo
+        binh luan da go va tra loi."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                for pid in ("p1", "p2"):
+                    for i in range(3):
+                        kho.create_comment(Comment(
+                            post_id=pid, author_user_id="u1",
+                            text=f"{pid}-{i}", created_at=now_iso_us()))
+                # tra loi va binh luan da go khong duoc vao xem truoc
+                kho.create_comment(Comment(post_id="p1", author_user_id="u2",
+                                           text="tra loi", parent_id="x",
+                                           created_at=now_iso_us()))
+                go = Comment(post_id="p1", author_user_id="u2", text="da go",
+                             state=ContentState.REMOVED,
+                             created_at=now_iso_us())
+                kho.create_comment(go)
+                xt = kho.comments_for_posts(["p1", "p2", "p3"], moi_bai=2)
+                self.assertEqual([c.text for c in xt["p1"]], ["p1-1", "p1-2"])
+                self.assertEqual([c.text for c in xt["p2"]], ["p2-1", "p2-2"])
+                self.assertEqual(xt.get("p3", []), [])
+
+    def test_duyet_toan_he_thong_tach_kinh_moi_va_hang_cu_null(self):
+        """
+        `list_comments_all("")` phai thay CA hang moi (target_kind="") LAN hang
+        cu (target_kind=NULL — thuoc tinh them sau khi hang da ton tai). Day
+        chinh la cho `or(equal, isNull)` ton tai vi no.
+        """
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.create_comment(Comment(post_id="p1", author_user_id="u1",
+                                           text="moi - bai dang",
+                                           created_at=now_iso_us()))
+                kho.create_comment(Comment(post_id="chp_1",
+                                           author_user_id="u1",
+                                           text="moi - chuong",
+                                           target_kind="chapter",
+                                           created_at=now_iso_us()))
+                if ten == "appwrite":
+                    # Gia lap HANG CU: ghi thang khong co target_kind (NULL).
+                    kho._create("comments", "cmt_cu", {
+                        "comment_id": "cmt_cu", "post_id": "p9",
+                        "author_user_id": "u1", "parent_id": "",
+                        "text": "cu - truoc V3", "state": "visible",
+                        "reply_count": 0, "removed_by": "",
+                        "removed_reason": "", "created_at": now_iso_us(),
+                        "updated_at": now_iso_us()}, "u1")
+                bai_dang, tong = kho.list_comments_all(target_kind="")
+                mong = 2 if ten == "appwrite" else 1
+                self.assertEqual(tong, mong,
+                                 f"hàng cũ NULL phải được xem là bài đăng")
+                chuong, tong_ch = kho.list_comments_all(target_kind="chapter")
+                self.assertEqual(tong_ch, 1)
+                self.assertEqual(chuong[0].text, "moi - chuong")
+
+    def test_bai_nhieu_anh_round_trip_qua_images_json(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                bai = Post(author_user_id="u1", text="X",
+                           images=[{"key": f"posts/u1/p/anh-{i}.webp",
+                                    "mime": "image/webp", "width": 10 + i,
+                                    "height": 20, "bytes": 99}
+                                   for i in range(4)])
+                kho.create_post(bai)
+                doc = kho.get_post(bai.post_id)
+                self.assertEqual(len(doc.images), 4)
+                self.assertEqual(doc.images[2]["width"], 12)
+                self.assertTrue(doc.has_image)
+
     # =============================================================== THONG BAO
 
     def test_thong_bao_trung_khoa_chi_tao_MOT_lan(self):
@@ -807,10 +909,14 @@ class SchemaTest(unittest.TestCase):
             (COL_NOTIFICATIONS, Notification(user_id="u")),
             (COL_REPORTS, ContentReport(reporter_id="u")),
         ]
+        # Truong DOI TEN khi luu: gia tri van xuong kho, chi khac hinh dang.
+        # `images` (danh sach) -> `images_json` (chuoi JSON) — xem
+        # `AppwriteSocialStore._hinh_luu_bai`.
+        doi_ten = {"images": "images_json"}
         for bang, ban_ghi in mau:
             duoc_luu = set(SOCIAL_PERSISTED_FIELDS[bang])
             for truong in ban_ghi.to_dict():
-                self.assertIn(truong, duoc_luu,
+                self.assertIn(doi_ten.get(truong, truong), duoc_luu,
                               f"{bang}.{truong} không bao giờ được lưu")
 
     def test_moi_chi_muc_tro_toi_cot_co_that(self):

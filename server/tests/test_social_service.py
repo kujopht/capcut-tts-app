@@ -236,13 +236,38 @@ class AnhBaiTest(Nen):
         self.assertIn("image_url", bai)
 
     def test_khoa_doi_tuong_dung_khong_gian_ten(self):
+        # V3: anh nam trong `images` (danh sach), khong con o truong don.
         bai = self.social.create_post(self.an, text="", image=self._anh())
-        khoa = self.store.get_post(bai["post_id"]).image_key
-        self.assertTrue(khoa.startswith(f"posts/{self.an.user_id}/"))
+        anh = self.store.get_post(bai["post_id"]).all_images()
+        self.assertEqual(len(anh), 1)
+        self.assertTrue(str(anh[0]["key"]).startswith(
+            f"posts/{self.an.user_id}/"))
 
     def test_khoa_doi_tuong_KHONG_chua_email(self):
         bai = self.social.create_post(self.an, text="", image=self._anh())
-        self.assertNotIn("@", self.store.get_post(bai["post_id"]).image_key)
+        for anh in self.store.get_post(bai["post_id"]).all_images():
+            self.assertNotIn("@", str(anh["key"]))
+
+    def test_bon_anh_moi_khoa_mot_so_thu_tu(self):
+        """`anh-0.webp` … `anh-3.webp` trong CUNG thu muc cua bai."""
+        bai = self.social.create_post(self.an, text="",
+                                      images=[self._anh() for _ in range(4)])
+        khoa = [a["key"] for a in self.store.get_post(bai["post_id"]).all_images()]
+        self.assertEqual(len(khoa), 4)
+        for i, k in enumerate(khoa):
+            self.assertIn(f"anh-{i}.", k)
+        # va TAT CA phai ton tai trong kho
+        for k in khoa:
+            self.assertTrue(self.storage.exists(k))
+
+    def test_qua_bon_anh_bi_tu_choi_SACH(self):
+        """Kiem het truoc khi tai: that bai khong de lai anh nao trong kho."""
+        with self.assertRaises(SocialError):
+            self.social.create_post(self.an, text="",
+                                    images=[self._anh() for _ in range(5)])
+        # kho khong co anh mo coi nao cua nguoi nay
+        con = [o.key for o in self.storage.list_objects("posts/")]
+        self.assertEqual(con, [])
 
     def test_ban_CONG_KHAI_khong_lo_khoa_doi_tuong(self):
         """
@@ -270,12 +295,15 @@ class AnhBaiTest(Nen):
         luu = self.store.get_post(bai["post_id"])
         self.assertLessEqual(luu.image_width, 1600)
 
-    def test_xoa_bai_thi_xoa_ca_anh(self):
-        bai = self.social.create_post(self.an, text="", image=self._anh())
-        khoa = self.store.get_post(bai["post_id"]).image_key
-        self.assertTrue(self.storage.exists(khoa))
+    def test_xoa_bai_thi_xoa_HET_anh(self):
+        bai = self.social.create_post(self.an, text="",
+                                      images=[self._anh(), self._anh()])
+        khoa = [a["key"] for a in self.store.get_post(bai["post_id"]).all_images()]
+        for k in khoa:
+            self.assertTrue(self.storage.exists(k))
         self.social.delete_post(self.an, bai["post_id"])
-        self.assertFalse(self.storage.exists(khoa))
+        for k in khoa:
+            self.assertFalse(self.storage.exists(k))
 
 
 class ThichTest(Nen):
@@ -464,9 +492,9 @@ class BangTinTest(Nen):
 
 
 class ThongBaoTest(Nen):
-    def test_du_bay_loai(self):
+    def test_du_tam_loai(self):
         """
-        Bay loai la HOP DONG voi giao dien va voi lop enum trong schema. Thieu
+        TAM loai la HOP DONG voi giao dien va voi lop enum trong schema. Thieu
         mot loai o day nghia la mot su kien khong bao gio duoc bao.
         """
         from server.domain import NotificationKind
@@ -474,7 +502,8 @@ class ThongBaoTest(Nen):
         self.assertEqual(
             {k.value for k in NotificationKind},
             {"follow", "post_like", "post_comment", "comment_reply",
-             "story_chapter", "author_approved", "author_rejected"})
+             "story_chapter", "chapter_comment",
+             "author_approved", "author_rejected"})
 
     def test_dem_chua_doc(self):
         bai = self._bai()
@@ -807,6 +836,172 @@ class TomTatTest(Nen):
         """Mot ky tu se khop gan het moi bai — do khong phai mot ket qua tim."""
         self._bai(text="Chuyện về Luffy")
         self.assertEqual(self.social.search_posts("L")["total"], 0)
+
+
+class BinhLuanChuongTest(Nen):
+    """
+    Binh luan AUDIO/CHUONG (V3). Dich la `chapter_id` — khong phai file MP3.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        from server.domain import AudioTrack, Chapter
+
+        self.chuong = self.store.create_chapter(Chapter(
+            novel_id=self.truyen.novel_id, owner_id=self.an.user_id,
+            title="Chương 1", content="..."))
+        self.track = self.store.create_track(AudioTrack(
+            chapter_id=self.chuong.chapter_id, owner_id=self.an.user_id,
+            voice_id="v", object_key="k1", content_hash="h1",
+            duration_seconds=180.0))
+
+    def _cmt(self, cua=None, **kw):
+        return self.social.create_chapter_comment(
+            cua or self.binh, self.chuong.chapter_id,
+            text=kw.pop("text", "Nghe hay!"), **kw)
+
+    def test_tao_va_doc_lai(self):
+        c = self._cmt(timestamp_ms=65_000, spoiler=True)
+        self.assertEqual(c["target_kind"], "chapter")
+        self.assertEqual(c["timestamp_ms"], 65_000)
+        self.assertTrue(c["spoiler"])
+        ds = self.social.chapter_comments(self.chuong.chapter_id)
+        self.assertEqual(ds["total"], 1)
+
+    def test_moc_0_la_hop_le(self):
+        """0 = dau chuong. Mot phep `or 0` nuot no la mot loi da duoc de phong."""
+        c = self._cmt(timestamp_ms=0)
+        self.assertEqual(c["timestamp_ms"], 0)
+
+    def test_moc_vuot_thoi_luong_bi_tu_choi(self):
+        with self.assertRaises(SocialError):
+            self._cmt(timestamp_ms=200_000)      # track chi dai 180s
+
+    def test_chuoi_binh_luan_SONG_SOT_khi_tao_lai_audio(self):
+        """
+        DIEU KIEN SONG cua ca tinh nang: tac gia tao lai MP3 thi binh luan
+        khong duoc bien mat. Dich la chapter_id nen viec nay dung theo cau
+        truc — bai test ghim de khong ai "toi uu" no thanh gan theo track.
+        """
+        from server.domain import AudioTrack
+
+        c = self._cmt(timestamp_ms=1000)
+        # Tac gia tao lai audio: track cu bi xoa, track MOI khac object_key.
+        self.store.delete_track(self.track.track_id)
+        self.store.create_track(AudioTrack(
+            chapter_id=self.chuong.chapter_id, owner_id=self.an.user_id,
+            voice_id="v", object_key="k2-MOI", content_hash="h2",
+            duration_seconds=200.0))
+        ds = self.social.chapter_comments(self.chuong.chapter_id)
+        self.assertEqual(ds["total"], 1)
+        self.assertEqual(ds["items"][0]["comment_id"], c["comment_id"])
+
+    def test_chuong_nhap_khong_co_chuoi_binh_luan_cong_khai(self):
+        from server.domain import Chapter, Novel
+
+        nhap = self.store.create_novel(Novel(owner_id=self.an.user_id,
+                                             title="Nháp"))
+        ch_nhap = self.store.create_chapter(Chapter(
+            novel_id=nhap.novel_id, owner_id=self.an.user_id, title="C"))
+        with self.assertRaises(NotFoundError):
+            self.social.chapter_comments(ch_nhap.chapter_id)
+        with self.assertRaises(NotFoundError):
+            self.social.create_chapter_comment(self.binh, ch_nhap.chapter_id,
+                                               text="x")
+
+    def test_mac_dinh_MOI_NHAT_truoc_va_sort_cu_dao_lai(self):
+        self._cmt(text="thu nhat")
+        self._cmt(text="thu hai")
+        moi = self.social.chapter_comments(self.chuong.chapter_id)
+        self.assertEqual(moi["items"][0]["text"], "thu hai")
+        cu = self.social.chapter_comments(self.chuong.chapter_id, sort="cu")
+        self.assertEqual(cu["items"][0]["text"], "thu nhat")
+
+    def test_tra_loi_mot_cap_va_khong_hon(self):
+        goc = self._cmt()
+        tl = self.social.create_chapter_comment(
+            self.an, self.chuong.chapter_id, text="Cảm ơn!",
+            parent_id=goc["comment_id"])
+        with self.assertRaises(SocialError):
+            self.social.create_chapter_comment(
+                self.cuc, self.chuong.chapter_id, text="Nữa",
+                parent_id=tl["comment_id"])
+
+    def test_thong_bao_dung_nguoi_dung_loai(self):
+        """Binh luan goc -> TAC GIA truyen (chapter_comment); tra loi -> chu
+        binh luan goc (comment_reply). Khong ai tu bao cho minh."""
+        goc = self._cmt()
+        ds_an = self.social.notifications(self.an)["items"]
+        self.assertEqual(ds_an[0]["kind"], "chapter_comment")
+        self.assertEqual(ds_an[0]["subject_kind"], "chapter")
+        self.assertEqual(ds_an[0]["subject_id"], self.chuong.chapter_id)
+        self.social.create_chapter_comment(self.an, self.chuong.chapter_id,
+                                           text="Cảm ơn!",
+                                           parent_id=goc["comment_id"])
+        ds_binh = self.social.notifications(self.binh)["items"]
+        self.assertEqual(ds_binh[0]["kind"], "comment_reply")
+
+    def test_tac_gia_tu_binh_luan_khong_tu_bao(self):
+        self._cmt(cua=self.an)
+        self.assertEqual(self.social.notifications(self.an)["total"], 0)
+
+    def test_nhieu_binh_luan_mot_ngay_chi_MOT_thong_bao(self):
+        """Chong bao no thong bao: khoa gom theo (nguoi, chuong, ngay)."""
+        self._cmt(text="mot")
+        self._cmt(text="hai")
+        self._cmt(text="ba")
+        self.assertEqual(self.social.notifications(self.an)["total"], 1)
+
+    def test_sua_xoa_bao_cao_di_duong_binh_luan_chung(self):
+        """Cung mot loi binh luan: edit/delete/report khong can duong rieng."""
+        c = self._cmt()
+        ra = self.social.edit_comment(self.binh, c["comment_id"], text="Đã sửa")
+        self.assertEqual(ra["text"], "Đã sửa")
+        bc = self.social.report(self.cuc, target_kind="comment",
+                                target_id=c["comment_id"], reason="spam")
+        self.assertTrue(bc["created"])
+        with self.assertRaises(PermissionDenied):
+            self.social.delete_comment(self.cuc, c["comment_id"])
+
+    def test_admin_duyet_tach_duoc_hai_loai(self):
+        self._cmt(text="binh luan chuong")
+        bai = self._bai()
+        self.social.create_comment(self.binh, bai["post_id"], text="binh luan bai")
+        chuong = self.social.admin_browse_comments(target_kind="chapter")
+        bai_dang = self.social.admin_browse_comments(target_kind="")
+        self.assertEqual(chuong["total"], 1)
+        self.assertEqual(bai_dang["total"], 1)
+        self.assertTrue(chuong["items"][0]["context_url"].startswith("/chapters/"))
+        self.assertTrue(bai_dang["items"][0]["context_url"].startswith("/posts/"))
+
+    def test_bao_cao_binh_luan_chuong_co_duong_toi_nguon(self):
+        c = self._cmt()
+        self.social.report(self.cuc, target_kind="comment",
+                           target_id=c["comment_id"], reason="spam")
+        hd = self.social.admin_reports()
+        self.assertEqual(hd["items"][0]["context_url"],
+                         f"/chapters/{self.chuong.chapter_id}")
+
+
+class NhieuAnhVaXemTruocTest(Nen):
+    def test_xem_truoc_binh_luan_trong_bang_tin(self):
+        """Bang tin kem 2 binh luan MOI NHAT moi bai, hien thu tu cu->moi."""
+        bai = self._bai()
+        for i in range(3):
+            self.social.create_comment(self.binh, bai["post_id"],
+                                       text=f"BL {i}")
+        f = self.social.feed(None)
+        xt = f["items"][0]["comments_preview"]
+        self.assertEqual([c["text"] for c in xt], ["BL 1", "BL 2"])
+        self.assertIn("author", xt[0])
+
+    def test_bai_bon_anh_ra_bon_url(self):
+        anh = {"data": b"x" * 100, "mime": "image/webp", "width": 8, "height": 8}
+        bai = self.social.create_post(self.an, text="", images=[anh] * 4)
+        self.assertEqual(len(bai["images"]), 4)
+        # LocalStorageAdapter khong ky URL -> danh sach URL co the rong o dev;
+        # so luong metadata moi la hop dong. URL that duoc E2E staging kiem.
+        self.assertEqual([a["width"] for a in bai["images"]], [8, 8, 8, 8])
 
 
 if __name__ == "__main__":

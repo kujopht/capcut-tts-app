@@ -46,6 +46,9 @@ from server.domain import (
 )
 from server.social import (
     COMMENT_MAX_CHARS,
+    POST_MAX_IMAGES,
+    kiem_bo_anh,
+    kiem_timestamp,
     HAN_MUC_MAC_DINH,
     HanMuc,
     MODERATION_NOTE_MAX_CHARS,
@@ -190,19 +193,25 @@ class SocialService:
 
     def create_post(self, actor: Profile, *, text: str,
                     kind: str = "post", novel_id: str = "",
-                    image: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                    image: Optional[Dict[str, Any]] = None,
+                    images: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
         Dang mot bai.
 
-        `image` (tuy chon) la `{"data": bytes, "mime": str, "width": int,
-        "height": int}` — anh DA duoc xu ly. Tang nay khong giai ma anh: doc
-        kich thuoc that tu mot tep do nguoi la gui len can mot thu vien anh, va
-        moi thu vien anh la mot be mat tan cong. Chung ta chi kiem MIME, so byte
-        va tran so — nhung thu doc duoc ma khong phai phan tich noi dung tep.
+        `images` (V3, toi da BON) — moi phan tu `{"data": bytes, "mime": str,
+        "width": int, "height": int}`, anh DA duoc xu ly. `image` (so it) giu
+        lai cho tuong thich; co ca hai thi gop lam mot danh sach. Tang nay
+        khong giai ma anh: doc kich thuoc that tu mot tep do nguoi la gui len
+        can mot thu vien anh, va moi thu vien anh la mot be mat tan cong. Chung
+        ta chi kiem MIME, so byte va tran so — nhung thu doc duoc ma khong phai
+        phan tich noi dung tep.
         """
         loai = self._loai_bai(kind)
+        bo_anh = list(images or [])
+        if image:
+            bo_anh.insert(0, image)
         noi_dung = clean_text(text, toi_da=POST_MAX_CHARS, ten="Nội dung bài",
-                              bat_buoc=image is None)
+                              bat_buoc=not bo_anh)
         truyen = None
         if loai is PostKind.STORY_UPDATE:
             if actor.author_status is not AuthorStatus.APPROVED:
@@ -222,8 +231,8 @@ class SocialService:
             kind=loai,
             novel_id=truyen.novel_id if truyen else "",
         )
-        if image:
-            self._gan_anh(bai, image)
+        if bo_anh:
+            self._gan_bo_anh(bai, bo_anh)
         self._store.create_post(bai)
         return self._mot_bai(bai, actor)
 
@@ -264,35 +273,57 @@ class SocialService:
             raise PermissionDenied("Bài đăng này đã bị gỡ.")
         return bai
 
-    def _gan_anh(self, bai: Post, image: Dict[str, Any]) -> None:
-        data = image.get("data") or b""
-        mime = str(image.get("mime") or "")
-        chinh_sach = kiem_anh("post", mime=mime, so_byte=len(data))
+    def _gan_bo_anh(self, bai: Post, bo: List[Dict[str, Any]]) -> None:
+        """
+        Kiem va tai TOI DA BON anh len kho, roi ghi metadata vao bai.
+
+        KIEM HET truoc khi tai cai dau tien: anh thu ba hong ma hai cai dau da
+        len kho thi hoac phai don, hoac de rac. Kiem truoc thi that bai la that
+        bai SACH — chua co gi de don.
+        """
         if self._storage is None:
             raise SocialError("Máy chủ chưa cấu hình kho ảnh.")
-        duoi = mime.split("/")[-1] or "webp"
-        khoa = object_key("post", user_id=bai.author_user_id,
-                          subject_id=bai.post_id, duoi=duoi)
-        self._storage.put(khoa, data, content_type=mime)
-        bai.image_key = khoa
-        bai.image_mime = mime
-        bai.image_bytes = len(data)
-        bai.image_width = max(0, min(int(image.get("width") or 0),
-                                     chinh_sach.canh_toi_da))
-        bai.image_height = max(0, min(int(image.get("height") or 0),
-                                      chinh_sach.canh_toi_da))
+        da_kiem = []
+        for anh in bo:
+            data = anh.get("data") or b""
+            mime = str(anh.get("mime") or "")
+            chinh_sach = kiem_anh("post", mime=mime, so_byte=len(data))
+            da_kiem.append((data, mime, anh, chinh_sach))
+        kiem_bo_anh("post", [{"so_byte": len(d)} for d, *_ in da_kiem])
+
+        for i, (data, mime, anh, chinh_sach) in enumerate(da_kiem):
+            duoi = mime.split("/")[-1] or "webp"
+            # `anh-0.webp`, `anh-1.webp`… trong CUNG thu muc cua bai — xoa bai
+            # la xoa mot tien to, khong phai di tim tung khoa.
+            khoa = object_key("post", user_id=bai.author_user_id,
+                              subject_id=bai.post_id, duoi=duoi)
+            khoa = khoa.replace("anh.", f"anh-{i}.")
+            self._storage.put(khoa, data, content_type=mime)
+            bai.images.append({
+                "key": khoa,
+                "mime": mime,
+                "bytes": len(data),
+                "width": max(0, min(int(anh.get("width") or 0),
+                                    chinh_sach.canh_toi_da)),
+                "height": max(0, min(int(anh.get("height") or 0),
+                                     chinh_sach.canh_toi_da)),
+            })
 
     def _xoa_anh(self, bai: Post) -> None:
-        """Xoa anh trong kho, va KHONG lam hong thao tac neu kho tu choi."""
-        if not bai.image_key or self._storage is None:
+        """Xoa MOI anh cua bai trong kho, khong lam hong thao tac neu kho tu choi."""
+        if self._storage is None:
             return
-        try:
-            self._storage.delete(bai.image_key)
-        except Exception:
-            # Mot anh mo coi ton vai tram KB; mot loi 500 khi nguoi dung bam
-            # Xoa thi ho se bam lai, va lan sau hang da mat nen bai khong bao
-            # gio xoa duoc nua. Uu tien ro rang.
-            pass
+        for anh in bai.all_images():
+            khoa = str(anh.get("key") or "")
+            if not khoa:
+                continue
+            try:
+                self._storage.delete(khoa)
+            except Exception:
+                # Mot anh mo coi ton vai tram KB; mot loi 500 khi nguoi dung
+                # bam Xoa thi ho se bam lai, va lan sau hang da mat nen bai
+                # khong bao gio xoa duoc nua. Uu tien ro rang.
+                pass
 
     # =================================================================== LUOT THICH
 
@@ -344,7 +375,7 @@ class SocialService:
     def create_comment(self, actor: Profile, post_id: str, *, text: str,
                        parent_id: str = "") -> Dict[str, Any]:
         """
-        Binh luan, hoac tra loi mot binh luan goc.
+        Binh luan mot BAI DANG, hoac tra loi mot binh luan goc.
 
         DUNG mot cap tra loi — `parent_hop_le` tu choi tra loi mot tra loi ngay
         tai day thay vi am tham gan no vao dau do. Xem `social.REPLY_MAX_DEPTH`.
@@ -353,13 +384,7 @@ class SocialService:
         noi_dung = clean_text(text, toi_da=COMMENT_MAX_CHARS, ten="Bình luận")
         self._kiem_han_muc("comment", actor.user_id)
 
-        cha: Optional[Comment] = None
-        if parent_id:
-            cha = self._store.get_comment(parent_id)
-            if cha is None or cha.post_id != post_id:
-                raise NotFoundError("Không tìm thấy bình luận cha.")
-            parent_hop_le(parent_id, cha.parent_id)
-
+        cha = self._cha_hop_le(post_id, parent_id)
         bl = Comment(post_id=post_id, author_user_id=actor.user_id,
                      text=noi_dung, parent_id=parent_id)
         self._store.create_comment(bl)
@@ -369,7 +394,7 @@ class SocialService:
 
         # Thong bao: MOT nguoi nhan cho moi su kien, va khong bao gio la chinh
         # nguoi vua go. Tra loi bao cho chu binh luan goc; binh luan goc bao cho
-        # chu bai.
+        # chu bai. `subject_id` la BAI de bam vao thong bao mo dung trang.
         if cha is not None:
             if cha.author_user_id != actor.user_id:
                 self._bao(cha.author_user_id, NotificationKind.COMMENT_REPLY,
@@ -379,6 +404,116 @@ class SocialService:
             self._bao(bai.author_user_id, NotificationKind.POST_COMMENT,
                       actor_id=actor.user_id, subject_id=bl.comment_id,
                       subject_kind="comment", preview=_cat(noi_dung))
+        return self._mot_binh_luan(bl, actor)
+
+    def _cha_hop_le(self, target_id: str,
+                    parent_id: str) -> Optional[Comment]:
+        """Binh luan cha, da kiem cung DICH va dung MOT cap."""
+        if not parent_id:
+            return None
+        cha = self._store.get_comment(parent_id)
+        if cha is None or cha.post_id != target_id:
+            raise NotFoundError("Không tìm thấy bình luận cha.")
+        parent_hop_le(parent_id, cha.parent_id)
+        return cha
+
+    # ======================================================== BINH LUAN CHUONG
+
+    def _chuong_cong_khai(self, chapter_id: str):
+        """
+        Chuong + truyen, VA truyen phai DA XUAT BAN.
+
+        Day la hang rao duy nhat giua binh luan cong khai va ban nhap rieng tu:
+        chuong nhap khong co chuoi binh luan cong khai, va audio Studio (khong
+        co trang chuong) thi khong bao gio toi duoc day. Tra 404 chu khong 403
+        — nguoi la khong can biet ban nhap nay ton tai.
+        """
+        try:
+            chuong = self._store.get_chapter(chapter_id)
+            truyen = self._store.get_novel(chuong.novel_id)
+        except NotFoundError:
+            raise NotFoundError("Không tìm thấy chương.")
+        if truyen.state is not PublishState.PUBLISHED:
+            raise NotFoundError("Không tìm thấy chương.")
+        return chuong, truyen
+
+    def chapter_comments(self, chapter_id: str, *,
+                         sort: str = "moi",
+                         limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+        """
+        Binh luan cua mot chuong, kem vai tra loi dau — y het trang bai dang,
+        chi khac DICH va thu tu mac dinh (MOI NHAT truoc: mot chuong gom binh
+        luan qua nhieu thang, nguoi vua nghe xong muon thay nguoi ta vua noi gi).
+        """
+        self._chuong_cong_khai(chapter_id)
+        goc, tong = self._store.list_comments(
+            chapter_id, parent_id="", newest_first=(sort != "cu"),
+            limit=limit, offset=offset)
+        tra_loi = self._store.replies_for([c.comment_id for c in goc])
+        moi = list(goc) + [c for ds in tra_loi.values() for c in ds]
+        the = self._the_nguoi([c.author_user_id for c in moi])
+        return {
+            "items": [
+                {
+                    **c.to_public_dict(),
+                    "author": the.get(c.author_user_id),
+                    "replies": [
+                        {**r.to_public_dict(),
+                         "author": the.get(r.author_user_id)}
+                        for r in tra_loi.get(c.comment_id, [])
+                    ],
+                }
+                for c in goc
+            ],
+            "total": tong,
+            "limit": limit,
+            "offset": offset,
+            "sort": "cu" if sort == "cu" else "moi",
+        }
+
+    def create_chapter_comment(self, actor: Profile, chapter_id: str, *,
+                               text: str, parent_id: str = "",
+                               timestamp_ms: Optional[int] = None,
+                               spoiler: bool = False) -> Dict[str, Any]:
+        """
+        Binh luan mot CHUONG — dich la `chapter_id`, KHONG phai file MP3.
+
+        Tac gia tao lai audio thi `chapter_id` khong doi, nen chuoi binh luan
+        song sot qua moi lan tao lai. Moc thoi gian duoc kiem theo thoi luong
+        THAT cua track hien tai neu biet — xem `social.kiem_timestamp`.
+        """
+        chuong, truyen = self._chuong_cong_khai(chapter_id)
+        noi_dung = clean_text(text, toi_da=COMMENT_MAX_CHARS, ten="Bình luận")
+        self._kiem_han_muc("comment", actor.user_id)
+
+        track = self._store.track_for_chapter(chapter_id)
+        moc = kiem_timestamp(
+            timestamp_ms,
+            float(track.duration_seconds) if track is not None else None)
+
+        cha = self._cha_hop_le(chapter_id, parent_id)
+        bl = Comment(post_id=chapter_id, author_user_id=actor.user_id,
+                     text=noi_dung, parent_id=parent_id,
+                     target_kind="chapter", timestamp_ms=moc,
+                     spoiler=bool(spoiler))
+        self._store.create_comment(bl)
+        if cha is not None:
+            self._store.bump_comment_counter(cha.comment_id, "reply_count", 1)
+
+        # Tra loi -> bao chu binh luan goc; binh luan goc -> bao TAC GIA truyen.
+        # `subject_id` la CHUONG de thong bao mo dung trang doc. Khoa chong lap
+        # theo (nguoi nhan, loai, nguoi gay, chuong, ngay): mot nguoi binh luan
+        # hang chuc cau trong mot buoi nghe chi sinh MOT thong bao cho tac gia.
+        if cha is not None:
+            if cha.author_user_id != actor.user_id:
+                self._bao(cha.author_user_id, NotificationKind.COMMENT_REPLY,
+                          actor_id=actor.user_id, subject_id=chapter_id,
+                          subject_kind="chapter", preview=_cat(noi_dung))
+        elif truyen.owner_id != actor.user_id:
+            self._bao(truyen.owner_id, NotificationKind.CHAPTER_COMMENT,
+                      actor_id=actor.user_id, subject_id=chapter_id,
+                      subject_kind="chapter",
+                      preview=_cat(f"{chuong.title} — {noi_dung}"))
         return self._mot_binh_luan(bl, actor)
 
     def edit_comment(self, actor: Profile, comment_id: str, *,
@@ -494,7 +629,7 @@ class SocialService:
         theo_id = {p.post_id: p for p in list(tu_theo_doi) + list(kham_pha)}
         bai = [theo_id[str(x["post_id"])] for x in gop if x["post_id"] in theo_id]
         return {
-            "items": self._lam_giau_bai(bai, viewer),
+            "items": self._lam_giau_bai(bai, viewer, kem_xem_truoc=True),
             "total": tong,
             "limit": so,
             "offset": offset,
@@ -511,8 +646,8 @@ class SocialService:
         so = kich_thuoc_trang(limit)
         ds, tong = self._store.list_posts(author_ids=[author_id], limit=so,
                                           offset=offset)
-        return {"items": self._lam_giau_bai(ds, viewer), "total": tong,
-                "limit": so, "offset": offset}
+        return {"items": self._lam_giau_bai(ds, viewer, kem_xem_truoc=True),
+                "total": tong, "limit": so, "offset": offset}
 
     def post_detail(self, post_id: str,
                     viewer: Optional[Profile] = None) -> Dict[str, Any]:
@@ -539,17 +674,25 @@ class SocialService:
     # ================================================================= LAM GIAU
 
     def _lam_giau_bai(self, bai: Sequence[Post],
-                      viewer: Optional[Profile]) -> List[Dict[str, Any]]:
+                      viewer: Optional[Profile],
+                      kem_xem_truoc: bool = False) -> List[Dict[str, Any]]:
         """
-        Ghep tac gia, co da-thich va the truyen vao MOT TRANG bai dang.
+        Ghep tac gia, co da-thich, the truyen — va khi `kem_xem_truoc`, VAI
+        binh luan moi nhat — vao MOT TRANG bai dang.
 
-        BON truy van cho ca trang, khong phu thuoc so bai: ho so, thong ke
-        (de co hang), co da-thich, va tieu de truyen. Hoi tung bai mot la dung
-        cai N+1 da lam khu quan tri mat 34 giay tren staging that.
+        Van la so truy van CO DINH cho ca trang, khong phu thuoc so bai: ho so,
+        thong ke, co da-thich, tieu de truyen, va MOT luot binh luan xem truoc
+        (`comments_for_posts`). Hoi tung bai mot la dung cai N+1 da lam khu
+        quan tri mat 34 giay tren staging that.
         """
         if not bai:
             return []
-        the = self._the_nguoi([p.author_user_id for p in bai])
+        xem_truoc: Dict[str, List[Comment]] = {}
+        if kem_xem_truoc:
+            xem_truoc = self._store.comments_for_posts(
+                [p.post_id for p in bai], moi_bai=2)
+        nguoi_xt = [c.author_user_id for ds in xem_truoc.values() for c in ds]
+        the = self._the_nguoi([p.author_user_id for p in bai] + nguoi_xt)
         da_thich = set()
         if viewer is not None:
             da_thich = self._store.liked_flags(
@@ -564,18 +707,35 @@ class SocialService:
             muc["liked"] = p.post_id in da_thich
             muc["can_edit"] = viewer is not None and viewer.user_id == p.author_user_id
             if p.has_image and self._storage is not None:
-                muc["image_url"] = self._anh_url(p.image_key)
+                urls = [self._anh_url(str(a.get("key") or ""))
+                        for a in p.all_images()]
+                muc["image_urls"] = [u for u in urls if u]
+                # Truong cu — client cu chi biet mot anh van hien duoc anh dau.
+                muc["image_url"] = muc["image_urls"][0] if muc["image_urls"] else ""
             n = truyen.get(p.novel_id) if p.novel_id else None
             if n is not None:
                 muc["novel"] = {"novel_id": n.novel_id, "title": n.title,
                                 "cover_key": n.cover_key}
+            if kem_xem_truoc:
+                muc["comments_preview"] = [
+                    {**c.to_public_dict(), "author": the.get(c.author_user_id)}
+                    for c in xem_truoc.get(p.post_id, [])
+                ]
             ra.append(muc)
         return ra
 
     def _anh_url(self, key: str) -> str:
-        """URL da ky, ngan han. Khoa doi tuong tho khong bao gio ra khoi backend."""
+        """
+        URL da ky, ngan han. Khoa doi tuong tho khong bao gio ra khoi backend.
+
+        `LocalStorageAdapter` (che do dev) khong ky URL va tra `None` — luc do
+        tra chuoi rong de giao dien don gian la khong ve anh, thay vi ve mot
+        the `<img src="None">`. Anh chi hien tren R2 that; da ghi trong bao cao.
+        """
+        if not key:
+            return ""
         try:
-            return self._storage.signed_url(key, expires_seconds=3600)
+            return self._storage.signed_url(key, expires_seconds=3600) or ""
         except Exception:
             return ""
 
@@ -818,11 +978,20 @@ class SocialService:
             else:
                 c = bl.get(r.target_id)
                 noi_dung = c.to_dict() if c else None
+            duong_nguon = ""
+            if r.target_kind == "post":
+                duong_nguon = f"/posts/{r.target_id}"
+            elif noi_dung is not None:
+                # Binh luan: nguon la BAI hoac CHUONG chua no.
+                duong_nguon = (f"/chapters/{noi_dung.get('post_id')}"
+                               if noi_dung.get("target_kind") == "chapter"
+                               else f"/posts/{noi_dung.get('post_id')}")
             muc.append({
                 **r.to_dict(),
                 "content": noi_dung,
                 "reporter": the.get(r.reporter_id),
                 "target_owner": the.get(r.target_owner_id),
+                "context_url": duong_nguon,
             })
         return {"items": muc, "total": tong, "limit": limit, "offset": offset}
 
@@ -931,6 +1100,33 @@ class SocialService:
             "items": [{**c.to_dict(), "author": the.get(c.author_user_id),
                        "open_reports": int(bao_cao.get(c.comment_id, 0))}
                       for c in ds],
+            "total": tong, "limit": limit, "offset": offset,
+        }
+
+    def admin_browse_comments(self, *, target_kind: str = "",
+                              limit: int = 25,
+                              offset: int = 0) -> Dict[str, Any]:
+        """
+        Duyet binh luan TOAN HE THONG cho khu quan tri, tach duoc hai loai:
+        binh luan bai dang (`target_kind=""`) va binh luan chuong ("chapter").
+
+        Hai loai dan toi hai noi khac nhau, nen nguoi kiem duyet can mot duong
+        toi NGUON: bai thi `/posts/{id}`, chuong thi `/chapters/{id}` — tra
+        `context_url` san thay vi bat giao dien tu suy.
+        """
+        ds, tong = self._store.list_comments_all(
+            target_kind=target_kind, limit=limit, offset=offset)
+        the = self._the_nguoi([c.author_user_id for c in ds])
+        bao_cao = self._store.reports_for_targets([c.comment_id for c in ds])
+        return {
+            "items": [{
+                **c.to_dict(),
+                "author": the.get(c.author_user_id),
+                "open_reports": int(bao_cao.get(c.comment_id, 0)),
+                "context_url": (f"/chapters/{c.post_id}"
+                                if c.target_kind == "chapter"
+                                else f"/posts/{c.post_id}"),
+            } for c in ds],
             "total": tong, "limit": limit, "offset": offset,
         }
 

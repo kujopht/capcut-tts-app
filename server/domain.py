@@ -150,6 +150,8 @@ class NotificationKind(str, Enum):
     POST_COMMENT = "post_comment"
     COMMENT_REPLY = "comment_reply"
     STORY_CHAPTER = "story_chapter"
+    #: Co nguoi binh luan vao mot CHUONG cua minh (V3 — binh luan audio).
+    CHAPTER_COMMENT = "chapter_comment"
     AUTHOR_APPROVED = "author_approved"
     AUTHOR_REJECTED = "author_rejected"
 
@@ -700,11 +702,18 @@ class Post:
     #: Chi co nghia voi `STORY_UPDATE`. Chuoi rong voi bai thuong.
     novel_id: str = ""
     #: Khoa doi tuong trong R2 — xem `social.object_key`. KHONG phai binary.
+    #: BAN CU (mot anh). Van doc/ghi duoc de hang da co tren staging khong
+    #: hong; bai MOI dung `images` va de cac truong nay rong.
     image_key: str = ""
     image_mime: str = ""
     image_width: int = 0
     image_height: int = 0
     image_bytes: int = 0
+    #: V3: toi da BON anh. Moi phan tu:
+    #: {"key","mime","width","height","bytes"}. Luu xuong Appwrite thanh MOT
+    #: cot chuoi JSON (`images_json`) — them mot bang con chi de dem bon hang
+    #: la them mot vong mang cho moi bai tren bang tin.
+    images: List[Dict[str, Any]] = field(default_factory=list)
     state: ContentState = ContentState.VISIBLE
     like_count: int = 0
     comment_count: int = 0
@@ -717,7 +726,17 @@ class Post:
 
     @property
     def has_image(self) -> bool:
-        return bool(self.image_key)
+        return bool(self.image_key) or bool(self.images)
+
+    def all_images(self) -> List[Dict[str, Any]]:
+        """Danh sach anh THONG NHAT: bai cu mot-anh va bai moi nhieu-anh."""
+        if self.images:
+            return list(self.images)
+        if self.image_key:
+            return [{"key": self.image_key, "mime": self.image_mime,
+                     "width": self.image_width, "height": self.image_height,
+                     "bytes": self.image_bytes}]
+        return []
 
     def to_dict(self) -> Dict[str, Any]:
         """Hinh dang LUU TRU va hinh dang cho QUAN TRI. Co ca truong kiem duyet."""
@@ -732,6 +751,7 @@ class Post:
             "image_width": self.image_width,
             "image_height": self.image_height,
             "image_bytes": self.image_bytes,
+            "images": list(self.images),
             "state": self.state.value,
             "like_count": self.like_count,
             "comment_count": self.comment_count,
@@ -761,6 +781,12 @@ class Post:
             "has_image": self.has_image and self.state is ContentState.VISIBLE,
             "image_width": self.image_width,
             "image_height": self.image_height,
+            # Kich thuoc tung anh cho gallery — KHONG kem `key`; khoa tho khong
+            # bao gio ra ngoai, URL da ky duoc tang route ghep vao.
+            "images": ([{"width": int(a.get("width") or 0),
+                         "height": int(a.get("height") or 0)}
+                        for a in self.all_images()]
+                       if self.state is ContentState.VISIBLE else []),
             "state": self.state.value,
             "like_count": self.like_count,
             "comment_count": self.comment_count,
@@ -794,6 +820,16 @@ class Comment:
 
     `parent_id` rong = binh luan goc. DUNG mot cap — xem `social.REPLY_MAX_DEPTH`
     de biet vi sao khong phai mot cay khong gioi han.
+
+    MOT loi binh luan cho HAI noi (V3): bai dang cong dong VA chuong truyen.
+    `post_id` giu ten cu nhung mang nghia "id cua DICH" — voi binh luan chuong
+    no chua `chapter_id`. Doi ten cot tren mot bang da co du lieu that la mot
+    migration pha huy; giu ten va noi ro nghia thi khong. Hai khong gian id
+    (`pst_…`/`chp_…`) khong the va cham, va `target_kind` noi tuong minh.
+
+    DICH LA CHUONG, khong phai file MP3: tac gia tao lai audio thi `chapter_id`
+    khong doi, nen chuoi binh luan SONG SOT qua moi lan tao lai. Gan vao object
+    key cua R2 thi moi lan render lai la mot chuoi binh luan mo coi.
     """
 
     post_id: str
@@ -801,6 +837,16 @@ class Comment:
     text: str = ""
     #: `comment_id` cua binh luan goc, hoac chuoi rong.
     parent_id: str = ""
+    #: `""` = binh luan BAI DANG (moi hang cu deu vay — mac dinh nay chinh la
+    #: phep tuong thich nguoc). `"chapter"` = binh luan chuong/audio.
+    target_kind: str = ""
+    #: Vi tri audio dang nghe luc binh luan, tinh bang MILI GIAY. `None` =
+    #: khong dinh kem. KHONG dung -1 hay 0 lam "khong co": 0 la mot moc HOP LE
+    #: (dau chuong), va mot gia tri canh gac kieu -1 se co ngay bi mot phep
+    #: `or 0` nuot mat o tang doi hang.
+    timestamp_ms: Optional[int] = None
+    #: Nguoi viet TU danh dau co spoiler. Khong co may do spoiler nao ca.
+    spoiler: bool = False
     state: ContentState = ContentState.VISIBLE
     reply_count: int = 0
     removed_by: str = ""
@@ -815,6 +861,9 @@ class Comment:
             "post_id": self.post_id,
             "author_user_id": self.author_user_id,
             "parent_id": self.parent_id,
+            "target_kind": self.target_kind,
+            "timestamp_ms": self.timestamp_ms,
+            "spoiler": self.spoiler,
             "text": self.text,
             "state": self.state.value,
             "reply_count": self.reply_count,
@@ -838,6 +887,9 @@ class Comment:
             "post_id": self.post_id,
             "author_user_id": "" if da_go else self.author_user_id,
             "parent_id": self.parent_id,
+            "target_kind": self.target_kind,
+            "timestamp_ms": None if da_go else self.timestamp_ms,
+            "spoiler": self.spoiler,
             "text": "" if da_go else self.text,
             "state": self.state.value,
             "reply_count": self.reply_count,

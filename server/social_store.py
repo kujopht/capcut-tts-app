@@ -344,13 +344,17 @@ class MockSocialStore:
 
     def list_comments(self, post_id: str, *, parent_id: Optional[str] = None,
                       include_removed: bool = True,
+                      newest_first: bool = False,
                       limit: int = 20,
                       offset: int = 0) -> Tuple[List[Comment], int]:
         """
-        Binh luan cua mot bai, CU NHAT truoc.
+        Binh luan cua mot DICH (bai dang hoac chuong), mac dinh CU NHAT truoc.
 
         Nguoc voi bang tin, va co ly do: mot cuoc trao doi doc theo thu tu no
         dien ra. Bang tin thi khong — o do "vua co gi moi" la cau hoi.
+        `newest_first=True` danh cho binh luan CHUONG: mot chuong co the gom
+        binh luan qua nhieu thang, va nguoi vua nghe xong muon thay nguoi ta
+        vua noi gi.
 
         `parent_id=""` lay binh luan GOC; mot `comment_id` lay cac tra loi cua
         no; `None` lay tat ca.
@@ -364,7 +368,48 @@ class MockSocialStore:
             rows = [c for c in rows if c.parent_id == parent_id]
         if not include_removed:
             rows = [c for c in rows if c.state is ContentState.VISIBLE]
-        rows.sort(key=lambda c: (c.created_at, c.comment_id))
+        rows.sort(key=lambda c: (c.created_at, c.comment_id),
+                  reverse=newest_first)
+        return rows[offset:offset + limit], len(rows)
+
+    def comments_for_posts(self, post_ids: Sequence[str],
+                           moi_bai: int = 2) -> Dict[str, List[Comment]]:
+        """
+        Vai binh luan GOC MOI NHAT cua NHIEU bai, MOT luot — cho phan xem
+        truoc kieu bang tin. Cung ly do ton tai voi `replies_for`: khong co no
+        thi 20 bai tren bang tin la 20 truy van nua.
+
+        Tra ve theo thu tu CU->MOI trong tung bai (dung thu tu doc), nhung
+        chon N cai MOI NHAT — nhu moi bang tin quen thuoc.
+        """
+        can = set(p for p in post_ids if p)
+        if not can:
+            return {}
+        with self._lock:
+            rows = [c for c in self._comments.values()
+                    if c.post_id in can and c.parent_id == ""
+                    and c.state is ContentState.VISIBLE]
+        rows.sort(key=lambda c: (c.created_at, c.comment_id), reverse=True)
+        gom: Dict[str, List[Comment]] = {pid: [] for pid in can}
+        for c in rows:
+            if len(gom[c.post_id]) < moi_bai:
+                gom[c.post_id].append(c)
+        return {pid: list(reversed(ds)) for pid, ds in gom.items()}
+
+    def list_comments_all(self, *, target_kind: str = "",
+                          limit: int = 25,
+                          offset: int = 0) -> Tuple[List[Comment], int]:
+        """
+        Duyet binh luan toan he thong cho khu QUAN TRI, moi nhat truoc.
+
+        `target_kind=""` = binh luan bai dang (gia tri cua moi hang cu);
+        `"chapter"` = binh luan chuong. Khu quan tri can phan biet duoc hai
+        loai — chung dan toi hai noi khac nhau.
+        """
+        with self._lock:
+            rows = [c for c in self._comments.values()
+                    if (c.target_kind or "") == (target_kind or "")]
+        rows.sort(key=lambda c: (c.created_at, c.comment_id), reverse=True)
         return rows[offset:offset + limit], len(rows)
 
     def replies_for(self, parent_ids: Sequence[str],

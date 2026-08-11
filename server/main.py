@@ -2405,6 +2405,18 @@ class PostIn(BaseModel):
     image_mime: Annotated[str, StringConstraints(max_length=60)] = ""
     image_width: int = 0
     image_height: int = 0
+    #: V3: toi da BON anh. Moi phan tu cung hinh dang voi bo truong don o tren.
+    #: Tran do dai danh sach o day chi la lop chan tho — tran THAT (so anh,
+    #: tong byte) nam o `server/social.py` va duoc kiem sau khi giai ma.
+    images: List["AnhIn"] = Field(default_factory=list, max_length=6)
+
+
+class AnhIn(BaseModel):
+    base64: Annotated[str, StringConstraints(min_length=1,
+                                             max_length=3_000_000)]
+    mime: Annotated[str, StringConstraints(max_length=60)] = ""
+    width: int = 0
+    height: int = 0
 
 
 class PostPatch(BaseModel):
@@ -2415,6 +2427,16 @@ class CommentIn(BaseModel):
     text: Annotated[str, StringConstraints(min_length=1,
                                           max_length=COMMENT_MAX_CHARS)]
     parent_id: Annotated[str, StringConstraints(max_length=64)] = ""
+
+
+class ChapterCommentIn(CommentIn):
+    """Binh luan chuong: them moc audio (mili giay) va co spoiler."""
+
+    #: `None` = khong dinh kem. Tran tho 12h; tran THAT theo thoi luong track
+    #: nam o `social.kiem_timestamp`.
+    timestamp_ms: Optional[int] = Field(default=None, ge=0,
+                                        le=12 * 60 * 60 * 1000)
+    spoiler: bool = False
 
 
 class ReportIn(BaseModel):
@@ -2453,20 +2475,32 @@ def _xa_hoi(fn, *args, **kwargs):
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
 
-def _anh_tu_body(payload: "PostIn") -> Optional[Dict[str, Any]]:
-    """Giai ma anh base64, hoac None khi bai khong co anh."""
-    if not payload.image_base64:
-        return None
+def _giai_ma_anh(b64: str, mime: str, width: int, height: int) -> Dict[str, Any]:
     import base64
     import binascii
 
     try:
-        data = base64.b64decode(payload.image_base64, validate=True)
+        data = base64.b64decode(b64, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Ảnh không hợp lệ.") from exc
-    return {"data": data, "mime": payload.image_mime,
-            "width": payload.image_width, "height": payload.image_height}
+    return {"data": data, "mime": mime, "width": width, "height": height}
+
+
+def _bo_anh_tu_body(payload: "PostIn") -> List[Dict[str, Any]]:
+    """
+    Giai ma MOI anh cua bai: danh sach `images` (V3) + truong don cu neu co.
+
+    Client cu chi gui truong don van chay; client moi gui danh sach. Gop o day
+    de tang dich vu chi thay MOT danh sach.
+    """
+    ra: List[Dict[str, Any]] = []
+    if payload.image_base64:
+        ra.append(_giai_ma_anh(payload.image_base64, payload.image_mime,
+                               payload.image_width, payload.image_height))
+    for anh in payload.images:
+        ra.append(_giai_ma_anh(anh.base64, anh.mime, anh.width, anh.height))
+    return ra
 
 
 @app.get("/api/limits")
@@ -2531,10 +2565,9 @@ def api_feed(limit: int = 0, offset: int = 0,
 @app.post("/api/posts", status_code=status.HTTP_201_CREATED)
 def create_post(payload: PostIn,
                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    anh = _anh_tu_body(payload)
     return {"post": _xa_hoi(social.create_post, profile, text=payload.text,
                             kind=payload.kind, novel_id=payload.novel_id,
-                            image=anh)}
+                            images=_bo_anh_tu_body(payload))}
 
 
 @app.get("/api/posts/{post_id}")
@@ -2597,6 +2630,30 @@ def create_comment(post_id: str, payload: CommentIn,
                    profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return {"comment": _xa_hoi(social.create_comment, profile, post_id,
                                text=payload.text, parent_id=payload.parent_id)}
+
+
+@app.get("/api/chapters/{chapter_id}/comments")
+def list_chapter_comments(chapter_id: str, sort: str = "moi",
+                          limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+    """
+    Binh luan cua mot CHUONG. Cong khai — chi chuong cua truyen DA XUAT BAN
+    (hang rao nam o `SocialService._chuong_cong_khai`; ban nhap tra 404).
+
+    Dich la `chapter_id`, khong phai file MP3: tac gia tao lai audio thi chuoi
+    binh luan van con nguyen.
+    """
+    return _xa_hoi(social.chapter_comments, chapter_id, sort=sort,
+                   limit=max(1, min(50, limit)), offset=max(0, offset))
+
+
+@app.post("/api/chapters/{chapter_id}/comments",
+          status_code=status.HTTP_201_CREATED)
+def create_chapter_comment(chapter_id: str, payload: ChapterCommentIn,
+                           profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"comment": _xa_hoi(
+        social.create_chapter_comment, profile, chapter_id,
+        text=payload.text, parent_id=payload.parent_id,
+        timestamp_ms=payload.timestamp_ms, spoiler=payload.spoiler)}
 
 
 @app.get("/api/comments/{comment_id}/replies")
@@ -2724,6 +2781,22 @@ def admin_remove_post(post_id: str, payload: RemoveIn,
 def admin_restore_post(post_id: str, payload: FollowIn,
                        admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     return {"post": _xa_hoi(social.restore_post, admin, post_id)}
+
+
+@app.get("/api/admin/comments")
+def admin_browse_comments(target_kind: str = "", limit: int = 25,
+                          offset: int = 0,
+                          admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Duyet binh luan toan he thong, TACH duoc binh luan bai dang voi binh luan
+    chuong (`target_kind=chapter`) — hai loai dan toi hai noi khac nhau va
+    nguoi kiem duyet can biet minh dang nhin gi.
+    """
+    if target_kind not in ("", "chapter"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "target_kind không hợp lệ.")
+    return _xa_hoi(social.admin_browse_comments, target_kind=target_kind,
+                   limit=max(1, min(100, limit)), offset=max(0, offset))
 
 
 @app.get("/api/admin/posts/{post_id}/comments")

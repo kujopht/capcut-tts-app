@@ -65,12 +65,16 @@ SOCIAL_PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_POSTS: (
         "post_id", "author_user_id", "kind", "novel_id", "text",
         "image_key", "image_mime", "image_width", "image_height", "image_bytes",
+        # V3: nhieu anh, luu MOT cot JSON. Xem `Post.images`.
+        "images_json",
         "state", "like_count", "comment_count", "removed_by", "removed_reason",
         "created_at", "updated_at",
     ),
     COL_POST_LIKES: ("like_id", "post_id", "user_id", "created_at"),
     COL_COMMENTS: (
         "comment_id", "post_id", "author_user_id", "parent_id", "text",
+        # V3: binh luan chuong/audio. Xem ghi chu o `domain.Comment`.
+        "target_kind", "timestamp_ms", "spoiler",
         "state", "reply_count", "removed_by", "removed_reason",
         "created_at", "updated_at",
     ),
@@ -118,7 +122,21 @@ def _enum(kieu, gia_tri, mac_dinh):
 
 
 def _post_from(row: Dict[str, Any]) -> Post:
+    # `images_json` -> danh sach. Chuoi hong (khong phai JSON) doc thanh danh
+    # sach RONG chu khong nem: mot hang hong khong duoc keo sap ca bang tin.
+    import json as _json
+
+    anh: List[Dict[str, Any]] = []
+    tho = row.get("images_json")
+    if tho:
+        try:
+            giai = _json.loads(tho)
+            if isinstance(giai, list):
+                anh = [a for a in giai if isinstance(a, dict)]
+        except (ValueError, TypeError):
+            anh = []
     return Post(
+        images=anh,
         post_id=str(row.get("post_id") or row.get("$id") or ""),
         author_user_id=str(row.get("author_user_id") or ""),
         kind=_enum(PostKind, row.get("kind"), PostKind.POST),
@@ -140,11 +158,17 @@ def _post_from(row: Dict[str, Any]) -> Post:
 
 
 def _comment_from(row: Dict[str, Any]) -> Comment:
+    # `timestamp_ms`: 0 la moc HOP LE (dau chuong) — phan biet voi vang mat
+    # bang phep kiem None tuong minh, khong dung `or`.
+    ts = row.get("timestamp_ms")
     return Comment(
         comment_id=str(row.get("comment_id") or row.get("$id") or ""),
         post_id=str(row.get("post_id") or ""),
         author_user_id=str(row.get("author_user_id") or ""),
         parent_id=str(row.get("parent_id") or ""),
+        target_kind=str(row.get("target_kind") or ""),
+        timestamp_ms=int(ts) if ts is not None else None,
+        spoiler=bool(row.get("spoiler")),
         text=str(row.get("text") or ""),
         state=_enum(ContentState, row.get("state"), ContentState.VISIBLE),
         reply_count=int(row.get("reply_count") or 0),
@@ -313,7 +337,7 @@ class AppwriteSocialStore:
         # Quyen doc CONG KHAI: moi bai deu cong khai o giai doan nay. Bai bi go
         # van giu quyen do — noi dung khong ra ngoai vi `to_public_dict()` cat
         # no, chu khong phai vi permission. Mot duong bao ve duy nhat, o mot cho.
-        self._create(COL_POSTS, post.post_id, post.to_dict(),
+        self._create(COL_POSTS, post.post_id, self._hinh_luu_bai(post),
                      post.author_user_id, public_read=True)
         return post
 
@@ -325,8 +349,19 @@ class AppwriteSocialStore:
 
     def save_post(self, post: Post) -> Post:
         post.updated_at = now_iso_us()
-        self._update(COL_POSTS, post.post_id, post.to_dict())
+        self._update(COL_POSTS, post.post_id, self._hinh_luu_bai(post))
         return post
+
+    @staticmethod
+    def _hinh_luu_bai(post: Post) -> Dict[str, Any]:
+        """`to_dict()` + doi `images` (danh sach) thanh `images_json` (chuoi)."""
+        import json as _json
+
+        data = post.to_dict()
+        data.pop("images", None)
+        data["images_json"] = (_json.dumps(post.images, ensure_ascii=False)
+                               if post.images else "")
+        return data
 
     def delete_post(self, post_id: str) -> bool:
         return self._xoa_neu_co(COL_POSTS, post_id)
@@ -459,18 +494,74 @@ class AppwriteSocialStore:
 
     def list_comments(self, post_id: str, *, parent_id: Optional[str] = None,
                       include_removed: bool = True,
+                      newest_first: bool = False,
                       limit: int = 20,
                       offset: int = 0) -> Tuple[List[Comment], int]:
-        """CU NHAT truoc — mot cuoc trao doi doc theo thu tu no dien ra."""
+        """Mac dinh CU NHAT truoc; `newest_first` cho binh luan chuong."""
         from server.appwrite_store import (q_equal, q_limit, q_offset,
-                                           q_order_asc)
+                                           q_order_asc, q_order_desc)
 
         queries = [q_equal("post_id", post_id)]
         if parent_id is not None:
             queries.append(q_equal("parent_id", parent_id))
         if not include_removed:
             queries.append(q_equal("state", ContentState.VISIBLE.value))
-        queries += [q_order_asc("created_at"), q_limit(limit), q_offset(offset)]
+        queries += [q_order_desc("created_at") if newest_first
+                    else q_order_asc("created_at"),
+                    q_limit(limit), q_offset(offset)]
+        rows, total = self._page(COL_COMMENTS, queries)
+        return [_comment_from(r) for r in rows], total
+
+    def comments_for_posts(self, post_ids: Sequence[str],
+                           moi_bai: int = 2) -> Dict[str, List[Comment]]:
+        """
+        Vai binh luan goc MOI NHAT cua NHIEU bai, mot truy van moi lo — xem
+        contract o `MockSocialStore.comments_for_posts`. Lay `len(lo) * moi_bai`
+        hang moi nhat roi cat o Python, cung ky thuat voi `replies_for`.
+        """
+        from server.appwrite_store import (BATCH_IDS, _theo_lo, q_equal,
+                                           q_limit, q_order_desc)
+
+        ids = [p for p in post_ids if p]
+        if not ids:
+            return {}
+        gom: Dict[str, List[Comment]] = {pid: [] for pid in ids}
+        for lo in _theo_lo(list(dict.fromkeys(ids)), BATCH_IDS):
+            rows = self._list(COL_COMMENTS, [
+                q_equal("post_id", *lo),
+                q_equal("parent_id", ""),
+                q_equal("state", ContentState.VISIBLE.value),
+                q_order_desc("created_at"),
+                q_limit(len(lo) * max(1, moi_bai)),
+            ])
+            for row in rows:
+                c = _comment_from(row)
+                cho = gom.setdefault(c.post_id, [])
+                if len(cho) < moi_bai:
+                    cho.append(c)
+        return {pid: list(reversed(ds)) for pid, ds in gom.items()}
+
+    def list_comments_all(self, *, target_kind: str = "",
+                          limit: int = 25,
+                          offset: int = 0) -> Tuple[List[Comment], int]:
+        """Duyet toan he thong cho khu quan tri — xem contract o ban mock."""
+        from server.appwrite_store import (q_equal, q_limit, q_offset,
+                                           q_order_desc)
+
+        # Hang cu khong co thuoc tinh `target_kind` (them sau -> NULL); hang
+        # moi loai bai dang ghi "". `equal("")` KHONG khop null, nen loc "bai
+        # dang" phai la `or(equal(""), isNull)`. Voi "chapter" mot gia tri du.
+        if target_kind:
+            queries = [q_equal("target_kind", target_kind)]
+        else:
+            from server.appwrite_store import q_or
+
+            queries = [q_or(
+                {"method": "equal", "attribute": "target_kind", "values": [""]},
+                {"method": "isNull", "attribute": "target_kind"},
+            )]
+        queries += [q_order_desc("created_at"), q_limit(limit),
+                    q_offset(offset)]
         rows, total = self._page(COL_COMMENTS, queries)
         return [_comment_from(r) for r in rows], total
 

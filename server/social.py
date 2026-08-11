@@ -279,12 +279,65 @@ CHINH_SACH_ANH: Dict[str, ChinhSachAnh] = {
                          canh_toi_da=1600),
 }
 
-#: MOT anh moi bai dang, va con so nay duoc CUONG CHE o tang dich vu.
+#: V3: toi da BON anh moi bai, cuong che o tang dich vu.
 #:
-#: Vi sao khong phai mot thu vien anh: mot bai nhieu anh keo theo thu tu anh,
-#: giao dien luot, anh bia cua bai, va mot man hinh xem anh. Do la mot tinh nang
-#: rieng, khong phai mot tham so.
-POST_MAX_IMAGES = 1
+#: Bon la con so cua mot luoi 2x2 — cai luoi don gian nhat con dep. Nhieu hon
+#: thi thanh mot thu vien anh voi trang rieng, thu tu keo tha va man hinh luot,
+#: va do la mot tinh nang khac.
+POST_MAX_IMAGES = 4
+
+#: Tran TONG dung luong anh cua MOT bai, sau xu ly. Kho R2 dang o goi MVP —
+#: xem `docs/HANDOFF.md`. Mot bai bon anh WebP 1600px thuong roi vao khoang
+#: 400 KB - 2 MB; tran 3 MB la du rong cho anh that va du chat de mot bai
+#: khong ngon mot phan nghin cua kho.
+POST_TOTAL_MEDIA_BYTES = 3 * 1024 * 1024
+
+
+def kiem_bo_anh(loai: str, anh: "Sequence[Dict[str, object]]") -> None:
+    """
+    Kiem CA BO anh cua mot bai: so luong va TONG dung luong.
+
+    Tung anh mot da qua `kiem_anh`; ham nay giu hai rang buoc chi co nghia o
+    muc ca bo. Tach rieng de cho goi nao chi co mot anh khong phai tra tien
+    cho logic bo.
+    """
+    if len(anh) > POST_MAX_IMAGES:
+        raise SocialError(f"Tối đa {POST_MAX_IMAGES} ảnh mỗi bài.")
+    tong = sum(int(a.get("so_byte") or 0) for a in anh)
+    if tong > POST_TOTAL_MEDIA_BYTES:
+        mb = POST_TOTAL_MEDIA_BYTES / (1024 * 1024)
+        raise SocialError(
+            f"Tổng dung lượng ảnh vượt quá {mb:.0f} MB. Hãy bớt hoặc nén ảnh.")
+
+
+#: Tran hop ly cuoi cung cho moc thoi gian dinh kem (mili giay) khi KHONG kiem
+#: duoc thoi luong that: 12 gio. Khong audiobook chuong nao dai hon, va mot moc
+#: bia dat se chi tro ve cuoi audio khi bam — kho chiu, khong nguy hiem.
+TIMESTAMP_TRAN_MS = 12 * 60 * 60 * 1000
+
+
+def kiem_timestamp(timestamp_ms: Optional[int],
+                   duration_seconds: Optional[float]) -> Optional[int]:
+    """
+    Kiem moc thoi gian dinh kem mot binh luan chuong.
+
+    `duration_seconds` la thoi luong THAT tu `audio_tracks` neu co. Khi co,
+    moc phai nam trong [0, thoi luong + 2s] — hai giay du sai so lam tron cua
+    trinh duyet o cuoi audio. Khi KHONG co (chuong chua co audio, hoac track
+    thieu thoi luong), lui ve phep kiem hop ly: [0, 12 gio]. Han che nay duoc
+    ghi trong bao cao — khong gia vo kiem duoc thu khong kiem duoc.
+    """
+    if timestamp_ms is None:
+        return None
+    ts = int(timestamp_ms)
+    if ts < 0:
+        raise SocialError("Mốc thời gian không hợp lệ.")
+    if duration_seconds and duration_seconds > 0:
+        if ts > int(duration_seconds * 1000) + 2000:
+            raise SocialError("Mốc thời gian vượt quá độ dài audio.")
+    elif ts > TIMESTAMP_TRAN_MS:
+        raise SocialError("Mốc thời gian không hợp lệ.")
+    return ts
 
 
 def kiem_anh(loai: str, *, mime: str, so_byte: int) -> ChinhSachAnh:
@@ -360,6 +413,7 @@ def mo_ta_gioi_han() -> Dict[str, object]:
         "comment_max_chars": COMMENT_MAX_CHARS,
         "report_detail_max_chars": REPORT_DETAIL_MAX_CHARS,
         "post_max_images": POST_MAX_IMAGES,
+        "post_total_media_bytes": POST_TOTAL_MEDIA_BYTES,
         "image": {
             loai: {
                 "max_bytes": cs.toi_da_byte,

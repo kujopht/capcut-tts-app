@@ -1063,6 +1063,14 @@ def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profil
         content=payload.content,
         order_index=payload.order_index,
     ))
+    # Chuong moi trong truyen DA XUAT BAN la mot chuong doc gia doc duoc NGAY:
+    # danh sach chuong cua trang truyen khong loc theo trang thai chuong, chi
+    # theo trang thai truyen. Nen day — chu khong phai mot nut "xuat ban
+    # chuong" khong ton tai — chinh la khoanh khac "co chuong moi" ma nguoi
+    # theo doi truyen can duoc bao. E2E tren staging that da chung minh duong
+    # cu (doi `state` cua chuong qua PATCH) khong bao gio kich hoat duoc:
+    # `ChapterPatch` khong nhan `state`.
+    _bao_chuong_moi(chapter)
     return {"chapter": chapter.to_dict()}
 
 

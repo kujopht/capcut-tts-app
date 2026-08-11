@@ -112,6 +112,11 @@ class FakeAppwrite:
                 rows = [r for r in rows
                         if vals and str(vals[0]).lower() in str(r.get(attr, "")).lower()]
             elif m == "or":
+                # Appwrite THAT tu choi `or` co duoi hai dieu kien — bat duoc
+                # tren staging o truy van tim bai. Ban gia lap phai kho tinh y
+                # het, neu khong loai loi nay chi lo ra khi chay that.
+                if len(d.get("values") or []) < 2:
+                    raise _Loi400("Or queries require at least two queries")
                 giu = []
                 for r in rows:
                     for dk in d.get("values") or []:
@@ -147,6 +152,10 @@ class FakeAppwrite:
         return {"documents": rows[offset:offset + limit], "total": len(rows)}
 
 
+class _Loi400(Exception):
+    pass
+
+
 class _Loi404(Exception):
     pass
 
@@ -163,7 +172,7 @@ def _bo_client(fake: FakeAppwrite):
             try:
                 return fake.request(method, url, json=json, params=params,
                                     headers=headers)
-            except (_Loi404, _Loi409) as exc:
+            except (_Loi400, _Loi404, _Loi409) as exc:
                 from server.adapters import NotFoundError
                 raise NotFoundError(str(exc)) from exc
 

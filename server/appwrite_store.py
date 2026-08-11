@@ -228,7 +228,15 @@ def q_or(*conditions: Dict[str, Any]) -> str:
 
     Cac dieu kien phai long vao duoi dang DOI TUONG. Long dang chuoi JSON thi
     Appwrite tra 'Server Error' — da gap that khi chay.
+
+    MOT dieu kien thi tra ve CHINH dieu kien do, khong boc `or`: Appwrite that
+    tu choi 'Or queries require at least two queries' — do duoc tren staging,
+    o dung truy van tim bai dang dau tien. Nguoi goi thuong xay danh sach dieu
+    kien dong (mot tu khoa -> mot `contains`), va bat ho tu dem so dieu kien
+    truoc khi chon ham la giao cho moi cho goi mot viec de quen.
     """
+    if len(conditions) == 1:
+        return json.dumps(conditions[0])
     return json.dumps({"method": "or", "values": list(conditions)})
 
 

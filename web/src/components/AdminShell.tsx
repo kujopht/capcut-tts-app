@@ -48,6 +48,7 @@ const MUC = [
   // vao thuong ngay cua nguoi kiem duyet, con danh sach bai la duong tra cuu.
   { href: "/admin/reports", nhan: "Báo cáo", icon: IconShield },
   { href: "/admin/posts", nhan: "Bài đăng", icon: IconMegaphone },
+  { href: "/admin/comments", nhan: "Bình luận", icon: IconFeather },
   { href: "/admin/events", nhan: "Nhật ký", icon: IconHistory },
 ];
 

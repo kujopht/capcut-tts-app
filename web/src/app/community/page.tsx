@@ -27,6 +27,7 @@ import { useSession } from "@/lib/session";
 import { PageHeader, SkeletonList, ErrorState, EmptyState } from "@/components/ui";
 import { PostCard } from "@/components/PostCard";
 import { PostComposer } from "@/components/PostComposer";
+import { TacGiaNoiBat } from "@/components/CommunitySidebar";
 
 export default function CommunityPage() {
   const { profile, loading: dangTaiPhien } = useSession();
@@ -100,7 +101,8 @@ export default function CommunityPage() {
   }, [trang]);
 
   return (
-    <div className="stack">
+    <div className="cong-dong-luoi">
+      <div className="stack cong-dong-chinh">
       <PageHeader
         eyebrow="Quảng trường"
         title="Cộng đồng"
@@ -133,6 +135,14 @@ export default function CommunityPage() {
           thích và bình luận.
         </p>
       )}
+
+      {/*
+        Chua theo doi ai: goi y vai tac gia de bat dau — tieu chi la luot nghe
+        hop le, con so that cua he thong hang. Khong "goi y cho ban" bia.
+      */}
+      {profile && trang && !trang.personalized ? (
+        <TacGiaNoiBat gon />
+      ) : null}
 
       {/* Nói rõ khi danh sách theo dõi bị cắt, thay vì im lặng bỏ bớt. */}
       {trang?.following_truncated ? (
@@ -200,6 +210,16 @@ export default function CommunityPage() {
           {dangThem ? "Đang tải…" : "Xem thêm"}
         </button>
       ) : null}
+      </div>
+
+      {/*
+        Cot phai — CHI desktop (CSS an duoi 1000px). Du lieu THAT: tac gia xep
+        theo luot nghe hop le. Bang tin van la nhan vat chinh; cot nay khong
+        bao gio co khung "trending" bia.
+      */}
+      <aside className="cong-dong-phai" aria-label="Khám phá thêm">
+        <TacGiaNoiBat />
+      </aside>
     </div>
   );
 }

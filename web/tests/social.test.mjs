@@ -31,6 +31,37 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const codeOnly = (src) =>
   src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
+/**
+ * Gop THAN cua moi khoi @media cung loai lai lam mot.
+ *
+ * Tep CSS gio co nhieu khoi `max-width: 640px` (moi dot them tinh nang noi
+ * mot khoi vao cuoi). `lastIndexOf` chi thay khoi moi nhat — bai test do vi
+ * quy tac no tim nam o khoi cu, du quy tac van con nguyen. Quet TAT CA moi
+ * la dieu bai test thuc su muon noi.
+ */
+function gopMedia(text, moc) {
+  let ra = "";
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(moc, from);
+    if (at === -1) return ra;
+    const open = text.indexOf("{", at);
+    let sau = 0;
+    for (let j = open; j < text.length; j += 1) {
+      if (text[j] === "{") sau += 1;
+      else if (text[j] === "}") {
+        sau -= 1;
+        if (sau === 0) {
+          ra += text.slice(open + 1, j) + "\n";
+          from = j;
+          break;
+        }
+      }
+    }
+    from += 1;
+  }
+}
+
 const api = () => read("../src/lib/api.ts");
 const feed = () => read("../src/app/community/page.tsx");
 const postCard = () => read("../src/components/PostCard.tsx");
@@ -132,8 +163,10 @@ test("chi tac gia da duyet moi bi hoi danh sach truyen cua minh", () => {
 test("binh luan CHI tai khi duoc mo — khong phai 20 truy van cho 20 bai", () => {
   const src = postCard();
   assert.match(src, /\{moBinhLuan && !commentsElsewhere \? \(/);
-  // Va khoi binh luan tu tai du lieu cua no khi mount
-  assert.match(comments(), /social\s*\n?\s*\.comments\(postId\)/);
+  // V3: khoi binh luan tai qua bo chuyen dich `nguon(kind, id)` — mot cho re
+  // nhanh duy nhat giua bai dang va chuong.
+  assert.match(comments(), /nguon\(targetKind, postId\)/);
+  assert.match(comments(), /social\.comments\(id, limit, offset\)/);
 });
 
 test("thich la aria-pressed + cap nhat lac quan + hoan lai khi loi", () => {
@@ -157,11 +190,42 @@ test("trang mot bai le khong hien HAI khoi binh luan", () => {
   assert.match(postCard(), /commentsElsewhere \? \(/);
 });
 
-test("nut sua/xoa chi hien voi chinh chu, nut bao cao voi nguoi khac", () => {
+test("menu bai: cua minh Sua/Xoa, cua nguoi khac Bao cao — khong lan nhau", () => {
+  // V3: hai nhom hanh dong chuyen vao menu ⋯. `cuaToi` quyet dinh nhanh nao
+  // duoc VE — may chu van la noi cuong che (403), day chi de khong hien mot
+  // nut chac chan that bai.
   const src = postCard();
-  assert.match(src, /\{bai\.can_edit \? \(/);
-  // Bao cao nam o nhanh NGUOC lai cua can_edit — khong ai bao cao chinh minh.
-  assert.match(src, /\) : profile \? \(/);
+  assert.match(src, /cuaToi=\{bai\.can_edit\}/);
+  assert.match(src, /\{cuaToi \? \(/);
+  assert.match(src, /Sửa bài viết/);
+  assert.match(src, /Xóa bài viết/);
+  assert.match(src, /🚩 Báo cáo/);
+});
+
+test("chia se V1 = chep lien ket ben /posts/{id}, co duong lui khi clipboard bi chan", () => {
+  const src = postCard();
+  assert.match(src, /\/posts\/\$\{bai\.post_id\}/);
+  assert.match(src, /navigator\.clipboard\.writeText/);
+  // Clipboard bi chan khong duoc im lang — hien URL de nguoi dung tu chep.
+  assert.match(src, /toast\.push\("info", url\)/);
+});
+
+test("gallery 1-4 anh co bo cuc rieng va mo trinh xem", () => {
+  const src = postCard();
+  assert.match(src, /bai-gallery-\$\{Math\.min\(urls\.length, 4\)\}/);
+  assert.match(src, /ImageLightbox/);
+  const than = css();
+  for (const lop of ["bai-gallery-2", "bai-gallery-3", "bai-gallery-4"]) {
+    assert.ok(than.includes(`.${lop}`), `thiếu bố cục .${lop}`);
+  }
+});
+
+test("trinh xem anh: Escape dong, mui ten chuyen, tra tieu diem ve cho cu", () => {
+  const src = read("../src/components/ImageLightbox.tsx");
+  assert.match(src, /aria-modal="true"/);
+  assert.match(src, /e\.key === "Escape"/);
+  assert.match(src, /ArrowRight/);
+  assert.match(src, /truoc\.current\?\.focus\(\)/);
 });
 
 test("anh bai co max-height — mot anh doc khong day bang tin xuong ba man", () => {
@@ -197,7 +261,8 @@ test("anh qua tran bi chan O TRINH DUYET kem con so that", () => {
 test("URL xem truoc duoc thu hoi — khong ro ri blob theo tung anh", () => {
   const src = composer();
   assert.match(src, /URL\.revokeObjectURL\(nguon\)/);
-  assert.match(src, /if \(url\) URL\.revokeObjectURL\(url\)/);
+  // V3 nhieu anh: thu hoi TUNG url trong danh sach.
+  assert.match(src, /urls\.forEach\(\(u\) => URL\.revokeObjectURL\(u\)\)/);
 });
 
 test("o chon tep den duoc bang ban phim — khong display:none", () => {
@@ -434,8 +499,7 @@ test("khu cong dong co sac rieng va khong co canh troi dong", () => {
 });
 
 test("mobile: anh bai thap hon, tra loi thut it hon, tab cuon ngang", () => {
-  const than = css();
-  const mobile = than.slice(than.lastIndexOf("@media (max-width: 640px)"));
+  const mobile = gopMedia(css(), "@media (max-width: 640px)");
   assert.match(mobile, /\.bai-anh \{ max-height: 50vh; \}/);
   assert.match(mobile, /\.binh-luan\.tra-loi \{ margin-left: 12px; \}/);
   assert.match(mobile, /\.tab-hang \{[^}]*overflow-x: auto/);
@@ -453,8 +517,7 @@ test("mobile: bang thong bao GHIM vao khung nhin, khong neo theo chuong", () => 
     tren nen trong, nhung o day bang nam de len hang dieu huong va chu "Khám
     phá" xuyen qua tron vao chu cua thong bao.
   */
-  const than = css();
-  const mobile = than.slice(than.lastIndexOf("@media (max-width: 640px)"));
+  const mobile = gopMedia(css(), "@media (max-width: 640px)");
   const at = mobile.indexOf(".bell-panel {");
   assert.notEqual(at, -1, "thiếu ghi đè .bell-panel ở mobile");
   const khoi = mobile.slice(at, mobile.indexOf("}", at) + 1);
@@ -465,10 +528,71 @@ test("mobile: bang thong bao GHIM vao khung nhin, khong neo theo chuong", () => 
 });
 
 test("reduced-motion tat het chuyen dong cua tang xa hoi", () => {
-  const than = css();
-  const khoi = than.slice(than.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
+  const khoi = gopMedia(css(), "@media (prefers-reduced-motion: reduce)");
   assert.match(khoi, /\.bai-dang/);
   assert.match(khoi, /animation: none !important/);
+  // V3: nhip phong cua tim cung phai tat.
+  assert.match(khoi, /\.da-thich \.bai-tim \{ animation: none; \}/);
+});
+
+/* ===================================================== binh luan chuong V3 */
+
+test("binh luan chuong: MOT engine, dich la chapter_id, khong audio element moi", () => {
+  const src = comments();
+  // Mot engine: chinh CommentThread phuc vu ca hai dich.
+  assert.match(src, /targetKind\?: DichKind/);
+  assert.match(src, /social\.chapterComments\(id, sort, limit, offset\)/);
+  // KHONG the <audio> nao trong ca engine binh luan lan khoi chuong.
+  // codeOnly: chu thich cua chinh tep nay nhac toi the <audio> de giai thich
+  // vi sao KHONG tao no — cung cai bay da gap o Phase 0 va o cai chuong.
+  assert.ok(!/<audio/.test(codeOnly(src)), "engine bình luận tự tạo thẻ audio");
+  assert.ok(!/<audio/.test(codeOnly(read("../src/components/ChapterComments.tsx"))),
+    "khối bình luận chương tự tạo thẻ audio");
+});
+
+test("moc thoi gian: dong bang luc bam, tua qua CHINH engine dung chung", () => {
+  const src = comments();
+  // Dinh moc: DOC vi tri hien tai mot lan — khong troi theo audio dang phat.
+  assert.match(src, /Math\.floor\(engine\.trangThai\.thoiDiem \* 1000\)/);
+  // Tua: goi dieu khien cua engine, khong cham element nao.
+  assert.match(src, /engine\.dieuKhien\.tua\(ms \/ 1000\)/);
+  // Khong co engine (trang chua co audio): moc hien TINH, khong bien mat.
+  assert.match(src, /moc-tinh/);
+});
+
+test("spoiler: nguoi viet tu danh dau, nguoi doc tu mo — khong may do nao", () => {
+  const src = comments();
+  assert.match(src, /Có spoiler/);
+  assert.match(src, /Hiện spoiler/);
+  assert.match(src, /bl\.spoiler && !hien/);
+});
+
+test("khoi binh luan chuong: gap/mo, mac dinh theo be rong, an voi ban nhap", () => {
+  const src = read("../src/components/ChapterComments.tsx");
+  assert.match(src, /aria-expanded=\{mo\}/);
+  assert.match(src, /window\.innerWidth >= 900/);
+  // Chuong nhap tra 404 -> AN ca khoi, khong hien loi do.
+  assert.match(src, /e\.status === 404\) setAn\(true\)/);
+  assert.match(src, /placeholder="Bạn nghĩ gì về chương này\?"/);
+});
+
+test("trang chuong gan khoi binh luan o CA hai nhanh co/khong audio", () => {
+  const trang = read("../src/app/chapters/[id]/page.tsx");
+  const dem = (trang.match(/<ChapterComments /g) ?? []).length;
+  assert.equal(dem, 2, "phải có ở nhánh có audio LẪN nhánh chưa có audio");
+});
+
+test("composer bang tin: hang kich hoat quen thuoc, mo roi focus", () => {
+  const src = composer();
+  assert.match(src, /Bạn đang nghĩ gì\?/);
+  assert.match(src, /queueMicrotask\(\(\) => oChu\.current\?\.focus\(\)\)/);
+});
+
+test("xem truoc binh luan trong the bai: khong hien khi khoi day du dang mo", () => {
+  const src = postCard();
+  assert.match(src, /\{!moBinhLuan && !commentsElsewhere && xemTruoc\.length > 0/);
+  // Xem truoc co spoiler thi KHONG lo noi dung.
+  assert.match(src, /có spoiler — mở bình luận để xem/);
 });
 
 /* ============================================== vien thuoc nav — hoi quy */

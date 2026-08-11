@@ -3,6 +3,14 @@
 /**
  * Hộp soạn bài đăng.
  *
+ * V3 — mở bằng MỘT hàng kích hoạt quen thuộc (avatar + "Bạn đang nghĩ gì?"):
+ * bảng tin không mở đầu bằng một textarea to trống trải, và người chỉ đến đọc
+ * không phải cuộn qua một cái form. Bấm vào hàng là composer thật mở ra và
+ * textarea nhận tiêu điểm.
+ *
+ * V3 — tối đa BỐN ảnh. Mỗi ảnh qua cùng đường xử lý canvas; trần số ảnh và
+ * tổng dung lượng đọc từ `/api/limits`, máy chủ vẫn là nơi cưỡng chế.
+ *
  * XỬ LÝ ẢNH Ở TRÌNH DUYỆT, và đó là quyết định đáng giải thích nhất ở đây.
  *
  * Ảnh được vẽ lại qua `<canvas>` rồi xuất ra WebP TRƯỚC KHI gửi. Ba lý do, theo
@@ -23,6 +31,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, social, type Post, type ServerLimits } from "@/lib/api";
+import { useSession } from "@/lib/session";
 
 /** Cạnh dài nhất và chất lượng nén. Dùng khi máy chủ chưa trả giới hạn về. */
 const CANH_DU_PHONG = 1600;
@@ -112,61 +121,87 @@ export function PostComposer({
   storyOptions?: ReadonlyArray<{ novel_id: string; title: string }>;
   onPosted: (post: Post) => void;
 }) {
+  const { profile } = useSession();
+  const [moRong, setMoRong] = useState(false);
   const [chu, setChu] = useState("");
   const [truyenId, setTruyenId] = useState("");
-  const [anh, setAnh] = useState<AnhDaXuLy | null>(null);
+  const [anhDs, setAnhDs] = useState<AnhDaXuLy[]>([]);
   const [dangXuLyAnh, setDangXuLyAnh] = useState(false);
   const [dangGui, setDangGui] = useState(false);
   const [loi, setLoi] = useState("");
   const oTep = useRef<HTMLInputElement | null>(null);
+  const oChu = useRef<HTMLTextAreaElement | null>(null);
 
   const tranChu = limits?.post_max_chars ?? 2000;
   const canhToiDa = limits?.image?.post?.max_edge ?? CANH_DU_PHONG;
   const tranByte = limits?.image?.post?.max_bytes ?? 1024 * 1024;
+  const tranSoAnh = limits?.post_max_images ?? 4;
+  const tranTongByte = limits?.post_total_media_bytes ?? 3 * 1024 * 1024;
 
-  /* Thu hồi URL xem trước khi ảnh bị thay hoặc thành phần biến mất. Không thu
-     hồi thì blob nằm lại trong bộ nhớ của tab cho tới khi tải lại trang. */
+  /* Thu hồi MỌI URL xem trước khi danh sách đổi hoặc thành phần biến mất.
+     Không thu hồi thì blob nằm lại trong bộ nhớ tab tới khi tải lại trang. */
   useEffect(() => {
-    const url = anh?.xemTruoc;
+    const urls = anhDs.map((a) => a.xemTruoc);
     return () => {
-      if (url) URL.revokeObjectURL(url);
+      urls.forEach((u) => URL.revokeObjectURL(u));
     };
-  }, [anh?.xemTruoc]);
+  }, [anhDs]);
 
   const chonTep = useCallback(
-    async (tep: File | undefined) => {
-      if (!tep) return;
+    async (danhSach: FileList | null) => {
+      if (!danhSach?.length) return;
       setLoi("");
       setDangXuLyAnh(true);
       try {
-        const ra = await xuLyAnh(tep, canhToiDa);
-        if (!ra) {
-          setLoi("Không đọc được ảnh này. Hãy thử một tệp khác.");
-          return;
+        const chua = tranSoAnh - anhDs.length;
+        const tep = [...danhSach].slice(0, Math.max(0, chua));
+        if (danhSach.length > chua) {
+          setLoi(`Tối đa ${tranSoAnh} ảnh mỗi bài — chỉ nhận ${chua} ảnh nữa.`);
         }
-        if (ra.bytes > tranByte) {
-          // Đã nén hết cỡ mà vẫn vượt trần: nói rõ con số thật thay vì để máy
-          // chủ từ chối sau khi người dùng đã chờ hết đường truyền.
-          setLoi(
-            `Ảnh vẫn còn ${(ra.bytes / 1024 / 1024).toFixed(1)} MB sau khi nén ` +
-              `(trần ${(tranByte / 1024 / 1024).toFixed(1)} MB). Hãy chọn ảnh nhỏ hơn.`,
-          );
-          URL.revokeObjectURL(ra.xemTruoc);
-          return;
+        const moi: AnhDaXuLy[] = [];
+        for (const t of tep) {
+          const ra = await xuLyAnh(t, canhToiDa);
+          if (!ra) {
+            setLoi("Không đọc được một trong các ảnh. Hãy thử tệp khác.");
+            continue;
+          }
+          if (ra.bytes > tranByte) {
+            // Nói rõ con số thật thay vì để máy chủ từ chối sau khi người
+            // dùng đã chờ hết đường truyền.
+            setLoi(
+              `Ảnh còn ${(ra.bytes / 1024 / 1024).toFixed(1)} MB sau khi nén ` +
+                `(trần ${(tranByte / 1024 / 1024).toFixed(1)} MB) — đã bỏ qua.`,
+            );
+            URL.revokeObjectURL(ra.xemTruoc);
+            continue;
+          }
+          moi.push(ra);
         }
-        setAnh(ra);
+        if (moi.length) {
+          const tongMoi = [...anhDs, ...moi];
+          const tong = tongMoi.reduce((t, a) => t + a.bytes, 0);
+          if (tong > tranTongByte) {
+            setLoi(
+              `Tổng dung lượng ảnh vượt ${(tranTongByte / 1024 / 1024).toFixed(0)} MB. ` +
+                "Hãy bớt hoặc nén ảnh.",
+            );
+            moi.forEach((a) => URL.revokeObjectURL(a.xemTruoc));
+          } else {
+            setAnhDs(tongMoi);
+          }
+        }
       } finally {
         setDangXuLyAnh(false);
         // Xoá giá trị ô tệp để chọn LẠI CÙNG một tệp vẫn kích hoạt `onChange`.
         if (oTep.current) oTep.current.value = "";
       }
     },
-    [canhToiDa, tranByte],
+    [anhDs, canhToiDa, tranByte, tranSoAnh, tranTongByte],
   );
 
   const gui = useCallback(async () => {
     const noiDung = chu.trim();
-    if (!noiDung && !anh) {
+    if (!noiDung && !anhDs.length) {
       setLoi("Hãy viết gì đó, hoặc chọn một ảnh.");
       return;
     }
@@ -177,24 +212,53 @@ export function PostComposer({
         text: noiDung,
         kind: truyenId ? "story_update" : "post",
         novel_id: truyenId,
-        image_base64: anh?.base64,
-        image_mime: anh?.mime,
-        image_width: anh?.width,
-        image_height: anh?.height,
+        images: anhDs.map((a) => ({
+          base64: a.base64,
+          mime: a.mime,
+          width: a.width,
+          height: a.height,
+        })),
       });
       setChu("");
       setTruyenId("");
-      setAnh(null);
+      setAnhDs([]);
+      setMoRong(false);
       onPosted(ra.post);
     } catch (e) {
       setLoi(e instanceof ApiError ? e.message : "Không đăng được bài.");
     } finally {
       setDangGui(false);
     }
-  }, [chu, truyenId, anh, onPosted]);
+  }, [chu, truyenId, anhDs, onPosted]);
 
   const conLai = tranChu - chu.length;
   const gan = chu.length >= tranChu * CANH_BAO;
+  const tenToi = profile?.display_name || profile?.username || "?";
+
+  /*
+    HANG KICH HOAT — bang tin khong mo dau bang mot form trong trai. Day la
+    mot <button> that: Enter/Space mo duoc, va tieu diem chay vao textarea
+    ngay sau khi composer hien ra.
+  */
+  if (!moRong) {
+    return (
+      <section className="card soan-bai-moi" aria-label="Đăng bài mới">
+        <span className="avatar" aria-hidden="true">
+          {tenToi.slice(0, 2).toUpperCase()}
+        </span>
+        <button
+          type="button"
+          className="soan-bai-kich-hoat"
+          onClick={() => {
+            setMoRong(true);
+            queueMicrotask(() => oChu.current?.focus());
+          }}
+        >
+          Bạn đang nghĩ gì?
+        </button>
+      </section>
+    );
+  }
 
   return (
     <section className="card soan-bai" aria-labelledby="soan-bai-tieu-de">
@@ -202,43 +266,53 @@ export function PostComposer({
         Đăng bài mới
       </h2>
       <textarea
+        ref={oChu}
         className="input soan-bai-o"
         rows={3}
         maxLength={tranChu}
         value={chu}
         onChange={(e) => setChu(e.target.value)}
-        placeholder="Bạn đang đọc gì? Chia sẻ vài dòng…"
+        placeholder="Bạn đang nghĩ gì?"
         aria-label="Nội dung bài đăng"
       />
 
-      {anh ? (
+      {anhDs.length ? (
         <div className="soan-bai-anh">
-          {/* `<img>` thuần, không phải `next/image`: đây là một blob cục bộ,
-              không có gì để tối ưu và `next/image` không nhận blob URL. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={anh.xemTruoc} alt="Ảnh sẽ đăng kèm" />
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => setAnh(null)}
-          >
-            Bỏ ảnh
-          </button>
-          <span className="hint">
-            {anh.width}×{anh.height} · {(anh.bytes / 1024).toFixed(0)} KB · WebP
-          </span>
+          {anhDs.map((a, i) => (
+            <figure key={a.xemTruoc} className="soan-bai-anh-o">
+              {/* `<img>` thuần: blob cục bộ, `next/image` không nhận blob URL. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={a.xemTruoc} alt={`Ảnh ${i + 1} sẽ đăng kèm`} />
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                aria-label={`Bỏ ảnh ${i + 1}`}
+                onClick={() =>
+                  setAnhDs((ds) => ds.filter((x) => x !== a))
+                }
+              >
+                ✕
+              </button>
+              <figcaption className="hint">
+                {(a.bytes / 1024).toFixed(0)} KB
+              </figcaption>
+            </figure>
+          ))}
         </div>
       ) : null}
 
       <div className="soan-bai-day">
         <label className="btn btn-ghost btn-sm soan-bai-tep">
-          {dangXuLyAnh ? "Đang xử lý…" : "🖼 Thêm ảnh"}
+          {dangXuLyAnh
+            ? "Đang xử lý…"
+            : `🖼 Thêm ảnh (${anhDs.length}/${tranSoAnh})`}
           <input
             ref={oTep}
             type="file"
+            multiple
             accept={(limits?.image?.post?.mime ?? ["image/*"]).join(",")}
-            onChange={(e) => void chonTep(e.target.files?.[0])}
-            disabled={dangXuLyAnh || !!anh}
+            onChange={(e) => void chonTep(e.target.files)}
+            disabled={dangXuLyAnh || anhDs.length >= tranSoAnh}
           />
         </label>
 
@@ -265,6 +339,13 @@ export function PostComposer({
         </span>
         <button
           type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setMoRong(false)}
+        >
+          Thu gọn
+        </button>
+        <button
+          type="button"
           className="btn btn-primary btn-sm"
           disabled={dangGui || dangXuLyAnh}
           onClick={gui}
@@ -283,8 +364,7 @@ export function PostComposer({
           trong ảnh của họ không đi ra ngoài. */}
       <p className="hint soan-bai-ghi-chu">
         Ảnh được nén lại trong trình duyệt và <strong>bỏ hết metadata</strong>{" "}
-        (kể cả toạ độ GPS) trước khi gửi. Tối đa {limits?.post_max_images ?? 1}{" "}
-        ảnh mỗi bài.
+        (kể cả toạ độ GPS) trước khi gửi. Tối đa {tranSoAnh} ảnh mỗi bài.
       </p>
     </section>
   );

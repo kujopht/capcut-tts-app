@@ -789,6 +789,12 @@ export interface Post {
   image_height: number;
   /** URL đã ký, ngắn hạn. Vắng mặt khi bài không có ảnh. */
   image_url?: string;
+  /** V3: URL đã ký của TỪNG ảnh, cùng thứ tự với `images`. */
+  image_urls?: string[];
+  /** Kích thước từng ảnh cho gallery — không bao giờ kèm khóa kho. */
+  images: Array<{ width: number; height: number }>;
+  /** 2 bình luận mới nhất, ghép sẵn cho bảng tin — hiển thị cũ→mới. */
+  comments_preview?: Comment[];
   state: ContentState;
   like_count: number;
   comment_count: number;
@@ -806,10 +812,19 @@ export interface Post {
 
 export interface Comment {
   comment_id: string;
+  /** Id của ĐÍCH: bài đăng, hoặc chương (bình luận audio). Tên cột giữ nguyên
+      vì lịch sử — xem `domain.Comment`. */
   post_id: string;
   /** Chuỗi rỗng khi bình luận đã bị gỡ — xem `Comment.to_public_dict`. */
   author_user_id: string;
   parent_id: string;
+  /** `""` = bình luận bài đăng; `"chapter"` = bình luận chương/audio. */
+  target_kind: string;
+  /** Vị trí audio đính kèm, mili giây. `null` = không đính kèm — 0 là một mốc
+      HỢP LỆ (đầu chương). */
+  timestamp_ms: number | null;
+  /** Người viết tự đánh dấu có spoiler — thân bị che cho tới khi bấm hiện. */
+  spoiler: boolean;
   text: string;
   state: ContentState;
   reply_count: number;
@@ -825,6 +840,7 @@ export type NotificationKind =
   | "post_comment"
   | "comment_reply"
   | "story_chapter"
+  | "chapter_comment"
   | "author_approved"
   | "author_rejected";
 
@@ -915,6 +931,8 @@ export interface ServerLimits {
   comment_max_chars: number;
   report_detail_max_chars: number;
   post_max_images: number;
+  /** Trần TỔNG dung lượng ảnh của một bài, sau xử lý. */
+  post_total_media_bytes: number;
   image: Record<
     string,
     {
@@ -976,6 +994,13 @@ export const social = {
     image_mime?: string;
     image_width?: number;
     image_height?: number;
+    /** V3: tối đa 4 ảnh. Trần thật ở máy chủ (`/api/limits`). */
+    images?: Array<{
+      base64: string;
+      mime: string;
+      width: number;
+      height: number;
+    }>;
   }) =>
     request<{ post: Post }>("/api/posts", {
       method: "POST",
@@ -1036,6 +1061,29 @@ export const social = {
     request<{ deleted: boolean }>(
       `/api/comments/${encodeURIComponent(commentId)}`,
       { method: "DELETE" },
+    ),
+
+  // -- bình luận chương (audio) ----------------------------------------------
+
+  /** Đích là CHƯƠNG, không phải file MP3 — tác giả tạo lại audio thì chuỗi
+      bình luận vẫn còn. Mặc định MỚI NHẤT trước. */
+  chapterComments: (chapterId: string, sort: "moi" | "cu" = "moi",
+                    limit = 20, offset = 0) =>
+    request<CommentPage & { sort: string }>(
+      `/api/chapters/${encodeURIComponent(chapterId)}/comments` +
+        `?sort=${sort}&limit=${limit}&offset=${offset}`,
+    ),
+
+  createChapterComment: (chapterId: string, payload: {
+    text: string;
+    parent_id?: string;
+    /** Mili giây. Bỏ qua = không đính kèm. */
+    timestamp_ms?: number | null;
+    spoiler?: boolean;
+  }) =>
+    request<{ comment: Comment }>(
+      `/api/chapters/${encodeURIComponent(chapterId)}/comments`,
+      { method: "POST", body: JSON.stringify(payload) },
     ),
 
   // -- thông báo ------------------------------------------------------------
@@ -1109,6 +1157,8 @@ export interface AdminComment extends Omit<Comment, "replies"> {
   removed_by: string;
   removed_reason: string;
   open_reports: number;
+  /** Đường tới NGUỒN: `/posts/{id}` hoặc `/chapters/{id}`. Backend tính. */
+  context_url?: string;
 }
 
 export interface ContentReport {
@@ -1130,6 +1180,8 @@ export interface ContentReport {
   content: (AdminPost & AdminComment) | null;
   reporter?: AuthorCard;
   target_owner?: AuthorCard;
+  /** Đường tới nguồn của nội dung bị báo cáo. Backend tính. */
+  context_url?: string;
 }
 
 export interface SocialOverview {
@@ -1182,6 +1234,18 @@ export const adminSocial = {
     request<{ post: AdminPost }>(
       `/api/admin/posts/${encodeURIComponent(postId)}/restore`,
       { method: "POST", body: "{}" },
+    ),
+
+  /** Duyệt bình luận toàn hệ thống, tách bài đăng / chương. */
+  browseComments: (targetKind: "" | "chapter" = "", limit = 25, offset = 0) =>
+    request<{
+      items: AdminComment[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      `/api/admin/comments?target_kind=${targetKind}` +
+        `&limit=${limit}&offset=${offset}`,
     ),
 
   postComments: (postId: string, limit = 50, offset = 0) =>

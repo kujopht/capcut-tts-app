@@ -11,6 +11,7 @@ import { AudioEngineProvider } from "@/components/AudioEngine";
 import { ChapterPlayer } from "@/components/ChapterPlayer";
 import { MiniPlayer } from "@/components/MiniPlayer";
 import { ListenReporter } from "@/components/ListenReporter";
+import { ChapterComments } from "@/components/ChapterComments";
 import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
 import { IconBook } from "@/components/Icons";
 
@@ -137,9 +138,19 @@ export default function ChapterPage({
           {/* Dem thoi gian nghe THAT va bao len may chu de tinh uy tin cho tac
               gia. Khong ve gi ca — xem `components/ListenReporter.tsx`. */}
           <ListenReporter chapterId={chapter.chapter_id} />
+
+          {/*
+            Binh luan chuong — TRONG provider de composer co nut "Bình luận
+            tại 03:42" va moc tren binh luan tua duoc. Van la MOT the <audio>:
+            khoi nay chi GOI dieu khien cua engine, khong tao trinh phat nao.
+            Gap/mo duoc de viec doc yen tinh — xem `ChapterComments`.
+          */}
+          <div className="listen-col">
+            <ChapterComments chapterId={chapter.chapter_id} />
+          </div>
         </AudioEngineProvider>
       ) : (
-        <div className="reader-col">
+        <div className="reader-col stack">
           <EmptyState
             icon="🎧"
             title="Chương này chưa có audio"
@@ -156,6 +167,9 @@ export default function ChapterPage({
               ) : undefined
             }
           />
+          {/* Chua co audio van binh luan duoc — dich la CHUONG, khong phai
+              file MP3. Ngoai provider nen khong co nut moc thoi gian. */}
+          <ChapterComments chapterId={chapter.chapter_id} />
         </div>
       )}
 

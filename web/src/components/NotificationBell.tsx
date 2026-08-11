@@ -44,6 +44,8 @@ function moTa(n: Notification): string {
       return "đã trả lời bình luận của bạn";
     case "story_chapter":
       return "vừa đăng chương mới";
+    case "chapter_comment":
+      return "đã bình luận chương của bạn";
     case "author_approved":
       return "Đơn tác giả của bạn đã được duyệt";
     case "author_rejected":
@@ -70,6 +72,8 @@ function dichDen(n: Notification): string {
       return `/notifications#${n.subject_id}`;
     case "novel":
       return `/novels/${n.subject_id}`;
+    case "chapter":
+      return `/chapters/${n.subject_id}`;
     case "user":
       return n.actor?.username ? `/u/${n.actor.username}` : "/notifications";
     default:

@@ -5002,3 +5002,332 @@ body.co-mini { padding-bottom: 74px; }
     transition: none !important;
   }
 }
+
+/* ==========================================================================
+   XÃ HỘI V3 — bình luận audio, gallery, bảng tin kiểu quen thuộc
+   ========================================================================== */
+
+/* -- bình luận chương (audio) ---------------------------------------------- */
+
+.binh-luan-chuong { display: grid; gap: 10px; }
+
+.binh-luan-chuong-nut {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.binh-luan-chuong-nut:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.binh-luan-chuong-mui { margin-left: auto; }
+
+/* Hàng gõ: avatar + textarea — bố cục composer quen thuộc. */
+.binh-luan-go-hang {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.binh-luan-go-hang textarea { flex: 1; }
+
+.binh-luan-cong-cu { gap: 10px; flex-wrap: wrap; }
+.binh-luan-spoiler { padding: 0; font-size: var(--t-sm); }
+
+/* Mốc audio trên bình luận: một viên nhỏ bấm được. Bản tĩnh (audio không còn)
+   giữ nguyên hình dạng nhưng không có hover — mốc vẫn là thông tin. */
+.moc-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--brand-hover);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.moc-audio:hover { border-color: var(--brand); }
+.moc-audio:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.moc-tinh { cursor: default; color: var(--muted); }
+.moc-tinh:hover { border-color: var(--line); }
+
+/* Màn che spoiler: cả khối là MỘT nút — vùng bấm to, không phải một liên kết
+   nhỏ trong câu. */
+.spoiler-che {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.spoiler-che:hover { color: var(--text); border-color: var(--brand); }
+.spoiler-che:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* -- composer: hàng kích hoạt ---------------------------------------------- */
+
+.soan-bai-moi {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.soan-bai-kich-hoat {
+  flex: 1;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.soan-bai-kich-hoat:hover { border-color: var(--brand); color: var(--text); }
+.soan-bai-kich-hoat:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.soan-bai-anh-o {
+  position: relative;
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.soan-bai-anh-o img {
+  max-width: 130px;
+  max-height: 110px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  object-fit: cover;
+}
+
+.soan-bai-anh-o button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-height: 28px;
+  background: rgb(0 0 0 / 0.55);
+}
+
+/* -- thẻ bài: menu, tóm tắt, hàng hành động, xem trước ---------------------- */
+
+.bai-menu { margin-left: auto; }
+.bai-menu-nut { min-width: 34px; }
+
+.bai-luc { color: inherit; text-decoration: none; }
+.bai-luc:hover { color: var(--brand-hover); text-decoration: underline; }
+
+.bai-tom-tat { margin: 0; padding-top: 2px; }
+
+/* Ba nút hành động chia đều bề ngang — mẫu quen thuộc của mọi bảng tin. */
+.bai-day { display: flex; gap: 4px; }
+.bai-nut { flex: 1; justify-content: center; min-height: 40px; }
+.bai-nut-tinh { opacity: 0.6; cursor: default; }
+
+/* Tim: đổi màu + MỘT nhịp phồng nhỏ. Reduced-motion tắt ở khối cuối tệp. */
+.da-thich .bai-tim {
+  display: inline-block;
+  animation: tim-phong 0.25s var(--ease);
+}
+
+@keyframes tim-phong {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+.bai-xem-truoc {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.bai-xt-dong {
+  margin: 0;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* -- gallery 1–4 ảnh -------------------------------------------------------- */
+
+.bai-gallery {
+  display: grid;
+  gap: 4px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.bai-gallery-o {
+  padding: 0;
+  border: 0;
+  background: var(--bg-2);
+  cursor: zoom-in;
+  display: block;
+  min-height: 0;
+}
+
+.bai-gallery-o:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+.bai-gallery-o img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 1 ảnh: giữ tỉ lệ thật, chỉ chặn chiều cao. */
+.bai-gallery-1 .bai-gallery-o img {
+  object-fit: contain;
+  max-height: 60vh;
+}
+
+/* 2 ảnh: hai cột cân. 3 ảnh: một lớn + hai nhỏ. 4 ảnh: lưới 2×2. */
+.bai-gallery-2 { grid-template-columns: 1fr 1fr; }
+.bai-gallery-2 .bai-gallery-o { aspect-ratio: 1; }
+
+.bai-gallery-3 {
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.bai-gallery-3 .bai-gallery-o:first-child { grid-row: span 2; }
+.bai-gallery-3 .bai-gallery-o { aspect-ratio: auto; min-height: 120px; }
+
+.bai-gallery-4 { grid-template-columns: 1fr 1fr; }
+.bai-gallery-4 .bai-gallery-o { aspect-ratio: 4 / 3; }
+
+/* -- trình xem ảnh ---------------------------------------------------------- */
+
+.xem-anh {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  max-width: min(920px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+
+.xem-anh img {
+  max-width: 100%;
+  max-height: calc(100vh - 110px);
+  border-radius: var(--r-md);
+}
+
+.xem-anh:focus-visible { outline: 2px solid var(--brand); outline-offset: 4px; }
+.xem-anh-day { gap: 10px; align-items: center; }
+
+/* -- lưới cộng đồng + cột phải ---------------------------------------------- */
+
+.cong-dong-luoi {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.cong-dong-phai { display: none; }
+
+@media (min-width: 1000px) {
+  .cong-dong-luoi { grid-template-columns: minmax(0, 1fr) 280px; }
+  .cong-dong-phai {
+    display: block;
+    position: sticky;
+    top: 76px;
+  }
+}
+
+.sidebar-tieu-de {
+  margin: 0;
+  font-size: var(--t-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-ds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.sidebar-nguoi {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sidebar-nguoi-chu { display: grid; gap: 2px; min-width: 0; flex: 1; }
+
+.sidebar-ten {
+  color: var(--text);
+  font-weight: 650;
+  font-size: var(--t-sm);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-ten:hover { color: var(--brand-hover); }
+
+.avatar-sm { width: 28px; height: 28px; font-size: 11px; flex: 0 0 auto; }
+
+/* -- mobile ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  /* Gallery 3 anh xep lai: mot lon tren, hai nho duoi — cot 2fr/1fr qua hep
+     tren man 375px. */
+  .bai-gallery-3 {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+  .bai-gallery-3 .bai-gallery-o:first-child {
+    grid-row: auto;
+    grid-column: span 2;
+    aspect-ratio: 16 / 9;
+  }
+
+  .soan-bai-anh-o img { max-width: 100px; max-height: 90px; }
+
+  /* Nut hanh dong: nhan gon lai van vua ba nut mot hang 375px. */
+  .bai-nut { font-size: var(--t-sm); padding-inline: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .da-thich .bai-tim { animation: none; }
+}

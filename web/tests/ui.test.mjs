@@ -70,10 +70,20 @@ test("trang chu la trang KHAM PHA TRUYEN, khong phai landing gioi thieu cong cu"
   assert.ok(!home.includes("api.getNovel("), "trang chủ gọi getNovel — N+1");
 
   const css = read("../src/app/globals.css");
-  assert.ok(
-    !/grid-template-columns:\s*1fr\s+1fr/.test(css),
-    "khong duoc chia doi man hinh co dinh 50/50",
-  );
+  /*
+    Lenh cam nay tung quet CA TEP — va no vo khi gallery anh (V3) dung
+    `1fr 1fr` cho luoi hai cot mot cach hoan toan chinh dang. Y dinh that cua
+    no la: khu HERO cua trang chu khong duoc chia doi man hinh co dinh. Quet
+    dung pham vi do: moi khoi co selector chua "hero".
+  */
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (/hero/i.test(m[1])) {
+      assert.ok(
+        !/grid-template-columns:\s*1fr\s+1fr/.test(m[2]),
+        `khu hero chia doi 50/50: ${m[1].trim().slice(0, 60)}`,
+      );
+    }
+  }
 });
 
 /* -------------------------------------------- LOI 1: khong co nut xuat ban */
@@ -899,7 +909,8 @@ test("khong them ho endpoint nao ma khong di qua day", () => {
 
   // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`.
 
-  const api = read("../src/lib/api.ts");
+  const api = read("../src/lib/api.ts");
+
   kiemHoEndpoint(api);
 
   // Nghe tai cho dung dung duong da co, khong tao duong rieng

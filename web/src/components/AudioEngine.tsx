@@ -86,6 +86,18 @@ export function useAudioEngine(): Hop {
   return hop;
 }
 
+/**
+ * Nhu `useAudioEngine` nhung tra `null` khi KHONG co provider.
+ *
+ * Danh cho khoi binh luan chuong: no song ca o trang co audio (trong provider,
+ * co nut "Bình luận tại 03:42") lan trang chua co audio (ngoai provider — van
+ * binh luan duoc, chi khong co nut moc thoi gian). Mot hook nem loi se bat
+ * khoi do phai co HAI phien ban.
+ */
+export function useAudioEngineOptional(): Hop | null {
+  return useContext(Ngu_canh);
+}
+
 export function AudioEngineProvider({
   chapterId,
   title,

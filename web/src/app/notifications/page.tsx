@@ -35,6 +35,7 @@ const CAU: Record<Notification["kind"], string> = {
   post_comment: "đã bình luận bài của bạn",
   comment_reply: "đã trả lời bình luận của bạn",
   story_chapter: "vừa đăng chương mới",
+  chapter_comment: "đã bình luận chương của bạn",
   author_approved: "Đơn tác giả của bạn đã được duyệt",
   author_rejected: "Đơn tác giả của bạn chưa được duyệt",
 };
@@ -47,6 +48,7 @@ function dichDen(n: Notification): string | null {
   if (laHeThong(n)) return "/creator/apply";
   if (n.subject_kind === "post") return `/posts/${n.subject_id}`;
   if (n.subject_kind === "novel") return `/novels/${n.subject_id}`;
+  if (n.subject_kind === "chapter") return `/chapters/${n.subject_id}`;
   if (n.subject_kind === "user" && n.actor?.username) {
     return `/u/${n.actor.username}`;
   }

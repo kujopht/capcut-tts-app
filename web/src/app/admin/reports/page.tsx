@@ -246,12 +246,10 @@ export default function AdminReportsPage() {
                     </span>
                   )}
 
-                  {bc.target_kind === "post" ? (
-                    <Link
-                      className="btn btn-ghost btn-sm"
-                      href={`/posts/${bc.target_id}`}
-                    >
-                      Xem bài
+                  {/* Backend tinh san duong toi nguon — bai HOAC chuong. */}
+                  {bc.context_url ? (
+                    <Link className="btn btn-ghost btn-sm" href={bc.context_url}>
+                      Xem nguồn
                     </Link>
                   ) : null}
                 </footer>

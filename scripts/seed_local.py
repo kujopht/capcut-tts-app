@@ -141,6 +141,103 @@ def nap(settings) -> None:
             ))
 
 
+#: Bai dang mo cho bang tin. (email tac gia, noi dung, gan truyen dau tien?)
+BAI = [
+    ("cao@fanfic.local",
+     "Chương 12 đã lên! Lần này Luffy gặp lại người thợ rèn già — và ông ấy "
+     "không còn là người nữa.", True),
+    ("giua@fanfic.local",
+     "Mọi người thích đọc fanfic vào lúc nào trong ngày? Mình toàn viết lúc "
+     "2 giờ sáng nên tò mò ai đọc lúc đó không 😅", False),
+    ("moi@fanfic.local",
+     "Truyện đầu tiên của mình vừa được duyệt! Run quá. Mong mọi người góp ý "
+     "nhẹ tay.", False),
+    ("doc@fanfic.local",
+     "Vừa nghe xong chương 1 của 'Quán trà của Robin' bằng giọng đọc mới. "
+     "Ai chưa thử tính năng audio thì thử đi, đọc truyện lúc rửa bát tiện "
+     "cực kỳ.", False),
+    ("cao@fanfic.local",
+     "Một mẹo nhỏ cho ai mới viết: đừng tả cơn bão. Hãy tả cái mũ rơm ướt "
+     "sũng dán vào ngực Luffy. Chi tiết nhỏ kể chuyện to.", False),
+]
+
+
+def nap_xa_hoi(settings) -> None:
+    """
+    Du lieu moi cua tang xa hoi: theo doi, bai, thich, binh luan, bao cao.
+
+    Chay SAU `nap()` vi no tra cuu nguoi va truyen theo du lieu da mo. Moi thao
+    tac di qua `SocialService` that — khong ghi thang vao kho — nen thong bao,
+    bo dem va nhat ky sinh ra dung nhu khi nguoi that bam.
+    """
+    from server import main as server_main
+
+    identity = server_main.identity
+    store = server_main.store
+    social = server_main.social
+
+    ho_so = {}
+    for email, *_ in NGUOI:
+        token = identity.login(email, MAT_KHAU)
+        ho_so[email] = identity.profile_from_token(token)
+
+    # Do thi theo doi: nguoi doc theo doi cac tac gia; tac gia theo doi nhau.
+    theo_doi = [
+        ("doc@fanfic.local", "cao@fanfic.local"),
+        ("doc@fanfic.local", "giua@fanfic.local"),
+        ("doc@fanfic.local", "moi@fanfic.local"),
+        ("moi@fanfic.local", "cao@fanfic.local"),
+        ("giua@fanfic.local", "cao@fanfic.local"),
+        ("cho@fanfic.local", "cao@fanfic.local"),
+        ("cao@fanfic.local", "giua@fanfic.local"),
+    ]
+    for nguon, dich in theo_doi:
+        social.follow_user(ho_so[nguon], ho_so[dich].user_id)
+
+    # Nguoi doc theo doi truyen dau tien cua tac gia hang cao.
+    truyen_cao = store.list_novels(owner_id=ho_so["cao@fanfic.local"].user_id,
+                                   published_only=True)
+    if truyen_cao:
+        social.follow_story(ho_so["doc@fanfic.local"], truyen_cao[0].novel_id)
+        social.follow_story(ho_so["moi@fanfic.local"], truyen_cao[0].novel_id)
+
+    # Bai dang. Bai "cap nhat truyen" gan truyen that cua tac gia do.
+    bai_ids = []
+    for email, chu, gan_truyen in BAI:
+        nguoi = ho_so[email]
+        if gan_truyen:
+            truyen = store.list_novels(owner_id=nguoi.user_id,
+                                       published_only=True)
+            bai = social.create_post(nguoi, text=chu, kind="story_update",
+                                     novel_id=truyen[0].novel_id)
+        else:
+            bai = social.create_post(nguoi, text=chu)
+        bai_ids.append((email, bai["post_id"]))
+
+    # Thich va binh luan vao bai dau tien (cua tac gia hang cao).
+    _, bai_dau = bai_ids[0]
+    for email in ("doc@fanfic.local", "moi@fanfic.local", "giua@fanfic.local"):
+        social.like_post(ho_so[email], bai_dau)
+    goc = social.create_comment(ho_so["doc@fanfic.local"], bai_dau,
+                                text="Đợi chương này cả tuần! Ông thợ rèn là "
+                                     "người của Thế Kỷ Trống Rỗng đúng không?")
+    social.create_comment(ho_so["cao@fanfic.local"], bai_dau,
+                          text="Đọc tiếp sẽ biết 😉",
+                          parent_id=goc["comment_id"])
+    social.create_comment(ho_so["moi@fanfic.local"], bai_dau,
+                          text="Giọng văn chương này khác hẳn mấy chương đầu, "
+                               "thích lắm.")
+
+    # Mot bao cao dang mo — de hang doi kiem duyet co thu de nhin.
+    _, bai_hoi = bai_ids[1]
+    social.report(ho_so["doc@fanfic.local"], target_kind="post",
+                  target_id=bai_hoi, reason="other",
+                  detail="Không vi phạm gì, chỉ thử nút báo cáo (dữ liệu mồi).")
+
+    print(f"  {len(theo_doi)} lượt theo dõi, {len(BAI)} bài, "
+          f"3 lượt thích, 3 bình luận, 1 báo cáo đang mở")
+
+
 def main(argv: List[str]) -> int:
     if "--help" in argv or "-h" in argv:
         print(__doc__)
@@ -159,6 +256,7 @@ def main(argv: List[str]) -> int:
         return 2
 
     nap(settings)
+    nap_xa_hoi(settings)
 
     # Quyen quan tri den tu CAU HINH, khong tu du lieu. `user_id` cua ban mock
     # duoc sinh ngau nhien moi lan chay, nen phai dat sau khi tao xong ho so.

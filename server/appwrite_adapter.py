@@ -389,6 +389,18 @@ class AppwriteIdentityAdapter:
     )
     _PROFILE_V2_FIELDS = ("username", "bio", "author_status")
 
+    #: Truong co INDEX UNIQUE. Chuoi rong KHONG duoc ghi vao day.
+    #:
+    #: LOI DA XAY RA TREN STAGING: `register()` ghi `username: ""` cho moi ho so
+    #: moi. Index `username_unique` coi hai chuoi rong la TRUNG NHAU, nen nguoi
+    #: thu HAI dang ky nhan 409 va khong co hang ho so nao — Auth co 7 user, bang
+    #: `profiles` chi co 2 hang. Loi nay khong the lo ra o kho mock, va no chan
+    #: dung buoc dang ky.
+    #:
+    #: Bo han khoa khi gia tri rong thi cot la NULL, va index unique cua Appwrite
+    #: cho phep nhieu NULL.
+    _PROFILE_UNIQUE_FIELDS = ("username",)
+
     def _writable_profile(self, profile: Profile) -> Dict[str, Any]:
         data = profile.to_dict()
         co = self._profile_attributes()
@@ -396,8 +408,12 @@ class AppwriteIdentityAdapter:
         for k in self._PROFILE_V2_FIELDS:
             # `co is None` = khong hoi duoc schema. Luc do BO QUA ba truong moi:
             # gui bua vao co the lam vo ca buoc tao ho so.
-            if co is not None and k in co:
-                ra[k] = data[k]
+            if co is None or k not in co:
+                continue
+            if k in self._PROFILE_UNIQUE_FIELDS and not data[k]:
+                # Xem `_PROFILE_UNIQUE_FIELDS`: de NULL, khong de chuoi rong.
+                continue
+            ra[k] = data[k]
         return ra
 
     def _profile_attributes(self) -> Optional[set]:
@@ -437,8 +453,27 @@ class AppwriteIdentityAdapter:
                 "Chưa thể lưu danh tính công khai: bảng `profiles` còn thiếu các "
                 "thuộc tính username/bio/author_status. Cần chạy migration V2."
             )
-        self._request("PATCH", self._profile_path(profile.user_id),
-                      payload={"data": data})
+        if "username" in data and not data["username"]:
+            # Cung ly do voi `_writable_profile`: dat lai chuoi rong se dam vao
+            # index unique cua nguoi khac cung dang de trong.
+            data.pop("username")
+        try:
+            self._request("PATCH", self._profile_path(profile.user_id),
+                          payload={"data": data})
+        except AuthError:
+            # Hang ho so co the CHUA ton tai: nguoi dung dang nhap bang OAuth
+            # truoc khi `ensure_profile` chay, hoac mot lan tao truoc do that bai.
+            # Tao lai thay vi de mot thao tac hop le chet vi mot hang thieu.
+            self._request(
+                "POST",
+                (f"/v1/databases/{self._settings.database_id}"
+                 f"/collections/{COLLECTION_PROFILES}/documents"),
+                payload={
+                    "documentId": profile.user_id,
+                    "data": self._writable_profile(profile),
+                    "permissions": profile_permissions(profile.user_id),
+                },
+            )
         return profile
 
     def get_profile(self, user_id: str) -> Profile:

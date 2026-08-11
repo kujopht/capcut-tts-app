@@ -4740,6 +4740,18 @@ body.co-mini { padding-bottom: 74px; }
   align-items: start;
   white-space: normal;
   text-align: left;
+  /*
+   * KHONG duoc co lai. Bang chuong la flex-cot co `max-height`, va flex mac
+   * dinh BOP cac con (flex-shrink: 1) khi thieu cho. Binh thuong kich thuoc
+   * toi thieu tu dong chan viec do — nhung quy tac vung cham mobile dat
+   * `min-height: 44px` cho `.menu-item`, va mot min-height TUONG MINH thay
+   * the han duoi tu dong. Ket qua do duoc tren 390px that: muc cao 70px bi
+   * bop con 48px, chu cua muc nay de len muc duoi. Bang phai CUON, khong bop.
+   */
+  flex-shrink: 0;
+  /* Muc thong bao la mot LIEN KET, va mau `a` toan cuc gach chan no — ca khoi
+     chu ba dong gach chan doc ra nhu loi. Ten nguoi va xem truoc du phan biet. */
+  text-decoration: none;
 }
 
 .bell-text { line-height: 1.45; }

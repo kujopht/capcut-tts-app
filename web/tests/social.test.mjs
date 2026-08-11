@@ -529,3 +529,19 @@ test("ket qua bai dang di duoc bang ban phim nhu hai muc kia", () => {
   assert.match(src, /\.\.\.bai\.map\(\(b\) => \(\{ loai: "bai" as const, bai: b \}\)\)/);
   assert.match(src, /if \(k\.loai === "bai"\) return `\/posts\/\$\{k\.bai\.post_id\}`;/);
 });
+
+test("muc thong bao KHONG co lai trong bang flex co max-height", () => {
+  /*
+    LOI THAT do QA tren staging 390px tim ra: bang chuong la flex-cot co
+    `max-height`, flex mac dinh BOP cac con khi thieu cho, va quy tac vung cham
+    mobile `min-height: 44px` da THAY THE han duoi tu dong cua flex — muc cao
+    70px bi bop con 48px, chu cua muc nay de len muc duoi. Bang phai CUON,
+    khong duoc bop.
+  */
+  const than = css();
+  const at = than.indexOf(".bell-item {");
+  const khoi = than.slice(at, than.indexOf("}", at) + 1);
+  assert.match(khoi, /flex-shrink: 0/);
+  // Va muc la mot LIEN KET — mau `a` toan cuc gach chan no thanh ba dong gach.
+  assert.match(khoi, /text-decoration: none/);
+});

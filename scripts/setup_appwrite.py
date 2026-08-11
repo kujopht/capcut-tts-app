@@ -522,9 +522,17 @@ class Setup:
             response = client.get(f"{self.endpoint}{path}", headers=self._headers())
         return response.status_code == 200
 
-    def _call(self, method: str, path: str, payload: Optional[Dict] = None) -> Any:
+    def _call(self, method: str, path: str, payload: Optional[Dict] = None,
+              *, doc_thoi: bool = False) -> Any:
+        """
+        :param doc_thoi: mot phep DOC de so sanh, khong phai mot thay doi —
+            khong in dong dry-run va khong cong vao bo dem `created`. Khong co
+            co nay thi moi lan chay lai, moi enum da ton tai lam "tạo mới" tang
+            mot don vi, va dong tong ket idempotent noi doi.
+        """
         if self.dry_run:
-            print(f"    [dry-run] {method} {path}")
+            if not doc_thoi:
+                print(f"    [dry-run] {method} {path}")
             return None
         headers = self._headers()
         with httpx.Client(timeout=TIMEOUT) as client:
@@ -542,7 +550,8 @@ class Setup:
             except Exception:
                 pass
             raise SystemExit(f"Appwrite lỗi {response.status_code}: {message}")
-        self.created += 1
+        if not doc_thoi:
+            self.created += 1
         return response.json() if response.content else {}
 
     # -- cac buoc -------------------------------------------------------------
@@ -604,6 +613,13 @@ class Setup:
             path = f"{base}/attributes/email"
         elif kind == "enum":
             path, payload["elements"] = f"{base}/attributes/enum", extra
+            # Enum la kieu DUY NHAT ma "da co" chua chac la "da dung": danh
+            # sach gia tri co the duoc MO RONG giua hai lan chay (nhat ky kiem
+            # duyet vua nhan them sau hanh dong xa hoi). POST tra 409 roi bo
+            # qua se de lai enum cu — va moi hang mang gia tri moi bi Appwrite
+            # tu choi AM THAM o dung cho can no nhat: luc ghi nhat ky.
+            self._ensure_enum(base, key, required, list(extra))
+            return
         elif kind == "boolean":
             path = f"{base}/attributes/boolean"
         elif kind == "integer":
@@ -617,6 +633,40 @@ class Setup:
 
         result = self._call("POST", path, payload)
         print(f"    - {key} ({kind}): {'đã có' if result == 'exists' else 'đã tạo'}")
+
+    def _ensure_enum(self, base: str, key: str, required: bool,
+                     elements: List[str]) -> None:
+        """
+        Tao enum, hoac MO RONG danh sach gia tri neu no da ton tai ma thieu.
+
+        Chi mo rong, khong thu hep: bot mot gia tri khoi enum trong khi bang
+        da co hang mang gia tri do la mot thao tac pha du lieu, va no phai la
+        mot quyet dinh cua nguoi that chu khong phai cua mot script idempotent.
+        """
+        path = f"{base}/attributes/enum"
+        ket_qua = self._call("POST", path,
+                             {"key": key, "required": required,
+                              "elements": elements})
+        if ket_qua != "exists":
+            print(f"    - {key} (enum): đã tạo")
+            return
+        if self.dry_run:
+            return
+        # Da ton tai — doc ve va so sanh danh sach gia tri.
+        hien_co = self._call("GET", path.rsplit("/attributes", 1)[0],
+                             doc_thoi=True)
+        cot = next((a for a in (hien_co or {}).get("attributes", [])
+                    if a.get("key") == key), None)
+        dang_co = list((cot or {}).get("elements") or [])
+        thieu = [e for e in elements if e not in dang_co]
+        if not thieu:
+            print(f"    - {key} (enum): đã có, đủ {len(elements)} giá trị")
+            return
+        gop = dang_co + thieu
+        self._call("PATCH", f"{path}/{key}",
+                   {"elements": gop, "required": required, "default": None})
+        print(f"    - {key} (enum): MỞ RỘNG {len(dang_co)} -> {len(gop)} "
+              f"giá trị (+{', '.join(thieu)})")
 
     def _ensure_index(self, base: str, name: str, kind: str, keys: List[str]) -> None:
         result = self._call("POST", f"{base}/indexes", {

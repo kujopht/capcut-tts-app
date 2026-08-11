@@ -27,16 +27,17 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { api, type Novel, type PublicProfile } from "@/lib/api";
+import { api, social, type Novel, type Post, type PublicProfile } from "@/lib/api";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { NovelCover } from "@/components/NovelCover";
-import { IconBook, IconUser } from "@/components/Icons";
+import { IconBook, IconMegaphone, IconUser } from "@/components/Icons";
 
 const NHIP_GO = 250;
 
 type KetQua =
   | { loai: "truyen"; novel: Novel }
-  | { loai: "nguoi"; nguoi: PublicProfile };
+  | { loai: "nguoi"; nguoi: PublicProfile }
+  | { loai: "bai"; bai: Post };
 
 type TrangThai = "dau" | "dang-tai" | "co" | "rong" | "loi";
 
@@ -64,6 +65,7 @@ export function SearchOverlay({
     tu: string;
     truyen: Novel[];
     nguoi: PublicProfile[];
+    bai: Post[];
   } | null>(null);
   const [tuLoi, setTuLoi] = useState("");
   const [chon, setChon] = useState(0);
@@ -72,6 +74,7 @@ export function SearchOverlay({
   const KHONG: never[] = useMemo(() => [], []);
   const truyen = ketQua?.tu === tu ? ketQua.truyen : KHONG;
   const nguoi = ketQua?.tu === tu ? ketQua.nguoi : KHONG;
+  const bai = ketQua?.tu === tu ? ketQua.bai : KHONG;
 
   const trangThai: TrangThai = !tu
     ? "dau"
@@ -79,7 +82,7 @@ export function SearchOverlay({
       ? "loi"
       : ketQua?.tu !== tu
         ? "dang-tai"
-        : truyen.length + nguoi.length
+        : truyen.length + nguoi.length + bai.length
           ? "co"
           : "rong";
 
@@ -95,12 +98,18 @@ export function SearchOverlay({
           Hai truy van SONG SONG. Tuan tu thi nguoi dung cho tong thoi gian cua
           ca hai, va muc thu hai luon toi muon han mot nhip.
         */
-        const [a, b] = await Promise.all([
+        /*
+          Bai dang la muc PHU: chi BA ket qua, va loi cua rieng no khong duoc
+          keo sap ca hop tim — truyen va nguoi van la ly do nguoi ta mo hop nay.
+          `catch` tra ve rong thay vi de `Promise.all` tu choi tat ca.
+        */
+        const [a, b, c] = await Promise.all([
           api.browseNovels({ query: tu, limit: 5 }),
           api.searchPeople(tu, "users", 5),
+          social.searchPosts(tu, 3).catch(() => ({ items: [], total: 0 })),
         ]);
         if (bo.signal.aborted) return;
-        setKetQua({ tu, truyen: a.novels, nguoi: b.people });
+        setKetQua({ tu, truyen: a.novels, nguoi: b.people, bai: c.items });
         setChon(0);
       } catch {
         if (!bo.signal.aborted) setTuLoi(tu);
@@ -119,14 +128,15 @@ export function SearchOverlay({
     () => [
       ...truyen.map((n) => ({ loai: "truyen" as const, novel: n })),
       ...nguoi.map((p) => ({ loai: "nguoi" as const, nguoi: p })),
+      ...bai.map((b) => ({ loai: "bai" as const, bai: b })),
     ],
-    [truyen, nguoi],
+    [truyen, nguoi, bai],
   );
 
   const duong = useCallback((k: KetQua) => {
-    return k.loai === "truyen"
-      ? `/novels/${k.novel.novel_id}`
-      : `/u/${k.nguoi.username}`;
+    if (k.loai === "truyen") return `/novels/${k.novel.novel_id}`;
+    if (k.loai === "bai") return `/posts/${k.bai.post_id}`;
+    return `/u/${k.nguoi.username}`;
   }, []);
 
   useEffect(() => {
@@ -284,6 +294,46 @@ export function SearchOverlay({
                           {p.is_author && p.rank ? (
                             <RankBadge rank={p.rank} size="sm" />
                           ) : null}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </section>
+              ) : null}
+
+              {/*
+                Muc PHU — dung ba ket qua, dung sau cung. Truyen va nguoi van
+                la uu tien cua hop tim nay; bai dang chi la duong tat cho ai
+                nho mot cau ai do vua viet.
+              */}
+              {bai.length ? (
+                <section aria-labelledby={`${idGoc}-bai`}>
+                  <h2 className="tim-nhom" id={`${idGoc}-bai`}>
+                    <IconMegaphone size={15} /> Bài viết
+                  </h2>
+                  {bai.map((b, i) => {
+                    const vt = truyen.length + nguoi.length + i;
+                    return (
+                      <Link
+                        key={b.post_id}
+                        id={`${idGoc}-kq-${vt}`}
+                        role="option"
+                        aria-selected={chon === vt}
+                        className={`tim-kq${chon === vt ? " la-chon" : ""}`}
+                        href={`/posts/${b.post_id}`}
+                        onClick={onDong}
+                        onMouseEnter={() => setChon(vt)}
+                      >
+                        <span className="tim-avatar" aria-hidden="true">
+                          {(b.author?.display_name || "?").slice(0, 2).toUpperCase()}
+                        </span>
+                        <span className="tim-chu">
+                          <strong>
+                            {b.text.length > 70 ? `${b.text.slice(0, 70)}…` : b.text}
+                          </strong>
+                          <span className="hint">
+                            {b.author?.display_name || b.author?.username || ""}
+                          </span>
                         </span>
                       </Link>
                     );

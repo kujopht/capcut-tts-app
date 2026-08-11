@@ -505,3 +505,27 @@ test("HOI QUY: sections.ts van tinh dung huong quanh community", async () => {
   assert.equal(huongDi("/community", "/library"), 1);
   assert.equal(huongDi("/library", "/community"), -1);
 });
+
+/* ==================================================== tim kiem toan cuc */
+
+test("bai dang la muc PHU cua tim kiem, va loi cua no khong keo sap ca hop", () => {
+  const src = read("../src/components/SearchOverlay.tsx");
+  // Ba ket qua, dung SAU truyen va nguoi — uu tien khong doi.
+  assert.match(src, /social\.searchPosts\(tu, 3\)/);
+  const viTri = [src.indexOf("Truyện"), src.indexOf("Người dùng"),
+                 src.indexOf("Bài viết")];
+  assert.ok(viTri[0] < viTri[2] && viTri[1] < viTri[2],
+    "khu Bài viết phải đứng sau Truyện và Người dùng");
+  /*
+    `.catch` tra ve rong: truyen va nguoi la ly do nguoi ta mo hop tim nay, va
+    mot loi cua rieng muc bai dang khong duoc keo sap ca hai. Da thay THAT khi
+    backend cu chua co route: hop van hien truyen, chi thieu muc bai.
+  */
+  assert.match(src, /searchPosts\(tu, 3\)\.catch\(\(\) => \(\{ items: \[\], total: 0 \}\)\)/);
+});
+
+test("ket qua bai dang di duoc bang ban phim nhu hai muc kia", () => {
+  const src = read("../src/components/SearchOverlay.tsx");
+  assert.match(src, /\.\.\.bai\.map\(\(b\) => \(\{ loai: "bai" as const, bai: b \}\)\)/);
+  assert.match(src, /if \(k\.loai === "bai"\) return `\/posts\/\$\{k\.bai\.post_id\}`;/);
+});

@@ -2141,6 +2141,21 @@ def search_people(q: str = "", kind: str = "users",
                                   limit=limit, offset=offset)
 
 
+@app.get("/api/search/posts")
+def search_posts(q: str = "", limit: int = 5,
+                 authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """
+    Tim trong bai dang. Muc PHU cua tim kiem toan cuc — truyen va nguoi van la
+    uu tien, va giao dien hien muc nay sau cung voi it ket qua hon.
+
+    Duoi 2 ky tu tra ve rong (khong phai loi): mot ky tu khop gan het moi bai,
+    va do khong phai mot ket qua tim.
+    """
+    viewer = optional_profile(authorization)
+    return _xa_hoi(social.search_posts, q, limit=max(1, min(20, limit)),
+                   viewer=viewer)
+
+
 @app.post("/api/listens")
 def record_listen(payload: ListenIn,
                   authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:

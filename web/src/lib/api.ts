@@ -1073,6 +1073,14 @@ export const social = {
       body: JSON.stringify(payload),
     }),
 
+  // -- tìm kiếm ---------------------------------------------------------------
+
+  /** Mục PHỤ của tìm kiếm toàn cục — truyện và người vẫn là ưu tiên. */
+  searchPosts: (q: string, limit = 3) =>
+    request<{ items: Post[]; total: number }>(
+      `/api/search/posts?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+
   // -- của chính mình -------------------------------------------------------
 
   accountSocial: () => request<AccountSocial>("/api/account/social"),

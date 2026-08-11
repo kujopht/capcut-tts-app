@@ -85,8 +85,16 @@ class AppwriteIdentityAdapter:
         #: Ten thuoc tinh that su co trong `profiles`, hoi mot lan roi nho. `None`
         #: = chua hoi. Xem `_profile_attributes`.
         self._profile_attrs: Optional[set] = None
+        #: Client dung lai. Xem `_http`.
+        self._client: Optional[httpx.Client] = None
 
     # -- ha tang --------------------------------------------------------------
+
+    def _http(self) -> httpx.Client:
+        """MOT client dung lai — xem ghi chu trong `_request`."""
+        if self._client is None:
+            self._client = httpx.Client(timeout=REQUEST_TIMEOUT)
+        return self._client
 
     def _headers(self, *, admin: bool = True, session: str = "") -> Dict[str, str]:
         headers = {
@@ -114,14 +122,20 @@ class AppwriteIdentityAdapter:
     ) -> Dict[str, Any]:
         url = f"{self._endpoint}{path}"
         try:
-            # Client MOI moi lan, khong giu cookie: neu cookie phien truoc con
-            # sot lai, Appwrite se tra 403 "JWT and cookie used in the same
-            # request", va te hon la request co the chay bang danh tinh cu.
-            with httpx.Client(timeout=REQUEST_TIMEOUT, cookies=None) as client:
-                response = client.request(
-                    method, url, json=payload, params=params,
-                    headers=self._headers(admin=admin, session=session),
-                )
+            client = self._http()
+            # KHONG giu cookie giua cac request: neu cookie phien truoc con sot
+            # lai, Appwrite tra 403 "JWT and cookie used in the same request",
+            # va te hon la request co the chay bang danh tinh cu.
+            #
+            # Truoc day dieu nay duoc bao dam bang cach tao MOT CLIENT MOI moi
+            # lan — dung, nhung ton 1.5-2.0 giay bat tay TLS moi lan goi (do
+            # duoc tren staging). Xoa cookie tren mot client dung lai giu nguyen
+            # bao dam do va lay lai keep-alive.
+            client.cookies.clear()
+            response = client.request(
+                method, url, json=payload, params=params,
+                headers=self._headers(admin=admin, session=session),
+            )
         except httpx.HTTPError as exc:
             raise AuthError(f"Không kết nối được Appwrite: {exc}") from exc
 
@@ -556,6 +570,30 @@ class AppwriteIdentityAdapter:
             _q_not_equal("username", ""), _q_limit(500),
         ])
         return [str(r.get("username")) for r in rows if r.get("username")]
+
+    def profiles_by_ids(self, user_ids: List[str]) -> Dict[str, Profile]:
+        """
+        Nhieu ho so trong MOT truy van.
+
+        `equal` cua Appwrite nhan NHIEU gia tri va hoat dong nhu `IN`. Truoc day
+        khu quan tri goi `get_profile` cho tung hang — mot vong mang moi hang, va
+        `/api/admin/author-applications` mat 34 giay cho sau persona tren staging.
+
+        Chia lo 50: URL co tran do dai, va mot truy van voi vai tram id se bi tu
+        choi truoc khi toi duoc database.
+        """
+        ds = [u for u in dict.fromkeys(user_ids) if u]
+        ra: Dict[str, Profile] = {}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            rows = self._rows(COLLECTION_PROFILES, [
+                _q_equal("user_id", *lo), _q_limit(len(lo)),
+            ])
+            for row in rows:
+                pf = _profile_from(row)
+                if pf.user_id:
+                    ra[pf.user_id] = pf
+        return ra
 
     # -- ha tang truy van ----------------------------------------------------
 

@@ -290,8 +290,15 @@ test("KHONG gi chuyen dong sau doan van cua trang doc chuong", () => {
 });
 
 test("cac khu LAM VIEC khong co gi chuyen dong", () => {
+  /*
+    Danh sach nay da THU HEP mot lan, co y: `/library` va `/fanfic` gio co bui
+    phep va dom sang — chung la khu DOC, khong phai khu lam viec.
+
+    Hai cai con lai thi khong bao gio: mot thu dang troi ben canh mot o soan
+    thao la thu lam met mat sau nam phut.
+  */
   const src = codeOnly(read("../src/components/AmbientScene.tsx"));
-  for (const noi of ["studio", "write", "library", "explore"]) {
+  for (const noi of ["studio", "write"]) {
     assert.ok(!new RegExp(`noi === "${noi}"`).test(src),
       `${noi} có lớp trang trí động`);
   }
@@ -350,5 +357,129 @@ test("chuc nang KHONG doi khi giam chuyen dong", () => {
     const sel = m[1].trim();
     assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after/.test(sel),
       `${sel} bị ẩn khi giảm chuyển động — có thể đang giấu nội dung`);
+  }
+});
+
+/* ================================================ V3: vien thuoc + khong khi */
+
+test("MOT vien thuoc, khong phai mot vach cho moi muc", () => {
+  /*
+    Vach 2px cu doc ra la mot gach ngang doi cho. Mot vien thuoc co THE TICH,
+    nen mat theo duoc no di qua khoang trong giua hai muc.
+  */
+  const than = khoi(css(), ".nav-vach {");
+  assert.match(than, /border-radius: var\(--r-full\)/, "vẫn là một vạch");
+  assert.match(than, /height: 34px/);
+  assert.match(than, /transition:[\s\S]*transform/);
+  // Ease-out manh, KHONG nay lai: mot duong cong co do vong doc ra nhu do choi.
+  assert.match(than, /cubic-bezier\(\.22, 1, \.36, 1\)/);
+  const ms = Number(than.match(/transform (\d+)ms/)?.[1]);
+  assert.ok(ms >= 350 && ms <= 500, `${ms}ms — cần 350–500`);
+});
+
+test("vien thuoc nam DUOI chu", () => {
+  // Neu khong thi no phu len chinh cai chu no dang danh dau.
+  assert.match(khoi(css(), ".nav-vach {"), /z-index: 0/);
+  assert.match(css(), /\.nav-link \{ z-index: 1; \}/);
+});
+
+test("sac cua tung khu vuc nam o MOT cho", () => {
+  /*
+    Rai mau vao tung component la cach chac chan de sau ba thang khong ai biet
+    `/library` dang mau gi, va de hai cho ve hai mau khac nhau.
+  */
+  const text = css();
+  for (const k of ["home", "explore", "library", "write", "studio", "account"]) {
+    assert.match(text, new RegExp(`--sac-${k}-1:`), `thiếu sắc cho ${k}`);
+    assert.match(text, new RegExp(`--sac-${k}-2:`), `thiếu sắc phụ cho ${k}`);
+  }
+  // Va component KHONG duoc tu dat ma mau nao.
+  for (const f of ["../src/components/NavIndicator.tsx",
+                   "../src/components/NavAuth.tsx"]) {
+    assert.ok(!/#[0-9a-f]{6}/i.test(codeOnly(read(f))), `${f} tự đặt mã màu`);
+  }
+});
+
+test("chuyen canh nen MANH HON nhung van trong khoang cho phep", () => {
+  const text = css();
+  const ms = Number(text.match(/--dur-nen: (\d+)ms/)?.[1]);
+  assert.ok(ms >= 500 && ms <= 650, `${ms}ms — cần 500–650`);
+  assert.equal(
+    ms,
+    Number(read("../src/components/PageBackground.tsx")
+      .match(/const THOI_LUONG = (\d+);/)?.[1]),
+    "CSS và component lệch thời lượng",
+  );
+  // Bien do van phai NHO: truot ca man hinh doc ra nhu mot slide.
+  for (const m of text.matchAll(/translate3d\((-?[\d.]+)vw, 0, 0\)/g)) {
+    assert.ok(Math.abs(Number(m[1])) <= 10, `dịch ${m[1]}vw — quá lớn`);
+  }
+  // Chieu sau: rat nho. CHI quet trong cac keyframes cua NEN — `scale(1.04)` cua
+  // bia truyen khi ro chuot la mot thu khac han.
+  for (const ten of ["vao-tu-phai", "ra-sang-trai", "vao-tu-trai", "ra-sang-phai"]) {
+    for (const m of khoi(text, `@keyframes ${ten}`).matchAll(/scale\((1\.\d+)\)/g)) {
+      assert.ok(Number(m[1]) <= 1.02, `${ten} phóng ${m[1]} — quá nhiều`);
+    }
+  }
+});
+
+test("khong khi V2: moi khu vuc mot bo, va co TRAN", () => {
+  const src = read("../src/components/AmbientScene.tsx");
+  /*
+    Dem MOT lan vao mot bang tra, thay vi ghep mot bieu thuc chinh quy dong cho
+    tung ten. Mot bieu thuc ghep chuoi rat de mat dau gach cheo khi tep di qua
+    mot buoc xu ly nao do, va khi do bai test do vi CHINH NO chu khong vi ma
+    nguon — da mat mot vong de tim ra dung dieu do.
+  */
+  const so_luong = new Map();
+  for (const [, ten, than] of src.matchAll(
+    /const ([A-Z_]+): Hat\[\] = \[([\s\S]*?)\];/g,
+  )) {
+    const so = (than.match(/\{ t:/g) ?? []).length;
+    assert.ok(so >= 1 && so <= 10, `${ten} có ${so} phần tử — cần 1–10`);
+    so_luong.set(ten, so);
+  }
+
+  // Trang giau nhat (trang chu) khong duoc vuot 14 phan tu.
+  const home = src.slice(src.indexOf('noi === "home"'), src.indexOf('noi === "explore"'));
+  const bo = [...home.matchAll(/([A-Z_]+)(?:\.slice\([^)]*\))?\.map/g)].map((m) => m[1]);
+  const tong = bo.reduce((n, ten) => n + (so_luong.get(ten) ?? 0), 0);
+  assert.ok(tong >= 1 && tong <= 14, `trang chủ có ${tong} phần tử — cần 1–14`);
+});
+
+test("cac khu LAM VIEC van khong co gi chuyen dong", () => {
+  const src = codeOnly(read("../src/components/AmbientScene.tsx"));
+  for (const noi of ["studio", "write"]) {
+    assert.ok(!new RegExp(`noi === "${noi}"`).test(src), `${noi} có lớp động`);
+  }
+});
+
+test("mobile cat bot so phan tu, va cat bang CSS chu khong bang React", () => {
+  /*
+    So luong phan tu KHONG duoc phu thuoc vao be rong man hinh luc ve: ban may
+    chu va ban trinh duyet se lech nhau va React bao "hydration mismatch".
+  */
+  // Co NHIEU khoi `@media (max-width: 900px)` trong tep. Lay dung khoi CHUA
+  // `.la-troi` thay vi khoi dau tien.
+  const text = css();
+  const at = text.lastIndexOf("@media (max-width: 900px)");
+  const than = khoi(text.slice(at), "@media (max-width: 900px)");
+  for (const lop of ["la-troi", "vet-gio", "chim"]) {
+    assert.ok(than.includes(`.${lop}`), `${lop} không bị cắt ở mobile`);
+  }
+  assert.match(than, /\.dom:nth-child\(n \+ \d+\) \{ display: none; \}/);
+
+  const src = codeOnly(read("../src/components/AmbientScene.tsx"));
+  assert.ok(!/innerWidth|matchMedia|window\./.test(src),
+    "số phần tử phụ thuộc bề rộng lúc vẽ");
+});
+
+test("MOI hieu ung khong khi deu nam trong .canh-troi", () => {
+  // `.canh-troi { display: none }` o khoi giam chuyen dong tat het. Mot lop
+  // khong khi nam NGOAI phan tu do la mot cho quen tat.
+  const src = read("../src/components/AmbientScene.tsx");
+  for (const m of src.matchAll(/return \(\s*<div className="([^"]+)"/g)) {
+    assert.ok(m[1].startsWith("canh-troi"),
+      `lớp không khí "${m[1]}" nằm ngoài .canh-troi`);
   }
 });

@@ -58,6 +58,44 @@ const SAO_BANG: Hat[] = [
   { t: 5, l: 84, co: 130, tre: 19, nhip: 29 },
 ];
 
+/**
+ * La troi ngang o trang chu. HAI chiec, khong hon: mot chiec la doc ra la mot
+ * chi tiet, muoi chiec doc ra la thoi tiet.
+ */
+const LA_TROI: Hat[] = [
+  { t: 14, l: -8, co: 13, tre: 2, nhip: 27 },
+  { t: 46, l: -6, co: 9, tre: 16, nhip: 33 },
+];
+
+/** Vet gio: mot net cong rat mo bay ngang. */
+const VET_GIO: Hat[] = [
+  { t: 28, l: -12, co: 180, tre: 5, nhip: 21 },
+  { t: 64, l: -14, co: 140, tre: 13, nhip: 29 },
+];
+
+/** Dom sang: dung chung cho trang chu, kham pha va thu vien, khac nhau o SAC. */
+const DOM_CHUNG: Hat[] = [
+  { t: 22, l: 14, co: 3, tre: 0, nhip: 15 },
+  { t: 58, l: 27, co: 2, tre: 5, nhip: 19 },
+  { t: 34, l: 68, co: 3, tre: 9, nhip: 17 },
+  { t: 71, l: 82, co: 2, tre: 3, nhip: 23 },
+  { t: 12, l: 91, co: 2, tre: 12, nhip: 21 },
+];
+
+/** Chim luon o trang kham pha. Bay ngang, rat thua. */
+const CHIM: Hat[] = [
+  { t: 18, l: -10, co: 16, tre: 6, nhip: 38 },
+  { t: 31, l: -12, co: 11, tre: 24, nhip: 44 },
+];
+
+/** Sao tinh o trang dang nhap — nhap nhay tai cho, khong di chuyen. */
+const SAO_TINH: Hat[] = [
+  { t: 16, l: 22, co: 2, tre: 0, nhip: 7 },
+  { t: 30, l: 71, co: 3, tre: 2.5, nhip: 9 },
+  { t: 52, l: 12, co: 2, tre: 5, nhip: 11 },
+  { t: 9, l: 47, co: 2, tre: 7.5, nhip: 8 },
+];
+
 /** Dom sang am quanh khoi nghe o trang doc chuong. */
 const DOM_NGHE: Hat[] = [
   { t: 18, l: 8, co: 3, tre: 0, nhip: 13 },
@@ -88,16 +126,66 @@ export function AmbientScene({ duongDan }: { duongDan: string }) {
   const noi: ViTri = viTri(duongDan);
 
   /*
-    CHI ba noi co the trang tri. Cac khu lam viec — `/studio`, `/write`,
+    Moi noi mot bo rieng. Cac khu lam viec — `/studio`, `/write`,
     `/library`, `/fanfic` — khong co gi chuyen dong ca: dom sang cua chung da
     nam o lop `.hat` (CSS thuan) hoac khong co, va mot thu dang troi ben canh
     mot o soan thao la thu lam met mat sau nam phut.
   */
+  if (noi === "home") {
+    /*
+      Trang chu la mat tien, nen no duoc nhieu nhat: dom sang + hai chiec la +
+      hai vet gio = 9 phan tu. Tat ca deu o MEP hoac o phia sau, khong cai nao
+      di qua giua man hinh noi co chu tieu de.
+    */
+    return (
+      <div className="canh-troi canh-home" aria-hidden="true">
+        {DOM_CHUNG.map((h, i) => (
+          <span key={`d${i}`} className="dom" style={style(h)} />
+        ))}
+        {LA_TROI.map((h, i) => (
+          <span key={`l${i}`} className="la-troi" style={style(h)} />
+        ))}
+        {VET_GIO.map((h, i) => (
+          <span key={`g${i}`} className="vet-gio" style={style(h)} />
+        ))}
+      </div>
+    );
+  }
+
+  if (noi === "explore") {
+    // Vuong quoc tren may: dom sang cao + hai bong chim luon rat thua.
+    return (
+      <div className="canh-troi" aria-hidden="true">
+        {DOM_CHUNG.slice(0, 4).map((h, i) => (
+          <span key={`d${i}`} className="dom dom-troi" style={style(h)} />
+        ))}
+        {CHIM.map((h, i) => (
+          <span key={`c${i}`} className="chim" style={style(h)} />
+        ))}
+      </div>
+    );
+  }
+
+  if (noi === "library") {
+    // Thu vien: bui phep xanh/vang, cham va deu. KHONG cai nao di qua the.
+    return (
+      <div className="canh-troi" aria-hidden="true">
+        {DOM_CHUNG.map((h, i) => (
+          <span key={i} className={i % 2 ? "dom dom-vang" : "dom dom-xanh"}
+                style={style(h)} />
+        ))}
+      </div>
+    );
+  }
+
   if (noi === "account") {
     return (
       <div className="canh-troi" aria-hidden="true">
         {CANH_HOA.map((h, i) => (
-          <span key={i} className="canh-hoa" style={style(h)} />
+          <span key={`h${i}`} className="canh-hoa" style={style(h)} />
+        ))}
+        {DOM_CHUNG.slice(0, 3).map((h, i) => (
+          <span key={`d${i}`} className="dom dom-am" style={style(h)} />
         ))}
       </div>
     );
@@ -106,8 +194,11 @@ export function AmbientScene({ duongDan }: { duongDan: string }) {
   if (noi === "ngoai") {
     return (
       <div className="canh-troi" aria-hidden="true">
+        {SAO_TINH.map((h, i) => (
+          <span key={`t${i}`} className="sao-tinh" style={style(h)} />
+        ))}
         {SAO_BANG.map((h, i) => (
-          <span key={i} className="sao-bang" style={style(h)} />
+          <span key={`b${i}`} className="sao-bang" style={style(h)} />
         ))}
       </div>
     );

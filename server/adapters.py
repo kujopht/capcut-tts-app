@@ -641,6 +641,17 @@ class MockIdentityAdapter:
         with self._lock:
             return [p.username for p in self._profiles.values() if p.username]
 
+    def profiles_by_ids(self, user_ids: Sequence[str]) -> Dict[str, Profile]:
+        """
+        Nhieu ho so trong MOT lan doc. Thieu ai thi khong co khoa do trong ket qua.
+
+        Xem ban Appwrite de biet vi sao ham nay ton tai: khu quan tri tung goi
+        `get_profile` cho tung hang, va do la mot vong mang moi hang.
+        """
+        with self._lock:
+            return {uid: self._profiles[uid] for uid in dict.fromkeys(user_ids)
+                    if uid in self._profiles}
+
     # -- OAuth ---------------------------------------------------------------
 
     def oauth_start_url(self, provider: str, success: str, failure: str) -> str:
@@ -1227,6 +1238,62 @@ class MockMetadataStore:
     def delete_track(self, track_id: str) -> None:
         with self._lock:
             self.tracks.pop(track_id, None)
+
+
+    # -- doc theo LO -----------------------------------------------------------
+    #
+    # Bon ham duoi day ton tai vi mot ly do do duoc: khu quan tri tung goi
+    # `get_stats` / `list_novels` / `get_profile` cho TUNG HANG. Tren kho mock do
+    # la vai phep tra dict; tren Appwrite that do la mot vong mang moi hang, va
+    # `/api/admin/author-applications` mat 34 giay cho SAU persona.
+    #
+    # Ban mock giu cung CHU KY va cung ngu nghia de bo test hop dong doi soat
+    # duoc hai ban.
+
+    def stats_by_ids(self, user_ids: Sequence[str]) -> Dict[str, AuthorStats]:
+        """Ban tong hop cua nhieu nguoi. Thieu ai thi tra ban RONG cho nguoi do."""
+        with self._lock:
+            return {
+                uid: (self._stats.get(uid) or AuthorStats(user_id=uid))
+                for uid in user_ids
+            }
+
+    def published_counts(self, owner_ids: Sequence[str]) -> Dict[str, int]:
+        """So truyen DA XUAT BAN cua nhieu chu so huu."""
+        can = set(owner_ids)
+        dem = {uid: 0 for uid in can}
+        with self._lock:
+            for n in self.novels.values():
+                if n.owner_id in can and n.state is PublishState.PUBLISHED:
+                    dem[n.owner_id] += 1
+        return dem
+
+    def chapter_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """So chuong cua nhieu truyen."""
+        can = set(novel_ids)
+        dem = {nid: 0 for nid in can}
+        with self._lock:
+            for c in self.chapters.values():
+                if c.novel_id in can:
+                    dem[c.novel_id] += 1
+        return dem
+
+    def total_published_novels(self) -> int:
+        with self._lock:
+            return sum(1 for n in self.novels.values()
+                       if n.state is PublishState.PUBLISHED)
+
+    def sum_qualified_listens(self) -> int:
+        """Tong luot nghe hop le tren toan he thong, tu ban TONG HOP."""
+        with self._lock:
+            return sum(s.qualified_listens for s in self._stats.values())
+
+    def count_applications(self, status: Optional[AuthorStatus] = None) -> int:
+        with self._lock:
+            rows = list(self._applications.values())
+        if status is not None:
+            rows = [r for r in rows if r.status is status]
+        return len(rows)
 
     # -- tac gia: don, thong ke, luot nghe ------------------------------------
     #

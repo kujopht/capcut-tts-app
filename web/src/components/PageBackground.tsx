@@ -35,7 +35,7 @@ import { huongDi, tenHuong, type Huong } from "@/lib/sections";
 import { AmbientScene } from "@/components/AmbientScene";
 
 /** Khop voi `--dur-nen` o `globals.css`. */
-const THOI_LUONG = 520;
+const THOI_LUONG = 580;
 
 export function PageBackground() {
   const [duongDan, setDuongDan] = useState<string | null>(null);

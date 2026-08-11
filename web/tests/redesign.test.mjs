@@ -342,7 +342,11 @@ test("muc dang xem tren thanh dieu huong cung vay", () => {
   // Vach duoi chu la tin hieu hinh dang, khong phai mau. Gio la mot vach dung
   // chung TRUOT giua cac muc — xem `motion-v2.test.mjs`.
   assert.match(css(), /\.nav-vach \{/);
-  assert.match(css(), /\.nav-vach \{[^}]*background: var\(--grad-brand\)/s);
+  // Vach 2px da thanh mot VIEN THUOC: mot hinh co the tich, nen mat theo duoc no
+  // di qua khoang trong giua hai muc thay vi chi thay mot gach ngang doi cho.
+  // Dieu KHONG doi: muc dang xem van khong duoc to ca nen bang mau dac.
+  assert.match(css(), /\.nav-vach \{[^}]*border-radius: var\(--r-full\)/s);
+  assert.match(css(), /\.nav-vach \{[^}]*background: #ffffff0f/s);
 });
 
 /* ================================ nhung loi CHI thay duoc khi mo trinh duyet */

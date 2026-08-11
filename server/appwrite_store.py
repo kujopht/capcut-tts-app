@@ -123,6 +123,18 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
 }
 
 
+def _theo_lo(items, co=50):
+    """
+    Chia thanh cac lo nho. URL cua Appwrite co tran do dai, va mot truy van
+     voi vai tram gia tri se bi tu choi TRUOC khi toi duoc database.
+
+    50 la con so an toan cho id 20-24 ky tu; mot trang quan tri 25 hang chi can
+    dung MOT lo.
+    """
+    for i in range(0, len(items), co):
+        yield items[i:i + co]
+
+
 def _application_from(row: Dict[str, Any]) -> "AuthorApplication":
     """Hang Appwrite -> ban ghi domain. Mot cho duy nhat lam phep doi nay."""
     from server.domain import AuthorApplication, AuthorStatus
@@ -274,6 +286,10 @@ class AppwriteMetadataStore:
         self._client = client
         #: Ten thuoc tinh that su co trong tung collection, hoi mot lan roi nho.
         self._attrs_cache: Dict[str, Set[str]] = {}
+        #: Ket noi dung chung. TEN KHAC `_client`: truong do da danh cho client
+        #: gia lap ma test tiem vao, va dung chung mot ten se lam nhanh "client
+        #: duoc tiem" cua `_call` bat nham ket noi that.
+        self._pool: Optional[httpx.Client] = None
 
     # -- ha tang --------------------------------------------------------------
 
@@ -292,9 +308,8 @@ class AppwriteMetadataStore:
             return self._client.request(method, url, json=payload, params=params,
                                         headers=self._headers())
         try:
-            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-                response = client.request(method, url, json=payload, params=params,
-                                          headers=self._headers())
+            response = self._http().request(method, url, json=payload,
+                                            params=params, headers=self._headers())
         except httpx.HTTPError as exc:
             raise NotFoundError(f"Không kết nối được Appwrite: {exc}") from exc
 
@@ -312,6 +327,24 @@ class AppwriteMetadataStore:
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
+
+    def _http(self) -> httpx.Client:
+        """
+        MOT client dung lai, thay vi mot client moi cho tung request.
+
+        Do duoc tren staging that: mot `httpx.Client` moi ton 1.5-2.0 giay moi
+        lan goi — phan lon la bat tay TLS toi `sgp.cloud.appwrite.io`. Dung lai
+        mot client co keep-alive thi cac lan sau con 0.5-0.9 giay.
+
+        Voi mot trang quan tri goi bay truy van, khac biet do la vai chuc giay.
+
+        An toan luong: `httpx.Client` an toan cho nhieu luong, va o day khong
+        co trang thai nao duoc chia se ngoai ket noi — header duoc truyen theo
+        tung request.
+        """
+        if self._pool is None:
+            self._pool = httpx.Client(timeout=REQUEST_TIMEOUT)
+        return self._pool
 
     def _docs(self, collection: str) -> str:
         return f"/v1/databases/{self._db}/collections/{collection}/documents"
@@ -1127,6 +1160,96 @@ class AppwriteMetadataStore:
 # Doi document -> dataclass
 # -----------------------------------------------------------------------------
 
+
+
+    # -- doc theo LO -----------------------------------------------------------
+    #
+    # MOT vong mang cho N hang, thay vi N vong.
+    #
+    # `equal` cua Appwrite nhan NHIEU gia tri va hoat dong nhu `IN` — da kiem
+    # chung. Do la ca co so cua khoi nay: mot truy van `equal(user_id, [a,b,c])`
+    # thay cho ba lan `GET /documents/{id}`.
+    #
+    # LY DO TON TAI: khu quan tri tung goi `get_stats`/`list_novels`/`get_profile`
+    # cho TUNG HANG, va `/api/admin/author-applications` mat 34 giay cho sau
+    # persona tren staging that.
+
+    def stats_by_ids(self, user_ids: Sequence[str]) -> Dict[str, AuthorStats]:
+        ds = [u for u in dict.fromkeys(user_ids) if u]
+        ra = {uid: AuthorStats(user_id=uid) for uid in ds}
+        if not ds:
+            return ra
+        for lo in _theo_lo(ds):
+            for row in self._list_all(COL_STATS, [q_equal("user_id", *lo)]):
+                uid = str(row.get("user_id") or "")
+                if uid in ra:
+                    ra[uid] = AuthorStats(
+                        user_id=uid,
+                        qualified_listens=int(row.get("qualified_listens") or 0),
+                        published_novels=int(row.get("published_novels") or 0),
+                        updated_at=str(row.get("updated_at") or ""),
+                    )
+        return ra
+
+    def published_counts(self, owner_ids: Sequence[str]) -> Dict[str, int]:
+        ds = [u for u in dict.fromkeys(owner_ids) if u]
+        dem = {uid: 0 for uid in ds}
+        if not ds:
+            return dem
+        for lo in _theo_lo(ds):
+            rows = self._list_all(COL_NOVELS, [
+                q_equal("owner_id", *lo),
+                q_equal("state", PublishState.PUBLISHED.value),
+                q_select("owner_id"),
+            ])
+            for row in rows:
+                uid = str(row.get("owner_id") or "")
+                if uid in dem:
+                    dem[uid] += 1
+        return dem
+
+    def chapter_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        ds = [n for n in dict.fromkeys(novel_ids) if n]
+        dem = {nid: 0 for nid in ds}
+        if not ds:
+            return dem
+        for lo in _theo_lo(ds):
+            for row in self._list_all(COL_CHAPTERS,
+                                      [q_equal("novel_id", *lo),
+                                       q_select("novel_id")]):
+                nid = str(row.get("novel_id") or "")
+                if nid in dem:
+                    dem[nid] += 1
+        return dem
+
+    def total_published_novels(self) -> int:
+        """
+        Dung `total` cua Appwrite, KHONG keo ban ghi ve.
+
+        `limit(1)` van tra `total` cua ca tap khop dieu kien — da kiem chung, va
+        `_page` da dua vao dieu do tu truoc.
+        """
+        _, total = self._page(COL_NOVELS, [
+            q_equal("state", PublishState.PUBLISHED.value), q_limit(1)])
+        return total
+
+    def sum_qualified_listens(self) -> int:
+        """
+        Tong tu ban TONG HOP, khong tu bang su kien.
+
+        Dem lai tu `listen_credits` cho moi lan mo bang dieu khien la mot phep
+        quet toan bang. `author_stats` co mot hang moi tac gia, va so tac gia
+        nho hon so luot nghe nhieu bac.
+        """
+        return sum(int(r.get("qualified_listens") or 0)
+                   for r in self._list_all(COL_STATS,
+                                           [q_select("qualified_listens")]))
+
+    def count_applications(self, status: Optional[AuthorStatus] = None) -> int:
+        queries = [q_limit(1)]
+        if status is not None:
+            queries.insert(0, q_equal("status", status.value))
+        return self._page(COL_APPLICATIONS, queries)[1]
 
     # =========================================================== V2: TAC GIA
     #

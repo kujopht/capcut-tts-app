@@ -246,7 +246,9 @@ test("hat sang CHI o ba trang, va KHONG o trang doc chuong", () => {
 test("hat sang tat han khi nguoi dung chon giam chuyen dong", () => {
   const text = css();
   const at = text.indexOf("@media (prefers-reduced-motion: reduce)");
-  const than = text.slice(at, at + 1400);
+  // Cat theo DAU NGOAC, khong theo mot so ky tu co dinh: them mot dong chu
+  // thich vao khoi nay tung lam cua so 1400 ky tu truot mat cac dong duoi.
+  const than = text.slice(at, text.indexOf("\n}", at));
   assert.match(than, /\.hat \{ display: none; \}/);
   assert.match(than, /\.btn-primary::after \{ display: none; \}/);
   assert.match(than, /\.play-btn\.is-playing::after \{ animation: none; \}/);

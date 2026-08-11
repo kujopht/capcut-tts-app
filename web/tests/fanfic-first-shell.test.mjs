@@ -96,8 +96,12 @@ test("menu ben phai dung duoc bang ban phim va bang doc man hinh", () => {
 test("muc dieu huong 'Trang chu' khop CHINH XAC, khong dung startsWith", () => {
   // `"/".startsWith` khop moi duong dan, nen moi trang trong site se cung sang
   // muc "Trang chủ". Day la mot loi de mac va kho thay.
+  //
+  // Phep so khop da chuyen len mot cho: `dangXem` duoc tinh MOT lan cho ca
+  // `aria-current` lan vien thuoc dieu huong. Rang buoc thi y nguyen.
   const nav = read("../src/components/NavAuth.tsx");
-  assert.match(nav, /link\.href === "\/"\s*\n?\s*\?\s*pathname === "\/"/);
+  assert.match(nav, /l\.href === "\/"\s*\n?\s*\?\s*pathname === "\/"/);
+  assert.match(nav, /const active = link\.href === dangXem;/);
 });
 
 test("Audio Studio VAN co loi vao o footer cho nguoi khong mo menu", () => {

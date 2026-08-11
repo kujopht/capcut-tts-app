@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { viTri } from "@/lib/sections";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator } from "@/components/NavIndicator";
@@ -42,21 +43,38 @@ export function NavLinks() {
     ngang duoc o mobile.
   */
   const hop = useRef<HTMLElement | null>(null);
+  /*
+    `href` cua muc dang xem — tinh MOT lan o day, dung cho ca `aria-current` lan
+    vien thuoc. Truyen `pathname` roi de vien thuoc tu do DOM se dua voi chu ky
+    ve cua React; da do duoc dieu do tren trinh duyet.
+  */
+  const dangXem =
+    LINKS.find((l) =>
+      l.href === "/"
+        ? pathname === "/"
+        : pathname === l.href || pathname.startsWith(`${l.href}/`),
+    )?.href ?? "";
   return (
     <nav className="nav-links" aria-label="Điều hướng chính" ref={hop}>
       {LINKS.map((link) => {
         // "/" khop CHINH XAC, khong dung `startsWith`: neu khong thi moi trang
         // trong site deu sang muc "Trang chủ".
-        const active =
-          link.href === "/"
-            ? pathname === "/"
-            : pathname === link.href || pathname.startsWith(`${link.href}/`);
+        const active = link.href === dangXem;
         return (
           <Link
             key={link.href}
             href={link.href}
             className={link.cta ? "nav-link nav-cta" : "nav-link"}
             aria-current={active ? "page" : undefined}
+            /* Sac cua khu vuc, cung nguon token voi vien thuoc. */
+            style={
+              active
+                ? ({
+                    ["--sac-1" as string]: `var(--sac-${viTri(link.href)}-1)`,
+                    ["--sac-2" as string]: `var(--sac-${viTri(link.href)}-2)`,
+                  } as React.CSSProperties)
+                : undefined
+            }
           >
             {link.label}
           </Link>
@@ -67,7 +85,7 @@ export function NavLinks() {
         ve vach cua no bang `::after`, nen doi trang la vach bien mat roi mot
         vach khac xuat hien — khong co gi noi hai trang thai voi nhau.
       */}
-      <NavIndicator bao={hop} moc={pathname} />
+      <NavIndicator bao={hop} moc={dangXem} />
     </nav>
   );
 }

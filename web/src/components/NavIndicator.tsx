@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { viTri } from "@/lib/sections";
 
 type O = {
   x: number;
@@ -41,7 +42,16 @@ type O = {
 export function NavIndicator({
   /** Phan tu bao cac muc. Chi bao co `position: relative`. */
   bao,
-  /** Doi khi gia tri nay doi thi do lai — thuong la `pathname`. */
+  /**
+   * `href` cua muc DANG XEM, hoac chuoi rong khi khong muc nao khop.
+   *
+   * KHONG phai `pathname`, va KHONG doc `[aria-current="page"]` tu DOM: hai cach
+   * do deu DUA voi chu ky ve cua React. Da do tren trinh duyet — vien thuoc tre
+   * dung MOT nhip dieu huong, ke ca sau hai `requestAnimationFrame`, vi thuoc
+   * tinh `aria-current` cua cac muc duoc cap nhat o mot lan ve sau.
+   *
+   * `href` thi nguoi goi da biet chac ngay luc ve, nen khong con cuoc dua nao.
+   */
   moc,
 }: {
   bao: React.RefObject<HTMLElement | null>;
@@ -56,7 +66,9 @@ export function NavIndicator({
     if (!hop) return;
 
     const do_lai = () => {
-      const muc = hop.querySelector<HTMLElement>('[aria-current="page"]');
+      const muc = moc
+        ? hop.querySelector<HTMLElement>(`a[href="${CSS.escape(moc)}"]`)
+        : null;
       if (!muc) {
         setO(null);
         // Trang khong co muc nao khop (vd `/login`) khong dat lai `daDo`: quay
@@ -79,10 +91,19 @@ export function NavIndicator({
     };
 
     /*
-      Do SAU khi trinh duyet da ve xong. `requestAnimationFrame` chu khong phai
-      do ngay trong effect: `aria-current` vua doi o cung mot lan ve, va doc kich
-      thuoc ngay lap tuc co the tra ve so cua khung TRUOC.
+      Do SAU khi trinh duyet da ve xong, va do HAI LAN.
+
+      MOT `requestAnimationFrame` la KHONG DU, va day la mot loi da do duoc tren
+      trinh duyet that: doi `/` -> `/library` thi mau va chu cua vien thuoc doi
+      dung, nhung vi tri van dung o muc cu. Ly do la `aria-current` cua cac muc
+      duoc Next cap nhat o mot lan ve SAU lan ve cua component nay, nen o khung
+      dau tien `querySelector('[aria-current="page"]')` con tra ve MUC CU.
+
+      Do lai o khung thu hai bat duoc trang thai da on. Hai lan do mot phan tu
+      2px la mot phep tinh khong dang ke.
     */
+    // MOT khung la du: `href` khong doi theo chu ky ve, chi kich thuoc moi can
+    // cho trinh duyet ve xong.
     const khung = requestAnimationFrame(do_lai);
 
     /*
@@ -114,7 +135,17 @@ export function NavIndicator({
       className="nav-vach"
       aria-hidden="true"
       data-dung-yen={o.truot ? undefined : ""}
-      style={{ transform: `translateX(${o.x}px)`, width: `${o.w}px` }}
+      style={{
+        transform: `translateX(${o.x}px)`,
+        width: `${o.w}px`,
+        /*
+          Sac cua khu vuc dang toi, truyen qua bien de CSS noi mau muot khi vien
+          thuoc di chuyen. Dat thang mau vao day thay vi vao mot lop se lam mau
+          NHAY o dau chuyen dong thay vi chuyen dan.
+        */
+        ["--sac-1" as string]: `var(--sac-${viTri(moc)}-1, var(--brand))`,
+        ["--sac-2" as string]: `var(--sac-${viTri(moc)}-2, var(--brand-hover))`,
+      }}
     />
   );
 }

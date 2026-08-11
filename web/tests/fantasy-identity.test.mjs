@@ -55,9 +55,13 @@ test("vang la mau CHI TIET, khong bao gio la mau nen cua mot be mat", () => {
     // va cac `box-shadow: inset 0 -1px 0 #d8b56a3d` deu KHONG phai la nen: cai
     // dau la ten mau, cai sau la mot net day mot pixel.
     if (!/^\s*background(-color|-image)?:\s*[^;]*(var\(--vang|#(d8b56a|e4c982))/i.test(d)) return;
-    // `.hang-muc::before` la ngoai le da ghi nhan.
-    const truoc = dong.slice(Math.max(0, i - 12), i).join("\n");
-    if (truoc.includes(".hang-muc::before")) return;
+    /*
+      Hai ngoai le da ghi nhan, ca hai deu la NET chu khong phai be mat:
+        `.hang-muc::before`  dau vien 5x5px
+        `.sao-bang`          vet sang day 1.5px o trang dang nhap
+    */
+    const truoc = dong.slice(Math.max(0, i - 14), i).join("\n");
+    if (/\.hang-muc::before|\.sao-bang \{/.test(truoc)) return;
     nen_vang.push(`${i + 1}: ${d.trim()}`);
   });
   assert.deepEqual(nen_vang, [], `vàng bị dùng làm nền:\n  ${nen_vang.join("\n  ")}`);
@@ -268,17 +272,22 @@ test("hat sang CHI o ba trang, va KHONG o trang doc chuong", () => {
 
 test("nhip tho cua nen CHI o trang chu, rat cham, va bien do rat nho", () => {
   const text = css();
-  const at = text.indexOf('.page-bg-lop[data-bg="home"][data-vao]');
+  const at = text.indexOf('.page-bg-lop[data-bg="home"][data-vao]::before');
   assert.notEqual(at, -1, "thiếu nhịp thở của nền trang chủ");
   const than = text.slice(text.indexOf("{", at), text.indexOf("}", at));
 
   /*
-    BAY DA DAT MOT LAN: `[data-vao]` da dat `animation` cho lop nen. Mot quy tac
-    rieng cho trang chu ma chi khai `tho-nen` se GHI DE khai bao do, va lop nen
-    trang chu mat luon hieu ung hien vao — khong ai nhan ra ngay, vi trang chu
-    thuong la trang mo dau tien nen khong co gi de chuyen canh tu.
+    NHIP THO NAM O `::before`, KHONG o the.
+
+    Ly do: the dung `transform` cho cu truot ngang cua chuyen canh co huong, va
+    hai hieu ung tranh cung mot thuoc tinh thi mot cai bien mat.
+
+    BAY DA DAT MOT LAN: `::before` da co `nen-lang`. Mot quy tac rieng cho trang
+    chu ma chi khai `tho-nen` se GHI DE khai bao do, va lop anh trang chu mat luon
+    hieu ung lang xuong — khong ai nhan ra ngay, vi trang chu thuong la trang mo
+    dau tien nen khong co gi de chuyen canh tu.
   */
-  assert.match(than, /nen-vao/, "khai báo riêng cho trang chủ ghi đè hiệu ứng hiện vào");
+  assert.match(than, /nen-lang/, "khai báo riêng cho trang chủ ghi đè hiệu ứng lắng xuống");
   assert.match(than, /tho-nen/);
 
   const giay = Number(than.match(/tho-nen (\d+)s/)?.[1]);
@@ -300,13 +309,18 @@ test("moi hieu ung moi deu TAT khi nguoi dung chon giam chuyen dong", () => {
   const text = css();
   const than = text.slice(text.indexOf("@media (prefers-reduced-motion: reduce)"));
   assert.match(than, /\.hat \{ display: none; \}/);
-  assert.match(than, /\.page-bg-lop\[data-bg="home"\]\[data-vao\]/,
+  assert.match(than, /\.page-bg-lop\[data-bg="home"\]\[data-vao\]::before \{ animation: none; \}/,
     "nhịp thở của nền không được tắt khi giảm chuyển động");
-  // Va phan tat do KHONG duoc lam mat luon hieu ung hien vao.
-  const at = than.indexOf('.page-bg-lop[data-bg="home"][data-vao]');
-  const khoi = than.slice(than.indexOf("{", at), than.indexOf("}", at));
-  assert.match(khoi, /nen-vao/);
-  assert.ok(!khoi.includes("tho-nen"));
+
+  /*
+    Va cu TRUOT NGANG cua chuyen canh cung phai tat. Phai ghi de tung `data-huong`:
+    quy tac `[data-vao][data-huong="tien"]` co do cu the cao han, nen chi dat lai
+    `animation` o `[data-vao]` thi cu truot van chay.
+  */
+  for (const h of ["tien", "lui", "nhe"]) {
+    assert.match(than, new RegExp(`\[data-vao\]\[data-huong="${h}"\]`),
+      `hướng ${h} vẫn còn trượt ngang khi giảm chuyển động`);
+  }
 });
 
 /* ================================ 6. nut chinh */

@@ -121,7 +121,11 @@ test("'Viết truyện' noi bat hon muc dieu huong thuong", () => {
 test("muc dang xem danh dau bang vach duoi, khong to ca nen", () => {
   // To ca nen o mot thanh bon muc thi khoi mau do to ngang mot cai nut va hut
   // mat truoc ca ten san pham.
-  assert.match(css(), /\.nav-link\[aria-current="page"\]::after/);
+  //
+  // Vach gio la MOT phan tu dung chung truot giua cac muc, khong con la mot
+  // `::after` cua tung muc — xem `motion-v2.test.mjs`. Dieu duoc giu o day la
+  // phan KHONG doi: muc dang xem khong duoc to ca nen.
+  assert.match(css(), /\.nav-vach \{/);
   const active = rule('.nav-link[aria-current="page"]');
   assert.match(active, /background: transparent/);
 });
@@ -335,8 +339,10 @@ test("truyen dang chon co tin hieu NGOAI mau sac", () => {
 });
 
 test("muc dang xem tren thanh dieu huong cung vay", () => {
-  // Vach duoi chu la tin hieu hinh dang, khong phai mau.
-  assert.match(css(), /\.nav-link\[aria-current="page"\]::after/);
+  // Vach duoi chu la tin hieu hinh dang, khong phai mau. Gio la mot vach dung
+  // chung TRUOT giua cac muc — xem `motion-v2.test.mjs`.
+  assert.match(css(), /\.nav-vach \{/);
+  assert.match(css(), /\.nav-vach \{[^}]*background: var\(--grad-brand\)/s);
 });
 
 /* ================================ nhung loi CHI thay duoc khi mo trinh duyet */

@@ -247,7 +247,7 @@ body {
 }
 
 /* --dur-nen: khop voi `THOI_LUONG` o `PageBackground.tsx`. */
-:root { --dur-nen: 420ms; }
+:root { --dur-nen: 520ms; }
 
 /*
   MOT lop tranh. Co the co hai lop cung luc trong luc chuyen canh — mot dang mo
@@ -304,14 +304,62 @@ body {
 }
 
 /*
-  CHUYEN CANH: tam moi hien dan vao, tam cu mo dan ra.
+  CHUYEN CANH CO HUONG — mot cu QUAY MAY, khong phai mot cu doi anh.
 
-  Tam moi cung thu nho tu 1.015 ve 1 — mot chuyen dong rat nho lam canh nhu
-  "lang xuong" thay vi "bat ra". KHONG dich chuyen ngang: mot cu truot ngang o
-  lop nen doc ra la mot loi bo cuc.
+  Cac khu vuc chinh nam tren MOT TRUC (xem `lib/sections.ts`):
+
+      Trang chu -> Kham pha -> Thu vien -> Viet -> Studio -> Tai khoan
+
+  Di sang PHAI tren truc thi may quay sang phai: tam cu troi ra ben trai, tam moi
+  vao tu ben phai. Di ve trai thi nguoc lai. Nho vay mot cu bam "Quay lai" cua
+  trinh duyet tu dong tra ve dung huong — huong duoc tinh tu hai DUONG DAN, khong
+  tu mot cai co "nguoi dung vua bam Back" ma ta phai tu theo doi.
+
+  BIEN DO NHO, va do la ca quyet dinh: 5vw ra, 8vw vao. Truot ca man hinh 100vw
+  doc ra nhu mot slide PowerPoint; mot cu dich nho doc ra nhu may vua quay sang
+  mot khu khac cua CUNG MOT the gioi. Tam vao di xa han tam ra mot chut de mat
+  thay "cai moi dang tien vao" chu khong phai "hai tam cung troi".
+
+  `nhe` cho trang long (`/novels/*`, `/chapters/*`) va cho moi buoc khong co
+  huong: chung khong phai mot khu vuc rieng, nen chi dich 2vw kem mo dan.
+
+  `transform` + `opacity` — hai thuoc tinh duy nhat trinh duyet ghep duoc tren GPU
+  ma khong phai tinh lai bo cuc.
 */
 .page-bg-lop[data-vao] { animation: nen-vao var(--dur-nen) var(--ease) both; }
 .page-bg-lop[data-ra]  { animation: nen-ra  var(--dur-nen) var(--ease) both; }
+
+.page-bg-lop[data-vao][data-huong="tien"] { animation-name: vao-tu-phai; }
+.page-bg-lop[data-ra][data-huong="tien"]  { animation-name: ra-sang-trai; }
+.page-bg-lop[data-vao][data-huong="lui"]  { animation-name: vao-tu-trai; }
+.page-bg-lop[data-ra][data-huong="lui"]   { animation-name: ra-sang-phai; }
+.page-bg-lop[data-vao][data-huong="nhe"]  { animation-name: vao-nhe; }
+.page-bg-lop[data-ra][data-huong="nhe"]   { animation-name: ra-nhe; }
+
+@keyframes vao-tu-phai {
+  from { opacity: 0; transform: translate3d(8vw, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes ra-sang-trai {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(-5vw, 0, 0); }
+}
+@keyframes vao-tu-trai {
+  from { opacity: 0; transform: translate3d(-8vw, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes ra-sang-phai {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(5vw, 0, 0); }
+}
+@keyframes vao-nhe {
+  from { opacity: 0; transform: translate3d(2vw, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes ra-nhe {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(-2vw, 0, 0); }
+}
 
 /*
   MOT chuyen dong lien tuc duy nhat trong ca site, va chi o TRANG CHU.
@@ -323,14 +371,14 @@ body {
   KHONG dat o cac trang lam viec: mot khung nen dang bo ra vao phia sau mot form
   hay mot chuong truyen la thu lam met mat sau nam phut.
 
-  Vi sao khai CA HAI hieu ung trong mot khai bao: `[data-vao]` da dat `animation`
-  cho lop nay. Mot quy tac rieng cho trang chu se GHI DE khai bao do va lop nen
-  mat luon hieu ung hien vao. Nen phai liet ke ca hai, va cho cai thu hai tre
-  dung bang thoi luong chuyen canh de hai thu khong tranh `transform`.
+  NAM O `::before`, KHONG o the: the gio dung `transform` cho cu truot ngang cua
+  chuyen canh, va hai hieu ung tranh cung mot thuoc tinh thi mot cai bien mat.
+  `::before` da co `nen-lang`, nen phai khai CA HAI trong mot khai bao — mot quy
+  tac rieng se ghi de va lop nen mat luon hieu ung hien vao.
 */
-.page-bg-lop[data-bg="home"][data-vao] {
+.page-bg-lop[data-bg="home"][data-vao]::before {
   animation:
-    nen-vao var(--dur-nen) var(--ease) both,
+    nen-lang var(--dur-nen) var(--ease) both,
     tho-nen 54s ease-in-out var(--dur-nen) infinite alternate;
 }
 @keyframes tho-nen {
@@ -400,6 +448,102 @@ body {
 @keyframes troi {
   from { transform: translate3d(0, 0, 0); }
   to   { transform: translate3d(2%, -3%, 0); }
+}
+
+/* ================================================== khong khi cua tung khu vuc
+
+   Xem `components/AmbientScene.tsx`. Ba noi, va CHI ba noi:
+
+     /account   canh hoa dao roi
+     /login     sao bang, THUA
+     /chapters  vai dom sang QUANH khoi nghe — khong gi sau doan van
+
+   Cac khu lam viec khong co gi chuyen dong ca. Mot thu dang troi ben canh mot o
+   soan thao la thu lam met mat sau nam phut.
+   ========================================================================== */
+
+.canh-troi {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.canh-troi > * {
+  position: absolute;
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* -- canh hoa dao ---------------------------------------------------------- */
+/* Mot canh hoa la mot hinh bau duc lech, khong phai mot vong tron: `border-radius`
+   bon gia tri khac nhau cho ra dung hinh do ma khong can mot tep anh nao. */
+.canh-hoa {
+  width: var(--co);
+  height: calc(var(--co) * 0.62);
+  border-radius: 60% 20% 55% 25%;
+  background: linear-gradient(140deg, #ffc9dd6b, #ff9ec27a 55%, #ffd6e64d);
+  opacity: 0;
+  animation: hoa-roi var(--nhip) linear var(--tre) infinite;
+}
+@keyframes hoa-roi {
+  /*
+    Roi HET chieu cao khung nhin roi bien mat, va xoay cham trong luc roi. Doan
+    mo dau/ket thuc de do mo 0 nen khong ai thay canh hoa "xuat hien" hay "bi
+    cat" — chung chi troi vao va troi ra.
+  */
+  0%   { opacity: 0; transform: translate3d(0, 0, 0) rotate(0deg); }
+  8%   { opacity: 0.55; }
+  85%  { opacity: 0.4; }
+  100% { opacity: 0; transform: translate3d(-6vw, 108vh, 0) rotate(220deg); }
+}
+
+/* -- sao bang -------------------------------------------------------------- */
+/*
+  THUA la ca dieu quan trong: mot vet sang lap lien tuc doc ra nhu mot cai den
+  bao, khong phai nhu bau troi. Vet chi song 4% cua mot nhip 17-29 giay, nen
+  khoang cach giua hai lan thay duoc la muoi may den hai muoi may giay.
+*/
+.sao-bang {
+  width: var(--co);
+  height: 1.5px;
+  border-radius: var(--r-full);
+  background: linear-gradient(90deg, transparent, #ffffffc4 62%, #e4c982e6);
+  box-shadow: 0 0 6px #ffffff5c;
+  opacity: 0;
+  transform: rotate(18deg);
+  animation: sao-bay var(--nhip) linear var(--tre) infinite;
+}
+@keyframes sao-bay {
+  0%    { opacity: 0; transform: translate3d(0, 0, 0) rotate(18deg); }
+  1%    { opacity: 0.85; }
+  4%    { opacity: 0; transform: translate3d(22vw, 7vw, 0) rotate(18deg); }
+  100%  { opacity: 0; transform: translate3d(22vw, 7vw, 0) rotate(18deg); }
+}
+
+/* -- dom sang quanh khoi nghe ---------------------------------------------- */
+/*
+  CHI o hai ben mep, va lop nay bi cat con mot dai cao 520px o dinh trang: doan
+  van bat dau ngay duoi do, va khong duoc co gi chuyen dong sau chu.
+*/
+.canh-nghe {
+  bottom: auto;
+  height: 520px;
+  /* Tan dan o day de khong co mot duong cat ngang thay duoc. */
+  mask-image: linear-gradient(180deg, #000 62%, transparent);
+  -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent);
+}
+.dom-nghe {
+  width: var(--co);
+  height: var(--co);
+  border-radius: 50%;
+  background: #a7f3d0;
+  box-shadow: 0 0 8px #6ee7b78a;
+  opacity: 0;
+  animation: dom-tho var(--nhip) ease-in-out var(--tre) infinite;
+}
+@keyframes dom-tho {
+  0%, 100% { opacity: 0;    transform: translate3d(0, 0, 0); }
+  50%      { opacity: 0.45; transform: translate3d(0, -18px, 0); }
 }
 
 h1, h2, h3, h4 {
@@ -785,16 +929,41 @@ main { overflow-x: clip; }
   color: var(--text);
   background: transparent;
 }
-.nav-link[aria-current="page"]::after {
-  content: "";
+
+/*
+  MOT vach dung chung, TRUOT tu muc cu sang muc moi.
+
+  Truoc day moi muc tu ve vach cua rieng no bang `::after`. Doi trang thi vach o
+  muc cu bien mat va mot vach moi xuat hien o muc khac — khong co gi noi hai
+  trang thai, nen mat khong doc ra "toi vua di tu day sang kia", chi doc ra "co
+  gi vua nhap nhay".
+
+  `transform` cho vi tri, `width` cho be dai. KHONG dung `left`: doi `left` buoc
+  trinh duyet tinh lai bo cuc moi khung; `transform` chay tren tang ghep. `width`
+  thi khong tranh duoc — no la thu duy nhat lam vach dai ngan theo do dai chu —
+  nhung mot phan tu 2px cao khong co con nao ben trong thi phep tinh lai gan nhu
+  bang khong.
+
+  Xem `components/NavIndicator.tsx` de biet cach do vi tri.
+*/
+.nav-links { position: relative; }
+.nav-vach {
   position: absolute;
-  left: 14px;
-  right: 14px;
+  left: 0;
   bottom: 2px;
   height: 2px;
   border-radius: var(--r-full);
   background: var(--grad-brand);
+  pointer-events: none;
+  /* Vao cung mot nhip voi chuyen canh nen: hai thu xay ra cung luc, va lech
+     thoi luong thi doc ra nhu hai hieu ung roi rac. */
+  transition:
+    transform var(--dur-nen) var(--ease),
+    width var(--dur-nen) var(--ease);
 }
+/* Lan do dau tien: hien NGAY tai cho. Mot cu truot tu goc trai man hinh vao luc
+   moi mo trang doc ra nhu mot loi ve. */
+.nav-vach[data-dung-yen] { transition: none; }
 
 /*
   "Viết truyện" la loi keu goi, khong phai mot muc dieu huong.
@@ -3235,22 +3404,45 @@ body.co-mini { padding-bottom: 74px; }
   /* Cac hieu ung cua ban them nen: hat troi, vet sang quet qua nut, nhip song
      cua nut phat. Ca ba deu phai BIEN MAT chu khong phai chay nhanh hon. */
   .hat { display: none; }
+  /* Canh hoa, sao bang, dom sang: bo han. `display: none` chu khong
+     phai `animation: none` — mot canh hoa dung yen giua man hinh doc
+     ra nhu mot vet ban tren kinh. */
+  .canh-troi { display: none; }
   .btn-primary::after { display: none; }
   .play-btn.is-playing::after { animation: none; }
 
   /* Hieu ung vao trang va doi tab: BO han phan DICH CHO, giu lai phan hien ra.
      Rut thoi luong ve 0 van con mot buoc nhay; `transform: none` thi khong. */
   .page, .doi-tab { animation: none; }
+  /* Vach dieu huong: nhay thang sang muc moi, khong truot. */
+  .nav-vach { transition: none; }
 
   /* Chuyen canh nen: bo phan PHONG TO, giu mot lan mo/hien rat ngan de khong
      giat. Doi anh tuc thi cung duoc, nhung mot cu nhay giua hai tam sang toi
      khac nhau con kho chiu hon chinh chuyen dong. */
-  :root { --dur-nen: 90ms; }
+  :root { --dur-nen: 120ms; }
   .page-bg-lop[data-vao]::before { animation: none; }
-  /* Nhip tho cua nen trang chu: BO han. Giu lai mot lan hien vao rat ngan. */
-  .page-bg-lop[data-bg="home"][data-vao] {
-    animation: nen-vao var(--dur-nen) var(--ease) both;
+  /*
+    Chuyen canh CO HUONG: bo han phan DICH NGANG, chi con mot lan mo/hien.
+
+    Phai ghi de ca `animation-name` cho tung huong: quy tac
+    `[data-vao][data-huong="tien"]` co do cu the cao han, nen chi dat lai
+    `animation` o `[data-vao]` thi cu truot ngang van chay.
+  */
+  .page-bg-lop[data-vao],
+  .page-bg-lop[data-vao][data-huong="tien"],
+  .page-bg-lop[data-vao][data-huong="lui"],
+  .page-bg-lop[data-vao][data-huong="nhe"] {
+    animation: nen-vao var(--dur-nen) linear both;
   }
+  .page-bg-lop[data-ra],
+  .page-bg-lop[data-ra][data-huong="tien"],
+  .page-bg-lop[data-ra][data-huong="lui"],
+  .page-bg-lop[data-ra][data-huong="nhe"] {
+    animation: nen-ra var(--dur-nen) linear both;
+  }
+  /* Nhip tho cua nen trang chu: BO han. Giu lai mot lan hien vao rat ngan. */
+  .page-bg-lop[data-bg="home"][data-vao]::before { animation: none; }
   .story-card:hover { filter: none; }
 }
 

@@ -31,9 +31,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { anhNen, tenNen } from "@/lib/backgrounds";
+import { huongDi, tenHuong, type Huong } from "@/lib/sections";
+import { AmbientScene } from "@/components/AmbientScene";
 
 /** Khop voi `--dur-nen` o `globals.css`. */
-const THOI_LUONG = 420;
+const THOI_LUONG = 520;
 
 export function PageBackground() {
   const [duongDan, setDuongDan] = useState<string | null>(null);
@@ -41,7 +43,16 @@ export function PageBackground() {
 
   /** Tam dang mo dan ra. `null` khi khong co chuyen canh nao dang chay. */
   const [tenCu, setTenCu] = useState<string | null>(null);
+  /**
+   * Huong cua lan chuyen canh dang chay.
+   *
+   * Tinh tu HAI DUONG DAN, khong tu hai tam nen: hai duong dan khac nhau co the
+   * dung cung mot tam (`/fanfic` va `/novels/x` deu la `explore`), va lay huong
+   * tu ten tam se lam moi buoc di vao mot trang truyen thanh "khong co huong".
+   */
+  const [huong, setHuong] = useState<Huong>(0);
   const truoc = useRef<string | null>(null);
+  const duongTruoc = useRef<string | null>(null);
   const hen = useRef<number | null>(null);
 
   /*
@@ -66,16 +77,25 @@ export function PageBackground() {
   }, []);
 
   useEffect(() => {
-    if (!ten) return;
+    if (!ten || duongDan === null) return;
     if (truoc.current === null) {
       // Lan dau: khong co gi de chuyen canh tu.
       truoc.current = ten;
+      duongTruoc.current = duongDan;
       return;
     }
-    if (truoc.current === ten) return;   // cung mot tam — vi du /fanfic -> /novels
+    if (truoc.current === ten) {
+      // Cung mot tam nen — vi du `/fanfic` -> `/novels/x`. Khong chuyen canh,
+      // nhung VAN phai nho duong dan moi: neu khong thi buoc di tiep theo se
+      // tinh huong tu mot duong dan cu da hai lan dieu huong truoc do.
+      duongTruoc.current = duongDan;
+      return;
+    }
 
     const cu = truoc.current;
     truoc.current = ten;
+    const huongMoi = huongDi(duongTruoc.current ?? "/", duongDan);
+    duongTruoc.current = duongDan;
 
     /*
       NAP TRUOC roi moi doi. Neu doi ngay thi trinh duyet ve mot khung trong
@@ -89,6 +109,7 @@ export function PageBackground() {
     img.src = anhNen(ten);
     const batDau = () => {
       if (huy) return;
+      setHuong(huongMoi);
       setTenCu(cu);
       if (hen.current) window.clearTimeout(hen.current);
       hen.current = window.setTimeout(() => setTenCu(null), THOI_LUONG);
@@ -99,7 +120,7 @@ export function PageBackground() {
     return () => {
       huy = true;
     };
-  }, [ten]);
+  }, [ten, duongDan]);
 
   useEffect(
     () => () => {
@@ -110,17 +131,40 @@ export function PageBackground() {
 
   if (!ten) return null;
 
+  const huongText = tenHuong(huong);
+
   return (
     <div className="page-bg" aria-hidden="true">
-      {/* Lop DUOI: tam cu, mo dan ra. Chi ton tai trong luc chuyen canh. */}
-      {tenCu ? <div className="page-bg-lop" data-bg={tenCu} data-ra="" /> : null}
+      {/*
+        HAI lop, va `data-huong` quyet dinh chung truot ve dau.
+
+        `tien`  may quay sang phai — di sang khu vuc ben phai tren truc
+        `lui`   nguoc lai
+        `nhe`   chi mo/hien kem mot cu dich rat nho: dung cho trang long
+                (`/novels/*`, `/chapters/*`) va cho cac buoc khong co huong
+
+        Bien do nho — 5vw ra, 8vw vao — va do la co y: truot ca man hinh 100vw
+        doc ra nhu mot slide PowerPoint, con mot cu dich nho doc ra nhu may vua
+        quay sang mot khu khac cua cung mot the gioi.
+      */}
+      {tenCu ? (
+        <div className="page-bg-lop" data-bg={tenCu} data-ra="" data-huong={huongText} />
+      ) : null}
 
       {/* Lop TREN: tam hien hanh. `key` doi theo tam nen hieu ung hien dan tu
           chay lai — khong phai theo doi trang thai gi them. */}
-      <div className="page-bg-lop" data-bg={ten} key={ten} data-vao="" />
+      <div className="page-bg-lop" data-bg={ten} key={ten} data-vao=""
+           data-huong={huongText} />
 
       {/* Hat sang — CSS quyet dinh trang nao ve. Mot phan tu, khong phai vai tram. */}
       <div className="hat" data-bg={ten} />
+
+      {/*
+        Khong khi rieng cua tung khu vuc. Dat o DAY chu khong o `layout.tsx`:
+        component nay da theo doi `pathname` roi, va them mot cho nua theo doi
+        cung mot thu la them mot cho nua co the lech.
+      */}
+      <AmbientScene duongDan={duongDan ?? "/"} />
     </div>
   );
 }

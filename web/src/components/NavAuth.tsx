@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
+import { NavIndicator } from "@/components/NavIndicator";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -35,8 +36,14 @@ const LINKS = [
 
 export function NavLinks() {
   const pathname = usePathname();
+  /*
+    `hop` de `NavIndicator` do vi tri muc dang xem. Vach nam TRONG hang nay chu
+    khong o mot tang khac: no duoc dat theo toa do trong hang, va hang thi cuon
+    ngang duoc o mobile.
+  */
+  const hop = useRef<HTMLElement | null>(null);
   return (
-    <nav className="nav-links" aria-label="Điều hướng chính">
+    <nav className="nav-links" aria-label="Điều hướng chính" ref={hop}>
       {LINKS.map((link) => {
         // "/" khop CHINH XAC, khong dung `startsWith`: neu khong thi moi trang
         // trong site deu sang muc "Trang chủ".
@@ -55,6 +62,12 @@ export function NavLinks() {
           </Link>
         );
       })}
+      {/*
+        MOT vach dung chung, truot tu muc cu sang muc moi. Truoc day tung muc tu
+        ve vach cua no bang `::after`, nen doi trang la vach bien mat roi mot
+        vach khac xuat hien — khong co gi noi hai trang thai voi nhau.
+      */}
+      <NavIndicator bao={hop} moc={pathname} />
     </nav>
   );
 }

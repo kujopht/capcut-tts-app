@@ -34,7 +34,7 @@ test("dung HAI lop, khong bao gio nhieu hon", () => {
     mau cong don sai.
   */
   const src = comp();
-  assert.match(src, /tenCu \? <div className="page-bg-lop"/,
+  assert.match(src, /tenCu \? \(\s*<div className="page-bg-lop"/,
     "lớp cũ không được vẽ có điều kiện");
   assert.match(src, /setTenCu\(null\)/, "không dọn lớp cũ sau khi chuyển cảnh");
   assert.match(src, /clearTimeout\(hen\.current\)/,
@@ -218,7 +218,8 @@ test("thoi luong o CSS khop voi thoi luong o component", () => {
   const ms = Number(css().match(/--dur-nen: (\d+)ms/)?.[1]);
   const js = Number(comp().match(/const THOI_LUONG = (\d+);/)?.[1]);
   assert.equal(ms, js, `CSS ${ms}ms nhưng component ${js}ms`);
-  assert.ok(ms >= 350 && ms <= 500, `${ms}ms — cần 350–500`);
+  // 450-650ms: mot cu QUAY MAY can lau han mot lan mo/hien.
+  assert.ok(ms >= 450 && ms <= 650, `${ms}ms — cần 450–650`);
 });
 
 /* ============================================================== tab cuc bo */

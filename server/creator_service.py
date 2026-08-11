@@ -66,6 +66,11 @@ class CreatorService:
     def __init__(self, identity: Any, store: Any):
         self._identity = identity
         self._store = store
+        #: Moc goi khi mot don duoc DUYET hoac TU CHOI. `None` = khong ai nghe.
+        #: `server/main.py` gan `SocialService.notify_author_decision` vao day.
+        #: Xem ghi chu trong `_decide` ve vi sao la mot moc chu khong phai mot
+        #: import.
+        self.on_decision: Optional[Any] = None
 
     # =========================================================== ho so cong khai
 
@@ -287,6 +292,26 @@ class CreatorService:
                 actor_id=actor_id,
                 note=(note or "").strip(),
             ))
+
+        # Bao cho nguoi nop don, neu co ai dang nghe.
+        #
+        # `on_decision` la mot MOC, mac dinh `None`. Tang nay khong import tang
+        # xa hoi: `SocialService` da phu thuoc vao `creator` (no dung
+        # `public_author_card` va `rank_progress`), nen mot import nguoc se tao
+        # vong phu thuoc — thu rat kho thao ra sau nay. `server/main.py` gan moc
+        # nay khi khoi tao.
+        #
+        # Loi trong duong thong bao KHONG duoc lam hong quyet dinh kiem duyet:
+        # trang thai da doi va nhat ky da ghi, nen mot thong bao that lac la thu
+        # nho hon nhieu so voi mot lan duyet bao loi ma van co hieu luc mot nua.
+        if self.on_decision is not None and moi in (AuthorStatus.APPROVED,
+                                                    AuthorStatus.REJECTED):
+            try:
+                self.on_decision(user_id,
+                                 approved=moi is AuthorStatus.APPROVED,
+                                 actor_id=actor_id, note=(note or "").strip())
+            except Exception:
+                pass
         return app
 
     def _set_status(self, profile: Profile, status: AuthorStatus) -> Profile:

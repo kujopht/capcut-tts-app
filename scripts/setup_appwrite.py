@@ -128,7 +128,13 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("event_id", "string", True, 64),
             ("action", "enum", True,
              ["author_approved", "author_rejected", "author_suspended",
-              "author_restored"]),
+              "author_restored",
+              # Kiem duyet xa hoi vao CUNG mot nhat ky. Mot nhat ky, khong phai
+              # hai: nguoi doc lai mot vu viec muon thay MOI thu da xay ra voi
+              # mot nguoi theo thu tu, chu khong phai ghep hai danh sach.
+              "post_removed", "post_restored",
+              "comment_removed", "comment_restored",
+              "report_resolved", "report_dismissed"]),
             ("target_user_id", "string", True, 64),
             # Rong = he thong (vd migration grandfather), khong phai mot nguoi.
             ("actor_id", "string", False, 64),
@@ -140,6 +146,188 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "indexes": [
             ("target_created_idx", "key", ["target_user_id", "created_at"]),
             ("created_idx", "key", ["created_at"]),
+        ],
+    },
+    # ========================================================== TANG XA HOI
+    #
+    # BAY bang. Moi chi muc duoi day tuong ung voi mot truy van CO THAT trong
+    # `server/appwrite_social.py` — khong co chi muc nao dat "cho chac". Mot chi
+    # muc thua ton dung luong va lam moi lan ghi cham hon, va no khong bao gio
+    # duoc go ra vi khong ai biet no dung cho gi.
+    #
+    # KHONG bang nao co chi muc `unique`: tinh duy nhat o day do `rowId` TAT
+    # DINH cuong che (xem `server/social.py`). Mot chi muc unique nua se la mot
+    # rang buoc thu hai noi cung mot dieu — va hai nguon su that cho cung mot
+    # rang buoc la mot cho de lech.
+    "user_follows": {
+        "name": "User follows",
+        "attributes": [
+            ("follow_id", "string", True, 64),
+            ("follower_id", "string", True, 64),
+            ("target_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # `following_user_ids` — ai toi dang theo doi, moi nhat truoc.
+            ("follower_created_idx", "key", ["follower_id", "created_at"]),
+            # `follower_ids` / `follower_counts` — ai theo doi nguoi nay.
+            ("target_created_idx", "key", ["target_id", "created_at"]),
+            # `following_flags` — mot truy van cho ca trang.
+            ("pair_idx", "key", ["follower_id", "target_id"]),
+        ],
+    },
+    "story_follows": {
+        "name": "Story follows",
+        # BANG RIENG voi `user_follows`, khong gop bang mot cot `kind`. "Ai theo
+        # doi truyen nay" va "ai theo doi nguoi nay" la hai cau hoi chay o hai
+        # cho khac nhau; gop lai thi moi truy van phai mang them mot dieu kien
+        # loc chi de bo di mot nua bang.
+        "attributes": [
+            ("follow_id", "string", True, 64),
+            ("follower_id", "string", True, 64),
+            ("novel_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("follower_created_idx", "key", ["follower_id", "created_at"]),
+            # Phat thong bao khi co chuong moi.
+            ("novel_created_idx", "key", ["novel_id", "created_at"]),
+            ("pair_idx", "key", ["follower_id", "novel_id"]),
+        ],
+    },
+    "posts": {
+        "name": "Posts",
+        "attributes": [
+            ("post_id", "string", True, 64),
+            ("author_user_id", "string", True, 64),
+            ("kind", "enum", True, ["post", "story_update"]),
+            # Chi co nghia voi `story_update`.
+            ("novel_id", "string", False, 64),
+            ("text", "string", False, 2000),
+            # Khoa doi tuong trong R2, KHONG phai binary. Xem `social.object_key`.
+            ("image_key", "string", False, 512),
+            ("image_mime", "string", False, 60),
+            ("image_width", "integer", False, None),
+            ("image_height", "integer", False, None),
+            ("image_bytes", "integer", False, None),
+            # `removed` la kiem duyet, KHONG phai xoa: hang o lai de mot quyet
+            # dinh bi khieu nai con xem lai duoc. Xem `domain.ContentState`.
+            ("state", "enum", True, ["visible", "removed"]),
+            # Ban TONG HOP, dem lai duoc tu `post_likes`/`comments` — xem
+            # `SocialService.recount_post`.
+            ("like_count", "integer", False, None),
+            ("comment_count", "integer", False, None),
+            ("removed_by", "string", False, 64),
+            ("removed_reason", "string", False, 1000),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # Bang tin "theo doi": `author_user_id IN (...)` + moi nhat truoc.
+            ("author_created_idx", "key", ["author_user_id", "created_at"]),
+            # Bang tin kham pha: loc `state` + moi nhat truoc.
+            ("state_created_idx", "key", ["state", "created_at"]),
+            ("novel_idx", "key", ["novel_id"]),
+        ],
+    },
+    "post_likes": {
+        "name": "Post likes",
+        # `rowId` = khoa tat dinh tu (nguoi, bai) — xem `social.post_like_key`.
+        # Do la co che chan hai luot thich cua cung mot nguoi, va no manh hon
+        # moi phep doc-roi-kiem-tra: request thu hai va vao 409 cua Appwrite.
+        "attributes": [
+            ("like_id", "string", True, 64),
+            ("post_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # `count_post_likes` — dem lai tu bang su that.
+            ("post_idx", "key", ["post_id"]),
+            # `liked_flags` — mot truy van cho ca trang bang tin.
+            ("user_post_idx", "key", ["user_id", "post_id"]),
+        ],
+    },
+    "comments": {
+        "name": "Comments",
+        "attributes": [
+            ("comment_id", "string", True, 64),
+            ("post_id", "string", True, 64),
+            ("author_user_id", "string", True, 64),
+            # Rong = binh luan goc. DUNG mot cap tra loi — xem
+            # `social.REPLY_MAX_DEPTH` de biet vi sao khong phai mot cay.
+            ("parent_id", "string", False, 64),
+            ("text", "string", False, 1000),
+            ("state", "enum", True, ["visible", "removed"]),
+            ("reply_count", "integer", False, None),
+            ("removed_by", "string", False, 64),
+            ("removed_reason", "string", False, 1000),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # Binh luan cua mot bai, cu nhat truoc.
+            ("post_created_idx", "key", ["post_id", "created_at"]),
+            # `replies_for` — tra loi cua NHIEU binh luan goc, mot truy van.
+            ("parent_created_idx", "key", ["parent_id", "created_at"]),
+            # Han muc chong spam: dem binh luan cua mot nguoi trong mot gio.
+            ("author_created_idx", "key", ["author_user_id", "created_at"]),
+        ],
+    },
+    "notifications": {
+        "name": "Notifications",
+        # `rowId` = khoa tat dinh CO GO NGAY — xem `social.notification_key`.
+        # Chinh tinh duy nhat cua no la toan bo co che chong lap: cung mot nguoi
+        # lam cung mot viec voi cung mot doi tuong trong mot ngay chi sinh MOT
+        # thong bao. Khong co bo dem nao ca.
+        "attributes": [
+            ("notification_id", "string", True, 64),
+            # NGUOI NHAN.
+            ("user_id", "string", True, 64),
+            ("kind", "enum", True,
+             ["follow", "post_like", "post_comment", "comment_reply",
+              "story_chapter", "author_approved", "author_rejected"]),
+            # Rong = he thong (vd don duoc duyet), khong phai mot nguoi.
+            ("actor_id", "string", False, 64),
+            ("subject_id", "string", False, 64),
+            ("subject_kind", "string", False, 20),
+            ("preview", "string", False, 200),
+            ("read", "boolean", False, None),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_created_idx", "key", ["user_id", "created_at"]),
+            # Con so tren cai chuong — chay o MOI trang, nen phai re.
+            ("user_read_idx", "key", ["user_id", "read"]),
+        ],
+    },
+    "content_reports": {
+        "name": "Content reports",
+        # Hang duoc tao KHONG cap quyen doc cho client nao (`_create_kin`): no
+        # chua `resolution_note` — ghi chu noi bo cua quan tri.
+        "attributes": [
+            ("report_id", "string", True, 64),
+            ("reporter_id", "string", True, 64),
+            ("target_kind", "enum", True, ["post", "comment"]),
+            ("target_id", "string", True, 64),
+            # Chep lai luc bao cao de khu quan tri khong phai doc them mot bang
+            # nua cho moi hang.
+            ("target_owner_id", "string", False, 64),
+            ("reason", "enum", True,
+             ["spam", "harassment", "inappropriate", "copyright", "other"]),
+            ("detail", "string", False, 500),
+            ("status", "enum", True, ["open", "resolved", "dismissed"]),
+            ("resolution_note", "string", False, 1000),
+            ("resolved_by", "string", False, 64),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # Hang doi kiem duyet: cu nhat truoc, khong ai bi bo quen.
+            ("status_created_idx", "key", ["status", "created_at"]),
+            # `reports_for_targets` — so bao cao con mo cua ca mot trang.
+            ("target_status_idx", "key", ["target_id", "status"]),
+            ("reporter_created_idx", "key", ["reporter_id", "created_at"]),
         ],
     },
     "novels": {

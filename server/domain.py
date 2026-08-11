@@ -21,6 +21,21 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def now_iso_us() -> str:
+    """
+    Moc thoi gian den MICRO GIAY.
+
+    Dung cho moi ban ghi duoc doc theo THU TU: nhat ky kiem duyet, bai dang,
+    binh luan, thong bao. `now_iso()` cat o giay, va hai bai dang trong cung
+    mot giay se co cung moc — luc do thu tu bang tin tuy thuoc vao phep sap
+    xep, va no co the ke nguoc cau chuyen.
+
+    Cac ban ghi KHONG duoc doc theo thu tu (ho so, truyen, chuong) giu
+    `now_iso()`: chung khong can, va moc ngan thi de doc hon khi go loi.
+    """
+    return datetime.now(timezone.utc).isoformat()
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
 
@@ -61,6 +76,70 @@ class AuthorStatus(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     SUSPENDED = "suspended"
+
+
+class ContentState(str, Enum):
+    """
+    Noi dung do nguoi dung tao con hien hay da bi go.
+
+    KHONG co `deleted` o day. Kiem duyet dung `REMOVED` — hang van con, chi
+    khong hien ra nua. Ly do: mot thao tac xoa that lam mat luon bang chung cua
+    chinh viec kiem duyet do, va khi mot quyet dinh bi khieu nai thi khong con
+    gi de xem lai. Xoa THAT chi xay ra khi CHINH CHU xoa bai cua minh.
+    """
+
+    VISIBLE = "visible"
+    REMOVED = "removed"
+
+
+class PostKind(str, Enum):
+    """
+    Bai thuong hay thong bao cua tac gia ve mot truyen.
+
+    `STORY_UPDATE` chi tac gia DA DUYET moi dang duoc, va no gan voi mot truyen
+    cu the — giao dien hien kem the truyen do.
+    """
+
+    POST = "post"
+    STORY_UPDATE = "story_update"
+
+
+class NotificationKind(str, Enum):
+    """
+    Loai thong bao. Chuoi ON DINH: chung di vao API, vao khoa chong lap, va vao
+    test. Doi mot chuoi o day la lam mat khoa chong lap cua nhung thong bao da
+    ton tai, nen dung doi.
+    """
+
+    FOLLOW = "follow"
+    POST_LIKE = "post_like"
+    POST_COMMENT = "post_comment"
+    COMMENT_REPLY = "comment_reply"
+    STORY_CHAPTER = "story_chapter"
+    AUTHOR_APPROVED = "author_approved"
+    AUTHOR_REJECTED = "author_rejected"
+
+
+class ReportReason(str, Enum):
+    SPAM = "spam"
+    HARASSMENT = "harassment"
+    INAPPROPRIATE = "inappropriate"
+    COPYRIGHT = "copyright"
+    OTHER = "other"
+
+
+class ReportStatus(str, Enum):
+    """
+    Vong doi cua mot bao cao.
+
+    `OPEN` -> `RESOLVED` (da xu ly, co the da go noi dung) hoac `DISMISSED`
+    (da xem, khong vi pham). Khong co duong quay lai `OPEN`: mot bao cao da
+    duoc mot nguoi that doc xong thi khong tu mo lai.
+    """
+
+    OPEN = "open"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
 
 
 class JobStatus(str, Enum):
@@ -500,6 +579,327 @@ class AudioStamp:
         """Co du tham so de TINH LAI dau van tay hay khong."""
         return bool(self.content_hash and self.voice_id
                     and self.rate is not None and self.chunk_chars is not None)
+
+
+# -----------------------------------------------------------------------------
+# Tang xa hoi
+# -----------------------------------------------------------------------------
+#
+# BAY bang, va mot nguyen tac chung cho ca bay: khoa chinh cua nhung bang co
+# the co ban ghi TRUNG la mot khoa TAT DINH (xem `server/social.py`). Khong co
+# no, moi phep "kiem tra roi ghi" deu thua mot cuoc dua, va so dem sai vinh vien.
+#
+#   user_follows     rowId = khoa(nguoi theo doi, nguoi duoc theo doi)
+#   story_follows    rowId = khoa(nguoi theo doi, truyen)
+#   posts            rowId = post_id        moi bai mot hang
+#   post_likes       rowId = khoa(nguoi, bai)
+#   comments         rowId = comment_id
+#   notifications    rowId = khoa(nguoi nhan, loai, nguoi gay, doi tuong, ngay)
+#   content_reports  rowId = khoa(nguoi bao, loai, doi tuong)
+
+
+@dataclass
+class UserFollow:
+    """Mot nguoi theo doi mot nguoi khac."""
+
+    follower_id: str
+    target_id: str
+    follow_id: str = ""
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "follow_id": self.follow_id,
+            "follower_id": self.follower_id,
+            "target_id": self.target_id,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
+class StoryFollow:
+    """
+    Mot nguoi theo doi mot truyen.
+
+    BANG RIENG, khong gop voi `UserFollow` bang mot cot `kind`. Ly do la truy
+    van: "ai theo doi truyen nay" va "ai theo doi nguoi nay" la hai cau hoi
+    khac nhau chay o hai cho khac nhau, va gop lai thi moi truy van deu phai
+    mang them mot dieu kien loc chi de bo di mot nua bang.
+    """
+
+    follower_id: str
+    novel_id: str
+    follow_id: str = ""
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "follow_id": self.follow_id,
+            "follower_id": self.follower_id,
+            "novel_id": self.novel_id,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
+class Post:
+    """
+    Mot bai dang cong khai.
+
+    HIEN THI: giai doan nay MOI bai deu cong khai. Khong co che do rieng tu hay
+    "chi nguoi theo doi" — them mot truc hien thi keo theo phep loc o moi truy
+    van bang tin, moi trang ca nhan va moi man kiem duyet, va lam sai mot cho
+    trong so do la lo noi dung rieng tu ra ngoai. Mot truc, cuong che o mot cho.
+
+    `like_count`/`comment_count` la ban TONG HOP, giong `AuthorStats`: dem lai
+    tu bang `post_likes` cho MOI bai trong bang tin la mot phep quet moi hang.
+    Doi lai chung co the LECH neu mot buoc cong bi mat, va bang su that van la
+    `post_likes`/`comments` — co duong dem lai o tang dich vu.
+    """
+
+    author_user_id: str
+    text: str = ""
+    kind: PostKind = PostKind.POST
+    #: Chi co nghia voi `STORY_UPDATE`. Chuoi rong voi bai thuong.
+    novel_id: str = ""
+    #: Khoa doi tuong trong R2 — xem `social.object_key`. KHONG phai binary.
+    image_key: str = ""
+    image_mime: str = ""
+    image_width: int = 0
+    image_height: int = 0
+    image_bytes: int = 0
+    state: ContentState = ContentState.VISIBLE
+    like_count: int = 0
+    comment_count: int = 0
+    #: Quan tri da go. Rong khi bai con hien.
+    removed_by: str = ""
+    removed_reason: str = ""
+    post_id: str = field(default_factory=lambda: new_id("pst"))
+    created_at: str = field(default_factory=now_iso_us)
+    updated_at: str = field(default_factory=now_iso_us)
+
+    @property
+    def has_image(self) -> bool:
+        return bool(self.image_key)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Hinh dang LUU TRU va hinh dang cho QUAN TRI. Co ca truong kiem duyet."""
+        return {
+            "post_id": self.post_id,
+            "author_user_id": self.author_user_id,
+            "kind": self.kind.value,
+            "novel_id": self.novel_id,
+            "text": self.text,
+            "image_key": self.image_key,
+            "image_mime": self.image_mime,
+            "image_width": self.image_width,
+            "image_height": self.image_height,
+            "image_bytes": self.image_bytes,
+            "state": self.state.value,
+            "like_count": self.like_count,
+            "comment_count": self.comment_count,
+            "removed_by": self.removed_by,
+            "removed_reason": self.removed_reason,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        """
+        Ban CONG KHAI — danh sach cho phep, khong phai danh sach loai tru.
+
+        `removed_by` khong ra ngoai: no cho biet quan tri nao da xu ly, va do la
+        thu bien mot quyet dinh kiem duyet thanh mot muc tieu ca nhan.
+
+        `image_key` cung khong ra: khoa doi tuong tho khong dung truc tiep duoc
+        (kho la rieng tu) va lo ra cau truc khong gian ten. Tang route ghep
+        `image_url` da ky vao thay cho no.
+        """
+        return {
+            "post_id": self.post_id,
+            "author_user_id": self.author_user_id,
+            "kind": self.kind.value,
+            "novel_id": self.novel_id,
+            "text": self.text if self.state is ContentState.VISIBLE else "",
+            "has_image": self.has_image and self.state is ContentState.VISIBLE,
+            "image_width": self.image_width,
+            "image_height": self.image_height,
+            "state": self.state.value,
+            "like_count": self.like_count,
+            "comment_count": self.comment_count,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class PostLike:
+    """Mot luot thich. `like_id` la khoa tat dinh — xem `social.post_like_key`."""
+
+    post_id: str
+    user_id: str
+    like_id: str = ""
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "like_id": self.like_id,
+            "post_id": self.post_id,
+            "user_id": self.user_id,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
+class Comment:
+    """
+    Mot binh luan, hoac mot tra loi cho binh luan goc.
+
+    `parent_id` rong = binh luan goc. DUNG mot cap — xem `social.REPLY_MAX_DEPTH`
+    de biet vi sao khong phai mot cay khong gioi han.
+    """
+
+    post_id: str
+    author_user_id: str
+    text: str = ""
+    #: `comment_id` cua binh luan goc, hoac chuoi rong.
+    parent_id: str = ""
+    state: ContentState = ContentState.VISIBLE
+    reply_count: int = 0
+    removed_by: str = ""
+    removed_reason: str = ""
+    comment_id: str = field(default_factory=lambda: new_id("cmt"))
+    created_at: str = field(default_factory=now_iso_us)
+    updated_at: str = field(default_factory=now_iso_us)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "comment_id": self.comment_id,
+            "post_id": self.post_id,
+            "author_user_id": self.author_user_id,
+            "parent_id": self.parent_id,
+            "text": self.text,
+            "state": self.state.value,
+            "reply_count": self.reply_count,
+            "removed_by": self.removed_by,
+            "removed_reason": self.removed_reason,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        """
+        Binh luan da bi go van TRA VE, nhung khong kem noi dung.
+
+        Vi sao khong an han: mot tra loi treo lo lung duoi mot khoang trong doc
+        ra kho hieu hon la mot dong "Bình luận đã bị gỡ". Va so dem tra loi cua
+        binh luan goc van dung.
+        """
+        da_go = self.state is not ContentState.VISIBLE
+        return {
+            "comment_id": self.comment_id,
+            "post_id": self.post_id,
+            "author_user_id": "" if da_go else self.author_user_id,
+            "parent_id": self.parent_id,
+            "text": "" if da_go else self.text,
+            "state": self.state.value,
+            "reply_count": self.reply_count,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class Notification:
+    """
+    Mot thong bao trong ung dung. KHONG co email o giai doan nay.
+
+    `notification_id` la khoa TAT DINH co go ngay (xem
+    `social.notification_key`), nen cung mot nguoi lam cung mot viec voi cung
+    mot doi tuong trong mot ngay chi sinh MOT thong bao. Chinh tinh duy nhat cua
+    khoa la co che chong lap — khong co bo dem nao ca.
+    """
+
+    #: Nguoi NHAN.
+    user_id: str
+    kind: NotificationKind = NotificationKind.FOLLOW
+    #: Nguoi GAY RA. Rong = he thong (vd don duoc duyet).
+    actor_id: str = ""
+    #: Doi tuong duoc nhac toi: post_id, comment_id, novel_id... tuy `kind`.
+    subject_id: str = ""
+    #: `post` | `comment` | `novel` | `user` | rong. De frontend biet dieu huong.
+    subject_kind: str = ""
+    #: Mot doan ngan da cat san, de danh sach thong bao khong phai doc them bang.
+    preview: str = ""
+    read: bool = False
+    notification_id: str = ""
+    created_at: str = field(default_factory=now_iso_us)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "notification_id": self.notification_id,
+            "user_id": self.user_id,
+            "kind": self.kind.value,
+            "actor_id": self.actor_id,
+            "subject_id": self.subject_id,
+            "subject_kind": self.subject_kind,
+            "preview": self.preview,
+            "read": self.read,
+            "created_at": self.created_at,
+        }
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        """Ban cho CHINH NGUOI NHAN. Bo `user_id` — ho biet ho la ai."""
+        data = self.to_dict()
+        data.pop("user_id", None)
+        return data
+
+
+@dataclass
+class ContentReport:
+    """
+    Mot bao cao cua nguoi dung ve mot bai hoac mot binh luan.
+
+    BAO CAO KHONG BAO GIO TU GO NOI DUNG. No chi dua noi dung vao hang doi kiem
+    duyet. Neu khong the: mot nhom nguoi phoi hop bam Bao cao se tro thanh mot
+    cong cu xoa noi dung cua nguoi ho khong thich, va do la ket qua nguoc hoan
+    toan voi muc dich cua nut do.
+
+    `resolution_note` la ghi chu NOI BO cua quan tri — khong bao gio ra API cong
+    khai, giong `ModerationEvent.note`.
+    """
+
+    reporter_id: str
+    #: `post` | `comment`.
+    target_kind: str = "post"
+    target_id: str = ""
+    #: Chu so huu noi dung bi bao cao, chep lai luc bao cao de khu quan tri khong
+    #: phai doc them mot bang nua cho moi hang.
+    target_owner_id: str = ""
+    reason: ReportReason = ReportReason.OTHER
+    detail: str = ""
+    status: ReportStatus = ReportStatus.OPEN
+    resolution_note: str = ""
+    resolved_by: str = ""
+    report_id: str = ""
+    created_at: str = field(default_factory=now_iso_us)
+    updated_at: str = field(default_factory=now_iso_us)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "report_id": self.report_id,
+            "reporter_id": self.reporter_id,
+            "target_kind": self.target_kind,
+            "target_id": self.target_id,
+            "target_owner_id": self.target_owner_id,
+            "reason": self.reason.value,
+            "detail": self.detail,
+            "status": self.status.value,
+            "resolution_note": self.resolution_note,
+            "resolved_by": self.resolved_by,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
 
 
 def job_fingerprint(content: str, voice_id: str, rate: str, chunk_chars: int) -> str:

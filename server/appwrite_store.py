@@ -21,6 +21,10 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import httpx
 
 from server.adapters import NotFoundError, PermissionDenied
+from server.appwrite_social import (
+    AppwriteSocialStore,
+    SOCIAL_PERSISTED_FIELDS,
+)
 from server.config import AppwriteSettings
 from server.domain import (
     AuthorApplication,
@@ -121,6 +125,11 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "event_id", "action", "target_user_id", "actor_id", "note", "created_at",
     ),
 }
+
+#: Bay bang cua tang xa hoi. Khai o `server/appwrite_social.py` de danh sach
+#: thuoc tinh nam CANH ma doi hang cua chinh chung — hai thu do luon phai doi
+#: cung nhau, va de chung o hai tep khac nhau la moi mot lan quen.
+PERSISTED_FIELDS.update(SOCIAL_PERSISTED_FIELDS)
 
 
 def _theo_lo(items, co=50):
@@ -251,8 +260,14 @@ def persistable(collection: str, data: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in data.items() if key in allowed}
 
 
-class AppwriteMetadataStore:
-    """Novels / chapters / tts_jobs / audio_tracks tren Appwrite."""
+class AppwriteMetadataStore(AppwriteSocialStore):
+    """
+    Novels / chapters / tts_jobs / audio_tracks tren Appwrite.
+
+    Phan XA HOI o `server/appwrite_social.py` — cung mot kho, tach tep vi do
+    dai. Mixin do dung lai ha tang cua lop nay (`_create`, `_page`, ...) va
+    khong mo ket noi rieng nao.
+    """
 
     mode = "appwrite"
 
@@ -1207,6 +1222,17 @@ class AppwriteMetadataStore:
                 if uid in dem:
                     dem[uid] += 1
         return dem
+
+    def novels_by_ids(self, novel_ids: Sequence[str]) -> Dict[str, Novel]:
+        """Nhieu truyen, doc theo LO — xem contract o `MockMetadataStore`."""
+        ds = [n for n in dict.fromkeys(novel_ids) if n]
+        ra: Dict[str, Novel] = {}
+        for lo in _theo_lo(ds):
+            for row in self._list(COL_NOVELS, [q_equal("novel_id", *lo),
+                                               q_limit(len(lo))]):
+                n = _novel_from_doc(row)
+                ra[n.novel_id] = n
+        return ra
 
     def chapter_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
         ds = [n for n in dict.fromkeys(novel_ids) if n]

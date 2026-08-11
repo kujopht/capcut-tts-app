@@ -48,6 +48,7 @@ from server.domain import (
     new_id,
     now_iso,
 )
+from server.social_store import MockSocialStore
 
 
 @dataclass(frozen=True)
@@ -806,9 +807,13 @@ class LocalStorageAdapter:
 # -----------------------------------------------------------------------------
 
 
-class MockMetadataStore:
+class MockMetadataStore(MockSocialStore):
     """
     Kho metadata trong bo nho: profiles, novels, chapters, tts_jobs, audio_tracks.
+
+    Phan XA HOI (theo doi, bai dang, thich, binh luan, thong bao, bao cao) o
+    `server/social_store.py` — cung mot kho, tach tep vi do dai. Xem ghi chu dau
+    tep do.
 
     Moi truy van deu kiem tra QUYEN SO HUU - dung mo hinh phan quyen ma Appwrite
     se ap dung o ban that.
@@ -844,6 +849,8 @@ class MockMetadataStore:
         self._credits: Dict[str, ListenCredit] = {}
         #: Nhat ky kiem duyet. CHI THEM, khong bao gio sua hay xoa.
         self._events: List[ModerationEvent] = []
+
+        self._khoi_tao_xa_hoi()
 
     # -- novel ---------------------------------------------------------------
 
@@ -1267,6 +1274,17 @@ class MockMetadataStore:
                 if n.owner_id in can and n.state is PublishState.PUBLISHED:
                     dem[n.owner_id] += 1
         return dem
+
+    def novels_by_ids(self, novel_ids: Sequence[str]) -> Dict[str, Novel]:
+        """
+        Nhieu truyen, MOT luot. Thieu truyen nao thi vang mat khoi ket qua.
+
+        Dung cho bang tin: mot bai "cap nhat truyen" can tieu de truyen, va hoi
+        tung bai mot la mot truy van moi bai.
+        """
+        can = set(novel_ids)
+        with self._lock:
+            return {nid: n for nid, n in self.novels.items() if nid in can}
 
     def chapter_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
         """So chuong cua nhieu truyen."""

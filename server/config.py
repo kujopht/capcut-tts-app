@@ -216,6 +216,17 @@ class Settings:
     #: Xem `docs/ADMIN.md` de biet cach tao quan tri dau tien cho production.
     admin_user_ids: tuple = ()
 
+    #: Han muc chong spam cua tang xa hoi, GHI DE len mac dinh trong
+    #: `server/social.py`. Doc tu `FAS_SOCIAL_LIMITS` dang
+    #: `post:10/60,comment:40/60` (so lan / so phut).
+    #:
+    #: VI SAO CO THE CAU HINH: nguong dung o staging va nguong dung o that khong
+    #: giong nhau. Mot phien kiem thu tu dong tao ba muoi bai trong hai phut se
+    #: cham tran ngay, va luc do lua chon con lai la sua ma nguon roi trien khai
+    #: lai — giua mot phien kiem thu. Mac dinh van la con so an toan; bien nay
+    #: chi de NOI LONG co y thuc o mot moi truong cu the.
+    social_limits: dict = field(default_factory=dict)
+
     #: Goc cua giao dien web. Doc tu `FAS_WEB_BASE_URL`.
     #:
     #: Backend can biet cho nay de dung URL callback cho OAuth: Appwrite se
@@ -379,6 +390,33 @@ class Settings:
         }
 
 
+def _social_limits() -> dict:
+    """
+    Doc `FAS_SOCIAL_LIMITS` dang `post:10/60,comment:40/60`.
+
+    Muc nao sai cu phap thi BO QUA muc do va giu mac dinh, khong nem loi. Ly do:
+    bien nay chi NOI LONG mot nguong an toan. Mot dau phay thua trong bien moi
+    truong ma lam backend khong khoi dong duoc la mot cai gia qua dat cho mot
+    tham so tuy chon — trong khi bo qua no chi co nghia la nguong an toan van
+    duoc dung.
+    """
+    from server.social import HanMuc
+
+    raw = _env("FAS_SOCIAL_LIMITS", "")
+    ra: dict = {}
+    for muc in raw.split(","):
+        muc = muc.strip()
+        if not muc or ":" not in muc:
+            continue
+        ten, _, phan = muc.partition(":")
+        so, _, phut = phan.partition("/")
+        try:
+            ra[ten.strip()] = HanMuc(so_lan=int(so), phut=int(phut or 60))
+        except ValueError:
+            continue
+    return ra
+
+
 def _local_voices() -> Tuple[str, ...]:
     """
     Doc `FAS_LOCAL_VOICES`. Khong dat -> giu mac dinh cua `Settings`.
@@ -440,6 +478,7 @@ def load_settings() -> Settings:
         admin_user_ids=tuple(
             x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()
         ),
+        social_limits=_social_limits(),
         var_dir=var_dir,
         appwrite=AppwriteSettings(
             endpoint=_env("APPWRITE_ENDPOINT"),

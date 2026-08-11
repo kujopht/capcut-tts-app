@@ -138,3 +138,6 @@ web/public/artwork/fantasy-backgrounds/*.png
 # Bo anh nen CYBERPUNK cua ban truoc — da bi thay bang bo fantasy o
 # `fantasy-backgrounds/`. Giu lai tren dia de doi chieu, khong dua vao kho.
 web/public/artwork/backgrounds/
+
+# Bao cao/ghi chep dung mot lan cua phien lam viec — khong thuoc san pham.
+scratchpad/

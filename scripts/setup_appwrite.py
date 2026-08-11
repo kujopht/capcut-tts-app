@@ -615,7 +615,24 @@ class Setup:
         print("  đã có sẵn" if result == "exists" else "  đã tạo")
 
         base = f"/v1/databases/{self.cfg.database_id}/collections/{cid}"
+        # DOC danh sach thuoc tinh HIEN CO mot lan, bo qua POST cho cai da ton
+        # tai. Truoc day script cu POST roi coi 409 la "da co" — nhung tren mot
+        # collection GAN TRAN dung luong hang, Appwrite kiem suc chua TRUOC khi
+        # kiem trung: POST trung tra 400 "maximum size reached" thay vi 409, va
+        # lan chay lai chet dung o thuoc tinh cuoi cung vua tao. Da gap that
+        # tren staging voi `posts.images_json`. Kiem ton tai truoc thi khong
+        # con POST trung nao de ma hong.
+        da_co: set = set()
+        if not self.dry_run:
+            hien = self._call("GET", base, doc_thoi=True) or {}
+            da_co = {a.get("key") for a in hien.get("attributes", [])}
         for key, kind, required, extra in spec["attributes"]:
+            if key in da_co and kind != "enum":
+                # Enum van di duong rieng: no con phai SO SANH danh sach gia
+                # tri de mo rong — xem `_ensure_enum`.
+                self.skipped += 1
+                print(f"    - {key} ({kind}): đã có")
+                continue
             self._ensure_attribute(base, key, kind, required, extra)
         for name, kind, keys in spec["indexes"]:
             self._ensure_index(base, name, kind, keys)

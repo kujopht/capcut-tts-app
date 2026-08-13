@@ -397,6 +397,13 @@ class CreatorService:
             day_bucket=dedupe_day_bucket(moment),
             listened_seconds=float(listened_seconds),
             credit_id=credit_key(listener_id or "", chapter_id, moment),
+            # Dong dau bang CHINH `moment`, khong de dataclass tu lay dong ho
+            # that: `last_credit_at` doc `created_at` de kiem cua so 24 gio, va
+            # mot ban ghi mang gio that ben canh mot `now` duoc tiem vao la hai
+            # dong ho tron lan — phep kiem chi dung khi gio that tinh co nam
+            # gan `now`. Do duoc bang test: bo test xanh ca ngay roi do khi
+            # dong ho that troi qua mot ranh gioi ngay.
+            created_at=moment.isoformat(timespec="seconds"),
         )
         if not self._store.create_credit_once(credit):
             # Mot request khac vua thang cuoc dua. Khong phai loi.

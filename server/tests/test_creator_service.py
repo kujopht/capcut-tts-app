@@ -102,9 +102,25 @@ class ApplicationFlowTest(Base):
         self.assertEqual(trang_thai["application"]["reviewer_note"],
                          "Giới thiệu quá ngắn.")
 
+    def _dong_dau_tu_choi(self):
+        """
+        Dat `decided_at` ve MOC CO DINH sau khi tu choi.
+
+        `reject()` dong dau bang dong ho THAT, con bai test tiem
+        `now=BAY_GIO+4d` — hai dong ho tron lan, va bai test chi xanh khi gio
+        that tinh co nam canh BAY_GIO. Da do duoc: bo test do dung vao hom
+        dong ho that troi qua ranh gioi cooldown. Ghim ve BAY_GIO de bai test
+        noi ve THOI GIAN TUONG DOI (4 ngay sau khi tu choi), khong phai ve
+        hom nay la ngay nao.
+        """
+        app = self.store.get_application(self.nguoi.user_id)
+        app.decided_at = BAY_GIO.isoformat(timespec="seconds")
+        self.store.save_application(app)
+
     def test_nop_lai_sau_thoi_gian_cho_thi_xoa_ghi_chu_cu(self):
         self._nop_don()
         self.svc.reject(self.nguoi.user_id, note="Chưa ổn.")
+        self._dong_dau_tu_choi()
         p = self.identity.get_profile(self.nguoi.user_id)
         sau = BAY_GIO + timedelta(days=4)
         self.svc.apply(p, pen_name="Kẻ Dệt Mộng", intro="Tôi viết lại rồi.",
@@ -118,6 +134,7 @@ class ApplicationFlowTest(Base):
         # Doi khoa la lam moi lien ket cu tro toi mot ban ghi khong con.
         app1 = self._nop_don()
         self.svc.reject(self.nguoi.user_id, note="Chưa ổn.")
+        self._dong_dau_tu_choi()
         p = self.identity.get_profile(self.nguoi.user_id)
         app2 = self.svc.apply(p, pen_name="X Y", intro="Viết lại.",
                               accepted_rules=True,

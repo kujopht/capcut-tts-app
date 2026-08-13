@@ -4,8 +4,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { viTri } from "@/lib/sections";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
+import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
+import { NotificationBell } from "@/components/NotificationBell";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -21,36 +24,85 @@ import { useSession } from "@/lib/session";
  *
  * `/fanfic` giu nguyen duong dan, chi mang nhan "Khám phá": doi duong dan se
  * lam hong moi lien ket da chia se.
+ *
+ * `cta` KHONG doi thu tu hay cau truc — no chi doi CACH VE. "Viết truyện" van
+ * la muc thu tu trong danh sach nay; no duoc ve thanh mot nut co vien tim thay
+ * vi mot lien ket tron, de nguoi luot qua thay ngay rang ho tu viet duoc.
  */
 const LINKS = [
   { href: "/", label: "Trang chủ" },
   { href: "/fanfic", label: "Khám phá" },
+  { href: "/community", label: "Cộng đồng" },
   { href: "/library", label: "Thư viện" },
-  { href: "/write", label: "Viết truyện" },
+  { href: "/write", label: "Viết truyện", cta: true },
 ];
 
 export function NavLinks() {
   const pathname = usePathname();
+  /*
+    `hop` de `NavIndicator` do vi tri muc dang xem. Vach nam TRONG hang nay chu
+    khong o mot tang khac: no duoc dat theo toa do trong hang, va hang thi cuon
+    ngang duoc o mobile.
+  */
+  const hop = useRef<HTMLElement | null>(null);
+  /*
+    Bang `href -> phan tu`, do chinh cac muc tu dang ky khi duoc gan vao DOM.
+
+    Vien thuoc do TU BANG NAY chu khong tim bang `querySelector`: mot phep tim
+    trong DOM doc trang thai ma React co the cap nhat o mot lan ve den sau, con
+    bang thi duoc dien ngay o buoc gan tham chieu. Xem `NavIndicator`.
+
+    `useRef` chu khong `useState`: dien bang khong duoc keo theo mot lan ve moi,
+    va noi dung cua no on dinh sau lan gan dau tien.
+  */
+  const bang = useRef<BangMuc>(new Map());
+  /*
+    `href` cua muc dang xem — tinh MOT lan o day, dung cho ca `aria-current` lan
+    vien thuoc. Truyen `pathname` roi de vien thuoc tu do DOM se dua voi chu ky
+    ve cua React; da do duoc dieu do tren trinh duyet.
+  */
+  const dangXem =
+    LINKS.find((l) =>
+      l.href === "/"
+        ? pathname === "/"
+        : pathname === l.href || pathname.startsWith(`${l.href}/`),
+    )?.href ?? "";
   return (
-    <nav className="nav-links" aria-label="Điều hướng chính">
+    <nav className="nav-links" aria-label="Điều hướng chính" ref={hop}>
       {LINKS.map((link) => {
         // "/" khop CHINH XAC, khong dung `startsWith`: neu khong thi moi trang
         // trong site deu sang muc "Trang chủ".
-        const active =
-          link.href === "/"
-            ? pathname === "/"
-            : pathname === link.href || pathname.startsWith(`${link.href}/`);
+        const active = link.href === dangXem;
         return (
           <Link
             key={link.href}
             href={link.href}
-            className="nav-link"
+            className={link.cta ? "nav-link nav-cta" : "nav-link"}
             aria-current={active ? "page" : undefined}
+            ref={(el) => {
+              if (el) bang.current.set(link.href, el);
+              else bang.current.delete(link.href);
+            }}
+            /* Sac cua khu vuc, cung nguon token voi vien thuoc. */
+            style={
+              active
+                ? ({
+                    ["--sac-1" as string]: `var(--sac-${viTri(link.href)}-1)`,
+                    ["--sac-2" as string]: `var(--sac-${viTri(link.href)}-2)`,
+                  } as React.CSSProperties)
+                : undefined
+            }
           >
             {link.label}
           </Link>
         );
       })}
+      {/*
+        MOT vach dung chung, truot tu muc cu sang muc moi. Truoc day tung muc tu
+        ve vach cua no bang `::after`, nen doi trang la vach bien mat roi mot
+        vach khac xuat hien — khong co gi noi hai trang thai voi nhau.
+      */}
+      <NavIndicator bao={hop} bang={bang} moc={dangXem} />
     </nav>
   );
 }
@@ -188,6 +240,9 @@ export function NavAuth() {
   return (
     <div className="row nav-right">
       <ToolsMenu />
+      {/* Chuông đứng TRƯỚC menu tài khoản: nó là thứ người ta nhìn thường
+          xuyên hơn, và đặt nó sau avatar sẽ đẩy nó ra rìa màn hình ở mobile. */}
+      <NotificationBell />
       <AccountMenu />
     </div>
   );

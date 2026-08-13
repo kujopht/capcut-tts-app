@@ -179,6 +179,54 @@ class Settings:
     #: "khong ai thay" thi cung khong ai theo doi khi no hong.
     facebook_login_enabled: bool = False
 
+    #: Co bat CONG CHAN XUAT BAN theo trang thai tac gia. Doc tu `FAS_AUTHOR_GATE`.
+    #:
+    #: MAC DINH TAT, va day khong phai su rut re — day la thu tu trien khai bat
+    #: buoc. Moi ho so dang ton tai deu co `author_status = "none"`, ke ca nhung
+    #: nguoi da xuat ban muoi truyen. Bat cong nay TRUOC khi chay migration
+    #: grandfather la khoa toan bo tac gia hien co ra khoi chinh cong viec cua ho,
+    #: va no am tham: ho bam "Xuat ban" va nhan mot loi 403.
+    #:
+    #: Thu tu dung:
+    #:   1. trien khai ma nguon nay (cong TAT — khong ai thay gi doi)
+    #:   2. chay `scripts.grandfather_authors --apply`
+    #:   3. doi soat, roi moi dat `FAS_AUTHOR_GATE=1`
+    #:
+    #: Xem `docs/AUTHOR_RANK.md` muc "Ke hoach migration".
+    author_gate_enabled: bool = False
+
+    #: Cac `user_id` duoc quyen QUAN TRI. Doc tu `FAS_ADMIN_USER_IDS`, ngan cach
+    #: bang dau phay. MAC DINH RONG — khong ai la quan tri.
+    #:
+    #: VI SAO O BIEN MOI TRUONG chu khong phai mot cot trong bang `profiles`:
+    #:
+    #:   1. Khong the LEO THANG qua ung dung. Moi duong ghi cua he thong deu di
+    #:      qua Appwrite; neu quyen quan tri la mot truong du lieu thi bat ky lo
+    #:      hong ghi nao — mot route quen kiem, mot quyen document dat sai — deu
+    #:      tro thanh mot duong tu phong minh lam quan tri. Mot bien moi truong
+    #:      thi khong co API nao cham toi duoc.
+    #:   2. KHONG can migration. Bat quyen quan tri khong doi mot dong du lieu
+    #:      nao, va tat no cung vay.
+    #:   3. Doi danh sach la mot thao tac VAN HANH co chu y: sua bien roi khoi
+    #:      dong lai, co dau vet trong lich su cau hinh.
+    #:
+    #: Danh doi: doi quan tri phai khoi dong lai tien trinh. Voi mot he thong co
+    #: mot hoac hai quan tri thi do la cai gia dung.
+    #:
+    #: Xem `docs/ADMIN.md` de biet cach tao quan tri dau tien cho production.
+    admin_user_ids: tuple = ()
+
+    #: Han muc chong spam cua tang xa hoi, GHI DE len mac dinh trong
+    #: `server/social.py`. Doc tu `FAS_SOCIAL_LIMITS` dang
+    #: `post:10/60,comment:40/60` (so lan / so phut).
+    #:
+    #: VI SAO CO THE CAU HINH: nguong dung o staging va nguong dung o that khong
+    #: giong nhau. Mot phien kiem thu tu dong tao ba muoi bai trong hai phut se
+    #: cham tran ngay, va luc do lua chon con lai la sua ma nguon roi trien khai
+    #: lai — giua mot phien kiem thu. Mac dinh van la con so an toan; bien nay
+    #: chi de NOI LONG co y thuc o mot moi truong cu the.
+    social_limits: dict = field(default_factory=dict)
+
     #: Goc cua giao dien web. Doc tu `FAS_WEB_BASE_URL`.
     #:
     #: Backend can biet cho nay de dung URL callback cho OAuth: Appwrite se
@@ -333,9 +381,40 @@ class Settings:
             "public_voice_languages": list(self.public_voice_languages),
             # Bao ra de nguoi van hanh thay ngay duong dang nhap nao dang mo.
             "facebook_login_enabled": self.facebook_login_enabled,
+            "author_gate_enabled": self.author_gate_enabled,
+            # CHI so luong, KHONG bao gio la danh sach: `/api/health` la
+            # cong khai, va lo ra `user_id` cua quan tri la chi dung dich.
+            "admin_count": len(self.admin_user_ids),
             "env_file_loaded": self.env_file_loaded,
             "inline_worker": self.inline_worker,
         }
+
+
+def _social_limits() -> dict:
+    """
+    Doc `FAS_SOCIAL_LIMITS` dang `post:10/60,comment:40/60`.
+
+    Muc nao sai cu phap thi BO QUA muc do va giu mac dinh, khong nem loi. Ly do:
+    bien nay chi NOI LONG mot nguong an toan. Mot dau phay thua trong bien moi
+    truong ma lam backend khong khoi dong duoc la mot cai gia qua dat cho mot
+    tham so tuy chon — trong khi bo qua no chi co nghia la nguong an toan van
+    duoc dung.
+    """
+    from server.social import HanMuc
+
+    raw = _env("FAS_SOCIAL_LIMITS", "")
+    ra: dict = {}
+    for muc in raw.split(","):
+        muc = muc.strip()
+        if not muc or ":" not in muc:
+            continue
+        ten, _, phan = muc.partition(":")
+        so, _, phut = phan.partition("/")
+        try:
+            ra[ten.strip()] = HanMuc(so_lan=int(so), phut=int(phut or 60))
+        except ValueError:
+            continue
+    return ra
 
 
 def _local_voices() -> Tuple[str, ...]:
@@ -395,6 +474,11 @@ def load_settings() -> Settings:
         cors_origins=_env_list("FAS_CORS_ORIGINS", "http://localhost:3000"),
         web_base_url=_env("FAS_WEB_BASE_URL", "http://localhost:3000").rstrip("/"),
         facebook_login_enabled=_env_bool("FAS_FACEBOOK_LOGIN", False),
+        author_gate_enabled=_env_bool("FAS_AUTHOR_GATE", False),
+        admin_user_ids=tuple(
+            x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()
+        ),
+        social_limits=_social_limits(),
         var_dir=var_dir,
         appwrite=AppwriteSettings(
             endpoint=_env("APPWRITE_ENDPOINT"),

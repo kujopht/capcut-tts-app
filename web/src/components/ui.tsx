@@ -9,11 +9,57 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { JobStatus } from "@/lib/api";
 
+/* ------------------------------------------------------------- dau trang */
+
+/**
+ * Dau trang: nhan nho, tieu de, mo ta, va cho dat hanh dong ben phai.
+ *
+ * Truoc day moi trang tu ghep `<header className="row-between">` kem
+ * `style={{ maxWidth: 620 }}` inline. Bay cho lam cung mot viec la bay lan de
+ * lech, va style inline thi media query khong voi toi — o dien thoai doan mo
+ * ta van bi ep o 620px.
+ */
+export function PageHeader({
+  eyebrow,
+  icon,
+  title,
+  lead,
+  action,
+  id,
+}: {
+  eyebrow?: string;
+  /** Bieu tuong dat truoc nhan nho. Tuy chon — khong phai dau trang nao cung can. */
+  icon?: React.ReactNode;
+  title: string;
+  lead?: React.ReactNode;
+  action?: React.ReactNode;
+  /** Dat khi trang can `aria-labelledby` tro toi tieu de nay. */
+  id?: string;
+}) {
+  return (
+    <header className="page-head">
+      <div className="stack-2 page-head-body">
+        {eyebrow ? (
+          <span className="eyebrow eyebrow-icon">
+            {icon}
+            {eyebrow}
+          </span>
+        ) : null}
+        <h1 className="page-title" id={id}>
+          {title}
+        </h1>
+        {lead ? <p className="lead lead-narrow">{lead}</p> : null}
+      </div>
+      {action ? <div className="row page-head-actions">{action}</div> : null}
+    </header>
+  );
+}
+
 /* ------------------------------------------------------------ trang thai */
 
 export function Loading({ label = "Đang tải…" }: { label?: string }) {
   return (
-    <div className="row" role="status" style={{ color: "var(--text-2)" }}>
+    <div className="row muted" role="status">
       <span className="spinner" aria-hidden="true" />
       <span>{label}</span>
     </div>
@@ -245,7 +291,7 @@ export function ConfirmDialog({
         ref={panel}
       >
         <h2 id="confirm-title">{title}</h2>
-        <div className="muted" style={{ fontSize: "var(--t-sm)" }}>
+        <div className="muted modal-body">
           {body}
         </div>
         <div className="modal-actions">

@@ -39,6 +39,14 @@ from server.adapters import (
     build_storage,
 )
 from server.config import get_settings
+from server.creator import (
+    AuthorStateError,
+    RANK_TIERS,
+    UsernameError,
+    UsernameTaken,
+    suggest_username,
+)
+from server.creator_service import CreatorService
 from server.domain import (
     AudioStamp,
     AudioTrack,
@@ -51,6 +59,14 @@ from server.domain import (
     job_fingerprint,
     now_iso,
 )
+from server.social import (
+    COMMENT_MAX_CHARS,
+    POST_MAX_CHARS,
+    RateLimited,
+    SocialError,
+    mo_ta_gioi_han,
+)
+from server.social_service import SocialService
 
 app = FastAPI(
     title="Fanfic Audio Studio API",
@@ -72,8 +88,34 @@ identity = build_identity(settings)
 storage = build_storage(settings)
 store = build_metadata_store(settings)
 
+#: Tang service cua tac gia. MOT the hien, dung chung identity va store voi
+#: cac route khac — khong co duong ghi thu hai vao trang thai tac gia.
+#:
+#: Cac ham DUYET/TU CHOI/TREO cua no KHONG co route nao goi toi. Xem ghi chu o
+#: dau `server/creator_service.py`: du an chua co co che phan quyen quan tri,
+#: va mot endpoint duyet khong duoc bao ve la mot cai cong mo.
+creators = CreatorService(identity, store)
+
+#: Tang service cua tang xa hoi. Cung `identity`/`store`/`storage` voi moi route
+#: khac — mot duong ghi duy nhat, va no la noi quyen/han muc/thong bao duoc
+#: cuong che. Xem dau `server/social_service.py`.
+social = SocialService(identity, store, storage,
+                       han_muc=settings.social_limits or None)
+
+#: `CreatorService` khong biet gi ve thong bao, va khong nen biet: no la tang
+#: moderation cua tac gia. Noi hai tang lai bang mot moc thay vi mot import
+#: nguoc — mot import nguoc se lam hai module phu thuoc vong vao nhau, va do la
+#: thu rat kho thao ra sau nay.
+creators.on_decision = social.notify_author_decision
+
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
+
+#: Cac phu thuoc CUA RIENG V2. Thieu chung thi tinh nang tac gia khong dung duoc,
+#: nhung doc/nghe/tao audio van chay — nen chung duoc BAO RA o `/api/ready` ma
+#: KHONG lam dich vu bi danh dau "chua san sang".
+V2_PHU_THUOC = frozenset({"tac_gia", "uy_tin", "luot_nghe", "nhat_ky",
+                          "ho_so_cong_khai"})
 
 #: Cac job dang chay nen. Job chay trong thread rieng de API tra ve ngay.
 _job_threads: Dict[str, threading.Thread] = {}
@@ -349,14 +391,37 @@ def ready() -> Response:
         ("metadata", lambda: store.list_jobs_by_status(JobStatus.RUNNING)),
         ("storage", lambda: next(iter(storage.list_objects(
             prefix="audio/__readiness__/")), None)),
+        # --- V2: bon bang tac gia -----------------------------------------
+        #
+        # KHONG lam `/api/ready` tra 503 khi thieu (xem `tot_v2` ben duoi): mot
+        # ban trien khai truoc migration van phuc vu doc/nghe/tao audio binh
+        # thuong, va tu choi nhan traffic vi mot tinh nang chua bat la lam hong
+        # nhieu han sua.
+        #
+        # Nhung PHAI bao ra. Truoc day thieu bang la mot loi 500 chung o
+        # `/api/creator/me`, va nguoi van hanh khong co cach nao biet nguyen
+        # nhan la "chua chay migration" thay vi "code hong".
+        ("tac_gia", lambda: store.list_applications(limit=1)),
+        ("uy_tin", lambda: store.get_stats("__readiness__")),
+        ("luot_nghe", lambda: store.last_credit_at("__readiness__", "__x__")),
+        ("nhat_ky", lambda: store.list_events(limit=1)),
+        ("ho_so_cong_khai", lambda: identity.profile_by_username("__readiness__")),
     ):
         try:
             kiem()
             ket_qua["phu_thuoc"][ten] = {"dat": True}
         except Exception as exc:
-            tot = False
+            # Bon bang V2 KHONG lam ca dich vu thanh "chua san sang" — xem ghi
+            # chu o danh sach tren.
+            if ten not in V2_PHU_THUOC:
+                tot = False
             # Chi TEN loai loi. Thong diep co the chua endpoint hoac dinh danh.
-            ket_qua["phu_thuoc"][ten] = {"dat": False, "loai_loi": type(exc).__name__}
+            ket_qua["phu_thuoc"][ten] = {
+                "dat": False,
+                "loai_loi": type(exc).__name__,
+                **({"ghi_chu": "Cần chạy `python -m scripts.setup_appwrite`"}
+                   if ten in V2_PHU_THUOC else {}),
+            }
 
     ket_qua["status"] = "ready" if tot else "not_ready"
     return Response(
@@ -788,10 +853,20 @@ def get_novel(novel_id: str,
     chapters = store.list_chapters(novel_id)
     stamps = _with_job_settings(
         novel.owner_id, store.audio_by_chapter([c.chapter_id for c in chapters]))
-    return {
+    ra: Dict[str, Any] = {
         "novel": _novel_out(novel),
         "chapters": [_chapter_row(c, stamps.get(c.chapter_id)) for c in chapters],
     }
+    # Trang thai theo doi ghep vao CUNG lan goi nay, chi voi truyen DA XUAT BAN
+    # (ban nhap khong theo doi duoc — xem `SocialService.follow_story`).
+    #
+    # Ghep vao day chu khong de frontend hoi them: nut "Theo dõi truyện" khong
+    # duoc phep nhay tu "chua biet" sang "dang theo doi" sau khi trang da ve
+    # xong. Cung ly do voi `social` o `/api/users/{username}`.
+    if novel.state is PublishState.PUBLISHED:
+        ra["follow"] = social.story_follow_state(
+            novel_id, optional_profile(authorization))
+    return ra
 
 
 def _purge_chapter(chapter: Chapter) -> Dict[str, int]:
@@ -936,7 +1011,21 @@ def publish_novel(novel_id: str, profile: Profile = Depends(current_profile)) ->
     Chu so huu LUON lay tu token da xac minh, khong bao gio tu body.
 
     IDEMPOTENT: publish lai novel da `published` van tra 200 voi cung novel.
+
+    CONG CHAN: chi tac gia da duyet duoc xuat ban. Tao va sua ban nhap thi ai
+    cung lam duoc — cong chi nam o day, khong o cac route khac. Tra 403 kem
+    thong diep dung trang thai de giao dien mo dung luong tiep theo (dang ky /
+    dang cho / gui lai / bi treo) thay vi hien mot loi chung.
+
+    Cong nay chi co hieu luc khi `FAS_AUTHOR_GATE` duoc bat, va no MAC DINH TAT.
+    Ly do nam o `Settings.author_gate_enabled`: bat truoc khi chay migration
+    grandfather la khoa toan bo tac gia hien co ra khoi cong viec cua ho.
     """
+    if settings.author_gate_enabled:
+        try:
+            creators.assert_can_publish(profile)
+        except AuthorStateError as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     try:
         novel = store.publish_novel(novel_id, profile.user_id)
     except NotFoundError as exc:
@@ -974,6 +1063,14 @@ def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profil
         content=payload.content,
         order_index=payload.order_index,
     ))
+    # Chuong moi trong truyen DA XUAT BAN la mot chuong doc gia doc duoc NGAY:
+    # danh sach chuong cua trang truyen khong loc theo trang thai chuong, chi
+    # theo trang thai truyen. Nen day — chu khong phai mot nut "xuat ban
+    # chuong" khong ton tai — chinh la khoanh khac "co chuong moi" ma nguoi
+    # theo doi truyen can duoc bao. E2E tren staging that da chung minh duong
+    # cu (doi `state` cua chuong qua PATCH) khong bao gio kich hoat duoc:
+    # `ChapterPatch` khong nhan `state`.
+    _bao_chuong_moi(chapter)
     return {"chapter": chapter.to_dict()}
 
 
@@ -1061,13 +1158,43 @@ def update_chapter(chapter_id: str, payload: ChapterPatch,
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
     if isinstance(fields.get("title"), str):
         fields["title"] = fields["title"].strip()
+    # Doc trang thai CU truoc khi ghi: "chuong nay vua duoc xuat ban" chi tra
+    # loi duoc khi con biet no truoc do CHUA xuat ban. Sau khi ghi thi thong tin
+    # do da mat, va mot lan sua tieu de cua chuong da xuat ban se ban thong bao
+    # cho moi nguoi theo doi truyen — mot lan nua, moi lan.
+    truoc: Optional[PublishState] = None
+    try:
+        truoc = store.owned_chapter(chapter_id, profile.user_id).state
+    except (NotFoundError, PermissionDenied):
+        # De `update_chapter` nem loi dung — no la noi duy nhat quyet dinh
+        # 404 hay 403, va lam viec do o hai cho la hai cho co the lech.
+        pass
     try:
         chapter = store.update_chapter(chapter_id, profile.user_id, fields)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except PermissionDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    if (chapter.state is PublishState.PUBLISHED
+            and truoc is not PublishState.PUBLISHED):
+        _bao_chuong_moi(chapter)
     return {"chapter": chapter.to_dict()}
+
+
+def _bao_chuong_moi(chapter: Chapter) -> None:
+    """
+    Bao cho nguoi theo doi truyen. KHONG BAO GIO lam hong viec xuat ban.
+
+    Chuong da len roi khi ham nay chay. Mot thong bao that lac la thu nho hon
+    nhieu so voi mot request xuat ban tra 500 trong khi chuong THUC SU da duoc
+    xuat ban — nguoi dung se bam lai, va lan thu hai khong con gi de lam.
+    """
+    try:
+        novel = store.get_novel(chapter.novel_id)
+        if novel.state is PublishState.PUBLISHED:
+            social.notify_new_chapter(novel, chapter)
+    except Exception:
+        pass
 
 
 @app.delete("/api/chapters/{chapter_id}")
@@ -1865,3 +1992,828 @@ def stream_audio(
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     return Response(content=data, media_type="audio/mpeg")
+
+
+# -----------------------------------------------------------------------------
+# Tac gia: don, ho so cong khai, tim kiem, uy tin
+# -----------------------------------------------------------------------------
+#
+# KHONG co route DUYET / TU CHOI / TREO o day, va do la mot quyet dinh an toan
+# chu khong phai mot viec con thieu. Du an chua co co che phan quyen quan tri:
+# khong vai tro, khong bang admin, khong xac thuc hai buoc. Mo mot endpoint
+# duyet ma khong co cai do la tang mot cai cong — bat ky ai doan duoc duong dan
+# deu tu phong minh lam tac gia.
+#
+# Cac thao tac do nam o `CreatorService`, duoc kiem thu day du, va cho trang
+# quan tri. Xem `docs/AUTHOR_RANK.md` muc "Viec con lai".
+
+
+class UsernameIn(BaseModel):
+    username: Annotated[str, StringConstraints(min_length=1, max_length=40)]
+
+
+class BioIn(BaseModel):
+    bio: Annotated[str, StringConstraints(max_length=400)] = ""
+
+
+class ApplyIn(BaseModel):
+    pen_name: Annotated[str, StringConstraints(min_length=1, max_length=60)]
+    bio: Annotated[str, StringConstraints(max_length=400)] = ""
+    genres: List[Annotated[str, StringConstraints(max_length=40)]] = Field(
+        default_factory=list)
+    intro: Annotated[str, StringConstraints(min_length=1, max_length=1000)]
+    accepted_rules: bool = False
+
+
+class ListenIn(BaseModel):
+    """
+    Bao cao mot lan nghe.
+
+    `listened_seconds` do TRINH DUYET gui, nen no KHONG duoc tin: may chu con ap
+    nguong, chan tu nghe, va chan tinh lai trong 24 gio. Mot client noi doi "toi
+    nghe 9999 giay" cung chi doi duoc mot lan tinh moi 24 gio cho moi chuong —
+    va do la tran ma he thong chap nhan o V1.
+    """
+
+    chapter_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    listened_seconds: float = Field(ge=0, le=86_400)
+
+
+@app.get("/api/creator/me")
+def creator_me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Trang thai tac gia cua chinh minh, trong MOT lan goi."""
+    data = creators.creator_state(profile)
+    if not data["username"]:
+        # Mot GOI Y de dien san vao o nhap, khong phai mot cai ten duoc gan tu
+        # dong. Nguoi dung con sua duoc truoc khi no thanh cong khai.
+        data["username_suggestion"] = suggest_username(
+            profile.display_name, profile.email, identity.all_usernames())
+    return data
+
+
+@app.get("/api/creator/ranks")
+def creator_ranks() -> Dict[str, Any]:
+    """
+    Bang hang, de giao dien ve duoc thang bac ma khong nhung nguong vao code.
+
+    Nguong la CHINH SACH va no se doi. Mot ban frontend cu dang chay trong tab
+    cua ai do khong duoc phep ve mot hang khac voi hang may chu cong nhan.
+    """
+    return {"tiers": [{"key": t.key, "title": t.title,
+                       "min_listens": t.min_listens, "level": t.level}
+                      for t in RANK_TIERS]}
+
+
+@app.put("/api/creator/username")
+def set_username(payload: UsernameIn,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    try:
+        updated = creators.set_username(profile, payload.username)
+    except UsernameTaken as exc:
+        # Phai bat TRUOC `UsernameError`: `UsernameTaken` la con cua no.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except UsernameError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except AuthError as exc:
+        # Ban mock nem AuthError khi index duy nhat cua kho chan — cung mot nghia.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"profile": updated.to_dict()}
+
+
+@app.put("/api/creator/bio")
+def set_bio(payload: BioIn,
+            profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"profile": creators.set_bio(profile, payload.bio).to_dict()}
+
+
+@app.post("/api/creator/apply", status_code=status.HTTP_201_CREATED)
+def apply_author(payload: ApplyIn,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    try:
+        app_row = creators.apply(
+            profile,
+            pen_name=payload.pen_name,
+            bio=payload.bio,
+            genres=payload.genres,
+            intro=payload.intro,
+            accepted_rules=payload.accepted_rules,
+        )
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_public_dict(),
+            "author_status": app_row.status.value}
+
+
+@app.get("/api/users/{username}")
+def public_profile_route(
+    username: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """
+    Trang cong khai cua mot nguoi dung. KHONG can dang nhap.
+
+    404 cho ca hai truong hop "khong ton tai" va "co nhung chua chon username":
+    phan biet ra thi thanh mot cach do xem ai da dang ky.
+
+    `social` duoc ghep vao CUNG mot lan goi thay vi de frontend hoi them.
+    Ly do khong phai tiet kiem mot request: hai lan goi tao ra hai trang thai
+    tai, va giao dien phai ve ca hai — cai thu hai luon la cai bi quen. Nut
+    "Theo dõi" khong duoc phep nhay tu "chua biet" sang "dang theo doi" sau khi
+    trang da ve xong.
+
+    Nguoi xem la TUY CHON: khach vang lai van thay so lieu, chi khong thay co
+    "dang theo doi" (no luon `false`).
+    """
+    data = creators.public_profile_by_username(username)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    viewer = optional_profile(authorization)
+    ho_so = identity.profile_by_username(username)
+    if ho_so is not None:
+        data["social"] = social.profile_social(ho_so, viewer)
+    return {"profile": data}
+
+
+@app.get("/api/search/people")
+def search_people(q: str = "", kind: str = "users",
+                  limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+    """
+    Tim nguoi. `kind=authors` thi CHI tac gia da duyet.
+
+    Tim o MAY CHU: tai het nguoi dung ve roi loc o trinh duyet la vua cham vua
+    la mot cach tai ca danh ba nguoi dung ve may khach.
+    """
+    limit = max(1, min(50, limit))
+    offset = max(0, offset)
+    return creators.search_people(q, authors_only=(kind == "authors"),
+                                  limit=limit, offset=offset)
+
+
+@app.get("/api/search/posts")
+def search_posts(q: str = "", limit: int = 5,
+                 authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """
+    Tim trong bai dang. Muc PHU cua tim kiem toan cuc — truyen va nguoi van la
+    uu tien, va giao dien hien muc nay sau cung voi it ket qua hon.
+
+    Duoi 2 ky tu tra ve rong (khong phai loi): mot ky tu khop gan het moi bai,
+    va do khong phai mot ket qua tim.
+    """
+    viewer = optional_profile(authorization)
+    return _xa_hoi(social.search_posts, q, limit=max(1, min(20, limit)),
+                   viewer=viewer)
+
+
+@app.post("/api/listens")
+def record_listen(payload: ListenIn,
+                  authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """
+    Ghi nhan mot lan nghe. May chu la nguon su that cho uy tin tac gia.
+
+    KHONG bat buoc dang nhap: khach an danh van goi duoc, va nhan lai
+    `credited=false` voi ly do. Tra 401 se lam trinh phat cua khach hien loi cho
+    mot viec ho khong lam gi sai.
+
+    Tra ve DUY NHAT `credited` va `reason` — khong tra ve so lan nghe moi cua tac
+    gia: nguoi nghe khong can biet, va tra ve thi thanh mot cach dem uy tin cua
+    nguoi khac bang cach bam Phat.
+    """
+    listener: Optional[str] = None
+    try:
+        listener = current_profile(authorization).user_id
+    except HTTPException:
+        listener = None
+
+    try:
+        chapter = store.get_chapter(payload.chapter_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    # Do dai lay tu TRACK o may chu, khong tu client: nguong tinh theo ti le cho
+    # chuong ngan phu thuoc vao no, va de client tu khai do dai la mo mot cach
+    # ha nguong xuong con vai giay.
+    track = store.track_for_chapter(payload.chapter_id)
+    duration = float(track.duration_seconds) if track else 0.0
+
+    return creators.record_listen(
+        listener_id=listener,
+        chapter_id=payload.chapter_id,
+        author_id=chapter.owner_id,
+        listened_seconds=float(payload.listened_seconds),
+        duration_seconds=duration,
+    )
+
+
+# -----------------------------------------------------------------------------
+# QUAN TRI
+# -----------------------------------------------------------------------------
+#
+# MOI route duoi day di qua `Depends(admin_profile)`. Khong mot route nao tu
+# kiem quyen bang tay, va khong mot route nao duoc phep quen — do la ca ly do
+# phep kiem nam trong MOT phu thuoc thay vi trong tung than ham.
+#
+# Ai la quan tri do BIEN MOI TRUONG quyet dinh (`FAS_ADMIN_USER_IDS`), khong
+# phai mot cot trong bang. Xem `Settings.admin_user_ids`: mot truong du lieu thi
+# bat ky lo hong ghi nao cung tro thanh duong tu phong minh lam quan tri; mot
+# bien moi truong thi khong co API nao cham toi duoc.
+#
+# Giao dien KHONG bao gio la noi quyet dinh. `/admin` chi ve nhung gi cac route
+# nay tra ve, va mot nguoi dung thuong go thang duong dan se nhan 403 kem mot
+# than rong.
+
+
+def admin_profile(profile: Profile = Depends(current_profile)) -> Profile:
+    """
+    Ho so cua nguoi goi, VA nguoi do phai la quan tri.
+
+    Hai ma khac nhau, va khac biet do la co y:
+      401  chua dang nhap        -> `current_profile` nem
+      403  dang nhap nhung khong phai quan tri
+
+    Tra 404 cho ca hai se giau duoc su ton tai cua khu quan tri, nhung doi lai
+    la mot nguoi quan tri that go nham tai khoan se khong hieu vi sao khong vao
+    duoc. Khu nay khong bi mat, no chi bi khoa.
+    """
+    if profile.user_id not in settings.admin_user_ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Khu vực quản trị.")
+    return profile
+
+
+class NoteIn(BaseModel):
+    note: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+@app.get("/api/admin/overview")
+def admin_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return creators.admin_overview()
+
+
+@app.get("/api/admin/author-applications")
+def admin_applications(status_filter: str = "", limit: int = 25, offset: int = 0,
+                       admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return creators.admin_applications(status=status_filter or None,
+                                       limit=max(1, min(100, limit)),
+                                       offset=max(0, offset))
+
+
+@app.get("/api/admin/author-applications/{user_id}")
+def admin_application(user_id: str,
+                      admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    data = creators.admin_application(user_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn.")
+    return {"application": data}
+
+
+@app.post("/api/admin/author-applications/{user_id}/approve")
+def admin_approve(user_id: str, payload: NoteIn,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Duyet don. Goi thang tang service da duoc kiem thu — route KHONG lap lai
+    mot dong logic nghiep vu nao.
+    """
+    try:
+        app_row = creators.approve(user_id, note=payload.note,
+                                   actor_id=admin.user_id)
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_dict()}
+
+
+@app.post("/api/admin/author-applications/{user_id}/reject")
+def admin_reject(user_id: str, payload: NoteIn,
+                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Tu choi don. `note` la BAT BUOC o tang service — mot lan tu choi khong ly do
+    la mot cai cua dong im lang, va nguoi nop se doc duoc ghi chu nay.
+    """
+    try:
+        app_row = creators.reject(user_id, note=payload.note,
+                                  actor_id=admin.user_id)
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_dict()}
+
+
+@app.get("/api/admin/authors")
+def admin_authors(limit: int = 25, offset: int = 0,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return creators.admin_authors(limit=max(1, min(100, limit)),
+                                  offset=max(0, offset))
+
+
+@app.post("/api/admin/authors/{user_id}/suspend")
+def admin_suspend(user_id: str, payload: NoteIn,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Tam dung quyen xuat ban.
+
+    KHONG cham vao noi dung da co: truyen da xuat ban van cong khai, ban nhap van
+    con, chuong va audio khong bi xoa. Chi cac lan xuat ban MOI bi chan. Xem
+    `docs/ADMIN.md` muc "Treo tac gia lam gi va KHONG lam gi".
+    """
+    try:
+        app_row = creators.suspend(user_id, note=payload.note,
+                                   actor_id=admin.user_id)
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_dict()}
+
+
+@app.post("/api/admin/authors/{user_id}/restore")
+def admin_restore(user_id: str, payload: NoteIn,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    try:
+        app_row = creators.restore(user_id, note=payload.note,
+                                   actor_id=admin.user_id)
+    except AuthorStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"application": app_row.to_dict()}
+
+
+@app.get("/api/admin/users")
+def admin_users(q: str = "", limit: int = 25, offset: int = 0,
+                admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """Tim nguoi dung. Ket qua CO `email` — day la duong quan tri."""
+    return creators.admin_users(query=q, limit=max(1, min(100, limit)),
+                                offset=max(0, offset))
+
+
+@app.get("/api/admin/users/{user_id}")
+def admin_user(user_id: str,
+               admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    data = creators.admin_user(user_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    return {"user": data}
+
+
+@app.get("/api/admin/novels")
+def admin_novels(q: str = "", state: str = "", limit: int = 25, offset: int = 0,
+                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Duyet truyen — CHI DOC.
+
+    Khong co route go xuong hay xoa: backend chua co luong takedown nao an toan,
+    va dat mot nut xoa len mot luong chua thiet ke la cach nhanh nhat de mat noi
+    dung cua nguoi khac. Xem `docs/ADMIN.md` muc "Viec con lai".
+    """
+    return creators.admin_novels(query=q, state=state,
+                                 limit=max(1, min(100, limit)),
+                                 offset=max(0, offset))
+
+
+@app.get("/api/admin/events")
+def admin_events(limit: int = 50, offset: int = 0,
+                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """Nhat ky kiem duyet. CHI THEM — khong co route sua hay xoa."""
+    return creators.admin_events(limit=max(1, min(200, limit)),
+                                 offset=max(0, offset))
+
+
+# -----------------------------------------------------------------------------
+# XA HOI
+# -----------------------------------------------------------------------------
+#
+# MOI route duoi day chi lam ba viec: doi kieu dau vao, goi mot phuong thuc cua
+# `social`, va doi loi thanh ma trang thai. Khong mot dong logic nghiep vu nao o
+# day — quyen, han muc va thong bao deu o `server/social_service.py`.
+#
+# Ly do khong phai phong cach: mot phep kiem quyen viet trong than route chi bao
+# ve DUNG route do. Cung mot phep kiem o tang dich vu bao ve moi duong goi toi
+# no, ke ca duong duoc them sau nay boi mot nguoi khong doc lai tep nay.
+
+
+class FollowIn(BaseModel):
+    """Body rong — id nam trong duong dan. Giu lop de them truong sau nay."""
+
+
+class PostIn(BaseModel):
+    text: Annotated[str, StringConstraints(max_length=POST_MAX_CHARS)] = ""
+    kind: Annotated[str, StringConstraints(max_length=20)] = "post"
+    novel_id: Annotated[str, StringConstraints(max_length=64)] = ""
+    #: Anh dang base64, KHONG phai multipart.
+    #:
+    #: Vi sao: multipart doi goi `python-multipart`, va goi do hien chi co mat
+    #: trong moi truong nay vi gradio keo theo — no KHONG nam trong
+    #: `server/requirements.txt`. Mot ban cai backend sach se thieu no, va route
+    #: nay se hong ngay khi trien khai that. Base64 ton them 33% duong truyen
+    #: cho mot tep toi da 1 MB; do la cai gia re hon nhieu so voi mot phu thuoc
+    #: khong khai bao.
+    image_base64: Annotated[str, StringConstraints(max_length=3_000_000)] = ""
+    image_mime: Annotated[str, StringConstraints(max_length=60)] = ""
+    image_width: int = 0
+    image_height: int = 0
+    #: V3: toi da BON anh. Moi phan tu cung hinh dang voi bo truong don o tren.
+    #: Tran do dai danh sach o day chi la lop chan tho — tran THAT (so anh,
+    #: tong byte) nam o `server/social.py` va duoc kiem sau khi giai ma.
+    images: List["AnhIn"] = Field(default_factory=list, max_length=6)
+
+
+class AnhIn(BaseModel):
+    base64: Annotated[str, StringConstraints(min_length=1,
+                                             max_length=3_000_000)]
+    mime: Annotated[str, StringConstraints(max_length=60)] = ""
+    width: int = 0
+    height: int = 0
+
+
+class PostPatch(BaseModel):
+    text: Annotated[str, StringConstraints(max_length=POST_MAX_CHARS)] = ""
+
+
+class CommentIn(BaseModel):
+    text: Annotated[str, StringConstraints(min_length=1,
+                                          max_length=COMMENT_MAX_CHARS)]
+    parent_id: Annotated[str, StringConstraints(max_length=64)] = ""
+
+
+class ChapterCommentIn(CommentIn):
+    """Binh luan chuong: them moc audio (mili giay) va co spoiler."""
+
+    #: `None` = khong dinh kem. Tran tho 12h; tran THAT theo thoi luong track
+    #: nam o `social.kiem_timestamp`.
+    timestamp_ms: Optional[int] = Field(default=None, ge=0,
+                                        le=12 * 60 * 60 * 1000)
+    spoiler: bool = False
+
+
+class ReportIn(BaseModel):
+    target_kind: Annotated[str, StringConstraints(max_length=20)]
+    target_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    reason: Annotated[str, StringConstraints(max_length=30)]
+    detail: Annotated[str, StringConstraints(max_length=500)] = ""
+
+
+class ResolveIn(BaseModel):
+    dismiss: bool = False
+    note: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+class RemoveIn(BaseModel):
+    reason: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+def _xa_hoi(fn, *args, **kwargs):
+    """
+    Goi tang dich vu va doi loi cua no thanh ma HTTP.
+
+    MOT cho lam phep doi nay. Lap `try/except` bon tang trong ba muoi route la
+    ba muoi cho co the quen mot tang — va tang bi quen thuong la `RateLimited`,
+    tuc la mot loi 500 thay vi mot loi 429 doc duoc.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except RateLimited as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
+    except SocialError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+def _giai_ma_anh(b64: str, mime: str, width: int, height: int) -> Dict[str, Any]:
+    import base64
+    import binascii
+
+    try:
+        data = base64.b64decode(b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Ảnh không hợp lệ.") from exc
+    return {"data": data, "mime": mime, "width": width, "height": height}
+
+
+def _bo_anh_tu_body(payload: "PostIn") -> List[Dict[str, Any]]:
+    """
+    Giai ma MOI anh cua bai: danh sach `images` (V3) + truong don cu neu co.
+
+    Client cu chi gui truong don van chay; client moi gui danh sach. Gop o day
+    de tang dich vu chi thay MOT danh sach.
+    """
+    ra: List[Dict[str, Any]] = []
+    if payload.image_base64:
+        ra.append(_giai_ma_anh(payload.image_base64, payload.image_mime,
+                               payload.image_width, payload.image_height))
+    for anh in payload.images:
+        ra.append(_giai_ma_anh(anh.base64, anh.mime, anh.width, anh.height))
+    return ra
+
+
+@app.get("/api/limits")
+def api_limits() -> Dict[str, Any]:
+    """
+    Gioi han do MAY CHU quyet dinh, cho giao dien noi truoc.
+
+    MOT nguon: `server/social.py`. Giao dien khong duoc chep tay con so nao —
+    co test doi soat `web/src/lib/limits.ts` voi cho nay.
+    """
+    return {
+        "max_chapter_chars": MAX_CHAPTER_CHARS,
+        "max_active_jobs": MAX_ACTIVE_JOBS,
+        **mo_ta_gioi_han(),
+    }
+
+
+# -- theo doi -----------------------------------------------------------------
+
+
+@app.post("/api/users/{user_id}/follow")
+def follow_user(user_id: str, payload: FollowIn,
+                profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.follow_user, profile, user_id)
+
+
+@app.delete("/api/users/{user_id}/follow")
+def unfollow_user(user_id: str,
+                  profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.unfollow_user, profile, user_id)
+
+
+@app.post("/api/novels/{novel_id}/follow")
+def follow_story(novel_id: str, payload: FollowIn,
+                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.follow_story, profile, novel_id)
+
+
+@app.delete("/api/novels/{novel_id}/follow")
+def unfollow_story(novel_id: str,
+                   profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.unfollow_story, profile, novel_id)
+
+
+# -- bai dang -----------------------------------------------------------------
+
+
+@app.get("/api/feed")
+def api_feed(limit: int = 0, offset: int = 0,
+             authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """
+    Bang tin. KHONG doi dang nhap — khach vang lai thay bang tin kham pha.
+
+    Dung `optional_profile`: mot trang cong dong tra 401 cho nguoi chua dang nhap
+    la mot canh cua dong, va noi dung o day von la cong khai.
+    """
+    viewer = optional_profile(authorization)
+    return _xa_hoi(social.feed, viewer, limit=limit or None,
+                   offset=max(0, offset))
+
+
+@app.post("/api/posts", status_code=status.HTTP_201_CREATED)
+def create_post(payload: PostIn,
+                profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"post": _xa_hoi(social.create_post, profile, text=payload.text,
+                            kind=payload.kind, novel_id=payload.novel_id,
+                            images=_bo_anh_tu_body(payload))}
+
+
+@app.get("/api/posts/{post_id}")
+def get_post_detail(post_id: str,
+                    authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    viewer = optional_profile(authorization)
+    return {"post": _xa_hoi(social.post_detail, post_id, viewer)}
+
+
+@app.patch("/api/posts/{post_id}")
+def update_post(post_id: str, payload: PostPatch,
+                profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"post": _xa_hoi(social.edit_post, profile, post_id,
+                            text=payload.text)}
+
+
+@app.delete("/api/posts/{post_id}")
+def delete_post(post_id: str,
+                profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    _xa_hoi(social.delete_post, profile, post_id)
+    return {"deleted": True}
+
+
+@app.get("/api/users/{user_id}/posts")
+def user_posts(user_id: str, limit: int = 0, offset: int = 0,
+               authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    viewer = optional_profile(authorization)
+    return _xa_hoi(social.posts_by_user, user_id, viewer=viewer,
+                   limit=limit or None, offset=max(0, offset))
+
+
+# -- thich --------------------------------------------------------------------
+
+
+@app.post("/api/posts/{post_id}/like")
+def like_post(post_id: str, payload: FollowIn,
+              profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.like_post, profile, post_id)
+
+
+@app.delete("/api/posts/{post_id}/like")
+def unlike_post(post_id: str,
+                profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.unlike_post, profile, post_id)
+
+
+# -- binh luan ----------------------------------------------------------------
+
+
+@app.get("/api/posts/{post_id}/comments")
+def list_post_comments(post_id: str, limit: int = 20, offset: int = 0,
+                       authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    viewer = optional_profile(authorization)
+    return _xa_hoi(social.comments, post_id, viewer=viewer,
+                   limit=max(1, min(50, limit)), offset=max(0, offset))
+
+
+@app.post("/api/posts/{post_id}/comments", status_code=status.HTTP_201_CREATED)
+def create_comment(post_id: str, payload: CommentIn,
+                   profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"comment": _xa_hoi(social.create_comment, profile, post_id,
+                               text=payload.text, parent_id=payload.parent_id)}
+
+
+@app.get("/api/chapters/{chapter_id}/comments")
+def list_chapter_comments(chapter_id: str, sort: str = "moi",
+                          limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+    """
+    Binh luan cua mot CHUONG. Cong khai — chi chuong cua truyen DA XUAT BAN
+    (hang rao nam o `SocialService._chuong_cong_khai`; ban nhap tra 404).
+
+    Dich la `chapter_id`, khong phai file MP3: tac gia tao lai audio thi chuoi
+    binh luan van con nguyen.
+    """
+    return _xa_hoi(social.chapter_comments, chapter_id, sort=sort,
+                   limit=max(1, min(50, limit)), offset=max(0, offset))
+
+
+@app.post("/api/chapters/{chapter_id}/comments",
+          status_code=status.HTTP_201_CREATED)
+def create_chapter_comment(chapter_id: str, payload: ChapterCommentIn,
+                           profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"comment": _xa_hoi(
+        social.create_chapter_comment, profile, chapter_id,
+        text=payload.text, parent_id=payload.parent_id,
+        timestamp_ms=payload.timestamp_ms, spoiler=payload.spoiler)}
+
+
+@app.get("/api/comments/{comment_id}/replies")
+def list_replies(comment_id: str, limit: int = 20,
+                 offset: int = 0) -> Dict[str, Any]:
+    return _xa_hoi(social.replies, comment_id, limit=max(1, min(50, limit)),
+                   offset=max(0, offset))
+
+
+@app.patch("/api/comments/{comment_id}")
+def update_comment(comment_id: str, payload: CommentIn,
+                   profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return {"comment": _xa_hoi(social.edit_comment, profile, comment_id,
+                               text=payload.text)}
+
+
+@app.delete("/api/comments/{comment_id}")
+def delete_comment(comment_id: str,
+                   profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    _xa_hoi(social.delete_comment, profile, comment_id)
+    return {"deleted": True}
+
+
+# -- thong bao ----------------------------------------------------------------
+
+
+@app.get("/api/notifications")
+def list_notifications(unread: bool = False, limit: int = 20, offset: int = 0,
+                       profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.notifications, profile, unread_only=unread,
+                   limit=max(1, min(50, limit)), offset=max(0, offset))
+
+
+@app.get("/api/notifications/unread")
+def notifications_unread(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Chi con so, cho cai chuong. Nhe han danh sach — no chay o moi trang."""
+    return _xa_hoi(social.unread_count, profile)
+
+
+@app.post("/api/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: str, payload: FollowIn,
+                           profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.mark_read, profile, notification_id)
+
+
+@app.post("/api/notifications/read-all")
+def mark_all_notifications_read(payload: FollowIn,
+                                profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.mark_all_read, profile)
+
+
+# -- bao cao ------------------------------------------------------------------
+
+
+@app.post("/api/reports", status_code=status.HTTP_201_CREATED)
+def create_report(payload: ReportIn,
+                  profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Bao cao mot bai hoac mot binh luan.
+
+    KHONG BAO GIO tu go noi dung — xem `SocialService.report`.
+    """
+    return _xa_hoi(social.report, profile, target_kind=payload.target_kind,
+                   target_id=payload.target_id, reason=payload.reason,
+                   detail=payload.detail)
+
+
+# -- tom tat cua chinh minh ---------------------------------------------------
+
+
+@app.get("/api/account/social")
+def account_social(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.account_summary, profile)
+
+
+# -- kiem duyet xa hoi (quan tri) ---------------------------------------------
+#
+# Cung mot `Depends(admin_profile)` voi phan quan tri tac gia, va cung mot nhat
+# ky `moderation_events`. Mot nhat ky, khong phai hai: nguoi doc lai mot vu viec
+# muon thay MOI thu da xay ra voi mot nguoi theo thu tu.
+
+
+@app.get("/api/admin/social/overview")
+def admin_social_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return social.social_overview()
+
+
+@app.get("/api/admin/reports")
+def admin_reports(status_filter: str = "open", target_kind: str = "",
+                  limit: int = 25, offset: int = 0,
+                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.admin_reports, status=status_filter,
+                   target_kind=target_kind, limit=max(1, min(100, limit)),
+                   offset=max(0, offset))
+
+
+@app.post("/api/admin/reports/{report_id}/resolve")
+def admin_resolve_report(report_id: str, payload: ResolveIn,
+                         admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return {"report": _xa_hoi(social.resolve_report, admin, report_id,
+                              dismiss=payload.dismiss, note=payload.note)}
+
+
+@app.get("/api/admin/posts")
+def admin_posts(q: str = "", limit: int = 25, offset: int = 0,
+                admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.admin_posts, query=q, limit=max(1, min(100, limit)),
+                   offset=max(0, offset))
+
+
+@app.post("/api/admin/posts/{post_id}/remove")
+def admin_remove_post(post_id: str, payload: RemoveIn,
+                      admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Go mot bai. Hang VAN CON trong kho — xem `ContentState`.
+
+    KHONG co route xoa that o duong quan tri, va do la co y: mot quyet dinh kiem
+    duyet khong con bang chung thi khong the xem lai khi bi khieu nai.
+    """
+    return {"post": _xa_hoi(social.remove_post, admin, post_id,
+                            reason=payload.reason)}
+
+
+@app.post("/api/admin/posts/{post_id}/restore")
+def admin_restore_post(post_id: str, payload: FollowIn,
+                       admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return {"post": _xa_hoi(social.restore_post, admin, post_id)}
+
+
+@app.get("/api/admin/comments")
+def admin_browse_comments(target_kind: str = "", limit: int = 25,
+                          offset: int = 0,
+                          admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Duyet binh luan toan he thong, TACH duoc binh luan bai dang voi binh luan
+    chuong (`target_kind=chapter`) — hai loai dan toi hai noi khac nhau va
+    nguoi kiem duyet can biet minh dang nhin gi.
+    """
+    if target_kind not in ("", "chapter"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "target_kind không hợp lệ.")
+    return _xa_hoi(social.admin_browse_comments, target_kind=target_kind,
+                   limit=max(1, min(100, limit)), offset=max(0, offset))
+
+
+@app.get("/api/admin/posts/{post_id}/comments")
+def admin_post_comments(post_id: str, limit: int = 50, offset: int = 0,
+                        admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return _xa_hoi(social.admin_comments, post_id,
+                   limit=max(1, min(200, limit)), offset=max(0, offset))
+
+
+@app.post("/api/admin/comments/{comment_id}/remove")
+def admin_remove_comment(comment_id: str, payload: RemoveIn,
+                         admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return {"comment": _xa_hoi(social.remove_comment, admin, comment_id,
+                               reason=payload.reason)}
+
+
+@app.post("/api/admin/comments/{comment_id}/restore")
+def admin_restore_comment(comment_id: str, payload: FollowIn,
+                          admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    return {"comment": _xa_hoi(social.restore_comment, admin, comment_id)}

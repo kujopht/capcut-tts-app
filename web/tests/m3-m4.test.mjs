@@ -4,6 +4,7 @@
 // nen file nay tu duoc nhan.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { kiemHoEndpoint } from "./_ho-endpoint.mjs";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -201,9 +202,10 @@ test("M4: trang doc chuong canh bao ngay tren trinh phat", () => {
   assert.match(src, /alert alert-warn/);
   assert.match(src, /audio có thể không còn khớp/);
   assert.match(src, /vẫn nghe và tải được/, "phai noi ro audio van dung duoc");
-  // Canh bao phai o TRUOC trinh phat trong DOM
+  // Canh bao phai o TRUOC trinh phat trong DOM. Trinh phat cua trang doc gio
+  // la `<ChapterPlayer>` — rang buoc khong doi, chi doi ten thanh phan.
   assert.ok(
-    src.indexOf("alert alert-warn") < src.indexOf("<AudioPlayer"),
+    src.indexOf("alert alert-warn") < src.indexOf("<ChapterPlayer"),
     "canh bao phai nam tren trinh phat",
   );
 });
@@ -268,12 +270,8 @@ test("M3\\/M4 khong pha M1: khoi mobile van nang vung bam len 44px", () => {
 });
 
 test("cac endpoint cu con nguyen, chi them dung mot cai", () => {
-  const found = new Set([...api().matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]));
-  assert.deepEqual(
-    [...found].sort(),
-    ["audio", "auth", "chapters", "health", "jobs", "novels", "voices"],
-    "khong duoc them ho tai nguyen moi",
-  );
+  // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`.
+  kiemHoEndpoint(api());
   // Duong doi thu tu nam duoi `novels`, khong phai mot ho moi
   assert.match(api(), /novels\/\$\{novelId\}\/chapters\/order/);
 });

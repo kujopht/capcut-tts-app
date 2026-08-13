@@ -1,6 +1,7 @@
 // N+1 o thu vien audio, va cac khai bao kem theo cua ba ban sua lan nay.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { kiemHoEndpoint } from "./_ho-endpoint.mjs";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -106,12 +107,10 @@ test("endpoint chuong cua toi khong kem noi dung, khong kem URL audio", () => {
    ================================================================ */
 
 test("khong them ho tai nguyen moi", () => {
-  const found = new Set([...api().matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]));
-  assert.deepEqual(
-    [...found].sort(),
-    ["audio", "auth", "chapters", "health", "jobs", "novels", "voices"],
-    "chi duoc dung lai cac ho da co",
-  );
+  // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`. Truoc day cung
+  // mot danh sach duoc chep tay o BON bai test, va them mot ho endpoint lam do
+  // bon cho cung luc.
+  kiemHoEndpoint(api());
 });
 
 test("cac ham api cu con nguyen", () => {

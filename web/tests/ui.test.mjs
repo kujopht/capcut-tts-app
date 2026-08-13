@@ -1,6 +1,7 @@
 // Regression cho hai lo hong giao dien da phat hien va sua o lan nay.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { kiemHoEndpoint } from "./_ho-endpoint.mjs";
 import { readFileSync, existsSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -24,7 +25,7 @@ test("du cac route cua hai khu vuc san pham", () => {
   }
 });
 
-test("thanh dieu huong chinh dung BON muc, theo dung thu tu", () => {
+test("thanh dieu huong chinh dung NAM muc, theo dung thu tu", () => {
   const nav = read("../src/components/NavAuth.tsx");
   // Thu tu la mot quyet dinh san pham, khong phai chuyen thu hang muc. So khop
   // theo VI TRI chu khong phai theo tap hop.
@@ -38,6 +39,7 @@ test("thanh dieu huong chinh dung BON muc, theo dung thu tu", () => {
   assert.deepEqual(order, [
     ["/", "Trang chủ"],
     ["/fanfic", "Khám phá"],
+    ["/community", "Cộng đồng"],
     ["/library", "Thư viện"],
     ["/write", "Viết truyện"],
   ]);
@@ -68,10 +70,20 @@ test("trang chu la trang KHAM PHA TRUYEN, khong phai landing gioi thieu cong cu"
   assert.ok(!home.includes("api.getNovel("), "trang chủ gọi getNovel — N+1");
 
   const css = read("../src/app/globals.css");
-  assert.ok(
-    !/grid-template-columns:\s*1fr\s+1fr/.test(css),
-    "khong duoc chia doi man hinh co dinh 50/50",
-  );
+  /*
+    Lenh cam nay tung quet CA TEP — va no vo khi gallery anh (V3) dung
+    `1fr 1fr` cho luoi hai cot mot cach hoan toan chinh dang. Y dinh that cua
+    no la: khu HERO cua trang chu khong duoc chia doi man hinh co dinh. Quet
+    dung pham vi do: moi khoi co selector chua "hero".
+  */
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (/hero/i.test(m[1])) {
+      assert.ok(
+        !/grid-template-columns:\s*1fr\s+1fr/.test(m[2]),
+        `khu hero chia doi 50/50: ${m[1].trim().slice(0, 60)}`,
+      );
+    }
+  }
 });
 
 /* -------------------------------------------- LOI 1: khong co nut xuat ban */
@@ -614,10 +626,10 @@ test("bia that nam tren, bia du phong nam duoi", () => {
 
 test("anh bia duoc dung o ca bon noi", () => {
   for (const f of [
-    "../src/app/novels/[id]/page.tsx",   // chi tiet truyen
-    "../src/app/chapters/[id]/page.tsx", // luong nghe
-    "../src/app/library/page.tsx",       // thu vien
-    "../src/components/StoryCard.tsx",   // the truyen dung chung
+    "../src/app/novels/[id]/page.tsx",     // chi tiet truyen
+    "../src/components/ChapterPlayer.tsx", // luong nghe o trang doc chuong
+    "../src/app/library/page.tsx",         // thu vien
+    "../src/components/StoryCard.tsx",     // the truyen dung chung
   ]) {
     assert.match(read(f), /<NovelCover/, `${f} chua dung anh bia`);
   }
@@ -650,8 +662,10 @@ test("lop api khai bao truong moi la tuy chon", () => {
 
 test("CSS anh bia co du ba bien the", () => {
   const css = read("../src/app/globals.css");
+  //  thay cho : bia du phong khong con chu cai
+  // dau, ma la mot dau an hinh hoc — xem `components/StoryCoverFallback.tsx`.
   for (const cls of [".cover-card", ".cover-wide", ".cover-thumb", ".cover-fallback",
-                     ".cover-image", ".cover-initial"]) {
+                     ".cover-image", ".cover-sigil"]) {
     assert.ok(css.includes(cls), `thieu ${cls}`);
   }
   assert.match(css, /\.cover-image \{ background-size: cover/);
@@ -754,11 +768,12 @@ test("moi lop bam duoc deu cao it nhat 44px o mobile", () => {
 test("nut co CHU dung min-height chu khong phai height co dinh", () => {
   // `height: 44px` se cat cut nut co chu dai xuong hai dong.
   //
-  // Tru `.btn-icon`: nut chi chua mot mui nhon, vuong 44x44 la dung y muon va
-  // khong co chu nao de tran ra. Bo dong dinh nghia no ra roi moi kiem.
+  // Tru `.btn-icon` va `.play-btn-sm`: ca hai chi chua MOT ky hieu, vuong
+  // 44x44 la dung y muon va khong co chu nao de tran ra. Bo dong dinh nghia
+  // chung ra roi moi kiem.
   const block = mobileBlock()
     .split("\n")
-    .filter((line) => !line.includes(".btn-icon"))
+    .filter((line) => !line.includes(".btn-icon") && !line.includes(".play-btn-sm"))
     .join("\n");
   assert.ok(
     !/[^-]height:\s*44px/.test(block.replace(/min-height/g, "MIN")),
@@ -890,18 +905,14 @@ test("dung lai AudioPlayer san co, khong tu ve trinh phat moi", () => {
   assert.ok(!/resolveAudio|audioLink/.test(src), "khong duoc tu goi lai lop audio");
 });
 
-test("khong them endpoint nao cho M2", () => {
+test("khong them ho endpoint nao ma khong di qua day", () => {
+
+  // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`.
+
   const api = read("../src/lib/api.ts");
-  // Lay ten tai nguyen ngay sau /api/ — du de biet co endpoint moi hay khong,
-  // ma khong phu thuoc vao cach viet chuoi (nhay don, nhay kep hay backtick).
-  const found = new Set(
-    [...api.matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]),
-  );
-  assert.deepEqual(
-    [...found].sort(),
-    ["audio", "auth", "chapters", "health", "jobs", "novels", "voices"],
-    "M2 khong duoc them hay bo endpoint nao",
-  );
+
+  kiemHoEndpoint(api);
+
   // Nghe tai cho dung dung duong da co, khong tao duong rieng
   assert.match(api, /audioLink:/);
   assert.match(api, /\/api\/audio\/\$\{chapterId\}\/url/);

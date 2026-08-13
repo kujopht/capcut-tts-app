@@ -98,8 +98,8 @@ function LoginForm() {
   }
 
   return (
-    <div className="page" style={{ maxWidth: 460, margin: "0 auto", width: "100%" }}>
-      <header className="stack-2" style={{ textAlign: "center", alignItems: "center" }}>
+    <div className="page auth-page">
+      <header className="auth-head">
         <LogoMark size={54} title="Fanfic Audio Studio" />
         <h1 className="page-title">
           {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}
@@ -111,7 +111,7 @@ function LoginForm() {
         </p>
       </header>
 
-      <div className="seg" role="group" aria-label="Chế độ" style={{ alignSelf: "center" }}>
+      <div className="seg auth-seg" role="group" aria-label="Chế độ">
         <button
           type="button"
           className="seg-item"
@@ -243,7 +243,7 @@ function LoginForm() {
         </button>
       </form>
 
-      <p className="hint" style={{ textAlign: "center" }}>
+      <p className="hint auth-foot">
         Chưa muốn đăng nhập?{" "}
         <Link href="/fanfic">Xem trang khám phá Fanfic</Link>
       </p>

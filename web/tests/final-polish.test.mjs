@@ -2,6 +2,7 @@
 // L4 (mau hardcode) va vung bam breadcrumb.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { kiemHoEndpoint } from "./_ho-endpoint.mjs";
 import { readFileSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
@@ -194,9 +195,14 @@ test("L4: trang chu khong con hex va khong con style inline", () => {
 });
 
 test("L4: mau quang nam trong khoi token", () => {
+  // Y cua bai nay la CHO DAT mau, khong phai chinh gia tri mau: quang phai
+  // duoc dinh nghia mot lan trong khoi token roi dung lai qua `var()`. Ban
+  // thiet ke lai doi tim/lo, nen gia tri doi theo; rang buoc thi giu nguyen.
   const text = css();
-  assert.match(text, /--brand-glow: #7c8cff3d;/);
-  assert.match(text, /--accent-glow: #4dd6c133;/);
+  assert.match(text, /--brand-glow: #[0-9a-f]{6,8};/,
+    "quang thương hiệu không còn là token");
+  assert.match(text, /--accent-glow: #[0-9a-f]{6,8};/,
+    "quang phụ không còn là token");
   assert.match(rule(".feature-studio"), /var\(--brand-glow\)/);
   assert.match(rule(".feature-fanfic"), /var\(--accent-glow\)/);
 });
@@ -274,12 +280,8 @@ test("khong pha M2/M3/M4: cac tinh nang van con", () => {
 });
 
 test("cac ho endpoint khong doi, chi them duong duoi novels", () => {
-  const found = new Set([...api().matchAll(/\/api\/([a-z]+)/g)].map((m) => m[1]));
-  assert.deepEqual(
-    [...found].sort(),
-    ["audio", "auth", "chapters", "health", "jobs", "novels", "voices"],
-    "khong duoc them ho tai nguyen moi",
-  );
+  // MOT nguon cho danh sach nay — xem `tests/_ho-endpoint.mjs`.
+  kiemHoEndpoint(api());
   assert.match(api(), /\/api\/novels\/tags/);
 });
 

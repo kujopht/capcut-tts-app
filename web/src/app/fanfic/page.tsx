@@ -16,7 +16,13 @@ import { useSearchParams } from "next/navigation";
 import { api, type Novel } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { fanficOnly } from "@/lib/workspace";
-import { EmptyState, ErrorState, SkeletonCards } from "@/components/ui";
+import {
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  SkeletonCards,
+} from "@/components/ui";
+import { IconCompass } from "@/components/Icons";
 import { StoryCard } from "@/components/StoryCard";
 
 /** So truyen moi trang. Backend chan tran tren o 60. */
@@ -128,40 +134,57 @@ function FanficBrowser() {
 
   return (
     <div className="page">
-      <header className="row-between">
-        <div className="stack-2">
-          <span className="eyebrow">Fanfic</span>
-          <h1 className="page-title">Khám phá truyện</h1>
-          <p className="lead" style={{ maxWidth: 620 }}>
-            Những truyện đã được tác giả xuất bản. Mỗi chương có thể kèm bản
-            audio để bạn vừa đọc vừa nghe.
-          </p>
-        </div>
-        <Link className="btn btn-primary" href={profile ? "/write" : "/login"}>
-          {profile ? "Viết truyện của bạn" : "Đăng nhập để viết"}
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow="Fanfic"
+        icon={<IconCompass />}
+        title="Khám phá truyện"
+        lead="Những truyện đã được tác giả xuất bản. Mỗi chương có thể kèm bản audio để bạn vừa đọc vừa nghe."
+        action={
+          <Link className="btn btn-primary" href={profile ? "/write" : "/login"}>
+            {profile ? "Viết truyện của bạn" : "Đăng nhập để viết"}
+          </Link>
+        }
+      />
 
-      <section className="card stack" aria-label="Bộ lọc">
+      <section className="filter-bar" aria-label="Bộ lọc">
         <div className="field">
           <label className="label" htmlFor="fanfic-q">
             Tìm truyện
           </label>
-          <input
-            id="fanfic-q"
-            className="input"
-            type="search"
-            value={query}
-            onChange={(e) => changeQuery(e.target.value)}
-            placeholder="Tên truyện hoặc mô tả…"
-          />
+          {/*
+            Bieu tuong nam trong mot `<span>` rieng dat chong len o nhap, chu
+            khong phai `background-image` cua chinh o do: o `<input type=search>`
+            trinh duyet ve nut xoa cua rieng no o ben phai, va mot anh nen se
+            nam duoi nut do o mot so trinh duyet.
+          */}
+          <div className="input-icon">
+            <span className="input-icon-mark" aria-hidden="true">
+              🔍
+            </span>
+            <input
+              id="fanfic-q"
+              className="input"
+              type="search"
+              value={query}
+              onChange={(e) => changeQuery(e.target.value)}
+              placeholder="Tên truyện hoặc mô tả…"
+            />
+          </div>
         </div>
         {tags.length > 0 ? (
           <div className="field">
             <span className="label" id="fanfic-tags-label">
               Thẻ
             </span>
-            <div className="row" role="group" aria-labelledby="fanfic-tags-label">
+            {/*
+              Cuon NGANG chu khong xuong dong: voi vai chuc the, mot khoi chip
+              nhieu dong cao bang ca man hinh va day het truyen xuong duoi.
+            */}
+            <div
+              className="chip-rail"
+              role="group"
+              aria-labelledby="fanfic-tags-label"
+            >
               <button
                 type="button"
                 className="chip"
@@ -216,7 +239,8 @@ function FanficBrowser() {
         )
       ) : (
         <>
-          <p className="hint" role="status">
+          {/* Cung mot loi trinh bay voi dong dem o Thu vien — xem `.hang-muc`. */}
+          <p className="hint hang-muc" role="status">
             {from}–{to} trong {total} truyện
             {filtering ? " khớp bộ lọc" : ""}
           </p>

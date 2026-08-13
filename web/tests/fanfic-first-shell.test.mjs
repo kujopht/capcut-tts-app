@@ -96,8 +96,12 @@ test("menu ben phai dung duoc bang ban phim va bang doc man hinh", () => {
 test("muc dieu huong 'Trang chu' khop CHINH XAC, khong dung startsWith", () => {
   // `"/".startsWith` khop moi duong dan, nen moi trang trong site se cung sang
   // muc "Trang chủ". Day la mot loi de mac va kho thay.
+  //
+  // Phep so khop da chuyen len mot cho: `dangXem` duoc tinh MOT lan cho ca
+  // `aria-current` lan vien thuoc dieu huong. Rang buoc thi y nguyen.
   const nav = read("../src/components/NavAuth.tsx");
-  assert.match(nav, /link\.href === "\/"\s*\n?\s*\?\s*pathname === "\/"/);
+  assert.match(nav, /l\.href === "\/"\s*\n?\s*\?\s*pathname === "\/"/);
+  assert.match(nav, /const active = link\.href === dangXem;/);
 });
 
 test("Audio Studio VAN co loi vao o footer cho nguoi khong mo menu", () => {
@@ -112,16 +116,38 @@ test("o tim nam trong header, khong phai mot thanh khong lo giua trang", () => {
   // Trang chu KHONG duoc tu dung o tim thu hai.
   assert.ok(!read("../src/app/page.tsx").includes("SiteSearch"));
 
+  // Y cua rang buoc la o tim phai NHO va co chan tren, khong phai mot con so
+  // cu the: ban thiet ke lai gop o tim va nut "Tìm" thanh mot cum co chung
+  // vien, nen be rong cua rieng o nhap doi theo.
   const rule = css().match(/\.input-search\s*\{[^}]*\}/)?.[0] ?? "";
-  assert.match(rule, /width:\s*200px/, "ô tìm ở header phải nhỏ, không tràn");
+  const rong = Number(rule.match(/width:\s*(\d+)px/)?.[1] ?? 0);
+  assert.ok(rong > 0 && rong <= 240,
+    `ô tìm ở header phải nhỏ, không tràn — đang là ${rong || "không đặt"}px`);
 });
 
-test("o tim chi DIEU HUONG, khong nhan ban duong tim thu hai", () => {
+test("tim kiem khong nhan ban duong LOC thu hai", () => {
+  /*
+    Rang buoc nay da doi hinh nhung khong doi noi dung.
+
+    Ban truoc: o tim o header CHI dieu huong sang `/fanfic?q=`, va bai test cam
+    no goi API. V2 co mot overlay hien ket qua ngay, nen no PHAI goi API —
+    nhung moi quan tam that su van y nguyen: khong duoc co mot duong LOC thu hai.
+
+    Cu the:
+      - overlay goi dung `browseNovels`, tuc la dung endpoint ma `/fanfic` dung;
+      - no KHONG tu loc o trinh duyet;
+      - va no luon co duong giao lai cho `/fanfic?q=` de xem day du.
+  */
+  const overlay = read("../src/components/SearchOverlay.tsx");
+  assert.match(overlay, /api\.browseNovels\(\{ query: tu/,
+    "overlay không dùng lại đường tìm của backend");
+  assert.match(overlay, /\/fanfic\?q=\$\{encodeURIComponent\(tu\)\}/,
+    "overlay không giao lại cho trang Khám phá");
+  assert.ok(!/\.filter\(/.test(overlay),
+    "overlay tự lọc ở trình duyệt — đó là đường lọc thứ hai");
+
+  // Va o header van chi la mot cai nut mo overlay, khong tu tim gi ca.
   const search = read("../src/components/SiteSearch.tsx");
-  assert.match(search, /\/fanfic\?q=/);
-  assert.match(search, /encodeURIComponent/);
-  // Toan bo tim/loc/phan trang da do BACKEND lam o `/fanfic`. Goi thang API o
-  // day la tao duong thu hai, va hai duong se lech nhau.
   assert.ok(!search.includes("api."), "SiteSearch không được tự gọi API");
 });
 
@@ -257,6 +283,11 @@ test("hex duy nhat trong layout la themeColor, va no BUOC phai la hex", () => {
   // hardcode thu hai lot vao.
   const layout = read("../src/app/layout.tsx");
   const hex = layout.match(/#[0-9a-fA-F]{6,8}\b/g) ?? [];
-  assert.deepEqual(hex, ["#0b0d12"]);
-  assert.match(layout, /themeColor: "#0b0d12"/);
+  assert.deepEqual(hex, ["#08090f"]);
+  assert.match(layout, /themeColor: "#08090f"/);
+
+  // Va no phai BANG DUNG `--bg`. Lech nhau thi thanh trinh duyet vien mot mau
+  // khac han nen trang — thay ro nhat tren dien thoai.
+  const css = read("../src/app/globals.css");
+  assert.match(css, /--bg: #08090f;/, "themeColor không còn khớp `--bg`");
 });

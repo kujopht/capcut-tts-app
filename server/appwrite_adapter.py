@@ -11,14 +11,22 @@ NGUYEN TAC:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 import httpx
 
 from server.adapters import AuthError
+from server.appwrite_store import (
+    q_contains as _q_contains,
+    q_equal as _q_equal,
+    q_limit as _q_limit,
+    q_offset as _q_offset,
+    q_or as _q_or,
+    q_order_asc as _q_order_asc,
+)
 from server.config import AppwriteSettings
-from server.domain import Profile, Tier
+from server.domain import AuthorStatus, Profile, Tier
 
 #: Ten collection tuong ung voi schema trong docs/APPWRITE_SCHEMA.md
 COLLECTION_PROFILES = "profiles"
@@ -74,8 +82,19 @@ class AppwriteIdentityAdapter:
         self._settings = settings
         # `api_base` da bo `/v1` o cuoi neu co - moi path duoi day tu them `/v1`
         self._endpoint = settings.api_base
+        #: Ten thuoc tinh that su co trong `profiles`, hoi mot lan roi nho. `None`
+        #: = chua hoi. Xem `_profile_attributes`.
+        self._profile_attrs: Optional[set] = None
+        #: Client dung lai. Xem `_http`.
+        self._client: Optional[httpx.Client] = None
 
     # -- ha tang --------------------------------------------------------------
+
+    def _http(self) -> httpx.Client:
+        """MOT client dung lai — xem ghi chu trong `_request`."""
+        if self._client is None:
+            self._client = httpx.Client(timeout=REQUEST_TIMEOUT)
+        return self._client
 
     def _headers(self, *, admin: bool = True, session: str = "") -> Dict[str, str]:
         headers = {
@@ -97,19 +116,26 @@ class AppwriteIdentityAdapter:
         path: str,
         *,
         payload: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
         session: str = "",
         admin: bool = True,
     ) -> Dict[str, Any]:
         url = f"{self._endpoint}{path}"
         try:
-            # Client MOI moi lan, khong giu cookie: neu cookie phien truoc con
-            # sot lai, Appwrite se tra 403 "JWT and cookie used in the same
-            # request", va te hon la request co the chay bang danh tinh cu.
-            with httpx.Client(timeout=REQUEST_TIMEOUT, cookies=None) as client:
-                response = client.request(
-                    method, url, json=payload,
-                    headers=self._headers(admin=admin, session=session),
-                )
+            client = self._http()
+            # KHONG giu cookie giua cac request: neu cookie phien truoc con sot
+            # lai, Appwrite tra 403 "JWT and cookie used in the same request",
+            # va te hon la request co the chay bang danh tinh cu.
+            #
+            # Truoc day dieu nay duoc bao dam bang cach tao MOT CLIENT MOI moi
+            # lan — dung, nhung ton 1.5-2.0 giay bat tay TLS moi lan goi (do
+            # duoc tren staging). Xoa cookie tren mot client dung lai giu nguyen
+            # bao dam do va lay lai keep-alive.
+            client.cookies.clear()
+            response = client.request(
+                method, url, json=payload, params=params,
+                headers=self._headers(admin=admin, session=session),
+            )
         except httpx.HTTPError as exc:
             raise AuthError(f"Không kết nối được Appwrite: {exc}") from exc
 
@@ -163,7 +189,16 @@ class AppwriteIdentityAdapter:
             f"/v1/databases/{self._settings.database_id}/collections/{COLLECTION_PROFILES}/documents",
             payload={
                 "documentId": user_id,
-                "data": profile.to_dict(),
+                # LOC truong, y het `ensure_profile`. `to_dict()` gio kem ca
+                # `username`/`bio`/`author_status`, va ba thuoc tinh do co the
+                # CHUA ton tai trong Appwrite neu migration V2 chua chay — gui
+                # mot thuoc tinh chua co thi Appwrite tu choi CA document, tuc la
+                # KHONG DANG KY DUOC NUA.
+                #
+                # Duong nay tung bi bo sot: `ensure_profile` (dang ky bang
+                # Google) da duoc loc, con `register` (dang ky bang email) thi
+                # chua. Hai duong tao ho so phai di qua cung mot bo loc.
+                "data": self._writable_profile(profile),
                 "permissions": profile_permissions(user_id),
             },
         )
@@ -234,12 +269,41 @@ class AppwriteIdentityAdapter:
         user_id = str(data.get("$id") or "")
         if not user_id:
             raise AuthError("Phiên đăng nhập không hợp lệ hoặc đã hết hạn.")
-        return Profile(
+        return self._merge_stored(Profile(
             user_id=user_id,
             email=str(data.get("email") or ""),
             display_name=str(data.get("name") or ""),
             tier=Tier.FREE,
-        )
+        ))
+
+    def _merge_stored(self, profile: Profile) -> Profile:
+        """
+        Ghep `username` / `bio` / `author_status` tu hang `profiles` vao.
+
+        VI SAO CAN: `/v1/account` cua Appwrite chi biet email va ten — no khong
+        biet gi ve ba truong V2. Khong ghep thi moi request tra ve mot ho so
+        `author_status = "none"`, va toan bo he thong tac gia vo hinh o che do
+        Appwrite du du lieu da nam dung trong bang.
+
+        HONG THI BO QUA: bang chua co ba thuoc tinh (migration chua chay), mang
+        loi, hay khong du quyen — tat ca deu tra ve ho so goc. Mot tinh nang
+        khong hien con hon mot duong dang nhap bi chan.
+        """
+        try:
+            row = self._request("GET", self._profile_path(profile.user_id))
+        except Exception:
+            return profile
+        profile.username = str(row.get("username") or "")
+        profile.bio = str(row.get("bio") or "")
+        try:
+            profile.author_status = AuthorStatus(row.get("author_status") or "none")
+        except ValueError:
+            profile.author_status = AuthorStatus.NONE
+        return profile
+
+    def _profile_path(self, user_id: str) -> str:
+        return (f"/v1/databases/{self._settings.database_id}"
+                f"/collections/{COLLECTION_PROFILES}/documents/{user_id}")
 
     # -- OAuth ----------------------------------------------------------------
 
@@ -301,8 +365,7 @@ class AppwriteIdentityAdapter:
         ve nguyen ven. Nguoi dung doi ten hien thi trong Fanfic roi sau do dang
         nhap bang Google khong duoc bi Google dat lai ten ho.
         """
-        path = (f"/v1/databases/{self._settings.database_id}"
-                f"/collections/{COLLECTION_PROFILES}/documents/{profile.user_id}")
+        path = self._profile_path(profile.user_id)
         try:
             self._request("GET", path)
             return profile
@@ -319,13 +382,277 @@ class AppwriteIdentityAdapter:
                 "documentId": profile.user_id,
                 # CUNG schema va cung gia tri mac dinh voi dang ky thuong —
                 # khong co bang rieng cho nguoi dung OAuth.
-                "data": profile.to_dict(),
+                #
+                # LOC truong: `to_dict()` gio kem ca `username`/`bio`/
+                # `author_status`, va ba thuoc tinh do co the CHUA ton tai trong
+                # Appwrite neu migration V2 chua chay. Gui mot thuoc tinh chua co
+                # thi Appwrite tu choi CA document — tuc la khong dang ky duoc
+                # nua. Cung ly do va cung cach lam nhu `_supported_fields` o
+                # `appwrite_store.py`.
+                "data": self._writable_profile(profile),
                 "permissions": profile_permissions(profile.user_id),
             },
         )
         return profile
 
+    #: Thuoc tinh cua `profiles` da co tu ban dau. Ba truong V2 nam ngoai tap
+    #: nay va chi duoc gui khi Appwrite bao la no co.
+    _PROFILE_BASE_FIELDS = (
+        "user_id", "email", "display_name", "tier",
+        "listened_minutes", "tts_characters_used", "created_at",
+    )
+    _PROFILE_V2_FIELDS = ("username", "bio", "author_status")
+
+    #: Truong co INDEX UNIQUE. Chuoi rong KHONG duoc ghi vao day.
+    #:
+    #: LOI DA XAY RA TREN STAGING: `register()` ghi `username: ""` cho moi ho so
+    #: moi. Index `username_unique` coi hai chuoi rong la TRUNG NHAU, nen nguoi
+    #: thu HAI dang ky nhan 409 va khong co hang ho so nao — Auth co 7 user, bang
+    #: `profiles` chi co 2 hang. Loi nay khong the lo ra o kho mock, va no chan
+    #: dung buoc dang ky.
+    #:
+    #: Bo han khoa khi gia tri rong thi cot la NULL, va index unique cua Appwrite
+    #: cho phep nhieu NULL.
+    _PROFILE_UNIQUE_FIELDS = ("username",)
+
+    def _writable_profile(self, profile: Profile) -> Dict[str, Any]:
+        data = profile.to_dict()
+        co = self._profile_attributes()
+        ra = {k: data[k] for k in self._PROFILE_BASE_FIELDS if k in data}
+        for k in self._PROFILE_V2_FIELDS:
+            # `co is None` = khong hoi duoc schema. Luc do BO QUA ba truong moi:
+            # gui bua vao co the lam vo ca buoc tao ho so.
+            if co is None or k not in co:
+                continue
+            if k in self._PROFILE_UNIQUE_FIELDS and not data[k]:
+                # Xem `_PROFILE_UNIQUE_FIELDS`: de NULL, khong de chuoi rong.
+                continue
+            ra[k] = data[k]
+        return ra
+
+    def _profile_attributes(self) -> Optional[set]:
+        """Ten thuoc tinh THUC SU co trong `profiles`, hoi Appwrite MOT lan."""
+        if self._profile_attrs is not None:
+            return self._profile_attrs or None
+        try:
+            meta = self._request(
+                "GET",
+                (f"/v1/databases/{self._settings.database_id}"
+                 f"/collections/{COLLECTION_PROFILES}"),
+            )
+        except Exception:
+            return None
+        ten = {a.get("key") for a in (meta.get("attributes") or []) if a.get("key")}
+        self._profile_attrs = ten
+        return ten or None
+
+    def save_profile(self, profile: Profile) -> Profile:
+        """
+        Ghi ba truong V2 cua mot ho so da ton tai.
+
+        `PATCH` chu khong phai `PUT`: chi dat nhung gi minh biet, va khong bao gio
+        cham vao `email`/`tier`/quota — do la cac truong ma tang khac quan ly.
+
+        Ba thuoc tinh chua ton tai trong Appwrite thi day la mot phep KHONG-LAM-GI
+        (va nem loi de tang tren biet): khong the luu username vao mot cot chua co,
+        va lam nhu da luu thanh cong con te hon.
+        """
+        co = self._profile_attributes()
+        data = {k: getattr(profile, k) for k in self._PROFILE_V2_FIELDS
+                if co is not None and k in co}
+        if "author_status" in data:
+            data["author_status"] = profile.author_status.value
+        if not data:
+            raise AuthError(
+                "Chưa thể lưu danh tính công khai: bảng `profiles` còn thiếu các "
+                "thuộc tính username/bio/author_status. Cần chạy migration V2."
+            )
+        if "username" in data and not data["username"]:
+            # Cung ly do voi `_writable_profile`: dat lai chuoi rong se dam vao
+            # index unique cua nguoi khac cung dang de trong.
+            data.pop("username")
+        try:
+            self._request("PATCH", self._profile_path(profile.user_id),
+                          payload={"data": data})
+        except AuthError:
+            # Hang ho so co the CHUA ton tai: nguoi dung dang nhap bang OAuth
+            # truoc khi `ensure_profile` chay, hoac mot lan tao truoc do that bai.
+            # Tao lai thay vi de mot thao tac hop le chet vi mot hang thieu.
+            self._request(
+                "POST",
+                (f"/v1/databases/{self._settings.database_id}"
+                 f"/collections/{COLLECTION_PROFILES}/documents"),
+                payload={
+                    "documentId": profile.user_id,
+                    "data": self._writable_profile(profile),
+                    "permissions": profile_permissions(profile.user_id),
+                },
+            )
+        return profile
+
+    def get_profile(self, user_id: str) -> Profile:
+        """Doc ho so tu bang. Dung cho tang service, khong cho duong dang nhap."""
+        row = self._request("GET", self._profile_path(user_id))
+        profile = Profile(
+            user_id=user_id,
+            email=str(row.get("email") or ""),
+            display_name=str(row.get("display_name") or ""),
+        )
+        return self._merge_stored(profile)
+
+
+    # =========================================================== V2: tim ho so
+    #
+    # Ba ham duoi day doc THANG bang `profiles`, khong qua `/v1/account`:
+    # `/v1/account` chi biet ve NGUOI DANG GOI, con o day ta can tim nguoi khac.
+    #
+    # RIENG TU: cac ham nay tra ve `Profile` DAY DU, ke ca `email`. Chung la
+    # nguyen lieu cho CA hai duong — cong khai va quan tri — va viec chieu xuong
+    # danh sach cho phep nam o `creator.public_profile()`. Khong bao gio tra
+    # thang ket qua cua chung ra API cong khai.
+
+    def profile_by_username(self, username: str) -> Optional[Profile]:
+        """
+        Tim theo ten cong khai, dang da chuan hoa.
+
+        Tra `None` khi khong co — route se doi thanh 404. Khong phan biet "khong
+        ton tai" voi "co nhung chua chon username": phan biet ra thi thanh mot
+        cach do xem ai da dang ky.
+        """
+        ten = (username or "").strip().lower()
+        if not ten:
+            return None
+        rows = self._rows(COLLECTION_PROFILES, [
+            _q_equal("username", ten), _q_limit(1),
+        ])
+        return _profile_from(rows[0]) if rows else None
+
+    def search_profiles(self, query: str, limit: int = 20,
+                        offset: int = 0) -> Tuple[List[Profile], int]:
+        """
+        Tim theo ten hien thi VA username, LOC va PHAN TRANG o phia Appwrite.
+
+        Tai het nguoi dung ve roi loc o Python la vua cham vua khong co tran —
+        no hong dan theo so nguoi dung, va hong am tham.
+
+        CHI nguoi da co username: chua chon thi chua co trang cong khai, nen dua
+        ho vao ket qua la dan nguoi dung toi mot lien ket khong mo duoc.
+
+        `contains` cua Appwrite khong phan biet hoa/thuong VA khong phan biet dau
+        — da kiem chung tren Cloud 1.9.6 — nen tim "ke det" ra "Kẻ Dệt Mộng".
+        """
+        from server.creator import normalize_username
+
+        queries: List[str] = [_q_not_equal("username", "")]
+        tu = (query or "").strip()
+        if tu:
+            # Hai cach viet cham cung mot o: dang chuan cho `username`, dang tho
+            # cho `display_name` (ten hien thi CO dau).
+            queries.append(_q_or(
+                _q_contains("username", normalize_username(tu)),
+                _q_contains("display_name", tu),
+            ))
+        # Sap TAT DINH: phan trang tren mot thu tu khong on dinh thi trang 2 co
+        # the lap lai hoac bo sot ban ghi cua trang 1.
+        queries += [_q_order_asc("username"), _q_limit(limit), _q_offset(offset)]
+        rows, total = self._page(COLLECTION_PROFILES, queries)
+        return [_profile_from(r) for r in rows], total
+
+    def all_usernames(self) -> List[str]:
+        """
+        Cac ten da co, de goi y mot ten chua ai lay.
+
+        Lay TOI DA 500: day chi phuc vu mot goi y o o nhap, va tinh duy nhat that
+        su do index `username_unique` cuong che. Keo ca bang ve chi de goi y mot
+        cai ten la mot phep doi vo ly.
+        """
+        rows = self._rows(COLLECTION_PROFILES, [
+            _q_not_equal("username", ""), _q_limit(500),
+        ])
+        return [str(r.get("username")) for r in rows if r.get("username")]
+
+    def profiles_by_ids(self, user_ids: List[str]) -> Dict[str, Profile]:
+        """
+        Nhieu ho so trong MOT truy van.
+
+        `equal` cua Appwrite nhan NHIEU gia tri va hoat dong nhu `IN`. Truoc day
+        khu quan tri goi `get_profile` cho tung hang — mot vong mang moi hang, va
+        `/api/admin/author-applications` mat 34 giay cho sau persona tren staging.
+
+        Chia lo 50: URL co tran do dai, va mot truy van voi vai tram id se bi tu
+        choi truoc khi toi duoc database.
+        """
+        ds = [u for u in dict.fromkeys(user_ids) if u]
+        ra: Dict[str, Profile] = {}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            rows = self._rows(COLLECTION_PROFILES, [
+                _q_equal("user_id", *lo), _q_limit(len(lo)),
+            ])
+            for row in rows:
+                pf = _profile_from(row)
+                if pf.user_id:
+                    ra[pf.user_id] = pf
+        return ra
+
+    # -- ha tang truy van ----------------------------------------------------
+
+    def _rows(self, collection: str, queries: List[str]) -> List[Dict[str, Any]]:
+        return self._page(collection, queries)[0]
+
+    def _page(self, collection: str,
+              queries: List[str]) -> Tuple[List[Dict[str, Any]], int]:
+        data = self._request(
+            "GET",
+            f"/v1/databases/{self._settings.database_id}"
+            f"/collections/{collection}/documents",
+            params={"queries[]": queries},
+        )
+        docs = list(data.get("documents") or [])
+        total = data.get("total")
+        return docs, int(total) if isinstance(total, int) else len(docs)
+
     def healthcheck(self) -> bool:
         """Kiem tra cau hinh co dung khong. Loi thi nem ra, khong nuot."""
         self._request("GET", "/v1/health")
         return True
+
+
+def _q_not_equal(attribute: str, value: Any) -> str:
+    """
+    Khac gia tri. Dung de loai cac ho so CHUA chon username.
+
+    Kho chua can toi phep nay nen no nam o day; neu sau co cho thu hai dung, hay
+    chuyen no sang `appwrite_store` cung cac ham truy van khac thay vi nhan ban.
+    """
+    import json
+
+    return json.dumps({"method": "notEqual", "attribute": attribute,
+                       "values": [value]})
+
+
+def _profile_from(row: Dict[str, Any]) -> Profile:
+    """
+    Hang `profiles` -> ban ghi domain.
+
+    Tra ve ban DAY DU, ke ca `email`: day la nguyen lieu cho ca duong cong khai
+    lan duong quan tri, va phep chieu xuong danh sach cho phep nam o
+    `creator.public_profile()`. Mot ham doc kho khong phai cho quyet dinh cai gi
+    duoc lo ra.
+    """
+    try:
+        status = AuthorStatus(row.get("author_status") or "none")
+    except ValueError:
+        status = AuthorStatus.NONE
+    return Profile(
+        user_id=str(row.get("user_id") or row.get("") or ""),
+        email=str(row.get("email") or ""),
+        display_name=str(row.get("display_name") or ""),
+        tier=Tier.FREE,
+        listened_minutes=int(row.get("listened_minutes") or 0),
+        tts_characters_used=int(row.get("tts_characters_used") or 0),
+        created_at=str(row.get("created_at") or ""),
+        username=str(row.get("username") or ""),
+        bio=str(row.get("bio") or ""),
+        author_status=status,
+    )

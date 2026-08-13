@@ -21,8 +21,17 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import httpx
 
 from server.adapters import NotFoundError, PermissionDenied
+from server.appwrite_social import (
+    AppwriteSocialStore,
+    SOCIAL_PERSISTED_FIELDS,
+)
 from server.config import AppwriteSettings
 from server.domain import (
+    AuthorApplication,
+    AuthorStats,
+    AuthorStatus,
+    ListenCredit,
+    ModerationEvent,
     AudioStamp,
     AudioTrack,
     Chapter,
@@ -40,6 +49,14 @@ COL_TRACKS = "audio_tracks"
 COL_CLAIMS = "job_claims"
 #: Khoa tat dinh chan hai request cung tao mot job. Xem `create_job_once`.
 COL_JOB_LOCKS = "job_locks"
+
+#: --- V2: tac gia -----------------------------------------------------------
+#: Bon bang moi. Moi bang mot cach dat `rowId` khac nhau, va do la thu quyet
+#: dinh tinh dung dan — xem khoi "V2: TAC GIA" o cuoi lop.
+COL_APPLICATIONS = "author_applications"
+COL_STATS = "author_stats"
+COL_CREDITS = "listen_credits"
+COL_EVENTS = "moderation_events"
 
 REQUEST_TIMEOUT = 15.0
 
@@ -92,7 +109,64 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "track_id", "chapter_id", "owner_id", "voice_id", "object_key",
         "content_hash", "duration_seconds", "size_bytes", "created_at",
     ),
+    COL_APPLICATIONS: (
+        "application_id", "user_id", "pen_name", "bio", "genres", "intro",
+        "accepted_rules", "status", "reviewer_note", "attempts",
+        "created_at", "updated_at", "decided_at",
+    ),
+    COL_STATS: (
+        "user_id", "qualified_listens", "published_novels", "updated_at",
+    ),
+    COL_CREDITS: (
+        "credit_id", "listener_id", "author_id", "chapter_id", "day_bucket",
+        "listened_seconds", "created_at",
+    ),
+    COL_EVENTS: (
+        "event_id", "action", "target_user_id", "actor_id", "note", "created_at",
+    ),
 }
+
+#: Bay bang cua tang xa hoi. Khai o `server/appwrite_social.py` de danh sach
+#: thuoc tinh nam CANH ma doi hang cua chinh chung — hai thu do luon phai doi
+#: cung nhau, va de chung o hai tep khac nhau la moi mot lan quen.
+PERSISTED_FIELDS.update(SOCIAL_PERSISTED_FIELDS)
+
+
+def _theo_lo(items, co=50):
+    """
+    Chia thanh cac lo nho. URL cua Appwrite co tran do dai, va mot truy van
+     voi vai tram gia tri se bi tu choi TRUOC khi toi duoc database.
+
+    50 la con so an toan cho id 20-24 ky tu; mot trang quan tri 25 hang chi can
+    dung MOT lo.
+    """
+    for i in range(0, len(items), co):
+        yield items[i:i + co]
+
+
+def _application_from(row: Dict[str, Any]) -> "AuthorApplication":
+    """Hang Appwrite -> ban ghi domain. Mot cho duy nhat lam phep doi nay."""
+    from server.domain import AuthorApplication, AuthorStatus
+
+    try:
+        status = AuthorStatus(row.get("status") or "pending")
+    except ValueError:
+        status = AuthorStatus.PENDING
+    return AuthorApplication(
+        user_id=str(row.get("user_id") or ""),
+        pen_name=str(row.get("pen_name") or ""),
+        bio=str(row.get("bio") or ""),
+        genres=list(row.get("genres") or []),
+        intro=str(row.get("intro") or ""),
+        accepted_rules=bool(row.get("accepted_rules")),
+        status=status,
+        reviewer_note=str(row.get("reviewer_note") or ""),
+        attempts=int(row.get("attempts") or 1),
+        application_id=str(row.get("application_id") or row.get("$id") or ""),
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at") or ""),
+        decided_at=row.get("decided_at") or None,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -154,7 +228,15 @@ def q_or(*conditions: Dict[str, Any]) -> str:
 
     Cac dieu kien phai long vao duoi dang DOI TUONG. Long dang chuoi JSON thi
     Appwrite tra 'Server Error' — da gap that khi chay.
+
+    MOT dieu kien thi tra ve CHINH dieu kien do, khong boc `or`: Appwrite that
+    tu choi 'Or queries require at least two queries' — do duoc tren staging,
+    o dung truy van tim bai dang dau tien. Nguoi goi thuong xay danh sach dieu
+    kien dong (mot tu khoa -> mot `contains`), va bat ho tu dem so dieu kien
+    truoc khi chon ham la giao cho moi cho goi mot viec de quen.
     """
+    if len(conditions) == 1:
+        return json.dumps(conditions[0])
     return json.dumps({"method": "or", "values": list(conditions)})
 
 
@@ -186,8 +268,14 @@ def persistable(collection: str, data: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in data.items() if key in allowed}
 
 
-class AppwriteMetadataStore:
-    """Novels / chapters / tts_jobs / audio_tracks tren Appwrite."""
+class AppwriteMetadataStore(AppwriteSocialStore):
+    """
+    Novels / chapters / tts_jobs / audio_tracks tren Appwrite.
+
+    Phan XA HOI o `server/appwrite_social.py` — cung mot kho, tach tep vi do
+    dai. Mixin do dung lai ha tang cua lop nay (`_create`, `_page`, ...) va
+    khong mo ket noi rieng nao.
+    """
 
     mode = "appwrite"
 
@@ -221,6 +309,10 @@ class AppwriteMetadataStore:
         self._client = client
         #: Ten thuoc tinh that su co trong tung collection, hoi mot lan roi nho.
         self._attrs_cache: Dict[str, Set[str]] = {}
+        #: Ket noi dung chung. TEN KHAC `_client`: truong do da danh cho client
+        #: gia lap ma test tiem vao, va dung chung mot ten se lam nhanh "client
+        #: duoc tiem" cua `_call` bat nham ket noi that.
+        self._pool: Optional[httpx.Client] = None
 
     # -- ha tang --------------------------------------------------------------
 
@@ -239,9 +331,8 @@ class AppwriteMetadataStore:
             return self._client.request(method, url, json=payload, params=params,
                                         headers=self._headers())
         try:
-            with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-                response = client.request(method, url, json=payload, params=params,
-                                          headers=self._headers())
+            response = self._http().request(method, url, json=payload,
+                                            params=params, headers=self._headers())
         except httpx.HTTPError as exc:
             raise NotFoundError(f"Không kết nối được Appwrite: {exc}") from exc
 
@@ -259,6 +350,24 @@ class AppwriteMetadataStore:
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
+
+    def _http(self) -> httpx.Client:
+        """
+        MOT client dung lai, thay vi mot client moi cho tung request.
+
+        Do duoc tren staging that: mot `httpx.Client` moi ton 1.5-2.0 giay moi
+        lan goi — phan lon la bat tay TLS toi `sgp.cloud.appwrite.io`. Dung lai
+        mot client co keep-alive thi cac lan sau con 0.5-0.9 giay.
+
+        Voi mot trang quan tri goi bay truy van, khac biet do la vai chuc giay.
+
+        An toan luong: `httpx.Client` an toan cho nhieu luong, va o day khong
+        co trang thai nao duoc chia se ngoai ket noi — header duoc truyen theo
+        tung request.
+        """
+        if self._pool is None:
+            self._pool = httpx.Client(timeout=REQUEST_TIMEOUT)
+        return self._pool
 
     def _docs(self, collection: str) -> str:
         return f"/v1/databases/{self._db}/collections/{collection}/documents"
@@ -1073,6 +1182,299 @@ class AppwriteMetadataStore:
 # -----------------------------------------------------------------------------
 # Doi document -> dataclass
 # -----------------------------------------------------------------------------
+
+
+
+    # -- doc theo LO -----------------------------------------------------------
+    #
+    # MOT vong mang cho N hang, thay vi N vong.
+    #
+    # `equal` cua Appwrite nhan NHIEU gia tri va hoat dong nhu `IN` — da kiem
+    # chung. Do la ca co so cua khoi nay: mot truy van `equal(user_id, [a,b,c])`
+    # thay cho ba lan `GET /documents/{id}`.
+    #
+    # LY DO TON TAI: khu quan tri tung goi `get_stats`/`list_novels`/`get_profile`
+    # cho TUNG HANG, va `/api/admin/author-applications` mat 34 giay cho sau
+    # persona tren staging that.
+
+    def stats_by_ids(self, user_ids: Sequence[str]) -> Dict[str, AuthorStats]:
+        ds = [u for u in dict.fromkeys(user_ids) if u]
+        ra = {uid: AuthorStats(user_id=uid) for uid in ds}
+        if not ds:
+            return ra
+        for lo in _theo_lo(ds):
+            for row in self._list_all(COL_STATS, [q_equal("user_id", *lo)]):
+                uid = str(row.get("user_id") or "")
+                if uid in ra:
+                    ra[uid] = AuthorStats(
+                        user_id=uid,
+                        qualified_listens=int(row.get("qualified_listens") or 0),
+                        published_novels=int(row.get("published_novels") or 0),
+                        updated_at=str(row.get("updated_at") or ""),
+                    )
+        return ra
+
+    def published_counts(self, owner_ids: Sequence[str]) -> Dict[str, int]:
+        ds = [u for u in dict.fromkeys(owner_ids) if u]
+        dem = {uid: 0 for uid in ds}
+        if not ds:
+            return dem
+        for lo in _theo_lo(ds):
+            rows = self._list_all(COL_NOVELS, [
+                q_equal("owner_id", *lo),
+                q_equal("state", PublishState.PUBLISHED.value),
+                q_select("owner_id"),
+            ])
+            for row in rows:
+                uid = str(row.get("owner_id") or "")
+                if uid in dem:
+                    dem[uid] += 1
+        return dem
+
+    def novels_by_ids(self, novel_ids: Sequence[str]) -> Dict[str, Novel]:
+        """Nhieu truyen, doc theo LO — xem contract o `MockMetadataStore`."""
+        ds = [n for n in dict.fromkeys(novel_ids) if n]
+        ra: Dict[str, Novel] = {}
+        for lo in _theo_lo(ds):
+            for row in self._list(COL_NOVELS, [q_equal("novel_id", *lo),
+                                               q_limit(len(lo))]):
+                n = _novel_from_doc(row)
+                ra[n.novel_id] = n
+        return ra
+
+    def chapter_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        ds = [n for n in dict.fromkeys(novel_ids) if n]
+        dem = {nid: 0 for nid in ds}
+        if not ds:
+            return dem
+        for lo in _theo_lo(ds):
+            for row in self._list_all(COL_CHAPTERS,
+                                      [q_equal("novel_id", *lo),
+                                       q_select("novel_id")]):
+                nid = str(row.get("novel_id") or "")
+                if nid in dem:
+                    dem[nid] += 1
+        return dem
+
+    def total_published_novels(self) -> int:
+        """
+        Dung `total` cua Appwrite, KHONG keo ban ghi ve.
+
+        `limit(1)` van tra `total` cua ca tap khop dieu kien — da kiem chung, va
+        `_page` da dua vao dieu do tu truoc.
+        """
+        _, total = self._page(COL_NOVELS, [
+            q_equal("state", PublishState.PUBLISHED.value), q_limit(1)])
+        return total
+
+    def sum_qualified_listens(self) -> int:
+        """
+        Tong tu ban TONG HOP, khong tu bang su kien.
+
+        Dem lai tu `listen_credits` cho moi lan mo bang dieu khien la mot phep
+        quet toan bang. `author_stats` co mot hang moi tac gia, va so tac gia
+        nho hon so luot nghe nhieu bac.
+        """
+        return sum(int(r.get("qualified_listens") or 0)
+                   for r in self._list_all(COL_STATS,
+                                           [q_select("qualified_listens")]))
+
+    def count_applications(self, status: Optional[AuthorStatus] = None) -> int:
+        queries = [q_limit(1)]
+        if status is not None:
+            queries.insert(0, q_equal("status", status.value))
+        return self._page(COL_APPLICATIONS, queries)[1]
+
+    # =========================================================== V2: TAC GIA
+    #
+    # Bon bang moi, va moi bang mot cach dat `rowId` khac nhau — do la thu quyet
+    # dinh tinh dung dan cua ca khoi nay:
+    #
+    #   author_applications  rowId = user_id       MOT don moi nguoi
+    #   author_stats         rowId = user_id       MOT ban tong hop moi nguoi
+    #   listen_credits       rowId = khoa TAT DINH  chong dua, xem `credit_key`
+    #   moderation_events    rowId = event_id      chi THEM
+    #
+    # `listen_credits` la cho quan trong nhat: tinh duy nhat cua `rowId` do chinh
+    # Appwrite cuong che, nen hai request cung luc thi mot cai nhan 409 va KHONG
+    # co lan tinh thu hai. Khong can transaction, khong can khoa rieng — day la
+    # co che manh nhat ma kien truc hien tai co san, va no giong het cach
+    # `job_locks` chan hai worker cung nhan mot job.
+
+    def _create_kin(self, collection: str, doc_id: str,
+                    data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Tao hang KHONG cap quyen doc cho bat ky client nao.
+
+        Dung cho `moderation_events`: hang do chua ghi chu noi bo cua nguoi duyet
+        va `actor_id` cua quan tri. Moi duong doc hop le deu di qua backend bang
+        API key (API key bo qua permission), nen danh sach quyen rong khong lam
+        hong chuc nang nao — no chi dong duong doc THANG tu trinh duyet.
+        """
+        return self._call("POST", self._docs(collection), payload={
+            "documentId": doc_id,
+            "data": self._writable(collection, data),
+            "permissions": [],
+        })
+
+    # -- don tac gia ----------------------------------------------------------
+
+    def get_application(self, user_id: str) -> Optional[AuthorApplication]:
+        try:
+            row = self._get(COL_APPLICATIONS, user_id)
+        except NotFoundError:
+            return None
+        return _application_from(row)
+
+    def save_application(self, app: AuthorApplication) -> AuthorApplication:
+        """
+        TAO-HOAC-CAP-NHAT. `rowId` la `user_id`, nen nop lai chinh la ghi de.
+
+        Thu tao truoc roi moi vá: mot don moi la truong hop thuong gap han, va
+        lam nguoc lai thi moi lan nop don deu ton mot lan doc that bai.
+        """
+        app.updated_at = now_iso()
+        data = app.to_dict()
+        try:
+            self._create(COL_APPLICATIONS, app.user_id, data, app.user_id)
+        except NotFoundError:
+            # Da ton tai (Appwrite tra 409, `_call` doi thanh NotFoundError) ->
+            # cap nhat. Giu nguyen quyen cua hang cu.
+            self._update(COL_APPLICATIONS, app.user_id, data)
+        return app
+
+    def list_applications(self, status: Optional[AuthorStatus] = None,
+                          limit: int = 50,
+                          offset: int = 0) -> Tuple[List[AuthorApplication], int]:
+        """
+        Cu lau nhat truoc — thu tu duy nhat khong lam ai bi bo quen vinh vien.
+
+        Loc va phan trang HOAN TOAN o phia Appwrite: mot hang doi co the dai, va
+        keo het ve roi cat o Python la cach lam hong dan theo so nguoi dung.
+        """
+        queries: List[str] = []
+        if status is not None:
+            queries.append(q_equal("status", status.value))
+        queries += [q_order_asc("created_at"), q_limit(limit), q_offset(offset)]
+        rows, total = self._page(COL_APPLICATIONS, queries)
+        return [_application_from(r) for r in rows], total
+
+    # -- ban tong hop uy tin --------------------------------------------------
+
+    def get_stats(self, user_id: str) -> AuthorStats:
+        """Chua co hang thi tra ban RONG: mot tac gia chua ai nghe van hop le."""
+        try:
+            row = self._get(COL_STATS, user_id)
+        except NotFoundError:
+            return AuthorStats(user_id=user_id)
+        return AuthorStats(
+            user_id=user_id,
+            qualified_listens=int(row.get("qualified_listens") or 0),
+            published_novels=int(row.get("published_novels") or 0),
+            updated_at=str(row.get("updated_at") or now_iso()),
+        )
+
+    def save_stats(self, stats: AuthorStats) -> AuthorStats:
+        stats.updated_at = now_iso()
+        data = stats.to_dict()
+        try:
+            self._create(COL_STATS, stats.user_id, data, stats.user_id)
+        except NotFoundError:
+            self._update(COL_STATS, stats.user_id, data)
+        return stats
+
+    def add_qualified_listen(self, author_id: str, delta: int = 1) -> AuthorStats:
+        """
+        Cong don vao ban tong hop.
+
+        HAN CHE DA BIET: day la DOC-ROI-GHI. Appwrite khong co phep cong nguyen
+        tu, va mot transaction cung khong cuu duoc vi gia tri moi phai tinh tu
+        gia tri cu. Hai lan tinh cho CUNG mot tac gia trong cung mot phan giay co
+        the lam mat mot don vi.
+
+        Vi sao van chap nhan duoc:
+          - buoc QUAN TRONG — khong tao hai lan tinh cho cung mot nguoi nghe —
+            da duoc `create_credit_once` chan tuyet doi bang tinh duy nhat cua
+            `rowId`. Cai co the mat o day chi la mot con so dem;
+          - `listen_credits` la nguon su that, va `recount_listens()` dung lai
+            ban tong hop bat cu luc nao. Chay lai bao nhieu lan cung duoc.
+
+        Xem `docs/AUTHOR_RANK.md` muc "Han che da biet".
+        """
+        stats = self.get_stats(author_id)
+        stats.qualified_listens = max(0, stats.qualified_listens + delta)
+        return self.save_stats(stats)
+
+    # -- luot nghe hop le -----------------------------------------------------
+
+    def create_credit_once(self, credit: ListenCredit) -> bool:
+        """
+        Ghi mot lan tinh, tra `False` neu khoa da ton tai.
+
+        `credit_id` la khoa TAT DINH tu (nguoi nghe, chuong, ngay UTC) — xem
+        `creator.credit_key`. Tinh duy nhat cua `rowId` do APPWRITE cuong che,
+        nen hai request cung luc thi mot cai nhan 409 va khong co lan tinh thu
+        hai. Khong can transaction: day la co che nguyen tu manh nhat ma kien
+        truc hien tai co san, y het cach `job_locks` chan hai worker.
+
+        `_call` doi MOI ma >= 400 thanh `NotFoundError`, nen khong phan biet
+        duoc 409 voi mot loi khac. Doi lai: mot loi mang o day cung tra `False`,
+        tuc la BO QUA mot lan tinh thay vi tinh hai lan. Voi mot he thong uy tin,
+        thieu mot lan an han thua mot lan.
+        """
+        try:
+            self._create(COL_CREDITS, credit.credit_id, credit.to_dict(),
+                         credit.listener_id)
+            return True
+        except NotFoundError:
+            return False
+
+    def last_credit_at(self, listener_id: str, chapter_id: str) -> Optional[str]:
+        """Moc cua lan tinh GAN NHAT cho cap nay, cho phep kiem cua so 24 gio."""
+        rows = self._list(COL_CREDITS, [
+            q_equal("listener_id", listener_id),
+            q_equal("chapter_id", chapter_id),
+            q_order_desc("created_at"),
+            q_limit(1),
+        ])
+        return str(rows[0].get("created_at")) if rows else None
+
+    def count_credits(self, author_id: str) -> int:
+        """Dem lai tu bang su that — de doi soat `stats` khi nghi no lech."""
+        _, total = self._page(COL_CREDITS, [q_equal("author_id", author_id),
+                                            q_limit(1)])
+        return total
+
+    # -- nhat ky kiem duyet ---------------------------------------------------
+
+    def record_event(self, event: ModerationEvent) -> ModerationEvent:
+        """
+        CHI THEM. Khong co `_update` hay `_delete` cho bang nay o bat ky tang nao.
+
+        Hang duoc tao KHONG co quyen doc cho client — xem `_create_kin`.
+        """
+        self._create_kin(COL_EVENTS, event.event_id, event.to_dict())
+        return event
+
+    def list_events(self, target_user_id: str = "", limit: int = 50,
+                    offset: int = 0) -> Tuple[List[ModerationEvent], int]:
+        """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra"."""
+        queries: List[str] = []
+        if target_user_id:
+            queries.append(q_equal("target_user_id", target_user_id))
+        queries += [q_order_desc("created_at"), q_limit(limit), q_offset(offset)]
+        rows, total = self._page(COL_EVENTS, queries)
+        return [
+            ModerationEvent(
+                action=str(r.get("action") or ""),
+                target_user_id=str(r.get("target_user_id") or ""),
+                actor_id=str(r.get("actor_id") or ""),
+                note=str(r.get("note") or ""),
+                event_id=str(r.get("event_id") or r.get("$id") or ""),
+                created_at=str(r.get("created_at") or ""),
+            )
+            for r in rows
+        ], total
 
 
 def _novel_from_doc(doc: Dict[str, Any]) -> Novel:

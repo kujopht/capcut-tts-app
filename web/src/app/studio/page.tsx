@@ -38,10 +38,12 @@ import {
   ErrorState,
   JobBadge,
   Loading,
+  PageHeader,
   SkeletonList,
   formatDate,
   formatNumber,
 } from "@/components/ui";
+import { IconMic , IconHistory, IconBulb } from "@/components/Icons";
 
 /** Gioi han cua Studio — dat o day de tranh job chay qua lau. */
 const MAX_CHARS = 20_000;
@@ -322,24 +324,22 @@ export default function StudioPage() {
 
   return (
     <div className="page">
-      <header className="row-between">
-        <div className="stack-2">
-          <span className="eyebrow">Audio Studio</span>
-          <h1 className="page-title">Tạo audio từ văn bản</h1>
-          <p className="lead" style={{ maxWidth: 620 }}>
-            Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là
-            riêng tư và không trở thành chương fanfic.
-          </p>
-        </div>
-        <Link className="btn" href="/library">
-          Thư viện audio của tôi
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow="Audio Studio"
+        icon={<IconMic />}
+        title="Tạo audio từ văn bản"
+        lead="Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là riêng tư và không trở thành chương fanfic."
+        action={
+          <Link className="btn" href="/library">
+            Thư viện audio của tôi
+          </Link>
+        }
+      />
 
       {bootError ? (
         <ErrorState message={bootError} onRetry={retryBoot} />
       ) : (
-        <div className="split">
+        <div className="split page-lam-viec">
           {/* ------------------------------------------------ cot chinh */}
           <section className="stack-5">
             <form className="card stack" onSubmit={submit}>
@@ -393,9 +393,12 @@ export default function StudioPage() {
                   {booting ? (
                     <div className="sk" style={{ height: 42 }} aria-hidden="true" />
                   ) : availableVoices.length === 0 ? (
+                    // Nguoi dung KHONG sua duoc cau hinh may chu, nen bao ho di
+                    // "kiem tra lai cau hinh backend" la mot loi khuyen vo dung.
+                    // Noi dieu ho lam duoc: thu lai, va bao neu van vay.
                     <Alert kind="warn">
-                      Chưa có giọng đọc nào sẵn sàng. Kiểm tra lại cấu hình
-                      backend rồi tải lại trang.
+                      Hiện chưa có giọng đọc nào sẵn sàng. Hãy tải lại trang sau
+                      ít phút; nếu vẫn vậy thì máy chủ giọng đọc đang bảo trì.
                     </Alert>
                   ) : (
                     <select
@@ -441,11 +444,10 @@ export default function StudioPage() {
                     Tốc độ đọc
                   </span>
                   <div
-                    className="seg"
+                    className="seg seg-wrap"
                     role="group"
                     aria-labelledby="studio-rate-label"
-                    style={{ flexWrap: "wrap" }}
-                  >
+                                      >
                     {RATES.map((option) => (
                       <button
                         key={option.value}
@@ -484,8 +486,12 @@ export default function StudioPage() {
 
             {/* trang thai job dang chay */}
             {activeJob ? (
-              <section className="card stack">
-                <h2 className="section-title">Tiến trình</h2>
+              // KHONG boc them mot `.card` nua: `<JobProgress>` da la mot khung
+              // co vien roi, va the long the trong nhu mot loi bo cuc.
+              <section className="stack-2" aria-labelledby="studio-tien-trinh">
+                <h2 className="section-title" id="studio-tien-trinh">
+                  Tiến trình
+                </h2>
 
                 {/*
                   CUNG mot khung tien do voi `/write` — xem
@@ -512,8 +518,8 @@ export default function StudioPage() {
                         */
                         <p className="hint">
                           {activeJob.voice_id.startsWith("piper:")
-                            ? "Job đã nhận và đang xếp hàng chờ máy chủ tạo giọng. Máy chủ xử lý lần lượt từng job nên có thể phải chờ; job vẫn được giữ nguyên và không bị đổi sang giọng khác. Bạn có thể đóng trang này."
-                            : "Job đã nhận, đang chờ tới lượt xử lý."}
+                            ? "Đã nhận yêu cầu và đang xếp hàng chờ máy chủ tạo giọng. Máy chủ xử lý lần lượt từng bản nên có thể phải chờ; bản của bạn vẫn được giữ nguyên và không bị đổi sang giọng khác. Bạn có thể đóng trang này."
+                            : "Đã nhận yêu cầu, đang chờ tới lượt xử lý."}
                         </p>
                       ) : null}
 
@@ -574,7 +580,9 @@ export default function StudioPage() {
           {/* ------------------------------------------------ cot phu */}
           <aside className="stack sticky-side">
             <section className="card stack">
-              <h2 className="section-title">Lịch sử audio</h2>
+              <h2 className="section-title section-title-icon">
+                <IconHistory size={20} /> Lịch sử audio
+              </h2>
               {booting ? (
                 <SkeletonList count={3} />
               ) : history.length === 0 ? (
@@ -584,35 +592,38 @@ export default function StudioPage() {
               ) : (
                 <div className="list">
                   {history.slice(0, 8).map(({ job, chapter }) => (
-                    <div key={job.job_id} className="list-item" style={{ alignItems: "flex-start" }}>
-                      <div className="stack-2" style={{ flex: 1, minWidth: 0 }}>
-                        <strong className="truncate" style={{ fontSize: "var(--t-sm)" }}>
-                          {chapter?.title ?? "Audio"}
-                        </strong>
-                        <span className="hint">{formatDate(job.created_at)}</span>
-                        <div className="row" style={{ gap: "var(--s2)" }}>
-                          <JobBadge status={job.status} />
-                          {job.status === "completed" ? (
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-ghost"
-                              // `activeJob` duoc suy ra tu `activeChapterId`,
-                              // nen chi can tro toi chuong la du.
-                              onClick={() => setActiveChapterId(job.chapter_id)}
-                            >
-                              Nghe lại
-                            </button>
-                          ) : null}
-                          {job.status === "failed" ? (
-                            <button
-                              type="button"
-                              className="btn btn-sm"
-                              onClick={() => retry(job)}
-                            >
-                              Thử lại
-                            </button>
-                          ) : null}
-                        </div>
+                    <div
+                      key={job.job_id}
+                      className={`hist-item${
+                        job.chapter_id === activeChapterId ? " hist-item-on" : ""
+                      }`}
+                    >
+                      <strong className="truncate hist-title">
+                        {chapter?.title ?? "Audio"}
+                      </strong>
+                      <span className="hint">{formatDate(job.created_at)}</span>
+                      <div className="row hist-actions">
+                        <JobBadge status={job.status} />
+                        {job.status === "completed" ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            // `activeJob` duoc suy ra tu `activeChapterId`,
+                            // nen chi can tro toi chuong la du.
+                            onClick={() => setActiveChapterId(job.chapter_id)}
+                          >
+                            Nghe lại
+                          </button>
+                        ) : null}
+                        {job.status === "failed" ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            onClick={() => retry(job)}
+                          >
+                            Thử lại
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -626,7 +637,9 @@ export default function StudioPage() {
             </section>
 
             <section className="card stack-2">
-              <h2 className="section-title">Mẹo</h2>
+              <h2 className="section-title section-title-icon">
+                <IconBulb size={20} /> Mẹo
+              </h2>
               <p className="hint">
                 Văn bản có dấu câu rõ ràng sẽ cho giọng đọc tự nhiên hơn.
               </p>

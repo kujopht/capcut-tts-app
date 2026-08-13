@@ -65,9 +65,9 @@ export function AudioPlayer({
     <div className="player">
       {!compact ? (
         <div className="row-between">
-          <span className="row" style={{ gap: "var(--s2)" }}>
+          <span className="row row-tight">
             <span aria-hidden="true">🎧</span>
-            <strong style={{ fontSize: "var(--t-sm)" }}>{title}</strong>
+            <strong className="player-title">{title}</strong>
           </span>
           {audio ? (
             <span className="hint">{formatBytes(audio.sizeBytes)}</span>
@@ -92,7 +92,7 @@ export function AudioPlayer({
             Trình duyệt của bạn không hỗ trợ phát audio.
           </audio>
 
-          <div className="row" style={{ justifyContent: "space-between" }}>
+          <div className="row row-spread">
             <span className="hint" role="status">
               {ready ? "Sẵn sàng phát" : "Đang chuẩn bị…"}
             </span>

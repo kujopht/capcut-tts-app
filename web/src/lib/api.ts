@@ -22,6 +22,99 @@ export interface Profile {
   listened_minutes: number;
   tts_characters_used: number;
   created_at: string;
+  /** Tên công khai, dạng chuẩn. Chuỗi rỗng = chưa chọn. */
+  username: string;
+  bio: string;
+  author_status: AuthorStatus;
+}
+
+/**
+ * Được phép **xuất bản công khai** hay không. Đây là moderation, KHÔNG phải uy
+ * tín — xem `docs/AUTHOR_RANK.md`.
+ *
+ * Giá trị này chỉ có ở hồ sơ **của chính mình**. Hồ sơ công khai của người khác
+ * chỉ lộ đúng một bit: `is_author`.
+ */
+export type AuthorStatus =
+  | "none"
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "suspended";
+
+/** Một bậc hạng. Ngưỡng do máy chủ cấp — KHÔNG nhúng vào frontend. */
+export interface RankTier {
+  key: string;
+  title: string;
+  min_listens: number;
+  level: number;
+}
+
+/** Hạng hiện tại + chặng đường tới hạng sau. Máy chủ tính. */
+export interface RankProgress {
+  key: string;
+  title: string;
+  level: number;
+  qualified_listens: number;
+  next_key: string | null;
+  next_title: string | null;
+  next_at: number | null;
+  remaining: number;
+  percent: number;
+}
+
+export interface AuthorApplication {
+  pen_name: string;
+  bio: string;
+  genres: string[];
+  intro: string;
+  accepted_rules: boolean;
+  status: AuthorStatus;
+  reviewer_note: string;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+}
+
+/** Trạng thái khu Creator của chính mình, trong MỘT lần gọi. */
+export interface CreatorState {
+  author_status: AuthorStatus;
+  can_publish: boolean;
+  can_apply: boolean;
+  apply_blocked_reason: string;
+  username: string;
+  bio: string;
+  application: AuthorApplication | null;
+  rank?: RankProgress;
+  qualified_listens?: number;
+  published_novels?: number;
+  /** Chỉ có khi chưa chọn username. Là GỢI Ý, không phải tên được gán. */
+  username_suggestion?: string;
+}
+
+/**
+ * Hồ sơ **công khai** của một người.
+ *
+ * Danh sách cho phép ở backend (`creator.public_profile`) quyết định có gì ở
+ * đây. Không bao giờ có email, tier, quota, hay trạng thái duyệt.
+ */
+export interface PublicProfile {
+  user_id: string;
+  username: string;
+  display_name: string;
+  bio?: string;
+  is_author: boolean;
+  rank?: RankProgress;
+  published_novels?: number;
+  novels?: Novel[];
+  /**
+   * Số liệu xã hội, ghép sẵn vào cùng một lần gọi.
+   *
+   * Tuỳ chọn để một client cũ (chưa biết trường này) vẫn biên dịch được — cùng
+   * lý do với `Novel.cover_url`.
+   */
+  social?: ProfileSocial;
 }
 
 export interface Novel {
@@ -208,6 +301,73 @@ export const api = {
 
   me: () => request<{ profile: Profile }>("/api/auth/me"),
 
+  // ---------------------------------------------------------------- tác giả
+
+  creatorMe: () => request<CreatorState>("/api/creator/me"),
+
+  /** Bảng hạng. KHÔNG cần đăng nhập — giao diện vẽ thang bậc trước cả khi biết
+      người dùng là ai. Ngưỡng là chính sách và nó sẽ đổi; một bản frontend cũ
+      đang chạy trong tab của ai đó không được vẽ một hạng khác với hạng máy chủ
+      công nhận. */
+  ranks: () => request<{ tiers: RankTier[] }>("/api/creator/ranks"),
+
+  setUsername: (username: string) =>
+    request<{ profile: Profile }>("/api/creator/username", {
+      method: "PUT",
+      body: JSON.stringify({ username }),
+    }),
+
+  setBio: (bio: string) =>
+    request<{ profile: Profile }>("/api/creator/bio", {
+      method: "PUT",
+      body: JSON.stringify({ bio }),
+    }),
+
+  applyAuthor: (payload: {
+    pen_name: string;
+    bio?: string;
+    genres?: string[];
+    intro: string;
+    accepted_rules: boolean;
+  }) =>
+    request<{ application: AuthorApplication; author_status: AuthorStatus }>(
+      "/api/creator/apply",
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  publicProfile: (username: string) =>
+    request<{ profile: PublicProfile }>(
+      `/api/users/${encodeURIComponent(username)}`,
+    ),
+
+  /**
+   * Tìm người ở **máy chủ**.
+   *
+   * Tải hết người dùng về rồi lọc ở trình duyệt là vừa chậm vừa là một cách tải
+   * cả danh bạ người dùng về máy khách.
+   */
+  searchPeople: (q: string, kind: "users" | "authors" = "users",
+                 limit = 8, offset = 0) =>
+    request<{ people: PublicProfile[]; total: number; limit: number; offset: number }>(
+      `/api/search/people?q=${encodeURIComponent(q)}&kind=${kind}` +
+      `&limit=${limit}&offset=${offset}`,
+    ),
+
+  /**
+   * Báo một lần nghe. Máy chủ là nguồn sự thật cho uy tín tác giả.
+   *
+   * KHÔNG bắt buộc đăng nhập: khách ẩn danh vẫn gọi được và nhận lại
+   * `credited: false`. Không bao giờ trả về số lượt nghe của tác giả.
+   */
+  reportListen: (chapterId: string, listenedSeconds: number) =>
+    request<{ credited: boolean; reason: string }>("/api/listens", {
+      method: "POST",
+      body: JSON.stringify({
+        chapter_id: chapterId,
+        listened_seconds: Math.max(0, Math.round(listenedSeconds)),
+      }),
+    }),
+
   /**
    * Kết thúc phiên ở phía máy chủ.
    *
@@ -289,7 +449,13 @@ export const api = {
     }),
 
   getNovel: (novelId: string) =>
-    request<{ novel: Novel; chapters: Chapter[] }>(`/api/novels/${novelId}`),
+    request<{
+      novel: Novel;
+      chapters: Chapter[];
+      /** Trạng thái theo dõi, ghép sẵn. Vắng mặt với bản nháp — bản nháp không
+          theo dõi được. Tuỳ chọn để client cũ vẫn biên dịch. */
+      follow?: FollowState;
+    }>(`/api/novels/${novelId}`),
 
   publishNovel: (novelId: string) =>
     request<{ novel: Novel }>(`/api/novels/${novelId}/publish`, {
@@ -455,3 +621,653 @@ export interface AudioLink {
   expires_in: number | null;
   size_bytes: number;
 }
+
+// ---------------------------------------------------------------- quản trị
+//
+// Mọi thứ dưới đây yêu cầu quyền quản trị **ở máy chủ**. Giao diện không bao giờ
+// là nơi quyết định: người dùng thường gọi các hàm này sẽ nhận 403 và một thân
+// rỗng. Xem `server/main.py` mục QUAN TRI.
+
+export interface AdminOverview {
+  pending_applications: number;
+  approved_authors: number;
+  rejected_applications: number;
+  suspended_authors: number;
+  published_novels: number;
+  users_with_username: number;
+  qualified_listens: number;
+}
+
+/** Danh tính kèm theo đơn / hàng tác giả. CÓ `email` — đây là đường quản trị. */
+export interface AdminUser {
+  user_id: string;
+  email: string;
+  display_name: string;
+  username: string;
+  author_status: AuthorStatus;
+  created_at: string;
+  qualified_listens: number;
+  published_novels?: number;
+  rank?: RankProgress;
+  bio?: string;
+  application?: AdminApplication | null;
+  events?: ModerationEvent[];
+  novels?: Novel[];
+}
+
+export interface AdminApplication {
+  application_id: string;
+  user_id: string;
+  pen_name: string;
+  bio: string;
+  genres: string[];
+  intro: string;
+  accepted_rules: boolean;
+  status: AuthorStatus;
+  reviewer_note: string;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+  decided_at: string | null;
+  user?: AdminUser | null;
+}
+
+export interface ModerationEvent {
+  event_id: string;
+  action:
+    | "author_approved"
+    | "author_rejected"
+    | "author_suspended"
+    | "author_restored";
+  target_user_id: string;
+  actor_id: string;
+  note: string;
+  created_at: string;
+}
+
+export interface AdminNovel extends Novel {
+  chapters: number;
+  owner: { display_name: string; username: string } | null;
+}
+
+export const adminApi = {
+  overview: () => request<AdminOverview>("/api/admin/overview"),
+
+  applications: (status = "", limit = 25, offset = 0) =>
+    request<{ applications: AdminApplication[]; total: number }>(
+      `/api/admin/author-applications?status_filter=${status}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  application: (userId: string) =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/author-applications/${encodeURIComponent(userId)}`,
+    ),
+
+  approve: (userId: string, note = "") =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/author-applications/${encodeURIComponent(userId)}/approve`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  reject: (userId: string, note: string) =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/author-applications/${encodeURIComponent(userId)}/reject`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  authors: (limit = 25, offset = 0) =>
+    request<{ authors: AdminUser[]; total: number }>(
+      `/api/admin/authors?limit=${limit}&offset=${offset}`,
+    ),
+
+  suspend: (userId: string, note: string) =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/authors/${encodeURIComponent(userId)}/suspend`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  restore: (userId: string, note = "") =>
+    request<{ application: AdminApplication }>(
+      `/api/admin/authors/${encodeURIComponent(userId)}/restore`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  users: (q = "", limit = 25, offset = 0) =>
+    request<{ users: AdminUser[]; total: number }>(
+      `/api/admin/users?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`,
+    ),
+
+  user: (userId: string) =>
+    request<{ user: AdminUser }>(`/api/admin/users/${encodeURIComponent(userId)}`),
+
+  novels: (q = "", state = "", limit = 25, offset = 0) =>
+    request<{ novels: AdminNovel[]; total: number }>(
+      `/api/admin/novels?q=${encodeURIComponent(q)}&state=${state}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  events: (limit = 50) =>
+    request<{ events: ModerationEvent[]; total: number }>(
+      `/api/admin/events?limit=${limit}`,
+    ),
+};
+
+// ---------------------------------------------------------------------------
+// Tầng xã hội
+// ---------------------------------------------------------------------------
+//
+// MỌI kiểu ở đây khớp với `to_public_dict()` của `server/domain.py`, không phải
+// với `to_dict()`. Khác biệt đó là chủ ý và nó có ý nghĩa bảo mật: bản công khai
+// là một **danh sách cho phép**, nên `removed_by`, `removed_reason` và
+// `image_key` không bao giờ xuống tới trình duyệt.
+
+/** Thẻ tác giả gọn — cùng hình dạng với kết quả tìm kiếm. */
+export interface AuthorCard {
+  user_id: string;
+  username: string;
+  display_name: string;
+  is_author: boolean;
+  rank?: RankProgress;
+  published_novels?: number;
+}
+
+export type PostKind = "post" | "story_update";
+export type ContentState = "visible" | "removed";
+
+export interface Post {
+  post_id: string;
+  author_user_id: string;
+  kind: PostKind;
+  novel_id: string;
+  text: string;
+  /** `has_image`, KHÔNG phải `image_key`: khóa đối tượng thô không bao giờ ra
+      khỏi backend — nó không dùng trực tiếp được (kho là riêng tư) và nó lộ cấu
+      trúc không gian tên. */
+  has_image: boolean;
+  image_width: number;
+  image_height: number;
+  /** URL đã ký, ngắn hạn. Vắng mặt khi bài không có ảnh. */
+  image_url?: string;
+  /** V3: URL đã ký của TỪNG ảnh, cùng thứ tự với `images`. */
+  image_urls?: string[];
+  /** Kích thước từng ảnh cho gallery — không bao giờ kèm khóa kho. */
+  images: Array<{ width: number; height: number }>;
+  /** 2 bình luận mới nhất, ghép sẵn cho bảng tin — hiển thị cũ→mới. */
+  comments_preview?: Comment[];
+  state: ContentState;
+  like_count: number;
+  comment_count: number;
+  created_at: string;
+  updated_at: string;
+  author?: AuthorCard;
+  /** Người đang xem đã thích chưa. `false` với khách vãng lai. */
+  liked: boolean;
+  /** Người đang xem có sửa được không. MÁY CHỦ vẫn là nơi cưỡng chế — cờ này
+      chỉ để giao diện khỏi hiện một cái nút chắc chắn sẽ trả 403. */
+  can_edit: boolean;
+  /** Chỉ có với `story_update`. */
+  novel?: { novel_id: string; title: string; cover_key: string | null };
+}
+
+export interface Comment {
+  comment_id: string;
+  /** Id của ĐÍCH: bài đăng, hoặc chương (bình luận audio). Tên cột giữ nguyên
+      vì lịch sử — xem `domain.Comment`. */
+  post_id: string;
+  /** Chuỗi rỗng khi bình luận đã bị gỡ — xem `Comment.to_public_dict`. */
+  author_user_id: string;
+  parent_id: string;
+  /** `""` = bình luận bài đăng; `"chapter"` = bình luận chương/audio. */
+  target_kind: string;
+  /** Vị trí audio đính kèm, mili giây. `null` = không đính kèm — 0 là một mốc
+      HỢP LỆ (đầu chương). */
+  timestamp_ms: number | null;
+  /** Người viết tự đánh dấu có spoiler — thân bị che cho tới khi bấm hiện. */
+  spoiler: boolean;
+  text: string;
+  state: ContentState;
+  reply_count: number;
+  created_at: string;
+  updated_at: string;
+  author?: AuthorCard;
+  replies?: Comment[];
+}
+
+export type NotificationKind =
+  | "follow"
+  | "post_like"
+  | "post_comment"
+  | "comment_reply"
+  | "story_chapter"
+  | "chapter_comment"
+  | "author_approved"
+  | "author_rejected";
+
+export interface Notification {
+  notification_id: string;
+  kind: NotificationKind;
+  actor_id: string;
+  subject_id: string;
+  subject_kind: string;
+  preview: string;
+  read: boolean;
+  created_at: string;
+  actor?: AuthorCard;
+}
+
+export type ReportReason =
+  | "spam"
+  | "harassment"
+  | "inappropriate"
+  | "copyright"
+  | "other";
+
+export interface FollowState {
+  following: boolean;
+  follower_count: number;
+}
+
+export interface LikeState {
+  liked: boolean;
+  like_count: number;
+}
+
+export interface FeedPage {
+  items: Post[];
+  total: number;
+  limit: number;
+  offset: number;
+  /** Bài của người mình theo dõi có được ưu tiên hay không. `false` = đang xem
+      bảng tin khám phá vì chưa theo dõi ai. */
+  personalized: boolean;
+  /** Danh sách người theo dõi đã bị cắt vì vượt trần truy vấn. Giao diện NÓI RÕ
+      điều này thay vì im lặng bỏ bớt. */
+  following_truncated: boolean;
+}
+
+export interface CommentPage {
+  items: Comment[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface NotificationPage {
+  items: Notification[];
+  total: number;
+  unread: number;
+  limit: number;
+  offset: number;
+}
+
+/** Tóm tắt xã hội của chính mình, cho `/account`. */
+export interface AccountSocial {
+  follower_count: number;
+  following_count: number;
+  post_count: number;
+  followed_stories: number;
+  unread_notifications: number;
+  /** Chỉ tác giả ĐÃ DUYỆT mới có ba trường dưới đây. */
+  rank?: RankProgress;
+  qualified_listens?: number;
+  published_novels?: number;
+}
+
+/** Phần xã hội của một trang cá nhân. */
+export interface ProfileSocial {
+  follower_count: number;
+  following_count: number;
+  post_count: number;
+  following: boolean;
+  is_self: boolean;
+}
+
+/** Giới hạn do MÁY CHỦ quyết định. Xem `src/lib/limits.ts`. */
+export interface ServerLimits {
+  max_chapter_chars: number;
+  max_active_jobs: number;
+  post_max_chars: number;
+  comment_max_chars: number;
+  report_detail_max_chars: number;
+  post_max_images: number;
+  /** Trần TỔNG dung lượng ảnh của một bài, sau xử lý. */
+  post_total_media_bytes: number;
+  image: Record<
+    string,
+    {
+      max_bytes: number;
+      max_edge: number;
+      mime: string[];
+      preferred_mime: string[];
+    }
+  >;
+  rate: Record<string, { count: number; minutes: number }>;
+}
+
+export const social = {
+  limits: () => request<ServerLimits>("/api/limits"),
+
+  // -- theo dõi -------------------------------------------------------------
+
+  followUser: (userId: string) =>
+    request<FollowState>(`/api/users/${encodeURIComponent(userId)}/follow`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unfollowUser: (userId: string) =>
+    request<FollowState>(`/api/users/${encodeURIComponent(userId)}/follow`, {
+      method: "DELETE",
+    }),
+
+  followStory: (novelId: string) =>
+    request<FollowState>(`/api/novels/${encodeURIComponent(novelId)}/follow`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unfollowStory: (novelId: string) =>
+    request<FollowState>(`/api/novels/${encodeURIComponent(novelId)}/follow`, {
+      method: "DELETE",
+    }),
+
+  // -- bảng tin và bài đăng -------------------------------------------------
+
+  feed: (limit = 20, offset = 0) =>
+    request<FeedPage>(`/api/feed?limit=${limit}&offset=${offset}`),
+
+  userPosts: (userId: string, limit = 20, offset = 0) =>
+    request<FeedPage>(
+      `/api/users/${encodeURIComponent(userId)}/posts` +
+        `?limit=${limit}&offset=${offset}`,
+    ),
+
+  post: (postId: string) =>
+    request<{ post: Post }>(`/api/posts/${encodeURIComponent(postId)}`),
+
+  createPost: (payload: {
+    text: string;
+    kind?: PostKind;
+    novel_id?: string;
+    image_base64?: string;
+    image_mime?: string;
+    image_width?: number;
+    image_height?: number;
+    /** V3: tối đa 4 ảnh. Trần thật ở máy chủ (`/api/limits`). */
+    images?: Array<{
+      base64: string;
+      mime: string;
+      width: number;
+      height: number;
+    }>;
+  }) =>
+    request<{ post: Post }>("/api/posts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  editPost: (postId: string, text: string) =>
+    request<{ post: Post }>(`/api/posts/${encodeURIComponent(postId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text }),
+    }),
+
+  deletePost: (postId: string) =>
+    request<{ deleted: boolean }>(`/api/posts/${encodeURIComponent(postId)}`, {
+      method: "DELETE",
+    }),
+
+  // -- thích ----------------------------------------------------------------
+
+  like: (postId: string) =>
+    request<LikeState>(`/api/posts/${encodeURIComponent(postId)}/like`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  unlike: (postId: string) =>
+    request<LikeState>(`/api/posts/${encodeURIComponent(postId)}/like`, {
+      method: "DELETE",
+    }),
+
+  // -- bình luận ------------------------------------------------------------
+
+  comments: (postId: string, limit = 20, offset = 0) =>
+    request<CommentPage>(
+      `/api/posts/${encodeURIComponent(postId)}/comments` +
+        `?limit=${limit}&offset=${offset}`,
+    ),
+
+  createComment: (postId: string, text: string, parentId = "") =>
+    request<{ comment: Comment }>(
+      `/api/posts/${encodeURIComponent(postId)}/comments`,
+      { method: "POST", body: JSON.stringify({ text, parent_id: parentId }) },
+    ),
+
+  replies: (commentId: string, limit = 20, offset = 0) =>
+    request<CommentPage>(
+      `/api/comments/${encodeURIComponent(commentId)}/replies` +
+        `?limit=${limit}&offset=${offset}`,
+    ),
+
+  editComment: (commentId: string, text: string) =>
+    request<{ comment: Comment }>(
+      `/api/comments/${encodeURIComponent(commentId)}`,
+      { method: "PATCH", body: JSON.stringify({ text }) },
+    ),
+
+  deleteComment: (commentId: string) =>
+    request<{ deleted: boolean }>(
+      `/api/comments/${encodeURIComponent(commentId)}`,
+      { method: "DELETE" },
+    ),
+
+  // -- bình luận chương (audio) ----------------------------------------------
+
+  /** Đích là CHƯƠNG, không phải file MP3 — tác giả tạo lại audio thì chuỗi
+      bình luận vẫn còn. Mặc định MỚI NHẤT trước. */
+  chapterComments: (chapterId: string, sort: "moi" | "cu" = "moi",
+                    limit = 20, offset = 0) =>
+    request<CommentPage & { sort: string }>(
+      `/api/chapters/${encodeURIComponent(chapterId)}/comments` +
+        `?sort=${sort}&limit=${limit}&offset=${offset}`,
+    ),
+
+  createChapterComment: (chapterId: string, payload: {
+    text: string;
+    parent_id?: string;
+    /** Mili giây. Bỏ qua = không đính kèm. */
+    timestamp_ms?: number | null;
+    spoiler?: boolean;
+  }) =>
+    request<{ comment: Comment }>(
+      `/api/chapters/${encodeURIComponent(chapterId)}/comments`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  // -- thông báo ------------------------------------------------------------
+
+  notifications: (unread = false, limit = 20, offset = 0) =>
+    request<NotificationPage>(
+      `/api/notifications?unread=${unread}&limit=${limit}&offset=${offset}`,
+    ),
+
+  /** Chỉ con số, cho cái chuông. Nhẹ hơn danh sách — nó chạy ở mọi trang. */
+  unreadCount: () => request<{ unread: number }>("/api/notifications/unread"),
+
+  markRead: (notificationId: string) =>
+    request<{ unread: number }>(
+      `/api/notifications/${encodeURIComponent(notificationId)}/read`,
+      { method: "POST", body: "{}" },
+    ),
+
+  markAllRead: () =>
+    request<{ marked: number; unread: number }>(
+      "/api/notifications/read-all",
+      { method: "POST", body: "{}" },
+    ),
+
+  // -- báo cáo --------------------------------------------------------------
+
+  report: (payload: {
+    target_kind: "post" | "comment";
+    target_id: string;
+    reason: ReportReason;
+    detail?: string;
+  }) =>
+    request<{ reported: boolean; created: boolean }>("/api/reports", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // -- tìm kiếm ---------------------------------------------------------------
+
+  /** Mục PHỤ của tìm kiếm toàn cục — truyện và người vẫn là ưu tiên. */
+  searchPosts: (q: string, limit = 3) =>
+    request<{ items: Post[]; total: number }>(
+      `/api/search/posts?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+
+  // -- của chính mình -------------------------------------------------------
+
+  accountSocial: () => request<AccountSocial>("/api/account/social"),
+};
+
+// ---------------------------------------------------------------------------
+// Kiểm duyệt xã hội (quản trị)
+// ---------------------------------------------------------------------------
+//
+// Các kiểu ở đây khớp với `to_dict()` — bản QUẢN TRỊ, có `state`, `removed_by`
+// và ghi chú nội bộ. Đó là cả mục đích của những màn hình này.
+
+export type ReportStatus = "open" | "resolved" | "dismissed";
+
+/** Bản quản trị của một bài — có thêm trường kiểm duyệt. */
+export interface AdminPost extends Omit<Post, "liked" | "can_edit" | "has_image"> {
+  image_key: string;
+  image_mime: string;
+  image_bytes: number;
+  removed_by: string;
+  removed_reason: string;
+  open_reports: number;
+}
+
+export interface AdminComment extends Omit<Comment, "replies"> {
+  removed_by: string;
+  removed_reason: string;
+  open_reports: number;
+  /** Đường tới NGUỒN: `/posts/{id}` hoặc `/chapters/{id}`. Backend tính. */
+  context_url?: string;
+}
+
+export interface ContentReport {
+  report_id: string;
+  reporter_id: string;
+  target_kind: "post" | "comment";
+  target_id: string;
+  target_owner_id: string;
+  reason: ReportReason;
+  detail: string;
+  status: ReportStatus;
+  /** Ghi chú NỘI BỘ. Chỉ ra ở đường quản trị. */
+  resolution_note: string;
+  resolved_by: string;
+  created_at: string;
+  updated_at: string;
+  /** Nội dung bị báo cáo, ghép sẵn để màn hình này không phải gọi thêm. `null`
+      khi nội dung đã bị chính chủ xoá thật. */
+  content: (AdminPost & AdminComment) | null;
+  reporter?: AuthorCard;
+  target_owner?: AuthorCard;
+  /** Đường tới nguồn của nội dung bị báo cáo. Backend tính. */
+  context_url?: string;
+}
+
+export interface SocialOverview {
+  open_reports: number;
+  total_reports: number;
+  total_posts: number;
+  removed_posts: number;
+}
+
+export const adminSocial = {
+  overview: () => request<SocialOverview>("/api/admin/social/overview"),
+
+  reports: (status = "open", targetKind = "", limit = 25, offset = 0) =>
+    request<{
+      items: ContentReport[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      `/api/admin/reports?status_filter=${encodeURIComponent(status)}` +
+        `&target_kind=${encodeURIComponent(targetKind)}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  resolveReport: (reportId: string, dismiss: boolean, note = "") =>
+    request<{ report: ContentReport }>(
+      `/api/admin/reports/${encodeURIComponent(reportId)}/resolve`,
+      { method: "POST", body: JSON.stringify({ dismiss, note }) },
+    ),
+
+  posts: (q = "", limit = 25, offset = 0) =>
+    request<{
+      items: AdminPost[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      `/api/admin/posts?q=${encodeURIComponent(q)}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  /** GỠ, không xoá. Hàng vẫn còn — xem `domain.ContentState`. */
+  removePost: (postId: string, reason: string) =>
+    request<{ post: AdminPost }>(
+      `/api/admin/posts/${encodeURIComponent(postId)}/remove`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  restorePost: (postId: string) =>
+    request<{ post: AdminPost }>(
+      `/api/admin/posts/${encodeURIComponent(postId)}/restore`,
+      { method: "POST", body: "{}" },
+    ),
+
+  /** Duyệt bình luận toàn hệ thống, tách bài đăng / chương. */
+  browseComments: (targetKind: "" | "chapter" = "", limit = 25, offset = 0) =>
+    request<{
+      items: AdminComment[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      `/api/admin/comments?target_kind=${targetKind}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  postComments: (postId: string, limit = 50, offset = 0) =>
+    request<{
+      items: AdminComment[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(
+      `/api/admin/posts/${encodeURIComponent(postId)}/comments` +
+        `?limit=${limit}&offset=${offset}`,
+    ),
+
+  removeComment: (commentId: string, reason: string) =>
+    request<{ comment: AdminComment }>(
+      `/api/admin/comments/${encodeURIComponent(commentId)}/remove`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  restoreComment: (commentId: string) =>
+    request<{ comment: AdminComment }>(
+      `/api/admin/comments/${encodeURIComponent(commentId)}/restore`,
+      { method: "POST", body: "{}" },
+    ),
+};

@@ -22,6 +22,7 @@ import {
 } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
+import { CongXuatBan, useTrangThaiCreator } from "@/components/PublishGate";
 import { MAX_CHAPTER_CHARS } from "@/lib/limits";
 import {
   ALL_VOICES_LABEL,
@@ -43,9 +44,11 @@ import {
   EmptyState,
   ErrorState,
   Loading,
+  PageHeader,
   SkeletonList,
   formatNumber,
 } from "@/components/ui";
+import { IconFeather , IconBook, IconLibrary } from "@/components/Icons";
 
 /** Thao tac xoa dang cho xac nhan. */
 type PendingDelete =
@@ -65,6 +68,11 @@ export default function WritePage() {
   const router = useRouter();
   const { profile, loading: sessionLoading } = useSession();
   const toast = useToast();
+  /*
+    Trang thai tac gia, nap MOT lan cho ca trang. Chi nut xuat ban doc toi no —
+    xem `components/PublishGate.tsx`.
+  */
+  const { trangThai: creator } = useTrangThaiCreator(Boolean(profile));
 
   const [novels, setNovels] = useState<Novel[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -549,55 +557,52 @@ export default function WritePage() {
 
   return (
     <div className="page">
-      <header className="row-between">
-        <div className="stack-2">
-          <span className="eyebrow">Khu vực tác giả</span>
-          <h1 className="page-title">Viết và xuất bản</h1>
-        </div>
-        <Link className="btn" href="/fanfic">
-          Xem trang khám phá
-        </Link>
-      </header>
+      <PageHeader
+        eyebrow="Khu vực tác giả"
+        icon={<IconFeather />}
+        title="Viết và xuất bản"
+        lead="Tạo truyện, thêm chương, tạo audio cho từng chương. Truyện nằm ở bản nháp cho tới khi bạn tự xuất bản."
+        action={
+          <Link className="btn" href="/fanfic">
+            Xem trang khám phá
+          </Link>
+        }
+      />
 
       {error ? (
         <ErrorState message={error} onRetry={retryLoad} />
       ) : loading ? (
         <SkeletonList count={4} />
       ) : (
-        <div className="split-narrow">
+        <div className="split-narrow page-lam-viec">
           {/* --------------------------------------------- cot trai: truyen */}
           <aside className="stack">
             <section className="card stack">
-              <h2 className="section-title">Truyện của tôi</h2>
+              <h2 className="section-title section-title-icon">
+                <IconBook size={19} /> Truyện của tôi
+              </h2>
               {novels.length === 0 ? (
                 <p className="hint">Chưa có truyện nào. Tạo truyện đầu tiên bên dưới.</p>
               ) : (
                 <div className="list">
                   {novels.map((novel) => (
+                    // Mau va trang thai dang chon do CSS quyet dinh, khong con
+                    // `style` inline: media query khong voi toi style inline,
+                    // va ba dong mau lap lai o day la ba cho de lech.
                     <button
                       key={novel.novel_id}
                       type="button"
-                      className="list-item"
+                      className="novel-pick"
                       aria-current={novel.novel_id === selectedId ? "true" : undefined}
-                      style={{
-                        textAlign: "left",
-                        cursor: "pointer",
-                        borderColor:
-                          novel.novel_id === selectedId ? "var(--brand-line)" : undefined,
-                        background:
-                          novel.novel_id === selectedId ? "var(--brand-soft)" : undefined,
-                      }}
                       onClick={() => setSelectedId(novel.novel_id)}
                     >
-                      <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
-                        <strong className="truncate" style={{ fontSize: "var(--t-sm)" }}>
-                          {novel.title}
-                        </strong>
-                        <span
-                          className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}
-                        >
-                          {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
-                        </span>
+                      <strong className="truncate novel-pick-title">
+                        {novel.title}
+                      </strong>
+                      <span
+                        className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}
+                      >
+                        {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
                       </span>
                     </button>
                   ))}
@@ -626,8 +631,7 @@ export default function WritePage() {
                 </label>
                 <textarea
                   id="w-desc"
-                  className="textarea"
-                  style={{ minHeight: 90 }}
+                  className="textarea textarea-short"
                   value={novelDesc}
                   onChange={(e) => setNovelDesc(e.target.value)}
                 />
@@ -688,8 +692,7 @@ export default function WritePage() {
                         </label>
                         <textarea
                           id="w-edit-desc"
-                          className="textarea"
-                          style={{ minHeight: 90 }}
+                          className="textarea textarea-short"
                           value={editDesc}
                           onChange={(e) => setEditDesc(e.target.value)}
                         />
@@ -729,7 +732,7 @@ export default function WritePage() {
                   ) : (
                     <>
                       <div className="row-between">
-                        <div className="stack-2" style={{ minWidth: 0 }}>
+                        <div className="stack-2 min0">
                           <h2 className="section-title">{selected.title}</h2>
                           <span className="hint">
                             {chapters.length} chương ·{" "}
@@ -739,7 +742,7 @@ export default function WritePage() {
                             <p className="hint clamp-2">{selected.description}</p>
                           ) : null}
                         </div>
-                        <div className="row" style={{ gap: "var(--s2)" }}>
+                        <div className="row row-tight">
                           <Link
                             className="btn btn-sm"
                             href={`/novels/${selected.novel_id}`}
@@ -758,14 +761,17 @@ export default function WritePage() {
                               Gỡ xuất bản
                             </button>
                           ) : (
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              onClick={() => setConfirmPublish("publish")}
-                              disabled={chapters.length === 0}
-                            >
-                              Xuất bản
-                            </button>
+                            /*
+                              CONG CHAN XUAT BAN. Chi NUT nay doi theo trang thai
+                              tac gia — tao truyen, sua truyen, them chuong, tao
+                              audio deu khong di qua day. Ai cung viet duoc, chi
+                              khong ai cung dua ra cong khai duoc.
+                            */
+                            <CongXuatBan
+                              trangThai={creator}
+                              coTheXuatBan={chapters.length > 0}
+                              onXuatBan={() => setConfirmPublish("publish")}
+                            />
                           )}
                           <button
                             type="button"
@@ -793,9 +799,11 @@ export default function WritePage() {
 
                 <section className="card stack">
                   <div className="row-between">
-                    <h2 className="section-title">Chương</h2>
+                    <h2 className="section-title section-title-icon">
+                      <IconLibrary size={19} /> Chương
+                    </h2>
                     {availableVoices.length > 0 ? (
-                      <div className="row" style={{ gap: "var(--s2)" }}>
+                      <div className="row row-tight">
                         <label className="hint" htmlFor="w-voice">
                           Giọng đọc
                         </label>
@@ -941,11 +949,10 @@ export default function WritePage() {
                             <span className="list-index" aria-hidden="true">
                               {index + 1}
                             </span>
-                            <span className="stack-2" style={{ flex: 1, minWidth: 0 }}>
+                            <span className="stack-2 grow">
                               <Link
                                 href={`/chapters/${chapter.chapter_id}`}
                                 className="truncate list-title"
-                                style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}
                               >
                                 {chapter.title}
                               </Link>
@@ -1072,7 +1079,9 @@ export default function WritePage() {
                 </section>
 
                 <form className="card stack" onSubmit={createChapter}>
-                  <h2 className="section-title">Thêm chương</h2>
+                  <h2 className="section-title section-title-icon">
+                    <IconFeather size={19} /> Thêm chương
+                  </h2>
                   <div className="field">
                     <label className="label" htmlFor="w-ch-title">
                       Tiêu đề chương
@@ -1141,7 +1150,7 @@ export default function WritePage() {
                 <strong>{selected?.title}</strong> sẽ biến mất khỏi trang Khám
                 phá, và audio của các chương trở lại chế độ riêng tư.
               </p>
-              <p style={{ marginTop: "var(--s2)" }}>
+              <p className="mt-2">
                 Nội dung không bị xoá — bạn xuất bản lại bất cứ lúc nào.
               </p>
             </>
@@ -1152,7 +1161,7 @@ export default function WritePage() {
                 khai trong trang Khám phá và bất kỳ ai cũng nghe được audio của
                 các chương.
               </p>
-              <p style={{ marginTop: "var(--s2)" }}>Bạn có thể gỡ xuất bản sau.</p>
+              <p className="mt-2">Bạn có thể gỡ xuất bản sau.</p>
             </>
           )
         }
@@ -1175,7 +1184,7 @@ export default function WritePage() {
                 <strong>toàn bộ {chapters.length} chương</strong> và mọi file
                 audio đã tạo.
               </p>
-              <p style={{ marginTop: "var(--s2)" }}>
+              <p className="mt-2">
                 Thao tác này <strong>không hoàn tác được</strong>.
               </p>
             </>
@@ -1185,7 +1194,7 @@ export default function WritePage() {
                 <strong>{pendingDelete?.title}</strong> sẽ bị xoá
                 {pendingDelete?.hasAudio ? " cùng file audio của nó" : ""}.
               </p>
-              <p style={{ marginTop: "var(--s2)" }}>
+              <p className="mt-2">
                 Thao tác này <strong>không hoàn tác được</strong>.
               </p>
             </>

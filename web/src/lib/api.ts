@@ -26,6 +26,13 @@ export interface Profile {
   username: string;
   bio: string;
   author_status: AuthorStatus;
+  /**
+   * Người này có phải quản trị không — do MÁY CHỦ trả lời (từ
+   * `FAS_ADMIN_USER_IDS`), chỉ có ở hồ sơ của chính mình. Frontend không bao
+   * giờ tự suy từ email/username: bit này chỉ quyết định việc HIỂN THỊ lối vào
+   * `/admin`; quyền thật nằm ở từng route `/api/admin/*`.
+   */
+  is_admin?: boolean;
 }
 
 /**

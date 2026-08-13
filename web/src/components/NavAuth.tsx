@@ -218,6 +218,16 @@ function AccountMenu() {
           <Link href="/account" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">👤</span> Tài khoản
           </Link>
+          {/*
+            Chỉ hiện khi MÁY CHỦ xác nhận (`/api/auth/me` → `is_admin`).
+            Không suy từ email hay danh sách nhúng trong frontend — đây chỉ là
+            lối vào; quyền thật vẫn do từng route `/api/admin/*` kiểm.
+          */}
+          {profile.is_admin ? (
+            <Link href="/admin" className="menu-item" role="menuitem" onClick={close}>
+              <span aria-hidden="true">🛡</span> Quản trị
+            </Link>
+          ) : null}
           <div className="menu-sep" role="separator" />
           <button
             type="button"

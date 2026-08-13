@@ -523,12 +523,25 @@ class Setup:
         self.dry_run = dry_run
         self.created = 0
         self.skipped = 0
+        # Khoa cho viec quan SCHEMA: uu tien `APPWRITE_SCHEMA_API_KEY`.
+        #
+        # Khoa runtime cua backend chi can quyen documents; quyen sua schema
+        # song o mot khoa RIENG khong bao gio len Render. Thieu khoa rieng thi
+        # lui ve khoa runtime (staging cap du quyen cho no) — va neu khoa do
+        # cung thieu scope, Appwrite tu choi TRUOC khi ghi bat cu gi, `_call`
+        # se in huong dan doc duoc thay vi mot stack trace. Chi in TEN bien,
+        # khong bao gio in gia tri.
+        self.api_key = self.cfg.schema_api_key or self.cfg.api_key
+        if not dry_run:
+            print("Khoá schema:",
+                  "APPWRITE_SCHEMA_API_KEY" if self.cfg.schema_api_key
+                  else "APPWRITE_API_KEY (fallback — chưa đặt khoá schema riêng)")
 
     def _headers(self) -> Dict[str, str]:
         return {
             "Content-Type": "application/json",
             "X-Appwrite-Project": self.cfg.project_id,
-            "X-Appwrite-Key": self.cfg.api_key,     # CHI o phia server
+            "X-Appwrite-Key": self.api_key,     # CHI o phia server
         }
 
     def _exists(self, path: str) -> bool:
@@ -567,6 +580,19 @@ class Setup:
                 message = body.get("message", message)
             except Exception:
                 pass
+            # Thieu scope schema: chi ra DUNG viec can lam thay vi mot dong
+            # loi tho. Da gap that o production: khoa runtime chi co quyen
+            # documents, va 401 nay chan TRUOC khi bat ky thu gi bi ghi.
+            if response.status_code == 401 and "missing scopes" in message:
+                raise SystemExit(
+                    f"Appwrite lỗi 401: {message}\n\n"
+                    "Khoá đang dùng không có quyền quản schema. Tạo một API "
+                    "key riêng trong Appwrite Console với scopes: "
+                    "databases.read, collections.read/write, "
+                    "attributes.read/write, indexes.read/write, rồi đặt vào "
+                    "biến APPWRITE_SCHEMA_API_KEY (tệp env cục bộ — KHÔNG "
+                    "phải Render). Khoá runtime giữ nguyên quyền documents."
+                )
             raise SystemExit(f"Appwrite lỗi {response.status_code}: {message}")
         if not doc_thoi:
             self.created += 1

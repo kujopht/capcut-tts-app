@@ -106,6 +106,17 @@ class AppwriteSettings:
     project_id: str = ""
     api_key: str = ""
     database_id: str = ""
+    #: Khoa RIENG cho viec quan schema (`APPWRITE_SCHEMA_API_KEY`), tuy chon.
+    #:
+    #: VI SAO TACH: khoa runtime cua backend chi can quyen DOCUMENTS — cap them
+    #: `collections.write` cho no la trao quyen sua schema cho moi tien trinh
+    #: dang cam khoa do (Render, worker). Migration la viec lam TU MAY VAN
+    #: HANH, thua thot, co nguoi ngoi canh — nen no cam mot khoa rieng, va
+    #: khoa do khong bao gio len Render.
+    #:
+    #: KHONG bao gio xuat hien trong `describe()`, health, log hay loi. Chi
+    #: `scripts/setup_appwrite.py` doc no.
+    schema_api_key: str = ""
 
     @property
     def configured(self) -> bool:
@@ -484,6 +495,7 @@ def load_settings() -> Settings:
             endpoint=_env("APPWRITE_ENDPOINT"),
             project_id=_env("APPWRITE_PROJECT_ID"),
             api_key=_env("APPWRITE_API_KEY"),
+            schema_api_key=_env("APPWRITE_SCHEMA_API_KEY"),
             database_id=_env("APPWRITE_DATABASE_ID"),
         ),
         r2=R2Settings(

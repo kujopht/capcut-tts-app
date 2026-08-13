@@ -306,56 +306,13 @@ def ensure_voice_ready(registry: Any, voice: Voice) -> None:
 # Do thoi luong & ghi file ket qua
 # -----------------------------------------------------------------------------
 
-
-def find_ffprobe(ffmpeg_path: Optional[str] = None) -> Optional[str]:
-    """Tim ffprobe (thuong nam canh ffmpeg). Tra None neu khong co."""
-    from desktop_app.output_manager import find_ffmpeg
-
-    found = shutil.which("ffprobe")
-    if found:
-        return found
-
-    ffmpeg = find_ffmpeg(ffmpeg_path)
-    if ffmpeg:
-        candidate = Path(ffmpeg).with_name("ffprobe" + Path(ffmpeg).suffix)
-        if candidate.is_file():
-            return str(candidate)
-    return None
-
-
-def probe_duration_seconds(path: Path | str, ffmpeg_path: Optional[str] = None) -> Optional[float]:
-    """
-    Do thoi luong file audio bang ffprobe.
-
-    Tra None khi khong do duoc (khong co ffprobe, file la...). KHONG uoc luong
-    tu kich thuoc file: bao mot con so doan mo con te hon la noi thang rang
-    chua do duoc.
-    """
-    exe = find_ffprobe(ffmpeg_path)
-    if not exe:
-        return None
-    try:
-        proc = subprocess.run(
-            [
-                exe, "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    try:
-        value = float((proc.stdout or "").strip())
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
+# Hai ham nay da don sang `output_manager` de backend web dung chung (backend
+# khong duoc phep import `arc_pipeline` — xem CLAUDE.md). Re-export de giu
+# nguyen cho nguoi goi cu (arc_cli, test) va cac cho patch theo duong dan cu.
+from desktop_app.output_manager import (  # noqa: E402,F401
+    find_ffprobe,
+    probe_duration_seconds,
+)
 
 
 def publish_audio(source: Path | str, target: Path | str) -> int:

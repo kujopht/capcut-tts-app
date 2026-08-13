@@ -449,6 +449,23 @@ def voices() -> Dict[str, Any]:
 # -----------------------------------------------------------------------------
 
 
+def _ho_so_tra_ve(profile: Profile) -> Dict[str, Any]:
+    """
+    Ho so tra cho CHINH CHU, kem `is_admin`.
+
+    Quyen quan tri song o bien moi truong (`Settings.admin_user_ids`), khong
+    phai mot cot du lieu — nen `to_dict()` khong the tu biet. Giao dien can
+    dung MOT bit nay de quyet dinh co ve muc "Quản trị" hay khong; khong co no
+    thi frontend chi con cach nhung email vao ma nguon, va do la mot danh sach
+    quan tri thu hai se lech voi danh sach that.
+
+    CHI la chuyen hien-hay-an: moi route `/api/admin/*` van tu kiem quyen qua
+    `admin_profile`, mot nguoi thuong go thang duong dan van nhan 403.
+    """
+    return {**profile.to_dict(),
+            "is_admin": profile.user_id in settings.admin_user_ids}
+
+
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterIn) -> Dict[str, Any]:
     try:
@@ -461,7 +478,7 @@ def register(payload: RegisterIn) -> Dict[str, Any]:
         token = identity.login(payload.email, payload.password)
     except AuthError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    return {"token": token, "profile": profile.to_dict()}
+    return {"token": token, "profile": _ho_so_tra_ve(profile)}
 
 
 @app.post("/api/auth/login")
@@ -473,12 +490,12 @@ def login(payload: LoginIn) -> Dict[str, Any]:
         profile = identity.profile_from_token(token)
     except AuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
-    return {"token": token, "profile": profile.to_dict()}
+    return {"token": token, "profile": _ho_so_tra_ve(profile)}
 
 
 @app.get("/api/auth/me")
 def me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    return {"profile": profile.to_dict()}
+    return {"profile": _ho_so_tra_ve(profile)}
 
 
 @app.post("/api/auth/logout")
@@ -617,7 +634,7 @@ def oauth_exchange(payload: OAuthExchangeIn) -> Dict[str, Any]:
         # Thong diep da duoc adapter lam sach. KHONG them chi tiet o day:
         # `user_id` va `secret` khong duoc ro ri ra phan hoi hay log.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
-    return {"token": token, "profile": profile.to_dict()}
+    return {"token": token, "profile": _ho_so_tra_ve(profile)}
 
 
 # -----------------------------------------------------------------------------
@@ -1417,6 +1434,14 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
         else:
             storage.put(output_key, dest.read_bytes())
 
+        # `duration_seconds` do tu metadata file that (ffprobe). Khong do duoc
+        # thi track van hoan tat voi 0 — thieu thoi luong khong duoc phep lam
+        # hong mot ban audio da tong hop xong; cac phep kiem theo thoi luong
+        # (moc binh luan, luot nghe hop le) tu lui ve nhanh du phong khi 0.
+        duration = result.get("duration_seconds")
+        if not duration:
+            print(f"canh bao: khong do duoc thoi luong audio cua job "
+                  f"{job.job_id} — track se ghi duration_seconds=0")
         store.create_track(AudioTrack(
             chapter_id=job.chapter_id,
             owner_id=job.owner_id,
@@ -1424,6 +1449,7 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
             object_key=output_key,
             content_hash=job.content_hash,
             size_bytes=result["size_bytes"],
+            duration_seconds=float(duration or 0.0),
         ))
 
         # -- transition: running -> completed --------------------------------
@@ -1615,6 +1641,19 @@ def recover_stale_jobs(pending_min_age_seconds: Optional[int] = None) -> Dict[st
         if dang_chay is not None and dang_chay.is_alive():
             report["bo_qua_dang_chay_o_day"] = (
                 report.get("bo_qua_dang_chay_o_day", 0) + 1)
+            continue
+
+        # Giong cuc bo ma MAY NAY khong co model -> NHUONG, khong nhan.
+        #
+        # Chi ap dung cho worker CHUYEN TRACH (`inline_worker` tat): production
+        # chay nhieu worker voi bo model khac nhau, va nhan mot job minh khong
+        # chay duoc roi danh dau `failed` la giet vinh vien mot job ma worker
+        # khac lam duoc. O che do inline (dev, mot tien trinh duy nhat) van
+        # nhan-va-that-bai nhu cu: khong co ai khac de nhuong, va mot loi
+        # "chua tai model" doc duoc tot hon mot job treo pending vo han.
+        if (not settings.inline_worker
+                and not tts_bridge.voice_runnable_on_this_machine(job.voice_id)):
+            report["bo_qua_thieu_model"] = report.get("bo_qua_thieu_model", 0) + 1
             continue
 
         if (job.attempts or 0) >= JOB_MAX_ATTEMPTS:

@@ -79,6 +79,59 @@ def find_ffmpeg(configured: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def find_ffprobe(ffmpeg_path: Optional[str] = None) -> Optional[str]:
+    """Tim ffprobe (thuong nam canh ffmpeg). Tra None neu khong co."""
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+
+    ffmpeg = find_ffmpeg(ffmpeg_path)
+    if ffmpeg:
+        candidate = Path(ffmpeg).with_name("ffprobe" + Path(ffmpeg).suffix)
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def probe_duration_seconds(path: Path | str, ffmpeg_path: Optional[str] = None) -> Optional[float]:
+    """
+    Do thoi luong file audio bang ffprobe.
+
+    Tra None khi khong do duoc (khong co ffprobe, file la...). KHONG uoc luong
+    tu kich thuoc file: bao mot con so doan mo con te hon la noi thang rang
+    chua do duoc.
+
+    Song o day (chu khong o `arc_pipeline`) vi ca desktop LAN backend web can
+    no: backend chi duoc phep cham `desktop_app.output_manager` va vai module
+    da kiem chung khong keo theo GUI — xem CLAUDE.md.
+    """
+    exe = find_ffprobe(ffmpeg_path)
+    if not exe:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                exe, "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        value = float((proc.stdout or "").strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _unique_dir(parent: Path, name: str) -> Path:
     """Tao thu muc con voi ten duy nhat (them _2, _3... neu da ton tai)."""
     parent.mkdir(parents=True, exist_ok=True)

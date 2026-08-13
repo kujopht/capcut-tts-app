@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 # Cac import duoi day deu la Python thuan, khong keo theo Qt.
 from desktop_app.models import ErrorKind
+from desktop_app.output_manager import probe_duration_seconds
 from desktop_app.providers.base import ProviderError, Voice
 from desktop_app.text_chunker import chunk_text, normalize_chunk_size
 
@@ -243,6 +244,29 @@ def ensure_voice_runnable(voice_id: str, settings: Any = None) -> None:
             ErrorKind.VOICE_NOT_FOUND.value,
             f"Giọng '{voice_id}' hiện không được cung cấp.",
         )
+
+
+def voice_runnable_on_this_machine(voice_id: str) -> bool:
+    """
+    MAY NAY co tong hop duoc giong nay khong — cau hoi cua worker LUC NHAN job.
+
+    Khac voi `ensure_voice_runnable` (danh sach trang = quyet dinh san pham),
+    day la cau hoi VAT LY: model co nam tren dia cua tien trinh nay khong.
+    Production chay nhieu worker voi bo model khac nhau (GCE giu du bo NghiTTS,
+    laptop chi co mot); worker nhan mot job ma no khong co model roi danh dau
+    `failed` la giet vinh vien mot job ma worker khac lam duoc.
+
+    Giong KHONG cuc bo (CapCut/Edge) luon chay duoc — khong can model. Giong
+    khong co trong registry cung tra True: de duong cu xu ly (nhan -> that bai
+    voi thong diep ro rang) thay vi de job treo `pending` vo han.
+    """
+    provider = (voice_id or "").split(":", 1)[0]
+    if provider != LOCAL_PROVIDER:
+        return True
+    voice = get_registry().voice_by_id(voice_id)
+    if voice is None:
+        return True
+    return bool(getattr(voice, "installed", True))
 
 
 def list_voices(settings: Any = None) -> List[Dict[str, Any]]:
@@ -472,9 +496,14 @@ def _tong_hop_cac_doan(registry, voice, chunks, dest, rate, cancel,
                 on_progress(index, len(chunks))
 
         size = _concat_mp3(part_paths, Path(dest))
+        # Thoi luong THAT tu metadata cua file vua ghep (ffprobe) — khong bao
+        # gio uoc luong tu do dai van ban. `None` = "chua do duoc" (thieu
+        # ffprobe, file hong...): nguoi goi giu track o 0 va moi phep kiem
+        # theo thoi luong phai lui ve nhanh du phong, khong duoc doan bua.
         return {
             "size_bytes": size,
             "total_parts": len(chunks),
+            "duration_seconds": probe_duration_seconds(Path(dest)),
             "voice_id": voice.id,
             "provider": voice.provider,
         }

@@ -375,5 +375,41 @@ class NovelBrowserTest(Base):
                 self.assertEqual(methods, {"GET"}, d)
 
 
+class HoSoKemQuyenTest(Base):
+    """
+    Bit `is_admin` trong ho so CHINH CHU — nguon duy nhat de giao dien quyet
+    dinh co ve loi vao "Quản trị" hay khong.
+
+    Vi sao phai co: khong co bit nay thi frontend chi con cach nhung email/id
+    quan tri vao ma nguon — mot danh sach quan tri thu hai, va no SE lech voi
+    `FAS_ADMIN_USER_IDS` that. May chu tra loi, giao dien chi ve.
+    """
+
+    def test_admin_thay_is_admin_true(self):
+        r = self.client.get("/api/auth/me", headers=self.h_admin)
+        self.assertIs(r.json()["profile"]["is_admin"], True)
+
+    def test_nguoi_thuong_thay_is_admin_false(self):
+        r = self.client.get("/api/auth/me", headers=self.h_thuong)
+        self.assertIs(r.json()["profile"]["is_admin"], False)
+
+    def test_login_cung_mang_bit(self):
+        """Dang nhap xong phai biet ngay, khong doi den lan goi `me` ke tiep."""
+        r = self.client.post("/api/auth/login", json={
+            "email": "admin@fanfic.local", "password": "matkhau123"})
+        self.assertIs(r.json()["profile"]["is_admin"], True)
+
+    def test_ho_so_cong_khai_khong_lo_is_admin(self):
+        """
+        Trang cong khai van la danh sach cho phep — ai la quan tri khong phai
+        viec cua nguoi xem trang.
+        """
+        self.client.put("/api/creator/username", headers=self.h_admin,
+                        json={"username": "quan-tri-vien"})
+        r = self.client.get("/api/users/quan-tri-vien")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("is_admin", r.json()["profile"])
+
+
 if __name__ == "__main__":
     unittest.main()

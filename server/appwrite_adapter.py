@@ -278,7 +278,8 @@ class AppwriteIdentityAdapter:
 
     def _merge_stored(self, profile: Profile) -> Profile:
         """
-        Ghep `username` / `bio` / `author_status` tu hang `profiles` vao.
+        Ghep `username` / `bio` / `author_status` / `avatar_key` tu hang
+        `profiles` vao.
 
         VI SAO CAN: `/v1/account` cua Appwrite chi biet email va ten — no khong
         biet gi ve ba truong V2. Khong ghep thi moi request tra ve mot ho so
@@ -299,6 +300,7 @@ class AppwriteIdentityAdapter:
             profile.author_status = AuthorStatus(row.get("author_status") or "none")
         except ValueError:
             profile.author_status = AuthorStatus.NONE
+        profile.avatar_key = str(row.get("avatar_key") or "")
         return profile
 
     def _profile_path(self, user_id: str) -> str:
@@ -401,7 +403,7 @@ class AppwriteIdentityAdapter:
         "user_id", "email", "display_name", "tier",
         "listened_minutes", "tts_characters_used", "created_at",
     )
-    _PROFILE_V2_FIELDS = ("username", "bio", "author_status")
+    _PROFILE_V2_FIELDS = ("username", "bio", "author_status", "avatar_key")
 
     #: Truong co INDEX UNIQUE. Chuoi rong KHONG duoc ghi vao day.
     #:

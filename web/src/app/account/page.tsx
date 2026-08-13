@@ -5,6 +5,11 @@
 import Link from "next/link";
 import { useCallback, useState } from "react";
 import { useSession } from "@/lib/session";
+import { useToast } from "@/lib/toast";
+import { errorMessage } from "@/lib/session";
+import { api } from "@/lib/api";
+import { xuLyAnh } from "@/lib/image";
+import { MAX_AVATAR_EDGE } from "@/lib/limits";
 import { ConfirmDialog, EmptyState, Loading, formatDate, formatNumber } from "@/components/ui";
 import {
   IconSparkles,
@@ -25,13 +30,58 @@ const TIER_LABEL: Record<string, string> = {
 };
 
 export default function AccountPage() {
-  const { profile, loading, signOut } = useSession();
+  const { profile, loading, signOut, updateProfile } = useSession();
   const [confirmOut, setConfirmOut] = useState(false);
+  const [savingAvatar, setSavingAvatar] = useState(false);
+  const toast = useToast();
 
   const doSignOut = useCallback(() => {
     setConfirmOut(false);
     signOut();
   }, [signOut]);
+
+  const chonAvatar = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const tep = event.target.files?.[0];
+      event.target.value = "";
+      if (!tep) return;
+      setSavingAvatar(true);
+      try {
+        const anh = await xuLyAnh(tep, MAX_AVATAR_EDGE);
+        if (!anh) {
+          toast.error("Không đọc được ảnh này.");
+          return;
+        }
+        const result = await api.setAvatar({
+          base64: anh.base64,
+          mime: anh.mime,
+          width: anh.width,
+          height: anh.height,
+        });
+        URL.revokeObjectURL(anh.xemTruoc);
+        updateProfile(result.profile);
+        toast.ok("Đã cập nhật avatar.");
+      } catch (cause) {
+        toast.error(errorMessage(cause));
+      } finally {
+        setSavingAvatar(false);
+      }
+    },
+    [toast, updateProfile],
+  );
+
+  const xoaAvatar = useCallback(async () => {
+    setSavingAvatar(true);
+    try {
+      const result = await api.removeAvatar();
+      updateProfile(result.profile);
+      toast.ok("Đã gỡ avatar.");
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setSavingAvatar(false);
+    }
+  }, [toast, updateProfile]);
 
   if (loading) {
     return (
@@ -66,15 +116,54 @@ export default function AccountPage() {
         nhin, va do la ca viec cua trang tai khoan.
       */}
       <header className="account-hero">
-        <span className="account-avatar" aria-hidden="true">
-          {(profile.display_name || profile.email).slice(0, 2).toUpperCase()}
-        </span>
+        <label
+          className="min0"
+          style={{ cursor: savingAvatar ? "wait" : "pointer" }}
+          title="Đổi avatar"
+        >
+          <span
+            className="account-avatar"
+            aria-hidden="true"
+            style={
+              profile.avatar_url
+                ? {
+                    backgroundImage: `url("${profile.avatar_url}")`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                  }
+                : undefined
+            }
+          >
+            {profile.avatar_url
+              ? null
+              : (profile.display_name || profile.email).slice(0, 2).toUpperCase()}
+          </span>
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            disabled={savingAvatar}
+            onChange={chonAvatar}
+          />
+        </label>
         <div className="stack-2 account-hero-body">
           <span className="eyebrow">Tài khoản</span>
           <h1 className="page-title">
             {profile.display_name || profile.email.split("@")[0]}
           </h1>
           <p className="hint">{profile.email}</p>
+          {profile.avatar_url ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={xoaAvatar}
+              disabled={savingAvatar}
+              style={{ alignSelf: "flex-start" }}
+            >
+              {savingAvatar ? <span className="spinner" aria-hidden="true" /> : null}
+              Gỡ avatar
+            </button>
+          ) : null}
         </div>
         <div className="stack-2 account-hero-plan">
           <span className="badge badge-brand">

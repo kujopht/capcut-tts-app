@@ -212,6 +212,11 @@ class Profile:
     bio: str = ""
     #: Moderation. Xem `AuthorStatus`.
     author_status: AuthorStatus = AuthorStatus.NONE
+    #: Khoa doi tuong anh dai dien trong R2 (`server.social.object_key("avatar", ...)`).
+    #: Chuoi rong = chua tai — giao dien lui ve chu cai dau ten. KHONG PHAI url:
+    #: url ky (het han) duoc tinh luc tra ve, tu khoa nay — xem `_ho_so_tra_ve`
+    #: va `CreatorService._public_bundle`.
+    avatar_key: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -231,6 +236,7 @@ class Profile:
             "username": self.username,
             "bio": self.bio,
             "author_status": self.author_status.value,
+            "avatar_key": self.avatar_key,
         }
 
 

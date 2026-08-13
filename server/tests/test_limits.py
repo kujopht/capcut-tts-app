@@ -141,6 +141,36 @@ class DoDaiChuong(Nen):
             int(khop.group(1)), server_main.MAX_CHAPTER_CHARS,
             "giới hạn ở giao diện và ở máy chủ đã lệch nhau")
 
+    def test_canh_bia_giao_dien_khop_chinh_sach_anh_may_chu(self) -> None:
+        """`MAX_COVER_EDGE` (giao diện) phải khớp `CHINH_SACH_ANH["cover"]`."""
+        import re
+
+        from server.social import CHINH_SACH_ANH
+
+        duong = (Path(__file__).resolve().parents[2]
+                 / "web" / "src" / "lib" / "limits.ts")
+        khop = re.search(r"MAX_COVER_EDGE\s*=\s*(\d+)",
+                         duong.read_text(encoding="utf-8"))
+        self.assertIsNotNone(khop, "không đọc được MAX_COVER_EDGE ở giao diện")
+        self.assertEqual(
+            int(khop.group(1)), CHINH_SACH_ANH["cover"].canh_toi_da,
+            "cạnh tối đa ảnh bìa ở giao diện và ở máy chủ đã lệch nhau")
+
+    def test_canh_avatar_giao_dien_khop_chinh_sach_anh_may_chu(self) -> None:
+        """`MAX_AVATAR_EDGE` (giao diện) phải khớp `CHINH_SACH_ANH["avatar"]`."""
+        import re
+
+        from server.social import CHINH_SACH_ANH
+
+        duong = (Path(__file__).resolve().parents[2]
+                 / "web" / "src" / "lib" / "limits.ts")
+        khop = re.search(r"MAX_AVATAR_EDGE\s*=\s*(\d+)",
+                         duong.read_text(encoding="utf-8"))
+        self.assertIsNotNone(khop, "không đọc được MAX_AVATAR_EDGE ở giao diện")
+        self.assertEqual(
+            int(khop.group(1)), CHINH_SACH_ANH["avatar"].canh_toi_da,
+            "cạnh tối đa avatar ở giao diện và ở máy chủ đã lệch nhau")
+
 
 class TranSoJobXepHang(Nen):
 

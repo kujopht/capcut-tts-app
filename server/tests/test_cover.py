@@ -18,6 +18,10 @@ from fastapi.testclient import TestClient
 from server import main as server_main
 from server.adapters import LocalStorageAdapter, MockIdentityAdapter, MockMetadataStore
 
+#: PNG 1x1 diem anh hop le — anh dung thu nho nhat co the, dung o nhieu test.
+PNG_1X1 = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+          "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
 
 class SignedStorage(LocalStorageAdapter):
     """Gia lap kho co URL ky (nhu R2)."""
@@ -257,6 +261,116 @@ class TestNoFakeCover(CoverTestCase):
         self.assertIn("return None", source)
         # Khong co chuoi URL nao duoc viet cung trong ham
         self.assertNotIn("http", source.split('"""')[-1])
+
+
+class TestNovelCoverUpload(CoverTestCase):
+    """
+    Duong TAI anh bia that (V4 Phase 5) — trai voi `set_cover()` cua
+    `CoverTestCase`, vong qua thang kho de dung khi cac test kia CHI can doc
+    `cover_url`. O day ta kiem CHINH duong ghi.
+    """
+
+    def test_tai_len_dat_cover_key_va_luu_object(self):
+        token = self.user()
+        novel_id = self.novel(token)
+        r = self.client.put(f"/api/novels/{novel_id}/cover", headers=self.auth(token),
+                            json={"base64": PNG_1X1, "mime": "image/png",
+                                  "width": 1, "height": 1})
+        self.assertEqual(r.status_code, 200, r.text)
+        khoa = r.json()["novel"]["cover_key"]
+        self.assertTrue(khoa)
+        self.assertTrue(khoa.startswith("covers/"))
+        self.assertTrue(server_main.storage._path(khoa).is_file())
+
+    def test_khoa_doi_tuong_tat_dinh_theo_chu_va_truyen_khong_co_email(self):
+        token = self.user("chu@example.com")
+        novel_id = self.novel(token)
+        r = self.client.put(f"/api/novels/{novel_id}/cover", headers=self.auth(token),
+                            json={"base64": PNG_1X1, "mime": "image/png"})
+        khoa = r.json()["novel"]["cover_key"]
+        self.assertNotIn("@", khoa)
+        self.assertNotIn("example.com", khoa)
+        self.assertIn(novel_id, khoa)
+
+    def test_nguoi_khong_so_huu_bi_tu_choi_403(self):
+        chu_token = self.user("chu@example.com")
+        novel_id = self.novel(chu_token)
+        ke_khac = self.user("khac@example.com")
+        r = self.client.put(f"/api/novels/{novel_id}/cover", headers=self.auth(ke_khac),
+                            json={"base64": PNG_1X1, "mime": "image/png"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_truyen_khong_ton_tai_tra_404(self):
+        token = self.user()
+        r = self.client.put("/api/novels/khong-ton-tai/cover", headers=self.auth(token),
+                            json={"base64": PNG_1X1, "mime": "image/png"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_dinh_dang_khong_hop_le_bi_tu_choi_400(self):
+        token = self.user()
+        novel_id = self.novel(token)
+        r = self.client.put(f"/api/novels/{novel_id}/cover", headers=self.auth(token),
+                            json={"base64": PNG_1X1, "mime": "application/pdf"})
+        self.assertEqual(r.status_code, 400)
+        # Kiem TRUOC khi cham kho: khong co object rac nao duoc tao.
+        self.assertEqual(server_main.store.novels[novel_id].cover_key, None)
+
+    def test_base64_hong_tra_400_khong_phai_500(self):
+        token = self.user()
+        novel_id = self.novel(token)
+        r = self.client.put(f"/api/novels/{novel_id}/cover", headers=self.auth(token),
+                            json={"base64": "***khong-phai-base64***",
+                                  "mime": "image/png"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_thay_bia_moi_xoa_object_cu_khi_doi_duoi(self):
+        """
+        Khoa tat dinh theo (chu, truyen) nhung DUOI co the doi giua cac lan
+        tai (vd .jpg -> .png) — anh cu voi duoi khac phai duoc xoa, khong thi
+        no mo coi vinh vien trong kho.
+        """
+        token = self.user()
+        novel_id = self.novel(token)
+        r1 = self.client.put(f"/api/novels/{novel_id}/cover", headers=self.auth(token),
+                             json={"base64": PNG_1X1, "mime": "image/jpeg"})
+        khoa_cu = r1.json()["novel"]["cover_key"]
+        self.assertTrue(server_main.storage._path(khoa_cu).is_file())
+
+        r2 = self.client.put(f"/api/novels/{novel_id}/cover", headers=self.auth(token),
+                             json={"base64": PNG_1X1, "mime": "image/png"})
+        khoa_moi = r2.json()["novel"]["cover_key"]
+        self.assertNotEqual(khoa_cu, khoa_moi)
+        self.assertFalse(server_main.storage._path(khoa_cu).is_file(),
+                         "anh bia cũ (đuôi khác) phải bị xoá sau khi thay")
+        self.assertTrue(server_main.storage._path(khoa_moi).is_file())
+
+    def test_go_bia_xoa_ca_khoa_lan_object(self):
+        token = self.user()
+        novel_id = self.novel(token)
+        khoa = self.client.put(
+            f"/api/novels/{novel_id}/cover", headers=self.auth(token),
+            json={"base64": PNG_1X1, "mime": "image/png"},
+        ).json()["novel"]["cover_key"]
+
+        r = self.client.delete(f"/api/novels/{novel_id}/cover", headers=self.auth(token))
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.json()["novel"]["cover_key"])
+        self.assertFalse(server_main.storage._path(khoa).is_file())
+
+    def test_go_bia_khi_chua_co_bia_khong_loi(self):
+        """Idempotent: bam Xoá khi chưa từng có bìa không được nem lỗi."""
+        token = self.user()
+        novel_id = self.novel(token)
+        r = self.client.delete(f"/api/novels/{novel_id}/cover", headers=self.auth(token))
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.json()["novel"]["cover_key"])
+
+    def test_go_bia_khong_phai_chu_bi_tu_choi_403(self):
+        chu_token = self.user("chu@example.com")
+        novel_id = self.novel(chu_token)
+        ke_khac = self.user("khac@example.com")
+        r = self.client.delete(f"/api/novels/{novel_id}/cover", headers=self.auth(ke_khac))
+        self.assertEqual(r.status_code, 403)
 
 
 if __name__ == "__main__":

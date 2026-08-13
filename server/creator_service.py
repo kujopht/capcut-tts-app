@@ -45,6 +45,7 @@ from server.domain import (
     PublishState,
     now_iso,
 )
+from server.social import SocialError, kiem_anh, object_key
 
 #: Gioi han do dai. Cat o backend chu khong tin vao `maxLength` cua o nhap: mot
 #: request curl khong di qua o nhap nao.
@@ -63,11 +64,14 @@ class CreatorService:
     nao thu hai.
     """
 
-    def __init__(self, identity: Any, store: Any):
+    def __init__(self, identity: Any, store: Any, storage: Any = None):
         self._identity = identity
         self._store = store
+        #: Kho doi tuong cho anh dai dien (V4). `None` = chua cau hinh — cac
+        #: ham upload nem `SocialError` ro rang thay vi AttributeError mo ho.
+        self._storage = storage
         #: Moc goi khi mot don duoc DUYET hoac TU CHOI. `None` = khong ai nghe.
-        #: `server/main.py` gan `SocialService.notify_author_decision` vao day.
+        #: `server/main.py` gan `SocialService.notify_author_decision` vao do.
         #: Xem ghi chu trong `_decide` ve vi sao la mot moc chu khong phai mot
         #: import.
         self.on_decision: Optional[Any] = None
@@ -93,6 +97,59 @@ class CreatorService:
     def set_bio(self, profile: Profile, bio: str) -> Profile:
         profile.bio = (bio or "").strip()[:MAX_BIO]
         return self._identity.save_profile(profile)
+
+    def set_avatar(self, profile: Profile, *, data: bytes, mime: str) -> Profile:
+        """
+        Tai/doi anh dai dien.
+
+        Cung khuon voi anh bia truyen (`main.py::set_novel_cover`): kiem
+        TRUOC khi cham kho, upload anh MOI truoc, roi moi xoa anh CU (khac
+        duoi thi khac khoa — xoa SAU de khong bao gio mat ca hai neu upload
+        that bai giua chung).
+        """
+        if self._storage is None:
+            raise SocialError("Máy chủ chưa cấu hình kho ảnh.")
+        kiem_anh("avatar", mime=mime, so_byte=len(data))
+        duoi = mime.split("/")[-1] or "webp"
+        khoa_moi = object_key("avatar", user_id=profile.user_id, subject_id="",
+                              duoi=duoi)
+        self._storage.put(khoa_moi, data, content_type=mime)
+        khoa_cu = profile.avatar_key
+        profile.avatar_key = khoa_moi
+        updated = self._identity.save_profile(profile)
+        if khoa_cu and khoa_cu != khoa_moi:
+            try:
+                self._storage.delete(khoa_cu)
+            except Exception:
+                pass
+        return updated
+
+    def remove_avatar(self, profile: Profile) -> Profile:
+        """Go anh dai dien — giao dien lui ve chu cai dau ten."""
+        khoa_cu = profile.avatar_key
+        profile.avatar_key = ""
+        updated = self._identity.save_profile(profile)
+        if khoa_cu and self._storage is not None:
+            try:
+                self._storage.delete(khoa_cu)
+            except Exception:
+                pass
+        return updated
+
+    def avatar_url(self, profile: Profile) -> Optional[str]:
+        """
+        URL xem duoc cua avatar, hoac `None` neu chua co / khong ky duoc.
+
+        Cung logic voi `main.py::_cover_url` — tach thanh ham o day vi CA hai
+        noi tra ho so (rieng tu VA cong khai) deu can no.
+        """
+        if not profile.avatar_key or self._storage is None:
+            return None
+        try:
+            return self._storage.signed_url(profile.avatar_key,
+                                            expires_seconds=3600) or None
+        except Exception:
+            return None
 
     def public_profile_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         """
@@ -121,6 +178,10 @@ class CreatorService:
             "published_novels": len(truyen),
         })
         goi["novels"] = truyen
+        # `avatar_url` la truong TINH (ky lai moi lan doc, het han sau 1h) —
+        # them SAU `public_profile()` giong cach `novels` duoc ghep, vi ham do
+        # la HAM THUAN va khong duoc phep tu goi kho doi tuong.
+        goi["avatar_url"] = self.avatar_url(profile)
         return goi
 
     # =========================================================== don tac gia

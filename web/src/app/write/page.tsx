@@ -23,7 +23,7 @@ import {
 import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { CongXuatBan, useTrangThaiCreator } from "@/components/PublishGate";
-import { MAX_CHAPTER_CHARS } from "@/lib/limits";
+import { MAX_CHAPTER_CHARS, MAX_COVER_EDGE } from "@/lib/limits";
 import {
   ALL_VOICES_LABEL,
   RECOMMENDED_LABEL,
@@ -38,6 +38,8 @@ import { useJobTracker } from "@/lib/useJobTracker";
 import { fanficOnly } from "@/lib/workspace";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { JobProgress } from "@/components/JobProgress";
+import { NovelCover } from "@/components/NovelCover";
+import { xuLyAnh } from "@/lib/image";
 import {
   Alert,
   ConfirmDialog,
@@ -100,6 +102,7 @@ export default function WritePage() {
   const [editDesc, setEditDesc] = useState("");
   const [editTags, setEditTags] = useState("");
   const [savingNovel, setSavingNovel] = useState(false);
+  const [savingCover, setSavingCover] = useState(false);
 
   const [chapterTitle, setChapterTitle] = useState("");
   const [chapterText, setChapterText] = useState("");
@@ -337,6 +340,56 @@ export default function WritePage() {
       setTogglingPublish(false);
     }
   }, [selected, confirmPublish, toast]);
+
+  /* --------------------------------------------------------------- bia */
+
+  const chonAnhBia = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const tep = event.target.files?.[0];
+      event.target.value = ""; // cho chon lai CUNG tep lan nua
+      if (!tep || !selected) return;
+      setSavingCover(true);
+      try {
+        const anh = await xuLyAnh(tep, MAX_COVER_EDGE);
+        if (!anh) {
+          toast.error("Không đọc được ảnh này.");
+          return;
+        }
+        const result = await api.setNovelCover(selected.novel_id, {
+          base64: anh.base64,
+          mime: anh.mime,
+          width: anh.width,
+          height: anh.height,
+        });
+        URL.revokeObjectURL(anh.xemTruoc); // chi dung de xem truoc tam thoi
+        setNovels((current) =>
+          current.map((n) => (n.novel_id === result.novel.novel_id ? result.novel : n)),
+        );
+        toast.ok("Đã cập nhật ảnh bìa.");
+      } catch (cause) {
+        toast.error(errorMessage(cause));
+      } finally {
+        setSavingCover(false);
+      }
+    },
+    [selected, toast],
+  );
+
+  const xoaAnhBia = useCallback(async () => {
+    if (!selected) return;
+    setSavingCover(true);
+    try {
+      const result = await api.removeNovelCover(selected.novel_id);
+      setNovels((current) =>
+        current.map((n) => (n.novel_id === result.novel.novel_id ? result.novel : n)),
+      );
+      toast.ok("Đã gỡ ảnh bìa.");
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setSavingCover(false);
+    }
+  }, [selected, toast]);
 
   /* ------------------------------------------------------------- chuong */
 
@@ -732,15 +785,55 @@ export default function WritePage() {
                   ) : (
                     <>
                       <div className="row-between">
-                        <div className="stack-2 min0">
-                          <h2 className="section-title">{selected.title}</h2>
-                          <span className="hint">
-                            {chapters.length} chương ·{" "}
-                            {published ? "đã xuất bản" : "bản nháp, chỉ mình bạn thấy"}
-                          </span>
-                          {selected.description ? (
-                            <p className="hint clamp-2">{selected.description}</p>
-                          ) : null}
+                        <div className="row row-tight min0">
+                          {/*
+                            Bia + nut doi/go ngay canh tieu de — cho tu nhien
+                            nhat de tim thay, vi day la khu vuc "day la truyen
+                            cua toi" chu khong phai mot trang cai dat rieng.
+                          */}
+                          <label
+                            className="min0"
+                            style={{ cursor: savingCover ? "wait" : "pointer" }}
+                            title="Đổi ảnh bìa"
+                          >
+                            <NovelCover
+                              novelId={selected.novel_id}
+                              title={selected.title}
+                              coverUrl={selected.cover_url}
+                              size="thumb"
+                            />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              hidden
+                              disabled={savingCover}
+                              onChange={chonAnhBia}
+                            />
+                          </label>
+                          <div className="stack-2 min0">
+                            <h2 className="section-title">{selected.title}</h2>
+                            <span className="hint">
+                              {chapters.length} chương ·{" "}
+                              {published ? "đã xuất bản" : "bản nháp, chỉ mình bạn thấy"}
+                            </span>
+                            {selected.description ? (
+                              <p className="hint clamp-2">{selected.description}</p>
+                            ) : null}
+                            {selected.cover_url ? (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={xoaAnhBia}
+                                disabled={savingCover}
+                                style={{ alignSelf: "flex-start" }}
+                              >
+                                {savingCover ? (
+                                  <span className="spinner" aria-hidden="true" />
+                                ) : null}
+                                Gỡ ảnh bìa
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                         <div className="row row-tight">
                           <Link

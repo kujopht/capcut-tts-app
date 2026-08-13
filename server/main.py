@@ -64,7 +64,9 @@ from server.social import (
     POST_MAX_CHARS,
     RateLimited,
     SocialError,
+    kiem_anh,
     mo_ta_gioi_han,
+    object_key,
 )
 from server.social_service import SocialService
 
@@ -94,7 +96,7 @@ store = build_metadata_store(settings)
 #: Cac ham DUYET/TU CHOI/TREO cua no KHONG co route nao goi toi. Xem ghi chu o
 #: dau `server/creator_service.py`: du an chua co co che phan quyen quan tri,
 #: va mot endpoint duyet khong duoc bao ve la mot cai cong mo.
-creators = CreatorService(identity, store)
+creators = CreatorService(identity, store, storage)
 
 #: Tang service cua tang xa hoi. Cung `identity`/`store`/`storage` voi moi route
 #: khac — mot duong ghi duy nhat, va no la noi quyen/han muc/thong bao duoc
@@ -461,9 +463,14 @@ def _ho_so_tra_ve(profile: Profile) -> Dict[str, Any]:
 
     CHI la chuyen hien-hay-an: moi route `/api/admin/*` van tu kiem quyen qua
     `admin_profile`, mot nguoi thuong go thang duong dan van nhan 403.
+
+    Kem `avatar_url` (ky lai moi lan doc) ben canh `avatar_key` da co trong
+    `to_dict()` — CUNG ly do voi `is_admin`: trinh duyet khong co credential
+    cua kho nen khong tu dung tu khoa duoc.
     """
     return {**profile.to_dict(),
-            "is_admin": profile.user_id in settings.admin_user_ids}
+            "is_admin": profile.user_id in settings.admin_user_ids,
+            "avatar_url": creators.avatar_url(profile)}
 
 
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
@@ -676,6 +683,84 @@ def _novel_brief(novel: Novel) -> Dict[str, Any]:
         "cover_key": novel.cover_key,
         "cover_url": _cover_url(novel),
     }
+
+
+class CoverIn(BaseModel):
+    """Anh dang base64 — cung ly do voi `PostIn.image_base64`, xem ghi chu o do."""
+
+    base64: Annotated[str, StringConstraints(min_length=1, max_length=3_000_000)]
+    mime: Annotated[str, StringConstraints(max_length=60)] = ""
+    width: int = 0
+    height: int = 0
+
+
+@app.put("/api/novels/{novel_id}/cover")
+def set_novel_cover(novel_id: str, payload: CoverIn,
+                    profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Tai/doi anh bia truyen.
+
+    Kiem TRUOC khi cham kho (dung mau voi `_gan_bo_anh` cua tang xa hoi): giai
+    ma, kiem MIME/kich thuoc, ROI moi upload. That bai o buoc kiem thi chua co
+    gi de don.
+
+    Khoa doi tuong TAT DINH theo `(owner_id, novel_id)` nhung DUOI tep co the
+    doi giua cac lan tai (vd .jpg -> .webp) — anh bia cu voi duoi khac se mo
+    coi neu khong xoa, nen xoa no SAU KHI anh moi da luu thanh cong.
+    """
+    if storage is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Máy chủ chưa cấu hình kho ảnh.")
+    try:
+        novel = store.owned_novel(novel_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    anh = _giai_ma_anh(payload.base64, payload.mime, payload.width, payload.height)
+    try:
+        kiem_anh("cover", mime=anh["mime"], so_byte=len(anh["data"]))
+    except SocialError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    duoi = anh["mime"].split("/")[-1] or "webp"
+    khoa_moi = object_key("cover", user_id=profile.user_id, subject_id=novel_id,
+                          duoi=duoi)
+    storage.put(khoa_moi, anh["data"], content_type=anh["mime"])
+
+    khoa_cu = novel.cover_key
+    updated = store.set_novel_cover(novel_id, profile.user_id, khoa_moi)
+
+    if khoa_cu and khoa_cu != khoa_moi:
+        try:
+            storage.delete(khoa_cu)
+        except Exception:
+            # Anh cu mo coi ton vai tram KB; khong lam hong request vi mot loi
+            # don kho — nguoi dung da co anh bia MOI, do la dieu ho can thay.
+            pass
+
+    return {"novel": _novel_out(updated)}
+
+
+@app.delete("/api/novels/{novel_id}/cover")
+def remove_novel_cover(novel_id: str,
+                       profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Go anh bia — truyen lui ve hien thi gradient + rune du phong o giao dien."""
+    try:
+        novel = store.owned_novel(novel_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    updated = store.set_novel_cover(novel_id, profile.user_id, None)
+    if novel.cover_key and storage is not None:
+        try:
+            storage.delete(novel.cover_key)
+        except Exception:
+            pass
+    return {"novel": _novel_out(updated)}
 
 
 #: Tran tren cho `limit`. Khong de client tu xin 10.000 ban ghi mot lan.
@@ -2123,6 +2208,34 @@ def set_username(payload: UsernameIn,
 def set_bio(payload: BioIn,
             profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return {"profile": creators.set_bio(profile, payload.bio).to_dict()}
+
+
+class AvatarIn(BaseModel):
+    """Anh dang base64 — cung khuon voi `CoverIn`."""
+
+    base64: Annotated[str, StringConstraints(min_length=1, max_length=3_000_000)]
+    mime: Annotated[str, StringConstraints(max_length=60)] = ""
+    width: int = 0
+    height: int = 0
+
+
+@app.put("/api/creator/avatar")
+def set_avatar(payload: AvatarIn,
+               profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Tai/doi anh dai dien. Xem `CreatorService.set_avatar`."""
+    anh = _giai_ma_anh(payload.base64, payload.mime, payload.width, payload.height)
+    try:
+        updated = creators.set_avatar(profile, data=anh["data"], mime=anh["mime"])
+    except SocialError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"profile": _ho_so_tra_ve(updated)}
+
+
+@app.delete("/api/creator/avatar")
+def remove_avatar(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Go anh dai dien — giao dien lui ve chu cai dau ten."""
+    updated = creators.remove_avatar(profile)
+    return {"profile": _ho_so_tra_ve(updated)}
 
 
 @app.post("/api/creator/apply", status_code=status.HTTP_201_CREATED)

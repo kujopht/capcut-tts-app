@@ -53,6 +53,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("bio", "string", False, 400),
             ("author_status", "enum", False,
              ["none", "pending", "approved", "rejected", "suspended"]),
+            # --- V4: anh dai dien (Phase 6) ------------------------------------
+            # Khoa doi tuong R2, KHONG PHAI url — cung quy uoc voi
+            # `novels.cover_key`. 512 la muc rong rai giong het cover_key, du
+            # avatar_key thuc te ngan hon nhieu (khong co subject_id).
+            ("avatar_key", "string", False, 512),
         ],
         "indexes": [
             ("email_unique", "unique", ["email"]),

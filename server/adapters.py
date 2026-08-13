@@ -247,6 +247,20 @@ class MetadataStore(Protocol):
         """Sua truyen. Chi chu so huu; chi nhan cac truong nguoi dung duoc sua."""
         ...
 
+    def set_novel_cover(self, novel_id: str, owner_id: str,
+                        cover_key: Optional[str]) -> Novel:
+        """
+        Dat/xoa khoa anh bia. TACH khoi `update_novel`.
+
+        `NOVEL_EDITABLE` cua `update_novel` la danh sach TRUONG NGUOI DUNG GO
+        TAY (title/description/tags) — mo them `cover_key` vao do se cho phep
+        mot request PATCH gan khoa cua BAT KY object nao trong R2 lam bia
+        truyen, ke ca object khong phai anh hay khong thuoc ve minh. `cover_key`
+        chi duoc may chu tinh RA sau khi tu upload va kiem tra, nen no can
+        duong ghi rieng, khong di qua duong nhan du lieu tho tu client.
+        """
+        ...
+
     def unpublish_novel(self, novel_id: str, owner_id: str) -> Novel:
         """Dua truyen ve ban nhap VA thu hoi quyen doc cong khai. Idempotent."""
         ...
@@ -938,6 +952,14 @@ class MockMetadataStore(MockSocialStore):
             current = self.owned_novel(novel_id, owner_id)
             allowed = {k: v for k, v in fields.items() if k in self.NOVEL_EDITABLE}
             updated = replace(current, **allowed, updated_at=now_iso())
+            self.novels[novel_id] = updated
+            return updated
+
+    def set_novel_cover(self, novel_id: str, owner_id: str,
+                        cover_key: Optional[str]) -> Novel:
+        with self._lock:
+            current = self.owned_novel(novel_id, owner_id)
+            updated = replace(current, cover_key=cover_key, updated_at=now_iso())
             self.novels[novel_id] = updated
             return updated
 

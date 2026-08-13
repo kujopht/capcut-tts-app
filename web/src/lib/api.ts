@@ -33,6 +33,12 @@ export interface Profile {
    * `/admin`; quyền thật nằm ở từng route `/api/admin/*`.
    */
   is_admin?: boolean;
+  /** Khoá đối tượng R2 của avatar. Chuỗi rỗng = chưa tải — dùng `avatar_url`
+      để hiển thị, không bao giờ tự dựng URL từ khoá này. */
+  avatar_key?: string;
+  /** URL xem được của avatar, do máy chủ ký. `null`/`undefined` = chưa có —
+      giao diện lùi về chữ cái đầu tên. */
+  avatar_url?: string | null;
 }
 
 /**
@@ -115,6 +121,9 @@ export interface PublicProfile {
   rank?: RankProgress;
   published_novels?: number;
   novels?: Novel[];
+  /** URL avatar đã ký, hoặc `null` khi chưa tải. Tuỳ chọn để client cũ vẫn
+      biên dịch được — cùng lý do với `Novel.cover_url`. */
+  avatar_url?: string | null;
   /**
    * Số liệu xã hội, ghép sẵn vào cùng một lần gọi.
    *
@@ -330,6 +339,22 @@ export const api = {
       body: JSON.stringify({ bio }),
     }),
 
+  /**
+   * Tai/doi avatar. `image` da qua xu ly o trinh duyet — xem
+   * `lib/image.ts::xuLyAnh`. May chu van kiem lai MIME/kich thuoc that.
+   */
+  setAvatar: (
+    image: { base64: string; mime: string; width: number; height: number },
+  ) =>
+    request<{ profile: Profile }>("/api/creator/avatar", {
+      method: "PUT",
+      body: JSON.stringify(image),
+    }),
+
+  /** Go avatar — giao dien lui ve chu cai dau ten. */
+  removeAvatar: () =>
+    request<{ profile: Profile }>("/api/creator/avatar", { method: "DELETE" }),
+
   applyAuthor: (payload: {
     pen_name: string;
     bio?: string;
@@ -490,6 +515,25 @@ export const api = {
       `/api/novels/${novelId}`,
       { method: "DELETE" },
     ),
+
+  /**
+   * Tai/doi anh bia truyen. `image` da qua xu ly o trinh duyet (WebP, da nen)
+   * — xem `lib/image.ts::xuLyAnh`. May chu van kiem lai MIME/kich thuoc that.
+   */
+  setNovelCover: (
+    novelId: string,
+    image: { base64: string; mime: string; width: number; height: number },
+  ) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}/cover`, {
+      method: "PUT",
+      body: JSON.stringify(image),
+    }),
+
+  /** Go anh bia — truyen lui ve hien thi gradient + rune du phong. */
+  removeNovelCover: (novelId: string) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}/cover`, {
+      method: "DELETE",
+    }),
 
   createChapter: (
     novelId: string,

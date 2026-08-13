@@ -157,25 +157,21 @@ test("chu nam TRUC TIEP tren tranh deu co mot cach chong nhoe", () => {
   assert.equal(diem.at(-1), "00", "mảng tối footer không tan ở mép dưới");
 });
 
-test("tieu de trang du sang de canh tieu de chuong khong nhin nhu bi tat", () => {
+test("tieu de trang dac mau gan trang, khong con gradient mo dan", () => {
   /*
-    `.page-title` to bang gradient qua `background-clip: text`, nghia la mot
-    `text-shadow` KHONG cuu duoc no — bong ve phia sau lop gradient, khong phia
-    sau net chu. Nen thu duy nhat con lai la ban than gradient phai du sang.
-
-    Ban truoc ket o `#9aa5bd`: nua duoi net chu xam han nua tren, va canh tieu
-    de chuong (chu dac) o trang doc thi moi tieu de khac doc ra nhu dang mo dan.
+    Ban gradient-clip-text truoc day (`linear-gradient(...) -> #c5cfe3`) van
+    lam nua duoi cua tieu de hai dong doc ra XAM tren nen sang — do bang anh
+    chup that o `02-explore-sky-kingdom`. Sua: mau DAC `var(--text)`, khong
+    con `background-clip: text` / `color: transparent`, kem text-shadow RIENG
+    (khong dua vao danh sach dung chung — no lon hon han cac dong con lai).
   */
   const text = css();
   const at = text.indexOf(".page-title {");
   const than = text.slice(at, text.indexOf("}", at));
-  const cuoi = than.match(/linear-gradient\(180deg, var\(--text\)[^,]*, (#[0-9a-f]{6})/);
-  assert.ok(cuoi, "không tìm thấy gradient của tiêu đề trang");
-  // Do sang tuong doi cua diem cuoi. `#9aa5bd` -> 0.39; nguong 0.55 loai no ra.
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(cuoi[1].slice(i, i + 2), 16) / 255);
-  const kenh = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  const L = 0.2126 * kenh(r) + 0.7152 * kenh(g) + 0.0722 * kenh(b);
-  assert.ok(L > 0.55, `điểm cuối gradient sáng ${L.toFixed(2)}, cần > 0.55`);
+  assert.match(than, /color:\s*var\(--text\)/, "tiêu đề trang phải là màu đặc var(--text)");
+  assert.doesNotMatch(than, /color:\s*transparent/, "tiêu đề trang không còn được phép trong suốt");
+  assert.doesNotMatch(than, /background-clip:\s*text/, "tiêu đề trang không còn gradient-clip");
+  assert.match(than, /text-shadow:/, "tiêu đề trang cần bóng chữ riêng để đọc được trên tranh nền");
 });
 
 test("hang dieu huong cuon duoc o mobile thi phai NOI ra la cuon duoc", () => {

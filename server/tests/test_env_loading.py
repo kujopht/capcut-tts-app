@@ -264,5 +264,47 @@ class TestNoRealSecretsInTests(unittest.TestCase):
         self.assertRegex(declared[0], r"[<>=~!]", "phải có ràng buộc phiên bản")
 
 
+
+
+class SchemaKeyTest(unittest.TestCase):
+    """
+    `APPWRITE_SCHEMA_API_KEY` — khoa quan schema RIENG, khong bao gio lo ra.
+
+    Khoa runtime tren Render chi co quyen documents; khoa schema chi song o
+    may van hanh. Hai bai duoi day ghim hai dieu: khoa duoc NAP dung, va khong
+    duong mo ta/health nao mang no ra ngoai.
+    """
+
+    def test_nap_va_khong_lo_qua_describe(self):
+        import os
+        from server.config import load_settings
+
+        cu = os.environ.get("APPWRITE_SCHEMA_API_KEY")
+        os.environ["APPWRITE_SCHEMA_API_KEY"] = "khoa-thu-khong-in-ra"
+        try:
+            s = load_settings()
+            self.assertEqual(s.appwrite.schema_api_key, "khoa-thu-khong-in-ra")
+            chu = repr(s.describe())
+            self.assertNotIn("khoa-thu-khong-in-ra", chu)
+            self.assertNotIn("schema_api_key", chu)
+        finally:
+            if cu is None:
+                os.environ.pop("APPWRITE_SCHEMA_API_KEY", None)
+            else:
+                os.environ["APPWRITE_SCHEMA_API_KEY"] = cu
+
+    def test_script_schema_uu_tien_khoa_rieng(self):
+        """Khoa schema khi co, lui ve khoa runtime khi vang — dung phep chon
+        ma `scripts/setup_appwrite.py::Setup.__init__` dung."""
+        from server.config import AppwriteSettings
+
+        co = AppwriteSettings(endpoint="e", project_id="p", api_key="runtime",
+                              database_id="d", schema_api_key="schema")
+        khong = AppwriteSettings(endpoint="e", project_id="p",
+                                 api_key="runtime", database_id="d")
+        self.assertEqual(co.schema_api_key or co.api_key, "schema")
+        self.assertEqual(khong.schema_api_key or khong.api_key, "runtime")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

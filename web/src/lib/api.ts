@@ -863,6 +863,19 @@ export const api = {
     request<AudioLink>(
       `/api/audio/${chapterId}/url${download ? "?download=true" : ""}`,
     ),
+
+  // -- Subtitle Studio (overnight Phase 4, Phan 4E) --------------------------
+
+  /**
+   * Dich MOT LO dong phu de (toi da 50 dong/lan, khop gioi han backend) —
+   * CHI van ban, khong bao gio gui video. Dung `lib/subtitles/translate.ts`
+   * (`dichDongPhuDe`) de tu chia lo cho danh sach dai hon.
+   */
+  translateSubtitleLines: (texts: string[]) =>
+    request<{ translated: string[] }>("/api/tools/subtitles/translate", {
+      method: "POST",
+      body: JSON.stringify({ texts }),
+    }),
 };
 
 /** Mot trang trong danh sach truyen. */

@@ -5679,3 +5679,32 @@ body.co-mini { padding-bottom: 74px; }
   }
   .editor-panes { grid-template-columns: 1fr; }
 }
+
+/* =============================================================================
+   Subtitle Studio (overnight Phase 4, V6) — /tools/subtitles
+   ============================================================================= */
+
+.sub-video {
+  width: 100%;
+  max-height: 60vh;
+  border-radius: var(--r3);
+  background: #000;
+}
+.input-mini { width: 90px; padding: 4px 8px; text-align: right; }
+.sub-list { max-height: 60vh; overflow-y: auto; gap: var(--s2); }
+.sub-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s3);
+  align-items: start;
+  padding: var(--s3);
+}
+.sub-row-active { border-color: var(--brand-hover); }
+.sub-row-times { flex-direction: column; align-items: flex-start; gap: 4px; }
+.sub-row-text { min-height: 44px; resize: vertical; }
+.sub-row-actions { flex-direction: column; }
+@media (max-width: 640px) {
+  .sub-row { grid-template-columns: 1fr; }
+  .sub-row-times { flex-direction: row; align-items: center; }
+  .sub-row-actions { flex-direction: row; }
+}

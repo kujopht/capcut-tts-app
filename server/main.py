@@ -93,8 +93,16 @@ from server.translation import (
     UnsupportedFormat,
 )
 from server.translation_import import extract_text as _trich_van_ban_tep
-from server.translation_providers import build_provider
-from server.translation_provider_registry import ConnectionCheckError, build_provider_registry
+from server.translation_providers import (
+    TranslationContext,
+    TranslationProviderError,
+    build_provider,
+)
+from server.translation_provider_registry import (
+    AllProvidersUnavailable,
+    ConnectionCheckError,
+    build_provider_registry,
+)
 from server.translation_byok_crypto import ByokConfigError, ByokCrypto, build_byok_crypto
 from server.translation_byok_service import ByokNotConfiguredError, ProviderConnectionService
 from server.translation_service import TranslationService
@@ -3908,6 +3916,67 @@ def admin_translate_usage(profile: Profile = Depends(admin_profile)) -> Dict[str
         "summary_by_provider": rec.tom_tat_theo_model(),
         "recent_events": [e.to_dict() for e in rec.gan_day(200)],
     }
+
+
+#: So dong toi da MOT lan goi — kiem soat thoi gian request (Groq timeout
+#: 60s CHO TUNG doan, chay TUAN TU): 50 dong o mien te nhat van nam trong
+#: vai phut, khong de mot request treo qua lau. Phu de dai hon thi frontend
+#: tu chia thanh nhieu lo (xem `web/src/lib/subtitles/translate.ts`).
+SUBTITLE_TRANSLATE_MAX_LINES = 50
+
+
+class SubtitleTranslateIn(BaseModel):
+    texts: List[Annotated[str, StringConstraints(max_length=2000)]]
+    target_language: Annotated[str, StringConstraints(max_length=16)] = "vi"
+
+
+@app.post("/api/tools/subtitles/translate")
+def translate_subtitle_lines(
+    payload: SubtitleTranslateIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Dich MOT LO dong phu de — CHI VAN BAN, KHONG BAO GIO nhan/dung video
+    (Phan 4E: "send subtitle TEXT ONLY... Never upload the source video
+    merely to translate text").
+
+    Dung LAI nguyen tang provider/registry/BYOK cua Fanfic Translation
+    Studio (Part Q/V5.1) — KHONG tao TranslationProject/job rieng cho cong
+    cu nay (Phan 4F: "Do not force Novel entities"): day la dich TUNG DONG
+    doc lap, khong can Novel Bible/glossary/chuong.
+
+    Dang nhap bat buoc — tranh nguoi la mat dung pool mien phi chung qua
+    mot cong cu khong co gioi han job nhu Translation Studio.
+    """
+    if not payload.texts:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Danh sách dòng trống.")
+    if len(payload.texts) > SUBTITLE_TRANSLATE_MAX_LINES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Tối đa {SUBTITLE_TRANSLATE_MAX_LINES} dòng mỗi lần — chia nhỏ lô.")
+
+    personal = (translation_byok_svc.build_all_configured_providers(profile.user_id)
+               if translation_byok_svc else [])
+    ra: List[str] = []
+    for dong in payload.texts:
+        sach = dong.strip()
+        if not sach:
+            ra.append("")
+            continue
+        ctx = TranslationContext(vai_tro="translator", quality_mode="nhanh")
+        try:
+            dich, _ = translation_registry.translate_segment_with_personal(
+                sach, context=ctx, mode="auto", allow_fallback=True,
+                personal_providers=personal, prefer_personal=False)
+        except AllProvidersUnavailable as exc:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Các model dịch miễn phí hiện đều không dùng được, thử lại sau."
+            ) from exc
+        except TranslationProviderError as exc:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                               "Không dịch được dòng này, thử lại.") from exc
+        ra.append(dich)
+    return {"translated": ra}
 
 
 class ProviderSettingsPatch(BaseModel):

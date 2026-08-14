@@ -44,6 +44,10 @@ export const HO_ENDPOINT = [
   "progress",
   "reports",
   "search",
+  // Subtitle Studio (overnight Phase 4, V6) — cong cu CUC BO, dich tung dong
+  // qua registry chung nhung KHONG tao TranslationProject/job rieng, nen ho
+  // rieng thay vi nam duoi `/api/translate/...`.
+  "tools",
   // V5 — Novel Translation Studio. Ho RIENG: subsystem khong dung chung bang
   // voi tts_jobs/novels, xem `server/translation_service.py`.
   "translate",

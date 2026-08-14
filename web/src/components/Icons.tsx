@@ -75,6 +75,17 @@ export function IconHeadphones(p: Props) {
   );
 }
 
+/** Cuon phim — "video/phu de" (Subtitle Studio, overnight Phase 4). */
+export function IconFilm(p: Props) {
+  return (
+    <Svg {...p}>
+      <rect x="3" y="5" width="18" height="14" rx="1.5" />
+      <path d="M7 5 V19 M17 5 V19" />
+      <path d="M3 9 H7 M3 15 H7 M17 9 H21 M17 15 H21" />
+    </Svg>
+  );
+}
+
 /** Micro — "tao giong doc". */
 export function IconMic(p: Props) {
   return (

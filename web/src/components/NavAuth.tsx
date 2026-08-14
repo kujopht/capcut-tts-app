@@ -173,6 +173,9 @@ function ToolsMenu() {
           <Link href="/translate" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">🈺</span> Dịch tiểu thuyết
           </Link>
+          <Link href="/tools/subtitles" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">🎬</span> Subtitle Studio
+          </Link>
         </div>
       ) : null}
     </div>

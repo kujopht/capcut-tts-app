@@ -21,6 +21,7 @@ import {
 } from "@/components/Icons";
 import { CreatorSection } from "@/components/CreatorSection";
 import { AccountSocial } from "@/components/AccountSocial";
+import { Avatar } from "@/components/Avatar";
 
 const TIER_LABEL: Record<string, string> = {
   free: "Miễn phí",
@@ -121,23 +122,11 @@ export default function AccountPage() {
           style={{ cursor: savingAvatar ? "wait" : "pointer" }}
           title="Đổi avatar"
         >
-          <span
+          <Avatar
+            name={profile.display_name || profile.email}
+            avatarUrl={profile.avatar_url}
             className="account-avatar"
-            aria-hidden="true"
-            style={
-              profile.avatar_url
-                ? {
-                    backgroundImage: `url("${profile.avatar_url}")`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }
-                : undefined
-            }
-          >
-            {profile.avatar_url
-              ? null
-              : (profile.display_name || profile.email).slice(0, 2).toUpperCase()}
-          </span>
+          />
           <input
             type="file"
             accept="image/*"

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 import { NotificationBell } from "@/components/NotificationBell";
+import { Avatar } from "@/components/Avatar";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -208,21 +209,7 @@ function AccountMenu() {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <span
-          className="avatar"
-          aria-hidden="true"
-          style={
-            profile.avatar_url
-              ? {
-                  backgroundImage: `url("${profile.avatar_url}")`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }
-              : undefined
-          }
-        >
-          {profile.avatar_url ? null : name.slice(0, 2).toUpperCase()}
-        </span>
+        <Avatar name={name} avatarUrl={profile.avatar_url} className="avatar" />
         <span className="hint truncate account-name">{name}</span>
       </button>
       {open ? (

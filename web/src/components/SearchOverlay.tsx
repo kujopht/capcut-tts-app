@@ -29,6 +29,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, social, type Novel, type Post, type PublicProfile } from "@/lib/api";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
+import { Avatar } from "@/components/Avatar";
 import { NovelCover } from "@/components/NovelCover";
 import { IconBook, IconMegaphone, IconUser } from "@/components/Icons";
 
@@ -280,9 +281,11 @@ export function SearchOverlay({
                         onClick={onDong}
                         onMouseEnter={() => setChon(vt)}
                       >
-                        <span className="tim-avatar" aria-hidden="true">
-                          {(p.display_name || p.username).slice(0, 2).toUpperCase()}
-                        </span>
+                        <Avatar
+                          name={p.display_name || p.username}
+                          avatarUrl={p.avatar_url}
+                          className="tim-avatar"
+                        />
                         <span className="tim-chu">
                           <strong>{p.display_name || p.username}</strong>
                           <span className="hint mono">@{p.username}</span>
@@ -324,9 +327,11 @@ export function SearchOverlay({
                         onClick={onDong}
                         onMouseEnter={() => setChon(vt)}
                       >
-                        <span className="tim-avatar" aria-hidden="true">
-                          {(b.author?.display_name || "?").slice(0, 2).toUpperCase()}
-                        </span>
+                        <Avatar
+                          name={b.author?.display_name || "?"}
+                          avatarUrl={b.author?.avatar_url}
+                          className="tim-avatar"
+                        />
                         <span className="tim-chu">
                           <strong>
                             {b.text.length > 70 ? `${b.text.slice(0, 70)}…` : b.text}

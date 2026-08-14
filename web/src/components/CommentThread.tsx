@@ -38,6 +38,7 @@ import { khiNao, dongHo } from "@/lib/time";
 import { ReportDialog } from "@/components/ReportDialog";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { useAudioEngineOptional } from "@/components/AudioEngine";
+import { Avatar } from "@/components/Avatar";
 
 type DichKind = "post" | "chapter";
 
@@ -113,9 +114,7 @@ function OGo({
   return (
     <div className="binh-luan-go">
       <div className="binh-luan-go-hang">
-        <span className="avatar avatar-sm" aria-hidden="true">
-          {ten.slice(0, 2).toUpperCase()}
-        </span>
+        <Avatar name={ten} avatarUrl={profile?.avatar_url} className="avatar avatar-sm" />
         <textarea
           className="input"
           rows={2}
@@ -260,6 +259,11 @@ function MotBinhLuan({
   return (
     <li className={tra ? "binh-luan tra-loi" : "binh-luan"} id={bl.comment_id}>
       <div className="binh-luan-dau">
+        <Avatar
+          name={bl.author?.display_name || bl.author?.username || "?"}
+          avatarUrl={bl.author?.avatar_url}
+          className="avatar avatar-sm"
+        />
         {bl.author?.username ? (
           <Link href={`/u/${bl.author.username}`} className="binh-luan-ten">
             {bl.author.display_name || bl.author.username}

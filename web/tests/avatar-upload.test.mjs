@@ -71,10 +71,20 @@ test("nut Go avatar chi hien khi DA co avatar", () => {
   assert.match(truoc, /profile\.avatar_url\s*\?/);
 });
 
-test("menu tai khoan (NavAuth) hien avatar that khi co, khong ve chu cai de len anh", () => {
+test("menu tai khoan (NavAuth) dung component Avatar dung chung, truyen avatar_url", () => {
+  /*
+    Logic "anh that hay chu cai dau" gio song trong `components/Avatar.tsx`
+    (dung chung cho NavAuth, /account, PostCard, CommentThread, SearchOverlay,
+    trang ho so cong khai) — bai kiem ve dac diem HIEN THI thuoc ve file do;
+    o day chi con kiem NavAuth truyen dung prop.
+  */
   const src = navAuth();
-  assert.match(src, /profile\.avatar_url/);
-  assert.match(src, /backgroundImage:\s*`url\("\$\{profile\.avatar_url\}"\)`/);
-  // Chu cai chi hien khi KHONG co avatar_url — tranh chu de len tren anh.
-  assert.match(src, /profile\.avatar_url\s*\?\s*null\s*:/);
+  assert.match(src, /import\s*\{\s*Avatar\s*\}\s*from\s*"@\/components\/Avatar"/);
+  assert.match(src, /<Avatar\s+name=\{name\}\s+avatarUrl=\{profile\.avatar_url\}/);
+});
+
+test("components/Avatar.tsx: anh that hay chu cai dau ten, khong de chu chong len anh", () => {
+  const src = read("../src/components/Avatar.tsx");
+  assert.match(src, /backgroundImage:\s*`url\("\$\{avatarUrl\}"\)`/);
+  assert.match(src, /avatarUrl\s*\?\s*null\s*:/);
 });

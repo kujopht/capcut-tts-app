@@ -219,5 +219,33 @@ class TestR2AdapterGuards(unittest.TestCase):
         self.assertIn("boto3", str(ctx.exception))
 
 
+class TestProfileFromRow(unittest.TestCase):
+    """
+    `_profile_from` (hang `profiles` -> `Profile`) la nguon cho MOI duong doc
+    NHIEU ho so mot luot (`profiles_by_ids`, `profile_by_username`, tim kiem).
+
+    Bo BUG THAT: ham nay da doc `username`/`bio`/`author_status` nhung QUEN
+    `avatar_key` khi truong do duoc them — hau qua la avatar bien mat khoi
+    bai dang/binh luan/thong bao/tim kiem (tat ca di qua duong nay) trong khi
+    van hien dung o `/api/auth/me` (di qua `_merge_stored`, mot ham khac).
+    """
+
+    def test_avatar_key_duoc_doc_tu_hang(self):
+        from server.appwrite_adapter import _profile_from
+
+        p = _profile_from({
+            "user_id": "u1", "email": "a@vidu.vn", "username": "an",
+            "bio": "chao", "author_status": "approved",
+            "avatar_key": "avatars/u1/anh.webp",
+        })
+        self.assertEqual(p.avatar_key, "avatars/u1/anh.webp")
+
+    def test_thieu_avatar_key_tra_chuoi_rong_khong_nem(self):
+        from server.appwrite_adapter import _profile_from
+
+        p = _profile_from({"user_id": "u1", "email": "a@vidu.vn"})
+        self.assertEqual(p.avatar_key, "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

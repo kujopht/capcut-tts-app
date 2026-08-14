@@ -502,10 +502,12 @@ class CreatorService:
             if authors_only and p.author_status is not AuthorStatus.APPROVED:
                 continue
             stats = self._store.get_stats(p.user_id)
-            ket_qua.append(public_author_card(p.to_dict(), {
+            the = public_author_card(p.to_dict(), {
                 "qualified_listens": stats.qualified_listens,
                 "published_novels": stats.published_novels,
-            }))
+            })
+            the["avatar_url"] = self.avatar_url(p)
+            ket_qua.append(the)
         return {"people": ket_qua, "total": total,
                 "limit": limit, "offset": offset}
 

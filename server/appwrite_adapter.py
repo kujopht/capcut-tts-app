@@ -657,4 +657,5 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         username=str(row.get("username") or ""),
         bio=str(row.get("bio") or ""),
         author_status=status,
+        avatar_key=str(row.get("avatar_key") or ""),
     )

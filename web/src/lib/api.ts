@@ -821,6 +821,10 @@ export interface AuthorCard {
   is_author: boolean;
   rank?: RankProgress;
   published_novels?: number;
+  /** URL avatar đã ký, hoặc `null`/vắng mặt khi chưa tải — nơi hiển thị lùi
+      về chữ cái đầu tên. Cùng một chỗ (`_the_nguoi` ở backend) phục vụ mọi
+      nơi thẻ này xuất hiện: bài đăng, bình luận, thông báo, tìm kiếm. */
+  avatar_url?: string | null;
 }
 
 export type PostKind = "post" | "story_update";

@@ -1004,5 +1004,74 @@ class NhieuAnhVaXemTruocTest(Nen):
         self.assertEqual([a["width"] for a in bai["images"]], [8, 8, 8, 8])
 
 
+class _KhoKyGia(LocalStorageAdapter):
+    """Gia lap kho co URL ky (nhu R2) — dung de kiem avatar_url lan truyen."""
+
+    mode = "r2"
+
+    def signed_url(self, key, expires_seconds=3600, download_name=None):
+        return f"https://khong-co-that.example/{key}?sig=gia-lap"
+
+
+class AvatarLanTruyenTest(Nen):
+    """
+    V4 Phase 6 (tiep): avatar phai hien o MOI noi `_the_nguoi` phuc vu — bai
+    dang, binh luan, tra loi, thong bao, tim kiem, the tac gia. Sua MOT ham
+    (`_the_nguoi`) phai lan toa het thay vi phai sua tung route.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.social._storage = _KhoKyGia(Path(tempfile.mkdtemp()))
+        self.an.avatar_key = "avatars/an/anh.webp"
+        self.identity.save_profile(self.an)
+
+    def test_bai_dang_hien_avatar_tac_gia(self):
+        bai = self._bai()
+        self.assertIn("khong-co-that.example", bai["author"]["avatar_url"])
+
+    def test_bang_tin_hien_avatar_tac_gia(self):
+        self._bai()
+        f = self.social.feed(None)
+        self.assertIn("khong-co-that.example",
+                     f["items"][0]["author"]["avatar_url"])
+
+    def test_binh_luan_hien_avatar_nguoi_binh_luan(self):
+        bai = self._bai(cua=self.binh)
+        self.binh.avatar_key = "avatars/binh/anh.webp"
+        self.identity.save_profile(self.binh)
+        c = self.social.create_comment(self.an, bai["post_id"], text="Hay!")
+        self.assertIn("khong-co-that.example", c["author"]["avatar_url"])
+
+    def test_tra_loi_hien_avatar(self):
+        bai = self._bai()
+        goc = self.social.create_comment(self.binh, bai["post_id"], text="Gốc")
+        self.social.create_comment(
+            self.an, bai["post_id"], text="Trả lời", parent_id=goc["comment_id"])
+        ds = self.social.replies(goc["comment_id"])
+        self.assertIn("khong-co-that.example",
+                     ds["items"][0]["author"]["avatar_url"])
+
+    def test_thong_bao_hien_avatar_nguoi_gay_ra(self):
+        self.social.follow_user(self.an, self.binh.user_id)
+        tb = self.social.notifications(self.binh)
+        self.assertIn("khong-co-that.example",
+                     tb["items"][0]["actor"]["avatar_url"])
+
+    def test_the_tac_gia_tim_kiem_hien_avatar(self):
+        the = self.social._the_nguoi([self.an.user_id])
+        self.assertIn("khong-co-that.example", the[self.an.user_id]["avatar_url"])
+
+    def test_chua_co_avatar_thi_null_khong_phai_chuoi_rong(self):
+        the = self.social._the_nguoi([self.binh.user_id])
+        self.assertIsNone(the[self.binh.user_id]["avatar_url"])
+
+    def test_khong_ky_duoc_thi_null_khong_gay_loi(self):
+        """LocalStorageAdapter (dev) khong ky URL — phai la None, khong nem."""
+        self.social._storage = LocalStorageAdapter(Path(tempfile.mkdtemp()))
+        the = self.social._the_nguoi([self.an.user_id])
+        self.assertIsNone(the[self.an.user_id]["avatar_url"])
+
+
 if __name__ == "__main__":
     unittest.main()

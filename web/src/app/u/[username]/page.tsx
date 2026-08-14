@@ -16,6 +16,7 @@ import { use, useCallback } from "react";
 import { api, type PublicProfile } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
+import { Avatar } from "@/components/Avatar";
 import { EmptyState, ErrorState, Loading, formatNumber } from "@/components/ui";
 import { IconHeadphones, IconUser } from "@/components/Icons";
 import { FollowButton } from "@/components/FollowButton";
@@ -64,9 +65,11 @@ export default function PublicProfilePage({
   return (
     <div className="page">
       <header className="account-hero ho-so-hero">
-        <span className="account-avatar" aria-hidden="true">
-          {(p.display_name || p.username).slice(0, 2).toUpperCase()}
-        </span>
+        <Avatar
+          name={p.display_name || p.username}
+          avatarUrl={p.avatar_url}
+          className="account-avatar"
+        />
 
         <div className="stack-2 account-hero-body">
           <span className="eyebrow eyebrow-icon">

@@ -170,6 +170,9 @@ function ToolsMenu() {
           <Link href="/studio" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">🎙</span> Audio Studio
           </Link>
+          <Link href="/translate" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">🈺</span> Dịch tiểu thuyết
+          </Link>
         </div>
       ) : null}
     </div>

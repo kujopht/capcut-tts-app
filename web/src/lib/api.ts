@@ -1332,3 +1332,221 @@ export const adminSocial = {
       { method: "POST", body: "{}" },
     ),
 };
+
+// =============================================================================
+// V5 — Novel Translation Studio
+// =============================================================================
+//
+// Kieu o day khop `to_dict()` cua `server/translation_domain.py`. Subsystem
+// RIENG voi TTS — khong dung chung `Job`/`Chapter` o tren.
+
+export type GenrePreset =
+  | "tien_hiep" | "huyen_huyen" | "vo_hiep" | "do_thi" | "ngon_tinh"
+  | "lich_su" | "he_thong" | "dong_nhan" | "kinh_di" | "auto";
+
+export type NamingMode = "han_viet" | "pinyin" | "thuan_viet" | "fandom" | "auto";
+export type QualityMode = "nhanh" | "can_bang" | "van_hoc";
+
+export type TranslationJobStatus =
+  | "queued" | "analyzing" | "glossary" | "translating" | "reviewing" | "qa"
+  | "completed" | "failed" | "cancelled";
+
+export interface TranslationProject {
+  project_id: string;
+  owner_id: string;
+  title: string;
+  source_language: string;
+  target_language: string;
+  genre: GenrePreset;
+  genre_label: string;
+  naming_mode: NamingMode;
+  naming_mode_label: string;
+  quality_mode: QualityMode;
+  custom_instruction: string;
+  source_filename: string;
+  chapter_count: number;
+  translated_chapter_count: number;
+  imported_to_novel_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TranslationJob {
+  job_id: string;
+  project_id: string;
+  status: TranslationJobStatus;
+  current_chapter: number;
+  total_chapters: number;
+  progress: number;
+  retry_count: number;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
+export interface GlossaryEntry {
+  term_id: string;
+  category: string;
+  original: string;
+  translated: string;
+  note: string;
+  locked: boolean;
+}
+
+/** Nhan tieng Viet cho giao dien — khop `GENRE_LABELS`/`NAMING_LABELS` o
+    `server/translation.py`, chi de dung khi CHUA co du lieu tu may chu
+    (vd trong dropdown truoc khi goi API nao). */
+export const GENRE_OPTIONS: { value: GenrePreset; label: string }[] = [
+  { value: "auto", label: "Tự động nhận diện" },
+  { value: "tien_hiep", label: "Tiên hiệp" },
+  { value: "huyen_huyen", label: "Huyền huyễn" },
+  { value: "vo_hiep", label: "Võ hiệp" },
+  { value: "do_thi", label: "Đô thị" },
+  { value: "ngon_tinh", label: "Ngôn tình" },
+  { value: "lich_su", label: "Lịch sử" },
+  { value: "he_thong", label: "Hệ thống" },
+  { value: "dong_nhan", label: "Đồng nhân" },
+  { value: "kinh_di", label: "Kinh dị" },
+];
+
+export const NAMING_OPTIONS: { value: NamingMode; label: string }[] = [
+  { value: "auto", label: "Tự động" },
+  { value: "han_viet", label: "Hán Việt" },
+  { value: "pinyin", label: "Pinyin" },
+  { value: "thuan_viet", label: "Việt hoá ngữ nghĩa" },
+  { value: "fandom", label: "Thuật ngữ fandom" },
+];
+
+export const QUALITY_OPTIONS: { value: QualityMode; label: string; hint: string }[] = [
+  { value: "nhanh", label: "Nhanh", hint: "Một lượt dịch, rẻ và nhanh nhất." },
+  { value: "can_bang", label: "Cân bằng",
+    hint: "Dịch + kiểm tra nhất quán thuật ngữ." },
+  { value: "van_hoc", label: "Văn học",
+    hint: "Thêm một lượt biên tập văn học — tốn thời gian/API hơn." },
+];
+
+export const translate = {
+  estimate: (sourceText: string) =>
+    request<{ characters: number; estimated_tokens: number; chapters: number }>(
+      "/api/translate/estimate",
+      { method: "POST", body: JSON.stringify({ source_text: sourceText }) },
+    ),
+
+  createProject: (fields: {
+    title?: string;
+    sourceText: string;
+    genre?: GenrePreset;
+    namingMode?: NamingMode;
+    qualityMode?: QualityMode;
+    customInstruction?: string;
+  }) =>
+    request<{ project: TranslationProject }>("/api/translate/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        title: fields.title ?? "",
+        source_text: fields.sourceText,
+        genre: fields.genre ?? "auto",
+        naming_mode: fields.namingMode ?? "auto",
+        quality_mode: fields.qualityMode ?? "can_bang",
+        custom_instruction: fields.customInstruction ?? "",
+      }),
+    }),
+
+  /** `base64` la NOI DUNG TEP (khong phai van ban da giai ma) — xem
+      `TranslateUploadIn` o backend, cung ly do voi anh: tranh phu thuoc
+      `python-multipart` chua khai bao trong server/requirements.txt. */
+  uploadProject: (fields: {
+    filename: string;
+    base64: string;
+    title?: string;
+    genre?: GenrePreset;
+    namingMode?: NamingMode;
+    qualityMode?: QualityMode;
+    customInstruction?: string;
+  }) =>
+    request<{ project: TranslationProject }>("/api/translate/projects/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: fields.filename,
+        base64: fields.base64,
+        title: fields.title ?? "",
+        genre: fields.genre ?? "auto",
+        naming_mode: fields.namingMode ?? "auto",
+        quality_mode: fields.qualityMode ?? "can_bang",
+        custom_instruction: fields.customInstruction ?? "",
+      }),
+    }),
+
+  listProjects: () =>
+    request<{ projects: TranslationProject[]; total: number }>(
+      "/api/translate/projects",
+    ),
+
+  getProject: (projectId: string) =>
+    request<{
+      project: TranslationProject;
+      chapters: { index: number; translated: boolean; text: string }[];
+      jobs: TranslationJob[];
+    }>(`/api/translate/projects/${encodeURIComponent(projectId)}`),
+
+  createJob: (projectId: string) =>
+    request<{ job: TranslationJob }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/jobs`,
+      { method: "POST", body: "{}" },
+    ),
+
+  getJob: (jobId: string) =>
+    request<{ job: TranslationJob }>(
+      `/api/translate/jobs/${encodeURIComponent(jobId)}`,
+    ),
+
+  cancelJob: (jobId: string) =>
+    request<{ job: TranslationJob }>(
+      `/api/translate/jobs/${encodeURIComponent(jobId)}/cancel`,
+      { method: "POST", body: "{}" },
+    ),
+
+  listGlossary: (projectId: string) =>
+    request<{ entries: GlossaryEntry[]; total: number }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/glossary`,
+    ),
+
+  addGlossaryEntry: (projectId: string, fields: {
+    category: string; original: string; translated: string; note?: string;
+  }) =>
+    request<GlossaryEntry>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/glossary`,
+      { method: "POST", body: JSON.stringify(fields) },
+    ),
+
+  updateGlossaryEntry: (projectId: string, termId: string, fields: {
+    translated?: string; note?: string; locked?: boolean;
+  }) =>
+    request<GlossaryEntry>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/glossary/` +
+        encodeURIComponent(termId),
+      { method: "PATCH", body: JSON.stringify(fields) },
+    ),
+
+  deleteGlossaryEntry: (projectId: string, termId: string) =>
+    request<{ deleted: boolean }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/glossary/` +
+        encodeURIComponent(termId),
+      { method: "DELETE" },
+    ),
+
+  importToDraft: (projectId: string, fields: {
+    novelId?: string; newNovelTitle?: string;
+  } = {}) =>
+    request<{ novel_id: string; already_imported: boolean; chapters_created: number }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/import`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          novel_id: fields.novelId ?? "",
+          new_novel_title: fields.newNovelTitle ?? "",
+        }),
+      },
+    ),
+};

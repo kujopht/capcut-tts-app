@@ -69,6 +69,14 @@ from server.social import (
     object_key,
 )
 from server.social_service import SocialService
+from server.translation import (
+    QuotaExceeded as TranslationQuotaExceeded,
+    TranslationError,
+    UnsupportedFormat,
+)
+from server.translation_import import extract_text as _trich_van_ban_tep
+from server.translation_service import TranslationService
+from server.translation_store import MockTranslationStore
 
 app = FastAPI(
     title="Fanfic Audio Studio API",
@@ -109,6 +117,15 @@ social = SocialService(identity, store, storage,
 #: nguoc — mot import nguoc se lam hai module phu thuoc vong vao nhau, va do la
 #: thu rat kho thao ra sau nay.
 creators.on_decision = social.notify_author_decision
+
+#: Tang dich vu Novel Translation Studio (V5) — subsystem RIENG, khong dung
+#: chung bang voi tts_jobs/novels. Kho hien tai la MOCK (trong bo nho) — chua
+#: co ban Appwrite, xem bao cao V5 "known limitations". Provider mac dinh la
+#: mock (`build_provider(None)` khi chua cau hinh
+#: TRANSLATION_BASE_URL/API_KEY/MODEL) — moi truong chua co key LLM that van
+#: chay duoc, chi khong dich that.
+translation_store = MockTranslationStore()
+translation_svc = TranslationService(translation_store, store)
 
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
@@ -2969,3 +2986,235 @@ def admin_remove_comment(comment_id: str, payload: RemoveIn,
 def admin_restore_comment(comment_id: str, payload: FollowIn,
                           admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     return {"comment": _xa_hoi(social.restore_comment, admin, comment_id)}
+
+
+# =============================================================================
+# Novel Translation Studio (V5) — subsystem RIENG, xem `translation_service.py`.
+# =============================================================================
+
+
+def _dich_vu(fn, *args, **kwargs):
+    """Cung vai tro voi `_xa_hoi()` nhung cho tang dich thuat — MOT cho doi
+    loi nghiep vu thanh ma HTTP, thay vi lap try/except o tung route."""
+    try:
+        return fn(*args, **kwargs)
+    except TranslationQuotaExceeded as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
+    except UnsupportedFormat as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except TranslationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+
+class TranslateProjectIn(BaseModel):
+    title: Annotated[str, StringConstraints(max_length=200)] = ""
+    #: Dan TRUC TIEP — duong khac (tai tep) di qua
+    #: `POST /api/translate/projects/upload`.
+    source_text: Annotated[str, StringConstraints(max_length=400_000)] = ""
+    genre: Annotated[str, StringConstraints(max_length=20)] = "auto"
+    naming_mode: Annotated[str, StringConstraints(max_length=20)] = "auto"
+    quality_mode: Annotated[str, StringConstraints(max_length=20)] = "can_bang"
+    custom_instruction: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+@app.post("/api/translate/estimate")
+def translate_estimate(payload: TranslateProjectIn) -> Dict[str, Any]:
+    """Uoc luong THO truoc khi tao du an — khong ghi gi, khong can dang nhap
+    (nguoi dung xem truoc luc con dang dan/chinh van ban)."""
+    return translation_svc.estimate(payload.source_text)
+
+
+@app.post("/api/translate/projects", status_code=status.HTTP_201_CREATED)
+def create_translation_project(
+    payload: TranslateProjectIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    project = _dich_vu(
+        translation_svc.create_project, profile.user_id,
+        title=payload.title, source_text=payload.source_text,
+        genre=payload.genre, naming_mode=payload.naming_mode,
+        quality_mode=payload.quality_mode,
+        custom_instruction=payload.custom_instruction)
+    return {"project": project.to_dict()}
+
+
+class TranslateUploadIn(BaseModel):
+    """
+    Tep dang base64 — CUNG ly do voi `PostIn.image_base64`: multipart doi
+    `python-multipart`, goi chua khai bao trong `server/requirements.txt`
+    (chi co mat cuc bo vi mot phu thuoc khac keo theo). Base64 ton them ~33%
+    duong truyen cho mot tep toi da 10 MB; re hon nhieu so voi mot phu thuoc
+    khong khai bao lam vo backend luc trien khai that.
+    """
+
+    filename: Annotated[str, StringConstraints(max_length=200)]
+    #: 10 MB truoc base64 -> ~13.4 MB chuoi; lam tron len cho an toan.
+    base64: Annotated[str, StringConstraints(min_length=1, max_length=14_000_000)]
+    title: Annotated[str, StringConstraints(max_length=200)] = ""
+    genre: Annotated[str, StringConstraints(max_length=20)] = "auto"
+    naming_mode: Annotated[str, StringConstraints(max_length=20)] = "auto"
+    quality_mode: Annotated[str, StringConstraints(max_length=20)] = "can_bang"
+    custom_instruction: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+@app.post("/api/translate/projects/upload", status_code=status.HTTP_201_CREATED)
+def upload_translation_project(
+    payload: TranslateUploadIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Tao du an tu mot tep tai len (.txt/.epub/.docx). Xem `translation_import.py`."""
+    import base64
+    import binascii
+
+    try:
+        du_lieu = base64.b64decode(payload.base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Tệp không hợp lệ.") from exc
+    van_ban = _dich_vu(_trich_van_ban_tep, payload.filename, du_lieu)
+    project = _dich_vu(
+        translation_svc.create_project, profile.user_id,
+        title=payload.title or payload.filename, source_text=van_ban,
+        source_filename=payload.filename,
+        genre=payload.genre, naming_mode=payload.naming_mode,
+        quality_mode=payload.quality_mode,
+        custom_instruction=payload.custom_instruction)
+    return {"project": project.to_dict()}
+
+
+@app.get("/api/translate/projects")
+def list_translation_projects(
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    ds = translation_svc.list_projects(profile.user_id)
+    return {"projects": [p.to_dict() for p in ds], "total": len(ds)}
+
+
+@app.get("/api/translate/projects/{project_id}")
+def get_translation_project(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    project = _dich_vu(translation_svc.get_project, project_id, profile.user_id)
+    return {
+        "project": project.to_dict(),
+        "chapters": [
+            {"index": i, "translated": bool(c), "text": c}
+            for i, c in enumerate(project.translated_chapters)
+        ],
+        "jobs": [j.to_dict()
+                for j in translation_store.jobs_for_project(project_id)],
+    }
+
+
+@app.post("/api/translate/projects/{project_id}/jobs",
+         status_code=status.HTTP_201_CREATED)
+def create_translation_job(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Tao job dich. IDEMPOTENT: goi lai khi con job CHUA KET THUC tra ve CHINH
+    NO — day la co che chong "F5 tao job thu hai" (xem
+    `TranslationService.create_job`).
+    """
+    job = _dich_vu(translation_svc.create_job, project_id, profile.user_id)
+    return {"job": job.to_dict()}
+
+
+@app.get("/api/translate/jobs/{job_id}")
+def get_translation_job(
+    job_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    job = _dich_vu(translation_svc.get_job, job_id, profile.user_id)
+    return {"job": job.to_dict()}
+
+
+@app.post("/api/translate/jobs/{job_id}/cancel")
+def cancel_translation_job(
+    job_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    job = _dich_vu(translation_svc.cancel_job, job_id, profile.user_id)
+    return {"job": job.to_dict()}
+
+
+class GlossaryIn(BaseModel):
+    category: Annotated[str, StringConstraints(max_length=20)] = "other"
+    original: Annotated[str, StringConstraints(min_length=1, max_length=80)]
+    translated: Annotated[str, StringConstraints(min_length=1, max_length=80)]
+    note: Annotated[str, StringConstraints(max_length=500)] = ""
+
+
+class GlossaryPatch(BaseModel):
+    translated: Optional[Annotated[str, StringConstraints(max_length=80)]] = None
+    note: Optional[Annotated[str, StringConstraints(max_length=500)]] = None
+    locked: Optional[bool] = None
+
+
+@app.get("/api/translate/projects/{project_id}/glossary")
+def list_translation_glossary(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    ds = _dich_vu(translation_svc.list_glossary, project_id, profile.user_id)
+    return {"entries": [
+        {"term_id": e.term_id, "category": e.category.value,
+         "original": e.original, "translated": e.translated,
+         "note": e.note, "locked": e.locked}
+        for e in ds
+    ], "total": len(ds)}
+
+
+@app.post("/api/translate/projects/{project_id}/glossary",
+         status_code=status.HTTP_201_CREATED)
+def add_translation_glossary(
+    project_id: str, payload: GlossaryIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    e = _dich_vu(
+        translation_svc.add_glossary_entry, project_id, profile.user_id,
+        category=payload.category, original=payload.original,
+        translated=payload.translated, note=payload.note)
+    return {"term_id": e.term_id, "category": e.category.value,
+           "original": e.original, "translated": e.translated,
+           "note": e.note, "locked": e.locked}
+
+
+@app.patch("/api/translate/projects/{project_id}/glossary/{term_id}")
+def update_translation_glossary(
+    project_id: str, term_id: str, payload: GlossaryPatch,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    e = _dich_vu(
+        translation_svc.update_glossary_entry, project_id, profile.user_id,
+        term_id, translated=payload.translated, note=payload.note,
+        locked=payload.locked)
+    return {"term_id": e.term_id, "category": e.category.value,
+           "original": e.original, "translated": e.translated,
+           "note": e.note, "locked": e.locked}
+
+
+@app.delete("/api/translate/projects/{project_id}/glossary/{term_id}")
+def delete_translation_glossary(
+    project_id: str, term_id: str,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    _dich_vu(translation_svc.delete_glossary_entry, project_id,
+            profile.user_id, term_id)
+    return {"deleted": True}
+
+
+class ImportDraftIn(BaseModel):
+    novel_id: Annotated[str, StringConstraints(max_length=64)] = ""
+    new_novel_title: Annotated[str, StringConstraints(max_length=200)] = ""
+
+
+@app.post("/api/translate/projects/{project_id}/import")
+def import_translation_to_draft(
+    project_id: str, payload: ImportDraftIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    return _dich_vu(
+        translation_svc.import_to_draft, project_id, profile.user_id,
+        novel_id=payload.novel_id, new_novel_title=payload.new_novel_title)

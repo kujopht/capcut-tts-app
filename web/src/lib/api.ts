@@ -251,10 +251,15 @@ export interface AudioTrack {
 /** Loi API kem thong bao tieng Viet de hien thi thang cho nguoi dung. */
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** V5.1 BYOK — ma loi SACH khi backend tra `detail` dang object
+      (`{code, message}`, xem `ConnectionCheckError` o server). Rong voi
+      moi loi khac (detail dang chuoi nhu truoc gio). */
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -287,13 +292,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     let message = `Máy chủ trả về lỗi ${response.status}.`;
+    let code: string | undefined;
     try {
       const body = await response.json();
-      if (typeof body?.detail === "string") message = body.detail;
+      if (typeof body?.detail === "string") {
+        message = body.detail;
+      } else if (body?.detail && typeof body.detail === "object") {
+        // V5.1 BYOK — `{code, message}` (xem `ConnectionCheckError`).
+        if (typeof body.detail.message === "string") message = body.detail.message;
+        if (typeof body.detail.code === "string") code = body.detail.code;
+      }
     } catch {
       /* giu thong bao mac dinh */
     }
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, code);
   }
 
   if (response.status === 204) return undefined as T;
@@ -1371,9 +1383,14 @@ export interface TranslationProject {
   provider_mode: "auto" | "manual";
   selected_provider_id: string | null;
   allow_fallback: boolean;
+  /** V5.1 Part F — "Ưu tiên API key cá nhân". */
+  prefer_personal_provider: boolean;
   created_at: string;
   updated_at: string;
 }
+
+export type WaitingReason = "shared_free_quota_exhausted" | "personal_quota_exhausted";
+export type WaitingAction = "connect_personal_provider";
 
 export interface TranslationJob {
   job_id: string;
@@ -1390,10 +1407,28 @@ export interface TranslationJob {
   last_error: string | null;
   /** Part Q4 — chỉ có ý nghĩa khi `status === "waiting_for_provider"`. */
   waiting_retry_at: string | null;
+  /** V5.1 Part G — an toàn, không lộ chi tiết nội bộ. */
+  waiting_reason: WaitingReason | null;
+  waiting_action: WaitingAction | null;
   created_at: string;
   updated_at: string;
   finished_at: string | null;
 }
+
+/** V5.1 BYOK — metadata AN TOÀN, không bao giờ chứa api key. */
+export interface ProviderConnection {
+  provider_id: string;
+  connected: true;
+  last4: string;
+  status: ProviderStatusValue;
+  selected_model: string | null;
+  last_verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ConnectionErrorCode =
+  | "INVALID_KEY" | "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "MODEL_UNAVAILABLE";
 
 export interface GlossaryEntry {
   term_id: string;
@@ -1680,6 +1715,7 @@ export const translate = {
     providerMode?: "auto" | "manual";
     selectedProviderId?: string;
     allowFallback?: boolean;
+    preferPersonalProvider?: boolean;
   }) =>
     request<{ project: TranslationProject }>(
       `/api/translate/projects/${encodeURIComponent(projectId)}/provider`,
@@ -1689,7 +1725,46 @@ export const translate = {
           provider_mode: fields.providerMode,
           selected_provider_id: fields.selectedProviderId,
           allow_fallback: fields.allowFallback,
+          prefer_personal_provider: fields.preferPersonalProvider,
         }),
       },
     ),
+
+  // ---------------------------------------------------------- BYOK (V5.1)
+
+  listConnections: () =>
+    request<{ connections: ProviderConnection[]; total: number }>(
+      "/api/translate/provider-connections",
+    ),
+
+  /** Ket noi (hoac THAY THE) mot provider ca nhan. Nem `ApiError` voi
+      `.code` la mot trong `ConnectionErrorCode` khi that bai — hien dung
+      thong bao theo `.code`, khong doan tu `.message`. */
+  connectProvider: (providerId: string, apiKey: string, selectedModel?: string) =>
+    request<{ connection: ProviderConnection }>(
+      `/api/translate/provider-connections/${encodeURIComponent(providerId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          api_key: apiKey, selected_model: selectedModel ?? "",
+        }),
+      },
+    ),
+
+  testConnection: (providerId: string) =>
+    request<{ connection: ProviderConnection }>(
+      `/api/translate/provider-connections/${encodeURIComponent(providerId)}/test`,
+      { method: "POST", body: "{}" },
+    ),
+
+  deleteConnection: (providerId: string) =>
+    request<{ deleted: boolean }>(
+      `/api/translate/provider-connections/${encodeURIComponent(providerId)}`,
+      { method: "DELETE" },
+    ),
 };
+
+/** https://console.groq.com/keys — trang tao/quan ly API key Groq CA NHAN
+    cua nguoi dung. Hang so RIENG (khong phai bien moi truong): day la mot
+    URL cong khai, on dinh, cua chinh Groq, khong phai cau hinh trien khai. */
+export const GROQ_CONSOLE_KEYS_URL = "https://console.groq.com/keys";

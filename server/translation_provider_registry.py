@@ -127,6 +127,11 @@ class ProviderProvenance:
     success: bool
     attempted_at: str = ""
     error: str = ""
+    #: V5.1 BYOK — "shared" (kho Fanfic dung chung) hoac "personal" (API key
+    #: rieng cua nguoi dung). KHONG BAO GIO chua bi mat — chi mot nhan cho
+    #: biet AI TRA TIEN cho lan goi nay (Part I: "biet nguon credential ma
+    #: khong luu bi mat").
+    credential_source: str = "shared"
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -136,6 +141,7 @@ class ProviderProvenance:
             "success": self.success,
             "attempted_at": self.attempted_at,
             "error": self.error,
+            "credential_source": self.credential_source,
         }
 
 
@@ -362,6 +368,10 @@ class ConfiguredProvider:
     quality_hint: str
     provider: TranslationProvider
     free_tier: bool = True
+    #: V5.1 BYOK — "shared" (mac dinh, kho Fanfic dung chung, xay dung o
+    #: `build_provider_registry`) hoac "personal" (API key rieng cua MOT
+    #: nguoi dung, xay dung o `translation_byok_service.py`).
+    credential_source: str = "shared"
     _status: ProviderStatus = field(default=ProviderStatus.UNKNOWN, repr=False)
     _reset_at: str = field(default="", repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -444,6 +454,45 @@ class ProviderRegistry:
                 return p
         return None
 
+    def as_list(self) -> List[ConfiguredProvider]:
+        """Ban sao danh sach provider DUNG CHUNG, theo dung thu tu cau hinh —
+        dung o tang service khi can GHEP them provider CA NHAN (Part F,
+        `translate_segment_with_personal`)."""
+        return list(self._providers)
+
+    @staticmethod
+    def _thu_theo_thu_tu(thu_tu: List[ConfiguredProvider], text: str, *,
+                         context: TranslationContext
+                         ) -> Tuple[str, ProviderProvenance]:
+        """Vong lap LOI CHUNG — thu LAN LUOT dung thu tu da quyet dinh san
+        (boi `translate_segment`/`translate_segment_with_personal`), dung o
+        provider DAU TIEN con dung duoc. Tach rieng de CA HAI ham goi cung
+        MOT logic, khong lap lai."""
+        som_nhat_reset = ""
+        for cp in thu_tu:
+            if cp is None:
+                continue
+            if not cp.is_available_now():
+                entry = cp.catalog_entry()
+                if entry.reset_at and (not som_nhat_reset
+                                       or entry.reset_at < som_nhat_reset):
+                    som_nhat_reset = entry.reset_at
+                continue
+            try:
+                ket_qua = cp.translate_segment(text, context=context)
+            except TranslationProviderError:
+                entry = cp.catalog_entry()
+                if entry.reset_at and (not som_nhat_reset
+                                       or entry.reset_at < som_nhat_reset):
+                    som_nhat_reset = entry.reset_at
+                continue
+            return ket_qua, ProviderProvenance(
+                provider_id=cp.provider_id, model_id=cp.model_id,
+                pass_type=context.vai_tro, success=True,
+                attempted_at=_now_iso(),
+                credential_source=cp.credential_source)
+        raise AllProvidersUnavailable(retry_not_before=som_nhat_reset)
+
     def translate_segment(self, text: str, *, context: TranslationContext,
                           mode: str = "auto",
                           selected_provider_id: str = "",
@@ -460,29 +509,114 @@ class ProviderRegistry:
         else:
             thu_tu = list(self._providers)
 
-        som_nhat_reset = ""
-        loi_gan_nhat = ""
-        for cp in thu_tu:
-            if not cp.is_available_now():
-                entry = cp.catalog_entry()
-                if entry.reset_at and (not som_nhat_reset
-                                       or entry.reset_at < som_nhat_reset):
-                    som_nhat_reset = entry.reset_at
-                continue
-            try:
-                ket_qua = cp.translate_segment(text, context=context)
-            except TranslationProviderError as exc:
-                loi_gan_nhat = str(exc)
-                entry = cp.catalog_entry()
-                if entry.reset_at and (not som_nhat_reset
-                                       or entry.reset_at < som_nhat_reset):
-                    som_nhat_reset = entry.reset_at
-                continue
-            return ket_qua, ProviderProvenance(
-                provider_id=cp.provider_id, model_id=cp.model_id,
-                pass_type=context.vai_tro, success=True,
-                attempted_at=_now_iso())
-        raise AllProvidersUnavailable(retry_not_before=som_nhat_reset)
+        return self._thu_theo_thu_tu(thu_tu, text, context=context)
+
+    def translate_segment_with_personal(
+        self, text: str, *, context: TranslationContext,
+        mode: str = "auto", selected_provider_id: str = "",
+        allow_fallback: bool = True,
+        personal_providers: Optional[List[ConfiguredProvider]] = None,
+        prefer_personal: bool = False,
+    ) -> Tuple[str, ProviderProvenance]:
+        """
+        Bien the CO tich hop provider CA NHAN cua MOT nguoi dung (V5.1 Part
+        F) — `personal_providers` PHAI da duoc giai ma DUNG cho DUNG nguoi
+        dung nay (xay boi tang service, xem
+        `translation_byok_service.ProviderConnectionService`); ham nay KHONG
+        BAO GIO tu tra cuu/giai ma — chi nhan danh sach da san sang de dung.
+
+        Thu tu (Part F):
+          - `prefer_personal=False` (mac dinh): Fanfic dung chung TRUOC, ca
+            nhan la du phong.
+          - `prefer_personal=True`: ca nhan TRUOC, Fanfic dung chung la du
+            phong.
+          - `mode="manual"`: `selected_provider_id` co the tro toi CA
+            provider dung chung LAN provider ca nhan (tim trong CA HAI danh
+            sach) — dung y "provider_id nhu 'groq' dung chung giua shared va
+            personal, phan biet boi credential_source".
+
+        KHONG co danh sach ca nhan (`personal_providers` rong/None) thi hanh
+        vi Y HET `translate_segment` — dam bao khong pha vo bat ky luong
+        khong dung BYOK nao.
+        """
+        ca_nhan = list(personal_providers or [])
+        dung_chung = list(self._providers)
+
+        if mode == "manual" and selected_provider_id:
+            tat_ca = dung_chung + ca_nhan
+            chon = next((p for p in tat_ca if p.provider_id == selected_provider_id), None)
+            thu_tu = [chon] if chon else []
+            if allow_fallback:
+                thu_tu += [p for p in tat_ca if p is not chon]
+        elif prefer_personal:
+            thu_tu = ca_nhan + dung_chung
+        else:
+            thu_tu = dung_chung + ca_nhan
+
+        return self._thu_theo_thu_tu(thu_tu, text, context=context)
+
+
+class ConnectionCheckError(TranslationProviderError):
+    """
+    Loi kiem tra ket noi CA NHAN (V5.1 Part E) — `code` la MOT trong bon gia
+    tri SACH quy dinh o yeu cau goc, KHONG BAO GIO kem theo header/response
+    goc cua nha cung cap (`str(exc)` van la thong diep tieng Viet an toan
+    cho nguoi dung, `code` la thong diep MAY doc duoc cho frontend re nhanh
+    UI theo dung loai loi).
+    """
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
+#: Timeout NGAN cho kiem tra ket noi — day la mot lenh GET nhe, khong phai
+#: mot lan dich, khong can du 60s nhu `_OpenAICompatFreeProvider`.
+_KIEM_TRA_TIMEOUT_SECONDS = 15.0
+
+
+def kiem_tra_ket_noi_groq(api_key: str, model: str, *,
+                         client: Optional[httpx.Client] = None) -> None:
+    """
+    Xac thuc MOT api key Groq CA NHAN + kiem tra model co san — dung
+    `GET /models` (liet ke model), KHONG dich thu bat ky doan van nao, nen
+    KHONG TON HAN MUC DICH cua nguoi dung (dung y "does not waste
+    translation quota" cua yeu cau goc).
+
+    Khong nem gi = thanh cong. Nem `ConnectionCheckError` voi `code` la MOT
+    trong "INVALID_KEY"/"RATE_LIMITED"/"PROVIDER_UNAVAILABLE"/
+    "MODEL_UNAVAILABLE" — KHONG BAO GIO kem response/header goc cua Groq.
+    """
+    c = client or httpx.Client(
+        base_url="https://api.groq.com/openai/v1",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=_KIEM_TRA_TIMEOUT_SECONDS)
+    try:
+        resp = c.get("/models")
+    except httpx.HTTPError as exc:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE", "Không kết nối được Groq.") from exc
+
+    if resp.status_code == 401:
+        raise ConnectionCheckError("INVALID_KEY", "API key không hợp lệ.")
+    if resp.status_code == 429:
+        raise ConnectionCheckError(
+            "RATE_LIMITED", "Đang bị giới hạn tốc độ, thử lại sau.")
+    if resp.status_code != 200:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE", "Groq hiện không phản hồi đúng.")
+
+    try:
+        du_lieu = resp.json()
+        cac_model = {m.get("id") for m in (du_lieu.get("data") or [])}
+    except Exception as exc:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE",
+            "Phản hồi từ Groq không đúng định dạng mong đợi.") from exc
+    if model not in cac_model:
+        raise ConnectionCheckError(
+            "MODEL_UNAVAILABLE",
+            f"Model {model} không khả dụng với API key này.")
 
 
 def build_provider_registry(env: Optional[Dict[str, str]] = None

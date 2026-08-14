@@ -49,6 +49,7 @@ from server.translation_providers import (
 )
 from server.translation_provider_registry import (
     AllProvidersUnavailable,
+    ConfiguredProvider,
     ProviderProvenance,
     ProviderRegistry,
 )
@@ -159,7 +160,8 @@ class TranslationService:
                  provider: Optional[TranslationProvider] = None,
                  inline_worker: bool = True,
                  max_concurrent_jobs: Optional[int] = None,
-                 registry: Optional[ProviderRegistry] = None):
+                 registry: Optional[ProviderRegistry] = None,
+                 byok: Optional[Any] = None):
         self._store = store
         #: Store CUA SAN PHAM AUDIO — chi dung o `import_to_draft`, de tao
         #: novel/chapter that. Khong bang nao khac cua no duoc cham vao.
@@ -171,6 +173,12 @@ class TranslationService:
         #: nhu truoc gio — giu nguyen HANH VI VA TUONG THICH cho toan bo test
         #: hien co (~1574 bai), khong bat buoc phai co registry moi chay duoc.
         self._registry = registry if registry else None
+        #: V5.1 BYOK — TUY CHON (`ProviderConnectionService`, kieu `Any` de
+        #: tranh vong lap import — `translation_byok_service.py` KHONG import
+        #: nguoc lai module nay). None = tinh nang BYOK khong tham gia vao
+        #: duong dich, hanh vi Y HET truoc khi co V5.1 (chi dung
+        #: `self._registry` neu co, roi `self._provider`).
+        self._byok = byok
 
         #: Danh tinh cua TIEN TRINH NAY — hai worker khac nhau (hoac hai
         #: instance service khac nhau, vd trong test mo phong "worker chet
@@ -474,6 +482,37 @@ class TranslationService:
                 report["khong_chay_duoc"] = report.get("khong_chay_duoc", 0) + 1
         return report
 
+    def try_resume_user_jobs(self, user_id: str) -> int:
+        """
+        V5.1 Part G — goi SAU KHI nguoi dung ket noi THANH CONG mot provider
+        ca nhan, de cac job dang `waiting_for_provider` CUA CHINH nguoi do
+        duoc thu lai NGAY, khong doi den moc `waiting_retry_at` (co the con
+        xa vai phut).
+
+        KHONG tao job moi (van la CHINH job da co), KHONG dich lai chuong da
+        xong — chi ep `lease_expires_at` ve qua khu de job do coi la "co the
+        nhan lai duoc" ngay lap tuc, roi goi `recover_stale_jobs` mot lan.
+        Neu van khong du provider (vd key moi ket noi cung het han muc ngay),
+        job tu quay lai `waiting_for_provider` — khong co gi mat.
+
+        Tra ve so job DA THU lai (khong dam bao thanh cong).
+        """
+        try:
+            jobs = self._store.list_jobs_by_status(
+                TranslationJobStatus.WAITING_FOR_PROVIDER)
+        except Exception:
+            return 0
+        da_thu = 0
+        for job in jobs:
+            if job.owner_id != user_id:
+                continue
+            job.lease_expires_at = "2000-01-01T00:00:00+00:00"
+            self._store.save_job(job)
+            da_thu += 1
+        if da_thu:
+            self.recover_stale_jobs(pending_min_age_seconds=0)
+        return da_thu
+
     def _run_job(self, job: TranslationJob, fence: Optional[int]) -> None:
         """
         Nhan job (neu chua co fence), chay den khi xong/loi/mat quyen, roi
@@ -639,6 +678,18 @@ class TranslationService:
             job.status = TranslationJobStatus.WAITING_FOR_PROVIDER
             job.error = ""
             job.waiting_retry_at = retry_at
+            # V5.1 Part G — ly do/hanh dong AN TOAN cho frontend: nguoi dung
+            # CHUA co ket noi ca nhan nao thi moi CTA "kết nối Groq cá
+            # nhân"; da co roi nhung CUNG het han muc thi chi con cho (khong
+            # moi ket noi THEM — ket noi da co khong giup gi luc nay).
+            co_ket_noi_ca_nhan = bool(
+                self._byok and self._byok.list_connections(job.owner_id))
+            if co_ket_noi_ca_nhan:
+                job.waiting_reason = "personal_quota_exhausted"
+                job.waiting_action = ""
+            else:
+                job.waiting_reason = "shared_free_quota_exhausted"
+                job.waiting_action = "connect_personal_provider"
             job.updated_at = now_iso()
             job.lease_owner = ""
             job.lease_expires_at = retry_at
@@ -668,6 +719,35 @@ class TranslationService:
             except Exception:
                 pass
 
+    def _goi_dich_mot_doan(self, text: str, ctx: TranslationContext,
+                           project: TranslationProject,
+                           personal_providers: List["ConfiguredProvider"]
+                           ) -> "tuple[str, ProviderProvenance]":
+        """
+        MOT diem goi DUY NHAT vao provider/registry — dung boi CA
+        `_dich_mot_chuong` (job nen) LAN `_chay_vai_tro_tren_van_ban` (editor,
+        Part N). V5.1 BYOK: neu co `self._byok`, dung
+        `translate_segment_with_personal` (Fanfic chung + ca nhan cua CHINH
+        chu du an theo dung thu tu `project.prefer_personal_provider`);
+        neu khong, hanh vi Y HET truoc V5.1.
+        """
+        if self._registry and self._byok:
+            return self._registry.translate_segment_with_personal(
+                text, context=ctx, mode=project.provider_mode,
+                selected_provider_id=project.selected_provider_id,
+                allow_fallback=project.allow_fallback,
+                personal_providers=personal_providers,
+                prefer_personal=project.prefer_personal_provider)
+        if self._registry:
+            return self._registry.translate_segment(
+                text, context=ctx, mode=project.provider_mode,
+                selected_provider_id=project.selected_provider_id,
+                allow_fallback=project.allow_fallback)
+        ket_qua = self._provider.translate_segment(text, context=ctx)
+        return ket_qua, ProviderProvenance(
+            provider_id=self._provider.name, model_id="",
+            pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+
     def _dich_mot_chuong(self, project: TranslationProject, noi_dung: str,
                          chuong_idx: int, job: TranslationJob,
                          fence: int, lost: threading.Event
@@ -692,40 +772,46 @@ class TranslationService:
         #: khong phai tung doan rieng — du de biet "chuong nay ai dich",
         #: khong nham lam mot so lieu benchmark tung-doan chi tiet hon.
         provenance_by_role: Dict[str, ProviderProvenance] = {}
-        for i, phan in enumerate(doan):
-            # Kiem huy/mat quyen GIUA TUNG DOAN — min hon "giua cac pass":
-            # mot chuong dai nhieu doan khong phai cho het chuong moi biet
-            # nguoi dung da bam Huy.
-            if self._nen_dung_lai(job.job_id, lost):
-                return "\n\n".join(ket_qua), provenance_by_role
-            # Ba pass THAT (khong chi may trang thai): dich truoc, roi lan
-            # luot chuyen ket qua qua bien tap/QA neu che do yeu cau — moi
-            # vai tro nhan dau ra cua vai tro TRUOC lam van ban dau vao.
-            dich = phan
-            for vai_tro in vai_tro_ds:
-                ctx = TranslationContext(
-                    vai_tro=vai_tro, genre=project.genre.value,
-                    naming_mode=project.naming_mode.value,
-                    tom_tat_truoc=tom_tat, glossary=glossary,
-                    custom_instruction=project.custom_instruction)
-                if self._registry:
-                    dich, prov = self._registry.translate_segment(
-                        dich, context=ctx, mode=project.provider_mode,
-                        selected_provider_id=project.selected_provider_id,
-                        allow_fallback=project.allow_fallback)
-                else:
-                    dich = self._provider.translate_segment(dich, context=ctx)
-                    prov = ProviderProvenance(
-                        provider_id=self._provider.name, model_id="",
-                        pass_type=vai_tro, success=True,
-                        attempted_at=now_iso())
-                provenance_by_role[vai_tro] = prov
-            ket_qua.append(dich)
-            job.current_chapter_done_segments = i + 1
-            job.updated_at = now_iso()
-            self._store.save_progress(
-                job.job_id, fence, self._worker_id,
-                current_chapter_done_segments=i + 1)
+        # V5.1 BYOK — xay danh sach provider CA NHAN cua CHU du an MOT LAN
+        # cho ca chuong (khong giai ma lai moi doan) — xem
+        # `_goi_dich_mot_doan`.
+        personal_providers = (
+            self._byok.build_all_configured_providers(project.owner_id)
+            if self._byok else [])
+        try:
+            for i, phan in enumerate(doan):
+                # Kiem huy/mat quyen GIUA TUNG DOAN — min hon "giua cac pass":
+                # mot chuong dai nhieu doan khong phai cho het chuong moi biet
+                # nguoi dung da bam Huy.
+                if self._nen_dung_lai(job.job_id, lost):
+                    return "\n\n".join(ket_qua), provenance_by_role
+                # Ba pass THAT (khong chi may trang thai): dich truoc, roi lan
+                # luot chuyen ket qua qua bien tap/QA neu che do yeu cau — moi
+                # vai tro nhan dau ra cua vai tro TRUOC lam van ban dau vao.
+                dich = phan
+                for vai_tro in vai_tro_ds:
+                    ctx = TranslationContext(
+                        vai_tro=vai_tro, genre=project.genre.value,
+                        naming_mode=project.naming_mode.value,
+                        tom_tat_truoc=tom_tat, glossary=glossary,
+                        custom_instruction=project.custom_instruction)
+                    dich, prov = self._goi_dich_mot_doan(
+                        dich, ctx, project, personal_providers)
+                    provenance_by_role[vai_tro] = prov
+                ket_qua.append(dich)
+                job.current_chapter_done_segments = i + 1
+                job.updated_at = now_iso()
+                self._store.save_progress(
+                    job.job_id, fence, self._worker_id,
+                    current_chapter_done_segments=i + 1)
+        finally:
+            # Dong bo trang thai provider CA NHAN xuong kho ben vung NGAY CA
+            # KHI that bai (vd `AllProvidersUnavailable` bay len) — nguoi
+            # dung can thay "Groq của bạn đã đạt giới hạn" ma khong phai tu
+            # bam "Kiểm tra lại" (xem `ProviderConnectionService.sync_status`).
+            if self._byok:
+                for cp in personal_providers:
+                    self._byok.sync_status(project.owner_id, cp)
 
         ban_ghep = "\n\n".join(ket_qua)
         # Ap khoa glossary SAU CUNG — rao chan cuoi, xem
@@ -850,25 +936,25 @@ class TranslationService:
                     for e in self._store.list_glossary(project.project_id)}
         ket_qua = []
         prov: Optional[ProviderProvenance] = None
-        for phan in doan:
-            dich = phan
-            for vai_tro in vai_tro_ds:
-                ctx = TranslationContext(
-                    vai_tro=vai_tro, genre=project.genre.value,
-                    naming_mode=project.naming_mode.value,
-                    tom_tat_truoc=tom_tat, glossary=glossary,
-                    custom_instruction=project.custom_instruction)
-                if self._registry:
-                    dich, prov = self._registry.translate_segment(
-                        dich, context=ctx, mode=project.provider_mode,
-                        selected_provider_id=project.selected_provider_id,
-                        allow_fallback=project.allow_fallback)
-                else:
-                    dich = self._provider.translate_segment(dich, context=ctx)
-                    prov = ProviderProvenance(
-                        provider_id=self._provider.name, model_id="",
-                        pass_type=vai_tro, success=True, attempted_at=now_iso())
-            ket_qua.append(dich)
+        personal_providers = (
+            self._byok.build_all_configured_providers(project.owner_id)
+            if self._byok else [])
+        try:
+            for phan in doan:
+                dich = phan
+                for vai_tro in vai_tro_ds:
+                    ctx = TranslationContext(
+                        vai_tro=vai_tro, genre=project.genre.value,
+                        naming_mode=project.naming_mode.value,
+                        tom_tat_truoc=tom_tat, glossary=glossary,
+                        custom_instruction=project.custom_instruction)
+                    dich, prov = self._goi_dich_mot_doan(
+                        dich, ctx, project, personal_providers)
+                ket_qua.append(dich)
+        finally:
+            if self._byok:
+                for cp in personal_providers:
+                    self._byok.sync_status(project.owner_id, cp)
         ban_ghep = "\n\n".join(ket_qua)
         for e in self._store.list_glossary(project.project_id):
             if e.locked and e.original in ban_ghep:
@@ -1098,7 +1184,8 @@ class TranslationService:
     def update_provider_settings(self, project_id: str, owner_id: str, *,
                                  provider_mode: Optional[str] = None,
                                  selected_provider_id: Optional[str] = None,
-                                 allow_fallback: Optional[bool] = None
+                                 allow_fallback: Optional[bool] = None,
+                                 prefer_personal_provider: Optional[bool] = None,
                                  ) -> TranslationProject:
         project = self._store.owned_project(project_id, owner_id)
         if provider_mode is not None:
@@ -1109,6 +1196,8 @@ class TranslationService:
             project.selected_provider_id = selected_provider_id
         if allow_fallback is not None:
             project.allow_fallback = bool(allow_fallback)
+        if prefer_personal_provider is not None:
+            project.prefer_personal_provider = bool(prefer_personal_provider)
         project.updated_at = now_iso()
         return self._store.save_project(project)
 

@@ -67,6 +67,12 @@ class TranslationProject:
     #: MANUAL + fallback TAT: het han muc thi cho (`waiting_for_provider`),
     #: KHONG tu doi model. AUTO luon coi nhu fallback BAT (bo qua co nay).
     allow_fallback: bool = True
+    #: V5.1 Part F — "Ưu tiên API key cá nhân". False (mac dinh): thu tu
+    #: THUONG (Fanfic chung TRUOC, ca nhan sau). True: dao nguoc — ca nhan
+    #: TRUOC, Fanfic chung la du phong. KHONG anh huong gi neu nguoi dung
+    #: chua ket noi provider ca nhan nao (danh sach ca nhan rong -> hanh vi
+    #: y het truoc day).
+    prefer_personal_provider: bool = False
     project_id: str = field(default_factory=lambda: _id("trp"))
     created_at: str = ""
     updated_at: str = ""
@@ -95,6 +101,7 @@ class TranslationProject:
             "provider_mode": self.provider_mode,
             "selected_provider_id": self.selected_provider_id or None,
             "allow_fallback": self.allow_fallback,
+            "prefer_personal_provider": self.prefer_personal_provider,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -146,6 +153,15 @@ class TranslationJob:
     #: khi `status is WAITING_FOR_PROVIDER`. Rong = khong biet moc chinh xac
     #: (hien UI: "Đang chờ nhà cung cấp mở lại hạn mức", KHONG bia gio).
     waiting_retry_at: str = ""
+    #: V5.1 Part G — LY DO AN TOAN (khong lo chi tiet noi bo) cho frontend
+    #: quyet dinh hien CTA nao. "shared_free_quota_exhausted" (nguoi dung
+    #: CHUA co ket noi ca nhan nao — moi CTA "kết nối Groq cá nhân") hoac
+    #: "personal_quota_exhausted"/"" (da co ket noi ca nhan nhung CUNG het
+    #: han muc — chi con cho). Rong = job khong o waiting_for_provider.
+    waiting_reason: str = ""
+    #: HANH DONG AN TOAN goi y cho frontend — "connect_personal_provider"
+    #: hoac rong (khong co hanh dong nao khac ngoai cho).
+    waiting_action: str = ""
     job_id: str = field(default_factory=lambda: _id("trj"))
     created_at: str = ""
     updated_at: str = ""
@@ -198,6 +214,8 @@ class TranslationJob:
             "error": self.error or None,
             "last_error": self.error or None,
             "waiting_retry_at": self.waiting_retry_at or None,
+            "waiting_reason": self.waiting_reason or None,
+            "waiting_action": self.waiting_action or None,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "finished_at": self.finished_at or None,
@@ -248,4 +266,65 @@ class TranslationVersion:
             "provider_id": self.provider_id or None,
             "model_id": self.model_id or None,
             "created_at": self.created_at,
+        }
+
+
+def id_ket_noi_provider(user_id: str, provider_id: str) -> str:
+    """
+    ID TAT DINH tu (user_id, provider_id) — KHONG ngau nhien.
+
+    MOI nguoi dung CHI co MOT ket noi cho MOI provider: "kien" lai (goi
+    connect lan hai voi cung provider) tu nhien GHI DE dung ban ghi cu
+    (cung id) thay vi tao ban ghi thu hai mo côi — dung y voi tinh chat
+    upsert cua "Lưu kết nối"/"Thay API key" (Part J).
+    """
+    return f"pc_{abs(hash((user_id, provider_id))) % (10 ** 12):012x}"
+
+
+@dataclass
+class ProviderConnection:
+    """
+    Ket noi provider AI CA NHAN cua MOT nguoi dung (V5.1, BYOK).
+
+    `encrypted_secret` LA CHUOI DA MA HOA (xem `translation_byok_crypto.py`)
+    — KHONG BAO GIO la api key ro. Entity nay VA `to_dict()` cua no la RANH
+    GIOI AN TOAN duy nhat: bat ky noi nao tra `to_dict()` ra ngoai (route,
+    log) deu KHONG THE lam lo bi mat, vi truong do khong ton tai trong dict.
+    """
+
+    user_id: str
+    provider_id: str
+    #: Chuoi da ma hoa (dinh dang `byok.v1.<nonce>.<ciphertext>`) — KHONG
+    #: BAO GIO xuat hien trong `to_dict()`.
+    encrypted_secret: str
+    #: 4 ky tu cuoi cua key that — CHI de hien thi ("••••••••AB42"), khong du
+    #: de doan lai key (xem `translation_byok_crypto.lay_4_ky_tu_cuoi`).
+    last4: str
+    #: Gia tri cua `ProviderStatus` (xem `translation_provider_registry.py`)
+    #: — "unknown" cho den lan kiem tra dau tien.
+    status: str = "unknown"
+    selected_model: str = ""
+    connection_id: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    #: Lan gan nhat kiem tra ket noi THANH CONG (khong phai lan tao). Rong =
+    #: chua tung kiem tra thanh cong.
+    last_verified_at: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.connection_id:
+            self.connection_id = id_ket_noi_provider(self.user_id, self.provider_id)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """AN TOAN de tra ve qua API — xem docstring dau class. Danh sach
+        truong o day LA TOAN BO nhung gi frontend duoc phep thay."""
+        return {
+            "provider_id": self.provider_id,
+            "connected": True,
+            "last4": self.last4,
+            "status": self.status,
+            "selected_model": self.selected_model or None,
+            "last_verified_at": self.last_verified_at or None,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }

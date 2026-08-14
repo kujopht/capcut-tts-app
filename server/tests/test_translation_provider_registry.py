@@ -18,6 +18,7 @@ from server.translation_provider_registry import (
     AllProvidersUnavailable,
     CloudflareWorkersAIProvider,
     ConfiguredProvider,
+    ConnectionCheckError,
     GroqProvider,
     ProviderCatalogEntry,
     ProviderQuotaExhausted,
@@ -25,6 +26,7 @@ from server.translation_provider_registry import (
     ProviderRegistry,
     ProviderStatus,
     build_provider_registry,
+    kiem_tra_ket_noi_groq,
 )
 
 
@@ -323,6 +325,119 @@ class BuildProviderRegistryTest(unittest.TestCase):
             "TRANSLATION_ALLOW_PAID_PROVIDER": "false",
         })
         self.assertFalse(bool(reg))
+
+
+class TranslateWithPersonalTest(unittest.TestCase):
+    """V5.1 Part F — thu tu shared/personal, tich hop TUY CHON (khong pha
+    hanh vi cu khi khong co danh sach ca nhan)."""
+
+    def setUp(self):
+        self.shared_ok = _cp("shared-groq", ["ok"])
+        self.reg = ProviderRegistry([self.shared_ok])
+
+    def test_khong_co_personal_hanh_vi_y_het_translate_segment(self):
+        ra, prov = self.reg.translate_segment_with_personal(
+            "x", context=TranslationContext(vai_tro="translator"),
+            personal_providers=None)
+        self.assertEqual(prov.provider_id, "shared-groq")
+        self.assertEqual(prov.credential_source, "shared")
+
+    def test_mac_dinh_shared_truoc_personal_sau(self):
+        ca_nhan = _cp("personal-groq", ["ok"], free_tier=True)
+        ca_nhan.credential_source = "personal"
+        ra, prov = self.reg.translate_segment_with_personal(
+            "x", context=TranslationContext(vai_tro="translator"),
+            personal_providers=[ca_nhan])
+        # Shared thanh cong ngay -> khong bao gio cham toi personal.
+        self.assertEqual(prov.provider_id, "shared-groq")
+        self.assertEqual(prov.credential_source, "shared")
+
+    def test_shared_that_bai_fallback_sang_personal(self):
+        reg = ProviderRegistry([_cp("shared-groq", [TranslationProviderError("het han muc")])])
+        ca_nhan = _cp("personal-groq", ["ok"])
+        ca_nhan.credential_source = "personal"
+        ra, prov = reg.translate_segment_with_personal(
+            "x", context=TranslationContext(vai_tro="translator"),
+            personal_providers=[ca_nhan])
+        self.assertEqual(prov.provider_id, "personal-groq")
+        self.assertEqual(prov.credential_source, "personal")
+
+    def test_prefer_personal_thu_ca_nhan_truoc(self):
+        ca_nhan = _cp("personal-groq", ["ok"])
+        ca_nhan.credential_source = "personal"
+        ra, prov = self.reg.translate_segment_with_personal(
+            "x", context=TranslationContext(vai_tro="translator"),
+            personal_providers=[ca_nhan], prefer_personal=True)
+        self.assertEqual(prov.provider_id, "personal-groq")
+        # shared khong duoc goi vi personal da thanh cong.
+        self.assertEqual(self.shared_ok.provider.so_lan_goi, 0)
+
+    def test_ca_hai_that_bai_nem_all_unavailable(self):
+        reg = ProviderRegistry([_cp("shared-groq", [TranslationProviderError("x")])])
+        ca_nhan = _cp("personal-groq", [TranslationProviderError("y")])
+        with self.assertRaises(AllProvidersUnavailable):
+            reg.translate_segment_with_personal(
+                "x", context=TranslationContext(vai_tro="translator"),
+                personal_providers=[ca_nhan])
+
+    def test_khong_bao_gio_tron_provider_cua_nguoi_khac(self):
+        """Ham nay KHONG tu tra cuu personal provider — no CHI dung DUNG
+        danh sach duoc truyen vao. Day la bang chung cau truc: khong co
+        duong nao de mot provider ca nhan cua nguoi dung KHAC lot vao neu
+        tang goi (service) khong tu the truyen no vao."""
+        ra, prov = self.reg.translate_segment_with_personal(
+            "x", context=TranslationContext(vai_tro="translator"),
+            personal_providers=[])  # danh sach RONG mo phong "khong ket noi"
+        self.assertEqual(prov.credential_source, "shared")
+
+
+class KiemTraKetNoiGroqTest(unittest.TestCase):
+    def _client(self, handler):
+        return httpx.Client(base_url="https://vidu.test",
+                            transport=httpx.MockTransport(handler))
+
+    def test_key_hop_le_va_model_co_san_thanh_cong(self):
+        def handler(request):
+            return httpx.Response(200, json={"data": [{"id": "qwen/qwen3.6-27b"}]})
+
+        kiem_tra_ket_noi_groq("gsk_hop_le", "qwen/qwen3.6-27b",
+                             client=self._client(handler))  # khong nem gi
+
+    def test_401_thanh_invalid_key(self):
+        with self.assertRaises(ConnectionCheckError) as ctx:
+            kiem_tra_ket_noi_groq("gsk_sai", "m", client=self._client(
+                lambda r: httpx.Response(401, json={"error": "unauthorized"})))
+        self.assertEqual(ctx.exception.code, "INVALID_KEY")
+
+    def test_429_thanh_rate_limited(self):
+        with self.assertRaises(ConnectionCheckError) as ctx:
+            kiem_tra_ket_noi_groq("gsk_x", "m", client=self._client(
+                lambda r: httpx.Response(429, text="rate limited")))
+        self.assertEqual(ctx.exception.code, "RATE_LIMITED")
+
+    def test_model_khong_co_trong_danh_sach_thanh_model_unavailable(self):
+        with self.assertRaises(ConnectionCheckError) as ctx:
+            kiem_tra_ket_noi_groq("gsk_hop_le", "model-khong-ton-tai",
+                                 client=self._client(lambda r: httpx.Response(
+                                     200, json={"data": [{"id": "model-khac"}]})))
+        self.assertEqual(ctx.exception.code, "MODEL_UNAVAILABLE")
+
+    def test_loi_mang_thanh_provider_unavailable(self):
+        def handler(request):
+            raise httpx.ConnectTimeout("timeout", request=request)
+
+        with self.assertRaises(ConnectionCheckError) as ctx:
+            kiem_tra_ket_noi_groq("gsk_x", "m", client=self._client(handler))
+        self.assertEqual(ctx.exception.code, "PROVIDER_UNAVAILABLE")
+
+    def test_loi_khong_bao_gio_kem_header_goc(self):
+        """`str(exc)` (thong diep tieng Viet hien cho nguoi dung) KHONG BAO
+        GIO chua noi dung response goc cua Groq — chi ma loi SACH."""
+        with self.assertRaises(ConnectionCheckError) as ctx:
+            kiem_tra_ket_noi_groq("gsk_x", "m", client=self._client(
+                lambda r: httpx.Response(
+                    401, json={"error": {"message": "RẤT BÍ MẬT NỘI BỘ"}})))
+        self.assertNotIn("RẤT BÍ MẬT NỘI BỘ", str(ctx.exception))
 
 
 if __name__ == "__main__":

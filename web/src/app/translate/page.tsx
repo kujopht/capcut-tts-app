@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import {
   GENRE_OPTIONS,
+  GROQ_CONSOLE_KEYS_URL,
   NAMING_OPTIONS,
   QUALITY_OPTIONS,
   translate,
@@ -41,6 +42,7 @@ import {
 import { loginHref } from "@/lib/nav";
 import { IconFeather } from "@/components/Icons";
 import ChapterEditor from "./ChapterEditor";
+import ProviderConnectDialog from "./ProviderConnectDialog";
 
 const TRANG_THAI_NHAN: Record<string, string> = {
   queued: "Đang xếp hàng…",
@@ -507,13 +509,7 @@ function ProjectDetail({
             </span>
             <GlossaryCounts projectId={projectId} />
             {jobMoiNhat.status === "waiting_for_provider" ? (
-              <Alert kind="warn">
-                Tất cả model dịch miễn phí hiện đang hết hạn mức. Các chương
-                đã dịch vẫn được giữ nguyên — hệ thống sẽ tự thử lại
-                {jobMoiNhat.waiting_retry_at
-                  ? ` lúc ${new Date(jobMoiNhat.waiting_retry_at).toLocaleTimeString("vi-VN")}.`
-                  : " khi nhà cung cấp mở lại hạn mức."}
-              </Alert>
+              <WaitingForProviderCta job={jobMoiNhat} onChanged={reload} />
             ) : null}
             {jobMoiNhat.status === "failed" && jobMoiNhat.error ? (
               <Alert kind="error">{jobMoiNhat.error}</Alert>
@@ -584,6 +580,67 @@ function ProjectDetail({
   );
 }
 
+/* ============================================================ cho han muc (V5.1 Part G) */
+
+function WaitingForProviderCta({
+  job,
+  onChanged,
+}: {
+  job: TranslationJob;
+  onChanged: () => void;
+}) {
+  const [dialogMo, setDialogMo] = useState(false);
+  const moc = job.waiting_retry_at
+    ? new Date(job.waiting_retry_at).toLocaleTimeString("vi-VN")
+    : null;
+
+  if (job.waiting_reason === "personal_quota_exhausted") {
+    return (
+      <Alert kind="warn">
+        Groq của bạn đã đạt giới hạn. Các chương đã dịch vẫn được giữ
+        nguyên — hệ thống sẽ tự thử lại{moc ? ` lúc ${moc}.` : " sau."}
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="stack-2">
+      <Alert kind="warn">
+        Hạn mức AI miễn phí chung hiện đã hết.
+        <br />
+        Bạn có thể chờ hạn mức hồi lại hoặc tiếp tục bằng Groq của bạn.
+      </Alert>
+      <div className="row row-tight">
+        <span className="chip chip-static">
+          Chờ hạn mức hồi lại{moc ? ` (khoảng ${moc})` : ""}
+        </span>
+        {job.waiting_action === "connect_personal_provider" ? (
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => setDialogMo(true)}
+          >
+            Tiếp tục bằng Groq của bạn
+          </button>
+        ) : null}
+      </div>
+      <ProviderConnectDialog
+        open={dialogMo}
+        // `onChanged` (reload cua ca trang du an) CHI goi luc DONG hop
+        // thoai, khong phai ngay luc ket noi thanh cong — `reload()` khien
+        // `ProjectDetail` hien `<Loading>` va UNMOUNT toan bo cay con
+        // (ke ca hop thoai nay), pha huy trang thai "Kết nối thành công"
+        // TRUOC KHI nguoi dung kip thay. Loi that tim qua QA trinh duyet.
+        onClose={() => {
+          setDialogMo(false);
+          onChanged();
+        }}
+        onConnected={() => {}}
+      />
+    </div>
+  );
+}
+
 /* ============================================================ dem tu dien */
 
 function GlossaryCounts({ projectId }: { projectId: string }) {
@@ -612,9 +669,12 @@ function ProviderSettingsPanel({
 }) {
   const toast = useToast();
   const { data } = useAsyncData(useCallback(() => translate.listProviders(), []));
+  const { data: connData, reload: taiLaiKetNoi } = useAsyncData(
+    useCallback(() => translate.listConnections(), []),
+  );
   const [dangLuu, setDangLuu] = useState(false);
-
-  if (!data || data.providers.length === 0) return null;
+  const [dialogMo, setDialogMo] = useState(false);
+  const [dangXuLy, setDangXuLy] = useState<string | null>(null);
 
   const capNhat = async (fields: Parameters<typeof translate.updateProviderSettings>[1]) => {
     setDangLuu(true);
@@ -628,69 +688,189 @@ function ProviderSettingsPanel({
     }
   };
 
+  const ketNoi = connData?.connections ?? [];
+  const coProviderChung = (data?.providers.length ?? 0) > 0;
+  if (!coProviderChung && ketNoi.length === 0 && connData === null) {
+    // Chua tai xong lan dau — tranh nhap nhay MOT khung hinh khong noi dung.
+    return null;
+  }
+
+  const kiemTraLai = async (providerId: string) => {
+    setDangXuLy(providerId);
+    try {
+      await translate.testConnection(providerId);
+      taiLaiKetNoi();
+      toast.ok("Đã kiểm tra lại kết nối.");
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setDangXuLy(null);
+    }
+  };
+
+  const xoaKetNoi = async (providerId: string) => {
+    setDangXuLy(providerId);
+    try {
+      await translate.deleteConnection(providerId);
+      taiLaiKetNoi();
+      toast.ok("Đã xoá kết nối.");
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setDangXuLy(null);
+    }
+  };
+
   return (
     <section className="card stack-2">
-      <h2 className="section-title">Model dịch</h2>
-      <ul className="stack-2" style={{ listStyle: "none", padding: 0 }}>
-        {data.providers.map((p: ProviderCatalogEntry) => (
-          <li key={p.provider_id} className="row-between">
-            <span>{p.display_name}</span>
-            <NhanTrangThaiProvider entry={p} />
-          </li>
-        ))}
-      </ul>
-      <div className="row row-tight">
-        <label className="chip" style={{ cursor: "pointer" }}>
-          <input
-            type="radio"
-            name="provider-mode"
-            checked={project.provider_mode !== "manual"}
-            onChange={() => void capNhat({ providerMode: "auto" })}
-            disabled={dangLuu}
-            style={{ marginRight: 6 }}
-          />
-          Tự động chọn — Khuyên dùng
-        </label>
-        <label className="chip" style={{ cursor: "pointer" }}>
-          <input
-            type="radio"
-            name="provider-mode"
-            checked={project.provider_mode === "manual"}
-            onChange={() => void capNhat({
-              providerMode: "manual",
-              selectedProviderId: project.selected_provider_id
-                ?? data.providers[0]?.provider_id,
-            })}
-            disabled={dangLuu}
-            style={{ marginRight: 6 }}
-          />
-          Tự chọn model
-        </label>
-      </div>
-      {project.provider_mode === "manual" ? (
-        <div className="stack-2">
-          <select
-            className="input"
-            value={project.selected_provider_id ?? ""}
-            disabled={dangLuu}
-            onChange={(e) => void capNhat({ selectedProviderId: e.target.value })}
-          >
-            {data.providers.map((p) => (
-              <option key={p.provider_id} value={p.provider_id}>{p.display_name}</option>
+      <h2 className="section-title">AI dịch</h2>
+      {coProviderChung && data ? (
+        <>
+          <ul className="stack-2" style={{ listStyle: "none", padding: 0 }}>
+            {data.providers.map((p: ProviderCatalogEntry) => (
+              <li key={p.provider_id} className="row-between">
+                <span>● Fanfic Free · {p.display_name}</span>
+                <NhanTrangThaiProvider entry={p} />
+              </li>
             ))}
-          </select>
+          </ul>
+          <div className="row row-tight">
+            <label className="chip" style={{ cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="provider-mode"
+                checked={project.provider_mode !== "manual"}
+                onChange={() => void capNhat({ providerMode: "auto" })}
+                disabled={dangLuu}
+                style={{ marginRight: 6 }}
+              />
+              Tự động chọn — Khuyên dùng
+            </label>
+            <label className="chip" style={{ cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="provider-mode"
+                checked={project.provider_mode === "manual"}
+                onChange={() => void capNhat({
+                  providerMode: "manual",
+                  selectedProviderId: project.selected_provider_id
+                    ?? data.providers[0]?.provider_id,
+                })}
+                disabled={dangLuu}
+                style={{ marginRight: 6 }}
+              />
+              Tự chọn model
+            </label>
+          </div>
+          {project.provider_mode === "manual" ? (
+            <div className="stack-2">
+              <select
+                className="input"
+                value={project.selected_provider_id ?? ""}
+                disabled={dangLuu}
+                onChange={(e) => void capNhat({ selectedProviderId: e.target.value })}
+              >
+                {data.providers.map((p) => (
+                  <option key={p.provider_id} value={p.provider_id}>{p.display_name}</option>
+                ))}
+              </select>
+              <label className="chip" style={{ cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={project.allow_fallback}
+                  disabled={dangLuu}
+                  onChange={(e) => void capNhat({ allowFallback: e.target.checked })}
+                  style={{ marginRight: 6 }}
+                />
+                Tự động chuyển sang model miễn phí khác khi model đã chọn hết hạn mức
+              </label>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {/* V5.1 BYOK — ket noi ca nhan */}
+      {ketNoi.length === 0 ? (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setDialogMo(true)}
+        >
+          Dịch nhiều? Kết nối API key cá nhân
+        </button>
+      ) : (
+        <div className="stack-2">
+          <h3 className="section-title" style={{ fontSize: "var(--t-sm, 0.875rem)" }}>
+            Groq cá nhân
+          </h3>
+          {ketNoi.map((c) => (
+            <div key={c.provider_id} className="row-between">
+              <span>
+                ✓ Đã kết nối · ••••••••{c.last4}
+                {c.status !== "available" && c.status !== "unknown" ? (
+                  <> · {NHAN_PROVIDER_STATUS[c.status] ?? c.status}</>
+                ) : null}
+              </span>
+              <span className="row row-tight">
+                <button
+                  type="button" className="btn btn-ghost btn-sm"
+                  disabled={dangXuLy === c.provider_id}
+                  onClick={() => void kiemTraLai(c.provider_id)}
+                >
+                  Kiểm tra lại
+                </button>
+                <button
+                  type="button" className="btn btn-ghost btn-sm"
+                  onClick={() => setDialogMo(true)}
+                >
+                  Thay API key
+                </button>
+                <button
+                  type="button" className="btn btn-ghost btn-sm"
+                  disabled={dangXuLy === c.provider_id}
+                  onClick={() => void xoaKetNoi(c.provider_id)}
+                >
+                  Xoá kết nối
+                </button>
+              </span>
+            </div>
+          ))}
+          <p className="hint">Xóa tại Fanfic không thu hồi key bên Groq.</p>
+          <a
+            className="btn btn-ghost btn-sm"
+            href={GROQ_CONSOLE_KEYS_URL}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+          >
+            Quản lý API key trên Groq ↗
+          </a>
           <label className="chip" style={{ cursor: "pointer" }}>
             <input
               type="checkbox"
-              checked={project.allow_fallback}
+              checked={project.prefer_personal_provider}
               disabled={dangLuu}
-              onChange={(e) => void capNhat({ allowFallback: e.target.checked })}
+              onChange={(e) => void capNhat({ preferPersonalProvider: e.target.checked })}
               style={{ marginRight: 6 }}
             />
-            Tự động chuyển sang model miễn phí khác khi model đã chọn hết hạn mức
+            Ưu tiên API key cá nhân
           </label>
         </div>
-      ) : null}
+      )}
+      <ProviderConnectDialog
+        open={dialogMo}
+        // `taiLaiKetNoi` (chi tai LAI DANH SACH ket noi, cuc bo trong panel
+        // nay) an toan goi NGAY luc thanh cong — no KHONG unmount ca cay.
+        // `onChanged` (reload toan bo du an, co the hien `<Loading>` va
+        // unmount panel nay) CHI goi luc DONG hop thoai, sau khi nguoi
+        // dung da thay man hinh "Kết nối thành công" — loi that tim qua QA
+        // trinh duyet: goi ca hai NGAY luc ket noi se pha huy hop thoai
+        // truoc khi kip hien trang thai thanh cong.
+        onClose={() => {
+          setDialogMo(false);
+          onChanged();
+        }}
+        onConnected={() => taiLaiKetNoi()}
+      />
     </section>
   );
 }

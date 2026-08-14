@@ -537,6 +537,8 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("provider_mode", "string", False, 16),
             ("selected_provider_id", "string", False, 64),
             ("allow_fallback", "boolean", False, None),
+            # V5.1 Part F, THEM SAU — "Ưu tiên API key cá nhân".
+            ("prefer_personal_provider", "boolean", False, None),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],
@@ -569,6 +571,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("error", "string", False, 300),
             # Part Q4, THEM SAU — moc thu lai khi job dang cho han muc mien phi.
             ("waiting_retry_at", "datetime", False, None),
+            # V5.1 Part G, THEM SAU — ly do/hanh dong AN TOAN cho frontend.
+            ("waiting_reason", "string", False, 32),
+            ("waiting_action", "string", False, 32),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
             ("finished_at", "datetime", False, None),
@@ -644,6 +649,39 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("project_idx", "key", ["project_id"]),
             ("project_chapter_idx", "key", ["project_id", "chapter_index"]),
             ("project_created_idx", "key", ["project_id", "created_at"]),
+        ],
+    },
+    # Ket noi provider AI CA NHAN cua nguoi dung (V5.1, BYOK) — COLLECTION
+    # THU SAU, CONG THEM, chua ap len bat ky moi truong nao.
+    #
+    # `encrypted_secret` LA CHUOI DA MA HOA (AES-256-GCM, xem
+    # `server/translation_byok_crypto.py`) — KHONG BAO GIO la api key ro.
+    # Ban than viec ap schema nay KHONG lam lo bi mat gi (chi tao cot rong);
+    # rui ro chi phat sinh khi co du lieu that duoc ghi vao SAU khi ap, va
+    # luc do van an toan vi gia tri luon o dang da ma hoa.
+    #
+    # ROLLBACK: xoa ca collection — nguoi dung se can ket noi lai API key
+    # rieng cua ho (khong mat gi thuoc ve Fanfic, chi mat ket noi CA NHAN).
+    "translation_provider_connections": {
+        "name": "Translation Provider Connections",
+        "attributes": [
+            ("connection_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            ("provider_id", "string", True, 32),
+            # Du cho tien to "byok.v1." + base64(nonce 12B) + "." +
+            # base64(ciphertext) cho mot api key that dai toi ~200 ky tu.
+            ("encrypted_secret", "string", True, 1000),
+            ("last4", "string", False, 8),
+            ("status", "enum", False,
+             ["available", "rate_limited", "quota_exhausted", "unavailable",
+              "disabled", "unknown"]),
+            ("selected_model", "string", False, 128),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+            ("last_verified_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
         ],
     },
 }

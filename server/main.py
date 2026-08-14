@@ -77,7 +77,9 @@ from server.translation import (
 )
 from server.translation_import import extract_text as _trich_van_ban_tep
 from server.translation_providers import build_provider
-from server.translation_provider_registry import build_provider_registry
+from server.translation_provider_registry import ConnectionCheckError, build_provider_registry
+from server.translation_byok_crypto import ByokConfigError, ByokCrypto, build_byok_crypto
+from server.translation_byok_service import ByokNotConfiguredError, ProviderConnectionService
 from server.translation_service import TranslationService
 from server.translation_store import build_translation_store
 
@@ -145,10 +147,17 @@ translation_store = build_translation_store(settings)
 #: ve `self._provider` don (dong hanh vi voi truoc gio, xem
 #: `TranslationService.__init__`).
 translation_registry = build_provider_registry()
+#: V5.1 BYOK — TUY CHON: `None` khi `TRANSLATION_BYOK_MASTER_KEY` vang mat
+#: (tinh nang khong hoat dong, cac route ket noi ca nhan tra 503 ro rang —
+#: xem `ByokNotConfiguredError`), nem loi NGAY neu bien co mat nhung sai
+#: dinh dang (xem `build_byok_crypto`). KHONG BAO GIO la `NEXT_PUBLIC_*`.
+translation_byok_crypto = build_byok_crypto()
+translation_byok_svc = ProviderConnectionService(
+    translation_store, crypto=translation_byok_crypto)
 translation_svc = TranslationService(
     translation_store, store, provider=build_provider(settings),
     inline_worker=settings.translation_inline_worker,
-    registry=translation_registry)
+    registry=translation_registry, byok=translation_byok_svc)
 
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
@@ -3060,6 +3069,21 @@ def _dich_vu(fn, *args, **kwargs):
         # 409 — frontend hien hop thoai xac nhan, goi lai CUNG request voi
         # `force=true` neu nguoi dung dong y (xem docstring exception).
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except ConnectionCheckError as exc:
+        # V5.1 BYOK Part E — `detail` la MOT DICT (khong phai chuoi) de
+        # frontend re nhanh chinh xac theo `code` SACH, khong phai doan tu
+        # van ban tieng Viet. KHONG BAO GIO kem response/header goc cua nha
+        # cung cap (xem docstring `ConnectionCheckError`/`kiem_tra_ket_noi_groq`).
+        ma_trang_thai = {
+            "INVALID_KEY": status.HTTP_400_BAD_REQUEST,
+            "RATE_LIMITED": status.HTTP_429_TOO_MANY_REQUESTS,
+            "PROVIDER_UNAVAILABLE": status.HTTP_503_SERVICE_UNAVAILABLE,
+            "MODEL_UNAVAILABLE": status.HTTP_400_BAD_REQUEST,
+        }.get(exc.code, status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(
+            ma_trang_thai, {"code": exc.code, "message": str(exc)}) from exc
+    except ByokNotConfiguredError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except TranslationError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except NotFoundError as exc:
@@ -3406,6 +3430,8 @@ class ProviderSettingsPatch(BaseModel):
     provider_mode: Optional[Annotated[str, StringConstraints(max_length=16)]] = None
     selected_provider_id: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
     allow_fallback: Optional[bool] = None
+    #: V5.1 Part F — "Ưu tiên API key cá nhân".
+    prefer_personal_provider: Optional[bool] = None
 
 
 @app.patch("/api/translate/projects/{project_id}/provider")
@@ -3419,8 +3445,77 @@ def update_translation_provider_settings(
         translation_svc.update_provider_settings, project_id, profile.user_id,
         provider_mode=payload.provider_mode,
         selected_provider_id=payload.selected_provider_id,
-        allow_fallback=payload.allow_fallback)
+        allow_fallback=payload.allow_fallback,
+        prefer_personal_provider=payload.prefer_personal_provider)
     return {"project": project.to_dict()}
+
+
+# =============================================================================
+# BYOK — ket noi provider AI CA NHAN cua nguoi dung (V5.1)
+# =============================================================================
+
+
+@app.get("/api/translate/provider-connections")
+def list_provider_connections(
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """AN TOAN de tra ve — `ProviderConnection.to_dict()` KHONG BAO GIO chua
+    `encrypted_secret` (xem docstring entity)."""
+    ds = translation_byok_svc.list_connections(profile.user_id)
+    return {"connections": [c.to_dict() for c in ds], "total": len(ds)}
+
+
+class ProviderConnectionIn(BaseModel):
+    api_key: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    selected_model: Annotated[str, StringConstraints(max_length=128)] = ""
+
+
+@app.post("/api/translate/provider-connections/{provider_id}",
+         status_code=status.HTTP_201_CREATED)
+def connect_provider(
+    provider_id: str, payload: ProviderConnectionIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Ket noi (hoac THAY THE) mot provider ca nhan. Kiem tra key server-side
+    TRUOC khi ma hoa/luu (Part E) — that bai thi KHONG luu gi ca.
+
+    Hien CHI ho tro `provider_id="groq"`
+    (`translation_byok_service.SUPPORTED_BYOK_PROVIDERS`) — provider khac
+    tra 400 ro rang qua `TranslationError`.
+    """
+    conn = _dich_vu(
+        translation_byok_svc.connect, profile.user_id, provider_id,
+        payload.api_key, selected_model=payload.selected_model)
+    # Ket noi THANH CONG co the giup mot job dang `waiting_for_provider`
+    # cua CHINH nguoi dung nay tiep tuc ngay (Part G) — khong tao job moi,
+    # khong dich lai chuong da xong (xem `TranslationService.try_resume_user_jobs`).
+    translation_svc.try_resume_user_jobs(profile.user_id)
+    return {"connection": conn.to_dict()}
+
+
+@app.post("/api/translate/provider-connections/{provider_id}/test")
+def test_provider_connection(
+    provider_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Kiem tra LAI mot ket noi DA co — dung endpoint NHE (khong dich thu,
+    khong ton han muc dich — xem `kiem_tra_ket_noi_groq`)."""
+    conn = _dich_vu(
+        translation_byok_svc.test_connection, profile.user_id, provider_id)
+    return {"connection": conn.to_dict()}
+
+
+@app.delete("/api/translate/provider-connections/{provider_id}")
+def delete_provider_connection(
+    provider_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Xoa ket noi TAI FANFIC — KHONG thu hoi key ben phia nha cung cap (Part
+    J: "Xóa tại Fanfic không thu hồi key bên Groq", nguoi dung tu quan ly
+    o `https://console.groq.com/keys` neu muon thu hoi that).
+    """
+    translation_byok_svc.delete(profile.user_id, provider_id)
+    return {"deleted": True}
 
 
 class ImportDraftIn(BaseModel):

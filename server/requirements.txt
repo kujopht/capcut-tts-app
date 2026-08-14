@@ -50,5 +50,11 @@ edge-tts>=7.2.8,<8.0
 # Bo comment dong duoi neu muon dung giong cuc bo.
 # piper-tts>=1.6.0,<2.0
 
+# --- Bat buoc: ma hoa BYOK (V5.1) ---
+# `server/translation_byok_crypto.py` dung AES-256-GCM (`cryptography.hazmat`)
+# de ma hoa API key rieng cua nguoi dung truoc khi luu — KHONG tu viet thuat
+# toan ma hoa, dung thu vien da duoc kiem duyet rong rai.
+cryptography>=42.0,<44.0
+
 # --- Ngoai Python ---
 # ffmpeg phai co trong PATH de ghep cac doan MP3 (server/tts_bridge.py).

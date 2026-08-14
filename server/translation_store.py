@@ -19,7 +19,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from server.adapters import NotFoundError, PermissionDenied
 from server.translation import TERMINAL_STATUSES, GlossaryEntry, TranslationJobStatus
-from server.translation_domain import TranslationJob, TranslationProject, TranslationVersion
+from server.translation_domain import (
+    ProviderConnection,
+    TranslationJob,
+    TranslationProject,
+    TranslationVersion,
+    id_ket_noi_provider,
+)
 
 
 class MockTranslationStore:
@@ -35,6 +41,10 @@ class MockTranslationStore:
         self._claims: Set[Tuple[str, int]] = set()
         #: project_id -> {version_id: TranslationVersion} — Part O.
         self._versions: Dict[str, Dict[str, TranslationVersion]] = {}
+        #: connection_id -> ProviderConnection — V5.1 BYOK. ID tat dinh tu
+        #: (user_id, provider_id) nen tu nhien la MOT bang phang, khong can
+        #: long theo user_id nhu `_versions`.
+        self._connections: Dict[str, ProviderConnection] = {}
 
     # ======================================================== du an
 
@@ -238,6 +248,38 @@ class MockTranslationStore:
         if chapter_index is not None:
             ra = [v for v in ra if v.chapter_index == chapter_index]
         return sorted(ra, key=lambda v: v.created_at, reverse=True)
+
+    # ======================================================== ket noi provider ca nhan (V5.1 BYOK)
+
+    def save_connection(self, connection: ProviderConnection) -> ProviderConnection:
+        """Upsert — cung connection_id (tat dinh tu user_id+provider_id, xem
+        `id_ket_noi_provider`) thi GHI DE, khong tao ban ghi thu hai."""
+        with self._lock:
+            self._connections[connection.connection_id] = connection
+            return connection
+
+    def get_connection(self, user_id: str, provider_id: str) -> ProviderConnection:
+        """CHI tra ve ket noi THUOC DUNG `user_id` nay — khong co duong nao
+        de doc ket noi cua nguoi dung khac qua ham nay, ke ca biet truoc
+        connection_id (ham nay khong nhan connection_id lam tham so)."""
+        muon_id = id_ket_noi_provider(user_id, provider_id)
+        with self._lock:
+            conn = self._connections.get(muon_id)
+        if conn is None or conn.user_id != user_id:
+            raise NotFoundError("Chưa kết nối provider này.")
+        return conn
+
+    def list_connections(self, user_id: str) -> List[ProviderConnection]:
+        with self._lock:
+            ra = [c for c in self._connections.values() if c.user_id == user_id]
+        return sorted(ra, key=lambda c: c.created_at)
+
+    def delete_connection(self, user_id: str, provider_id: str) -> None:
+        muon_id = id_ket_noi_provider(user_id, provider_id)
+        with self._lock:
+            conn = self._connections.get(muon_id)
+            if conn is not None and conn.user_id == user_id:
+                del self._connections[muon_id]
 
 
 def build_translation_store(settings) -> Any:

@@ -37,7 +37,13 @@ from server.translation import (
     QualityMode,
     TranslationJobStatus,
 )
-from server.translation_domain import TranslationJob, TranslationProject, TranslationVersion
+from server.translation_domain import (
+    ProviderConnection,
+    TranslationJob,
+    TranslationProject,
+    TranslationVersion,
+    id_ket_noi_provider,
+)
 from server.translation import GlossaryEntry
 
 COL_PROJECTS = "translation_projects"
@@ -49,6 +55,8 @@ COL_GLOSSARY = "translation_glossary"
 COL_JOB_CLAIMS = "translation_job_claims"
 #: Lich su ban dich (Part O) — CONG THEM, khong doi 4 collection cu.
 COL_VERSIONS = "translation_versions"
+#: Ket noi provider AI ca nhan (V5.1 BYOK) — CONG THEM, collection THU SAU.
+COL_PROVIDER_CONNECTIONS = "translation_provider_connections"
 
 #: Ten thuoc tinh THAT SU muon luu cho tung collection — cung vai tro voi
 #: `PERSISTED_FIELDS` o `appwrite_store.py`, nhung tach rieng: doi schema ben
@@ -60,6 +68,7 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "custom_instruction", "source_filename", "chapter_summaries",
         "translated_chapters", "imported_to_novel_id", "chapter_warnings",
         "provider_mode", "selected_provider_id", "allow_fallback",
+        "prefer_personal_provider",
         "created_at", "updated_at",
     ),
     COL_JOBS: (
@@ -67,6 +76,7 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "total_chapters", "current_chapter_done_segments",
         "current_chapter_total_segments", "current_pass", "attempts",
         "lease_owner", "lease_expires_at", "error", "waiting_retry_at",
+        "waiting_reason", "waiting_action",
         "created_at", "updated_at", "finished_at",
     ),
     COL_GLOSSARY: (
@@ -77,6 +87,11 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "version_id", "project_id", "chapter_index", "paragraph_index",
         "operation", "pass_type", "previous_text", "new_text", "actor_id",
         "provider_id", "model_id", "created_at",
+    ),
+    COL_PROVIDER_CONNECTIONS: (
+        "connection_id", "user_id", "provider_id", "encrypted_secret",
+        "last4", "status", "selected_model", "created_at", "updated_at",
+        "last_verified_at",
     ),
 }
 
@@ -131,6 +146,7 @@ def _project_to_row(p: TranslationProject) -> Dict[str, Any]:
         "provider_mode": p.provider_mode,
         "selected_provider_id": p.selected_provider_id,
         "allow_fallback": p.allow_fallback,
+        "prefer_personal_provider": p.prefer_personal_provider,
         "created_at": p.created_at,
         "updated_at": p.updated_at,
     }
@@ -169,6 +185,7 @@ def _project_from_row(row: Dict[str, Any]) -> TranslationProject:
         provider_mode=str(row.get("provider_mode") or "auto"),
         selected_provider_id=str(row.get("selected_provider_id") or ""),
         allow_fallback=bool(row.get("allow_fallback", True)),
+        prefer_personal_provider=bool(row.get("prefer_personal_provider", False)),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
     )
@@ -202,6 +219,8 @@ def _job_to_row(j: TranslationJob) -> Dict[str, Any]:
         "lease_expires_at": j.lease_expires_at,
         "error": j.error,
         "waiting_retry_at": j.waiting_retry_at,
+        "waiting_reason": j.waiting_reason,
+        "waiting_action": j.waiting_action,
         "created_at": j.created_at,
         "updated_at": j.updated_at,
         "finished_at": j.finished_at,
@@ -230,6 +249,8 @@ def _job_from_row(row: Dict[str, Any]) -> TranslationJob:
         lease_expires_at=str(row.get("lease_expires_at") or ""),
         error=str(row.get("error") or ""),
         waiting_retry_at=str(row.get("waiting_retry_at") or ""),
+        waiting_reason=str(row.get("waiting_reason") or ""),
+        waiting_action=str(row.get("waiting_action") or ""),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
         finished_at=str(row.get("finished_at") or ""),
@@ -302,6 +323,36 @@ def _version_from_row(row: Dict[str, Any]) -> TranslationVersion:
         provider_id=str(row.get("provider_id") or ""),
         model_id=str(row.get("model_id") or ""),
         created_at=str(row.get("created_at") or ""),
+    )
+
+
+def _connection_to_row(c: ProviderConnection) -> Dict[str, Any]:
+    return {
+        "connection_id": c.connection_id,
+        "user_id": c.user_id,
+        "provider_id": c.provider_id,
+        "encrypted_secret": c.encrypted_secret,
+        "last4": c.last4,
+        "status": c.status,
+        "selected_model": c.selected_model,
+        "created_at": c.created_at,
+        "updated_at": c.updated_at,
+        "last_verified_at": c.last_verified_at,
+    }
+
+
+def _connection_from_row(row: Dict[str, Any]) -> ProviderConnection:
+    return ProviderConnection(
+        user_id=str(row.get("user_id") or ""),
+        provider_id=str(row.get("provider_id") or ""),
+        encrypted_secret=str(row.get("encrypted_secret") or ""),
+        last4=str(row.get("last4") or ""),
+        status=str(row.get("status") or "unknown"),
+        selected_model=str(row.get("selected_model") or ""),
+        connection_id=str(row.get("connection_id") or row.get("$id") or ""),
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at") or ""),
+        last_verified_at=str(row.get("last_verified_at") or ""),
     )
 
 
@@ -687,3 +738,45 @@ class AppwriteTranslationStore:
         rows = self._list_all(COL_VERSIONS, queries)
         ra = [_version_from_row(r) for r in rows]
         return sorted(ra, key=lambda v: v.created_at, reverse=True)
+
+    # ======================================================== ket noi provider ca nhan (V5.1 BYOK)
+
+    def save_connection(self, connection: ProviderConnection) -> ProviderConnection:
+        """Upsert THAT: thu tao truoc (id tat dinh — trung id se bi Appwrite
+        tu choi voi 409), khong duoc thi cap nhat. Khong doc-truoc-roi-ghi:
+        tranh mot chuyen di REST thua trong duong thanh cong (lan dau)."""
+        row = _connection_to_row(connection)
+        # KHONG cap quyen doc truc tiep cho client (`owner_id=""` -> khong
+        # permission nao) — dung nguyen tac voi glossary: MOI duong doc/ghi
+        # deu qua backend bang API key, secret khong bao gio ra ngoai qua
+        # Appwrite truc tiep.
+        try:
+            self._create(COL_PROVIDER_CONNECTIONS, connection.connection_id,
+                        row, owner_id="")
+        except NotFoundError:
+            self._update(COL_PROVIDER_CONNECTIONS, connection.connection_id, row)
+        return connection
+
+    def get_connection(self, user_id: str, provider_id: str) -> ProviderConnection:
+        muon_id = id_ket_noi_provider(user_id, provider_id)
+        try:
+            row = self._get(COL_PROVIDER_CONNECTIONS, muon_id)
+        except NotFoundError:
+            raise NotFoundError("Chưa kết nối provider này.") from None
+        conn = _connection_from_row(row)
+        if conn.user_id != user_id:
+            raise NotFoundError("Chưa kết nối provider này.")
+        return conn
+
+    def list_connections(self, user_id: str) -> List[ProviderConnection]:
+        rows = self._list_all(COL_PROVIDER_CONNECTIONS,
+                              [q_equal("user_id", user_id)])
+        ra = [_connection_from_row(r) for r in rows]
+        return sorted(ra, key=lambda c: c.created_at)
+
+    def delete_connection(self, user_id: str, provider_id: str) -> None:
+        try:
+            conn = self.get_connection(user_id, provider_id)
+        except NotFoundError:
+            return
+        self._delete(COL_PROVIDER_CONNECTIONS, conn.connection_id)

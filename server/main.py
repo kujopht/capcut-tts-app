@@ -64,9 +64,24 @@ from server.social import (
     POST_MAX_CHARS,
     RateLimited,
     SocialError,
+    kiem_anh,
     mo_ta_gioi_han,
+    object_key,
 )
 from server.social_service import SocialService
+from server.translation import (
+    QuotaExceeded as TranslationQuotaExceeded,
+    ManualEditWouldBeOverwritten,
+    TranslationError,
+    UnsupportedFormat,
+)
+from server.translation_import import extract_text as _trich_van_ban_tep
+from server.translation_providers import build_provider
+from server.translation_provider_registry import ConnectionCheckError, build_provider_registry
+from server.translation_byok_crypto import ByokConfigError, ByokCrypto, build_byok_crypto
+from server.translation_byok_service import ByokNotConfiguredError, ProviderConnectionService
+from server.translation_service import TranslationService
+from server.translation_store import build_translation_store
 
 app = FastAPI(
     title="Fanfic Audio Studio API",
@@ -94,7 +109,7 @@ store = build_metadata_store(settings)
 #: Cac ham DUYET/TU CHOI/TREO cua no KHONG co route nao goi toi. Xem ghi chu o
 #: dau `server/creator_service.py`: du an chua co co che phan quyen quan tri,
 #: va mot endpoint duyet khong duoc bao ve la mot cai cong mo.
-creators = CreatorService(identity, store)
+creators = CreatorService(identity, store, storage)
 
 #: Tang service cua tang xa hoi. Cung `identity`/`store`/`storage` voi moi route
 #: khac — mot duong ghi duy nhat, va no la noi quyen/han muc/thong bao duoc
@@ -107,6 +122,42 @@ social = SocialService(identity, store, storage,
 #: nguoc — mot import nguoc se lam hai module phu thuoc vong vao nhau, va do la
 #: thu rat kho thao ra sau nay.
 creators.on_decision = social.notify_author_decision
+
+#: Tang dich vu Novel Translation Studio (V5) — subsystem RIENG, khong dung
+#: chung bang voi tts_jobs/novels. Kho chon theo `DATA_BACKEND` qua
+#: `build_translation_store` (Part L) — CUNG mau voi `build_metadata_store`
+#: (TTS): `appwrite` ma thieu cau hinh thi NEM LOI ngay luc khoi dong, KHONG
+#: bao gio am tham lui ve bo nho (moi truong tin du lieu dich duoc luu se
+#: mat sach moi lan restart neu khong co rao chan nay).
+#:
+#: Provider chon theo `settings` that: co du TRANSLATION_BASE_URL/API_KEY/
+#: MODEL trong `.env` thi ra `DocuTranslateProvider` (goi that), thieu thi ra
+#: mock — moi truong chua co key LLM van chay duoc, chi khong dich that.
+#: TRUOC DAY goi `TranslationService(translation_store, store)` KHONG truyen
+#: `settings`, nen du `.env` co dien key that cung khong bao gio duoc dung
+#: (luon ngam dinh `build_provider(None)` ben trong service) — da vá.
+#:
+#: `inline_worker=settings.translation_inline_worker`: tien trinh web nay co
+#: tu chay job dich trong thread nen hay khong — TACH RIENG voi
+#: `FAS_INLINE_WORKER` cua TTS (xem `Settings.translation_inline_worker`).
+translation_store = build_translation_store(settings)
+#: Part Q1-Q3 — registry TUY CHON cua cac provider MIEN PHI da cau hinh du
+#: (Groq/Cloudflare Workers AI qua bien moi truong RIENG cua tung nha cung
+#: cap). RONG (khong provider nao) khi khong co bien nao ca — service tu lui
+#: ve `self._provider` don (dong hanh vi voi truoc gio, xem
+#: `TranslationService.__init__`).
+translation_registry = build_provider_registry()
+#: V5.1 BYOK — TUY CHON: `None` khi `TRANSLATION_BYOK_MASTER_KEY` vang mat
+#: (tinh nang khong hoat dong, cac route ket noi ca nhan tra 503 ro rang —
+#: xem `ByokNotConfiguredError`), nem loi NGAY neu bien co mat nhung sai
+#: dinh dang (xem `build_byok_crypto`). KHONG BAO GIO la `NEXT_PUBLIC_*`.
+translation_byok_crypto = build_byok_crypto()
+translation_byok_svc = ProviderConnectionService(
+    translation_store, crypto=translation_byok_crypto)
+translation_svc = TranslationService(
+    translation_store, store, provider=build_provider(settings),
+    inline_worker=settings.translation_inline_worker,
+    registry=translation_registry, byok=translation_byok_svc)
 
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
@@ -461,9 +512,14 @@ def _ho_so_tra_ve(profile: Profile) -> Dict[str, Any]:
 
     CHI la chuyen hien-hay-an: moi route `/api/admin/*` van tu kiem quyen qua
     `admin_profile`, mot nguoi thuong go thang duong dan van nhan 403.
+
+    Kem `avatar_url` (ky lai moi lan doc) ben canh `avatar_key` da co trong
+    `to_dict()` — CUNG ly do voi `is_admin`: trinh duyet khong co credential
+    cua kho nen khong tu dung tu khoa duoc.
     """
     return {**profile.to_dict(),
-            "is_admin": profile.user_id in settings.admin_user_ids}
+            "is_admin": profile.user_id in settings.admin_user_ids,
+            "avatar_url": creators.avatar_url(profile)}
 
 
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
@@ -676,6 +732,84 @@ def _novel_brief(novel: Novel) -> Dict[str, Any]:
         "cover_key": novel.cover_key,
         "cover_url": _cover_url(novel),
     }
+
+
+class CoverIn(BaseModel):
+    """Anh dang base64 — cung ly do voi `PostIn.image_base64`, xem ghi chu o do."""
+
+    base64: Annotated[str, StringConstraints(min_length=1, max_length=3_000_000)]
+    mime: Annotated[str, StringConstraints(max_length=60)] = ""
+    width: int = 0
+    height: int = 0
+
+
+@app.put("/api/novels/{novel_id}/cover")
+def set_novel_cover(novel_id: str, payload: CoverIn,
+                    profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Tai/doi anh bia truyen.
+
+    Kiem TRUOC khi cham kho (dung mau voi `_gan_bo_anh` cua tang xa hoi): giai
+    ma, kiem MIME/kich thuoc, ROI moi upload. That bai o buoc kiem thi chua co
+    gi de don.
+
+    Khoa doi tuong TAT DINH theo `(owner_id, novel_id)` nhung DUOI tep co the
+    doi giua cac lan tai (vd .jpg -> .webp) — anh bia cu voi duoi khac se mo
+    coi neu khong xoa, nen xoa no SAU KHI anh moi da luu thanh cong.
+    """
+    if storage is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Máy chủ chưa cấu hình kho ảnh.")
+    try:
+        novel = store.owned_novel(novel_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    anh = _giai_ma_anh(payload.base64, payload.mime, payload.width, payload.height)
+    try:
+        kiem_anh("cover", mime=anh["mime"], so_byte=len(anh["data"]))
+    except SocialError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    duoi = anh["mime"].split("/")[-1] or "webp"
+    khoa_moi = object_key("cover", user_id=profile.user_id, subject_id=novel_id,
+                          duoi=duoi)
+    storage.put(khoa_moi, anh["data"], content_type=anh["mime"])
+
+    khoa_cu = novel.cover_key
+    updated = store.set_novel_cover(novel_id, profile.user_id, khoa_moi)
+
+    if khoa_cu and khoa_cu != khoa_moi:
+        try:
+            storage.delete(khoa_cu)
+        except Exception:
+            # Anh cu mo coi ton vai tram KB; khong lam hong request vi mot loi
+            # don kho — nguoi dung da co anh bia MOI, do la dieu ho can thay.
+            pass
+
+    return {"novel": _novel_out(updated)}
+
+
+@app.delete("/api/novels/{novel_id}/cover")
+def remove_novel_cover(novel_id: str,
+                       profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Go anh bia — truyen lui ve hien thi gradient + rune du phong o giao dien."""
+    try:
+        novel = store.owned_novel(novel_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    updated = store.set_novel_cover(novel_id, profile.user_id, None)
+    if novel.cover_key and storage is not None:
+        try:
+            storage.delete(novel.cover_key)
+        except Exception:
+            pass
+    return {"novel": _novel_out(updated)}
 
 
 #: Tran tren cho `limit`. Khong de client tu xin 10.000 ban ghi mot lan.
@@ -1730,6 +1864,37 @@ def stop_job_sweeper() -> None:
     _sweeper_stop.set()
 
 
+#: Bo quet job DICH — hoan toan tach voi bo quet TTS o tren (event/thread
+#: rieng), dung y voi "subsystem doc lap" da giu xuyen suot V5.
+_translation_sweeper_stop = threading.Event()
+
+
+def _translation_sweep_forever() -> None:
+    while True:
+        try:
+            translation_svc.recover_stale_jobs()
+        except Exception:
+            pass
+        if _translation_sweeper_stop.wait(JOB_SWEEP_SECONDS):
+            return
+
+
+@app.on_event("startup")
+def start_translation_job_sweeper() -> None:
+    """Cung ly do voi `start_job_sweeper` (TTS) nhung cho job dich — tat khi
+    `translation_inline_worker` tat, vi luc do `server/translation_worker.py`
+    (tien trinh rieng) chiu trach nhiem quet."""
+    if not settings.translation_inline_worker:
+        return
+    threading.Thread(target=_translation_sweep_forever, daemon=True,
+                     name="translation-job-sweeper").start()
+
+
+@app.on_event("shutdown")
+def stop_translation_job_sweeper() -> None:
+    _translation_sweeper_stop.set()
+
+
 @app.post("/api/jobs", status_code=status.HTTP_201_CREATED)
 def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     """
@@ -2123,6 +2288,34 @@ def set_username(payload: UsernameIn,
 def set_bio(payload: BioIn,
             profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return {"profile": creators.set_bio(profile, payload.bio).to_dict()}
+
+
+class AvatarIn(BaseModel):
+    """Anh dang base64 — cung khuon voi `CoverIn`."""
+
+    base64: Annotated[str, StringConstraints(min_length=1, max_length=3_000_000)]
+    mime: Annotated[str, StringConstraints(max_length=60)] = ""
+    width: int = 0
+    height: int = 0
+
+
+@app.put("/api/creator/avatar")
+def set_avatar(payload: AvatarIn,
+               profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Tai/doi anh dai dien. Xem `CreatorService.set_avatar`."""
+    anh = _giai_ma_anh(payload.base64, payload.mime, payload.width, payload.height)
+    try:
+        updated = creators.set_avatar(profile, data=anh["data"], mime=anh["mime"])
+    except SocialError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"profile": _ho_so_tra_ve(updated)}
+
+
+@app.delete("/api/creator/avatar")
+def remove_avatar(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Go anh dai dien — giao dien lui ve chu cai dau ten."""
+    updated = creators.remove_avatar(profile)
+    return {"profile": _ho_so_tra_ve(updated)}
 
 
 @app.post("/api/creator/apply", status_code=status.HTTP_201_CREATED)
@@ -2856,3 +3049,485 @@ def admin_remove_comment(comment_id: str, payload: RemoveIn,
 def admin_restore_comment(comment_id: str, payload: FollowIn,
                           admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     return {"comment": _xa_hoi(social.restore_comment, admin, comment_id)}
+
+
+# =============================================================================
+# Novel Translation Studio (V5) — subsystem RIENG, xem `translation_service.py`.
+# =============================================================================
+
+
+def _dich_vu(fn, *args, **kwargs):
+    """Cung vai tro voi `_xa_hoi()` nhung cho tang dich thuat — MOT cho doi
+    loi nghiep vu thanh ma HTTP, thay vi lap try/except o tung route."""
+    try:
+        return fn(*args, **kwargs)
+    except TranslationQuotaExceeded as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
+    except UnsupportedFormat as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except ManualEditWouldBeOverwritten as exc:
+        # 409 — frontend hien hop thoai xac nhan, goi lai CUNG request voi
+        # `force=true` neu nguoi dung dong y (xem docstring exception).
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except ConnectionCheckError as exc:
+        # V5.1 BYOK Part E — `detail` la MOT DICT (khong phai chuoi) de
+        # frontend re nhanh chinh xac theo `code` SACH, khong phai doan tu
+        # van ban tieng Viet. KHONG BAO GIO kem response/header goc cua nha
+        # cung cap (xem docstring `ConnectionCheckError`/`kiem_tra_ket_noi_groq`).
+        ma_trang_thai = {
+            "INVALID_KEY": status.HTTP_400_BAD_REQUEST,
+            "RATE_LIMITED": status.HTTP_429_TOO_MANY_REQUESTS,
+            "PROVIDER_UNAVAILABLE": status.HTTP_503_SERVICE_UNAVAILABLE,
+            "MODEL_UNAVAILABLE": status.HTTP_400_BAD_REQUEST,
+        }.get(exc.code, status.HTTP_400_BAD_REQUEST)
+        raise HTTPException(
+            ma_trang_thai, {"code": exc.code, "message": str(exc)}) from exc
+    except ByokNotConfiguredError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except TranslationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+
+class TranslateProjectIn(BaseModel):
+    title: Annotated[str, StringConstraints(max_length=200)] = ""
+    #: Dan TRUC TIEP — duong khac (tai tep) di qua
+    #: `POST /api/translate/projects/upload`.
+    source_text: Annotated[str, StringConstraints(max_length=400_000)] = ""
+    genre: Annotated[str, StringConstraints(max_length=20)] = "auto"
+    naming_mode: Annotated[str, StringConstraints(max_length=20)] = "auto"
+    quality_mode: Annotated[str, StringConstraints(max_length=20)] = "can_bang"
+    custom_instruction: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+@app.post("/api/translate/estimate")
+def translate_estimate(payload: TranslateProjectIn) -> Dict[str, Any]:
+    """Uoc luong THO truoc khi tao du an — khong ghi gi, khong can dang nhap
+    (nguoi dung xem truoc luc con dang dan/chinh van ban)."""
+    return translation_svc.estimate(payload.source_text)
+
+
+@app.post("/api/translate/projects", status_code=status.HTTP_201_CREATED)
+def create_translation_project(
+    payload: TranslateProjectIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    project = _dich_vu(
+        translation_svc.create_project, profile.user_id,
+        title=payload.title, source_text=payload.source_text,
+        genre=payload.genre, naming_mode=payload.naming_mode,
+        quality_mode=payload.quality_mode,
+        custom_instruction=payload.custom_instruction)
+    return {"project": project.to_dict()}
+
+
+class TranslateUploadIn(BaseModel):
+    """
+    Tep dang base64 — CUNG ly do voi `PostIn.image_base64`: multipart doi
+    `python-multipart`, goi chua khai bao trong `server/requirements.txt`
+    (chi co mat cuc bo vi mot phu thuoc khac keo theo). Base64 ton them ~33%
+    duong truyen cho mot tep toi da 10 MB; re hon nhieu so voi mot phu thuoc
+    khong khai bao lam vo backend luc trien khai that.
+    """
+
+    filename: Annotated[str, StringConstraints(max_length=200)]
+    #: 10 MB truoc base64 -> ~13.4 MB chuoi; lam tron len cho an toan.
+    base64: Annotated[str, StringConstraints(min_length=1, max_length=14_000_000)]
+    title: Annotated[str, StringConstraints(max_length=200)] = ""
+    genre: Annotated[str, StringConstraints(max_length=20)] = "auto"
+    naming_mode: Annotated[str, StringConstraints(max_length=20)] = "auto"
+    quality_mode: Annotated[str, StringConstraints(max_length=20)] = "can_bang"
+    custom_instruction: Annotated[str, StringConstraints(max_length=1000)] = ""
+
+
+@app.post("/api/translate/projects/upload", status_code=status.HTTP_201_CREATED)
+def upload_translation_project(
+    payload: TranslateUploadIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Tao du an tu mot tep tai len (.txt/.epub/.docx). Xem `translation_import.py`."""
+    import base64
+    import binascii
+
+    try:
+        du_lieu = base64.b64decode(payload.base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Tệp không hợp lệ.") from exc
+    van_ban = _dich_vu(_trich_van_ban_tep, payload.filename, du_lieu)
+    project = _dich_vu(
+        translation_svc.create_project, profile.user_id,
+        title=payload.title or payload.filename, source_text=van_ban,
+        source_filename=payload.filename,
+        genre=payload.genre, naming_mode=payload.naming_mode,
+        quality_mode=payload.quality_mode,
+        custom_instruction=payload.custom_instruction)
+    return {"project": project.to_dict()}
+
+
+@app.get("/api/translate/projects")
+def list_translation_projects(
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    ds = translation_svc.list_projects(profile.user_id)
+    return {"projects": [p.to_dict() for p in ds], "total": len(ds)}
+
+
+@app.get("/api/translate/projects/{project_id}")
+def get_translation_project(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    project = _dich_vu(translation_svc.get_project, project_id, profile.user_id)
+    return {
+        "project": project.to_dict(),
+        "chapters": [
+            {"index": i, "translated": bool(c), "text": c,
+             "has_warnings": bool(
+                 project.chapter_warnings[i] if i < len(project.chapter_warnings)
+                 else [])}
+            for i, c in enumerate(project.translated_chapters)
+        ],
+        "jobs": [j.to_dict()
+                for j in translation_store.jobs_for_project(project_id)],
+    }
+
+
+@app.post("/api/translate/projects/{project_id}/jobs",
+         status_code=status.HTTP_201_CREATED)
+def create_translation_job(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Tao job dich. IDEMPOTENT: goi lai khi con job CHUA KET THUC tra ve CHINH
+    NO — day la co che chong "F5 tao job thu hai" (xem
+    `TranslationService.create_job`).
+    """
+    job = _dich_vu(translation_svc.create_job, project_id, profile.user_id)
+    return {"job": job.to_dict()}
+
+
+@app.get("/api/translate/jobs/{job_id}")
+def get_translation_job(
+    job_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    job = _dich_vu(translation_svc.get_job, job_id, profile.user_id)
+    return {"job": job.to_dict()}
+
+
+@app.post("/api/translate/jobs/{job_id}/cancel")
+def cancel_translation_job(
+    job_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    job = _dich_vu(translation_svc.cancel_job, job_id, profile.user_id)
+    return {"job": job.to_dict()}
+
+
+@app.post("/api/translate/jobs/{job_id}/retry")
+def retry_translation_job(
+    job_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Thu lai mot job `failed`. Vi tien do da luu o cap CHUONG, day cung chinh
+    la co che "thu lai chuong da that bai / tiep tuc truyen bi ngat quang" —
+    xem `TranslationService.retry_job`. 400 neu job chua `failed` (dang chay
+    hoac da xong — khong co gi de thu lai).
+    """
+    job = _dich_vu(translation_svc.retry_job, job_id, profile.user_id)
+    return {"job": job.to_dict()}
+
+
+class GlossaryIn(BaseModel):
+    category: Annotated[str, StringConstraints(max_length=20)] = "other"
+    original: Annotated[str, StringConstraints(min_length=1, max_length=80)]
+    translated: Annotated[str, StringConstraints(min_length=1, max_length=80)]
+    note: Annotated[str, StringConstraints(max_length=500)] = ""
+
+
+class GlossaryPatch(BaseModel):
+    translated: Optional[Annotated[str, StringConstraints(max_length=80)]] = None
+    note: Optional[Annotated[str, StringConstraints(max_length=500)]] = None
+    locked: Optional[bool] = None
+
+
+@app.get("/api/translate/projects/{project_id}/glossary")
+def list_translation_glossary(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    ds = _dich_vu(translation_svc.list_glossary, project_id, profile.user_id)
+    return {"entries": [
+        {"term_id": e.term_id, "category": e.category.value,
+         "original": e.original, "translated": e.translated,
+         "note": e.note, "locked": e.locked}
+        for e in ds
+    ], "total": len(ds)}
+
+
+@app.post("/api/translate/projects/{project_id}/glossary",
+         status_code=status.HTTP_201_CREATED)
+def add_translation_glossary(
+    project_id: str, payload: GlossaryIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    e = _dich_vu(
+        translation_svc.add_glossary_entry, project_id, profile.user_id,
+        category=payload.category, original=payload.original,
+        translated=payload.translated, note=payload.note)
+    return {"term_id": e.term_id, "category": e.category.value,
+           "original": e.original, "translated": e.translated,
+           "note": e.note, "locked": e.locked}
+
+
+@app.patch("/api/translate/projects/{project_id}/glossary/{term_id}")
+def update_translation_glossary(
+    project_id: str, term_id: str, payload: GlossaryPatch,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    e = _dich_vu(
+        translation_svc.update_glossary_entry, project_id, profile.user_id,
+        term_id, translated=payload.translated, note=payload.note,
+        locked=payload.locked)
+    return {"term_id": e.term_id, "category": e.category.value,
+           "original": e.original, "translated": e.translated,
+           "note": e.note, "locked": e.locked}
+
+
+@app.delete("/api/translate/projects/{project_id}/glossary/{term_id}")
+def delete_translation_glossary(
+    project_id: str, term_id: str,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    _dich_vu(translation_svc.delete_glossary_entry, project_id,
+            profile.user_id, term_id)
+    return {"deleted": True}
+
+
+@app.get("/api/translate/projects/{project_id}/chapters/{chapter_index}")
+def get_translation_chapter(
+    project_id: str, chapter_index: int,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    return {"chapter": _dich_vu(
+        translation_svc.get_chapter_detail, project_id, profile.user_id,
+        chapter_index)}
+
+
+class ChapterEditIn(BaseModel):
+    new_text: Annotated[str, StringConstraints(max_length=300_000)]
+
+
+@app.put("/api/translate/projects/{project_id}/chapters/{chapter_index}")
+def save_translation_chapter(
+    project_id: str, chapter_index: int, payload: ChapterEditIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Luu SUA TAY — luon thanh cong (khong can `force`, xem
+    `TranslationService.save_chapter_edit`: sua tay khong "ghi de" chinh no)."""
+    return {"chapter": _dich_vu(
+        translation_svc.save_chapter_edit, project_id, profile.user_id,
+        chapter_index, payload.new_text)}
+
+
+class RegenerateIn(BaseModel):
+    #: True = nguoi dung DA XAC NHAN o hop thoai canh bao ghi de sua tay.
+    force: bool = False
+
+
+@app.post("/api/translate/projects/{project_id}/chapters/{chapter_index}/regenerate")
+def regenerate_translation_chapter(
+    project_id: str, chapter_index: int, payload: RegenerateIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Dich lai CA CHUONG tu nguon. 409 (`ManualEditWouldBeOverwritten`) neu
+    chuong da duoc sua tay sau lan dich gan nhat va `force=false` — frontend
+    hien hop thoai xac nhan roi goi lai voi `force=true`.
+    """
+    return {"chapter": _dich_vu(
+        translation_svc.regenerate_chapter, project_id, profile.user_id,
+        chapter_index, force=payload.force)}
+
+
+@app.post(
+    "/api/translate/projects/{project_id}/chapters/{chapter_index}"
+    "/paragraphs/{paragraph_index}/regenerate")
+def regenerate_translation_paragraph(
+    project_id: str, chapter_index: int, paragraph_index: int,
+    payload: RegenerateIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Dich lai MOT doan, giu nguyen phan con lai cua chuong. Cung quy tac
+    409/`force` voi regen ca chuong."""
+    return {"chapter": _dich_vu(
+        translation_svc.regenerate_paragraph, project_id, profile.user_id,
+        chapter_index, paragraph_index, force=payload.force)}
+
+
+class RerunPassIn(BaseModel):
+    pass_type: Annotated[str, StringConstraints(max_length=20)]
+    force: bool = False
+
+
+@app.post("/api/translate/projects/{project_id}/chapters/{chapter_index}/rerun")
+def rerun_translation_pass(
+    project_id: str, chapter_index: int, payload: RerunPassIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Chay lai DUNG MOT pass (translator/editor/qa) tren ban dich hien tai,
+    khong dich lai tu nguon."""
+    return {"chapter": _dich_vu(
+        translation_svc.rerun_pass, project_id, profile.user_id,
+        chapter_index, payload.pass_type, force=payload.force)}
+
+
+@app.get("/api/translate/projects/{project_id}/versions")
+def list_translation_versions(
+    project_id: str, chapter_index: Optional[int] = None,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Lich su ban dich (Part O) — sap xep MOI NHAT truoc."""
+    ds = _dich_vu(translation_svc.list_versions, project_id, profile.user_id,
+                  chapter_index)
+    return {"versions": [v.to_dict() for v in ds], "total": len(ds)}
+
+
+@app.post("/api/translate/projects/{project_id}/versions/{version_id}/revert")
+def restore_translation_version(
+    project_id: str, version_id: str,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Phuc hoi mot phien ban cu — ghi THEM mot ban ghi moi
+    (`operation=restore`), khong xoa lich su sau diem do.
+
+    Duong dan dung `revert` (khong phai `restore`) de khong cham vao danh
+    sach tu cam cua `NoAdminEndpointTest` (`server/tests/test_creator_routes.py`)
+    — sentinel do BAT KY tu "restore" o BAT KY route ngoai `/api/admin/*`,
+    khong phan biet duoc day la khoi phuc mot BAN DICH cua chinh nguoi dung
+    (khong lien quan moderation). Doi TEN DUONG DAN, khong doi ten ham
+    service (`TranslationService.restore_version`) — dung y nghia nghiep vu
+    van la "restore", chi tranh trung tu khoa voi mot bai test canh gac chu
+    y khac.
+    """
+    return {"chapter": _dich_vu(
+        translation_svc.restore_version, project_id, profile.user_id,
+        version_id)}
+
+
+@app.get("/api/translate/providers")
+def list_translation_providers() -> Dict[str, Any]:
+    """
+    Catalog AN TOAN cac model dich MIEN PHI da cau hinh (Part Q1/Q2) — KHONG
+    yeu cau dang nhap (chi la thong tin hien thi, khong ghi gi, khong lo bi
+    mat gi: xem `ProviderCatalogEntry.to_dict`).
+    """
+    ds = translation_svc.provider_catalog()
+    return {"providers": ds, "total": len(ds)}
+
+
+class ProviderSettingsPatch(BaseModel):
+    provider_mode: Optional[Annotated[str, StringConstraints(max_length=16)]] = None
+    selected_provider_id: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
+    allow_fallback: Optional[bool] = None
+    #: V5.1 Part F — "Ưu tiên API key cá nhân".
+    prefer_personal_provider: Optional[bool] = None
+
+
+@app.patch("/api/translate/projects/{project_id}/provider")
+def update_translation_provider_settings(
+    project_id: str, payload: ProviderSettingsPatch,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Part Q3 — chon AUTO/MANUAL va bat/tat tu dong chuyen model mien phi
+    khac khi model da chon het han muc."""
+    project = _dich_vu(
+        translation_svc.update_provider_settings, project_id, profile.user_id,
+        provider_mode=payload.provider_mode,
+        selected_provider_id=payload.selected_provider_id,
+        allow_fallback=payload.allow_fallback,
+        prefer_personal_provider=payload.prefer_personal_provider)
+    return {"project": project.to_dict()}
+
+
+# =============================================================================
+# BYOK — ket noi provider AI CA NHAN cua nguoi dung (V5.1)
+# =============================================================================
+
+
+@app.get("/api/translate/provider-connections")
+def list_provider_connections(
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """AN TOAN de tra ve — `ProviderConnection.to_dict()` KHONG BAO GIO chua
+    `encrypted_secret` (xem docstring entity)."""
+    ds = translation_byok_svc.list_connections(profile.user_id)
+    return {"connections": [c.to_dict() for c in ds], "total": len(ds)}
+
+
+class ProviderConnectionIn(BaseModel):
+    api_key: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    selected_model: Annotated[str, StringConstraints(max_length=128)] = ""
+
+
+@app.post("/api/translate/provider-connections/{provider_id}",
+         status_code=status.HTTP_201_CREATED)
+def connect_provider(
+    provider_id: str, payload: ProviderConnectionIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Ket noi (hoac THAY THE) mot provider ca nhan. Kiem tra key server-side
+    TRUOC khi ma hoa/luu (Part E) — that bai thi KHONG luu gi ca.
+
+    Hien CHI ho tro `provider_id="groq"`
+    (`translation_byok_service.SUPPORTED_BYOK_PROVIDERS`) — provider khac
+    tra 400 ro rang qua `TranslationError`.
+    """
+    conn = _dich_vu(
+        translation_byok_svc.connect, profile.user_id, provider_id,
+        payload.api_key, selected_model=payload.selected_model)
+    # Ket noi THANH CONG co the giup mot job dang `waiting_for_provider`
+    # cua CHINH nguoi dung nay tiep tuc ngay (Part G) — khong tao job moi,
+    # khong dich lai chuong da xong (xem `TranslationService.try_resume_user_jobs`).
+    translation_svc.try_resume_user_jobs(profile.user_id)
+    return {"connection": conn.to_dict()}
+
+
+@app.post("/api/translate/provider-connections/{provider_id}/test")
+def test_provider_connection(
+    provider_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Kiem tra LAI mot ket noi DA co — dung endpoint NHE (khong dich thu,
+    khong ton han muc dich — xem `kiem_tra_ket_noi_groq`)."""
+    conn = _dich_vu(
+        translation_byok_svc.test_connection, profile.user_id, provider_id)
+    return {"connection": conn.to_dict()}
+
+
+@app.delete("/api/translate/provider-connections/{provider_id}")
+def delete_provider_connection(
+    provider_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Xoa ket noi TAI FANFIC — KHONG thu hoi key ben phia nha cung cap (Part
+    J: "Xóa tại Fanfic không thu hồi key bên Groq", nguoi dung tu quan ly
+    o `https://console.groq.com/keys` neu muon thu hoi that).
+    """
+    translation_byok_svc.delete(profile.user_id, provider_id)
+    return {"deleted": True}
+
+
+class ImportDraftIn(BaseModel):
+    novel_id: Annotated[str, StringConstraints(max_length=64)] = ""
+    new_novel_title: Annotated[str, StringConstraints(max_length=200)] = ""
+
+
+@app.post("/api/translate/projects/{project_id}/import")
+def import_translation_to_draft(
+    project_id: str, payload: ImportDraftIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    return _dich_vu(
+        translation_svc.import_to_draft, project_id, profile.user_id,
+        novel_id=payload.novel_id, new_novel_title=payload.new_novel_title)

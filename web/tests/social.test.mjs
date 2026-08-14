@@ -66,6 +66,7 @@ const api = () => read("../src/lib/api.ts");
 const feed = () => read("../src/app/community/page.tsx");
 const postCard = () => read("../src/components/PostCard.tsx");
 const composer = () => read("../src/components/PostComposer.tsx");
+const image = () => read("../src/lib/image.ts");
 const comments = () => read("../src/components/CommentThread.tsx");
 const bell = () => read("../src/components/NotificationBell.tsx");
 const followBtn = () => read("../src/components/FollowButton.tsx");
@@ -240,7 +241,12 @@ test("anh bai co max-height — mot anh doc khong day bang tin xuong ba man", ()
 /* ============================================================ hop soan bai */
 
 test("anh duoc ve lai qua canvas va xuat WebP truoc khi gui", () => {
-  const src = composer();
+  /*
+    V4: `xuLyAnh` don tu PostComposer sang `lib/image.ts` de dung chung voi
+    anh bia truyen (xem NovelCover upload o /write) — cac dac diem xu ly anh
+    gio nam o do, khong con o PostComposer.
+  */
+  const src = image();
   assert.match(src, /canvas\.getContext\("2d"\)/);
   assert.match(src, /canvas\.toBlob\(xong, "image\/webp"/);
   // Va noi ro voi nguoi dung rang metadata (ke ca GPS) bi bo.
@@ -258,11 +264,12 @@ test("anh qua tran bi chan O TRINH DUYET kem con so that", () => {
   assert.match(src, /MB sau khi nén/);
 });
 
-test("URL xem truoc duoc thu hoi — khong ro ri blob theo tung anh", () => {
-  const src = composer();
-  assert.match(src, /URL\.revokeObjectURL\(nguon\)/);
-  // V3 nhieu anh: thu hoi TUNG url trong danh sach.
-  assert.match(src, /urls\.forEach\(\(u\) => URL\.revokeObjectURL\(u\)\)/);
+test("URL xem truoc duoc thu hoi — khong ro ri blob theo tung anh hoac lan xu ly", () => {
+  // Thu hoi URL tam trong LUC xu ly mot anh (`lib/image.ts`, dung chung).
+  assert.match(image(), /URL\.revokeObjectURL\(nguon\)/);
+  // Va thu hoi TUNG url con lai trong danh sach khi composer dong/doi (rieng
+  // cua PostComposer — no giu mang `anhDs`, `lib/image.ts` thi khong).
+  assert.match(composer(), /urls\.forEach\(\(u\) => URL\.revokeObjectURL\(u\)\)/);
 });
 
 test("o chon tep den duoc bang ban phim — khong display:none", () => {

@@ -31,83 +31,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, social, type Post, type ServerLimits } from "@/lib/api";
+import { xuLyAnh, type AnhDaXuLy } from "@/lib/image";
 import { useSession } from "@/lib/session";
+import { Avatar } from "@/components/Avatar";
 
-/** Cạnh dài nhất và chất lượng nén. Dùng khi máy chủ chưa trả giới hạn về. */
+/** Cạnh dài nhất. Dùng khi máy chủ chưa trả giới hạn về. */
 const CANH_DU_PHONG = 1600;
-const CHAT_LUONG = 0.82;
 
 /** Ngưỡng cảnh báo số ký tự — cùng tỉ lệ với trang soạn chương. */
 const CANH_BAO = 0.85;
-
-interface AnhDaXuLy {
-  base64: string;
-  mime: string;
-  width: number;
-  height: number;
-  bytes: number;
-  /** URL tạm để xem trước. PHẢI được thu hồi — xem `useEffect` dọn dẹp. */
-  xemTruoc: string;
-}
-
-/**
- * Vẽ lại một ảnh về trong giới hạn và xuất WebP.
- *
- * Trả `null` khi trình duyệt không đọc được tệp — một tệp `.webp` hỏng hay một
- * tệp đổi đuôi đều rơi vào đây, và cả hai đều nên nói "không đọc được ảnh" thay
- * vì làm hỏng cả hộp soạn.
- */
-async function xuLyAnh(
-  tep: File,
-  canhToiDa: number,
-): Promise<AnhDaXuLy | null> {
-  const nguon = URL.createObjectURL(tep);
-  try {
-    const anh = await new Promise<HTMLImageElement | null>((xong) => {
-      const el = new Image();
-      el.onload = () => xong(el);
-      el.onerror = () => xong(null);
-      el.src = nguon;
-    });
-    if (!anh) return null;
-
-    const canh = Math.max(anh.naturalWidth, anh.naturalHeight) || 1;
-    const ti = Math.min(1, canhToiDa / canh);
-    const w = Math.max(1, Math.round(anh.naturalWidth * ti));
-    const h = Math.max(1, Math.round(anh.naturalHeight * ti));
-
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(anh, 0, 0, w, h);
-
-    const blob = await new Promise<Blob | null>((xong) =>
-      canvas.toBlob(xong, "image/webp", CHAT_LUONG),
-    );
-    if (!blob) return null;
-
-    const buf = await blob.arrayBuffer();
-    // `btoa` cần chuỗi nhị phân. Chuyển theo khối để không vượt trần số tham số
-    // của `String.fromCharCode` với một ảnh vài trăm KB.
-    const bytes = new Uint8Array(buf);
-    let nhi = "";
-    for (let i = 0; i < bytes.length; i += 8192) {
-      nhi += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    }
-    return {
-      base64: btoa(nhi),
-      mime: "image/webp",
-      width: w,
-      height: h,
-      bytes: blob.size,
-      xemTruoc: URL.createObjectURL(blob),
-    };
-  } finally {
-    URL.revokeObjectURL(nguon);
-  }
-}
 
 export function PostComposer({
   limits,
@@ -243,9 +175,7 @@ export function PostComposer({
   if (!moRong) {
     return (
       <section className="card soan-bai-moi" aria-label="Đăng bài mới">
-        <span className="avatar" aria-hidden="true">
-          {tenToi.slice(0, 2).toUpperCase()}
-        </span>
+        <Avatar name={tenToi} avatarUrl={profile?.avatar_url} className="avatar" />
         <button
           type="button"
           className="soan-bai-kich-hoat"

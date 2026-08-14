@@ -714,8 +714,13 @@ class SocialService:
                 muc["image_url"] = muc["image_urls"][0] if muc["image_urls"] else ""
             n = truyen.get(p.novel_id) if p.novel_id else None
             if n is not None:
+                # `cover_key` GIU LAI cho client cu (chi them, khong doi ten —
+                # cung nguyen tac voi `image_url` o tren); `cover_url` la truong
+                # MOI, da ky, de the truyen trong bai dang co the hien bia that
+                # thay vi chi mot lien ket chu.
                 muc["novel"] = {"novel_id": n.novel_id, "title": n.title,
-                                "cover_key": n.cover_key}
+                                "cover_key": n.cover_key,
+                                "cover_url": self._anh_url(n.cover_key or "") or None}
             if kem_xem_truoc:
                 muc["comments_preview"] = [
                     {**c.to_public_dict(), "author": the.get(c.author_user_id)}
@@ -741,10 +746,16 @@ class SocialService:
 
     def _the_nguoi(self, user_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
         """
-        The tac gia gon cho nhieu nguoi, HAI truy van.
+        The tac gia gon cho nhieu nguoi, HAI truy van (+ ky URL avatar CUC BO).
 
         Dung `public_author_card` — cung danh sach cho phep ma tim kiem va trang
-        ca nhan dung. Mot danh sach cho phep, mot cho.
+        ca nhan dung. Mot danh sach cho phep, mot cho — MOI noi hien avatar
+        (bai dang, binh luan, tra loi, thong bao, tim kiem, the tac gia) deu
+        di qua ham nay nen chi can sua MOT cho.
+
+        Ky URL avatar KHONG phai mot truy van them: `_anh_url` tinh chu ky
+        cuc bo (HMAC/presign), khong goi mang — nen ky N avatar o day van la
+        hai truy van kho du lieu, khong phai N+1.
         """
         ids = sorted({u for u in user_ids if u})
         if not ids:
@@ -757,10 +768,12 @@ class SocialService:
             if p is None:
                 continue
             st = thong_ke.get(uid)
-            ra[uid] = public_author_card(p.to_dict(), {
+            the = public_author_card(p.to_dict(), {
                 "qualified_listens": st.qualified_listens if st else 0,
                 "published_novels": st.published_novels if st else 0,
             })
+            the["avatar_url"] = self._anh_url(p.avatar_key) or None
+            ra[uid] = the
         return ra
 
     def _mot_bai(self, bai: Post, viewer: Optional[Profile]) -> Dict[str, Any]:

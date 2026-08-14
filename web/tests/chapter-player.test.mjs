@@ -18,7 +18,9 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const engine = () => read("../src/components/AudioEngine.tsx");
 const hero = () => read("../src/components/ChapterPlayer.tsx");
 const mini = () => read("../src/components/MiniPlayer.tsx");
+const globalMini = () => read("../src/components/GlobalMiniPlayer.tsx");
 const trang = () => read("../src/app/chapters/[id]/page.tsx");
+const layout = () => read("../src/app/layout.tsx");
 const css = () => read("../src/app/globals.css");
 
 /** Bo chu thich truoc khi quet — xem `job-recovery.test.mjs`. */
@@ -29,11 +31,12 @@ const codeOnly = (src) =>
 
 test("chi DONG CO moi tao the <audio>", () => {
   assert.match(codeOnly(engine()), /<audio\b/, "động cơ không có thẻ <audio>");
-  // `codeOnly`: chu thich cua ca hai tep co trich `<audio controls>` de giai
+  // `codeOnly`: chu thich cua ca ba tep co trich `<audio controls>` de giai
   // thich vi sao chung KHONG tu tao the — quet ca tep se bat trung loi giai.
   for (const [ten, src] of [
     ["ChapterPlayer", codeOnly(hero())],
     ["MiniPlayer", codeOnly(mini())],
+    ["GlobalMiniPlayer", codeOnly(globalMini())],
   ]) {
     assert.ok(
       !/<audio\b/.test(src),
@@ -42,18 +45,27 @@ test("chi DONG CO moi tao the <audio>", () => {
   }
 });
 
-test("ca hai trinh phat doc CUNG mot ngu canh", () => {
+test("ca hai trinh phat doc CUNG mot ngu canh, cung dong co toan cuc", () => {
   for (const [ten, src] of [["ChapterPlayer", hero()], ["MiniPlayer", mini()]]) {
     assert.match(src, /useAudioEngine\(\)/, `${ten} không dùng ngữ cảnh chung`);
   }
-  // Va ngu canh do bao TRUM ca hai trong trang.
+  // Dong co gio la TOAN CUC, mount mot lan trong layout — bao TRUM ca thanh
+  // header/main/footer va thanh phat nho toan tuyen (GlobalMiniPlayer), khong
+  // phai chi rieng trang doc chuong. Dieu huong sang trang khac vi vay khong
+  // huy dong co: chi `{children}` doi.
+  const l = layout();
+  const mo = l.indexOf("<AudioEngineProvider");
+  const dong = l.indexOf("</AudioEngineProvider>");
+  assert.ok(mo !== -1 && dong > mo, "layout không có <AudioEngineProvider>");
+  const trong = l.slice(mo, dong);
+  assert.match(trong, /\{children\}/, "children nằm ngoài ngữ cảnh audio");
+  assert.match(trong, /<GlobalMiniPlayer/, "thanh phát toàn tuyến nằm ngoài ngữ cảnh");
+  // Trang doc chuong KHONG tu mo mot provider rieng — chi goi `phat()` de bien
+  // chuong cua no thanh bai dang phat toan cuc.
   const t = trang();
-  const mo = t.indexOf("<AudioEngineProvider");
-  const dong = t.indexOf("</AudioEngineProvider>");
-  assert.ok(mo !== -1 && dong > mo, "không có <AudioEngineProvider>");
-  const trong = t.slice(mo, dong);
-  assert.match(trong, /<ChapterPlayer/, "trình phát lớn nằm ngoài ngữ cảnh");
-  assert.match(trong, /<MiniPlayer/, "thanh nhỏ nằm ngoài ngữ cảnh");
+  assert.ok(!/<AudioEngineProvider/.test(t), "trang chương tự mở provider riêng");
+  assert.match(t, /useAudioEngine\(\)/, "trang chương không lấy điều khiển từ ngữ cảnh chung");
+  assert.match(t, /\.phat\(chapter\.chapter_id, chapter\.title\)/, "trang chương không gọi phat()");
 });
 
 test("nut phat o CA HAI cho deu goi cung mot ham", () => {
@@ -78,8 +90,32 @@ test("phat/dung/tua deu goi thang vao the <audio>", () => {
 test("duong lay URL KHONG doi", () => {
   // Van la `lib/audio.ts::resolveAudio`, ke ca duong R2 ky san lan duong
   // stream qua backend. Doi cho nay la pha ca hai che do kho.
-  assert.match(engine(), /resolveAudio\(chapterId\)/);
+  assert.match(engine(), /resolveAudio\(track\.chapterId\)/);
   assert.match(engine(), /thuHoi\.current\?\.\(\)/, "không thu hồi blob URL");
+});
+
+test("phat() la khong-lam-gi voi CUNG chapterId — vi tri phat khong bi dat lai", () => {
+  // Day la ly do dieu huong ve DUNG trang chuong dang nghe khong lam audio
+  // nhay ve dau: `setTrack` tra ve chinh doi tuong cu khi chapterId khop, nen
+  // effect lay URL (khoa boi `track`) khong chay lai.
+  const src = engine();
+  assert.match(
+    src,
+    /hienTai\?\.chapterId === chapterId \? hienTai : \{ chapterId, title \}/,
+    "phat() không idempotent theo chapterId",
+  );
+  assert.match(src, /\}, \[track\]\);/, "effect lấy URL không khóa theo track");
+});
+
+test("GlobalMiniPlayer an o dung trang chuong dang phat, hien o moi noi khac", () => {
+  const src = globalMini();
+  assert.match(src, /usePathname\(/, "không đọc tuyến hiện tại");
+  assert.match(
+    src,
+    /pathname === `\/chapters\/\$\{t\.chapterId\}`/,
+    "không so sánh với trang chương đang phát",
+  );
+  assert.match(src, /t\.daBatDau && !t\.loi && !oTrangDocChuongNay/);
 });
 
 test("tai MP3 van con, va dung URL tai rieng", () => {

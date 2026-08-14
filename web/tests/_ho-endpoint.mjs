@@ -40,6 +40,9 @@ export const HO_ENDPOINT = [
   "posts",
   "reports",
   "search",
+  // V5 — Novel Translation Studio. Ho RIENG: subsystem khong dung chung bang
+  // voi tts_jobs/novels, xem `server/translation_service.py`.
+  "translate",
   "users",
   "voices",
 ];

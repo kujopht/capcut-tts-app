@@ -39,6 +39,7 @@ import { loginHref } from "@/lib/nav";
 import { khiNao } from "@/lib/time";
 import { formatNumber } from "@/components/ui";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
+import { Avatar } from "@/components/Avatar";
 import { CommentThread } from "@/components/CommentThread";
 import { ReportDialog } from "@/components/ReportDialog";
 import { ImageLightbox } from "@/components/ImageLightbox";
@@ -238,9 +239,7 @@ export function PostCard({
   return (
     <article className="card bai-dang" aria-labelledby={`bai-${bai.post_id}`}>
       <header className="bai-dau">
-        <span className="avatar" aria-hidden="true">
-          {ten.slice(0, 2).toUpperCase()}
-        </span>
+        <Avatar name={ten} avatarUrl={bai.author?.avatar_url} className="avatar" />
         <div className="bai-dau-chu">
           <h3 id={`bai-${bai.post_id}`} className="bai-ten">
             {bai.author?.username ? (
@@ -309,7 +308,20 @@ export function PostCard({
 
       {bai.novel ? (
         <Link href={`/novels/${bai.novel.novel_id}`} className="bai-truyen">
-          <span aria-hidden="true">📖</span> {bai.novel.title}
+          {bai.novel.cover_url ? (
+            <span
+              className="bai-truyen-bia"
+              aria-hidden="true"
+              style={{
+                backgroundImage: `url("${bai.novel.cover_url}")`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }}
+            />
+          ) : (
+            <span aria-hidden="true">📖</span>
+          )}
+          {bai.novel.title}
         </Link>
       ) : null}
 

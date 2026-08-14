@@ -33,6 +33,12 @@ export interface Profile {
    * `/admin`; quyền thật nằm ở từng route `/api/admin/*`.
    */
   is_admin?: boolean;
+  /** Khoá đối tượng R2 của avatar. Chuỗi rỗng = chưa tải — dùng `avatar_url`
+      để hiển thị, không bao giờ tự dựng URL từ khoá này. */
+  avatar_key?: string;
+  /** URL xem được của avatar, do máy chủ ký. `null`/`undefined` = chưa có —
+      giao diện lùi về chữ cái đầu tên. */
+  avatar_url?: string | null;
 }
 
 /**
@@ -115,6 +121,9 @@ export interface PublicProfile {
   rank?: RankProgress;
   published_novels?: number;
   novels?: Novel[];
+  /** URL avatar đã ký, hoặc `null` khi chưa tải. Tuỳ chọn để client cũ vẫn
+      biên dịch được — cùng lý do với `Novel.cover_url`. */
+  avatar_url?: string | null;
   /**
    * Số liệu xã hội, ghép sẵn vào cùng một lần gọi.
    *
@@ -242,10 +251,15 @@ export interface AudioTrack {
 /** Loi API kem thong bao tieng Viet de hien thi thang cho nguoi dung. */
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** V5.1 BYOK — ma loi SACH khi backend tra `detail` dang object
+      (`{code, message}`, xem `ConnectionCheckError` o server). Rong voi
+      moi loi khac (detail dang chuoi nhu truoc gio). */
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -278,13 +292,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     let message = `Máy chủ trả về lỗi ${response.status}.`;
+    let code: string | undefined;
     try {
       const body = await response.json();
-      if (typeof body?.detail === "string") message = body.detail;
+      if (typeof body?.detail === "string") {
+        message = body.detail;
+      } else if (body?.detail && typeof body.detail === "object") {
+        // V5.1 BYOK — `{code, message}` (xem `ConnectionCheckError`).
+        if (typeof body.detail.message === "string") message = body.detail.message;
+        if (typeof body.detail.code === "string") code = body.detail.code;
+      }
     } catch {
       /* giu thong bao mac dinh */
     }
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, code);
   }
 
   if (response.status === 204) return undefined as T;
@@ -329,6 +350,22 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ bio }),
     }),
+
+  /**
+   * Tai/doi avatar. `image` da qua xu ly o trinh duyet — xem
+   * `lib/image.ts::xuLyAnh`. May chu van kiem lai MIME/kich thuoc that.
+   */
+  setAvatar: (
+    image: { base64: string; mime: string; width: number; height: number },
+  ) =>
+    request<{ profile: Profile }>("/api/creator/avatar", {
+      method: "PUT",
+      body: JSON.stringify(image),
+    }),
+
+  /** Go avatar — giao dien lui ve chu cai dau ten. */
+  removeAvatar: () =>
+    request<{ profile: Profile }>("/api/creator/avatar", { method: "DELETE" }),
 
   applyAuthor: (payload: {
     pen_name: string;
@@ -490,6 +527,25 @@ export const api = {
       `/api/novels/${novelId}`,
       { method: "DELETE" },
     ),
+
+  /**
+   * Tai/doi anh bia truyen. `image` da qua xu ly o trinh duyet (WebP, da nen)
+   * — xem `lib/image.ts::xuLyAnh`. May chu van kiem lai MIME/kich thuoc that.
+   */
+  setNovelCover: (
+    novelId: string,
+    image: { base64: string; mime: string; width: number; height: number },
+  ) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}/cover`, {
+      method: "PUT",
+      body: JSON.stringify(image),
+    }),
+
+  /** Go anh bia — truyen lui ve hien thi gradient + rune du phong. */
+  removeNovelCover: (novelId: string) =>
+    request<{ novel: Novel }>(`/api/novels/${novelId}/cover`, {
+      method: "DELETE",
+    }),
 
   createChapter: (
     novelId: string,
@@ -777,6 +833,10 @@ export interface AuthorCard {
   is_author: boolean;
   rank?: RankProgress;
   published_novels?: number;
+  /** URL avatar đã ký, hoặc `null`/vắng mặt khi chưa tải — nơi hiển thị lùi
+      về chữ cái đầu tên. Cùng một chỗ (`_the_nguoi` ở backend) phục vụ mọi
+      nơi thẻ này xuất hiện: bài đăng, bình luận, thông báo, tìm kiếm. */
+  avatar_url?: string | null;
 }
 
 export type PostKind = "post" | "story_update";
@@ -814,7 +874,13 @@ export interface Post {
       chỉ để giao diện khỏi hiện một cái nút chắc chắn sẽ trả 403. */
   can_edit: boolean;
   /** Chỉ có với `story_update`. */
-  novel?: { novel_id: string; title: string; cover_key: string | null };
+  novel?: {
+    novel_id: string;
+    title: string;
+    cover_key: string | null;
+    /** Tuỳ chọn để client cũ vẫn biên dịch được — cùng lý do với `Novel.cover_url`. */
+    cover_url?: string | null;
+  };
 }
 
 export interface Comment {
@@ -1278,3 +1344,427 @@ export const adminSocial = {
       { method: "POST", body: "{}" },
     ),
 };
+
+// =============================================================================
+// V5 — Novel Translation Studio
+// =============================================================================
+//
+// Kieu o day khop `to_dict()` cua `server/translation_domain.py`. Subsystem
+// RIENG voi TTS — khong dung chung `Job`/`Chapter` o tren.
+
+export type GenrePreset =
+  | "tien_hiep" | "huyen_huyen" | "vo_hiep" | "do_thi" | "ngon_tinh"
+  | "lich_su" | "he_thong" | "dong_nhan" | "kinh_di" | "auto";
+
+export type NamingMode = "han_viet" | "pinyin" | "thuan_viet" | "fandom" | "auto";
+export type QualityMode = "nhanh" | "can_bang" | "van_hoc";
+
+export type TranslationJobStatus =
+  | "queued" | "analyzing" | "glossary" | "translating" | "reviewing" | "qa"
+  | "waiting_for_provider" | "completed" | "failed" | "cancelled";
+
+export interface TranslationProject {
+  project_id: string;
+  owner_id: string;
+  title: string;
+  source_language: string;
+  target_language: string;
+  genre: GenrePreset;
+  genre_label: string;
+  naming_mode: NamingMode;
+  naming_mode_label: string;
+  quality_mode: QualityMode;
+  custom_instruction: string;
+  source_filename: string;
+  chapter_count: number;
+  translated_chapter_count: number;
+  imported_to_novel_id: string | null;
+  /** Part Q3 — "auto" hoặc "manual". */
+  provider_mode: "auto" | "manual";
+  selected_provider_id: string | null;
+  allow_fallback: boolean;
+  /** V5.1 Part F — "Ưu tiên API key cá nhân". */
+  prefer_personal_provider: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type WaitingReason = "shared_free_quota_exhausted" | "personal_quota_exhausted";
+export type WaitingAction = "connect_personal_provider";
+
+export interface TranslationJob {
+  job_id: string;
+  project_id: string;
+  status: TranslationJobStatus;
+  current_chapter: number;
+  total_chapters: number;
+  /** Vai trò provider đang chạy ngay lúc này ("translator"/"editor"/"qa"), rỗng khi chưa chạy/đã xong. */
+  current_pass: string | null;
+  progress: number;
+  attempts: number;
+  error: string | null;
+  /** Giống hệt `error` — tên khác cho cùng giá trị, dùng ở UI tiến trình. */
+  last_error: string | null;
+  /** Part Q4 — chỉ có ý nghĩa khi `status === "waiting_for_provider"`. */
+  waiting_retry_at: string | null;
+  /** V5.1 Part G — an toàn, không lộ chi tiết nội bộ. */
+  waiting_reason: WaitingReason | null;
+  waiting_action: WaitingAction | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
+/** V5.1 BYOK — metadata AN TOÀN, không bao giờ chứa api key. */
+export interface ProviderConnection {
+  provider_id: string;
+  connected: true;
+  last4: string;
+  status: ProviderStatusValue;
+  selected_model: string | null;
+  last_verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ConnectionErrorCode =
+  | "INVALID_KEY" | "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "MODEL_UNAVAILABLE";
+
+export interface GlossaryEntry {
+  term_id: string;
+  category: string;
+  original: string;
+  translated: string;
+  note: string;
+  locked: boolean;
+}
+
+/** Part N — chi tiet editor cua MOT chuong. */
+export interface ChapterDetail {
+  chapter_index: number;
+  chapter_count: number;
+  source_text: string;
+  translated_text: string;
+  source_paragraphs: string[];
+  translated_paragraphs: string[];
+  warnings: string[];
+  manually_edited: boolean;
+  previous_chapter_summary: string;
+  is_translated: boolean;
+}
+
+/** Part O — mot ban ghi lich su ban dich. */
+export interface TranslationVersion {
+  version_id: string;
+  project_id: string;
+  chapter_index: number;
+  paragraph_index: number | null;
+  operation: string;
+  pass_type: string;
+  previous_text: string;
+  new_text: string;
+  actor_id: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  created_at: string;
+}
+
+export type ProviderStatusValue =
+  | "available" | "rate_limited" | "quota_exhausted" | "unavailable"
+  | "disabled" | "unknown";
+
+/** Part Q1/Q2 — catalog AN TOAN, khong bao gio chua bi mat. */
+export interface ProviderCatalogEntry {
+  provider_id: string;
+  model_id: string;
+  display_name: string;
+  quality_hint: string;
+  free_tier: boolean;
+  status: ProviderStatusValue;
+  reset_at: string;
+}
+
+/** Nhan tieng Viet cho giao dien — khop `GENRE_LABELS`/`NAMING_LABELS` o
+    `server/translation.py`, chi de dung khi CHUA co du lieu tu may chu
+    (vd trong dropdown truoc khi goi API nao). */
+export const GENRE_OPTIONS: { value: GenrePreset; label: string }[] = [
+  { value: "auto", label: "Tự động nhận diện" },
+  { value: "tien_hiep", label: "Tiên hiệp" },
+  { value: "huyen_huyen", label: "Huyền huyễn" },
+  { value: "vo_hiep", label: "Võ hiệp" },
+  { value: "do_thi", label: "Đô thị" },
+  { value: "ngon_tinh", label: "Ngôn tình" },
+  { value: "lich_su", label: "Lịch sử" },
+  { value: "he_thong", label: "Hệ thống" },
+  { value: "dong_nhan", label: "Đồng nhân" },
+  { value: "kinh_di", label: "Kinh dị" },
+];
+
+export const NAMING_OPTIONS: { value: NamingMode; label: string }[] = [
+  { value: "auto", label: "Tự động" },
+  { value: "han_viet", label: "Hán Việt" },
+  { value: "pinyin", label: "Pinyin" },
+  { value: "thuan_viet", label: "Việt hoá ngữ nghĩa" },
+  { value: "fandom", label: "Thuật ngữ fandom" },
+];
+
+export const QUALITY_OPTIONS: { value: QualityMode; label: string; hint: string }[] = [
+  { value: "nhanh", label: "Nhanh", hint: "Một lượt dịch, rẻ và nhanh nhất." },
+  { value: "can_bang", label: "Cân bằng",
+    hint: "Dịch + kiểm tra nhất quán thuật ngữ." },
+  { value: "van_hoc", label: "Văn học",
+    hint: "Thêm một lượt biên tập văn học — tốn thời gian/API hơn." },
+];
+
+export const translate = {
+  estimate: (sourceText: string) =>
+    request<{ characters: number; estimated_tokens: number; chapters: number }>(
+      "/api/translate/estimate",
+      { method: "POST", body: JSON.stringify({ source_text: sourceText }) },
+    ),
+
+  createProject: (fields: {
+    title?: string;
+    sourceText: string;
+    genre?: GenrePreset;
+    namingMode?: NamingMode;
+    qualityMode?: QualityMode;
+    customInstruction?: string;
+  }) =>
+    request<{ project: TranslationProject }>("/api/translate/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        title: fields.title ?? "",
+        source_text: fields.sourceText,
+        genre: fields.genre ?? "auto",
+        naming_mode: fields.namingMode ?? "auto",
+        quality_mode: fields.qualityMode ?? "can_bang",
+        custom_instruction: fields.customInstruction ?? "",
+      }),
+    }),
+
+  /** `base64` la NOI DUNG TEP (khong phai van ban da giai ma) — xem
+      `TranslateUploadIn` o backend, cung ly do voi anh: tranh phu thuoc
+      `python-multipart` chua khai bao trong server/requirements.txt. */
+  uploadProject: (fields: {
+    filename: string;
+    base64: string;
+    title?: string;
+    genre?: GenrePreset;
+    namingMode?: NamingMode;
+    qualityMode?: QualityMode;
+    customInstruction?: string;
+  }) =>
+    request<{ project: TranslationProject }>("/api/translate/projects/upload", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: fields.filename,
+        base64: fields.base64,
+        title: fields.title ?? "",
+        genre: fields.genre ?? "auto",
+        naming_mode: fields.namingMode ?? "auto",
+        quality_mode: fields.qualityMode ?? "can_bang",
+        custom_instruction: fields.customInstruction ?? "",
+      }),
+    }),
+
+  listProjects: () =>
+    request<{ projects: TranslationProject[]; total: number }>(
+      "/api/translate/projects",
+    ),
+
+  getProject: (projectId: string) =>
+    request<{
+      project: TranslationProject;
+      chapters: {
+        index: number; translated: boolean; text: string;
+        has_warnings: boolean;
+      }[];
+      jobs: TranslationJob[];
+    }>(`/api/translate/projects/${encodeURIComponent(projectId)}`),
+
+  createJob: (projectId: string) =>
+    request<{ job: TranslationJob }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/jobs`,
+      { method: "POST", body: "{}" },
+    ),
+
+  getJob: (jobId: string) =>
+    request<{ job: TranslationJob }>(
+      `/api/translate/jobs/${encodeURIComponent(jobId)}`,
+    ),
+
+  cancelJob: (jobId: string) =>
+    request<{ job: TranslationJob }>(
+      `/api/translate/jobs/${encodeURIComponent(jobId)}/cancel`,
+      { method: "POST", body: "{}" },
+    ),
+
+  /** Thử lại một job đã `failed` — tiếp tục đúng từ chương còn thiếu, không dịch lại từ đầu. */
+  retryJob: (jobId: string) =>
+    request<{ job: TranslationJob }>(
+      `/api/translate/jobs/${encodeURIComponent(jobId)}/retry`,
+      { method: "POST", body: "{}" },
+    ),
+
+  listGlossary: (projectId: string) =>
+    request<{ entries: GlossaryEntry[]; total: number }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/glossary`,
+    ),
+
+  addGlossaryEntry: (projectId: string, fields: {
+    category: string; original: string; translated: string; note?: string;
+  }) =>
+    request<GlossaryEntry>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/glossary`,
+      { method: "POST", body: JSON.stringify(fields) },
+    ),
+
+  updateGlossaryEntry: (projectId: string, termId: string, fields: {
+    translated?: string; note?: string; locked?: boolean;
+  }) =>
+    request<GlossaryEntry>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/glossary/` +
+        encodeURIComponent(termId),
+      { method: "PATCH", body: JSON.stringify(fields) },
+    ),
+
+  deleteGlossaryEntry: (projectId: string, termId: string) =>
+    request<{ deleted: boolean }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/glossary/` +
+        encodeURIComponent(termId),
+      { method: "DELETE" },
+    ),
+
+  importToDraft: (projectId: string, fields: {
+    novelId?: string; newNovelTitle?: string;
+  } = {}) =>
+    request<{ novel_id: string; already_imported: boolean; chapters_created: number }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/import`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          novel_id: fields.novelId ?? "",
+          new_novel_title: fields.newNovelTitle ?? "",
+        }),
+      },
+    ),
+
+  // ---------------------------------------------------------- Editor (Part N)
+
+  getChapter: (projectId: string, chapterIndex: number) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/${chapterIndex}`,
+    ),
+
+  saveChapterEdit: (projectId: string, chapterIndex: number, newText: string) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/${chapterIndex}`,
+      { method: "PUT", body: JSON.stringify({ new_text: newText }) },
+    ),
+
+  /** 409 (`ApiError.status === 409`) neu chuong da bi sua tay va `force` chua bat — hien
+      `ConfirmDialog` roi goi lai voi `force: true`. */
+  regenerateChapter: (projectId: string, chapterIndex: number, force = false) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/${chapterIndex}/regenerate`,
+      { method: "POST", body: JSON.stringify({ force }) },
+    ),
+
+  regenerateParagraph: (
+    projectId: string, chapterIndex: number, paragraphIndex: number, force = false,
+  ) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/` +
+        `${chapterIndex}/paragraphs/${paragraphIndex}/regenerate`,
+      { method: "POST", body: JSON.stringify({ force }) },
+    ),
+
+  rerunPass: (
+    projectId: string, chapterIndex: number,
+    passType: "translator" | "editor" | "qa", force = false,
+  ) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/${chapterIndex}/rerun`,
+      { method: "POST", body: JSON.stringify({ pass_type: passType, force }) },
+    ),
+
+  // ---------------------------------------------------------- Lich su (Part O)
+
+  listVersions: (projectId: string, chapterIndex?: number) =>
+    request<{ versions: TranslationVersion[]; total: number }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/versions` +
+        (chapterIndex === undefined ? "" : `?chapter_index=${chapterIndex}`),
+    ),
+
+  revertToVersion: (projectId: string, versionId: string) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/versions/` +
+        `${encodeURIComponent(versionId)}/revert`,
+      { method: "POST", body: "{}" },
+    ),
+
+  // ---------------------------------------------------------- Provider (Part Q)
+
+  listProviders: () =>
+    request<{ providers: ProviderCatalogEntry[]; total: number }>(
+      "/api/translate/providers",
+    ),
+
+  updateProviderSettings: (projectId: string, fields: {
+    providerMode?: "auto" | "manual";
+    selectedProviderId?: string;
+    allowFallback?: boolean;
+    preferPersonalProvider?: boolean;
+  }) =>
+    request<{ project: TranslationProject }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/provider`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          provider_mode: fields.providerMode,
+          selected_provider_id: fields.selectedProviderId,
+          allow_fallback: fields.allowFallback,
+          prefer_personal_provider: fields.preferPersonalProvider,
+        }),
+      },
+    ),
+
+  // ---------------------------------------------------------- BYOK (V5.1)
+
+  listConnections: () =>
+    request<{ connections: ProviderConnection[]; total: number }>(
+      "/api/translate/provider-connections",
+    ),
+
+  /** Ket noi (hoac THAY THE) mot provider ca nhan. Nem `ApiError` voi
+      `.code` la mot trong `ConnectionErrorCode` khi that bai — hien dung
+      thong bao theo `.code`, khong doan tu `.message`. */
+  connectProvider: (providerId: string, apiKey: string, selectedModel?: string) =>
+    request<{ connection: ProviderConnection }>(
+      `/api/translate/provider-connections/${encodeURIComponent(providerId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          api_key: apiKey, selected_model: selectedModel ?? "",
+        }),
+      },
+    ),
+
+  testConnection: (providerId: string) =>
+    request<{ connection: ProviderConnection }>(
+      `/api/translate/provider-connections/${encodeURIComponent(providerId)}/test`,
+      { method: "POST", body: "{}" },
+    ),
+
+  deleteConnection: (providerId: string) =>
+    request<{ deleted: boolean }>(
+      `/api/translate/provider-connections/${encodeURIComponent(providerId)}`,
+      { method: "DELETE" },
+    ),
+};
+
+/** https://console.groq.com/keys — trang tao/quan ly API key Groq CA NHAN
+    cua nguoi dung. Hang so RIENG (khong phai bien moi truong): day la mot
+    URL cong khai, on dinh, cua chinh Groq, khong phai cau hinh trien khai. */
+export const GROQ_CONSOLE_KEYS_URL = "https://console.groq.com/keys";

@@ -37,6 +37,14 @@ interface SessionValue {
    * Promise — token phía trình duyệt luôn được xoá, kể cả khi lời gọi hỏng.
    */
   signOut: () => Promise<void>;
+  /**
+   * Thay hồ sơ đang giữ bằng bản MỚI, không đụng token.
+   *
+   * Dùng sau các thao tác tự trả về `{ profile }` mới (đổi avatar, username,
+   * bio…) — nơi gọi đã CÓ sẵn bản mới trong tay, gọi lại `/api/auth/me` chỉ
+   * tốn thêm một round-trip vô ích.
+   */
+  updateProfile: (next: Profile) => void;
 }
 
 const SessionContext = createContext<SessionValue | null>(null);
@@ -111,7 +119,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<SessionValue>(
-    () => ({ profile, loading, signIn, signUp, signOut, adoptSession }),
+    () => ({
+      profile,
+      loading,
+      signIn,
+      signUp,
+      signOut,
+      adoptSession,
+      updateProfile: setProfile,
+    }),
     [profile, loading, signIn, signUp, signOut, adoptSession],
   );
 

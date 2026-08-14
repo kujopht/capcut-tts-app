@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 import { NotificationBell } from "@/components/NotificationBell";
+import { Avatar } from "@/components/Avatar";
 
 /**
  * Bon muc chinh, DUNG THU TU NAY.
@@ -169,6 +170,9 @@ function ToolsMenu() {
           <Link href="/studio" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">🎙</span> Audio Studio
           </Link>
+          <Link href="/translate" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">🈺</span> Dịch tiểu thuyết
+          </Link>
         </div>
       ) : null}
     </div>
@@ -208,9 +212,7 @@ function AccountMenu() {
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="avatar" aria-hidden="true">
-          {name.slice(0, 2).toUpperCase()}
-        </span>
+        <Avatar name={name} avatarUrl={profile.avatar_url} className="avatar" />
         <span className="hint truncate account-name">{name}</span>
       </button>
       {open ? (

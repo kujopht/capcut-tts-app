@@ -53,6 +53,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("bio", "string", False, 400),
             ("author_status", "enum", False,
              ["none", "pending", "approved", "rejected", "suspended"]),
+            # --- V4: anh dai dien (Phase 6) ------------------------------------
+            # Khoa doi tuong R2, KHONG PHAI url — cung quy uoc voi
+            # `novels.cover_key`. 512 la muc rong rai giong het cover_key, du
+            # avatar_key thuc te ngan hon nhieu (khong co subject_id).
+            ("avatar_key", "string", False, 512),
         ],
         "indexes": [
             ("email_unique", "unique", ["email"]),
@@ -488,11 +493,211 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("chapter_created_idx", "key", ["chapter_id", "created_at"]),
         ],
     },
+    # ==========================================================================
+    # Novel Translation Studio (V5) — subsystem RIENG, KHONG dung chung bang
+    # voi novels/chapters/tts_jobs o tren. Xem
+    # `server/appwrite_translation_store.py` va docstring cua no ve vi sao
+    # CHUA co collection "chapters"/"characters" rieng (mo hinh hien tai gom
+    # chuong/tom-tat trong CHINH translation_projects, nhan vat la mot LOAI
+    # trong translation_glossary).
+    #
+    # BA COLLECTION NAY CHUA duoc ap len bat ky moi truong nao (dev/staging/
+    # production) — chi khai bao o day de `setup_appwrite.py` san sang khi
+    # can, giong dung mo hinh voi ba thuoc tinh V2 (username/bio/author_status)
+    # da tung nam cho san truoc khi ap.
+    # ==========================================================================
+    "translation_projects": {
+        "name": "Translation Projects",
+        "attributes": [
+            ("project_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("title", "string", True, 200),
+            # 300000 = MAX_CHARS_PER_PROJECT (server/translation_service.py) —
+            # ca du an khong the vuot muc nay du chia lam bao nhieu chuong.
+            ("source_text", "string", True, 300000),
+            ("source_language", "string", False, 8),
+            ("target_language", "string", False, 8),
+            ("genre", "enum", False,
+             ["tien_hiep", "huyen_huyen", "vo_hiep", "do_thi", "ngon_tinh",
+              "lich_su", "he_thong", "dong_nhan", "kinh_di", "auto"]),
+            ("naming_mode", "enum", False,
+             ["han_viet", "pinyin", "thuan_viet", "fandom", "auto"]),
+            ("quality_mode", "enum", False, ["nhanh", "can_bang", "van_hoc"]),
+            ("custom_instruction", "string", False, 1000),
+            ("source_filename", "string", False, 255),
+            # Hai MANG song song, chi so khop CHI SO CHUONG (tach tu
+            # source_text luc doc, khong luu rieng danh sach chuong).
+            ("chapter_summaries", "string", False, 500),      # mang
+            ("translated_chapters", "string", False, 300000), # mang
+            ("imported_to_novel_id", "string", False, 64),
+            # --- Part N/Q3, THEM SAU — chua ap len bat ky moi truong nao ------
+            # Moi chuong 1 chuoi JSON (danh sach canh bao) — xem
+            # `server/appwrite_translation_store.py::_project_to_row`.
+            ("chapter_warnings", "string", False, 2000),        # mang
+            ("provider_mode", "string", False, 16),
+            ("selected_provider_id", "string", False, 64),
+            ("allow_fallback", "boolean", False, None),
+            # V5.1 Part F, THEM SAU — "Ưu tiên API key cá nhân".
+            ("prefer_personal_provider", "boolean", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("owner_idx", "key", ["owner_id"]),
+            ("owner_created_idx", "key", ["owner_id", "created_at"]),
+        ],
+    },
+    "translation_jobs": {
+        "name": "Translation Jobs",
+        "attributes": [
+            ("job_id", "string", True, 64),
+            ("project_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("status", "enum", True,
+             ["queued", "analyzing", "glossary", "translating", "reviewing",
+              "qa", "waiting_for_provider", "completed", "failed", "cancelled"]),
+            ("current_chapter", "integer", False, None),
+            ("total_chapters", "integer", False, None),
+            ("current_chapter_done_segments", "integer", False, None),
+            ("current_chapter_total_segments", "integer", False, None),
+            # --- claim/lease (worker nen rieng, cung khuon voi tts_jobs) ------
+            # Bon thuoc tinh nay CHUA duoc ap len bat ky moi truong nao (giong
+            # het ba thuoc tinh V2 cua `profiles` truoc khi duoc ap) — chi
+            # khai bao truoc de mot lan chay script sau nay tao chung.
+            ("current_pass", "string", False, 32),
+            ("attempts", "integer", False, None),
+            ("lease_owner", "string", False, 64),
+            ("lease_expires_at", "datetime", False, None),
+            ("error", "string", False, 300),
+            # Part Q4, THEM SAU — moc thu lai khi job dang cho han muc mien phi.
+            ("waiting_retry_at", "datetime", False, None),
+            # V5.1 Part G, THEM SAU — ly do/hanh dong AN TOAN cho frontend.
+            ("waiting_reason", "string", False, 32),
+            ("waiting_action", "string", False, 32),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+            ("finished_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("project_idx", "key", ["project_id"]),
+            ("project_created_idx", "key", ["project_id", "created_at"]),
+            ("owner_idx", "key", ["owner_id"]),
+            ("status_idx", "key", ["status"]),
+        ],
+    },
+    # Khoa cua viec nhan job dich — cung ly do ton tai voi `job_claims` cua
+    # TTS: tinh DUY NHAT cua rowId do database cuong che, dat thao tac
+    # `create` hang nay VAO TRONG transaction cung voi `update` job row thi
+    # duoc mot compare-and-set that su. Xem
+    # `server/appwrite_translation_store.py::AppwriteTranslationStore.claim_job`.
+    #
+    # ROLLBACK: xoa ca collection — chi la trang thai dieu phoi, khong mat du
+    # lieu dich nao.
+    "translation_job_claims": {
+        "name": "Translation Job Claims",
+        "attributes": [
+            ("job_id", "string", True, 64),
+            ("attempt", "integer", True, None),
+            ("worker_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("job_idx", "key", ["job_id"]),
+        ],
+    },
+    "translation_glossary": {
+        "name": "Translation Glossary",
+        "attributes": [
+            ("term_id", "string", True, 64),
+            ("project_id", "string", True, 64),
+            ("category", "enum", True,
+             ["character", "place", "organization", "power_system", "item",
+              "other"]),
+            ("original", "string", True, 80),
+            ("translated", "string", True, 80),
+            ("aliases", "string", False, 80),     # mang
+            ("note", "string", False, 500),
+            ("locked", "boolean", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("project_idx", "key", ["project_id"]),
+        ],
+    },
+    # Lich su ban dich (Part O) — COLLECTION THU NAM, CONG THEM, chua ap len
+    # bat ky moi truong nao. Additive-only theo dung yeu cau: khong sua/xoa
+    # ban ghi cu, chi luon them ban ghi moi (xem
+    # `server/translation_domain.py::TranslationVersion`).
+    "translation_versions": {
+        "name": "Translation Versions",
+        "attributes": [
+            ("version_id", "string", True, 64),
+            ("project_id", "string", True, 64),
+            ("chapter_index", "integer", True, None),
+            ("paragraph_index", "integer", False, None),  # -1 = ca chuong
+            ("operation", "string", True, 32),
+            ("pass_type", "string", True, 16),
+            ("previous_text", "string", False, 300000),
+            ("new_text", "string", False, 300000),
+            ("actor_id", "string", False, 64),
+            ("provider_id", "string", False, 64),
+            ("model_id", "string", False, 128),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("project_idx", "key", ["project_id"]),
+            ("project_chapter_idx", "key", ["project_id", "chapter_index"]),
+            ("project_created_idx", "key", ["project_id", "created_at"]),
+        ],
+    },
+    # Ket noi provider AI CA NHAN cua nguoi dung (V5.1, BYOK) — COLLECTION
+    # THU SAU, CONG THEM, chua ap len bat ky moi truong nao.
+    #
+    # `encrypted_secret` LA CHUOI DA MA HOA (AES-256-GCM, xem
+    # `server/translation_byok_crypto.py`) — KHONG BAO GIO la api key ro.
+    # Ban than viec ap schema nay KHONG lam lo bi mat gi (chi tao cot rong);
+    # rui ro chi phat sinh khi co du lieu that duoc ghi vao SAU khi ap, va
+    # luc do van an toan vi gia tri luon o dang da ma hoa.
+    #
+    # ROLLBACK: xoa ca collection — nguoi dung se can ket noi lai API key
+    # rieng cua ho (khong mat gi thuoc ve Fanfic, chi mat ket noi CA NHAN).
+    "translation_provider_connections": {
+        "name": "Translation Provider Connections",
+        "attributes": [
+            ("connection_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            ("provider_id", "string", True, 32),
+            # Du cho tien to "byok.v1." + base64(nonce 12B) + "." +
+            # base64(ciphertext) cho mot api key that dai toi ~200 ky tu.
+            ("encrypted_secret", "string", True, 1000),
+            ("last4", "string", False, 8),
+            ("status", "enum", False,
+             ["available", "rate_limited", "quota_exhausted", "unavailable",
+              "disabled", "unknown"]),
+            ("selected_model", "string", False, 128),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+            ("last_verified_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
 }
 
 #: Cac thuoc tinh la MANG. Appwrite doi co `array: true` luc tao; thieu no thi
 #: thuoc tinh thanh chuoi don va buoc ghi dau tien bi tu choi.
-ARRAY_ATTRIBUTES = frozenset({"tags", "genres"})
+#:
+#: `chapter_summaries`/`translated_chapters`/`aliases` CHI dung o
+#: `translation_projects`/`translation_glossary` — ten trung voi truong khac
+#: (vi du neu sau nay mot collection khac cung dung ten "aliases" ma KHONG
+#: phai mang) se vo tinh bi ep `array: true`. Chua xay ra o schema hien tai,
+#: ghi chu o day de tranh bay khi them collection moi.
+ARRAY_ATTRIBUTES = frozenset({
+    "tags", "genres", "chapter_summaries", "translated_chapters", "aliases",
+    "chapter_warnings",
+})
 
 #: Quyen o muc COLLECTION: khong cap gi cho client.
 #:

@@ -695,18 +695,16 @@ main { overflow-x: clip; }
   font-size: var(--t-2xl);
   letter-spacing: -0.028em;
   /*
-    Do doc tu tren xuong, nhung KHONG toi #9aa5bd nua. Do bang anh chup: canh
-    tieu de chuong (chu dac, trang) o trang doc, cac tieu de trang khac doc ra
-    nhu bi lam mo — nua duoi cua net chu xam han so voi nua tren, va tren tranh
-    nen sang thi ca dong nhin nhu dang tat dan.
+    TUNG la mot gradient-clip-text tu `--text` xuong `#c5cfe3` — dung y muon
+    them anh kim, nhung ket qua that la nua duoi cua tieu de (phan lon dien
+    tich o mot h1 hai dong) doc ra XAM chu khong trang, dac biet tren nen sang
+    nhu `02-explore-sky-kingdom`. Mot tieu de trang chinh khong duoc phep mo
+    hon chinh cai nen no dang phai thang.
 
-    Van giu mot chut anh kim de tieu de khong phang, chi thu hep khoang cach hai
-    dau lai.
+    Mau DAC, gan trang, + do bong lam viec readability — khong con gradient.
   */
-  background: linear-gradient(180deg, var(--text) 22%, #c5cfe3 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--text);
+  text-shadow: 0 2px 18px #05070fe6, 0 1px 3px #05070fb3;
 }
 
 /* Dau trang — xem `components/ui.tsx::PageHeader`. `align-items: flex-start`
@@ -721,25 +719,23 @@ main { overflow-x: clip; }
 }
 
 /*
-  Mang toi mem SAU chu tieu de trang.
+  Mang toi mem, CHI BAM QUANH khoi chu — vai tro phu, chu KHONG con la co che
+  chinh: `.page-title` va `.lead` gio tu lo bang mau dac + text-shadow rieng
+  (xem tren). Truoc day inset rong bat doi xung (-160px/-120px ngang, -44/-34
+  doc) tren mot header thuong rong ca ngan pixel bien lop nay thanh mot dai
+  sang nam ngang doc ra nhu MOT TAM PANEL chu nhat — dung dieu Phase 1 cam.
 
-  Lop phu toan trang gio nhe han (30-54% thay vi 27-83%) de tranh hien ro. Doi
-  lai, chu nam TRUC TIEP tren tranh — tieu de trang va doan mo ta khong co the
-  nao do lung — se mat tuong phan o nhung tam sang nhu `02-explore-sky-kingdom`
-  (sang 150/255).
-
-  Nen thay vi lam toi CA trang chi vi mot vung chu, chi lam toi dung vung do.
-  Lop nay toa ra ngoai va mo dan het nen no khong doc ra la mot cai hop.
+  Sua: inset hep va GAN DOI XUNG (bam sat noi dung, khong loang ra het chieu
+  rong trang), nhieu diem dung de tan that muot, dinh do mo thap han han — chi
+  con la mot lop day nhe cho nhung nen qua sang, khong con nang do het viec.
 */
 .page-head::before {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: -44px -160px -34px -120px;
-  /* Tan han truoc khi toi mep hop — neu con mau o mep thi hop bi cat thang va
-     doc ra la mot khoi chu nhat dan vao. */
-  background: radial-gradient(48% 110% at 24% 50%,
-    #05070feb 0%, #05070fb3 34%, transparent 62%);
+  inset: -20px -48px -16px -36px;
+  background: radial-gradient(62% 145% at 28% 50%,
+    #05070fa8 0%, #05070f70 32%, #05070f38 52%, #05070f12 70%, transparent 86%);
   pointer-events: none;
 }
 .page-head-body { min-width: 0; }
@@ -842,8 +838,10 @@ main { overflow-x: clip; }
 
   Ben trong the thi bong nay vo hinh — nen the da toi san — nen khong can loc
   ra tung cho.
+
+  `.page-title` KHONG nam trong danh sach nay: no lon hon han cac dong con lai
+  va can bong rieng, manh hon — xem khai bao ngay canh mau cua no o tren.
 */
-.page-title,
 .section-title,
 .eyebrow,
 .page > .hint,
@@ -854,7 +852,13 @@ main { overflow-x: clip; }
 .section-head + .hint { text-shadow: 0 1px 12px #05070fd9, 0 0 3px #05070f80; }
 
 .lead   { font-size: var(--t-md); color: var(--text-2); line-height: var(--lh-normal); }
-.page > .lead, .page-head .lead { text-shadow: 0 1px 12px #05070fd9; }
+/*
+  Doan mo ta NGAY DUOI tieu de trang phai sang hon `--text-2` thuong (dang
+  dung o khap noi cho chu phu) — no nam truc tiep tren tranh nen, khong phai
+  tren mot the toi san. Chi doi rieng o day, khong doi bien toan cuc: `.lead`
+  con duoc dung ben trong the, noi `--text-2` van dung.
+*/
+.page > .lead, .page-head .lead { color: #c9d2e6; text-shadow: 0 1px 12px #05070fd9; }
 .muted  { color: var(--text-2); }
 .hint   { font-size: var(--t-sm); color: var(--text-3); }
 .mono   { font-family: var(--font-mono); font-size: var(--t-sm); }
@@ -4526,6 +4530,13 @@ body.co-mini { padding-bottom: 74px; }
 }
 
 .bai-truyen:hover { border-color: var(--brand); color: var(--brand-hover); }
+/* Bia that thay emoji khi truyen da co — 3:2, du nho de khong pha vo mot chip
+   pill nhung du de nhan ra la MOT anh chu khong phai mot cham mau. */
+.bai-truyen-bia {
+  width: 18px; height: 12px; flex: 0 0 auto;
+  border-radius: 3px;
+  background-color: var(--bg-2);
+}
 
 .bai-day {
   display: flex;
@@ -5330,4 +5341,79 @@ body.co-mini { padding-bottom: 74px; }
 
 @media (prefers-reduced-motion: reduce) {
   .da-thich .bai-tim { animation: none; }
+}
+
+/* =============================================================================
+   Editor dich thuat (V5 Part N) — /translate::ChapterEditor
+   Bo cuc: rail chuong GON | vung lam viec nguon+dich LON. Novel Bible la
+   panel rieng (GlossaryPanel), khong nam trong luoi nay.
+   ============================================================================= */
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--s4, 16px);
+  align-items: start;
+}
+
+.editor-rail {
+  position: sticky;
+  top: var(--s4, 16px);
+  max-height: 70vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 10px);
+  background: var(--bg-2);
+}
+
+.editor-rail-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.editor-rail-item:hover { background: var(--bg-3); }
+
+.editor-rail-item.is-active {
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.editor-panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s4, 16px);
+}
+
+.editor-pane-text {
+  height: 360px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  resize: vertical;
+}
+
+@media (max-width: 860px) {
+  .editor-layout { grid-template-columns: 1fr; }
+  .editor-rail {
+    position: static;
+    max-height: 220px;
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .editor-rail ul { display: flex; }
+  .editor-rail-item {
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+    min-width: 140px;
+  }
+  .editor-panes { grid-template-columns: 1fr; }
 }

@@ -610,6 +610,16 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                      {**allowed, "updated_at": updated.updated_at})
         return updated
 
+    def set_novel_cover(self, novel_id: str, owner_id: str,
+                        cover_key: Optional[str]) -> Novel:
+        """Xem contract o `MetadataStore.set_novel_cover` — duong ghi RIENG,
+        khong di qua `NOVEL_EDITABLE` cua `update_novel`."""
+        current = self.owned_novel(novel_id, owner_id)
+        updated = replace(current, cover_key=cover_key, updated_at=now_iso())
+        self._update(COL_NOVELS, novel_id,
+                     {"cover_key": cover_key, "updated_at": updated.updated_at})
+        return updated
+
     def unpublish_novel(self, novel_id: str, owner_id: str) -> Novel:
         """
         Ve ban nhap VA thu hoi `read("any")` trong CUNG mot request PATCH.

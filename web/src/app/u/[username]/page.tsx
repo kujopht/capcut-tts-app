@@ -18,8 +18,9 @@ import { useAsyncData } from "@/lib/useAsyncData";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { Avatar } from "@/components/Avatar";
 import { EmptyState, ErrorState, Loading, formatNumber } from "@/components/ui";
-import { IconHeadphones, IconUser } from "@/components/Icons";
+import { IconHeadphones, IconShield, IconUser } from "@/components/Icons";
 import { FollowButton } from "@/components/FollowButton";
+import { BadgeIcon, CosmeticFrame, OrnamentIcon } from "@/components/cosmetics/Cosmetics";
 import { ProfileTabs } from "./ProfileTabs";
 
 export default function PublicProfilePage({
@@ -61,15 +62,21 @@ export default function PublicProfilePage({
   const p: PublicProfile = data.profile;
   const truyen = p.novels ?? [];
   const xh = p.social;
+  const gam = p.gamification;
+  const khungAvatar = gam?.equipped_cosmetics.find((c) => c.slot === "avatar_frame");
+  const huyHieu = gam?.equipped_cosmetics.find((c) => c.slot === "badge");
+  const hoaVan = gam?.equipped_cosmetics.find((c) => c.slot === "profile_ornament");
 
   return (
     <div className="page">
       <header className="account-hero ho-so-hero">
-        <Avatar
-          name={p.display_name || p.username}
-          avatarUrl={p.avatar_url}
-          className="account-avatar"
-        />
+        <CosmeticFrame cosmetic={khungAvatar}>
+          <Avatar
+            name={p.display_name || p.username}
+            avatarUrl={p.avatar_url}
+            className="account-avatar"
+          />
+        </CosmeticFrame>
 
         <div className="stack-2 account-hero-body">
           <span className="eyebrow eyebrow-icon">
@@ -77,6 +84,33 @@ export default function PublicProfilePage({
           </span>
           <h1 className="page-title">{p.display_name || p.username}</h1>
           <p className="hint ho-so-ten">@{p.username}</p>
+
+          {/*
+            Danh xung/bac (V4 visual completion, vong 2) — TRUC RIENG, tach
+            khoi huy hieu tac gia/hang ben duoi. "✦" chi la mot dau tach thi
+            giac, khong phai vat pham.
+          */}
+          {gam ? (
+            <p className="hint ho-so-danh-xung">
+              {hoaVan ? (
+                <span aria-hidden="true" className="ho-so-hoa-van">
+                  <OrnamentIcon assetRef={hoaVan.asset_ref} size={16} />
+                </span>
+              ) : (
+                "✦"
+              )}{" "}
+              {gam.equipped_title} · Lv. {gam.level}
+              {huyHieu ? (
+                <span
+                  className="ho-so-huy-hieu"
+                  title={huyHieu.name}
+                  aria-label={huyHieu.name}
+                >
+                  <BadgeIcon assetRef={huyHieu.asset_ref} size={16} />
+                </span>
+              ) : null}
+            </p>
+          ) : null}
 
           {/*
             HAI huy hieu, hai chuyen khac nhau:
@@ -131,6 +165,34 @@ export default function PublicProfilePage({
           </div>
         ) : null}
       </header>
+
+      {/*
+        Thanh tuu CONG KHAI — CHI nhung cai DA MO (khong ve ca danh sach
+        khoa, tranh trang ca nhan thanh mot bang "chua lam duoc gi"). An
+        hoan toan khi chua co gi — cung nguyen tac voi module Tiep tuc o
+        trang chu.
+      */}
+      {gam && gam.achievements.some((a) => a.unlocked) ? (
+        <section className="stack-2" aria-labelledby="ho-so-thanh-tuu">
+          <h2 className="section-title section-title-icon" id="ho-so-thanh-tuu">
+            <IconShield size={19} /> Thành tựu
+          </h2>
+          <div className="bento-grid">
+            {gam.achievements
+              .filter((a) => a.unlocked)
+              .map((a) => (
+                <div key={a.key} className={`achievement-card do-hiem-${a.rarity}`}>
+                  <span className="achievement-card-icon" aria-hidden="true">
+                    {a.icon}
+                  </span>
+                  <span className="progress-card-body">
+                    <strong>{a.name}</strong>
+                  </span>
+                </div>
+              ))}
+          </div>
+        </section>
+      ) : null}
 
       <ProfileTabs
         userId={p.user_id}

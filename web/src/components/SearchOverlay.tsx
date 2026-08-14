@@ -31,14 +31,17 @@ import { api, social, type Novel, type Post, type PublicProfile } from "@/lib/ap
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { Avatar } from "@/components/Avatar";
 import { NovelCover } from "@/components/NovelCover";
-import { IconBook, IconMegaphone, IconUser } from "@/components/Icons";
+import { IconBook, IconHeadphones, IconMegaphone, IconUser } from "@/components/Icons";
 
 const NHIP_GO = 250;
+
+type NovelAudio = Novel & { audio_chapter_count: number };
 
 type KetQua =
   | { loai: "truyen"; novel: Novel }
   | { loai: "nguoi"; nguoi: PublicProfile }
-  | { loai: "bai"; bai: Post };
+  | { loai: "bai"; bai: Post }
+  | { loai: "audio"; novel: NovelAudio };
 
 type TrangThai = "dau" | "dang-tai" | "co" | "rong" | "loi";
 
@@ -49,11 +52,14 @@ type TrangThai = "dau" | "dang-tai" | "co" | "rong" | "loi";
  * that khi V6 co du lieu chi la them MOT dong o day roi bat `sanSang`, KHONG
  * dung mot truy van/nhanh hien thi rieng.
  *
- * "audio" va "animation" hien CHUA `sanSang`: chua co duong tim kiem audio
- * rieng o backend (tim theo chuong CO audio, khac voi tim truyen), va
- * Animation thi chua ton tai san pham. Mot bo loc "chay" ma luon ra rong la
- * noi doi ve tinh nang co that — nen ca hai deu bi VO HIEU o giao dien thay
- * vi gia vo hoat dong.
+ * "audio" da that (V4 visual completion, vong 2, Buoc 11): `GET
+ * /api/search/audio` tim truyen DA XUAT BAN va CO it nhat mot chuong da co
+ * ban audio, dan ve trang truyen (kien truc hien tai chua co trang nghe
+ * rieng — do la viec cua ban thiet ke lai sau nay, khong lam o day).
+ *
+ * "animation" van CHUA `sanSang`: san pham do chua ton tai. Mot bo loc "chay"
+ * ma luon ra rong la noi doi ve tinh nang co that — nen no bi VO HIEU o giao
+ * dien thay vi gia vo hoat dong.
  */
 const DANH_MUC: ReadonlyArray<{
   khoa: "tat_ca" | "truyen" | "nguoi" | "bai" | "audio" | "animation";
@@ -62,9 +68,9 @@ const DANH_MUC: ReadonlyArray<{
 }> = [
   { khoa: "tat_ca", nhan: "Tất cả", sanSang: true },
   { khoa: "truyen", nhan: "Truyện", sanSang: true },
+  { khoa: "audio", nhan: "Audio", sanSang: true },
   { khoa: "nguoi", nhan: "Người dùng", sanSang: true },
   { khoa: "bai", nhan: "Bài đăng", sanSang: true },
-  { khoa: "audio", nhan: "Audio", sanSang: false },
   { khoa: "animation", nhan: "Animation", sanSang: false },
 ];
 type DanhMuc = (typeof DANH_MUC)[number]["khoa"];
@@ -94,6 +100,7 @@ export function SearchOverlay({
     truyen: Novel[];
     nguoi: PublicProfile[];
     bai: Post[];
+    audio: NovelAudio[];
   } | null>(null);
   const [tuLoi, setTuLoi] = useState("");
   const [chon, setChon] = useState(0);
@@ -104,6 +111,7 @@ export function SearchOverlay({
   const truyen = ketQua?.tu === tu ? ketQua.truyen : KHONG;
   const nguoi = ketQua?.tu === tu ? ketQua.nguoi : KHONG;
   const bai = ketQua?.tu === tu ? ketQua.bai : KHONG;
+  const audio = ketQua?.tu === tu ? ketQua.audio : KHONG;
 
   const trangThai: TrangThai = !tu
     ? "dau"
@@ -111,7 +119,7 @@ export function SearchOverlay({
       ? "loi"
       : ketQua?.tu !== tu
         ? "dang-tai"
-        : truyen.length + nguoi.length + bai.length
+        : truyen.length + nguoi.length + bai.length + audio.length
           ? "co"
           : "rong";
 
@@ -128,21 +136,22 @@ export function SearchOverlay({
     const canTruyen = danhMuc === "tat_ca" || danhMuc === "truyen";
     const canNguoi = danhMuc === "tat_ca" || danhMuc === "nguoi";
     const canBai = danhMuc === "tat_ca" || danhMuc === "bai";
+    const canAudio = danhMuc === "tat_ca" || danhMuc === "audio";
     const gioiHan = danhMuc === "tat_ca" ? 5 : 20;
 
     const bo = new AbortController();
     const hen = window.setTimeout(async () => {
       try {
         /*
-          Ba truy van SONG SONG. Tuan tu thi nguoi dung cho tong thoi gian cua
-          ca ba, va muc cuoi luon toi muon han mot nhip.
+          Bon truy van SONG SONG. Tuan tu thi nguoi dung cho tong thoi gian cua
+          ca bon, va muc cuoi luon toi muon han mot nhip.
         */
         /*
-          Bai dang la muc PHU khi xem "Tất cả": loi cua rieng no khong duoc
-          keo sap ca hop tim — truyen va nguoi van la ly do nguoi ta mo hop
-          nay. `catch` tra ve rong thay vi de `Promise.all` tu choi tat ca.
+          Bai dang va audio la muc PHU khi xem "Tất cả": loi cua rieng chung
+          khong duoc keo sap ca hop tim — truyen va nguoi van la ly do nguoi ta
+          mo hop nay. `catch` tra ve rong thay vi de `Promise.all` tu choi tat ca.
         */
-        const [a, b, c] = await Promise.all([
+        const [a, b, c, d] = await Promise.all([
           canTruyen
             ? api.browseNovels({ query: tu, limit: gioiHan })
             : Promise.resolve({ novels: [] }),
@@ -152,9 +161,12 @@ export function SearchOverlay({
           canBai
             ? social.searchPosts(tu, gioiHan).catch(() => ({ items: [], total: 0 }))
             : Promise.resolve({ items: [], total: 0 }),
+          canAudio
+            ? api.searchAudio(tu, gioiHan).catch(() => ({ novels: [] }))
+            : Promise.resolve({ novels: [] }),
         ]);
         if (bo.signal.aborted) return;
-        setKetQua({ tu, truyen: a.novels, nguoi: b.people, bai: c.items });
+        setKetQua({ tu, truyen: a.novels, nguoi: b.people, bai: c.items, audio: d.novels });
         setChon(0);
       } catch {
         if (!bo.signal.aborted) setTuLoi(tu);
@@ -172,14 +184,15 @@ export function SearchOverlay({
   const danh: KetQua[] = useMemo(
     () => [
       ...truyen.map((n) => ({ loai: "truyen" as const, novel: n })),
+      ...audio.map((n) => ({ loai: "audio" as const, novel: n })),
       ...nguoi.map((p) => ({ loai: "nguoi" as const, nguoi: p })),
       ...bai.map((b) => ({ loai: "bai" as const, bai: b })),
     ],
-    [truyen, nguoi, bai],
+    [truyen, audio, nguoi, bai],
   );
 
   const duong = useCallback((k: KetQua) => {
-    if (k.loai === "truyen") return `/novels/${k.novel.novel_id}`;
+    if (k.loai === "truyen" || k.loai === "audio") return `/novels/${k.novel.novel_id}`;
     if (k.loai === "bai") return `/posts/${k.bai.post_id}`;
     return `/u/${k.nguoi.username}`;
   }, []);
@@ -322,13 +335,51 @@ export function SearchOverlay({
                 </section>
               ) : null}
 
+              {audio.length ? (
+                <section aria-labelledby={`${idGoc}-audio`}>
+                  <h2 className="tim-nhom" id={`${idGoc}-audio`}>
+                    <IconHeadphones size={15} /> Audio
+                  </h2>
+                  {audio.map((n, i) => {
+                    const vt = truyen.length + i;
+                    return (
+                      <Link
+                        key={n.novel_id}
+                        id={`${idGoc}-kq-${vt}`}
+                        role="option"
+                        aria-selected={chon === vt}
+                        className={`tim-kq${chon === vt ? " la-chon" : ""}`}
+                        href={`/novels/${n.novel_id}`}
+                        onClick={onDong}
+                        onMouseEnter={() => setChon(vt)}
+                      >
+                        <span className="tim-bia">
+                          <NovelCover
+                            novelId={n.novel_id}
+                            title={n.title}
+                            coverUrl={n.cover_url}
+                            size="thumb"
+                          />
+                        </span>
+                        <span className="tim-chu">
+                          <strong>{n.title}</strong>
+                          <span className="hint">
+                            {n.audio_chapter_count} chương có audio
+                          </span>
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </section>
+              ) : null}
+
               {nguoi.length ? (
                 <section aria-labelledby={`${idGoc}-nguoi`}>
                   <h2 className="tim-nhom" id={`${idGoc}-nguoi`}>
                     <IconUser size={15} /> Người dùng
                   </h2>
                   {nguoi.map((p, i) => {
-                    const vt = truyen.length + i;
+                    const vt = truyen.length + audio.length + i;
                     return (
                       <Link
                         key={p.user_id}
@@ -374,7 +425,7 @@ export function SearchOverlay({
                     <IconMegaphone size={15} /> Bài viết
                   </h2>
                   {bai.map((b, i) => {
-                    const vt = truyen.length + nguoi.length + i;
+                    const vt = truyen.length + audio.length + nguoi.length + i;
                     return (
                       <Link
                         key={b.post_id}

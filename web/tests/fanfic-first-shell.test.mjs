@@ -196,11 +196,21 @@ test("trang chu chi goi so request CO DINH, khong phu thuoc so truyen", () => {
   // V4 visual completion, Phan B: them `getContinueProgress` cho module Tiep
   // tuc doc/nghe — VAN co dinh (mot lan cho ho so nguoi dang nhap), khong
   // tang theo so truyen, nen khong pha rang buoc N+1 ma bai test nay giu.
+  //
+  // Vong 2, Buoc 12: them `getProgress`/`getAchievements` cho dong nho
+  // gamification o dau trang — CUNG co dinh (mot lan cho ho so nguoi dang
+  // nhap, khong lap theo so truyen).
   const home = read("../src/app/page.tsx");
   const calls = home.match(/api\.\w+\(/g) ?? [];
   assert.deepEqual(
     calls.sort(),
-    ["api.browseNovels(", "api.getContinueProgress(", "api.novelTags("],
+    [
+      "api.browseNovels(",
+      "api.getAchievements(",
+      "api.getContinueProgress(",
+      "api.getProgress(",
+      "api.novelTags(",
+    ],
   );
 });
 

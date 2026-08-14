@@ -699,18 +699,24 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
     },
     # --- V4 visual completion, Phan G/K/L: cap do + vat pham suu tam --------
     # THIET KE — logic thuan da co test (server/gamification.py,
-    # server/gamification_domain.py), CHUA noi vao route/UI nao. Hai
-    # collection duoi day CHUA duoc ap len production trong dot nay; chi
-    # them vao SCHEMA de --dry-run the hien dung ke hoach khi lam tiep.
+    # server/gamification_domain.py) VA da noi vao route that qua
+    # `MockGamificationStore` (server/gamification_store.py). Bon collection
+    # duoi day CHUA duoc ap len production trong dot nay; chi them vao SCHEMA
+    # de --dry-run the hien dung ke hoach khi lam ban Appwrite that cua kho
+    # (tuong tu `appwrite_translation_store.py`).
     #
-    # ROLLBACK: xoa ca hai collection — khong anh huong gi den du lieu dang
-    # dung (thanh tuu tinh tai cho, khong doc hai bang nay).
+    # ROLLBACK: xoa ca bon collection — khong anh huong gi den du lieu dang
+    # dung (kho dang chay la `MockGamificationStore` trong bo nho, khong
+    # collection nao o day duoc doc/ghi that hien nay).
     "user_progress": {
         "name": "User Progress",
         "attributes": [
             ("user_id", "string", True, 64),
             ("xp", "integer", True, None),
             ("equipped_title_key", "string", False, 64),
+            # So goi thuong mien phi dang cho mo — xem
+            # `gamification_domain.UserProgress.goi_thuong_dang_cho`.
+            ("pending_reward_packs", "integer", False, None),
             ("updated_at", "datetime", True, None),
         ],
         "indexes": [
@@ -726,6 +732,41 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("equipped", "boolean", False, None),
         ],
         "indexes": [
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # Nhat ky XP kiem toan duoc — xem `gamification_domain.XpLedgerEntry`.
+    # `entry_id` la khoa idempotency: `MockGamificationStore.record_xp_event`
+    # tu choi ghi neu id da co, chan client refresh/retry cong XP hai lan.
+    "xp_ledger": {
+        "name": "XP Ledger",
+        "attributes": [
+            ("entry_id", "string", True, 128),
+            ("user_id", "string", True, 64),
+            ("event_type", "string", True, 64),
+            ("source_kind", "string", True, 32),
+            ("source_id", "string", True, 64),
+            ("xp_awarded", "integer", True, None),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("entry_idx", "unique", ["entry_id"]),
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # Thanh tuu DA MO KHOA that su kem moc thoi gian — xem
+    # `gamification_domain.UnlockedAchievement`. Tach khoi tinh toan tai cho
+    # (`gamification.tinh_trang_thanh_tuu`) de khong "quen mo lai" khi du
+    # lieu nguon giam sau nay (vi du xoa truyen).
+    "achievement_unlocks": {
+        "name": "Achievement Unlocks",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("achievement_key", "string", True, 64),
+            ("unlocked_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_achievement_idx", "unique", ["user_id", "achievement_key"]),
             ("user_idx", "key", ["user_id"]),
         ],
     },

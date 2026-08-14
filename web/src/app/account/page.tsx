@@ -22,6 +22,7 @@ import {
 import { CreatorSection } from "@/components/CreatorSection";
 import { AccountSocial } from "@/components/AccountSocial";
 import { AchievementGrid } from "@/components/AchievementGrid";
+import { GamificationPanel } from "@/components/GamificationPanel";
 import { Avatar } from "@/components/Avatar";
 
 const TIER_LABEL: Record<string, string> = {
@@ -205,7 +206,18 @@ export default function AccountPage() {
 
       <AchievementGrid />
 
+      <GamificationPanel />
+
       <CreatorSection />
+
+      {/*
+        V4 visual completion, Phan 8: NGAN CACH bang mat "TUY CHINH HO SO
+        CONG KHAI" (moi thu o tren — thanh tuu, cap do, danh xung, vat
+        pham, danh tinh tac gia) voi "CAI DAT TAI KHOAN" (loi tat, phien
+        dang nhap) o duoi. Cung mot trang, nhung hai y dinh khac nhau.
+      */}
+      <hr className="divider" />
+      <h2 className="section-title">Cài đặt tài khoản</h2>
 
       <section className="stack" aria-labelledby="acc-loi-tat">
         <h2 className="section-title section-title-icon" id="acc-loi-tat">

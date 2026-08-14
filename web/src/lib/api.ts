@@ -59,24 +59,69 @@ export interface ContinueItem {
   duration_seconds?: number | null;
 }
 
+/** Một bậc danh xưng (Phần G-I, V4 visual completion vòng 2) — độc lập với
+ * huy hiệu tác giả (`is_author`/`AuthorStatus`). Xem `server/gamification.py::LEVEL_TIERS`. */
+export interface TitleTier {
+  key: string;
+  title: string;
+  level: number;
+  min_xp: number;
+  unlocked: boolean;
+}
+
+/** Cấp độ CỦA CHÍNH MÌNH — mọi giá trị do máy chủ tính. */
+export interface OwnProgress {
+  xp: number;
+  level: number;
+  level_key: string;
+  current_level_xp: number;
+  next_level_xp: number | null;
+  progress_percent: number;
+  equipped_title_key: string;
+  equipped_title: string;
+  pending_reward_packs: number;
+}
+
+/** Cấp độ CÔNG KHAI (trên `/u/[username]`) — KHÔNG có xp/tiến trình nội bộ. */
+export interface PublicProgress {
+  level: number;
+  level_key: string;
+  equipped_title_key: string;
+  equipped_title: string;
+}
+
+export interface CosmeticItem {
+  key: string;
+  name: string;
+  rarity: "common" | "rare" | "epic" | "legendary" | "mythic";
+  slot: "avatar_frame" | "profile_ornament" | "badge" | "card_border" | "title_effect";
+  asset_ref: string;
+  equipped?: boolean;
+  acquired_at?: string;
+}
+
 /**
- * Một thành tựu (V4 visual completion, Phan G-J) — TÍNH TẠI CHỖ tự dữ liệu
- * đã có, không phải bản ghi lưu riêng. Xem docstring `server/gamification.py`
- * để biết vì sao (Giai đoạn 1 cố ý không có "unlocked_at").
+ * Một thành tựu (V4 visual completion). Điều kiện tính tại chỗ từ dữ liệu
+ * đã có, nhưng lần đầu đạt điều kiện được LƯU THẬT kèm `unlocked_at` (xem
+ * `server/gamification_domain.py::UnlockedAchievement`) — không mất khi
+ * dữ liệu nguồn giảm sau đó (ví dụ xoá truyện).
+ *
+ * `description`/`progress` chỉ có ở phiên bản CỦA CHÍNH MÌNH
+ * (`/api/account/achievements`); bản công khai (`/u/[username]`) chỉ có
+ * `key`/`name`/`icon`/`rarity`/`unlocked`.
  */
 export interface Achievement {
   key: string;
   name: string;
-  description: string;
+  description?: string;
   icon: string;
   rarity: "common" | "rare" | "epic" | "legendary" | "mythic";
   unlocked: boolean;
-  /** `[hiện tại, mục tiêu]` khi đo được theo một con số; `null` khi nhị phân. */
-  progress: [number, number] | null;
+  progress?: [number, number] | null;
+  unlocked_at?: string | null;
 }
 
-/**
- * Được phép **xuất bản công khai** hay không. Đây là moderation, KHÔNG phải uy
+/** Được phép **xuất bản công khai** hay không. Đây là moderation, KHÔNG phải uy
  * tín — xem `docs/AUTHOR_RANK.md`.
  *
  * Giá trị này chỉ có ở hồ sơ **của chính mình**. Hồ sơ công khai của người khác
@@ -165,6 +210,15 @@ export interface PublicProfile {
    * lý do với `Novel.cover_url`.
    */
   social?: ProfileSocial;
+  /**
+   * Gamification CÔNG KHAI (V4 visual completion vòng 2) — bậc/danh xưng
+   * đang trang bị, thành tựu đã mở (chỉ boolean, không lộ điều kiện gốc),
+   * vật phẩm đang trang bị. Tuỳ chọn để client cũ vẫn biên dịch được.
+   */
+  gamification?: PublicProgress & {
+    achievements: Achievement[];
+    equipped_cosmetics: CosmeticItem[];
+  };
 }
 
 export interface Novel {
@@ -432,6 +486,15 @@ export const api = {
     ),
 
   /**
+   * Truyện có audio khớp từ khoá (V4 visual completion, vòng 2, Bước 11).
+   * Chỉ truyện đã xuất bản và có ít nhất một chương đã có bản audio.
+   */
+  searchAudio: (q: string, limit = 5) =>
+    request<{ novels: (Novel & { audio_chapter_count: number })[] }>(
+      `/api/search/audio?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+
+  /**
    * Báo một lần nghe. Máy chủ là nguồn sự thật cho uy tín tác giả.
    *
    * KHÔNG bắt buộc đăng nhập: khách ẩn danh vẫn gọi được và nhận lại
@@ -481,6 +544,48 @@ export const api = {
    */
   getAchievements: () =>
     request<{ achievements: Achievement[] }>("/api/account/achievements"),
+
+  /** Cấp độ/XP/danh xưng đang trang bị CỦA CHÍNH MÌNH. */
+  getProgress: () => request<OwnProgress>("/api/account/progress"),
+
+  /** Toàn bộ thang danh xưng, kèm cờ đã-mở-khoá — để vẽ danh sách chọn. */
+  getTitles: () => request<{ titles: TitleTier[] }>("/api/account/titles"),
+
+  /** Trang bị một danh xưng đã mở khoá. `titleKey` rỗng = quay về mặc định. */
+  equipTitle: (titleKey: string) =>
+    request<OwnProgress>("/api/account/title", {
+      method: "POST",
+      body: JSON.stringify({ title_key: titleKey }),
+    }),
+
+  /** Vật phẩm CỦA CHÍNH MÌNH — cả đang trang bị lẫn chưa. */
+  getCosmetics: () => request<{ cosmetics: CosmeticItem[] }>("/api/account/cosmetics"),
+
+  equipCosmetic: (cosmeticKey: string) =>
+    request<{ cosmetic_key: string; equipped: boolean }>(
+      `/api/account/cosmetics/${encodeURIComponent(cosmeticKey)}/equip`,
+      { method: "POST" },
+    ),
+
+  /** Danh sách gói thưởng hiện có — công khai, không cần đăng nhập. */
+  getRewardPacks: () =>
+    request<{ packs: { key: string; name: string; rarity_weights: Record<string, number> }[] }>(
+      "/api/account/reward-packs",
+    ),
+
+  /**
+   * Mở một gói thưởng đang chờ. Kết quả do MÁY CHỦ rút và đã LƯU trước khi
+   * trả lời — tải lại trang không mở lại được (xem
+   * `server/gamification_service.py::open_reward_pack`).
+   */
+  openRewardPack: (packKey: string) =>
+    request<{
+      cosmetic: CosmeticItem;
+      duplicate: boolean;
+      pending_reward_packs: number;
+    }>(`/api/account/reward-packs/${encodeURIComponent(packKey)}/open`, {
+      method: "POST",
+    }),
 
   /**
    * Kết thúc phiên ở phía máy chủ.

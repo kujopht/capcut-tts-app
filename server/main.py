@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import threading
 import time
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -47,7 +48,20 @@ from server.creator import (
     suggest_username,
 )
 from server.creator_service import CreatorService
-from server.gamification import tinh_trang_thanh_tuu
+from server.gamification import COSMETIC_CATALOG, LEVEL_TIERS, REWARD_PACKS
+from server.gamification_service import (
+    GamificationError,
+    achievements_hien_thi as thanh_tuu_hien_thi,
+    award_xp as thuong_xp,
+    cap_do_hien_thi,
+    cong_khai_cap_do,
+    cong_khai_thanh_tuu,
+    cong_khai_vat_pham_dang_trang_bi,
+    equip_cosmetic,
+    equip_title,
+    open_reward_pack,
+)
+from server.gamification_store import build_gamification_store
 from server.domain import (
     AudioStamp,
     AudioTrack,
@@ -111,6 +125,12 @@ store = build_metadata_store(settings)
 #: dau `server/creator_service.py`: du an chua co co che phan quyen quan tri,
 #: va mot endpoint duyet khong duoc bao ve la mot cai cong mo.
 creators = CreatorService(identity, store, storage)
+
+#: Kho gamification (V4 visual completion, vong 2) — MOT the hien, dung
+#: chung cho toan bo route XP/cap do/thanh tuu/vat pham. Doc lap hoan toan
+#: voi `store` (novels/chapters/tts) va `translation_store` — xem
+#: `server/gamification_store.py`.
+gamification_store = build_gamification_store(settings)
 
 #: Tang service cua tang xa hoi. Cung `identity`/`store`/`storage` voi moi route
 #: khac — mot duong ghi duy nhat, va no la noi quyen/han muc/thong bao duoc
@@ -1178,6 +1198,15 @@ def publish_novel(novel_id: str, profile: Profile = Depends(current_profile)) ->
             creators.assert_can_publish(profile)
         except AuthorStateError as exc:
             raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    # Doc trang thai CU truoc khi ghi — cung ly do voi `truoc` o `update_chapter`:
+    # sau khi `store.publish_novel()` chay xong thi khong con biet day co phai
+    # lan XUAT BAN THAT (draft -> published) hay chi mot lan goi lai idempotent.
+    # Thuong XP chi dung cho lan THAT.
+    truoc: Optional[PublishState] = None
+    try:
+        truoc = store.owned_novel(novel_id, profile.user_id).state
+    except (NotFoundError, PermissionDenied):
+        pass  # De `store.publish_novel()` o duoi nem loi dung.
     try:
         novel = store.publish_novel(novel_id, profile.user_id)
     except NotFoundError as exc:
@@ -1191,7 +1220,31 @@ def publish_novel(novel_id: str, profile: Profile = Depends(current_profile)) ->
             status.HTTP_502_BAD_GATEWAY,
             f"Không lưu được trạng thái xuất bản: {type(exc).__name__}",
         ) from exc
+    if truoc is not None and truoc is not PublishState.PUBLISHED:
+        _thuong_xp_xuat_ban_truyen(novel, profile.user_id)
     return {"novel": _novel_out(novel)}
+
+
+def _thuong_xp_xuat_ban_truyen(novel: Novel, user_id: str) -> None:
+    """
+    XP cho lan XUAT BAN THAT su (draft -> published) — KHONG BAO GIO lam
+    hong viec xuat ban, cung triet ly voi `_bao_chuong_moi`: nuot moi loi.
+
+    Xuat ban mot truyen lam TAT CA chuong cua no hien ra cong khai CUNG LUC
+    (xem `_dem_truyen_chuong_da_xuat_ban`) — nen thuong XP cho MOI chuong
+    dang co trong truyen ngay tai day, khong doi tung chuong duoc "xuat ban
+    rieng" (kien truc hien tai khong co buoc do).
+    """
+    try:
+        thuong_xp(gamification_store, user_id, "publish_first_novel",
+                 source_kind="novel", source_id=user_id)
+        for chapter in store.list_chapters(novel.novel_id):
+            thuong_xp(gamification_store, user_id, "publish_chapter",
+                     source_kind="chapter", source_id=chapter.chapter_id)
+            thuong_xp(gamification_store, user_id, "publish_first_chapter",
+                     source_kind="chapter", source_id=user_id)
+    except Exception:
+        pass
 
 
 # -----------------------------------------------------------------------------
@@ -1202,7 +1255,7 @@ def publish_novel(novel_id: str, profile: Profile = Depends(current_profile)) ->
 @app.post("/api/chapters", status_code=status.HTTP_201_CREATED)
 def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     try:
-        store.owned_novel(payload.novel_id, profile.user_id)
+        novel = store.owned_novel(payload.novel_id, profile.user_id)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except PermissionDenied as exc:
@@ -1223,6 +1276,17 @@ def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profil
     # cu (doi `state` cua chuong qua PATCH) khong bao gio kich hoat duoc:
     # `ChapterPatch` khong nhan `state`.
     _bao_chuong_moi(chapter)
+    # Cung ly do: truyen cha DA xuat ban tu truoc thi chuong moi nay LA cong
+    # khai ngay, nen thuong XP tai day. Truyen con nhap thi cho toi khi
+    # `publish_novel` quet qua (xem `_thuong_xp_xuat_ban_truyen`).
+    if novel.state is PublishState.PUBLISHED:
+        try:
+            thuong_xp(gamification_store, profile.user_id, "publish_chapter",
+                     source_kind="chapter", source_id=chapter.chapter_id)
+            thuong_xp(gamification_store, profile.user_id, "publish_first_chapter",
+                     source_kind="chapter", source_id=profile.user_id)
+        except Exception:
+            pass
     return {"chapter": chapter.to_dict()}
 
 
@@ -2256,36 +2320,150 @@ def creator_me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return data
 
 
+def _dem_truyen_chuong_da_xuat_ban(user_id: str) -> Tuple[int, int]:
+    """
+    So truyen VA so chuong "cong khai" that su cua MOT nguoi dung.
+
+    LOI THAT tim thay o vong 2: kien truc hien tai KHONG BAO GIO dat
+    `Chapter.state = PUBLISHED` o bat ky duong nao (`ChapterPatch` khong
+    nhan `state`, `create_chapter` khong gan, `publish_novel` chi doi trang
+    thai NOVEL) — hien thi mot chuong hoan toan do TRUYEN CHA da xuat ban
+    hay chua (xem `_may_read`/comment o `GET /api/novels/{id}`). Dem theo
+    `chapter.state is PublishState.PUBLISHED` (nhu ban dau cua thanh tuu Giai
+    doan 1) vi vay LUON RA 0 — "Chương đầu tiên" se KHONG BAO GIO mo khoa
+    duoc. Sua bang cach dem chuong theo TRUYEN CHA da xuat ban.
+    """
+    truyen_da_xuat_ban = store.list_novels(owner_id=user_id, published_only=True)
+    id_truyen_da_xuat_ban = {n.novel_id for n in truyen_da_xuat_ban}
+    so_chuong = sum(
+        1 for c in store.chapters_for_owner(user_id)
+        if c.novel_id in id_truyen_da_xuat_ban)
+    return len(truyen_da_xuat_ban), so_chuong
+
+
 @app.get("/api/account/achievements")
 def account_achievements(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     """
-    Thanh tuu CUA CHINH MINH (V4 visual completion, Phan G-J).
+    Thanh tuu CUA CHINH MINH (V4 visual completion). MO KHOA duoc LUU THAT
+    (kem `unlocked_at`) qua `gamification_service.achievements_hien_thi` —
+    dieu kien van tinh tai cho tu du lieu da co, nhung lan dau dat dieu kien
+    se ghi mot ban ghi vinh vien (khong bao gio "quen mo lai" du du lieu
+    nguon sau nay giam, vi du truyen bi xoa).
 
-    TINH TAI CHO tu du lieu da co san — KHONG luu ban ghi rieng, xem docstring
-    dau `server/gamification.py`. Chi cho chinh chu: cac bo dem dung o day
-    (`tts_characters_used`, so chuong da xuat ban) KHONG nam trong danh sach
-    cho phep cong khai cua `creator.public_profile()`.
+    Chi cho chinh chu: `tts_characters_used`/so chuong xuat ban KHONG nam
+    trong danh sach cho phep cong khai cua `creator.public_profile()`.
     """
-    so_truyen = len(store.list_novels(owner_id=profile.user_id, published_only=True))
-    so_chuong = sum(
-        1 for c in store.chapters_for_owner(profile.user_id)
-        if c.state is PublishState.PUBLISHED)
-    trang_thai = tinh_trang_thanh_tuu(
-        so_truyen_xuat_ban=so_truyen, so_chuong_xuat_ban=so_chuong,
-        ky_tu_da_tong_hop=profile.tts_characters_used,
-        phut_da_nghe=profile.listened_minutes)
+    so_truyen, so_chuong = _dem_truyen_chuong_da_xuat_ban(profile.user_id)
     return {
-        "achievements": [
-            {
-                "key": t.dinh_nghia.key,
-                "name": t.dinh_nghia.name,
-                "description": t.dinh_nghia.description,
-                "icon": t.dinh_nghia.icon,
-                "rarity": t.dinh_nghia.rarity,
-                "unlocked": t.dat_duoc,
-                "progress": list(t.tien_do) if t.tien_do else None,
-            }
-            for t in trang_thai
+        "achievements": thanh_tuu_hien_thi(
+            gamification_store, profile.user_id,
+            so_truyen_xuat_ban=so_truyen, so_chuong_xuat_ban=so_chuong,
+            ky_tu_da_tong_hop=profile.tts_characters_used,
+            phut_da_nghe=profile.listened_minutes),
+    }
+
+
+@app.get("/api/account/progress")
+def account_progress(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """XP/cap do/danh xung CUA CHINH MINH — moi gia tri do MAY CHU tinh
+    (xem `gamification_service.cap_do_hien_thi`), giao dien khong tu suy
+    nguong tu client."""
+    progress = gamification_store.get_progress(profile.user_id)
+    return cap_do_hien_thi(progress)
+
+
+class TitleIn(BaseModel):
+    #: Chuoi rong = quay ve danh xung MAC DINH theo bac hien tai.
+    title_key: str = ""
+
+
+@app.post("/api/account/title")
+def account_equip_title(payload: TitleIn,
+                        profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Trang bi mot danh xung DA MO KHOA. Danh xung chua mo hoac khong ton
+    tai deu bi tu choi O MAY CHU — khong tin gia tri client gui len."""
+    try:
+        progress = equip_title(gamification_store, profile.user_id, payload.title_key)
+    except GamificationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return cap_do_hien_thi(progress)
+
+
+@app.get("/api/account/titles")
+def account_titles(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Toan bo danh xung — kem co MO KHOA CHUA de giao dien ve dung, khong
+    bia nguong o frontend."""
+    xp = gamification_store.get_progress(profile.user_id).xp
+    return {
+        "titles": [
+            {"key": t.key, "title": t.title, "level": t.level,
+             "min_xp": t.min_xp, "unlocked": xp >= t.min_xp}
+            for t in LEVEL_TIERS
+        ],
+    }
+
+
+@app.get("/api/account/cosmetics")
+def account_cosmetics(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Vat pham NGUOI DUNG DA CO, ghep voi dinh nghia catalog (ten/do
+    hiem/vi tri) — kho chi luu khoa+trang bi, KHONG luu lai thong tin trung
+    lap cua catalog."""
+    dinh_nghia = {c.key: c for c in COSMETIC_CATALOG}
+    ra = []
+    for muc in gamification_store.list_cosmetics(profile.user_id):
+        dn = dinh_nghia.get(muc.cosmetic_key)
+        if dn is None:
+            continue
+        ra.append({
+            "key": dn.key, "name": dn.name, "rarity": dn.rarity, "slot": dn.slot,
+            "asset_ref": dn.asset_ref, "equipped": muc.equipped,
+            "acquired_at": muc.acquired_at,
+        })
+    return {"cosmetics": ra}
+
+
+@app.post("/api/account/cosmetics/{cosmetic_key}/equip")
+def account_equip_cosmetic(cosmetic_key: str,
+                           profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    try:
+        muc = equip_cosmetic(gamification_store, profile.user_id, cosmetic_key)
+    except GamificationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"cosmetic_key": muc.cosmetic_key, "equipped": muc.equipped}
+
+
+@app.post("/api/account/reward-packs/{pack_key}/open")
+def account_open_reward_pack(pack_key: str,
+                             profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Mo MOT goi thuong dang cho. KHONG tien that, khong tien te tra phi —
+    xem `gamification_service.open_reward_pack`. Ket qua duoc LUU truoc khi
+    tra ve, va so goi dang cho da bi tru NGAY trong request nay — tai lai
+    trang khong mo lai duoc.
+    """
+    try:
+        vat_pham, trung_lap = open_reward_pack(
+            gamification_store, profile.user_id, pack_key, random.Random())
+    except GamificationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {
+        "cosmetic": {
+            "key": vat_pham.key, "name": vat_pham.name, "rarity": vat_pham.rarity,
+            "slot": vat_pham.slot, "asset_ref": vat_pham.asset_ref,
+        },
+        "duplicate": trung_lap,
+        "pending_reward_packs": gamification_store.get_progress(profile.user_id).goi_thuong_dang_cho,
+    }
+
+
+@app.get("/api/account/reward-packs")
+def account_reward_packs() -> Dict[str, Any]:
+    """Danh sach goi thuong hien co — CHI ten/khoa/trong so cong khai
+    (minh bach xac suat), khong lo gi ve nguoi dung."""
+    return {
+        "packs": [
+            {"key": p.key, "name": p.name, "rarity_weights": p.rarity_weights}
+            for p in REWARD_PACKS
         ],
     }
 
@@ -2398,6 +2576,17 @@ def public_profile_route(
     ho_so = identity.profile_by_username(username)
     if ho_so is not None:
         data["social"] = social.profile_social(ho_so, viewer)
+        # Gamification CONG KHAI (V4 visual completion, vong 2) — CHI danh
+        # xung/bac/thanh tuu-da-mo/vat-pham-dang-trang-bi. KHONG BAO GIO
+        # dung `cap_do_hien_thi`/`achievements_hien_thi` (danh cho CHINH
+        # CHU) o day — hai ham do doc/tinh tu bo dem rieng tu.
+        progress = gamification_store.get_progress(ho_so.user_id)
+        data["gamification"] = {
+            **cong_khai_cap_do(progress),
+            "achievements": cong_khai_thanh_tuu(gamification_store, ho_so.user_id),
+            "equipped_cosmetics": cong_khai_vat_pham_dang_trang_bi(
+                gamification_store, ho_so.user_id),
+        }
     return {"profile": data}
 
 
@@ -2431,6 +2620,47 @@ def search_posts(q: str = "", limit: int = 5,
                    viewer=viewer)
 
 
+@app.get("/api/search/audio")
+def search_audio(q: str = "", limit: int = 5) -> Dict[str, Any]:
+    """
+    Danh muc "Audio" cua tim kiem toan cuc (Phan F/11, V4 visual completion
+    vong 2) — THAT, khong con vo hieu nhu vong 1.
+
+    Tim TRUYEN CONG KHAI khop `q`, roi giu lai truyen nao co IT NHAT MOT
+    chuong da co audio (`store.audio_by_chapter`) — day la dinh nghia "audio"
+    dung duoc voi kien truc HIEN TAI (audio gan voi chuong, khong phai mot
+    thuc the doc lap). Dan toi `/novels/{id}`, TRANG CHI TIET TRUYEN hien co
+    — mot trang /listen rieng (neu lam sau nay) la mot nhanh KHAC, ngoai
+    pham vi dot nay.
+
+    GHEP HOAN TOAN tu cac phuong thuc CONG KHAI da co san cua `MetadataStore`
+    (`find_novels`/`list_chapters`/`audio_by_chapter`) — KHONG them ham moi
+    vao protocol, nen ca ban Mock LAN Appwrite deu chay dung ngay, khong
+    can viet them mot dong nao o `adapters.py`.
+
+    GIOI HAN DA BIET: chi xet trong 30 truyen khop DAU TIEN (theo thu tu
+    `find_novels`) — mot tu khoa rat pho bien voi hang nghin truyen co the
+    bo sot truyen co audio nam ngoai 30 ket qua dau. Chap nhan duoc cho MVP;
+    ghi lai o day de khong ai tuong day la tim kiem day du.
+    """
+    tu = q.strip()
+    if len(tu) < 2:
+        return {"novels": []}
+    gioi_han = max(1, min(20, limit))
+    UNG_VIEN = 30
+    truyen, _ = store.find_novels(published_only=True, query=tu, limit=UNG_VIEN)
+    ra: List[Dict[str, Any]] = []
+    for n in truyen:
+        chuong = store.list_chapters(n.novel_id)
+        dau = store.audio_by_chapter([c.chapter_id for c in chuong])
+        if not dau:
+            continue
+        ra.append({**_novel_out(n), "audio_chapter_count": len(dau)})
+        if len(ra) >= gioi_han:
+            break
+    return {"novels": ra}
+
+
 @app.post("/api/listens")
 def record_listen(payload: ListenIn,
                   authorization: Optional[str] = Header(default=None)) -> Dict[str, Any]:
@@ -2462,13 +2692,25 @@ def record_listen(payload: ListenIn,
     track = store.track_for_chapter(payload.chapter_id)
     duration = float(track.duration_seconds) if track else 0.0
 
-    return creators.record_listen(
+    ket_qua = creators.record_listen(
         listener_id=listener,
         chapter_id=payload.chapter_id,
         author_id=chapter.owner_id,
         listened_seconds=float(payload.listened_seconds),
         duration_seconds=duration,
     )
+    # XP cho NGUOI NGHE (khac uy tin cong khai cua tac gia o tren) — chi khi
+    # da dang nhap VA lan nghe nay THAT SU hop le (dung phep kiem chong farm
+    # co san cua `evaluate_listen`, khong them phep kiem rieng). "Moc" o day
+    # la MOT LAN moi chuong, khong phai moi ngay — source_id = chapter_id
+    # nen mot chuong chi thuong XP nghe DUNG MOT LAN cho moi nguoi nghe.
+    if listener and ket_qua.get("credited"):
+        try:
+            thuong_xp(gamification_store, listener, "listen_milestone_qualified",
+                     source_kind="chapter", source_id=payload.chapter_id)
+        except Exception:
+            pass
+    return ket_qua
 
 
 # -----------------------------------------------------------------------------

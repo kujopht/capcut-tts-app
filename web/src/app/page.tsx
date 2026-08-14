@@ -35,7 +35,7 @@
 
 import Link from "next/link";
 import { useCallback } from "react";
-import { api, type ContinueItem, type Novel } from "@/lib/api";
+import { api, type Achievement, type ContinueItem, type Novel, type OwnProgress } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { StoryCard } from "@/components/StoryCard";
@@ -53,6 +53,7 @@ interface HomeData {
   tags: string[];
   reading: ContinueItem | null;
   listening: ContinueItem | null;
+  gamification: { progress: OwnProgress; thanhTuuMoiNhat: Achievement | null } | null;
 }
 
 function dinhDangGio(giay: number): string {
@@ -108,8 +109,20 @@ function TheTiepTuc({ kieu, muc }: { kieu: "read" | "listen"; muc: ContinueItem 
  * dang nhap khong can nghe lai "day la gi" moi lan ve trang chu, nen tieu
  * de rut lai con mot loi chao; loi vao nhanh cung doi tu hai nut CTA lon
  * (khach vang lai) sang mot lien ket gon toi thu vien cua ho (da dang nhap).
+ *
+ * `gamification` (V4 visual completion, vong 2, Buoc 12) — MOT dong nho:
+ * bac/XP/danh xung, kem thanh tuu moi mo gan nhat neu co. KHONG phai bang
+ * dieu khien, khong co thanh tien do rieng o day — muon xem day du thi vao
+ * `/account`. Thieu du lieu (chua tai xong / loi) thi AN het dong nay thay
+ * vi ve mot cho trong.
  */
-function DaiGioiThieu({ daDangNhap }: { daDangNhap: boolean }) {
+function DaiGioiThieu({
+  daDangNhap,
+  gamification,
+}: {
+  daDangNhap: boolean;
+  gamification: { progress: OwnProgress; thanhTuuMoiNhat: Achievement | null } | null;
+}) {
   return (
     <section className="home-intro rise" aria-labelledby="home-intro-title">
       <span className="pill">
@@ -139,6 +152,23 @@ function DaiGioiThieu({ daDangNhap }: { daDangNhap: boolean }) {
           </Link>
         </div>
       )}
+      {gamification ? (
+        <p className="hint home-gamification-line">
+          Lv. {gamification.progress.level} ·{" "}
+          {gamification.progress.xp}
+          {gamification.progress.next_level_xp
+            ? `/${gamification.progress.next_level_xp}`
+            : ""}{" "}
+          XP · {gamification.progress.equipped_title}
+          {gamification.thanhTuuMoiNhat ? (
+            <>
+              {" "}
+              · Thành tựu mới nhất: {gamification.thanhTuuMoiNhat.icon}{" "}
+              {gamification.thanhTuuMoiNhat.name}
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -148,18 +178,27 @@ export default function HomePage() {
   const daDangNhap = Boolean(profile);
 
   const load = useCallback(async (): Promise<HomeData> => {
-    const [page, tags, tiepTuc] = await Promise.all([
+    const [page, tags, tiepTuc, gam] = await Promise.all([
       api.browseNovels({ limit: GRID_COUNT }),
       api.novelTags(),
       daDangNhap
         ? api.getContinueProgress().catch(() => ({ reading: null, listening: null }))
         : Promise.resolve({ reading: null, listening: null }),
+      daDangNhap
+        ? Promise.all([api.getProgress(), api.getAchievements()]).catch(() => null)
+        : Promise.resolve(null),
     ]);
+    const thanhTuuMoiNhat = gam
+      ? gam[1].achievements
+          .filter((a) => a.unlocked && a.unlocked_at)
+          .sort((a, b) => (b.unlocked_at! < a.unlocked_at! ? -1 : 1))[0] ?? null
+      : null;
     return {
       novels: page.novels,
       tags: tags.tags,
       reading: tiepTuc.reading,
       listening: tiepTuc.listening,
+      gamification: gam ? { progress: gam[0], thanhTuuMoiNhat } : null,
     };
   }, [daDangNhap]);
 
@@ -170,7 +209,7 @@ export default function HomePage() {
 
   return (
     <div className="page">
-      <DaiGioiThieu daDangNhap={daDangNhap} />
+      <DaiGioiThieu daDangNhap={daDangNhap} gamification={data?.gamification ?? null} />
 
       {/* An hoan toan khi chua co gi de tiep tuc — KHONG ve khung rong. */}
       {coTiepTuc ? (

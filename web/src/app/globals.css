@@ -1425,16 +1425,45 @@ main { overflow-x: clip; }
   color: var(--rarity, var(--rarity-common));
 }
 .achievement-card-locked { opacity: 0.45; filter: grayscale(0.6); }
+/* `.achievement-card` cung dung duoc nhu mot nut bam (trang bi vat pham) —
+   xoa kieu mac dinh cua `<button>`, giu nguyen phan con lai cua lop. */
+button.achievement-card { cursor: pointer; text-align: left; font: inherit; color: inherit; width: 100%; }
+button.achievement-card:disabled { cursor: default; opacity: 0.6; }
+.cosmetic-frame-preview {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--bg-3); border: 1px solid var(--line-soft); flex: 0 0 auto;
+}
 .achievement-card-progress { font-size: var(--t-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* Lop CHU DINH cho tung do hiem — khong dat mau qua `style` inline (cung
    quy uoc voi `.feature-studio`/`.feature-fanfic`: gia tri mau CHI nam
-   trong token/CSS, JSX chi chon lop). */
-.achievement-card.do-hiem-common { --rarity: var(--rarity-common); }
-.achievement-card.do-hiem-rare { --rarity: var(--rarity-rare); }
-.achievement-card.do-hiem-epic { --rarity: var(--rarity-epic); }
-.achievement-card.do-hiem-legendary { --rarity: var(--rarity-legendary); }
-.achievement-card.do-hiem-mythic { --rarity: var(--rarity-mythic); }
+   trong token/CSS, JSX chi chon lop). DUNG CHUNG cho `.achievement-card` VA
+   cac icon vat pham suu tam (`.do-hiem-mau`, xem
+   `components/cosmetics/Cosmetics.tsx`) — khong gioi han o mot the cha. */
+.do-hiem-common { --rarity: var(--rarity-common); }
+.do-hiem-rare { --rarity: var(--rarity-rare); }
+.do-hiem-epic { --rarity: var(--rarity-epic); }
+.do-hiem-legendary { --rarity: var(--rarity-legendary); }
+.do-hiem-mythic { --rarity: var(--rarity-mythic); }
+
+/* Icon vat pham suu tam: mau CHINH la mau do hiem (`currentColor` trong SVG
+   doc `color` nay). */
+.do-hiem-mau { color: var(--rarity, var(--rarity-common)); }
+
+/* Khung avatar suu tam (Phan K/9) — mot vong SVG PHU LEN avatar, khong
+   thay doi kich thuoc avatar ben duoi. */
+.cosmetic-frame {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.cosmetic-frame-svg {
+  position: absolute;
+  inset: -12%;
+  width: 124%;
+  height: 124%;
+  pointer-events: none;
+}
 
 /* Khoi ho so trong showcase (Phan M) — nhe hon `.account-hero` cu, danh cho
    moi module rieng (thanh tuu, suu tap, hoat dong) thay vi mot khoi hero to
@@ -4053,6 +4082,11 @@ body.co-mini { padding-bottom: 74px; }
 /* -- trang ca nhan cong khai ---------------------------------------------- */
 
 .ho-so-ten { font-family: var(--font-mono); }
+/* Danh xung/bac cong khai (V4 visual completion, vong 2) — mau tim nhe de
+   tach khoi cac dong `.hint` xam khac, nhung KHONG ruc bang huy hieu tac
+   gia/hang ben duoi (hai truc khac nhau, xem ghi chu trong page.tsx). */
+.ho-so-danh-xung { color: var(--brand-hover); margin: 0; display: flex; align-items: center; gap: var(--s1); flex-wrap: wrap; }
+.ho-so-hoa-van, .ho-so-huy-hieu { display: inline-flex; color: inherit; }
 .ho-so-hh { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0; }
 .ho-so-bio { margin-top: var(--s1); }
 .ho-so-so { align-items: flex-end; text-align: right; }

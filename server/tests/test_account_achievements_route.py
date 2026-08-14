@@ -10,12 +10,14 @@ from fastapi.testclient import TestClient
 from server import main as server_main
 from server.adapters import MockIdentityAdapter, MockMetadataStore
 from server.domain import Chapter, Novel, PublishState
+from server.gamification_store import MockGamificationStore
 
 
 class AccountAchievementsTestCase(unittest.TestCase):
     def setUp(self) -> None:
         server_main.identity = MockIdentityAdapter()
         server_main.store = MockMetadataStore()
+        server_main.gamification_store = MockGamificationStore()
         self.client = TestClient(server_main.app)
 
     def auth(self, token: str) -> Dict[str, str]:

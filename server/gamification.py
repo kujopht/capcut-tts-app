@@ -31,6 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
+from server.gamification_domain import CosmeticDef, RewardPack
+
 
 @dataclass(frozen=True)
 class AchievementDef:
@@ -180,6 +182,7 @@ def next_level(xp: int) -> Optional[LevelTier]:
 #: cong XP dung MOT LAN, giong ky thuat `credit_key` cua `creator.py`.
 XP_EVENTS: Dict[str, int] = {
     "publish_first_novel": 50,
+    "publish_first_chapter": 20,
     "publish_chapter": 10,
     "listen_milestone_qualified": 5,
     "community_contribution": 5,
@@ -195,3 +198,51 @@ def id_xp_entry(user_id: str, event_type: str, source_id: str) -> str:
     hai chi la upsert vo hai thay vi cong don sai.
     """
     return f"xp_{abs(hash((user_id, event_type, source_id))) % (10 ** 12):012x}"
+
+
+def title_unlocked(xp: int, title_key: str) -> bool:
+    """Danh xung `title_key` co MO KHOA voi `xp` hien tai hay khong."""
+    tier = next((t for t in LEVEL_TIERS if t.key == title_key), None)
+    return tier is not None and xp >= tier.min_xp
+
+
+# =============================================================================
+# Vat pham suu tam — catalog THAT (Phan K, V4 visual completion vong 2)
+# =============================================================================
+#
+# Tai san la THAM CHIEU (`asset_ref`) toi mot component SVG/CSS o frontend
+# (`web/src/components/cosmetics/`), KHONG PHAI anh — khong nhan vat hoat
+# hinh co ban quyen, dung phong cach huyen ao TIET CHE nhu phan con lai cua
+# giao dien (xem `web/src/app/globals.css`, khoi "hoa van huyen ao").
+
+COSMETIC_CATALOG: Tuple[CosmeticDef, ...] = (
+    # --- khung avatar (5, moi bac hiem mot cai) -----------------------------
+    CosmeticDef("khung_go", "Khung Gỗ Mộc", "common", "avatar_frame", "frame_go"),
+    CosmeticDef("khung_bac", "Khung Bạc Cổ", "rare", "avatar_frame", "frame_bac"),
+    CosmeticDef("khung_ngoc", "Khung Ngọc Bích", "epic", "avatar_frame", "frame_ngoc"),
+    CosmeticDef("khung_vang", "Khung Vàng Hoàng Gia", "legendary", "avatar_frame", "frame_vang"),
+    CosmeticDef("khung_sao", "Khung Tinh Tú", "mythic", "avatar_frame", "frame_sao"),
+    # --- hoa tiet ho so (3) --------------------------------------------------
+    CosmeticDef("hoa_van_la", "Hoạ Tiết Lá Rừng", "common", "profile_ornament", "ornament_la"),
+    CosmeticDef("hoa_van_may", "Hoạ Tiết Mây Trời", "rare", "profile_ornament", "ornament_may"),
+    CosmeticDef("hoa_van_sao_bang", "Hoạ Tiết Sao Băng", "epic", "profile_ornament", "ornament_sao_bang"),
+    # --- huy hieu (5) ---------------------------------------------------------
+    CosmeticDef("huy_hieu_but_long", "Huy Hiệu Bút Lông", "common", "badge", "badge_but_long"),
+    CosmeticDef("huy_hieu_cuon_giay", "Huy Hiệu Cuộn Giấy Cổ", "common", "badge", "badge_cuon_giay"),
+    CosmeticDef("huy_hieu_la_ban_sao", "Huy Hiệu La Bàn Sao", "rare", "badge", "badge_la_ban"),
+    CosmeticDef("huy_hieu_dom_lua", "Huy Hiệu Đốm Lửa Ma Thuật", "epic", "badge", "badge_dom_lua"),
+    CosmeticDef("huy_hieu_phuong_hoang", "Huy Hiệu Phượng Hoàng Tro Tàn", "legendary", "badge", "badge_phuong_hoang"),
+)
+
+#: Goi thuong MIEN PHI duy nhat cua Giai doan 1 — cap khi len bac (xem
+#: `gamification_service.award_xp`). Trong so THEO DO HIEM, cong khai duoc.
+REWARD_PACKS: Tuple[RewardPack, ...] = (
+    RewardPack("goi_len_bac", "Gói Lên Bậc",
+              {"common": 120, "rare": 54, "epic": 20, "legendary": 5, "mythic": 1}),
+)
+
+
+def cosmetic_pool_for_pack(pack_key: str) -> Tuple[CosmeticDef, ...]:
+    """Toan bo catalog la mot ho boi DUY NHAT trong Giai doan 1 — chua co
+    goi rieng theo vi tri trang bi."""
+    return COSMETIC_CATALOG

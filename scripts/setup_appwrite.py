@@ -58,6 +58,19 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # `novels.cover_key`. 512 la muc rong rai giong het cover_key, du
             # avatar_key thuc te ngan hon nhieu (khong co subject_id).
             ("avatar_key", "string", False, 512),
+            # --- V4 visual completion: "tiep tuc doc/nghe" (Phan B) -----------
+            # CON TRO DUY NHAT toi noi dang do dang, khong phai lich su — xem
+            # `server/domain.py::Profile`. Tat ca deu KHONG bat buoc: thieu
+            # schema nay chi lam module "Tiep tuc..." AN o trang chu, khong
+            # lam vo dang ky/cap nhat ho so (cung co che voi ba truong V2 o
+            # tren, xem `AppwriteIdentityAdapter._writable_profile`).
+            ("last_read_novel_id", "string", False, 64),
+            ("last_read_chapter_id", "string", False, 64),
+            ("last_read_at", "datetime", False, None),
+            ("last_listen_novel_id", "string", False, 64),
+            ("last_listen_chapter_id", "string", False, 64),
+            ("last_listen_position_seconds", "double", False, None),
+            ("last_listen_at", "datetime", False, None),
         ],
         "indexes": [
             ("email_unique", "unique", ["email"]),
@@ -679,6 +692,38 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
             ("last_verified_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # --- V4 visual completion, Phan G/K/L: cap do + vat pham suu tam --------
+    # THIET KE — logic thuan da co test (server/gamification.py,
+    # server/gamification_domain.py), CHUA noi vao route/UI nao. Hai
+    # collection duoi day CHUA duoc ap len production trong dot nay; chi
+    # them vao SCHEMA de --dry-run the hien dung ke hoach khi lam tiep.
+    #
+    # ROLLBACK: xoa ca hai collection — khong anh huong gi den du lieu dang
+    # dung (thanh tuu tinh tai cho, khong doc hai bang nay).
+    "user_progress": {
+        "name": "User Progress",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("xp", "integer", True, None),
+            ("equipped_title_key", "string", False, 64),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "unique", ["user_id"]),
+        ],
+    },
+    "cosmetic_inventory": {
+        "name": "Cosmetic Inventory",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("cosmetic_key", "string", True, 64),
+            ("acquired_at", "datetime", True, None),
+            ("equipped", "boolean", False, None),
         ],
         "indexes": [
             ("user_idx", "key", ["user_id"]),

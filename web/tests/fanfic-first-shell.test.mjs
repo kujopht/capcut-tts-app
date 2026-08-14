@@ -192,10 +192,16 @@ test("trang chu va Kham pha dung CHUNG mot the truyen", () => {
   }
 });
 
-test("trang chu chi goi HAI request, khong phu thuoc so truyen", () => {
+test("trang chu chi goi so request CO DINH, khong phu thuoc so truyen", () => {
+  // V4 visual completion, Phan B: them `getContinueProgress` cho module Tiep
+  // tuc doc/nghe — VAN co dinh (mot lan cho ho so nguoi dang nhap), khong
+  // tang theo so truyen, nen khong pha rang buoc N+1 ma bai test nay giu.
   const home = read("../src/app/page.tsx");
   const calls = home.match(/api\.\w+\(/g) ?? [];
-  assert.deepEqual(calls.sort(), ["api.browseNovels(", "api.novelTags("]);
+  assert.deepEqual(
+    calls.sort(),
+    ["api.browseNovels(", "api.getContinueProgress(", "api.novelTags("],
+  );
 });
 
 test("trang chu goi dung ten thu no co: 'Truyen moi', khong phai 'noi bat'", () => {
@@ -236,11 +242,15 @@ test("footer KHONG tao trang phap ly gia", () => {
 
 /* ========================================================== responsive */
 
-test("hero va luoi truyen deu co quy tac cho tablet va mobile", () => {
+test("luoi truyen co quy tac cho mobile, the featured gioi han rong o moi be", () => {
+  // `.hero-story` (luoi 2 cot bia/chu) da bi thay boi `.story-card-featured`
+  // (V4 visual completion, Phan A/E) — mot cot flex don, KHONG can quy tac
+  // rieng cho tablet vi no khong bao gio la luoi nhieu cot de phai gap lai.
+  // Rang buoc con lai la `max-width`: the KHONG duoc phep rong het container
+  // o BAT KY be nao, do chinh la thu ngan no thanh hero nua trang.
   const text = css();
-  const tablet = text.slice(text.indexOf("@media (max-width: 900px)"));
   const mobile = text.slice(text.indexOf("@media (max-width: 640px)"));
-  assert.match(tablet, /\.hero-story \{ grid-template-columns/);
+  assert.match(text, /\.story-card-featured \{[^}]*max-width:\s*\d+px/s);
   assert.match(mobile, /\.story-grid \{ grid-template-columns/);
   assert.match(mobile, /\.footer-grid \{ grid-template-columns/);
 });

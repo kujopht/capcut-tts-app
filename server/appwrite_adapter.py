@@ -278,8 +278,8 @@ class AppwriteIdentityAdapter:
 
     def _merge_stored(self, profile: Profile) -> Profile:
         """
-        Ghep `username` / `bio` / `author_status` / `avatar_key` tu hang
-        `profiles` vao.
+        Ghep `username` / `bio` / `author_status` / `avatar_key` / cac truong
+        "tiep tuc doc/nghe" tu hang `profiles` vao.
 
         VI SAO CAN: `/v1/account` cua Appwrite chi biet email va ten — no khong
         biet gi ve ba truong V2. Khong ghep thi moi request tra ve mot ho so
@@ -301,6 +301,14 @@ class AppwriteIdentityAdapter:
         except ValueError:
             profile.author_status = AuthorStatus.NONE
         profile.avatar_key = str(row.get("avatar_key") or "")
+        profile.last_read_novel_id = str(row.get("last_read_novel_id") or "")
+        profile.last_read_chapter_id = str(row.get("last_read_chapter_id") or "")
+        profile.last_read_at = str(row.get("last_read_at") or "")
+        profile.last_listen_novel_id = str(row.get("last_listen_novel_id") or "")
+        profile.last_listen_chapter_id = str(row.get("last_listen_chapter_id") or "")
+        profile.last_listen_position_seconds = float(
+            row.get("last_listen_position_seconds") or 0.0)
+        profile.last_listen_at = str(row.get("last_listen_at") or "")
         return profile
 
     def _profile_path(self, user_id: str) -> str:
@@ -403,7 +411,15 @@ class AppwriteIdentityAdapter:
         "user_id", "email", "display_name", "tier",
         "listened_minutes", "tts_characters_used", "created_at",
     )
-    _PROFILE_V2_FIELDS = ("username", "bio", "author_status", "avatar_key")
+    _PROFILE_V2_FIELDS = (
+        "username", "bio", "author_status", "avatar_key",
+        # "Tiep tuc doc/nghe" (V4 visual completion) — them SAU, cung co che
+        # dong-thieu-thi-bo-qua nay: chua chay schema thi tinh nang chi an,
+        # khong lam vo dang ky/cap nhat ho so.
+        "last_read_novel_id", "last_read_chapter_id", "last_read_at",
+        "last_listen_novel_id", "last_listen_chapter_id",
+        "last_listen_position_seconds", "last_listen_at",
+    )
 
     #: Truong co INDEX UNIQUE. Chuoi rong KHONG duoc ghi vao day.
     #:
@@ -658,4 +674,12 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         bio=str(row.get("bio") or ""),
         author_status=status,
         avatar_key=str(row.get("avatar_key") or ""),
+        last_read_novel_id=str(row.get("last_read_novel_id") or ""),
+        last_read_chapter_id=str(row.get("last_read_chapter_id") or ""),
+        last_read_at=str(row.get("last_read_at") or ""),
+        last_listen_novel_id=str(row.get("last_listen_novel_id") or ""),
+        last_listen_chapter_id=str(row.get("last_listen_chapter_id") or ""),
+        last_listen_position_seconds=float(
+            row.get("last_listen_position_seconds") or 0.0),
+        last_listen_at=str(row.get("last_listen_at") or ""),
     )

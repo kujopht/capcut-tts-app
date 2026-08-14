@@ -47,6 +47,7 @@ from server.creator import (
     suggest_username,
 )
 from server.creator_service import CreatorService
+from server.gamification import tinh_trang_thanh_tuu
 from server.domain import (
     AudioStamp,
     AudioTrack,
@@ -2255,6 +2256,40 @@ def creator_me(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     return data
 
 
+@app.get("/api/account/achievements")
+def account_achievements(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Thanh tuu CUA CHINH MINH (V4 visual completion, Phan G-J).
+
+    TINH TAI CHO tu du lieu da co san — KHONG luu ban ghi rieng, xem docstring
+    dau `server/gamification.py`. Chi cho chinh chu: cac bo dem dung o day
+    (`tts_characters_used`, so chuong da xuat ban) KHONG nam trong danh sach
+    cho phep cong khai cua `creator.public_profile()`.
+    """
+    so_truyen = len(store.list_novels(owner_id=profile.user_id, published_only=True))
+    so_chuong = sum(
+        1 for c in store.chapters_for_owner(profile.user_id)
+        if c.state is PublishState.PUBLISHED)
+    trang_thai = tinh_trang_thanh_tuu(
+        so_truyen_xuat_ban=so_truyen, so_chuong_xuat_ban=so_chuong,
+        ky_tu_da_tong_hop=profile.tts_characters_used,
+        phut_da_nghe=profile.listened_minutes)
+    return {
+        "achievements": [
+            {
+                "key": t.dinh_nghia.key,
+                "name": t.dinh_nghia.name,
+                "description": t.dinh_nghia.description,
+                "icon": t.dinh_nghia.icon,
+                "rarity": t.dinh_nghia.rarity,
+                "unlocked": t.dat_duoc,
+                "progress": list(t.tien_do) if t.tien_do else None,
+            }
+            for t in trang_thai
+        ],
+    }
+
+
 @app.get("/api/creator/ranks")
 def creator_ranks() -> Dict[str, Any]:
     """
@@ -2434,6 +2469,115 @@ def record_listen(payload: ListenIn,
         listened_seconds=float(payload.listened_seconds),
         duration_seconds=duration,
     )
+
+
+# -----------------------------------------------------------------------------
+# TIEP TUC DOC / NGHE (V4 visual completion, Phan B)
+# -----------------------------------------------------------------------------
+#
+# BA khai niem KHAC voi `/api/listens` o tren, dung nham la lo du lieu sai cho:
+#
+#   `/api/listens`         UY TIN CONG KHAI cua tac gia — khong can dang nhap,
+#                          chi dem "hop le" theo quy tac chong farm.
+#   `/api/progress/*`      TIEN ICH CA NHAN cua nguoi doc/nghe — BAT BUOC dang
+#                          nhap, khong ai khac thay duoc, khong dinh gi den
+#                          uy tin. Ghi de CON TRO (vi tri gan nhat), khong
+#                          phai mot ban ghi lich su.
+#
+# Y muon la "bam vao trang chu thay ngay cho minh dang do dang", khong phai
+# theo doi hanh vi doc chi tiet — nen chi luu DUY NHAT (novel, chapter) gan
+# nhat cho moi kieu (doc/nghe), khong luu vi tri cuon trang hay phan tram doc.
+
+
+class ReadProgressIn(BaseModel):
+    """Bao cao dang doc chuong nao. KHONG co truong vi tri/phan tram — trang
+    doc chuong hien tai khong do cuon trang, nen se la BIA neu them vao."""
+
+    novel_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    chapter_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+
+
+class ListenProgressIn(BaseModel):
+    """Bao cao vi tri dang nghe. `position_seconds` CHI de hien thi thanh tien
+    do — KHONG dung lam can cu tinh uy tin (xem `ListenIn` o tren, do lay tu
+    track o may chu)."""
+
+    novel_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    chapter_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    position_seconds: float = Field(ge=0, le=86_400)
+
+
+@app.post("/api/progress/read")
+def bao_cao_dang_doc(payload: ReadProgressIn,
+                     profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Ghi con tro "dang doc chuong nao" cho module Tiep tuc doc o trang chu.
+
+    Khong kiem `novel_id`/`chapter_id` co that su ton tai hay khong: day la
+    con tro CA NHAN, chi chinh chu doc lai duoc qua `/api/progress/continue`
+    (roi ham do tu bo qua con tro tro toi noi da bi xoa) — mot id sai chi lam
+    con tro cua chinh nguoi goi vo dung, khong anh huong ai khac."""
+    profile.last_read_novel_id = payload.novel_id
+    profile.last_read_chapter_id = payload.chapter_id
+    profile.last_read_at = now_iso()
+    identity.save_profile(profile)
+    return {"ok": True}
+
+
+@app.post("/api/progress/listen")
+def bao_cao_dang_nghe(payload: ListenProgressIn,
+                      profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Cung vai tro voi `bao_cao_dang_doc`, kem vi tri giay de hien thanh tien
+    do khi quay lai."""
+    profile.last_listen_novel_id = payload.novel_id
+    profile.last_listen_chapter_id = payload.chapter_id
+    profile.last_listen_position_seconds = float(payload.position_seconds)
+    profile.last_listen_at = now_iso()
+    identity.save_profile(profile)
+    return {"ok": True}
+
+
+def _tiep_tuc_mot_muc(novel_id: str, chapter_id: str, luc: str, *, kieu: str,
+                      vi_tri_giay: float = 0.0) -> Optional[Dict[str, Any]]:
+    """Mot muc cua `/api/progress/continue`, hoac `None` neu khong co gi / con
+    tro tro toi mot novel/chapter da bi xoa — AN module do, KHONG bia du lieu."""
+    if not novel_id or not chapter_id:
+        return None
+    try:
+        novel = store.get_novel(novel_id)
+        chapter = store.get_chapter(chapter_id)
+    except NotFoundError:
+        return None
+    muc: Dict[str, Any] = {
+        "novel_id": novel.novel_id,
+        "novel_title": novel.title,
+        "chapter_id": chapter.chapter_id,
+        "chapter_title": chapter.title,
+        "chapter_order_index": chapter.order_index,
+        "updated_at": luc,
+    }
+    if kieu == "listen":
+        track = store.track_for_chapter(chapter_id)
+        muc["position_seconds"] = vi_tri_giay
+        # `None` khi chua ro do dai (track cu/da xoa) — giao dien hien vi tri
+        # da nghe MA KHONG bia mot mau so, thay vi ve "17:42 / 0:00".
+        muc["duration_seconds"] = (
+            float(track.duration_seconds)
+            if track and track.duration_seconds else None)
+    return muc
+
+
+@app.get("/api/progress/continue")
+def tiep_tuc(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Du lieu cho hai module trang chu: Tiep tuc doc / Tiep tuc nghe."""
+    return {
+        "reading": _tiep_tuc_mot_muc(
+            profile.last_read_novel_id, profile.last_read_chapter_id,
+            profile.last_read_at, kieu="read"),
+        "listening": _tiep_tuc_mot_muc(
+            profile.last_listen_novel_id, profile.last_listen_chapter_id,
+            profile.last_listen_at, kieu="listen",
+            vi_tri_giay=profile.last_listen_position_seconds),
+    }
 
 
 # -----------------------------------------------------------------------------

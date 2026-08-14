@@ -3,15 +3,17 @@
 /**
  * Trang chu — mat tien cho NGUOI DOC.
  *
- * Truoc day day la landing tinh gioi thieu cong cu tao giong: hai the lon
- * "Tạo audio" / "Khám phá Fanfic", khong goi mot API nao va khong hien mot
- * truyen nao. Nguoi vao lan dau khong thay duoc thu san pham thuc su ban —
- * truyen.
+ * V4 VISUAL COMPLETION (Phan A/B) — VIET LAI bo cuc, khong chi doi mau:
  *
- * Dai mo dau o tren la MOT dai ngan, khong phai mot hero cao ca man hinh. No
- * noi day la cho doc va nghe, va tac gia tu viet duoc; roi nhuong cho ngay cho
- * truyen that. Mot hero cao se day truyen dau tien xuong duoi nep gap va bien
- * trang nay tro lai thanh landing gioi thieu cong cu.
+ *   TRUOC: HomeHero cao gan het man hinh dau tien, ROI DEN mot StoryHero
+ *   thu hai (bia+chu chia doi trang) truoc khi toi duoc luoi truyen that.
+ *   Hai khoi gioi thieu lien tiep day noi dung that xuong duoi nep gap.
+ *
+ *   SAU: mot dai gioi thieu GON (mot dong tieu de + nut, khong choan man
+ *   hinh), roi toi NGAY module "Tiep tuc" (nguoi da dang nhap) hoac luoi
+ *   truyen — khong con StoryHero rieng. Chi con DUY NHAT mot truyen trong
+ *   kho thi dung the "featured" (gioi han rong, xem `StoryCard`), khong bia
+ *   thanh mot hero nua trang.
  *
  * VE DU LIEU, va day la phan quan trong nhat khi doc file nay:
  *
@@ -20,105 +22,174 @@
  * Goi no la "Mới cập nhật" se la mot lai noi khong dung voi du lieu.
  *
  * Khong co muc "nổi bật", "nghe nhiều" hay "có audio": khong ton tai co
- * featured, khong ton tai luot nghe theo truyen, va `Novel` khong mang co nao
- * cho biet truyen da co audio hay chua. `Profile.listened_minutes` la cua
- * NGUOI DUNG chu khong phai cua truyen. Bia dat mot muc nhu vay se phai bia ca
- * thu tu.
+ * featured (SAI: xem tren — "featured" o day la mot BIEN THE HIEN THI khi
+ * kho chi co it truyen, khong phai mot truong xep hang), khong ton tai luot
+ * nghe theo truyen. `Profile.listened_minutes` la cua NGUOI DUNG chu khong
+ * phai cua truyen.
  *
- * Chi HAI request, khong phu thuoc so truyen: mot trang truyen va mot lan lay
- * the. Khong bao gio goi `getNovel` tung truyen de dem chuong — do la N+1,
- * va `tests/correctness-scale.test.mjs` dang khoa lai dung cho do.
+ * "Tiep tuc doc/nghe" KHONG BIA: goi `GET /api/progress/continue`, mot API
+ * THAT tra ve con tro CA NHAN da luu (xem `server/main.py`). Nguoi chua
+ * dang nhap hoac chua doc/nghe gi thi KHONG thay module nay — an gon,
+ * khong ve khung rong.
  */
 
 import Link from "next/link";
 import { useCallback } from "react";
-import { api, type Novel } from "@/lib/api";
+import { api, type ContinueItem, type Novel } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
-import { StoryCard, StoryHero } from "@/components/StoryCard";
-import { EmptyState, ErrorState, SkeletonCards } from "@/components/ui";
+import { StoryCard } from "@/components/StoryCard";
+import { EmptyState, ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
 import { IconFlame, IconTag } from "@/components/Icons";
 
-/** Mot truyen cho hero + 12 the ben duoi. */
-const HERO_COUNT = 1;
+/** So truyen lay ve cho luoi kham pha. */
 const GRID_COUNT = 12;
 
-/** So the hien o muc kham pha. Du de goi y, khong du de thanh mot bai tuong. */
+/** So the hien o muc kham pha theo the. Du de goi y, khong du de thanh mot bai tuong. */
 const MAX_TAGS = 12;
 
 interface HomeData {
   novels: Novel[];
   tags: string[];
+  reading: ContinueItem | null;
+  listening: ContinueItem | null;
+}
+
+function dinhDangGio(giay: number): string {
+  const s = Math.max(0, Math.floor(giay));
+  const gio = Math.floor(s / 3600);
+  const phut = Math.floor((s % 3600) / 60);
+  const con = s % 60;
+  const hai = (n: number) => String(n).padStart(2, "0");
+  return gio > 0 ? `${gio}:${hai(phut)}:${hai(con)}` : `${phut}:${hai(con)}`;
 }
 
 /**
- * Dai mo dau. LUON ve, ke ca khi chua co truyen nao.
+ * Mot the "Tiep tuc doc"/"Tiep tuc nghe" — dan thang toi trang doc chuong.
  *
- * Do la ca diem cua no: khi kho con trong, day la thu duy nhat noi cho nguoi
- * vao lan dau biet ho dang o dau va lam duoc gi.
+ * Thanh tien do CHI ve khi biet `duration_seconds` that (khong bia mau so
+ * 0 de ve "17:42 / 0:00" — xem ghi chu o `server/main.py::_tiep_tuc_mot_muc`).
  */
-function HomeHero({ daDangNhap }: { daDangNhap: boolean }) {
+function TheTiepTuc({ kieu, muc }: { kieu: "read" | "listen"; muc: ContinueItem }) {
+  const viTriGiay = muc.position_seconds ?? 0;
+  const phanTram =
+    kieu === "listen" && muc.duration_seconds
+      ? Math.max(0, Math.min(100, Math.round((viTriGiay / muc.duration_seconds) * 100)))
+      : null;
+
   return (
-    <section className="home-hero rise" aria-labelledby="home-hero-title">
+    <Link href={`/chapters/${muc.chapter_id}`} className="progress-card">
+      <span className="progress-card-icon" aria-hidden="true">
+        {kieu === "listen" ? "🎧" : "📖"}
+      </span>
+      <span className="progress-card-body">
+        <strong className="clamp-1">{muc.novel_title}</strong>
+        <span className="progress-card-meta">
+          Chương {muc.chapter_order_index} · {muc.chapter_title}
+          {kieu === "listen"
+            ? ` · ${dinhDangGio(viTriGiay)}${
+                muc.duration_seconds ? ` / ${dinhDangGio(muc.duration_seconds)}` : ""
+              }`
+            : ""}
+        </span>
+        {phanTram !== null ? (
+          <ProgressBar percent={phanTram} label={`Đã nghe ${phanTram}%`} />
+        ) : null}
+      </span>
+      <span className="btn btn-sm" aria-hidden="true">
+        Tiếp tục
+      </span>
+    </Link>
+  );
+}
+
+/**
+ * Dai gioi thieu GON — mot dong tieu de, khong phai mot man hinh. Nguoi
+ * dang nhap khong can nghe lai "day la gi" moi lan ve trang chu, nen tieu
+ * de rut lai con mot loi chao; loi vao nhanh cung doi tu hai nut CTA lon
+ * (khach vang lai) sang mot lien ket gon toi thu vien cua ho (da dang nhap).
+ */
+function DaiGioiThieu({ daDangNhap }: { daDangNhap: boolean }) {
+  return (
+    <section className="home-intro rise" aria-labelledby="home-intro-title">
       <span className="pill">
         <span className="pill-dot" aria-hidden="true" />
         Đọc và nghe fanfic tiếng Việt
       </span>
-
-      <h1 className="home-hero-title" id="home-hero-title">
-        Truyện của cộng đồng, <em>đọc bằng mắt hoặc bằng tai</em>
-      </h1>
-
-      <p className="lead home-hero-lead">
-        Khám phá fanfic do chính người viết xuất bản, và nghe bằng giọng đọc
-        tiếng Việt tự nhiên. Bạn cũng có thể tự viết và tự tạo audio cho truyện
-        của mình.
-      </p>
-
-      <div className="row">
-        <Link className="btn btn-primary btn-lg" href="/fanfic">
-          Khám phá truyện
-        </Link>
-        <Link className="btn btn-outline btn-lg" href="/write">
-          Viết truyện của bạn
-        </Link>
-        {/* Da dang nhap thi loi vao huu ich nhat la cho ho da nghe do dang. */}
+      <h1 className="home-intro-title" id="home-intro-title">
         {daDangNhap ? (
-          <Link className="btn btn-ghost btn-lg" href="/library">
-            Thư viện của bạn
+          "Chào mừng trở lại"
+        ) : (
+          <>
+            Truyện của cộng đồng, <em>đọc bằng mắt hoặc bằng tai</em>
+          </>
+        )}
+      </h1>
+      {daDangNhap ? (
+        <Link className="section-more" href="/library">
+          Thư viện của bạn <span aria-hidden="true">→</span>
+        </Link>
+      ) : (
+        <div className="row">
+          <Link className="btn btn-primary" href="/fanfic">
+            Khám phá truyện
           </Link>
-        ) : null}
-      </div>
+          <Link className="btn btn-outline" href="/write">
+            Viết truyện của bạn
+          </Link>
+        </div>
+      )}
     </section>
   );
 }
 
 export default function HomePage() {
   const { profile } = useSession();
+  const daDangNhap = Boolean(profile);
 
   const load = useCallback(async (): Promise<HomeData> => {
-    const [page, tags] = await Promise.all([
-      api.browseNovels({ limit: HERO_COUNT + GRID_COUNT }),
+    const [page, tags, tiepTuc] = await Promise.all([
+      api.browseNovels({ limit: GRID_COUNT }),
       api.novelTags(),
+      daDangNhap
+        ? api.getContinueProgress().catch(() => ({ reading: null, listening: null }))
+        : Promise.resolve({ reading: null, listening: null }),
     ]);
-    return { novels: page.novels, tags: tags.tags };
-  }, []);
+    return {
+      novels: page.novels,
+      tags: tags.tags,
+      reading: tiepTuc.reading,
+      listening: tiepTuc.listening,
+    };
+  }, [daDangNhap]);
 
   const { data, error, loading, reload } = useAsyncData(load);
 
   const novels = data?.novels ?? [];
-  const hero = novels[0];
-  const rest = novels.slice(HERO_COUNT);
+  const coTiepTuc = Boolean(data?.reading || data?.listening);
 
   return (
     <div className="page">
-      <HomeHero daDangNhap={Boolean(profile)} />
+      <DaiGioiThieu daDangNhap={daDangNhap} />
+
+      {/* An hoan toan khi chua co gi de tiep tuc — KHONG ve khung rong. */}
+      {coTiepTuc ? (
+        <section className="stack-2 rise rise-1" aria-labelledby="home-tiep-tuc">
+          <h2 className="section-title" id="home-tiep-tuc">
+            Tiếp tục
+          </h2>
+          <div className="bento-grid">
+            {data?.reading ? <TheTiepTuc kieu="read" muc={data.reading} /> : null}
+            {data?.listening ? <TheTiepTuc kieu="listen" muc={data.listening} /> : null}
+          </div>
+        </section>
+      ) : null}
 
       {loading ? (
         <SkeletonCards count={6} />
       ) : error ? (
         <ErrorState message={error} onRetry={reload} />
-      ) : !hero ? (
+      ) : novels.length === 0 ? (
         <EmptyState
           icon="📚"
           title="Chưa có truyện nào được xuất bản"
@@ -129,53 +200,51 @@ export default function HomePage() {
             </Link>
           }
         />
+      ) : novels.length === 1 ? (
+        // CHI mot truyen trong ca kho: mot the noi bat gioi han rong, KHONG
+        // phai mot hero choan nua trang cho mot du lieu duy nhat.
+        <section className="rise rise-2" aria-label="Truyện duy nhất hiện có">
+          <StoryCard novel={novels[0]} variant="featured" />
+        </section>
       ) : (
-        <>
-          <div className="rise rise-1">
-            <StoryHero novel={hero} />
+        <section className="stack-5 rise rise-2" aria-labelledby="home-moi">
+          <div className="section-head">
+            <h2 className="section-title section-title-icon" id="home-moi">
+              <IconFlame size={20} /> Truyện mới
+            </h2>
+            <Link href="/fanfic" className="section-more">
+              Xem tất cả <span aria-hidden="true">→</span>
+            </Link>
           </div>
-
-          {rest.length > 0 ? (
-            <section className="stack-5 rise rise-2" aria-labelledby="home-moi">
-              <div className="section-head">
-                <h2 className="section-title section-title-icon" id="home-moi">
-                  <IconFlame size={20} /> Truyện mới
-                </h2>
-                <Link href="/fanfic" className="section-more">
-                  Xem tất cả <span aria-hidden="true">→</span>
-                </Link>
-              </div>
-              <div className="story-grid">
-                {rest.map((novel) => (
-                  <StoryCard key={novel.novel_id} novel={novel} />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {data && data.tags.length > 0 ? (
-            <section className="stack-2" aria-labelledby="home-the">
-              <h2 className="section-title section-title-icon" id="home-the">
-                <IconTag size={19} /> Khám phá theo thẻ
-              </h2>
-              <p className="hint">
-                Thẻ do chính tác giả đặt khi xuất bản truyện.
-              </p>
-              <div className="story-tags">
-                {data.tags.slice(0, MAX_TAGS).map((tag) => (
-                  <Link
-                    key={tag}
-                    href={`/fanfic?tag=${encodeURIComponent(tag)}`}
-                    className="chip"
-                  >
-                    {tag}
-                  </Link>
-                ))}
-              </div>
-            </section>
-          ) : null}
-        </>
+          <div className="story-grid">
+            {novels.map((novel) => (
+              <StoryCard key={novel.novel_id} novel={novel} />
+            ))}
+          </div>
+        </section>
       )}
+
+      {data && data.tags.length > 0 ? (
+        <section className="stack-2" aria-labelledby="home-the">
+          <h2 className="section-title section-title-icon" id="home-the">
+            <IconTag size={19} /> Khám phá theo thẻ
+          </h2>
+          <p className="hint">
+            Thẻ do chính tác giả đặt khi xuất bản truyện.
+          </p>
+          <div className="story-tags">
+            {data.tags.slice(0, MAX_TAGS).map((tag) => (
+              <Link
+                key={tag}
+                href={`/fanfic?tag=${encodeURIComponent(tag)}`}
+                className="chip"
+              >
+                {tag}
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {/*
         Dat o CUOI, sau khi nguoi doc da xem truyen. Dat no o tren thi thanh ra

@@ -42,6 +42,40 @@ export interface Profile {
 }
 
 /**
+ * Một mục của `GET /api/progress/continue` — module "Tiếp tục đọc"/"Tiếp
+ * tục nghe" ở trang chủ. CON TRỎ duy nhất tới nơi đang dở dang, không phải
+ * lịch sử — xem `server/main.py` khu "TIEP TUC DOC / NGHE".
+ */
+export interface ContinueItem {
+  novel_id: string;
+  novel_title: string;
+  chapter_id: string;
+  chapter_title: string;
+  chapter_order_index: number;
+  updated_at: string;
+  /** Chỉ có ở mục "đang nghe". */
+  position_seconds?: number;
+  /** `null` khi chưa rõ độ dài (track cũ/đã xoá) — đừng vẽ "x / 0:00". */
+  duration_seconds?: number | null;
+}
+
+/**
+ * Một thành tựu (V4 visual completion, Phan G-J) — TÍNH TẠI CHỖ tự dữ liệu
+ * đã có, không phải bản ghi lưu riêng. Xem docstring `server/gamification.py`
+ * để biết vì sao (Giai đoạn 1 cố ý không có "unlocked_at").
+ */
+export interface Achievement {
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+  rarity: "common" | "rare" | "epic" | "legendary" | "mythic";
+  unlocked: boolean;
+  /** `[hiện tại, mục tiêu]` khi đo được theo một con số; `null` khi nhị phân. */
+  progress: [number, number] | null;
+}
+
+/**
  * Được phép **xuất bản công khai** hay không. Đây là moderation, KHÔNG phải uy
  * tín — xem `docs/AUTHOR_RANK.md`.
  *
@@ -411,6 +445,42 @@ export const api = {
         listened_seconds: Math.max(0, Math.round(listenedSeconds)),
       }),
     }),
+
+  /**
+   * Ghi con trỏ "đang đọc chương nào" cho module Tiếp tục đọc ở trang chủ.
+   *
+   * Khác `reportListen`: đây là TIỆN ÍCH CÁ NHÂN (bắt buộc đăng nhập), không
+   * phải uy tín công khai — xem `server/main.py` khu "TIEP TUC DOC / NGHE".
+   */
+  reportReadProgress: (novelId: string, chapterId: string) =>
+    request<{ ok: boolean }>("/api/progress/read", {
+      method: "POST",
+      body: JSON.stringify({ novel_id: novelId, chapter_id: chapterId }),
+    }),
+
+  /** Cùng vai trò với `reportReadProgress`, kèm vị trí giây để vẽ thanh tiến độ. */
+  reportListenProgress: (novelId: string, chapterId: string, positionSeconds: number) =>
+    request<{ ok: boolean }>("/api/progress/listen", {
+      method: "POST",
+      body: JSON.stringify({
+        novel_id: novelId,
+        chapter_id: chapterId,
+        position_seconds: Math.max(0, positionSeconds),
+      }),
+    }),
+
+  /** Dữ liệu cho hai module trang chủ: Tiếp tục đọc / Tiếp tục nghe. */
+  getContinueProgress: () =>
+    request<{ reading: ContinueItem | null; listening: ContinueItem | null }>(
+      "/api/progress/continue",
+    ),
+
+  /**
+   * Thành tựu CỦA CHÍNH MÌNH — tính tại chỗ từ dữ liệu đã có (xem
+   * `server/gamification.py`). Chỉ chính chủ, không dùng cho hồ sơ công khai.
+   */
+  getAchievements: () =>
+    request<{ achievements: Achievement[] }>("/api/account/achievements"),
 
   /**
    * Kết thúc phiên ở phía máy chủ.

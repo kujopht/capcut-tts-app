@@ -42,6 +42,33 @@ type KetQua =
 
 type TrangThai = "dau" | "dang-tai" | "co" | "rong" | "loi";
 
+/**
+ * Bo chon danh muc tim kiem (Phan F, V4 visual completion).
+ *
+ * MOT DANG KY — khong phai mot lan viet lai `SearchOverlay`. Them "Animation"
+ * that khi V6 co du lieu chi la them MOT dong o day roi bat `sanSang`, KHONG
+ * dung mot truy van/nhanh hien thi rieng.
+ *
+ * "audio" va "animation" hien CHUA `sanSang`: chua co duong tim kiem audio
+ * rieng o backend (tim theo chuong CO audio, khac voi tim truyen), va
+ * Animation thi chua ton tai san pham. Mot bo loc "chay" ma luon ra rong la
+ * noi doi ve tinh nang co that — nen ca hai deu bi VO HIEU o giao dien thay
+ * vi gia vo hoat dong.
+ */
+const DANH_MUC: ReadonlyArray<{
+  khoa: "tat_ca" | "truyen" | "nguoi" | "bai" | "audio" | "animation";
+  nhan: string;
+  sanSang: boolean;
+}> = [
+  { khoa: "tat_ca", nhan: "Tất cả", sanSang: true },
+  { khoa: "truyen", nhan: "Truyện", sanSang: true },
+  { khoa: "nguoi", nhan: "Người dùng", sanSang: true },
+  { khoa: "bai", nhan: "Bài đăng", sanSang: true },
+  { khoa: "audio", nhan: "Audio", sanSang: false },
+  { khoa: "animation", nhan: "Animation", sanSang: false },
+];
+type DanhMuc = (typeof DANH_MUC)[number]["khoa"];
+
 export function SearchOverlay({
   mo,
   onDong,
@@ -70,6 +97,7 @@ export function SearchOverlay({
   } | null>(null);
   const [tuLoi, setTuLoi] = useState("");
   const [chon, setChon] = useState(0);
+  const [danhMuc, setDanhMuc] = useState<DanhMuc>("tat_ca");
 
   const tu = q.trim();
   const KHONG: never[] = useMemo(() => [], []);
@@ -92,22 +120,38 @@ export function SearchOverlay({
   useEffect(() => {
     if (!mo || !tu) return;
 
+    /*
+      Chon mot danh muc CU THE thi chi hoi dung ho do — vua nhanh hon (bot
+      request thua), vua cho phep lay NHIEU ket qua hon cho danh muc dang
+      xem (khong con chia canh voi hai ho kia).
+      */
+    const canTruyen = danhMuc === "tat_ca" || danhMuc === "truyen";
+    const canNguoi = danhMuc === "tat_ca" || danhMuc === "nguoi";
+    const canBai = danhMuc === "tat_ca" || danhMuc === "bai";
+    const gioiHan = danhMuc === "tat_ca" ? 5 : 20;
+
     const bo = new AbortController();
     const hen = window.setTimeout(async () => {
       try {
         /*
-          Hai truy van SONG SONG. Tuan tu thi nguoi dung cho tong thoi gian cua
-          ca hai, va muc thu hai luon toi muon han mot nhip.
+          Ba truy van SONG SONG. Tuan tu thi nguoi dung cho tong thoi gian cua
+          ca ba, va muc cuoi luon toi muon han mot nhip.
         */
         /*
-          Bai dang la muc PHU: chi BA ket qua, va loi cua rieng no khong duoc
-          keo sap ca hop tim — truyen va nguoi van la ly do nguoi ta mo hop nay.
-          `catch` tra ve rong thay vi de `Promise.all` tu choi tat ca.
+          Bai dang la muc PHU khi xem "Tất cả": loi cua rieng no khong duoc
+          keo sap ca hop tim — truyen va nguoi van la ly do nguoi ta mo hop
+          nay. `catch` tra ve rong thay vi de `Promise.all` tu choi tat ca.
         */
         const [a, b, c] = await Promise.all([
-          api.browseNovels({ query: tu, limit: 5 }),
-          api.searchPeople(tu, "users", 5),
-          social.searchPosts(tu, 3).catch(() => ({ items: [], total: 0 })),
+          canTruyen
+            ? api.browseNovels({ query: tu, limit: gioiHan })
+            : Promise.resolve({ novels: [] }),
+          canNguoi
+            ? api.searchPeople(tu, "users", gioiHan)
+            : Promise.resolve({ people: [] }),
+          canBai
+            ? social.searchPosts(tu, gioiHan).catch(() => ({ items: [], total: 0 }))
+            : Promise.resolve({ items: [], total: 0 }),
         ]);
         if (bo.signal.aborted) return;
         setKetQua({ tu, truyen: a.novels, nguoi: b.people, bai: c.items });
@@ -121,7 +165,7 @@ export function SearchOverlay({
       bo.abort();
       window.clearTimeout(hen);
     };
-  }, [tu, mo]);
+  }, [tu, mo, danhMuc]);
 
   /* -- ban phim --------------------------------------------------------- */
 
@@ -188,6 +232,21 @@ export function SearchOverlay({
       <div className="tim-hop kinh">
         <div className="tim-dau">
           <IconBook size={18} />
+          {/* Bo chon danh muc (Phan F) — kien truc mo rong duoc, xem
+              `DANH_MUC` o dau tep. "Audio"/"Animation" hien vo hieu. */}
+          <select
+            className="select select-mini"
+            aria-label="Tìm trong danh mục"
+            value={danhMuc}
+            onChange={(e) => setDanhMuc(e.target.value as DanhMuc)}
+          >
+            {DANH_MUC.map((m) => (
+              <option key={m.khoa} value={m.khoa} disabled={!m.sanSang}>
+                {m.nhan}
+                {m.sanSang ? "" : " (sắp có)"}
+              </option>
+            ))}
+          </select>
           <input
             ref={oNhap}
             className="tim-o"

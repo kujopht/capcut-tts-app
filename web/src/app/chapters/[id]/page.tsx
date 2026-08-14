@@ -11,6 +11,7 @@ import { useAudioEngine } from "@/components/AudioEngine";
 import { ChapterPlayer } from "@/components/ChapterPlayer";
 import { MiniPlayer } from "@/components/MiniPlayer";
 import { ListenReporter } from "@/components/ListenReporter";
+import { ContinueListenReporter } from "@/components/ContinueListenReporter";
 import { ChapterComments } from "@/components/ChapterComments";
 import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
 import { IconBook } from "@/components/Icons";
@@ -47,6 +48,18 @@ export default function ChapterPage({
     if (audioTrangThai.chapterId === chapter.chapter_id) return;
     audioDieuKhien.phat(chapter.chapter_id, chapter.title);
   }, [audio, chapter, audioTrangThai.chapterId, audioDieuKhien]);
+
+  /*
+    Ghi con tro "Tiếp tục đọc" (Phần B, V4 visual completion) — MỘT LẦN khi mở
+    trang, không phải mỗi lần cuộn. Chỉ khi đã đăng nhập: route yêu cầu token,
+    và khách vãng lai không có "trang chủ của họ" để quay lại. Lỗi mạng ở đây
+    KHÔNG được làm hỏng việc đọc — chỉ là tiện ích, không phải nội dung chính.
+  */
+  useEffect(() => {
+    if (!profile || !chapter) return;
+    api.reportReadProgress(chapter.novel_id, chapter.chapter_id).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.user_id, chapter?.chapter_id]);
 
   if (loading) {
     return (
@@ -148,6 +161,14 @@ export default function ChapterPage({
           {/* Dem thoi gian nghe THAT va bao len may chu de tinh uy tin cho tac
               gia. Khong ve gi ca — xem `components/ListenReporter.tsx`. */}
           <ListenReporter chapterId={chapter.chapter_id} />
+          {/* Con tro "Tiep tuc nghe" — chi ghi khi da dang nhap, khop dieu
+              kien cua `/api/progress/listen`. */}
+          {profile ? (
+            <ContinueListenReporter
+              novelId={chapter.novel_id}
+              chapterId={chapter.chapter_id}
+            />
+          ) : null}
 
           {/*
             Binh luan chuong — TRONG provider de composer co nut "Bình luận

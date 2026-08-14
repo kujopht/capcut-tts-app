@@ -217,6 +217,21 @@ class Profile:
     #: url ky (het han) duoc tinh luc tra ve, tu khoa nay — xem `_ho_so_tra_ve`
     #: va `CreatorService._public_bundle`.
     avatar_key: str = ""
+    #: "Tiep tuc doc/nghe" (V4 visual completion) — CON TRO DUY NHAT toi noi
+    #: dang do dang, khong phai lich su. Moi lan ghi de lan truoc: y muon la
+    #: "quay lai cho gan nhat", khong phai danh sach moi truyen dang do dang.
+    #: Rong = chua co gi de tiep tuc — giao dien AN module, khong bia du lieu.
+    last_read_novel_id: str = ""
+    last_read_chapter_id: str = ""
+    last_read_at: str = ""
+    last_listen_novel_id: str = ""
+    last_listen_chapter_id: str = ""
+    #: Giay, TU CLIENT gui len — chi de hien thi vi tri tren thanh tien do, KHONG
+    #: dung lam can cu tinh uy tin (xem `creator.evaluate_listen`, doc do lay tu
+    #: track o may chu). Sai lech vai giay o day chi lam gach tien do hoi le,
+    #: khong anh huong gi khac.
+    last_listen_position_seconds: float = 0.0
+    last_listen_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -237,6 +252,13 @@ class Profile:
             "bio": self.bio,
             "author_status": self.author_status.value,
             "avatar_key": self.avatar_key,
+            "last_read_novel_id": self.last_read_novel_id or None,
+            "last_read_chapter_id": self.last_read_chapter_id or None,
+            "last_read_at": self.last_read_at or None,
+            "last_listen_novel_id": self.last_listen_novel_id or None,
+            "last_listen_chapter_id": self.last_listen_chapter_id or None,
+            "last_listen_position_seconds": self.last_listen_position_seconds,
+            "last_listen_at": self.last_listen_at or None,
         }
 
 

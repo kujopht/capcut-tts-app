@@ -38,6 +38,10 @@ export const HO_ENDPOINT = [
   "notifications",
   "novels",
   "posts",
+  // V4 visual completion, Phan B — con tro CA NHAN "tiep tuc doc/nghe". Ho
+  // RIENG voi `listens` co y: `listens` la UY TIN CONG KHAI cua tac gia,
+  // con day la tien ich rieng tu, khac hoan toan quy tac va doi tuong doc.
+  "progress",
   "reports",
   "search",
   // V5 — Novel Translation Studio. Ho RIENG: subsystem khong dung chung bang

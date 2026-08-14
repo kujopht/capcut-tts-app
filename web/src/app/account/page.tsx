@@ -21,6 +21,7 @@ import {
 } from "@/components/Icons";
 import { CreatorSection } from "@/components/CreatorSection";
 import { AccountSocial } from "@/components/AccountSocial";
+import { AchievementGrid } from "@/components/AchievementGrid";
 import { Avatar } from "@/components/Avatar";
 
 const TIER_LABEL: Record<string, string> = {
@@ -202,6 +203,8 @@ export default function AccountPage() {
       */}
       <AccountSocial />
 
+      <AchievementGrid />
+
       <CreatorSection />
 
       <section className="stack" aria-labelledby="acc-loi-tat">
@@ -233,7 +236,9 @@ export default function AccountPage() {
         </div>
       </section>
 
-      <section className="card stack">
+      {/* V4 visual completion, Phan C: `surface-secondary` thay `card` — mot
+          cau + mot nut khong can toan bo be day kinh cua `.page > .card`. */}
+      <section className="surface-secondary stack card-tight">
         <h2 className="section-title">Phiên đăng nhập</h2>
         <p className="hint">
           Đăng xuất sẽ xoá phiên khỏi trình duyệt này. Dữ liệu của bạn vẫn giữ

@@ -173,8 +173,10 @@ test("hoa van goc CHI len be mat lon, khong len tung the nho", () => {
     the dang nhap, panel chinh cua Studio va Write.
   */
   const text = css();
-  const at = text.indexOf(".home-hero::after");
-  assert.notEqual(at, -1, "thiếu hoa văn góc trên hero trang chủ");
+  // V4 visual completion: `.home-hero` (hero cao nua trang) bi loai bo, thay
+  // bang `.story-card-featured` — be mat "lon" duy nhat con lai o trang chu.
+  const at = text.indexOf(".story-card-featured::after");
+  assert.notEqual(at, -1, "thiếu hoa văn góc trên thẻ nổi bật trang chủ");
   const dau = text.lastIndexOf("\n", at);
   // `codeOnly` TRUOC khi tach: chu thich giai thich tung be mat co chua dau
   // phay, va tach truoc thi moi cau chu thich thanh mot "selector".
@@ -211,7 +213,7 @@ test("hoa van khong lam TANG do mo cua kinh", () => {
 
 test("hoa van KHONG chan chuot va KHONG chuyen dong", () => {
   const text = css();
-  const at = text.indexOf(".home-hero::after");
+  const at = text.indexOf(".story-card-featured::after");
   const than = text.slice(text.indexOf("{", at), text.indexOf("}", at));
   assert.match(than, /pointer-events: none/, "hoa văn chặn được cú bấm");
   assert.ok(!/animation|transition/.test(than), "hoa văn góc có chuyển động");

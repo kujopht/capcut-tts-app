@@ -77,7 +77,7 @@ from server.translation import (
 from server.translation_import import extract_text as _trich_van_ban_tep
 from server.translation_providers import build_provider
 from server.translation_service import TranslationService
-from server.translation_store import MockTranslationStore
+from server.translation_store import build_translation_store
 
 app = FastAPI(
     title="Fanfic Audio Studio API",
@@ -120,17 +120,26 @@ social = SocialService(identity, store, storage,
 creators.on_decision = social.notify_author_decision
 
 #: Tang dich vu Novel Translation Studio (V5) — subsystem RIENG, khong dung
-#: chung bang voi tts_jobs/novels. Kho hien tai la MOCK (trong bo nho) — chua
-#: co ban Appwrite, xem bao cao V5 "known limitations". Provider chon theo
-#: `settings` that: co du TRANSLATION_BASE_URL/API_KEY/MODEL trong `.env` thi
-#: ra `DocuTranslateProvider` (goi that), thieu thi ra mock — moi truong chua
-#: co key LLM van chay duoc, chi khong dich that. TRUOC DAY goi
-#: `TranslationService(translation_store, store)` KHONG truyen `settings`,
-#: nen du `.env` co dien key that cung khong bao gio duoc dung (luon ngam
-#: dinh `build_provider(None)` ben trong service) — da vá.
-translation_store = MockTranslationStore()
+#: chung bang voi tts_jobs/novels. Kho chon theo `DATA_BACKEND` qua
+#: `build_translation_store` (Part L) — CUNG mau voi `build_metadata_store`
+#: (TTS): `appwrite` ma thieu cau hinh thi NEM LOI ngay luc khoi dong, KHONG
+#: bao gio am tham lui ve bo nho (moi truong tin du lieu dich duoc luu se
+#: mat sach moi lan restart neu khong co rao chan nay).
+#:
+#: Provider chon theo `settings` that: co du TRANSLATION_BASE_URL/API_KEY/
+#: MODEL trong `.env` thi ra `DocuTranslateProvider` (goi that), thieu thi ra
+#: mock — moi truong chua co key LLM van chay duoc, chi khong dich that.
+#: TRUOC DAY goi `TranslationService(translation_store, store)` KHONG truyen
+#: `settings`, nen du `.env` co dien key that cung khong bao gio duoc dung
+#: (luon ngam dinh `build_provider(None)` ben trong service) — da vá.
+#:
+#: `inline_worker=settings.translation_inline_worker`: tien trinh web nay co
+#: tu chay job dich trong thread nen hay khong — TACH RIENG voi
+#: `FAS_INLINE_WORKER` cua TTS (xem `Settings.translation_inline_worker`).
+translation_store = build_translation_store(settings)
 translation_svc = TranslationService(
-    translation_store, store, provider=build_provider(settings))
+    translation_store, store, provider=build_provider(settings),
+    inline_worker=settings.translation_inline_worker)
 
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
@@ -1837,6 +1846,37 @@ def stop_job_sweeper() -> None:
     _sweeper_stop.set()
 
 
+#: Bo quet job DICH — hoan toan tach voi bo quet TTS o tren (event/thread
+#: rieng), dung y voi "subsystem doc lap" da giu xuyen suot V5.
+_translation_sweeper_stop = threading.Event()
+
+
+def _translation_sweep_forever() -> None:
+    while True:
+        try:
+            translation_svc.recover_stale_jobs()
+        except Exception:
+            pass
+        if _translation_sweeper_stop.wait(JOB_SWEEP_SECONDS):
+            return
+
+
+@app.on_event("startup")
+def start_translation_job_sweeper() -> None:
+    """Cung ly do voi `start_job_sweeper` (TTS) nhung cho job dich — tat khi
+    `translation_inline_worker` tat, vi luc do `server/translation_worker.py`
+    (tien trinh rieng) chiu trach nhiem quet."""
+    if not settings.translation_inline_worker:
+        return
+    threading.Thread(target=_translation_sweep_forever, daemon=True,
+                     name="translation-job-sweeper").start()
+
+
+@app.on_event("shutdown")
+def stop_translation_job_sweeper() -> None:
+    _translation_sweeper_stop.set()
+
+
 @app.post("/api/jobs", status_code=status.HTTP_201_CREATED)
 def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     """
@@ -3142,6 +3182,20 @@ def cancel_translation_job(
     job_id: str, profile: Profile = Depends(current_profile),
 ) -> Dict[str, Any]:
     job = _dich_vu(translation_svc.cancel_job, job_id, profile.user_id)
+    return {"job": job.to_dict()}
+
+
+@app.post("/api/translate/jobs/{job_id}/retry")
+def retry_translation_job(
+    job_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Thu lai mot job `failed`. Vi tien do da luu o cap CHUONG, day cung chinh
+    la co che "thu lai chuong da that bai / tiep tuc truyen bi ngat quang" —
+    xem `TranslationService.retry_job`. 400 neu job chua `failed` (dang chay
+    hoac da xong — khong co gi de thu lai).
+    """
+    job = _dich_vu(translation_svc.retry_job, job_id, profile.user_id)
     return {"job": job.to_dict()}
 
 

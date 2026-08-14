@@ -9,6 +9,7 @@ chung bang voi `tts_jobs`/`Novel`/`Chapter`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from server.translation import (
@@ -90,6 +91,13 @@ class TranslationJob:
     So voi `TtsJob`: them `current_step`/`current_chapter`/`total_chapters` vi
     nguoi dung can biet DANG O BUOC NAO (Phase 12 UI: "Đang biên tập...",
     khong chi mot % chung chung).
+
+    Phan claim/lease (`attempts`/`lease_owner`/`lease_expires_at`) CUNG KHUON
+    voi `TtsJob` (`server/domain.py`) — mot worker rieng
+    (`server/translation_worker.py`) co the nhan/gia han/nha job nay bang
+    dung logic CAS da chung minh o pipeline audio, tren BANG RIENG
+    (`translation_jobs`/`translation_job_claims`), khong dung chung voi
+    `tts_jobs`/`job_claims`.
     """
 
     project_id: str
@@ -100,7 +108,20 @@ class TranslationJob:
     #: Doan da xu ly / tong so doan CUA CHUONG DANG CHAY — tien do min hon.
     current_chapter_done_segments: int = 0
     current_chapter_total_segments: int = 0
-    retry_count: int = 0
+    #: Vai tro provider dang chay NGAY LUC NAY trong chuong hien tai
+    #: ("translator"/"editor"/"qa"), rong khi job chua chay/da ket thuc. Chi
+    #: la thong tin hien thi (UI: "Đang biên tập văn học...") — KHONG dung de
+    #: re nhanh logic, `status` moi la nguon that cho may trang thai.
+    current_pass: str = ""
+    #: Fencing token — TANG MOI LAN mot worker claim job nay THANH CONG.
+    #: Truoc day ten la `retry_count` nhung KHONG bao gio duoc dung (khong
+    #: worker nao, khong claim nao) — doi ten cho dung vai tro that: day la
+    #: token CAS, cung khuon voi `TtsJob.attempts`.
+    attempts: int = 0
+    #: Ai dang giu job nay — rong khi khong ai giu (queued/da ket thuc).
+    lease_owner: str = ""
+    #: Lease het han luc nao (ISO 8601). Rong = khong co lease.
+    lease_expires_at: str = ""
     #: Da lam sach (khong lo chi tiet noi bo/stack trace) — xem
     #: `TranslationService._loi_an_toan`.
     error: str = ""
@@ -124,6 +145,25 @@ class TranslationJob:
                 / self.current_chapter_total_segments) * moi_chuong
         return min(100, int(da_xong + trong_chuong_nay))
 
+    def lease_is_live(self, now: Optional[datetime] = None) -> bool:
+        """
+        Con worker nao dang thuc su giu job nay hay khong.
+
+        Cung logic voi `TtsJob.lease_is_live` — khong co lease thi coi la
+        KHONG con song (job cu truoc khi co lease, hoac da nha lease khi
+        xong, deu roi vao day dung y muon).
+        """
+        if not self.lease_expires_at:
+            return False
+        moment = now or datetime.now(timezone.utc)
+        try:
+            expires = datetime.fromisoformat(self.lease_expires_at)
+        except ValueError:
+            return False
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        return expires > moment
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "job_id": self.job_id,
@@ -131,9 +171,11 @@ class TranslationJob:
             "status": self.status.value,
             "current_chapter": self.current_chapter,
             "total_chapters": self.total_chapters,
+            "current_pass": self.current_pass or None,
             "progress": self.progress_percent(),
-            "retry_count": self.retry_count,
+            "attempts": self.attempts,
             "error": self.error or None,
+            "last_error": self.error or None,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "finished_at": self.finished_at or None,

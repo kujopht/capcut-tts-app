@@ -21,13 +21,16 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import replace
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 
 from server.adapters import NotFoundError, PermissionDenied
 from server.config import AppwriteSettings
+from server.domain import now_iso
 from server.translation import (
+    TERMINAL_STATUSES,
     GenrePreset,
     GlossaryCategory,
     NamingMode,
@@ -40,6 +43,10 @@ from server.translation import GlossaryEntry
 COL_PROJECTS = "translation_projects"
 COL_JOBS = "translation_jobs"
 COL_GLOSSARY = "translation_glossary"
+#: Khoa cua viec nhan job dich — cung vai tro voi `job_claims` cua TTS: MOT
+#: hang cho MOI lan thu cua MOI job, id tat dinh `{job_id}-{attempt}`. Chi
+#: ton tai vi tinh DUY NHAT cua rowId ma Appwrite cuong che.
+COL_JOB_CLAIMS = "translation_job_claims"
 
 #: Ten thuoc tinh THAT SU muon luu cho tung collection — cung vai tro voi
 #: `PERSISTED_FIELDS` o `appwrite_store.py`, nhung tach rieng: doi schema ben
@@ -55,7 +62,8 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_JOBS: (
         "job_id", "project_id", "owner_id", "status", "current_chapter",
         "total_chapters", "current_chapter_done_segments",
-        "current_chapter_total_segments", "retry_count", "error",
+        "current_chapter_total_segments", "current_pass", "attempts",
+        "lease_owner", "lease_expires_at", "error",
         "created_at", "updated_at", "finished_at",
     ),
     COL_GLOSSARY: (
@@ -66,6 +74,9 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
 
 REQUEST_TIMEOUT = 30.0
 PAGE_SIZE = 100
+#: Xem `TRANSACTION_TTL_SECONDS` o `appwrite_store.py` — cung gia tri, tach
+#: hang so rieng vi module nay HOAN TOAN doc lap.
+TRANSACTION_TTL_SECONDS = 60
 
 
 def q_equal(attribute: str, *values: Any) -> str:
@@ -153,7 +164,10 @@ def _job_to_row(j: TranslationJob) -> Dict[str, Any]:
         "total_chapters": j.total_chapters,
         "current_chapter_done_segments": j.current_chapter_done_segments,
         "current_chapter_total_segments": j.current_chapter_total_segments,
-        "retry_count": j.retry_count,
+        "current_pass": j.current_pass,
+        "attempts": j.attempts,
+        "lease_owner": j.lease_owner,
+        "lease_expires_at": j.lease_expires_at,
         "error": j.error,
         "created_at": j.created_at,
         "updated_at": j.updated_at,
@@ -177,7 +191,10 @@ def _job_from_row(row: Dict[str, Any]) -> TranslationJob:
             row.get("current_chapter_done_segments") or 0),
         current_chapter_total_segments=int(
             row.get("current_chapter_total_segments") or 0),
-        retry_count=int(row.get("retry_count") or 0),
+        current_pass=str(row.get("current_pass") or ""),
+        attempts=int(row.get("attempts") or 0),
+        lease_owner=str(row.get("lease_owner") or ""),
+        lease_expires_at=str(row.get("lease_expires_at") or ""),
         error=str(row.get("error") or ""),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
@@ -402,9 +419,7 @@ class AppwriteTranslationStore:
         rows = self._list_all(COL_JOBS, [q_equal("project_id", project_id)])
         for row in rows:
             j = _job_from_row(row)
-            if j.status not in (TranslationJobStatus.COMPLETED,
-                                TranslationJobStatus.FAILED,
-                                TranslationJobStatus.CANCELLED):
+            if j.status not in TERMINAL_STATUSES:
                 return j
         return None
 
@@ -412,6 +427,142 @@ class AppwriteTranslationStore:
         rows = self._list_all(COL_JOBS, [
             q_equal("project_id", project_id), q_order_desc("created_at")])
         return [_job_from_row(r) for r in rows]
+
+    def list_jobs_by_status(self, status: TranslationJobStatus) -> List[TranslationJob]:
+        rows = self._list_all(COL_JOBS, [
+            q_equal("status", status.value), q_order_asc("created_at")])
+        return [_job_from_row(r) for r in rows]
+
+    # ======================================================== claim/lease
+    #
+    # CUNG CO CHE voi `AppwriteMetadataStore` (TTS, `server/appwrite_store.py`)
+    # — Transactions API that su (`/v1/tablesdb/transactions`), KHONG doc-
+    # roi-ghi-lai. Claim gom HAI thao tac trong CUNG mot transaction: tao hang
+    # khoa co id tat dinh `{job_id}-{attempt}` (tinh duy nhat do database
+    # cuong che) + cap nhat job row (status/attempts/lease). Worker thua co
+    # commit HONG HAN, khong ghi duoc gi ca.
+    #
+    # KHONG co gia lap REST cho Transactions API trong bo test (xem
+    # `test_translation_contract.py`) — cung ly do voi TTS: co che nay da
+    # duoc xac minh THAT tren Appwrite Cloud (xem docstring
+    # `AppwriteMetadataStore.claim_job`), va mot ban gia lap tu viet cho rieng
+    # transaction sẽ chi kiem chung LOGIC CUA CHINH MINH, khong kiem chung
+    # duoc hanh vi that cua Appwrite. Test tu dong cho claim/lease/fencing
+    # chay tren `MockTranslationStore` (`test_translation_worker.py`) — noi
+    # do CHINH LA logic CAS duoc kiem, khong phai lop REST.
+
+    def claim_job(self, job: TranslationJob, worker_id: str,
+                 lease_expires_at: str) -> Optional[int]:
+        current = self.get_job(job.job_id)
+        if current.status in TERMINAL_STATUSES:
+            return None
+        if current.lease_is_live():
+            return None
+
+        fence = (current.attempts or 0) + 1
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+        except Exception:
+            return None
+        tx_id = tx.get("$id")
+        if not tx_id:
+            return None
+
+        operations = [
+            {"action": "create", "databaseId": self._db,
+             "tableId": COL_JOB_CLAIMS, "rowId": f"{job.job_id}-{fence}",
+             "data": {"job_id": job.job_id, "attempt": fence,
+                      "worker_id": worker_id, "created_at": now_iso()}},
+            {"action": "update", "databaseId": self._db, "tableId": COL_JOBS,
+             "rowId": job.job_id,
+             "data": {"status": TranslationJobStatus.ANALYZING.value,
+                      "attempts": fence, "lease_owner": worker_id,
+                      "lease_expires_at": lease_expires_at}},
+        ]
+        try:
+            self._call("POST", f"/v1/tablesdb/transactions/{tx_id}/operations",
+                       payload={"operations": operations})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx_id}",
+                                payload={"commit": True})
+        except Exception:
+            return None
+        return fence if result.get("status") == "committed" else None
+
+    def renew_lease(self, job_id: str, fence: int, worker_id: str,
+                    lease_expires_at: str) -> bool:
+        try:
+            current = self.get_job(job_id)
+        except NotFoundError:
+            return False
+        if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+            return False
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+            self._call("POST", f"/v1/tablesdb/transactions/{tx['$id']}/operations",
+                       payload={"operations": [{
+                           "action": "update", "databaseId": self._db,
+                           "tableId": COL_JOBS, "rowId": job_id,
+                           "data": {"lease_expires_at": lease_expires_at,
+                                    "lease_owner": worker_id}}]})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx['$id']}",
+                                payload={"commit": True})
+        except Exception:
+            return False
+        return result.get("status") == "committed"
+
+    def save_progress(self, job_id: str, fence: int, worker_id: str,
+                      **truong: Any) -> bool:
+        """Ghi nhanh mot vai truong tien do — xem `MockTranslationStore.save_progress`."""
+        try:
+            current = self.get_job(job_id)
+        except NotFoundError:
+            return False
+        if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+            return False
+        data = {k: v for k, v in truong.items()
+               if k in _PERSISTED_FIELDS[COL_JOBS]}
+        if not data:
+            return True
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+            self._call("POST", f"/v1/tablesdb/transactions/{tx['$id']}/operations",
+                       payload={"operations": [{
+                           "action": "update", "databaseId": self._db,
+                           "tableId": COL_JOBS, "rowId": job_id,
+                           "data": data}]})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx['$id']}",
+                                payload={"commit": True})
+        except Exception:
+            # Mang chap chon: mat mot lan ghi tien do la vo hai, lan sau se
+            # ghi con so moi hon.
+            return False
+        return result.get("status") == "committed"
+
+    def save_job_fenced(self, job: TranslationJob, fence: int,
+                        worker_id: str) -> bool:
+        try:
+            current = self.get_job(job.job_id)
+        except NotFoundError:
+            return False
+        if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+            return False
+        data = self._writable(COL_JOBS, _job_to_row(replace(job, attempts=fence)))
+        try:
+            tx = self._call("POST", "/v1/tablesdb/transactions",
+                            payload={"ttl": TRANSACTION_TTL_SECONDS})
+            self._call("POST", f"/v1/tablesdb/transactions/{tx['$id']}/operations",
+                       payload={"operations": [{
+                           "action": "update", "databaseId": self._db,
+                           "tableId": COL_JOBS, "rowId": job.job_id,
+                           "data": data}]})
+            result = self._call("PATCH", f"/v1/tablesdb/transactions/{tx['$id']}",
+                                payload={"commit": True})
+        except Exception:
+            return False
+        return result.get("status") == "committed"
 
     # ======================================================== glossary
 

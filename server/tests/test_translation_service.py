@@ -5,6 +5,8 @@ Tang dich vu — `server/translation_service.py`. Chay tren kho MOCK va
 
 from __future__ import annotations
 
+import threading
+import time
 import unittest
 
 from server.adapters import (
@@ -13,8 +15,16 @@ from server.adapters import (
     NotFoundError,
     PermissionDenied,
 )
-from server.translation import QuotaExceeded, TranslationError, TranslationJobStatus
-from server.translation_providers import MockTranslationProvider
+from server.translation import (
+    TERMINAL_STATUSES,
+    QuotaExceeded,
+    TranslationError,
+    TranslationJobStatus,
+)
+from server.translation_providers import (
+    MockTranslationProvider,
+    TranslationProviderError,
+)
 from server.translation_service import (
     MAX_CHAPTERS_PER_PROJECT,
     MAX_CHARS_PER_PROJECT,
@@ -28,6 +38,25 @@ VB_HAI_CHUONG = (
 )
 
 
+def cho_job_xong(svc, job_id, owner_id, timeout=5.0):
+    """
+    Cho job chay xong (`create_job`/`retry_job` TRA VE NGAY, khong con chay
+    dong bo trong request — xem Part K). Voi `MockTranslationProvider` (khong
+    do tre mang), thread nen thuong xong trong vai mili-giay; deadline 5s chi
+    de bat that su treo (bug), khong phai do tre binh thuong.
+
+    Dung y voi idiom cua `test_worker_split.py` (TTS): poll trang thai qua
+    chinh giao dien cong khai, KHONG cham vao noi bo thread.
+    """
+    han = time.time() + timeout
+    while time.time() < han:
+        job = svc.get_job(job_id, owner_id)
+        if job.status in TERMINAL_STATUSES:
+            return job
+        time.sleep(0.005)
+    raise AssertionError(f"job {job_id} không xong sau {timeout}s")
+
+
 class Nen(unittest.TestCase):
     def setUp(self) -> None:
         self.identity = MockIdentityAdapter()
@@ -36,6 +65,10 @@ class Nen(unittest.TestCase):
         self.svc = TranslationService(self.store, self.novels)
         self.an = self.identity.register("an@vidu.vn", "MatKhau123", "An")
         self.binh = self.identity.register("binh@vidu.vn", "MatKhau123", "Bình")
+
+    def _cho_xong(self, job_id, owner_id=None, timeout=5.0):
+        return cho_job_xong(self.svc, job_id, owner_id or self.an.user_id,
+                            timeout=timeout)
 
 
 class TaoDuAnTest(Nen):
@@ -77,8 +110,25 @@ class JobTest(Nen):
         self.p = self.svc.create_project(self.an.user_id, title="Đấu Phá",
                                          source_text=VB_HAI_CHUONG)
 
+    def test_tao_job_tra_ve_NGAY_o_trang_thai_queued(self):
+        """
+        Part K: `POST .../jobs` KHONG duoc chay ca chuong trong request —
+        `create_job()` phai tra ve object o dung trang thai `queued` MA NO
+        duoc tao ra (`_start_job_thread` chi doc bien `vua_tao` da chup SAN,
+        khong doi cho thread chay). `stop_accepting_new_jobs()` o day chi la
+        cach kiem CHAC CHAN khong co race voi thread nen cuc nhanh cua mock —
+        gia tri tra ve khong phu thuoc gi vao co cho thread chay hay khong,
+        nen day la mot phep kiem dung dan bat ke co bat worker hay khong.
+        """
+        self.svc.stop_accepting_new_jobs()
+        job = self.svc.create_job(self.p.project_id, self.an.user_id)
+        self.assertEqual(job.status, TranslationJobStatus.QUEUED)
+        self.assertFalse(job.finished_at)
+        self.assertEqual(job.total_chapters, 2)
+
     def test_tao_job_chay_toi_completed_voi_mock(self):
         job = self.svc.create_job(self.p.project_id, self.an.user_id)
+        job = self._cho_xong(job.job_id)
         self.assertEqual(job.status, TranslationJobStatus.COMPLETED)
         self.assertEqual(job.total_chapters, 2)
         self.assertEqual(job.progress_percent(), 100)
@@ -92,7 +142,8 @@ class JobTest(Nen):
         O day chi kiem: ket qua CO di qua provider that (danh dau [MOCK-VI]),
         khong phai van ban Trung nguyen ven khong xu ly gi.
         """
-        self.svc.create_job(self.p.project_id, self.an.user_id)
+        job = self.svc.create_job(self.p.project_id, self.an.user_id)
+        self._cho_xong(job.job_id)
         p = self.svc.get_project(self.p.project_id, self.an.user_id)
         self.assertEqual(len(p.translated_chapters), 2)
         self.assertTrue(p.translated_chapters[0].startswith("[MOCK-VI]"))
@@ -101,39 +152,33 @@ class JobTest(Nen):
 
     def test_goi_lai_khi_dang_hoat_dong_tra_ve_CUNG_job(self):
         """
-        IDEMPOTENT — mo phong F5: goi `create_job` lan hai KHONG duoc tao
-        job thu hai. Voi mock (chay xong ngay) can kiem tra o muc service
-        thap hon: goi active_job_for_project TRUOC khi job ket thuc.
+        IDEMPOTENT — mo phong F5: goi `create_job` lan hai trong khi job dau
+        VAN CON hoat dong (chua ket thuc) KHONG duoc tao job thu hai.
+
+        `stop_accepting_new_jobs()` giu job o `queued` MAI MAI (khong thread
+        nao nhan) — deterministic, khong phai dua vao thoi diem may man truoc
+        khi thread nen (rat nhanh voi mock) kip chay xong.
         """
-        from unittest.mock import patch
-
-        goc = self.svc._chay_toi_khi_xong
-        job_dau = []
-
-        def cham(job, project):
-            job_dau.append(job.job_id)
-            return goc(job, project)
-
-        with patch.object(self.svc, "_chay_toi_khi_xong", side_effect=cham):
-            j1 = self.svc.create_job(self.p.project_id, self.an.user_id)
-        # Gia lap: job van "active" (chua ket thuc), goi lai phai tra CUNG id.
-        self.store._jobs[j1.job_id].status = TranslationJobStatus.TRANSLATING
+        self.svc.stop_accepting_new_jobs()
+        j1 = self.svc.create_job(self.p.project_id, self.an.user_id)
+        self.assertEqual(j1.status, TranslationJobStatus.QUEUED)
         j2 = self.svc.create_job(self.p.project_id, self.an.user_id)
         self.assertEqual(j1.job_id, j2.job_id)
-        self.assertEqual(len(job_dau), 1)
+        self.assertEqual(
+            len(self.store.jobs_for_project(self.p.project_id)), 1)
 
     def test_khong_so_huu_khong_tao_duoc_job(self):
         with self.assertRaises(PermissionDenied):
             self.svc.create_job(self.p.project_id, self.binh.user_id)
 
     def test_qua_tran_job_dong_thoi_bi_chan(self):
-        # Tao MAX du an rieng, moi cai giu mot job "dang chay" gia lap bang
-        # cach thao tung status ve TRANSLATING sau khi mock da chay xong.
+        # `stop_accepting_new_jobs()`: moi job tao ra deu nam nguyen o
+        # `queued` — deterministic, khong dua vao viec "chua kip chay xong".
+        self.svc.stop_accepting_new_jobs()
         for i in range(MAX_CONCURRENT_JOBS_PER_USER):
             p = self.svc.create_project(self.an.user_id, title=f"p{i}",
                                         source_text="một đoạn.")
-            j = self.svc.create_job(p.project_id, self.an.user_id)
-            self.store._jobs[j.job_id].status = TranslationJobStatus.TRANSLATING
+            self.svc.create_job(p.project_id, self.an.user_id)
         p_moi = self.svc.create_project(self.an.user_id, title="thêm",
                                         source_text="một đoạn khác.")
         with self.assertRaises(QuotaExceeded):
@@ -141,6 +186,8 @@ class JobTest(Nen):
 
     def test_huy_job_da_xong_khong_loi_idempotent(self):
         job = self.svc.create_job(self.p.project_id, self.an.user_id)
+        job = self._cho_xong(job.job_id)
+        self.assertEqual(job.status, TranslationJobStatus.COMPLETED)
         ra = self.svc.cancel_job(job.job_id, self.an.user_id)
         self.assertEqual(ra.status, TranslationJobStatus.COMPLETED)  # khong doi
 
@@ -181,7 +228,8 @@ class BaPassTest(unittest.TestCase):
         p = self.svc.create_project(
             self.an.user_id, title="x", source_text="một câu duy nhất.",
             quality_mode=quality_mode)
-        self.svc.create_job(p.project_id, self.an.user_id)
+        job = self.svc.create_job(p.project_id, self.an.user_id)
+        cho_job_xong(self.svc, job.job_id, self.an.user_id)
         return list(self.provider.lich_su_vai_tro)
 
     def test_nhanh_chi_dich_mot_luot(self):
@@ -193,6 +241,136 @@ class BaPassTest(unittest.TestCase):
     def test_van_hoc_du_ba_pass_dung_thu_tu(self):
         self.assertEqual(self._chay("van_hoc"),
                          ["translator", "editor", "qa"])
+
+
+class _LoiOLanGoi(MockTranslationProvider):
+    """Spy: nem `TranslationProviderError` o dung LAN GOI thu N (dem TU 1,
+    tren TOAN BO doi tuong — ke ca qua nhieu job/nhieu lan retry), con lai uy
+    thac cho Mock. Dung de gia lap "worker chet giua chuong K" mot cach
+    DETERMINISTIC, khong dua vao do tre thoi gian."""
+
+    def __init__(self, that_bai_o_lan: int):
+        self._that_bai_o_lan = that_bai_o_lan
+        self.so_lan_goi = 0
+
+    def translate_segment(self, text, *, context):
+        self.so_lan_goi += 1
+        if self.so_lan_goi == self._that_bai_o_lan:
+            raise TranslationProviderError("Lỗi giả lập để kiểm thử retry.")
+        return super().translate_segment(text, context=context)
+
+
+VB_BA_CHUONG_MOI_CHUONG_MOT_CAU = (
+    "第1章 Một\n甲。\n第2章 Hai\n乙。\n第3章 Ba\n丙。"
+)
+
+
+class KhongCoCompletedGiaGiuaTruyenTest(unittest.TestCase):
+    """
+    Rao chan hoi quy CU THE cho mot loi THAT tim thay qua
+    `test_translation_job_recovery.py`: may trang thai CUA RIENG MOT CHUONG
+    dung CHUNG gia tri enum `TranslationJobStatus.COMPLETED` voi may trang
+    thai CUA CA JOB — buoc chuyen "pipeline chuong nay xong" tung ghi thang
+    `job.status = COMPLETED` vao kho, du con nhieu chuong nua chua dich. Mot
+    lan poll dung luc do se thay `status=completed, progress=100` cho mot
+    job moi xong CHUONG DAU trong mot tieu thuyet 5 chuong — mot loi that
+    nghiem trong cho giao dien chi doc trang thai qua polling.
+    """
+
+    def test_completed_chi_xuat_hien_dung_mot_lan_o_cuoi(self):
+        identity = MockIdentityAdapter()
+        novels = MockMetadataStore()
+        store = MockTranslationStore()
+        svc = TranslationService(store, novels)
+        an = identity.register("an@vidu.vn", "MatKhau123", "An")
+
+        van_ban = "\n".join(f"第{i}章 X\n{'甲'*i}。" for i in range(1, 6))
+        p = svc.create_project(an.user_id, title="x", source_text=van_ban,
+                               quality_mode="nhanh")
+
+        lan_thay_completed = []
+
+        goc = store.save_job_fenced
+
+        def theo_doi(j, fence, worker_id):
+            ok = goc(j, fence, worker_id)
+            if ok and j.status is TranslationJobStatus.COMPLETED:
+                lan_thay_completed.append(j.current_chapter)
+            return ok
+
+        store.save_job_fenced = theo_doi
+        try:
+            job = svc.create_job(p.project_id, an.user_id)
+            cho_job_xong(svc, job.job_id, an.user_id)
+        finally:
+            store.save_job_fenced = goc
+
+        self.assertEqual(
+            len(lan_thay_completed), 1,
+            f"COMPLETED bị ghi xuống kho {len(lan_thay_completed)} lần, "
+            "phải đúng MỘT lần duy nhất ở cuối")
+        self.assertEqual(
+            lan_thay_completed[0], 5,
+            "lần COMPLETED duy nhất phải ở đúng chương cuối (5), không phải "
+            "giữa truyện")
+
+
+class RetryJobTest(unittest.TestCase):
+    """
+    Part K — "retry một chương đã thất bại". Trong một pipeline TUẦN TỰ,
+    chương "thất bại" LUÔN là chương đầu tiên CHƯA nằm trong
+    `translated_chapters` (không có trường hợp chương N lỗi mà N+1 đã xong) —
+    nên retry và resume LÀ CÙNG MỘT hành động, xem
+    `TranslationService.retry_job`.
+    """
+
+    def setUp(self) -> None:
+        self.identity = MockIdentityAdapter()
+        self.novels = MockMetadataStore()
+        self.store = MockTranslationStore()
+        # Che do NHANH + moi chuong dung MOT cau ngan -> DUNG MOT lan goi
+        # provider cho MOI chuong, nen dem lan goi = dem chuong, deterministic
+        # tuyet doi (khong phu thuoc do dai doan van).
+        self.provider = _LoiOLanGoi(that_bai_o_lan=2)
+        self.svc = TranslationService(self.store, self.novels,
+                                      provider=self.provider)
+        self.an = self.identity.register("an@vidu.vn", "MatKhau123", "An")
+
+    def test_retry_tiep_tuc_dung_cho_khong_dich_lai_chuong_da_xong(self):
+        p = self.svc.create_project(
+            self.an.user_id, title="x",
+            source_text=VB_BA_CHUONG_MOI_CHUONG_MOT_CAU, quality_mode="nhanh")
+        job = self.svc.create_job(p.project_id, self.an.user_id)
+        job = cho_job_xong(self.svc, job.job_id, self.an.user_id)
+
+        self.assertEqual(job.status, TranslationJobStatus.FAILED)
+        self.assertTrue(job.error)
+        p_sau_loi = self.svc.get_project(p.project_id, self.an.user_id)
+        self.assertEqual(len(p_sau_loi.translated_chapters), 1,
+                         "chỉ chương 1 phải xong trước khi chương 2 thất bại")
+
+        job2 = self.svc.retry_job(job.job_id, self.an.user_id)
+        self.assertEqual(job2.job_id, job.job_id,
+                         "retry la CUNG mot job, khong tao job moi")
+        job2 = cho_job_xong(self.svc, job2.job_id, self.an.user_id)
+
+        self.assertEqual(job2.status, TranslationJobStatus.COMPLETED)
+        p_cuoi = self.svc.get_project(p.project_id, self.an.user_id)
+        self.assertEqual(len(p_cuoi.translated_chapters), 3,
+                         "phai co DU 3 chuong sau khi retry xong")
+        # 4 lan goi TONG CONG (chuong1, chuong2-that-bai, chuong2-retry,
+        # chuong3) — NEU la 5 thi tuc la chuong 1 bi dich lai oan.
+        self.assertEqual(self.provider.so_lan_goi, 4)
+
+    def test_retry_job_chua_that_bai_bi_tu_choi(self):
+        p = self.svc.create_project(
+            self.an.user_id, title="x", source_text="một câu.",
+            quality_mode="nhanh")
+        job = self.svc.create_job(p.project_id, self.an.user_id)
+        job = cho_job_xong(self.svc, job.job_id, self.an.user_id)
+        self.assertEqual(job.status, TranslationJobStatus.COMPLETED)
+        with self.assertRaises(TranslationError):
+            self.svc.retry_job(job.job_id, self.an.user_id)
 
 
 class GlossaryTest(Nen):
@@ -243,7 +421,8 @@ class GlossaryTest(Nen):
             p.project_id, self.an.user_id,
             self.svc.list_glossary(p.project_id, self.an.user_id)[0].term_id,
             locked=True)
-        self.svc.create_job(p.project_id, self.an.user_id)
+        job = self.svc.create_job(p.project_id, self.an.user_id)
+        self._cho_xong(job.job_id)
         p2 = self.svc.get_project(p.project_id, self.an.user_id)
         # Cau nay khop CHINH XAC trong tu dien mock, tra ve nguyen ban KHONG
         # qua glossary trong provider — nhung rao chan cuoi cua service phai
@@ -256,7 +435,8 @@ class NhapVaoTruyenTest(Nen):
         super().setUp()
         self.p = self.svc.create_project(self.an.user_id, title="Đấu Phá",
                                          source_text=VB_HAI_CHUONG)
-        self.svc.create_job(self.p.project_id, self.an.user_id)
+        job = self.svc.create_job(self.p.project_id, self.an.user_id)
+        self._cho_xong(job.job_id)
 
     def test_nhap_tao_truyen_moi_kem_du_chuong(self):
         ra = self.svc.import_to_draft(self.p.project_id, self.an.user_id)
@@ -287,6 +467,66 @@ class NhapVaoTruyenTest(Nen):
         ra = self.svc.import_to_draft(self.p.project_id, self.an.user_id,
                                       novel_id=novel.novel_id)
         self.assertEqual(ra["novel_id"], novel.novel_id)
+
+
+class _ChanODiemDinh(MockTranslationProvider):
+    """
+    Spy: DUNG LAI (block that su tren mot `threading.Event`) o dung lan goi
+    thu N, cho toi khi test cho phep tiep tuc. Dung de kiem "huy giua cac
+    pass/chuong" MOT CACH DETERMINISTIC — khong dua vao may man ve tocdo,
+    thread nen chay THAT SU dung o giua chuong cho toi khi test bam Huy VA
+    chu dong tha no ra.
+    """
+
+    def __init__(self, dung_o_lan: int):
+        self._dung_o_lan = dung_o_lan
+        self.so_lan_goi = 0
+        self.da_toi_diem_dung = threading.Event()
+        self.duoc_tiep_tuc = threading.Event()
+
+    def translate_segment(self, text, *, context):
+        self.so_lan_goi += 1
+        if self.so_lan_goi == self._dung_o_lan:
+            self.da_toi_diem_dung.set()
+            self.duoc_tiep_tuc.wait(timeout=5)
+        return super().translate_segment(text, context=context)
+
+
+class CancelGiuaChungTest(unittest.TestCase):
+    """Part K/M: "test cancellation between passes" — huy PHAI co hieu luc
+    truoc khi chuong DANG DICH duoc luu vao `translated_chapters`, du provider
+    van hoan tat LUOT GOI dang block (khong the ngat ngang mot cuoc goi mang
+    dang cho, chi dam bao KET QUA cua no bi bo di dung luc)."""
+
+    def setUp(self) -> None:
+        self.identity = MockIdentityAdapter()
+        self.novels = MockMetadataStore()
+        self.store = MockTranslationStore()
+        # Dung o lan goi thu 2 — dung luc dang dich CHUONG 2 (che do NHANH +
+        # moi chuong mot cau -> 1 lan goi/chuong, dem lan goi = dem chuong).
+        self.provider = _ChanODiemDinh(dung_o_lan=2)
+        self.svc = TranslationService(self.store, self.novels,
+                                      provider=self.provider)
+        self.an = self.identity.register("an@vidu.vn", "MatKhau123", "An")
+
+    def test_huy_giua_chuong_khong_luu_chuong_dang_dich(self):
+        p = self.svc.create_project(
+            self.an.user_id, title="x",
+            source_text=VB_BA_CHUONG_MOI_CHUONG_MOT_CAU, quality_mode="nhanh")
+        job = self.svc.create_job(p.project_id, self.an.user_id)
+
+        # Cho toi khi thread nen THAT SU dang o giua chuong 2 (khong doan mo).
+        self.assertTrue(self.provider.da_toi_diem_dung.wait(timeout=5),
+                        "provider không tới điểm dừng kịp trong 5s")
+        self.svc.cancel_job(job.job_id, self.an.user_id)
+        self.provider.duoc_tiep_tuc.set()  # tha luot goi dang block ra
+
+        job2 = cho_job_xong(self.svc, job.job_id, self.an.user_id)
+        self.assertEqual(job2.status, TranslationJobStatus.CANCELLED)
+
+        p2 = self.svc.get_project(p.project_id, self.an.user_id)
+        self.assertEqual(len(p2.translated_chapters), 1,
+                         "chương 2 (đang dịch lúc huỷ) không được lưu")
 
 
 if __name__ == "__main__":

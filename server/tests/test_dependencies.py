@@ -169,6 +169,37 @@ class TestBackendSelection(unittest.TestCase):
         self.assertIsInstance(build_storage(settings), LocalStorageAdapter)
         self.assertIsInstance(build_metadata_store(settings), MockMetadataStore)
 
+        # V5 — Part L: kho dich CUNG chon theo `DATA_BACKEND` (khong co bien
+        # rieng), nen mock/local van phai chay duoc khong can credential nao.
+        from server.translation_store import MockTranslationStore, build_translation_store
+
+        self.assertIsInstance(build_translation_store(settings), MockTranslationStore)
+
+    def test_translation_store_appwrite_without_config_fails_fast(self):
+        """
+        Part L: "Configured persistent environments must use
+        AppwriteTranslationStore... Fail loudly and clearly if persistence
+        is requested but misconfigured. Never silently fall back to memory."
+
+        `settings.validate()` da chan truong hop nay o `server/main.py` (goi
+        TRUOC ca `build_translation_store`) — bai nay kiem THEM mot lop nua,
+        DOC LAP voi validate: goi thang `build_translation_store` voi settings
+        chua du cau hinh Appwrite van phai nem loi ro rang, khong am tham lui
+        ve bo nho. Phong khi mot noi goi khac (script, worker rieng) quen goi
+        `settings.validate()` truoc.
+        """
+        from server.translation_store import build_translation_store
+
+        os.environ["DATA_BACKEND"] = "appwrite"
+        from server.config import load_settings
+
+        settings = load_settings()
+        with self.assertRaises(Exception) as ctx:
+            build_translation_store(settings)
+        thong_diep = str(ctx.exception).lower()
+        self.assertNotIn("mock", thong_diep,
+                         "không được gợi ý âm thầm quay về mock")
+
     def test_storage_backend_r2_without_config_fails_fast(self):
         from server.config import ConfigError, load_settings
 

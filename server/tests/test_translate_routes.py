@@ -127,6 +127,24 @@ class JobQuaApiTest(TranslateRouteTestCase):
                              json={"title": "x", "source_text": vb})
         return r.json()["project"]["project_id"]
 
+    def _cho_xong(self, job_id: str, token: str, timeout: float = 5.0):
+        """
+        Poll qua CHINH duong API — cung y voi `test_worker_split.py` (TTS):
+        `POST .../jobs` gio TRA VE NGAY o `queued` (Part K, job chay trong
+        thread nen/worker rieng), khong con xong dong bo trong request.
+        """
+        import time
+
+        han = time.time() + timeout
+        while time.time() < han:
+            r = self.client.get(f"/api/translate/jobs/{job_id}",
+                                headers=self.auth(token))
+            trang_thai = r.json()["job"]["status"]
+            if trang_thai in ("completed", "failed", "cancelled"):
+                return r.json()["job"]
+            time.sleep(0.005)
+        raise AssertionError(f"job {job_id} không xong sau {timeout}s")
+
     def test_tao_job_va_doc_lai_qua_reload(self):
         token = self.user()
         pid = self._du_an(token)
@@ -134,15 +152,12 @@ class JobQuaApiTest(TranslateRouteTestCase):
                             headers=self.auth(token))
         self.assertEqual(r.status_code, 201, r.text)
         job_id = r.json()["job"]["job_id"]
-        self.assertEqual(r.json()["job"]["status"], "completed")
 
         # "F5": doc lai job bang MOT request GET doc lap — trang thai phai
         # con nguyen, khong phu thuoc tien trinh nao dang giu no trong bo nho.
-        r2 = self.client.get(f"/api/translate/jobs/{job_id}",
-                             headers=self.auth(token))
-        self.assertEqual(r2.status_code, 200)
-        self.assertEqual(r2.json()["job"]["status"], "completed")
-        self.assertEqual(r2.json()["job"]["progress"], 100)
+        job = self._cho_xong(job_id, token)
+        self.assertEqual(job["status"], "completed")
+        self.assertEqual(job["progress"], 100)
 
     def test_goi_lai_khi_job_con_dang_chay_khong_tao_ban_sao(self):
         """
@@ -226,14 +241,29 @@ class GlossaryQuaApiTest(TranslateRouteTestCase):
 
 
 class NhapVaoTruyenQuaApiTest(TranslateRouteTestCase):
+    def _cho_xong(self, job_id: str, token: str, timeout: float = 5.0):
+        import time
+
+        han = time.time() + timeout
+        while time.time() < han:
+            r = self.client.get(f"/api/translate/jobs/{job_id}",
+                                headers=self.auth(token))
+            if r.json()["job"]["status"] in ("completed", "failed", "cancelled"):
+                return r.json()["job"]
+            time.sleep(0.005)
+        raise AssertionError(f"job {job_id} không xong sau {timeout}s")
+
     def test_nhap_thanh_cong_va_goi_lai_khong_tao_ban_sao(self):
         token = self.user()
         pid = self.client.post(
             "/api/translate/projects", headers=self.auth(token),
             json={"title": "x", "source_text": VB_HAI_CHUONG}
         ).json()["project"]["project_id"]
-        self.client.post(f"/api/translate/projects/{pid}/jobs",
-                         headers=self.auth(token))
+        job = self.client.post(f"/api/translate/projects/{pid}/jobs",
+                               headers=self.auth(token)).json()["job"]
+        # Nhap dua vao `translated_chapters` da co noi dung — job gio chay
+        # NEN (Part K), nen phai cho no xong truoc, khong con dong bo nhu cu.
+        self._cho_xong(job["job_id"], token)
 
         r1 = self.client.post(f"/api/translate/projects/{pid}/import",
                               headers=self.auth(token), json={})

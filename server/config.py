@@ -303,6 +303,14 @@ class Settings:
     #: `deploy/RUNBOOK.md` muc "Rollback ve che do inline (khan cap)".
     allow_inline_worker_in_real_env: bool = False
 
+    #: Nhu `inline_worker` o tren nhung cho subsystem DICH (V5) — TACH RIENG
+    #: co tinh, khong dung chung mot co voi TTS: hai duong ong hoan toan doc
+    #: lap (bang rieng, worker rieng — `server/translation_worker.py`), nen
+    #: mot noi co the tat inline ma khong anh huong noi kia (vi du: tat
+    #: inline cho dich [do tre mang cua LLM that co the vuot timeout HTTP]
+    #: nhung van de TTS chay inline vi audio tong hop nhanh hon nhieu).
+    translation_inline_worker: bool = True
+
     #: Da nap duoc file `.env` hay chua. Bao ra o `/api/health` de nguoi van
     #: hanh biet ngay file cau hinh co thuc su co tac dung khong - chinh la
     #: cai bay da tung lam ca buoi kiem chung chay tren mock.
@@ -410,6 +418,10 @@ class Settings:
             "admin_count": len(self.admin_user_ids),
             "env_file_loaded": self.env_file_loaded,
             "inline_worker": self.inline_worker,
+            "translation_inline_worker": self.translation_inline_worker,
+            "translation_provider_configured": bool(
+                self.translation_base_url and self.translation_api_key
+                and self.translation_model),
         }
 
 
@@ -522,6 +534,8 @@ def load_settings() -> Settings:
         inline_worker=_env_bool("FAS_INLINE_WORKER", True),
         allow_inline_worker_in_real_env=_env_bool(
             "FAS_ALLOW_INLINE_WORKER_IN_REAL_ENV", False),
+        translation_inline_worker=_env_bool(
+            "FAS_TRANSLATION_INLINE_WORKER", True),
         env_file_loaded=env_file is not None,
         translation_base_url=_env("TRANSLATION_BASE_URL"),
         translation_api_key=_env("TRANSLATION_API_KEY"),

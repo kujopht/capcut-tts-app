@@ -551,7 +551,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("total_chapters", "integer", False, None),
             ("current_chapter_done_segments", "integer", False, None),
             ("current_chapter_total_segments", "integer", False, None),
-            ("retry_count", "integer", False, None),
+            # --- claim/lease (worker nen rieng, cung khuon voi tts_jobs) ------
+            # Bon thuoc tinh nay CHUA duoc ap len bat ky moi truong nao (giong
+            # het ba thuoc tinh V2 cua `profiles` truoc khi duoc ap) — chi
+            # khai bao truoc de mot lan chay script sau nay tao chung.
+            ("current_pass", "string", False, 32),
+            ("attempts", "integer", False, None),
+            ("lease_owner", "string", False, 64),
+            ("lease_expires_at", "datetime", False, None),
             ("error", "string", False, 300),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
@@ -561,6 +568,27 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("project_idx", "key", ["project_id"]),
             ("project_created_idx", "key", ["project_id", "created_at"]),
             ("owner_idx", "key", ["owner_id"]),
+            ("status_idx", "key", ["status"]),
+        ],
+    },
+    # Khoa cua viec nhan job dich — cung ly do ton tai voi `job_claims` cua
+    # TTS: tinh DUY NHAT cua rowId do database cuong che, dat thao tac
+    # `create` hang nay VAO TRONG transaction cung voi `update` job row thi
+    # duoc mot compare-and-set that su. Xem
+    # `server/appwrite_translation_store.py::AppwriteTranslationStore.claim_job`.
+    #
+    # ROLLBACK: xoa ca collection — chi la trang thai dieu phoi, khong mat du
+    # lieu dich nao.
+    "translation_job_claims": {
+        "name": "Translation Job Claims",
+        "attributes": [
+            ("job_id", "string", True, 64),
+            ("attempt", "integer", True, None),
+            ("worker_id", "string", True, 64),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("job_idx", "key", ["job_id"]),
         ],
     },
     "translation_glossary": {

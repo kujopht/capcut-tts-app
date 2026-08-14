@@ -321,6 +321,30 @@ class SchemaKeyTest(unittest.TestCase):
             else:
                 os.environ["APPWRITE_SCHEMA_API_KEY"] = cu
 
+    def test_translation_api_key_khong_lo_qua_describe(self):
+        """
+        Cung nguyen tac voi khoa schema o tren, ap cho `TRANSLATION_API_KEY`
+        (V5) — `describe()` CHI duoc phep noi CO cau hinh hay khong
+        (`translation_provider_configured`, mot boolean), khong bao gio in
+        chinh gia tri khoa.
+        """
+        import os
+        from server.config import load_settings
+
+        cu = os.environ.get("TRANSLATION_API_KEY")
+        os.environ["TRANSLATION_API_KEY"] = "khoa-dich-khong-in-ra"
+        try:
+            s = load_settings()
+            self.assertEqual(s.translation_api_key, "khoa-dich-khong-in-ra")
+            chu = repr(s.describe())
+            self.assertNotIn("khoa-dich-khong-in-ra", chu)
+            self.assertNotIn("translation_api_key", chu)
+        finally:
+            if cu is None:
+                os.environ.pop("TRANSLATION_API_KEY", None)
+            else:
+                os.environ["TRANSLATION_API_KEY"] = cu
+
     def test_script_schema_uu_tien_khoa_rieng(self):
         """Khoa schema khi co, lui ve khoa runtime khi vang — dung phep chon
         ma `scripts/setup_appwrite.py::Setup.__init__` dung."""

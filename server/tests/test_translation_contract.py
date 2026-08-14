@@ -152,7 +152,7 @@ class HopDongDich(unittest.TestCase):
                     current_chapter=2, total_chapters=5,
                     current_chapter_done_segments=3,
                     current_chapter_total_segments=10,
-                    retry_count=1, error="",
+                    attempts=1, error="",
                     created_at="2026-08-14T00:00:00+00:00",
                     updated_at="2026-08-14T00:01:00+00:00")
                 kho.create_job(j)
@@ -161,7 +161,7 @@ class HopDongDich(unittest.TestCase):
                 self.assertEqual(lai.current_chapter, 2, ten)
                 self.assertEqual(lai.total_chapters, 5, ten)
                 self.assertEqual(lai.current_chapter_done_segments, 3, ten)
-                self.assertEqual(lai.retry_count, 1, ten)
+                self.assertEqual(lai.attempts, 1, ten)
 
     def test_owned_job_tu_choi_nguoi_khong_so_huu(self):
         from server.adapters import PermissionDenied

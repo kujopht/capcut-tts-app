@@ -1377,9 +1377,13 @@ export interface TranslationJob {
   status: TranslationJobStatus;
   current_chapter: number;
   total_chapters: number;
+  /** Vai trò provider đang chạy ngay lúc này ("translator"/"editor"/"qa"), rỗng khi chưa chạy/đã xong. */
+  current_pass: string | null;
   progress: number;
-  retry_count: number;
+  attempts: number;
   error: string | null;
+  /** Giống hệt `error` — tên khác cho cùng giá trị, dùng ở UI tiến trình. */
+  last_error: string | null;
   created_at: string;
   updated_at: string;
   finished_at: string | null;
@@ -1504,6 +1508,13 @@ export const translate = {
   cancelJob: (jobId: string) =>
     request<{ job: TranslationJob }>(
       `/api/translate/jobs/${encodeURIComponent(jobId)}/cancel`,
+      { method: "POST", body: "{}" },
+    ),
+
+  /** Thử lại một job đã `failed` — tiếp tục đúng từ chương còn thiếu, không dịch lại từ đầu. */
+  retryJob: (jobId: string) =>
+    request<{ job: TranslationJob }>(
+      `/api/translate/jobs/${encodeURIComponent(jobId)}/retry`,
       { method: "POST", body: "{}" },
     ),
 

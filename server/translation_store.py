@@ -14,10 +14,11 @@ hay bat ky bang nao cua pipeline audio.
 from __future__ import annotations
 
 import threading
-from typing import Dict, List, Optional
+from dataclasses import replace
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from server.adapters import NotFoundError, PermissionDenied
-from server.translation import GlossaryEntry, TranslationJobStatus
+from server.translation import TERMINAL_STATUSES, GlossaryEntry, TranslationJobStatus
 from server.translation_domain import TranslationJob, TranslationProject
 
 
@@ -28,6 +29,10 @@ class MockTranslationStore:
         self._jobs: Dict[str, TranslationJob] = {}
         #: project_id -> {term_id: GlossaryEntry}
         self._glossary: Dict[str, Dict[str, GlossaryEntry]] = {}
+        #: (job_id, attempt) da duoc claim — cung vai tro voi `job_claims` cua
+        #: Appwrite: mot khoa DA claim khong bao gio claim duoc lan hai, cung
+        #: mot lan thu. Xem `MockMetadataStore._claims` (tts) — cung khuon.
+        self._claims: Set[Tuple[str, int]] = set()
 
     # ======================================================== du an
 
@@ -92,10 +97,7 @@ class MockTranslationStore:
         """
         with self._lock:
             for j in self._jobs.values():
-                if (j.project_id == project_id
-                        and j.status not in (TranslationJobStatus.COMPLETED,
-                                             TranslationJobStatus.FAILED,
-                                             TranslationJobStatus.CANCELLED)):
+                if j.project_id == project_id and j.status not in TERMINAL_STATUSES:
                     return j
         return None
 
@@ -103,6 +105,86 @@ class MockTranslationStore:
         with self._lock:
             ra = [j for j in self._jobs.values() if j.project_id == project_id]
         return sorted(ra, key=lambda j: j.created_at, reverse=True)
+
+    def list_jobs_by_status(self, status: TranslationJobStatus) -> List[TranslationJob]:
+        with self._lock:
+            items = [j for j in self._jobs.values() if j.status is status]
+        return sorted(items, key=lambda j: j.created_at)
+
+    # ======================================================== claim/lease
+
+    def claim_job(self, job: TranslationJob, worker_id: str,
+                 lease_expires_at: str) -> Optional[int]:
+        """
+        Compare-and-set THAT SU — cung khuon voi
+        `MockMetadataStore.claim_job` (TTS). Trong bo nho, `self._lock` la
+        thu cuong che tinh duy nhat: kiem-va-ghi nam gon trong mot lan giu
+        khoa, khong the bi xen ngang.
+
+        Tra ve fencing token (int) khi thang, `None` khi thua — nguoi goi
+        PHAI dung lai, khong thu lai mu quang (xem `translation_service.py`).
+        """
+        with self._lock:
+            current = self._jobs.get(job.job_id)
+            if current is None or current.status in TERMINAL_STATUSES:
+                return None
+            if current.lease_is_live():
+                # KE CA khi lease la cua chinh `worker_id` — tu nhan lai job
+                # cua chinh minh la duong dan toi hai thread cung dich mot
+                # chuong, cung ly do voi TTS.
+                return None
+            fence = (current.attempts or 0) + 1
+            key = (job.job_id, fence)
+            if key in self._claims:
+                return None
+            self._claims.add(key)
+            self._jobs[job.job_id] = replace(
+                current, status=TranslationJobStatus.ANALYZING, attempts=fence,
+                lease_owner=worker_id, lease_expires_at=lease_expires_at)
+            return fence
+
+    def renew_lease(self, job_id: str, fence: int, worker_id: str,
+                    lease_expires_at: str) -> bool:
+        with self._lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                return False
+            if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+                return False
+            self._jobs[job_id] = replace(current, lease_expires_at=lease_expires_at,
+                                         lease_owner=worker_id)
+            return True
+
+    def save_progress(self, job_id: str, fence: int, worker_id: str, **truong) -> bool:
+        """
+        Ghi NHANH cac truong tien do (khong phai transition trang thai day
+        du) — cung ly do voi `TtsJob.save_progress`: chi ghi it truong hay
+        doi lien tuc, tranh mot giao dich day du moi lan mot doan dich xong.
+
+        `truong` la BAT KY thuoc tinh nao cua `TranslationJob` (thuong
+        `current_chapter`/`current_chapter_done_segments`/
+        `current_chapter_total_segments`/`current_pass`).
+        """
+        with self._lock:
+            current = self._jobs.get(job_id)
+            if current is None:
+                return False
+            if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+                return False
+            self._jobs[job_id] = replace(current, **truong)
+            return True
+
+    def save_job_fenced(self, job: TranslationJob, fence: int,
+                        worker_id: str) -> bool:
+        """Ghi job chi khi nguoi goi CON GIU quyen (fence + lease_owner khop)."""
+        with self._lock:
+            current = self._jobs.get(job.job_id)
+            if current is None:
+                return False
+            if (current.attempts or 0) != fence or current.lease_owner != worker_id:
+                return False
+            self._jobs[job.job_id] = replace(job, attempts=fence)
+            return True
 
     # ======================================================== glossary
 
@@ -132,3 +214,26 @@ class MockTranslationStore:
         with self._lock:
             ra = list(self._glossary.get(project_id, {}).values())
         return sorted(ra, key=lambda e: e.original)
+
+
+def build_translation_store(settings) -> Any:
+    """
+    Chon kho dich theo `DATA_BACKEND` — CUNG MAU voi
+    `server.adapters.build_metadata_store` (TTS), nhung chon RIENG cho
+    subsystem nay: `DATA_BACKEND=appwrite` co the ap dung cho novels/tts_jobs
+    ma van dang mock cho dich (hoac nguoc lai) neu can, vi hai kho hoan toan
+    doc lap.
+
+    Part L: "khong bao gio am tham lui ve bo nho khi da cau hinh dung ben
+    vung". `AppwriteTranslationStore.__init__` tu nem `AppwriteConfigError`
+    khi thieu bat ky bien nao trong bon bien Appwrite bat buoc — ham nay
+    KHONG bat loi do, de nem thang len tren: mot moi truong
+    tuong minh dat `appwrite` ma thieu cau hinh PHAI CHET NGAY luc khoi dong,
+    khong duoc chay tiep roi am tham dung mock (nguoi dung tin du lieu dich
+    duoc luu, thuc te moi lan restart la mat sach).
+    """
+    if settings.data_backend == "appwrite":
+        from server.appwrite_translation_store import AppwriteTranslationStore
+
+        return AppwriteTranslationStore(settings.appwrite)
+    return MockTranslationStore()

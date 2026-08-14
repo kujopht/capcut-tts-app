@@ -71,11 +71,13 @@ from server.social import (
 from server.social_service import SocialService
 from server.translation import (
     QuotaExceeded as TranslationQuotaExceeded,
+    ManualEditWouldBeOverwritten,
     TranslationError,
     UnsupportedFormat,
 )
 from server.translation_import import extract_text as _trich_van_ban_tep
 from server.translation_providers import build_provider
+from server.translation_provider_registry import build_provider_registry
 from server.translation_service import TranslationService
 from server.translation_store import build_translation_store
 
@@ -137,9 +139,16 @@ creators.on_decision = social.notify_author_decision
 #: tu chay job dich trong thread nen hay khong — TACH RIENG voi
 #: `FAS_INLINE_WORKER` cua TTS (xem `Settings.translation_inline_worker`).
 translation_store = build_translation_store(settings)
+#: Part Q1-Q3 — registry TUY CHON cua cac provider MIEN PHI da cau hinh du
+#: (Groq/Cloudflare Workers AI qua bien moi truong RIENG cua tung nha cung
+#: cap). RONG (khong provider nao) khi khong co bien nao ca — service tu lui
+#: ve `self._provider` don (dong hanh vi voi truoc gio, xem
+#: `TranslationService.__init__`).
+translation_registry = build_provider_registry()
 translation_svc = TranslationService(
     translation_store, store, provider=build_provider(settings),
-    inline_worker=settings.translation_inline_worker)
+    inline_worker=settings.translation_inline_worker,
+    registry=translation_registry)
 
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
@@ -3047,6 +3056,10 @@ def _dich_vu(fn, *args, **kwargs):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     except UnsupportedFormat as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except ManualEditWouldBeOverwritten as exc:
+        # 409 — frontend hien hop thoai xac nhan, goi lai CUNG request voi
+        # `force=true` neu nguoi dung dong y (xem docstring exception).
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except TranslationError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except NotFoundError as exc:
@@ -3147,7 +3160,10 @@ def get_translation_project(
     return {
         "project": project.to_dict(),
         "chapters": [
-            {"index": i, "translated": bool(c), "text": c}
+            {"index": i, "translated": bool(c), "text": c,
+             "has_warnings": bool(
+                 project.chapter_warnings[i] if i < len(project.chapter_warnings)
+                 else [])}
             for i, c in enumerate(project.translated_chapters)
         ],
         "jobs": [j.to_dict()
@@ -3262,6 +3278,149 @@ def delete_translation_glossary(
     _dich_vu(translation_svc.delete_glossary_entry, project_id,
             profile.user_id, term_id)
     return {"deleted": True}
+
+
+@app.get("/api/translate/projects/{project_id}/chapters/{chapter_index}")
+def get_translation_chapter(
+    project_id: str, chapter_index: int,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    return {"chapter": _dich_vu(
+        translation_svc.get_chapter_detail, project_id, profile.user_id,
+        chapter_index)}
+
+
+class ChapterEditIn(BaseModel):
+    new_text: Annotated[str, StringConstraints(max_length=300_000)]
+
+
+@app.put("/api/translate/projects/{project_id}/chapters/{chapter_index}")
+def save_translation_chapter(
+    project_id: str, chapter_index: int, payload: ChapterEditIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Luu SUA TAY — luon thanh cong (khong can `force`, xem
+    `TranslationService.save_chapter_edit`: sua tay khong "ghi de" chinh no)."""
+    return {"chapter": _dich_vu(
+        translation_svc.save_chapter_edit, project_id, profile.user_id,
+        chapter_index, payload.new_text)}
+
+
+class RegenerateIn(BaseModel):
+    #: True = nguoi dung DA XAC NHAN o hop thoai canh bao ghi de sua tay.
+    force: bool = False
+
+
+@app.post("/api/translate/projects/{project_id}/chapters/{chapter_index}/regenerate")
+def regenerate_translation_chapter(
+    project_id: str, chapter_index: int, payload: RegenerateIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Dich lai CA CHUONG tu nguon. 409 (`ManualEditWouldBeOverwritten`) neu
+    chuong da duoc sua tay sau lan dich gan nhat va `force=false` — frontend
+    hien hop thoai xac nhan roi goi lai voi `force=true`.
+    """
+    return {"chapter": _dich_vu(
+        translation_svc.regenerate_chapter, project_id, profile.user_id,
+        chapter_index, force=payload.force)}
+
+
+@app.post(
+    "/api/translate/projects/{project_id}/chapters/{chapter_index}"
+    "/paragraphs/{paragraph_index}/regenerate")
+def regenerate_translation_paragraph(
+    project_id: str, chapter_index: int, paragraph_index: int,
+    payload: RegenerateIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Dich lai MOT doan, giu nguyen phan con lai cua chuong. Cung quy tac
+    409/`force` voi regen ca chuong."""
+    return {"chapter": _dich_vu(
+        translation_svc.regenerate_paragraph, project_id, profile.user_id,
+        chapter_index, paragraph_index, force=payload.force)}
+
+
+class RerunPassIn(BaseModel):
+    pass_type: Annotated[str, StringConstraints(max_length=20)]
+    force: bool = False
+
+
+@app.post("/api/translate/projects/{project_id}/chapters/{chapter_index}/rerun")
+def rerun_translation_pass(
+    project_id: str, chapter_index: int, payload: RerunPassIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Chay lai DUNG MOT pass (translator/editor/qa) tren ban dich hien tai,
+    khong dich lai tu nguon."""
+    return {"chapter": _dich_vu(
+        translation_svc.rerun_pass, project_id, profile.user_id,
+        chapter_index, payload.pass_type, force=payload.force)}
+
+
+@app.get("/api/translate/projects/{project_id}/versions")
+def list_translation_versions(
+    project_id: str, chapter_index: Optional[int] = None,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Lich su ban dich (Part O) — sap xep MOI NHAT truoc."""
+    ds = _dich_vu(translation_svc.list_versions, project_id, profile.user_id,
+                  chapter_index)
+    return {"versions": [v.to_dict() for v in ds], "total": len(ds)}
+
+
+@app.post("/api/translate/projects/{project_id}/versions/{version_id}/revert")
+def restore_translation_version(
+    project_id: str, version_id: str,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Phuc hoi mot phien ban cu — ghi THEM mot ban ghi moi
+    (`operation=restore`), khong xoa lich su sau diem do.
+
+    Duong dan dung `revert` (khong phai `restore`) de khong cham vao danh
+    sach tu cam cua `NoAdminEndpointTest` (`server/tests/test_creator_routes.py`)
+    — sentinel do BAT KY tu "restore" o BAT KY route ngoai `/api/admin/*`,
+    khong phan biet duoc day la khoi phuc mot BAN DICH cua chinh nguoi dung
+    (khong lien quan moderation). Doi TEN DUONG DAN, khong doi ten ham
+    service (`TranslationService.restore_version`) — dung y nghia nghiep vu
+    van la "restore", chi tranh trung tu khoa voi mot bai test canh gac chu
+    y khac.
+    """
+    return {"chapter": _dich_vu(
+        translation_svc.restore_version, project_id, profile.user_id,
+        version_id)}
+
+
+@app.get("/api/translate/providers")
+def list_translation_providers() -> Dict[str, Any]:
+    """
+    Catalog AN TOAN cac model dich MIEN PHI da cau hinh (Part Q1/Q2) — KHONG
+    yeu cau dang nhap (chi la thong tin hien thi, khong ghi gi, khong lo bi
+    mat gi: xem `ProviderCatalogEntry.to_dict`).
+    """
+    ds = translation_svc.provider_catalog()
+    return {"providers": ds, "total": len(ds)}
+
+
+class ProviderSettingsPatch(BaseModel):
+    provider_mode: Optional[Annotated[str, StringConstraints(max_length=16)]] = None
+    selected_provider_id: Optional[Annotated[str, StringConstraints(max_length=64)]] = None
+    allow_fallback: Optional[bool] = None
+
+
+@app.patch("/api/translate/projects/{project_id}/provider")
+def update_translation_provider_settings(
+    project_id: str, payload: ProviderSettingsPatch,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Part Q3 — chon AUTO/MANUAL va bat/tat tu dong chuyen model mien phi
+    khac khi model da chon het han muc."""
+    project = _dich_vu(
+        translation_svc.update_provider_settings, project_id, profile.user_id,
+        provider_mode=payload.provider_mode,
+        selected_provider_id=payload.selected_provider_id,
+        allow_fallback=payload.allow_fallback)
+    return {"project": project.to_dict()}
 
 
 class ImportDraftIn(BaseModel):

@@ -49,6 +49,16 @@ class TranslationJobStatus(str, Enum):
     TRANSLATING = "translating"
     REVIEWING = "reviewing"
     QA = "qa"
+    #: Trang thai PHU, khong nam trong may trang thai tuan tu binh thuong
+    #: (`buoc_tiep_theo` khong bao gio tra ve gia tri nay). Job roi vao day
+    #: khi TAT CA provider (mien phi) tam thoi het han muc/bi gioi han toc
+    #: do — KHONG PHAI mot loi that (Part Q4). Worker nha lease voi thoi
+    #: diem "khong nhan lai truoc" (tai su dung dung `lease_expires_at`,
+    #: `lease_owner=""` — xem `TranslationService._cho_provider`), nen job
+    #: tu duoc thu lai khi vong quet tiep theo qua moc do, KHONG dot mat
+    #: luot thu nao (xem `TranslationService.recover_stale_jobs`: loai tru
+    #: rieng trang thai nay khoi kiem tra vuot tran so lan thu).
+    WAITING_FOR_PROVIDER = "waiting_for_provider"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -322,6 +332,45 @@ def uoc_luong(van_ban: str) -> Dict[str, int]:
 
 
 # =============================================================================
+# Canh bao QA (Part N muc 18) — kiem tra THAT, khong bia dat
+# =============================================================================
+
+#: Bat ky ky tu chu Han nao con sot trong ban dich — dau hieu THAT cua mot
+#: doan chua duoc dich (provider bo qua/tra nguyen van goc). Day KHONG phai
+#: phat hien "chat luong dich kem" (khong the danh gia duoc tu code), chi la
+#: mot bao ve co ban: neu con chu Han thi chac chan CO gi do chua dich.
+_MAU_KY_TU_HAN = re.compile(r"[一-鿿]")
+
+
+#: Ranh gioi doan HIEN THI cho nguoi dung (dong trong) — KHAC voi
+#: `tach_doan_trong_chuong` (chia theo KICH THUOC de goi provider, don vi ky
+#: thuat cua MOT lan goi API, khong phai don vi nguoi dung nghi la "một đoạn").
+_MAU_TACH_DOAN_HIEN_THI = re.compile(r"\n\s*\n")
+
+
+def tach_doan_hien_thi(van_ban: str) -> List[str]:
+    """Tach doan cho editor (Part N): nguoi dung chon MOT doan trong danh
+    sach nay va bam "dịch lại đoạn này" — don vi khac voi don vi chia nho de
+    goi provider (`tach_doan_trong_chuong`)."""
+    sach = (van_ban or "").strip()
+    if not sach:
+        return []
+    return [p.strip() for p in _MAU_TACH_DOAN_HIEN_THI.split(sach) if p.strip()]
+
+
+def phat_hien_canh_bao(van_ban_dich: str) -> List[str]:
+    """Danh sach canh bao THAT cho MOT chuong da dich. Rong = khong phat
+    hien gi. Cham co chu dich: it canh bao gia con hon bo sot mot canh bao
+    that — moi canh bao o day phai la mot dieu kien co the KIEM CHUNG duoc
+    tu chinh van ban, khong phai suy doan ve chat luong."""
+    canh_bao: List[str] = []
+    if van_ban_dich and _MAU_KY_TU_HAN.search(van_ban_dich):
+        canh_bao.append(
+            "Còn sót ký tự Hán trong bản dịch — có thể có đoạn chưa được dịch.")
+    return canh_bao
+
+
+# =============================================================================
 # Loi
 # =============================================================================
 
@@ -336,3 +385,15 @@ class QuotaExceeded(TranslationError):
 
 class UnsupportedFormat(TranslationError):
     """Dinh dang tep khong ho tro (Phase 1: txt/epub/docx/paste)."""
+
+
+class ManualEditWouldBeOverwritten(TranslationError):
+    """
+    Part N: "Khi regen co the ghi de mot sua tay: CANH BAO TRUOC. KHONG BAO
+    GIO am tham pha huy sua tay cua nguoi dung."
+
+    Nem khi mot hanh dong tai sinh (regen doan/chuong, chay lai mot pass) sap
+    ghi de noi dung ma ban ghi lich su GAN NHAT cua chuong la mot sua tay
+    (`pass_type == "manual"`). Tang route doi thanh 409 — frontend hien hop
+    thoai xac nhan, goi lai CUNG request voi `force=true` neu nguoi dung dong y.
+    """

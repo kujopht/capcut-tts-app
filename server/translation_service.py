@@ -15,12 +15,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from server.adapters import NotFoundError, PermissionDenied
-from server.domain import now_iso
+from server.domain import now_iso, now_iso_us
 from server.translation import (
     TERMINAL_STATUSES,
     GenrePreset,
     GlossaryCategory,
     GlossaryEntry,
+    ManualEditWouldBeOverwritten,
     NamingMode,
     QualityMode,
     QuotaExceeded,
@@ -29,16 +30,27 @@ from server.translation import (
     ap_dung_khoa_glossary,
     buoc_tiep_theo,
     kiem_glossary_entry,
+    phat_hien_canh_bao,
     tach_chuong,
+    tach_doan_hien_thi,
     tach_doan_trong_chuong,
     uoc_luong,
 )
-from server.translation_domain import TranslationJob, TranslationProject
+from server.translation_domain import (
+    TranslationJob,
+    TranslationProject,
+    TranslationVersion,
+)
 from server.translation_providers import (
     TranslationContext,
     TranslationProvider,
     TranslationProviderError,
     build_provider,
+)
+from server.translation_provider_registry import (
+    AllProvidersUnavailable,
+    ProviderProvenance,
+    ProviderRegistry,
 )
 
 #: Tran cau hinh — doc tu bien moi truong o `server/config.py` khi wiring vao
@@ -72,8 +84,16 @@ if TRANSLATION_JOB_LEASE_SECONDS < TRANSLATION_JOB_HEARTBEAT_SECONDS * 3:
         "chu kỳ nhịp.")
 
 #: So lan claim toi da cho MOT job. Vuot thi `failed` kem thong bao ro rang
-#: thay vi xoay vong mai.
+#: thay vi xoay vong mai. KHONG ap dung cho job dang `waiting_for_provider`
+#: (Part Q4) — cho han muc mien phi la mot vong lap BINH THUONG, khong phai
+#: dau hieu worker cu bi loi, nen khong duoc phep dot mat luot thu.
 TRANSLATION_JOB_MAX_ATTEMPTS = 3
+
+#: Backoff MAC DINH (giay) khi TAT CA provider het han muc nhung KHONG
+#: provider nao bao duoc moc reset — dung khi
+#: `AllProvidersUnavailable.retry_not_before` rong. Xem `_thuc_thi_job`.
+TRANSLATION_WAITING_DEFAULT_RETRY_SECONDS = int(
+    os.environ.get("FAS_TRANSLATION_WAITING_DEFAULT_RETRY_SECONDS", "300"))
 
 #: Cac trang thai job dang "song" (chua ket thuc) — mot job dang o bat ky
 #: trang thai nao trong day ma mat lease se can duoc mot worker khac nhan lai.
@@ -138,12 +158,19 @@ class TranslationService:
     def __init__(self, store: Any, novel_store: Any,
                  provider: Optional[TranslationProvider] = None,
                  inline_worker: bool = True,
-                 max_concurrent_jobs: Optional[int] = None):
+                 max_concurrent_jobs: Optional[int] = None,
+                 registry: Optional[ProviderRegistry] = None):
         self._store = store
         #: Store CUA SAN PHAM AUDIO — chi dung o `import_to_draft`, de tao
         #: novel/chapter that. Khong bang nao khac cua no duoc cham vao.
         self._novel_store = novel_store
         self._provider = provider or build_provider(None)
+        #: Part Q1-Q3 — TUY CHON, chi khac None khi wiring vao voi it nhat
+        #: mot provider MIEN PHI da cau hinh du (xem `build_provider_registry`
+        #: o `main.py`). Khi None, `_dich_mot_chuong` dung THANG `self._provider`
+        #: nhu truoc gio — giu nguyen HANH VI VA TUONG THICH cho toan bo test
+        #: hien co (~1574 bai), khong bat buoc phai co registry moi chay duoc.
+        self._registry = registry if registry else None
 
         #: Danh tinh cua TIEN TRINH NAY — hai worker khac nhau (hoac hai
         #: instance service khac nhau, vd trong test mo phong "worker chet
@@ -423,7 +450,8 @@ class TranslationService:
             if self.job_threads_alive() >= self._max_concurrent_jobs:
                 report["bo_qua_qua_tai"] = report.get("bo_qua_qua_tai", 0) + 1
                 continue
-            if (job.attempts or 0) >= TRANSLATION_JOB_MAX_ATTEMPTS:
+            if (job.status is not TranslationJobStatus.WAITING_FOR_PROVIDER
+                    and (job.attempts or 0) >= TRANSLATION_JOB_MAX_ATTEMPTS):
                 job.status = TranslationJobStatus.FAILED
                 job.error = (
                     f"Đã thử dịch {job.attempts} lần nhưng lần nào tiến "
@@ -553,12 +581,13 @@ class TranslationService:
                     return  # mat quyen giua chung — worker khac da nhan
 
                 ban_dich = ""
+                provenance_by_role: Dict[str, ProviderProvenance] = {}
                 while trang_thai is not TranslationJobStatus.COMPLETED:
                     if self._nen_dung_lai(job.job_id, lost):
                         return
                     if trang_thai is TranslationJobStatus.TRANSLATING:
-                        ban_dich = self._dich_mot_chuong(project, noi_dung, idx,
-                                                         job, fence, lost)
+                        ban_dich, provenance_by_role = self._dich_mot_chuong(
+                            project, noi_dung, idx, job, fence, lost)
                         if self._nen_dung_lai(job.job_id, lost):
                             return
                     trang_thai = buoc_tiep_theo(trang_thai, project.quality_mode)
@@ -581,8 +610,11 @@ class TranslationService:
 
                 project.translated_chapters.append(ban_dich)
                 project.chapter_summaries.append(_tom_tat_tho(ban_dich))
+                project.chapter_warnings.append(phat_hien_canh_bao(ban_dich))
                 project.updated_at = now_iso()
                 self._store.save_project(project)
+                self._ghi_version_tu_dong(project.project_id, idx,
+                                          ban_dich, provenance_by_role)
                 job.current_chapter_done_segments = 0
                 job.current_chapter_total_segments = 0
 
@@ -592,6 +624,24 @@ class TranslationService:
             job.updated_at = job.finished_at
             job.lease_owner = ""
             job.lease_expires_at = ""
+            self._store.save_job_fenced(job, fence, self._worker_id)
+        except AllProvidersUnavailable as exc:
+            # Part Q4: KHONG PHAI mot loi that — tat ca provider mien phi da
+            # cau hinh dang het han muc/gap loi TAM THOI. Nha lease nhung dat
+            # `lease_expires_at` bang moc "khong nhan lai truoc" (tai su dung
+            # dung co che claim/lease da co — xem `TranslationJobStatus.
+            # WAITING_FOR_PROVIDER`): `claim_job`/`recover_stale_jobs` tu bo
+            # qua job nay cho toi luc do, KHONG dot mat luot thu nao (da loai
+            # tru trang thai nay khoi kiem tra `TRANSLATION_JOB_MAX_ATTEMPTS`
+            # o `recover_stale_jobs`). Cac chuong da xong VAN CON NGUYEN.
+            retry_at = exc.retry_not_before or _lease_until(
+                TRANSLATION_WAITING_DEFAULT_RETRY_SECONDS)
+            job.status = TranslationJobStatus.WAITING_FOR_PROVIDER
+            job.error = ""
+            job.waiting_retry_at = retry_at
+            job.updated_at = now_iso()
+            job.lease_owner = ""
+            job.lease_expires_at = retry_at
             self._store.save_job_fenced(job, fence, self._worker_id)
         except TranslationProviderError as exc:
             job.status = TranslationJobStatus.FAILED
@@ -620,7 +670,8 @@ class TranslationService:
 
     def _dich_mot_chuong(self, project: TranslationProject, noi_dung: str,
                          chuong_idx: int, job: TranslationJob,
-                         fence: int, lost: threading.Event) -> str:
+                         fence: int, lost: threading.Event
+                         ) -> "tuple[str, Dict[str, ProviderProvenance]]":
         doan = tach_doan_trong_chuong(noi_dung, DOAN_KY_TU_MOI_LAN_GOI)
         job.current_chapter_total_segments = len(doan)
         self._store.save_progress(
@@ -635,12 +686,18 @@ class TranslationService:
 
         vai_tro_ds = _VAI_TRO_THEO_CHE_DO[project.quality_mode]
         ket_qua = []
+        #: Provider/model xu ly LAN CUOI moi vai tro trong chuong nay (Part
+        #: Q5) — don gian hoa co chu dich: neu AUTO fallback giua chung mot
+        #: chuong dai nhieu doan, gia tri o day la provider CUOI CUNG chu
+        #: khong phai tung doan rieng — du de biet "chuong nay ai dich",
+        #: khong nham lam mot so lieu benchmark tung-doan chi tiet hon.
+        provenance_by_role: Dict[str, ProviderProvenance] = {}
         for i, phan in enumerate(doan):
             # Kiem huy/mat quyen GIUA TUNG DOAN — min hon "giua cac pass":
             # mot chuong dai nhieu doan khong phai cho het chuong moi biet
             # nguoi dung da bam Huy.
             if self._nen_dung_lai(job.job_id, lost):
-                return "\n\n".join(ket_qua)
+                return "\n\n".join(ket_qua), provenance_by_role
             # Ba pass THAT (khong chi may trang thai): dich truoc, roi lan
             # luot chuyen ket qua qua bien tap/QA neu che do yeu cau — moi
             # vai tro nhan dau ra cua vai tro TRUOC lam van ban dau vao.
@@ -651,7 +708,18 @@ class TranslationService:
                     naming_mode=project.naming_mode.value,
                     tom_tat_truoc=tom_tat, glossary=glossary,
                     custom_instruction=project.custom_instruction)
-                dich = self._provider.translate_segment(dich, context=ctx)
+                if self._registry:
+                    dich, prov = self._registry.translate_segment(
+                        dich, context=ctx, mode=project.provider_mode,
+                        selected_provider_id=project.selected_provider_id,
+                        allow_fallback=project.allow_fallback)
+                else:
+                    dich = self._provider.translate_segment(dich, context=ctx)
+                    prov = ProviderProvenance(
+                        provider_id=self._provider.name, model_id="",
+                        pass_type=vai_tro, success=True,
+                        attempted_at=now_iso())
+                provenance_by_role[vai_tro] = prov
             ket_qua.append(dich)
             job.current_chapter_done_segments = i + 1
             job.updated_at = now_iso()
@@ -667,7 +735,26 @@ class TranslationService:
         for e in self._store.list_glossary(project.project_id):
             if e.locked and e.original in ban_ghep:
                 ban_ghep = ban_ghep.replace(e.original, e.translated)
-        return ban_ghep
+        return ban_ghep, provenance_by_role
+
+    def _ghi_version_tu_dong(self, project_id: str, chuong_idx: int,
+                             ban_dich: str,
+                             provenance_by_role: Dict[str, "ProviderProvenance"]
+                             ) -> None:
+        """Ghi MOT ban ghi lich su cho MOI vai tro da chay trong lan dich TU
+        DONG nay cua chuong (Part O + Q5 dung chung MOT co che). Khong bao
+        gio nem loi ra ngoai — mat mot ban ghi provenance khong duoc phep lam
+        hong ca job dich."""
+        try:
+            for vai_tro, prov in provenance_by_role.items():
+                self._store.add_version(TranslationVersion(
+                    project_id=project_id, chapter_index=chuong_idx,
+                    operation="auto_translate", pass_type=vai_tro,
+                    previous_text="", new_text=ban_dich,
+                    provider_id=prov.provider_id, model_id=prov.model_id,
+                    created_at=now_iso_us()))
+        except Exception:
+            pass
 
     @staticmethod
     def _loi_an_toan(exc: Exception) -> str:
@@ -727,6 +814,303 @@ class TranslationService:
     def list_glossary(self, project_id: str, owner_id: str) -> List[GlossaryEntry]:
         self._store.owned_project(project_id, owner_id)
         return self._store.list_glossary(project_id)
+
+    # ==================================================================== EDITOR (Part N)
+
+    def _kiem_tra_sua_tay(self, project_id: str, chuong_idx: int,
+                          force: bool) -> None:
+        """CANH BAO TRUOC khi mot hanh dong tai sinh sap ghi de sua tay —
+        xem `ManualEditWouldBeOverwritten`. `force=True` bo qua kiem tra nay
+        (nguoi dung da xac nhan o hop thoai)."""
+        if force:
+            return
+        gan_nhat = self._store.list_versions(project_id, chapter_index=chuong_idx)
+        if gan_nhat and gan_nhat[0].pass_type == "manual":
+            raise ManualEditWouldBeOverwritten(
+                "Chương này đã được chỉnh sửa thủ công sau lần dịch gần "
+                "nhất. Việc tạo lại sẽ GHI ĐÈ nội dung đã sửa.")
+
+    def _chay_vai_tro_tren_van_ban(self, van_ban: str, vai_tro_ds: tuple,
+                                   project: TranslationProject, chuong_idx: int
+                                   ) -> "tuple[str, Optional[ProviderProvenance]]":
+        """
+        Chay MOT hoac nhieu vai tro LIEN TIEP tren MOT khoi van ban tuy y —
+        dung cho cac hanh dong editor (regen doan/chuong, chay lai mot pass),
+        KHAC voi `_dich_mot_chuong` (danh RIENG cho vong lap job nen, giu
+        nguyen khong doi de khong anh huong hanh vi/test da co).
+
+        Van chia nho theo `tach_doan_trong_chuong` truoc khi goi provider —
+        cung gioi han kich thuoc voi duong ong tu dong, tranh mot doan qua
+        dai vuot kha nang MOT lan goi.
+        """
+        doan = tach_doan_trong_chuong(van_ban, DOAN_KY_TU_MOI_LAN_GOI)
+        tom_tat = "\n".join(project.chapter_summaries[
+            max(0, chuong_idx - SO_CHUONG_TOM_TAT_NGU_CANH):chuong_idx])
+        glossary = {e.original: e.translated
+                    for e in self._store.list_glossary(project.project_id)}
+        ket_qua = []
+        prov: Optional[ProviderProvenance] = None
+        for phan in doan:
+            dich = phan
+            for vai_tro in vai_tro_ds:
+                ctx = TranslationContext(
+                    vai_tro=vai_tro, genre=project.genre.value,
+                    naming_mode=project.naming_mode.value,
+                    tom_tat_truoc=tom_tat, glossary=glossary,
+                    custom_instruction=project.custom_instruction)
+                if self._registry:
+                    dich, prov = self._registry.translate_segment(
+                        dich, context=ctx, mode=project.provider_mode,
+                        selected_provider_id=project.selected_provider_id,
+                        allow_fallback=project.allow_fallback)
+                else:
+                    dich = self._provider.translate_segment(dich, context=ctx)
+                    prov = ProviderProvenance(
+                        provider_id=self._provider.name, model_id="",
+                        pass_type=vai_tro, success=True, attempted_at=now_iso())
+            ket_qua.append(dich)
+        ban_ghep = "\n\n".join(ket_qua)
+        for e in self._store.list_glossary(project.project_id):
+            if e.locked and e.original in ban_ghep:
+                ban_ghep = ban_ghep.replace(e.original, e.translated)
+        return ban_ghep, prov
+
+    @staticmethod
+    def _kiem_tra_chuong_da_dich(project: TranslationProject, chuong_idx: int
+                                 ) -> None:
+        so_chuong = len(tach_chuong(project.source_text))
+        if chuong_idx < 0 or chuong_idx >= so_chuong:
+            raise TranslationError("Không có chương này trong dự án.")
+        if chuong_idx >= len(project.translated_chapters):
+            raise TranslationError(
+                "Chương này chưa được dịch xong, chưa thể chỉnh sửa.")
+
+    def get_chapter_detail(self, project_id: str, owner_id: str,
+                           chuong_idx: int) -> Dict[str, Any]:
+        """Toan bo du lieu editor can cho MOT chuong: nguon, ban dich, canh
+        bao, doan hien thi (nguon+dich), tom tat chuong truoc, da sua tay hay
+        chua. Cho phep xem chuong CHUA dich xong (ban dich rong) — nguoi dung
+        van muon doc nguon truoc khi job toi luot no."""
+        project = self._store.owned_project(project_id, owner_id)
+        chuong_goc = tach_chuong(project.source_text)
+        so_chuong = len(chuong_goc)
+        if chuong_idx < 0 or chuong_idx >= so_chuong:
+            raise TranslationError("Không có chương này trong dự án.")
+        nguon = chuong_goc[chuong_idx]
+        da_dich = (project.translated_chapters[chuong_idx]
+                  if chuong_idx < len(project.translated_chapters) else "")
+        canh_bao = (project.chapter_warnings[chuong_idx]
+                   if chuong_idx < len(project.chapter_warnings) else [])
+        lich_su = self._store.list_versions(project_id, chapter_index=chuong_idx)
+        return {
+            "chapter_index": chuong_idx,
+            "chapter_count": so_chuong,
+            "source_text": nguon,
+            "translated_text": da_dich,
+            "source_paragraphs": tach_doan_hien_thi(nguon),
+            "translated_paragraphs": tach_doan_hien_thi(da_dich),
+            "warnings": canh_bao,
+            "manually_edited": bool(lich_su) and lich_su[0].pass_type == "manual",
+            "previous_chapter_summary": (
+                project.chapter_summaries[chuong_idx - 1]
+                if 0 < chuong_idx <= len(project.chapter_summaries) else ""),
+            "is_translated": chuong_idx < len(project.translated_chapters),
+        }
+
+    def save_chapter_edit(self, project_id: str, owner_id: str,
+                          chuong_idx: int, new_text: str) -> Dict[str, Any]:
+        """Luu sua tay CUA NGUOI DUNG cho MOT chuong — luon cho phep (KHONG
+        qua kiem tra `_kiem_tra_sua_tay`: sua tay khong bao gio "ghi de" sua
+        tay cua chinh minh, chi co CAC HANH DONG TAI SINH moi can canh bao)."""
+        project = self._store.owned_project(project_id, owner_id)
+        self._kiem_tra_chuong_da_dich(project, chuong_idx)
+        cu = project.translated_chapters[chuong_idx]
+        moi = (new_text or "").strip()
+        if not moi:
+            raise TranslationError("Nội dung bản dịch không được để trống.")
+        project.translated_chapters[chuong_idx] = moi
+        while len(project.chapter_warnings) <= chuong_idx:
+            project.chapter_warnings.append([])
+        project.chapter_warnings[chuong_idx] = phat_hien_canh_bao(moi)
+        project.updated_at = now_iso()
+        self._store.save_project(project)
+        self._store.add_version(TranslationVersion(
+            project_id=project_id, chapter_index=chuong_idx,
+            operation="manual_edit", pass_type="manual",
+            previous_text=cu, new_text=moi, actor_id=owner_id,
+            created_at=now_iso_us()))
+        return self.get_chapter_detail(project_id, owner_id, chuong_idx)
+
+    def regenerate_chapter(self, project_id: str, owner_id: str,
+                           chuong_idx: int, force: bool = False
+                           ) -> Dict[str, Any]:
+        """Dich lai TOAN BO mot chuong tu NGUON — dong bo (nguoi dung bam va
+        cho ket qua), KHONG qua job nen: day la MOT chuong, khac han "chay
+        toan bo tieu thuyet trong mot request" ma kien truc worker nen (Part
+        K) ton tai de tranh."""
+        project = self._store.owned_project(project_id, owner_id)
+        self._kiem_tra_chuong_da_dich(project, chuong_idx)
+        self._kiem_tra_sua_tay(project_id, chuong_idx, force)
+        chuong_goc = tach_chuong(project.source_text)
+        cu = project.translated_chapters[chuong_idx]
+        vai_tro_ds = _VAI_TRO_THEO_CHE_DO[project.quality_mode]
+        moi, prov = self._chay_vai_tro_tren_van_ban(
+            chuong_goc[chuong_idx], vai_tro_ds, project, chuong_idx)
+        project.translated_chapters[chuong_idx] = moi
+        project.chapter_summaries[chuong_idx] = _tom_tat_tho(moi)
+        while len(project.chapter_warnings) <= chuong_idx:
+            project.chapter_warnings.append([])
+        project.chapter_warnings[chuong_idx] = phat_hien_canh_bao(moi)
+        project.updated_at = now_iso()
+        self._store.save_project(project)
+        self._store.add_version(TranslationVersion(
+            project_id=project_id, chapter_index=chuong_idx,
+            operation="regenerate_chapter", pass_type=vai_tro_ds[-1],
+            previous_text=cu, new_text=moi, actor_id=owner_id,
+            provider_id=(prov.provider_id if prov else ""),
+            model_id=(prov.model_id if prov else ""),
+            created_at=now_iso_us()))
+        return self.get_chapter_detail(project_id, owner_id, chuong_idx)
+
+    def regenerate_paragraph(self, project_id: str, owner_id: str,
+                             chuong_idx: int, doan_idx: int,
+                             force: bool = False) -> Dict[str, Any]:
+        """
+        Dich lai MOT doan hien thi trong chuong, GIU NGUYEN phan con lai —
+        yeu cau bat buoc cua Part N: "Paragraph regeneration must preserve
+        the rest of the chapter exactly."
+
+        Gia dinh so doan NGUON va so doan DA DICH khop nhau (chia cung mot bo
+        tach `tach_doan_hien_thi`) — dung voi da so ban dich van xuoi giu
+        nguyen so doan; neu mot provider tung gop/tach doan lam lech so
+        luong, ham nay bao loi ro rang thay vi ghi sai vi tri.
+        """
+        project = self._store.owned_project(project_id, owner_id)
+        self._kiem_tra_chuong_da_dich(project, chuong_idx)
+        self._kiem_tra_sua_tay(project_id, chuong_idx, force)
+        chuong_goc = tach_chuong(project.source_text)
+        doan_nguon = tach_doan_hien_thi(chuong_goc[chuong_idx])
+        cu_toan_chuong = project.translated_chapters[chuong_idx]
+        doan_dich = tach_doan_hien_thi(cu_toan_chuong)
+        if not (0 <= doan_idx < len(doan_nguon)):
+            raise TranslationError("Không có đoạn này trong chương.")
+        if len(doan_dich) != len(doan_nguon):
+            raise TranslationError(
+                "Số đoạn bản dịch không khớp số đoạn nguồn (có thể do một "
+                "lần dịch trước đã gộp/tách đoạn) — hãy dùng \"Dịch lại cả "
+                "chương\" thay vì từng đoạn.")
+
+        vai_tro_ds = _VAI_TRO_THEO_CHE_DO[project.quality_mode]
+        doan_moi, prov = self._chay_vai_tro_tren_van_ban(
+            doan_nguon[doan_idx], vai_tro_ds, project, chuong_idx)
+        doan_dich[doan_idx] = doan_moi
+        moi_toan_chuong = "\n\n".join(doan_dich)
+        project.translated_chapters[chuong_idx] = moi_toan_chuong
+        while len(project.chapter_warnings) <= chuong_idx:
+            project.chapter_warnings.append([])
+        project.chapter_warnings[chuong_idx] = phat_hien_canh_bao(moi_toan_chuong)
+        project.updated_at = now_iso()
+        self._store.save_project(project)
+        self._store.add_version(TranslationVersion(
+            project_id=project_id, chapter_index=chuong_idx,
+            paragraph_index=doan_idx,
+            operation="regenerate_paragraph", pass_type=vai_tro_ds[-1],
+            previous_text=cu_toan_chuong, new_text=moi_toan_chuong,
+            actor_id=owner_id,
+            provider_id=(prov.provider_id if prov else ""),
+            model_id=(prov.model_id if prov else ""),
+            created_at=now_iso_us()))
+        return self.get_chapter_detail(project_id, owner_id, chuong_idx)
+
+    def rerun_pass(self, project_id: str, owner_id: str, chuong_idx: int,
+                   pass_type: str, force: bool = False) -> Dict[str, Any]:
+        """Chay LAI DUNG MOT pass ("translator"|"editor"|"qa") tren ban dich
+        HIEN TAI cua chuong (KHONG dich lai tu nguon) — vi du "chay lai rieng
+        QA" sau khi da tu sua tay phan con lai."""
+        if pass_type not in ("translator", "editor", "qa"):
+            raise TranslationError(
+                "Chỉ có thể chạy lại translator/editor/qa.")
+        project = self._store.owned_project(project_id, owner_id)
+        self._kiem_tra_chuong_da_dich(project, chuong_idx)
+        self._kiem_tra_sua_tay(project_id, chuong_idx, force)
+        cu = project.translated_chapters[chuong_idx]
+        moi, prov = self._chay_vai_tro_tren_van_ban(
+            cu, (pass_type,), project, chuong_idx)
+        project.translated_chapters[chuong_idx] = moi
+        while len(project.chapter_warnings) <= chuong_idx:
+            project.chapter_warnings.append([])
+        project.chapter_warnings[chuong_idx] = phat_hien_canh_bao(moi)
+        project.updated_at = now_iso()
+        self._store.save_project(project)
+        self._store.add_version(TranslationVersion(
+            project_id=project_id, chapter_index=chuong_idx,
+            operation="rerun_pass", pass_type=pass_type,
+            previous_text=cu, new_text=moi, actor_id=owner_id,
+            provider_id=(prov.provider_id if prov else ""),
+            model_id=(prov.model_id if prov else ""),
+            created_at=now_iso_us()))
+        return self.get_chapter_detail(project_id, owner_id, chuong_idx)
+
+    # ==================================================================== LICH SU (Part O)
+
+    def list_versions(self, project_id: str, owner_id: str,
+                      chuong_idx: Optional[int] = None
+                      ) -> List[TranslationVersion]:
+        self._store.owned_project(project_id, owner_id)
+        return self._store.list_versions(project_id, chapter_index=chuong_idx)
+
+    def restore_version(self, project_id: str, owner_id: str,
+                        version_id: str) -> Dict[str, Any]:
+        """
+        Phuc hoi mot phien ban CU cua mot chuong — ghi THEM mot ban ghi moi
+        (`operation="restore"`), KHONG xoa lich su sau diem do (Part O:
+        "Do not build Git complexity", giu tinh chat ADDITIVE).
+        """
+        project = self._store.owned_project(project_id, owner_id)
+        phien_ban = self._store.get_version(project_id, version_id)
+        chuong_idx = phien_ban.chapter_index
+        self._kiem_tra_chuong_da_dich(project, chuong_idx)
+        cu = project.translated_chapters[chuong_idx]
+        moi = phien_ban.new_text
+        project.translated_chapters[chuong_idx] = moi
+        while len(project.chapter_warnings) <= chuong_idx:
+            project.chapter_warnings.append([])
+        project.chapter_warnings[chuong_idx] = phat_hien_canh_bao(moi)
+        project.updated_at = now_iso()
+        self._store.save_project(project)
+        self._store.add_version(TranslationVersion(
+            project_id=project_id, chapter_index=chuong_idx,
+            operation="restore", pass_type=phien_ban.pass_type,
+            previous_text=cu, new_text=moi, actor_id=owner_id,
+            provider_id=phien_ban.provider_id, model_id=phien_ban.model_id,
+            created_at=now_iso_us()))
+        return self.get_chapter_detail(project_id, owner_id, chuong_idx)
+
+    # ==================================================================== PROVIDER (Part Q)
+
+    def provider_catalog(self) -> List[Dict[str, Any]]:
+        """Danh sach AN TOAN de tra ve qua API — xem
+        `ProviderCatalogEntry.to_dict` (KHONG BAO GIO chua api key/secret)."""
+        if not self._registry:
+            return []
+        return [e.to_dict() for e in self._registry.catalog()]
+
+    def update_provider_settings(self, project_id: str, owner_id: str, *,
+                                 provider_mode: Optional[str] = None,
+                                 selected_provider_id: Optional[str] = None,
+                                 allow_fallback: Optional[bool] = None
+                                 ) -> TranslationProject:
+        project = self._store.owned_project(project_id, owner_id)
+        if provider_mode is not None:
+            if provider_mode not in ("auto", "manual"):
+                raise TranslationError("provider_mode chỉ nhận auto/manual.")
+            project.provider_mode = provider_mode
+        if selected_provider_id is not None:
+            project.selected_provider_id = selected_provider_id
+        if allow_fallback is not None:
+            project.allow_fallback = bool(allow_fallback)
+        project.updated_at = now_iso()
+        return self._store.save_project(project)
 
     # ==================================================================== NHAP VAO TRUYEN
 

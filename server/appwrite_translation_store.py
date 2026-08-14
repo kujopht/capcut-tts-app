@@ -37,7 +37,7 @@ from server.translation import (
     QualityMode,
     TranslationJobStatus,
 )
-from server.translation_domain import TranslationJob, TranslationProject
+from server.translation_domain import TranslationJob, TranslationProject, TranslationVersion
 from server.translation import GlossaryEntry
 
 COL_PROJECTS = "translation_projects"
@@ -47,6 +47,8 @@ COL_GLOSSARY = "translation_glossary"
 #: hang cho MOI lan thu cua MOI job, id tat dinh `{job_id}-{attempt}`. Chi
 #: ton tai vi tinh DUY NHAT cua rowId ma Appwrite cuong che.
 COL_JOB_CLAIMS = "translation_job_claims"
+#: Lich su ban dich (Part O) — CONG THEM, khong doi 4 collection cu.
+COL_VERSIONS = "translation_versions"
 
 #: Ten thuoc tinh THAT SU muon luu cho tung collection — cung vai tro voi
 #: `PERSISTED_FIELDS` o `appwrite_store.py`, nhung tach rieng: doi schema ben
@@ -56,19 +58,25 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "project_id", "owner_id", "title", "source_text", "source_language",
         "target_language", "genre", "naming_mode", "quality_mode",
         "custom_instruction", "source_filename", "chapter_summaries",
-        "translated_chapters", "imported_to_novel_id", "created_at",
-        "updated_at",
+        "translated_chapters", "imported_to_novel_id", "chapter_warnings",
+        "provider_mode", "selected_provider_id", "allow_fallback",
+        "created_at", "updated_at",
     ),
     COL_JOBS: (
         "job_id", "project_id", "owner_id", "status", "current_chapter",
         "total_chapters", "current_chapter_done_segments",
         "current_chapter_total_segments", "current_pass", "attempts",
-        "lease_owner", "lease_expires_at", "error",
+        "lease_owner", "lease_expires_at", "error", "waiting_retry_at",
         "created_at", "updated_at", "finished_at",
     ),
     COL_GLOSSARY: (
         "term_id", "project_id", "category", "original", "translated",
         "aliases", "note", "locked", "created_at", "updated_at",
+    ),
+    COL_VERSIONS: (
+        "version_id", "project_id", "chapter_index", "paragraph_index",
+        "operation", "pass_type", "previous_text", "new_text", "actor_id",
+        "provider_id", "model_id", "created_at",
     ),
 }
 
@@ -116,6 +124,13 @@ def _project_to_row(p: TranslationProject) -> Dict[str, Any]:
         "chapter_summaries": list(p.chapter_summaries),
         "translated_chapters": list(p.translated_chapters),
         "imported_to_novel_id": p.imported_to_novel_id,
+        # `chapter_warnings` la List[List[str]] — Appwrite khong co kieu
+        # mang long nhau, nen ma hoa MOI chuong thanh MOT chuoi JSON, luu
+        # nhu mot string[] (khop chi so voi `translated_chapters`).
+        "chapter_warnings": [json.dumps(w) for w in p.chapter_warnings],
+        "provider_mode": p.provider_mode,
+        "selected_provider_id": p.selected_provider_id,
+        "allow_fallback": p.allow_fallback,
         "created_at": p.created_at,
         "updated_at": p.updated_at,
     }
@@ -149,9 +164,26 @@ def _project_from_row(row: Dict[str, Any]) -> TranslationProject:
         chapter_summaries=list(row.get("chapter_summaries") or []),
         translated_chapters=list(row.get("translated_chapters") or []),
         imported_to_novel_id=str(row.get("imported_to_novel_id") or ""),
+        chapter_warnings=[_giai_ma_canh_bao(w)
+                         for w in (row.get("chapter_warnings") or [])],
+        provider_mode=str(row.get("provider_mode") or "auto"),
+        selected_provider_id=str(row.get("selected_provider_id") or ""),
+        allow_fallback=bool(row.get("allow_fallback", True)),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
     )
+
+
+def _giai_ma_canh_bao(muc: Any) -> List[str]:
+    """Giai ma MOT phan tu cua `chapter_warnings` — xem ghi chu ma hoa o
+    `_project_to_row`. Doc hong (JSON sai dinh dang) -> rong, khong nem loi."""
+    if isinstance(muc, list):
+        return list(muc)
+    try:
+        gia_tri = json.loads(muc)
+    except (TypeError, ValueError):
+        return []
+    return gia_tri if isinstance(gia_tri, list) else []
 
 
 def _job_to_row(j: TranslationJob) -> Dict[str, Any]:
@@ -169,6 +201,7 @@ def _job_to_row(j: TranslationJob) -> Dict[str, Any]:
         "lease_owner": j.lease_owner,
         "lease_expires_at": j.lease_expires_at,
         "error": j.error,
+        "waiting_retry_at": j.waiting_retry_at,
         "created_at": j.created_at,
         "updated_at": j.updated_at,
         "finished_at": j.finished_at,
@@ -196,6 +229,7 @@ def _job_from_row(row: Dict[str, Any]) -> TranslationJob:
         lease_owner=str(row.get("lease_owner") or ""),
         lease_expires_at=str(row.get("lease_expires_at") or ""),
         error=str(row.get("error") or ""),
+        waiting_retry_at=str(row.get("waiting_retry_at") or ""),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
         finished_at=str(row.get("finished_at") or ""),
@@ -233,6 +267,41 @@ def _glossary_from_row(row: Dict[str, Any]) -> GlossaryEntry:
         locked=bool(row.get("locked") or False),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
+    )
+
+
+def _version_to_row(v: TranslationVersion) -> Dict[str, Any]:
+    return {
+        "version_id": v.version_id,
+        "project_id": v.project_id,
+        "chapter_index": v.chapter_index,
+        "paragraph_index": v.paragraph_index if v.paragraph_index is not None else -1,
+        "operation": v.operation,
+        "pass_type": v.pass_type,
+        "previous_text": v.previous_text,
+        "new_text": v.new_text,
+        "actor_id": v.actor_id,
+        "provider_id": v.provider_id,
+        "model_id": v.model_id,
+        "created_at": v.created_at,
+    }
+
+
+def _version_from_row(row: Dict[str, Any]) -> TranslationVersion:
+    doan_idx = int(row.get("paragraph_index") if row.get("paragraph_index") is not None else -1)
+    return TranslationVersion(
+        version_id=str(row.get("version_id") or row.get("$id") or ""),
+        project_id=str(row.get("project_id") or ""),
+        chapter_index=int(row.get("chapter_index") or 0),
+        paragraph_index=None if doan_idx < 0 else doan_idx,
+        operation=str(row.get("operation") or ""),
+        pass_type=str(row.get("pass_type") or ""),
+        previous_text=str(row.get("previous_text") or ""),
+        new_text=str(row.get("new_text") or ""),
+        actor_id=str(row.get("actor_id") or ""),
+        provider_id=str(row.get("provider_id") or ""),
+        model_id=str(row.get("model_id") or ""),
+        created_at=str(row.get("created_at") or ""),
     )
 
 
@@ -595,3 +664,26 @@ class AppwriteTranslationStore:
         rows = self._list_all(COL_GLOSSARY, [q_equal("project_id", project_id)])
         ra = [_glossary_from_row(r) for r in rows]
         return sorted(ra, key=lambda e: e.original)
+
+    # ======================================================== lich su ban dich (Part O)
+
+    def add_version(self, version: TranslationVersion) -> TranslationVersion:
+        self._create(COL_VERSIONS, version.version_id, _version_to_row(version),
+                    owner_id="")
+        return version
+
+    def get_version(self, project_id: str, version_id: str) -> TranslationVersion:
+        row = self._get(COL_VERSIONS, version_id)
+        v = _version_from_row(row)
+        if v.project_id != project_id:
+            raise NotFoundError("Không tìm thấy phiên bản lịch sử này.")
+        return v
+
+    def list_versions(self, project_id: str,
+                      chapter_index: Optional[int] = None) -> List[TranslationVersion]:
+        queries = [q_equal("project_id", project_id)]
+        if chapter_index is not None:
+            queries.append(q_equal("chapter_index", chapter_index))
+        rows = self._list_all(COL_VERSIONS, queries)
+        ra = [_version_from_row(r) for r in rows]
+        return sorted(ra, key=lambda v: v.created_at, reverse=True)

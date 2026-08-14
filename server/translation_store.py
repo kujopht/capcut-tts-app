@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from server.adapters import NotFoundError, PermissionDenied
 from server.translation import TERMINAL_STATUSES, GlossaryEntry, TranslationJobStatus
-from server.translation_domain import TranslationJob, TranslationProject
+from server.translation_domain import TranslationJob, TranslationProject, TranslationVersion
 
 
 class MockTranslationStore:
@@ -33,6 +33,8 @@ class MockTranslationStore:
         #: Appwrite: mot khoa DA claim khong bao gio claim duoc lan hai, cung
         #: mot lan thu. Xem `MockMetadataStore._claims` (tts) — cung khuon.
         self._claims: Set[Tuple[str, int]] = set()
+        #: project_id -> {version_id: TranslationVersion} — Part O.
+        self._versions: Dict[str, Dict[str, TranslationVersion]] = {}
 
     # ======================================================== du an
 
@@ -214,6 +216,28 @@ class MockTranslationStore:
         with self._lock:
             ra = list(self._glossary.get(project_id, {}).values())
         return sorted(ra, key=lambda e: e.original)
+
+    # ======================================================== lich su ban dich (Part O)
+
+    def add_version(self, version: TranslationVersion) -> TranslationVersion:
+        with self._lock:
+            self._versions.setdefault(version.project_id, {})[version.version_id] = version
+            return version
+
+    def get_version(self, project_id: str, version_id: str) -> TranslationVersion:
+        with self._lock:
+            v = self._versions.get(project_id, {}).get(version_id)
+        if v is None:
+            raise NotFoundError("Không tìm thấy phiên bản lịch sử này.")
+        return v
+
+    def list_versions(self, project_id: str,
+                      chapter_index: Optional[int] = None) -> List[TranslationVersion]:
+        with self._lock:
+            ra = list(self._versions.get(project_id, {}).values())
+        if chapter_index is not None:
+            ra = [v for v in ra if v.chapter_index == chapter_index]
+        return sorted(ra, key=lambda v: v.created_at, reverse=True)
 
 
 def build_translation_store(settings) -> Any:

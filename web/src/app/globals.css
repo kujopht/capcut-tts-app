@@ -5342,3 +5342,78 @@ body.co-mini { padding-bottom: 74px; }
 @media (prefers-reduced-motion: reduce) {
   .da-thich .bai-tim { animation: none; }
 }
+
+/* =============================================================================
+   Editor dich thuat (V5 Part N) — /translate::ChapterEditor
+   Bo cuc: rail chuong GON | vung lam viec nguon+dich LON. Novel Bible la
+   panel rieng (GlossaryPanel), khong nam trong luoi nay.
+   ============================================================================= */
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--s4, 16px);
+  align-items: start;
+}
+
+.editor-rail {
+  position: sticky;
+  top: var(--s4, 16px);
+  max-height: 70vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 10px);
+  background: var(--bg-2);
+}
+
+.editor-rail-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.editor-rail-item:hover { background: var(--bg-3); }
+
+.editor-rail-item.is-active {
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.editor-panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s4, 16px);
+}
+
+.editor-pane-text {
+  height: 360px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  resize: vertical;
+}
+
+@media (max-width: 860px) {
+  .editor-layout { grid-template-columns: 1fr; }
+  .editor-rail {
+    position: static;
+    max-height: 220px;
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .editor-rail ul { display: flex; }
+  .editor-rail-item {
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+    min-width: 140px;
+  }
+  .editor-panes { grid-template-columns: 1fr; }
+}

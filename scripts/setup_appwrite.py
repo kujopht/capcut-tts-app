@@ -530,6 +530,13 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("chapter_summaries", "string", False, 500),      # mang
             ("translated_chapters", "string", False, 300000), # mang
             ("imported_to_novel_id", "string", False, 64),
+            # --- Part N/Q3, THEM SAU — chua ap len bat ky moi truong nao ------
+            # Moi chuong 1 chuoi JSON (danh sach canh bao) — xem
+            # `server/appwrite_translation_store.py::_project_to_row`.
+            ("chapter_warnings", "string", False, 2000),        # mang
+            ("provider_mode", "string", False, 16),
+            ("selected_provider_id", "string", False, 64),
+            ("allow_fallback", "boolean", False, None),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],
@@ -546,7 +553,7 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("owner_id", "string", True, 64),
             ("status", "enum", True,
              ["queued", "analyzing", "glossary", "translating", "reviewing",
-              "qa", "completed", "failed", "cancelled"]),
+              "qa", "waiting_for_provider", "completed", "failed", "cancelled"]),
             ("current_chapter", "integer", False, None),
             ("total_chapters", "integer", False, None),
             ("current_chapter_done_segments", "integer", False, None),
@@ -560,6 +567,8 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("lease_owner", "string", False, 64),
             ("lease_expires_at", "datetime", False, None),
             ("error", "string", False, 300),
+            # Part Q4, THEM SAU — moc thu lai khi job dang cho han muc mien phi.
+            ("waiting_retry_at", "datetime", False, None),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
             ("finished_at", "datetime", False, None),
@@ -611,6 +620,32 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("project_idx", "key", ["project_id"]),
         ],
     },
+    # Lich su ban dich (Part O) — COLLECTION THU NAM, CONG THEM, chua ap len
+    # bat ky moi truong nao. Additive-only theo dung yeu cau: khong sua/xoa
+    # ban ghi cu, chi luon them ban ghi moi (xem
+    # `server/translation_domain.py::TranslationVersion`).
+    "translation_versions": {
+        "name": "Translation Versions",
+        "attributes": [
+            ("version_id", "string", True, 64),
+            ("project_id", "string", True, 64),
+            ("chapter_index", "integer", True, None),
+            ("paragraph_index", "integer", False, None),  # -1 = ca chuong
+            ("operation", "string", True, 32),
+            ("pass_type", "string", True, 16),
+            ("previous_text", "string", False, 300000),
+            ("new_text", "string", False, 300000),
+            ("actor_id", "string", False, 64),
+            ("provider_id", "string", False, 64),
+            ("model_id", "string", False, 128),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("project_idx", "key", ["project_id"]),
+            ("project_chapter_idx", "key", ["project_id", "chapter_index"]),
+            ("project_created_idx", "key", ["project_id", "created_at"]),
+        ],
+    },
 }
 
 #: Cac thuoc tinh la MANG. Appwrite doi co `array: true` luc tao; thieu no thi
@@ -623,6 +658,7 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
 #: ghi chu o day de tranh bay khi them collection moi.
 ARRAY_ATTRIBUTES = frozenset({
     "tags", "genres", "chapter_summaries", "translated_chapters", "aliases",
+    "chapter_warnings",
 })
 
 #: Quyen o muc COLLECTION: khong cap gi cho client.

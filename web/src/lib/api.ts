@@ -1349,7 +1349,7 @@ export type QualityMode = "nhanh" | "can_bang" | "van_hoc";
 
 export type TranslationJobStatus =
   | "queued" | "analyzing" | "glossary" | "translating" | "reviewing" | "qa"
-  | "completed" | "failed" | "cancelled";
+  | "waiting_for_provider" | "completed" | "failed" | "cancelled";
 
 export interface TranslationProject {
   project_id: string;
@@ -1367,6 +1367,10 @@ export interface TranslationProject {
   chapter_count: number;
   translated_chapter_count: number;
   imported_to_novel_id: string | null;
+  /** Part Q3 — "auto" hoặc "manual". */
+  provider_mode: "auto" | "manual";
+  selected_provider_id: string | null;
+  allow_fallback: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -1384,6 +1388,8 @@ export interface TranslationJob {
   error: string | null;
   /** Giống hệt `error` — tên khác cho cùng giá trị, dùng ở UI tiến trình. */
   last_error: string | null;
+  /** Part Q4 — chỉ có ý nghĩa khi `status === "waiting_for_provider"`. */
+  waiting_retry_at: string | null;
   created_at: string;
   updated_at: string;
   finished_at: string | null;
@@ -1396,6 +1402,51 @@ export interface GlossaryEntry {
   translated: string;
   note: string;
   locked: boolean;
+}
+
+/** Part N — chi tiet editor cua MOT chuong. */
+export interface ChapterDetail {
+  chapter_index: number;
+  chapter_count: number;
+  source_text: string;
+  translated_text: string;
+  source_paragraphs: string[];
+  translated_paragraphs: string[];
+  warnings: string[];
+  manually_edited: boolean;
+  previous_chapter_summary: string;
+  is_translated: boolean;
+}
+
+/** Part O — mot ban ghi lich su ban dich. */
+export interface TranslationVersion {
+  version_id: string;
+  project_id: string;
+  chapter_index: number;
+  paragraph_index: number | null;
+  operation: string;
+  pass_type: string;
+  previous_text: string;
+  new_text: string;
+  actor_id: string | null;
+  provider_id: string | null;
+  model_id: string | null;
+  created_at: string;
+}
+
+export type ProviderStatusValue =
+  | "available" | "rate_limited" | "quota_exhausted" | "unavailable"
+  | "disabled" | "unknown";
+
+/** Part Q1/Q2 — catalog AN TOAN, khong bao gio chua bi mat. */
+export interface ProviderCatalogEntry {
+  provider_id: string;
+  model_id: string;
+  display_name: string;
+  quality_hint: string;
+  free_tier: boolean;
+  status: ProviderStatusValue;
+  reset_at: string;
 }
 
 /** Nhan tieng Viet cho giao dien — khop `GENRE_LABELS`/`NAMING_LABELS` o
@@ -1490,7 +1541,10 @@ export const translate = {
   getProject: (projectId: string) =>
     request<{
       project: TranslationProject;
-      chapters: { index: number; translated: boolean; text: string }[];
+      chapters: {
+        index: number; translated: boolean; text: string;
+        has_warnings: boolean;
+      }[];
       jobs: TranslationJob[];
     }>(`/api/translate/projects/${encodeURIComponent(projectId)}`),
 
@@ -1557,6 +1611,84 @@ export const translate = {
         body: JSON.stringify({
           novel_id: fields.novelId ?? "",
           new_novel_title: fields.newNovelTitle ?? "",
+        }),
+      },
+    ),
+
+  // ---------------------------------------------------------- Editor (Part N)
+
+  getChapter: (projectId: string, chapterIndex: number) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/${chapterIndex}`,
+    ),
+
+  saveChapterEdit: (projectId: string, chapterIndex: number, newText: string) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/${chapterIndex}`,
+      { method: "PUT", body: JSON.stringify({ new_text: newText }) },
+    ),
+
+  /** 409 (`ApiError.status === 409`) neu chuong da bi sua tay va `force` chua bat — hien
+      `ConfirmDialog` roi goi lai voi `force: true`. */
+  regenerateChapter: (projectId: string, chapterIndex: number, force = false) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/${chapterIndex}/regenerate`,
+      { method: "POST", body: JSON.stringify({ force }) },
+    ),
+
+  regenerateParagraph: (
+    projectId: string, chapterIndex: number, paragraphIndex: number, force = false,
+  ) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/` +
+        `${chapterIndex}/paragraphs/${paragraphIndex}/regenerate`,
+      { method: "POST", body: JSON.stringify({ force }) },
+    ),
+
+  rerunPass: (
+    projectId: string, chapterIndex: number,
+    passType: "translator" | "editor" | "qa", force = false,
+  ) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/chapters/${chapterIndex}/rerun`,
+      { method: "POST", body: JSON.stringify({ pass_type: passType, force }) },
+    ),
+
+  // ---------------------------------------------------------- Lich su (Part O)
+
+  listVersions: (projectId: string, chapterIndex?: number) =>
+    request<{ versions: TranslationVersion[]; total: number }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/versions` +
+        (chapterIndex === undefined ? "" : `?chapter_index=${chapterIndex}`),
+    ),
+
+  revertToVersion: (projectId: string, versionId: string) =>
+    request<{ chapter: ChapterDetail }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/versions/` +
+        `${encodeURIComponent(versionId)}/revert`,
+      { method: "POST", body: "{}" },
+    ),
+
+  // ---------------------------------------------------------- Provider (Part Q)
+
+  listProviders: () =>
+    request<{ providers: ProviderCatalogEntry[]; total: number }>(
+      "/api/translate/providers",
+    ),
+
+  updateProviderSettings: (projectId: string, fields: {
+    providerMode?: "auto" | "manual";
+    selectedProviderId?: string;
+    allowFallback?: boolean;
+  }) =>
+    request<{ project: TranslationProject }>(
+      `/api/translate/projects/${encodeURIComponent(projectId)}/provider`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          provider_mode: fields.providerMode,
+          selected_provider_id: fields.selectedProviderId,
+          allow_fallback: fields.allowFallback,
         }),
       },
     ),

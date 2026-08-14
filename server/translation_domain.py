@@ -53,6 +53,20 @@ class TranslationProject:
     translated_chapters: List[str] = field(default_factory=list)
     #: Da nhap vao truyen nao roi (novel_id) — chan nhap trung. Rong = chua.
     imported_to_novel_id: str = ""
+    #: Canh bao QA THAT phat hien duoc cho tung chuong da dich — chi so khop
+    #: voi `translated_chapters` (Part N muc 18). Xem
+    #: `translation.phat_hien_canh_bao` — hien chi kiem tra con sot ky tu Han
+    #: trong ban dich, MOT tin hieu that, khong bia dat.
+    chapter_warnings: List[List[str]] = field(default_factory=list)
+    #: Part Q3 — AUTO ("auto") hay MANUAL ("manual") chon provider. Rong tuong
+    #: duong "auto" (chua ai chon).
+    provider_mode: str = "auto"
+    #: Provider da chon THU CONG — chi co y nghia khi `provider_mode="manual"`.
+    selected_provider_id: str = ""
+    #: MANUAL + fallback BAT: het han muc thi thu provider MIEN PHI khac.
+    #: MANUAL + fallback TAT: het han muc thi cho (`waiting_for_provider`),
+    #: KHONG tu doi model. AUTO luon coi nhu fallback BAT (bo qua co nay).
+    allow_fallback: bool = True
     project_id: str = field(default_factory=lambda: _id("trp"))
     created_at: str = ""
     updated_at: str = ""
@@ -78,6 +92,9 @@ class TranslationProject:
             "translated_chapter_count": len(
                 [c for c in self.translated_chapters if c]),
             "imported_to_novel_id": self.imported_to_novel_id or None,
+            "provider_mode": self.provider_mode,
+            "selected_provider_id": self.selected_provider_id or None,
+            "allow_fallback": self.allow_fallback,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -125,6 +142,10 @@ class TranslationJob:
     #: Da lam sach (khong lo chi tiet noi bo/stack trace) — xem
     #: `TranslationService._loi_an_toan`.
     error: str = ""
+    #: Part Q4 — moc thoi gian (ISO) job co the duoc thu lai, CHI co y nghia
+    #: khi `status is WAITING_FOR_PROVIDER`. Rong = khong biet moc chinh xac
+    #: (hien UI: "Đang chờ nhà cung cấp mở lại hạn mức", KHONG bia gio).
+    waiting_retry_at: str = ""
     job_id: str = field(default_factory=lambda: _id("trj"))
     created_at: str = ""
     updated_at: str = ""
@@ -176,7 +197,55 @@ class TranslationJob:
             "attempts": self.attempts,
             "error": self.error or None,
             "last_error": self.error or None,
+            "waiting_retry_at": self.waiting_retry_at or None,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "finished_at": self.finished_at or None,
+        }
+
+
+@dataclass
+class TranslationVersion:
+    """
+    MOT ban ghi lich su cho MOT chuong (Part O) — dich nhe, KHONG git.
+
+    Moi lan tao/ghi de noi dung dich (tu dong luc chay job, dich lai mot
+    doan/chuong, chay rieng mot pass, hoac nguoi dung tu sua) deu tao THEM
+    mot ban ghi — KHONG BAO GIO sua/xoa ban ghi cu, chi them (`additive`).
+    Phuc hoi (`restore`) ghi mot ban ghi MOI voi `operation="restore"", KHONG
+    quay lai xoa lich su sau diem do — giu dung tinh chat "them, khong bao
+    gio mat".
+    """
+
+    project_id: str
+    chapter_index: int
+    #: "auto_translate" | "manual_edit" | "regenerate_paragraph" |
+    #: "regenerate_chapter" | "rerun_pass" | "restore"
+    operation: str
+    #: "translator" | "editor" | "qa" | "manual"
+    pass_type: str
+    previous_text: str
+    new_text: str
+    actor_id: str = ""
+    provider_id: str = ""
+    model_id: str = ""
+    #: None = ca chuong. Co gia tri = chi mot doan cu the (regen doan).
+    paragraph_index: Optional[int] = None
+    version_id: str = field(default_factory=lambda: _id("trv"))
+    created_at: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "version_id": self.version_id,
+            "project_id": self.project_id,
+            "chapter_index": self.chapter_index,
+            "paragraph_index": self.paragraph_index,
+            "operation": self.operation,
+            "pass_type": self.pass_type,
+            "previous_text": self.previous_text,
+            "new_text": self.new_text,
+            "actor_id": self.actor_id or None,
+            "provider_id": self.provider_id or None,
+            "model_id": self.model_id or None,
+            "created_at": self.created_at,
         }

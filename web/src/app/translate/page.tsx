@@ -23,6 +23,7 @@ import {
   type GenrePreset,
   type GlossaryEntry,
   type NamingMode,
+  type ProviderCatalogEntry,
   type QualityMode,
   type TranslationJob,
   type TranslationProject,
@@ -39,17 +40,25 @@ import {
 } from "@/components/ui";
 import { loginHref } from "@/lib/nav";
 import { IconFeather } from "@/components/Icons";
+import ChapterEditor from "./ChapterEditor";
 
 const TRANG_THAI_NHAN: Record<string, string> = {
   queued: "Đang xếp hàng…",
   analyzing: "Đang phân tích…",
   glossary: "Đang xây dựng từ điển…",
   translating: "Đang dịch…",
-  reviewing: "Đang biên tập…",
+  reviewing: "Đang biên tập văn học…",
   qa: "Đang kiểm tra chất lượng…",
+  waiting_for_provider: "Đang chờ hạn mức dịch miễn phí…",
   completed: "Đã hoàn tất",
   failed: "Thất bại",
   cancelled: "Đã huỷ",
+};
+
+const NHAN_VAI_TRO_CHE_DO: Record<QualityMode, string[]> = {
+  nhanh: ["translator"],
+  can_bang: ["translator", "qa"],
+  van_hoc: ["translator", "editor", "qa"],
 };
 
 /** Doc mot tep thanh chuoi base64 (KHONG qua canvas — day la van ban/zip,
@@ -382,6 +391,7 @@ function ProjectDetail({
   );
   const [dangTaoJob, setDangTaoJob] = useState(false);
   const [dangNhap, setDangNhap] = useState(false);
+  const [dangHuy, setDangHuy] = useState(false);
   const jobDinhKy = useRef<number | null>(null);
 
   const batDauDich = useCallback(async () => {
@@ -413,6 +423,22 @@ function ProjectDetail({
       setDangTaoJob(false);
     }
   }, [projectId, toast, reload]);
+
+  const huyDich = useCallback(
+    async (jobId: string) => {
+      setDangHuy(true);
+      try {
+        await translate.cancelJob(jobId);
+        toast.ok("Đã huỷ job dịch.");
+        reload();
+      } catch (cause) {
+        toast.error(errorMessage(cause));
+      } finally {
+        setDangHuy(false);
+      }
+    },
+    [toast, reload],
+  );
 
   const nhapVaoTruyen = useCallback(async () => {
     setDangNhap(true);
@@ -464,10 +490,7 @@ function ProjectDetail({
 
         {jobMoiNhat ? (
           <div className="stack-2">
-            <span className="hint">
-              Chương {jobMoiNhat.current_chapter}/{jobMoiNhat.total_chapters} ·{" "}
-              {TRANG_THAI_NHAN[jobMoiNhat.status] ?? jobMoiNhat.status}
-            </span>
+            <span className="hint">Dịch tiểu thuyết · {jobMoiNhat.progress}%</span>
             <div
               className="progress"
               role="progressbar"
@@ -477,6 +500,21 @@ function ProjectDetail({
             >
               <div className="progress-bar" style={{ width: `${jobMoiNhat.progress}%` }} />
             </div>
+            <span className="hint">
+              Chương {jobMoiNhat.current_chapter} / {jobMoiNhat.total_chapters}
+              <br />
+              {TRANG_THAI_NHAN[jobMoiNhat.status] ?? jobMoiNhat.status}
+            </span>
+            <GlossaryCounts projectId={projectId} />
+            {jobMoiNhat.status === "waiting_for_provider" ? (
+              <Alert kind="warn">
+                Tất cả model dịch miễn phí hiện đang hết hạn mức. Các chương
+                đã dịch vẫn được giữ nguyên — hệ thống sẽ tự thử lại
+                {jobMoiNhat.waiting_retry_at
+                  ? ` lúc ${new Date(jobMoiNhat.waiting_retry_at).toLocaleTimeString("vi-VN")}.`
+                  : " khi nhà cung cấp mở lại hạn mức."}
+              </Alert>
+            ) : null}
             {jobMoiNhat.status === "failed" && jobMoiNhat.error ? (
               <Alert kind="error">{jobMoiNhat.error}</Alert>
             ) : null}
@@ -496,6 +534,20 @@ function ProjectDetail({
               Bắt đầu dịch
             </button>
           ) : null}
+          {jobMoiNhat
+           && jobMoiNhat.status !== "completed"
+           && jobMoiNhat.status !== "failed"
+           && jobMoiNhat.status !== "cancelled" ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={dangHuy}
+              onClick={() => void huyDich(jobMoiNhat.job_id)}
+            >
+              {dangHuy ? <span className="spinner" aria-hidden="true" /> : null}
+              Huỷ dịch
+            </button>
+          ) : null}
           {coBanDich && !project.imported_to_novel_id ? (
             <button
               type="button"
@@ -510,21 +562,157 @@ function ProjectDetail({
         </div>
       </section>
 
+      <ProviderSettingsPanel project={project} onChanged={reload} />
+
       <GlossaryPanel projectId={projectId} />
 
       {coBanDich ? (
         <section className="stack-2">
           <h2 className="section-title">Bản dịch</h2>
-          {chapters.filter((c) => c.translated).map((c) => (
-            <details key={c.index} className="card card-tight">
-              <summary style={{ cursor: "pointer" }}>Chương {c.index + 1}</summary>
-              <p className="prose" style={{ marginTop: 8 }}>{c.text}</p>
-            </details>
-          ))}
+          <ChapterEditor
+            projectId={projectId}
+            chapters={chapters.map((c) => ({
+              index: c.index, translated: c.translated,
+              has_warnings: c.has_warnings,
+            }))}
+            qualityRoles={NHAN_VAI_TRO_CHE_DO[project.quality_mode]}
+            onChanged={reload}
+          />
         </section>
       ) : null}
     </div>
   );
+}
+
+/* ============================================================ dem tu dien */
+
+function GlossaryCounts({ projectId }: { projectId: string }) {
+  const { data } = useAsyncData(
+    useCallback(() => translate.listGlossary(projectId), [projectId]),
+  );
+  if (!data || data.entries.length === 0) return null;
+  const nhanVat = data.entries.filter((e) => e.category === "character").length;
+  const diaDanh = data.entries.filter((e) => e.category === "place").length;
+  const daKhoa = data.entries.filter((e) => e.locked).length;
+  return (
+    <span className="hint">
+      {nhanVat} nhân vật · {diaDanh} địa danh · {daKhoa} thuật ngữ đã khoá
+    </span>
+  );
+}
+
+/* ============================================================ chon provider (Part Q) */
+
+function ProviderSettingsPanel({
+  project,
+  onChanged,
+}: {
+  project: TranslationProject;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const { data } = useAsyncData(useCallback(() => translate.listProviders(), []));
+  const [dangLuu, setDangLuu] = useState(false);
+
+  if (!data || data.providers.length === 0) return null;
+
+  const capNhat = async (fields: Parameters<typeof translate.updateProviderSettings>[1]) => {
+    setDangLuu(true);
+    try {
+      await translate.updateProviderSettings(project.project_id, fields);
+      onChanged();
+    } catch (cause) {
+      toast.error(errorMessage(cause));
+    } finally {
+      setDangLuu(false);
+    }
+  };
+
+  return (
+    <section className="card stack-2">
+      <h2 className="section-title">Model dịch</h2>
+      <ul className="stack-2" style={{ listStyle: "none", padding: 0 }}>
+        {data.providers.map((p: ProviderCatalogEntry) => (
+          <li key={p.provider_id} className="row-between">
+            <span>{p.display_name}</span>
+            <NhanTrangThaiProvider entry={p} />
+          </li>
+        ))}
+      </ul>
+      <div className="row row-tight">
+        <label className="chip" style={{ cursor: "pointer" }}>
+          <input
+            type="radio"
+            name="provider-mode"
+            checked={project.provider_mode !== "manual"}
+            onChange={() => void capNhat({ providerMode: "auto" })}
+            disabled={dangLuu}
+            style={{ marginRight: 6 }}
+          />
+          Tự động chọn — Khuyên dùng
+        </label>
+        <label className="chip" style={{ cursor: "pointer" }}>
+          <input
+            type="radio"
+            name="provider-mode"
+            checked={project.provider_mode === "manual"}
+            onChange={() => void capNhat({
+              providerMode: "manual",
+              selectedProviderId: project.selected_provider_id
+                ?? data.providers[0]?.provider_id,
+            })}
+            disabled={dangLuu}
+            style={{ marginRight: 6 }}
+          />
+          Tự chọn model
+        </label>
+      </div>
+      {project.provider_mode === "manual" ? (
+        <div className="stack-2">
+          <select
+            className="input"
+            value={project.selected_provider_id ?? ""}
+            disabled={dangLuu}
+            onChange={(e) => void capNhat({ selectedProviderId: e.target.value })}
+          >
+            {data.providers.map((p) => (
+              <option key={p.provider_id} value={p.provider_id}>{p.display_name}</option>
+            ))}
+          </select>
+          <label className="chip" style={{ cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={project.allow_fallback}
+              disabled={dangLuu}
+              onChange={(e) => void capNhat({ allowFallback: e.target.checked })}
+              style={{ marginRight: 6 }}
+            />
+            Tự động chuyển sang model miễn phí khác khi model đã chọn hết hạn mức
+          </label>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+const NHAN_PROVIDER_STATUS: Record<string, string> = {
+  available: "✓ Khả dụng",
+  rate_limited: "⚠ Đã đạt giới hạn",
+  quota_exhausted: "⚠ Đã đạt giới hạn miễn phí",
+  unavailable: "⛔ Không khả dụng",
+  disabled: "⛔ Đã tắt",
+  unknown: "· Chưa rõ",
+};
+
+function NhanTrangThaiProvider({ entry }: { entry: ProviderCatalogEntry }) {
+  const nhan = NHAN_PROVIDER_STATUS[entry.status] ?? entry.status;
+  if (entry.status === "available" || entry.status === "unknown") {
+    return <span className="hint">{nhan} · Miễn phí</span>;
+  }
+  const khiNao = entry.reset_at
+    ? `Khả dụng lại lúc ${new Date(entry.reset_at).toLocaleTimeString("vi-VN")}`
+    : "Đang chờ nhà cung cấp mở lại hạn mức";
+  return <span className="hint">{nhan} · {khiNao}</span>;
 }
 
 /* ============================================================ Novel Bible */
@@ -537,6 +725,8 @@ function GlossaryPanel({ projectId }: { projectId: string }) {
   const [goc, setGoc] = useState("");
   const [dich, setDich] = useState("");
   const [dangThem, setDangThem] = useState(false);
+  const [dangSuaTermId, setDangSuaTermId] = useState<string | null>(null);
+  const [giaTriSua, setGiaTriSua] = useState("");
 
   const them = useCallback(
     async (e: React.FormEvent) => {
@@ -573,6 +763,22 @@ function GlossaryPanel({ projectId }: { projectId: string }) {
     [projectId, toast, reload],
   );
 
+  const luuSua = useCallback(
+    async (termId: string) => {
+      if (!giaTriSua.trim()) return;
+      try {
+        await translate.updateGlossaryEntry(projectId, termId, {
+          translated: giaTriSua.trim(),
+        });
+        setDangSuaTermId(null);
+        reload();
+      } catch (cause) {
+        toast.error(errorMessage(cause));
+      }
+    },
+    [projectId, giaTriSua, toast, reload],
+  );
+
   return (
     <section className="card stack-2">
       <h2 className="section-title">Từ điển thuật ngữ (Novel Bible)</h2>
@@ -587,16 +793,60 @@ function GlossaryPanel({ projectId }: { projectId: string }) {
         <ul className="stack-2" style={{ listStyle: "none", padding: 0 }}>
           {data.entries.map((entry) => (
             <li key={entry.term_id} className="row-between">
-              <span>
-                <strong>{entry.original}</strong> → {entry.translated}
+              {dangSuaTermId === entry.term_id ? (
+                <span className="row row-tight">
+                  <strong>{entry.original}</strong> →
+                  <input
+                    className="input"
+                    style={{ maxWidth: 140 }}
+                    value={giaTriSua}
+                    maxLength={80}
+                    autoFocus
+                    onChange={(e) => setGiaTriSua(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void luuSua(entry.term_id)}
+                  >
+                    Lưu
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setDangSuaTermId(null)}
+                  >
+                    Huỷ
+                  </button>
+                </span>
+              ) : (
+                <span>
+                  <strong>{entry.original}</strong> → {entry.translated}
+                </span>
+              )}
+              <span className="row row-tight">
+                {dangSuaTermId !== entry.term_id ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    disabled={entry.locked}
+                    title={entry.locked ? "Mở khoá trước khi sửa." : undefined}
+                    onClick={() => {
+                      setDangSuaTermId(entry.term_id);
+                      setGiaTriSua(entry.translated);
+                    }}
+                  >
+                    Sửa
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => void doiKhoa(entry)}
+                >
+                  {entry.locked ? "🔒 Đã khoá" : "🔓 Khoá"}
+                </button>
               </span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => void doiKhoa(entry)}
-              >
-                {entry.locked ? "🔒 Đã khoá" : "🔓 Khoá"}
-              </button>
             </li>
           ))}
         </ul>

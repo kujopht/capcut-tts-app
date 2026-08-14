@@ -23,6 +23,7 @@ MUC TIEU THIET KE (theo dung yeu cau goc):
 from __future__ import annotations
 
 import os
+import re
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -142,6 +143,19 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+#: Mot so model "reasoning" (vd Qwen3 tren Groq) tra ve khoi
+#: `<think>...</think>` NGAY TRONG `message.content` — neu khong loc, toan bo
+#: chuoi suy luan noi bo se bi coi la "ban dich". Loc o day la RAO CHAN CUOI,
+#: doc lap voi viec co tat duoc bang tham so rieng cua tung nha cung cap hay
+#: khong (xem `GroqProvider.EXTRA_PAYLOAD` — da yeu cau Groq an no o nguon,
+#: nhung mot so model/phien ban co the khong tuan thu tham so do).
+_MAU_KHOI_NGHI = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+
+
+def _bo_khoi_nghi(noi_dung: str) -> str:
+    return _MAU_KHOI_NGHI.sub("", noi_dung or "").strip()
+
+
 def _retry_after_to_iso(resp: httpx.Response) -> str:
     """Doc header `Retry-After` (giay, hoac ngay thang HTTP) -> ISO tuyet
     doi. Tra rong neu khong doc duoc — KHONG BAO GIO bia mot con so."""
@@ -168,6 +182,12 @@ class _OpenAICompatFreeProvider(TranslationProvider):
 
     TIMEOUT_SECONDS = 60.0
 
+    #: Tham so THEM vao than request, ghi de o lop con cho tung nha cung cap
+    #: cu the (vd Groq dung `reasoning_format` de tat khoi suy luan cua cac
+    #: model "reasoning" — xem `GroqProvider`). Rong o day: mot endpoint
+    #: OpenAI-compatible bat ky khong chac hieu tham so rieng cua Groq.
+    EXTRA_PAYLOAD: Dict[str, object] = {}
+
     def __init__(self, *, base_url: str, api_key: str, model: str,
                 client: Optional[httpx.Client] = None):
         self._model = model
@@ -189,6 +209,7 @@ class _OpenAICompatFreeProvider(TranslationProvider):
                 {"role": "user", "content": _nguoi_dung_prompt(sach, context)},
             ],
             "temperature": 0.3,
+            **self.EXTRA_PAYLOAD,
         }
         try:
             resp = self._client.post("/chat/completions", json=payload)
@@ -217,16 +238,39 @@ class _OpenAICompatFreeProvider(TranslationProvider):
             raise TranslationProviderError(
                 "Phản hồi dịch vụ dịch không đúng định dạng mong đợi.") from exc
 
-        ket_qua = (noi_dung or "").strip()
+        ket_qua = _bo_khoi_nghi((noi_dung or "").strip())
         if not ket_qua:
             raise TranslationProviderError("Dịch vụ dịch trả về nội dung rỗng.")
         return ket_qua
 
 
 class GroqProvider(_OpenAICompatFreeProvider):
-    """Groq — REST tuong thich OpenAI, endpoint mien phi cho cac model Qwen."""
+    """
+    Groq — REST tuong thich OpenAI, endpoint mien phi cho cac model Qwen.
+
+    HAI dieu chinh CHI THAT SU can thiet den tu kiem thu SONG voi API that
+    (khong doan duoc tu tai lieu):
+
+    1. `reasoning_format: "hidden"` — cac model "reasoning" (vd
+       `qwen/qwen3.6-27b`) mac dinh tra ve khoi `<think>...</think>` NGAY
+       TRONG `message.content`. `_bo_khoi_nghi` (lop cha) van loc lai LAN
+       NUA cho chac — phong khi mot model/phien ban khong tuan thu tham so
+       nay.
+    2. `max_tokens: 4096` — model nay danh GAN NHU TOAN BO ngan sach token
+       cho suy luan noi bo (do THAT: mot cau ngan don gian da dung toi 3793/
+       4096 token suy luan, chi con ~30 token cho cau tra loi that). KHONG
+       dat gioi han nay, mot doan van tuong doi dai se bi CAT NGANG GIUA
+       CHUNG SUY LUAN — API van tra 200 nhung `message.content` RONG (khong
+       phai loi, khong phai rate limit, chi la het cho truoc khi kip viet
+       cau tra loi) — tung xay ra THAT va gay `TranslationProviderError`
+       "nội dung rỗng" o moi doan van dai vua phai.
+    """
 
     name = "groq"
+    EXTRA_PAYLOAD: Dict[str, object] = {
+        "reasoning_format": "hidden",
+        "max_tokens": 4096,
+    }
 
     def __init__(self, *, api_key: str, model: str,
                 client: Optional[httpx.Client] = None):
@@ -297,7 +341,9 @@ class CloudflareWorkersAIProvider(TranslationProvider):
             raise TranslationProviderError(
                 "Phản hồi dịch vụ dịch không đúng định dạng mong đợi.") from exc
 
-        ket_qua = (noi_dung or "").strip()
+        # Cung rao chan voi Groq — mot so model "reasoning" (kha nang co tren
+        # Workers AI trong tuong lai) co the tra `<think>` ngay trong content.
+        ket_qua = _bo_khoi_nghi((noi_dung or "").strip())
         if not ket_qua:
             raise TranslationProviderError("Dịch vụ dịch trả về nội dung rỗng.")
         return ket_qua

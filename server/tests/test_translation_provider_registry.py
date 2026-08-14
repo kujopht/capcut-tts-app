@@ -80,6 +80,74 @@ class GroqProviderTest(unittest.TestCase):
         with self.assertRaises(TranslationProviderError):
             GroqProvider(api_key="", model="qwen")
 
+    def test_yeu_cau_groq_an_khoi_suy_luan_o_nguon(self):
+        """Phat hien THAT qua kiem thu song voi Groq that (qwen/qwen3.6-27b
+        la model "reasoning"): phai gui `reasoning_format=hidden`."""
+        than_gui = {}
+
+        def handler(request):
+            than_gui.update(__import__("json").loads(request.content))
+            return _tra_loi_chat("Xin chào")
+
+        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(handler))
+        p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(than_gui.get("reasoning_format"), "hidden")
+
+    def test_gui_max_tokens_du_lon_cho_model_reasoning(self):
+        """Phat hien THAT qua kiem thu song: khong dat `max_tokens` du lon,
+        model danh gan het ngan sach cho suy luan noi bo va cat ngang TRUOC
+        khi kip viet cau tra loi — API tra 200 nhung content RONG (khong
+        phai loi, khong phai 429). Da do duoc voi mot cau ngan don gian (3793/
+        4096 token la suy luan). Khoa lai: PHAI gui `max_tokens` du lon."""
+        than_gui = {}
+
+        def handler(request):
+            than_gui.update(__import__("json").loads(request.content))
+            return _tra_loi_chat("Xin chào")
+
+        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(handler))
+        p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
+        self.assertIsInstance(than_gui.get("max_tokens"), int)
+        self.assertGreaterEqual(than_gui.get("max_tokens"), 2048)
+
+    def test_loc_khoi_think_neu_model_van_tra_ve(self):
+        """RAO CHAN CUOI: du da yeu cau `reasoning_format=hidden`, mot model/
+        phien ban khong tuan thu van khong duoc phep lam hong ban dich —
+        loi thu THAT tung xay ra voi qwen/qwen3.6-27b luc kiem thu song."""
+        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+            lambda r: _tra_loi_chat(
+                "<think>\nSuy nghĩ nội bộ dài dòng ở đây...\n</think>\n\n"
+                "Tiêu Viêm nhìn về phía Dược Lão.")))
+        ra = p.translate_segment("萧炎看向药老。",
+                                 context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(ra, "Tiêu Viêm nhìn về phía Dược Lão.")
+        self.assertNotIn("<think>", ra)
+
+    def test_content_toan_khoi_think_sau_loc_thanh_rong_nem_loi(self):
+        """Khac voi test tren (con cau tra loi SAU khoi think): o day content
+        CHI la khoi think, khong con gi sau khi loc — PHAI nem loi ro rang,
+        KHONG DUOC coi chuoi rong la mot ban dich thanh cong (mot ban dich
+        rong lam mat noi dung ma khong ai biet — dung nguyen tac chung cua
+        `TranslationProvider.translate_segment`)."""
+        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+            lambda r: _tra_loi_chat(
+                "<think>\nSuy nghĩ dài dòng nhưng KHÔNG BAO GIỜ kết luận...\n</think>")))
+        with self.assertRaises(TranslationProviderError):
+            p.translate_segment("萧炎看向药老。",
+                               context=TranslationContext(vai_tro="translator"))
+
+    def test_content_rong_that_do_bi_cat_ngang_nem_loi_ro_rang(self):
+        """Kich ban THAT tung gap khi kiem thu song: model bi cat ngang GIUA
+        CHUNG suy luan (het `max_tokens` truoc khi kip viet cau tra loi) —
+        API tra 200 nhung `message.content` la CHUOI RONG tu dau (khong co
+        khoi think nao de loc). Phai nem loi, khong duoc coi la thanh cong."""
+        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+            lambda r: _tra_loi_chat("")))
+        with self.assertRaises(TranslationProviderError) as ctx:
+            p.translate_segment("萧炎看向药老。",
+                               context=TranslationContext(vai_tro="translator"))
+        self.assertIn("rỗng", str(ctx.exception))
+
 
 class CloudflareProviderTest(unittest.TestCase):
     def test_phan_hoi_binh_thuong(self):

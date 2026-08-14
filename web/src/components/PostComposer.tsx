@@ -33,6 +33,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, social, type Post, type ServerLimits } from "@/lib/api";
 import { xuLyAnh, type AnhDaXuLy } from "@/lib/image";
 import { useSession } from "@/lib/session";
+import { Avatar } from "@/components/Avatar";
 
 /** Cạnh dài nhất. Dùng khi máy chủ chưa trả giới hạn về. */
 const CANH_DU_PHONG = 1600;
@@ -174,9 +175,7 @@ export function PostComposer({
   if (!moRong) {
     return (
       <section className="card soan-bai-moi" aria-label="Đăng bài mới">
-        <span className="avatar" aria-hidden="true">
-          {tenToi.slice(0, 2).toUpperCase()}
-        </span>
+        <Avatar name={tenToi} avatarUrl={profile?.avatar_url} className="avatar" />
         <button
           type="button"
           className="soan-bai-kich-hoat"

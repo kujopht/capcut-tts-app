@@ -21,6 +21,8 @@ const postCard = () => read("../src/components/PostCard.tsx");
 const commentThread = () => read("../src/components/CommentThread.tsx");
 const searchOverlay = () => read("../src/components/SearchOverlay.tsx");
 const publicProfile = () => read("../src/app/u/[username]/page.tsx");
+const postComposer = () => read("../src/components/PostComposer.tsx");
+const communitySidebar = () => read("../src/components/CommunitySidebar.tsx");
 const api = () => read("../src/lib/api.ts");
 
 test("AuthorCard (kieu dung chung cho bai/binh luan/tim kiem) co avatar_url", () => {
@@ -52,12 +54,34 @@ test("Trang ho so cong khai (/u/[username]) hien avatar that", () => {
   assert.match(src, /avatarUrl=\{p\.avatar_url\}/);
 });
 
-test("khong con noi nao trong 5 be mat nay tu ve chu cai bang slice(0, 2)", () => {
+/*
+  Hai be mat nay bi bo sot khi <Avatar> ra doi (thay <span> tu ve tay o moi
+  noi) — QA that phat hien: hang kich hoat cua PostComposer va danh sach
+  "Tác giả nổi bật" cua CommunitySidebar VAN con ve chu cai suong du profile
+  DA co avatar_url that. Kiem rieng vi ca hai deu KHONG nam trong "5 be mat"
+  ma phien lam avatar ban dau da liet ke.
+*/
+test("PostComposer hien avatar that o hang kich hoat (khong chi luc mo rong)", () => {
+  const src = postComposer();
+  assert.match(src, /<Avatar\s+name=\{tenToi\}\s+avatarUrl=\{profile\?\.avatar_url\}/);
+});
+
+test("CommunitySidebar (Tác giả nổi bật) hien avatar that cua tung nguoi", () => {
+  const src = communitySidebar();
+  assert.match(
+    src,
+    /avatarUrl=\{p\.avatar_url\}/,
+    "danh sách tác giả nổi bật không đọc avatar_url",
+  );
+});
+
+test("khong con noi nao trong 6 be mat nay tu ve chu cai bang slice(0, 2)", () => {
   /*
     Rao chan chong hoi quy: neu ai do sau nay quay lai kieu cu (chep tay
     span+slice thay vi dung <Avatar>), bai nay do duoc ngay.
   */
-  for (const src of [postCard(), commentThread(), searchOverlay(), publicProfile()]) {
+  for (const src of [postCard(), commentThread(), searchOverlay(), publicProfile(),
+                     postComposer(), communitySidebar()]) {
     assert.doesNotMatch(src, /\.slice\(0,\s*2\)\.toUpperCase\(\)/);
   }
 });

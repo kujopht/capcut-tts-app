@@ -1,0 +1,104 @@
+# Unit systemd cho worker DỊCH THUẬT PRODUCTION trên Google Compute Engine.
+#
+# Cài đặt: xem "Bước 6" trong `deploy/RUNBOOK-PRODUCTION.md` (thao tác thủ
+# công song song với `fanfic-worker-prod.service` — KHÔNG dùng chung script
+# `install_gce_worker.sh`, vì script đó kiểm model/ffmpeg riêng cho TTS).
+#
+# TỆP NÀY KHÔNG CHỨA GIÁ TRỊ BÍ MẬT NÀO. Secret nằm ở
+# /etc/fanfic-audio/translation-worker-prod.env, quyền 0600, không bao giờ
+# vào git.
+#
+# ============================================================================
+#  KHÁC GÌ `fanfic-worker-prod.service` (bản TTS)
+# ============================================================================
+#
+#  | Hạng mục            | TTS (worker-prod)        | dịch thuật (tệp này)        |
+#  |---------------------|--------------------------|------------------------------|
+#  | ExecStart module     | server.worker            | **server.translation_worker**|
+#  | EnvironmentFile      | worker-prod.env          | **translation-worker-prod.env**|
+#  | StateDirectory        | fanfic-audio-prod        | **fanfic-audio-translation-prod**|
+#  | FAS_PIPER_MODELS_DIR  | có đặt                   | **không đặt (không cần TTS)**|
+#
+#  Hai unit ĐỘC LẬP HOÀN TOÀN — bảng riêng (translation_jobs/translation_job_
+#  claims, không phải tts_jobs/job_claims), StateDirectory riêng nên tệp nhịp
+#  không ghi đè nhau, và unit này KHÔNG BAO GIỜ được cài/khởi động bằng cách
+#  sửa hay restart `fanfic-worker-prod.service`.
+#
+# ============================================================================
+#  VÌ SAO `User=fanfic` — xem chú thích đầy đủ trong `fanfic-worker-prod.service`.
+# ============================================================================
+
+[Unit]
+Description=Fanfic Audio Studio — translation worker (PRODUCTION)
+Documentation=file:/opt/fanfic-audio/deploy/RUNBOOK-PRODUCTION.md
+# `network-online` chứ không phải `network`: worker gọi Appwrite và provider
+# dịch (Groq/...) ngay ở vòng quét đầu tiên.
+After=network-online.target
+Wants=network-online.target
+# Sập 5 lần trong 5 phút thì dừng hẳn. Crash liên tục là lỗi cấu hình, và một
+# tiến trình restart mãi chỉ làm log ngập mà không ai để ý.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=fanfic
+Group=fanfic
+WorkingDirectory=/opt/fanfic-audio
+
+# SECRET CHỈ ĐẾN TỪ ĐÂY — bao gồm TRANSLATION_BYOK_MASTER_KEY, PHẢI cùng giá
+# trị với biến cùng tên trên backend API (cả hai giải mã chung
+# ProviderConnection.encrypted_secret). Không `Environment=` nào mang giá trị
+# nhạy cảm, nên `systemctl show` và `ps auxe` không lộ gì.
+EnvironmentFile=/etc/fanfic-audio/translation-worker-prod.env
+
+# Không bí mật — để ở đây cho rõ, và để tệp env chỉ còn đúng secret.
+Environment=PYTHONPATH=/opt/fanfic-audio
+Environment=PYTHONUNBUFFERED=1
+Environment=FAS_VAR_DIR=/var/lib/fanfic-audio-translation-prod
+Environment=FAS_INLINE_WORKER=false
+Environment=FAS_TRANSLATION_INLINE_WORKER=false
+
+# `--require-env production` là rào chắn chống trỏ nhầm tài nguyên: nếu tệp
+# env bị thay bằng cấu hình staging thì worker thoát ngay với mã 2 thay vì
+# lặng lẽ xử lý job của môi trường khác.
+ExecStart=/opt/fanfic-audio/.venv/bin/python -m server.translation_worker --require-env production
+
+Restart=always
+RestartSec=10
+# Mã 2 = "FAS_ENV không khớp". Lỗi cấu hình, restart bao nhiêu lần cũng không
+# tự khỏi — dừng hẳn để người vận hành thấy.
+RestartPreventExitStatus=2
+
+# DỪNG SẠCH. Worker bắt SIGTERM, ngừng nhận job mới, rồi chờ job đang chạy
+# xong trong FAS_TRANSLATION_WORKER_GRACE_SECONDS. TimeoutStopSec phải DÀI
+# HƠN con số đó, nếu không systemd sẽ SIGKILL đúng lúc worker đang chờ tử tế.
+KillSignal=SIGTERM
+TimeoutStopSec=300
+KillMode=mixed
+
+# /var/lib/fanfic-audio-translation-prod — systemd tự tạo, tự chown, còn
+# nguyên sau reboot. RIÊNG với thư mục của worker TTS.
+StateDirectory=fanfic-audio-translation-prod
+StateDirectoryMode=0750
+
+# -- rào chắn quyền ----------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# `ProtectSystem=strict` khoá toàn hệ thống ở chế độ chỉ đọc. Đây là ngoại lệ
+# DUY NHẤT được mở ra để ghi.
+ReadWritePaths=/var/lib/fanfic-audio-translation-prod
+
+# Worker KHÔNG mở cổng nào. Nó không phục vụ request, nên không cần cổng vào,
+# và VM không cần mở 80/443 cho nó.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fanfic-translation-worker-prod
+
+[Install]
+WantedBy=multi-user.target

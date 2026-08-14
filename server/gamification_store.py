@@ -1,12 +1,16 @@
 """
-Kho gamification — V4 visual completion, vong 2.
+Kho gamification trong bo nho — V4 visual completion, vong 2.
 
-CHUA phai kho ben vung Appwrite — dung mau voi `MockTranslationStore` o giai
-doan dau cua V5 (xem ghi chu trong `gamification_domain.py`): logic idempotent
-(chan XP/thanh tuu/vat pham bi cong/mo/cap hai lan) da DAY DU va CO TEST o
-day, doc lap voi ha tang. Khi can ben vung that qua restart, them mot ban
-Appwrite CUNG giao dien nay — cac route trong `server/main.py` va tang
-service se KHONG doi mot dong nao.
+Logic idempotent (chan XP/thanh tuu/vat pham bi cong/mo/cap hai lan) DAY DU
+va CO TEST o day, doc lap voi ha tang — dung lam kho cho test va cho
+`DATA_BACKEND != appwrite`. Ban ben vung that qua restart la
+`server/appwrite_gamification_store.py::AppwriteGamificationStore` (them ở
+vong 3 overnight) — CUNG giao dien nay, `gamification_service.py` va route
+trong `server/main.py` khong biet dang chay tren kho nao.
+
+`build_gamification_store()` cua kho THAT (chon Mock/Appwrite theo
+`DATA_BACKEND`) nam o `appwrite_gamification_store.py`, KHONG phai o day —
+module nay chi con dinh nghia `MockGamificationStore`.
 
 MOT MIXIN doc lap — khong dung chung bang voi `tts_jobs`/`translation_*`.
 """
@@ -112,14 +116,3 @@ class MockGamificationStore:
             if muc is None:
                 raise NotFoundError("Bạn chưa có vật phẩm này.")
             muc.equipped = equipped
-
-
-def build_gamification_store(settings) -> "MockGamificationStore":
-    """
-    Chon kho gamification — CUNG MAU voi `translation_store.build_
-    translation_store`. HIEN CHUA co ban Appwrite (xem docstring dau module
-    nay) nen luon tra ve kho trong bo nho, BAT KE `DATA_BACKEND` — day la
-    gioi han da biet va da ghi trong bao cao phat hanh, khong phai mot loi
-    am tham lui ve mock.
-    """
-    return MockGamificationStore()

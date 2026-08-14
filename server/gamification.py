@@ -28,6 +28,7 @@ nghe) — day la truc THU HAI, doc lap: thanh tuu la "ban da lam gi", hang la
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
@@ -192,12 +193,39 @@ XP_EVENTS: Dict[str, int] = {
 
 def id_xp_entry(user_id: str, event_type: str, source_id: str) -> str:
     """
-    ID TAT DINH cho MOT lan cong XP — cung ky thuat voi
-    `translation_domain.id_ket_noi_provider`/`creator.credit_key`: cung
-    (user_id, event_type, source_id) luon ra CUNG mot id, nen ghi lai lan
-    hai chi la upsert vo hai thay vi cong don sai.
+    ID TAT DINH cho MOT lan cong XP: cung (user_id, event_type, source_id)
+    LUON ra cung mot id — o MOI tien trinh, MOI lan chay, MOI worker.
+
+    Dung `hashlib.sha256` chu KHONG dung `hash()` cua Python: `hash()` tren
+    str/tuple duoc "muoi" ngau nhien theo `PYTHONHASHSEED` MOI KHI tien
+    trinh Python khoi dong (chong tan cong hash-flooding) — nghia la cung
+    mot bo ba tren HAI tien trinh khac nhau (vi du sau khi restart server,
+    hoac hai worker gunicorn khac nhau) se ra HAI id KHAC NHAU. Voi kho
+    trong bo nho (`MockGamificationStore`, chi song trong MOT tien trinh)
+    dieu do vo hai, nhung vua pha vo dung yeu cau idempotent-qua-restart ma
+    `AppwriteGamificationStore` can co — mot lan thu lai sau khi server
+    restart se sinh entry_id moi va CONG XP LAN HAI. `sha256` khong phu
+    thuoc tien trinh, nen id luon giong het nhau bat ke chay o dau.
     """
-    return f"xp_{abs(hash((user_id, event_type, source_id))) % (10 ** 12):012x}"
+    khoa = "\x1f".join((user_id, event_type, source_id)).encode("utf-8")
+    return f"xp_{hashlib.sha256(khoa).hexdigest()[:24]}"
+
+
+def id_mo_khoa_thanh_tuu(user_id: str, achievement_key: str) -> str:
+    """ID TAT DINH cho MOT ban ghi mo khoa thanh tuu — cung ky thuat va cung
+    ly do voi `id_xp_entry` (sha256, khong dung `hash()`): dung lam Appwrite
+    documentId de chinh Appwrite cuong che "mot nguoi chi mo MOT lan cho MOI
+    thanh tuu", khong can doc-truoc-roi-ghi."""
+    khoa = "\x1f".join((user_id, achievement_key)).encode("utf-8")
+    return f"au_{hashlib.sha256(khoa).hexdigest()[:24]}"
+
+
+def id_vat_pham_kho(user_id: str, cosmetic_key: str) -> str:
+    """ID TAT DINH cho MOT hang trong kho vat pham — cung ky thuat voi
+    `id_xp_entry`/`id_mo_khoa_thanh_tuu`: Appwrite tu choi tao hang thu hai
+    cung id, nen rut trung vat pham tu nhien khong tao ban sao."""
+    khoa = "\x1f".join((user_id, cosmetic_key)).encode("utf-8")
+    return f"ci_{hashlib.sha256(khoa).hexdigest()[:24]}"
 
 
 def title_unlocked(xp: int, title_key: str) -> bool:

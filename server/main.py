@@ -61,7 +61,7 @@ from server.gamification_service import (
     equip_title,
     open_reward_pack,
 )
-from server.gamification_store import build_gamification_store
+from server.appwrite_gamification_store import build_gamification_store
 from server.domain import (
     AudioStamp,
     AudioTrack,

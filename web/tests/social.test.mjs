@@ -583,10 +583,13 @@ test("khoi binh luan chuong: gap/mo, mac dinh theo be rong, an voi ban nhap", ()
   assert.match(src, /placeholder="Bạn nghĩ gì về chương này\?"/);
 });
 
-test("trang chuong gan khoi binh luan o CA hai nhanh co/khong audio", () => {
+test("trang doc chuong luon gan khoi binh luan, khong phu thuoc audio", () => {
+  // Overnight Phase 2 (Phan 2A): trang doc khong con re nhanh theo audio nua
+  // (chi chu — audio la viec cua `/listen/[id]`), nen binh luan gio chi con
+  // MOT lan xuat hien duy nhat, luon hien.
   const trang = read("../src/app/chapters/[id]/page.tsx");
   const dem = (trang.match(/<ChapterComments /g) ?? []).length;
-  assert.equal(dem, 2, "phải có ở nhánh có audio LẪN nhánh chưa có audio");
+  assert.equal(dem, 1, "bình luận phải luôn hiện, không rẽ nhánh theo audio");
 });
 
 test("composer bang tin: hang kich hoat quen thuoc, mo roi focus", () => {

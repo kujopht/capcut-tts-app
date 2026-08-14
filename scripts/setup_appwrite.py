@@ -500,6 +500,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("duration_seconds", "double", False, None),
             ("size_bytes", "integer", False, None),
             ("created_at", "datetime", True, None),
+            # Phu de dong bo (V4, Phan 2H) — additive. Khoa sidecar trong CUNG
+            # kho voi `object_key` (R2/local), KHONG phai noi dung transcript:
+            # xem `server/transcript.py` va docstring `AudioTrack`.
+            ("transcript_key", "string", False, 512),
+            ("transcript_version", "integer", False, None),
+            ("source_content_hash", "string", False, 64),
         ],
         "indexes": [
             ("chapter_idx", "key", ["chapter_id"]),

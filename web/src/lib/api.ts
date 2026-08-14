@@ -336,6 +336,38 @@ export interface AudioTrack {
   created_at: string;
 }
 
+/** Mot doan hien thi cua phu de dong bo — xem `server/transcript.py`. */
+export interface TranscriptSegment {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+}
+
+/**
+ * Phu de dong bo sinh TU CHINH van ban TTS, khong phai ASR — xem
+ * `server/transcript.py`. `available: false` khi chua co (audio cu, hoac
+ * mot phan khong do duoc luc tong hop): CAC TRUONG KHAC deu vang mat luc do,
+ * dung kiem `available` truoc khi doc bat ky truong nao khac.
+ */
+export type ChapterTranscript =
+  | { available: false }
+  | {
+      available: true;
+      version: number;
+      track_id: string;
+      chapter_id: string;
+      source_content_hash: string;
+      duration_ms: number;
+      /**
+       * Chuoi CO NGHIA mo ta do chinh xac — vi du
+       * `"part_exact_sentence_estimated"`: thoi luong CA PHAN chinh xac
+       * (do bang ffprobe), thoi diem TUNG DOAN la UOC LUONG theo ty le ky
+       * tu. KHONG BAO GIO chinh xac tung tu.
+       */
+      timing_quality: string;
+      segments: TranscriptSegment[];
+    };
+
 /** Loi API kem thong bao tieng Viet de hien thi thang cho nguoi dung. */
 export class ApiError extends Error {
   status: number;
@@ -763,6 +795,17 @@ export const api = {
       /** Chuong sua sau khi tao audio -> audio co the khong con khop. */
       audio_outdated?: boolean;
     }>(`/api/chapters/${chapterId}`),
+
+  /**
+   * Phu de dong bo cua audio HIEN TAI cua chuong (V4, Phan 2F-2I).
+   *
+   * `available: false` la trang thai HOP LE (chua co audio, audio cu tu
+   * truoc tinh nang nay, hoac mot phan khong do duoc thoi luong luc tong
+   * hop) — KHONG phai loi. Giao dien phai ve duoc ca hai truong hop, khong
+   * coi `false` la mot ngoai le can bat.
+   */
+  getChapterTranscript: (chapterId: string) =>
+    request<ChapterTranscript>(`/api/chapters/${chapterId}/transcript`),
 
   /**
    * Dat lai thu tu chuong bang MOT request.

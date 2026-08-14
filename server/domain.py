@@ -596,6 +596,19 @@ class AudioTrack:
     size_bytes: int = 0
     track_id: str = field(default_factory=lambda: new_id("trk"))
     created_at: str = field(default_factory=now_iso)
+    #: Khoa sidecar phu de dong bo trong CUNG kho voi `object_key` (vi du
+    #: `audio/.../x.mp3` -> `audio/.../x.transcript.json`) — rong khi CHUA co
+    #: (audio cu tu truoc tinh nang nay, hoac ffprobe khong do duoc mot phan
+    #: nao do luc tong hop). Xem `server/transcript.py` (web V4, Phan 2H).
+    transcript_key: str = ""
+    #: Khop `transcript.TRANSCRIPT_VERSION` luc sinh — de sau nay doi cach
+    #: tinh thoi gian ma van biet ban cu dung cong thuc nao.
+    transcript_version: int = 0
+    #: TRUNG VOI `content_hash` tai thoi diem sinh transcript — chua chac
+    #: TRUNG voi `content_hash` cua track (vi du neu sau nay transcript duoc
+    #: sinh lai doc lap). Dung de kiem phien ban truoc khi hien thi, tranh
+    #: dong bo nham phu de cua mot ban van khac (Phan 2L).
+    source_content_hash: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -608,6 +621,9 @@ class AudioTrack:
             "duration_seconds": self.duration_seconds,
             "size_bytes": self.size_bytes,
             "created_at": self.created_at,
+            "transcript_key": self.transcript_key,
+            "transcript_version": self.transcript_version,
+            "source_content_hash": self.source_content_hash,
         }
 
 

@@ -1435,6 +1435,53 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 }
 .achievement-card-progress { font-size: var(--t-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
 
+/* -- phu de dong bo (Phan 2F-2K, overnight Phase 2) ----------------------- */
+
+.synced-transcript-wrap { position: relative; display: flex; flex-direction: column; gap: var(--s2); }
+.synced-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: var(--s3);
+  border-radius: var(--r3);
+  border: 1px solid var(--kinh-vien);
+  background: linear-gradient(180deg, #0d1019f2, #090b12f7);
+}
+.synced-transcript-trong { padding: var(--s3) 0; }
+/* Moi doan la mot <button>: bam de tua toi, ban phim di duoc qua Tab —
+   xoa kieu <button> mac dinh, giu doc nhu mot doan van thuong. */
+.synced-seg {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--r2);
+  padding: var(--s2) var(--s2);
+  cursor: pointer;
+  line-height: 1.6;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.synced-seg:hover { background: var(--bg-3); color: var(--text-1); }
+.synced-seg:disabled { cursor: default; }
+.synced-seg-active {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--brand-hover) 16%, transparent);
+  border-left: 3px solid var(--brand-hover);
+  padding-left: calc(var(--s2) - 3px);
+  font-weight: 600;
+}
+.synced-transcript-resume {
+  align-self: center;
+  position: sticky;
+  bottom: var(--s2);
+}
+.synced-transcript-do-chinh-xac { margin: 0; }
+
 /* Lop CHU DINH cho tung do hiem — khong dat mau qua `style` inline (cung
    quy uoc voi `.feature-studio`/`.feature-fanfic`: gia tri mau CHI nam
    trong token/CSS, JSX chi chon lop). DUNG CHUNG cho `.achievement-card` VA
@@ -2951,6 +2998,44 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   overflow-wrap: anywhere;
 }
 .listen-hero-novel { margin-bottom: var(--s2); }
+
+/* -- trang Nghe rieng (Phan 2A-2K, overnight Phase 2) --------------------- */
+
+.listen-nav { max-width: 820px; flex-wrap: wrap; gap: var(--s2); }
+.listen-nav [aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+.listen-chon-tap {
+  max-width: 820px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-radius: var(--r3);
+  border: 1px solid var(--kinh-vien);
+  background: var(--bg-2);
+}
+.listen-chon-tap-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  overflow-y: auto;
+  gap: 2px;
+}
+.listen-chon-tap-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2);
+  border-radius: var(--r2);
+  color: var(--text-2);
+}
+.listen-chon-tap-item:hover { background: var(--bg-3); color: var(--text-1); }
+.listen-chon-tap-item.la-chon {
+  background: color-mix(in srgb, var(--brand-hover) 16%, transparent);
+  color: var(--text-1);
+  font-weight: 600;
+}
+.listen-chon-tap-item .badge { margin-left: auto; flex: 0 0 auto; }
+.listen-ban-chu { max-width: 820px; }
 
 /* ---------------------------------------------------------- nut phat lon */
 
@@ -5517,6 +5602,7 @@ body.co-mini { padding-bottom: 74px; }
 
 @media (prefers-reduced-motion: reduce) {
   .da-thich .bai-tim { animation: none; }
+  .synced-seg { transition: none; }
 }
 
 /* =============================================================================

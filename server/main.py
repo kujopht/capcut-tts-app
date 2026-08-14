@@ -29,6 +29,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, StringConstraints
 
 from server import tts_bridge
+from server.transcript import TRANSCRIPT_VERSION, build_transcript
 from server.adapters import (
     AuthError,
     LocalStorageAdapter,
@@ -1057,6 +1058,9 @@ def _purge_chapter(chapter: Chapter) -> Dict[str, int]:
 
     tracks = store.tracks_for_chapter(chapter.chapter_id)
     keys = [track.object_key for track in tracks if track.object_key]
+    # Sidecar phu de di THEO audio — khong xoa rieng no thi cu moi lan tao lai
+    # audio la mot file JSON mo coi nam lai trong kho (Phan 2H).
+    keys += [track.transcript_key for track in tracks if track.transcript_key]
     for track in tracks:
         store.delete_track(track.track_id)
         removed["tracks"] += 1
@@ -1332,27 +1336,9 @@ def get_chapter(chapter_id: str,
     truyen ma bo ngo o day thi vo nghia, chi can biet id chuong la doc duoc het
     noi dung cua mot truyen chua xuat ban.
     """
-    try:
-        chapter = store.get_chapter(chapter_id)
-    except NotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
-
-    # Kem theo truyen cha: luong nghe can bia va ten truyen, va nho vay tang
-    # tren khong phai goi them mot vong `/api/novels/{id}` nua.
-    try:
-        novel: Optional[Novel] = store.get_novel(chapter.novel_id)
-    except NotFoundError:
-        novel = None
-
+    chapter, novel = _chapter_with_novel_or_404(chapter_id)
     viewer = optional_profile(authorization)
-    if novel is not None:
-        allowed = _may_read(novel, viewer)
-    else:
-        # Chuong mo coi (khong co truyen cha) khong sinh ra tu duong chay nao —
-        # xem docs/HANDOFF.md muc "Xu ly mo coi". Khong xac minh duoc trang thai
-        # xuat ban thi cho phia an toan: chi chu so huu doc duoc.
-        allowed = viewer is not None and viewer.user_id == chapter.owner_id
-    if not allowed:
+    if not _can_read_chapter(chapter, novel, viewer):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
 
     track = store.track_for_chapter(chapter_id)
@@ -1364,6 +1350,67 @@ def get_chapter(chapter_id: str,
         # Chi la canh bao, khong bao gio la ly do de xoa file audio.
         "audio_outdated": _audio_outdated(chapter, _stamp_for(chapter, track)),
     }
+
+
+def _chapter_with_novel_or_404(chapter_id: str) -> Tuple[Chapter, Optional[Novel]]:
+    """DUNG CHUNG cho `GET /api/chapters/{id}` va
+    `GET /api/chapters/{id}/transcript` — cung mot chuong thi cung mot quyen
+    doc, tach rieng se co ngay hai route lech nhau ve ai xem duoc gi."""
+    try:
+        chapter = store.get_chapter(chapter_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    try:
+        novel: Optional[Novel] = store.get_novel(chapter.novel_id)
+    except NotFoundError:
+        novel = None
+    return chapter, novel
+
+
+def _can_read_chapter(chapter: Chapter, novel: Optional[Novel],
+                      viewer: Optional[Profile]) -> bool:
+    if novel is not None:
+        return _may_read(novel, viewer)
+    # Chuong mo coi (khong co truyen cha) khong sinh ra tu duong chay nao —
+    # xem docs/HANDOFF.md muc "Xu ly mo coi". Khong xac minh duoc trang thai
+    # xuat ban thi cho phia an toan: chi chu so huu doc duoc.
+    return viewer is not None and viewer.user_id == chapter.owner_id
+
+
+@app.get("/api/chapters/{chapter_id}/transcript")
+def get_chapter_transcript(
+    chapter_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """
+    Phu de dong bo cua ban audio HIEN TAI cua chuong — V4, Phan 2H/2I.
+
+    CUNG quyen doc voi `GET /api/chapters/{id}` — ai doc duoc chuong thi nghe
+    duoc audio cua no, nen cung xem duoc phu de cua audio do.
+
+    TRUNG THUC ve trang thai — KHONG BAO GIO bia du lieu:
+      - Chua co audio, hoac audio chua co transcript (sinh truoc tinh nang
+        nay, hoac ffprobe khong do duoc mot phan luc tong hop) -> tra
+        `{"available": false}`, KHONG phai 404 — day la trang thai HOP LE,
+        khong phai loi.
+      - Co transcript nhung file sidecar bien mat khoi kho (hi hoa, khong
+        nen xay ra) -> cung `{"available": false}` thay vi 500, vi day van
+        la mot trang thai nguoi dung CO THE gap va giao dien phai ve duoc.
+    """
+    chapter, novel = _chapter_with_novel_or_404(chapter_id)
+    viewer = optional_profile(authorization)
+    if not _can_read_chapter(chapter, novel, viewer):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
+
+    track = store.track_for_chapter(chapter_id)
+    if track is None or not track.transcript_key:
+        return {"available": False}
+    try:
+        raw = storage.get(track.transcript_key)
+        data = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return {"available": False}
+    return {"available": True, **data}
 
 
 @app.patch("/api/chapters/{chapter_id}")
@@ -1641,6 +1688,35 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
         if not duration:
             print(f"canh bao: khong do duoc thoi luong audio cua job "
                   f"{job.job_id} — track se ghi duration_seconds=0")
+
+        # -- phu de dong bo (V4, Phan 2F-2H) — VIEC PHU, khong duoc lam hong
+        # audio da tong hop xong. Loi o day chi bo trong ket qua transcript
+        # rong ("chua co" — Phan 2I), khong bao gio bien mot job THANH CONG
+        # thanh `failed`.
+        transcript_key = ""
+        chunks = result.get("chunks")
+        phan_thoi_luong = result.get("part_durations_seconds")
+        if chunks and phan_thoi_luong and all(d for d in phan_thoi_luong):
+            try:
+                transcript = build_transcript(
+                    chunks, phan_thoi_luong,
+                    chapter_id=job.chapter_id,
+                    # `track_id` chua sinh (AudioTrack() sinh no ben duoi) —
+                    # nhung khoa doc lap voi track_id, mien LUON DI KEM CUNG
+                    # `output_key` (chinh no da khoa 1-1 theo content_hash),
+                    # nen dung mot gia tri du doan duoc thay vi sinh truoc.
+                    track_id=f"trk_{job.content_hash[:24]}",
+                    source_content_hash=job.content_hash,
+                )
+                khoa_transcript = output_key[:-len(".mp3")] + ".transcript.json"
+                storage.put(khoa_transcript,
+                           json.dumps(transcript, ensure_ascii=False).encode("utf-8"),
+                           content_type="application/json")
+                transcript_key = khoa_transcript
+            except Exception as exc:
+                print(f"canh bao: khong sinh duoc transcript cho job "
+                      f"{job.job_id}: {exc}")
+
         store.create_track(AudioTrack(
             chapter_id=job.chapter_id,
             owner_id=job.owner_id,
@@ -1649,6 +1725,9 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
             content_hash=job.content_hash,
             size_bytes=result["size_bytes"],
             duration_seconds=float(duration or 0.0),
+            transcript_key=transcript_key,
+            transcript_version=TRANSCRIPT_VERSION if transcript_key else 0,
+            source_content_hash=job.content_hash if transcript_key else "",
         ))
 
         # -- transition: running -> completed --------------------------------

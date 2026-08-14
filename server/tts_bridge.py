@@ -472,6 +472,13 @@ def _tong_hop_cac_doan(registry, voice, chunks, dest, rate, cancel,
     """Tong hop tung doan roi ghep. Tach ra chi de `synthesize_chapter` con doc duoc."""
     work_dir = Path(tempfile.mkdtemp(prefix="fas_web_tts_"))
     part_paths: List[Path] = []
+    # Thoi luong THAT cua TUNG phan — do NGAY sau khi tong hop xong phan do,
+    # TRUOC khi `finally` xoa het file tam. Day la du lieu goc de dung phu de
+    # dong bo (V4, Phan 2F): xem `server/transcript.py::build_transcript`.
+    # `None` (khong phai 0.0) khi ffprobe khong do duoc phan do — phan biet
+    # voi "do duoc va dai 0 giay" de noi goi biet KHONG dung duoc gia tri nay
+    # cho phu de, thay vi am tham coi 0 la mot con so that.
+    part_durations_seconds: List[Optional[float]] = []
     try:
         for index, chunk in enumerate(chunks, start=1):
             part = work_dir / f"part_{index:03d}.mp3"
@@ -492,6 +499,7 @@ def _tong_hop_cac_doan(registry, voice, chunks, dest, rate, cancel,
                 ) from exc
 
             part_paths.append(part)
+            part_durations_seconds.append(probe_duration_seconds(part))
             if on_progress:
                 on_progress(index, len(chunks))
 
@@ -506,6 +514,12 @@ def _tong_hop_cac_doan(registry, voice, chunks, dest, rate, cancel,
             "duration_seconds": probe_duration_seconds(Path(dest)),
             "voice_id": voice.id,
             "provider": voice.provider,
+            # Hai truong duoi day di THANH CAP voi nhau, CUNG thu tu — hop dong
+            # voi `server/transcript.py::build_transcript`. Nguoi goi (V4, Phan
+            # 2F) chi duoc dung de dung phu de khi KHONG co gia tri `None` nao
+            # trong `part_durations_seconds`.
+            "chunks": list(chunks),
+            "part_durations_seconds": part_durations_seconds,
         }
     finally:
         # Xoa MOI THU trong thu muc lam viec, khong chi nhung part da ghi nhan.

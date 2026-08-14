@@ -19,7 +19,10 @@ const engine = () => read("../src/components/AudioEngine.tsx");
 const hero = () => read("../src/components/ChapterPlayer.tsx");
 const mini = () => read("../src/components/MiniPlayer.tsx");
 const globalMini = () => read("../src/components/GlobalMiniPlayer.tsx");
-const trang = () => read("../src/app/chapters/[id]/page.tsx");
+/** Trang Nghe rieng (overnight Phase 2, Phan 2A) — day la trang goi
+    `phat()`/`useAudioEngine()` gio, tach khoi trang doc `/chapters/[id]`. */
+const trang = () => read("../src/app/listen/[id]/page.tsx");
+const trangDoc = () => read("../src/app/chapters/[id]/page.tsx");
 const layout = () => read("../src/app/layout.tsx");
 const css = () => read("../src/app/globals.css");
 
@@ -60,12 +63,19 @@ test("ca hai trinh phat doc CUNG mot ngu canh, cung dong co toan cuc", () => {
   const trong = l.slice(mo, dong);
   assert.match(trong, /\{children\}/, "children nằm ngoài ngữ cảnh audio");
   assert.match(trong, /<GlobalMiniPlayer/, "thanh phát toàn tuyến nằm ngoài ngữ cảnh");
-  // Trang doc chuong KHONG tu mo mot provider rieng — chi goi `phat()` de bien
+  // Trang Nghe KHONG tu mo mot provider rieng — chi goi `phat()` de bien
   // chuong cua no thanh bai dang phat toan cuc.
   const t = trang();
-  assert.ok(!/<AudioEngineProvider/.test(t), "trang chương tự mở provider riêng");
-  assert.match(t, /useAudioEngine\(\)/, "trang chương không lấy điều khiển từ ngữ cảnh chung");
-  assert.match(t, /\.phat\(chapter\.chapter_id, chapter\.title\)/, "trang chương không gọi phat()");
+  assert.ok(!/<AudioEngineProvider/.test(t), "trang Nghe tự mở provider riêng");
+  assert.match(t, /useAudioEngine\(\)/, "trang Nghe không lấy điều khiển từ ngữ cảnh chung");
+  assert.match(t, /\.phat\(chapter\.chapter_id, chapter\.title\)/, "trang Nghe không gọi phat()");
+
+  // Trang doc (`/chapters/[id]`) gio KHONG con cham toi audio nua — day la
+  // rang buoc MOI cua overnight Phase 2 (Phan 2A/2E: doc va nghe la HAI
+  // trai nghiem tach biet).
+  const d = trangDoc();
+  assert.ok(!/useAudioEngine\(\)/.test(d), "trang đọc không được dùng AudioEngine nữa");
+  assert.ok(!/\.phat\(/.test(d), "trang đọc không được tự nạp audio nữa");
 });
 
 test("nut phat o CA HAI cho deu goi cung mot ham", () => {
@@ -107,15 +117,17 @@ test("phat() la khong-lam-gi voi CUNG chapterId — vi tri phat khong bi dat lai
   assert.match(src, /\}, \[track\]\);/, "effect lấy URL không khóa theo track");
 });
 
-test("GlobalMiniPlayer an o dung trang chuong dang phat, hien o moi noi khac", () => {
+test("GlobalMiniPlayer an o dung trang Nghe dang phat, hien o moi noi khac", () => {
+  // Ke ca trang doc `/chapters/[id]` (overnight Phase 2: khong con trinh
+  // phat rieng nua) — chi trang Nghe `/listen/[id]` moi co ChapterPlayer to.
   const src = globalMini();
   assert.match(src, /usePathname\(/, "không đọc tuyến hiện tại");
   assert.match(
     src,
-    /pathname === `\/chapters\/\$\{t\.chapterId\}`/,
-    "không so sánh với trang chương đang phát",
+    /pathname === `\/listen\/\$\{t\.chapterId\}`/,
+    "không so sánh với trang Nghe đang phát",
   );
-  assert.match(src, /t\.daBatDau && !t\.loi && !oTrangDocChuongNay/);
+  assert.match(src, /t\.daBatDau && !t\.loi && !oTrangNgheChuongNay/);
 });
 
 test("tai MP3 van con, va dung URL tai rieng", () => {

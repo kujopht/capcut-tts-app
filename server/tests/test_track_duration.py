@@ -49,8 +49,13 @@ class CauTtsDoThoiLuongTest(unittest.TestCase):
                 text="xin chào thế giới", voice_id="mock:v1",
                 dest=Path(tmp) / "ra.mp3")
         self.assertEqual(ket["duration_seconds"], 7.5)
-        # Do tren file KET QUA (da ghep), khong phai tren part trung gian.
-        do.assert_called_once_with(Path(tmp) / "ra.mp3")
+        # Do CA tren file KET QUA (da ghep) LAN tren TUNG part trung gian —
+        # phan sau la THEM MOI cho phu de dong bo (V4, Phan 2F): moi phan can
+        # thoi luong THAT cua rieng no truoc khi bi xoa, xem
+        # `tts_bridge._tong_hop_cac_doan`.
+        do.assert_any_call(Path(tmp) / "ra.mp3")
+        self.assertEqual(ket["part_durations_seconds"], [7.5])
+        self.assertEqual(ket["chunks"], ["xin chào thế giới"])
 
     def test_khong_do_duoc_thi_none_va_khong_nem(self):
         with TemporaryDirectory() as tmp, \
@@ -61,6 +66,10 @@ class CauTtsDoThoiLuongTest(unittest.TestCase):
                 dest=Path(tmp) / "ra.mp3")
         self.assertIsNone(ket["duration_seconds"])
         self.assertGreater(ket["size_bytes"], 0)
+        # Phan cung khong do duoc — `_run_job` phai coi day la "khong dung
+        # duoc cho transcript" (None, khong phai 0.0 — xem ghi chu trong
+        # `tts_bridge._tong_hop_cac_doan`), khong duoc bia thoi luong.
+        self.assertEqual(ket["part_durations_seconds"], [None])
 
 
 def _synth_gia(duration: Any):

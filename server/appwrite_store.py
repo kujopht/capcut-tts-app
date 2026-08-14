@@ -108,6 +108,11 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_TRACKS: (
         "track_id", "chapter_id", "owner_id", "voice_id", "object_key",
         "content_hash", "duration_seconds", "size_bytes", "created_at",
+        # Phu de dong bo (V4, Phan 2H) — additive, xem `AudioTrack` va
+        # `scripts/setup_appwrite.py`. `_supported_fields` tu bo qua ba truong
+        # nay neu migration Appwrite chua chay, cung co che voi ba truong
+        # recovery cua `tts_jobs` o tren.
+        "transcript_key", "transcript_version", "source_content_hash",
     ),
     COL_APPLICATIONS: (
         "application_id", "user_id", "pen_name", "bio", "genres", "intro",
@@ -1552,4 +1557,10 @@ def _track_from_doc(doc: Dict[str, Any]) -> AudioTrack:
         duration_seconds=float(doc.get("duration_seconds") or 0.0),
         size_bytes=int(doc.get("size_bytes") or 0),
         created_at=str(doc.get("created_at") or ""),
+        # Ba truong nay CO THE vang mat tren tai lieu cu (audio tao truoc khi
+        # tinh nang phu de ton tai) — `.get(...) or ""`/`or 0` cho ket qua
+        # "chua co transcript" trung thuc, khong nem loi.
+        transcript_key=str(doc.get("transcript_key") or ""),
+        transcript_version=int(doc.get("transcript_version") or 0),
+        source_content_hash=str(doc.get("source_content_hash") or ""),
     )

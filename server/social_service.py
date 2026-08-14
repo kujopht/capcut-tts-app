@@ -714,8 +714,13 @@ class SocialService:
                 muc["image_url"] = muc["image_urls"][0] if muc["image_urls"] else ""
             n = truyen.get(p.novel_id) if p.novel_id else None
             if n is not None:
+                # `cover_key` GIU LAI cho client cu (chi them, khong doi ten —
+                # cung nguyen tac voi `image_url` o tren); `cover_url` la truong
+                # MOI, da ky, de the truyen trong bai dang co the hien bia that
+                # thay vi chi mot lien ket chu.
                 muc["novel"] = {"novel_id": n.novel_id, "title": n.title,
-                                "cover_key": n.cover_key}
+                                "cover_key": n.cover_key,
+                                "cover_url": self._anh_url(n.cover_key or "") or None}
             if kem_xem_truoc:
                 muc["comments_preview"] = [
                     {**c.to_public_dict(), "author": the.get(c.author_user_id)}

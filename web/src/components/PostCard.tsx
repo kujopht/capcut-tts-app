@@ -308,7 +308,20 @@ export function PostCard({
 
       {bai.novel ? (
         <Link href={`/novels/${bai.novel.novel_id}`} className="bai-truyen">
-          <span aria-hidden="true">📖</span> {bai.novel.title}
+          {bai.novel.cover_url ? (
+            <span
+              className="bai-truyen-bia"
+              aria-hidden="true"
+              style={{
+                backgroundImage: `url("${bai.novel.cover_url}")`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }}
+            />
+          ) : (
+            <span aria-hidden="true">📖</span>
+          )}
+          {bai.novel.title}
         </Link>
       ) : null}
 

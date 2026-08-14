@@ -1072,6 +1072,28 @@ class AvatarLanTruyenTest(Nen):
         the = self.social._the_nguoi([self.an.user_id])
         self.assertIsNone(the[self.an.user_id]["avatar_url"])
 
+    def test_bai_cap_nhat_truyen_kem_cover_url_da_ky(self):
+        """
+        Bai 'cap nhat truyen' gan mot `Novel` — truoc day chi gui `cover_key`
+        THO (khong dung duoc thang tren trinh duyet). Gio phai kem `cover_url`
+        da ky, cung mot co che voi avatar/anh bai dang.
+        """
+        from dataclasses import replace
+
+        self.store.novels[self.truyen.novel_id] = replace(
+            self.truyen, cover_key="covers/an/truyen1/anh.webp")
+        bai = self.social.create_post(self.an, text="Chương 12 đã lên!",
+                                      kind="story_update",
+                                      novel_id=self.truyen.novel_id)
+        self.assertIn("khong-co-that.example", bai["novel"]["cover_url"])
+        self.assertEqual(bai["novel"]["cover_key"], "covers/an/truyen1/anh.webp")
+
+    def test_bai_cap_nhat_truyen_chua_co_bia_thi_cover_url_null(self):
+        bai = self.social.create_post(self.an, text="Chương 1!",
+                                      kind="story_update",
+                                      novel_id=self.truyen.novel_id)
+        self.assertIsNone(bai["novel"]["cover_url"])
+
 
 if __name__ == "__main__":
     unittest.main()

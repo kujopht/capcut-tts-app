@@ -862,7 +862,13 @@ export interface Post {
       chỉ để giao diện khỏi hiện một cái nút chắc chắn sẽ trả 403. */
   can_edit: boolean;
   /** Chỉ có với `story_update`. */
-  novel?: { novel_id: string; title: string; cover_key: string | null };
+  novel?: {
+    novel_id: string;
+    title: string;
+    cover_key: string | null;
+    /** Tuỳ chọn để client cũ vẫn biên dịch được — cùng lý do với `Novel.cover_url`. */
+    cover_url?: string | null;
+  };
 }
 
 export interface Comment {

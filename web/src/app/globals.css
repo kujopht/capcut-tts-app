@@ -4530,6 +4530,13 @@ body.co-mini { padding-bottom: 74px; }
 }
 
 .bai-truyen:hover { border-color: var(--brand); color: var(--brand-hover); }
+/* Bia that thay emoji khi truyen da co — 3:2, du nho de khong pha vo mot chip
+   pill nhung du de nhan ra la MOT anh chu khong phai mot cham mau. */
+.bai-truyen-bia {
+  width: 18px; height: 12px; flex: 0 0 auto;
+  border-radius: 3px;
+  background-color: var(--bg-2);
+}
 
 .bai-day {
   display: flex;

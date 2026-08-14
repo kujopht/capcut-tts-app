@@ -71,6 +71,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("last_listen_chapter_id", "string", False, 64),
             ("last_listen_position_seconds", "double", False, None),
             ("last_listen_at", "datetime", False, None),
+            # --- V6 (overnight Phase 5): "tiep tuc xem" Animation --------------
+            # CUNG co che dong-thieu-thi-bo-qua voi ba nhom truong tren — xem
+            # `server/appwrite_adapter.py::_PROFILE_V2_FIELDS`.
+            ("last_watch_series_id", "string", False, 64),
+            ("last_watch_episode_id", "string", False, 64),
+            ("last_watch_position_seconds", "double", False, None),
+            ("last_watch_duration_seconds", "double", False, None),
+            ("last_watch_at", "datetime", False, None),
         ],
         "indexes": [
             ("email_unique", "unique", ["email"]),
@@ -322,7 +330,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               "story_chapter",
               # V3: co nguoi binh luan vao mot CHUONG cua minh.
               "chapter_comment",
-              "author_approved", "author_rejected"]),
+              "author_approved", "author_rejected",
+              # V6 (overnight Phase 5): co nguoi binh luan vao mot TAP animation.
+              "episode_comment"]),
             # Rong = he thong (vd don duoc duyet), khong phai mot nguoi.
             ("actor_id", "string", False, 64),
             ("subject_id", "string", False, 64),
@@ -487,6 +497,60 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("created_at", "datetime", True, None),
         ],
         "indexes": [],
+    },
+    # ==========================================================================
+    # Animation (V6, overnight Phase 5) — subsystem RIENG, doc lap voi
+    # novels/chapters. Xem `server/animation_domain.py` va
+    # `server/appwrite_animation_store.py` ve vi sao day KHONG dung chung bang
+    # voi Truyen: Animation la mot san pham XEM, khong phai ban chuyen the.
+    "animation_series": {
+        "name": "Animation Series",
+        "attributes": [
+            ("series_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("title", "string", True, 200),
+            ("description", "string", False, 2000),
+            ("cover_key", "string", False, 512),
+            ("state", "enum", True, ["draft", "published", "archived"]),
+            ("tags", "string", False, 64),               # mang
+            # Lien ket TUY CHON toi mot truyen — RONG = khong lien ket. Xem
+            # `AnimationSeries.related_novel_id`.
+            ("related_novel_id", "string", False, 64),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("owner_idx", "key", ["owner_id"]),
+            ("state_idx", "key", ["state"]),
+            ("state_created_idx", "key", ["state", "created_at"]),
+        ],
+    },
+    "animation_episodes": {
+        "name": "Animation Episodes",
+        "attributes": [
+            ("episode_id", "string", True, 64),
+            ("series_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("title", "string", True, 200),
+            # Chi "youtube" duoc trien khai — ba gia tri con lai (native,
+            # google_drive_private, cloudflare_stream) la KIEN TRUC DANH SAN,
+            # xem `AnimationSource`.
+            ("source", "enum", True,
+             ["youtube", "native", "google_drive_private", "cloudflare_stream"]),
+            # ID YouTube 11 ky tu DA CHUAN HOA — KHONG PHAI url tho. Xem
+            # `animation_domain.parse_youtube_id`.
+            ("external_id", "string", True, 32),
+            ("order_index", "integer", True, None),
+            ("state", "enum", True, ["draft", "published", "archived"]),
+            ("duration_seconds", "double", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("series_idx", "key", ["series_id"]),
+            ("series_order_idx", "key", ["series_id", "order_index"]),
+            ("owner_idx", "key", ["owner_id"]),
+        ],
     },
     "audio_tracks": {
         "name": "Audio Tracks",

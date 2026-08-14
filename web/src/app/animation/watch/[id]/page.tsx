@@ -1,0 +1,273 @@
+"use client";
+
+/**
+ * Trang XEM một tập Animation (overnight Phase 5, V6, Phần 5H).
+ *
+ * CÙNG KIẾN TRÚC với `/listen/[id]` (trang Nghe, Phase 2): điều hướng tập
+ * trước/sau LUÔN hiện, chọn tập dạng danh sách gấp/mở, hai request tổng cộng
+ * (tập hiện tại + series kèm mọi tập, dùng cho bộ chọn) bất kể series có bao
+ * nhiêu tập — xem ghi chú ở `load()`.
+ *
+ * TRÌNH PHÁT là `YouTubeFacadePlayer` (facade — không nhúng iframe thật cho
+ * tới khi người xem bấm Play, xem docstring component đó). Tiến độ xem chỉ
+ * được ghi (`/api/progress/watch`) SAU khi người xem đã bấm Play — không bao
+ * giờ trước đó, vì trước Play chưa có iframe/YouTube IFrame API nào để đọc vị
+ * trí thật.
+ *
+ * KHÔNG có mục "creator" riêng: `/novels/[id]` (trang truyện) cũng chưa hiển
+ * thị tên tác giả trên trang chi tiết — theo đúng tiền lệ đó, trang này không
+ * tự chế một tra cứu owner_id → hồ sơ công khai mới cho một mình nó.
+ *
+ * KHÔNG có "reactions" (thích/tim): chương truyện cũng chưa có cơ chế thích
+ * chung nào để dùng lại (chỉ bài đăng cộng đồng có `/api/posts/{id}/like`) —
+ * xây một hệ thống thích MỚI chỉ cho tập animation sẽ là "hệ thống thứ hai"
+ * đúng thứ spec yêu cầu tránh cho bình luận, nên phần này để trống có chủ ý,
+ * không giả một nút thích không làm gì.
+ */
+
+import Link from "next/link";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  api,
+  type AnimationEpisode,
+  type AnimationSeries,
+} from "@/lib/api";
+import { useSession } from "@/lib/session";
+import { useAsyncData } from "@/lib/useAsyncData";
+import { useToast } from "@/lib/toast";
+import { loadYouTubeIframeApi, type YTPlayerInstance } from "@/lib/youtubeIframeApi";
+import { YouTubeFacadePlayer } from "@/components/YouTubeFacadePlayer";
+import { EpisodeComments } from "@/components/EpisodeComments";
+import { EmptyState, ErrorState, SkeletonList } from "@/components/ui";
+import { IconFilm } from "@/components/Icons";
+
+interface WatchData {
+  episode: AnimationEpisode;
+  series: AnimationSeries;
+  episodes: AnimationEpisode[];
+  prevEpisodeId: string | null;
+  nextEpisodeId: string | null;
+}
+
+/** Id ổn định cho iframe — chỉ một trình phát trên trang này tại một thời điểm. */
+const IFRAME_ID = "anim-watch-player";
+
+/** Báo tiến độ mỗi N giây phát — đủ mượt cho "Tiếp tục xem", không dội API
+    mỗi vài trăm mili-giây như `timeupdate` của thẻ `<video>` thường làm. */
+const KHOANG_BAO_CAO_GIAY = 10;
+
+export default function AnimationWatchPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = use(params);
+  const { profile } = useSession();
+  const toast = useToast();
+
+  const [moChonTap, setMoChonTap] = useState(false);
+  const player = useRef<YTPlayerInstance | null>(null);
+  const bao = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const load = useCallback(async (): Promise<WatchData> => {
+    const { episode, series, prev_episode_id, next_episode_id } =
+      await api.getAnimationEpisode(id);
+    // HAI request tong cong, khong phu thuoc so tap trong series — cung ly do
+    // voi `/listen/[id]`: tap hien tai (o tren) + moi tap cua series (o day),
+    // dung cho bo chon, KHONG goi lai cho tung tap khi nhay trong CUNG series
+    // (trang nay re-mount moi lan doi route nen effect chi chay lai dung mot lan).
+    const { episodes } = await api.getAnimationSeries(series.series_id);
+    return {
+      episode,
+      series,
+      episodes,
+      prevEpisodeId: prev_episode_id,
+      nextEpisodeId: next_episode_id,
+    };
+  }, [id]);
+
+  const { data, loading, error, missing, reload } = useAsyncData(load);
+
+  useEffect(() => {
+    return () => {
+      if (bao.current) clearInterval(bao.current);
+      player.current?.destroy?.();
+    };
+  }, [id]);
+
+  const guiTienDo = useCallback(() => {
+    if (!player.current || !data) return;
+    const viTri = player.current.getCurrentTime?.();
+    const doDai = player.current.getDuration?.();
+    if (typeof viTri !== "number" || Number.isNaN(viTri)) return;
+    api
+      .reportWatchProgress(
+        data.series.series_id, data.episode.episode_id, viTri, doDai || 0,
+      )
+      .catch(() => {});
+  }, [data]);
+
+  const batDauXem = useCallback(async () => {
+    if (!profile) return;
+    try {
+      const YT = await loadYouTubeIframeApi();
+      // Trinh phat facade da dung `<iframe id={IFRAME_ID}>` vao DOM luc nay
+      // (nguoi xem vua bam Play) — gan YouTube IFrame API vao CHINH iframe do,
+      // khong tao mot iframe thu hai.
+      player.current = new YT.Player(IFRAME_ID, {
+        events: { onReady: () => {
+          bao.current = setInterval(guiTienDo, KHOANG_BAO_CAO_GIAY * 1000);
+        } },
+      });
+    } catch {
+      // API IFrame khong nap duoc (mang cham/bi chan) — nguoi xem VAN xem
+      // duoc binh thuong qua chinh iframe YouTube, chi la "Tiep tuc xem"
+      // se khong ghi duoc tien do cho lan xem nay. Khong chan phat vi chuyen
+      // do.
+    }
+  }, [profile, guiTienDo]);
+
+  const soThuTu = useMemo(
+    () => new Map((data?.episodes ?? []).map((e, i) => [e.episode_id, i + 1])),
+    [data],
+  );
+
+  const chiaSe = useCallback(async () => {
+    if (!data) return;
+    const url = `${window.location.origin}/animation/watch/${data.episode.episode_id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.ok("Đã chép liên kết tập phim.");
+    } catch {
+      toast.push("info", url);
+    }
+  }, [data, toast]);
+
+  if (loading) {
+    return (
+      <div className="page">
+        <div className="sk sk-title" style={{ height: 30, width: "45%" }} />
+        <SkeletonList count={3} />
+      </div>
+    );
+  }
+
+  if (missing || (!loading && !data && !error)) {
+    return (
+      <div className="page">
+        <EmptyState
+          icon="🔍"
+          title="Không tìm thấy tập này"
+          hint="Tập có thể đã bị xoá, hoặc series chưa được xuất bản."
+          action={
+            <Link className="btn btn-primary" href="/animation">
+              Về trang Animation
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="page">
+        <ErrorState message={error || "Không tải được tập."} onRetry={reload} />
+      </div>
+    );
+  }
+
+  const { episode, series, episodes, prevEpisodeId, nextEpisodeId } = data;
+  const chiSoHienTai = soThuTu.get(episode.episode_id) ?? 0;
+
+  return (
+    <div className="page">
+      <nav aria-label="Đường dẫn" className="reader-crumb">
+        <Link href={`/animation/${series.series_id}`} className="hint crumb">
+          ← {series.title}
+        </Link>
+      </nav>
+
+      <header className="stack-2 reader-head">
+        <span className="eyebrow eyebrow-icon">
+          <IconFilm size={17} /> Đang xem
+        </span>
+        <h1 className="page-title">{episode.title}</h1>
+      </header>
+
+      {/* Truoc/sau + chon tap LUON hien, giong `/listen/[id]`. */}
+      <nav className="row row-spread listen-nav" aria-label="Điều hướng tập">
+        {prevEpisodeId ? (
+          <Link className="btn" href={`/animation/watch/${prevEpisodeId}`}>
+            <span aria-hidden="true">←</span> Tập trước
+          </Link>
+        ) : (
+          <span className="btn" aria-disabled="true">
+            <span aria-hidden="true">←</span> Tập trước
+          </span>
+        )}
+        <button
+          type="button"
+          className="btn btn-ghost"
+          aria-expanded={moChonTap}
+          onClick={() => setMoChonTap((v) => !v)}
+        >
+          Danh sách tập ({chiSoHienTai}/{episodes.length})
+        </button>
+        {nextEpisodeId ? (
+          <Link className="btn" href={`/animation/watch/${nextEpisodeId}`}>
+            Tập sau <span aria-hidden="true">→</span>
+          </Link>
+        ) : (
+          <span className="btn" aria-disabled="true">
+            Tập sau <span aria-hidden="true">→</span>
+          </span>
+        )}
+      </nav>
+
+      {moChonTap ? (
+        <div className="listen-chon-tap" role="region" aria-label="Chọn tập để xem">
+          <div className="anim-ep-list">
+            {episodes.map((ep) => {
+              const dangXem = ep.episode_id === episode.episode_id;
+              return (
+                <Link
+                  key={ep.episode_id}
+                  href={`/animation/watch/${ep.episode_id}`}
+                  className={`card anim-ep-row${dangXem ? " anim-ep-row-active" : ""}`}
+                  aria-current={dangXem ? "true" : undefined}
+                  onClick={() => setMoChonTap(false)}
+                >
+                  <span className="anim-ep-row-num" aria-hidden="true">
+                    {soThuTu.get(ep.episode_id)}
+                  </span>
+                  <span className="truncate list-title">{ep.title}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <YouTubeFacadePlayer
+        videoId={episode.external_id}
+        title={episode.title}
+        iframeId={IFRAME_ID}
+        onPlay={batDauXem}
+      />
+
+      <div className="row row-tight">
+        <button type="button" className="btn btn-ghost" onClick={chiaSe}>
+          <span aria-hidden="true">↗</span> Chia sẻ
+        </button>
+        {series.related_novel_id ? (
+          <Link className="btn btn-ghost" href={`/novels/${series.related_novel_id}`}>
+            Truyện gốc
+          </Link>
+        ) : null}
+      </div>
+
+      <EpisodeComments episodeId={episode.episode_id} />
+    </div>
+  );
+}

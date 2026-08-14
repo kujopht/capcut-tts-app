@@ -64,6 +64,13 @@ from server.gamification_service import (
     open_reward_pack,
 )
 from server.appwrite_gamification_store import build_gamification_store
+from server.appwrite_animation_store import build_animation_store
+from server.animation_domain import (
+    AnimationEpisode,
+    AnimationSeries,
+    AnimationSource,
+    parse_youtube_id,
+)
 from server.domain import (
     AudioStamp,
     AudioTrack,
@@ -142,11 +149,21 @@ creators = CreatorService(identity, store, storage)
 #: `server/gamification_store.py`.
 gamification_store = build_gamification_store(settings)
 
+#: Kho Animation (V6, overnight Phase 5) — MOT the hien, DOC LAP hoan toan
+#: voi `store` (novels/chapters/tts) — xem docstring dau
+#: `server/animation_domain.py` ve vi sao Animation la mot san pham RIENG.
+animation_store = build_animation_store(settings)
+
 #: Tang service cua tang xa hoi. Cung `identity`/`store`/`storage` voi moi route
 #: khac — mot duong ghi duy nhat, va no la noi quyen/han muc/thong bao duoc
 #: cuong che. Xem dau `server/social_service.py`.
+#:
+#: `animation_store` them vao DE BINH LUAN TAP dung chung ha tang binh luan
+#: (`Comment` voi `target_kind="animation_episode"`) thay vi mot he thong
+#: binh luan thu hai — xem `SocialService._tap_cong_khai`.
 social = SocialService(identity, store, storage,
-                       han_muc=settings.social_limits or None)
+                       han_muc=settings.social_limits or None,
+                       animation_store=animation_store)
 
 #: `CreatorService` khong biet gi ve thong bao, va khong nen biet: no la tang
 #: moderation cua tac gia. Noi hai tang lai bang mot moc thay vi mot import
@@ -368,6 +385,52 @@ class ChapterOrderIn(BaseModel):
     """Thu tu chuong moi, day du va dung mot lan."""
 
     chapter_ids: List[str] = Field(min_length=1)
+
+
+# -- Animation (V6, overnight Phase 5) ---------------------------------------
+
+
+class AnimationSeriesIn(BaseModel):
+    title: TieuDe
+    description: str = ""
+    tags: List[str] = Field(default_factory=list)
+    related_novel_id: str = ""
+
+
+class AnimationSeriesPatch(BaseModel):
+    """Chi cac truong nguoi dung duoc sua. `state` doi qua publish/unpublish."""
+
+    title: Optional[TieuDe] = None
+    description: Optional[str] = None
+    tags: Optional[List[str]] = None
+    related_novel_id: Optional[str] = None
+
+
+class AnimationEpisodeIn(BaseModel):
+    series_id: str
+    title: TieuDe
+    #: URL YouTube (moi dang) HOAC ID tran — xem `animation_domain.parse_youtube_id`.
+    youtube_url: str
+    order_index: int = 1
+
+
+class AnimationEpisodePatch(BaseModel):
+    title: Optional[TieuDe] = None
+    youtube_url: Optional[str] = None
+    order_index: Optional[int] = None
+
+
+class EpisodeOrderIn(BaseModel):
+    """Thu tu tap moi, day du va dung mot lan."""
+
+    episode_ids: List[str] = Field(min_length=1)
+
+
+class WatchProgressIn(BaseModel):
+    series_id: str
+    episode_id: str
+    position_seconds: float = 0.0
+    duration_seconds: float = 0.0
 
 
 class JobIn(BaseModel):
@@ -2802,6 +2865,311 @@ def record_listen(payload: ListenIn,
 
 
 # -----------------------------------------------------------------------------
+# ANIMATION (V6, overnight Phase 5) — san pham XEM, doc lap voi Truyen/Audio.
+# -----------------------------------------------------------------------------
+#
+# CUNG KIEN TRUC voi novels/chapters (series~novel, episode~chapter), nhung
+# tren mot KHO RIENG (`animation_store`) — xem docstring dau
+# `server/animation_domain.py`. Binh luan TAP dung chung ha tang binh luan
+# qua `SocialService.episode_comments`/`create_episode_comment`, KHONG phai
+# mot he thong binh luan thu hai.
+
+
+def _series_out(series: AnimationSeries) -> Dict[str, Any]:
+    return {**series.to_dict(), "cover_url": _cover_url(series)}
+
+
+def _may_read_series(series: AnimationSeries, viewer: Optional[Profile]) -> bool:
+    """Cung logic voi `_may_read` (novel): da xuat ban thi ai cung xem duoc;
+    chua thi chi chu so huu."""
+    if series.state is PublishState.PUBLISHED:
+        return True
+    return viewer is not None and viewer.user_id == series.owner_id
+
+
+@app.get("/api/animation/series")
+def list_animation_series(mine: bool = False, q: str = "", tag: str = "",
+                          limit: Optional[int] = None, offset: int = 0,
+                          authorization: Optional[str] = Header(default=None),
+                          ) -> Dict[str, Any]:
+    """Thu vien Animation cong khai, hoac danh sach cua rieng minh khi
+    `mine=true` — cung contract voi `GET /api/novels`."""
+    owner_id = None
+    if mine:
+        owner_id = current_profile(authorization).user_id
+
+    page_size = None if limit is None else max(1, min(limit, MAX_PAGE_SIZE))
+    items, total = animation_store.find_series(
+        owner_id=owner_id, published_only=not mine, query=q, tag=tag,
+        limit=page_size, offset=max(0, offset))
+    return {
+        "series": [_series_out(s) for s in items],
+        "count": len(items),
+        "total": total,
+        "limit": page_size,
+        "offset": max(0, offset),
+        "has_more": max(0, offset) + len(items) < total,
+    }
+
+
+# PHAI khai bao TRUOC `/api/animation/series/{series_id}` — cung ly do voi
+# `/api/novels/tags`.
+@app.get("/api/animation/series/tags")
+def list_animation_series_tags() -> Dict[str, Any]:
+    tags = animation_store.series_tags(published_only=True)
+    return {"tags": tags, "count": len(tags)}
+
+
+@app.post("/api/animation/series", status_code=status.HTTP_201_CREATED)
+def create_animation_series(payload: AnimationSeriesIn,
+                            profile: Profile = Depends(current_profile),
+                            ) -> Dict[str, Any]:
+    series = animation_store.create_series(AnimationSeries(
+        owner_id=profile.user_id,
+        title=payload.title.strip(),
+        description=payload.description.strip(),
+        tags=payload.tags,
+        related_novel_id=payload.related_novel_id.strip(),
+    ))
+    return {"series": _series_out(series)}
+
+
+@app.get("/api/animation/series/{series_id}")
+def get_animation_series(series_id: str,
+                         authorization: Optional[str] = Header(default=None),
+                         ) -> Dict[str, Any]:
+    """Series kem DANH SACH TAP — cung ly do gop voi `GET /api/novels/{id}`:
+    tranh N+1 khi trang chi tiet can biet tung tap."""
+    try:
+        series = animation_store.get_series(series_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    if not _may_read_series(series, optional_profile(authorization)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy series animation.")
+
+    episodes = animation_store.list_episodes(series_id)
+    return {
+        "series": _series_out(series),
+        "episodes": [e.to_dict() for e in episodes],
+    }
+
+
+@app.patch("/api/animation/series/{series_id}")
+def update_animation_series(series_id: str, payload: AnimationSeriesPatch,
+                            profile: Profile = Depends(current_profile),
+                            ) -> Dict[str, Any]:
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    if isinstance(fields.get("title"), str):
+        fields["title"] = fields["title"].strip()
+    try:
+        series = animation_store.update_series(series_id, profile.user_id, fields)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"series": _series_out(series)}
+
+
+@app.delete("/api/animation/series/{series_id}")
+def delete_animation_series(series_id: str,
+                            profile: Profile = Depends(current_profile),
+                            ) -> Dict[str, Any]:
+    """Xoa series CUNG moi tap cua no. KHONG dong toi YouTube — chi go
+    metadata cua Fanfic (xem docstring dau `animation_domain.py`)."""
+    try:
+        animation_store.owned_series(series_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    removed = 0
+    for episode in animation_store.list_episodes(series_id):
+        animation_store.delete_episode(episode.episode_id, profile.user_id)
+        removed += 1
+    animation_store.delete_series(series_id, profile.user_id)
+    return {"deleted": True, "removed_episodes": removed}
+
+
+@app.post("/api/animation/series/{series_id}/publish")
+def publish_animation_series(series_id: str,
+                             profile: Profile = Depends(current_profile),
+                             ) -> Dict[str, Any]:
+    """Xuat ban series — cung cong chan voi `POST /api/novels/{id}/publish`
+    (`FAS_AUTHOR_GATE`, mac dinh TAT)."""
+    if settings.author_gate_enabled:
+        try:
+            creators.assert_can_publish(profile)
+        except AuthorStateError as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    try:
+        series = animation_store.publish_series(series_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"series": _series_out(series)}
+
+
+@app.post("/api/animation/series/{series_id}/unpublish")
+def unpublish_animation_series(series_id: str,
+                               profile: Profile = Depends(current_profile),
+                               ) -> Dict[str, Any]:
+    try:
+        series = animation_store.unpublish_series(series_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"series": _series_out(series)}
+
+
+@app.post("/api/animation/series/{series_id}/episodes/order")
+def reorder_animation_episodes(series_id: str, payload: EpisodeOrderIn,
+                               profile: Profile = Depends(current_profile),
+                               ) -> Dict[str, Any]:
+    try:
+        episodes = animation_store.reorder_episodes(
+            series_id, profile.user_id, payload.episode_ids)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"episodes": [e.to_dict() for e in episodes]}
+
+
+@app.post("/api/animation/episodes", status_code=status.HTTP_201_CREATED)
+def create_animation_episode(payload: AnimationEpisodeIn,
+                             profile: Profile = Depends(current_profile),
+                             ) -> Dict[str, Any]:
+    try:
+        animation_store.owned_series(payload.series_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    video_id = parse_youtube_id(payload.youtube_url)
+    if not video_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Không đọc được ID video YouTube từ đường dẫn này.")
+
+    episode = animation_store.create_episode(AnimationEpisode(
+        series_id=payload.series_id,
+        owner_id=profile.user_id,
+        title=payload.title.strip(),
+        source=AnimationSource.YOUTUBE,
+        external_id=video_id,
+        order_index=payload.order_index,
+    ))
+    return {"episode": episode.to_dict()}
+
+
+def _episode_with_series_or_404(
+        episode_id: str) -> Tuple[AnimationEpisode, Optional[AnimationSeries]]:
+    try:
+        episode = animation_store.get_episode(episode_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    try:
+        series: Optional[AnimationSeries] = animation_store.get_series(
+            episode.series_id)
+    except NotFoundError:
+        series = None
+    return episode, series
+
+
+@app.get("/api/animation/episodes/{episode_id}")
+def get_animation_episode(episode_id: str,
+                          authorization: Optional[str] = Header(default=None),
+                          ) -> Dict[str, Any]:
+    """Mot tap kem series cha VA tap ke truoc/sau (theo `order_index`).
+
+    Quyen doc bam theo SERIES CHA, giong `GET /api/chapters/{id}` voi truyen."""
+    episode, series = _episode_with_series_or_404(episode_id)
+    viewer = optional_profile(authorization)
+    if series is None or not _may_read_series(series, viewer):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tập.")
+
+    cac_tap = animation_store.list_episodes(episode.series_id)
+    vi_tri = next((i for i, e in enumerate(cac_tap)
+                   if e.episode_id == episode_id), None)
+    tap_truoc = cac_tap[vi_tri - 1] if vi_tri is not None and vi_tri > 0 else None
+    tap_sau = (cac_tap[vi_tri + 1]
+               if vi_tri is not None and vi_tri + 1 < len(cac_tap) else None)
+    return {
+        "episode": episode.to_dict(),
+        "series": _series_out(series),
+        "prev_episode_id": tap_truoc.episode_id if tap_truoc else None,
+        "next_episode_id": tap_sau.episode_id if tap_sau else None,
+    }
+
+
+@app.patch("/api/animation/episodes/{episode_id}")
+def update_animation_episode(episode_id: str, payload: AnimationEpisodePatch,
+                             profile: Profile = Depends(current_profile),
+                             ) -> Dict[str, Any]:
+    fields = payload.model_dump(exclude_none=True, exclude={"youtube_url"})
+    if payload.youtube_url is not None:
+        video_id = parse_youtube_id(payload.youtube_url)
+        if not video_id:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Không đọc được ID video YouTube từ đường dẫn này.")
+        fields["external_id"] = video_id
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    if isinstance(fields.get("title"), str):
+        fields["title"] = fields["title"].strip()
+    try:
+        episode = animation_store.update_episode(episode_id, profile.user_id, fields)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"episode": episode.to_dict()}
+
+
+@app.delete("/api/animation/episodes/{episode_id}")
+def delete_animation_episode(episode_id: str,
+                             profile: Profile = Depends(current_profile),
+                             ) -> Dict[str, Any]:
+    try:
+        animation_store.delete_episode(episode_id, profile.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"deleted": True}
+
+
+@app.get("/api/search/animation")
+def search_animation(q: str = "", limit: int = 5) -> Dict[str, Any]:
+    """
+    Danh muc "Animation" cua tim kiem toan cuc (Phan 5E) — cung mau voi
+    `GET /api/search/audio`: tim SERIES CONG KHAI khop `q`.
+    """
+    tu = q.strip()
+    if len(tu) < 2:
+        return {"series": []}
+    gioi_han = max(1, min(20, limit))
+    series, _ = animation_store.find_series(
+        published_only=True, query=tu, limit=gioi_han)
+    return {"series": [_series_out(s) for s in series]}
+
+
+# Binh luan TAP dung `CommentIn`, dinh nghia sau trong tep nay — hai route
+# tuong ung nam CANH `create_chapter_comment`/`list_chapter_comments`
+# (muc "binh luan"), khong o day, de khong tham chieu mot lop chua khai bao.
+
+
+# -----------------------------------------------------------------------------
 # TIEP TUC DOC / NGHE (V4 visual completion, Phan B)
 # -----------------------------------------------------------------------------
 #
@@ -2866,6 +3234,50 @@ def bao_cao_dang_nghe(payload: ListenProgressIn,
     return {"ok": True}
 
 
+@app.post("/api/progress/watch")
+def bao_cao_dang_xem(payload: WatchProgressIn,
+                     profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    "Tiep tuc xem" Animation (V6, overnight Phase 5) — cung vai tro voi
+    `bao_cao_dang_nghe`, kem CA vi tri LAN do dai tap (do YouTube IFrame API
+    o trinh duyet bao ve, khong hoi lai YouTube tu backend).
+    """
+    profile.last_watch_series_id = payload.series_id
+    profile.last_watch_episode_id = payload.episode_id
+    profile.last_watch_position_seconds = float(payload.position_seconds)
+    profile.last_watch_duration_seconds = float(payload.duration_seconds)
+    profile.last_watch_at = now_iso()
+    identity.save_profile(profile)
+    return {"ok": True}
+
+
+def _tiep_tuc_xem(series_id: str, episode_id: str, luc: str, *,
+                  vi_tri_giay: float = 0.0,
+                  do_dai_giay: float = 0.0) -> Optional[Dict[str, Any]]:
+    """Muc "Tiep tuc xem" cua `/api/progress/continue` — cung triet ly voi
+    `_tiep_tuc_mot_muc`: AN module neu con tro tro toi series/tap da bi xoa,
+    KHONG bia du lieu."""
+    if not series_id or not episode_id:
+        return None
+    try:
+        series = animation_store.get_series(series_id)
+        episode = animation_store.get_episode(episode_id)
+    except NotFoundError:
+        return None
+    return {
+        "series_id": series.series_id,
+        "series_title": series.title,
+        "episode_id": episode.episode_id,
+        "episode_title": episode.title,
+        "episode_order_index": episode.order_index,
+        "position_seconds": vi_tri_giay,
+        # `None` khi chua biet do dai — giao dien hien vi tri da xem MA KHONG
+        # bia mot mau so, cung nguyen tac voi `_tiep_tuc_mot_muc`.
+        "duration_seconds": do_dai_giay or None,
+        "updated_at": luc,
+    }
+
+
 def _tiep_tuc_mot_muc(novel_id: str, chapter_id: str, luc: str, *, kieu: str,
                       vi_tri_giay: float = 0.0) -> Optional[Dict[str, Any]]:
     """Mot muc cua `/api/progress/continue`, hoac `None` neu khong co gi / con
@@ -2907,6 +3319,11 @@ def tiep_tuc(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
             profile.last_listen_novel_id, profile.last_listen_chapter_id,
             profile.last_listen_at, kieu="listen",
             vi_tri_giay=profile.last_listen_position_seconds),
+        "watching": _tiep_tuc_xem(
+            profile.last_watch_series_id, profile.last_watch_episode_id,
+            profile.last_watch_at,
+            vi_tri_giay=profile.last_watch_position_seconds,
+            do_dai_giay=profile.last_watch_duration_seconds),
     }
 
 
@@ -3360,6 +3777,28 @@ def create_chapter_comment(chapter_id: str, payload: ChapterCommentIn,
         social.create_chapter_comment, profile, chapter_id,
         text=payload.text, parent_id=payload.parent_id,
         timestamp_ms=payload.timestamp_ms, spoiler=payload.spoiler)}
+
+
+@app.get("/api/animation/episodes/{episode_id}/comments")
+def list_episode_comments(episode_id: str, sort: str = "moi",
+                          limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+    """
+    Binh luan cua mot TAP animation (V6, overnight Phase 5). Cong khai — chi
+    tap cua series DA XUAT BAN (hang rao nam o `SocialService._tap_cong_khai`;
+    ban nhap tra 404) — cung mau voi `list_chapter_comments`.
+    """
+    return _xa_hoi(social.episode_comments, episode_id, sort=sort,
+                   limit=max(1, min(50, limit)), offset=max(0, offset))
+
+
+@app.post("/api/animation/episodes/{episode_id}/comments",
+          status_code=status.HTTP_201_CREATED)
+def create_episode_comment_route(episode_id: str, payload: CommentIn,
+                                 profile: Profile = Depends(current_profile),
+                                 ) -> Dict[str, Any]:
+    return {"comment": _xa_hoi(
+        social.create_episode_comment, profile, episode_id,
+        text=payload.text, parent_id=payload.parent_id)}
 
 
 @app.get("/api/comments/{comment_id}/replies")

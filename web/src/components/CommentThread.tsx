@@ -40,7 +40,7 @@ import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { useAudioEngineOptional } from "@/components/AudioEngine";
 import { Avatar } from "@/components/Avatar";
 
-type DichKind = "post" | "chapter";
+type DichKind = "post" | "chapter" | "animation_episode";
 
 /** Gọi đúng API theo đích — một chỗ rẽ nhánh duy nhất của cả engine. */
 function nguon(kind: DichKind, id: string) {
@@ -54,6 +54,17 @@ function nguon(kind: DichKind, id: string) {
         timestamp_ms?: number | null;
         spoiler?: boolean;
       }) => social.createChapterComment(id, payload),
+    };
+  }
+  if (kind === "animation_episode") {
+    // Cùng khả năng đổi thứ tự với "chapter" (backend nhận cùng `sort`), NHƯNG
+    // không có mốc thời gian/spoiler: một tập là video YouTube, không phải
+    // audio của Fanfic — xem `SocialService.create_episode_comment`.
+    return {
+      list: (sort: "moi" | "cu", limit: number, offset: number) =>
+        social.episodeComments(id, sort, limit, offset),
+      create: (payload: { text: string; parent_id?: string }) =>
+        social.createEpisodeComment(id, payload),
     };
   }
   return {
@@ -383,12 +394,13 @@ export function CommentThread({
   const { profile } = useSession();
   const pathname = usePathname();
   const laChuong = targetKind === "chapter";
+  /** Chương VÀ tập animation đều đổi được thứ tự; bài đăng luôn cũ→mới. */
+  const coTheDoiThuTu = laChuong || targetKind === "animation_episode";
   const [ds, setDs] = useState<Comment[] | null>(null);
   const [tong, setTong] = useState(0);
   const [loi, setLoi] = useState("");
   const [dangTraLoi, setDangTraLoi] = useState("");
-  /** Chỉ chương mới đổi được thứ tự; bài đăng luôn cũ→mới. */
-  const [sort, setSort] = useState<"moi" | "cu">(laChuong ? "moi" : "cu");
+  const [sort, setSort] = useState<"moi" | "cu">(coTheDoiThuTu ? "moi" : "cu");
   const tranChu = limits?.comment_max_chars ?? 1000;
   const goi = nguon(targetKind, postId);
 
@@ -419,16 +431,16 @@ export function CommentThread({
           ? { timestamp_ms: extras.timestamp_ms, spoiler: extras.spoiler }
           : {}),
       });
-      // Chuong sap MOI truoc -> len dau; bai dang cu->moi -> xuong cuoi.
+      // Chuong/tap sap MOI truoc -> len dau; bai dang cu->moi -> xuong cuoi.
       setDs((truoc) =>
-        laChuong && sort === "moi"
+        coTheDoiThuTu && sort === "moi"
           ? [{ ...ra.comment, replies: [] }, ...(truoc ?? [])]
           : [...(truoc ?? []), { ...ra.comment, replies: [] }],
       );
       setTong((t) => t + 1);
       onCountChange?.(1);
     },
-    [goi, laChuong, sort, onCountChange],
+    [goi, laChuong, coTheDoiThuTu, sort, onCountChange],
   );
 
   const themTraLoi = useCallback(
@@ -473,7 +485,7 @@ export function CommentThread({
         </p>
       )}
 
-      {laChuong && tong > 1 ? (
+      {coTheDoiThuTu && tong > 1 ? (
         <div className="row" style={{ gap: 6 }}>
           {(["moi", "cu"] as const).map((k) => (
             <button

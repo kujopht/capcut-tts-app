@@ -59,7 +59,7 @@ test("truc la mot hanh trinh, khong phai thu tu tinh co cua mot cai menu", async
   // `write`/`studio` se lam mot cu bam tu "Khám phá" sang "Cộng đồng" quay may
   // di qua ca khu sang tac.
   assert.deepEqual([...TRUC],
-    ["home", "explore", "community", "library", "write", "studio",
+    ["home", "explore", "animation", "community", "library", "write", "studio",
      "account"]);
 });
 
@@ -69,6 +69,7 @@ test("moi duong dan roi dung khu vuc", async () => {
     ["/", "home"],
     ["/fanfic", "explore"],
     ["/fanfic?tag=One%20Piece", "explore"],
+    ["/animation", "animation"],
     ["/library", "library"],
     ["/write", "write"],
     ["/studio", "studio"],

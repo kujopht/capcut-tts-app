@@ -59,6 +59,22 @@ export interface ContinueItem {
   duration_seconds?: number | null;
 }
 
+/**
+ * Mục "Tiếp tục xem" Animation (V6, overnight Phase 5) — CÙNG vai trò với
+ * `ContinueItem`, hình dạng riêng vì series/episode không phải novel/chapter.
+ */
+export interface ContinueWatchItem {
+  series_id: string;
+  series_title: string;
+  episode_id: string;
+  episode_title: string;
+  episode_order_index: number;
+  position_seconds: number;
+  /** `null` khi chưa rõ độ dài — CLIENT tự ghi lại từ YouTube IFrame API. */
+  duration_seconds: number | null;
+  updated_at: string;
+}
+
 /** Một bậc danh xưng (Phần G-I, V4 visual completion vòng 2) — độc lập với
  * huy hiệu tác giả (`is_author`/`AuthorStatus`). Xem `server/gamification.py::LEVEL_TIERS`. */
 export interface TitleTier {
@@ -266,6 +282,50 @@ export interface Chapter {
    * Tuy chon de client cu van bien dich duoc.
    */
   audio_outdated?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Mot series Animation (V6, overnight Phase 5) — tuong duong `Novel` nhung
+ * cho san pham XEM, doc lap voi Truyen/Audio. Xem docstring dau
+ * `server/animation_domain.py`.
+ */
+export interface AnimationSeries {
+  series_id: string;
+  owner_id: string;
+  title: string;
+  description: string;
+  cover_key: string | null;
+  cover_url?: string | null;
+  state: PublishState;
+  tags: string[];
+  /** Lien ket TUY CHON toi mot truyen — chuoi rong = khong lien ket. */
+  related_novel_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AnimationSource =
+  | "youtube"
+  // Danh san — CHUA trien khai, xem `AnimationSource` o backend.
+  | "native"
+  | "google_drive_private"
+  | "cloudflare_stream";
+
+/** Mot tap trong mot series — tuong duong `Chapter`. */
+export interface AnimationEpisode {
+  episode_id: string;
+  series_id: string;
+  owner_id: string;
+  title: string;
+  source: AnimationSource;
+  /** ID YouTube 11 ky tu DA CHUAN HOA — KHONG PHAI url tho. */
+  external_id: string;
+  order_index: number;
+  state: PublishState;
+  /** Giay — `0` = chua biet (client tu ghi lai tu YouTube IFrame API). */
+  duration_seconds: number;
   created_at: string;
   updated_at: string;
 }
@@ -564,11 +624,31 @@ export const api = {
       }),
     }),
 
-  /** Dữ liệu cho hai module trang chủ: Tiếp tục đọc / Tiếp tục nghe. */
+  /** Dữ liệu cho ba module trang chủ: Tiếp tục đọc / nghe / xem. */
   getContinueProgress: () =>
-    request<{ reading: ContinueItem | null; listening: ContinueItem | null }>(
-      "/api/progress/continue",
-    ),
+    request<{
+      reading: ContinueItem | null;
+      listening: ContinueItem | null;
+      watching: ContinueWatchItem | null;
+    }>("/api/progress/continue"),
+
+  /** Cùng vai trò với `reportListenProgress`, cho Animation. Vị trí/độ dài do
+      YouTube IFrame API ở trình duyệt báo về. */
+  reportWatchProgress: (
+    seriesId: string,
+    episodeId: string,
+    positionSeconds: number,
+    durationSeconds: number,
+  ) =>
+    request<{ ok: boolean }>("/api/progress/watch", {
+      method: "POST",
+      body: JSON.stringify({
+        series_id: seriesId,
+        episode_id: episodeId,
+        position_seconds: Math.max(0, positionSeconds),
+        duration_seconds: Math.max(0, durationSeconds),
+      }),
+    }),
 
   /**
    * Thành tựu CỦA CHÍNH MÌNH — tính tại chỗ từ dữ liệu đã có (xem
@@ -876,6 +956,144 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ texts }),
     }),
+
+  // -- Animation (overnight Phase 5, V6) --------------------------------------
+
+  /** Thu vien Animation cong khai, hoac danh sach cua rieng minh khi `mine`. */
+  listAnimationSeries: (opts: {
+    mine?: boolean;
+    query?: string;
+    tag?: string;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.mine) params.set("mine", "true");
+    if (opts.query?.trim()) params.set("q", opts.query.trim());
+    if (opts.tag) params.set("tag", opts.tag);
+    if (opts.limit != null) params.set("limit", String(opts.limit));
+    if (opts.offset != null) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return request<{
+      series: AnimationSeries[];
+      count: number;
+      total: number;
+      limit: number | null;
+      offset: number;
+      has_more: boolean;
+    }>(`/api/animation/series${qs ? `?${qs}` : ""}`);
+  },
+
+  /** Cac the dang co tren series DA XUAT BAN, cho bo loc. */
+  animationSeriesTags: () =>
+    request<{ tags: string[]; count: number }>("/api/animation/series/tags"),
+
+  createAnimationSeries: (
+    title: string,
+    description: string,
+    tags: string[] = [],
+    relatedNovelId = "",
+  ) =>
+    request<{ series: AnimationSeries }>("/api/animation/series", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        description,
+        tags,
+        related_novel_id: relatedNovelId,
+      }),
+    }),
+
+  /** Series kem DANH SACH TAP, trong MOT request. */
+  getAnimationSeries: (seriesId: string) =>
+    request<{ series: AnimationSeries; episodes: AnimationEpisode[] }>(
+      `/api/animation/series/${seriesId}`,
+    ),
+
+  updateAnimationSeries: (
+    seriesId: string,
+    fields: {
+      title?: string;
+      description?: string;
+      tags?: string[];
+      related_novel_id?: string;
+    },
+  ) =>
+    request<{ series: AnimationSeries }>(`/api/animation/series/${seriesId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
+
+  publishAnimationSeries: (seriesId: string) =>
+    request<{ series: AnimationSeries }>(
+      `/api/animation/series/${seriesId}/publish`,
+      { method: "POST" },
+    ),
+
+  unpublishAnimationSeries: (seriesId: string) =>
+    request<{ series: AnimationSeries }>(
+      `/api/animation/series/${seriesId}/unpublish`,
+      { method: "POST" },
+    ),
+
+  /** Xoa series cung moi tap cua no. KHONG dong toi YouTube. */
+  deleteAnimationSeries: (seriesId: string) =>
+    request<{ deleted: boolean; removed_episodes: number }>(
+      `/api/animation/series/${seriesId}`,
+      { method: "DELETE" },
+    ),
+
+  /** `youtubeUrl` nhan MOI dang URL YouTube pho bien, hoac ID tran. */
+  createAnimationEpisode: (
+    seriesId: string,
+    title: string,
+    youtubeUrl: string,
+    orderIndex = 1,
+  ) =>
+    request<{ episode: AnimationEpisode }>("/api/animation/episodes", {
+      method: "POST",
+      body: JSON.stringify({
+        series_id: seriesId,
+        title,
+        youtube_url: youtubeUrl,
+        order_index: orderIndex,
+      }),
+    }),
+
+  /** Mot tap kem series cha va tap ke truoc/sau. */
+  getAnimationEpisode: (episodeId: string) =>
+    request<{
+      episode: AnimationEpisode;
+      series: AnimationSeries;
+      prev_episode_id: string | null;
+      next_episode_id: string | null;
+    }>(`/api/animation/episodes/${episodeId}`),
+
+  updateAnimationEpisode: (
+    episodeId: string,
+    fields: { title?: string; youtube_url?: string; order_index?: number },
+  ) =>
+    request<{ episode: AnimationEpisode }>(
+      `/api/animation/episodes/${episodeId}`,
+      { method: "PATCH", body: JSON.stringify(fields) },
+    ),
+
+  deleteAnimationEpisode: (episodeId: string) =>
+    request<{ deleted: boolean }>(`/api/animation/episodes/${episodeId}`, {
+      method: "DELETE",
+    }),
+
+  reorderAnimationEpisodes: (seriesId: string, episodeIds: string[]) =>
+    request<{ episodes: AnimationEpisode[] }>(
+      `/api/animation/series/${seriesId}/episodes/order`,
+      { method: "POST", body: JSON.stringify({ episode_ids: episodeIds }) },
+    ),
+
+  /** Danh muc "Animation" cua tim kiem toan cuc. */
+  searchAnimation: (q: string, limit = 5) =>
+    request<{ series: AnimationSeries[] }>(
+      `/api/search/animation?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
 };
 
 /** Mot trang trong danh sach truyen. */
@@ -1387,6 +1605,25 @@ export const social = {
   }) =>
     request<{ comment: Comment }>(
       `/api/chapters/${encodeURIComponent(chapterId)}/comments`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  // -- bình luận tập animation (overnight Phase 5, V6) ------------------------
+
+  /** Đích là TẬP — cùng vai trò với `chapterComments`. */
+  episodeComments: (episodeId: string, sort: "moi" | "cu" = "moi",
+                    limit = 20, offset = 0) =>
+    request<CommentPage & { sort: string }>(
+      `/api/animation/episodes/${encodeURIComponent(episodeId)}/comments` +
+        `?sort=${sort}&limit=${limit}&offset=${offset}`,
+    ),
+
+  createEpisodeComment: (episodeId: string, payload: {
+    text: string;
+    parent_id?: string;
+  }) =>
+    request<{ comment: Comment }>(
+      `/api/animation/episodes/${encodeURIComponent(episodeId)}/comments`,
       { method: "POST", body: JSON.stringify(payload) },
     ),
 

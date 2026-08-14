@@ -29,10 +29,18 @@ import { Avatar } from "@/components/Avatar";
  * `cta` KHONG doi thu tu hay cau truc — no chi doi CACH VE. "Viết truyện" van
  * la muc thu tu trong danh sach nay; no duoc ve thanh mot nut co vien tim thay
  * vi mot lien ket tron, de nguoi luot qua thay ngay rang ho tu viet duoc.
+ *
+ * "Animation" (V6, overnight Phase 5) dung NGAY SAU "Khám phá" — cùng nhịp
+ * XEM/ĐỌC "tìm thứ để tiêu thụ", trước khi rẽ sang "Cộng đồng" (tương tác xã
+ * hội). Đây là một sản phẩm ĐỘC LẬP với Truyện/Audio (xem docstring đầu
+ * `server/animation_domain.py`) — Audio KHÔNG lên hàng đầu vì nó vẫn là một
+ * CÔNG CỤ (`/studio`) chứ không phải một khu vực duyệt riêng, còn Animation
+ * thì có trang chủ/series/tập của chính nó, xứng một mục điều hướng chính.
  */
 const LINKS = [
   { href: "/", label: "Trang chủ" },
   { href: "/fanfic", label: "Khám phá" },
+  { href: "/animation", label: "Animation" },
   { href: "/community", label: "Cộng đồng" },
   { href: "/library", label: "Thư viện" },
   { href: "/write", label: "Viết truyện", cta: true },

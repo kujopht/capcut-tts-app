@@ -25,7 +25,7 @@ test("du cac route cua hai khu vuc san pham", () => {
   }
 });
 
-test("thanh dieu huong chinh dung NAM muc, theo dung thu tu", () => {
+test("thanh dieu huong chinh dung SAU muc, theo dung thu tu", () => {
   const nav = read("../src/components/NavAuth.tsx");
   // Thu tu la mot quyet dinh san pham, khong phai chuyen thu hang muc. So khop
   // theo VI TRI chu khong phai theo tap hop.
@@ -33,12 +33,16 @@ test("thanh dieu huong chinh dung NAM muc, theo dung thu tu", () => {
   // "Viết truyện" ngang hang voi "Khám phá" va "Thư viện": khong co tac gia
   // thi khong co gi de doc, nen giau no trong menu tai khoan la noi rang viec
   // do la phu.
+  //
+  // "Animation" (V6, overnight Phase 5) dung NGAY SAU "Khám phá" — xem ghi
+  // chu tren `LINKS` trong `NavAuth.tsx`.
   const order = [...nav.matchAll(/href: "([^"]+)", label: "([^"]+)"/g)].map(
     (m) => [m[1], m[2]],
   );
   assert.deepEqual(order, [
     ["/", "Trang chủ"],
     ["/fanfic", "Khám phá"],
+    ["/animation", "Animation"],
     ["/community", "Cộng đồng"],
     ["/library", "Thư viện"],
     ["/write", "Viết truyện"],

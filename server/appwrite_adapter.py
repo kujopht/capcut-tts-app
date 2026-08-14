@@ -309,6 +309,13 @@ class AppwriteIdentityAdapter:
         profile.last_listen_position_seconds = float(
             row.get("last_listen_position_seconds") or 0.0)
         profile.last_listen_at = str(row.get("last_listen_at") or "")
+        profile.last_watch_series_id = str(row.get("last_watch_series_id") or "")
+        profile.last_watch_episode_id = str(row.get("last_watch_episode_id") or "")
+        profile.last_watch_position_seconds = float(
+            row.get("last_watch_position_seconds") or 0.0)
+        profile.last_watch_duration_seconds = float(
+            row.get("last_watch_duration_seconds") or 0.0)
+        profile.last_watch_at = str(row.get("last_watch_at") or "")
         return profile
 
     def _profile_path(self, user_id: str) -> str:
@@ -419,6 +426,11 @@ class AppwriteIdentityAdapter:
         "last_read_novel_id", "last_read_chapter_id", "last_read_at",
         "last_listen_novel_id", "last_listen_chapter_id",
         "last_listen_position_seconds", "last_listen_at",
+        # "Tiep tuc xem" (V6, overnight Phase 5) — them SAU, cung co che
+        # dong-thieu-thi-bo-qua nay.
+        "last_watch_series_id", "last_watch_episode_id",
+        "last_watch_position_seconds", "last_watch_duration_seconds",
+        "last_watch_at",
     )
 
     #: Truong co INDEX UNIQUE. Chuoi rong KHONG duoc ghi vao day.
@@ -682,4 +694,11 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         last_listen_position_seconds=float(
             row.get("last_listen_position_seconds") or 0.0),
         last_listen_at=str(row.get("last_listen_at") or ""),
+        last_watch_series_id=str(row.get("last_watch_series_id") or ""),
+        last_watch_episode_id=str(row.get("last_watch_episode_id") or ""),
+        last_watch_position_seconds=float(
+            row.get("last_watch_position_seconds") or 0.0),
+        last_watch_duration_seconds=float(
+            row.get("last_watch_duration_seconds") or 0.0),
+        last_watch_at=str(row.get("last_watch_at") or ""),
     )

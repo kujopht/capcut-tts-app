@@ -86,6 +86,15 @@ export function IconFilm(p: Props) {
   );
 }
 
+/** Tam giac Play — nut phat cua trinh phat facade YouTube (overnight Phase 5). */
+export function IconPlay(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M7 4.5 L19 12 L7 19.5 Z" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
 /** Micro — "tao giong doc". */
 export function IconMic(p: Props) {
   return (

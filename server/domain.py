@@ -154,6 +154,8 @@ class NotificationKind(str, Enum):
     CHAPTER_COMMENT = "chapter_comment"
     AUTHOR_APPROVED = "author_approved"
     AUTHOR_REJECTED = "author_rejected"
+    #: Co nguoi binh luan vao mot TAP animation cua minh (V6, overnight Phase 5).
+    EPISODE_COMMENT = "episode_comment"
 
 
 class ReportReason(str, Enum):
@@ -232,6 +234,16 @@ class Profile:
     #: khong anh huong gi khac.
     last_listen_position_seconds: float = 0.0
     last_listen_at: str = ""
+    #: "Tiep tuc xem" (V6, overnight Phase 5) — CUNG mau voi last_listen_*:
+    #: con tro DUY NHAT, khong phai lich su. Xem docstring cua last_listen_*.
+    last_watch_series_id: str = ""
+    last_watch_episode_id: str = ""
+    last_watch_position_seconds: float = 0.0
+    #: Do dai TAP dang xem, giay — GHEP VAO luc ghi tien do (client gui,
+    #: xem `/api/progress/watch`) de trang chu hien "12:03 / 24:00" ma khong
+    #: phai hoi lai YouTube. `0` = chua biet.
+    last_watch_duration_seconds: float = 0.0
+    last_watch_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -259,6 +271,11 @@ class Profile:
             "last_listen_chapter_id": self.last_listen_chapter_id or None,
             "last_listen_position_seconds": self.last_listen_position_seconds,
             "last_listen_at": self.last_listen_at or None,
+            "last_watch_series_id": self.last_watch_series_id or None,
+            "last_watch_episode_id": self.last_watch_episode_id or None,
+            "last_watch_position_seconds": self.last_watch_position_seconds,
+            "last_watch_duration_seconds": self.last_watch_duration_seconds or None,
+            "last_watch_at": self.last_watch_at or None,
         }
 
 

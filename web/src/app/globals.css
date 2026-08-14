@@ -5708,3 +5708,123 @@ body.co-mini { padding-bottom: 74px; }
   .sub-row-times { flex-direction: row; align-items: center; }
   .sub-row-actions { flex-direction: row; }
 }
+
+/* =============================================================================
+   Animation (overnight Phase 5, V6) — /animation, san pham XEM doc lap voi
+   Truyen/Audio. Xem docstring dau `server/animation_domain.py`.
+   ============================================================================= */
+
+/* -- sac cua khu Animation -------------------------------------------------- */
+/* Cung he token voi cac khu khac (xem `--sac-community-*` o tren). Hong-cam:
+   khu nay khong phai noi doc (tim) hay nghe (xanh ngoc) — no la mot man hinh. */
+:root {
+  --sac-animation-1: #fb7185;
+  --sac-animation-2: #fda4af;
+}
+
+.anim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--s3);
+}
+
+.anim-card {
+  display: grid;
+  gap: var(--s2);
+  text-decoration: none;
+  color: inherit;
+}
+
+.anim-card-cover {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r3);
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--sac-animation-1), var(--sac-animation-2));
+}
+
+.anim-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.anim-card-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -- trinh phat facade YouTube (Phan 5C) ------------------------------------ */
+/*
+  Anh dai dien/nut Play cua CHINH Fanfic, hien TRUOC khi iframe YouTube duoc
+  nap. Khong nap iframe cho toi khi nguoi dung bam Play — xem
+  `YouTubeFacadePlayer.tsx`.
+*/
+.yt-facade {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  border-radius: var(--r3);
+  overflow: hidden;
+  background: #000;
+}
+
+.yt-facade img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.yt-facade iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.yt-facade-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+  border: 0;
+  cursor: pointer;
+  color: #fff;
+}
+
+.yt-facade-play-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  transition: transform 0.15s ease;
+}
+
+.yt-facade-play:hover .yt-facade-play-icon { transform: scale(1.08); }
+
+.anim-ep-list { display: grid; gap: var(--s2); }
+
+.anim-ep-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  text-decoration: none;
+  color: inherit;
+}
+
+.anim-ep-row-active { border-color: var(--sac-animation-1); }
+
+.anim-ep-row-num {
+  min-width: 28px;
+  text-align: center;
+  color: var(--text-3);
+}

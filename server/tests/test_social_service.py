@@ -503,7 +503,8 @@ class ThongBaoTest(Nen):
             {k.value for k in NotificationKind},
             {"follow", "post_like", "post_comment", "comment_reply",
              "story_chapter", "chapter_comment",
-             "author_approved", "author_rejected"})
+             "author_approved", "author_rejected",
+             "episode_comment"})
 
     def test_dem_chua_doc(self):
         bai = self._bai()

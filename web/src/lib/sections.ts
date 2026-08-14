@@ -28,6 +28,12 @@
 export const TRUC = [
   "home",
   "explore",
+  // Animation (V6, overnight Phase 5) nam NGAY SAU "Kham pha" — cung mot nhip
+  // XEM/DOC, truoc khi re sang "Cong dong". Day la mot san pham DOC LAP voi
+  // Truyen/Audio (xem docstring dau `server/animation_domain.py`), nhung tren
+  // TRUC dieu huong no dung canh "Kham pha" vi ca hai deu la "tim thu de
+  // tieu thu", khac voi "Cong dong" (tuong tac xa hoi).
+  "animation",
   // "Cộng đồng" nằm giữa "Khám phá" và "Thư viện", không phải ở cuối trục.
   //
   // Trục này là hành trình đọc → nghe → viết, và bảng tin thuộc về nửa ĐỌC:
@@ -60,6 +66,7 @@ export type Huong = -1 | 0 | 1;
 const BANG: ReadonlyArray<readonly [RegExp, ViTri]> = [
   [/^\/$/, "home"],
   [/^\/fanfic/, "explore"],
+  [/^\/animation/, "animation"],
   [/^\/community/, "community"],
   [/^\/library/, "library"],
   [/^\/write/, "write"],

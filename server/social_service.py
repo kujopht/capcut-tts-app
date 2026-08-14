@@ -95,13 +95,18 @@ class SocialService:
     """
 
     def __init__(self, identity: Any, store: Any, storage: Any = None,
-                 han_muc: Optional[Dict[str, HanMuc]] = None):
+                 han_muc: Optional[Dict[str, HanMuc]] = None,
+                 animation_store: Any = None):
         self._identity = identity
         self._store = store
         self._storage = storage
         self._han_muc = dict(HAN_MUC_MAC_DINH)
         if han_muc:
             self._han_muc.update(han_muc)
+        #: Kho Animation (V6, overnight Phase 5) — DOC LAP voi `self._store`,
+        #: chi dung cho binh luan TAP. `None` cho cac test khong dung toi
+        #: nhanh Animation (khong goi `create_episode_comment`/`episode_comments`).
+        self._animation_store = animation_store
 
     # ==================================================================== THEO DOI
 
@@ -514,6 +519,87 @@ class SocialService:
                       actor_id=actor.user_id, subject_id=chapter_id,
                       subject_kind="chapter",
                       preview=_cat(f"{chuong.title} — {noi_dung}"))
+        return self._mot_binh_luan(bl, actor)
+
+    # ======================================================== BINH LUAN TAP ANIMATION
+
+    def _tap_cong_khai(self, episode_id: str):
+        """
+        Tap + series, VA series phai DA XUAT BAN — cung vai tro voi
+        `_chuong_cong_khai` (V6, overnight Phase 5, xem docstring do).
+
+        Dung KHO ANIMATION RIENG (`self._animation_store`), khong phai
+        `self._store`: Animation la mot he thong doc lap voi Truyen/Chuong.
+        """
+        try:
+            tap = self._animation_store.get_episode(episode_id)
+            series = self._animation_store.get_series(tap.series_id)
+        except NotFoundError:
+            raise NotFoundError("Không tìm thấy tập.")
+        if series.state is not PublishState.PUBLISHED:
+            raise NotFoundError("Không tìm thấy tập.")
+        return tap, series
+
+    def episode_comments(self, episode_id: str, *,
+                         sort: str = "moi",
+                         limit: int = 20, offset: int = 0) -> Dict[str, Any]:
+        """Binh luan cua mot TAP — y het `chapter_comments`, chi khac DICH."""
+        self._tap_cong_khai(episode_id)
+        goc, tong = self._store.list_comments(
+            episode_id, parent_id="", newest_first=(sort != "cu"),
+            limit=limit, offset=offset)
+        tra_loi = self._store.replies_for([c.comment_id for c in goc])
+        the = self._the_nguoi(
+            [c.author_user_id for c in goc]
+            + [r.author_user_id for ds in tra_loi.values() for r in ds])
+        return {
+            "items": [
+                {
+                    **c.to_public_dict(),
+                    "author": the.get(c.author_user_id),
+                    "replies": [
+                        {**r.to_public_dict(),
+                         "author": the.get(r.author_user_id)}
+                        for r in tra_loi.get(c.comment_id, [])
+                    ],
+                }
+                for c in goc
+            ],
+            "total": tong,
+            "limit": limit,
+            "offset": offset,
+            "sort": "cu" if sort == "cu" else "moi",
+        }
+
+    def create_episode_comment(self, actor: Profile, episode_id: str, *,
+                               text: str, parent_id: str = "") -> Dict[str, Any]:
+        """
+        Binh luan mot TAP — dich la `episode_id`. Khong co moc thoi gian audio
+        (`kiem_timestamp`) nhu binh luan chuong: mot tap la video YouTube, va
+        thoi diem trong video do nam ngoai kien truc `AudioTrack`.
+        """
+        tap, series = self._tap_cong_khai(episode_id)
+        noi_dung = clean_text(text, toi_da=COMMENT_MAX_CHARS, ten="Bình luận")
+        self._kiem_han_muc("comment", actor.user_id)
+
+        cha = self._cha_hop_le(episode_id, parent_id)
+        bl = Comment(post_id=episode_id, author_user_id=actor.user_id,
+                     text=noi_dung, parent_id=parent_id,
+                     target_kind="animation_episode")
+        self._store.create_comment(bl)
+        if cha is not None:
+            self._store.bump_comment_counter(cha.comment_id, "reply_count", 1)
+
+        if cha is not None:
+            if cha.author_user_id != actor.user_id:
+                self._bao(cha.author_user_id, NotificationKind.COMMENT_REPLY,
+                          actor_id=actor.user_id, subject_id=episode_id,
+                          subject_kind="animation_episode", preview=_cat(noi_dung))
+        elif series.owner_id != actor.user_id:
+            self._bao(series.owner_id, NotificationKind.EPISODE_COMMENT,
+                      actor_id=actor.user_id, subject_id=episode_id,
+                      subject_kind="animation_episode",
+                      preview=_cat(f"{tap.title} — {noi_dung}"))
         return self._mot_binh_luan(bl, actor)
 
     def edit_comment(self, actor: Profile, comment_id: str, *,

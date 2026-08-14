@@ -22,6 +22,10 @@ export const HO_ENDPOINT = [
   // luon la chu token. Mot duong co id la mot duong ai do se thu doi id.
   "account",
   "admin",
+  // Animation (overnight Phase 5, V6) — san pham XEM, DOC LAP voi
+  // novels/chapters, tren kho rieng `animation_store`. Xem
+  // `server/animation_domain.py`.
+  "animation",
   "audio",
   "auth",
   "chapters",

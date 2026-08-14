@@ -38,6 +38,12 @@ class TranslationContext:
     #: dung de chon he thong-prompt phu hop; mock dung de bo qua bien tap/QA
     #: (tra nguyen van doan dich, xem `MockTranslationProvider`).
     vai_tro: str
+    #: Che do chat luong cua DU AN ("nhanh"/"can_bang"/"van_hoc") — Phan 3D
+    #: (overnight Phase 3): `ProviderRegistry` dung gia tri nay CUNG
+    #: `vai_tro` de chon THU TU model Groq nen thu, xem
+    #: `translation_model_profiles.route_order`. Rong = khong dinh tuyen dac
+    #: biet (vi du goi tu noi chua biet che do, nhu mot so test cu).
+    quality_mode: str = ""
     genre: str = "auto"
     naming_mode: str = "auto"
     #: Tom tat NGAN cac chuong truoc — kiem soat token, KHONG nhet toan bo

@@ -791,7 +791,8 @@ class TranslationService:
                 dich = phan
                 for vai_tro in vai_tro_ds:
                     ctx = TranslationContext(
-                        vai_tro=vai_tro, genre=project.genre.value,
+                        vai_tro=vai_tro, quality_mode=project.quality_mode.value,
+                        genre=project.genre.value,
                         naming_mode=project.naming_mode.value,
                         tom_tat_truoc=tom_tat, glossary=glossary,
                         custom_instruction=project.custom_instruction)
@@ -944,7 +945,8 @@ class TranslationService:
                 dich = phan
                 for vai_tro in vai_tro_ds:
                     ctx = TranslationContext(
-                        vai_tro=vai_tro, genre=project.genre.value,
+                        vai_tro=vai_tro, quality_mode=project.quality_mode.value,
+                        genre=project.genre.value,
                         naming_mode=project.naming_mode.value,
                         tom_tat_truoc=tom_tat, glossary=glossary,
                         custom_instruction=project.custom_instruction)

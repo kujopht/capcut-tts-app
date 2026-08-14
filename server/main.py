@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from server import tts_bridge
 from server.transcript import TRANSCRIPT_VERSION, build_transcript
+from server.translation_usage import usage_recorder
 from server.adapters import (
     AuthError,
     LocalStorageAdapter,
@@ -3889,6 +3890,24 @@ def list_translation_providers() -> Dict[str, Any]:
     """
     ds = translation_svc.provider_catalog()
     return {"providers": ds, "total": len(ds)}
+
+
+@app.get("/api/admin/translate/usage")
+def admin_translate_usage(profile: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Nen tang ke toan pool mien phi (V5.2, overnight Phase 3, Phan 3I) —
+    QUAN TRI CHI, khong danh cho nguoi dung thuong: day la so lieu VAN HANH
+    (bao nhieu request/ty le loi theo TUNG model), khong phai thong tin can
+    hien cho nguoi dung cuoi.
+
+    CHUA thuc thi han muc gi — chi quan sat. Xem `server/translation_usage.py`
+    ve gioi han da biet (trong bo nho, mat khi restart).
+    """
+    rec = usage_recorder()
+    return {
+        "summary_by_provider": rec.tom_tat_theo_model(),
+        "recent_events": [e.to_dict() for e in rec.gan_day(200)],
+    }
 
 
 class ProviderSettingsPatch(BaseModel):

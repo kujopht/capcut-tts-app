@@ -26,6 +26,7 @@ from server.domain import now_iso
 from server.translation import TranslationError
 from server.translation_byok_crypto import ByokCrypto, ByokDecryptError, lay_4_ky_tu_cuoi
 from server.translation_domain import ProviderConnection
+from server.translation_model_profiles import GROQ_MODEL_PROFILES, ModelProfile
 from server.translation_provider_registry import (
     ConfiguredProvider,
     GroqProvider,
@@ -37,11 +38,25 @@ from server.translation_provider_registry import (
 #: + mot nhanh trong `_kiem_tra`/`build_configured_provider`.
 SUPPORTED_BYOK_PROVIDERS = ("groq",)
 
+#: model_id -> ho so, tra cuu nguoc tu `GROQ_MODEL_PROFILES` (khoa o do la
+#: "qwen"/"gpt_oss_120b"/... — o day can tra theo model_id THAT nguoi dung
+#: da chon/luu, vi `ProviderConnection.selected_model` luu model_id).
+_GROQ_PROFILE_BY_MODEL_ID = {p.model_id: p for p in GROQ_MODEL_PROFILES.values()}
+
 
 def _model_mac_dinh(provider_id: str) -> str:
     if provider_id == "groq":
         return os.environ.get("GROQ_MODEL", "").strip() or "qwen/qwen3.6-27b"
     return ""
+
+
+def _ho_so_groq_cho_model(model_id: str) -> ModelProfile:
+    """Ho so tham so cho MOT model_id Groq — model CURATED (Qwen/GPT-OSS)
+    tra dung ho so cua no; model KHAC (nguoi dung tu nhap, chua co trong
+    danh sach curated) tra ho so RONG tham so — an toan, khong doan bua tham
+    so cho mot model chua biet."""
+    return _GROQ_PROFILE_BY_MODEL_ID.get(model_id) or ModelProfile(
+        key="custom", model_id=model_id, display_name=model_id, quality_hint="")
 
 
 class ByokNotConfiguredError(TranslationError):
@@ -167,7 +182,8 @@ class ProviderConnectionService:
 
         if provider_id == "groq":
             model = conn.selected_model or _model_mac_dinh("groq")
-            provider = GroqProvider(api_key=api_key, model=model)
+            provider = GroqProvider(api_key=api_key,
+                                    profile=_ho_so_groq_cho_model(model))
         else:
             return None
 
@@ -176,16 +192,65 @@ class ProviderConnectionService:
             display_name=f"{provider_id} (cá nhân)", quality_hint="cá nhân",
             provider=provider, free_tier=True, credential_source="personal")
 
-    def build_all_configured_providers(self, user_id: str) -> List[ConfiguredProvider]:
-        """Tat ca provider ca nhan DA KET NOI cua MOT nguoi dung, san sang
-        dua vao `ProviderRegistry.translate_segment_with_personal`."""
+    def build_all_model_providers(self, user_id: str, provider_id: str
+                                  ) -> List[ConfiguredProvider]:
+        """
+        Phan 3G (overnight Phase 3): MOT ket noi Groq ca nhan -> BA
+        `ConfiguredProvider` (Qwen/GPT-OSS 120B/GPT-OSS 20B), CUNG mot api
+        key da giai ma — dung y "Do not ask user to enter a key per model".
+
+        `credential.user_id == job.user_id` van duoc cuong che y HET
+        `build_configured_provider`: giai ma qua CHINH `_crypto`, chi doc
+        ket noi CUA user_id duoc truyen vao — KHONG co duong nao de gop
+        credential ca nhan cua hai nguoi dung ("No pooling personal
+        credentials").
+
+        Provider KHAC "groq" hien chua ho tro nhieu model (chi Groq co
+        catalog curated) — tra ve MOT phan tu duy nhat qua
+        `build_configured_provider`, giu hanh vi cu.
+        """
+        if provider_id != "groq":
+            cp = self.build_configured_provider(user_id, provider_id)
+            return [cp] if cp is not None else []
+
         if self._crypto is None:
             return []
+        try:
+            conn = self._store.get_connection(user_id, provider_id)
+        except NotFoundError:
+            return []
+        if conn.user_id != user_id:
+            return []
+        try:
+            api_key = self._crypto.giai_ma(
+                conn.encrypted_secret, user_id=conn.user_id,
+                provider_id=conn.provider_id)
+        except ByokDecryptError:
+            return []
+
         ra = []
+        for profile_key, profile in GROQ_MODEL_PROFILES.items():
+            ra.append(ConfiguredProvider(
+                provider_id=f"groq_{profile_key}", model_id=profile.model_id,
+                display_name=f"{profile.display_name} (cá nhân)",
+                quality_hint="cá nhân",
+                provider=GroqProvider(api_key=api_key, profile=profile),
+                free_tier=True, credential_source="personal"))
+        return ra
+
+    def build_all_configured_providers(self, user_id: str) -> List[ConfiguredProvider]:
+        """Tat ca provider ca nhan DA KET NOI cua MOT nguoi dung, san sang
+        dua vao `ProviderRegistry.translate_segment_with_personal`.
+
+        Tu Phan 3G: mot ket noi Groq gop VAO DAY ca ba model curated (xem
+        `build_all_model_providers`), khong chi MOT model da chon —
+        `selected_model` cua ket noi van con y nghia rieng cho UI hien thi
+        "model ưu tiên", nhung khong con GIOI HAN duong fallback nua."""
+        if self._crypto is None:
+            return []
+        ra: List[ConfiguredProvider] = []
         for conn in self._store.list_connections(user_id):
-            cp = self.build_configured_provider(user_id, conn.provider_id)
-            if cp is not None:
-                ra.append(cp)
+            ra.extend(self.build_all_model_providers(user_id, conn.provider_id))
         return ra
 
     def sync_status(self, user_id: str, cp: ConfiguredProvider) -> None:

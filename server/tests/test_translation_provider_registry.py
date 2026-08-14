@@ -13,6 +13,7 @@ import unittest
 
 import httpx
 
+from server.translation_model_profiles import GROQ_MODEL_PROFILES
 from server.translation_providers import TranslationContext, TranslationProviderError
 from server.translation_provider_registry import (
     AllProvidersUnavailable,
@@ -29,6 +30,10 @@ from server.translation_provider_registry import (
     kiem_tra_ket_noi_groq,
 )
 
+#: Ho so Qwen curated — dung lai trong TOAN BO test cua lop nay thay vi tao
+#: `ModelProfile` tay o tung test (Phan 3B/3C, overnight Phase 3).
+_QWEN = GROQ_MODEL_PROFILES["qwen"]
+
 
 def _client_gia(handler):
     return httpx.Client(base_url="https://vidu.test",
@@ -44,13 +49,13 @@ def _tra_loi_chat(noi_dung: str, *, status_code: int = 200,
 
 class GroqProviderTest(unittest.TestCase):
     def test_phan_hoi_binh_thuong(self):
-        p = GroqProvider(api_key="k", model="qwen",
+        p = GroqProvider(api_key="k", profile=_QWEN,
                          client=_client_gia(lambda r: _tra_loi_chat("Xin chào")))
         ra = p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
         self.assertEqual(ra, "Xin chào")
 
     def test_429_co_retry_after_thanh_rate_limited(self):
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(
             lambda r: httpx.Response(429, text="too many requests",
                                      headers={"retry-after": "30"})))
         with self.assertRaises(ProviderRateLimited) as ctx:
@@ -58,14 +63,14 @@ class GroqProviderTest(unittest.TestCase):
         self.assertTrue(ctx.exception.retry_at)  # co moc ISO, khong rong
 
     def test_429_khong_header_van_la_rate_limited_nhung_khong_bia_moc(self):
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(
             lambda r: httpx.Response(429, text="rate limited")))
         with self.assertRaises(ProviderRateLimited) as ctx:
             p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
         self.assertEqual(ctx.exception.retry_at, "")
 
     def test_429_chua_tu_quota_thanh_quota_exhausted(self):
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(
             lambda r: httpx.Response(429, text="daily quota exceeded")))
         with self.assertRaises(ProviderQuotaExhausted):
             p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
@@ -74,13 +79,13 @@ class GroqProviderTest(unittest.TestCase):
         def handler(request):
             raise httpx.ConnectTimeout("timeout", request=request)
 
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(handler))
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(handler))
         with self.assertRaises(TranslationProviderError):
             p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
 
     def test_thieu_cau_hinh_nem_loi_ngay_luc_tao(self):
         with self.assertRaises(TranslationProviderError):
-            GroqProvider(api_key="", model="qwen")
+            GroqProvider(api_key="", profile=_QWEN)
 
     def test_yeu_cau_groq_an_khoi_suy_luan_o_nguon(self):
         """Phat hien THAT qua kiem thu song voi Groq that (qwen/qwen3.6-27b
@@ -91,32 +96,69 @@ class GroqProviderTest(unittest.TestCase):
             than_gui.update(__import__("json").loads(request.content))
             return _tra_loi_chat("Xin chào")
 
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(handler))
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(handler))
         p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
         self.assertEqual(than_gui.get("reasoning_format"), "hidden")
 
-    def test_gui_max_tokens_du_lon_cho_model_reasoning(self):
-        """Phat hien THAT qua kiem thu song: khong dat `max_tokens` du lon,
-        model danh gan het ngan sach cho suy luan noi bo va cat ngang TRUOC
-        khi kip viet cau tra loi — API tra 200 nhung content RONG (khong
-        phai loi, khong phai 429). Da do duoc voi mot cau ngan don gian (3793/
-        4096 token la suy luan). Khoa lai: PHAI gui `max_tokens` du lon."""
+    def test_gui_max_completion_tokens_du_lon_cho_model_reasoning(self):
+        """Phat hien THAT qua kiem thu song: khong dat gioi han token dau ra
+        du lon, model danh gan het ngan sach cho suy luan noi bo va cat ngang
+        TRUOC khi kip viet cau tra loi — API tra 200 nhung content RONG
+        (khong phai loi, khong phai 429). Da do duoc voi mot cau ngan don
+        gian (3793/4096 token la suy luan).
+
+        Overnight Phase 3 (Part R): doi tu `max_tokens` sang
+        `max_completion_tokens` — tham so HIEN HANH theo tai lieu Groq (xac
+        minh 2026-08-14, xem `translation_model_profiles.py`); `max_tokens`
+        van duoc Groq chap nhan o thoi diem viet code nay nhung khong con la
+        tham so chinh thuc trong tai lieu/vi du hien tai."""
         than_gui = {}
 
         def handler(request):
             than_gui.update(__import__("json").loads(request.content))
             return _tra_loi_chat("Xin chào")
 
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(handler))
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(handler))
         p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
-        self.assertIsInstance(than_gui.get("max_tokens"), int)
-        self.assertGreaterEqual(than_gui.get("max_tokens"), 2048)
+        self.assertIsInstance(than_gui.get("max_completion_tokens"), int)
+        self.assertGreaterEqual(than_gui.get("max_completion_tokens"), 2048)
+
+    def test_qwen_tat_reasoning_effort_de_khong_lang_phi_token(self):
+        """Phan 3A (overnight Phase 3): dich thuong KHONG can Qwen suy luan
+        truoc khi tra loi — phai gui `reasoning_effort: "none"`."""
+        than_gui = {}
+
+        def handler(request):
+            than_gui.update(__import__("json").loads(request.content))
+            return _tra_loi_chat("Xin chào")
+
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(handler))
+        p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(than_gui.get("reasoning_effort"), "none")
+
+    def test_gpt_oss_khong_gui_reasoning_format_cua_qwen(self):
+        """Phan 3C: KHONG gui tham so cua model NAY cho model KHAC —
+        `reasoning_format` la RIENG cua Qwen, tai lieu Groq ghi ro no "not
+        supported" tren GPT-OSS. GPT-OSS dung `reasoning_effort: "low"`
+        (mac dinh, Phan 3C) va KHONG co `reasoning_format` trong than gui."""
+        than_gui = {}
+
+        def handler(request):
+            than_gui.update(__import__("json").loads(request.content))
+            return _tra_loi_chat("Xin chào")
+
+        gpt_oss = GROQ_MODEL_PROFILES["gpt_oss_120b"]
+        p = GroqProvider(api_key="k", profile=gpt_oss, client=_client_gia(handler))
+        p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(than_gui.get("reasoning_effort"), "low")
+        self.assertNotIn("reasoning_format", than_gui)
+        self.assertEqual(than_gui.get("model"), "openai/gpt-oss-120b")
 
     def test_loc_khoi_think_neu_model_van_tra_ve(self):
         """RAO CHAN CUOI: du da yeu cau `reasoning_format=hidden`, mot model/
         phien ban khong tuan thu van khong duoc phep lam hong ban dich —
         loi thu THAT tung xay ra voi qwen/qwen3.6-27b luc kiem thu song."""
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(
             lambda r: _tra_loi_chat(
                 "<think>\nSuy nghĩ nội bộ dài dòng ở đây...\n</think>\n\n"
                 "Tiêu Viêm nhìn về phía Dược Lão.")))
@@ -131,7 +173,7 @@ class GroqProviderTest(unittest.TestCase):
         KHONG DUOC coi chuoi rong la mot ban dich thanh cong (mot ban dich
         rong lam mat noi dung ma khong ai biet — dung nguyen tac chung cua
         `TranslationProvider.translate_segment`)."""
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(
             lambda r: _tra_loi_chat(
                 "<think>\nSuy nghĩ dài dòng nhưng KHÔNG BAO GIỜ kết luận...\n</think>")))
         with self.assertRaises(TranslationProviderError):
@@ -143,7 +185,7 @@ class GroqProviderTest(unittest.TestCase):
         CHUNG suy luan (het `max_tokens` truoc khi kip viet cau tra loi) —
         API tra 200 nhung `message.content` la CHUOI RONG tu dau (khong co
         khoi think nao de loc). Phai nem loi, khong duoc coi la thanh cong."""
-        p = GroqProvider(api_key="k", model="qwen", client=_client_gia(
+        p = GroqProvider(api_key="k", profile=_QWEN, client=_client_gia(
             lambda r: _tra_loi_chat("")))
         with self.assertRaises(TranslationProviderError) as ctx:
             p.translate_segment("萧炎看向药老。",

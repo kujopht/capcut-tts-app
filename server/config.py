@@ -308,6 +308,18 @@ class Settings:
     #: cai bay da tung lam ca buoi kiem chung chay tren mock.
     env_file_loaded: bool = False
 
+    #: Cau hinh provider dich V5 (Novel Translation Studio) — endpoint tuong
+    #: thich OpenAI chat completions (KHONG phai import goi `docutranslate`
+    #: — xem ghi chu kien truc trong `translation_providers.py`). Ba truong
+    #: nay TRUOC DAY chi ton tai trong docstring cua `build_provider`, chua
+    #: bao gio thuc su duoc doc tu `.env` — nen mot key that duoc dien vao
+    #: van im lang khong co tac dung gi (`TranslationService` mac dinh goi
+    #: `build_provider(None)`, luon ra mock). Rong = chua cau hinh, van chay
+    #: duoc tren mock — dung y voi moi truong dev/test chua co key that.
+    translation_base_url: str = ""
+    translation_api_key: str = ""
+    translation_model: str = ""
+
     @property
     def is_development(self) -> bool:
         return self.environment.lower() in ("development", "dev", "local")
@@ -511,6 +523,9 @@ def load_settings() -> Settings:
         allow_inline_worker_in_real_env=_env_bool(
             "FAS_ALLOW_INLINE_WORKER_IN_REAL_ENV", False),
         env_file_loaded=env_file is not None,
+        translation_base_url=_env("TRANSLATION_BASE_URL"),
+        translation_api_key=_env("TRANSLATION_API_KEY"),
+        translation_model=_env("TRANSLATION_MODEL"),
     )
 
 

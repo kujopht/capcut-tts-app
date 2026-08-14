@@ -36,6 +36,7 @@ _TOUCHED = (
     "APPWRITE_ENDPOINT", "APPWRITE_PROJECT_ID", "APPWRITE_API_KEY",
     "APPWRITE_DATABASE_ID",
     "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET",
+    "TRANSLATION_BASE_URL", "TRANSLATION_API_KEY", "TRANSLATION_MODEL",
 )
 
 
@@ -82,6 +83,33 @@ class TestEnvFileIsRead(EnvFileTestCase):
         os.environ["FAS_ENV_FILE"] = ""
         self.assertIsNone(env_file_path())
         self.assertFalse(load_settings().env_file_loaded)
+
+
+class TestTranslationSettings(EnvFileTestCase):
+    """
+    `TRANSLATION_BASE_URL`/`API_KEY`/`MODEL` (V5, DocuTranslateProvider) —
+    rao chan hoi quy cho cai bay da tim thay that: `Settings` truoc day
+    khong khai bao ba truong nay nen `load_settings()` khong bao gio doc
+    duoc chung du `.env` co dien gia tri — mot API key that se im lang
+    khong co tac dung gi. Xem `translation_providers.py::build_provider`.
+    """
+
+    def test_ca_ba_bien_den_duoc_settings(self):
+        self._write_env(
+            "TRANSLATION_BASE_URL=https://api.vidu.test/v1\n"
+            "TRANSLATION_API_KEY=khoa-thu\n"
+            "TRANSLATION_MODEL=vidu-model\n"
+        )
+        settings = load_settings()
+        self.assertEqual(settings.translation_base_url, "https://api.vidu.test/v1")
+        self.assertEqual(settings.translation_api_key, "khoa-thu")
+        self.assertEqual(settings.translation_model, "vidu-model")
+
+    def test_khong_dat_thi_rong_khong_loi(self):
+        settings = load_settings()
+        self.assertEqual(settings.translation_base_url, "")
+        self.assertEqual(settings.translation_api_key, "")
+        self.assertEqual(settings.translation_model, "")
 
 
 class TestPrecedence(EnvFileTestCase):

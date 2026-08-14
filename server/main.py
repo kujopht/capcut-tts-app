@@ -75,6 +75,7 @@ from server.translation import (
     UnsupportedFormat,
 )
 from server.translation_import import extract_text as _trich_van_ban_tep
+from server.translation_providers import build_provider
 from server.translation_service import TranslationService
 from server.translation_store import MockTranslationStore
 
@@ -120,12 +121,16 @@ creators.on_decision = social.notify_author_decision
 
 #: Tang dich vu Novel Translation Studio (V5) — subsystem RIENG, khong dung
 #: chung bang voi tts_jobs/novels. Kho hien tai la MOCK (trong bo nho) — chua
-#: co ban Appwrite, xem bao cao V5 "known limitations". Provider mac dinh la
-#: mock (`build_provider(None)` khi chua cau hinh
-#: TRANSLATION_BASE_URL/API_KEY/MODEL) — moi truong chua co key LLM that van
-#: chay duoc, chi khong dich that.
+#: co ban Appwrite, xem bao cao V5 "known limitations". Provider chon theo
+#: `settings` that: co du TRANSLATION_BASE_URL/API_KEY/MODEL trong `.env` thi
+#: ra `DocuTranslateProvider` (goi that), thieu thi ra mock — moi truong chua
+#: co key LLM van chay duoc, chi khong dich that. TRUOC DAY goi
+#: `TranslationService(translation_store, store)` KHONG truyen `settings`,
+#: nen du `.env` co dien key that cung khong bao gio duoc dung (luon ngam
+#: dinh `build_provider(None)` ben trong service) — da vá.
 translation_store = MockTranslationStore()
-translation_svc = TranslationService(translation_store, store)
+translation_svc = TranslationService(
+    translation_store, store, provider=build_provider(settings))
 
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300

@@ -19,6 +19,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+import httpx
+
+from server.translation import XUNG_HO_CAN_NGU_CANH
+
 
 @dataclass
 class TranslationContext:
@@ -105,38 +109,176 @@ class MockTranslationProvider(TranslationProvider):
         return f"[MOCK-VI] {ra}"
 
 
+#: Nhan tieng Viet, VIET RIENG cho prompt (khac `GENRE_LABELS` o
+#: `server/translation.py` — nhan do ngan, dung cho GIAO DIEN; o day can mo
+#: ta DAI hon de LLM hieu dung boi canh the loai). `XUNG_HO_CAN_NGU_CANH`
+#: thi dung chung THAT (import thang) vi day la danh sach du lieu, khong
+#: phai van ban hien thi — dung chung tranh lech danh sach giua hai noi.
+_NHAN_THE_LOAI: Dict[str, str] = {
+    "tien_hiep": "tiên hiệp (tu luyện, cảnh giới, tông môn)",
+    "huyen_huyen": "huyền huyễn (dị năng, đại lục, chủng tộc)",
+    "vo_hiep": "võ hiệp (võ công, giang hồ, môn phái)",
+    "do_thi": "đô thị hiện đại",
+    "ngon_tinh": "ngôn tình (tâm lý nhân vật, tình cảm)",
+    "lich_su": "lịch sử/dã sử",
+    "he_thong": "hệ thống (game hoá, bảng trạng thái, nâng cấp)",
+    "dong_nhan": "đồng nhân (dựa trên tác phẩm gốc có sẵn)",
+    "kinh_di": "kinh dị/rùng rợn",
+    "auto": "chưa xác định — tự nhận diện từ văn bản",
+}
+
+_NHAN_DAT_TEN: Dict[str, str] = {
+    "han_viet": "phiên âm Hán Việt (ví dụ: 萧炎 → Tiêu Viêm)",
+    "pinyin": "giữ nguyên bính âm/phiên âm La-tinh (ví dụ: 萧炎 → Xiao Yan)",
+    "thuan_viet": "Việt hoá theo NGHĨA thay vì âm đọc khi hợp lý",
+    "fandom": "dùng đúng thuật ngữ cộng đồng fandom Việt đã quen dùng",
+    "auto": "tự chọn cách phù hợp nhất với thể loại",
+}
+
+#: Xem `server/translation.py::XUNG_HO_CAN_NGU_CANH` — cung mot danh sach,
+#: dua thang vao prompt de LLM tu QUYET DINH tu xung ho tieng Viet phu hop
+#: THEO NGU CANH (gioi tinh, quan he, vai ve) — chu KHONG anh xa tinh mot
+#: dai tu Viet co dinh cho moi tu Trung. Day la diem khac biet voi mot tu
+#: dien tinh: cung mot ky tu "你" co the la "ngươi"/"cậu"/"con"/"ngài" tuy
+#: nguoi noi la ai, dang noi voi ai — chi mot LLM doc hieu van canh moi
+#: quyet dinh dung, khong co bang tra cuu nao lam thay duoc.
+_XUNG_HO_GHI_CHU = (
+    "Các đại từ/danh xưng tiếng Trung sau đây KHÔNG có một bản dịch cố định "
+    "— hãy chọn từ xưng hô tiếng Việt phù hợp dựa trên giới tính, quan hệ "
+    "và vai vế của người nói/người nghe trong NGỮ CẢNH đoạn văn, không dịch "
+    "máy móc theo một từ điển tĩnh: " + "、".join(XUNG_HO_CAN_NGU_CANH)
+)
+
+
+def _he_thong_prompt(context: TranslationContext) -> str:
+    """
+    Xay prompt he thong theo VAI TRO — day la noi ba-pass (dich/bien tap/QA)
+    THUC SU khac nhau ve NOI DUNG chi dan, dung y voi docstring dau file.
+    """
+    the_loai = _NHAN_THE_LOAI.get(context.genre, context.genre)
+    dat_ten = _NHAN_DAT_TEN.get(context.naming_mode, context.naming_mode)
+
+    goc = (
+        "Bạn là một dịch giả tiểu thuyết mạng Trung Quốc sang tiếng Việt, "
+        f"chuyên thể loại {the_loai}. Quy ước đặt tên riêng: {dat_ten}. "
+        f"{_XUNG_HO_GHI_CHU}"
+    )
+
+    if context.vai_tro == "translator":
+        return (
+            goc + " Dịch đoạn văn được đưa vào sang tiếng Việt tự nhiên, "
+            "đúng văn phong tiểu thuyết mạng (không dịch từng chữ máy móc). "
+            "CHỈ trả về đoạn văn đã dịch, không thêm lời giải thích, không "
+            "thêm ký hiệu markdown hay chú thích."
+        )
+    if context.vai_tro == "editor":
+        return (
+            goc + " Đoạn văn đưa vào ĐÃ được dịch sang tiếng Việt ở bước "
+            "trước. Nhiệm vụ của bạn là biên tập văn học: câu văn mượt hơn, "
+            "tự nhiên hơn, đúng giọng văn thể loại — KHÔNG đổi nghĩa, KHÔNG "
+            "thêm/bớt tình tiết, KHÔNG đổi tên riêng đã dùng. Nếu đoạn văn "
+            "đã tốt, trả về nguyên văn. CHỈ trả về đoạn văn kết quả."
+        )
+    # "qa"
+    return (
+        goc + " Đoạn văn đưa vào là bản dịch đã qua biên tập. Kiểm tra lỗi "
+        "sai nghĩa, thiếu câu, xưng hô mâu thuẫn với ngữ cảnh, hoặc lỗi "
+        "chính tả — rồi SỬA CỤC BỘ đúng chỗ sai (patch tại chỗ), KHÔNG viết "
+        "lại toàn bộ đoạn văn nếu phần còn lại đã ổn. Nếu không có lỗi, trả "
+        "về nguyên văn không đổi. CHỈ trả về đoạn văn kết quả."
+    )
+
+
+def _nguoi_dung_prompt(text: str, context: TranslationContext) -> str:
+    phan = [f"Đoạn văn cần xử lý:\n{text}"]
+    if context.tom_tat_truoc.strip():
+        phan.append(f"Tóm tắt các chương trước (để giữ mạch truyện):\n"
+                    f"{context.tom_tat_truoc}")
+    if context.glossary:
+        muc = "\n".join(f"- {g}: {v}" for g, v in context.glossary.items())
+        phan.append(f"Thuật ngữ ĐÃ CHỐT cho tác phẩm này (dùng đúng, không "
+                    f"đổi):\n{muc}")
+    if context.custom_instruction.strip():
+        phan.append(f"Yêu cầu thêm từ người dùng:\n{context.custom_instruction}")
+    return "\n\n".join(phan)
+
+
 class DocuTranslateProvider(TranslationProvider):
     """
-    Adapter cho DocuTranslate (github.com/xunbu/docutranslate, MPL-2.0).
+    Provider dich that qua endpoint tuong thich OpenAI chat completions.
 
-    CHUA TRIEN KHAI: can mot API key LLM that (DocuTranslate tu no khong
-    dich — no dieu phoi tach van ban/glossary va GOI mot LLM ben ngoai qua
-    cau hinh `TRANSLATION_BASE_URL`/`TRANSLATION_API_KEY`/`TRANSLATION_MODEL`,
-    xem `server/config.py`). Viet khung o day truoc de tang service khong
-    phai doi khi co key that — chi can lap `__init__`/`translate_segment`.
-
-    Y dinh tich hop: goi DocuTranslate nhu THU VIEN Python (import + goi ham),
-    KHONG vendor UI cua no. Giay phep MPL-2.0 cho phep dung nhu mot phu thuoc
-    (giu nguyen header MPL trong file CUA DocuTranslate, khong bat buoc mo
-    nguon toan bo Fanfic World) — xem ghi chu day du trong bao cao V5.
+    KHONG import goi PyPI `docutranslate` (github.com/xunbu/docutranslate,
+    MPL-2.0): API cong khai cua no la file-vao/file-ra
+    (`Client.translate(duong_dan_tep)`) — dieu phoi VA GOI mot LLM ben trong
+    theo cach RIENG cua no, khong cho phep kiem soat prompt tung doan/tung
+    vai-tro nhu he thong nay can (glossary khoa, tom tat chuong truoc, ba
+    vai tro dich/bien-tap/QA). Dung endpoint OpenAI-compatible truc tiep qua
+    `httpx` (da la phu thuoc khai bao san — xem `server/requirements.txt`)
+    la lua chon dung: cung MOT hinh dang cau hinh (`base_url`/`api_key`/
+    `model`) ma mot backend kieu DocuTranslate se dung, nhung van giu duoc
+    toan bo prompt engineering (Novel Bible, xung ho theo ngu canh, 3-pass)
+    da xay o tang tren. Ghi ro quyet dinh nay o day de phien sau khong
+    tuong nham la chua tich hop vi "thieu import goi docutranslate".
     """
 
     name = "docutranslate"
 
-    def __init__(self, *, base_url: str, api_key: str, model: str):
+    #: Giay — timeout MOI request. Doan van dich co the dai, LLM tra loi
+    #: cham hon TTS thong thuong.
+    TIMEOUT_SECONDS = 60.0
+
+    def __init__(self, *, base_url: str, api_key: str, model: str,
+                client: Optional[httpx.Client] = None):
         if not (base_url and api_key and model):
             raise TranslationProviderError(
                 "Thiếu cấu hình TRANSLATION_BASE_URL/API_KEY/MODEL — "
                 "chưa thể dùng DocuTranslateProvider.")
-        self._base_url = base_url
-        self._api_key = api_key
         self._model = model
+        # `client` tiem duoc de test dung `httpx.MockTransport` — khong bao
+        # gio goi mang that trong bo test (xem test_translation_providers.py).
+        self._client = client or httpx.Client(
+            base_url=base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=self.TIMEOUT_SECONDS,
+        )
 
     def translate_segment(self, text: str, *,
                           context: TranslationContext) -> str:
-        raise NotImplementedError(
-            "DocuTranslateProvider chưa triển khai — cần API key LLM thật. "
-            "Dùng MockTranslationProvider cho phát triển/test.")
+        sach = (text or "").strip()
+        if not sach:
+            raise TranslationProviderError("Đoạn văn rỗng, không có gì để dịch.")
+
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": _he_thong_prompt(context)},
+                {"role": "user", "content": _nguoi_dung_prompt(sach, context)},
+            ],
+            "temperature": 0.3,
+        }
+        try:
+            resp = self._client.post("/chat/completions", json=payload)
+        except httpx.HTTPError as exc:
+            raise TranslationProviderError(
+                f"Không gọi được dịch vụ dịch: {exc}") from exc
+
+        if resp.status_code != 200:
+            raise TranslationProviderError(
+                f"Dịch vụ dịch trả lỗi {resp.status_code}: "
+                f"{resp.text[:300]}")
+
+        try:
+            du_lieu = resp.json()
+            noi_dung = du_lieu["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, ValueError) as exc:
+            raise TranslationProviderError(
+                "Phản hồi dịch vụ dịch không đúng định dạng mong đợi.") from exc
+
+        ket_qua = (noi_dung or "").strip()
+        if not ket_qua:
+            raise TranslationProviderError(
+                "Dịch vụ dịch trả về nội dung rỗng.")
+        return ket_qua
 
 
 def build_provider(settings: Optional[object] = None) -> TranslationProvider:

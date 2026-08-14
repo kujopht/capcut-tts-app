@@ -14,6 +14,7 @@ from server.adapters import (
     PermissionDenied,
 )
 from server.translation import QuotaExceeded, TranslationError, TranslationJobStatus
+from server.translation_providers import MockTranslationProvider
 from server.translation_service import (
     MAX_CHAPTERS_PER_PROJECT,
     MAX_CHARS_PER_PROJECT,
@@ -142,6 +143,56 @@ class JobTest(Nen):
         job = self.svc.create_job(self.p.project_id, self.an.user_id)
         ra = self.svc.cancel_job(job.job_id, self.an.user_id)
         self.assertEqual(ra.status, TranslationJobStatus.COMPLETED)  # khong doi
+
+
+class _GhiVaiTro(MockTranslationProvider):
+    """Spy tren mock — ghi lai DUNG THU TU `vai_tro` da goi cho MOI doan, de
+    kiem 3-pass THAT (khong chi may trang thai job) chay dung so luot theo
+    che do chat luong. Ke thua Mock nen van tra ve hanh vi tat dinh, khong
+    goi mang — chi them mot danh sach ghi am."""
+
+    def __init__(self):
+        self.lich_su_vai_tro: list = []
+
+    def translate_segment(self, text, *, context):
+        self.lich_su_vai_tro.append(context.vai_tro)
+        return super().translate_segment(text, context=context)
+
+
+class BaPassTest(unittest.TestCase):
+    """
+    Rao chan hoi quy CU THE cho lo hong da tim thay: may trang thai job DI
+    QUA du buoc reviewing/qa cho CAN_BANG/VAN_HOC, nhung truoc day
+    `_dich_mot_chuong` chi bao gio goi provider VOI `vai_tro="translator"` —
+    cac buoc do chi la NHAN, khong that su goi bien tap/QA. Da sua trong
+    `TranslationService._dich_mot_chuong` (xem `_VAI_TRO_THEO_CHE_DO`).
+    """
+
+    def setUp(self) -> None:
+        self.identity = MockIdentityAdapter()
+        self.novels = MockMetadataStore()
+        self.store = MockTranslationStore()
+        self.provider = _GhiVaiTro()
+        self.svc = TranslationService(self.store, self.novels,
+                                      provider=self.provider)
+        self.an = self.identity.register("an@vidu.vn", "MatKhau123", "An")
+
+    def _chay(self, quality_mode: str) -> list:
+        p = self.svc.create_project(
+            self.an.user_id, title="x", source_text="một câu duy nhất.",
+            quality_mode=quality_mode)
+        self.svc.create_job(p.project_id, self.an.user_id)
+        return list(self.provider.lich_su_vai_tro)
+
+    def test_nhanh_chi_dich_mot_luot(self):
+        self.assertEqual(self._chay("nhanh"), ["translator"])
+
+    def test_can_bang_dich_roi_qa_khong_bien_tap_rieng(self):
+        self.assertEqual(self._chay("can_bang"), ["translator", "qa"])
+
+    def test_van_hoc_du_ba_pass_dung_thu_tu(self):
+        self.assertEqual(self._chay("van_hoc"),
+                         ["translator", "editor", "qa"])
 
 
 class GlossaryTest(Nen):

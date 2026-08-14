@@ -55,6 +55,19 @@ SO_CHUONG_TOM_TAT_NGU_CANH = 2
 DO_DAI_TOM_TAT = 240
 
 
+#: Thu tu vai-tro provider CHAY THAT cho MOI doan, theo che do chat luong.
+#: `NHANH`: chi dich, dung cho ban nhap nhanh. `CAN_BANG`: dich + mot lan QA
+#: sua loi cuc bo (khong bien tap van hoc rieng — do la diem KHAC voi
+#: `VAN_HOC`, dung y voi yeu cau goc muc 9 "CAN_BANG/VAN_HOC khac nhau o SO
+#: LUOT dich that"). `VAN_HOC`: du ba pass — dich, bien tap van hoc, roi QA
+#: sua loi cuc bo tren ban da bien tap.
+_VAI_TRO_THEO_CHE_DO: Dict[QualityMode, tuple] = {
+    QualityMode.NHANH: ("translator",),
+    QualityMode.CAN_BANG: ("translator", "qa"),
+    QualityMode.VAN_HOC: ("translator", "editor", "qa"),
+}
+
+
 def _tom_tat_tho(van_ban_da_dich: str) -> str:
     """Tom tat THO: cau dau + cau cuoi cua chuong da dich. Khong goi LLM rieng
     cho viec tom tat — mot lan goi them cho MOI chuong la chi phi khong xung
@@ -235,14 +248,20 @@ class TranslationService:
         glossary = {e.original: e.translated
                     for e in self._store.list_glossary(project.project_id)}
 
+        vai_tro_ds = _VAI_TRO_THEO_CHE_DO[project.quality_mode]
         ket_qua = []
         for i, phan in enumerate(doan):
-            ctx = TranslationContext(
-                vai_tro="translator", genre=project.genre.value,
-                naming_mode=project.naming_mode.value,
-                tom_tat_truoc=tom_tat, glossary=glossary,
-                custom_instruction=project.custom_instruction)
-            dich = self._provider.translate_segment(phan, context=ctx)
+            # Ba pass THAT (khong chi may trang thai): dich truoc, roi lan
+            # luot chuyen ket qua qua bien tap/QA neu che do yeu cau — moi
+            # vai tro nhan dau ra cua vai tro TRUOC lam van ban dau vao.
+            dich = phan
+            for vai_tro in vai_tro_ds:
+                ctx = TranslationContext(
+                    vai_tro=vai_tro, genre=project.genre.value,
+                    naming_mode=project.naming_mode.value,
+                    tom_tat_truoc=tom_tat, glossary=glossary,
+                    custom_instruction=project.custom_instruction)
+                dich = self._provider.translate_segment(dich, context=ctx)
             ket_qua.append(dich)
             job.current_chapter_done_segments = i + 1
             job.updated_at = now_iso()

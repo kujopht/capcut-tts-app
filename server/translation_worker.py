@@ -38,6 +38,9 @@ from typing import Any, Dict, Optional
 
 from server.adapters import build_metadata_store
 from server.config import get_settings
+from server.translation_byok_crypto import build_byok_crypto
+from server.translation_byok_service import ProviderConnectionService
+from server.translation_provider_registry import build_provider_registry
 from server.translation_providers import build_provider
 from server.translation_service import TranslationService
 from server.translation_store import build_translation_store
@@ -68,6 +71,18 @@ _ep_utf8()
 _settings = get_settings()
 _novel_store = build_metadata_store(_settings)
 _translation_store = build_translation_store(_settings)
+#: LO HONG THAT tung ton tai o day, tim khi kiem toan release: tien trinh
+#: worker RIENG (danh cho production, `FAS_TRANSLATION_INLINE_WORKER=false`)
+#: CHUA TUNG duoc noi voi registry da-provider (Part Q, Groq/Cloudflare mien
+#: phi) lan BYOK (Part V5.1, key ca nhan) — chi `main.py` (duong inline,
+#: dev/staging) co day du hai thu nay. Trien khai dung kien truc khuyen dung
+#: (worker rieng, khong inline) se AM THAM chi con provider don/mock cu, bo
+#: qua toan bo da-provider+BYOK ma khong bao loi gi. Noi CUNG mot cach voi
+#: `main.py` — xem `server/main.py` doan wiring `translation_svc`.
+_translation_registry = build_provider_registry()
+_translation_byok_crypto = build_byok_crypto()
+_translation_byok_svc = ProviderConnectionService(
+    _translation_store, crypto=_translation_byok_crypto)
 _svc = TranslationService(
     _translation_store, _novel_store,
     provider=build_provider(_settings),
@@ -76,6 +91,8 @@ _svc = TranslationService(
     # `server/worker.py::api.enable_job_execution()`: mot AttributeError o
     # buoc kiem moi truong khong duoc vo tinh cho phep chay job truoc do.
     inline_worker=False,
+    registry=_translation_registry,
+    byok=_translation_byok_svc,
 )
 
 HEARTBEAT_FILE = _settings.var_dir / "translation_worker" / "heartbeat.json"

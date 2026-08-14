@@ -14,6 +14,33 @@ import unittest
 from pathlib import Path
 
 from server.translation_worker import _doc_tham_so
+from server import translation_worker as tw
+from server.translation_byok_service import ProviderConnectionService
+from server.translation_provider_registry import ProviderRegistry
+
+
+class WiringDaProviderVaBYOKTest(unittest.TestCase):
+    """
+    LO HONG THAT tung ton tai, tim khi kiem toan release (V5.1): tien trinh
+    worker RIENG nay (danh cho production, khac `main.py` dung inline) tung
+    CHUA duoc noi voi registry da-provider (Part Q, Groq/Cloudflare) lan
+    BYOK (V5.1, key ca nhan) — chi co provider don/mock cu. Trien khai dung
+    kien truc khuyen dung cho production (worker rieng) se AM THAM bo qua
+    toan bo da-provider+BYOK ma khong loi gi. Khoa lai vinh vien o day.
+    """
+
+    def test_da_xay_registry_da_provider_va_truyen_vao_svc(self):
+        # `_translation_registry` (bien module) LUON la mot ProviderRegistry
+        # THAT — rong hay khong tuy moi truong co GROQ_API_KEY hay khong.
+        # `TranslationService.__init__` tu chuan hoa registry RONG thanh
+        # None (dung y thiet ke — rong = "khong co provider chung", tuong
+        # duong khong truyen gi), nen kiem tra o CAP BIEN MODULE, khong phai
+        # o `tw._svc._registry`, moi phan anh dung viec "co duoc NOI vao
+        # khong" bat ke moi truong test co cau hinh Groq hay khong.
+        self.assertIsInstance(tw._translation_registry, ProviderRegistry)
+
+    def test_svc_co_byok_service(self):
+        self.assertIsInstance(tw._svc._byok, ProviderConnectionService)
 
 
 class ThamSoTest(unittest.TestCase):

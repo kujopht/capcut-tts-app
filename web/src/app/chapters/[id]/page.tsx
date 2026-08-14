@@ -3,11 +3,11 @@
 /** Doc chuong: trinh phat audio o tren, noi dung o duoi. */
 
 import Link from "next/link";
-import { use, useCallback, useRef } from "react";
+import { use, useCallback, useEffect, useRef } from "react";
 import { api, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
-import { AudioEngineProvider } from "@/components/AudioEngine";
+import { useAudioEngine } from "@/components/AudioEngine";
 import { ChapterPlayer } from "@/components/ChapterPlayer";
 import { MiniPlayer } from "@/components/MiniPlayer";
 import { ListenReporter } from "@/components/ListenReporter";
@@ -22,6 +22,7 @@ export default function ChapterPage({
 }) {
   const { id } = use(params);
   const { profile } = useSession();
+  const { trangThai: audioTrangThai, dieuKhien: audioDieuKhien } = useAudioEngine();
   /** Trinh phat lon — thanh nho theo doi phan tu nay de biet khi nao noi len. */
   const mocPhat = useRef<HTMLDivElement | null>(null);
 
@@ -34,6 +35,18 @@ export default function ChapterPage({
   const audio: AudioTrack | null = data?.audio ?? null;
   const novel: NovelBrief | null = data?.novel ?? null;
   const audioOutdated = Boolean(data?.audio_outdated);
+
+  /*
+    Bien chuong nay thanh BAI DANG PHAT TOAN CUC. `phat()` la khong-lam-gi
+    khi day DA la bai dang phat (vd quay lai dung trang nay) — vi tri/trang
+    thai phat duoc giu nguyen, khong bi dat lai. Phai dat SAU moi hook khac
+    (thu tu hook on dinh), va TRUOC moi `return` som ben duoi.
+  */
+  useEffect(() => {
+    if (!audio || !chapter) return;
+    if (audioTrangThai.chapterId === chapter.chapter_id) return;
+    audioDieuKhien.phat(chapter.chapter_id, chapter.title);
+  }, [audio, chapter, audioTrangThai.chapterId, audioDieuKhien]);
 
   if (loading) {
     return (
@@ -94,10 +107,7 @@ export default function ChapterPage({
         cuon qua no moi toi duoc chuong.
       */}
       {audio ? (
-        <AudioEngineProvider
-          chapterId={chapter.chapter_id}
-          title={chapter.title}
-        >
+        <>
           <div className="stack listen-col" ref={mocPhat}>
             {/* M4: audio van phat duoc va van tai duoc — chi canh bao rang no
                 duoc tao truoc lan sua noi dung gan nhat. Chu so huu duoc chi
@@ -148,7 +158,7 @@ export default function ChapterPage({
           <div className="listen-col">
             <ChapterComments chapterId={chapter.chapter_id} />
           </div>
-        </AudioEngineProvider>
+        </>
       ) : (
         <div className="reader-col stack">
           <EmptyState

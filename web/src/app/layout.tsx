@@ -8,6 +8,8 @@ import { PageBackground } from "@/components/PageBackground";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { Logo } from "@/components/Logo";
+import { AudioEngineProvider } from "@/components/AudioEngine";
+import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
 
 // Mo ta cu noi ve viec tao audio truoc tien. San pham nay la nen tang doc va
 // nghe fanfic; Audio Studio la cong cu phu. Mo ta cung phai noi theo thu tu do.
@@ -48,6 +50,12 @@ export default function RootLayout({
       <body>
         <SessionProvider>
           <ToastProvider>
+          {/*
+            Dong co phat TOAN CUC — bao NGOAI `{children}`, nen dieu huong
+            giua cac trang (chi thay `{children}`) khong lam no unmount. Day
+            la ly do audio SONG XUYEN ROUTE: xem `components/AudioEngine.tsx`.
+          */}
+          <AudioEngineProvider>
             {/* Lop tranh nen — mot phan tu `fixed` nam duoi tat ca. Ve TRUOC
                 lien ket bo qua de no khong bao gio chen vao thu tu tieu diem. */}
             <PageBackground />
@@ -143,6 +151,13 @@ export default function RootLayout({
                 </span>
               </div>
             </footer>
+
+            {/* Thanh phat nho, song xuyen moi tuyen duong — xem
+                `components/GlobalMiniPlayer.tsx`. Tu an khi khong co gi
+                dang phat, hoac khi dang o chinh trang doc chuong do (trang
+                do da co trinh phat lon + thanh nho theo cuon rieng). */}
+            <GlobalMiniPlayer />
+          </AudioEngineProvider>
           </ToastProvider>
         </SessionProvider>
       </body>

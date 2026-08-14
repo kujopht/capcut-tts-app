@@ -70,6 +70,7 @@ function OGo({
   nhan,
   moTa,
   chuong = false,
+  chapterId,
   onGui,
   onHuy,
 }: {
@@ -78,6 +79,10 @@ function OGo({
   moTa: string;
   /** Bật các khả năng riêng của bình luận chương. */
   chuong?: boolean;
+  /** Chương ĐANG xem — dùng để kiểm engine toàn cục có đúng đang phát CHƯƠNG
+      NÀY không (provider giờ là toàn cục, có thể đang phát một chương khác
+      hoàn toàn). Chỉ có ý nghĩa khi `chuong` là true. */
+  chapterId?: string;
   onGui: (text: string, extras: {
     timestamp_ms: number | null;
     spoiler: boolean;
@@ -129,12 +134,13 @@ function OGo({
       {chuong ? (
         <div className="row binh-luan-cong-cu">
           {/*
-            Nut dinh moc chi hien khi CO engine (trang co audio). Bam mot lan
-            DONG BANG vi tri hien tai; bam lai thi bo. Khong tu cap nhat theo
-            audio dang chay — nguoi ta muon danh dau "cho toi VUA nghe", khong
-            phai mot con so troi.
+            Nut dinh moc chi hien khi engine TOAN CUC dang phat DUNG chuong
+            nay (khong chi "co provider" — provider gio luon co mat, co the
+            dang phat mot chuong khac). Bam mot lan DONG BANG vi tri hien tai;
+            bam lai thi bo. Khong tu cap nhat theo audio dang chay — nguoi ta
+            muon danh dau "cho toi VUA nghe", khong phai mot con so troi.
           */}
-          {engine ? (
+          {engine && chapterId && engine.trangThai.chapterId === chapterId ? (
             <button
               type="button"
               className={moc === null ? "btn btn-ghost btn-sm" : "btn btn-sm"}
@@ -187,12 +193,20 @@ function OGo({
   );
 }
 
-/** Mốc audio trên một bình luận: bấm để tua — qua CHÍNH engine dùng chung. */
-function MocAudio({ ms }: { ms: number }) {
+/**
+ * Mốc audio trên một bình luận: bấm để tua — qua CHÍNH engine dùng chung.
+ *
+ * `chapterId` PHẢI khớp `engine.trangThai.chapterId`: provider giờ là toàn
+ * cục, nên chỉ "có engine" không còn nghĩa là "engine đang phát CHƯƠNG NÀY"
+ * — nó có thể đang phát một chương khác hoàn toàn (người dùng mở bài này
+ * trong lúc chương khác đang phát ở MiniPlayer toàn cục).
+ */
+function MocAudio({ ms, chapterId }: { ms: number; chapterId?: string }) {
   const engine = useAudioEngineOptional();
   const nhan = dongHo(ms / 1000);
-  if (!engine) {
-    // Audio khong con (hoac trang khong co): moc van la thong tin, hien tinh.
+  if (!engine || !chapterId || engine.trangThai.chapterId !== chapterId) {
+    // Audio khong phai cua chuong nay (hoac khong con/trang khong co): moc
+    // van la thong tin, hien tinh.
     return <span className="moc-audio moc-tinh">⏱ {nhan}</span>;
   }
   return (
@@ -231,6 +245,7 @@ function MotBinhLuan({
   bl,
   tra,
   tranChu,
+  chapterId,
   onTraLoi,
   onDoi,
   onXoa,
@@ -238,6 +253,8 @@ function MotBinhLuan({
   bl: Comment;
   tra: boolean;
   tranChu: number;
+  /** Chỉ có ở chế độ chương — xem `MocAudio`. */
+  chapterId?: string;
   onTraLoi?: () => void;
   onDoi: (moi: Comment) => void;
   onXoa: () => void;
@@ -278,7 +295,7 @@ function MotBinhLuan({
           <RankBadge rank={bl.author.rank} size="sm" />
         ) : null}
         {bl.timestamp_ms !== null && bl.timestamp_ms !== undefined ? (
-          <MocAudio ms={bl.timestamp_ms} />
+          <MocAudio ms={bl.timestamp_ms} chapterId={chapterId} />
         ) : null}
         <span className="hint">{khiNao(bl.created_at)}</span>
       </div>
@@ -447,6 +464,7 @@ export function CommentThread({
           nhan="Bình luận"
           moTa={placeholder ?? "Viết bình luận…"}
           chuong={laChuong}
+          chapterId={laChuong ? postId : undefined}
           onGui={themGoc}
         />
       ) : (
@@ -488,6 +506,7 @@ export function CommentThread({
                   bl={c}
                   tra={false}
                   tranChu={tranChu}
+                  chapterId={laChuong ? postId : undefined}
                   onTraLoi={
                     profile
                       ? () =>
@@ -519,6 +538,7 @@ export function CommentThread({
                     bl={r}
                     tra
                     tranChu={tranChu}
+                    chapterId={laChuong ? postId : undefined}
                     onDoi={(moi) =>
                       setDs((truoc) =>
                         (truoc ?? []).map((x) =>

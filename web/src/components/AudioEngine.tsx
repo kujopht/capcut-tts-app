@@ -1,23 +1,30 @@
 "use client";
 
 /**
- * Dong co phat cho trang doc chuong.
+ * Dong co phat TOAN CUC — song o `app/layout.tsx`, ngoai cay cua tung trang.
  *
- * MOT the `<audio>` DUY NHAT, do context nay so huu. Trinh phat lon o dau
- * trang va thanh nho dinh o duoi deu doc cung mot trang thai va goi cung mot
- * bo dieu khien — chung KHONG phai hai trinh phat.
+ * MOT the `<audio>` DUY NHAT cho CA UNG DUNG. Truoc day provider nay duoc mo
+ * lai o TUNG trang doc chuong (nhan `chapterId`/`title` la prop bat buoc luc
+ * mount) — nghia la dieu huong sang `/fanfic`/`/community`/`/account` se THAO
+ * ca provider lan the <audio>, va audio dang phat bi CAT NGANG. Da do duoc
+ * that: MiniPlayer khong song xuyen route du kien truc component da co san.
  *
- * Tao the `<audio>` thu hai la loi de mac nhat o cho nay: hai the cung phat
- * mot file thi nguoi dung nghe thanh tieng vong, va bam dung o thanh nay khong
- * dung thanh kia.
+ * SUA: provider gio KHONG nhan chapterId/title qua prop. No mang mot BAI
+ * DANG TAI (`track`, co the null) trong state cua chinh no, va cong bo mot
+ * hanh dong `phat(chapterId, title)` de BAT KY trang nao (trang doc chuong,
+ * hoac sau nay la mot nut "Nghe" o Thu vien) goi vao de bien mot chuong
+ * thanh BAI DANG PHAT TOAN CUC. Vi provider nam NGOAI `{children}` trong
+ * layout, dieu huong giua cac trang chi thay `{children}` — provider VA the
+ * <audio> cua no khong bi cham toi.
+ *
+ * `phat()` la IDEMPOTENT theo chapterId: goi lai VOI CUNG chapterId (vi du
+ * quay lai dung trang chuong dang nghe) la mot phep KHONG-LAM-GI — vi tri
+ * phat, trang thai dang-phat/tam-dung deu giu nguyen. Chi khi chapterId THAT
+ * SU doi thi trang thai moi duoc dat lai va audio moi moi duoc tai.
  *
  * The `<audio>` VAN la dong co phat — khong tu viet lai bang Web Audio API.
- * Cai duoc thay chi la lop VE: giao dien rieng thay cho bo dieu khien mac dinh
- * cua trinh duyet, con phat/dung/tua/am luong deu goi thang vao the do.
- *
- * Cach lay URL khong doi: van la `lib/audio.ts::resolveAudio`, ke ca duong R2
- * ky san lan duong stream qua backend. Xem ghi chu o tep do de biet vi sao
- * khong gan thang `/api/audio/{id}`.
+ * Cai duoc thay chi la lop VE: giao dien rieng thay cho bo dieu khien mac
+ * dinh cua trinh duyet, con phat/dung/tua/am luong deu goi thang vao the do.
  */
 
 import {
@@ -40,6 +47,10 @@ export { dongHo } from "@/lib/time";
 import { errorMessage } from "@/lib/session";
 
 export interface TrangThaiAudio {
+  /** Chuong dang la bai TOAN CUC hien tai, hoac `null` khi chua ai bam nghe
+      gi. Cac component so sanh gia tri nay voi chapterId CUA RIENG chung de
+      biet "day co phai audio cua TOI khong" — xem `CommentThread.tsx`. */
+  chapterId: string | null;
   /** Dang hoi backend URL phat. */
   dangTai: boolean;
   /** Loi khi lay URL hoac khi trinh duyet khong phat duoc. */
@@ -65,11 +76,18 @@ export interface DieuKhienAudio {
   tua: (giay: number) => void;
   datAmLuong: (v: number) => void;
   datTocDo: (v: number) => void;
+  /**
+   * Bien mot chuong thanh BAI DANG PHAT TOAN CUC. Goi lai voi CUNG chapterId
+   * la khong-lam-gi (giu nguyen vi tri/trang thai) — an toan de goi trong
+   * `useEffect` moi lan trang doc chuong duoc tham, khong so lap lai.
+   */
+  phat: (chapterId: string, title: string) => void;
 }
 
 interface Hop {
   trangThai: TrangThaiAudio;
   dieuKhien: DieuKhienAudio;
+  /** Tieu de bai dang phat — chuoi rong khi `chapterId` la null. */
   tieuDe: string;
 }
 
@@ -89,27 +107,28 @@ export function useAudioEngine(): Hop {
 /**
  * Nhu `useAudioEngine` nhung tra `null` khi KHONG co provider.
  *
- * Danh cho khoi binh luan chuong: no song ca o trang co audio (trong provider,
- * co nut "Bình luận tại 03:42") lan trang chua co audio (ngoai provider — van
- * binh luan duoc, chi khong co nut moc thoi gian). Mot hook nem loi se bat
- * khoi do phai co HAI phien ban.
+ * Provider gio la TOAN CUC (mount trong layout) nen ham nay hau nhu luon tra
+ * ve mot gia tri — nhung van giu ban tuy chon nay cho cac trang render ngoai
+ * cay layout thong thuong (vd mot trang loi/gioi han) va cho code cu chua
+ * kip doi. Component GOI ham nay VAN PHAI tu so sanh
+ * `engine.trangThai.chapterId` voi chapterId cua CHINH NO truoc khi coi day
+ * la audio "cua minh" — mot provider toan cuc co the dang phat MOT CHUONG
+ * KHAC voi chuong dang xem.
  */
 export function useAudioEngineOptional(): Hop | null {
   return useContext(Ngu_canh);
 }
 
-export function AudioEngineProvider({
-  chapterId,
-  title,
-  children,
-}: {
+interface Track {
   chapterId: string;
   title: string;
-  children: React.ReactNode;
-}) {
+}
+
+export function AudioEngineProvider({ children }: { children: React.ReactNode }) {
   const el = useRef<HTMLAudioElement | null>(null);
   const thuHoi = useRef<(() => void) | null>(null);
 
+  const [track, setTrack] = useState<Track | null>(null);
   const [tep, setTep] = useState<PlayableAudio | null>(null);
   const [loi, setLoi] = useState("");
   const [sanSang, setSanSang] = useState(false);
@@ -121,13 +140,50 @@ export function AudioEngineProvider({
   const [amLuong, setAmLuongState] = useState(1);
   const [tocDo, setTocDoState] = useState(1);
 
+  /* -------------------------------------------------------- doi bai dang phat */
+
+  const phat = useCallback((chapterId: string, title: string) => {
+    setTrack((hienTai) =>
+      hienTai?.chapterId === chapterId ? hienTai : { chapterId, title },
+    );
+  }, []);
+
   /* --------------------------------------------------------- lay lien ket */
 
-  // Than effect chi khoi dong promise; moi `setState` nam trong callback —
-  // quy tac `react-hooks/set-state-in-effect`.
+  // Chay lai MOI KHI `track?.chapterId` THAT SU doi — goi `phat()` voi cung
+  // chapterId khong lam doi gia tri nay (xem `phat` o tren), nen effect
+  // KHONG chay lai va vi tri/trang thai phat duoc giu nguyen. Than effect chi
+  // khoi dong promise; moi `setState` nam trong callback — quy tac
+  // `react-hooks/set-state-in-effect`.
   useEffect(() => {
     let huy = false;
-    resolveAudio(chapterId)
+
+    // Dat lai TOAN BO trang thai hien thi cho bai MOI (hoac khi khong con
+    // bai nao — `track === null`) — buoc BAT BUOC moi lan chuyen chapterId.
+    // Trong `queueMicrotask`, khong goi thang: quy tac
+    // `react-hooks/set-state-in-effect` cam `setState` DONG BO trong than
+    // effect (cung ly do da ghi o `NavIndicator.tsx`). Microtask nay CHAC
+    // CHAN chay truoc bat ky `.then()` nao cua `resolveAudio` ben duoi (Promise
+    // do it nhat mot vong mang that, con day la mot microtask thuan).
+    queueMicrotask(() => {
+      if (huy) return;
+      setTep(null);
+      setLoi("");
+      setSanSang(false);
+      setDangPhat(false);
+      setDaBatDau(false);
+      setDaXong(false);
+      setThoiDiem(0);
+      setThoiLuong(0);
+    });
+
+    if (!track) {
+      return () => {
+        huy = true;
+      };
+    }
+
+    resolveAudio(track.chapterId)
       .then((xong) => {
         if (huy) {
           xong.revoke?.();
@@ -144,7 +200,7 @@ export function AudioEngineProvider({
       thuHoi.current?.();
       thuHoi.current = null;
     };
-  }, [chapterId]);
+  }, [track]);
 
   /* ------------------------------------------------------------ dieu khien */
 
@@ -186,7 +242,8 @@ export function AudioEngineProvider({
 
   const trangThai = useMemo<TrangThaiAudio>(
     () => ({
-      dangTai: !tep && !loi,
+      chapterId: track?.chapterId ?? null,
+      dangTai: !!track && !tep && !loi,
       loi,
       sanSang,
       dangPhat,
@@ -197,20 +254,20 @@ export function AudioEngineProvider({
       amLuong,
       tocDo,
       tep,
-      tenTep: audioFileName(title),
+      tenTep: audioFileName(track?.title ?? ""),
     }),
-    [tep, loi, sanSang, dangPhat, daBatDau, daXong, thoiDiem, thoiLuong,
-     amLuong, tocDo, title],
+    [track, tep, loi, sanSang, dangPhat, daBatDau, daXong, thoiDiem,
+     thoiLuong, amLuong, tocDo],
   );
 
   const dieuKhien = useMemo<DieuKhienAudio>(
-    () => ({ batTat, tua, datAmLuong, datTocDo }),
-    [batTat, tua, datAmLuong, datTocDo],
+    () => ({ batTat, tua, datAmLuong, datTocDo, phat }),
+    [batTat, tua, datAmLuong, datTocDo, phat],
   );
 
   const hop = useMemo(
-    () => ({ trangThai, dieuKhien, tieuDe: title }),
-    [trangThai, dieuKhien, title],
+    () => ({ trangThai, dieuKhien, tieuDe: track?.title ?? "" }),
+    [trangThai, dieuKhien, track],
   );
 
   return (
@@ -218,10 +275,13 @@ export function AudioEngineProvider({
       {/*
         KHONG dat `controls`: bo dieu khien mac dinh cua trinh duyet khong ve
         gi khi thieu thuoc tinh do, nen the nay vo hinh va chi lam dong co.
-        Giao dien nam o `<ChapterPlayer>` va `<MiniPlayer>`.
+        Giao dien nam o `<ChapterPlayer>` va `<MiniPlayer>`/`<GlobalMiniPlayer>`.
 
         Van giu `preload="metadata"` de biet thoi luong truoc khi bam phat —
         khong co no thi thanh thoi gian khong ve duoc gi cho toi lan phat dau.
+
+        DUY NHAT mot the o day, va no nam NGOAI `{children}` (trong layout) —
+        dieu huong giua cac trang khong lam no unmount.
       */}
       {tep ? (
         <audio
@@ -251,4 +311,3 @@ export function AudioEngineProvider({
     </Ngu_canh.Provider>
   );
 }
-

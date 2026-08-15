@@ -169,6 +169,55 @@ STORAGE_BACKENDS = ("local", "r2")
 
 
 @dataclass(frozen=True)
+class ImageStudioSettings:
+    """Cau hinh Image Studio V1 (overnight build) — PHASE 7.
+
+    `POLLINATIONS_API_KEY` la khoa SERVER-SIDE cho Shared Premium — KHONG
+    BAO GIO gui xuong trinh duyet, khong bao gio xuat hien trong
+    `describe()`. `POLLINATIONS_CLIENT_ID` (dang `pk_...`) NGUOC LAI la
+    publishable — an toan de lo, dung cho luong BYOP OAuth.
+    """
+
+    #: Cong tac TONG cho Shared Premium — Quick Free/BYOP KHONG bi anh huong.
+    shared_premium_enabled: bool = False
+    monthly_budget_usd: float = 20.0
+    warning_budget_usd: float = 15.0
+    max_cost_per_request_usd: float = 0.10
+    max_concurrent_shared_generations: int = 3
+    markup_multiplier: float = 1.0
+    disabled_models: Tuple[str, ...] = ()
+
+    pollinations_api_key: str = ""
+    pollinations_client_id: str = ""
+    byop_master_key: str = ""
+    byop_redirect_uri: str = ""
+
+    @property
+    def shared_premium_configured(self) -> bool:
+        return self.shared_premium_enabled and bool(self.pollinations_api_key)
+
+    @property
+    def byop_configured(self) -> bool:
+        return bool(
+            self.pollinations_client_id and self.byop_master_key and self.byop_redirect_uri
+        )
+
+    def describe(self) -> dict:
+        """KHONG BAO GIO chua `pollinations_api_key`/`byop_master_key` —
+        chi co/khong co, giong `AppwriteSettings.configured` o tren."""
+        return {
+            "shared_premium_enabled": self.shared_premium_enabled,
+            "shared_premium_configured": self.shared_premium_configured,
+            "byop_configured": self.byop_configured,
+            "monthly_budget_usd": self.monthly_budget_usd,
+            "warning_budget_usd": self.warning_budget_usd,
+            "max_cost_per_request_usd": self.max_cost_per_request_usd,
+            "max_concurrent_shared_generations": self.max_concurrent_shared_generations,
+            "disabled_models": list(self.disabled_models),
+        }
+
+
+@dataclass(frozen=True)
 class Settings:
     """Toan bo cau hinh backend."""
 
@@ -252,6 +301,7 @@ class Settings:
     var_dir: Path = DEFAULT_VAR_DIR
     appwrite: AppwriteSettings = field(default_factory=AppwriteSettings)
     r2: R2Settings = field(default_factory=R2Settings)
+    image_studio: ImageStudioSettings = field(default_factory=ImageStudioSettings)
 
     #: KHONG con la cong chan cho giong cuc bo — xem `local_voices` ngay duoi.
     #:
@@ -422,6 +472,7 @@ class Settings:
             "translation_provider_configured": bool(
                 self.translation_base_url and self.translation_api_key
                 and self.translation_model),
+            "image_studio": self.image_studio.describe(),
         }
 
 
@@ -540,6 +591,48 @@ def load_settings() -> Settings:
         translation_base_url=_env("TRANSLATION_BASE_URL"),
         translation_api_key=_env("TRANSLATION_API_KEY"),
         translation_model=_env("TRANSLATION_MODEL"),
+        image_studio=_image_studio_settings(),
+    )
+
+
+def _image_studio_settings() -> ImageStudioSettings:
+    """
+    So VD mac dinh (20/15 USD, 3 dong thoi) la con so KHOI DONG hop ly cho
+    MOT chu site nho — KHONG hard-code trong logic nghiep vu (PHASE 7 yeu
+    cau ro: "Do not hard-code the example numbers"), CHI la default cua
+    dataclass, doi duoc hoan toan qua bien moi truong ma khong sua code.
+    """
+    def _float(name: str, default: float) -> float:
+        raw = _env(name, "").strip()
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            raise ConfigError(f"{name} phải là số, nhận được {raw!r}.")
+
+    def _int(name: str, default: int) -> int:
+        raw = _env(name, "").strip()
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            raise ConfigError(f"{name} phải là số nguyên, nhận được {raw!r}.")
+
+    return ImageStudioSettings(
+        shared_premium_enabled=_env_bool("IMAGE_SHARED_PREMIUM_ENABLED", False),
+        monthly_budget_usd=_float("IMAGE_MONTHLY_BUDGET_USD", 20.0),
+        warning_budget_usd=_float("IMAGE_WARNING_BUDGET_USD", 15.0),
+        max_cost_per_request_usd=_float("IMAGE_MAX_COST_PER_REQUEST_USD", 0.10),
+        max_concurrent_shared_generations=_int(
+            "IMAGE_MAX_CONCURRENT_SHARED_GENERATIONS", 3),
+        markup_multiplier=_float("IMAGE_MARKUP_MULTIPLIER", 1.0),
+        disabled_models=tuple(_env_list("IMAGE_DISABLED_MODELS", "")),
+        pollinations_api_key=_env("POLLINATIONS_API_KEY"),
+        pollinations_client_id=_env("POLLINATIONS_CLIENT_ID"),
+        byop_master_key=_env("IMAGE_BYOP_MASTER_KEY"),
+        byop_redirect_uri=_env("IMAGE_BYOP_REDIRECT_URI"),
     )
 
 

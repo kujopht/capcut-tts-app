@@ -2309,7 +2309,178 @@ export const translate = {
       `/api/translate/provider-connections/${encodeURIComponent(providerId)}`,
       { method: "DELETE" },
     ),
+
 };
+
+/**
+ * Image Studio V1 (overnight build) — export RIENG, cung khuon voi
+ * `translate`/`social`, khong nhet vao `api` chung.
+ */
+export const imageStudio = {
+  imageModels: () => request<ImageModelsResponse>("/api/image/models"),
+
+  /** An danh, KHONG can dang nhap. Nhan hien thi CO DINH la "Quick Free"/
+      "Auto model" — KHONG BAO GIO ten mot model rieng le (xem
+      `docs/reports/pollinations-anonymous-probe-summary.md`: endpoint an
+      danh bo qua/chuan hoa tham so model). */
+  imageQuickFree: (prompt: string, aspectRatio: string, signal?: AbortSignal) =>
+    request<ImageGenerationResult>("/api/image/quick-free", {
+      method: "POST",
+      body: JSON.stringify({ prompt, aspect_ratio: aspectRatio }),
+      signal,
+    }),
+
+  imageSharedPremiumEstimate: (model: string, quality: string) =>
+    request<{ estimated_credit_micro: number }>(
+      "/api/image/shared-premium/estimate",
+      { method: "POST", body: JSON.stringify({ prompt: "_", model, quality }) },
+    ),
+
+  imageSharedPremium: (params: {
+    prompt: string; negativePrompt: string; model: string;
+    aspectRatio: string; quality: string; idempotencyKey: string;
+  }, signal?: AbortSignal) =>
+    request<ImageGenerationResult>("/api/image/shared-premium", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: params.prompt, negative_prompt: params.negativePrompt,
+        model: params.model, aspect_ratio: params.aspectRatio,
+        quality: params.quality, idempotency_key: params.idempotencyKey,
+      }),
+      signal,
+    }),
+
+  imageByop: (params: {
+    prompt: string; negativePrompt: string; model: string;
+    aspectRatio: string; quality: string;
+  }, signal?: AbortSignal) =>
+    request<ImageGenerationResult>("/api/image/byop", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: params.prompt, negative_prompt: params.negativePrompt,
+        model: params.model, aspect_ratio: params.aspectRatio,
+        quality: params.quality,
+      }),
+      signal,
+    }),
+
+  imageWallet: () =>
+    request<{ available_micro: number; reserved_micro: number; total_micro: number }>(
+      "/api/image/wallet",
+    ),
+
+  imageByopStatus: () =>
+    request<{ connected: boolean; scope: string; expires_at: string; byop_enabled: boolean }>(
+      "/api/image/byop/status",
+    ),
+
+  imageByopConnect: () =>
+    request<{ authorize_url: string }>("/api/image/byop/connect", { method: "POST" }),
+
+  imageByopCallback: (state: string, code: string, redirectUri: string) =>
+    request<{ connected: boolean; scope: string }>("/api/image/byop/callback", {
+      method: "POST",
+      body: JSON.stringify({ state, code, redirect_uri: redirectUri }),
+    }),
+
+  imageByopDisconnect: () =>
+    request<{ connected: boolean }>("/api/image/byop/disconnect", { method: "POST" }),
+
+  imageLibrarySave: (params: {
+    generationId: string; prompt: string; negativePrompt: string; model: string;
+    mode: string; aspectRatio: string; imageBase64: string;
+  }) =>
+    request<{ image_id: string }>("/api/image/library", {
+      method: "POST",
+      body: JSON.stringify({
+        generation_id: params.generationId, prompt: params.prompt,
+        negative_prompt: params.negativePrompt, model: params.model,
+        mode: params.mode, aspect_ratio: params.aspectRatio,
+        image_base64: params.imageBase64,
+      }),
+    }),
+
+  imageLibraryList: () => request<{ images: SavedImageEntry[] }>("/api/image/library"),
+
+  imageLibraryDelete: (imageId: string) =>
+    request<{ deleted: boolean }>(
+      `/api/image/library/${encodeURIComponent(imageId)}`, { method: "DELETE" },
+    ),
+
+  /** Cong Free — model cong dong Pollinations dang bao gia 0 pollen NGAY
+      BAY GIO. `available: false` nghia la khong lay duoc danh sach (loi
+      mang), KHAC voi `models: []` (lay duoc, nhung hien khong model nao
+      mien phi — xem ADDENDUM, day la trang thai THAT co the xay ra). */
+  imageCommunityFreeModels: () =>
+    request<ImageCommunityFreeModelsResponse>("/api/image/community-free/models"),
+
+  imageCommunityFree: (params: {
+    prompt: string; negativePrompt: string; model: string;
+    aspectRatio: string; quality: string; idempotencyKey: string;
+  }, signal?: AbortSignal) =>
+    request<ImageGenerationResult>("/api/image/community-free", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: params.prompt, negative_prompt: params.negativePrompt,
+        model: params.model, aspect_ratio: params.aspectRatio,
+        quality: params.quality, idempotency_key: params.idempotencyKey,
+      }),
+      signal,
+    }),
+};
+
+export interface ImageModelInfo {
+  model_id: string;
+  display_name: string;
+  supports_text_to_image: boolean;
+  supports_image_edit: boolean;
+  quality_levels: string[];
+  estimated_credit_cost: number;
+}
+
+export interface ImageModelsResponse {
+  models: ImageModelInfo[];
+  aspect_ratios: string[];
+  shared_premium_available: boolean;
+}
+
+export interface ImageGenerationResult {
+  image_base64: string;
+  content_type: string;
+  byte_size: number;
+  provider_id: string;
+  generation_id?: string;
+  status?: string;
+  estimated_cost_micro?: number;
+  actual_cost_micro?: number | null;
+}
+
+export interface CommunityFreeImageModel {
+  model_id: string;
+  display_name: string;
+  provider_badge: string;
+  is_official: boolean;
+  per_user_rpm: number | null;
+  capabilities: string[];
+  description: string;
+  alpha_hint: string;
+}
+
+export interface ImageCommunityFreeModelsResponse {
+  available: boolean;
+  error: string;
+  models: CommunityFreeImageModel[];
+}
+
+export interface SavedImageEntry {
+  image_id: string;
+  prompt: string;
+  model: string;
+  mode: string;
+  aspect_ratio: string;
+  created_at: string;
+  url: string;
+}
 
 /** https://console.groq.com/keys — trang tao/quan ly API key Groq CA NHAN
     cua nguoi dung. Hang so RIENG (khong phai bien moi truong): day la mot

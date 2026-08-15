@@ -12,6 +12,7 @@ Backend KHONG import GUI: da xac minh khong module PySide6 nao bi keo vao.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import random
@@ -23,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, StringConstraints
@@ -121,6 +122,40 @@ from server.translation_byok_crypto import ByokConfigError, ByokCrypto, build_by
 from server.translation_byok_service import ByokNotConfiguredError, ProviderConnectionService
 from server.translation_service import TranslationService
 from server.translation_store import build_translation_store
+from server.image_domain import GenerationMode, PollinationsConnection, SavedImage
+from server.image_provider_registry import (
+    ImageProviderError,
+    ImageProviderRateLimited,
+    ImageProviderUnavailable,
+    ImageProviderTimeout,
+    InvalidImageResponse,
+    QuickFreeImageProvider,
+    SharedPremiumImageProvider,
+)
+from server.image_wallet_store import (
+    DuplicateReservation,
+    InsufficientBalance,
+    InvalidReservationTransition,
+    MockWalletStore,
+)
+from server.image_byop_crypto import build_image_byop_crypto
+from server.image_byop_service import (
+    ByopError,
+    ByopExchangeFailed,
+    ByopStateMismatch,
+    PollinationsByopService,
+)
+from server.image_spending_guard import SharedPremiumDisabled, SharedPremiumSpendingGuard
+from server.image_payment import CheckoutStatus, MockPaymentProvider
+from server.image_library_store import MockImageLibraryStore
+from server.image_community_catalogue import CommunityCatalogueCache
+from server.image_service import (
+    ByopNotConnected,
+    CommunityModelNoLongerFree,
+    GenerationAlreadyProcessed,
+    ImageStudioService,
+    UnknownOrDisabledModel,
+)
 
 app = FastAPI(
     title="Fanfic Audio Studio API",
@@ -219,6 +254,68 @@ translation_svc = TranslationService(
     translation_store, store, provider=build_provider(settings),
     inline_worker=settings.translation_inline_worker,
     registry=translation_registry, byok=translation_byok_svc)
+
+#: Image Studio V1 (overnight build, PHASE 2-11) — vi/thu vien la kho MOCK
+#: (trong bo nho) cho toi khi Appwrite production duoc mo lai, cung nguyen
+#: tac voi `gamification_store`/`translation_store` khi chua co ha tang
+#: production: tinh nang chay day du tren mock, chi khong ben vung qua
+#: restart. Xem `docs/reports/image-studio-v1-summary.md`.
+image_wallet_store = MockWalletStore()
+image_library_store = MockImageLibraryStore()
+image_quick_free_provider = QuickFreeImageProvider()
+#: `None` khi CHUA cau hinh POLLINATIONS_API_KEY (Shared Premium bi khoa ro
+#: rang o tang service — KHONG am tham lui ve mot khoa rong).
+image_shared_premium_provider = (
+    SharedPremiumImageProvider(api_key=settings.image_studio.pollinations_api_key)
+    if settings.image_studio.pollinations_api_key else None
+)
+image_byop_crypto = build_image_byop_crypto(
+    {"IMAGE_BYOP_MASTER_KEY": settings.image_studio.byop_master_key}
+    if settings.image_studio.byop_master_key else {}
+)
+image_byop_svc = PollinationsByopService(
+    client_id=settings.image_studio.pollinations_client_id or "pk_chua_cau_hinh",
+    redirect_uri=settings.image_studio.byop_redirect_uri or "https://chua-cau-hinh.invalid/callback",
+    crypto=image_byop_crypto,
+)
+
+
+def _canh_bao_ngan_sach_image_studio(snapshot) -> None:
+    """Callback canh bao PHASE 11 — CHUA co kenh quan tri that (Appwrite
+    production bi chan), nen ghi log co cau truc de van hanh doi soat thu
+    cong duoc; nang cap len thong bao that (email/Slack) khi co ha tang."""
+    print(
+        f"[image-studio][CANH BAO NGAN SACH] thang={snapshot.thang} "
+        f"da_chi={snapshot.spent_usd:.2f} usd / han_muc={snapshot.budget_usd:.2f} usd"
+    )
+
+
+image_spending_guard = SharedPremiumSpendingGuard(
+    monthly_budget_usd=settings.image_studio.monthly_budget_usd,
+    warning_budget_usd=settings.image_studio.warning_budget_usd,
+    max_concurrent=settings.image_studio.max_concurrent_shared_generations,
+    canh_bao=_canh_bao_ngan_sach_image_studio,
+)
+if not settings.image_studio.shared_premium_enabled:
+    # Cong tac TONG tat — dat kill switch NGAY tu luc khoi dong thay vi rai
+    # rac kiem tra `shared_premium_enabled` o moi route.
+    image_spending_guard.dat_kill_switch(True)
+
+#: Danh sach model cong dong Pollinations bao gia 0 pollen — CONG KHAI (chi
+#: goi endpoint LIET KE, khong can POLLINATIONS_API_KEY), xem
+#: `server/image_community_catalogue.py` docstring dau file ve nguon that
+#: da xac minh (`GET https://gen.pollinations.ai/image/models`, anonymous).
+image_community_catalogue = CommunityCatalogueCache()
+
+image_studio_svc = ImageStudioService(
+    wallet_store=image_wallet_store,
+    quick_free_provider=image_quick_free_provider,
+    shared_premium_provider=image_shared_premium_provider,
+    byop_service=image_byop_svc,
+    spending_guard=image_spending_guard,
+    community_catalogue=image_community_catalogue,
+)
+image_payment_provider = MockPaymentProvider()
 
 #: URL ky cho audio chi song ngan - backend van la noi quyet dinh quyen.
 AUDIO_URL_TTL_SECONDS = 300
@@ -4638,3 +4735,498 @@ def import_translation_to_draft(
     return _dich_vu(
         translation_svc.import_to_draft, project_id, profile.user_id,
         novel_id=payload.novel_id, new_novel_title=payload.new_novel_title)
+
+
+# -----------------------------------------------------------------------------
+# Image Studio V1 (overnight build) — PHASE 3-11
+# -----------------------------------------------------------------------------
+#
+# Ba che do, MOT tang dieu phoi (`image_studio_svc`) — xem docstring dau
+# `server/image_service.py`. Route o day CHI lam ba viec: xac thuc/tham so,
+# goi dieu phoi, doi loi nghiep vu thanh ma HTTP. Toan bo logic tien/an toan
+# nam trong `server/image_*`, KHONG lap lai o day.
+
+
+def _client_ip(request: Request) -> str:
+    """IP nguoi goi cho Quick Free rate-limit. `X-Forwarded-For` neu chay sau
+    proxy nguoc (Render/Cloudflare) — lay MUC DAU (client that, khong phai
+    proxy ke tiep); lui ve `request.client.host` khi khong co header do
+    (dev cuc bo)."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _dich_vu_anh(fn, *args, **kwargs):
+    """Cung vai tro voi `_dich_vu` nhung cho Image Studio — MOT cho doi loi
+    nghiep vu thanh ma HTTP thay vi lap try/except o tung route."""
+    try:
+        return fn(*args, **kwargs)
+    except ImageProviderRateLimited as exc:
+        headers = (
+            {"Retry-After": str(exc.retry_after_seconds)}
+            if exc.retry_after_seconds else {}
+        )
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc),
+                            headers=headers) from exc
+    except ImageProviderTimeout as exc:
+        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, str(exc)) from exc
+    except ImageProviderUnavailable as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except InvalidImageResponse as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    except UnknownOrDisabledModel as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except SharedPremiumDisabled as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except InsufficientBalance as exc:
+        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, str(exc)) from exc
+    except DuplicateReservation as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except GenerationAlreadyProcessed as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except ByopNotConnected as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except CommunityModelNoLongerFree as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except ByopStateMismatch as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except ByopExchangeFailed as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except ByopError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except ImageProviderError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+
+_TI_LE_HOP_LE = ("1:1", "16:9", "9:16", "3:4", "4:3")
+
+
+class ImageQuickFreeIn(BaseModel):
+    prompt: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    aspect_ratio: Annotated[str, StringConstraints(max_length=10)] = "1:1"
+
+
+class ImageSharedPremiumIn(BaseModel):
+    prompt: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    negative_prompt: Annotated[str, StringConstraints(max_length=1000)] = ""
+    model: Annotated[str, StringConstraints(max_length=50)]
+    aspect_ratio: Annotated[str, StringConstraints(max_length=10)] = "1:1"
+    quality: Annotated[str, StringConstraints(max_length=20)] = "standard"
+    #: Client sinh ra (vd UUID) — CUNG gia tri khi bam "thu lai request giong
+    #: het" thi KHONG bi tinh phi/goi provider lan hai (xem PHASE 5).
+    idempotency_key: Annotated[str, StringConstraints(min_length=8, max_length=128)]
+
+
+class ImageByopIn(BaseModel):
+    prompt: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    negative_prompt: Annotated[str, StringConstraints(max_length=1000)] = ""
+    model: Annotated[str, StringConstraints(max_length=50)]
+    aspect_ratio: Annotated[str, StringConstraints(max_length=10)] = "1:1"
+    quality: Annotated[str, StringConstraints(max_length=20)] = "standard"
+
+
+def _anh_thanh_dict(image, *, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Anh tra ve dang base64 trong JSON — CUNG quy uoc voi
+    `TranslateUploadIn.base64`/`PostIn.image_base64` da co san trong repo
+    nay (tranh phu thuoc `python-multipart` chua khai bao), khong phai quy
+    uoc rieng cho Image Studio.
+    """
+    ra = {
+        "image_base64": base64.b64encode(image.content).decode("ascii"),
+        "content_type": image.content_type,
+        "byte_size": image.byte_size,
+        "provider_id": image.provider_id,
+    }
+    if extra:
+        ra.update(extra)
+    return ra
+
+
+@app.get("/api/image/models")
+def image_models() -> Dict[str, Any]:
+    """Catalogue Shared Premium — CONG KHAI (thong tin gia/nang luc, khong
+    phai secret). Quick Free/BYOP khong co catalogue rieng: Quick Free luon
+    la 'Auto model' (xem PHASE 4A), BYOP dung CUNG catalogue nay qua
+    Pollinations cua chinh nguoi dung."""
+    return {
+        "models": [
+            {
+                "model_id": m.model_id,
+                "display_name": m.display_name,
+                "supports_text_to_image": m.supports_text_to_image,
+                "supports_image_edit": m.supports_image_edit,
+                "quality_levels": list(m.quality_levels),
+                "estimated_credit_cost": m.estimated_credit_cost,
+            }
+            for m in image_studio_svc.catalogue()
+        ],
+        "aspect_ratios": list(_TI_LE_HOP_LE),
+        "shared_premium_available": settings.image_studio.shared_premium_configured,
+    }
+
+
+@app.post("/api/image/quick-free")
+def image_generate_quick_free(
+    payload: ImageQuickFreeIn, request: Request,
+) -> Dict[str, Any]:
+    """An danh, KHONG dang nhap, KHONG key — xem canh bao PHASE 4A: nhan
+    hien thi CO DINH la 'Quick Free'/'Auto model', khong bao gio ten model
+    rieng le (da chung minh bi bo qua/chuan hoa o `chore/pollinations-
+    anonymous-probe`)."""
+    if payload.aspect_ratio not in _TI_LE_HOP_LE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tỷ lệ khung hình không hợp lệ.")
+    image = _dich_vu_anh(
+        image_studio_svc.sinh_anh_quick_free,
+        prompt=payload.prompt, aspect_ratio=payload.aspect_ratio,
+        client_ip=_client_ip(request),
+    )
+    return _anh_thanh_dict(image)
+
+
+@app.get("/api/image/wallet")
+def image_wallet(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    so_du = image_wallet_store.lay_so_du(profile.user_id)
+    return {
+        "available_micro": so_du.available_micro,
+        "reserved_micro": so_du.reserved_micro,
+        "total_micro": so_du.total_micro,
+    }
+
+
+@app.get("/api/image/wallet/transactions")
+def image_wallet_transactions(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    giao_dich = image_wallet_store.liet_ke_giao_dich(profile.user_id)
+    return {
+        "transactions": [
+            {
+                "transaction_id": tx.transaction_id,
+                "generation_id": tx.generation_id,
+                "entry_type": tx.entry_type.value,
+                "amount_micro": tx.amount_micro,
+                "created_at": tx.created_at,
+                "note": tx.note,
+            }
+            for tx in giao_dich
+        ],
+    }
+
+
+class ImageEstimateIn(BaseModel):
+    model: Annotated[str, StringConstraints(max_length=50)]
+    quality: Annotated[str, StringConstraints(max_length=20)] = "standard"
+
+
+@app.post("/api/image/shared-premium/estimate")
+def image_shared_premium_estimate(
+    payload: ImageEstimateIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    micro = _dich_vu_anh(
+        image_studio_svc.uoc_tinh_shared_premium,
+        model_id=payload.model, quality=payload.quality,
+    )
+    return {"estimated_credit_micro": micro}
+
+
+@app.post("/api/image/shared-premium")
+def image_generate_shared_premium(
+    payload: ImageSharedPremiumIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Fanfic Credits — tru vi cua NGUOI DUNG DANG NHAP, khong bao gio dung
+    credential dung chung cho nguoi khac (idempotency_key khong bi doi tuong
+    khac 'muon' vi no luon di cung user_id trong `dat_cho`)."""
+    if payload.aspect_ratio not in _TI_LE_HOP_LE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tỷ lệ khung hình không hợp lệ.")
+    ket_qua = _dich_vu_anh(
+        image_studio_svc.sinh_anh_shared_premium,
+        user_id=profile.user_id, prompt=payload.prompt,
+        negative_prompt=payload.negative_prompt, model_id=payload.model,
+        aspect_ratio=payload.aspect_ratio, quality=payload.quality,
+        idempotency_key=payload.idempotency_key,
+    )
+    return _anh_thanh_dict(ket_qua.image, extra={
+        "generation_id": ket_qua.reservation.generation_id,
+        "status": ket_qua.reservation.status.value,
+        "estimated_cost_micro": ket_qua.reservation.estimated_cost_micro,
+        "actual_cost_micro": ket_qua.reservation.actual_cost_micro,
+    })
+
+
+@app.post("/api/image/byop")
+def image_generate_byop(
+    payload: ImageByopIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """My Pollinations — dung Pollen CA NHAN, KHONG BAO GIO cham Fanfic
+    Credit (xem `ImageStudioService.sinh_anh_byop`)."""
+    if payload.aspect_ratio not in _TI_LE_HOP_LE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tỷ lệ khung hình không hợp lệ.")
+    image = _dich_vu_anh(
+        image_studio_svc.sinh_anh_byop,
+        user_id=profile.user_id, prompt=payload.prompt,
+        negative_prompt=payload.negative_prompt, model_id=payload.model,
+        aspect_ratio=payload.aspect_ratio, quality=payload.quality,
+    )
+    return _anh_thanh_dict(image)
+
+
+# ----------------------------------------------------------------- Cong Free
+
+
+@app.get("/api/image/community-free/models")
+def image_community_free_models(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Danh sach model cong dong Pollinations dang bao gia 0 pollen NGAY BAY
+    GIO — dong (co the rong that su, xem ADDENDUM). `available=False` nghia
+    la khong lay duoc danh sach (loi mang), khac voi danh sach rong hop le."""
+    trang_thai = image_studio_svc.catalogue_cong_dong()
+    return {
+        "available": trang_thai["available"],
+        "error": trang_thai["error"],
+        "models": [
+            {
+                "model_id": m.model_id,
+                "display_name": m.display_name,
+                "provider_badge": m.provider_badge,
+                "is_official": m.is_official,
+                "per_user_rpm": m.per_user_rpm,
+                "capabilities": list(m.capabilities),
+                "description": m.description,
+                "alpha_hint": m.alpha_hint,
+            }
+            for m in trang_thai["models"]
+        ],
+    }
+
+
+class ImageCommunityFreeIn(BaseModel):
+    prompt: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    negative_prompt: Annotated[str, StringConstraints(max_length=1000)] = ""
+    model: Annotated[str, StringConstraints(max_length=80)]
+    aspect_ratio: Annotated[str, StringConstraints(max_length=10)] = "1:1"
+    quality: Annotated[str, StringConstraints(max_length=20)] = "standard"
+    idempotency_key: Annotated[str, StringConstraints(min_length=8, max_length=128)]
+
+
+@app.post("/api/image/community-free")
+def image_generate_community_free(
+    payload: ImageCommunityFreeIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Sinh anh qua model cong dong dang mien phi THAT SU — kiem tra LAI
+    danh sach truoc moi lan goi, KHONG bao gio tu chuyen sang Shared Premium
+    neu model da bi ru khoi danh sach mien phi (xem
+    `ImageStudioService.sinh_anh_cong_dong`)."""
+    if payload.aspect_ratio not in _TI_LE_HOP_LE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tỷ lệ khung hình không hợp lệ.")
+    ket_qua = _dich_vu_anh(
+        image_studio_svc.sinh_anh_cong_dong,
+        user_id=profile.user_id, prompt=payload.prompt,
+        negative_prompt=payload.negative_prompt, model_id=payload.model,
+        aspect_ratio=payload.aspect_ratio, quality=payload.quality,
+        idempotency_key=payload.idempotency_key,
+    )
+    return _anh_thanh_dict(ket_qua.image, extra={
+        "generation_id": ket_qua.reservation.generation_id,
+        "status": ket_qua.reservation.status.value,
+    })
+
+
+# --------------------------------------------------------- BYOP (My Pollinations)
+
+
+@app.get("/api/image/byop/status")
+def image_byop_status(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    conn = image_byop_svc.trang_thai(profile.user_id)
+    return {
+        "connected": bool(conn and conn.active),
+        "scope": conn.scope if conn else "",
+        "expires_at": conn.expires_at if conn else "",
+        "byop_enabled": image_byop_svc.enabled,
+    }
+
+
+@app.post("/api/image/byop/connect")
+def image_byop_connect(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    url = _dich_vu_anh(image_byop_svc.bat_dau_ket_noi, user_id=profile.user_id)
+    return {"authorize_url": url}
+
+
+class ImageByopCallbackIn(BaseModel):
+    state: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    code: Annotated[str, StringConstraints(min_length=1, max_length=2048)]
+    redirect_uri: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+
+
+@app.post("/api/image/byop/callback")
+def image_byop_callback(
+    payload: ImageByopCallbackIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Frontend goi endpoint nay SAU KHI trinh duyet duoc Pollinations dieu
+    huong ve — KHONG BAO GIO log/echo `payload.code` (ma xac thuc dung mot
+    lan, xem `image_byop_service.ByopExchangeFailed`)."""
+    conn = _dich_vu_anh(
+        image_byop_svc.xu_ly_callback,
+        user_id=profile.user_id, state=payload.state, code=payload.code,
+        redirect_uri=payload.redirect_uri,
+    )
+    return {"connected": conn.active, "scope": conn.scope}
+
+
+@app.post("/api/image/byop/disconnect")
+def image_byop_disconnect(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    image_byop_svc.ngat_ket_noi(profile.user_id)
+    return {"connected": False}
+
+
+# --------------------------------------------------------------- thu vien anh
+
+
+class ImageLibrarySaveIn(BaseModel):
+    generation_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    prompt: Annotated[str, StringConstraints(max_length=2000)] = ""
+    negative_prompt: Annotated[str, StringConstraints(max_length=1000)] = ""
+    model: Annotated[str, StringConstraints(max_length=50)] = ""
+    mode: Annotated[str, StringConstraints(max_length=20)] = "quick_free"
+    aspect_ratio: Annotated[str, StringConstraints(max_length=10)] = "1:1"
+    image_base64: Annotated[str, StringConstraints(min_length=1, max_length=14_000_000)]
+
+
+@app.post("/api/image/library", status_code=status.HTTP_201_CREATED)
+def image_library_save(
+    payload: ImageLibrarySaveIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Luu VINH VIEN qua storage adapter (Local/R2) — CHI khi nguoi dung chu
+    dong bam 'Luu' (PHASE 9: khong luu moi ung vien tam)."""
+    import binascii
+
+    try:
+        du_lieu = base64.b64decode(payload.image_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ảnh không hợp lệ.") from exc
+    if len(du_lieu) > 12_000_000:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Ảnh quá lớn.")
+
+    try:
+        mode = GenerationMode(payload.mode)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chế độ tạo ảnh không hợp lệ.")
+
+    image_id = uuid.uuid4().hex[:16]
+    storage_key = f"image-studio/{profile.user_id}/{image_id}.jpg"
+    storage.put(storage_key, du_lieu, content_type="image/jpeg")
+
+    saved = SavedImage(
+        image_id=image_id, owner_user_id=profile.user_id,
+        generation_id=payload.generation_id, prompt=payload.prompt,
+        negative_prompt=payload.negative_prompt, model=payload.model,
+        mode=mode, aspect_ratio=payload.aspect_ratio, storage_key=storage_key,
+    )
+    image_library_store.luu(saved)
+    return {"image_id": image_id}
+
+
+@app.get("/api/image/library")
+def image_library_list(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    ds = image_library_store.liet_ke(profile.user_id)
+    return {
+        "images": [
+            {
+                "image_id": a.image_id,
+                "prompt": a.prompt,
+                "model": a.model,
+                "mode": a.mode.value,
+                "aspect_ratio": a.aspect_ratio,
+                "created_at": a.created_at,
+                "url": storage.signed_url(a.storage_key, expires_seconds=3600),
+            }
+            for a in ds
+        ],
+    }
+
+
+@app.delete("/api/image/library/{image_id}")
+def image_library_delete(
+    image_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    saved = _dich_vu_anh(image_library_store.lay, profile.user_id, image_id)
+    storage.delete(saved.storage_key)
+    image_library_store.xoa(profile.user_id, image_id)
+    return {"deleted": True}
+
+
+# ------------------------------------------------------------------- quan tri
+
+
+@app.get("/api/admin/image-studio/spending")
+def admin_image_studio_spending(profile: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    snap = image_spending_guard.snapshot()
+    return {
+        "month": snap.thang,
+        "spent_usd": snap.spent_usd,
+        "budget_usd": snap.budget_usd,
+        "warning_usd": snap.warning_usd,
+        "kill_switch_engaged": snap.kill_switch_engaged,
+        "active_concurrent": snap.active_concurrent,
+        "max_concurrent": snap.max_concurrent,
+        "shared_premium_enabled_config": settings.image_studio.shared_premium_enabled,
+        "shared_premium_configured": settings.image_studio.shared_premium_configured,
+    }
+
+
+class KillSwitchIn(BaseModel):
+    engaged: bool
+
+
+@app.post("/api/admin/image-studio/kill-switch")
+def admin_image_studio_kill_switch(
+    payload: KillSwitchIn, profile: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    """Cong tac VIEN khan cap — DOC LAP voi han muc thang (PHASE 7). Tat o
+    day KHONG anh huong Quick Free/BYOP, chi Shared Premium."""
+    image_spending_guard.dat_kill_switch(payload.engaged)
+    return {"kill_switch_engaged": payload.engaged}
+
+
+# ------------------------------------------------------- Fanfic Credit (mock)
+
+
+class ImageCheckoutIn(BaseModel):
+    credit_micro: Annotated[int, Field(gt=0, le=100_000_00)]
+    price_usd_cents: Annotated[int, Field(gt=0, le=100_000)]
+
+
+@app.post("/api/image/checkout", status_code=status.HTTP_201_CREATED)
+def image_checkout_create(
+    payload: ImageCheckoutIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """CHI mock/test-mode — xem canh bao dau `server/image_payment.py`.
+    KHONG co cong thanh toan production nao duoc ket noi o day."""
+    phien = image_payment_provider.tao_checkout(
+        user_id=profile.user_id, credit_micro=payload.credit_micro,
+        price_usd_cents=payload.price_usd_cents,
+    )
+    return {"checkout_id": phien.checkout_id, "status": phien.status.value,
+           "provider_id": phien.provider_id}
+
+
+@app.post("/api/image/checkout/{checkout_id}/confirm")
+def image_checkout_confirm(
+    checkout_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    try:
+        phien = image_payment_provider.xac_nhan(checkout_id)
+    except KeyError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    if phien.user_id != profile.user_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Không phải phiên của bạn.")
+    if phien.status == CheckoutStatus.SUCCEEDED:
+        image_wallet_store.nap_tien_test(
+            profile.user_id, phien.credit_micro,
+            idempotency_key=f"checkout:{checkout_id}",
+            note=f"mock checkout {checkout_id}",
+        )
+    return {"status": phien.status.value}

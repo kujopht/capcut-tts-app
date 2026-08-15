@@ -21,7 +21,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 def _now_iso() -> str:
@@ -40,6 +40,12 @@ class UsageEvent:
     #: "success" | "rate_limited" | "quota_exhausted" | "error".
     outcome: str
     latency_ms: int
+    #: So token input/output CUA LAN GOI NAY, neu provider co tra ve (khong
+    #: phai provider nao cung tra `usage` trong phan hoi) — `None` nghia la
+    #: KHONG BIET, khong phai "0 token". Xem `_OpenAICompatFreeProvider.
+    #: last_usage`.
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -50,6 +56,8 @@ class UsageEvent:
             "pass_type": self.pass_type,
             "outcome": self.outcome,
             "latency_ms": self.latency_ms,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
         }
 
 
@@ -64,11 +72,14 @@ class UsageRecorder:
         self._su_kien: List[UsageEvent] = []
 
     def ghi(self, *, provider_id: str, model_id: str, credential_source: str,
-           pass_type: str, outcome: str, latency_ms: int) -> None:
+           pass_type: str, outcome: str, latency_ms: int,
+           input_tokens: Optional[int] = None,
+           output_tokens: Optional[int] = None) -> None:
         su_kien = UsageEvent(
             occurred_at=_now_iso(), provider_id=provider_id, model_id=model_id,
             credential_source=credential_source, pass_type=pass_type,
-            outcome=outcome, latency_ms=max(0, int(latency_ms)))
+            outcome=outcome, latency_ms=max(0, int(latency_ms)),
+            input_tokens=input_tokens, output_tokens=output_tokens)
         with self._lock:
             self._su_kien.append(su_kien)
             if len(self._su_kien) > self.GIOI_HAN:
@@ -89,10 +100,15 @@ class UsageRecorder:
             muc = ra.setdefault(e.provider_id, {
                 "model_id": e.model_id, "total": 0, "success": 0,
                 "rate_limited": 0, "quota_exhausted": 0, "error": 0,
-                "avg_latency_ms": 0.0,
+                "avg_latency_ms": 0.0, "total_input_tokens": 0,
+                "total_output_tokens": 0,
             })
             muc["total"] = int(muc["total"]) + 1
             muc[e.outcome] = int(muc.get(e.outcome, 0)) + 1
+            if e.input_tokens is not None:
+                muc["total_input_tokens"] = int(muc["total_input_tokens"]) + e.input_tokens
+            if e.output_tokens is not None:
+                muc["total_output_tokens"] = int(muc["total_output_tokens"]) + e.output_tokens
         # Tinh trung binh o vong THU HAI — can tong so lan goi truoc.
         for provider_id, muc in ra.items():
             cac_su_kien = [e for e in su_kien if e.provider_id == provider_id]

@@ -77,6 +77,48 @@ GROQ_MODEL_PROFILES: Dict[str, ModelProfile] = {
         }),
 }
 
+#: Hai model curated tren Cerebras — MOT credential (`CEREBRAS_API_KEY`), hai
+#: model (chien luoc san xuat tam thoi, xem `translation_provider_registry.
+#: build_provider_registry`). KHONG co bang dinh tuyen theo vai-tro rieng nhu
+#: `ROLE_ROUTING` cua Groq: thu tu Cerebras la MOT chuoi CO DINH (GLM truoc,
+#: GPT-OSS 120B la du phong NGAY TRONG Cerebras), khong doi theo quality_mode/
+#: vai_tro — dung y "shared site routing" da chot san trong yeu cau goc, khac
+#: voi Groq (noi model nao nen thu truoc tuy che do/vai tro DA tung la cau hoi
+#: mo).
+#:
+#: `extra_payload` THEO TAI LIEU CEREBRAS (inference-docs.cerebras.ai, doc
+#: 2026-08-15) — CHUA kiem thu song voi API that (khac Groq, noi ca ba tham
+#: so da duoc xac minh qua request that): `max_completion_tokens` la TEN THAT
+#: (giong Groq, khac `max_tokens`); `reasoning_effort` nhan "none" cho
+#: `zai-glm-4.7` va "low"/"medium"/"high" cho `gpt-oss-120b` (mac dinh tai lieu
+#: la "medium" — o day chon "low" giong lua chon DA XAC MINH cua Groq cho
+#: CUNG model nay, giam rui ro model danh het ngan sach cho suy luan noi bo
+#: truoc khi tra loi). Can doi lai neu benchmark thuc te (xem
+#: `scripts/benchmark_cerebras_groq_translation.py`) cho thay sai.
+#:
+#: CANH BAO VAN HANH: tai lieu Cerebras (kiem tra 2026-08-15) ghi `zai-glm-4.7`
+#: SE NGUNG HO TRO 2026-08-17 — CHI HAI NGAY sau khi viet ho so nay. Day la
+#: LY DO chinh danh cho tinh chat "tam thoi" cua chien luoc nay (yeu cau goc:
+#: "the temporary production translation strategy") — phien sau CAN kiem tra
+#: lai model GLM con duoc Cerebras ho tro hay khong TRUOC khi coi day la
+#: chien luoc dai han.
+CEREBRAS_MODEL_PROFILES: Dict[str, ModelProfile] = {
+    "glm": ModelProfile(
+        key="glm", model_id="zai-glm-4.7", display_name="GLM 4.7",
+        quality_hint="chất lượng cao",
+        extra_payload={
+            "reasoning_effort": "none",
+            "max_completion_tokens": 4096,
+        }),
+    "gpt_oss_120b": ModelProfile(
+        key="gpt_oss_120b", model_id="gpt-oss-120b",
+        display_name="GPT-OSS 120B", quality_hint="dự phòng",
+        extra_payload={
+            "reasoning_effort": "low",
+            "max_completion_tokens": 4096,
+        }),
+}
+
 #: Dinh tuyen vai tro TU DONG (yeu cau 3D) — (che_do, vai_tro) -> THU TU khoa
 #: model Groq de thu. CHI liet ke to hop THAT SU xay ra
 #: (`translation_service._VAI_TRO_THEO_CHE_DO`: NHANH chi co "translator";

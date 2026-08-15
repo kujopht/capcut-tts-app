@@ -16,6 +16,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CEREBRAS_CONSOLE_KEYS_URL,
   GENRE_OPTIONS,
   GROQ_CONSOLE_KEYS_URL,
   NAMING_OPTIONS,
@@ -600,7 +601,7 @@ function WaitingForProviderCta({
   job: TranslationJob;
   onChanged: () => void;
 }) {
-  const [dialogMo, setDialogMo] = useState(false);
+  const [dangMoProvider, setDangMoProvider] = useState<"groq" | "cerebras" | null>(null);
   const moc = job.waiting_retry_at
     ? new Date(job.waiting_retry_at).toLocaleTimeString("vi-VN")
     : null;
@@ -608,8 +609,8 @@ function WaitingForProviderCta({
   if (job.waiting_reason === "personal_quota_exhausted") {
     return (
       <Alert kind="warn">
-        Groq của bạn đã đạt giới hạn. Các chương đã dịch vẫn được giữ
-        nguyên — hệ thống sẽ tự thử lại{moc ? ` lúc ${moc}.` : " sau."}
+        API key cá nhân của bạn đã đạt giới hạn. Các chương đã dịch vẫn được
+        giữ nguyên — hệ thống sẽ tự thử lại{moc ? ` lúc ${moc}.` : " sau."}
       </Alert>
     );
   }
@@ -619,31 +620,56 @@ function WaitingForProviderCta({
       <Alert kind="warn">
         Hạn mức AI miễn phí chung hiện đã hết.
         <br />
-        Bạn có thể chờ hạn mức hồi lại hoặc tiếp tục bằng Groq của bạn.
+        Bạn có thể chờ hạn mức hồi lại hoặc tiếp tục bằng API key cá nhân.
       </Alert>
       <div className="row row-tight">
         <span className="chip chip-static">
           Chờ hạn mức hồi lại{moc ? ` (khoảng ${moc})` : ""}
         </span>
         {job.waiting_action === "connect_personal_provider" ? (
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => setDialogMo(true)}
-          >
-            Tiếp tục bằng Groq của bạn
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setDangMoProvider("cerebras")}
+            >
+              Tiếp tục bằng Cerebras của bạn
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => setDangMoProvider("groq")}
+            >
+              Tiếp tục bằng Groq của bạn
+            </button>
+          </>
         ) : null}
       </div>
       <ProviderConnectDialog
-        open={dialogMo}
+        open={dangMoProvider === "cerebras"}
+        providerId="cerebras"
+        providerLabel="Cerebras"
+        consoleUrl={CEREBRAS_CONSOLE_KEYS_URL}
+        keyPlaceholder="csk-................................"
         // `onChanged` (reload cua ca trang du an) CHI goi luc DONG hop
         // thoai, khong phai ngay luc ket noi thanh cong — `reload()` khien
         // `ProjectDetail` hien `<Loading>` va UNMOUNT toan bo cay con
         // (ke ca hop thoai nay), pha huy trang thai "Kết nối thành công"
         // TRUOC KHI nguoi dung kip thay. Loi that tim qua QA trinh duyet.
         onClose={() => {
-          setDialogMo(false);
+          setDangMoProvider(null);
+          onChanged();
+        }}
+        onConnected={() => {}}
+      />
+      <ProviderConnectDialog
+        open={dangMoProvider === "groq"}
+        providerId="groq"
+        providerLabel="Groq"
+        consoleUrl={GROQ_CONSOLE_KEYS_URL}
+        keyPlaceholder="gsk_................................"
+        onClose={() => {
+          setDangMoProvider(null);
           onChanged();
         }}
         onConnected={() => {}}
@@ -671,6 +697,25 @@ function GlossaryCounts({ projectId }: { projectId: string }) {
 
 /* ============================================================ chon provider (Part Q) */
 
+/** Ba che do BYOK cua san pham (V6 cerebras-groq-translation): "Tự động"
+ * (site quota), "Cerebras của tôi", "Groq của tôi". Hai muc sau la MANUAL +
+ * `selectedProviderId` tro toi model CHINH cua ho do (Cerebras: GLM, Groq:
+ * Qwen) + `allowFallback=true` (van duoc chuyen sang model KHAC CUNG ho —
+ * vd Cerebras GLM -> Cerebras GPT-OSS 120B, xem `ProviderRegistry._ho_provider`
+ * o backend) + `preferPersonalProvider=true` (tin hieu "day la BYOK tuong
+ * minh", dung de phan biet voi ket noi dung chung CUNG ten model — xem
+ * `translate_segment_with_personal` o backend). */
+const BYOK_PROVIDERS = [
+  {
+    id: "cerebras", label: "Cerebras", primaryModel: "cerebras_glm",
+    consoleUrl: CEREBRAS_CONSOLE_KEYS_URL, keyPlaceholder: "csk-................................",
+  },
+  {
+    id: "groq", label: "Groq", primaryModel: "groq_qwen",
+    consoleUrl: GROQ_CONSOLE_KEYS_URL, keyPlaceholder: "gsk_................................",
+  },
+] as const;
+
 function ProviderSettingsPanel({
   project,
   onChanged,
@@ -684,7 +729,7 @@ function ProviderSettingsPanel({
     useCallback(() => translate.listConnections(), []),
   );
   const [dangLuu, setDangLuu] = useState(false);
-  const [dialogMo, setDialogMo] = useState(false);
+  const [dangMoProvider, setDangMoProvider] = useState<"groq" | "cerebras" | null>(null);
   const [dangXuLy, setDangXuLy] = useState<string | null>(null);
 
   const capNhat = async (fields: Parameters<typeof translate.updateProviderSettings>[1]) => {
@@ -800,88 +845,127 @@ function ProviderSettingsPanel({
         </>
       ) : null}
 
-      {/* V5.1 BYOK — ket noi ca nhan */}
-      {ketNoi.length === 0 ? (
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => setDialogMo(true)}
-        >
-          Dịch nhiều? Kết nối API key cá nhân
-        </button>
-      ) : (
-        <div className="stack-2">
-          <h3 className="section-title" style={{ fontSize: "var(--t-sm, 0.875rem)" }}>
-            Groq cá nhân
-          </h3>
-          {ketNoi.map((c) => (
-            <div key={c.provider_id} className="row-between">
-              <span>
-                ✓ Đã kết nối · ••••••••{c.last4}
-                {c.status !== "available" && c.status !== "unknown" ? (
-                  <> · {NHAN_PROVIDER_STATUS[c.status] ?? c.status}</>
-                ) : null}
-              </span>
-              <span className="row row-tight">
-                <button
-                  type="button" className="btn btn-ghost btn-sm"
-                  disabled={dangXuLy === c.provider_id}
-                  onClick={() => void kiemTraLai(c.provider_id)}
-                >
-                  Kiểm tra lại
-                </button>
-                <button
-                  type="button" className="btn btn-ghost btn-sm"
-                  onClick={() => setDialogMo(true)}
-                >
-                  Thay API key
-                </button>
-                <button
-                  type="button" className="btn btn-ghost btn-sm"
-                  disabled={dangXuLy === c.provider_id}
-                  onClick={() => void xoaKetNoi(c.provider_id)}
-                >
-                  Xoá kết nối
-                </button>
-              </span>
+      {/* V6 BYOK — ket noi ca nhan, Cerebras VA Groq doc lap */}
+      <div className="stack-2">
+        <h3 className="section-title" style={{ fontSize: "var(--t-sm, 0.875rem)" }}>
+          API key cá nhân
+        </h3>
+        {BYOK_PROVIDERS.map((bp) => {
+          const c = ketNoi.find((k) => k.provider_id === bp.id);
+          const dangDungCaNhanNay =
+            project.provider_mode === "manual"
+            && project.prefer_personal_provider
+            && project.selected_provider_id === bp.primaryModel;
+          return (
+            <div key={bp.id} className="stack-2" style={{ borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+              {!c ? (
+                <div className="row-between">
+                  <span>{bp.label}</span>
+                  <button
+                    type="button" className="btn btn-ghost btn-sm"
+                    onClick={() => setDangMoProvider(bp.id)}
+                  >
+                    Kết nối API key {bp.label}
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="row-between">
+                    <span>
+                      {bp.label} · ✓ Đã kết nối · ••••••••{c.last4}
+                      {c.status !== "available" && c.status !== "unknown" ? (
+                        <> · {NHAN_PROVIDER_STATUS[c.status] ?? c.status}</>
+                      ) : null}
+                    </span>
+                    <span className="row row-tight">
+                      <button
+                        type="button" className="btn btn-ghost btn-sm"
+                        disabled={dangXuLy === c.provider_id}
+                        onClick={() => void kiemTraLai(c.provider_id)}
+                      >
+                        Kiểm tra lại
+                      </button>
+                      <button
+                        type="button" className="btn btn-ghost btn-sm"
+                        onClick={() => setDangMoProvider(bp.id)}
+                      >
+                        Thay API key
+                      </button>
+                      <button
+                        type="button" className="btn btn-ghost btn-sm"
+                        disabled={dangXuLy === c.provider_id}
+                        onClick={() => void xoaKetNoi(c.provider_id)}
+                      >
+                        Xoá kết nối
+                      </button>
+                    </span>
+                  </div>
+                  <label className="chip" style={{ cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="byok-mode"
+                      checked={dangDungCaNhanNay}
+                      disabled={dangLuu}
+                      onChange={() => void capNhat({
+                        providerMode: "manual",
+                        selectedProviderId: bp.primaryModel,
+                        allowFallback: true,
+                        preferPersonalProvider: true,
+                      })}
+                      style={{ marginRight: 6 }}
+                    />
+                    Dùng {bp.label} của tôi — không dùng hạn mức chung
+                  </label>
+                  <p className="hint">Xóa tại Fanfic không thu hồi key bên {bp.label}.</p>
+                </>
+              )}
+              <a
+                className="btn btn-ghost btn-sm"
+                href={bp.consoleUrl}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+              >
+                Quản lý API key trên {bp.label} ↗
+              </a>
+              <ProviderConnectDialog
+                open={dangMoProvider === bp.id}
+                providerId={bp.id}
+                providerLabel={bp.label}
+                consoleUrl={bp.consoleUrl}
+                keyPlaceholder={bp.keyPlaceholder}
+                // `taiLaiKetNoi` (chi tai LAI DANH SACH ket noi, cuc bo trong
+                // panel nay) an toan goi NGAY luc thanh cong — no KHONG
+                // unmount ca cay. `onChanged` (reload toan bo du an, co the
+                // hien `<Loading>` va unmount panel nay) CHI goi luc DONG
+                // hop thoai, sau khi nguoi dung da thay man hinh "Kết nối
+                // thành công" — loi that tim qua QA trinh duyet: goi ca hai
+                // NGAY luc ket noi se pha huy hop thoai truoc khi kip hien
+                // trang thai thanh cong.
+                onClose={() => {
+                  setDangMoProvider(null);
+                  onChanged();
+                }}
+                onConnected={() => taiLaiKetNoi()}
+              />
             </div>
-          ))}
-          <p className="hint">Xóa tại Fanfic không thu hồi key bên Groq.</p>
-          <a
-            className="btn btn-ghost btn-sm"
-            href={GROQ_CONSOLE_KEYS_URL}
-            target="_blank"
-            rel="noopener noreferrer nofollow"
-          >
-            Quản lý API key trên Groq ↗
-          </a>
+          );
+        })}
+        {ketNoi.length > 0 ? (
           <label className="chip" style={{ cursor: "pointer" }}>
             <input
-              type="checkbox"
-              checked={project.prefer_personal_provider}
+              type="radio"
+              name="byok-mode"
+              checked={!(project.provider_mode === "manual" && project.prefer_personal_provider)}
               disabled={dangLuu}
-              onChange={(e) => void capNhat({ preferPersonalProvider: e.target.checked })}
+              onChange={() => void capNhat({
+                providerMode: "auto", preferPersonalProvider: false,
+              })}
               style={{ marginRight: 6 }}
             />
-            Ưu tiên API key cá nhân
+            Tự động — ưu tiên hạn mức chung, chỉ dùng key cá nhân khi cần
           </label>
-        </div>
-      )}
-      <ProviderConnectDialog
-        open={dialogMo}
-        // `taiLaiKetNoi` (chi tai LAI DANH SACH ket noi, cuc bo trong panel
-        // nay) an toan goi NGAY luc thanh cong — no KHONG unmount ca cay.
-        // `onChanged` (reload toan bo du an, co the hien `<Loading>` va
-        // unmount panel nay) CHI goi luc DONG hop thoai, sau khi nguoi
-        // dung da thay man hinh "Kết nối thành công" — loi that tim qua QA
-        // trinh duyet: goi ca hai NGAY luc ket noi se pha huy hop thoai
-        // truoc khi kip hien trang thai thanh cong.
-        onClose={() => {
-          setDialogMo(false);
-          onChanged();
-        }}
-        onConnected={() => taiLaiKetNoi()}
-      />
+        ) : null}
+      </div>
     </section>
   );
 }

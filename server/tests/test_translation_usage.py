@@ -44,15 +44,17 @@ class UsageRecorderTest(unittest.TestCase):
 
     def test_khong_bao_gio_ghi_credential(self):
         """`UsageEvent` khong co truong nao cho api key/secret — kiem tra
-        cau truc du lieu, khong phai gia tri cu the."""
+        TEN TRUONG cu the, khong phai substring tho tren toan chuoi: kiem tra
+        do (thay vi ten truong) se bao loi GIA voi `input_tokens`/
+        `output_tokens` (dem SO LUONG token dich — hop phap, khong phai bi
+        mat) vi chuoi do TINH CO chua chu "token"."""
         rec = UsageRecorder()
         rec.ghi(provider_id="groq_qwen", model_id="qwen/qwen3.6-27b",
                credential_source="personal", pass_type="translator",
                outcome="success", latency_ms=10)
         d = rec.gan_day(1)[0].to_dict()
-        chuoi = str(d).lower()
-        for tu_cam in ("key", "token", "secret", "authorization"):
-            self.assertNotIn(tu_cam, chuoi)
+        for truong_cam in ("api_key", "secret", "authorization", "key"):
+            self.assertNotIn(truong_cam, d)
 
     def test_tom_tat_theo_model_dem_dung(self):
         rec = UsageRecorder()

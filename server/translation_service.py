@@ -8,6 +8,8 @@ Khong biet gi ve HTTP — nem `TranslationError`/`NotFoundError`/
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import threading
 import uuid
@@ -145,6 +147,101 @@ _VAI_TRO_THEO_CHE_DO: Dict[QualityMode, tuple] = {
 }
 
 
+#: Doi so nay khi thay doi CACH GOP prompt he thong/nguoi dung (xem
+#: `translation_providers._he_thong_prompt`/`_nguoi_dung_prompt`) de cac muc
+#: cache CU (gop theo cach cu) khong bi dung nham lam ket qua cua cach MOI.
+_CACHE_PROMPT_VERSION = "v1"
+
+
+class _KetQuaCache:
+    """Mot ket qua da dich LUU TRONG CACHE — giu lai provider/model/nguon
+    credential GOC de `ProviderProvenance` cua mot lan CACHE HIT van bao dung
+    "ai da dich lan dau", chi kem co `from_cache=True`."""
+
+    __slots__ = ("van_ban", "provider_id", "model_id", "credential_source")
+
+    def __init__(self, van_ban: str, provider_id: str, model_id: str,
+                credential_source: str):
+        self.van_ban = van_ban
+        self.provider_id = provider_id
+        self.model_id = model_id
+        self.credential_source = credential_source
+
+
+class _TranslationSegmentCache:
+    """
+    Cache dich TRONG TIEN TRINH, THEO TUNG INSTANCE `TranslationService` —
+    KHONG PHAI mot singleton toan cuc cap module. Mot cache dung CHUNG giua
+    nhieu instance (vd giua cac bai test khac nhau trong cung mot tien trinh
+    pytest) se lam MOT test ro ri ket qua sang test khac dung chung van ban —
+    day la loai loi that de gap va kho tim (test B "tinh co" thanh cong vi
+    dung lai ket qua da cache tu test A, thay vi tu goi provider gia cua
+    chinh no) nen kien truc nay CO CHU DICH gan cache vao instance, khong
+    dung bien cap module.
+
+    Khoa la sha256 cua dau vao anh huong ket qua dich: van ban + MOI truong
+    on dinh tu `TranslationContext` (vai_tro/quality_mode/genre/naming_mode/
+    glossary/custom_instruction) + `_CACHE_PROMPT_VERSION` — CO CHU DICH
+    KHONG gom lua chon provider (provider_mode/selected_provider_id): cache
+    nay la "cung dau vao + cung chi dan -> cung ket qua", giong triet ly bo
+    nho dich (translation memory) trong cac cong cu CAT, doc lap voi model
+    NAO thuc su tao ra no lan dau — chuyen provider khong lam mat gia tri
+    cache da co.
+
+    CO CHU DICH KHONG gom `tom_tat_truoc` (tom tat cac chuong TRUOC, xem
+    `SO_CHUONG_TOM_TAT_NGU_CANH`): gia tri nay THAY DOI o HAU NHU MOI chuong
+    (moi chuong dich xong lai doi tom tat chuong truoc do cua CHINH no) —
+    neu dua vao khoa cache, hai doan van GIONG HET nhau o hai chuong khac
+    nhau (vd mot cau hoi thoai lap lai, rat thuong gap trong fanfic mang) se
+    GAN NHU KHONG BAO GIO trung cache duoc, vo hieu hoa gan het gia tri thuc
+    te cua cache nay. Danh doi: mot doan van lap lai co the duoc dich giong
+    het nhau du boi canh chuong truoc da doi — chap nhan duoc vi ban than
+    tom tat chi la "tri nho long", khong phai mot chi dan NGON NGU truc tiep
+    anh huong tu vung/ngu phap cua CHINH doan dang dich.
+    """
+
+    GIOI_HAN = 2000
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._kho: Dict[str, _KetQuaCache] = {}
+        #: FIFO don gian de gioi han kich thuoc — khong can LRU chinh xac,
+        #: chi can khong phinh vo han qua mot phien server chay lau.
+        self._thu_tu: List[str] = []
+
+    @staticmethod
+    def _khoa(text: str, ctx: "TranslationContext") -> str:
+        phan = {
+            "text": text,
+            "vai_tro": ctx.vai_tro,
+            "quality_mode": ctx.quality_mode,
+            "genre": ctx.genre,
+            "naming_mode": ctx.naming_mode,
+            "glossary": sorted(ctx.glossary.items()),
+            "custom_instruction": ctx.custom_instruction,
+            "prompt_version": _CACHE_PROMPT_VERSION,
+        }
+        tho = json.dumps(phan, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(tho.encode("utf-8")).hexdigest()
+
+    def lay(self, text: str, ctx: "TranslationContext") -> Optional[_KetQuaCache]:
+        with self._lock:
+            return self._kho.get(self._khoa(text, ctx))
+
+    def luu(self, text: str, ctx: "TranslationContext", *, van_ban: str,
+           provider_id: str, model_id: str, credential_source: str) -> None:
+        khoa = self._khoa(text, ctx)
+        with self._lock:
+            if khoa not in self._kho and len(self._thu_tu) >= self.GIOI_HAN:
+                cu = self._thu_tu.pop(0)
+                self._kho.pop(cu, None)
+            if khoa not in self._kho:
+                self._thu_tu.append(khoa)
+            self._kho[khoa] = _KetQuaCache(
+                van_ban=van_ban, provider_id=provider_id, model_id=model_id,
+                credential_source=credential_source)
+
+
 def _tom_tat_tho(van_ban_da_dich: str) -> str:
     """Tom tat THO: cau dau + cau cuoi cua chuong da dich. Khong goi LLM rieng
     cho viec tom tat — mot lan goi them cho MOI chuong la chi phi khong xung
@@ -205,6 +302,9 @@ class TranslationService:
         self._max_concurrent_jobs = (
             max_concurrent_jobs if max_concurrent_jobs is not None
             else int(os.environ.get("FAS_TRANSLATION_MAX_CONCURRENT_JOBS", "3")))
+        #: Cache dich RIENG cua instance nay — xem docstring
+        #: `_TranslationSegmentCache` ve ly do KHONG dung bien cap module.
+        self._cache = _TranslationSegmentCache()
 
     # ==================================================================== DU AN
 
@@ -721,7 +821,8 @@ class TranslationService:
 
     def _goi_dich_mot_doan(self, text: str, ctx: TranslationContext,
                            project: TranslationProject,
-                           personal_providers: List["ConfiguredProvider"]
+                           personal_providers: List["ConfiguredProvider"],
+                           allow_cache: bool = True
                            ) -> "tuple[str, ProviderProvenance]":
         """
         MOT diem goi DUY NHAT vao provider/registry — dung boi CA
@@ -730,23 +831,53 @@ class TranslationService:
         `translate_segment_with_personal` (Fanfic chung + ca nhan cua CHINH
         chu du an theo dung thu tu `project.prefer_personal_provider`);
         neu khong, hanh vi Y HET truoc V5.1.
+
+        Cache (xem `_TranslationSegmentCache`) duoc kiem TRUOC TIEN khi
+        `allow_cache=True` — trung cache thi tra ve NGAY, KHONG cham toi
+        provider/registry nao (khong ton request/token, khong ghi usage gia).
+        Chi ket qua THANH CONG moi duoc luu vao cache — loi khong bao gio
+        duoc cache (mot lan loi tam thoi khong duoc phep "dinh" mai trong
+        cache).
+
+        `allow_cache=False` (dung boi `_chay_vai_tro_tren_van_ban`, tuc MOI
+        hanh dong "dịch lại"/"chạy lại pass" cua nguoi dung — Part N): nguoi
+        dung bam "Dịch lại đoạn/chương này" ro rang MUON mot KET QUA MOI, dung
+        cache o day se tra ve Y HET ban dich cu, pha vo hoan toan muc dich
+        cua nut "dịch lại". CHI duong ong TU DONG (`_dich_mot_chuong`) moi
+        duoc dung cache — gia tri that cua no la tranh dich lai NHUNG DOAN DA
+        TUNG THANH CONG khi mot chuong phai lam lai tu dau sau
+        `waiting_for_provider` (xem `_thuc_thi_job`), hoac cac doan trung
+        lap tu nhien giua nhieu chuong (hoi thoai/cau van lap lai).
         """
+        cache_hit = self._cache.lay(text, ctx) if allow_cache else None
+        if cache_hit is not None:
+            return cache_hit.van_ban, ProviderProvenance(
+                provider_id=cache_hit.provider_id, model_id=cache_hit.model_id,
+                pass_type=ctx.vai_tro, success=True, attempted_at=now_iso(),
+                credential_source=cache_hit.credential_source, from_cache=True)
+
         if self._registry and self._byok:
-            return self._registry.translate_segment_with_personal(
+            ket_qua, prov = self._registry.translate_segment_with_personal(
                 text, context=ctx, mode=project.provider_mode,
                 selected_provider_id=project.selected_provider_id,
                 allow_fallback=project.allow_fallback,
                 personal_providers=personal_providers,
                 prefer_personal=project.prefer_personal_provider)
-        if self._registry:
-            return self._registry.translate_segment(
+        elif self._registry:
+            ket_qua, prov = self._registry.translate_segment(
                 text, context=ctx, mode=project.provider_mode,
                 selected_provider_id=project.selected_provider_id,
                 allow_fallback=project.allow_fallback)
-        ket_qua = self._provider.translate_segment(text, context=ctx)
-        return ket_qua, ProviderProvenance(
-            provider_id=self._provider.name, model_id="",
-            pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+        else:
+            van_ban = self._provider.translate_segment(text, context=ctx)
+            ket_qua, prov = van_ban, ProviderProvenance(
+                provider_id=self._provider.name, model_id="",
+                pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+
+        if allow_cache:
+            self._cache.luu(text, ctx, van_ban=ket_qua, provider_id=prov.provider_id,
+                           model_id=prov.model_id, credential_source=prov.credential_source)
+        return ket_qua, prov
 
     def _dich_mot_chuong(self, project: TranslationProject, noi_dung: str,
                          chuong_idx: int, job: TranslationJob,
@@ -951,7 +1082,8 @@ class TranslationService:
                         tom_tat_truoc=tom_tat, glossary=glossary,
                         custom_instruction=project.custom_instruction)
                     dich, prov = self._goi_dich_mot_doan(
-                        dich, ctx, project, personal_providers)
+                        dich, ctx, project, personal_providers,
+                        allow_cache=False)
                 ket_qua.append(dich)
         finally:
             if self._byok:

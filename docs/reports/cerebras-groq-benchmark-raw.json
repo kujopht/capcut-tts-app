@@ -1,0 +1,134 @@
+[
+  {
+    "model_key": "cerebras_glm",
+    "display_name": "Cerebras · GLM 4.7",
+    "doan_key": "hoi_thoai_xung_ho",
+    "trang_thai": "skipped",
+    "do_tre_giay": null,
+    "dau_ra": "",
+    "loi": "thiếu CEREBRAS_API_KEY",
+    "input_tokens": null,
+    "output_tokens": null
+  },
+  {
+    "model_key": "cerebras_glm",
+    "display_name": "Cerebras · GLM 4.7",
+    "doan_key": "tuong_thuat_dia_danh",
+    "trang_thai": "skipped",
+    "do_tre_giay": null,
+    "dau_ra": "",
+    "loi": "thiếu CEREBRAS_API_KEY",
+    "input_tokens": null,
+    "output_tokens": null
+  },
+  {
+    "model_key": "cerebras_glm",
+    "display_name": "Cerebras · GLM 4.7",
+    "doan_key": "he_thong_thuat_ngu",
+    "trang_thai": "skipped",
+    "do_tre_giay": null,
+    "dau_ra": "",
+    "loi": "thiếu CEREBRAS_API_KEY",
+    "input_tokens": null,
+    "output_tokens": null
+  },
+  {
+    "model_key": "cerebras_glm",
+    "display_name": "Cerebras · GLM 4.7",
+    "doan_key": "doi_thoai_nhieu_nhan_vat",
+    "trang_thai": "skipped",
+    "do_tre_giay": null,
+    "dau_ra": "",
+    "loi": "thiếu CEREBRAS_API_KEY",
+    "input_tokens": null,
+    "output_tokens": null
+  },
+  {
+    "model_key": "cerebras_gpt_oss_120b",
+    "display_name": "Cerebras · GPT-OSS 120B",
+    "doan_key": "hoi_thoai_xung_ho",
+    "trang_thai": "skipped",
+    "do_tre_giay": null,
+    "dau_ra": "",
+    "loi": "thiếu CEREBRAS_API_KEY",
+    "input_tokens": null,
+    "output_tokens": null
+  },
+  {
+    "model_key": "cerebras_gpt_oss_120b",
+    "display_name": "Cerebras · GPT-OSS 120B",
+    "doan_key": "tuong_thuat_dia_danh",
+    "trang_thai": "skipped",
+    "do_tre_giay": null,
+    "dau_ra": "",
+    "loi": "thiếu CEREBRAS_API_KEY",
+    "input_tokens": null,
+    "output_tokens": null
+  },
+  {
+    "model_key": "cerebras_gpt_oss_120b",
+    "display_name": "Cerebras · GPT-OSS 120B",
+    "doan_key": "he_thong_thuat_ngu",
+    "trang_thai": "skipped",
+    "do_tre_giay": null,
+    "dau_ra": "",
+    "loi": "thiếu CEREBRAS_API_KEY",
+    "input_tokens": null,
+    "output_tokens": null
+  },
+  {
+    "model_key": "cerebras_gpt_oss_120b",
+    "display_name": "Cerebras · GPT-OSS 120B",
+    "doan_key": "doi_thoai_nhieu_nhan_vat",
+    "trang_thai": "skipped",
+    "do_tre_giay": null,
+    "dau_ra": "",
+    "loi": "thiếu CEREBRAS_API_KEY",
+    "input_tokens": null,
+    "output_tokens": null
+  },
+  {
+    "model_key": "groq_qwen",
+    "display_name": "Groq · Qwen 3.6 27B",
+    "doan_key": "hoi_thoai_xung_ho",
+    "trang_thai": "ok",
+    "do_tre_giay": 0.375,
+    "dau_ra": "Tiêu Viêm nhìn về phía Dược Lão, khẽ nhíu mày, trầm giọng nói: “Thư sư, chuyện này ngài đã biết từ lâu rồi, phải không?”",
+    "loi": "",
+    "input_tokens": 262,
+    "output_tokens": 36
+  },
+  {
+    "model_key": "groq_qwen",
+    "display_name": "Groq · Qwen 3.6 27B",
+    "doan_key": "tuong_thuat_dia_danh",
+    "trang_thai": "ok",
+    "do_tre_giay": 0.2969999999986612,
+    "dau_ra": "Một ngày nọ, dưới chân Vân Xích Sơn nổi lên một trận sương mù dày đặc, những cây khô héo hai bên đường núi phát ra tiếng gào thét trầm thấp trong gió.",
+    "loi": "",
+    "input_tokens": 265,
+    "output_tokens": 42
+  },
+  {
+    "model_key": "groq_qwen",
+    "display_name": "Groq · Qwen 3.6 27B",
+    "doan_key": "he_thong_thuat_ngu",
+    "trang_thai": "ok",
+    "do_tre_giay": 0.28100000000267755,
+    "dau_ra": "“Ting! Chúc mừng chủ nhân đột phá đến Luyện Khí Cửu Tầng, nhận được công pháp ‘Thiên Sơn Quyết’ một bộ, xin vui lòng kiểm tra kịp thời.”",
+    "loi": "",
+    "input_tokens": 264,
+    "output_tokens": 38
+  },
+  {
+    "model_key": "groq_qwen",
+    "display_name": "Groq · Qwen 3.6 27B",
+    "doan_key": "doi_thoai_nhieu_nhan_vat",
+    "trang_thai": "loi",
+    "do_tre_giay": 0.125,
+    "dau_ra": "",
+    "loi": "Model đang bị giới hạn tốc độ: {\"error\":{\"message\":\"Rate limit reached for model `qwen/qwen3.6-27b` in organization `org_01kzzpg5kre19rck1c525wtkja` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 4893, Reques",
+    "input_tokens": null,
+    "output_tokens": null
+  }
+]

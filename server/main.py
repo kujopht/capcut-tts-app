@@ -4907,12 +4907,15 @@ def image_wallet_transactions(profile: Profile = Depends(current_profile)) -> Di
     }
 
 
+class ImageEstimateIn(BaseModel):
+    model: Annotated[str, StringConstraints(max_length=50)]
+    quality: Annotated[str, StringConstraints(max_length=20)] = "standard"
+
+
 @app.post("/api/image/shared-premium/estimate")
 def image_shared_premium_estimate(
-    payload: ImageSharedPremiumIn, profile: Profile = Depends(current_profile),
+    payload: ImageEstimateIn, profile: Profile = Depends(current_profile),
 ) -> Dict[str, Any]:
-    if payload.aspect_ratio not in _TI_LE_HOP_LE:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tỷ lệ khung hình không hợp lệ.")
     micro = _dich_vu_anh(
         image_studio_svc.uoc_tinh_shared_premium,
         model_id=payload.model, quality=payload.quality,

@@ -34,6 +34,10 @@ export const HO_ENDPOINT = [
   "creator",
   "feed",
   "health",
+  // Image Studio V1 (overnight build) — Quick Free/Fanfic Credits/My
+  // Pollinations, doc lap voi moi ho khac. Xem
+  // `docs/reports/image-studio-v1-summary.md`.
+  "image",
   "jobs",
   // Bang xep hang XP (V6 gamification) — CONG KHAI, khong nam duoi
   // `/api/account/...` vi khong doi hoi dang nhap (nguoi xem chua dang nhap

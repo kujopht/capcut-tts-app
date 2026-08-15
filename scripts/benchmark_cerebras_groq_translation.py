@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-So sánh CÙNG một số đoạn fanfic Trung -> Việt qua Cerebras (zai-glm-4.7,
-gpt-oss-120b) và Groq (qwen/qwen3.6-27b) — chiến lược sản xuất tạm thời
+So sánh CÙNG một số đoạn fanfic Trung -> Việt qua Cerebras (gpt-oss-120b) và
+Groq (qwen/qwen3.6-27b) — chiến lược sản xuất tạm thời
 (`feature/cerebras-groq-translation`).
+
+KHÔNG benchmark `zai-glm-4.7`: tài liệu Cerebras (kiểm tra 2026-08-15) ghi
+model này là Preview và sẽ ngừng hỗ trợ 2026-08-17 — đã bị gỡ khỏi
+`CEREBRAS_MODEL_PROFILES`, không còn nằm trong định tuyến sản xuất/BYOK.
 
     python scripts/benchmark_cerebras_groq_translation.py
 
@@ -148,7 +152,6 @@ def main() -> None:
     print()
 
     tat_ca: list[KetQua] = []
-    tat_ca += _thu_cerebras("glm", cerebras_key)
     tat_ca += _thu_cerebras("gpt_oss_120b", cerebras_key)
     tat_ca += _thu_groq("qwen", groq_key)
 

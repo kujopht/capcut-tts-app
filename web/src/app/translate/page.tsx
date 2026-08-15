@@ -699,15 +699,16 @@ function GlossaryCounts({ projectId }: { projectId: string }) {
 
 /** Ba che do BYOK cua san pham (V6 cerebras-groq-translation): "Tự động"
  * (site quota), "Cerebras của tôi", "Groq của tôi". Hai muc sau la MANUAL +
- * `selectedProviderId` tro toi model CHINH cua ho do (Cerebras: GLM, Groq:
- * Qwen) + `allowFallback=true` (van duoc chuyen sang model KHAC CUNG ho —
- * vd Cerebras GLM -> Cerebras GPT-OSS 120B, xem `ProviderRegistry._ho_provider`
- * o backend) + `preferPersonalProvider=true` (tin hieu "day la BYOK tuong
+ * `selectedProviderId` tro toi model CHINH cua ho do (Cerebras: GPT-OSS
+ * 120B — model duy nhat, `zai-glm-4.7` đã bị gỡ do Cerebras đánh dấu
+ * deprecated/preview; Groq: Qwen) + `allowFallback=true` (van duoc chuyen
+ * sang model KHAC CUNG ho neu co, xem `ProviderRegistry._ho_provider` o
+ * backend) + `preferPersonalProvider=true` (tin hieu "day la BYOK tuong
  * minh", dung de phan biet voi ket noi dung chung CUNG ten model — xem
  * `translate_segment_with_personal` o backend). */
 const BYOK_PROVIDERS = [
   {
-    id: "cerebras", label: "Cerebras", primaryModel: "cerebras_glm",
+    id: "cerebras", label: "Cerebras", primaryModel: "cerebras_gpt_oss_120b",
     consoleUrl: CEREBRAS_CONSOLE_KEYS_URL, keyPlaceholder: "csk-................................",
   },
   {

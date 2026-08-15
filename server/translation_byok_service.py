@@ -65,7 +65,10 @@ def _model_mac_dinh(provider_id: str) -> str:
     if provider_id == "groq":
         return os.environ.get("GROQ_MODEL", "").strip() or "qwen/qwen3.6-27b"
     if provider_id == "cerebras":
-        return "zai-glm-4.7"
+        # `zai-glm-4.7` da bi go khoi CEREBRAS_MODEL_PROFILES (xem
+        # `translation_model_profiles.py`) — model MAC DINH gio la model
+        # CURATED DUY NHAT con lai.
+        return "gpt-oss-120b"
     return ""
 
 
@@ -237,11 +240,15 @@ class ProviderConnectionService:
         """
         Phan 3G (overnight Phase 3, mo rong sang Cerebras): MOT ket noi ca
         nhan -> NHIEU `ConfiguredProvider` (tat ca model curated cua provider
-        do — Qwen/GPT-OSS 120B/GPT-OSS 20B cho Groq, GLM/GPT-OSS 120B cho
-        Cerebras), CUNG mot api key da giai ma — dung y "Do not ask user to
-        enter a key per model". Day CUNG la co so de "My Cerebras API key"/
-        "My Groq API key" (BYOK tuong minh, MANUAL + fallback BAT) tu dong
-        chuyen giua CAC MODEL CUA CHINH HO nay khi mot model that bai, ma
+        do — Qwen/GPT-OSS 120B/GPT-OSS 20B cho Groq; Cerebras hien CHI co
+        GPT-OSS 120B, `zai-glm-4.7` da bi go do Cerebras danh dau Preview/
+        sap ngung ho tro, xem `translation_model_profiles.py`), CUNG mot api
+        key da giai ma — dung y "Do not ask user to enter a key per model".
+        Day CUNG la co so de "My Cerebras API key"/"My Groq API key" (BYOK
+        tuong minh, MANUAL + fallback BAT) tu dong chuyen giua CAC MODEL CUA
+        CHINH HO nay khi mot model that bai (hien chi thuc su ap dung cho
+        Groq — Cerebras chi co mot model nen khong co gi de fallback noi
+        bo), ma
         KHONG cham toi provider dung chung hay ho BYOK khac — xem
         `ProviderRegistry._ho_provider`/`translate_segment_with_personal`.
 

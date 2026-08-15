@@ -347,9 +347,11 @@ class GroqProvider(_OpenAICompatFreeProvider):
 class CerebrasProvider(_OpenAICompatFreeProvider):
     """
     Cerebras Cloud — REST tuong thich OpenAI, dung lam nha cung cap CHINH cho
-    chien luoc san xuat tam thoi (`CEREBRAS_MODEL_PROFILES`: GLM 4.7 + GPT-OSS
-    120B). Cung nen `_OpenAICompatFreeProvider` voi Groq — endpoint/than
-    request giong het, chi khac `base_url`/model/tham so rieng qua `profile`.
+    chien luoc san xuat tam thoi (`CEREBRAS_MODEL_PROFILES`: hien CHI GPT-OSS
+    120B — `zai-glm-4.7` da bi go vi Cerebras danh dau Preview/sap ngung ho
+    tro, xem docstring `translation_model_profiles.py`). Cung nen
+    `_OpenAICompatFreeProvider` voi Groq — endpoint/than request giong het,
+    chi khac `base_url`/model/tham so rieng qua `profile`.
     """
 
     name = "cerebras"
@@ -586,11 +588,15 @@ class ProviderRegistry:
     def _ho_provider(provider_id: str) -> str:
         """
         "Ho" (family) cua MOT provider_id — dung DE GIOI HAN fallback BYOK
-        tuong minh (xem `translate_segment_with_personal`): mot ket noi
-        Cerebras ca nhan duoc phep tu dong chuyen giua CAC MODEL CUA CHINH
-        NO (`cerebras_glm` <-> `cerebras_gpt_oss_120b`, cung MOT api key), NHUNG
-        khong bao gio duoc phep "tràn" sang provider dung chung/ho khac — dung
-        y voi yeu cau goc "do NOT silently fall back to shared credentials".
+        tuong minh (xem `translate_segment_with_personal`): mot ket noi Groq
+        ca nhan duoc phep tu dong chuyen giua CAC MODEL CUA CHINH NO
+        (`groq_qwen` <-> `groq_gpt_oss_120b` <-> `groq_gpt_oss_20b`, cung MOT
+        api key), NHUNG khong bao gio duoc phep "tràn" sang provider dung
+        chung/ho khac — dung y voi yeu cau goc "do NOT silently fall back to
+        shared credentials". Ho "cerebras" hien CHI co MOT model curated
+        (`gpt_oss_120b`, xem `translation_model_profiles.py`) nen khong co
+        fallback noi bo nao xay ra trong thuc te — co che nay VAN giu nguyen
+        cho tuong lai neu Cerebras them model curated thu hai.
 
         Provider da-model curated (groq_*, cerebras_*) tra ve TEN HO chung
         ("groq"/"cerebras"); provider don (vd "cloudflare", "custom",
@@ -613,7 +619,7 @@ class ProviderRegistry:
         LAI dung tai vi tri no chiem trong danh sach dau vao, KHONG bi day
         len dau mot cach vo dieu kien. Dieu nay quan trong tu khi Cerebras
         tro thanh nha cung cap CHIA SE duoc uu tien HON Groq (chien luoc san
-        xuat tam thoi: Cerebras GLM -> Cerebras GPT-OSS -> Groq Qwen) —
+        xuat tam thoi: Cerebras GPT-OSS 120B -> Groq Qwen) —
         `build_provider_registry` dang ky Cerebras TRUOC Groq trong danh sach
         dau vao chinh xac de dua vao hanh vi "giu nguyen vi tri" nay; neu ham
         nay vo dieu kien day nhom Groq len dau (nhu ban truoc Phan R), Groq se
@@ -743,7 +749,7 @@ class ProviderRegistry:
 
         if mode == "manual" and selected_provider_id:
             # Provider CA NHAN dung CHINH provider_id voi provider DUNG CHUNG
-            # tuong ung (vd ca hai deu la "cerebras_glm" — xem
+            # tuong ung (vd ca hai deu la "groq_qwen" — xem
             # `translation_byok_service.build_all_model_providers`) — CO CHU
             # DICH, giu nguyen API cu (AUTO + `prefer_personal_provider` chi
             # can NOI, khong can PHAN BIET id). Khi MANUAL chon dung id nay,
@@ -760,9 +766,9 @@ class ProviderRegistry:
                     # BYOK CHON TUONG MINH (yeu cau goc: "use that user's
                     # provider directly... do not silently fall back to
                     # shared credentials"): CHI duoc phep chuyen sang MODEL
-                    # KHAC CUNG HO ca nhan (vd Cerebras GLM -> Cerebras
-                    # GPT-OSS 120B, CUNG mot api key nguoi dung) — khong bao
-                    # gio cham toi `dung_chung` hay ca nhan cua ho KHAC.
+                    # KHAC CUNG HO ca nhan (vd Groq Qwen -> Groq GPT-OSS
+                    # 120B, CUNG mot api key nguoi dung) — khong bao gio cham
+                    # toi `dung_chung` hay ca nhan cua ho KHAC.
                     ho = self._ho_provider(chon.provider_id)
                     thu_tu += [p for p in ca_nhan
                               if p is not chon and self._ho_provider(p.provider_id) == ho]
@@ -898,8 +904,9 @@ def build_provider_registry(env: Optional[Dict[str, str]] = None
     # Chien luoc san xuat TAM THOI (yeu cau goc): Cerebras la nha cung cap
     # CHIA SE CHINH — dang ky TRUOC Groq trong danh sach nay de thu tu AUTO
     # (`_sap_theo_vai_tro`, giu nguyen vi tri cac provider khong phai Groq)
-    # la Cerebras GLM -> Cerebras GPT-OSS 120B -> Groq Qwen -> ... dung y yeu
-    # cau "Default server-managed translation route". `free_tier=True`:
+    # la Cerebras GPT-OSS 120B -> Groq Qwen -> ... dung y yeu cau "Default
+    # server-managed translation route" (`zai-glm-4.7` da bi go — xem
+    # `translation_model_profiles.py`). `free_tier=True`:
     # Cerebras Cloud co hang mien phi (rate-limited) tuong tu Groq — cung
     # tien de voi `TRANSLATION_ALLOW_PAID_PROVIDER` (rao chan CHUA CAN bat
     # de dung nha cung cap nay).

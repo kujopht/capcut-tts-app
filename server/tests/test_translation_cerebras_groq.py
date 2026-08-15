@@ -1,8 +1,15 @@
 """
-Chien luoc san xuat TAM THOI: Cerebras (GLM 4.7 + GPT-OSS 120B) + Groq (Qwen,
-du phong doc lap) — `feature/cerebras-groq-translation`.
+Chien luoc san xuat TAM THOI: Cerebras (GPT-OSS 120B) + Groq (Qwen, du phong
+doc lap) — `feature/cerebras-groq-translation`.
 
-Bo cuc file (khop voi 17 kich ban yeu cau goc):
+`zai-glm-4.7` KHONG con trong dinh tuyen — tai lieu Cerebras chinh thuc
+(kiem tra 2026-08-15) ghi ro day la model Preview va SE NGUNG HO TRO
+2026-08-17, nen da bi go khoi `CEREBRAS_MODEL_PROFILES` (xem
+`translation_model_profiles.py`) TRUOC KHI benchmark that. Cerebras hien
+CHI co MOT model curated (`gpt_oss_120b`).
+
+Bo cuc file (khop voi 17 kich ban yeu cau goc, da dieu chinh cho dung MOT
+model Cerebras):
   - `CerebrasProviderTest`            : co che `CerebrasProvider` (Phan 1-5)
   - `KiemTraKetNoiCerebrasTest`       : kiem tra ket noi BYOK (khong dich thu)
   - `BuildProviderRegistryTest`       : doc CEREBRAS_API_KEY/GROQ_API_KEY
@@ -17,6 +24,7 @@ Bo cuc file (khop voi 17 kich ban yeu cau goc):
 from __future__ import annotations
 
 import json
+import time
 import unittest
 from unittest.mock import patch
 
@@ -31,8 +39,6 @@ from server.translation_provider_registry import (
     CerebrasProvider,
     ConfiguredProvider,
     ConnectionCheckError,
-    GroqProvider,
-    ProviderQuotaExhausted,
     ProviderRateLimited,
     ProviderRegistry,
     build_provider_registry,
@@ -42,7 +48,10 @@ from server.translation_providers import TranslationContext, TranslationProvider
 from server.translation_service import TranslationService
 from server.translation_store import MockTranslationStore
 
-_GLM = CEREBRAS_MODEL_PROFILES["glm"]
+#: Cerebras hien CHI co MOT model curated (`zai-glm-4.7` da bi go — xem
+#: docstring dau file). Bien nay giu ten "GPT_OSS" (khong phai "MODEL" chung
+#: chung) de neu Cerebras them model curated thu hai sau nay, cac test o day
+#: khong nham lan gia dinh "chi co mot model mai mai".
 _CEREBRAS_GPT_OSS = CEREBRAS_MODEL_PROFILES["gpt_oss_120b"]
 _QWEN = GROQ_MODEL_PROFILES["qwen"]
 
@@ -104,13 +113,13 @@ def _groq_cp(profile_key: str, kich_ban, credential_source="shared"):
 
 class CerebrasProviderTest(unittest.TestCase):
     def test_phan_hoi_binh_thuong(self):
-        p = CerebrasProvider(api_key="k", profile=_GLM,
+        p = CerebrasProvider(api_key="k", profile=_CEREBRAS_GPT_OSS,
                              client=_client_gia(lambda r: _tra_loi_chat("Xin chào")))
         ra = p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
         self.assertEqual(ra, "Xin chào")
 
     def test_429_thanh_rate_limited(self):
-        p = CerebrasProvider(api_key="k", profile=_GLM, client=_client_gia(
+        p = CerebrasProvider(api_key="k", profile=_CEREBRAS_GPT_OSS, client=_client_gia(
             lambda r: httpx.Response(429, text="too many requests",
                                      headers={"retry-after": "20"})))
         with self.assertRaises(ProviderRateLimited) as ctx:
@@ -118,7 +127,7 @@ class CerebrasProviderTest(unittest.TestCase):
         self.assertTrue(ctx.exception.retry_at)
 
     def test_401_thanh_loi_chung_khong_bi_coi_la_rate_limit(self):
-        p = CerebrasProvider(api_key="sai-key", profile=_GLM, client=_client_gia(
+        p = CerebrasProvider(api_key="sai-key", profile=_CEREBRAS_GPT_OSS, client=_client_gia(
             lambda r: httpx.Response(401, text="invalid api key")))
         with self.assertRaises(TranslationProviderError) as ctx:
             p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
@@ -128,25 +137,13 @@ class CerebrasProviderTest(unittest.TestCase):
         def handler(request):
             raise httpx.ConnectTimeout("timeout", request=request)
 
-        p = CerebrasProvider(api_key="k", profile=_GLM, client=_client_gia(handler))
+        p = CerebrasProvider(api_key="k", profile=_CEREBRAS_GPT_OSS, client=_client_gia(handler))
         with self.assertRaises(TranslationProviderError):
             p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
 
     def test_thieu_cau_hinh_nem_loi_ngay_luc_tao(self):
         with self.assertRaises(TranslationProviderError):
-            CerebrasProvider(api_key="", profile=_GLM)
-
-    def test_glm_gui_reasoning_effort_none(self):
-        than_gui = {}
-
-        def handler(request):
-            than_gui.update(json.loads(request.content))
-            return _tra_loi_chat("Xin chào")
-
-        p = CerebrasProvider(api_key="k", profile=_GLM, client=_client_gia(handler))
-        p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
-        self.assertEqual(than_gui.get("reasoning_effort"), "none")
-        self.assertEqual(than_gui.get("model"), "zai-glm-4.7")
+            CerebrasProvider(api_key="", profile=_CEREBRAS_GPT_OSS)
 
     def test_gpt_oss_gui_reasoning_effort_low(self):
         than_gui = {}
@@ -165,7 +162,7 @@ class CerebrasProviderTest(unittest.TestCase):
         """Rao chan chung (`_bo_khoi_nghi`) ap dung cho MOI provider tuong
         thich OpenAI, khong rieng Groq — Cerebras cung dung chung lop nen
         `_OpenAICompatFreeProvider`."""
-        p = CerebrasProvider(api_key="k", profile=_GLM, client=_client_gia(
+        p = CerebrasProvider(api_key="k", profile=_CEREBRAS_GPT_OSS, client=_client_gia(
             lambda r: _tra_loi_chat(
                 "<think>\nsuy nghĩ nội bộ...\n</think>\n\nTiêu Viêm nhìn về phía Dược Lão.")))
         ra = p.translate_segment("萧炎看向药老。",
@@ -173,14 +170,14 @@ class CerebrasProviderTest(unittest.TestCase):
         self.assertEqual(ra, "Tiêu Viêm nhìn về phía Dược Lão.")
 
     def test_luu_lai_so_token_tu_usage(self):
-        p = CerebrasProvider(api_key="k", profile=_GLM, client=_client_gia(
+        p = CerebrasProvider(api_key="k", profile=_CEREBRAS_GPT_OSS, client=_client_gia(
             lambda r: _tra_loi_chat("Xin chào",
                                    usage={"prompt_tokens": 42, "completion_tokens": 7})))
         p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
         self.assertEqual(p.last_usage, {"input_tokens": 42, "output_tokens": 7})
 
     def test_khong_co_usage_trong_phan_hoi_thi_last_usage_none(self):
-        p = CerebrasProvider(api_key="k", profile=_GLM,
+        p = CerebrasProvider(api_key="k", profile=_CEREBRAS_GPT_OSS,
                              client=_client_gia(lambda r: _tra_loi_chat("Xin chào")))
         p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
         self.assertIsNone(p.last_usage)
@@ -193,32 +190,32 @@ class CerebrasProviderTest(unittest.TestCase):
 class KiemTraKetNoiCerebrasTest(unittest.TestCase):
     def test_thanh_cong(self):
         client = _client_gia(lambda r: httpx.Response(
-            200, json={"data": [{"id": "zai-glm-4.7"}, {"id": "gpt-oss-120b"}]}))
-        kiem_tra_ket_noi_cerebras("k", "zai-glm-4.7", client=client)  # khong nem gi
+            200, json={"data": [{"id": "gpt-oss-120b"}]}))
+        kiem_tra_ket_noi_cerebras("k", "gpt-oss-120b", client=client)  # khong nem gi
 
     def test_401_thanh_invalid_key(self):
         client = _client_gia(lambda r: httpx.Response(401))
         with self.assertRaises(ConnectionCheckError) as ctx:
-            kiem_tra_ket_noi_cerebras("sai", "zai-glm-4.7", client=client)
+            kiem_tra_ket_noi_cerebras("sai", "gpt-oss-120b", client=client)
         self.assertEqual(ctx.exception.code, "INVALID_KEY")
 
     def test_429_thanh_rate_limited(self):
         client = _client_gia(lambda r: httpx.Response(429))
         with self.assertRaises(ConnectionCheckError) as ctx:
-            kiem_tra_ket_noi_cerebras("k", "zai-glm-4.7", client=client)
+            kiem_tra_ket_noi_cerebras("k", "gpt-oss-120b", client=client)
         self.assertEqual(ctx.exception.code, "RATE_LIMITED")
 
     def test_model_khong_co_trong_danh_sach(self):
         client = _client_gia(lambda r: httpx.Response(
-            200, json={"data": [{"id": "gpt-oss-120b"}]}))
+            200, json={"data": [{"id": "khac-hoan-toan"}]}))
         with self.assertRaises(ConnectionCheckError) as ctx:
-            kiem_tra_ket_noi_cerebras("k", "zai-glm-4.7", client=client)
+            kiem_tra_ket_noi_cerebras("k", "gpt-oss-120b", client=client)
         self.assertEqual(ctx.exception.code, "MODEL_UNAVAILABLE")
 
     def test_loi_khong_bao_gio_kem_api_key(self):
         client = _client_gia(lambda r: httpx.Response(401))
         with self.assertRaises(ConnectionCheckError) as ctx:
-            kiem_tra_ket_noi_cerebras("bi-mat-cua-toi-12345", "zai-glm-4.7", client=client)
+            kiem_tra_ket_noi_cerebras("bi-mat-cua-toi-12345", "gpt-oss-120b", client=client)
         self.assertNotIn("bi-mat-cua-toi-12345", str(ctx.exception))
 
 
@@ -232,11 +229,14 @@ class BuildProviderRegistryTest(unittest.TestCase):
         ids = {p.provider_id for p in reg.as_list()}
         self.assertFalse(any(pid.startswith("cerebras") for pid in ids))
 
-    def test_co_cerebras_api_key_them_ca_hai_model(self):
+    def test_co_cerebras_api_key_them_dung_mot_model(self):
         reg = build_provider_registry(env={"CEREBRAS_API_KEY": "csk_test"})
         ids = [p.provider_id for p in reg.as_list()]
-        self.assertIn("cerebras_glm", ids)
         self.assertIn("cerebras_gpt_oss_120b", ids)
+        # `zai-glm-4.7` (Preview, ngung ho tro 2026-08-17) da bi go khoi
+        # `CEREBRAS_MODEL_PROFILES` — KHONG duoc xuat hien du CEREBRAS_API_KEY
+        # co cau hinh.
+        self.assertNotIn("cerebras_glm", ids)
 
     def test_khong_can_allow_paid_provider_de_bat_cerebras(self):
         """Cerebras la MIEN PHI (free_tier=True, giong Groq) — khong can
@@ -246,7 +246,7 @@ class BuildProviderRegistryTest(unittest.TestCase):
             "TRANSLATION_ALLOW_PAID_PROVIDER": "false",
         })
         ids = {p.provider_id for p in reg.as_list()}
-        self.assertIn("cerebras_glm", ids)
+        self.assertIn("cerebras_gpt_oss_120b", ids)
 
     def test_cerebras_dung_TRUOC_groq_trong_danh_sach(self):
         """Chien luoc san xuat tam thoi: Cerebras la nha cung cap CHIA SE
@@ -255,88 +255,76 @@ class BuildProviderRegistryTest(unittest.TestCase):
         reg = build_provider_registry(env={
             "CEREBRAS_API_KEY": "csk_test", "GROQ_API_KEY": "gsk_test"})
         ids = [p.provider_id for p in reg.as_list()]
-        self.assertLess(ids.index("cerebras_glm"), ids.index("groq_qwen"))
+        self.assertLess(ids.index("cerebras_gpt_oss_120b"), ids.index("groq_qwen"))
 
 
 # =============================================================================
 # 4) Kich ban 1-5, 13: dinh tuyen THAT bai o che do dung chung (shared)
+#
+# Chi con HAI buoc that su (Cerebras GPT-OSS 120B -> Groq Qwen) thay vi ba —
+# `zai-glm-4.7` da bi go, nen "hai model Cerebras that bai" (kich ban 3 ban
+# dau) va "GLM that bai -> GPT-OSS" (kich ban 2 ban dau) khong con ap dung
+# duoc THEO DUNG NGHIA GOC: gop lai thanh "Cerebras (mot model) that bai ->
+# Groq".
 # =============================================================================
 
 class SharedRoutingTest(unittest.TestCase):
     """Dung `ProviderRegistry` truc tiep (khong qua build_provider_registry)
     voi provider GIA — kiem THU TU va hanh vi fallback, khong can API that."""
 
-    def _registry(self, glm_kich_ban, gpt_oss_kich_ban, qwen_kich_ban):
-        glm = _cerebras_cp("glm", glm_kich_ban)
-        gpt_oss = _cerebras_cp("gpt_oss_120b", gpt_oss_kich_ban)
+    def _registry(self, cerebras_kich_ban, qwen_kich_ban):
+        cerebras = _cerebras_cp("gpt_oss_120b", cerebras_kich_ban)
         qwen = _groq_cp("qwen", qwen_kich_ban)
         # Dang ky Cerebras TRUOC Groq — dung thu tu san xuat.
-        return ProviderRegistry([glm, gpt_oss, qwen]), glm, gpt_oss, qwen
+        return ProviderRegistry([cerebras, qwen]), cerebras, qwen
 
-    def test_1_cerebras_glm_thanh_cong(self):
-        reg, glm, gpt_oss, qwen = self._registry(["ok"], ["ok"], ["ok"])
-        _, prov = reg.translate_segment(
-            "x", context=TranslationContext(vai_tro="translator", quality_mode="van_hoc"))
-        self.assertEqual(prov.provider_id, "cerebras_glm")
-        self.assertEqual(gpt_oss.provider.so_lan_goi, 0)
-        self.assertEqual(qwen.provider.so_lan_goi, 0)
-
-    def test_2_glm_that_bai_fallback_sang_gpt_oss(self):
-        reg, glm, gpt_oss, qwen = self._registry(
-            [TranslationProviderError("model tam thoi loi")], ["ok"], ["ok"])
+    def test_1_cerebras_thanh_cong(self):
+        reg, cerebras, qwen = self._registry(["ok"], ["ok"])
         _, prov = reg.translate_segment(
             "x", context=TranslationContext(vai_tro="translator", quality_mode="van_hoc"))
         self.assertEqual(prov.provider_id, "cerebras_gpt_oss_120b")
         self.assertEqual(qwen.provider.so_lan_goi, 0)
 
-    def test_3_ca_hai_model_cerebras_that_bai_fallback_sang_groq(self):
-        reg, glm, gpt_oss, qwen = self._registry(
-            [ProviderQuotaExhausted("hết hạn mức")],
-            [ProviderQuotaExhausted("hết hạn mức")],
-            ["ok"])
+    def test_3_cerebras_that_bai_fallback_sang_groq(self):
+        reg, cerebras, qwen = self._registry(
+            [TranslationProviderError("hết hạn mức")], ["ok"])
         _, prov = reg.translate_segment(
             "x", context=TranslationContext(vai_tro="translator", quality_mode="van_hoc"))
         self.assertEqual(prov.provider_id, "groq_qwen")
 
     def test_4_cerebras_loi_xac_thuc_sang_groq_ngay(self):
         """"Auth failure" duoc mo phong bang mot `TranslationProviderError`
-        chung (401 khong duoc 429-hoa) — ca hai model Cerebras dung CHUNG
-        credential nen ca hai deu that bai, roi Groq (credential KHAC) thanh
-        cong ngay."""
-        reg, glm, gpt_oss, qwen = self._registry(
-            [TranslationProviderError("401: invalid api key")],
-            [TranslationProviderError("401: invalid api key")],
-            ["ok"])
+        chung (401 khong duoc 429-hoa) — Cerebras that bai NGAY LAN DAU (chi
+        MOT model, khong co du phong noi bo nao de thu tiep), roi Groq
+        (credential KHAC) thanh cong ngay."""
+        reg, cerebras, qwen = self._registry(
+            [TranslationProviderError("401: invalid api key")], ["ok"])
         _, prov = reg.translate_segment(
             "x", context=TranslationContext(vai_tro="translator", quality_mode="van_hoc"))
         self.assertEqual(prov.provider_id, "groq_qwen")
-        self.assertEqual(glm.provider.so_lan_goi, 1)
-        self.assertEqual(gpt_oss.provider.so_lan_goi, 1)
+        self.assertEqual(cerebras.provider.so_lan_goi, 1)
 
-    def test_5_groq_thanh_cong_khi_ca_cerebras_deu_loi(self):
-        reg, glm, gpt_oss, qwen = self._registry(
-            [TranslationProviderError("x")], [TranslationProviderError("y")], ["ok"])
+    def test_5_groq_thanh_cong_khi_cerebras_loi(self):
+        reg, cerebras, qwen = self._registry([TranslationProviderError("x")], ["ok"])
         ra, prov = reg.translate_segment(
             "x", context=TranslationContext(vai_tro="translator", quality_mode="van_hoc"))
         self.assertEqual(prov.provider_id, "groq_qwen")
         self.assertIn("[fake] x", ra)
 
     def test_13_tat_ca_deu_loi_nem_controlled_error(self):
-        reg, glm, gpt_oss, qwen = self._registry(
-            [TranslationProviderError("x")],
-            [TranslationProviderError("y")],
-            [TranslationProviderError("z")])
+        reg, cerebras, qwen = self._registry(
+            [TranslationProviderError("x")], [TranslationProviderError("z")])
         with self.assertRaises(AllProvidersUnavailable):
             reg.translate_segment(
                 "x", context=TranslationContext(vai_tro="translator", quality_mode="van_hoc"))
 
     def test_khong_dinh_tuyen_lai_manual_giu_nguyen_lua_chon(self):
-        reg, glm, gpt_oss, qwen = self._registry(["ok"], ["ok"], ["ok"])
+        reg, cerebras, qwen = self._registry(["ok"], ["ok"])
         _, prov = reg.translate_segment(
             "x", context=TranslationContext(vai_tro="translator", quality_mode="van_hoc"),
             mode="manual", selected_provider_id="groq_qwen")
         self.assertEqual(prov.provider_id, "groq_qwen")
-        self.assertEqual(glm.provider.so_lan_goi, 0)
+        self.assertEqual(cerebras.provider.so_lan_goi, 0)
 
 
 # =============================================================================
@@ -376,13 +364,18 @@ class CerebrasByokTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "RATE_LIMITED")
 
     @patch("server.translation_byok_service.kiem_tra_ket_noi_cerebras")
-    def test_build_all_model_providers_tra_ca_hai_model_cerebras(self, kiem_tra):
+    def test_build_all_model_providers_tra_dung_mot_model_cerebras(self, kiem_tra):
         self.svc.connect("u1", "cerebras", "csk_test")
         ds = self.svc.build_all_model_providers("u1", "cerebras")
         ids = {p.provider_id for p in ds}
-        self.assertEqual(ids, {"cerebras_glm", "cerebras_gpt_oss_120b"})
+        self.assertEqual(ids, {"cerebras_gpt_oss_120b"})
         for p in ds:
             self.assertEqual(p.credential_source, "personal")
+
+    @patch("server.translation_byok_service.kiem_tra_ket_noi_cerebras")
+    def test_model_mac_dinh_la_gpt_oss_khong_phai_glm_da_go(self, kiem_tra):
+        conn = self.svc.connect("u1", "cerebras", "csk_test")
+        self.assertEqual(conn.selected_model, "gpt-oss-120b")
 
 
 class GroqByokTest(unittest.TestCase):
@@ -415,51 +408,56 @@ class GroqByokTest(unittest.TestCase):
 
 # =============================================================================
 # 12) BYOK tuong minh KHONG BAO GIO cham toi credential dung chung
+#
+# Cerebras chi con MOT model curated nen KHONG con vi du "tu fallback noi bo
+# giua hai model Cerebras" — vi du do gio dung GROQ (van co ba model curated)
+# de chung minh dung tinh chat "chi fallback CUNG ho ca nhan". Rieng phan
+# "mot model Cerebras ca nhan that bai thi KHONG dung shared" van giu (don
+# gian hoa: khong con fallback noi bo nao de thu truoc khi bao loi).
 # =============================================================================
 
 class ByokNeverConsumesSharedTest(unittest.TestCase):
-    def test_manual_ca_nhan_that_bai_chi_fallback_noi_bo_ho_cerebras(self):
-        shared_glm = _cerebras_cp("glm", ["ok"], credential_source="shared")
-        shared_gpt_oss = _cerebras_cp("gpt_oss_120b", ["ok"], credential_source="shared")
+    def test_manual_ca_nhan_that_bai_chi_fallback_noi_bo_ho_groq(self):
         shared_qwen = _groq_cp("qwen", ["ok"], credential_source="shared")
-        ca_nhan_glm = _cerebras_cp(
-            "glm", [TranslationProviderError("model-specific")], credential_source="personal")
-        ca_nhan_gpt_oss = _cerebras_cp("gpt_oss_120b", ["ok"], credential_source="personal")
+        shared_gpt120 = _groq_cp("gpt_oss_120b", ["ok"], credential_source="shared")
+        shared_cerebras = _cerebras_cp("gpt_oss_120b", ["ok"], credential_source="shared")
+        ca_nhan_qwen = _groq_cp(
+            "qwen", [TranslationProviderError("model-specific")], credential_source="personal")
+        ca_nhan_gpt120 = _groq_cp("gpt_oss_120b", ["ok"], credential_source="personal")
 
-        reg = ProviderRegistry([shared_glm, shared_gpt_oss, shared_qwen])
+        reg = ProviderRegistry([shared_cerebras, shared_qwen, shared_gpt120])
         # `prefer_personal=True`: dung y nguoi dung tuong minh chon "API key
         # của tôi" — day la co the tim ca nhan TRUOC khi ca hai (dung chung
-        # + ca nhan) co CUNG provider_id "cerebras_glm" (xem
+        # + ca nhan) co CUNG provider_id "groq_qwen" (xem
         # `build_provider_registry`/`build_all_model_providers`: ca hai deu
         # dat ten theo cung quy uoc `{provider_id}_{profile_key}`).
         _, prov = reg.translate_segment_with_personal(
             "x", context=TranslationContext(vai_tro="translator"),
-            mode="manual", selected_provider_id="cerebras_glm",
+            mode="manual", selected_provider_id="groq_qwen",
             allow_fallback=True, prefer_personal=True,
-            personal_providers=[ca_nhan_glm, ca_nhan_gpt_oss])
+            personal_providers=[ca_nhan_qwen, ca_nhan_gpt120])
 
-        # Model ca nhan THU HAI (cung ho Cerebras, cung mot api key) duoc
-        # dung — KHONG BAO GIO cham toi bat ky provider DUNG CHUNG nao.
-        self.assertEqual(prov.provider_id, "cerebras_gpt_oss_120b")
+        # Model ca nhan THU HAI (cung ho Groq, cung mot api key) duoc dung —
+        # KHONG BAO GIO cham toi bat ky provider DUNG CHUNG nao (ke ca
+        # Cerebras dung chung, du no dung TRUOC Groq trong danh sach).
+        self.assertEqual(prov.provider_id, "groq_gpt_oss_120b")
         self.assertEqual(prov.credential_source, "personal")
-        self.assertEqual(shared_glm.provider.so_lan_goi, 0)
-        self.assertEqual(shared_gpt_oss.provider.so_lan_goi, 0)
+        self.assertEqual(shared_cerebras.provider.so_lan_goi, 0)
         self.assertEqual(shared_qwen.provider.so_lan_goi, 0)
+        self.assertEqual(shared_gpt120.provider.so_lan_goi, 0)
 
-    def test_ca_hai_model_ca_nhan_that_bai_khong_cham_shared_nem_loi(self):
+    def test_ca_nhan_cerebras_that_bai_khong_cham_shared_nem_loi(self):
         shared_qwen = _groq_cp("qwen", ["ok"], credential_source="shared")
-        ca_nhan_glm = _cerebras_cp(
-            "glm", [TranslationProviderError("x")], credential_source="personal")
-        ca_nhan_gpt_oss = _cerebras_cp(
-            "gpt_oss_120b", [TranslationProviderError("y")], credential_source="personal")
+        ca_nhan_cerebras = _cerebras_cp(
+            "gpt_oss_120b", [TranslationProviderError("x")], credential_source="personal")
 
         reg = ProviderRegistry([shared_qwen])
         with self.assertRaises(AllProvidersUnavailable):
             reg.translate_segment_with_personal(
                 "x", context=TranslationContext(vai_tro="translator"),
-                mode="manual", selected_provider_id="cerebras_glm",
+                mode="manual", selected_provider_id="cerebras_gpt_oss_120b",
                 allow_fallback=True, prefer_personal=True,
-                personal_providers=[ca_nhan_glm, ca_nhan_gpt_oss])
+                personal_providers=[ca_nhan_cerebras])
         self.assertEqual(shared_qwen.provider.so_lan_goi, 0)
 
 
@@ -481,22 +479,20 @@ class ChunkOrderingTest(unittest.TestCase):
             f"第{i}章 C{i}\n{ky_tu}。" for i, ky_tu in
             enumerate(["甲", "乙", "丙", "丁"], start=1))
 
-        # GLM that bai o LAN GOI DAU (chuong 1), thanh cong tu do tro di —
-        # kiem tra chi CHUONG 1 fallback sang GPT-OSS, cac chuong sau van
-        # dung GLM (trang thai KHONG bi "dinh" mai o unavailable sau MOT
-        # loi tam thoi thuoc loai TranslationProviderError chung — day la
-        # hanh vi hien co, ghi nhan lai o day khong phai thay doi moi).
-        glm = _cerebras_cp("glm", [TranslationProviderError("tam thoi loi mot lan")])
-        gpt_oss = _cerebras_cp("gpt_oss_120b", ["ok", "ok", "ok", "ok"])
-        from server.translation_provider_registry import ProviderRegistry as _Reg
-        registry = _Reg([glm, gpt_oss])
+        # Cerebras that bai o LAN GOI DAU (chuong 1), Groq nhan chuong do —
+        # cac chuong sau van thu Cerebras TRUOC (trang thai KHONG bi "dinh"
+        # mai o unavailable sau MOT loi tam thoi thuoc loai
+        # TranslationProviderError chung — day la hanh vi hien co, ghi nhan
+        # lai o day khong phai thay doi moi), thanh cong tu chuong 2 tro di.
+        cerebras = _cerebras_cp("gpt_oss_120b", [TranslationProviderError("tam thoi loi mot lan")])
+        qwen = _groq_cp("qwen", ["ok", "ok", "ok", "ok"])
+        registry = ProviderRegistry([cerebras, qwen])
 
         svc = TranslationService(self.store, self.novels, registry=registry)
         p = svc.create_project(self.an.user_id, title="t", source_text=van_ban,
                                quality_mode="nhanh")
         job = svc.create_job(p.project_id, self.an.user_id)
 
-        import time
         han = time.time() + 5.0
         while time.time() < han:
             job = svc.get_job(job.job_id, self.an.user_id)
@@ -535,15 +531,13 @@ class CacheAvoidsRepeatedCallTest(unittest.TestCase):
         # nhau giua hai chuong, khong chi phan cau hoi thoai.
         van_ban = "第1章\n你好。\n第1章\n你好。"
         qwen = _groq_cp("qwen", ["ok", "ok"])
-        from server.translation_provider_registry import ProviderRegistry as _Reg
-        registry = _Reg([qwen])
+        registry = ProviderRegistry([qwen])
 
         svc = TranslationService(self.store, self.novels, registry=registry)
         p = svc.create_project(self.an.user_id, title="t", source_text=van_ban,
                                quality_mode="nhanh")
         job = svc.create_job(p.project_id, self.an.user_id)
 
-        import time
         han = time.time() + 5.0
         while time.time() < han:
             job = svc.get_job(job.job_id, self.an.user_id)
@@ -562,15 +556,13 @@ class CacheAvoidsRepeatedCallTest(unittest.TestCase):
         cache CHI danh cho duong ong tu dong (`_dich_mot_chuong`)."""
         van_ban = "第1章 Một\n你好。"
         qwen = _groq_cp("qwen", ["ok", "ok"])
-        from server.translation_provider_registry import ProviderRegistry as _Reg
-        registry = _Reg([qwen])
+        registry = ProviderRegistry([qwen])
 
         svc = TranslationService(self.store, self.novels, registry=registry)
         p = svc.create_project(self.an.user_id, title="t", source_text=van_ban,
                                quality_mode="nhanh")
         job = svc.create_job(p.project_id, self.an.user_id)
 
-        import time
         han = time.time() + 5.0
         while time.time() < han:
             job = svc.get_job(job.job_id, self.an.user_id)
@@ -591,7 +583,7 @@ class CacheAvoidsRepeatedCallTest(unittest.TestCase):
 
 class NoSecretsLeakTest(unittest.TestCase):
     def test_loi_provider_khong_kem_api_key(self):
-        p = CerebrasProvider(api_key="bi-mat-cua-toi-xyz", profile=_GLM,
+        p = CerebrasProvider(api_key="bi-mat-cua-toi-xyz", profile=_CEREBRAS_GPT_OSS,
                              client=_client_gia(lambda r: httpx.Response(
                                  500, text="internal server error")))
         with self.assertRaises(TranslationProviderError) as ctx:
@@ -602,7 +594,7 @@ class NoSecretsLeakTest(unittest.TestCase):
         from server.translation_usage import UsageRecorder
 
         rec = UsageRecorder()
-        rec.ghi(provider_id="cerebras_glm", model_id="zai-glm-4.7",
+        rec.ghi(provider_id="cerebras_gpt_oss_120b", model_id="gpt-oss-120b",
                credential_source="personal", pass_type="translator",
                outcome="success", latency_ms=5, input_tokens=10, output_tokens=3)
         d = rec.gan_day(1)[0].to_dict()
@@ -612,7 +604,7 @@ class NoSecretsLeakTest(unittest.TestCase):
     def test_connection_error_khong_kem_api_key(self):
         client = _client_gia(lambda r: httpx.Response(401))
         with self.assertRaises(ConnectionCheckError) as ctx:
-            kiem_tra_ket_noi_cerebras("cyc_secret_value_999", "zai-glm-4.7", client=client)
+            kiem_tra_ket_noi_cerebras("cyc_secret_value_999", "gpt-oss-120b", client=client)
         self.assertNotIn("cyc_secret_value_999", str(ctx.exception))
         self.assertNotIn("cyc_secret_value_999", ctx.exception.code)
 

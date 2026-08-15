@@ -112,6 +112,22 @@ class PollinationsProviderTest(unittest.TestCase):
         with self.assertRaises(TranslationProviderError):
             p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
 
+    def test_het_so_du_402_nem_loi_ro_rang(self):
+        """Kich ban THAT gap khi kiem thu song voi Pollinations that (tai
+        khoan chua nap 'pollen'): 402 kem `PAYMENT_REQUIRED` — KHONG phai
+        429 (khac `ProviderRateLimited`), nen roi vao nhanh loi CHUNG
+        (`resp.status_code != 200`) — van la mot `TranslationProviderError`
+        ro rang, khong bao gio bi coi la thanh cong."""
+        than_that = ('{"success":false,"error":{"message":"Insufficient '
+                    'balance. This request costs ~0.0021 pollen, but your '
+                    'available balance is 0.0000.","code":"PAYMENT_REQUIRED"'
+                    '}}')
+        p = PollinationsProvider(api_key="sk_vidu", model="deepseek", client=_client_gia(
+            lambda r: httpx.Response(402, text=than_that)))
+        with self.assertRaises(TranslationProviderError) as ctx:
+            p.translate_segment("你好", context=TranslationContext(vai_tro="translator"))
+        self.assertNotIsInstance(ctx.exception, ProviderRateLimited)
+
     def test_timeout_khong_thu_lai_khi_retry_count_0(self):
         so_lan = {"n": 0}
 
@@ -200,6 +216,28 @@ class PollinationsFallbackChainTest(unittest.TestCase):
             "你好", context=TranslationContext(vai_tro="translator"))
         self.assertEqual(ra, "Bản dịch chất lượng cao")
         self.assertEqual(prov.provider_id, "pollinations_quality")
+
+    def test_het_so_du_that_ca_hai_pollinations_chuyen_sang_groq(self):
+        """Hoi quy TU KIEM THU SONG (2026-08-15): tai khoan Pollinations
+        chua nap 'pollen' tra 402 that cho CA HAI model — xac nhan day van
+        la MOT `TranslationProviderError` chung (khong phai 429), va
+        registry van chuyen dung sang Groq thay vi coi 402 la thanh cong
+        hoac dung lai giua chung."""
+        than_402 = ('{"success":false,"error":{"message":"Insufficient '
+                   'balance. This request costs ~0.0021 pollen, but your '
+                   'available balance is 0.0000.","code":"PAYMENT_REQUIRED"}}')
+        deepseek = self._cp_pollinations(
+            "pollinations_primary", "deepseek",
+            lambda r: httpx.Response(402, text=than_402))
+        deepseek_pro = self._cp_pollinations(
+            "pollinations_quality", "deepseek-pro",
+            lambda r: httpx.Response(402, text=than_402))
+        groq = self._cp_groq(lambda r: _tra_loi_chat("Xin chào từ Groq"))
+        reg = ProviderRegistry([deepseek, deepseek_pro, groq])
+        ra, prov = reg.translate_segment(
+            "你好", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(ra, "Xin chào từ Groq")
+        self.assertEqual(prov.provider_id, "groq_qwen")
 
     def test_ca_hai_pollinations_that_bai_chuyen_sang_groq(self):
         deepseek = self._cp_pollinations(

@@ -39,6 +39,13 @@ for _luong in (sys.stdout, sys.stderr):
     if hasattr(_luong, "reconfigure"):
         _luong.reconfigure(encoding="utf-8", errors="replace")
 
+from server.config import load_env_file  # noqa: E402
+
+# Nap `server/.env` NEU CO (cung co che voi `server/main.py`) — bien da co
+# san trong process environment LUON THANG (`override=False`), nen chay
+# script nay trong CI/production voi bien tiem qua shell van an toan y het.
+load_env_file()
+
 from server.translation_model_profiles import GROQ_MODEL_PROFILES  # noqa: E402
 from server.translation_provider_registry import (  # noqa: E402
     GroqProvider,

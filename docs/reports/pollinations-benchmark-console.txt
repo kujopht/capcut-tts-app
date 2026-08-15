@@ -1,0 +1,31 @@
+Đang chạy pollinations_deepseek...
+Đang chạy pollinations_deepseek_pro...
+Đang chạy groq_gpt_oss_20b...
+
+Đã ghi kết quả thô vào docs/reports/pollinations-benchmark-raw.json
+
+==============================================================================
+ĐỘ TRỄ (median, mili-giây) — thấp hơn = nhanh hơn
+==============================================================================
+  pollinations_deepseek        THẤT BẠI: Dịch vụ dịch trả lỗi 402: {"success":false,"error":{"message":"Insufficient bala
+  pollinations_deepseek_pro    THẤT BẠI: Dịch vụ dịch trả lỗi 402: {"success":false,"error":{"message":"Insufficient bala
+  groq_gpt_oss_20b             THẤT BẠI: Model đang bị giới hạn tốc độ: {"error":{"message":"Rate limit reached for model
+
+==============================================================================
+BẢN DỊCH — TỰ SO SÁNH chất lượng/tên riêng/xưng hô/hội thoại
+(script KHÔNG tự chấm điểm chất lượng — chỉ đo được độ trễ/thành công một cách khách quan; chất lượng dịch cần người đọc tiếng Việt đánh giá trực tiếp trên văn bản dưới đây)
+==============================================================================
+
+--- Đoạn 1: hoi_thoai_xung_ho ---
+[Nguồn] 萧炎看向药老，低声道：“师父，你说这药方当真有效？”
+药老捋了捋胡须，笑道：“为师行走多年，何时骗过你？”
+萧炎苦笑一声，没有再说话，只是将手中的药瓶握得更紧了。
+
+--- Đoạn 2: mieu_ta_thuan_tuy ---
+[Nguồn] 夜色渐深，乌坦城的灯火一盏盏熄灭下去。远处的山峦在月光下勾勒出一道模糊的轮廓，山间的雾气缓缓流动，像是活物一般缠绕在树梢之间。城墙上的巡逻兵靴声回荡在寂静的街道中，偶尔传来几声犬吠，随即又归于平静。
+
+--- Đoạn 3: ba_nhan_vat_kinh_xung ---
+[Nguồn] “师兄，前辈找你。”云韵匆匆跑来，脸上带着几分焦急。
+萧炎皱了皱眉：“药老找我做什么？”
+“这我哪知道。”云韵白了他一眼，“药老前辈的脾气你又不是不知道，还不快去。”
+萧炎无奈地叹了口气，转身朝药老的院子走去。

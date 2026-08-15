@@ -1,0 +1,24 @@
+{
+  "pollinations_deepseek": {
+    "thanh_cong": false,
+    "loi": "Dịch vụ dịch trả lỗi 402: {\"success\":false,\"error\":{\"message\":\"Insufficient balance. This request costs ~0.0021 pollen, but your available balance is 0.0000.\",\"code\":\"PAYMENT_REQUIRED\",\"timestamp\":\"2026-08-15T07:14:40.350Z\"},\"status\":402}",
+    "do_tre_ms": [],
+    "ban_dich": []
+  },
+  "pollinations_deepseek_pro": {
+    "thanh_cong": false,
+    "loi": "Dịch vụ dịch trả lỗi 402: {\"success\":false,\"error\":{\"message\":\"Insufficient balance. This request costs ~0.0148 pollen, but your available balance is 0.0000.\",\"code\":\"PAYMENT_REQUIRED\",\"timestamp\":\"2026-08-15T07:14:41.721Z\"},\"status\":402}",
+    "do_tre_ms": [],
+    "ban_dich": []
+  },
+  "groq_gpt_oss_20b": {
+    "thanh_cong": false,
+    "loi": "Model đang bị giới hạn tốc độ: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-20b` in organization `org_01kzzpg5kre19rck1c525wtkja` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 4543, Requ",
+    "do_tre_ms": [
+      688
+    ],
+    "ban_dich": [
+      "Xiao Yán nhìn về phía Yào Lǎo, lặng lẽ hỏi: “Thầy ơi, thầy có nghĩ công thức thuốc này thực sự có hiệu lực không?”  \nYào Lǎo lăn lăn lông ria, mỉm cười đáp: “Tôi đã đi cùng thầy nhiều năm, chưa bao giờ lừa dối ngươi.”  \nXiao Yán cười khổ, không nói gì thêm, chỉ thắt chặt tay nắm chiếc bình thuốc trong tay."
+    ]
+  }
+}

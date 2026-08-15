@@ -18,6 +18,7 @@ khong dong ho toan cuc (moi ham nhan du lieu can thiet qua tham so).
 
 from __future__ import annotations
 
+import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Sequence
 
@@ -201,3 +202,160 @@ def them_vao_kho_neu_chua_co(
         if muc.user_id == user_id and muc.cosmetic_key == cosmetic_key:
             return None
     return CosmeticInventoryItem(user_id=user_id, cosmetic_key=cosmetic_key)
+
+
+# =============================================================================
+# Chuoi ngay doc lien tuc (reading streak) — V4 visual completion, vong 5.
+# =============================================================================
+#
+# NGAY UTC, khong phai gio dia phuong nguoi dung: mot ban ghi CHUNG server,
+# nhieu nguoi dung o nhieu mui gio khac nhau — dung gio dia phuong nghia la
+# "hom nay" khac nhau tuy nguoi, khong the dem "lien tuc" mot cach nhat quan.
+# Danh doi da biet: mot nguoi o mui gio lech UTC nhieu co the thay ngay doi
+# vao mot gio trong ngay khong phai nua dem cua ho. Chap nhan duoc cho MVP —
+# ghi lai o day de khong ai tuong day la loi khi gap.
+
+
+@dataclass
+class ReadingStreak:
+    """Chuoi ngay doc lien tuc CUA MOT nguoi dung — MOT hang moi user_id.
+
+    `last_read_date` la chuoi `YYYY-MM-DD` (UTC), KHONG PHAI datetime day
+    du — chi ngay moi co y nghia cho viec dem chuoi, gio trong ngay thi
+    khong. Rong = chua tung doc lan nao."""
+
+    user_id: str
+    current_streak: int = 0
+    longest_streak: int = 0
+    last_read_date: str = ""
+    #: Da dung LUOT AN HAN cua CHUOI HIEN TAI hay chua — moi chuoi (tinh tu
+    #: luc `current_streak` ve lai 1) duoc DUNG LAI mot lan an han rieng, xem
+    #: `advance_streak`. Reset ve `False` khi chuoi bi dut that (khong dung
+    #: an han duoc nua) va bat dau lai tu 1.
+    grace_used_this_run: bool = False
+    updated_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "user_id": self.user_id,
+            "current_streak": self.current_streak,
+            "longest_streak": self.longest_streak,
+            "last_read_date": self.last_read_date or None,
+            "grace_used_this_run": self.grace_used_this_run,
+            "updated_at": self.updated_at,
+        }
+
+
+def _ngay_utc(iso_date: str) -> _dt.date:
+    return _dt.date.fromisoformat(iso_date)
+
+
+def advance_streak(streak: ReadingStreak, today: str) -> ReadingStreak:
+    """
+    Tinh TRANG THAI MOI cua chuoi sau mot lan doc vao ngay `today` (chuoi
+    `YYYY-MM-DD`, UTC) — HAM THUAN, khong doc dong ho he thong, khong ghi
+    kho. Goi tra ve mot `ReadingStreak` MOI (khong sua `streak` dau vao).
+
+    BON truong hop:
+      - `today` == ngay doc gan nhat: DA dem hom nay roi, khong doi gi ca
+        (goi lai nhieu lan trong cung mot ngay khong lam chuoi tang bay).
+      - Lan doc DAU TIEN (`last_read_date` rong): bat dau chuoi = 1.
+      - Cach ngay doc gan nhat DUNG 1 ngay: chuoi lien tuc, +1.
+      - Cach DUNG 2 ngay VA chua dung an han cua chuoi nay: AN HAN cuu chuoi
+        — ngay bi bo qua duoc tha thu, chuoi vAn +1 (tinh ngay hom nay), va
+        an han cua chuoi nay coi nhu da dung (khong con an han cho lan bo
+        ngay tiep theo, tru khi chuoi dut that va bat dau lai).
+      - Con lai (cach >= 2 ngay ma da dung an han, hoac cach >= 3 ngay): dut
+        chuoi that su, bat dau lai tu 1, an han cua chuoi MOI duoc lam moi.
+    """
+    if streak.last_read_date == today:
+        return streak  # Da dem hom nay, khong lam gi them.
+
+    moi = ReadingStreak(
+        user_id=streak.user_id, current_streak=streak.current_streak,
+        longest_streak=streak.longest_streak,
+        last_read_date=streak.last_read_date,
+        grace_used_this_run=streak.grace_used_this_run,
+        updated_at=streak.updated_at)
+
+    if not streak.last_read_date:
+        moi.current_streak = 1
+        moi.grace_used_this_run = False
+    else:
+        khoang_cach = (_ngay_utc(today) - _ngay_utc(streak.last_read_date)).days
+        if khoang_cach == 1:
+            moi.current_streak = streak.current_streak + 1
+        elif khoang_cach == 2 and not streak.grace_used_this_run:
+            moi.current_streak = streak.current_streak + 1
+            moi.grace_used_this_run = True
+        else:
+            moi.current_streak = 1
+            moi.grace_used_this_run = False
+
+    moi.longest_streak = max(moi.longest_streak, moi.current_streak)
+    moi.last_read_date = today
+    moi.updated_at = now_iso()
+    return moi
+
+
+# =============================================================================
+# Nhiem vu (quest) hang ngay/hang tuan — V4 visual completion, vong 5.
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class QuestDef:
+    """Dinh nghia MOT nhiem vu — tuong tu `AchievementDef`/`CosmeticDef`.
+
+    `event_type` la khoa su kien (vd `"chapter_read"`) ma
+    `gamification_service.record_quest_event` doi chieu de biet nhiem vu nao
+    duoc cong tien do. `period` quyet dinh nhiem vu reset THEO NGAY hay THEO
+    TUAN — xem `quest_period_key`."""
+
+    key: str
+    name: str
+    description: str
+    period: str  # "daily" | "weekly"
+    event_type: str
+    target_count: int
+    xp_reward: int
+    #: Rong = khong co phan thuong vat pham, chi XP.
+    cosmetic_reward_key: str = ""
+
+
+@dataclass
+class QuestProgress:
+    """Tien do MOT nguoi dung cho MOT nhiem vu TRONG MOT KY (period_key) cu
+    the — MOT hang moi (user_id, quest_key, period_key). Ky MOI (ngay/tuan
+    khac) la MOT HANG MOI, khong sua hang cu — "reset" xay ra TU NHIEN vi
+    khong ai doc hang cua ky da qua nua, khong can mot cong viec don dep
+    rieng. Hang cu con lai la lich su vo hai (nhe, chi mot so nguyen)."""
+
+    user_id: str
+    quest_key: str
+    period_key: str
+    count: int = 0
+    claimed: bool = False
+    updated_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "user_id": self.user_id,
+            "quest_key": self.quest_key,
+            "period_key": self.period_key,
+            "count": self.count,
+            "claimed": self.claimed,
+            "updated_at": self.updated_at,
+        }
+
+
+def quest_period_key(period: str, today: str) -> str:
+    """`today` la chuoi `YYYY-MM-DD` (UTC). "daily" -> chinh `today`.
+    "weekly" -> tuan ISO (`YYYY-Www`, thu Hai la dau tuan) — dung chuan ISO
+    thay vi tu dinh nghia "dau tuan" de khong mo hoac lech mui gio."""
+    if period == "daily":
+        return today
+    if period == "weekly":
+        nam, tuan, _ = _ngay_utc(today).isocalendar()
+        return f"{nam}-W{tuan:02d}"
+    raise ValueError(f"Chu ky nhiem vu khong xac dinh: {period!r}.")

@@ -221,3 +221,24 @@ export function IconMegaphone(p: Props) {
     </Svg>
   );
 }
+
+/** Cuon giay — nhiem vu (quest). */
+export function IconScroll(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M6.5 4.5h11v13a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" />
+      <path d="M17.5 4.5a2 2 0 0 1 2 2v1h-2" />
+      <path d="M9 9h6M9 12.5h6M9 16h4" />
+    </Svg>
+  );
+}
+
+/** Vuong mien — bang xep hang. */
+export function IconCrown(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 8.5 8 11l4-6.5 4 6.5 4-2.5-1.4 9.5H5.4Z" />
+      <path d="M5.4 18.5h13.2" />
+    </Svg>
+  );
+}

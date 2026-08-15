@@ -35,6 +35,11 @@ export const HO_ENDPOINT = [
   "feed",
   "health",
   "jobs",
+  // Bang xep hang XP (V6 gamification) — CONG KHAI, khong nam duoi
+  // `/api/account/...` vi khong doi hoi dang nhap (nguoi xem chua dang nhap
+  // van xem duoc, chi thieu `viewer_entry`). Xem
+  // `server/gamification_service.py::leaderboard_all_time/leaderboard_weekly`.
+  "leaderboard",
   // Gioi han do MAY CHU quyet dinh, cho giao dien noi truoc. Xem
   // `server/social.py::mo_ta_gioi_han`.
   "limits",

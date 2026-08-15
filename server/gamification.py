@@ -32,7 +32,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-from server.gamification_domain import CosmeticDef, RewardPack
+from server.gamification_domain import CosmeticDef, QuestDef, RewardPack
 
 
 @dataclass(frozen=True)
@@ -228,6 +228,25 @@ def id_vat_pham_kho(user_id: str, cosmetic_key: str) -> str:
     return f"ci_{hashlib.sha256(khoa).hexdigest()[:24]}"
 
 
+def id_thuong_nhiem_vu(user_id: str, quest_key: str, period_key: str) -> str:
+    """ID TAT DINH cho MOT lan nhan thuong nhiem vu, dung LAM `entry_id`
+    trong CUNG nhat ky XP voi `id_xp_entry` — cung ky thuat (sha256), khac
+    tien to de doc nhat ky de phan biet nguon. `period_key` doi (ky moi) la
+    mot ID KHAC, nen nhiem vu cua ky moi nhan thuong duoc, khong bi coi la
+    "da nhan roi" cua ky truoc."""
+    khoa = "\x1f".join((user_id, "quest_reward", quest_key, period_key)).encode("utf-8")
+    return f"qr_{hashlib.sha256(khoa).hexdigest()[:24]}"
+
+
+def id_tien_do_nhiem_vu(user_id: str, quest_key: str, period_key: str) -> str:
+    """ID TAT DINH cho MOT hang tien do nhiem vu (user_id, quest_key,
+    period_key) — cung ky thuat voi cac ham `id_*` khac o tren. `period_key`
+    doi (ngay/tuan khac) nghia la mot ID KHAC, tuc mot HANG MOI — day chinh
+    la co che "reset" tu nhien cua nhiem vu, khong can xoa hay ghi de gi."""
+    khoa = "\x1f".join((user_id, quest_key, period_key)).encode("utf-8")
+    return f"qp_{hashlib.sha256(khoa).hexdigest()[:24]}"
+
+
 def title_unlocked(xp: int, title_key: str) -> bool:
     """Danh xung `title_key` co MO KHOA voi `xp` hien tai hay khong."""
     tier = next((t for t in LEVEL_TIERS if t.key == title_key), None)
@@ -274,3 +293,52 @@ def cosmetic_pool_for_pack(pack_key: str) -> Tuple[CosmeticDef, ...]:
     """Toan bo catalog la mot ho boi DUY NHAT trong Giai doan 1 — chua co
     goi rieng theo vi tri trang bi."""
     return COSMETIC_CATALOG
+
+
+# =============================================================================
+# Nhiem vu (quest) — V4 visual completion, vong 5.
+# =============================================================================
+#
+# `event_type` doi chieu VOI SU KIEN THAT MAY CHU DA XAC NHAN (doc chuong,
+# nghe, binh luan, dang bai) — cung triet ly voi `XP_EVENTS`: khong bao gio
+# nhan tien do tu client, chi dem su kien server tu ghi nhan. Phan thuong
+# nhiem vu la GIA TRI CO DINH da biet truoc (khac goi gacha ngau nhien): lam
+# xong dung viec do thi chac chan nhan dung phan thuong do, khong may rui.
+QUEST_CATALOG: Tuple[QuestDef, ...] = (
+    # --- hang ngay (reset moi ngay UTC) --------------------------------------
+    QuestDef(
+        key="doc_hang_ngay", name="Đọc một chương",
+        description="Đọc ít nhất một chương truyện hôm nay.",
+        period="daily", event_type="chapter_read",
+        target_count=1, xp_reward=10),
+    QuestDef(
+        key="nghe_hang_ngay", name="Nghe một chương",
+        description="Nghe ít nhất một chương audio hôm nay.",
+        period="daily", event_type="chapter_listened",
+        target_count=1, xp_reward=10),
+    QuestDef(
+        key="binh_luan_hang_ngay", name="Để lại một bình luận",
+        description="Bình luận một chương hoặc bài đăng hôm nay.",
+        period="daily", event_type="comment_posted",
+        target_count=1, xp_reward=10),
+    # --- hang tuan (reset moi tuan ISO, thu Hai) ------------------------------
+    QuestDef(
+        key="doc_5_chuong_tuan", name="Đọc 5 chương trong tuần",
+        description="Đọc đủ 5 chương truyện trong tuần này.",
+        period="weekly", event_type="chapter_read",
+        target_count=5, xp_reward=50),
+    QuestDef(
+        key="nghe_5_chuong_tuan", name="Nghe 5 chương trong tuần",
+        description="Nghe đủ 5 chương audio trong tuần này.",
+        period="weekly", event_type="chapter_listened",
+        target_count=5, xp_reward=50),
+    QuestDef(
+        key="tuong_tac_cong_dong_tuan", name="Gắn bó cộng đồng",
+        description="Bình luận hoặc đăng bài 3 lần trong tuần này.",
+        period="weekly", event_type="community_interaction",
+        target_count=3, xp_reward=40, cosmetic_reward_key="huy_hieu_but_long"),
+)
+
+
+def quests_for_period(period: str) -> Tuple[QuestDef, ...]:
+    return tuple(q for q in QUEST_CATALOG if q.period == period)

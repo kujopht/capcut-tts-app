@@ -34,6 +34,30 @@ from server.domain import (
 )
 
 
+def _so_sanh_duoc(v: Any) -> tuple:
+    """
+    Khoa SO SANH DUOC cho MOT gia tri thuoc tinh — dung cho ca sap xep
+    (`orderAsc`/`orderDesc`) lan loc theo nguong (`greaterThan(Equal)`).
+
+    Appwrite THAT so sanh THEO KIEU THUOC TINH khai bao trong schema: so
+    (`integer`/`double`) so sanh nhu SO, con chuoi (ke ca datetime ISO, luu
+    duoi dang chuoi) so sanh tu dien. Ban gia lap nay khong biet kieu khai
+    bao, nen DOAN: chuyen duoc sang `float` thi so la SO (vd XP), khong thi
+    la CHUOI (vd `created_at` ISO — dinh dang ISO 8601 vua hay so sanh tu
+    dien DUNG bang thoi gian, nen khong can xu ly rieng).
+
+    Bay da mac trong THUC TE (sua o day): sap `orderDesc("xp")` truoc day ep
+    gia tri thanh chuoi (`str(...)`) roi so sanh — "150" < "50" theo tu dien
+    (ky tu dau '1' < '5'), lam bang xep hang XP sap SAI thu tu. Chi lo ra
+    khi viet code that dung XP (so), vi moi truy van truoc do chi so/loc
+    theo chuoi (id, ten...).
+    """
+    try:
+        return (0, float(v))
+    except (TypeError, ValueError):
+        return (1, str(v))
+
+
 class FakeAppwrite:
     """
     Ban gia lap REST cua Appwrite, chi du cho cac bang V2.
@@ -137,9 +161,13 @@ class FakeAppwrite:
                         if any(_khop(r, dk) for dk in d.get("values") or [])]
             elif m == "greaterThanEqual":
                 # So sanh CHUOI ISO cung dinh dang chinh la so sanh thoi gian —
-                # xem `appwrite_social.q_greater_equal`.
+                # xem `appwrite_social.q_greater_equal`. `_so_sanh_duoc` van
+                # dung so THAT khi thuoc tinh la so (vd XP), khong ep chuoi.
                 rows = [r for r in rows
-                        if vals and str(r.get(attr, "")) >= str(vals[0])]
+                        if vals and _so_sanh_duoc(r.get(attr)) >= _so_sanh_duoc(vals[0])]
+            elif m == "greaterThan":
+                rows = [r for r in rows
+                        if vals and _so_sanh_duoc(r.get(attr)) > _so_sanh_duoc(vals[0])]
             elif m == "select":
                 # Appwrite that CHI tra ve nhung thuoc tinh duoc chon. Ban gia
                 # lap phai bat chuoc dieu do: mot doan ma doc mot truong khong
@@ -156,7 +184,8 @@ class FakeAppwrite:
                 offset = int(vals[0])
 
         if order:
-            rows.sort(key=lambda r: str(r.get(order[0], "")), reverse=order[1])
+            rows.sort(key=lambda r: _so_sanh_duoc(r.get(order[0], "")),
+                     reverse=order[1])
         # `total` DOC LAP voi limit/offset — day la hanh vi that cua Appwrite, va
         # code phan trang dua vao no.
         return {"documents": rows[offset:offset + limit], "total": len(rows)}

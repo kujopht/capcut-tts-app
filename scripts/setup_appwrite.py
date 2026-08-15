@@ -840,6 +840,49 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("user_idx", "key", ["user_id"]),
         ],
     },
+    # V6 gamification (chuoi ngay doc + nhiem vu) — xem
+    # `gamification_domain.ReadingStreak`/`QuestProgress`. THIET KE, chua ap
+    # len production; kho dang chay la `MockGamificationStore` trong bo nho.
+    # `documentId` = `user_id` (giong `user_progress`) nen "user_idx" o day
+    # chi phuc vu truy van tuong minh, khong thay the rang buoc duy nhat.
+    #
+    # ROLLBACK: xoa ca hai collection — khong anh huong du lieu dang dung.
+    "reading_streaks": {
+        "name": "Reading Streaks",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("current_streak", "integer", True, None),
+            ("longest_streak", "integer", True, None),
+            # Ngay ISO "YYYY-MM-DD" theo lich UTC — xem gioi han da ghi trong
+            # `gamification_domain.advance_streak` (chua theo mui gio nguoi
+            # dung). La chuoi, khong phai `datetime`, de tranh lech gio.
+            ("last_read_date", "string", False, 10),
+            ("grace_used_this_run", "boolean", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "unique", ["user_id"]),
+        ],
+    },
+    # `documentId` = `id_tien_do_nhiem_vu(user_id, quest_key, period_key)` —
+    # xem `gamification.py`. Idempotency + tinh duy nhat theo bo ba do khoa
+    # tai lop id, khong can index unique rieng cho ba truong nay.
+    "quest_progress": {
+        "name": "Quest Progress",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("quest_key", "string", True, 64),
+            # "YYYY-MM-DD" (daily) hoac "YYYY-Www" (weekly) — xem
+            # `gamification_domain.quest_period_key`.
+            ("period_key", "string", True, 16),
+            ("count", "integer", True, None),
+            ("claimed", "boolean", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
 }
 
 #: Cac thuoc tinh la MANG. Appwrite doi co `array: true` luc tao; thieu no thi

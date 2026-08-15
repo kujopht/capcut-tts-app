@@ -23,6 +23,7 @@ import { CreatorSection } from "@/components/CreatorSection";
 import { AccountSocial } from "@/components/AccountSocial";
 import { AchievementGrid } from "@/components/AchievementGrid";
 import { GamificationPanel } from "@/components/GamificationPanel";
+import { QuestPanel } from "@/components/QuestPanel";
 import { Avatar } from "@/components/Avatar";
 
 const TIER_LABEL: Record<string, string> = {
@@ -205,6 +206,8 @@ export default function AccountPage() {
       <AccountSocial />
 
       <AchievementGrid />
+
+      <QuestPanel />
 
       <GamificationPanel />
 

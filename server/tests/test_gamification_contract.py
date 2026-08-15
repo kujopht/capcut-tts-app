@@ -21,6 +21,8 @@ from server.appwrite_gamification_store import AppwriteGamificationStore
 from server.config import AppwriteSettings
 from server.gamification_domain import (
     CosmeticInventoryItem,
+    QuestProgress,
+    ReadingStreak,
     UnlockedAchievement,
     UserProgress,
     XpLedgerEntry,
@@ -217,6 +219,135 @@ class HopDongGamification(unittest.TestCase):
         for ten, kho in self._cac_kho():
             with self.subTest(kho=ten):
                 self.assertEqual(kho.list_cosmetics_by_ids([]), {}, ten)
+
+    def test_get_progress_by_ids_gom_dung_nguoi(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_progress(UserProgress(user_id="u1", xp=100))
+                kho.save_progress(UserProgress(user_id="u2", xp=50))
+                ra = kho.get_progress_by_ids(["u1", "u2", "u3_khong_ton_tai"])
+                self.assertEqual(ra["u1"].xp, 100, ten)
+                self.assertEqual(ra["u2"].xp, 50, ten)
+                self.assertNotIn("u3_khong_ton_tai", ra, ten)
+
+    # ===================================================== chuoi ngay doc
+
+    def test_streak_mac_dinh_khi_chua_co(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.get_streak("u1")
+                self.assertEqual(s.current_streak, 0, ten)
+                self.assertEqual(s.last_read_date, "", ten)
+
+    def test_save_streak_doc_lai_dung(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_streak(ReadingStreak(
+                    user_id="u1", current_streak=3, longest_streak=5,
+                    last_read_date="2026-08-15", grace_used_this_run=True))
+                s = kho.get_streak("u1")
+                self.assertEqual(s.current_streak, 3, ten)
+                self.assertEqual(s.longest_streak, 5, ten)
+                self.assertEqual(s.last_read_date, "2026-08-15", ten)
+                self.assertTrue(s.grace_used_this_run, ten)
+
+    def test_streak_hai_nguoi_dung_doc_lap(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_streak(ReadingStreak(user_id="u1", current_streak=3))
+                kho.save_streak(ReadingStreak(user_id="u2", current_streak=1))
+                self.assertEqual(kho.get_streak("u1").current_streak, 3, ten)
+                self.assertEqual(kho.get_streak("u2").current_streak, 1, ten)
+
+    # ===================================================== nhiem vu
+
+    def test_quest_progress_mac_dinh_khi_chua_co(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                p = kho.get_quest_progress("u1", "doc_hang_ngay", "2026-08-15")
+                self.assertEqual(p.count, 0, ten)
+                self.assertFalse(p.claimed, ten)
+
+    def test_save_quest_progress_doc_lai_dung(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_quest_progress(QuestProgress(
+                    user_id="u1", quest_key="doc_hang_ngay",
+                    period_key="2026-08-15", count=1, claimed=True))
+                p = kho.get_quest_progress("u1", "doc_hang_ngay", "2026-08-15")
+                self.assertEqual(p.count, 1, ten)
+                self.assertTrue(p.claimed, ten)
+
+    def test_quest_progress_ky_khac_la_ban_ghi_khac(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_quest_progress(QuestProgress(
+                    user_id="u1", quest_key="doc_hang_ngay",
+                    period_key="2026-08-14", count=1, claimed=True))
+                # Ky moi (2026-08-15) chua co ban ghi -> mac dinh 0/chua nhan,
+                # KHONG ke thua trang thai cua ky truoc.
+                p = kho.get_quest_progress("u1", "doc_hang_ngay", "2026-08-15")
+                self.assertEqual(p.count, 0, ten)
+                self.assertFalse(p.claimed, ten)
+
+    def test_list_quest_progress_gom_moi_ky_cua_nguoi_do(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_quest_progress(QuestProgress(
+                    user_id="u1", quest_key="doc_hang_ngay", period_key="2026-08-14"))
+                kho.save_quest_progress(QuestProgress(
+                    user_id="u1", quest_key="doc_hang_ngay", period_key="2026-08-15"))
+                kho.save_quest_progress(QuestProgress(
+                    user_id="u2", quest_key="doc_hang_ngay", period_key="2026-08-15"))
+                ds = kho.list_quest_progress("u1")
+                self.assertEqual(len(ds), 2, ten)
+
+    # ===================================================== bang xep hang
+
+    def test_list_all_progress_ranked_sap_giam_dan(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_progress(UserProgress(user_id="u1", xp=50))
+                kho.save_progress(UserProgress(user_id="u2", xp=150))
+                kho.save_progress(UserProgress(user_id="u3", xp=100))
+                trang, tong = kho.list_all_progress_ranked(limit=10, offset=0)
+                self.assertEqual(tong, 3, ten)
+                self.assertEqual([p.user_id for p in trang], ["u2", "u3", "u1"], ten)
+
+    def test_list_all_progress_ranked_phan_trang(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_progress(UserProgress(user_id="u1", xp=50))
+                kho.save_progress(UserProgress(user_id="u2", xp=150))
+                kho.save_progress(UserProgress(user_id="u3", xp=100))
+                trang, tong = kho.list_all_progress_ranked(limit=1, offset=1)
+                self.assertEqual(tong, 3, ten)
+                self.assertEqual([p.user_id for p in trang], ["u3"], ten)
+
+    def test_count_users_above_xp(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_progress(UserProgress(user_id="u1", xp=50))
+                kho.save_progress(UserProgress(user_id="u2", xp=150))
+                kho.save_progress(UserProgress(user_id="u3", xp=100))
+                self.assertEqual(kho.count_users_above_xp(60), 2, ten)
+                self.assertEqual(kho.count_users_above_xp(150), 0, ten)
+
+    def test_xp_earned_since_tinh_dung_moc_thoi_gian(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.record_xp_event(XpLedgerEntry(
+                    entry_id="x1", user_id="u1", event_type="e1",
+                    source_kind="s", source_id="1", xp_awarded=10,
+                    created_at="2026-08-01T00:00:00+00:00"))
+                kho.record_xp_event(XpLedgerEntry(
+                    entry_id="x2", user_id="u1", event_type="e1",
+                    source_kind="s", source_id="2", xp_awarded=20,
+                    created_at="2026-08-15T00:00:00+00:00"))
+                ra = kho.xp_earned_since("2026-08-10T00:00:00+00:00")
+                self.assertEqual(ra.get("u1"), 20, ten)  # chi tinh su kien SAU moc
+                ra_ca_hai = kho.xp_earned_since("2026-01-01T00:00:00+00:00")
+                self.assertEqual(ra_ca_hai.get("u1"), 30, ten)
 
 
 class BuildGamificationStoreTest(unittest.TestCase):

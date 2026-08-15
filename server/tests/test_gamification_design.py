@@ -14,8 +14,11 @@ from server.gamification import LEVEL_TIERS, id_xp_entry, level_for, next_level
 from server.gamification_domain import (
     CosmeticDef,
     CosmeticInventoryItem,
+    ReadingStreak,
     RewardPack,
     RewardPackError,
+    advance_streak,
+    quest_period_key,
     roll_cosmetic,
     them_vao_kho_neu_chua_co,
 )
@@ -112,6 +115,75 @@ class TrungLapTest(unittest.TestCase):
         kho = [CosmeticInventoryItem(user_id="u1", cosmetic_key="khung_dong")]
         muc = them_vao_kho_neu_chua_co(kho, "u2", "khung_dong")
         self.assertIsNotNone(muc)
+
+
+class AdvanceStreakTest(unittest.TestCase):
+    """V4 visual completion, vong 5 — chuoi ngay doc. Xem
+    `gamification_domain.advance_streak` de biet day du bon truong hop."""
+
+    def test_lan_dau_bat_dau_chuoi_bang_1(self):
+        s = advance_streak(ReadingStreak(user_id="u1"), "2026-08-10")
+        self.assertEqual(s.current_streak, 1)
+        self.assertEqual(s.longest_streak, 1)
+        self.assertEqual(s.last_read_date, "2026-08-10")
+        self.assertFalse(s.grace_used_this_run)
+
+    def test_goi_lai_cung_ngay_khong_doi_gi(self):
+        s1 = advance_streak(ReadingStreak(user_id="u1"), "2026-08-10")
+        s2 = advance_streak(s1, "2026-08-10")
+        self.assertEqual(s2.current_streak, 1)
+        self.assertIs(s2, s1)  # tra ve chinh doi tuong dau vao, khong tao moi
+
+    def test_ngay_lien_tiep_tang_chuoi(self):
+        s = advance_streak(ReadingStreak(user_id="u1"), "2026-08-10")
+        s = advance_streak(s, "2026-08-11")
+        self.assertEqual(s.current_streak, 2)
+        self.assertEqual(s.longest_streak, 2)
+
+    def test_bo_lo_dung_mot_ngay_duoc_an_han_cuu(self):
+        s = advance_streak(ReadingStreak(user_id="u1"), "2026-08-10")
+        s = advance_streak(s, "2026-08-11")
+        s = advance_streak(s, "2026-08-13")  # bo qua 08-12
+        self.assertEqual(s.current_streak, 3)
+        self.assertTrue(s.grace_used_this_run)
+
+    def test_an_han_chi_dung_duoc_mot_lan_moi_chuoi(self):
+        s = advance_streak(ReadingStreak(user_id="u1"), "2026-08-10")
+        s = advance_streak(s, "2026-08-11")
+        s = advance_streak(s, "2026-08-13")  # dung an han lan 1
+        s = advance_streak(s, "2026-08-15")  # bo lo 08-14, an han da het -> dut
+        self.assertEqual(s.current_streak, 1)
+        self.assertFalse(s.grace_used_this_run)
+
+    def test_bo_lo_hai_ngay_lien_tiep_dut_chuoi_ngay_ca_khi_con_an_han(self):
+        s = advance_streak(ReadingStreak(user_id="u1"), "2026-08-10")
+        s = advance_streak(s, "2026-08-14")  # bo 3 ngay, qua xa de an han cuu
+        self.assertEqual(s.current_streak, 1)
+        self.assertFalse(s.grace_used_this_run)
+
+    def test_longest_streak_giu_nguyen_sau_khi_dut(self):
+        s = advance_streak(ReadingStreak(user_id="u1"), "2026-08-10")
+        s = advance_streak(s, "2026-08-11")
+        s = advance_streak(s, "2026-08-12")  # longest = 3
+        s = advance_streak(s, "2026-08-20")  # dut, ve 1
+        self.assertEqual(s.current_streak, 1)
+        self.assertEqual(s.longest_streak, 3)
+
+
+class QuestPeriodKeyTest(unittest.TestCase):
+    def test_daily_la_chinh_ngay(self):
+        self.assertEqual(quest_period_key("daily", "2026-08-15"), "2026-08-15")
+
+    def test_weekly_dung_tuan_iso(self):
+        self.assertEqual(quest_period_key("weekly", "2026-08-15"), "2026-W33")
+
+    def test_weekly_doi_khi_sang_tuan_moi(self):
+        # 2026-08-17 la thu Hai, dau tuan ISO ke tiep.
+        self.assertEqual(quest_period_key("weekly", "2026-08-17"), "2026-W34")
+
+    def test_chu_ky_khong_xac_dinh_nem_loi(self):
+        with self.assertRaises(ValueError):
+            quest_period_key("monthly", "2026-08-15")
 
 
 if __name__ == "__main__":

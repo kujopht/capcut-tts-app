@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 import { NotificationBell } from "@/components/NotificationBell";
+import { StreakBadge } from "@/components/StreakBadge";
 import { Avatar } from "@/components/Avatar";
 
 /**
@@ -231,6 +232,9 @@ function AccountMenu() {
           <Link href="/account" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">👤</span> Tài khoản
           </Link>
+          <Link href="/leaderboard" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">👑</span> Bảng xếp hạng
+          </Link>
           {/*
             Chỉ hiện khi MÁY CHỦ xác nhận (`/api/auth/me` → `is_admin`).
             Không suy từ email hay danh sách nhúng trong frontend — đây chỉ là
@@ -263,6 +267,7 @@ export function NavAuth() {
   return (
     <div className="row nav-right">
       <ToolsMenu />
+      <StreakBadge />
       {/* Chuông đứng TRƯỚC menu tài khoản: nó là thứ người ta nhìn thường
           xuyên hơn, và đặt nó sau avatar sẽ đẩy nó ra rìa màn hình ở mobile. */}
       <NotificationBell />

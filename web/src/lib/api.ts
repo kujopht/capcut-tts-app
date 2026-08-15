@@ -116,6 +116,50 @@ export interface CosmeticItem {
   acquired_at?: string;
 }
 
+/** Chuỗi ngày đọc CỦA CHÍNH MÌNH — xem `server/gamification_domain.py::ReadingStreak`. */
+export interface ReadingStreak {
+  current_streak: number;
+  longest_streak: number;
+  last_read_date: string | null;
+}
+
+/** Một nhiệm vụ (ngày/tuần) kèm tiến độ CỦA CHÍNH MÌNH trong kỳ hiện tại. */
+export interface QuestItem {
+  key: string;
+  name: string;
+  description: string;
+  period: "daily" | "weekly";
+  target_count: number;
+  xp_reward: number;
+  cosmetic_reward_key: string | null;
+  count: number;
+  completed: boolean;
+  claimed: boolean;
+}
+
+/** Một hàng trong bảng xếp hạng XP — xem `gamification_service._the_bang_xep_hang`. */
+export interface LeaderboardEntry {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  title: string;
+  rank: number;
+  xp: number;
+  is_you: boolean;
+  equipped_cosmetics: CosmeticItem[];
+}
+
+export interface LeaderboardResponse {
+  items: LeaderboardEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+  /** Hạng THẬT của người xem dù họ có nằm trong `items` hay không —
+      `null` khi chưa đăng nhập hoặc chưa có XP nào. */
+  viewer_entry: LeaderboardEntry | null;
+}
+
 /**
  * Một thành tựu (V4 visual completion). Điều kiện tính tại chỗ từ dữ liệu
  * đã có, nhưng lần đầu đạt điều kiện được LƯU THẬT kèm `unlocked_at` (xem
@@ -698,6 +742,37 @@ export const api = {
     }>(`/api/account/reward-packs/${encodeURIComponent(packKey)}/open`, {
       method: "POST",
     }),
+
+  /** Chuỗi ngày đọc CỦA CHÍNH MÌNH. */
+  getStreak: () => request<ReadingStreak>("/api/account/streak"),
+
+  /** Toàn bộ nhiệm vụ (ngày + tuần) kèm tiến độ kỳ hiện tại. */
+  getQuests: () => request<{ quests: QuestItem[] }>("/api/account/quests"),
+
+  /**
+   * Nhận thưởng một nhiệm vụ ĐÃ hoàn thành, CHƯA nhận. Máy chủ đã lưu
+   * `claimed=true` trước khi trả lời — tải lại trang không nhận lại được
+   * (xem `server/gamification_service.py::claim_quest_reward`).
+   */
+  claimQuest: (questKey: string) =>
+    request<{ quest_key: string; xp_awarded: number; cosmetic: CosmeticItem | null }>(
+      `/api/account/quests/${encodeURIComponent(questKey)}/claim`,
+      { method: "POST" },
+    ),
+
+  /**
+   * Bảng xếp hạng XP — CÔNG KHAI, không cần đăng nhập (khi có, kèm
+   * `viewer_entry` riêng của người xem). `mode`: `"all_time"` (mặc định)
+   * hoặc `"weekly"` (XP kiếm được trong tuần ISO hiện tại).
+   */
+  getLeaderboard: (
+    mode: "all_time" | "weekly" = "all_time",
+    limit = 20,
+    offset = 0,
+  ) =>
+    request<LeaderboardResponse>(
+      `/api/leaderboard?mode=${mode}&limit=${limit}&offset=${offset}`,
+    ),
 
   /**
    * Kết thúc phiên ở phía máy chủ.

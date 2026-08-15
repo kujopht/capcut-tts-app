@@ -5839,3 +5839,102 @@ body.co-mini { padding-bottom: 74px; }
   text-align: center;
   color: var(--text-3);
 }
+
+/* ==================================================== V6 gamification: chuoi
+   ngay doc + nhiem vu + bang xep hang. */
+
+/* Chi so gon tren thanh dieu huong (`StreakBadge`) — cung tinh than voi
+   `.badge` nhung tron hon, khop voi `.bell`/`.account-link` xung quanh. */
+.streak-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--rarity-legendary, #f5b942);
+  font-size: var(--t-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.streak-title { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The nhiem vu (`QuestPanel`) — doc, khac `.achievement-card` ngang: can cho
+   cho thanh tien do + hang nut/trang thai o duoi. */
+.quest-card {
+  display: flex;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r3);
+  border: 1px solid var(--kinh-vien);
+  background: linear-gradient(180deg, #0d1019f2, #090b12f7);
+  box-shadow: var(--do-sau), var(--edge);
+}
+.quest-card::before {
+  content: "";
+  align-self: stretch;
+  width: 3px;
+  border-radius: var(--r-full);
+  background: var(--rarity, var(--rarity-common));
+}
+.quest-card .achievement-card-icon {
+  background: color-mix(in srgb, var(--rarity, var(--rarity-common)) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rarity, var(--rarity-common)) 45%, transparent);
+  color: var(--rarity, var(--rarity-common));
+}
+.quest-card-body { flex: 1; gap: 6px; }
+
+/* Bang xep hang (`/leaderboard`) — danh sach hang, cung khung voi `.tb-ds`
+   nhung them cot hang/XP rieng. */
+.lb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.lb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 10px var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, var(--r2));
+  background: var(--card, var(--bg-2));
+}
+.lb-row-you {
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+}
+.lb-rank {
+  min-width: 32px;
+  text-align: center;
+  font-weight: 700;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+.lb-info {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.lb-xp {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.lb-sep {
+  text-align: center;
+  padding: var(--s2) 0;
+}
+
+@media (max-width: 640px) {
+  .lb-rank { min-width: 24px; }
+  .lb-xp { font-size: var(--t-sm); }
+}

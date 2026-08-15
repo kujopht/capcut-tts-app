@@ -23,15 +23,21 @@ from __future__ import annotations
 
 import json
 import threading
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
 from server.adapters import NotFoundError
 from server.config import AppwriteSettings
-from server.gamification import id_mo_khoa_thanh_tuu, id_vat_pham_kho
+from server.gamification import (
+    id_mo_khoa_thanh_tuu,
+    id_tien_do_nhiem_vu,
+    id_vat_pham_kho,
+)
 from server.gamification_domain import (
     CosmeticInventoryItem,
+    QuestProgress,
+    ReadingStreak,
     UnlockedAchievement,
     UserProgress,
     XpLedgerEntry,
@@ -41,6 +47,10 @@ COL_PROGRESS = "user_progress"
 COL_XP_LEDGER = "xp_ledger"
 COL_ACHIEVEMENT_UNLOCKS = "achievement_unlocks"
 COL_COSMETIC_INVENTORY = "cosmetic_inventory"
+#: Hai collection MOI, V4 visual completion vong 5 — xem
+#: `server/gamification_domain.py` (ReadingStreak/QuestProgress).
+COL_READING_STREAKS = "reading_streaks"
+COL_QUEST_PROGRESS = "quest_progress"
 
 #: Ten thuoc tinh THAT SU muon luu — cung vai tro voi `_PERSISTED_FIELDS` o
 #: `appwrite_translation_store.py`. Phai KHOP CHINH XAC voi SCHEMA trong
@@ -60,6 +70,13 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_COSMETIC_INVENTORY: (
         "user_id", "cosmetic_key", "acquired_at", "equipped",
     ),
+    COL_READING_STREAKS: (
+        "user_id", "current_streak", "longest_streak", "last_read_date",
+        "grace_used_this_run", "updated_at",
+    ),
+    COL_QUEST_PROGRESS: (
+        "user_id", "quest_key", "period_key", "count", "claimed", "updated_at",
+    ),
 }
 
 REQUEST_TIMEOUT = 30.0
@@ -71,8 +88,22 @@ def q_equal(attribute: str, *values: Any) -> str:
                        "values": list(values)})
 
 
+def q_greater(attribute: str, value: Any) -> str:
+    return json.dumps({"method": "greaterThan", "attribute": attribute,
+                       "values": [value]})
+
+
+def q_greater_equal(attribute: str, value: Any) -> str:
+    return json.dumps({"method": "greaterThanEqual", "attribute": attribute,
+                       "values": [value]})
+
+
 def q_order_asc(attribute: str) -> str:
     return json.dumps({"method": "orderAsc", "attribute": attribute})
+
+
+def q_order_desc(attribute: str) -> str:
+    return json.dumps({"method": "orderDesc", "attribute": attribute})
 
 
 def q_limit(count: int) -> str:
@@ -158,6 +189,50 @@ def _cosmetic_from_row(row: Dict[str, Any]) -> CosmeticInventoryItem:
         cosmetic_key=str(row.get("cosmetic_key") or ""),
         acquired_at=str(row.get("acquired_at") or ""),
         equipped=bool(row.get("equipped") or False),
+    )
+
+
+def _streak_to_row(s: ReadingStreak) -> Dict[str, Any]:
+    return {
+        "user_id": s.user_id,
+        "current_streak": s.current_streak,
+        "longest_streak": s.longest_streak,
+        "last_read_date": s.last_read_date,
+        "grace_used_this_run": s.grace_used_this_run,
+        "updated_at": s.updated_at,
+    }
+
+
+def _streak_from_row(row: Dict[str, Any]) -> ReadingStreak:
+    return ReadingStreak(
+        user_id=str(row.get("user_id") or ""),
+        current_streak=int(row.get("current_streak") or 0),
+        longest_streak=int(row.get("longest_streak") or 0),
+        last_read_date=str(row.get("last_read_date") or ""),
+        grace_used_this_run=bool(row.get("grace_used_this_run") or False),
+        updated_at=str(row.get("updated_at") or ""),
+    )
+
+
+def _quest_to_row(q: QuestProgress) -> Dict[str, Any]:
+    return {
+        "user_id": q.user_id,
+        "quest_key": q.quest_key,
+        "period_key": q.period_key,
+        "count": q.count,
+        "claimed": q.claimed,
+        "updated_at": q.updated_at,
+    }
+
+
+def _quest_from_row(row: Dict[str, Any]) -> QuestProgress:
+    return QuestProgress(
+        user_id=str(row.get("user_id") or ""),
+        quest_key=str(row.get("quest_key") or ""),
+        period_key=str(row.get("period_key") or ""),
+        count=int(row.get("count") or 0),
+        claimed=bool(row.get("claimed") or False),
+        updated_at=str(row.get("updated_at") or ""),
     )
 
 
@@ -290,6 +365,21 @@ class AppwriteGamificationStore:
                 return out
             offset += PAGE_SIZE
 
+    def _page(self, collection: str,
+             queries: List[str]) -> Tuple[List[Dict[str, Any]], int]:
+        """MOT trang (khong lat het) — kem `total` Appwrite tra ve, dung cho
+        bang xep hang: `total` la so KHOP TOAN BO ke ca ngoai trang, khong
+        can doc het moi hang de dem."""
+        data = self._call("GET", self._docs(collection), params={"queries[]": queries})
+        return list(data.get("documents") or []), int(data.get("total") or 0)
+
+    def _count(self, collection: str, queries: List[str]) -> int:
+        """So hang KHOP — muon MOT gia tri `total`, khong can tai du lieu:
+        `q_limit(1)` de Appwrite khong tra ve nhieu hon can, `total` van la
+        so khop THAT SU ke ca ngoai gioi han do."""
+        _, tong = self._page(collection, queries + [q_limit(1)])
+        return tong
+
     # ======================================================== cap do / XP
 
     def get_progress(self, user_id: str) -> UserProgress:
@@ -298,6 +388,15 @@ class AppwriteGamificationStore:
         except NotFoundError:
             return UserProgress(user_id=user_id)
         return _progress_from_row(row)
+
+    def get_progress_by_ids(self, user_ids: Sequence[str]) -> Dict[str, UserProgress]:
+        """Ban HANG LOAT — MOT truy van `equal("user_id", [...])`, khong
+        phai N truy van rieng. Xem `MockGamificationStore.get_progress_by_ids`."""
+        ids = [u for u in user_ids if u]
+        if not ids:
+            return {}
+        rows = self._list_all(COL_PROGRESS, [q_equal("user_id", *ids)])
+        return {str(r.get("user_id")): _progress_from_row(r) for r in rows}
 
     def save_progress(self, progress: UserProgress) -> UserProgress:
         """Upsert THAT: thu tao truoc (documentId = user_id, MOT hang moi
@@ -398,6 +497,82 @@ class AppwriteGamificationStore:
         if current is None:
             raise NotFoundError("Bạn chưa có vật phẩm này.")
         self._update(COL_COSMETIC_INVENTORY, muon_id, {"equipped": equipped})
+
+    # ======================================================== chuoi ngay doc
+
+    def get_streak(self, user_id: str) -> ReadingStreak:
+        try:
+            row = self._get(COL_READING_STREAKS, user_id)
+        except NotFoundError:
+            return ReadingStreak(user_id=user_id)
+        return _streak_from_row(row)
+
+    def save_streak(self, streak: ReadingStreak) -> ReadingStreak:
+        """Upsert THAT — documentId = user_id (MOT hang moi nguoi dung),
+        cung ky thuat voi `save_progress`."""
+        row = _streak_to_row(streak)
+        try:
+            self._create(COL_READING_STREAKS, streak.user_id, row, streak.user_id)
+        except NotFoundError:
+            self._update(COL_READING_STREAKS, streak.user_id, row)
+        return streak
+
+    # ======================================================== nhiem vu
+
+    def get_quest_progress(self, user_id: str, quest_key: str,
+                           period_key: str) -> QuestProgress:
+        muon_id = id_tien_do_nhiem_vu(user_id, quest_key, period_key)
+        try:
+            row = self._get(COL_QUEST_PROGRESS, muon_id)
+        except NotFoundError:
+            return QuestProgress(user_id=user_id, quest_key=quest_key,
+                                 period_key=period_key)
+        return _quest_from_row(row)
+
+    def save_quest_progress(self, progress: QuestProgress) -> QuestProgress:
+        """Upsert qua documentId TAT DINH (`id_tien_do_nhiem_vu`) — MOT hang
+        moi (user_id, quest_key, period_key), cung ky thuat voi cac ham
+        `save_*`/`grant_*` khac trong tep nay."""
+        muon_id = id_tien_do_nhiem_vu(
+            progress.user_id, progress.quest_key, progress.period_key)
+        row = _quest_to_row(progress)
+        try:
+            self._create(COL_QUEST_PROGRESS, muon_id, row, progress.user_id)
+        except NotFoundError:
+            self._update(COL_QUEST_PROGRESS, muon_id, row)
+        return progress
+
+    def list_quest_progress(self, user_id: str) -> List[QuestProgress]:
+        rows = self._list_all(COL_QUEST_PROGRESS, [q_equal("user_id", user_id)])
+        return [_quest_from_row(r) for r in rows]
+
+    # ======================================================== bang xep hang
+
+    def list_all_progress_ranked(
+            self, limit: int, offset: int) -> Tuple[List[UserProgress], int]:
+        """Trang XP toan thoi gian, MAY CHU sap xep+phan trang (`orderDesc`
+        + `limit`/`offset`) — khong tai ca bang ve roi sap o Python."""
+        docs, tong = self._page(COL_PROGRESS, [
+            q_order_desc("xp"), q_limit(max(0, limit)), q_offset(max(0, offset))])
+        return [_progress_from_row(d) for d in docs], tong
+
+    def count_users_above_xp(self, xp: int) -> int:
+        """Dung `total` cua Appwrite (xem `_count`) — KHONG tai ve tung
+        nguoi dung co XP cao hon chi de dem so luong."""
+        return self._count(COL_PROGRESS, [q_greater("xp", xp)])
+
+    def xp_earned_since(self, since_iso: str) -> Dict[str, int]:
+        """Tong XP tu `since_iso` — quet toan bo nhat ky XP tu moc do
+        (`_list_all`, bi chan boi mot moc thoi gian nen KHONG phai quet vo
+        han), roi cong don theo nguoi dung o Python. Xem ghi chu day du o
+        `MockGamificationStore.xp_earned_since`."""
+        rows = self._list_all(
+            COL_XP_LEDGER, [q_greater_equal("created_at", since_iso)])
+        ra: Dict[str, int] = {}
+        for row in rows:
+            entry = _xp_entry_from_row(row)
+            ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
+        return ra
 
 
 def build_gamification_store(settings: Any):

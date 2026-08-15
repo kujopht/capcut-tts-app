@@ -18,11 +18,13 @@ MOT MIXIN doc lap — khong dung chung bang voi `tts_jobs`/`translation_*`.
 from __future__ import annotations
 
 import threading
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from server.adapters import NotFoundError
 from server.gamification_domain import (
     CosmeticInventoryItem,
+    QuestProgress,
+    ReadingStreak,
     UnlockedAchievement,
     UserProgress,
     XpLedgerEntry,
@@ -39,12 +41,26 @@ class MockGamificationStore:
         self._achievements: Dict[str, Dict[str, UnlockedAchievement]] = {}
         #: user_id -> {cosmetic_key: CosmeticInventoryItem}
         self._cosmetics: Dict[str, Dict[str, CosmeticInventoryItem]] = {}
+        #: user_id -> ReadingStreak
+        self._streaks: Dict[str, ReadingStreak] = {}
+        #: user_id -> {(quest_key, period_key): QuestProgress}
+        self._quests: Dict[str, Dict[tuple, QuestProgress]] = {}
 
     # ======================================================== cap do / XP
 
     def get_progress(self, user_id: str) -> UserProgress:
         with self._lock:
             return self._progress.get(user_id) or UserProgress(user_id=user_id)
+
+    def get_progress_by_ids(self, user_ids: Sequence[str]) -> Dict[str, UserProgress]:
+        """Ban HANG LOAT cua `get_progress` — cho trang bang xep hang
+        'weekly' can biet bac/danh xung THAT (khong phai XP tuan) cua DUNG
+        nhung nguoi dang hien trong trang, mot lan cho ca trang thay vi
+        mot truy van rieng cho tung hang. Nguoi khong co tien do nao VANG
+        MAT khoi dict (khong tra doi tuong XP=0 gia) — noi goi tu quyet
+        dinh muon hien gi cho truong hop do."""
+        with self._lock:
+            return {uid: self._progress[uid] for uid in user_ids if uid in self._progress}
 
     def save_progress(self, progress: UserProgress) -> UserProgress:
         with self._lock:
@@ -126,3 +142,68 @@ class MockGamificationStore:
             if muc is None:
                 raise NotFoundError("Bạn chưa có vật phẩm này.")
             muc.equipped = equipped
+
+    # ======================================================== chuoi ngay doc
+
+    def get_streak(self, user_id: str) -> ReadingStreak:
+        with self._lock:
+            return self._streaks.get(user_id) or ReadingStreak(user_id=user_id)
+
+    def save_streak(self, streak: ReadingStreak) -> ReadingStreak:
+        with self._lock:
+            self._streaks[streak.user_id] = streak
+            return streak
+
+    # ======================================================== nhiem vu
+
+    def get_quest_progress(self, user_id: str, quest_key: str,
+                           period_key: str) -> QuestProgress:
+        with self._lock:
+            muc = self._quests.get(user_id, {}).get((quest_key, period_key))
+            return muc or QuestProgress(
+                user_id=user_id, quest_key=quest_key, period_key=period_key)
+
+    def save_quest_progress(self, progress: QuestProgress) -> QuestProgress:
+        with self._lock:
+            cua_nguoi_dung = self._quests.setdefault(progress.user_id, {})
+            cua_nguoi_dung[(progress.quest_key, progress.period_key)] = progress
+            return progress
+
+    def list_quest_progress(self, user_id: str) -> List[QuestProgress]:
+        """TOAN BO ban ghi tien do cua mot nguoi dung, MOI KY — dung mot lan
+        cho ca danh sach nhiem vu (tang service loc lay dung ky HIEN TAI),
+        khong phai mot truy van rieng cho tung nhiem vu."""
+        with self._lock:
+            return list(self._quests.get(user_id, {}).values())
+
+    # ======================================================== bang xep hang
+
+    def list_all_progress_ranked(
+            self, limit: int, offset: int) -> Tuple[List[UserProgress], int]:
+        """Trang XP TOAN THOI GIAN, sap giam dan — cho bang xep hang che do
+        'all_time'. Sap on dinh theo `user_id` khi XP bang nhau, de thu tu
+        khong doi giua cac lan tai lien tiep."""
+        with self._lock:
+            tat_ca = sorted(
+                self._progress.values(), key=lambda p: (-p.xp, p.user_id))
+        tong = len(tat_ca)
+        trang = tat_ca[offset:offset + max(0, limit)]
+        return trang, tong
+
+    def count_users_above_xp(self, xp: int) -> int:
+        """So nguoi dung co XP CAO HON `xp` — dung tinh hang cua chinh minh
+        khi khong nam trong trang dang xem."""
+        with self._lock:
+            return sum(1 for p in self._progress.values() if p.xp > xp)
+
+    def xp_earned_since(self, since_iso: str) -> Dict[str, int]:
+        """Tong XP MOI nguoi dung kiem duoc TU MOC THOI GIAN nay — dung cho
+        bang xep hang 'weekly'. Tinh tu chinh nhat ky XP da co
+        (`_xp_events`), KHONG can mot bo dem rieng nao — 'reset hang tuan'
+        chi la doi moc `since_iso` truyen vao, khong xoa hay ghi de gi ca."""
+        with self._lock:
+            ra: Dict[str, int] = {}
+            for entry in self._xp_events.values():
+                if entry.created_at >= since_iso:
+                    ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
+            return ra

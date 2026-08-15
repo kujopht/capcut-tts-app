@@ -56,12 +56,19 @@ from server.gamification_service import (
     achievements_hien_thi as thanh_tuu_hien_thi,
     award_xp as thuong_xp,
     cap_do_hien_thi,
+    claim_quest_reward,
     cong_khai_cap_do,
     cong_khai_thanh_tuu,
     cong_khai_vat_pham_dang_trang_bi,
     equip_cosmetic,
     equip_title,
+    leaderboard_all_time,
+    leaderboard_weekly,
+    list_quests_with_progress,
     open_reward_pack,
+    record_daily_read,
+    record_quest_event,
+    streak_hien_thi,
 )
 from server.appwrite_gamification_store import build_gamification_store
 from server.appwrite_animation_store import build_animation_store
@@ -2625,6 +2632,72 @@ def account_reward_packs() -> Dict[str, Any]:
     }
 
 
+@app.get("/api/account/streak")
+def account_streak(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Chuoi ngay doc CUA CHINH MINH (V4 visual completion, vong 5) — CHI
+    doc, khong ghi: ghi xay ra o `POST /api/progress/read` (tin hieu "da doc
+    hom nay" that duy nhat). Tu-chi-doc mot streak khong tang."""
+    return streak_hien_thi(gamification_store.get_streak(profile.user_id))
+
+
+@app.get("/api/account/quests")
+def account_quests(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Nhiem vu ngay+tuan CUA CHINH MINH, kem tien do KY HIEN TAI (vong 5)."""
+    return {"quests": list_quests_with_progress(
+        gamification_store, profile.user_id, _ngay_utc_hom_nay())}
+
+
+@app.post("/api/account/quests/{quest_key}/claim")
+def account_claim_quest(quest_key: str,
+                        profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Nhan thuong MOT nhiem vu da hoan thanh trong ky hien tai. Chua hoan
+    thanh hoac da nhan roi deu bi tu choi O MAY CHU (400) — xem
+    `gamification_service.claim_quest_reward`."""
+    try:
+        ket_qua = claim_quest_reward(
+            gamification_store, profile.user_id, quest_key, _ngay_utc_hom_nay())
+    except GamificationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return ket_qua
+
+
+@app.get("/api/leaderboard")
+def leaderboard(mode: str = "all_time", limit: int = 20, offset: int = 0,
+                authorization: Optional[str] = Header(default=None),
+                ) -> Dict[str, Any]:
+    """
+    Bang xep hang XP — CONG KHAI, khong bat buoc dang nhap (khach vang lai
+    van xem duoc, chi khong co `viewer_entry`). `mode`:
+
+      - `all_time` (mac dinh): tong XP TU TRUOC TOI GIO, MAY CHU sap xep +
+        phan trang that (xem `gamification_service.leaderboard_all_time`).
+      - `weekly`: XP kiem duoc TRONG TUAN ISO HIEN TAI (tu thu Hai), tinh tu
+        nhat ky XP — xem `gamification_service.leaderboard_weekly`.
+
+    `limit` bi CHAN TRAN o day (khong tin gia tri client gui vo han), giong
+    quy uoc o `/api/animation/series`/`/api/novels`.
+    """
+    gioi_han = max(1, min(100, limit))
+    do_lech = max(0, offset)
+    nguoi_xem = optional_profile(authorization)
+    viewer_id = nguoi_xem.user_id if nguoi_xem else ""
+
+    if mode == "weekly":
+        hom_nay = datetime.now(timezone.utc).date()
+        dau_tuan = hom_nay - timedelta(days=hom_nay.weekday())
+        since_iso = datetime.combine(
+            dau_tuan, datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        return leaderboard_weekly(gamification_store, identity, storage,
+                                  limit=gioi_han, offset=do_lech,
+                                  since_iso=since_iso, viewer_id=viewer_id)
+    if mode != "all_time":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Chế độ bảng xếp hạng không hợp lệ.")
+    return leaderboard_all_time(gamification_store, identity, storage,
+                                limit=gioi_han, offset=do_lech,
+                                viewer_id=viewer_id)
+
+
 @app.get("/api/creator/ranks")
 def creator_ranks() -> Dict[str, Any]:
     """
@@ -3211,6 +3284,14 @@ class ListenProgressIn(BaseModel):
     position_seconds: float = Field(ge=0, le=86_400)
 
 
+def _ngay_utc_hom_nay() -> str:
+    """Ngay UTC hien tai, chuoi `YYYY-MM-DD` — dung lam `today` cho chuoi
+    ngay doc va khoa ky nhiem vu (xem `gamification_domain.advance_streak`/
+    `quest_period_key`). MOT cho DUY NHAT doc dong ho he thong cho ca hai
+    tinh nang, de test co the thay the bang mot ngay co dinh neu can."""
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 @app.post("/api/progress/read")
 def bao_cao_dang_doc(payload: ReadProgressIn,
                      profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
@@ -3219,11 +3300,19 @@ def bao_cao_dang_doc(payload: ReadProgressIn,
     Khong kiem `novel_id`/`chapter_id` co that su ton tai hay khong: day la
     con tro CA NHAN, chi chinh chu doc lai duoc qua `/api/progress/continue`
     (roi ham do tu bo qua con tro tro toi noi da bi xoa) — mot id sai chi lam
-    con tro cua chinh nguoi goi vo dung, khong anh huong ai khac."""
+    con tro cua chinh nguoi goi vo dung, khong anh huong ai khac.
+
+    Cung la noi ghi CHUOI NGAY DOC va cong tien do nhiem vu "doc" (V4 visual
+    completion, vong 5) — day la tin hieu THAT duy nhat may chu co ve viec
+    "hom nay da doc chua", nen ca hai tinh nang deu bam vao day thay vi tu
+    doan tu cho khac."""
     profile.last_read_novel_id = payload.novel_id
     profile.last_read_chapter_id = payload.chapter_id
     profile.last_read_at = now_iso()
     identity.save_profile(profile)
+    hom_nay = _ngay_utc_hom_nay()
+    record_daily_read(gamification_store, profile.user_id, hom_nay)
+    record_quest_event(gamification_store, profile.user_id, "chapter_read", hom_nay)
     return {"ok": True}
 
 
@@ -3231,11 +3320,13 @@ def bao_cao_dang_doc(payload: ReadProgressIn,
 def bao_cao_dang_nghe(payload: ListenProgressIn,
                       profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     """Cung vai tro voi `bao_cao_dang_doc`, kem vi tri giay de hien thanh tien
-    do khi quay lai."""
+    do khi quay lai. Cung cong tien do nhiem vu "nghe" (vong 5)."""
     profile.last_listen_novel_id = payload.novel_id
     profile.last_listen_chapter_id = payload.chapter_id
     profile.last_listen_position_seconds = float(payload.position_seconds)
     profile.last_listen_at = now_iso()
+    record_quest_event(gamification_store, profile.user_id, "chapter_listened",
+                       _ngay_utc_hom_nay())
     identity.save_profile(profile)
     return {"ok": True}
 
@@ -3694,9 +3785,12 @@ def api_feed(limit: int = 0, offset: int = 0,
 @app.post("/api/posts", status_code=status.HTTP_201_CREATED)
 def create_post(payload: PostIn,
                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    return {"post": _xa_hoi(social.create_post, profile, text=payload.text,
-                            kind=payload.kind, novel_id=payload.novel_id,
-                            images=_bo_anh_tu_body(payload))}
+    ket_qua = {"post": _xa_hoi(social.create_post, profile, text=payload.text,
+                               kind=payload.kind, novel_id=payload.novel_id,
+                               images=_bo_anh_tu_body(payload))}
+    record_quest_event(gamification_store, profile.user_id,
+                       "community_interaction", _ngay_utc_hom_nay())
+    return ket_qua
 
 
 @app.get("/api/posts/{post_id}")
@@ -3754,11 +3848,22 @@ def list_post_comments(post_id: str, limit: int = 20, offset: int = 0,
                    limit=max(1, min(50, limit)), offset=max(0, offset))
 
 
+def _cong_nhiem_vu_binh_luan(user_id: str) -> None:
+    """Cong tien do CA HAI nhiem vu lien quan binh luan/dang bai — dung o
+    MOI diem tao binh luan (bai dang, chuong, tap animation), tranh lap lai
+    hai dong `record_quest_event` o tung route."""
+    hom_nay = _ngay_utc_hom_nay()
+    record_quest_event(gamification_store, user_id, "comment_posted", hom_nay)
+    record_quest_event(gamification_store, user_id, "community_interaction", hom_nay)
+
+
 @app.post("/api/posts/{post_id}/comments", status_code=status.HTTP_201_CREATED)
 def create_comment(post_id: str, payload: CommentIn,
                    profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    return {"comment": _xa_hoi(social.create_comment, profile, post_id,
-                               text=payload.text, parent_id=payload.parent_id)}
+    ket_qua = {"comment": _xa_hoi(social.create_comment, profile, post_id,
+                                  text=payload.text, parent_id=payload.parent_id)}
+    _cong_nhiem_vu_binh_luan(profile.user_id)
+    return ket_qua
 
 
 @app.get("/api/chapters/{chapter_id}/comments")
@@ -3779,10 +3884,12 @@ def list_chapter_comments(chapter_id: str, sort: str = "moi",
           status_code=status.HTTP_201_CREATED)
 def create_chapter_comment(chapter_id: str, payload: ChapterCommentIn,
                            profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
-    return {"comment": _xa_hoi(
+    ket_qua = {"comment": _xa_hoi(
         social.create_chapter_comment, profile, chapter_id,
         text=payload.text, parent_id=payload.parent_id,
         timestamp_ms=payload.timestamp_ms, spoiler=payload.spoiler)}
+    _cong_nhiem_vu_binh_luan(profile.user_id)
+    return ket_qua
 
 
 @app.get("/api/animation/episodes/{episode_id}/comments")
@@ -3802,9 +3909,11 @@ def list_episode_comments(episode_id: str, sort: str = "moi",
 def create_episode_comment_route(episode_id: str, payload: CommentIn,
                                  profile: Profile = Depends(current_profile),
                                  ) -> Dict[str, Any]:
-    return {"comment": _xa_hoi(
+    ket_qua = {"comment": _xa_hoi(
         social.create_episode_comment, profile, episode_id,
         text=payload.text, parent_id=payload.parent_id)}
+    _cong_nhiem_vu_binh_luan(profile.user_id)
+    return ket_qua
 
 
 @app.get("/api/comments/{comment_id}/replies")

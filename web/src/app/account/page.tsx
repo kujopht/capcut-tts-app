@@ -37,6 +37,7 @@ export default function AccountPage() {
   const { profile, loading, signOut, updateProfile } = useSession();
   const [confirmOut, setConfirmOut] = useState(false);
   const [savingAvatar, setSavingAvatar] = useState(false);
+  const [xpRefreshKey, setXpRefreshKey] = useState(0);
   const toast = useToast();
 
   const doSignOut = useCallback(() => {
@@ -207,9 +208,16 @@ export default function AccountPage() {
 
       <AchievementGrid />
 
-      <QuestPanel />
+      {/*
+        Nhan qua nhiem vu cong THAT XP, nhung `QuestPanel`/`GamificationPanel`
+        la hai component doc lap voi hai lan `useAsyncData` rieng — khong co
+        cai do, "Cap do" se hien XP cu cho toi khi tai lai trang. `xpRefreshKey`
+        la tin hieu don gian nhat de bao GamificationPanel tai lai, khong can
+        dung mot store/context chi cho mot gia tri.
+      */}
+      <QuestPanel onXpChange={() => setXpRefreshKey((k) => k + 1)} />
 
-      <GamificationPanel />
+      <GamificationPanel refreshKey={xpRefreshKey} />
 
       <CreatorSection />
 

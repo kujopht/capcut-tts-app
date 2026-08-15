@@ -79,7 +79,7 @@ function TheNhiemVu({
   );
 }
 
-export function QuestPanel() {
+export function QuestPanel({ onXpChange }: { onXpChange?: () => void }) {
   const toast = useToast();
   const [dangNhanKhoa, setDangNhanKhoa] = useState<string | null>(null);
 
@@ -103,6 +103,7 @@ export function QuestPanel() {
           : `Nhận +${ketQua.xp_awarded} XP!`,
       );
       reload();
+      onXpChange?.();
     } catch (cause) {
       toast.error(errorMessage(cause));
     } finally {

@@ -166,10 +166,12 @@ export default function LeaderboardPage() {
 
           {profile && data.viewer_entry && !viewerTrongTrang ? (
             <>
-              <div className="lb-sep hint" role="separator">
-                Vị trí của bạn
-              </div>
-              <ul className="lb-list">
+              {/* KHONG dung `role="separator"`: vai tro do khong nhan ten tu
+                  noi dung theo dac ta ARIA, nen trinh doc man hinh se BO QUA
+                  chu "Vị trí của bạn" — dung mot the thuong (vai tro mac
+                  dinh "generic") de noi dung van duoc doc binh thuong. */}
+              <p className="lb-sep hint">Vị trí của bạn</p>
+              <ul className="lb-list" aria-label="Vị trí của bạn">
                 <HangXepHang it={data.viewer_entry} />
               </ul>
             </>

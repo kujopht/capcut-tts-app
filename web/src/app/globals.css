@@ -4925,7 +4925,19 @@ body.co-mini { padding-bottom: 74px; }
   font-size: var(--t-sm);
 }
 
-.binh-luan-ten { font-weight: 650; color: var(--text); text-decoration: none; }
+/* `max-width` + ellipsis: tren mot ten hien thi rat dai, Link nay la MOT flex
+   item nguyen khoi trong `.binh-luan-dau` — khong gioi han thi no day ca
+   avatar/thoi gian xuong dong rieng thay vi giu chung mot hang gon nhu moi
+   binh luan khac. */
+.binh-luan-ten {
+  font-weight: 650;
+  color: var(--text);
+  text-decoration: none;
+  max-width: min(260px, 60vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .binh-luan-ten:hover { color: var(--brand-hover); }
 
 .binh-luan-chu {
@@ -5930,6 +5942,7 @@ body.co-mini { padding-bottom: 74px; }
   white-space: nowrap;
 }
 .lb-sep {
+  margin: 0;
   text-align: center;
   padding: var(--s2) 0;
 }

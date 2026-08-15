@@ -55,7 +55,14 @@ function TheVatPham({
   );
 }
 
-export function GamificationPanel() {
+export function GamificationPanel({
+  refreshKey,
+}: {
+  /** Tang gia tri nay (vi du sau khi nhan thuong nhiem vu o `QuestPanel`) de
+      buoc tai lai — XP co the doi o mot component khac ma panel nay khong
+      tu biet. */
+  refreshKey?: number;
+} = {}) {
   const toast = useToast();
   const [dangMoGoi, setDangMoGoi] = useState(false);
 
@@ -66,7 +73,8 @@ export function GamificationPanel() {
       api.getCosmetics(),
     ]);
     return { progress, titles: titleList.titles, cosmetics: cosmeticList.cosmetics };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const { data, reload } = useAsyncData(fetchAll);
 

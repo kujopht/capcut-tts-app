@@ -161,9 +161,15 @@ animation_store = build_animation_store(settings)
 #: `animation_store` them vao DE BINH LUAN TAP dung chung ha tang binh luan
 #: (`Comment` voi `target_kind="animation_episode"`) thay vi mot he thong
 #: binh luan thu hai — xem `SocialService._tap_cong_khai`.
+#:
+#: `gamification_store` them vao (V4 visual completion, vong 4) DE the tac
+#: gia gon (`_the_nguoi`) doc duoc khung/huy hieu DANG TRANG BI hang loat —
+#: nho vay khung avatar hien NHAT QUAN o binh luan/bai dang/thong bao/tim
+#: kiem ma khong can sua tung noi hien thi rieng.
 social = SocialService(identity, store, storage,
                        han_muc=settings.social_limits or None,
-                       animation_store=animation_store)
+                       animation_store=animation_store,
+                       gamification_store=gamification_store)
 
 #: `CreatorService` khong biet gi ve thong bao, va khong nen biet: no la tang
 #: moderation cua tac gia. Noi hai tang lai bang mot moc thay vi mot import

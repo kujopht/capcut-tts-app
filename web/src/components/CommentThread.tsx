@@ -39,6 +39,7 @@ import { ReportDialog } from "@/components/ReportDialog";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { useAudioEngineOptional } from "@/components/AudioEngine";
 import { Avatar } from "@/components/Avatar";
+import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
 
 type DichKind = "post" | "chapter" | "animation_episode";
 
@@ -287,11 +288,17 @@ function MotBinhLuan({
   return (
     <li className={tra ? "binh-luan tra-loi" : "binh-luan"} id={bl.comment_id}>
       <div className="binh-luan-dau">
-        <Avatar
-          name={bl.author?.display_name || bl.author?.username || "?"}
-          avatarUrl={bl.author?.avatar_url}
-          className="avatar avatar-sm"
-        />
+        <CosmeticFrame
+          cosmetic={bl.author?.equipped_cosmetics?.find(
+            (c) => c.slot === "avatar_frame",
+          )}
+        >
+          <Avatar
+            name={bl.author?.display_name || bl.author?.username || "?"}
+            avatarUrl={bl.author?.avatar_url}
+            className="avatar avatar-sm"
+          />
+        </CosmeticFrame>
         {bl.author?.username ? (
           <Link href={`/u/${bl.author.username}`} className="binh-luan-ten">
             {bl.author.display_name || bl.author.username}

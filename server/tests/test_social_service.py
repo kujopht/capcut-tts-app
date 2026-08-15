@@ -32,6 +32,8 @@ from server.domain import (
     PublishState,
     ReportStatus,
 )
+from server.gamification_domain import CosmeticInventoryItem
+from server.gamification_store import MockGamificationStore
 from server.social import HanMuc, RateLimited, SocialError
 from server.social_service import SocialService
 
@@ -433,6 +435,42 @@ class BinhLuanTest(Nen):
         self.assertEqual(ds[0]["state"], "removed")
         self.assertEqual(ds[0]["text"], "")
         self.assertEqual(ds[0]["author_user_id"], "")
+
+
+class TheTacGiaVatPhamTest(Nen):
+    """The tac gia (`_the_nguoi`) phai kem `equipped_cosmetics` khi co kho
+    gamification — V4 visual completion, vong 4. Ghi de `setUp` cua `Nen` de
+    dung MOT `SocialService` co gan `gamification_store` (bai o `Nen` khong
+    gan, cho dung "khong co kho thi bo qua truong nay" da kiem rieng)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.gam = MockGamificationStore()
+        self.social = SocialService(self.identity, self.store, self.storage,
+                                    gamification_store=self.gam)
+
+    def test_binh_luan_kem_khung_dang_trang_bi(self):
+        self.gam.grant_cosmetic(CosmeticInventoryItem(
+            user_id=self.an.user_id, cosmetic_key="khung_bac"))
+        self.gam.set_cosmetic_equipped(self.an.user_id, "khung_bac", True)
+        bai = self._bai()
+        bl = self.social.create_comment(self.an, bai["post_id"], text="Hay!")
+        self.assertEqual(
+            [c["key"] for c in bl["author"]["equipped_cosmetics"]],
+            ["khung_bac"])
+
+    def test_binh_luan_khong_trang_bi_gi_thi_vang_mat_truong(self):
+        bai = self._bai()
+        bl = self.social.create_comment(self.binh, bai["post_id"], text="Ok")
+        self.assertNotIn("equipped_cosmetics", bl["author"])
+
+    def test_khong_co_kho_gamification_thi_bo_qua_khong_loi(self):
+        """`Nen.social` (khong gan `gamification_store`) van hoat dong binh
+        thuong — the tac gia chi thieu truong, khong nem loi."""
+        chat = SocialService(self.identity, self.store, self.storage)
+        bai = chat.create_post(self.an, text="Bai thu")
+        bl = chat.create_comment(self.binh, bai["post_id"], text="Ok")
+        self.assertNotIn("equipped_cosmetics", bl["author"])
 
 
 class BangTinTest(Nen):

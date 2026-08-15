@@ -1286,6 +1286,10 @@ export interface AuthorCard {
       về chữ cái đầu tên. Cùng một chỗ (`_the_nguoi` ở backend) phục vụ mọi
       nơi thẻ này xuất hiện: bài đăng, bình luận, thông báo, tìm kiếm. */
   avatar_url?: string | null;
+  /** Vật phẩm sưu tầm ĐANG TRANG BỊ (V4 visual completion, vòng 4) — cùng
+      một chỗ (`_the_nguoi`) nên khung avatar hiện NHẤT QUÁN ở mọi nơi thẻ
+      này xuất hiện. Vắng mặt/rỗng = không trang bị gì, không phải lỗi. */
+  equipped_cosmetics?: CosmeticItem[];
 }
 
 export type PostKind = "post" | "story_update";

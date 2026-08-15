@@ -18,7 +18,7 @@ MOT MIXIN doc lap — khong dung chung bang voi `tts_jobs`/`translation_*`.
 from __future__ import annotations
 
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from server.adapters import NotFoundError
 from server.gamification_domain import (
@@ -90,6 +90,16 @@ class MockGamificationStore:
     def list_cosmetics(self, user_id: str) -> List[CosmeticInventoryItem]:
         with self._lock:
             return list(self._cosmetics.get(user_id, {}).values())
+
+    def list_cosmetics_by_ids(
+            self, user_ids: Sequence[str]) -> Dict[str, List[CosmeticInventoryItem]]:
+        """Ban HANG LOAT cua `list_cosmetics` — cho the tac gia gon
+        (`SocialService._the_nguoi`) hien khung dang trang bi ma KHONG di mot
+        truy van rieng cho tung nguoi (N+1). Nguoi khong co gi thi VANG MAT
+        khoi dict, khong phai danh sach rong — goi noi chi can `.get(uid, [])`."""
+        with self._lock:
+            return {uid: list(self._cosmetics[uid].values())
+                    for uid in user_ids if uid in self._cosmetics}
 
     def get_cosmetic(self, user_id: str, cosmetic_key: str) -> Optional[CosmeticInventoryItem]:
         with self._lock:

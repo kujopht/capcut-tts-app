@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import threading
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 import httpx
 
@@ -353,6 +353,21 @@ class AppwriteGamificationStore:
         rows = self._list_all(COL_COSMETIC_INVENTORY,
                               [q_equal("user_id", user_id)])
         return [_cosmetic_from_row(r) for r in rows]
+
+    def list_cosmetics_by_ids(
+            self, user_ids: Sequence[str]) -> Dict[str, List[CosmeticInventoryItem]]:
+        """Ban HANG LOAT — MOT truy van `equal("user_id", [...])` cho ca danh
+        sach (Appwrite khop OR tren nhieu gia tri), khong phai N truy van rieng.
+        Xem `MockGamificationStore.list_cosmetics_by_ids`."""
+        ids = [u for u in user_ids if u]
+        if not ids:
+            return {}
+        rows = self._list_all(COL_COSMETIC_INVENTORY, [q_equal("user_id", *ids)])
+        ra: Dict[str, List[CosmeticInventoryItem]] = {}
+        for row in rows:
+            item = _cosmetic_from_row(row)
+            ra.setdefault(item.user_id, []).append(item)
+        return ra
 
     def get_cosmetic(self, user_id: str,
                      cosmetic_key: str) -> Optional[CosmeticInventoryItem]:

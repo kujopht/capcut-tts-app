@@ -14,7 +14,7 @@
  */
 
 import Link from "next/link";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   GENRE_OPTIONS,
   GROQ_CONSOLE_KEYS_URL,
@@ -395,6 +395,17 @@ function ProjectDetail({
   const [dangNhap, setDangNhap] = useState(false);
   const [dangHuy, setDangHuy] = useState(false);
   const jobDinhKy = useRef<number | null>(null);
+
+  // Doi tuong tu goi lai (khong phai setInterval) nen khong the huy bang mot
+  // ID co dinh o dau — moi vong `hoi()` tu dat mot hen gio MOI. Don deu khi
+  // rong trang: thieu buoc nay thi nguoi dung roi `/translate` giua chung
+  // vong hoi van tiep tuc goi `getProject` toi 60 giay sau tren mot component
+  // da go, lang phi mang va co the in canh bao setState-tren-component-da-go.
+  useEffect(() => {
+    return () => {
+      if (jobDinhKy.current !== null) window.clearTimeout(jobDinhKy.current);
+    };
+  }, []);
 
   const batDauDich = useCallback(async () => {
     setDangTaoJob(true);

@@ -197,6 +197,27 @@ class HopDongGamification(unittest.TestCase):
                 self.assertEqual(len(kho.list_cosmetics("u1")), 1, ten)
                 self.assertEqual(len(kho.list_cosmetics("u2")), 1, ten)
 
+    def test_list_cosmetics_by_ids_gom_dung_nguoi(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.grant_cosmetic(CosmeticInventoryItem(
+                    user_id="u1", cosmetic_key="khung_go"))
+                kho.grant_cosmetic(CosmeticInventoryItem(
+                    user_id="u1", cosmetic_key="khung_bac"))
+                kho.grant_cosmetic(CosmeticInventoryItem(
+                    user_id="u2", cosmetic_key="khung_go"))
+                ra = kho.list_cosmetics_by_ids(["u1", "u2", "u3_khong_ton_tai"])
+                self.assertEqual({m.cosmetic_key for m in ra["u1"]},
+                                 {"khung_go", "khung_bac"}, ten)
+                self.assertEqual({m.cosmetic_key for m in ra["u2"]},
+                                 {"khung_go"}, ten)
+                self.assertNotIn("u3_khong_ton_tai", ra, ten)
+
+    def test_list_cosmetics_by_ids_rong_tra_dict_rong(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                self.assertEqual(kho.list_cosmetics_by_ids([]), {}, ten)
+
 
 class BuildGamificationStoreTest(unittest.TestCase):
     """`build_gamification_store` phai chon dung kho theo `DATA_BACKEND`,

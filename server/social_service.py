@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from server.adapters import NotFoundError, PermissionDenied
 from server.creator import public_author_card, rank_progress
+from server.gamification_service import cong_khai_vat_pham_dang_trang_bi_hang_loat
 from server.domain import (
     Comment,
     ContentReport,
@@ -96,7 +97,8 @@ class SocialService:
 
     def __init__(self, identity: Any, store: Any, storage: Any = None,
                  han_muc: Optional[Dict[str, HanMuc]] = None,
-                 animation_store: Any = None):
+                 animation_store: Any = None,
+                 gamification_store: Any = None):
         self._identity = identity
         self._store = store
         self._storage = storage
@@ -107,6 +109,11 @@ class SocialService:
         #: chi dung cho binh luan TAP. `None` cho cac test khong dung toi
         #: nhanh Animation (khong goi `create_episode_comment`/`episode_comments`).
         self._animation_store = animation_store
+        #: Kho gamification — CHI de doc vat pham DANG TRANG BI hang loat cho
+        #: the tac gia gon (`_the_nguoi`), khong ghi gi qua day. `None` cho cac
+        #: test khong quan tam khung/huy hieu (the tac gia chi thieu truong
+        #: `equipped_cosmetics`, khong loi gi).
+        self._gamification_store = gamification_store
 
     # ==================================================================== THEO DOI
 
@@ -832,22 +839,32 @@ class SocialService:
 
     def _the_nguoi(self, user_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
         """
-        The tac gia gon cho nhieu nguoi, HAI truy van (+ ky URL avatar CUC BO).
+        The tac gia gon cho nhieu nguoi, BA truy van (+ ky URL avatar CUC BO).
 
         Dung `public_author_card` — cung danh sach cho phep ma tim kiem va trang
         ca nhan dung. Mot danh sach cho phep, mot cho — MOI noi hien avatar
         (bai dang, binh luan, tra loi, thong bao, tim kiem, the tac gia) deu
-        di qua ham nay nen chi can sua MOT cho.
+        di qua ham nay nen chi can sua MOT cho. Cung ly do, `equipped_cosmetics`
+        (khung avatar/huy hieu dang trang bi — V4 visual completion vong 4)
+        them vao day thi TU DONG hien nhat quan o moi noi ke tren, khong phai
+        sua tung noi hien thi rieng.
 
         Ky URL avatar KHONG phai mot truy van them: `_anh_url` tinh chu ky
-        cuc bo (HMAC/presign), khong goi mang — nen ky N avatar o day van la
-        hai truy van kho du lieu, khong phai N+1.
+        cuc bo (HMAC/presign), khong goi mang. Vat pham dang trang bi dung
+        MOT truy van hang loat (`list_cosmetics_by_ids`) cho ca danh sach —
+        nen ky N avatar + doc khung N nguoi o day van la BA truy van kho du
+        lieu tong cong, khong phai N+1. `self._gamification_store` co the la
+        `None` (test khong quan tam khung/huy hieu) — luc do bo qua buoc nay,
+        the tac gia chi thieu truong `equipped_cosmetics`.
         """
         ids = sorted({u for u in user_ids if u})
         if not ids:
             return {}
         ho_so = self._identity.profiles_by_ids(ids)
         thong_ke = self._store.stats_by_ids(ids)
+        vat_pham = (cong_khai_vat_pham_dang_trang_bi_hang_loat(
+            self._gamification_store, ids)
+            if self._gamification_store is not None else {})
         ra: Dict[str, Dict[str, Any]] = {}
         for uid in ids:
             p = ho_so.get(uid)
@@ -859,6 +876,8 @@ class SocialService:
                 "published_novels": st.published_novels if st else 0,
             })
             the["avatar_url"] = self._anh_url(p.avatar_key) or None
+            if uid in vat_pham:
+                the["equipped_cosmetics"] = vat_pham[uid]
             ra[uid] = the
         return ra
 

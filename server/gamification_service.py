@@ -10,7 +10,7 @@ khong tao vat pham trung) nam o MOT cho.
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from server.gamification import (
     ACHIEVEMENTS,
@@ -212,6 +212,35 @@ def cong_khai_vat_pham_dang_trang_bi(store: Any, user_id: str) -> List[dict]:
             continue
         ra.append({"key": dn.key, "name": dn.name, "rarity": dn.rarity,
                    "slot": dn.slot, "asset_ref": dn.asset_ref})
+    return ra
+
+
+def cong_khai_vat_pham_dang_trang_bi_hang_loat(
+        store: Any, user_ids: Sequence[str]) -> Dict[str, List[dict]]:
+    """
+    Ban HANG LOAT cua `cong_khai_vat_pham_dang_trang_bi` — cho the tac gia gon
+    dung chung o nhieu noi cung luc (binh luan, bai dang, thong bao, tim kiem —
+    xem `SocialService._the_nguoi`). MOT truy van kho du lieu cho ca danh sach
+    (`list_cosmetics_by_ids`), khong phai mot truy van rieng cho tung nguoi.
+
+    Nguoi khong trang bi gi VANG MAT khoi dict tra ve (khong phai danh sach
+    rong) — noi goi dung `.get(uid, [])`.
+    """
+    dinh_nghia = {c.key: c for c in COSMETIC_CATALOG}
+    theo_nguoi = store.list_cosmetics_by_ids(user_ids)
+    ra: Dict[str, List[dict]] = {}
+    for uid, muc_list in theo_nguoi.items():
+        cua_nguoi = []
+        for muc in muc_list:
+            if not muc.equipped:
+                continue
+            dn = dinh_nghia.get(muc.cosmetic_key)
+            if dn is None:
+                continue
+            cua_nguoi.append({"key": dn.key, "name": dn.name, "rarity": dn.rarity,
+                              "slot": dn.slot, "asset_ref": dn.asset_ref})
+        if cua_nguoi:
+            ra[uid] = cua_nguoi
     return ra
 
 

@@ -46,13 +46,31 @@ export function AchievementGrid() {
   const { data } = useAsyncData(fetcher);
   const items = data?.achievements ?? [];
 
+  // Rong = KHONG tai duoc (loi mang/auth) — module PHU nen an hoan toan thay
+  // vi choan trang bang mot thong bao loi. Danh sach thanh tuu THAT (tu
+  // `ACHIEVEMENTS` o may chu) khong bao gio rong: nguoi moi tinh van thay
+  // du bon the, chi la tat ca dang khoa — xem `daChuaMoKhoaNao` ben duoi.
   if (items.length === 0) return null;
+
+  const daChuaMoKhoaNao = items.every((a) => !a.unlocked);
 
   return (
     <section className="stack-2" aria-labelledby="acc-thanh-tuu">
       <h2 className="section-title section-title-icon" id="acc-thanh-tuu">
         <IconShield size={19} /> Thành tựu
       </h2>
+      {daChuaMoKhoaNao ? (
+        <div className="profile-showcase-card">
+          <strong>Bạn chưa mở khoá thành tựu nào</strong>
+          <p className="hint">
+            Thành tựu là những cột mốc đọc, nghe và sáng tác trên Fanfic
+            World — mỗi thẻ dưới đây đã ghi rõ điều kiện để mở khoá. Đọc một
+            chương, tổng hợp một bản audio hay xuất bản một tiểu thuyết là
+            những bước đầu tiên; tiến độ được máy chủ ghi nhận tự động,
+            không cần tự báo.
+          </p>
+        </div>
+      ) : null}
       <div className="bento-grid">
         {items.map((a) => (
           <TheThanhTuu key={a.key} a={a} />

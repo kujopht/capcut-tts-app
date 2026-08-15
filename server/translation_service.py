@@ -322,6 +322,15 @@ class TranslationService:
         #: Cache dich RIENG cua instance nay — xem docstring
         #: `_TranslationSegmentCache` ve ly do KHONG dung bien cap module.
         self._cache = _TranslationSegmentCache()
+        #: V6 (yeu cau bo sung "terminology consistency") — snapshot thuat
+        #: ngu {project_id: {tu_goc: ban_dich}} CHO CA MOT LAN CHAY JOB, xem
+        #: `_lay_thuat_ngu_du_an`. Trong bo nho, RIENG cua instance nay (cung
+        #: ly do voi `_cache`) — KHONG ben vung qua restart, KHONG dong bo
+        #: giua nhieu worker process. San sang thay bang kho Appwrite rieng
+        #: sau nay (yeu cau goc muc 7): CHI can doi noi doc/ghi trong
+        #: `_lay_thuat_ngu_du_an`, hinh dang du lieu {tu_goc: ban_dich}
+        #: khong doi.
+        self._thuat_ngu_theo_du_an: Dict[str, Dict[str, str]] = {}
 
     # ==================================================================== DU AN
 
@@ -720,6 +729,13 @@ class TranslationService:
         lai TU DAU (chua kip ghi vao `translated_chapters` nen khong co gi
         de mat).
         """
+        # Xoa snapshot thuat ngu CU (neu co, tu mot lan chay TRUOC cua CUNG
+        # du an nay) — moi LAN CHAY job (ke ca resume sau worker chet) lay
+        # MOT snapshot MOI tu kho, roi giu NGUYEN snapshot do cho TOAN BO
+        # chuong con lai cua lan chay nay (xem `_lay_thuat_ngu_du_an`, yeu
+        # cau goc muc 2: nhat quan thuat ngu XUYEN SUOT mot lan chay job).
+        self._thuat_ngu_theo_du_an.pop(project.project_id, None)
+
         chuong = tach_chuong(project.source_text)
         bat_dau_tu = len(project.translated_chapters)
         try:
@@ -939,7 +955,7 @@ class TranslationService:
                 mode="manual", selected_provider_id=prov_1.provider_id,
                 allow_fallback=False,
                 prefer_personal=(prov_1.credential_source == "personal"))
-            if not kiem_tra_tinh_ven(text, ket_qua_2):
+            if not kiem_tra_tinh_ven(text, ket_qua_2, glossary=ctx.glossary):
                 return ket_qua_2, prov_2
         except TranslationProviderError:
             # Lan sua loi TU NO cung co the that bai (vd rate-limit/loi mang
@@ -1026,7 +1042,7 @@ class TranslationService:
         # trong test) thuong "dich" bang cach ECHO NGUYEN VAN dau vao (vd
         # `MockTranslationProvider`/`_FakeInnerProvider` — xem docstring cac
         # lop do) nen SE bi flag han_residue SAI neu bi kiem tra o day.
-        van_de = (kiem_tra_tinh_ven(text, ket_qua)
+        van_de = (kiem_tra_tinh_ven(text, ket_qua, glossary=ctx.glossary)
                  if prov.provider_id.startswith(("cerebras", "groq")) else [])
         if van_de:
             if prov.provider_id.startswith("cerebras"):
@@ -1042,6 +1058,37 @@ class TranslationService:
                            model_id=prov.model_id, credential_source=prov.credential_source)
         return ket_qua, prov
 
+    def _lay_thuat_ngu_du_an(self, project: TranslationProject) -> Dict[str, str]:
+        """
+        Snapshot thuat ngu (glossary) CHO CA MOT LAN CHAY JOB — lay MOT LAN
+        tu kho, roi GIU NGUYEN (khong doc lai) cho TOAN BO cac chuong con
+        lai cua CUNG lan chay nay (yeu cau bo sung "terminology consistency"
+        muc 2: "Preserve a translation-job terminology map across all chunks
+        of the same chapter/job").
+
+        Danh doi CO CHU DICH: neu ai do sua glossary GIUA CHUNG mot job dang
+        chay (vd du an dai nhieu chuong, nguoi dung sua tu dien o giua),
+        thay doi do CHUA co hieu luc cho cac chuong CON LAI cua lan chay
+        HIEN TAI — chi co hieu luc tu LAN CHAY KE TIEP (`_thuc_thi_job` xoa
+        snapshot cu luc bat dau, xem noi goi). Nhat quan XUYEN SUOT mot lan
+        chay quan trong hon phan anh tuc thi mot thay doi giua chung — dung
+        y "cung mot ten rieng/tieu de/mon phai/thuat ngu tu luyen duoc dich
+        nhat quan" cho CA job, khong doi giua chuong 3 va chuong 5 chi vi
+        request doc glossary tinh co roi vao giua mot lan sua.
+
+        CHI DUNG cho duong ong TU DONG (`_dich_mot_chuong`) — hanh dong THU
+        CONG (`_chay_vai_tro_tren_van_ban`: regen doan/chuong, chay lai pass)
+        VAN doc glossary TRUC TIEP tu kho (KHONG qua snapshot nay), vi day
+        la mot hanh dong RIENG LE cua nguoi dung, khong phai "mot chuong
+        trong lan chay job dang dien ra" — nguoi dung bam "dịch lại" luon
+        muon ban MOI NHAT cua glossary, khong phai mot snapshot co the da cu.
+        """
+        if project.project_id not in self._thuat_ngu_theo_du_an:
+            self._thuat_ngu_theo_du_an[project.project_id] = {
+                e.original: e.translated
+                for e in self._store.list_glossary(project.project_id)}
+        return self._thuat_ngu_theo_du_an[project.project_id]
+
     def _dich_mot_chuong(self, project: TranslationProject, noi_dung: str,
                          chuong_idx: int, job: TranslationJob,
                          fence: int, lost: threading.Event
@@ -1055,8 +1102,7 @@ class TranslationService:
         tom_tat = "\n".join(
             project.chapter_summaries[max(0, chuong_idx - SO_CHUONG_TOM_TAT_NGU_CANH):
                                       chuong_idx])
-        glossary = {e.original: e.translated
-                    for e in self._store.list_glossary(project.project_id)}
+        glossary = self._lay_thuat_ngu_du_an(project)
 
         vai_tro_ds = _VAI_TRO_THEO_CHE_DO[project.quality_mode]
         ket_qua = []

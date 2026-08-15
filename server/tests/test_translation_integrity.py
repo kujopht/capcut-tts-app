@@ -107,6 +107,61 @@ class TruncationTest(unittest.TestCase):
         self.assertNotIn("truncated", _ma(kiem_tra_tinh_ven(nguon, dich)))
 
 
+class GlossaryViolationTest(unittest.TestCase):
+    """Yeu cau bo sung "terminology consistency" (sau phat hien "药老" dich
+    khong nhat quan giua hai lan goi that: "Dược Lão" vs "Yêu Lão")."""
+
+    def test_tai_lap_mau_that_duoc_lao_vs_yeu_lao(self):
+        nguon = "萧炎看向药老，微微皱眉。"
+        dich_sai = "Tiêu Viêm nhìn về phía Yêu Lão, khẽ nhíu mày."
+        van_de = kiem_tra_tinh_ven(nguon, dich_sai, glossary={"药老": "Dược Lão"})
+        self.assertIn("glossary_violation", _ma(van_de))
+
+    def test_dung_thuat_ngu_da_chot_khong_bao_loi(self):
+        nguon = "萧炎看向药老，微微皱眉。"
+        dich_dung = "Tiêu Viêm nhìn về phía Dược Lão, khẽ nhíu mày."
+        van_de = kiem_tra_tinh_ven(nguon, dich_dung, glossary={"药老": "Dược Lão"})
+        self.assertNotIn("glossary_violation", _ma(van_de))
+
+    def test_thuat_ngu_khong_xuat_hien_trong_doan_nay_thi_khong_kiem_tra(self):
+        """Tu dien co the co CA du an (nhieu nhan vat), nhung CHI kiem tu
+        NAO thuc su xuat hien trong doan dang xu ly — tranh canh bao gia
+        cho nhung tu khong lien quan doan nay."""
+        nguon = "他站起身，转身离开了房间。"
+        dich = "Hắn đứng dậy rồi quay người rời khỏi căn phòng."
+        van_de = kiem_tra_tinh_ven(nguon, dich, glossary={"药老": "Dược Lão"})
+        self.assertNotIn("glossary_violation", _ma(van_de))
+
+    def test_khong_glossary_thi_hanh_vi_cu_khong_doi(self):
+        """`glossary=None` (mac dinh) — tuong thich nguoc hoan toan voi
+        hanh vi truoc khi co yeu cau nay."""
+        nguon = "萧炎看向药老。"
+        dich = "Tiêu Viêm nhìn về phía Yêu Lão."
+        self.assertEqual(kiem_tra_tinh_ven(nguon, dich), [])
+
+    def test_hai_nhan_vat_khac_nhau_khong_bi_gop_nham(self):
+        """Hai tu dien RIENG cho hai nhan vat KHAC nhau — vi pham cua nhan
+        vat A khong duoc lam anh huong toi kiem tra cua nhan vat B."""
+        glossary = {"药老": "Dược Lão", "萧炎": "Tiêu Viêm"}
+        nguon = "萧炎和药老一起走进了迷雾之中。"
+        # Chi "萧炎" dung, "药老" SAI ("Dược Sư" khong phai "Dược Lão").
+        dich_mot_phan_sai = "Tiêu Viêm và Dược Sư cùng nhau bước vào sương mù."
+        van_de = kiem_tra_tinh_ven(nguon, dich_mot_phan_sai, glossary=glossary)
+        ma = _ma(van_de)
+        self.assertIn("glossary_violation", ma)
+        # Chi DUNG MOT vi pham (药老) — "萧炎"/"Tiêu Viêm" dung, khong bi
+        # tinh gop nham thanh vi pham thu hai.
+        so_vi_pham = sum(1 for v in van_de if v.code == "glossary_violation")
+        self.assertEqual(so_vi_pham, 1)
+
+    def test_ca_hai_nhan_vat_dung_khong_bao_loi(self):
+        glossary = {"药老": "Dược Lão", "萧炎": "Tiêu Viêm"}
+        nguon = "萧炎和药老一起走进了迷雾之中。"
+        dich_dung = "Tiêu Viêm và Dược Lão cùng nhau bước vào trong màn sương mù."
+        van_de = kiem_tra_tinh_ven(nguon, dich_dung, glossary=glossary)
+        self.assertNotIn("glossary_violation", _ma(van_de))
+
+
 class EmptyOutputTest(unittest.TestCase):
     def test_dich_rong(self):
         van_de = kiem_tra_tinh_ven("你好。", "")

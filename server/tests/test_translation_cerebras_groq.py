@@ -131,10 +131,15 @@ class _FakeScriptedTextProvider:
         #: Ghi lai `context.chi_dan_sua_loi` cua MOI lan goi — dung de kiem
         #: tra lan goi SUA LOI thuc su co kem chi dan (khac lan goi dau).
         self.chi_dan_sua_loi_moi_lan: list = []
+        #: V6 (terminology consistency) — ghi lai `context.glossary` cua
+        #: MOI lan goi (BAN SAO, khong phai tham chieu) — dung de kiem tra
+        #: lan goi SUA LOI nhan DUNG cung rang buoc thuat ngu voi lan goi dau.
+        self.glossary_moi_lan: list = []
 
     def translate_segment(self, text, *, context):
         self.so_lan_goi += 1
         self.chi_dan_sua_loi_moi_lan.append(context.chi_dan_sua_loi)
+        self.glossary_moi_lan.append(dict(context.glossary))
         hanh_dong = self._kich_ban.pop(0) if self._kich_ban else "ok rỗng."
         if isinstance(hanh_dong, Exception):
             raise hanh_dong
@@ -822,6 +827,154 @@ class GroqCooldownTest(unittest.TestCase):
         self.assertEqual(prov.provider_id, "groq_gpt_oss_120b")
         self.assertEqual(qwen.provider.so_lan_goi, so_lan_goi_truoc,
                          "provider đang cooldown KHÔNG được gọi lại")
+
+
+# =============================================================================
+# Terminology consistency — sau phat hien "药老" dich khong nhat quan giua
+# hai lan goi that ("Dược Lão" vs "Yêu Lão")
+# =============================================================================
+
+class TerminologyConsistencyTest(unittest.TestCase):
+    """Yeu cau bo sung: glossary tuong minh la nguon su that CAO NHAT cho
+    thuat ngu, duoc bao ve boi tich ven + sua loi, VA duoc giu NHAT QUAN
+    xuyen suot MOI chuong cua CUNG mot lan chay job (khong doc lai glossary
+    tu kho moi chuong — xem `TranslationService._lay_thuat_ngu_du_an`)."""
+
+    NGUON_1 = "萧炎看向药老，微微皱眉。"
+    NGUON_2 = "药老转过身，对萧炎说了几句话。"
+    DICH_1_DUNG = "Tiêu Viêm nhìn về phía Dược Lão, khẽ nhíu mày."
+    DICH_2_SAI = "Yêu Lão quay người, nói với Tiêu Viêm vài câu."
+    DICH_2_DUNG = "Dược Lão quay người, nói với Tiêu Viêm vài câu."
+
+    def setUp(self):
+        self.identity = MockIdentityAdapter()
+        self.novels = MockMetadataStore()
+        self.store = MockTranslationStore()
+        self.an = self.identity.register("an@vidu.vn", "MatKhau123", "An")
+
+    def _svc_va_du_an(self, registry, source_text="x"):
+        svc = TranslationService(self.store, self.novels, registry=registry)
+        p = svc.create_project(self.an.user_id, title="t", source_text=source_text,
+                               quality_mode="nhanh")
+        return svc, p
+
+    def test_explicit_glossary_ghi_de_bien_the_cua_model(self):
+        """Kich ban CHINH XAC tu benchmark that: model tra ve "Yêu Lão" (mot
+        bien the "hop ly" nhung SAI voi thuat ngu da chot) — glossary tuong
+        minh PHAI thang, sua loi buoc model quay ve DUNG "Dược Lão"."""
+        cerebras = _cerebras_cp_scripted([self.DICH_2_SAI, self.DICH_2_DUNG])
+        qwen = _groq_cp_scripted(["KHÔNG ĐƯỢC GỌI"])
+        registry = ProviderRegistry([cerebras, qwen])
+        svc, p = self._svc_va_du_an(registry)
+
+        ctx = TranslationContext(vai_tro="translator", quality_mode="van_hoc",
+                                 glossary={"药老": "Dược Lão"})
+        ket_qua, prov = svc._goi_dich_mot_doan(self.NGUON_2, ctx, p, [])
+
+        self.assertEqual(ket_qua, self.DICH_2_DUNG)
+        self.assertEqual(prov.provider_id, "cerebras_gpt_oss_120b")
+        self.assertEqual(cerebras.provider.so_lan_goi, 2,
+                         "phải gọi Cerebras 2 lần: lần đầu sai, lần sửa lỗi đúng")
+        self.assertEqual(qwen.provider.so_lan_goi, 0)
+
+    def test_repair_retry_nhan_dung_cung_rang_buoc_thuat_ngu(self):
+        """Yeu cau muc 3: 'Pass the canonical terminology map into every
+        provider call and every repair retry' — lan goi SUA LOI phai nhan
+        CHINH XAC cung glossary voi lan goi dau, khong bi mat/doi khac."""
+        cerebras = _cerebras_cp_scripted([self.DICH_2_SAI, self.DICH_2_DUNG])
+        registry = ProviderRegistry([cerebras])
+        svc, p = self._svc_va_du_an(registry)
+        glossary = {"药老": "Dược Lão", "萧炎": "Tiêu Viêm"}
+        ctx = TranslationContext(vai_tro="translator", quality_mode="van_hoc",
+                                 glossary=glossary)
+        svc._goi_dich_mot_doan(self.NGUON_2, ctx, p, [])
+
+        self.assertEqual(len(cerebras.provider.glossary_moi_lan), 2)
+        self.assertEqual(cerebras.provider.glossary_moi_lan[0], glossary)
+        self.assertEqual(cerebras.provider.glossary_moi_lan[1], glossary,
+                         "lần sửa lỗi phải nhận ĐÚNG cùng glossary với lần đầu")
+
+    def test_cung_ten_rieng_nhat_quan_qua_nhieu_chuong_trong_mot_job(self):
+        """Yeu cau muc 2: 'Preserve a translation-job terminology map across
+        all chunks of the same chapter/job' — mot job THAT (khong goi
+        `_goi_dich_mot_doan` truc tiep) voi HAI chuong, CA HAI chuong deu
+        phai dung DUNG "Dược Lão" cho "药老", ke ca khi model "muon" dich
+        khac o chuong thu hai."""
+        van_ban = f"第1章 Một\n{self.NGUON_1}\n第2章 Hai\n{self.NGUON_2}"
+        # Chuong 1: model dich DUNG ngay. Chuong 2: model dich SAI truoc,
+        # sua loi moi dung — CA HAI TRUONG HOP deu phai ra "Dược Lão" cuoi
+        # cung, khong con "Yêu Lão" nao trong ket qua.
+        cerebras = _cerebras_cp_scripted(
+            [self.DICH_1_DUNG, self.DICH_2_SAI, self.DICH_2_DUNG])
+        registry = ProviderRegistry([cerebras])
+
+        svc = TranslationService(self.store, self.novels, registry=registry)
+        p = svc.create_project(self.an.user_id, title="t", source_text=van_ban,
+                               quality_mode="nhanh")
+        # Glossary tuong minh — them TRUOC khi tao job (giong moi test glossary
+        # hien co trong repo: glossary phai san sang truoc khi job bat dau).
+        term = svc.add_glossary_entry(
+            p.project_id, self.an.user_id, category="character",
+            original="药老", translated="Dược Lão")
+        svc.update_glossary_entry(p.project_id, self.an.user_id,
+                                  term.term_id, locked=True)
+
+        job = svc.create_job(p.project_id, self.an.user_id)
+        han = time.time() + 5.0
+        while time.time() < han:
+            job = svc.get_job(job.job_id, self.an.user_id)
+            if job.status.value in ("completed", "failed", "cancelled"):
+                break
+            time.sleep(0.005)
+
+        self.assertEqual(job.status.value, "completed", job.error)
+        p_cuoi = svc.get_project(p.project_id, self.an.user_id)
+        self.assertEqual(len(p_cuoi.translated_chapters), 2)
+        self.assertIn("Dược Lão", p_cuoi.translated_chapters[0])
+        self.assertIn("Dược Lão", p_cuoi.translated_chapters[1])
+        self.assertNotIn("Yêu Lão", p_cuoi.translated_chapters[0])
+        self.assertNotIn("Yêu Lão", p_cuoi.translated_chapters[1],
+                         "chương 2 không được để sót bản dịch sai chưa sửa")
+        # Khong trung lap: hai chuong PHAI khac noi dung nhau (mac du cung
+        # nhan vat) — khong bi ghep/nhan doi mot chuong thanh ca hai.
+        self.assertNotEqual(p_cuoi.translated_chapters[0], p_cuoi.translated_chapters[1])
+
+    def test_hai_nhan_vat_khac_nhau_khong_bi_gop_nham(self):
+        """Yeu cau: 'different characters are not accidentally merged' —
+        mot doan co HAI ten rieng, chi MOT ten dich sai — sua loi CHI anh
+        huong dung ten do, ten con lai giu nguyen, khong bi "sua nham"."""
+        glossary = {"药老": "Dược Lão", "萧炎": "Tiêu Viêm"}
+        nguon = "萧炎和药老一起走进了迷雾之中。"
+        dich_mot_phan_sai = "Tiêu Viêm và Dược Sư cùng nhau bước vào sương mù."
+        dich_sua_dung = "Tiêu Viêm và Dược Lão cùng nhau bước vào trong màn sương mù."
+
+        cerebras = _cerebras_cp_scripted([dich_mot_phan_sai, dich_sua_dung])
+        registry = ProviderRegistry([cerebras])
+        svc, p = self._svc_va_du_an(registry)
+        ctx = TranslationContext(vai_tro="translator", quality_mode="van_hoc",
+                                 glossary=glossary)
+        ket_qua, prov = svc._goi_dich_mot_doan(nguon, ctx, p, [])
+
+        self.assertEqual(ket_qua, dich_sua_dung)
+        self.assertIn("Tiêu Viêm", ket_qua)
+        self.assertIn("Dược Lão", ket_qua)
+        self.assertEqual(cerebras.provider.so_lan_goi, 2)
+
+    def test_khong_trung_lap_sau_khi_sua_thuat_ngu(self):
+        """Yeu cau: 'no duplicate text after terminology repair' — ket qua
+        SAU sua loi thay the HOAN TOAN ket qua sai, khong noi/ghep ca hai."""
+        cerebras = _cerebras_cp_scripted([self.DICH_2_SAI, self.DICH_2_DUNG])
+        registry = ProviderRegistry([cerebras])
+        svc, p = self._svc_va_du_an(registry)
+        ctx = TranslationContext(vai_tro="translator", quality_mode="van_hoc",
+                                 glossary={"药老": "Dược Lão"})
+        ket_qua, prov = svc._goi_dich_mot_doan(self.NGUON_2, ctx, p, [])
+
+        self.assertEqual(ket_qua, self.DICH_2_DUNG)
+        self.assertNotIn(self.DICH_2_SAI, ket_qua)
+        # Do dai ket qua PHAI la CHINH XAC ban dich sua loi, khong dai hon
+        # (khong bi noi them ban sai vao truoc/sau).
+        self.assertEqual(len(ket_qua), len(self.DICH_2_DUNG))
 
 
 if __name__ == "__main__":

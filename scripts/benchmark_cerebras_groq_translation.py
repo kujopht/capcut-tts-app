@@ -67,17 +67,29 @@ from server.translation_service import CHI_DAN_SUA_LOI_CEREBRAS  # noqa: E402
 #: Vài đoạn fanfic tiên hiệp/huyền huyễn NGẮN, KHÔNG bản quyền (tự viết cho
 #: mục đích kiểm thử) — đủ đa dạng để lộ ra khác biệt về xưng hô, tên riêng,
 #: hội thoại, và đoạn văn tường thuật thuần tuý.
+#:
+#: `nhac_lai_duoc_lao` THÊM sau khi phát hiện benchmark thật dịch "药老"
+#: không nhất quán giữa hai lần gọi ("Dược Lão" vs "Yêu Lão") — đoạn này
+#: nhắc lại CÙNG nhân vật để chứng minh glossary tường minh giữ nhất quán
+#: XUYÊN SUỐT nhiều lần gọi (mô phỏng nhiều chunk của cùng một job).
 DOAN_MAU = [
     ("hoi_thoai_xung_ho", "萧炎看向药老，微微皱眉，低声道：\"师父，这件事你早就知道了，对不对？\""),
     ("tuong_thuat_dia_danh", "这一日，云澈山下起了大雾，山道两旁的枯树在风中发出低沉的呜咽声。"),
     ("he_thong_thuat_ngu", "叮！恭喜宿主突破至炼气期九层，获得功法《焚天诀》一份，请及时查看。"),
     ("doi_thoai_nhieu_nhan_vat",
      "\"你到底是谁？\"她厉声问道。\n\"我？\"他冷笑一声，\"你很快就会知道了。\""),
+    ("nhac_lai_duoc_lao", "药老转过身，对萧炎说了几句话，随后又望向远方的天际。"),
 ]
+
+#: Novel Bible / glossary GIẢ ĐỊNH đã chốt cho dự án này (thực tế sẽ do
+#: người dùng cấu hình qua `TranslationService.add_glossary_entry` — script
+#: này gọi thẳng provider, không qua project/store, nên khai báo trực tiếp
+#: ở đây để mô phỏng ĐÚNG những gì một dự án thật đã có sẵn).
+GLOSSARY_DU_AN = {"药老": "Dược Lão"}
 
 CONTEXT = TranslationContext(
     vai_tro="translator", quality_mode="van_hoc",
-    genre="tien_hiep", naming_mode="han_viet")
+    genre="tien_hiep", naming_mode="han_viet", glossary=GLOSSARY_DU_AN)
 
 
 @dataclass
@@ -134,7 +146,7 @@ def _thu_cerebras(profile_key: str, api_key: str) -> list[KetQua]:
                              loi=str(exc)[:300]))
             continue
 
-        van_de_1 = kiem_tra_tinh_ven(van_ban, dau_ra_1)
+        van_de_1 = kiem_tra_tinh_ven(van_ban, dau_ra_1, glossary=GLOSSARY_DU_AN)
         da_sua = False
         dau_ra_cuoi = dau_ra_1
         loi_sua = ""
@@ -147,7 +159,7 @@ def _thu_cerebras(profile_key: str, api_key: str) -> list[KetQua]:
             except TranslationProviderError as exc:
                 loi_sua = f" (lần sửa lỗi cũng thất bại: {str(exc)[:200]})"
 
-        van_de_cuoi = kiem_tra_tinh_ven(van_ban, dau_ra_cuoi)
+        van_de_cuoi = kiem_tra_tinh_ven(van_ban, dau_ra_cuoi, glossary=GLOSSARY_DU_AN)
         ra.append(KetQua(
             model_key=ten, display_name=hien_thi, doan_key=dk,
             trang_thai="ok" if not van_de_cuoi else "loi_tinh_ven",
@@ -179,7 +191,7 @@ def _thu_groq(profile_key: str, api_key: str) -> list[KetQua]:
         bat_dau = time.monotonic()
         try:
             dau_ra = provider.translate_segment(van_ban, context=CONTEXT)
-            van_de = kiem_tra_tinh_ven(van_ban, dau_ra)
+            van_de = kiem_tra_tinh_ven(van_ban, dau_ra, glossary=GLOSSARY_DU_AN)
             ra.append(KetQua(
                 model_key=f"groq_{profile_key}",
                 display_name=f"Groq · {profile.display_name}", doan_key=dk,

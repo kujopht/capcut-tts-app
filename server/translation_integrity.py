@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List, Optional
 
 from server.translation import MAU_KY_TU_HAN
 
@@ -59,7 +59,9 @@ class IntegrityIssue:
     detail: str
 
 
-def kiem_tra_tinh_ven(nguon: str, dich: str) -> List[IntegrityIssue]:
+def kiem_tra_tinh_ven(nguon: str, dich: str, *,
+                      glossary: Optional[Dict[str, str]] = None
+                      ) -> List[IntegrityIssue]:
     """
     Kiem tra MOT doan dich (nguon Trung -> dich Viet) — tra ve danh sach
     RONG neu khong phat hien van de gi (hop le). KHONG bao gio nem loi — day
@@ -69,6 +71,13 @@ def kiem_tra_tinh_ven(nguon: str, dich: str) -> List[IntegrityIssue]:
     Goi voi CA doan khong phai dich Trung->Viet (vd pass editor/QA, dau vao
     da la tieng Viet) van AN TOAN: nguon khong co chu Han thi rule (3) khong
     bao gio kich hoat (khong the "con sot" cai chua bao gio co).
+
+    `glossary` (V6, terminology consistency): {tu_goc: ban_dich_DA_CHOT} — CO
+    HIEU LUC CAO NHAT trong tat ca cac quy tac (yeu cau goc muc 1/4): neu
+    THAT SU khong dung DUNG ban dich da chot cho MOT tu goc CO XUAT HIEN
+    trong doan nguon nay, luon la loi (`glossary_violation`), BAT KE cac
+    rule khac co bat gi hay khong. Rong/None = khong kiem tra gi them (hanh
+    vi CU, tuong thich nguoc hoan toan).
     """
     van_de: List[IntegrityIssue] = []
     sach_dich = (dich or "").strip()
@@ -80,6 +89,27 @@ def kiem_tra_tinh_ven(nguon: str, dich: str) -> List[IntegrityIssue]:
     if not sach_dich:
         van_de.append(IntegrityIssue("empty", "Bản dịch rỗng."))
         return van_de  # cac rule sau vo nghia voi chuoi rong, dung som
+
+    # 1b) Vi pham thuat ngu DA CHOT (uu tien CAO NHAT — yeu cau goc muc 1/4):
+    # tu goc CO xuat hien trong doan nguon nay (chi kiem nhung tu THUC SU
+    # LIEN QUAN, tranh phinh canh bao cho ca tu dien du an khong dung o day)
+    # nhung ban dich KHONG chua DUNG ban dich da chot cho no — vi du that:
+    # glossary {"药老": "Dược Lão"}, nguon co "药老", dich la "Yêu Lão" (SAI,
+    # khong phai "Dược Lão" o dau ca) -> loi. KHONG doan/suy luan "Yêu Lão"
+    # co nghia la gi — chi kiem tra SU HIEN DIEN cua ban dich DUNG, dung y
+    # yeu cau goc "Do not blindly replace arbitrary Chinese text with string
+    # substitution. Only enforce known/approved glossary or terminology
+    # mappings" (day la PHAT HIEN, khong phai thay the mu quang — sua that
+    # su la viec cua buoc repair retry, khong phai o day).
+    if glossary:
+        for tu_goc, ban_dich_dung in glossary.items():
+            if not tu_goc or not ban_dich_dung:
+                continue
+            if tu_goc in sach_nguon and ban_dich_dung not in sach_dich:
+                van_de.append(IntegrityIssue(
+                    "glossary_violation",
+                    f"Thuật ngữ đã chốt \"{tu_goc}\" phải dịch thành "
+                    f"\"{ban_dich_dung}\" nhưng không thấy trong bản dịch."))
 
     # 2) Con sot ky tu Han — CHI kich hoat khi NGUON THAT SU co chu Han de
     # "con sot" (tranh bao gio flag sai mot pass editor/QA tren van ban da

@@ -7,67 +7,64 @@ GROQ_API_KEY: có
 
 | Model | Đoạn | Trạng thái | Đã sửa lỗi? | Độ trễ (s) | Token in/out |
 |---|---|---|---|---|---|
-| Cerebras · GPT-OSS 120B | hoi_thoai_xung_ho | ok | — | 0.70 | 369/189 |
-| Cerebras · GPT-OSS 120B | tuong_thuat_dia_danh | ok | — | 0.45 | 372/77 |
-| Cerebras · GPT-OSS 120B | he_thong_thuat_ngu | ok | — | 0.55 | 367/331 |
-| Cerebras · GPT-OSS 120B | doi_thoai_nhieu_nhan_vat | ok | có | 0.92 | 463/145 |
-| Groq · Qwen 3.6 27B | hoi_thoai_xung_ho | ok | — | 0.42 | 262/35 |
-| Groq · Qwen 3.6 27B | tuong_thuat_dia_danh | loi | — | 0.19 | None/None |
-| Groq · Qwen 3.6 27B | he_thong_thuat_ngu | loi | — | 0.19 | None/None |
-| Groq · Qwen 3.6 27B | doi_thoai_nhieu_nhan_vat | loi | — | 0.22 | None/None |
+| Cerebras · GPT-OSS 120B | hoi_thoai_xung_ho | ok | — | 0.75 | 399/151 |
+| Cerebras · GPT-OSS 120B | tuong_thuat_dia_danh | ok | — | 0.55 | 402/176 |
+| Cerebras · GPT-OSS 120B | he_thong_thuat_ngu | ok | — | 0.51 | 397/231 |
+| Cerebras · GPT-OSS 120B | doi_thoai_nhieu_nhan_vat | ok | — | 0.55 | 398/181 |
+| Cerebras · GPT-OSS 120B | nhac_lai_duoc_lao | ok | — | 0.44 | 390/128 |
+| Groq · Qwen 3.6 27B | hoi_thoai_xung_ho | ok | — | 0.42 | 291/36 |
+| Groq · Qwen 3.6 27B | tuong_thuat_dia_danh | loi | — | 0.14 | None/None |
+| Groq · Qwen 3.6 27B | he_thong_thuat_ngu | ok | — | 0.28 | 293/38 |
+| Groq · Qwen 3.6 27B | doi_thoai_nhieu_nhan_vat | loi | — | 0.14 | None/None |
+| Groq · Qwen 3.6 27B | nhac_lai_duoc_lao | loi | — | 0.14 | None/None |
 
 ## Nội dung dịch (để đối chiếu chất lượng thủ công)
 
 **Cerebras · GPT-OSS 120B · hoi_thoai_xung_ho**
 
-Tiêu Viêm nhìn về phía Yếu Lão, nhíu mày nhẹ, thì thầm: “Thưa thầy, chuyện này ngài đã biết từ lâu rồi, phải không?”
+Tiêu Viêm nhìn về Dược Lão, nhíu mày nhẹ, thì thầm: “Thầy, chuyện này ngài đã biết từ lâu, đúng không?”
 
 **Cerebras · GPT-OSS 120B · tuong_thuat_dia_danh**
 
-Ngày hôm ấy, dưới chân núi Vân Trạch xuất hiện một lớp sương mù dày đặc, hai bên lối mòn phủ đầy những cây khô râm ran, gió thổi qua làm chúng rên rỉ âm u.
+Ngày ấy, dưới chân núi Vân Triệt sương mù dày đặc, những cây khô hai bên lối mòn trong gió rên rỉ âm trầm.
 
 **Cerebras · GPT-OSS 120B · he_thong_thuat_ngu**
 
-Bíp! Chúc mừng cư chủ đã đột phá tới tầng thứ chín của kỳ luyện khí, nhận được một bản công pháp “Phổ Thiên Kết”, xin kiểm tra kịp thời.
+Bíp! Chúc mừng chủ nhân đã đột phá lên tầng chín của kỳ luyện khí, nhận được một bản công pháp 《Phong Thiên Quyết》, xin kiểm tra kịp thời.
 
 **Cerebras · GPT-OSS 120B · doi_thoai_nhieu_nhan_vat**
 
-_Lần đầu (KHÔNG đạt: Còn sót 4 ký tự Hán chưa dịch trong bản dịch.):_ “Ngươi到底是誰？” cô gắt hỏi.  
-“Ta？” anh cười lạnh, “Cô sẽ sớm biết được.”
+"Ngươi là ai vậy?" cô ấy gắt hỏi.  
+"Tôi sao?" anh ta cười khẩy, "Ngươi sẽ sớm biết đáp."
 
-_Sau khi sửa lỗi:_
+**Cerebras · GPT-OSS 120B · nhac_lai_duoc_lao**
 
-“Ngươi thật ra là ai?” cô hỏi dữ dội.  
-“Tao?” anh cười lạnh một tiếng, “Ngươi sẽ sớm biết được.”
+Dược Lão quay người lại, nói vài lời với Tiêu Viêm, rồi lại nhìn về phía chân trời xa xăm.
 
 **Groq · Qwen 3.6 27B · hoi_thoai_xung_ho**
 
-Tiêu Viêm nhìn về phía Dược Lão, hơi nhíu mày, khẽ nói: “Thư sư, chuyện này ngài đã biết từ lâu rồi, phải không?”
+Tiêu Viêm nhìn về phía Dược Lão, khẽ nhíu mày, thấp giọng nói: “Thư sư, chuyện này ngài đã biết từ lâu rồi, phải không?”
+
+**Groq · Qwen 3.6 27B · he_thong_thuat_ngu**
+
+“Ting! Chúc mừng chủ nhân đột phá đến Luyện Khí Cửu Trọng, nhận được công pháp ‘Phen Thiên Quyết’ một bộ, xin vui lòng kiểm tra kịp thời.”
 
 ## Lỗi chất lượng đã xác nhận — KHÔNG được che giấu/chuẩn hoá
 
 **1. Groq Qwen 3.6 27B dịch sai "师父" thành "Thư sư" thay vì "Sư phụ".**
 
-Xác nhận **tái lập được lần thứ TƯ độc lập** (không phải nhiễu ngẫu nhiên):
-- Lần 1 (trước khi gỡ GLM): *"...trầm giọng nói: "Thư sư, chuyện này ngài đã biết từ lâu rồi, phải không?""*
-- Lần 2 (sau khi gỡ GLM): *"...trầm giọng nói: "Thư sư, chuyện này ngài đã sớm biết rồi, phải không?""*
-- Lần 3 (benchmark thật đầu tiên với Cerebras): *"...thấp giọng nói: "Thư sư, chuyện này ngài đã biết từ lâu rồi, phải không?""*
-- Lần 4 (benchmark sau khi thêm cơ chế tích vẹn/sửa lỗi, 2026-08-15): *"...khẽ nói: "Thư sư, chuyện này ngài đã biết từ lâu rồi, phải không?""*
+Xác nhận **tái lập được lần thứ NĂM độc lập**:
+- Lần 1-4: xem lịch sử benchmark trước (đều "Thư sư").
+- Lần 5 (benchmark terminology-consistency, 2026-08-15): *"...thấp giọng nói: "Thư sư, chuyện này ngài đã biết từ lâu rồi, phải không?""*
 
-"师父" (shī fù) là cách xưng hô đệ tử gọi sư phụ — bản dịch chuẩn Hán Việt phải là **"Sư phụ"**. Lỗi thật của Groq Qwen 3.6 27B — validator tính vẹn KHÔNG bắt được lỗi này theo đúng thiết kế (đây là lỗi NGỮ NGHĨA/từ vựng, không phải thiếu nội dung/còn sót tiếng Trung — nằm ngoài phạm vi validator).
+Lỗi NGỮ NGHĨA/từ vựng — nằm ngoài phạm vi validator tính vẹn theo đúng thiết kế (validator không đánh giá "dịch đúng nghĩa chưa", chỉ đánh giá "có đầy đủ/nhất quán với thuật ngữ đã chốt hay không"). Đối chiếu: Cerebras GPT-OSS 120B dịch "师父" thành "Thầy"/"Thưa sư phụ" tuỳ lần — cũng KHÔNG hoàn toàn nhất quán, nhưng không sai nghĩa như Groq.
 
-**Đối chiếu: Cerebras GPT-OSS 120B dịch ĐÚNG cùng câu này** cả 2 lần benchmark thật ("Thưa sư phụ" / "Thưa thầy") — Cerebras nhất quán đúng hơn Groq ở điểm này.
+**2. ĐÃ SỬA: Cerebras GPT-OSS 120B từng để sót nguyên văn tiếng Trung trong đoạn hội thoại nhiều nhân vật** — xem chi tiết ở lịch sử benchmark trước; cơ chế sửa lỗi đã xác nhận hoạt động, mẫu tương đương lần này (`doi_thoai_nhieu_nhan_vat`) dịch đầy đủ ngay từ lần đầu, không cần sửa lỗi.
 
-**2. ĐÃ SỬA: Cerebras GPT-OSS 120B từng để sót nguyên văn tiếng Trung trong đoạn hội thoại nhiều nhân vật.**
+**3. ĐÃ XÁC MINH: "药老" dịch nhất quán "Dược Lão" xuyên suốt 2 mẫu khác nhau (mô phỏng 2 chunk khác nhau của cùng một job) sau khi thêm glossary tường minh.**
 
-Lần benchmark đầu tiên (trước khi có cơ chế tích vẹn), mẫu `doi_thoai_nhieu_nhan_vat` bị Cerebras để sót "到底是誰" chưa dịch. **Sau khi thêm `translation_integrity.kiem_tra_tinh_ven` + cơ chế sửa lỗi (repair retry)**, benchmark thật lần này (2026-08-15) xác nhận:
-- Lần đầu: **vẫn tái lập đúng lỗi cũ** ("到底是誰" còn sót) — chứng minh đây không phải lỗi ngẫu nhiên đã tự hết.
-- Cơ chế phát hiện lỗi (rule `han_residue`) kích hoạt đúng, gửi lại CÙNG đoạn cho Cerebras kèm chỉ dẫn sửa lỗi.
-- Lần sửa lỗi: Cerebras trả về bản dịch tiếng Việt đầy đủ, không còn ký tự Hán nào — **ĐẠT tiêu chí thành công**.
-- Tổng cộng đoạn này tốn 2 lần gọi model (1 lần đầu + 1 lần sửa lỗi) thay vì 1 — chi phí thêm CHỈ xảy ra khi thật sự cần.
+Trước khi có terminology-consistency layer: benchmark thật (2 lần chạy độc lập, 2 tiến trình script riêng biệt, KHÔNG có glossary nào) cho ra **"Dược Lão"** ở lần 1 và **"Yêu Lão"** ở lần 2 — không có gì ràng buộc hai lần gọi độc lập đó phải nhất quán.
 
-**3. Ghi nhận mới: tên riêng "药老" không nhất quán giữa hai lần gọi Cerebras.**
+Sau khi thêm `GLOSSARY_DU_AN = {"药老": "Dược Lão"}` vào benchmark (mô phỏng một Novel Bible thật đã chốt tên nhân vật này) + cơ chế `translation_integrity.kiem_tra_tinh_ven(..., glossary=...)`: benchmark thật lần này cho ra **"Dược Lão" ở CẢ 2 mẫu** (`hoi_thoai_xung_ho` và `nhac_lai_duoc_lao`, mẫu mới thêm để tái hiện "nhiều chunk cùng nhắc một nhân vật"). Cả hai lần Cerebras đều tuân thủ NGAY TỪ LẦN GỌI ĐẦU (không cần sửa lỗi lần này) — chứng minh chỉ dẫn glossary trong prompt đã đủ hiệu quả để model tự nhất quán, và cơ chế phát hiện+sửa lỗi vẫn sẵn sàng can thiệp nếu model lại lệch ở một job khác.
 
-Trong lần benchmark này, Cerebras dịch "药老" thành **"Yếu Lão"** (mẫu `hoi_thoai_xung_ho`) — khác với lần benchmark trước đó cùng mẫu này cho ra **"Dược Lão"** (cách phiên âm Hán Việt đúng, cũng là cách Groq luôn dùng). Đây là dấu hiệu Cerebras GPT-OSS 120B **không ổn định về tên riêng giữa các lần gọi khác nhau** — đáng cân nhắc nếu tên nhân vật cần nhất quán xuyên suốt một bộ truyện dài (glossary khoá theo `project.custom_instruction`/từ điển thuật ngữ đã có sẵn trong hệ thống có thể giảm thiểu vấn đề này, nhưng đáng theo dõi thêm).
-
-**Ghi chú số token:** với cơ chế sửa lỗi mới, mẫu cần sửa lỗi (`doi_thoai_nhieu_nhan_vat`) tốn 463 token đầu vào/145 token đầu ra — cao hơn hẳn 3 mẫu còn lại (do gồm CẢ prompt gốc lẫn prompt sửa lỗi cộng dồn qua 2 lần gọi).
+**Ghi chú:** Groq cũng dùng đúng "Dược Lão" ở mẫu thành công duy nhất của nó (`hoi_thoai_xung_ho`) — mẫu `nhac_lai_duoc_lao` của Groq bị rate-limit thật (hạn mức chung gần cạn do benchmark lặp nhiều lần), không có dữ liệu đối chiếu thêm cho Groq lần này.

@@ -116,3 +116,23 @@ def model_allowlist() -> Dict[str, ImageModelInfo]:
 
 def _tat(info: ImageModelInfo) -> ImageModelInfo:
     return ImageModelInfo(**{**info.__dict__, "enabled": False})
+
+
+#: UOC TINH tho chi phi THAT (USD) Pollinations tinh cho MOT lan sinh, CHI
+#: dung noi bo de tinh ngan sach chia se (PHASE 7 spending guard) — KHONG
+#: BAO GIO hien thi cho nguoi dung (ho chi thay gia Fanfic Credit). Day la
+#: con so KHOI DONG hop ly, CAN hieu chinh lai theo hoa don Pollinations
+#: that khi site-owner bat Shared Premium that (xem docs/reports).
+PROVIDER_COST_USD_ESTIMATE: Dict[str, float] = {
+    "flux": 0.003,
+    "zimage": 0.003,
+    "gpt-image-2": 0.02,
+    "gptimage": 0.015,
+    "gptimage-large": 0.03,
+    "nanobanana-pro": 0.01,
+}
+DEFAULT_PROVIDER_COST_USD_ESTIMATE = 0.02
+
+
+def uoc_tinh_chi_phi_provider_usd(model_id: str) -> float:
+    return PROVIDER_COST_USD_ESTIMATE.get(model_id, DEFAULT_PROVIDER_COST_USD_ESTIMATE)

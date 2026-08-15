@@ -14,7 +14,22 @@
  * `globals.css` (khoi "hoa van huyen ao").
  */
 
+import { useState } from "react";
 import type { CosmeticItem } from "@/lib/api";
+
+/**
+ * Anh khung avatar sinh boi Pollinations (V6 fantasy-assets-v1) — dat trong
+ * `public/artwork/cosmetics/frames/`. Neu file bi xoa/thieu, `onError` cua
+ * `<img>` trong `KhungAvatar` se roi ve khung SVG `KhungAvatarSvg` ben duoi,
+ * KHONG lam vo giao dien.
+ */
+const KHUNG_ANH: Record<string, string> = {
+  frame_go: "/artwork/cosmetics/frames/frame_go.webp",
+  frame_bac: "/artwork/cosmetics/frames/frame_bac.webp",
+  frame_ngoc: "/artwork/cosmetics/frames/frame_ngoc.webp",
+  frame_vang: "/artwork/cosmetics/frames/frame_vang.webp",
+  frame_sao: "/artwork/cosmetics/frames/frame_sao.webp",
+};
 
 function KhungSvg({ children }: { children: React.ReactNode }) {
   return (
@@ -33,8 +48,30 @@ function KhungSvg({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Khung avatar — mot vong SVG phu LEN TREN avatar, dinh vi tuyet doi. */
+/** Khung avatar — anh PNG/WebP phu LEN TREN avatar, dinh vi tuyet doi. */
 function KhungAvatar({ assetRef }: { assetRef: string }) {
+  const [loiAnh, setLoiAnh] = useState(false);
+  const nguonAnh = KHUNG_ANH[assetRef];
+
+  if (nguonAnh && !loiAnh) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- overlay tuyet doi, khong can toi uu Next/Image
+      <img
+        src={nguonAnh}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+        className="cosmetic-frame-svg cosmetic-frame-img"
+        onError={() => setLoiAnh(true)}
+      />
+    );
+  }
+
+  return <KhungAvatarSvg assetRef={assetRef} />;
+}
+
+/** Khung du phong dang SVG — dung khi anh sinh boi Pollinations bi thieu/loi. */
+function KhungAvatarSvg({ assetRef }: { assetRef: string }) {
   switch (assetRef) {
     case "frame_go":
       return (

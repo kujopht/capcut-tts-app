@@ -27,10 +27,37 @@ const PAGE_SIZE = 20;
 
 type Mode = "all_time" | "weekly";
 
+/** Anh huy hieu hang 1/2/3 (V6 fantasy-assets-v1) — hang 4 tro di khong co
+ * huy hieu, chi hien "#N". Loi tai anh se an huy hieu, van con so hang binh
+ * thuong, khong lam vo giao dien. */
+const HUY_HIEU_HANG: Record<number, string> = {
+  1: "/artwork/cosmetics/ranks/rank_gold.webp",
+  2: "/artwork/cosmetics/ranks/rank_silver.webp",
+  3: "/artwork/cosmetics/ranks/rank_bronze.webp",
+};
+
+function HuyHieuHang({ hang }: { hang: number }) {
+  const [loi, setLoi] = useState(false);
+  const nguonAnh = HUY_HIEU_HANG[hang];
+  if (!nguonAnh || loi) return null;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- huy hieu nho, khong can toi uu Next/Image
+    <img
+      src={nguonAnh}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+      className="lb-rank-medal"
+      onError={() => setLoi(true)}
+    />
+  );
+}
+
 function HangXepHang({ it }: { it: LeaderboardEntry }) {
   return (
     <li className={it.is_you ? "lb-row lb-row-you" : "lb-row"}>
       <span className="lb-rank" aria-hidden="true">
+        <HuyHieuHang hang={it.rank} />
         #{it.rank}
       </span>
       <CosmeticFrame

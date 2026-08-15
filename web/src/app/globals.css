@@ -5771,6 +5771,11 @@ body.co-mini { padding-bottom: 74px; }
 }
 
 .yt-facade img {
+  /* Lop NEN, khong tham gia flex cua `.yt-facade-play`: neu de o che do flow
+     binh thuong, `width:100%` bien no thanh mot flex-item xin toan bo truc
+     chinh, day nut Play (span ke sau) troi ra mep thay vi nam giua. */
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -5798,6 +5803,12 @@ body.co-mini { padding-bottom: 74px; }
 }
 
 .yt-facade-play-icon {
+  /* `position: relative` de no NAM TREN `img` nen (`.yt-facade img` la
+     `position: absolute`) — moi phan tu co dat vi tri deu ve SAU moi phan tu
+     khong dat vi tri trong cung ngu canh xep chong, bat ke thu tu DOM, nen
+     thieu dong nay thi vong tron nut Play bi anh nen ve de len, xem KHONG
+     duoc. */
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;

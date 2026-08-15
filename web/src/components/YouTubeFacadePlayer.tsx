@@ -75,22 +75,33 @@ export function YouTubeFacadePlayer({
   }
 
   return (
-    <button
-      type="button"
-      className="yt-facade yt-facade-play"
-      onClick={() => {
-        setDaBam(true);
-        onPlay?.();
-      }}
-      aria-label={`Phát ${title}`}
-    >
-      {/* eslint-disable-next-line @next/next/no-img-element -- anh tu YouTube,
-          khong phai asset cua Fanfic; next/image doi cau hinh domain rieng
-          cho mot the hien duy nhat khong dang. */}
-      <img src={youtubeThumbnailUrl(videoId)} alt="" />
-      <span className="yt-facade-play-icon">
-        <IconPlay size={28} />
-      </span>
-    </button>
+    // `.yt-facade` PHAI la mot phan tu RIENG bao ngoai `.yt-facade-play`,
+    // khong duoc gop chung mot the: `.yt-facade` la `position: relative`
+    // (khung neo), con `.yt-facade-play` la `position: absolute; inset: 0`
+    // (lop phu vua khit). Gop ca hai lop vao MOT the khien thuoc tinh
+    // `position` tren cung mot phan tu bi `.yt-facade-play` de len sau trong
+    // stylesheet ghi de mat `position: relative` cua `.yt-facade` — luc do
+    // nut Play mat neo, tu nhay ra ngoai theo khoi cha xa nhat co dat
+    // `transform` (moi trang `.page` deu co, qua animation vao-trang), phu
+    // kin ca tieu de/dieu huong tap nam phia tren trong flow binh thuong.
+    <div className="yt-facade">
+      <button
+        type="button"
+        className="yt-facade-play"
+        onClick={() => {
+          setDaBam(true);
+          onPlay?.();
+        }}
+        aria-label={`Phát ${title}`}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- anh tu YouTube,
+            khong phai asset cua Fanfic; next/image doi cau hinh domain rieng
+            cho mot the hien duy nhat khong dang. */}
+        <img src={youtubeThumbnailUrl(videoId)} alt="" />
+        <span className="yt-facade-play-icon">
+          <IconPlay size={28} />
+        </span>
+      </button>
+    </div>
   );
 }

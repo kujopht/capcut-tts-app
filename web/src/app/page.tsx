@@ -35,7 +35,14 @@
 
 import Link from "next/link";
 import { useCallback } from "react";
-import { api, type Achievement, type ContinueItem, type Novel, type OwnProgress } from "@/lib/api";
+import {
+  api,
+  type Achievement,
+  type ContinueItem,
+  type ContinueWatchItem,
+  type Novel,
+  type OwnProgress,
+} from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { StoryCard } from "@/components/StoryCard";
@@ -53,6 +60,10 @@ interface HomeData {
   tags: string[];
   reading: ContinueItem | null;
   listening: ContinueItem | null;
+  /** "Tiếp tục xem" Animation (V6, overnight Phase 5) — cùng vai trò với
+      `reading`/`listening`, hình dạng riêng vì series/episode không phải
+      novel/chapter. Xem `server/main.py::_tiep_tuc_xem`. */
+  watching: ContinueWatchItem | null;
   gamification: { progress: OwnProgress; thanhTuuMoiNhat: Achievement | null } | null;
 }
 
@@ -95,6 +106,40 @@ function TheTiepTuc({ kieu, muc }: { kieu: "read" | "listen"; muc: ContinueItem 
         </span>
         {phanTram !== null ? (
           <ProgressBar percent={phanTram} label={`Đã nghe ${phanTram}%`} />
+        ) : null}
+      </span>
+      <span className="btn btn-sm" aria-hidden="true">
+        Tiếp tục
+      </span>
+    </Link>
+  );
+}
+
+/**
+ * Thẻ "Tiếp tục xem" Animation (V6, overnight Phase 5) — cùng vai trò với
+ * `TheTiepTuc`, hình dạng riêng vì series/episode không phải novel/chapter,
+ * và dẫn thẳng tới `/animation/watch/{episode_id}`.
+ */
+function TheTiepTucXem({ muc }: { muc: ContinueWatchItem }) {
+  const viTriGiay = muc.position_seconds ?? 0;
+  const phanTram = muc.duration_seconds
+    ? Math.max(0, Math.min(100, Math.round((viTriGiay / muc.duration_seconds) * 100)))
+    : null;
+
+  return (
+    <Link href={`/animation/watch/${muc.episode_id}`} className="progress-card">
+      <span className="progress-card-icon" aria-hidden="true">
+        🎬
+      </span>
+      <span className="progress-card-body">
+        <strong className="clamp-1">{muc.series_title}</strong>
+        <span className="progress-card-meta">
+          Tập {muc.episode_order_index} · {muc.episode_title} ·{" "}
+          {dinhDangGio(viTriGiay)}
+          {muc.duration_seconds ? ` / ${dinhDangGio(muc.duration_seconds)}` : ""}
+        </span>
+        {phanTram !== null ? (
+          <ProgressBar percent={phanTram} label={`Đã xem ${phanTram}%`} />
         ) : null}
       </span>
       <span className="btn btn-sm" aria-hidden="true">
@@ -182,8 +227,8 @@ export default function HomePage() {
       api.browseNovels({ limit: GRID_COUNT }),
       api.novelTags(),
       daDangNhap
-        ? api.getContinueProgress().catch(() => ({ reading: null, listening: null }))
-        : Promise.resolve({ reading: null, listening: null }),
+        ? api.getContinueProgress().catch(() => ({ reading: null, listening: null, watching: null }))
+        : Promise.resolve({ reading: null, listening: null, watching: null }),
       daDangNhap
         ? Promise.all([api.getProgress(), api.getAchievements()]).catch(() => null)
         : Promise.resolve(null),
@@ -198,6 +243,7 @@ export default function HomePage() {
       tags: tags.tags,
       reading: tiepTuc.reading,
       listening: tiepTuc.listening,
+      watching: tiepTuc.watching,
       gamification: gam ? { progress: gam[0], thanhTuuMoiNhat } : null,
     };
   }, [daDangNhap]);
@@ -205,7 +251,7 @@ export default function HomePage() {
   const { data, error, loading, reload } = useAsyncData(load);
 
   const novels = data?.novels ?? [];
-  const coTiepTuc = Boolean(data?.reading || data?.listening);
+  const coTiepTuc = Boolean(data?.reading || data?.listening || data?.watching);
 
   return (
     <div className="page">
@@ -220,6 +266,7 @@ export default function HomePage() {
           <div className="bento-grid">
             {data?.reading ? <TheTiepTuc kieu="read" muc={data.reading} /> : null}
             {data?.listening ? <TheTiepTuc kieu="listen" muc={data.listening} /> : null}
+            {data?.watching ? <TheTiepTucXem muc={data.watching} /> : null}
           </div>
         </section>
       ) : null}

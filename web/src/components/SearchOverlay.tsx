@@ -27,11 +27,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { api, social, type Novel, type Post, type PublicProfile } from "@/lib/api";
+import {
+  api,
+  social,
+  type AnimationSeries,
+  type Novel,
+  type Post,
+  type PublicProfile,
+} from "@/lib/api";
 import { AuthorBadge, RankBadge } from "@/components/AuthorBadge";
 import { Avatar } from "@/components/Avatar";
 import { NovelCover } from "@/components/NovelCover";
-import { IconBook, IconHeadphones, IconMegaphone, IconUser } from "@/components/Icons";
+import { IconBook, IconFilm, IconHeadphones, IconMegaphone, IconUser } from "@/components/Icons";
 
 const NHIP_GO = 250;
 
@@ -41,7 +48,8 @@ type KetQua =
   | { loai: "truyen"; novel: Novel }
   | { loai: "nguoi"; nguoi: PublicProfile }
   | { loai: "bai"; bai: Post }
-  | { loai: "audio"; novel: NovelAudio };
+  | { loai: "audio"; novel: NovelAudio }
+  | { loai: "animation"; series: AnimationSeries };
 
 type TrangThai = "dau" | "dang-tai" | "co" | "rong" | "loi";
 
@@ -57,9 +65,8 @@ type TrangThai = "dau" | "dang-tai" | "co" | "rong" | "loi";
  * ban audio, dan ve trang truyen (kien truc hien tai chua co trang nghe
  * rieng — do la viec cua ban thiet ke lai sau nay, khong lam o day).
  *
- * "animation" van CHUA `sanSang`: san pham do chua ton tai. Mot bo loc "chay"
- * ma luon ra rong la noi doi ve tinh nang co that — nen no bi VO HIEU o giao
- * dien thay vi gia vo hoat dong.
+ * "animation" (V6, overnight Phase 5) da that: `GET /api/search/animation`
+ * tim SERIES DA XUAT BAN, dan ve trang series (`/animation/{id}`).
  */
 const DANH_MUC: ReadonlyArray<{
   khoa: "tat_ca" | "truyen" | "nguoi" | "bai" | "audio" | "animation";
@@ -71,7 +78,7 @@ const DANH_MUC: ReadonlyArray<{
   { khoa: "audio", nhan: "Audio", sanSang: true },
   { khoa: "nguoi", nhan: "Người dùng", sanSang: true },
   { khoa: "bai", nhan: "Bài đăng", sanSang: true },
-  { khoa: "animation", nhan: "Animation", sanSang: false },
+  { khoa: "animation", nhan: "Animation", sanSang: true },
 ];
 type DanhMuc = (typeof DANH_MUC)[number]["khoa"];
 
@@ -101,6 +108,7 @@ export function SearchOverlay({
     nguoi: PublicProfile[];
     bai: Post[];
     audio: NovelAudio[];
+    animation: AnimationSeries[];
   } | null>(null);
   const [tuLoi, setTuLoi] = useState("");
   const [chon, setChon] = useState(0);
@@ -112,6 +120,7 @@ export function SearchOverlay({
   const nguoi = ketQua?.tu === tu ? ketQua.nguoi : KHONG;
   const bai = ketQua?.tu === tu ? ketQua.bai : KHONG;
   const audio = ketQua?.tu === tu ? ketQua.audio : KHONG;
+  const animation = ketQua?.tu === tu ? ketQua.animation : KHONG;
 
   const trangThai: TrangThai = !tu
     ? "dau"
@@ -119,7 +128,7 @@ export function SearchOverlay({
       ? "loi"
       : ketQua?.tu !== tu
         ? "dang-tai"
-        : truyen.length + nguoi.length + bai.length + audio.length
+        : truyen.length + nguoi.length + bai.length + audio.length + animation.length
           ? "co"
           : "rong";
 
@@ -137,21 +146,23 @@ export function SearchOverlay({
     const canNguoi = danhMuc === "tat_ca" || danhMuc === "nguoi";
     const canBai = danhMuc === "tat_ca" || danhMuc === "bai";
     const canAudio = danhMuc === "tat_ca" || danhMuc === "audio";
+    const canAnimation = danhMuc === "tat_ca" || danhMuc === "animation";
     const gioiHan = danhMuc === "tat_ca" ? 5 : 20;
 
     const bo = new AbortController();
     const hen = window.setTimeout(async () => {
       try {
         /*
-          Bon truy van SONG SONG. Tuan tu thi nguoi dung cho tong thoi gian cua
-          ca bon, va muc cuoi luon toi muon han mot nhip.
+          NAM truy van SONG SONG. Tuan tu thi nguoi dung cho tong thoi gian cua
+          ca nam, va muc cuoi luon toi muon han mot nhip.
         */
         /*
-          Bai dang va audio la muc PHU khi xem "Tất cả": loi cua rieng chung
-          khong duoc keo sap ca hop tim — truyen va nguoi van la ly do nguoi ta
-          mo hop nay. `catch` tra ve rong thay vi de `Promise.all` tu choi tat ca.
+          Bai dang, audio, animation la muc PHU khi xem "Tất cả": loi cua rieng
+          chung khong duoc keo sap ca hop tim — truyen va nguoi van la ly do
+          nguoi ta mo hop nay. `catch` tra ve rong thay vi de `Promise.all` tu
+          choi tat ca.
         */
-        const [a, b, c, d] = await Promise.all([
+        const [a, b, c, d, e] = await Promise.all([
           canTruyen
             ? api.browseNovels({ query: tu, limit: gioiHan })
             : Promise.resolve({ novels: [] }),
@@ -164,9 +175,15 @@ export function SearchOverlay({
           canAudio
             ? api.searchAudio(tu, gioiHan).catch(() => ({ novels: [] }))
             : Promise.resolve({ novels: [] }),
+          canAnimation
+            ? api.searchAnimation(tu, gioiHan).catch(() => ({ series: [] }))
+            : Promise.resolve({ series: [] }),
         ]);
         if (bo.signal.aborted) return;
-        setKetQua({ tu, truyen: a.novels, nguoi: b.people, bai: c.items, audio: d.novels });
+        setKetQua({
+          tu, truyen: a.novels, nguoi: b.people, bai: c.items, audio: d.novels,
+          animation: e.series,
+        });
         setChon(0);
       } catch {
         if (!bo.signal.aborted) setTuLoi(tu);
@@ -185,14 +202,16 @@ export function SearchOverlay({
     () => [
       ...truyen.map((n) => ({ loai: "truyen" as const, novel: n })),
       ...audio.map((n) => ({ loai: "audio" as const, novel: n })),
+      ...animation.map((s) => ({ loai: "animation" as const, series: s })),
       ...nguoi.map((p) => ({ loai: "nguoi" as const, nguoi: p })),
       ...bai.map((b) => ({ loai: "bai" as const, bai: b })),
     ],
-    [truyen, audio, nguoi, bai],
+    [truyen, audio, animation, nguoi, bai],
   );
 
   const duong = useCallback((k: KetQua) => {
     if (k.loai === "truyen" || k.loai === "audio") return `/novels/${k.novel.novel_id}`;
+    if (k.loai === "animation") return `/animation/${k.series.series_id}`;
     if (k.loai === "bai") return `/posts/${k.bai.post_id}`;
     return `/u/${k.nguoi.username}`;
   }, []);
@@ -246,7 +265,7 @@ export function SearchOverlay({
         <div className="tim-dau">
           <IconBook size={18} />
           {/* Bo chon danh muc (Phan F) — kien truc mo rong duoc, xem
-              `DANH_MUC` o dau tep. "Audio"/"Animation" hien vo hieu. */}
+              `DANH_MUC` o dau tep. */}
           <select
             className="select select-mini"
             aria-label="Tìm trong danh mục"
@@ -373,13 +392,49 @@ export function SearchOverlay({
                 </section>
               ) : null}
 
+              {animation.length ? (
+                <section aria-labelledby={`${idGoc}-animation`}>
+                  <h2 className="tim-nhom" id={`${idGoc}-animation`}>
+                    <IconFilm size={15} /> Animation
+                  </h2>
+                  {animation.map((s, i) => {
+                    const vt = truyen.length + audio.length + i;
+                    return (
+                      <Link
+                        key={s.series_id}
+                        id={`${idGoc}-kq-${vt}`}
+                        role="option"
+                        aria-selected={chon === vt}
+                        className={`tim-kq${chon === vt ? " la-chon" : ""}`}
+                        href={`/animation/${s.series_id}`}
+                        onClick={onDong}
+                        onMouseEnter={() => setChon(vt)}
+                      >
+                        <span className="tim-bia">
+                          <NovelCover
+                            novelId={s.series_id}
+                            title={s.title}
+                            coverUrl={s.cover_url}
+                            size="thumb"
+                          />
+                        </span>
+                        <span className="tim-chu">
+                          <strong>{s.title}</strong>
+                          <span className="hint">{s.tags.slice(0, 3).join(" · ")}</span>
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </section>
+              ) : null}
+
               {nguoi.length ? (
                 <section aria-labelledby={`${idGoc}-nguoi`}>
                   <h2 className="tim-nhom" id={`${idGoc}-nguoi`}>
                     <IconUser size={15} /> Người dùng
                   </h2>
                   {nguoi.map((p, i) => {
-                    const vt = truyen.length + audio.length + i;
+                    const vt = truyen.length + audio.length + animation.length + i;
                     return (
                       <Link
                         key={p.user_id}
@@ -425,7 +480,8 @@ export function SearchOverlay({
                     <IconMegaphone size={15} /> Bài viết
                   </h2>
                   {bai.map((b, i) => {
-                    const vt = truyen.length + audio.length + nguoi.length + i;
+                    const vt =
+                      truyen.length + audio.length + animation.length + nguoi.length + i;
                     return (
                       <Link
                         key={b.post_id}

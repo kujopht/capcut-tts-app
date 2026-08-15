@@ -13,6 +13,7 @@ import json
 import os
 import threading
 import uuid
+from dataclasses import replace as _thay_the
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -43,8 +44,10 @@ from server.translation_domain import (
     TranslationProject,
     TranslationVersion,
 )
+from server.translation_integrity import kiem_tra_tinh_ven, tom_tat_van_de
 from server.translation_providers import (
     TranslationContext,
+    TranslationIntegrityError,
     TranslationProvider,
     TranslationProviderError,
     build_provider,
@@ -132,6 +135,20 @@ SO_CHUONG_TOM_TAT_NGU_CANH = 2
 #: Do dai toi da mot cau tom tat chuong — chinh no cung phai gon de khong
 #: phinh dan prompt qua nhieu chuong.
 DO_DAI_TOM_TAT = 240
+
+#: V6 cerebras-groq-translation — chi dan SUA LOI gui LAI CUNG provider
+#: (Cerebras) khi `translation_integrity.kiem_tra_tinh_ven` phat hien lan
+#: dich dau khong dat (con sot chu Han/thieu doan/hoi thoai/cat cut). Noi
+#: dung tuong duong yeu cau goc ("Translate every source segment completely;
+#: do not leave Chinese source text untranslated; preserve every paragraph
+#: and dialogue line"), viet lai bang tieng Viet de nhat quan voi toan bo
+#: phan con lai cua prompt he thong (xem `translation_providers._he_thong_prompt`).
+CHI_DAN_SUA_LOI_CEREBRAS = (
+    "Dịch TOÀN BỘ đoạn nguồn một cách đầy đủ — KHÔNG được để sót bất kỳ "
+    "phần tiếng Trung nào chưa dịch. Giữ nguyên đầy đủ MỌI đoạn văn và MỌI "
+    "dòng hội thoại có trong đoạn nguồn, không bỏ sót, không tóm tắt, "
+    "không rút gọn."
+)
 
 
 #: Thu tu vai-tro provider CHAY THAT cho MOI doan, theo che do chat luong.
@@ -819,6 +836,136 @@ class TranslationService:
             except Exception:
                 pass
 
+    def _goi_registry(self, text: str, ctx: TranslationContext,
+                      project: TranslationProject,
+                      personal_providers: List["ConfiguredProvider"], *,
+                      mode: Optional[str] = None,
+                      selected_provider_id: Optional[str] = None,
+                      allow_fallback: Optional[bool] = None,
+                      prefer_personal: Optional[bool] = None
+                      ) -> "tuple[str, ProviderProvenance]":
+        """
+        MOT lan goi provider/registry — tham so MAC DINH lay tu `project`
+        (dung boi lan goi DAU TIEN), nhung CO THE GHI DE (dung boi lan goi
+        SUA LOI/du phong tuong minh o `_sua_loi_cerebras_roi_du_phong_groq`,
+        noi can CHON DUNG mot provider cu the bat ke `project` dang o che do
+        gi). Tach rieng khoi `_goi_dich_mot_doan` de CA hai noi (lan goi dau,
+        lan sua loi, lan du phong) dung CHUNG mot duong goi, khong lap logic
+        registry/khong-registry o ba noi.
+        """
+        mode = project.provider_mode if mode is None else mode
+        selected_provider_id = (
+            project.selected_provider_id if selected_provider_id is None
+            else selected_provider_id)
+        allow_fallback = (
+            project.allow_fallback if allow_fallback is None else allow_fallback)
+        prefer_personal = (
+            project.prefer_personal_provider if prefer_personal is None
+            else prefer_personal)
+
+        if self._registry and self._byok:
+            return self._registry.translate_segment_with_personal(
+                text, context=ctx, mode=mode,
+                selected_provider_id=selected_provider_id,
+                allow_fallback=allow_fallback,
+                personal_providers=personal_providers,
+                prefer_personal=prefer_personal)
+        if self._registry:
+            return self._registry.translate_segment(
+                text, context=ctx, mode=mode,
+                selected_provider_id=selected_provider_id,
+                allow_fallback=allow_fallback)
+        van_ban = self._provider.translate_segment(text, context=ctx)
+        return van_ban, ProviderProvenance(
+            provider_id=self._provider.name, model_id="",
+            pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+
+    @staticmethod
+    def _tim_groq_du_phong(prov_cerebras: ProviderProvenance,
+                           personal_providers: List["ConfiguredProvider"]
+                           ) -> "tuple[Optional[str], bool]":
+        """
+        Xac dinh provider Groq nao DUNG DE DU PHONG sau khi Cerebras that
+        bai tinh ven CA sau khi da sua loi — TON TRONG pham vi credential
+        cua LAN GOI CEREBRAS ban dau (yeu cau goc BYOK: "no silent use of
+        shared credentials"):
+          - Cerebras ban dau la CA NHAN (BYOK) -> CHI duoc dung Groq CA NHAN
+            CUA CHINH nguoi dung nay (neu co ket noi); KHONG BAO GIO roi
+            sang Groq dung chung. Khong co ket noi Groq ca nhan -> tra
+            `(None, False)`, nghia la "khong co Groq de du phong" (dung y
+            "Groq fallback, only if Groq is available").
+          - Cerebras ban dau la DUNG CHUNG (shared) -> dung Groq DUNG CHUNG
+            (`groq_qwen`, model DUY NHAT theo chien luoc san xuat hien tai).
+
+        Tra ve `(selected_provider_id, prefer_personal)` de goi thang
+        `_goi_registry(mode="manual", selected_provider_id=..., allow_fallback=False,
+        prefer_personal=...)`.
+        """
+        if prov_cerebras.credential_source == "personal":
+            groq_ca_nhan = next(
+                (p for p in personal_providers if p.provider_id.startswith("groq_")),
+                None)
+            if groq_ca_nhan is None:
+                return None, False
+            return groq_ca_nhan.provider_id, True
+        return "groq_qwen", False
+
+    def _sua_loi_cerebras_roi_du_phong_groq(
+        self, text: str, ctx: TranslationContext, project: TranslationProject,
+        personal_providers: List["ConfiguredProvider"],
+        prov_1: ProviderProvenance
+    ) -> "tuple[str, ProviderProvenance]":
+        """
+        Cerebras da tra ve mot ban dich KHONG DAT tinh ven (goi luc
+        `_goi_dich_mot_doan`, tham so `prov_1` la provenance cua LAN GOI DAU
+        do). Theo dung so do yeu cau goc:
+
+            Cerebras (lan 1) --that bai tinh ven-->
+            Cerebras (sua loi, CUNG provider/CUNG credential) --con that bai-->
+            Groq (CHI khi co, CUNG pham vi credential voi Cerebras ban dau) -->
+            loi CO KIEM SOAT cho DUNG doan nay (KHONG lam hong ca chuong).
+
+        Groq (neu dung duoc) KHONG duoc kiem tra lai tinh ven o day — chap
+        nhan ket qua cua no VO DIEU KIEN, dung so do yeu cau goc (buoc "sua
+        loi" CHI ap dung cho Cerebras, Groq la diem dung cuoi truoc loi co
+        kiem soat).
+        """
+        # 1) Sua loi — CUNG provider Cerebras vua tra loi, CUNG credential
+        # (shared/personal), them chi dan sua loi vao context.
+        ctx_sua = _thay_the(ctx, chi_dan_sua_loi=CHI_DAN_SUA_LOI_CEREBRAS)
+        try:
+            ket_qua_2, prov_2 = self._goi_registry(
+                text, ctx_sua, project, personal_providers,
+                mode="manual", selected_provider_id=prov_1.provider_id,
+                allow_fallback=False,
+                prefer_personal=(prov_1.credential_source == "personal"))
+            if not kiem_tra_tinh_ven(text, ket_qua_2):
+                return ket_qua_2, prov_2
+        except TranslationProviderError:
+            # Lan sua loi TU NO cung co the that bai (vd rate-limit/loi mang
+            # tam thoi) — khong coi day la loi cuoi cung, van tiep tuc sang
+            # buoc du phong Groq nhu binh thuong.
+            pass
+
+        # 2) Groq du phong — CHI trong CUNG pham vi credential voi Cerebras
+        # ban dau (xem `_tim_groq_du_phong`).
+        groq_id, groq_prefer_personal = self._tim_groq_du_phong(prov_1, personal_providers)
+        if groq_id is None:
+            raise TranslationIntegrityError(
+                "Cerebras trả về bản dịch không đạt yêu cầu (đã thử sửa lỗi "
+                "nhưng vẫn không đạt) và không có Groq khả dụng để dự phòng "
+                "cho đoạn này.")
+        try:
+            return self._goi_registry(
+                text, ctx, project, personal_providers,
+                mode="manual", selected_provider_id=groq_id,
+                allow_fallback=False, prefer_personal=groq_prefer_personal)
+        except TranslationProviderError as exc:
+            raise TranslationIntegrityError(
+                "Cerebras trả về bản dịch không đạt yêu cầu (đã thử sửa lỗi) "
+                f"và Groq dự phòng cũng thất bại cho đoạn này: "
+                f"{self._loi_an_toan(exc)}") from exc
+
     def _goi_dich_mot_doan(self, text: str, ctx: TranslationContext,
                            project: TranslationProject,
                            personal_providers: List["ConfiguredProvider"],
@@ -832,12 +979,22 @@ class TranslationService:
         chu du an theo dung thu tu `project.prefer_personal_provider`);
         neu khong, hanh vi Y HET truoc V5.1.
 
+        V6 cerebras-groq-translation — TICH VEN (xem `translation_integrity.
+        kiem_tra_tinh_ven`): "Never accept a provider response as successful
+        merely because HTTP returned 200." Ket qua tu Cerebras duoc kiem tra
+        NGAY sau khi nhan ve; khong dat thi sua loi/du phong Groq qua
+        `_sua_loi_cerebras_roi_du_phong_groq` TRUOC KHI duoc coi la thanh
+        cong. Ket qua tu provider KHAC Cerebras (Groq lam SO CAP, vi du
+        BYOK-Groq-rieng) khong dat tinh ven thi KHONG co buoc sua loi nao
+        duoc dinh nghia — nem `TranslationIntegrityError` ngay (loi CO KIEM
+        SOAT cho dung doan nay, khong lam hong ca chuong — xem
+        `TranslationIntegrityError`).
+
         Cache (xem `_TranslationSegmentCache`) duoc kiem TRUOC TIEN khi
         `allow_cache=True` — trung cache thi tra ve NGAY, KHONG cham toi
         provider/registry nao (khong ton request/token, khong ghi usage gia).
-        Chi ket qua THANH CONG moi duoc luu vao cache — loi khong bao gio
-        duoc cache (mot lan loi tam thoi khong duoc phep "dinh" mai trong
-        cache).
+        Chi ket qua THANH CONG VA DAT TINH VEN moi duoc luu vao cache — loi
+        (ke ca loi tinh ven) khong bao gio duoc cache.
 
         `allow_cache=False` (dung boi `_chay_vai_tro_tren_van_ban`, tuc MOI
         hanh dong "dịch lại"/"chạy lại pass" cua nguoi dung — Part N): nguoi
@@ -856,23 +1013,29 @@ class TranslationService:
                 pass_type=ctx.vai_tro, success=True, attempted_at=now_iso(),
                 credential_source=cache_hit.credential_source, from_cache=True)
 
-        if self._registry and self._byok:
-            ket_qua, prov = self._registry.translate_segment_with_personal(
-                text, context=ctx, mode=project.provider_mode,
-                selected_provider_id=project.selected_provider_id,
-                allow_fallback=project.allow_fallback,
-                personal_providers=personal_providers,
-                prefer_personal=project.prefer_personal_provider)
-        elif self._registry:
-            ket_qua, prov = self._registry.translate_segment(
-                text, context=ctx, mode=project.provider_mode,
-                selected_provider_id=project.selected_provider_id,
-                allow_fallback=project.allow_fallback)
-        else:
-            van_ban = self._provider.translate_segment(text, context=ctx)
-            ket_qua, prov = van_ban, ProviderProvenance(
-                provider_id=self._provider.name, model_id="",
-                pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+        ket_qua, prov = self._goi_registry(text, ctx, project, personal_providers)
+
+        # Tich ven CHI ap dung cho ho provider Cerebras/Groq — day la PHAM VI
+        # THAT SU cua yeu cau goc ("Cerebras must produce complete Vietnamese
+        # output... Groq remains fallback"), KHONG PHAI moi provider bat ky.
+        # Quan trong: dieu nay TU NHIEN loai tru duong `self._provider` don
+        # (Mock/DocuTranslate, provider_id="mock"/"docutranslate") VA moi
+        # provider tuy chinh khac (Cloudflare, provider gia trong test —
+        # "sai"/"het-han-muc"/"fake"/...) khoi bi kiem tra — nhung provider
+        # do KHONG PHAI doi tuong cua yeu cau goc nay, va (voi provider gia
+        # trong test) thuong "dich" bang cach ECHO NGUYEN VAN dau vao (vd
+        # `MockTranslationProvider`/`_FakeInnerProvider` — xem docstring cac
+        # lop do) nen SE bi flag han_residue SAI neu bi kiem tra o day.
+        van_de = (kiem_tra_tinh_ven(text, ket_qua)
+                 if prov.provider_id.startswith(("cerebras", "groq")) else [])
+        if van_de:
+            if prov.provider_id.startswith("cerebras"):
+                ket_qua, prov = self._sua_loi_cerebras_roi_du_phong_groq(
+                    text, ctx, project, personal_providers, prov)
+            else:
+                raise TranslationIntegrityError(
+                    f"Bản dịch từ {prov.provider_id} không đạt yêu cầu tính "
+                    f"vẹn: {tom_tat_van_de(van_de)}")
 
         if allow_cache:
             self._cache.luu(text, ctx, van_ban=ket_qua, provider_id=prov.provider_id,

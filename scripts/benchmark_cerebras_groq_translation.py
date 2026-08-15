@@ -15,6 +15,13 @@ model này là Preview và sẽ ngừng hỗ trợ 2026-08-17 — đã bị gỡ
 ("SKIPPED — thiếu ..."), KHÔNG bịa kết quả. Không tạo job/project/store nào —
 gọi thẳng `CerebrasProvider`/`GroqProvider`, độc lập với web/API.
 
+QUAN TRỌNG (sau khi thêm kiểm tra tính vẹn): script này gọi CÙNG cơ chế
+tích vẹn + sửa lỗi mà `TranslationService._goi_dich_mot_doan` dùng thật
+(`translation_integrity.kiem_tra_tinh_ven` + `CHI_DAN_SUA_LOI_CEREBRAS`) —
+KHÔNG chỉ gọi provider thô. Nếu không làm vậy, benchmark sẽ chỉ tái hiện lại
+lỗi gốc (còn sót tiếng Trung) mà không bao giờ chứng minh được cơ chế sửa
+lỗi mới có tác dụng thật.
+
 KHÔNG tự động đổi thứ tự provider chỉ vì độ trễ — script này CHỈ in số liệu
 (độ trễ, số token, nội dung dịch) để NGƯỜI đọc và quyết định; không có logic
 "model nhanh nhất thắng" nào ở đây.
@@ -28,7 +35,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -44,6 +51,7 @@ load_env_file()
 
 import os  # noqa: E402
 
+from server.translation_integrity import kiem_tra_tinh_ven, tom_tat_van_de  # noqa: E402
 from server.translation_model_profiles import (  # noqa: E402
     CEREBRAS_MODEL_PROFILES,
     GROQ_MODEL_PROFILES,
@@ -54,6 +62,7 @@ from server.translation_provider_registry import (  # noqa: E402
     TranslationProviderError,
 )
 from server.translation_providers import TranslationContext  # noqa: E402
+from server.translation_service import CHI_DAN_SUA_LOI_CEREBRAS  # noqa: E402
 
 #: Vài đoạn fanfic tiên hiệp/huyền huyễn NGẮN, KHÔNG bản quyền (tự viết cho
 #: mục đích kiểm thử) — đủ đa dạng để lộ ra khác biệt về xưng hô, tên riêng,
@@ -76,15 +85,34 @@ class KetQua:
     model_key: str
     display_name: str
     doan_key: str
-    trang_thai: str  # "ok" | "loi" | "skipped"
+    #: "ok" (dat tinh ven) | "loi_tinh_ven" (API thanh cong nhung van khong
+    #: dat tinh ven sau khi da thu moi cach) | "loi" (API that bai) |
+    #: "skipped" (thieu key).
+    trang_thai: str
     do_tre_giay: Optional[float] = None
+    #: Ket qua CUOI CUNG (sau sua loi neu co) — day la thu duoc dua vao
+    #: file/hien thi chinh.
     dau_ra: str = ""
     loi: str = ""
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
+    #: True neu lan dau KHONG dat tinh ven va da phai goi sua loi (repair
+    #: retry) — cho biet co che sua loi co THAT SU can dung hay khong.
+    da_sua_loi: bool = False
+    #: Ban dich THO lan dau (CHI dien khi `da_sua_loi=True`) — giu lai de
+    #: doi chieu truoc/sau sua loi.
+    dau_ra_lan_dau: str = ""
+    #: Mo ta van de tinh ven phat hien o lan dau (rong = khong co van de).
+    van_de_lan_dau: str = ""
 
 
 def _thu_cerebras(profile_key: str, api_key: str) -> list[KetQua]:
+    """
+    Goi Cerebras qua CUNG co che tich ven + sua loi that su dung trong san
+    xuat (`TranslationService._sua_loi_cerebras_roi_du_phong_groq`, don gian
+    hoa cho MOT provider — khong co Groq du phong o day, script nay muon
+    thay RIENG kha nang tu sua cua Cerebras).
+    """
     profile = CEREBRAS_MODEL_PROFILES[profile_key]
     if not api_key:
         return [KetQua(model_key=f"cerebras_{profile_key}",
@@ -96,25 +124,48 @@ def _thu_cerebras(profile_key: str, api_key: str) -> list[KetQua]:
     ra = []
     for dk, van_ban in DOAN_MAU:
         bat_dau = time.monotonic()
+        ten = f"cerebras_{profile_key}"
+        hien_thi = f"Cerebras · {profile.display_name}"
         try:
-            dau_ra = provider.translate_segment(van_ban, context=CONTEXT)
-            ra.append(KetQua(
-                model_key=f"cerebras_{profile_key}",
-                display_name=f"Cerebras · {profile.display_name}", doan_key=dk,
-                trang_thai="ok", do_tre_giay=time.monotonic() - bat_dau,
-                dau_ra=dau_ra,
-                input_tokens=(provider.last_usage or {}).get("input_tokens"),
-                output_tokens=(provider.last_usage or {}).get("output_tokens")))
+            dau_ra_1 = provider.translate_segment(van_ban, context=CONTEXT)
         except TranslationProviderError as exc:
-            ra.append(KetQua(
-                model_key=f"cerebras_{profile_key}",
-                display_name=f"Cerebras · {profile.display_name}", doan_key=dk,
-                trang_thai="loi", do_tre_giay=time.monotonic() - bat_dau,
-                loi=str(exc)[:300]))
+            ra.append(KetQua(model_key=ten, display_name=hien_thi, doan_key=dk,
+                             trang_thai="loi", do_tre_giay=time.monotonic() - bat_dau,
+                             loi=str(exc)[:300]))
+            continue
+
+        van_de_1 = kiem_tra_tinh_ven(van_ban, dau_ra_1)
+        da_sua = False
+        dau_ra_cuoi = dau_ra_1
+        loi_sua = ""
+        if van_de_1:
+            ctx_sua = replace(CONTEXT, chi_dan_sua_loi=CHI_DAN_SUA_LOI_CEREBRAS)
+            try:
+                dau_ra_2 = provider.translate_segment(van_ban, context=ctx_sua)
+                da_sua = True
+                dau_ra_cuoi = dau_ra_2
+            except TranslationProviderError as exc:
+                loi_sua = f" (lần sửa lỗi cũng thất bại: {str(exc)[:200]})"
+
+        van_de_cuoi = kiem_tra_tinh_ven(van_ban, dau_ra_cuoi)
+        ra.append(KetQua(
+            model_key=ten, display_name=hien_thi, doan_key=dk,
+            trang_thai="ok" if not van_de_cuoi else "loi_tinh_ven",
+            do_tre_giay=time.monotonic() - bat_dau,
+            dau_ra=dau_ra_cuoi,
+            loi=(tom_tat_van_de(van_de_cuoi) + loi_sua) if van_de_cuoi else "",
+            input_tokens=(provider.last_usage or {}).get("input_tokens"),
+            output_tokens=(provider.last_usage or {}).get("output_tokens"),
+            da_sua_loi=da_sua,
+            dau_ra_lan_dau=dau_ra_1 if da_sua else "",
+            van_de_lan_dau=tom_tat_van_de(van_de_1) if van_de_1 else ""))
     return ra
 
 
 def _thu_groq(profile_key: str, api_key: str) -> list[KetQua]:
+    """Groq KHONG co buoc sua loi rieng (dung theo so do yeu cau goc — chi
+    Cerebras moi "sua loi", Groq la du phong cuoi) — CHI kiem tra tinh ven
+    de BAO CAO (khong remediation nao duoc thuc hien tren ket qua cua no)."""
     profile = GROQ_MODEL_PROFILES[profile_key]
     if not api_key:
         return [KetQua(model_key=f"groq_{profile_key}",
@@ -128,11 +179,13 @@ def _thu_groq(profile_key: str, api_key: str) -> list[KetQua]:
         bat_dau = time.monotonic()
         try:
             dau_ra = provider.translate_segment(van_ban, context=CONTEXT)
+            van_de = kiem_tra_tinh_ven(van_ban, dau_ra)
             ra.append(KetQua(
                 model_key=f"groq_{profile_key}",
                 display_name=f"Groq · {profile.display_name}", doan_key=dk,
-                trang_thai="ok", do_tre_giay=time.monotonic() - bat_dau,
-                dau_ra=dau_ra,
+                trang_thai="ok" if not van_de else "loi_tinh_ven",
+                do_tre_giay=time.monotonic() - bat_dau,
+                dau_ra=dau_ra, loi=tom_tat_van_de(van_de) if van_de else "",
                 input_tokens=(provider.last_usage or {}).get("input_tokens"),
                 output_tokens=(provider.last_usage or {}).get("output_tokens")))
         except TranslationProviderError as exc:
@@ -156,11 +209,17 @@ def main() -> None:
     tat_ca += _thu_groq("qwen", groq_key)
 
     for kq in tat_ca:
-        print(f"[{kq.trang_thai.upper():7}] {kq.display_name:24} · {kq.doan_key}")
-        if kq.trang_thai == "ok":
+        print(f"[{kq.trang_thai.upper():13}] {kq.display_name:24} · {kq.doan_key}")
+        if kq.trang_thai in ("ok", "loi_tinh_ven"):
             print(f"          độ trễ={kq.do_tre_giay:.2f}s "
                  f"tokens(in/out)={kq.input_tokens}/{kq.output_tokens}")
+            if kq.da_sua_loi:
+                print(f"          [LẦN ĐẦU, KHÔNG ĐẠT: {kq.van_de_lan_dau}]")
+                print(f"          -> {kq.dau_ra_lan_dau}")
+                print("          [SAU KHI SỬA LỖI]")
             print(f"          -> {kq.dau_ra}")
+            if kq.trang_thai == "loi_tinh_ven":
+                print(f"          VẪN KHÔNG ĐẠT TÍNH VẸN: {kq.loi}")
         elif kq.trang_thai == "loi":
             print(f"          lỗi: {kq.loi}")
         else:
@@ -176,21 +235,42 @@ def main() -> None:
         [kq.__dict__ for kq in tat_ca], ensure_ascii=False, indent=2),
         encoding="utf-8")
 
+    cerebras_ket_qua = [kq for kq in tat_ca if kq.model_key.startswith("cerebras")]
+    cerebras_dat_het = (bool(cerebras_ket_qua)
+                        and all(kq.trang_thai == "ok" for kq in cerebras_ket_qua))
+
     dong_md = ["# Benchmark Cerebras + Groq — dịch fanfic Trung -> Việt", "",
               f"CEREBRAS_API_KEY: {'có' if cerebras_key else 'THIẾU — model Cerebras bị bỏ qua'}",
-              f"GROQ_API_KEY: {'có' if groq_key else 'THIẾU — model Groq bị bỏ qua'}", "",
-              "| Model | Đoạn | Trạng thái | Độ trễ (s) | Token in/out |",
-              "|---|---|---|---|---|"]
+              f"GROQ_API_KEY: {'có' if groq_key else 'THIẾU — model Groq bị bỏ qua'}", ""]
+    if cerebras_key:
+        dong_md.append(
+            "**Tiêu chí thành công** (Cerebras cho ra bản dịch tiếng Việt "
+            "đầy đủ cho cả 4 mẫu sau khi qua cơ chế tích vẹn/sửa lỗi, "
+            "không còn sót tiếng Trung): "
+            + ("ĐẠT ✓" if cerebras_dat_het else "CHƯA ĐẠT ✗ — xem chi tiết bên dưới"))
+        dong_md.append("")
+
+    dong_md += [
+        "| Model | Đoạn | Trạng thái | Đã sửa lỗi? | Độ trễ (s) | Token in/out |",
+        "|---|---|---|---|---|---|"]
     for kq in tat_ca:
         dong_md.append(
             f"| {kq.display_name} | {kq.doan_key} | {kq.trang_thai} | "
+            f"{'có' if kq.da_sua_loi else '—'} | "
             f"{f'{kq.do_tre_giay:.2f}' if kq.do_tre_giay is not None else '—'} | "
             f"{kq.input_tokens}/{kq.output_tokens} |")
     dong_md.append("")
     dong_md.append("## Nội dung dịch (để đối chiếu chất lượng thủ công)")
     for kq in tat_ca:
-        if kq.trang_thai == "ok":
-            dong_md.append(f"\n**{kq.display_name} · {kq.doan_key}**\n\n{kq.dau_ra}")
+        if kq.trang_thai in ("ok", "loi_tinh_ven"):
+            dong_md.append(f"\n**{kq.display_name} · {kq.doan_key}**")
+            if kq.da_sua_loi:
+                dong_md.append(
+                    f"\n_Lần đầu (KHÔNG đạt: {kq.van_de_lan_dau}):_ {kq.dau_ra_lan_dau}")
+                dong_md.append("\n_Sau khi sửa lỗi:_")
+            dong_md.append(f"\n{kq.dau_ra}")
+            if kq.trang_thai == "loi_tinh_ven":
+                dong_md.append(f"\n_⚠ Vẫn không đạt tính vẹn: {kq.loi}_")
     md_path.write_text("\n".join(dong_md), encoding="utf-8")
 
     print(f"Đã ghi: {json_path}")

@@ -24,6 +24,7 @@ model Cerebras):
 from __future__ import annotations
 
 import json
+import re
 import time
 import unittest
 from unittest.mock import patch
@@ -44,7 +45,11 @@ from server.translation_provider_registry import (
     build_provider_registry,
     kiem_tra_ket_noi_cerebras,
 )
-from server.translation_providers import TranslationContext, TranslationProviderError
+from server.translation_providers import (
+    TranslationContext,
+    TranslationIntegrityError,
+    TranslationProviderError,
+)
 from server.translation_service import TranslationService
 from server.translation_store import MockTranslationStore
 
@@ -54,6 +59,12 @@ from server.translation_store import MockTranslationStore
 #: khong nham lan gia dinh "chi co mot model mai mai".
 _CEREBRAS_GPT_OSS = CEREBRAS_MODEL_PROFILES["gpt_oss_120b"]
 _QWEN = GROQ_MODEL_PROFILES["qwen"]
+
+#: Dung boi `_FakeInnerProvider(dich_sach=True)` — xoa ky tu Han khoi dau
+#: vao de mo phong MOT BAN DICH THAT (khong con sot chu Trung), tranh trigger
+#: SAI `translation_integrity.kiem_tra_tinh_ven` (rule han_residue) khi test
+#: dua van ban nguon Trung THAT qua `TranslationService`.
+_MAU_HAN_TEST = re.compile(r"[一-鿿]")
 
 KHOA_TEST = sinh_master_key_moi()
 
@@ -73,37 +84,98 @@ def _tra_loi_chat(noi_dung: str, *, status_code: int = 200, headers=None,
 
 class _FakeInnerProvider:
     """Spy tat dinh — kich ban la danh sach hanh dong ("ok" hoac mot
-    Exception) tra ve/nem theo THU TU moi lan goi."""
+    Exception) tra ve/nem theo THU TU moi lan goi.
+
+    `dich_sach=False` (mac dinh): "dich" bang cach ECHO NGUYEN VAN dau vao,
+    kem tien to — vo hai voi cac test dung van ban ASCII ("x") vi khong co
+    gi de "con sot", nhung SE bi `translation_integrity.kiem_tra_tinh_ven`
+    flag han_residue SAI neu dung voi van ban nguon TIENG TRUNG THAT (day la
+    ly do co `dich_sach=True`, xem duoi).
+
+    `dich_sach=True`: mo phong MOT BAN DICH THAT SU — xoa het ky tu Han
+    khoi dau vao truoc khi tra ve (giu lai so/chu ASCII con lai lam dau hieu
+    phan biet, vd "C1"/"C2" trong tieu de chuong test) — dung cho cac test
+    day van ban Trung THAT qua TranslationService (`ChunkOrderingTest`,
+    `CacheAvoidsRepeatedCallTest`)."""
 
     name = "fake"
 
-    def __init__(self, kich_ban):
+    def __init__(self, kich_ban, dich_sach: bool = False):
         self._kich_ban = list(kich_ban)
         self.so_lan_goi = 0
+        self._dich_sach = dich_sach
 
     def translate_segment(self, text, *, context):
         self.so_lan_goi += 1
         hanh_dong = self._kich_ban.pop(0) if self._kich_ban else "ok"
         if hanh_dong == "ok":
+            if self._dich_sach:
+                sach = _MAU_HAN_TEST.sub("", text)
+                return f"[{self.name}-vi] {sach}#{self.so_lan_goi}."
             return f"[{self.name}] {text}"
         raise hanh_dong
 
 
-def _cerebras_cp(profile_key: str, kich_ban, credential_source="shared"):
+class _FakeScriptedTextProvider:
+    """Spy tra ve VAN BAN CU THE theo kich ban (khong echo/danh dau tu dong
+    nhu `_FakeInnerProvider`) — dung de kiem tra sua loi/du phong: lan goi
+    DAU tra ve mot ban dich CO LOI (con sot chu Han/thieu hoi thoai/cat cut),
+    lan goi SUA LOI (thu hai) tra ve mot ban dich TOT. Moi phan tu kich ban
+    la MOT chuoi (tra ve nguyen van) hoac MOT exception (nem ra)."""
+
+    name = "fake-scripted"
+
+    def __init__(self, kich_ban):
+        self._kich_ban = list(kich_ban)
+        self.so_lan_goi = 0
+        #: Ghi lai `context.chi_dan_sua_loi` cua MOI lan goi — dung de kiem
+        #: tra lan goi SUA LOI thuc su co kem chi dan (khac lan goi dau).
+        self.chi_dan_sua_loi_moi_lan: list = []
+
+    def translate_segment(self, text, *, context):
+        self.so_lan_goi += 1
+        self.chi_dan_sua_loi_moi_lan.append(context.chi_dan_sua_loi)
+        hanh_dong = self._kich_ban.pop(0) if self._kich_ban else "ok rỗng."
+        if isinstance(hanh_dong, Exception):
+            raise hanh_dong
+        return hanh_dong
+
+
+def _cerebras_cp_scripted(kich_ban, credential_source="shared"):
+    profile = CEREBRAS_MODEL_PROFILES["gpt_oss_120b"]
+    return ConfiguredProvider(
+        provider_id="cerebras_gpt_oss_120b", model_id=profile.model_id,
+        display_name=profile.display_name, quality_hint=profile.quality_hint,
+        provider=_FakeScriptedTextProvider(kich_ban), free_tier=True,
+        credential_source=credential_source)
+
+
+def _groq_cp_scripted(kich_ban, credential_source="shared"):
+    profile = GROQ_MODEL_PROFILES["qwen"]
+    return ConfiguredProvider(
+        provider_id="groq_qwen", model_id=profile.model_id,
+        display_name=profile.display_name, quality_hint=profile.quality_hint,
+        provider=_FakeScriptedTextProvider(kich_ban), free_tier=True,
+        credential_source=credential_source)
+
+
+def _cerebras_cp(profile_key: str, kich_ban, credential_source="shared",
+                 dich_sach=False):
     profile = CEREBRAS_MODEL_PROFILES[profile_key]
     return ConfiguredProvider(
         provider_id=f"cerebras_{profile_key}", model_id=profile.model_id,
         display_name=profile.display_name, quality_hint=profile.quality_hint,
-        provider=_FakeInnerProvider(kich_ban), free_tier=True,
+        provider=_FakeInnerProvider(kich_ban, dich_sach=dich_sach), free_tier=True,
         credential_source=credential_source)
 
 
-def _groq_cp(profile_key: str, kich_ban, credential_source="shared"):
+def _groq_cp(profile_key: str, kich_ban, credential_source="shared",
+            dich_sach=False):
     profile = GROQ_MODEL_PROFILES[profile_key]
     return ConfiguredProvider(
         provider_id=f"groq_{profile_key}", model_id=profile.model_id,
         display_name=profile.display_name, quality_hint=profile.quality_hint,
-        provider=_FakeInnerProvider(kich_ban), free_tier=True,
+        provider=_FakeInnerProvider(kich_ban, dich_sach=dich_sach), free_tier=True,
         credential_source=credential_source)
 
 
@@ -484,8 +556,10 @@ class ChunkOrderingTest(unittest.TestCase):
         # mai o unavailable sau MOT loi tam thoi thuoc loai
         # TranslationProviderError chung — day la hanh vi hien co, ghi nhan
         # lai o day khong phai thay doi moi), thanh cong tu chuong 2 tro di.
-        cerebras = _cerebras_cp("gpt_oss_120b", [TranslationProviderError("tam thoi loi mot lan")])
-        qwen = _groq_cp("qwen", ["ok", "ok", "ok", "ok"])
+        cerebras = _cerebras_cp(
+            "gpt_oss_120b", [TranslationProviderError("tam thoi loi mot lan")],
+            dich_sach=True)
+        qwen = _groq_cp("qwen", ["ok", "ok", "ok", "ok"], dich_sach=True)
         registry = ProviderRegistry([cerebras, qwen])
 
         svc = TranslationService(self.store, self.novels, registry=registry)
@@ -504,9 +578,12 @@ class ChunkOrderingTest(unittest.TestCase):
         p_cuoi = svc.get_project(p.project_id, self.an.user_id)
         self.assertEqual(len(p_cuoi.translated_chapters), 4)
         # Moi chuong xuat hien DUNG MOT LAN, dung noi dung, dung thu tu —
-        # khong doan nao bi lap/mat/sai vi tri.
-        for i, ky_tu in enumerate(["甲", "乙", "丙", "丁"]):
-            self.assertIn(ky_tu, p_cuoi.translated_chapters[i])
+        # khong doan nao bi lap/mat/sai vi tri. Dau hieu phan biet la "C{i}"
+        # (tu tieu de chuong, la ky tu ASCII con nguyen sau khi
+        # `_FakeInnerProvider(dich_sach=True)` xoa ky tu Han) — KHONG dung
+        # ky_tu Han goc nua (`_MAU_HAN_TEST` co chu dich cu the xoa no).
+        for i in range(4):
+            self.assertIn(f"C{i + 1}", p_cuoi.translated_chapters[i])
         # Khong co chuong nao trung noi dung voi chuong khac (khong trung lap).
         self.assertEqual(len(set(p_cuoi.translated_chapters)), 4)
 
@@ -530,7 +607,7 @@ class CacheAvoidsRepeatedCallTest(unittest.TestCase):
         # `ChunkOrderingTest`) de dam bao van ban goi provider GIONG HET
         # nhau giua hai chuong, khong chi phan cau hoi thoai.
         van_ban = "第1章\n你好。\n第1章\n你好。"
-        qwen = _groq_cp("qwen", ["ok", "ok"])
+        qwen = _groq_cp("qwen", ["ok", "ok"], dich_sach=True)
         registry = ProviderRegistry([qwen])
 
         svc = TranslationService(self.store, self.novels, registry=registry)
@@ -555,7 +632,7 @@ class CacheAvoidsRepeatedCallTest(unittest.TestCase):
         """Nguoi dung bam "dịch lại" phai luon nhan MOT lan goi that moi —
         cache CHI danh cho duong ong tu dong (`_dich_mot_chuong`)."""
         van_ban = "第1章 Một\n你好。"
-        qwen = _groq_cp("qwen", ["ok", "ok"])
+        qwen = _groq_cp("qwen", ["ok", "ok"], dich_sach=True)
         registry = ProviderRegistry([qwen])
 
         svc = TranslationService(self.store, self.novels, registry=registry)
@@ -607,6 +684,144 @@ class NoSecretsLeakTest(unittest.TestCase):
             kiem_tra_ket_noi_cerebras("cyc_secret_value_999", "gpt-oss-120b", client=client)
         self.assertNotIn("cyc_secret_value_999", str(ctx.exception))
         self.assertNotIn("cyc_secret_value_999", ctx.exception.code)
+
+
+# =============================================================================
+# Sua loi (repair retry) + du phong Groq — yeu cau bo sung sau benchmark that
+# =============================================================================
+
+class RepairAndFallbackTest(unittest.TestCase):
+    """Tai lap CHINH XAC loi that tu benchmark (到底是谁 con sot trong doan
+    hoi thoai nhieu nhan vat), kiem tra co che sua loi (repair retry, CUNG
+    provider Cerebras) roi du phong Groq CHI KHI can, va tinh chat 'ban dich
+    da hop le thi khong bi sua/khong trung lap'."""
+
+    NGUON_HOI_THOAI = ("\"你到底是谁？\"她厉声问道。\n"
+                       "\"我？\"他冷笑一声，\"你很快就会知道了。\"")
+    #: Mau LOI THAT tu benchmark (2026-08-15) — xem
+    #: docs/reports/cerebras-groq-benchmark-summary.md.
+    DICH_LOI = "“Ngươi到底是誰？” cô gắt hỏi.\n“Ta？” anh cười lạnh, “Cô sẽ sớm biết được.”"
+    DICH_TOT = "“Ngươi rốt cuộc là ai?” cô gắt hỏi.\n“Ta?” anh cười lạnh, “Cậu sẽ sớm biết thôi.”"
+
+    def setUp(self):
+        self.identity = MockIdentityAdapter()
+        self.novels = MockMetadataStore()
+        self.store = MockTranslationStore()
+        self.an = self.identity.register("an@vidu.vn", "MatKhau123", "An")
+
+    def _svc_va_du_an(self, registry):
+        svc = TranslationService(self.store, self.novels, registry=registry)
+        p = svc.create_project(self.an.user_id, title="t", source_text="x",
+                               quality_mode="van_hoc")
+        return svc, p
+
+    def test_repair_retry_thanh_cong(self):
+        """Kich ban 'repair retry succeeds': lan dau Cerebras tra ve ban
+        dich LOI (con sot chu Han), lan sua loi (CUNG provider) tra ve ban
+        dich TOT — chap nhan NGAY, KHONG bao gio cham toi Groq."""
+        cerebras = _cerebras_cp_scripted([self.DICH_LOI, self.DICH_TOT])
+        qwen = _groq_cp_scripted(["KHÔNG ĐƯỢC GỌI"])
+        registry = ProviderRegistry([cerebras, qwen])
+        svc, p = self._svc_va_du_an(registry)
+
+        ctx = TranslationContext(vai_tro="translator", quality_mode="van_hoc")
+        ket_qua, prov = svc._goi_dich_mot_doan(self.NGUON_HOI_THOAI, ctx, p, [])
+
+        self.assertEqual(ket_qua, self.DICH_TOT)
+        self.assertEqual(prov.provider_id, "cerebras_gpt_oss_120b")
+        self.assertEqual(cerebras.provider.so_lan_goi, 2,
+                         "phải gọi Cerebras đúng 2 lần (lần đầu + lần sửa lỗi)")
+        self.assertEqual(qwen.provider.so_lan_goi, 0,
+                         "Groq KHÔNG được gọi khi sửa lỗi đã thành công")
+        # Lan goi DAU khong kem chi dan sua loi; lan SUA LOI (thu hai) co.
+        self.assertEqual(cerebras.provider.chi_dan_sua_loi_moi_lan[0], "")
+        self.assertTrue(cerebras.provider.chi_dan_sua_loi_moi_lan[1])
+
+    def test_repair_retry_van_loi_fallback_sang_groq(self):
+        """Kich ban 'repair retry still invalid -> Groq fallback': ca lan
+        dau LAN lan sua loi cua Cerebras deu tra ve ban dich LOI — chuyen
+        sang Groq, chap nhan ket qua cua Groq VO DIEU KIEN (khong kiem tra
+        lai tinh ven Groq, dung so do yeu cau goc)."""
+        cerebras = _cerebras_cp_scripted([self.DICH_LOI, self.DICH_LOI])
+        qwen = _groq_cp_scripted(["Bản dịch tốt từ Groq dự phòng."])
+        registry = ProviderRegistry([cerebras, qwen])
+        svc, p = self._svc_va_du_an(registry)
+
+        ctx = TranslationContext(vai_tro="translator", quality_mode="van_hoc")
+        ket_qua, prov = svc._goi_dich_mot_doan(self.NGUON_HOI_THOAI, ctx, p, [])
+
+        self.assertEqual(ket_qua, "Bản dịch tốt từ Groq dự phòng.")
+        self.assertEqual(prov.provider_id, "groq_qwen")
+        self.assertEqual(cerebras.provider.so_lan_goi, 2)
+        self.assertEqual(qwen.provider.so_lan_goi, 1)
+
+    def test_khong_co_groq_du_phong_nem_loi_co_kiem_soat(self):
+        """'fail/rate-limit -> controlled per-chunk translation error':
+        khong co Groq nao trong registry -> loi CO KIEM SOAT cho DUNG doan
+        nay, la mot `TranslationProviderError` (job se failed AN TOAN,
+        khong lam mat cac chuong TRUOC do — hanh vi hien co cua
+        `_thuc_thi_job`, khong doi gi them)."""
+        cerebras = _cerebras_cp_scripted([self.DICH_LOI, self.DICH_LOI])
+        registry = ProviderRegistry([cerebras])  # KHONG co Groq
+        svc, p = self._svc_va_du_an(registry)
+        ctx = TranslationContext(vai_tro="translator", quality_mode="van_hoc")
+        with self.assertRaises(TranslationIntegrityError):
+            svc._goi_dich_mot_doan(self.NGUON_HOI_THOAI, ctx, p, [])
+
+    def test_ban_dich_hop_le_khong_bi_sua_khong_trung_lap(self):
+        """'valid Chinese names/formatting do not cause accidental duplicate
+        output': ten rieng Han Viet hop le KHONG duoc kich hoat sua loi —
+        Cerebras CHI duoc goi DUNG MOT LAN, Groq khong bao gio duoc cham
+        toi, va ket qua khong bi nhan doi/ghep lai."""
+        cerebras = _cerebras_cp_scripted(["Tiêu Viêm nhìn về phía Dược Lão."])
+        qwen = _groq_cp_scripted(["KHÔNG ĐƯỢC GỌI"])
+        registry = ProviderRegistry([cerebras, qwen])
+        svc, p = self._svc_va_du_an(registry)
+        ctx = TranslationContext(vai_tro="translator", quality_mode="van_hoc")
+        ket_qua, prov = svc._goi_dich_mot_doan("萧炎看向药老。", ctx, p, [])
+
+        self.assertEqual(ket_qua, "Tiêu Viêm nhìn về phía Dược Lão.")
+        self.assertEqual(prov.provider_id, "cerebras_gpt_oss_120b")
+        self.assertEqual(cerebras.provider.so_lan_goi, 1,
+                         "không được sửa lỗi khi bản dịch đã hợp lệ")
+        self.assertEqual(qwen.provider.so_lan_goi, 0)
+
+
+# =============================================================================
+# Groq cooldown — khong hammer khi dang bi gioi han toc do
+# =============================================================================
+
+class GroqCooldownTest(unittest.TestCase):
+    def test_khong_co_retry_after_van_co_cooldown_co_han(self):
+        """Truoc day: 429 khong kem `Retry-After` -> `_reset_at` bi de RONG
+        -> `is_available_now()` coi la khong dung duoc MAI MAI trong tien
+        trinh dang chay (khong bao gio tu hoi phuc). Sau khi sua: phai co
+        mot moc reset MAC DINH (co han), khong RONG."""
+        qwen = _groq_cp("qwen", [ProviderRateLimited("hết lượt, không có retry-after")])
+        with self.assertRaises(ProviderRateLimited):
+            qwen.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        entry = qwen.catalog_entry()
+        self.assertTrue(entry.reset_at, "phải có mốc reset MẶC ĐỊNH, không được để rỗng")
+
+    def test_dang_cooldown_khong_bi_goi_lai_ngay_lap_tuc(self):
+        """'introduce provider cooldown/backoff so the site does not
+        repeatedly hammer Groq' + 'during cooldown, fail cleanly rather than
+        generating repeated useless calls': provider dang RATE_LIMITED (moc
+        reset trong TUONG LAI) phai bi BO QUA (khong goi lai) khi
+        `ProviderRegistry` thu no lan nua trong CUNG mot lan `translate_segment`."""
+        qwen = _groq_cp("qwen", [ProviderRateLimited("hết lượt")])
+        with self.assertRaises(ProviderRateLimited):
+            qwen.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        so_lan_goi_truoc = qwen.provider.so_lan_goi
+        self.assertFalse(qwen.is_available_now(), "phải đang trong cooldown")
+
+        gpt_oss = _groq_cp("gpt_oss_120b", ["ok"])
+        reg = ProviderRegistry([qwen, gpt_oss])
+        _, prov = reg.translate_segment(
+            "x", context=TranslationContext(vai_tro="translator", quality_mode="van_hoc"))
+        self.assertEqual(prov.provider_id, "groq_gpt_oss_120b")
+        self.assertEqual(qwen.provider.so_lan_goi, so_lan_goi_truoc,
+                         "provider đang cooldown KHÔNG được gọi lại")
 
 
 if __name__ == "__main__":

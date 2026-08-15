@@ -174,6 +174,32 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+#: Giay — cooldown MAC DINH khi mot provider bao 429/het han muc nhung
+#: KHONG kem header `Retry-After` (Groq da tung tra ve dang nay that su, xem
+#: `test_429_khong_header_van_la_rate_limited_nhung_khong_bia_moc`). TRUOC
+#: V6 cerebras-groq-translation, `_reset_at` bi de RONG trong truong hop
+#: nay -> `is_available_now()` coi provider la KHONG DUNG DUOC MAI MAI (rong
+#: khong co moc reset nao de so sanh) TRONG SUOT vong doi tien trinh — vua
+#: khong dat duoc "cooldown" (khong bao gio thu lai) vua khong dat duoc
+#: "khong hammer lien tuc" theo dung nghia (no cham lien tuc VE MOT PHIA:
+#: khong bao gio goi lai NHUNG cung khong bao gio bao cho ai biet no co the
+#: da hoi phuc). Cho mot cooldown CO HAN thay vi RONG-nghia-la-mai-mai sua
+#: CA HAI: provider duoc NGHI mot khoang hop ly (khong hammer), roi TU DONG
+#: duoc thu lai (khong "chet" vinh vien trong tien trinh dang chay).
+DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 60
+
+
+def _reset_at_mac_dinh(retry_at: str) -> str:
+    """`retry_at` (tu header `Retry-After`, co the RONG) -> moc ISO CHAC
+    CHAN co gia tri — dung cooldown mac dinh khi nha cung cap khong bao moc
+    cu the nao ca."""
+    if retry_at:
+        return retry_at
+    return (datetime.now(timezone.utc)
+            + timedelta(seconds=DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS)
+            ).isoformat(timespec="seconds")
+
+
 #: Mot so model "reasoning" (vd Qwen3 tren Groq) tra ve khoi
 #: `<think>...</think>` NGAY TRONG `message.content` — neu khong loc, toan bo
 #: chuoi suy luan noi bo se bi coi la "ban dich". Loc o day la RAO CHAN CUOI,
@@ -493,7 +519,7 @@ class ConfiguredProvider:
         except ProviderRateLimited as exc:
             with self._lock:
                 self._status = ProviderStatus.RATE_LIMITED
-                self._reset_at = exc.retry_at
+                self._reset_at = _reset_at_mac_dinh(exc.retry_at)
             usage_recorder().ghi(
                 provider_id=self.provider_id, model_id=self.model_id,
                 credential_source=self.credential_source,
@@ -503,7 +529,7 @@ class ConfiguredProvider:
         except ProviderQuotaExhausted as exc:
             with self._lock:
                 self._status = ProviderStatus.QUOTA_EXHAUSTED
-                self._reset_at = exc.retry_at
+                self._reset_at = _reset_at_mac_dinh(exc.retry_at)
             usage_recorder().ghi(
                 provider_id=self.provider_id, model_id=self.model_id,
                 credential_source=self.credential_source,

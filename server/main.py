@@ -148,8 +148,10 @@ from server.image_byop_service import (
 from server.image_spending_guard import SharedPremiumDisabled, SharedPremiumSpendingGuard
 from server.image_payment import CheckoutStatus, MockPaymentProvider
 from server.image_library_store import MockImageLibraryStore
+from server.image_community_catalogue import CommunityCatalogueCache
 from server.image_service import (
     ByopNotConnected,
+    CommunityModelNoLongerFree,
     GenerationAlreadyProcessed,
     ImageStudioService,
     UnknownOrDisabledModel,
@@ -299,12 +301,19 @@ if not settings.image_studio.shared_premium_enabled:
     # rac kiem tra `shared_premium_enabled` o moi route.
     image_spending_guard.dat_kill_switch(True)
 
+#: Danh sach model cong dong Pollinations bao gia 0 pollen — CONG KHAI (chi
+#: goi endpoint LIET KE, khong can POLLINATIONS_API_KEY), xem
+#: `server/image_community_catalogue.py` docstring dau file ve nguon that
+#: da xac minh (`GET https://gen.pollinations.ai/image/models`, anonymous).
+image_community_catalogue = CommunityCatalogueCache()
+
 image_studio_svc = ImageStudioService(
     wallet_store=image_wallet_store,
     quick_free_provider=image_quick_free_provider,
     shared_premium_provider=image_shared_premium_provider,
     byop_service=image_byop_svc,
     spending_guard=image_spending_guard,
+    community_catalogue=image_community_catalogue,
 )
 image_payment_provider = MockPaymentProvider()
 
@@ -4779,6 +4788,8 @@ def _dich_vu_anh(fn, *args, **kwargs):
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except ByopNotConnected as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except CommunityModelNoLongerFree as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except ByopStateMismatch as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except ByopExchangeFailed as exc:
@@ -4962,6 +4973,66 @@ def image_generate_byop(
         aspect_ratio=payload.aspect_ratio, quality=payload.quality,
     )
     return _anh_thanh_dict(image)
+
+
+# ----------------------------------------------------------------- Cong Free
+
+
+@app.get("/api/image/community-free/models")
+def image_community_free_models(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """Danh sach model cong dong Pollinations dang bao gia 0 pollen NGAY BAY
+    GIO — dong (co the rong that su, xem ADDENDUM). `available=False` nghia
+    la khong lay duoc danh sach (loi mang), khac voi danh sach rong hop le."""
+    trang_thai = image_studio_svc.catalogue_cong_dong()
+    return {
+        "available": trang_thai["available"],
+        "error": trang_thai["error"],
+        "models": [
+            {
+                "model_id": m.model_id,
+                "display_name": m.display_name,
+                "provider_badge": m.provider_badge,
+                "is_official": m.is_official,
+                "per_user_rpm": m.per_user_rpm,
+                "capabilities": list(m.capabilities),
+                "description": m.description,
+                "alpha_hint": m.alpha_hint,
+            }
+            for m in trang_thai["models"]
+        ],
+    }
+
+
+class ImageCommunityFreeIn(BaseModel):
+    prompt: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    negative_prompt: Annotated[str, StringConstraints(max_length=1000)] = ""
+    model: Annotated[str, StringConstraints(max_length=80)]
+    aspect_ratio: Annotated[str, StringConstraints(max_length=10)] = "1:1"
+    quality: Annotated[str, StringConstraints(max_length=20)] = "standard"
+    idempotency_key: Annotated[str, StringConstraints(min_length=8, max_length=128)]
+
+
+@app.post("/api/image/community-free")
+def image_generate_community_free(
+    payload: ImageCommunityFreeIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Sinh anh qua model cong dong dang mien phi THAT SU — kiem tra LAI
+    danh sach truoc moi lan goi, KHONG bao gio tu chuyen sang Shared Premium
+    neu model da bi ru khoi danh sach mien phi (xem
+    `ImageStudioService.sinh_anh_cong_dong`)."""
+    if payload.aspect_ratio not in _TI_LE_HOP_LE:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tỷ lệ khung hình không hợp lệ.")
+    ket_qua = _dich_vu_anh(
+        image_studio_svc.sinh_anh_cong_dong,
+        user_id=profile.user_id, prompt=payload.prompt,
+        negative_prompt=payload.negative_prompt, model_id=payload.model,
+        aspect_ratio=payload.aspect_ratio, quality=payload.quality,
+        idempotency_key=payload.idempotency_key,
+    )
+    return _anh_thanh_dict(ket_qua.image, extra={
+        "generation_id": ket_qua.reservation.generation_id,
+        "status": ket_qua.reservation.status.value,
+    })
 
 
 # --------------------------------------------------------- BYOP (My Pollinations)

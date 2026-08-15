@@ -5,6 +5,10 @@
  *
  *   Quick Free      — an danh, khong dang nhap, KHONG chon duoc model
  *                      ("Auto model" — xem canh bao duoi).
+ *   Cộng đồng Free   — model CONG DONG Pollinations dang bao gia 0 pollen
+ *                      NGAY BAY GIO (co the la danh sach RONG that su — xem
+ *                      canh bao duoi). Van can dang nhap: sinh anh van goi
+ *                      Unified API co xac thuc server-side (KHAC Quick Free).
  *   Fanfic Credits   — dang nhap, tru vi noi bo, chon model/chat luong.
  *   My Pollinations  — dang nhap + ket noi Pollinations ca nhan (BYOP),
  *                      dung Pollen cua chinh nguoi dung, KHONG cham vi.
@@ -14,11 +18,20 @@
  * minh endpoint an danh bo qua/chuan hoa tham so model — hien "Free Flux"
  * se la mot loi quang cao sai. Nhan hien thi CO DINH la "Quick Free"/"Auto
  * model", dung theo dung nhan backend tra ve.
+ *
+ * QUAN TRONG #2: "Cộng đồng Free" (gia 0 pollen do Pollinations cong bo)
+ * KHAC HOAN TOAN "Quick Free" (an danh, khong biet model) — xem ADDENDUM
+ * "FREE POLLINATIONS COMMUNITY IMAGE MODELS". Danh sach nay co the RONG
+ * THAT SU (da xac minh 2026-08-15: chua model anh nao dang gia 0) — day la
+ * trang thai HOP LE, khong phai loi, va KHONG duoc tu dong chuyen sang
+ * Fanfic Credits khi rong/khi mot model bi ru khoi danh sach.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ApiError,
   imageStudio,
+  type CommunityFreeImageModel,
   type ImageGenerationResult,
   type ImageModelInfo,
   type SavedImageEntry,
@@ -34,7 +47,7 @@ import {
 } from "@/components/ui";
 import { IconSparkles, IconHistory, IconKey } from "@/components/Icons";
 
-type Mode = "quick_free" | "shared_premium" | "byop";
+type Mode = "quick_free" | "community_free" | "shared_premium" | "byop";
 
 const ASPECT_RATIOS = ["1:1", "16:9", "9:16", "3:4", "4:3"] as const;
 
@@ -85,6 +98,12 @@ export default function ImageStudioPage() {
   const [byopConnected, setByopConnected] = useState(false);
   const [byopChecking, setByopChecking] = useState(true);
 
+  const [communityModels, setCommunityModels] = useState<CommunityFreeImageModel[]>([]);
+  const [communityAvailable, setCommunityAvailable] = useState(true);
+  const [communityError, setCommunityError] = useState("");
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [communityModel, setCommunityModel] = useState("");
+
   const [result, setResult] = useState<ImageGenerationResult | null>(null);
   const [lastMode, setLastMode] = useState<Mode>("quick_free");
   const [generating, setGenerating] = useState(false);
@@ -127,10 +146,32 @@ export default function ImageStudioPage() {
       .finally(() => setByopChecking(false));
   }, [profile]);
 
+  const refreshCommunityFree = useCallback(() => {
+    // KHONG goi `setCommunityLoading(true)` truc tiep o day (setState dong
+    // bo trong than effect, khi ham nay duoc goi truc tiep tu effect ben
+    // duoi) — hoan lai mot nhip qua Promise, cung tinh than voi
+    // `estimateMicro`/`doi()` o tren.
+    Promise.resolve().then(() => setCommunityLoading(true));
+    imageStudio
+      .imageCommunityFreeModels()
+      .then((r) => {
+        setCommunityAvailable(r.available);
+        setCommunityError(r.error);
+        setCommunityModels(r.models);
+        setCommunityModel((current) => current || r.models[0]?.model_id || "");
+      })
+      .catch((cause) => {
+        setCommunityAvailable(false);
+        setCommunityError(errorMessage(cause));
+      })
+      .finally(() => setCommunityLoading(false));
+  }, []);
+
   useEffect(() => {
     if (mode === "shared_premium") refreshWallet();
     if (mode === "byop") refreshByopStatus();
-  }, [mode, refreshWallet, refreshByopStatus]);
+    if (mode === "community_free") refreshCommunityFree();
+  }, [mode, refreshWallet, refreshByopStatus, refreshCommunityFree]);
 
   // Uoc tinh chi phi — chi cho Fanfic Credits, cap nhat khi doi model/chat luong.
   useEffect(() => {
@@ -197,7 +238,8 @@ export default function ImageStudioPage() {
     prompt.trim().length > 0 &&
     !generating &&
     (mode !== "shared_premium" || Boolean(model)) &&
-    (mode !== "byop" || (byopConnected && Boolean(model)));
+    (mode !== "byop" || (byopConnected && Boolean(model))) &&
+    (mode !== "community_free" || (communityAvailable && Boolean(communityModel)));
 
   const generate = useCallback(async () => {
     setError("");
@@ -210,6 +252,15 @@ export default function ImageStudioPage() {
       let ket_qua: ImageGenerationResult;
       if (mode === "quick_free") {
         ket_qua = await imageStudio.imageQuickFree(prompt.trim(), aspectRatio, controller.signal);
+      } else if (mode === "community_free") {
+        ket_qua = await imageStudio.imageCommunityFree(
+          {
+            prompt: prompt.trim(), negativePrompt: negativePrompt.trim(),
+            model: communityModel, aspectRatio, quality,
+            idempotencyKey: idemRef.current,
+          },
+          controller.signal,
+        );
       } else if (mode === "shared_premium") {
         ket_qua = await imageStudio.imageSharedPremium(
           {
@@ -230,6 +281,11 @@ export default function ImageStudioPage() {
     } catch (cause) {
       if ((cause as Error)?.name === "AbortError") {
         toast.push("info", "Đã huỷ.");
+      } else if (mode === "community_free" && cause instanceof ApiError && cause.status === 409) {
+        // ADDENDUM: model bi ru khoi danh sach mien phi giua chung — bao ro
+        // rang, KHONG tu chuyen sang Fanfic Credits, va lam moi danh sach.
+        setError(errorMessage(cause));
+        refreshCommunityFree();
       } else {
         setError(errorMessage(cause));
       }
@@ -237,7 +293,10 @@ export default function ImageStudioPage() {
       setGenerating(false);
       abortRef.current = null;
     }
-  }, [mode, prompt, negativePrompt, aspectRatio, model, quality, refreshWallet, toast]);
+  }, [
+    mode, prompt, negativePrompt, aspectRatio, model, quality, communityModel,
+    refreshWallet, refreshCommunityFree, toast,
+  ]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
@@ -264,7 +323,7 @@ export default function ImageStudioPage() {
       await imageStudio.imageLibrarySave({
         generationId: result.generation_id ?? "",
         prompt: prompt.trim(), negativePrompt: negativePrompt.trim(),
-        model: mode === "quick_free" ? "" : model,
+        model: mode === "quick_free" ? "" : mode === "community_free" ? communityModel : model,
         mode: lastMode, aspectRatio, imageBase64: result.image_base64,
       });
       toast.ok("Đã lưu vào thư viện.");
@@ -274,7 +333,7 @@ export default function ImageStudioPage() {
     } finally {
       setSaving(false);
     }
-  }, [result, prompt, negativePrompt, model, mode, lastMode, aspectRatio, toast]);
+  }, [result, prompt, negativePrompt, model, communityModel, mode, lastMode, aspectRatio, toast]);
 
   const loadLibrary = useCallback(() => {
     imageStudio.imageLibraryList().then((r) => setLibrary(r.images)).catch(() => setLibrary([]));
@@ -317,6 +376,13 @@ export default function ImageStudioPage() {
             </button>
             <button
               type="button" className="seg-item" role="tab"
+              aria-selected={mode === "community_free"}
+              onClick={() => setMode("community_free")}
+            >
+              Cộng đồng Free
+            </button>
+            <button
+              type="button" className="seg-item" role="tab"
               aria-selected={mode === "shared_premium"}
               onClick={() => setMode("shared_premium")}
             >
@@ -336,6 +402,29 @@ export default function ImageStudioPage() {
               Miễn phí, không cần đăng nhập. Hệ thống tự chọn model phía nhà
               cung cấp (&quot;Auto model&quot;) — bạn không chọn được model cụ thể ở
               chế độ này.
+            </Alert>
+          ) : null}
+
+          {mode === "community_free" && !profile ? (
+            <Alert kind="warn">Cần đăng nhập để dùng Cộng đồng Free.</Alert>
+          ) : null}
+          {mode === "community_free" && profile && communityLoading ? (
+            <Alert kind="info">Đang kiểm tra model cộng đồng đang miễn phí…</Alert>
+          ) : null}
+          {mode === "community_free" && profile && !communityLoading && !communityAvailable ? (
+            <Alert kind="warn">
+              Không lấy được danh sách model cộng đồng lúc này
+              {communityError ? `: ${communityError}` : "."} Quick Free và
+              Fanfic Credits vẫn dùng được — vui lòng thử lại sau.
+            </Alert>
+          ) : null}
+          {mode === "community_free" && profile && !communityLoading
+            && communityAvailable && communityModels.length === 0 ? (
+            <Alert kind="info">
+              Hiện chưa có model cộng đồng nào đang được Pollinations công bố
+              giá 0 — danh sách này kiểm tra định kỳ và sẽ tự xuất hiện ngay
+              khi có model đủ điều kiện. Quick Free và Fanfic Credits vẫn
+              dùng được trong lúc chờ.
             </Alert>
           ) : null}
 
@@ -424,7 +513,7 @@ export default function ImageStudioPage() {
               </div>
             </div>
 
-            {mode !== "quick_free" ? (
+            {mode === "shared_premium" || mode === "byop" ? (
               <div className="grid-2">
                 <div className="field">
                   <label className="label" htmlFor="img-model">Model</label>
@@ -456,6 +545,44 @@ export default function ImageStudioPage() {
                     </select>
                   </div>
                 ) : null}
+              </div>
+            ) : null}
+
+            {mode === "community_free" && communityModels.length > 0 ? (
+              <div className="field">
+                <label className="label" htmlFor="img-community-model">
+                  Model cộng đồng (miễn phí)
+                </label>
+                <select
+                  id="img-community-model" className="select" value={communityModel}
+                  onChange={(e) => setCommunityModel(e.target.value)}
+                >
+                  {communityModels.map((m) => (
+                    <option key={m.model_id} value={m.model_id}>
+                      {m.display_name}
+                      {m.provider_badge ? ` · ${m.provider_badge}` : ""}
+                    </option>
+                  ))}
+                </select>
+                {(() => {
+                  const chon = communityModels.find((m) => m.model_id === communityModel);
+                  if (!chon) return null;
+                  return (
+                    <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                      <span className="badge badge-ok">Free / 0 Pollen</span>
+                      {chon.provider_badge ? (
+                        <span className="badge">{chon.provider_badge}</span>
+                      ) : (
+                        <span className="badge">Chính thức</span>
+                      )}
+                      {chon.alpha_hint ? <span className="badge badge-warn">Alpha</span> : null}
+                      {typeof chon.per_user_rpm === "number" ? (
+                        <span className="hint">Giới hạn: {chon.per_user_rpm} yêu cầu/phút</span>
+                      ) : null}
+                      {chon.alpha_hint ? <span className="hint">{chon.alpha_hint}</span> : null}
+                    </div>
+                  );
+                })()}
               </div>
             ) : null}
 

@@ -2406,6 +2406,27 @@ export const imageStudio = {
     request<{ deleted: boolean }>(
       `/api/image/library/${encodeURIComponent(imageId)}`, { method: "DELETE" },
     ),
+
+  /** Cong Free — model cong dong Pollinations dang bao gia 0 pollen NGAY
+      BAY GIO. `available: false` nghia la khong lay duoc danh sach (loi
+      mang), KHAC voi `models: []` (lay duoc, nhung hien khong model nao
+      mien phi — xem ADDENDUM, day la trang thai THAT co the xay ra). */
+  imageCommunityFreeModels: () =>
+    request<ImageCommunityFreeModelsResponse>("/api/image/community-free/models"),
+
+  imageCommunityFree: (params: {
+    prompt: string; negativePrompt: string; model: string;
+    aspectRatio: string; quality: string; idempotencyKey: string;
+  }, signal?: AbortSignal) =>
+    request<ImageGenerationResult>("/api/image/community-free", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: params.prompt, negative_prompt: params.negativePrompt,
+        model: params.model, aspect_ratio: params.aspectRatio,
+        quality: params.quality, idempotency_key: params.idempotencyKey,
+      }),
+      signal,
+    }),
 };
 
 export interface ImageModelInfo {
@@ -2432,6 +2453,23 @@ export interface ImageGenerationResult {
   status?: string;
   estimated_cost_micro?: number;
   actual_cost_micro?: number | null;
+}
+
+export interface CommunityFreeImageModel {
+  model_id: string;
+  display_name: string;
+  provider_badge: string;
+  is_official: boolean;
+  per_user_rpm: number | null;
+  capabilities: string[];
+  description: string;
+  alpha_hint: string;
+}
+
+export interface ImageCommunityFreeModelsResponse {
+  available: boolean;
+  error: string;
+  models: CommunityFreeImageModel[];
 }
 
 export interface SavedImageEntry {

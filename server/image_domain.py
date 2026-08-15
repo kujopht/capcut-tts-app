@@ -42,6 +42,11 @@ class GenerationMode(str, Enum):
     QUICK_FREE = "quick_free"
     SHARED_PREMIUM = "shared_premium"
     BYOP = "byop"
+    #: Model CONG DONG Pollinations bao gia dung 0 pollen — xem ADDENDUM
+    #: "FREE POLLINATIONS COMMUNITY IMAGE MODELS". KHAC voi QUICK_FREE: van
+    #: can biet dung model nao va van goi Unified API co xac thuc server-side
+    #: (xem `image_community_catalogue.py` va `ImageStudioService.sinh_anh_cong_dong`).
+    COMMUNITY_FREE = "community_free"
 
 
 class GenerationStatus(str, Enum):

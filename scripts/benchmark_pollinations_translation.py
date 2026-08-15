@@ -1,21 +1,35 @@
 #!/usr/bin/env python3
 """
-So sánh Pollinations (deepseek, deepseek-pro) với Groq hiện có trên CÙNG một
-tập đoạn văn fanfic mẫu — feature/pollinations-translation.
+So sánh MỌI model Pollinations đang CẤU HÌNH (`POLLINATIONS_MODELS`, hoặc
+cặp `POLLINATIONS_PRIMARY_MODEL`/`POLLINATIONS_QUALITY_MODEL` cũ) với Groq
+hiện có, trên CÙNG một tập đoạn văn fanfic mẫu — feature/pollinations-translation.
 
     python scripts/benchmark_pollinations_translation.py
+    POLLINATIONS_MODELS=deepseek,kimi,glm python scripts/benchmark_pollinations_translation.py
     python scripts/benchmark_pollinations_translation.py --groq-model gpt_oss_120b
     python scripts/benchmark_pollinations_translation.py --repeat 3 --json out.json
+
+Danh sách model Pollinations benchmark KHÔNG hard-code trong script này —
+đọc qua `_danh_sach_model_pollinations` (cùng hàm `build_provider_registry`
+dùng để dựng registry thật), nên script LUÔN đo ĐÚNG những model đang thực
+sự được cấu hình chạy production, không lệch pha với registry thật.
+
+TRƯỚC KHI thêm một model vào `POLLINATIONS_MODELS`, xác minh nó THẬT SỰ tồn
+tại qua `GET /v1/models` (xem `kiem_tra_ket_noi_pollinations` hoặc gọi thẳng
+endpoint) — script này KHÔNG tự làm việc đó, chỉ benchmark những gì bạn đã
+xác nhận và cấu hình.
 
 Đọc `POLLINATIONS_API_KEY`/`GROQ_API_KEY` từ biến môi trường. THIẾU credential
 nào thì BỎ QUA cột đó (in rõ "bỏ qua — thiếu <BIẾN>"), không làm sập script —
 script này PHẢI chạy được để so sánh MỘT PHẦN (ví dụ chỉ có Groq) mà không cần
 đủ cả hai bên.
 
-KHÔNG tự động kết luận "Pollinations tốt hơn" từ tên model — script này CHỈ đo
-độ trễ và in NGUYÊN VĂN bản dịch của cả ba model để người đọc tự so sánh:
-chất lượng dịch, nhất quán tên riêng, nhất quán xưng hô, tự nhiên của hội
-thoại. Xem hướng dẫn đọc kết quả ở cuối output.
+KHÔNG tự động kết luận "Pollinations tốt hơn" hay "model X tốt hơn model Y"
+từ TÊN/nhà cung cấp gốc — script này CHỈ đo độ trễ và in NGUYÊN VĂN bản dịch
+của MỌI model để người đọc tự so sánh: chất lượng dịch, nhất quán tên riêng,
+nhất quán xưng hô, tự nhiên của hội thoại. Xem hướng dẫn đọc kết quả ở cuối
+output. Thứ tự ưu tiên production CUỐI CÙNG phải dựa trên kết quả đọc được ở
+đây, không phải suy đoán trước.
 
 Không import `server.main` (tránh nạp FastAPI/toàn bộ app chỉ để đo một hàm) —
 chỉ dùng `server.translation_provider_registry`/`server.translation_providers`
@@ -50,6 +64,7 @@ from server.translation_model_profiles import GROQ_MODEL_PROFILES  # noqa: E402
 from server.translation_provider_registry import (  # noqa: E402
     GroqProvider,
     PollinationsProvider,
+    _danh_sach_model_pollinations,
 )
 from server.translation_providers import (  # noqa: E402
     TranslationContext,
@@ -133,8 +148,15 @@ def main() -> int:
     ket_qua_theo_model = {}
 
     if pollinations_key:
-        for model_id, nhan in (("deepseek", "pollinations_deepseek"),
-                               ("deepseek-pro", "pollinations_deepseek_pro")):
+        # Danh sach model DUNG CHUNG voi `build_provider_registry` — doi
+        # `POLLINATIONS_MODELS` (hoac cap bien cu) se tu doi ca script nay,
+        # khong can sua code o day (yeu cau: benchmark MOI ung vien dang
+        # cau hinh, khong hard-code hai model co dinh).
+        cac_model = _danh_sach_model_pollinations(os.environ)
+        print(f"Ứng viên Pollinations đang cấu hình: {', '.join(cac_model)}",
+              file=sys.stderr)
+        for model_id in cac_model:
+            nhan = f"pollinations_{model_id.replace('-', '_')}"
             provider = PollinationsProvider(api_key=pollinations_key, model=model_id)
             provider.name = nhan
             print(f"Đang chạy {nhan}...", file=sys.stderr)

@@ -13,8 +13,17 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+import httpx
+
 from server.adapters import MockIdentityAdapter, MockMetadataStore
+from server.translation_model_profiles import GROQ_MODEL_PROFILES
 from server.translation_providers import MockTranslationProvider, TranslationProviderError
+from server.translation_provider_registry import (
+    ConfiguredProvider,
+    GroqProvider,
+    PollinationsProvider,
+    ProviderRegistry,
+)
 from server.translation_service import TranslationService
 from server.translation_store import MockTranslationStore
 from server.tests.test_translation_service import cho_job_xong
@@ -206,6 +215,78 @@ class CacheKhongGoiLaiLLMTest(Nen):
         cho_job_xong(svc, job2.job_id, an.user_id)
         self.assertEqual(provider.so_lan_goi, 2,
                          "glossary khác nhau phải là một khoá cache khác")
+
+
+def _client_gia(handler):
+    return httpx.Client(base_url="https://vidu.test",
+                        transport=httpx.MockTransport(handler))
+
+
+def _tra_loi_chat(noi_dung: str) -> httpx.Response:
+    return httpx.Response(200, json={"choices": [{"message": {"content": noi_dung}}]})
+
+
+class KhongLapDoanSauFailoverTest(unittest.TestCase):
+    """'no duplicate translation chunks after failover' — dich MOT chuong
+    NHIEU doan qua `ProviderRegistry` THAT (Pollinations 402 -> Groq), xac
+    nhan MOI doan xuat hien DUNG MOT LAN, dung thu tu, sau khi failover xay
+    ra GIUA CHUONG (khong phai chi mot lan goi don le nhu
+    `test_translation_pollinations.py`)."""
+
+    def test_moi_doan_qua_failover_dung_thu_tu_khong_trung_lap(self):
+        so_lan_groq = {"n": 0}
+
+        def groq_handler(request):
+            so_lan_groq["n"] += 1
+            import json as _json
+            noi_dung = _json.loads(request.content)["messages"][1]["content"]
+            # Vi tri "Đoạn văn cần xử lý:\n<doan goc>" trong prompt nguoi
+            # dung — tra ve mot ban dich gan voi doan GOC de kiem thu tu.
+            doan_goc = noi_dung.split("Đoạn văn cần xử lý:\n", 1)[1].split("\n\n")[0]
+            return _tra_loi_chat(f"[GROQ] {doan_goc}")
+
+        pollinations_cp = ConfiguredProvider(
+            provider_id="pollinations_deepseek", model_id="deepseek",
+            display_name="Pollinations", quality_hint="test",
+            provider=PollinationsProvider(
+                api_key="sk_vidu", model="deepseek",
+                client=_client_gia(lambda r: httpx.Response(
+                    402, text='{"error":"insufficient balance"}'))),
+            free_tier=True, rate_limit_la_toan_tai_khoan=True)
+        groq_cp = ConfiguredProvider(
+            provider_id="groq_qwen", model_id=GROQ_MODEL_PROFILES["qwen"].model_id,
+            display_name="Groq", quality_hint="test",
+            provider=GroqProvider(api_key="k", profile=GROQ_MODEL_PROFILES["qwen"],
+                                  client=_client_gia(groq_handler)),
+            free_tier=True)
+        reg = ProviderRegistry([pollinations_cp, groq_cp])
+
+        identity = MockIdentityAdapter()
+        novels = MockMetadataStore()
+        store = MockTranslationStore()
+        svc = TranslationService(store, novels, registry=reg)
+        an = identity.register("an@vidu.vn", "MatKhau123", "An")
+
+        with patch("server.translation_service.DOAN_KY_TU_MOI_LAN_GOI", 200):
+            p = svc.create_project(an.user_id, title="x",
+                                   source_text=_VAN_BAN_BA_DOAN, quality_mode="nhanh")
+            job = svc.create_job(p.project_id, an.user_id)
+            job = cho_job_xong(svc, job.job_id, an.user_id)
+
+        self.assertEqual(job.status.value, "completed", job.error)
+        ban_dich = svc.get_project(p.project_id, an.user_id).translated_chapters[0]
+
+        # MOI Pollinations that bai (402) -> MOI doan deu phai qua Groq —
+        # dung DUNG so lan (3 doan, khong hon — khong goi Groq lap lai cho
+        # cung mot doan do failover).
+        self.assertEqual(so_lan_groq["n"], 3)
+        for doan in (_DOAN_1, _DOAN_2, _DOAN_3):
+            self.assertEqual(ban_dich.count(f"[GROQ] {doan}"), 1)
+        vi_tri_1 = ban_dich.index(f"[GROQ] {_DOAN_1}")
+        vi_tri_2 = ban_dich.index(f"[GROQ] {_DOAN_2}")
+        vi_tri_3 = ban_dich.index(f"[GROQ] {_DOAN_3}")
+        self.assertLess(vi_tri_1, vi_tri_2)
+        self.assertLess(vi_tri_2, vi_tri_3)
 
 
 if __name__ == "__main__":

@@ -1,15 +1,20 @@
+Ứng viên Pollinations đang cấu hình: deepseek, kimi, glm, command-a-plus
 Đang chạy pollinations_deepseek...
-Đang chạy pollinations_deepseek_pro...
-Đang chạy groq_gpt_oss_20b...
+Đang chạy pollinations_kimi...
+Đang chạy pollinations_glm...
+Đang chạy pollinations_command_a_plus...
+Đang chạy groq_qwen...
 
 Đã ghi kết quả thô vào docs/reports/pollinations-benchmark-raw.json
 
 ==============================================================================
 ĐỘ TRỄ (median, mili-giây) — thấp hơn = nhanh hơn
 ==============================================================================
-  pollinations_deepseek        THẤT BẠI: Dịch vụ dịch trả lỗi 402: {"success":false,"error":{"message":"Insufficient bala
-  pollinations_deepseek_pro    THẤT BẠI: Dịch vụ dịch trả lỗi 402: {"success":false,"error":{"message":"Insufficient bala
-  groq_gpt_oss_20b             THẤT BẠI: Model đang bị giới hạn tốc độ: {"error":{"message":"Rate limit reached for model
+  pollinations_deepseek           11453 ms (n=3)
+  pollinations_kimi               47579 ms (n=3)
+  pollinations_glm                22110 ms (n=3)
+  pollinations_command_a_plus      7000 ms (n=3)
+  groq_qwen                    THẤT BẠI: Model đang bị giới hạn tốc độ: {"error":{"message":"Rate limit reached for model
 
 ==============================================================================
 BẢN DỊCH — TỰ SO SÁNH chất lượng/tên riêng/xưng hô/hội thoại
@@ -20,12 +25,59 @@ BẢN DỊCH — TỰ SO SÁNH chất lượng/tên riêng/xưng hô/hội tho�
 [Nguồn] 萧炎看向药老，低声道：“师父，你说这药方当真有效？”
 药老捋了捋胡须，笑道：“为师行走多年，何时骗过你？”
 萧炎苦笑一声，没有再说话，只是将手中的药瓶握得更紧了。
+[pollinations_deepseek] Tiêu Viêm nhìn về phía Dược Lão, khẽ nói: "Sư phụ, người nói phương thuốc này thật sự có hiệu quả sao?"
+
+Dược Lão vuốt chòm râu, cười nói: "Vi sư đi lại nhiều năm, khi nào từng lừa con?"
+
+Tiêu Viêm cười khổ một tiếng, không nói thêm gì nữa, chỉ siết chặt bình thuốc trong tay hơn.
+[pollinations_kimi] Tiêu Viêm nhìn về phía Dược Lão, giọng thấp hỏi: "Sư phụ, người nói phương thuốc này quả thực có hiệu quả?"
+
+Dược Lão vuốt vuốt chòm râu, cười nói: "Vi sư hành tẩu nhiều năm như vậy, bao giờ lừa ngươi?"
+
+Tiêu Viêm cười khổ một tiếng, không nói thêm lời nào, chỉ siết chặt bình thuốc trong tay.
+[pollinations_glm] Tiêu Viêm nhìn về phía Dược lão, hạ giọng nói: "Sư phụ, người nói phương thuốc này thật sự có hiệu quả?"
+
+Dược lão vuốt râu, mỉm cười nói: "Vi sư đi giang hồ nhiều năm, khi nào từng lừa ngươi?"
+
+Tiêu Viêm cười khổ một tiếng, không nói thêm gì nữa, chỉ siết chặt bình thuốc trong tay hơn.
+[pollinations_command_a_plus] Xiao Yan nhìn Dược Lão, thấp giọng hỏi: “Sư phụ, ngài nói phương thuốc này thực sự hiệu quả sao?”
+Dược Lão vuốt râu, cười đáp: “Là sư phụ đã bôn ba khắp nơi nhiều năm rồi, có bao giờ lừa gạt con đâu?”
+Xiao Yan cười khổ một tiếng, không nói gì thêm, chỉ siết chặt bình thuốc trong tay hơn.
 
 --- Đoạn 2: mieu_ta_thuan_tuy ---
 [Nguồn] 夜色渐深，乌坦城的灯火一盏盏熄灭下去。远处的山峦在月光下勾勒出一道模糊的轮廓，山间的雾气缓缓流动，像是活物一般缠绕在树梢之间。城墙上的巡逻兵靴声回荡在寂静的街道中，偶尔传来几声犬吠，随即又归于平静。
+[pollinations_deepseek] Màn đêm dần buông xuống, ánh đèn trong thành Ô Thản lần lượt tắt đi. Phía xa, những dãy núi in bóng mờ ảo dưới ánh trăng, sương mù giữa rừng núi chầm chậm trôi, tựa như sinh vật sống quấn quýt quanh những ngọn cây. Tiếng bước chân của lính tuần tra trên tường thành vang vọng trong những con phố tĩnh mịch, thỉnh thoảng vài tiếng chó sủa vọng lại, rồi lại chìm vào im lặng.
+[pollinations_kimi] Đêm đã khuya, đèn đuốc nơi Ô Thản thành tắt lụi từng ngọn. Xa xa, dãy núi in dưới ánh trăng một đường viền mờ ảo, sương mù giữa các ngọn núi trôi lững lờ, uốn lượn quanh ngọn cây như thể có sinh mệnh. Tiếng bốt giày của tuần binh trên tường thành vang vọng giữa con phố tĩnh mịch, thỉnh thoảng lại vọng đến vài tiếng chó sủa, rồi chốc liền lặng thinh trở lại.
+[pollinations_glm] Đêm dần khuya, đèn đuốc trong thành Ô Đản lần lượt tắt lịm. Dưới ánh trăng, dãy núi xa xa phác họa một đường nét mờ ảo, sương mù giữa núi đồi chậm rãi trôi lững lờ, tựa như một sinh linh quấn quýt lấy những ngọn cây. Tiếng bước chân của binh lính tuần tra trên tường thành vang vọng trong những con phố vắng lặng, thỉnh thoảng vọng lại vài tiếng chó sủa, rồi nhanh chóng lại chìm vào tĩnh lặng.
+[pollinations_command_a_plus] Khi đêm dần buông xuống, những ngọn đèn trong thành U Tan lần lượt tắt đi. Dưới ánh trăng, những ngọn núi xa xa hiện lên mờ ảo, sương mù giữa núi chầm chậm trôi qua, quấn quýt trên những cành cây như thể chúng là những sinh vật sống. Tiếng bước chân của những lính tuần tra trên tường thành vang lên trong những con phố yên tĩnh, thỉnh thoảng vang lên tiếng chó sủa, rồi lại trở nên im lặng.
 
 --- Đoạn 3: ba_nhan_vat_kinh_xung ---
 [Nguồn] “师兄，前辈找你。”云韵匆匆跑来，脸上带着几分焦急。
 萧炎皱了皱眉：“药老找我做什么？”
 “这我哪知道。”云韵白了他一眼，“药老前辈的脾气你又不是不知道，还不快去。”
 萧炎无奈地叹了口气，转身朝药老的院子走去。
+[pollinations_deepseek] “Sư huynh, tiền bối tìm huynh.” Vân Vận vội vã chạy tới, trên mặt thoáng chút lo lắng.
+
+Tiêu Viêm nhíu mày: “Dược lão tìm ta làm gì?”
+
+“Cái đó thì ta làm sao mà biết được.” Vân Vận trợn mắt nhìn hắn, “Tính khí của Dược lão tiền bối ngươi còn không rõ sao, còn không mau đi đi.”
+
+Tiêu Viêm bất đắc dĩ thở dài, quay người đi về phía tiểu viện của Dược lão.
+[pollinations_kimi] "Sư huynh, tiền bối tìm huynh." Vân Vận vội vàng chạy tới, trên mặt mang theo vài phần lo lắng.
+
+Tiêu Viêm nhíu mày: "Dược Lão tìm ta có chuyện gì?"
+
+"Chuyện này muội làm sao biết được." Vân Vận liếc hắn một cái, "Huynh cũng đâu phải không biết tính khí của Dược Lão tiền bối, còn không mau đi."
+
+Tiêu Viêm bất đắc dĩ thở dài, quay người đi về viện tử của Dược Lão.
+[pollinations_glm] "Sư huynh, tiền bối tìm huynh." Vân Vận vội vã chạy tới, nét mặt mang theo vài phần lo lắng.
+
+Tiêu Viêm nhíu mày: "Dược lão tìm ta làm gì?"
+
+"Muội đâu biết được." Vân Vận liếc hắn một cái, "Tính khí của Dược lão tiền bối huynh đâu phải không biết, còn không mau đi."
+
+Tiêu Viêm bất lực thở dài, quay người bước về phía sân viện của Dược lão.
+[pollinations_command_a_plus] “Anh trai, sư phụ đang tìm anh đấy.” Vân Du vội vã chạy đến, vẻ mặt đầy lo lắng.
+Tiêu Viêm nhíu mày: “Lão Dược tìm ta làm gì chứ?”
+“Tôi làm sao biết được.” Vân Du lườm hắn một cái, “Anh cũng biết tính tình của lão Dược mà, mau đi đi.”
+Tiêu Viêm bất đắc dĩ thở dài, quay người đi về phía sân viện của lão Dược.

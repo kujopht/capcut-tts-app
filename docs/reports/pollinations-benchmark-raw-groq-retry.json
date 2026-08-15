@@ -1,0 +1,40 @@
+{
+  "pollinations_deepseek": {
+    "thanh_cong": true,
+    "loi": "",
+    "do_tre_ms": [
+      953,
+      672,
+      672
+    ],
+    "ban_dich": [
+      "Tiêu Viêm nhìn về phía Dược Lão, khẽ nói: \"Sư phụ, người nói phương thuốc này thật sự có hiệu quả sao?\"\n\nDược Lão vuốt chòm râu, cười nói: \"Vi sư đi lại nhiều năm, khi nào từng lừa con?\"\n\nTiêu Viêm cười khổ một tiếng, không nói thêm gì nữa, chỉ siết chặt bình thuốc trong tay hơn.",
+      "Màn đêm dần buông xuống, ánh đèn trong thành Ô Thản lần lượt tắt đi. Phía xa, những dãy núi in bóng mờ ảo dưới ánh trăng, sương mù giữa rừng núi chầm chậm trôi, tựa như sinh vật sống quấn quýt quanh những ngọn cây. Tiếng bước chân của lính tuần tra trên tường thành vang vọng trong những con phố tĩnh mịch, thỉnh thoảng vài tiếng chó sủa vọng lại, rồi lại chìm vào im lặng.",
+      "“Sư huynh, tiền bối tìm huynh.” Vân Vận vội vã chạy tới, trên mặt thoáng chút lo lắng.\n\nTiêu Viêm nhíu mày: “Dược lão tìm ta làm gì?”\n\n“Cái đó thì ta làm sao mà biết được.” Vân Vận trợn mắt nhìn hắn, “Tính khí của Dược lão tiền bối ngươi còn không rõ sao, còn không mau đi đi.”\n\nTiêu Viêm bất đắc dĩ thở dài, quay người đi về phía tiểu viện của Dược lão."
+    ]
+  },
+  "pollinations_deepseek_pro": {
+    "thanh_cong": true,
+    "loi": "",
+    "do_tre_ms": [
+      11078,
+      10454,
+      10718
+    ],
+    "ban_dich": [
+      "Tiêu Viêm nhìn Dược Lão, khẽ nói: \"Sư phụ, người nói xem phương thuốc này có thật sự hiệu nghiệm không?\"\n\nDược Lão vuốt chòm râu, cười nói: \"Vi sư hành tẩu giang hồ bao năm, lừa con bao giờ chưa?\"\n\nTiêu Viêm cười khổ một tiếng, không nói thêm gì, chỉ nắm chặt lọ thuốc trong tay hơn.",
+      "Đêm dần buông xuống, đèn đóm trong thành Ô Thản lần lượt tắt ngấm. Dãy núi xa xa dưới ánh trăng phác họa nên một đường viền mờ ảo, sương mù giữa các ngọn núi chậm rãi trôi, như sinh vật sống quấn quýt quanh những ngọn cây. Tiếng bước chân của lính tuần tra trên tường thành vang vọng khắp những con phố tĩnh mịch, thỉnh thoảng lại có vài tiếng chó sủa, rồi chẳng mấy chốc lại chìm vào yên ắng.",
+      "\"Sư huynh, tiền bối tìm huynh.\" Vân Vận vội vàng chạy tới, trên mặt mang theo vài phần lo lắng.\n\nTiêu Viêm nhíu mày: \"Dược lão tìm ta làm gì?\"\n\n\"Cái này muội làm sao biết.\" Vân Vận liếc hắn một cái, \"Tính tình của Dược lão tiền bối huynh cũng đâu phải không biết, còn không mau đi đi.\"\n\nTiêu Viêm bất đắc dĩ thở dài, xoay người đi về phía viện của Dược lão."
+    ]
+  },
+  "groq_gpt_oss_120b": {
+    "thanh_cong": false,
+    "loi": "Model đang bị giới hạn tốc độ: {\"error\":{\"message\":\"Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01kzzpg5kre19rck1c525wtkja` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 4542, Req",
+    "do_tre_ms": [
+      969
+    ],
+    "ban_dich": [
+      "Xiao Yan nhìn về phía Yao Lão, nhẹ giọng hỏi: “Thưa sư phụ, liệu công thức thuốc này thực sự có tác dụng?”  \nYao Lão vuốt râu, cười đáp: “Ta đã hành nghề bao năm nay, bao giờ nào lừa được ngươi?”  \nXiao Yan cười khẽ, không nói gì thêm, chỉ siết chặt bình thuốc trong tay hơn."
+    ]
+  }
+}

@@ -8,6 +8,7 @@ thanh cong/loi dieu khien duoc, giong mau `test_translation_editor.py`.
 
 from __future__ import annotations
 
+import re
 import time
 import unittest
 from unittest.mock import patch
@@ -25,6 +26,18 @@ from server.tests.test_translation_service import cho_job_xong
 KHOA_TEST = sinh_master_key_moi()
 VB_MOT_CHUONG = "第1章 Khởi đầu\n萧炎看向药老。他继续前进。第一句。\n\n第二句đoạn hai。"
 
+#: V6 cerebras-groq-translation — `translation_service._goi_dich_mot_doan`
+#: gio kiem tra tinh ven (xem `translation_integrity.kiem_tra_tinh_ven`) cho
+#: MOI provider co provider_id bat dau bang "groq"/"cerebras" (provider_id
+#: "groq" o file nay CO khop dieu kien do). Provider gia o day chi la "co
+#: thanh cong hay khong", khong phai mot ban dich that — xoa ky tu Han khoi
+#: dau ra tranh trigger SAI rule han_residue (dau ra van con nguyen phan
+#: ASCII/tieng Viet de cac assertion "co noi dung" van dung). Cung doi dau
+#: cau CJK sang Latin (mot ban dich THAT luon lam vay) de khong bi rule
+#: "truncated" (ket thuc bang dau cau) hieu nham la cat cut.
+_MAU_HAN = re.compile(r"[一-鿿]")
+_DOI_DAU_CAU = {"。": ".", "！": "!", "？": "?"}
+
 
 class _LuonThatBaiProvider:
     name = "shared-het-han-muc"
@@ -40,7 +53,10 @@ class _LuonThanhCongProvider:
 
     def translate_segment(self, text, *, context):
         self.so_lan_goi += 1
-        return f"[{self.name}] {text}"
+        sach = _MAU_HAN.sub("", text)
+        for cu, moi in _DOI_DAU_CAU.items():
+            sach = sach.replace(cu, moi)
+        return f"[{self.name}] {sach}"
 
 
 def _moi_truong(shared_ok: bool):

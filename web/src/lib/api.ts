@@ -2315,3 +2315,10 @@ export const translate = {
     cua nguoi dung. Hang so RIENG (khong phai bien moi truong): day la mot
     URL cong khai, on dinh, cua chinh Groq, khong phai cau hinh trien khai. */
 export const GROQ_CONSOLE_KEYS_URL = "https://console.groq.com/keys";
+
+/** https://cloud.cerebras.ai — trang chu Cerebras Cloud Console (API Keys o
+    thanh dieu huong trai sau dang nhap). KHONG co duong dan sau rieng cho
+    trang API key duoc Cerebras cong bo chinh thuc (khac Groq co
+    `/keys` on dinh) — dung goc de tranh 404 neu console doi giao dien, chi
+    goc `/` la thu duy nhat Cerebras xac nhan on dinh. */
+export const CEREBRAS_CONSOLE_KEYS_URL = "https://cloud.cerebras.ai";

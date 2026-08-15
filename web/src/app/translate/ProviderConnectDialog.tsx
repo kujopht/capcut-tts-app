@@ -1,7 +1,9 @@
 "use client";
 
 /**
- * Hop thoai ket noi provider AI CA NHAN (V5.1 BYOK, Part A/C).
+ * Hop thoai ket noi provider AI CA NHAN (V5.1 BYOK, Part A/C — tong quat
+ * hoa cho NHIEU provider o V6 cerebras-groq-translation: Groq VA Cerebras
+ * dung CHUNG mot hop thoai, chi khac props hien thi/URL).
  *
  * Luong: dan key -> "Kiểm tra kết nối" (goi THANG `translate.connectProvider`
  * — kiem tra VA luu trong CUNG mot request o backend, khong co buoc "xac
@@ -13,26 +15,40 @@
  */
 
 import { useState } from "react";
-import { translate, GROQ_CONSOLE_KEYS_URL, type ProviderConnection } from "@/lib/api";
+import { translate, type ProviderConnection } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import { errorMessage } from "@/lib/session";
 import { Alert } from "@/components/ui";
 
-const NHAN_LOI_KET_NOI: Record<string, string> = {
-  INVALID_KEY: "API key không hợp lệ. Kiểm tra lại bạn đã sao chép đúng key chưa.",
-  RATE_LIMITED: "Groq đang giới hạn tốc độ — thử lại sau ít phút.",
-  PROVIDER_UNAVAILABLE: "Không kết nối được Groq lúc này. Thử lại sau.",
-  MODEL_UNAVAILABLE: "Model mặc định không khả dụng với API key này.",
-};
+function nhanLoiKetNoi(tenProvider: string): Record<string, string> {
+  return {
+    INVALID_KEY: "API key không hợp lệ. Kiểm tra lại bạn đã sao chép đúng key chưa.",
+    RATE_LIMITED: `${tenProvider} đang giới hạn tốc độ — thử lại sau ít phút.`,
+    PROVIDER_UNAVAILABLE: `Không kết nối được ${tenProvider} lúc này. Thử lại sau.`,
+    MODEL_UNAVAILABLE: "Model mặc định không khả dụng với API key này.",
+  };
+}
 
 export default function ProviderConnectDialog({
   open,
   onClose,
   onConnected,
+  providerId = "groq",
+  providerLabel = "Groq",
+  consoleUrl,
+  keyPlaceholder = "................................",
 }: {
   open: boolean;
   onClose: () => void;
   onConnected: (connection: ProviderConnection) => void;
+  /** ID provider goi API — "groq" | "cerebras". */
+  providerId?: string;
+  /** Ten hien thi trong tieu de hop thoai va thong bao loi. */
+  providerLabel?: string;
+  /** Trang tao API key CUA CHINH provider do. */
+  consoleUrl: string;
+  /** Vi du dinh dang key, hien trong o nhap (khong phai gia tri that). */
+  keyPlaceholder?: string;
 }) {
   const [apiKey, setApiKey] = useState("");
   const [dangKiemTra, setDangKiemTra] = useState(false);
@@ -54,12 +70,12 @@ export default function ProviderConnectDialog({
     setDangKiemTra(true);
     setLoi("");
     try {
-      const { connection } = await translate.connectProvider("groq", apiKey.trim());
+      const { connection } = await translate.connectProvider(providerId, apiKey.trim());
       setKetQua(connection);
       onConnected(connection);
     } catch (cause) {
       const ma = cause instanceof ApiError ? cause.code : undefined;
-      setLoi((ma && NHAN_LOI_KET_NOI[ma]) || errorMessage(cause));
+      setLoi((ma && nhanLoiKetNoi(providerLabel)[ma]) || errorMessage(cause));
     } finally {
       setDangKiemTra(false);
     }
@@ -70,13 +86,13 @@ export default function ProviderConnectDialog({
       if (e.target === e.currentTarget) dong();
     }}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="byok-title">
-        <h2 id="byok-title">Groq cá nhân</h2>
+        <h2 id="byok-title">{providerLabel} cá nhân</h2>
         <div className="stack-2 modal-body">
           {ketQua ? (
             <div className="stack-2">
               <Alert kind="ok">Kết nối thành công</Alert>
               <p>
-                Groq · Qwen
+                {providerLabel}
                 <br />
                 Key: ••••••••{ketQua.last4}
               </p>
@@ -84,18 +100,18 @@ export default function ProviderConnectDialog({
           ) : (
             <form className="stack-2" onSubmit={kiemTraVaKetNoi}>
               <div className="stack-2">
-                <p><strong>1. Tạo API key Groq</strong></p>
+                <p><strong>1. Tạo API key {providerLabel}</strong></p>
                 <a
                   className="btn btn-outline btn-sm"
-                  href={GROQ_CONSOLE_KEYS_URL}
+                  href={consoleUrl}
                   target="_blank"
                   rel="noopener noreferrer nofollow"
                 >
                   Mở trang tạo API key ↗
                 </a>
                 <p className="hint">
-                  Đăng nhập Groq, nhấn Create API Key, sau đó sao chép key và
-                  dán vào đây.
+                  Đăng nhập {providerLabel}, tạo API key mới, sau đó sao chép
+                  key và dán vào đây.
                 </p>
               </div>
               <div className="field">
@@ -105,7 +121,7 @@ export default function ProviderConnectDialog({
                   className="input"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="gsk_................................"
+                  placeholder={keyPlaceholder}
                   autoComplete="off"
                   spellCheck={false}
                   disabled={dangKiemTra}

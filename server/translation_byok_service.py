@@ -26,27 +26,49 @@ from server.domain import now_iso
 from server.translation import TranslationError
 from server.translation_byok_crypto import ByokCrypto, ByokDecryptError, lay_4_ky_tu_cuoi
 from server.translation_domain import ProviderConnection
-from server.translation_model_profiles import GROQ_MODEL_PROFILES, ModelProfile
+from server.translation_model_profiles import (
+    CEREBRAS_MODEL_PROFILES,
+    GROQ_MODEL_PROFILES,
+    ModelProfile,
+)
 from server.translation_provider_registry import (
+    CerebrasProvider,
     ConfiguredProvider,
     GroqProvider,
     ProviderStatus,
+    kiem_tra_ket_noi_cerebras,
     kiem_tra_ket_noi_groq,
 )
 
 #: Provider BYOK duoc ho tro — them provider moi CHI can them mot muc o day
-#: + mot nhanh trong `_kiem_tra`/`build_configured_provider`.
-SUPPORTED_BYOK_PROVIDERS = ("groq",)
+#: + mot nhanh trong `_kiem_tra`/`build_configured_provider`/
+#: `build_all_model_providers`.
+SUPPORTED_BYOK_PROVIDERS = ("groq", "cerebras")
 
 #: model_id -> ho so, tra cuu nguoc tu `GROQ_MODEL_PROFILES` (khoa o do la
 #: "qwen"/"gpt_oss_120b"/... — o day can tra theo model_id THAT nguoi dung
 #: da chon/luu, vi `ProviderConnection.selected_model` luu model_id).
 _GROQ_PROFILE_BY_MODEL_ID = {p.model_id: p for p in GROQ_MODEL_PROFILES.values()}
+_CEREBRAS_PROFILE_BY_MODEL_ID = {p.model_id: p for p in CEREBRAS_MODEL_PROFILES.values()}
+
+#: Provider co NHIEU model curated tu MOT credential (Part 3G, mo rong sang
+#: Cerebras) — `build_all_model_providers` gop TAT CA model cua provider nay
+#: vao ket qua thay vi CHI model da chon, dung y "Do not ask user to enter a
+#: key per model".
+_MULTI_MODEL_BYOK_PROVIDERS = {
+    "groq": GROQ_MODEL_PROFILES,
+    "cerebras": CEREBRAS_MODEL_PROFILES,
+}
 
 
 def _model_mac_dinh(provider_id: str) -> str:
     if provider_id == "groq":
         return os.environ.get("GROQ_MODEL", "").strip() or "qwen/qwen3.6-27b"
+    if provider_id == "cerebras":
+        # `zai-glm-4.7` da bi go khoi CEREBRAS_MODEL_PROFILES (xem
+        # `translation_model_profiles.py`) — model MAC DINH gio la model
+        # CURATED DUY NHAT con lai.
+        return "gpt-oss-120b"
     return ""
 
 
@@ -56,6 +78,12 @@ def _ho_so_groq_cho_model(model_id: str) -> ModelProfile:
     danh sach curated) tra ho so RONG tham so — an toan, khong doan bua tham
     so cho mot model chua biet."""
     return _GROQ_PROFILE_BY_MODEL_ID.get(model_id) or ModelProfile(
+        key="custom", model_id=model_id, display_name=model_id, quality_hint="")
+
+
+def _ho_so_cerebras_cho_model(model_id: str) -> ModelProfile:
+    """Cung nguyen tac voi `_ho_so_groq_cho_model` nhung cho Cerebras."""
+    return _CEREBRAS_PROFILE_BY_MODEL_ID.get(model_id) or ModelProfile(
         key="custom", model_id=model_id, display_name=model_id, quality_hint="")
 
 
@@ -148,6 +176,8 @@ class ProviderConnectionService:
         route anh xa thanh HTTP."""
         if provider_id == "groq":
             kiem_tra_ket_noi_groq(api_key, model)
+        elif provider_id == "cerebras":
+            kiem_tra_ket_noi_cerebras(api_key, model)
         else:
             raise TranslationError(
                 f"Chưa hỗ trợ kiểm tra kết nối cho provider '{provider_id}'.")
@@ -184,6 +214,10 @@ class ProviderConnectionService:
             model = conn.selected_model or _model_mac_dinh("groq")
             provider = GroqProvider(api_key=api_key,
                                     profile=_ho_so_groq_cho_model(model))
+        elif provider_id == "cerebras":
+            model = conn.selected_model or _model_mac_dinh("cerebras")
+            provider = CerebrasProvider(api_key=api_key,
+                                       profile=_ho_so_cerebras_cho_model(model))
         else:
             return None
 
@@ -192,12 +226,31 @@ class ProviderConnectionService:
             display_name=f"{provider_id} (cá nhân)", quality_hint="cá nhân",
             provider=provider, free_tier=True, credential_source="personal")
 
+    #: provider_id -> ham dung Provider tu (api_key, profile) — dung o
+    #: `build_all_model_providers` de KHOI TAO DUNG loai `TranslationProvider`
+    #: cho tung "ho" BYOK da-model, khong lap lai vong for rieng cho tung
+    #: provider.
+    _MULTI_MODEL_FACTORY = {
+        "groq": lambda api_key, profile: GroqProvider(api_key=api_key, profile=profile),
+        "cerebras": lambda api_key, profile: CerebrasProvider(api_key=api_key, profile=profile),
+    }
+
     def build_all_model_providers(self, user_id: str, provider_id: str
                                   ) -> List[ConfiguredProvider]:
         """
-        Phan 3G (overnight Phase 3): MOT ket noi Groq ca nhan -> BA
-        `ConfiguredProvider` (Qwen/GPT-OSS 120B/GPT-OSS 20B), CUNG mot api
+        Phan 3G (overnight Phase 3, mo rong sang Cerebras): MOT ket noi ca
+        nhan -> NHIEU `ConfiguredProvider` (tat ca model curated cua provider
+        do — Qwen/GPT-OSS 120B/GPT-OSS 20B cho Groq; Cerebras hien CHI co
+        GPT-OSS 120B, `zai-glm-4.7` da bi go do Cerebras danh dau Preview/
+        sap ngung ho tro, xem `translation_model_profiles.py`), CUNG mot api
         key da giai ma — dung y "Do not ask user to enter a key per model".
+        Day CUNG la co so de "My Cerebras API key"/"My Groq API key" (BYOK
+        tuong minh, MANUAL + fallback BAT) tu dong chuyen giua CAC MODEL CUA
+        CHINH HO nay khi mot model that bai (hien chi thuc su ap dung cho
+        Groq — Cerebras chi co mot model nen khong co gi de fallback noi
+        bo), ma
+        KHONG cham toi provider dung chung hay ho BYOK khac — xem
+        `ProviderRegistry._ho_provider`/`translate_segment_with_personal`.
 
         `credential.user_id == job.user_id` van duoc cuong che y HET
         `build_configured_provider`: giai ma qua CHINH `_crypto`, chi doc
@@ -205,11 +258,13 @@ class ProviderConnectionService:
         credential ca nhan cua hai nguoi dung ("No pooling personal
         credentials").
 
-        Provider KHAC "groq" hien chua ho tro nhieu model (chi Groq co
-        catalog curated) — tra ve MOT phan tu duy nhat qua
-        `build_configured_provider`, giu hanh vi cu.
+        Provider KHONG co catalog da-model (vd mot provider tuong lai chi co
+        MOT model) tra ve MOT phan tu duy nhat qua `build_configured_provider`,
+        giu hanh vi cu.
         """
-        if provider_id != "groq":
+        profiles = _MULTI_MODEL_BYOK_PROVIDERS.get(provider_id)
+        factory = self._MULTI_MODEL_FACTORY.get(provider_id)
+        if profiles is None or factory is None:
             cp = self.build_configured_provider(user_id, provider_id)
             return [cp] if cp is not None else []
 
@@ -229,12 +284,12 @@ class ProviderConnectionService:
             return []
 
         ra = []
-        for profile_key, profile in GROQ_MODEL_PROFILES.items():
+        for profile_key, profile in profiles.items():
             ra.append(ConfiguredProvider(
-                provider_id=f"groq_{profile_key}", model_id=profile.model_id,
+                provider_id=f"{provider_id}_{profile_key}", model_id=profile.model_id,
                 display_name=f"{profile.display_name} (cá nhân)",
                 quality_hint="cá nhân",
-                provider=GroqProvider(api_key=api_key, profile=profile),
+                provider=factory(api_key, profile),
                 free_tier=True, credential_source="personal"))
         return ra
 

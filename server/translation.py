@@ -339,7 +339,12 @@ def uoc_luong(van_ban: str) -> Dict[str, int]:
 #: doan chua duoc dich (provider bo qua/tra nguyen van goc). Day KHONG phai
 #: phat hien "chat luong dich kem" (khong the danh gia duoc tu code), chi la
 #: mot bao ve co ban: neu con chu Han thi chac chan CO gi do chua dich.
-_MAU_KY_TU_HAN = re.compile(r"[一-鿿]")
+#:
+#: CONG KHAI (khong con tien to `_`) — dung CHUNG voi
+#: `server/translation_integrity.py` (kiem tra tinh ven TUNG DOAN dich, V6
+#: cerebras-groq-translation), tranh dinh nghia lai CUNG mot dai Unicode o
+#: hai noi.
+MAU_KY_TU_HAN = re.compile(r"[一-鿿]")
 
 
 #: Ranh gioi doan HIEN THI cho nguoi dung (dong trong) — KHAC voi
@@ -364,7 +369,7 @@ def phat_hien_canh_bao(van_ban_dich: str) -> List[str]:
     that — moi canh bao o day phai la mot dieu kien co the KIEM CHUNG duoc
     tu chinh van ban, khong phai suy doan ve chat luong."""
     canh_bao: List[str] = []
-    if van_ban_dich and _MAU_KY_TU_HAN.search(van_ban_dich):
+    if van_ban_dich and MAU_KY_TU_HAN.search(van_ban_dich):
         canh_bao.append(
             "Còn sót ký tự Hán trong bản dịch — có thể có đoạn chưa được dịch.")
     return canh_bao

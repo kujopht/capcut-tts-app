@@ -77,6 +77,42 @@ GROQ_MODEL_PROFILES: Dict[str, ModelProfile] = {
         }),
 }
 
+#: MOT model curated tren Cerebras — MOT credential (`CEREBRAS_API_KEY`)
+#: (chien luoc san xuat tam thoi, xem `translation_provider_registry.
+#: build_provider_registry`). KHONG co bang dinh tuyen theo vai-tro rieng nhu
+#: `ROLE_ROUTING` cua Groq — hien CHI co MOT model nen khong can dinh tuyen
+#: noi bo nao ca; du an nay giu cau truc dict (thay vi MOT hang so don) de
+#: mo rong lai de dang neu Cerebras them model curated khac sau nay.
+#:
+#: LICH SU: ban dau co CA `zai-glm-4.7` (uu tien) VA `gpt-oss-120b` (du
+#: phong noi bo). Da GO BO `zai-glm-4.7` (2026-08-15, cung ngay phat hien) vi
+#: tai lieu Cerebras chinh thuc (inference-docs.cerebras.ai) ghi ro day la
+#: model PREVIEW va SE NGUNG HO TRO 2026-08-17 — dua mot model sap ngung ho
+#: tro lam LUA CHON MAC DINH cho dinh tuyen san xuat/BYOK la khong an toan,
+#: du chi la "tam thoi". KHONG giu lai duoi dang code chet (khong provider
+#: nao, khong lua chon frontend nao con tham chieu no) — neu Cerebras phat
+#: hanh mot ban GLM on dinh sau nay, them lai nhu MOT muc moi o day, KHONG
+#: phuc hoi nguyen ban ghi cu (kiem tra lai extra_payload tu tai lieu MOI).
+#:
+#: `extra_payload` THEO TAI LIEU CEREBRAS (inference-docs.cerebras.ai, doc
+#: 2026-08-15) — CHUA kiem thu song voi API that (khac Groq, noi tham so da
+#: duoc xac minh qua request that): `max_completion_tokens` la TEN THAT
+#: (giong Groq, khac `max_tokens`); `reasoning_effort` nhan "low"/"medium"/
+#: "high" cho `gpt-oss-120b` (mac dinh tai lieu la "medium" — o day chon
+#: "low" giong lua chon DA XAC MINH cua Groq cho CUNG model nay, giam rui ro
+#: model danh het ngan sach cho suy luan noi bo truoc khi tra loi). Can doi
+#: lai neu benchmark thuc te (xem `scripts/benchmark_cerebras_groq_translation.py`)
+#: cho thay sai.
+CEREBRAS_MODEL_PROFILES: Dict[str, ModelProfile] = {
+    "gpt_oss_120b": ModelProfile(
+        key="gpt_oss_120b", model_id="gpt-oss-120b",
+        display_name="GPT-OSS 120B", quality_hint="chất lượng cao",
+        extra_payload={
+            "reasoning_effort": "low",
+            "max_completion_tokens": 4096,
+        }),
+}
+
 #: Dinh tuyen vai tro TU DONG (yeu cau 3D) — (che_do, vai_tro) -> THU TU khoa
 #: model Groq de thu. CHI liet ke to hop THAT SU xay ra
 #: (`translation_service._VAI_TRO_THEO_CHE_DO`: NHANH chi co "translator";

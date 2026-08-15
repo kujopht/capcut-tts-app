@@ -83,6 +83,20 @@ class ProviderQuotaExhausted(TranslationProviderError):
         self.retry_at = retry_at
 
 
+class ProviderTransientError(TranslationProviderError):
+    """
+    Loi TAM THOI o tang MANG (timeout, mat ket noi) — RIENG voi
+    `TranslationProviderError` chung (vd 4xx/JSON sai hinh dang) de logic
+    thu-lai-cuc-bo (vd `PollinationsProvider`, Phan Pollinations: "Pollinations
+    deepseek ↓ fail/timeout") phan biet duoc "co the dang cho qua lau, thu
+    lai NGAY se co ich" voi "phan hoi da ro rang, thu lai khong ich gi".
+
+    VAN LA MOT `TranslationProviderError` (khong doi hanh vi cu): moi noi
+    dang bat `TranslationProviderError` chung (Groq/Cloudflare/registry) van
+    hoat dong y het, khong can sua gi them.
+    """
+
+
 class AllProvidersUnavailable(TranslationProviderError):
     """
     TAT CA provider (mien phi) da cau hinh hien khong dung duoc.
@@ -148,6 +162,11 @@ class ProviderProvenance:
     #: biet AI TRA TIEN cho lan goi nay (Part I: "biet nguon credential ma
     #: khong luu bi mat").
     credential_source: str = "shared"
+    #: Bo nho dem doan dich (Phan cache Pollinations) — True nghia la ket
+    #: qua nay KHONG goi LLM lan nay, lay tu lan dich TRUOC voi cung van
+    #: ban + ngu canh + phien ban prompt. Quan trong cho so lieu (benchmark/
+    #: usage) khong duoc dem mot lan lay cache la mot lan goi model that.
+    from_cache: bool = False
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -158,6 +177,7 @@ class ProviderProvenance:
             "attempted_at": self.attempted_at,
             "error": self.error,
             "credential_source": self.credential_source,
+            "from_cache": self.from_cache,
         }
 
 
@@ -215,18 +235,23 @@ class _OpenAICompatFreeProvider(TranslationProvider):
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
                 client: Optional[httpx.Client] = None,
-                extra_payload: Optional[Dict[str, object]] = None):
+                extra_payload: Optional[Dict[str, object]] = None,
+                timeout_seconds: Optional[float] = None):
         self._model = model
         self._extra_payload = (
             extra_payload if extra_payload is not None else self.EXTRA_PAYLOAD)
         self._client = client or httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=self.TIMEOUT_SECONDS,
+            timeout=timeout_seconds or self.TIMEOUT_SECONDS,
         )
 
     def translate_segment(self, text: str, *,
                           context: TranslationContext) -> str:
+        """Mot lan goi DUY NHAT. Lop con muon thu lai cuc bo (vd
+        `PollinationsProvider`) tu goi lai ham nay, phan biet duoc
+        `ProviderTransientError` (mang/timeout — thu lai co ich) voi cac
+        `TranslationProviderError` khac (phan hoi da ro rang — thu lai vo ich)."""
         sach = (text or "").strip()
         if not sach:
             raise TranslationProviderError("Đoạn văn rỗng, không có gì để dịch.")
@@ -241,6 +266,9 @@ class _OpenAICompatFreeProvider(TranslationProvider):
         }
         try:
             resp = self._client.post("/chat/completions", json=payload)
+        except httpx.TimeoutException as exc:
+            raise ProviderTransientError(
+                f"Hết thời gian chờ dịch vụ dịch: {exc}") from exc
         except httpx.HTTPError as exc:
             raise TranslationProviderError(
                 f"Không gọi được dịch vụ dịch: {exc}") from exc
@@ -312,6 +340,125 @@ class GroqProvider(_OpenAICompatFreeProvider):
         super().__init__(base_url="https://api.groq.com/openai/v1",
                          api_key=api_key, model=profile.model_id,
                          client=client, extra_payload=profile.extra_payload)
+
+
+class PollinationsProvider(_OpenAICompatFreeProvider):
+    """
+    Pollinations.ai — REST tuong thich OpenAI chat completions, nha cung
+    cap dich CHINH (yeu cau Pollinations, nhanh moi): model chinh (mac dinh
+    `deepseek`) roi model chat luong/thu lai (mac dinh `deepseek-pro`) trong
+    CUNG mot lop, khac nhau chi o `model_id` — dung mau voi `GroqProvider`
+    phuc vu nhieu model qua MOT lop.
+
+    Ten lop ke thua tu `_OpenAICompatFreeProvider` la LICH SU (lop do ban
+    dau chi phuc vu Groq/Cloudflare mien phi) — ban than lop cha KHONG doc
+    `free_tier` hay dua ra bat ky gia dinh nao ve gia ca, do la moi quan tam
+    RIENG cua `ConfiguredProvider`/`build_provider_registry`. Pollinations
+    dung API key dang `sk_...` (bi mat THAT, khong bao gio lo ra frontend —
+    xem `ProviderCatalogEntry.to_dict`, da kiem o
+    `ProviderCatalogSafetyTest`), nen ham `build_provider_registry` coi day
+    la provider TRA PHI theo mac dinh (xem ghi chu tai do) tru khi
+    `POLLINATIONS_FREE_TIER=true` duoc dat ro rang.
+
+    Thu lai CUC BO (Phan "retry count" cua yeu cau): CHI thu lai khi loi la
+    `ProviderTransientError` (mang/timeout — vd mot lan mat goi that su co
+    the thanh cong o lan ke tiep), KHONG thu lai loi khac (429/JSON sai hinh
+    dang/noi dung rong) — thu lai loai do vo ich, chi lam cham them truoc
+    khi chuyen sang model/provider tiep theo trong day fallback
+    (`ProviderRegistry`).
+    """
+
+    name = "pollinations"
+
+    #: URL mac dinh THEO DUNG yeu cau goc — van cho ghi de qua
+    #: `POLLINATIONS_BASE_URL` (xem `build_provider_registry`) de kiem thu/
+    #: trien khai rieng khong bi khoa cung.
+    DEFAULT_BASE_URL = "https://gen.pollinations.ai/v1"
+
+    #: Khoang nghi GIUA hai lan thu cuc bo — NHO, khong phai backoff day du:
+    #: day la mot worker nen dang chay trong vong lap, khong phai duong dan
+    #: request nguoi dung dang cho truc tiep, nen uu tien thu lai NHANH hon
+    #: la trung phat nguoi dung bang mot khoang cho dai.
+    RETRY_DELAY_SECONDS = 0.2
+
+    def __init__(self, *, api_key: str, model: str, base_url: str = "",
+                client: Optional[httpx.Client] = None,
+                timeout_seconds: Optional[float] = None,
+                retry_count: int = 0):
+        if not (api_key and model):
+            raise TranslationProviderError(
+                "Thiếu POLLINATIONS_API_KEY hoặc model.")
+        self._retry_count = max(0, retry_count)
+        super().__init__(base_url=base_url or self.DEFAULT_BASE_URL,
+                         api_key=api_key, model=model, client=client,
+                         timeout_seconds=timeout_seconds)
+
+    def translate_segment(self, text: str, *,
+                          context: TranslationContext) -> str:
+        loi_cuoi: Optional[ProviderTransientError] = None
+        for lan in range(self._retry_count + 1):
+            try:
+                return super().translate_segment(text, context=context)
+            except ProviderTransientError as exc:
+                loi_cuoi = exc
+                if lan < self._retry_count:
+                    time.sleep(self.RETRY_DELAY_SECONDS)
+                continue
+        assert loi_cuoi is not None  # vong lap luon chay >=1 lan
+        raise loi_cuoi
+
+
+def kiem_tra_ket_noi_pollinations(api_key: str, model: str, *,
+                                  base_url: str = "",
+                                  client: Optional[httpx.Client] = None
+                                  ) -> None:
+    """
+    Kiem tra suc khoe NHE cho Pollinations — cung triet ly voi
+    `kiem_tra_ket_noi_groq` (mot lenh GET, KHONG dich thu doan van nao nen
+    khong ton han muc). GOI THEO YEU CAU (tu route/CLI chan doan), KHONG
+    BAO GIO tu poll dinh ky — dung y "khong dua polling don dap vao".
+
+    Pollinations tuong thich OpenAI nen gia dinh no cung ho tro
+    `GET /models` nhu moi backend OpenAI-compat khac; neu endpoint THAT
+    khac di, ham nay se tra ve `PROVIDER_UNAVAILABLE` mot cach an toan thay
+    vi nem loi la (xem nhanh `except Exception` o cuoi) — tot hon la lam
+    hong luong kiem tra ket noi vi mot chi tiet endpoint chua xac minh
+    duoc voi API key that.
+    """
+    c = client or httpx.Client(
+        base_url=(base_url or PollinationsProvider.DEFAULT_BASE_URL).rstrip("/"),
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=_KIEM_TRA_TIMEOUT_SECONDS)
+    try:
+        resp = c.get("/models")
+    except httpx.HTTPError as exc:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE", "Không kết nối được Pollinations.") from exc
+
+    if resp.status_code == 401:
+        raise ConnectionCheckError("INVALID_KEY", "API key không hợp lệ.")
+    if resp.status_code == 429:
+        raise ConnectionCheckError(
+            "RATE_LIMITED", "Đang bị giới hạn tốc độ, thử lại sau.")
+    if resp.status_code != 200:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE", "Pollinations hiện không phản hồi đúng.")
+
+    try:
+        du_lieu = resp.json()
+        cac_model = {m.get("id") for m in (du_lieu.get("data") or [])}
+    except Exception as exc:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE",
+            "Phản hồi từ Pollinations không đúng định dạng mong đợi.") from exc
+    if cac_model and model not in cac_model:
+        # KHONG chan cung: neu danh sach model tra ve RONG (endpoint co that
+        # nhung khong liet ke model theo cach nay), day khong phai bang
+        # chung model khong ton tai — chi khi CO danh sach ma model can
+        # tim VANG MAT moi coi la loi ro rang.
+        raise ConnectionCheckError(
+            "MODEL_UNAVAILABLE",
+            f"Model {model} không khả dụng với API key này.")
 
 
 class CloudflareWorkersAIProvider(TranslationProvider):
@@ -527,13 +674,25 @@ class ProviderRegistry:
                           ) -> List[ConfiguredProvider]:
         """
         Sap lai NHOM model Groq curated theo (quality_mode, vai_tro) — Phan
-        3D. Provider KHAC (Cloudflare, tuy chinh, Groq legacy, ca nhan BYOK)
-        GIU NGUYEN vi tri tuong doi, noi TIEP SAU nhom Groq da sap — vi du
-        mau Phan 3F "Qwen -> GPT-OSS 120B -> GPT-OSS 20B -> Cloudflare ->
-        ca nhan" chinh la ket qua cua cach ghep nay.
+        3D. Provider KHAC (Cloudflare, tuy chinh, Groq legacy, Pollinations,
+        ca nhan BYOK) GIU NGUYEN VI TRI TUONG DOI VOI NHOM GROQ — nhom Groq
+        (da sap lai theo vai tro) duoc CHEN LAI dung cho no von dung trong
+        danh sach dau vao, thay vi luon bi day xuong cuoi.
 
-        Khong dinh tuyen duoc (thieu `quality_mode`, hoac to hop la) thi
-        TRA NGUYEN thu tu dau vao — an toan mac dinh, khong lam gi ca.
+        Sua loi (Phan Pollinations): ban truoc CHI biet "Groq" la nhom duy
+        nhat can sap, nen coi MOI provider khac la "noi sau nhom Groq" mot
+        cach vo dieu kien — dung voi Cloudflare (vd Phan 3F: "Qwen -> GPT-OSS
+        120B -> GPT-OSS 20B -> Cloudflare", Cloudflare von o CUOI cau hinh),
+        nhung SAI ngay khi mot provider khac (Pollinations) duoc dat TRUOC
+        Groq trong cau hinh de lam nha cung cap CHINH — logic cu se am tham
+        DAO NGUOC uu tien do moi khi dinh tuyen AUTO theo vai tro chay. Gio
+        vi tri "nhom Groq" duoc XAC DINH tu vi tri XUAT HIEN DAU TIEN cua no
+        trong danh sach goc, va MOI provider khac (bat ke o truoc hay sau)
+        giu nguyen vi tri tuong doi cua CHUNG voi vi tri do.
+
+        Khong dinh tuyen duoc (thieu `quality_mode`, hoac to hop la, hoac
+        khong co provider Groq curated nao) thi TRA NGUYEN thu tu dau vao —
+        an toan mac dinh, khong lam gi ca.
         """
         thu_tu_khoa = route_order(context.quality_mode, context.vai_tro)
         if not thu_tu_khoa:
@@ -541,19 +700,30 @@ class ProviderRegistry:
 
         theo_khoa: Dict[str, ConfiguredProvider] = {}
         khac: List[ConfiguredProvider] = []
+        vi_tri_nhom_groq: Optional[int] = None
         for p in providers:
             khoa = cls._groq_model_key(p.provider_id)
             if khoa is not None and khoa not in theo_khoa:
                 theo_khoa[khoa] = p
+                if vi_tri_nhom_groq is None:
+                    # Vi tri trong `khac` TAI THOI DIEM gap phan tu Groq DAU
+                    # TIEN — chinh la so provider-khong-Groq da xuat hien
+                    # TRUOC no, nen la noi nhom Groq (sau khi sap) se duoc
+                    # chen lai.
+                    vi_tri_nhom_groq = len(khac)
             else:
                 khac.append(p)
+
+        if vi_tri_nhom_groq is None:
+            return providers  # khong co provider Groq curated nao de sap
 
         da_dinh_tuyen = [theo_khoa[k] for k in thu_tu_khoa if k in theo_khoa]
         # Model Groq curated nhung KHONG nam trong bang dinh tuyen (khong nen
         # xay ra voi ba model hien co, nhung an toan cho tuong lai) — giu lai,
         # noi vao CUOI nhom Groq thay vi am tham bi rot.
         con_lai_groq = [p for k, p in theo_khoa.items() if k not in thu_tu_khoa]
-        return da_dinh_tuyen + con_lai_groq + khac
+        nhom_groq_da_sap = da_dinh_tuyen + con_lai_groq
+        return khac[:vi_tri_nhom_groq] + nhom_groq_da_sap + khac[vi_tri_nhom_groq:]
 
     @staticmethod
     def _thu_theo_thu_tu(thu_tu: List[ConfiguredProvider], text: str, *,
@@ -720,6 +890,51 @@ def kiem_tra_ket_noi_groq(api_key: str, model: str, *,
             f"Model {model} không khả dụng với API key này.")
 
 
+def _so_thuc(gia_tri: str, *, mac_dinh: float) -> float:
+    """Doc mot bien moi truong dang so thuc — chuoi rong/khong doc duoc thi
+    tra ve mac dinh, KHONG nem loi (mot bien cau hinh go sai khong duoc
+    phep lam sap ca tien trinh luc khoi dong)."""
+    try:
+        return float(gia_tri) if gia_tri.strip() else mac_dinh
+    except ValueError:
+        return mac_dinh
+
+
+def _so_nguyen(gia_tri: str, *, mac_dinh: int) -> int:
+    try:
+        return int(gia_tri) if gia_tri.strip() else mac_dinh
+    except ValueError:
+        return mac_dinh
+
+
+def _ap_dung_uu_tien(providers: List[ConfiguredProvider],
+                     uu_tien_tho: str) -> List[ConfiguredProvider]:
+    """
+    Sap lai THU TU GOC cua registry theo `TRANSLATION_PROVIDER_PRIORITY`
+    (danh sach `provider_id`, phan cach dau phay) — day la co che "reorder
+    qua cau hinh, khong hard-code" o cap CAO NHAT (thu tu giua CAC NHOM
+    provider, vd Pollinations truoc Groq hay nguoc lai), doc lap voi
+    `ProviderRegistry._sap_theo_vai_tro` (chi sap XEP NOI BO trong MOT nhom
+    Groq/vai tro AUTO).
+
+    Provider KHONG duoc nhac toi trong danh sach uu tien giu NGUYEN thu tu
+    tuong doi CUA CHUNG VOI NHAU, noi vao SAU tat ca provider da duoc nhac
+    toi — an toan mac dinh, khong lam mat provider nao.
+
+    Rong/khong dat -> tra nguyen thu tu dau vao (thu tu xay dung tu nhien
+    trong ham nay: Pollinations, Groq, Cloudflare, tuy chinh).
+    """
+    uu_tien = [p.strip() for p in uu_tien_tho.split(",") if p.strip()]
+    if not uu_tien:
+        return providers
+    thu_tu_uu_tien = {pid: i for i, pid in enumerate(uu_tien)}
+    con_lai = [p for p in providers if p.provider_id not in thu_tu_uu_tien]
+    da_uu_tien = sorted(
+        (p for p in providers if p.provider_id in thu_tu_uu_tien),
+        key=lambda p: thu_tu_uu_tien[p.provider_id])
+    return da_uu_tien + con_lai
+
+
 def build_provider_registry(env: Optional[Dict[str, str]] = None
                             ) -> ProviderRegistry:
     """
@@ -732,6 +947,70 @@ def build_provider_registry(env: Optional[Dict[str, str]] = None
     cho_phep_tra_phi = e.get("TRANSLATION_ALLOW_PAID_PROVIDER", "false").strip().lower() == "true"
 
     providers: List[ConfiguredProvider] = []
+
+    # --- Pollinations (nha cung cap CHINH, yeu cau moi) -----------------
+    #
+    # Them TRUOC Groq trong danh sach — thu tu XAY DUNG o day chinh la thu
+    # tu UU TIEN mac dinh (Pollinations truoc, Groq la du phong doc lap),
+    # va `ProviderRegistry._sap_theo_vai_tro` da duoc sua (Phan Pollinations)
+    # de giu nguyen vi tri tuong doi nay ke ca khi dinh tuyen AUTO theo vai
+    # tro sap lai NOI BO nhom Groq. `TRANSLATION_PROVIDER_PRIORITY` (cuoi
+    # ham nay) co the doi lai thu tu nay qua cau hinh, khong can sua code.
+    #
+    # `free_tier`: Pollinations doi hoi mot api key dang `sk_...` (bi mat
+    # THAT), nen VE MAT AN TOAN day la provider TRA PHI — nhung ho so nay
+    # theo DUNG tien le cua Groq (cung doi hoi mot api key that, van duoc
+    # coi la mien phi vi phan mien phi cua no la phan duoc dung o day): mac
+    # dinh `POLLINATIONS_FREE_TIER=true`, dua Pollinations vao duong thu chi
+    # can `POLLINATIONS_API_KEY` — dung khop yeu cau goc ("Pollinations la
+    # nha cung cap CHINH", chi mot bien moi truong duy nhat duoc nhac toi).
+    # Dat `POLLINATIONS_FREE_TIER=false` de tat han (KHONG dua vao registry
+    # theo cach nao, ke ca voi `TRANSLATION_ALLOW_PAID_PROVIDER=true` —
+    # `ProviderRegistry.__init__` loc THEO `free_tier` MOT CACH VO DIEU
+    # KIEN nhu mot rao chan kep, nen `cho_phep_tra_phi` khong the "mo lai"
+    # mot provider da bi coi la tra phi; day la hanh vi CO SAN cua
+    # `ProviderRegistry`, khong phai gioi han rieng cua Pollinations).
+    pollinations_key = e.get("POLLINATIONS_API_KEY", "").strip()
+    if pollinations_key:
+        pollinations_base_url = (
+            e.get("POLLINATIONS_BASE_URL", "").strip()
+            or PollinationsProvider.DEFAULT_BASE_URL)
+        pollinations_timeout = _so_thuc(
+            e.get("POLLINATIONS_TIMEOUT_SECONDS", ""), mac_dinh=60.0)
+        pollinations_retry = _so_nguyen(
+            e.get("POLLINATIONS_RETRY_COUNT", ""), mac_dinh=1)
+        pollinations_free = e.get(
+            "POLLINATIONS_FREE_TIER", "true").strip().lower() == "true"
+        primary_model = (
+            e.get("POLLINATIONS_PRIMARY_MODEL", "").strip() or "deepseek")
+        quality_model = (
+            e.get("POLLINATIONS_QUALITY_MODEL", "").strip() or "deepseek-pro")
+
+        providers.append(ConfiguredProvider(
+            provider_id="pollinations_primary", model_id=primary_model,
+            display_name=f"Pollinations · {primary_model}",
+            quality_hint="chính, ưu tiên hàng đầu",
+            provider=PollinationsProvider(
+                api_key=pollinations_key, model=primary_model,
+                base_url=pollinations_base_url,
+                timeout_seconds=pollinations_timeout,
+                retry_count=pollinations_retry),
+            free_tier=pollinations_free))
+        # model_id KHAC voi primary thi moi them — mot operator dat
+        # POLLINATIONS_PRIMARY_MODEL == POLLINATIONS_QUALITY_MODEL (vd de
+        # tam thoi tat model chat luong) se khong bi trung mot entry vo
+        # nghia (hai ConfiguredProvider cung goi mot model_id).
+        if quality_model != primary_model:
+            providers.append(ConfiguredProvider(
+                provider_id="pollinations_quality", model_id=quality_model,
+                display_name=f"Pollinations · {quality_model}",
+                quality_hint="chất lượng cao, thử lại khi model chính lỗi",
+                provider=PollinationsProvider(
+                    api_key=pollinations_key, model=quality_model,
+                    base_url=pollinations_base_url,
+                    timeout_seconds=pollinations_timeout,
+                    retry_count=pollinations_retry),
+                free_tier=pollinations_free))
 
     groq_key = e.get("GROQ_API_KEY", "").strip()
     if groq_key:
@@ -797,4 +1076,6 @@ def build_provider_registry(env: Optional[Dict[str, str]] = None
 
     if not cho_phep_tra_phi:
         providers = [p for p in providers if p.free_tier]
+    providers = _ap_dung_uu_tien(
+        providers, e.get("TRANSLATION_PROVIDER_PRIORITY", ""))
     return ProviderRegistry(providers)

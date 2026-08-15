@@ -8,9 +8,12 @@ Khong biet gi ve HTTP — nem `TranslationError`/`NotFoundError`/
 
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
+import time
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -155,6 +158,86 @@ def _tom_tat_tho(van_ban_da_dich: str) -> str:
     return sach[:DO_DAI_TOM_TAT].rsplit(" ", 1)[0] + "…"
 
 
+#: So lan thu LAI mot DOAN rieng le (toan bo chuoi provider — Pollinations
+#: chinh -> Pollinations chat luong -> Groq...) neu TAT CA deu that bai o
+#: lan dau, TRUOC KHI de loi lan len lam GIAN DOAN CA CHUONG (yeu cau
+#: Pollinations: "support retry of individual failed chunks rather than
+#: restarting the whole chapter").
+#:
+#: MAC DINH 0 (TAT) — CO Y, khong phai bo sot: gia tri >0 lam mot LOI
+#: THOANG QUA tu bien thanh THANH CONG NGAY trong CUNG mot lan chay job,
+#: nen mot loi that su thoang qua (mang chap chon 1 lan) se KHONG con lam
+#: job chuyen `waiting_for_provider`/`failed` nua — dieu nay xung dot voi
+#: hanh vi RETRY-O-CAP-JOB da co san va da co test rieng (Part K,
+#: `RetryJobTest`, dung mot provider gia "loi dung lan goi thu N" de kiem
+#: `retry_job` mot cach deterministic). Dat `TRANSLATION_CHUNK_RETRY_COUNT`
+#: (bien moi truong) > 0 de BAT tinh nang nay co y thuc — an toan de bat
+#: cho Pollinations/production that (loi mang thoang qua pho bien hon
+#: nhieu so voi mot bai test tat dinh), chi khong nen la mac dinh AM THAM
+#: doi hanh vi retry-cap-job da duoc kiem chung.
+TRANSLATION_CHUNK_RETRY_COUNT = max(0, int(
+    os.environ.get("TRANSLATION_CHUNK_RETRY_COUNT", "0")))
+
+#: Khoang nghi GIUA hai lan thu lai mot doan — nho, chi de tranh don dap
+#: ngay lap tuc vao provider vua that bai.
+_CHUNK_RETRY_DELAY_SECONDS = 0.3
+
+#: Tang PHIEN BAN nay moi khi doi CAU TRUC prompt he thong/nguoi dung
+#: (`_he_thong_prompt`/`_nguoi_dung_prompt` o `translation_providers.py`) —
+#: bo nho dem doan dich (duoi day) tu dong "quen" moi ket qua cu, khong can
+#: xoa tay: khoa cache gom ca gia tri nay.
+TRANSLATION_PROMPT_VERSION = "v1"
+
+
+class _TranslationSegmentCache:
+    """
+    Bo nho dem MOT DOAN dich TRONG TIEN TRINH (Phan audit caching, yeu cau
+    Pollinations) — KHONG ghi Appwrite/dia, mat khi tien trinh khoi dong
+    lai. Chap nhan duoc: day la mot toi uu hoa (tranh goi LLM lai cho cung
+    mot dau vao), khong phai nguon su that cua ban dich (nguon su that van
+    la `TranslationVersion` da luu qua tung lan goi THAT).
+
+    Khoa gom DU: van ban goc, MOI truong anh huong prompt (`vai_tro`,
+    `quality_mode`, `genre`, `naming_mode`, `tom_tat_truoc`, `glossary`,
+    `custom_instruction`) VA `TRANSLATION_PROMPT_VERSION` — hai lan goi
+    khac nhau CHI mot trong so nay (vi du glossary du an vua doi) se KHONG
+    trung cache, dam bao khong bao gio tra ve ket qua sai ngu canh.
+
+    Gioi han kich thuoc (LRU) de khong phinh vo han trong mot worker chay
+    lau — cu/it dung nhat bi day ra truoc.
+    """
+
+    def __init__(self, so_muc_toi_da: int = 2000):
+        self._so_muc_toi_da = so_muc_toi_da
+        self._du_lieu: "OrderedDict[str, str]" = OrderedDict()
+        self._khoa = threading.Lock()
+
+    @staticmethod
+    def _tinh_khoa(text: str, ctx: TranslationContext) -> str:
+        glossary_on_dinh = tuple(sorted(ctx.glossary.items()))
+        tho = "\x1f".join([
+            TRANSLATION_PROMPT_VERSION, ctx.vai_tro, ctx.quality_mode,
+            ctx.genre, ctx.naming_mode, ctx.tom_tat_truoc,
+            repr(glossary_on_dinh), ctx.custom_instruction, text,
+        ])
+        return hashlib.sha256(tho.encode("utf-8")).hexdigest()
+
+    def get(self, text: str, ctx: TranslationContext) -> Optional[str]:
+        khoa = self._tinh_khoa(text, ctx)
+        with self._khoa:
+            if khoa not in self._du_lieu:
+                return None
+            self._du_lieu.move_to_end(khoa)
+            return self._du_lieu[khoa]
+
+    def put(self, text: str, ctx: TranslationContext, ket_qua: str) -> None:
+        khoa = self._tinh_khoa(text, ctx)
+        with self._khoa:
+            self._du_lieu[khoa] = ket_qua
+            self._du_lieu.move_to_end(khoa)
+            while len(self._du_lieu) > self._so_muc_toi_da:
+                self._du_lieu.popitem(last=False)
+
 class TranslationService:
     def __init__(self, store: Any, novel_store: Any,
                  provider: Optional[TranslationProvider] = None,
@@ -179,6 +262,16 @@ class TranslationService:
         #: duong dich, hanh vi Y HET truoc khi co V5.1 (chi dung
         #: `self._registry` neu co, roi `self._provider`).
         self._byok = byok
+        #: Bo nho dem doan dich (Phan audit caching) — MOT cache RIENG cho
+        #: MOI instance `TranslationService`, khong phai singleton cap
+        #: module: production chi tao DUNG MOT instance cho ca vong doi tien
+        #: trinh (xem `main.py`/`translation_worker.py`) nen hieu qua cache
+        #: KHONG doi, nhung MOI test tu tao instance RIENG cua no trong
+        #: `setUp` se KHONG BAO GIO thay ket qua dich cua mot test khac —
+        #: tranh dung mot bien toan cuc de lai trang thai giua cac test
+        #: (nguon loi tung gap: mot lan cache-hit "vo hinh" o mot test lam
+        #: mot provider gia khong duoc goi dung so lan no ky vong).
+        self._translation_cache = _TranslationSegmentCache()
 
         #: Danh tinh cua TIEN TRINH NAY — hai worker khac nhau (hoac hai
         #: instance service khac nhau, vd trong test mo phong "worker chet
@@ -730,23 +823,72 @@ class TranslationService:
         `translate_segment_with_personal` (Fanfic chung + ca nhan cua CHINH
         chu du an theo dung thu tu `project.prefer_personal_provider`);
         neu khong, hanh vi Y HET truoc V5.1.
+
+        Kiem bo nho dem TRUOC khi goi provider (Phan audit caching): trung
+        khop THI TRA NGAY, khong tinh vao so lan goi LLM/usage that. Trung
+        khop phu thuoc ca `project.provider_mode`/`selected_provider_id` hay
+        khong? KHONG — cache dung y nghia "cung van ban + cung ngu canh se
+        ra cung ban dich BAT KE provider nao thuc hien", nen mot lan dich
+        THANH CONG truoc do (du bang provider/mode nao) la du de tra loi
+        ngay cho lan sau, dung tinh than "khong goi LLM lai cho dau vao
+        giong het".
         """
+        cache_hit = self._translation_cache.get(text, ctx)
+        if cache_hit is not None:
+            return cache_hit, ProviderProvenance(
+                provider_id="cache", model_id="", pass_type=ctx.vai_tro,
+                success=True, attempted_at=now_iso(), from_cache=True)
+
         if self._registry and self._byok:
-            return self._registry.translate_segment_with_personal(
+            ket_qua, prov = self._registry.translate_segment_with_personal(
                 text, context=ctx, mode=project.provider_mode,
                 selected_provider_id=project.selected_provider_id,
                 allow_fallback=project.allow_fallback,
                 personal_providers=personal_providers,
                 prefer_personal=project.prefer_personal_provider)
-        if self._registry:
-            return self._registry.translate_segment(
+        elif self._registry:
+            ket_qua, prov = self._registry.translate_segment(
                 text, context=ctx, mode=project.provider_mode,
                 selected_provider_id=project.selected_provider_id,
                 allow_fallback=project.allow_fallback)
-        ket_qua = self._provider.translate_segment(text, context=ctx)
-        return ket_qua, ProviderProvenance(
-            provider_id=self._provider.name, model_id="",
-            pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+        else:
+            ket_qua = self._provider.translate_segment(text, context=ctx)
+            prov = ProviderProvenance(
+                provider_id=self._provider.name, model_id="",
+                pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+
+        self._translation_cache.put(text, ctx, ket_qua)
+        return ket_qua, prov
+
+    def _goi_dich_mot_doan_co_thu_lai(
+        self, text: str, ctx: TranslationContext, project: TranslationProject,
+        personal_providers: List["ConfiguredProvider"],
+    ) -> "tuple[str, ProviderProvenance]":
+        """
+        Boc `_goi_dich_mot_doan` voi THU LAI cho MOT DOAN rieng le (yeu cau
+        Pollinations: "retry of individual failed chunks rather than
+        restarting the whole chapter") — chi `_dich_mot_chuong` (vong lap
+        job nen) dung ham nay; `_chay_vai_tro_tren_van_ban` (hanh dong editor
+        tuc thi) CO CHU DICH khong doi (xem docstring do).
+
+        Thu lai TOAN BO chuoi provider (Pollinations chinh -> Pollinations
+        chat luong -> Groq...) cho DOAN NAY — mot lan mat mang thoang qua co
+        the anh huong CA chuoi cung luc, nen thu lai lai TU DAU chuoi (khong
+        chi provider cuoi) la hop ly. `TRANSLATION_CHUNK_RETRY_COUNT=0` giu
+        nguyen hanh vi cu (loi lan len NGAY, khong thu lai).
+        """
+        loi_cuoi: Optional[TranslationProviderError] = None
+        for lan in range(TRANSLATION_CHUNK_RETRY_COUNT + 1):
+            try:
+                return self._goi_dich_mot_doan(
+                    text, ctx, project, personal_providers)
+            except TranslationProviderError as exc:
+                loi_cuoi = exc
+                if lan < TRANSLATION_CHUNK_RETRY_COUNT:
+                    time.sleep(_CHUNK_RETRY_DELAY_SECONDS)
+                continue
+        assert loi_cuoi is not None  # vong lap luon chay it nhat mot lan
+        raise loi_cuoi
 
     def _dich_mot_chuong(self, project: TranslationProject, noi_dung: str,
                          chuong_idx: int, job: TranslationJob,
@@ -796,7 +938,7 @@ class TranslationService:
                         naming_mode=project.naming_mode.value,
                         tom_tat_truoc=tom_tat, glossary=glossary,
                         custom_instruction=project.custom_instruction)
-                    dich, prov = self._goi_dich_mot_doan(
+                    dich, prov = self._goi_dich_mot_doan_co_thu_lai(
                         dich, ctx, project, personal_providers)
                     provenance_by_role[vai_tro] = prov
                 ket_qua.append(dich)

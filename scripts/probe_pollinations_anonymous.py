@@ -23,6 +23,14 @@ AN TOAN — RANG BUOC BAT BUOC (khong duoc vi pham duoi bat ky hinh thuc nao):
 - Khong dump toan bo noi dung loi (HTML/JSON dai) hay bat ky header nao
   vao bao cao — chi luu ma trang thai, Content-Type, kich thuoc, do tre,
   va toi da 200 ky tu dau cua thong diep loi.
+
+Chay `python scripts/probe_pollinations_anonymous.py --final-check-only` de
+CHI thuc hien buoc xac minh toi thieu bo sung (4 request: khong model,
+model=flux, model=zimage, model khong ton tai) — dung de doi chieu voi
+phat hien "7 model tra ve anh giong het nhau" ma KHONG lap lai toan bo
+25 request cua lan do dau (tranh stress-test dich vu). Buoc nay doc lai
+raw JSON da co san tren dia de giu nguyen du lieu vong 1/vong 2 cu, chi
+them phan xac minh moi va sua lai cach dien dat bao cao.
 """
 
 from __future__ import annotations
@@ -168,7 +176,181 @@ def _in_dong(kq: KetQua, nhan: str) -> None:
     )
 
 
+HEADER_KHONG_NHAY_CAM = (
+    "content-type", "content-length", "x-cache", "cf-cache-status", "age",
+    "server", "x-model", "x-served-by", "via", "x-request-id",
+)
+"""Danh sach header duoc phep ghi vao bao cao — KHONG bao gio ghi
+Authorization, Set-Cookie, hay bat ky header nao khac ngoai danh sach nay."""
+
+
+@dataclass
+class KetQuaXacMinh:
+    nhan: str
+    tham_so_model: Optional[str]
+    http_status: Optional[int]
+    content_type: str
+    byte_size: Optional[int]
+    sha256_16: str
+    do_tre_giay: float
+    headers_khong_nhay_cam: dict
+
+
+def _goi_xac_minh(client: httpx.Client, nhan: str, model: Optional[str]) -> KetQuaXacMinh:
+    url = f"{LEGACY_BASE}/{quote(PROMPT)}"
+    tham_so = {"seed": SEED, "nologo": "true"}
+    if model is not None:
+        tham_so["model"] = model
+    bat_dau = time.monotonic()
+    resp = client.get(url, params=tham_so)
+    do_tre = time.monotonic() - bat_dau
+    content_type = resp.headers.get("content-type", "")
+    sha_day_du = hashlib.sha256(resp.content).hexdigest() if content_type.startswith("image/") else ""
+    headers_loc = {
+        k: v for k, v in resp.headers.items() if k.lower() in HEADER_KHONG_NHAY_CAM
+    }
+    return KetQuaXacMinh(
+        nhan=nhan, tham_so_model=model, http_status=resp.status_code,
+        content_type=content_type,
+        byte_size=len(resp.content) if content_type.startswith("image/") else None,
+        sha256_16=sha_day_du[:16], do_tre_giay=do_tre,
+        headers_khong_nhay_cam=headers_loc,
+    )
+
+
+def chay_xac_minh_cuoi_va_cap_nhat_bao_cao() -> None:
+    """Buoc xac minh TOI THIEU bo sung — dung DUY NHAT 4 request, khong lap
+    lai toan bo cuoc do dau (khong stress-test dich vu)."""
+    client = _client()
+    print("=== XAC MINH TOI THIEU: khong model / flux / zimage / model khong ton tai ===")
+    cac_truong_hop = [
+        ("khong_model", None),
+        ("model=flux", "flux"),
+        ("model=zimage", "zimage"),
+        ("model_khong_ton_tai", "this-model-definitely-does-not-exist-xyz123"),
+    ]
+    ket_qua = []
+    for nhan, model in cac_truong_hop:
+        kq = _goi_xac_minh(client, nhan, model)
+        ket_qua.append(kq)
+        print(
+            f"[{nhan:20}] status={kq.http_status} content-type={kq.content_type!r} "
+            f"size={kq.byte_size} sha256_16={kq.sha256_16 or '—'} "
+            f"do_tre={kq.do_tre_giay:.2f}s headers={kq.headers_khong_nhay_cam}"
+        )
+    client.close()
+
+    cac_hash = {kq.nhan: kq.sha256_16 for kq in ket_qua if kq.sha256_16}
+    tat_ca_giong_nhau = len(set(cac_hash.values())) == 1 and len(cac_hash) == len(ket_qua)
+
+    goc = Path(__file__).resolve().parent.parent
+    thu_muc = goc / "docs" / "reports"
+    raw_path = thu_muc / "pollinations-anonymous-probe-raw.json"
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    raw["xac_minh_toi_thieu_bo_sung"] = {
+        "muc_dich": (
+            "Kiem tra xem endpoint legacy an danh co thuc su phan biet model "
+            "hay khong, bang cach so sanh: khong truyen model, model that "
+            "(flux/zimage), va mot ten model khong ton tai."
+        ),
+        "ket_qua": [asdict(kq) for kq in ket_qua],
+        "tat_ca_giong_nhau_byte_for_byte": tat_ca_giong_nhau,
+    }
+    raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    _sua_lai_bao_cao_sau_xac_minh(ket_qua, tat_ca_giong_nhau)
+    print()
+    print(f"Đã cập nhật báo cáo: {thu_muc / 'pollinations-anonymous-probe-summary.md'}")
+
+
+def _sua_lai_bao_cao_sau_xac_minh(ket_qua: List[KetQuaXacMinh], tat_ca_giong_nhau: bool) -> None:
+    goc = Path(__file__).resolve().parent.parent
+    thu_muc = goc / "docs" / "reports"
+    duong_dan = thu_muc / "pollinations-anonymous-probe-summary.md"
+    noi_dung = duong_dan.read_text(encoding="utf-8")
+
+    tieu_de_ket_luan = "## Kết luận cuối cùng — đã xác minh tối thiểu bổ sung\n"
+    if tieu_de_ket_luan in noi_dung:
+        noi_dung = noi_dung.split(tieu_de_ket_luan)[0].rstrip() + "\n\n"
+
+    dong = [tieu_de_ket_luan]
+    dong.append(
+        "Bước xác minh bổ sung (4 request, cùng prompt + seed=42, KHÔNG lặp "
+        "lại toàn bộ 25 request của lần dò đầu — tránh stress-test dịch vụ):\n"
+    )
+    dong.append("| Trường hợp | HTTP | Content-Type | Size | SHA256 (16 ký tự) | Header không nhạy cảm |")
+    dong.append("|---|---|---|---|---|---|")
+    for kq in ket_qua:
+        dong.append(
+            f"| {kq.nhan} | {kq.http_status} | {kq.content_type or '—'} | "
+            f"{kq.byte_size if kq.byte_size is not None else '—'} | "
+            f"{kq.sha256_16 or '—'} | `{kq.headers_khong_nhay_cam}` |"
+        )
+    dong.append("")
+
+    if tat_ca_giong_nhau:
+        dong.append(
+            "**Xác nhận:** yêu cầu KHÔNG truyền `model`, `model=flux`, "
+            "`model=zimage`, và một tên model KHÔNG TỒN TẠI (`this-model-"
+            "definitely-does-not-exist-xyz123`) đều trả về **CÙNG MỘT ảnh "
+            "byte-for-byte giống hệt nhau**. Điều này chứng minh endpoint "
+            "legacy ẩn danh **bỏ qua/chuẩn hoá tham số `model=`** — nó KHÔNG "
+            "phân biệt được model hợp lệ với model bịa đặt, nên không thể "
+            "coi bất kỳ tên model riêng lẻ nào là \"đã xác nhận hoạt động "
+            "ẩn danh\" theo đúng nghĩa của nó.\n"
+        )
+    else:
+        dong.append(
+            "**Không xác nhận lại được** hiện tượng trùng lặp byte-for-byte "
+            "ở lần chạy xác minh này — xem bảng trên để biết chi tiết từng "
+            "trường hợp; cần diễn giải lại kết luận bên dưới cho phù hợp với "
+            "dữ liệu thực tế thay vì giữ nguyên kết luận cũ.\n"
+        )
+
+    dong.append(
+        "**Đối chiếu tài liệu công khai (không dùng thông tin xác thực):** "
+        "APIDOCS.md chính thức của Pollinations "
+        "([raw.githubusercontent.com/pollinations/pollinations/master/APIDOCS.md]"
+        "(https://raw.githubusercontent.com/pollinations/pollinations/master/APIDOCS.md)) "
+        "ghi tham số `model` có giá trị mặc định là `flux` — đây là giá trị "
+        "MẶC ĐỊNH CỦA THAM SỐ theo tài liệu, KHÔNG phải bằng chứng model nền "
+        "thực sự chạy khi ẩn danh (vì cả tên model bịa đặt cũng cho ra ảnh "
+        "giống hệt). Tài liệu cũng mô tả hệ thống bậc truy cập: Anonymous → "
+        "\"Basic models\", Seed (đăng ký miễn phí) → \"Standard models\", "
+        "Flower (trả phí) → \"Advanced models\", Nectar (doanh nghiệp) → "
+        "\"All models\" — khớp với việc kontext/nanobanana/seedream bị chặn "
+        "kèm thông điệp yêu cầu `enter.pollinations.ai`. Tài liệu KHÔNG mô tả "
+        "rõ hành vi chuẩn hoá/bỏ qua tham số model quan sát được ở trên — đây "
+        "là phát hiện THỰC NGHIỆM, không phải điều tài liệu xác nhận.\n"
+    )
+
+    dong.append("### Kết luận theo đúng yêu cầu\n")
+    dong.append(
+        "**CONFIRMED:**\n"
+        "- Sinh ảnh ẩn danh (không key) qua endpoint legacy hoạt động — trả "
+        "về HTTP 200 + ảnh hợp lệ khi gọi endpoint này mà không có bất kỳ "
+        "thông tin xác thực nào.\n\n"
+        "**NOT CONFIRMED:**\n"
+        "- flux hoạt động độc lập/ẩn danh với đúng đặc tính riêng của model này.\n"
+        "- zimage hoạt động độc lập/ẩn danh với đúng đặc tính riêng của model này.\n"
+        "- gpt-image-2 hoạt động độc lập/ẩn danh với đúng đặc tính riêng của model này.\n"
+        "- Bất kỳ model nào khác được đặt tên (dreamshaper, turbo, gptimage, "
+        "nanobanana-pro) hoạt động độc lập/ẩn danh với đúng đặc tính riêng "
+        "của nó — tham số `model=` bị bỏ qua/chuẩn hoá ẩn danh nên không thể "
+        "quy kết ảnh trả về là do model được yêu cầu tạo ra.\n\n"
+        "**UNIFIED API:**\n"
+        "- Sinh ảnh không key qua `gen.pollinations.ai` (endpoint hợp nhất) "
+        "trả về HTTP 401 — yêu cầu xác thực.\n"
+    )
+
+    duong_dan.write_text(noi_dung + "\n".join(dong), encoding="utf-8")
+
+
 def main() -> None:
+    if "--final-check-only" in sys.argv:
+        chay_xac_minh_cuoi_va_cap_nhat_bao_cao()
+        return
+
     client = _client()
     tat_ca: List[KetQua] = []
 

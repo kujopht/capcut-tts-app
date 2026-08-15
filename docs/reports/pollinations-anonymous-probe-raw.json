@@ -303,5 +303,71 @@
       "loi": "",
       "sha256_16": "173c3d7d6d85d537"
     }
-  ]
+  ],
+  "xac_minh_toi_thieu_bo_sung": {
+    "muc_dich": "Kiem tra xem endpoint legacy an danh co thuc su phan biet model hay khong, bang cach so sanh: khong truyen model, model that (flux/zimage), va mot ten model khong ton tai.",
+    "ket_qua": [
+      {
+        "nhan": "khong_model",
+        "tham_so_model": null,
+        "http_status": 200,
+        "content_type": "image/jpeg",
+        "byte_size": 42779,
+        "sha256_16": "173c3d7d6d85d537",
+        "do_tre_giay": 0.9060000000026776,
+        "headers_khong_nhay_cam": {
+          "content-type": "image/jpeg",
+          "content-length": "42779",
+          "x-cache": "HIT",
+          "server": "cloudflare"
+        }
+      },
+      {
+        "nhan": "model=flux",
+        "tham_so_model": "flux",
+        "http_status": 200,
+        "content_type": "image/jpeg",
+        "byte_size": 42779,
+        "sha256_16": "173c3d7d6d85d537",
+        "do_tre_giay": 0.6100000000005821,
+        "headers_khong_nhay_cam": {
+          "content-type": "image/jpeg",
+          "content-length": "42779",
+          "x-cache": "HIT",
+          "server": "cloudflare"
+        }
+      },
+      {
+        "nhan": "model=zimage",
+        "tham_so_model": "zimage",
+        "http_status": 200,
+        "content_type": "image/jpeg",
+        "byte_size": 42779,
+        "sha256_16": "173c3d7d6d85d537",
+        "do_tre_giay": 0.31199999999807915,
+        "headers_khong_nhay_cam": {
+          "content-type": "image/jpeg",
+          "content-length": "42779",
+          "x-cache": "HIT",
+          "server": "cloudflare"
+        }
+      },
+      {
+        "nhan": "model_khong_ton_tai",
+        "tham_so_model": "this-model-definitely-does-not-exist-xyz123",
+        "http_status": 200,
+        "content_type": "image/jpeg",
+        "byte_size": 42779,
+        "sha256_16": "173c3d7d6d85d537",
+        "do_tre_giay": 0.6719999999986612,
+        "headers_khong_nhay_cam": {
+          "content-type": "image/jpeg",
+          "content-length": "42779",
+          "x-cache": "HIT",
+          "server": "cloudflare"
+        }
+      }
+    ],
+    "tat_ca_giong_nhau_byte_for_byte": true
+  }
 }

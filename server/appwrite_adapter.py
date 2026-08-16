@@ -26,6 +26,7 @@ from server.appwrite_store import (
     q_order_asc as _q_order_asc,
 )
 from server.config import AppwriteSettings
+from server.secret_redaction import thong_diep_loi_an_toan
 from server.domain import AuthorStatus, Profile, Tier
 
 #: Ten collection tuong ung voi schema trong docs/APPWRITE_SCHEMA.md
@@ -140,13 +141,11 @@ class AppwriteIdentityAdapter:
             raise AuthError(f"Không kết nối được Appwrite: {exc}") from exc
 
         if response.status_code >= 400:
-            message = f"Appwrite trả về lỗi {response.status_code}."
             try:
                 body = response.json()
-                if isinstance(body, dict) and body.get("message"):
-                    message = str(body["message"])
             except Exception:
-                pass
+                body = None
+            message = thong_diep_loi_an_toan(body, status_code=response.status_code)
             if response.status_code in (401, 403):
                 raise AuthError(message)
             raise AuthError(message)

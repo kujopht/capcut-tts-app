@@ -22,21 +22,26 @@ from server.adapters import NotFoundError, PermissionDenied
 from server.animation_domain import AnimationEpisode, AnimationSeries, AnimationSource
 from server.config import AppwriteSettings
 from server.secret_redaction import thong_diep_loi_an_toan
-from server.domain import PublishState, now_iso
+from server.domain import ContentState, PublishState, now_iso
 
 COL_SERIES = "animation_series"
 COL_EPISODES = "animation_episodes"
 
 #: Ten thuoc tinh THAT SU muon luu — phai khop CHINH XAC voi SCHEMA trong
-#: `scripts/setup_appwrite.py`.
+#: `scripts/setup_appwrite.py`. Ba truong `moderation_state`/`removed_by`/
+#: `removed_reason` la THEM SAU (Phase 4, Admin Control Center V2) — ca ba
+#: deu KHONG BAT BUOC trong schema, dung CUNG co che dong-thieu-thi-bo-qua
+#: voi cac truong V2 cua `profiles` (xem `appwrite_adapter.py`).
 _PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_SERIES: (
         "series_id", "owner_id", "title", "description", "cover_key",
-        "state", "tags", "related_novel_id", "created_at", "updated_at",
+        "state", "tags", "related_novel_id", "moderation_state",
+        "removed_by", "removed_reason", "created_at", "updated_at",
     ),
     COL_EPISODES: (
         "episode_id", "series_id", "owner_id", "title", "source",
         "external_id", "order_index", "state", "duration_seconds",
+        "moderation_state", "removed_by", "removed_reason",
         "created_at", "updated_at",
     ),
 }
@@ -54,6 +59,32 @@ def q_order_desc(attribute: str) -> str:
     return json.dumps({"method": "orderDesc", "attribute": attribute})
 
 
+def q_order_asc(attribute: str) -> str:
+    return json.dumps({"method": "orderAsc", "attribute": attribute})
+
+
+def q_select(*attributes: str) -> str:
+    return json.dumps({"method": "select", "values": list(attributes)})
+
+
+def q_equal_or_null(attribute: str, value: Any) -> str:
+    """
+    `attribute == value` HOAC `attribute` CHUA CO (NULL) — dung khi loc theo
+    mot thuoc tinh THEM SAU (Phase 4: `moderation_state`) tren mot collection
+    da co du lieu tu truoc migration.
+
+    Series/tap TAO TRUOC Phase 4 khong co gia tri nao cho `moderation_state`
+    ca (thuoc tinh khong bat buoc, moi them) — `equal("moderation_state",
+    "visible")` KHONG khop NULL, nen loc rieng "visible" se lam BIEN MAT moi
+    ban ghi cu khoi thu vien cong khai. Cung ly do va cung cach lam voi
+    `list_comments_all`'s xu ly `target_kind` cu (xem `appwrite_social.py`).
+    """
+    return json.dumps({"method": "or", "values": [
+        {"method": "equal", "attribute": attribute, "values": [value]},
+        {"method": "isNull", "attribute": attribute},
+    ]})
+
+
 def q_limit(count: int) -> str:
     return json.dumps({"method": "limit", "values": [int(count)]})
 
@@ -66,6 +97,15 @@ def q_contains(attribute: str, value: Any) -> Dict[str, Any]:
     return {"method": "contains", "attribute": attribute, "values": [value]}
 
 
+def _moderation_state_from_doc(doc: Dict[str, Any]) -> ContentState:
+    """`None`/thieu (hang TAO TRUOC Phase 4) -> VISIBLE, giu nguyen hien
+    trang cong khai cua du lieu cu. Xem `q_equal_or_null`."""
+    try:
+        return ContentState(str(doc.get("moderation_state") or "visible"))
+    except ValueError:
+        return ContentState.VISIBLE
+
+
 def _series_from_doc(doc: Dict[str, Any]) -> AnimationSeries:
     return AnimationSeries(
         series_id=str(doc.get("series_id") or doc.get("$id") or ""),
@@ -76,6 +116,9 @@ def _series_from_doc(doc: Dict[str, Any]) -> AnimationSeries:
         state=PublishState(str(doc.get("state") or "draft")),
         tags=list(doc.get("tags") or []),
         related_novel_id=str(doc.get("related_novel_id") or ""),
+        moderation_state=_moderation_state_from_doc(doc),
+        removed_by=str(doc.get("removed_by") or ""),
+        removed_reason=str(doc.get("removed_reason") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
@@ -96,6 +139,9 @@ def _episode_from_doc(doc: Dict[str, Any]) -> AnimationEpisode:
         order_index=int(doc.get("order_index") or 1),
         state=PublishState(str(doc.get("state") or "draft")),
         duration_seconds=float(doc.get("duration_seconds") or 0.0),
+        moderation_state=_moderation_state_from_doc(doc),
+        removed_by=str(doc.get("removed_by") or ""),
+        removed_reason=str(doc.get("removed_reason") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
@@ -270,12 +316,20 @@ class AppwriteAnimationStore:
     def find_series(self, owner_id: Optional[str] = None,
                     published_only: bool = False, query: str = "",
                     tag: str = "", limit: Optional[int] = None,
-                    offset: int = 0) -> Tuple[List[AnimationSeries], int]:
+                    offset: int = 0, state: str = "",
+                    include_removed: bool = False,
+                    sort: str = "newest") -> Tuple[List[AnimationSeries], int]:
+        """Xem docstring day du o `MockAnimationStore.find_series` — CUNG
+        hop dong, `state`/`include_removed`/`sort` la mo rong Phase 4."""
         queries: List[str] = []
         if owner_id:
             queries.append(q_equal("owner_id", owner_id))
-        if published_only:
+        if state:
+            queries.append(q_equal("state", state))
+        elif published_only:
             queries.append(q_equal("state", "published"))
+        if not include_removed:
+            queries.append(q_equal_or_null("moderation_state", "visible"))
         needle = query.strip()
         if tag and needle:
             queries.append(json.dumps({"method": "or", "values": [
@@ -286,7 +340,8 @@ class AppwriteAnimationStore:
         elif needle:
             queries.append(json.dumps({"method": "or", "values": [
                 q_contains("title", needle), q_contains("description", needle)]}))
-        queries.append(q_order_desc("created_at"))
+        queries.append(q_order_asc("created_at") if sort == "oldest"
+                       else q_order_desc("created_at"))
 
         if limit is None:
             items = [_series_from_doc(d) for d in self._list_all(COL_SERIES, queries)]
@@ -294,6 +349,20 @@ class AppwriteAnimationStore:
         docs, total = self._page(COL_SERIES, queries + [
             q_limit(limit), q_offset(max(0, offset))])
         return [_series_from_doc(d) for d in docs], total
+
+    def episode_counts(self, series_ids: Sequence[str]) -> Dict[str, int]:
+        """So tap cua nhieu series, MOT truy van moi lo 50 — cung idiom voi
+        `AppwriteMetadataStore.chapter_counts` (khong N+1)."""
+        ds = [s for s in dict.fromkeys(series_ids) if s]
+        dem = {sid: 0 for sid in ds}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_EPISODES, [
+                    q_equal("series_id", *lo), q_select("series_id")]):
+                sid = str(row.get("series_id") or "")
+                if sid in dem:
+                    dem[sid] += 1
+        return dem
 
     def series_tags(self, published_only: bool = True) -> List[str]:
         queries = [q_equal("state", "published")] if published_only else []
@@ -347,6 +416,32 @@ class AppwriteAnimationStore:
         self.owned_series(series_id, owner_id)
         self._delete(COL_SERIES, series_id)
 
+    # -- kiem duyet (Phase 4, Admin Control Center V2) -----------------------
+    #
+    # KHONG kiem chu so huu, KHONG dong toi `state`/quyen doc — xem docstring
+    # `MockAnimationStore.admin_unpublish_series`.
+
+    def admin_unpublish_series(self, series_id: str, *, removed_by: str,
+                               reason: str = "") -> AnimationSeries:
+        current = self.get_series(series_id)
+        if current.moderation_state is ContentState.REMOVED:
+            return current
+        self._update(COL_SERIES, series_id, {
+            "moderation_state": "removed", "removed_by": removed_by,
+            "removed_reason": reason, "updated_at": now_iso(),
+        })
+        return self.get_series(series_id)
+
+    def admin_restore_series(self, series_id: str) -> AnimationSeries:
+        current = self.get_series(series_id)
+        if current.moderation_state is ContentState.VISIBLE:
+            return current
+        self._update(COL_SERIES, series_id, {
+            "moderation_state": "visible", "removed_by": "",
+            "removed_reason": "", "updated_at": now_iso(),
+        })
+        return self.get_series(series_id)
+
     # -- episode ----------------------------------------------------------------
 
     def create_episode(self, episode: AnimationEpisode) -> AnimationEpisode:
@@ -364,8 +459,12 @@ class AppwriteAnimationStore:
             raise PermissionDenied("Bạn không sở hữu tập này.")
         return episode
 
-    def list_episodes(self, series_id: str) -> List[AnimationEpisode]:
-        docs = self._list_all(COL_EPISODES, [q_equal("series_id", series_id)])
+    def list_episodes(self, series_id: str,
+                      include_removed: bool = False) -> List[AnimationEpisode]:
+        queries = [q_equal("series_id", series_id)]
+        if not include_removed:
+            queries.append(q_equal_or_null("moderation_state", "visible"))
+        docs = self._list_all(COL_EPISODES, queries)
         items = [_episode_from_doc(d) for d in docs]
         items.sort(key=lambda e: e.order_index)
         return items
@@ -391,6 +490,29 @@ class AppwriteAnimationStore:
     def delete_episode(self, episode_id: str, owner_id: str) -> None:
         self.owned_episode(episode_id, owner_id)
         self._delete(COL_EPISODES, episode_id)
+
+    # -- kiem duyet (Phase 4) — xem ghi chu o khoi tuong ung cua series ------
+
+    def admin_unpublish_episode(self, episode_id: str, *, removed_by: str,
+                                reason: str = "") -> AnimationEpisode:
+        current = self.get_episode(episode_id)
+        if current.moderation_state is ContentState.REMOVED:
+            return current
+        self._update(COL_EPISODES, episode_id, {
+            "moderation_state": "removed", "removed_by": removed_by,
+            "removed_reason": reason, "updated_at": now_iso(),
+        })
+        return self.get_episode(episode_id)
+
+    def admin_restore_episode(self, episode_id: str) -> AnimationEpisode:
+        current = self.get_episode(episode_id)
+        if current.moderation_state is ContentState.VISIBLE:
+            return current
+        self._update(COL_EPISODES, episode_id, {
+            "moderation_state": "visible", "removed_by": "",
+            "removed_reason": "", "updated_at": now_iso(),
+        })
+        return self.get_episode(episode_id)
 
     def reorder_episodes(self, series_id: str, owner_id: str,
                          episode_ids: Sequence[str]) -> List[AnimationEpisode]:

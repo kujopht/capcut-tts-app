@@ -552,6 +552,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Lien ket TUY CHON toi mot truyen — RONG = khong lien ket. Xem
             # `AnimationSeries.related_novel_id`.
             ("related_novel_id", "string", False, 64),
+            # Kiem duyet (Phase 4, Admin Control Center V2) — THEM SAU, KHONG
+            # bat buoc: hang tao TRUOC Phase 4 khong co gia tri, doc thanh
+            # VISIBLE qua `_moderation_state_from_doc` (xem
+            # `appwrite_animation_store.py`). TACH BACH voi `state` o tren —
+            # xem docstring `AnimationSeries.moderation_state`.
+            ("moderation_state", "enum", False, ["visible", "removed"]),
+            ("removed_by", "string", False, 64),
+            ("removed_reason", "string", False, 1000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],
@@ -559,6 +567,7 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("owner_idx", "key", ["owner_id"]),
             ("state_idx", "key", ["state"]),
             ("state_created_idx", "key", ["state", "created_at"]),
+            ("moderation_idx", "key", ["moderation_state"]),
         ],
     },
     "animation_episodes": {
@@ -579,6 +588,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("order_index", "integer", True, None),
             ("state", "enum", True, ["draft", "published", "archived"]),
             ("duration_seconds", "double", False, None),
+            # Kiem duyet (Phase 4) — cung mau voi `animation_series` o tren.
+            ("moderation_state", "enum", False, ["visible", "removed"]),
+            ("removed_by", "string", False, 64),
+            ("removed_reason", "string", False, 1000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],
@@ -586,6 +599,7 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("series_idx", "key", ["series_id"]),
             ("series_order_idx", "key", ["series_id", "order_index"]),
             ("owner_idx", "key", ["owner_id"]),
+            ("moderation_idx", "key", ["moderation_state"]),
         ],
     },
     "audio_tracks": {

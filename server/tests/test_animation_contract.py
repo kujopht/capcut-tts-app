@@ -15,7 +15,7 @@ from server.animation_domain import AnimationEpisode, AnimationSeries
 from server.animation_store import MockAnimationStore
 from server.appwrite_animation_store import AppwriteAnimationStore
 from server.config import AppwriteSettings
-from server.domain import PublishState
+from server.domain import ContentState, PublishState
 from server.tests.test_appwrite_v2_contract import FakeAppwrite, _bo_client
 
 
@@ -248,6 +248,134 @@ class HopDongAnimationTest(unittest.TestCase):
                 s = kho.create_series(AnimationSeries(owner_id="u1", title="T"))
                 with self.assertRaises(PermissionDenied, msg=ten):
                     kho.reorder_episodes(s.series_id, "u2", [])
+
+    # ===================================================== kiem duyet (Phase 4)
+
+    def test_admin_unpublish_va_restore_series_khong_can_chu(self):
+        """Thao tac quan tri KHONG kiem chu so huu — khac `unpublish_series`
+        (cua chinh chu) o tren."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="T"))
+                go = kho.admin_unpublish_series(
+                    s.series_id, removed_by="mod1", reason="Vi pham")
+                self.assertEqual(go.moderation_state, ContentState.REMOVED, ten)
+                self.assertEqual(go.removed_by, "mod1", ten)
+                self.assertEqual(go.removed_reason, "Vi pham", ten)
+                # Idempotent.
+                go2 = kho.admin_unpublish_series(s.series_id, removed_by="mod1")
+                self.assertEqual(go2.moderation_state, ContentState.REMOVED, ten)
+
+                lai = kho.admin_restore_series(s.series_id)
+                self.assertEqual(lai.moderation_state, ContentState.VISIBLE, ten)
+                self.assertEqual(lai.removed_by, "", ten)
+                lai2 = kho.admin_restore_series(s.series_id)
+                self.assertEqual(lai2.moderation_state, ContentState.VISIBLE, ten)
+
+    def test_admin_go_xuong_KHONG_dong_toi_state_xuat_ban(self):
+        """Cot loi cua thiet ke: kiem duyet la truc RIENG, tach voi trang
+        thai xuat ban cua chu so huu — chu co the van thay `state` cua ho
+        khong doi (van la published), chi khong ai xem duoc noi dung nua."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="T"))
+                kho.publish_series(s.series_id, "u1")
+                go = kho.admin_unpublish_series(s.series_id, removed_by="mod1")
+                self.assertEqual(go.state, PublishState.PUBLISHED, ten)
+
+    def test_admin_unpublish_va_restore_episode_khong_can_chu(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="T"))
+                e = kho.create_episode(AnimationEpisode(
+                    series_id=s.series_id, owner_id="u1", title="Tap 1",
+                    external_id="a" * 11))
+                go = kho.admin_unpublish_episode(
+                    e.episode_id, removed_by="mod1", reason="Sai noi dung")
+                self.assertEqual(go.moderation_state, ContentState.REMOVED, ten)
+                lai = kho.admin_restore_episode(e.episode_id)
+                self.assertEqual(lai.moderation_state, ContentState.VISIBLE, ten)
+
+    def test_list_episodes_an_tap_da_go_mac_dinh(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="T"))
+                e1 = kho.create_episode(AnimationEpisode(
+                    series_id=s.series_id, owner_id="u1", title="Tap 1",
+                    external_id="a" * 11, order_index=1))
+                e2 = kho.create_episode(AnimationEpisode(
+                    series_id=s.series_id, owner_id="u1", title="Tap 2",
+                    external_id="b" * 11, order_index=2))
+                kho.admin_unpublish_episode(e1.episode_id, removed_by="mod1")
+
+                hien = kho.list_episodes(s.series_id)
+                self.assertEqual([e.episode_id for e in hien], [e2.episode_id], ten)
+
+                het = kho.list_episodes(s.series_id, include_removed=True)
+                self.assertEqual(len(het), 2, ten)
+
+    def test_find_series_an_series_da_go_mac_dinh(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                a = kho.create_series(AnimationSeries(owner_id="u1", title="A"))
+                b = kho.create_series(AnimationSeries(owner_id="u1", title="B"))
+                kho.admin_unpublish_series(a.series_id, removed_by="mod1")
+
+                hien, tong = kho.find_series()
+                self.assertEqual([s.series_id for s in hien], [b.series_id], ten)
+                self.assertEqual(tong, 1, ten)
+
+                het, tong2 = kho.find_series(include_removed=True)
+                self.assertEqual(tong2, 2, ten)
+
+    def test_find_series_loc_theo_state_chinh_xac(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                a = kho.create_series(AnimationSeries(owner_id="u1", title="A"))
+                kho.create_series(AnimationSeries(owner_id="u1", title="B"))
+                kho.publish_series(a.series_id, "u1")
+
+                nhap, _ = kho.find_series(state="draft")
+                self.assertEqual(len(nhap), 1, ten)
+                da_xb, _ = kho.find_series(state="published")
+                self.assertEqual([s.series_id for s in da_xb], [a.series_id], ten)
+
+    def test_find_series_sap_xep_moi_cu(self):
+        # `created_at` dat TAY, khac giay ro rang — `now_iso()` cat o giay,
+        # va hai lan tao trong cung mot bai test co the roi vao CUNG mot giay
+        # thuc, luc do thu tu tuy thuoc offset ma khong phai thu tu THAT.
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                a = kho.create_series(AnimationSeries(
+                    owner_id="u1", title="A", created_at="2020-01-01T00:00:00+00:00"))
+                b = kho.create_series(AnimationSeries(
+                    owner_id="u1", title="B", created_at="2020-01-02T00:00:00+00:00"))
+
+                moi_truoc, _ = kho.find_series(sort="newest")
+                self.assertEqual([s.series_id for s in moi_truoc],
+                                 [b.series_id, a.series_id], ten)
+                cu_truoc, _ = kho.find_series(sort="oldest")
+                self.assertEqual([s.series_id for s in cu_truoc],
+                                 [a.series_id, b.series_id], ten)
+
+    def test_episode_counts_nhieu_series_mot_lan(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                a = kho.create_series(AnimationSeries(owner_id="u1", title="A"))
+                b = kho.create_series(AnimationSeries(owner_id="u1", title="B"))
+                kho.create_episode(AnimationEpisode(
+                    series_id=a.series_id, owner_id="u1", title="T1",
+                    external_id="a" * 11))
+                kho.create_episode(AnimationEpisode(
+                    series_id=a.series_id, owner_id="u1", title="T2",
+                    external_id="b" * 11))
+                kho.create_episode(AnimationEpisode(
+                    series_id=b.series_id, owner_id="u1", title="T1",
+                    external_id="c" * 11))
+                dem = kho.episode_counts([a.series_id, b.series_id, "khong_co"])
+                self.assertEqual(dem[a.series_id], 2, ten)
+                self.assertEqual(dem[b.series_id], 1, ten)
+                self.assertEqual(dem["khong_co"], 0, ten)
 
 
 class BuildAnimationStoreTest(unittest.TestCase):

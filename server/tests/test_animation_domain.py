@@ -10,7 +10,7 @@ from server.animation_domain import (
     AnimationSource,
     parse_youtube_id,
 )
-from server.domain import PublishState
+from server.domain import ContentState, PublishState
 
 
 class ParseYoutubeIdTest(unittest.TestCase):
@@ -80,6 +80,10 @@ class AnimationSeriesTest(unittest.TestCase):
         self.assertEqual(s.state, PublishState.DRAFT)
         self.assertEqual(s.related_novel_id, "")
         self.assertTrue(s.series_id.startswith("ani_"))
+        # Phase 4 (Admin Control Center V2): MOI series moi tao deu VISIBLE —
+        # kiem duyet la mot truc RIENG, khong lien quan gi den trang thai
+        # xuat ban cua chu so huu.
+        self.assertEqual(s.moderation_state, ContentState.VISIBLE)
 
     def test_to_dict(self):
         s = AnimationSeries(owner_id="u1", title="T", tags=["hanh_dong"])
@@ -87,6 +91,8 @@ class AnimationSeriesTest(unittest.TestCase):
         self.assertEqual(d["title"], "T")
         self.assertEqual(d["tags"], ["hanh_dong"])
         self.assertEqual(d["state"], "draft")
+        self.assertEqual(d["moderation_state"], "visible")
+        self.assertEqual(d["removed_by"], "")
 
 
 class AnimationEpisodeTest(unittest.TestCase):
@@ -104,6 +110,7 @@ class AnimationEpisodeTest(unittest.TestCase):
         self.assertEqual(d["source"], "youtube")
         self.assertEqual(d["external_id"], "dQw4w9WgXcQ")
         self.assertEqual(d["duration_seconds"], 1425.0)
+        self.assertEqual(d["moderation_state"], "visible")
 
 
 if __name__ == "__main__":

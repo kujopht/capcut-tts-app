@@ -354,6 +354,15 @@ export interface AnimationSeries {
   tags: string[];
   /** Lien ket TUY CHON toi mot truyen — chuoi rong = khong lien ket. */
   related_novel_id: string;
+  /**
+   * Kiem duyet (Phase 4, Admin Control Center V2) — TACH BACH voi `state` o
+   * tren. `state` la truc XUAT BAN cua chu so huu; `moderation_state` la
+   * truc GO XUONG cua quan tri, chu so huu KHONG doi duoc qua bat ky route
+   * nao cua ho. Xem `server/animation_domain.py::AnimationSeries`.
+   */
+  moderation_state: "visible" | "removed";
+  removed_by: string;
+  removed_reason: string;
   created_at: string;
   updated_at: string;
 }
@@ -378,6 +387,11 @@ export interface AnimationEpisode {
   state: PublishState;
   /** Giay — `0` = chua biet (client tu ghi lai tu YouTube IFrame API). */
   duration_seconds: number;
+  /** Kiem duyet (Phase 4) — cung y nghia voi `AnimationSeries.moderation_state`,
+      nhung RIENG cho tung tap: go mot tap KHONG dong toi series cha. */
+  moderation_state: "visible" | "removed";
+  removed_by: string;
+  removed_reason: string;
   created_at: string;
   updated_at: string;
 }
@@ -1400,6 +1414,23 @@ export interface AdminNovel extends Novel {
   owner: { display_name: string; username: string } | null;
 }
 
+/** Mot dong trong danh sach series cho khu quan tri (Phase 4). */
+export interface AdminAnimationSeriesRow extends AnimationSeries {
+  owner: { display_name: string; username: string } | null;
+  episode_count: number;
+  related_novel: { novel_id: string; title: string } | null;
+}
+
+/** Chi tiet MOT series cho khu quan tri — kem TOAN BO tap (ke ca da bi go)
+    va lich su kiem duyet cua CHINH series (khong phai cua tung tap). */
+export interface AdminAnimationSeriesDetail {
+  series: AnimationSeries;
+  owner: { display_name: string; username: string } | null;
+  related_novel: { novel_id: string; title: string; state: PublishState } | null;
+  episodes: AnimationEpisode[];
+  events: ModerationEvent[];
+}
+
 export interface AdminImageStudioSpending {
   month: string;
   spent_usd: number;
@@ -1508,17 +1539,71 @@ export const adminApi = {
 
   events: (
     limit = 50,
-    opts: { offset?: number; targetUserId?: string; targetType?: string; action?: string } = {},
+    opts: {
+      offset?: number; targetUserId?: string; targetType?: string;
+      targetId?: string; action?: string;
+    } = {},
   ) => {
     const p = new URLSearchParams({ limit: String(limit) });
     if (opts.offset) p.set("offset", String(opts.offset));
     if (opts.targetUserId) p.set("target_user_id", opts.targetUserId);
     if (opts.targetType) p.set("target_type", opts.targetType);
+    if (opts.targetId) p.set("target_id", opts.targetId);
     if (opts.action) p.set("action", opts.action);
     return request<{ events: ModerationEvent[]; total: number }>(
       `/api/admin/events?${p.toString()}`,
     );
   },
+
+  // -- Animation (Phase 4, Admin Control Center V2) ------------------------
+  //
+  // Kiem duyet series/tap: go xuong (`moderation_state`) TACH BACH voi
+  // `state` xuat ban cua chu so huu — xem `AnimationSeries.moderation_state`.
+
+  animationSeries: (
+    opts: {
+      q?: string; state?: "" | "draft" | "published";
+      sort?: "newest" | "oldest"; limit?: number; offset?: number;
+    } = {},
+  ) => {
+    const p = new URLSearchParams({
+      q: opts.q ?? "", state: opts.state ?? "", sort: opts.sort ?? "newest",
+      limit: String(opts.limit ?? 25), offset: String(opts.offset ?? 0),
+    });
+    return request<{ series: AdminAnimationSeriesRow[]; total: number;
+                    limit: number; offset: number }>(
+      `/api/admin/animation/series?${p.toString()}`,
+    );
+  },
+
+  animationSeriesDetail: (seriesId: string) =>
+    request<AdminAnimationSeriesDetail>(
+      `/api/admin/animation/series/${encodeURIComponent(seriesId)}`,
+    ),
+
+  unpublishAnimationSeries: (seriesId: string, reason: string) =>
+    request<{ series: AnimationSeries }>(
+      `/api/admin/animation/series/${encodeURIComponent(seriesId)}/unpublish`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  restoreAnimationSeries: (seriesId: string) =>
+    request<{ series: AnimationSeries }>(
+      `/api/admin/animation/series/${encodeURIComponent(seriesId)}/restore`,
+      { method: "POST", body: "{}" },
+    ),
+
+  unpublishAnimationEpisode: (episodeId: string, reason: string) =>
+    request<{ episode: AnimationEpisode }>(
+      `/api/admin/animation/episodes/${encodeURIComponent(episodeId)}/unpublish`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  restoreAnimationEpisode: (episodeId: string) =>
+    request<{ episode: AnimationEpisode }>(
+      `/api/admin/animation/episodes/${encodeURIComponent(episodeId)}/restore`,
+      { method: "POST", body: "{}" },
+    ),
 };
 
 // ---------------------------------------------------------------------------
@@ -2037,8 +2122,12 @@ export const adminSocial = {
       { method: "POST", body: "{}" },
     ),
 
-  /** Duyệt bình luận toàn hệ thống, tách bài đăng / chương. */
-  browseComments: (targetKind: "" | "chapter" = "", limit = 25, offset = 0) =>
+  /** Duyệt bình luận toàn hệ thống, tách bài đăng / chương / tập Animation. */
+  browseComments: (
+    targetKind: "" | "chapter" | "animation_episode" = "",
+    limit = 25,
+    offset = 0,
+  ) =>
     request<{
       items: AdminComment[];
       total: number;

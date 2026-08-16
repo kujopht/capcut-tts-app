@@ -87,7 +87,7 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
   {
     nhom: "Animation",
     muc: [
-      { href: "/admin/animation", nhan: "Series", icon: IconFilm },
+      { href: "/admin/animation/series", nhan: "Series", icon: IconFilm },
       {
         href: "/admin/animation/sources", nhan: "Trusted Sources",
         icon: IconLink, vaiToiThieu: "admin",

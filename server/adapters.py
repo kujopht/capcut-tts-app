@@ -1619,13 +1619,20 @@ class MockMetadataStore(MockSocialStore):
 
     def list_events(self, target_user_id: str = "", limit: int = 50,
                     offset: int = 0, target_type: str = "",
+                    target_id: str = "",
                     action: str = "") -> Tuple[List[ModerationEvent], int]:
-        """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra"."""
+        """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra".
+
+        `target_id` (Phase 4, Admin Control Center V2) — loc dung MOT doi
+        tuong khong phai user (vd mot series/tap Animation cu the), cung
+        tinh than voi `target_type`/`action`."""
         with self._lock:
             rows = [e for e in self._events
                     if not target_user_id or e.target_user_id == target_user_id]
             if target_type:
                 rows = [e for e in rows if e.target_type == target_type]
+            if target_id:
+                rows = [e for e in rows if e.target_id == target_id]
             if action:
                 rows = [e for e in rows if e.action == action]
         # Dao TRUOC roi moi sap xep: `sorted` cua Python on dinh, nen hai ban ghi

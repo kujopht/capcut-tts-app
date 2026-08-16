@@ -1505,19 +1505,25 @@ class AppwriteMetadataStore(AppwriteSocialStore):
 
     def list_events(self, target_user_id: str = "", limit: int = 50,
                     offset: int = 0, target_type: str = "",
+                    target_id: str = "",
                     action: str = "") -> Tuple[List[ModerationEvent], int]:
         """
         Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra".
 
         `target_type`/`action` (Admin Control Center V2, A5) loc THEM cho
         `/admin/audit-log` — CHI equal, khong tim mo (nhat ky khong can tim
-        chuoi con, chi can loc dung loai/dung hanh dong).
+        chuoi con, chi can loc dung loai/dung hanh dong). `target_id` (Phase
+        4) loc dung MOT doi tuong (vd mot series/tap Animation cu the) — dung
+        cho lich su kiem duyet trong trang chi tiet, KHONG phai N truy van
+        rieng cho tung tap cua series do.
         """
         queries: List[str] = []
         if target_user_id:
             queries.append(q_equal("target_user_id", target_user_id))
         if target_type:
             queries.append(q_equal("target_type", target_type))
+        if target_id:
+            queries.append(q_equal("target_id", target_id))
         if action:
             queries.append(q_equal("action", action))
         queries += [q_order_desc("created_at"), q_limit(limit), q_offset(offset)]

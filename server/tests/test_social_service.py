@@ -1022,6 +1022,72 @@ class BinhLuanChuongTest(Nen):
                          f"/chapters/{self.chuong.chapter_id}")
 
 
+class BinhLuanTapAnimationTest(Nen):
+    """
+    Binh luan TAP Animation (V6) — dung CHUNG ha tang binh luan qua
+    `target_kind="animation_episode"`. Phase 4 (Admin Control Center V2) sua
+    mot lo hong: `admin_browse_comments`/`admin_reports` truoc do tinh
+    `context_url` SAI cho loai nay (roi vao nhanh mac dinh `/posts/{id}`,
+    trong khi `{id}` la mot `episode_id` chu khong phai `post_id`).
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        from server.animation_domain import AnimationEpisode, AnimationSeries
+        from server.animation_store import MockAnimationStore
+
+        # `Nen.setUp` khong noi animation_store — noi lai bang tay o day,
+        # cung cach `server/main.py` lam (`SocialService(..., animation_store=...)`).
+        self.animation_store = MockAnimationStore()
+        self.social = SocialService(self.identity, self.store, self.storage,
+                                    animation_store=self.animation_store)
+
+        self.series = self.animation_store.create_series(
+            AnimationSeries(owner_id=self.an.user_id, title="Series Test"))
+        self.animation_store.publish_series(self.series.series_id, self.an.user_id)
+        self.tap = self.animation_store.create_episode(AnimationEpisode(
+            series_id=self.series.series_id, owner_id=self.an.user_id,
+            title="Tap 1", external_id="a" * 11))
+
+    def test_binh_luan_tap_dung_target_kind_rieng(self):
+        c = self.social.create_episode_comment(
+            self.binh, self.tap.episode_id, text="Hay qua!")
+        self.assertEqual(c["target_kind"], "animation_episode")
+
+    def test_admin_duyet_tach_duoc_binh_luan_tap(self):
+        self.social.create_episode_comment(
+            self.binh, self.tap.episode_id, text="Hay qua!")
+        tap = self.social.admin_browse_comments(target_kind="animation_episode")
+        self.assertEqual(tap["total"], 1)
+        self.assertEqual(tap["items"][0]["context_url"],
+                         f"/animation/watch/{self.tap.episode_id}")
+
+    def test_bao_cao_binh_luan_tap_co_duong_toi_nguon_dung(self):
+        c = self.social.create_episode_comment(
+            self.binh, self.tap.episode_id, text="Spam!")
+        self.social.report(self.cuc, target_kind="comment",
+                           target_id=c["comment_id"], reason="spam")
+        hd = self.social.admin_reports()
+        self.assertEqual(hd["items"][0]["context_url"],
+                         f"/animation/watch/{self.tap.episode_id}")
+
+    def test_series_bi_go_xuong_thi_khong_binh_luan_duoc_nua(self):
+        """Kiem duyet (Phase 4) THANG truoc `state` xuat ban — series bi go
+        xuong thi khong ai binh luan/xem duoc tap cua no nua."""
+        self.animation_store.admin_unpublish_series(
+            self.series.series_id, removed_by=self.qt.user_id)
+        with self.assertRaises(NotFoundError):
+            self.social.create_episode_comment(
+                self.binh, self.tap.episode_id, text="x")
+
+    def test_tap_bi_go_xuong_rieng_thi_khong_binh_luan_duoc_du_series_con_song(self):
+        self.animation_store.admin_unpublish_episode(
+            self.tap.episode_id, removed_by=self.qt.user_id)
+        with self.assertRaises(NotFoundError):
+            self.social.create_episode_comment(
+                self.binh, self.tap.episode_id, text="x")
+
+
 class NhieuAnhVaXemTruocTest(Nen):
     def test_xem_truoc_binh_luan_trong_bang_tin(self):
         """Bang tin kem 2 binh luan MOI NHAT moi bai, hien thu tu cu->moi."""

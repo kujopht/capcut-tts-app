@@ -4,7 +4,7 @@
 Đừng dựa vào trí nhớ hội thoại trước — hãy đọc file này và kiểm tra lại code
 thật trước khi sửa bất cứ gì.
 
-Cập nhật lần cuối: 2026-08-16, sau khi Phase 3 được push.
+Cập nhật lần cuối: 2026-08-16, sau khi Phase 4 được push.
 
 ## 0. Bootstrap cho phiên mới
 
@@ -49,13 +49,14 @@ xong và được người dùng duyệt.
   muc quan tri + mo rong nhat ky kiem duyet".
 - Phase 2: commit `b92583d` — "Admin Control Center V2, Phase 2: giao dien
   shell + bang tong quan".
-- Phase 3: commit MỚI NHẤT trên nhánh này (chạy `git log --oneline -5` để
-  lấy SHA thật — đừng tin một con số ghi cứng ở đây, file này không tự cập
-  nhật SHA của chính commit chứa nó) — "Admin Control Center V2, Phase 3:
-  quan ly tai khoan day du qua Appwrite Users API". Đã push.
+- Phase 3: commit `b8e1f69` — "Admin Control Center V2, Phase 3: quan ly tai
+  khoan day du qua Appwrite Users API".
+- Phase 4: commit MỚI NHẤT trên nhánh này (chạy `git log --oneline -5` để
+  lấy SHA thật — đừng tin một con số ghi cứng ở đây) — "Admin Control Center
+  V2, Phase 4: kiem duyet Animation (series/tap)". Đã push.
 - Remote: `origin/feature/admin-trusted-video-v2` phải khớp HEAD cục bộ sau
-  khi Phase 3 được push — xác nhận lại bằng `git fetch` + `git rev-parse`
-  trước khi tiếp tục Phase 4, đừng tin dòng này nếu đã có thời gian trôi qua.
+  khi Phase 4 được push — xác nhận lại bằng `git fetch` + `git rev-parse`
+  trước khi tiếp tục Phase 5, đừng tin dòng này nếu đã có thời gian trôi qua.
 - `main`: **chưa hề đụng tới** trong toàn bộ việc này. `origin/main` đang ở
   `d483e90` ("deploy: them systemd unit cho translation worker production")
   — hoàn toàn không liên quan, không có commit nào của nhánh này lọt vào.
@@ -245,18 +246,164 @@ KHÔNG bao giờ in `user_id`/token ra tài liệu này. Đã xác nhận qua HT
   từ trước; Appwrite Cloud production KHÔNG bị đụng tới trong toàn bộ quá
   trình này.
 
+## 4c. Đã xong — Phase 4 (Animation Moderation)
+
+**Phát hiện quan trọng NHẤT trước khi viết code**: `AnimationEpisode.state`
+(PublishState draft/published) **KHÔNG hề gác hiển thị công khai nào cả** —
+`list_episodes()`/`get_animation_episode` trả về MỌI tập bất kể `state`,
+hiển thị của một tập phụ thuộc HOÀN TOÀN vào trạng thái SERIES cha. Mọi tập
+từng tạo đều có `state=draft` mặc định và KHÔNG có route nào từng đổi nó.
+Nếu tái dùng thẳng `state` để "gỡ tập" thì việc THỰC THI gác đó lần đầu tiên
+sẽ làm MỌI tập đang có (state=draft) biến mất khỏi công khai — một hồi quy
+lớn. Quyết định: thêm TRƯỜNG MỚI, KHÔNG đụng `state`.
+
+**Kiến trúc kiểm duyệt — hai trục TÁCH BIỆT, xem docstring
+`AnimationSeries.moderation_state`/`AnimationEpisode.moderation_state`:**
+- `state` (đã có) — trục XUẤT BẢN của CHỦ SỞ HỮU, họ tự đổi qua
+  `/api/animation/series/{id}/publish|unpublish`. Quản trị KHÔNG đụng vào.
+- `moderation_state` (MỚI, `visible`/`removed`) — trục GỠ XUỐNG của QUẢN
+  TRỊ, cùng khái niệm với `ContentState` của Post/Comment. Chủ sở hữu
+  KHÔNG đổi được qua bất kỳ route nào của họ — đã xác nhận THẬT: chủ sở
+  hữu bấm "Xuất bản" lại sau khi bị gỡ vẫn nhận **200** (route thành công)
+  nhưng nội dung VẪN 404 công khai, vì `moderation_state` không đổi.
+- Mặc định `VISIBLE` cho MỌI series/tập — migration-an-toàn, không đổi hiện
+  trạng công khai của dữ liệu cũ (schema mới KHÔNG bắt buộc, đọc thiếu/NULL
+  thành VISIBLE).
+
+**Backend:**
+- `server/animation_domain.py`: thêm `moderation_state`/`removed_by`/
+  `removed_reason` vào CẢ `AnimationSeries` và `AnimationEpisode`.
+- `server/animation_store.py`/`server/appwrite_animation_store.py`: `find_series`
+  thêm `state`/`include_removed`/`sort` (mặc định `include_removed=False`
+  — ẩn nội dung đã gỡ khỏi MỌI listing công khai, kể cả của chính chủ);
+  `list_episodes` thêm `include_removed`; MỚI `episode_counts()` (batch,
+  không N+1); MỚI `admin_unpublish_series`/`admin_restore_series`/
+  `admin_unpublish_episode`/`admin_restore_episode` — KHÔNG kiểm chủ sở
+  hữu (đây là quyền quản trị). Bản Appwrite dùng `q_equal_or_null()` (mới)
+  để lọc `moderation_state` an toàn với dữ liệu cũ chưa có thuộc tính này
+  (`equal("visible")` không khớp NULL — cùng bài học với `target_kind` cũ
+  ở `appwrite_social.py`).
+- `server/main.py`: `_may_read_series` + `get_animation_episode` gác THÊM
+  `moderation_state`. Sáu route mới dưới `/api/admin/animation/*`, TẤT CẢ
+  dùng `Depends(admin_profile)` (≥ MODERATOR — khác Phase 3 vốn cần
+  `admin_or_owner_profile`, vì đây là kiểm duyệt nội dung thông thường,
+  cùng mức với báo cáo/bài đăng/bình luận). Route unpublish BẮT BUỘC
+  `reason` (400 nếu rỗng, xem `SocialService.unpublish_animation_series`).
+- `server/social_service.py`: MỚI `admin_animation_series`/
+  `admin_animation_series_detail`/`unpublish_animation_series`/
+  `restore_animation_series`/`unpublish_animation_episode`/
+  `restore_animation_episode` — tái dùng `self._animation_store` đã có sẵn
+  (nối từ trước cho bình luận tập), `self._store.novels_by_ids`/
+  `self._identity.profiles_by_ids` để làm giàu KHÔNG N+1, và
+  `_ghi_nhat_ky` (mở rộng thêm `actor_role`/`target_type`/`target_id`,
+  tương thích ngược) để ghi nhật ký — TÁI DÙNG action `content_unpublish`/
+  `content_restore` đã có sẵn từ Phase 1 (không cần migration enum mới),
+  `target_type="animation_series"` hoặc `"animation_episode"`.
+- **Sửa một lỗ hổng kiểm duyệt bình luận đã có từ trước (V6)**: bình luận
+  tập Animation (`target_kind="animation_episode"`) đã tồn tại nhưng
+  `admin_browse_comments`/`admin_reports` tính `context_url` SAI cho loại
+  này (rơi vào nhánh mặc định `/posts/{id}`, trong khi `{id}` là
+  `episode_id` chứ không phải `post_id`) — sửa bằng hàm dùng chung
+  `_duong_nguon_binh_luan()`, và `admin_browse_comments` nay chấp nhận
+  `target_kind=animation_episode` (trước đó bị 400 dù dữ liệu tồn tại).
+  Cũng vá `_tap_cong_khai` để gác THÊM `moderation_state` — trước đó một
+  series/tập bị gỡ vẫn bình luận được.
+- Thêm `target_id` vào `list_events`/`admin_events`/`/api/admin/events`
+  (mở rộng thêm, tương thích ngược) — tra được lịch sử của MỘT đối tượng cụ
+  thể (một series) trong một truy vấn, tránh N+1 khi ghép lịch sử vào
+  trang chi tiết.
+- `scripts/setup_appwrite.py`: thêm `moderation_state`/`removed_by`/
+  `removed_reason` (không bắt buộc) + index `moderation_idx` vào CẢ
+  `animation_series` và `animation_episodes`.
+- Test: `server/tests/test_animation_contract.py` (+8, chạy trên CẢ mock
+  và Appwrite giả lập), `server/tests/test_animation_domain.py` (mở rộng),
+  `server/tests/test_social_service.py::BinhLuanTapAnimationTest` (+5,
+  MỚI), `server/tests/test_social_routes.py::KiemDuyetAnimationTest` (+9,
+  MỚI, HTTP đầy đủ — bao gồm xác nhận chủ sở hữu KHÔNG hoàn tác được lệnh
+  gỡ bằng publish lại, kiểm qua HTTP thật).
+
+**Frontend:**
+- `web/src/app/admin/animation/page.tsx` — ĐỔI từ placeholder
+  `AdminSapXayDung` sang trang landing THẬT (link tới Series/Trusted
+  Sources/Import Queue), không gọi `adminApi` (không cần trạng thái tải).
+- `web/src/app/admin/animation/series/page.tsx` — MỚI. Danh sách series
+  TOÀN NỀN TẢNG (mọi chủ sở hữu), tìm kiếm debounce, lọc trạng thái xuất
+  bản, sắp xếp mới/cũ, phân trang server (offset/limit).
+- `web/src/app/admin/animation/series/[id]/page.tsx` — MỚI. Chi tiết MỘT
+  series: HAI thẻ trạng thái TÁCH BIỆT (xuất bản của chủ vs kiểm duyệt),
+  bảng tập kèm nút gỡ/phục hồi RIÊNG từng tập, lịch sử kiểm duyệt của
+  series. Gỡ series/tập đều qua `ConfirmDialog` kèm ô lý do BẮT BUỘC.
+- `AdminShell.tsx`: mục nav "Series" đổi href từ `/admin/animation` sang
+  `/admin/animation/series` (trỏ thẳng vào danh sách, khớp trang landing
+  mới).
+- `web/src/app/admin/comments/page.tsx`: thêm bộ lọc "Bình luận tập
+  Animation", nhãn hiển thị đúng ba loại (trước đó bình luận tập Animation
+  bị hiển thị nhầm thành "Bài đăng").
+- **Sửa một bug UI nghiêm trọng, phát hiện qua QA trình duyệt THẬT (không
+  phải qua test tĩnh)**: `ConfirmDialog` (`web/src/components/ui.tsx`) có
+  effect bẫy focus/Escape với `onCancel` trong mảng phụ thuộc. MỌI nơi gọi
+  `<ConfirmDialog>` đều truyền `onCancel` dạng hàm nền inline
+  (`() => setHoi(null)`) — một THAM CHIẾU MỚI mỗi lần cha render lại. Khi
+  `body` là một ô nhập có kiểm soát (textarea ghi lý do — CHÍNH XÁC tình
+  huống Phase 3 VÀ Phase 4 vừa thêm), MỖI PHÍM GÕ gọi `setState` → cha
+  render lại → effect DỌN RỒI CHẠY LẠI → tiêu điểm bị giật khỏi ô nhập về
+  nút đã mở hộp thoại. Hậu quả: **không ai gõ được quá MỘT ký tự vào bất
+  kỳ ô lý do kiểm duyệt nào trong toàn bộ khu quản trị** (treo tác giả, gỡ
+  bài/bình luận, tạm dừng tài khoản Phase 3, gỡ series/tập Phase 4) — một
+  hồi quy im lặng đã tồn tại từ Phase 2/3, không bài test tĩnh nào bắt
+  được vì các bài đó chỉ đọc mã nguồn bằng regex, không thật sự chạy
+  component trong trình duyệt. Sửa: thêm `onCancelRef` (ref giữ `onCancel`
+  MỚI NHẤT, cập nhật trong effect không phụ thuộc), effect bẫy focus chỉ
+  còn phụ thuộc `[open]`. Xác nhận lại bằng gõ thật qua
+  `type_text`/`evaluate_script` trong trình duyệt, không chỉ đọc code.
+- Test: `web/tests/admin-animation-moderation.test.mjs` (MỚI, 12 test),
+  `web/tests/ui.test.mjs` (+1, khẳng định cấu trúc ref/dependency của fix
+  trên để không hồi quy), `web/tests/admin.test.mjs` (nới ngoại lệ "trang
+  tĩnh không cần DanhSachTrangThai" từ riêng `AdminSapXayDung` thành MỌI
+  trang không gọi `adminApi`), `web/tests/admin-control-center-v2.test.mjs`
+  (sửa href nav Series + sửa một chỗ dò `indexOf("  events:")` bị trùng
+  với trường `events` mới trong interface Phase 4).
+
+**Smoke test THẬT trên Appwrite tự lưu trú dev** — chạy migration schema
+thật (`scripts/setup_appwrite.py --only animation_series` và
+`--only animation_episodes`, xác nhận 4 thuộc tính+1 index MỚI mỗi bảng,
+15-16 mục còn lại đã có), tạo series+tập dùng-một-lần thật, và xác nhận
+qua HTTP thật:
+- Danh sách/chi tiết series quản trị đọc đúng, làm giàu đúng (chủ sở hữu,
+  số tập) từ dữ liệu thật.
+- Gỡ series → công khai 404 NGAY; chủ sở hữu tự `publish` lại → route trả
+  200 nhưng **VẪN 404 công khai** (xác nhận đúng thiết kế: quản trị go
+  xuống không thể bị chính chủ hoàn tác); phục hồi → 200 trở lại.
+- Gỡ MỘT tập không đụng series cha (series vẫn xuất bản, chỉ tập đó biến
+  mất khỏi danh sách công khai); phục hồi tập → hiện lại.
+- Nhật ký kiểm duyệt ghi đúng `content_unpublish`/`content_restore`,
+  `target_type`, `target_id`, `actor_role`, lọc qua `target_id` đúng.
+- Ranh giới quyền: 401 ẩn danh thật, 403 người dùng thường thật.
+
+**QA trình duyệt THẬT** (chrome-devtools MCP, đăng nhập OWNER thật qua
+`localhost:3000` trỏ về backend dev thật trên cổng riêng): danh sách
+series, chi tiết series, gỡ/phục hồi qua UI với ConfirmDialog + ô lý do —
+phát hiện VÀ sửa bug ConfirmDialog nói trên ngay tại đây. **Lưu ý môi
+trường cho phiên sau**: một tiến trình `next dev` khác đang chạy sẵn trên
+cổng 3000 (không phải do phiên này khởi động) đã NGỪNG HOẠT ĐỘNG trong lúc
+phiên này thử khởi động một `next dev` thứ hai (Next 16 chặn hai tiến
+trình dev cùng thư mục) — tương quan thời điểm rõ, nguyên nhân chính xác
+CHƯA chắc chắn. Nếu có ai đó đang dựa vào dev server đó, họ cần tự khởi
+động lại (`npm run dev` trong `web/`).
+
 ## 5. Trạng thái test/build (đã CHẠY LẠI và xác nhận ngay tại thời điểm viết
 handoff này, không phải chỉ nhớ lại)
 
 | Mục | Kết quả |
 |---|---|
-| Backend (`unittest discover -s server/tests -t .`) | **2167/2167 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +10 test Phase 3 |
-| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **584/584 pass** — +8 test Phase 3 |
+| Backend (`unittest discover -s server/tests -t .`) | **2189/2189 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +22 test Phase 4 |
+| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **597/597 pass** — +13 test Phase 4 |
 | `npm run typecheck` | sạch, 0 lỗi |
 | `npm run lint` | 0 lỗi, 2 warning (không liên quan — `<img>` ở `image-studio/page.tsx`, có từ trước) |
-| `npm run build` | build production thành công, `/admin/users/[user_id]` lên đúng route động |
+| `npm run build` | build production thành công, `/admin/animation/series/[id]` lên đúng route động |
 | Secret scan (grep diff cho api_key/secret/token/password/bearer/aws_/private_key + kiểm không có file `.env` nào bị đổi) | sạch |
-| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b |
+| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4) |
+| QA trình duyệt thật | ĐÃ CHẠY Phase 4 (xem mục 4c) — phát hiện + sửa 1 bug ConfirmDialog thật |
 
 ## 6. Quyết định về hiệu năng
 
@@ -328,10 +475,11 @@ handoff này, không phải chỉ nhớ lại)
   trong trang thai" — cấm mọi biến `is_admin`/`isAdmin` tự quyết định trong
   code frontend).
 - Route hiện phân theo mức:
-  - `admin_profile` (≥ MODERATOR): reports, posts, comments (moderation-scoped).
+  - `admin_profile` (≥ MODERATOR): reports, posts, comments (moderation-scoped),
+    **animation/series (Phase 4 — list/detail/unpublish/restore series+episode)**.
   - `admin_or_owner_profile` (≥ ADMIN): author-applications, authors, users,
     events (audit log), social/overview, translate/usage, image-studio/spending,
-    novels.
+    novels, **users/{id}/suspend|unsuspend|sessions/\* (Phase 3)**.
   - `owner_profile` (chỉ OWNER): image-studio kill-switch (POST).
 
 ## 9. File/route Admin V2 hiện có
@@ -367,11 +515,20 @@ POST /api/admin/users/{user_id}/suspend                          — MỚI Phase
 POST /api/admin/users/{user_id}/unsuspend                        — MỚI Phase 3
 POST /api/admin/users/{user_id}/sessions/{session_id}/terminate  — MỚI Phase 3
 POST /api/admin/users/{user_id}/sessions/terminate-all           — MỚI Phase 3
+GET  /api/admin/animation/series                                — MỚI Phase 4
+GET  /api/admin/animation/series/{series_id}                    — MỚI Phase 4
+POST /api/admin/animation/series/{series_id}/unpublish           — MỚI Phase 4
+POST /api/admin/animation/series/{series_id}/restore             — MỚI Phase 4
+POST /api/admin/animation/episodes/{episode_id}/unpublish        — MỚI Phase 4
+POST /api/admin/animation/episodes/{episode_id}/restore          — MỚI Phase 4
 ```
 Lưu ý: `GET /api/admin/users` và `GET /api/admin/users/{user_id}` (Phase 3)
 giờ đọc THẲNG Appwrite Users API (native) làm nguồn chính, làm giàu bằng
-`profiles` — xem mục 4b. Bốn route mới đều gọi qua
+`profiles` — xem mục 4b. Bốn route quản lý tài khoản đều gọi qua
 `_kiem_quyen_tac_dong_tai_khoan()` (rào chắn tự-thao-tác + cross-rank).
+Sáu route Animation (Phase 4) đều `admin_profile` (≥ MODERATOR) và gọi qua
+`SocialService` (`social.admin_animation_series*`/`unpublish_animation_*`/
+`restore_animation_*`) — xem mục 4c.
 
 **Frontend** (`web/src/app/admin/`):
 ```
@@ -387,26 +544,33 @@ audit-log/              — MỚI Phase 2, thay /admin/events (đã xoá)
 analytics/               — MỚI Phase 2
 ai-credits/              — MỚI Phase 2
 system/                  — MỚI Phase 2
-animation/               — MỚI Phase 2, trang tĩnh "Sắp xây dựng"
-animation/sources/       — MỚI Phase 2, trang tĩnh
-animation/import-queue/  — MỚI Phase 2, trang tĩnh
+animation/               — ĐỔI Phase 4: tu placeholder sang trang landing THẬT
+animation/series/       — MỚI Phase 4: danh sách series TOÀN NỀN TẢNG
+animation/series/[id]/  — MỚI Phase 4: chi tiết series + kiểm duyệt tập
+animation/sources/       — CÒN placeholder Phase 2, CHỜ Phase 5
+animation/import-queue/  — CÒN placeholder Phase 2, CHỜ Phase 5
 ```
 Component chính: `web/src/components/AdminShell.tsx` (shell/nav/OSo/
-ChuaCauHinh/duVaiTro), `web/src/components/AdminSapXayDung.tsx` (mới,
-placeholder tái dùng được), `web/src/lib/api.ts` (mọi type + hàm gọi
-`adminApi.*`).
+ChuaCauHinh/duVaiTro — Phase 4 đổi href nav "Series" sang
+`/admin/animation/series`), `web/src/components/AdminSapXayDung.tsx`
+(placeholder tái dùng được, còn dùng cho sources/import-queue),
+`web/src/components/ui.tsx::ConfirmDialog` (Phase 4 sửa bug focus, xem mục
+4c), `web/src/lib/api.ts` (mọi type + hàm gọi `adminApi.*`).
 
-Test: `server/tests/test_admin.py` (class `AccountManagementTest` MỚI Phase
-3), `web/tests/admin.test.mjs`, `web/tests/admin-control-center-v2.test.mjs`
-(12 test Phase 2), `web/tests/admin-account-management.test.mjs` (MỚI, 8
-test Phase 3).
+Test: `server/tests/test_admin.py` (class `AccountManagementTest` Phase 3),
+`server/tests/test_animation_contract.py`/`test_animation_domain.py`
+(Phase 4), `server/tests/test_social_service.py::BinhLuanTapAnimationTest`
+(Phase 4), `server/tests/test_social_routes.py::KiemDuyetAnimationTest`
+(Phase 4), `web/tests/admin.test.mjs`,
+`web/tests/admin-control-center-v2.test.mjs`,
+`web/tests/admin-account-management.test.mjs` (Phase 3),
+`web/tests/admin-animation-moderation.test.mjs` (MỚI Phase 4),
+`web/tests/ui.test.mjs` (Phase 4, +1 khẳng định fix ConfirmDialog).
 
 ## 10. Các phase còn lại (ĐÚNG THỨ TỰ)
 
-- ~~**PHASE 3** — User Management đầy đủ~~ — **XONG**, xem mục 4b. Commit
-  trên nhánh này (chạy `git log --oneline -5` để lấy SHA thật).
-- **PHASE 4** — Animation moderation (kiểm duyệt nội dung Animation:
-  series/tập, báo cáo liên quan tới Animation).
+- ~~**PHASE 3** — User Management đầy đủ~~ — **XONG**, xem mục 4b.
+- ~~**PHASE 4** — Animation Moderation~~ — **XONG**, xem mục 4c.
 - **PHASE 5** — Trusted Video Sources backend + UI: mô hình kênh/video/
   playlist YouTube tin cậy, ánh xạ series, bộ phân loại/phát hiện tập mới,
   hàng đợi nhập, nhập lại lịch sử (backfill).
@@ -476,29 +640,44 @@ stash@{0}: On feature/animation-player-v2-custom-controls: animation-player-v2 d
   `feature/admin-trusted-video-v2`, KHÔNG amend commit cũ trừ khi được yêu
   cầu rõ.
 
-## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 4
+## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 5
 
-Phase 3 (Full User Management) **ĐÃ XONG** — xem mục 4b để biết chi tiết đầy
-đủ những gì đã làm, quyết định kiến trúc, và kết quả smoke test thật. ĐỪNG
-làm lại Phase 3.
+Phase 3 (Full User Management) và Phase 4 (Animation Moderation) **ĐÃ
+XONG** — xem mục 4b/4c để biết chi tiết đầy đủ, quyết định kiến trúc, và
+kết quả smoke test/QA trình duyệt thật. ĐỪNG làm lại hai phase này.
 
-**PHASE 4 — ANIMATION MODERATION**: kiểm duyệt nội dung Animation (series/
-tập, báo cáo liên quan tới Animation) — mục tiêu gốc ghi ở mục 10, chưa có
-chi tiết cụ thể hơn (khác Phase 3, phase này CHƯA được đặc tả kỹ trong
-handoff gốc). Trước khi viết code:
-- Đọc `docs/ADMIN.md` và phần Animation hiện có trong `server/main.py`/
-  `server/animation_store.py` (hoặc tên module tương đương — kiểm tra bằng
-  `grep` thay vì đoán tên file) để biết mô hình series/episode hiện tại.
-- Hỏi người dùng để xác nhận phạm vi cụ thể (những gì cần kiểm duyệt: xoá
-  tạm/khôi phục series hay tập? báo cáo Animation đi vào `reports` chung
-  hay bảng riêng?) TRƯỚC khi viết code — mục 10 chỉ ghi một câu tóm tắt,
-  không đủ chi tiết để chắc chắn phạm vi như Phase 3 đã có.
-- Tái sử dụng hạ tầng `ModerationEvent`/`actor_role`/`target_type`/
-  `target_id` đã có từ Phase 1 — ĐỪNG xây hệ thống log thứ hai, cùng
-  nguyên tắc đã áp dụng xuyên suốt Phase 1-3.
-- Giữ nguyên phân biệt vai trò đã thiết lập: `admin_profile` (≥ MODERATOR)
-  cho các thao tác kiểm duyệt/xem, `admin_or_owner_profile` (≥ ADMIN) cho
-  quản lý có tác động rộng hơn — xem mục 8.
+**PHASE 5 — TRUSTED VIDEO SOURCES**: mô hình kênh/playlist YouTube "tin
+cậy", ánh xạ sang series, phát hiện tập mới, hàng đợi nhập, nhập lại lịch
+sử (backfill) — xem mục 1 (mục tiêu dự án, Phần B) và mục 11 (cấu hình
+YouTube, CHƯA xác nhận `YOUTUBE_API_KEY`/YouTube Data API v3 đã bật hay
+chưa — hỏi người dùng TRỰC TIẾP ở đầu phase này, đừng giả định). Trước khi
+viết code:
+- Đọc lại mục 11 VÀ hỏi người dùng xác nhận: (a) `YOUTUBE_API_KEY` đã có
+  trong `server/.env.selfhost` thật chưa, (b) YouTube Data API v3 đã bật
+  trên Google Cloud project tương ứng chưa. KHÔNG viết code gọi YouTube
+  Data API thật trước khi có câu trả lời rõ ràng.
+- Đây là PHẦN B của dự án (mô hình mới hoàn toàn: `trusted_sources`,
+  `youtube_mappings` hoặc tên tương đương) — KHÁC Phase 4 (kiểm duyệt
+  series/tập ĐÃ CÓ). Cần thiết kế schema Appwrite mới (thêm collection
+  trong `scripts/setup_appwrite.py`, cùng mẫu additive/optional-field như
+  Phase 4 đã làm cho `moderation_state`).
+- Dashboard hiện có `trusted_sources: {"configured": false}` (Phase 2,
+  `server/main.py::_admin_dashboard_them`) — Phase 5 là lúc thay `false`
+  bằng dữ liệu thật, xem mục 6 (quyết định hiệu năng) để giữ đúng idiom
+  bounded-count (`limit(1)` + đọc `total`, không quét toàn bảng).
+  `web/src/app/admin/animation/sources`/`import-queue` hiện vẫn là
+  placeholder `AdminSapXayDung` (Phase 2), chờ thay bằng trang thật ở đây.
+- Tái sử dụng hạ tầng `ModerationEvent` với action `trusted_source_add`/
+  `trusted_source_disable`/`trusted_source_enable`/`youtube_mapping_create`/
+  `youtube_mapping_update` — ĐÃ CÓ SẴN trong enum Appwrite từ Phase 1
+  (không cần migration enum mới, cùng mẫu Phase 3/4 đã tái dùng
+  `user_suspend`/`content_unpublish` có sẵn).
+- Giữ nguyên phân biệt vai trò đã thiết lập (mục 8) — quyết định mức
+  (`admin_profile` hay `admin_or_owner_profile`) cho route Trusted Sources
+  TRƯỚC khi viết route, dựa theo mức độ nhạy cảm (thêm/tắt một nguồn tin
+  cậy có lẽ nên là `admin_or_owner_profile`, tương tự author-applications/
+  users, vì đây là cấu hình ảnh hưởng rộng chứ không phải kiểm duyệt từng
+  mục nội dung).
 
 ## 16. Ghi chú cho agent đọc file này
 

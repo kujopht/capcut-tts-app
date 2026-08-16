@@ -42,7 +42,7 @@ test("AdminShell: nhom Animation co du ba muc con Series/Trusted Sources/Import 
   const at = src.indexOf('nhom: "Animation"');
   assert.ok(at > 0, "không tìm thấy nhóm Animation");
   const doan = src.slice(at, at + 500);
-  assert.match(doan, /href: "\/admin\/animation", nhan: "Series"/);
+  assert.match(doan, /href: "\/admin\/animation\/series", nhan: "Series"/);
   assert.match(doan, /href: "\/admin\/animation\/sources"/);
   assert.match(doan, /href: "\/admin\/animation\/import-queue"/);
 });
@@ -114,7 +114,11 @@ test("Audit Log: co bo loc hanh dong/loai doi tuong/user_id + phan trang", () =>
 
 test("adminApi.events: truyen duoc target_type/action/target_user_id qua query string", () => {
   const src = api();
-  const at = src.indexOf("  events:");
+  // `events: (` (co dau mo ngoac) — khop DUNG dinh nghia ham trong `adminApi`,
+  // khong khop truong `events: ModerationEvent[]` cua mot interface khac
+  // dung tinh cau "  events:" (vi du `AdminAnimationSeriesDetail`, Phase 4).
+  const at = src.indexOf("  events: (");
+  assert.ok(at > 0, "không tìm thấy hàm adminApi.events");
   const doan = src.slice(at, at + 700);
   assert.match(doan, /target_user_id/);
   assert.match(doan, /target_type/);

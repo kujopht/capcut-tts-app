@@ -246,6 +246,31 @@ test("hop thoai xac nhan bay focus va dong bang Escape", () => {
   assert.match(ui, /event\.key !== "Tab"/, "phai bay focus trong hop thoai");
 });
 
+test("ConfirmDialog: effect bay focus KHONG chay lai theo moi phim go trong body", () => {
+  /*
+   * Bug that da gap (Phase 4, Admin Control Center V2, phat hien qua QA
+   * trinh duyet that): effect bay focus/Escape cu co `onCancel` trong mang
+   * phu thuoc. MOI noi goi <ConfirmDialog> truyen `onCancel` la mot ham NEN
+   * inline (vd `() => setHoi(null)`) — mot THAM CHIEU MOI moi lan cha render
+   * lai. Neu body la mot o nhap co kiem soat (textarea ghi ly do), MOI phim
+   * go goi setState -> cha render lai -> effect DON ROI CHAY LAI -> tieu
+   * diem bi giat ra khoi o nhap ve nut da mo hop thoai. Ket qua: nguoi dung
+   * KHONG BAO GIO go duoc qua mot ky tu vao o ly do.
+   *
+   * Sua bang mot ref giu ham `onCancel` MOI NHAT, effect chinh chi con phu
+   * thuoc `open`.
+   */
+  const ui = read("../src/components/ui.tsx");
+  const at = ui.indexOf("export function ConfirmDialog");
+  const than = ui.slice(at, ui.indexOf("export function", at + 1));
+  assert.match(than, /const onCancelRef = useRef\(onCancel\)/,
+    "thieu ref giu onCancel moi nhat");
+  assert.match(than, /onCancelRef\.current\(\)/,
+    "effect bay focus phai goi qua ref, khong goi thang onCancel");
+  assert.match(than, /\},\s*\[open\]\)/,
+    "effect bay focus phai CHI phu thuoc `open` — `onCancel` trong mang phu thuoc se lam no chay lai theo moi phim go");
+});
+
 test("khong dung eslint-disable de lam ngo canh bao", () => {
   for (const file of [
     "../src/components/AudioPlayer.tsx",

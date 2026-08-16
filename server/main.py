@@ -85,6 +85,7 @@ from server.domain import (
     AudioStamp,
     AudioTrack,
     Chapter,
+    ContentState,
     JobStatus,
     Novel,
     Profile,
@@ -3067,8 +3068,19 @@ def _series_out(series: AnimationSeries) -> Dict[str, Any]:
 
 
 def _may_read_series(series: AnimationSeries, viewer: Optional[Profile]) -> bool:
-    """Cung logic voi `_may_read` (novel): da xuat ban thi ai cung xem duoc;
-    chua thi chi chu so huu."""
+    """
+    Cung logic voi `_may_read` (novel): da xuat ban thi ai cung xem duoc;
+    chua thi chi chu so huu.
+
+    Kiem duyet (Phase 4, Admin Control Center V2) THANG truoc tien: mot
+    series bi quan tri go xuong (`moderation_state == REMOVED`) thi 404 cho
+    TAT CA, KE CA CHINH CHU — cung hanh vi voi bai dang bi go
+    (`SocialService._bai_hien`). Chu so huu tu bam "Xuat ban" lai KHONG hoan
+    tac duoc lenh go nay, vi day la truc RIENG voi `state` — xem docstring
+    `AnimationSeries.moderation_state`.
+    """
+    if series.moderation_state is not ContentState.VISIBLE:
+        return False
     if series.state is PublishState.PUBLISHED:
         return True
     return viewer is not None and viewer.user_id == series.owner_id
@@ -3281,7 +3293,11 @@ def get_animation_episode(episode_id: str,
     Quyen doc bam theo SERIES CHA, giong `GET /api/chapters/{id}` voi truyen."""
     episode, series = _episode_with_series_or_404(episode_id)
     viewer = optional_profile(authorization)
-    if series is None or not _may_read_series(series, viewer):
+    # Quyen doc bam theo SERIES CHA (xem docstring ham), CONG THEM kiem duyet
+    # RIENG cua chinh tap do (Phase 4) — mot tap co the bi go xuong ma khong
+    # dong toi ca series.
+    if (series is None or not _may_read_series(series, viewer)
+            or episode.moderation_state is not ContentState.VISIBLE):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tập.")
 
     cac_tap = animation_store.list_episodes(episode.series_id)
@@ -3904,16 +3920,17 @@ def admin_novels(q: str = "", state: str = "", limit: int = 25, offset: int = 0,
 
 @app.get("/api/admin/events")
 def admin_events(limit: int = 50, offset: int = 0, target_user_id: str = "",
-                 target_type: str = "", action: str = "",
+                 target_type: str = "", target_id: str = "", action: str = "",
                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Nhat ky kiem duyet — /admin/audit-log (Admin Control Center V2, A5).
-    CHI THEM — khong co route sua hay xoa.
+    CHI THEM — khong co route sua hay xoa. `target_id` (Phase 4) tra cuu
+    lich su cua MOT doi tuong cu the (vd mot series/tap Animation).
     """
     return creators.admin_events(
         limit=max(1, min(200, limit)), offset=max(0, offset),
         target_user_id=target_user_id, target_type=target_type,
-        action=action)
+        target_id=target_id, action=action)
 
 
 # -----------------------------------------------------------------------------
@@ -4372,11 +4389,13 @@ def admin_browse_comments(target_kind: str = "", limit: int = 25,
                           offset: int = 0,
                           admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     """
-    Duyet binh luan toan he thong, TACH duoc binh luan bai dang voi binh luan
-    chuong (`target_kind=chapter`) — hai loai dan toi hai noi khac nhau va
-    nguoi kiem duyet can biet minh dang nhin gi.
+    Duyet binh luan toan he thong, TACH duoc BA loai: binh luan bai dang
+    (`target_kind=""`), binh luan chuong (`target_kind=chapter`), va binh
+    luan tap Animation (`target_kind=animation_episode`, Phase 4 — cung ha
+    tang binh luan, xem `SocialService._tap_cong_khai`) — moi loai dan toi
+    mot noi khac nhau va nguoi kiem duyet can biet minh dang nhin gi.
     """
-    if target_kind not in ("", "chapter"):
+    if target_kind not in ("", "chapter", "animation_episode"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "target_kind không hợp lệ.")
     return _xa_hoi(social.admin_browse_comments, target_kind=target_kind,
@@ -4401,6 +4420,95 @@ def admin_remove_comment(comment_id: str, payload: RemoveIn,
 def admin_restore_comment(comment_id: str, payload: FollowIn,
                           admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     return {"comment": _xa_hoi(social.restore_comment, admin, comment_id)}
+
+
+# -----------------------------------------------------------------------------
+# Kiem duyet ANIMATION (Phase 4, Admin Control Center V2)
+# -----------------------------------------------------------------------------
+#
+# Cung muc quyen voi kiem duyet bai/binh luan o tren (`admin_profile`, tuc la
+# TU MODERATOR tro len) — Phase 4 xac dinh Animation la kiem duyet noi dung
+# THONG THUONG, khong phai cai dat he thong/tai chinh, nen KHONG can nang len
+# `admin_or_owner_profile` nhu quan ly tai khoan (Phase 3). Backend luon la
+# noi quyet dinh that — xem `_kiem_quyen_tac_dong_tai_khoan` cho vi du khac o
+# Phase 3 ve nguyen tac nay.
+#
+# KHONG co route XOA that (series/tap) trong Phase 4 — chi go xuong/phuc hoi.
+# Neu sau nay can xoa that, do la mot quyet dinh rieng (xem `docs/ADMIN.md`
+# muc "Viec con lai" ve ly do khong tu them nut xoa cung).
+
+
+@app.get("/api/admin/animation/series")
+def admin_animation_series(q: str = "", state: str = "", sort: str = "newest",
+                           limit: int = 25, offset: int = 0,
+                           admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Danh sach series cho khu quan tri — phan trang/loc/sap xep o phia kho,
+    KHONG tai toan bo thu vien ve trinh duyet. Xem `SocialService.
+    admin_animation_series`.
+    """
+    if state not in ("", "draft", "published"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "state không hợp lệ.")
+    if sort not in ("newest", "oldest"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "sort không hợp lệ.")
+    return _xa_hoi(social.admin_animation_series, query=q, state=state,
+                   sort=sort, limit=max(1, min(100, limit)), offset=max(0, offset))
+
+
+@app.get("/api/admin/animation/series/{series_id}")
+def admin_animation_series_detail(
+    series_id: str, admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    data = social.admin_animation_series_detail(series_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy series animation.")
+    return data
+
+
+@app.post("/api/admin/animation/series/{series_id}/unpublish")
+def admin_unpublish_animation_series(
+    series_id: str, payload: RemoveIn,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    """Go xuong MOT series — BAT BUOC ly do (`SocialService.
+    unpublish_animation_series` tu choi neu rong, tra 400)."""
+    return {"series": _xa_hoi(
+        social.unpublish_animation_series, admin, series_id,
+        reason=payload.reason,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/series/{series_id}/restore")
+def admin_restore_animation_series(
+    series_id: str, payload: FollowIn,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    return {"series": _xa_hoi(
+        social.restore_animation_series, admin, series_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/episodes/{episode_id}/unpublish")
+def admin_unpublish_animation_episode(
+    episode_id: str, payload: RemoveIn,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    """Go MOT tap rieng le — KHONG dong toi series cha. BAT BUOC ly do."""
+    return {"episode": _xa_hoi(
+        social.unpublish_animation_episode, admin, episode_id,
+        reason=payload.reason,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/episodes/{episode_id}/restore")
+def admin_restore_animation_episode(
+    episode_id: str, payload: FollowIn,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    return {"episode": _xa_hoi(
+        social.restore_animation_episode, admin, episode_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
 
 
 # =============================================================================

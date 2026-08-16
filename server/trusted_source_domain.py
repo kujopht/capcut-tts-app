@@ -189,16 +189,23 @@ class TrustedSource:
             "auto_publish": self.auto_publish,
             "minimum_confidence": self.minimum_confidence,
             "created_by": self.created_by,
-            "last_scan_at": self.last_scan_at,
-            "last_success_at": self.last_success_at,
-            "last_error_at": self.last_error_at,
+            # `or None`: bon truong nay la `datetime` TUY CHON trong SCHEMA
+            # (scripts/setup_appwrite.py) — Appwrite tu luu tru doi chuoi
+            # rong "" thanh GIO HIEN TAI cho thuoc tinh datetime thay vi giu
+            # null (xem checkpoint 8b1c544 sua loi cung dang cho
+            # profiles/translation_jobs). `create_source()` gui thang dict
+            # nay len Appwrite, nen thieu `or None` o day se lam MOI nguon
+            # moi tao mang gia tri "da quet/da dang ky" gia ngay tu dau.
+            "last_scan_at": self.last_scan_at or None,
+            "last_success_at": self.last_success_at or None,
+            "last_error_at": self.last_error_at or None,
             "last_error_message": self.last_error_message,
             "subscription_status": self.subscription_status.value,
-            "subscription_expires_at": self.subscription_expires_at,
-            "last_subscription_attempt_at": self.last_subscription_attempt_at,
-            "last_notification_at": self.last_notification_at,
+            "subscription_expires_at": self.subscription_expires_at or None,
+            "last_subscription_attempt_at": self.last_subscription_attempt_at or None,
+            "last_notification_at": self.last_notification_at or None,
             "last_websub_error": self.last_websub_error,
-            "last_successful_sync_at": self.last_successful_sync_at,
+            "last_successful_sync_at": self.last_successful_sync_at or None,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -297,7 +304,9 @@ class VideoImport:
             "channel_id": self.channel_id,
             "channel_title": self.channel_title,
             "thumbnail_url": self.thumbnail_url,
-            "published_at": self.published_at,
+            # `or None`: `published_at`/`reviewed_at` la `datetime` TUY CHON
+            # trong SCHEMA — cung ly do voi `TrustedSource.to_dict()` o tren.
+            "published_at": self.published_at or None,
             "duration_seconds": self.duration_seconds,
             "detected_mapping_id": self.detected_mapping_id,
             "detected_series_id": self.detected_series_id,
@@ -308,7 +317,7 @@ class VideoImport:
             "reason": self.reason,
             "created_episode_id": self.created_episode_id,
             "reviewed_by": self.reviewed_by,
-            "reviewed_at": self.reviewed_at,
+            "reviewed_at": self.reviewed_at or None,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

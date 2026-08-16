@@ -87,6 +87,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # service la de tra ve thong bao doc duoc; cai chan duoc mot cuoc dua
             # giua hai request la index nay.
             ("username_unique", "unique", ["username"]),
+            # Phase 13 (overnight hardening): `profiles_by_ids` (appwrite_adapter.py)
+            # loc `equal("user_id", ...)` hang loat cho khu quan tri (vd
+            # /api/admin/author-applications) — truoc day khong co chi muc nao
+            # phu chi muc nay, dan den quet toan bang moi lan goi.
+            ("user_idx", "key", ["user_id"]),
         ],
     },
     # --- V2: tac gia ---------------------------------------------------------
@@ -223,6 +228,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Loc nhat ky theo LOAI doi tuong (vd chi xem hanh dong len
             # trusted_source) — dung cho /admin/audit-log (A5).
             ("target_type_created_idx", "key", ["target_type", "created_at"]),
+            # Phase 13 (overnight hardening): `list_events(target_id=...)` va
+            # `list_events(action=...)` (appwrite_store.py) loc THEM cho
+            # /admin/audit-log — khong duoc chi muc nao o tren phu (chi muc
+            # hien co deu lay target_user_id/target_type lam cot dau). Nhat ky
+            # nay CHI THEM va lon dan vo han, nen thieu chi muc o day la mot
+            # phep quet toan bang ngay cang cham theo thoi gian.
+            ("target_id_idx", "key", ["target_id"]),
+            ("action_idx", "key", ["action"]),
         ],
     },
     # ========================================================== TANG XA HOI
@@ -309,6 +322,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Bang tin kham pha: loc `state` + moi nhat truoc.
             ("state_created_idx", "key", ["state", "created_at"]),
             ("novel_idx", "key", ["novel_id"]),
+            # Phase 13 (overnight hardening): `posts_by_ids` (appwrite_social.py)
+            # loc `equal("post_id", ...)` hang loat — `post_id` LA `documentId`
+            # (xem `create_post`), nen ve nguyen tac co the doi sang loc `$id`
+            # nhu `get_series_by_ids`; cho toi khi doi, chi muc nay tranh quet
+            # toan bang.
+            ("post_id_idx", "key", ["post_id"]),
         ],
     },
     "post_likes": {
@@ -364,6 +383,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Khu quan tri duyet theo LOAI, moi nhat truoc —
             # `list_comments_all(target_kind=...)`.
             ("kind_created_idx", "key", ["target_kind", "created_at"]),
+            # Phase 13 (overnight hardening): `comments_by_ids` (appwrite_social.py)
+            # loc `equal("comment_id", ...)` hang loat — cung tinh huong voi
+            # `post_id_idx` o `posts` phia tren.
+            ("comment_id_idx", "key", ["comment_id"]),
         ],
     },
     "notifications": {
@@ -425,6 +448,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # `reports_for_targets` — so bao cao con mo cua ca mot trang.
             ("target_status_idx", "key", ["target_id", "status"]),
             ("reporter_created_idx", "key", ["reporter_id", "created_at"]),
+            # Phase 13 (overnight hardening): `list_reports(target_kind=...)`
+            # co the loc CHI theo target_kind (khong kem status) — khong chi
+            # muc nao o tren co target_kind lam cot dau.
+            ("target_kind_idx", "key", ["target_kind"]),
         ],
     },
     "novels": {
@@ -444,6 +471,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("owner_idx", "key", ["owner_id"]),
             ("state_idx", "key", ["state"]),
             ("state_created_idx", "key", ["state", "created_at"]),
+            # Phase 13 (overnight hardening): `novels_by_ids` (appwrite_store.py)
+            # loc `equal("novel_id", ...)` hang loat de gom nhieu truyen mot
+            # truy van (chong N+1 cho khu quan tri) — cung tinh huong voi
+            # `post_id_idx`/`comment_id_idx` o tren, chua co chi muc phu truoc do.
+            ("novel_id_idx", "key", ["novel_id"]),
         ],
     },
     "chapters": {
@@ -970,6 +1002,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         ],
         "indexes": [
             ("user_idx", "unique", ["user_id"]),
+            # Phase 13 (overnight hardening): `list_all_progress_ranked`
+            # (bang xep hang XP toan thoi gian) sap `orderDesc("xp")`, va
+            # `count_users_above_xp` loc `greaterThan("xp", ...)` — ca hai
+            # deu khong co chi muc nao phu truoc do, nen la mot phep sap toan
+            # bang moi lan mo trang xep hang.
+            ("xp_idx", "key", ["xp"]),
         ],
     },
     "cosmetic_inventory": {
@@ -1001,6 +1039,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "indexes": [
             ("entry_idx", "unique", ["entry_id"]),
             ("user_idx", "key", ["user_id"]),
+            # Phase 13 (overnight hardening): `xp_earned_since` quet TOAN BO
+            # nhat ky XP (moi nguoi dung) tu mot moc thoi gian — khong co chi
+            # muc nao phu `created_at` truoc do.
+            ("created_idx", "key", ["created_at"]),
         ],
     },
     # Thanh tuu DA MO KHOA that su kem moc thoi gian — xem

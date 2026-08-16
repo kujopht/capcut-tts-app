@@ -246,8 +246,40 @@ dừng cả phiên.
       smoke/perf-probe đều khớp đúng lời khai "không in bí mật" trong docstring
       của chính chúng. `compileall` + toàn bộ `server/tests` (2408 test) — OK
       sau khi sửa.
-- [~] Phase 13 — Data/schema consistency audit — ĐANG CHẠY nền (fork,
-      `docs/reports/preprod-schema-audit.md`)
+- [x] Phase 13 — Data/schema consistency audit (`docs/reports/preprod-schema-audit.md`). XONG
+      (fork đầu bị lạc đề, đã huỷ và chạy lại với phạm vi chặt hơn — kết quả
+      dưới đây là của lần chạy lại) — parse trực tiếp `SCHEMA` trong
+      `scripts/setup_appwrite.py` (39 collection, ~31 thuộc tính enum), không
+      kết nối Appwrite thật. 3 nhóm lỗi tìm thấy và ĐÃ SỬA:
+      (1) 9 chỉ mục Appwrite còn thiếu cho các truy vấn lọc/sắp đã có sẵn
+      (`profiles.user_idx`, `moderation_events.target_id_idx`/`action_idx`,
+      `posts.post_id_idx`, `comments.comment_id_idx`,
+      `content_reports.target_kind_idx`, `user_progress.xp_idx`,
+      `xp_ledger.created_idx`) — thêm vào `SCHEMA`, KHÔNG chạy tạo chỉ mục
+      thật trên Appwrite nào;
+      (2) 4 điểm đọc enum không an toàn (`novels`/`chapters`/`tts_jobs`/
+      `animation_series`/`animation_episodes` dùng `PublishState(...)`/
+      `JobStatus(...)` trần, khác các enum khác đã có try/except) — thêm
+      `_publish_state_from_doc()`/`_job_status_from_doc()` với fallback an
+      toàn;
+      (3) **1 lỗi datetime-chuỗi-rỗng CÒN SÓT** sau đợt hardening
+      `8b1c544` — `server/trusted_source_domain.py::TrustedSource.to_dict()`/
+      `VideoImport.to_dict()` (9 trường: `last_scan_at`, `last_success_at`,
+      `last_error_at`, `subscription_expires_at`,
+      `last_subscription_attempt_at`, `last_notification_at`,
+      `last_successful_sync_at`, `published_at`, `reviewed_at`) chưa có
+      `or None` — đợt `8b1c544` chưa từng chạm file domain-serializer này.
+      Ảnh hưởng thật: nguồn tin cậy/video mới tạo sẽ hiện SAI là "đã quét/đã
+      đồng bộ" ngay từ đầu do Appwrite tự đổi chuỗi rỗng thành giờ hiện tại
+      trên thuộc tính `datetime`. Xác nhận SẠCH: phía ghi enum luôn dùng
+      `.value`; mẫu tính duy nhất qua `documentId` tất định đã xác minh lại
+      trên >10 collection (đúng ý đồ, không phải thiếu sót). Ghi nhận không
+      sửa (ngoài FIX POLICY, để Phase 16/17 quyết định): `docs/APPWRITE_V2.md`/
+      `APPWRITE_SCHEMA.md` thiếu 18/39 collection và vài trường đã lỗi thời so
+      với `SCHEMA` thật — Phase 16 đã thêm ghi chú trỏ tới `setup_appwrite.py`
+      thay vì viết lại toàn bộ, chấp nhận được cho giai đoạn này.
+      Test: 2408/2408 pass (1 skip không liên quan), khớp baseline, không có
+      hồi quy.
 - [x] Phase 14 — Worker/restart/ops audit (`docs/reports/preprod-worker-ops-audit.md`). XONG —
       graceful shutdown/stale-job ở `server/worker.py` SẠCH (SIGTERM/SIGINT chờ
       `FAS_WORKER_GRACE_SECONDS` rồi mới thoát, không giả vờ xong nếu còn job,

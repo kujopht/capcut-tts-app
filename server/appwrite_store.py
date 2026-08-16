@@ -1559,6 +1559,16 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         ], total
 
 
+def _publish_state_from_doc(doc: Dict[str, Any]) -> PublishState:
+    """Chuoi hong/la (du lieu cu, gia tri thu cong tren console) -> DRAFT thay
+    vi nem `ValueError` va lam sap ca request. Cung mau voi
+    `appwrite_animation_store.py::_moderation_state_from_doc`."""
+    try:
+        return PublishState(str(doc.get("state") or "draft"))
+    except ValueError:
+        return PublishState.DRAFT
+
+
 def _novel_from_doc(doc: Dict[str, Any]) -> Novel:
     return Novel(
         novel_id=str(doc.get("novel_id") or doc.get("$id") or ""),
@@ -1566,7 +1576,7 @@ def _novel_from_doc(doc: Dict[str, Any]) -> Novel:
         title=str(doc.get("title") or ""),
         description=str(doc.get("description") or ""),
         cover_key=doc.get("cover_key"),
-        state=PublishState(str(doc.get("state") or "draft")),
+        state=_publish_state_from_doc(doc),
         tags=list(doc.get("tags") or []),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
@@ -1581,10 +1591,19 @@ def _chapter_from_doc(doc: Dict[str, Any]) -> Chapter:
         title=str(doc.get("title") or ""),
         content=str(doc.get("content") or ""),
         order_index=int(doc.get("order_index") or 1),
-        state=PublishState(str(doc.get("state") or "draft")),
+        state=_publish_state_from_doc(doc),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
+
+
+def _job_status_from_doc(doc: Dict[str, Any]) -> JobStatus:
+    """Cung ly do voi `_publish_state_from_doc`: gia tri la/hong -> PENDING
+    thay vi nem `ValueError`."""
+    try:
+        return JobStatus(str(doc.get("status") or "pending"))
+    except ValueError:
+        return JobStatus.PENDING
 
 
 def _job_from_doc(doc: Dict[str, Any]) -> TtsJob:
@@ -1594,7 +1613,7 @@ def _job_from_doc(doc: Dict[str, Any]) -> TtsJob:
         chapter_id=str(doc.get("chapter_id") or ""),
         voice_id=str(doc.get("voice_id") or ""),
         content_hash=str(doc.get("content_hash") or ""),
-        status=JobStatus(str(doc.get("status") or "pending")),
+        status=_job_status_from_doc(doc),
         output_key=doc.get("output_key"),
         error_kind=doc.get("error_kind"),
         error_message=str(doc.get("error_message") or ""),

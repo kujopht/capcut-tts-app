@@ -18,12 +18,13 @@ dung API rieng nao khac ngoai field da co).
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 import httpx
 from fastapi.testclient import TestClient
 
 from server import main as server_main
-from server.adapters import AuthError, MockIdentityAdapter, MockMetadataStore
+from server.adapters import MockIdentityAdapter, MockMetadataStore
 from server.appwrite_adapter import AppwriteIdentityAdapter
 from server.config import AppwriteSettings
 
@@ -170,6 +171,49 @@ class KichBanRequestSaiDinhDang(unittest.TestCase):
         self.assertNotIn("Traceback", r.text)
 
 
+class KichBanGuiTrungLap(unittest.TestCase):
+    """Kich ban 6: gui trung mot request thay doi du lieu hai lan lien tiep
+    (kieu bam nut hai lan lien tuc)."""
+
+    def setUp(self) -> None:
+        self._identity_cu = server_main.identity
+        self._store_cu = server_main.store
+        server_main.identity = MockIdentityAdapter()
+        server_main.store = MockMetadataStore()
+        self.client = TestClient(server_main.app)
+
+    def tearDown(self) -> None:
+        server_main.identity = self._identity_cu
+        server_main.store = self._store_cu
+
+    def test_dang_ky_trung_email_hai_lan_lien_tiep_khong_tao_hai_ho_so(self):
+        payload = {"email": "trung-lap@example.com", "password": "matkhau123"}
+        r1 = self.client.post("/api/auth/register", json=payload)
+        self.assertEqual(r1.status_code, 201, r1.text)
+        r2 = self.client.post("/api/auth/register", json=payload)
+        # Lan hai PHAI bi tu choi ro rang - khong duoc tao ho so thu hai, va
+        # khong duoc la loi 500.
+        self.assertEqual(r2.status_code, 400, r2.text)
+        self.assertNotIn("Traceback", r2.text)
+
+    def test_tao_hai_novel_giong_het_nhau_lien_tiep_deu_thanh_cong_rieng_biet(self):
+        """Tao Novel KHONG co khoa duy nhat theo tieu de - hai lan bam nut
+        'Tao truyen moi' voi cung ten PHAI tao ra hai novel_id khac nhau
+        (khong ghi de/mat du lieu lan dau), khong phai loi."""
+        r = self.client.post("/api/auth/register",
+                             json={"email": "i@example.com", "password": "matkhau123"})
+        token = r.json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        r1 = self.client.post("/api/novels", json={"title": "Truyen trung lap"},
+                              headers=headers)
+        r2 = self.client.post("/api/novels", json={"title": "Truyen trung lap"},
+                              headers=headers)
+        self.assertEqual(r1.status_code, 201, r1.text)
+        self.assertEqual(r2.status_code, 201, r2.text)
+        self.assertNotEqual(
+            r1.json()["novel"]["novel_id"], r2.json()["novel"]["novel_id"])
+
+
 class KichBanDangNhapPhienHetHan(unittest.TestCase):
     """Kich ban 8: token het han/rac dung cho route duoc bao ve."""
 
@@ -233,6 +277,62 @@ class KichBanAdminBiTuChoi(unittest.TestCase):
         self.assertNotIn("Traceback", r2.text)
         self.assertNotIn("site-packages", r2.text)
         self.assertNotIn("File \"", r2.text)
+
+
+class KichBanLoiKhongLuongTruoc(unittest.TestCase):
+    """
+    Loi 500 THAT SU chua tung nghi toi (bug ngoai y muon, khong duoc bat o
+    bat ky `except` nao) - kiem tra LUOI AN TOAN cuoi cung cua FastAPI/
+    Starlette (`app = FastAPI(...)` trong `main.py` KHONG bat `debug=True`,
+    xac nhan bang doc code) khong lam lo traceback Python vao than JSON tra
+    ve trinh duyet, du route nao do co bug thuc su.
+    """
+
+    def setUp(self) -> None:
+        self._identity_cu = server_main.identity
+        self._store_cu = server_main.store
+        self._settings_cu = server_main.settings
+        server_main.identity = MockIdentityAdapter()
+        server_main.store = MockMetadataStore()
+        # `raise_server_exceptions=False`: mac dinh TestClient/Starlette NEM
+        # LAI loi 500 cho tien trinh test (huu ich khi VIET code) - o day ta
+        # co y MO PHONG dung hanh vi tren trinh duyet that (`app.run` that su
+        # KHONG nem lai, no tra ve HTTP response), nen phai tat co che nem lai
+        # cua rieng bo test.
+        self.client = TestClient(server_main.app, raise_server_exceptions=False)
+
+    def tearDown(self) -> None:
+        server_main.identity = self._identity_cu
+        server_main.store = self._store_cu
+        server_main.settings = self._settings_cu
+
+    def test_loi_bat_ngo_khong_bi_bat_o_bat_ky_dau_van_tra_500_sach(self):
+        r = self.client.post("/api/auth/register",
+                             json={"email": "j@example.com", "password": "matkhau123"})
+        token = r.json()["token"]
+        user_id = r.json()["profile"]["user_id"]
+        # Nang tai khoan nay len ADMIN de qua duoc `Depends(admin_profile)`
+        # cua `/api/admin/overview` - cung idiom voi `test_admin.py::_dat_admin`.
+        server_main.settings = replace(server_main.settings, admin_user_ids=(user_id,))
+
+        def _no_boom(*args, **kwargs):
+            raise RuntimeError(
+                "loi noi bo bat ngo, chua secret-gia-dinh-khong-duoc-lo db_password=hunter2")
+
+        goc = server_main.creators.admin_overview
+        server_main.creators.admin_overview = _no_boom
+        try:
+            r2 = self.client.get("/api/admin/overview",
+                                 headers={"Authorization": f"Bearer {token}"})
+        finally:
+            server_main.creators.admin_overview = goc
+
+        self.assertEqual(r2.status_code, 500)
+        self.assertNotIn("Traceback", r2.text)
+        self.assertNotIn("hunter2", r2.text)
+        self.assertNotIn("db_password", r2.text)
+        self.assertNotIn("RuntimeError", r2.text)
+        self.assertNotIn(".py", r2.text)
 
 
 if __name__ == "__main__":

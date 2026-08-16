@@ -276,21 +276,41 @@ dừng cả phiên.
 
 (sẽ ghi SHA + tóm tắt sau mỗi phase xong)
 
-## Phát hiện tổng hợp (sẽ điền dần)
+## Phát hiện tổng hợp
 
-### Bugs tìm thấy
-(chưa có)
+(Chi tiết đầy đủ nằm trong ghi chú từng phase ở trên và các file
+`docs/reports/preprod-*.md` tương ứng — mục này chỉ tóm tắt để Phase 17 dễ
+tổng hợp.)
 
-### Bugs đã sửa
-(chưa có)
+### Bugs tìm thấy và đã sửa
+- Phase 5: `admin_image_studio_spending` (`server/main.py`) — 9 truy vấn đếm
+  Appwrite chạy tuần tự, đo thật 7.8s. Sửa: song song hoá
+  (`ThreadPoolExecutor(max_workers=4)` + `_an_toan_song_song`) → 3.1s.
+- Phase 11 (vòng 1): `translate/ProviderConnectDialog.tsx` hộp thoại BYOK
+  hoàn toàn thiếu xử lý bàn phím (focus/Escape) — đã thêm.
+- Phase 11 (vòng 2, độc lập): `.tim-dau` (`globals.css`) thiếu focus style
+  thay thế cho `outline: none`; `ReportDialog.tsx` không trả tiêu điểm về
+  nút mở như docstring tự nhận; `.bell` thiếu kích thước chạm tối thiểu
+  44×44 trên mobile — cả 3 đã sửa.
+- Phase 16: `docs/WEB_README.md` còn nhắc tên trường cũ `commercial_ready`
+  (đã đổi `public_enabled`) và câu "chưa có moderation" đã lỗi thời — đã sửa.
 
 ### Bugs CỐ Ý không sửa (ghi rõ lý do)
-(chưa có)
+Xem ghi chú "minor" tại từng phase (5, 7, 10, 11, 14, 15, 16) — mỗi mục đều
+ghi rõ lý do chấp nhận được (hành động ADMIN không phải đường nóng, quyết
+định có chủ đích đã có comment tại chỗ, hoặc vượt phạm vi "sửa nhỏ/an
+toàn" của FIX POLICY overnight này).
 
 ### Blocked (cần thao tác tay/secret/cloud console/thanh toán)
-- Phase 6, ADMIN qua HTTP+auth thật trên Appwrite dev tự lưu trữ (suspend/
-  unsuspend/sessions/audit log): không có `FAS_ADMIN_USER_IDS`/
-  `FAS_OWNER_USER_IDS` cấu hình cho `appwrite-dev.fanfic.world` — cần gán role
-  admin/owner cho một tài khoản thật qua Appwrite console (thao tác tay), việc
-  ngoài phạm vi tự động của phiên này. Đã bù bằng kiểm chứng lớp code (Phase 3,
-  sạch) + lớp service thật (smoke Trusted Sources, 19/19).
+(Không còn mục nào — mục Phase 6 "ADMIN qua HTTP+auth thật" ĐÃ GỠ BLOCKED
+trong lúc làm Phase 5: hoá ra vai trò admin/owner là biến môi trường của
+tiến trình backend, không phải cột Appwrite, nên không cần thao tác
+Appwrite console. Xem ghi chú "BỔ SUNG" ở Phase 5 và "HẾT BLOCKED" ở
+Phase 6 phía trên.)
+
+Blocked thật sự còn lại (không liên quan Phase 6, xem Phase 17 mục "known
+blockers"): (A) YouTube WebSub E2E ngoài — cần callback HTTPS công khai;
+(B) Ví Fanfic Credit theo người dùng — kiến trúc Appwrite hoá đã hoãn có
+chủ đích sang việc khác, ngoài phạm vi phiên này; (C) Kiểm tra/dọn dữ liệu
+datetime profile production lịch sử — hoãn tới khi có lại quyền truy cập
+Appwrite Cloud.

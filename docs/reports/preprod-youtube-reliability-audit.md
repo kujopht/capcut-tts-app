@@ -214,3 +214,186 @@ mục đều cần thiết kế lại một phần cơ chế (đồng thời, ph
 chữ ký API), vượt quá "sửa an toàn nhỏ". Đề xuất theo dõi riêng cho các phase
 sau nếu tính năng Trusted Video Sources đi vào production ở quy mô nhiều
 admin/nhiều nguồn.
+
+---
+
+## Bổ sung: Fuzz corpus bộ phân tích số tập + kiểm chứng trùng lặp/xung đột/video không khả dụng
+
+(Phần này chạy độc lập, sau phần audit ở trên trong cùng Phase 7 — trọng tâm
+khác: mục tiêu, hạng mục 1-5 ở trên là rà soát tĩnh thiết kế đồng thời/lỗi
+mạng; phần dưới đây là **fuzz test tất định** cho bộ phân tích số tập/độ tin
+cậy, cộng kiểm chứng lại (đọc code + test) hai luồng trùng lặp/xung đột và xử
+lý video không còn truy cập được.)
+
+### Tóm tắt
+
+| Hạng mục | Trước khi sửa | Sau khi sửa |
+|---|---|---|
+| `parse_episode_number("e12")` (chữ thường) | Trả `None` — SAI, mâu thuẫn với chính cam kết "không phân biệt hoa/thường" ghi ở docstring đầu `server/episode_parser.py` | Trả `12` — khớp `parse_episode_number("E12")` |
+| `_BARE_E_RE` (regex "E12" trần) | Không có cờ `re.IGNORECASE` | Có `re.IGNORECASE` |
+| Test fuzz cho `episode_parser`/`video_classifier` | Chỉ có test cơ bản (11+9 case) | Thêm 2 lớp `FuzzCorpusPhase7Test` (7 test mới ở `test_episode_parser.py`, 4 test mới ở `test_video_classifier.py`) phủ tiếng Việt có/không dấu, tiếng Anh, "Ep.", combo season+episode, Unicode NFC/NFD, năm phát hành/lượt xem cạnh số tập, toàn bộ `NEGATIVE_KEYWORDS` |
+| Test cho "video không còn truy cập" khi quét nguồn kiểu `youtube_video` đơn lẻ | Không có test (hành vi đúng nhưng chưa có test khoá lại) | Thêm `test_quet_nguon_video_don_le_khong_con_truy_cap_bao_loi_ro_rang` |
+| Test cho "một video trong playlist/kênh bị gỡ/riêng tư giữa lúc quét" | Không có test | Thêm `test_quet_kenh_bo_qua_video_rieng_tu_trong_playlist_khong_lam_sap_ca_lan_quet` |
+
+### 1. Bug tìm thấy và đã sửa: "e12" (chữ thường) không đọc được số tập
+
+**File:** `server/episode_parser.py`, hằng số `_BARE_E_RE` (dòng ~38).
+
+Fuzz corpus dựng tay theo đúng yêu cầu Phase 7 (tiếng Việt có dấu/không dấu,
+tiếng Anh, combo season+episode, Unicode, từ khoá loại trừ, số trong ngữ cảnh
+không liên quan) phát hiện: `_KEYWORD_RE` (khớp "tập"/"tap"/"episode"/"ep"/...)
+biên dịch với `(?i)` (không phân biệt hoa/thường) như docstring đầu file cam
+kết ("Ho tro CA hai each viet tieng Viet... khong phan biet hoa/thuong"), NHƯNG
+`_BARE_E_RE` (khớp dạng "E12" trần, dùng khi không có từ khoá đầy đủ) biên dịch
+KHÔNG có cờ nào cả:
+
+```python
+# Trước khi sửa
+_BARE_E_RE = re.compile(r"\bE(\d{1,4})\b")
+```
+
+Hệ quả: `parse_episode_number("E12")` → `12` (đúng), nhưng
+`parse_episode_number("e12")` → `None` (sai) — cùng một chuỗi, chỉ khác hoa/
+thường, ra hai kết quả khác nhau, vi phạm trực tiếp cam kết tất định + không
+phân biệt hoa/thường của chính module. Trong thực tế, tiêu đề video tự nộp
+thường viết thường toàn bộ (ví dụ kênh tự động hoá dùng template chữ thường),
+nên đây không phải một trường hợp biên vô nghĩa.
+
+**Đã sửa** (thêm `re.IGNORECASE`, không đổi ngữ nghĩa/độ đặc hiệu của regex,
+không đổi thứ tự ưu tiên với `_KEYWORD_RE`):
+
+```python
+_BARE_E_RE = re.compile(r"\bE(\d{1,4})\b", re.IGNORECASE)
+```
+
+Xác nhận rủi ro khớp nhầm không tăng: `\b` (ranh giới từ) vẫn đòi hỏi ký tự
+ngay trước "E"/"e" không phải ký tự chữ/số — các chuỗi dính liền kiểu
+"type12"/"free12"/"anime12" vẫn KHÔNG khớp (không có ranh giới từ ở giữa),
+chỉ các trường hợp "E"/"e" đứng như một token riêng (ví dụ "(e12)", "- E12",
+"E12" đứng đầu chuỗi) mới khớp — đúng như trước, chỉ thêm biến thể hoa/thường.
+
+Test khoá lại: `test_e_tran_khong_phan_biet_hoa_thuong` trong
+`server/tests/test_episode_parser.py`.
+
+### 2. Fuzz corpus — các hạng mục khác (không phát hiện bug)
+
+Chạy `server/tests/test_episode_parser.py::FuzzCorpusPhase7Test` và
+`server/tests/test_video_classifier.py::FuzzCorpusPhase7Test` (17+16 test,
+toàn bộ PASS sau khi sửa mục 1):
+
+- **Tiếng Việt có dấu/không dấu**: "Tập 1"/"TẬP 1"/"tập 1"/"Tap 1"/"TAP 1",
+  "Chương 7"/"CHƯƠNG 7"/"chuong 7", "Phần 3"/"phan 3" — đều đọc đúng.
+- **Tiếng Anh**: "Episode 12", "Ep. 12", "Ep.12", "Ep 12", "EP#12", "Ep #12"
+  — đều đọc đúng qua `_KEYWORD_RE` (hỗ trợ dấu chấm/khoảng trắng/`#` tuỳ
+  chọn giữa từ khoá và số).
+- **Combo season+episode ("S01E12"/"S2E12" dính liền)**: KHÔNG đọc được
+  (trả `None`) — đây là **hạn chế đã biết, KHÔNG PHẢI bug**: docstring đầu
+  `episode_parser.py` chỉ công bố hỗ trợ
+  "Tap/Tập/EP/Episode/E12/Chương/Chapter/Phần/Part", không có dạng dính liền
+  kiểu fansub S01E12. Dạng có khoảng trắng ("Season 2 Episode 12") vẫn đọc
+  đúng 12 vì "Episode 12" tự nó là một khớp từ khoá đầy đủ độc lập. **Không
+  sửa** theo FIX POLICY (mở rộng dạng nhận diện là "redesign the parser",
+  ngoài phạm vi "sửa bug" — cần thiết kế thêm ưu tiên/độ đặc hiệu cho pattern
+  mới, không phải một dòng vá an toàn).
+- **Unicode NFC/NFD**: tiêu đề gõ theo tổ hợp dấu tách rời (NFD) và ghép sẵn
+  (NFC) đều ra cùng kết quả — `parse_episode_number` tự chuẩn hoá NFC trước
+  khi khớp, `video_classifier.chuan_hoa` tự chuẩn hoá NFKD trước khi so
+  alias, cả hai đường đều đã đúng.
+- **Số trong ngữ cảnh không liên quan** (năm phát hành, lượt xem, độ phân
+  giải): "Tiên Nghịch (2024)", "1080p 60fps", "10000000 views", "4K
+  Remaster" — đều KHÔNG bị nhận nhầm thành số tập (đúng ý đồ: parser chỉ
+  đọc số NGAY SAU một từ khoá tập, không đoán số trần). Khi có từ khoá thật
+  cạnh năm phát hành ("Tập 12 (2024)"), vẫn đọc đúng 12 (số đầu tiên có từ
+  khoá thắng).
+- **Toàn bộ `NEGATIVE_KEYWORDS`** (13 từ: trailer/teaser/pv/preview/ost/op/
+  ed/opening/ending/short/shorts/highlight/reaction/announcement/livestream)
+  — fuzz từng từ một, mỗi từ đều hạ điểm và đánh dấu `excluded=True` đúng ý
+  đồ khi xuất hiện như MỘT TỪ RIÊNG. Đồng thời xác nhận các từ này KHÔNG bị
+  khớp nhầm khi là một phần của từ khác không liên quan ("PVP Championship",
+  "Operation Rescue", "Edit nhanh") — nhờ ranh giới từ `\b` trong `_co_tu`.
+- **Tiêu đề mơ hồ**: khớp alias nhưng không đọc được số tập (video tổng
+  hợp/AMV) vẫn trả về đúng `series_id`, `episode_number=None` — quản trị tự
+  gán số tập bằng tay, không phải lỗi.
+
+### 3. Kiểm chứng trùng lặp (duplicate) và xung đột (conflict) — khớp ý đồ, không sửa
+
+Đọc lại `server/trusted_source_service.py` + test hiện có
+(`server/tests/test_trusted_source_service.py`):
+
+- **Video đã là một `AnimationEpisode` thật** (nhập trùng cùng video hai
+  lần, hoặc video đã có ở series khác) → `_phan_loai_va_ghi_mot_video` tra
+  `episodes_by_external_ids` TRƯỚC khi phân loại, đánh dấu `DUPLICATE` ngay,
+  không phân loại lại — test `test_quet_video_da_la_tap_thanh_duplicate`
+  xác nhận. Nút "Nhập" thủ công (`import_video`) kiểm tra lại LẦN NỮA ngay
+  trước khi tạo episode (không chỉ tin kết quả quét cũ) — đúng docstring
+  "KHÔNG BAO GIO ghi de am tham".
+- **Hai video khác nhau cùng nhận diện ra một số tập trong cùng series**
+  (conflict) → `_quyet_dinh_trang_thai` tra `episodes_by_series` (danh sách
+  `order_index` đã có), nếu số tập trùng với MỘT episode đã tồn tại (từ
+  video KHÁC) thì trả `CONFLICT`, KHÔNG tự động ghi đè — test
+  `test_quet_trung_so_tap_thanh_conflict` xác nhận. `import_video` thủ công
+  cũng kiểm tra lại xung đột ngay trước khi tạo (biến `xung_dot`, dòng
+  686-694), khớp nguyên tắc "không ghi đè âm thầm" nêu trong docstring hàm.
+- **Idempotent khi quét lại cùng nguồn nhiều lần**: `create_import_once`
+  (cả bản Mock lẫn Appwrite) dùng `import_id` tất định =
+  `video_import_id(youtube_video_id)`, video đã có bản ghi thì KHÔNG phân
+  loại lại (giữ nguyên quyết định quản trị cũ) — khớp ý đồ, đã xác nhận lại
+  qua đọc code (không phát hiện thêm gì mới ngoài phát hiện #2 ở phần audit
+  chính bên trên).
+
+Không tìm thấy bug ở hai luồng này — hành vi khớp đúng ý đồ tài liệu hoá
+trong docstring `ImportStatus.DUPLICATE`/`ImportStatus.CONFLICT`. Không sửa.
+
+### 4. Kiểm chứng "video không khả dụng" (bị gỡ/riêng tư) — khớp ý đồ, đã thêm test khoá lại
+
+Ba đường xử lý video không còn truy cập được qua YouTube Data API, đều đã
+xác nhận qua đọc code + test (2 test MỚI thêm trong phiên này, xem mục Tóm
+tắt):
+
+1. **Nguồn kiểu `youtube_video` (một video đơn lẻ được tin cậy) mà chính
+   video đó bị gỡ/riêng tư trước lúc quét lại**: `_lay_ung_vien` gọi
+   `yt.get_video(...)`, nếu trả `None` thì ném `YouTubeApiError` với thông
+   điệp rõ ràng ("Không còn truy cập được video này qua YouTube Data API —
+   có thể đã bị gỡ hoặc chuyển riêng tư"), `scan_source` bắt lỗi này, ghi
+   `last_error_at`/`last_error_message` rồi ném lại (không im lặng, không
+   tạo `VideoImport` rác) — xác nhận bằng test MỚI
+   `test_quet_nguon_video_don_le_khong_con_truy_cap_bao_loi_ro_rang`.
+2. **Một video trong playlist/kênh (nhiều video) bị gỡ/riêng tư giữa lúc
+   quét**: `_lay_ung_vien` gọi `get_videos()` theo lô, video nào không có
+   trong kết quả trả về thì bị BỎ QUA êm (dòng "video rieng tu/da bi go —
+   bo qua, khong bia du lieu"), KHÔNG làm hỏng cả lượt quét — các video còn
+   lại vẫn được phát hiện/phân loại bình thường, nguồn vẫn được ghi
+   `last_success_at` — xác nhận bằng test MỚI
+   `test_quet_kenh_bo_qua_video_rieng_tu_trong_playlist_khong_lam_sap_ca_lan_quet`.
+3. **Thông báo WebSub báo video đã bị xoá** (`<at:deleted-entry>`, Phase 6):
+   `_danh_dau_video_khong_con_truy_cap` chỉ đổi các bản ghi CÒN chờ quyết
+   định (`NEW`/`PENDING`/`CONFLICT`) thành `UNAVAILABLE`, KHÔNG đụng vào bản
+   ghi đã là quyết định cuối cùng (`IMPORTED`/`REJECTED`/`IGNORED`/
+   `DUPLICATE`) — đã có test từ trước
+   (`test_video_bi_xoa_danh_dau_unavailable_neu_dang_cho_duyet` trong
+   `test_trusted_source_websub.py`), xác nhận lại vẫn đúng, không sửa.
+
+Cả ba đường đều degrade graceful, không crash, không lộ dữ liệu bịa —
+KHÔNG có phát hiện mới ở hạng mục này.
+
+### 5. YOUTUBE_API_KEY — trạng thái cấu hình
+
+`server/.env` (mặc định của máy này) **KHÔNG** có `YOUTUBE_API_KEY` — khớp
+xác nhận ở phần audit chính bên trên. Tuy nhiên `server/.env.selfhost` (dùng
+để chạy `scripts/smoke_test_selfhost_trusted_sources.py`, đã có kết quả
+19/19 rất gần đây theo `docs/handoffs/preprod-overnight-hardening-v1.md`
+Phase 6) **CÓ** cấu hình biến này (chỉ xác nhận sự hiện diện, không in giá
+trị). Theo phạm vi Phase 7: KHÔNG gọi lại YouTube Data API thật trong phần
+bổ sung này (đã có smoke test thật rất gần đây bao phủ đúng luồng
+quét/nhập/preview, không lặp lại) — toàn bộ xác minh ở đây là fuzz test
+tất định + đọc code, không cần mạng.
+
+### Test mới thêm
+
+- `server/tests/test_episode_parser.py` — lớp `FuzzCorpusPhase7Test` (7 test).
+- `server/tests/test_video_classifier.py` — lớp `FuzzCorpusPhase7Test` (4 test).
+- `server/tests/test_trusted_source_service.py` — 2 test mới (video đơn lẻ
+  không khả dụng; video trong playlist không khả dụng).
+
+Chạy toàn bộ `server/tests` sau khi sửa: **2405/2405 pass (1 skip — thiếu
+file `.onnx.json` test model cục bộ, không liên quan)**.

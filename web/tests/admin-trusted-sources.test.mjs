@@ -12,7 +12,12 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 function read(rel) {
-  return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+  // Chuan hoa CRLF -> LF: checkout that tren Windows (core.autocrlf=true)
+  // co the ghi CRLF cho file nguon, lam mot vai khang dinh so khop chuoi
+  // con CHINH XAC (bao gom \n nhung) that bai du JSX khong doi gi ca — day
+  // la do khac biet dong ket thuc dong, khong phai loi noi dung.
+  return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8")
+    .replace(/\r\n/g, "\n");
 }
 
 const api = () => read("../src/lib/api.ts");

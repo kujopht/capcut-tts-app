@@ -343,8 +343,16 @@ dừng cả phiên.
       scripts khớp `web/package.json`), toàn bộ 18 biến `FAS_*` và mọi route
       API được nhắc trong `docs/*.md` (trừ APPWRITE_V2/SCHEMA) đều tồn tại
       thật trong code — không biến/route ảo nào.
-- [ ] Phase 17 — Release-candidate report (`docs/reports/preprod-overnight-hardening-v1.md`)
-- [ ] Phase 18 — Final verification
+- [x] Phase 17 — Release-candidate report (`docs/reports/preprod-overnight-hardening-v1.md`). XONG —
+      23 mục đầy đủ, tổng hợp 13 báo cáo con. Khuyến nghị: READY, có thể
+      merge sau khi người dùng soát xét Phase 10/13 (đụng đường xác thực/dữ
+      liệu).
+- [x] Phase 18 — Final verification. XONG — backend 2408/2408 pass (1 skip),
+      frontend 635/635 pass, typecheck sạch, lint 0 lỗi (2 warning
+      `no-img-element` đã biết), `npm run build` thành công, quét secret
+      sạch (không `.env` nào track, không mẫu secret trong diff nhánh). Xác
+      nhận `main`==`d483e909d...` và `integration/pre-prod-v1`==`a0420e6`
+      chưa đổi, stash còn nguyên 1 mục, working tree sạch.
 - [ ] Phase 19 — Finalize overnight branch (push, freeze, KHÔNG merge, quay về integration/pre-prod-v1 sạch)
 
 ## Checkpoint commits

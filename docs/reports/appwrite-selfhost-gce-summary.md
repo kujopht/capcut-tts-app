@@ -375,3 +375,108 @@ hưởng cách Let's Encrypt HTTP-01 challenge xác minh vì traffic đi qua
 Cloudflare trước khi tới VM). Sau khi xác nhận và phân giải được thật, chạy
 lại các mục 2-5/8 còn thiếu ở trên.
 
+## 15. HTTPS hoàn tất — `https://appwrite-dev.fanfic.world`
+
+### 15.1 DNS đã phân giải, nhưng KHÔNG phải "DNS only" như báo cáo
+
+Xác nhận qua hai resolver công khai (8.8.8.8, 1.1.1.1): bản ghi **đã**
+phân giải, nhưng ra **địa chỉ IP của Cloudflare** (`104.21.63.15`,
+`172.67.142.101`, ...) — trùng với apex domain `fanfic.world` — chứ KHÔNG
+phải `35.225.209.115` của VM. Nghĩa là bản ghi đang **Proxied (mây cam)**,
+không phải "DNS only" như bạn báo. Đã tiếp tục xử lý dựa trên thực tế quan
+sát được thay vì giả định.
+
+### 15.2 Phát hiện quan trọng — vì sao chứng chỉ không tự cấp
+
+Đọc thẳng mã nguồn Appwrite 1.9.6
+(`src/Appwrite/Certificates/LetsEncrypt.php`, dòng 26):
+
+```php
+$staging = (Http::isProduction()) ? '' : ' --dry-run';
+```
+
+Appwrite CHỈ xin chứng chỉ Let's Encrypt **thật** khi `_APP_ENV=production`
+— `.env` self-host trước đó vẫn để `_APP_ENV=development` (giá trị mặc
+định của template gốc), nên MỌI lần thử đều là `--dry-run` (giả lập,
+không lưu file thật) — đúng như log lỗi "Cannot renew domain... Failed to
+rename certificate cert.pem" quan sát được (dry-run không tạo file
+`/etc/letsencrypt/live/.../cert.pem` thật để đổi tên).
+
+**Lưu ý phân biệt**: `_APP_ENV` này là cờ NỘI BỘ của instance Appwrite tự
+lưu trữ (kiểm soát hành vi cứng hoá/chi tiết lỗi CỦA APPWRITE), hoàn toàn
+KHÁC với môi trường "production" của Fanfic World hay Appwrite Cloud — đổi
+cờ này không đụng chạm gì tới Cloud hay repo. Đã đặt `_APP_ENV=production`
+trên `~/appwrite/.env` (chỉ trên self-host) — lợi ích phụ: giảm luôn độ
+chi tiết của debug trace mà Appwrite trả về khi lỗi (liên quan trực tiếp
+tới sự cố lộ khoá mục 7 phía trên).
+
+### 15.3 Cấp chứng chỉ — worker không tự trigger, đã chạy certbot thủ công MỘT LẦN
+
+Worker `appwrite-worker-certificates` chỉ xử lý khi có message trong hàng
+đợi; task bảo trì hàng ngày bị khoá cứng theo `_APP_MAINTENANCE_START_TIME=
+12:00` (còn ~8.6 giờ lúc kiểm tra) — không có cơ chế "trigger ngay" qua
+API/CLI tìm thấy được trong thời gian hợp lý. Đã chạy TRỰC TIẾP đúng lệnh
+`certbot` mà `LetsEncrypt.php` sẽ chạy (không `--dry-run`, cùng tham số:
+webroot `/storage/certificates`, cert-name = domain), rồi chép 4 file
+`.pem` + ghi file cấu hình TLS cho Traefik vào `/storage/config/` — CHÍNH
+XÁC các bước code gốc làm sau khi certbot chạy xong. Đây là hành động
+MỘT LẦN, không lặp lại tự động — chứng chỉ that hết hạn `2026-11-14`; cần
+lặp lại thao tác này (hoặc đợi task bảo trì tự renew trong 30 ngày trước
+hạn, đúng logic `isRenewRequired()` đã đọc trong mã nguồn) trước ngày đó.
+
+Xác nhận SAU khi cấp — trực tiếp trên VM (`openssl s_client localhost:443`):
+`issuer=... O=Let's Encrypt`, `subject=CN=appwrite-dev.fanfic.world`, đúng
+khớp ngày certbot báo.
+
+### 15.4 HTTP → HTTPS — biến `_APP_OPTIONS_ROUTER_FORCE_HTTPS` KHÔNG áp dụng cho API gốc
+
+Tài liệu chính thức xác nhận: biến này chỉ "force HTTPS connection to
+**function and site domains**" — KHÔNG bao gồm domain API/console gốc.
+Route Traefik gốc của Appwrite định nghĩa HAI router riêng
+(`appwrite_api_http` trên entrypoint `:80`, `appwrite_api_https` trên
+`:443`) phục vụ y hệt nội dung ở CẢ HAI, không tự chuyển hướng. Đã thêm ba
+cờ tĩnh chuẩn của Traefik vào `command:` của service `traefik` trong
+`docker-compose.yml` (tệp vendor trên VM, không phải file repo):
+
+```
+--entrypoints.appwrite_web.http.redirections.entryPoint.to=appwrite_websecure
+--entrypoints.appwrite_web.http.redirections.entryPoint.scheme=https
+--entrypoints.appwrite_web.http.redirections.entryPoint.permanent=true
+```
+
+### 15.5 Kiểm chứng cuối cùng — cả từ origin VÀ qua Cloudflare thật
+
+| Kiểm tra | Trực tiếp origin (bỏ qua Cloudflare) | Qua hostname thật (qua Cloudflare) |
+|---|---|---|
+| `HTTP` → `HTTPS` | 301 → `https://...` | 301 → `https://...` |
+| `GET /v1/health/version` qua HTTPS | 200, `{"version":"1.9.6"}` | 200, `{"version":"1.9.6"}` |
+| `/console` | — | 200 |
+| Chứng chỉ thấy được | `Let's Encrypt`, CN đúng domain, hết hạn `2026-11-14` | **`Google Trust Services`, CN=`fanfic.world`** (chứng chỉ Universal SSL của Cloudflare) |
+
+**Cần lưu ý trung thực**: vì bản ghi đang Proxied, người dùng thật kết nối
+qua domain sẽ thấy chứng chỉ CỦA CLOUDFLARE, không phải chứng chỉ Let's
+Encrypt vừa cấp — đây là hành vi ĐÚNG và AN TOÀN của Cloudflare (đầu cuối
+TLS công khai do Cloudflare đảm nhiệm, sau đó Cloudflare nối tới origin
+bằng HTTPS riêng — đã xác nhận nối thành công, nghĩa là chế độ SSL/TLS của
+Cloudflare tương thích với chứng chỉ gốc vừa cấp). Chứng chỉ Let's Encrypt
+trên origin vẫn CÓ THẬT và ĐÚNG — chỉ là không phải thứ trình duyệt thật
+nhìn thấy trực tiếp khi domain được proxy.
+
+Cổng public vẫn CHỈ 22/80/443 sau toàn bộ thay đổi (xác nhận lại qua `ss
+-tulnp`). Không đụng Appwrite Cloud, không thử lại migration Cloud.
+
+`server/.env.selfhost` đã đổi `APPWRITE_ENDPOINT` sang
+`https://appwrite-dev.fanfic.world/v1` — `server/.env.production` xác
+nhận KHÔNG đổi.
+
+### 15.6 Smoke test cuối + kiểm chứng suite (qua endpoint HTTPS thật)
+
+Backend thật chạy với `FAS_ENV_FILE=server/.env.selfhost` (giờ trỏ HTTPS):
+`/api/health` báo `identity=appwrite`, `/api/ready` → 200. Đăng ký mới,
+gọi `POST /api/progress/read` hai lần cùng payload → `streak.
+current_streak=1` (không phải 2), leaderboard/cosmetics đều 200 — tất cả
+qua kết nối HTTPS thật, không phải HTTP như các lần trước.
+
+Backend **2145/2145**, frontend **563/563**, typecheck/lint sạch, build
+thành công — chạy trên nhánh `infra/appwrite-selfhost-gce`.
+

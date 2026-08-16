@@ -70,8 +70,33 @@ dừng cả phiên.
       useEffect/setInterval). Không sửa gì (không có phát hiện cần sửa). 1 hạn
       chế đã biết ở `admin_authors` (kéo tối đa 500 hồ sơ) — chấp nhận được,
       không sửa.
-- [~] Phase 5 — Performance audit — ĐANG CHẠY nền (fork,
-      `docs/reports/preprod-performance-audit.md`)
+- [x] Phase 5 — Performance audit (`docs/reports/preprod-performance-audit.md`). XONG —
+      SẠCH cả backend (`server/`) lẫn frontend (`web/src`), không có phát
+      hiện mức blocker. 5 ghi chú minor (N+1 nhỏ trong xoá cascading/reorder
+      admin, `<img>` không khai báo width/height ở ảnh do người dùng tạo,
+      không có `dynamic()` code-splitting) — đều là hành động không phải
+      đường nóng hoặc quyết định có chủ đích đã ghi chú tại chỗ, không sửa.
+      Đo Core Web Vitals thật qua `performance_start_trace` trên 3 route
+      (`/`, `/fanfic`, `/animation`): LCP 438-692ms, CLS 0.01 — không có
+      vấn đề hiệu năng render.
+      BỔ SUNG (đo độ trễ THẬT chống `appwrite-dev.fanfic.world` qua
+      `scripts/perf_probe_admin_selfhost.py`, cấp OWNER cục bộ cho tiến
+      trình tạm qua `FAS_OWNER_USER_IDS` — biến môi trường, không phải cột
+      Appwrite, không cần thao tác Appwrite console): phát hiện
+      `GET /api/admin/image-studio/spending` mất **7.8s** do 9 truy vấn
+      đếm chạy TUẦN TỰ. ĐÃ SỬA: song song hoá bằng
+      `ThreadPoolExecutor(max_workers=4)` (cùng idiom `_admin_dashboard_them`,
+      tách `_an_toan` cũ thành `_an_toan_song_song` cấp module để dùng
+      chung) → còn **3.1s**. `admin_analytics_detail` (11.4s trước đo) đã
+      được song song hoá độc lập (không trùng). Test backend lại
+      **2401/2401 pass** sau sửa. Đây cũng GIẢI QUYẾT mục BLOCKED "ADMIN
+      qua HTTP+auth thật" ghi ở Phase 6 bên dưới — hoá ra role admin/owner
+      là biến môi trường CỤC BỘ (`Settings.admin_role_of`), không phải cột
+      Appwrite, nên có thể cấp cho một tiến trình backend tạm mà không cần
+      thao tác Appwrite console; đã tận dụng để đo VÀ gọi thật
+      `/api/admin/overview`, `/users`, `/animation/series`, `/sources`,
+      `/imports`, `/events` qua HTTP+JWT thật — toàn bộ trả 200 đúng như kỳ
+      vọng.
 - [x] Phase 6 — Self-hosted Appwrite real smoke matrix. XONG (một mục BLOCKED) —
       chạy thật với `FAS_ENV_FILE=server/.env.selfhost` chống `https://appwrite-dev.fanfic.world/v1`:
       - AUTH+PROFILE+GAMIFICATION: mở rộng `scripts/smoke_test_selfhost_appwrite.py`
@@ -92,39 +117,157 @@ dừng cả phiên.
       - WEBSUB: đã có kết quả **14/14** rất gần đây từ
         `scripts/smoke_test_selfhost_websub.py` (callback giả lập, trùng lặp,
         chữ ký, reconciliation) — dùng lại, không chạy trùng lặp.
-      - ADMIN (user list/detail/suspend/unsuspend/sessions/audit log) qua LỚP
-        HTTP+auth thật: **BLOCKED** — `server/.env.selfhost` không có
-        `FAS_ADMIN_USER_IDS`/`FAS_OWNER_USER_IDS` nào được cấu hình, tức KHÔNG có
-        tài khoản admin/owner thật nào gắn với môi trường dev tự lưu trữ để đăng
-        nhập thật rồi gọi các route `/api/admin/*`. Cấp quyền cho một tài khoản
-        thật đòi hỏi thao tác tay trên Appwrite console (gán role) — đúng loại
-        việc phải ĐÁNH DẤU BLOCKED theo quy tắc an toàn, không tự ý làm thay. Bù
-        lại: hành vi các route admin đã được xác nhận sạch ở lớp
-        code/dependency (Phase 3) và ở lớp service thật chống Appwrite dev qua
-        `smoke_test_selfhost_trusted_sources.py` (admin_source_detail/scan/import
-        đều là ghi/đọc THẬT trên Appwrite, chỉ là gọi thẳng service với Profile
-        giả lập vai trò thay vì qua HTTP+JWT thật).
-- [~] Phase 7 — YouTube/Trusted Video reliability audit — ĐANG CHẠY nền (fork,
-      `docs/reports/preprod-youtube-reliability-audit.md`)
+      - ADMIN qua LỚP HTTP+auth thật: **HẾT BLOCKED** (gỡ trong lúc làm Phase 5,
+        xem ghi chú "BỔ SUNG" ở Phase 5 phía trên) — hoá ra
+        `FAS_ADMIN_USER_IDS`/`FAS_OWNER_USER_IDS` là biến môi trường của TIẾN
+        TRÌNH BACKEND, không phải cột dữ liệu trong Appwrite (`Settings.
+        admin_role_of`, xem docstring `config.py`), nên KHÔNG cần thao tác tay
+        trên Appwrite console để kiểm thật — chỉ cần đăng ký một user smoke-test
+        thật rồi khởi một tiến trình backend tạm với `FAS_OWNER_USER_IDS=<id
+        vừa tạo>`. Đã gọi thật qua HTTP+JWT: `/api/admin/overview`, `/users`,
+        `/animation/series`, `/animation/sources`, `/animation/imports`,
+        `/events`, `/image-studio/spending` — toàn bộ trả 200. Chưa test riêng
+        suspend/unsuspend (hành động ghi, không cần thiết cho mục tiêu đo hiệu
+        năng của Phase 5 — hành vi ghi/quyền hạn của các route đó đã xác nhận
+        sạch ở lớp code/dependency tại Phase 3 và ở lớp service thật tại
+        `smoke_test_selfhost_trusted_sources.py`).
+- [x] Phase 7 — YouTube/Trusted Video reliability audit
+      (`docs/reports/preprod-youtube-reliability-audit.md`). XONG — không có
+      phát hiện mức BLOCKER. 3 phát hiện minor (không sửa, cần thiết kế lại,
+      vượt "sửa an toàn nhỏ"): (1) `youtube_client.py::_goi()` không có
+      retry/backoff nào cho lỗi mạng/5xx tạm thời — chỉ `quotaExceeded` được
+      phân biệt rõ (429), còn lại đều gộp chung 502; (2) `import_video()`
+      (nút "Nhập" thủ công) là check-then-act không khoá xuyên suốt — 2 admin
+      bấm "Nhập" cùng lúc trên CÙNG một video có thể tạo 2 `AnimationEpisode`
+      trùng `order_index` (khác với `scan_source`/`create_import_once`, đã
+      xác nhận THỰC SỰ idempotent qua `documentId` tất định); nút bị disable
+      ở frontend chỉ chặn double-click cùng tab, không chặn 2 phiên khác
+      nhau; (3) preview bắt buộc trước khi tạo nguồn chỉ ép ở frontend,
+      backend `create_source()` không gọi lại YouTube Data API để xác minh —
+      admin có thể POST thẳng ID bịa đặt. Đã xác minh SẠCH: ngưỡng
+      `minimum_confidence` luôn chặn trước khi đọc cờ auto_import/auto_publish
+      (một đường quyết định `_quyet_dinh_trang_thai` dùng chung cho quét thủ
+      công lẫn WebSub, không có đường tắt); xoá nguồn cascade đúng mapping,
+      không làm mồ côi episode/import (có fallback graceful cho tên nguồn đã
+      xoá). Không sửa code, không gọi mạng YouTube thật (máy này không có
+      `YOUTUBE_API_KEY`).
 - [~] Phase 8 — Image Studio safety/integration audit (KHÔNG chi tiêu thật) —
       ĐANG CHẠY nền (fork, `docs/reports/preprod-image-translation-tts-audit.md`)
 - [~] Phase 9 — Translation/TTS integration audit (KHÔNG chi tiêu thật) —
       ĐANG CHẠY nền (cùng fork với Phase 8)
-- [~] Phase 10 — Error/resilience testing — ĐANG CHẠY nền (fork,
-      `docs/reports/preprod-resilience-audit.md`)
-- [~] Phase 11 — Accessibility audit — ĐANG CHẠY nền (fork,
-      `docs/reports/preprod-accessibility-audit.md`)
+- [x] Phase 10 — Error/resilience testing (`docs/reports/preprod-resilience-audit.md`). XONG —
+      SẠCH cả 5 mục: (1) TTS job pipeline (`main.py::_run_job`/`recover_stale_jobs`,
+      `server/worker.py`) — claim nguyên tử + fencing token + lease/heartbeat +
+      `JOB_MAX_ATTEMPTS` có trần, worker restart giữa job được nhận lại đúng; (2)
+      Translation job pipeline — cùng khuôn claim/lease/fence, backoff 429/5xx có
+      cấu trúc (đọc `Retry-After`, cooldown mặc định 60s khi thiếu header,
+      `waiting_for_provider` tách biệt `failed` khi hết hạn mức mọi provider); (3)
+      không tìm thêm `print()`/log non-ASCII nào khác có nguy cơ `UnicodeEncodeError`
+      ngoài lỗi đã sửa trước đó trong phiên (`admin_overview`, `main.py:3786`) —
+      `server/worker.py`/`server/translation_worker.py` đã tự `reconfigure` UTF-8
+      trước mọi `print`; (4) không có `except Exception` nào che giấu lỗi thật (mọi
+      transition trạng thái thành công đều qua kiểm tra rõ ràng) — chỉ ghi nhận
+      MINOR: vài nhánh "việc phụ không được lỗi hỏng request chính" (dọn ảnh cũ,
+      thưởng XP, báo người theo dõi) nuốt lỗi mà không log, thiếu quan sát vận hành
+      nếu lỗi dai dẳng; (5) toàn bộ HTTP client ra ngoài đều có timeout tường minh
+      (Appwrite 15-30s, translation provider 60s, kiểm tra kết nối 15s) — chỉ ghi
+      nhận MINOR: R2 (`boto3`) không đặt `connect_timeout`/`read_timeout` tường
+      minh trong `Config`, dựa vào mặc định thư viện (không phải treo vô hạn).
+      Không sửa gì (không có bug đủ rõ ràng/đủ nhỏ để sửa an toàn).
+- [x] Phase 11 — Accessibility audit (`docs/reports/preprod-accessibility-audit.md`). XONG —
+      đo Lighthouse Accessibility qua Chrome DevTools MCP trên 6 route
+      (`/`, `/fanfic`, `/animation`, `/community`, `/library`, `/login`):
+      **100/100 cả 6 route**, không audit accessibility nào fail. Đọc code
+      tĩnh SẠCH: skip-nav áp dụng toàn site kể cả admin (`app/layout.tsx`),
+      label/aria-label đầy đủ cho input và nút icon-only, `alt` ảnh đúng (kể
+      cả xác nhận `alt=""` chủ đích ở `admin/animation/sources/new/page.tsx:139`
+      — thông tin đã có ở text kế bên), độ tương phản theme tối đã được rà
+      soát từ trước (`globals.css` có ghi chú sửa tỉ lệ tương phản
+      `--text-3`). Phát hiện MINOR (không sửa, vượt phạm vi an toàn/nhỏ):
+      `ReportDialog.tsx`, `ImageLightbox.tsx`, `SearchOverlay.tsx` không bẫy
+      phím Tab trong modal (khác `ConfirmDialog` — duy nhất có bẫy Tab đầy
+      đủ) — Tab có thể rơi vào phần tử bị lớp phủ che khuất phía sau. Đã SỬA
+      1 lỗi rõ ràng hơn: `translate/ProviderConnectDialog.tsx` (hộp thoại
+      BYOK Groq/Cerebras) hoàn toàn thiếu xử lý bàn phím (không tự focus,
+      Escape không đóng được, không trả tiêu điểm) — đã thêm để khớp mức tối
+      thiểu của `ReportDialog`/`ImageLightbox`; `tsc --noEmit` + `eslint` qua
+      sạch sau khi sửa.
+      **Vòng 2** (chạy lại độc lập, không hay biết vòng 1 — trùng lặp ngoài ý
+      muốn, nhưng tìm thêm được 3 lỗi thật KHÁC còn sót sau vòng 1): (1)
+      `globals.css` `.tim-dau` (ô tìm kiếm `SearchOverlay`) có `outline: none`
+      không thay thế — đã thêm `.tim-dau:focus-within { box-shadow: var(--ring); }`
+      giống mẫu `.site-search:focus-within`; (2) `ReportDialog.tsx` docstring tự
+      nhận trả tiêu điểm về nút mở nhưng code không làm — đã thêm bẫy Tab +
+      lưu/trả `document.activeElement` giống `ConfirmDialog`; (3) nút chuông
+      thông báo `.bell` cỡ cố định 34×34px, thiếu trong khối mobile nâng lên
+      44×44 như các nút khác — đã thêm `.bell { min-width: 44px; min-height: 44px; }`
+      trong `@media (max-width: 640px)` (dùng min-width/min-height thay vì
+      width/height cố định để không phá một test đã khoá quy ước đó).
+      `npm run typecheck` sạch, `npm test` **635/635 pass**.
 - [~] Phase 12 — Security/secret audit (toàn repo + git history) — ĐANG CHẠY nền
       (fork, `docs/reports/preprod-security-audit.md`)
 - [~] Phase 13 — Data/schema consistency audit — ĐANG CHẠY nền (fork,
       `docs/reports/preprod-schema-audit.md`)
-- [~] Phase 14 — Worker/restart/ops audit — ĐANG CHẠY nền (fork,
-      `docs/reports/preprod-worker-ops-audit.md`)
-- [~] Phase 15 — Cross-platform/Windows test robustness — ĐANG CHẠY nền (cùng
-      fork với Phase 14, `docs/reports/preprod-cross-platform-audit.md`)
-- [~] Phase 16 — Documentation consistency — ĐANG CHẠY nền (fork,
-      `docs/reports/preprod-documentation-audit.md`) — sẽ cần rà lại lần cuối ở
-      Phase 17 vì các phase khác vẫn đang chạy song song lúc fork này khởi động.
+- [x] Phase 14 — Worker/restart/ops audit (`docs/reports/preprod-worker-ops-audit.md`). XONG —
+      graceful shutdown/stale-job ở `server/worker.py` SẠCH (SIGTERM/SIGINT chờ
+      `FAS_WORKER_GRACE_SECONDS` rồi mới thoát, không giả vờ xong nếu còn job,
+      lease/claim/fencing đã có sẵn cứu job kẹt `running` khi bị `kill -9`,
+      khớp đúng test/tài liệu hiện có). 2 phát hiện vận hành (không phải bug
+      code, KHÔNG sửa — vượt ngưỡng "nhỏ/an toàn" của phase này): (1) `/api/health`
+      và `/api/ready` của web KHÔNG hề biết trạng thái worker riêng (đúng ý đồ
+      kiến trúc tách rời, nhưng nghĩa là không có endpoint HTTP nào báo được
+      "worker có sống không" — chỉ `python -m server.worker --check` trên chính
+      host worker làm được); (2) production **thiếu hẳn** cặp
+      `fanfic-worker-health.{service,timer}` (watchdog tự restart khi worker
+      treo) mà bản staging đang có — `fanfic-worker-prod.service` và
+      `fanfic-translation-worker-prod.service` chỉ có `Restart=always` (bắt
+      crash, không bắt treo), và hệ quả liên quan: khi quên chạy worker riêng ở
+      production (`FAS_INLINE_WORKER=false` đúng nhưng không tiến trình nào
+      chạy), job kẹt `pending` **im lặng vô thời hạn**, không log/alert nào tự
+      kích hoạt. Khuyến nghị ghi lại cho quyết định sau (không thuộc phase
+      này): thêm `fanfic-worker-health-prod.*` + mở rộng
+      `test_worker_deploy.py` để khoá bất biến cho nhánh production.
+- [x] Phase 15 — Cross-platform/Windows test robustness
+      (`docs/reports/preprod-crossplatform-audit.md`). XONG — không tìm thêm
+      lỗi CRLF/LF nào khác ngoài lỗi đã biết và đã sửa trước phiên này
+      (`admin-trusted-sources.test.mjs`, commit `a0420e6`): đã rà toàn bộ 31
+      file `web/tests/*.test.mjs` đọc source qua `readFileSync`, không có
+      khẳng định nào khác dựa vào `\n` trần khi so khớp chuỗi (các so khớp đa
+      dòng còn lại đều dùng regex `\s*`/`[\s\S]`, vốn đã bao trọn `\r`).
+      `server/tests/*.py` SẠCH về cấu trúc — `Path.read_text()` mặc định dịch
+      universal newlines nên miễn nhiễm với dạng lỗi này (khác Node). Không
+      tìm thấy Python nào ghép đường dẫn hệ điều hành cục bộ bằng `/` cứng
+      thay vì `os.path.join`/`pathlib` (các chỗ dùng `/` tìm được đều là URL,
+      khoá lưu trữ S3/R2, khoá `QSettings`, hoặc đường dẫn trong file zip —
+      đều ĐÚNG ý đồ). Ghi nhận (không sửa, MINOR, chỉ là tài liệu): 3 lệnh
+      dạng `VAR=value lenh` (cú pháp POSIX) trong khối ```bash``` của
+      `CLAUDE.md:25`, `docs/DEV_SELFHOST_APPWRITE.md:45`,
+      `docs/HANDOFF.md:290` — không chạy trực tiếp được trong PowerShell
+      thuần/cmd.exe, chỉ đúng khi qua Git Bash. `compileall` (app.py,
+      desktop_app, server, tests) và `web` `npm run typecheck` đều sạch,
+      không lỗi. Không sửa code nào (không có bug thật để sửa).
+- [x] Phase 16 — Documentation consistency
+      (`docs/reports/preprod-doc-consistency-audit.md`). XONG — quan trọng
+      nhất: KHÔNG có vi phạm quy tắc `CLAUDE.md` nào trong code (grep toàn bộ
+      `server/` xác nhận không import PySide6/Qt nào, và mọi import
+      `desktop_app.*` khớp đúng 4 module được phép). 2 phát hiện BLOCKER về
+      tài liệu (không sửa, cần quyết định lớn hơn, chỉ ghi lại): (1)
+      `docs/HANDOFF.md` (sửa cuối 2026-08-08) cực kỳ lỗi thời — hoàn toàn
+      không nhắc Appwrite tự lưu trữ, Admin Control Center V2/Trusted Video
+      Sources, Image Studio, Animation... dù `CLAUDE.md` vẫn trỏ người đọc mới
+      vào đó; (2) `docs/WEB_README.md` (sửa cuối 2026-08-07) mục "Giới hạn
+      hiện tại" khẳng định sai rằng Appwrite/R2 "chưa kiểm chứng thật", trái
+      với các lần smoke test thật đã ghi nhận (kể cả Phase 6 phiên này). 1
+      phát hiện MINOR: `docs/ADMIN.md` mục "API" thiếu liệt kê nhiều route
+      admin mới của V2 (animation/image-studio/comments/reports/sessions) —
+      không route nào ảo, chỉ là danh sách chưa đầy đủ. Đã tự sửa 1 lỗi nhỏ rõ
+      ràng: `docs/WEB_README.md` còn ghi tên trường cũ `commercial_ready`
+      (đã đổi thành `public_enabled` từ 2026-08-08) và câu "chưa có moderation"
+      đã sai (Admin V2 đã có moderation). Đã kiểm chứng SẠCH: lệnh/đường dẫn
+      trong `CLAUDE.md` gốc (compileall chạy thật, mọi path tồn tại, npm
+      scripts khớp `web/package.json`), toàn bộ 18 biến `FAS_*` và mọi route
+      API được nhắc trong `docs/*.md` (trừ APPWRITE_V2/SCHEMA) đều tồn tại
+      thật trong code — không biến/route ảo nào.
 - [ ] Phase 17 — Release-candidate report (`docs/reports/preprod-overnight-hardening-v1.md`)
 - [ ] Phase 18 — Final verification
 - [ ] Phase 19 — Finalize overnight branch (push, freeze, KHÔNG merge, quay về integration/pre-prod-v1 sạch)

@@ -264,13 +264,15 @@ class TrustedSourceService:
         }
 
     def _ten_series_theo_id(self, series_ids: Sequence[str]) -> Dict[str, str]:
-        ra: Dict[str, str] = {}
-        for sid in dict.fromkeys(s for s in series_ids if s):
-            try:
-                ra[sid] = self._animation_store.get_series(sid).title
-            except NotFoundError:
-                ra[sid] = ""
-        return ra
+        """Phase 5 (performance audit) — TRUOC DAY goi `get_series` RIENG LE
+        cho tung ID phan biet (N+1: mot trang Import Queue 100 dong co the
+        keo toi 100 truy van rieng). Gio doc MOT LAN qua
+        `get_series_by_ids` (theo lo, xem cac kho Animation) roi tra ve
+        tieu de rong cho ID khong tim thay — CUNG hanh vi voi truoc day."""
+        ds = [s for s in series_ids if s]
+        theo_id = self._animation_store.get_series_by_ids(ds)
+        return {sid: theo_id[sid].title if sid in theo_id else ""
+                for sid in dict.fromkeys(ds)}
 
     def update_source(self, admin: Profile, source_id: str, fields: Dict[str, Any],
                       *, actor_role: str = "") -> Optional[Dict[str, Any]]:
@@ -615,17 +617,23 @@ class TrustedSourceService:
     def admin_list_imports(self, *, status: str = "", trusted_source_id: str = "",
                            series_id: str = "", limit: int = 25,
                            offset: int = 0) -> Dict[str, Any]:
+        """
+        Phase 5 (performance audit) — lam giau MOT TRANG hang doi nhap bang
+        SO LUONG truy van CO DINH khong phu thuoc so dong: 1 (trang) + 1
+        (nguon hang loat) + 1 (series hang loat, ben trong `_ten_series_theo_id`).
+        TRUOC DAY `ten_nguon` goi `get_source` RIENG LE cho tung ID nguon
+        phan biet (N+1: trang toi da 100 dong co the toi 100 truy van rieng
+        chi de lay `display_name`) — gio dung `get_sources_by_ids` (theo lo),
+        cung idiom voi `mapping_counts`.
+        """
         items, total = self._store.find_imports(
             status=status, trusted_source_id=trusted_source_id,
             series_id=series_id, limit=limit, offset=offset)
         nguon_ids = [i.trusted_source_id for i in items if i.trusted_source_id]
         ten_series = self._ten_series_theo_id([i.detected_series_id for i in items])
-        ten_nguon: Dict[str, str] = {}
-        for sid in dict.fromkeys(nguon_ids):
-            try:
-                ten_nguon[sid] = self._store.get_source(sid).display_name
-            except NotFoundError:
-                ten_nguon[sid] = ""
+        nguon_theo_id = self._store.get_sources_by_ids(nguon_ids)
+        ten_nguon = {sid: (nguon_theo_id[sid].display_name if sid in nguon_theo_id else "")
+                    for sid in dict.fromkeys(nguon_ids)}
         rows = []
         for i in items:
             d = i.to_dict()

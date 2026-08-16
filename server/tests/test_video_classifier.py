@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import unicodedata
 import unittest
 
 from server.trusted_source_domain import SeriesMapping, TrustedSource, TrustedSourceType
-from server.video_classifier import chuan_hoa, classify_video
+from server.video_classifier import NEGATIVE_KEYWORDS, chuan_hoa, classify_video
 
 
 def _nguon(**kw) -> TrustedSource:
@@ -126,6 +127,79 @@ class ClassifyVideoTest(unittest.TestCase):
                            mappings=[anh_xa])
         self.assertGreaterEqual(kq.confidence, 0.0)
         self.assertLessEqual(kq.confidence, 1.0)
+
+
+class FuzzCorpusPhase7Test(unittest.TestCase):
+    """
+    Corpus fuzz TAT DINH cho Phase 7 — tap trung vao tu khoa loai tru mac
+    dinh (OST/trailer/PV/...), tieu de mo ho (khop alias nhung khong doc
+    duoc so tap), va Unicode NFC/NFD tren alias/tieu de.
+    """
+
+    def test_moi_tu_khoa_loai_tru_mac_dinh_deu_ha_diem_va_danh_dau_excluded(self):
+        """Fuzz TOAN BO danh sach `NEGATIVE_KEYWORDS` khai bao san — moi tu
+        rieng le, dung nhu MOT TU (co ranh gioi), phai bi phat diem VA danh
+        dau `excluded=True`, bat ke tu do la gi trong danh sach."""
+        nguon = _nguon()
+        anh_xa = _anh_xa()
+        for tu in NEGATIVE_KEYWORDS:
+            tieu_de = f"Tiên Nghịch {tu.upper()} chính thức"
+            with self.subTest(tu_khoa=tu):
+                kq = classify_video(title=tieu_de, channel_id="UC_kenh_A",
+                                    trusted_source=nguon, mappings=[anh_xa])
+                self.assertTrue(kq.excluded, f"'{tu}' phải bị loại trừ")
+
+    def test_tu_khoa_loai_tru_la_mot_phan_cua_tu_khac_khong_bi_nham(self):
+        """"pv" trong "pvp", "op" trong "opera"/"operation", "ed" trong
+        "edit" KHONG duoc coi la tu khoa loai tru — `_co_tu` doi hoi ranh
+        gioi tu ca hai phia."""
+        nguon = _nguon()
+        anh_xa = _anh_xa()
+        for tieu_de in (
+            "Tiên Nghịch Tập 12 PVP Championship",
+            "Tiên Nghịch Tập 12 Operation Rescue",
+            "Tiên Nghịch Tập 12 Edit nhanh",
+        ):
+            with self.subTest(tieu_de=tieu_de):
+                kq = classify_video(title=tieu_de, channel_id="UC_kenh_A",
+                                    trusted_source=nguon, mappings=[anh_xa])
+                self.assertFalse(kq.excluded, f"'{tieu_de}' không được bị loại trừ")
+
+    def test_khop_alias_nhung_khong_co_so_tap_van_khop_series(self):
+        """Tieu de MO HO: khop alias nhung KHONG doc duoc so tap (vi du
+        video tong hop/AMV khong danh so) — van phai nhan dien duoc SERIES
+        (de quan tri tu gan so tap bang tay), `episode_number` la `None`,
+        khong phai loi."""
+        nguon = _nguon()
+        anh_xa = _anh_xa()
+        kq = classify_video(title="Tiên Nghịch AMV tổng hợp cảm động",
+                           channel_id="UC_kenh_A", trusted_source=nguon,
+                           mappings=[anh_xa])
+        self.assertEqual(kq.series_id, "ani_1")
+        self.assertIsNone(kq.episode_number)
+
+    def test_alias_nfc_khop_tieu_de_nfd_va_nguoc_lai(self):
+        """Alias va tieu de go theo hai kieu chuan hoa Unicode khac nhau
+        (NFC/NFD) van phai khop, vi `chuan_hoa()` dua ca hai ve cung mot
+        dang truoc khi so sanh."""
+        nguon = _nguon()
+        anh_xa = _anh_xa(aliases=[unicodedata.normalize("NFD", "Tiên Nghịch")])
+        tieu_de_nfc = unicodedata.normalize("NFC", "Tiên Nghịch Tập 9")
+        kq = classify_video(title=tieu_de_nfc, channel_id="UC_kenh_A",
+                           trusted_source=nguon, mappings=[anh_xa])
+        self.assertEqual(kq.series_id, "ani_1")
+        self.assertEqual(kq.episode_number, 9)
+
+    def test_nam_phat_hanh_canh_so_tap_khong_lam_sai_so_tap(self):
+        """So nam (nam gan lien voi so tap that trong tieu de) khong duoc
+        parser doc nham thanh so tap — so tap dau tien (co tu khoa) phai
+        duoc uu tien, xem `test_episode_parser.py` cho pham vi day du hon."""
+        nguon = _nguon()
+        anh_xa = _anh_xa()
+        kq = classify_video(title="Tiên Nghịch Tập 12 (2024) 1080p",
+                           channel_id="UC_kenh_A", trusted_source=nguon,
+                           mappings=[anh_xa])
+        self.assertEqual(kq.episode_number, 12)
 
 
 if __name__ == "__main__":

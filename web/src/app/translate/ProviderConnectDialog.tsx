@@ -14,7 +14,7 @@
  * (`last4` tu may chu, khong tu cat chuoi o frontend).
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { translate, type ProviderConnection } from "@/lib/api";
 import { ApiError } from "@/lib/api";
 import { errorMessage } from "@/lib/session";
@@ -54,8 +54,9 @@ export default function ProviderConnectDialog({
   const [dangKiemTra, setDangKiemTra] = useState(false);
   const [loi, setLoi] = useState("");
   const [ketQua, setKetQua] = useState<ProviderConnection | null>(null);
-
-  if (!open) return null;
+  const hop = useRef<HTMLDivElement | null>(null);
+  /** Phan tu giu tieu diem TRUOC khi mo — tra ve dung no khi dong. */
+  const truoc = useRef<HTMLElement | null>(null);
 
   const dong = () => {
     setApiKey("");
@@ -63,6 +64,38 @@ export default function ProviderConnectDialog({
     setKetQua(null);
     onClose();
   };
+
+  /* Giu ham DONG moi nhat trong mot ref, KHONG dua vao mang phu thuoc cua
+     effect ben duoi — cung ly do voi `ConfirmDialog` (`components/ui.tsx`):
+     go phim vao o nhap API key lam component render lai, tao mot `dong` MOI
+     moi lan; neu no nam trong deps thi effect don-roi-chay-lai sau MOI PHIM
+     GO va giat tieu diem ra khoi o nhap. */
+  const dongRef = useRef(dong);
+  useEffect(() => {
+    dongRef.current = dong;
+  });
+
+  /* Tieu diem vao hop thoai khi mo, Escape dong, tra tieu diem ve nut da mo
+     khi dong — cung quy tac voi moi hop thoai khac cua app (xem
+     `ReportDialog`, `ImageLightbox`). */
+  useEffect(() => {
+    if (!open) return;
+    truoc.current = document.activeElement as HTMLElement | null;
+    hop.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        dongRef.current();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      truoc.current?.focus();
+    };
+  }, [open]);
+
+  if (!open) return null;
 
   const kiemTraVaKetNoi = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,7 +118,14 @@ export default function ProviderConnectDialog({
     <div className="modal-backdrop" onMouseDown={(e) => {
       if (e.target === e.currentTarget) dong();
     }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="byok-title">
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="byok-title"
+        tabIndex={-1}
+        ref={hop}
+      >
         <h2 id="byok-title">{providerLabel} cá nhân</h2>
         <div className="stack-2 modal-body">
           {ketQua ? (

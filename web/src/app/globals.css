@@ -3950,6 +3950,11 @@ body.co-mini { padding-bottom: 74px; }
   .btn, .btn-sm, .chip, .seg-item, .nav-link, .account-link,
   .brand, .menu-item, .input-search, .novel-pick { min-height: 44px; }
   .btn-sm { padding: 8px 13px; }
+  /* `.bell` (chuong thong bao) bi bo sot khoi danh sach tren: kich thuoc goc
+     34x34 la CO DINH (width/height, khong phai min-height) nen khong tu gian
+     ra duoc — phai nang rieng len 44x44 o day. Dung `min-width`/`min-height`
+     (khong phai `width`/`height` cung) de khop quy uoc chung cua khoi nay. */
+  .bell { min-width: 44px; min-height: 44px; }
   .chip { padding: 8px 14px; }
   /* Nhan trong the truyen KHONG phai vung bam — xem `.chip-static`. */
   .chip-static { min-height: 0; padding: 3px 9px; }
@@ -4288,6 +4293,15 @@ body.co-mini { padding-bottom: 74px; }
   gap: var(--s3);
   padding: var(--s3) var(--s4);
   border-bottom: 1px solid var(--line-soft);
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+/* O tim (.tim-o) tat `outline` mac dinh de tu ve giao dien rieng — buoc
+   nay tra lai mot dau hieu tieu diem ro rang bang box-shadow tren CA CUM
+   khi tieu diem o BAT KY dau ben trong (o nhap hoac bo chon danh muc),
+   cung mau chu voi `.site-search:focus-within`. Thieu buoc nay thi nguoi
+   dung ban phim mo hop tim khong thay o nhap dang giu tieu diem o dau. */
+.tim-dau:focus-within {
+  box-shadow: var(--ring);
 }
 .tim-dau > svg { color: var(--brand-hover); flex: 0 0 auto; }
 .tim-o {

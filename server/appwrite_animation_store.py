@@ -364,6 +364,22 @@ class AppwriteAnimationStore:
                     dem[sid] += 1
         return dem
 
+    def get_series_by_ids(self, series_ids: Sequence[str]) -> Dict[str, AnimationSeries]:
+        """Nhieu series theo ID, MOT truy van moi lo 50 — tranh N+1 khi lam
+        giau danh sach quan tri (Trusted Sources/Import Queue, Phase 5 hieu
+        nang: truoc day moi ID rieng le goi `get_series` MOT truy van HTTP
+        rieng). Loc theo `$id` (KHONG can chi muc rieng): `create_series`
+        dung thang `series.series_id` lam ID tai lieu Appwrite, nen `$id`
+        va `series_id` LUON trung nhau — xem `create_series` o tren."""
+        ds = [s for s in dict.fromkeys(series_ids) if s]
+        ra: Dict[str, AnimationSeries] = {}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_SERIES, [q_equal("$id", *lo)]):
+                s = _series_from_doc(row)
+                ra[s.series_id] = s
+        return ra
+
     def series_tags(self, published_only: bool = True) -> List[str]:
         queries = [q_equal("state", "published")] if published_only else []
         docs = self._list_all(COL_SERIES, queries)

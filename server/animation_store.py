@@ -104,6 +104,14 @@ class MockAnimationStore:
                     dem[e.series_id] += 1
         return dem
 
+    def get_series_by_ids(self, series_ids: Sequence[str]) -> Dict[str, AnimationSeries]:
+        """Nhieu series theo ID trong MOT lan quet — tranh N+1 khi lam giau
+        danh sach quan tri (Trusted Sources/Import Queue, Phase 5 hieu nang),
+        cung idiom voi `MetadataStore.novels_by_ids`."""
+        with self._lock:
+            return {sid: self.series[sid]
+                    for sid in dict.fromkeys(series_ids) if sid and sid in self.series}
+
     def series_tags(self, published_only: bool = True) -> List[str]:
         with self._lock:
             items = list(self.series.values())

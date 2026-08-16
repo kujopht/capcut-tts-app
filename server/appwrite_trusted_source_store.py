@@ -345,6 +345,22 @@ class AppwriteTrustedSourceStore:
     def get_source(self, source_id: str) -> TrustedSource:
         return _nguon_tu_doc(self._get(COL_SOURCES, source_id))
 
+    def get_sources_by_ids(self, source_ids: Sequence[str]) -> Dict[str, TrustedSource]:
+        """Nhieu nguon theo ID, MOT truy van moi lo 50 — tranh N+1 khi lam
+        giau Import Queue (Phase 5 hieu nang: truoc day moi ID rieng le goi
+        `get_source` MOT truy van HTTP rieng). Loc theo `$id` (KHONG can chi
+        muc rieng): `create_source` dung thang `source.source_id` lam ID tai
+        lieu Appwrite, nen `$id` va `source_id` LUON trung nhau, cung ly do
+        voi `get_series_by_ids` o `appwrite_animation_store.py`."""
+        ds = [s for s in dict.fromkeys(source_ids) if s]
+        ra: Dict[str, TrustedSource] = {}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_SOURCES, [q_equal("$id", *lo)]):
+                s = _nguon_tu_doc(row)
+                ra[s.source_id] = s
+        return ra
+
     SOURCE_EDITABLE = (
         "display_name", "enabled", "auto_discover", "auto_import",
         "auto_publish", "minimum_confidence",

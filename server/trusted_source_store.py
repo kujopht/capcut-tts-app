@@ -44,6 +44,13 @@ class MockTrustedSourceStore:
             self.sources[source.source_id] = source
             return source
 
+    def get_sources_by_ids(self, source_ids: Sequence[str]) -> Dict[str, TrustedSource]:
+        """Nhieu nguon theo ID trong MOT lan quet — tranh N+1 khi lam giau
+        Import Queue (Phase 5 hieu nang), cung idiom voi `mapping_counts`."""
+        with self._lock:
+            return {sid: self.sources[sid]
+                    for sid in dict.fromkeys(source_ids) if sid and sid in self.sources}
+
     def get_source(self, source_id: str) -> TrustedSource:
         source = self.sources.get(source_id)
         if source is None:

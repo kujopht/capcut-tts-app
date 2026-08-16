@@ -35,7 +35,11 @@ _KEYWORD_RE = re.compile(
 #: day du (de nham voi ky tu dau cua mot tu khac). Yeu cau ranh gioi tu ca
 #: hai phia (`\b`) de "E12" trong "SE12x01" (vi du) khong bi bat nham — dang
 #: do hiem trong tieu de Animation tieng Viet nen chap nhan duoc.
-_BARE_E_RE = re.compile(r"\bE(\d{1,4})\b")
+#: `re.IGNORECASE` BAT BUOC — module nay cam ket "khong phan biet hoa/thuong"
+#: (xem docstring dau file); thieu co nay se lam "e12" (thuong) khong khop
+#: trong khi "E12" (hoa) khop, mau thuan voi chinh cam ket do (bug tim thay
+#: qua fuzz corpus Phase 7).
+_BARE_E_RE = re.compile(r"\bE(\d{1,4})\b", re.IGNORECASE)
 
 
 def parse_episode_number(title: str) -> Optional[int]:

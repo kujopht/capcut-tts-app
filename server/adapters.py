@@ -68,6 +68,20 @@ class AuthError(Exception):
     """Sai thong tin dang nhap hoac phien khong hop le."""
 
 
+class AppwriteUnavailableError(AuthError):
+    """
+    Khong ket noi duoc Appwrite (mang loi/DNS/timeout/host chet) - KHAC voi
+    sai thong tin dang nhap hay phien het han.
+
+    La CON cua `AuthError` (khong phai loai moi hoan toan) de code cu bat
+    `except AuthError` van bat duoc no va khong crash - nhung noi nao CAN
+    phan biet "backend phu thuoc dang gian doan" (503, loi tam thoi, thu lai
+    duoc) voi "nguoi dung sai thong tin" (401/400, loi vinh vien cho toi khi
+    ho sua) PHAI bat lop nay TRUOC `AuthError`. Xem `server/appwrite_adapter.py`
+    (`_request`) noi no duoc nem, va `server/main.py` noi no duoc bat.
+    """
+
+
 class NotFoundError(Exception):
     """Khong tim thay ban ghi."""
 

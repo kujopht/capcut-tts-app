@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from server.adapters import AuthError
+from server.adapters import AppwriteUnavailableError, AuthError
 from server.appwrite_store import (
     q_contains as _q_contains,
     q_equal as _q_equal,
@@ -140,7 +140,19 @@ class AppwriteIdentityAdapter:
                 headers=self._headers(admin=admin, session=session),
             )
         except httpx.HTTPError as exc:
-            raise AuthError(f"Không kết nối được Appwrite: {exc}") from exc
+            # KHONG dua `exc` thang vao thong diep: no co the chua chi tiet
+            # ha tang noi bo (vd loi DNS/errno cua he dieu hanh, endpoint) -
+            # cung nguyen tac voi `youtube_client.py::_goi`. Phat hien THAT
+            # (Phase 10, overnight hardening): truoc day thong diep noi
+            # `f"...: {exc}"`, nen mot Appwrite khong ket noi duoc se lam
+            # "[Errno 11001] getaddrinfo failed" lot ra tan phan hoi JSON.
+            #
+            # `AppwriteUnavailableError` (con cua `AuthError`, xem
+            # `server/adapters.py`) de noi goi (main.py) tra 503 thay vi
+            # 401/400 - day la loi TAM THOI cua ha tang, khong phai nguoi
+            # dung sai thong tin.
+            raise AppwriteUnavailableError(
+                "Không kết nối được Appwrite. Vui lòng thử lại sau.") from exc
 
         if response.status_code >= 400:
             try:

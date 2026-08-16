@@ -190,7 +190,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               "trusted_source_update", "trusted_source_remove",
               "youtube_mapping_remove",
               "video_scan_start", "video_import", "video_import_publish",
-              "video_reject", "video_ignore"]),
+              "video_reject", "video_ignore",
+              # Phase 6 (YouTube WebSub + pipeline tu dong) — dang ky/gia
+              # han/thong bao qua PubSubHubbub, va ket qua pipeline tu dong
+              # (khac voi "video_import"/"video_reject" thu cong o tren).
+              "websub_subscribe", "websub_unsubscribe", "websub_renew",
+              "websub_notification", "websub_failure",
+              "auto_video_discover", "auto_video_import", "auto_video_publish",
+              "reconciliation_run"]),
             ("target_user_id", "string", True, 64),
             # Rong = he thong (vd migration grandfather), khong phai mot nguoi.
             ("actor_id", "string", False, 64),
@@ -641,11 +648,19 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("last_success_at", "datetime", False, None),
             ("last_error_at", "datetime", False, None),
             ("last_error_message", "string", False, 1000),
-            # WebSub (Phase 6) — TON TAI TU BAY GIO nhung CHUA co logic dang
-            # ky nao doc/ghi chung, xem `SubscriptionStatus`.
+            # WebSub (Phase 6) — dang ky/gia han that voi hub PubSubHubbub
+            # cua YouTube, xem `SubscriptionStatus`/`server/youtube_websub.py`.
             ("subscription_status", "enum", True,
              ["none", "pending", "active", "expired", "failed"]),
             ("subscription_expires_at", "datetime", False, None),
+            ("last_subscription_attempt_at", "datetime", False, None),
+            ("last_notification_at", "datetime", False, None),
+            ("last_websub_error", "string", False, 1000),
+            ("last_successful_sync_at", "datetime", False, None),
+            # Bi mat HMAC ky/xac minh thong bao WebSub — KHONG BAO GIO ra
+            # `to_dict()`/API quan tri, xem docstring `TrustedSource.
+            # websub_secret`. Do dai du cho `secrets.token_urlsafe(32)`.
+            ("websub_secret", "string", False, 64),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],

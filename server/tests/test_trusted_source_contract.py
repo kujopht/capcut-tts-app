@@ -108,6 +108,48 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                 self.assertEqual(len(trang1), 2, ten)
                 self.assertEqual(tong, 5, ten)
 
+    def test_writable_chuyen_chuoi_rong_datetime_thanh_null(self):
+        """
+        Appwrite THẬT (tự lưu trữ) tự điền giờ server HIỆN TẠI khi nhận chuỗi
+        rỗng "" cho một thuộc tính `datetime` KHÔNG bắt buộc, thay vì null như
+        kỳ vọng — đã xác nhận THẬT trên môi trường dev (Phase 6): một nguồn/
+        video import MỚI tạo trông như đã từng quét/đăng ký/duyệt ngay lúc
+        tạo. `_writable` phải đổi "" -> None cho các trường datetime TRƯỚC khi
+        gửi lên, `FakeAppwrite` không mô phỏng tật này nên bài test đọc thẳng
+        payload `_writable` sinh ra thay vì round-trip qua kho giả.
+        """
+        kho = _kho_appwrite(FakeAppwrite())
+        ra = kho._writable("trusted_sources", {
+            "source_id": "tsrc_x", "last_scan_at": "", "last_success_at": "",
+            "last_error_at": "", "subscription_expires_at": "",
+            "last_subscription_attempt_at": "", "last_notification_at": "",
+            "last_successful_sync_at": "",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })
+        for truong in ("last_scan_at", "last_success_at", "last_error_at",
+                      "subscription_expires_at", "last_subscription_attempt_at",
+                      "last_notification_at", "last_successful_sync_at"):
+            self.assertIsNone(ra[truong], truong)
+        self.assertEqual(ra["created_at"], "2026-01-01T00:00:00+00:00")
+
+        ra2 = kho._writable("video_imports", {
+            "import_id": "vi_x", "published_at": "", "reviewed_at": "",
+        })
+        self.assertIsNone(ra2["published_at"])
+        self.assertIsNone(ra2["reviewed_at"])
+
+    def test_create_source_that_khong_gia_lam_da_tung_dong_bo(self):
+        """Hoi quy o muc create_source: dung THANG API cong khai cua kho (bao
+        gom qua FakeAppwrite) — cac truong datetime WebSub phai la chuoi rong
+        sau khi doc lai, KHONG phai gia tri THAT truyen vao _writable o day."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_source(TrustedSource(youtube_channel_id="UC1"))
+                lai = kho.get_source(s.source_id)
+                self.assertEqual(lai.last_notification_at, "", ten)
+                self.assertEqual(lai.last_successful_sync_at, "", ten)
+                self.assertEqual(lai.subscription_expires_at, "", ten)
+
     def test_record_scan_result_thanh_cong_va_that_bai(self):
         for ten, kho in self._cac_kho():
             with self.subTest(kho=ten):

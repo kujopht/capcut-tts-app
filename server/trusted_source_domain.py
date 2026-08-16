@@ -141,11 +141,40 @@ class TrustedSource:
     last_error_message: str = ""
     subscription_status: SubscriptionStatus = SubscriptionStatus.NONE
     subscription_expires_at: str = ""
+    #: Lan gan nhat THU dang ky/gia han (bat ke thanh cong hay khong) — khac
+    #: `subscription_expires_at` (lan hub XAC NHAN). Phase 6 - WebSub.
+    last_subscription_attempt_at: str = ""
+    #: Lan gan nhat NHAN duoc mot thong bao POST that tu hub — dau hieu
+    #: "dang ky con song", doc lap voi viec xu ly thong bao do co thanh
+    #: cong hay khong. Phase 6.
+    last_notification_at: str = ""
+    #: Thong diep loi AN TOAN gan nhat lien quan WebSub (dang ky/gia han/xu
+    #: ly thong bao That bai) — hien cho quan tri xem, KHONG BAO GIO chua
+    #: bi mat. Phase 6.
+    last_websub_error: str = ""
+    #: Lan gan nhat doi chieu dinh ky (Phase 6, muc 9) thanh cong tim/xu ly
+    #: xong danh sach video gan day — DOC LAP voi `last_scan_at` (quet thu
+    #: cong tu trang chi tiet nguon).
+    last_successful_sync_at: str = ""
+    #: Bi mat HMAC dung de KY (luc dang ky) va XAC MINH (luc nhan thong bao)
+    #: chu ky `X-Hub-Signature` cua hub — sinh ngau nhien luc dang ky, KHONG
+    #: BAO GIO xuat hien trong `to_dict()` (xem docstring o do va
+    #: `ProviderConnection.encrypted_secret` cung mau trong
+    #: `translation_domain.py` — day la RANH GIOI AN TOAN duy nhat cho
+    #: truong nay). Kho Appwrite dung ham rieng de ghi/doc, xem
+    #: `appwrite_trusted_source_store.py::_nguon_thanh_hang`/`_nguon_tu_doc`.
+    websub_secret: str = ""
     source_id: str = field(default_factory=lambda: new_id("tsrc"))
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
 
     def to_dict(self) -> Dict[str, Any]:
+        """
+        AN TOAN de tra ve qua API quan tri — xem docstring `websub_secret`.
+        `websub_secret` CO CHU DICH khong nam trong dict nay: day la RANH
+        GIOI DUY NHAT ngan bi mat that lo ra ngoai, cung nguyen tac voi
+        `ProviderConnection.to_dict()` (BYOK, V5.1).
+        """
         return {
             "source_id": self.source_id,
             "source_type": self.source_type.value,
@@ -166,6 +195,10 @@ class TrustedSource:
             "last_error_message": self.last_error_message,
             "subscription_status": self.subscription_status.value,
             "subscription_expires_at": self.subscription_expires_at,
+            "last_subscription_attempt_at": self.last_subscription_attempt_at,
+            "last_notification_at": self.last_notification_at,
+            "last_websub_error": self.last_websub_error,
+            "last_successful_sync_at": self.last_successful_sync_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

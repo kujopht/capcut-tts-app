@@ -41,6 +41,8 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "auto_discover", "auto_import", "auto_publish", "minimum_confidence",
         "created_by", "last_scan_at", "last_success_at", "last_error_at",
         "last_error_message", "subscription_status", "subscription_expires_at",
+        "last_subscription_attempt_at", "last_notification_at",
+        "last_websub_error", "last_successful_sync_at", "websub_secret",
         "created_at", "updated_at",
     ),
     COL_MAPPINGS: (
@@ -56,6 +58,21 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "reason", "created_episode_id", "reviewed_by", "reviewed_at",
         "created_at", "updated_at",
     ),
+}
+
+# Cac thuoc tinh KIEU `datetime` (khong bat buoc) tren tung collection — xem
+# ghi chu o `_writable`: Appwrite (tu luu tru) TU DIEN gio server HIEN TAI khi
+# nhan chuoi rong "" cho thuoc tinh datetime khong bat buoc, thay vi null nhu
+# ky vong (da xac nhan THAT tren moi truong dev — KHONG phai suy doan). Bug
+# nay lam MOI nguon tin cay/video import MOI tao trong nhu da tung quet/dang
+# ky/duyet ngay tu luc tao.
+_DATETIME_FIELDS: Dict[str, tuple] = {
+    COL_SOURCES: (
+        "last_scan_at", "last_success_at", "last_error_at",
+        "subscription_expires_at", "last_subscription_attempt_at",
+        "last_notification_at", "last_successful_sync_at",
+    ),
+    COL_IMPORTS: ("published_at", "reviewed_at"),
 }
 
 REQUEST_TIMEOUT = 15.0
@@ -112,9 +129,27 @@ def _nguon_tu_doc(doc: Dict[str, Any]) -> TrustedSource:
         last_error_message=str(doc.get("last_error_message") or ""),
         subscription_status=sub,
         subscription_expires_at=str(doc.get("subscription_expires_at") or ""),
+        last_subscription_attempt_at=str(doc.get("last_subscription_attempt_at") or ""),
+        last_notification_at=str(doc.get("last_notification_at") or ""),
+        last_websub_error=str(doc.get("last_websub_error") or ""),
+        last_successful_sync_at=str(doc.get("last_successful_sync_at") or ""),
+        websub_secret=str(doc.get("websub_secret") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
+
+
+def _nguon_thanh_hang(source: TrustedSource) -> Dict[str, Any]:
+    """
+    Ban ghi DAY DU de GHI len Appwrite — KHAC `TrustedSource.to_dict()`
+    (an toan, tra ve API) o DUY NHAT MOT diem: co them `websub_secret`. Cung
+    mau voi `appwrite_translation_store.py::_connection_to_row` (BYOK,
+    V5.1) — hai ham serialize TACH BIET cho hai muc dich, khong phai mot
+    dict dung chung.
+    """
+    ra = source.to_dict()
+    ra["websub_secret"] = source.websub_secret
+    return ra
 
 
 def _anh_xa_tu_doc(doc: Dict[str, Any]) -> SeriesMapping:
@@ -246,6 +281,9 @@ class AppwriteTrustedSourceStore:
         allowed = _PERSISTED_FIELDS.get(collection)
         fields = ({k: v for k, v in data.items() if k in allowed}
                  if allowed is not None else dict(data))
+        for ten in _DATETIME_FIELDS.get(collection, ()):
+            if fields.get(ten) == "":
+                fields[ten] = None
         available = self._supported_fields(collection)
         if available is None:
             return fields
@@ -295,7 +333,7 @@ class AppwriteTrustedSourceStore:
     # -- trusted source -------------------------------------------------------
 
     def create_source(self, source: TrustedSource) -> TrustedSource:
-        self._create(COL_SOURCES, source.source_id, source.to_dict())
+        self._create(COL_SOURCES, source.source_id, _nguon_thanh_hang(source))
         return source
 
     def get_source(self, source_id: str) -> TrustedSource:
@@ -346,6 +384,59 @@ class AppwriteTrustedSourceStore:
             data["last_error_at"] = moc
             data["last_error_message"] = error_message
         self._update(COL_SOURCES, source_id, data)
+        return self.get_source(source_id)
+
+    def find_source_by_channel_id(self, channel_id: str) -> Optional[TrustedSource]:
+        """Tra cuu THEO `channel_idx` (index co san tu Phase 5) — dung boi
+        callback WebSub (Phase 6) de biet mot thong bao thuoc nguon nao,
+        KHONG can quet toan bang."""
+        if not channel_id:
+            return None
+        docs, _total = self._page(COL_SOURCES, [
+            q_equal("youtube_channel_id", channel_id), q_limit(1)])
+        return _nguon_tu_doc(docs[0]) if docs else None
+
+    def record_websub_subscription(
+        self, source_id: str, *, status: SubscriptionStatus,
+        expires_at: str = "", secret: Optional[str] = None,
+    ) -> TrustedSource:
+        """
+        Ghi lai KET QUA mot lan thu dang ky/gia han/huy dang ky WebSub
+        (Phase 6). `secret` CHI ghi de khi truyen THAT (khac `None`) — goi
+        de HUY dang ky (`status=NONE`) khong can/khong nen xoa bi mat dang
+        dung do dang ky co the dang xu ly dong thoi; `subscribe_source` moi
+        la noi sinh bi mat MOI va truyen vao day.
+        """
+        moc = now_iso()
+        data: Dict[str, Any] = {
+            "subscription_status": status.value,
+            "last_subscription_attempt_at": moc,
+            "updated_at": moc,
+        }
+        if expires_at:
+            data["subscription_expires_at"] = expires_at
+        if secret is not None:
+            data["websub_secret"] = secret
+        self._update(COL_SOURCES, source_id, data)
+        return self.get_source(source_id)
+
+    def record_websub_notification(self, source_id: str) -> TrustedSource:
+        moc = now_iso()
+        self._update(COL_SOURCES, source_id,
+                     {"last_notification_at": moc, "updated_at": moc})
+        return self.get_source(source_id)
+
+    def record_websub_failure(self, source_id: str, *, error_message: str) -> TrustedSource:
+        moc = now_iso()
+        self._update(COL_SOURCES, source_id, {
+            "last_websub_error": error_message, "updated_at": moc,
+        })
+        return self.get_source(source_id)
+
+    def record_reconciliation_sync(self, source_id: str) -> TrustedSource:
+        moc = now_iso()
+        self._update(COL_SOURCES, source_id,
+                     {"last_successful_sync_at": moc, "updated_at": moc})
         return self.get_source(source_id)
 
     # -- series mapping -----------------------------------------------------

@@ -17,6 +17,7 @@ BA phu thuoc ngoai chinh:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from server.adapters import NotFoundError
@@ -25,6 +26,7 @@ from server.domain import ModerationEvent, Profile, PublishState, now_iso
 from server.trusted_source_domain import (
     ImportStatus,
     SeriesMapping,
+    SubscriptionStatus,
     TrustedSource,
     TrustedSourceType,
     VideoImport,
@@ -37,12 +39,31 @@ from server.youtube_client import (
     YouTubeConfigError,
     parse_source_url,
 )
+from server.youtube_websub import (
+    WebSubClient,
+    WebSubConfigError,
+    WebSubError,
+    WebSubParseError,
+    build_callback_url,
+    build_topic_url,
+    new_secret as new_websub_secret,
+    parse_notification,
+    verify_signature,
+)
 
 #: So trang toi da MOI LAN QUET (moi trang 50 video) — "bounded YouTube API
 #: calls", xem yeu cau hieu nang Phase 5. Quet tiep bang cach goi lai voi
 #: `page_token` tra ve.
 MAX_SCAN_PAGES = 5
 DEFAULT_SCAN_PAGES = 2
+
+#: Doi chieu dinh ky (Phase 6) chi quet MOT trang/nguon — day la du phong
+#: cho video BO LO, khong phai mot lan quet lich su day du (nguoi quan tri
+#: dung "Quet video co san" thu cong cho viec do).
+RECONCILIATION_MAX_PAGES = 1
+#: Tu dong gia han dang ky khi con duoi nguong nay truoc han het — WebSub
+#: KHONG BAO GIO cap thoi han vinh vien (xem `server/youtube_websub.py`).
+RENEWAL_WINDOW = timedelta(hours=24)
 
 
 class TrustedSourceError(Exception):
@@ -52,11 +73,12 @@ class TrustedSourceError(Exception):
 
 class TrustedSourceService:
     def __init__(self, store: Any, animation_store: Any, metadata_store: Any,
-                youtube_api_key: str = ""):
+                youtube_api_key: str = "", websub_callback_base_url: str = ""):
         self._store = store
         self._animation_store = animation_store
         self._metadata_store = metadata_store
         self._youtube_api_key = youtube_api_key
+        self._websub_callback_base_url = (websub_callback_base_url or "").rstrip("/")
 
     def _youtube(self) -> YouTubeClient:
         """Nem `YouTubeConfigError` NGAY o day neu chua cau hinh — tang tren
@@ -66,6 +88,16 @@ class TrustedSourceService:
 
     def youtube_configured(self) -> bool:
         return bool(self._youtube_api_key)
+
+    def _websub(self) -> WebSubClient:
+        return WebSubClient()
+
+    def websub_configured(self) -> bool:
+        """`False` khi CHUA co URL callback cong khai — Phase 6 dang phat
+        trien tren backend cuc bo, YouTube khong the goi toi duoc (xem
+        docstring dau `server/youtube_websub.py`). Frontend hien "Chưa cấu
+        hình" thay vi mot trang thai dang ky bia dat."""
+        return bool(self._websub_callback_base_url)
 
     # ==================================================== them nguon (preview)
 
@@ -225,6 +257,10 @@ class TrustedSourceService:
             "source": source.to_dict(),
             "mappings": anh_xa_ra,
             "recent_imports": [i.to_dict() for i in gan_day],
+            # Phase 6 — su that TOAN CUC (khong phai theo tung nguon): frontend
+            # can biet WebSub co the dung duoc o MOI TRUONG nay hay khong de
+            # hien "Chưa cấu hình" thay vi mot trang thai dang ky bia dat.
+            "websub_configured": self.websub_configured(),
         }
 
     def _ten_series_theo_id(self, series_ids: Sequence[str]) -> Dict[str, str]:
@@ -264,6 +300,18 @@ class TrustedSourceService:
             source = self._store.get_source(source_id)
         except NotFoundError:
             return False
+        # Huy dang ky WebSub TRUOC khi xoa (Phase 6) — CO GANG HET SUC, khong
+        # chan viec xoa neu hub khong phan hoi (nguon sap bien mat khoi kho
+        # cua ta, con thue bao "ma" o phia hub khong con y nghia gi voi
+        # nghiep vu, ghi loi de quan tri biet neu can tu don don sau).
+        if (self.websub_configured()
+                and source.subscription_status is not SubscriptionStatus.NONE):
+            try:
+                self._thuc_hien_huy_dang_ky(source)
+            except WebSubError as exc:
+                self._ghi_nhat_ky(
+                    "websub_failure", target_id=source_id, actor_id=admin.user_id,
+                    actor_role=actor_role, note=str(exc))
         self._store.delete_source(source_id)
         self._ghi_nhat_ky(
             "trusted_source_remove", target_id=source_id, actor_id=admin.user_id,
@@ -368,25 +416,9 @@ class TrustedSourceService:
                 dem["already_tracked"] += 1
                 continue  # DA CO ban ghi — KHONG phan loai lai (idempotent).
 
-            if vid in da_la_tap:
-                self._store.create_import_once(VideoImport(
-                    trusted_source_id=source_id, youtube_video_id=vid,
-                    title=v["title"], channel_id=v["channel_id"],
-                    channel_title=v["channel_title"], thumbnail_url=v["thumbnail_url"],
-                    published_at=v["published_at"], duration_seconds=v["duration_seconds"],
-                    status=ImportStatus.DUPLICATE,
-                    reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác."))
-                dem["duplicates"] += 1
-                continue
-
-            ket_qua = classify_video(
-                title=v["title"], channel_id=v["channel_id"],
-                trusted_source=source, mappings=mappings,
-                episodes_by_series=episodes_by_series)
-
-            trang_thai, ly_do, episode_id = self._quyet_dinh_trang_thai(
-                source=source, mappings_by_id={m.mapping_id: m for m in mappings},
-                ket_qua=ket_qua, video=v, episodes_by_series=episodes_by_series)
+            trang_thai, matched = self._phan_loai_va_ghi_mot_video(
+                source=source, mappings=mappings, episodes_by_series=episodes_by_series,
+                video=v, da_la_tap=da_la_tap)
 
             if trang_thai in (ImportStatus.AUTO_IMPORTED, ImportStatus.AUTO_PUBLISHED):
                 dem["auto_imported" if trang_thai is ImportStatus.AUTO_IMPORTED
@@ -397,24 +429,63 @@ class TrustedSourceService:
                 dem["excluded"] += 1
             elif trang_thai is ImportStatus.CONFLICT:
                 dem["conflicts"] += 1
-            if ket_qua.series_id:
+            elif trang_thai is ImportStatus.DUPLICATE:
+                dem["duplicates"] += 1
+            if matched:
                 dem["matched"] += 1
-
-            self._store.create_import_once(VideoImport(
-                trusted_source_id=source_id, youtube_video_id=vid,
-                title=v["title"], channel_id=v["channel_id"],
-                channel_title=v["channel_title"], thumbnail_url=v["thumbnail_url"],
-                published_at=v["published_at"], duration_seconds=v["duration_seconds"],
-                detected_mapping_id=ket_qua.mapping_id,
-                detected_series_id=ket_qua.series_id,
-                detected_episode_number=ket_qua.episode_number,
-                confidence=ket_qua.confidence, signals=list(ket_qua.signals),
-                status=trang_thai, reason=ly_do, created_episode_id=episode_id,
-            ))
 
         self._store.record_scan_result(source_id, success=True)
         dem["next_page_token"] = next_token
         return dem
+
+    def _phan_loai_va_ghi_mot_video(
+        self, *, source: TrustedSource, mappings: List[SeriesMapping],
+        episodes_by_series: Dict[str, Sequence[int]], video: Dict[str, Any],
+        da_la_tap: Dict[str, AnimationEpisode],
+    ) -> tuple:
+        """
+        Phan loai + luu MOT video — dung CHUNG boi `scan_source` (quet thu
+        cong/doi chieu dinh ky) VA pipeline WebSub (Phase 6,
+        `_xu_ly_mot_video_websub`). MOT duong quyet dinh DUY NHAT: hai kenh
+        phat hien (quet thu cong vs thong bao tu dong) khong duoc phep dua
+        ra ket qua KHAC NHAU cho cung mot video.
+
+        Tra `(status, matched: bool)` — `matched` la co `ket_qua.series_id`
+        hay khong (dung de dem "Khớp series", KHONG tinh cho nhanh DUPLICATE
+        vi video do chua tung duoc phan loai).
+        """
+        vid = video["video_id"]
+        if vid in da_la_tap:
+            self._store.create_import_once(VideoImport(
+                trusted_source_id=source.source_id, youtube_video_id=vid,
+                title=video["title"], channel_id=video["channel_id"],
+                channel_title=video["channel_title"], thumbnail_url=video["thumbnail_url"],
+                published_at=video["published_at"], duration_seconds=video["duration_seconds"],
+                status=ImportStatus.DUPLICATE,
+                reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác."))
+            return ImportStatus.DUPLICATE, False
+
+        ket_qua = classify_video(
+            title=video["title"], channel_id=video["channel_id"],
+            trusted_source=source, mappings=mappings,
+            episodes_by_series=episodes_by_series)
+
+        trang_thai, ly_do, episode_id = self._quyet_dinh_trang_thai(
+            source=source, mappings_by_id={m.mapping_id: m for m in mappings},
+            ket_qua=ket_qua, video=video, episodes_by_series=episodes_by_series)
+
+        self._store.create_import_once(VideoImport(
+            trusted_source_id=source.source_id, youtube_video_id=vid,
+            title=video["title"], channel_id=video["channel_id"],
+            channel_title=video["channel_title"], thumbnail_url=video["thumbnail_url"],
+            published_at=video["published_at"], duration_seconds=video["duration_seconds"],
+            detected_mapping_id=ket_qua.mapping_id,
+            detected_series_id=ket_qua.series_id,
+            detected_episode_number=ket_qua.episode_number,
+            confidence=ket_qua.confidence, signals=list(ket_qua.signals),
+            status=trang_thai, reason=ly_do, created_episode_id=episode_id,
+        ))
+        return trang_thai, bool(ket_qua.series_id)
 
     def _lay_ung_vien(self, yt: YouTubeClient, source: TrustedSource,
                       page_token: str, max_pages: int) -> tuple:
@@ -672,14 +743,357 @@ class TrustedSourceService:
             actor_role=actor_role)
         return updated.to_dict()
 
+    # ==================================================== WebSub (Phase 6)
+    #
+    # Ba manh: (1) dang ky/huy dang ky/gia han qua hub PubSubHubbub, (2) hai
+    # route CONG KHAI (`/api/youtube/websub`) doi thoai voi hub — xac minh
+    # (GET) va thong bao (POST), (3) doi chieu dinh ky du phong. CHI nguon
+    # kieu `youtube_channel` co feed WebSub — playlist/video don le KHONG
+    # dang ky duoc.
+
+    def _thuc_hien_dang_ky(self, source: TrustedSource) -> TrustedSource:
+        """Goi hub THAT + ghi lai ket qua — dung CHUNG boi hanh dong dang ky
+        cua quan tri (`subscribe_source`) VA gia han tu dong luc doi chieu
+        dinh ky (`_gia_han_neu_sap_het_han`). Nem `WebSubError` (thong diep
+        AN TOAN) neu hub tu choi — nguoi goi tu quyet dinh xu ly tiep."""
+        if not self.websub_configured():
+            raise WebSubConfigError(
+                "Chưa cấu hình URL callback công khai "
+                "(YOUTUBE_WEBSUB_CALLBACK_BASE_URL) — WebSub cần một backend "
+                "công khai qua HTTPS, xem tài liệu Phase 6.")
+        secret = new_websub_secret()
+        callback_url = build_callback_url(self._websub_callback_base_url, source.source_id)
+        try:
+            self._websub().subscribe(
+                channel_id=source.youtube_channel_id, callback_url=callback_url,
+                secret=secret)
+        except WebSubError as exc:
+            self._store.record_websub_subscription(
+                source.source_id, status=SubscriptionStatus.FAILED)
+            self._store.record_websub_failure(source.source_id, error_message=str(exc))
+            raise
+        return self._store.record_websub_subscription(
+            source.source_id, status=SubscriptionStatus.PENDING, secret=secret)
+
+    def _thuc_hien_huy_dang_ky(self, source: TrustedSource) -> TrustedSource:
+        callback_url = build_callback_url(self._websub_callback_base_url, source.source_id)
+        try:
+            self._websub().unsubscribe(
+                channel_id=source.youtube_channel_id, callback_url=callback_url)
+        except WebSubError as exc:
+            self._store.record_websub_failure(source.source_id, error_message=str(exc))
+            raise
+        return self._store.record_websub_subscription(
+            source.source_id, status=SubscriptionStatus.NONE, secret="")
+
+    def subscribe_source(self, admin: Profile, source_id: str, *,
+                         actor_role: str = "") -> Dict[str, Any]:
+        """Dang ky (hoac gia han — WebSub cho phep dang ky lai truoc han de
+        gia han) mot nguon kieu kenh voi hub PubSubHubbub — nut "Đăng ký"/
+        "Đăng ký lại" tren trang chi tiet nguon."""
+        source = self._store.get_source(source_id)
+        if source.source_type is not TrustedSourceType.YOUTUBE_CHANNEL:
+            raise TrustedSourceError(
+                "Chỉ nguồn kiểu kênh YouTube mới đăng ký WebSub được.")
+        try:
+            updated = self._thuc_hien_dang_ky(source)
+        except WebSubError as exc:
+            self._ghi_nhat_ky(
+                "websub_failure", target_id=source_id, actor_id=admin.user_id,
+                actor_role=actor_role, note=str(exc))
+            raise TrustedSourceError(str(exc)) from exc
+        self._ghi_nhat_ky(
+            "websub_subscribe", target_id=source_id, actor_id=admin.user_id,
+            actor_role=actor_role)
+        return updated.to_dict()
+
+    def unsubscribe_source(self, admin: Profile, source_id: str, *,
+                           actor_role: str = "") -> Dict[str, Any]:
+        source = self._store.get_source(source_id)
+        if source.subscription_status is SubscriptionStatus.NONE:
+            return source.to_dict()  # khong co gi de huy — khong goi hub vo ich.
+        try:
+            updated = self._thuc_hien_huy_dang_ky(source)
+        except WebSubError as exc:
+            self._ghi_nhat_ky(
+                "websub_failure", target_id=source_id, actor_id=admin.user_id,
+                actor_role=actor_role, note=str(exc))
+            raise TrustedSourceError(str(exc)) from exc
+        self._ghi_nhat_ky(
+            "websub_unsubscribe", target_id=source_id, actor_id=admin.user_id,
+            actor_role=actor_role)
+        return updated.to_dict()
+
+    def _gia_han_neu_sap_het_han(self, source: TrustedSource) -> None:
+        """Tu dong dang ky lai khi con duoi `RENEWAL_WINDOW` truoc han het —
+        goi tu `run_reconciliation`, KHONG can quan tri bam gi ca. Loi o day
+        CHI ghi lai, khong lam hong ca luot doi chieu."""
+        if source.subscription_status not in (
+                SubscriptionStatus.ACTIVE, SubscriptionStatus.EXPIRED):
+            return
+        if not source.subscription_expires_at:
+            return
+        try:
+            han = datetime.fromisoformat(source.subscription_expires_at)
+        except ValueError:
+            return
+        if han.tzinfo is None:
+            han = han.replace(tzinfo=timezone.utc)
+        if han - datetime.now(timezone.utc) > RENEWAL_WINDOW:
+            return
+        try:
+            self._thuc_hien_dang_ky(source)
+        except WebSubError as exc:
+            self._ghi_nhat_ky(
+                "websub_failure", target_id=source.source_id, actor_id="",
+                actor_role="system", note=str(exc))
+            return
+        self._ghi_nhat_ky(
+            "websub_renew", target_id=source.source_id, actor_id="",
+            actor_role="system")
+
+    def handle_websub_verification(
+        self, *, source_id: str, mode: str, topic: str, challenge: str,
+        lease_seconds: str,
+    ) -> Optional[str]:
+        """
+        GET tu hub de xac minh mot yeu cau dang ky/huy dang ky (dac ta
+        WebSub, xem `server/youtube_websub.py`). Tra chuoi `challenge` DE
+        ROUTE ECHO NGUYEN VEN neu chap nhan, `None` neu tu choi (route tra
+        404 — dac ta: "return HTTP 404 if subscriber doesn't agree").
+        """
+        try:
+            source = self._store.get_source(source_id)
+        except NotFoundError:
+            return None
+        if mode != "denied" and topic != build_topic_url(source.youtube_channel_id):
+            return None  # topic khong khop nguon nay — tu choi, khong doan.
+
+        if mode == "subscribe":
+            het_han = ""
+            try:
+                giay = int(lease_seconds)
+                het_han = (datetime.now(timezone.utc) + timedelta(seconds=max(0, giay))) \
+                    .isoformat(timespec="seconds")
+            except (TypeError, ValueError):
+                pass
+            self._store.record_websub_subscription(
+                source_id, status=SubscriptionStatus.ACTIVE, expires_at=het_han)
+        elif mode == "unsubscribe":
+            self._store.record_websub_subscription(
+                source_id, status=SubscriptionStatus.NONE, secret="")
+        elif mode == "denied":
+            self._store.record_websub_subscription(
+                source_id, status=SubscriptionStatus.FAILED)
+            self._store.record_websub_failure(
+                source_id, error_message="Hub từ chối đăng ký (denied).")
+            self._ghi_nhat_ky(
+                "websub_failure", target_id=source_id, actor_id="",
+                actor_role="system", note="Hub từ chối đăng ký.")
+        else:
+            return None
+        return challenge
+
+    def handle_websub_notification(
+        self, *, source_id: str, body: bytes, signature_header: str,
+    ) -> Optional[bool]:
+        """
+        POST tu hub bao video moi/cap nhat/da xoa. Tra `None` neu `source_id`
+        KHONG TON TAI (route doi thanh 404, cung mau voi
+        `handle_websub_verification` — day khong phai mot lan giao that,
+        chi la mot URL callback ta chua tung dang ky). Tra `True`/`False`
+        khi nguon TON TAI (route LUON tra 200 cho ca hai — dac ta WebSub: ma
+        thanh cong CHI co nghia DA NHAN, khong phai da xu ly xong THANH
+        CONG; `False` (chu ky sai/XML hong) chi anh huong nhat ky noi bo).
+        """
+        try:
+            source = self._store.get_source(source_id)
+        except NotFoundError:
+            return None
+
+        if not verify_signature(source.websub_secret, body, signature_header):
+            self._store.record_websub_failure(
+                source_id, error_message="Chữ ký X-Hub-Signature không hợp lệ.")
+            self._ghi_nhat_ky(
+                "websub_failure", target_id=source_id, actor_id="",
+                actor_role="system", note="Chữ ký không hợp lệ.")
+            return False
+
+        self._store.record_websub_notification(source_id)
+        self._ghi_nhat_ky(
+            "websub_notification", target_id=source_id, actor_id="",
+            actor_role="system")
+
+        try:
+            parsed = parse_notification(body)
+        except WebSubParseError as exc:
+            self._store.record_websub_failure(source_id, error_message=str(exc))
+            return False
+
+        if not source.enabled or not source.auto_discover:
+            return True  # da nhan, nhung auto_discover tat — khong lam gi them.
+
+        for entry in parsed.entries:
+            if entry.channel_id != source.youtube_channel_id:
+                continue  # thong bao khong dung kenh nguon nay — khong tin, bo qua.
+            try:
+                self._xu_ly_mot_video_websub(source, entry.video_id)
+            except (YouTubeConfigError, YouTubeApiError) as exc:
+                self._store.record_websub_failure(source_id, error_message=str(exc))
+
+        for xoa in parsed.deleted:
+            if xoa.channel_id and xoa.channel_id != source.youtube_channel_id:
+                continue
+            self._danh_dau_video_khong_con_truy_cap(xoa.video_id)
+
+        return True
+
+    def _xu_ly_mot_video_websub(self, source: TrustedSource, video_id: str) -> None:
+        """
+        Xu ly MOT video ID tu mot thong bao WebSub (hoac doi chieu dinh ky
+        goi lai qua `scan_source`, xem `run_reconciliation`) — LUON tra cuu
+        AUTHORITATIVE qua YouTube Data API TRUOC khi tin bat cu dieu gi tu
+        thong bao (dac ta Phase 6, muc 5: "Do NOT trust notification
+        metadata as final authority").
+
+        Co the nem `YouTubeConfigError`/`YouTubeApiError` — nguoi goi
+        (`handle_websub_notification`) bat rieng cho TUNG video, mot video
+        loi khong duoc lam hong ca lo thong bao.
+        """
+        da_theo_doi = self._store.get_import_by_video_id(video_id)
+        if da_theo_doi is not None:
+            self._lam_moi_metadata_neu_can(da_theo_doi, video_id)
+            return  # DA CO ban ghi — KHONG phan loai lai (idempotent, cung
+                     # nguyen tac voi `scan_source`).
+
+        video = self._youtube().get_video(video_id)
+        if video is None:
+            return  # khong (con) truy cap duoc — bo qua, doi chieu dinh ky
+                     # se bat lai neu that su con ton tai sau nay.
+        if video.channel_id != source.youtube_channel_id:
+            return  # tra cuu THAT khong khop kenh nguon — khong tin thong
+                     # bao, bo qua (phong thu sau, khac voi kiem tra tho o
+                     # `handle_websub_notification`).
+
+        da_la_tap = self._animation_store.episodes_by_external_ids([video_id])
+        mappings = self._store.list_mappings(source.source_id)
+        episodes_by_series = self._tap_da_co_theo_series(
+            [m.animation_series_id for m in mappings])
+        video_dict = {
+            "video_id": video.video_id, "title": video.title,
+            "channel_id": video.channel_id, "channel_title": video.channel_title,
+            "thumbnail_url": video.thumbnail_url, "published_at": video.published_at,
+            "duration_seconds": video.duration_seconds,
+        }
+        trang_thai, _matched = self._phan_loai_va_ghi_mot_video(
+            source=source, mappings=mappings, episodes_by_series=episodes_by_series,
+            video=video_dict, da_la_tap=da_la_tap)
+
+        ban_ghi = self._store.get_import_by_video_id(video_id)
+        muc_tieu = ban_ghi.import_id if ban_ghi else source.source_id
+        self._ghi_nhat_ky(
+            "auto_video_discover", target_id=muc_tieu, actor_id="",
+            actor_role="system", note=f"video={video_id} trạng thái={trang_thai.value}")
+        if trang_thai in (ImportStatus.AUTO_IMPORTED, ImportStatus.AUTO_PUBLISHED):
+            self._ghi_nhat_ky(
+                "auto_video_import", target_id=muc_tieu, actor_id="", actor_role="system")
+            if trang_thai is ImportStatus.AUTO_PUBLISHED:
+                self._ghi_nhat_ky(
+                    "auto_video_publish", target_id=muc_tieu, actor_id="",
+                    actor_role="system")
+
+    def _lam_moi_metadata_neu_can(self, hien_tai: VideoImport, video_id: str) -> None:
+        """Lam moi tieu de/anh dai dien tren MOT `VideoImport` DA CO — CHI
+        khi con o trang thai "cho quyet dinh" (`NEW`/`PENDING`/`CONFLICT`),
+        KHONG BAO GIO dong toi ban ghi DA la quyet dinh cuoi cung — mot
+        thong bao WebSub bao "video vua duoc cap nhat" khong duoc phep doi
+        gi tren mot tap DA nhap/tu choi/bo qua (dac ta Phase 6 muc 6)."""
+        if hien_tai.status not in (
+                ImportStatus.NEW, ImportStatus.PENDING, ImportStatus.CONFLICT):
+            return
+        try:
+            video = self._youtube().get_video(video_id)
+        except (YouTubeConfigError, YouTubeApiError):
+            return  # lam moi la "tot thi lam", khong quan trong bang xu ly chinh.
+        if video is None:
+            return
+        self._store.update_import(hien_tai.import_id, {
+            "title": video.title, "thumbnail_url": video.thumbnail_url,
+        })
+
+    def _danh_dau_video_khong_con_truy_cap(self, video_id: str) -> None:
+        """`at:deleted-entry` (WebSub bao video da bi go/rieng tu) — CHI doi
+        mot ban ghi CON CHO QUYET DINH thanh `UNAVAILABLE`, giu nguyen mot
+        ban ghi DA la quyet dinh cuoi cung."""
+        ban_ghi = self._store.get_import_by_video_id(video_id)
+        if ban_ghi is None:
+            return
+        if ban_ghi.status not in (
+                ImportStatus.NEW, ImportStatus.PENDING, ImportStatus.CONFLICT):
+            return
+        self._store.update_import(ban_ghi.import_id, {
+            "status": ImportStatus.UNAVAILABLE,
+            "reason": "YouTube báo video này không còn truy cập được (đã gỡ/riêng tư).",
+        })
+
+    def run_reconciliation(self, *, source_id: str = "", actor_id: str = "",
+                          actor_role: str = "") -> Dict[str, Any]:
+        """
+        Doi chieu dinh ky (Phase 6, du phong khi WebSub bo lo do gian doan
+        webhook/dang ky het han/callback tam thoi khong truy cap duoc) —
+        quet lai CAC nguon BAT + `auto_discover` voi so trang THAP
+        (`RECONCILIATION_MAX_PAGES`), dung LAI `scan_source` (idempotent
+        qua CUNG mot pipeline voi WebSub, khong phai duong rieng). Cung tien
+        the gia han dang ky sap het han (xem `_gia_han_neu_sap_het_han`).
+
+        `source_id` rong = chay cho MOI nguon phu hop (nut toan cuc/kich
+        boi script ben ngoai, xem `scripts/run_websub_reconciliation.py`);
+        truyen vao = CHI mot nguon (nut "Chạy đối chiếu ngay" tren trang chi
+        tiet nguon). `actor_id` rong = he thong (kich hoat tu dong/script),
+        khac voi hanh dong quan tri bam nut that.
+        """
+        if source_id:
+            nguon = [self._store.get_source(source_id)]
+        else:
+            tat_ca, _total = self._store.find_sources(enabled=True, limit=None)
+            nguon = [s for s in tat_ca if s.auto_discover]
+
+        tong = {"sources_checked": 0, "sources_failed": 0, "videos_detected": 0}
+        for s in nguon:
+            tong["sources_checked"] += 1
+            try:
+                ket_qua = self.scan_source(
+                    Profile(user_id=actor_id or "system", email=""), s.source_id,
+                    max_pages=RECONCILIATION_MAX_PAGES, actor_role=actor_role)
+                tong["videos_detected"] += ket_qua["detected"]
+                self._store.record_reconciliation_sync(s.source_id)
+            except (YouTubeConfigError, YouTubeApiError):
+                tong["sources_failed"] += 1
+            if self.websub_configured() and s.source_type is TrustedSourceType.YOUTUBE_CHANNEL:
+                self._gia_han_neu_sap_het_han(s)
+
+        self._ghi_nhat_ky(
+            "reconciliation_run", target_id=source_id, actor_id=actor_id,
+            actor_role=actor_role,
+            note=(f"{tong['sources_checked']} nguồn, "
+                 f"{tong['videos_detected']} video, {tong['sources_failed']} lỗi"))
+        return tong
+
     # ==================================================== ha tang
 
     def _ghi_nhat_ky(self, action: str, *, target_id: str, actor_id: str,
                      actor_role: str = "", note: str = "") -> None:
+        #: `websub_*`/`reconciliation_run` nham vao MOT `TrustedSource`
+        #: (`target_id` la `source_id`) — CUNG nhom voi `trusted_source_*`/
+        #: `youtube_mapping_*`, KHAC voi `auto_video_*` (nham vao MOT
+        #: `VideoImport`, `target_id` la `import_id`).
+        if action.startswith(("trusted_source", "youtube_mapping", "websub_")) \
+                or action == "reconciliation_run":
+            target_type = "trusted_source"
+        else:
+            target_type = "video_import"
         self._metadata_store.record_event(ModerationEvent(
-            action=action, target_user_id="",
-            target_type="trusted_source" if action.startswith(
-                ("trusted_source", "youtube_mapping")) else "video_import",
+            action=action, target_user_id="", target_type=target_type,
             target_id=target_id, actor_id=actor_id, actor_role=actor_role,
             note=note[:1000]))
 

@@ -4,7 +4,7 @@
 Đừng dựa vào trí nhớ hội thoại trước — hãy đọc file này và kiểm tra lại code
 thật trước khi sửa bất cứ gì.
 
-Cập nhật lần cuối: 2026-08-16, sau khi Phase 5 được push.
+Cập nhật lần cuối: 2026-08-16, sau khi Phase 6 được push.
 
 ## 0. Bootstrap cho phiên mới
 
@@ -53,12 +53,15 @@ xong và được người dùng duyệt.
   khoan day du qua Appwrite Users API".
 - Phase 4: commit `7e301b8` — "Admin Control Center V2, Phase 4: kiem duyet
   Animation (series/tap)". Đã push, đã duyệt.
-- Phase 5: commit MỚI NHẤT trên nhánh này SAU `7e301b8` (chạy
+- Phase 5: commit `f556cd5` — "Admin Control Center V2, Phase 5: Trusted
+  Video Sources". Đã push, đã duyệt (checkpoint được xác nhận trước khi bắt
+  đầu Phase 6).
+- Phase 6: commit MỚI NHẤT trên nhánh này SAU `f556cd5` (chạy
   `git log --oneline -5` để lấy SHA thật — đừng tin một con số ghi cứng ở
-  đây) — "Admin Control Center V2, Phase 5: Trusted Video Sources". Đã push.
+  đây) — "YouTube WebSub + pipeline tập mới tự động". Đã push.
 - Remote: `origin/feature/admin-trusted-video-v2` phải khớp HEAD cục bộ sau
-  khi Phase 5 được push — xác nhận lại bằng `git fetch` + `git rev-parse`
-  trước khi tiếp tục Phase 6, đừng tin dòng này nếu đã có thời gian trôi qua.
+  khi Phase 6 được push — xác nhận lại bằng `git fetch` + `git rev-parse`
+  trước khi tiếp tục Phase 7, đừng tin dòng này nếu đã có thời gian trôi qua.
 - `main`: **chưa hề đụng tới** trong toàn bộ việc này. `origin/main` đang ở
   `d483e90` ("deploy: them systemd unit cho translation worker production")
   — hoàn toàn không liên quan, không có commit nào của nhánh này lọt vào.
@@ -642,20 +645,178 @@ thái/phân quyền/CORS-tương-đương), `server/tests/test_animation_contrac
 ánh đúng trạng thái MỚI, `configured=True`). `web/tests/
 admin-trusted-sources.test.mjs` (MỚI, 16).
 
+## 4e. Đã xong — Phase 6 (YouTube WebSub + Automatic Episode Pipeline)
+
+**Kiến trúc**: kênh CHÍNH là WebSub (PubSubHubbub) chính thức của YouTube —
+hub `pubsubhubbub.appspot.com`, topic `https://www.youtube.com/feeds/videos.xml?channel_id=<ID>`.
+Đối chiếu định kỳ (`run_reconciliation`) CHỈ là dự phòng tần suất thấp, dùng
+LẠI `scan_source` (bounded 1 trang, `RECONCILIATION_MAX_PAGES=1`) — KHÔNG
+viết đường xử lý riêng, thoả đúng yêu cầu "một pipeline duy nhất cho cả
+WebSub lẫn đối chiếu".
+
+**Module mới** (`server/youtube_websub.py`):
+- `WebSubClient.subscribe`/`unsubscribe` — POST form-encoded thật tới hub.
+- `parse_notification()` — phân tích Atom/`at:deleted-entry` bằng
+  `defusedxml` (thư viện MỚI ở `server/requirements.txt`, chặn XXE/billion-laughs
+  — KHÔNG tự viết parser XML an toàn tay, cùng triết lý với việc dùng
+  `cryptography` cho BYOK ở V5.1 thay vì tự mã hoá).
+- `compute_signature`/`verify_signature` — HMAC `X-Hub-Signature` theo đặc
+  tả WebSub chính thức (KHÔNG tự chế lược đồ chữ ký riêng). Lỗi thật đã sửa:
+  `hmac.compare_digest` ném `TypeError` nếu chữ ký không phải hex ASCII —
+  validate bằng `re.fullmatch(r"[0-9a-f]+", ...)` TRƯỚC khi so sánh.
+- URL callback DUY NHẤT theo dạng `?source_id=<id>` — định tuyến GET/POST
+  đến đúng `TrustedSource` KHÔNG cần tin/phân tích `topic` từ payload
+  (khuyến nghị chính thức của WebSub, tránh phải parse dữ liệu không tin
+  cậy để định tuyến).
+
+**Tầng dịch vụ** (`server/trusted_source_service.py`):
+- Refactor `scan_source`'s vòng lặp phân loại-và-ghi thành
+  `_phan_loai_va_ghi_mot_video()` DÙNG CHUNG bởi CẢ `scan_source` (quét thủ
+  công) LẪN `_xu_ly_mot_video_websub()` (một video từ thông báo WebSub/đối
+  chiếu) — xác nhận KHÔNG hồi quy bằng cách chạy lại 22 test cũ của
+  `test_trusted_source_service.py` (Phase 5) không đổi sau refactor, toàn
+  bộ vẫn xanh.
+- `handle_websub_notification()` — LUÔN tra cứu AUTHORITATIVE qua YouTube
+  Data API trước khi tin bất cứ gì từ payload (đặc tả mục 5: "Do NOT trust
+  notification metadata as final authority"). Trả `Optional[bool]`: `None`
+  = `source_id` không tồn tại (route → 404, giống `handle_websub_verification`);
+  `True`/`False` khi nguồn tồn tại (route LUÔN trả 200 — đặc tả WebSub: mã
+  thành công chỉ nghĩa là "đã nhận", không phải "đã xử lý xong thành công").
+- Idempotency: `_xu_ly_mot_video_websub()` bỏ qua NGAY nếu đã có
+  `VideoImport` cho `youtube_video_id` đó (dùng lại `create_import_once`
+  theo `documentId` tất định, nền tảng có sẵn từ Phase 5); nếu bản ghi đang
+  ở trạng thái CÒN CHỜ QUYẾT ĐỊNH (`NEW`/`PENDING`/`CONFLICT`),
+  `_lam_moi_metadata_neu_can()` chỉ làm mới tiêu đề/ảnh, KHÔNG BAO GIỜ đụng
+  một bản ghi ĐÃ là quyết định cuối cùng.
+- `at:deleted-entry` (video bị gỡ/riêng tư) → `_danh_dau_video_khong_con_truy_cap()`
+  chỉ đổi bản ghi CÒN CHỜ quyết định thành `UNAVAILABLE`.
+- `run_reconciliation()` — quét các nguồn `enabled` + `auto_discover` (hoặc
+  một nguồn cụ thể qua nút "Chạy đối chiếu ngay"), gọi lại `scan_source`,
+  ghi `last_successful_sync_at`; đồng thời gia hạn đăng ký sắp hết hạn
+  (`_gia_han_neu_sap_het_han`, cửa sổ `RENEWAL_WINDOW=24h`) — GHÉP vào
+  bước đối chiếu có sẵn thay vì viết một scheduler nền mới, vì việc gia hạn
+  chỉ cần chạy định kỳ tần suất thấp giống hệt đối chiếu.
+- `scripts/run_websub_reconciliation.py` (MỚI) — CLI độc lập để lịch ngoài
+  (cron/Task Scheduler/systemd timer) gọi `run_reconciliation` cho MỌI
+  nguồn, mirror quy ước `grandfather_authors.py` — KHÔNG tạo scheduler
+  trong-tiến-trình mới.
+
+**MỘT LỖI THẬT NGHIÊM TRỌNG phát hiện qua QA trình duyệt thật, không phải
+qua test tĩnh** (bug này lộ ra ở tầng Appwrite tự lưu trú, `FakeAppwrite`
+không mô phỏng): Appwrite (tự lưu trú) TỰ ĐIỀN giờ server HIỆN TẠI cho một
+thuộc tính `datetime` KHÔNG bắt buộc khi nhận CHUỖI RỖNG `""`, thay vì lưu
+null như kỳ vọng — đã xác nhận THẬT bằng cách ghi trực tiếp lên collection
+`trusted_sources` dev và đọc lại kết quả (gửi `""` → đọc lại được một
+timestamp = giờ ghi; gửi `None`/JSON null → đọc lại đúng `null`). Hậu quả:
+MỌI `TrustedSource`/`VideoImport` MỚI TẠO trông như đã từng quét/đăng ký/
+thông báo/đối chiếu/duyệt NGAY LÚC TẠO — khối "Đồng bộ tự động (WebSub)"
+trên trang chi tiết nguồn hiện timestamp thay vì "—" cho một nguồn hoàn
+toàn mới. Ảnh hưởng CẢ bốn trường Phase 6 (`subscription_expires_at`,
+`last_subscription_attempt_at`, `last_notification_at`,
+`last_successful_sync_at`) LẪN ba trường Phase 5 sẵn có
+(`last_scan_at`/`last_success_at`/`last_error_at`) trên `trusted_sources`,
+và HAI trường trên `video_imports` (`published_at`/`reviewed_at`, phát
+hiện mọi video import mới trông như "đã được duyệt" ngay lúc quét). Sửa:
+`AppwriteTrustedSourceStore._writable()` (điểm chốt DUY NHẤT dùng chung bởi
+`_create`/`_update`) đổi CHUỖI RỖNG thành `None` cho các trường datetime
+đã biết trước khi gửi lên Appwrite (bảng `_DATETIME_FIELDS` theo collection).
+Xác nhận lại bằng ghi/đọc thật trên Appwrite dev sau khi sửa: cả bảy trường
+`trusted_sources` lẫn hai trường `video_imports` đều đọc lại đúng `""` khi
+chưa từng xảy ra. Thêm hai test hồi quy vào
+`server/tests/test_trusted_source_contract.py`
+(`test_writable_chuyen_chuoi_rong_datetime_thanh_null` — đọc thẳng payload
+`_writable()` sinh ra; `test_create_source_that_khong_gia_lam_da_tung_dong_bo`
+— round-trip qua CẢ hai kho, chạy trên `FakeAppwrite` để chống hồi quy ở
+mức có thể, dù `FakeAppwrite` KHÔNG mô phỏng được chính tật Appwrite thật
+đã gây ra lỗi này — bài học: mock nuốt êm loại lỗi này, CHỈ smoke test thật
+mới bắt được, giống các tật Appwrite khác đã ghi ở Phase 1-5).
+
+**Backend routes mới** (`server/main.py`) — xem mục 9 để có danh sách đầy
+đủ: `POST /sources/{id}/subscribe`, `POST /sources/{id}/unsubscribe`,
+`POST /reconciliation/run` (đều `admin_or_owner_profile`, ≥ ADMIN — cùng
+mức với các route mutate Phase 5); `GET`/`POST /api/youtube/websub` (CÔNG
+KHAI, không qua `admin_profile`/`admin_or_owner_profile` nào — đây là route
+hệ thống YouTube gọi trực tiếp, rào chắn RIÊNG là chữ ký HMAC/challenge
+WebSub, không phải vai trò quản trị). `WebSubConfigError` (chưa cấu hình
+`YOUTUBE_WEBSUB_CALLBACK_BASE_URL`) → 503, cùng mẫu với `YouTubeConfigError`.
+POST notification kiểm `Content-Length` so với `MAX_NOTIFICATION_BYTES`
+TRƯỚC khi đọc body (chặn payload khổng lồ sớm nhất có thể).
+
+**Admin UI** (`web/src/app/admin/animation/sources/[id]/page.tsx`) — thẻ
+mới "Đồng bộ tự động (WebSub)": trạng thái đăng ký (5 giá trị enum: none/
+pending/active/expired/failed), ba chỉ số (thông báo gần nhất/đối chiếu
+thành công gần nhất/hạn đăng ký — CẢ BA hiện "—" đúng cho nguồn mới, xem
+lỗi Appwrite ở trên), nút "Đăng ký"/"Đăng ký lại"/"Chạy đối chiếu ngay".
+`!data.websub_configured` hiện `<ChuaCauHinh>` thay vì bịa trạng thái đăng
+ký (`websub_configured` là SỰ THẬT TOÀN CỤC của môi trường, không phải
+theo từng nguồn — trả về từ `admin_source_detail`).
+
+**Real dev smoke test** (`scripts/smoke_test_selfhost_websub.py`, MỚI) —
+gọi thẳng `TrustedSourceService`, dùng lại "Me at the zoo"
+(`jNQXAC9IVRw`/`UC4QobU6STFB0P71PMvOGN5A`, cùng dữ liệu ổn định vĩnh viễn
+với Phase 5). Phân biệt rõ RÀNG những gì kiểm THẬT được (hub PubSubHubbub
+THẬT chấp nhận subscribe/unsubscribe 2xx, tra cứu YouTube Data API thật,
+Atom body giả lập THỰC TẾ với chữ ký HMAC THẬT tính bằng bí mật thật đã
+lưu lúc đăng ký, gửi thẳng vào `handle_websub_notification` — đây LÀ
+đường xử lý ĐẦY ĐỦ trừ đúng một bước) so với phần BỊ CHẶN (hub THẬT tự gọi
+ngược lại callback của ta — cần backend công khai qua HTTPS chưa triển
+khai). In rõ **"EXTERNAL WEBSUB E2E: BLOCKED — public HTTPS callback not
+yet deployed"** thay vì bịa một kết quả thành công. Mọi bản ghi disposable
+(source/series/video_import) được xoá SẠCH qua try/finally kể cả khi thất
+bại, kể cả huỷ đăng ký khỏi hub thật trước khi xoá.
+
+**QA trình duyệt THẬT** (chrome-devtools MCP, đăng ký tài khoản QA mới
+`phase6-qa-owner2@fanfic.world`, backend dev tạm ở cổng `8010`/frontend
+`3010`, cùng mẫu môi trường Phase 5): tạo nguồn thật cho kênh "jawed" qua
+UI, xác nhận thẻ AUTO SYNC hiện `<ChuaCauHinh>` khi
+`YOUTUBE_WEBSUB_CALLBACK_BASE_URL` chưa cấu hình; bật biến đó (giá trị
+placeholder không truy cập được, có chủ đích — xác minh thật vẫn BỊ CHẶN)
+→ thẻ chuyển sang trạng thái đầy đủ; bấm "Đăng ký" → hub thật chấp nhận,
+trạng thái chuyển `PENDING`, hạn đăng ký ĐÚNG vẫn "—" (vì xác minh bị
+chặn); bấm "Chạy đối chiếu ngay" → phát hiện đúng video thật, tạo
+`VideoImport` trạng thái `new` (auto_discover tắt trên nguồn QA này),
+"Đối chiếu thành công gần nhất" cập nhật đúng. **Một quan sát TƯỞNG là bug
+nhưng KHÔNG PHẢI**: sau khi đối chiếu, đọc `document.querySelector('main').
+innerText` cho thấy giá trị của "Đối chiếu thành công gần nhất" dường như
+hiện dưới nhãn "Thông báo gần nhất" — điều tra bằng cách đọc thẳng
+`innerHTML` của khối thẻ (không qua `innerText`/snapshot accessibility) và
+gọi thẳng API bằng `fetch()` (kèm token từ `localStorage.getItem('fas.token')`)
+xác nhận CẢ DOM thật LẪN response API đều ĐÚNG — chỉ có `innerText`/cây
+accessibility của chrome-devtools MCP LINEARIZE sai thứ tự khi đọc một
+`.stat-grid` (CSS Grid nhiều cột). **Bài học môi trường MỚI cho phiên
+sau**: khi nghi ngờ hai giá trị cạnh nhau trong một layout CSS Grid/Flex bị
+"hoán đổi", đừng tin `innerText`/accessibility snapshot — đọc thẳng
+`innerHTML` của khối đó (hoặc gọi API trực tiếp bằng `fetch()` với token
+từ `localStorage`) trước khi kết luận có bug. Tất cả dữ liệu disposable
+(nguồn `tsrc_...` cho kênh jawed, tạo trong phiên QA này — KHÔNG có mapping/
+series nào được tạo qua UI lần này) đã được xoá sạch trực tiếp trên
+Appwrite dev sau khi QA xong; xác nhận lại `find_sources`/`_get` không còn
+sót.
+
+**Test**: `server/tests/test_youtube_websub.py` (MỚI, 21 test đơn vị,
+không gọi mạng — Atom parse, HMAC, URL builder), `server/tests/
+test_trusted_source_websub.py` (MỚI, 31 test tầng dịch vụ, dùng
+`FakeYouTubeClient` + `FakeWebSubClient`), `server/tests/
+test_trusted_source_routes.py::WebSubRoutesTest` (MỚI, 11 test HTTP đầy
+đủ), `server/tests/test_trusted_source_contract.py` (+2: hồi quy lỗi
+Appwrite datetime rỗng ở trên), `web/tests/
+admin-trusted-sources-websub.test.mjs` (MỚI, 9 test).
+
 ## 5. Trạng thái test/build (đã CHẠY LẠI và xác nhận ngay tại thời điểm viết
 handoff này, không phải chỉ nhớ lại)
 
 | Mục | Kết quả |
 |---|---|
-| Backend (`unittest discover -s server/tests -t .`) | **2288/2288 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +99 test Phase 5 |
-| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **613/613 pass** — +16 test Phase 5 |
+| Backend (`unittest discover -s server/tests -t .`) | **2353/2353 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +65 test Phase 6 |
+| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **622/622 pass** — +9 test Phase 6 |
 | `npm run typecheck` | sạch, 0 lỗi |
 | `npm run lint` | 0 lỗi, 2 warning (không liên quan — `<img>` ở `image-studio/page.tsx`, có từ trước) |
-| `npm run build` | build production thành công, 4 route Trusted Sources/Import Queue lên đúng (2 tĩnh, `sources/[id]` động) |
-| Secret scan (grep diff cho api_key/secret/token/password/bearer/aws_/private_key + kiểm không có file `.env` nào bị đổi) | sạch |
-| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4), 4d (Phase 5 — 19/19 kiểm tra đạt) |
-| Smoke test thật YouTube Data API | ĐÃ CHẠY — xem mục 4d, video "Me at the zoo" ổn định vĩnh viễn làm dữ liệu thật |
-| QA trình duyệt thật | ĐÃ CHẠY Phase 4 (mục 4c) + Phase 5 (mục 4d) — phát hiện + sửa bug ConfirmDialog (P4), set-state-in-effect + window.location (P5) |
+| `npm run build` | build production thành công, route `animation/sources/[id]` (động) không đổi hình dạng |
+| Secret scan (grep diff cho api_key/secret/token/password/bearer + kiểm không có file `.env` nào bị đổi) | sạch |
+| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4), 4d (Phase 5 — 19/19), 4e (Phase 6 — hub thật + YouTube Data API thật + phát hiện/sửa lỗi Appwrite datetime rỗng) |
+| Smoke test thật YouTube Data API | ĐÃ CHẠY — xem mục 4d/4e, video "Me at the zoo" ổn định vĩnh viễn làm dữ liệu thật |
+| Smoke test thật WebSub/hub PubSubHubbub | ĐÃ CHẠY một phần — xem mục 4e; EXTERNAL WEBSUB E2E: BLOCKED (cần backend công khai qua HTTPS) |
+| QA trình duyệt thật | ĐÃ CHẠY Phase 4 (mục 4c) + Phase 5 (mục 4d) + Phase 6 (mục 4e) — phát hiện + sửa bug ConfirmDialog (P4), set-state-in-effect + window.location (P5), lỗi Appwrite datetime rỗng (P6) |
 
 ## 6. Quyết định về hiệu năng
 
@@ -789,6 +950,11 @@ PATCH /api/admin/animation/imports/{import_id}/series              — MỚI Pha
 POST /api/admin/animation/imports/{import_id}/import                — MỚI Phase 5
 POST /api/admin/animation/imports/{import_id}/reject                — MỚI Phase 5
 POST /api/admin/animation/imports/{import_id}/ignore                — MỚI Phase 5
+POST /api/admin/animation/sources/{source_id}/subscribe           — MỚI Phase 6
+POST /api/admin/animation/sources/{source_id}/unsubscribe         — MỚI Phase 6
+POST /api/admin/animation/reconciliation/run                      — MỚI Phase 6
+GET  /api/youtube/websub                                          — MỚI Phase 6 (CÔNG KHAI)
+POST /api/youtube/websub                                          — MỚI Phase 6 (CÔNG KHAI)
 ```
 Lưu ý: `GET /api/admin/users` và `GET /api/admin/users/{user_id}` (Phase 3)
 giờ đọc THẲNG Appwrite Users API (native) làm nguồn chính, làm giàu bằng
@@ -800,7 +966,13 @@ Sáu route Animation (Phase 4) đều `admin_profile` (≥ MODERATOR) và gọi 
 (Phase 5) đều gọi qua `TrustedSourceService` (biến module `trusted_sources`)
 + `_nguon_tin_cay()` (đổi lỗi service/YouTube thành mã HTTP) — GET dùng
 `admin_profile`, MỌI route mutate dùng `admin_or_owner_profile` — xem mục
-4d.
+4d. Ba route WebSub quản trị (Phase 6: subscribe/unsubscribe/reconciliation)
+CŨNG dùng `admin_or_owner_profile` (≥ ADMIN), cùng `_nguon_tin_cay()` (mở
+rộng thêm `WebSubConfigError` → 503). HAI route `/api/youtube/websub`
+(Phase 6) là route CÔNG KHAI DUY NHẤT trong toàn bộ `/api/admin/animation/*`
+— KHÔNG qua bất kỳ dependency vai trò nào, rào chắn là chữ ký HMAC
+`X-Hub-Signature`/challenge WebSub (xem mục 4e), route hệ thống YouTube gọi
+trực tiếp chứ không phải quản trị viên.
 
 **Frontend** (`web/src/app/admin/`):
 ```
@@ -869,15 +1041,18 @@ MỚI Phase 5, xem mục 4d), `web/tests/admin.test.mjs`,
     11 liệt kê ba mức) — `SeriesMapping` hiện không có trường playlist
     riêng. Nếu cần, đây là một trường mở rộng an toàn cho phase sau (thêm
     field optional, additive).
-- **PHASE 6** — YouTube WebSub + pipeline tập mới tự động: WebSub là kênh
-  CHÍNH, có đối chiếu định kỳ tần suất thấp làm dự phòng, nhập tự động phải
-  idempotent, tuỳ chọn tự động xuất bản. Test callback thật từ YouTube bị
-  CHẶN cho tới khi có backend công khai qua HTTPS thật (xem mục 12).
-  `TrustedSource.auto_discover`/`subscription_status`/
-  `subscription_expires_at` đã TỒN TẠI từ Phase 5 nhưng CHƯA có logic đọc/
-  ghi nào — Phase 6 là nơi hiện thực hoá.
+- ~~**PHASE 6** — YouTube WebSub + pipeline tập mới tự động~~ — **XONG**,
+  xem mục 4e. Test đầu-cuối THẬT từ YouTube → callback thật của mình VẪN
+  BỊ CHẶN (cần backend công khai qua HTTPS thật, chưa triển khai) — mọi
+  phần còn lại của pipeline (subscribe/unsubscribe thật, parse/chữ ký/lưu/
+  idempotency/đối chiếu/gia hạn) đã kiểm THẬT. Một lỗi Appwrite thật
+  (chuỗi rỗng trên thuộc tính datetime bị tự điền thành giờ hiện tại) được
+  phát hiện + sửa trong phase này — xem mục 4e để biết chi tiết, phase sau
+  KHÔNG cần điều tra lại hiện tượng "timestamp lạ trên nguồn mới tạo".
 - **PHASE 7** — Hoàn thiện các chỉ số analytics/product còn thiếu + hoàn
-  thiện tích hợp tổng thể.
+  thiện tích hợp tổng thể. Cân nhắc thêm: triển khai backend công khai qua
+  HTTPS thật để gỡ blocker "EXTERNAL WEBSUB E2E" của Phase 6 (không bắt
+  buộc, tuỳ ưu tiên người dùng).
 
 ## 11. Cấu hình YouTube
 
@@ -942,46 +1117,29 @@ stash@{0}: On feature/animation-player-v2-custom-controls: animation-player-v2 d
   `feature/admin-trusted-video-v2`, KHÔNG amend commit cũ trừ khi được yêu
   cầu rõ.
 
-## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 6
+## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 7
 
-Phase 3 (Full User Management), Phase 4 (Animation Moderation), và Phase 5
-(Trusted Video Sources) **ĐÃ XONG** — xem mục 4b/4c/4d để biết chi tiết
-đầy đủ, quyết định kiến trúc, và kết quả smoke test/QA trình duyệt thật.
-ĐỪNG làm lại ba phase này.
+Phase 3 (Full User Management), Phase 4 (Animation Moderation), Phase 5
+(Trusted Video Sources), và Phase 6 (YouTube WebSub + Automatic Episode
+Pipeline) **ĐÃ XONG** — xem mục 4b/4c/4d/4e để biết chi tiết đầy đủ, quyết
+định kiến trúc, và kết quả smoke test/QA trình duyệt thật. ĐỪNG làm lại
+bốn phase này.
 
-**PHASE 6 — YOUTUBE WEBSUB + PIPELINE TẬP MỚI TỰ ĐỘNG**: xem mục 1 (mục
-tiêu dự án, Phần B/C) và mục 12 (quyết định kiến trúc WebSub). Trước khi
-viết code:
-- WebSub (PubSubHubbub) là kênh CHÍNH — KHÔNG được hạ cấp xuống chỉ
-  polling định kỳ (polling tần suất thấp CHỈ đóng vai trò đối chiếu/dự
-  phòng). Xem mục 12 để biết vì sao test đầu-cuối THẬT (YouTube → callback
-  của mình) bị CHẶN cho tới khi có backend công khai qua HTTPS thật —
-  đừng cố giả lập việc này, chỉ ghi nhận blocker và làm phần còn lại
-  (parse/lưu/idempotency) bằng test giả lập trước.
-- `TrustedSource.subscription_status`/`subscription_expires_at` (enum
-  `none`/`pending`/`active`/`expired`/`failed`, xem
-  `server/trusted_source_domain.py::SubscriptionStatus`) và
-  `auto_discover` ĐÃ TỒN TẠI TỪ PHASE 5 nhưng CHƯA có logic đăng ký/gia
-  hạn/đọc callback nào — đây LÀ nơi hiện thực hoá, KHÔNG cần thêm trường
-  schema mới cho phần này.
-- Pipeline callback → phát hiện video mới PHẢI tái dùng NGUYÊN VẸN
-  `TrustedSourceService.scan_source`'s classify/decide logic (`video_classifier.
-  classify_video`, `episode_parser.parse_episode_number`,
-  `_quyet_dinh_trang_thai`) cho ĐÚNG MỘT video vừa được WebSub báo, thay
-  vì viết lại một đường phân loại riêng — tránh hai luồng "quét thủ công"
-  và "tự động qua WebSub" đưa ra quyết định KHÁC NHAU cho cùng một video.
-- Nhập tự động qua WebSub PHẢI idempotent — đã có sẵn nền tảng
-  (`create_import_once` theo `documentId` tất định từ `youtube_video_id`,
-  xem mục 4d) — Phase 6 chỉ cần gọi ĐÚNG con đường đã có, không viết một
-  cơ chế chống trùng riêng.
-- Route callback WebSub công khai (không qua `admin_profile`, vì YouTube's
-  hub gọi trực tiếp) cần rào chắn RIÊNG (xác thực chữ ký/challenge của
-  PubSubHubbub) — KHÔNG dùng `admin_profile`/`admin_or_owner_profile` cho
-  route này, đó là route nội bộ hệ thống, không phải route quản trị.
-- Sau khi có pipeline tự động, cân nhắc điền `detected_today` ở dashboard
-  (hiện `None` từ Phase 5, xem mục 4d) — cần thêm bộ lọc theo ngày trên
-  `video_imports`, một mở rộng additive nhỏ (KHÔNG bắt buộc cho Phase 6
-  xong mới coi là hoàn tất, chỉ là cơ hội tiện thể nếu có thời gian).
+**PHASE 7 — hoàn thiện chỉ số analytics/product còn thiếu + hoàn thiện
+tích hợp tổng thể.** Trước khi viết code, các việc còn treo lại từ các
+phase trước (KHÔNG bắt buộc, chỉ là cơ hội tiện thể nếu có thời gian/người
+dùng yêu cầu):
+- `detected_today` ở dashboard vẫn `None` (từ Phase 5, xem mục 4d) — cần
+  thêm bộ lọc theo ngày trên `video_imports`, một mở rộng additive nhỏ.
+- Độ trễ `/api/admin/overview` (~13-20 giây trên môi trường dev tự lưu
+  trú) CHƯA được tối ưu — xem mục 6, vẫn là vấn đề đã biết, không chặn
+  phase nào.
+- "EXTERNAL WEBSUB E2E: BLOCKED" (mục 4e/12) — nếu người dùng ưu tiên việc
+  này, cần triển khai một backend công khai qua HTTPS thật để YouTube's
+  hub có thể gọi ngược lại callback; đây là hạ tầng triển khai, KHÔNG phải
+  việc sửa code (pipeline xử lý callback đã hoàn chỉnh từ Phase 6).
+- Nếu tiếp tục mở rộng Trusted Video Sources: `SeriesMapping` chưa có
+  trường playlist riêng (đơn giản hoá có chủ đích từ Phase 5, xem mục 10).
 
 ## 16. Ghi chú cho agent đọc file này
 

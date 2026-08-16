@@ -397,6 +397,14 @@ class Settings:
     #: KHONG bao gio am tham lui ve mock hay gia lap ket qua.
     youtube_api_key: str = ""
 
+    #: Goc URL cong khai (vd "https://api.fanfic.world") de dang ky WebSub
+    #: voi hub PubSubHubbub cua YouTube (Phase 6) — RONG trong dev cuc bo
+    #: (YouTube khong goi toi localhost duoc), cac route/nut lien quan phai
+    #: bao "chua cau hinh" ro rang (xem
+    #: `TrustedSourceService.websub_configured`), KHONG bao gio dang ky voi
+    #: mot URL noi bo/khong that.
+    youtube_websub_callback_base_url: str = ""
+
     @property
     def is_development(self) -> bool:
         return self.environment.lower() in ("development", "dev", "local")
@@ -646,6 +654,7 @@ def load_settings() -> Settings:
         translation_api_key=_env("TRANSLATION_API_KEY"),
         translation_model=_env("TRANSLATION_MODEL"),
         youtube_api_key=_env("YOUTUBE_API_KEY"),
+        youtube_websub_callback_base_url=_env("YOUTUBE_WEBSUB_CALLBACK_BASE_URL"),
         image_studio=_image_studio_settings(),
     )
 

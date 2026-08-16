@@ -1476,6 +1476,17 @@ export interface TrustedSource {
   last_error_message: string;
   subscription_status: SubscriptionStatus;
   subscription_expires_at: string;
+  /** Phase 6 (WebSub) — lan gan nhat THU dang ky/gia han, bat ke thanh cong. */
+  last_subscription_attempt_at: string;
+  /** Phase 6 — lan gan nhat NHAN duoc mot thong bao THAT tu hub. */
+  last_notification_at: string;
+  /** Phase 6 — thong diep loi AN TOAN gan nhat lien quan WebSub. KHONG BAO
+      GIO co truong bi mat (`websub_secret`) — xem `TrustedSource.to_dict()`
+      phia server, day la ranh gioi an toan duy nhat. */
+  last_websub_error: string;
+  /** Phase 6 — lan gan nhat doi chieu dinh ky thanh cong (doc lap voi
+      `last_scan_at`, von la quet THU CONG). */
+  last_successful_sync_at: string;
   created_at: string;
   updated_at: string;
 }
@@ -1550,6 +1561,10 @@ export interface AdminTrustedSourceDetail {
   source: TrustedSource;
   mappings: AdminSeriesMappingRow[];
   recent_imports: VideoImport[];
+  /** Phase 6 — su thật TOÀN CỤC (không theo từng nguồn): `false` khi backend
+      CHƯA có URL callback công khai (`YOUTUBE_WEBSUB_CALLBACK_BASE_URL`) —
+      hiện "Chưa cấu hình" thay vì một trạng thái đăng ký bịa đặt. */
+  websub_configured: boolean;
 }
 
 /** Ket qua MOT lan "Quet video co san" — xem `TrustedSourceService.scan_source`. */
@@ -1810,6 +1825,29 @@ export const adminApi = {
       `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/scan`,
       { method: "POST", body: JSON.stringify({
         page_token: opts.pageToken ?? "", max_pages: opts.maxPages ?? 2 }) },
+    ),
+
+  // -- WebSub / doi chieu dinh ky (Phase 6) --------------------------------
+  //
+  // 503 = chưa cấu hình URL callback công khai (backend đang chạy cục bộ,
+  // YouTube không gọi tới được) — hiện qua `<ChuaCauHinh>`, không phải lỗi.
+
+  subscribeTrustedSource: (sourceId: string) =>
+    request<{ source: TrustedSource }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/subscribe`,
+      { method: "POST", body: "{}" },
+    ),
+
+  unsubscribeTrustedSource: (sourceId: string) =>
+    request<{ source: TrustedSource }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/unsubscribe`,
+      { method: "POST", body: "{}" },
+    ),
+
+  runReconciliation: (sourceId: string = "") =>
+    request<{ sources_checked: number; sources_failed: number; videos_detected: number }>(
+      "/api/admin/animation/reconciliation/run",
+      { method: "POST", body: JSON.stringify({ source_id: sourceId }) },
     ),
 
   createSeriesMapping: (sourceId: string, payload: {

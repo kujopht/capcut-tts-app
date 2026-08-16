@@ -17,11 +17,12 @@ import {
   adminApi,
   type AdminSeriesMappingRow,
   type AdminAnimationSeriesRow,
+  type SubscriptionStatus,
   type TrustedSourceScanResult,
 } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
-import { DanhSachTrangThai, loiApi } from "@/components/AdminShell";
+import { ChuaCauHinh, DanhSachTrangThai, loiApi } from "@/components/AdminShell";
 import { ConfirmDialog } from "@/components/ui";
 import { IconLink } from "@/components/Icons";
 
@@ -29,6 +30,14 @@ const TEN_LOAI: Record<string, string> = {
   youtube_channel: "Kênh YouTube",
   youtube_playlist: "Playlist YouTube",
   youtube_video: "Video đơn lẻ",
+};
+
+const NHAN_DANG_KY: Record<SubscriptionStatus, { chu: string; lop: string }> = {
+  none: { chu: "Chưa đăng ký", lop: "tt-trong" },
+  pending: { chu: "Đang chờ xác minh", lop: "tt-cho" },
+  active: { chu: "Đang hoạt động", lop: "tt-duyet" },
+  expired: { chu: "Đã hết hạn", lop: "tt-treo" },
+  failed: { chu: "Lỗi", lop: "tt-tuchoi" },
 };
 
 export default function AdminTrustedSourceDetailPage({
@@ -68,6 +77,12 @@ export default function AdminTrustedSourceDetailPage({
   const [ketQuaQuet, setKetQuaQuet] = useState<TrustedSourceScanResult | null>(null);
   const [hoiXoaNguon, setHoiXoaNguon] = useState(false);
   const [dangXoa, setDangXoa] = useState(false);
+
+  const [dangDangKy, setDangDangKy] = useState(false);
+  const [dangDoiChieu, setDangDoiChieu] = useState(false);
+  const [ketQuaDoiChieu, setKetQuaDoiChieu] = useState<
+    { sources_checked: number; sources_failed: number; videos_detected: number } | null
+  >(null);
 
   const [danhSachSeries, setDanhSachSeries] = useState<AdminAnimationSeriesRow[]>([]);
   useEffect(() => {
@@ -128,6 +143,34 @@ export default function AdminTrustedSourceDetailPage({
       toast.error(loiApi(cause, "Quét thất bại."));
     } finally {
       setDangQuet(false);
+    }
+  }
+
+  async function dangKy() {
+    setDangDangKy(true);
+    try {
+      await adminApi.subscribeTrustedSource(sourceId);
+      toast.ok("Đã gửi yêu cầu đăng ký WebSub — chờ YouTube xác minh.");
+      reload();
+    } catch (cause) {
+      toast.error(loiApi(cause, "Không đăng ký được."));
+    } finally {
+      setDangDangKy(false);
+    }
+  }
+
+  async function chayDoiChieu() {
+    setDangDoiChieu(true);
+    setKetQuaDoiChieu(null);
+    try {
+      const ket_qua = await adminApi.runReconciliation(sourceId);
+      setKetQuaDoiChieu(ket_qua);
+      toast.ok(`Đã đối chiếu: ${ket_qua.videos_detected} video phát hiện.`);
+      reload();
+    } catch (cause) {
+      toast.error(loiApi(cause, "Đối chiếu thất bại."));
+    } finally {
+      setDangDoiChieu(false);
     }
   }
 
@@ -210,6 +253,80 @@ export default function AdminTrustedSourceDetailPage({
                   Bỏ tin cậy
                 </button>
               </div>
+            </div>
+
+            <div className="card stack-2">
+              <h3 className="section-title">Đồng bộ tự động (WebSub)</h3>
+              {!data.websub_configured ? (
+                <ChuaCauHinh
+                  tieuDe="Chưa cấu hình"
+                  ghiChu="Cần một backend công khai qua HTTPS (YOUTUBE_WEBSUB_CALLBACK_BASE_URL) để YouTube gọi callback được — chưa khả dụng trên môi trường phát triển cục bộ."
+                />
+              ) : (
+                <>
+                  <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                    <span className={`tt ${NHAN_DANG_KY[s.subscription_status].lop}`}>
+                      {NHAN_DANG_KY[s.subscription_status].chu}
+                    </span>
+                  </div>
+                  <div className="stat-grid admin-luoi">
+                    <div className="stat">
+                      <span className="stat-value">
+                        {s.last_notification_at
+                          ? new Date(s.last_notification_at).toLocaleString("vi-VN")
+                          : "—"}
+                      </span>
+                      <span className="stat-label">Thông báo gần nhất</span>
+                    </div>
+                    <div className="stat">
+                      <span className="stat-value">
+                        {s.last_successful_sync_at
+                          ? new Date(s.last_successful_sync_at).toLocaleString("vi-VN")
+                          : "—"}
+                      </span>
+                      <span className="stat-label">Đối chiếu thành công gần nhất</span>
+                    </div>
+                    <div className="stat">
+                      <span className="stat-value">
+                        {s.subscription_expires_at
+                          ? new Date(s.subscription_expires_at).toLocaleString("vi-VN")
+                          : "—"}
+                      </span>
+                      <span className="stat-label">Hạn đăng ký</span>
+                    </div>
+                  </div>
+                  {s.last_websub_error ? (
+                    <p className="hint" role="alert">Lỗi gần nhất: {s.last_websub_error}</p>
+                  ) : null}
+                  <div className="row">
+                    <button type="button" className="btn btn-sm" disabled={dangDangKy}
+                            onClick={dangKy}>
+                      {dangDangKy ? "Đang đăng ký…"
+                        : s.subscription_status === "none" ? "Đăng ký"
+                        : "Đăng ký lại"}
+                    </button>
+                    <button type="button" className="btn btn-sm" disabled={dangDoiChieu}
+                            onClick={chayDoiChieu}>
+                      {dangDoiChieu ? "Đang đối chiếu…" : "Chạy đối chiếu ngay"}
+                    </button>
+                  </div>
+                  {ketQuaDoiChieu ? (
+                    <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                      <span className="tt tt-trong">
+                        Nguồn đã kiểm: {ketQuaDoiChieu.sources_checked}
+                      </span>
+                      <span className="tt tt-trong">
+                        Video phát hiện: {ketQuaDoiChieu.videos_detected}
+                      </span>
+                      {ketQuaDoiChieu.sources_failed > 0 ? (
+                        <span className="tt tt-tuchoi">
+                          Lỗi: {ketQuaDoiChieu.sources_failed}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
 
             <div className="card stack-2">

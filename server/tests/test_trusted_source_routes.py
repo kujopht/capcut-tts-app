@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient       # noqa: E402
 from server import main                          # noqa: E402
 from server.animation_domain import AnimationSeries  # noqa: E402
 from server.youtube_client import ChannelInfo, VideoInfo  # noqa: E402
+from server.youtube_websub import WebSubError, compute_signature  # noqa: E402
 
 
 class FakeYouTubeClient:
@@ -51,6 +52,22 @@ class FakeYouTubeClient:
         return self._playlist_items.get(playlist_id, ([], ""))
 
 
+class FakeWebSubClient:
+    def __init__(self, *, subscribe_fails=False):
+        self.subscribe_calls = []
+        self.unsubscribe_calls = []
+        self._subscribe_fails = subscribe_fails
+
+    def subscribe(self, *, channel_id, callback_url, secret, lease_seconds=432000):
+        self.subscribe_calls.append(
+            {"channel_id": channel_id, "callback_url": callback_url, "secret": secret})
+        if self._subscribe_fails:
+            raise WebSubError("Hub từ chối yêu cầu (HTTP 500).")
+
+    def unsubscribe(self, *, channel_id, callback_url):
+        self.unsubscribe_calls.append({"channel_id": channel_id, "callback_url": callback_url})
+
+
 class Nen(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(main.app)
@@ -71,7 +88,8 @@ class Nen(unittest.TestCase):
         main.trusted_source_store = MockTrustedSourceStore()
         main.trusted_sources = TrustedSourceService(
             main.trusted_source_store, main.animation_store, main.store,
-            youtube_api_key="fake-key")
+            youtube_api_key="fake-key",
+            websub_callback_base_url="https://api.fanfic.world")
 
         self.an, self.tk_an = self._nguoi("an@vidu.vn", "An")
         self.kt, self.tk_kt = self._nguoi("kt@vidu.vn", "Kiểm duyệt")
@@ -103,6 +121,17 @@ class Nen(unittest.TestCase):
 
     def _dat_client_gia(self, client: FakeYouTubeClient):
         main.trusted_sources._youtube = lambda: client
+
+    def _dat_websub_gia(self, client: FakeWebSubClient):
+        main.trusted_sources._websub = lambda: client
+
+    def _tao_nguon_kenh(self, *, cid: str, headers=None, **kwargs) -> dict:
+        body = {"source_type": "youtube_channel", "youtube_channel_id": cid,
+               "display_name": "Kênh test"}
+        body.update(kwargs)
+        return self.client.post(
+            "/api/admin/animation/sources", headers=headers or self.tk_admin,
+            json=body).json()["source"]
 
 
 class TrustedSourceRoutesTest(Nen):
@@ -366,6 +395,150 @@ class TrustedSourceRoutesTest(Nen):
             json={"url": "UC" + "z" * 22})
         self.assertEqual(resp.status_code, 503)
         main.trusted_sources._youtube_api_key = "fake-key"
+
+
+class WebSubRoutesTest(Nen):
+    """Phase 6 — dang ky/huy dang ky/doi chieu (quan tri) + hai route callback
+    CONG KHAI (`/api/youtube/websub`)."""
+
+    def test_kiem_duyet_khong_dang_ky_duoc(self):
+        cid = "UC" + "e" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/subscribe",
+            headers=self.tk_kt, json={})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_admin_dang_ky_thanh_cong(self):
+        cid = "UC" + "f" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        self._dat_websub_gia(FakeWebSubClient())
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/subscribe",
+            headers=self.tk_admin, json={})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["source"]["subscription_status"], "pending")
+        self.assertNotIn("websub_secret", resp.json()["source"])
+
+    def test_chua_cau_hinh_callback_tra_503(self):
+        cid = "UC" + "g" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        main.trusted_sources._websub_callback_base_url = ""
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/subscribe",
+            headers=self.tk_admin, json={})
+        self.assertEqual(resp.status_code, 503)
+        main.trusted_sources._websub_callback_base_url = "https://api.fanfic.world"
+
+    def test_admin_huy_dang_ky(self):
+        cid = "UC" + "h" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        self._dat_websub_gia(FakeWebSubClient())
+        self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/subscribe",
+            headers=self.tk_admin, json={})
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/unsubscribe",
+            headers=self.tk_admin, json={})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["source"]["subscription_status"], "none")
+
+    def test_admin_chay_doi_chieu(self):
+        cid = "UC" + "i" * 22
+        self._tao_nguon_kenh(cid=cid, auto_discover=True)
+        self._dat_client_gia(FakeYouTubeClient())
+        resp = self.client.post(
+            "/api/admin/animation/reconciliation/run", headers=self.tk_admin, json={})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("sources_checked", resp.json())
+
+    def test_kiem_duyet_khong_chay_duoc_doi_chieu(self):
+        resp = self.client.post(
+            "/api/admin/animation/reconciliation/run", headers=self.tk_kt, json={})
+        self.assertEqual(resp.status_code, 403)
+
+    # -- callback cong khai ---------------------------------------------------
+
+    def test_xac_minh_nguon_khong_ton_tai_tra_404(self):
+        resp = self.client.get(
+            "/api/youtube/websub",
+            params={"source_id": "khong_ton_tai", "hub.mode": "subscribe",
+                   "hub.topic": "x", "hub.challenge": "abc", "hub.lease_seconds": "1"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_xac_minh_echo_challenge_nguyen_ven(self):
+        cid = "UC" + "j" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        topic = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+        resp = self.client.get(
+            "/api/youtube/websub",
+            params={"source_id": source["source_id"], "hub.mode": "subscribe",
+                   "hub.topic": topic, "hub.challenge": "thu-thach-xyz",
+                   "hub.lease_seconds": "432000"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.text, "thu-thach-xyz")
+        self.assertEqual(resp.headers.get("x-content-type-options"), "nosniff")
+
+    def test_thong_bao_nguon_khong_ton_tai_tra_404(self):
+        resp = self.client.post(
+            "/api/youtube/websub", params={"source_id": "khong_ton_tai"},
+            content=b"<feed/>")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_thong_bao_khong_co_chu_ky_van_tra_200(self):
+        cid = "UC" + "k" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        self._dat_websub_gia(FakeWebSubClient())
+        self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/subscribe",
+            headers=self.tk_admin, json={})
+        resp = self.client.post(
+            "/api/youtube/websub", params={"source_id": source["source_id"]},
+            content=b"<feed/>")
+        # Dac ta WebSub: ma thanh cong CHI co nghia DA NHAN — chu ky sai/
+        # thieu van tra 200, xu ly/tu choi noi bo (xem nhat ky kiem duyet).
+        self.assertEqual(resp.status_code, 200)
+
+    def test_thong_bao_dung_chu_ky_xu_ly_thanh_cong(self):
+        cid = "UC" + "l" * 22
+        source = self._tao_nguon_kenh(cid=cid, auto_discover=True, auto_import=True,
+                                      minimum_confidence=0.1)
+        self._dat_websub_gia(FakeWebSubClient())
+        self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/subscribe",
+            headers=self.tk_admin, json={})
+        secret = main.trusted_source_store.get_source(source["source_id"]).websub_secret
+
+        self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/mappings",
+            headers=self.tk_admin,
+            json={"animation_series_id": self.series.series_id,
+                 "aliases": ["tiên nghịch"]})
+
+        vid = "vidR0000001"
+        self._dat_client_gia(FakeYouTubeClient(videos={
+            vid: VideoInfo(video_id=vid, title="Tiên Nghịch Tập 3", channel_id=cid,
+                          channel_title="Kênh test", thumbnail_url="", published_at="",
+                          duration_seconds=10.0)}))
+
+        body = f"""<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+                         xmlns="http://www.w3.org/2005/Atom">
+          <entry>
+            <yt:videoId>{vid}</yt:videoId>
+            <yt:channelId>{cid}</yt:channelId>
+            <title>Tiên Nghịch Tập 3</title>
+          </entry>
+        </feed>""".encode("utf-8")
+        sig = compute_signature(secret, body)
+        resp = self.client.post(
+            "/api/youtube/websub", params={"source_id": source["source_id"]},
+            content=body, headers={"X-Hub-Signature": sig})
+        self.assertEqual(resp.status_code, 200)
+
+        hang_doi = self.client.get(
+            "/api/admin/animation/imports", headers=self.tk_admin).json()["imports"]
+        self.assertEqual(len(hang_doi), 1)
+        self.assertEqual(hang_doi[0]["status"], "auto_imported")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ from server.adapters import NotFoundError
 from server.domain import now_iso
 from server.trusted_source_domain import (
     SeriesMapping,
+    SubscriptionStatus,
     TrustedSource,
     VideoImport,
     video_import_id,
@@ -107,6 +108,58 @@ class MockTrustedSourceStore:
                 allowed["last_error_at"] = moc
                 allowed["last_error_message"] = error_message
             updated = replace(current, **allowed, updated_at=moc)
+            self.sources[source_id] = updated
+            return updated
+
+    def find_source_by_channel_id(self, channel_id: str) -> Optional[TrustedSource]:
+        if not channel_id:
+            return None
+        with self._lock:
+            for s in self.sources.values():
+                if s.youtube_channel_id == channel_id:
+                    return s
+        return None
+
+    def record_websub_subscription(
+        self, source_id: str, *, status: SubscriptionStatus,
+        expires_at: str = "", secret: Optional[str] = None,
+    ) -> TrustedSource:
+        with self._lock:
+            current = self.get_source(source_id)
+            moc = now_iso()
+            allowed: Dict[str, Any] = {
+                "subscription_status": status,
+                "last_subscription_attempt_at": moc,
+            }
+            if expires_at:
+                allowed["subscription_expires_at"] = expires_at
+            if secret is not None:
+                allowed["websub_secret"] = secret
+            updated = replace(current, **allowed, updated_at=moc)
+            self.sources[source_id] = updated
+            return updated
+
+    def record_websub_notification(self, source_id: str) -> TrustedSource:
+        with self._lock:
+            current = self.get_source(source_id)
+            moc = now_iso()
+            updated = replace(current, last_notification_at=moc, updated_at=moc)
+            self.sources[source_id] = updated
+            return updated
+
+    def record_websub_failure(self, source_id: str, *, error_message: str) -> TrustedSource:
+        with self._lock:
+            current = self.get_source(source_id)
+            moc = now_iso()
+            updated = replace(current, last_websub_error=error_message, updated_at=moc)
+            self.sources[source_id] = updated
+            return updated
+
+    def record_reconciliation_sync(self, source_id: str) -> TrustedSource:
+        with self._lock:
+            current = self.get_source(source_id)
+            moc = now_iso()
+            updated = replace(current, last_successful_sync_at=moc, updated_at=moc)
             self.sources[source_id] = updated
             return updated
 

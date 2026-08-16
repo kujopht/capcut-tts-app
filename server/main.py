@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, StringConstraints
@@ -88,6 +88,7 @@ from server.trusted_source_service import (
     TrustedSourceService,
 )
 from server.youtube_client import YouTubeApiError, YouTubeConfigError
+from server.youtube_websub import MAX_NOTIFICATION_BYTES, WebSubConfigError
 from server.domain import (
     AdminRole,
     AudioStamp,
@@ -220,7 +221,8 @@ trusted_source_store = build_trusted_source_store(settings)
 #: nhat ky voi kiem duyet Animation/xa hoi o tren.
 trusted_sources = TrustedSourceService(
     trusted_source_store, animation_store, store,
-    youtube_api_key=settings.youtube_api_key)
+    youtube_api_key=settings.youtube_api_key,
+    websub_callback_base_url=settings.youtube_websub_callback_base_url)
 
 #: Tang service cua tang xa hoi. Cung `identity`/`store`/`storage` voi moi route
 #: khac — mot duong ghi duy nhat, va no la noi quyen/han muc/thong bao duoc
@@ -4094,7 +4096,7 @@ def _nguon_tin_cay(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except TrustedSourceError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    except YouTubeConfigError as exc:
+    except (YouTubeConfigError, WebSubConfigError) as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except YouTubeApiError as exc:
         ma = (status.HTTP_429_TOO_MANY_REQUESTS if exc.reason == "quotaExceeded"
@@ -4865,6 +4867,106 @@ def admin_ignore_video_import(
         raise HTTPException(status.HTTP_404_NOT_FOUND,
                             "Không tìm thấy video trong hàng đợi nhập.")
     return {"import": updated}
+
+
+# -----------------------------------------------------------------------------
+# YouTube WebSub (Phase 6, Trusted Video Sources) — dang ky/gia han + doi chieu
+# -----------------------------------------------------------------------------
+#
+# BA route quan tri (dang ky/huy dang ky/chay doi chieu) dung
+# `admin_or_owner_profile` — CUNG muc voi mutate Trusted Sources o Phase 5.
+# HAI route callback CONG KHAI (`youtube_websub_verify`/`youtube_websub_notify`,
+# ben duoi) KHONG qua bat ky `Depends` nao ca — day la route he thong ma hub
+# PubSubHubbub cua YouTube goi TRUC TIEP, khong phai nguoi dung dang nhap.
+
+
+@app.post("/api/admin/animation/sources/{source_id}/subscribe")
+def admin_subscribe_trusted_source(
+    source_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Dang ky (hoac dang ky lai de gia han) mot nguon kieu kenh voi hub
+    WebSub. 503 neu chua cau hinh URL callback cong khai — xem
+    `TrustedSourceService.websub_configured`."""
+    return {"source": _nguon_tin_cay(
+        trusted_sources.subscribe_source, admin, source_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/sources/{source_id}/unsubscribe")
+def admin_unsubscribe_trusted_source(
+    source_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return {"source": _nguon_tin_cay(
+        trusted_sources.unsubscribe_source, admin, source_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+class ReconciliationRunIn(BaseModel):
+    #: Rong = chay cho MOI nguon BAT + auto_discover; truyen vao = CHI mot nguon.
+    source_id: str = ""
+
+
+@app.post("/api/admin/animation/reconciliation/run")
+def admin_run_reconciliation(
+    payload: ReconciliationRunIn, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """"Chạy đối chiếu ngay" — thu cong, BI CHAN (mot trang/nguon), co kiem
+    toan qua nhat ky `reconciliation_run`. Xem `TrustedSourceService.
+    run_reconciliation`."""
+    return _nguon_tin_cay(
+        trusted_sources.run_reconciliation, source_id=payload.source_id,
+        actor_id=admin.user_id, actor_role=settings.admin_role_of(admin.user_id).value)
+
+
+@app.get("/api/youtube/websub")
+def youtube_websub_verify(
+    source_id: str = "",
+    hub_mode: str = Query("", alias="hub.mode"),
+    hub_topic: str = Query("", alias="hub.topic"),
+    hub_challenge: str = Query("", alias="hub.challenge"),
+    hub_lease_seconds: str = Query("", alias="hub.lease_seconds"),
+) -> Response:
+    """
+    Xac minh dang ky/huy dang ky (bat tay WebSub, xem
+    `server/youtube_websub.py`). Dac ta BAT BUOC: echo NGUYEN VEN
+    `hub.challenge`, Content-Type AN TOAN (khong phai HTML/JS — tranh phan
+    anh XSS neu challenge chua ky tu la), va tra 404 khi tu choi.
+    """
+    challenge = trusted_sources.handle_websub_verification(
+        source_id=source_id, mode=hub_mode, topic=hub_topic,
+        challenge=hub_challenge, lease_seconds=hub_lease_seconds)
+    if challenge is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không xác nhận đăng ký này.")
+    return Response(content=challenge, media_type="text/plain",
+                    headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/api/youtube/websub")
+async def youtube_websub_notify(
+    request: Request, source_id: str = "",
+    x_hub_signature: str = Header("", alias="X-Hub-Signature"),
+) -> Response:
+    """
+    Thong bao video moi/cap nhat/da xoa tu hub. LUON tra 200 (dac ta WebSub:
+    ma thanh cong CHI co nghia DA NHAN, khong phai da xu ly xong THANH
+    CONG) — ket qua xu ly/tu choi (nguon khong ton tai, chu ky sai, XML
+    hong) chi anh huong nhat ky/trang thai noi bo, xem
+    `TrustedSourceService.handle_websub_notification`.
+    """
+    khai_bao = request.headers.get("content-length")
+    if khai_bao:
+        try:
+            if int(khai_bao) > MAX_NOTIFICATION_BYTES:
+                raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                    "Thân thông báo quá lớn.")
+        except ValueError:
+            pass
+    body = await request.body()
+    ket_qua = trusted_sources.handle_websub_notification(
+        source_id=source_id, body=body, signature_header=x_hub_signature)
+    if ket_qua is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có nguồn tin cậy nào khớp.")
+    return Response(status_code=status.HTTP_200_OK)
 
 
 # =============================================================================

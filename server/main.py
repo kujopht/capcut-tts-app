@@ -34,6 +34,7 @@ from server import tts_bridge
 from server import traffic_analytics
 from server.transcript import TRANSCRIPT_VERSION, build_transcript
 from server.translation_usage import usage_recorder
+from server.secret_redaction import loc_bo_theo_gia_tri
 from server.adapters import (
     AppwriteUnavailableError,
     AuthError,
@@ -3722,7 +3723,13 @@ def _an_toan_song_song(future, mac_dinh, *, nhan: str = "admin"):
         # moi truong (vd console Windows cp1252) — mot ky tu co dau o day
         # co the tu no nem UnicodeEncodeError, pha huy chinh muc dich cua
         # duong an toan nay.
-        print(f"[{nhan}] mot nhom truy van loi, dung gia tri mac dinh: {exc!r}")
+        #
+        # loc_bo_theo_gia_tri(): phong truong hop MOT nhom truy van (vd mot
+        # provider/adapter moi them sau nay) nem loi chua bi mat dang
+        # Bearer/JWT/khoa Appwrite truoc khi kip di qua `thong_diep_loi_an_toan`
+        # o tang duoi — xem server/secret_redaction.py (Phase 12 audit).
+        print(f"[{nhan}] mot nhom truy van loi, dung gia tri mac dinh: "
+              f"{loc_bo_theo_gia_tri(repr(exc))}")
         return mac_dinh
 
 

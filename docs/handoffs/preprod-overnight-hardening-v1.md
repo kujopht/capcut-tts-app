@@ -228,8 +228,24 @@ dừng cả phiên.
       trong `@media (max-width: 640px)` (dùng min-width/min-height thay vì
       width/height cố định để không phá một test đã khoá quy ước đó).
       `npm run typecheck` sạch, `npm test` **635/635 pass**.
-- [~] Phase 12 — Security/secret audit (toàn repo + git history) — ĐANG CHẠY nền
-      (fork, `docs/reports/preprod-security-audit.md`)
+- [x] Phase 12 — Security/secret audit (`docs/reports/preprod-security-audit.md`). XONG —
+      SẠCH cả 6 mục: (1) quét toàn bộ lịch sử Git (`git log --all -p`) cho mẫu
+      khoá Appwrite/YouTube/OpenAI-style/PEM/service-account/Bearer/JWT — 0 bí
+      mật thật, chỉ có chuỗi giả trong test; không `.env` thật nào từng được
+      commit (chỉ `.env.example`); (2) đã CHẠY THẬT `secret_redaction.py` với
+      giá trị giả (Appwrite key/Bearer/JWT) — redact đúng; ghi nhận khoảng
+      trống nhỏ (chưa có mẫu cho khoá `AIzaSy…` kiểu YouTube) nhưng xác nhận
+      không khai thác được vì `youtube_client.py` không bao giờ đưa exception
+      vào thông điệp lỗi; (3) 1 LỖI NHỎ ĐÃ SỬA —
+      `_an_toan_song_song()` (`server/main.py`) in thẳng `repr(exc)` không qua
+      lọc, đã bọc bằng `loc_bo_theo_gia_tri()` (phòng thủ chiều sâu, chưa từng
+      bị khai thác thật vì mọi exception hiện tại đã được lọc ở tầng store);
+      (4) frontend SẠCH — chỉ `NEXT_PUBLIC_API_BASE`, BYOK/provider-connection
+      chỉ trả `last4`/`status`, có test canh giữ riêng; (5) không có token qua
+      URL query, không middleware log request/header nào; (6) 4 script
+      smoke/perf-probe đều khớp đúng lời khai "không in bí mật" trong docstring
+      của chính chúng. `compileall` + toàn bộ `server/tests` (2408 test) — OK
+      sau khi sửa.
 - [~] Phase 13 — Data/schema consistency audit — ĐANG CHẠY nền (fork,
       `docs/reports/preprod-schema-audit.md`)
 - [x] Phase 14 — Worker/restart/ops audit (`docs/reports/preprod-worker-ops-audit.md`). XONG —

@@ -151,10 +151,34 @@ dừng cả phiên.
       không làm mồ côi episode/import (có fallback graceful cho tên nguồn đã
       xoá). Không sửa code, không gọi mạng YouTube thật (máy này không có
       `YOUTUBE_API_KEY`).
-- [~] Phase 8 — Image Studio safety/integration audit (KHÔNG chi tiêu thật) —
-      ĐANG CHẠY nền (fork, `docs/reports/preprod-image-translation-tts-audit.md`)
-- [~] Phase 9 — Translation/TTS integration audit (KHÔNG chi tiêu thật) —
-      ĐANG CHẠY nền (cùng fork với Phase 8)
+- [x] Phase 8 — Image Studio safety/integration audit (KHÔNG chi tiêu thật)
+      (`docs/reports/preprod-image-translation-tts-audit.md`). XONG — SẠCH,
+      không sửa gì. Quick Free thật sự miễn phí/không giới hạn (không đụng
+      wallet); Community Free báo `available=False` trung thực khi tra cứu
+      lỗi (khác rỗng thật) và luôn kiểm tra lại danh sách model free trước
+      mỗi lần sinh (chặn thay vì âm thầm rơi về trả phí); kill-switch Shared
+      Premium chặn ĐÚNG cả hai chiều (thiếu `POLLINATIONS_API_KEY` và cờ
+      `shared_premium_enabled=False`) trước khi giữ chỗ ví; `MockWalletStore`
+      giữ/chốt/hoàn tiền đều qua một điểm ghi duy nhất theo khoá idempotency
+      — không có đường trừ đúp/hoàn đúp; giới hạn mock-only đã được ghi tài
+      liệu trung thực từ trước (chấp nhận được, DEFERRED); token BYOP được mã
+      hoá khi lưu, không log; lỗi provider luôn qua thông điệp an toàn chung,
+      không lộ nội dung/stack thật.
+- [x] Phase 9 — Translation/TTS integration audit (KHÔNG chi tiêu thật)
+      (cùng báo cáo với Phase 8). XONG — SẠCH, không sửa gì. Thiếu biến môi
+      trường provider → bị loại khỏi registry (không crash); registry rỗng →
+      trạng thái job `waiting_for_provider`, không phải lỗi cứng. Dây chuyền
+      dự phòng Cerebras→Groq đúng khi rate-limit/hết hạn mức.
+      `TRANSLATION_ALLOW_PAID_PROVIDER` được chặn HAI lớp (khi dựng registry
+      và lại trong `ProviderRegistry.__init__`) — cờ tắt thì không có đường
+      lọt provider trả phí. `translation_integrity.py` có 5 kiểm tra cụ thể
+      chống bản dịch hỏng ngầm. TTS dùng LẠI đúng một đường claim/lease/fencing
+      với `main.recover_stale_jobs()`/`_run_job()`, không có bản sao riêng lệch
+      pha. Bộ test 20 file liên quan: 363/363 pass; toàn bộ: 2408/2408 pass
+      (1 skip không liên quan) — khớp đúng baseline, không đổi số vì không sửa
+      code nào. (Lưu ý: một fork Phase 8/9 đầu tiên bị lạc đề, đi xác minh lại
+      Phase 3/5 đã xong thay vì làm việc được giao — đã huỷ, chạy lại fork thứ
+      hai với phạm vi chặt hơn, kết quả trên là của lần chạy lại.)
 - [x] Phase 10 — Error/resilience testing (`docs/reports/preprod-resilience-audit.md`). XONG —
       SẠCH cả 5 mục: (1) TTS job pipeline (`main.py::_run_job`/`recover_stale_jobs`,
       `server/worker.py`) — claim nguyên tử + fencing token + lease/heartbeat +

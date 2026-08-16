@@ -2,6 +2,20 @@
 
 Cập nhật: 2026-08-08 · Branch `feature/web-mvp` · HEAD `14f4a31`
 
+> **CẬP NHẬT (overnight hardening V1, Phase 16/17):** file này là snapshot của
+> nhánh `feature/web-mvp` từ 2026-08-08 — KHÔNG còn phản ánh trạng thái hiện
+> tại. Từ đó tới nay đã merge: Appwrite tự lưu trữ trên GCE
+> (`integration/pre-prod-v1`), Admin Control Center V2 + Trusted Video Sources
+> (7 phase), Image Studio V1, dịch thuật Cerebras/Groq (BYOK), hệ
+> gamification/social, hạng tác giả. `CLAUDE.md` trỏ file này làm nguồn "mốc
+> nào đã xong" — với các tính năng SAU 2026-08-08, xem thay:
+> `docs/ADMIN.md`, `docs/DEV_SELFHOST_APPWRITE.md`,
+> `docs/handoffs/admin-trusted-video-v2-handoff.md`,
+> `docs/handoffs/preprod-overnight-hardening-v1.md`, và
+> `docs/reports/preprod-*.md`. Không viết lại toàn bộ file này trong đợt
+> hardening này (rủi ro/khối lượng vượt phạm vi "tài liệu lỗi thời, sửa nhỏ
+> an toàn") — để nguyên làm hồ sơ lịch sử của mốc `feature/web-mvp`.
+
 Tài liệu này để một phiên khác tiếp tục được khi phiên hiện tại hết context.
 
 ## Trạng thái hiện tại — đọc mục này trước

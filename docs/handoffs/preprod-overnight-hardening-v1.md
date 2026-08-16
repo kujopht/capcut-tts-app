@@ -327,7 +327,10 @@ dừng cả phiên.
       `docs/HANDOFF.md` (sửa cuối 2026-08-08) cực kỳ lỗi thời — hoàn toàn
       không nhắc Appwrite tự lưu trữ, Admin Control Center V2/Trusted Video
       Sources, Image Studio, Animation... dù `CLAUDE.md` vẫn trỏ người đọc mới
-      vào đó; (2) `docs/WEB_README.md` (sửa cuối 2026-08-07) mục "Giới hạn
+      vào đó — ĐÃ SỬA ở bước dọn Phase 17 (bên dưới): thêm banner "CẬP NHẬT"
+      ngay đầu file trỏ sang các tài liệu hiện hành, KHÔNG viết lại toàn bộ
+      1036 dòng (ngoài phạm vi sửa nhỏ an toàn); (2) `docs/WEB_README.md`
+      (sửa cuối 2026-08-07) mục "Giới hạn
       hiện tại" khẳng định sai rằng Appwrite/R2 "chưa kiểm chứng thật", trái
       với các lần smoke test thật đã ghi nhận (kể cả Phase 6 phiên này). 1
       phát hiện MINOR: `docs/ADMIN.md` mục "API" thiếu liệt kê nhiều route

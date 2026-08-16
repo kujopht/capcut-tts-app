@@ -283,13 +283,13 @@ class CreatorService:
     # mot cai cong mo. Chung o day, duoc kiem thu, cho trang quan tri.
 
     def approve(self, user_id: str, *, note: str = "",
-                actor_id: str = "") -> AuthorApplication:
+                actor_id: str = "", actor_role: str = "") -> AuthorApplication:
         """Duyet. `pending -> approved`."""
         return self._decide(user_id, AuthorStatus.APPROVED, note,
-                            actor_id, "author_approved")
+                            actor_id, "author_approved", actor_role)
 
     def reject(self, user_id: str, *, note: str = "",
-               actor_id: str = "") -> AuthorApplication:
+               actor_id: str = "", actor_role: str = "") -> AuthorApplication:
         """
         Tu choi. `pending -> rejected`.
 
@@ -299,10 +299,10 @@ class CreatorService:
         if not (note or "").strip():
             raise AuthorStateError("Cần ghi chú lý do khi từ chối đơn.")
         return self._decide(user_id, AuthorStatus.REJECTED, note,
-                            actor_id, "author_rejected")
+                            actor_id, "author_rejected", actor_role)
 
     def suspend(self, user_id: str, *, note: str = "",
-                actor_id: str = "") -> AuthorApplication:
+                actor_id: str = "", actor_role: str = "") -> AuthorApplication:
         """
         Tam dung quyen xuat ban. `approved -> suspended`.
 
@@ -311,16 +311,17 @@ class CreatorService:
         khac. Chi chan xuat ban MOI. Ban nhap, chuong va audio deu khong bi cham.
         """
         return self._decide(user_id, AuthorStatus.SUSPENDED, note,
-                            actor_id, "author_suspended")
+                            actor_id, "author_suspended", actor_role)
 
     def restore(self, user_id: str, *, note: str = "",
-                actor_id: str = "") -> AuthorApplication:
+                actor_id: str = "", actor_role: str = "") -> AuthorApplication:
         """Phuc hoi sau khi treo. `suspended -> approved`."""
         return self._decide(user_id, AuthorStatus.APPROVED, note,
-                            actor_id, "author_restored")
+                            actor_id, "author_restored", actor_role)
 
     def _decide(self, user_id: str, moi: AuthorStatus, note: str,
-                actor_id: str = "", hanh_dong: str = "") -> AuthorApplication:
+                actor_id: str = "", hanh_dong: str = "",
+                actor_role: str = "") -> AuthorApplication:
         profile = self._identity.get_profile(user_id)
         cu = profile.author_status
         if not can_transition(cu, moi):
@@ -351,6 +352,7 @@ class CreatorService:
                 action=hanh_dong,
                 target_user_id=user_id,
                 actor_id=actor_id,
+                actor_role=actor_role,
                 note=(note or "").strip(),
             ))
 

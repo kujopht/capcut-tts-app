@@ -46,6 +46,15 @@ class Base(unittest.TestCase):
         server_main.settings = replace(server_main.settings,
                                        admin_user_ids=tuple(ids))
 
+    def _dat_vai_tro(self, owner=(), admin=(), moderator=()) -> None:
+        """Dat CA BA danh sach vai tro cung luc (Admin Control Center V2)."""
+        server_main.settings = replace(
+            server_main.settings,
+            owner_user_ids=tuple(owner),
+            admin_user_ids=tuple(admin),
+            moderator_user_ids=tuple(moderator),
+        )
+
     def _dang_ky(self, email, ten):
         self.client.post("/api/auth/register", json={
             "email": email, "password": "matkhau123", "display_name": ten})
@@ -104,9 +113,11 @@ class AdminAuthTest(Base):
 
     def test_moi_route_admin_deu_duoc_bao_ve(self):
         """
-        Tu liet ke va tu kiem. Mot route `/api/admin/*` moi ma quen
-        `Depends(admin_profile)` se lam bai nay do — khong ai phai nho bo sung
-        mot dong vao danh sach test.
+        Tu liet ke va tu kiem. Mot route `/api/admin/*` moi ma quen mot trong
+        BA phu thuoc quan tri (Admin Control Center V2: `admin_profile` — bat
+        ky muc nao; `admin_or_owner_profile` — ADMIN tro len; `owner_profile`
+        — CHI OWNER, danh cho cai dat he thong/tai chinh) se lam bai nay do —
+        khong ai phai nho bo sung mot dong vao danh sach test.
         """
         duong = sorted({
             getattr(r, "path", "") for r in server_main.app.routes
@@ -114,22 +125,28 @@ class AdminAuthTest(Base):
         })
         self.assertGreaterEqual(len(duong), 10, "chưa có route quản trị nào?")
 
+        PHU_THUOC_HOP_LE = {
+            server_main.admin_profile,
+            server_main.admin_or_owner_profile,
+            server_main.owner_profile,
+        }
         chua_bao_ve = []
         for r in server_main.app.routes:
             d = getattr(r, "path", "")
             if not d.startswith("/api/admin/"):
                 continue
             ten_tham_so = set(getattr(r, "dependant", None).query_params and [] or [])
-            # Tham so `admin` la ket qua cua `Depends(admin_profile)`; kiem theo
-            # chinh ham phu thuoc chu khong theo ten bien.
+            # Tham so `admin` la ket qua cua mot trong ba `Depends(...)` o
+            # tren; kiem theo CHINH ham phu thuoc chu khong theo ten bien.
             phu_thuoc = [
                 sub.call for sub in getattr(r.dependant, "dependencies", [])
             ]
-            if server_main.admin_profile not in phu_thuoc:
+            if not (PHU_THUOC_HOP_LE & set(phu_thuoc)):
                 chua_bao_ve.append(f"{sorted(r.methods)} {d}")
             del ten_tham_so
         self.assertEqual(chua_bao_ve, [],
-                         "route quản trị thiếu Depends(admin_profile)")
+                         "route quản trị thiếu Depends(admin_profile/"
+                         "admin_or_owner_profile/owner_profile)")
 
     def test_khong_co_quan_tri_nao_thi_KHONG_AI_vao_duoc(self):
         """Mac dinh la RONG: mot he thong moi trien khai khong co cua sau nao."""
@@ -142,6 +159,75 @@ class AdminAuthTest(Base):
         # `/api/health` la cong khai. Lo `user_id` cua quan tri la chi dich.
         d = self.client.get("/api/health").json()
         self.assertNotIn(self.admin["user_id"], str(d))
+
+
+class AdminRoleModelTest(Base):
+    """
+    Ba muc quan tri (Admin Control Center V2): OWNER > ADMIN > MODERATOR,
+    van la BIEN MOI TRUONG (xem `Settings.admin_role_of`), khong phai cot du
+    lieu — chi mo rong tu MOT danh sach thanh BA.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.chu, self.h_chu = self._dang_ky("owner@fanfic.local", "Chủ Sở Hữu")
+        self.kiemduyet, self.h_kiemduyet = self._dang_ky(
+            "mod@fanfic.local", "Kiểm Duyệt")
+        self._dat_vai_tro(
+            owner=[self.chu["user_id"]],
+            admin=[self.admin["user_id"]],
+            moderator=[self.kiemduyet["user_id"]],
+        )
+
+    def test_owner_profile_chi_owner_vao_duoc(self):
+        d = "/api/admin/image-studio/kill-switch"
+        payload = {"engaged": True}
+        self.assertEqual(
+            self.client.post(d, json=payload, headers=self.h_chu).status_code, 200)
+        for h in (self.h_admin, self.h_kiemduyet, self.h_thuong):
+            self.assertEqual(
+                self.client.post(d, json=payload, headers=h).status_code, 403)
+
+    def test_admin_or_owner_profile_tu_choi_moderator(self):
+        # `/api/admin/users` dung `admin_or_owner_profile` — MODERATOR khong
+        # duoc quan ly nguoi dung, chi duoc xu ly bao cao/kiem duyet noi dung.
+        d = "/api/admin/users"
+        self.assertEqual(
+            self.client.get(d, headers=self.h_admin).status_code, 200)
+        self.assertEqual(
+            self.client.get(d, headers=self.h_chu).status_code, 200)
+        self.assertEqual(
+            self.client.get(d, headers=self.h_kiemduyet).status_code, 403)
+
+    def test_admin_profile_van_nhan_ca_ba_muc(self):
+        # `/api/admin/overview` dung `admin_profile` — bat ky vai tro nao
+        # trong ba cung vao duoc, dung tinh than "MODERATOR van la quan tri".
+        d = "/api/admin/overview"
+        for h in (self.h_chu, self.h_admin, self.h_kiemduyet):
+            self.assertEqual(self.client.get(d, headers=h).status_code, 200)
+        self.assertEqual(
+            self.client.get(d, headers=self.h_thuong).status_code, 403)
+
+    def test_nam_trong_nhieu_danh_sach_thi_muc_cao_nhat_thang(self):
+        """Sai sot cau hinh (cung mot id trong ca owner lan moderator) khong
+        duoc CONG DON quyen — luon lay muc CAO NHAT."""
+        self._dat_vai_tro(
+            owner=[self.thuong["user_id"]],
+            moderator=[self.thuong["user_id"]],
+        )
+        self.assertEqual(
+            server_main.settings.admin_role_of(self.thuong["user_id"]),
+            server_main.AdminRole.OWNER,
+        )
+
+    def test_auth_me_tra_dung_admin_role_theo_tung_muc(self):
+        for h, muc in (
+            (self.h_chu, "owner"), (self.h_admin, "admin"),
+            (self.h_kiemduyet, "moderator"), (self.h_thuong, "none"),
+        ):
+            d = self.client.get("/api/auth/me", headers=h).json()["profile"]
+            self.assertEqual(d["admin_role"], muc)
+            self.assertEqual(d["is_admin"], muc != "none")
 
 
 class ApplicationQueueTest(Base):

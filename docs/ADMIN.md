@@ -1,5 +1,28 @@
 # Khu quản trị
 
+## 0. Ba mức quan tri (Admin Control Center V2, feature/admin-trusted-video-v2)
+
+Từ V2, có **BA** mức thay vì một mức phẳng — vẫn cùng triết lý ở mục 1 (biến
+môi trường, không phải cột dữ liệu), chỉ là **ba danh sách** thay vì một:
+
+| Biến môi trường | Mức | Được làm gì |
+|---|---|---|
+| `FAS_OWNER_USER_IDS` | OWNER | Toàn quyền — bao gồm cài đặt hệ thống/hạ tầng/tài chính (vd công tắc khẩn cấp Image Studio) |
+| `FAS_ADMIN_USER_IDS` | ADMIN | Người dùng/nội dung/phân tích/nguồn tin cậy YouTube — KHÔNG chạm hạ tầng/bí mật/tài chính |
+| `FAS_MODERATOR_USER_IDS` | MODERATOR | Chỉ xem/xử lý báo cáo và kiểm duyệt nội dung |
+
+Một `user_id` nằm trong nhiều danh sách cùng lúc (sai sót cấu hình) thì mức
+**CAO NHẤT thắng** — không cộng dồn quyền. Xem `Settings.admin_role_of`.
+
+Ba phụ thuộc FastAPI tương ứng, `server/main.py`:
+- `admin_profile` — bất kỳ mức nào trong ba (giữ tên cũ, chỉ mở rộng định nghĩa).
+- `admin_or_owner_profile` — ADMIN trở lên.
+- `owner_profile` — CHỈ OWNER.
+
+`/api/auth/me` trả thêm `admin_role` ("none"/"moderator"/"admin"/"owner") để
+giao diện ẩn/hiện đúng mục — **chỉ là gợi ý hiển thị**, mọi route vẫn tự kiểm
+lại qua ba phụ thuộc trên.
+
 ## 1. Ai là quản trị — và vì sao nó nằm ở biến môi trường
 
 `FAS_ADMIN_USER_IDS` — danh sách `user_id`, ngăn cách bằng dấu phẩy. **Mặc định
@@ -79,15 +102,31 @@ bảng, và trong hộp xác nhận.
 Bảng `moderation_events`. **Chỉ thêm** — không tầng nào có đường sửa hay xoá,
 và một bài test kiểm rằng route `events` chỉ có `GET`.
 
-Ghi: `action`, `target_user_id`, `actor_id`, `note`, `created_at`.
+Ghi: `action`, `target_user_id`, `actor_id`, `actor_role`, `target_type`,
+`target_id`, `note`, `metadata`, `created_at`.
+
+Bốn trường **MỚI từ V2** (Admin Control Center V2):
+- `actor_role` — mức của actor TẠI THỜI ĐIỂM hành động ("owner"/"admin"/
+  "moderator") — mức có thể đổi sau (sửa biến môi trường), ghi lại để nhật ký
+  không kể sai "ai có quyền gì lúc đó".
+- `target_type`/`target_id` — dùng khi đối tượng bị tác động KHÔNG PHẢI là
+  user (vd `"animation_series"`, `"trusted_source"`) — rỗng nghĩa là đối
+  tượng là user, dùng `target_user_id` như trước.
+- `metadata` — JSON AN TOÀN, KHÔNG BAO GIỜ chứa API key/OAuth token/BYOP
+  token/cookie/session secret/khoá mã hoá.
+
+`action` là Appwrite **enum** — thêm hành động mới phải MỞ RỘNG danh sách giá
+trị trong `scripts/setup_appwrite.py` (script tự phát hiện và PATCH mở rộng,
+không bao giờ thu hẹp — xem `_ensure_enum`), không tự ý ghi một chuỗi ngoài
+danh sách.
 
 `created_at` dùng **micro giây**, không dùng `now_iso()` (cắt ở giây). Một quản
 trị bấm Duyệt rồi Treo trong cùng một giây sẽ tạo hai bản ghi cùng mốc, và nhật
 ký có thể kể ngược câu chuyện — "phục hồi" hiện trước "treo". Lỗi này đã đổ ra
 trong test trước khi ai kịp đọc nhầm.
 
-Không bao giờ ra API công khai: `note` có thể chứa nhận xét nội bộ, và
-`actor_id` cho biết ai đang làm quản trị.
+Không bao giờ ra API công khai: `note`/`metadata` có thể chứa nhận xét nội bộ,
+và `actor_id` cho biết ai đang làm quản trị.
 
 ## 6. Schema cần thêm — **CHƯA áp lên production**
 
@@ -138,7 +177,14 @@ người khác. Những thứ cần có **trước** cái nút đó:
 **Xoá tài khoản.** Chưa có, và cố ý: chưa có luồng an toàn nào cho việc quyết
 định số phận truyện, audio và lượt nghe của người bị xoá.
 
-**Tầng lưu trữ Appwrite.** Các phương thức V2 (`get_application`, `get_stats`,
-`record_event`, `search_profiles`…) mới chỉ hiện thực cho kho **mock**. Ở chế độ
-Appwrite, các endpoint V2 và `/api/admin/*` sẽ trả 500 cho tới khi có đợt hiện
-thực đó. Các luồng cũ không bị ảnh hưởng.
+**Tầng lưu trữ Appwrite — ĐÃ XONG, không còn là "việc còn lại".** Ghi chú cũ ở
+đây ("các phương thức V2 chỉ hiện thực cho kho mock, `/api/admin/*` trả 500
+trên Appwrite") đã LỖI THỜI — kiểm tra lại 2026-08-16 (feature/
+admin-trusted-video-v2, Phase 0 audit) thấy `get_application`/`get_stats`/
+`record_event`/`search_profiles` đều đã có bản Appwrite đầy đủ trong
+`server/appwrite_store.py`/`server/appwrite_adapter.py`. Đã **smoke test
+THẬT** trên Appwrite tự lưu trữ dev (`appwrite-dev.fanfic.world`):
+`/api/admin/overview`, `/api/admin/users`, `/api/admin/events` đều trả 200,
+và một lượt duyệt tác giả thật ghi đúng `actor_role: "owner"` vào
+`moderation_events`. Nếu gặp lại lỗi 500 ở nhánh Appwrite, đó là một hồi quy
+MỚI, không phải khoảng trống đã biết này.

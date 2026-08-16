@@ -128,7 +128,8 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "listened_seconds", "created_at",
     ),
     COL_EVENTS: (
-        "event_id", "action", "target_user_id", "actor_id", "note", "created_at",
+        "event_id", "action", "target_user_id", "actor_id", "actor_role",
+        "target_type", "target_id", "note", "metadata", "created_at",
     ),
 }
 
@@ -1471,11 +1472,22 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         return event
 
     def list_events(self, target_user_id: str = "", limit: int = 50,
-                    offset: int = 0) -> Tuple[List[ModerationEvent], int]:
-        """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra"."""
+                    offset: int = 0, target_type: str = "",
+                    action: str = "") -> Tuple[List[ModerationEvent], int]:
+        """
+        Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra".
+
+        `target_type`/`action` (Admin Control Center V2, A5) loc THEM cho
+        `/admin/audit-log` — CHI equal, khong tim mo (nhat ky khong can tim
+        chuoi con, chi can loc dung loai/dung hanh dong).
+        """
         queries: List[str] = []
         if target_user_id:
             queries.append(q_equal("target_user_id", target_user_id))
+        if target_type:
+            queries.append(q_equal("target_type", target_type))
+        if action:
+            queries.append(q_equal("action", action))
         queries += [q_order_desc("created_at"), q_limit(limit), q_offset(offset)]
         rows, total = self._page(COL_EVENTS, queries)
         return [
@@ -1483,7 +1495,11 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                 action=str(r.get("action") or ""),
                 target_user_id=str(r.get("target_user_id") or ""),
                 actor_id=str(r.get("actor_id") or ""),
+                actor_role=str(r.get("actor_role") or ""),
+                target_type=str(r.get("target_type") or ""),
+                target_id=str(r.get("target_id") or ""),
                 note=str(r.get("note") or ""),
+                metadata=str(r.get("metadata") or ""),
                 event_id=str(r.get("event_id") or r.get("$id") or ""),
                 created_at=str(r.get("created_at") or ""),
             )

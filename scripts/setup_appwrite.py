@@ -151,6 +151,15 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "name": "Moderation events",
         # CHI THEM. Khong co duong sua hay xoa o bat ky tang nao — mot nhat ky
         # sua duoc la mot nhat ky khong dung de lam gi.
+        #
+        # MO RONG (Admin Control Center V2, feature/admin-trusted-video-v2):
+        # day van la MOT nhat ky duy nhat cho MOI hanh dong quan tri — tiep
+        # tuc dung tinh than "mot nhat ky, khong phai hai" da co tu truoc, chi
+        # mo rong tu vựng `action` va them bon truong ngu canh
+        # (actor_role/target_type/target_id/metadata). Cac gia tri
+        # user_*/content_*/trusted_source_*/youtube_mapping_*/auto_* CHUA co
+        # route nao ghi (se den trong cac giai doan sau cua nhanh nay) — them
+        # truoc de tranh phai chay lai migration enum nhieu lan.
         "attributes": [
             ("event_id", "string", True, 64),
             ("action", "enum", True,
@@ -161,11 +170,34 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               # mot nguoi theo thu tu, chu khong phai ghep hai danh sach.
               "post_removed", "post_restored",
               "comment_removed", "comment_restored",
-              "report_resolved", "report_dismissed"]),
+              "report_resolved", "report_dismissed",
+              # Quan ly nguoi dung (A2/A3, Admin Control Center V2).
+              "user_suspend", "user_unsuspend", "user_session_terminate",
+              "user_role_change", "user_delete",
+              # Kiem duyet noi dung ngoai pham vi bai dang/binh luan (A4).
+              "content_unpublish", "content_restore",
+              # Nguon tin cay YouTube va anh xa series (Phan B).
+              "trusted_source_add", "trusted_source_disable",
+              "trusted_source_enable", "youtube_mapping_create",
+              "youtube_mapping_update",
+              # Hang doi nhap tu dong (Phan B4-B6).
+              "auto_import_approve", "auto_import_reject",
+              "auto_publish_toggle"]),
             ("target_user_id", "string", True, 64),
             # Rong = he thong (vd migration grandfather), khong phai mot nguoi.
             ("actor_id", "string", False, 64),
+            # Vai tro cua actor TAI THOI DIEM hanh dong — "owner"/"admin"/
+            # "moderator". Ghi lai vi vai tro co the doi sau (bien moi truong).
+            ("actor_role", "string", False, 16),
+            # Loai doi tuong khi KHONG PHAI la user (vd "novel",
+            # "animation_series", "trusted_source"). Rong = doi tuong la user.
+            ("target_type", "string", False, 32),
+            ("target_id", "string", False, 64),
             ("note", "string", False, 1000),
+            # JSON, AN TOAN — khong bao gio chua API key/OAuth/BYOP token/
+            # cookie/session secret/khoa ma hoa. Xem docstring
+            # `ModerationEvent.metadata` o server/domain.py.
+            ("metadata", "string", False, 2000),
             # `datetime` cua Appwrite giu duoc micro giay — can dung the: hai
             # thao tac trong cung mot giay phai doc ra dung thu tu.
             ("created_at", "datetime", True, None),
@@ -173,6 +205,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "indexes": [
             ("target_created_idx", "key", ["target_user_id", "created_at"]),
             ("created_idx", "key", ["created_at"]),
+            # Loc nhat ky theo LOAI doi tuong (vd chi xem hanh dong len
+            # trusted_source) — dung cho /admin/audit-log (A5).
+            ("target_type_created_idx", "key", ["target_type", "created_at"]),
         ],
     },
     # ========================================================== TANG XA HOI

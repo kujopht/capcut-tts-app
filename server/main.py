@@ -80,6 +80,7 @@ from server.animation_domain import (
     parse_youtube_id,
 )
 from server.domain import (
+    AdminRole,
     AudioStamp,
     AudioTrack,
     Chapter,
@@ -720,9 +721,18 @@ def _ho_so_tra_ve(profile: Profile) -> Dict[str, Any]:
     Kem `avatar_url` (ky lai moi lan doc) ben canh `avatar_key` da co trong
     `to_dict()` — CUNG ly do voi `is_admin`: trinh duyet khong co credential
     cua kho nen khong tu dung tu khoa duoc.
+
+    `admin_role` (Admin Control Center V2) la chuoi "none"/"moderator"/
+    "admin"/"owner" — giao dien dung de AN/HIEN cac muc trong sidebar quan
+    tri theo dung vai tro, nhung day CHI la goi y hien thi. Moi route
+    `/api/admin/*` van tu kiem lai qua `admin_profile`/`admin_or_owner_profile`/
+    `owner_profile` — mot nguoi sua `admin_role` bang tay trong DevTools van
+    nhan 403 y het truoc gio.
     """
+    vai_tro = settings.admin_role_of(profile.user_id)
     return {**profile.to_dict(),
-            "is_admin": profile.user_id in settings.admin_user_ids,
+            "is_admin": vai_tro != AdminRole.NONE,
+            "admin_role": vai_tro.value,
             "avatar_url": creators.avatar_url(profile)}
 
 
@@ -3541,7 +3551,11 @@ def tiep_tuc(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
 
 def admin_profile(profile: Profile = Depends(current_profile)) -> Profile:
     """
-    Ho so cua nguoi goi, VA nguoi do phai la quan tri.
+    Ho so cua nguoi goi, VA nguoi do phai la quan tri — BAT KY muc nao trong
+    ba muc (OWNER/ADMIN/MODERATOR, xem `AdminRole` va `Settings.admin_role_of`,
+    Admin Control Center V2). Truoc ban V2 chi co mot muc phang; ham nay GIU
+    NGUYEN TEN va hai ma loi cu de moi route dang dung no khong phai doi gi,
+    chi rong dinh nghia "la quan tri" thanh "co bat ky vai tro nao trong ba".
 
     Hai ma khac nhau, va khac biet do la co y:
       401  chua dang nhap        -> `current_profile` nem
@@ -3551,9 +3565,37 @@ def admin_profile(profile: Profile = Depends(current_profile)) -> Profile:
     la mot nguoi quan tri that go nham tai khoan se khong hieu vi sao khong vao
     duoc. Khu nay khong bi mat, no chi bi khoa.
     """
-    if profile.user_id not in settings.admin_user_ids:
+    if settings.admin_role_of(profile.user_id) == AdminRole.NONE:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Khu vực quản trị.")
+    return profile
+
+
+def owner_profile(profile: Profile = Depends(current_profile)) -> Profile:
+    """
+    CHI muc OWNER — cai dat he thong/ha tang/tai chinh (vd cong tac khan cap
+    Image Studio, cai dat WebSub/nguon tin cay o muc he thong). ADMIN va
+    MODERATOR deu nhan 403 o day, kem ADMIN co the lam duoc nhieu viec khac
+    qua `admin_or_owner_profile`/`admin_profile`.
+    """
+    if settings.admin_role_of(profile.user_id) != AdminRole.OWNER:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Khu vực chỉ dành cho Owner.")
+    return profile
+
+
+def admin_or_owner_profile(profile: Profile = Depends(current_profile)) -> Profile:
+    """
+    Muc ADMIN tro len (ADMIN hoac OWNER) — quan ly nguoi dung/noi dung/phan
+    tich/nguon tin cay YouTube. MODERATOR nhan 403: ho chi duoc xem/xu ly bao
+    cao va kiem duyet noi dung qua `admin_profile`, khong quan ly vai tro hay
+    them nguon tin cay moi.
+    """
+    if settings.admin_role_of(profile.user_id) not in (
+        AdminRole.ADMIN, AdminRole.OWNER,
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Cần quyền Admin trở lên.")
     return profile
 
 
@@ -3568,7 +3610,7 @@ def admin_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
 
 @app.get("/api/admin/author-applications")
 def admin_applications(status_filter: str = "", limit: int = 25, offset: int = 0,
-                       admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                       admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     return creators.admin_applications(status=status_filter or None,
                                        limit=max(1, min(100, limit)),
                                        offset=max(0, offset))
@@ -3576,7 +3618,7 @@ def admin_applications(status_filter: str = "", limit: int = 25, offset: int = 0
 
 @app.get("/api/admin/author-applications/{user_id}")
 def admin_application(user_id: str,
-                      admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                      admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     data = creators.admin_application(user_id)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn.")
@@ -3585,14 +3627,15 @@ def admin_application(user_id: str,
 
 @app.post("/api/admin/author-applications/{user_id}/approve")
 def admin_approve(user_id: str, payload: NoteIn,
-                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Duyet don. Goi thang tang service da duoc kiem thu — route KHONG lap lai
     mot dong logic nghiep vu nao.
     """
     try:
-        app_row = creators.approve(user_id, note=payload.note,
-                                   actor_id=admin.user_id)
+        app_row = creators.approve(
+            user_id, note=payload.note, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)
     except AuthorStateError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"application": app_row.to_dict()}
@@ -3600,14 +3643,15 @@ def admin_approve(user_id: str, payload: NoteIn,
 
 @app.post("/api/admin/author-applications/{user_id}/reject")
 def admin_reject(user_id: str, payload: NoteIn,
-                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                 admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Tu choi don. `note` la BAT BUOC o tang service — mot lan tu choi khong ly do
     la mot cai cua dong im lang, va nguoi nop se doc duoc ghi chu nay.
     """
     try:
-        app_row = creators.reject(user_id, note=payload.note,
-                                  actor_id=admin.user_id)
+        app_row = creators.reject(
+            user_id, note=payload.note, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)
     except AuthorStateError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"application": app_row.to_dict()}
@@ -3615,14 +3659,14 @@ def admin_reject(user_id: str, payload: NoteIn,
 
 @app.get("/api/admin/authors")
 def admin_authors(limit: int = 25, offset: int = 0,
-                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     return creators.admin_authors(limit=max(1, min(100, limit)),
                                   offset=max(0, offset))
 
 
 @app.post("/api/admin/authors/{user_id}/suspend")
 def admin_suspend(user_id: str, payload: NoteIn,
-                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Tam dung quyen xuat ban.
 
@@ -3631,8 +3675,9 @@ def admin_suspend(user_id: str, payload: NoteIn,
     `docs/ADMIN.md` muc "Treo tac gia lam gi va KHONG lam gi".
     """
     try:
-        app_row = creators.suspend(user_id, note=payload.note,
-                                   actor_id=admin.user_id)
+        app_row = creators.suspend(
+            user_id, note=payload.note, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)
     except AuthorStateError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"application": app_row.to_dict()}
@@ -3640,10 +3685,11 @@ def admin_suspend(user_id: str, payload: NoteIn,
 
 @app.post("/api/admin/authors/{user_id}/restore")
 def admin_restore(user_id: str, payload: NoteIn,
-                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     try:
-        app_row = creators.restore(user_id, note=payload.note,
-                                   actor_id=admin.user_id)
+        app_row = creators.restore(
+            user_id, note=payload.note, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)
     except AuthorStateError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"application": app_row.to_dict()}
@@ -3651,7 +3697,7 @@ def admin_restore(user_id: str, payload: NoteIn,
 
 @app.get("/api/admin/users")
 def admin_users(q: str = "", limit: int = 25, offset: int = 0,
-                admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """Tim nguoi dung. Ket qua CO `email` — day la duong quan tri."""
     return creators.admin_users(query=q, limit=max(1, min(100, limit)),
                                 offset=max(0, offset))
@@ -3659,7 +3705,7 @@ def admin_users(q: str = "", limit: int = 25, offset: int = 0,
 
 @app.get("/api/admin/users/{user_id}")
 def admin_user(user_id: str,
-               admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+               admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     data = creators.admin_user(user_id)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
@@ -3683,7 +3729,7 @@ def admin_novels(q: str = "", state: str = "", limit: int = 25, offset: int = 0,
 
 @app.get("/api/admin/events")
 def admin_events(limit: int = 50, offset: int = 0,
-                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                 admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """Nhat ky kiem duyet. CHI THEM — khong co route sua hay xoa."""
     return creators.admin_events(limit=max(1, min(200, limit)),
                                  offset=max(0, offset))
@@ -4094,7 +4140,7 @@ def account_social(profile: Profile = Depends(current_profile)) -> Dict[str, Any
 
 
 @app.get("/api/admin/social/overview")
-def admin_social_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+def admin_social_overview(admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     return social.social_overview()
 
 
@@ -4552,7 +4598,7 @@ def list_translation_providers() -> Dict[str, Any]:
 
 
 @app.get("/api/admin/translate/usage")
-def admin_translate_usage(profile: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+def admin_translate_usage(profile: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Nen tang ke toan pool mien phi (V5.2, overnight Phase 3, Phan 3I) —
     QUAN TRI CHI, khong danh cho nguoi dung thuong: day la so lieu VAN HANH
@@ -5162,7 +5208,7 @@ def image_library_delete(
 
 
 @app.get("/api/admin/image-studio/spending")
-def admin_image_studio_spending(profile: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+def admin_image_studio_spending(profile: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     snap = image_spending_guard.snapshot()
     return {
         "month": snap.thang,
@@ -5183,10 +5229,15 @@ class KillSwitchIn(BaseModel):
 
 @app.post("/api/admin/image-studio/kill-switch")
 def admin_image_studio_kill_switch(
-    payload: KillSwitchIn, profile: Profile = Depends(admin_profile),
+    payload: KillSwitchIn, profile: Profile = Depends(owner_profile),
 ) -> Dict[str, Any]:
     """Cong tac VIEN khan cap — DOC LAP voi han muc thang (PHASE 7). Tat o
-    day KHONG anh huong Quick Free/BYOP, chi Shared Premium."""
+    day KHONG anh huong Quick Free/BYOP, chi Shared Premium.
+
+    CHI OWNER (Admin Control Center V2): day la cai dat tai chinh/he thong —
+    dung `owner_profile`, khong phai `admin_profile` — theo dung phan tang
+    "ADMIN: users/content/analytics/trusted sources, KHONG infra/secrets/
+    financial" cua mo hinh vai tro moi."""
     image_spending_guard.dat_kill_switch(payload.engaged)
     return {"kill_switch_engaged": payload.engaged}
 

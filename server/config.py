@@ -276,6 +276,19 @@ class Settings:
     #: Xem `docs/ADMIN.md` de biet cach tao quan tri dau tien cho production.
     admin_user_ids: tuple = ()
 
+    #: Muc QUAN TRI CAO NHAT (Admin Control Center V2) — toan quyen, bao gom
+    #: ca cai dat ha tang/bi mat/tai chinh ma `admin_user_ids` (muc ADMIN)
+    #: KHONG duoc chieu toi. Doc tu `FAS_OWNER_USER_IDS`, CUNG triet ly voi
+    #: `admin_user_ids`: bien moi truong, khong phai cot du lieu. Xem
+    #: `admin_role_of`.
+    owner_user_ids: tuple = ()
+
+    #: Muc quan tri HEP NHAT — chi xem/xu ly bao cao va kiem duyet noi dung
+    #: (go xuat ban, xoa binh luan, treo user vi ly do kiem duyet). KHONG co
+    #: quyen quan ly vai tro, nguon tin cay YouTube, hay cai dat he
+    #: thong/tai chinh. Doc tu `FAS_MODERATOR_USER_IDS`.
+    moderator_user_ids: tuple = ()
+
     #: Han muc chong spam cua tang xa hoi, GHI DE len mac dinh trong
     #: `server/social.py`. Doc tu `FAS_SOCIAL_LIMITS` dang
     #: `post:10/60,comment:40/60` (so lan / so phut).
@@ -390,6 +403,27 @@ class Settings:
     def identity_mode(self) -> str:
         return self.data_backend
 
+    def admin_role_of(self, user_id: str) -> "AdminRole":
+        """
+        Muc quan tri THAT SU cua mot user_id — nguon su that DUY NHAT cho moi
+        phep kiem quyen quan tri (Admin Control Center V2).
+
+        Thu tu kiem TU CAO XUONG THAP: mot user_id co the (do sai sot cau
+        hinh) nam trong nhieu danh sach cung luc — luc do OWNER thang, khong
+        cong don quyen. Import `AdminRole` cuc bo trong ham (khong o dau tep)
+        de tranh vong lap import: `domain.py` khong dong gi toi `config.py`,
+        nhung nhieu module import ca hai theo thu tu khac nhau.
+        """
+        from server.domain import AdminRole
+
+        if user_id in self.owner_user_ids:
+            return AdminRole.OWNER
+        if user_id in self.admin_user_ids:
+            return AdminRole.ADMIN
+        if user_id in self.moderator_user_ids:
+            return AdminRole.MODERATOR
+        return AdminRole.NONE
+
     def validate(self) -> None:
         """
         Kiem tra cau hinh khi khoi dong. FAIL FAST: da chon che do cloud ma
@@ -465,7 +499,15 @@ class Settings:
             "author_gate_enabled": self.author_gate_enabled,
             # CHI so luong, KHONG bao gio la danh sach: `/api/health` la
             # cong khai, va lo ra `user_id` cua quan tri la chi dung dich.
-            "admin_count": len(self.admin_user_ids),
+            # `admin_count` giu TEN CU (tuong thich nguoc: mot vai cong cu van
+            # doc truong nay) nhung nay la TONG ca ba muc; hai truong rieng
+            # them de nhin ro phan bo giua cac muc.
+            "admin_count": (
+                len(self.owner_user_ids) + len(self.admin_user_ids)
+                + len(self.moderator_user_ids)
+            ),
+            "owner_count": len(self.owner_user_ids),
+            "moderator_count": len(self.moderator_user_ids),
             "env_file_loaded": self.env_file_loaded,
             "inline_worker": self.inline_worker,
             "translation_inline_worker": self.translation_inline_worker,
@@ -563,6 +605,12 @@ def load_settings() -> Settings:
         author_gate_enabled=_env_bool("FAS_AUTHOR_GATE", False),
         admin_user_ids=tuple(
             x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()
+        ),
+        owner_user_ids=tuple(
+            x for x in _env_list("FAS_OWNER_USER_IDS", "") if x.strip()
+        ),
+        moderator_user_ids=tuple(
+            x for x in _env_list("FAS_MODERATOR_USER_IDS", "") if x.strip()
         ),
         social_limits=_social_limits(),
         var_dir=var_dir,

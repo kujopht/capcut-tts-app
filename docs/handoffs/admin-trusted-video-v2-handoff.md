@@ -4,7 +4,7 @@
 Đừng dựa vào trí nhớ hội thoại trước — hãy đọc file này và kiểm tra lại code
 thật trước khi sửa bất cứ gì.
 
-Cập nhật lần cuối: 2026-08-16, sau khi Phase 2 được push.
+Cập nhật lần cuối: 2026-08-16, sau khi Phase 3 được push.
 
 ## 0. Bootstrap cho phiên mới
 
@@ -49,9 +49,13 @@ xong và được người dùng duyệt.
   muc quan tri + mo rong nhat ky kiem duyet".
 - Phase 2: commit `b92583d` — "Admin Control Center V2, Phase 2: giao dien
   shell + bang tong quan".
-- Remote: `origin/feature/admin-trusted-video-v2` == `b92583d` — **khớp
-  chính xác với HEAD cục bộ**, đã push, đã xác nhận qua `git fetch` +
-  `git rev-parse`.
+- Phase 3: commit MỚI NHẤT trên nhánh này (chạy `git log --oneline -5` để
+  lấy SHA thật — đừng tin một con số ghi cứng ở đây, file này không tự cập
+  nhật SHA của chính commit chứa nó) — "Admin Control Center V2, Phase 3:
+  quan ly tai khoan day du qua Appwrite Users API". Đã push.
+- Remote: `origin/feature/admin-trusted-video-v2` phải khớp HEAD cục bộ sau
+  khi Phase 3 được push — xác nhận lại bằng `git fetch` + `git rev-parse`
+  trước khi tiếp tục Phase 4, đừng tin dòng này nếu đã có thời gian trôi qua.
 - `main`: **chưa hề đụng tới** trong toàn bộ việc này. `origin/main` đang ở
   `d483e90` ("deploy: them systemd unit cho translation worker production")
   — hoàn toàn không liên quan, không có commit nào của nhánh này lọt vào.
@@ -138,17 +142,121 @@ tự lưu trú dev):
   nhưng chưa có screenshot mobile thật. Nên làm việc này sớm ở phiên sau nếu
   có sửa gì tới nav.
 
+## 4b. Đã xong — Phase 3 (Full User Management)
+
+**Ý chính: hai khái niệm "tạm dừng" TÁCH BIỆT, đừng nhầm.**
+- Treo TÁC GIẢ (đã có từ trước, `/api/admin/authors/{id}/suspend`) — chỉ chặn
+  XUẤT BẢN mới. Tác giả vẫn đăng nhập, đọc, nghe bình thường.
+- Tạm dừng TÀI KHOẢN (MỚI Phase 3, `/api/admin/users/{id}/suspend`) — khoá
+  ĐĂNG NHẬP hoàn toàn (email lẫn OAuth), qua `PATCH /v1/users/{id}/status`
+  của Appwrite. Không đụng gì tới `author_status`.
+
+**Backend:**
+- `server/domain.py`: hai dataclass mới `AccountStatus` (trạng thái tài
+  khoản native: `enabled`/`email_verified`/`phone_verified`/`registered_at`)
+  và `AccountSession` (một phiên đăng nhập). KHÔNG lưu vào `profiles` — đọc
+  thẳng từ Appwrite Auth mỗi lần hỏi.
+- `server/adapters.py` (`IdentityAdapter` Protocol + `MockIdentityAdapter`)
+  và `server/appwrite_adapter.py` (`AppwriteIdentityAdapter`, bản THẬT): sáu
+  hàm mới — `list_accounts`, `account_status`, `list_sessions`,
+  `terminate_session`, `terminate_all_sessions`, `set_account_enabled`,
+  `count_accounts`. Bản Appwrite gọi THẲNG REST `/v1/users*` (native Users
+  API), KHÔNG qua collection `profiles` — xác nhận qua smoke test thật (mục
+  dưới), field `search` là tham số RIÊNG của `/v1/users` (khác `contains`
+  bên Databases), `registration`/`$createdAt` trả về ISO string (không phải
+  timestamp số như một số tài liệu AI-tóm-tắt ghi sai).
+- `server/creator_service.py`: `admin_users`/`admin_user` ĐỔI NGUỒN — giờ
+  đọc `list_accounts` (native) trước, làm giàu bằng `profiles_by_ids` theo
+  LÔ (không N+1), nên một tài khoản CHƯA chọn username vẫn hiện ra (khác
+  hành vi Phase 2 cũ, vốn chỉ thấy người đã có hồ sơ công khai). Bốn hàm
+  mới: `admin_set_account_enabled`, `admin_terminate_session`,
+  `admin_terminate_all_sessions` — đều ghi `ModerationEvent` qua hạ tầng có
+  sẵn từ Phase 1 (`user_suspend`/`user_unsuspend`/`user_session_terminate`,
+  BA giá trị này đã có sẵn trong enum Appwrite từ Phase 1, không cần
+  migration enum mới).
+- `server/main.py`: bốn route mới, đều `Depends(admin_or_owner_profile)` —
+  `POST /api/admin/users/{id}/suspend`, `.../unsuspend`,
+  `.../sessions/{session_id}/terminate`, `.../sessions/terminate-all`. Hàm
+  rào chắn `_kiem_quyen_tac_dong_tai_khoan(admin, target_user_id)` (ngay
+  trước `class NoteIn`) chặn HAI rủi ro thật:
+  - Tự thao tác lên chính mình (400) — tránh tự khoá mình giữa lúc thao tác.
+  - ADMIN thao tác lên tài khoản của một quản trị KHÁC (ADMIN/OWNER) — CHỈ
+    OWNER được làm việc này (403 cho ADMIN).
+  - **KHÔNG có route "đổi vai trò"**: vai trò là biến môi trường
+    (`Settings.admin_role_of`), không phải cột ghi được (xem mục 8) — nên
+    rủi ro kinh điển "ADMIN tự nâng mình lên OWNER" trong checklist Phase 3
+    gốc KHÔNG áp dụng được ở kiến trúc này, đây là quyết định có chủ đích
+    chứ không phải bỏ sót.
+  - **KHÔNG có nút xoá tài khoản** — dù Appwrite Users API hỗ trợ
+    `DELETE /v1/users/{id}`, handoff gốc yêu cầu cân nhắc kỹ trước khi phơi
+    ra UI; quyết định ở phiên này là CHƯA làm, để dành hỏi người dùng nếu
+    thật sự cần.
+  - `/api/admin/overview`: `users.verified/unverified/suspended` giờ là SỐ
+    THẬT (`identity.count_accounts(...)`), không còn `None` — lấp đúng chỗ
+    trống Phase 2 để lại.
+  - `admin_role` được thêm vào MỌI response `/api/admin/users` và
+    `/api/admin/users/{id}` — tính lại ở tầng route (`settings.admin_role_of`),
+    không cache trong service.
+- Test: `server/tests/test_admin.py`, class `AccountManagementTest` (10 test
+  mới) — bao gồm tài khoản chưa có username vẫn hiện, tạm dừng chặn đăng
+  nhập KHÔNG đụng `author_status`, rào chắn tự-thao-tác và rào chắn
+  cross-rank, chấm dứt một phiên/tất cả phiên, nhật ký ghi đúng hành động.
+  Cập nhật `test_truong_chua_theo_doi_tra_None_khong_bia_so_0` (đổi tên ý
+  nghĩa: giờ khẳng định số THẬT thay vì `None`).
+
+**Frontend:**
+- `web/src/lib/api.ts`: `AdminUser` mở rộng (`email_verified`,
+  `account_enabled`, `registered_at`, `admin_role`, `account`, `sessions`),
+  hai interface mới `AdminAccountStatus`/`AdminAccountSession`, bốn hàm
+  `adminApi.suspendAccount/unsuspendAccount/terminateSession/terminateAllSessions`.
+- `web/src/app/admin/users/page.tsx`: danh sách giờ hiện CẢ tài khoản chưa
+  có username (`"chưa chọn tên công khai"` thay vì link chết tới `/u/...`),
+  thêm cột "Trạng thái tài khoản", mỗi hàng dẫn sang trang chi tiết mới.
+- `web/src/app/admin/users/[user_id]/page.tsx` — MỚI. Trang chi tiết MỘT
+  tài khoản: trạng thái tác giả và trạng thái tài khoản vẽ ở HAI thẻ riêng
+  (rõ ràng đây là hai khái niệm khác nhau), danh sách phiên đăng nhập kèm
+  nút chấm dứt từng phiên/tất cả, nút tạm dừng/bỏ tạm dừng tài khoản (đều
+  qua `ConfirmDialog` kèm ô ghi chú). Nút thao tác TỰ ẨN khi
+  `profile.user_id === userId` (rào chắn thật vẫn ở backend, đây chỉ là UX
+  tránh một cú bấm vô ích).
+- Test: `web/tests/admin-account-management.test.mjs` (8 test mới).
+
+**Smoke test THẬT trên Appwrite tự lưu trú dev** (không phải chỉ đọc code
+tĩnh) — quy trình: khởi động backend tạm ở CỔNG RIÊNG (không phải 8010, vốn
+đang bị một tiến trình uvicorn cũ từ phiên trước chiếm giữ — ĐÃ KHÔNG đụng
+vào tiến trình đó, không rõ nó có đang được ai dùng hay không), đăng ký hai
+tài khoản dùng-một-lần qua `/api/auth/register` (một gán làm OWNER qua
+`FAS_OWNER_USER_IDS` khi khởi động lại backend, một làm mục tiêu test),
+KHÔNG bao giờ in `user_id`/token ra tài liệu này. Đã xác nhận qua HTTP thật:
+- `GET /api/admin/users?q=...` trả về tài khoản CHƯA có username, `search`
+  của Appwrite khớp theo TOKEN (không phải substring y hệt) — ghi nhận khác
+  biệt so với `contains` của `search_profiles` cũ.
+- Tạm dừng tài khoản → đăng nhập trả **401 thật** ngay sau đó; bỏ tạm dừng →
+  đăng nhập lại **200**.
+- Chấm dứt MỘT phiên và chấm dứt TẤT CẢ phiên đều phản ánh đúng ở
+  `GET /v1/users/{id}/sessions` ngay sau đó (số phiên giảm đúng số lượng).
+- Rào chắn tự-thao-tác: 400 thật khi OWNER gọi suspend lên chính mình.
+- Rào chắn cross-rank: 403 thật khi ADMIN gọi suspend lên tài khoản OWNER.
+- `/api/admin/overview`: `verified`/`unverified`/`suspended` phản ánh ĐÚNG
+  trạng thái thật trên Appwrite (12 tài khoản thật trên DB dev lúc test, tất
+  cả chưa xác minh email — số `unverified` khớp).
+- Hai tài khoản dùng-một-lần được GIỮ LẠI trên DB dev sau khi test (không
+  xoá) — cùng tiền lệ với tài khoản `smoketest@fanficdev.invalid` đã có sẵn
+  từ trước; Appwrite Cloud production KHÔNG bị đụng tới trong toàn bộ quá
+  trình này.
+
 ## 5. Trạng thái test/build (đã CHẠY LẠI và xác nhận ngay tại thời điểm viết
 handoff này, không phải chỉ nhớ lại)
 
 | Mục | Kết quả |
 |---|---|
-| Backend (`unittest discover -s server/tests -t .`) | **2157/2157 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) |
-| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **576/576 pass** |
+| Backend (`unittest discover -s server/tests -t .`) | **2167/2167 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +10 test Phase 3 |
+| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **584/584 pass** — +8 test Phase 3 |
 | `npm run typecheck` | sạch, 0 lỗi |
 | `npm run lint` | 0 lỗi, 2 warning (không liên quan — `<img>` ở `image-studio/page.tsx`, có từ trước) |
-| `npm run build` | build production thành công |
+| `npm run build` | build production thành công, `/admin/users/[user_id]` lên đúng route động |
 | Secret scan (grep diff cho api_key/secret/token/password/bearer/aws_/private_key + kiểm không có file `.env` nào bị đổi) | sạch |
+| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b |
 
 ## 6. Quyết định về hiệu năng
 
@@ -255,15 +363,23 @@ POST /api/admin/comments/{comment_id}/restore
 GET  /api/admin/translate/usage
 GET  /api/admin/image-studio/spending
 POST /api/admin/image-studio/kill-switch
+POST /api/admin/users/{user_id}/suspend                          — MỚI Phase 3
+POST /api/admin/users/{user_id}/unsuspend                        — MỚI Phase 3
+POST /api/admin/users/{user_id}/sessions/{session_id}/terminate  — MỚI Phase 3
+POST /api/admin/users/{user_id}/sessions/terminate-all           — MỚI Phase 3
 ```
-Lưu ý: `GET /api/admin/users/{user_id}` hiện tại CHỈ đọc profile cơ bản —
-KHÔNG có session/status/role management thật, đó chính là việc của Phase 3.
+Lưu ý: `GET /api/admin/users` và `GET /api/admin/users/{user_id}` (Phase 3)
+giờ đọc THẲNG Appwrite Users API (native) làm nguồn chính, làm giàu bằng
+`profiles` — xem mục 4b. Bốn route mới đều gọi qua
+`_kiem_quyen_tac_dong_tai_khoan()` (rào chắn tự-thao-tác + cross-rank).
 
 **Frontend** (`web/src/app/admin/`):
 ```
 layout.tsx              — bọc <AdminShell> quanh mọi trang con
 page.tsx                — Dashboard
-users/                  — (đã có từ trước Phase 2, danh sách người dùng cơ bản)
+users/                  — danh sách tài khoản (ĐỔI NGUỒN ở Phase 3, xem mục 4b)
+users/[user_id]/        — MỚI Phase 3: chi tiết một tài khoản, tạm dừng/
+                          phiên đăng nhập
 authors/                — đơn tác giả + danh sách tác giả (đã có từ trước)
 stories/                — duyệt truyện (đã có từ trước, KHÔNG có nút xoá — có chủ đích)
 posts/, comments/, reports/  — moderation xã hội (đã có từ trước)
@@ -280,13 +396,15 @@ ChuaCauHinh/duVaiTro), `web/src/components/AdminSapXayDung.tsx` (mới,
 placeholder tái dùng được), `web/src/lib/api.ts` (mọi type + hàm gọi
 `adminApi.*`).
 
-Test: `server/tests/test_admin.py`, `web/tests/admin.test.mjs`,
-`web/tests/admin-control-center-v2.test.mjs` (mới, 12 test cho Phase 2).
+Test: `server/tests/test_admin.py` (class `AccountManagementTest` MỚI Phase
+3), `web/tests/admin.test.mjs`, `web/tests/admin-control-center-v2.test.mjs`
+(12 test Phase 2), `web/tests/admin-account-management.test.mjs` (MỚI, 8
+test Phase 3).
 
 ## 10. Các phase còn lại (ĐÚNG THỨ TỰ)
 
-- **PHASE 3** — User Management đầy đủ, dùng Appwrite Users API + Sessions
-  API thật (KHÔNG PHẢI mock). Đây là next action, xem mục 15.
+- ~~**PHASE 3** — User Management đầy đủ~~ — **XONG**, xem mục 4b. Commit
+  trên nhánh này (chạy `git log --oneline -5` để lấy SHA thật).
 - **PHASE 4** — Animation moderation (kiểm duyệt nội dung Animation:
   series/tập, báo cáo liên quan tới Animation).
 - **PHASE 5** — Trusted Video Sources backend + UI: mô hình kênh/video/
@@ -358,48 +476,29 @@ stash@{0}: On feature/animation-player-v2-custom-controls: animation-player-v2 d
   `feature/admin-trusted-video-v2`, KHÔNG amend commit cũ trừ khi được yêu
   cầu rõ.
 
-## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 3
+## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 4
 
-**PHASE 3 — FULL USER MANAGEMENT**, dùng Appwrite Users API + Sessions API
-THẬT (không phải chỉ đọc `profiles` collection như `/api/admin/users` hiện
-tại đang làm).
+Phase 3 (Full User Management) **ĐÃ XONG** — xem mục 4b để biết chi tiết đầy
+đủ những gì đã làm, quyết định kiến trúc, và kết quả smoke test thật. ĐỪNG
+làm lại Phase 3.
 
-Phải bao gồm:
-- Tích hợp Appwrite Users API thật (native), không chỉ đọc collection
-  `profiles` nội bộ.
-- Phân trang phía server (không tải hết rồi cắt ở frontend).
-- Tìm kiếm.
-- Bộ lọc.
-- Trang chi tiết người dùng.
-- Trạng thái tài khoản (verified/unverified/suspended — đây chính là những
-  chỉ số hiện đang trả `null` ở Dashboard Phase 2 vì chưa có nguồn dữ liệu
-  thật; Phase 3 nên lấp chỗ này).
-- Thông tin đăng ký/xác minh.
-- Thông tin vai trò (đọc qua `Settings.admin_role_of`, KHÔNG thêm cột DB mới
-  cho việc này — xem mục 8).
-- Danh sách phiên đăng nhập (sessions).
-- Chấm dứt MỘT phiên.
-- Chấm dứt TẤT CẢ phiên.
-- Tạm dừng/bỏ tạm dừng tài khoản (suspend/unsuspend).
-- Xử lý vai trò an toàn — không cho một ADMIN tự nâng mình lên OWNER, không
-  cho hạ OWNER cuối cùng xuống (tránh khoá quyền truy cập hoàn toàn).
-- Lịch sử kiểm duyệt của người dùng đó (đọc từ `moderation_events`, lọc theo
-  `target_user_id`/`target_type="user"` — hạ tầng này ĐÃ CÓ từ Phase 1, xem
-  mục 3).
-- Rào chắn an toàn cho thao tác xoá phá huỷ (nếu Users API hỗ trợ xoá tài
-  khoản thật — cân nhắc kỹ có nên phơi ra UI hay không, hỏi người dùng nếu
-  không chắc, đừng tự quyết định thêm nút xoá cứng).
-- Ghi audit log cho MỌI thao tác đặc quyền (suspend, chấm dứt phiên, đổi
-  trạng thái, v.v.) — dùng lại hạ tầng `ModerationEvent`/`actor_role`/
-  `target_type`/`target_id`/`metadata` đã có từ Phase 1, ĐỪNG xây hệ thống
-  log thứ hai.
-- Smoke test thật trên Appwrite tự lưu trú dev (không chỉ mock/unit test).
-
-Trước khi viết code Phase 3: đọc kỹ Appwrite Python SDK's Users API/Account
-API thật đang có sẵn trong `requirements` của `server/`, xem cách
-`server/appwrite_adapter.py` hiện đang bọc Appwrite SDK cho các nhu cầu khác
-để theo đúng convention hiện có, và đọc `server/adapters.py`'s
-`MockIdentityAdapter` để biết interface nào cần mock tương ứng cho test.
+**PHASE 4 — ANIMATION MODERATION**: kiểm duyệt nội dung Animation (series/
+tập, báo cáo liên quan tới Animation) — mục tiêu gốc ghi ở mục 10, chưa có
+chi tiết cụ thể hơn (khác Phase 3, phase này CHƯA được đặc tả kỹ trong
+handoff gốc). Trước khi viết code:
+- Đọc `docs/ADMIN.md` và phần Animation hiện có trong `server/main.py`/
+  `server/animation_store.py` (hoặc tên module tương đương — kiểm tra bằng
+  `grep` thay vì đoán tên file) để biết mô hình series/episode hiện tại.
+- Hỏi người dùng để xác nhận phạm vi cụ thể (những gì cần kiểm duyệt: xoá
+  tạm/khôi phục series hay tập? báo cáo Animation đi vào `reports` chung
+  hay bảng riêng?) TRƯỚC khi viết code — mục 10 chỉ ghi một câu tóm tắt,
+  không đủ chi tiết để chắc chắn phạm vi như Phase 3 đã có.
+- Tái sử dụng hạ tầng `ModerationEvent`/`actor_role`/`target_type`/
+  `target_id` đã có từ Phase 1 — ĐỪNG xây hệ thống log thứ hai, cùng
+  nguyên tắc đã áp dụng xuyên suốt Phase 1-3.
+- Giữ nguyên phân biệt vai trò đã thiết lập: `admin_profile` (≥ MODERATOR)
+  cho các thao tác kiểm duyệt/xem, `admin_or_owner_profile` (≥ ADMIN) cho
+  quản lý có tác động rộng hơn — xem mục 8.
 
 ## 16. Ghi chú cho agent đọc file này
 

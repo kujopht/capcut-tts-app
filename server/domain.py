@@ -435,6 +435,79 @@ class ModerationEvent:
 
 
 @dataclass
+class AccountStatus:
+    """
+    Trang thai tai khoan NATIVE, doc THANG tu Appwrite Users API — TACH BACH
+    voi `Profile.author_status` (quyen XUAT BAN, song trong `profiles`).
+
+    `enabled=False` nghia la tai khoan bi KHOA HOAN TOAN, khong dang nhap
+    duoc nua o BAT KY duong nao (email/OAuth) — khac voi treo TAC GIA, von
+    chi chan xuat ban MOI va van cho dang nhap binh thuong. Hai khai niem
+    nay CO Y tach rieng (Phase 3, Admin Control Center V2): mot tac gia bi
+    treo van la mot doc gia binh thuong, con mot tai khoan bi khoa thi
+    khong dung duoc san pham nua o bat ky vai tro nao.
+
+    KHONG BAO GIO ghi lai vao `profiles` — day la du lieu Appwrite Auth tra
+    ve TRUC TIEP moi lan hoi, khong phai mot ban sao can dong bo.
+    """
+
+    user_id: str
+    email: str
+    name: str
+    enabled: bool
+    email_verified: bool
+    phone_verified: bool
+    registered_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "user_id": self.user_id,
+            "email": self.email,
+            "name": self.name,
+            "enabled": self.enabled,
+            "email_verified": self.email_verified,
+            "phone_verified": self.phone_verified,
+            "registered_at": self.registered_at,
+        }
+
+
+@dataclass
+class AccountSession:
+    """
+    MOT phien dang nhap, doc tu Appwrite Users API (Phase 3).
+
+    `current` chi co y nghia khi may chu tu goi bang chinh session dang xac
+    thuc request do. Moi thao tac quan tri o day goi bang API KEY (khong
+    phai session cua ai ca), nen Appwrite luon tra `False` cho MOI phien —
+    khong the biet "day co phai phien trinh duyet dang mo trang quan tri
+    hay khong" tu goc nhin nay.
+    """
+
+    session_id: str
+    provider: str
+    ip: str
+    os_name: str
+    client_name: str
+    device_name: str
+    country_name: str
+    current: bool
+    created_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "provider": self.provider,
+            "ip": self.ip,
+            "os_name": self.os_name,
+            "client_name": self.client_name,
+            "device_name": self.device_name,
+            "country_name": self.country_name,
+            "current": self.current,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
 class AuthorStats:
     """
     Ban TONG HOP cua uy tin mot tac gia.

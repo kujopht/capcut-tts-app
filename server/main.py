@@ -3600,6 +3600,34 @@ def admin_or_owner_profile(profile: Profile = Depends(current_profile)) -> Profi
     return profile
 
 
+def _kiem_quyen_tac_dong_tai_khoan(admin: Profile, target_user_id: str) -> None:
+    """
+    Rao chan cho thao tac quan tri TREN MOT TAI KHOAN KHAC — tam dung/bo tam
+    dung/cham dut phien dang nhap (Phase 3, Admin Control Center V2).
+
+    Vai tro (OWNER/ADMIN/MODERATOR) la BIEN MOI TRUONG, khong phai cot ghi
+    duoc (xem `Settings.admin_role_of`) — nen KHONG co thao tac "doi vai tro"
+    qua API, va rui ro kinh dien "ADMIN tu nang minh len OWNER" khong the xay
+    ra vi khong co duong ghi nao vao ba danh sach do ca. Hai rui ro CON LAI,
+    that su xay ra duoc qua cac nut o day, moi duoc chan:
+
+    - Tu tac dong len CHINH MINH: tam dung/cham dut MOI phien tren chinh tai
+      khoan dang dang nhap se tu khoa minh ngay giua luc thao tac.
+    - ADMIN tac dong len MOT TAI KHOAN QUAN TRI KHAC (ADMIN hoac OWNER): chi
+      OWNER moi duoc dong toi tai khoan cua nguoi lam quan tri — chan mot
+      ADMIN (vi du tai khoan bi chiem) tam dung dong nghiep hay chinh OWNER.
+    """
+    if target_user_id == admin.user_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Không thể tự thao tác trên chính tài khoản đang đăng nhập.")
+    vai_tro_dich = settings.admin_role_of(target_user_id)
+    if vai_tro_dich != AdminRole.NONE and settings.admin_role_of(admin.user_id) != AdminRole.OWNER:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Chỉ Owner mới được thao tác trên tài khoản quản trị khác.")
+
+
 class NoteIn(BaseModel):
     note: Annotated[str, StringConstraints(max_length=1000)] = ""
 
@@ -3640,12 +3668,12 @@ def _admin_dashboard_them() -> Dict[str, Any]:
                 created_after=dau_ngay_hom_nay.isoformat(timespec="seconds")),
             "new_7d": identity.count_profiles(created_after=moc_7_ngay),
             "new_30d": identity.count_profiles(created_after=moc_30_ngay),
-            # KHONG duoc theo doi o schema hien tai (khong co cot verified/
-            # suspended tren `profiles`) — None de giao dien hien "chưa có dữ
-            # liệu" thay vi bia mot con so 0 sai su that.
-            "verified": None,
-            "unverified": None,
-            "suspended": None,
+            # Phase 3 (Admin Control Center V2): doc THANG tu Appwrite Users
+            # API (`IdentityAdapter.count_accounts`), khong phai tu `profiles`
+            # — day la du lieu Auth native, xem `AccountStatus`.
+            "verified": identity.count_accounts(email_verified=True),
+            "unverified": identity.count_accounts(email_verified=False),
+            "suspended": identity.count_accounts(enabled=False),
         },
         "content": {
             "novels_total": store.total_novels(),
@@ -3777,9 +3805,18 @@ def admin_restore(user_id: str, payload: NoteIn,
 @app.get("/api/admin/users")
 def admin_users(q: str = "", limit: int = 25, offset: int = 0,
                 admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
-    """Tim nguoi dung. Ket qua CO `email` — day la duong quan tri."""
-    return creators.admin_users(query=q, limit=max(1, min(100, limit)),
+    """
+    Tim tai khoan (Phase 3: nguon la Appwrite Users API native, xem
+    `CreatorService.admin_users`). Ket qua CO `email` — day la duong quan tri.
+    """
+    data = creators.admin_users(query=q, limit=max(1, min(100, limit)),
                                 offset=max(0, offset))
+    for row in data["users"]:
+        # Vai tro doc THANG tu `Settings.admin_role_of` — KHONG bao gio mot
+        # cot DB (xem `_kiem_quyen_tac_dong_tai_khoan`), nen phai tinh o day
+        # moi lan tra ve, khong the luu san trong `creators.admin_users`.
+        row["admin_role"] = settings.admin_role_of(row["user_id"]).value
+    return data
 
 
 @app.get("/api/admin/users/{user_id}")
@@ -3788,7 +3825,66 @@ def admin_user(user_id: str,
     data = creators.admin_user(user_id)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    data["admin_role"] = settings.admin_role_of(user_id).value
     return {"user": data}
+
+
+@app.post("/api/admin/users/{user_id}/suspend")
+def admin_user_suspend(user_id: str, payload: NoteIn,
+                       admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """
+    Tam dung TAI KHOAN — khoa dang nhap HOAN TOAN. TACH BACH voi
+    `/api/admin/authors/{user_id}/suspend` (chi chan xuat ban, tac gia van
+    dang nhap va doc/nghe binh thuong). Xem `AccountStatus` va
+    `_kiem_quyen_tac_dong_tai_khoan`.
+    """
+    _kiem_quyen_tac_dong_tai_khoan(admin, user_id)
+    ket_qua = creators.admin_set_account_enabled(
+        user_id, False, note=payload.note, actor_id=admin.user_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if ket_qua is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    return {"account": ket_qua}
+
+
+@app.post("/api/admin/users/{user_id}/unsuspend")
+def admin_user_unsuspend(user_id: str, payload: NoteIn,
+                         admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """Go tam dung tai khoan — cho phep dang nhap lai."""
+    _kiem_quyen_tac_dong_tai_khoan(admin, user_id)
+    ket_qua = creators.admin_set_account_enabled(
+        user_id, True, note=payload.note, actor_id=admin.user_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if ket_qua is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    return {"account": ket_qua}
+
+
+@app.post("/api/admin/users/{user_id}/sessions/{session_id}/terminate")
+def admin_user_terminate_session(
+    user_id: str, session_id: str, payload: NoteIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Cham dut MOT phien dang nhap cu the cua mot tai khoan."""
+    _kiem_quyen_tac_dong_tai_khoan(admin, user_id)
+    da_huy = creators.admin_terminate_session(
+        user_id, session_id, note=payload.note, actor_id=admin.user_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    return {"terminated": da_huy}
+
+
+@app.post("/api/admin/users/{user_id}/sessions/terminate-all")
+def admin_user_terminate_all_sessions(
+    user_id: str, payload: NoteIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Cham dut MOI phien dang nhap cua mot tai khoan — dung khi nghi ngo tai
+    khoan bi chiem, hoac ngay sau khi tam dung tai khoan do."""
+    _kiem_quyen_tac_dong_tai_khoan(admin, user_id)
+    so_luong = creators.admin_terminate_all_sessions(
+        user_id, note=payload.note, actor_id=admin.user_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    return {"terminated_count": so_luong}
 
 
 @app.get("/api/admin/novels")

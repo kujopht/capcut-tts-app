@@ -1305,6 +1305,46 @@ export interface AdminUser {
   application?: AdminApplication | null;
   events?: ModerationEvent[];
   novels?: Novel[];
+
+  // Phase 3, Admin Control Center V2 — tu Appwrite Users API (native),
+  // KHONG phai `profiles`. Xem `AccountStatus` o server/domain.py.
+  email_verified?: boolean;
+  account_enabled?: boolean;
+  registered_at?: string;
+  /** Vai tro quan tri, doc qua `Settings.admin_role_of` — CHI de hien thi,
+      khong phai bien kiem quyen (backend luon tu kiem lai). */
+  admin_role?: AdminRole;
+  /** Chi co o CHI TIET mot tai khoan (`/api/admin/users/{id}`). `null` =
+      khong doc duoc tu Appwrite Users API (tai khoan khong ton tai native,
+      truong hop hau nhu khong xay ra vi user_id luon den tu Auth). */
+  account?: AdminAccountStatus | null;
+  sessions?: AdminAccountSession[];
+}
+
+/** Trang thai tai khoan NATIVE (Appwrite Auth) — TACH BACH voi
+    `author_status` (quyen xuat ban). `enabled=false` = khoa dang nhap HOAN
+    TOAN, o moi duong (email lan OAuth). */
+export interface AdminAccountStatus {
+  user_id: string;
+  email: string;
+  name: string;
+  enabled: boolean;
+  email_verified: boolean;
+  phone_verified: boolean;
+  registered_at: string;
+}
+
+/** Mot phien dang nhap, doc tu Appwrite Users API. */
+export interface AdminAccountSession {
+  session_id: string;
+  provider: string;
+  ip: string;
+  os_name: string;
+  client_name: string;
+  device_name: string;
+  country_name: string;
+  current: boolean;
+  created_at: string;
 }
 
 export interface AdminApplication {
@@ -1433,6 +1473,32 @@ export const adminApi = {
 
   user: (userId: string) =>
     request<{ user: AdminUser }>(`/api/admin/users/${encodeURIComponent(userId)}`),
+
+  /** Khoa dang nhap HOAN TOAN — TACH BACH voi `suspend()` o tren (chi chan
+      xuat ban). Phase 3, Admin Control Center V2. */
+  suspendAccount: (userId: string, note = "") =>
+    request<{ account: AdminAccountStatus }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/suspend`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  unsuspendAccount: (userId: string, note = "") =>
+    request<{ account: AdminAccountStatus }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/unsuspend`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  terminateSession: (userId: string, sessionId: string, note = "") =>
+    request<{ terminated: boolean }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sessionId)}/terminate`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  terminateAllSessions: (userId: string, note = "") =>
+    request<{ terminated_count: number }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/sessions/terminate-all`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
 
   novels: (q = "", state = "", limit = 25, offset = 0) =>
     request<{ novels: AdminNovel[]; total: number }>(

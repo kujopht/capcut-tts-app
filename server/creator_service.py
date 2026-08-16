@@ -16,6 +16,7 @@ Xem `docs/AUTHOR_RANK.md`.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -718,21 +719,60 @@ class CreatorService:
 
     def admin_users(self, query: str = "", limit: int = 25,
                     offset: int = 0) -> Dict[str, Any]:
-        """Tim o MAY CHU, phan trang o MAY CHU, lam giau THEO LO cho dung trang."""
-        rows, total = self._identity.search_profiles(query, limit=limit,
-                                                     offset=offset)
-        return {
-            "users": self._lam_giau(rows),
-            "total": total, "limit": limit, "offset": offset,
-        }
+        """
+        Tim o MAY CHU, phan trang o MAY CHU (Phase 3, Admin Control Center V2).
+
+        Nguon CHINH gio la `IdentityAdapter.list_accounts` (Appwrite Users API
+        native) — thay vi chi doc collection `profiles` nhu ban Phase 2: day
+        la quan ly TAI KHOAN (ai dang nhap duoc), nen mot tai khoan CHUA chon
+        username (chua co ho so cong khai) van phai hien o day. Lam giau bang
+        du lieu nghiep vu (rank/so truyen/username) qua CUNG `_lam_giau` voi
+        `admin_authors`, dung MOT truy van theo lo (`profiles_by_ids`) —
+        khong N+1 du trang co bao nhieu tai khoan chua co ho so.
+        """
+        accounts, total = self._identity.list_accounts(query, limit=limit,
+                                                        offset=offset)
+        ho_so = self._identity.profiles_by_ids([a.user_id for a in accounts])
+        gia = [
+            ho_so.get(a.user_id)
+            or Profile(user_id=a.user_id, email=a.email, display_name=a.name,
+                      created_at=a.registered_at)
+            for a in accounts
+        ]
+        ra = self._lam_giau(gia)
+        theo_id = {a.user_id: a for a in accounts}
+        for row in ra:
+            acc = theo_id[row["user_id"]]
+            if not row["email"]:
+                row["email"] = acc.email
+            row["email_verified"] = acc.email_verified
+            row["account_enabled"] = acc.enabled
+            row["registered_at"] = acc.registered_at
+        return {"users": ra, "total": total, "limit": limit, "offset": offset}
 
     def admin_user(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Chi tiet mot nguoi dung, KEM don va nhat ky kiem duyet cua ho."""
+        """
+        Chi tiet mot nguoi dung, KEM don, nhat ky kiem duyet, trang thai TAI
+        KHOAN native va danh sach phien dang nhap (Phase 3).
+
+        Ton tai neu co MOT trong hai: ho so cong khai (`profiles`) HOAC tai
+        khoan Auth (Appwrite Users API) — mot tai khoan moi tinh, chua kip
+        dong bo/chua chon username, van phai xem duoc chi tiet.
+        """
         profile = self._identity.profiles_by_ids([user_id]).get(user_id)
-        if profile is None:
+        tai_khoan = self._identity.account_status(user_id)
+        if profile is None and tai_khoan is None:
             return None
-        data = self._lam_giau([profile])[0]
-        data["bio"] = profile.bio
+        gia = profile or Profile(
+            user_id=user_id, email=tai_khoan.email, display_name=tai_khoan.name,
+            created_at=tai_khoan.registered_at)
+        data = self._lam_giau([gia])[0]
+        data["bio"] = profile.bio if profile else ""
+        data["account"] = tai_khoan.to_dict() if tai_khoan else None
+        data["sessions"] = (
+            [s.to_dict() for s in self._identity.list_sessions(user_id)]
+            if tai_khoan else []
+        )
         app = self._store.get_application(user_id)
         data["application"] = app.to_dict() if app else None
         su_kien, _ = self._store.list_events(target_user_id=user_id, limit=25)
@@ -741,6 +781,58 @@ class CreatorService:
             n.to_dict() for n in self._store.list_novels(owner_id=user_id)
         ]
         return data
+
+    def admin_set_account_enabled(self, user_id: str, enabled: bool, *,
+                                  note: str = "", actor_id: str = "",
+                                  actor_role: str = "") -> Optional[Dict[str, Any]]:
+        """
+        Bat/khoa dang nhap MOT tai khoan (Phase 3) — TACH BACH voi `suspend`/
+        `restore` o tren (chi chan XUAT BAN). `enabled=False` chan MOI duong
+        dang nhap. Ghi nhat ky kiem duyet bang HA TANG SAN CO
+        (`ModerationEvent`/`target_type`/`actor_role`), KHONG xay he thong
+        log thu hai.
+
+        Tra `None` neu khong tim thay tai khoan — route se doi thanh 404.
+        """
+        trang_thai = self._identity.set_account_enabled(user_id, enabled)
+        if trang_thai is None:
+            return None
+        self._store.record_event(ModerationEvent(
+            action=("user_unsuspend" if enabled else "user_suspend"),
+            target_user_id=user_id, actor_id=actor_id, actor_role=actor_role,
+            note=(note or "").strip(),
+        ))
+        return trang_thai.to_dict()
+
+    def admin_terminate_session(self, user_id: str, session_id: str, *,
+                                note: str = "", actor_id: str = "",
+                                actor_role: str = "") -> bool:
+        """Cham dut MOT phien dang nhap. Chi ghi nhat ky khi THAT SU huy duoc
+        mot phien dang song — cham dut mot phien von da mat khong phai mot
+        hanh dong quan tri dang ghi lai."""
+        da_huy = self._identity.terminate_session(user_id, session_id)
+        if da_huy:
+            self._store.record_event(ModerationEvent(
+                action="user_session_terminate", target_user_id=user_id,
+                actor_id=actor_id, actor_role=actor_role,
+                note=(note or "").strip(),
+                metadata=json.dumps({"scope": "single", "session_id": session_id}),
+            ))
+        return da_huy
+
+    def admin_terminate_all_sessions(self, user_id: str, *, note: str = "",
+                                     actor_id: str = "",
+                                     actor_role: str = "") -> int:
+        """Cham dut MOI phien. Luon ghi nhat ky (ke ca khi 0 phien) — mot
+        quan tri bam nut nay la MOT quyet dinh da xay ra, du ket qua la
+        khong con phien nao de huy."""
+        so_luong = self._identity.terminate_all_sessions(user_id)
+        self._store.record_event(ModerationEvent(
+            action="user_session_terminate", target_user_id=user_id,
+            actor_id=actor_id, actor_role=actor_role, note=(note or "").strip(),
+            metadata=json.dumps({"scope": "all", "count": so_luong}),
+        ))
+        return so_luong
 
     def admin_novels(self, query: str = "", state: str = "", limit: int = 25,
                      offset: int = 0) -> Dict[str, Any]:

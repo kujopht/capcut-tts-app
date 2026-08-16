@@ -380,6 +380,133 @@ class UserLookupTest(Base):
                             headers=self.h_admin).status_code, 404)
 
 
+class AccountManagementTest(Base):
+    """
+    Phase 3, Admin Control Center V2: quan ly TAI KHOAN native (Appwrite Users
+    API) — TACH BACH voi `AuthorManagementTest` o tren (chi chan XUAT BAN).
+    """
+
+    def test_tai_khoan_chua_chon_username_van_hien_o_danh_sach(self):
+        """Nguon moi la Appwrite Users API — phai thay CA nguoi chua chon
+        username, khac ban Phase 2 chi doc `profiles` da co username."""
+        moi, _ = self._dang_ky("chuadat@x.local", "Chưa Đặt Tên")
+        d = self.client.get("/api/admin/users?q=chuadat",
+                            headers=self.h_admin).json()
+        self.assertEqual(d["total"], 1)
+        hang = d["users"][0]
+        self.assertEqual(hang["user_id"], moi["user_id"])
+        self.assertEqual(hang["username"], "")
+        self.assertTrue(hang["email_verified"])
+        self.assertTrue(hang["account_enabled"])
+
+    def test_chi_tiet_tai_khoan_kem_trang_thai_va_phien(self):
+        me, h = self._dang_ky("chitiettk@x.local", "Chi Tiết Tài Khoản")
+        self.client.post("/api/auth/login", json={
+            "email": "chitiettk@x.local", "password": "matkhau123"})
+        d = self.client.get(f"/api/admin/users/{me['user_id']}",
+                            headers=self.h_admin).json()["user"]
+        self.assertIsNotNone(d["account"])
+        self.assertTrue(d["account"]["enabled"])
+        self.assertGreaterEqual(len(d["sessions"]), 2)  # dang ky + login them
+        self.assertEqual(d["admin_role"], "none")
+
+    def test_tam_dung_tai_khoan_chan_dang_nhap_hoan_toan(self):
+        me, h = self._dang_ky("khoatk@x.local", "Khoá Tài Khoản")
+        r = self.client.post(f"/api/admin/users/{me['user_id']}/suspend",
+                             headers=self.h_admin, json={"note": "Nghi ngờ gian lận."})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["account"]["enabled"])
+
+        dang_nhap = self.client.post("/api/auth/login", json={
+            "email": "khoatk@x.local", "password": "matkhau123"})
+        self.assertEqual(dang_nhap.status_code, 401)
+
+        r = self.client.post(f"/api/admin/users/{me['user_id']}/unsuspend",
+                             headers=self.h_admin, json={"note": "Đã xác minh."})
+        self.assertTrue(r.json()["account"]["enabled"])
+        dang_nhap_lai = self.client.post("/api/auth/login", json={
+            "email": "khoatk@x.local", "password": "matkhau123"})
+        self.assertEqual(dang_nhap_lai.status_code, 200)
+
+    def test_tam_dung_tai_khoan_KHONG_dong_toi_author_status(self):
+        """Hai khai niem tach rieng: khoa tai khoan khong doi trang thai tac gia."""
+        me, _ = self._tac_gia("khoatk2@x.local", "Khoá 2")
+        self.client.post(f"/api/admin/users/{me['user_id']}/suspend",
+                         headers=self.h_admin, json={"note": "x"})
+        self.assertIs(self.identity.get_profile(me["user_id"]).author_status,
+                      AuthorStatus.APPROVED)
+
+    def test_khong_the_tu_tam_dung_chinh_minh(self):
+        r = self.client.post(f"/api/admin/users/{self.admin['user_id']}/suspend",
+                             headers=self.h_admin, json={"note": "x"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_khong_the_tu_cham_dut_phien_cua_chinh_minh(self):
+        r = self.client.post(
+            f"/api/admin/users/{self.admin['user_id']}/sessions/terminate-all",
+            headers=self.h_admin, json={"note": "x"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_admin_khong_duoc_tam_dung_tai_khoan_quan_tri_khac(self):
+        chu, h_chu = self._dang_ky("chuso@fanfic.local", "Chủ Sở Hữu 2")
+        self._dat_vai_tro(owner=[chu["user_id"]], admin=[self.admin["user_id"]])
+
+        # ADMIN khong duoc dong toi tai khoan cua OWNER.
+        r = self.client.post(f"/api/admin/users/{chu['user_id']}/suspend",
+                             headers=self.h_admin, json={"note": "x"})
+        self.assertEqual(r.status_code, 403)
+
+        # OWNER thi duoc dong toi tai khoan cua ADMIN.
+        r = self.client.post(f"/api/admin/users/{self.admin['user_id']}/suspend",
+                             headers=h_chu, json={"note": "x"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_cham_dut_mot_phien_va_cham_dut_tat_ca(self):
+        me, _ = self._dang_ky("phien@x.local", "Phiên")
+        r2 = self.client.post("/api/auth/login", json={
+            "email": "phien@x.local", "password": "matkhau123"})
+        h2 = {"Authorization": f"Bearer {r2.json()['token']}"}
+
+        chi_tiet = self.client.get(f"/api/admin/users/{me['user_id']}",
+                                   headers=self.h_admin).json()["user"]
+        self.assertGreaterEqual(len(chi_tiet["sessions"]), 2)
+        phien_dau = chi_tiet["sessions"][0]["session_id"]
+
+        r = self.client.post(
+            f"/api/admin/users/{me['user_id']}/sessions/{phien_dau}/terminate",
+            headers=self.h_admin, json={"note": ""})
+        self.assertTrue(r.json()["terminated"])
+
+        r = self.client.post(
+            f"/api/admin/users/{me['user_id']}/sessions/terminate-all",
+            headers=self.h_admin, json={"note": "Chấm dứt toàn bộ."})
+        self.assertGreaterEqual(r.json()["terminated_count"], 1)
+        self.assertEqual(self.client.get("/api/auth/me", headers=h2).status_code, 401)
+
+    def test_tam_dung_va_cham_dut_phien_deu_ghi_nhat_ky(self):
+        me, _ = self._dang_ky("nhatkytk@x.local", "Nhật Ký Tài Khoản")
+        self.client.post(f"/api/admin/users/{me['user_id']}/suspend",
+                         headers=self.h_admin, json={"note": "vi phạm"})
+        self.client.post(f"/api/admin/users/{me['user_id']}/unsuspend",
+                         headers=self.h_admin, json={"note": "đã xử lý"})
+        self.client.post(
+            f"/api/admin/users/{me['user_id']}/sessions/terminate-all",
+            headers=self.h_admin, json={"note": ""})
+        hanh_dong = [e["action"] for e in self.client.get(
+            "/api/admin/events", headers=self.h_admin).json()["events"]]
+        self.assertIn("user_suspend", hanh_dong)
+        self.assertIn("user_unsuspend", hanh_dong)
+        self.assertIn("user_session_terminate", hanh_dong)
+
+    def test_thao_tac_tai_khoan_khong_ton_tai_tra_404(self):
+        for duong in (
+            "/api/admin/users/usr_khong_co/suspend",
+            "/api/admin/users/usr_khong_co/unsuspend",
+        ):
+            r = self.client.post(duong, headers=self.h_admin, json={"note": ""})
+            self.assertEqual(r.status_code, 404, duong)
+
+
 class AuditLogTest(Base):
     def test_moi_thao_tac_deu_de_lai_mot_dong(self):
         me, _ = self._tac_gia("nhatky@x.local", "Nhật Ký", duyet=False)
@@ -492,9 +619,14 @@ class DashboardMoRongTest(Base):
 
     def test_truong_chua_theo_doi_tra_None_khong_bia_so_0(self):
         d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
-        self.assertIsNone(d["users"]["verified"])
-        self.assertIsNone(d["users"]["unverified"])
-        self.assertIsNone(d["users"]["suspended"])
+        # Phase 3 (Admin Control Center V2): verified/unverified/suspended gio
+        # doc THAT tu Appwrite Users API (`IdentityAdapter.count_accounts`),
+        # khong con la None — xem `AccountStatus`. Mock luon coi MOI tai
+        # khoan la da xac minh (khong co luong xac minh email that o mock),
+        # nen "unverified" luon la 0 va "verified" bang tong so tai khoan.
+        self.assertGreaterEqual(d["users"]["verified"], 2)
+        self.assertEqual(d["users"]["unverified"], 0)
+        self.assertEqual(d["users"]["suspended"], 0)
         self.assertIsNone(d["product"]["image_generations_total"])
 
     def test_dem_noi_dung_dung_sau_khi_tao_truyen_chuong_series(self):

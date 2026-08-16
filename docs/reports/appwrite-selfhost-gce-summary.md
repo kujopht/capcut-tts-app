@@ -334,3 +334,44 @@ liệu test cố ý viết tay từ trước (vd `tok-secret-value` trong
 Backend **2145/2145** (2128 cũ + 17 test mới), frontend **563/563**,
 typecheck/lint sạch, build thành công.
 
+## 14. Follow-up: DNS `appwrite-dev.fanfic.world` — CHƯA phân giải
+
+Bạn báo đã cấu hình bản ghi A `appwrite-dev.fanfic.world → 35.225.209.115`.
+Kiểm tra thật qua **hai resolver công khai độc lập** (Google 8.8.8.8,
+Cloudflare 1.1.1.1), lặp lại nhiều lần cách nhau ~15-20 phút: cả hai đều trả
+**NXDOMAIN** ("Non-existent domain") cho subdomain này. Zone gốc
+`fanfic.world` xác nhận CÓ cấu hình DNS thật (nameserver Cloudflare, apex
+domain phân giải bình thường) — nên đây không phải lỗi toàn zone, chỉ riêng
+bản ghi con `appwrite-dev` chưa thấy. Vì zone đã dùng Cloudflare (thường
+gần như tức thời, không có độ trễ TTL truyền thống), khả năng cao là bản ghi
+chưa thực sự được lưu, sai chính tả subdomain, hoặc đang ở trạng thái nào đó
+chưa active — **không phải vấn đề lan truyền cần chờ thêm**.
+
+**Vì lý do này, các mục sau CHƯA thực hiện** (phụ thuộc domain phân giải
+được, thử Let's Encrypt lúc domain chưa phân giải sẽ chỉ thất bại và phí một
+lượt thử): cấu hình Traefik/Appwrite cho `https://appwrite-dev.fanfic.world`,
+xin/xác minh chứng chỉ TLS, xác nhận redirect HTTP→HTTPS, đổi
+`server/.env.selfhost` sang endpoint HTTPS mới.
+
+**Đã hoàn thành trong lần này (không phụ thuộc DNS)**:
+
+- **Khôi phục sau khởi động lại VM — đã kiểm chứng THẬT** (không chỉ đọc
+  cấu hình): chạy `gcloud compute instances reset`, đợi SSH sống lại, đợi
+  `appwrite-selfhost.service` tự chuyển `active` — **không cần can thiệp
+  thủ công**. Toàn bộ ~30 container lên lại đầy đủ, tất cả healthcheck qua,
+  0 container exited, 0 restart loop (xác nhận qua `uptime` chỉ "1 min" lúc
+  kiểm — đúng là sau reboot thật). Traefik cũng route đúng ngay sau reboot
+  lần này (không tái diễn lỗi đua thời điểm khởi động đã gặp lần đầu).
+- **Smoke test lại qua backend thật**: đăng ký mới, gọi
+  `POST /api/progress/read` hai lần cùng payload → `streak.current_streak=1`
+  (không phải 2, đúng idempotent), leaderboard/cosmetics đều 200.
+- Backend 2145/2145, frontend 563/563, typecheck/lint sạch, build thành
+  công (mục 5 ở trên) — chạy lại sau reboot, không phải chỉ trước đó.
+
+**Cần bạn xác nhận lại**: kiểm tra bản ghi DNS trên Cloudflare dashboard
+(đúng tên `appwrite-dev.fanfic.world`, đúng loại A, đúng giá trị
+`35.225.209.115`, trạng thái Proxied hay DNS-only — Proxied có thể ảnh
+hưởng cách Let's Encrypt HTTP-01 challenge xác minh vì traffic đi qua
+Cloudflare trước khi tới VM). Sau khi xác nhận và phân giải được thật, chạy
+lại các mục 2-5/8 còn thiếu ở trên.
+

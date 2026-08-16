@@ -1,155 +1,218 @@
 # Kiểm toán khả năng chống chịu lỗi (Error/Resilience) — Phase 10
 
-Overnight Pre-Production Hardening Marathon V1. Phạm vi: đọc code tĩnh trong
-`server/` (không dựng lỗi thật trên Appwrite Cloud). Mục tiêu: tìm lỗi
-resilience KHÁC với lỗi `UnicodeEncodeError` đã sửa trước đó trong phiên này
-(một `print()` non-ASCII ở handler fallback `admin_overview`, `server/main.py`).
+Overnight Pre-Production Hardening Marathon V1. Bản này MỞ RỘNG một lượt rà
+soát tĩnh trước đó trong cùng phase (pipeline TTS/Translation, `print()`
+non-ASCII, `except Exception` nuốt lỗi, timeout HTTP — cả năm mục đều SẠCH,
+xem lịch sử Git) bằng phương pháp **tái hiện thật qua `TestClient`** của
+FastAPI cho đúng 9 kịch bản lỗi được giao, thay vì chỉ đọc code.
 
-## Tóm tắt theo 5 mục yêu cầu
+Toàn bộ test mới nằm ở `server/tests/test_resilience_error_handling.py`
+(18 test, chạy OFFLINE — không chạm Appwrite/YouTube thật). Kết nối Appwrite
+được "cắt" bằng cách thay `AppwriteIdentityAdapter._client` bằng một đối
+tượng giả ném `httpx.ConnectError`, cùng mô hình bọc client đã có sẵn ở
+`test_appwrite_v2_contract.py`.
 
-| Mục | Phạm vi | Kết luận |
+## Tóm tắt theo 9 kịch bản
+
+| # | Kịch bản | Kết luận |
 |---|---|---|
-| 1. TTS job pipeline (`server/main.py`, `server/worker.py`, `desktop_app/providers/`) | Job thất bại giữa chừng, giới hạn retry, worker restart | SẠCH |
-| 2. Translation job pipeline (`server/translation_service.py`, `translation_providers.py`, `appwrite_translation_store.py`) | Lease hết hạn, backoff 429/5xx | SẠCH |
-| 3. `print()`/log non-ASCII có nguy cơ `UnicodeEncodeError` trên console Windows | Toàn bộ `server/*.py` | SẠCH — không tìm thêm lỗi nào khác |
-| 4. `except Exception` nuốt lỗi âm thầm | Toàn bộ `server/*.py` | SẠCH về mặt đúng-sai, 1 ghi nhận MINOR (thiếu log quan sát) |
-| 5. Timeout cho HTTP ra ngoài (YouTube, translation provider, R2, Appwrite) | Toàn bộ client HTTP trong `server/` | SẠCH, 1 ghi nhận MINOR (R2/boto3) |
+| 1 | Appwrite backend không thể kết nối | **ĐÃ SỬA** — 2 lỗi thật: sai mã HTTP (401 thay vì 503) và rò rỉ chi tiết lỗi hệ thống (`getaddrinfo failed`) vào JSON trả về |
+| 2 | YouTube API không khả dụng/lỗi | PASS — đã có pattern xử lý mẫu mực từ trước (503 cấu hình thiếu / 429 hết hạn mức / 502 lỗi kết nối), xác nhận lại bằng test thật |
+| 3 | Cấu hình provider TTS/dịch không hợp lệ | PASS — có sẵn cơ chế fail-fast, xác nhận qua test hiện có (`test_dependencies.py`, `test_translation_provider_registry.py`) |
+| 4 | Request body sai định dạng | PASS — Pydantic trả 422 sạch, không traceback, xác nhận bằng 5 test mới trên 3 route đại diện |
+| 5 | Timeout cho lời gọi ra ngoài | PASS — mọi `httpx.Client` trong `server/` đều khai báo `timeout=...` tường minh (đã xác nhận ở lượt rà soát tĩnh trước, kiểm lại toàn bộ danh sách bên dưới) |
+| 6 | Gửi trùng lặp (double-click) | PASS — đăng ký trùng email bị chặn rõ ràng (400, không tạo hồ sơ thứ hai); tạo 2 tài nguyên không-khoá-duy-nhất giống hệt nhau đều thành công độc lập (đúng ý đồ, không phải khoá phát hiện trùng) |
+| 7 | Mất mạng giữa chừng request | N/A (đã có cơ chế tương đương) — worker bị ngắt giữa chừng được xử lý bằng lease hết hạn + fencing token (`test_lease_hardening.py`, `test_claim_atomicity.py`), không có "khoá vĩnh viễn" |
+| 8 | Token phiên hết hạn/rác | PASS — 401 sạch, không traceback; token đã đăng xuất không dùng lại được |
+| 9 | Người dùng thường gọi `/api/admin/*` | PASS — thân phản hồi 403 sạch (chỉ có `detail` dạng chuỗi, không traceback/đường dẫn file); KHÔNG kiểm lại quyền hạn (đã xác minh sạch ở Phase 3) |
 
-## Chi tiết
+**Phát hiện thêm ngoài 9 kịch bản**: lưới an toàn cuối cùng của FastAPI
+(exception hoàn toàn không lường trước, không bị `except` nào bắt) đã được
+xác nhận SẠCH — `app = FastAPI(...)` không bật `debug=True`, nên một lỗi
+500 thật sự vẫn không làm lộ traceback hay chi tiết nội bộ vào response.
 
-### 1. TTS job pipeline — SẠCH
+## Chi tiết kịch bản 1 — Appwrite không kết nối được (lỗi đã sửa)
 
-- `server/main.py::_run_job` (dòng 1789-1996): claim TRƯỚC `try` (đã có ghi
-  chú lịch sử về lỗi từng gặp khi claim nằm trong `try`), MỌI lần ghi trạng
-  thái đều kèm fencing token (`save_job_fenced`), thứ tự bắt buộc
-  synthesize → upload → create_track → `completed` nên không bao giờ có job
-  `completed` mà thiếu audio.
-- `recover_stale_jobs()` (dòng 2081-2192): idempotent, kiểm tra
-  `job.lease_is_live()` trước khi nhận lại, kiểm tra `_job_threads` trong bộ
-  nhớ tiến trình TRƯỚC khi claim để tránh 2 thread cùng chạy 1 job (bug này
-  đã từng xảy ra trên staging theo comment, đã vá).
-- `JOB_MAX_ATTEMPTS`: có giới hạn số lần thử (dòng 2158-2168) — job vượt trần
-  bị chuyển `failed` với thông báo đọc được, KHÔNG xoay vòng vô hạn.
-- Worker restart giữa job đang chạy: lease hết hạn (`FAS_JOB_LEASE_SECONDS`)
-  + heartbeat gia hạn định kỳ (`JOB_HEARTBEAT_SECONDS`) + fencing token chặn
-  worker cũ ghi đè kết quả của worker mới — đã có test riêng
-  (`test_lease_hardening.py`, `test_recovery_and_reconcile.py`,
-  `test_worker_split.py`).
-- `desktop_app/providers/edge_provider.py`: retry có giới hạn
-  (`MAX_ATTEMPTS`) kèm `RETRY_BACKOFF_SECONDS` tăng dần — không phải vòng lặp
-  retry vô hạn.
+### Phát hiện
 
-### 2. Translation job pipeline — SẠCH
+`AppwriteIdentityAdapter._request()` (`server/appwrite_adapter.py`) bắt
+`httpx.HTTPError` (mất kết nối/DNS lỗi/timeout) và trước đây ném:
 
-- `server/translation_service.py::recover_stale_jobs`/`_run_job`/`_thuc_thi_job`
-  dùng đúng khuôn claim/lease/fence với TTS, bảng riêng
-  (`translation_jobs`/`translation_job_claims`).
-- `TRANSLATION_JOB_MAX_ATTEMPTS = 3` (dòng 96) — có trần, NHƯNG cố ý loại trừ
-  trạng thái `WAITING_FOR_PROVIDER` khỏi kiểm tra trần này (dòng 603-613):
-  đây là thiết kế đúng ý đồ (chờ hạn mức miễn phí reset là vòng lặp BÌNH
-  THƯỜNG, không phải dấu hiệu worker chết) — đã ghi rõ trong comment, không
-  phải bug.
-- Backoff 429/5xx: `server/translation_provider_registry.py`
-  (`_OpenAICompatFreeProvider.translate_segment`, dòng 291-300) phân biệt rõ
-  429-quota vs 429-rate-limit, đọc header `Retry-After` nếu có
-  (`_retry_after_to_iso`), và có `DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 60`
-  khi provider không kèm header — KHÔNG hammer liên tục, cũng KHÔNG coi
-  provider "chết vĩnh viễn" khi thiếu header (bug này được ghi chú đã từng
-  tồn tại trước "V6 cerebras-groq-translation", nay đã sửa).
-- `AllProvidersUnavailable` → job chuyển `waiting_for_provider` (không phải
-  `failed`), `retry_not_before` lấy mốc SỚM NHẤT trong các provider, có
-  backoff mặc định (`TRANSLATION_WAITING_DEFAULT_RETRY_SECONDS = 300`) khi
-  không provider nào báo mốc cụ thể.
-- `appwrite_translation_store.py::claim_job`/`renew_lease`/`save_job_fenced`:
-  dùng transaction Appwrite thật (create+update trong 1 transaction), so
-  khớp `attempts`/`lease_owner` trước khi ghi — đúng compare-and-set.
+```python
+raise AuthError(f"Không kết nối được Appwrite: {exc}") from exc
+```
 
-### 3. `print()`/log non-ASCII — SẠCH, không tìm thêm lỗi
+Hai vấn đề, tái hiện được bằng test thật (`KichBanAppwriteKhongKetNoiDuoc`):
 
-Đã grep toàn bộ `server/*.py` cho `print(...)` chứa ký tự có dấu tiếng Việt.
-Kết quả:
+1. **Rò rỉ chi tiết lỗi hệ thống**: `{exc}` in thẳng nội dung exception của
+   `httpx` vào thông điệp — ví dụ `[Errno 11001] getaddrinfo failed` — và
+   thông điệp này đi thẳng vào `detail` của response JSON. Không phải secret
+   (không phải API key/mật khẩu) nhưng là chi tiết hạ tầng nội bộ không nên
+   lộ ra ngoài, vi phạm đúng nguyên tắc `thong_diep_loi_an_toan` mà
+   `_request()` đã áp dụng cho các lỗi HTTP khác trong CÙNG hàm.
+2. **Sai mã HTTP**: vì `AuthError` được dùng chung cho cả "sai thông tin
+   đăng nhập" LẪN "không kết nối được Appwrite", `current_profile` (dependency
+   bảo vệ HẦU HẾT route, bao gồm mọi route `/api/admin/*` qua `admin_profile`)
+   và `/api/auth/login` trả về **401 Unauthorized** khi Appwrite chỉ đơn
+   giản là đang gián đoạn — người dùng ĐANG đăng nhập hợp lệ sẽ bị hiểu nhầm
+   hàng loạt là "phiên hết hạn, đăng nhập lại đi" trong lúc backend chỉ
+   không tới được Appwrite. Đây là kiểu lỗi lệch nghiêm trọng hơn so với
+   `/api/admin/trusted-sources/scan` (YouTube) — nơi cùng loại lỗi kết nối
+   đã được cố ý map đúng thành 503/502 từ trước (`server/main.py::_nguon_tin_cay`).
 
-- `server/main.py:3786-3791` (`_an_toan` trong `admin_overview`) — CHÍNH LÀ
-  handler đã sửa trong phiên này (nay ASCII thuần), xác nhận lại còn nguyên
-  vẹn.
-- `server/main.py:317-320` (`_canh_bao_ngan_sach_image_studio`) — ASCII
-  thuần (`thang=`, `da_chi=`, `han_muc=`), an toàn.
-- `server/main.py:1910-1911`, `1938-1939` — `print("canh bao: ...")` ASCII
-  thuần (không dấu), an toàn.
-- `server/worker.py` và `server/translation_worker.py` — CÓ in JSON kèm
-  tiếng Việt có dấu (`ensure_ascii=False`), NHƯNG cả hai file đều tự gọi
-  `_ep_utf8()` ngay khi import (`sys.stdout/stderr.reconfigure(encoding="utf-8",
-  errors="replace")`) TRƯỚC bất kỳ lệnh `print` nào — nên không thể tái phát
-  `UnicodeEncodeError` kiểu đã sửa. Đây là thiết kế đã phòng thủ đúng, không
-  phải lỗ hổng.
+### Sửa
 
-Không tìm thấy `print()`/log non-ASCII nào khác có nguy cơ tương tự lỗi đã
-sửa.
+- `server/adapters.py`: thêm `AppwriteUnavailableError(AuthError)` — vẫn là
+  con của `AuthError` (code cũ bắt `except AuthError` không bị vỡ) nhưng cho
+  phép nơi gọi phân biệt "hạ tầng gián đoạn tạm thời" với "người dùng sai".
+- `server/appwrite_adapter.py::_request()`: đổi sang ném
+  `AppwriteUnavailableError("Không kết nối được Appwrite. Vui lòng thử lại
+  sau.")` — không còn nội suy `{exc}`.
+- `server/main.py`: 5 điểm bắt `AppwriteUnavailableError` TRƯỚC `AuthError`,
+  trả về `503` thay vì mã cũ — `current_profile` (dependency dùng chung cho
+  gần như mọi route được bảo vệ, kể cả toàn bộ `/api/admin/*`), `login`,
+  `register` (cả hai lệnh gọi `identity.register`/`identity.login`),
+  `oauth_exchange`, `set_username` (trước đây map nhầm thành 409 "tên đã bị
+  trùng").
 
-### 4. `except Exception` nuốt lỗi âm thầm — SẠCH, 1 ghi nhận MINOR
+### Bảng so sánh
 
-Rà toàn bộ `except Exception` trong `server/*.py` (không tính `tests/`).
-Phần lớn có comment giải thích rõ lý do chấp nhận được (mạng chập chờn,
-dọn dẹp không quan trọng, ghi tiến độ mất thì lần sau ghi lại). Một số điểm
-swallow lỗi bằng `pass` MÀ KHÔNG log, tuy đúng về mặt thiết kế (không được
-phép làm hỏng hành động chính) nhưng thiếu quan sát vận hành:
+| Hạng mục | Trước khi sửa | Sau khi sửa |
+|---|---|---|
+| Thông điệp lỗi khi Appwrite mất kết nối | `"Không kết nối được Appwrite: [Errno 11001] getaddrinfo failed"` (rò rỉ chi tiết hệ thống) | `"Không kết nối được Appwrite. Vui lòng thử lại sau."` (không lộ chi tiết nội bộ) |
+| Mã HTTP cho `/api/auth/login` khi Appwrite mất kết nối | 401 (giống hệt sai mật khẩu) | 503 (đúng bản chất: hạ tầng gián đoạn tạm thời) |
+| Mã HTTP cho MỌI route bảo vệ (`current_profile`, gồm cả `/api/admin/*`) khi Appwrite mất kết nối | 401 — người dùng hợp lệ bị buộc tưởng "phiên hết hạn" | 503 — đúng là lỗi backend tạm thời, không đá người dùng ra khỏi phiên một cách vô lý |
+| Mã HTTP cho `/api/creator/username` khi Appwrite mất kết nối | 409 "tên đã bị trùng" (sai hoàn toàn về bản chất) | 503 |
+| Test tái hiện | Không có | `server/tests/test_resilience_error_handling.py::KichBanAppwriteKhongKetNoiDuoc` (6 test) |
 
-- `server/main.py:1053` (xoá cover cũ khi gỡ ảnh bìa), `:1300` (xoá object
-  rác khi xoá chương), `:1471`/`:1513` (thưởng XP khi xuất bản/tạo chương),
-  `:1680` (báo người theo dõi có chương mới), `:3077` (thưởng XP khi nghe đủ
-  điều kiện) — tất cả đều là "việc phụ không được phép làm hỏng request
-  chính", chủ đích đúng, NHƯNG nếu tầng thưởng XP (`gamification_store`) có
-  lỗi hệ thống dai dẳng, không ai biết được vì lỗi bị nuốt hoàn toàn không
-  log. Mức độ: MINOR — gợi ý (không sửa trong phiên này) là thêm một dòng
-  log cấu trúc (giống style `_an_toan`/`admin_overview`) khi các nhánh này
-  bắt được exception, để vận hành đối soát được mà không làm hỏng request
-  chính.
-- `server/creator_service.py:124/136/377`, `server/appwrite_store.py:782` —
-  cùng loại (dọn avatar cũ, callback thông báo quyết định kiểm duyệt, khoá
-  job) — cùng đánh giá MINOR, không sửa.
+## Chi tiết các kịch bản còn lại
 
-Không tìm thấy trường hợp nào là lỗi thật bị che giấu (ví dụ: nuốt lỗi rồi
-báo thành công giả cho client) — mọi đường ghi trạng thái `completed`/`published`
-đều đi qua kiểm tra rõ ràng trước khi trả 200.
+### 2 — YouTube API không khả dụng (PASS)
 
-### 5. Timeout HTTP ra ngoài — SẠCH, 1 ghi nhận MINOR
+`server/youtube_client.py::YouTubeClient._goi()` đã tách bạch rõ: lỗi kết
+nối (`httpx.HTTPError`) → `YouTubeApiError("Không kết nối được YouTube Data
+API.")` (KHÔNG bao giờ nội suy `exc`/URL có chứa `key=`), lỗi `quotaExceeded`
+giữ nguyên `reason` để tầng trên map thành 429, các lỗi API khác thành
+thông điệp chung. `server/main.py::_nguon_tin_cay()` map: `YouTubeConfigError`
+→ 503, `YouTubeApiError` với `reason=="quotaExceeded"` → 429, còn lại → 502.
+Test có sẵn `test_trusted_source_routes.py::test_khong_cau_hinh_key_tra_503`
+xác nhận qua `TestClient` thật. Đây là pattern nên tham chiếu khi các nơi
+khác cần phân biệt lỗi hạ tầng — thực tế mục 1 ở trên (Appwrite) đã áp dụng
+đúng tinh thần này.
 
-- Appwrite (`appwrite_adapter.py`, `appwrite_store.py`,
-  `appwrite_animation_store.py`, `appwrite_trusted_source_store.py`,
-  `youtube_websub.py`, `youtube_client.py`): `REQUEST_TIMEOUT = 15.0`.
-- Appwrite translation (`appwrite_translation_store.py`): `REQUEST_TIMEOUT = 30.0`.
-- Appwrite gamification (`appwrite_gamification_store.py`): `REQUEST_TIMEOUT = 30.0`.
-- Translation provider (Groq/Cerebras/Cloudflare/custom,
-  `translation_provider_registry.py`/`translation_providers.py`):
-  `TIMEOUT_SECONDS = 60.0` cho lần dịch thật (đoạn văn dài, LLM trả lời
-  chậm — có chủ đích), `_KIEM_TRA_TIMEOUT_SECONDS = 15.0` cho kiểm tra kết
-  nối (GET /models, nhẹ hơn).
-- R2 (`r2_adapter.py`): dùng `boto3.client("s3", ..., config=Config(...,
-  retries={"max_attempts": 3}))` nhưng KHÔNG đặt `connect_timeout`/
-  `read_timeout` tường minh trong `Config` — dựa vào giá trị mặc định của
-  botocore (thường ~60s, KHÔNG phải vô hạn). MINOR — không phải "treo vô
-  hạn" nhưng nên đặt tường minh (vd `Config(..., connect_timeout=15,
-  read_timeout=60)`) để nhất quán với các client khác và không phụ thuộc
-  hành vi mặc định của thư viện bên thứ ba. Không sửa trong phiên này (rủi
-  ro thấp, cần test lại toàn bộ đường ghi R2 nếu đổi).
+### 3 — Cấu hình provider không hợp lệ (PASS)
+
+`server/tests/test_dependencies.py` xác nhận `DATA_BACKEND=appwrite` hay
+`STORAGE_BACKEND=r2` thiếu biến môi trường bắt buộc đều fail-fast ngay ở
+`settings.validate()`/`build_*`, KHÔNG bao giờ lặng lẽ lùi về mock.
+`server/tests/test_translation_provider_registry.py::test_thieu_cau_hinh_nem_loi_ngay_luc_tao`
+xác nhận provider dịch thiếu API key ném lỗi ngay lúc khởi tạo, không phải
+lúc dùng. `server/tts_bridge.py` bọc mọi lỗi provider TTS (kể cả
+`subprocess.TimeoutExpired`) thành `TtsBridgeError` có `ErrorKind` rõ ràng,
+không để lộ traceback subprocess.
+
+### 4 — Request body sai định dạng (PASS)
+
+5 test mới (`KichBanRequestSaiDinhDang`) gửi: thiếu trường bắt buộc, sai kiểu
+dữ liệu, và body không phải JSON hợp lệ tới `/api/auth/register`,
+`/api/novels`, `/api/chapters`. Tất cả trả `422` (JSON không hợp lệ trả
+`400`/`422` tuỳ tầng parse), không route nào lộ traceback hay đường dẫn file
+Python trong response — hành vi mặc định của Pydantic/FastAPI đã đủ an toàn.
+
+### 5 — Timeout cho lời gọi ra ngoài (PASS)
+
+Xác nhận lại danh sách `httpx.Client(timeout=...)` trong toàn bộ `server/`:
+Appwrite/YouTube (`REQUEST_TIMEOUT = 15.0`), Appwrite dịch/gamification
+(`30.0`), provider dịch (`TIMEOUT_SECONDS = 60.0` cho dịch thật,
+`_KIEM_TRA_TIMEOUT_SECONDS = 15.0` cho kiểm tra kết nối), Image Studio
+BYOK/registry (`self._timeout`). Không có client HTTP nào thiếu timeout
+(có thể treo vô hạn). Một ghi nhận MINOR còn tồn từ lượt rà soát trước
+(không sửa, rủi ro thấp): R2/boto3 không đặt `connect_timeout`/`read_timeout`
+tường minh trong `Config`, dựa vào mặc định của botocore.
+
+### 6 — Gửi trùng lặp / double-click (PASS)
+
+`KichBanGuiTrungLap` (2 test mới): đăng ký cùng một email hai lần liên tiếp
+— lần hai bị từ chối rõ ràng (400 "Email này đã được đăng ký."), không tạo
+hồ sơ thứ hai, không lỗi 500 — nhờ khoá (`threading.Lock`) trong
+`MockIdentityAdapter.register`. Tạo hai Novel cùng tiêu đề liên tiếp (tài
+nguyên KHÔNG có ràng buộc duy nhất theo tiêu đề) đều thành công với
+`novel_id` khác nhau — đúng ý đồ (không phải lỗi trùng lặp cần chặn). Việc
+tạo TTS job trùng lặp (cùng nội dung/giọng/tốc độ) đã có cơ chế
+fingerprint riêng (`job_fingerprint`, `test_fingerprint_and_scale.py`) để
+không tổng hợp lại audio đã có.
+
+### 7 — Mất mạng giữa chừng request (N/A — đã có cơ chế tương đương)
+
+Không mô phỏng riêng vì cơ chế bảo vệ đã tồn tại và có test: một worker bị
+ngắt kết nối/crash giữa chừng khi đang xử lý job để lại lease hết hạn
+(`FAS_JOB_LEASE_SECONDS`), job được `recover_stale_jobs()` nhận lại bởi
+worker khác, và fencing token (`test_lease_hardening.py::TestFencingBlocksTheOldWorker`)
+chặn worker cũ (nếu "sống lại") ghi đè kết quả — không có trạng thái kẹt
+vĩnh viễn ở tầng job. Ở tầng HTTP đơn thuần (client đóng kết nối giữa
+chừng), đây là hành vi ASGI server xử lý (request bị huỷ, không có state
+nào bị ghi dở dang phía ứng dụng vì mọi ghi trạng thái đều nằm sau khi đã
+có kết quả đầy đủ) — không có gì đặc thù của ứng dụng cần vá.
+
+### 8 — Token phiên hết hạn/rác (PASS)
+
+`KichBanDangNhapPhienHetHan` (3 test): token rác hoàn toàn → 401 sạch,
+không traceback. Token đã đăng xuất → không dùng lại được (401). Thiếu
+header `Authorization` → 401, không phải 500.
+
+### 9 — Người dùng thường gọi `/api/admin/*` (PASS)
+
+Không kiểm lại phân quyền (đã xác minh sạch ở Phase 3). Chỉ kiểm thân phản
+hồi: `/api/admin/overview` với tài khoản thường trả 403, thân JSON chỉ có
+`detail` dạng chuỗi, không có `Traceback`, không có `site-packages`, không
+có dòng `File "..."` — phản hồi lỗi hoàn toàn sạch.
 
 ## Bugs tìm thấy
 
-Không có bug mới nào ở mức BLOCKER hoặc cần sửa ngay. Hai ghi nhận MINOR nêu
-trên (mục 4 và 5) mang tính cải thiện quan sát/nhất quán, không phải lỗi gây
-hỏng chức năng.
+1. `server/appwrite_adapter.py::AppwriteIdentityAdapter._request()` — rò rỉ
+   chi tiết lỗi hệ thống (`getaddrinfo failed`, v.v.) vào response JSON khi
+   Appwrite mất kết nối. **ĐÃ SỬA.**
+2. Toàn bộ đường xác thực (`current_profile`, `login`, `register`,
+   `oauth_exchange`, `set_username`) trả sai mã HTTP (401/400/409) khi
+   Appwrite mất kết nối, đáng lẽ phải là 503. Nghiêm trọng nhất là
+   `current_profile` vì nó bảo vệ gần như mọi route, kể cả toàn bộ
+   `/api/admin/*` — nghĩa là một lần Appwrite gián đoạn tạm thời sẽ trông
+   giống hệt "toàn bộ người dùng đang đăng nhập bị hết phiên cùng lúc".
+   **ĐÃ SỬA.**
 
 ## Bugs đã sửa trong phase này
 
-Không có (không tìm thấy lỗi đủ rõ ràng và đủ nhỏ để sửa an toàn theo tiêu
-chí của nhiệm vụ).
+Xem bảng so sánh ở mục "Chi tiết kịch bản 1" phía trên. Tệp thay đổi:
+`server/adapters.py` (thêm `AppwriteUnavailableError`),
+`server/appwrite_adapter.py` (ném lớp lỗi mới, bỏ nội suy exception thô),
+`server/main.py` (5 điểm bắt lỗi, map sang 503).
+
+## Bugs CỐ Ý không sửa (ghi rõ lý do)
+
+- R2/boto3 thiếu `connect_timeout`/`read_timeout` tường minh (mục 5) — rủi
+  ro thấp (mặc định botocore không phải vô hạn), sửa cần test lại toàn bộ
+  đường ghi R2, ngoài phạm vi cho phép của phase này (tránh thay đổi kiến
+  trúc rộng).
+- Một số `except Exception: pass` không log (thưởng XP, dọn cover cũ, thông
+  báo follower) ghi nhận từ lượt rà soát tĩnh trước trong cùng phase — đúng
+  về mặt không được phép làm hỏng request chính, chỉ thiếu quan sát vận
+  hành, MINOR, không sửa.
+
+## Kết quả kiểm thử
+
+- `server/tests/test_resilience_error_handling.py`: **18/18 PASS** (file
+  mới, viết trong phase này).
+- Toàn bộ `server/tests/`: **2408/2408 PASS** (1 skip, không liên quan —
+  thiếu file `.onnx.json` test model cục bộ) sau khi áp dụng các sửa đổi.
+- `python -m compileall -q server`: sạch.
 
 ## Kết luận
 
-Pipeline TTS và Translation đã được thiết kế resilience rất kỹ từ trước
-(claim nguyên tử qua transaction Appwrite, fencing token, lease + heartbeat,
-giới hạn số lần thử, backoff có cấu trúc cho rate-limit, phân biệt rõ "lỗi
-thật" và "chờ hạn mức reset"). Không tìm thấy `UnicodeEncodeError` non-ASCII
-nào khác ngoài lỗi đã sửa trước đó trong phiên. Không có exception bị nuốt
-theo kiểu che giấu sự cố thật. Timeout HTTP ra ngoài đều được đặt tường minh
-trừ một ngoại lệ nhỏ ở R2/boto3 (không phải treo vô hạn).
+9/9 kịch bản đã được kiểm tra bằng request thật qua `TestClient` (trừ kịch
+bản 7, có cơ chế tương đương đã kiểm chứng bằng test hiện có). Tìm và sửa
+được 1 lỗi thật có thể tái hiện, ảnh hưởng tới TOÀN BỘ route được bảo vệ khi
+Appwrite gián đoạn (sai mã HTTP + rò rỉ chi tiết lỗi hệ thống). Các kịch
+bản còn lại đều đã có pattern xử lý lỗi tốt từ trước (đặc biệt là
+YouTube/Trusted Video — dùng làm tài liệu tham chiếu khi sửa Appwrite), lưới
+an toàn cuối cùng của FastAPI cho lỗi 500 hoàn toàn không lường trước cũng
+đã xác nhận sạch.

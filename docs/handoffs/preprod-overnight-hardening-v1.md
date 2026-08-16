@@ -70,7 +70,8 @@ dừng cả phiên.
       useEffect/setInterval). Không sửa gì (không có phát hiện cần sửa). 1 hạn
       chế đã biết ở `admin_authors` (kéo tối đa 500 hồ sơ) — chấp nhận được,
       không sửa.
-- [ ] Phase 5 — Performance audit
+- [~] Phase 5 — Performance audit — ĐANG CHẠY nền (fork,
+      `docs/reports/preprod-performance-audit.md`)
 - [x] Phase 6 — Self-hosted Appwrite real smoke matrix. XONG (một mục BLOCKED) —
       chạy thật với `FAS_ENV_FILE=server/.env.selfhost` chống `https://appwrite-dev.fanfic.world/v1`:
       - AUTH+PROFILE+GAMIFICATION: mở rộng `scripts/smoke_test_selfhost_appwrite.py`
@@ -103,18 +104,27 @@ dừng cả phiên.
         `smoke_test_selfhost_trusted_sources.py` (admin_source_detail/scan/import
         đều là ghi/đọc THẬT trên Appwrite, chỉ là gọi thẳng service với Profile
         giả lập vai trò thay vì qua HTTP+JWT thật).
-- [ ] Phase 7 — YouTube/Trusted Video reliability audit
+- [~] Phase 7 — YouTube/Trusted Video reliability audit — ĐANG CHẠY nền (fork,
+      `docs/reports/preprod-youtube-reliability-audit.md`)
 - [~] Phase 8 — Image Studio safety/integration audit (KHÔNG chi tiêu thật) —
       ĐANG CHẠY nền (fork, `docs/reports/preprod-image-translation-tts-audit.md`)
 - [~] Phase 9 — Translation/TTS integration audit (KHÔNG chi tiêu thật) —
       ĐANG CHẠY nền (cùng fork với Phase 8)
-- [ ] Phase 10 — Error/resilience testing
-- [ ] Phase 11 — Accessibility audit
-- [ ] Phase 12 — Security/secret audit (toàn repo + git history)
-- [ ] Phase 13 — Data/schema consistency audit
-- [ ] Phase 14 — Worker/restart/ops audit
-- [ ] Phase 15 — Cross-platform/Windows test robustness
-- [ ] Phase 16 — Documentation consistency
+- [~] Phase 10 — Error/resilience testing — ĐANG CHẠY nền (fork,
+      `docs/reports/preprod-resilience-audit.md`)
+- [~] Phase 11 — Accessibility audit — ĐANG CHẠY nền (fork,
+      `docs/reports/preprod-accessibility-audit.md`)
+- [~] Phase 12 — Security/secret audit (toàn repo + git history) — ĐANG CHẠY nền
+      (fork, `docs/reports/preprod-security-audit.md`)
+- [~] Phase 13 — Data/schema consistency audit — ĐANG CHẠY nền (fork,
+      `docs/reports/preprod-schema-audit.md`)
+- [~] Phase 14 — Worker/restart/ops audit — ĐANG CHẠY nền (fork,
+      `docs/reports/preprod-worker-ops-audit.md`)
+- [~] Phase 15 — Cross-platform/Windows test robustness — ĐANG CHẠY nền (cùng
+      fork với Phase 14, `docs/reports/preprod-cross-platform-audit.md`)
+- [~] Phase 16 — Documentation consistency — ĐANG CHẠY nền (fork,
+      `docs/reports/preprod-documentation-audit.md`) — sẽ cần rà lại lần cuối ở
+      Phase 17 vì các phase khác vẫn đang chạy song song lúc fork này khởi động.
 - [ ] Phase 17 — Release-candidate report (`docs/reports/preprod-overnight-hardening-v1.md`)
 - [ ] Phase 18 — Final verification
 - [ ] Phase 19 — Finalize overnight branch (push, freeze, KHÔNG merge, quay về integration/pre-prod-v1 sạch)

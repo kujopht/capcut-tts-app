@@ -8,11 +8,11 @@
  * (tập hiện tại + series kèm mọi tập, dùng cho bộ chọn) bất kể series có bao
  * nhiêu tập — xem ghi chú ở `load()`.
  *
- * TRÌNH PHÁT là `YouTubeFacadePlayer` (facade — không nhúng iframe thật cho
- * tới khi người xem bấm Play, xem docstring component đó). Tiến độ xem chỉ
- * được ghi (`/api/progress/watch`) SAU khi người xem đã bấm Play — không bao
- * giờ trước đó, vì trước Play chưa có iframe/YouTube IFrame API nào để đọc vị
- * trí thật.
+ * TRÌNH PHÁT là `YouTubeFacadePlayer` (facade + thanh điều khiển Fanfic Cinema
+ * tuỳ chỉnh, xem docstring component đó — animation-player-v2-custom-controls).
+ * Component đó tự quản lý toàn bộ vòng đời YT.Player; trang này chỉ nhận lại
+ * tiến độ qua `onProgress` để ghi (`/api/progress/watch`), throttle 10s giữ
+ * nguyên từ V1 — KHÔNG giữ ref/interval nào ở tầng trang nữa.
  *
  * KHÔNG có mục "creator" riêng: `/novels/[id]` (trang truyện) cũng chưa hiển
  * thị tên tác giả trên trang chi tiết — theo đúng tiền lệ đó, trang này không
@@ -26,7 +26,7 @@
  */
 
 import Link from "next/link";
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { use, useCallback, useMemo, useState } from "react";
 import {
   api,
   type AnimationEpisode,
@@ -35,8 +35,6 @@ import {
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
-import { dongHo } from "@/lib/time";
-import { loadYouTubeIframeApi, type YTPlayerInstance } from "@/lib/youtubeIframeApi";
 import { YouTubeFacadePlayer } from "@/components/YouTubeFacadePlayer";
 import { EpisodeComments } from "@/components/EpisodeComments";
 import { EmptyState, ErrorState, SkeletonList } from "@/components/ui";
@@ -50,33 +48,6 @@ interface WatchData {
   nextEpisodeId: string | null;
 }
 
-/** Id ổn định cho iframe — chỉ một trình phát trên trang này tại một thời điểm. */
-const IFRAME_ID = "anim-watch-player";
-
-/** Báo tiến độ mỗi N giây phát — đủ mượt cho "Tiếp tục xem", không dội API
-    mỗi vài trăm mili-giây như `timeupdate` của thẻ `<video>` thường làm. */
-const KHOANG_BAO_CAO_GIAY = 10;
-
-/** Ma loi cua YouTube IFrame API -> thong bao tieng Viet ro rang (Phan 3,
-    animation-youtube-polish-v1). Video da xoa/rieng tu/tat nhung deu la
-    loi phia CHU video, khong phai loi cua Fanfic — khong doan them chi tiet
-    ngoai tai lieu chinh thuc de tranh noi sai nguyen nhan. */
-function thongBaoLoiVideo(maLoi: number): string {
-  switch (maLoi) {
-    case 2:
-      return "Đường dẫn video không hợp lệ.";
-    case 5:
-      return "Trình phát không hỗ trợ định dạng của video này.";
-    case 100:
-      return "Video này không còn tồn tại (có thể đã bị xoá hoặc đặt ở chế độ riêng tư).";
-    case 101:
-    case 150:
-      return "Chủ video đã tắt tính năng phát trên trang khác cho video này.";
-    default:
-      return "Không thể phát video này lúc này.";
-  }
-}
-
 export default function AnimationWatchPage({
   params,
 }: {
@@ -87,12 +58,6 @@ export default function AnimationWatchPage({
   const toast = useToast();
 
   const [moChonTap, setMoChonTap] = useState(false);
-  const [loiVideo, setLoiVideo] = useState<string | null>(null);
-  // Chi de HIEN THI (thanh tien do trong khung "rap chieu") — KHONG phai
-  // nguon that cho "Tiep tuc xem", van la `/api/progress/watch` o server.
-  const [tienDo, setTienDo] = useState<{ viTri: number; doDai: number } | null>(null);
-  const player = useRef<YTPlayerInstance | null>(null);
-  const bao = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async (): Promise<WatchData> => {
     const { episode, series, prev_episode_id, next_episode_id } =
@@ -113,56 +78,21 @@ export default function AnimationWatchPage({
 
   const { data, loading, error, missing, reload } = useAsyncData(load);
 
-  useEffect(() => {
-    // KHONG can tu reset `loiVideo` o day: trang nay re-mount moi lan doi
-    // route (xem ghi chu o `load()`), nen `useState` da tu ve gia tri dau
-    // `null` cho tap moi — dat them mot `setState` dong bo trong than effect
-    // se vi pham `react-hooks/set-state-in-effect` ma khong giai quyet gi hon.
-    return () => {
-      if (bao.current) clearInterval(bao.current);
-      player.current?.destroy?.();
-    };
-  }, [id]);
-
-  const guiTienDo = useCallback(() => {
-    if (!player.current || !data) return;
-    const viTri = player.current.getCurrentTime?.();
-    const doDai = player.current.getDuration?.();
-    if (typeof viTri !== "number" || Number.isNaN(viTri)) return;
-    setTienDo({ viTri, doDai: doDai || 0 });
-    api
-      .reportWatchProgress(
-        data.series.series_id, data.episode.episode_id, viTri, doDai || 0,
-      )
-      .catch(() => {});
-  }, [data]);
-
-  const batDauXem = useCallback(async () => {
-    if (!profile) return;
-    try {
-      const YT = await loadYouTubeIframeApi();
-      // Trinh phat facade da dung `<iframe id={IFRAME_ID}>` vao DOM luc nay
-      // (nguoi xem vua bam Play) — gan YouTube IFrame API vao CHINH iframe do,
-      // khong tao mot iframe thu hai.
-      player.current = new YT.Player(IFRAME_ID, {
-        events: {
-          onReady: () => {
-            guiTienDo();
-            bao.current = setInterval(guiTienDo, KHOANG_BAO_CAO_GIAY * 1000);
-          },
-          onError: (event) => {
-            if (bao.current) clearInterval(bao.current);
-            setLoiVideo(thongBaoLoiVideo(event.data));
-          },
-        },
-      });
-    } catch {
-      // API IFrame khong nap duoc (mang cham/bi chan) — nguoi xem VAN xem
-      // duoc binh thuong qua chinh iframe YouTube, chi la "Tiep tuc xem"
-      // se khong ghi duoc tien do cho lan xem nay. Khong chan phat vi chuyen
-      // do.
-    }
-  }, [profile, guiTienDo]);
+  // Nhan tien do TU `YouTubeFacadePlayer` (component tu quan ly YT.Player,
+  // throttle 10s, cap nhat cuc bo cho thanh tien do — xem docstring component
+  // do). O day CHI ghi vao backend, VA CHI khi da dang nhap — nguoi xem chua
+  // dang nhap van dieu khien duoc video day du, chi khong co "Tiep tuc xem".
+  const onProgress = useCallback(
+    (hienTaiGiay: number, doDaiGiay: number) => {
+      if (!profile || !data) return;
+      api
+        .reportWatchProgress(
+          data.series.series_id, data.episode.episode_id, hienTaiGiay, doDaiGiay,
+        )
+        .catch(() => {});
+    },
+    [profile, data],
+  );
 
   const soThuTu = useMemo(
     () => new Map((data?.episodes ?? []).map((e, i) => [e.episode_id, i + 1])),
@@ -298,44 +228,18 @@ export default function AnimationWatchPage({
         ) : null}
 
         <div className="yt-cinema-stage">
-          {loiVideo ? (
-            <div className="card anim-video-loi" role="alert">
-              <p>{loiVideo}</p>
-              <p className="hint">
-                Bạn vẫn có thể chuyển sang tập khác bằng điều hướng phía trên.
-              </p>
-            </div>
-          ) : (
-            <YouTubeFacadePlayer
-              videoId={episode.external_id}
-              title={episode.title}
-              iframeId={IFRAME_ID}
-              onPlay={batDauXem}
-            />
-          )}
+          {/* `YouTubeFacadePlayer` tu quan ly TOAN BO vong doi: facade → tai
+              API → gan YT.Player → thanh dieu khien Fanfic → trang thai loi
+              (video khong xem duoc HOAC API khong tai duoc). Trang nay chi
+              can biet tien do de ghi backend, khong con giu ref/interval nao. */}
+          <YouTubeFacadePlayer
+            videoId={episode.external_id}
+            title={episode.title}
+            onProgress={onProgress}
+          />
         </div>
 
         <div className="yt-cinema-foot">
-          {tienDo ? (
-            <div className="yt-cinema-progress">
-              <div className="yt-cinema-progress-bar" aria-hidden="true">
-                <div
-                  className="yt-cinema-progress-fill"
-                  style={{
-                    width: `${
-                      tienDo.doDai > 0
-                        ? Math.min(100, (tienDo.viTri / tienDo.doDai) * 100)
-                        : 0
-                    }%`,
-                  }}
-                />
-              </div>
-              <span className="hint yt-cinema-progress-time">
-                {dongHo(tienDo.viTri)} / {dongHo(tienDo.doDai)}
-              </span>
-            </div>
-          ) : null}
-
           <div className="row row-tight">
             <button type="button" className="btn btn-ghost" onClick={chiaSe}>
               <span aria-hidden="true">↗</span> Chia sẻ

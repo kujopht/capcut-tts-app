@@ -131,39 +131,46 @@ test("lib/youtubeIframeApi.ts: ho tro onError voi tai lieu ro ma loi YouTube", (
   assert.match(src, /101\/150 = chu video/);
 });
 
-test("animation/watch/[id]/page.tsx: thongBaoLoiVideo anh xa dung ma loi YouTube sang tieng Viet", () => {
-  const src = watchPage();
-  assert.match(src, /function thongBaoLoiVideo\(maLoi: number\): string/);
+test("lib/youtubeIframeApi.ts: thongBaoLoiVideo anh xa dung ma loi YouTube sang tieng Viet", () => {
+  // Chuyen tu watch/[id]/page.tsx sang lib/youtubeIframeApi.ts trong
+  // animation-player-v2-custom-controls, de YouTubeFacadePlayer dung chung.
+  const src = youtubeIframeApi();
+  assert.match(src, /export function thongBaoLoiVideo\(maLoi: number\): string/);
   assert.match(src, /case 100:[\s\S]{0,120}không còn tồn tại/);
   assert.match(src, /case 101:\s*\n\s*case 150:[\s\S]{0,150}tắt tính năng phát trên trang khác/);
 });
 
-test("animation/watch/[id]/page.tsx: wire onError vao YT.Player va hien trang thai loi thay vi iframe hong", () => {
-  const src = watchPage();
-  assert.match(src, /onError:\s*\(event\)\s*=>\s*\{/);
-  assert.match(src, /setLoiVideo\(thongBaoLoiVideo\(event\.data\)\)/);
-  assert.match(src, /\{loiVideo \? \(/);
+test("components/YouTubeFacadePlayer.tsx: wire onError vao YT.Player va hien trang thai loi thay vi iframe hong", () => {
+  // Vong doi YT.Player (bao gom onError) chuyen tu trang xem vao CHINH
+  // component nay trong animation-player-v2-custom-controls.
+  const src = facadePlayer();
+  assert.match(src, /onError:\s*\(e\)\s*=>\s*\{/);
+  assert.match(src, /thongBaoLoiVideo\(e\.data\)/);
+  assert.match(src, /setGiaiDoan\("loi-video"\)/);
+  assert.match(src, /giaiDoan === "loi-video"/);
   assert.match(src, /role="alert"/);
 });
 
-test("animation/watch/[id]/page.tsx: khi video loi, dieu huong tap truoc\\/sau van con nguyen (khong bi an)", () => {
+test("animation/watch/[id]/page.tsx: dieu huong tap KHONG phu thuoc trang thai loi cua trinh phat", () => {
+  // Trang xem khong con giu state loi nao ca (chuyen het vao component) — nav
+  // vi vay LUON hien khong dieu kien, nam TRUOC diem gan trinh phat.
   const src = watchPage();
   const viTriDieuHuong = src.indexOf('aria-label="Điều hướng tập"');
-  const viTriLoi = src.indexOf("{loiVideo ? (");
+  const viTriStage = src.indexOf('className="yt-cinema-stage"');
   assert.ok(viTriDieuHuong > 0, "không tìm thấy khối điều hướng tập");
-  assert.ok(viTriLoi > 0, "không tìm thấy khối hiển thị lỗi video");
+  assert.ok(viTriStage > 0, "không tìm thấy điểm gắn trình phát");
   assert.ok(
-    viTriDieuHuong < viTriLoi,
-    "điều hướng tập phải nằm NGOÀI (trước) khối điều kiện lỗi video, không phụ thuộc vào nó",
+    viTriDieuHuong < viTriStage,
+    "điều hướng tập phải nằm TRƯỚC điểm gắn trình phát, không lồng trong điều kiện nào phụ thuộc nó",
   );
+  assert.doesNotMatch(src, /loiVideo/);
 });
 
-test("animation/watch/[id]/page.tsx: loiVideo la state cuc bo, khong dat lai dong bo trong than effect", () => {
-  const src = watchPage();
-  assert.match(src, /const \[loiVideo, setLoiVideo\] = useState<string \| null>\(null\)/);
-  // Dat setState dong bo trong than effect vi pham react-hooks/set-state-in-effect
-  // (xem lint) — trang nay dua vao viec re-mount moi lan doi route thay vi vay.
-  assert.doesNotMatch(src, /useEffect\(\(\) => \{\s*setLoiVideo/);
+test("components/YouTubeFacadePlayer.tsx: trang thai loi la state cuc bo, khong dat lai dong bo trong than effect", () => {
+  const src = facadePlayer();
+  assert.match(src, /const \[thongDiepLoi, setThongDiepLoi\] = useState/);
+  // Dat setState dong bo trong than effect vi pham react-hooks/set-state-in-effect.
+  assert.doesNotMatch(src, /useEffect\(\(\) => \{\s*set(GiaiDoan|ThongDiepLoi)/);
 });
 
 // -- Phan 5: CSP + nguon nhung an toan --------------------------------------
@@ -176,8 +183,8 @@ test("components/YouTubeFacadePlayer.tsx: CHI nhung youtube-nocookie.com, khong 
   const src = facadePlayer();
   // Chi xet KHOI iframe THAT SU render (bo qua docstring dau file, noi co
   // nhac lai `youtube.com/embed` nhu MOT VI DU VE VIEC KHONG lam).
-  const khoiIframe = src.slice(src.indexOf("if (daBam)"));
-  assert.match(khoiIframe, /https:\/\/www\.youtube-nocookie\.com\/embed\/\$\{videoId\}/);
+  const khoiIframe = src.slice(src.indexOf("const goc ="));
+  assert.match(khoiIframe, /\$\{YOUTUBE_EMBED_ORIGIN\}\/embed\/\$\{videoId\}/);
   assert.doesNotMatch(khoiIframe, /youtube\.com\/embed/);
 });
 
@@ -235,9 +242,10 @@ test("globals.css: .yt-facade (iframe THAT) khong bi component cinema shell thu 
   assert.match(css, /\.yt-facade \{[\s\S]{0,120}aspect-ratio: 16 \/ 9;[\s\S]{0,60}width: 100%;/);
 });
 
-test("animation/watch/[id]/page.tsx: co thanh tien do hien thi duoi trinh phat, dung lai dongHo tu lib/time", () => {
-  const src = watchPage();
+test("components/YouTubePlayerControls.tsx: hien thoi gian MM:SS qua dongHo tu lib/time (Phan V2)", () => {
+  // Thanh tien do THU DONG cua V1 (`.yt-cinema-progress`) da duoc thay bang
+  // thanh dieu khien tuong tac cua V2 — xem
+  // tests/animation-player-v2-custom-controls.test.mjs de biet chi tiet.
+  const src = read("../src/components/YouTubePlayerControls.tsx");
   assert.match(src, /import\s*\{\s*dongHo\s*\}\s*from\s*"@\/lib\/time"/);
-  assert.match(src, /className="yt-cinema-progress"/);
-  assert.match(src, /\{dongHo\(tienDo\.viTri\)\} \/ \{dongHo\(tienDo\.doDai\)\}/);
 });

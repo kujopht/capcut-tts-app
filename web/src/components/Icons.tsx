@@ -95,6 +95,64 @@ export function IconPlay(p: Props) {
   );
 }
 
+/** Hai vach doc — nut Tam dung cua control bar tuy chinh (Fanfic Cinema
+    Controls, animation-player-v2-custom-controls). */
+export function IconPause(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M8 5 V19 M16 5 V19" fill="none" />
+    </Svg>
+  );
+}
+
+/** Mui ten cong — nut Phat lai khi video da ket thuc. */
+export function IconReplay(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 12 a8 8 0 1 1 2.6 5.9" />
+      <path d="M4 12 V17 H9" />
+    </Svg>
+  );
+}
+
+/** Loa co song am — am luong dang bat. */
+export function IconVolume(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 10 V14 H8 L13 18 V6 L8 10 Z" fill="currentColor" stroke="none" />
+      <path d="M16.5 9.5 a4.2 4.2 0 0 1 0 5" />
+    </Svg>
+  );
+}
+
+/** Loa gach cheo — dang tat tieng. */
+export function IconMute(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 10 V14 H8 L13 18 V6 L8 10 Z" fill="currentColor" stroke="none" />
+      <path d="M16 9.5 L20.5 14 M20.5 9.5 L16 14" />
+    </Svg>
+  );
+}
+
+/** Bon mui ten huong ra goc — mo toan man hinh. */
+export function IconExpand(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M9 4 H4 V9 M15 4 H20 V9 M9 20 H4 V15 M15 20 H20 V15" />
+    </Svg>
+  );
+}
+
+/** Bon mui ten huong vao trong — thoat toan man hinh. */
+export function IconCollapse(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 9 H9 V4 M20 9 H15 V4 M4 15 H9 V20 M20 15 H15 V20" />
+    </Svg>
+  );
+}
+
 /** Micro — "tao giong doc". */
 export function IconMic(p: Props) {
   return (

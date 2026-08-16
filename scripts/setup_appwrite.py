@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from server.config import load_settings
+from server.secret_redaction import thong_diep_loi_an_toan
 
 TIMEOUT = 30.0
 
@@ -1100,12 +1101,16 @@ class Setup:
             self.skipped += 1
             return "exists"
         if response.status_code >= 400:
-            message = response.text[:300]
             try:
                 body = response.json()
-                message = body.get("message", message)
             except Exception:
-                pass
+                body = None
+            # `thong_diep_loi_an_toan` loc bi mat theo MAU (vd khoa API dang
+            # "standard_...") ke ca khi roi vao nhanh fallback (JSON khong
+            # doc duoc) — truoc day nhanh do dung `response.text[:300]` THO,
+            # chua qua loc.
+            message = thong_diep_loi_an_toan(
+                body, status_code=response.status_code, gioi_han_ky_tu=2000)
             # Appwrite 1.9.6 tu-luu-tru: da xac nhan bang cach lap lai that
             # (khong doan) — tao trung index tra ve HTTP 400 kem thong diep
             # nay, KHONG PHAI 409 nhu ban Appwrite ma script duoc kiem chung

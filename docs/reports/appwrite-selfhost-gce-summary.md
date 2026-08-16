@@ -4,7 +4,7 @@ Nhánh: `infra/appwrite-selfhost-gce`, branch từ `integration/pre-prod-v1`
 (`295d470`). Không merge main, không deploy production. Appwrite Cloud
 production **hoàn toàn không bị ghi/xoá/thay đổi** trong toàn bộ phiên này.
 
-## ⚠️ Sự cố bảo mật cần bạn xử lý NGAY
+## ⚠️ Sự cố bảo mật — ĐÃ XỬ LÝ (khoá production đã được xoay vòng thủ công)
 
 Trong lúc thử cơ chế migration chính thức Cloud → self-host, một lời gọi API
 thất bại (lỗi validate tham số `resources`) và Appwrite trả về stack trace
@@ -13,10 +13,11 @@ phần `trace.args` — điều này KHÔNG được lường trước (sanitize
 key cấp cao nhất của JSON, không lọc đệ quy vào `trace`). Giá trị đó đã xuất
 hiện trong output hiển thị của phiên làm việc này.
 
-**Tôi không có cách nào tự xoay vòng (rotate) khoá này** — việc đó cần đăng
-nhập console Appwrite Cloud thật, mà tôi không có thông tin đăng nhập đó.
+**Cập nhật**: bạn đã tự xoay vòng khoá này thủ công qua Appwrite Cloud
+console. Xem mục 13 bên dưới cho đợt audit/vá lỗi hệ thống sau sự cố này
+(gốc rễ, chỗ đã sửa, kết quả quét lịch sử git).
 
-**Hành động bắt buộc, độc lập với mọi thứ khác trong báo cáo này**: đăng
+**Hành động ĐÃ HOÀN TẤT (giữ nguyên lịch sử báo cáo)**: đăng
 nhập Appwrite Cloud console, vào phần API Keys của dự án production, **thu
 hồi/tạo mới khoá `APPWRITE_API_KEY` đang dùng trong `server/.env.production`
 ngay bây giờ**, rồi cập nhật file đó với khoá mới. Đây là ưu tiên cao hơn bất
@@ -253,4 +254,83 @@ chưa deploy.
 | Backup | `~/appwrite/backup.sh`, đã chạy thật, có RESTORE.md |
 | Nhánh + SHA | `infra/appwrite-selfhost-gce`, xem `git log` sau commit |
 | DNS/TLS còn thiếu | Bản ghi A `appwrite-dev.fanfic.world → 35.225.209.115` (mục 4) |
-| **Cần bạn làm NGAY** | **Thu hồi/tạo mới `APPWRITE_API_KEY` production đã lộ (đầu báo cáo)** |
+| Khoá production đã lộ | **ĐÃ xoay vòng thủ công (xác nhận từ bạn)** — xem mục 13 |
+
+## 13. Audit bảo mật sau sự cố lộ khoá (follow-up)
+
+Không đọc/in/echo giá trị khoá `APPWRITE_API_KEY` MỚI trong toàn bộ đợt
+audit này — không cần thiết, đây là audit CODE PATTERN, không phải thao tác
+với credential thật.
+
+### 13.1 Gốc rễ thật sự
+
+Toàn bộ 5 lớp đọc Appwrite hiện có trong repo
+(`server/appwrite_store.py`, `appwrite_adapter.py`,
+`appwrite_gamification_store.py`, `appwrite_animation_store.py`,
+`appwrite_translation_store.py`) và `scripts/setup_appwrite.py` **đã luôn
+an toàn** — cả 6 file chỉ trích xuất đúng trường `message` từ response, KHÔNG
+BAO GIỜ in nguyên văn `trace`/`args`/header. Sự cố lộ khoá KHÔNG đến từ code
+production, mà từ một **script chẩn đoán tạm thời** (viết ngoài repo, đã bị
+xoá sau khi dùng) tự gọi `httpx` trực tiếp và in `resp.json()` nguyên văn —
+bỏ qua hoàn toàn các lớp `_call()` an toàn đã có sẵn.
+
+### 13.2 Đã thêm — lớp phòng thủ THÊM (không thay thế cách làm cũ)
+
+`server/secret_redaction.py` (mới):
+- `loc_bo_de_qui(du_lieu)` — duyệt đệ quy dict/list, thay giá trị của các
+  TÊN TRƯỜNG nhạy cảm đã biết (`SECRET_KEY_NAMES`, so khớp CHÍNH XÁC không
+  phải substring — tránh xoá nhầm `storage_key`/`avatar_key`/`cosmetic_key`
+  vốn là ID chứ không phải bí mật) bằng `<redacted>`.
+- `loc_bo_theo_gia_tri(van_ban)` — lọc theo MẪU (regex) bất kể tên trường:
+  khoá Appwrite dạng `standard_<hex dài>`, header `Bearer <token>`, JWT —
+  bắt đúng trường hợp đã xảy ra (bí mật nằm trong `args[2]`, một vị trí
+  không tên, không thể liệt kê hết trước).
+- `thong_diep_loi_an_toan(body, status_code)` — hàm DÙNG CHUNG mới cho mọi
+  script/adapter tương lai, thay vì mỗi nơi tự viết lại logic trích message.
+
+Đã nối `thong_diep_loi_an_toan` vào cả 6 file kể trên (thay logic trích
+`message` cục bộ bằng lời gọi hàm dùng chung) — hành vi quan sát được
+KHÔNG đổi cho lỗi bình thường, chỉ thêm một lớp lọc theo mẫu phòng khi
+`message` vô tình chứa chuỗi giống bí mật.
+
+### 13.3 Kiểm tra các đường khác theo đúng danh sách yêu cầu
+
+- **subprocess/curl verbose**: quét toàn bộ `scripts/*.py`/`server/*.py` —
+  KHÔNG tìm thấy lời gọi `subprocess` nào chuyển secret qua tham số dòng
+  lệnh (rủi ro lộ qua danh sách tiến trình), KHÔNG tìm thấy `curl -v`/
+  `--verbose` nào trong repo.
+- **BYOP/OAuth token** (`image_byop_service.py`): đã xác nhận lại — thông
+  điệp lỗi (`ByopExchangeFailed`, ...) đều là chuỗi CỐ ĐỊNH viết tay, không
+  bao giờ nhúng body/token thật của Pollinations.
+- **Provider lỗi khác** (`image_provider_registry.py`,
+  `translation_provider_registry.py`): đã có `_thong_diep_loi_an_toan` kiểu
+  ánh xạ mã trạng thái → câu cố định, không đổi.
+
+### 13.4 Test hồi quy mới (`server/tests/test_secret_redaction.py`, 17 test)
+
+Quan trọng nhất: `test_tai_hien_su_co_that_apikey_trong_trace_long_nhau` —
+tái hiện CHÍNH XÁC hình dạng response đã gây rò rỉ thật (message ở ngoài,
+`apiKey` nằm sâu trong `trace[0]["args"][2][2]["apiKey"]`) và xác nhận giá
+trị bí mật không còn xuất hiện sau khi lọc. Cộng thêm test riêng cho từng
+loại được liệt kê: `X-Appwrite-Key`, `Authorization`, API key (cả hai cách
+viết), BYOP/OAuth token, khoá mã hoá, cookie/session — và một test xác nhận
+KHÔNG lọc nhầm trường ID hợp lệ có hậu tố `_key`.
+
+### 13.5 Quét lịch sử git (chỉ báo cáo LOẠI + đường dẫn, không giá trị)
+
+Quét toàn bộ lịch sử (`git log --all -p`) của nhánh này và các nhánh tổ tiên
+cho các dạng bí mật: khoá Appwrite (`standard_`/`console_` + hex dài), JWT,
+header `Bearer`, khối PEM private key, gán biến `*_KEY=`/`*_SECRET=`/
+`*_PASSWORD=`/`*_TOKEN=` có giá trị dài không phải placeholder, khoá AWS
+(`AKIA...`).
+
+**Kết quả: KHÔNG tìm thấy bí mật nào bị commit** trong toàn bộ lịch sử đã
+quét. Các chuỗi dạng "secret" duy nhất từng xuất hiện trong lịch sử là dữ
+liệu test cố ý viết tay từ trước (vd `tok-secret-value` trong
+`tests/mocks.py` của desktop app — giá trị giả, không phải khoá thật).
+
+### 13.6 Kiểm chứng cuối
+
+Backend **2145/2145** (2128 cũ + 17 test mới), frontend **563/563**,
+typecheck/lint sạch, build thành công.
+

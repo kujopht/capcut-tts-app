@@ -28,6 +28,7 @@ import httpx
 
 from server.adapters import NotFoundError, PermissionDenied
 from server.config import AppwriteSettings
+from server.secret_redaction import thong_diep_loi_an_toan
 from server.domain import now_iso
 from server.translation import (
     TERMINAL_STATUSES,
@@ -409,14 +410,12 @@ class AppwriteTranslationStore:
         if response.status_code == 404:
             raise NotFoundError("Không tìm thấy bản ghi.")
         if response.status_code >= 400:
-            message = f"Appwrite trả về lỗi {response.status_code}."
             try:
                 body = response.json()
-                if isinstance(body, dict) and body.get("message"):
-                    message = str(body["message"])
             except Exception:
-                pass
-            raise NotFoundError(message)
+                body = None
+            raise NotFoundError(
+                thong_diep_loi_an_toan(body, status_code=response.status_code))
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()

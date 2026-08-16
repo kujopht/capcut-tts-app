@@ -30,6 +30,10 @@ class Base(unittest.TestCase):
         self._storage = server_main.storage
         server_main.storage = LocalStorageAdapter(Path(tempfile.mkdtemp()))
         self._can_run = server_main._CAN_RUN_JOBS
+        # `/api/ready` cache la MODULE-LEVEL (xem docs/reports/appwrite-read-
+        # audit.md) — reset moi test, khac thi mot test doi `store` roi goi
+        # `/api/ready` co the doc nham ket qua da cache tu test truoc do.
+        server_main.reset_ready_cache_for_test()
         self.client = TestClient(server_main.app)
         self.token = self.client.post(
             "/api/auth/register",
@@ -389,6 +393,53 @@ class TestReadiness(Base):
                              "iterator phai duoc tieu thu, khong chi tao ra")
         finally:
             server_main.storage = that
+
+    def test_ready_khong_doc_lai_appwrite_trong_ttl(self):
+        """docs/reports/appwrite-read-audit.md — moi lan `/api/ready` cham
+        Appwrite it nhat mot lan doc BAO DAM (`get_stats` la getDocument theo
+        id, tinh phi ke ca khong tim thay). Nhieu lan goi lien tiep trong TTL
+        (mac dinh 5s) CHI duoc cham kho that MOT lan."""
+        da_goi = {"n": 0}
+        goc = server_main.store.get_stats
+
+        def dem(user_id):
+            da_goi["n"] += 1
+            return goc(user_id)
+
+        server_main.store.get_stats = dem
+        try:
+            r1 = self.client.get("/api/ready")
+            r2 = self.client.get("/api/ready")
+            r3 = self.client.get("/api/ready")
+        finally:
+            server_main.store.get_stats = goc
+
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r1.json(), r2.json())
+        self.assertEqual(r1.json(), r3.json())
+        self.assertEqual(da_goi["n"], 1)
+
+    def test_ready_doc_lai_sau_khi_het_ttl(self):
+        """TTL het han thi PHAI cham kho lai — cache khong duoc phep che mai
+        mot su co that (vd Appwrite vua het han muc)."""
+        da_goi = {"n": 0}
+        goc = server_main.store.get_stats
+
+        def dem(user_id):
+            da_goi["n"] += 1
+            return goc(user_id)
+
+        server_main.store.get_stats = dem
+        that_ttl = server_main._READY_CACHE_TTL_SECONDS
+        server_main._READY_CACHE_TTL_SECONDS = 0.0  # het han ngay lap tuc
+        try:
+            self.client.get("/api/ready")
+            self.client.get("/api/ready")
+        finally:
+            server_main.store.get_stats = goc
+            server_main._READY_CACHE_TTL_SECONDS = that_ttl
+
+        self.assertEqual(da_goi["n"], 2)
 
 
 if __name__ == "__main__":

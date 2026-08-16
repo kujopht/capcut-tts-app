@@ -10,6 +10,8 @@ khong tao vat pham trung) nam o MOT cho.
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from server.domain import now_iso
@@ -525,6 +527,50 @@ def _the_rieng_cho_nguoi_xem(store: Any, identity: Any, storage: Any,
     return _the_bang_xep_hang(viewer_id, xp, hang, True, ho_so, vat_pham)
 
 
+class _XpEarnedSinceCache:
+    """Cache TTL ngan cho `store.xp_earned_since()` — xem
+    `docs/reports/appwrite-read-audit.md`: day la nguyen nhan RO RANG NHAT
+    trong dot kiem tra doc Appwrite — moi lan mo tab "tuan nay" cua bang xep
+    hang quet LAI TOAN BO nhat ky XP tu dau tuan, khong cache gi ca. Nhieu
+    nguoi xem trong vai giay (hoac mot nguoi doi tab qua lai) nhan ban tao
+    lai y het nhau tu Appwrite moi lan.
+
+    Khong can tuoi tung giay: bang xep hang "tuan nay" xem duoc cham vai chuc
+    giay khong sao — TTL mac dinh 60s. Khoa cache la `since_iso` (moc dau
+    tuan) nen tu chuyen sang tuan moi ma khong can don dep thu cong; chi giu
+    toi da 4 muc (~1 thang) de khong phinh vo han qua nhieu lan doi tuan.
+    """
+
+    def __init__(self, *, ttl_seconds: float = 60.0) -> None:
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+        self._cache: Dict[str, Tuple[Dict[str, int], float]] = {}
+
+    def lay(self, store: Any, since_iso: str) -> Dict[str, int]:
+        with self._lock:
+            hit = self._cache.get(since_iso)
+            if hit is not None and time.monotonic() - hit[1] < self._ttl:
+                return hit[0]
+        ket_qua = store.xp_earned_since(since_iso)
+        with self._lock:
+            self._cache[since_iso] = (ket_qua, time.monotonic())
+            if len(self._cache) > 4:
+                cu_nhat = min(self._cache, key=lambda k: self._cache[k][1])
+                del self._cache[cu_nhat]
+        return ket_qua
+
+
+#: Instance dung chung o cap module — MOT tien trinh backend chia se MOT
+#: cache, giong tinh than `image_community_catalogue.CommunityCatalogueCache`.
+_xp_earned_since_cache = _XpEarnedSinceCache()
+
+
+def reset_xp_earned_since_cache_for_test() -> None:
+    """CHI dung trong test — xoa cache de moi test doc lap voi nhau."""
+    global _xp_earned_since_cache
+    _xp_earned_since_cache = _XpEarnedSinceCache()
+
+
 def leaderboard_all_time(store: Any, identity: Any, storage: Any = None, *,
                          limit: int, offset: int, viewer_id: str = "") -> dict:
     """
@@ -585,8 +631,13 @@ def leaderboard_weekly(store: Any, identity: Any, storage: Any = None, *,
     phai XP-trong-tuan) — mot nguoi moi vao co the dan dau tuan nay nhung
     van o bac thap, va do la dieu dung, khong phai loi. Lay qua MOT truy
     van hang loat (`store.get_progress_by_ids`), khong phai N+1.
+
+    `store.xp_earned_since()` di qua `_XpEarnedSinceCache` (TTL 60s) — day
+    la duong quet TOAN BO nhat ky XP tu dau tuan, va khong cache no la
+    nguyen nhan doc Appwrite ro rang nhat tim duoc trong dot kiem tra (xem
+    `docs/reports/appwrite-read-audit.md`).
     """
-    theo_nguoi = store.xp_earned_since(since_iso)
+    theo_nguoi = _xp_earned_since_cache.lay(store, since_iso)
     sap = sorted(theo_nguoi.items(), key=lambda kv: (-kv[1], kv[0]))
     tong = len(sap)
     trang = sap[offset:offset + max(0, limit)]

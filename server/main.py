@@ -622,18 +622,19 @@ def health() -> Dict[str, Any]:
     }
 
 
-@app.get("/api/ready")
-def ready() -> Response:
-    """
-    READINESS: cac phu thuoc co that su dung duoc khong.
+#: TTL cache cho `/api/ready` — xem docs/reports/appwrite-read-audit.md.
+#: Moi request that chua qua duong nay deu gay it nhat MOT lan doc Appwrite
+#: bao dam (`store.get_stats("__readiness__")` la getDocument-theo-id, tinh
+#: phi ke ca khi khong tim thay). Mot uptime-monitor/health-probe ben ngoai
+#: goi lai nhanh hon vai giay se nhan LAI ket qua vua tinh thay vi doc lai.
+#: KHONG anh huong `/api/health` (khong cham Appwrite/R2, xem docstring rieng).
+_READY_CACHE_TTL_SECONDS = float(os.environ.get("FAS_READY_CACHE_TTL_SECONDS", "5"))
+_ready_cache: Optional[Tuple[Dict[str, Any], bool, float]] = None
 
-    Tra 200 khi ca kho metadata lan kho file deu tra loi; 503 khi khong. Nen
-    tang hosting dung duong nay de quyet dinh co dua traffic vao hay chua —
-    khac han `/api/health`, cai chi noi tien trinh con song.
 
-    Chi dung thao tac DOC, va khong bao gio tra ve gia tri bi mat: chi ten kho
-    va dat/khong dat.
-    """
+def _tinh_readiness() -> Tuple[Dict[str, Any], bool]:
+    """Phan THAT SU cham Appwrite/R2 cua `/api/ready` — tach rieng khoi cache
+    de test goi truc tiep duoc ma khong phai dung thoi gian that."""
     ket_qua: Dict[str, Any] = {
         "service": "fanfic-audio-api",
         "version": app.version,
@@ -679,6 +680,38 @@ def ready() -> Response:
             }
 
     ket_qua["status"] = "ready" if tot else "not_ready"
+    return ket_qua, tot
+
+
+def reset_ready_cache_for_test() -> None:
+    """CHI dung trong test — xoa cache de moi test doc lap voi nhau."""
+    global _ready_cache
+    _ready_cache = None
+
+
+@app.get("/api/ready")
+def ready() -> Response:
+    """
+    READINESS: cac phu thuoc co that su dung duoc khong.
+
+    Tra 200 khi ca kho metadata lan kho file deu tra loi; 503 khi khong. Nen
+    tang hosting dung duong nay de quyet dinh co dua traffic vao hay chua —
+    khac han `/api/health`, cai chi noi tien trinh con song.
+
+    Chi dung thao tac DOC, va khong bao gio tra ve gia tri bi mat: chi ten kho
+    va dat/khong dat.
+
+    Ket qua duoc cache TTL ngan (`_READY_CACHE_TTL_SECONDS`, mac dinh 5s) —
+    xem ghi chu o `_ready_cache`.
+    """
+    global _ready_cache
+    now = time.monotonic()
+    if _ready_cache is not None and now - _ready_cache[2] < _READY_CACHE_TTL_SECONDS:
+        ket_qua, tot, _ = _ready_cache
+    else:
+        ket_qua, tot = _tinh_readiness()
+        _ready_cache = (ket_qua, tot, now)
+
     return Response(
         content=json.dumps(ket_qua, ensure_ascii=False),
         media_type="application/json",

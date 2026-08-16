@@ -23,6 +23,7 @@ from server.gamification_service import (
     open_reward_pack,
     record_daily_read,
     record_quest_event,
+    reset_xp_earned_since_cache_for_test,
     streak_hien_thi,
     sync_achievements,
 )
@@ -313,6 +314,11 @@ class LeaderboardServiceTest(unittest.TestCase):
     def setUp(self):
         self.store = MockGamificationStore()
         self.identity = MockIdentityAdapter()
+        # Cache TTL cua xp_earned_since() la MODULE-LEVEL (dung chung mot
+        # tien trinh) — bat buoc reset giua cac test, khong thi mot test
+        # dung LAI cung `since_iso` voi test truoc se doc nham ket qua da
+        # cache cua store CU (xem test_weekly_cache_khong_ro_ri_qua_cac_lan_goi).
+        reset_xp_earned_since_cache_for_test()
 
     def test_all_time_sap_giam_dan_va_danh_dau_nguoi_xem(self):
         u1 = self.identity.register("u1@x.com", "MatKhau123", "Một")
@@ -384,6 +390,56 @@ class LeaderboardServiceTest(unittest.TestCase):
         self.assertEqual(lb_tuan["items"][0]["avatar_url"],
                          "https://cdn.test/avt/u1.png?sig=abc")
         self.assertEqual(lb_tuan["items"][0]["title"], hang_dau["title"])
+
+    def test_weekly_khong_quet_lai_nhat_ky_xp_trong_ttl(self):
+        """docs/reports/appwrite-read-audit.md — nguyen nhan doc Appwrite ro
+        rang nhat: moi lan mo tab 'tuan nay' quet LAI toan bo nhat ky XP.
+        Hai lan goi cung `since_iso` trong TTL CHI duoc goi `xp_earned_since`
+        MOT lan xuong kho that."""
+        u1 = self.identity.register("u1@x.com", "MatKhau123", "Một")
+        award_xp(self.store, u1.user_id, "publish_first_novel",
+                source_kind="novel", source_id=u1.user_id)
+
+        so_lan_goi = {"n": 0}
+        goc = self.store.xp_earned_since
+
+        def dem(since_iso):
+            so_lan_goi["n"] += 1
+            return goc(since_iso)
+
+        self.store.xp_earned_since = dem
+
+        since_iso = "2000-01-01T00:00:00+00:00"
+        lb1 = leaderboard_weekly(self.store, self.identity, limit=10, offset=0,
+                                 since_iso=since_iso, viewer_id=u1.user_id)
+        lb2 = leaderboard_weekly(self.store, self.identity, limit=10, offset=0,
+                                 since_iso=since_iso, viewer_id=u1.user_id)
+
+        self.assertEqual(so_lan_goi["n"], 1)
+        self.assertEqual(lb1["items"], lb2["items"])
+
+    def test_weekly_since_iso_khac_nhau_khong_dung_chung_cache(self):
+        """Doi tuan (since_iso khac) PHAI goi lai kho that — cache khong
+        duoc phep tra ve du lieu cua tuan khac."""
+        u1 = self.identity.register("u1@x.com", "MatKhau123", "Một")
+        award_xp(self.store, u1.user_id, "publish_first_novel",
+                source_kind="novel", source_id=u1.user_id)
+
+        so_lan_goi = {"n": 0}
+        goc = self.store.xp_earned_since
+
+        def dem(since_iso):
+            so_lan_goi["n"] += 1
+            return goc(since_iso)
+
+        self.store.xp_earned_since = dem
+
+        leaderboard_weekly(self.store, self.identity, limit=10, offset=0,
+                           since_iso="2000-01-01T00:00:00+00:00", viewer_id=u1.user_id)
+        leaderboard_weekly(self.store, self.identity, limit=10, offset=0,
+                           since_iso="2099-01-01T00:00:00+00:00", viewer_id=u1.user_id)
+
+        self.assertEqual(so_lan_goi["n"], 2)
 
 
 if __name__ == "__main__":

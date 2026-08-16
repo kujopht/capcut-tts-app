@@ -86,6 +86,22 @@ PREVIEW_CHARS = 80
 FANOUT_TOI_DA = 500
 
 
+def _duong_nguon_binh_luan(target_kind: str, post_id: str) -> str:
+    """
+    Duong toi NGUON cua mot binh luan, theo `target_kind` cua no.
+
+    DUNG O HAI CHO: `admin_browse_comments` (duyet toan he thong) va
+    `admin_reports` (hang doi bao cao, khi doi tuong bi bao cao la mot binh
+    luan) — tach mot ham rieng de hai duong nay khong lech nhau khi Phan 4
+    them loai thu ba (`animation_episode`).
+    """
+    if target_kind == "chapter":
+        return f"/chapters/{post_id}"
+    if target_kind == "animation_episode":
+        return f"/animation/watch/{post_id}"
+    return f"/posts/{post_id}"
+
+
 class SocialService:
     """
     Theo doi, bai dang, thich, binh luan, thong bao, bao cao.
@@ -544,6 +560,12 @@ class SocialService:
         except NotFoundError:
             raise NotFoundError("Không tìm thấy tập.")
         if series.state is not PublishState.PUBLISHED:
+            raise NotFoundError("Không tìm thấy tập.")
+        # Kiem duyet (Phase 4, Admin Control Center V2) — series/tap bi quan
+        # tri go xuong thi KHONG xem/binh luan duoc nua, du `state` van la
+        # published (xem docstring `AnimationSeries.moderation_state`).
+        if (series.moderation_state is not ContentState.VISIBLE
+                or tap.moderation_state is not ContentState.VISIBLE):
             raise NotFoundError("Không tìm thấy tập.")
         return tap, series
 
@@ -1100,10 +1122,9 @@ class SocialService:
             if r.target_kind == "post":
                 duong_nguon = f"/posts/{r.target_id}"
             elif noi_dung is not None:
-                # Binh luan: nguon la BAI hoac CHUONG chua no.
-                duong_nguon = (f"/chapters/{noi_dung.get('post_id')}"
-                               if noi_dung.get("target_kind") == "chapter"
-                               else f"/posts/{noi_dung.get('post_id')}")
+                # Binh luan: nguon la BAI/CHUONG/TAP ANIMATION chua no.
+                duong_nguon = _duong_nguon_binh_luan(
+                    noi_dung.get("target_kind") or "", noi_dung.get("post_id"))
             muc.append({
                 **r.to_dict(),
                 "content": noi_dung,
@@ -1221,16 +1242,157 @@ class SocialService:
             "total": tong, "limit": limit, "offset": offset,
         }
 
+    # ==================================================== ANIMATION (Phase 4)
+    #
+    # Kiem duyet Animation (Admin Control Center V2, Phase 4) — DUNG
+    # `self._animation_store` (kho RIENG, xem docstring dau `animation_domain.py`)
+    # CONG VOI `self._store` (chu so huu qua `identity`, truyen lien ket qua
+    # `novels_by_ids`, nhat ky kiem duyet qua `record_event`). Cung mot
+    # nguyen tac voi kiem duyet bai/binh luan o tren: mot lop DUY NHAT, moi
+    # thao tac ghi deu qua day, khong route nao cham thang kho.
+
+    def admin_animation_series(self, *, query: str = "", state: str = "",
+                               include_removed: bool = True,
+                               sort: str = "newest", limit: int = 25,
+                               offset: int = 0) -> Dict[str, Any]:
+        """
+        Danh sach series cho khu quan tri — MOI chu so huu, phan trang/loc/
+        sap xep o phia kho (khong tai het roi cat o Python).
+
+        `include_removed=True` MAC DINH (khac `find_series` cong khai, luon
+        `False`): quan tri CAN thay ca series da bi go de xem lai/phuc hoi —
+        an no di la mat kha nang kiem duyet chinh no.
+        """
+        items, total = self._animation_store.find_series(
+            query=query, state=state, include_removed=include_removed,
+            sort=sort, limit=limit, offset=offset)
+        owner_ids = [s.owner_id for s in items]
+        novel_ids = [s.related_novel_id for s in items if s.related_novel_id]
+        so_tap = self._animation_store.episode_counts([s.series_id for s in items])
+        ho_so = self._identity.profiles_by_ids(owner_ids)
+        truyen = self._store.novels_by_ids(novel_ids) if novel_ids else {}
+
+        rows: List[Dict[str, Any]] = []
+        for s in items:
+            d = s.to_dict()
+            chu = ho_so.get(s.owner_id)
+            d["owner"] = ({"display_name": chu.display_name,
+                           "username": chu.username} if chu else None)
+            d["episode_count"] = so_tap.get(s.series_id, 0)
+            rn = truyen.get(s.related_novel_id) if s.related_novel_id else None
+            d["related_novel"] = (
+                {"novel_id": rn.novel_id, "title": rn.title} if rn else None)
+            rows.append(d)
+        return {"series": rows, "total": total, "limit": limit, "offset": offset}
+
+    def admin_animation_series_detail(self, series_id: str) -> Optional[Dict[str, Any]]:
+        """Chi tiet MOT series: metadata, chu so huu, truyen lien ket, TOAN
+        BO tap (ke ca da go — `include_removed=True`), va lich su kiem duyet
+        cua CHINH series nay (khong phai cua tung tap — xem docstring
+        `_kiem_duyet_animation` ve ly do khong lam N+1 o day)."""
+        try:
+            series = self._animation_store.get_series(series_id)
+        except NotFoundError:
+            return None
+        episodes = self._animation_store.list_episodes(series_id, include_removed=True)
+        chu = self._identity.profiles_by_ids([series.owner_id]).get(series.owner_id)
+        novel = None
+        if series.related_novel_id:
+            rn = self._store.novels_by_ids(
+                [series.related_novel_id]).get(series.related_novel_id)
+            if rn is not None:
+                novel = {"novel_id": rn.novel_id, "title": rn.title,
+                        "state": rn.state.value}
+        su_kien, _ = self._store.list_events(
+            target_type="animation_series", target_id=series_id, limit=25)
+        return {
+            "series": series.to_dict(),
+            "owner": ({"display_name": chu.display_name, "username": chu.username}
+                      if chu else None),
+            "related_novel": novel,
+            "episodes": [e.to_dict() for e in episodes],
+            "events": [e.to_dict() for e in su_kien],
+        }
+
+    def unpublish_animation_series(self, admin: Profile, series_id: str, *,
+                                   reason: str, actor_role: str = "") -> Dict[str, Any]:
+        """
+        Go xuong MOT series — CHAN toan bo hien thi cong khai cua no VA moi
+        tap ben trong (xem `_may_read_series`/`_tap_cong_khai`), KHONG dong
+        toi `state` xuat ban cua chu so huu (xem docstring
+        `AnimationSeries.moderation_state`).
+
+        BAT BUOC ly do — khac `remove_post`/`remove_comment` (tuy chon):
+        Phase 4 doi hoi ro rang moi lan go mot san pham xem PHAI co ly do
+        ghi lai, vi day la noi dung cua tac gia khac, tac dong lon hon mot
+        binh luan don le.
+
+        `actor_role` do NGUOI GOI (route) tinh qua `Settings.admin_role_of`
+        va truyen vao — tang nay khong co `settings`, cung quy uoc voi
+        `CreatorService.suspend(..., actor_role=...)`.
+        """
+        ly_do = clean_text(reason, toi_da=MODERATION_NOTE_MAX_CHARS, ten="Lý do")
+        try:
+            series = self._animation_store.admin_unpublish_series(
+                series_id, removed_by=admin.user_id, reason=ly_do)
+        except NotFoundError:
+            raise NotFoundError("Không tìm thấy series animation.")
+        self._ghi_nhat_ky(
+            "content_unpublish", target_type="animation_series",
+            target_id=series_id, actor_id=admin.user_id,
+            actor_role=actor_role, note=ly_do)
+        return series.to_dict()
+
+    def restore_animation_series(self, admin: Profile, series_id: str, *,
+                                 actor_role: str = "") -> Dict[str, Any]:
+        try:
+            series = self._animation_store.admin_restore_series(series_id)
+        except NotFoundError:
+            raise NotFoundError("Không tìm thấy series animation.")
+        self._ghi_nhat_ky(
+            "content_restore", target_type="animation_series",
+            target_id=series_id, actor_id=admin.user_id, actor_role=actor_role)
+        return series.to_dict()
+
+    def unpublish_animation_episode(self, admin: Profile, episode_id: str, *,
+                                    reason: str, actor_role: str = "") -> Dict[str, Any]:
+        """Go MOT tap rieng le — KHONG dong toi series cha hay cac tap khac.
+        Dung khi chi mot tap vi pham, khong phai ca series."""
+        ly_do = clean_text(reason, toi_da=MODERATION_NOTE_MAX_CHARS, ten="Lý do")
+        try:
+            tap = self._animation_store.admin_unpublish_episode(
+                episode_id, removed_by=admin.user_id, reason=ly_do)
+        except NotFoundError:
+            raise NotFoundError("Không tìm thấy tập animation.")
+        self._ghi_nhat_ky(
+            "content_unpublish", target_type="animation_episode",
+            target_id=episode_id, actor_id=admin.user_id,
+            actor_role=actor_role, note=ly_do)
+        return tap.to_dict()
+
+    def restore_animation_episode(self, admin: Profile, episode_id: str, *,
+                                  actor_role: str = "") -> Dict[str, Any]:
+        try:
+            tap = self._animation_store.admin_restore_episode(episode_id)
+        except NotFoundError:
+            raise NotFoundError("Không tìm thấy tập animation.")
+        self._ghi_nhat_ky(
+            "content_restore", target_type="animation_episode",
+            target_id=episode_id, actor_id=admin.user_id, actor_role=actor_role)
+        return tap.to_dict()
+
     def admin_browse_comments(self, *, target_kind: str = "",
                               limit: int = 25,
                               offset: int = 0) -> Dict[str, Any]:
         """
-        Duyet binh luan TOAN HE THONG cho khu quan tri, tach duoc hai loai:
-        binh luan bai dang (`target_kind=""`) va binh luan chuong ("chapter").
+        Duyet binh luan TOAN HE THONG cho khu quan tri, tach duoc BA loai:
+        binh luan bai dang (`target_kind=""`), binh luan chuong ("chapter"),
+        va binh luan tap Animation ("animation_episode", Phase 4).
 
-        Hai loai dan toi hai noi khac nhau, nen nguoi kiem duyet can mot duong
-        toi NGUON: bai thi `/posts/{id}`, chuong thi `/chapters/{id}` — tra
-        `context_url` san thay vi bat giao dien tu suy.
+        Ba loai dan toi ba noi khac nhau, nen nguoi kiem duyet can mot duong
+        toi NGUON: bai thi `/posts/{id}`, chuong thi `/chapters/{id}`, tap
+        Animation thi `/animation/watch/{id}` — tra `context_url` san thay vi
+        bat giao dien tu suy.
         """
         ds, tong = self._store.list_comments_all(
             target_kind=target_kind, limit=limit, offset=offset)
@@ -1241,15 +1403,13 @@ class SocialService:
                 **c.to_dict(),
                 "author": the.get(c.author_user_id),
                 "open_reports": int(bao_cao.get(c.comment_id, 0)),
-                "context_url": (f"/chapters/{c.post_id}"
-                                if c.target_kind == "chapter"
-                                else f"/posts/{c.post_id}"),
+                "context_url": _duong_nguon_binh_luan(c.target_kind, c.post_id),
             } for c in ds],
             "total": tong, "limit": limit, "offset": offset,
         }
 
     def social_overview(self) -> Dict[str, Any]:
-        """So lieu xa hoi cho trang tong quan quan tri. Bon phep dem."""
+        """So lieu xa hoi cho trang tong quan quan tri. Nam phep dem."""
         return {
             "open_reports": self._store.count_reports(ReportStatus.OPEN),
             "total_reports": self._store.count_reports(),
@@ -1258,9 +1418,19 @@ class SocialService:
             "removed_posts": (self._store.list_posts(include_removed=True,
                                                      limit=1)[1]
                               - self._store.list_posts(limit=1)[1]),
+            # Admin Control Center V2, A1 — bang dieu khien tong quat.
+            "total_comments": self._store.count_comments(),
         }
 
-    def _ghi_nhat_ky(self, action: str, *, target_user_id: str, actor_id: str,
+    def admin_count_comments(self, *, created_after: str = "") -> int:
+        """Bo dem binh luan BI CHAN theo ngay tao — trang phan tich chi tiet
+        (Phase 7), TACH khoi `social_overview` (bang dieu khien chinh phai
+        nhe, xem muc 6 handoff)."""
+        return self._store.count_comments(created_after=created_after)
+
+    def _ghi_nhat_ky(self, action: str, *, target_user_id: str = "",
+                     actor_id: str, actor_role: str = "",
+                     target_type: str = "", target_id: str = "",
                      note: str = "") -> None:
         """
         Moi thao tac kiem duyet xa hoi vao CUNG mot nhat ky voi kiem duyet tac
@@ -1269,9 +1439,15 @@ class SocialService:
         Mot nhat ky, khong phai hai: nguoi doc lai mot vu viec muon thay MOI thu
         da xay ra voi mot nguoi, theo thu tu — chu khong phai ghep hai danh sach
         o hai man hinh.
+
+        `actor_role`/`target_type`/`target_id` (Phase 4, Admin Control Center
+        V2) — MO RONG cho kiem duyet Animation, nam doi tuong KHONG PHAI la
+        user (xem `ModerationEvent.target_type`). Mac dinh rong, khong doi
+        hanh vi cac loi goi cu (kiem duyet bai/binh luan, luon la user).
         """
         self._store.record_event(ModerationEvent(
             action=action, target_user_id=target_user_id, actor_id=actor_id,
+            actor_role=actor_role, target_type=target_type, target_id=target_id,
             note=note[:MODERATION_NOTE_MAX_CHARS]))
 
     # ==================================================================== HA TANG

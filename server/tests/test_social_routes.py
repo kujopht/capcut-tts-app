@@ -410,5 +410,136 @@ class KiemDuyetQuaHttpTest(Nen):
         self.assertNotIn("removed_reason", cong_khai)
 
 
+class KiemDuyetAnimationTest(Nen):
+    """
+    Kiem duyet Animation qua HTTP (Phase 4, Admin Control Center V2).
+
+    `Nen.setUp` khong noi `animation_store` — noi lai o day, va RESET no moi
+    bai (khac `main.store`, `main.animation_store` la mot bien module SONG
+    xuyen suot tien trinh test, khong tu sach giua cac bai neu khong reset).
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        from server.animation_domain import AnimationEpisode, AnimationSeries
+        from server.animation_store import MockAnimationStore
+        from server.social_service import SocialService
+
+        main.animation_store = MockAnimationStore()
+        main.social = SocialService(main.identity, main.store, main.storage,
+                                    animation_store=main.animation_store)
+
+        self.series = main.animation_store.create_series(
+            AnimationSeries(owner_id=self.an.user_id, title="Series Test"))
+        main.animation_store.publish_series(self.series.series_id, self.an.user_id)
+        self.tap = main.animation_store.create_episode(AnimationEpisode(
+            series_id=self.series.series_id, owner_id=self.an.user_id,
+            title="Tập 1", external_id="a" * 11))
+
+    DUONG_QUAN_TRI = [
+        ("get", "/api/admin/animation/series"),
+    ]
+
+    def test_khach_vang_lai_nhan_401(self):
+        for method, duong in self.DUONG_QUAN_TRI:
+            with self.subTest(duong=duong):
+                self.assertEqual(self._goi(method, duong).status_code, 401)
+
+    def test_nguoi_dung_thuong_nhan_403(self):
+        for method, duong in self.DUONG_QUAN_TRI:
+            with self.subTest(duong=duong):
+                r = self._goi(method, duong, headers=self.tk_binh)
+                self.assertEqual(r.status_code, 403)
+
+    def test_quan_tri_thay_danh_sach_va_chi_tiet(self):
+        r = self.client.get("/api/admin/animation/series", headers=self.tk_qt)
+        self.assertEqual(r.status_code, 200, r.text)
+        d = r.json()
+        self.assertEqual(d["total"], 1)
+        hang = d["series"][0]
+        self.assertEqual(hang["owner"]["display_name"], "An")
+        self.assertEqual(hang["episode_count"], 1)
+
+        r = self.client.get(f"/api/admin/animation/series/{self.series.series_id}",
+                            headers=self.tk_qt)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.json()["episodes"]), 1)
+
+    def test_khong_ton_tai_tra_404(self):
+        r = self.client.get("/api/admin/animation/series/khong_co",
+                            headers=self.tk_qt)
+        self.assertEqual(r.status_code, 404)
+
+    def test_go_xuong_BAT_BUOC_ly_do(self):
+        r = self.client.post(
+            f"/api/admin/animation/series/{self.series.series_id}/unpublish",
+            json={"reason": ""}, headers=self.tk_qt)
+        self.assertEqual(r.status_code, 400)
+
+    def test_go_va_phuc_hoi_series(self):
+        r = self.client.post(
+            f"/api/admin/animation/series/{self.series.series_id}/unpublish",
+            json={"reason": "Vi phạm bản quyền"}, headers=self.tk_qt)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["series"]["moderation_state"], "removed")
+
+        # Cong khai: 404 ngay sau do.
+        cong_khai = self.client.get(
+            f"/api/animation/series/{self.series.series_id}")
+        self.assertEqual(cong_khai.status_code, 404)
+
+        r = self.client.post(
+            f"/api/admin/animation/series/{self.series.series_id}/restore",
+            json={}, headers=self.tk_qt)
+        self.assertEqual(r.json()["series"]["moderation_state"], "visible")
+        cong_khai2 = self.client.get(
+            f"/api/animation/series/{self.series.series_id}")
+        self.assertEqual(cong_khai2.status_code, 200)
+
+    def test_chu_so_huu_KHONG_hoan_tac_duoc_lenh_go_bang_publish_lai(self):
+        """Cot loi cua thiet ke: `moderation_state` la truc RIENG voi `state`
+        — chu so huu tu bam Xuat ban lai KHONG mo lai duoc noi dung da bi
+        quan tri go xuong."""
+        self.client.post(
+            f"/api/admin/animation/series/{self.series.series_id}/unpublish",
+            json={"reason": "Vi phạm"}, headers=self.tk_qt)
+        r = self.client.post(
+            f"/api/animation/series/{self.series.series_id}/publish",
+            headers=self.tk_an)
+        self.assertEqual(r.status_code, 200)  # chinh chu van goi duoc route
+        cong_khai = self.client.get(
+            f"/api/animation/series/{self.series.series_id}")
+        self.assertEqual(cong_khai.status_code, 404)  # nhung van khong xem duoc
+
+    def test_go_rieng_mot_tap_khong_dong_series(self):
+        r = self.client.post(
+            f"/api/admin/animation/episodes/{self.tap.episode_id}/unpublish",
+            json={"reason": "Sai nội dung"}, headers=self.tk_qt)
+        self.assertEqual(r.status_code, 200, r.text)
+
+        cong_khai = self.client.get(
+            f"/api/animation/series/{self.series.series_id}").json()
+        self.assertEqual(cong_khai["episodes"], [])   # tap bi go, an di
+
+        r = self.client.post(
+            f"/api/admin/animation/episodes/{self.tap.episode_id}/restore",
+            json={}, headers=self.tk_qt)
+        self.assertEqual(r.status_code, 200)
+        cong_khai2 = self.client.get(
+            f"/api/animation/series/{self.series.series_id}").json()
+        self.assertEqual(len(cong_khai2["episodes"]), 1)
+
+    def test_thao_tac_vao_nhat_ky_CHUNG(self):
+        self.client.post(
+            f"/api/admin/animation/series/{self.series.series_id}/unpublish",
+            json={"reason": "x"}, headers=self.tk_qt)
+        r = self.client.get("/api/admin/events", headers=self.tk_qt)
+        su_kien = r.json()["events"][0]
+        self.assertEqual(su_kien["action"], "content_unpublish")
+        self.assertEqual(su_kien["target_type"], "animation_series")
+        self.assertEqual(su_kien["target_id"], self.series.series_id)
+        self.assertEqual(su_kien["actor_id"], self.qt.user_id)
+
+
 if __name__ == "__main__":
     unittest.main()

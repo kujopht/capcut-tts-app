@@ -25,7 +25,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from server.domain import PublishState, new_id, now_iso
+from server.domain import ContentState, PublishState, new_id, now_iso
 
 
 class AnimationSource(str, Enum):
@@ -119,6 +119,22 @@ class AnimationSeries:
     state: PublishState = PublishState.DRAFT
     tags: List[str] = field(default_factory=list)
     related_novel_id: str = ""
+    #: Kiem duyet (Phase 4, Admin Control Center V2) — TACH BACH voi `state`
+    #: o tren. `state` la truc XUAT BAN cua CHU SO HUU (draft/published, ho
+    #: tu doi duoc qua `/api/animation/series/{id}/publish|unpublish`).
+    #: `moderation_state` la truc GO XUONG cua QUAN TRI — cung khai niem voi
+    #: `Post`/`Comment` (xem `ContentState`), CHU SO HUU KHONG doi duoc truong
+    #: nay qua bat ky route nao cua ho. Neu chu so huu tu bam "Xuat ban" lai
+    #: sau khi bi go, series VAN an vi `moderation_state` con la REMOVED —
+    #: mot lan go xuong khong the bi hoan tac boi chinh nguoi bi go.
+    #:
+    #: Mac dinh VISIBLE: MOI series da ton tai truoc Phase 4 (schema chua co
+    #: cot nay) duoc doc thanh VISIBLE, giu nguyen hien trang cong khai.
+    moderation_state: ContentState = ContentState.VISIBLE
+    #: user_id cua nguoi go xuong. Rong = chua bi go (hoac da duoc phuc hoi).
+    removed_by: str = ""
+    #: Ly do go xuong — hien duoc cho quan tri xem lai, KHONG ra API cong khai.
+    removed_reason: str = ""
     series_id: str = field(default_factory=lambda: new_id("ani"))
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
@@ -133,6 +149,9 @@ class AnimationSeries:
             "state": self.state.value,
             "tags": list(self.tags),
             "related_novel_id": self.related_novel_id,
+            "moderation_state": self.moderation_state.value,
+            "removed_by": self.removed_by,
+            "removed_reason": self.removed_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -160,6 +179,15 @@ class AnimationEpisode:
     #: Giay — TUY CHON, do frontend ghi lai tu YouTube IFrame API sau lan phat
     #: dau (xem Phan 5I). `0` = chua biet, giao dien KHONG bia mot con so.
     duration_seconds: float = 0.0
+    #: Kiem duyet (Phase 4) — CUNG khai niem voi `AnimationSeries.moderation_state`
+    #: (xem docstring o do). `state` (PublishState) o tren HIEN TAI khong gac
+    #: hien thi cong khai nao ca (hien thi mot tap phu thuoc TOAN BO vao trang
+    #: thai series cha, xem `_may_read_series`/`AppwriteAnimationStore.
+    #: _owner_permissions`) — day la truc RIENG, that su co hieu luc, danh
+    #: cho quan tri go/phuc hoi TUNG TAP ma khong dong toi ca series.
+    moderation_state: ContentState = ContentState.VISIBLE
+    removed_by: str = ""
+    removed_reason: str = ""
     episode_id: str = field(default_factory=lambda: new_id("anep"))
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
@@ -175,6 +203,9 @@ class AnimationEpisode:
             "order_index": self.order_index,
             "state": self.state.value,
             "duration_seconds": self.duration_seconds,
+            "moderation_state": self.moderation_state.value,
+            "removed_by": self.removed_by,
+            "removed_reason": self.removed_reason,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

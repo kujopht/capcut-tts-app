@@ -56,5 +56,14 @@ edge-tts>=7.2.8,<8.0
 # toan ma hoa, dung thu vien da duoc kiem duyet rong rai.
 cryptography>=42.0,<44.0
 
+# --- Bat buoc: phan tich XML AN TOAN cho callback WebSub (Phase 6) ---
+# `server/youtube_websub.py` phan tich Atom XML nhan tu hub PubSubHubbub —
+# du lieu tu INTERNET, khong duoc tin. `xml.etree.ElementTree` cua thu vien
+# chuan KHONG chan duoc "billion laughs"/quadratic blowup (xem tai lieu
+# chinh thuc: https://docs.python.org/3/library/xml.html#xml-vulnerabilities)
+# — dung defusedxml (thu vien chuan cho van de nay) thay vi tu vet mot lop
+# chan rieng, cung triet ly voi `cryptography` o tren.
+defusedxml>=0.7.1,<0.8
+
 # --- Ngoai Python ---
 # ffmpeg phai co trong PATH de ghep cac doan MP3 (server/tts_bridge.py).

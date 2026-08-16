@@ -44,6 +44,7 @@ SECRET_KEY_NAMES = frozenset({
     "code_verifier", "code_challenge",
     "cookie", "cookies", "session_secret",
     "private_key", "byop_master_key", "openssl_key", "master_key",
+    "websub_secret", "hub.secret", "x-hub-signature",
 })
 
 #: Mau THEO GIA TRI (khong phu thuoc ten truong) — bat bi mat lot vao mot

@@ -19,17 +19,19 @@ import random
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, StringConstraints
 
 from server import tts_bridge
+from server import traffic_analytics
 from server.transcript import TRANSCRIPT_VERSION, build_transcript
 from server.translation_usage import usage_recorder
 from server.adapters import (
@@ -73,16 +75,27 @@ from server.gamification_service import (
 )
 from server.appwrite_gamification_store import build_gamification_store
 from server.appwrite_animation_store import build_animation_store
+from server.appwrite_trusted_source_store import build_trusted_source_store
 from server.animation_domain import (
     AnimationEpisode,
     AnimationSeries,
     AnimationSource,
     parse_youtube_id,
 )
+from server.trusted_source_service import (
+    DEFAULT_SCAN_PAGES,
+    MAX_SCAN_PAGES,
+    TrustedSourceError,
+    TrustedSourceService,
+)
+from server.youtube_client import YouTubeApiError, YouTubeConfigError
+from server.youtube_websub import MAX_NOTIFICATION_BYTES, WebSubConfigError
 from server.domain import (
+    AdminRole,
     AudioStamp,
     AudioTrack,
     Chapter,
+    ContentState,
     JobStatus,
     Novel,
     Profile,
@@ -105,6 +118,7 @@ from server.translation import (
     QuotaExceeded as TranslationQuotaExceeded,
     ManualEditWouldBeOverwritten,
     TranslationError,
+    TranslationJobStatus,
     UnsupportedFormat,
 )
 from server.translation_import import extract_text as _trich_van_ban_tep
@@ -195,6 +209,22 @@ gamification_store = build_gamification_store(settings)
 #: voi `store` (novels/chapters/tts) — xem docstring dau
 #: `server/animation_domain.py` ve vi sao Animation la mot san pham RIENG.
 animation_store = build_animation_store(settings)
+
+#: Kho Trusted Video Sources (Phase 5, Admin Control Center V2) — MOT the
+#: hien, DOC LAP hoan toan voi `store`/`animation_store` — ba bang RIENG
+#: (`trusted_sources`/`series_mappings`/`video_imports`), xem docstring dau
+#: `server/trusted_source_domain.py`.
+trusted_source_store = build_trusted_source_store(settings)
+
+#: Tang dich vu Trusted Video Sources (Phase 5) — noi YouTube Data API,
+#: `video_classifier`/`episode_parser`, `trusted_source_store` va
+#: `animation_store` (tao/doc `AnimationEpisode` that) gap nhau. `store`
+#: (KHONG phai `animation_store`) dung de ghi nhat ky kiem duyet — CUNG mot
+#: nhat ky voi kiem duyet Animation/xa hoi o tren.
+trusted_sources = TrustedSourceService(
+    trusted_source_store, animation_store, store,
+    youtube_api_key=settings.youtube_api_key,
+    websub_callback_base_url=settings.youtube_websub_callback_base_url)
 
 #: Tang service cua tang xa hoi. Cung `identity`/`store`/`storage` voi moi route
 #: khac — mot duong ghi duy nhat, va no la noi quyen/han muc/thong bao duoc
@@ -720,9 +750,18 @@ def _ho_so_tra_ve(profile: Profile) -> Dict[str, Any]:
     Kem `avatar_url` (ky lai moi lan doc) ben canh `avatar_key` da co trong
     `to_dict()` — CUNG ly do voi `is_admin`: trinh duyet khong co credential
     cua kho nen khong tu dung tu khoa duoc.
+
+    `admin_role` (Admin Control Center V2) la chuoi "none"/"moderator"/
+    "admin"/"owner" — giao dien dung de AN/HIEN cac muc trong sidebar quan
+    tri theo dung vai tro, nhung day CHI la goi y hien thi. Moi route
+    `/api/admin/*` van tu kiem lai qua `admin_profile`/`admin_or_owner_profile`/
+    `owner_profile` — mot nguoi sua `admin_role` bang tay trong DevTools van
+    nhan 403 y het truoc gio.
     """
+    vai_tro = settings.admin_role_of(profile.user_id)
     return {**profile.to_dict(),
-            "is_admin": profile.user_id in settings.admin_user_ids,
+            "is_admin": vai_tro != AdminRole.NONE,
+            "admin_role": vai_tro.value,
             "avatar_url": creators.avatar_url(profile)}
 
 
@@ -3056,8 +3095,19 @@ def _series_out(series: AnimationSeries) -> Dict[str, Any]:
 
 
 def _may_read_series(series: AnimationSeries, viewer: Optional[Profile]) -> bool:
-    """Cung logic voi `_may_read` (novel): da xuat ban thi ai cung xem duoc;
-    chua thi chi chu so huu."""
+    """
+    Cung logic voi `_may_read` (novel): da xuat ban thi ai cung xem duoc;
+    chua thi chi chu so huu.
+
+    Kiem duyet (Phase 4, Admin Control Center V2) THANG truoc tien: mot
+    series bi quan tri go xuong (`moderation_state == REMOVED`) thi 404 cho
+    TAT CA, KE CA CHINH CHU — cung hanh vi voi bai dang bi go
+    (`SocialService._bai_hien`). Chu so huu tu bam "Xuat ban" lai KHONG hoan
+    tac duoc lenh go nay, vi day la truc RIENG voi `state` — xem docstring
+    `AnimationSeries.moderation_state`.
+    """
+    if series.moderation_state is not ContentState.VISIBLE:
+        return False
     if series.state is PublishState.PUBLISHED:
         return True
     return viewer is not None and viewer.user_id == series.owner_id
@@ -3270,7 +3320,11 @@ def get_animation_episode(episode_id: str,
     Quyen doc bam theo SERIES CHA, giong `GET /api/chapters/{id}` voi truyen."""
     episode, series = _episode_with_series_or_404(episode_id)
     viewer = optional_profile(authorization)
-    if series is None or not _may_read_series(series, viewer):
+    # Quyen doc bam theo SERIES CHA (xem docstring ham), CONG THEM kiem duyet
+    # RIENG cua chinh tap do (Phase 4) — mot tap co the bi go xuong ma khong
+    # dong toi ca series.
+    if (series is None or not _may_read_series(series, viewer)
+            or episode.moderation_state is not ContentState.VISIBLE):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tập.")
 
     cac_tap = animation_store.list_episodes(episode.series_id)
@@ -3541,7 +3595,11 @@ def tiep_tuc(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
 
 def admin_profile(profile: Profile = Depends(current_profile)) -> Profile:
     """
-    Ho so cua nguoi goi, VA nguoi do phai la quan tri.
+    Ho so cua nguoi goi, VA nguoi do phai la quan tri — BAT KY muc nao trong
+    ba muc (OWNER/ADMIN/MODERATOR, xem `AdminRole` va `Settings.admin_role_of`,
+    Admin Control Center V2). Truoc ban V2 chi co mot muc phang; ham nay GIU
+    NGUYEN TEN va hai ma loi cu de moi route dang dung no khong phai doi gi,
+    chi rong dinh nghia "la quan tri" thanh "co bat ky vai tro nao trong ba".
 
     Hai ma khac nhau, va khac biet do la co y:
       401  chua dang nhap        -> `current_profile` nem
@@ -3551,10 +3609,66 @@ def admin_profile(profile: Profile = Depends(current_profile)) -> Profile:
     la mot nguoi quan tri that go nham tai khoan se khong hieu vi sao khong vao
     duoc. Khu nay khong bi mat, no chi bi khoa.
     """
-    if profile.user_id not in settings.admin_user_ids:
+    if settings.admin_role_of(profile.user_id) == AdminRole.NONE:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Khu vực quản trị.")
     return profile
+
+
+def owner_profile(profile: Profile = Depends(current_profile)) -> Profile:
+    """
+    CHI muc OWNER — cai dat he thong/ha tang/tai chinh (vd cong tac khan cap
+    Image Studio, cai dat WebSub/nguon tin cay o muc he thong). ADMIN va
+    MODERATOR deu nhan 403 o day, kem ADMIN co the lam duoc nhieu viec khac
+    qua `admin_or_owner_profile`/`admin_profile`.
+    """
+    if settings.admin_role_of(profile.user_id) != AdminRole.OWNER:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Khu vực chỉ dành cho Owner.")
+    return profile
+
+
+def admin_or_owner_profile(profile: Profile = Depends(current_profile)) -> Profile:
+    """
+    Muc ADMIN tro len (ADMIN hoac OWNER) — quan ly nguoi dung/noi dung/phan
+    tich/nguon tin cay YouTube. MODERATOR nhan 403: ho chi duoc xem/xu ly bao
+    cao va kiem duyet noi dung qua `admin_profile`, khong quan ly vai tro hay
+    them nguon tin cay moi.
+    """
+    if settings.admin_role_of(profile.user_id) not in (
+        AdminRole.ADMIN, AdminRole.OWNER,
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Cần quyền Admin trở lên.")
+    return profile
+
+
+def _kiem_quyen_tac_dong_tai_khoan(admin: Profile, target_user_id: str) -> None:
+    """
+    Rao chan cho thao tac quan tri TREN MOT TAI KHOAN KHAC — tam dung/bo tam
+    dung/cham dut phien dang nhap (Phase 3, Admin Control Center V2).
+
+    Vai tro (OWNER/ADMIN/MODERATOR) la BIEN MOI TRUONG, khong phai cot ghi
+    duoc (xem `Settings.admin_role_of`) — nen KHONG co thao tac "doi vai tro"
+    qua API, va rui ro kinh dien "ADMIN tu nang minh len OWNER" khong the xay
+    ra vi khong co duong ghi nao vao ba danh sach do ca. Hai rui ro CON LAI,
+    that su xay ra duoc qua cac nut o day, moi duoc chan:
+
+    - Tu tac dong len CHINH MINH: tam dung/cham dut MOI phien tren chinh tai
+      khoan dang dang nhap se tu khoa minh ngay giua luc thao tac.
+    - ADMIN tac dong len MOT TAI KHOAN QUAN TRI KHAC (ADMIN hoac OWNER): chi
+      OWNER moi duoc dong toi tai khoan cua nguoi lam quan tri — chan mot
+      ADMIN (vi du tai khoan bi chiem) tam dung dong nghiep hay chinh OWNER.
+    """
+    if target_user_id == admin.user_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Không thể tự thao tác trên chính tài khoản đang đăng nhập.")
+    vai_tro_dich = settings.admin_role_of(target_user_id)
+    if vai_tro_dich != AdminRole.NONE and settings.admin_role_of(admin.user_id) != AdminRole.OWNER:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Chỉ Owner mới được thao tác trên tài khoản quản trị khác.")
 
 
 class NoteIn(BaseModel):
@@ -3563,12 +3677,400 @@ class NoteIn(BaseModel):
 
 @app.get("/api/admin/overview")
 def admin_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
-    return creators.admin_overview()
+    return {**creators.admin_overview(), **_admin_dashboard_them()}
+
+
+def _admin_dashboard_them() -> Dict[str, Any]:
+    """
+    Cac muc MOI cua bang dieu khien (Admin Control Center V2, A1) — goi THEM
+    ben canh `creators.admin_overview()` cu (KHONG thay the — giao dien cu,
+    neu con noi nao dung, van doc duoc y het truoc).
+
+    MOI phep dem o day deu BI CHAN: `limit(1)` + doc `total` cua Appwrite,
+    hoac mot snapshot da co san trong bo nho (`image_spending_guard`).
+    KHONG vong lap tren tung hang, KHONG quet toan bang — dung yeu cau
+    "Do not create expensive full-table scans for dashboard cards".
+
+    Phase 7 — SONG SONG HOA: ~10 nhom truy van BI CHAN, DOC LAP voi nhau
+    (khong nhom nao doc ket qua cua nhom khac), chay qua
+    `ThreadPoolExecutor` thay vi tuan tu — day la I/O-bound (cho phan hoi
+    HTTP tu Appwrite VM o xa), nen luong (thread) that su giam duoc tong
+    thoi gian cho (GIL nha ra trong luc cho socket), khong phai gia von.
+    `httpx.Client` (dung trong MOI kho Appwrite o day) an toan dung dong
+    thoi tren nhieu luong — xem tai lieu httpx. Da xac nhan qua QA trinh
+    duyet that: dashboard cu (tuan tu) mat 13-90+ giay tren VM dev o xa;
+    day la lan dau ham nay duoc song song hoa (Phase 2-6 chi ghi nhan la
+    "huong kha di cho phase sau", Phase 7 la phase do).
+    """
+    now = datetime.now(timezone.utc)
+    dau_ngay_hom_nay = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    moc_hom_nay = dau_ngay_hom_nay.isoformat(timespec="seconds")
+    moc_7_ngay = (now - timedelta(days=7)).isoformat(timespec="seconds")
+    moc_30_ngay = (now - timedelta(days=30)).isoformat(timespec="seconds")
+
+    def _appwrite_khoe() -> Optional[bool]:
+        try:
+            return identity.healthcheck()
+        except Exception:
+            return False
+
+    def _doi_chieu() -> Dict[str, Any]:
+        # MOT truy van bi chan duy nhat (limit=1, moi nhat truoc) cho ca
+        # "lan chay gan nhat" LAN "tong so lan chay" cung luc.
+        return creators.admin_events(action="reconciliation_run", limit=1)
+
+    def _users() -> Dict[str, Any]:
+        return {
+            "total": identity.count_profiles(),
+            "new_today": identity.count_profiles(created_after=moc_hom_nay),
+            "new_7d": identity.count_profiles(created_after=moc_7_ngay),
+            "new_30d": identity.count_profiles(created_after=moc_30_ngay),
+            # Phase 3 (Admin Control Center V2): doc THANG tu Appwrite Users
+            # API (`IdentityAdapter.count_accounts`), khong phai tu `profiles`
+            # — day la du lieu Auth native, xem `AccountStatus`.
+            "verified": identity.count_accounts(email_verified=True),
+            "unverified": identity.count_accounts(email_verified=False),
+            "suspended": identity.count_accounts(enabled=False),
+        }
+
+    def _noi_dung_rieng() -> Dict[str, Any]:
+        # Phan phu thuoc `xa_hoi` (comments/pending_reports) duoc ghep VAO
+        # SAU, o luong chinh — day chi la phan DOC LAP voi social_overview.
+        return {
+            "novels_total": store.total_novels(),
+            "chapters_total": store.total_chapters(),
+            "animation_series_total": animation_store.find_series(limit=1)[1],
+            "animation_series_published": animation_store.find_series(
+                published_only=True, limit=1)[1],
+            "animation_episodes_total": animation_store.total_episodes(),
+        }
+
+    def _san_pham() -> Dict[str, Any]:
+        return {
+            "translation_projects_total": translation_svc.admin_total_projects(),
+            "tts_jobs_total": store.total_jobs(),
+        }
+
+    def _trusted_sources_rieng() -> Dict[str, Any]:
+        # Phan phu thuoc `doi_chieu` duoc ghep VAO SAU o luong chinh.
+        return {
+            "total": trusted_source_store.find_sources(limit=1)[1],
+            "enabled_total": trusted_source_store.find_sources(
+                enabled=True, limit=1)[1],
+            "detected_today": trusted_source_store.find_imports(
+                created_after=moc_hom_nay, limit=1)[1],
+            "auto_imported_total": (
+                trusted_source_store.find_imports(status="auto_imported", limit=1)[1]
+                + trusted_source_store.find_imports(status="auto_published", limit=1)[1]),
+            "pending_total": trusted_source_store.find_imports(
+                status="pending", limit=1)[1],
+            "error_total": (
+                trusted_source_store.find_imports(status="conflict", limit=1)[1]
+                + trusted_source_store.find_imports(status="duplicate", limit=1)[1]
+                + trusted_source_store.find_imports(status="unavailable", limit=1)[1]
+                + trusted_source_store.find_imports(status="failed", limit=1)[1]),
+        }
+
+    def _an_toan(future, mac_dinh):
+        """
+        Lay ket qua MOT future — LOI (vd Appwrite dev VM cham/timeout khi
+        bi nhieu luong hoi cung luc, da xac nhan THAT khi kiem tra thoi
+        gian chay Phase 7) tra ve `mac_dinh` (moi truong = None, dung
+        triet ly co san "None = chua co du lieu, khong phai 0") THAY VI
+        lam SUP CA trang tong quan vi MOT nhom cham. Ghi log de van hanh
+        biet, khong nem loi len quan tri vien.
+        """
+        try:
+            return future.result()
+        except Exception as exc:
+            # ASCII thuan tuy: print() khong dam bao encoding UTF-8 tren moi
+            # moi truong (vd console Windows cp1252) — mot ky tu co dau o
+            # day co the tu no nem UnicodeEncodeError, pha huy chinh muc
+            # dich cua duong an toan nay.
+            print(f"[admin_overview] mot nhom truy van loi, dung gia tri "
+                 f"mac dinh: {exc!r}")
+            return mac_dinh
+
+    # `max_workers=4` (khong phai 8, dung bang so nhom) CO CHU DICH: kiem
+    # tra THAT tren Appwrite dev tu luu tru (VM nho, mot tien trinh) cho
+    # thay 8 luong dong thoi thinh thoang lam MOT truy van vuot qua 15 giay
+    # (REQUEST_TIMEOUT) do VM qua tai — gioi han con 4 giam tai dinh, van
+    # giu phan lon loi ich song song so voi tuan tu hoan toan.
+    with ThreadPoolExecutor(max_workers=4) as bo_luong:
+        f_appwrite_khoe = bo_luong.submit(_appwrite_khoe)
+        f_xa_hoi = bo_luong.submit(social.social_overview)
+        f_doi_chieu = bo_luong.submit(_doi_chieu)
+        f_users = bo_luong.submit(_users)
+        f_noi_dung = bo_luong.submit(_noi_dung_rieng)
+        f_san_pham = bo_luong.submit(_san_pham)
+        f_trusted = bo_luong.submit(_trusted_sources_rieng)
+        f_traffic = bo_luong.submit(traffic_analytics.overview)
+
+        appwrite_khoe = _an_toan(f_appwrite_khoe, False)
+        xa_hoi = _an_toan(f_xa_hoi, {"total_comments": None, "open_reports": None})
+        doi_chieu = _an_toan(f_doi_chieu, {"events": [], "total": None})
+        users = _an_toan(f_users, {
+            "total": None, "new_today": None, "new_7d": None, "new_30d": None,
+            "verified": None, "unverified": None, "suspended": None})
+        noi_dung = _an_toan(f_noi_dung, {
+            "novels_total": None, "chapters_total": None,
+            "animation_series_total": None, "animation_series_published": None,
+            "animation_episodes_total": None})
+        san_pham = _an_toan(f_san_pham, {
+            "translation_projects_total": None, "tts_jobs_total": None})
+        trusted = _an_toan(f_trusted, {
+            "total": None, "enabled_total": None, "detected_today": None,
+            "auto_imported_total": None, "pending_total": None, "error_total": None})
+        traffic = _an_toan(f_traffic, {
+            "configured": False, "message": "Tạm thời không đọc được trạng thái.",
+            "visits_today": None, "pageviews_today": None, "visits_7d": None,
+            "pageviews_7d": None, "visits_30d": None, "pageviews_30d": None,
+            "top_paths": None, "trend_by_day": None, "referrers": None,
+            "countries": None, "device_categories": None})
+
+    chi_tieu = image_spending_guard.snapshot()  # trong bo nho, khong can luong rieng
+    lan_chay_gan_nhat = (
+        doi_chieu["events"][0]["created_at"] if doi_chieu["events"] else "")
+    tong_lan_doi_chieu = doi_chieu["total"]
+
+    noi_dung["comments_total"] = xa_hoi["total_comments"]
+    noi_dung["pending_reports"] = xa_hoi["open_reports"]
+    san_pham["image_studio_spend_usd"] = chi_tieu.spent_usd
+    san_pham["image_studio_budget_usd"] = chi_tieu.budget_usd
+    # Chua co phep dem RIENG cho so luot sinh anh (chi co chi tieu gop) —
+    # None thay vi suy tu chi tieu (mot lan sinh khong dong gia mot lan chi).
+    san_pham["image_generations_total"] = None
+    trusted["configured"] = True
+    trusted["reconciliation_total_runs"] = tong_lan_doi_chieu
+    trusted["reconciliation_last_run_at"] = lan_chay_gan_nhat or None
+
+    return {
+        "users": users,
+        "content": noi_dung,
+        "product": san_pham,
+        "trusted_sources": trusted,
+        "traffic": traffic,
+        "system": {
+            "backend": "ok",
+            "data_backend": settings.data_backend,
+            "appwrite_configured": settings.appwrite.configured,
+            "appwrite_healthy": appwrite_khoe if settings.appwrite.configured else None,
+            "inline_worker": settings.inline_worker,
+            "translation_provider_configured": bool(
+                settings.translation_base_url and settings.translation_api_key
+                and settings.translation_model),
+            "image_studio_shared_premium_configured":
+                settings.image_studio.shared_premium_configured,
+            # Phase 7 — trang He thong (muc 7): YouTube Data API/WebSub deu
+            # la kiem tra CO CAU HINH hay khong (khong goi mang), rong.
+            "youtube_data_api_configured": trusted_sources.youtube_configured(),
+            "youtube_websub_configured": trusted_sources.websub_configured(),
+            "statuses": _trang_thai_he_thong(
+                appwrite_configured=settings.appwrite.configured,
+                appwrite_healthy=appwrite_khoe,
+                translation_configured=bool(
+                    settings.translation_base_url and settings.translation_api_key
+                    and settings.translation_model),
+                image_studio_configured=settings.image_studio.shared_premium_configured,
+                youtube_data_api_configured=trusted_sources.youtube_configured(),
+                youtube_websub_configured=trusted_sources.websub_configured(),
+                reconciliation_total_runs=tong_lan_doi_chieu,
+                reconciliation_last_run_at=lan_chay_gan_nhat,
+                now=now,
+            ),
+        },
+    }
+
+
+#: Bon trang thai duy nhat cho MOI hang muc o trang He thong (Phase 7, muc
+#: 7) — khong bia them gia tri trung gian nao khac.
+TRANG_THAI_KHOE = "healthy"
+TRANG_THAI_SUY_GIAM = "degraded"
+TRANG_THAI_LOI = "error"
+TRANG_THAI_CHUA_CAU_HINH = "not_configured"
+
+
+def _trang_thai_he_thong(
+    *, appwrite_configured: bool, appwrite_healthy: Optional[bool],
+    translation_configured: bool, image_studio_configured: bool,
+    youtube_data_api_configured: bool, youtube_websub_configured: bool,
+    reconciliation_total_runs: int, reconciliation_last_run_at: str,
+    now: datetime,
+) -> Dict[str, str]:
+    """
+    Tinh trang thai HEALTHY/DEGRADED/ERROR/NOT_CONFIGURED cho tung hang muc
+    trang He thong — CHI dua tren tin hieu THAT SU co san (cau hinh + mot
+    lan doc da co san), KHONG bia mot phep kiem tra suc khoe khong ton tai.
+
+    `workers` khong co giam sat rieng (khong co tin hieu am nao de phat
+    hien "worker chet" — xem han che ghi o handoff muc 4g) nen an theo
+    Appwrite: dung duoc Appwrite thi coi la healthy.
+    """
+    if not appwrite_configured:
+        appwrite = TRANG_THAI_CHUA_CAU_HINH
+    elif appwrite_healthy:
+        appwrite = TRANG_THAI_KHOE
+    else:
+        appwrite = TRANG_THAI_LOI
+
+    reconciliation: str
+    if not youtube_websub_configured:
+        reconciliation = TRANG_THAI_CHUA_CAU_HINH
+    elif reconciliation_total_runs <= 0:
+        reconciliation = TRANG_THAI_SUY_GIAM
+    else:
+        try:
+            lan_cuoi = datetime.fromisoformat(reconciliation_last_run_at)
+            if lan_cuoi.tzinfo is None:
+                lan_cuoi = lan_cuoi.replace(tzinfo=timezone.utc)
+            reconciliation = (
+                TRANG_THAI_KHOE if now - lan_cuoi <= timedelta(hours=48)
+                else TRANG_THAI_SUY_GIAM)
+        except ValueError:
+            reconciliation = TRANG_THAI_SUY_GIAM
+
+    return {
+        "backend": TRANG_THAI_KHOE,
+        "appwrite": appwrite,
+        "workers": appwrite,
+        "translation_provider": (
+            TRANG_THAI_KHOE if translation_configured else TRANG_THAI_CHUA_CAU_HINH),
+        "tts": TRANG_THAI_KHOE,
+        "image_studio": (
+            TRANG_THAI_KHOE if image_studio_configured else TRANG_THAI_CHUA_CAU_HINH),
+        "youtube_data_api": (
+            TRANG_THAI_KHOE if youtube_data_api_configured else TRANG_THAI_CHUA_CAU_HINH),
+        "youtube_websub": (
+            TRANG_THAI_KHOE if youtube_websub_configured else TRANG_THAI_CHUA_CAU_HINH),
+        "reconciliation": reconciliation,
+    }
+
+
+#: Cua so thoi gian hop le cho /api/admin/analytics/detail — CHINH XAC ba
+#: gia tri spec Phase 7 yeu cau (Today/7 days/30 days), khong hon.
+_PHAM_VI_HOP_LE = {"today": timedelta(days=0), "7d": timedelta(days=7),
+                   "30d": timedelta(days=30)}
+
+
+def _moc_theo_pham_vi(range: str, now: datetime) -> str:
+    delta = _PHAM_VI_HOP_LE.get(range, _PHAM_VI_HOP_LE["7d"])
+    if delta == timedelta(days=0):
+        moc = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        moc = now - delta
+    return moc.isoformat(timespec="seconds")
+
+
+@app.get("/api/admin/analytics/detail")
+def admin_analytics_detail(
+    range: str = "7d", admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    """
+    Chi tiet phan tich cho `/admin/analytics` (Phase 7) — TACH khoi
+    `/api/admin/overview` (bang dieu khien chinh phai nhe, xem muc 6/9
+    handoff): CHI trang Analytics goi route nay, va CHI khi nguoi dung mo
+    trang do/doi khoang thoi gian — khong polling, khong goi tu dashboard.
+
+    So luong truy van Appwrite cho MOI lan tai (da dem, xem handoff):
+    ~15-18 truy van BI CHAN (`limit(1)`/tuong duong), KHONG truy van nao
+    keo toan bang. Chi tiet: 1 (dang ky moi trong khoang) + 1 (binh luan
+    trong khoang) + 4 (job dich theo status) + 4 (job TTS theo status) +
+    4 (video phat hien/tu nhap/cho duyet/loi trong khoang) + 5 (WebSub
+    theo trang thai dang ky, KHONG theo khoang — la mot snapshot) + 1
+    (doi chieu trong khoang).
+
+    DAU/WAU/MAU va "novel reads/chapter completions/Animation views":
+    CHUA the tinh CHINH XAC voi du lieu hien co (xem ghi chu tung muc)
+    — tra ve `None` kem `*_note` giai thich, KHONG bia so.
+    """
+    if range not in _PHAM_VI_HOP_LE:
+        range = "7d"
+    now = datetime.now(timezone.utc)
+    moc = _moc_theo_pham_vi(range, now)
+
+    tts_status_dem = {
+        trang: store.count_jobs(status=st, created_after=moc)
+        for trang, st in (("pending", JobStatus.PENDING),
+                          ("running", JobStatus.RUNNING),
+                          ("completed", JobStatus.COMPLETED),
+                          ("failed", JobStatus.FAILED))
+    }
+    dich_status_dem = {
+        trang: translation_svc.admin_count_jobs(status=st, created_after=moc)
+        for trang, st in (("completed", TranslationJobStatus.COMPLETED),
+                          ("failed", TranslationJobStatus.FAILED),
+                          ("cancelled", TranslationJobStatus.CANCELLED))
+    }
+    dich_tong_trong_ky = translation_svc.admin_count_jobs(created_after=moc)
+    dich_status_dem["in_progress"] = max(0, dich_tong_trong_ky
+                                        - sum(dich_status_dem.values()))
+
+    doi_chieu = creators.admin_events(action="reconciliation_run",
+                                      created_after=moc, limit=1)
+
+    return {
+        "range": range,
+        "since": moc,
+        "users": {
+            "registrations": identity.count_profiles(created_after=moc),
+            "active_daily": None,
+            "active_weekly": None,
+            "active_monthly": None,
+            "active_note": (
+                "Chưa đo lường được: Appwrite Users API không cho lọc theo "
+                "accessedAt (đã xác nhận thật), và tính từ sự kiện thô sẽ "
+                "quét toàn bảng — cần hạ tầng đo lường hoạt động chuyên "
+                "dụng, ngoài phạm vi Phase 7."
+            ),
+        },
+        "content": {
+            "comments": social.admin_count_comments(created_after=moc),
+            "novel_reads": None,
+            "chapter_completions": None,
+            "animation_views": None,
+            "content_activity_note": (
+                "Chưa ghi nhận sự kiện đọc/xem — cần triển khai instrumentation "
+                "mới trên đường phục vụ nội dung; sẽ tính từ ngày triển khai "
+                "trở đi (không suy ngược lịch sử), ngoài phạm vi Phase 7."
+            ),
+        },
+        "ai_product": {
+            "translation_jobs": dich_status_dem,
+            "tts_jobs": tts_status_dem,
+            "image_studio_generations": None,
+            "image_studio_note": (
+                "Chưa đếm riêng số lượt sinh ảnh — chỉ có tổng chi tiêu "
+                "($), xem /api/admin/image-studio/spending."
+            ),
+        },
+        "trusted_video": {
+            "detected": trusted_source_store.find_imports(
+                created_after=moc, limit=1)[1],
+            "auto_imported": (
+                trusted_source_store.find_imports(
+                    status="auto_imported", created_after=moc, limit=1)[1]
+                + trusted_source_store.find_imports(
+                    status="auto_published", created_after=moc, limit=1)[1]),
+            "pending": trusted_source_store.find_imports(
+                status="pending", created_after=moc, limit=1)[1],
+            "errors": sum(
+                trusted_source_store.find_imports(
+                    status=s, created_after=moc, limit=1)[1]
+                for s in ("conflict", "duplicate", "unavailable", "failed")),
+            # Snapshot HIEN TAI, khong phai theo khoang — suc khoe dang ky
+            # WebSub la trang thai TAI THOI DIEM doc, khong phai mot phep dem
+            # su kien trong ky.
+            "websub_status_breakdown": trusted_source_store
+                .count_sources_by_subscription_status(),
+            "reconciliation_runs": doi_chieu["total"],
+        },
+        "traffic": traffic_analytics.overview(),
+    }
 
 
 @app.get("/api/admin/author-applications")
 def admin_applications(status_filter: str = "", limit: int = 25, offset: int = 0,
-                       admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                       admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     return creators.admin_applications(status=status_filter or None,
                                        limit=max(1, min(100, limit)),
                                        offset=max(0, offset))
@@ -3576,7 +4078,7 @@ def admin_applications(status_filter: str = "", limit: int = 25, offset: int = 0
 
 @app.get("/api/admin/author-applications/{user_id}")
 def admin_application(user_id: str,
-                      admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                      admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     data = creators.admin_application(user_id)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn.")
@@ -3585,14 +4087,15 @@ def admin_application(user_id: str,
 
 @app.post("/api/admin/author-applications/{user_id}/approve")
 def admin_approve(user_id: str, payload: NoteIn,
-                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Duyet don. Goi thang tang service da duoc kiem thu — route KHONG lap lai
     mot dong logic nghiep vu nao.
     """
     try:
-        app_row = creators.approve(user_id, note=payload.note,
-                                   actor_id=admin.user_id)
+        app_row = creators.approve(
+            user_id, note=payload.note, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)
     except AuthorStateError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"application": app_row.to_dict()}
@@ -3600,14 +4103,15 @@ def admin_approve(user_id: str, payload: NoteIn,
 
 @app.post("/api/admin/author-applications/{user_id}/reject")
 def admin_reject(user_id: str, payload: NoteIn,
-                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                 admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Tu choi don. `note` la BAT BUOC o tang service — mot lan tu choi khong ly do
     la mot cai cua dong im lang, va nguoi nop se doc duoc ghi chu nay.
     """
     try:
-        app_row = creators.reject(user_id, note=payload.note,
-                                  actor_id=admin.user_id)
+        app_row = creators.reject(
+            user_id, note=payload.note, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)
     except AuthorStateError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"application": app_row.to_dict()}
@@ -3615,14 +4119,14 @@ def admin_reject(user_id: str, payload: NoteIn,
 
 @app.get("/api/admin/authors")
 def admin_authors(limit: int = 25, offset: int = 0,
-                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     return creators.admin_authors(limit=max(1, min(100, limit)),
                                   offset=max(0, offset))
 
 
 @app.post("/api/admin/authors/{user_id}/suspend")
 def admin_suspend(user_id: str, payload: NoteIn,
-                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Tam dung quyen xuat ban.
 
@@ -3631,8 +4135,9 @@ def admin_suspend(user_id: str, payload: NoteIn,
     `docs/ADMIN.md` muc "Treo tac gia lam gi va KHONG lam gi".
     """
     try:
-        app_row = creators.suspend(user_id, note=payload.note,
-                                   actor_id=admin.user_id)
+        app_row = creators.suspend(
+            user_id, note=payload.note, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)
     except AuthorStateError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"application": app_row.to_dict()}
@@ -3640,10 +4145,11 @@ def admin_suspend(user_id: str, payload: NoteIn,
 
 @app.post("/api/admin/authors/{user_id}/restore")
 def admin_restore(user_id: str, payload: NoteIn,
-                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     try:
-        app_row = creators.restore(user_id, note=payload.note,
-                                   actor_id=admin.user_id)
+        app_row = creators.restore(
+            user_id, note=payload.note, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)
     except AuthorStateError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return {"application": app_row.to_dict()}
@@ -3651,19 +4157,87 @@ def admin_restore(user_id: str, payload: NoteIn,
 
 @app.get("/api/admin/users")
 def admin_users(q: str = "", limit: int = 25, offset: int = 0,
-                admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
-    """Tim nguoi dung. Ket qua CO `email` — day la duong quan tri."""
-    return creators.admin_users(query=q, limit=max(1, min(100, limit)),
+                admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """
+    Tim tai khoan (Phase 3: nguon la Appwrite Users API native, xem
+    `CreatorService.admin_users`). Ket qua CO `email` — day la duong quan tri.
+    """
+    data = creators.admin_users(query=q, limit=max(1, min(100, limit)),
                                 offset=max(0, offset))
+    for row in data["users"]:
+        # Vai tro doc THANG tu `Settings.admin_role_of` — KHONG bao gio mot
+        # cot DB (xem `_kiem_quyen_tac_dong_tai_khoan`), nen phai tinh o day
+        # moi lan tra ve, khong the luu san trong `creators.admin_users`.
+        row["admin_role"] = settings.admin_role_of(row["user_id"]).value
+    return data
 
 
 @app.get("/api/admin/users/{user_id}")
 def admin_user(user_id: str,
-               admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+               admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     data = creators.admin_user(user_id)
     if data is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    data["admin_role"] = settings.admin_role_of(user_id).value
     return {"user": data}
+
+
+@app.post("/api/admin/users/{user_id}/suspend")
+def admin_user_suspend(user_id: str, payload: NoteIn,
+                       admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """
+    Tam dung TAI KHOAN — khoa dang nhap HOAN TOAN. TACH BACH voi
+    `/api/admin/authors/{user_id}/suspend` (chi chan xuat ban, tac gia van
+    dang nhap va doc/nghe binh thuong). Xem `AccountStatus` va
+    `_kiem_quyen_tac_dong_tai_khoan`.
+    """
+    _kiem_quyen_tac_dong_tai_khoan(admin, user_id)
+    ket_qua = creators.admin_set_account_enabled(
+        user_id, False, note=payload.note, actor_id=admin.user_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if ket_qua is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    return {"account": ket_qua}
+
+
+@app.post("/api/admin/users/{user_id}/unsuspend")
+def admin_user_unsuspend(user_id: str, payload: NoteIn,
+                         admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """Go tam dung tai khoan — cho phep dang nhap lai."""
+    _kiem_quyen_tac_dong_tai_khoan(admin, user_id)
+    ket_qua = creators.admin_set_account_enabled(
+        user_id, True, note=payload.note, actor_id=admin.user_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if ket_qua is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    return {"account": ket_qua}
+
+
+@app.post("/api/admin/users/{user_id}/sessions/{session_id}/terminate")
+def admin_user_terminate_session(
+    user_id: str, session_id: str, payload: NoteIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Cham dut MOT phien dang nhap cu the cua mot tai khoan."""
+    _kiem_quyen_tac_dong_tai_khoan(admin, user_id)
+    da_huy = creators.admin_terminate_session(
+        user_id, session_id, note=payload.note, actor_id=admin.user_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    return {"terminated": da_huy}
+
+
+@app.post("/api/admin/users/{user_id}/sessions/terminate-all")
+def admin_user_terminate_all_sessions(
+    user_id: str, payload: NoteIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Cham dut MOI phien dang nhap cua mot tai khoan — dung khi nghi ngo tai
+    khoan bi chiem, hoac ngay sau khi tam dung tai khoan do."""
+    _kiem_quyen_tac_dong_tai_khoan(admin, user_id)
+    so_luong = creators.admin_terminate_all_sessions(
+        user_id, note=payload.note, actor_id=admin.user_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    return {"terminated_count": so_luong}
 
 
 @app.get("/api/admin/novels")
@@ -3682,11 +4256,18 @@ def admin_novels(q: str = "", state: str = "", limit: int = 25, offset: int = 0,
 
 
 @app.get("/api/admin/events")
-def admin_events(limit: int = 50, offset: int = 0,
-                 admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
-    """Nhat ky kiem duyet. CHI THEM — khong co route sua hay xoa."""
-    return creators.admin_events(limit=max(1, min(200, limit)),
-                                 offset=max(0, offset))
+def admin_events(limit: int = 50, offset: int = 0, target_user_id: str = "",
+                 target_type: str = "", target_id: str = "", action: str = "",
+                 admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """
+    Nhat ky kiem duyet — /admin/audit-log (Admin Control Center V2, A5).
+    CHI THEM — khong co route sua hay xoa. `target_id` (Phase 4) tra cuu
+    lich su cua MOT doi tuong cu the (vd mot series/tap Animation).
+    """
+    return creators.admin_events(
+        limit=max(1, min(200, limit)), offset=max(0, offset),
+        target_user_id=target_user_id, target_type=target_type,
+        target_id=target_id, action=action)
 
 
 # -----------------------------------------------------------------------------
@@ -3786,6 +4367,34 @@ def _xa_hoi(fn, *args, **kwargs):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     except SocialError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+def _nguon_tin_cay(fn, *args, **kwargs):
+    """
+    Cung vai tro voi `_xa_hoi()` nhung cho `TrustedSourceService` (Phase 5) —
+    them hai loai loi RIENG cua YouTube Data API.
+
+    `YouTubeConfigError` -> 503: "chua cau hinh", KHONG phai loi cua nguoi
+    dung — frontend hien trang thai "Chưa cấu hình" ro rang (xem dac ta
+    Phase 5, muc 2), khong phai mot thong bao loi chung chung.
+    `YouTubeApiError` -> 429 neu `reason == "quotaExceeded"` (het han muc
+    NGAY HOM NAY, khac voi loi ky thuat that), nguoc lai 502 (upstream tu
+    choi/khong ket noi duoc).
+    """
+    try:
+        return fn(*args, **kwargs)
+    except TrustedSourceError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except (YouTubeConfigError, WebSubConfigError) as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except YouTubeApiError as exc:
+        ma = (status.HTTP_429_TOO_MANY_REQUESTS if exc.reason == "quotaExceeded"
+             else status.HTTP_502_BAD_GATEWAY)
+        raise HTTPException(ma, str(exc)) from exc
     except PermissionDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except NotFoundError as exc:
@@ -4094,7 +4703,7 @@ def account_social(profile: Profile = Depends(current_profile)) -> Dict[str, Any
 
 
 @app.get("/api/admin/social/overview")
-def admin_social_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+def admin_social_overview(admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     return social.social_overview()
 
 
@@ -4145,11 +4754,13 @@ def admin_browse_comments(target_kind: str = "", limit: int = 25,
                           offset: int = 0,
                           admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     """
-    Duyet binh luan toan he thong, TACH duoc binh luan bai dang voi binh luan
-    chuong (`target_kind=chapter`) — hai loai dan toi hai noi khac nhau va
-    nguoi kiem duyet can biet minh dang nhin gi.
+    Duyet binh luan toan he thong, TACH duoc BA loai: binh luan bai dang
+    (`target_kind=""`), binh luan chuong (`target_kind=chapter`), va binh
+    luan tap Animation (`target_kind=animation_episode`, Phase 4 — cung ha
+    tang binh luan, xem `SocialService._tap_cong_khai`) — moi loai dan toi
+    mot noi khac nhau va nguoi kiem duyet can biet minh dang nhin gi.
     """
-    if target_kind not in ("", "chapter"):
+    if target_kind not in ("", "chapter", "animation_episode"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "target_kind không hợp lệ.")
     return _xa_hoi(social.admin_browse_comments, target_kind=target_kind,
@@ -4174,6 +4785,481 @@ def admin_remove_comment(comment_id: str, payload: RemoveIn,
 def admin_restore_comment(comment_id: str, payload: FollowIn,
                           admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     return {"comment": _xa_hoi(social.restore_comment, admin, comment_id)}
+
+
+# -----------------------------------------------------------------------------
+# Kiem duyet ANIMATION (Phase 4, Admin Control Center V2)
+# -----------------------------------------------------------------------------
+#
+# Cung muc quyen voi kiem duyet bai/binh luan o tren (`admin_profile`, tuc la
+# TU MODERATOR tro len) — Phase 4 xac dinh Animation la kiem duyet noi dung
+# THONG THUONG, khong phai cai dat he thong/tai chinh, nen KHONG can nang len
+# `admin_or_owner_profile` nhu quan ly tai khoan (Phase 3). Backend luon la
+# noi quyet dinh that — xem `_kiem_quyen_tac_dong_tai_khoan` cho vi du khac o
+# Phase 3 ve nguyen tac nay.
+#
+# KHONG co route XOA that (series/tap) trong Phase 4 — chi go xuong/phuc hoi.
+# Neu sau nay can xoa that, do la mot quyet dinh rieng (xem `docs/ADMIN.md`
+# muc "Viec con lai" ve ly do khong tu them nut xoa cung).
+
+
+@app.get("/api/admin/animation/series")
+def admin_animation_series(q: str = "", state: str = "", sort: str = "newest",
+                           limit: int = 25, offset: int = 0,
+                           admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """
+    Danh sach series cho khu quan tri — phan trang/loc/sap xep o phia kho,
+    KHONG tai toan bo thu vien ve trinh duyet. Xem `SocialService.
+    admin_animation_series`.
+    """
+    if state not in ("", "draft", "published"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "state không hợp lệ.")
+    if sort not in ("newest", "oldest"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "sort không hợp lệ.")
+    return _xa_hoi(social.admin_animation_series, query=q, state=state,
+                   sort=sort, limit=max(1, min(100, limit)), offset=max(0, offset))
+
+
+@app.get("/api/admin/animation/series/{series_id}")
+def admin_animation_series_detail(
+    series_id: str, admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    data = social.admin_animation_series_detail(series_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy series animation.")
+    return data
+
+
+@app.post("/api/admin/animation/series/{series_id}/unpublish")
+def admin_unpublish_animation_series(
+    series_id: str, payload: RemoveIn,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    """Go xuong MOT series — BAT BUOC ly do (`SocialService.
+    unpublish_animation_series` tu choi neu rong, tra 400)."""
+    return {"series": _xa_hoi(
+        social.unpublish_animation_series, admin, series_id,
+        reason=payload.reason,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/series/{series_id}/restore")
+def admin_restore_animation_series(
+    series_id: str, payload: FollowIn,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    return {"series": _xa_hoi(
+        social.restore_animation_series, admin, series_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/episodes/{episode_id}/unpublish")
+def admin_unpublish_animation_episode(
+    episode_id: str, payload: RemoveIn,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    """Go MOT tap rieng le — KHONG dong toi series cha. BAT BUOC ly do."""
+    return {"episode": _xa_hoi(
+        social.unpublish_animation_episode, admin, episode_id,
+        reason=payload.reason,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/episodes/{episode_id}/restore")
+def admin_restore_animation_episode(
+    episode_id: str, payload: FollowIn,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    return {"episode": _xa_hoi(
+        social.restore_animation_episode, admin, episode_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+# -----------------------------------------------------------------------------
+# Trusted Video Sources (Phase 5, Admin Control Center V2 / Animation Phan B)
+# -----------------------------------------------------------------------------
+#
+# GET (xem danh sach/chi tiet nguon, hang doi nhap) dung `admin_profile` (tu
+# MODERATOR tro len) — cung muc quyen XEM voi kiem duyet Animation o tren.
+# MOI route MUTATE (them/sua/xoa nguon, anh xa, quet, nhap/tu choi/bo qua)
+# dung `admin_or_owner_profile` (ADMIN/OWNER) theo dung dac ta Phase 5 muc 4 —
+# day la hanh dong TAO NOI DUNG THAT/xac nhan tin cay, khac voi kiem duyet
+# thong thuong (an/hien noi dung da co).
+
+
+class TrustedSourcePreviewIn(BaseModel):
+    url: Annotated[str, StringConstraints(max_length=2000)]
+
+
+class TrustedSourceCreateIn(BaseModel):
+    source_type: str
+    youtube_channel_id: str = ""
+    youtube_playlist_id: str = ""
+    youtube_video_id: str = ""
+    display_name: Annotated[str, StringConstraints(max_length=200)]
+    thumbnail_url: Annotated[str, StringConstraints(max_length=512)] = ""
+    auto_discover: bool = False
+    auto_import: bool = False
+    auto_publish: bool = False
+    minimum_confidence: float = 0.9
+
+
+class TrustedSourceUpdateIn(BaseModel):
+    display_name: Optional[Annotated[str, StringConstraints(max_length=200)]] = None
+    auto_discover: Optional[bool] = None
+    auto_import: Optional[bool] = None
+    auto_publish: Optional[bool] = None
+    minimum_confidence: Optional[float] = None
+
+
+class SourceEnabledIn(BaseModel):
+    enabled: bool
+
+
+class ScanSourceIn(BaseModel):
+    page_token: str = ""
+    max_pages: int = DEFAULT_SCAN_PAGES
+
+
+class SeriesMappingCreateIn(BaseModel):
+    animation_series_id: str
+    aliases: List[str] = []
+    include_keywords: List[str] = []
+    exclude_keywords: List[str] = []
+    minimum_confidence: Optional[float] = None
+    auto_import: Optional[bool] = None
+    auto_publish: Optional[bool] = None
+
+
+class SeriesMappingUpdateIn(BaseModel):
+    aliases: Optional[List[str]] = None
+    include_keywords: Optional[List[str]] = None
+    exclude_keywords: Optional[List[str]] = None
+    minimum_confidence: Optional[float] = None
+    auto_import: Optional[bool] = None
+    auto_publish: Optional[bool] = None
+
+
+class SetImportSeriesIn(BaseModel):
+    series_id: str = ""
+    episode_number: Optional[int] = None
+
+
+class ImportVideoIn(BaseModel):
+    publish: bool = False
+
+
+@app.post("/api/admin/animation/sources/preview")
+def admin_preview_trusted_source_url(
+    payload: TrustedSourcePreviewIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Doc mot URL/ID YouTube va tra ve thong tin XEM TRUOC — KHONG tao gi
+    ca (xem dac ta Phase 5, muc 5). Buoc BAT BUOC truoc khi xac nhan them
+    lam nguon tin cay."""
+    return _nguon_tin_cay(trusted_sources.preview_source_url, payload.url)
+
+
+@app.get("/api/admin/animation/sources")
+def admin_list_trusted_sources(
+    q: str = "", enabled: Optional[bool] = None, limit: int = 25, offset: int = 0,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    return _nguon_tin_cay(
+        trusted_sources.admin_list_sources, query=q, enabled=enabled,
+        limit=max(1, min(100, limit)), offset=max(0, offset))
+
+
+@app.post("/api/admin/animation/sources")
+def admin_create_trusted_source(
+    payload: TrustedSourceCreateIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return {"source": _nguon_tin_cay(
+        trusted_sources.create_source, admin,
+        source_type=payload.source_type,
+        youtube_channel_id=payload.youtube_channel_id,
+        youtube_playlist_id=payload.youtube_playlist_id,
+        youtube_video_id=payload.youtube_video_id,
+        display_name=payload.display_name, thumbnail_url=payload.thumbnail_url,
+        auto_discover=payload.auto_discover, auto_import=payload.auto_import,
+        auto_publish=payload.auto_publish,
+        minimum_confidence=payload.minimum_confidence,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.get("/api/admin/animation/sources/{source_id}")
+def admin_trusted_source_detail(
+    source_id: str, admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    data = _nguon_tin_cay(trusted_sources.admin_source_detail, source_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nguồn tin cậy.")
+    return data
+
+
+@app.patch("/api/admin/animation/sources/{source_id}")
+def admin_update_trusted_source(
+    source_id: str, payload: TrustedSourceUpdateIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    source = _nguon_tin_cay(
+        trusted_sources.update_source, admin, source_id, fields,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if source is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nguồn tin cậy.")
+    return {"source": source}
+
+
+@app.post("/api/admin/animation/sources/{source_id}/enabled")
+def admin_set_trusted_source_enabled(
+    source_id: str, payload: SourceEnabledIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    source = _nguon_tin_cay(
+        trusted_sources.set_source_enabled, admin, source_id, payload.enabled,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if source is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nguồn tin cậy.")
+    return {"source": source}
+
+
+@app.delete("/api/admin/animation/sources/{source_id}")
+def admin_remove_trusted_source(
+    source_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    da_xoa = _nguon_tin_cay(
+        trusted_sources.remove_source, admin, source_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if not da_xoa:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nguồn tin cậy.")
+    return {"ok": True}
+
+
+@app.post("/api/admin/animation/sources/{source_id}/scan")
+def admin_scan_trusted_source(
+    source_id: str, payload: ScanSourceIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Quet video co san (Phase 5, dac ta muc 11) — BI CHAN theo `max_pages`,
+    xem `TrustedSourceService.scan_source`."""
+    return _nguon_tin_cay(
+        trusted_sources.scan_source, admin, source_id,
+        page_token=payload.page_token,
+        max_pages=max(1, min(MAX_SCAN_PAGES, payload.max_pages)),
+        actor_role=settings.admin_role_of(admin.user_id).value)
+
+
+@app.post("/api/admin/animation/sources/{source_id}/mappings")
+def admin_create_series_mapping(
+    source_id: str, payload: SeriesMappingCreateIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return {"mapping": _nguon_tin_cay(
+        trusted_sources.create_mapping, admin, source_id,
+        animation_series_id=payload.animation_series_id, aliases=payload.aliases,
+        include_keywords=payload.include_keywords,
+        exclude_keywords=payload.exclude_keywords,
+        minimum_confidence=payload.minimum_confidence,
+        auto_import=payload.auto_import, auto_publish=payload.auto_publish,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.patch("/api/admin/animation/mappings/{mapping_id}")
+def admin_update_series_mapping(
+    mapping_id: str, payload: SeriesMappingUpdateIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    mapping = _nguon_tin_cay(
+        trusted_sources.update_mapping, admin, mapping_id, fields,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if mapping is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy ánh xạ series.")
+    return {"mapping": mapping}
+
+
+@app.delete("/api/admin/animation/mappings/{mapping_id}")
+def admin_remove_series_mapping(
+    mapping_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    da_xoa = _nguon_tin_cay(
+        trusted_sources.remove_mapping, admin, mapping_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if not da_xoa:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy ánh xạ series.")
+    return {"ok": True}
+
+
+@app.get("/api/admin/animation/imports")
+def admin_list_video_imports(
+    status_filter: str = "", trusted_source_id: str = "", series_id: str = "",
+    limit: int = 25, offset: int = 0, admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    return _nguon_tin_cay(
+        trusted_sources.admin_list_imports, status=status_filter,
+        trusted_source_id=trusted_source_id, series_id=series_id,
+        limit=max(1, min(100, limit)), offset=max(0, offset))
+
+
+@app.patch("/api/admin/animation/imports/{import_id}/series")
+def admin_set_import_series(
+    import_id: str, payload: SetImportSeriesIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Quan tri tu gan/sua series+so tap TRUOC khi nhap (dac ta Phase 5, muc 9)."""
+    updated = _nguon_tin_cay(
+        trusted_sources.set_import_series, admin, import_id,
+        series_id=payload.series_id, episode_number=payload.episode_number,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy video trong hàng đợi nhập.")
+    return {"import": updated}
+
+
+@app.post("/api/admin/animation/imports/{import_id}/import")
+def admin_import_video(
+    import_id: str, payload: ImportVideoIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return {"import": _nguon_tin_cay(
+        trusted_sources.import_video, admin, import_id, publish=payload.publish,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/imports/{import_id}/reject")
+def admin_reject_video_import(
+    import_id: str, payload: RemoveIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    updated = _nguon_tin_cay(
+        trusted_sources.reject_import, admin, import_id, reason=payload.reason,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy video trong hàng đợi nhập.")
+    return {"import": updated}
+
+
+@app.post("/api/admin/animation/imports/{import_id}/ignore")
+def admin_ignore_video_import(
+    import_id: str, payload: FollowIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    updated = _nguon_tin_cay(
+        trusted_sources.ignore_import, admin, import_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy video trong hàng đợi nhập.")
+    return {"import": updated}
+
+
+# -----------------------------------------------------------------------------
+# YouTube WebSub (Phase 6, Trusted Video Sources) — dang ky/gia han + doi chieu
+# -----------------------------------------------------------------------------
+#
+# BA route quan tri (dang ky/huy dang ky/chay doi chieu) dung
+# `admin_or_owner_profile` — CUNG muc voi mutate Trusted Sources o Phase 5.
+# HAI route callback CONG KHAI (`youtube_websub_verify`/`youtube_websub_notify`,
+# ben duoi) KHONG qua bat ky `Depends` nao ca — day la route he thong ma hub
+# PubSubHubbub cua YouTube goi TRUC TIEP, khong phai nguoi dung dang nhap.
+
+
+@app.post("/api/admin/animation/sources/{source_id}/subscribe")
+def admin_subscribe_trusted_source(
+    source_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Dang ky (hoac dang ky lai de gia han) mot nguon kieu kenh voi hub
+    WebSub. 503 neu chua cau hinh URL callback cong khai — xem
+    `TrustedSourceService.websub_configured`."""
+    return {"source": _nguon_tin_cay(
+        trusted_sources.subscribe_source, admin, source_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/sources/{source_id}/unsubscribe")
+def admin_unsubscribe_trusted_source(
+    source_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return {"source": _nguon_tin_cay(
+        trusted_sources.unsubscribe_source, admin, source_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+class ReconciliationRunIn(BaseModel):
+    #: Rong = chay cho MOI nguon BAT + auto_discover; truyen vao = CHI mot nguon.
+    source_id: str = ""
+
+
+@app.post("/api/admin/animation/reconciliation/run")
+def admin_run_reconciliation(
+    payload: ReconciliationRunIn, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """"Chạy đối chiếu ngay" — thu cong, BI CHAN (mot trang/nguon), co kiem
+    toan qua nhat ky `reconciliation_run`. Xem `TrustedSourceService.
+    run_reconciliation`."""
+    return _nguon_tin_cay(
+        trusted_sources.run_reconciliation, source_id=payload.source_id,
+        actor_id=admin.user_id, actor_role=settings.admin_role_of(admin.user_id).value)
+
+
+@app.get("/api/youtube/websub")
+def youtube_websub_verify(
+    source_id: str = "",
+    hub_mode: str = Query("", alias="hub.mode"),
+    hub_topic: str = Query("", alias="hub.topic"),
+    hub_challenge: str = Query("", alias="hub.challenge"),
+    hub_lease_seconds: str = Query("", alias="hub.lease_seconds"),
+) -> Response:
+    """
+    Xac minh dang ky/huy dang ky (bat tay WebSub, xem
+    `server/youtube_websub.py`). Dac ta BAT BUOC: echo NGUYEN VEN
+    `hub.challenge`, Content-Type AN TOAN (khong phai HTML/JS — tranh phan
+    anh XSS neu challenge chua ky tu la), va tra 404 khi tu choi.
+    """
+    challenge = trusted_sources.handle_websub_verification(
+        source_id=source_id, mode=hub_mode, topic=hub_topic,
+        challenge=hub_challenge, lease_seconds=hub_lease_seconds)
+    if challenge is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không xác nhận đăng ký này.")
+    return Response(content=challenge, media_type="text/plain",
+                    headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/api/youtube/websub")
+async def youtube_websub_notify(
+    request: Request, source_id: str = "",
+    x_hub_signature: str = Header("", alias="X-Hub-Signature"),
+) -> Response:
+    """
+    Thong bao video moi/cap nhat/da xoa tu hub. LUON tra 200 (dac ta WebSub:
+    ma thanh cong CHI co nghia DA NHAN, khong phai da xu ly xong THANH
+    CONG) — ket qua xu ly/tu choi (nguon khong ton tai, chu ky sai, XML
+    hong) chi anh huong nhat ky/trang thai noi bo, xem
+    `TrustedSourceService.handle_websub_notification`.
+    """
+    khai_bao = request.headers.get("content-length")
+    if khai_bao:
+        try:
+            if int(khai_bao) > MAX_NOTIFICATION_BYTES:
+                raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                    "Thân thông báo quá lớn.")
+        except ValueError:
+            pass
+    body = await request.body()
+    ket_qua = trusted_sources.handle_websub_notification(
+        source_id=source_id, body=body, signature_header=x_hub_signature)
+    if ket_qua is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không có nguồn tin cậy nào khớp.")
+    return Response(status_code=status.HTTP_200_OK)
 
 
 # =============================================================================
@@ -4552,7 +5638,7 @@ def list_translation_providers() -> Dict[str, Any]:
 
 
 @app.get("/api/admin/translate/usage")
-def admin_translate_usage(profile: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+def admin_translate_usage(profile: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
     """
     Nen tang ke toan pool mien phi (V5.2, overnight Phase 3, Phan 3I) —
     QUAN TRI CHI, khong danh cho nguoi dung thuong: day la so lieu VAN HANH
@@ -5162,8 +6248,31 @@ def image_library_delete(
 
 
 @app.get("/api/admin/image-studio/spending")
-def admin_image_studio_spending(profile: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+def admin_image_studio_spending(profile: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """
+    Trang AI/Credits (Admin Control Center V2). Phase 7 mo rong THEM (khong
+    doi hinh dang cac truong cu — dashboard/trang cu van doc duoc y het):
+    tinh trang van hanh dich/TTS (thanh cong/that bai/dang xu ly, TAT CA
+    THOI GIAN — trang nay la "hien tai dang the nao", khong phai xu huong
+    theo ky nhu `/api/admin/analytics/detail`) va so ket noi BYOK theo
+    trang thai (KHONG BAO GIO tra secret/key — chi dem).
+    """
     snap = image_spending_guard.snapshot()
+    dich_status = {
+        trang: translation_svc.admin_count_jobs(status=st)
+        for trang, st in (("completed", TranslationJobStatus.COMPLETED),
+                          ("failed", TranslationJobStatus.FAILED),
+                          ("cancelled", TranslationJobStatus.CANCELLED))
+    }
+    dich_tong = translation_svc.admin_count_jobs()
+    dich_status["in_progress"] = max(0, dich_tong - sum(dich_status.values()))
+    tts_status = {
+        trang: store.count_jobs(status=st)
+        for trang, st in (("pending", JobStatus.PENDING),
+                          ("running", JobStatus.RUNNING),
+                          ("completed", JobStatus.COMPLETED),
+                          ("failed", JobStatus.FAILED))
+    }
     return {
         "month": snap.thang,
         "spent_usd": snap.spent_usd,
@@ -5174,6 +6283,22 @@ def admin_image_studio_spending(profile: Profile = Depends(admin_profile)) -> Di
         "max_concurrent": snap.max_concurrent,
         "shared_premium_enabled_config": settings.image_studio.shared_premium_enabled,
         "shared_premium_configured": settings.image_studio.shared_premium_configured,
+        "translation_jobs_by_status": dich_status,
+        "tts_jobs_by_status": tts_status,
+        "byok_connections_by_status": translation_svc.admin_count_connections_by_status(),
+        # Vi Fanfic Credit theo NGUOI DUNG (khac ngan sach Shared Premium o
+        # tren) hien chi la MockWalletStore (bo nho tam TUNG TIEN TRINH,
+        # mat khi khoi dong lai) — AppwriteWalletStore da duoc quy hoach o
+        # Phase 9 (xem docstring `image_wallet_store.py`), CHUA trien khai.
+        # Khong co ham tong hop NHIEU nguoi dung tren kho hien tai nen
+        # KHONG hien mot so lieu bia — chi ghi ro tinh trang.
+        "wallet_configured": False,
+        "wallet_note": (
+            "Ví Fanfic Credit theo người dùng hiện chạy trên bộ nhớ tạm "
+            "từng tiến trình (MockWalletStore), không bền vững qua khởi "
+            "động lại — bản Appwrite hoá đã quy hoạch ở Phase 9, chưa "
+            "triển khai. Chưa có tổng hợp nhiều người dùng để hiển thị."
+        ),
     }
 
 
@@ -5183,10 +6308,15 @@ class KillSwitchIn(BaseModel):
 
 @app.post("/api/admin/image-studio/kill-switch")
 def admin_image_studio_kill_switch(
-    payload: KillSwitchIn, profile: Profile = Depends(admin_profile),
+    payload: KillSwitchIn, profile: Profile = Depends(owner_profile),
 ) -> Dict[str, Any]:
     """Cong tac VIEN khan cap — DOC LAP voi han muc thang (PHASE 7). Tat o
-    day KHONG anh huong Quick Free/BYOP, chi Shared Premium."""
+    day KHONG anh huong Quick Free/BYOP, chi Shared Premium.
+
+    CHI OWNER (Admin Control Center V2): day la cai dat tai chinh/he thong —
+    dung `owner_profile`, khong phai `admin_profile` — theo dung phan tang
+    "ADMIN: users/content/analytics/trusted sources, KHONG infra/secrets/
+    financial" cua mo hinh vai tro moi."""
     image_spending_guard.dat_kill_switch(payload.engaged)
     return {"kill_switch_engaged": payload.engaged}
 

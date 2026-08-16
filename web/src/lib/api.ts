@@ -13,6 +13,8 @@ const TOKEN_KEY = "fas.token";
 export type Tier = "free" | "listener_pro" | "creator_pro" | "ultra";
 export type PublishState = "draft" | "published" | "archived";
 export type JobStatus = "pending" | "running" | "completed" | "failed";
+/** Admin Control Center V2 — ba mức, xem `docs/ADMIN.md`. */
+export type AdminRole = "none" | "moderator" | "admin" | "owner";
 
 export interface Profile {
   user_id: string;
@@ -33,6 +35,12 @@ export interface Profile {
    * `/admin`; quyền thật nằm ở từng route `/api/admin/*`.
    */
   is_admin?: boolean;
+  /**
+   * Mức quản trị THẬT (Admin Control Center V2) — "none" khi không phải quản
+   * trị. CHỈ dùng để ẩn/hiện mục trong sidebar; mọi route `/api/admin/*` vẫn
+   * tự kiểm lại quyền, sửa giá trị này trong DevTools không mở thêm được gì.
+   */
+  admin_role?: AdminRole;
   /** Khoá đối tượng R2 của avatar. Chuỗi rỗng = chưa tải — dùng `avatar_url`
       để hiển thị, không bao giờ tự dựng URL từ khoá này. */
   avatar_key?: string;
@@ -346,6 +354,15 @@ export interface AnimationSeries {
   tags: string[];
   /** Lien ket TUY CHON toi mot truyen — chuoi rong = khong lien ket. */
   related_novel_id: string;
+  /**
+   * Kiem duyet (Phase 4, Admin Control Center V2) — TACH BACH voi `state` o
+   * tren. `state` la truc XUAT BAN cua chu so huu; `moderation_state` la
+   * truc GO XUONG cua quan tri, chu so huu KHONG doi duoc qua bat ky route
+   * nao cua ho. Xem `server/animation_domain.py::AnimationSeries`.
+   */
+  moderation_state: "visible" | "removed";
+  removed_by: string;
+  removed_reason: string;
   created_at: string;
   updated_at: string;
 }
@@ -370,6 +387,11 @@ export interface AnimationEpisode {
   state: PublishState;
   /** Giay — `0` = chua biet (client tu ghi lai tu YouTube IFrame API). */
   duration_seconds: number;
+  /** Kiem duyet (Phase 4) — cung y nghia voi `AnimationSeries.moderation_state`,
+      nhung RIENG cho tung tap: go mot tap KHONG dong toi series cha. */
+  moderation_state: "visible" | "removed";
+  removed_by: string;
+  removed_reason: string;
   created_at: string;
   updated_at: string;
 }
@@ -1215,7 +1237,16 @@ export interface AudioLink {
 // là nơi quyết định: người dùng thường gọi các hàm này sẽ nhận 403 và một thân
 // rỗng. Xem `server/main.py` mục QUAN TRI.
 
+/**
+ * Mot chi so co the CHUA CO du lieu (schema chua theo doi, hoac nha cung cap
+ * ngoai chua cau hinh) — `null` nghia la "chua co", KHONG PHAI 0. Giao dien
+ * PHAI phan biet hai truong hop nay (Admin Control Center V2, A1: "Do not
+ * fabricate numbers").
+ */
+export type ChiSo = number | null;
+
 export interface AdminOverview {
+  // Cac truong CU, tu ban dau — giu nguyen, khong doi kieu.
   pending_applications: number;
   approved_authors: number;
   rejected_applications: number;
@@ -1223,6 +1254,127 @@ export interface AdminOverview {
   published_novels: number;
   users_with_username: number;
   qualified_listens: number;
+
+  // Admin Control Center V2, Phase 2 — cac muc MOI cua bang dieu khien.
+  users: {
+    total: number;
+    new_today: number;
+    new_7d: number;
+    new_30d: number;
+    verified: ChiSo;
+    unverified: ChiSo;
+    suspended: ChiSo;
+  };
+  content: {
+    novels_total: number;
+    chapters_total: number;
+    comments_total: number;
+    animation_series_total: number;
+    animation_series_published: number;
+    animation_episodes_total: number;
+    pending_reports: number;
+  };
+  product: {
+    translation_projects_total: number;
+    tts_jobs_total: number;
+    image_studio_spend_usd: number;
+    image_studio_budget_usd: number;
+    image_generations_total: ChiSo;
+  };
+  trusted_sources: {
+    configured: boolean;
+    total?: number;
+    enabled_total?: number;
+    /** Phase 7 — bo dem THAT (`find_imports(created_after=...)`), khong con luon None. */
+    detected_today?: ChiSo;
+    auto_imported_total?: number;
+    pending_total?: number;
+    error_total?: number;
+    reconciliation_total_runs?: number;
+    reconciliation_last_run_at?: string | null;
+  };
+  traffic: TrafficOverview;
+  system: {
+    backend: string;
+    data_backend: string;
+    appwrite_configured: boolean;
+    appwrite_healthy: boolean | null;
+    inline_worker: boolean;
+    translation_provider_configured: boolean;
+    image_studio_shared_premium_configured: boolean;
+    /** Phase 7 — trang Hệ thống. */
+    youtube_data_api_configured: boolean;
+    youtube_websub_configured: boolean;
+    statuses: {
+      backend: TrangThaiHeThong;
+      appwrite: TrangThaiHeThong;
+      workers: TrangThaiHeThong;
+      translation_provider: TrangThaiHeThong;
+      tts: TrangThaiHeThong;
+      image_studio: TrangThaiHeThong;
+      youtube_data_api: TrangThaiHeThong;
+      youtube_websub: TrangThaiHeThong;
+      reconciliation: TrangThaiHeThong;
+    };
+  };
+}
+
+/** Phase 7 — bon trang thai duy nhat cho MOI hang muc trang He thong. */
+export type TrangThaiHeThong = "healthy" | "degraded" | "error" | "not_configured";
+
+/** Phase 7 — /admin/analytics. Xem `server/traffic_analytics.py`. */
+export interface TrafficOverview {
+  configured: boolean;
+  visits_today: ChiSo;
+  pageviews_today: ChiSo;
+  visits_7d: ChiSo;
+  pageviews_7d: ChiSo;
+  visits_30d: ChiSo;
+  pageviews_30d: ChiSo;
+  top_paths: Array<{ path: string; count: number }> | null;
+  trend_by_day: Array<{ date: string; visits: number; pageviews: number }> | null;
+  referrers: Array<{ referrer: string; count: number }> | null;
+  countries: Array<{ country: string; count: number }> | null;
+  device_categories: Array<{ device: string; count: number }> | null;
+  message: string;
+}
+
+export type PhamViPhanTich = "today" | "7d" | "30d";
+
+/** Phase 7 — /api/admin/analytics/detail. TACH khoi `/api/admin/overview`
+ * (dashboard chinh phai nhe) — CHI trang Analytics goi route nay. */
+export interface AdminAnalyticsDetail {
+  range: PhamViPhanTich;
+  since: string;
+  users: {
+    registrations: number;
+    active_daily: ChiSo;
+    active_weekly: ChiSo;
+    active_monthly: ChiSo;
+    active_note: string;
+  };
+  content: {
+    comments: number;
+    novel_reads: ChiSo;
+    chapter_completions: ChiSo;
+    animation_views: ChiSo;
+    content_activity_note: string;
+  };
+  ai_product: {
+    translation_jobs: { completed: number; failed: number; cancelled: number; in_progress: number };
+    tts_jobs: { pending: number; running: number; completed: number; failed: number };
+    image_studio_generations: ChiSo;
+    image_studio_note: string;
+  };
+  trusted_video: {
+    detected: number;
+    auto_imported: number;
+    pending: number;
+    errors: number;
+    websub_status_breakdown: Record<string, number>;
+    reconciliation_runs: number;
+  };
+  traffic: TrafficOverview;
 }
 
 /** Danh tính kèm theo đơn / hàng tác giả. CÓ `email` — đây là đường quản trị. */
@@ -1240,6 +1392,46 @@ export interface AdminUser {
   application?: AdminApplication | null;
   events?: ModerationEvent[];
   novels?: Novel[];
+
+  // Phase 3, Admin Control Center V2 — tu Appwrite Users API (native),
+  // KHONG phai `profiles`. Xem `AccountStatus` o server/domain.py.
+  email_verified?: boolean;
+  account_enabled?: boolean;
+  registered_at?: string;
+  /** Vai tro quan tri, doc qua `Settings.admin_role_of` — CHI de hien thi,
+      khong phai bien kiem quyen (backend luon tu kiem lai). */
+  admin_role?: AdminRole;
+  /** Chi co o CHI TIET mot tai khoan (`/api/admin/users/{id}`). `null` =
+      khong doc duoc tu Appwrite Users API (tai khoan khong ton tai native,
+      truong hop hau nhu khong xay ra vi user_id luon den tu Auth). */
+  account?: AdminAccountStatus | null;
+  sessions?: AdminAccountSession[];
+}
+
+/** Trang thai tai khoan NATIVE (Appwrite Auth) — TACH BACH voi
+    `author_status` (quyen xuat ban). `enabled=false` = khoa dang nhap HOAN
+    TOAN, o moi duong (email lan OAuth). */
+export interface AdminAccountStatus {
+  user_id: string;
+  email: string;
+  name: string;
+  enabled: boolean;
+  email_verified: boolean;
+  phone_verified: boolean;
+  registered_at: string;
+}
+
+/** Mot phien dang nhap, doc tu Appwrite Users API. */
+export interface AdminAccountSession {
+  session_id: string;
+  provider: string;
+  ip: string;
+  os_name: string;
+  client_name: string;
+  device_name: string;
+  country_name: string;
+  current: boolean;
+  created_at: string;
 }
 
 export interface AdminApplication {
@@ -1259,16 +1451,34 @@ export interface AdminApplication {
   user?: AdminUser | null;
 }
 
+/** Vi du tu vung `action` hien tai (server/scripts/setup_appwrite.py) — danh
+    sach That con dai hon, kieu string de khong phai doi frontend moi khi
+    backend mo rong enum. */
+export type AdminAuditAction =
+  | "author_approved" | "author_rejected"
+  | "author_suspended" | "author_restored"
+  | "post_removed" | "post_restored"
+  | "comment_removed" | "comment_restored"
+  | "report_resolved" | "report_dismissed"
+  | "user_suspend" | "user_unsuspend" | "user_session_terminate"
+  | "user_role_change" | "user_delete"
+  | "content_unpublish" | "content_restore"
+  | "trusted_source_add" | "trusted_source_disable" | "trusted_source_enable"
+  | "youtube_mapping_create" | "youtube_mapping_update"
+  | "auto_import_approve" | "auto_import_reject" | "auto_publish_toggle"
+  | (string & {});
+
 export interface ModerationEvent {
   event_id: string;
-  action:
-    | "author_approved"
-    | "author_rejected"
-    | "author_suspended"
-    | "author_restored";
+  action: AdminAuditAction;
   target_user_id: string;
   actor_id: string;
+  /** Admin Control Center V2 — rỗng cho bản ghi cũ trước migration. */
+  actor_role?: AdminRole | "";
+  target_type?: string;
+  target_id?: string;
   note: string;
+  metadata?: string;
   created_at: string;
 }
 
@@ -1277,8 +1487,201 @@ export interface AdminNovel extends Novel {
   owner: { display_name: string; username: string } | null;
 }
 
+/** Mot dong trong danh sach series cho khu quan tri (Phase 4). */
+export interface AdminAnimationSeriesRow extends AnimationSeries {
+  owner: { display_name: string; username: string } | null;
+  episode_count: number;
+  related_novel: { novel_id: string; title: string } | null;
+}
+
+/** Chi tiet MOT series cho khu quan tri — kem TOAN BO tap (ke ca da bi go)
+    va lich su kiem duyet cua CHINH series (khong phai cua tung tap). */
+export interface AdminAnimationSeriesDetail {
+  series: AnimationSeries;
+  owner: { display_name: string; username: string } | null;
+  related_novel: { novel_id: string; title: string; state: PublishState } | null;
+  episodes: AnimationEpisode[];
+  events: ModerationEvent[];
+}
+
+// -- Trusted Video Sources (Phase 5, Admin Control Center V2) ---------------
+//
+// Kieu khop `to_dict()` cua `server/trusted_source_domain.py`. YouTube API
+// key KHONG BAO GIO xuat hien o day — backend giu rieng, frontend chi thay
+// KET QUA da tra cuu (ten kenh, thumbnail...).
+
+export type TrustedSourceType =
+  | "youtube_channel" | "youtube_playlist" | "youtube_video"
+  | "direct_hls" | "direct_mp4";
+
+export type SubscriptionStatus = "none" | "pending" | "active" | "expired" | "failed";
+
+/** Vong doi MOT video phat hien duoc — xem docstring `ImportStatus` phia
+    server de biet y nghia day du cua tung gia tri. */
+export type VideoImportStatus =
+  | "new" | "pending" | "auto_imported" | "auto_published" | "imported"
+  | "rejected" | "ignored" | "duplicate" | "conflict" | "unavailable" | "failed";
+
+export interface TrustedSource {
+  source_id: string;
+  source_type: TrustedSourceType;
+  youtube_channel_id: string;
+  youtube_playlist_id: string;
+  youtube_video_id: string;
+  display_name: string;
+  thumbnail_url: string;
+  enabled: boolean;
+  auto_discover: boolean;
+  auto_import: boolean;
+  auto_publish: boolean;
+  minimum_confidence: number;
+  created_by: string;
+  last_scan_at: string;
+  last_success_at: string;
+  last_error_at: string;
+  last_error_message: string;
+  subscription_status: SubscriptionStatus;
+  subscription_expires_at: string;
+  /** Phase 6 (WebSub) — lan gan nhat THU dang ky/gia han, bat ke thanh cong. */
+  last_subscription_attempt_at: string;
+  /** Phase 6 — lan gan nhat NHAN duoc mot thong bao THAT tu hub. */
+  last_notification_at: string;
+  /** Phase 6 — thong diep loi AN TOAN gan nhat lien quan WebSub. KHONG BAO
+      GIO co truong bi mat (`websub_secret`) — xem `TrustedSource.to_dict()`
+      phia server, day la ranh gioi an toan duy nhat. */
+  last_websub_error: string;
+  /** Phase 6 — lan gan nhat doi chieu dinh ky thanh cong (doc lap voi
+      `last_scan_at`, von la quet THU CONG). */
+  last_successful_sync_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminTrustedSourceRow extends TrustedSource {
+  mapping_count: number;
+}
+
+export interface SeriesMapping {
+  mapping_id: string;
+  trusted_source_id: string;
+  animation_series_id: string;
+  aliases: string[];
+  include_keywords: string[];
+  exclude_keywords: string[];
+  /** `null` = ke thua nguong/co cua nguon (`TrustedSource`). */
+  minimum_confidence: number | null;
+  auto_import: boolean | null;
+  auto_publish: boolean | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminSeriesMappingRow extends SeriesMapping {
+  series_title: string;
+}
+
+export interface VideoImport {
+  import_id: string;
+  trusted_source_id: string;
+  youtube_video_id: string;
+  title: string;
+  channel_id: string;
+  channel_title: string;
+  thumbnail_url: string;
+  published_at: string;
+  duration_seconds: number;
+  detected_mapping_id: string;
+  detected_series_id: string;
+  detected_episode_number: number | null;
+  confidence: number;
+  signals: string[];
+  status: VideoImportStatus;
+  reason: string;
+  created_episode_id: string;
+  reviewed_by: string;
+  reviewed_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminVideoImportRow extends VideoImport {
+  source_display_name: string;
+  series_title: string;
+}
+
+/** Ket qua xem truoc MOT url/ID YouTube — CHUA tao gi ca, xem
+    `adminApi.previewTrustedSourceUrl`. */
+export interface TrustedSourcePreview {
+  source_type: TrustedSourceType;
+  youtube_channel_id: string;
+  youtube_playlist_id: string;
+  youtube_video_id: string;
+  display_name: string;
+  thumbnail_url: string;
+  channel_title: string;
+  channel_thumbnail_url?: string;
+  item_count?: number;
+}
+
+export interface AdminTrustedSourceDetail {
+  source: TrustedSource;
+  mappings: AdminSeriesMappingRow[];
+  recent_imports: VideoImport[];
+  /** Phase 6 — su thật TOÀN CỤC (không theo từng nguồn): `false` khi backend
+      CHƯA có URL callback công khai (`YOUTUBE_WEBSUB_CALLBACK_BASE_URL`) —
+      hiện "Chưa cấu hình" thay vì một trạng thái đăng ký bịa đặt. */
+  websub_configured: boolean;
+}
+
+/** Ket qua MOT lan "Quet video co san" — xem `TrustedSourceService.scan_source`. */
+export interface TrustedSourceScanResult {
+  detected: number;
+  matched: number;
+  pending: number;
+  auto_imported: number;
+  auto_published: number;
+  excluded: number;
+  conflicts: number;
+  duplicates: number;
+  already_tracked: number;
+  next_page_token: string;
+}
+
+export interface AdminImageStudioSpending {
+  month: string;
+  spent_usd: number;
+  budget_usd: number;
+  warning_usd: number;
+  kill_switch_engaged: boolean;
+  active_concurrent: number;
+  max_concurrent: number;
+  shared_premium_enabled_config: boolean;
+  shared_premium_configured: boolean;
+  /** Phase 7 — trang AI/Credits: tinh trang van hanh cac san pham AI khac. */
+  translation_jobs_by_status: { completed: number; failed: number; cancelled: number; in_progress: number };
+  tts_jobs_by_status: { pending: number; running: number; completed: number; failed: number };
+  byok_connections_by_status: Record<string, number>;
+  wallet_configured: boolean;
+  wallet_note: string;
+}
+
 export const adminApi = {
   overview: () => request<AdminOverview>("/api/admin/overview"),
+
+  /** Phase 7 — chi tiet phan tich, TACH khoi dashboard chinh. */
+  analyticsDetail: (range: PhamViPhanTich = "7d") =>
+    request<AdminAnalyticsDetail>(`/api/admin/analytics/detail?range=${range}`),
+
+  /** AI / Credits (Admin Control Center V2) — chi tieu Image Studio. */
+  imageStudioSpending: () =>
+    request<AdminImageStudioSpending>("/api/admin/image-studio/spending"),
+
+  /** CHI OWNER goi duoc — server tu choi 403 voi vai tro thap hon. */
+  imageStudioKillSwitch: (engaged: boolean) =>
+    request<{ kill_switch_engaged: boolean }>(
+      "/api/admin/image-studio/kill-switch",
+      { method: "POST", body: JSON.stringify({ engaged }) },
+    ),
 
   applications: (status = "", limit = 25, offset = 0) =>
     request<{ applications: AdminApplication[]; total: number }>(
@@ -1328,15 +1731,265 @@ export const adminApi = {
   user: (userId: string) =>
     request<{ user: AdminUser }>(`/api/admin/users/${encodeURIComponent(userId)}`),
 
+  /** Khoa dang nhap HOAN TOAN — TACH BACH voi `suspend()` o tren (chi chan
+      xuat ban). Phase 3, Admin Control Center V2. */
+  suspendAccount: (userId: string, note = "") =>
+    request<{ account: AdminAccountStatus }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/suspend`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  unsuspendAccount: (userId: string, note = "") =>
+    request<{ account: AdminAccountStatus }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/unsuspend`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  terminateSession: (userId: string, sessionId: string, note = "") =>
+    request<{ terminated: boolean }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sessionId)}/terminate`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
+  terminateAllSessions: (userId: string, note = "") =>
+    request<{ terminated_count: number }>(
+      `/api/admin/users/${encodeURIComponent(userId)}/sessions/terminate-all`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    ),
+
   novels: (q = "", state = "", limit = 25, offset = 0) =>
     request<{ novels: AdminNovel[]; total: number }>(
       `/api/admin/novels?q=${encodeURIComponent(q)}&state=${state}` +
         `&limit=${limit}&offset=${offset}`,
     ),
 
-  events: (limit = 50) =>
-    request<{ events: ModerationEvent[]; total: number }>(
-      `/api/admin/events?limit=${limit}`,
+  events: (
+    limit = 50,
+    opts: {
+      offset?: number; targetUserId?: string; targetType?: string;
+      targetId?: string; action?: string;
+    } = {},
+  ) => {
+    const p = new URLSearchParams({ limit: String(limit) });
+    if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.targetUserId) p.set("target_user_id", opts.targetUserId);
+    if (opts.targetType) p.set("target_type", opts.targetType);
+    if (opts.targetId) p.set("target_id", opts.targetId);
+    if (opts.action) p.set("action", opts.action);
+    return request<{ events: ModerationEvent[]; total: number }>(
+      `/api/admin/events?${p.toString()}`,
+    );
+  },
+
+  // -- Animation (Phase 4, Admin Control Center V2) ------------------------
+  //
+  // Kiem duyet series/tap: go xuong (`moderation_state`) TACH BACH voi
+  // `state` xuat ban cua chu so huu — xem `AnimationSeries.moderation_state`.
+
+  animationSeries: (
+    opts: {
+      q?: string; state?: "" | "draft" | "published";
+      sort?: "newest" | "oldest"; limit?: number; offset?: number;
+    } = {},
+  ) => {
+    const p = new URLSearchParams({
+      q: opts.q ?? "", state: opts.state ?? "", sort: opts.sort ?? "newest",
+      limit: String(opts.limit ?? 25), offset: String(opts.offset ?? 0),
+    });
+    return request<{ series: AdminAnimationSeriesRow[]; total: number;
+                    limit: number; offset: number }>(
+      `/api/admin/animation/series?${p.toString()}`,
+    );
+  },
+
+  animationSeriesDetail: (seriesId: string) =>
+    request<AdminAnimationSeriesDetail>(
+      `/api/admin/animation/series/${encodeURIComponent(seriesId)}`,
+    ),
+
+  unpublishAnimationSeries: (seriesId: string, reason: string) =>
+    request<{ series: AnimationSeries }>(
+      `/api/admin/animation/series/${encodeURIComponent(seriesId)}/unpublish`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  restoreAnimationSeries: (seriesId: string) =>
+    request<{ series: AnimationSeries }>(
+      `/api/admin/animation/series/${encodeURIComponent(seriesId)}/restore`,
+      { method: "POST", body: "{}" },
+    ),
+
+  unpublishAnimationEpisode: (episodeId: string, reason: string) =>
+    request<{ episode: AnimationEpisode }>(
+      `/api/admin/animation/episodes/${encodeURIComponent(episodeId)}/unpublish`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  restoreAnimationEpisode: (episodeId: string) =>
+    request<{ episode: AnimationEpisode }>(
+      `/api/admin/animation/episodes/${encodeURIComponent(episodeId)}/restore`,
+      { method: "POST", body: "{}" },
+    ),
+
+  // -- Trusted Video Sources (Phase 5, Admin Control Center V2) ------------
+  //
+  // Xem/danh sach: MODERATOR tro len. Them/sua/xoa/quet/nhap: CHI ADMIN/OWNER
+  // (xem `admin_or_owner_profile` phia server) — day la hanh dong xac nhan
+  // tin cay/tao noi dung that, khac voi kiem duyet thong thuong.
+  //
+  // Loi 503 = YouTube Data API CHUA CAU HINH — hien qua `<ChuaCauHinh>`,
+  // khong phai mot thong bao loi chung.
+
+  previewTrustedSourceUrl: (url: string) =>
+    request<TrustedSourcePreview>("/api/admin/animation/sources/preview", {
+      method: "POST", body: JSON.stringify({ url }),
+    }),
+
+  trustedSources: (
+    opts: { q?: string; enabled?: boolean; limit?: number; offset?: number } = {},
+  ) => {
+    const p = new URLSearchParams({
+      q: opts.q ?? "", limit: String(opts.limit ?? 25), offset: String(opts.offset ?? 0),
+    });
+    if (opts.enabled !== undefined) p.set("enabled", String(opts.enabled));
+    return request<{ sources: AdminTrustedSourceRow[]; total: number;
+                    limit: number; offset: number }>(
+      `/api/admin/animation/sources?${p.toString()}`,
+    );
+  },
+
+  createTrustedSource: (payload: {
+    source_type: TrustedSourceType; youtube_channel_id?: string;
+    youtube_playlist_id?: string; youtube_video_id?: string; display_name: string;
+    thumbnail_url?: string; auto_discover?: boolean; auto_import?: boolean;
+    auto_publish?: boolean; minimum_confidence?: number;
+  }) =>
+    request<{ source: TrustedSource }>("/api/admin/animation/sources", {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+
+  trustedSourceDetail: (sourceId: string) =>
+    request<AdminTrustedSourceDetail>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}`,
+    ),
+
+  updateTrustedSource: (sourceId: string, fields: Partial<{
+    display_name: string; auto_discover: boolean; auto_import: boolean;
+    auto_publish: boolean; minimum_confidence: number;
+  }>) =>
+    request<{ source: TrustedSource }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}`,
+      { method: "PATCH", body: JSON.stringify(fields) },
+    ),
+
+  setTrustedSourceEnabled: (sourceId: string, enabled: boolean) =>
+    request<{ source: TrustedSource }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/enabled`,
+      { method: "POST", body: JSON.stringify({ enabled }) },
+    ),
+
+  removeTrustedSource: (sourceId: string) =>
+    request<{ ok: boolean }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}`,
+      { method: "DELETE" },
+    ),
+
+  scanTrustedSource: (
+    sourceId: string, opts: { pageToken?: string; maxPages?: number } = {},
+  ) =>
+    request<TrustedSourceScanResult>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/scan`,
+      { method: "POST", body: JSON.stringify({
+        page_token: opts.pageToken ?? "", max_pages: opts.maxPages ?? 2 }) },
+    ),
+
+  // -- WebSub / doi chieu dinh ky (Phase 6) --------------------------------
+  //
+  // 503 = chưa cấu hình URL callback công khai (backend đang chạy cục bộ,
+  // YouTube không gọi tới được) — hiện qua `<ChuaCauHinh>`, không phải lỗi.
+
+  subscribeTrustedSource: (sourceId: string) =>
+    request<{ source: TrustedSource }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/subscribe`,
+      { method: "POST", body: "{}" },
+    ),
+
+  unsubscribeTrustedSource: (sourceId: string) =>
+    request<{ source: TrustedSource }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/unsubscribe`,
+      { method: "POST", body: "{}" },
+    ),
+
+  runReconciliation: (sourceId: string = "") =>
+    request<{ sources_checked: number; sources_failed: number; videos_detected: number }>(
+      "/api/admin/animation/reconciliation/run",
+      { method: "POST", body: JSON.stringify({ source_id: sourceId }) },
+    ),
+
+  createSeriesMapping: (sourceId: string, payload: {
+    animation_series_id: string; aliases?: string[]; include_keywords?: string[];
+    exclude_keywords?: string[]; minimum_confidence?: number | null;
+    auto_import?: boolean | null; auto_publish?: boolean | null;
+  }) =>
+    request<{ mapping: SeriesMapping }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/mappings`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  updateSeriesMapping: (mappingId: string, fields: Partial<{
+    aliases: string[]; include_keywords: string[]; exclude_keywords: string[];
+    minimum_confidence: number | null; auto_import: boolean | null;
+    auto_publish: boolean | null;
+  }>) =>
+    request<{ mapping: SeriesMapping }>(
+      `/api/admin/animation/mappings/${encodeURIComponent(mappingId)}`,
+      { method: "PATCH", body: JSON.stringify(fields) },
+    ),
+
+  removeSeriesMapping: (mappingId: string) =>
+    request<{ ok: boolean }>(
+      `/api/admin/animation/mappings/${encodeURIComponent(mappingId)}`,
+      { method: "DELETE" },
+    ),
+
+  videoImports: (
+    opts: { status?: string; trustedSourceId?: string; seriesId?: string;
+           limit?: number; offset?: number } = {},
+  ) => {
+    const p = new URLSearchParams({
+      status_filter: opts.status ?? "",
+      trusted_source_id: opts.trustedSourceId ?? "", series_id: opts.seriesId ?? "",
+      limit: String(opts.limit ?? 25), offset: String(opts.offset ?? 0),
+    });
+    return request<{ imports: AdminVideoImportRow[]; total: number;
+                    limit: number; offset: number }>(
+      `/api/admin/animation/imports?${p.toString()}`,
+    );
+  },
+
+  setImportSeries: (importId: string, seriesId: string, episodeNumber: number | null) =>
+    request<{ import: VideoImport }>(
+      `/api/admin/animation/imports/${encodeURIComponent(importId)}/series`,
+      { method: "PATCH", body: JSON.stringify({
+        series_id: seriesId, episode_number: episodeNumber }) },
+    ),
+
+  importVideo: (importId: string, publish: boolean) =>
+    request<{ import: VideoImport }>(
+      `/api/admin/animation/imports/${encodeURIComponent(importId)}/import`,
+      { method: "POST", body: JSON.stringify({ publish }) },
+    ),
+
+  rejectVideoImport: (importId: string, reason: string) =>
+    request<{ import: VideoImport }>(
+      `/api/admin/animation/imports/${encodeURIComponent(importId)}/reject`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  ignoreVideoImport: (importId: string) =>
+    request<{ import: VideoImport }>(
+      `/api/admin/animation/imports/${encodeURIComponent(importId)}/ignore`,
+      { method: "POST", body: "{}" },
     ),
 };
 
@@ -1856,8 +2509,12 @@ export const adminSocial = {
       { method: "POST", body: "{}" },
     ),
 
-  /** Duyệt bình luận toàn hệ thống, tách bài đăng / chương. */
-  browseComments: (targetKind: "" | "chapter" = "", limit = 25, offset = 0) =>
+  /** Duyệt bình luận toàn hệ thống, tách bài đăng / chương / tập Animation. */
+  browseComments: (
+    targetKind: "" | "chapter" | "animation_episode" = "",
+    limit = 25,
+    offset = 0,
+  ) =>
     request<{
       items: AdminComment[];
       total: number;

@@ -759,6 +759,18 @@ main { overflow-x: clip; }
    nen. Khong tang CO chu — chi tang do dam va do sang. */
 .section-title { font-size: var(--t-lg); font-weight: 700; color: var(--text); }
 
+/* Tieu de con trong mot khoi (vd tung nhom o Dashboard quan tri V2) — nho
+   hon .section-title, van co the ket hop voi icon inline. */
+.section-title-sm {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--t-base);
+  font-weight: 650;
+  color: var(--text-2);
+  margin: 0 0 var(--s2);
+}
+
 /*
   HANG DANH MUC: mot dau vien vang nho, mot nhan, roi mot duong ngan tan dan.
 
@@ -4416,12 +4428,28 @@ body.co-mini { padding-bottom: 74px; }
   top: 86px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--s3);
   padding: var(--s2);
   border: 1px solid var(--kinh-vien);
   border-radius: var(--r3);
   background: #080a14c4;
 }
+/* Nhom dieu huong (Admin Control Center V2) — Content/Animation/Moderation
+   gop cac trang lien quan duoi MOT tieu de nho, khong phai the toggle rieng:
+   tren desktop day chi la khoang cach truc quan; tren mobile (duoi day) toan
+   bo .admin-nav chuyen thanh mot hang cuon ngang, nen nhom van la cac muc
+   phang ke tiep nhau, chi khac o khoang cach.  */
+.admin-nhom { display: flex; flex-direction: column; gap: 2px; }
+.admin-nhom-nhan {
+  font-size: var(--t-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 4px 12px 2px;
+}
+/* Nut gap/mo cho mobile/tablet — AN o desktop, .admin-nav luon hien o do. */
+.admin-nut-mobile { display: none; }
 .admin-muc {
   display: flex;
   align-items: center;
@@ -4447,6 +4475,19 @@ body.co-mini { padding-bottom: 74px; }
 .admin-luoi { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .admin-o-ghi { margin-top: 4px; }
 .admin-rong { text-align: center; color: var(--text-3); padding: var(--s6); }
+
+/* Nhan VAI TRO canh tieu de "Quản trị" (Admin Control Center V2, A3). Mau
+   theo THU BAC, khong trung mau voi .tt-* (trang thai kiem duyet) o duoi —
+   hai he thong nhan khac nhau khong duoc doc nham la cung mot loai. */
+.admin-badge-vaitro { margin-left: var(--s2); font-size: var(--t-xs); }
+.admin-badge-owner { color: #fbbf24; background: #fbbf2422; border-color: #fbbf2455; }
+.admin-badge-admin { color: #60a5fa; background: #60a5fa22; border-color: #60a5fa55; }
+.admin-badge-moderator { color: #a3a3a3; background: #a3a3a322; border-color: #a3a3a355; }
+
+/* Khoi "chua cau hinh" (Trusted Sources/Traffic khi chua co du lieu) — the ro
+   rang thay cho mot luoi so 0 gay hieu lam. */
+.admin-chua-cau-hinh { color: var(--text-2); }
+.admin-chua-cau-hinh strong { color: var(--text); }
 
 /* Loi nhac o dau bang: mot hang doi dang cho la thu duy nhat can hanh dong. */
 .admin-nhac {
@@ -4554,7 +4595,11 @@ body.co-mini { padding-bottom: 74px; }
 .admin-bang tbody tr:last-child td { border-bottom: 0; }
 .admin-bang tbody tr:hover { background: #ffffff05; }
 .admin-so { text-align: right; }
-.admin-nguoi { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.admin-nguoi {
+  display: flex; align-items: center; gap: var(--s2); min-width: 0;
+  color: inherit; text-decoration: none;
+}
+.admin-nguoi:hover .admin-hang-chu strong { text-decoration: underline; }
 .admin-email { color: var(--text-2); }
 .admin-thao-tac { flex-wrap: nowrap; gap: 6px; }
 
@@ -4573,17 +4618,21 @@ body.co-mini { padding-bottom: 74px; }
 .admin-luc { margin-left: auto; flex: 0 0 auto; white-space: nowrap; }
 
 @media (max-width: 900px) {
-  /* Cot dieu huong thanh mot hang cuon ngang o tren. */
+  /* Cot dieu huong GAP/MO duoc (Admin Control Center V2) — thay cho hang
+     cuon ngang cu: voi so muc tang gan gap doi (them Content/Animation/
+     Analytics/AI-Credits/System), mot hang ngang se qua dai de cuon co ich.
+     Mac dinh AN, nut "Menu quản trị" (`.admin-nut-mobile`, chi hien o day)
+     dieu khien qua `aria-expanded` + class `.admin-nav-mo`. */
   .admin-khung { grid-template-columns: minmax(0, 1fr); }
+  .admin-nut-mobile { display: inline-flex; }
   .admin-nav {
+    display: none;
     position: static;
-    flex-direction: row;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-direction: column;
+    max-height: 70vh;
+    overflow-y: auto;
   }
-  .admin-nav::-webkit-scrollbar { display: none; }
-  .admin-muc { border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; }
-  .admin-muc[aria-current="page"] { border-left: 0; border-bottom-color: var(--brand); }
+  .admin-nav.admin-nav-mo { display: flex; }
   /* Hang doi: danh sach tren, chi tiet duoi. */
   .admin-doi { grid-template-columns: minmax(0, 1fr); }
   .admin-su-kien { flex-wrap: wrap; }

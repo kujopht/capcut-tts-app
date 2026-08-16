@@ -128,7 +128,8 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "listened_seconds", "created_at",
     ),
     COL_EVENTS: (
-        "event_id", "action", "target_user_id", "actor_id", "note", "created_at",
+        "event_id", "action", "target_user_id", "actor_id", "actor_role",
+        "target_type", "target_id", "note", "metadata", "created_at",
     ),
 }
 
@@ -192,6 +193,22 @@ def _application_from(row: Dict[str, Any]) -> "AuthorApplication":
 def q_equal(attribute: str, *values: Any) -> str:
     return json.dumps({"method": "equal", "attribute": attribute,
                        "values": list(values)})
+
+
+def q_greater_equal(attribute: str, value: Any) -> str:
+    """
+    `attribute >= value` — dung cho khoang thoi gian (vd `created_at >=` mot
+    moc ISO) khi dem "moi dang ky hom nay/7 ngay/30 ngay" (Admin Control
+    Center V2, A1) MA KHONG can keo ban ghi ve — ket hop `q_limit(1)` de doc
+    `total` nhu cac phep dem bi chan khac trong tep nay.
+
+    TEN PHUONG THUC THAT cua Appwrite la `greaterThanEqual`, KHONG PHAI
+    `greaterEqual` — da doan sai va bi Appwrite tu choi ("Invalid query
+    method: greaterEqual") khi smoke test that tren appwrite-dev.fanfic.world,
+    khong phai chi tu tai lieu.
+    """
+    return json.dumps({"method": "greaterThanEqual", "attribute": attribute,
+                       "values": [value]})
 
 
 def q_order_asc(attribute: str) -> str:
@@ -1046,6 +1063,22 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             return False
         return result.get("status") == "committed"
 
+    def total_jobs(self) -> int:
+        """Tong so job TTS TREN TOAN NEN TANG — bang dieu khien quan tri
+        (Admin Control Center V2, A1). `limit(1)` + doc `total`."""
+        return self._page(COL_JOBS, [q_limit(1)])[1]
+
+    def count_jobs(self, *, status: Optional[JobStatus] = None,
+                  created_after: str = "") -> int:
+        """Bo dem BI CHAN cho bang dieu khien quan tri (Phase 7 analytics) —
+        loc THEO status/ngay tao qua Appwrite, KHONG quet toan bang."""
+        queries: List[str] = [q_limit(1)]
+        if status is not None:
+            queries.append(q_equal("status", status.value))
+        if created_after:
+            queries.append(q_greater_equal("created_at", created_after))
+        return self._page(COL_JOBS, queries)[1]
+
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """
         Lat trang: so job `running` khong co tran tren.
@@ -1281,6 +1314,17 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             q_equal("state", PublishState.PUBLISHED.value), q_limit(1)])
         return total
 
+    def total_novels(self) -> int:
+        """Tong so truyen o MOI trang thai (nhap + xuat ban) — bang dieu khien
+        quan tri (Admin Control Center V2, A1). Cung idiom bi chan nhu
+        `total_published_novels`."""
+        return self._page(COL_NOVELS, [q_limit(1)])[1]
+
+    def total_chapters(self) -> int:
+        """Tong so chuong TREN TOAN NEN TANG — mot phep dem bi chan, khong
+        phai vong lap tren tung truyen (do se la N+1)."""
+        return self._page(COL_CHAPTERS, [q_limit(1)])[1]
+
     def sum_qualified_listens(self) -> int:
         """
         Tong tu ban TONG HOP, khong tu bang su kien.
@@ -1471,11 +1515,31 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         return event
 
     def list_events(self, target_user_id: str = "", limit: int = 50,
-                    offset: int = 0) -> Tuple[List[ModerationEvent], int]:
-        """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra"."""
+                    offset: int = 0, target_type: str = "",
+                    target_id: str = "", action: str = "",
+                    created_after: str = "") -> Tuple[List[ModerationEvent], int]:
+        """
+        Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra".
+
+        `target_type`/`action` (Admin Control Center V2, A5) loc THEM cho
+        `/admin/audit-log` — CHI equal, khong tim mo (nhat ky khong can tim
+        chuoi con, chi can loc dung loai/dung hanh dong). `target_id` (Phase
+        4) loc dung MOT doi tuong (vd mot series/tap Animation cu the) — dung
+        cho lich su kiem duyet trong trang chi tiet, KHONG phai N truy van
+        rieng cho tung tap cua series do. `created_after` (Phase 7 analytics)
+        loc theo ngay tao — dung cho bo dem theo khoang thoi gian.
+        """
         queries: List[str] = []
         if target_user_id:
             queries.append(q_equal("target_user_id", target_user_id))
+        if target_type:
+            queries.append(q_equal("target_type", target_type))
+        if target_id:
+            queries.append(q_equal("target_id", target_id))
+        if action:
+            queries.append(q_equal("action", action))
+        if created_after:
+            queries.append(q_greater_equal("created_at", created_after))
         queries += [q_order_desc("created_at"), q_limit(limit), q_offset(offset)]
         rows, total = self._page(COL_EVENTS, queries)
         return [
@@ -1483,7 +1547,11 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                 action=str(r.get("action") or ""),
                 target_user_id=str(r.get("target_user_id") or ""),
                 actor_id=str(r.get("actor_id") or ""),
+                actor_role=str(r.get("actor_role") or ""),
+                target_type=str(r.get("target_type") or ""),
+                target_id=str(r.get("target_id") or ""),
                 note=str(r.get("note") or ""),
+                metadata=str(r.get("metadata") or ""),
                 event_id=str(r.get("event_id") or r.get("$id") or ""),
                 created_at=str(r.get("created_at") or ""),
             )

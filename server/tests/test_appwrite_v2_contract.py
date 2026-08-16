@@ -29,8 +29,10 @@ from server.domain import (
     AuthorApplication,
     AuthorStats,
     AuthorStatus,
+    JobStatus,
     ListenCredit,
     ModerationEvent,
+    TtsJob,
 )
 
 
@@ -421,6 +423,59 @@ class HopDongV2(unittest.TestCase):
         for ten, kho in self._cac_kho():
             for cam in ("update_event", "delete_event", "save_event"):
                 self.assertFalse(hasattr(kho, cam), f"{ten}.{cam}")
+
+    def test_loc_nhat_ky_theo_ngay_tao_phase7(self):
+        for ten, kho in self._cac_kho():
+            kho.record_event(ModerationEvent(
+                action="reconciliation_run", target_user_id="", event_id="e_cu",
+                created_at="2026-01-01T00:00:00+00:00"))
+            kho.record_event(ModerationEvent(
+                action="reconciliation_run", target_user_id="", event_id="e_moi",
+                created_at="2026-08-16T00:00:00+00:00"))
+            _, tong = kho.list_events(
+                action="reconciliation_run",
+                created_after="2026-08-01T00:00:00+00:00", limit=1)
+            self.assertEqual(tong, 1, ten)
+
+    # -- tts jobs (Phase 7 analytics: count_jobs) -----------------------------
+
+    def test_count_jobs_loc_theo_status_va_ngay_phase7(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.create_job(TtsJob(
+                    owner_id="u1", chapter_id="c1", voice_id="v1",
+                    content_hash="h1", status=JobStatus.COMPLETED,
+                    created_at="2026-01-01T00:00:00+00:00"))
+                kho.create_job(TtsJob(
+                    owner_id="u1", chapter_id="c2", voice_id="v1",
+                    content_hash="h2", status=JobStatus.FAILED,
+                    created_at="2026-08-16T00:00:00+00:00"))
+                self.assertEqual(
+                    kho.count_jobs(status=JobStatus.COMPLETED), 1, ten)
+                self.assertEqual(
+                    kho.count_jobs(status=JobStatus.FAILED), 1, ten)
+                self.assertEqual(
+                    kho.count_jobs(created_after="2026-08-01T00:00:00+00:00"),
+                    1, ten)
+                self.assertEqual(kho.count_jobs(), 2, ten)
+
+    # -- comments (Phase 7 analytics: count_comments created_after) ----------
+
+    def test_count_comments_theo_ngay_tao_phase7(self):
+        from server.domain import Comment
+
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.create_comment(Comment(
+                    comment_id="cm_cu", post_id="p1", author_user_id="u1",
+                    text="cu", created_at="2026-01-01T00:00:00+00:00"))
+                kho.create_comment(Comment(
+                    comment_id="cm_moi", post_id="p1", author_user_id="u1",
+                    text="moi", created_at="2026-08-16T00:00:00+00:00"))
+                self.assertEqual(kho.count_comments(), 2, ten)
+                self.assertEqual(
+                    kho.count_comments(created_after="2026-08-01T00:00:00+00:00"),
+                    1, ten)
 
 
 class QuyenHangTest(unittest.TestCase):

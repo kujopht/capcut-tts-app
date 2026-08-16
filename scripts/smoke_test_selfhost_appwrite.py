@@ -128,6 +128,34 @@ def _chay_kiem_tra(client: httpx.Client, kq: BoKetQua, *, keep_user: bool) -> No
     token = r.json().get("token", "")
     headers = {"Authorization": f"Bearer {token}"}
 
+    # -- dang nhap rieng (phien thu hai, doc lap voi token dang ky) -------
+    r = client.post("/api/auth/login", json={"email": email, "password": "SmokeTest123"})
+    kq.kiem("đăng nhập lại bằng email/password vừa đăng ký", r.status_code == 200,
+           f"HTTP {r.status_code}")
+    login_token = r.json().get("token", "") if r.status_code == 200 else ""
+    login_headers = {"Authorization": f"Bearer {login_token}"}
+
+    r = client.get("/api/auth/me", headers=login_headers)
+    kq.kiem("/api/auth/me trả đúng profile vừa đăng nhập",
+           r.status_code == 200 and r.json().get("profile", {}).get("email") == email,
+           f"HTTP {r.status_code}, email nhận: {r.json().get('profile', {}).get('email')!r}")
+
+    # -- dang xuat: phien BI HUY that o may chu, khong chi xoa token cuc bo
+    r = client.post("/api/auth/logout", headers=login_headers)
+    kq.kiem("đăng xuất trả 200 và da_huy_phien == true",
+           r.status_code == 200 and r.json().get("da_huy_phien") is True,
+           f"HTTP {r.status_code}, thân: {r.json() if r.status_code == 200 else r.text}")
+
+    r = client.get("/api/auth/me", headers=login_headers)
+    kq.kiem("token đã đăng xuất KHÔNG còn dùng được cho /api/auth/me (401)",
+           r.status_code == 401, f"HTTP {r.status_code}")
+
+    # -- dang xuat mot token da het han/khong hop le van tra 200 -----------
+    r = client.post("/api/auth/logout", headers={"Authorization": "Bearer token-khong-hop-le"})
+    kq.kiem("đăng xuất token không hợp lệ vẫn trả 200 (da_huy_phien == false)",
+           r.status_code == 200 and r.json().get("da_huy_phien") is False,
+           f"HTTP {r.status_code}, thân: {r.json() if r.status_code == 200 else r.text}")
+
     # -- tien do doc / streak / quest (idempotency THAT) -----------------
     payload = {"novel_id": "smoke-novel", "chapter_id": "smoke-chapter"}
     r1 = client.post("/api/progress/read", json=payload, headers=headers)

@@ -35,6 +35,7 @@ import {
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
+import { dongHo } from "@/lib/time";
 import { loadYouTubeIframeApi, type YTPlayerInstance } from "@/lib/youtubeIframeApi";
 import { YouTubeFacadePlayer } from "@/components/YouTubeFacadePlayer";
 import { EpisodeComments } from "@/components/EpisodeComments";
@@ -56,6 +57,26 @@ const IFRAME_ID = "anim-watch-player";
     mỗi vài trăm mili-giây như `timeupdate` của thẻ `<video>` thường làm. */
 const KHOANG_BAO_CAO_GIAY = 10;
 
+/** Ma loi cua YouTube IFrame API -> thong bao tieng Viet ro rang (Phan 3,
+    animation-youtube-polish-v1). Video da xoa/rieng tu/tat nhung deu la
+    loi phia CHU video, khong phai loi cua Fanfic — khong doan them chi tiet
+    ngoai tai lieu chinh thuc de tranh noi sai nguyen nhan. */
+function thongBaoLoiVideo(maLoi: number): string {
+  switch (maLoi) {
+    case 2:
+      return "Đường dẫn video không hợp lệ.";
+    case 5:
+      return "Trình phát không hỗ trợ định dạng của video này.";
+    case 100:
+      return "Video này không còn tồn tại (có thể đã bị xoá hoặc đặt ở chế độ riêng tư).";
+    case 101:
+    case 150:
+      return "Chủ video đã tắt tính năng phát trên trang khác cho video này.";
+    default:
+      return "Không thể phát video này lúc này.";
+  }
+}
+
 export default function AnimationWatchPage({
   params,
 }: {
@@ -66,6 +87,10 @@ export default function AnimationWatchPage({
   const toast = useToast();
 
   const [moChonTap, setMoChonTap] = useState(false);
+  const [loiVideo, setLoiVideo] = useState<string | null>(null);
+  // Chi de HIEN THI (thanh tien do trong khung "rap chieu") — KHONG phai
+  // nguon that cho "Tiep tuc xem", van la `/api/progress/watch` o server.
+  const [tienDo, setTienDo] = useState<{ viTri: number; doDai: number } | null>(null);
   const player = useRef<YTPlayerInstance | null>(null);
   const bao = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -89,6 +114,10 @@ export default function AnimationWatchPage({
   const { data, loading, error, missing, reload } = useAsyncData(load);
 
   useEffect(() => {
+    // KHONG can tu reset `loiVideo` o day: trang nay re-mount moi lan doi
+    // route (xem ghi chu o `load()`), nen `useState` da tu ve gia tri dau
+    // `null` cho tap moi — dat them mot `setState` dong bo trong than effect
+    // se vi pham `react-hooks/set-state-in-effect` ma khong giai quyet gi hon.
     return () => {
       if (bao.current) clearInterval(bao.current);
       player.current?.destroy?.();
@@ -100,6 +129,7 @@ export default function AnimationWatchPage({
     const viTri = player.current.getCurrentTime?.();
     const doDai = player.current.getDuration?.();
     if (typeof viTri !== "number" || Number.isNaN(viTri)) return;
+    setTienDo({ viTri, doDai: doDai || 0 });
     api
       .reportWatchProgress(
         data.series.series_id, data.episode.episode_id, viTri, doDai || 0,
@@ -115,9 +145,16 @@ export default function AnimationWatchPage({
       // (nguoi xem vua bam Play) — gan YouTube IFrame API vao CHINH iframe do,
       // khong tao mot iframe thu hai.
       player.current = new YT.Player(IFRAME_ID, {
-        events: { onReady: () => {
-          bao.current = setInterval(guiTienDo, KHOANG_BAO_CAO_GIAY * 1000);
-        } },
+        events: {
+          onReady: () => {
+            guiTienDo();
+            bao.current = setInterval(guiTienDo, KHOANG_BAO_CAO_GIAY * 1000);
+          },
+          onError: (event) => {
+            if (bao.current) clearInterval(bao.current);
+            setLoiVideo(thongBaoLoiVideo(event.data));
+          },
+        },
       });
     } catch {
       // API IFrame khong nap duoc (mang cham/bi chan) — nguoi xem VAN xem
@@ -146,7 +183,13 @@ export default function AnimationWatchPage({
   if (loading) {
     return (
       <div className="page">
-        <div className="sk sk-title" style={{ height: 30, width: "45%" }} />
+        <div className="yt-cinema">
+          <div className="yt-cinema-head">
+            <div className="sk sk-text" style={{ width: "20%", marginBottom: 6 }} />
+            <div className="sk sk-title" style={{ width: "45%" }} />
+          </div>
+          <div className="sk yt-cinema-stage-sk" />
+        </div>
         <SkeletonList count={3} />
       </div>
     );
@@ -188,83 +231,122 @@ export default function AnimationWatchPage({
         </Link>
       </nav>
 
-      <header className="stack-2 reader-head">
-        <span className="eyebrow eyebrow-icon">
-          <IconFilm size={17} /> Đang xem
-        </span>
-        <h1 className="page-title">{episode.title}</h1>
-      </header>
-
-      {/* Truoc/sau + chon tap LUON hien, giong `/listen/[id]`. */}
-      <nav className="row row-spread listen-nav" aria-label="Điều hướng tập">
-        {prevEpisodeId ? (
-          <Link className="btn" href={`/animation/watch/${prevEpisodeId}`}>
-            <span aria-hidden="true">←</span> Tập trước
-          </Link>
-        ) : (
-          <span className="btn" aria-disabled="true">
-            <span aria-hidden="true">←</span> Tập trước
+      <div className="yt-cinema">
+        <header className="yt-cinema-head">
+          <span className="eyebrow eyebrow-icon">
+            <IconFilm size={17} /> Đang xem
           </span>
-        )}
-        <button
-          type="button"
-          className="btn btn-ghost"
-          aria-expanded={moChonTap}
-          onClick={() => setMoChonTap((v) => !v)}
+          <p className="yt-cinema-series truncate">{series.title}</p>
+          <h1 className="page-title yt-cinema-title">{episode.title}</h1>
+        </header>
+
+        {/* Truoc/sau + chon tap LUON hien, giong `/listen/[id]`. */}
+        <nav
+          className="row row-spread listen-nav yt-cinema-toolbar"
+          aria-label="Điều hướng tập"
         >
-          Danh sách tập ({chiSoHienTai}/{episodes.length})
-        </button>
-        {nextEpisodeId ? (
-          <Link className="btn" href={`/animation/watch/${nextEpisodeId}`}>
-            Tập sau <span aria-hidden="true">→</span>
-          </Link>
-        ) : (
-          <span className="btn" aria-disabled="true">
-            Tập sau <span aria-hidden="true">→</span>
-          </span>
-        )}
-      </nav>
+          {prevEpisodeId ? (
+            <Link className="btn" href={`/animation/watch/${prevEpisodeId}`}>
+              <span aria-hidden="true">←</span> Tập trước
+            </Link>
+          ) : (
+            <span className="btn" aria-disabled="true">
+              <span aria-hidden="true">←</span> Tập trước
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            aria-expanded={moChonTap}
+            onClick={() => setMoChonTap((v) => !v)}
+          >
+            Danh sách tập ({chiSoHienTai}/{episodes.length})
+          </button>
+          {nextEpisodeId ? (
+            <Link className="btn" href={`/animation/watch/${nextEpisodeId}`}>
+              Tập sau <span aria-hidden="true">→</span>
+            </Link>
+          ) : (
+            <span className="btn" aria-disabled="true">
+              Tập sau <span aria-hidden="true">→</span>
+            </span>
+          )}
+        </nav>
 
-      {moChonTap ? (
-        <div className="listen-chon-tap" role="region" aria-label="Chọn tập để xem">
-          <div className="anim-ep-list">
-            {episodes.map((ep) => {
-              const dangXem = ep.episode_id === episode.episode_id;
-              return (
-                <Link
-                  key={ep.episode_id}
-                  href={`/animation/watch/${ep.episode_id}`}
-                  className={`card anim-ep-row${dangXem ? " anim-ep-row-active" : ""}`}
-                  aria-current={dangXem ? "true" : undefined}
-                  onClick={() => setMoChonTap(false)}
-                >
-                  <span className="anim-ep-row-num" aria-hidden="true">
-                    {soThuTu.get(ep.episode_id)}
-                  </span>
-                  <span className="truncate list-title">{ep.title}</span>
-                </Link>
-              );
-            })}
+        {moChonTap ? (
+          <div className="listen-chon-tap" role="region" aria-label="Chọn tập để xem">
+            <div className="anim-ep-list">
+              {episodes.map((ep) => {
+                const dangXem = ep.episode_id === episode.episode_id;
+                return (
+                  <Link
+                    key={ep.episode_id}
+                    href={`/animation/watch/${ep.episode_id}`}
+                    className={`card anim-ep-row${dangXem ? " anim-ep-row-active" : ""}`}
+                    aria-current={dangXem ? "true" : undefined}
+                    onClick={() => setMoChonTap(false)}
+                  >
+                    <span className="anim-ep-row-num" aria-hidden="true">
+                      {soThuTu.get(ep.episode_id)}
+                    </span>
+                    <span className="truncate list-title">{ep.title}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="yt-cinema-stage">
+          {loiVideo ? (
+            <div className="card anim-video-loi" role="alert">
+              <p>{loiVideo}</p>
+              <p className="hint">
+                Bạn vẫn có thể chuyển sang tập khác bằng điều hướng phía trên.
+              </p>
+            </div>
+          ) : (
+            <YouTubeFacadePlayer
+              videoId={episode.external_id}
+              title={episode.title}
+              iframeId={IFRAME_ID}
+              onPlay={batDauXem}
+            />
+          )}
+        </div>
+
+        <div className="yt-cinema-foot">
+          {tienDo ? (
+            <div className="yt-cinema-progress">
+              <div className="yt-cinema-progress-bar" aria-hidden="true">
+                <div
+                  className="yt-cinema-progress-fill"
+                  style={{
+                    width: `${
+                      tienDo.doDai > 0
+                        ? Math.min(100, (tienDo.viTri / tienDo.doDai) * 100)
+                        : 0
+                    }%`,
+                  }}
+                />
+              </div>
+              <span className="hint yt-cinema-progress-time">
+                {dongHo(tienDo.viTri)} / {dongHo(tienDo.doDai)}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="row row-tight">
+            <button type="button" className="btn btn-ghost" onClick={chiaSe}>
+              <span aria-hidden="true">↗</span> Chia sẻ
+            </button>
+            {series.related_novel_id ? (
+              <Link className="btn btn-ghost" href={`/novels/${series.related_novel_id}`}>
+                Truyện gốc
+              </Link>
+            ) : null}
           </div>
         </div>
-      ) : null}
-
-      <YouTubeFacadePlayer
-        videoId={episode.external_id}
-        title={episode.title}
-        iframeId={IFRAME_ID}
-        onPlay={batDauXem}
-      />
-
-      <div className="row row-tight">
-        <button type="button" className="btn btn-ghost" onClick={chiaSe}>
-          <span aria-hidden="true">↗</span> Chia sẻ
-        </button>
-        {series.related_novel_id ? (
-          <Link className="btn btn-ghost" href={`/novels/${series.related_novel_id}`}>
-            Truyện gốc
-          </Link>
-        ) : null}
       </div>
 
       <EpisodeComments episodeId={episode.episode_id} />

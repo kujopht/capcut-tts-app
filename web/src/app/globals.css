@@ -5777,6 +5777,65 @@ body.co-mini { padding-bottom: 74px; }
   nap. Khong nap iframe cho toi khi nguoi dung bam Play — xem
   `YouTubeFacadePlayer.tsx`.
 */
+/*
+  Khung "rap chieu" TRANG TRI bao quanh trinh phat (Fanfic Cinema Shell,
+  animation-youtube-polish-v1) — CHI o day, KHONG dat overflow/z-index nao
+  de len tren `.yt-facade`/iframe. Moi trang tri nam trong PADDING cua hop
+  nay, iframe (khi da phat) luon la mot khoi hinh chu nhat nguyen ven, khong
+  bi che/cat mot phan nao — dung yeu cau tuan thu nhung YouTube. Mau accent
+  dung lai `--sac-animation-1/2` da co san o badge/nav Animation, khong bay
+  them bang mau moi cho rieng trang nay.
+*/
+.yt-cinema {
+  position: relative;
+  border-radius: var(--r3);
+  padding: var(--s4);
+  background: linear-gradient(165deg, #1a0d12ee, #0b0d12 60%);
+  border: 1px solid color-mix(in srgb, var(--sac-animation-1) 30%, var(--line));
+  box-shadow: 0 24px 60px -36px color-mix(in srgb, var(--sac-animation-1) 55%, transparent);
+}
+
+.yt-cinema-head { margin-bottom: var(--s3); }
+.yt-cinema-series {
+  margin: 2px 0 0;
+  font-size: var(--t-sm);
+  color: var(--sac-animation-1);
+  font-weight: 600;
+}
+.yt-cinema-title { margin: 2px 0 0; }
+
+.yt-cinema-toolbar { margin-bottom: var(--s3); }
+
+.yt-cinema-stage { margin-bottom: var(--s3); }
+
+/* Cung ty le 16:9 luc dang tai, de khung khong nhay bo cuc khi du lieu ve. */
+.yt-cinema-stage-sk { aspect-ratio: 16 / 9; width: 100%; }
+
+.yt-cinema-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.yt-cinema-progress { display: flex; align-items: center; gap: var(--s3); }
+.yt-cinema-progress-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.yt-cinema-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--sac-animation-1), var(--sac-animation-2));
+  transition: width 0.3s ease;
+}
+.yt-cinema-progress-time { flex: 0 0 auto; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .yt-cinema { padding: var(--s3); }
+}
+
 .yt-facade {
   position: relative;
   aspect-ratio: 16 / 9;
@@ -5837,7 +5896,23 @@ body.co-mini { padding-bottom: 74px; }
 
 .yt-facade-play:hover .yt-facade-play-icon { transform: scale(1.08); }
 
+/* Cung ty le 16:9 voi `.yt-facade` de trang khong nhay bo cuc khi doi tu
+   trinh phat sang thong bao loi (Phan 3, animation-youtube-polish-v1). */
+.anim-video-loi {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  text-align: center;
+  background: var(--bg-2);
+}
+
 .anim-ep-list { display: grid; gap: var(--s2); }
+
+.yt-url-preview-thumb { border-radius: var(--r2); object-fit: cover; flex: 0 0 auto; }
 
 .anim-ep-row {
   display: flex;

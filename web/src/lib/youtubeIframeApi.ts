@@ -19,6 +19,15 @@ interface YTPlayerOptions {
   events?: {
     onReady?: (event: { target: YTPlayerInstance }) => void;
     onStateChange?: (event: { data: number; target: YTPlayerInstance }) => void;
+    /**
+     * Ma loi theo tai lieu YouTube IFrame API:
+     * 2 = tham so (ID video) khong hop le; 5 = loi trinh phat HTML5;
+     * 100 = video khong ton tai/da bi xoa/rieng tu; 101/150 = chu video
+     * khong cho phep nhung o trang khac. Dung de hien thong bao tieng Viet
+     * ro rang thay vi de nguoi xem nhin mot iframe trang/ket cung (Phan 3,
+     * animation-youtube-polish-v1).
+     */
+    onError?: (event: { data: number }) => void;
   };
 }
 

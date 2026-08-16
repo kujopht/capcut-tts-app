@@ -10,8 +10,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useCallback, useState } from "react";
-import { api, type AnimationEpisode, type AnimationSeries } from "@/lib/api";
+import { use, useCallback, useEffect, useState } from "react";
+import {
+  api,
+  type AnimationEpisode,
+  type AnimationSeries,
+  type Novel,
+} from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import {
@@ -21,6 +26,8 @@ import {
   formatDate,
 } from "@/components/ui";
 import { NovelCover } from "@/components/NovelCover";
+import { YoutubeUrlPreview } from "@/components/YoutubeUrlPreview";
+import { parseYoutubeVideoId } from "@/lib/youtubeUrl";
 
 export default function AnimationSeriesPage({
   params,
@@ -42,10 +49,11 @@ export default function AnimationSeriesPage({
   // -- them tap --------------------------------------------------------------
   const [tenTap, setTenTap] = useState("");
   const [urlTap, setUrlTap] = useState("");
+  const urlTapHopLe = !urlTap.trim() || parseYoutubeVideoId(urlTap.trim()) !== null;
 
   const themTap = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!series || !tenTap.trim() || !urlTap.trim()) return;
+    if (!series || !tenTap.trim() || !urlTap.trim() || !urlTapHopLe) return;
     setDangXuLy(true);
     setThongBao("");
     try {
@@ -55,6 +63,44 @@ export default function AnimationSeriesPage({
       setData((cur) => (cur ? { ...cur, episodes: [...cur.episodes, episode] } : cur));
       setTenTap("");
       setUrlTap("");
+    } catch (cause) {
+      setThongBao(errorMessage(cause));
+    } finally {
+      setDangXuLy(false);
+    }
+  };
+
+  // -- sua tap (Phan 1, animation-youtube-polish-v1) --------------------------
+  const [dangSuaTapId, setDangSuaTapId] = useState<string | null>(null);
+  const [suaTenTap, setSuaTenTap] = useState("");
+  const [suaUrlTap, setSuaUrlTap] = useState("");
+  const [suaThuTuTap, setSuaThuTuTap] = useState(1);
+  const suaUrlTapHopLe =
+    !suaUrlTap.trim() || parseYoutubeVideoId(suaUrlTap.trim()) !== null;
+
+  const moSuaTap = (ep: AnimationEpisode, thuTu: number) => {
+    setDangSuaTapId(ep.episode_id);
+    setSuaTenTap(ep.title);
+    setSuaUrlTap("");
+    setSuaThuTuTap(thuTu);
+    setThongBao("");
+  };
+
+  const dongSuaTap = () => setDangSuaTapId(null);
+
+  const luuSuaTap = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dangSuaTapId || !suaTenTap.trim() || !suaUrlTapHopLe) return;
+    setDangXuLy(true);
+    setThongBao("");
+    try {
+      await api.updateAnimationEpisode(dangSuaTapId, {
+        title: suaTenTap,
+        ...(suaUrlTap.trim() ? { youtube_url: suaUrlTap.trim() } : {}),
+        order_index: suaThuTuTap,
+      });
+      setDangSuaTapId(null);
+      reload();
     } catch (cause) {
       setThongBao(errorMessage(cause));
     } finally {
@@ -108,6 +154,53 @@ export default function AnimationSeriesPage({
     }
   };
 
+  // -- sua thong tin series + gan truyen goc (Phan 4, animation-youtube-polish-v1) --
+  const isOwner = profile?.user_id === series?.owner_id;
+  const [dangSuaSeries, setDangSuaSeries] = useState(false);
+  const [suaTieuDe, setSuaTieuDe] = useState("");
+  const [suaMoTa, setSuaMoTa] = useState("");
+  const [suaTruyenGoc, setSuaTruyenGoc] = useState("");
+  const [danhSachTruyen, setDanhSachTruyen] = useState<Novel[] | null>(null);
+
+  useEffect(() => {
+    if (!isOwner || danhSachTruyen !== null) return;
+    // CHI tai danh sach truyen CUA CHINH minh — nguoi dung khong the gan
+    // series toi truyen cua nguoi khac, khop rang buoc owner_id o backend.
+    api.listNovels(true).then(
+      ({ novels }) => setDanhSachTruyen(novels),
+      () => setDanhSachTruyen([]),
+    );
+  }, [isOwner, danhSachTruyen]);
+
+  const moSuaSeries = () => {
+    if (!series) return;
+    setSuaTieuDe(series.title);
+    setSuaMoTa(series.description);
+    setSuaTruyenGoc(series.related_novel_id || "");
+    setDangSuaSeries(true);
+    setThongBao("");
+  };
+
+  const luuSuaSeries = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!series || !suaTieuDe.trim()) return;
+    setDangXuLy(true);
+    setThongBao("");
+    try {
+      const { series: moi } = await api.updateAnimationSeries(series.series_id, {
+        title: suaTieuDe,
+        description: suaMoTa,
+        related_novel_id: suaTruyenGoc,
+      });
+      setData((cur) => (cur ? { ...cur, series: moi } : cur));
+      setDangSuaSeries(false);
+    } catch (cause) {
+      setThongBao(errorMessage(cause));
+    } finally {
+      setDangXuLy(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="page">
@@ -141,8 +234,6 @@ export default function AnimationSeriesPage({
       </div>
     );
   }
-
-  const isOwner = profile?.user_id === series.owner_id;
 
   return (
     <div className="page">
@@ -197,6 +288,10 @@ export default function AnimationSeriesPage({
             ) : null}
             {isOwner ? (
               <>
+                <button type="button" className="btn" onClick={moSuaSeries}
+                        disabled={dangXuLy}>
+                  Sửa thông tin
+                </button>
                 <button type="button" className="btn" onClick={xuatBan}
                         disabled={dangXuLy}>
                   {series.state === "published" ? "Gỡ xuất bản" : "Xuất bản"}
@@ -214,37 +309,178 @@ export default function AnimationSeriesPage({
         </div>
       </header>
 
+      {isOwner && dangSuaSeries ? (
+        <form
+          className="card stack-2"
+          aria-label="Sửa thông tin series"
+          onSubmit={luuSuaSeries}
+        >
+          <h2 className="section-title">Sửa thông tin series</h2>
+          <div className="field">
+            <label className="label" htmlFor="series-title">Tên series</label>
+            <input
+              id="series-title"
+              className="input"
+              value={suaTieuDe}
+              onChange={(e) => setSuaTieuDe(e.target.value)}
+              maxLength={200}
+              required
+            />
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="series-desc">Mô tả</label>
+            <textarea
+              id="series-desc"
+              className="input"
+              value={suaMoTa}
+              onChange={(e) => setSuaMoTa(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="series-novel">
+              Truyện gốc (không bắt buộc)
+            </label>
+            <select
+              id="series-novel"
+              className="input"
+              value={suaTruyenGoc}
+              onChange={(e) => setSuaTruyenGoc(e.target.value)}
+            >
+              <option value="">— Không gắn với truyện nào —</option>
+              {(danhSachTruyen ?? []).map((novel) => (
+                <option key={novel.novel_id} value={novel.novel_id}>
+                  {novel.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="row row-tight">
+            <button type="submit" className="btn btn-primary" disabled={dangXuLy}>
+              Lưu
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setDangSuaSeries(false)}
+              disabled={dangXuLy}
+            >
+              Huỷ
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       <section className="stack" aria-label="Danh sách tập">
         <h2 className="section-title">Danh sách tập</h2>
         {episodes.length === 0 ? (
           <EmptyState icon="🎬" title="Series chưa có tập nào" />
         ) : (
           <div className="anim-ep-list">
-            {episodes.map((ep, index) => (
-              <Link
-                key={ep.episode_id}
-                href={`/animation/watch/${ep.episode_id}`}
-                className="card row anim-ep-row"
-              >
-                <span className="anim-ep-row-num" aria-hidden="true">
-                  {index + 1}
-                </span>
-                <span className="truncate list-title">{ep.title}</span>
-                {isOwner ? (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-danger"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      xoaTap(ep.episode_id);
-                    }}
-                    disabled={dangXuLy}
-                  >
-                    Xoá
-                  </button>
-                ) : null}
-              </Link>
-            ))}
+            {episodes.map((ep, index) =>
+              isOwner && dangSuaTapId === ep.episode_id ? (
+                <form
+                  key={ep.episode_id}
+                  className="card stack-2"
+                  aria-label={`Sửa tập ${ep.title}`}
+                  onSubmit={luuSuaTap}
+                >
+                  <div className="field">
+                    <label className="label" htmlFor={`ep-edit-title-${ep.episode_id}`}>
+                      Tên tập
+                    </label>
+                    <input
+                      id={`ep-edit-title-${ep.episode_id}`}
+                      className="input"
+                      value={suaTenTap}
+                      onChange={(e) => setSuaTenTap(e.target.value)}
+                      maxLength={200}
+                      required
+                    />
+                  </div>
+                  <div className="field">
+                    <label className="label" htmlFor={`ep-edit-url-${ep.episode_id}`}>
+                      Đường dẫn YouTube mới (bỏ trống nếu giữ nguyên video)
+                    </label>
+                    <input
+                      id={`ep-edit-url-${ep.episode_id}`}
+                      className="input"
+                      value={suaUrlTap}
+                      onChange={(e) => setSuaUrlTap(e.target.value)}
+                      placeholder="https://www.youtube.com/watch?v=…"
+                    />
+                    <YoutubeUrlPreview url={suaUrlTap} />
+                  </div>
+                  <div className="field">
+                    <label className="label" htmlFor={`ep-edit-order-${ep.episode_id}`}>
+                      Số thứ tự
+                    </label>
+                    <input
+                      id={`ep-edit-order-${ep.episode_id}`}
+                      className="input"
+                      type="number"
+                      min={1}
+                      value={suaThuTuTap}
+                      onChange={(e) => setSuaThuTuTap(Number(e.target.value) || 1)}
+                    />
+                  </div>
+                  <div className="row row-tight">
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={dangXuLy || !suaUrlTapHopLe}
+                    >
+                      Lưu
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={dongSuaTap}
+                      disabled={dangXuLy}
+                    >
+                      Huỷ
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <Link
+                  key={ep.episode_id}
+                  href={`/animation/watch/${ep.episode_id}`}
+                  className="card row anim-ep-row"
+                >
+                  <span className="anim-ep-row-num" aria-hidden="true">
+                    {index + 1}
+                  </span>
+                  <span className="truncate list-title">{ep.title}</span>
+                  {isOwner ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          moSuaTap(ep, index + 1);
+                        }}
+                        disabled={dangXuLy}
+                      >
+                        Sửa
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-danger"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          xoaTap(ep.episode_id);
+                        }}
+                        disabled={dangXuLy}
+                      >
+                        Xoá
+                      </button>
+                    </>
+                  ) : null}
+                </Link>
+              ),
+            )}
           </div>
         )}
       </section>
@@ -273,8 +509,13 @@ export default function AnimationSeriesPage({
                 onChange={(e) => setUrlTap(e.target.value)}
                 placeholder="https://www.youtube.com/watch?v=…"
               />
+              <YoutubeUrlPreview url={urlTap} />
             </div>
-            <button type="submit" className="btn btn-primary" disabled={dangXuLy}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={dangXuLy || !urlTap.trim() || !urlTapHopLe}
+            >
               Thêm tập
             </button>
           </form>

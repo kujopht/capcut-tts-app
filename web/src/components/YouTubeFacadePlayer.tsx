@@ -25,10 +25,9 @@
 
 import { useState } from "react";
 import { IconPlay } from "@/components/Icons";
+import { YOUTUBE_EMBED_ORIGIN, youtubeThumbnailUrl } from "@/lib/youtubeUrl";
 
-export function youtubeThumbnailUrl(videoId: string): string {
-  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-}
+export { youtubeThumbnailUrl };
 
 export function YouTubeFacadePlayer({
   videoId,

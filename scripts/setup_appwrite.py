@@ -182,7 +182,15 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               "youtube_mapping_update",
               # Hang doi nhap tu dong (Phan B4-B6).
               "auto_import_approve", "auto_import_reject",
-              "auto_publish_toggle"]),
+              "auto_publish_toggle",
+              # Phase 5 (Trusted Video Sources) — MO RONG them cac hanh dong
+              # THAT SU dung (khac ten voi bon dong tren, von la du doan tu
+              # Phase 1 truoc khi Phase 5 duoc dac ta chi tiet). KHONG xoa
+              # bon gia tri cu — enum chi duoc MO RONG, khong thu hep.
+              "trusted_source_update", "trusted_source_remove",
+              "youtube_mapping_remove",
+              "video_scan_start", "video_import", "video_import_publish",
+              "video_reject", "video_ignore"]),
             ("target_user_id", "string", True, 64),
             # Rong = he thong (vd migration grandfather), khong phai mot nguoi.
             ("actor_id", "string", False, 64),
@@ -600,6 +608,112 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("series_order_idx", "key", ["series_id", "order_index"]),
             ("owner_idx", "key", ["owner_id"]),
             ("moderation_idx", "key", ["moderation_state"]),
+            # Phase 5 (Trusted Video Sources) — phat hien MOT video YouTube
+            # da la mot tap that o BAT KY series nao, tranh nhap trung. Xem
+            # `AnimationStore.episodes_by_external_ids`.
+            ("external_id_idx", "key", ["external_id"]),
+        ],
+    },
+    # ==========================================================================
+    # Trusted Video Sources (Phase 5, Animation Phan B) — subsystem RIENG, DOC
+    # LAP voi animation_series/animation_episodes. Xem
+    # `server/trusted_source_domain.py` ve moi quan he giua ba bang duoi day:
+    # TrustedSource -> SeriesMapping -> AnimationSeries (da co san).
+    "trusted_sources": {
+        "name": "Trusted Sources",
+        "attributes": [
+            ("source_id", "string", True, 64),
+            ("source_type", "enum", True,
+             ["youtube_channel", "youtube_playlist", "youtube_video",
+              "direct_hls", "direct_mp4"]),
+            ("youtube_channel_id", "string", False, 64),
+            ("youtube_playlist_id", "string", False, 64),
+            ("youtube_video_id", "string", False, 32),
+            ("display_name", "string", False, 200),
+            ("thumbnail_url", "string", False, 512),
+            ("enabled", "boolean", True, None),
+            ("auto_discover", "boolean", True, None),
+            ("auto_import", "boolean", True, None),
+            ("auto_publish", "boolean", True, None),
+            ("minimum_confidence", "double", True, None),
+            ("created_by", "string", False, 64),
+            ("last_scan_at", "datetime", False, None),
+            ("last_success_at", "datetime", False, None),
+            ("last_error_at", "datetime", False, None),
+            ("last_error_message", "string", False, 1000),
+            # WebSub (Phase 6) — TON TAI TU BAY GIO nhung CHUA co logic dang
+            # ky nao doc/ghi chung, xem `SubscriptionStatus`.
+            ("subscription_status", "enum", True,
+             ["none", "pending", "active", "expired", "failed"]),
+            ("subscription_expires_at", "datetime", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("channel_idx", "key", ["youtube_channel_id"]),
+            ("playlist_idx", "key", ["youtube_playlist_id"]),
+            ("video_idx", "key", ["youtube_video_id"]),
+            ("enabled_idx", "key", ["enabled"]),
+        ],
+    },
+    "series_mappings": {
+        "name": "Series Mappings",
+        "attributes": [
+            ("mapping_id", "string", True, 64),
+            ("trusted_source_id", "string", True, 64),
+            ("animation_series_id", "string", True, 64),
+            ("aliases", "string", False, 200),           # mang
+            ("include_keywords", "string", False, 100),  # mang
+            ("exclude_keywords", "string", False, 100),   # mang
+            # `None`/vang mat = ke thua `TrustedSource.minimum_confidence` —
+            # KHONG bat buoc, xem `SeriesMapping.minimum_confidence`.
+            ("minimum_confidence", "double", False, None),
+            ("auto_import", "boolean", False, None),
+            ("auto_publish", "boolean", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("source_idx", "key", ["trusted_source_id"]),
+            ("series_idx", "key", ["animation_series_id"]),
+        ],
+    },
+    "video_imports": {
+        "name": "Video Imports",
+        "attributes": [
+            ("import_id", "string", True, 64),
+            ("trusted_source_id", "string", False, 64),
+            # ID video YouTube — DUY NHAT trong toan he thong. `import_id`
+            # TAT DINH tu gia tri nay, xem
+            # `trusted_source_domain.video_import_id`.
+            ("youtube_video_id", "string", True, 32),
+            ("title", "string", False, 300),
+            ("channel_id", "string", False, 64),
+            ("channel_title", "string", False, 200),
+            ("thumbnail_url", "string", False, 512),
+            ("published_at", "datetime", False, None),
+            ("duration_seconds", "double", False, None),
+            ("detected_mapping_id", "string", False, 64),
+            ("detected_series_id", "string", False, 64),
+            ("detected_episode_number", "integer", False, None),
+            ("confidence", "double", False, None),
+            ("signals", "string", False, 300),  # mang
+            ("status", "enum", True,
+             ["new", "pending", "auto_imported", "auto_published", "imported",
+              "rejected", "ignored", "duplicate", "conflict", "unavailable",
+              "failed"]),
+            ("reason", "string", False, 500),
+            ("created_episode_id", "string", False, 64),
+            ("reviewed_by", "string", False, 64),
+            ("reviewed_at", "datetime", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("video_idx", "unique", ["youtube_video_id"]),
+            ("source_idx", "key", ["trusted_source_id"]),
+            ("status_idx", "key", ["status"]),
+            ("series_idx", "key", ["detected_series_id"]),
         ],
     },
     "audio_tracks": {
@@ -1065,9 +1179,15 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
 #: (vi du neu sau nay mot collection khac cung dung ten "aliases" ma KHONG
 #: phai mang) se vo tinh bi ep `array: true`. Chua xay ra o schema hien tai,
 #: ghi chu o day de tranh bay khi them collection moi.
+#:
+#: `include_keywords`/`exclude_keywords`/`signals` them o Phase 5 (Trusted
+#: Video Sources, `series_mappings`/`video_imports`) — DUNG chinh cai bay
+#: nay bi vap THAT luc chay smoke test that voi Appwrite tu luu tru: thieu
+#: ten trong tap nay lam Appwrite tu choi ghi voi loi "invalid type" khi
+#: kho gui mot `List[str]` vao thuoc tinh tuong duoc tao nhu chuoi don.
 ARRAY_ATTRIBUTES = frozenset({
     "tags", "genres", "chapter_summaries", "translated_chapters", "aliases",
-    "chapter_warnings",
+    "chapter_warnings", "include_keywords", "exclude_keywords", "signals",
 })
 
 #: Quyen o muc COLLECTION: khong cap gi cho client.

@@ -74,12 +74,20 @@ from server.gamification_service import (
 )
 from server.appwrite_gamification_store import build_gamification_store
 from server.appwrite_animation_store import build_animation_store
+from server.appwrite_trusted_source_store import build_trusted_source_store
 from server.animation_domain import (
     AnimationEpisode,
     AnimationSeries,
     AnimationSource,
     parse_youtube_id,
 )
+from server.trusted_source_service import (
+    DEFAULT_SCAN_PAGES,
+    MAX_SCAN_PAGES,
+    TrustedSourceError,
+    TrustedSourceService,
+)
+from server.youtube_client import YouTubeApiError, YouTubeConfigError
 from server.domain import (
     AdminRole,
     AudioStamp,
@@ -198,6 +206,21 @@ gamification_store = build_gamification_store(settings)
 #: voi `store` (novels/chapters/tts) — xem docstring dau
 #: `server/animation_domain.py` ve vi sao Animation la mot san pham RIENG.
 animation_store = build_animation_store(settings)
+
+#: Kho Trusted Video Sources (Phase 5, Admin Control Center V2) — MOT the
+#: hien, DOC LAP hoan toan voi `store`/`animation_store` — ba bang RIENG
+#: (`trusted_sources`/`series_mappings`/`video_imports`), xem docstring dau
+#: `server/trusted_source_domain.py`.
+trusted_source_store = build_trusted_source_store(settings)
+
+#: Tang dich vu Trusted Video Sources (Phase 5) — noi YouTube Data API,
+#: `video_classifier`/`episode_parser`, `trusted_source_store` va
+#: `animation_store` (tao/doc `AnimationEpisode` that) gap nhau. `store`
+#: (KHONG phai `animation_store`) dung de ghi nhat ky kiem duyet — CUNG mot
+#: nhat ky voi kiem duyet Animation/xa hoi o tren.
+trusted_sources = TrustedSourceService(
+    trusted_source_store, animation_store, store,
+    youtube_api_key=settings.youtube_api_key)
 
 #: Tang service cua tang xa hoi. Cung `identity`/`store`/`storage` voi moi route
 #: khac — mot duong ghi duy nhat, va no la noi quyen/han muc/thong bao duoc
@@ -3711,10 +3734,29 @@ def _admin_dashboard_them() -> Dict[str, Any]:
             # gia mot lan chi).
             "image_generations_total": None,
         },
-        # Phan B (Trusted Video Sources) CHUA xay o Phase 2 nay — hien ro
-        # "chua cau hinh" thay vi bia so 0 (0 that va "chua co tinh nang" la
-        # hai y nghia khac nhau, khong duoc lam nguoi doc bang nham lan).
-        "trusted_sources": {"configured": False},
+        # Phan B (Trusted Video Sources, Phase 5) — MOI dem deu dung idiom
+        # bounded-count (`limit(1)` + doc `total`, KHONG quet toan bang),
+        # cung triet ly voi cac bo dem khac trong ham nay. `detected_today`
+        # con `None`: kho hien tai CHUA co bo loc theo ngay tren
+        # `video_imports`, them mot cho nay se la doan so (0 that va "chua
+        # co du lieu" la hai y nghia khac nhau, xem `OSo` phia frontend).
+        "trusted_sources": {
+            "configured": True,
+            "total": trusted_source_store.find_sources(limit=1)[1],
+            "enabled_total": trusted_source_store.find_sources(
+                enabled=True, limit=1)[1],
+            "detected_today": None,
+            "auto_imported_total": (
+                trusted_source_store.find_imports(status="auto_imported", limit=1)[1]
+                + trusted_source_store.find_imports(status="auto_published", limit=1)[1]),
+            "pending_total": trusted_source_store.find_imports(
+                status="pending", limit=1)[1],
+            "error_total": (
+                trusted_source_store.find_imports(status="conflict", limit=1)[1]
+                + trusted_source_store.find_imports(status="duplicate", limit=1)[1]
+                + trusted_source_store.find_imports(status="unavailable", limit=1)[1]
+                + trusted_source_store.find_imports(status="failed", limit=1)[1]),
+        },
         "traffic": traffic_analytics.overview(),
         "system": {
             "backend": "ok",
@@ -4030,6 +4072,34 @@ def _xa_hoi(fn, *args, **kwargs):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     except SocialError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+def _nguon_tin_cay(fn, *args, **kwargs):
+    """
+    Cung vai tro voi `_xa_hoi()` nhung cho `TrustedSourceService` (Phase 5) —
+    them hai loai loi RIENG cua YouTube Data API.
+
+    `YouTubeConfigError` -> 503: "chua cau hinh", KHONG phai loi cua nguoi
+    dung — frontend hien trang thai "Chưa cấu hình" ro rang (xem dac ta
+    Phase 5, muc 2), khong phai mot thong bao loi chung chung.
+    `YouTubeApiError` -> 429 neu `reason == "quotaExceeded"` (het han muc
+    NGAY HOM NAY, khac voi loi ky thuat that), nguoc lai 502 (upstream tu
+    choi/khong ket noi duoc).
+    """
+    try:
+        return fn(*args, **kwargs)
+    except TrustedSourceError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except YouTubeConfigError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except YouTubeApiError as exc:
+        ma = (status.HTTP_429_TOO_MANY_REQUESTS if exc.reason == "quotaExceeded"
+             else status.HTTP_502_BAD_GATEWAY)
+        raise HTTPException(ma, str(exc)) from exc
     except PermissionDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except NotFoundError as exc:
@@ -4509,6 +4579,292 @@ def admin_restore_animation_episode(
     return {"episode": _xa_hoi(
         social.restore_animation_episode, admin, episode_id,
         actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+# -----------------------------------------------------------------------------
+# Trusted Video Sources (Phase 5, Admin Control Center V2 / Animation Phan B)
+# -----------------------------------------------------------------------------
+#
+# GET (xem danh sach/chi tiet nguon, hang doi nhap) dung `admin_profile` (tu
+# MODERATOR tro len) — cung muc quyen XEM voi kiem duyet Animation o tren.
+# MOI route MUTATE (them/sua/xoa nguon, anh xa, quet, nhap/tu choi/bo qua)
+# dung `admin_or_owner_profile` (ADMIN/OWNER) theo dung dac ta Phase 5 muc 4 —
+# day la hanh dong TAO NOI DUNG THAT/xac nhan tin cay, khac voi kiem duyet
+# thong thuong (an/hien noi dung da co).
+
+
+class TrustedSourcePreviewIn(BaseModel):
+    url: Annotated[str, StringConstraints(max_length=2000)]
+
+
+class TrustedSourceCreateIn(BaseModel):
+    source_type: str
+    youtube_channel_id: str = ""
+    youtube_playlist_id: str = ""
+    youtube_video_id: str = ""
+    display_name: Annotated[str, StringConstraints(max_length=200)]
+    thumbnail_url: Annotated[str, StringConstraints(max_length=512)] = ""
+    auto_discover: bool = False
+    auto_import: bool = False
+    auto_publish: bool = False
+    minimum_confidence: float = 0.9
+
+
+class TrustedSourceUpdateIn(BaseModel):
+    display_name: Optional[Annotated[str, StringConstraints(max_length=200)]] = None
+    auto_discover: Optional[bool] = None
+    auto_import: Optional[bool] = None
+    auto_publish: Optional[bool] = None
+    minimum_confidence: Optional[float] = None
+
+
+class SourceEnabledIn(BaseModel):
+    enabled: bool
+
+
+class ScanSourceIn(BaseModel):
+    page_token: str = ""
+    max_pages: int = DEFAULT_SCAN_PAGES
+
+
+class SeriesMappingCreateIn(BaseModel):
+    animation_series_id: str
+    aliases: List[str] = []
+    include_keywords: List[str] = []
+    exclude_keywords: List[str] = []
+    minimum_confidence: Optional[float] = None
+    auto_import: Optional[bool] = None
+    auto_publish: Optional[bool] = None
+
+
+class SeriesMappingUpdateIn(BaseModel):
+    aliases: Optional[List[str]] = None
+    include_keywords: Optional[List[str]] = None
+    exclude_keywords: Optional[List[str]] = None
+    minimum_confidence: Optional[float] = None
+    auto_import: Optional[bool] = None
+    auto_publish: Optional[bool] = None
+
+
+class SetImportSeriesIn(BaseModel):
+    series_id: str = ""
+    episode_number: Optional[int] = None
+
+
+class ImportVideoIn(BaseModel):
+    publish: bool = False
+
+
+@app.post("/api/admin/animation/sources/preview")
+def admin_preview_trusted_source_url(
+    payload: TrustedSourcePreviewIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Doc mot URL/ID YouTube va tra ve thong tin XEM TRUOC — KHONG tao gi
+    ca (xem dac ta Phase 5, muc 5). Buoc BAT BUOC truoc khi xac nhan them
+    lam nguon tin cay."""
+    return _nguon_tin_cay(trusted_sources.preview_source_url, payload.url)
+
+
+@app.get("/api/admin/animation/sources")
+def admin_list_trusted_sources(
+    q: str = "", enabled: Optional[bool] = None, limit: int = 25, offset: int = 0,
+    admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    return _nguon_tin_cay(
+        trusted_sources.admin_list_sources, query=q, enabled=enabled,
+        limit=max(1, min(100, limit)), offset=max(0, offset))
+
+
+@app.post("/api/admin/animation/sources")
+def admin_create_trusted_source(
+    payload: TrustedSourceCreateIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return {"source": _nguon_tin_cay(
+        trusted_sources.create_source, admin,
+        source_type=payload.source_type,
+        youtube_channel_id=payload.youtube_channel_id,
+        youtube_playlist_id=payload.youtube_playlist_id,
+        youtube_video_id=payload.youtube_video_id,
+        display_name=payload.display_name, thumbnail_url=payload.thumbnail_url,
+        auto_discover=payload.auto_discover, auto_import=payload.auto_import,
+        auto_publish=payload.auto_publish,
+        minimum_confidence=payload.minimum_confidence,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.get("/api/admin/animation/sources/{source_id}")
+def admin_trusted_source_detail(
+    source_id: str, admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    data = _nguon_tin_cay(trusted_sources.admin_source_detail, source_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nguồn tin cậy.")
+    return data
+
+
+@app.patch("/api/admin/animation/sources/{source_id}")
+def admin_update_trusted_source(
+    source_id: str, payload: TrustedSourceUpdateIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    source = _nguon_tin_cay(
+        trusted_sources.update_source, admin, source_id, fields,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if source is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nguồn tin cậy.")
+    return {"source": source}
+
+
+@app.post("/api/admin/animation/sources/{source_id}/enabled")
+def admin_set_trusted_source_enabled(
+    source_id: str, payload: SourceEnabledIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    source = _nguon_tin_cay(
+        trusted_sources.set_source_enabled, admin, source_id, payload.enabled,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if source is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nguồn tin cậy.")
+    return {"source": source}
+
+
+@app.delete("/api/admin/animation/sources/{source_id}")
+def admin_remove_trusted_source(
+    source_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    da_xoa = _nguon_tin_cay(
+        trusted_sources.remove_source, admin, source_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if not da_xoa:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy nguồn tin cậy.")
+    return {"ok": True}
+
+
+@app.post("/api/admin/animation/sources/{source_id}/scan")
+def admin_scan_trusted_source(
+    source_id: str, payload: ScanSourceIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Quet video co san (Phase 5, dac ta muc 11) — BI CHAN theo `max_pages`,
+    xem `TrustedSourceService.scan_source`."""
+    return _nguon_tin_cay(
+        trusted_sources.scan_source, admin, source_id,
+        page_token=payload.page_token,
+        max_pages=max(1, min(MAX_SCAN_PAGES, payload.max_pages)),
+        actor_role=settings.admin_role_of(admin.user_id).value)
+
+
+@app.post("/api/admin/animation/sources/{source_id}/mappings")
+def admin_create_series_mapping(
+    source_id: str, payload: SeriesMappingCreateIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return {"mapping": _nguon_tin_cay(
+        trusted_sources.create_mapping, admin, source_id,
+        animation_series_id=payload.animation_series_id, aliases=payload.aliases,
+        include_keywords=payload.include_keywords,
+        exclude_keywords=payload.exclude_keywords,
+        minimum_confidence=payload.minimum_confidence,
+        auto_import=payload.auto_import, auto_publish=payload.auto_publish,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.patch("/api/admin/animation/mappings/{mapping_id}")
+def admin_update_series_mapping(
+    mapping_id: str, payload: SeriesMappingUpdateIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    mapping = _nguon_tin_cay(
+        trusted_sources.update_mapping, admin, mapping_id, fields,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if mapping is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy ánh xạ series.")
+    return {"mapping": mapping}
+
+
+@app.delete("/api/admin/animation/mappings/{mapping_id}")
+def admin_remove_series_mapping(
+    mapping_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    da_xoa = _nguon_tin_cay(
+        trusted_sources.remove_mapping, admin, mapping_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if not da_xoa:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy ánh xạ series.")
+    return {"ok": True}
+
+
+@app.get("/api/admin/animation/imports")
+def admin_list_video_imports(
+    status_filter: str = "", trusted_source_id: str = "", series_id: str = "",
+    limit: int = 25, offset: int = 0, admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    return _nguon_tin_cay(
+        trusted_sources.admin_list_imports, status=status_filter,
+        trusted_source_id=trusted_source_id, series_id=series_id,
+        limit=max(1, min(100, limit)), offset=max(0, offset))
+
+
+@app.patch("/api/admin/animation/imports/{import_id}/series")
+def admin_set_import_series(
+    import_id: str, payload: SetImportSeriesIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Quan tri tu gan/sua series+so tap TRUOC khi nhap (dac ta Phase 5, muc 9)."""
+    updated = _nguon_tin_cay(
+        trusted_sources.set_import_series, admin, import_id,
+        series_id=payload.series_id, episode_number=payload.episode_number,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy video trong hàng đợi nhập.")
+    return {"import": updated}
+
+
+@app.post("/api/admin/animation/imports/{import_id}/import")
+def admin_import_video(
+    import_id: str, payload: ImportVideoIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return {"import": _nguon_tin_cay(
+        trusted_sources.import_video, admin, import_id, publish=payload.publish,
+        actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+@app.post("/api/admin/animation/imports/{import_id}/reject")
+def admin_reject_video_import(
+    import_id: str, payload: RemoveIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    updated = _nguon_tin_cay(
+        trusted_sources.reject_import, admin, import_id, reason=payload.reason,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy video trong hàng đợi nhập.")
+    return {"import": updated}
+
+
+@app.post("/api/admin/animation/imports/{import_id}/ignore")
+def admin_ignore_video_import(
+    import_id: str, payload: FollowIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    updated = _nguon_tin_cay(
+        trusted_sources.ignore_import, admin, import_id,
+        actor_role=settings.admin_role_of(admin.user_id).value)
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy video trong hàng đợi nhập.")
+    return {"import": updated}
 
 
 # =============================================================================

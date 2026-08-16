@@ -453,6 +453,20 @@ class AppwriteAnimationStore:
     def get_episode(self, episode_id: str) -> AnimationEpisode:
         return _episode_from_doc(self._get(COL_EPISODES, episode_id))
 
+    def episodes_by_external_ids(
+        self, external_ids: Sequence[str]) -> Dict[str, AnimationEpisode]:
+        """Xem docstring o `MockAnimationStore.episodes_by_external_ids` —
+        MOT truy van moi lo 50, dung index `external_id_idx` (xem
+        `scripts/setup_appwrite.py`)."""
+        ds = [e for e in dict.fromkeys(external_ids) if e]
+        ra: Dict[str, AnimationEpisode] = {}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_EPISODES, [q_equal("external_id", *lo)]):
+                ep = _episode_from_doc(row)
+                ra[ep.external_id] = ep
+        return ra
+
     def owned_episode(self, episode_id: str, owner_id: str) -> AnimationEpisode:
         episode = self.get_episode(episode_id)
         if episode.owner_id != owner_id:

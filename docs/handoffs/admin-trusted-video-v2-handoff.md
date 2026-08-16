@@ -4,7 +4,7 @@
 Đừng dựa vào trí nhớ hội thoại trước — hãy đọc file này và kiểm tra lại code
 thật trước khi sửa bất cứ gì.
 
-Cập nhật lần cuối: 2026-08-16, sau khi Phase 4 được push.
+Cập nhật lần cuối: 2026-08-16, sau khi Phase 5 được push.
 
 ## 0. Bootstrap cho phiên mới
 
@@ -51,12 +51,14 @@ xong và được người dùng duyệt.
   shell + bang tong quan".
 - Phase 3: commit `b8e1f69` — "Admin Control Center V2, Phase 3: quan ly tai
   khoan day du qua Appwrite Users API".
-- Phase 4: commit MỚI NHẤT trên nhánh này (chạy `git log --oneline -5` để
-  lấy SHA thật — đừng tin một con số ghi cứng ở đây) — "Admin Control Center
-  V2, Phase 4: kiem duyet Animation (series/tap)". Đã push.
+- Phase 4: commit `7e301b8` — "Admin Control Center V2, Phase 4: kiem duyet
+  Animation (series/tap)". Đã push, đã duyệt.
+- Phase 5: commit MỚI NHẤT trên nhánh này SAU `7e301b8` (chạy
+  `git log --oneline -5` để lấy SHA thật — đừng tin một con số ghi cứng ở
+  đây) — "Admin Control Center V2, Phase 5: Trusted Video Sources". Đã push.
 - Remote: `origin/feature/admin-trusted-video-v2` phải khớp HEAD cục bộ sau
-  khi Phase 4 được push — xác nhận lại bằng `git fetch` + `git rev-parse`
-  trước khi tiếp tục Phase 5, đừng tin dòng này nếu đã có thời gian trôi qua.
+  khi Phase 5 được push — xác nhận lại bằng `git fetch` + `git rev-parse`
+  trước khi tiếp tục Phase 6, đừng tin dòng này nếu đã có thời gian trôi qua.
 - `main`: **chưa hề đụng tới** trong toàn bộ việc này. `origin/main` đang ở
   `d483e90` ("deploy: them systemd unit cho translation worker production")
   — hoàn toàn không liên quan, không có commit nào của nhánh này lọt vào.
@@ -391,19 +393,269 @@ trình dev cùng thư mục) — tương quan thời điểm rõ, nguyên nhân 
 CHƯA chắc chắn. Nếu có ai đó đang dựa vào dev server đó, họ cần tự khởi
 động lại (`npm run dev` trong `web/`).
 
+## 4d. Đã xong — Phase 5 (Trusted Video Sources)
+
+**Mô hình domain MỚI hoàn toàn** (`server/trusted_source_domain.py`) — BA
+thực thể, một chuỗi: `TrustedSource` (kênh/playlist/video YouTube đã được
+quản trị XÁC NHẬN tin cậy) → `SeriesMapping` (ánh xạ MỘT nguồn tới MỘT
+`AnimationSeries` đã có sẵn, kèm alias/từ khoá bao gồm/loại trừ) →
+`VideoImport` (một video phát hiện được, đã phân loại, chờ quản trị duyệt/
+đã tự động nhập). `video_import_id(youtube_video_id) -> f"vimp_{id}"` là
+`documentId` TẤT ĐỊNH — nền tảng cho "quét idempotent" (quét lại không tạo
+bản trùng, không đổi quyết định quản trị đã có).
+
+**KHÔNG có đường tự động nào biến một video của tác giả thường thành "tin
+cậy"** — `TrustedSource.created_by` LUÔN là quyết định quản trị tường minh
+(`create_source`).
+
+**Ba module tất định, KHÔNG dùng LLM** (yêu cầu rõ của đặc tả Phase 5):
+- `server/episode_parser.py::parse_episode_number()` — regex nhận diện
+  `Tập/Tap/EP/Episode/E/Chương/Chapter/Phần/Part` + số, chuẩn hoá Unicode
+  NFC, thử mẫu đầy đủ từ khoá trước, `E12` trần sau.
+- `server/video_classifier.py::classify_video()` — chấm điểm CÓ TRỌNG SỐ
+  (khớp kênh/alias/số tập/từ khoá bao gồm/tập lân cận là tín hiệu DƯƠNG;
+  từ khoá loại trừ riêng của ánh xạ + `NEGATIVE_KEYWORDS` mặc định
+  — trailer/teaser/OST/OP/ED/short/reaction/... — là tín hiệu ÂM), giới
+  hạn `[0.0, 1.0]`. MỌI kết quả kèm `signals: List[str]` để quản trị hiểu
+  VÌ SAO (yêu cầu "explainable" của đặc tả).
+- `server/youtube_client.py::YouTubeClient` — CHỈ gọi `videos.list`/
+  `channels.list`/`playlists.list`/`playlistItems.list` (tra cứu TRỰC TIẾP
+  theo ID), TRÁNH `search.list` (tốn quota gấp bội, kết quả mờ). API key
+  CHỈ nằm ở đây, KHÔNG BAO GIỜ vào log/lỗi/response — `YouTubeConfigError`
+  (chưa cấu hình) và `YouTubeApiError` (kèm `.reason`, vd `quotaExceeded`)
+  tách biệt để tầng trên hiển thị đúng trạng thái.
+  `parse_source_url()` (thuần phân tích chuỗi, KHÔNG gọi mạng) đọc video/
+  playlist/kênh (`/channel/UC...`, `/@handle`, `/user/...`, `/c/...` —
+  thử như handle vì `search.list` bị cấm) từ MỘT URL/ID.
+
+**Kho** (`server/trusted_source_store.py` Mock +
+`server/appwrite_trusted_source_store.py` Appwrite, cùng giao diện, cùng
+mẫu `build_trusted_source_store()` như `animation_store`) — BA bảng RIÊNG
+(`trusted_sources`/`series_mappings`/`video_imports`), KHÔNG dùng chung
+bảng với `animation_series`/`animation_episodes`. `create_import_once()`
+trả `(video_import, da_tao_moi: bool)` — tạo-hoặc-lấy AN TOÀN dưới tải
+đua nhau qua `documentId` tất định (cùng kỹ thuật `_job_lock_id` đã có ở
+`appwrite_store.py`). Thêm `episodes_by_external_ids()` vào
+`animation_store.py`/`appwrite_animation_store.py` (Phase 5 dùng để phát
+hiện một video ĐÃ là episode thật ở BẤT KỲ series nào, chống trùng).
+
+**Tầng dịch vụ** (`server/trusted_source_service.py::TrustedSourceService`)
+— MỘT nơi ghi duy nhất, nối YouTube client + hai module phân loại + hai
+kho (trusted source VÀ animation) + nhật ký kiểm duyệt:
+- `preview_source_url()` — xem trước THẬT qua YouTube Data API, KHÔNG tạo
+  gì (bước bắt buộc trước "Add as Trusted Source", đặc tả mục 5).
+- CRUD nguồn/ánh xạ, `_dinh_danh_da_ton_tai()` chặn trùng lặp theo
+  `source_type` + ID định danh tương ứng (quét toàn bộ nguồn hiện có —
+  chấp nhận được vì số nguồn tin cậy dự kiến hàng chục, không phải hàng
+  nghìn, KHÔNG phải đường nóng trang danh sách thường).
+- `scan_source()` — quét video có sẵn: ưu tiên playlist đã chọn > playlist
+  tải lên của kênh (nguồn `youtube_video` chỉ xử lý ĐÚNG MỘT video, không
+  cần phân trang). BỊ CHẶN theo `max_pages` (mặc định 2, tối đa 5, mỗi
+  trang 50 video). Video ĐÃ có `VideoImport` (dù trạng thái gì) bị BỎ QUA
+  hoàn toàn — không phân loại lại, không đụng quyết định quản trị đã có
+  (idempotent THẬT). Video ĐÃ là episode thật (kiểm qua
+  `episodes_by_external_ids`) → `DUPLICATE` ngay, không phân loại.
+  `_quyet_dinh_trang_thai()` (thuần, dễ test): loại trừ → `IGNORED`;
+  không khớp series nào → `NEW`; dưới ngưỡng tin cậy → `PENDING`; đủ
+  ngưỡng nhưng nguồn/ánh xạ KHÔNG bật `auto_import` → `PENDING` (đủ tin
+  cậy không đồng nghĩa tự động — quản trị phải bật cờ); thiếu số tập →
+  `PENDING`; trùng số tập với video KHÁC trong series → `CONFLICT`; còn
+  lại → tạo `AnimationEpisode` thật, `AUTO_IMPORTED`/`AUTO_PUBLISHED` theo
+  cờ `auto_publish`.
+- `import_video()`/`reject_import()`/`ignore_import()`/
+  `set_import_series()` — hành động THỦ CÔNG trên hàng đợi. `import_video`
+  KIỂM LẠI trùng lặp/xung đột NGAY LÚC BẤM NÚT (không chỉ tin kết quả quét
+  cũ — trạng thái có thể đã đổi), dùng trạng thái `IMPORTED` (KHÔNG bao
+  giờ `AUTO_*` — hai giá trị đó CHỈ dành cho video hệ thống tự nhập lúc
+  quét, xem docstring `ImportStatus`).
+- Ghi nhật ký kiểm duyệt qua `ModerationEvent` CHUNG với Phase 1-4 —
+  KHÔNG collection riêng.
+
+**Ba lỗi thật phát hiện VÀ sửa trong lúc viết code (trước khi chạm
+Appwrite thật):**
+- `TrustedSource` thiếu hẳn trường lưu ID video cho `source_type ==
+  youtube_video` (chỉ có `youtube_channel_id`/`youtube_playlist_id`) — một
+  nguồn "video đơn lẻ" sẽ KHÔNG THỂ quét lại được gì. Thêm
+  `youtube_video_id` vào domain + Appwrite store + schema + preview.
+- `update_import()` ở `MockTrustedSourceStore` ghi TRỰC TIẾP giá trị field
+  qua `dataclasses.replace()` — truyền `ImportStatus.X.value` (chuỗi) thay
+  vì `ImportStatus.X` (thành viên enum) làm `updated.status` thành một
+  `str` THƯỜNG, và `to_dict()` gọi `self.status.value` sẽ ném
+  `AttributeError`. Sửa: MỌI lệnh gọi `update_import({"status": ...})`
+  trong tầng dịch vụ truyền thẳng thành viên enum, không gọi `.value`.
+- Nhập thủ công "Nhập + Xuất bản" ban đầu gán trạng thái `AUTO_PUBLISHED` —
+  SAI Ý NGHĨA (`AUTO_*` chỉ dành cho hệ thống tự nhập lúc quét theo
+  docstring `ImportStatus`). Sửa: `import_video()` luôn dùng `IMPORTED`
+  bất kể cờ `publish`, truyền `state=PUBLISHED`/`DRAFT` cho
+  `AnimationEpisode` để phản ánh ý "xuất bản hay không" mà không lạm dụng
+  sai enum trạng thái nhập.
+
+**Một lỗi thật KHÁC chỉ lộ ra khi chạy smoke test THẬT với Appwrite tự lưu
+trú** (không bài test giả lập nào bắt được, vì `FakeAppwrite` không kiểm
+tra kiểu thuộc tính): `ARRAY_ATTRIBUTES` ở `scripts/setup_appwrite.py` là
+một TẬP TÊN TOÀN CỤC (không phải cờ theo từng collection) quyết định
+thuộc tính nào được tạo với `array: true`. `include_keywords`/
+`exclude_keywords` (mới ở `series_mappings`) và `signals` (mới ở
+`video_imports`) đều là `List[str]` nhưng KHÔNG nằm trong tập đó — Appwrite
+tạo chúng thành chuỗi ĐƠN, và ghi một `List[str]` vào bị từ chối với lỗi
+"invalid type". Sửa: thêm ba tên đó vào `ARRAY_ATTRIBUTES` (đã kiểm không
+trùng tên với trường nào khác trong schema), XOÁ ba thuộc tính sai kiểu đã
+lỡ tạo trên Appwrite dev qua `APPWRITE_SCHEMA_API_KEY`, chạy lại migration
+để tạo lại đúng kiểu mảng.
+
+**Backend routes** (`server/main.py`, xem mục 9 để có danh sách đầy đủ) —
+GET (danh sách/chi tiết nguồn, hàng đợi nhập) dùng `admin_profile` (≥
+MODERATOR, xem/không được sửa); MỌI route MUTATE (thêm/sửa/xoá/bật-tắt
+nguồn, quét, ánh xạ, nhập/từ chối/bỏ qua) dùng `admin_or_owner_profile` (≥
+ADMIN) — đây là hành động XÁC NHẬN TIN CẬY/TẠO NỘI DUNG THẬT, khác kiểm
+duyệt thông thường của Phase 4. `_nguon_tin_cay()` (mới, cạnh `_xa_hoi()`)
+đổi `TrustedSourceError` → 400, `YouTubeConfigError` → 503 ("chưa cấu
+hình" rõ ràng, không phải lỗi người dùng), `YouTubeApiError` → 429 nếu
+`reason == "quotaExceeded"` còn lại 502.
+
+**Dashboard** (`server/main.py::_admin_dashboard_them`) — Phase 2 để
+`"trusted_sources": {"configured": False}` làm placeholder; Phase 5 thay
+bằng dữ liệu THẬT: `total`/`enabled_total` (từ `find_sources`),
+`auto_imported_total` (auto_imported + auto_published),
+`pending_total`, `error_total` (conflict + duplicate + unavailable +
+failed) — MỌI số đều `find_*(limit=1)[1]` (đọc `total`, không kéo
+document, đúng idiom mục 6). `detected_today` CỐ Ý để `None` — kho CHƯA có
+bộ lọc theo ngày trên `video_imports`, thà "chưa có dữ liệu" còn hơn bịa
+một con số. `web/src/app/admin/page.tsx` đổi 6 ô `so={null}` cứng (Phase
+2 stub) sang đọc thật từ `data.trusted_sources.*`.
+
+**Frontend** — HAI trang Phase 2 để placeholder `AdminSapXayDung`
+(`animation/sources`, `animation/import-queue`) nay là trang THẬT; HAI
+trang MỚI hoàn toàn (`animation/sources/new`, `animation/sources/[id]`):
+- `animation/sources/page.tsx` — danh sách TOÀN NỀN TẢNG, tìm kiếm
+  debounce, cột loại/bật-tắt/số ánh xạ/cờ tự động/ngưỡng/quét gần nhất.
+- `animation/sources/new/page.tsx` — luồng thêm HAI BƯỚC bắt buộc: dán
+  URL → `previewTrustedSourceUrl` (xem trước THẬT, có thumbnail) → xác
+  nhận rõ ràng mới `createTrustedSource`. 503 (chưa cấu hình key) hiện
+  `<ChuaCauHinh>`, không phải lỗi chung chung.
+- `animation/sources/[id]/page.tsx` — chi tiết: sửa cài đặt, bật/tắt, "Bỏ
+  tin cậy" (`ConfirmDialog`), "Quét video có sẵn" kèm đếm kết quả
+  (Phát hiện/Khớp/Chờ duyệt/Tự nhập/Tự xuất bản/Loại trừ/Trùng/Xung đột/Đã
+  theo dõi), khối ánh xạ series (thêm/sửa/xoá, chọn series qua
+  `adminApi.animationSeries`), bảng video phát hiện gần đây (chỉ xem).
+- `animation/import-queue/page.tsx` — lọc theo TRẠNG THÁI + query param
+  `?source=` (từ trang chi tiết nguồn), gán/sửa series+số tập ngay trên
+  hàng (form ẩn/hiện), bốn hành động Nhập/Nhập+Xuất bản/Từ chối
+  (`ConfirmDialog`)/Bỏ qua.
+- `web/src/lib/api.ts` — kiểu `TrustedSource`/`SeriesMapping`/
+  `VideoImport`/`TrustedSourcePreview`/`TrustedSourceScanResult` + 15 hàm
+  `adminApi.*` mới — KHÔNG kiểu nào nhắc tới API key (đã có test khẳng
+  định).
+- `AdminShell.tsx` KHÔNG cần đổi — mục nav "Trusted Sources"/"Import
+  Queue" đã trỏ đúng đường từ Phase 2.
+
+**Hai lỗi lint thật bắt được TRƯỚC khi chạm QA trình duyệt** (giá trị của
+`npm run lint` chạy nghiêm túc, không chỉ cho có):
+- `react-hooks/set-state-in-effect` ở `sources/[id]/page.tsx`: đồng bộ
+  state form từ dữ liệu vừa nạp (`useEffect` gọi `setState` đồng bộ trong
+  thân effect). Sửa bằng mẫu "điều chỉnh state lúc render" CHÍNH THỐNG của
+  React (so sánh `source_id` với state đã lưu, gọi `setState` NGAY TRONG
+  THÂN COMPONENT nếu khác — không phải trong effect) — KHÔNG dùng
+  `useEffect` cho việc này.
+- `@next/next/no-location-assign-relative-destination`: dùng
+  `window.location.href` để điều hướng nội bộ sau khi xoá nguồn. Sửa bằng
+  `useRouter().push()`.
+- Bài học chung cho phase sau: bất kỳ trang admin nào gọi `adminApi.*`
+  ĐỀU BỊ MỘT BÀI TEST CHUNG (`web/tests/admin.test.mjs`) BẮT BUỘC dùng
+  `<DanhSachTrangThai>` — kể cả một trang KHÔNG có tải trang (như
+  `sources/new`, chỉ có hành động "Xem trước" theo yêu cầu người dùng).
+  Giải pháp ĐÚNG không phải nới lỏng bài test chung đó, mà là bọc CHÍNH
+  kết quả "Xem trước" trong `<DanhSachTrangThai dangTai loi rong={false}
+  onThuLai>` — vừa khớp quy ước, vừa được nút "Thử lại" chuẩn, đã xác
+  nhận qua QA trình duyệt thật rằng trạng thái lỗi hiện đúng
+  `role="alert"` kèm thông điệp thật từ backend.
+
+**Migration schema THẬT trên Appwrite tự lưu trú dev** — `scripts/
+setup_appwrite.py --only trusted_sources`/`--only series_mappings`/
+`--only video_imports` (ba collection MỚI hoàn toàn), `--only
+animation_episodes` (thêm `external_id_idx`), `--only moderation_events`
+(mở rộng enum `action` 25→33 giá trị, additive-only). Xem đoạn
+`ARRAY_ATTRIBUTES` phía trên để biết vì sao phải chạy migration
+`series_mappings`/`video_imports` HAI LẦN (lần đầu tạo sai kiểu, xoá thủ
+công qua REST rồi chạy lại).
+
+**Smoke test THẬT** (`scripts/smoke_test_selfhost_trusted_sources.py`,
+MỚI — gọi THẲNG lớp kho/dịch vụ, không qua HTTP, để tránh phải bootstrap
+một tài khoản ADMIN thật qua đăng nhập/token) — dùng "Me at the zoo"
+(video YouTube đầu tiên, công khai, ổn định vĩnh viễn, ID
+`jNQXAC9IVRw`) làm dữ liệu thật AN TOÀN — ID kênh/playlist đọc THẬT từ kết
+quả trả về, KHÔNG BAO GIỜ đoán trước. **19/19 kiểm tra đạt** ở lần chạy
+cuối: `get_video`/`get_channel`/`list_playlist_items` THẬT qua YouTube
+Data API; `create_series`/`create_source`/chặn trùng lặp/
+`admin_source_detail`/`create_mapping` THẬT trên Appwrite dev; `scan_source`
+trên nguồn `youtube_video` (video không có số tập trong tiêu đề → đúng
+`PENDING`, không tự nhập mù); quét lại IDEMPOTENT (không tạo dòng thứ
+hai); `set_import_series` gán thủ công; `import_video` → `IMPORTED` +
+episode thật; nhập lại → đúng `DUPLICATE`; nhật ký kiểm duyệt ghi
+`trusted_source_add` thật. MỌI bản ghi disposable đã XOÁ SẠCH sau khi chạy
+(xác nhận lại: 0 `trusted_sources` còn sót có tên "smoke-test").
+
+**QA trình duyệt THẬT** (chrome-devtools MCP, đăng nhập OWNER thật —
+đăng ký một tài khoản QA mới, khởi động lại backend dev với
+`FAS_OWNER_USER_IDS=<user_id đó>` — qua `localhost:3010` trỏ về backend dev
+thật trên cổng `8010` riêng, TRÁNH đụng cổng 3000/8000 mặc định phòng khi
+có tiến trình khác đang chạy sẵn, xem bài học môi trường ở mục 4c): danh
+sách nguồn (rỗng đúng), luồng thêm nguồn (dán URL video thật →
+xem trước hiện đúng ảnh/tên/kênh thật → xác nhận → chuyển trang chi tiết),
+"Quét video có sẵn" (đếm kết quả hiện đúng), hàng đợi nhập (gán series
+thật + số tập → "Nhập + Xuất bản" → trạng thái `imported`, episode thật
+được tạo), trạng thái lỗi (URL vô nghĩa → thẻ lỗi đọc được kèm nút "Thử
+lại"), thu nhỏ 390×844 (điều hướng gập, bảng cuộn ngang trong khung riêng,
+không đẩy trang cuộn ngang). MỌI dữ liệu disposable tạo qua trình duyệt đã
+XOÁ SẠCH sau đó.
+
+**Hai bài học môi trường MỚI cho phiên sau** (khác với bài học `next dev`
+hai tiến trình đã ghi ở mục 4c):
+- Next.js 16 CHẶN request tới tài nguyên dev (`/_next/static/*`, HMR,
+  font) nếu Origin khác với host server được khởi động — mở trình duyệt
+  qua `127.0.0.1:PORT` trong khi `next dev` tự coi mình là `localhost` (và
+  ngược lại) làm mọi chunk JS bị 403, trang treo mãi ở "Đang tải…". Sửa:
+  LUÔN mở qua CÙNG MỘT dạng host (khuyên dùng `localhost`, không phải
+  `127.0.0.1`) cho cả lệnh khởi động VÀ URL trình duyệt.
+- Backend dev tự lưu trú mặc định CORS CHỈ chấp nhận
+  `http://localhost:3000` (`FAS_CORS_ORIGINS`, xem `server/config.py`) —
+  chạy frontend QA ở cổng khác (vd `3010`, để tránh đụng cổng mặc định)
+  BẮT BUỘC truyền thêm `FAS_CORS_ORIGINS=http://localhost:<port>` khi khởi
+  động backend, nếu không đăng nhập sẽ báo "Không kết nối được máy chủ"
+  dù backend đang chạy tốt (lỗi CORS bị trình duyệt nuốt thành lỗi mạng
+  chung chung).
+- Công cụ chụp snapshot (accessibility tree) của chrome-devtools MCP đôi
+  khi trả về trạng thái CŨ ("Đang tải…") dù DOM thật đã render xong —
+  chụp lại lần nữa (hoặc đọc thẳng `document.querySelector('main').
+  innerText` qua `evaluate_script`) trước khi kết luận trang bị treo thật.
+
+**Test**: `server/tests/test_episode_parser.py` (MỚI, 9), `server/tests/
+test_video_classifier.py` (MỚI, 11), `server/tests/test_youtube_client.py`
+(MỚI, 19, chỉ phân tích chuỗi/thời lượng, KHÔNG gọi mạng), `server/tests/
+test_trusted_source_contract.py` (MỚI, 22, dual-backend Mock+FakeAppwrite),
+`server/tests/test_trusted_source_service.py` (MỚI, 22, dùng
+`FakeYouTubeClient` để kiểm soát dữ liệu), `server/tests/
+test_trusted_source_routes.py` (MỚI, 17, HTTP đầy đủ — mã trạng
+thái/phân quyền/CORS-tương-đương), `server/tests/test_animation_contract.py`
+(+1: `episodes_by_external_ids`), `server/tests/test_admin.py` (sửa 1 bài
+`test_trusted_sources_va_traffic_chua_cau_hinh` cũ → tách thành 2 bài phản
+ánh đúng trạng thái MỚI, `configured=True`). `web/tests/
+admin-trusted-sources.test.mjs` (MỚI, 16).
+
 ## 5. Trạng thái test/build (đã CHẠY LẠI và xác nhận ngay tại thời điểm viết
 handoff này, không phải chỉ nhớ lại)
 
 | Mục | Kết quả |
 |---|---|
-| Backend (`unittest discover -s server/tests -t .`) | **2189/2189 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +22 test Phase 4 |
-| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **597/597 pass** — +13 test Phase 4 |
+| Backend (`unittest discover -s server/tests -t .`) | **2288/2288 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +99 test Phase 5 |
+| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **613/613 pass** — +16 test Phase 5 |
 | `npm run typecheck` | sạch, 0 lỗi |
 | `npm run lint` | 0 lỗi, 2 warning (không liên quan — `<img>` ở `image-studio/page.tsx`, có từ trước) |
-| `npm run build` | build production thành công, `/admin/animation/series/[id]` lên đúng route động |
+| `npm run build` | build production thành công, 4 route Trusted Sources/Import Queue lên đúng (2 tĩnh, `sources/[id]` động) |
 | Secret scan (grep diff cho api_key/secret/token/password/bearer/aws_/private_key + kiểm không có file `.env` nào bị đổi) | sạch |
-| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4) |
-| QA trình duyệt thật | ĐÃ CHẠY Phase 4 (xem mục 4c) — phát hiện + sửa 1 bug ConfirmDialog thật |
+| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4), 4d (Phase 5 — 19/19 kiểm tra đạt) |
+| Smoke test thật YouTube Data API | ĐÃ CHẠY — xem mục 4d, video "Me at the zoo" ổn định vĩnh viễn làm dữ liệu thật |
+| QA trình duyệt thật | ĐÃ CHẠY Phase 4 (mục 4c) + Phase 5 (mục 4d) — phát hiện + sửa bug ConfirmDialog (P4), set-state-in-effect + window.location (P5) |
 
 ## 6. Quyết định về hiệu năng
 
@@ -521,6 +773,22 @@ POST /api/admin/animation/series/{series_id}/unpublish           — MỚI Phase
 POST /api/admin/animation/series/{series_id}/restore             — MỚI Phase 4
 POST /api/admin/animation/episodes/{episode_id}/unpublish        — MỚI Phase 4
 POST /api/admin/animation/episodes/{episode_id}/restore          — MỚI Phase 4
+POST /api/admin/animation/sources/preview                        — MỚI Phase 5
+GET  /api/admin/animation/sources                                — MỚI Phase 5
+POST /api/admin/animation/sources                                — MỚI Phase 5
+GET  /api/admin/animation/sources/{source_id}                    — MỚI Phase 5
+PATCH /api/admin/animation/sources/{source_id}                   — MỚI Phase 5
+POST /api/admin/animation/sources/{source_id}/enabled            — MỚI Phase 5
+DELETE /api/admin/animation/sources/{source_id}                  — MỚI Phase 5
+POST /api/admin/animation/sources/{source_id}/scan                — MỚI Phase 5
+POST /api/admin/animation/sources/{source_id}/mappings            — MỚI Phase 5
+PATCH /api/admin/animation/mappings/{mapping_id}                  — MỚI Phase 5
+DELETE /api/admin/animation/mappings/{mapping_id}                 — MỚI Phase 5
+GET  /api/admin/animation/imports                                 — MỚI Phase 5
+PATCH /api/admin/animation/imports/{import_id}/series              — MỚI Phase 5
+POST /api/admin/animation/imports/{import_id}/import                — MỚI Phase 5
+POST /api/admin/animation/imports/{import_id}/reject                — MỚI Phase 5
+POST /api/admin/animation/imports/{import_id}/ignore                — MỚI Phase 5
 ```
 Lưu ý: `GET /api/admin/users` và `GET /api/admin/users/{user_id}` (Phase 3)
 giờ đọc THẲNG Appwrite Users API (native) làm nguồn chính, làm giàu bằng
@@ -528,12 +796,16 @@ giờ đọc THẲNG Appwrite Users API (native) làm nguồn chính, làm giàu
 `_kiem_quyen_tac_dong_tai_khoan()` (rào chắn tự-thao-tác + cross-rank).
 Sáu route Animation (Phase 4) đều `admin_profile` (≥ MODERATOR) và gọi qua
 `SocialService` (`social.admin_animation_series*`/`unpublish_animation_*`/
-`restore_animation_*`) — xem mục 4c.
+`restore_animation_*`) — xem mục 4c. Mười bảy route Trusted Sources
+(Phase 5) đều gọi qua `TrustedSourceService` (biến module `trusted_sources`)
++ `_nguon_tin_cay()` (đổi lỗi service/YouTube thành mã HTTP) — GET dùng
+`admin_profile`, MỌI route mutate dùng `admin_or_owner_profile` — xem mục
+4d.
 
 **Frontend** (`web/src/app/admin/`):
 ```
 layout.tsx              — bọc <AdminShell> quanh mọi trang con
-page.tsx                — Dashboard
+page.tsx                — Dashboard (Phase 5: khối Trusted Sources đọc dữ liệu thật)
 users/                  — danh sách tài khoản (ĐỔI NGUỒN ở Phase 3, xem mục 4b)
 users/[user_id]/        — MỚI Phase 3: chi tiết một tài khoản, tạm dừng/
                           phiên đăng nhập
@@ -547,37 +819,63 @@ system/                  — MỚI Phase 2
 animation/               — ĐỔI Phase 4: tu placeholder sang trang landing THẬT
 animation/series/       — MỚI Phase 4: danh sách series TOÀN NỀN TẢNG
 animation/series/[id]/  — MỚI Phase 4: chi tiết series + kiểm duyệt tập
-animation/sources/       — CÒN placeholder Phase 2, CHỜ Phase 5
-animation/import-queue/  — CÒN placeholder Phase 2, CHỜ Phase 5
+animation/sources/       — ĐỔI Phase 5: từ placeholder sang danh sách THẬT
+animation/sources/new/  — MỚI Phase 5: luồng thêm nguồn (xem trước → xác nhận)
+animation/sources/[id]/ — MỚI Phase 5: chi tiết nguồn + cài đặt/quét/ánh xạ
+animation/import-queue/  — ĐỔI Phase 5: từ placeholder sang hàng đợi nhập THẬT
 ```
 Component chính: `web/src/components/AdminShell.tsx` (shell/nav/OSo/
 ChuaCauHinh/duVaiTro — Phase 4 đổi href nav "Series" sang
-`/admin/animation/series`), `web/src/components/AdminSapXayDung.tsx`
-(placeholder tái dùng được, còn dùng cho sources/import-queue),
-`web/src/components/ui.tsx::ConfirmDialog` (Phase 4 sửa bug focus, xem mục
-4c), `web/src/lib/api.ts` (mọi type + hàm gọi `adminApi.*`).
+`/admin/animation/series`; mục "Trusted Sources"/"Import Queue" đã trỏ
+đúng đường từ Phase 2, KHÔNG cần đổi ở Phase 5),
+`web/src/components/AdminSapXayDung.tsx` (placeholder tái dùng được,
+KHÔNG còn trang nào dùng sau Phase 5 — có thể xoá nếu không còn placeholder
+nào khác cần nó), `web/src/components/ui.tsx::ConfirmDialog` (Phase 4 sửa
+bug focus, xem mục 4c), `web/src/lib/api.ts` (mọi type + hàm gọi
+`adminApi.*`).
 
-Test: `server/tests/test_admin.py` (class `AccountManagementTest` Phase 3),
+Test: `server/tests/test_admin.py` (class `AccountManagementTest` Phase 3;
+Phase 5 sửa `DashboardMoRongTest` cho `trusted_sources.configured=True`),
 `server/tests/test_animation_contract.py`/`test_animation_domain.py`
-(Phase 4), `server/tests/test_social_service.py::BinhLuanTapAnimationTest`
+(Phase 4; Phase 5 +1 `episodes_by_external_ids`),
+`server/tests/test_social_service.py::BinhLuanTapAnimationTest`
 (Phase 4), `server/tests/test_social_routes.py::KiemDuyetAnimationTest`
-(Phase 4), `web/tests/admin.test.mjs`,
+(Phase 4), `server/tests/test_episode_parser.py`/`test_video_classifier.py`/
+`test_youtube_client.py`/`test_trusted_source_contract.py`/
+`test_trusted_source_service.py`/`test_trusted_source_routes.py` (TẤT CẢ
+MỚI Phase 5, xem mục 4d), `web/tests/admin.test.mjs`,
 `web/tests/admin-control-center-v2.test.mjs`,
 `web/tests/admin-account-management.test.mjs` (Phase 3),
 `web/tests/admin-animation-moderation.test.mjs` (MỚI Phase 4),
+`web/tests/admin-trusted-sources.test.mjs` (MỚI Phase 5, 16 test),
 `web/tests/ui.test.mjs` (Phase 4, +1 khẳng định fix ConfirmDialog).
 
 ## 10. Các phase còn lại (ĐÚNG THỨ TỰ)
 
 - ~~**PHASE 3** — User Management đầy đủ~~ — **XONG**, xem mục 4b.
 - ~~**PHASE 4** — Animation Moderation~~ — **XONG**, xem mục 4c.
-- **PHASE 5** — Trusted Video Sources backend + UI: mô hình kênh/video/
-  playlist YouTube tin cậy, ánh xạ series, bộ phân loại/phát hiện tập mới,
-  hàng đợi nhập, nhập lại lịch sử (backfill).
+- ~~**PHASE 5** — Trusted Video Sources backend + UI~~ — **XONG**, xem mục
+  4d. HAI đơn giản hoá có chủ đích so với đặc tả gốc, ghi lại rõ để Phase 6
+  không hiểu nhầm là đã có sẵn:
+  - "Quét video có sẵn" là MỘT BƯỚC (phân loại + lưu + tự nhập nếu đủ điều
+    kiện trong CÙNG một lượt gọi), KHÔNG phải "xem trước số đếm rồi mới xác
+    nhận nhập" như đặc tả gốc mô tả — an toàn tương đương đạt được qua
+    trạng thái `PENDING`/`NEW` (không gì tự xuất bản trừ khi đủ ngưỡng VÀ
+    cờ `auto_import`/`auto_publish` được bật), nhưng KHÔNG có một màn hình
+    "đếm trước khi cam kết" riêng.
+  - Ưu tiên playlist khi quét chỉ có HAI mức (playlist của chính nguồn nếu
+    `source_type=youtube_playlist` > playlist tải lên của kênh), KHÔNG có
+    mức "playlist gắn riêng cho một ánh xạ series cụ thể" (đặc tả gốc mục
+    11 liệt kê ba mức) — `SeriesMapping` hiện không có trường playlist
+    riêng. Nếu cần, đây là một trường mở rộng an toàn cho phase sau (thêm
+    field optional, additive).
 - **PHASE 6** — YouTube WebSub + pipeline tập mới tự động: WebSub là kênh
   CHÍNH, có đối chiếu định kỳ tần suất thấp làm dự phòng, nhập tự động phải
   idempotent, tuỳ chọn tự động xuất bản. Test callback thật từ YouTube bị
   CHẶN cho tới khi có backend công khai qua HTTPS thật (xem mục 12).
+  `TrustedSource.auto_discover`/`subscription_status`/
+  `subscription_expires_at` đã TỒN TẠI từ Phase 5 nhưng CHƯA có logic đọc/
+  ghi nào — Phase 6 là nơi hiện thực hoá.
 - **PHASE 7** — Hoàn thiện các chỉ số analytics/product còn thiếu + hoàn
   thiện tích hợp tổng thể.
 
@@ -589,9 +887,13 @@ Test: `server/tests/test_admin.py` (class `AccountManagementTest` Phase 3),
   Nếu key thật đã được cấu hình riêng trong `server/.env.selfhost` hoặc môi
   trường thật, đó là việc của người vận hành, không phải của agent — agent
   KHÔNG được đọc/in giá trị đó ra bất cứ đâu.
-- YouTube Data API v3 cần được BẬT trên Google Cloud project tương ứng
-  trước khi Phase 5/6 có thể gọi thật — xác nhận việc này đã làm hay chưa
-  TRỰC TIẾP với người dùng ở đầu Phase 5, đừng giả định.
+- **XÁC NHẬN Ở PHASE 5**: người dùng đã tự thêm `YOUTUBE_API_KEY` vào
+  `server/.env.selfhost` VÀ bật YouTube Data API v3 trên Google Cloud
+  project tương ứng — xác nhận THẬT qua smoke test
+  `scripts/smoke_test_selfhost_trusted_sources.py` (19/19 kiểm tra đạt,
+  gọi `get_video`/`get_channel`/`list_playlist_items` thật, xem mục 4d).
+  Phase 6 KHÔNG cần hỏi lại việc này — chỉ cần xác nhận key VẪN còn hợp lệ
+  nếu smoke test đầu Phase 6 báo lỗi xác thực bất ngờ.
 
 ## 12. Quyết định kiến trúc WebSub
 
@@ -640,44 +942,46 @@ stash@{0}: On feature/animation-player-v2-custom-controls: animation-player-v2 d
   `feature/admin-trusted-video-v2`, KHÔNG amend commit cũ trừ khi được yêu
   cầu rõ.
 
-## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 5
+## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 6
 
-Phase 3 (Full User Management) và Phase 4 (Animation Moderation) **ĐÃ
-XONG** — xem mục 4b/4c để biết chi tiết đầy đủ, quyết định kiến trúc, và
-kết quả smoke test/QA trình duyệt thật. ĐỪNG làm lại hai phase này.
+Phase 3 (Full User Management), Phase 4 (Animation Moderation), và Phase 5
+(Trusted Video Sources) **ĐÃ XONG** — xem mục 4b/4c/4d để biết chi tiết
+đầy đủ, quyết định kiến trúc, và kết quả smoke test/QA trình duyệt thật.
+ĐỪNG làm lại ba phase này.
 
-**PHASE 5 — TRUSTED VIDEO SOURCES**: mô hình kênh/playlist YouTube "tin
-cậy", ánh xạ sang series, phát hiện tập mới, hàng đợi nhập, nhập lại lịch
-sử (backfill) — xem mục 1 (mục tiêu dự án, Phần B) và mục 11 (cấu hình
-YouTube, CHƯA xác nhận `YOUTUBE_API_KEY`/YouTube Data API v3 đã bật hay
-chưa — hỏi người dùng TRỰC TIẾP ở đầu phase này, đừng giả định). Trước khi
+**PHASE 6 — YOUTUBE WEBSUB + PIPELINE TẬP MỚI TỰ ĐỘNG**: xem mục 1 (mục
+tiêu dự án, Phần B/C) và mục 12 (quyết định kiến trúc WebSub). Trước khi
 viết code:
-- Đọc lại mục 11 VÀ hỏi người dùng xác nhận: (a) `YOUTUBE_API_KEY` đã có
-  trong `server/.env.selfhost` thật chưa, (b) YouTube Data API v3 đã bật
-  trên Google Cloud project tương ứng chưa. KHÔNG viết code gọi YouTube
-  Data API thật trước khi có câu trả lời rõ ràng.
-- Đây là PHẦN B của dự án (mô hình mới hoàn toàn: `trusted_sources`,
-  `youtube_mappings` hoặc tên tương đương) — KHÁC Phase 4 (kiểm duyệt
-  series/tập ĐÃ CÓ). Cần thiết kế schema Appwrite mới (thêm collection
-  trong `scripts/setup_appwrite.py`, cùng mẫu additive/optional-field như
-  Phase 4 đã làm cho `moderation_state`).
-- Dashboard hiện có `trusted_sources: {"configured": false}` (Phase 2,
-  `server/main.py::_admin_dashboard_them`) — Phase 5 là lúc thay `false`
-  bằng dữ liệu thật, xem mục 6 (quyết định hiệu năng) để giữ đúng idiom
-  bounded-count (`limit(1)` + đọc `total`, không quét toàn bảng).
-  `web/src/app/admin/animation/sources`/`import-queue` hiện vẫn là
-  placeholder `AdminSapXayDung` (Phase 2), chờ thay bằng trang thật ở đây.
-- Tái sử dụng hạ tầng `ModerationEvent` với action `trusted_source_add`/
-  `trusted_source_disable`/`trusted_source_enable`/`youtube_mapping_create`/
-  `youtube_mapping_update` — ĐÃ CÓ SẴN trong enum Appwrite từ Phase 1
-  (không cần migration enum mới, cùng mẫu Phase 3/4 đã tái dùng
-  `user_suspend`/`content_unpublish` có sẵn).
-- Giữ nguyên phân biệt vai trò đã thiết lập (mục 8) — quyết định mức
-  (`admin_profile` hay `admin_or_owner_profile`) cho route Trusted Sources
-  TRƯỚC khi viết route, dựa theo mức độ nhạy cảm (thêm/tắt một nguồn tin
-  cậy có lẽ nên là `admin_or_owner_profile`, tương tự author-applications/
-  users, vì đây là cấu hình ảnh hưởng rộng chứ không phải kiểm duyệt từng
-  mục nội dung).
+- WebSub (PubSubHubbub) là kênh CHÍNH — KHÔNG được hạ cấp xuống chỉ
+  polling định kỳ (polling tần suất thấp CHỈ đóng vai trò đối chiếu/dự
+  phòng). Xem mục 12 để biết vì sao test đầu-cuối THẬT (YouTube → callback
+  của mình) bị CHẶN cho tới khi có backend công khai qua HTTPS thật —
+  đừng cố giả lập việc này, chỉ ghi nhận blocker và làm phần còn lại
+  (parse/lưu/idempotency) bằng test giả lập trước.
+- `TrustedSource.subscription_status`/`subscription_expires_at` (enum
+  `none`/`pending`/`active`/`expired`/`failed`, xem
+  `server/trusted_source_domain.py::SubscriptionStatus`) và
+  `auto_discover` ĐÃ TỒN TẠI TỪ PHASE 5 nhưng CHƯA có logic đăng ký/gia
+  hạn/đọc callback nào — đây LÀ nơi hiện thực hoá, KHÔNG cần thêm trường
+  schema mới cho phần này.
+- Pipeline callback → phát hiện video mới PHẢI tái dùng NGUYÊN VẸN
+  `TrustedSourceService.scan_source`'s classify/decide logic (`video_classifier.
+  classify_video`, `episode_parser.parse_episode_number`,
+  `_quyet_dinh_trang_thai`) cho ĐÚNG MỘT video vừa được WebSub báo, thay
+  vì viết lại một đường phân loại riêng — tránh hai luồng "quét thủ công"
+  và "tự động qua WebSub" đưa ra quyết định KHÁC NHAU cho cùng một video.
+- Nhập tự động qua WebSub PHẢI idempotent — đã có sẵn nền tảng
+  (`create_import_once` theo `documentId` tất định từ `youtube_video_id`,
+  xem mục 4d) — Phase 6 chỉ cần gọi ĐÚNG con đường đã có, không viết một
+  cơ chế chống trùng riêng.
+- Route callback WebSub công khai (không qua `admin_profile`, vì YouTube's
+  hub gọi trực tiếp) cần rào chắn RIÊNG (xác thực chữ ký/challenge của
+  PubSubHubbub) — KHÔNG dùng `admin_profile`/`admin_or_owner_profile` cho
+  route này, đó là route nội bộ hệ thống, không phải route quản trị.
+- Sau khi có pipeline tự động, cân nhắc điền `detected_today` ở dashboard
+  (hiện `None` từ Phase 5, xem mục 4d) — cần thêm bộ lọc theo ngày trên
+  `video_imports`, một mở rộng additive nhỏ (KHÔNG bắt buộc cho Phase 6
+  xong mới coi là hoàn tất, chỉ là cơ hội tiện thể nếu có thời gian).
 
 ## 16. Ghi chú cho agent đọc file này
 

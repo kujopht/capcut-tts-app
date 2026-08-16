@@ -198,6 +198,22 @@ class MockAnimationStore:
             raise NotFoundError("Không tìm thấy tập animation.")
         return episode
 
+    def episodes_by_external_ids(
+        self, external_ids: Sequence[str]) -> Dict[str, AnimationEpisode]:
+        """
+        Tra ve tap DA CO san theo `external_id` (ID video YouTube) — dung
+        cho Phase 5 (Trusted Video Sources) de phat hien mot video DA la
+        mot `AnimationEpisode` that o BAT KY series nao, tranh tao ban trung
+        khi nhap. MOT truy van cho CA lo, khong N+1.
+        """
+        can = {e for e in external_ids if e}
+        with self._lock:
+            ra: Dict[str, AnimationEpisode] = {}
+            for ep in self.episodes.values():
+                if ep.external_id in can:
+                    ra[ep.external_id] = ep
+            return ra
+
     def owned_episode(self, episode_id: str, owner_id: str) -> AnimationEpisode:
         episode = self.get_episode(episode_id)
         if episode.owner_id != owner_id:

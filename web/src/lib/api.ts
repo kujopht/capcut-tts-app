@@ -1283,6 +1283,13 @@ export interface AdminOverview {
   };
   trusted_sources: {
     configured: boolean;
+    total?: number;
+    enabled_total?: number;
+    /** `null` — kho chưa lọc video phát hiện theo ngày, xem `server/main.py`. */
+    detected_today?: ChiSo;
+    auto_imported_total?: number;
+    pending_total?: number;
+    error_total?: number;
   };
   traffic: {
     configured: boolean;
@@ -1429,6 +1436,134 @@ export interface AdminAnimationSeriesDetail {
   related_novel: { novel_id: string; title: string; state: PublishState } | null;
   episodes: AnimationEpisode[];
   events: ModerationEvent[];
+}
+
+// -- Trusted Video Sources (Phase 5, Admin Control Center V2) ---------------
+//
+// Kieu khop `to_dict()` cua `server/trusted_source_domain.py`. YouTube API
+// key KHONG BAO GIO xuat hien o day — backend giu rieng, frontend chi thay
+// KET QUA da tra cuu (ten kenh, thumbnail...).
+
+export type TrustedSourceType =
+  | "youtube_channel" | "youtube_playlist" | "youtube_video"
+  | "direct_hls" | "direct_mp4";
+
+export type SubscriptionStatus = "none" | "pending" | "active" | "expired" | "failed";
+
+/** Vong doi MOT video phat hien duoc — xem docstring `ImportStatus` phia
+    server de biet y nghia day du cua tung gia tri. */
+export type VideoImportStatus =
+  | "new" | "pending" | "auto_imported" | "auto_published" | "imported"
+  | "rejected" | "ignored" | "duplicate" | "conflict" | "unavailable" | "failed";
+
+export interface TrustedSource {
+  source_id: string;
+  source_type: TrustedSourceType;
+  youtube_channel_id: string;
+  youtube_playlist_id: string;
+  youtube_video_id: string;
+  display_name: string;
+  thumbnail_url: string;
+  enabled: boolean;
+  auto_discover: boolean;
+  auto_import: boolean;
+  auto_publish: boolean;
+  minimum_confidence: number;
+  created_by: string;
+  last_scan_at: string;
+  last_success_at: string;
+  last_error_at: string;
+  last_error_message: string;
+  subscription_status: SubscriptionStatus;
+  subscription_expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminTrustedSourceRow extends TrustedSource {
+  mapping_count: number;
+}
+
+export interface SeriesMapping {
+  mapping_id: string;
+  trusted_source_id: string;
+  animation_series_id: string;
+  aliases: string[];
+  include_keywords: string[];
+  exclude_keywords: string[];
+  /** `null` = ke thua nguong/co cua nguon (`TrustedSource`). */
+  minimum_confidence: number | null;
+  auto_import: boolean | null;
+  auto_publish: boolean | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminSeriesMappingRow extends SeriesMapping {
+  series_title: string;
+}
+
+export interface VideoImport {
+  import_id: string;
+  trusted_source_id: string;
+  youtube_video_id: string;
+  title: string;
+  channel_id: string;
+  channel_title: string;
+  thumbnail_url: string;
+  published_at: string;
+  duration_seconds: number;
+  detected_mapping_id: string;
+  detected_series_id: string;
+  detected_episode_number: number | null;
+  confidence: number;
+  signals: string[];
+  status: VideoImportStatus;
+  reason: string;
+  created_episode_id: string;
+  reviewed_by: string;
+  reviewed_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminVideoImportRow extends VideoImport {
+  source_display_name: string;
+  series_title: string;
+}
+
+/** Ket qua xem truoc MOT url/ID YouTube — CHUA tao gi ca, xem
+    `adminApi.previewTrustedSourceUrl`. */
+export interface TrustedSourcePreview {
+  source_type: TrustedSourceType;
+  youtube_channel_id: string;
+  youtube_playlist_id: string;
+  youtube_video_id: string;
+  display_name: string;
+  thumbnail_url: string;
+  channel_title: string;
+  channel_thumbnail_url?: string;
+  item_count?: number;
+}
+
+export interface AdminTrustedSourceDetail {
+  source: TrustedSource;
+  mappings: AdminSeriesMappingRow[];
+  recent_imports: VideoImport[];
+}
+
+/** Ket qua MOT lan "Quet video co san" — xem `TrustedSourceService.scan_source`. */
+export interface TrustedSourceScanResult {
+  detected: number;
+  matched: number;
+  pending: number;
+  auto_imported: number;
+  auto_published: number;
+  excluded: number;
+  conflicts: number;
+  duplicates: number;
+  already_tracked: number;
+  next_page_token: string;
 }
 
 export interface AdminImageStudioSpending {
@@ -1602,6 +1737,144 @@ export const adminApi = {
   restoreAnimationEpisode: (episodeId: string) =>
     request<{ episode: AnimationEpisode }>(
       `/api/admin/animation/episodes/${encodeURIComponent(episodeId)}/restore`,
+      { method: "POST", body: "{}" },
+    ),
+
+  // -- Trusted Video Sources (Phase 5, Admin Control Center V2) ------------
+  //
+  // Xem/danh sach: MODERATOR tro len. Them/sua/xoa/quet/nhap: CHI ADMIN/OWNER
+  // (xem `admin_or_owner_profile` phia server) — day la hanh dong xac nhan
+  // tin cay/tao noi dung that, khac voi kiem duyet thong thuong.
+  //
+  // Loi 503 = YouTube Data API CHUA CAU HINH — hien qua `<ChuaCauHinh>`,
+  // khong phai mot thong bao loi chung.
+
+  previewTrustedSourceUrl: (url: string) =>
+    request<TrustedSourcePreview>("/api/admin/animation/sources/preview", {
+      method: "POST", body: JSON.stringify({ url }),
+    }),
+
+  trustedSources: (
+    opts: { q?: string; enabled?: boolean; limit?: number; offset?: number } = {},
+  ) => {
+    const p = new URLSearchParams({
+      q: opts.q ?? "", limit: String(opts.limit ?? 25), offset: String(opts.offset ?? 0),
+    });
+    if (opts.enabled !== undefined) p.set("enabled", String(opts.enabled));
+    return request<{ sources: AdminTrustedSourceRow[]; total: number;
+                    limit: number; offset: number }>(
+      `/api/admin/animation/sources?${p.toString()}`,
+    );
+  },
+
+  createTrustedSource: (payload: {
+    source_type: TrustedSourceType; youtube_channel_id?: string;
+    youtube_playlist_id?: string; youtube_video_id?: string; display_name: string;
+    thumbnail_url?: string; auto_discover?: boolean; auto_import?: boolean;
+    auto_publish?: boolean; minimum_confidence?: number;
+  }) =>
+    request<{ source: TrustedSource }>("/api/admin/animation/sources", {
+      method: "POST", body: JSON.stringify(payload),
+    }),
+
+  trustedSourceDetail: (sourceId: string) =>
+    request<AdminTrustedSourceDetail>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}`,
+    ),
+
+  updateTrustedSource: (sourceId: string, fields: Partial<{
+    display_name: string; auto_discover: boolean; auto_import: boolean;
+    auto_publish: boolean; minimum_confidence: number;
+  }>) =>
+    request<{ source: TrustedSource }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}`,
+      { method: "PATCH", body: JSON.stringify(fields) },
+    ),
+
+  setTrustedSourceEnabled: (sourceId: string, enabled: boolean) =>
+    request<{ source: TrustedSource }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/enabled`,
+      { method: "POST", body: JSON.stringify({ enabled }) },
+    ),
+
+  removeTrustedSource: (sourceId: string) =>
+    request<{ ok: boolean }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}`,
+      { method: "DELETE" },
+    ),
+
+  scanTrustedSource: (
+    sourceId: string, opts: { pageToken?: string; maxPages?: number } = {},
+  ) =>
+    request<TrustedSourceScanResult>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/scan`,
+      { method: "POST", body: JSON.stringify({
+        page_token: opts.pageToken ?? "", max_pages: opts.maxPages ?? 2 }) },
+    ),
+
+  createSeriesMapping: (sourceId: string, payload: {
+    animation_series_id: string; aliases?: string[]; include_keywords?: string[];
+    exclude_keywords?: string[]; minimum_confidence?: number | null;
+    auto_import?: boolean | null; auto_publish?: boolean | null;
+  }) =>
+    request<{ mapping: SeriesMapping }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/mappings`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
+  updateSeriesMapping: (mappingId: string, fields: Partial<{
+    aliases: string[]; include_keywords: string[]; exclude_keywords: string[];
+    minimum_confidence: number | null; auto_import: boolean | null;
+    auto_publish: boolean | null;
+  }>) =>
+    request<{ mapping: SeriesMapping }>(
+      `/api/admin/animation/mappings/${encodeURIComponent(mappingId)}`,
+      { method: "PATCH", body: JSON.stringify(fields) },
+    ),
+
+  removeSeriesMapping: (mappingId: string) =>
+    request<{ ok: boolean }>(
+      `/api/admin/animation/mappings/${encodeURIComponent(mappingId)}`,
+      { method: "DELETE" },
+    ),
+
+  videoImports: (
+    opts: { status?: string; trustedSourceId?: string; seriesId?: string;
+           limit?: number; offset?: number } = {},
+  ) => {
+    const p = new URLSearchParams({
+      status_filter: opts.status ?? "",
+      trusted_source_id: opts.trustedSourceId ?? "", series_id: opts.seriesId ?? "",
+      limit: String(opts.limit ?? 25), offset: String(opts.offset ?? 0),
+    });
+    return request<{ imports: AdminVideoImportRow[]; total: number;
+                    limit: number; offset: number }>(
+      `/api/admin/animation/imports?${p.toString()}`,
+    );
+  },
+
+  setImportSeries: (importId: string, seriesId: string, episodeNumber: number | null) =>
+    request<{ import: VideoImport }>(
+      `/api/admin/animation/imports/${encodeURIComponent(importId)}/series`,
+      { method: "PATCH", body: JSON.stringify({
+        series_id: seriesId, episode_number: episodeNumber }) },
+    ),
+
+  importVideo: (importId: string, publish: boolean) =>
+    request<{ import: VideoImport }>(
+      `/api/admin/animation/imports/${encodeURIComponent(importId)}/import`,
+      { method: "POST", body: JSON.stringify({ publish }) },
+    ),
+
+  rejectVideoImport: (importId: string, reason: string) =>
+    request<{ import: VideoImport }>(
+      `/api/admin/animation/imports/${encodeURIComponent(importId)}/reject`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  ignoreVideoImport: (importId: string) =>
+    request<{ import: VideoImport }>(
+      `/api/admin/animation/imports/${encodeURIComponent(importId)}/ignore`,
       { method: "POST", body: "{}" },
     ),
 };

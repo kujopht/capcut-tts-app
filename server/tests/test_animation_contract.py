@@ -377,6 +377,19 @@ class HopDongAnimationTest(unittest.TestCase):
                 self.assertEqual(dem[b.series_id], 1, ten)
                 self.assertEqual(dem["khong_co"], 0, ten)
 
+    def test_episodes_by_external_ids_phat_hien_video_da_nhap(self):
+        """Phase 5 (Trusted Video Sources): tra ve tap DA CO theo ID video
+        YouTube, o BAT KY series nao — dung de chan nhap trung."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="A"))
+                kho.create_episode(AnimationEpisode(
+                    series_id=s.series_id, owner_id="u1", title="Tập 1",
+                    external_id="a" * 11))
+                dem = kho.episodes_by_external_ids(["a" * 11, "z" * 11])
+                self.assertEqual(set(dem.keys()), {"a" * 11}, ten)
+                self.assertEqual(dem["a" * 11].title, "Tập 1", ten)
+
 
 class BuildAnimationStoreTest(unittest.TestCase):
     """`build_animation_store` phai chon dung kho theo `DATA_BACKEND`, va

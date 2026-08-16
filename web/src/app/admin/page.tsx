@@ -115,12 +115,12 @@ export default function AdminDashboard() {
               </h3>
               {data.trusted_sources.configured ? (
                 <div className="stat-grid admin-luoi">
-                  <OSo nhan="Kênh tin cậy" so={null} />
-                  <OSo nhan="Đang theo dõi" so={null} />
-                  <OSo nhan="Video phát hiện hôm nay" so={null} />
-                  <OSo nhan="Tự động nhập" so={null} />
-                  <OSo nhan="Chờ duyệt" so={null} />
-                  <OSo nhan="Lỗi/xung đột" so={null} />
+                  <OSo nhan="Kênh tin cậy" so={data.trusted_sources.total ?? null} />
+                  <OSo nhan="Đang theo dõi" so={data.trusted_sources.enabled_total ?? null} />
+                  <OSo nhan="Video phát hiện hôm nay" so={data.trusted_sources.detected_today ?? null} />
+                  <OSo nhan="Tự động nhập" so={data.trusted_sources.auto_imported_total ?? null} />
+                  <OSo nhan="Chờ duyệt" so={data.trusted_sources.pending_total ?? null} />
+                  <OSo nhan="Lỗi/xung đột" so={data.trusted_sources.error_total ?? null} />
                 </div>
               ) : (
                 <ChuaCauHinh

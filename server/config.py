@@ -391,6 +391,12 @@ class Settings:
     translation_api_key: str = ""
     translation_model: str = ""
 
+    #: YouTube Data API v3 (Phase 5, Trusted Video Sources) — RONG = chua
+    #: cau hinh, cac route/service lien quan phai bao trang thai "chua cau
+    #: hinh" ro rang (xem `server/youtube_client.py::YouTubeConfigError`),
+    #: KHONG bao gio am tham lui ve mock hay gia lap ket qua.
+    youtube_api_key: str = ""
+
     @property
     def is_development(self) -> bool:
         return self.environment.lower() in ("development", "dev", "local")
@@ -639,6 +645,7 @@ def load_settings() -> Settings:
         translation_base_url=_env("TRANSLATION_BASE_URL"),
         translation_api_key=_env("TRANSLATION_API_KEY"),
         translation_model=_env("TRANSLATION_MODEL"),
+        youtube_api_key=_env("YOUTUBE_API_KEY"),
         image_studio=_image_studio_settings(),
     )
 

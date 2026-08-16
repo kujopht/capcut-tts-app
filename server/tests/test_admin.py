@@ -644,13 +644,25 @@ class DashboardMoRongTest(Base):
         self.assertEqual(sau["content"]["chapters_total"],
                          truoc["content"]["chapters_total"] + 1)
 
-    def test_trusted_sources_va_traffic_chua_cau_hinh(self):
-        """Phan B (Trusted Video Sources) va Cloudflare traffic analytics
-        CHUA xay/CHUA co credential — phai bao ro, khong bia du lieu."""
+    def test_traffic_chua_cau_hinh(self):
+        """Cloudflare traffic analytics CHUA co credential — phai bao ro,
+        khong bia du lieu."""
         d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
-        self.assertFalse(d["trusted_sources"]["configured"])
         self.assertFalse(d["traffic"]["configured"])
         self.assertIn("not configured", d["traffic"]["message"])
+
+    def test_trusted_sources_da_xay_phase_5_dem_dung_bounded(self):
+        """Phan B (Trusted Video Sources, Phase 5) — kho da xay, dashboard
+        phai bao `configured=True` kem cac bo dem THAT (bounded-count,
+        khong quet toan bang), khong con bia "chua xay" nhu Phase 2."""
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        ts = d["trusted_sources"]
+        self.assertTrue(ts["configured"])
+        for khoa in ("total", "enabled_total", "auto_imported_total",
+                    "pending_total", "error_total"):
+            self.assertIsInstance(ts[khoa], int)
+        # Chua co bo loc theo ngay tren video_imports — None, khong bia 0.
+        self.assertIsNone(ts["detected_today"])
 
     def test_moderator_van_xem_duoc_dashboard(self):
         """Dashboard dung `admin_profile` (bat ky vai tro nao) — MODERATOR

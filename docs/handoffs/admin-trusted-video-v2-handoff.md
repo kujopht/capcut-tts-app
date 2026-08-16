@@ -4,8 +4,8 @@
 Đừng dựa vào trí nhớ hội thoại trước — hãy đọc file này và kiểm tra lại code
 thật trước khi sửa bất cứ gì.
 
-Cập nhật lần cuối: 2026-08-16, sau khi đợt hardening (audit Appwrite
-datetime rỗng toàn repo) được push.
+Cập nhật lần cuối: 2026-08-16, sau khi Phase 7 (Analytics + Final Admin
+Control Center Polish) được push.
 
 ## 0. Bootstrap cho phiên mới
 
@@ -60,13 +60,18 @@ xong và được người dùng duyệt.
 - Phase 6: commit `eedc077` — "Admin Control Center V2, Phase 6: YouTube
   WebSub + dong bo tap moi tu dong". Đã push, đã duyệt.
 - Hardening (không phải một phase đánh số, chạy TRƯỚC Phase 7 theo yêu cầu
-  người dùng): commit MỚI NHẤT trên nhánh này SAU `eedc077` (chạy
-  `git log --oneline -5` để lấy SHA thật) — "Hardening: audit toàn repo cho
-  lỗi Appwrite datetime rỗng". Đã push. Xem mục 4f.
+  người dùng): commit `8b1c544` — "Hardening: audit toàn repo cho lỗi
+  Appwrite datetime rỗng". Đã push, đã duyệt. Xem mục 4f.
+- Phase 7: commit MỚI NHẤT trên nhánh này SAU `8b1c544` (chạy
+  `git log --oneline -5` để lấy SHA thật) — "Admin Control Center V2, Phase
+  7: Analytics + Final Admin Control Center Polish". Đã push. Xem mục 4g.
+  Đây là **phase tính năng CUỐI CÙNG** trước khi xét duyệt tích hợp toàn
+  nhánh (nguyên văn yêu cầu người dùng) — KHÔNG tự suy ra "Phase 8" nào,
+  bước tiếp theo là người dùng quyết định có merge/tích hợp hay không.
 - Remote: `origin/feature/admin-trusted-video-v2` phải khớp HEAD cục bộ sau
-  khi commit hardening được push — xác nhận lại bằng `git fetch` +
-  `git rev-parse` trước khi tiếp tục Phase 7, đừng tin dòng này nếu đã có
-  thời gian trôi qua.
+  khi commit Phase 7 được push — xác nhận lại bằng `git fetch` +
+  `git rev-parse` trước khi làm bất cứ gì tiếp theo, đừng tin dòng này nếu
+  đã có thời gian trôi qua.
 - `main`: **chưa hề đụng tới** trong toàn bộ việc này. `origin/main` đang ở
   `d483e90` ("deploy: them systemd unit cho translation worker production")
   — hoàn toàn không liên quan, không có commit nào của nhánh này lọt vào.
@@ -911,21 +916,223 @@ hiệu bị ảnh hưởng, cần xoá `last_*_at` (đặt lại rỗng) — nh�
 đoán heuristic, CẦN người dùng xác nhận trước khi chạy bất kỳ điều gì trên
 Appwrite Cloud production.
 
+**CẬP NHẬT Phase 7**: script dry-run CHỈ ĐỌC hiện thực hoá đúng heuristic
+này đã được viết — `scripts/audit_profiles_datetime_dry_run.py` — và đã
+chạy THẬT trên Appwrite dev tự lưu trú (16/16 hồ sơ quét, 6 ứng viên nghi
+vấn tìm thấy trên chính môi trường dev, xác nhận heuristic hoạt động
+đúng). Xem mục 4g phần "Deferred production data audit" để biết chi tiết
+đầy đủ — vẫn CHƯA chạy trên Appwrite Cloud production, vẫn cần quyết định
+của người dùng trước khi làm bất cứ điều gì ở đó.
+
+## 4g. Đã xong — Phase 7 (Analytics + Final Admin Control Center Polish)
+
+Phase tính năng CUỐI CÙNG trước khi xét duyệt tích hợp toàn nhánh. Mục
+tiêu: hoàn thiện analytics/chỉ số vận hành/trang tình trạng hệ thống còn
+thiếu, và một đợt hoàn thiện cuối cho toàn bộ Admin Control Center V2.
+
+**Nguyên tắc xuyên suốt**: KHÔNG bịa chỉ số không thể tính đúng — mọi chỉ
+số không khả dụng hiện "Chưa đo lường được"/"Chưa có dữ liệu" kèm lý do rõ
+ràng, KHÔNG bao giờ hiện `0` giả.
+
+**Kiến trúc tách bạch MỚI**: `/api/admin/overview` (dashboard chính) PHẢI
+giữ nhẹ — chỉ thêm ĐÚNG hai truy vấn bị chặn mới (fix `detected_today`,
+đọc lần đối chiếu gần nhất). Mọi chi tiết phân tích SÂU HƠN (theo khoảng
+thời gian, theo trạng thái) đi qua route RIÊNG, CHỈ gọi khi người dùng
+thật sự mở trang tương ứng:
+
+- `GET /api/admin/analytics/detail?range=today|7d|30d` (MỚI) — nguồn dữ
+  liệu cho `/admin/analytics`. ~15-18 truy vấn bị chặn mỗi lần gọi (đã ghi
+  rõ trong docstring route), KHÔNG truy vấn nào quét toàn bảng.
+- `GET /api/admin/image-studio/spending` (MỞ RỘNG, không đổi hình dạng
+  trường cũ) — thêm tình trạng vận hành dịch/TTS/BYOK cho `/admin/ai-credits`.
+
+**USERS**: `registrations` (theo khoảng, tái dùng `count_profiles`).
+DAU/WAU/MAU: **KHÔNG hiện thực được với dữ liệu hiện có** — đã xác nhận
+THẬT bằng cách thử truy vấn `accessedAt` (Appwrite Users API trả về
+trường này trong response nhưng TỪ CHỐI lọc theo nó: "Attribute not found
+in schema: accessedAt" — xác nhận qua gọi thật tới Appwrite dev). Tính từ
+sự kiện thô sẽ quét toàn bảng (cấm), và xây một cơ chế theo dõi hoạt động
+mới (vd `profiles.last_active_at`, cập nhật tại điểm xác thực phiên) sẽ
+đụng vào ĐƯỜNG NÓNG NHẤT của toàn ứng dụng (mọi request đã xác thực) —
+một thay đổi xuyên suốt lớn, rủi ro cao, ngoài phạm vi một phase "hoàn
+thiện analytics". Quyết định: hiện `null` kèm `active_note` giải thích rõ,
+đúng tinh thần "Do not fabricate metrics" của đặc tả.
+
+**CONTENT**: `comments` (theo khoảng, MỚI thêm `created_after` vào
+`count_comments`). `novel_reads`/`chapter_completions`/`animation_views`:
+**KHÔNG có instrumentation nào ghi nhận các sự kiện này hiện tại** — thêm
+mới sẽ đụng vào đường phục vụ nội dung (đọc truyện/hoàn thành chương/xem
+Animation), một thay đổi cross-cutting khác, ngoài phạm vi phase này.
+Quyết định: `null` kèm ghi chú "sẽ tính từ ngày triển khai trở đi" (đúng
+hướng dẫn đặc tả mục 3 cho dữ liệu lịch sử không tái dựng được rẻ).
+
+**AI/PRODUCT**: dịch thuật + TTS đều có phân tích theo trạng thái
+(completed/failed/cancelled/in_progress cho dịch; pending/running/
+completed/failed cho TTS) qua `count_jobs()` MỚI thêm vào CẢ bốn kho
+(`AppwriteMetadataStore`/`MockMetadataStore` cho TTS,
+`AppwriteTranslationStore`/`MockTranslationStore` cho dịch). Lượt sinh
+ảnh Image Studio: `null` — chỉ có tổng chi tiêu ($), không có bộ đếm lượt
+sinh riêng.
+
+**TRUSTED VIDEO**: tái dùng toàn bộ hạ tầng Phase 5/6 — thêm
+`created_after` vào `find_imports()` (CẢ hai kho) để tính theo khoảng, và
+`count_sources_by_subscription_status()` (MỚI, CẢ hai kho) cho bảng suc
+khỏe đăng ký WebSub (5 giá trị enum, mỗi giá trị MỘT truy vấn bị chặn —
+Appwrite không hỗ trợ group-by). Số lần đối chiếu đọc qua
+`admin_events(action="reconciliation_run", created_after=...)` — MỚI thêm
+`created_after` vào `list_events`/`admin_events` (CẢ hai kho chính +
+service layer), tận dụng LẠI "lần đối chiếu gần nhất" và "tổng số lần" từ
+CÙNG một lệnh gọi (`events[0]`/`total`).
+
+**PHÁT HIỆN QUAN TRỌNG — kiến trúc ví Fanfic Credit chưa Appwrite hoá**:
+`server/main.py` gán CỨNG `image_wallet_store = MockWalletStore()` — ví
+Fanfic Credit theo NGƯỜI DÙNG (khác hẳn "Shared Premium" — ngân sách
+THÁNG của quản trị, đã hiện từ Phase 2) hiện chạy HOÀN TOÀN trên bộ nhớ
+tạm từng tiến trình, mất sạch khi khởi động lại, dù ba collection Appwrite
+(`image_wallet_transactions`/`image_generation_reservations`/
+`image_saved_library`) đã có sẵn trong schema. **Đây KHÔNG phải một lỗi
+mới phát hiện** — docstring `server/image_wallet_store.py` đã tự ghi rõ
+từ trước: "PHASE 9 — production Appwrite đang bị chặn, nên chỉ đây GIAO
+DIỆN ở đây, chưa có `AppwriteWalletStore` thật" — một quyết định kiến
+trúc CÓ CHỦ ĐÍCH từ lúc viết, không phải sơ suất. Trang AI/Credits (Phase
+7) hiển thị đúng thực trạng này (`wallet_configured: false` +
+`wallet_note` giải thích) thay vì giả vờ có dữ liệu tổng hợp nhiều người
+dùng không tồn tại — KHÔNG xây `AppwriteWalletStore` trong phase này
+(ngoài phạm vi, đã có kế hoạch riêng ở Phase 9).
+
+**TRAFFIC (Cloudflare)**: mở rộng `TrafficOverview`/`traffic_analytics.py`
+với các trường đặc tả yêu cầu (visits/pageviews hôm nay, `trend_by_day`,
+`referrers`, `countries`, `device_categories`) — TẤT CẢ vẫn `None` khi
+chưa cấu hình (không đổi hành vi hiện tại). Thêm
+`CLOUDFLARE_ANALYTICS_ZONE_ID`/`CLOUDFLARE_ANALYTICS_API_TOKEN` vào
+`server/.env.example` (chỉ tên biến, không giá trị) — hai biến này ĐÃ
+được thiết kế từ Phase 2, TÁCH BIỆT với `CLOUDFLARE_ACCOUNT_ID`/
+`CLOUDFLARE_API_TOKEN` (Workers AI, phạm vi token khác). KHÔNG hiện thực
+lệnh gọi GraphQL Analytics API thật (vẫn chưa có credential thật để kiểm
+thử — viết code gọi API không kiểm thử được là đoán, không phải kỹ thuật,
+đúng quyết định đã ghi từ Phase 2).
+
+**SYSTEM**: vocab BỐN trạng thái thống nhất
+(`healthy`/`degraded`/`error`/`not_configured`, hàm
+`_trang_thai_he_thong()` trong `server/main.py`) thay cho boolean rời
+rạc trước đây. Thêm YouTube Data API/YouTube WebSub/Đối chiếu định kỳ —
+"reconciliation" tính `degraded` nếu WebSub đã cấu hình nhưng CHƯA từng
+chạy HOẶC lần chạy gần nhất quá 48 giờ (dấu hiệu cron/scheduler ngoài có
+thể đã ngừng), `not_configured` nếu WebSub chưa cấu hình — KHÔNG BAO GIỜ
+hiện `healthy` giả trước khi có callback công khai thật (đúng yêu cầu đặc
+tả mục 8: "no misleading healthy status"). "Worker/hàng đợi" KHÔNG có
+giám sát độc lập (không có tín hiệu nào để phát hiện worker chết riêng
+biệt) — ăn theo tình trạng Appwrite, ghi chú rõ hạn chế này trong UI thay
+vì giả vờ giám sát.
+
+**HIỆU NĂNG — sửa THẬT, không chỉ ghi nhận (mục 11 đặc tả)**:
+`_admin_dashboard_them()` (dashboard chính) từ TUẦN TỰ (Phase 2-6, ~20+
+truy vấn Appwrite nối tiếp nhau) chuyển sang SONG SONG qua
+`ThreadPoolExecutor` — lần ĐẦU TIÊN hàm này được song song hoá (Phase 2-6
+chỉ ghi "hướng khả dĩ cho phase sau", Phase 7 là phase đó). Đã đo THẬT
+trên Appwrite dev tự lưu trú:
+- TRƯỚC (tuần tự, đã có TỪ Phase 2, cộng thêm 2 truy vấn Phase 7 mới):
+  quan sát qua QA trình duyệt **90+ giây** ở một số lần tải.
+- SAU (song song, `max_workers=8`): 21 giây MỘT LẦN gọi trực tiếp, nhưng
+  **gây timeout THẬT** ở lần gọi thứ hai (VM dev nhỏ, một tiến trình, quá
+  tải khi 8 truy vấn đồng thời — `httpx.ReadTimeout` sau 15 giây trên
+  `count_reports()`). Đây là bằng chứng THẬT, không phải suy đoán.
+- SAU (song song, `max_workers=4`, cấu hình CUỐI CÙNG): **5-9 giây**, ổn
+  định qua 3 lần gọi liên tiếp, không lỗi.
+- **Khả năng chịu lỗi MỚI**: mỗi nhóm truy vấn (`ThreadPoolExecutor`
+  future) được bọc qua `_an_toan()` — một nhóm lỗi/timeout trả về giá trị
+  mặc định (`None`, đúng triết lý "None = chưa có dữ liệu" đã dùng xuyên
+  suốt dashboard) THAY VÌ làm sập 500 CẢ trang tổng quan. Test hồi quy
+  `test_mot_nhom_truy_van_loi_khong_lam_sup_ca_dashboard` mô phỏng ĐÚNG
+  tình huống timeout thật đã gặp — bắt được MỘT lỗi thật khi viết (xem
+  dưới).
+- **Lỗi thật bắt được nhờ bài test trên**: nhánh xử lý lỗi ban đầu gọi
+  `print()` với chuỗi có dấu tiếng Việt — `UnicodeEncodeError` trên
+  console Windows cp1252 khi CHẠY TEST (dù không phải môi trường production
+  thật là Linux) — sửa bằng thông điệp log thuần ASCII. Nếu không viết
+  bài test mô phỏng lỗi thật, nhánh xử lý lỗi (chính nó!) sẽ có lỗi ẩn
+  không ai phát hiện tới khi cần dùng thật.
+
+**Trusted Video final polish (đặc tả mục 8)**: rà lại UI Phase 5/6 —
+confidence hiện % + `signals`/`reason` giải thích (đã có từ Phase 5, xác
+nhận còn nguyên), xung đột tô màu cảnh báo riêng (`tt-treo`, đã có), nút
+"Bỏ tin cậy" bắt buộc qua `ConfirmDialog` (đã có từ Phase 4/5), trạng thái
+WebSub không bao giờ hiện "khoẻ" giả trước khi có callback thật (Phase 6 +
+System page mới). **KHÔNG cần sửa code** — rà soát xác nhận các yêu cầu
+mục 8 đã được đáp ứng từ các phase trước, không phải bỏ sót.
+
+**Deferred production data audit (đặc tả mục 10)** —
+`scripts/audit_profiles_datetime_dry_run.py` (MỚI): script CHỈ ĐỌC, KHÔNG
+có đường ghi/sửa nào trong file (không phải "mặc định dry-run có thể bật
+--apply" — phiên bản này VẬT LÝ không có code path nào để mutate, an toàn
+tuyệt đối kể cả gọi nhầm cờ). Heuristic: một hồ sơ là "ứng viên nghi vấn"
+nếu `last_X_at` khác rỗng NHƯNG con trỏ nội dung tương ứng
+(`last_read_novel_id`/`last_watch_series_id`/...) lại rỗng — tổ hợp KHÔNG
+THỂ xảy ra qua luồng ghi bình thường, dấu hiệu chắc chắn của lỗi Appwrite
+datetime rỗng (mục 4f). Đã chạy THẬT trên Appwrite dev: quét 16 hồ sơ, tìm
+thấy 6 ứng viên (bằng chứng heuristic hoạt động đúng, VÀ xác nhận lỗi ĐÃ
+từng ảnh hưởng dữ liệu thật trên môi trường dev — không chỉ lý thuyết).
+KHÔNG chạy trên Appwrite Cloud production (đúng yêu cầu), KHÔNG sửa 6 hồ
+sơ nghi vấn trên dev (giữ nguyên làm bằng chứng, việc dọn dẹp không cấp
+bách). Khi Appwrite Cloud production được khôi phục quyền truy cập: chạy
+LẠI script này trỏ vào production để lấy danh sách/số lượng thật, rồi
+NGƯỜI DÙNG quyết định có cần một script sửa RIÊNG hay không (script đó
+PHẢI có `--apply`, xác nhận tay, backup/export trước khi đổi — KHÔNG mở
+rộng script đọc này để tự sửa).
+
+**Security audit (đặc tả mục 12)**: MỌI route mới/mở rộng ở Phase 7 là
+CHỈ ĐỌC (GET) — không có route mutate mới nào, nên không cần bổ sung nhật
+ký kiểm duyệt hay hộp thoại xác nhận. `/api/admin/analytics/detail` xác
+nhận qua `test_moi_route_admin_deu_duoc_bao_ve` (tự phát hiện + tự kiểm
+MỌI route `/api/admin/*`) là được bảo vệ bởi `admin_profile`. Không có
+secret/API key/token nào lộ ra qua bất kỳ trường JSON mới nào (đã kiểm
+bằng test — `byok_connections_by_status` CHỈ đếm theo trạng thái, không
+bao giờ trả `encrypted_secret`).
+
+**Test mới**: `server/tests/test_appwrite_v2_contract.py` (+3:
+`count_jobs`/`count_comments`/`list_events created_after`),
+`server/tests/test_translation_contract.py` (+3:
+`count_jobs`/`count_connections_by_status`),
+`server/tests/test_trusted_source_contract.py` (+2:
+`count_sources_by_subscription_status`/`find_imports created_after`),
+`server/tests/test_admin.py` (+8: `AnalyticsDetailTest` ×5,
+`AiCreditsSpendingTest` ×1, trạng thái hệ thống YouTube/WebSub ×1, khả
+năng chịu lỗi dashboard ×1), `web/tests/
+admin-analytics-ai-credits-system-phase7.test.mjs` (MỚI, 13 test).
+
+**QA trình duyệt THẬT** (chrome-devtools MCP, tài khoản QA mới
+`phase7-qa-owner@fanfic.world`, backend dev tạm cổng `8010`/frontend
+`3010`, cùng mẫu môi trường Phase 5/6): Dashboard (`detected_today` hiện
+số thật `0` thay vì "—"), Analytics (bộ chuyển đổi phạm vi hoạt động,
+DAU/WAU/MAU + hoạt động nội dung hiện đúng "—" kèm ghi chú), AI/Credits
+(phân tích dịch/TTS/BYOK hiện đúng, phát hiện MỘT trạng thái bất ngờ —
+kill switch Shared Premium đang BẬT — xác nhận đây là hành vi CÓ CHỦ ĐÍCH
+từ trước, tự động bật khi `shared_premium_enabled=false` lúc khởi động,
+KHÔNG PHẢI lỗi Phase 7), System (đủ tám hàng trạng thái, "Đối chiếu định
+kỳ" hiện đúng cả trạng thái `not_configured` LẪN "lần chạy gần nhất" lịch
+sử — hai thông tin không mâu thuẫn nhau), Trusted Sources (danh sách rỗng
+đúng, không hồi quy). Một hiện tượng "không có quyền quản trị" thoáng qua
+xuất hiện HAI LẦN khi điều hướng nhanh — tự khỏi khi tải lại, tương quan
+với một request `/api/admin/overview` bị huỷ giữa chừng báo lỗi CORS giả
+(cùng họ với độ trễ VM đã ghi ở mục 6, không phải lỗi Phase 7 mới). Không
+có dữ liệu disposable nào cần dọn (chỉ đăng ký một tài khoản QA, không
+tạo trusted source/series nào lần này).
+
 ## 5. Trạng thái test/build (đã CHẠY LẠI và xác nhận ngay tại thời điểm viết
 handoff này, không phải chỉ nhớ lại)
 
 | Mục | Kết quả |
 |---|---|
-| Backend (`unittest discover -s server/tests -t .`) | **2360/2360 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +7 test hardening |
-| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **622/622 pass** — không đổi ở đợt hardening (không sửa file frontend nào) |
+| Backend (`unittest discover -s server/tests -t .`) | **2375/2375 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +15 test Phase 7 |
+| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **635/635 pass** — +13 test Phase 7 |
 | `npm run typecheck` | sạch, 0 lỗi |
 | `npm run lint` | 0 lỗi, 2 warning (không liên quan — `<img>` ở `image-studio/page.tsx`, có từ trước) |
-| `npm run build` | build production thành công, route `animation/sources/[id]` (động) không đổi hình dạng |
+| `npm run build` | build production thành công, không đổi hình dạng route |
 | Secret scan (grep diff cho api_key/secret/token/password/bearer + kiểm không có file `.env` nào bị đổi) | sạch |
-| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4), 4d (Phase 5 — 19/19), 4e (Phase 6 — hub thật + YouTube Data API thật + phát hiện lỗi Appwrite datetime rỗng), 4f (hardening — ghi/đọc thật ba write path đã sửa: `profiles`, `translation_jobs`, `translation_provider_connections`) |
+| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4), 4d (Phase 5 — 19/19), 4e (Phase 6 — hub thật + YouTube Data API thật), 4f (hardening — ba write path đã sửa), 4g (Phase 7 — `accessedAt` không lọc được xác nhận thật, dashboard đo thời gian thật trước/sau song song hoá, script audit dry-run chạy thật 16 hồ sơ) |
 | Smoke test thật YouTube Data API | ĐÃ CHẠY — xem mục 4d/4e, video "Me at the zoo" ổn định vĩnh viễn làm dữ liệu thật |
 | Smoke test thật WebSub/hub PubSubHubbub | ĐÃ CHẠY một phần — xem mục 4e; EXTERNAL WEBSUB E2E: BLOCKED (cần backend công khai qua HTTPS) |
-| QA trình duyệt thật | ĐÃ CHẠY Phase 4 (mục 4c) + Phase 5 (mục 4d) + Phase 6 (mục 4e) — phát hiện + sửa bug ConfirmDialog (P4), set-state-in-effect + window.location (P5), lỗi Appwrite datetime rỗng (P6) |
+| QA trình duyệt thật | ĐÃ CHẠY Phase 4 (mục 4c) + Phase 5 (mục 4d) + Phase 6 (mục 4e) + Phase 7 (mục 4g) — phát hiện + sửa bug ConfirmDialog (P4), set-state-in-effect + window.location (P5), lỗi Appwrite datetime rỗng (P6), song song hoá dashboard + khả năng chịu lỗi (P7) |
 
 ## 6. Quyết định về hiệu năng
 
@@ -940,21 +1147,26 @@ handoff này, không phải chỉ nhớ lại)
   KHÔNG phải `"greaterEqual"` (bug thật đã gặp và sửa trong phiên này, phát
   hiện qua smoke test thật, không phải qua đọc doc — nếu thấy `"greaterEqual"`
   ở đâu đó khác trong codebase thì đó cũng là bug cùng loại).
-- **Quan sát độ trễ CHƯA giải quyết**: `/api/admin/overview` mất khoảng
-  13-14 giây để tải xong hoàn toàn khi test qua trình duyệt thật chống lại
-  Appwrite tự lưu trú (VM ở xa, không phải localhost). Nguyên nhân nhiều khả
-  năng là `_admin_dashboard_them()` gọi TUẦN TỰ ~12-15 truy vấn Appwrite độc
-  lập (mỗi truy vấn RIÊNG LẺ đã bị chặn/bounded đúng yêu cầu, nhưng tổng độ
-  trễ MẠNG của việc gọi tuần tự cộng dồn lại). Đã xác nhận đây KHÔNG phải
-  vòng lặp gọi lại (số lượng network request trong DevTools đứng yên, không
-  tăng thêm mãi theo thời gian).
-  - **Chưa tối ưu.** Hướng khả dĩ cho phase sau: song song hoá các lệnh gọi
-    độc lập trong `_admin_dashboard_them()` (vd `ThreadPoolExecutor` ở phía
-    Python, vì các truy vấn không phụ thuộc lẫn nhau), hoặc cache ngắn hạn
-    (vài chục giây) cho kết quả tổng quan nếu việc gọi lại liên tục là vấn đề
-    thật ở production.
-  - Đây KHÔNG chặn Phase 2 được coi là "xanh" — đã được người dùng chấp nhận
-    ghi nhận làm việc tiếp theo, không phải lỗi chặn checkpoint.
+- **ĐÃ GIẢI QUYẾT ở Phase 7** (trước đó là quan sát độ trễ chưa giải quyết
+  từ Phase 2): `/api/admin/overview` từng mất 13-90+ giây (quan sát THẬT
+  qua QA trình duyệt Phase 2-7) do `_admin_dashboard_them()` gọi TUẦN TỰ
+  ~20+ truy vấn Appwrite độc lập. Phase 7 chuyển sang SONG SONG qua
+  `ThreadPoolExecutor` (`max_workers=4`) — đo THẬT trên Appwrite dev: còn
+  **5-9 giây**, ổn định qua nhiều lần gọi. `max_workers=8` (tương ứng đúng
+  số nhóm truy vấn) đã THỬ TRƯỚC nhưng gây **timeout thật**
+  (`httpx.ReadTimeout` sau 15s) trên VM dev nhỏ khi quá tải — hạ xuống 4
+  để cân bằng tốc độ/tải VM. MỌI nhóm truy vấn được bọc qua `_an_toan()`:
+  một nhóm lỗi/timeout trả `None` cho ĐÚNG phần đó thay vì làm sập 500 cả
+  trang — xem mục 4g để biết đầy đủ (bao gồm một lỗi Unicode thật bắt được
+  nhờ viết test mô phỏng tình huống timeout).
+  - `httpx.Client` (dùng trong mọi kho Appwrite ở đây) an toàn dùng đồng
+    thời trên nhiều luồng — không cần một client riêng cho mỗi luồng.
+  - Nếu VM dev sau này được nâng cấp/production dùng Appwrite Cloud (nhiều
+    tài nguyên hơn), có thể cân nhắc tăng lại `max_workers` — đo lại THẬT
+    trước khi đổi, đừng chỉnh theo suy đoán.
+  - Cache ngắn hạn cho kết quả tổng quan (đã từng đề xuất ở Phase 2) VẪN
+    CHƯA cần thiết sau khi song song hoá — độ trễ hiện tại đã chấp nhận
+    được, để dành nếu vấn đề tái xuất hiện ở quy mô lớn hơn.
 - Không có lớp cache mới nào được thêm cho dashboard trong Phase 2 — mỗi lần
   tải trang là một lượt gọi thật tới Appwrite (bounded từng truy vấn, nhưng
   không cache tổng thể response).
@@ -1064,7 +1276,13 @@ POST /api/admin/animation/sources/{source_id}/unsubscribe         — MỚI Phas
 POST /api/admin/animation/reconciliation/run                      — MỚI Phase 6
 GET  /api/youtube/websub                                          — MỚI Phase 6 (CÔNG KHAI)
 POST /api/youtube/websub                                          — MỚI Phase 6 (CÔNG KHAI)
+GET  /api/admin/analytics/detail                                  — MỚI Phase 7
 ```
+`GET /api/admin/image-studio/spending` (Phase 2) được MỞ RỘNG ở Phase 7 —
+thêm `translation_jobs_by_status`/`tts_jobs_by_status`/
+`byok_connections_by_status`/`wallet_configured`/`wallet_note`, KHÔNG đổi
+hình dạng trường cũ (xem mục 4g).
+
 Lưu ý: `GET /api/admin/users` và `GET /api/admin/users/{user_id}` (Phase 3)
 giờ đọc THẲNG Appwrite Users API (native) làm nguồn chính, làm giàu bằng
 `profiles` — xem mục 4b. Bốn route quản lý tài khoản đều gọi qua
@@ -1081,7 +1299,9 @@ rộng thêm `WebSubConfigError` → 503). HAI route `/api/youtube/websub`
 (Phase 6) là route CÔNG KHAI DUY NHẤT trong toàn bộ `/api/admin/animation/*`
 — KHÔNG qua bất kỳ dependency vai trò nào, rào chắn là chữ ký HMAC
 `X-Hub-Signature`/challenge WebSub (xem mục 4e), route hệ thống YouTube gọi
-trực tiếp chứ không phải quản trị viên.
+trực tiếp chứ không phải quản trị viên. `GET /api/admin/analytics/detail`
+(Phase 7) dùng `admin_profile` (≥ MODERATOR, giống mức đọc dashboard
+chính) — CHỈ ĐỌC, không có route mutate mới nào ở Phase 7.
 
 **Frontend** (`web/src/app/admin/`):
 ```
@@ -1094,9 +1314,9 @@ authors/                — đơn tác giả + danh sách tác giả (đã có t
 stories/                — duyệt truyện (đã có từ trước, KHÔNG có nút xoá — có chủ đích)
 posts/, comments/, reports/  — moderation xã hội (đã có từ trước)
 audit-log/              — MỚI Phase 2, thay /admin/events (đã xoá)
-analytics/               — MỚI Phase 2
-ai-credits/              — MỚI Phase 2
-system/                  — MỚI Phase 2
+analytics/               — MỚI Phase 2, ĐỔI HẲN Phase 7 sang /api/admin/analytics/detail
+ai-credits/              — MỚI Phase 2, MỞ RỘNG Phase 7 (dịch/TTS/BYOK/ví)
+system/                  — MỚI Phase 2, MỞ RỘNG Phase 7 (YouTube/WebSub/đối chiếu, vocab 4 trạng thái)
 animation/               — ĐỔI Phase 4: tu placeholder sang trang landing THẬT
 animation/series/       — MỚI Phase 4: danh sách series TOÀN NỀN TẢNG
 animation/series/[id]/  — MỚI Phase 4: chi tiết series + kiểm duyệt tập
@@ -1129,7 +1349,9 @@ MỚI Phase 5, xem mục 4d), `web/tests/admin.test.mjs`,
 `web/tests/admin-account-management.test.mjs` (Phase 3),
 `web/tests/admin-animation-moderation.test.mjs` (MỚI Phase 4),
 `web/tests/admin-trusted-sources.test.mjs` (MỚI Phase 5, 16 test),
-`web/tests/ui.test.mjs` (Phase 4, +1 khẳng định fix ConfirmDialog).
+`web/tests/ui.test.mjs` (Phase 4, +1 khẳng định fix ConfirmDialog),
+`web/tests/admin-analytics-ai-credits-system-phase7.test.mjs` (MỚI Phase
+7, 13 test).
 
 ## 10. Các phase còn lại (ĐÚNG THỨ TỰ)
 
@@ -1158,10 +1380,29 @@ MỚI Phase 5, xem mục 4d), `web/tests/admin.test.mjs`,
   (chuỗi rỗng trên thuộc tính datetime bị tự điền thành giờ hiện tại) được
   phát hiện + sửa trong phase này — xem mục 4e để biết chi tiết, phase sau
   KHÔNG cần điều tra lại hiện tượng "timestamp lạ trên nguồn mới tạo".
-- **PHASE 7** — Hoàn thiện các chỉ số analytics/product còn thiếu + hoàn
-  thiện tích hợp tổng thể. Cân nhắc thêm: triển khai backend công khai qua
-  HTTPS thật để gỡ blocker "EXTERNAL WEBSUB E2E" của Phase 6 (không bắt
-  buộc, tuỳ ưu tiên người dùng).
+- ~~**PHASE 7** — Analytics + Final Admin Control Center Polish~~ —
+  **XONG**, xem mục 4g. Đây là **phase tính năng CUỐI CÙNG** theo yêu cầu
+  người dùng ("final feature phase before whole-branch integration
+  review") — KHÔNG có Phase 8 nào được tự suy ra. Ba việc CỐ Ý để lại
+  chưa làm (đã ghi rõ lý do trong mục 4g, không phải bỏ sót):
+  - DAU/WAU/MAU và luợt đọc truyện/hoàn thành chương/lượt xem Animation:
+    không có nguồn dữ liệu rẻ để tính đúng — hiện `null` kèm lý do, KHÔNG
+    xây instrumentation mới trên đường nóng của toàn ứng dụng.
+  - `AppwriteWalletStore` (ví Fanfic Credit bền vững): đã quy hoạch riêng
+    ở Phase 9 từ trước, KHÔNG xây trong phase này.
+  - "EXTERNAL WEBSUB E2E: BLOCKED" (Phase 6) vẫn còn — cần triển khai
+    backend công khai qua HTTPS thật, một việc hạ tầng/triển khai ngoài
+    phạm vi sửa code, tuỳ người dùng ưu tiên.
+  - Việc dọn dữ liệu `profiles` production bị ảnh hưởng bởi lỗi Appwrite
+    datetime rỗng (mục 4f): script dry-run đã sẵn sàng
+    (`scripts/audit_profiles_datetime_dry_run.py`), CHƯA chạy trên
+    production, chờ Appwrite Cloud access được khôi phục + quyết định
+    người dùng.
+- **SAU PHASE 7**: xét duyệt tích hợp toàn nhánh
+  (`feature/admin-trusted-video-v2` → `integration/pre-prod-v1`/`main`) —
+  đây là quyết định CỦA NGƯỜI DÙNG, không phải một phase code tiếp theo.
+  Agent phiên sau KHÔNG được tự ý merge/deploy dù đọc thấy dòng này — chỉ
+  làm khi có lệnh rõ ràng (xem mục 14).
 
 ## 11. Cấu hình YouTube
 
@@ -1226,32 +1467,42 @@ stash@{0}: On feature/animation-player-v2-custom-controls: animation-player-v2 d
   `feature/admin-trusted-video-v2`, KHÔNG amend commit cũ trừ khi được yêu
   cầu rõ.
 
-## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 7
+## 15. TRẠNG THÁI HIỆN TẠI — TẤT CẢ CÁC PHASE TÍNH NĂNG ĐÃ XONG
 
 Phase 3 (Full User Management), Phase 4 (Animation Moderation), Phase 5
 (Trusted Video Sources), Phase 6 (YouTube WebSub + Automatic Episode
-Pipeline), và đợt Hardening "audit Appwrite datetime rỗng toàn repo"
-**ĐÃ XONG** — xem mục 4b/4c/4d/4e/4f để biết chi tiết đầy đủ, quyết định
-kiến trúc, và kết quả smoke test/QA trình duyệt thật. ĐỪNG làm lại các
-mục này. **An toàn để bắt đầu Phase 7** — không còn lỗi Appwrite
-datetime rỗng nào chưa sửa trong toàn bộ 39 collection (xem mục 4f để
-biết phương pháp audit và bảng kết quả đầy đủ).
+Pipeline), đợt Hardening "audit Appwrite datetime rỗng toàn repo", và
+Phase 7 (Analytics + Final Admin Control Center Polish) **ĐÃ XONG** — xem
+mục 4b/4c/4d/4e/4f/4g để biết chi tiết đầy đủ, quyết định kiến trúc, và
+kết quả smoke test/QA trình duyệt thật. ĐỪNG làm lại các mục này.
 
-**PHASE 7 — hoàn thiện chỉ số analytics/product còn thiếu + hoàn thiện
-tích hợp tổng thể.** Trước khi viết code, các việc còn treo lại từ các
-phase trước (KHÔNG bắt buộc, chỉ là cơ hội tiện thể nếu có thời gian/người
-dùng yêu cầu):
-- `detected_today` ở dashboard vẫn `None` (từ Phase 5, xem mục 4d) — cần
-  thêm bộ lọc theo ngày trên `video_imports`, một mở rộng additive nhỏ.
-- Độ trễ `/api/admin/overview` (~13-20 giây trên môi trường dev tự lưu
-  trú) CHƯA được tối ưu — xem mục 6, vẫn là vấn đề đã biết, không chặn
-  phase nào.
-- "EXTERNAL WEBSUB E2E: BLOCKED" (mục 4e/12) — nếu người dùng ưu tiên việc
-  này, cần triển khai một backend công khai qua HTTPS thật để YouTube's
-  hub có thể gọi ngược lại callback; đây là hạ tầng triển khai, KHÔNG phải
-  việc sửa code (pipeline xử lý callback đã hoàn chỉnh từ Phase 6).
-- Nếu tiếp tục mở rộng Trusted Video Sources: `SeriesMapping` chưa có
-  trường playlist riêng (đơn giản hoá có chủ đích từ Phase 5, xem mục 10).
+**Phase 7 là phase tính năng CUỐI CÙNG** theo đúng yêu cầu người dùng —
+KHÔNG có "Phase 8" nào được lên kế hoạch hay tự suy ra. Việc còn treo
+(KHÔNG chặn, đã ghi rõ lý do ở mục 4g/10):
+- DAU/WAU/MAU, lượt đọc truyện/hoàn thành chương/lượt xem Animation:
+  không có nguồn dữ liệu rẻ để tính đúng hiện tại — cố ý để `null`.
+- `AppwriteWalletStore` (ví Fanfic Credit bền vững) — đã quy hoạch riêng ở
+  Phase 9 từ trước khi Phase 7 bắt đầu, không phải việc mới phát sinh.
+- "EXTERNAL WEBSUB E2E: BLOCKED" (Phase 6) — cần backend công khai qua
+  HTTPS thật, việc hạ tầng/triển khai, không phải code.
+- Dọn dữ liệu `profiles` production (mục 4f) — script dry-run đã sẵn
+  sàng, chờ Appwrite Cloud access khôi phục + quyết định người dùng.
+
+**BƯỚC TIẾP THEO là quyết định của người dùng, KHÔNG PHẢI một phase code
+mới**: xét duyệt tích hợp toàn nhánh
+(`feature/admin-trusted-video-v2` → `integration/pre-prod-v1` hoặc
+`main`). Một phiên agent mới đọc file này **TUYỆT ĐỐI KHÔNG được tự ý**:
+- Merge nhánh này vào `integration/pre-prod-v1` hay `main`.
+- Deploy production.
+- Đụng tới Appwrite Cloud production (kể cả chỉ để chạy script audit
+  dry-run mục 4g — cần lệnh rõ ràng của người dùng trước).
+- Tự phát minh một "Phase 8" nào đó để tiếp tục làm việc.
+
+Nếu người dùng yêu cầu tiếp tục, khả năng cao nhất là MỘT trong: (a) xét
+duyệt/merge tích hợp nhánh, (b) triển khai backend công khai HTTPS để gỡ
+blocker WebSub, (c) chạy script audit dry-run trên production sau khi có
+quyền truy cập, (d) xây `AppwriteWalletStore` (Phase 9). Đọc kỹ yêu cầu
+thật của người dùng trước khi giả định là việc nào trong bốn việc trên.
 
 ## 16. Ghi chú cho agent đọc file này
 

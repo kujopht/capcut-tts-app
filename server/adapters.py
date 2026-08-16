@@ -1393,6 +1393,18 @@ class MockMetadataStore(MockSocialStore):
         with self._lock:
             return len(self.jobs)
 
+    def count_jobs(self, *, status: Optional[JobStatus] = None,
+                  created_after: str = "") -> int:
+        """Bo dem cho bang dieu khien quan tri (Phase 7 analytics) — loc
+        THEO status/ngay tao, khong keo document nao ve."""
+        with self._lock:
+            items = self.jobs.values()
+            if status is not None:
+                items = [j for j in items if j.status is status]
+            if created_after:
+                items = [j for j in items if j.created_at >= created_after]
+            return len(list(items))
+
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """Xem contract o `MetadataStore.list_jobs_by_status`."""
         with self._lock:
@@ -1619,13 +1631,15 @@ class MockMetadataStore(MockSocialStore):
 
     def list_events(self, target_user_id: str = "", limit: int = 50,
                     offset: int = 0, target_type: str = "",
-                    target_id: str = "",
-                    action: str = "") -> Tuple[List[ModerationEvent], int]:
+                    target_id: str = "", action: str = "",
+                    created_after: str = "") -> Tuple[List[ModerationEvent], int]:
         """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra".
 
         `target_id` (Phase 4, Admin Control Center V2) — loc dung MOT doi
         tuong khong phai user (vd mot series/tap Animation cu the), cung
-        tinh than voi `target_type`/`action`."""
+        tinh than voi `target_type`/`action`. `created_after` (Phase 7
+        analytics) — loc theo ngay tao, dung cho bo dem theo khoang thoi
+        gian (vd so lan doi chieu WebSub trong 7 ngay qua)."""
         with self._lock:
             rows = [e for e in self._events
                     if not target_user_id or e.target_user_id == target_user_id]
@@ -1635,6 +1649,8 @@ class MockMetadataStore(MockSocialStore):
                 rows = [e for e in rows if e.target_id == target_id]
             if action:
                 rows = [e for e in rows if e.action == action]
+            if created_after:
+                rows = [e for e in rows if e.created_at >= created_after]
         # Dao TRUOC roi moi sap xep: `sorted` cua Python on dinh, nen hai ban ghi
         # cung moc thoi gian se giu thu tu ghi dao nguoc — tuc la cai ghi sau
         # dung truoc. Mot lop bao ve nua ben canh moc micro giay.

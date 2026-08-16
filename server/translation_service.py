@@ -387,6 +387,17 @@ class TranslationService:
         (Admin Control Center V2, A1)."""
         return self._store.total_projects()
 
+    def admin_count_jobs(self, *, status: Optional[TranslationJobStatus] = None,
+                         created_after: str = "") -> int:
+        """Bo dem job dich BI CHAN cho bang dieu khien quan tri (Phase 7
+        analytics) — loc THEO status/ngay tao, khong keo document nao ve."""
+        return self._store.count_jobs(status=status, created_after=created_after)
+
+    def admin_count_connections_by_status(self) -> Dict[str, int]:
+        """Bo dem ket noi BYOK theo trang thai — trang AI/Credits (Phase 7
+        analytics). KHONG bao gio tra secret/key."""
+        return self._store.count_connections_by_status()
+
     def estimate(self, source_text: str) -> Dict[str, int]:
         return uoc_luong(source_text)
 

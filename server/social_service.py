@@ -1422,6 +1422,12 @@ class SocialService:
             "total_comments": self._store.count_comments(),
         }
 
+    def admin_count_comments(self, *, created_after: str = "") -> int:
+        """Bo dem binh luan BI CHAN theo ngay tao — trang phan tich chi tiet
+        (Phase 7), TACH khoi `social_overview` (bang dieu khien chinh phai
+        nhe, xem muc 6 handoff)."""
+        return self._store.count_comments(created_after=created_after)
+
     def _ghi_nhat_ky(self, action: str, *, target_user_id: str = "",
                      actor_id: str, actor_role: str = "",
                      target_type: str = "", target_id: str = "",

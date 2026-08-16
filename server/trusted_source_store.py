@@ -111,6 +111,16 @@ class MockTrustedSourceStore:
             self.sources[source_id] = updated
             return updated
 
+    def count_sources_by_subscription_status(self) -> Dict[str, int]:
+        """Bo dem nguon THEO trang thai dang ky WebSub — Phase 7 analytics
+        (trang He thong: suc khoe WebSub)."""
+        with self._lock:
+            items = list(self.sources.values())
+        ra = {s.value: 0 for s in SubscriptionStatus}
+        for src in items:
+            ra[src.subscription_status.value] += 1
+        return ra
+
     def find_source_by_channel_id(self, channel_id: str) -> Optional[TrustedSource]:
         if not channel_id:
             return None
@@ -253,7 +263,8 @@ class MockTrustedSourceStore:
             return ra
 
     def find_imports(self, *, status: str = "", trusted_source_id: str = "",
-                     series_id: str = "", limit: int = 25,
+                     series_id: str = "", created_after: str = "",
+                     limit: int = 25,
                      offset: int = 0) -> Tuple[List[VideoImport], int]:
         with self._lock:
             items = list(self.imports.values())
@@ -263,6 +274,8 @@ class MockTrustedSourceStore:
             items = [i for i in items if i.trusted_source_id == trusted_source_id]
         if series_id:
             items = [i for i in items if i.detected_series_id == series_id]
+        if created_after:
+            items = [i for i in items if i.created_at >= created_after]
         items.sort(key=lambda i: i.created_at, reverse=True)
         total = len(items)
         start = max(0, offset)

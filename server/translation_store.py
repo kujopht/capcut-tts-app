@@ -122,6 +122,18 @@ class MockTranslationStore:
             ra = [j for j in self._jobs.values() if j.project_id == project_id]
         return sorted(ra, key=lambda j: j.created_at, reverse=True)
 
+    def count_jobs(self, *, status: Optional[TranslationJobStatus] = None,
+                  created_after: str = "") -> int:
+        """Bo dem cho bang dieu khien quan tri (Phase 7 analytics) — loc
+        THEO status/ngay tao, khong keo document nao ve."""
+        with self._lock:
+            items = self._jobs.values()
+            if status is not None:
+                items = [j for j in items if j.status is status]
+            if created_after:
+                items = [j for j in items if j.created_at >= created_after]
+            return len(list(items))
+
     def list_jobs_by_status(self, status: TranslationJobStatus) -> List[TranslationJob]:
         with self._lock:
             items = [j for j in self._jobs.values() if j.status is status]
@@ -277,6 +289,16 @@ class MockTranslationStore:
         with self._lock:
             ra = [c for c in self._connections.values() if c.user_id == user_id]
         return sorted(ra, key=lambda c: c.created_at)
+
+    def count_connections_by_status(self) -> Dict[str, int]:
+        """Bo dem ket noi BYOK TREN TOAN NEN TANG theo trang thai — trang
+        AI/Credits (Phase 7 analytics). KHONG bao gio tra ve secret/key."""
+        with self._lock:
+            items = list(self._connections.values())
+        ra: Dict[str, int] = {}
+        for c in items:
+            ra[c.status] = ra.get(c.status, 0) + 1
+        return ra
 
     def delete_connection(self, user_id: str, provider_id: str) -> None:
         muon_id = id_ket_noi_provider(user_id, provider_id)

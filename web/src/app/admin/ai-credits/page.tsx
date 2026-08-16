@@ -10,11 +10,7 @@
  */
 
 import { useCallback, useState } from "react";
-import {
-  adminApi,
-  type AdminImageStudioSpending,
-  type AdminOverview,
-} from "@/lib/api";
+import { adminApi, type AdminImageStudioSpending } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
@@ -29,8 +25,6 @@ export default function AdminAiCredits() {
   const napChiTieu = useCallback(() => adminApi.imageStudioSpending(), []);
   const { data, loading, error, reload } =
     useAsyncData<AdminImageStudioSpending>(napChiTieu);
-  const napTongQuan = useCallback(() => adminApi.overview(), []);
-  const { data: tongQuan } = useAsyncData<AdminOverview>(napTongQuan);
 
   const [dangGui, setDangGui] = useState(false);
 
@@ -64,8 +58,49 @@ export default function AdminAiCredits() {
               />
               <OSo nhan="Đang chạy đồng thời" so={data.active_concurrent}
                 ghi_chu={`Tối đa: ${data.max_concurrent}`} />
-              <OSo nhan="Dự án dịch" so={tongQuan?.product.translation_projects_total ?? null} />
-              <OSo nhan="Job TTS" so={tongQuan?.product.tts_jobs_total ?? null} />
+            </div>
+
+            <div className="card stack-2">
+              <h3 className="section-title-sm">Dịch thuật</h3>
+              <div className="stat-grid admin-luoi">
+                <OSo nhan="Hoàn thành" so={data.translation_jobs_by_status.completed} />
+                <OSo nhan="Thất bại" so={data.translation_jobs_by_status.failed} />
+                <OSo nhan="Đã huỷ" so={data.translation_jobs_by_status.cancelled} />
+                <OSo nhan="Đang xử lý" so={data.translation_jobs_by_status.in_progress} />
+              </div>
+            </div>
+
+            <div className="card stack-2">
+              <h3 className="section-title-sm">TTS (chuyển văn bản thành giọng nói)</h3>
+              <div className="stat-grid admin-luoi">
+                <OSo nhan="Chờ xử lý" so={data.tts_jobs_by_status.pending} />
+                <OSo nhan="Đang chạy" so={data.tts_jobs_by_status.running} />
+                <OSo nhan="Hoàn thành" so={data.tts_jobs_by_status.completed} />
+                <OSo nhan="Thất bại" so={data.tts_jobs_by_status.failed} />
+              </div>
+            </div>
+
+            <div className="card stack-2">
+              <h3 className="section-title-sm">Kết nối API cá nhân (BYOK)</h3>
+              {Object.keys(data.byok_connections_by_status).length > 0 ? (
+                <div className="stat-grid admin-luoi">
+                  {Object.entries(data.byok_connections_by_status).map(
+                    ([trang, so]) => (
+                      <OSo key={trang} nhan={trang} so={so} />
+                    ),
+                  )}
+                </div>
+              ) : (
+                <p className="hint">Chưa có kết nối cá nhân nào.</p>
+              )}
+              <p className="hint">
+                Chỉ đếm theo trạng thái — không bao giờ hiện API key/secret ở đây.
+              </p>
+            </div>
+
+            <div className="card stack-2">
+              <h3 className="section-title-sm">Ví Fanfic Credit</h3>
+              <p className="hint">{data.wallet_note}</p>
             </div>
 
             <div className="card stack-2">

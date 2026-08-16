@@ -1068,6 +1068,17 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         (Admin Control Center V2, A1). `limit(1)` + doc `total`."""
         return self._page(COL_JOBS, [q_limit(1)])[1]
 
+    def count_jobs(self, *, status: Optional[JobStatus] = None,
+                  created_after: str = "") -> int:
+        """Bo dem BI CHAN cho bang dieu khien quan tri (Phase 7 analytics) —
+        loc THEO status/ngay tao qua Appwrite, KHONG quet toan bang."""
+        queries: List[str] = [q_limit(1)]
+        if status is not None:
+            queries.append(q_equal("status", status.value))
+        if created_after:
+            queries.append(q_greater_equal("created_at", created_after))
+        return self._page(COL_JOBS, queries)[1]
+
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """
         Lat trang: so job `running` khong co tran tren.
@@ -1505,8 +1516,8 @@ class AppwriteMetadataStore(AppwriteSocialStore):
 
     def list_events(self, target_user_id: str = "", limit: int = 50,
                     offset: int = 0, target_type: str = "",
-                    target_id: str = "",
-                    action: str = "") -> Tuple[List[ModerationEvent], int]:
+                    target_id: str = "", action: str = "",
+                    created_after: str = "") -> Tuple[List[ModerationEvent], int]:
         """
         Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra".
 
@@ -1515,7 +1526,8 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         chuoi con, chi can loc dung loai/dung hanh dong). `target_id` (Phase
         4) loc dung MOT doi tuong (vd mot series/tap Animation cu the) — dung
         cho lich su kiem duyet trong trang chi tiet, KHONG phai N truy van
-        rieng cho tung tap cua series do.
+        rieng cho tung tap cua series do. `created_after` (Phase 7 analytics)
+        loc theo ngay tao — dung cho bo dem theo khoang thoi gian.
         """
         queries: List[str] = []
         if target_user_id:
@@ -1526,6 +1538,8 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             queries.append(q_equal("target_id", target_id))
         if action:
             queries.append(q_equal("action", action))
+        if created_after:
+            queries.append(q_greater_equal("created_at", created_after))
         queries += [q_order_desc("created_at"), q_limit(limit), q_offset(offset)]
         rows, total = self._page(COL_EVENTS, queries)
         return [

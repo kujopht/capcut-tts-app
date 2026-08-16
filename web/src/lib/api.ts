@@ -1285,21 +1285,15 @@ export interface AdminOverview {
     configured: boolean;
     total?: number;
     enabled_total?: number;
-    /** `null` — kho chưa lọc video phát hiện theo ngày, xem `server/main.py`. */
+    /** Phase 7 — bo dem THAT (`find_imports(created_after=...)`), khong con luon None. */
     detected_today?: ChiSo;
     auto_imported_total?: number;
     pending_total?: number;
     error_total?: number;
+    reconciliation_total_runs?: number;
+    reconciliation_last_run_at?: string | null;
   };
-  traffic: {
-    configured: boolean;
-    visits_7d: ChiSo;
-    pageviews_7d: ChiSo;
-    visits_30d: ChiSo;
-    pageviews_30d: ChiSo;
-    top_paths: Array<{ path: string; count: number }> | null;
-    message: string;
-  };
+  traffic: TrafficOverview;
   system: {
     backend: string;
     data_backend: string;
@@ -1308,7 +1302,79 @@ export interface AdminOverview {
     inline_worker: boolean;
     translation_provider_configured: boolean;
     image_studio_shared_premium_configured: boolean;
+    /** Phase 7 — trang Hệ thống. */
+    youtube_data_api_configured: boolean;
+    youtube_websub_configured: boolean;
+    statuses: {
+      backend: TrangThaiHeThong;
+      appwrite: TrangThaiHeThong;
+      workers: TrangThaiHeThong;
+      translation_provider: TrangThaiHeThong;
+      tts: TrangThaiHeThong;
+      image_studio: TrangThaiHeThong;
+      youtube_data_api: TrangThaiHeThong;
+      youtube_websub: TrangThaiHeThong;
+      reconciliation: TrangThaiHeThong;
+    };
   };
+}
+
+/** Phase 7 — bon trang thai duy nhat cho MOI hang muc trang He thong. */
+export type TrangThaiHeThong = "healthy" | "degraded" | "error" | "not_configured";
+
+/** Phase 7 — /admin/analytics. Xem `server/traffic_analytics.py`. */
+export interface TrafficOverview {
+  configured: boolean;
+  visits_today: ChiSo;
+  pageviews_today: ChiSo;
+  visits_7d: ChiSo;
+  pageviews_7d: ChiSo;
+  visits_30d: ChiSo;
+  pageviews_30d: ChiSo;
+  top_paths: Array<{ path: string; count: number }> | null;
+  trend_by_day: Array<{ date: string; visits: number; pageviews: number }> | null;
+  referrers: Array<{ referrer: string; count: number }> | null;
+  countries: Array<{ country: string; count: number }> | null;
+  device_categories: Array<{ device: string; count: number }> | null;
+  message: string;
+}
+
+export type PhamViPhanTich = "today" | "7d" | "30d";
+
+/** Phase 7 — /api/admin/analytics/detail. TACH khoi `/api/admin/overview`
+ * (dashboard chinh phai nhe) — CHI trang Analytics goi route nay. */
+export interface AdminAnalyticsDetail {
+  range: PhamViPhanTich;
+  since: string;
+  users: {
+    registrations: number;
+    active_daily: ChiSo;
+    active_weekly: ChiSo;
+    active_monthly: ChiSo;
+    active_note: string;
+  };
+  content: {
+    comments: number;
+    novel_reads: ChiSo;
+    chapter_completions: ChiSo;
+    animation_views: ChiSo;
+    content_activity_note: string;
+  };
+  ai_product: {
+    translation_jobs: { completed: number; failed: number; cancelled: number; in_progress: number };
+    tts_jobs: { pending: number; running: number; completed: number; failed: number };
+    image_studio_generations: ChiSo;
+    image_studio_note: string;
+  };
+  trusted_video: {
+    detected: number;
+    auto_imported: number;
+    pending: number;
+    errors: number;
+    websub_status_breakdown: Record<string, number>;
+    reconciliation_runs: number;
+  };
+  traffic: TrafficOverview;
 }
 
 /** Danh tính kèm theo đơn / hàng tác giả. CÓ `email` — đây là đường quản trị. */
@@ -1591,10 +1657,20 @@ export interface AdminImageStudioSpending {
   max_concurrent: number;
   shared_premium_enabled_config: boolean;
   shared_premium_configured: boolean;
+  /** Phase 7 — trang AI/Credits: tinh trang van hanh cac san pham AI khac. */
+  translation_jobs_by_status: { completed: number; failed: number; cancelled: number; in_progress: number };
+  tts_jobs_by_status: { pending: number; running: number; completed: number; failed: number };
+  byok_connections_by_status: Record<string, number>;
+  wallet_configured: boolean;
+  wallet_note: string;
 }
 
 export const adminApi = {
   overview: () => request<AdminOverview>("/api/admin/overview"),
+
+  /** Phase 7 — chi tiet phan tich, TACH khoi dashboard chinh. */
+  analyticsDetail: (range: PhamViPhanTich = "7d") =>
+    request<AdminAnalyticsDetail>(`/api/admin/analytics/detail?range=${range}`),
 
   /** AI / Credits (Admin Control Center V2) — chi tieu Image Studio. */
   imageStudioSpending: () =>

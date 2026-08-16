@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -659,10 +660,45 @@ class DashboardMoRongTest(Base):
         ts = d["trusted_sources"]
         self.assertTrue(ts["configured"])
         for khoa in ("total", "enabled_total", "auto_imported_total",
-                    "pending_total", "error_total"):
+                    "pending_total", "error_total",
+                    "detected_today", "reconciliation_total_runs"):
             self.assertIsInstance(ts[khoa], int)
-        # Chua co bo loc theo ngay tren video_imports — None, khong bia 0.
-        self.assertIsNone(ts["detected_today"])
+        # Chua tung doi chieu lan nao trong test nay — None, khong bia chuoi rong.
+        self.assertIsNone(ts["reconciliation_last_run_at"])
+
+    def test_system_them_trang_thai_youtube_va_websub_phase7(self):
+        """Phase 7 — trang He thong: YouTube Data API/WebSub CHUA cau hinh
+        trong moi truong test, phai bao ro `not_configured`, khong bia
+        `healthy`. Doi chieu chua chay lan nao -> cung `not_configured`
+        (WebSub la dieu kien tien quyet cua doi chieu tu dong)."""
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        he_thong = d["system"]
+        self.assertFalse(he_thong["youtube_data_api_configured"])
+        self.assertFalse(he_thong["youtube_websub_configured"])
+        trang_thai = he_thong["statuses"]
+        self.assertEqual(trang_thai["backend"], "healthy")
+        self.assertEqual(trang_thai["youtube_data_api"], "not_configured")
+        self.assertEqual(trang_thai["youtube_websub"], "not_configured")
+        self.assertEqual(trang_thai["reconciliation"], "not_configured")
+
+    def test_mot_nhom_truy_van_loi_khong_lam_sup_ca_dashboard(self):
+        """
+        Phase 7 — song song hoa `_admin_dashboard_them` (ThreadPoolExecutor):
+        da xac nhan THAT tren Appwrite dev tu luu tru rang truy van dong
+        thoi thinh thoang vuot timeout do VM nho qua tai. Mo phong DUNG
+        tinh huong do (mot nhom nem loi) va xac nhan dashboard van tra 200
+        voi truong bi anh huong la `None` — KHONG 500 ca trang chi vi mot
+        nhom cham/loi.
+        """
+        with patch.object(server_main.social, "social_overview",
+                         side_effect=RuntimeError("gia lap timeout mang")):
+            r = self.client.get("/api/admin/overview", headers=self.h_admin)
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        self.assertIsNone(d["content"]["comments_total"])
+        self.assertIsNone(d["content"]["pending_reports"])
+        # Cac nhom KHAC van phai co du lieu that, khong bi keo theo.
+        self.assertIsInstance(d["users"]["total"], int)
 
     def test_moderator_van_xem_duoc_dashboard(self):
         """Dashboard dung `admin_profile` (bat ky vai tro nao) — MODERATOR
@@ -674,6 +710,70 @@ class DashboardMoRongTest(Base):
         self.assertEqual(
             self.client.get("/api/admin/overview", headers=h_mod).status_code,
             200)
+
+
+class AnalyticsDetailTest(Base):
+    """Phase 7 — /api/admin/analytics/detail, TACH khoi dashboard chinh."""
+
+    def test_hinh_dang_day_du_va_pham_vi_mac_dinh(self):
+        d = self.client.get("/api/admin/analytics/detail",
+                            headers=self.h_admin).json()
+        self.assertEqual(d["range"], "7d")
+        for khoa in ("users", "content", "ai_product", "trusted_video", "traffic"):
+            self.assertIn(khoa, d)
+        # DAU/WAU/MAU va hoat dong noi dung: KHONG bia so, phai None + note.
+        self.assertIsNone(d["users"]["active_daily"])
+        self.assertTrue(d["users"]["active_note"])
+        self.assertIsNone(d["content"]["novel_reads"])
+        self.assertTrue(d["content"]["content_activity_note"])
+        self.assertIsInstance(d["content"]["comments"], int)
+
+    def test_pham_vi_khong_hop_le_lui_ve_7d(self):
+        d = self.client.get("/api/admin/analytics/detail?range=nam_nay",
+                            headers=self.h_admin).json()
+        self.assertEqual(d["range"], "7d")
+
+    def test_pham_vi_today_dung_moc_dau_ngay(self):
+        d = self.client.get("/api/admin/analytics/detail?range=today",
+                            headers=self.h_admin).json()
+        self.assertEqual(d["range"], "today")
+        self.assertTrue(d["since"].endswith("T00:00:00+00:00"))
+
+    def test_websub_status_breakdown_du_5_gia_tri(self):
+        d = self.client.get("/api/admin/analytics/detail",
+                            headers=self.h_admin).json()
+        vo = d["trusted_video"]["websub_status_breakdown"]
+        for gia_tri in ("none", "pending", "active", "expired", "failed"):
+            self.assertIn(gia_tri, vo)
+
+    def test_moderator_khong_xem_duoc_analytics_detail(self):
+        """`admin_profile` (>= MODERATOR) — nguoi thuong bi 401/403."""
+        self.assertIn(
+            self.client.get("/api/admin/analytics/detail",
+                            headers=self.h_thuong).status_code,
+            (401, 403))
+
+
+class AiCreditsSpendingTest(Base):
+    """Phase 7 mo rong /api/admin/image-studio/spending — them tinh trang
+    van hanh dich/TTS/BYOK, KHONG doi hinh dang cac truong cu."""
+
+    def test_van_giu_truong_cu_va_them_truong_moi(self):
+        d = self.client.get("/api/admin/image-studio/spending",
+                            headers=self.h_admin).json()
+        for khoa in ("month", "spent_usd", "budget_usd", "kill_switch_engaged",
+                    "shared_premium_configured"):
+            self.assertIn(khoa, d)
+        for trang in ("completed", "failed", "cancelled", "in_progress"):
+            self.assertIn(trang, d["translation_jobs_by_status"])
+        for trang in ("pending", "running", "completed", "failed"):
+            self.assertIn(trang, d["tts_jobs_by_status"])
+        self.assertIn("byok_connections_by_status", d)
+        self.assertFalse(d["wallet_configured"])
+        self.assertTrue(d["wallet_note"])
+        # Tuyet doi khong lo secret/key qua duong nay.
+        self.assertNotIn("encrypted_secret", str(d))
+        self.assertNotIn("api_key", str(d).lower())
 
 
 class HoSoKemQuyenTest(Base):

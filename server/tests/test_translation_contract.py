@@ -247,6 +247,25 @@ class HopDongDich(unittest.TestCase):
                 self.assertEqual(lai.waiting_retry_at, "", ten)
                 self.assertEqual(lai.finished_at, "", ten)
 
+    def test_count_jobs_loc_theo_status_va_ngay_phase7(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.create_job(TranslationJob(
+                    project_id="trp_x", owner_id="u1",
+                    status=TranslationJobStatus.COMPLETED,
+                    created_at="2026-01-01T00:00:00+00:00"))
+                kho.create_job(TranslationJob(
+                    project_id="trp_x", owner_id="u1",
+                    status=TranslationJobStatus.FAILED,
+                    created_at="2026-08-16T00:00:00+00:00"))
+                self.assertEqual(
+                    kho.count_jobs(status=TranslationJobStatus.COMPLETED), 1, ten)
+                self.assertEqual(
+                    kho.count_jobs(status=TranslationJobStatus.FAILED), 1, ten)
+                self.assertEqual(
+                    kho.count_jobs(created_after="2026-08-01T00:00:00+00:00"), 1, ten)
+                self.assertEqual(kho.count_jobs(), 2, ten)
+
     # ===================================================== GLOSSARY
 
     def test_them_va_doc_lai_thuat_ngu_giu_nguyen_alias(self):
@@ -368,6 +387,24 @@ class HopDongDich(unittest.TestCase):
             updated_at="2026-08-14T00:00:00+00:00")
         row = _connection_to_row(c)
         self.assertIsNone(row["last_verified_at"])
+
+    def test_count_connections_by_status_phase7(self):
+        from server.translation_domain import ProviderConnection
+
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.save_connection(ProviderConnection(
+                    user_id="u1", provider_id="groq",
+                    encrypted_secret="byok.v1.a.b", last4="AB42",
+                    status="available"))
+                kho.save_connection(ProviderConnection(
+                    user_id="u2", provider_id="groq",
+                    encrypted_secret="byok.v1.c.d", last4="CD99",
+                    status="quota_exhausted"))
+                dem = kho.count_connections_by_status()
+                self.assertEqual(dem.get("available", 0), 1, ten)
+                self.assertEqual(dem.get("quota_exhausted", 0), 1, ten)
+                self.assertNotIn("encrypted_secret", str(dem), ten)
 
 
 if __name__ == "__main__":

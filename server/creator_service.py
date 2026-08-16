@@ -869,17 +869,20 @@ class CreatorService:
 
     def admin_events(self, limit: int = 50, offset: int = 0,
                      target_user_id: str = "", target_type: str = "",
-                     target_id: str = "",
-                     action: str = "") -> Dict[str, Any]:
+                     target_id: str = "", action: str = "",
+                     created_after: str = "") -> Dict[str, Any]:
         """
         Nhat ky kiem duyet — /admin/audit-log (Admin Control Center V2, A5).
 
         Cac tham so loc (`target_user_id` co tu truoc; `target_id` moi o
         Phase 4, cho lich su cua mot series/tap Animation cu the) deu CHI
         equal, khong tim mo: day la mot nhat ky, nguoi doc muon loc DUNG doi
-        tuong/DUNG hanh dong, khong can tim gan dung.
+        tuong/DUNG hanh dong, khong can tim gan dung. `created_after`
+        (Phase 7 analytics) loc theo ngay tao — dung cho bo dem theo
+        khoang thoi gian (vd so lan doi chieu WebSub trong 7 ngay qua).
         """
         rows, total = self._store.list_events(
             limit=limit, offset=offset, target_user_id=target_user_id,
-            target_type=target_type, target_id=target_id, action=action)
+            target_type=target_type, target_id=target_id, action=action,
+            created_after=created_after)
         return {"events": [e.to_dict() for e in rows], "total": total}

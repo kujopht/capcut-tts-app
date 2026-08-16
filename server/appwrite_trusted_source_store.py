@@ -100,6 +100,12 @@ def q_contains(attribute: str, value: Any) -> str:
     return json.dumps({"method": "contains", "attribute": attribute, "values": [value]})
 
 
+def q_greater_equal(attribute: str, value: Any) -> str:
+    #: Ten method THAT cua Appwrite la "greaterThanEqual" — xem muc 6 handoff.
+    return json.dumps({"method": "greaterThanEqual", "attribute": attribute,
+                       "values": [value]})
+
+
 def _nguon_tu_doc(doc: Dict[str, Any]) -> TrustedSource:
     try:
         loai = TrustedSourceType(str(doc.get("source_type") or "youtube_channel"))
@@ -526,7 +532,8 @@ class AppwriteTrustedSourceStore:
         return ra
 
     def find_imports(self, *, status: str = "", trusted_source_id: str = "",
-                     series_id: str = "", limit: int = 25,
+                     series_id: str = "", created_after: str = "",
+                     limit: int = 25,
                      offset: int = 0) -> Tuple[List[VideoImport], int]:
         queries: List[str] = []
         if status:
@@ -535,6 +542,8 @@ class AppwriteTrustedSourceStore:
             queries.append(q_equal("trusted_source_id", trusted_source_id))
         if series_id:
             queries.append(q_equal("detected_series_id", series_id))
+        if created_after:
+            queries.append(q_greater_equal("created_at", created_after))
         queries += [q_order_desc("created_at"), q_limit(limit), q_offset(max(0, offset))]
         docs, total = self._page(COL_IMPORTS, queries)
         return [_import_tu_doc(d) for d in docs], total
@@ -544,6 +553,16 @@ class AppwriteTrustedSourceStore:
         data["updated_at"] = now_iso()
         self._update(COL_IMPORTS, import_id, data)
         return self.get_import(import_id)
+
+    def count_sources_by_subscription_status(self) -> Dict[str, int]:
+        """Bo dem nguon THEO trang thai dang ky WebSub — Phase 7 analytics
+        (trang He thong: suc khoe WebSub). MOI gia tri enum MOT truy van bi
+        chan rieng (Appwrite khong ho tro group-by) — CHAP NHAN DUOC vi CHI
+        5 gia tri co the va CHI goi tu trang phan tich chi tiet, khong phai
+        dashboard chinh (xem muc 6 handoff ve nguyen tac hieu nang)."""
+        return {s.value: self._page(
+            COL_SOURCES, [q_equal("subscription_status", s.value), q_limit(1)])[1]
+            for s in SubscriptionStatus}
 
 
 def build_trusted_source_store(settings: Any):

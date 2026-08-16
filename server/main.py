@@ -19,6 +19,7 @@ import random
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, List, Optional, Tuple
@@ -117,6 +118,7 @@ from server.translation import (
     QuotaExceeded as TranslationQuotaExceeded,
     ManualEditWouldBeOverwritten,
     TranslationError,
+    TranslationJobStatus,
     UnsupportedFormat,
 )
 from server.translation_import import extract_text as _trich_van_ban_tep
@@ -3688,25 +3690,39 @@ def _admin_dashboard_them() -> Dict[str, Any]:
     hoac mot snapshot da co san trong bo nho (`image_spending_guard`).
     KHONG vong lap tren tung hang, KHONG quet toan bang — dung yeu cau
     "Do not create expensive full-table scans for dashboard cards".
+
+    Phase 7 — SONG SONG HOA: ~10 nhom truy van BI CHAN, DOC LAP voi nhau
+    (khong nhom nao doc ket qua cua nhom khac), chay qua
+    `ThreadPoolExecutor` thay vi tuan tu — day la I/O-bound (cho phan hoi
+    HTTP tu Appwrite VM o xa), nen luong (thread) that su giam duoc tong
+    thoi gian cho (GIL nha ra trong luc cho socket), khong phai gia von.
+    `httpx.Client` (dung trong MOI kho Appwrite o day) an toan dung dong
+    thoi tren nhieu luong — xem tai lieu httpx. Da xac nhan qua QA trinh
+    duyet that: dashboard cu (tuan tu) mat 13-90+ giay tren VM dev o xa;
+    day la lan dau ham nay duoc song song hoa (Phase 2-6 chi ghi nhan la
+    "huong kha di cho phase sau", Phase 7 la phase do).
     """
     now = datetime.now(timezone.utc)
     dau_ngay_hom_nay = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    moc_hom_nay = dau_ngay_hom_nay.isoformat(timespec="seconds")
     moc_7_ngay = (now - timedelta(days=7)).isoformat(timespec="seconds")
     moc_30_ngay = (now - timedelta(days=30)).isoformat(timespec="seconds")
 
-    try:
-        appwrite_khoe: Optional[bool] = identity.healthcheck()
-    except Exception:
-        appwrite_khoe = False
+    def _appwrite_khoe() -> Optional[bool]:
+        try:
+            return identity.healthcheck()
+        except Exception:
+            return False
 
-    xa_hoi = social.social_overview()
-    chi_tieu = image_spending_guard.snapshot()
+    def _doi_chieu() -> Dict[str, Any]:
+        # MOT truy van bi chan duy nhat (limit=1, moi nhat truoc) cho ca
+        # "lan chay gan nhat" LAN "tong so lan chay" cung luc.
+        return creators.admin_events(action="reconciliation_run", limit=1)
 
-    return {
-        "users": {
+    def _users() -> Dict[str, Any]:
+        return {
             "total": identity.count_profiles(),
-            "new_today": identity.count_profiles(
-                created_after=dau_ngay_hom_nay.isoformat(timespec="seconds")),
+            "new_today": identity.count_profiles(created_after=moc_hom_nay),
             "new_7d": identity.count_profiles(created_after=moc_7_ngay),
             "new_30d": identity.count_profiles(created_after=moc_30_ngay),
             # Phase 3 (Admin Control Center V2): doc THANG tu Appwrite Users
@@ -3715,39 +3731,34 @@ def _admin_dashboard_them() -> Dict[str, Any]:
             "verified": identity.count_accounts(email_verified=True),
             "unverified": identity.count_accounts(email_verified=False),
             "suspended": identity.count_accounts(enabled=False),
-        },
-        "content": {
+        }
+
+    def _noi_dung_rieng() -> Dict[str, Any]:
+        # Phan phu thuoc `xa_hoi` (comments/pending_reports) duoc ghep VAO
+        # SAU, o luong chinh — day chi la phan DOC LAP voi social_overview.
+        return {
             "novels_total": store.total_novels(),
             "chapters_total": store.total_chapters(),
-            "comments_total": xa_hoi["total_comments"],
             "animation_series_total": animation_store.find_series(limit=1)[1],
             "animation_series_published": animation_store.find_series(
                 published_only=True, limit=1)[1],
             "animation_episodes_total": animation_store.total_episodes(),
-            "pending_reports": xa_hoi["open_reports"],
-        },
-        "product": {
+        }
+
+    def _san_pham() -> Dict[str, Any]:
+        return {
             "translation_projects_total": translation_svc.admin_total_projects(),
             "tts_jobs_total": store.total_jobs(),
-            "image_studio_spend_usd": chi_tieu.spent_usd,
-            "image_studio_budget_usd": chi_tieu.budget_usd,
-            # Chua co phep dem RIENG cho so luot sinh anh (chi co chi tieu
-            # gop) — None thay vi suy tu chi tieu (mot lan sinh khong dong
-            # gia mot lan chi).
-            "image_generations_total": None,
-        },
-        # Phan B (Trusted Video Sources, Phase 5) — MOI dem deu dung idiom
-        # bounded-count (`limit(1)` + doc `total`, KHONG quet toan bang),
-        # cung triet ly voi cac bo dem khac trong ham nay. `detected_today`
-        # con `None`: kho hien tai CHUA co bo loc theo ngay tren
-        # `video_imports`, them mot cho nay se la doan so (0 that va "chua
-        # co du lieu" la hai y nghia khac nhau, xem `OSo` phia frontend).
-        "trusted_sources": {
-            "configured": True,
+        }
+
+    def _trusted_sources_rieng() -> Dict[str, Any]:
+        # Phan phu thuoc `doi_chieu` duoc ghep VAO SAU o luong chinh.
+        return {
             "total": trusted_source_store.find_sources(limit=1)[1],
             "enabled_total": trusted_source_store.find_sources(
                 enabled=True, limit=1)[1],
-            "detected_today": None,
+            "detected_today": trusted_source_store.find_imports(
+                created_after=moc_hom_nay, limit=1)[1],
             "auto_imported_total": (
                 trusted_source_store.find_imports(status="auto_imported", limit=1)[1]
                 + trusted_source_store.find_imports(status="auto_published", limit=1)[1]),
@@ -3758,8 +3769,87 @@ def _admin_dashboard_them() -> Dict[str, Any]:
                 + trusted_source_store.find_imports(status="duplicate", limit=1)[1]
                 + trusted_source_store.find_imports(status="unavailable", limit=1)[1]
                 + trusted_source_store.find_imports(status="failed", limit=1)[1]),
-        },
-        "traffic": traffic_analytics.overview(),
+        }
+
+    def _an_toan(future, mac_dinh):
+        """
+        Lay ket qua MOT future — LOI (vd Appwrite dev VM cham/timeout khi
+        bi nhieu luong hoi cung luc, da xac nhan THAT khi kiem tra thoi
+        gian chay Phase 7) tra ve `mac_dinh` (moi truong = None, dung
+        triet ly co san "None = chua co du lieu, khong phai 0") THAY VI
+        lam SUP CA trang tong quan vi MOT nhom cham. Ghi log de van hanh
+        biet, khong nem loi len quan tri vien.
+        """
+        try:
+            return future.result()
+        except Exception as exc:
+            # ASCII thuan tuy: print() khong dam bao encoding UTF-8 tren moi
+            # moi truong (vd console Windows cp1252) — mot ky tu co dau o
+            # day co the tu no nem UnicodeEncodeError, pha huy chinh muc
+            # dich cua duong an toan nay.
+            print(f"[admin_overview] mot nhom truy van loi, dung gia tri "
+                 f"mac dinh: {exc!r}")
+            return mac_dinh
+
+    # `max_workers=4` (khong phai 8, dung bang so nhom) CO CHU DICH: kiem
+    # tra THAT tren Appwrite dev tu luu tru (VM nho, mot tien trinh) cho
+    # thay 8 luong dong thoi thinh thoang lam MOT truy van vuot qua 15 giay
+    # (REQUEST_TIMEOUT) do VM qua tai — gioi han con 4 giam tai dinh, van
+    # giu phan lon loi ich song song so voi tuan tu hoan toan.
+    with ThreadPoolExecutor(max_workers=4) as bo_luong:
+        f_appwrite_khoe = bo_luong.submit(_appwrite_khoe)
+        f_xa_hoi = bo_luong.submit(social.social_overview)
+        f_doi_chieu = bo_luong.submit(_doi_chieu)
+        f_users = bo_luong.submit(_users)
+        f_noi_dung = bo_luong.submit(_noi_dung_rieng)
+        f_san_pham = bo_luong.submit(_san_pham)
+        f_trusted = bo_luong.submit(_trusted_sources_rieng)
+        f_traffic = bo_luong.submit(traffic_analytics.overview)
+
+        appwrite_khoe = _an_toan(f_appwrite_khoe, False)
+        xa_hoi = _an_toan(f_xa_hoi, {"total_comments": None, "open_reports": None})
+        doi_chieu = _an_toan(f_doi_chieu, {"events": [], "total": None})
+        users = _an_toan(f_users, {
+            "total": None, "new_today": None, "new_7d": None, "new_30d": None,
+            "verified": None, "unverified": None, "suspended": None})
+        noi_dung = _an_toan(f_noi_dung, {
+            "novels_total": None, "chapters_total": None,
+            "animation_series_total": None, "animation_series_published": None,
+            "animation_episodes_total": None})
+        san_pham = _an_toan(f_san_pham, {
+            "translation_projects_total": None, "tts_jobs_total": None})
+        trusted = _an_toan(f_trusted, {
+            "total": None, "enabled_total": None, "detected_today": None,
+            "auto_imported_total": None, "pending_total": None, "error_total": None})
+        traffic = _an_toan(f_traffic, {
+            "configured": False, "message": "Tạm thời không đọc được trạng thái.",
+            "visits_today": None, "pageviews_today": None, "visits_7d": None,
+            "pageviews_7d": None, "visits_30d": None, "pageviews_30d": None,
+            "top_paths": None, "trend_by_day": None, "referrers": None,
+            "countries": None, "device_categories": None})
+
+    chi_tieu = image_spending_guard.snapshot()  # trong bo nho, khong can luong rieng
+    lan_chay_gan_nhat = (
+        doi_chieu["events"][0]["created_at"] if doi_chieu["events"] else "")
+    tong_lan_doi_chieu = doi_chieu["total"]
+
+    noi_dung["comments_total"] = xa_hoi["total_comments"]
+    noi_dung["pending_reports"] = xa_hoi["open_reports"]
+    san_pham["image_studio_spend_usd"] = chi_tieu.spent_usd
+    san_pham["image_studio_budget_usd"] = chi_tieu.budget_usd
+    # Chua co phep dem RIENG cho so luot sinh anh (chi co chi tieu gop) —
+    # None thay vi suy tu chi tieu (mot lan sinh khong dong gia mot lan chi).
+    san_pham["image_generations_total"] = None
+    trusted["configured"] = True
+    trusted["reconciliation_total_runs"] = tong_lan_doi_chieu
+    trusted["reconciliation_last_run_at"] = lan_chay_gan_nhat or None
+
+    return {
+        "users": users,
+        "content": noi_dung,
+        "product": san_pham,
+        "trusted_sources": trusted,
+        "traffic": traffic,
         "system": {
             "backend": "ok",
             "data_backend": settings.data_backend,
@@ -3771,7 +3861,210 @@ def _admin_dashboard_them() -> Dict[str, Any]:
                 and settings.translation_model),
             "image_studio_shared_premium_configured":
                 settings.image_studio.shared_premium_configured,
+            # Phase 7 — trang He thong (muc 7): YouTube Data API/WebSub deu
+            # la kiem tra CO CAU HINH hay khong (khong goi mang), rong.
+            "youtube_data_api_configured": trusted_sources.youtube_configured(),
+            "youtube_websub_configured": trusted_sources.websub_configured(),
+            "statuses": _trang_thai_he_thong(
+                appwrite_configured=settings.appwrite.configured,
+                appwrite_healthy=appwrite_khoe,
+                translation_configured=bool(
+                    settings.translation_base_url and settings.translation_api_key
+                    and settings.translation_model),
+                image_studio_configured=settings.image_studio.shared_premium_configured,
+                youtube_data_api_configured=trusted_sources.youtube_configured(),
+                youtube_websub_configured=trusted_sources.websub_configured(),
+                reconciliation_total_runs=tong_lan_doi_chieu,
+                reconciliation_last_run_at=lan_chay_gan_nhat,
+                now=now,
+            ),
         },
+    }
+
+
+#: Bon trang thai duy nhat cho MOI hang muc o trang He thong (Phase 7, muc
+#: 7) — khong bia them gia tri trung gian nao khac.
+TRANG_THAI_KHOE = "healthy"
+TRANG_THAI_SUY_GIAM = "degraded"
+TRANG_THAI_LOI = "error"
+TRANG_THAI_CHUA_CAU_HINH = "not_configured"
+
+
+def _trang_thai_he_thong(
+    *, appwrite_configured: bool, appwrite_healthy: Optional[bool],
+    translation_configured: bool, image_studio_configured: bool,
+    youtube_data_api_configured: bool, youtube_websub_configured: bool,
+    reconciliation_total_runs: int, reconciliation_last_run_at: str,
+    now: datetime,
+) -> Dict[str, str]:
+    """
+    Tinh trang thai HEALTHY/DEGRADED/ERROR/NOT_CONFIGURED cho tung hang muc
+    trang He thong — CHI dua tren tin hieu THAT SU co san (cau hinh + mot
+    lan doc da co san), KHONG bia mot phep kiem tra suc khoe khong ton tai.
+
+    `workers` khong co giam sat rieng (khong co tin hieu am nao de phat
+    hien "worker chet" — xem han che ghi o handoff muc 4g) nen an theo
+    Appwrite: dung duoc Appwrite thi coi la healthy.
+    """
+    if not appwrite_configured:
+        appwrite = TRANG_THAI_CHUA_CAU_HINH
+    elif appwrite_healthy:
+        appwrite = TRANG_THAI_KHOE
+    else:
+        appwrite = TRANG_THAI_LOI
+
+    reconciliation: str
+    if not youtube_websub_configured:
+        reconciliation = TRANG_THAI_CHUA_CAU_HINH
+    elif reconciliation_total_runs <= 0:
+        reconciliation = TRANG_THAI_SUY_GIAM
+    else:
+        try:
+            lan_cuoi = datetime.fromisoformat(reconciliation_last_run_at)
+            if lan_cuoi.tzinfo is None:
+                lan_cuoi = lan_cuoi.replace(tzinfo=timezone.utc)
+            reconciliation = (
+                TRANG_THAI_KHOE if now - lan_cuoi <= timedelta(hours=48)
+                else TRANG_THAI_SUY_GIAM)
+        except ValueError:
+            reconciliation = TRANG_THAI_SUY_GIAM
+
+    return {
+        "backend": TRANG_THAI_KHOE,
+        "appwrite": appwrite,
+        "workers": appwrite,
+        "translation_provider": (
+            TRANG_THAI_KHOE if translation_configured else TRANG_THAI_CHUA_CAU_HINH),
+        "tts": TRANG_THAI_KHOE,
+        "image_studio": (
+            TRANG_THAI_KHOE if image_studio_configured else TRANG_THAI_CHUA_CAU_HINH),
+        "youtube_data_api": (
+            TRANG_THAI_KHOE if youtube_data_api_configured else TRANG_THAI_CHUA_CAU_HINH),
+        "youtube_websub": (
+            TRANG_THAI_KHOE if youtube_websub_configured else TRANG_THAI_CHUA_CAU_HINH),
+        "reconciliation": reconciliation,
+    }
+
+
+#: Cua so thoi gian hop le cho /api/admin/analytics/detail — CHINH XAC ba
+#: gia tri spec Phase 7 yeu cau (Today/7 days/30 days), khong hon.
+_PHAM_VI_HOP_LE = {"today": timedelta(days=0), "7d": timedelta(days=7),
+                   "30d": timedelta(days=30)}
+
+
+def _moc_theo_pham_vi(range: str, now: datetime) -> str:
+    delta = _PHAM_VI_HOP_LE.get(range, _PHAM_VI_HOP_LE["7d"])
+    if delta == timedelta(days=0):
+        moc = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        moc = now - delta
+    return moc.isoformat(timespec="seconds")
+
+
+@app.get("/api/admin/analytics/detail")
+def admin_analytics_detail(
+    range: str = "7d", admin: Profile = Depends(admin_profile),
+) -> Dict[str, Any]:
+    """
+    Chi tiet phan tich cho `/admin/analytics` (Phase 7) — TACH khoi
+    `/api/admin/overview` (bang dieu khien chinh phai nhe, xem muc 6/9
+    handoff): CHI trang Analytics goi route nay, va CHI khi nguoi dung mo
+    trang do/doi khoang thoi gian — khong polling, khong goi tu dashboard.
+
+    So luong truy van Appwrite cho MOI lan tai (da dem, xem handoff):
+    ~15-18 truy van BI CHAN (`limit(1)`/tuong duong), KHONG truy van nao
+    keo toan bang. Chi tiet: 1 (dang ky moi trong khoang) + 1 (binh luan
+    trong khoang) + 4 (job dich theo status) + 4 (job TTS theo status) +
+    4 (video phat hien/tu nhap/cho duyet/loi trong khoang) + 5 (WebSub
+    theo trang thai dang ky, KHONG theo khoang — la mot snapshot) + 1
+    (doi chieu trong khoang).
+
+    DAU/WAU/MAU va "novel reads/chapter completions/Animation views":
+    CHUA the tinh CHINH XAC voi du lieu hien co (xem ghi chu tung muc)
+    — tra ve `None` kem `*_note` giai thich, KHONG bia so.
+    """
+    if range not in _PHAM_VI_HOP_LE:
+        range = "7d"
+    now = datetime.now(timezone.utc)
+    moc = _moc_theo_pham_vi(range, now)
+
+    tts_status_dem = {
+        trang: store.count_jobs(status=st, created_after=moc)
+        for trang, st in (("pending", JobStatus.PENDING),
+                          ("running", JobStatus.RUNNING),
+                          ("completed", JobStatus.COMPLETED),
+                          ("failed", JobStatus.FAILED))
+    }
+    dich_status_dem = {
+        trang: translation_svc.admin_count_jobs(status=st, created_after=moc)
+        for trang, st in (("completed", TranslationJobStatus.COMPLETED),
+                          ("failed", TranslationJobStatus.FAILED),
+                          ("cancelled", TranslationJobStatus.CANCELLED))
+    }
+    dich_tong_trong_ky = translation_svc.admin_count_jobs(created_after=moc)
+    dich_status_dem["in_progress"] = max(0, dich_tong_trong_ky
+                                        - sum(dich_status_dem.values()))
+
+    doi_chieu = creators.admin_events(action="reconciliation_run",
+                                      created_after=moc, limit=1)
+
+    return {
+        "range": range,
+        "since": moc,
+        "users": {
+            "registrations": identity.count_profiles(created_after=moc),
+            "active_daily": None,
+            "active_weekly": None,
+            "active_monthly": None,
+            "active_note": (
+                "Chưa đo lường được: Appwrite Users API không cho lọc theo "
+                "accessedAt (đã xác nhận thật), và tính từ sự kiện thô sẽ "
+                "quét toàn bảng — cần hạ tầng đo lường hoạt động chuyên "
+                "dụng, ngoài phạm vi Phase 7."
+            ),
+        },
+        "content": {
+            "comments": social.admin_count_comments(created_after=moc),
+            "novel_reads": None,
+            "chapter_completions": None,
+            "animation_views": None,
+            "content_activity_note": (
+                "Chưa ghi nhận sự kiện đọc/xem — cần triển khai instrumentation "
+                "mới trên đường phục vụ nội dung; sẽ tính từ ngày triển khai "
+                "trở đi (không suy ngược lịch sử), ngoài phạm vi Phase 7."
+            ),
+        },
+        "ai_product": {
+            "translation_jobs": dich_status_dem,
+            "tts_jobs": tts_status_dem,
+            "image_studio_generations": None,
+            "image_studio_note": (
+                "Chưa đếm riêng số lượt sinh ảnh — chỉ có tổng chi tiêu "
+                "($), xem /api/admin/image-studio/spending."
+            ),
+        },
+        "trusted_video": {
+            "detected": trusted_source_store.find_imports(
+                created_after=moc, limit=1)[1],
+            "auto_imported": (
+                trusted_source_store.find_imports(
+                    status="auto_imported", created_after=moc, limit=1)[1]
+                + trusted_source_store.find_imports(
+                    status="auto_published", created_after=moc, limit=1)[1]),
+            "pending": trusted_source_store.find_imports(
+                status="pending", created_after=moc, limit=1)[1],
+            "errors": sum(
+                trusted_source_store.find_imports(
+                    status=s, created_after=moc, limit=1)[1]
+                for s in ("conflict", "duplicate", "unavailable", "failed")),
+            # Snapshot HIEN TAI, khong phai theo khoang — suc khoe dang ky
+            # WebSub la trang thai TAI THOI DIEM doc, khong phai mot phep dem
+            # su kien trong ky.
+            "websub_status_breakdown": trusted_source_store
+                .count_sources_by_subscription_status(),
+            "reconciliation_runs": doi_chieu["total"],
+        },
+        "traffic": traffic_analytics.overview(),
     }
 
 
@@ -5956,7 +6249,30 @@ def image_library_delete(
 
 @app.get("/api/admin/image-studio/spending")
 def admin_image_studio_spending(profile: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """
+    Trang AI/Credits (Admin Control Center V2). Phase 7 mo rong THEM (khong
+    doi hinh dang cac truong cu — dashboard/trang cu van doc duoc y het):
+    tinh trang van hanh dich/TTS (thanh cong/that bai/dang xu ly, TAT CA
+    THOI GIAN — trang nay la "hien tai dang the nao", khong phai xu huong
+    theo ky nhu `/api/admin/analytics/detail`) va so ket noi BYOK theo
+    trang thai (KHONG BAO GIO tra secret/key — chi dem).
+    """
     snap = image_spending_guard.snapshot()
+    dich_status = {
+        trang: translation_svc.admin_count_jobs(status=st)
+        for trang, st in (("completed", TranslationJobStatus.COMPLETED),
+                          ("failed", TranslationJobStatus.FAILED),
+                          ("cancelled", TranslationJobStatus.CANCELLED))
+    }
+    dich_tong = translation_svc.admin_count_jobs()
+    dich_status["in_progress"] = max(0, dich_tong - sum(dich_status.values()))
+    tts_status = {
+        trang: store.count_jobs(status=st)
+        for trang, st in (("pending", JobStatus.PENDING),
+                          ("running", JobStatus.RUNNING),
+                          ("completed", JobStatus.COMPLETED),
+                          ("failed", JobStatus.FAILED))
+    }
     return {
         "month": snap.thang,
         "spent_usd": snap.spent_usd,
@@ -5967,6 +6283,22 @@ def admin_image_studio_spending(profile: Profile = Depends(admin_or_owner_profil
         "max_concurrent": snap.max_concurrent,
         "shared_premium_enabled_config": settings.image_studio.shared_premium_enabled,
         "shared_premium_configured": settings.image_studio.shared_premium_configured,
+        "translation_jobs_by_status": dich_status,
+        "tts_jobs_by_status": tts_status,
+        "byok_connections_by_status": translation_svc.admin_count_connections_by_status(),
+        # Vi Fanfic Credit theo NGUOI DUNG (khac ngan sach Shared Premium o
+        # tren) hien chi la MockWalletStore (bo nho tam TUNG TIEN TRINH,
+        # mat khi khoi dong lai) — AppwriteWalletStore da duoc quy hoach o
+        # Phase 9 (xem docstring `image_wallet_store.py`), CHUA trien khai.
+        # Khong co ham tong hop NHIEU nguoi dung tren kho hien tai nen
+        # KHONG hien mot so lieu bia — chi ghi ro tinh trang.
+        "wallet_configured": False,
+        "wallet_note": (
+            "Ví Fanfic Credit theo người dùng hiện chạy trên bộ nhớ tạm "
+            "từng tiến trình (MockWalletStore), không bền vững qua khởi "
+            "động lại — bản Appwrite hoá đã quy hoạch ở Phase 9, chưa "
+            "triển khai. Chưa có tổng hợp nhiều người dùng để hiển thị."
+        ),
     }
 
 

@@ -212,6 +212,22 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                 self.assertEqual(dem["tsrc_2"], 1, ten)
                 self.assertEqual(dem["khong_co"], 0, ten)
 
+    def test_count_sources_by_subscription_status_phase7(self):
+        from server.trusted_source_domain import SubscriptionStatus
+
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                a = kho.create_source(TrustedSource(youtube_channel_id="UC1"))
+                kho.create_source(TrustedSource(youtube_channel_id="UC2"))
+                kho.record_websub_subscription(
+                    a.source_id, status=SubscriptionStatus.PENDING, secret="x")
+                dem = kho.count_sources_by_subscription_status()
+                self.assertEqual(dem["pending"], 1, ten)
+                self.assertEqual(dem["none"], 1, ten)
+                self.assertEqual(sum(dem.values()), 2, ten)
+                for gia_tri in ("none", "pending", "active", "expired", "failed"):
+                    self.assertIn(gia_tri, dem, ten)
+
     # ===================================================== video import
 
     def test_create_import_once_khong_trung(self):
@@ -257,6 +273,17 @@ class HopDongTrustedSourceTest(unittest.TestCase):
 
                 cua_s1, _ = kho.find_imports(trusted_source_id="s1")
                 self.assertEqual(len(cua_s1), 1, ten)
+
+    def test_find_imports_loc_theo_created_after_phase7(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.create_import_once(VideoImport(
+                    youtube_video_id="v_cu", created_at="2026-01-01T00:00:00+00:00"))
+                kho.create_import_once(VideoImport(
+                    youtube_video_id="v_moi", created_at="2026-08-16T00:00:00+00:00"))
+                _, tong = kho.find_imports(
+                    created_after="2026-08-01T00:00:00+00:00", limit=1)
+                self.assertEqual(tong, 1, ten)
 
     def test_update_import(self):
         for ten, kho in self._cac_kho():

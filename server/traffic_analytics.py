@@ -31,11 +31,21 @@ from typing import Any, Dict, List, Optional
 class TrafficOverview:
     configured: bool
     #: Chi co gia tri khi `configured=True`. Rong = dang cho hien thuc that.
+    visits_today: Optional[int] = None
+    pageviews_today: Optional[int] = None
     visits_7d: Optional[int] = None
     pageviews_7d: Optional[int] = None
     visits_30d: Optional[int] = None
     pageviews_30d: Optional[int] = None
     top_paths: Optional[List[Dict[str, Any]]] = None
+    #: Phase 7 — moi phan tu {"date": "YYYY-MM-DD", "visits": int, "pageviews": int}.
+    trend_by_day: Optional[List[Dict[str, Any]]] = None
+    #: Phase 7 — moi phan tu {"referrer": str, "count": int}.
+    referrers: Optional[List[Dict[str, Any]]] = None
+    #: Phase 7 — moi phan tu {"country": str, "count": int} (ma ISO 2 ky tu).
+    countries: Optional[List[Dict[str, Any]]] = None
+    #: Phase 7 — moi phan tu {"device": str, "count": int} (desktop/mobile/tablet).
+    device_categories: Optional[List[Dict[str, Any]]] = None
     #: Thong diep AN TOAN cho giao dien — khong bao gio la mot traceback.
     message: str = ""
 
@@ -94,10 +104,26 @@ def overview() -> Dict[str, Any]:
     o = provider.overview()
     return {
         "configured": o.configured,
+        "visits_today": o.visits_today,
+        "pageviews_today": o.pageviews_today,
         "visits_7d": o.visits_7d,
         "pageviews_7d": o.pageviews_7d,
         "visits_30d": o.visits_30d,
         "pageviews_30d": o.pageviews_30d,
         "top_paths": o.top_paths,
+        "trend_by_day": o.trend_by_day,
+        "referrers": o.referrers,
+        "countries": o.countries,
+        "device_categories": o.device_categories,
         "message": o.message,
     }
+
+
+#: Ten bien moi truong CAN THIET de bat phan tich luu luong that — cho
+#: giao dien/tai lieu doc truc tiep, KHONG bao gio kem gia tri that (xem
+#: `CloudflareTrafficProvider`). Phase 7, muc 4: "document the required
+#: env-variable NAMES only".
+REQUIRED_ENV_VARS = (
+    CloudflareTrafficProvider.ZONE_ID_ENV,
+    CloudflareTrafficProvider.API_TOKEN_ENV,
+)

@@ -124,6 +124,14 @@ def q_offset(count: int) -> str:
     return json.dumps({"method": "offset", "values": [int(count)]})
 
 
+def q_greater_equal(attribute: str, value: Any) -> str:
+    #: Ten method THAT cua Appwrite la "greaterThanEqual" — KHONG phai
+    #: "greaterEqual" (bug that da gap va sua o `appwrite_store.py`, xem
+    #: muc 6 cua handoff — ghi lai o day de khong lap lai).
+    return json.dumps({"method": "greaterThanEqual", "attribute": attribute,
+                       "values": [value]})
+
+
 def _project_to_row(p: TranslationProject) -> Dict[str, Any]:
     return {
         "project_id": p.project_id,
@@ -529,8 +537,13 @@ class AppwriteTranslationStore:
         """Tong so du an dich TREN TOAN NEN TANG — bang dieu khien quan tri
         (Admin Control Center V2, A1). `limit(1)` + doc `total`, KHONG dung
         `_list_all` (do se keo het ban ghi ve)."""
-        data = self._call("GET", self._docs(COL_PROJECTS),
-                          params={"queries[]": [q_limit(1)]})
+        return self._dem(COL_PROJECTS, [q_limit(1)])
+
+    def _dem(self, collection: str, queries: List[str]) -> int:
+        """Bo dem BI CHAN — `limit(1)` + doc `total`, KHONG dung `_list_all`
+        (se keo het ban ghi ve). Dung chung cho MOI phep dem Phase 7."""
+        data = self._call("GET", self._docs(collection),
+                          params={"queries[]": queries})
         total = data.get("total")
         return int(total) if isinstance(total, int) else 0
 
@@ -570,6 +583,17 @@ class AppwriteTranslationStore:
         rows = self._list_all(COL_JOBS, [
             q_equal("status", status.value), q_order_asc("created_at")])
         return [_job_from_row(r) for r in rows]
+
+    def count_jobs(self, *, status: Optional[TranslationJobStatus] = None,
+                  created_after: str = "") -> int:
+        """Bo dem BI CHAN cho bang dieu khien quan tri (Phase 7 analytics) —
+        loc THEO status/ngay tao qua Appwrite, KHONG quet toan bang."""
+        queries: List[str] = [q_limit(1)]
+        if status is not None:
+            queries.append(q_equal("status", status.value))
+        if created_after:
+            queries.append(q_greater_equal("created_at", created_after))
+        return self._dem(COL_JOBS, queries)
 
     # ======================================================== claim/lease
     #
@@ -791,6 +815,16 @@ class AppwriteTranslationStore:
                               [q_equal("user_id", user_id)])
         ra = [_connection_from_row(r) for r in rows]
         return sorted(ra, key=lambda c: c.created_at)
+
+    def count_connections_by_status(self) -> Dict[str, int]:
+        """Bo dem ket noi BYOK TREN TOAN NEN TANG theo trang thai — trang
+        AI/Credits (Phase 7 analytics). MOI gia tri `ProviderStatus` MOT
+        truy van bi chan rieng (khong ho tro group-by, cung nguyen tac voi
+        `count_sources_by_subscription_status`). KHONG bao gio tra secret."""
+        from server.translation_provider_registry import ProviderStatus
+        return {s.value: self._dem(
+            COL_PROVIDER_CONNECTIONS, [q_equal("status", s.value), q_limit(1)])
+            for s in ProviderStatus}
 
     def delete_connection(self, user_id: str, provider_id: str) -> None:
         try:

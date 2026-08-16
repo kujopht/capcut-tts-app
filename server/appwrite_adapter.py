@@ -434,6 +434,15 @@ class AppwriteIdentityAdapter:
         "last_watch_at",
     )
 
+    #: Thuoc tinh KIEU `datetime` (khong bat buoc) trong `_PROFILE_V2_FIELDS` —
+    #: Appwrite (tu luu tru) tu dien gio server HIEN TAI khi nhan chuoi rong ""
+    #: cho mot thuoc tinh datetime khong bat buoc, thay vi null nhu ky vong (da
+    #: xac nhan THAT o Phase 6 nhanh feature/admin-trusted-video-v2, xem
+    #: `appwrite_trusted_source_store.py::_DATETIME_FIELDS`). `save_profile`
+    #: PATCH ca ba truong nay moi lan goi (vd chi doi bio/avatar) — neu nguoi
+    #: dung chua tung doc/nghe/xem gi thi phai gui `None`, khong phai `""`.
+    _PROFILE_DATETIME_FIELDS = ("last_read_at", "last_listen_at", "last_watch_at")
+
     #: Truong co INDEX UNIQUE. Chuoi rong KHONG duoc ghi vao day.
     #:
     #: LOI DA XAY RA TREN STAGING: `register()` ghi `username: ""` cho moi ho so
@@ -493,6 +502,9 @@ class AppwriteIdentityAdapter:
                 if co is not None and k in co}
         if "author_status" in data:
             data["author_status"] = profile.author_status.value
+        for k in self._PROFILE_DATETIME_FIELDS:
+            if data.get(k) == "":
+                data[k] = None
         if not data:
             raise AuthError(
                 "Chưa thể lưu danh tính công khai: bảng `profiles` còn thiếu các "

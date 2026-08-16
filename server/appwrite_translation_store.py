@@ -217,14 +217,20 @@ def _job_to_row(j: TranslationJob) -> Dict[str, Any]:
         "current_pass": j.current_pass,
         "attempts": j.attempts,
         "lease_owner": j.lease_owner,
-        "lease_expires_at": j.lease_expires_at,
+        # Ba truong nay la thuoc tinh `datetime` KHONG bat buoc tren Appwrite —
+        # gui chuoi rong "" (gia tri mac dinh cua ba truong nay khi chua xay
+        # ra) bi Appwrite tu luu tru TU DIEN gio server HIEN TAI thay vi null
+        # (xac nhan THAT o Phase 6, nhanh feature/admin-trusted-video-v2, xem
+        # `appwrite_trusted_source_store.py::_DATETIME_FIELDS`) — phai gui
+        # `None` cho "chua xay ra".
+        "lease_expires_at": j.lease_expires_at or None,
         "error": j.error,
-        "waiting_retry_at": j.waiting_retry_at,
+        "waiting_retry_at": j.waiting_retry_at or None,
         "waiting_reason": j.waiting_reason,
         "waiting_action": j.waiting_action,
         "created_at": j.created_at,
         "updated_at": j.updated_at,
-        "finished_at": j.finished_at,
+        "finished_at": j.finished_at or None,
     }
 
 
@@ -338,7 +344,11 @@ def _connection_to_row(c: ProviderConnection) -> Dict[str, Any]:
         "selected_model": c.selected_model,
         "created_at": c.created_at,
         "updated_at": c.updated_at,
-        "last_verified_at": c.last_verified_at,
+        # Datetime khong bat buoc — xem ghi chu o `_job_to_row` phia tren.
+        # Trong THUC TE `connect()` luon dat gia tri that ngay luc tao (kiem
+        # tra key truoc khi luu), nhung van gui `None` cho "chua co" de an
+        # toan neu co duong tao moi nao khac sau nay.
+        "last_verified_at": c.last_verified_at or None,
     }
 
 

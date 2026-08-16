@@ -4,7 +4,8 @@
 Đừng dựa vào trí nhớ hội thoại trước — hãy đọc file này và kiểm tra lại code
 thật trước khi sửa bất cứ gì.
 
-Cập nhật lần cuối: 2026-08-16, sau khi Phase 6 được push.
+Cập nhật lần cuối: 2026-08-16, sau khi đợt hardening (audit Appwrite
+datetime rỗng toàn repo) được push.
 
 ## 0. Bootstrap cho phiên mới
 
@@ -56,12 +57,16 @@ xong và được người dùng duyệt.
 - Phase 5: commit `f556cd5` — "Admin Control Center V2, Phase 5: Trusted
   Video Sources". Đã push, đã duyệt (checkpoint được xác nhận trước khi bắt
   đầu Phase 6).
-- Phase 6: commit MỚI NHẤT trên nhánh này SAU `f556cd5` (chạy
-  `git log --oneline -5` để lấy SHA thật — đừng tin một con số ghi cứng ở
-  đây) — "YouTube WebSub + pipeline tập mới tự động". Đã push.
+- Phase 6: commit `eedc077` — "Admin Control Center V2, Phase 6: YouTube
+  WebSub + dong bo tap moi tu dong". Đã push, đã duyệt.
+- Hardening (không phải một phase đánh số, chạy TRƯỚC Phase 7 theo yêu cầu
+  người dùng): commit MỚI NHẤT trên nhánh này SAU `eedc077` (chạy
+  `git log --oneline -5` để lấy SHA thật) — "Hardening: audit toàn repo cho
+  lỗi Appwrite datetime rỗng". Đã push. Xem mục 4f.
 - Remote: `origin/feature/admin-trusted-video-v2` phải khớp HEAD cục bộ sau
-  khi Phase 6 được push — xác nhận lại bằng `git fetch` + `git rev-parse`
-  trước khi tiếp tục Phase 7, đừng tin dòng này nếu đã có thời gian trôi qua.
+  khi commit hardening được push — xác nhận lại bằng `git fetch` +
+  `git rev-parse` trước khi tiếp tục Phase 7, đừng tin dòng này nếu đã có
+  thời gian trôi qua.
 - `main`: **chưa hề đụng tới** trong toàn bộ việc này. `origin/main` đang ở
   `d483e90` ("deploy: them systemd unit cho translation worker production")
   — hoàn toàn không liên quan, không có commit nào của nhánh này lọt vào.
@@ -802,18 +807,122 @@ test_trusted_source_routes.py::WebSubRoutesTest` (MỚI, 11 test HTTP đầy
 Appwrite datetime rỗng ở trên), `web/tests/
 admin-trusted-sources-websub.test.mjs` (MỚI, 9 test).
 
+## 4f. Đã xong — Hardening: audit toàn repo cho lỗi Appwrite datetime rỗng
+
+Sau khi Phase 6 phát hiện Appwrite (tự lưu trú) tự điền giờ server HIỆN
+TẠI cho một thuộc tính `datetime` KHÔNG bắt buộc khi nhận chuỗi rỗng `""`
+(thay vì null), người dùng yêu cầu audit TOÀN BỘ repo trước khi bắt đầu
+Phase 7 — không chỉ giới hạn ở `trusted_sources`/`video_imports`.
+
+**Phương pháp**: parse `SCHEMA` trong `scripts/setup_appwrite.py` bằng
+`ast.literal_eval` (nguồn sự thật DUY NHẤT cho kiểu thuộc tính của MỌI
+collection — 39 collection, 75 khai báo `datetime`) để liệt kê CHÍNH XÁC
+mọi thuộc tính `datetime` KHÔNG bắt buộc (`required=False`) trong toàn bộ
+schema, rồi tra ngược từng trường đó tới write path thật của nó (không suy
+đoán từ tên biến). Bổ sung một lượt grep toàn `server/appwrite_*.py` cho
+mọi khoá dict dạng `"..._at":` để bắt các trường hợp không nằm gọn trong
+danh sách schema.
+
+**Kết quả — CHỈ 4 collection có thuộc tính `datetime` không bắt buộc trong
+toàn bộ 39 collection**:
+
+| Collection | Trường | Trạng thái TRƯỚC audit |
+|---|---|---|
+| `profiles` | `last_read_at`, `last_listen_at`, `last_watch_at` | **LỖI THẬT** — `save_profile()` (PATCH) |
+| `trusted_sources` | 7 trường (xem mục 4e) | Đã sửa ở Phase 6 |
+| `video_imports` | `published_at`, `reviewed_at` | Đã sửa ở Phase 6 |
+| `translation_jobs` | `lease_expires_at`, `waiting_retry_at`, `finished_at` | **LỖI THẬT** — `_job_to_row()` |
+| `translation_provider_connections` | `last_verified_at` | Lỗ hổng phòng thủ (chưa từng kích hoạt trong thực tế) |
+| `author_applications` | `decided_at` | AN TOÀN — domain dùng `Optional[str] = None`, `to_dict()` truyền thẳng |
+| `tts_jobs` | `lease_expires_at`, `started_at`, `finished_at` | AN TOÀN — domain dùng `Optional[str] = None`, mọi nơi gán đều gán giá trị thật hoặc `None` tường minh |
+
+Ba mươi lăm collection còn lại KHÔNG có thuộc tính `datetime` nào không
+bắt buộc — không cần kiểm tra thêm.
+
+**Lỗi THẬT #1 — `profiles.save_profile()`
+(`server/appwrite_adapter.py`)**: `_writable_profile()` (dùng cho
+`register()`/`ensure_profile()`, tức LÚC TẠO MỚI) gọi `Profile.to_dict()`,
+vốn ĐÃ tự đổi `""` → `None` cho ba trường này từ trước (an toàn). Nhưng
+`save_profile()` (dùng cho MỌI lần PATCH một hồ sơ ĐÃ CÓ — ví dụ chỉ đổi
+bio/avatar) xây dựng payload bằng `getattr(profile, k)` THÔ, bỏ qua
+`to_dict()` — nên MỖI LẦN gọi `save_profile()` trên một hồ sơ mà người
+dùng CHƯA từng đọc/nghe/xem gì sẽ ghi đè `last_read_at`/`last_listen_at`/
+`last_watch_at` thành **chuỗi rỗng**, kích hoạt tật Appwrite nói trên.
+**Vì `save_profile()` chạy trên MỌI cập nhật hồ sơ (đổi bio/avatar/tên
+hiển thị công khai...), đây là một lỗi có khả năng đã và đang ẢNH HƯỞNG DỮ
+LIỆU THẬT TRÊN PRODUCTION** kể từ khi các trường này được thêm (V4 "tiếp
+tục đọc/nghe", V6 "tiếp tục xem") — bất kỳ người dùng nào đổi bio/avatar
+mà chưa từng đọc/nghe/xem gì sẽ có `last_*_at` bị ghi đè thành "vừa mới
+đọc/nghe/xem", dù họ chưa hề làm vậy. Sửa: thêm vòng lặp đổi `"" -> None`
+cho ba trường này ngay trước khi gửi PATCH (`_PROFILE_DATETIME_FIELDS`).
+**KHÔNG có hành động sửa dữ liệu production nào được thực hiện trong phiên
+này** — chỉ sửa code đường ghi; dữ liệu production hiện có (nếu đã bị ảnh
+hưởng) cần người dùng tự quyết định có cần dọn lại hay không (xem mục
+"Cân nhắc production" cuối mục này).
+
+**Lỗi THẬT #2 — `translation_jobs._job_to_row()`
+(`server/appwrite_translation_store.py`)**: gửi thẳng
+`j.lease_expires_at`/`j.waiting_retry_at`/`j.finished_at` (mặc định `""`)
+lên Appwrite — MỌI `TranslationJob` mới tạo có các trường này bị ghi thành
+giờ tạo thay vì rỗng. Ảnh hưởng THỰC TẾ thấp hơn lỗi #1 vì không có logic
+nào trong repo kiểm tra các trường này bằng `bool(...)` (đều dùng
+`TranslationJobStatus` enum làm nguồn sự thật cho trạng thái) — nhưng vẫn
+là dữ liệu sai lưu trữ, có thể gây hiểu nhầm nếu một UI sau này hiển thị
+trực tiếp các mốc này. Sửa: đổi `"" -> None` ngay trong `_job_to_row()`.
+
+**`translation_provider_connections.last_verified_at`**: cùng lỗ hổng ở
+`_connection_to_row()`, nhưng KHÔNG active trong thực tế —
+`TranslationByokService.connect()` (nơi DUY NHẤT tạo `ProviderConnection`)
+luôn xác minh key thật TRƯỚC khi tạo, nên `last_verified_at` không bao giờ
+rỗng lúc ghi. Vẫn sửa để phòng thủ cho đường tạo mới nào khác trong tương
+lai.
+
+**Test hồi quy mới**:
+- `server/tests/test_adapters.py::TestSaveProfileDatetimeCoercion` (2 test)
+  — patch thẳng `adapter._request` để bắt payload PATCH thật gửi đi (không
+  có FakeAppwrite riêng cho `AppwriteIdentityAdapter` trong repo trước đây,
+  đây là bài test dual-mode ĐẦU TIÊN cho `save_profile`).
+- `server/tests/test_translation_contract.py` (+4): hai bài đọc thẳng
+  payload `_job_to_row()`/`_connection_to_row()` sinh ra (không round-trip
+  qua `FakeAppwrite` vì `FakeAppwrite` KHÔNG mô phỏng được tật Appwrite
+  này), hai bài round-trip xác nhận job mới tạo giữ `""` khi đọc lại qua
+  domain object (cả hai kho).
+
+**Smoke test THẬT trên Appwrite tự lưu trú dev** — ghi/đọc trực tiếp CẢ BA
+write path đã sửa (một hồ sơ `profiles` khả năng, một `translation_jobs`
+mới, một `translation_provider_connections` mới), xác nhận CẢ BA đọc lại
+đúng `None` (không phải timestamp giả) sau khi sửa. Mọi bản ghi disposable
+đã xoá sạch ngay sau khi kiểm.
+
+**Cân nhắc production (KHÔNG tự ý hành động, chỉ ghi lại để người dùng
+quyết định)**: vì lỗi #1 (`profiles.save_profile`) có khả năng đã chạy
+trên Appwrite Cloud production kể từ khi V4/V6 triển khai, có thể tồn tại
+những hồ sơ người dùng thật có `last_read_at`/`last_listen_at`/
+`last_watch_at` mang giá trị SAI (một timestamp cũ từ lần đổi bio/avatar
+nào đó, không phải lần đọc/nghe/xem thật gần nhất) — hoặc tệ hơn, một hồ
+sơ CHƯA từng đọc/nghe/xem gì lại hiện "tiếp tục đọc/nghe/xem" trên trang
+chủ với dữ liệu KHÔNG tồn tại (novel_id/chapter_id rỗng nhưng có
+timestamp). **Việc này KHÔNG được sửa trong phiên này** (ngoài phạm vi
+"sửa write path" được giao, và đụng tới dữ liệu production cần quyết định
+riêng của người dùng) — nếu cần dọn, hướng khả dĩ là một script một-lần
+quét `profiles` production, với MỖI hồ sơ: nếu `last_read_novel_id` rỗng
+mà `last_read_at` khác rỗng (cùng logic cho listen/watch) thì đó là dấu
+hiệu bị ảnh hưởng, cần xoá `last_*_at` (đặt lại rỗng) — nhưng đây là ước
+đoán heuristic, CẦN người dùng xác nhận trước khi chạy bất kỳ điều gì trên
+Appwrite Cloud production.
+
 ## 5. Trạng thái test/build (đã CHẠY LẠI và xác nhận ngay tại thời điểm viết
 handoff này, không phải chỉ nhớ lại)
 
 | Mục | Kết quả |
 |---|---|
-| Backend (`unittest discover -s server/tests -t .`) | **2353/2353 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +65 test Phase 6 |
-| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **622/622 pass** — +9 test Phase 6 |
+| Backend (`unittest discover -s server/tests -t .`) | **2360/2360 pass** (1 skipped, không liên quan — thiếu file `.onnx.json` test model cục bộ) — +7 test hardening |
+| Frontend (`npm test` = `node --test tests/*.test.mjs`) | **622/622 pass** — không đổi ở đợt hardening (không sửa file frontend nào) |
 | `npm run typecheck` | sạch, 0 lỗi |
 | `npm run lint` | 0 lỗi, 2 warning (không liên quan — `<img>` ở `image-studio/page.tsx`, có từ trước) |
 | `npm run build` | build production thành công, route `animation/sources/[id]` (động) không đổi hình dạng |
 | Secret scan (grep diff cho api_key/secret/token/password/bearer + kiểm không có file `.env` nào bị đổi) | sạch |
-| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4), 4d (Phase 5 — 19/19), 4e (Phase 6 — hub thật + YouTube Data API thật + phát hiện/sửa lỗi Appwrite datetime rỗng) |
+| Smoke test thật trên Appwrite tự lưu trú dev | ĐÃ CHẠY — xem mục 4b (Phase 3), 4c (Phase 4), 4d (Phase 5 — 19/19), 4e (Phase 6 — hub thật + YouTube Data API thật + phát hiện lỗi Appwrite datetime rỗng), 4f (hardening — ghi/đọc thật ba write path đã sửa: `profiles`, `translation_jobs`, `translation_provider_connections`) |
 | Smoke test thật YouTube Data API | ĐÃ CHẠY — xem mục 4d/4e, video "Me at the zoo" ổn định vĩnh viễn làm dữ liệu thật |
 | Smoke test thật WebSub/hub PubSubHubbub | ĐÃ CHẠY một phần — xem mục 4e; EXTERNAL WEBSUB E2E: BLOCKED (cần backend công khai qua HTTPS) |
 | QA trình duyệt thật | ĐÃ CHẠY Phase 4 (mục 4c) + Phase 5 (mục 4d) + Phase 6 (mục 4e) — phát hiện + sửa bug ConfirmDialog (P4), set-state-in-effect + window.location (P5), lỗi Appwrite datetime rỗng (P6) |
@@ -1120,10 +1229,13 @@ stash@{0}: On feature/animation-player-v2-custom-controls: animation-player-v2 d
 ## 15. HÀNH ĐỘNG TIẾP THEO CHÍNH XÁC — PHASE 7
 
 Phase 3 (Full User Management), Phase 4 (Animation Moderation), Phase 5
-(Trusted Video Sources), và Phase 6 (YouTube WebSub + Automatic Episode
-Pipeline) **ĐÃ XONG** — xem mục 4b/4c/4d/4e để biết chi tiết đầy đủ, quyết
-định kiến trúc, và kết quả smoke test/QA trình duyệt thật. ĐỪNG làm lại
-bốn phase này.
+(Trusted Video Sources), Phase 6 (YouTube WebSub + Automatic Episode
+Pipeline), và đợt Hardening "audit Appwrite datetime rỗng toàn repo"
+**ĐÃ XONG** — xem mục 4b/4c/4d/4e/4f để biết chi tiết đầy đủ, quyết định
+kiến trúc, và kết quả smoke test/QA trình duyệt thật. ĐỪNG làm lại các
+mục này. **An toàn để bắt đầu Phase 7** — không còn lỗi Appwrite
+datetime rỗng nào chưa sửa trong toàn bộ 39 collection (xem mục 4f để
+biết phương pháp audit và bảng kết quả đầy đủ).
 
 **PHASE 7 — hoàn thiện chỉ số analytics/product còn thiếu + hoàn thiện
 tích hợp tổng thể.** Trước khi viết code, các việc còn treo lại từ các

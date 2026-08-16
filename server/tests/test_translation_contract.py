@@ -204,6 +204,49 @@ class HopDongDich(unittest.TestCase):
                 self.assertEqual(ds[0].created_at,
                                  "2026-08-03T00:00:00+00:00", ten)
 
+    def test_job_moi_tao_chua_lease_giu_rong_khong_bi_dien_gio_hien_tai(self):
+        """
+        Hoi quy TU dot Appwrite optional-datetime audit: `_job_to_row` tung
+        gui thang `j.lease_expires_at`/`j.waiting_retry_at`/`j.finished_at`
+        (mac dinh "") len Appwrite — Appwrite (tu luu tru) tu dien gio server
+        HIEN TAI cho thuoc tinh datetime khong bat buoc khi nhan chuoi rong,
+        thay vi null. `FakeAppwrite` KHONG mo phong duoc tat nay (chi phat
+        hien qua smoke test that), nen bai nay kiem THANG payload
+        `_job_to_row` sinh ra thay vi round-trip.
+        """
+        from server.appwrite_translation_store import _job_to_row
+
+        j = TranslationJob(project_id="trp_x", owner_id="u1",
+                           created_at="2026-08-14T00:00:00+00:00")
+        row = _job_to_row(j)
+        self.assertIsNone(row["lease_expires_at"])
+        self.assertIsNone(row["waiting_retry_at"])
+        self.assertIsNone(row["finished_at"])
+
+    def test_job_da_co_lease_that_van_giu_nguyen_qua_writable(self):
+        from server.appwrite_translation_store import _job_to_row
+
+        j = TranslationJob(
+            project_id="trp_x", owner_id="u1",
+            lease_expires_at="2026-08-14T01:00:00+00:00",
+            finished_at="2026-08-14T02:00:00+00:00",
+            created_at="2026-08-14T00:00:00+00:00")
+        row = _job_to_row(j)
+        self.assertEqual(row["lease_expires_at"], "2026-08-14T01:00:00+00:00")
+        self.assertEqual(row["finished_at"], "2026-08-14T02:00:00+00:00")
+        self.assertIsNone(row["waiting_retry_at"])
+
+    def test_job_moi_tao_round_trip_ca_hai_kho_giu_truong_lease_rong(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                j = TranslationJob(project_id="trp_x", owner_id="u1",
+                                   created_at="2026-08-14T00:00:00+00:00")
+                kho.create_job(j)
+                lai = kho.get_job(j.job_id)
+                self.assertEqual(lai.lease_expires_at, "", ten)
+                self.assertEqual(lai.waiting_retry_at, "", ten)
+                self.assertEqual(lai.finished_at, "", ten)
+
     # ===================================================== GLOSSARY
 
     def test_them_va_doc_lai_thuat_ngu_giu_nguyen_alias(self):
@@ -284,6 +327,47 @@ class HopDongDich(unittest.TestCase):
                 ds = kho.list_glossary("trp_A")
                 self.assertEqual([e.original for e in ds], sorted(goc), ten)
                 self.assertEqual(len(kho.list_glossary("trp_B")), 1, ten)
+
+    # ===================================================== PROVIDER CONNECTION (BYOK)
+
+    def test_ket_noi_moi_round_trip_ca_hai_kho(self):
+        from server.translation_domain import ProviderConnection
+
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                c = ProviderConnection(
+                    user_id="u1", provider_id="groq",
+                    encrypted_secret="byok.v1.a.b", last4="AB42",
+                    status="available", selected_model="m1",
+                    created_at="2026-08-14T00:00:00+00:00",
+                    updated_at="2026-08-14T00:00:00+00:00",
+                    last_verified_at="2026-08-14T00:00:00+00:00")
+                kho.save_connection(c)
+                lai = kho.get_connection("u1", "groq")
+                self.assertEqual(lai.last4, "AB42", ten)
+                self.assertEqual(lai.last_verified_at,
+                                 "2026-08-14T00:00:00+00:00", ten)
+
+    def test_ket_noi_chua_xac_minh_khong_bi_dien_gio_hien_tai(self):
+        """
+        Hoi quy TU dot Appwrite optional-datetime audit: `_connection_to_row`
+        tung gui thang `c.last_verified_at` (mac dinh "") — trong THUC TE
+        `TranslationByokService.connect()` luon xac minh key TRUOC khi tao
+        ket noi nen truong nay chua tung rong o duong that, nhung sua phong
+        thu cho MOI duong tao khac trong tuong lai. `FakeAppwrite` khong mo
+        phong duoc tat Appwrite (chi phat hien qua smoke test that), nen bai
+        nay kiem THANG payload `_connection_to_row` sinh ra.
+        """
+        from server.appwrite_translation_store import _connection_to_row
+        from server.translation_domain import ProviderConnection
+
+        c = ProviderConnection(
+            user_id="u1", provider_id="groq",
+            encrypted_secret="byok.v1.a.b", last4="AB42",
+            created_at="2026-08-14T00:00:00+00:00",
+            updated_at="2026-08-14T00:00:00+00:00")
+        row = _connection_to_row(c)
+        self.assertIsNone(row["last_verified_at"])
 
 
 if __name__ == "__main__":

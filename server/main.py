@@ -30,6 +30,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, StringConstraints
 
 from server import tts_bridge
+from server import traffic_analytics
 from server.transcript import TRANSCRIPT_VERSION, build_transcript
 from server.translation_usage import usage_recorder
 from server.adapters import (
@@ -3605,7 +3606,85 @@ class NoteIn(BaseModel):
 
 @app.get("/api/admin/overview")
 def admin_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
-    return creators.admin_overview()
+    return {**creators.admin_overview(), **_admin_dashboard_them()}
+
+
+def _admin_dashboard_them() -> Dict[str, Any]:
+    """
+    Cac muc MOI cua bang dieu khien (Admin Control Center V2, A1) — goi THEM
+    ben canh `creators.admin_overview()` cu (KHONG thay the — giao dien cu,
+    neu con noi nao dung, van doc duoc y het truoc).
+
+    MOI phep dem o day deu BI CHAN: `limit(1)` + doc `total` cua Appwrite,
+    hoac mot snapshot da co san trong bo nho (`image_spending_guard`).
+    KHONG vong lap tren tung hang, KHONG quet toan bang — dung yeu cau
+    "Do not create expensive full-table scans for dashboard cards".
+    """
+    now = datetime.now(timezone.utc)
+    dau_ngay_hom_nay = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    moc_7_ngay = (now - timedelta(days=7)).isoformat(timespec="seconds")
+    moc_30_ngay = (now - timedelta(days=30)).isoformat(timespec="seconds")
+
+    try:
+        appwrite_khoe: Optional[bool] = identity.healthcheck()
+    except Exception:
+        appwrite_khoe = False
+
+    xa_hoi = social.social_overview()
+    chi_tieu = image_spending_guard.snapshot()
+
+    return {
+        "users": {
+            "total": identity.count_profiles(),
+            "new_today": identity.count_profiles(
+                created_after=dau_ngay_hom_nay.isoformat(timespec="seconds")),
+            "new_7d": identity.count_profiles(created_after=moc_7_ngay),
+            "new_30d": identity.count_profiles(created_after=moc_30_ngay),
+            # KHONG duoc theo doi o schema hien tai (khong co cot verified/
+            # suspended tren `profiles`) — None de giao dien hien "chưa có dữ
+            # liệu" thay vi bia mot con so 0 sai su that.
+            "verified": None,
+            "unverified": None,
+            "suspended": None,
+        },
+        "content": {
+            "novels_total": store.total_novels(),
+            "chapters_total": store.total_chapters(),
+            "comments_total": xa_hoi["total_comments"],
+            "animation_series_total": animation_store.find_series(limit=1)[1],
+            "animation_series_published": animation_store.find_series(
+                published_only=True, limit=1)[1],
+            "animation_episodes_total": animation_store.total_episodes(),
+            "pending_reports": xa_hoi["open_reports"],
+        },
+        "product": {
+            "translation_projects_total": translation_svc.admin_total_projects(),
+            "tts_jobs_total": store.total_jobs(),
+            "image_studio_spend_usd": chi_tieu.spent_usd,
+            "image_studio_budget_usd": chi_tieu.budget_usd,
+            # Chua co phep dem RIENG cho so luot sinh anh (chi co chi tieu
+            # gop) — None thay vi suy tu chi tieu (mot lan sinh khong dong
+            # gia mot lan chi).
+            "image_generations_total": None,
+        },
+        # Phan B (Trusted Video Sources) CHUA xay o Phase 2 nay — hien ro
+        # "chua cau hinh" thay vi bia so 0 (0 that va "chua co tinh nang" la
+        # hai y nghia khac nhau, khong duoc lam nguoi doc bang nham lan).
+        "trusted_sources": {"configured": False},
+        "traffic": traffic_analytics.overview(),
+        "system": {
+            "backend": "ok",
+            "data_backend": settings.data_backend,
+            "appwrite_configured": settings.appwrite.configured,
+            "appwrite_healthy": appwrite_khoe if settings.appwrite.configured else None,
+            "inline_worker": settings.inline_worker,
+            "translation_provider_configured": bool(
+                settings.translation_base_url and settings.translation_api_key
+                and settings.translation_model),
+            "image_studio_shared_premium_configured":
+                settings.image_studio.shared_premium_configured,
+        },
+    }
 
 
 @app.get("/api/admin/author-applications")
@@ -3728,11 +3807,17 @@ def admin_novels(q: str = "", state: str = "", limit: int = 25, offset: int = 0,
 
 
 @app.get("/api/admin/events")
-def admin_events(limit: int = 50, offset: int = 0,
+def admin_events(limit: int = 50, offset: int = 0, target_user_id: str = "",
+                 target_type: str = "", action: str = "",
                  admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
-    """Nhat ky kiem duyet. CHI THEM — khong co route sua hay xoa."""
-    return creators.admin_events(limit=max(1, min(200, limit)),
-                                 offset=max(0, offset))
+    """
+    Nhat ky kiem duyet — /admin/audit-log (Admin Control Center V2, A5).
+    CHI THEM — khong co route sua hay xoa.
+    """
+    return creators.admin_events(
+        limit=max(1, min(200, limit)), offset=max(0, offset),
+        target_user_id=target_user_id, target_type=target_type,
+        action=action)
 
 
 # -----------------------------------------------------------------------------

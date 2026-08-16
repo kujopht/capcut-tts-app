@@ -77,6 +77,10 @@ class MockTranslationStore:
             ra = [p for p in self._projects.values() if p.owner_id == owner_id]
         return sorted(ra, key=lambda p: p.created_at, reverse=True)
 
+    def total_projects(self) -> int:
+        with self._lock:
+            return len(self._projects)
+
     # ======================================================== job
 
     def create_job(self, job: TranslationJob) -> TranslationJob:

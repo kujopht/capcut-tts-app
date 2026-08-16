@@ -370,6 +370,12 @@ class AppwriteAnimationStore:
         items.sort(key=lambda e: e.order_index)
         return items
 
+    def total_episodes(self) -> int:
+        """Tong so tap TREN TOAN NEN TANG — bang dieu khien quan tri (Admin
+        Control Center V2, A1). `limit(1)` + doc `total`, KHONG vong lap tren
+        tung series (do se la N+1)."""
+        return self._page(COL_EPISODES, [q_limit(1)])[1]
+
     #: Cung danh sach voi `MockAnimationStore.EPISODE_EDITABLE` — xem ghi chu
     #: o `SERIES_EDITABLE` ve vi sao buoc loc nay khong duoc bo qua.
     EPISODE_EDITABLE = ("title", "external_id", "order_index", "duration_seconds")

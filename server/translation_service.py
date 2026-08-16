@@ -382,6 +382,11 @@ class TranslationService:
     def list_projects(self, owner_id: str) -> List[TranslationProject]:
         return self._store.list_projects(owner_id)
 
+    def admin_total_projects(self) -> int:
+        """Tong so du an dich TREN TOAN NEN TANG — bang dieu khien quan tri
+        (Admin Control Center V2, A1)."""
+        return self._store.total_projects()
+
     def estimate(self, source_text: str) -> Dict[str, int]:
         return uoc_luong(source_text)
 

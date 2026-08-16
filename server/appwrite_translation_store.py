@@ -515,6 +515,15 @@ class AppwriteTranslationStore:
             q_equal("owner_id", owner_id), q_order_desc("created_at")])
         return [_project_from_row(r) for r in rows]
 
+    def total_projects(self) -> int:
+        """Tong so du an dich TREN TOAN NEN TANG — bang dieu khien quan tri
+        (Admin Control Center V2, A1). `limit(1)` + doc `total`, KHONG dung
+        `_list_all` (do se keo het ban ghi ve)."""
+        data = self._call("GET", self._docs(COL_PROJECTS),
+                          params={"queries[]": [q_limit(1)]})
+        total = data.get("total")
+        return int(total) if isinstance(total, int) else 0
+
     # ======================================================== job
 
     def create_job(self, job: TranslationJob) -> TranslationJob:

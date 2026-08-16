@@ -98,9 +98,21 @@ test("MOI trang admin deu ve du ba trang thai tai/loi/rong", () => {
   /*
     Ba trang thai nay duoc gom vao MOT component co y: moi trang tu viet ba
     nhanh thi se co mot trang quen mot nhanh, va cai bi quen luon la "loi".
+
+    NGOAI LE (Admin Control Center V2, Phase 2): trang dung `AdminSapXayDung`
+    la trang TINH, KHONG goi API nao ca — ep chung dung `DanhSachTrangThai`
+    se la mot trang thai "dang tai" khong bao gio that su xay ra. Ngoai le
+    nay CHI mien cho trang KHONG goi `adminApi` — neu mot trang loai nay sau
+    them mot lan goi du lieu that, no phai doi sang dung `DanhSachTrangThai`
+    nhu moi trang khac.
   */
   for (const t of trangAdmin()) {
     const src = read(t);
+    if (src.includes("<AdminSapXayDung")) {
+      assert.ok(!src.includes("adminApi."),
+        `${t} dùng AdminSapXayDung nhưng vẫn gọi adminApi — bỏ ngoại lệ, dùng DanhSachTrangThai`);
+      continue;
+    }
     if (t.endsWith("admin/page.tsx")) {
       // Bang tong quan cung dung chung component do.
       assert.match(src, /DanhSachTrangThai/, t);

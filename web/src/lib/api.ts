@@ -13,6 +13,8 @@ const TOKEN_KEY = "fas.token";
 export type Tier = "free" | "listener_pro" | "creator_pro" | "ultra";
 export type PublishState = "draft" | "published" | "archived";
 export type JobStatus = "pending" | "running" | "completed" | "failed";
+/** Admin Control Center V2 — ba mức, xem `docs/ADMIN.md`. */
+export type AdminRole = "none" | "moderator" | "admin" | "owner";
 
 export interface Profile {
   user_id: string;
@@ -33,6 +35,12 @@ export interface Profile {
    * `/admin`; quyền thật nằm ở từng route `/api/admin/*`.
    */
   is_admin?: boolean;
+  /**
+   * Mức quản trị THẬT (Admin Control Center V2) — "none" khi không phải quản
+   * trị. CHỈ dùng để ẩn/hiện mục trong sidebar; mọi route `/api/admin/*` vẫn
+   * tự kiểm lại quyền, sửa giá trị này trong DevTools không mở thêm được gì.
+   */
+  admin_role?: AdminRole;
   /** Khoá đối tượng R2 của avatar. Chuỗi rỗng = chưa tải — dùng `avatar_url`
       để hiển thị, không bao giờ tự dựng URL từ khoá này. */
   avatar_key?: string;
@@ -1215,7 +1223,16 @@ export interface AudioLink {
 // là nơi quyết định: người dùng thường gọi các hàm này sẽ nhận 403 và một thân
 // rỗng. Xem `server/main.py` mục QUAN TRI.
 
+/**
+ * Mot chi so co the CHUA CO du lieu (schema chua theo doi, hoac nha cung cap
+ * ngoai chua cau hinh) — `null` nghia la "chua co", KHONG PHAI 0. Giao dien
+ * PHAI phan biet hai truong hop nay (Admin Control Center V2, A1: "Do not
+ * fabricate numbers").
+ */
+export type ChiSo = number | null;
+
 export interface AdminOverview {
+  // Cac truong CU, tu ban dau — giu nguyen, khong doi kieu.
   pending_applications: number;
   approved_authors: number;
   rejected_applications: number;
@@ -1223,6 +1240,54 @@ export interface AdminOverview {
   published_novels: number;
   users_with_username: number;
   qualified_listens: number;
+
+  // Admin Control Center V2, Phase 2 — cac muc MOI cua bang dieu khien.
+  users: {
+    total: number;
+    new_today: number;
+    new_7d: number;
+    new_30d: number;
+    verified: ChiSo;
+    unverified: ChiSo;
+    suspended: ChiSo;
+  };
+  content: {
+    novels_total: number;
+    chapters_total: number;
+    comments_total: number;
+    animation_series_total: number;
+    animation_series_published: number;
+    animation_episodes_total: number;
+    pending_reports: number;
+  };
+  product: {
+    translation_projects_total: number;
+    tts_jobs_total: number;
+    image_studio_spend_usd: number;
+    image_studio_budget_usd: number;
+    image_generations_total: ChiSo;
+  };
+  trusted_sources: {
+    configured: boolean;
+  };
+  traffic: {
+    configured: boolean;
+    visits_7d: ChiSo;
+    pageviews_7d: ChiSo;
+    visits_30d: ChiSo;
+    pageviews_30d: ChiSo;
+    top_paths: Array<{ path: string; count: number }> | null;
+    message: string;
+  };
+  system: {
+    backend: string;
+    data_backend: string;
+    appwrite_configured: boolean;
+    appwrite_healthy: boolean | null;
+    inline_worker: boolean;
+    translation_provider_configured: boolean;
+    image_studio_shared_premium_configured: boolean;
+  };
 }
 
 /** Danh tính kèm theo đơn / hàng tác giả. CÓ `email` — đây là đường quản trị. */
@@ -1259,16 +1324,34 @@ export interface AdminApplication {
   user?: AdminUser | null;
 }
 
+/** Vi du tu vung `action` hien tai (server/scripts/setup_appwrite.py) — danh
+    sach That con dai hon, kieu string de khong phai doi frontend moi khi
+    backend mo rong enum. */
+export type AdminAuditAction =
+  | "author_approved" | "author_rejected"
+  | "author_suspended" | "author_restored"
+  | "post_removed" | "post_restored"
+  | "comment_removed" | "comment_restored"
+  | "report_resolved" | "report_dismissed"
+  | "user_suspend" | "user_unsuspend" | "user_session_terminate"
+  | "user_role_change" | "user_delete"
+  | "content_unpublish" | "content_restore"
+  | "trusted_source_add" | "trusted_source_disable" | "trusted_source_enable"
+  | "youtube_mapping_create" | "youtube_mapping_update"
+  | "auto_import_approve" | "auto_import_reject" | "auto_publish_toggle"
+  | (string & {});
+
 export interface ModerationEvent {
   event_id: string;
-  action:
-    | "author_approved"
-    | "author_rejected"
-    | "author_suspended"
-    | "author_restored";
+  action: AdminAuditAction;
   target_user_id: string;
   actor_id: string;
+  /** Admin Control Center V2 — rỗng cho bản ghi cũ trước migration. */
+  actor_role?: AdminRole | "";
+  target_type?: string;
+  target_id?: string;
   note: string;
+  metadata?: string;
   created_at: string;
 }
 
@@ -1277,8 +1360,31 @@ export interface AdminNovel extends Novel {
   owner: { display_name: string; username: string } | null;
 }
 
+export interface AdminImageStudioSpending {
+  month: string;
+  spent_usd: number;
+  budget_usd: number;
+  warning_usd: number;
+  kill_switch_engaged: boolean;
+  active_concurrent: number;
+  max_concurrent: number;
+  shared_premium_enabled_config: boolean;
+  shared_premium_configured: boolean;
+}
+
 export const adminApi = {
   overview: () => request<AdminOverview>("/api/admin/overview"),
+
+  /** AI / Credits (Admin Control Center V2) — chi tieu Image Studio. */
+  imageStudioSpending: () =>
+    request<AdminImageStudioSpending>("/api/admin/image-studio/spending"),
+
+  /** CHI OWNER goi duoc — server tu choi 403 voi vai tro thap hon. */
+  imageStudioKillSwitch: (engaged: boolean) =>
+    request<{ kill_switch_engaged: boolean }>(
+      "/api/admin/image-studio/kill-switch",
+      { method: "POST", body: JSON.stringify({ engaged }) },
+    ),
 
   applications: (status = "", limit = 25, offset = 0) =>
     request<{ applications: AdminApplication[]; total: number }>(
@@ -1334,10 +1440,19 @@ export const adminApi = {
         `&limit=${limit}&offset=${offset}`,
     ),
 
-  events: (limit = 50) =>
-    request<{ events: ModerationEvent[]; total: number }>(
-      `/api/admin/events?limit=${limit}`,
-    ),
+  events: (
+    limit = 50,
+    opts: { offset?: number; targetUserId?: string; targetType?: string; action?: string } = {},
+  ) => {
+    const p = new URLSearchParams({ limit: String(limit) });
+    if (opts.offset) p.set("offset", String(opts.offset));
+    if (opts.targetUserId) p.set("target_user_id", opts.targetUserId);
+    if (opts.targetType) p.set("target_type", opts.targetType);
+    if (opts.action) p.set("action", opts.action);
+    return request<{ events: ModerationEvent[]; total: number }>(
+      `/api/admin/events?${p.toString()}`,
+    );
+  },
 };
 
 // ---------------------------------------------------------------------------

@@ -461,6 +461,77 @@ class NovelBrowserTest(Base):
                 self.assertEqual(methods, {"GET"}, d)
 
 
+class DashboardMoRongTest(Base):
+    """
+    Cac muc MOI cua /api/admin/overview (Admin Control Center V2, Phase 2,
+    A1) — cong THEM ben canh cac truong cu, khong thay the.
+    """
+
+    def test_van_giu_cac_truong_cu(self):
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        for khoa in ("pending_applications", "approved_authors",
+                    "rejected_applications", "suspended_authors",
+                    "published_novels", "users_with_username",
+                    "qualified_listens"):
+            self.assertIn(khoa, d)
+
+    def test_co_du_sau_muc_moi(self):
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        for khoa in ("users", "content", "product", "trusted_sources",
+                    "traffic", "system"):
+            self.assertIn(khoa, d)
+
+    def test_dem_nguoi_dung_dung_va_moi_hom_nay(self):
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        # setUp da tao self.admin + self.thuong -> it nhat 2 nguoi.
+        self.assertGreaterEqual(d["users"]["total"], 2)
+        # Ca hai deu vua dang ky trong bai test nay -> phai nam trong "hom nay".
+        self.assertGreaterEqual(d["users"]["new_today"], 2)
+        self.assertGreaterEqual(d["users"]["new_7d"], d["users"]["new_today"])
+        self.assertGreaterEqual(d["users"]["new_30d"], d["users"]["new_7d"])
+
+    def test_truong_chua_theo_doi_tra_None_khong_bia_so_0(self):
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        self.assertIsNone(d["users"]["verified"])
+        self.assertIsNone(d["users"]["unverified"])
+        self.assertIsNone(d["users"]["suspended"])
+        self.assertIsNone(d["product"]["image_generations_total"])
+
+    def test_dem_noi_dung_dung_sau_khi_tao_truyen_chuong_series(self):
+        me, h = self._tac_gia("dash@x.local", "Dash")
+        truoc = self.client.get("/api/admin/overview",
+                                headers=self.h_admin).json()
+        nid = self.client.post("/api/novels", headers=h,
+                               json={"title": "Truyện Dash"}).json()["novel"]["novel_id"]
+        self.client.post("/api/chapters", headers=h, json={
+            "novel_id": nid, "title": "C1", "content": "x"})
+        sau = self.client.get("/api/admin/overview",
+                              headers=self.h_admin).json()
+        self.assertEqual(sau["content"]["novels_total"],
+                         truoc["content"]["novels_total"] + 1)
+        self.assertEqual(sau["content"]["chapters_total"],
+                         truoc["content"]["chapters_total"] + 1)
+
+    def test_trusted_sources_va_traffic_chua_cau_hinh(self):
+        """Phan B (Trusted Video Sources) va Cloudflare traffic analytics
+        CHUA xay/CHUA co credential — phai bao ro, khong bia du lieu."""
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        self.assertFalse(d["trusted_sources"]["configured"])
+        self.assertFalse(d["traffic"]["configured"])
+        self.assertIn("not configured", d["traffic"]["message"])
+
+    def test_moderator_van_xem_duoc_dashboard(self):
+        """Dashboard dung `admin_profile` (bat ky vai tro nao) — MODERATOR
+        van can thay tong quan de lam viec, chi khong quan ly duoc user/
+        trusted source (xem AdminRoleModelTest)."""
+        prof_mod, h_mod = self._dang_ky("dashmod@fanfic.local", "Dash Mod")
+        self._dat_vai_tro(admin=[self.admin["user_id"]],
+                          moderator=[prof_mod["user_id"]])
+        self.assertEqual(
+            self.client.get("/api/admin/overview", headers=h_mod).status_code,
+            200)
+
+
 class HoSoKemQuyenTest(Base):
     """
     Bit `is_admin` trong ho so CHINH CHU — nguon duy nhat de giao dien quyet

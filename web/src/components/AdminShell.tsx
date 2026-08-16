@@ -22,35 +22,104 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback } from "react";
-import { ApiError, adminApi, type AuthorStatus } from "@/lib/api";
+import { useCallback, useState } from "react";
+import { ApiError, adminApi, type AdminRole, type AuthorStatus } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { Loading } from "@/components/ui";
 import {
   IconBook,
+  IconChart,
   IconCompass,
   IconFeather,
+  IconFilm,
+  IconGear,
   IconHistory,
+  IconInbox,
   IconKey,
+  IconLink,
   IconMegaphone,
   IconShield,
+  IconSparkles,
   IconUser,
 } from "@/components/Icons";
 
-const MUC = [
-  { href: "/admin", nhan: "Tổng quan", icon: IconCompass },
-  { href: "/admin/authors/applications", nhan: "Đơn tác giả", icon: IconFeather },
-  { href: "/admin/authors", nhan: "Tác giả", icon: IconKey },
-  { href: "/admin/users", nhan: "Người dùng", icon: IconUser },
-  { href: "/admin/stories", nhan: "Truyện", icon: IconBook },
-  // Kiem duyet xa hoi. "Báo cáo" dat TRUOC "Bài đăng": hang doi bao cao la cua
-  // vao thuong ngay cua nguoi kiem duyet, con danh sach bai la duong tra cuu.
-  { href: "/admin/reports", nhan: "Báo cáo", icon: IconShield },
-  { href: "/admin/posts", nhan: "Bài đăng", icon: IconMegaphone },
-  { href: "/admin/comments", nhan: "Bình luận", icon: IconFeather },
-  { href: "/admin/events", nhan: "Nhật ký", icon: IconHistory },
+interface MucDieuHuong {
+  href: string;
+  nhan: string;
+  icon: (p: { size?: number }) => React.ReactElement;
+  /**
+   * Muc quan tri TOI THIEU de THAY muc nay trong sidebar — CHI la goi y hien
+   * thi (Admin Control Center V2, A3). Bo trong = moi vai tro (ke ca
+   * MODERATOR) deu thay. Route `/api/admin/*` phia sau VAN tu kiem quyen
+   * rieng, khong phu thuoc gia tri nay — sua no bang DevTools khong mo thêm
+   * duoc gi.
+   */
+  vaiToiThieu?: AdminRole;
+}
+
+interface NhomDieuHuong {
+  /** Nhan nhom — bo trong = muc DUNG MOT MINH, khong can tieu de nhom. */
+  nhom?: string;
+  muc: MucDieuHuong[];
+}
+
+/**
+ * Cay dieu huong Admin Control Center V2 — dung nhom (Content/Animation/
+ * Moderation) de gop cac trang lien quan, giu cau truc "Dashboard/Users/
+ * Content/Animation/Moderation/Analytics/AI-Credits/System/Audit Log" theo
+ * dung ban ke hoach. Muc con hien PHANG duoi tieu de nhom (khong an/hien
+ * bang JS) — tren mobile, `.admin-nav` da co san che do cuon ngang (xem
+ * globals.css), nen day van la "dieu huong dap ung, gap gon duoc" ma khong
+ * can them mot component accordion moi.
+ */
+const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
+  { muc: [{ href: "/admin", nhan: "Dashboard", icon: IconCompass }] },
+  { muc: [{ href: "/admin/users", nhan: "Users", icon: IconUser, vaiToiThieu: "admin" }] },
+  {
+    nhom: "Content",
+    muc: [
+      { href: "/admin/stories", nhan: "Truyện", icon: IconBook },
+      { href: "/admin/posts", nhan: "Bài đăng", icon: IconMegaphone },
+      { href: "/admin/comments", nhan: "Bình luận", icon: IconFeather },
+    ],
+  },
+  {
+    nhom: "Animation",
+    muc: [
+      { href: "/admin/animation", nhan: "Series", icon: IconFilm },
+      {
+        href: "/admin/animation/sources", nhan: "Trusted Sources",
+        icon: IconLink, vaiToiThieu: "admin",
+      },
+      {
+        href: "/admin/animation/import-queue", nhan: "Import Queue",
+        icon: IconInbox, vaiToiThieu: "admin",
+      },
+    ],
+  },
+  {
+    nhom: "Moderation",
+    muc: [
+      { href: "/admin/reports", nhan: "Báo cáo", icon: IconShield },
+      { href: "/admin/authors/applications", nhan: "Đơn tác giả", icon: IconFeather },
+      { href: "/admin/authors", nhan: "Tác giả", icon: IconKey },
+    ],
+  },
+  { muc: [{ href: "/admin/analytics", nhan: "Analytics", icon: IconChart, vaiToiThieu: "admin" }] },
+  { muc: [{ href: "/admin/ai-credits", nhan: "AI / Credits", icon: IconSparkles, vaiToiThieu: "admin" }] },
+  { muc: [{ href: "/admin/system", nhan: "System", icon: IconGear, vaiToiThieu: "owner" }] },
+  { muc: [{ href: "/admin/audit-log", nhan: "Audit Log", icon: IconHistory, vaiToiThieu: "admin" }] },
 ];
+
+/** Vai tro co du cao de thay mot muc doi hoi `vaiToiThieu`? OWNER > ADMIN >
+    MODERATOR > NONE — trung khop thu bac o `Settings.admin_role_of` phia may
+    chu (server/config.py), CHI dung de an/hien, khong phai kiem quyen that. */
+function duVaiTro(cua: AdminRole | undefined, toiThieu: AdminRole | undefined): boolean {
+  if (!toiThieu) return true;
+  const BAC: Record<AdminRole, number> = { none: 0, moderator: 1, admin: 2, owner: 3 };
+  return BAC[cua ?? "none"] >= BAC[toiThieu];
+}
 
 /**
  * Cong chan.
@@ -62,6 +131,9 @@ const MUC = [
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { profile, loading: dangTaiPhien } = useSession();
+  // Dieu huong mobile/tablet gap/mo — desktop luon hien (xem CSS `.admin-nav`
+  // o `@media (max-width: 900px)`), nut nay chi co tac dung duoi nguong do.
+  const [moDieuHuongMobile, setMoDieuHuongMobile] = useState(false);
 
   const kiem = useCallback(async () => {
     await adminApi.overview();
@@ -77,30 +149,64 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     return <TuChoi daDangNhap={Boolean(profile)} loi={error} />;
   }
 
+  const vaiTro = profile?.admin_role;
+
   return (
     <div className="page admin-page">
-      <header className="admin-dau">
-        <span className="eyebrow eyebrow-icon">
-          <IconKey size={17} /> Quản trị
-        </span>
-        <h1 className="page-title admin-tieu-de">Fanfic World</h1>
+      <header className="admin-dau row row-spread">
+        <div className="stack-2">
+          <span className="eyebrow eyebrow-icon">
+            <IconKey size={17} /> Quản trị
+            {vaiTro && vaiTro !== "none" ? (
+              <span className={`badge admin-badge-vaitro admin-badge-${vaiTro}`}>
+                {vaiTro.toUpperCase()}
+              </span>
+            ) : null}
+          </span>
+          <h1 className="page-title admin-tieu-de">Fanfic World</h1>
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost admin-nut-mobile"
+          aria-expanded={moDieuHuongMobile}
+          aria-controls="admin-dieu-huong"
+          onClick={() => setMoDieuHuongMobile((v) => !v)}
+        >
+          {moDieuHuongMobile ? "Đóng menu" : "Menu quản trị"}
+        </button>
       </header>
 
       <div className="admin-khung">
-        <nav className="admin-nav" aria-label="Khu quản trị">
-          {MUC.map(({ href, nhan, icon: Icon }) => {
-            const dang =
-              href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+        <nav
+          id="admin-dieu-huong"
+          className={`admin-nav${moDieuHuongMobile ? " admin-nav-mo" : ""}`}
+          aria-label="Khu quản trị"
+        >
+          {NHOM_DIEU_HUONG.map((n, i) => {
+            const mucHienDuoc = n.muc.filter((m) => duVaiTro(vaiTro, m.vaiToiThieu));
+            if (mucHienDuoc.length === 0) return null;
             return (
-              <Link
-                key={href}
-                href={href}
-                className="admin-muc"
-                aria-current={dang ? "page" : undefined}
-              >
-                <Icon size={17} />
-                <span>{nhan}</span>
-              </Link>
+              <div className="admin-nhom" key={n.nhom ?? mucHienDuoc[0].href}>
+                {n.nhom ? (
+                  <span className="admin-nhom-nhan">{n.nhom}</span>
+                ) : null}
+                {mucHienDuoc.map(({ href, nhan, icon: Icon }) => {
+                  const dang =
+                    href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      className="admin-muc"
+                      aria-current={dang ? "page" : undefined}
+                      onClick={() => setMoDieuHuongMobile(false)}
+                    >
+                      <Icon size={17} />
+                      <span>{nhan}</span>
+                    </Link>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>
@@ -167,21 +273,44 @@ export function TrangThaiBadge({ status }: { status: AuthorStatus }) {
   return <span className={`tt ${n.lop}`}>{n.chu}</span>;
 }
 
-/** Mot o so lieu tren bang tong quan. */
+/**
+ * Mot o so lieu tren bang tong quan.
+ *
+ * `so === null` nghia la CHUA CO DU LIEU (schema chua theo doi, hoac nha
+ * cung cap ngoai chua cau hinh) — hien "—" kem ghi chu, KHONG bao gio hien
+ * "0" cho truong hop nay (Admin Control Center V2, A1: "Do not fabricate
+ * numbers" — 0 that va "chua co" la hai y nghia khac nhau).
+ */
 export function OSo({
   nhan,
   so,
   ghi_chu,
 }: {
   nhan: string;
-  so: number;
+  so: number | null;
   ghi_chu?: string;
 }) {
   return (
     <div className="stat admin-o">
-      <span className="stat-value">{so.toLocaleString("vi-VN")}</span>
+      <span className="stat-value">
+        {so === null ? "—" : so.toLocaleString("vi-VN")}
+      </span>
       <span className="stat-label">{nhan}</span>
-      {ghi_chu ? <span className="hint admin-o-ghi">{ghi_chu}</span> : null}
+      {ghi_chu ? <span className="hint admin-o-ghi">{ghi_chu}</span>
+        : so === null ? <span className="hint admin-o-ghi">Chưa có dữ liệu</span>
+        : null}
+    </div>
+  );
+}
+
+/** Khoi "chua cau hinh" cho MOT muc con (Trusted Sources, Traffic Analytics
+    khi chua co credential). Thay the toan bo the OSo cua muc do bang MOT
+    thong bao ro rang, thay vi hien mot loat so 0 gay hieu lam. */
+export function ChuaCauHinh({ tieuDe, ghiChu }: { tieuDe: string; ghiChu: string }) {
+  return (
+    <div className="card admin-chua-cau-hinh" role="status">
+      <strong>{tieuDe}</strong>
+      <p className="hint">{ghiChu}</p>
     </div>
   );
 }

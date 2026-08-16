@@ -1,19 +1,27 @@
 "use client";
 
 /**
- * Bang tong quan.
+ * Bang tong quan — Admin Control Center V2, Phase 2 (A1).
  *
- * CHI nhung con so may chu dem duoc RE. Khong bia them chi so nao: mot con so
- * sai tren bang quan tri con te han khong co con so nao, vi no duoc dung de ra
- * quyet dinh.
+ * CHI nhung con so may chu dem duoc RE, qua truy van BI CHAN (limit(1) + doc
+ * `total` cua Appwrite, hoac snapshot trong bo nho) — khong quet toan bang,
+ * khong N+1 (xem `server/main.py::_admin_dashboard_them`). Chi so nao CHUA
+ * theo doi duoc (vd tai khoan verified/suspended, luu luong truy cap khi
+ * Cloudflare chua cau hinh) hien RO la "chua co du lieu", KHONG bia so 0.
  */
 
 import Link from "next/link";
 import { useCallback } from "react";
 import { adminApi, type AdminOverview } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
-import { DanhSachTrangThai, OSo } from "@/components/AdminShell";
-import { IconFeather, IconSparkles } from "@/components/Icons";
+import { ChuaCauHinh, DanhSachTrangThai, OSo } from "@/components/AdminShell";
+import {
+  IconChart,
+  IconFeather,
+  IconGear,
+  IconLink,
+  IconSparkles,
+} from "@/components/Icons";
 
 export default function AdminDashboard() {
   const nap = useCallback(() => adminApi.overview(), []);
@@ -32,7 +40,7 @@ export default function AdminDashboard() {
         onThuLai={reload}
       >
         {data ? (
-          <>
+          <div className="stack-3">
             {data.pending_applications > 0 ? (
               <Link className="card admin-nhac" href="/admin/authors/applications?status=pending">
                 <IconFeather size={19} />
@@ -44,26 +52,144 @@ export default function AdminDashboard() {
               </Link>
             ) : null}
 
-            <div className="stat-grid admin-luoi">
-              <OSo nhan="Đơn chờ duyệt" so={data.pending_applications} />
-              <OSo nhan="Tác giả đã duyệt" so={data.approved_authors} />
-              <OSo nhan="Đang tạm dừng" so={data.suspended_authors} />
-              <OSo nhan="Đơn bị từ chối" so={data.rejected_applications} />
-              <OSo nhan="Truyện đã xuất bản" so={data.published_novels} />
-              <OSo
-                nhan="Người dùng có tên công khai"
-                so={data.users_with_username}
-                ghi_chu="Người chưa chọn tên công khai không nằm trong số này."
-              />
-              <OSo nhan="Lượt nghe hợp lệ" so={data.qualified_listens} />
+            {/* ---------------------------------------------------- USERS */}
+            <div>
+              <h3 className="section-title-sm">Người dùng</h3>
+              <div className="stat-grid admin-luoi">
+                <OSo nhan="Tổng số" so={data.users.total} />
+                <OSo nhan="Mới hôm nay" so={data.users.new_today} />
+                <OSo nhan="Mới 7 ngày" so={data.users.new_7d} />
+                <OSo nhan="Mới 30 ngày" so={data.users.new_30d} />
+                <OSo nhan="Đã xác minh" so={data.users.verified} />
+                <OSo nhan="Chưa xác minh" so={data.users.unverified} />
+                <OSo nhan="Đang tạm dừng" so={data.users.suspended} />
+                <OSo
+                  nhan="Có tên công khai"
+                  so={data.users_with_username}
+                  ghi_chu="Người chưa chọn tên công khai không nằm trong số này."
+                />
+              </div>
+            </div>
+
+            {/* -------------------------------------------------- CONTENT */}
+            <div>
+              <h3 className="section-title-sm">Nội dung</h3>
+              <div className="stat-grid admin-luoi">
+                <OSo nhan="Truyện (mọi trạng thái)" so={data.content.novels_total} />
+                <OSo nhan="Truyện đã xuất bản" so={data.published_novels} />
+                <OSo nhan="Chương" so={data.content.chapters_total} />
+                <OSo nhan="Bình luận" so={data.content.comments_total} />
+                <OSo nhan="Series Animation" so={data.content.animation_series_total} />
+                <OSo
+                  nhan="Series đã xuất bản"
+                  so={data.content.animation_series_published}
+                />
+                <OSo nhan="Tập Animation" so={data.content.animation_episodes_total} />
+                <OSo nhan="Báo cáo đang chờ" so={data.content.pending_reports} />
+              </div>
+            </div>
+
+            {/* -------------------------------------------------- PRODUCT */}
+            <div>
+              <h3 className="section-title-sm">Sản phẩm</h3>
+              <div className="stat-grid admin-luoi">
+                <OSo
+                  nhan="Dự án dịch"
+                  so={data.product.translation_projects_total}
+                />
+                <OSo nhan="Job TTS" so={data.product.tts_jobs_total} />
+                <OSo nhan="Lượt nghe hợp lệ" so={data.qualified_listens} />
+                <OSo
+                  nhan="Chi tiêu Image Studio (USD)"
+                  so={Math.round(data.product.image_studio_spend_usd * 100) / 100}
+                  ghi_chu={`Ngân sách tháng: $${data.product.image_studio_budget_usd}`}
+                />
+                <OSo nhan="Lượt sinh ảnh" so={data.product.image_generations_total} />
+              </div>
+            </div>
+
+            {/* ----------------------------------------- ANIMATION (Phần B) */}
+            <div>
+              <h3 className="section-title-sm">
+                <IconLink size={16} /> Trusted Video Sources
+              </h3>
+              {data.trusted_sources.configured ? (
+                <div className="stat-grid admin-luoi">
+                  <OSo nhan="Kênh tin cậy" so={null} />
+                  <OSo nhan="Đang theo dõi" so={null} />
+                  <OSo nhan="Video phát hiện hôm nay" so={null} />
+                  <OSo nhan="Tự động nhập" so={null} />
+                  <OSo nhan="Chờ duyệt" so={null} />
+                  <OSo nhan="Lỗi/xung đột" so={null} />
+                </div>
+              ) : (
+                <ChuaCauHinh
+                  tieuDe="Chưa xây dựng"
+                  ghiChu="Trusted Video Sources sẽ có ở giai đoạn tiếp theo (Phần B) — xem /admin/animation/sources."
+                />
+              )}
+            </div>
+
+            {/* ------------------------------------------------- TRAFFIC */}
+            <div>
+              <h3 className="section-title-sm">
+                <IconChart size={16} /> Lưu lượng truy cập
+              </h3>
+              {data.traffic.configured ? (
+                <div className="stat-grid admin-luoi">
+                  <OSo nhan="Lượt truy cập (7 ngày)" so={data.traffic.visits_7d} />
+                  <OSo nhan="Lượt xem trang (7 ngày)" so={data.traffic.pageviews_7d} />
+                  <OSo nhan="Lượt truy cập (30 ngày)" so={data.traffic.visits_30d} />
+                </div>
+              ) : (
+                <ChuaCauHinh
+                  tieuDe="Traffic analytics not configured"
+                  ghiChu="Chưa có credential Cloudflare Analytics — xem server/traffic_analytics.py."
+                />
+              )}
+            </div>
+
+            {/* -------------------------------------------------- SYSTEM */}
+            <div>
+              <h3 className="section-title-sm">
+                <IconGear size={16} /> Hệ thống
+              </h3>
+              <div className="stat-grid admin-luoi">
+                <OSo
+                  nhan="Kho dữ liệu"
+                  so={null}
+                  ghi_chu={data.system.data_backend}
+                />
+                <OSo
+                  nhan="Appwrite"
+                  so={null}
+                  ghi_chu={
+                    !data.system.appwrite_configured
+                      ? "Chưa cấu hình (mock)"
+                      : data.system.appwrite_healthy
+                        ? "Khoẻ"
+                        : "Không phản hồi"
+                  }
+                />
+                <OSo
+                  nhan="Worker TTS"
+                  so={null}
+                  ghi_chu={data.system.inline_worker ? "Chạy trong tiến trình web" : "Tiến trình riêng"}
+                />
+                <OSo
+                  nhan="Provider dịch"
+                  so={null}
+                  ghi_chu={data.system.translation_provider_configured ? "Đã cấu hình" : "Chưa cấu hình"}
+                />
+              </div>
             </div>
 
             <p className="hint">
-              Các con số trên đếm từ dữ liệu thật của backend đang chạy. Những chỉ
-              số chưa đếm được rẻ — lượt xem, thời gian nghe theo ngày — không
-              được hiển thị ở đây thay vì hiển thị một giá trị đoán.
+              Các con số trên đếm từ dữ liệu thật của backend đang chạy, qua
+              truy vấn bị chặn (không quét toàn bảng). Chỉ số hiện &ldquo;—&rdquo;
+              nghĩa là chưa có dữ liệu/chưa cấu hình, không phải bằng 0.
             </p>
-          </>
+          </div>
         ) : null}
       </DanhSachTrangThai>
     </section>

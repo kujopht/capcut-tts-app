@@ -95,6 +95,50 @@ export function IconPlay(p: Props) {
   );
 }
 
+/** Mat xich — nguon tin cay/lien ket ngoai (Trusted Video Sources). */
+export function IconLink(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M10.5 13.5 a3.2 3.2 0 0 0 4.6 0.2 l2.6 -2.6 a3.3 3.3 0 0 0 -4.7 -4.7 l-1.5 1.5" />
+      <path d="M13.5 10.5 a3.2 3.2 0 0 0 -4.6 -0.2 l-2.6 2.6 a3.3 3.3 0 0 0 4.7 4.7 l1.5 -1.5" />
+    </Svg>
+  );
+}
+
+/** Hop thu den — hang doi nhap tu dong (Import Queue). */
+export function IconInbox(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 12.5 H8.5 l1.5 2.5 h4 l1.5 -2.5 H20" />
+      <path d="M5.5 5.5 H18.5 L20 12.5 V18 a1.5 1.5 0 0 1 -1.5 1.5 H5.5 A1.5 1.5 0 0 1 4 18 V12.5 Z" />
+    </Svg>
+  );
+}
+
+/** Cot bieu do — Analytics/phan tich. */
+export function IconChart(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 20 V4" />
+      <path d="M4 20 H20" />
+      <rect x="7" y="13" width="3" height="7" rx="0.5" />
+      <rect x="12.5" y="9" width="3" height="11" rx="0.5" />
+      <rect x="16.5" y="6" width="3" height="14" rx="0.5" />
+    </Svg>
+  );
+}
+
+/** Banh rang — cai dat he thong. */
+export function IconGear(p: Props) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 3.5 v2.4 M12 18.1 v2.4 M20.5 12 h-2.4 M5.9 12 H3.5" />
+      <path d="M17.7 6.3 l-1.7 1.7 M8 16 l-1.7 1.7 M17.7 17.7 l-1.7 -1.7 M8 8 L6.3 6.3" />
+    </Svg>
+  );
+}
+
 /** Micro — "tao giong doc". */
 export function IconMic(p: Props) {
   return (

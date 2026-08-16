@@ -150,6 +150,13 @@ class MockAnimationStore:
         items.sort(key=lambda e: e.order_index)
         return items
 
+    def total_episodes(self) -> int:
+        """Tong so tap TREN TOAN NEN TANG — bang dieu khien quan tri (Admin
+        Control Center V2, A1). Mot phep dem, khong phai vong lap tren tung
+        series (do se la N+1)."""
+        with self._lock:
+            return len(self.episodes)
+
     #: `owner_id`, `series_id`, `state`, `source` khong cho client sua qua day.
     EPISODE_EDITABLE = ("title", "external_id", "order_index", "duration_seconds")
 

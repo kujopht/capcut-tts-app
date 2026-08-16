@@ -1249,7 +1249,7 @@ class SocialService:
         }
 
     def social_overview(self) -> Dict[str, Any]:
-        """So lieu xa hoi cho trang tong quan quan tri. Bon phep dem."""
+        """So lieu xa hoi cho trang tong quan quan tri. Nam phep dem."""
         return {
             "open_reports": self._store.count_reports(ReportStatus.OPEN),
             "total_reports": self._store.count_reports(),
@@ -1258,6 +1258,8 @@ class SocialService:
             "removed_posts": (self._store.list_posts(include_removed=True,
                                                      limit=1)[1]
                               - self._store.list_posts(limit=1)[1]),
+            # Admin Control Center V2, A1 — bang dieu khien tong quat.
+            "total_comments": self._store.count_comments(),
         }
 
     def _ghi_nhat_ky(self, action: str, *, target_user_id: str, actor_id: str,

@@ -396,6 +396,12 @@ class MockSocialStore:
                 gom[c.post_id].append(c)
         return {pid: list(reversed(ds)) for pid, ds in gom.items()}
 
+    def count_comments(self) -> int:
+        """Tong so binh luan TREN TOAN NEN TANG (bai dang + tap animation) —
+        bang dieu khien quan tri (Admin Control Center V2, A1)."""
+        with self._lock:
+            return len(self._comments)
+
     def list_comments_all(self, *, target_kind: str = "",
                           limit: int = 25,
                           offset: int = 0) -> Tuple[List[Comment], int]:

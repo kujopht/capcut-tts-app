@@ -20,6 +20,7 @@ from server.adapters import AuthError
 from server.appwrite_store import (
     q_contains as _q_contains,
     q_equal as _q_equal,
+    q_greater_equal as _q_greater_equal,
     q_limit as _q_limit,
     q_offset as _q_offset,
     q_or as _q_or,
@@ -586,6 +587,18 @@ class AppwriteIdentityAdapter:
         queries += [_q_order_asc("username"), _q_limit(limit), _q_offset(offset)]
         rows, total = self._page(COLLECTION_PROFILES, queries)
         return [_profile_from(r) for r in rows], total
+
+    def count_profiles(self, created_after: str = "") -> int:
+        """
+        Tong so ho so, TUY CHON chi tinh tu mot moc thoi gian — dung cho cac o
+        "moi dang ky hom nay/7 ngay/30 ngay" o bang dieu khien quan tri (Admin
+        Control Center V2, A1). `limit(1)` + doc `total`, KHONG keo ban ghi
+        ve — cung idiom voi `total_published_novels`/`count_applications`.
+        """
+        queries = [_q_limit(1)]
+        if created_after:
+            queries.insert(0, _q_greater_equal("created_at", created_after))
+        return self._page(COLLECTION_PROFILES, queries)[1]
 
     def all_usernames(self) -> List[str]:
         """

@@ -652,6 +652,22 @@ class MockIdentityAdapter:
         khop.sort(key=lambda p: p.username)
         return khop[offset:offset + limit], len(khop)
 
+    def healthcheck(self) -> bool:
+        """Kho trong bo nho luon 'khoe' — chi de CUNG mot chu ky voi ban
+        Appwrite (`AppwriteIdentityAdapter.healthcheck`) khi goi da hinh tu
+        bang dieu khien quan tri (Admin Control Center V2, muc SYSTEM)."""
+        return True
+
+    def count_profiles(self, created_after: str = "") -> int:
+        """Tong so ho so (MOI nguoi dung, khong loc theo username) — dung cho
+        cac o "moi dang ky hom nay/7/30 ngay" o bang dieu khien (Admin
+        Control Center V2, A1)."""
+        with self._lock:
+            if not created_after:
+                return len(self._profiles)
+            return sum(1 for p in self._profiles.values()
+                      if p.created_at >= created_after)
+
     def all_usernames(self) -> List[str]:
         with self._lock:
             return [p.username for p in self._profiles.values() if p.username]
@@ -1211,6 +1227,10 @@ class MockMetadataStore(MockSocialStore):
             self.jobs[job.job_id] = replace(job, attempts=fence)
             return True
 
+    def total_jobs(self) -> int:
+        with self._lock:
+            return len(self.jobs)
+
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """Xem contract o `MetadataStore.list_jobs_by_status`."""
         with self._lock:
@@ -1322,6 +1342,14 @@ class MockMetadataStore(MockSocialStore):
         with self._lock:
             return sum(1 for n in self.novels.values()
                        if n.state is PublishState.PUBLISHED)
+
+    def total_novels(self) -> int:
+        with self._lock:
+            return len(self.novels)
+
+    def total_chapters(self) -> int:
+        with self._lock:
+            return len(self.chapters)
 
     def sum_qualified_listens(self) -> int:
         """Tong luot nghe hop le tren toan he thong, tu ban TONG HOP."""

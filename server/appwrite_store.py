@@ -195,6 +195,22 @@ def q_equal(attribute: str, *values: Any) -> str:
                        "values": list(values)})
 
 
+def q_greater_equal(attribute: str, value: Any) -> str:
+    """
+    `attribute >= value` — dung cho khoang thoi gian (vd `created_at >=` mot
+    moc ISO) khi dem "moi dang ky hom nay/7 ngay/30 ngay" (Admin Control
+    Center V2, A1) MA KHONG can keo ban ghi ve — ket hop `q_limit(1)` de doc
+    `total` nhu cac phep dem bi chan khac trong tep nay.
+
+    TEN PHUONG THUC THAT cua Appwrite la `greaterThanEqual`, KHONG PHAI
+    `greaterEqual` — da doan sai va bi Appwrite tu choi ("Invalid query
+    method: greaterEqual") khi smoke test that tren appwrite-dev.fanfic.world,
+    khong phai chi tu tai lieu.
+    """
+    return json.dumps({"method": "greaterThanEqual", "attribute": attribute,
+                       "values": [value]})
+
+
 def q_order_asc(attribute: str) -> str:
     return json.dumps({"method": "orderAsc", "attribute": attribute})
 
@@ -1047,6 +1063,11 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             return False
         return result.get("status") == "committed"
 
+    def total_jobs(self) -> int:
+        """Tong so job TTS TREN TOAN NEN TANG — bang dieu khien quan tri
+        (Admin Control Center V2, A1). `limit(1)` + doc `total`."""
+        return self._page(COL_JOBS, [q_limit(1)])[1]
+
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """
         Lat trang: so job `running` khong co tran tren.
@@ -1281,6 +1302,17 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         _, total = self._page(COL_NOVELS, [
             q_equal("state", PublishState.PUBLISHED.value), q_limit(1)])
         return total
+
+    def total_novels(self) -> int:
+        """Tong so truyen o MOI trang thai (nhap + xuat ban) — bang dieu khien
+        quan tri (Admin Control Center V2, A1). Cung idiom bi chan nhu
+        `total_published_novels`."""
+        return self._page(COL_NOVELS, [q_limit(1)])[1]
+
+    def total_chapters(self) -> int:
+        """Tong so chuong TREN TOAN NEN TANG — mot phep dem bi chan, khong
+        phai vong lap tren tung truyen (do se la N+1)."""
+        return self._page(COL_CHAPTERS, [q_limit(1)])[1]
 
     def sum_qualified_listens(self) -> int:
         """

@@ -883,6 +883,128 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("user_idx", "key", ["user_id"]),
         ],
     },
+    # ================================================================
+    # Image Studio V1 (overnight build) — THIET KE, CHUA co adapter Appwrite
+    # that (chay tren `MockWalletStore`/`MockByopConnectionStore`/
+    # `MockImageLibraryStore` trong bo nho, xem `server/image_*.py`).
+    #
+    # Schema o day CHI la chuan bi cho lan bat Appwrite production mo lai —
+    # xem `docs/reports/appwrite-selfhost-gce-summary.md` muc "Phase 7".
+    # KHONG doi mac dinh Shared Premium/BYOP: hai tinh nang do van tat theo
+    # `IMAGE_SHARED_PREMIUM_ENABLED`/`IMAGE_BYOP_MASTER_KEY` du schema da co.
+    # ================================================================
+
+    # So cai vi Fanfic Credit — xem `image_domain.WalletTransaction`.
+    # APPEND-ONLY BAT BUOC: adapter Appwrite sau nay KHONG duoc phep UPDATE
+    # mot document da ghi, chi INSERT moi — cung nguyen tac voi
+    # `MockWalletStore._ghi_giao_dich`. `idempotency_idx` (unique) la diem
+    # chan tru tien hai lan DUY NHAT — day la rang buoc quan trong nhat cua
+    # toan bo Image Studio, phai giu nguyen khi chuyen sang Appwrite that.
+    "image_wallet_transactions": {
+        "name": "Image Wallet Transactions",
+        "attributes": [
+            ("transaction_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            # Rong khi la giao dich TOP_UP (chua gan voi mot lan sinh anh nao).
+            ("generation_id", "string", False, 64),
+            ("entry_type", "enum", True,
+             ["top_up", "reserve", "settle", "release", "refund", "promotional"]),
+            # Am = tru so du kha dung, duong = tra lai/nap them — xem
+            # `WalletTransaction.amount_micro`.
+            ("amount_micro", "integer", True, None),
+            ("idempotency_key", "string", True, 128),
+            ("created_at", "datetime", True, None),
+            ("note", "string", False, 500),
+        ],
+        "indexes": [
+            ("idempotency_idx", "unique", ["idempotency_key"]),
+            ("user_idx", "key", ["user_id"]),
+            ("generation_idx", "key", ["generation_id"]),
+        ],
+    },
+    # Trang thai giu cho MOT lan sinh anh — xem `image_domain.GenerationReservation`.
+    # `documentId` NEN la `generation_id` khi adapter that duoc viet (giong quy
+    # uoc `user_progress`/`documentId = user_id`) — tu than no da la khoa
+    # idempotency, index rieng o day chi phuc vu truy van tuong minh.
+    "image_generation_reservations": {
+        "name": "Image Generation Reservations",
+        "attributes": [
+            ("generation_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            ("mode", "enum", True,
+             ["quick_free", "shared_premium", "byop", "community_free"]),
+            ("provider_id", "string", True, 64),
+            ("model", "string", True, 80),
+            ("estimated_cost_micro", "integer", True, None),
+            ("status", "enum", True,
+             ["pending", "reserved", "succeeded", "failed", "refunded"]),
+            ("idempotency_key", "string", True, 128),
+            # Rong cho toi khi status == SUCCEEDED va provider tra chi phi that.
+            ("actual_cost_micro", "integer", False, None),
+            ("pricing_snapshot_version", "string", False, 32),
+            ("created_at", "datetime", True, None),
+            ("settled_at", "string", False, 32),
+            ("error_message", "string", False, 500),
+        ],
+        "indexes": [
+            ("generation_idx", "unique", ["generation_id"]),
+            ("idempotency_idx", "unique", ["idempotency_key"]),
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # Anh nguoi dung CHU DONG "Luu" — xem `image_domain.SavedImage`. CHI ghi
+    # khi nguoi dung bam Luu (PHASE 9: "Do NOT store every generated
+    # candidate permanently") — moi ung vien tam khac song trong bo nho
+    # (`ImageStudioService._anh_tam`), khong bao gio toi day.
+    "image_saved_library": {
+        "name": "Image Saved Library",
+        "attributes": [
+            ("image_id", "string", True, 64),
+            ("owner_user_id", "string", True, 64),
+            ("generation_id", "string", True, 64),
+            ("prompt", "string", True, 2000),
+            ("negative_prompt", "string", False, 1000),
+            ("model", "string", False, 80),
+            ("mode", "enum", True,
+             ["quick_free", "shared_premium", "byop", "community_free"]),
+            ("aspect_ratio", "string", False, 10),
+            # Khoa doi tuong storage (Local/R2), KHONG PHAI url truc tiep —
+            # cung quy uoc voi `novels.cover_key`/`profiles.avatar_key`.
+            ("storage_key", "string", True, 512),
+            ("created_at", "datetime", True, None),
+            ("safety_status", "string", False, 32),
+        ],
+        "indexes": [
+            ("image_idx", "unique", ["image_id"]),
+            ("owner_idx", "key", ["owner_user_id"]),
+        ],
+    },
+    # Ket noi BYOP (Bring-Your-Own-Pollinations) — xem
+    # `image_domain.PollinationsConnection`. TUYET DOI KHONG duoc them thuoc
+    # tinh chua token dang RO — CHI hai truong `encrypted_*` (AES-256-GCM qua
+    # `ByokCrypto`, xem `image_byop_crypto.py`). Kich thuoc 2048 du rong cho
+    # ciphertext + nonce + tag ma hoa base64 cua token OAuth thong thuong.
+    "image_byop_connections": {
+        "name": "Image BYOP Connections",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("provider_id", "string", True, 32),
+            ("encrypted_access_token", "string", False, 2048),
+            ("encrypted_refresh_token", "string", False, 2048),
+            ("scope", "string", False, 64),
+            ("expires_at", "string", False, 32),
+            # Ngan sach nguoi dung TU CHON — chi hien thi/canh bao phia Fanfic
+            # World, KHONG phai gioi han that (Pollinations tu quan ly Pollen).
+            ("user_budget_micro", "integer", False, None),
+            ("connected_at", "datetime", True, None),
+            ("revoked_at", "string", False, 32),
+        ],
+        "indexes": [
+            # MOI nguoi dung CHI mot ket noi BYOP dang hieu luc tai mot thoi
+            # diem — khop voi `MockByopConnectionStore` (dict khoa boi user_id).
+            ("user_idx", "unique", ["user_id"]),
+        ],
+    },
 }
 
 #: Cac thuoc tinh la MANG. Appwrite doi co `array: true` luc tao; thieu no thi
@@ -984,6 +1106,15 @@ class Setup:
                 message = body.get("message", message)
             except Exception:
                 pass
+            # Appwrite 1.9.6 tu-luu-tru: da xac nhan bang cach lap lai that
+            # (khong doan) — tao trung index tra ve HTTP 400 kem thong diep
+            # nay, KHONG PHAI 409 nhu ban Appwrite ma script duoc kiem chung
+            # truoc do dung. Chi khop CHINH XAC thong diep nay (khong phai
+            # moi loi 400) de khong che giau loi that khac.
+            if (response.status_code == 400
+                    and "already an index with the same attributes" in message):
+                self.skipped += 1
+                return "exists"
             # Thieu scope schema: chi ra DUNG viec can lam thay vi mot dong
             # loi tho. Da gap that o production: khoa runtime chi co quyen
             # documents, va 401 nay chan TRUOC khi bat ky thu gi bi ghi.
@@ -1056,6 +1187,7 @@ class Setup:
         if not self.dry_run:
             hien = self._call("GET", base, doc_thoi=True) or {}
             da_co = {a.get("key") for a in hien.get("attributes", [])}
+        co_thuoc_tinh_moi = False
         for key, kind, required, extra in spec["attributes"]:
             if key in da_co and kind != "enum":
                 # Enum van di duong rieng: no con phai SO SANH danh sach gia
@@ -1064,8 +1196,33 @@ class Setup:
                 print(f"    - {key} ({kind}): đã có")
                 continue
             self._ensure_attribute(base, key, kind, required, extra)
+            co_thuoc_tinh_moi = True
+        if co_thuoc_tinh_moi and not self.dry_run:
+            # Tao thuoc tinh o Appwrite la BAT DONG BO — POST tra ve ngay
+            # nhung thuoc tinh o trang thai "processing" vai giay truoc khi
+            # thanh "available". Tao index tren thuoc tinh con processing bi
+            # tu choi voi HTTP 400 "not yet available" — da gap that (khong
+            # doan) khi collection vua duoc tao xong trong CUNG lan chay nay.
+            # CHI cho khi CO thuoc tinh moi — collection da on dinh tu truoc
+            # thi bo qua, khong lam cham moi lan chay lai.
+            self._doi_thuoc_tinh_san_sang(base, [k for k, *_ in spec["attributes"]])
         for name, kind, keys in spec["indexes"]:
             self._ensure_index(base, name, kind, keys)
+
+    def _doi_thuoc_tinh_san_sang(self, base: str, keys: List[str],
+                                 *, so_lan_thu: int = 30, doi_giay: float = 1.0) -> None:
+        """Cho toi khi MOI thuoc tinh trong `keys` co status "available" —
+        toi da `so_lan_thu` lan, moi lan cach `doi_giay` giay. KHONG nem loi
+        neu het luot thu (de _ensure_index tu bao loi that neu van chua
+        san sang sau tung ay thoi gian — tranh treo vo han)."""
+        import time
+        for _ in range(so_lan_thu):
+            hien = self._call("GET", base, doc_thoi=True) or {}
+            trang_thai = {a.get("key"): a.get("status") for a in hien.get("attributes", [])}
+            con_cho = [k for k in keys if trang_thai.get(k) not in ("available", None)]
+            if not con_cho:
+                return
+            time.sleep(doi_giay)
 
     def _ensure_attribute(self, base: str, key: str, kind: str,
                           required: bool, extra: Any) -> None:

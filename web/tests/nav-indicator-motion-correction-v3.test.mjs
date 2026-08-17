@@ -118,41 +118,9 @@ test("V3: bo goc doi tu pill (--r-full) sang vuong vuc hon (--r2)", () => {
   assert.ok(!/var\(--r-full\)/.test(than));
 });
 
-/* ========================================== tracer LOP B (vien chay) ====== */
-
-test("tracer la MOT DOAN NGAN (~15% chu vi), khong phai ca vong sang", () => {
-  const than = rule(".nav-vach::before");
-  assert.match(than, /conic-gradient/);
-  // Phai co it nhat mot doan "transparent ... 100%" chiem phan LON cung tron
-  // — dau hieu chi mot cung nho sang, khong phai ca vong.
-  assert.match(than, /transparent 1[0-9]%,\s*\n?\s*transparent 100%/);
-  assert.match(than, /mask-composite: exclude/);
-  assert.match(than, /-webkit-mask-composite: xor/);
-});
-
-test("tracer KHONG blur/glow, xoay tuyen tinh 4.5-6s, khong dung rAF", () => {
-  const than = rule(".nav-vach::before");
-  assert.ok(!/box-shadow|filter/.test(than));
-  assert.match(than, /animation: nav-tracer-xoay (\d+(?:\.\d+)?)s linear infinite/);
-  const s = Number(than.match(/animation: nav-tracer-xoay (\d+(?:\.\d+)?)s/)?.[1]);
-  assert.ok(s >= 4.5 && s <= 6, `${s}s ngoài khoảng 4.5–6s`);
-  for (const f of ["../src/components/NavIndicator.tsx", "../src/components/NavAuth.tsx"]) {
-    assert.ok(!codeOnly(read(f)).includes("requestAnimationFrame"), `${f} dùng rAF cho tracer`);
-  }
-});
-
-test("tracer dung mau khu vuc (--sac-1/--sac-2), khong dung mau ngoai he thong", () => {
-  const than = rule(".nav-vach::before");
-  assert.match(than, /var\(--sac-1/);
-  assert.match(than, /var\(--sac-2/);
-});
-
-test("reduced motion: tracer dung xoay, van giu vien LOP A tinh de nhan biet active", () => {
-  const c = css();
-  const at = c.indexOf("@media (prefers-reduced-motion: reduce)");
-  const khoi = c.slice(at, at + 4200);
-  assert.match(khoi, /\.nav-vach::before \{ animation: none; \}/);
-  // Vien LOP A (border tinh) KHONG bi mai nay dong lai — chi chuyen dong bi tat.
-  assert.ok(!/\.nav-vach \{ display: none/.test(khoi));
-  assert.ok(!/\.nav-vach \{ border: none/.test(khoi));
-});
+/*
+  Khung tracer conic-gradient + mask (LOP B cua V3) da bi thay bang SVG stroke
+  o V4 — xem `nav-indicator-motion-correction-v4.test.mjs` cho cac test
+  tracer moi. Cac test cu cho `.nav-vach::before` da bi XOA khoi day (khong
+  con quy tac do trong CSS nua).
+*/

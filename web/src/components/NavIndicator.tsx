@@ -69,15 +69,6 @@ type O = {
    * `ref.current` trong than render la thu React khong dam bao.
    */
   truot: boolean;
-  /**
-   * Dem so lan DOI ROUTE THAT (khong tinh do lai vi resize/cuon o CUNG mot
-   * muc). Dung lam `key` cho vet sang mot lan (`.nav-vach-streak`) — doi key
-   * thi React go phan tu cu, gan phan tu moi, va animation CSS tren no chay
-   * lai tu dau. Khong dung mot bien dem ngoai state (vi du `useRef`) vi gia
-   * tri do phai co mat trong LAN RENDER dung key, va doc `ref.current` trong
-   * than render khong duoc dam bao boi React.
-   */
-  tick: number;
 };
 
 export function NavIndicator({
@@ -159,16 +150,7 @@ export function NavIndicator({
         }
         // `truot` chi bat tu lan do THU HAI tro di — xem `O.truot`.
         const truot = truoc !== null;
-        /*
-          `tick` CHI tang khi MUC dang xem thuc su doi (dieu huong that) — KHONG
-          tang khi cung mot muc do lai vi resize/cuon (`truoc.moc === moc` da bi
-          chan o nhanh tren NEU vi tri khong doi; nhung chu tai xong muon van co
-          the lam CUNG mot muc do ra vi tri khac, va do khong phai mot lan dieu
-          huong). Neu tang ca luc do thi vet sang phat lai moi khi ai do resize
-          cua so — sai voi dung y "MOT lan, dung luc doi trang".
-        */
-        const tick = truoc && truoc.moc !== moc ? truoc.tick + 1 : (truoc?.tick ?? 0);
-        return { moc, x, w, truot, tick };
+        return { moc, x, w, truot };
       });
     };
 
@@ -252,14 +234,61 @@ export function NavIndicator({
       }}
     >
       {/*
-        Vet sang "cong dich" — chay MOT LAN doc vien khi vach vua toi noi, xem
-        `.nav-vach-streak` (dung lai keyframe `sheen` da co, xem
-        `.progress-bar::after`). `key={o.tick}` la co che retrigger: doi key
-        thi React thao phan tu nay va gan mot phan tu MOI, nen animation CSS
-        tren no luon chay tu dau — khong can mot dong ho JS rieng de "reset"
-        animation. Chi ve khi `o.truot` (bo qua lan ve dau tien, xem `O.truot`).
+        SUA (Nav Indicator Reset V4): BO HAN ca khung tracer conic-gradient +
+        mask (Phase V3) LAN vet sang mot lan `.nav-vach-streak` (V1) — ca hai
+        deu la "hoa vao mot lop nen" chu khong phai "mot net ve". Nguyen nhan
+        goc cua quang mau bi phan hoi: `.nav-vach-streak` chay animation MOT
+        LAN nhung KHONG dat `animation-fill-mode: forwards`; het 480ms, thuoc
+        tinh `transform` quay ve gia tri tac gia (khong co, tuc `none`) thay
+        vi dung yen o cuoi keyframe — mot khoi gradient `inset:0` (PHU KIN
+        long trong) dung yen tai `transform: none` chinh la vung mau xanh
+        lam/tim ma nguoi dung thay "dinh vao" ben trong khung.
+
+        THAY BANG SVG: `fill="none"` tren CA HAI <rect> nghia la KHONG BAO
+        GIO co mot lop mau phu long trong — chi mot net 1-1.5px doc theo chu
+        vi. Day la ly do kien truc nay khong the tai dien loi tren du code co
+        sai o dau: khong co thuoc tinh nao (`fill`, `background`) co the vo
+        tinh "phu day" mot vung.
       */}
-      {o.truot ? <span key={o.tick} className="nav-vach-streak" aria-hidden="true" /> : null}
+      <svg
+        className="nav-vach-svg"
+        width="100%"
+        height="100%"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {/*
+          `x`/`y`/`width`/`height` bang KHONG inset — SVG `calc()` trong
+          thuoc tinh XML khong dang tin cay tren moi trinh duyet. Net ve
+          (`stroke`) mac dinh nam GIUA duong path (mot nua trong, mot nua
+          ngoai hop), nen mot net 1-1.5px se chi lo ra ngoai ~0.5-0.75px —
+          khong dang ke, va `.nav-vach` KHONG con `overflow: hidden` (chi
+          can cho tracer/vet sang cu, ca hai da bi go) nen khong co gi cat no.
+        */}
+        {/* LOP A — vien tinh, khong hoat hinh. */}
+        <rect
+          className="nav-vach-base-stroke"
+          x="0"
+          y="0"
+          width="100%"
+          height="100%"
+          rx="9"
+          fill="none"
+        />
+        {/* LOP B — tracer: MOT doan ngan chay quanh chu vi, dung yen sau khi
+            dung (`data-dung-yen`) hoac duoi prefers-reduced-motion (CSS). */}
+        <rect
+          className="nav-vach-tracer-stroke"
+          x="0"
+          y="0"
+          width="100%"
+          height="100%"
+          rx="9"
+          fill="none"
+          pathLength="100"
+        />
+      </svg>
     </span>
   );
 }

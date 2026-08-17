@@ -109,26 +109,22 @@ test("width TOI DICH cham hon transform mot chut — tao cam giac gian/nen nhe",
   assert.ok(w - t <= 150, "lệch quá xa sẽ trông như lỗi, không phải hiệu ứng có chủ đích");
 });
 
-test("vet sang 'cong dich' chay MOT LAN khi vach den noi, dung lai keyframe sheen da co", () => {
-  const css_ = css();
-  const streak = rule(".nav-vach-streak");
-  assert.match(streak, /animation: sheen \d+ms var\(--ease\) 1\b/, "phải chỉ định 1 lần lặp, không phải infinite");
-  assert.ok(!css_.match(/\.nav-vach-streak[^}]*infinite/s), "vệt sáng lặp vô hạn — spec yêu cầu MỘT LẦN rồi tắt hẳn");
+// "Vet sang cong dich" (`.nav-vach-streak`, mot lan khi doi route) da bi XOA
+// HOAN TOAN o Nav Indicator Reset V4: no chinh la NGUYEN NHAN GOC cua loi
+// "quang mau dinh trong khung" (thieu `animation-fill-mode: forwards` nen
+// sau khi animation ket thuc, `transform` quay ve `none` va khoi gradient
+// `inset:0` cua no dung yen PHU KIN long trong). Thay bang mot tracer SVG
+// thuong truc (`.nav-vach-tracer-stroke`, stroke-dashoffset) — xem
+// `nav-indicator-motion-correction-v4.test.mjs` cho cac test day du.
 
-  const src = read("../src/components/NavIndicator.tsx");
-  assert.match(src, /key=\{o\.tick\}/, "vệt sáng phải remount theo tick để animation chạy lại mỗi lần đổi route");
-  // tick CHI tang khi MUC that su doi — khong tang khi do lai vi resize/cuon.
-  assert.match(src, /truoc\.moc !== moc/);
-});
-
-test("vach + vet sang deu duoc tat/nhay tuc thi duoi prefers-reduced-motion", () => {
+test("vach + tracer deu duoc tat/nhay tuc thi duoi prefers-reduced-motion", () => {
   const css_ = css();
   const khoi = css_.slice(
     css_.indexOf("@media (prefers-reduced-motion: reduce)"),
-    css_.indexOf("@media (prefers-reduced-motion: reduce)") + 4000,
+    css_.indexOf("@media (prefers-reduced-motion: reduce)") + 4200,
   );
   assert.match(khoi, /\.nav-vach \{ transition: none; \}/);
-  assert.match(khoi, /\.nav-vach-streak \{ display: none; \}/);
+  assert.match(khoi, /\.nav-vach-tracer-stroke \{ animation: none; \}/);
 });
 
 /* ==================================================== homepage hub ======== */

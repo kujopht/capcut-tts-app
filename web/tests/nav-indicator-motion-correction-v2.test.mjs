@@ -89,11 +89,14 @@ test("noi that vach la NAVY TOI (tu --bg), khong phai nen sang", () => {
 });
 
 test("vien vach pha tron cyan+tim cua khu vuc (--sac-1/--sac-2), KHONG vien trang", () => {
-  const than = rule(".nav-vach");
-  // Navigation Motion Correction V3: border con 1px (tu 1.25px) — van net,
-  // van pha tron sac khu vuc, khong doi mau.
-  assert.match(than, /border: 1px solid color-mix\(in srgb, var\(--sac-1/);
+  // Nav Indicator Reset V4: vien LOP A khong con la CSS `border` tren
+  // `.nav-vach` nua — no la mot <rect stroke=...> trong SVG con
+  // (`.nav-vach-base-stroke`). Y nghia ("pha tron sac khu vuc, khong trang")
+  // giu nguyen, chi doi cho.
+  const than = rule(".nav-vach-base-stroke");
+  assert.match(than, /stroke: color-mix\(in srgb, var\(--sac-1/);
   assert.match(than, /var\(--sac-2/);
+  assert.ok(!/#fff/i.test(than));
 });
 
 test("V3: KHONG CON box-shadow/glow nao tren vach dang xem — chi vien + nen + chu", () => {
@@ -121,25 +124,20 @@ test("thoi luong truot trong khoang 420-560ms, duong cong ep-out co kiem soat", 
   assert.match(than, /cubic-bezier\(\.22, \.8, \.2, 1\)/);
 });
 
-test("vet sang mot lan dung mau khu vuc (cyan/tim), khong con mau trang thuan", () => {
-  const than = rule(".nav-vach-streak");
-  assert.ok(!/#ffffff[0-9a-f]{0,2}[,;)]/i.test(than.replace(/white/g, "")),
-    "vệt sáng vẫn dùng một khối màu trắng thuần");
-  assert.match(than, /var\(--sac-1/);
-  assert.match(than, /var\(--sac-2/);
-  assert.match(than, /animation: sheen \d+ms var\(--ease\) 1\b/);
-});
+// "Vet sang mot lan" (`.nav-vach-streak`) da bi XOA HOAN TOAN o Reset V4 —
+// day chinh la nguyen nhan goc cua loi "quang mau dinh trong khung" (thieu
+// `animation-fill-mode: forwards`). Xem
+// `nav-indicator-motion-correction-v4.test.mjs` cho cac test thay the.
 
 /* ==================================================== reduced motion ====== */
 
-test("reduced motion: vach nhay tuc thi, vet sang tat han, trang thai active van thay ro", () => {
+test("reduced motion: vach nhay tuc thi, trang thai active van thay ro", () => {
   const c = css();
   const khoi = c.slice(
     c.indexOf("@media (prefers-reduced-motion: reduce)"),
     c.indexOf("@media (prefers-reduced-motion: reduce)") + 4000,
   );
   assert.match(khoi, /\.nav-vach \{ transition: none; \}/);
-  assert.match(khoi, /\.nav-vach-streak \{ display: none; \}/);
   // Mau/chu cua trang thai active KHONG bi mai reduced-motion dong lai —
   // chi chuyen dong bi tat, khong phai chinh trang thai active.
   assert.ok(!/\.nav-vach \{ display: none/.test(khoi));

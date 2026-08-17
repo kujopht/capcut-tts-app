@@ -350,6 +350,7 @@ function TheGioiCong() {
             src="/images/portals/truyen-manuscript.webp"
             alt=""
             fill
+            priority
             sizes="(max-width: 900px) 100vw, 66vw"
             className="portal-art"
           />
@@ -370,6 +371,7 @@ function TheGioiCong() {
               src="/images/portals/animation-projector.webp"
               alt=""
               fill
+              loading="eager"
               sizes="(max-width: 900px) 50vw, 33vw"
               className="portal-art"
             />

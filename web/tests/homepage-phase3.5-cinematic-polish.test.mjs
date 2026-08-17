@@ -73,6 +73,24 @@ test("Portal Truyện và Animation render next/image voi anh minh hoa that, alt
   assert.match(truyenBlock, /alt=""/);
 });
 
+test("anh Truyen/Animation KHONG lazy-load (o gan dau trang, tranh nhap nhay 'hop den' luc tai lan dau)", () => {
+  // Bug that da gap tren staging: next/image mac dinh loading="lazy" khi
+  // khong khai bao — voi anh GAN DAU TRANG dieu do gay mot khoanh khac
+  // "hop den" truoc khi anh vao vung tai. `priority`/`loading="eager"` sua
+  // dung tai goc, khong phai vi lam dep code.
+  const src = codeOnly(home());
+  const truyenBlock = src.slice(
+    src.indexOf('src="/images/portals/truyen-manuscript.webp"') - 200,
+    src.indexOf('src="/images/portals/truyen-manuscript.webp"') + 300,
+  );
+  assert.match(truyenBlock, /priority/, "ảnh Truyện (cổng lớn nhất) phải có priority");
+  const animBlock = src.slice(
+    src.indexOf('src="/images/portals/animation-projector.webp"') - 200,
+    src.indexOf('src="/images/portals/animation-projector.webp"') + 300,
+  );
+  assert.match(animBlock, /loading="eager"/, "ảnh Animation phải tải eager, không lazy");
+});
+
 test("CA HAI anh Truyện/Animation deu co file that tren dia, dung .webp (khong PNG nang)", () => {
   for (const f of ["truyen-manuscript.webp", "animation-projector.webp", "creator-worldbuilding.webp"]) {
     const p = path(`../public/images/portals/${f}`);

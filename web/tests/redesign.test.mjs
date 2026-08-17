@@ -19,7 +19,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
+// Chuan hoa CRLF -> LF: checkout/merge tren Windows co the ghi lai CRLF cho
+// file van la LF trong git blob (xem bai hoc o `admin-trusted-sources.test.mjs`).
+// Thieu buoc nay thi cac test so khop chuoi da dong (\n) se vo co hong sau
+// mot lan `git checkout`/`merge`, du noi dung logic khong doi.
+const read = (p) =>
+  readFileSync(new URL(p, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const css = () => read("../src/app/globals.css");
 
 /**

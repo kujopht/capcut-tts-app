@@ -263,7 +263,15 @@ export function SearchOverlay({
     >
       <div className="tim-hop kinh">
         <div className="tim-dau">
-          <IconBook size={18} />
+          {/* SEARCHING: mot chi bao nho BEN TRONG (16px), khong phai ca khung
+              tim quay — xem phan hoi thiet ke tai `docs/design/` va lich su
+              o day: ban truoc tung xoay ca vien hop tim, nguoi dung khong
+              muon vay. */}
+          {trangThai === "dang-tai" ? (
+            <span className="spinner" aria-hidden="true" />
+          ) : (
+            <IconBook size={18} />
+          )}
           {/* Bo chon danh muc (Phan F) — kien truc mo rong duoc, xem
               `DANH_MUC` o dau tep. */}
           <select
@@ -283,7 +291,7 @@ export function SearchOverlay({
             ref={oNhap}
             className="tim-o"
             type="search"
-            placeholder="Tìm truyện, tác giả hoặc người dùng…"
+            placeholder="Tìm truyện, tác giả, Animation…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             role="combobox"

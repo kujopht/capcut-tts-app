@@ -361,7 +361,7 @@ test("chuc nang KHONG doi khi giam chuyen dong", () => {
   for (const m of than.matchAll(/^\s*([^{@}\n][^{\n]*)\{([^}]*)\}/gm)) {
     if (!/display: none/.test(m[2])) continue;
     const sel = m[1].trim();
-    assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after/.test(sel),
+    assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after|nav-vach-streak/.test(sel),
       `${sel} bị ẩn khi giảm chuyển động — có thể đang giấu nội dung`);
   }
 });

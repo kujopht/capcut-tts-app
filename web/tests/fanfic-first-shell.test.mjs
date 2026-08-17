@@ -200,6 +200,13 @@ test("trang chu chi goi so request CO DINH, khong phu thuoc so truyen", () => {
   // Vong 2, Buoc 12: them `getProgress`/`getAchievements` cho dong nho
   // gamification o dau trang — CUNG co dinh (mot lan cho ho so nguoi dang
   // nhap, khong lap theo so truyen).
+  //
+  // V2 Homepage Hub: them `listAnimationSeries` cho ke "Animation mới" —
+  // MOT lan goi CO DINH (limit co dinh, khong phu thuoc so truyen/series),
+  // goi SONG SONG trong cung `Promise.all`. `social.feed(...)` (ke cong
+  // dong) nam o namespace `social.`, khong khop regex `api\.\w+\(` nen
+  // khong can liet ke o day — van la MOT request co dinh, xem than ham
+  // `load`.
   const home = read("../src/app/page.tsx");
   const calls = home.match(/api\.\w+\(/g) ?? [];
   assert.deepEqual(
@@ -209,6 +216,7 @@ test("trang chu chi goi so request CO DINH, khong phu thuoc so truyen", () => {
       "api.getAchievements(",
       "api.getContinueProgress(",
       "api.getProgress(",
+      "api.listAnimationSeries(",
       "api.novelTags(",
     ],
   );

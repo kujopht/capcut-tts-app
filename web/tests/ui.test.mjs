@@ -64,7 +64,10 @@ test("trang chu la trang KHAM PHA TRUYEN, khong phai landing gioi thieu cong cu"
   const home = read("../src/app/page.tsx");
   // Phai that su lay truyen ve — truoc day trang chu khong goi mot API nao.
   assert.match(home, /api\.browseNovels/, "trang chủ không lấy truyện");
-  assert.match(home, /StoryHero/);
+  // `StoryHero` (khối bìa+chữ chia đôi trang) đã bị bỏ từ V4 visual
+  // completion, thay bằng `StoryCard variant="featured"` khi kho chỉ có
+  // đúng một truyện — xác nhận KHÔNG có `StoryHero` quay lại.
+  assert.ok(!home.includes("StoryHero"), "StoryHero cũ đã quay lại");
   assert.match(home, /StoryCard/);
   // Hai the tinh nang cu da bien mat: chung dat cong cu ngang hang voi noi
   // dung, dung thu ma ban thiet ke lai nay bo di.

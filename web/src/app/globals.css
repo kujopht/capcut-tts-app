@@ -3086,7 +3086,15 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 .portal-art {
   object-fit: cover;
   z-index: 0;
+  /*
+    Phase 3.5 Phan 8 "hover micro-interaction": lop nghe thuat dich RAT nhe
+    (2px) + phong RAT nhe (<=1.01) khi ru chuot vao ca `.portal-card` — mot
+    trong nam tin hieu duoc phep ("art layer moves 2-4px"). KHONG scale rieng
+    tren `.portal-card` (da du tin hieu tu `translateY` + vien + hoa).
+  */
+  transition: transform 320ms var(--ease);
 }
+.portal-card:hover .portal-art { transform: scale(1.01) translateY(-2px); }
 /* Anh Animation cao~vuong (1200x1000) nhung o rat det (~3:1) — mac dinh
    "center" chi lo phan troi trong o giua anh. Lech tam nhin XUONG duoi de lo
    dung may chieu/man chieu (chu the chinh cua anh). */
@@ -3147,7 +3155,10 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   background: var(--brand-soft);
   border: 1px solid var(--brand-line);
   color: var(--brand-hover);
+  /* Phase 3.5 Phan 8: icon "phan ung" rat nhe khi ru chuot vao ca cong. */
+  transition: transform 220ms var(--ease);
 }
+.portal-card:hover .portal-icon { transform: translateY(-1px) scale(1.05); }
 .portal-truyen .portal-icon { color: var(--sac-explore-1); border-color: color-mix(in srgb, var(--sac-explore-1) 45%, transparent); background: color-mix(in srgb, var(--sac-explore-1) 14%, transparent); }
 .portal-animation .portal-icon { color: var(--sac-animation-1); border-color: color-mix(in srgb, var(--sac-animation-1) 45%, transparent); background: color-mix(in srgb, var(--sac-animation-1) 14%, transparent); }
 .portal-audio .portal-icon { color: var(--sac-studio-1); border-color: color-mix(in srgb, var(--sac-studio-1) 45%, transparent); background: color-mix(in srgb, var(--sac-studio-1) 14%, transparent); }
@@ -4217,6 +4228,9 @@ body.co-mini { padding-bottom: 74px; }
   */
   .card-link:hover, .feature:hover, .story-card:hover, .quick-card:hover,
   .story-card:hover .cover-image { transform: none; }
+  /* .portal-card tu truoc da nhac len khi ru chuot nhung thieu o day — them
+     ca lop nghe thuat/icon moi (Phase 3.5 Phan 8). */
+  .portal-card:hover, .portal-card:hover .portal-art, .portal-card:hover .portal-icon { transform: none; }
   .progress-bar::after { display: none; }
   .rise { animation: none; }
 

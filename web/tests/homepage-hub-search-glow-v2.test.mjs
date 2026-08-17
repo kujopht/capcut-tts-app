@@ -169,7 +169,11 @@ test("6 diem den (3 cong chinh + 3 ve tinh) CHI tro toi duong da co that", () =>
 
 test("ke Animation moi / cong dong TU AN khi rong, khong ve hop rong to", () => {
   const src = home();
-  assert.match(src, /animationSeries\.length > 0 \? \(/);
+  // Phase 3.5 Phan 13: khong con MOT nhanh `> 0` don — chi mot series thi ve
+  // the noi bat rieng (`=== 1`), nhieu hon thi ve luoi (`> 1`). Ca hai nhanh
+  // cung tra `null` khi rong (0), nen y nghia "tu an khi rong" giu nguyen.
+  assert.match(src, /animationSeries\.length === 1 \? \(/);
+  assert.match(src, /animationSeries\.length > 1 \? \(/);
   assert.match(src, /communityPosts\.length > 0 \? \(/);
   // Rong thi tra `null` (khong ve gi). Ke truyen (ke quan trong nhat) rong
   // thi dung `KeTrongNoiBat` — mot loi moi trong-the-gioi gon, KHONG con

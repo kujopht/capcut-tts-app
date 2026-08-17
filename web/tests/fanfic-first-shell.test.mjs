@@ -210,6 +210,10 @@ test("trang chu chi goi so request CO DINH, khong phu thuoc so truyen", () => {
   // dong) nam o namespace `social.`, khong khop regex `api\.\w+\(` nen
   // khong can liet ke o day — van la MOT request co dinh, xem than ham
   // `load`.
+  //
+  // Phase 3.5 Phan 12: them `getLeaderboard` cho "Bảng vàng tuần" — CUNG mot
+  // lan goi CO DINH (mode="weekly", limit co dinh), khong phu thuoc so
+  // truyen/series/bai dang, goi SONG SONG trong cung `Promise.all`.
   const home = read("../src/app/page.tsx");
   const calls = home.match(/api\.\w+\(/g) ?? [];
   assert.deepEqual(
@@ -218,6 +222,7 @@ test("trang chu chi goi so request CO DINH, khong phu thuoc so truyen", () => {
       "api.browseNovels(",
       "api.getAchievements(",
       "api.getContinueProgress(",
+      "api.getLeaderboard(",
       "api.getProgress(",
       "api.listAnimationSeries(",
       "api.novelTags(",

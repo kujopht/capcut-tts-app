@@ -52,6 +52,7 @@ import {
   type AnimationSeries,
   type ContinueItem,
   type ContinueWatchItem,
+  type LeaderboardEntry,
   type Novel,
   type OwnProgress,
   type Post,
@@ -60,6 +61,7 @@ import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { StoryCard } from "@/components/StoryCard";
 import { Avatar } from "@/components/Avatar";
+import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
 import { NovelCover } from "@/components/NovelCover";
 import { ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
 import {
@@ -72,6 +74,7 @@ import {
 import {
   IconBook,
   IconCompass,
+  IconCrown,
   IconFeather,
   IconFilm,
   IconFlame,
@@ -88,6 +91,9 @@ const GRID_COUNT = 12;
 const MAX_TAGS = 12;
 /** So series lay ve cho ke "Animation mới" — gon, khong canh tranh voi ke truyen. */
 const ANIM_SHELF_COUNT = 6;
+/** So hang lay ve cho "Bảng vàng tuần" (Phase 3.5 Phan 12) — mot dong nhin
+ * luot qua duoc, khong phai ca bang xep hang (xem /leaderboard cho ban day du). */
+const BANG_VANG_COUNT = 5;
 /** So bai dang lay ve cho o xem truoc cong dong — "2–4 the" theo dac ta. */
 const FEED_SHELF_COUNT = 4;
 
@@ -100,6 +106,10 @@ interface HomeData {
   listening: ContinueItem | null;
   watching: ContinueWatchItem | null;
   gamification: { progress: OwnProgress; thanhTuuMoiNhat: Achievement | null } | null;
+  /** Top XP tuần ISO hiện tại — Phase 3.5 Phần 12 "Bảng vàng tuần". Rỗng khi
+   * chưa ai kiếm XP trong tuần (`GET /api/leaderboard?mode=weekly` thật, xem
+   * `app/leaderboard/page.tsx` — KHÔNG bịa chỉ số mới nào). */
+  bangVangTuan: LeaderboardEntry[];
 }
 
 function dinhDangGio(giay: number): string {
@@ -465,6 +475,47 @@ function KeTrongNoiBat() {
   );
 }
 
+/**
+ * Series Animation DUY NHAT trong kho — Phase 3.5 Phan 13. Dung LAI nguyen
+ * bo lop `.story-card-featured*` cua `StoryCard` (xem ghi chu o noi goi) —
+ * cung mot ngu phap "mot muc noi bat", khong bia rieng mot kieu the moi.
+ */
+function TheAnimNoiBat({ series }: { series: AnimationSeries }) {
+  return (
+    <article className="story-card-featured">
+      <Link href={`/animation/${series.series_id}`} className="story-card-featured-cover">
+        <NovelCover
+          novelId={series.series_id}
+          title={series.title}
+          coverUrl={series.cover_url}
+          size="wide"
+        />
+      </Link>
+      <div className="story-card-featured-body">
+        <span className="eyebrow">Series mới nhất</span>
+        <h3 className="story-card-featured-title">
+          <Link href={`/animation/${series.series_id}`}>{series.title}</Link>
+        </h3>
+        {series.tags.length > 0 ? (
+          <div className="story-tags">
+            {series.tags.slice(0, 3).map((tag) => (
+              <span key={tag} className="chip chip-static">
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {series.description ? (
+          <p className="hint clamp-2">{series.description}</p>
+        ) : null}
+        <Link href={`/animation/${series.series_id}`} className="btn btn-primary btn-sm">
+          Xem series
+        </Link>
+      </div>
+    </article>
+  );
+}
+
 /** The xem truoc mot bai dang cong dong (Phan 10 dac ta). */
 function TheCongDong({ bai }: { bai: Post }) {
   return (
@@ -494,6 +545,39 @@ function TheCongDong({ bai }: { bai: Post }) {
   );
 }
 
+/**
+ * Mot hang cua "Bảng vàng tuần" — dung LAI nguyen bo lop `.lb-*` cua
+ * `HangXepHang` o `app/leaderboard/page.tsx` (cung mot du lieu, cung mot
+ * ngu phap hang bang xep hang), bo qua huy hieu vang hang 1-3: hang muc nay
+ * la MOT dong xem luot, khong phai ca bang xep hang.
+ */
+function HangBangVang({ it }: { it: LeaderboardEntry }) {
+  return (
+    <li className="lb-row">
+      <span className="lb-rank" aria-hidden="true">#{it.rank}</span>
+      <CosmeticFrame
+        cosmetic={it.equipped_cosmetics.find((c) => c.slot === "avatar_frame")}
+      >
+        <Avatar
+          name={it.display_name || it.username || "?"}
+          avatarUrl={it.avatar_url}
+          className="avatar avatar-sm"
+        />
+      </CosmeticFrame>
+      <span className="lb-info">
+        {it.username ? (
+          <Link href={`/u/${it.username}`} className="binh-luan-ten">
+            {it.display_name || it.username}
+          </Link>
+        ) : (
+          <strong>{it.display_name || "Ẩn danh"}</strong>
+        )}
+      </span>
+      <span className="lb-xp">{it.xp.toLocaleString("vi-VN")} XP</span>
+    </li>
+  );
+}
+
 export default function HomePage() {
   const { profile } = useSession();
   const daDangNhap = Boolean(profile);
@@ -506,7 +590,7 @@ export default function HomePage() {
       duoc keo sap ca trang chu (cung triet ly voi ban V4 cu, mo rong cho hai
       nguon moi).
     */
-    const [page, tags, tiepTuc, gam, animRes, feedRes] = await Promise.all([
+    const [page, tags, tiepTuc, gam, animRes, feedRes, lbRes] = await Promise.all([
       api.browseNovels({ limit: GRID_COUNT }),
       api.novelTags(),
       daDangNhap
@@ -517,6 +601,7 @@ export default function HomePage() {
         : Promise.resolve(null),
       api.listAnimationSeries({ limit: ANIM_SHELF_COUNT }).catch(() => ({ series: [] })),
       social.feed(FEED_SHELF_COUNT).catch(() => ({ items: [] })),
+      api.getLeaderboard("weekly", BANG_VANG_COUNT, 0).catch(() => ({ items: [] })),
     ]);
     const thanhTuuMoiNhat = gam
       ? gam[1].achievements
@@ -528,6 +613,7 @@ export default function HomePage() {
       tags: tags.tags,
       animationSeries: animRes.series,
       communityPosts: feedRes.items,
+      bangVangTuan: lbRes.items,
       reading: tiepTuc.reading,
       listening: tiepTuc.listening,
       watching: tiepTuc.watching,
@@ -540,6 +626,7 @@ export default function HomePage() {
   const novels = data?.novels ?? [];
   const animationSeries = data?.animationSeries ?? [];
   const communityPosts = data?.communityPosts ?? [];
+  const bangVangTuan = data?.bangVangTuan ?? [];
   const coTiepTuc = Boolean(data?.reading || data?.listening || data?.watching);
 
   return (
@@ -616,8 +703,27 @@ export default function HomePage() {
         Ke "Animation mới" (Phan 8) — DOC LAP voi ke truyen tren: rong thi tu
         an, KHONG lam rong ca trang du kho truyen dang co du lieu (hoac
         nguoc lai).
+
+        Phase 3.5 Phan 13: CHI MOT series thi KHONG con nam lot thom trong
+        mot luoi (`.anim-grid-shelf`) — mot the nho co canh trong rat co don,
+        nhu mot carousel bi gay. Dung LAI dung mau "mot muc duy nhat" da co
+        san cho Truyen (`.story-card-featured`, xem `StoryCard.tsx`) thay vi
+        bia mot kieu rieng cho Animation — CUNG mot ngu phap thi giac cho
+        "chi mot thu trong kho" o ca hai khu vuc.
       */}
-      {!loading && animationSeries.length > 0 ? (
+      {!loading && animationSeries.length === 1 ? (
+        <section className="stack-2 rise rise-2" aria-labelledby="home-animation">
+          <div className="section-head">
+            <h2 className="section-title section-title-icon" id="home-animation">
+              <IconFilm size={20} /> Animation mới
+            </h2>
+            <Link href="/animation" className="section-more">
+              Xem tất cả <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+          <TheAnimNoiBat series={animationSeries[0]} />
+        </section>
+      ) : !loading && animationSeries.length > 1 ? (
         <section className="stack-2 rise rise-2" aria-labelledby="home-animation">
           <div className="section-head">
             <h2 className="section-title section-title-icon" id="home-animation">
@@ -657,6 +763,32 @@ export default function HomePage() {
               <TheCongDong key={bai.post_id} bai={bai} />
             ))}
           </div>
+        </section>
+      ) : null}
+
+      {/*
+        "Bảng vàng tuần" (Phase 3.5 Phan 12) — top XP tuan ISO hien tai, tu
+        DUNG API bang xep hang da co (`GET /api/leaderboard?mode=weekly`, xem
+        `app/leaderboard/page.tsx`). Chi MOT hang muc — backend khong tach
+        rieng "tac gia" voi "doc gia", nen KHONG bia hai the phan tach o day
+        (dac ta cam "invent engagement metrics"). Rong thi AN het, giong moi
+        ke khac o trang nay.
+      */}
+      {!loading && bangVangTuan.length > 0 ? (
+        <section className="stack-2 rise rise-2" aria-labelledby="home-bang-vang">
+          <div className="section-head">
+            <h2 className="section-title section-title-icon" id="home-bang-vang">
+              <IconCrown size={20} /> Bảng vàng tuần
+            </h2>
+            <Link href="/leaderboard" className="section-more">
+              Xem bảng xếp hạng <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+          <ol className="lb-list">
+            {bangVangTuan.map((it) => (
+              <HangBangVang key={it.user_id} it={it} />
+            ))}
+          </ol>
         </section>
       ) : null}
 

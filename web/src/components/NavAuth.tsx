@@ -124,6 +124,13 @@ function NavLinksThat() {
             href={link.href}
             className={link.cta ? "nav-link nav-cta" : "nav-link"}
             aria-current={active ? "page" : undefined}
+            /*
+              Hinh dang tham chieu cho NavIndicator (V5, "shape morph") — no
+              doc thuoc tinh nay tu chinh phan tu DOM dang do, khong tu bia mot
+              danh sach href dac biet rieng. "Viết truyện" la CTA (silhouette
+              khac: bo goc tron het, khong phai vuong vuc nhu cac muc con lai).
+            */
+            data-nav-shape={link.cta ? "cta" : "standard"}
             ref={(el) => {
               if (el) bang.current.set(link.href, el);
               else bang.current.delete(link.href);

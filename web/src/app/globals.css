@@ -1059,7 +1059,11 @@ main { overflow-x: clip; }
   */
   transition:
     transform 460ms cubic-bezier(.22, .8, .2, 1),
-    width 540ms cubic-bezier(.22, .8, .2, 1);
+    width 540ms cubic-bezier(.22, .8, .2, 1),
+    /* V5 "shape morph": bo goc doi CUNG NHIP voi transform khi hinh dang
+       dich khac hinh dang hien tai (vi du sang/roi "Viết truyện" — CTA vien
+       tron het, cac muc con lai vuong vuc). */
+    border-radius 460ms cubic-bezier(.22, .8, .2, 1);
 }
 /* Chu phai nam TREN vien thuoc. */
 .nav-link { z-index: 1; }
@@ -1073,12 +1077,21 @@ main { overflow-x: clip; }
   overflow: visible;
 }
 
-/* LOP A — vien tinh, khong hoat hinh, khong glow. Pha tron cyan+tim khu vuc. */
+/*
+  LOP A — vien tinh (khong hoat hinh VI TRI/mau lien tuc), khong glow. Pha
+  tron cyan+tim khu vuc.
+
+  `rx`/`ry` DUOC PHEP chuyen dan (V5 "shape morph") — day la hinh dang, khong
+  phai chuyen dong trang tri, va phai dong bo VOI `border-radius` cua
+  `.nav-vach` (Phan 8: cung mot boi canh doi hinh dang khi sang/roi "Viết
+  truyện"). `rx`/`ry` la presentation property CHUAN cua SVG2/CSS — Chrome
+  va Firefox hien dai deu ho tro chuyen dan qua CSS `transition`.
+*/
 .nav-vach-base-stroke {
   stroke: color-mix(in srgb, var(--sac-1, var(--brand)) 65%, var(--sac-2, var(--brand-hover)) 35%);
   stroke-width: 1.25px;
   opacity: 0.75;
-  transition: stroke 420ms var(--ease);
+  transition: stroke 420ms var(--ease), rx 460ms cubic-bezier(.22, .8, .2, 1), ry 460ms cubic-bezier(.22, .8, .2, 1);
 }
 
 /*
@@ -1100,6 +1113,10 @@ main { overflow-x: clip; }
   stroke-linecap: round;
   stroke-dasharray: 14 86;
   animation: nav-tracer-dash 5.4s linear infinite;
+  /* V5 "shape morph": rx/ry doi CUNG NHIP voi vien LOP A va .nav-vach — xem
+     chu thich o .nav-vach-base-stroke. `animation` (dash) va `transition`
+     (rx/ry) chay tren hai thuoc tinh khac nhau nen khong xung dot. */
+  transition: rx 460ms cubic-bezier(.22, .8, .2, 1), ry 460ms cubic-bezier(.22, .8, .2, 1);
 }
 /* Lan do dau tien (`data-dung-yen` co mat): tracer van chay — chi VACH
    (transform/width) la khong hoat hinh o lan do dau, xem quy tac duoi. */
@@ -1135,6 +1152,17 @@ main { overflow-x: clip; }
   background: var(--brand-soft);
   border: 1px solid var(--brand-line);
   font-weight: 620;
+  /*
+    V5 "khung duy nhat": chuyen dan (khong nhay) khi bi vach dung chung
+    (`.nav-vach`) tam an di luc dang xem, va khi hien lai luc roi trang. Chi
+    mot thoi luong co dinh, KHONG co delay o day — do tre thuc su (cho vach
+    di chuyen xong roi moi hien lai) do `[data-nav-leaving="write"]" ben
+    duoi dam nhiem bang cach GIU trang thai trong suot, khong phai bang
+    transition-delay (transition-delay tren chinh `.nav-cta` se lam ca thao
+    tac di chuot ra/vao nut nay — khong lien quan gi den dieu huong — cung bi
+    tre oan).
+  */
+  transition: background 200ms var(--ease), border-color 200ms var(--ease);
 }
 .nav-cta:hover {
   background: #8b6cff2e;
@@ -1150,12 +1178,40 @@ main { overflow-x: clip; }
   background: var(--grad-brand);
   flex: 0 0 auto;
 }
-/* Dang o `/write` thi bo vach duoi — ca cai nut da la tin hieu roi. */
+/*
+  V5 "khung duy nhat cho MOI muc": "Viết truyện" da co khung CTA rieng
+  (border/background o tren). Khi no DUOC CHON, `NavIndicator` (`.nav-vach`)
+  ve mot khung khac de LEN TREN cung vi tri/hinh dang — neu ca hai cung hien
+  se thanh "vien trong vien". SUA: luc dang xem, tat han background/vien
+  RIENG cua CTA (ve trong suot) — chu, dau cham, hit-target, padding giu
+  nguyen y — de vach dung chung tro thanh khung DUY NHAT con lai.
+*/
 .nav-cta[aria-current="page"] {
-  background: #8b6cff33;
-  border-color: var(--brand);
+  background: transparent;
+  border-color: transparent;
 }
 .nav-cta[aria-current="page"]::after { display: none; }
+/* Di chuot vao luc DANG la trang hien tai KHONG duoc lam vien rieng hien lai
+   — neu khong se tao lai "vien trong vien" ngay khi ru chuot qua. */
+.nav-cta[aria-current="page"]:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+}
+/*
+  V5 "khoang lang khi roi Viết truyện": luc roi trang, `aria-current` mat
+  NGAY LAP TUC — nhung dung luc do vach dung chung VAN CON phu dung hinh
+  dang CTA (no chi vua BAT DAU truot di). Neu vien rieng cua CTA hien lai
+  tuc thi o day, se co mot khoang thoi gian ca hai vien cung hien (dung dieu
+  V5 cam). `NavIndicator` bat `data-nav-leaving="write"` tren <body> dung
+  bang thoi gian vach can de truot/doi hinh dang xong (xem hang so trong
+  NavIndicator.tsx, khop voi `width` 540ms cua `.nav-vach`) roi tu go —
+  trong suot khoang do, GIU vien CTA trong suot du `aria-current` da mat.
+*/
+body[data-nav-leaving="write"] .nav-cta:not([aria-current="page"]) {
+  background: transparent;
+  border-color: transparent;
+}
 
 /*
   La mot `<button>` that. Phai TU TAT nen va vien mac dinh cua trinh duyet:

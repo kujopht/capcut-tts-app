@@ -22,6 +22,7 @@ import { api, type AnimationSeries } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { EmptyState, ErrorState, PageHeader, SkeletonCards } from "@/components/ui";
 import { IconFilm } from "@/components/Icons";
+import { MotifFilmFrame } from "@/components/Ornaments";
 import { NovelCover } from "@/components/NovelCover";
 
 const PAGE_SIZE = 12;
@@ -197,7 +198,7 @@ function AnimationBrowser() {
           />
         ) : (
           <EmptyState
-            icon="🎬"
+            art={<MotifFilmFrame />}
             title="Chưa có series animation nào được xuất bản"
             hint="Hãy là người đầu tiên: tạo series rồi thêm tập từ YouTube."
             action={
@@ -213,7 +214,12 @@ function AnimationBrowser() {
       ) : (
         <>
           <p className="hint hang-muc" role="status">
-            {from}–{to} trong {total} series
+            {/*
+              Phase 3.6 Phan V: "1–1 trong 1 series" khong sai nhung khong
+              tu nhien — khoang from-to chi co ich khi CO phan trang that
+              (nhieu hon mot trang/mot muc). Dung mot cau ngan khi total=1.
+            */}
+            {total === 1 ? "1 series" : `${from}–${to} trong ${total} series`}
             {filtering ? " khớp bộ lọc" : ""}
           </p>
           <div className="anim-grid">

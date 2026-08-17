@@ -23,6 +23,7 @@ import {
   SkeletonCards,
 } from "@/components/ui";
 import { IconCompass } from "@/components/Icons";
+import { MotifManuscript } from "@/components/Ornaments";
 import { StoryCard } from "@/components/StoryCard";
 
 /** So truyen moi trang. Backend chan tran tren o 60. */
@@ -227,7 +228,7 @@ function FanficBrowser() {
           />
         ) : (
           <EmptyState
-            icon="📚"
+            art={<MotifManuscript />}
             title="Chưa có truyện nào được xuất bản"
             hint="Hãy là người đầu tiên: viết truyện rồi bấm xuất bản."
             action={
@@ -241,7 +242,9 @@ function FanficBrowser() {
         <>
           {/* Cung mot loi trinh bay voi dong dem o Thu vien — xem `.hang-muc`. */}
           <p className="hint hang-muc" role="status">
-            {from}–{to} trong {total} truyện
+            {/* Phase 3.6 Phan V: cau ngan tu nhien khi chi co dung MOT ket
+                qua — xem giai thich o animation/page.tsx. */}
+            {total === 1 ? "1 truyện" : `${from}–${to} trong ${total} truyện`}
             {filtering ? " khớp bộ lọc" : ""}
           </p>
           {/*

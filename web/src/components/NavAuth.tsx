@@ -125,12 +125,14 @@ function NavLinksThat() {
             className={link.cta ? "nav-link nav-cta" : "nav-link"}
             aria-current={active ? "page" : undefined}
             /*
-              Hinh dang tham chieu cho NavIndicator (V5, "shape morph") — no
-              doc thuoc tinh nay tu chinh phan tu DOM dang do, khong tu bia mot
-              danh sach href dac biet rieng. "Viết truyện" la CTA (silhouette
-              khac: bo goc tron het, khong phai vuong vuc nhu cac muc con lai).
+              V6: co RIENG cho NavIndicator, KHONG con la mot "shape" —
+              hinh hoc (x/y/w/h/radius) gio la DO THAT tu chinh phan tu
+              (xem `NavIndicator.tsx`). Co nay CHI con phuc vu mot viec:
+              nhan ra "day la CTA co khung rieng can tam an luc duoc chon",
+              de biet luc nao bat `data-nav-leaving` (xem globals.css) — mot
+              moi quan tam KHAC voi hinh hoc, khong con tron lam mot nhu V5.
             */
-            data-nav-shape={link.cta ? "cta" : "standard"}
+            data-nav-cta={link.cta ? "" : undefined}
             ref={(el) => {
               if (el) bang.current.set(link.href, el);
               else bang.current.delete(link.href);
@@ -247,7 +249,9 @@ function AccountMenu() {
 
   if (!profile) {
     return (
-      <Link className="btn btn-primary btn-sm" href="/login">
+      // `nav-login` (Phase 3.6 Phan I): be mat rieng cho NUT NAY trong
+      // header — khong doi `.btn-primary` dung chung o cac CTA khac.
+      <Link className="btn btn-primary btn-sm nav-login" href="/login">
         Đăng nhập
       </Link>
     );

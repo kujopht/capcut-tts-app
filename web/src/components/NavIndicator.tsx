@@ -50,23 +50,6 @@ import { viTri } from "@/lib/sections";
 export type BangMuc = Map<string, HTMLElement>;
 
 /**
- * Bo goc theo HINH DANG (V5, "shape morph") — doc tu `data-nav-shape` cua
- * chinh phan tu dang do (xem `NavAuth.tsx`), KHONG bia mot danh sach href
- * rieng trong component nay: NavIndicator chi biet CACH ve mot hinh dang, no
- * khong can biet duong dan nao la CTA.
- *
- * `999` cho "cta": ca SVG `rx` lan CSS `border-radius` deu TU DONG ghim ve
- * dung mot nua chieu cao khi gia tri vuot qua no (dung quy tac bo goc chuan
- * cua ca hai), nen mot con so lon la cach chac chan ve MOT HINH VIEN THUOC
- * TRON HOAN TOAN du chieu cao thuc te la bao nhieu — khong can doan mot con
- * so px cu the.
- */
-const NAV_RADIUS: Record<string, number> = {
-  standard: 10, // khop --r2
-  cta: 999,
-};
-
-/**
  * Khoang lang (ms) giu vien rieng cua CTA ("Viết truyện") o trang thai trong
  * suot SAU KHI `aria-current` da mat — xem `[data-nav-leaving="write"]` o
  * globals.css. Phai >= thoi luong `width` cua `.nav-vach` (540ms, thoi gian
@@ -87,9 +70,20 @@ type O = {
    */
   moc: string;
   x: number;
+  y: number;
   w: number;
-  /** Bo goc dich — xem `NAV_RADIUS`. Doi cung luc voi `x`/`w` khi hinh dang
-   * dich khac hinh dang hien tai (vi du sang/roi "Viết truyện"). */
+  h: number;
+  /**
+   * Bo goc DICH — V6: doc THANG tu `getComputedStyle(muc).borderTopLeftRadius`
+   * cua chinh phan tu dang do, KHONG con qua mot bang tham chieu theo "hinh
+   * dang" (`data-nav-shape`/`NAV_RADIUS` cua V5). Ly do doi: hai muc CO THE
+   * dung CUNG mot gia tri bo goc (ca hai deu `--r-full`) nhung KHAC chieu
+   * cao that (xem `h`) — mot bang tra theo "shape" chi bao dam dung mau,
+   * khong bao dam dung KICH THUOC, va chinh sai lech kich thuoc (khong phai
+   * bo goc) la nguyen nhan that cua loi "khung nho hon/khac hinh" da phan
+   * hoi (do duoc tren staging: `.nav-vach` cao co dinh 32px trong khi CTA
+   * "Viết truyện" cao that 38px).
+   */
   radius: number;
   /**
    * Lan do dau tien thi KHONG truot: vao thang `/library` ma thay vien thuoc bo
@@ -119,9 +113,14 @@ export function NavIndicator({
   moc: string;
 }) {
   const [o, setO] = useState<O | null>(null);
-  /** Bo goc CUOI CUNG da do — de nhan ra dung LUC roi hinh dang CTA (xem
-   * `CTA_LEAVE_GRACE_MS`). Cap nhat trong `do_lai`, khong phai trong render. */
-  const radiusTruocRef = useRef<number | null>(null);
+  /**
+   * Muc dang xem TRUOC co phai CTA hay khong — de nhan ra dung LUC roi CTA
+   * (xem `CTA_LEAVE_GRACE_MS`). V6: tach RIENG khoi hinh hoc (`radius`/`h`
+   * gio la do THAT, khong con la mot gia tri "theo shape" co the dung de suy
+   * nguoc "day co phai CTA khong"). Doc tu `data-nav-cta` — mot CO RIENG,
+   * KHONG lien quan gi toi bo goc/kich thuoc do duoc.
+   */
+  const laCtaTruocRef = useRef(false);
   /** Bo dem cho phep go `data-nav-leaving`, de mot lan roi CTA moi khong bi
    * mot lan roi CTA cu (dieu huong lien tiep, nhanh) go som hon dinh. */
   const heTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -150,9 +149,8 @@ export function NavIndicator({
       tranh "vien trong vien" khi vach dung chung con dang truot ngang qua/gan
       vi tri cu cua no.
     */
-    const bao_roi_cta = (radiusMoi: number | null = null) => {
-      if (radiusTruocRef.current === NAV_RADIUS.cta && radiusMoi !== NAV_RADIUS.cta
-          && typeof document !== "undefined") {
+    const bao_roi_cta = (laCta: boolean) => {
+      if (laCtaTruocRef.current && !laCta && typeof document !== "undefined") {
         document.body.dataset.navLeaving = "write";
         if (heTimerRef.current) clearTimeout(heTimerRef.current);
         heTimerRef.current = setTimeout(() => {
@@ -160,7 +158,7 @@ export function NavIndicator({
           heTimerRef.current = null;
         }, CTA_LEAVE_GRACE_MS);
       }
-      radiusTruocRef.current = radiusMoi;
+      laCtaTruocRef.current = laCta;
     };
 
     const do_lai = () => {
@@ -185,7 +183,7 @@ export function NavIndicator({
         chi la chua do KIP, khong phai "khong co gi active".
       */
       if (!moc) {
-        bao_roi_cta();
+        bao_roi_cta(false);
         setO((truoc) => (truoc === null ? truoc : null));
         return;
       }
@@ -197,14 +195,30 @@ export function NavIndicator({
         Cong `scrollLeft`: o mobile hang nay cuon ngang duoc, va
         `getBoundingClientRect` tra toa do so voi KHUNG NHIN. Khong cong thi
         vien thuoc lech dung bang khoang da cuon.
+
+        V6: do CA `y`/`h` — khong con dung `top:50%; height:32px` co dinh cua
+        `.nav-vach` (gia dinh MOI muc cao bang nhau, SAI voi "Viết truyện":
+        do duoc tren staging la 38.14px trong khi cac muc thuong ~36px, va
+        vien thuoc cu ghim cung 32px). Do THAT tung muc thi khop duoc VOI
+        MOI chieu cao, khong can biet truoc muc nao cao hon.
       */
       const x = b.left - a.left + hop.scrollLeft;
+      const y = b.top - a.top;
       const w = b.width;
-      const radius = NAV_RADIUS[muc.dataset.navShape ?? "standard"] ?? NAV_RADIUS.standard;
-      bao_roi_cta(radius);
+      const h = b.height;
+      /*
+        Bo goc: doc THANG tu CSS da tinh cua chinh phan tu — khong con bang
+        tra "hinh dang". `borderTopLeftRadius` dai dien vi ca `.nav-link` lan
+        `.nav-cta` deu dung mot gia tri DONG DEU bon goc (`--r2`/`--r-full`
+        qua shorthand `border-radius`), khong co goc lech rieng.
+      */
+      const radius = parseFloat(getComputedStyle(muc).borderTopLeftRadius) || 0;
+      const laCta = muc.dataset.navCta !== undefined;
+      bao_roi_cta(laCta);
       setO((truoc) => {
         if (truoc && truoc.moc === moc
-            && Math.abs(truoc.x - x) < 0.5 && Math.abs(truoc.w - w) < 0.5
+            && Math.abs(truoc.x - x) < 0.5 && Math.abs(truoc.y - y) < 0.5
+            && Math.abs(truoc.w - w) < 0.5 && Math.abs(truoc.h - h) < 0.5
             && truoc.radius === radius) {
           // Khong doi gi — dung tao mot lan ve thua. `ResizeObserver` co the
           // phat vai lan lien tuc khi chu vua tai xong.
@@ -212,7 +226,7 @@ export function NavIndicator({
         }
         // `truot` chi bat tu lan do THU HAI tro di — xem `O.truot`.
         const truot = truoc !== null;
-        return { moc, x, w, radius, truot };
+        return { moc, x, y, w, h, radius, truot };
       });
     };
 
@@ -293,13 +307,20 @@ export function NavIndicator({
       aria-hidden="true"
       data-dung-yen={o.truot ? undefined : ""}
       style={{
-        transform: `translateX(${o.x}px)`,
-        width: `${o.w}px`,
         /*
-          Bo goc DICH (V5, "shape morph") — chuyen dan cung nhip voi
-          `transform`/`width` (xem `transition` cua `.nav-vach`), khong nhay
-          cung. "Viết truyện" la mot CTA vien tron het (999 tu-clamp ve nua
-          chieu cao that), cac muc con lai la hinh vuong vuc thuong.
+          V6: `translate(x, y)` thay vi chi `translateX` — vi tri DOC gio
+          cung la mot gia tri DO duoc (xem `O.y`), khong con suy tu
+          `top:50%; margin-top:-16px` co dinh tren `.nav-vach` (gia dinh MOI
+          muc cao bang nhau — sai voi CTA). `transform` (khong phai `top`)
+          de tranh reflow, dung tinh than "khong hoat hinh bang layout" cu.
+        */
+        transform: `translate(${o.x}px, ${o.y}px)`,
+        width: `${o.w}px`,
+        height: `${o.h}px`,
+        /*
+          Bo goc DICH (V5, "shape morph"; V6: gia tri gio la DO THAT tu chinh
+          phan tu) — chuyen dan cung nhip voi `transform`/`width`/`height`
+          (xem `transition` cua `.nav-vach`), khong nhay cung.
         */
         borderRadius: `${o.radius}px`,
         /*

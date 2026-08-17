@@ -25,6 +25,8 @@ import {
 } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { PageHeader, SkeletonList, ErrorState, EmptyState } from "@/components/ui";
+import { IconMegaphone } from "@/components/Icons";
+import { MotifCampfire } from "@/components/Ornaments";
 import { PostCard } from "@/components/PostCard";
 import { PostComposer } from "@/components/PostComposer";
 import { TacGiaNoiBat } from "@/components/CommunitySidebar";
@@ -105,6 +107,7 @@ export default function CommunityPage() {
       <div className="stack cong-dong-chinh">
       <PageHeader
         eyebrow="Quảng trường"
+        icon={<IconMegaphone />}
         title="Cộng đồng"
         lead={
           trang?.personalized
@@ -158,6 +161,7 @@ export default function CommunityPage() {
         <SkeletonList count={3} />
       ) : trang && trang.items.length === 0 ? (
         <EmptyState
+          art={<MotifCampfire />}
           title="Chưa có bài nào"
           hint={
             profile

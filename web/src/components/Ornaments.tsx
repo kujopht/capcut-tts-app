@@ -104,6 +104,33 @@ export function MotifFilmFrame({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Cộng đồng, trạng thái RỖNG — một bếp lửa trại yên tĩnh, chưa ai quây quần
+ * (Phase 3.6 Phần U). Trừu tượng: vài nét lửa mảnh + ba khúc củi, không phải
+ * biểu tượng lửa trại clip-art.
+ */
+export function MotifCampfire({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 160 120"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <path
+        d="M80 84 C68 84 58 76 58 64 C58 72 64 76 68 74 C64 64 68 50 80 40 C74 54 78 60 84 56 C88 48 84 40 80 32 C96 42 102 56 96 70 C100 66 100 60 98 56 C104 64 104 76 92 82 C88 84 84 84 80 84 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeOpacity="0.55"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M46 96 L74 86 M114 96 L86 86 M80 100 V86" stroke="currentColor" strokeOpacity="0.4" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Audio — sóng âm dịu dưới trăng. */
 export function MotifWaveform({ className }: { className?: string }) {
   const bars = [6, 12, 20, 14, 26, 16, 22, 10, 18, 8];

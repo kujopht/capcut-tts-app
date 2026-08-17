@@ -92,20 +92,35 @@ export function SkeletonList({ count = 4 }: { count?: number }) {
 
 export function EmptyState({
   icon = "✨",
+  art,
   title,
   hint,
   action,
 }: {
   icon?: string;
+  /**
+   * Hoạ tiết SVG nguyên bản (Phase 3.6 Phần U) — thay cho `icon` (emoji) khi
+   * có. Dùng một hoạ tiết đã có ở `Ornaments.tsx` (tái sử dụng ngôn ngữ thị
+   * giác hiện có: sách/khung chiếu/lửa trại...), không import icon rời hay
+   * clip-art. Emoji vẫn là fallback mặc định cho các trạng thái rỗng nhỏ,
+   * ít quan trọng chưa cần một hoạ tiết riêng.
+   */
+  art?: React.ReactNode;
   title: string;
   hint?: string;
   action?: React.ReactNode;
 }) {
   return (
     <div className="empty" role="status">
-      <span className="empty-icon" aria-hidden="true">
-        {icon}
-      </span>
+      {art ? (
+        <span className="empty-art" aria-hidden="true">
+          {art}
+        </span>
+      ) : (
+        <span className="empty-icon" aria-hidden="true">
+          {icon}
+        </span>
+      )}
       <strong>{title}</strong>
       {hint ? <p className="hint">{hint}</p> : null}
       {action}

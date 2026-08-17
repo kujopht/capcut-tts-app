@@ -99,11 +99,18 @@ test("KHONG trang nao hardcode mau tim/lo moi", () => {
 
 test("header la lop kinh mo va biet trang da cuon chua", () => {
   const head = rule(".site-header");
-  assert.match(head, /backdrop-filter: blur\(var\(--blur\)\)/);
-  // Nen doi tu token  sang mot gia tri sang hon o phase L: muc tieu
-  // la nhin ra RANH GIOI kinh, khong phai mot mang suong. Rang buoc giu nguyen
-  // y: header phai nua trong suot de tranh nen lot qua.
-  assert.match(head, /background: #[0-9a-f]{6,8};/, "header khong con nua trong suot");
+  // Phase 3.6 Phan F: `--blur` (18px, dung chung cho modal/mini player) qua
+  // MANH cho mot khoi noi nho canh logo — doi sang mot gia tri RIENG trong
+  // khoang "moderate" 12-18px dac ta yeu cau (14px), khong con qua token
+  // dung chung nua.
+  const m = head.match(/backdrop-filter: blur\((\d+)px\)/);
+  assert.notEqual(m, null, "thiếu backdrop-filter dạng blur(Npx)");
+  const px = Number(m[1]);
+  assert.ok(px >= 12 && px <= 18, `blur ${px}px ngoài khoảng 12-18px dặc tả`);
+  // V6: `color-mix` thay hex tinh — cung mot ly do (nua trong suot de tranh
+  // nen lot qua), chi doi CACH bieu dien mau (token dong bo voi --bg thay vi
+  // mot hang so tinh rieng).
+  assert.match(head, /background: color-mix\(in srgb, var\(--bg\)/, "header không còn nửa trong suốt");
   // Dac them khi da cuon — luc do moi co chu chay qua duoi.
   assert.match(css(), /\.site-header\[data-scrolled="true"\]/);
 

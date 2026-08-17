@@ -209,8 +209,11 @@ test("vach truot bang transform, KHONG bang left", () => {
     Doi `left` buoc trinh duyet tinh lai bo cuc moi khung. `transform` chay tren
     tang ghep va khong cham vao bo cuc.
   */
+  // V6: `translate(x, y)` thay vi rieng `translateX` — vi tri doc gio cung
+  // la mot gia tri DO duoc (xem O.y o NavIndicator.tsx), khong con suy tu
+  // `top:50%` co dinh tren CSS. Van la `transform`, khong phai `left`/`top`.
   const src = read("../src/components/NavIndicator.tsx");
-  assert.match(src, /transform: `translateX\(/);
+  assert.match(src, /transform: `translate\(/);
   assert.ok(!/left: `/.test(src), "vạch được đặt bằng `left`");
 
   const text = css();
@@ -379,7 +382,13 @@ test("MOT vien thuoc, khong phai mot vach cho moi muc", () => {
   // "modern anime UI marker" thay vi "nut phat sang". Van la MOT hinh co
   // the tich (khong phai gach ngang), chi khac bo goc.
   assert.match(than, /border-radius: var\(--r2\)/, "vẫn là một hình có thể tích");
-  assert.match(than, /height: 32px/);
+  // V6: KHONG con `height: 32px` co dinh trong CSS — chieu cao gio la mot
+  // gia tri DO duoc tu chinh muc dang xem (getBoundingClientRect thuc), dat
+  // qua `style.height` trong NavIndicator.tsx, vi cac muc KHONG cao bang
+  // nhau that (CTA "Viết truyện" cao hon). "Co the tich" gio duoc dam bao
+  // boi phep do that (khong bao gio ra 0/2px) thay vi mot hang so CSS.
+  assert.ok(!/height:\s*32px/.test(codeOnly(than)), "vẫn còn height cố định — sẽ lệch với CTA cao hơn");
+  assert.match(read("../src/components/NavIndicator.tsx"), /height: `\$\{o\.h\}px`/);
   assert.match(than, /transition:[\s\S]*transform/);
   // Navigation Motion Correction V2: doi sang cubic-bezier(.22,.8,.2,1) —
   // van la ease-out co kiem soat, KHONG nay lai.

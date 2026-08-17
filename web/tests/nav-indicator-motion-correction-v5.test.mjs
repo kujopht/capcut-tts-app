@@ -37,32 +37,24 @@ function rule(selector) {
   return text.slice(at, text.indexOf("}", at));
 }
 
-/* ============================== hinh dang: data-nav-shape + NAV_RADIUS === */
+/* ================== V6: hinh hoc DO THAT, khong con "hinh dang" tra bang == */
 
-test("moi Link dieu huong co data-nav-shape — CTA la 'cta', con lai la 'standard'", () => {
-  const src = codeOnly(navAuth());
-  assert.match(src, /data-nav-shape=\{link\.cta \? "cta" : "standard"\}/);
-});
-
-test("NAV_RADIUS anh xa dung 'standard' (khop --r2) va 'cta' (pill tu-clamp)", () => {
+test("V6: KHONG con NAV_RADIUS/data-nav-shape — bo goc doc THANG tu getComputedStyle", () => {
+  // Xem nav-indicator-motion-correction-v6.test.mjs cho dac ta day du cua co
+  // che moi (do x/y/w/h/radius THAT tu getBoundingClientRect/getComputedStyle).
   const src = codeOnly(navIndicator());
-  const khoi = src.match(/const NAV_RADIUS[\s\S]*?\};/)?.[0] ?? "";
-  assert.notEqual(khoi, "", "không tìm thấy hằng số NAV_RADIUS");
-  assert.match(khoi, /standard:\s*10/);
-  assert.match(khoi, /cta:\s*999/);
-});
-
-test("do_lai() doc data-nav-shape cua CHINH phan tu dang do, khong bia danh sach href rieng", () => {
-  const src = codeOnly(navIndicator());
-  assert.match(src, /NAV_RADIUS\[muc\.dataset\.navShape/);
+  assert.ok(!/NAV_RADIUS/.test(src), "vẫn còn bảng tra NAV_RADIUS — V6 yêu cầu đo thật");
+  assert.match(src, /getComputedStyle\(muc\)\.borderTopLeftRadius/);
+  const authSrc = codeOnly(navAuth());
+  assert.ok(!/data-nav-shape/.test(authSrc), "vẫn còn data-nav-shape — đã đổi sang data-nav-cta (V6)");
 });
 
 /* ============================= mot ban sac radius dung CHUNG (Phan 8) ===== */
 
-test("O co truong radius, tinh CUNG luc voi x/w trong setO — khong tach roi", () => {
+test("O co truong radius/y/h, tinh CUNG luc voi x/w trong setO — khong tach roi", () => {
   const src = codeOnly(navIndicator());
   assert.match(src, /radius:\s*number/);
-  assert.match(src, /return \{ moc, x, w, radius, truot \};/);
+  assert.match(src, /return \{ moc, x, y, w, h, radius, truot \};/);
 });
 
 test(".nav-vach dat border-radius tu o.radius — cung mot nguon voi ca hai rect SVG", () => {
@@ -141,10 +133,14 @@ test("NavIndicator: co hang so khoang lang, >= thoi luong width dai nhat cua .na
   assert.ok(grace >= w, `CTA_LEAVE_GRACE_MS (${grace}ms) phải >= width transition (${w}ms)`);
 });
 
-test("NavIndicator: bat data-nav-leaving CHI khi roi TU hinh dang cta, dung setTimeout tu go, khong requestAnimationFrame", () => {
+test("NavIndicator: bat data-nav-leaving CHI khi roi TU muc co data-nav-cta, dung setTimeout tu go, khong requestAnimationFrame", () => {
+  // V6: co "la CTA hay khong" tach RIENG khoi hinh hoc (khong con suy tu
+  // radius === 999, vi radius gio la mot GIA TRI DO duoc co the trung nhau
+  // giua CTA va muc thuong). Doc thang tu `data-nav-cta` — xem NavAuth.tsx.
   const src = codeOnly(navIndicator());
   assert.match(src, /document\.body\.dataset\.navLeaving = "write"/);
-  assert.match(src, /radiusTruocRef\.current === NAV_RADIUS\.cta/);
+  assert.match(src, /muc\.dataset\.navCta !== undefined/);
+  assert.match(src, /laCtaTruocRef\.current && !laCta/);
   assert.match(src, /setTimeout\(/);
   assert.ok(!/requestAnimationFrame/.test(src));
 });

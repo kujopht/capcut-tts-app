@@ -917,29 +917,51 @@ main { overflow-x: clip; }
   hinh chia trang thanh hai khoi roi rac; vach mo dan thi giu cam giac lien
   tuc ma van tach duoc thanh dieu huong khoi noi dung.
 */
+/*
+  Phase 3.6 Phan F "Floating Modern Anime Dock": header cu la mot thanh phang
+  dinh sat mep trang (full-bleed, khong bo goc). SUA: mot KHOI NOI, tach han
+  khoi mep man hinh — `margin-top`/`top` sticky CUNG mot gia tri (14px) de
+  khong "nhay" luc chuyen tu vi tri tinh sang vi tri dinh; `max-width` +
+  `margin-inline:auto` de no nam GIUA, khong tran het chieu rong.
+
+  KHONG phai mot capsule day du (bo goc 16px, khong phai 999px) — dac ta ro:
+  "not necessarily a full capsule". KHONG quang mau (`box-shadow` chi la
+  bong do TRUNG TINH, khong nhuom mau tim/cyan).
+*/
 .site-header {
   position: sticky;
-  top: 0;
+  top: 14px;
   z-index: 50;
-  background: #080a14a8;
-  backdrop-filter: blur(var(--blur)) saturate(1.2);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
-  border-bottom: 1px solid transparent;
-  border-image: linear-gradient(
-      90deg, transparent, var(--line) 22%, var(--line) 78%, transparent
-    ) 1;
-  transition: background var(--dur) var(--ease);
+  margin: 14px auto 0;
+  /* `--wrap` (1180px, dung chung voi noi dung trang) + mot chut dem rieng
+     cho khoi noi — "subtle horizontal padding" cua dac ta, khong phai mot
+     con so bia rieng khong lien quan gi toi luoi trang. */
+  width: min(calc(var(--wrap) + 64px), calc(100% - 32px));
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  background: color-mix(in srgb, var(--bg) 58%, transparent);
+  backdrop-filter: blur(14px) saturate(1.25);
+  /* Bong do TRUNG TINH (den thuan, khong nhuom mau) — chieu sau, khong phai
+     quang phat sang. Day la toan bo Phan G "khong quang mau". */
+  box-shadow: 0 10px 30px #00000040;
+  transition: background 280ms var(--ease), border-color 280ms var(--ease),
+    box-shadow 280ms var(--ease);
 }
-/* Cuon xuong thi nen dac hon — noi dung troi qua duoi khong con doc xuyen. */
+/*
+  Cuon xuong thi be mat DAC hon mot chut de doc duoc (Phan G) — VAN la cung
+  mot khoi noi, khong to/nho lai, khong nay (khong shrink/bounce). Chi doi
+  DO DAC, dung dac ta "increase surface opacity slightly for readability".
+*/
 .site-header[data-scrolled="true"] {
-  background: #070911d9;
-  box-shadow: 0 1px 0 #0000005c, 0 10px 34px #00000052;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  border-color: color-mix(in srgb, var(--line) 95%, transparent);
+  box-shadow: 0 12px 34px #00000055;
 }
 .site-header .wrap {
   display: flex;
   align-items: center;
   gap: var(--s4);
-  min-height: 66px;
+  min-height: 60px;
 }
 
 .brand {
@@ -1034,11 +1056,18 @@ main { overflow-x: clip; }
 */
 .nav-vach {
   position: absolute;
+  /*
+    V6: `left`/`top` VE 0 — vi tri THAT (ca ngang lan doc) gio nam het trong
+    `transform: translate(x, y)` inline (xem `NavIndicator.tsx`), do THANG tu
+    `getBoundingClientRect()` cua muc dang xem. Truoc day `top:50%;
+    margin-top:-16px; height:32px` gia dinh MOI muc cao dung 32px — SAI voi
+    "Viết truyện" (cao that ~38px do padding+dau cham rieng cua `.nav-cta`),
+    khien vien thuoc luon THAP hon CTA that mot khoang co dinh ~6px, doc ra
+    nhu "mot khung khac, nho hon" thay vi khop chinh xac khung CTA co san.
+  */
   left: 0;
-  top: 50%;
+  top: 0;
   z-index: 0;
-  height: 32px;
-  margin-top: -16px;
   border-radius: var(--r2);
   pointer-events: none;
   /* Dam hon kinh header (`--glass: #0f1119b8`) mot chut — day la "trong
@@ -1060,6 +1089,10 @@ main { overflow-x: clip; }
   transition:
     transform 460ms cubic-bezier(.22, .8, .2, 1),
     width 540ms cubic-bezier(.22, .8, .2, 1),
+    /* V6: chieu cao gio la mot GIA TRI DO duoc (xem O.h) — cung nhip/duong
+       cong voi width, vi ca hai deu la kich thuoc hinh hoc cua cung mot lan
+       doi muc. */
+    height 540ms cubic-bezier(.22, .8, .2, 1),
     /* V5 "shape morph": bo goc doi CUNG NHIP voi transform khi hinh dang
        dich khac hinh dang hien tai (vi du sang/roi "Viết truyện" — CTA vien
        tron het, cac muc con lai vuong vuc). */
@@ -1372,8 +1405,14 @@ body[data-nav-leaving="write"] .nav-cta:not([aria-current="page"]) {
     nam sau trong tep nen se de len phan `background` o day.
   */
   isolation: isolate;
+  /* CHI thuoc tinh CHUAN — trinh bien dich TU DONG them ban `-webkit-` khi
+     build (xac nhan tren dia: co ca hai trong CSS xuat ra). Tu tay viet CA
+     HAI dong o day tung khien buoc toi uu CSS gop nham thanh MOT dong va bo
+     mat dung dong CHUAN — Chrome/Firefox hien dai KHONG nhan bien ban
+     `-webkit-` (da xac minh bang `CSS.supports`), nen ket qua la ca lop kinh
+     mat han hieu ung mo, chi con mau nen trong suot. Phat hien luc lam Phase
+     3.6 (navbar noi) — vá luon moi cho dung mau. */
   backdrop-filter: blur(var(--blur-the)) saturate(1.18);
-  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.18);
   border: 1px solid var(--kinh-vien);
   box-shadow: var(--do-sau), var(--kinh-sang);
 }
@@ -1478,8 +1517,14 @@ body[data-nav-leaving="write"] .nav-cta:not([aria-current="page"]) {
   border-radius: var(--r4);
   border: 1px solid var(--kinh-vien);
   isolation: isolate;
+  /* CHI thuoc tinh CHUAN — trinh bien dich TU DONG them ban `-webkit-` khi
+     build (xac nhan tren dia: co ca hai trong CSS xuat ra). Tu tay viet CA
+     HAI dong o day tung khien buoc toi uu CSS gop nham thanh MOT dong va bo
+     mat dung dong CHUAN — Chrome/Firefox hien dai KHONG nhan bien ban
+     `-webkit-` (da xac minh bang `CSS.supports`), nen ket qua la ca lop kinh
+     mat han hieu ung mo, chi con mau nen trong suot. Phat hien luc lam Phase
+     3.6 (navbar noi) — vá luon moi cho dung mau. */
   backdrop-filter: blur(var(--blur-the)) saturate(1.18);
-  -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.18);
   box-shadow: var(--do-sau), var(--kinh-sang);
 }
 
@@ -1747,6 +1792,33 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 /* Bam xuong: thu nho mot chut. Phan hoi tuc thi, khong rung, khong nay. */
 .btn-primary:active:not(:disabled),
 .btn-outline:active:not(:disabled) { transform: scale(0.98); }
+
+/*
+  Phase 3.6 Phan I "Login button": CHI nut Đăng nhập trong header — KHONG
+  dong `.btn-primary` dung o moi noi khac (Khám phá, Bắt đầu viết...) vi dac
+  ta chi noi ve nut nay. Tim bao hoa + quang tim to (`--lift-brand`, vet sang
+  quet) doc lech qua "crypto CTA" trong mot khoi noi nho canh logo — thay
+  bang mot be mat toi hon, vien 1px sac net, gradient tim/cyan RAT kiem che,
+  KHONG box-shadow mau.
+*/
+.nav-login {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--brand) 55%, var(--bg-2)) 0%,
+    color-mix(in srgb, var(--accent) 22%, var(--bg-2)) 100%);
+  border-color: var(--brand-line);
+  box-shadow: none;
+}
+.nav-login::after { display: none; } /* bo vet sang quet — "no pulsing glow" */
+.nav-login:hover:not(:disabled) {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--brand-hover) 60%, var(--bg-2)) 0%,
+    color-mix(in srgb, var(--accent-hover) 24%, var(--bg-2)) 100%);
+  border-color: var(--brand);
+  color: #fff;
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+.nav-login:active:not(:disabled) { transform: translateY(0) scale(0.98); }
 
 /* Nut phu cap hai: vien tim, nen trong. Dung khi hai hanh dong ngang nhau ve
    tam quan trong nhung chi mot cai la buoc tiep theo tu nhien. */
@@ -2080,6 +2152,11 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   background: #12151d80;
 }
 .empty-icon { font-size: 36px; opacity: 0.75; }
+/* Phase 3.6 Phan U: hoa tiet SVG nguyen ban thay emoji cho cac trang thai
+   rong QUAN TRONG (Truyen/Cong dong/Animation). Do tuong phan THAP, mau
+   trung tinh — "elegant", khong phai mot bieu tuong noi bat gianh chu y
+   khoi tieu de ngay ben duoi no. */
+.empty-art { color: var(--text-3); opacity: 0.7; width: 84px; height: auto; }
 
 /* Thanh phan trang. `space-between` de hai nut ra hai dau, so trang o giua —
    o mobile chung tu xuong dong ma khong can quy tac rieng. */
@@ -2261,8 +2338,7 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
     0 0 0 4px #ffffff14,
     0 0 0 5px #d8b56a30,
     inset 0 1px 0 #ffffff40;
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px); /* build tu them ban -webkit- */
 }
 
 /*
@@ -2420,8 +2496,9 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   border: 1px solid var(--line-strong);
   border-radius: var(--r3);
   background: var(--glass-strong);
+  /* Xem chu thich o cong thuc kinh (.kinh) — chi thuoc tinh CHUAN, khong tu
+     viet ban `-webkit-` (build tu them dung). */
   backdrop-filter: blur(var(--blur)) saturate(1.5);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
   box-shadow: var(--shadow-3), var(--edge);
   transform-origin: top right;
   animation: menu-in var(--dur-fast) var(--ease);
@@ -2845,6 +2922,23 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 /* O nhap co bieu tuong dat chong len ben trai. */
 .input-icon { position: relative; }
 .input-icon .input { padding-left: 40px; }
+
+/*
+  Phase 3.6 Phan N "Explore search bar": `.input` mac dinh dac hoan toan
+  (`#0b0d14`, khong trong suot chut nao) — dung y cho FORM that (dang nhap,
+  mat khau, soan thao chuong), noi chu dang go can tuong phan toi da. O
+  `.filter-bar` (thanh tim/loc dau trang Khám phá/Animation) dieu do doc ra
+  nhu "mot thanh den nang" de len tren tranh nen. CHI override o day — KHONG
+  doi `.input` toan cuc, vi form that van can nen dac nhu cu.
+*/
+.filter-bar .input {
+  background: color-mix(in srgb, var(--bg-1) 70%, transparent);
+  border-color: color-mix(in srgb, var(--line) 85%, transparent);
+  backdrop-filter: blur(10px); /* build tu them ban -webkit- */
+}
+.filter-bar .input:hover { border-color: var(--line-strong); }
+/* :focus giu nguyen tu `.input:focus` (nen dac lai, vien tim, ring) — luc go
+   thi can tuong phan toi da nhu form that, "clear focus-visible state". */
 .input-icon-mark {
   position: absolute;
   left: 13px;
@@ -3333,6 +3427,15 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   (dai hon, thap hon) va anh nen tao kich tinh, dung tinh than "artwork
   provides drama, not CSS glow" cua dac ta.
 */
+/*
+  Phase 3.6 Phan R: day la "khoanh khac thi giac cuoi cung" cua trang chu —
+  KHONG con la mot the-kinh cung kich thuoc voi cac khoi phia tren
+  (`.portal-card`, `.story-card`...). Vo (`width:100vw` + margin am) pha vo
+  gioi han `.wrap` (1180px) de NGHE THUAT trai dai het chieu rong man hinh;
+  `padding-inline` tinh nguoc lai DUNG khoang do de CHU/nut van thang hang
+  voi cot doc cua ca trang — chi anh nen la full-bleed, khong phai chu.
+  An toan voi `main { overflow-x: clip }` da co san (xem dinh nghia do).
+*/
 .cta-band {
   position: relative;
   overflow: hidden;
@@ -3341,12 +3444,16 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   justify-content: space-between;
   gap: var(--s5);
   flex-wrap: wrap;
-  padding: var(--s6);
-  border-radius: var(--r4);
-  border: 1px solid var(--brand-line);
+  width: 100vw;
+  margin-inline: calc(50% - 50vw);
+  padding-block: var(--s7);
+  padding-inline: max(var(--s6), calc((100vw - var(--wrap)) / 2 + var(--s5)));
+  border-radius: 0;
+  border: 0;
+  border-block: 1px solid var(--brand-line);
   background: linear-gradient(180deg, #0a0d1aa3, #070910a8);
   box-shadow: var(--edge);
-  min-height: 220px;
+  min-height: 340px;
 }
 .cta-band-art {
   object-fit: cover;
@@ -3707,8 +3814,9 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   bottom: 0;
   z-index: 60;
   background: var(--glass-strong);
+  /* Xem chu thich o cong thuc kinh (.kinh) — chi thuoc tinh CHUAN, khong tu
+     viet ban `-webkit-` (build tu them dung). */
   backdrop-filter: blur(var(--blur)) saturate(1.5);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
   border-top: 1px solid var(--kinh-vien);
   box-shadow: 0 -8px 30px #00000059;
   padding-bottom: env(safe-area-inset-bottom, 0);
@@ -4826,8 +4934,7 @@ body.co-mini { padding-bottom: 74px; }
      xuong khi so ket qua doi. */
   padding: 10vh var(--s4) var(--s4);
   background: #05070fb8;
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px); /* build tu them ban -webkit- */
 }
 .tim-hop {
   position: relative;

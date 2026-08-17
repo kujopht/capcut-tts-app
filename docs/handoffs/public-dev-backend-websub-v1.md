@@ -105,6 +105,22 @@ hành vi `appwrite-dev.fanfic.world` hiện có trừ khi thật cần và an to
 - Full verification lại trên nhánh: backend **2409/2409 pass**, frontend
   **635/635 pass**, typecheck/lint/build sạch, quét secret sạch.
 
+### Phát hiện thêm khi audit Phần 11 (quan sát được): `youtube_websub` báo sai "healthy"
+
+Trong lúc audit tiêu chí Phần 11 ("KHÔNG BAO GIỜ báo HEALTHY khi trạng thái
+thật còn chưa rõ"), phát hiện `/api/admin/overview` báo `youtube_websub:
+healthy` CHỈ dựa trên "đã cấu hình URL callback" (biến môi trường) — không
+chứng minh gì về việc hub đã từng xác minh/gọi lại thật. Vì sắp công khai
+callback này lần đầu, rủi ro đọc nhầm "healthy" thành "đã chứng minh hoạt
+động" là thật. Đã sửa (commit `940cf94`): thêm
+`has_active_websub_subscription()` (một truy vấn bị chặn, an toàn cho
+dashboard chính) ở cả hai kho; `youtube_websub` giờ là `not_configured` /
+`degraded` (đã cấu hình nhưng chưa nguồn nào đạt `ACTIVE`) / `healthy` (ít
+nhất một nguồn `ACTIVE` thật). Test mới:
+`test_he_thong_khong_bao_healthy_khi_websub_chua_tung_xac_minh`. Backend:
+**2410/2410 pass**. Đã redeploy lên VM (`docker compose up -d --build`),
+xác nhận lại container healthy và định tuyến ngoài vẫn đúng.
+
 ## Phase 7 — DNS/TLS: BLOCKED (thao tác tay)
 
 Let's Encrypt cấp chứng chỉ qua thử thách HTTP-01 — CẦN DNS đã phân giải

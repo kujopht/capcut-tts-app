@@ -19,6 +19,21 @@ import type { JobStatus } from "@/lib/api";
  * lech, va style inline thi media query khong voi toi — o dien thoai doan mo
  * ta van bi ep o 620px.
  */
+/**
+ * Themed Page Hero (V1) — mau/suong cua dau trang gio den tu bien CSS
+ * (`--hero-*`, khai bao theo `[data-hero-theme]` o globals.css), KHONG con
+ * hardcode. `theme` chi la MOT chuoi tra cuu — component nay khong biet mau
+ * cu the la gi. Trang KHONG truyen `theme` (vd trang quan tri) tu dong dung
+ * gia tri mac dinh cu (--hero-* chua duoc dat, cac quy tac CSS co fallback
+ * ve dung mau navy/brand goc) — khong the doi visual cho cac trang chua
+ * theme hoa.
+ *
+ * `theme` PHAI duoc dat tren the bao NGOAI CUNG cua trang (`<div className="page"
+ * data-hero-theme={theme}>`), khong phai o day — vi mau con can lan toi ca
+ * `.filter-bar .input` (mot the ANH EM, khong phai con, cua `.page-head`) va
+ * bien CSS chi ke thua XUONG cay DOM, khong ngang hang. Component nay chi
+ * dung `theme` de chon MOTIF (hinh SVG) hien thi, khong tu dat thuoc tinh.
+ */
 export function PageHeader({
   eyebrow,
   icon,
@@ -26,6 +41,7 @@ export function PageHeader({
   lead,
   action,
   id,
+  motif,
 }: {
   eyebrow?: string;
   /** Bieu tuong dat truoc nhan nho. Tuy chon — khong phai dau trang nao cung can. */
@@ -35,9 +51,21 @@ export function PageHeader({
   action?: React.ReactNode;
   /** Dat khi trang can `aria-labelledby` tro toi tieu de nay. */
   id?: string;
+  /**
+   * Hoa tiet SVG nguyen ban RIENG cua khu vuc (Phan 14 dac ta) — mo, dat sau
+   * chu, mau/do mo doc tu `--hero-motif-color`/`--hero-motif-opacity` cua
+   * theme dang ap dung (xem `.page-head-motif`). Tuy chon — trang chua co
+   * hoa tiet rieng thi bo qua, khong bia mot hinh mac dinh.
+   */
+  motif?: React.ReactNode;
 }) {
   return (
     <header className="page-head">
+      {motif ? (
+        <span className="page-head-motif" aria-hidden="true">
+          {motif}
+        </span>
+      ) : null}
       <div className="stack-2 page-head-body">
         {eyebrow ? (
           <span className="eyebrow eyebrow-icon">

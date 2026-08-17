@@ -26,7 +26,7 @@ import {
 import { useSession } from "@/lib/session";
 import { PageHeader, SkeletonList, ErrorState, EmptyState } from "@/components/ui";
 import { IconMegaphone } from "@/components/Icons";
-import { MotifCampfire } from "@/components/Ornaments";
+import { MotifCampfire, MotifConstellation } from "@/components/Ornaments";
 import { PostCard } from "@/components/PostCard";
 import { PostComposer } from "@/components/PostComposer";
 import { TacGiaNoiBat } from "@/components/CommunitySidebar";
@@ -103,11 +103,14 @@ export default function CommunityPage() {
   }, [trang]);
 
   return (
-    <div className="cong-dong-luoi">
+    // Themed Page Hero V1 — "Guild Aurora": xanh lam-luc dam + cyan + mot
+    // chut ho phach am, cam giac "quang truong" thay vi "dem sao lanh".
+    <div className="cong-dong-luoi" data-hero-theme="community">
       <div className="stack cong-dong-chinh">
       <PageHeader
         eyebrow="Quảng trường"
         icon={<IconMegaphone />}
+        motif={<MotifConstellation />}
         title="Cộng đồng"
         lead={
           trang?.personalized

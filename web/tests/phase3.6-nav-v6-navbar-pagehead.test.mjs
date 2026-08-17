@@ -143,8 +143,11 @@ test("Cộng đồng co icon rieng trong PageHeader (truoc day thieu hoan toan)"
 test(".filter-bar .input nhe hon .input mac dinh — khong con la 'thanh den nang'", () => {
   const base = codeOnly(rule(".input, .textarea, .select"));
   assert.match(base, /background:\s*#0b0d14/, "input mặc định (form thật) vẫn nên đặc — không đổi ở đây");
+  // Themed Page Hero V1, Phan 16: mau nen gio tron theo `--hero-mist-2` cua
+  // theme (fallback ve `--bg-1` khi chua co theme — giu dung tinh than "trong
+  // suot hon" ban dau, chi doi NGUON mau tu mot hang so sang mot bien theme).
   const filterInput = codeOnly(rule(".filter-bar .input"));
-  assert.match(filterInput, /color-mix\(in srgb, var\(--bg-1\)/, "phải trong suốt hơn để tranh nền tham gia");
+  assert.match(filterInput, /color-mix\(in srgb, var\(--hero-mist-2, var\(--bg-1\)\)/, "phải trong suốt hơn để tranh nền tham gia, và tô theo theme khi có");
   assert.ok(!/^background:\s*#0b0d14/m.test(filterInput));
 });
 

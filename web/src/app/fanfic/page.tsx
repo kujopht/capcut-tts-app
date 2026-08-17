@@ -23,7 +23,7 @@ import {
   SkeletonCards,
 } from "@/components/ui";
 import { IconCompass } from "@/components/Icons";
-import { MotifManuscript } from "@/components/Ornaments";
+import { MotifManuscript, MotifCompassArc } from "@/components/Ornaments";
 import { StoryCard } from "@/components/StoryCard";
 
 /** So truyen moi trang. Backend chan tran tren o 60. */
@@ -134,10 +134,14 @@ function FanficBrowser() {
   const to = page * PAGE_SIZE + novels.length;
 
   return (
-    <div className="page">
+    // Themed Page Hero V1 — "Sky Manuscript": xanh lam/ngoc lam cua troi noi
+    // dao, dung chung mau cho ca PageHero LAN o tim/loc (xem globals.css
+    // `[data-hero-theme="explore"]`, `.filter-bar .input`).
+    <div className="page" data-hero-theme="explore">
       <PageHeader
         eyebrow="Fanfic"
         icon={<IconCompass />}
+        motif={<MotifCompassArc />}
         title="Khám phá truyện"
         lead="Những truyện đã được tác giả xuất bản. Mỗi chương có thể kèm bản audio để bạn vừa đọc vừa nghe."
         action={

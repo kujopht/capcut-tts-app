@@ -630,7 +630,10 @@ export default function HomePage() {
   const coTiepTuc = Boolean(data?.reading || data?.listening || data?.watching);
 
   return (
-    <div className="page">
+    // Themed Page Hero V1 — "Ocean Sky": bien+troi+phieu luu, cyan troi la
+    // nhan CHINH. Dat o day (khong phai rieng tren .hero-v2) de dong bo
+    // voi cach cac trang khac dat theme tren the bao ngoai cung.
+    <div className="page" data-hero-theme="home">
       <Hero daDangNhap={daDangNhap} />
       <DaiThanhVien gamification={data?.gamification ?? null} />
 

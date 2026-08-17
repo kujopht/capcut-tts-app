@@ -111,10 +111,13 @@ function AnimationBrowser() {
   const to = page * PAGE_SIZE + series.length;
 
   return (
-    <div className="page">
+    // Themed Page Hero V1 — "Cinematic Nebula": cham/xanh dem + mot diem
+    // cam/hong rat kiem che, cyan nho cho cam giac "anh chieu".
+    <div className="page" data-hero-theme="animation">
       <PageHeader
         eyebrow="Animation"
         icon={<IconFilm />}
+        motif={<MotifFilmFrame />}
         title="Animation"
         lead="Xem series animation từ YouTube — video luôn phát trực tiếp từ YouTube, Fanfic không tải lại hay lưu trữ video của ai cả."
         action={

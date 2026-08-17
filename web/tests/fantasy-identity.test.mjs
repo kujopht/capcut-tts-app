@@ -111,12 +111,20 @@ test("so lan dung vang co GIOI HAN — day la 10-15% cuoi, khong phai lop son", 
     Tran duoc nang MOT lan, khi V2 them huy hieu tac gia va sau bac hang — do la
     cho de bai dat vang tuong minh, va sau bac thi can sau sac do. Lan nang nay
     phai kem mot ly do; lan sau cung vay.
+
+    Lan nang THU HAI (Themed Page Hero V1, 48 -> 49): theme "Library — Arcane
+    Archive" dung DUNG MOT `--hero-accent-secondary: var(--vang)` — day la ban
+    sac "antique gold" that su cua rieng khu vuc Thu vien (dac ta yeu cau ro),
+    khong phai vang rai rac. Ca 7 theme con lai (home/explore/animation/
+    community/audio/image-studio/creator) deu KHONG dung --vang cho token nao
+    — da chu y tai su dung mau phu cua chinh tung theme thay vi mo rong ngan
+    sach vang o nhieu noi.
   */
   const text = css();
   const bien = (text.match(/var\(--vang[a-z-]*\)/g) ?? []).length;
   const hex = (text.match(/#(d8b56a|e4c982)/gi) ?? []).length;
-  assert.ok(bien + hex <= 48,
-    `vàng xuất hiện ${bien + hex} lần (biến ${bien} + hex ${hex}) — cần ≤ 48`);
+  assert.ok(bien + hex <= 49,
+    `vàng xuất hiện ${bien + hex} lần (biến ${bien} + hex ${hex}) — cần ≤ 49`);
 
   // Va tim VAN la mau chinh: no phai xuat hien nhieu han vang han han.
   const tim = (text.match(/#8b6cff|var\(--brand/gi) ?? []).length;

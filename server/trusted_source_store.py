@@ -128,6 +128,22 @@ class MockTrustedSourceStore:
             ra[src.subscription_status.value] += 1
         return ra
 
+    def has_active_websub_subscription(self) -> bool:
+        """
+        CO it nhat MOT nguon dang o trang thai `ACTIVE` hay khong — tin
+        hieu THAT DUY NHAT chung minh hub PubSubHubbub da tung xac minh
+        dang ky thanh cong (khac voi "da cau hinh URL callback", von chi
+        la co bien moi truong, khong chung minh gi ve trang thai ben ngoai
+        that). Dung cho `/api/admin/overview` (trang He thong) de KHONG BAO
+        GIO bao "healthy" khi trang thai that con chua ro — mot truy van
+        BI CHAN, cung idiom `find_sources(limit=1)` o noi khac, an toan de
+        goi tu dashboard chinh.
+        """
+        with self._lock:
+            return any(
+                s.subscription_status == SubscriptionStatus.ACTIVE
+                for s in self.sources.values())
+
     def find_source_by_channel_id(self, channel_id: str) -> Optional[TrustedSource]:
         if not channel_id:
             return None

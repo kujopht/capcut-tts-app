@@ -580,6 +580,20 @@ class AppwriteTrustedSourceStore:
             COL_SOURCES, [q_equal("subscription_status", s.value), q_limit(1)])[1]
             for s in SubscriptionStatus}
 
+    def has_active_websub_subscription(self) -> bool:
+        """
+        CO it nhat MOT nguon `ACTIVE` hay khong — MOT truy van bi chan
+        (`limit=1`), an toan de goi tu dashboard chinh (khac
+        `count_sources_by_subscription_status` o tren, von can 5 truy van
+        rieng nen CHI danh cho trang phan tich chi tiet). Xem docstring ban
+        Mock (`server/trusted_source_store.py`) ve ly do can tin hieu THAT
+        nay thay vi chi "da cau hinh".
+        """
+        _, total = self._page(
+            COL_SOURCES, [q_equal("subscription_status", SubscriptionStatus.ACTIVE.value),
+                         q_limit(1)])
+        return total > 0
+
 
 def build_trusted_source_store(settings: Any):
     """Chon kho theo `DATA_BACKEND` — cung mau voi

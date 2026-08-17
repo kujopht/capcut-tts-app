@@ -558,6 +558,38 @@ class WebSubRoutesTest(Nen):
         self.assertEqual(len(hang_doi), 1)
         self.assertEqual(hang_doi[0]["status"], "auto_imported")
 
+    def test_he_thong_khong_bao_healthy_khi_websub_chua_tung_xac_minh(self):
+        """
+        Trang He thong: "đã cấu hình URL callback" KHÔNG chứng minh hub đã
+        từng xác minh gì — chỉ là một biến môi trường. Trước khi có nguồn
+        nào đạt `ACTIVE` (qua GET xác minh thật từ hub), mục `youtube_websub`
+        phải là `degraded` (đã cấu hình nhưng CHƯA chứng minh), không phải
+        `healthy`. Sau khi MỘT nguồn đạt `ACTIVE`, mới thành `healthy`.
+        """
+        cid = "UC" + "n" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        self._dat_websub_gia(FakeWebSubClient())
+        self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/subscribe",
+            headers=self.tk_admin, json={})
+
+        # Da dang ky (status "pending") nhung hub CHUA tung goi lai xac
+        # minh — van phai la degraded, khong phai healthy.
+        d = self.client.get("/api/admin/overview", headers=self.tk_admin).json()
+        self.assertTrue(d["system"]["youtube_websub_configured"])
+        self.assertEqual(d["system"]["statuses"]["youtube_websub"], "degraded")
+
+        # Hub goi lai GET xac minh that -> nguon thanh ACTIVE.
+        topic = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+        resp = self.client.get(
+            "/api/youtube/websub",
+            params={"source_id": source["source_id"], "hub.mode": "subscribe",
+                   "hub.topic": topic, "hub.challenge": "x", "hub.lease_seconds": "432000"})
+        self.assertEqual(resp.status_code, 200)
+
+        d = self.client.get("/api/admin/overview", headers=self.tk_admin).json()
+        self.assertEqual(d["system"]["statuses"]["youtube_websub"], "healthy")
+
 
 if __name__ == "__main__":
     unittest.main()

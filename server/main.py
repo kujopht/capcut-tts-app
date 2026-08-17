@@ -3827,6 +3827,10 @@ def _admin_dashboard_them() -> Dict[str, Any]:
                 + trusted_source_store.find_imports(status="duplicate", limit=1)[1]
                 + trusted_source_store.find_imports(status="unavailable", limit=1)[1]
                 + trusted_source_store.find_imports(status="failed", limit=1)[1]),
+            # Phase "public dev backend + real WebSub E2E": tin hieu THAT
+            # duy nhat chung minh hub da tung xac minh dang ky thanh cong —
+            # xem `_trang_thai_he_thong` ve ly do "da cau hinh" khong du.
+            "websub_subscription_active": trusted_source_store.has_active_websub_subscription(),
         }
 
     def _an_toan(future, mac_dinh):
@@ -3861,7 +3865,8 @@ def _admin_dashboard_them() -> Dict[str, Any]:
             "translation_projects_total": None, "tts_jobs_total": None})
         trusted = _an_toan(f_trusted, {
             "total": None, "enabled_total": None, "detected_today": None,
-            "auto_imported_total": None, "pending_total": None, "error_total": None})
+            "auto_imported_total": None, "pending_total": None, "error_total": None,
+            "websub_subscription_active": False})
         traffic = _an_toan(f_traffic, {
             "configured": False, "message": "Tạm thời không đọc được trạng thái.",
             "visits_today": None, "pageviews_today": None, "visits_7d": None,
@@ -3915,6 +3920,7 @@ def _admin_dashboard_them() -> Dict[str, Any]:
                 image_studio_configured=settings.image_studio.shared_premium_configured,
                 youtube_data_api_configured=trusted_sources.youtube_configured(),
                 youtube_websub_configured=trusted_sources.websub_configured(),
+                youtube_websub_verified_active=bool(trusted["websub_subscription_active"]),
                 reconciliation_total_runs=tong_lan_doi_chieu,
                 reconciliation_last_run_at=lan_chay_gan_nhat,
                 now=now,
@@ -3935,6 +3941,7 @@ def _trang_thai_he_thong(
     *, appwrite_configured: bool, appwrite_healthy: Optional[bool],
     translation_configured: bool, image_studio_configured: bool,
     youtube_data_api_configured: bool, youtube_websub_configured: bool,
+    youtube_websub_verified_active: bool,
     reconciliation_total_runs: int, reconciliation_last_run_at: str,
     now: datetime,
 ) -> Dict[str, str]:
@@ -3946,6 +3953,17 @@ def _trang_thai_he_thong(
     `workers` khong co giam sat rieng (khong co tin hieu am nao de phat
     hien "worker chet" — xem han che ghi o handoff muc 4g) nen an theo
     Appwrite: dung duoc Appwrite thi coi la healthy.
+
+    `youtube_websub`: "da cau hinh URL callback" (`youtube_websub_configured`)
+    KHONG chung minh duoc hub PubSubHubbub that su goi lai/xac minh duoc gi
+    ca — chi la mot bien moi truong duoc dat. Phat hien (phase "public dev
+    backend + real WebSub E2E"): truoc day muc nay bao HEALTHY ngay khi
+    bien duoc dat, ke ca luc chua co DNS/TLS/dang ky that nao — vi pham
+    nguyen tac "khong bao gio bao HEALTHY khi trang thai that con chua ro".
+    Gio doi hoi THEM `youtube_websub_verified_active` (it nhat mot nguon o
+    trang thai `ACTIVE` — tin hieu THAT tu `has_active_websub_subscription`)
+    truoc khi bao HEALTHY; da cau hinh nhung chua tung xac minh duoc thi la
+    DEGRADED (chua chung minh, khong phai loi).
     """
     if not appwrite_configured:
         appwrite = TRANG_THAI_CHUA_CAU_HINH
@@ -3982,7 +4000,9 @@ def _trang_thai_he_thong(
         "youtube_data_api": (
             TRANG_THAI_KHOE if youtube_data_api_configured else TRANG_THAI_CHUA_CAU_HINH),
         "youtube_websub": (
-            TRANG_THAI_KHOE if youtube_websub_configured else TRANG_THAI_CHUA_CAU_HINH),
+            TRANG_THAI_CHUA_CAU_HINH if not youtube_websub_configured
+            else TRANG_THAI_KHOE if youtube_websub_verified_active
+            else TRANG_THAI_SUY_GIAM),
         "reconciliation": reconciliation,
     }
 

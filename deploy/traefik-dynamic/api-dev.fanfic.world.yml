@@ -19,10 +19,21 @@ http:
     # `appwrite_api@docker` da co san (khong tao dich vu moi, khong dam vao
     # nhan/docker-compose.yml cua Appwrite) — xem
     # docs/reports/appwrite-selfhost-gce-summary.md muc 15.3.
+    # HAI entrypoint: `appwrite_web` (yeu cau HTTP-01 goc) VA
+    # `appwrite_websecure` (entrypoint `appwrite_web` co redirect toan cuc
+    # HTTP->HTTPS o cap Appwrite, xem `docker-compose.yml` cua Appwrite —
+    # certbot theo redirect nay va yeu cau HTTPS thuc su tra ve dung file
+    # thu thach, nen router tren CA HAI entrypoint deu phai tro toi
+    # `appwrite_api@docker`, khong chi mot ben).
     api_dev_acme_challenge:
       rule: "Host(`api-dev.fanfic.world`) && PathPrefix(`/.well-known/acme-challenge/`)"
       entryPoints: ["appwrite_web"]
       service: appwrite_api@docker
+    api_dev_acme_challenge_secure:
+      rule: "Host(`api-dev.fanfic.world`) && PathPrefix(`/.well-known/acme-challenge/`)"
+      entryPoints: ["appwrite_websecure"]
+      service: appwrite_api@docker
+      tls: {}
     api_dev_web:
       rule: "Host(`api-dev.fanfic.world`)"
       entryPoints: ["appwrite_web"]

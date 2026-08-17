@@ -21,7 +21,9 @@ from fastapi.testclient import TestClient       # noqa: E402
 from server import main                          # noqa: E402
 from server.animation_domain import AnimationSeries  # noqa: E402
 from server.youtube_client import ChannelInfo, VideoInfo  # noqa: E402
-from server.youtube_websub import WebSubError, compute_signature  # noqa: E402
+from server.youtube_websub import (  # noqa: E402
+    MAX_NOTIFICATION_BYTES, WebSubError, compute_signature,
+)
 
 
 class FakeYouTubeClient:
@@ -485,6 +487,22 @@ class WebSubRoutesTest(Nen):
             content=b"<feed/>")
         self.assertEqual(resp.status_code, 404)
 
+    def test_thong_bao_qua_lon_bi_chan_413_du_khong_co_content_length_dung(self):
+        """
+        Route nay CONG KHAI khong qua Depends nao — ke tan cong co the gia
+        mao/bo qua header `Content-Length` (hoac dung chunked encoding) hi
+        vong bo qua kiem tra kich thuoc. Doc than theo tung khoi qua
+        `request.stream()` phai chan duoc DU trong truong hop do, khong chi
+        khi header co dung.
+        """
+        cid = "UC" + "m" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        qua_lon = b"x" * (MAX_NOTIFICATION_BYTES + 1)
+        resp = self.client.post(
+            "/api/youtube/websub", params={"source_id": source["source_id"]},
+            content=qua_lon)
+        self.assertEqual(resp.status_code, 413)
+
     def test_thong_bao_khong_co_chu_ky_van_tra_200(self):
         cid = "UC" + "k" * 22
         source = self._tao_nguon_kenh(cid=cid)
@@ -539,6 +557,38 @@ class WebSubRoutesTest(Nen):
             "/api/admin/animation/imports", headers=self.tk_admin).json()["imports"]
         self.assertEqual(len(hang_doi), 1)
         self.assertEqual(hang_doi[0]["status"], "auto_imported")
+
+    def test_he_thong_khong_bao_healthy_khi_websub_chua_tung_xac_minh(self):
+        """
+        Trang He thong: "đã cấu hình URL callback" KHÔNG chứng minh hub đã
+        từng xác minh gì — chỉ là một biến môi trường. Trước khi có nguồn
+        nào đạt `ACTIVE` (qua GET xác minh thật từ hub), mục `youtube_websub`
+        phải là `degraded` (đã cấu hình nhưng CHƯA chứng minh), không phải
+        `healthy`. Sau khi MỘT nguồn đạt `ACTIVE`, mới thành `healthy`.
+        """
+        cid = "UC" + "n" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        self._dat_websub_gia(FakeWebSubClient())
+        self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/subscribe",
+            headers=self.tk_admin, json={})
+
+        # Da dang ky (status "pending") nhung hub CHUA tung goi lai xac
+        # minh — van phai la degraded, khong phai healthy.
+        d = self.client.get("/api/admin/overview", headers=self.tk_admin).json()
+        self.assertTrue(d["system"]["youtube_websub_configured"])
+        self.assertEqual(d["system"]["statuses"]["youtube_websub"], "degraded")
+
+        # Hub goi lai GET xac minh that -> nguon thanh ACTIVE.
+        topic = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+        resp = self.client.get(
+            "/api/youtube/websub",
+            params={"source_id": source["source_id"], "hub.mode": "subscribe",
+                   "hub.topic": topic, "hub.challenge": "x", "hub.lease_seconds": "432000"})
+        self.assertEqual(resp.status_code, 200)
+
+        d = self.client.get("/api/admin/overview", headers=self.tk_admin).json()
+        self.assertEqual(d["system"]["statuses"]["youtube_websub"], "healthy")
 
 
 if __name__ == "__main__":

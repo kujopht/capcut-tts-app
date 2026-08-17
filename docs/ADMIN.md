@@ -85,6 +85,15 @@ GET  /api/admin/events              ← CHỈ ĐỌC
 Route **không lặp lại một dòng logic nghiệp vụ nào**: chúng gọi thẳng
 `CreatorService`, tầng đã được kiểm thử từ trước.
 
+**LỖI THỜI kể từ Admin Control Center V2** (`feature/admin-trusted-video-v2`,
+đã hợp nhất vào `integration/pre-prod-v1`): danh sách trên chỉ là API GỐC
+(V1). V2 thêm ~40 route `/api/admin/*` KHÔNG liệt kê ở đây — quản lý tài
+khoản (suspend/unsuspend/sessions), kiểm duyệt Animation (series/tập),
+Trusted Video Sources (nguồn/ánh xạ/hàng đợi nhập/WebSub), bài đăng/bình
+luận/báo cáo, phân tích (`analytics`), Image Studio kill-switch, thống kê
+dịch. Danh sách đầy đủ: `grep -n '@app\.\(get\|post\|patch\|delete\)("/api/admin' server/main.py`
+hoặc mục 9 của `docs/handoffs/admin-trusted-video-v2-handoff.md`.
+
 ## 4. Treo tác giả làm gì và KHÔNG làm gì
 
 | | |
@@ -128,14 +137,23 @@ trong test trước khi ai kịp đọc nhầm.
 Không bao giờ ra API công khai: `note`/`metadata` có thể chứa nhận xét nội bộ,
 và `actor_id` cho biết ai đang làm quản trị.
 
-## 6. Schema cần thêm — **CHƯA áp lên production**
+## 6. Schema `moderation_events` — trạng thái áp dụng
 
-`scripts/setup_appwrite.py` đã có định nghĩa `moderation_events`:
+**LỖI THỜI**: tiêu đề gốc "CHƯA áp lên production" và bảng dưới đây chỉ còn
+đúng ở tầng Appwrite Cloud production (chưa chạm tới, xem mục 8). Trên
+Appwrite tự lưu trữ dev (`appwrite-dev.fanfic.world`) schema này **ĐÃ áp
+dụng và đã smoke test thật** — xem `docs/DEV_SELFHOST_APPWRITE.md`. Bảng
+dưới cũng chỉ còn là bản GỐC (V1): `action` giờ là enum mở rộng nhiều lần
+qua Admin Control Center V2 (author_*/post_*/comment_*/report_*/user_*/
+content_*/trusted_source_*/youtube_mapping_*/auto_import_*, xem
+`scripts/setup_appwrite.py`), và đã thêm bốn thuộc tính `actor_role`,
+`target_type`, `target_id`, `metadata` (mục 5 ở trên). `_ensure_enum()` chỉ
+MỞ RỘNG, không bao giờ thu hẹp danh sách giá trị.
 
 | Thuộc tính | Kiểu |
 |---|---|
 | `event_id` | string(64), bắt buộc |
-| `action` | enum(author_approved/rejected/suspended/restored) |
+| `action` | enum(author_approved/rejected/suspended/restored) — **bản GỐC, xem ghi chú trên** |
 | `target_user_id` | string(64), bắt buộc |
 | `actor_id` | string(64) |
 | `note` | string(1000) |
@@ -144,6 +162,11 @@ và `actor_id` cho biết ai đang làm quản trị.
 Index: `target_created_idx`, `created_idx`.
 
 ## 7. Tạo quản trị đầu tiên cho production — **chưa thực hiện**
+
+Từ Admin Control Center V2 có BA biến, không chỉ một (xem mục 0):
+`FAS_OWNER_USER_IDS`, `FAS_ADMIN_USER_IDS`, `FAS_MODERATOR_USER_IDS`. Các
+bước dưới đây minh hoạ với `FAS_ADMIN_USER_IDS`, áp dụng tương tự cho hai
+biến còn lại tuỳ mức muốn cấp.
 
 ```
 1. Đăng nhập bằng tài khoản thật, gọi GET /api/auth/me, chép `user_id`.
@@ -164,9 +187,15 @@ tài khoản đó, và giới hạn nhịp gọi trên `/api/admin/*`.
 
 ## 8. Việc còn lại
 
-**Gỡ truyện xuống (takedown).** Chưa có, và khu duyệt truyện **chỉ để xem**. Đặt
-một nút xoá lên một luồng chưa thiết kế là cách nhanh nhất để mất nội dung của
-người khác. Những thứ cần có **trước** cái nút đó:
+**Gỡ truyện xuống (takedown) — chỉ đúng cho TRUYỆN (`novels`).** Chưa có, và
+khu duyệt truyện **chỉ để xem** (`GET /api/admin/novels`, không có route
+sửa). Lưu ý: Admin Control Center V2 ĐÃ thêm gỡ/phục hồi cho **Animation**
+(series/tập, trục `moderation_state` riêng, KHÔNG đụng `state` xuất bản của
+chủ sở hữu) qua `/api/admin/animation/{series|episodes}/*` — xem
+`docs/handoffs/admin-trusted-video-v2-handoff.md` mục 4c. Truyện (novel)
+vẫn CHƯA có cơ chế tương đương. Đặt một nút xoá lên một luồng chưa thiết kế
+là cách nhanh nhất để mất nội dung của người khác. Những thứ cần có
+**trước** cái nút đó:
 
 - một trạng thái `removed` **tách khỏi** `draft` — để tác giả biết truyện bị gỡ
   chứ không phải họ tự hạ xuống;

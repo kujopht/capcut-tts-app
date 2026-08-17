@@ -106,6 +106,15 @@ def _moderation_state_from_doc(doc: Dict[str, Any]) -> ContentState:
         return ContentState.VISIBLE
 
 
+def _publish_state_from_doc(doc: Dict[str, Any]) -> PublishState:
+    """Gia tri la/hong -> DRAFT thay vi nem `ValueError` — cung ly do voi
+    `_moderation_state_from_doc` o tren."""
+    try:
+        return PublishState(str(doc.get("state") or "draft"))
+    except ValueError:
+        return PublishState.DRAFT
+
+
 def _series_from_doc(doc: Dict[str, Any]) -> AnimationSeries:
     return AnimationSeries(
         series_id=str(doc.get("series_id") or doc.get("$id") or ""),
@@ -113,7 +122,7 @@ def _series_from_doc(doc: Dict[str, Any]) -> AnimationSeries:
         title=str(doc.get("title") or ""),
         description=str(doc.get("description") or ""),
         cover_key=doc.get("cover_key"),
-        state=PublishState(str(doc.get("state") or "draft")),
+        state=_publish_state_from_doc(doc),
         tags=list(doc.get("tags") or []),
         related_novel_id=str(doc.get("related_novel_id") or ""),
         moderation_state=_moderation_state_from_doc(doc),
@@ -137,7 +146,7 @@ def _episode_from_doc(doc: Dict[str, Any]) -> AnimationEpisode:
         source=source,
         external_id=str(doc.get("external_id") or ""),
         order_index=int(doc.get("order_index") or 1),
-        state=PublishState(str(doc.get("state") or "draft")),
+        state=_publish_state_from_doc(doc),
         duration_seconds=float(doc.get("duration_seconds") or 0.0),
         moderation_state=_moderation_state_from_doc(doc),
         removed_by=str(doc.get("removed_by") or ""),
@@ -363,6 +372,22 @@ class AppwriteAnimationStore:
                 if sid in dem:
                     dem[sid] += 1
         return dem
+
+    def get_series_by_ids(self, series_ids: Sequence[str]) -> Dict[str, AnimationSeries]:
+        """Nhieu series theo ID, MOT truy van moi lo 50 — tranh N+1 khi lam
+        giau danh sach quan tri (Trusted Sources/Import Queue, Phase 5 hieu
+        nang: truoc day moi ID rieng le goi `get_series` MOT truy van HTTP
+        rieng). Loc theo `$id` (KHONG can chi muc rieng): `create_series`
+        dung thang `series.series_id` lam ID tai lieu Appwrite, nen `$id`
+        va `series_id` LUON trung nhau — xem `create_series` o tren."""
+        ds = [s for s in dict.fromkeys(series_ids) if s]
+        ra: Dict[str, AnimationSeries] = {}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_SERIES, [q_equal("$id", *lo)]):
+                s = _series_from_doc(row)
+                ra[s.series_id] = s
+        return ra
 
     def series_tags(self, published_only: bool = True) -> List[str]:
         queries = [q_equal("state", "published")] if published_only else []

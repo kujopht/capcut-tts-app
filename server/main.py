@@ -34,7 +34,9 @@ from server import tts_bridge
 from server import traffic_analytics
 from server.transcript import TRANSCRIPT_VERSION, build_transcript
 from server.translation_usage import usage_recorder
+from server.secret_redaction import loc_bo_theo_gia_tri
 from server.adapters import (
+    AppwriteUnavailableError,
     AuthError,
     LocalStorageAdapter,
     MockMetadataStore,
@@ -586,12 +588,24 @@ class JobIn(BaseModel):
 
 
 def current_profile(authorization: Optional[str] = Header(default=None)) -> Profile:
-    """Lay ho so tu Bearer token. Thieu/khong hop le -> 401."""
+    """
+    Lay ho so tu Bearer token. Thieu/khong hop le -> 401.
+
+    `AppwriteUnavailableError` PHAI bat TRUOC `AuthError` (no la con cua
+    `AuthError`): Appwrite mat ket noi la loi ha tang TAM THOI (503, thu lai
+    duoc), khac han token sai/het han (401, nguoi dung phai dang nhap lai).
+    Phat hien Phase 10 (overnight hardening): truoc day MOI request co token
+    tren MOI route duoc bao ve deu thanh 401 khi Appwrite gian doan - nguoi
+    dung dang dang nhap se bi hieu nham la "phien het han" hang loat trong
+    luc backend chi dang khong ket noi duoc toi Appwrite.
+    """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Cần đăng nhập.")
     token = authorization.split(" ", 1)[1].strip()
     try:
         return identity.profile_from_token(token)
+    except AppwriteUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except AuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
 
@@ -767,14 +781,21 @@ def _ho_so_tra_ve(profile: Profile) -> Dict[str, Any]:
 
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterIn) -> Dict[str, Any]:
+    # `AppwriteUnavailableError` PHAI bat TRUOC `AuthError` - xem
+    # `current_profile` o tren ve vi sao (503 loi ha tang tam thoi, khac
+    # 400 loi du lieu nguoi dung nhap).
     try:
         profile = identity.register(payload.email, payload.password, payload.display_name)
+    except AppwriteUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except AuthError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     # `login` cung goi ra Appwrite va cung nem AuthError - de ngoai try thi
     # loi se thanh 500 thay vi mot thong bao ro rang.
     try:
         token = identity.login(payload.email, payload.password)
+    except AppwriteUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except AuthError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return {"token": token, "profile": _ho_so_tra_ve(profile)}
@@ -787,6 +808,8 @@ def login(payload: LoginIn) -> Dict[str, Any]:
     try:
         token = identity.login(payload.email, payload.password)
         profile = identity.profile_from_token(token)
+    except AppwriteUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except AuthError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
     return {"token": token, "profile": _ho_so_tra_ve(profile)}
@@ -929,6 +952,8 @@ def oauth_exchange(payload: OAuthExchangeIn) -> Dict[str, Any]:
         token = identity.exchange_oauth_token(payload.user_id, payload.secret)
         profile = identity.profile_from_token(token)
         profile = identity.ensure_profile(profile)
+    except AppwriteUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except AuthError as exc:
         # Thong diep da duoc adapter lam sach. KHONG them chi tiet o day:
         # `user_id` va `secret` khong duoc ro ri ra phan hoi hay log.
@@ -2857,6 +2882,12 @@ def set_username(payload: UsernameIn,
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except UsernameError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except AppwriteUnavailableError as exc:
+        # Phai bat TRUOC `AuthError` (no la con): Appwrite mat ket noi KHONG
+        # phai "tuong tu bi trung ten" - tra 409 o day se noi doi nguoi dung
+        # rang ten ho chon da co ai lay, trong khi that ra backend chi dang
+        # khong ket noi duoc toi Appwrite.
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except AuthError as exc:
         # Ban mock nem AuthError khi index duy nhat cua kho chan — cung mot nghia.
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
@@ -3675,6 +3706,33 @@ class NoteIn(BaseModel):
     note: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 
+def _an_toan_song_song(future, mac_dinh, *, nhan: str = "admin"):
+    """
+    Lay ket qua MOT future chay song song qua `ThreadPoolExecutor` — LOI (vd
+    Appwrite dev VM cham/timeout khi bi nhieu luong hoi cung luc, da xac
+    nhan THAT khi do Phase 5/7) tra ve `mac_dinh` (thuong = None, dung triet
+    ly co san "None = chua co du lieu, khong phai 0") THAY VI lam SUP CA
+    route vi MOT nhom cham. Ghi log de van hanh biet, khong nem loi len
+    quan tri vien. Dung chung cho `_admin_dashboard_them`,
+    `admin_analytics_detail`, `admin_image_studio_spending`.
+    """
+    try:
+        return future.result()
+    except Exception as exc:
+        # ASCII thuan tuy: print() khong dam bao encoding UTF-8 tren moi
+        # moi truong (vd console Windows cp1252) — mot ky tu co dau o day
+        # co the tu no nem UnicodeEncodeError, pha huy chinh muc dich cua
+        # duong an toan nay.
+        #
+        # loc_bo_theo_gia_tri(): phong truong hop MOT nhom truy van (vd mot
+        # provider/adapter moi them sau nay) nem loi chua bi mat dang
+        # Bearer/JWT/khoa Appwrite truoc khi kip di qua `thong_diep_loi_an_toan`
+        # o tang duoi — xem server/secret_redaction.py (Phase 12 audit).
+        print(f"[{nhan}] mot nhom truy van loi, dung gia tri mac dinh: "
+              f"{loc_bo_theo_gia_tri(repr(exc))}")
+        return mac_dinh
+
+
 @app.get("/api/admin/overview")
 def admin_overview(admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     return {**creators.admin_overview(), **_admin_dashboard_them()}
@@ -3772,24 +3830,7 @@ def _admin_dashboard_them() -> Dict[str, Any]:
         }
 
     def _an_toan(future, mac_dinh):
-        """
-        Lay ket qua MOT future — LOI (vd Appwrite dev VM cham/timeout khi
-        bi nhieu luong hoi cung luc, da xac nhan THAT khi kiem tra thoi
-        gian chay Phase 7) tra ve `mac_dinh` (moi truong = None, dung
-        triet ly co san "None = chua co du lieu, khong phai 0") THAY VI
-        lam SUP CA trang tong quan vi MOT nhom cham. Ghi log de van hanh
-        biet, khong nem loi len quan tri vien.
-        """
-        try:
-            return future.result()
-        except Exception as exc:
-            # ASCII thuan tuy: print() khong dam bao encoding UTF-8 tren moi
-            # moi truong (vd console Windows cp1252) — mot ky tu co dau o
-            # day co the tu no nem UnicodeEncodeError, pha huy chinh muc
-            # dich cua duong an toan nay.
-            print(f"[admin_overview] mot nhom truy van loi, dung gia tri "
-                 f"mac dinh: {exc!r}")
-            return mac_dinh
+        return _an_toan_song_song(future, mac_dinh, nhan="admin_overview")
 
     # `max_workers=4` (khong phai 8, dung bang so nhom) CO CHU DICH: kiem
     # tra THAT tren Appwrite dev tu luu tru (VM nho, mot tien trinh) cho
@@ -3982,37 +4023,83 @@ def admin_analytics_detail(
     DAU/WAU/MAU va "novel reads/chapter completions/Animation views":
     CHUA the tinh CHINH XAC voi du lieu hien co (xem ghi chu tung muc)
     — tra ve `None` kem `*_note` giai thich, KHONG bia so.
+
+    Phase 5 (performance audit) — SONG SONG HOA: cac truy van tren la 20
+    lenh doc BI CHAN, DOC LAP voi nhau (khong lenh nao doc ket qua cua
+    lenh khac — `dich_tong`/tong cac trang thai chi duoc CONG lai SAU khi
+    ca hai da co ket qua). Truoc phase nay ham chay TUAN TU nen do tre
+    mang toi Appwrite (dac biet la VM dev tu luu tru o xa) CONG DON tren
+    ca 20 lenh cho MOI lan mo trang. Dung lai idiom da kiem chung an toan
+    o `_admin_dashboard_them` (Phase 7): `ThreadPoolExecutor(max_workers=4)`
+    — KHONG dung 8, gioi han nay da xac nhan THAT tren VM dev nho (8 luong
+    dong thoi tung gay `httpx.ReadTimeout`). Khong doi hanh vi loi: neu
+    mot future nem loi, `.result()` van nem thang len nhu duong TUAN TU cu
+    (van thanh 500), khong nuot loi lam sai lech so lieu quan tri.
     """
     if range not in _PHAM_VI_HOP_LE:
         range = "7d"
     now = datetime.now(timezone.utc)
     moc = _moc_theo_pham_vi(range, now)
 
+    cong_viec: Dict[str, Any] = {
+        "tts_pending": lambda: store.count_jobs(
+            status=JobStatus.PENDING, created_after=moc),
+        "tts_running": lambda: store.count_jobs(
+            status=JobStatus.RUNNING, created_after=moc),
+        "tts_completed": lambda: store.count_jobs(
+            status=JobStatus.COMPLETED, created_after=moc),
+        "tts_failed": lambda: store.count_jobs(
+            status=JobStatus.FAILED, created_after=moc),
+        "dich_completed": lambda: translation_svc.admin_count_jobs(
+            status=TranslationJobStatus.COMPLETED, created_after=moc),
+        "dich_failed": lambda: translation_svc.admin_count_jobs(
+            status=TranslationJobStatus.FAILED, created_after=moc),
+        "dich_cancelled": lambda: translation_svc.admin_count_jobs(
+            status=TranslationJobStatus.CANCELLED, created_after=moc),
+        "dich_tong": lambda: translation_svc.admin_count_jobs(created_after=moc),
+        "doi_chieu": lambda: creators.admin_events(
+            action="reconciliation_run", created_after=moc, limit=1),
+        "registrations": lambda: identity.count_profiles(created_after=moc),
+        "comments": lambda: social.admin_count_comments(created_after=moc),
+        "tv_detected": lambda: trusted_source_store.find_imports(
+            created_after=moc, limit=1)[1],
+        "tv_auto_imported": lambda: trusted_source_store.find_imports(
+            status="auto_imported", created_after=moc, limit=1)[1],
+        "tv_auto_published": lambda: trusted_source_store.find_imports(
+            status="auto_published", created_after=moc, limit=1)[1],
+        "tv_pending": lambda: trusted_source_store.find_imports(
+            status="pending", created_after=moc, limit=1)[1],
+        "tv_err_conflict": lambda: trusted_source_store.find_imports(
+            status="conflict", created_after=moc, limit=1)[1],
+        "tv_err_duplicate": lambda: trusted_source_store.find_imports(
+            status="duplicate", created_after=moc, limit=1)[1],
+        "tv_err_unavailable": lambda: trusted_source_store.find_imports(
+            status="unavailable", created_after=moc, limit=1)[1],
+        "tv_err_failed": lambda: trusted_source_store.find_imports(
+            status="failed", created_after=moc, limit=1)[1],
+        "websub_breakdown": lambda: trusted_source_store
+            .count_sources_by_subscription_status(),
+    }
+    with ThreadPoolExecutor(max_workers=4) as bo_luong:
+        futures = {ten: bo_luong.submit(ham) for ten, ham in cong_viec.items()}
+        kq = {ten: f.result() for ten, f in futures.items()}
+
     tts_status_dem = {
-        trang: store.count_jobs(status=st, created_after=moc)
-        for trang, st in (("pending", JobStatus.PENDING),
-                          ("running", JobStatus.RUNNING),
-                          ("completed", JobStatus.COMPLETED),
-                          ("failed", JobStatus.FAILED))
+        "pending": kq["tts_pending"], "running": kq["tts_running"],
+        "completed": kq["tts_completed"], "failed": kq["tts_failed"],
     }
     dich_status_dem = {
-        trang: translation_svc.admin_count_jobs(status=st, created_after=moc)
-        for trang, st in (("completed", TranslationJobStatus.COMPLETED),
-                          ("failed", TranslationJobStatus.FAILED),
-                          ("cancelled", TranslationJobStatus.CANCELLED))
+        "completed": kq["dich_completed"], "failed": kq["dich_failed"],
+        "cancelled": kq["dich_cancelled"],
     }
-    dich_tong_trong_ky = translation_svc.admin_count_jobs(created_after=moc)
-    dich_status_dem["in_progress"] = max(0, dich_tong_trong_ky
-                                        - sum(dich_status_dem.values()))
-
-    doi_chieu = creators.admin_events(action="reconciliation_run",
-                                      created_after=moc, limit=1)
+    dich_status_dem["in_progress"] = max(
+        0, kq["dich_tong"] - sum(dich_status_dem.values()))
 
     return {
         "range": range,
         "since": moc,
         "users": {
-            "registrations": identity.count_profiles(created_after=moc),
+            "registrations": kq["registrations"],
             "active_daily": None,
             "active_weekly": None,
             "active_monthly": None,
@@ -4024,7 +4111,7 @@ def admin_analytics_detail(
             ),
         },
         "content": {
-            "comments": social.admin_count_comments(created_after=moc),
+            "comments": kq["comments"],
             "novel_reads": None,
             "chapter_completions": None,
             "animation_views": None,
@@ -4044,25 +4131,16 @@ def admin_analytics_detail(
             ),
         },
         "trusted_video": {
-            "detected": trusted_source_store.find_imports(
-                created_after=moc, limit=1)[1],
-            "auto_imported": (
-                trusted_source_store.find_imports(
-                    status="auto_imported", created_after=moc, limit=1)[1]
-                + trusted_source_store.find_imports(
-                    status="auto_published", created_after=moc, limit=1)[1]),
-            "pending": trusted_source_store.find_imports(
-                status="pending", created_after=moc, limit=1)[1],
-            "errors": sum(
-                trusted_source_store.find_imports(
-                    status=s, created_after=moc, limit=1)[1]
-                for s in ("conflict", "duplicate", "unavailable", "failed")),
+            "detected": kq["tv_detected"],
+            "auto_imported": kq["tv_auto_imported"] + kq["tv_auto_published"],
+            "pending": kq["tv_pending"],
+            "errors": (kq["tv_err_conflict"] + kq["tv_err_duplicate"]
+                      + kq["tv_err_unavailable"] + kq["tv_err_failed"]),
             # Snapshot HIEN TAI, khong phai theo khoang — suc khoe dang ky
             # WebSub la trang thai TAI THOI DIEM doc, khong phai mot phep dem
             # su kien trong ky.
-            "websub_status_breakdown": trusted_source_store
-                .count_sources_by_subscription_status(),
-            "reconciliation_runs": doi_chieu["total"],
+            "websub_status_breakdown": kq["websub_breakdown"],
+            "reconciliation_runs": kq["doi_chieu"]["total"],
         },
         "traffic": traffic_analytics.overview(),
     }
@@ -6256,22 +6334,46 @@ def admin_image_studio_spending(profile: Profile = Depends(admin_or_owner_profil
     THOI GIAN — trang nay la "hien tai dang the nao", khong phai xu huong
     theo ky nhu `/api/admin/analytics/detail`) va so ket noi BYOK theo
     trang thai (KHONG BAO GIO tra secret/key — chi dem).
+
+    Phase 5 (performance audit) — SONG SONG HOA: do THAT chong Appwrite dev
+    tu luu tru cho thay route nay mat ~7.8s vi 9 truy van dem BI CHAN chay
+    TUAN TU. Dung lai idiom da kiem chung o `_admin_dashboard_them`:
+    `ThreadPoolExecutor(max_workers=4)` + `_an_toan_song_song` (mot nhom dem
+    loi -> None, khong lam sup ca trang).
     """
-    snap = image_spending_guard.snapshot()
-    dich_status = {
-        trang: translation_svc.admin_count_jobs(status=st)
-        for trang, st in (("completed", TranslationJobStatus.COMPLETED),
-                          ("failed", TranslationJobStatus.FAILED),
-                          ("cancelled", TranslationJobStatus.CANCELLED))
+    cong_viec: Dict[str, Any] = {
+        "dich_completed": lambda: translation_svc.admin_count_jobs(
+            status=TranslationJobStatus.COMPLETED),
+        "dich_failed": lambda: translation_svc.admin_count_jobs(
+            status=TranslationJobStatus.FAILED),
+        "dich_cancelled": lambda: translation_svc.admin_count_jobs(
+            status=TranslationJobStatus.CANCELLED),
+        "dich_tong": lambda: translation_svc.admin_count_jobs(),
+        "tts_pending": lambda: store.count_jobs(status=JobStatus.PENDING),
+        "tts_running": lambda: store.count_jobs(status=JobStatus.RUNNING),
+        "tts_completed": lambda: store.count_jobs(status=JobStatus.COMPLETED),
+        "tts_failed": lambda: store.count_jobs(status=JobStatus.FAILED),
+        "byok": lambda: translation_svc.admin_count_connections_by_status(),
     }
-    dich_tong = translation_svc.admin_count_jobs()
-    dich_status["in_progress"] = max(0, dich_tong - sum(dich_status.values()))
+    with ThreadPoolExecutor(max_workers=4) as bo_luong:
+        futures = {ten: bo_luong.submit(ham) for ten, ham in cong_viec.items()}
+        kq = {ten: _an_toan_song_song(
+            f, {} if ten == "byok" else None,
+            nhan="admin_image_studio_spending")
+             for ten, f in futures.items()}
+
+    snap = image_spending_guard.snapshot()  # trong bo nho, khong can luong rieng
+    dich_status = {
+        "completed": kq["dich_completed"], "failed": kq["dich_failed"],
+        "cancelled": kq["dich_cancelled"],
+    }
+    dich_tong = kq["dich_tong"]
+    dich_status["in_progress"] = (
+        max(0, dich_tong - sum(v for v in dich_status.values() if v is not None))
+        if dich_tong is not None else None)
     tts_status = {
-        trang: store.count_jobs(status=st)
-        for trang, st in (("pending", JobStatus.PENDING),
-                          ("running", JobStatus.RUNNING),
-                          ("completed", JobStatus.COMPLETED),
-                          ("failed", JobStatus.FAILED))
+        "pending": kq["tts_pending"], "running": kq["tts_running"],
+        "completed": kq["tts_completed"], "failed": kq["tts_failed"],
     }
     return {
         "month": snap.thang,
@@ -6285,7 +6387,7 @@ def admin_image_studio_spending(profile: Profile = Depends(admin_or_owner_profil
         "shared_premium_configured": settings.image_studio.shared_premium_configured,
         "translation_jobs_by_status": dich_status,
         "tts_jobs_by_status": tts_status,
-        "byok_connections_by_status": translation_svc.admin_count_connections_by_status(),
+        "byok_connections_by_status": kq["byok"],
         # Vi Fanfic Credit theo NGUOI DUNG (khac ngan sach Shared Premium o
         # tren) hien chi la MockWalletStore (bo nho tam TUNG TIEN TRINH,
         # mat khi khoi dong lai) — AppwriteWalletStore da duoc quy hoach o

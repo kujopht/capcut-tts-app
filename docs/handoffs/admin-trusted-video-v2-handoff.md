@@ -7,6 +7,14 @@ thật trước khi sửa bất cứ gì.
 Cập nhật lần cuối: 2026-08-16, sau khi Phase 7 (Analytics + Final Admin
 Control Center Polish) được push.
 
+**CẬP NHẬT SAU KHI VIẾT XONG FILE NÀY**: quyết định "xét duyệt tích hợp"
+nói tới ở mục 10/15 dưới đây **ĐÃ XẢY RA** — `feature/admin-trusted-video-v2`
+đã được merge vào `integration/pre-prod-v1` (commit `5fd5ef7`, đứng sau là
+`a0420e6`). Các đoạn dưới đây viết TRƯỚC thời điểm đó nên vẫn nói merge
+"chưa xảy ra"/"là quyết định còn treo" — đừng hiểu nhầm là còn phải hỏi lại
+quyết định đó. Công việc tiếp diễn (nếu có) hiện chạy trên nhánh khác bắt
+nguồn từ `integration/pre-prod-v1`, không phải trên nhánh này nữa.
+
 ## 0. Bootstrap cho phiên mới
 
 Chạy trước khi làm bất cứ việc gì:

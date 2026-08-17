@@ -396,6 +396,79 @@ class TrustedSourceServiceTest(unittest.TestCase):
         self.assertTrue(updated.last_error_at)
         self.assertTrue(updated.last_error_message)
 
+    # -- Phase 7: video khong con truy cap duoc (bi go/rieng tu) -------------
+
+    def test_quet_nguon_video_don_le_khong_con_truy_cap_bao_loi_ro_rang(self):
+        """Nguon kieu `youtube_video` (mot video DON LE) ma video do bi go/
+        chuyen rieng tu truoc luc quet lai: `get_video` tra `None` ->
+        `YouTubeApiError` voi thong diep RO RANG (khong am tham tra danh
+        sach rong), VA `last_error_at`/`last_error_message` duoc ghi lai
+        giong moi loi YouTube khac (xem `_lay_ung_vien`)."""
+        video_id = "vidUNAVAIL01"
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_video", youtube_video_id=video_id,
+            display_name="Video mat tich", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+        # FakeYouTubeClient KHONG co video nay trong `videos={}` -> get_video None.
+        self._dat_client_gia(FakeYouTubeClient())
+        with self.assertRaises(YouTubeApiError) as ctx:
+            self.svc.scan_source(self.admin, source["source_id"])
+        self.assertIn("Không còn truy cập", str(ctx.exception))
+        updated = self.store.get_source(source["source_id"])
+        self.assertTrue(updated.last_error_at)
+        self.assertTrue(updated.last_error_message)
+        # KHONG tao ban ghi VideoImport rac nao ca — that bai DUNG luc lay
+        # ung vien, truoc khi co gi de phan loai/luu.
+        rows, total = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(total, 0)
+
+    def test_quet_kenh_bo_qua_video_rieng_tu_trong_playlist_khong_lam_sap_ca_lan_quet(self):
+        """Quet mot KENH/playlist co NHIEU video, trong do MOT video da bi
+        go/chuyen rieng tu (con trong danh sach playlist nhung `get_videos`
+        khong tra ve thong tin no nua — dung mo phong 404/403 tu YouTube
+        Data API that). Ky vong: video do bi BO QUA am tham (khong bia du
+        lieu), CAC video CON LAI van duoc phan loai/nhap binh thuong — mot
+        video loi KHONG duoc lam hong ca luot quet (xem `_lay_ung_vien`,
+        dong "video rieng tu/da bi go — bo qua, khong bia du lieu")."""
+        cid = "UC" + "p" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh P", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+
+        upload_playlist = "UUppp"
+        video_con = "vidCONOK0001"
+        video_mat = "vidMATTICH01"  # co trong playlist nhung KHONG co trong `videos=`.
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh P",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: (
+                [_video_item(video_mat), _video_item(video_con)], "")},
+            videos={video_con: VideoInfo(
+                video_id=video_con, title="Tiên Nghịch Tập 7", channel_id=cid,
+                channel_title="Kenh P", thumbnail_url="", published_at="",
+                duration_seconds=100.0)},
+            # `video_mat` CO CHU DICH khong co trong `videos` — mo phong
+            # 404/403 luc goi `videos.list` cho ID do.
+        )
+        self._dat_client_gia(client)
+        ket_qua = self.svc.scan_source(self.admin, source["source_id"])
+        # `detected` CHI dem video CON tra cuu duoc — video mat tich khong
+        # bao gio tro thanh "ung vien" ca, khong phai mot loai loi rieng.
+        self.assertEqual(ket_qua["detected"], 1)
+        rows, total = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(total, 1)
+        self.assertEqual(rows[0].youtube_video_id, video_con)
+        self.assertEqual(rows[0].status, ImportStatus.AUTO_IMPORTED)
+        # Lan quet KHONG bi coi la that bai — nguon van duoc ghi last_success.
+        updated = self.store.get_source(source["source_id"])
+        self.assertTrue(updated.last_success_at)
+        self.assertFalse(updated.last_error_message)
+
     # -- hang doi nhap thu cong --------------------------------------------------
 
     def test_nhap_thu_cong_thanh_cong(self):

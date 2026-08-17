@@ -36,6 +36,15 @@ backend với danh sách trường được phép** — không bao giờ mở qu
 
 ## Collections
 
+**LỖI THỜI/CHƯA ĐẦY ĐỦ**: mục này chỉ liệt kê các collection GỐC của MVP
+(`profiles`, `novels`, ...). Các collection thêm sau (Admin Control Center
+V2 + Trusted Video Sources: `moderation_events`, `animation_series`,
+`animation_episodes`, `trusted_sources`, `series_mappings`,
+`video_imports`) CHƯA được viết vào tài liệu này — định nghĩa nguồn thật
+của chúng nằm ở `scripts/setup_appwrite.py` (bảng thuộc tính/index/quyền
+đầy đủ), xem thêm `docs/ADMIN.md` mục 5-6 và
+`docs/handoffs/admin-trusted-video-v2-handoff.md` mục 4c/4d/4e.
+
 ### `profiles`
 Khoá document = `user_id` của Appwrite.
 

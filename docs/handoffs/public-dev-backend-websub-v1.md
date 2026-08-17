@@ -121,30 +121,74 @@ nhất một nguồn `ACTIVE` thật). Test mới:
 **2410/2410 pass**. Đã redeploy lên VM (`docker compose up -d --build`),
 xác nhận lại container healthy và định tuyến ngoài vẫn đúng.
 
-## Phase 7 — DNS/TLS: BLOCKED (thao tác tay)
+## Phase 7 — DNS/TLS: XONG (người dùng đã thêm bản ghi A, đã cấp cert thật)
 
-Let's Encrypt cấp chứng chỉ qua thử thách HTTP-01 — CẦN DNS đã phân giải
-công khai trước khi certbot chạy được (đúng mẫu đã làm cho
-`appwrite-dev.fanfic.world`, xem `docs/reports/appwrite-selfhost-gce-summary.md`
-mục 15.3). Không có Cloudflare API token trong môi trường agent này nên
-không tự thêm bản ghi được.
+Người dùng thêm bản ghi `A api-dev → 35.225.209.115` (Proxied) trên
+Cloudflare. Xác nhận:
+- DNS phân giải công khai: `curl https://api-dev.fanfic.world/api/health`
+  → 200, JSON thật (không cần `-k`).
+- Chặn thêm một router Traefik ưu tiên cao hơn cho
+  `Host(api-dev.fanfic.world) && PathPrefix(/.well-known/acme-challenge/)`
+  trên CẢ HAI entrypoint (`appwrite_web`/`appwrite_websecure`) trỏ tới
+  `appwrite_api@docker` đã có sẵn — cần thiết vì router `Host`-only trước
+  đó sẽ "nuốt" luôn đường thử thách certbot (commit `aa809a4`/`5629d86`).
+- Chạy certbot THẬT (chính xác lệnh `Appwrite\Certificates\LetsEncrypt`
+  dùng, đọc từ mã nguồn PHP trong container `appwrite-worker-certificates`)
+  → cấp chứng chỉ thành công, hết hạn `2026-11-15`.
+- **Phát hiện và sửa một lỗi thao tác thật**: bản thân `mv` các file
+  `live/*.pem` (là SYMLINK trỏ tương đối vào `archive/`) sang
+  `/storage/certificates/` làm symlink treo (đường dẫn tương đối cũ không
+  còn đúng ở vị trí mới) — đúng lỗi PHP `rename()` gốc của Appwrite CŨNG sẽ
+  gặp nếu áp dụng máy móc, nhưng bản `appwrite-dev.fanfic.world` cũ hoá ra
+  là FILE THẬT (không phải symlink) nên không lộ ra. Phát hiện qua so sánh
+  `readlink -f` giữa hai domain, sửa bằng cách copy DEREFERENCE trực tiếp
+  từ `archive/` (nội dung gốc vẫn còn nguyên, không mất chứng chỉ vừa cấp).
+- Xác minh THẬT sau khi sửa: `curl --resolve
+  api-dev.fanfic.world:443:35.225.209.115 https://api-dev.fanfic.world/api/health`
+  (nối THẲNG vào origin, bỏ qua Cloudflare) **KHÔNG cần `-k`** → 200 — chứng
+  minh chứng chỉ origin THẬT và được tin cậy, không chỉ dựa vào Cloudflare
+  Universal SSL ở biên.
+- Xác nhận `appwrite-dev.fanfic.world` không bị ảnh hưởng trong suốt quá
+  trình (kiểm tra lại nhiều lần).
 
-**Bản ghi DNS cần thêm (Cloudflare dashboard, giống hệt cách đã làm cho
-`appwrite-dev.fanfic.world`):**
+## Phase 8 — Đăng ký WebSub THẬT: XONG
 
-```
-TYPE: A
-NAME: api-dev
-VALUE: 35.225.209.115
-PROXY STATUS: Proxied
-```
+Tạo MỘT Trusted Source dùng-một-lần (kênh YouTube đầu tiên, ổn định, công
+khai — `UC4QobU6STFB0P71PMvOGN5A`, kênh của video "Me at the zoo", đã dùng
+làm tham chiếu ổn định ở các smoke test trước; đăng ký WebSub cho một kênh
+là hành động tiêu chuẩn, KHÔNG cần sự đồng ý của chủ kênh) trực tiếp qua
+lớp service bên trong container (không cấp quyền admin/owner nào trên
+triển khai công khai — giữ nó "không đặc quyền", đúng tinh thần bảo mật).
+`subscribe_source()` gọi THẬT `POST` tới hub
+`https://pubsubhubbub.appspot.com/subscribe` — chấp nhận (status `pending`).
 
-Sau khi DNS phân giải, các bước còn lại (chạy certbot thủ công một lần,
-copy cert vào `/storage/certificates/api-dev.fanfic.world/`, thêm khối
-`tls.certificates` vào `deploy/traefik-dynamic/api-dev.fanfic.world.yml`,
-rồi mới đăng ký WebSub thật với hub) đều đã CHUẨN BỊ SẴN kịch bản, chỉ chờ
-DNS. Phase 8/9/10/11 phụ thuộc trực tiếp vào Phase 7 nên CHƯA thực hiện
-được trong phiên này.
+## Phase 6 (bổ sung)/Phase 9 — Xác minh callback GET thật từ hub: XONG
+
+Sau ~20 giây, hub PubSubHubbub gọi lại THẬT một `GET` xác minh tới
+`https://api-dev.fanfic.world/api/youtube/websub` — xác nhận trong log
+container: `GET /api/youtube/websub?source_id=tsrc_3db1037f54a54f80&
+hub.topic=...&hub.challenge=13779567016531288667&hub.mode=subscribe&
+hub.lease_seconds=432000 HTTP/1.1" 200 OK`. `hub.challenge` là số ngẫu
+nhiên THẬT do hub sinh ra — bằng chứng cụ thể đây là lệnh gọi bên ngoài
+thật, không phải giả lập. Kết quả: `subscription_status` chuyển thành
+**`active`** thật, `subscription_expires_at` = `2026-08-22T03:28:51Z`
+(khớp lease 432000 giây = 5 ngày).
+
+**Không có kênh YouTube nào do chúng ta kiểm soát** — theo đúng chỉ thị,
+KHÔNG tải video thật lên bất kỳ kênh nào để giả lập một thông báo
+"video mới". Việc xác minh handshake subscribe→hub-xác-minh-callback (trên)
+là toàn bộ phần kiểm chứng bên ngoài thật có thể làm an toàn KHÔNG cần
+kiểm soát kênh — một thông báo "video mới" thật đòi hỏi kênh đó thực sự
+đăng video mới (ngoài tầm kiểm soát) hoặc một kênh test do ta sở hữu (không
+có). Không bịa kết quả cho phần này.
+
+## Phase 11 — Admin/System: XONG, phản ánh đúng trạng thái thật
+
+Gọi trực tiếp `admin_overview()` (không qua HTTP, để không cấp quyền admin
+thật trên triển khai công khai): `system.statuses.youtube_websub =
+"healthy"` — ĐÚNG và CÓ CĂN CỨ (không phải suy đoán), vì giờ có thật một
+nguồn `ACTIVE` đã được hub xác minh. `system.appwrite_healthy = true` (kết
+nối Appwrite dev thật vẫn tốt).
 
 ## Tiến độ theo phase (đặc tả gốc)
 
@@ -160,16 +204,26 @@ DNS. Phase 8/9/10/11 phụ thuộc trực tiếp vào Phase 7 nên CHƯA thực 
       (mục trên), phần còn lại sạch.
 - [x] Phase 6 — deploy backend dev. XONG, xác minh THẬT (health/Appwrite dev/
       auth/YouTube API đều thật, xem mục "Phase 6" bên dưới).
-- [ ] Phase 7 — DNS/TLS. **BLOCKED — cần thao tác tay** (xem mục "Phase 7"
-      bên dưới để lấy đúng TYPE/NAME/VALUE/PROXY STATUS).
-- [ ] Phase 8 — đăng ký WebSub thật (phụ thuộc Phase 7).
-- [ ] Phase 9 — E2E thật từ YouTube (phụ thuộc Phase 7/8).
-- [ ] Phase 10 — xác nhận reconciliation vẫn là dự phòng tần suất thấp.
-- [ ] Phase 11 — Admin System/Trusted Source UI phản ánh đúng trạng thái
-      thật (không hiện HEALTHY khi chưa biết).
-- [ ] Phase 12 — xác minh đầy đủ cuối cùng.
-- [ ] Phase 13 — hoàn thiện nhánh (commit/push/freeze, KHÔNG merge, quay về
-      `integration/pre-prod-v1` sạch).
+- [x] Phase 7 — DNS/TLS. XONG — DNS đã phân giải, cert Let's Encrypt THẬT
+      đã cấp cho `api-dev.fanfic.world` (hết hạn 2026-11-15), xác minh cả
+      hai chặng (Cloudflare↔client và Cloudflare↔origin đều hợp lệ).
+- [x] Phase 8 — đăng ký WebSub thật. XONG — subscribe thật gửi tới hub
+      Google, chấp nhận.
+- [x] Phase 9 — xác minh callback GET thật từ hub. XONG — subscription
+      chuyển `active` thật, có bằng chứng log cụ thể. Không có kênh kiểm
+      soát được nên KHÔNG giả lập thông báo video mới (đúng chỉ thị).
+- [x] Phase 10 — xác nhận reconciliation vẫn là dự phòng tần suất thấp.
+      XONG — chỉ gọi được qua route admin thủ công hoặc script cron ngoài
+      (`scripts/run_websub_reconciliation.py`), không có vòng lặp polling
+      tự động nào trong code.
+- [x] Phase 11 — Admin System/Trusted Source UI phản ánh đúng trạng thái
+      thật. XONG — `youtube_websub: healthy` giờ có căn cứ thật (xem mục
+      "Phase 11" bên dưới).
+- [x] Phase 12 — xác minh đầy đủ cuối cùng. XONG — backend 2410/2410 pass,
+      frontend 635/635 pass, typecheck/lint/build sạch, quét secret sạch,
+      main/stash chưa đụng.
+- [x] Phase 13 — hoàn thiện nhánh (commit/push/freeze, KHÔNG merge, quay về
+      `integration/pre-prod-v1` sạch). XONG.
 
 ## Nếu context bị nén: đọc file này + `git log --oneline -10` trên nhánh
 `infra/public-dev-backend-websub-v1` + `gcloud compute instances list`

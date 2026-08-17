@@ -12,6 +12,17 @@
 # api-dev.fanfic.world, khong anh huong request toi appwrite-dev.fanfic.world.
 http:
   routers:
+    # Uu tien CAO HON (rule dai hon = Host + PathPrefix): thu thach HTTP-01
+    # cua certbot (`-w /storage/certificates`) can duoc Appwrite phuc vu
+    # TINH (Appwrite da lam dieu nay cho appwrite-dev.fanfic.world, dung
+    # chung webroot). Tham chieu CHEO PROVIDER toi dich vu
+    # `appwrite_api@docker` da co san (khong tao dich vu moi, khong dam vao
+    # nhan/docker-compose.yml cua Appwrite) — xem
+    # docs/reports/appwrite-selfhost-gce-summary.md muc 15.3.
+    api_dev_acme_challenge:
+      rule: "Host(`api-dev.fanfic.world`) && PathPrefix(`/.well-known/acme-challenge/`)"
+      entryPoints: ["appwrite_web"]
+      service: appwrite_api@docker
     api_dev_web:
       rule: "Host(`api-dev.fanfic.world`)"
       entryPoints: ["appwrite_web"]

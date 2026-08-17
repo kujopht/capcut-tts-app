@@ -68,6 +68,68 @@ hành vi `appwrite-dev.fanfic.world` hiện có trừ khi thật cần và an to
 - `docs/DEV_PUBLIC_BACKEND.md` — kiến trúc, endpoint, biến môi trường, bản
   ghi DNS cần thêm.
 
+## Phase 6 — Deploy backend dev: XONG, đã xác minh THẬT
+
+- Clone nhánh `infra/public-dev-backend-websub-v1` thẳng từ GitHub (public)
+  vào `/home/robux/fanfic-dev-api/repo` trên `fanfic-appwrite-temp`.
+- `.env` chuyển bằng `gcloud compute scp` (KHÔNG qua tham số dòng lệnh,
+  KHÔNG in ra terminal) — phát hiện VÀ SỬA một lỗi khi thao tác: file gốc
+  không kết thúc bằng newline nên lần nối đầu tiên bị dính liền vào cuối
+  dòng `YOUTUBE_API_KEY` (làm hỏng CẢ HAI giá trị) — đã phát hiện qua kiểm
+  tra tên khoá (không in giá trị) và sửa bằng cách đảm bảo newline cuối file
+  trước khi nối. Đã thêm `YOUTUBE_WEBSUB_CALLBACK_BASE_URL=https://api-dev.
+  fanfic.world` và `FAS_ENV=development`.
+- `docker compose -f docker-compose.dev-api.yml build && up -d` — container
+  `fanfic-dev-api` **Up, health: healthy**.
+- Xác minh THẬT (không suy đoán):
+  - `GET /api/health` nội bộ: `data_backend: appwrite`, `appwrite_configured:
+    true`.
+  - Đăng ký một user thật qua container này → **201**, ghi thật vào
+    `appwrite-dev.fanfic.world` (Appwrite dev connectivity THẬT).
+  - `GET /api/admin/overview` không token → **401** (xác thực KHÔNG bị suy
+    yếu — container public không giữ quyền admin/owner cục bộ nào).
+  - `YouTubeClient.get_video('jNQXAC9IVRw')` thật → trả đúng tiêu đề "Me at
+    the zoo" (YouTube Data API connectivity THẬT).
+  - Cổng 8010 KHÔNG lộ ra host/Internet (`ss -tlnp` chỉ thấy 80/443 của
+    Traefik) — container chỉ tới được qua mạng docker `gateway`.
+  - Router Traefik mới copy vào
+    `/var/lib/docker/volumes/appwrite_appwrite-config/_data/
+    api-dev.fanfic.world.yml` (file-provider, watch tự nạp) — xác minh
+    bằng `curl --resolve api-dev.fanfic.world:443:35.225.209.115` TỪ MÁY
+    NGOÀI VM → **200**, đúng response của `fanfic-dev-api` (chưa có cert
+    Let's Encrypt thật nên phải `-k`, dùng cert dự phòng của Traefik tạm
+    thời).
+  - Xác nhận `appwrite-dev.fanfic.world` (route cũ, `PathPrefix('/')`)
+    KHÔNG bị ảnh hưởng — vẫn trả đúng qua cùng phép test `--resolve` giả
+    lập.
+- Full verification lại trên nhánh: backend **2409/2409 pass**, frontend
+  **635/635 pass**, typecheck/lint/build sạch, quét secret sạch.
+
+## Phase 7 — DNS/TLS: BLOCKED (thao tác tay)
+
+Let's Encrypt cấp chứng chỉ qua thử thách HTTP-01 — CẦN DNS đã phân giải
+công khai trước khi certbot chạy được (đúng mẫu đã làm cho
+`appwrite-dev.fanfic.world`, xem `docs/reports/appwrite-selfhost-gce-summary.md`
+mục 15.3). Không có Cloudflare API token trong môi trường agent này nên
+không tự thêm bản ghi được.
+
+**Bản ghi DNS cần thêm (Cloudflare dashboard, giống hệt cách đã làm cho
+`appwrite-dev.fanfic.world`):**
+
+```
+TYPE: A
+NAME: api-dev
+VALUE: 35.225.209.115
+PROXY STATUS: Proxied
+```
+
+Sau khi DNS phân giải, các bước còn lại (chạy certbot thủ công một lần,
+copy cert vào `/storage/certificates/api-dev.fanfic.world/`, thêm khối
+`tls.certificates` vào `deploy/traefik-dynamic/api-dev.fanfic.world.yml`,
+rồi mới đăng ký WebSub thật với hub) đều đã CHUẨN BỊ SẴN kịch bản, chỉ chờ
+DNS. Phase 8/9/10/11 phụ thuộc trực tiếp vào Phase 7 nên CHƯA thực hiện
+được trong phiên này.
+
 ## Tiến độ theo phase (đặc tả gốc)
 
 - [x] Phase 0 — an toàn, tạo nhánh.
@@ -80,9 +142,10 @@ hành vi `appwrite-dev.fanfic.world` hiện có trừ khi thật cần và an to
       lại logic Phase 6.
 - [x] Phase 5 — re-audit bảo mật callback công khai — 1 lỗ hổng thật đã sửa
       (mục trên), phần còn lại sạch.
-- [ ] Phase 6 — deploy backend dev (ĐANG LÀM — xem tiếp bên dưới khi resume).
-- [ ] Phase 7 — DNS/TLS (BLOCKED — cần thao tác tay, xem báo cáo cuối để
-      lấy đúng TYPE/NAME/VALUE/PROXY STATUS).
+- [x] Phase 6 — deploy backend dev. XONG, xác minh THẬT (health/Appwrite dev/
+      auth/YouTube API đều thật, xem mục "Phase 6" bên dưới).
+- [ ] Phase 7 — DNS/TLS. **BLOCKED — cần thao tác tay** (xem mục "Phase 7"
+      bên dưới để lấy đúng TYPE/NAME/VALUE/PROXY STATUS).
 - [ ] Phase 8 — đăng ký WebSub thật (phụ thuộc Phase 7).
 - [ ] Phase 9 — E2E thật từ YouTube (phụ thuộc Phase 7/8).
 - [ ] Phase 10 — xác nhận reconciliation vẫn là dự phòng tần suất thấp.

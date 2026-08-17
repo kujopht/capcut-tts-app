@@ -1,107 +1,349 @@
 "use client";
 
 /**
- * Trinh phat FACADE cho mot video YouTube (overnight Phase 5, V6, Phan 5C).
+ * Trinh phat YouTube cua Fanfic World — facade + control bar TUY CHINH (Phan
+ * Fanfic Cinema Controls, animation-player-v2-custom-controls; ke thua facade
+ * goc tu overnight Phase 5, V6, Phan 5C).
  *
- * VAN DE: nhung mot iframe YouTube ngay khi trang tai xong nghia la trinh
- * duyet nguoi xem tai ve toan bo script theo doi/quang cao cua YouTube TRUOC
- * ca khi ho quyet dinh co xem hay khong.
+ * KIEN TRUC 5 GIAI DOAN (`giaiDoan`):
+ * 1. "facade"    — anh dai dien tinh + nut Play cua Fanfic. CHUA co iframe
+ *                  nao trong DOM — khong tai script/tracking cua YouTube
+ *                  truoc khi nguoi xem THAT SU muon xem.
+ * 2. "khoi-tao"  — vua bam Play, dang cho `loadYouTubeIframeApi()`. Khong co
+ *                  iframe nao trong DOM o buoc nay (chi mot khung cho 16:9),
+ *                  nen "trang thai dang tai" KHONG BAO GIO la mot lop phu
+ *                  tren iframe — luc nay iframe chua ton tai de phu len.
+ * 3. "san-sang"  — API da nap thanh cong: nhung iframe voi `controls=0`,
+ *                  gan YT.Player, thanh dieu khien Fanfic (YouTubePlayerControls)
+ *                  dieu khien HOAN TOAN qua API chinh thuc (playVideo/pauseVideo/
+ *                  seekTo/setVolume/mute/unMute...). Day la duong "hanh phuc".
+ * 4. "loi-api"   — script IFrame API khong tai duoc (mang cham/bi chan). VAN
+ *                  nhung iframe nhung voi `controls=1` (dieu khien GOC cua
+ *                  YouTube) de nguoi xem khong bi bo lai voi mot video khong
+ *                  dieu khien duoc — controls=0 CHI an toan khi ta CHAC CHAN
+ *                  co API thay the.
+ * 5. "loi-video" — mot ma loi THAT tu chinh YouTube (2/5/100/101/150, xem
+ *                  `thongBaoLoiVideo`) — go iframe, hien thong bao tieng Viet,
+ *                  KHONG doan them chi tiet ngoai tai lieu chinh thuc.
  *
- * CACH LAM: hien GIAO DIEN CUA FANFIC truoc (anh dai dien tinh + nut Play) —
- * iframe CHI duoc dung vao DOM sau khi nguoi dung bam Play. Day la ly do
- * component nay khong bao gio render `<iframe>` truoc khi `daBam` la `true`.
- *
- * KHONG lam gi vuot qua muc do nay:
- * - Dung `youtube-nocookie.com`, KHONG dung `youtube.com/embed` — mien it
- *   theo doi hon cho nguoi CHUA bam Play (van la YouTube sau khi da bam).
- * - Truyen `origin` DUNG voi `window.location.origin` — tai lieu IFrame API
- *   hien tai yeu cau tham so nay khop de postMessage hoat dong dung.
- * - KHONG dung `modestbranding` (tham so cu, YouTube da ngung tuan thu no
- *   hoan toan tren giao dien nhung).
- * - KHONG phu CSS len tren iframe DANG PHAT de che ten kenh/tieu de/logo/nut
- *   dieu khien — do la vi pham dieu khoan nhung YouTube, va component nay CO
- *   Y khong lam vay: sau khi bam Play, do la giao dien THAT CUA YOUTUBE.
+ * TUAN THU CHINH SACH YOUTUBE (audit thu cong truoc khi viet, xem bao cao):
+ * - CHI dung tham so player CHINH THUC: controls, enablejsapi, playsinline,
+ *   origin, autoplay, rel — khong tu bay tham so nao khac.
+ * - CHI dung phuong thuc IFrame API CHINH THUC (xem `lib/youtubeIframeApi.ts`).
+ * - KHONG BAO GIO dat phan tu nao (bao gom `.yt-controls`) DE LEN TREN iframe —
+ *   thanh dieu khien Fanfic luon nam NGOAI, ben duoi/canh khung 16:9, khong
+ *   bao gio dung `position:absolute` chong len `<iframe>`.
+ * - KHONG dung `youtube.com/embed` — chi `youtube-nocookie.com`.
+ * - KHONG long iframe nay trong mot iframe khac (chinh sach 2026 cam nhung
+ *   long nhieu cap de "che nguon" — component nay chi tao DUY NHAT mot
+ *   `<iframe>` cho moi video).
+ * - KHONG che logo/watermark cua YouTube bang CSS — `controls=0` la tham so
+ *   CHINH THUC an nut dieu khien cua YouTube, khac hoan toan voi viec dung
+ *   overlay che mot player con nguyen ven.
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { IconPlay } from "@/components/Icons";
+import { YOUTUBE_EMBED_ORIGIN, youtubeThumbnailUrl } from "@/lib/youtubeUrl";
+import {
+  loadYouTubeIframeApi,
+  thongBaoLoiVideo,
+  YT_PLAYER_STATE,
+  type YTPlayerInstance,
+} from "@/lib/youtubeIframeApi";
+import { YouTubePlayerControls, type TrangThaiPhat } from "@/components/YouTubePlayerControls";
 
-export function youtubeThumbnailUrl(videoId: string): string {
-  return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-}
+export { youtubeThumbnailUrl };
+
+/** Bao tien do ve BACKEND moi N giay — throttle nay GIU NGUYEN tu V1, khong
+    lien quan gi toi tan so cap nhat CUC BO cua thanh tien do (xem duoi). */
+const KHOANG_BAO_CAO_GIAY = 10;
+
+/** Cap nhat hien thi CUC BO (thoi gian/thanh tien do) — chi doc `getCurrentTime()`
+    ngay trong trinh duyet, KHONG goi mang, nen tan so cao hon nhieu so
+    `KHOANG_BAO_CAO_GIAY` la an toan va can thiet de thanh tien do muot. */
+const KHOANG_CAP_NHAT_CUC_BO_MS = 250;
+
+type GiaiDoan = "facade" | "khoi-tao" | "san-sang" | "loi-api" | "loi-video";
 
 export function YouTubeFacadePlayer({
   videoId,
   title,
   autoPlay = true,
-  iframeId,
   onPlay,
+  onProgress,
+  onError,
+  onEnded,
 }: {
   videoId: string;
   title: string;
   /** Tu phat NGAY sau khi nguoi dung bam Play (khong tu phat truoc do). */
   autoPlay?: boolean;
-  /**
-   * `id` gan cho `<iframe>` — CHI can khi trang muon dieu khien qua YouTube
-   * IFrame API sau nay (vi du bao cao tien do xem, Phan 5I). Bo qua thi
-   * component van la mot trinh phat facade day du, chi khong dieu khien
-   * duoc tu ben ngoai.
-   */
-  iframeId?: string;
   onPlay?: () => void;
+  /** Goi moi ~10s trong luc phat — noi goi day THUONG la `api.reportWatchProgress`
+      o trang xem, giu nguyen nhip bao cao cua V1, khong tang tan so. */
+  onProgress?: (hienTaiGiay: number, doDaiGiay: number) => void;
+  /** Video KHONG xem duoc (xoa/rieng tu/tat nhung/loi dinh dang) — component
+      nay DA TU hien UI loi day du; cha co the dung callback nay them (vi du
+      ghi log) nhung khong bat buoc phai xu ly gi ca. */
+  onError?: (thongDiep: string) => void;
+  onEnded?: () => void;
 }) {
-  const [daBam, setDaBam] = useState(false);
+  const iframeId = useId();
+  const [giaiDoan, setGiaiDoan] = useState<GiaiDoan>("facade");
+  const [trangThai, setTrangThai] = useState<TrangThaiPhat>("dang-tai");
+  const [hienTai, setHienTai] = useState(0);
+  const [doDai, setDoDai] = useState(0);
+  const [amLuong, setAmLuong] = useState(100);
+  const [daTat, setDaTat] = useState(false);
+  const [dangToanManHinh, setDangToanManHinh] = useState(false);
+  const [thongDiepLoi, setThongDiepLoi] = useState("");
 
-  if (daBam) {
-    const goc =
-      typeof window !== "undefined" ? window.location.origin : "";
-    const params = new URLSearchParams({
-      autoplay: autoPlay ? "1" : "0",
-      rel: "0",
-      ...(iframeId ? { enablejsapi: "1" } : {}),
-      ...(goc ? { origin: goc } : {}),
+  const player = useRef<YTPlayerInstance | null>(null);
+  const baoTienDo = useRef<ReturnType<typeof setInterval> | null>(null);
+  const capNhatCucBo = useRef<ReturnType<typeof setInterval> | null>(null);
+  const khungRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (baoTienDo.current) clearInterval(baoTienDo.current);
+      if (capNhatCucBo.current) clearInterval(capNhatCucBo.current);
+      player.current?.destroy?.();
+    };
+  }, []);
+
+  // Theo doi toan man hinh qua CHINH API chuan cua trinh duyet (Fullscreen
+  // API) — khong tu "gia" trang thai nay, luon doc tu `document.fullscreenElement`.
+  useEffect(() => {
+    const onFsChange = () => {
+      setDangToanManHinh(document.fullscreenElement === khungRef.current);
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  const guiTienDoNgay = useCallback(() => {
+    const p = player.current;
+    if (!p) return;
+    const vt = p.getCurrentTime?.();
+    const dd = p.getDuration?.();
+    if (typeof vt !== "number" || Number.isNaN(vt)) return;
+    onProgress?.(vt, dd || 0);
+  }, [onProgress]);
+
+  const batDauXem = useCallback(async () => {
+    setGiaiDoan("khoi-tao");
+    onPlay?.();
+    let YT;
+    try {
+      YT = await loadYouTubeIframeApi();
+    } catch {
+      // API IFrame khong nap duoc (mang cham/bi chan) — chuyen sang nhung
+      // iframe voi `controls=1` de nguoi xem VAN dieu khien duoc bang dieu
+      // khien GOC cua YouTube, thay vi bi bo lai voi mot video cau cam
+      // (controls=0 nhung khong co gi thay the).
+      setGiaiDoan("loi-api");
+      return;
+    }
+    setGiaiDoan("san-sang");
+    // `new YT.Player` can phan tu <iframe id={iframeId}> DA CO trong DOM —
+    // doi mot khung hinh (sau khi React commit + trinh duyet ve xong iframe
+    // vua duoc dua vao qua setGiaiDoan o tren) roi moi gan API vao.
+    requestAnimationFrame(() => {
+      player.current = new YT.Player(iframeId, {
+        events: {
+          onReady: (e) => {
+            setDoDai(e.target.getDuration() || 0);
+            setAmLuong(e.target.getVolume());
+            setDaTat(e.target.isMuted());
+            setTrangThai(
+              e.target.getPlayerState() === YT_PLAYER_STATE.PLAYING
+                ? "dang-phat"
+                : "tam-dung",
+            );
+            guiTienDoNgay();
+            baoTienDo.current = setInterval(guiTienDoNgay, KHOANG_BAO_CAO_GIAY * 1000);
+            capNhatCucBo.current = setInterval(() => {
+              const hienTaiPlayer = player.current;
+              if (!hienTaiPlayer) return;
+              const vt = hienTaiPlayer.getCurrentTime?.();
+              if (typeof vt === "number" && !Number.isNaN(vt)) setHienTai(vt);
+            }, KHOANG_CAP_NHAT_CUC_BO_MS);
+          },
+          onStateChange: (e) => {
+            switch (e.data) {
+              case YT_PLAYER_STATE.PLAYING:
+                setTrangThai("dang-phat");
+                break;
+              case YT_PLAYER_STATE.PAUSED:
+                setTrangThai("tam-dung");
+                break;
+              case YT_PLAYER_STATE.BUFFERING:
+                setTrangThai("dang-tai");
+                break;
+              case YT_PLAYER_STATE.ENDED:
+                setTrangThai("ket-thuc");
+                onEnded?.();
+                break;
+              default:
+                break;
+            }
+          },
+          onError: (e) => {
+            if (baoTienDo.current) clearInterval(baoTienDo.current);
+            if (capNhatCucBo.current) clearInterval(capNhatCucBo.current);
+            const thongDiep = thongBaoLoiVideo(e.data);
+            setThongDiepLoi(thongDiep);
+            setGiaiDoan("loi-video");
+            onError?.(thongDiep);
+          },
+        },
+      });
     });
+  }, [iframeId, onPlay, onEnded, guiTienDoNgay, onError]);
+
+  const togglePlay = useCallback(() => {
+    const p = player.current;
+    if (!p) return;
+    if (trangThai === "ket-thuc") {
+      p.seekTo(0, true);
+      p.playVideo();
+      return;
+    }
+    if (trangThai === "dang-phat") p.pauseVideo();
+    else p.playVideo();
+  }, [trangThai]);
+
+  const seekPreview = useCallback((giay: number) => setHienTai(giay), []);
+
+  const seekCommit = useCallback((giay: number) => {
+    player.current?.seekTo(giay, true);
+    setHienTai(giay);
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const p = player.current;
+    if (!p) return;
+    if (p.isMuted()) {
+      p.unMute();
+      setDaTat(false);
+    } else {
+      p.mute();
+      setDaTat(true);
+    }
+  }, []);
+
+  const volumeChange = useCallback(
+    (v: number) => {
+      const p = player.current;
+      if (!p) return;
+      p.setVolume(v);
+      setAmLuong(v);
+      if (v === 0) {
+        p.mute();
+        setDaTat(true);
+      } else if (daTat) {
+        p.unMute();
+        setDaTat(false);
+      }
+    },
+    [daTat],
+  );
+
+  const toggleFullscreen = useCallback(() => {
+    const el = khungRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    } else {
+      el.requestFullscreen?.();
+    }
+  }, []);
+
+  if (giaiDoan === "facade") {
     return (
+      // `.yt-facade` PHAI la mot phan tu RIENG bao ngoai `.yt-facade-play`,
+      // khong duoc gop chung mot the: xem docstring lich su o CSS (V1).
       <div className="yt-facade">
-        <iframe
-          id={iframeId}
-          src={`https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`}
-          title={title}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          allowFullScreen
-        />
+        <button
+          type="button"
+          className="yt-facade-play"
+          onClick={batDauXem}
+          aria-label={`Phát ${title}`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- anh tu YouTube,
+              khong phai asset cua Fanfic. */}
+          <img src={youtubeThumbnailUrl(videoId)} alt="" />
+          <span className="yt-facade-play-icon">
+            <IconPlay size={28} />
+          </span>
+          <span className="yt-facade-title truncate">{title}</span>
+        </button>
       </div>
     );
   }
 
+  if (giaiDoan === "khoi-tao") {
+    return <div className="sk yt-cinema-stage-sk" aria-label="Đang tải trình phát…" />;
+  }
+
+  if (giaiDoan === "loi-video") {
+    return (
+      <div className="card anim-video-loi" role="alert">
+        <p>{thongDiepLoi}</p>
+        <p className="hint">Bạn vẫn có thể chuyển sang tập khác bằng điều hướng phía trên.</p>
+      </div>
+    );
+  }
+
+  // "san-sang" hoac "loi-api": iframe da/dang nhung. `controls` khac nhau
+  // giua hai truong hop — xem docstring dau file.
+  const goc = typeof window !== "undefined" ? window.location.origin : "";
+  const params = new URLSearchParams({
+    autoplay: autoPlay ? "1" : "0",
+    rel: "0",
+    playsinline: "1",
+    enablejsapi: "1",
+    controls: giaiDoan === "san-sang" ? "0" : "1",
+    ...(goc ? { origin: goc } : {}),
+  });
+
   return (
-    // `.yt-facade` PHAI la mot phan tu RIENG bao ngoai `.yt-facade-play`,
-    // khong duoc gop chung mot the: `.yt-facade` la `position: relative`
-    // (khung neo), con `.yt-facade-play` la `position: absolute; inset: 0`
-    // (lop phu vua khit). Gop ca hai lop vao MOT the khien thuoc tinh
-    // `position` tren cung mot phan tu bi `.yt-facade-play` de len sau trong
-    // stylesheet ghi de mat `position: relative` cua `.yt-facade` — luc do
-    // nut Play mat neo, tu nhay ra ngoai theo khoi cha xa nhat co dat
-    // `transform` (moi trang `.page` deu co, qua animation vao-trang), phu
-    // kin ca tieu de/dieu huong tap nam phia tren trong flow binh thuong.
-    <div className="yt-facade">
-      <button
-        type="button"
-        className="yt-facade-play"
-        onClick={() => {
-          setDaBam(true);
-          onPlay?.();
-        }}
-        aria-label={`Phát ${title}`}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element -- anh tu YouTube,
-            khong phai asset cua Fanfic; next/image doi cau hinh domain rieng
-            cho mot the hien duy nhat khong dang. */}
-        <img src={youtubeThumbnailUrl(videoId)} alt="" />
-        <span className="yt-facade-play-icon">
-          <IconPlay size={28} />
-        </span>
-      </button>
+    <div className="yt-cinema-fsframe" ref={khungRef}>
+      {/* Chi HIEN o che do toan man hinh (CSS `:fullscreen`) — khong lap lai
+          tieu de da co o dau khung `.yt-cinema` trong che do thuong. */}
+      <p className="yt-cinema-fs-title truncate">{title}</p>
+      <div className="yt-facade">
+        <iframe
+          id={iframeId}
+          src={`${YOUTUBE_EMBED_ORIGIN}/embed/${videoId}?${params.toString()}`}
+          title={title}
+          // `allow="fullscreen"` la cach hien dai duy nhat can — them
+          // `allowFullScreen` (thuoc tinh cu) se khien trinh duyet canh bao
+          // "Allow attribute will take precedence over allowfullscreen".
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+        />
+      </div>
+      {giaiDoan === "loi-api" ? (
+        <p className="hint yt-controls-fallback-notice">
+          Bộ điều khiển tuỳ chỉnh không tải được — dùng điều khiển gốc của YouTube phía trên.
+        </p>
+      ) : (
+        <YouTubePlayerControls
+          trangThai={trangThai}
+          hienTai={hienTai}
+          doDai={doDai}
+          amLuong={amLuong}
+          daTat={daTat}
+          dangToanManHinh={dangToanManHinh}
+          onTogglePlay={togglePlay}
+          onSeekPreview={seekPreview}
+          onSeekCommit={seekCommit}
+          onToggleMute={toggleMute}
+          onVolumeChange={volumeChange}
+          onToggleFullscreen={toggleFullscreen}
+        />
+      )}
     </div>
   );
 }

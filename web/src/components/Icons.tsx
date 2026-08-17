@@ -105,12 +105,32 @@ export function IconLink(p: Props) {
   );
 }
 
+/** Hai vach doc — nut Tam dung cua control bar tuy chinh (Fanfic Cinema
+    Controls, animation-player-v2-custom-controls). */
+export function IconPause(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M8 5 V19 M16 5 V19" fill="none" />
+    </Svg>
+  );
+}
+
 /** Hop thu den — hang doi nhap tu dong (Import Queue). */
 export function IconInbox(p: Props) {
   return (
     <Svg {...p}>
       <path d="M4 12.5 H8.5 l1.5 2.5 h4 l1.5 -2.5 H20" />
       <path d="M5.5 5.5 H18.5 L20 12.5 V18 a1.5 1.5 0 0 1 -1.5 1.5 H5.5 A1.5 1.5 0 0 1 4 18 V12.5 Z" />
+    </Svg>
+  );
+}
+
+/** Mui ten cong — nut Phat lai khi video da ket thuc. */
+export function IconReplay(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 12 a8 8 0 1 1 2.6 5.9" />
+      <path d="M4 12 V17 H9" />
     </Svg>
   );
 }
@@ -128,6 +148,16 @@ export function IconChart(p: Props) {
   );
 }
 
+/** Loa co song am — am luong dang bat. */
+export function IconVolume(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 10 V14 H8 L13 18 V6 L8 10 Z" fill="currentColor" stroke="none" />
+      <path d="M16.5 9.5 a4.2 4.2 0 0 1 0 5" />
+    </Svg>
+  );
+}
+
 /** Banh rang — cai dat he thong. */
 export function IconGear(p: Props) {
   return (
@@ -135,6 +165,34 @@ export function IconGear(p: Props) {
       <circle cx="12" cy="12" r="3.2" />
       <path d="M12 3.5 v2.4 M12 18.1 v2.4 M20.5 12 h-2.4 M5.9 12 H3.5" />
       <path d="M17.7 6.3 l-1.7 1.7 M8 16 l-1.7 1.7 M17.7 17.7 l-1.7 -1.7 M8 8 L6.3 6.3" />
+    </Svg>
+  );
+}
+
+/** Loa gach cheo — dang tat tieng. */
+export function IconMute(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 10 V14 H8 L13 18 V6 L8 10 Z" fill="currentColor" stroke="none" />
+      <path d="M16 9.5 L20.5 14 M20.5 9.5 L16 14" />
+    </Svg>
+  );
+}
+
+/** Bon mui ten huong ra goc — mo toan man hinh. */
+export function IconExpand(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M9 4 H4 V9 M15 4 H20 V9 M9 20 H4 V15 M15 20 H20 V15" />
+    </Svg>
+  );
+}
+
+/** Bon mui ten huong vao trong — thoat toan man hinh. */
+export function IconCollapse(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 9 H9 V4 M20 9 H15 V4 M4 15 H9 V20 M20 15 H15 V20" />
     </Svg>
   );
 }

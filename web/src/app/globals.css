@@ -6545,6 +6545,162 @@ body.co-mini { padding-bottom: 74px; }
   nap. Khong nap iframe cho toi khi nguoi dung bam Play — xem
   `YouTubeFacadePlayer.tsx`.
 */
+/*
+  Khung "rap chieu" TRANG TRI bao quanh trinh phat (Fanfic Cinema Shell,
+  animation-youtube-polish-v1) — CHI o day, KHONG dat overflow/z-index nao
+  de len tren `.yt-facade`/iframe. Moi trang tri nam trong PADDING cua hop
+  nay, iframe (khi da phat) luon la mot khoi hinh chu nhat nguyen ven, khong
+  bi che/cat mot phan nao — dung yeu cau tuan thu nhung YouTube. Mau accent
+  dung lai `--sac-animation-1/2` da co san o badge/nav Animation, khong bay
+  them bang mau moi cho rieng trang nay.
+*/
+.yt-cinema {
+  position: relative;
+  border-radius: var(--r3);
+  padding: var(--s4);
+  background: linear-gradient(165deg, #1a0d12ee, #0b0d12 60%);
+  border: 1px solid color-mix(in srgb, var(--sac-animation-1) 30%, var(--line));
+  box-shadow: 0 24px 60px -36px color-mix(in srgb, var(--sac-animation-1) 55%, transparent);
+}
+
+.yt-cinema-head { margin-bottom: var(--s3); }
+.yt-cinema-series {
+  margin: 2px 0 0;
+  font-size: var(--t-sm);
+  color: var(--sac-animation-1);
+  font-weight: 600;
+}
+.yt-cinema-title { margin: 2px 0 0; }
+
+.yt-cinema-toolbar { margin-bottom: var(--s3); }
+
+.yt-cinema-stage { margin-bottom: var(--s3); }
+
+/* Cung ty le 16:9 luc dang tai, de khung khong nhay bo cuc khi du lieu ve. */
+.yt-cinema-stage-sk { aspect-ratio: 16 / 9; width: 100%; }
+
+.yt-cinema-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+@media (max-width: 640px) {
+  .yt-cinema { padding: var(--s3); }
+}
+
+/*
+  Khung gan tren trinh phat DUNG DE mo toan man hinh (Fullscreen API cua
+  trinh duyet, KHONG phai tinh nang cua YouTube IFrame API — khong co
+  phuong thuc "fullscreen" chinh thuc nao trong API do). Khi khung nay o
+  che do `:fullscreen`, no CHUA iframe + thanh dieu khien Fanfic + mot dong
+  tieu de tap — iframe VAN nguyen ven, khong bi component nao de len.
+*/
+.yt-cinema-fsframe {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.yt-cinema-fs-title {
+  display: none;
+  margin: 0;
+  padding: var(--s2) var(--s1) 0;
+  color: var(--text);
+  font-weight: 650;
+}
+.yt-cinema-fsframe:fullscreen {
+  background: #05060a;
+  padding: var(--s3);
+  justify-content: center;
+}
+.yt-cinema-fsframe:fullscreen .yt-cinema-fs-title { display: block; }
+/*
+  QA trinh duyet THAT phat hien: `width: auto` + `aspect-ratio` tren mot flex
+  item (khong co `height` tuong minh) co the giai ra 0x0 tuy thuat toan
+  sizing cua flexbox — da THU va BO, vi day chinh la video, khong duoc phep
+  sup. Giai phap AN TOAN HON: giu nguyen `width: 100%` nhu che do thuong (dam
+  bao KHONG BAO GIO 0x0), chi gioi han chieu cao qua flex (`flex: 0 1 auto`
+  khong can thiet vi aspect-ratio da tu dieu tiet). Video co the khong toi da
+  chieu cao man hinh tren rat rong, nhung LUON hien thi day du, khong bao gio
+  bien mat — dung yeu cau "iframe phai luon hien thi hoan toan".
+*/
+.yt-cinema-fsframe:fullscreen .yt-facade { max-width: min(100%, 138.67vh); }
+
+/*
+  Thanh dieu khien Fanfic World TUY CHINH (Phan Fanfic Cinema Controls,
+  animation-player-v2-custom-controls) — NAM NGOAI/DUOI khung `.yt-facade`,
+  khong bao gio dat `position` de chong len iframe. Dieu khien THAT qua
+  YouTube IFrame API (`YouTubeFacadePlayer.tsx`), khong tu ve trang thai gia.
+*/
+.yt-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r2);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.yt-controls-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.yt-controls-btn:hover:not(:disabled) { background: var(--bg-3); }
+.yt-controls-btn:disabled { opacity: 0.4; cursor: default; }
+.yt-controls-time {
+  flex: 0 0 auto;
+  font-size: var(--t-sm);
+  color: var(--text-3);
+  min-width: 96px;
+}
+.yt-controls-seek { flex: 1; min-width: 120px; }
+.yt-controls-volume { width: 90px; flex: 0 0 auto; }
+.yt-controls-seek,
+.yt-controls-volume {
+  accent-color: var(--sac-animation-1);
+  cursor: pointer;
+}
+.yt-controls-seek:disabled,
+.yt-controls-volume:disabled { cursor: default; opacity: 0.5; }
+
+.yt-controls-btn:focus-visible,
+.yt-controls-seek:focus-visible,
+.yt-controls-volume:focus-visible {
+  outline: 2px solid var(--sac-animation-1);
+  outline-offset: 2px;
+}
+
+.yt-controls-fallback-notice { padding: 0 var(--s1); }
+
+@media (max-width: 480px) {
+  .yt-controls-volume { display: none; }
+  .yt-controls-time { min-width: 84px; font-size: var(--t-xs); }
+}
+
+/* Nhan tieu de tap tren CHINH facade (anh dai dien + nut Play cua Fanfic) —
+   yeu cau hien thi truoc khi tai iframe that (Phan Fanfic Cinema Controls). */
+.yt-facade-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--s4) var(--s3) var(--s2);
+  background: linear-gradient(to top, #000000cc, transparent);
+  color: #fff;
+  font-weight: 600;
+  text-align: left;
+}
+
 .yt-facade {
   position: relative;
   aspect-ratio: 16 / 9;
@@ -6605,7 +6761,23 @@ body.co-mini { padding-bottom: 74px; }
 
 .yt-facade-play:hover .yt-facade-play-icon { transform: scale(1.08); }
 
+/* Cung ty le 16:9 voi `.yt-facade` de trang khong nhay bo cuc khi doi tu
+   trinh phat sang thong bao loi (Phan 3, animation-youtube-polish-v1). */
+.anim-video-loi {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  text-align: center;
+  background: var(--bg-2);
+}
+
 .anim-ep-list { display: grid; gap: var(--s2); }
+
+.yt-url-preview-thumb { border-radius: var(--r2); object-fit: cover; flex: 0 0 auto; }
 
 .anim-ep-row {
   display: flex;

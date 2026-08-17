@@ -62,7 +62,7 @@ export function SiteSearch() {
         onClick={() => setMo(true)}
         aria-haspopup="dialog"
       >
-        <span className="tim-nut-chu">Tìm truyện, tác giả…</span>
+        <span className="tim-nut-chu">Tìm truyện, tác giả, Animation…</span>
         <kbd className="tim-phim" aria-hidden="true">
           /
         </kbd>

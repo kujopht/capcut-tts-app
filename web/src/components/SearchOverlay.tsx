@@ -261,7 +261,9 @@ export function SearchOverlay({
         if (e.target === e.currentTarget) onDong();
       }}
     >
-      <div className="tim-hop kinh">
+      <div
+        className={`tim-hop kinh${trangThai === "dang-tai" ? " tim-hop-dang-tim" : ""}`}
+      >
         <div className="tim-dau">
           <IconBook size={18} />
           {/* Bo chon danh muc (Phan F) — kien truc mo rong duoc, xem
@@ -283,7 +285,7 @@ export function SearchOverlay({
             ref={oNhap}
             className="tim-o"
             type="search"
-            placeholder="Tìm truyện, tác giả hoặc người dùng…"
+            placeholder="Tìm truyện, tác giả, Animation…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             role="combobox"

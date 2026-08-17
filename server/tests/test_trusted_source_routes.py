@@ -21,7 +21,9 @@ from fastapi.testclient import TestClient       # noqa: E402
 from server import main                          # noqa: E402
 from server.animation_domain import AnimationSeries  # noqa: E402
 from server.youtube_client import ChannelInfo, VideoInfo  # noqa: E402
-from server.youtube_websub import WebSubError, compute_signature  # noqa: E402
+from server.youtube_websub import (  # noqa: E402
+    MAX_NOTIFICATION_BYTES, WebSubError, compute_signature,
+)
 
 
 class FakeYouTubeClient:
@@ -484,6 +486,22 @@ class WebSubRoutesTest(Nen):
             "/api/youtube/websub", params={"source_id": "khong_ton_tai"},
             content=b"<feed/>")
         self.assertEqual(resp.status_code, 404)
+
+    def test_thong_bao_qua_lon_bi_chan_413_du_khong_co_content_length_dung(self):
+        """
+        Route nay CONG KHAI khong qua Depends nao — ke tan cong co the gia
+        mao/bo qua header `Content-Length` (hoac dung chunked encoding) hi
+        vong bo qua kiem tra kich thuoc. Doc than theo tung khoi qua
+        `request.stream()` phai chan duoc DU trong truong hop do, khong chi
+        khi header co dung.
+        """
+        cid = "UC" + "m" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        qua_lon = b"x" * (MAX_NOTIFICATION_BYTES + 1)
+        resp = self.client.post(
+            "/api/youtube/websub", params={"source_id": source["source_id"]},
+            content=qua_lon)
+        self.assertEqual(resp.status_code, 413)
 
     def test_thong_bao_khong_co_chu_ky_van_tra_200(self):
         cid = "UC" + "k" * 22

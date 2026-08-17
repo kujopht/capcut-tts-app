@@ -5323,16 +5323,25 @@ async def youtube_websub_notify(
     CONG) — ket qua xu ly/tu choi (nguon khong ton tai, chu ky sai, XML
     hong) chi anh huong nhat ky/trang thai noi bo, xem
     `TrustedSourceService.handle_websub_notification`.
+
+    Doc THAN theo tung khoi (`request.stream()`), KHONG dung
+    `await request.body()` truc tiep — route nay CONG KHAI, khong qua Depends
+    nao (xem ghi chu tren `youtube_websub_verify`). `request.body()` dem het
+    toan bo than vao bo nho TRUOC khi co co hoi kiem tra kich thuoc; ke tan
+    cong bo qua/gia mao header `Content-Length` (hoac dung chunked transfer-
+    encoding) van co the ep dem mot than khong gioi han. Doc theo khoi va
+    dung SOM ngay khi vuot `MAX_NOTIFICATION_BYTES` tranh duoc dieu do bat
+    ke header co dung/co mat hay khong (phat hien Phase "public dev backend
+    + real WebSub E2E": endpoint nay truoc day chua tung bi lo cong khai
+    that, nen day la lan dau khe ho nay co the bi khai thac tu Internet).
     """
-    khai_bao = request.headers.get("content-length")
-    if khai_bao:
-        try:
-            if int(khai_bao) > MAX_NOTIFICATION_BYTES:
-                raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                                    "Thân thông báo quá lớn.")
-        except ValueError:
-            pass
-    body = await request.body()
+    body = bytearray()
+    async for khoi in request.stream():
+        body.extend(khoi)
+        if len(body) > MAX_NOTIFICATION_BYTES:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                "Thân thông báo quá lớn.")
+    body = bytes(body)
     ket_qua = trusted_sources.handle_websub_notification(
         source_id=source_id, body=body, signature_header=x_hub_signature)
     if ket_qua is None:

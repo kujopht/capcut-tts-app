@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // Worker RIENG cho pre-production/staging cong khai — KHONG dung chung
+  // ten voi Worker production (`fanfic-web`, xem wrangler.jsonc). Build ra
+  // TU CUNG thu muc .open-next/ nhung phai duoc build LAI voi
+  // NEXT_PUBLIC_API_BASE tro ve backend DEV truoc khi deploy file nay, vi
+  // gia tri do duoc dong cung vao bundle client luc build, khong doc duoc
+  // luc chay (xem docs/DEV_PUBLIC_STAGING.md).
+  //
+  //   NEXT_PUBLIC_API_BASE=https://api-dev.fanfic.world npm run cf:build
+  //   npx wrangler deploy --config wrangler.staging.jsonc
+  "main": ".open-next/worker.js",
+  "name": "fanfic-web-staging",
+
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  // Custom Domain cua Cloudflare Workers — TU cap DNS + TLS khi deploy,
+  // khong can them ban ghi DNS tay (khac voi backend/Appwrite tren GCE,
+  // von dung Traefik + Let's Encrypt thu cong). KHONG dam vao route/domain
+  // cua Worker production.
+  "routes": [
+    { "pattern": "staging.fanfic.world", "custom_domain": true }
+  ]
+}

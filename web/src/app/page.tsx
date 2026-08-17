@@ -60,7 +60,14 @@ import { useSession } from "@/lib/session";
 import { StoryCard } from "@/components/StoryCard";
 import { Avatar } from "@/components/Avatar";
 import { NovelCover } from "@/components/NovelCover";
-import { EmptyState, ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
+import { ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
+import {
+  CelestialDivider,
+  CornerRune,
+  MotifFilmFrame,
+  MotifManuscript,
+  MotifWaveform,
+} from "@/components/Ornaments";
 import {
   IconBook,
   IconCompass,
@@ -184,9 +191,15 @@ function TheTiepTucXem({ muc }: { muc: ContinueWatchItem }) {
 }
 
 /**
- * HERO (Phần 5 đặc tả) — giữ bản sắc fantasy/anime + nền hiện có
- * (`PageBackground`, xem `layout.tsx`), nhưng rút gọn xuống một vùng nội
- * dung hữu ích thay vì một khối trống gần hết màn hình đầu tiên.
+ * HERO — "cổng vào thế giới" (Visual Renaissance Phase 3, xem Visual Bible
+ * muc 2 va 15).
+ *
+ * SUA so voi Homepage Hub V2: ban truoc nhet CA nut chinh LAN mot hang ba
+ * pill lien ket nhanh (Animation/Audio Studio/Cộng đồng) vao Hero — nam CTA
+ * dang-nut trong mot man hinh dau. Ba lien ket do gio nam trong luoi
+ * `TheGioiCong` ngay duoi day (dieu huong phu duoc "tich hop tinh te hon"
+ * thay vi lap lai o Hero) — Hero chi con DUNG MOT hanh dong chinh va MOT
+ * hanh dong phu, dung tinh than "one dominant action, one secondary action".
  */
 function Hero({ daDangNhap }: { daDangNhap: boolean }) {
   return (
@@ -209,17 +222,6 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
         </Link>
         <Link className="btn btn-outline" href="/write">
           Viết truyện
-        </Link>
-      </div>
-      <div className="row hero-v2-secondary" aria-label="Lối tắt nhanh">
-        <Link className="hero-v2-pill" href="/animation">
-          <IconFilm size={15} /> Animation
-        </Link>
-        <Link className="hero-v2-pill" href="/studio">
-          <IconHeadphones size={15} /> Audio Studio
-        </Link>
-        <Link className="hero-v2-pill" href="/community">
-          <IconMegaphone size={15} /> Cộng đồng
         </Link>
       </div>
       {!daDangNhap ? (
@@ -265,20 +267,26 @@ function DaiThanhVien({
   );
 }
 
-interface TinhNang {
+interface DiemDen {
   href: string;
   icon: React.ReactNode;
   ten: string;
   mota: string;
 }
 
-/** Luoi tinh nang (Phan 7 dac ta) — CHI tro toi cac duong da co that. */
-const DANH_SACH_TINH_NANG: TinhNang[] = [
+/**
+ * BA diem den CHINH — moi diem la mot "cong" rieng, khong phai mot the trong
+ * mot hang deu nhau (Visual Renaissance Phase 3, thay `DANH_SACH_TINH_NANG`
+ * cu). Thu tu ke ca kich thuoc phan anh dung uu tien san pham: Truyen la ly
+ * do chinh nguoi ta den, Animation la san pham thu hai manh nhat, Audio la
+ * mot cach tieu thu CHINH Truyen (khong phai mot the ngang hang doc lap).
+ */
+const DIEM_DEN_CHINH: DiemDen[] = [
   {
     href: "/fanfic",
-    icon: <IconBook size={19} />,
+    icon: <IconBook size={22} />,
     ten: "Truyện",
-    mota: "Khám phá fanfic cộng đồng",
+    mota: "Khám phá fanfic do cộng đồng viết",
   },
   {
     href: "/animation",
@@ -292,40 +300,94 @@ const DANH_SACH_TINH_NANG: TinhNang[] = [
     ten: "Audio",
     mota: "Nghe truyện bằng giọng đọc",
   },
+];
+
+/** BA diem den VE TINH — nho hon, mot hang gon duoi ba cong chinh. */
+const DIEM_DEN_PHU: DiemDen[] = [
   {
     href: "/community",
-    icon: <IconMegaphone size={19} />,
+    icon: <IconMegaphone size={17} />,
     ten: "Cộng đồng",
     mota: "Thảo luận và chia sẻ",
   },
   {
     href: "/write",
-    icon: <IconFeather size={19} />,
+    icon: <IconFeather size={17} />,
     ten: "Sáng tác",
     mota: "Viết và xuất bản truyện",
   },
   {
     href: "/image-studio",
-    icon: <IconSparkles size={19} />,
+    icon: <IconSparkles size={17} />,
     ten: "Image Studio",
     mota: "Tạo hình ảnh cho thế giới của bạn",
   },
 ];
 
-function LuoiTinhNang() {
+/**
+ * "CHỌN LỐI ĐI CỦA BẠN" — cổng thế giới bất đối xứng (Visual Renaissance
+ * Phase 3), thay lưới 6 thẻ đều nhau cũ (`.hub-grid`/`.quick-card`).
+ *
+ * Truyện là cổng THỐNG TRỊ (chiếm 2/3 chiều rộng, cao gấp đôi) — đây là lý do
+ * chính người dùng đến. Animation/Audio xếp dọc bên phải, nhỏ hơn nhưng vẫn
+ * là hai đích đến độc lập. Cộng đồng/Sáng tác/Image Studio là một dải vệ
+ * tinh gọn — trên mobile dải này CUỘN NGANG thay vì xếp chồng vô hạn (xem
+ * `.portal-satellites` ở `globals.css`).
+ *
+ * Mỗi cổng có MỘT hoạ tiết SVG nền riêng (`Ornaments.tsx`) để bản sắc đến từ
+ * chất liệu/hình ảnh, không chỉ icon+nhãn — đúng yêu cầu "destination art".
+ */
+function TheGioiCong() {
   return (
     <section className="stack-2 rise rise-1" aria-labelledby="home-tinh-nang">
       <h2 className="section-title" id="home-tinh-nang">
-        Khám phá Fanfic World
+        Chọn lối đi của bạn
       </h2>
-      <div className="hub-grid">
-        {DANH_SACH_TINH_NANG.map((t) => (
-          <Link key={t.href} className="quick-card" href={t.href}>
-            <span className="quick-icon" aria-hidden="true">
-              {t.icon}
+      <div className="portal-primary">
+        <Link href={DIEM_DEN_CHINH[0].href} className="portal-card portal-truyen">
+          <CornerRune className="portal-rune" />
+          <MotifManuscript className="portal-motif" />
+          <span className="portal-body">
+            <span className="portal-icon" aria-hidden="true">
+              {DIEM_DEN_CHINH[0].icon}
             </span>
-            <strong>{t.ten}</strong>
-            <span className="hint">{t.mota}</span>
+            <strong className="portal-title">{DIEM_DEN_CHINH[0].ten}</strong>
+            <span className="hint">{DIEM_DEN_CHINH[0].mota}</span>
+          </span>
+        </Link>
+        <div className="portal-stack">
+          <Link href={DIEM_DEN_CHINH[1].href} className="portal-card portal-animation">
+            <MotifFilmFrame className="portal-motif" />
+            <span className="portal-body">
+              <span className="portal-icon" aria-hidden="true">
+                {DIEM_DEN_CHINH[1].icon}
+              </span>
+              <strong className="portal-title">{DIEM_DEN_CHINH[1].ten}</strong>
+              <span className="hint">{DIEM_DEN_CHINH[1].mota}</span>
+            </span>
+          </Link>
+          <Link href={DIEM_DEN_CHINH[2].href} className="portal-card portal-audio">
+            <MotifWaveform className="portal-motif" />
+            <span className="portal-body">
+              <span className="portal-icon" aria-hidden="true">
+                {DIEM_DEN_CHINH[2].icon}
+              </span>
+              <strong className="portal-title">{DIEM_DEN_CHINH[2].ten}</strong>
+              <span className="hint">{DIEM_DEN_CHINH[2].mota}</span>
+            </span>
+          </Link>
+        </div>
+      </div>
+      <div className="portal-satellites">
+        {DIEM_DEN_PHU.map((d) => (
+          <Link key={d.href} href={d.href} className={`portal-satellite portal-sat-${d.href.replace(/\//g, "")}`}>
+            <span className="portal-satellite-icon" aria-hidden="true">
+              {d.icon}
+            </span>
+            <span className="portal-satellite-body">
+              <strong>{d.ten}</strong>
+              <span className="hint">{d.mota}</span>
+            </span>
           </Link>
         ))}
       </div>
@@ -352,6 +414,34 @@ function KeTrongGon({
       <span aria-hidden="true">{icon}</span>
       <span className="hint">{text}</span>
       {action}
+    </div>
+  );
+}
+
+/**
+ * Ke "Đang nổi bật" rỗng — LỜI MỜI trong-thế-giới, không phải một khối
+ * `EmptyState` viền đứt to đặt giữa trang (Visual Renaissance Phase 3, Phần
+ * 8 đặc tả: "transform that shelf into a compact in-world invitation").
+ *
+ * Khác `KeTrongGon` (một dòng, dùng cho "Tiếp tục"): kệ này là kệ QUAN TRỌNG
+ * NHẤT của trang chủ nên được phép có một hoạ tiết + nút CTA riêng, nhưng
+ * vẫn nhỏ hơn nhiều so với `.empty` (viền đứt, padding 48px) dùng chung cho
+ * toàn site — xem `.portal-empty-noibat` ở `globals.css`.
+ */
+function KeTrongNoiBat() {
+  return (
+    <div className="portal-empty-noibat">
+      <MotifManuscript className="portal-motif" />
+      <span className="portal-body">
+        <strong>Thư viện vẫn còn một chỗ trống.</strong>
+        <span className="hint">
+          Chưa có truyện nào được xuất bản — chỗ đầu tiên đang chờ tác giả
+          đầu tiên.
+        </span>
+        <Link className="btn btn-primary btn-sm" href="/write">
+          Viết câu chuyện đầu tiên
+        </Link>
+      </span>
     </div>
   );
 }
@@ -468,7 +558,11 @@ export default function HomePage() {
         </section>
       ) : null}
 
-      <LuoiTinhNang />
+      <TheGioiCong />
+
+      <div className="home-divider" aria-hidden="true">
+        <CelestialDivider />
+      </div>
 
       {/* Ke "Đang nổi bật" — moi tao gan day nhat trong kho truyen (Phan 8). */}
       <section className="stack-5 rise rise-2" aria-labelledby="home-noi-bat">
@@ -485,16 +579,7 @@ export default function HomePage() {
         ) : error ? (
           <ErrorState message={error} onRetry={reload} />
         ) : novels.length === 0 ? (
-          <EmptyState
-            icon="📚"
-            title="Chưa có truyện nào được xuất bản"
-            hint="Khi có tác giả xuất bản truyện đầu tiên, nó sẽ xuất hiện ở đây. Trong lúc chờ, bạn có thể tự viết chương đầu tiên."
-            action={
-              <Link className="btn btn-primary" href="/write">
-                Viết truyện đầu tiên
-              </Link>
-            }
-          />
+          <KeTrongNoiBat />
         ) : novels.length === 1 ? (
           // CHI mot truyen trong ca kho: mot the noi bat gioi han rong, KHONG
           // phai mot hero choan nua trang cho mot du lieu duy nhat.

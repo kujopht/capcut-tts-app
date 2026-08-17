@@ -144,22 +144,22 @@ test("hero moi la mot vung noi dung, khong phai chia doi 50/50", () => {
   }
 });
 
-test("luoi tinh nang LUON ve, khong phu thuoc so truyen/animation/cong dong", () => {
+test("cong the gioi LUON ve, khong phu thuoc so truyen/animation/cong dong", () => {
   const src = home();
-  const at = src.indexOf("<LuoiTinhNang");
+  const at = src.indexOf("<TheGioiCong");
   assert.notEqual(at, -1);
   // Phai nam TRUOC nhanh dieu kien cua ke "Đang nổi bật" (loading/error/rong) —
   // nghia la khong bi mot `&&`/ternary nao cua du lieu truyen bao quanh.
   assert.ok(at < src.indexOf('id="home-noi-bat"'));
   const truoc = src.slice(Math.max(0, at - 200), at);
   assert.ok(!/animationSeries\.length|communityPosts\.length|novels\.length/.test(truoc),
-    "lưới tính năng bị một điều kiện dữ liệu bao quanh");
+    "cổng thế giới bị một điều kiện dữ liệu bao quanh");
 });
 
-test("6 the tinh nang CHI tro toi duong da co that", () => {
+test("6 diem den (3 cong chinh + 3 ve tinh) CHI tro toi duong da co that", () => {
   const src = home();
-  const atDanhSach = src.indexOf("DANH_SACH_TINH_NANG");
-  const than = src.slice(atDanhSach, src.indexOf("function LuoiTinhNang"));
+  const atChinh = src.indexOf("const DIEM_DEN_CHINH");
+  const than = src.slice(atChinh, src.indexOf("function TheGioiCong"));
   const hrefs = [...than.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(hrefs, [
     "/fanfic", "/animation", "/studio", "/community", "/write", "/image-studio",
@@ -175,10 +175,12 @@ test("ke Animation moi / cong dong TU AN khi rong, khong ve hop rong to", () => 
   const src = home();
   assert.match(src, /animationSeries\.length > 0 \? \(/);
   assert.match(src, /communityPosts\.length > 0 \? \(/);
-  // Rong thi tra `null` (khong ve gi), khong phai mot `EmptyState` day du —
-  // `EmptyState` chi con danh cho ke truyen (ke quan trong nhat).
-  const soLanEmptyState = (src.match(/<EmptyState/g) ?? []).length;
-  assert.equal(soLanEmptyState, 1, "chỉ đúng MỘT EmptyState (ke truyện)");
+  // Rong thi tra `null` (khong ve gi). Ke truyen (ke quan trong nhat) rong
+  // thi dung `KeTrongNoiBat` — mot loi moi trong-the-gioi gon, KHONG con
+  // dung `EmptyState` (vien dut day du, qua to cho mot ke — xem Phan 8,
+  // Visual Renaissance Phase 3).
+  assert.ok(!src.includes("<EmptyState"), "vẫn còn dùng EmptyState cho kệ truyện");
+  assert.match(src, /<KeTrongNoiBat/);
 });
 
 test("khong bia so lieu backend khong ho tro (luot xem/nghe/theo doi gia)", () => {

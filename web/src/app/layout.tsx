@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Fraunces } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { SessionProvider } from "@/lib/session";
@@ -10,6 +11,24 @@ import { SiteSearch } from "@/components/SiteSearch";
 import { Logo } from "@/components/Logo";
 import { AudioEngineProvider } from "@/components/AudioEngine";
 import { GlobalMiniPlayer } from "@/components/GlobalMiniPlayer";
+
+/**
+ * Mat chu HIEN THI (Visual Bible V1, muc 4) — dung RAT TIET CHE, chi cho tieu
+ * de lon (Hero, cong the gioi). Tu-host qua `next/font` (tai o BUILD, khong
+ * goi mang luc chay) — bien CSS `--font-display` duoc gan vao `<body>`,
+ * KHONG thay the `--font` (UI/body) hien co.
+ *
+ * Subset "vietnamese" la BAT BUOC: thieu subset nay thi cac ky tu co dau se
+ * roi ve mat chu du phong xau hon thay vi loi ro rang — da kiem tra truc
+ * tiep tren trinh duyet (xem QA Phase 3) truoc khi chot dung font nay.
+ */
+const fraunces = Fraunces({
+  subsets: ["latin", "vietnamese"],
+  weight: ["500", "600"],
+  style: ["normal", "italic"],
+  variable: "--font-display",
+  display: "swap",
+});
 
 // Mo ta cu noi ve viec tao audio truoc tien. San pham nay la nen tang doc va
 // nghe fanfic; Audio Studio la cong cu phu. Mo ta cung phai noi theo thu tu do.
@@ -47,7 +66,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="vi">
-      <body>
+      <body className={fraunces.variable}>
         <SessionProvider>
           <ToastProvider>
           {/*

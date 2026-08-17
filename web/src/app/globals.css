@@ -749,13 +749,20 @@ main { overflow-x: clip; }
   rong trang), nhieu diem dung de tan that muot, dinh do mo thap han han — chi
   con la mot lop day nhe cho nhung nen qua sang, khong con nang do het viec.
 */
+/*
+  V7 Phan 15: 145% CHIEU CAO (gan gap ruoi chinh khoi `.page-head`) khien elip
+  nay TRAI GAN HET chieu cao header — dung nguyen nhan "tam panel chu nhat mo"
+  da phan hoi tren Explore/Animation (dung chung `.page-head` nen sua MOT
+  cho la sua ca hai trang). Cung cong thuc voi `.hero-v2::before`: elip NHO
+  GON hon nhieu, dinh alpha diu hon, tan HOAN TOAN som hon.
+*/
 .page-head::before {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: -20px -48px -16px -36px;
-  background: radial-gradient(62% 145% at 28% 50%,
-    #05070fa8 0%, #05070f70 32%, #05070f38 52%, #05070f12 70%, transparent 86%);
+  inset: -28px -64px -24px -48px;
+  background: radial-gradient(58% 76% at 26% 46%,
+    #05070f6b 0%, #05070f38 44%, #05070f12 64%, transparent 80%);
   pointer-events: none;
 }
 .page-head-body { min-width: 0; }
@@ -2528,7 +2535,20 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   background: var(--line-soft);
 }
 
-.nav-right { gap: var(--s2); }
+/*
+  V7 Phan 7: `.nav-right` ke thua `.row` (flex-wrap: wrap). Header noi (Phase
+  3.6) hep hon truoc mot chut (bot ~32px hai ben cho vien "tach khoi mep
+  trang") — o cac be rong desktop/may tinh bang "vua kit" (thuong hieu + bon
+  muc + o tim + Công cụ + Đăng nhập vua du mot hang), phan con lai cho
+  `.nav-right` co the bi ep hep hon chinh no can, khien `.row`'s flex-wrap
+  XEP DOC "Công cụ"/"Đăng nhập" thay vi giu mot hang — dung dieu da phan hoi
+  ("stacked vertically on desktop").
+
+  SUA: cum hanh dong nay LUON la MOT hang ngang, KHONG bao gio tu co lai/
+  xuong dong — no chi vai icon+nut gon, khong phai noi dung co the ngat.
+  Neu header thieu cho, thu khac (o tim) phai nhuong, khong phai cum nay.
+*/
+.nav-right { gap: var(--s2); flex-wrap: nowrap; flex-shrink: 0; }
 
 /* --------------------------------------------------------- dau muc trang */
 
@@ -3058,13 +3078,23 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   padding-block: var(--s5) var(--s6);
   max-width: 760px;
 }
+/*
+  V7 Phan 11-14: ban truoc (128% chieu cao, dung tan 4 diem) van doc ra nhu
+  MOT TAM PANEL chu nhat mo — dung tinh cach "giam do mo cua mot hinh chu
+  nhat" ma dac ta cam ro, khong phai "suong that". SUA: MOT elip DUY NHAT,
+  NHO GON hon nhieu so voi khoi `.hero-v2` (60% x 78%, khong con 128% chieu
+  cao — 128% la nguyen nhan khien elip gan nhu phu kin toan bo chieu cao
+  khoi, doc ra nhu mot dai/tam thay vi mot vung suong cuc bo), dinh alpha
+  DIU hon han (0x70 ~44% so 0xb0 ~69% cu) va tan HOAN TOAN o 80% — khong con
+  canh nao con lai o bat ky phia nao cua hop inset.
+*/
 .hero-v2::before {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: -32px -60px -24px -48px;
-  background: radial-gradient(68% 128% at 24% 32%,
-    #05070fb0 0%, #05070f80 30%, #05070f48 50%, #05070f1c 68%, transparent 85%);
+  inset: -48px -100px -48px -72px;
+  background: radial-gradient(60% 78% at 28% 42%,
+    #05070f70 0%, #05070f3d 42%, #05070f14 62%, transparent 80%);
   pointer-events: none;
 }
 .hero-v2-title {
@@ -4893,6 +4923,13 @@ body.co-mini { padding-bottom: 74px; }
   gap: var(--s3);
   padding: 0 10px 0 14px;
   height: 38px;
+  /* V7: `min-width: 0` — mac dinh flex item khong tu co duoi kich thuoc NOI
+     DUNG (van ban "Tìm truyện, tác giả, Animation…"), nen trong header hep
+     no se DAY cac phan tu khac ra thay vi tu co lai. `.tim-nut-chu` da san
+     `text-overflow: ellipsis`; can `min-width: 0` o day de co che do thuc su
+     kich hoat duoc khi header thieu cho — day la thu NEN co lai truoc, khong
+     phai cum Công cụ/Đăng nhập (xem `.nav-right`). */
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--r-full);
   background: #0b0e18a3;

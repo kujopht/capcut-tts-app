@@ -59,6 +59,14 @@ export type BangMuc = Map<string, HTMLElement>;
  */
 const CTA_LEAVE_GRACE_MS = 560;
 
+/**
+ * V7: thu hop hop net ve SVG vao trong dung mot nua stroke-width (net LOP A
+ * la 1.25px, tracer la 1.5px — dung chung mot con so gan dung cho ca hai,
+ * chenh lech khong dang ke o muc nay), de net KHONG BAO GIO lo ra ngoai
+ * vien khung du chi mot phan px — thay vi dua vao "khong dang ke" nhu ban cu.
+ */
+const STROKE_INSET = 0.75;
+
 type O = {
   /**
    * `href` ma phep do nay thuoc ve.
@@ -74,15 +82,12 @@ type O = {
   w: number;
   h: number;
   /**
-   * Bo goc DICH — V6: doc THANG tu `getComputedStyle(muc).borderTopLeftRadius`
-   * cua chinh phan tu dang do, KHONG con qua mot bang tham chieu theo "hinh
-   * dang" (`data-nav-shape`/`NAV_RADIUS` cua V5). Ly do doi: hai muc CO THE
-   * dung CUNG mot gia tri bo goc (ca hai deu `--r-full`) nhung KHAC chieu
-   * cao that (xem `h`) — mot bang tra theo "shape" chi bao dam dung mau,
-   * khong bao dam dung KICH THUOC, va chinh sai lech kich thuoc (khong phai
-   * bo goc) la nguyen nhan that cua loi "khung nho hon/khac hinh" da phan
-   * hoi (do duoc tren staging: `.nav-vach` cao co dinh 32px trong khi CTA
-   * "Viết truyện" cao that 38px).
+   * Bo goc HIEU DUNG (V7) — `min(targetRadius, w/2, h/2)`, khong phai gia
+   * tri computed-style tho. Day la GIA TRI DUY NHAT dung cho CA outer span
+   * (`border-radius`) LAN hai rect SVG (`rx`/`ry`) — khong tinh rieng cho
+   * tung noi. Xem chu thich o `do_lai()` cho ly do can clamp truoc (SVG
+   * rx/ry tu clamp theo TUNG TRUC rieng biet, khac CSS border-radius clamp
+   * theo ty le chung — lech nhau gay ra loi "tracer hinh elip").
    */
   radius: number;
   /**
@@ -207,12 +212,28 @@ export function NavIndicator({
       const w = b.width;
       const h = b.height;
       /*
-        Bo goc: doc THANG tu CSS da tinh cua chinh phan tu — khong con bang
-        tra "hinh dang". `borderTopLeftRadius` dai dien vi ca `.nav-link` lan
-        `.nav-cta` deu dung mot gia tri DONG DEU bon goc (`--r2`/`--r-full`
-        qua shorthand `border-radius`), khong co goc lech rieng.
+        V7 — SUA LOI GOC "tracer hinh elip": `.nav-link` (MOI muc, ke ca
+        "Trang chủ") dung `border-radius: var(--r-full)` — mot gia tri PILL
+        rat lon (999px), TU-CLAMP dung khi CSS ve o span ngoai vi CSS
+        border-radius clamp CA HAI truc (ngang/doc) THEO CUNG MOT ty le khi
+        vuot qua kich thuoc hop (giu duong tron o goc), cho ra mot vien
+        thuoc dung hinh vien-thuoc.
+
+        NHUNG SVG `rx`/`ry` clamp THEO TUNG TRUC RIENG BIET (spec SVG2: rx
+        ve width/2, ry ve height/2 MOT CACH DOC LAP) — tren mot hop RONG
+        HON NHIEU so voi CAO (vi du "Trang chủ" ~88x36), dat rx=ry=999 khien
+        SVG tu clamp thanh rx=44 (width/2) NHUNG ry=18 (height/2) — HAI GIA
+        TRI KHAC NHAU, ve ra mot goc HINH ELIP thay vi hinh tron nhu CSS.
+        Day CHINH XAC la nguyen nhan "tracer trong nhu elip" da phan hoi.
+
+        SUA: tu CLAMP truoc trong JS thanh MOT gia tri hieu dung DUY NHAT
+        (khong lon hon nua chieu rong LAN nua chieu cao) — luc do rx va ry
+        dat CUNG mot con so nay se KHONG bao gio bi SVG tu clamp lech nhau
+        nua (vi da nam trong gioi han an toan cua CA HAI truc tu truoc),
+        khop CHINH XAC voi cach CSS border-radius tu ve o outer span.
       */
-      const radius = parseFloat(getComputedStyle(muc).borderTopLeftRadius) || 0;
+      const targetRadius = parseFloat(getComputedStyle(muc).borderTopLeftRadius) || 0;
+      const radius = Math.min(targetRadius, w / 2, h / 2);
       const laCta = muc.dataset.navCta !== undefined;
       bao_roi_cta(laCta);
       setO((truoc) => {
@@ -351,6 +372,7 @@ export function NavIndicator({
       */}
       <svg
         className="nav-vach-svg"
+        viewBox={`0 0 ${o.w} ${o.h}`}
         width="100%"
         height="100%"
         preserveAspectRatio="none"
@@ -358,43 +380,45 @@ export function NavIndicator({
         focusable="false"
       >
         {/*
-          `x`/`y`/`width`/`height` bang KHONG inset — SVG `calc()` trong
-          thuoc tinh XML khong dang tin cay tren moi trinh duyet. Net ve
-          (`stroke`) mac dinh nam GIUA duong path (mot nua trong, mot nua
-          ngoai hop), nen mot net 1-1.5px se chi lo ra ngoai ~0.5-0.75px —
-          khong dang ke, va `.nav-vach` KHONG con `overflow: hidden` (chi
-          can cho tracer/vet sang cu, ca hai da bi go) nen khong co gi cat no.
-        */}
-        {/*
-          `rx`/`ry` DAT QUA CSS (`style.rx`), KHONG qua thuoc tinh XML tinh —
-          day la ly do CHINH cua Reset V5: `rx` la mot presentation property
-          co the CHUYEN DAN bang CSS `transition` (xem `.nav-vach-base-stroke`,
-          `.nav-vach-tracer-stroke`), trong khi doi thuoc tinh XML thuan tuy
-          nhay tuc thi. Dong bo VOI `o.radius` — CUNG mot gia tri, cung luc
-          voi `border-radius` cua `.nav-vach` (Phan 8: "mot ban sac dung
-          chung"), khong tinh rieng.
+          V7: hinh hoc TUONG MINH — `x`/`y`/`width`/`height` la SO THUC, khop
+          `viewBox` phia tren (khong con chuoi "100%"). Ly do doi: voi
+          `width="100%"` truoc day (khong co `viewBox`), SVG tu suy he toa do
+          tu chinh kich thuoc render cua no — VAN dung ve mat toa do, nhung
+          la nen cho `rx`/`ry` (o duoi) mot "mat phang" mo ho hon la mot
+          `viewBox` khai bao thang. Gio moi thu deu quy ve DUNG MOT cap so
+          (`o.w`, `o.h`) — khong con hai co che tinh toa do song song.
+
+          `STROKE_INSET` (0.75, ~nua stroke-width 1.25-1.5px): thu nho hop
+          net ve vao trong DUNG mot nua stroke de net khong bao gio lo ra
+          ngoai vien khung, thay vi dua vao "khong dang ke" nhu truoc.
         */}
         {/* LOP A — vien tinh, khong hoat hinh vi tri (chi doi rx theo morph). */}
         <rect
           className="nav-vach-base-stroke"
-          x="0"
-          y="0"
-          width="100%"
-          height="100%"
+          x={STROKE_INSET}
+          y={STROKE_INSET}
+          width={Math.max(0, o.w - STROKE_INSET * 2)}
+          height={Math.max(0, o.h - STROKE_INSET * 2)}
           fill="none"
-          style={{ rx: `${o.radius}px`, ry: `${o.radius}px` } as React.CSSProperties}
+          style={{
+            rx: `${Math.max(0, o.radius - STROKE_INSET)}px`,
+            ry: `${Math.max(0, o.radius - STROKE_INSET)}px`,
+          } as React.CSSProperties}
         />
         {/* LOP B — tracer: MOT doan ngan chay quanh chu vi, dung yen sau khi
             dung (`data-dung-yen`) hoac duoi prefers-reduced-motion (CSS). */}
         <rect
           className="nav-vach-tracer-stroke"
-          x="0"
-          y="0"
-          width="100%"
-          height="100%"
+          x={STROKE_INSET}
+          y={STROKE_INSET}
+          width={Math.max(0, o.w - STROKE_INSET * 2)}
+          height={Math.max(0, o.h - STROKE_INSET * 2)}
           fill="none"
           pathLength="100"
-          style={{ rx: `${o.radius}px`, ry: `${o.radius}px` } as React.CSSProperties}
+          style={{
+            rx: `${Math.max(0, o.radius - STROKE_INSET)}px`,
+            ry: `${Math.max(0, o.radius - STROKE_INSET)}px`,
+          } as React.CSSProperties}
         />
       </svg>
     </span>

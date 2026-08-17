@@ -67,13 +67,20 @@ test("NavIndicator ve DUNG MOT <svg> chua hai <rect fill=\"none\">", () => {
   }
 });
 
-test("hai rect dung CHUNG hinh hoc (x/y/width/height/rx) — khop chinh xac vien vach", () => {
+test("hai rect dung CHUNG hinh hoc (x/y/width/height) — khop chinh xac vien vach", () => {
+  // V7: khong con "x=0/width=100%" tinh — hinh hoc gio TUONG MINH, quy ve
+  // viewBox (o.w/o.h) va thu vao STROKE_INSET o ca bon canh (xem
+  // nav-indicator-motion-correction-v7.test.mjs cho chi tiet).
   const src = codeOnly(navIndicator());
   const base = src.match(/<rect\s+className="nav-vach-base-stroke"[\s\S]*?\/>/)?.[0] ?? "";
   const tracer = src.match(/<rect\s+className="nav-vach-tracer-stroke"[\s\S]*?\/>/)?.[0] ?? "";
   assert.notEqual(base, "");
   assert.notEqual(tracer, "");
-  for (const attr of ['x="0"', 'y="0"', 'width="100%"', 'height="100%"']) {
+  for (const attr of [
+    "x={STROKE_INSET}", "y={STROKE_INSET}",
+    "width={Math.max(0, o.w - STROKE_INSET * 2)}",
+    "height={Math.max(0, o.h - STROKE_INSET * 2)}",
+  ]) {
     assert.ok(base.includes(attr), `base-stroke thiếu ${attr}`);
     assert.ok(tracer.includes(attr), `tracer-stroke thiếu ${attr}`);
   }

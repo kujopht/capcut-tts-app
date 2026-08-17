@@ -57,20 +57,25 @@ test("O co truong radius/y/h, tinh CUNG luc voi x/w trong setO — khong tach ro
   assert.match(src, /return \{ moc, x, y, w, h, radius, truot \};/);
 });
 
-test(".nav-vach dat border-radius tu o.radius — cung mot nguon voi ca hai rect SVG", () => {
+test(".nav-vach dat border-radius tu o.radius — cung mot nguon voi ca hai rect SVG (V7: tru STROKE_INSET)", () => {
+  // V7: rx/ry cua rect gio la `o.radius - STROKE_INSET` (thu hep hop net ve
+  // vao trong dung mot nua stroke) — van CUNG mot nguon `o.radius` voi outer
+  // span, chi lech mot hang so co dinh da biet. Xem
+  // nav-indicator-motion-correction-v7.test.mjs cho test rx/ry chi tiet.
   const src = codeOnly(navIndicator());
   assert.match(src, /borderRadius:\s*`\$\{o\.radius\}px`/);
-  const rxCount = (src.match(/rx:\s*`\$\{o\.radius\}px`/g) ?? []).length;
-  const ryCount = (src.match(/ry:\s*`\$\{o\.radius\}px`/g) ?? []).length;
-  assert.equal(rxCount, 2, "phải đúng HAI rect (base + tracer) dùng chung o.radius cho rx");
-  assert.equal(ryCount, 2, "phải đúng HAI rect (base + tracer) dùng chung o.radius cho ry");
+  const rxCount = (src.match(/rx:\s*`\$\{Math\.max\(0, o\.radius - STROKE_INSET\)\}px`/g) ?? []).length;
+  const ryCount = (src.match(/ry:\s*`\$\{Math\.max\(0, o\.radius - STROKE_INSET\)\}px`/g) ?? []).length;
+  assert.equal(rxCount, 2, "phải đúng HAI rect (base + tracer) dùng chung công thức rx");
+  assert.equal(ryCount, 2, "phải đúng HAI rect (base + tracer) dùng chung công thức ry");
 });
 
 test("rx/ry dat qua CSS style (chuyen dan duoc), khong phai thuoc tinh XML tinh", () => {
   const src = codeOnly(navIndicator());
-  assert.ok(!/rx="\d/.test(src), "vẫn còn rx là thuộc tính XML tĩnh — không chuyển dần được");
-  assert.ok(!/ry="\d/.test(src), "vẫn còn ry là thuộc tính XML tĩnh — không chuyển dần được");
-  assert.match(src, /style=\{\{ rx: `\$\{o\.radius\}px`, ry: `\$\{o\.radius\}px` \} as React\.CSSProperties\}/g);
+  assert.ok(!/\brx="\d/.test(src), "vẫn còn rx là thuộc tính XML tĩnh — không chuyển dần được");
+  assert.ok(!/\bry="\d/.test(src), "vẫn còn ry là thuộc tính XML tĩnh — không chuyển dần được");
+  const styleCount = (src.match(/style=\{\{\s*rx:\s*`\$\{Math\.max\(0, o\.radius - STROKE_INSET\)\}px`,\s*ry:\s*`\$\{Math\.max\(0, o\.radius - STROKE_INSET\)\}px`,?\s*\} as React\.CSSProperties\}/g) ?? []).length;
+  assert.equal(styleCount, 2, "phải đúng HAI rect đặt rx/ry qua style theo công thức mới");
 });
 
 /* ============================ hoat hinh hinh dang: 380-480ms nhu de nghi = */

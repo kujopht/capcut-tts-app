@@ -354,7 +354,9 @@ test("muc dang xem tren thanh dieu huong cung vay", () => {
   // Vach 2px da thanh mot VIEN THUOC: mot hinh co the tich, nen mat theo duoc no
   // di qua khoang trong giua hai muc thay vi chi thay mot gach ngang doi cho.
   // Dieu KHONG doi: muc dang xem van khong duoc to ca nen bang mau dac.
-  assert.match(css(), /\.nav-vach \{[^}]*border-radius: var\(--r-full\)/s);
+  // Navigation Motion Correction V3: `--r-full` (vien tron) doi thanh `--r2`
+  // (vuong vuc hon) — van la MOT hinh co the tich, chi doi bo goc.
+  assert.match(css(), /\.nav-vach \{[^}]*border-radius: var\(--r2\)/s);
   // Navigation Motion Correction V2: nen doi tu trang mo (#ffffff0f, gay
   // "quang trang") sang navy toi pha tron tu `--bg` — van la MOT be mat
   // rieng (khong phai mau dac cua trang thai), chi khong con trang.

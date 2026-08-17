@@ -90,15 +90,18 @@ test("noi that vach la NAVY TOI (tu --bg), khong phai nen sang", () => {
 
 test("vien vach pha tron cyan+tim cua khu vuc (--sac-1/--sac-2), KHONG vien trang", () => {
   const than = rule(".nav-vach");
-  assert.match(than, /border: 1\.25px solid color-mix\(in srgb, var\(--sac-1/);
+  // Navigation Motion Correction V3: border con 1px (tu 1.25px) — van net,
+  // van pha tron sac khu vuc, khong doi mau.
+  assert.match(than, /border: 1px solid color-mix\(in srgb, var\(--sac-1/);
   assert.match(than, /var\(--sac-2/);
 });
 
-test("quang ngoai RAT NHO va CHI mau khu vuc — khong lam sang ca navbar", () => {
+test("V3: KHONG CON box-shadow/glow nao tren vach dang xem — chi vien + nen + chu", () => {
+  // Phan hoi V3: ke ca "quang rat nho" cua V2 van bi coi la glow. Phan biet
+  // trang thai active gio CHI den tu do tuong phan be mat, vien net, mau chu
+  // — khong tu do sang.
   const than = rule(".nav-vach");
-  // Blur toi da ~8px (cho phep spread am nho de thu hep).
-  const blur = Number(than.match(/0 0 (\d+)px -?\d*px? color-mix/)?.[1]);
-  assert.ok(blur > 0 && blur <= 10, `blur ${blur}px — cần rất nhỏ (<=10px)`);
+  assert.ok(!/box-shadow/.test(than), "vẫn còn box-shadow trên .nav-vach");
 });
 
 test("chu muc dang xem la GAN-TRANG (--text), khong con nhan sac rieng", () => {

@@ -374,8 +374,12 @@ test("MOT vien thuoc, khong phai mot vach cho moi muc", () => {
     nen mat theo duoc no di qua khoang trong giua hai muc.
   */
   const than = khoi(css(), ".nav-vach {");
-  assert.match(than, /border-radius: var\(--r-full\)/, "vẫn là một vạch");
-  assert.match(than, /height: 34px/);
+  // Navigation Motion Correction V3: bo goc doi tu `--r-full` (vien tron,
+  // "nut thuoc") sang `--r2` — mot dau hieu vuong vuc, dung tinh than
+  // "modern anime UI marker" thay vi "nut phat sang". Van la MOT hinh co
+  // the tich (khong phai gach ngang), chi khac bo goc.
+  assert.match(than, /border-radius: var\(--r2\)/, "vẫn là một hình có thể tích");
+  assert.match(than, /height: 32px/);
   assert.match(than, /transition:[\s\S]*transform/);
   // Navigation Motion Correction V2: doi sang cubic-bezier(.22,.8,.2,1) —
   // van la ease-out co kiem soat, KHONG nay lai.

@@ -118,10 +118,27 @@ export function NavIndicator({
       const hop = bao.current;
       const muc = moc ? bang.current.get(moc) : undefined;
       /*
-        Trang khong co muc nao khop (`/login`, `/admin`, `/u/*`): khong do gi ca.
-        Trang thai cu o lai, nhung `o.moc !== moc` nen render tra `null` — vien
-        thuoc bien mat ma khong can mot `setState` trong than effect.
+        SUA (Navigation Motion Correction V3): truoc day nhanh nay CHI
+        `return` — bo qua, khong dong `o`. Ket qua: hinh hoc CU (vi du "Viết
+        truyện") nam yen trong state trong suot ca luc trang khong co muc nao
+        active that su (`/login` khong `next=` hop le), roi khi mot muc MOI
+        xuat hien, no "hien lai tu vi tri an cu" thay vi xuat hien thang tai
+        dich — dung nhu phan hoi da ghi nhan ("tai xuat hien tu vi tri Viết
+        truyện cu").
+
+        `moc` rong (khong phai chi thieu `muc`) nghia la trang NAY THAT SU
+        khong co gi active — xoa sach `o` de lan xuat hien tiep theo la mot
+        phep do DAU TIEN (`truot` se la `false`, xem `O.truot`), tuc la XUAT
+        HIEN THANG tai dich, khong truot tu hinh hoc an cu.
+
+        Khi `moc` co gia tri nhung CHUA tim thay `muc` (khung hinh dau tien
+        truoc khi cac Link kip dang ky vao `bang`) thi GIU NGUYEN `o` — day
+        chi la chua do KIP, khong phai "khong co gi active".
       */
+      if (!moc) {
+        setO((truoc) => (truoc === null ? truoc : null));
+        return;
+      }
       if (!hop || !muc) return;
 
       const a = hop.getBoundingClientRect();

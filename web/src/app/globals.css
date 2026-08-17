@@ -1016,35 +1016,31 @@ main { overflow-x: clip; }
   la mot vong 1px. Hai thu khong duoc tranh nhau.
 */
 /*
-  SUA LAI VE MAU/CHAT LIEU (Navigation Motion Correction V2): ban truoc nen
-  trang 6% + ba lop box-shadow co mau trang (`#ffffff08`, `#ffffff1f`) chong
-  len quang mau — cong lai thanh mot "quang trang bloom" nhat nhoa, doc chu
-  kho hon thay vi de hon. Thiet ke lai "Moonlit Arcane Frame": nen NAVY TOI
-  (dam hon kinh header, khong pha trang), MOT vien 1.25px pha tron cyan+tim
-  cua khu vuc (khong con vien trang), quang NGOAI RAT NHO (toi da ~8px, chi
-  mau cyan/tim, khong bao gio lam sang ca thanh dieu huong).
+  SUA LAI LAN 2 (Navigation Motion Correction V3): bo HOAN TOAN box-shadow —
+  ke ca ban "quang rat nho" cua V2 van bi coi la "glow". Phan biet trang thai
+  active gio CHI den tu DO TUONG PHAN be mat + vien sac net + mau chu, KHONG
+  con tu do sang. Bo goc tu `--r-full` (vien tron 999px, "nut thuoc") xuong
+  `--r2` (10px) — mot dau hieu vuong vuc, chinh xac hon, dung tinh than
+  "modern anime UI marker" thay vi "nut phat sang".
 */
 .nav-vach {
   position: absolute;
   left: 0;
   top: 50%;
   z-index: 0;
-  height: 34px;
-  margin-top: -17px;
-  border-radius: var(--r-full);
+  height: 32px;
+  margin-top: -16px;
+  border-radius: var(--r2);
   pointer-events: none;
-  /* Cat vet sang (`.nav-vach-streak`) theo dung hinh vien nhon — xem ghi chu
-     tai dinh nghia streak. Khong anh huong `box-shadow`: no ve NGOAI hop nen
-     khong bi `overflow` cua chinh hop cat mat. */
+  /* Cat vet sang (`.nav-vach-streak`) va vong tracer (`::before`) theo dung
+     hinh vien nhon — xem ghi chu tai dinh nghia tung cai. */
   overflow: hidden;
   /* Dam hon kinh header (`--glass: #0f1119b8`) mot chut — day la "trong
      KHU VUC dang xem", nen phai doc duoc la mot be mat rieng, khong phai
      mot vung sang mo. */
   background: color-mix(in srgb, var(--bg) 82%, transparent);
-  border: 1.25px solid color-mix(in srgb, var(--sac-1, var(--brand)) 65%, var(--sac-2, var(--brand-hover)) 35%);
-  box-shadow:
-    0 0 8px -2px color-mix(in srgb, var(--sac-1, var(--brand)) 55%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--sac-1, var(--brand)) 20%, transparent);
+  /* Vien LOP A (tinh, net, khong glow) — pha tron cyan+tim cua khu vuc. */
+  border: 1px solid color-mix(in srgb, var(--sac-1, var(--brand)) 65%, var(--sac-2, var(--brand-hover)) 35%);
   /*
     `cubic-bezier(.22,.8,.2,1)` — ease-out co kiem soat, khong nay lai: canh
     toi dich muot nhung khong lo do (do do bi hieu la "do choi").
@@ -1059,11 +1055,45 @@ main { overflow-x: clip; }
   transition:
     transform 460ms cubic-bezier(.22, .8, .2, 1),
     width 540ms cubic-bezier(.22, .8, .2, 1),
-    border-color 420ms var(--ease),
-    box-shadow 420ms var(--ease);
+    border-color 420ms var(--ease);
 }
 /* Chu phai nam TREN vien thuoc. */
 .nav-link { z-index: 1; }
+
+/*
+  LOP B — "tracer" vien mong chay quanh chu vi luc dung yen.
+
+  KHAC HAN khung nang luong cu o o tim (da bo o Phase 1): o day CHI mot doan
+  cung NGAN (~15% chu vi) sang, phan con lai TRONG SUOT — vien LOP A ben duoi
+  van thay ro, tinh, gan nhu luc nao cung. Ky thuat GIONG khung o tim cu (mask
+  kep + transform: rotate), nhung conic-gradient chi to MOT cung ngan thay vi
+  ca vong tron — do la khac biet hinh anh mau chot giua "mot tia nang luong
+  di qua HUD" (dung y o day) va "ca khung phat sang xoay" (dieu KHONG dung).
+
+  KHONG blur, KHONG box-shadow, KHONG opacity nhap nhay — chi mot vien 1.25px
+  net xoay cham (5.2s/vong, gan nhu tuyen tinh).
+*/
+@keyframes nav-tracer-xoay { to { transform: rotate(1turn); } }
+.nav-vach::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.25px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--sac-1, var(--accent)) 4%,
+    var(--sac-2, var(--brand-hover)) 11%,
+    transparent 15%,
+    transparent 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: nav-tracer-xoay 5.2s linear infinite;
+}
 
 /*
   Vet sang "cong dich" — chay MOT LAN doc vien khi vach vua den noi (xem
@@ -2901,8 +2931,14 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   DAC — khong tai dien loi "mat chu tren nen dac" da ghi o dinh nghia
   `.nav-link[aria-current="page"]`.
 */
+/*
+  SUA (Visual Bible v1.1, "Modern Anime Fantasy"): bo `font-style: italic` —
+  chu nghieng serif la tin hieu "bien tap/van hoc" manh nhat, di nguoc dung y
+  "modern anime, khong phai trang sach". Van giu mau nhan (`--accent-hover`)
+  va mat chu hien thi (thua huong tu `.hero-v2-title`) de van co net rieng.
+*/
 .hero-v2-title em {
-  font-style: italic;
+  font-style: normal;
   font-weight: 500;
   color: var(--accent-hover);
 }
@@ -2966,7 +3002,17 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
     box-shadow 180ms var(--ease);
 }
 .portal-card:hover { color: inherit; transform: translateY(-3px); box-shadow: var(--shadow-2), var(--edge); }
-.portal-truyen { min-height: 316px; }
+/*
+  SUA (Visual Bible v1.1, Phan M): cong Truyen la khoi LON NHAT tren trang —
+  nen dac 85-96% cu doc ra nhu "mot chu nhat den" de len tranh nen. Doi sang
+  gradient TRONG hon o phia TREN (nghe thuat nen con tham gia bo cuc) va chi
+  dac lai gan DAY (noi chu ngoi), giu du tuong phan de doc chu ma khong choan
+  het khoi.
+*/
+.portal-truyen {
+  min-height: 316px;
+  background: linear-gradient(180deg, #0b0e1873 0%, #0b0e1899 45%, #080a11ec 100%);
+}
 
 /* Hoa tiet nen — mo, dat GOC DUOI PHAI, khong bao gio de len chu (z-index
    thap hon `.portal-body`, va mo du de khong canh tranh voi chu). */
@@ -3009,7 +3055,13 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 .portal-animation .portal-icon { color: var(--sac-animation-1); border-color: color-mix(in srgb, var(--sac-animation-1) 45%, transparent); background: color-mix(in srgb, var(--sac-animation-1) 14%, transparent); }
 .portal-audio .portal-icon { color: var(--sac-studio-1); border-color: color-mix(in srgb, var(--sac-studio-1) 45%, transparent); background: color-mix(in srgb, var(--sac-studio-1) 14%, transparent); }
 
-.portal-title { font-family: var(--font-display); font-size: var(--t-xl); font-weight: 600; }
+/*
+  SUA (Visual Bible v1.1): bo `--font-display` (Fraunces) khoi tieu de cong —
+  day la DIEU HUONG SAN PHAM (Truyen/Animation/Audio), khong phai "khoanh
+  khac cau chuyen". Mat chu hien thi CHI con danh cho Hero H1 — tranh ca
+  trang chu nga ve huong "trang bien tap" thay vi "san pham anime hien dai".
+*/
+.portal-title { font-size: var(--t-xl); font-weight: 700; letter-spacing: -0.01em; }
 .portal-truyen .portal-title { font-size: var(--t-2xl); }
 
 .portal-truyen:hover { border-color: color-mix(in srgb, var(--sac-explore-1) 55%, transparent); }
@@ -3029,6 +3081,10 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   padding: var(--s3);
   border-radius: var(--r3);
   border: 1px solid var(--kinh-vien);
+  /* Vien TRAI mo — dau hieu phan biet BA ve tinh voi nhau (Visual Bible
+     v1.1, Phan M: "khong don gian la 3 the mini giong het nhau"), moi loai
+     mot mau khu vuc rieng, khong can hoa tiet rieng cho tung cai. */
+  border-left: 2px solid var(--kinh-vien);
   background: #0b0e18b3;
   color: inherit;
   text-decoration: none;
@@ -3036,6 +3092,9 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   transition: border-color 180ms var(--ease), background 180ms var(--ease);
 }
 .portal-satellite:hover { color: inherit; background: #0b0e18e0; }
+.portal-sat-community { border-left-color: color-mix(in srgb, var(--sac-community-1) 55%, transparent); }
+.portal-sat-write { border-left-color: color-mix(in srgb, var(--sac-write-1) 55%, transparent); }
+.portal-sat-image-studio { border-left-color: color-mix(in srgb, var(--brand) 45%, transparent); }
 .portal-satellite-icon {
   display: grid;
   place-items: center;
@@ -4065,6 +4124,9 @@ body.co-mini { padding-bottom: 74px; }
      giua duong (dung ly do da ghi o dau khoi nay cho `.progress-bar::after`) —
      an han di. */
   .nav-vach-streak { display: none; }
+  /* Tracer vien (LOP B): dat het chuyen dong xoay, dung yen — vien LOP A
+     (tinh, khong bi mai nay dong toi) van du de nhan biet trang thai active. */
+  .nav-vach::before { animation: none; }
 
   /* Chuyen canh nen: bo phan PHONG TO, giu mot lan mo/hien rat ngan de khong
      giat. Doi anh tuc thi cung duoc, nhung mot cu nhay giua hai tam sang toi

@@ -273,3 +273,83 @@ Tổng hợp ngắn (chi tiết đầy đủ đã có ở yêu cầu gốc Phầ
 Tài liệu này KHÔNG tự ý đổi màu/token đã tồn tại, KHÔNG code CSS/component
 cho các trang Phase 3-8 — đó là việc của từng phase kế tiếp, mỗi phase có
 checkpoint QA + commit riêng theo đúng Phần N của yêu cầu.
+
+---
+
+# Bản v1.1 — Hiệu chỉnh "Modern Anime Fantasy" (2026-08)
+
+Phản hồi sau khi xem Phase 3 + Navigation V1/V2 trên staging: hướng đi cơ bản
+đúng, nhưng bị lệch quá xa về "fantasy huyền bí phát sáng" (glow, glass, viền
+tim tràn lan) và "biên tập/serif" (Fraunces dùng hơi nhiều nơi). Mục tiêu thật
+là **MODERN ANIME FANTASY** — màu sắc rõ ràng, bố cục sạch, hiệu ứng RẤT tiết
+chế. Cán cân đã thống nhất:
+
+Fantasy 8/10 · Màu anime 7/10 · UI hiện đại 9/10 · Điện ảnh 8/10 · Chuyển động
+4/10 · **Glow 1/10** · Kính 3/10 · Hoạ tiết 3/10 · Mật độ thị giác 5/10.
+
+## 1. Hệ màu ngữ nghĩa (thay cho danh sách token rời rạc ở mục 3)
+
+Token hex CŨ (`--brand`, `--accent`, `--sac-*`...) KHÔNG đổi giá trị — mục
+này chỉ đặt VAI TRÒ rõ ràng để tránh dùng tuỳ tiện:
+
+| Họ | Token | Vai trò |
+|---|---|---|
+| NỀN | `--bg`, `--bg-1..3` | Đêm trăng/mực xanh — nền MỌI bề mặt |
+| CHỮ | `--text` (ngọc trai), `--text-2`/`--text-3` (xám sương lạnh) | Chữ chính — KHÔNG bao giờ dùng `--sac-*` cho chữ thân |
+| ANIME CHÍNH | `--accent` (cyan trời quang) | Một điểm nhấn CHÍNH mỗi màn hình |
+| ANIME PHỤ | `--brand`/`--brand-hover` (tím pháp thuật kiềm chế) | Tối đa MỘT điểm nhấn phụ cùng lúc với cyan |
+| CẢM XÚC | `--vang`/`--vang-sang` (đèn lồng/hổ phách), các `--sac-*-2` ngả hồng (`#f0a6c8`, `#fda4af`) | Chi tiết CON NGƯỜI — huy hiệu, thành tựu, hồng anh đào — không phủ diện rộng |
+
+Quy tắc cứng: **một màn hình = nền + MỘT accent chính + tối đa MỘT accent
+theo ngữ cảnh.** Không rainbow UI — nếu một component cần hơn 2 màu nhấn
+cùng lúc, bỏ bớt màu chứ không thêm khung.
+
+## 2. Vật liệu — giảm kính, giảm viền, giảm chữ nhật đen
+
+- **Bỏ hẳn `box-shadow`/`filter: blur`/quầng sáng trên trạng thái điều
+  hướng đang chọn** — đã áp dụng cho `.nav-vach` (Navigation Motion
+  Correction V3). Phân biệt trạng thái CHỈ bằng độ tương phản bề mặt + viền
+  nét + màu chữ, không bằng độ sáng.
+- Ưu tiên **bề mặt navy phân lớp** hơn kính mờ (`backdrop-filter`) ở nơi
+  không thực sự cần — kính chỉ dành cho lớp NỔI thật sự (header, hộp tìm),
+  không lặp lại ở mọi thẻ.
+- Thẻ/khối lớn (ví dụ cổng "Truyện" ở trang chủ) nên GIẢM độ đục của lớp phủ
+  tối để nghệ thuật nền còn tham gia bố cục, thay vì đọc ra như "một chữ
+  nhật đen" — xem sửa `page.tsx`/`globals.css` cho `.portal-truyen`.
+
+## 3. Ngôn ngữ chuyển động v1.1 — "Anime motion graphics, không phải glow"
+
+Thay triết lý chuyển động cũ (chủ yếu nói về glow/vệt sáng) bằng:
+
+- **Đường kẻ sạch di chuyển** (tracer viền `.nav-vach::before`) thay cho hào
+  quang tĩnh — MỘT đoạn ngắn ~15% chu vi, không blur, không glow, chu kỳ
+  4.5–6s, dừng hẳn khi `prefers-reduced-motion`.
+- **Vệt sáng một lần** (`.nav-vach-streak`) khi cổng di chuyển — vẫn giữ,
+  đã đúng tinh thần "MỘT khoảnh khắc dàn dựng" từ v1.0.
+- KHÔNG: gradient xoay liên tục toàn khung (đã gỡ ở Phase 1), glow thở/nhấp
+  nháy, hạt phép thuật rải khắp trang.
+- Được phép: mask reveal, dịch chuyển độ sâu rất nhỏ (parallax nhẹ), chuyển
+  cảnh ảnh nền có hướng (đã có ở `PageBackground.tsx`).
+
+## 4. Chữ — cân bằng lại, không để cả sản phẩm thành trang biên tập
+
+`--font-display` (Fraunces) CHỈ còn dùng ở **Hero H1 trang chủ** — một "khoảnh
+khắc câu chuyện" duy nhất mỗi trang. Tiêu đề cổng (`Truyện`/`Animation`/
+`Audio`), điều hướng, nút, form, metadata đều dùng `--font` (sans hiện đại)
+— đây là UI sản phẩm, không phải trang sách. Chữ nghiêng serif ở phần nhấn
+mạnh Hero (`<em>`) đã bỏ — nghiêng cổ điển là tín hiệu "biên tập" mạnh nhất,
+không hợp "modern anime". Trang đọc chương (`Reader`) vẫn được phép giữ chất
+văn học hơn — đó là nơi DUY NHẤT ưu tiên cảm giác sách.
+
+## 5. Vật liệu điều hướng (chuẩn tham chiếu cho các khu vực khác sau này)
+
+`.nav-vach` là mẫu THAM CHIẾU cho mọi "điểm đánh dấu trạng thái đang chọn"
+sau này trong sản phẩm (tab, chip đang chọn, bước đang active...):
+
+- Bo góc vuông vức vừa phải (`--r2`), không bo tròn viên thuốc.
+- Nền navy tối hơn nền xung quanh — KHÔNG nền trắng mờ.
+- Viền 1px pha giữa hai sắc khu vực — KHÔNG viền trắng.
+- KHÔNG box-shadow ở bất kỳ dạng nào.
+- Chữ dùng `--text` (gần-trắng cố định) — không nhận màu khu vực.
+- Tối đa MỘT hiệu ứng chuyển động phụ (tracer viền RẤT tiết chế) — không bắt
+  buộc, chỉ thêm khi nó thực sự truyền tải trạng thái.

@@ -3,9 +3,10 @@
 /** Dieu huong chinh + cong cu + khu vuc tai khoan. Tach client de dung phien. */
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { viTri } from "@/lib/sections";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { resolveNavHref } from "@/lib/nav";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 import { NotificationBell } from "@/components/NotificationBell";
@@ -47,8 +48,43 @@ const LINKS = [
   { href: "/write", label: "Viết truyện", cta: true },
 ];
 
+const HREFS = LINKS.map((l) => l.href);
+
+/**
+ * `useSearchParams()` bat buoc mot bien Suspense (Next.js se tu bai bo ve
+ * client render neu khong co, va build tinh — vi du `/_not-found` — se loi
+ * han). Fallback la CHINH cac lien ket, chi thieu vien thuoc/aria-current —
+ * khong lech bo cuc, va vi day la mot khoi "use client" nen fallback chi
+ * thay duoc trong mot khung hinh cuc ngan luc hydrate, khong phai mot trang
+ * thai nguoi dung thuc su gap.
+ */
+function DanhSachLienKetTinh() {
+  return (
+    <nav className="nav-links" aria-label="Điều hướng chính">
+      {LINKS.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className={link.cta ? "nav-link nav-cta" : "nav-link"}
+        >
+          {link.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
 export function NavLinks() {
+  return (
+    <Suspense fallback={<DanhSachLienKetTinh />}>
+      <NavLinksThat />
+    </Suspense>
+  );
+}
+
+function NavLinksThat() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   /*
     `hop` de `NavIndicator` do vi tri muc dang xem. Vach nam TRONG hang nay chu
     khong o mot tang khac: no duoc dat theo toa do trong hang, va hang thi cuon
@@ -70,13 +106,12 @@ export function NavLinks() {
     `href` cua muc dang xem — tinh MOT lan o day, dung cho ca `aria-current` lan
     vien thuoc. Truyen `pathname` roi de vien thuoc tu do DOM se dua voi chu ky
     ve cua React; da do duoc dieu do tren trinh duyet.
+
+    DUNG `resolveNavHref`, KHONG so pathname tho: `/login?next=%2Fwrite` phai
+    tinh la "write" (dang giua luong Viet truyen, chi tam dieu huong qua trang
+    xac thuc) chu khong phai "khong co muc nao" — xem docstring ham do.
   */
-  const dangXem =
-    LINKS.find((l) =>
-      l.href === "/"
-        ? pathname === "/"
-        : pathname === l.href || pathname.startsWith(`${l.href}/`),
-    )?.href ?? "";
+  const dangXem = resolveNavHref(pathname, searchParams.get("next"), HREFS);
   return (
     <nav className="nav-links" aria-label="Điều hướng chính" ref={hop}>
       {LINKS.map((link) => {

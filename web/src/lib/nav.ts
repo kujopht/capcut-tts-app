@@ -41,3 +41,44 @@ export function loginHref(next: string): string {
     ? "/login"
     : `/login?next=${encodeURIComponent(target)}`;
 }
+
+/**
+ * Khoa dieu huong dang xem TU NGU NGHIA, khong chi tu pathname tho.
+ *
+ * LOI DA XAY RA (Navigation Motion Correction V3): khach bam "Viết truyện"
+ * o trang chu -> `/write` tu doi huong phia client sang
+ * `/login?next=%2Fwrite` (xem `write/page.tsx`). Vien thuoc dua hoan toan
+ * vao `pathname` tho thi thay `/login` KHONG khop muc nao trong thanh dieu
+ * huong -> an di -> roi tai xuat hien tu vi tri "Viết truyện" cu (hinh hoc
+ * an cu) khi nguoi dung dieu huong tiep — trong khi ve mat nguoi dung ho
+ * VAN dang o giua luong "Viết truyện", chua roi khoi no.
+ *
+ * CACH SUA: `/login`/`/register` VOI `next=` tro toi mot khu vuc dieu huong
+ * duoc coi la CHINH khu vuc do, khong phai "khong co gi". Dung lai
+ * `safeNext` (da co, da kiem open-redirect) de doc `next` — mot cong hai
+ * viec thay vi mot ham rieng.
+ *
+ * CHI /login, /register: day la HAI trang trung gian xac thuc DUY NHAT
+ * trong san pham dung tham so `next` theo dung quy uoc cua `loginHref`.
+ */
+export function resolveNavHref(
+  pathname: string,
+  next: string | null | undefined,
+  hrefs: readonly string[],
+): string {
+  const khop = (path: string): string =>
+    hrefs.find((h) =>
+      h === "/" ? path === "/" : path === h || path.startsWith(`${h}/`),
+    ) ?? "";
+
+  const truc_tiep = khop(pathname);
+  if (truc_tiep) return truc_tiep;
+
+  if (pathname === "/login" || pathname === "/register") {
+    const dich = safeNext(next);
+    if (dich !== DEFAULT_NEXT) {
+      return khop(dich.split("?")[0].split("#")[0]);
+    }
+  }
+  return "";
+}

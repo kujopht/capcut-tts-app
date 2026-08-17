@@ -1,7 +1,14 @@
 /*
- * Homepage Hub V2 + khung sang o tim (2026-08) — rang buoc cua vong thiet ke
- * nay. Chuan hoa CRLF -> LF truoc khi so khop chuoi chinh xac (checkout tren
- * Windows co the ghi CRLF, xem bai hoc o `admin-trusted-sources.test.mjs`).
+ * Homepage Hub V2 + sua lai hieu ung dieu huong (2026-08) — rang buoc cua
+ * vong thiet ke nay. Chuan hoa CRLF -> LF truoc khi so khop chuoi chinh xac
+ * (checkout tren Windows co the ghi CRLF, xem bai hoc o
+ * `admin-trusted-sources.test.mjs`).
+ *
+ * SUA LAI (Navigation Motion Correction v1): vong truoc hieu nham yeu cau va
+ * ve mot khung nang luong XOAY LIEN TUC quanh o tim. Nguoi dung KHONG muon
+ * vay — o tim tra ve tinh gian, va hieu ung "di chuyen" ho thuc su muon nam o
+ * VACH DIEU HUONG dang xem (`.nav-vach`, `NavIndicator.tsx`). Cac test cu cho
+ * khung xoay o tim da bi XOA va thay bang test cho hanh vi MOI o duoi day.
  */
 
 import { test } from "node:test";
@@ -26,51 +33,48 @@ function rule(selector) {
   return text.slice(at, text.indexOf("}", at));
 }
 
-/* ==================================================== khung sang o tim ==== */
+/* ============================================== o tim: TINH GIAN, khong xoay */
 
-test("khung nang luong: dung transform xoay + mask kep, KHONG dung JS rAF", () => {
+test("KHONG con khung nang luong xoay lien tuc quanh o tim (da bi loai bo)", () => {
   const css_ = css();
-  assert.match(css_, /@keyframes tim-vien-xoay \{\s*to \{ transform: rotate\(1turn\); \}/);
-  assert.match(css_, /mask-composite: exclude;/);
-  assert.match(css_, /-webkit-mask-composite: xor;/);
-  // KHONG dung requestAnimationFrame o component tim kiem cho hieu ung trang tri.
+  assert.ok(!css_.includes("tim-vien-xoay"), "vẫn còn keyframe xoay đã bị gỡ");
+  assert.ok(!css_.includes("tim-vien-mach"), "vẫn còn keyframe mạch đã bị gỡ");
+  assert.ok(!css_.includes("tim-hop-dang-tim"), "vẫn còn lớp trạng thái của khung xoay cũ");
+  assert.ok(!/\.tim-nut::before/.test(css_), "nút gọn vẫn có pseudo-element viền xoay");
+  assert.ok(!/\.tim-hop::before/.test(css_), "hộp tìm vẫn có pseudo-element viền xoay");
+});
+
+test("o tim go gon: IDLE tinh, HOVER chi sang vien (khong them glow/animation)", () => {
+  const nut = codeOnly(rule(".tim-nut"));
+  assert.ok(!/box-shadow:/.test(nut), "IDLE vẫn có box-shadow — spec yêu cầu viền tĩnh, không glow");
+  assert.ok(!/animation:/.test(nut));
+  assert.match(nut, /border: 1px solid var\(--line\)/);
+  const hover = codeOnly(rule(".tim-nut:hover"));
+  assert.match(hover, /border-color: var\(--line-strong\)/);
+  assert.ok(!/box-shadow:/.test(hover), "HOVER thêm box-shadow — spec yêu cầu CHỈ viền sáng hơn");
+});
+
+test("hop tim mo rong (FOCUS): quang TINH, khong keyframe, co vien accessible", () => {
+  const hop = codeOnly(rule(".tim-hop"));
+  assert.match(hop, /box-shadow:/);
+  assert.ok(!/animation:/.test(hop), "FOCUS vẫn có animation liên tục");
+  // O nhap ben trong van co vien tieu diem ro rang khi dieu huong bang ban phim.
+  const dau = rule(".tim-dau:focus-within");
+  assert.match(dau, /box-shadow: var\(--ring\)/);
+});
+
+test("SEARCHING: chi bao nho o BEN TRONG (spinner), khong phai ca khung tim quay", () => {
+  const overlay = read("../src/components/SearchOverlay.tsx");
+  assert.match(overlay, /trangThai === "dang-tai"/);
+  assert.match(overlay, /className="spinner"/);
+  // KHONG con class trang thai rieng cho ca hop tim (do la co che cua khung xoay cu).
+  assert.ok(!overlay.includes("tim-hop-dang-tim"));
+});
+
+test("KHONG dung requestAnimationFrame o component tim kiem", () => {
   for (const f of ["../src/components/SearchOverlay.tsx", "../src/components/SiteSearch.tsx"]) {
     assert.ok(!read(f).includes("requestAnimationFrame"), `${f} dùng rAF cho hiệu ứng`);
   }
-});
-
-test("khung nang luong ap dung cho CA nut go gon lan hop tim mo rong", () => {
-  const css_ = css();
-  assert.match(css_, /\.tim-nut::before,\s*\n\.tim-hop::before \{/);
-});
-
-test("nut go gon: sang len muot khi ro chuot (transition, khong nhay cung)", () => {
-  const nut = rule(".tim-nut");
-  assert.match(nut, /position: relative;/);
-  assert.match(nut, /box-shadow:.*var\(--brand-glow\)/);
-  assert.match(nut, /transition:[\s\S]*box-shadow/);
-  const hover = rule(".tim-nut:hover");
-  assert.match(hover, /box-shadow:/);
-});
-
-test("hop tim mo rong: vien sang hon IDLE va co mach nhe (opacity, khong scale rung)", () => {
-  const css_ = css();
-  // dung lastIndexOf: ".tim-hop::before {" cung xuat hien o dong 2 cua quy
-  // tac chung ".tim-nut::before,\n.tim-hop::before {" phia truoc — chi quy
-  // tac RIENG (sau cung) moi co mach nhe + inset:0.
-  const at = css_.lastIndexOf(".tim-hop::before {");
-  assert.notEqual(at, -1);
-  const than = css_.slice(at, css_.indexOf("}", at));
-  assert.match(than, /animation: tim-vien-xoay[^,]+,\s*tim-vien-mach/);
-  assert.match(than, /inset: 0;/, "phải dùng inset:0 (không âm) vì .tim-hop có overflow:hidden");
-});
-
-test("trang thai DANG TIM tang nhip nang luong, khong ve rieng mot thanh tien do", () => {
-  const css_ = css();
-  assert.match(css_, /\.tim-hop\.tim-hop-dang-tim::before \{/);
-  const overlay = read("../src/components/SearchOverlay.tsx");
-  assert.match(overlay, /tim-hop-dang-tim/);
-  assert.match(overlay, /trangThai === "dang-tai"/);
 });
 
 test("placeholder o tim phan anh toan bo nen tang, khong chi truyen", () => {
@@ -81,16 +85,50 @@ test("placeholder o tim phan anh toan bo nen tang, khong chi truyen", () => {
   }
 });
 
-test("moi hieu ung khung sang deu nam duoi mai reduced-motion toan cuc, khong tu y !important rieng", () => {
-  // Rang buoc CHUNG (redesign.test.mjs) da khoa: `*, *::before, *::after` bi
-  // ep `animation-duration: 0.01ms !important` duoi `prefers-reduced-motion:
-  // reduce`. O day chi can xac nhan cac keyframes/animation MOI khong tu y
-  // dat `!important` rieng — neu co thi se THANG ca luat toan cuc do va pha
-  // rang buoc "tat duoc bang prefers-reduced-motion".
+/* ===================================== vach dieu huong: "cong dich" di chuyen */
+
+test("vach dieu huong TRUOT bang transform/width, KHONG dung JS rAF", () => {
+  // Loai bo chu thich truoc: docstring cua file GIAI THICH vi sao KHONG dung
+  // rAF, nen ban than chu "requestAnimationFrame" xuat hien trong prose.
+  const src = codeOnly(read("../src/components/NavIndicator.tsx"));
+  assert.ok(!src.includes("requestAnimationFrame"));
+  const nav = rule(".nav-vach");
+  assert.match(nav, /transform \d+ms/);
+  assert.match(nav, /width \d+ms/);
+});
+
+test("width TOI DICH cham hon transform mot chut — tao cam giac gian/nen nhe", () => {
+  // Khong dung mot thuoc tinh/animation rieng cho "stretch": chi lech thoi
+  // luong giua hai transition da co (transform vs width) la du tao cam giac
+  // khung tam thoi gian dai hon dich roi mem lai.
+  const nav = rule(".nav-vach");
+  const t = Number(nav.match(/transform (\d+)ms/)?.[1]);
+  const w = Number(nav.match(/width (\d+)ms/)?.[1]);
+  assert.ok(t > 0 && w > 0);
+  assert.ok(w > t, `width (${w}ms) phải chậm hơn transform (${t}ms) để tạo hiệu ứng giãn nhẹ`);
+  assert.ok(w - t <= 150, "lệch quá xa sẽ trông như lỗi, không phải hiệu ứng có chủ đích");
+});
+
+test("vet sang 'cong dich' chay MOT LAN khi vach den noi, dung lai keyframe sheen da co", () => {
   const css_ = css();
-  const at = css_.indexOf(".tim-nut::before,");
-  const khoi = css_.slice(at, css_.indexOf("tim-hop-dang-tim::before {") + 200);
-  assert.ok(!khoi.includes("!important"), "khung sáng dùng !important — sẽ thắng cả luật reduced-motion");
+  const streak = rule(".nav-vach-streak");
+  assert.match(streak, /animation: sheen \d+ms var\(--ease\) 1\b/, "phải chỉ định 1 lần lặp, không phải infinite");
+  assert.ok(!css_.match(/\.nav-vach-streak[^}]*infinite/s), "vệt sáng lặp vô hạn — spec yêu cầu MỘT LẦN rồi tắt hẳn");
+
+  const src = read("../src/components/NavIndicator.tsx");
+  assert.match(src, /key=\{o\.tick\}/, "vệt sáng phải remount theo tick để animation chạy lại mỗi lần đổi route");
+  // tick CHI tang khi MUC that su doi — khong tang khi do lai vi resize/cuon.
+  assert.match(src, /truoc\.moc !== moc/);
+});
+
+test("vach + vet sang deu duoc tat/nhay tuc thi duoi prefers-reduced-motion", () => {
+  const css_ = css();
+  const khoi = css_.slice(
+    css_.indexOf("@media (prefers-reduced-motion: reduce)"),
+    css_.indexOf("@media (prefers-reduced-motion: reduce)") + 4000,
+  );
+  assert.match(khoi, /\.nav-vach \{ transition: none; \}/);
+  assert.match(khoi, /\.nav-vach-streak \{ display: none; \}/);
 });
 
 /* ==================================================== homepage hub ======== */

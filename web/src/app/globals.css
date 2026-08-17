@@ -1016,6 +1016,10 @@ main { overflow-x: clip; }
   margin-top: -17px;
   border-radius: var(--r-full);
   pointer-events: none;
+  /* Cat vet sang (`.nav-vach-streak`) theo dung hinh vien nhon — xem ghi chu
+     tai dinh nghia streak. Khong anh huong `box-shadow`: no ve NGOAI hop nen
+     khong bi `overflow` cua chinh hop cat mat. */
+  overflow: hidden;
   background: #ffffff0f;
   border: 1px solid var(--sac-1, var(--brand-line));
   box-shadow:
@@ -1025,15 +1029,40 @@ main { overflow-x: clip; }
   /*
     `cubic-bezier(.22,1,.36,1)` — ease-out manh, khong nay lai. Mot duong cong co
     do vong (spring) doc ra nhu do choi tren mot thanh dieu huong.
+
+    `width` CHAM HON `transform` mot chut (520ms so 420ms) — CHU Y, khong phai
+    lech vo tinh: canh dan (theo `transform`) toi noi truoc, be rong (theo
+    `width`) toi sau, nen khung tam thoi "gian" dai hon dich trong luc di
+    chuyen roi mem lai dung kich thuoc. Đây la "stretch/compression nhe" ma
+    khong can them mot dong JS hay mot thuoc tinh moi nao — chi lech thoi
+    luong giua hai transition da co san.
   */
   transition:
     transform 420ms cubic-bezier(.22, 1, .36, 1),
-    width 420ms cubic-bezier(.22, 1, .36, 1),
+    width 520ms cubic-bezier(.22, 1, .36, 1),
     border-color 420ms var(--ease),
     box-shadow 420ms var(--ease);
 }
 /* Chu phai nam TREN vien thuoc. */
 .nav-link { z-index: 1; }
+
+/*
+  Vet sang "cong dich" — chay MOT LAN doc vien khi vach vua den noi (xem
+  `NavIndicator.tsx`, `key={o.tick}` la co che khien no chay lai moi lan doi
+  route). Dung LAI keyframe `sheen` da co (xem `.progress-bar::after`) thay vi
+  dung mot keyframe rieng — cung mot "vet sang chay ngang mot lan" nhung o
+  moi noi khac trong san pham.
+
+  Y NGHIA: "cong dang toi da di chuyen sang mot the gioi khac" — mot tia sang
+  chay qua vien roi tat, KHONG phai mot vong xoay vinh vien.
+*/
+.nav-vach-streak {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(100deg, transparent, #ffffffb0, transparent);
+  animation: sheen 480ms var(--ease) 1;
+}
 
 /*
   Chu cua muc dang xem: sang len va nhan sac cua khu vuc do.
@@ -3842,6 +3871,10 @@ body.co-mini { padding-bottom: 74px; }
   /* Vach dieu huong: nhay thang sang muc moi, khong truot. */
   .nav-vach { transition: none; }
   .nav-link[aria-current="page"] { transition: none; }
+  /* Vet sang "cong dich": rut thoi luong ve 0 van de lai mot vach sang lo lung
+     giua duong (dung ly do da ghi o dau khoi nay cho `.progress-bar::after`) —
+     an han di. */
+  .nav-vach-streak { display: none; }
 
   /* Chuyen canh nen: bo phan PHONG TO, giu mot lan mo/hien rat ngan de khong
      giat. Doi anh tuc thi cung duoc, nhung mot cu nhay giua hai tam sang toi
@@ -4321,11 +4354,17 @@ body.co-mini { padding-bottom: 74px; }
    O tim o header gio la mot NUT MO overlay. Ve NHU mot o nhap chu khong nhu mot
    cai nut: nguoi ta tim mot o de go, va mot cai nut ghi "Tim kiem" thi mat luot
    qua khong nhan ra.
+
+   SUA LAI (2026-08, sau phan hoi thiet ke): vong dau ve mot khung nang luong
+   XOAY LIEN TUC quanh o tim — hieu nham yeu cau. O tim la noi go chu, KHONG
+   phai noi trung bay hieu ung; da bo han khung xoay, tra ve IDLE/HOVER/FOCUS
+   TINH (chi doi border-color/box-shadow qua transition, khong keyframe).
+   Hieu ung "di chuyen" NGUOI DUNG THUC SU MUON nam o `.nav-vach`
+   (`NavIndicator.tsx`) — vach chi khu vuc dang xem tren thanh dieu huong.
    ========================================================================== */
 
 .tim-nut {
   position: relative;
-  isolation: isolate;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4338,18 +4377,17 @@ body.co-mini { padding-bottom: 74px; }
   color: var(--text-3);
   font-size: var(--t-sm);
   cursor: text;
-  /* Quang ngoai CUC nhe khi dung yen — chi mot vien mo, khong choi mat. Sang
-     len o `:hover` qua transition, khong phai keyframe rieng (xem spec "HOVER:
-     glow increases smoothly"). */
-  box-shadow: 0 0 0 1px transparent, 0 2px 14px -4px var(--brand-glow);
+  /* THIET KE KIEM CHE (2026-08, sua sau phan hoi): ban truoc co mot khung
+     nang luong xoay lien tuc quanh o nay — nguoi dung khong yeu cau hieu ung
+     do, va bo tra lai dang tinh gian di. IDLE la mot be mat toi mo VOI vien
+     tinh, KHONG glow, KHONG animation lap. */
   transition: border-color var(--dur-fast) var(--ease),
-    background var(--dur-fast) var(--ease),
-    box-shadow var(--dur) var(--ease);
+    background var(--dur-fast) var(--ease);
 }
+/* HOVER: CHI vien sang hon — khong them glow, khong bien doi kich thuoc. */
 .tim-nut:hover {
   border-color: var(--line-strong);
   background: #0b0e18cc;
-  box-shadow: 0 0 0 1px var(--brand-line), 0 4px 22px -4px var(--brand-glow);
 }
 .tim-nut-chu { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tim-phim {
@@ -4363,77 +4401,6 @@ body.co-mini { padding-bottom: 74px; }
   font-size: 11px;
   color: var(--text-3);
 }
-
-/*
-  Khung nang luong dong quanh o tim (V2, Homepage Hub) — ap dung cho CA hai:
-  nut go gon o header (`.tim-nut`, trang thai IDLE/HOVER) va hop tim mo rong
-  (`.tim-hop`, luon coi la trang thai FOCUS vi o nhap ben trong tu dong nhan
-  tieu diem khi mo, xem `SearchOverlay.tsx`).
-
-  KY THUAT: mot `::before` phu RONG bang mask kep (content-box tru padding-box
-  = chi con lai mot VONG mong, khong phai ca khoi) roi XOAY bang
-  `transform: rotate` — khong doi goc `conic-gradient` qua `@property` (it
-  trinh duyet ho tro hon) va khong dung JS rAF. `transform`/`opacity` la hai
-  thu duy nhat hoat hinh o day: ca hai deu chi ton compositor, khong bao gio
-  lam lai layout du chay vo han.
-
-  MAU: tim (`--brand`) -> lam (`--accent`) -> trong suot, dung lai DUNG hai
-  bien mau chinh cua he thong (khong bia mau moi) — chuyen mau giua tim va
-  lam tu nhien di qua cac sac xanh lam trung gian, dung y "purple/cyan/blue"
-  ma khong can mot bien "xanh lam" rieng. KHONG dung `--vang`: bien do danh
-  rieng cho chi tiet nho (xem ghi chu tai dinh nghia `--vang`), dung lam
-  vien cho mot hieu ung noi bat se pha vo quy uoc "khong trang nao duoc phep
-  nhin vang".
-*/
-@keyframes tim-vien-xoay {
-  to { transform: rotate(1turn); }
-}
-@keyframes tim-vien-mach {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 0.85; }
-}
-
-.tim-nut::before,
-.tim-hop::before {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  z-index: -1;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    var(--brand) 90deg,
-    var(--accent) 190deg,
-    transparent 280deg,
-    transparent 360deg
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0.5;
-  animation: tim-vien-xoay 7s linear infinite;
-  pointer-events: none;
-}
-/* HOVER (nut go gon): vien sang len — nhanh hon mot chut de cam giac "song". */
-.tim-nut:hover::before { opacity: 0.75; animation-duration: 4.5s; }
-
-/* FOCUS (hop tim da mo): vien sang hon IDLE + mach nhe (khong nhap nhay manh —
-   bien do opacity chi 0.55-0.85, KHONG dung scale/box-shadow rung vi de gay
-   choang mat trong mot hop chiem giua man hinh). */
-.tim-hop::before {
-  /* `inset: 0` (khong am) — `.tim-hop` co `overflow: hidden` de cat noi dung
-     cuon theo goc tron, se cat luon phan vien lo ra ngoai khoi neu dung -1px
-     nhu `.tim-nut`. */
-  inset: 0;
-  padding: 2px;
-  opacity: 0.7;
-  animation: tim-vien-xoay 6s linear infinite, tim-vien-mach 2.4s ease-in-out infinite;
-}
-/* DANG TIM (SEARCHING): nang luong chay nhanh hon MOT CHUT khi dang cho ket
-   qua tu may chu — tin hieu tinh te, khong phai thanh tien do rieng. */
-.tim-hop.tim-hop-dang-tim::before { animation-duration: 2.2s, 1.4s; }
 
 .tim-lop {
   position: fixed;
@@ -4450,22 +4417,22 @@ body.co-mini { padding-bottom: 74px; }
 }
 .tim-hop {
   position: relative;
-  isolation: isolate;
   width: min(680px, 100%);
   max-height: 78vh;
   display: flex;
   flex-direction: column;
   border-radius: var(--r4);
   background: #080a14e8;
-  /* `overflow: hidden` cat noi dung cuon (`.tim-than`) theo goc tron — nhung
-     cung se cat luon vien nang luong neu no lo ra ngoai khoi. `.tim-hop::before`
-     vi vay dung `inset: 0` (nam TRON trong bien, khong lo ra nhu `.tim-nut`)
-     thay vi -1px, xem quy tac o dinh nghia `::before` chung. */
+  /* `overflow: hidden` cat noi dung cuon (`.tim-than`) theo goc tron. */
   overflow: hidden;
-  /* Ghi de `box-shadow` cua `.kinh` (dung chung selector, nhung khai bao nay
-     nam sau trong tep nen thang) — giu lai net sang mep tren cua kinh
-     (`--kinh-sang`) va them quang tim phia ngoai. */
-  box-shadow: 0 0 40px -12px var(--brand-glow), var(--do-sau-manh), var(--kinh-sang);
+  /* FOCUS: mot quang tim TINH (khong animation) — day la trang thai duy nhat
+     coi la "focus" cua o tim (o nhap ben trong tu dong nhan tieu diem khi mo,
+     xem `SearchOverlay.tsx`). Ghi de `box-shadow` cua `.kinh` (dung chung
+     selector, nhung khai bao nay nam sau trong tep nen thang) — giu lai net
+     sang mep tren cua kinh (`--kinh-sang`) va them mot vien 1px + quang nhe
+     phia ngoai, KHONG animation. */
+  box-shadow: 0 0 0 1px var(--brand-line), 0 0 28px -10px var(--brand-glow),
+    var(--do-sau-manh), var(--kinh-sang);
 }
 .tim-dau {
   display: flex;

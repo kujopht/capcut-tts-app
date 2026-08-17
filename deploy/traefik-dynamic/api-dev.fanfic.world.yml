@@ -51,8 +51,16 @@ http:
           # phan giai qua DNS noi bo cua Docker.
           - url: "http://fanfic-dev-api:8010"
 
-# Khoi `tls.certificates` cho chung chi Let's Encrypt THAT cua
-# api-dev.fanfic.world duoc THEM SAU, sau khi DNS phan giai va chay certbot
-# thu cong (dung mau voi appwrite-dev.fanfic.world, xem
-# docs/reports/appwrite-selfhost-gce-summary.md muc 15.3) — KHONG dat truoc
-# o day vi file chung chi chua ton tai tren VM cho toi luc do.
+# Chung chi Let's Encrypt THAT — cap qua certbot thu cong MOT LAN
+# (`certbot certonly -v --webroot --noninteractive --agree-tos --email
+# <_APP_SYSTEM_EMAIL_ADDRESS> --cert-name api-dev.fanfic.world -w
+# /storage/certificates -d api-dev.fanfic.world`, dung CHINH XAC lenh
+# `Appwrite\Certificates\LetsEncrypt::issueCertificate()` se chay, cung
+# mau voi appwrite-dev.fanfic.world — xem
+# docs/reports/appwrite-selfhost-gce-summary.md muc 15.3). Het han
+# 2026-11-15 — can lap lai thao tac nay truoc ngay do (khong tu renew,
+# giong appwrite-dev.fanfic.world).
+tls:
+  certificates:
+    - certFile: /storage/certificates/api-dev.fanfic.world/fullchain.pem
+      keyFile: /storage/certificates/api-dev.fanfic.world/privkey.pem

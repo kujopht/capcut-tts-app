@@ -42,6 +42,7 @@
  * nhap rieng, xem `DaiThanhVien`).
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback } from "react";
 import {
@@ -345,6 +346,14 @@ function TheGioiCong() {
       </h2>
       <div className="portal-primary">
         <Link href={DIEM_DEN_CHINH[0].href} className="portal-card portal-truyen">
+          <Image
+            src="/images/portals/truyen-manuscript.webp"
+            alt=""
+            fill
+            sizes="(max-width: 900px) 100vw, 66vw"
+            className="portal-art"
+          />
+          <span className="portal-overlay" aria-hidden="true" />
           <CornerRune className="portal-rune" />
           <MotifManuscript className="portal-motif" />
           <span className="portal-body">
@@ -357,6 +366,14 @@ function TheGioiCong() {
         </Link>
         <div className="portal-stack">
           <Link href={DIEM_DEN_CHINH[1].href} className="portal-card portal-animation">
+            <Image
+              src="/images/portals/animation-projector.webp"
+              alt=""
+              fill
+              sizes="(max-width: 900px) 50vw, 33vw"
+              className="portal-art"
+            />
+            <span className="portal-overlay" aria-hidden="true" />
             <MotifFilmFrame className="portal-motif" />
             <span className="portal-body">
               <span className="portal-icon" aria-hidden="true">
@@ -682,13 +699,22 @@ export default function HomePage() {
         de doc/xem/nghe.
       */}
       <section className="cta-band" aria-labelledby="home-tac-gia">
+        <Image
+          src="/images/portals/creator-worldbuilding.webp"
+          alt=""
+          fill
+          loading="lazy"
+          sizes="100vw"
+          className="cta-band-art"
+        />
+        <span className="cta-band-overlay" aria-hidden="true" />
         <div className="cta-band-body">
           <h2 className="section-title" id="home-tac-gia">
-            Bạn cũng viết fanfic?
+            Dựng nên thế giới của riêng bạn
           </h2>
           <p className="hint">
-            Tạo truyện, thêm chương, rồi tạo audio bằng giọng đọc tiếng Việt.
-            Truyện để ở bản nháp cho tới khi bạn tự xuất bản.
+            Viết truyện, thêm chương, rồi biến chữ thành giọng đọc và hình
+            ảnh. Truyện để ở bản nháp cho tới khi bạn tự xuất bản.
           </p>
         </div>
         <div className="row">

@@ -2944,13 +2944,34 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   trong. Van dinh THANG len tranh nen (khong `background` rieng) nhu
   `.home-intro` cu — chi rong hon va co them mot hang loi tat phu.
 */
+/*
+  Phase 3.5, Phan 5 "Hero contrast": tren nen artwork sang (vi du bau troi
+  gan trang/may sang cua `home`), tieu de+doan mo ta Hero tung gan nhu bien
+  mat vi KHONG co lop nao giua chu va tranh (khac `.page-head` o cac trang
+  khac, da co san `.page-head::before` lam dung viec nay). KHONG dung
+  text-shadow nang (dac ta cam ro) — thay bang MOT quang mo/suong xanh-navy
+  RAT feather, bam theo dung vung chu (pill+tieu de+doan mo ta+CTA), lech
+  sang trai vi Hero can le trai (`align-items: flex-start`). Ban kinh/diem
+  dung tat dan o 85% de KHONG bao gio doc ra la "mot hinh chu nhat" — chi la
+  mot vung khi quyen tam roi dan vao tranh nen.
+*/
 .hero-v2 {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: var(--s3);
   padding-block: var(--s5) var(--s6);
   max-width: 760px;
+}
+.hero-v2::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -32px -60px -24px -48px;
+  background: radial-gradient(68% 128% at 24% 32%,
+    #05070fb0 0%, #05070f80 30%, #05070f48 50%, #05070f1c 68%, transparent 85%);
+  pointer-events: none;
 }
 .hero-v2-title {
   font-family: var(--font-display);
@@ -3048,11 +3069,46 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 */
 .portal-truyen {
   min-height: 316px;
-  background: linear-gradient(180deg, #0b0e1873 0%, #0b0e1899 45%, #080a11ec 100%);
+}
+
+/*
+  Phase 3.5 "Cinematic Homepage Polish": Truyện + Animation nay co MOT anh
+  minh hoa that (sinh qua Pollinations, khoa theo aesthetic
+  `fanfic-world-modern-anime-fantasy` — xem
+  docs/design/fanfic-world-modern-anime-fantasy-aesthetic.md), thay cho hoa
+  tiet SVG dep + nen den day 45-93% opacity cu ("mot chu nhat den" bi phan
+  hoi). `.portal-art` la LOP DUOI CUNG; `.portal-overlay` la lop phu TOI vua
+  du de chu doc duoc, dat GIAM opacity o TREN (nghe thuat con tham gia bo
+  cuc) va DAM hon o DUOI (noi chu ngoi) — dung tinh than Visual Bible v1.1
+  muc 2. `.portal-audio` CHUA co anh rieng o vong nay — van dung hoa tiet SVG
+  + nen phang cu, xem `.portal-card` (fallback).
+*/
+.portal-art {
+  object-fit: cover;
+  z-index: 0;
+}
+/* Anh Animation cao~vuong (1200x1000) nhung o rat det (~3:1) — mac dinh
+   "center" chi lo phan troi trong o giua anh. Lech tam nhin XUONG duoi de lo
+   dung may chieu/man chieu (chu the chinh cua anh). */
+.portal-animation .portal-art {
+  object-position: center 78%;
+}
+.portal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.portal-truyen .portal-overlay {
+  background: linear-gradient(180deg, #0b0e1859 0%, #0b0e1888 42%, #080a11e6 100%);
+}
+.portal-animation .portal-overlay {
+  background: linear-gradient(165deg, #0b0e1852 0%, #0b0e1885 48%, #080a11e6 100%);
 }
 
 /* Hoa tiet nen — mo, dat GOC DUOI PHAI, khong bao gio de len chu (z-index
-   thap hon `.portal-body`, va mo du de khong canh tranh voi chu). */
+   thap hon `.portal-body`, va mo du de khong canh tranh voi chu). CHI con
+   dung cho cong CHUA co anh minh hoa that (Audio, va cac ve tinh). */
 .portal-motif {
   position: absolute;
   right: -10px;
@@ -3065,15 +3121,19 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   pointer-events: none;
   z-index: 0;
 }
-.portal-truyen .portal-motif { color: var(--sac-explore-1); opacity: 0.16; }
-.portal-animation .portal-motif { color: var(--sac-animation-1); opacity: 0.16; }
 .portal-audio .portal-motif { color: var(--sac-studio-1); opacity: 0.16; }
+/* Truyện/Animation co anh that o lop duoi — bo hoa tiet SVG de tranh CHONG
+   hai lop chat lieu cung luc (chi mot lop "chat lieu nen" moi cong). */
+.portal-truyen .portal-motif,
+.portal-animation .portal-motif {
+  display: none;
+}
 
-.portal-rune { position: absolute; top: var(--s3); left: var(--s3); color: var(--sac-explore-1); z-index: 1; }
+.portal-rune { position: absolute; top: var(--s3); left: var(--s3); color: var(--sac-explore-1); z-index: 2; }
 
 .portal-body {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -3254,7 +3314,17 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   Dat o CUOI, sau khi nguoi doc da xem truyen. Dat no o tren thi thanh ra bao
   nguoi vua vao rang hay di lam viec — trong khi ho den de doc.
 */
+/*
+  Phase 3.5: "ket luan thi giac" cua trang chu — ket hop anh minh hoa that
+  (manuscript-tro-thanh-the-gioi, sinh qua Pollinations, khoa theo aesthetic
+  `fanfic-world-modern-anime-fantasy`) thay cho glow tim toa tron cu (`radial-
+  gradient(...#8b6cff29...)`). KHONG con vien/glow trang tri — kich thuoc
+  (dai hon, thap hon) va anh nen tao kich tinh, dung tinh than "artwork
+  provides drama, not CSS glow" cua dac ta.
+*/
 .cta-band {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3263,11 +3333,23 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   padding: var(--s6);
   border-radius: var(--r4);
   border: 1px solid var(--brand-line);
-  background:
-    radial-gradient(720px 240px at 12% 0%, #8b6cff29, transparent 70%),
-    linear-gradient(180deg, #0a0d1aa3, #070910a8);
+  background: linear-gradient(180deg, #0a0d1aa3, #070910a8);
   box-shadow: var(--edge);
+  min-height: 220px;
 }
+.cta-band-art {
+  object-fit: cover;
+  object-position: 72% 40%;
+  z-index: 0;
+}
+.cta-band-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(100deg, #080a11f0 0%, #0a0d1ac2 38%, #0a0d1a6b 62%, #0a0d1a3d 100%);
+}
+.cta-band-body, .cta-band > .row { position: relative; z-index: 2; }
 .cta-band-body { display: flex; flex-direction: column; gap: var(--s2); max-width: 62ch; }
 .cta-band h2 { font-size: var(--t-lg); }
 

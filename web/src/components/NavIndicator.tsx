@@ -195,10 +195,27 @@ export function NavIndicator({
   }, [bao, bang, moc]);
 
   /*
-    `o.moc !== moc` nghia la phep do dang co la CUA ROUTE TRUOC — trang hien tai
-    khong co muc nao trong thanh dieu huong. An vien thuoc di.
+    SUA LOI GOC (Navigation Motion Correction V2): ban truoc kiem tra
+    `o.moc !== moc` de an vien thuoc o trang khong co muc nao khop — nhung
+    `moc` (prop) doi NGAY khi route doi, con `o.moc` (state) chi bat kip SAU
+    khi layout effect do lai xong. Giua hai thoi diem do, dieu kien tren
+    THANG (`o.moc` van la route CU) va component tra `null` — React GO HAN
+    the `<span class="nav-vach">`. Layout effect roi setO() gia tri MOI, ve
+    lai, mount MOT the <span> HOAN TOAN MOI tai vi tri dich. Transition CSS
+    khong bao gio co co hoi chay: no can HAI khung hinh da ve tren CUNG MOT
+    phan tu de noi suy, ma o day phan tu bi thao roi gan lai truoc khi trinh
+    duyet kip ve khung nao ca — nguoi dung chi thay "vach cu bien mat, vach
+    moi xuat hien tai cho khac", dung nhu phan hoi da ghi nhan.
+
+    CACH SUA: chi an vien thuoc khi CHINH `moc` (route hien tai) rong — day
+    la truong hop THAT su khong co muc nao de danh dau (`/login`, `/admin`,
+    `/u/*`). Con lai LUON ve THE <span> DUY NHAT bang toa do MOI NHAT da do
+    (`o.x`/`o.w`), du `o.moc` co tam thoi chua kip khop `moc` hay khong — the
+    nay khong bao gio bi thao/gan lai giua hai lan dieu huong, nen transition
+    `transform`/`width` co CA HAI khung hinh (cu va moi) tren CUNG MOT phan
+    tu de trinh duyet noi suy that.
   */
-  if (!o || o.moc !== moc) return null;
+  if (!moc || !o) return null;
 
   return (
     <span

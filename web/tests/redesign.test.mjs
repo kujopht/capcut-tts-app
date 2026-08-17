@@ -355,7 +355,10 @@ test("muc dang xem tren thanh dieu huong cung vay", () => {
   // di qua khoang trong giua hai muc thay vi chi thay mot gach ngang doi cho.
   // Dieu KHONG doi: muc dang xem van khong duoc to ca nen bang mau dac.
   assert.match(css(), /\.nav-vach \{[^}]*border-radius: var\(--r-full\)/s);
-  assert.match(css(), /\.nav-vach \{[^}]*background: #ffffff0f/s);
+  // Navigation Motion Correction V2: nen doi tu trang mo (#ffffff0f, gay
+  // "quang trang") sang navy toi pha tron tu `--bg` — van la MOT be mat
+  // rieng (khong phai mau dac cua trang thai), chi khong con trang.
+  assert.match(css(), /\.nav-vach \{[^}]*background: color-mix\(in srgb, var\(--bg\)/s);
 });
 
 /* ================================ nhung loi CHI thay duoc khi mo trinh duyet */

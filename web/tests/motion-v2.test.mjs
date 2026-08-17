@@ -377,10 +377,11 @@ test("MOT vien thuoc, khong phai mot vach cho moi muc", () => {
   assert.match(than, /border-radius: var\(--r-full\)/, "vẫn là một vạch");
   assert.match(than, /height: 34px/);
   assert.match(than, /transition:[\s\S]*transform/);
-  // Ease-out manh, KHONG nay lai: mot duong cong co do vong doc ra nhu do choi.
-  assert.match(than, /cubic-bezier\(\.22, 1, \.36, 1\)/);
+  // Navigation Motion Correction V2: doi sang cubic-bezier(.22,.8,.2,1) —
+  // van la ease-out co kiem soat, KHONG nay lai.
+  assert.match(than, /cubic-bezier\(\.22, \.8, \.2, 1\)/);
   const ms = Number(than.match(/transform (\d+)ms/)?.[1]);
-  assert.ok(ms >= 350 && ms <= 500, `${ms}ms — cần 350–500`);
+  assert.ok(ms >= 350 && ms <= 560, `${ms}ms — cần 350–560`);
 });
 
 test("vien thuoc nam DUOI chu", () => {
@@ -509,7 +510,9 @@ test("nhan muc dang xem KHONG BAO GIO trong suot", () => {
   assert.ok(!/background-clip/.test(than),
     "nhãn mục đang xem lại phụ thuộc background-clip: text");
   assert.ok(!/color: transparent/.test(than), "nhãn mục đang xem trong suốt");
-  assert.match(than, /color: var\(--sac-2/, "nhãn không có màu đặc");
+  // Navigation Motion Correction V2: chu doi tu mau theo khu vuc (`--sac-2`)
+  // sang `--text` co dinh (gan-trang) — nhung van phai la MOT MAU DAC.
+  assert.match(than, /color: var\(--text\)/, "nhãn không có màu đặc");
 });
 
 test("vien thuoc do tu BANG THAM CHIEU, khong tu querySelector", () => {

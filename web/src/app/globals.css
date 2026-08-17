@@ -1015,6 +1015,15 @@ main { overflow-x: clip; }
   Nhe han nut CTA "Viết truyện": nen mo han, khong co gradient dac, va quang chi
   la mot vong 1px. Hai thu khong duoc tranh nhau.
 */
+/*
+  SUA LAI VE MAU/CHAT LIEU (Navigation Motion Correction V2): ban truoc nen
+  trang 6% + ba lop box-shadow co mau trang (`#ffffff08`, `#ffffff1f`) chong
+  len quang mau — cong lai thanh mot "quang trang bloom" nhat nhoa, doc chu
+  kho hon thay vi de hon. Thiet ke lai "Moonlit Arcane Frame": nen NAVY TOI
+  (dam hon kinh header, khong pha trang), MOT vien 1.25px pha tron cyan+tim
+  cua khu vuc (khong con vien trang), quang NGOAI RAT NHO (toi da ~8px, chi
+  mau cyan/tim, khong bao gio lam sang ca thanh dieu huong).
+*/
 .nav-vach {
   position: absolute;
   left: 0;
@@ -1028,15 +1037,17 @@ main { overflow-x: clip; }
      tai dinh nghia streak. Khong anh huong `box-shadow`: no ve NGOAI hop nen
      khong bi `overflow` cua chinh hop cat mat. */
   overflow: hidden;
-  background: #ffffff0f;
-  border: 1px solid var(--sac-1, var(--brand-line));
+  /* Dam hon kinh header (`--glass: #0f1119b8`) mot chut — day la "trong
+     KHU VUC dang xem", nen phai doc duoc la mot be mat rieng, khong phai
+     mot vung sang mo. */
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border: 1.25px solid color-mix(in srgb, var(--sac-1, var(--brand)) 65%, var(--sac-2, var(--brand-hover)) 35%);
   box-shadow:
-    0 0 0 1px #ffffff08,
-    0 0 16px -4px var(--sac-1, var(--brand)),
-    inset 0 1px 0 #ffffff1f;
+    0 0 8px -2px color-mix(in srgb, var(--sac-1, var(--brand)) 55%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--sac-1, var(--brand)) 20%, transparent);
   /*
-    `cubic-bezier(.22,1,.36,1)` — ease-out manh, khong nay lai. Mot duong cong co
-    do vong (spring) doc ra nhu do choi tren mot thanh dieu huong.
+    `cubic-bezier(.22,.8,.2,1)` — ease-out co kiem soat, khong nay lai: canh
+    toi dich muot nhung khong lo do (do do bi hieu la "do choi").
 
     `width` CHAM HON `transform` mot chut (520ms so 420ms) — CHU Y, khong phai
     lech vo tinh: canh dan (theo `transform`) toi noi truoc, be rong (theo
@@ -1046,8 +1057,8 @@ main { overflow-x: clip; }
     luong giua hai transition da co san.
   */
   transition:
-    transform 420ms cubic-bezier(.22, 1, .36, 1),
-    width 520ms cubic-bezier(.22, 1, .36, 1),
+    transform 460ms cubic-bezier(.22, .8, .2, 1),
+    width 540ms cubic-bezier(.22, .8, .2, 1),
     border-color 420ms var(--ease),
     box-shadow 420ms var(--ease);
 }
@@ -1061,6 +1072,10 @@ main { overflow-x: clip; }
   dung mot keyframe rieng — cung mot "vet sang chay ngang mot lan" nhung o
   moi noi khac trong san pham.
 
+  Loi tam TRANG (`#ffffffb0`) truoc day gop phan vao "quang trang" bi phan
+  hoi — doi sang loi cyan (loi sang) + duoi tim (mo dan), dung dung hai sac
+  cua khu vuc thay vi mot mau trang trung tinh.
+
   Y NGHIA: "cong dang toi da di chuyen sang mot the gioi khac" — mot tia sang
   chay qua vien roi tat, KHONG phai mot vong xoay vinh vien.
 */
@@ -1068,37 +1083,30 @@ main { overflow-x: clip; }
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(100deg, transparent, #ffffffb0, transparent);
+  background: linear-gradient(
+    100deg,
+    transparent,
+    color-mix(in srgb, var(--sac-1, var(--accent)) 85%, white 15%),
+    color-mix(in srgb, var(--sac-2, var(--brand-hover)) 70%, transparent),
+    transparent
+  );
   animation: sheen 480ms var(--ease) 1;
 }
 
 /*
-  Chu cua muc dang xem: sang len va nhan sac cua khu vuc do.
+  Chu cua muc dang xem: MAU GAN-TRANG (moonlight ivory), KHONG con nhan sac
+  rieng cua khu vuc.
 
-  `background-clip: text` cho mot chuyen mau hai tong. Chu KHONG doi co va khong
-  doi khoang cach — doi hai thu do se lam ca hang nhay khi vien thuoc toi noi.
+  SUA (Navigation Motion Correction V2): truoc day chu nhan `--sac-2` (vi du
+  tim/hong tuy khu vuc) — phan hoi la "chu tim tren nen phat sang" kho doc.
+  Sac cua khu vuc gio CHI con o VIEN/QUANG cua `.nav-vach`; chu dung thang
+  `--text` (gan trang, da la token "gan-trang" san co — khong bia mau moi).
 */
 .nav-link[aria-current="page"] {
   font-weight: 650;
   /* Vien thuoc lo nen roi — muc dang xem khong to nen cua rieng no. */
   background: transparent;
-  /*
-    MAU DAC, khong dung `background-clip: text`.
-
-    LOI DA XAY RA: ban truoc to chu bang mot gradient qua `background-clip: text`
-    cong `color: transparent`. O muc "Viết truyện" — von la mot CTA co quy tac
-    `.nav-cta` rieng dat `background` cua no — quy tac do ghi de gradient nhung
-    KHONG ghi de `color`, nen chu con lai trong suot tren mot nen dac: nhan bien
-    mat hoan toan.
-
-    Bai hoc chung: `background-clip: text` bien mot thuoc tinh TRANG TRI
-    (`background`) thanh thu quyet dinh chu co nhin thay hay khong. Bat ky quy
-    tac nao cham vao `background` sau do deu lam mat chu, va no mat AM THAM.
-
-    Mot mau dac thi khong bao gio bien mat. Sac cua khu vuc van doi dung — do la
-    dieu thuc su can — chi la khong con chuyen hai tong.
-  */
-  color: var(--sac-2, var(--brand-hover));
+  color: var(--text);
 }
 /* Lan do dau tien: hien NGAY tai cho. Mot cu truot tu goc trai man hinh vao luc
    moi mo trang doc ra nhu mot loi ve. */

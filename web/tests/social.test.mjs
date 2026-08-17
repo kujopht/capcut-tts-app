@@ -619,14 +619,16 @@ test("HOI QUY: /community vao truc khong pha vien thuoc va nhan /write", () => {
   assert.match(nav, /bang\.current\.set\(link\.href, el\)/);
   assert.match(nav, /<NavIndicator bao=\{hop\} bang=\{bang\} moc=\{dangXem\} \/>/);
 
-  // Nhan muc dang xem van la mau DAC, khong background-clip.
+  // Nhan muc dang xem van la mau DAC, khong background-clip. Navigation
+  // Motion Correction V2: chu doi tu `--sac-2` (theo khu vuc) sang `--text`
+  // (gan-trang co dinh) — sac khu vuc gio chi con o vien/quang cua vach.
   const than = css();
   const at = than.indexOf('.nav-link[aria-current="page"]');
   assert.notEqual(at, -1);
   const khoi = than.slice(at, than.indexOf("}", at) + 1)
     .replace(/\/\*[\s\S]*?\*\//g, "");
   assert.ok(!/background-clip/.test(khoi));
-  assert.match(khoi, /color: var\(--sac-2/);
+  assert.match(khoi, /color: var\(--text\)/);
 });
 
 test("HOI QUY: sections.ts van tinh dung huong quanh community", async () => {

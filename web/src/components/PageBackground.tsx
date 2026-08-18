@@ -33,33 +33,14 @@ import { useEffect, useRef, useState } from "react";
 import { anhNen, tenNen } from "@/lib/backgrounds";
 import { huongDi, tenHuong, type Huong } from "@/lib/sections";
 import { AmbientScene } from "@/components/AmbientScene";
-import { LiveBackground } from "@/components/LiveBackground";
 
-/**
- * Live Wallpaper V1 — CHI trang chu, xem `docs/design/LIVE_WALLPAPER_MANIFEST.md`.
- *
- * Dat trong lop `data-vao` (tam HIEN HANH), khong dat trong lop `data-ra` (tam
- * dang mo di): chuyen canh giua route khong can video, chi can tam tinh cu.
- *
- * `LiveBackground` tu ve poster + video TREN `::before` (anh CSS) va DUOI
- * `::after` (vignette) theo dung thu tu DOM — khong can z-index rieng.
- *
- * V2 — HYBRID CINEMAGRAPH (xem bao cao review Candidate A ban dau, V1):
- * video toan khung (`01-home-sunny-harbor-live.*`) bi TU CHOI — camera zoom
- * dan du duoc yeu cau khoa cung (~5%/6s, do dac bang feature-matching, xem
- * `docs/reports/`), gay "day hinh" moi vong lap va mo hon anh tinh goc. Video
- * do ON LAI trong repo lam nguon chuyen dong (khong xoa), nhung KHONG con
- * dung truc tiep — da on dinh camera (offline, warp affine nghich dao theo
- * mo hinh trôi tuyen tinh do duoc) thanh `01-home-sunny-harbor-motion.*`, roi
- * CHI hien qua mot `videoMask` (may/nuoc/la ben phai) de len TREN anh tinh
- * goc — kien truc/anh goc khong bao gio bi thay the.
+/*
+ * Live Wallpaper V1/V2 (video toan khung, roi hybrid cinemagraph) da bi TU
+ * CHOI o QA thu cong hai lan — xem lich su git (`LiveBackground.tsx` van con,
+ * KHONG xoa, cho lan tich hop sau voi mot video thu cong chat luong cao hon).
+ * Trang chu quay ve DUNG anh tinh nhu truoc khi co Live Wallpaper — khong
+ * import, khong goi `LiveBackground` o day nua.
  */
-const HOME_LIVE_BAT = true;
-const HOME_VIDEO = {
-  webm: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-motion.webm",
-  mp4: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-motion.mp4",
-};
-const HOME_VIDEO_MASK = "/artwork/fantasy-backgrounds/01-home-sunny-harbor-motion-mask.webp";
 
 /** Khop voi `--dur-nen` o `globals.css`. */
 const THOI_LUONG = 580;
@@ -181,16 +162,7 @@ export function PageBackground() {
       {/* Lop TREN: tam hien hanh. `key` doi theo tam nen hieu ung hien dan tu
           chay lai — khong phai theo doi trang thai gi them. */}
       <div className="page-bg-lop" data-bg={ten} key={ten} data-vao=""
-           data-huong={huongText}>
-        {ten === "home" ? (
-          <LiveBackground
-            poster={anhNen(ten)}
-            video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
-            videoMask={HOME_LIVE_BAT ? HOME_VIDEO_MASK : undefined}
-            className="home-live-lop"
-          />
-        ) : null}
-      </div>
+           data-huong={huongText} />
 
       {/* Hat sang — CSS quyet dinh trang nao ve. Mot phan tu, khong phai vai tram. */}
       <div className="hat" data-bg={ten} />

@@ -141,3 +141,7 @@ web/public/artwork/backgrounds/
 
 # Bao cao/ghi chep dung mot lan cua phien lam viec — khong thuoc san pham.
 scratchpad/
+
+# Xuat tay cho nguoi dung (vd. anh nguon goc de tu lam live wallpaper) — khong
+# phai san pham, khong dua vao kho.
+exports/

@@ -151,6 +151,8 @@ def _episode_from_doc(doc: Dict[str, Any]) -> AnimationEpisode:
         moderation_state=_moderation_state_from_doc(doc),
         removed_by=str(doc.get("removed_by") or ""),
         removed_reason=str(doc.get("removed_reason") or ""),
+        source_channel_id=str(doc.get("source_channel_id") or ""),
+        source_channel_title=str(doc.get("source_channel_title") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
@@ -387,6 +389,18 @@ class AppwriteAnimationStore:
             for row in self._list_all(COL_SERIES, [q_equal("$id", *lo)]):
                 s = _series_from_doc(row)
                 ra[s.series_id] = s
+        return ra
+
+    def get_episodes_by_ids(self, episode_ids: Sequence[str]) -> Dict[str, AnimationEpisode]:
+        """Xem docstring `MockAnimationStore.get_episodes_by_ids` — MOT truy
+        van moi lo 50 theo `$id` (episode_id == $id, xem `create_episode`)."""
+        ds = [e for e in dict.fromkeys(episode_ids) if e]
+        ra: Dict[str, AnimationEpisode] = {}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_EPISODES, [q_equal("$id", *lo)]):
+                ep = _episode_from_doc(row)
+                ra[ep.episode_id] = ep
         return ra
 
     def series_tags(self, published_only: bool = True) -> List[str]:

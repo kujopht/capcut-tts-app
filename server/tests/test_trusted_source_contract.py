@@ -212,6 +212,29 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                 self.assertEqual(dem["tsrc_2"], 1, ten)
                 self.assertEqual(dem["khong_co"], 0, ten)
 
+    def test_imported_episode_ids_nhieu_nguon(self):
+        """Trusted Channels: cot 'Đã nhập' o danh sach quan tri — CHI ban
+        ghi co `created_episode_id` moi duoc tinh, du trang thai nao
+        (IMPORTED/AUTO_IMPORTED/AUTO_PUBLISHED deu dien truong nay)."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.create_import_once(VideoImport(
+                    trusted_source_id="tsrc_1", youtube_video_id="v" * 11,
+                    created_episode_id="anep_1"))
+                kho.create_import_once(VideoImport(
+                    trusted_source_id="tsrc_1", youtube_video_id="w" * 11,
+                    created_episode_id="anep_2"))
+                # Chua nhap (created_episode_id rong) — KHONG duoc tinh.
+                kho.create_import_once(VideoImport(
+                    trusted_source_id="tsrc_1", youtube_video_id="x" * 11))
+                kho.create_import_once(VideoImport(
+                    trusted_source_id="tsrc_2", youtube_video_id="y" * 11,
+                    created_episode_id="anep_3"))
+                dem = kho.imported_episode_ids(["tsrc_1", "tsrc_2", "khong_co"])
+                self.assertEqual(sorted(dem["tsrc_1"]), ["anep_1", "anep_2"], ten)
+                self.assertEqual(dem["tsrc_2"], ["anep_3"], ten)
+                self.assertEqual(dem["khong_co"], [], ten)
+
     def test_count_sources_by_subscription_status_phase7(self):
         from server.trusted_source_domain import SubscriptionStatus
 

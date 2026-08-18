@@ -232,10 +232,22 @@ class TrustedSourceService:
         items, total = self._store.find_sources(
             query=query, enabled=enabled, limit=limit, offset=offset)
         dem = self._store.mapping_counts([s.source_id for s in items])
+        #: "Da nhap"/"Da xuat ban" — MOT lan tra `episode_id` do tung nguon
+        #: tao ra (thu cong lan tu dong), roi MOT lan tra nguoc cac tap do de
+        #: biet cai nao THAT SU da xuat ban (`state`) — khong N+1, cung idiom
+        #: voi `mapping_counts`.
+        theo_nguon = self._store.imported_episode_ids([s.source_id for s in items])
+        tat_ca_id = [eid for ids in theo_nguon.values() for eid in ids]
+        tap_theo_id = self._animation_store.get_episodes_by_ids(tat_ca_id)
         rows = []
         for s in items:
             d = s.to_dict()
             d["mapping_count"] = dem.get(s.source_id, 0)
+            ids = theo_nguon.get(s.source_id, [])
+            d["imported_count"] = len(ids)
+            d["published_count"] = sum(
+                1 for eid in ids
+                if eid in tap_theo_id and tap_theo_id[eid].state is PublishState.PUBLISHED)
             rows.append(d)
         return {"sources": rows, "total": total, "limit": limit, "offset": offset}
 
@@ -607,6 +619,8 @@ class TrustedSourceService:
             external_id=video["video_id"], order_index=ket_qua.episode_number,
             state=PublishState.PUBLISHED if auto_publish else PublishState.DRAFT,
             duration_seconds=video["duration_seconds"],
+            source_channel_id=video["channel_id"],
+            source_channel_title=video["channel_title"],
         ))
         trang_thai = (ImportStatus.AUTO_PUBLISHED if auto_publish
                      else ImportStatus.AUTO_IMPORTED)
@@ -708,6 +722,8 @@ class TrustedSourceService:
             order_index=video.detected_episode_number,
             state=PublishState.PUBLISHED if publish else PublishState.DRAFT,
             duration_seconds=video.duration_seconds,
+            source_channel_id=video.channel_id,
+            source_channel_title=video.channel_title,
         ))
         # `IMPORTED` du khi co publish=True — cac gia tri AUTO_* chi danh
         # cho video HE THONG tu nhap luc quet (xem docstring `ImportStatus`),
@@ -722,6 +738,41 @@ class TrustedSourceService:
             target_id=import_id, actor_id=admin.user_id, actor_role=actor_role,
             note=f"episode={episode.episode_id}")
         return updated.to_dict()
+
+    def bulk_import_videos(
+        self, admin: Profile, items: Sequence[Dict[str, Any]], *, actor_role: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Nhap NHIEU video cung luc (nut "Nhập đã chọn" o hang doi nhap) — vo
+        mong THEM quanh `import_video()`, KHONG phai mot duong ghi song song:
+        moi item van di qua DUNG kiem tra series/tap/trung lap/xung dot va
+        DUNG nhat ky kiem duyet nhu nhap tung video mot, chi khac o cho goi
+        lien tiep nhieu lan trong MOT request.
+
+        LOI CUA MOT VIDEO KHONG LAM HONG CA LO: moi item duoc thu doc lap
+        (try/except quanh TUNG loi PHAN NGHIEP VU — `TrustedSourceError`/
+        `NotFoundError`), ket qua tra ve mot danh sach cung do dai voi
+        `items`, moi phan tu mot trang thai `ok`/loi rieng — khong bao gio
+        nem loi lam sap toan bo request giua chung (mot HTTP 400 duy nhat se
+        khien frontend khong biet NHUNG video nao da that su nhap thanh
+        cong truoc do). Loi HE THONG (vd YouTubeConfigError) van duoc de nem
+        thang ra ngoai — do khong phai loi cua rieng mot item, tang tren
+        (route) da co san co che dich sang ma HTTP dung.
+        """
+        ket_qua: List[Dict[str, Any]] = []
+        for item in items:
+            import_id = str(item.get("import_id") or "")
+            publish = bool(item.get("publish", False))
+            if not import_id:
+                ket_qua.append({"import_id": "", "ok": False, "error": "Thiếu import_id."})
+                continue
+            try:
+                updated = self.import_video(
+                    admin, import_id, publish=publish, actor_role=actor_role)
+                ket_qua.append({"import_id": import_id, "ok": True, "import": updated})
+            except (TrustedSourceError, NotFoundError) as exc:
+                ket_qua.append({"import_id": import_id, "ok": False, "error": str(exc)})
+        return {"results": ket_qua}
 
     def reject_import(self, admin: Profile, import_id: str, *, reason: str = "",
                       actor_role: str = "") -> Optional[Dict[str, Any]]:

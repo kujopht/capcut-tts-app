@@ -256,6 +256,24 @@ export default function AnimationWatchPage({
         onPlay={batDauXem}
       />
 
+      {/*
+        Nguon goc (Trusted Channels) — `source_channel_title` RONG cho tap
+        tao qua luong thu cong thuong (khong tu Trusted Channels) — van hien
+        duong dan YouTube goc (moi tap LUON co `external_id` that), chi bo
+        phan "Nguồn: <kênh>" khi khong biet kenh nao. KHONG bao gio bia ten
+        kenh.
+      */}
+      <p className="hint">
+        {episode.source_channel_title ? `Nguồn: ${episode.source_channel_title} · ` : ""}
+        <a
+          href={`https://www.youtube.com/watch?v=${episode.external_id}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Xem video gốc trên YouTube ↗
+        </a>
+      </p>
+
       <div className="row row-tight">
         <button type="button" className="btn btn-ghost" onClick={chiaSe}>
           <span aria-hidden="true">↗</span> Chia sẻ

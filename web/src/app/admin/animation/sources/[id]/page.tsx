@@ -196,7 +196,7 @@ export default function AdminTrustedSourceDetailPage({
                 </span>
               </span>
               <span className={`tt ${s.enabled ? "tt-duyet" : "tt-trong"}`}>
-                {s.enabled ? "Đang bật" : "Đã tắt"}
+                {s.enabled ? "Đang bật" : "Đã tạm dừng"}
               </span>
             </header>
 
@@ -245,7 +245,7 @@ export default function AdminTrustedSourceDetailPage({
                   </button>
                   <button type="button" className="btn btn-sm"
                           onClick={() => datBatTat(!s.enabled)}>
-                    {s.enabled ? "Tắt nguồn" : "Bật nguồn"}
+                    {s.enabled ? "Tạm dừng nguồn" : "Tiếp tục nguồn"}
                   </button>
                 </div>
                 <button type="button" className="btn btn-sm btn-danger"

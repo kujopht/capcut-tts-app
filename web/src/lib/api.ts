@@ -392,6 +392,11 @@ export interface AnimationEpisode {
   moderation_state: "visible" | "removed";
   removed_by: string;
   removed_reason: string;
+  /** Thuoc tinh nguon (Trusted Channels ingestion) — RONG cho tap tao qua
+      luong thu cong thuong, khong tu Trusted Channels. Dung de hien "Nguồn:
+      <tên kênh>" canh trinh phat, KHONG dung de xac thuc/phan quyen. */
+  source_channel_id: string;
+  source_channel_title: string;
   created_at: string;
   updated_at: string;
 }
@@ -1559,6 +1564,10 @@ export interface TrustedSource {
 
 export interface AdminTrustedSourceRow extends TrustedSource {
   mapping_count: number;
+  /** So video da tao tap (thu cong lan tu dong) tu nguon nay. */
+  imported_count: number;
+  /** Trong so `imported_count` do, so tap THAT SU dang o state=published. */
+  published_count: number;
 }
 
 export interface SeriesMapping {
@@ -1978,6 +1987,25 @@ export const adminApi = {
     request<{ import: VideoImport }>(
       `/api/admin/animation/imports/${encodeURIComponent(importId)}/import`,
       { method: "POST", body: JSON.stringify({ publish }) },
+    ),
+
+  /**
+   * Nhap NHIEU video cung luc (nut "Nhập đã chọn" o hang doi nhap) — vo
+   * mong quanh `importVideo` o server (`TrustedSourceService.
+   * bulk_import_videos`), khong phai duong ghi song song rieng. Loi cua
+   * MOT video KHONG lam hong ca lo: mang `results` tra ve luon co DUNG do
+   * dai voi `items`, moi phan tu mot trang thai `ok`/loi rieng — route CHI
+   * tra loi HTTP (400/...) cho loi HE THONG (rong, qua gioi han), khong bao
+   * gio cho loi cua rieng mot video trong danh sach.
+   */
+  bulkImportVideos: (items: ReadonlyArray<{ importId: string; publish: boolean }>) =>
+    request<{ results: Array<
+      | { import_id: string; ok: true; import: VideoImport }
+      | { import_id: string; ok: false; error: string }
+    > }>(
+      "/api/admin/animation/imports/bulk-import",
+      { method: "POST", body: JSON.stringify({
+        items: items.map((it) => ({ import_id: it.importId, publish: it.publish })) }) },
     ),
 
   rejectVideoImport: (importId: string, reason: string) =>

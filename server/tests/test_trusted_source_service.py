@@ -147,6 +147,57 @@ class TrustedSourceServiceTest(unittest.TestCase):
         row = next(r for r in ket_qua["sources"] if r["source_id"] == source["source_id"])
         self.assertEqual(row["mapping_count"], 1)
 
+    def test_danh_sach_nguon_kem_so_nhap_va_so_xuat_ban(self):
+        """Cot 'Đã nhập'/'Đã xuất bản' o danh sach quan tri — MOT tap draft
+        (khong tinh xuat ban) VA mot tap published (tinh CA hai)."""
+        cid = "UC" + "z" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh Z", auto_import=True, minimum_confidence=0.5)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+
+        upload_playlist = "UUzzz"
+        v1, v2 = "vidZ0000001", "vidZ0000002"
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh Z",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: ([_video_item(v1), _video_item(v2)], "")},
+            videos={
+                v1: VideoInfo(video_id=v1, title="Tiên Nghịch Tập 1", channel_id=cid,
+                              channel_title="Kenh Z", thumbnail_url="",
+                              published_at="2026-01-01", duration_seconds=100.0),
+                v2: VideoInfo(video_id=v2, title="Tiên Nghịch Tập 2", channel_id=cid,
+                              channel_title="Kenh Z", thumbnail_url="",
+                              published_at="2026-01-02", duration_seconds=100.0),
+            },
+        )
+        self._dat_client_gia(client)
+        # auto_import=True nhung auto_publish=False (mac dinh) -> ca hai tap
+        # deu thanh AUTO_IMPORTED (draft), khong tu xuat ban.
+        self.svc.scan_source(self.admin, source["source_id"])
+
+        ket_qua = self.svc.admin_list_sources()
+        row = next(r for r in ket_qua["sources"] if r["source_id"] == source["source_id"])
+        self.assertEqual(row["imported_count"], 2)
+        self.assertEqual(row["published_count"], 0, "cả hai tập đều là draft")
+
+        # Xuat ban thu cong MOT trong hai tap -> published_count phai tang.
+        # Ghi thang qua kho (khong qua mot route xuat ban thuc su nao — o day
+        # chi can MOT tap that co state=published de kiem cot dem, tuong tu
+        # cach cac test khac trong file nay thao tac truc tiep kho Mock).
+        from dataclasses import replace
+        rows, _ = self.store.find_imports(trusted_source_id=source["source_id"])
+        episode = self.animation.get_episode(rows[0].created_episode_id)
+        self.animation.episodes[episode.episode_id] = replace(
+            episode, state=PublishState.PUBLISHED)
+
+        ket_qua_2 = self.svc.admin_list_sources()
+        row_2 = next(r for r in ket_qua_2["sources"] if r["source_id"] == source["source_id"])
+        self.assertEqual(row_2["imported_count"], 2, "tổng số nhập không đổi")
+        self.assertEqual(row_2["published_count"], 1, "chỉ đúng MỘT tập vừa xuất bản")
+
     def test_tat_bat_nguon_ghi_nhat_ky_dung_hanh_dong(self):
         cid = "UC" + "e" * 22
         source = self.svc.create_source(
@@ -383,6 +434,11 @@ class TrustedSourceServiceTest(unittest.TestCase):
         self.assertEqual(ket_qua["detected"], 1)
         rows, _ = self.store.find_imports(trusted_source_id=source["source_id"])
         self.assertEqual(rows[0].status, ImportStatus.AUTO_IMPORTED)
+        # Tap tu dong nhap PHAI mang theo thuoc tinh kenh nguon (dung de hien
+        # "Nguồn: ..." o trang xem).
+        episode = self.animation.get_episode(rows[0].created_episode_id)
+        self.assertEqual(episode.source_channel_id, "UCx")
+        self.assertEqual(episode.source_channel_title, "Kenh X")
 
     def test_quet_loi_youtube_ghi_lai_last_error(self):
         cid = "UC" + "n" * 22
@@ -501,6 +557,10 @@ class TrustedSourceServiceTest(unittest.TestCase):
         self.assertTrue(updated["created_episode_id"])
         episode = self.animation.get_episode(updated["created_episode_id"])
         self.assertEqual(episode.state, PublishState.PUBLISHED)
+        # Nhap THU CONG cung phai mang theo thuoc tinh kenh nguon, khong chi
+        # rieng duong tu dong.
+        self.assertEqual(episode.source_channel_id, cid)
+        self.assertEqual(episode.source_channel_title, "Kenh O")
 
     def test_nhap_thu_cong_thieu_series_bao_loi(self):
         cid = "UC" + "p" * 22
@@ -533,6 +593,55 @@ class TrustedSourceServiceTest(unittest.TestCase):
         self.assertEqual(updated["status"], ImportStatus.IMPORTED.value)
         episode = self.animation.get_episode(updated["created_episode_id"])
         self.assertEqual(episode.state, PublishState.DRAFT)
+
+    def test_bulk_import_videos_loi_mot_item_khong_lam_hong_ca_lo(self):
+        """`bulk_import_videos` la vo mong quanh `import_video()` — loi cua
+        MOT item (`TrustedSourceError`/`NotFoundError`) phai duoc bat lai
+        thanh mot ket qua `ok: False`, KHONG duoc nem ra ngoai lam hong ca
+        loi goi ham (item con lai van phai thanh cong binh thuong)."""
+        cid = "UC" + "r" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh R")
+        upload_playlist = "UUrrr"
+        v_ok, v_thieu_series = "vidR0000001", "vidR0000002"
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh R",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: (
+                [_video_item(v_ok), _video_item(v_thieu_series)], "")},
+            videos={
+                v_ok: VideoInfo(video_id=v_ok, title="Video R1", channel_id=cid,
+                                channel_title="Kenh R", thumbnail_url="",
+                                published_at="", duration_seconds=100.0),
+                v_thieu_series: VideoInfo(
+                    video_id=v_thieu_series, title="Video R2", channel_id=cid,
+                    channel_title="Kenh R", thumbnail_url="", published_at="",
+                    duration_seconds=100.0),
+            },
+        )
+        self._dat_client_gia(client)
+        self.svc.scan_source(self.admin, source["source_id"])
+        rows, _ = self.store.find_imports(trusted_source_id=source["source_id"])
+        theo_video = {r.youtube_video_id: r for r in rows}
+        row_ok, row_loi = theo_video[v_ok], theo_video[v_thieu_series]
+        self.svc.set_import_series(
+            self.admin, row_ok.import_id, series_id=self.series.series_id,
+            episode_number=8)
+        # row_loi CO Y de trong — chua gan series, se gay TrustedSourceError.
+
+        ket_qua = self.svc.bulk_import_videos(self.admin, [
+            {"import_id": row_ok.import_id, "publish": False},
+            {"import_id": row_loi.import_id, "publish": False},
+            {"import_id": "khong_ton_tai", "publish": False},
+        ])
+        theo_id = {r["import_id"]: r for r in ket_qua["results"]}
+        self.assertTrue(theo_id[row_ok.import_id]["ok"])
+        self.assertEqual(theo_id[row_ok.import_id]["import"]["status"],
+                         ImportStatus.IMPORTED.value)
+        self.assertFalse(theo_id[row_loi.import_id]["ok"])
+        self.assertTrue(theo_id[row_loi.import_id]["error"])
+        self.assertFalse(theo_id["khong_ton_tai"]["ok"])
 
     def test_tu_choi_va_bo_qua_ghi_nhat_ky(self):
         cid = "UC" + "q" * 22

@@ -505,6 +505,21 @@ class AppwriteTrustedSourceStore:
                     dem[sid] += 1
         return dem
 
+    def imported_episode_ids(self, source_ids: Sequence[str]) -> Dict[str, List[str]]:
+        """Xem docstring `MockTrustedSourceStore.imported_episode_ids` —
+        MOT truy van moi lo 50 nguon."""
+        ds = [s for s in dict.fromkeys(source_ids) if s]
+        ra: Dict[str, List[str]] = {sid: [] for sid in ds}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_IMPORTS, [
+                    q_equal("trusted_source_id", *lo)]):
+                sid = str(row.get("trusted_source_id") or "")
+                eid = str(row.get("created_episode_id") or "")
+                if sid in ra and eid:
+                    ra[sid].append(eid)
+        return ra
+
     # -- video import (hang doi nhap) ----------------------------------------
 
     def create_import_once(self, video_import: VideoImport) -> Tuple[VideoImport, bool]:

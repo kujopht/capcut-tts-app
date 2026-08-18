@@ -122,6 +122,32 @@ test("animation/watch/[id]/page.tsx: hiển thị Truyện gốc công khai khi 
   assert.match(src, /href=\{`\/novels\/\$\{series\.related_novel_id\}`\}/);
 });
 
+// -- Trusted Channels: nguon goc canh trinh phat -----------------------------
+
+test("animation/watch/[id]/page.tsx: co khoi nguon goc TACH BIET voi thanh dieu khien, luon dan toi dung video YouTube", () => {
+  const src = watchPage();
+  assert.match(src, /className="yt-cinema-source/, "thiếu khối .yt-cinema-source riêng cho nguồn gốc");
+  assert.match(src,
+    /href=\{`https:\/\/www\.youtube\.com\/watch\?v=\$\{episode\.external_id\}`\}/,
+    "liên kết YouTube gốc phải dùng ĐÚNG external_id của tập đang xem, không hard-code");
+  assert.match(src, /target="_blank"/);
+  assert.match(src, /rel="noreferrer"/);
+});
+
+test("animation/watch/[id]/page.tsx: chi hien 'Nguồn: <kênh>' khi THAT SU biet ten kenh, khong bia", () => {
+  const src = watchPage();
+  assert.match(src, /episode\.source_channel_title\s*\?\s*`Nguồn:\s*\$\{episode\.source_channel_title\}/,
+    "phải đọc source_channel_title thật của tập, không hard-code một tên kênh");
+});
+
+test("lib/api.ts: AnimationEpisode co source_channel_id/source_channel_title (Trusted Channels)", () => {
+  const src = read("../src/lib/api.ts");
+  const at = src.indexOf("export interface AnimationEpisode");
+  const than = src.slice(at, src.indexOf("}", at));
+  assert.match(than, /source_channel_id:\s*string;/);
+  assert.match(than, /source_channel_title:\s*string;/);
+});
+
 // -- Phan 3: trang thai video khong xem duoc --------------------------------
 
 test("lib/youtubeIframeApi.ts: ho tro onError voi tai lieu ro ma loi YouTube", () => {

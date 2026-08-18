@@ -390,6 +390,19 @@ class HopDongAnimationTest(unittest.TestCase):
                 self.assertEqual(set(dem.keys()), {"a" * 11}, ten)
                 self.assertEqual(dem["a" * 11].title, "Tập 1", ten)
 
+    def test_get_episodes_by_ids_nhieu_tap_mot_lan(self):
+        """Trusted Channels: cung idiom voi `get_series_by_ids` — dung cho
+        cot 'Đã xuất bản' o danh sach Trusted Sources, khong N+1."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="A"))
+                e1 = kho.create_episode(AnimationEpisode(
+                    series_id=s.series_id, owner_id="u1", title="Tập 1",
+                    external_id="b" * 11))
+                dem = kho.get_episodes_by_ids([e1.episode_id, "khong_ton_tai"])
+                self.assertEqual(set(dem.keys()), {e1.episode_id}, ten)
+                self.assertEqual(dem[e1.episode_id].title, "Tập 1", ten)
+
 
 class BuildAnimationStoreTest(unittest.TestCase):
     """`build_animation_store` phai chon dung kho theo `DATA_BACKEND`, va

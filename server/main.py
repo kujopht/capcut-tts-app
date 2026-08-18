@@ -5048,6 +5048,15 @@ class ImportVideoIn(BaseModel):
     publish: bool = False
 
 
+class BulkImportItemIn(BaseModel):
+    import_id: str
+    publish: bool = False
+
+
+class BulkImportIn(BaseModel):
+    items: List[BulkImportItemIn]
+
+
 @app.post("/api/admin/animation/sources/preview")
 def admin_preview_trusted_source_url(
     payload: TrustedSourcePreviewIn,
@@ -5230,6 +5239,39 @@ def admin_import_video(
     return {"import": _nguon_tin_cay(
         trusted_sources.import_video, admin, import_id, publish=payload.publish,
         actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+#: Gioi han so video moi lan nhap hang loat — cung y do voi `max_pages` cua
+#: scan_source (chan mot request don le keo qua nhieu viec): admin chon tay
+#: tu danh sach dang hien (toi da 25 dong/trang, xem `TRANG` o frontend), 50
+#: du du cho ca hai trang lien tiep ma van la mot con so kiem soat duoc.
+GIOI_HAN_NHAP_HANG_LOAT = 50
+
+
+@app.post("/api/admin/animation/imports/bulk-import")
+def admin_bulk_import_videos(
+    payload: BulkImportIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """
+    Nhap NHIEU video cung luc (dac ta "bulk import") — vo mong THEM quanh
+    `import_video()` qua `TrustedSourceService.bulk_import_videos`, KHONG
+    phai mot duong ghi song song rieng. Loi cua MOT video (thieu series, da
+    trung, xung dot) khong lam hong ca lo — moi item tra ve mot trang thai
+    rieng trong `results`, route nay CHI 4xx/5xx cho loi HE THONG (vd sai
+    dinh dang request, chua cau hinh gi do), khong bao gio cho loi cua rieng
+    mot video trong danh sach.
+    """
+    if not payload.items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa chọn video nào để nhập.")
+    if len(payload.items) > GIOI_HAN_NHAP_HANG_LOAT:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Tối đa {GIOI_HAN_NHAP_HANG_LOAT} video mỗi lần nhập hàng loạt.")
+    return _nguon_tin_cay(
+        trusted_sources.bulk_import_videos, admin,
+        [item.model_dump() for item in payload.items],
+        actor_role=settings.admin_role_of(admin.user_id).value)
 
 
 @app.post("/api/admin/animation/imports/{import_id}/reject")

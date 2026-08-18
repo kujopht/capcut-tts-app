@@ -390,6 +390,159 @@ class TrustedSourceRoutesTest(Nen):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["import"]["status"], "imported")
 
+    # -- nhap hang loat (bulk import) ----------------------------------------
+
+    def _quet_hai_video(self, cid: str, v1: str, v2: str) -> list:
+        """Tao mot nguon, quet HAI video (chua gan series -> ca hai deu
+        PENDING), tra ve danh sach import that vua tao (thu tu KHONG dam
+        bao — sap xep theo youtube_video_id de test on dinh)."""
+        upload_playlist = f"UU{cid[-4:]}"
+        self._dat_client_gia(FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh bulk",
+                                       thumbnail_url="",
+                                       uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: (
+                [{"contentDetails": {"videoId": v1}},
+                 {"contentDetails": {"videoId": v2}}], "")},
+            videos={
+                v1: VideoInfo(video_id=v1, title="Video A", channel_id=cid,
+                              channel_title="Kenh bulk", thumbnail_url="",
+                              published_at="", duration_seconds=100.0),
+                v2: VideoInfo(video_id=v2, title="Video B", channel_id=cid,
+                              channel_title="Kenh bulk", thumbnail_url="",
+                              published_at="", duration_seconds=100.0),
+            },
+        ))
+        source = self.client.post(
+            "/api/admin/animation/sources", headers=self.tk_admin,
+            json={"source_type": "youtube_channel", "youtube_channel_id": cid,
+                 "display_name": "Kenh bulk"}).json()["source"]
+        self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/scan",
+            headers=self.tk_admin, json={})
+        rows = self.client.get(
+            "/api/admin/animation/imports", headers=self.tk_admin,
+            params={"trusted_source_id": source["source_id"]},
+        ).json()["imports"]
+        return sorted(rows, key=lambda r: r["youtube_video_id"])
+
+    def test_bulk_import_thanh_cong_ca_lo(self):
+        v1, v2 = "vidBULK00001", "vidBULK00002"
+        rows = self._quet_hai_video("UC" + "u" * 22, v1, v2)
+        for i, row in enumerate(rows, start=1):
+            self.client.patch(
+                f"/api/admin/animation/imports/{row['import_id']}/series",
+                headers=self.tk_admin,
+                json={"series_id": self.series.series_id, "episode_number": 10 + i})
+
+        resp = self.client.post(
+            "/api/admin/animation/imports/bulk-import", headers=self.tk_admin,
+            json={"items": [
+                {"import_id": rows[0]["import_id"], "publish": True},
+                {"import_id": rows[1]["import_id"], "publish": False},
+            ]})
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()["results"]
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(r["ok"] for r in results))
+        self.assertEqual(results[0]["import"]["status"], "imported")
+        self.assertEqual(results[1]["import"]["status"], "imported")
+
+    def test_bulk_import_loi_mot_item_khong_lam_hong_ca_lo(self):
+        """Mot item CHUA gan series (thieu dieu kien nhap) khong duoc lam
+        that bai item CON LAI trong cung mot lo — day la yeu cau cot loi cua
+        bulk import: loi cua rieng mot video khong pha hong toan bo lo."""
+        v1, v2 = "vidBULK00003", "vidBULK00004"
+        rows = self._quet_hai_video("UC" + "v" * 22, v1, v2)
+        # Chi gan series cho ĐÚNG MỘT trong hai — con lai CO Y de trong.
+        self.client.patch(
+            f"/api/admin/animation/imports/{rows[0]['import_id']}/series",
+            headers=self.tk_admin,
+            json={"series_id": self.series.series_id, "episode_number": 20})
+
+        resp = self.client.post(
+            "/api/admin/animation/imports/bulk-import", headers=self.tk_admin,
+            json={"items": [
+                {"import_id": rows[0]["import_id"], "publish": False},
+                {"import_id": rows[1]["import_id"], "publish": False},
+            ]})
+        self.assertEqual(resp.status_code, 200,
+                          "lỗi của MỘT item không được làm cả request 400")
+        results = resp.json()["results"]
+        theo_id = {r["import_id"]: r for r in results}
+        self.assertTrue(theo_id[rows[0]["import_id"]]["ok"])
+        self.assertFalse(theo_id[rows[1]["import_id"]]["ok"])
+        self.assertIn("series", theo_id[rows[1]["import_id"]]["error"].lower())
+
+        # Item THANH CONG that su tao ra mot episode that.
+        updated = self.client.get(
+            "/api/admin/animation/imports", headers=self.tk_admin,
+            params={"trusted_source_id": rows[0]["trusted_source_id"]},
+        ).json()["imports"]
+        theo_id_2 = {r["import_id"]: r for r in updated}
+        self.assertEqual(theo_id_2[rows[0]["import_id"]]["status"], "imported")
+        self.assertEqual(theo_id_2[rows[1]["import_id"]]["status"], "new")
+
+    def test_bulk_import_lap_lai_cung_lo_khong_tao_trung(self):
+        """Goi lai DUNG batch da nhap thanh cong lan truoc — idempotent:
+        khong nem loi, khong tao episode thu hai, tra ve status=duplicate."""
+        v1, v2 = "vidBULK00005", "vidBULK00006"
+        rows = self._quet_hai_video("UC" + "w" * 22, v1, v2)
+        for i, row in enumerate(rows, start=1):
+            self.client.patch(
+                f"/api/admin/animation/imports/{row['import_id']}/series",
+                headers=self.tk_admin,
+                json={"series_id": self.series.series_id, "episode_number": 30 + i})
+        items = [{"import_id": r["import_id"], "publish": False} for r in rows]
+
+        resp1 = self.client.post(
+            "/api/admin/animation/imports/bulk-import", headers=self.tk_admin,
+            json={"items": items})
+        self.assertEqual(resp1.status_code, 200)
+        self.assertTrue(all(r["ok"] for r in resp1.json()["results"]))
+
+        so_tap_truoc = len(self.client.get(
+            f"/api/admin/animation/series/{self.series.series_id}", headers=self.tk_admin
+        ).json()["episodes"])
+
+        resp2 = self.client.post(
+            "/api/admin/animation/imports/bulk-import", headers=self.tk_admin,
+            json={"items": items})
+        self.assertEqual(resp2.status_code, 200)
+        for r in resp2.json()["results"]:
+            self.assertTrue(r["ok"])
+            self.assertEqual(r["import"]["status"], "duplicate")
+
+        so_tap_sau = len(self.client.get(
+            f"/api/admin/animation/series/{self.series.series_id}", headers=self.tk_admin
+        ).json()["episodes"])
+        self.assertEqual(so_tap_truoc, so_tap_sau, "không được tạo tập nào thêm")
+
+    def test_bulk_import_rong_tra_400(self):
+        resp = self.client.post(
+            "/api/admin/animation/imports/bulk-import", headers=self.tk_admin,
+            json={"items": []})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_bulk_import_qua_gioi_han_tra_400(self):
+        items = [{"import_id": f"vimp_{i}", "publish": False} for i in range(51)]
+        resp = self.client.post(
+            "/api/admin/animation/imports/bulk-import", headers=self.tk_admin,
+            json={"items": items})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_bulk_import_anon_401_nguoi_thuong_403_kiem_duyet_403(self):
+        body = {"items": [{"import_id": "vimp_khong_ton_tai", "publish": False}]}
+        self.assertEqual(
+            self.client.post("/api/admin/animation/imports/bulk-import", json=body)
+            .status_code, 401)
+        self.assertEqual(
+            self.client.post("/api/admin/animation/imports/bulk-import",
+                             headers=self.tk_an, json=body).status_code, 403)
+        self.assertEqual(
+            self.client.post("/api/admin/animation/imports/bulk-import",
+                             headers=self.tk_kt, json=body).status_code, 403)
+
     def test_khong_cau_hinh_key_tra_503(self):
         main.trusted_sources._youtube_api_key = ""
         resp = self.client.post(

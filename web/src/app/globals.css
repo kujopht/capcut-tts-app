@@ -5849,6 +5849,11 @@ body.co-mini { padding-bottom: 74px; }
   color: var(--on-brand);
   font-size: 11px; font-weight: 700;
 }
+/* Anh dai dien THAT (vd thumbnail kenh YouTube trong danh sach Trusted
+   Sources) thay cho chu cai viet tat — cung kich thuoc/hinh dang voi
+   `.admin-avt`, chi doi nen/object-fit cho hop voi anh that thay vi mau
+   gradient+chu. */
+.admin-avt-img { background: var(--bg-2); object-fit: cover; }
 .admin-hang-chu {
   display: flex; flex-direction: column; gap: 1px;
   min-width: 0; flex: 1 1 auto;
@@ -5893,6 +5898,27 @@ body.co-mini { padding-bottom: 74px; }
 .admin-nguoi:hover .admin-hang-chu strong { text-decoration: underline; }
 .admin-email { color: var(--text-2); }
 .admin-thao-tac { flex-wrap: nowrap; gap: 6px; }
+
+/* -- nhap hang loat (bulk import), hang doi nhap ------------------------ */
+.admin-bulk-bar {
+  padding: var(--s3);
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r3);
+  background: var(--brand-soft);
+  flex-wrap: wrap;
+}
+/* Danh sach xem truoc trong ConfirmDialog nhap hang loat — cuon RIENG khi
+   chon nhieu video, khong keo dai ca hop thoai. */
+.admin-bulk-xem-truoc {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 /* -- nhat ky ----------------------------------------------------------- */
 .admin-nhat-ky { list-style: none; margin: 0; padding: 0;
@@ -7156,6 +7182,9 @@ body.co-mini { padding-bottom: 74px; }
   flex-direction: column;
   gap: var(--s3);
 }
+/* Nguon goc — chu nho, mau nhat (`.hint`), tach biet ro voi hang nut ben
+   duoi. `margin: 0` vi `.yt-cinema-foot` da tu lo khoang cach qua `gap`. */
+.yt-cinema-source { margin: 0; }
 
 @media (max-width: 640px) {
   .yt-cinema { padding: var(--s3); }

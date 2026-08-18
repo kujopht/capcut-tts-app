@@ -639,6 +639,13 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("moderation_state", "enum", False, ["visible", "removed"]),
             ("removed_by", "string", False, 64),
             ("removed_reason", "string", False, 1000),
+            # Thuoc tinh nguon (Trusted Channels ingestion) — RONG cho tap
+            # tao qua luong thu cong thuong (khong tu Trusted Channels). Xem
+            # docstring `AnimationEpisode.source_channel_id` — dung de hien
+            # "Nguon: <ten kenh>" canh trinh phat, KHONG bao gio dung de xac
+            # thuc/phan quyen.
+            ("source_channel_id", "string", False, 64),
+            ("source_channel_title", "string", False, 200),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],

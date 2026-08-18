@@ -43,7 +43,15 @@ import { LiveBackground } from "@/components/LiveBackground";
  *
  * `LiveBackground` tu ve poster + video TREN `::before` (anh CSS) va DUOI
  * `::after` (vignette) theo dung thu tu DOM — khong can z-index rieng.
+ *
+ * TAM TAT (V2, xem bao cao review): Candidate A (video toan khung) bi tu choi
+ * — camera zoom dan du duoc yeu cau khoa cung, gay "day hinh" moi vong lap va
+ * mo hon anh tinh goc. `HOME_LIVE_BAT` = false trong luc cho thiet ke lai theo
+ * huong hybrid (video CHI lam lop chuyen dong cuc bo — may/nuoc/la — de len
+ * TREN anh tinh goc, khong thay the toan khung). Giu nguyen kien truc/tai san/
+ * test — CHI tat co tren.
  */
+const HOME_LIVE_BAT = false;
 const HOME_VIDEO = {
   webm: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-live.webm",
   mp4: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-live.mp4",
@@ -173,7 +181,7 @@ export function PageBackground() {
         {ten === "home" ? (
           <LiveBackground
             poster={anhNen(ten)}
-            video={HOME_VIDEO}
+            video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
             className="home-live-lop"
           />
         ) : null}

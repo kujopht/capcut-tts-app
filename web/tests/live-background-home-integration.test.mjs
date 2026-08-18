@@ -1,56 +1,85 @@
 /*
- * Live Wallpaper — trang chu DA QUAY VE anh tinh (2026-08).
+ * Live Wallpaper — Gemini V2 tich hop vao trang chu (2026-08).
  *
- * V1 (video toan khung) va V2 (hybrid cinemagraph, video da on dinh + mask)
- * DEU bi tu choi o QA thu cong — xem lich su git. `LiveBackground.tsx` va
- * `liveBackgroundPreference.ts` la KIEN TRUC CHUNG, van con nguyen (xem
- * `live-background-v1.test.mjs`, `live-background-preference-stub.test.mjs`)
- * cho lan tich hop sau voi mot video thu cong chat luong cao hon — nhung
- * PageBackground.tsx (trang chu) KHONG con goi no.
+ * Lich su: Nova Reel V1 (video toan khung) va V2 (hybrid + mask) DEU bi tu
+ * choi o QA thu cong — xem lich su git. Gemini V1 (video dau tien nguoi dung
+ * tu tao) da thu o staging; nguoi dung tu danh gia va thay bang Gemini V2
+ * (chat luong cao hon) — day la ban DANG DUNG, khong chong ban Gemini V1.
  *
- * Bo test o day la RAO CHAN: dam bao khong ai vo tinh noi lai video vao trang
- * chu ma khong qua mot quyet dinh ro rang — trang chu khong duoc phat sinh
- * bat ky yeu cau video/mask nao.
+ * Bo test o day xac nhan RIENG phan NOI DAY: PageBackground.tsx goi dung
+ * LiveBackground CHI cho "home", dung nguon video that, khong mask, va khong
+ * lam vo cac bat bien da co cua PageBackground (xem `page-background.test.mjs`).
  *
  * Quet MA NGUON, khong render — dung quy uoc cua repo (khong co jsdom).
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const comp = () => read("../src/components/PageBackground.tsx");
 const css = () => read("../src/app/globals.css");
 const codeOnly = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-test("PageBackground KHONG import LiveBackground — trang chu la anh tinh", () => {
+const THU_MUC = new URL("../public/artwork/fantasy-backgrounds/", import.meta.url);
+
+test("PageBackground import LiveBackground", () => {
+  assert.match(comp(), /import \{ LiveBackground \} from "@\/components\/LiveBackground";/);
+});
+
+test("LiveBackground CHI duoc goi cho \"home\", khong cho trang nao khac", () => {
   const s = codeOnly(comp());
-  assert.ok(!/LiveBackground/.test(s),
-    "PageBackground vẫn còn nhắc tới LiveBackground — trang chủ sẽ lại phát video");
+  assert.match(s, /ten === "home" \? \(\s*<LiveBackground/);
 });
 
-test("lop tam HIEN HANH (data-vao) la mot the TU DONG — khong con phan tu con nao", () => {
+test("nguon video Home la ban Gemini V2 (chua khong con dung V1 da bi thay), tro dung mot tep that tren dia", () => {
+  const s = comp();
+  const mp4 = s.match(/mp4: "(\/artwork\/fantasy-backgrounds\/[^"]+\.mp4)"/)?.[1];
+  assert.ok(mp4, "thiếu nguồn mp4");
+  assert.match(mp4, /home-live-gemini-v2\.mp4$/,
+    "chưa dùng đúng bản Gemini V2 — có thể còn trỏ tới Nova Reel hoặc Gemini V1 đã bị thay");
+  assert.ok(existsSync(new URL(mp4.split("/").pop(), THU_MUC)), `không tồn tại: ${mp4}`);
+});
+
+test("KHONG con nhac toi tai san Nova Reel bi tu choi (live/motion) hay Gemini V1 da bi thay", () => {
+  const s = comp();
+  assert.ok(!/01-home-sunny-harbor-live/.test(s), "vẫn còn trỏ tới bản Nova Reel V1 bị từ chối");
+  assert.ok(!/01-home-sunny-harbor-motion/.test(s), "vẫn còn trỏ tới bản Nova Reel V2 (hybrid) bị từ chối");
+  assert.ok(!/home-live-gemini-v1\.mp4/.test(s), "vẫn còn trỏ tới bản Gemini V1 đã bị thay bằng V2");
+});
+
+test("KHONG mask/on dinh hoa — danh gia video Gemini nguyen ban nhu nguoi dung duyet thu cong", () => {
   const s = codeOnly(comp());
-  assert.match(s,
-    /<div className="page-bg-lop" data-bg=\{ten\} key=\{ten\} data-vao=""\s*data-huong=\{huongText\} \/>/,
-    "lớp data-vao không còn là thẻ tự đóng — có thể đã thêm lại một lớp video/con nào đó",
-  );
+  assert.ok(!/videoMask=/.test(s),
+    "đang truyền videoMask — yêu cầu lần thử đầu là KHÔNG mask, đánh giá video Gemini nguyên bản");
 });
 
-test("khong con class .home-live-lop trong CSS (dead code sau khi go video)", () => {
-  assert.ok(!css().includes("home-live-lop"),
-    "CSS vẫn còn .home-live-lop — lớp này chỉ có ý nghĩa khi PageBackground render LiveBackground");
+test("LiveBackground dung poster tu chinh anhNen(ten), khong hardcode duong dan khac", () => {
+  const s = codeOnly(comp());
+  assert.match(s, /poster=\{anhNen\(ten\)\}/);
 });
 
-test("home van dung dung anh tinh goc qua CSS ::before, khong doi", () => {
-  const text = css();
-  const dongHome = text.match(/\.page-bg-lop\[data-bg="home"\]\s*\{[^}]*\}/)?.[0] ?? "";
-  assert.match(dongHome, /01-home-sunny-harbor\.webp/);
-  assert.match(dongHome, /01-home-sunny-harbor-sm\.webp/);
+test("lop video Home dung CUNG object-position voi --diem cua CSS (center 42%)", () => {
+  const cssText = css();
+  const dongDiem = cssText.match(/\.page-bg-lop\[data-bg="home"\]\s*\{[^}]*--diem: ([^;]+);/);
+  assert.ok(dongDiem, "không tìm thấy --diem của home");
+  assert.equal(dongDiem[1].trim(), "center 42%", "CSS home đổi --diem mà chưa đồng bộ");
+
+  const lopVideo = cssText.slice(cssText.indexOf(".home-live-lop"));
+  assert.match(lopVideo, /object-position: center 42%/,
+    "lớp video Home lệch object-position với --diem — sẽ nhảy hình khi crossfade");
 });
 
-test("bat bien cu cua PageBackground van dung: khong <img>/style inline", () => {
+test("khong dua video vao lop tam CU (data-ra) dang mo di", () => {
+  const s = codeOnly(comp());
+  const m = s.match(/\{tenCu \? \(\s*<div className="page-bg-lop" data-bg=\{tenCu\}[^]*?\) : null\}/);
+  assert.ok(m, "không tìm thấy khối lớp CŨ (data-ra)");
+  assert.match(m[0], /\/>\s*\) : null\}/, "lớp CŨ không còn là thẻ tự đóng — có thể đã thêm con");
+  assert.ok(!m[0].includes("LiveBackground"), "video không được render ở lớp đang mờ đi");
+});
+
+test("bat bien cu cua PageBackground van dung: khong <img>/style inline TRUC TIEP trong tep nay", () => {
   const s = codeOnly(comp());
   assert.ok(!/<img/.test(s));
   assert.ok(!/style=\{\{/.test(s));

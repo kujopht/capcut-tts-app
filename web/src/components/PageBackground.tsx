@@ -33,14 +33,29 @@ import { useEffect, useRef, useState } from "react";
 import { anhNen, tenNen } from "@/lib/backgrounds";
 import { huongDi, tenHuong, type Huong } from "@/lib/sections";
 import { AmbientScene } from "@/components/AmbientScene";
+import { LiveBackground } from "@/components/LiveBackground";
 
-/*
- * Live Wallpaper V1/V2 (video toan khung, roi hybrid cinemagraph) da bi TU
- * CHOI o QA thu cong hai lan — xem lich su git (`LiveBackground.tsx` van con,
- * KHONG xoa, cho lan tich hop sau voi mot video thu cong chat luong cao hon).
- * Trang chu quay ve DUNG anh tinh nhu truoc khi co Live Wallpaper — khong
- * import, khong goi `LiveBackground` o day nua.
+/**
+ * Live Wallpaper — Gemini V2 (2026-08). CHI trang chu.
+ *
+ * Lich su: Nova Reel V1 (video toan khung, camera zoom ~5%/6s) va Nova Reel V2
+ * hybrid (video da on dinh + mask cuc bo) DEU bi tu choi o QA thu cong — xem
+ * lich su git. Gemini V1 (video dau tien nguoi dung tu tao) da thu o staging;
+ * nguoi dung tu danh gia va cung cap Gemini V2 (chat luong cao hon) de thay
+ * the — day la ban dang dung, KHONG chong len ban Gemini V1.
+ *
+ * Video nay do NGUOI DUNG tu tao bang Gemini (khong qua Pollinations, khong
+ * ton Pollen). Kiem tra nhanh (khong OpenCV/on dinh hoa/mask — nguoi dung da
+ * duyet thu cong): camera on dinh, khong bien dang lau dai/nhan vat/thuyen,
+ * khong nhap nhay do sang (<1% xuyen suot 10s).
+ *
+ * Video toan khung, giong cau truc Gemini V1/Nova Reel V1 ban dau (poster ->
+ * video crossfade, KHONG mask, KHONG on dinh hoa OpenCV).
  */
+const HOME_LIVE_BAT = true;
+const HOME_VIDEO = {
+  mp4: "/artwork/fantasy-backgrounds/home-live-gemini-v2.mp4",
+};
 
 /** Khop voi `--dur-nen` o `globals.css`. */
 const THOI_LUONG = 580;
@@ -162,7 +177,15 @@ export function PageBackground() {
       {/* Lop TREN: tam hien hanh. `key` doi theo tam nen hieu ung hien dan tu
           chay lai — khong phai theo doi trang thai gi them. */}
       <div className="page-bg-lop" data-bg={ten} key={ten} data-vao=""
-           data-huong={huongText} />
+           data-huong={huongText}>
+        {ten === "home" ? (
+          <LiveBackground
+            poster={anhNen(ten)}
+            video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
+            className="home-live-lop"
+          />
+        ) : null}
+      </div>
 
       {/* Hat sang — CSS quyet dinh trang nao ve. Mot phan tu, khong phai vai tram. */}
       <div className="hat" data-bg={ten} />

@@ -6,6 +6,7 @@ import { SessionProvider } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { NavAuth, NavLinks } from "@/components/NavAuth";
 import { PageBackground } from "@/components/PageBackground";
+import { RouteTransitionVeil } from "@/components/RouteTransitionVeil";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { Logo } from "@/components/Logo";
@@ -78,6 +79,15 @@ export default function RootLayout({
             {/* Lop tranh nen — mot phan tu `fixed` nam duoi tat ca. Ve TRUOC
                 lien ket bo qua de no khong bao gio chen vao thu tu tieu diem. */}
             <PageBackground />
+
+            {/*
+              Man may/suong che chuyen canh route (Cloud Veil V1) — MOT LAN
+              duy nhat, ngang hang voi `PageBackground` (khong long vao ben
+              trong: `.page-bg` co `z-index:-1`, mot ngu canh xep chong rieng
+              ma the con khong the thoat ra de noi len tren `.site-header`).
+              Xem `components/RouteTransitionVeil.tsx`.
+            */}
+            <RouteTransitionVeil />
 
             <a className="skip-link" href="#main">
               Bỏ qua điều hướng

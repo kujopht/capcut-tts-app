@@ -71,12 +71,18 @@ test("lop video Home dung CUNG object-position voi --diem cua CSS (center 42%)",
     "lớp video Home lệch object-position với --diem — sẽ nhảy hình khi crossfade");
 });
 
-test("khong dua video vao lop tam CU (data-ra) dang mo di", () => {
+test("V1 Cloud Veil: CHI MOT lop nen duy nhat, khong con lop CU/data-ra", () => {
+  /*
+    Chuyen canh route gio la viec cua `.route-veil` (xem
+    `route-transition-veil.test.mjs`) — `PageBackground.tsx` khong con tu
+    quan ly mot "lop cu dang mo di" nao nua, nen khong con `tenCu`/`data-ra`
+    de kiem tra video co lot vao do hay khong (cau hoi khong con y nghia:
+    chi co DUNG MOT `.page-bg-lop`).
+  */
   const s = codeOnly(comp());
-  const m = s.match(/\{tenCu \? \(\s*<div className="page-bg-lop" data-bg=\{tenCu\}[^]*?\) : null\}/);
-  assert.ok(m, "không tìm thấy khối lớp CŨ (data-ra)");
-  assert.match(m[0], /\/>\s*\) : null\}/, "lớp CŨ không còn là thẻ tự đóng — có thể đã thêm con");
-  assert.ok(!m[0].includes("LiveBackground"), "video không được render ở lớp đang mờ đi");
+  assert.ok(!/tenCu|data-ra=/.test(s), "vẫn còn dấu vết lớp CŨ (tenCu/data-ra) của cơ chế cũ");
+  assert.equal((s.match(/className="page-bg-lop"/g) ?? []).length, 1,
+    "phải đúng MỘT lớp nền — cơ chế cũ (hai lớp cũ/mới) đã bị thay bằng man mây");
 });
 
 test("bat bien cu cua PageBackground van dung: khong <img>/style inline TRUC TIEP trong tep nay", () => {

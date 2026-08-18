@@ -119,12 +119,18 @@ test("so lan dung vang co GIOI HAN — day la 10-15% cuoi, khong phai lop son", 
     community/audio/image-studio/creator) deu KHONG dung --vang cho token nao
     — da chu y tai su dung mau phu cua chinh tung theme thay vi mo rong ngan
     sach vang o nhieu noi.
+
+    Lan nang THU BA (Cloud Veil Route Transition V1, 49 -> 50): man may/suong
+    chuyen canh cua chu de "library" dung `--veil-2: #e4c982` — TAI SU DUNG
+    dung mot sac "antique gold" da co cua Thu vien (dac ta yeu cau ro: "deep
+    sapphire + muted gold"), khong phai mot vang moi. Bay chu de con lai deu
+    dung mau khac (cyan/lavender/azure/indigo/magenta/rose/blue-violet/purple).
   */
   const text = css();
   const bien = (text.match(/var\(--vang[a-z-]*\)/g) ?? []).length;
   const hex = (text.match(/#(d8b56a|e4c982)/gi) ?? []).length;
-  assert.ok(bien + hex <= 49,
-    `vàng xuất hiện ${bien + hex} lần (biến ${bien} + hex ${hex}) — cần ≤ 49`);
+  assert.ok(bien + hex <= 50,
+    `vàng xuất hiện ${bien + hex} lần (biến ${bien} + hex ${hex}) — cần ≤ 50`);
 
   // Va tim VAN la mau chinh: no phai xuat hien nhieu han vang han han.
   const tim = (text.match(/#8b6cff|var\(--brand/gi) ?? []).length;
@@ -313,22 +319,16 @@ test("hat sang CHI o ba trang, va KHONG o trang doc chuong", () => {
 
 test("nhip tho cua nen CHI o trang chu, rat cham, va bien do rat nho", () => {
   const text = css();
-  const at = text.indexOf('.page-bg-lop[data-bg="home"][data-vao]::before');
+  /*
+    V1 Cloud Veil: nen chi con MOT lop (khong con `[data-vao]`/`[data-ra]` —
+    chuyen canh route gio la viec cua `.route-veil`, xem
+    `route-transition-veil.test.mjs`). Nhip tho vi vay khong con can ghi de
+    `nen-lang` (hieu ung lang xuong cua he thong cu, da bo han) — chi con
+    MOT khai bao don gian tren `.page-bg-lop[data-bg="home"]::before`.
+  */
+  const at = text.indexOf('.page-bg-lop[data-bg="home"]::before');
   assert.notEqual(at, -1, "thiếu nhịp thở của nền trang chủ");
   const than = text.slice(text.indexOf("{", at), text.indexOf("}", at));
-
-  /*
-    NHIP THO NAM O `::before`, KHONG o the.
-
-    Ly do: the dung `transform` cho cu truot ngang cua chuyen canh co huong, va
-    hai hieu ung tranh cung mot thuoc tinh thi mot cai bien mat.
-
-    BAY DA DAT MOT LAN: `::before` da co `nen-lang`. Mot quy tac rieng cho trang
-    chu ma chi khai `tho-nen` se GHI DE khai bao do, va lop anh trang chu mat luon
-    hieu ung lang xuong — khong ai nhan ra ngay, vi trang chu thuong la trang mo
-    dau tien nen khong co gi de chuyen canh tu.
-  */
-  assert.match(than, /nen-lang/, "khai báo riêng cho trang chủ ghi đè hiệu ứng lắng xuống");
   assert.match(than, /tho-nen/);
 
   const giay = Number(than.match(/tho-nen (\d+)s/)?.[1]);
@@ -341,7 +341,7 @@ test("nhip tho cua nen CHI o trang chu, rat cham, va bien do rat nho", () => {
 
   // Va KHONG trang lam viec nao co nhip nay.
   for (const t of ["studio", "write", "library", "reader", "explore"]) {
-    assert.ok(!text.includes(`[data-bg="${t}"][data-vao] {`),
+    assert.ok(!text.includes(`[data-bg="${t}"]::before {`),
       `${t} có chuyển động nền liên tục`);
   }
 });
@@ -350,18 +350,18 @@ test("moi hieu ung moi deu TAT khi nguoi dung chon giam chuyen dong", () => {
   const text = css();
   const than = text.slice(text.indexOf("@media (prefers-reduced-motion: reduce)"));
   assert.match(than, /\.hat \{ display: none; \}/);
-  assert.match(than, /\.page-bg-lop\[data-bg="home"\]\[data-vao\]::before \{ animation: none; \}/,
+  assert.match(than, /\.page-bg-lop\[data-bg="home"\]::before \{ animation: none; \}/,
     "nhịp thở của nền không được tắt khi giảm chuyển động");
 
   /*
-    Va cu TRUOT NGANG cua chuyen canh cung phai tat. Phai ghi de tung `data-huong`:
-    quy tac `[data-vao][data-huong="tien"]` co do cu the cao han, nen chi dat lai
-    `animation` o `[data-vao]` thi cu truot van chay.
+    V1 Cloud Veil: chuyen canh route gio la man may/suong
+    (`.route-veil[data-state=...]`), khong con cu TRUOT NGANG. Duong di
+    (transform/blur) cua ca ba cuc may phai TAT het duoi giam chuyen dong,
+    chi con mot lan mo/an opacity rat ngan — xem
+    `route-transition-veil.test.mjs` cho cac rang buoc chi tiet ve man suong.
   */
-  for (const h of ["tien", "lui", "nhe"]) {
-    assert.match(than, new RegExp(`\[data-vao\]\[data-huong="${h}"\]`),
-      `hướng ${h} vẫn còn trượt ngang khi giảm chuyển động`);
-  }
+  assert.match(than, /\.veil-cloud, \.veil-haze \{ filter: none; backdrop-filter: none; \}/,
+    "man suong vẫn còn filter/backdrop-filter khi giảm chuyển động");
 });
 
 /* ================================ 6. nut chinh */

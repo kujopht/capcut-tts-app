@@ -135,64 +135,16 @@ test("ten huong la CHU, khong phai so", async () => {
   assert.equal(tenHuong(0), "nhe");
 });
 
-/* ==================================================== chuyen canh co huong */
-
-test("moi huong co MOT cap keyframes rieng, va bien do nho", () => {
-  const text = css();
-  for (const ten of ["vao-tu-phai", "ra-sang-trai", "vao-tu-trai",
-                     "ra-sang-phai", "vao-nhe", "ra-nhe"]) {
-    assert.ok(text.includes(`@keyframes ${ten}`), `thiếu @keyframes ${ten}`);
-  }
-
-  /*
-    Truot ca man hinh 100vw doc ra nhu mot slide PowerPoint. Bien do phai nho —
-    de bai dat 5vw ra / 8vw vao — va bai test nay giu tran do.
-  */
-  for (const m of text.matchAll(/translate3d\((-?[\d.]+)vw, 0, 0\)/g)) {
-    assert.ok(Math.abs(Number(m[1])) <= 10,
-      `dịch ${m[1]}vw — quá lớn, đọc ra như một slide`);
-  }
-});
-
-test("chi dung transform va opacity — khong thuoc tinh nao lam tinh lai bo cuc", () => {
-  const text = css();
-  for (const ten of ["vao-tu-phai", "ra-sang-trai", "vao-nhe"]) {
-    const than = khoi(text, `@keyframes ${ten}`);
-    assert.ok(!/\b(left|right|top|bottom|margin|width|height):/.test(than),
-      `${ten} động vào thuộc tính làm tính lại bố cục`);
-  }
-});
-
-test("thoi luong 450-650ms va KHOP giua CSS va component", () => {
-  // Lech nhau thi lop cu bi bo TRUOC khi mo het (thay mot nhay) hoac o lai SAU
-  // khi da mo het (mot lop `fixed` thua nam do).
-  const ms = Number(css().match(/--dur-nen: (\d+)ms/)?.[1]);
-  const js = Number(read("../src/components/PageBackground.tsx")
-    .match(/const THOI_LUONG = (\d+);/)?.[1]);
-  assert.equal(ms, js, `CSS ${ms}ms nhưng component ${js}ms`);
-  assert.ok(ms >= 450 && ms <= 650, `${ms}ms — cần 450–650`);
-});
-
-test("huong duoc tinh tu DUONG DAN, khong tu ten tam nen", () => {
-  /*
-    Hai duong dan khac nhau co the dung cung mot tam (`/fanfic` va `/novels/x`
-    deu la `explore`). Lay huong tu ten tam se lam moi buoc di vao mot trang
-    truyen thanh "khong co huong", va con te han: `/library` -> `/chapters/x`
-    dung tam `reader`, ma `reader` khong nam tren truc.
-  */
-  const src = read("../src/components/PageBackground.tsx");
-  assert.match(src, /huongDi\(duongTruoc\.current \?\? "\/", duongDan\)/,
-    "hướng không được tính từ hai đường dẫn");
-  assert.match(src, /duongTruoc\.current = duongDan/);
-});
-
-test("VAN dung HAI lop, khong bao gio nhieu hon", () => {
-  const src = read("../src/components/PageBackground.tsx");
-  assert.match(src, /tenCu \? \(/, "lớp cũ không được vẽ có điều kiện");
-  assert.match(src, /setTenCu\(null\)/, "không dọn lớp cũ sau khi chuyển cảnh");
-  assert.match(src, /clearTimeout\(hen\.current\)/,
-    "không huỷ hẹn cũ — hai lần điều hướng nhanh sẽ chồng nhau");
-});
+/*
+ * CHUYEN CANH CO HUONG (quay may ngang) — DA BO HAN, thay bang "Cloud Veil
+ * Route Transition V1" (man may/suong, xem `route-transition-veil.test.mjs`
+ * va `lib/routeTransitionStore.ts`). `huongDi`/`tenHuong` o tren VAN con la
+ * ham thuan huu ich (co the dung lai sau nay), nhung `PageBackground.tsx`
+ * khong con goi chung — do la ly do cac bai test tich hop VOI PageBackground
+ * cho co che cu (khop --dur-nen/THOI_LUONG, "hai lop", huong tinh tu duong
+ * dan) da bi xoa khoi day, khong phai giam do phu — xem lich su git neu can
+ * doi chieu nguyen van.
+ */
 
 /* ================================================ vach dieu huong dung chung */
 
@@ -420,28 +372,9 @@ test("sac cua tung khu vuc nam o MOT cho", () => {
   }
 });
 
-test("chuyen canh nen MANH HON nhung van trong khoang cho phep", () => {
-  const text = css();
-  const ms = Number(text.match(/--dur-nen: (\d+)ms/)?.[1]);
-  assert.ok(ms >= 500 && ms <= 650, `${ms}ms — cần 500–650`);
-  assert.equal(
-    ms,
-    Number(read("../src/components/PageBackground.tsx")
-      .match(/const THOI_LUONG = (\d+);/)?.[1]),
-    "CSS và component lệch thời lượng",
-  );
-  // Bien do van phai NHO: truot ca man hinh doc ra nhu mot slide.
-  for (const m of text.matchAll(/translate3d\((-?[\d.]+)vw, 0, 0\)/g)) {
-    assert.ok(Math.abs(Number(m[1])) <= 10, `dịch ${m[1]}vw — quá lớn`);
-  }
-  // Chieu sau: rat nho. CHI quet trong cac keyframes cua NEN — `scale(1.04)` cua
-  // bia truyen khi ro chuot la mot thu khac han.
-  for (const ten of ["vao-tu-phai", "ra-sang-trai", "vao-tu-trai", "ra-sang-phai"]) {
-    for (const m of khoi(text, `@keyframes ${ten}`).matchAll(/scale\((1\.\d+)\)/g)) {
-      assert.ok(Number(m[1]) <= 1.02, `${ten} phóng ${m[1]} — quá nhiều`);
-    }
-  }
-});
+// Thoi luong/bien do chuyen canh nen: xem `route-transition-veil.test.mjs`
+// (`--dur-veil-phu`/`--dur-veil-lo` khop `THOI_LUONG_BINH_THUONG` o
+// `lib/routeTransitionStore.ts`) — co che "quay may ngang" cu da bo han.
 
 test("khong khi V2: moi khu vuc mot bo, va co TRAN", () => {
   const src = read("../src/components/AmbientScene.tsx");

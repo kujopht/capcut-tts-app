@@ -360,95 +360,185 @@ test("z-index V2: CON AM (duoi noi dung thuong), nhung it am hon nen — NEN < M
     "main đã có position/isolation/transform/filter — điều này sẽ phá vỡ thứ tự z-index âm NỀN < MÂY < GIAO DIỆN");
 });
 
-test("BA+MOT cuc may/suong hinh dang BAT QUY TAC — khong phai hinh tron/oval deu", () => {
+const LOP_MIST = ["mist-wisp-1", "mist-wisp-2", "mist-ribbon-a", "mist-ribbon-b", "mist-core", "mist-trail"];
+
+test("V3: du SAU dai suong/may (2 dan dau + 2 vua + 1 trung tam + 1 theo sau)", () => {
   const text = css();
-  for (const lop of ["veil-cloud", "veil-wisp", "veil-cloud-a", "veil-cloud-b"]) {
-    // `.veil-cloud` chi ton tai o dang selector CHUNG ".veil-cloud, .veil-wisp {"
-    // (khong co khai bao rieng ".veil-cloud {") nen khong the doi hoi " {" ngay
-    // sau ten lop — chi can xac nhan CHUOI ten lop co xuat hien trong CSS.
-    const at = text.indexOf(`.${lop}`);
-    assert.notEqual(at, -1, `thiếu .${lop}`);
-  }
-  // Moi khai bao border-radius phai co BON gia tri KHAC nhau tren truc ngang
-  // (vd "44% 56% 61% 39%") — mot border-radius deu (vd "50%") se ra hinh
-  // tron/oval, dung dieu dac ta cam ("Avoid obvious circles/blobs").
-  const khaiBao = [...text.matchAll(/border-radius: (\d+)% (\d+)% (\d+)% (\d+)%/g)];
-  const trongVeil = khaiBao.filter((m) => {
-    const truoc = text.slice(Math.max(0, m.index - 400), m.index);
-    return truoc.includes("veil-cloud") || truoc.includes("veil-wisp");
-  });
-  assert.ok(trongVeil.length >= 3, "cần ít nhất 3 khai báo border-radius bất quy tắc cho các cục mây/mũi mây");
-  for (const m of trongVeil) {
-    const [, a, b, c, d] = m;
-    assert.ok(new Set([a, b, c, d]).size >= 3,
-      `border-radius ${m[0]} quá đều — đọc ra như một hình tròn/oval`);
+  for (const lop of LOP_MIST) {
+    assert.notEqual(text.indexOf(`.${lop} {`), -1, `thiếu .${lop}`);
   }
 });
 
-test("moi lop may co toc do/quang duong RIENG — khong dong bo tuyet doi (chieu sau)", () => {
+test("V3: KHONG con hinh tron/oval — moi lop dung clip-path da giac hanh van tay, KHONG border-radius/radial-gradient lam vien ngoai", () => {
   const text = css();
-  // Do tre khoi dong (V2): wisp=0 (dan dau), cloud-a=60ms, cloud-b=110ms.
-  const coDoTre = (text.match(/animation: veil-phu-(a|b) var\(--dur-veil-phu\) cubic-bezier\([^)]+\) \d+ms both/g) ?? []).length;
-  assert.ok(coDoTre >= 2, "ít nhất hai lớp mây phải có độ trễ khởi động riêng — nếu không sẽ đọc ra như MỘT khối duy nhất");
-
-  // Quang duong (khoang cach translate3d) PHAI khac nhau giua wisp/a/b — day
-  // la co che tao "toc do khac nhau" ma KHONG dong bo camera/nen (chi cac
-  // lop may nay tu di chuyen).
-  const quangDuong = (ten) => {
-    const m = text.match(new RegExp(`@keyframes veil-lo-${ten} \\{[\\s\\S]*?to\\s*\\{[^}]*translate3d\\((-?[\\d.]+)vw`));
-    return m ? Math.abs(Number(m[1])) : null;
-  };
-  const dWisp = quangDuong("wisp");
-  const dA = quangDuong("a");
-  const dB = quangDuong("b");
-  assert.ok(dWisp && dA && dB, "thiếu quãng đường cuối (translate3d) của một trong ba lớp");
-  assert.ok(new Set([dWisp, dA, dB]).size === 3,
-    `wisp=${dWisp}vw, a=${dA}vw, b=${dB}vw — phải khác nhau cả ba để tạo cảm giác chiều sâu`);
+  // Ba khuon da giac goc phai ton tai va CO NHIEU DIEM (khong phai mot hinh
+  // don gian 4 canh — dac ta cam "obvious rectangle/circle/ellipse").
+  for (const khuon of ["--da-giac-A", "--da-giac-B", "--da-giac-C"]) {
+    const m = text.match(new RegExp(`${khuon}: polygon\\(([^)]+)\\)`));
+    assert.ok(m, `thiếu biến ${khuon}`);
+    const soDiem = m[1].split(",").length;
+    assert.ok(soDiem >= 10, `${khuon} chỉ có ${soDiem} điểm — cần đủ điểm để tạo mép bất quy tắc, không phải đa giác đều`);
+  }
+  // Tung lop PHAI tham chieu mot trong ba khuon qua clip-path.
+  for (const lop of LOP_MIST) {
+    const at = text.indexOf(`.${lop} {`);
+    const than = text.slice(at, text.indexOf("}", at));
+    assert.match(than, /clip-path: var\(--da-giac-[ABC]\)/, `.${lop} thiếu clip-path da giác`);
+  }
+  // KHONG con border-radius (V2) hay radial-gradient (hinh tron tam-bien lam
+  // vien ngoai) trong toan bo khoi Cloud Veil — ca hai la dau hieu cua
+  // "hinh tron/oval CSS demo" ma V3 phai loai bo hoan toan.
+  // `lastIndexOf("/*", ...)` de bat DUNG ky tu mo `/*` cua khoi chu thich —
+  // neu chi neo vao giua doan van ban (sau `/*`), `codeOnly` se khong nhan
+  // ra day la chu thich (thieu dau mo trong pham vi slice) va KHONG loc bo.
+  const batDauKhoi = text.lastIndexOf("/*", text.indexOf("CLOUD VEIL ROUTE TRANSITION V3"));
+  const ketThucKhoi = text.indexOf('.route-veil[data-theme="auth"]');
+  const khoiVeil = codeOnly(text.slice(batDauKhoi, ketThucKhoi));
+  assert.ok(!/border-radius:/.test(khoiVeil), "vẫn còn border-radius (hình bo tròn kiểu V2) trong khối Cloud Veil");
+  assert.ok(!/radial-gradient\(/.test(khoiVeil), "vẫn còn radial-gradient (đọc ra như một chấm tròn mờ to) trong khối Cloud Veil");
 });
 
-test("do bao phu KHONG toi da: do mo dinh cua moi lop may deu duoi 0.6 (con thay duoc nen qua may)", () => {
+test("V3: khong con backdrop-filter — day la nguyen nhan chinh khien V2 doc ra MOT KHOI mo nhoe duy nhat", () => {
   /*
-    Dac ta V2: "at maximum density, it should cover approximately 55-75% of
-    the BACKGROUND visually — not 100%". Kiem tra GIAN TIEP qua do mo dinh
-    (opacity) cua tung lop trong keyframe "to" cua pha phu — V1 dat 0.7-0.94
-    (gan nhu che kin); V2 phai THAP HON HAN vi may gio nam sau giao dien va
-    khong con nhiem vu che giau viec doi DOM nua.
+    Nguyen nhan da xac nhan (xem chu thich dau khoi ".route-veil" o
+    globals.css): `.route-veil` co `contain: paint` -> tao ngu canh xep
+    chong rieng -> `backdrop-filter` cua MOT lop con se "nhin thay" CA CAC
+    lop con KHAC (khong chi `.page-bg` nhu gia dinh sai cua V2), tron nhieu
+    dai suong rieng biet thanh MOT khoi mo duy nhat. V3 bo han co che nay.
   */
   const text = css();
-  for (const ten of ["wisp", "a", "b"]) {
-    const m = text.match(new RegExp(`@keyframes veil-phu-${ten} \\{[\\s\\S]*?to\\s*\\{\\s*opacity:\\s*([\\d.]+);`));
-    assert.ok(m, `thiếu opacity đỉnh của veil-phu-${ten}`);
-    const do_mo = Number(m[1]);
-    assert.ok(do_mo <= 0.6, `veil-phu-${ten} đạt opacity ${do_mo} — quá đặc, phải ≤ 0.6 để không che kín nền`);
+  // `lastIndexOf("/*", ...)` de bat DUNG ky tu mo `/*` cua khoi chu thich —
+  // neu chi neo vao giua doan van ban (sau `/*`), `codeOnly` se khong nhan
+  // ra day la chu thich (thieu dau mo trong pham vi slice) va KHONG loc bo.
+  const batDauKhoi = text.lastIndexOf("/*", text.indexOf("CLOUD VEIL ROUTE TRANSITION V3"));
+  const ketThucKhoi = text.indexOf('.route-veil[data-theme="auth"]');
+  // codeOnly: chu thich GIAI THICH nguyen nhan cu (V2) van con nhac toi cum
+  // "backdrop-filter" trong VAN BAN — chi kiem tra CSS THAT SU, khong tinh
+  // chu thich.
+  const khoiVeil = codeOnly(text.slice(batDauKhoi, ketThucKhoi));
+  assert.ok(!/backdrop-filter/.test(khoiVeil), "vẫn còn backdrop-filter trong khối Cloud Veil — đây là nguyên nhân chính gây lỗi 'một khối mờ'");
+});
+
+test("V3: background-blend-mode: screen — dam bao nhieu lop mau chong nhau CHI sang len, khong bao gio toi/den di", () => {
+  /*
+    Nguyen nhan #2 cua loi "man hinh gan nhu den" (xem chu thich dau khoi):
+    chu de `auth` tung dung mot mau indigo gan-den lam than cua khoi may DAC
+    nhat; khi nhieu lop chong nhau, vung giao doc ra gan nhu den. `screen`
+    dam bao viec chong lop CHI co the lam SANG len.
+  */
+  const text = css();
+  assert.match(text, /\.mist \{[\s\S]*?background-blend-mode: screen;/,
+    "thiếu background-blend-mode: screen trên lớp .mist dùng chung");
+});
+
+test("V3: chu de auth KHONG con dung mau gan-den lam --veil-1 (nguyen nhan cu the cua 'man hinh gan nhu den')", () => {
+  const text = css();
+  const m = text.match(/\.route-veil\[data-theme="auth"\]\s*\{\s*--veil-1:\s*(#[0-9a-fA-F]{6});/);
+  assert.ok(m, "thiếu --veil-1 của chủ đề auth");
+  assert.notEqual(m[1].toLowerCase(), "#312e81",
+    "auth vẫn dùng --veil-1 cũ (#312e81, gần như đen) — đây là nguyên nhân cụ thể của ảnh chụp 'gần như đen'");
+  // Do sang tho (trung binh RGB) phai đủ cao de KHONG con la "gan nhu den".
+  const hex = m[1].slice(1);
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const doSang = (r + g + b) / 3;
+  assert.ok(doSang >= 60, `--veil-1 của auth quá tối (độ sáng thô ${doSang.toFixed(0)}/255) — vẫn có nguy cơ đọc ra gần như đen`);
+});
+
+test("moi lop may co toc do/quang duong/vi tri/do mo RIENG — khong lop nao trung thong so (tao chieu sau)", () => {
+  const text = css();
+  // Quang duong cuoi cung (|translate3d x|, vw) trong pha "lo" cua CA SAU lop
+  // phai khac nhau — day la co che tao "toc do khac nhau" ma KHONG dong bo
+  // camera/nen (chi cac lop may nay tu di chuyen).
+  const tenKeyframeLo = {
+    "mist-wisp-1": "suong-lo-wisp-1", "mist-wisp-2": "suong-lo-wisp-2",
+    "mist-ribbon-a": "suong-lo-ribbon-a", "mist-ribbon-b": "suong-lo-ribbon-b",
+    "mist-core": "suong-lo-core", "mist-trail": "suong-lo-trail",
+  };
+  const quangDuong = (kf) => {
+    const m = text.match(new RegExp(`@keyframes ${kf} \\{[\\s\\S]*?100%\\s*\\{[^}]*translate3d\\((-?[\\d.]+)vw`));
+    return m ? Math.abs(Number(m[1])) : null;
+  };
+  const cacQuangDuong = Object.values(tenKeyframeLo).map(quangDuong);
+  assert.ok(cacQuangDuong.every((d) => d !== null), "thiếu quãng đường cuối (translate3d) của một trong sáu lớp");
+  assert.equal(new Set(cacQuangDuong).size, 6,
+    `quãng đường: ${JSON.stringify(cacQuangDuong)} — cả sáu lớp phải khác nhau để tạo chiều sâu`);
+
+  // Vi tri doc (top) va do mo dinh (opacity dinh nghia tren .mist-*) cung
+  // phai khac nhau giua tat ca sau lop.
+  const viTriDoc = LOP_MIST.map((lop) => {
+    const at = text.indexOf(`.${lop} {`);
+    const than = text.slice(at, text.indexOf("}", at));
+    return than.match(/top: ([\d.]+)vh;/)?.[1];
+  });
+  assert.equal(new Set(viTriDoc).size, 6, `vị trí dọc (top): ${JSON.stringify(viTriDoc)} — cả sáu lớp phải khác nhau`);
+});
+
+test("do bao phu KHONG toi da: do mo DINH cua moi lop suong deu <= 0.7 (con thay duoc nen qua may, dac ta 35-60%)", () => {
+  /*
+    Nguong ban dau (<=0.5) qua thap: QA trinh duyet thuc te (chup man hinh
+    dinh pha phu) cho thay may GAN NHU KHONG THAY DUOC tren nen tranh sang
+    mau — "trong nhu suong" qua muc, khong con doc ra la "interesting even
+    as a frozen still frame" (dac ta muc 17). Nang tran len 0.7 (van con
+    thay duoc nen QUA may — khac hoan toan V1/V2 cu voi opacity 0.7-0.94 +
+    blur 16-28px dac kin) va giam blur/tang do bao hoa mau tuong ung de hinh
+    dang da giac doc ro hon.
+  */
+  const text = css();
+  const tenKeyframePhu = ["suong-phu-wisp-1", "suong-phu-wisp-2", "suong-phu-ribbon-a", "suong-phu-ribbon-b", "suong-phu-core"];
+  for (const kf of tenKeyframePhu) {
+    const m = text.match(new RegExp(`@keyframes ${kf} \\{[\\s\\S]*?100%\\s*\\{\\s*opacity:\\s*([\\d.]+);`));
+    assert.ok(m, `thiếu opacity đỉnh của ${kf}`);
+    const doMo = Number(m[1]);
+    assert.ok(doMo <= 0.7, `${kf} đạt opacity ${doMo} — quá đặc, phải ≤ 0.7 để không che kín nền`);
   }
+  // `.mist-trail` phai AN HOAN TOAN suot pha phu (dac ta "khong hien trong
+  // pha covering, chi xuat hien giua pha lo").
+  const trailPhu = text.match(/@keyframes suong-phu-trail \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(!/opacity: (?!0;)[\d.]+;/.test(trailPhu),
+    "mist-trail phải giữ opacity 0 SUỐT pha phủ — chỉ xuất hiện ở pha lộ (dạc tả 'trailing wisp ~430ms')");
 });
 
-test("lop suong nen dung backdrop-filter — chi lam mo NHE nen, khong con nhiem vu che kin", () => {
+test("V3: hien SO LE qua % keyframe (khong dung animation-delay — tranh buoc nhay khi delay+duration vuot --dur-veil-phu)", () => {
   const text = css();
-  const at = text.indexOf(".veil-haze {");
-  const than = text.slice(at, text.indexOf("}", at));
-  assert.match(than, /backdrop-filter:/);
+  // Cac lop KHONG hien tu 0% phai co mot cap "0%, X% { opacity: 0; ... }"
+  // giu nguyen truoc khi bat dau chuyen dong — day la co che "do tre" cua
+  // V3 (thay animation-delay).
+  for (const kf of ["suong-phu-ribbon-a", "suong-phu-wisp-2", "suong-phu-core", "suong-phu-ribbon-b"]) {
+    const m = text.match(new RegExp(`@keyframes ${kf} \\{\\s*0%,\\s*(\\d+)%\\s*\\{\\s*opacity:\\s*0;`));
+    assert.ok(m, `${kf} thiếu mốc giữ nguyên (0%, X%) để tạo độ trễ hiện — không được đồng bộ tuyệt đối với wisp-1`);
+  }
+  // Cac moc do tre phai KHAC nhau (thu tu hien so le, khong phai tat ca cung
+  // mot moc).
+  const mocDoTre = ["suong-phu-ribbon-a", "suong-phu-wisp-2", "suong-phu-core", "suong-phu-ribbon-b"].map((kf) => {
+    const m = text.match(new RegExp(`@keyframes ${kf} \\{\\s*0%,\\s*(\\d+)%`));
+    return m ? Number(m[1]) : null;
+  });
+  assert.equal(new Set(mocDoTre).size, 4, `mốc độ trễ: ${JSON.stringify(mocDoTre)} — phải khác nhau cả bốn (hiện orchestrated, không đồng loạt)`);
 });
 
-test("chi transform/opacity/filter dong — khong thuoc tinh nao lam tinh lai bo cuc", () => {
+test("chi transform/opacity dong — filter/clip-path la GIA TRI TINH, khong thuoc tinh nao lam tinh lai bo cuc", () => {
   const text = css();
-  for (const ten of ["veil-phu-wisp", "veil-phu-a", "veil-phu-b", "veil-lo-wisp", "veil-lo-a", "veil-lo-b"]) {
+  const tenKeyframe = [
+    "suong-phu-wisp-1", "suong-phu-ribbon-a", "suong-phu-wisp-2", "suong-phu-core", "suong-phu-ribbon-b", "suong-phu-trail",
+    "suong-lo-wisp-1", "suong-lo-ribbon-a", "suong-lo-wisp-2", "suong-lo-core", "suong-lo-ribbon-b", "suong-lo-trail",
+  ];
+  for (const ten of tenKeyframe) {
     const at = text.indexOf(`@keyframes ${ten} {`);
     assert.notEqual(at, -1, `thiếu @keyframes ${ten}`);
     const than = text.slice(at, text.indexOf("\n}", at));
-    assert.ok(!/\b(left|right|top|bottom|margin|width|height):/.test(than),
-      `${ten} động vào thuộc tính làm tính lại bố cục`);
+    assert.ok(!/\b(left|right|top|bottom|margin|width|height|filter|clip-path):/.test(than),
+      `${ten} động vào thuộc tính làm tính lại bố cục/tô vẽ (chỉ transform/opacity được phép hoạt hình)`);
   }
 });
 
 test("idle: KHONG mot animation nao gan san — chi phi luc dung yen la khong", () => {
   const text = css();
-  // Quy tac animation cho cuc may/suong CHI duoc gan co dieu kien qua
+  // Quy tac animation cho dai suong/may CHI duoc gan co dieu kien qua
   // `[data-state="covering"]`/`[data-state="revealing"]` — khong duoc co
-  // mot khai bao "tran" `.veil-cloud { animation: ... }` chay moi luc.
-  const truocDataState = text.slice(text.indexOf(".veil-cloud {"), text.indexOf('[data-state="covering"]'));
+  // mot khai bao "tran" `.mist { animation: ... }` chay moi luc.
+  const truocDataState = text.slice(text.indexOf(".mist {"), text.indexOf('[data-state="covering"]'));
   assert.ok(!/\banimation:/.test(truocDataState),
-    "cục mây có animation chạy mặc định — sẽ tốn CPU/GPU cả lúc không điều hướng");
+    "lớp mist có animation chạy mặc định — sẽ tốn CPU/GPU cả lúc không điều hướng");
 });
 
 test("mau man suong dinh nghia du CA 8 chu de nen (dung lai he thong co san)", () => {

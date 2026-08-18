@@ -360,8 +360,8 @@ test("moi hieu ung moi deu TAT khi nguoi dung chon giam chuyen dong", () => {
     dong, chi con mot lan mo/an opacity rat ngan — xem
     `route-transition-veil.test.mjs` cho cac rang buoc chi tiet ve man suong.
   */
-  assert.match(than, /\.veil-cloud, \.veil-wisp, \.veil-haze \{ filter: none; backdrop-filter: none; \}/,
-    "man suong vẫn còn filter/backdrop-filter khi giảm chuyển động");
+  assert.match(than, /\.mist \{ filter: none; \}/,
+    "man suong (V3: 6 dai .mist-*) vẫn còn filter khi giảm chuyển động");
 });
 
 /* ================================ 6. nut chinh */

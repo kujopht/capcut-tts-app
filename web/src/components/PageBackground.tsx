@@ -5,12 +5,18 @@
  *
  * V1 "Cloud Veil Route Transition": chuyen canh khi doi route KHONG con la
  * viec cua component nay nua — no chuyen sang `RouteTransitionVeil.tsx`
- * (man may/suong che kin man hinh) + `lib/routeTransitionStore.ts` (dong ho
- * dieu phoi pha phu/doi anh/lo, dung chung giua hai component). Component o
- * day gio CHI con MOT viec: VE dung chu de (`ten`) dang duoc kho cho phep
- * hien — vi kho da dam bao viec doi `ten` LUON xay ra dung luc man suong che
- * kin, nen o day khong can bat ky hoat hinh rieng nao (khong con "dang mo
- * ra"/"dang hien vao", khong con huong trai/phai).
+ * (man may/suong troi qua nen) + `lib/routeTransitionStore.ts` (dong ho
+ * dieu phoi pha phu/doi anh/lo, dung chung giua hai component).
+ *
+ * V3 (Celestial Mist Ribbon): THEM crossfade anh nen A->B (`--dur-bg-
+ * crossfade`, ~200ms). Ly do: V2 doi anh bang `key={ten}` — mot cu REMOUNT
+ * cung, an duoc vi may V2 qua day dac che kin man hinh dung luc do. May V3
+ * mong hon nhieu (chi con 35-60% dien tich, luon con khe ho) nen cu nhay do
+ * se LO RA neu khong tan sac that. Co che: khi `ten` doi, GIU lop CU mot
+ * chut (opacity 1->0) trong khi lop MOI hien vao (opacity 0->1) — CHI
+ * `.page-bg-lop` (anh+vignette) tan sac, KHONG phai ca `.page-bg` hay bat ky
+ * gi thuoc giao dien (dac ta cam "fade the whole page"). `.hat`/
+ * `<AmbientScene>` van doi cung (chi la trang tri phu, khong can tan sac).
  *
  * Lich su (V0, truoc bao cao Cloud Veil): tung la mot co che HAI LOP tu quan
  * ly rieng (nap truoc anh, dem gio, quay may ngang theo huong tren truc) —
@@ -21,7 +27,7 @@
  * KHONG dung lam bia truyen — do la viec cua `StoryCoverFallback`.
  */
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { anhNen } from "@/lib/backgrounds";
 import { AmbientScene } from "@/components/AmbientScene";
 import { LiveBackground } from "@/components/LiveBackground";
@@ -99,21 +105,74 @@ export function PageBackground() {
     };
   }, []);
 
+  /*
+    V3 crossfade: co the co HAI `.page-bg-lop` cung luc (`khoa` la so dem
+    rieng — KHONG phai `ten` — de tranh trung khoa khi ten CU va ten MOI
+    khac nhau nhung ta van can render CA HAI dong thoi). `fade`:
+
+      "steady"  binh thuong (opacity 1, co transition) — trang thai on dinh
+      "enter"   moi mount cho lan doi KHONG PHAI lan dau (opacity 0, KHONG
+                transition — tranh mot buoc nhay hoat hinh tai chinh khung
+                hinh mount), duoc chuyen sang "steady" o frame ke tiep de
+                trinh duyet THAT SU noi suy 0->1
+      "exit"    lop CU dang tan (opacity 1->0), tu go khoi mang khi
+                `transitionend` ban (`onTransitionEnd`)
+
+    CHI `.page-bg-lop` (anh + vignette) tan sac — `.hat`/`<AmbientScene>` ben
+    duoi doc `ten` truc tiep, doi CUNG (dac ta cam "fade the whole page";
+    day chi la hai chi tiet trang tri phu, khong can tan sac rieng).
+  */
+  const [cacLop, setCacLop] = useState<
+    { ten: string; khoa: number; fade: "steady" | "enter" | "exit" }[]
+  >([]);
+  const khoaKeTiep = useRef(0);
+  const tenTruocLop = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!ten || ten === tenTruocLop.current) return;
+    const laLanDau = tenTruocLop.current === null;
+    tenTruocLop.current = ten;
+    const khoa = khoaKeTiep.current++;
+    setCacLop((cu) => [
+      ...cu.map((l) => ({ ...l, fade: "exit" as const })),
+      { ten, khoa, fade: laLanDau ? "steady" : "enter" },
+    ]);
+    if (laLanDau) return;
+    // Doi mot khung hinh de trinh duyet ghi nhan trang thai "enter" (opacity
+    // 0, khong transition) TRUOC KHI doi sang "steady" — neu doi ca hai
+    // cung mot lan cap nhat, React gop lai thanh MOT lan render duy nhat va
+    // trinh duyet khong co gi de noi suy tu (khong thay hoat hinh).
+    const id = requestAnimationFrame(() => {
+      setCacLop((cu) => cu.map((l) => (l.khoa === khoa ? { ...l, fade: "steady" } : l)));
+    });
+    return () => cancelAnimationFrame(id);
+  }, [ten]);
+
+  function xoaLop(khoa: number) {
+    setCacLop((cu) => cu.filter((l) => l.khoa !== khoa));
+  }
+
   if (!ten) return null;
 
   return (
     <div className="page-bg" aria-hidden="true">
-      {/* MOT lop DUY NHAT — `key` doi theo chu de de LiveBackground (con cua
-          no, chi mount o "home") gan lai sach moi lan quay ve trang chu. */}
-      <div className="page-bg-lop" data-bg={ten} key={ten}>
-        {ten === "home" ? (
-          <LiveBackground
-            poster={anhNen(ten)}
-            video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
-            className="home-live-lop"
-          />
-        ) : null}
-      </div>
+      {cacLop.map((lop) => (
+        <div
+          className="page-bg-lop"
+          data-bg={lop.ten}
+          data-fade={lop.fade}
+          key={lop.khoa}
+          onTransitionEnd={lop.fade === "exit" ? () => xoaLop(lop.khoa) : undefined}
+        >
+          {lop.ten === "home" ? (
+            <LiveBackground
+              poster={anhNen(lop.ten)}
+              video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
+              className="home-live-lop"
+            />
+          ) : null}
+        </div>
+      ))}
 
       {/* Hat sang — CSS quyet dinh trang nao ve. Mot phan tu, khong phai vai tram. */}
       <div className="hat" data-bg={ten} />

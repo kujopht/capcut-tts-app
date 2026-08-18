@@ -55,9 +55,9 @@ test("KHONG mask/on dinh hoa — danh gia video Gemini nguyen ban nhu nguoi dung
     "đang truyền videoMask — yêu cầu lần thử đầu là KHÔNG mask, đánh giá video Gemini nguyên bản");
 });
 
-test("LiveBackground dung poster tu chinh anhNen(ten), khong hardcode duong dan khac", () => {
+test("LiveBackground dung poster tu chinh anhNen(lop.ten), khong hardcode duong dan khac", () => {
   const s = codeOnly(comp());
-  assert.match(s, /poster=\{anhNen\(ten\)\}/);
+  assert.match(s, /poster=\{anhNen\(lop\.ten\)\}/);
 });
 
 test("lop video Home dung CUNG object-position voi --diem cua CSS (center 42%)", () => {
@@ -71,18 +71,24 @@ test("lop video Home dung CUNG object-position voi --diem cua CSS (center 42%)",
     "lớp video Home lệch object-position với --diem — sẽ nhảy hình khi crossfade");
 });
 
-test("V1 Cloud Veil: CHI MOT lop nen duy nhat, khong con lop CU/data-ra", () => {
+test("V3 crossfade: mot NGUON JSX duy nhat cho .page-bg-lop (render qua map, khong hardcode 2 khoi lap lai)", () => {
   /*
-    Chuyen canh route gio la viec cua `.route-veil` (xem
-    `route-transition-veil.test.mjs`) — `PageBackground.tsx` khong con tu
-    quan ly mot "lop cu dang mo di" nao nua, nen khong con `tenCu`/`data-ra`
-    de kiem tra video co lot vao do hay khong (cau hoi khong con y nghia:
-    chi co DUNG MOT `.page-bg-lop`).
+    V2: `.route-veil` day dac che kin man hinh dung luc doi anh, nen
+    `PageBackground.tsx` chi can DUNG MOT `.page-bg-lop` voi `key={ten}` —
+    remount cung, an duoc sau man may. V3 (dac ta muc 10) doi anh phai TAN
+    SAC that (may V3 mong hon, khong con che duoc mot cu nhay), nen co THE
+    co HAI lop `.page-bg-lop` CUNG LUC trong DOM khi dang crossfade (`cacLop`
+    o `PageBackground.tsx`, khoa rieng, `data-fade`) — day la thay doi CO Y,
+    khong phai tan du cua co che "tenCu/data-ra" cu (da bi go hoan toan o
+    V1). Bai test nay xac nhan JSX chi khai bao MOT lan `className="page-
+    bg-lop"` (qua `.map()`, khong copy-paste hai khoi tuong tu cho "cu"/
+    "moi") va khong con dung lai bien `tenCu`/`data-ra` cua co che truoc do.
   */
   const s = codeOnly(comp());
   assert.ok(!/tenCu|data-ra=/.test(s), "vẫn còn dấu vết lớp CŨ (tenCu/data-ra) của cơ chế cũ");
   assert.equal((s.match(/className="page-bg-lop"/g) ?? []).length, 1,
-    "phải đúng MỘT lớp nền — cơ chế cũ (hai lớp cũ/mới) đã bị thay bằng man mây");
+    "chỉ nên có MỘT nguồn JSX cho .page-bg-lop (qua map), không copy hai khối lặp lại");
+  assert.match(s, /cacLop\.map\(/, "V3 phải render .page-bg-lop qua danh sách lớp (hỗ trợ crossfade 2 lớp cùng lúc)");
 });
 
 test("bat bien cu cua PageBackground van dung: khong <img>/style inline TRUC TIEP trong tep nay", () => {

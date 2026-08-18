@@ -1,45 +1,42 @@
 "use client";
 
 /**
- * Man may/suong che chuyen canh route — "Cloud Veil Route Transition V2".
+ * Man may/suong che chuyen canh route — "Cloud Veil V3: Celestial Mist
+ * Ribbon".
  *
  * Y DINH: doi canh trong mot the gioi anime fantasy la may TROI QUA the
  * gioi phia SAU giao dien — giao dien (PageHero/nut/o tim/the/Bento) LUON
  * o TREN, khong bao gio bi may che (khac V1, bi tu choi vi che ca giao
- * dien — xem lich su git). Trinh tu (mot duong QUET lien tuc, khong con
- * "phinh to che kin roi xep lai"):
+ * dien). V2 dung z-index dung nhung hinh hoc SAI (ba "cuc may" tron/oval mo
+ * to, doc ra nhu mot cham CSS demo — bi tu choi o khau thi giac); V3 GIU
+ * NGUYEN kien truc z-index/state-machine cua V2, chi THAY THE hinh hoc:
+ * sau DAI SUONG da giac hanh van tay (`clip-path: polygon(...)`), thon dai,
+ * mep dao dong doc lap — xem chu thich day du o globals.css (khoi
+ * ".route-veil" dau tien) cho ly do ky thuat V2 bi "toi den"/"mot khoi".
  *
- *   trang HIEN TAI -> mui may (wisp) di truoc -> khoi may chinh/phu quet
- *   qua NEN (KHONG qua giao dien) -> nen doi dung luc may day nhat -> may
- *   tiep tuc quet -> suong tan dan (trailing) -> trang MOI da hien tu truoc
- *
- * KIEN TRUC:
+ * KIEN TRUC (khong doi so V2):
  *
  *   - MOUNT MOT LAN duy nhat o `layout.tsx`, ngang hang voi `PageBackground`.
  *     `.route-veil` dat z-index **-1**, `.page-bg` dat z-index **-2** — CA
  *     HAI la con am, `<main>` (khong dinh vi) LUON ve SAU nhom con am du no
- *     khong dat z-index nao (CSS2.1 Appendix E) — da kiem thuc te khong co
- *     `position`/`transform`/`filter`/`isolation` nao tren
- *     `body`/`html`/`main`/`.wrap` pha vo dieu nay. Ket qua: NEN < MAY <
- *     GIAO DIEN, dung THU TU dac ta yeu cau — xem chu thich dau khoi
- *     ".route-veil" o globals.css cho chi tiet.
+ *     khong dat z-index nao (CSS2.1 Appendix E). Ket qua: NEN < MAY < GIAO
+ *     DIEN.
  *   - Doc trang thai tu `lib/routeTransitionStore.ts` — CUNG mot kho ma
- *     `PageBackground.tsx` (va `ContentAtmosphere.tsx`, cho vi chuyen canh
- *     rieng cua noi dung) doc, qua `useSyncExternalStore`. Component nay
- *     KHONG tu theo doi `pathname`: chi PageBackground lam viec do (mot noi
- *     duy nhat goi `diTinh`), tranh hai vong kiem doc lap co the bao nhau
- *     lech nhip.
+ *     `PageBackground.tsx` (va `ContentAtmosphere.tsx`) doc, qua
+ *     `useSyncExternalStore`. Component nay KHONG tu theo doi `pathname`.
  *   - `data-state`/`data-theme` la HAI THUOC TINH DOM DUY NHAT dieu khien
- *     toan bo hoat hinh — xem cac quy tac `.route-veil[data-state=...]` va
- *     `.route-veil[data-theme=...]` o globals.css. Luc `data-state="idle"`
- *     (mac dinh, gan het thoi gian) KHONG co `animation` nao dang chay —
- *     chi phi luc dung yen la SO KHONG (dung yeu cau "essentially zero idle
- *     cost").
- *   - KHONG Canvas, KHONG WebGL, KHONG `requestAnimationFrame` — moi chuyen
- *     dong la CSS keyframes tren `transform`/`opacity`/`filter` cua BON
- *     phan tu `<div>` co dinh so luong: mot mui may dan dau (`.veil-wisp`),
- *     hai khoi may chinh/phu toc do khac nhau (`.veil-cloud-a/b`), va mot
- *     lop suong nen tan cham nhat (`.veil-haze`).
+ *     toan bo hoat hinh. Luc `data-state="idle"` KHONG co `animation` nao
+ *     dang chay — chi phi luc dung yen la SO KHONG.
+ *   - KHONG Canvas, KHONG WebGL, KHONG `requestAnimationFrame`, KHONG SVG
+ *     filter dong (`feTurbulence`) — chi `transform`/`opacity` duoc hoat
+ *     hinh, `clip-path`/`filter: blur()` la GIA TRI TINH tren tung lop.
+ *     SAU phan tu `<div>` co dinh so luong (dung dac ta "2 dan dau + 2 vua +
+ *     1 trung tam + 1 theo sau"):
+ *
+ *       .mist-wisp-1/.mist-wisp-2   2 dai mong dan dau (tang GAN)
+ *       .mist-ribbon-a/.mist-ribbon-b  2 dai may vua (tang XA/GIUA)
+ *       .mist-core                  1 dai suong dac, trung tam (tang GIUA)
+ *       .mist-trail                 1 dai mong theo sau, chi hien pha "lo"
  *   - `pointer-events: none` + `aria-hidden`: day la trang tri, khong bao
  *     gio chan click hay lot vao cay truy cap.
  */
@@ -72,10 +69,12 @@ export function RouteTransitionVeil() {
       data-state={trangThai}
       data-theme={chuDeMau}
     >
-      <div className="veil-wisp" />
-      <div className="veil-cloud veil-cloud-a" />
-      <div className="veil-cloud veil-cloud-b" />
-      <div className="veil-haze" />
+      <div className="mist mist-wisp-1" />
+      <div className="mist mist-ribbon-a" />
+      <div className="mist mist-wisp-2" />
+      <div className="mist mist-core" />
+      <div className="mist mist-ribbon-b" />
+      <div className="mist mist-trail" />
     </div>
   );
 }

@@ -680,20 +680,26 @@ body {
 .page-bg-lop[data-bg="home"]    { --anh: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor.webp");      --anh-nho: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor-sm.webp");      --toi: 0.34; --diem: center 42%; --mo: 0px; }
 
 /*
-  Live Wallpaper Gemini V2 — CHI trang chu. Xem `components/LiveBackground.tsx`.
+  Live Wallpaper — rollout V4, CA 8 chu de. Xem `components/LiveBackground.tsx`
+  va `lib/backgrounds.ts` (`videoNen`).
 
-  `--diem` cua home la `center 42%` — poster/video phai dung CHINH XAC diem
-  do, neu khong canh se "nhay" mot chut khi video (object-position mac dinh:
-  center) chong len anh CSS ::before (dang o center 42%) roi hien dan vao.
+  `object-position: var(--diem)` KHONG hard-code mot toa do rieng cho home
+  nua — `--diem` la bien CSS da dinh nghia san tren CHINH `.page-bg-lop[data-
+  bg="X"]` (bang tren, tung tam mot gia tri rieng) va THUA KE xuong day, nen
+  poster/video CUNG mot chu de LUON dung CHINH XAC diem neo cua tam tinh ung
+  voi no — khong the lech nhau ma khong ai biet (khac V1 chi co home, phai
+  hard-code `center 42%%` rieng). Neu khong khop diem neo, canh se "nhay" mot
+  chut luc video (object-position mac dinh: center) chong len anh CSS
+  `::before` roi hien dan vao.
 
   Kich thuoc: lop nay dat trong `.page-bg-lop` (position: absolute; inset: 0),
   nen chi can rong/cao 100% — `position` van la "relative" tu chinh
   `LiveBackground.tsx` (khong doi o day), du de lam noi chua cho hai lop con
   `position: absolute` cua no.
 */
-.home-live-lop { width: 100%; height: 100%; }
-.home-live-lop .live-bg-poster,
-.home-live-lop .live-bg-video { object-position: center 42%; }
+.live-wallpaper-lop { width: 100%; height: 100%; }
+.live-wallpaper-lop .live-bg-poster,
+.live-wallpaper-lop .live-bg-video { object-position: var(--diem, center); }
 
 .page-bg-lop[data-bg="explore"] { --anh: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom-sm.webp");    --toi: 0.42; --diem: center 38%; --mo: 0px; }
 .page-bg-lop[data-bg="reader"]  { --anh: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine.webp");  --anh-nho: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine-sm.webp");  --toi: 0.38; --diem: center 22%; --mo: 0px; }

@@ -27,42 +27,39 @@
  */
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { anhNen } from "@/lib/backgrounds";
+import { anhNen, videoNen } from "@/lib/backgrounds";
 import { AmbientScene } from "@/components/AmbientScene";
 import { LiveBackground } from "@/components/LiveBackground";
 import { routeTransitionStore } from "@/lib/routeTransitionInstance";
 
 /**
- * Live Wallpaper — Gemini V2 (2026-08). CHI trang chu.
+ * Live Wallpaper — rollout V4 (2026-08): CA 8 chu de, khong con rieng trang
+ * chu. Lich su rieng cua trang chu (Nova Reel V1/V2 bi tu choi, Gemini V1/V2)
+ * xem lich su git — ban Gemini V2 da bi THAY THE hoan toan boi bo 8 video
+ * nguoi dung tu lam thu cong trong dot rollout nay (kiem tra vong lap/chat
+ * luong day du trong bao cao rollout), KHONG con dung.
  *
- * Lich su: Nova Reel V1 (video toan khung, camera zoom ~5%/6s) va Nova Reel V2
- * hybrid (video da on dinh + mask cuc bo) DEU bi tu choi o QA thu cong — xem
- * lich su git. Gemini V1 (video dau tien nguoi dung tu tao) da thu o staging;
- * nguoi dung tu danh gia va cung cap Gemini V2 (chat luong cao hon) de thay
- * the — day la ban dang dung, KHONG chong len ban Gemini V1.
+ * `videoNen(ten)` (`lib/backgrounds.ts`) la NGUON DUY NHAT quyet dinh video
+ * nao ung voi chu de nao — component nay KHONG tu ghep chuoi duong dan
+ * (dac ta rollout muc 9). `undefined` (chu de chua co live wallpaper, hien
+ * tai khong con chu de nao roi vao truong hop nay) -> `<LiveBackground>`
+ * nhan `video={undefined}`, tu no chi ve poster, khong khac gi truoc rollout.
  *
- * Video nay do NGUOI DUNG tu tao bang Gemini (khong qua Pollinations, khong
- * ton Pollen). Kiem tra nhanh (khong OpenCV/on dinh hoa/mask — nguoi dung da
- * duyet thu cong): camera on dinh, khong bien dang lau dai/nhan vat/thuyen,
- * khong nhap nhay do sang (<1% xuyen suot 10s).
- *
- * Video toan khung, giong cau truc Gemini V1/Nova Reel V1 ban dau (poster ->
- * video crossfade, KHONG mask, KHONG on dinh hoa OpenCV).
- *
- * TUONG THICH Aether Rift: roi trang chu -> `ten` (lop duoi) doi thanh chu
+ * TUONG THICH Aether Rift: roi mot chu de -> `ten` (lop duoi) doi thanh chu
  * de moi NGAY khi lop TREN (`tenMoi`) hoan tat tiet lo — `<LiveBackground>`
- * chi mount khi CHINH lop do co `data-bg="home"`, nen video tu go het khi
- * lop chua no khong con la "home" nua, KHONG bao gio phat ngam lau hon can
- * thiet. Vao trang chu: lop TREN mount voi `tenMoi === "home"` NGAY tu dau
- * pha reveal — LiveBackground tu no da ve poster truoc/video sau (xem
- * chinh component do), nen nguoi dung thay poster net trong luc duong bien
- * dang tiet lo, video chi hien khi tai xong. Khong can them "tam ngung".
+ * chi mount UNG VOI CHINH chu de cua lop do, nen video tu go het khi lop
+ * chua no khong con la chu de do nua, KHONG bao gio phat ngam lau hon can
+ * thiet. Vao mot chu de: lop TREN mount NGAY tu dau pha reveal — Live
+ * Background tu no da ve poster truoc/video sau (xem chinh component do),
+ * nen nguoi dung thay poster net trong luc duong bien dang tiet lo, video
+ * chi hien khi tai xong. Khong can them "tam ngung".
+ *
+ * O TRANG THAI ON DINH (khong dang chuyen canh) CHI CO MOT lop `.page-bg-lop`
+ * (`tenMoi === null`), nen CHI CO MOT `<video>` dang giai ma — dung dac ta
+ * rollout muc 15 ("normally only ONE full live wallpaper should be
+ * decoding"). Trong luc chuyen canh (~480ms), co THE co hai video ngan han —
+ * day la pham vi da duoc chap nhan cua Aether Rift, khong phai hoi quy.
  */
-const HOME_LIVE_BAT = true;
-const HOME_VIDEO = {
-  mp4: "/artwork/fantasy-backgrounds/home-live-gemini-v2.mp4",
-};
-
 export function PageBackground() {
   const { ten, tenMoi, the, duongDan } = useSyncExternalStore(
     routeTransitionStore.subscribe,
@@ -115,15 +112,28 @@ export function PageBackground() {
 
   return (
     <div className="page-bg" aria-hidden="true">
-      {/* Lop DUOI — DA ON DINH, khong bao gio hoat hinh. */}
+      {/*
+        Lop DUOI — DA ON DINH, khong bao gio hoat hinh. `key={ten}` la BAT
+        BUOC (phat hien qua QA trinh duyet that, khong phai doan): truoc
+        rollout V4, CHI home co video, nen doi chu de LUON di kem mount/
+        unmount `<video>` (mot ben co video, ben kia khong). Tu khi CA 8 chu
+        de deu co video, doi tu chu de CO video NAY sang chu de CO video
+        KHAC ma KHONG co `key` khien React coi day la "cung mot component",
+        chi cap nhat lai thuoc tinh `src` tren `<source>` co san — nhung
+        trinh duyet KHONG tu doc lai `<source>` khi thuoc tinh doi (yeu cau
+        goi `.load()`, ma `LiveBackground.tsx` khong tu goi luc nay), nen
+        `<video>` cu VAN tiep tuc phat nguon CU du DOM da hien thi dung
+        poster/data-bg moi. `key={ten}` ep React GO HAN va MOUNT LAI toan bo
+        LiveBackground moi lan chu de DUOI thay doi, dam bao `<video>` luon
+        dung nguon.
+      */}
       <div className="page-bg-lop" data-bg={ten}>
-        {ten === "home" ? (
-          <LiveBackground
-            poster={anhNen(ten)}
-            video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
-            className="home-live-lop"
-          />
-        ) : null}
+        <LiveBackground
+          key={ten}
+          poster={anhNen(ten)}
+          video={videoNen(ten)}
+          className="live-wallpaper-lop"
+        />
       </div>
 
       {/* Lop TREN — CHI ton tai luc dang "revealing", tiet lo dan qua
@@ -134,13 +144,11 @@ export function PageBackground() {
           data-bg={tenMoi}
           key={the}
         >
-          {tenMoi === "home" ? (
-            <LiveBackground
-              poster={anhNen(tenMoi)}
-              video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
-              className="home-live-lop"
-            />
-          ) : null}
+          <LiveBackground
+            poster={anhNen(tenMoi)}
+            video={videoNen(tenMoi)}
+            className="live-wallpaper-lop"
+          />
         </div>
       ) : null}
 

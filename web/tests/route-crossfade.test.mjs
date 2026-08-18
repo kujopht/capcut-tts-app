@@ -40,9 +40,14 @@ test("KHONG tai ca tam anh luc khoi dong", () => {
 test("bang ten tep o lib KHOP voi cac url trong CSS", () => {
   // Hai cho phai noi cung mot dieu: `anhNen()` dung de NAP TRUOC, con CSS dung
   // de VE. Lech nhau thi nap truoc mot tam roi ve mot tam khac.
+  //
+  // Chi quet trong khoi `const TEP = {...}` (anh TINH) — tu rollout Live
+  // Wallpaper V4, tep nay CON co mot bang thu hai `VIDEO` (ten .mp4, khong
+  // phai .webp) ngay ben duoi, khong lien quan gi toi CSS anh tinh o day.
   const lib = anhXa();
   const text = css();
-  const tep = [...lib.matchAll(/^ {2}\w+: "([^"]+)",$/gm)].map((m) => m[1]);
+  const khoiTep = lib.slice(lib.indexOf("const TEP"), lib.indexOf("const TEP") + lib.slice(lib.indexOf("const TEP")).indexOf("\n};"));
+  const tep = [...khoiTep.matchAll(/^ {2}\w+: "([^"]+)",$/gm)].map((m) => m[1]);
   assert.ok(tep.length >= 8, `chỉ tìm thấy ${tep.length} tên tệp trong lib`);
   for (const t of tep) {
     assert.ok(text.includes(`${t}.webp`), `CSS không dùng tấm ${t} mà lib khai báo`);

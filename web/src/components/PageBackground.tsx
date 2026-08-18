@@ -33,6 +33,21 @@ import { useEffect, useRef, useState } from "react";
 import { anhNen, tenNen } from "@/lib/backgrounds";
 import { huongDi, tenHuong, type Huong } from "@/lib/sections";
 import { AmbientScene } from "@/components/AmbientScene";
+import { LiveBackground } from "@/components/LiveBackground";
+
+/**
+ * Live Wallpaper V1 — CHI trang chu, xem `docs/design/LIVE_WALLPAPER_MANIFEST.md`.
+ *
+ * Dat trong lop `data-vao` (tam HIEN HANH), khong dat trong lop `data-ra` (tam
+ * dang mo di): chuyen canh giua route khong can video, chi can tam tinh cu.
+ *
+ * `LiveBackground` tu ve poster + video TREN `::before` (anh CSS) va DUOI
+ * `::after` (vignette) theo dung thu tu DOM — khong can z-index rieng.
+ */
+const HOME_VIDEO = {
+  webm: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-live.webm",
+  mp4: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-live.mp4",
+};
 
 /** Khop voi `--dur-nen` o `globals.css`. */
 const THOI_LUONG = 580;
@@ -154,7 +169,15 @@ export function PageBackground() {
       {/* Lop TREN: tam hien hanh. `key` doi theo tam nen hieu ung hien dan tu
           chay lai — khong phai theo doi trang thai gi them. */}
       <div className="page-bg-lop" data-bg={ten} key={ten} data-vao=""
-           data-huong={huongText} />
+           data-huong={huongText}>
+        {ten === "home" ? (
+          <LiveBackground
+            poster={anhNen(ten)}
+            video={HOME_VIDEO}
+            className="home-live-lop"
+          />
+        ) : null}
+      </div>
 
       {/* Hat sang — CSS quyet dinh trang nao ve. Mot phan tu, khong phai vai tram. */}
       <div className="hat" data-bg={ten} />

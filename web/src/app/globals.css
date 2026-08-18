@@ -450,6 +450,22 @@ body {
   doi soat, va de neu sau nay co ai doi thi test do ngay.
 */
 .page-bg-lop[data-bg="home"]    { --anh: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor.webp");      --anh-nho: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor-sm.webp");      --toi: 0.34; --diem: center 42%; --mo: 0px; }
+
+/*
+  Live Wallpaper V1 — CHI trang chu. Xem `components/LiveBackground.tsx`.
+
+  `--diem` cua home la `center 42%` — poster/video phai dung CHINH XAC diem do,
+  neu khong canh se "nhay" mot chut khi video (object-position mac dinh: center)
+  chong len anh CSS ::before (dang o center 42%) roi hien dan vao.
+
+  Kich thuoc: lop nay dat trong the `data-vao` (position: absolute; inset: 0),
+  nen chi can rong/cao 100% — `position` van la "relative" tu chinh
+  `LiveBackground.tsx` (khong doi o day), du de lam noi chua cho hai lop con
+  `position: absolute` cua no.
+*/
+.home-live-lop { width: 100%; height: 100%; }
+.home-live-lop .live-bg-poster,
+.home-live-lop .live-bg-video { object-position: center 42%; }
 .page-bg-lop[data-bg="explore"] { --anh: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom-sm.webp");    --toi: 0.42; --diem: center 38%; --mo: 0px; }
 .page-bg-lop[data-bg="reader"]  { --anh: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine.webp");  --anh-nho: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine-sm.webp");  --toi: 0.38; --diem: center 22%; --mo: 0px; }
 .page-bg-lop[data-bg="studio"]  { --anh: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop-sm.webp");    --toi: 0.46; --diem: center 45%; --mo: 0px; }

@@ -121,13 +121,22 @@ test("Công cụ (.btn-ghost) van la be mat trung tinh, khong nen tim nang/glow"
 
 /* ============================================== 11-15: suong doc hero/page = */
 
-test(".hero-v2::before: elip NHO GON (chieu cao <= 90%), khong con 128% cu — tranh 'tam panel'", () => {
+test(".hero-v2::before: lop khi quyen NHO GON (chieu cao <= 90%), khong con 128% cu — tranh 'tam panel'", () => {
+  /*
+    PageHero V2 (2026-08) thay MOT elip radial-gradient duy nhat bang BA lop
+    lech tam + mask-image feather (xem `themed-page-hero-v1.test.mjs` cho bo
+    test day du cua kien truc moi) — assertion "transparent 80%" cu (khoa mot
+    STOP CU THE cua elip DUY NHAT) khong con y nghia voi kien truc nhieu lop.
+    O day chi con giu lai dung y GOC: chieu cao elip dau tien khong duoc qua
+    lon, va CA composite lan mask deu phai tan bien hoan toan (khong dut cung).
+  */
   const than = codeOnly(rule(".hero-v2::before"));
   const m = than.match(/radial-gradient\((\d+)% (\d+)% at/);
   assert.notEqual(m, null);
   const h = Number(m[2]);
   assert.ok(h <= 90, `chiều cao elip ${h}% vẫn quá lớn — dễ đọc ra như một tấm phẳng`);
-  assert.match(than, /transparent 80%/, "phải tan biến hoàn toàn ở stop rõ ràng");
+  assert.match(than, /transparent\)/, "mỗi lớp radial-gradient phải tan biến hoàn toàn về transparent");
+  assert.match(than, /mask-image:.*transparent/, "phải có mask-image feather toàn bộ composite về transparent");
 });
 
 test(".page-head::before: cung nguyen tac elip nho gon — Explore/Animation dung chung component nay", () => {

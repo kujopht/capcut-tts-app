@@ -22,7 +22,7 @@ import { api, type AnimationSeries } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
 import { EmptyState, ErrorState, PageHeader, SkeletonCards } from "@/components/ui";
 import { IconFilm } from "@/components/Icons";
-import { MotifFilmFrame } from "@/components/Ornaments";
+import { MotifFilmFrame, MotifNebulaOrbit } from "@/components/Ornaments";
 import { NovelCover } from "@/components/NovelCover";
 
 const PAGE_SIZE = 12;
@@ -111,13 +111,15 @@ function AnimationBrowser() {
   const to = page * PAGE_SIZE + series.length;
 
   return (
-    // Themed Page Hero V1 — "Cinematic Nebula": cham/xanh dem + mot diem
-    // cam/hong rat kiem che, cyan nho cho cam giac "anh chieu".
+    // Themed Page Hero V2 — "Cinematic Nebula": cham/xanh dem + mot diem
+    // cam/hong rat kiem che, cyan nho cho cam giac "anh chieu". Hoa tiet la
+    // mot vanh quy dao thien the + sao (MotifNebulaOrbit) thay vi khung hinh
+    // dien anh (MotifFilmFrame van con dung o portal-card cua trang chu).
     <div className="page" data-hero-theme="animation">
       <PageHeader
         eyebrow="Animation"
         icon={<IconFilm />}
-        motif={<MotifFilmFrame />}
+        motif={<MotifNebulaOrbit />}
         title="Animation"
         lead="Xem series animation từ YouTube — video luôn phát trực tiếp từ YouTube, Fanfic không tải lại hay lưu trữ video của ai cả."
         action={

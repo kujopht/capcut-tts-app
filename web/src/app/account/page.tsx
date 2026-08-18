@@ -25,6 +25,7 @@ import { AchievementGrid } from "@/components/AchievementGrid";
 import { GamificationPanel } from "@/components/GamificationPanel";
 import { QuestPanel } from "@/components/QuestPanel";
 import { Avatar } from "@/components/Avatar";
+import { MotifSigil } from "@/components/Ornaments";
 
 const TIER_LABEL: Record<string, string> = {
   free: "Miễn phí",
@@ -114,13 +115,19 @@ export default function AccountPage() {
   }
 
   return (
-    <div className="page">
+    // Themed Page Hero V2 — Tai khoan: xanh lam-tim + indigo, KIEM CHE hon
+    // cac trang noi dung khac (day la ho so ca nhan, khong phai mot "the
+    // gioi" can the hien ro).
+    <div className="page" data-hero-theme="account">
       {/*
         Danh thiep: anh dai dien, ten, email, goi. Bon manh thong tin nay truoc
         day nam o bon khoi roi rac; gom lai mot cho thi doc duoc trong mot lan
         nhin, va do la ca viec cua trang tai khoan.
       */}
       <header className="account-hero">
+        <span className="account-hero-motif" aria-hidden="true">
+          <MotifSigil />
+        </span>
         <label
           className="min0"
           style={{ cursor: savingAvatar ? "wait" : "pointer" }}

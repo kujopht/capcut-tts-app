@@ -13,6 +13,7 @@ import { safeNext } from "@/lib/nav";
 import { api } from "@/lib/api";
 import { FacebookIcon, GoogleIcon } from "@/components/ProviderIcons";
 import { FACEBOOK_LOGIN_ENABLED, GOOGLE_LOGIN_ENABLED } from "@/lib/oauth";
+import { MotifPortalHalo } from "@/components/Ornaments";
 
 const MIN_PASSWORD = 8;
 
@@ -98,8 +99,13 @@ function LoginForm() {
   }
 
   return (
-    <div className="page auth-page">
+    // Themed Page Hero V2 — Cong sao: indigo nua dem + amethyst, quang cong
+    // (MotifPortalHalo) dat sau logo thay cho mang toi phang cu.
+    <div className="page auth-page" data-hero-theme="auth">
       <header className="auth-head">
+        <span className="auth-portal-halo" aria-hidden="true">
+          <MotifPortalHalo />
+        </span>
         <LogoMark size={54} title="Fanfic Audio Studio" />
         <h1 className="page-title">
           {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}

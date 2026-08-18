@@ -69,6 +69,7 @@ import {
   CornerRune,
   MotifFilmFrame,
   MotifManuscript,
+  MotifWaveArcs,
   MotifWaveform,
 } from "@/components/Ornaments";
 import {
@@ -215,6 +216,7 @@ function TheTiepTucXem({ muc }: { muc: ContinueWatchItem }) {
 function Hero({ daDangNhap }: { daDangNhap: boolean }) {
   return (
     <section className="hero-v2 rise" aria-labelledby="home-hero-title">
+      <MotifWaveArcs className="hero-v2-motif" />
       <span className="pill">
         <span className="pill-dot" aria-hidden="true" />
         Đọc · Nghe · Xem · Sáng tác

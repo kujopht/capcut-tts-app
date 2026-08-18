@@ -243,6 +243,133 @@ export function MotifInkBloom({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Trang chủ (PageHero V2) — vài cung sóng/khúc xạ mảnh, gợi mặt biển dưới
+ * ánh sáng chứ không phải biểu đồ hay đường viền hình học.
+ */
+export function MotifWaveArcs({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 200 100"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <path d="M4 70 C40 50 60 50 96 66 C132 82 152 82 188 60" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M10 42 C46 26 66 26 100 40 C134 54 154 54 186 36" fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M20 88 C54 76 72 76 104 86" fill="none" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/**
+ * Animation (PageHero V2) — thay `MotifFilmFrame` (qua nhieu "thiet bi quay
+ * phim" cho huong tinh than moi: mot vanh quy dao thien the mo + vai diem sao
+ * + mot cung cong mo nhu manh vo cua mot canh cong, khong con la khung hinh
+ * dien anh.
+ */
+export function MotifNebulaOrbit({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 160 160"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <ellipse cx="80" cy="80" rx="66" ry="30" fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.1" transform="rotate(-18 80 80)" />
+      <path d="M28 46 A70 70 0 0 1 96 18" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="118" cy="52" r="1.6" fill="currentColor" fillOpacity="0.8" />
+      <circle cx="40" cy="108" r="1.3" fill="currentColor" fillOpacity="0.65" />
+      <circle cx="100" cy="120" r="1.8" fill="currentColor" fillOpacity="0.7" />
+      <circle cx="132" cy="94" r="1.2" fill="currentColor" fillOpacity="0.55" />
+    </svg>
+  );
+}
+
+/**
+ * Audio Studio (PageHero V2) — thay `MotifWaveform` (day cot EQ ro rang) bang
+ * vai vong cong huong dong tam + mot cung song mem, tranh cam giac "bang tan
+ * so" lap lai o khap noi.
+ */
+export function MotifResonanceRings({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 160 160"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <circle cx="70" cy="80" r="18" fill="none" stroke="currentColor" strokeOpacity="0.55" strokeWidth="1.3" />
+      <circle cx="70" cy="80" r="36" fill="none" stroke="currentColor" strokeOpacity="0.38" strokeWidth="1.1" strokeDasharray="3 6" />
+      <circle cx="70" cy="80" r="54" fill="none" stroke="currentColor" strokeOpacity="0.22" strokeWidth="1" strokeDasharray="2 8" />
+      <path d="M100 100 C118 92 128 76 122 56" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Viết (PageHero V2) — mot net but muc uon nhe + vai vach rune nho, cam giac
+ * sang tac/van chuong chu khong phai trang trai cong chua. */
+export function MotifInkFlourish({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 160 120"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <path d="M18 92 C48 100 72 82 78 58 C82 40 74 24 58 20" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M58 20 C64 26 64 34 56 36" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M100 30 L104 40 M112 26 L108 38 M124 32 L118 42" stroke="currentColor" strokeOpacity="0.4" strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Tài khoản (PageHero V2) — mot huy hieu/an chuong nho, kiem che hon cac
+ * trang noi dung khac. */
+export function MotifSigil({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 120 120"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <path d="M60 14 L96 30 V62 C96 84 80 98 60 106 C40 98 24 84 24 62 V30 Z" fill="none" stroke="currentColor" strokeOpacity="0.45" strokeWidth="1.3" strokeLinejoin="round" />
+      <circle cx="60" cy="58" r="14" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.1" />
+      <circle cx="60" cy="58" r="2.2" fill="currentColor" fillOpacity="0.7" />
+    </svg>
+  );
+}
+
+/**
+ * Đăng nhập (PageHero V2) — vong cong cong that/nhung vach roi, vai diem sao
+ * nho, mot cung rune mo — quang cong dang sau logo, KHONG phai mot khoi tron
+ * dac.
+ */
+export function MotifPortalHalo({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 200 200"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <circle cx="100" cy="100" r="72" fill="none" stroke="currentColor" strokeOpacity="0.4" strokeWidth="1.3" strokeDasharray="10 14" />
+      <circle cx="100" cy="100" r="90" fill="none" stroke="currentColor" strokeOpacity="0.22" strokeWidth="1" strokeDasharray="4 18" />
+      <path d="M40 60 A72 72 0 0 1 100 28" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="150" cy="52" r="1.6" fill="currentColor" fillOpacity="0.75" />
+      <circle cx="42" cy="140" r="1.4" fill="currentColor" fillOpacity="0.6" />
+      <circle cx="160" cy="146" r="1.2" fill="currentColor" fillOpacity="0.55" />
+    </svg>
+  );
+}
+
 /** Audio — sóng âm dịu dưới trăng. */
 export function MotifWaveform({ className }: { className?: string }) {
   const bars = [6, 12, 20, 14, 26, 16, 22, 10, 18, 8];

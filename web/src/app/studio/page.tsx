@@ -44,7 +44,7 @@ import {
   formatNumber,
 } from "@/components/ui";
 import { IconMic , IconHistory, IconBulb } from "@/components/Icons";
-import { MotifWaveform } from "@/components/Ornaments";
+import { MotifResonanceRings } from "@/components/Ornaments";
 
 /** Gioi han cua Studio — dat o day de tranh job chay qua lau. */
 const MAX_CHARS = 20_000;
@@ -308,7 +308,7 @@ export default function StudioPage() {
   if (!profile) {
     return (
       <div className="page" data-hero-theme="audio">
-        <PageHeader eyebrow="Audio Studio" icon={<IconMic />} motif={<MotifWaveform />} title="Audio Studio" />
+        <PageHeader eyebrow="Audio Studio" icon={<IconMic />} motif={<MotifResonanceRings />} title="Audio Studio" />
         <EmptyState
           icon="🔐"
           title="Cần đăng nhập để tạo audio"
@@ -324,12 +324,14 @@ export default function StudioPage() {
   }
 
   return (
-    // Themed Page Hero V1 — "Moonwave": xanh dem + cyan + tim lanh.
+    // Themed Page Hero V2 — "Moonwave": xanh dem + cyan + tim lanh. Hoa tiet
+    // la vong cong huong dong tam (MotifResonanceRings), khong con la day
+    // cot EQ (MotifWaveform van con dung o portal-card cua trang chu).
     <div className="page" data-hero-theme="audio">
       <PageHeader
         eyebrow="Audio Studio"
         icon={<IconMic />}
-        motif={<MotifWaveform />}
+        motif={<MotifResonanceRings />}
         title="Tạo audio từ văn bản"
         lead="Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là riêng tư và không trở thành chương fanfic."
         action={

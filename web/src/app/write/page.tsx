@@ -50,6 +50,7 @@ import {
   SkeletonList,
   formatNumber,
 } from "@/components/ui";
+import { MotifInkFlourish } from "@/components/Ornaments";
 import { IconFeather , IconBook, IconLibrary } from "@/components/Icons";
 
 /** Thao tac xoa dang cho xac nhan. */
@@ -609,10 +610,13 @@ export default function WritePage() {
   }
 
   return (
-    <div className="page">
+    // Themed Page Hero V2 — Xuong sang tac: tim + indigo + hong tram, hoa
+    // tiet la net but muc uon (MotifInkFlourish).
+    <div className="page" data-hero-theme="write">
       <PageHeader
         eyebrow="Khu vực tác giả"
         icon={<IconFeather />}
+        motif={<MotifInkFlourish />}
         title="Viết và xuất bản"
         lead="Tạo truyện, thêm chương, tạo audio cho từng chương. Truyện nằm ở bản nháp cho tới khi bạn tự xuất bản."
         action={

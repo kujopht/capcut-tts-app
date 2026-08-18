@@ -1,25 +1,20 @@
 "use client";
 
 /**
- * Vi chuyen canh RIENG, RAT NHO cho noi dung trang — Cloud Veil Route
- * Transition V2.
+ * The bao noi dung trang — tu V2 (Cloud Veil), qua V3, den Aether Rift V4.
  *
- * VI SAO CAN THEM CAI NAY: V1 dat man may TREN ca noi dung, nen do mo cua
- * may tu no che giau luc DOM doi (Next.js thay `{children}` bang cay component
- * cua route moi). V2 chuyen man may XUONG duoi noi dung (xem
- * `RouteTransitionVeil.tsx`/`.route-veil` o globals.css) — noi dung gio
- * LUON o tren may, nen KHONG con gi che giau buoc thay DOM do nua. Component
- * nay bu lai bang mot cu mo/hien CUC NHO cua CHINH noi dung (opacity + dich
- * 3px doc), du de che mat cam giac "the bi thay dot ngot" ma khong can giu
- * hai cay component (cu/moi) cung luc.
+ * V4 (dac ta muc 11 — "First attempt: DO NOT fade route UI at all"): the
+ * bao nay HIEN KHONG con gan animation nao ca (`.route-content[data-state=
+ * ...]` da bi go khoi globals.css). `{children}` doi NGAY khi Next.js doi
+ * route — dac ta V4 muon dieu huong cam giac TUC THI, va bat ky do tre nao
+ * (ke ca mot cu mo 140-180ms nhu V2/V3) deu cong them vao cam giac "cho".
  *
- * MOT THE BAO ON DINH: `{children}` doi khi route doi (do Next.js quan ly),
- * nhung CHINH the bao nay (voi className "wrap route-content") KHONG BAO
- * GIO remount — no doc CUNG mot kho voi `PageBackground`/`RouteTransitionVeil`
- * qua `useSyncExternalStore`, chi doi thuoc tinh `data-state` (`.route-
- * content[data-state=...]` o globals.css dieu khien hoat hinh). Nho vay CSS
- * transition co "tu" va "den" tren CUNG mot phan tu DOM — dieu kien bat
- * buoc de trinh duyet noi suy duoc, khong bi nhay khung.
+ * The bao van duoc GIU LAI (khong go component) vi hai ly do: (1) `data-
+ * state` van duoc dat, san sang cho mot lan mo CUC ngan (opacity 0.96->1,
+ * 80-120ms, KHONG translateY) NEU QA sau nay thay viec doi noi dung qua
+ * dot ngot — chi can them lai hai quy tac CSS, khong doi component nay;
+ * (2) `className="wrap route-content"` giu nguyen cau truc DOM/bo cuc hien
+ * co (lop `.wrap` gio dat o day thay vi `layout.tsx`).
  */
 
 import { useSyncExternalStore } from "react";

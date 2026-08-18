@@ -120,12 +120,11 @@ test("H: khong co key nao dua tren width/DPR co the lam <video>/lop nen remount 
     assert.ok(!/key=\{[^}]*(width|innerWidth|devicePixelRatio|dpr)[^}]*\}/i.test(s),
       "key phụ thuộc kích thước/DPR — sẽ remount video một cách không cần thiết");
   }
-  // V3: khoa la mot bo dem (`khoa`) tang moi khi CHU DE THAT SU doi (khong
-  // phai width/DPR) — cho phep giu lop CU + lop MOI cung luc de crossfade
-  // (xem `live-background-home-integration.test.mjs`). Van on dinh qua
-  // resize/doi man hinh y het `key={ten}` cu: chi tang khi `ten` doi.
-  assert.match(s2, /key=\{lop\.khoa\}/);
-  assert.match(s2, /const khoa = khoaKeTiep\.current\+\+;/);
+  // V4: khoa la the-he `the` cua kho chuyen canh (routeTransitionStore),
+  // tang moi khi MOT LAN REVEAL MOI that su bat dau (khong phai width/DPR)
+  // — xem `route-transition-veil.test.mjs`. Van on dinh qua resize/doi man
+  // hinh: chi tang khi dieu huong that su bat dau mot chu ky moi.
+  assert.match(s2, /key=\{the\}/);
 });
 
 test("V3 khong dua vao focus/blur: khong them prop/co moi lien quan window focus vao LiveBackground", () => {

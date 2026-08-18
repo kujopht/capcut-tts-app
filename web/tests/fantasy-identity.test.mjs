@@ -354,14 +354,13 @@ test("moi hieu ung moi deu TAT khi nguoi dung chon giam chuyen dong", () => {
     "nhịp thở của nền không được tắt khi giảm chuyển động");
 
   /*
-    Cloud Veil (V1 roi V2): chuyen canh route la man may/suong
-    (`.route-veil[data-state=...]`), khong con cu TRUOT NGANG. Duong di
-    (transform/blur) cua CA BON lop may/suong phai TAT het duoi giam chuyen
-    dong, chi con mot lan mo/an opacity rat ngan — xem
-    `route-transition-veil.test.mjs` cho cac rang buoc chi tiet ve man suong.
+    Aether Rift (V4): chuyen canh route bi BO HAN duoi giam chuyen dong
+    (dac ta muc 21 — "skip Aether Rift entirely"), khong chi tat duong di
+    nhu cac ban truoc — xem `route-transition-veil.test.mjs` cho cac rang
+    buoc chi tiet.
   */
-  assert.match(than, /\.mist \{ filter: none; \}/,
-    "man suong (V3: 6 dai .mist-*) vẫn còn filter khi giảm chuyển động");
+  assert.match(than, /\.aether-rift \* \{ animation: none !important; \}/,
+    "Aether Rift vẫn còn hoạt hình khi giảm chuyển động");
 });
 
 /* ================================ 6. nut chinh */

@@ -82,13 +82,14 @@ export default function RootLayout({
             <PageBackground />
 
             {/*
-              Man may/suong chuyen canh route (Cloud Veil V2) — MOT LAN duy
-              nhat, ngang hang voi `PageBackground`. `.route-veil` dat
+              Hieu ung chuyen canh route "Aether Rift Reveal" (V4) — MOT LAN
+              duy nhat, ngang hang voi `PageBackground`. `.aether-rift` dat
               z-index -1 (chi hon `.page-bg` -2 mot bac) — CA HAI la con am,
               nen LUON ve TRUOC vung noi dung chinh (khong dinh vi) nhung SAU
-              cac lop dieu huong/modal z-index duong. Ket qua: NEN < MAY < GIAO DIEN
-              — may KHONG con che PageHero/nut/the nhu V1 (bi tu choi). Xem
-              `components/RouteTransitionVeil.tsx`.
+              cac lop dieu huong/modal z-index duong. Ket qua: NEN < HIEU UNG
+              < GIAO DIEN — hieu ung KHONG bao gio che PageHero/nut/the (dung
+              tu V1-V3, tat ca bi tu choi vi hinh dang, khong phai z-index).
+              Xem `components/RouteTransitionVeil.tsx`.
             */}
             <RouteTransitionVeil />
 

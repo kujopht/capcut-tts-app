@@ -5,29 +5,28 @@
  *
  * V1 "Cloud Veil Route Transition": chuyen canh khi doi route KHONG con la
  * viec cua component nay nua — no chuyen sang `RouteTransitionVeil.tsx`
- * (man may/suong troi qua nen) + `lib/routeTransitionStore.ts` (dong ho
- * dieu phoi pha phu/doi anh/lo, dung chung giua hai component).
+ * (hieu ung chuyen canh) + `lib/routeTransitionStore.ts` (kho dieu phoi,
+ * dung chung giua hai component).
  *
- * V3 (Celestial Mist Ribbon): THEM crossfade anh nen A->B (`--dur-bg-
- * crossfade`, ~200ms). Ly do: V2 doi anh bang `key={ten}` — mot cu REMOUNT
- * cung, an duoc vi may V2 qua day dac che kin man hinh dung luc do. May V3
- * mong hon nhieu (chi con 35-60% dien tich, luon con khe ho) nen cu nhay do
- * se LO RA neu khong tan sac that. Co che: khi `ten` doi, GIU lop CU mot
- * chut (opacity 1->0) trong khi lop MOI hien vao (opacity 0->1) — CHI
- * `.page-bg-lop` (anh+vignette) tan sac, KHONG phai ca `.page-bg` hay bat ky
- * gi thuoc giao dien (dac ta cam "fade the whole page"). `.hat`/
- * `<AmbientScene>` van doi cung (chi la trang tri phu, khong can tan sac).
+ * V4 "Aether Rift Reveal": component nay KHONG con tu quan ly mang lop
+ * (`cacLop`/`data-fade` cua V3) — kho da tu tach san CHINH XAC HAI lop can
+ * ve, doc truc tiep tu snapshot:
  *
- * Lich su (V0, truoc bao cao Cloud Veil): tung la mot co che HAI LOP tu quan
- * ly rieng (nap truoc anh, dem gio, quay may ngang theo huong tren truc) —
- * xem lich su git neu can doi chieu. Viec nap-truoc-anh khong mat di, no
- * chuyen vao `routeTransitionStore.ts` (`napAnh`), noi no co the dong bo voi
- * dong ho man suong thay vi tu chay rieng.
+ *   `ten`     lop DUOI, DA ON DINH, tuyet doi khong hoat hinh.
+ *   `tenMoi`  lop TREN, chi ton tai luc `trangThai === "revealing"` — duoc
+ *             "tiet lo" dan qua `clip-path: url(#aether-fill-clip)`
+ *             (dinh nghia o `RouteTransitionVeil.tsx`, hoat hinh boi CSS
+ *             `d`) thay vi opacity-crossfade nhu V3.
+ *
+ * `key={the}` tren lop TREN dam bao React REMOUNT no moi lan MOT LAN
+ * REVEAL MOI that su bat dau (ke ca khi dieu huong lien tiep thay doi dich
+ * TRUOC KHI lan truoc kip xong) — dam bao khong con LiveBackground/trang
+ * thai anh nao bi giu sot lai tu lan truoc.
  *
  * KHONG dung lam bia truyen — do la viec cua `StoryCoverFallback`.
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { anhNen } from "@/lib/backgrounds";
 import { AmbientScene } from "@/components/AmbientScene";
 import { LiveBackground } from "@/components/LiveBackground";
@@ -50,14 +49,14 @@ import { routeTransitionStore } from "@/lib/routeTransitionInstance";
  * Video toan khung, giong cau truc Gemini V1/Nova Reel V1 ban dau (poster ->
  * video crossfade, KHONG mask, KHONG on dinh hoa OpenCV).
  *
- * TUONG THICH Cloud Veil: khi ROI trang chu, `ten` doi tu "home" sang chu de
- * khac DUNG LUC man suong che kin (xem kho chuyen canh) — React go han
- * `<LiveBackground>` (dieu kien `ten === "home"` ben duoi) ngay tai thoi
- * diem do, nen video KHONG BAO GIO bi thay the/dung khi nguoi dung con thay
- * duoc no. Khi VAO trang chu cung vay: LiveBackground mount luc con bi che,
- * va tu no da ve poster truoc/video sau (xem chinh component do) — nen luc
- * man suong lo ra, nguoi dung thay poster net ngay, video chi hien sau khi
- * tai xong. Khong can them co "tam ngung" nao o day.
+ * TUONG THICH Aether Rift: roi trang chu -> `ten` (lop duoi) doi thanh chu
+ * de moi NGAY khi lop TREN (`tenMoi`) hoan tat tiet lo — `<LiveBackground>`
+ * chi mount khi CHINH lop do co `data-bg="home"`, nen video tu go het khi
+ * lop chua no khong con la "home" nua, KHONG bao gio phat ngam lau hon can
+ * thiet. Vao trang chu: lop TREN mount voi `tenMoi === "home"` NGAY tu dau
+ * pha reveal — LiveBackground tu no da ve poster truoc/video sau (xem
+ * chinh component do), nen nguoi dung thay poster net trong luc duong bien
+ * dang tiet lo, video chi hien khi tai xong. Khong can them "tam ngung".
  */
 const HOME_LIVE_BAT = true;
 const HOME_VIDEO = {
@@ -65,7 +64,7 @@ const HOME_VIDEO = {
 };
 
 export function PageBackground() {
-  const { ten, duongDan } = useSyncExternalStore(
+  const { ten, tenMoi, the, duongDan } = useSyncExternalStore(
     routeTransitionStore.subscribe,
     routeTransitionStore.getSnapshot,
     // Server: chua biet duong dan nao ca — `ten === null` -> component ve
@@ -84,11 +83,18 @@ export function PageBackground() {
   const duongDanTruoc = useRef<string | null>(null);
   useEffect(() => {
     /*
-      Chi goi `diTinh` khi duong dan THAT SU doi — vong kiem 120ms nay chay
-      MAI MAI (suot doi trang), nen neu goi `diTinh` moi nhip du khong co gi
-      doi, kho se `set()` (va lam CA HAI component ve lai) moi 120ms VO HAN,
+      Chi goi `diTinh` khi duong dan THAT SU doi — vong kiem nay chay MAI
+      MAI (suot doi trang), nen neu goi `diTinh` moi nhip du khong co gi
+      doi, kho se `set()` (va lam CA HAI component ve lai) moi nhip VO HAN,
       dung nguyen dieu "khong duoc kich hoat hoat hinh lien tuc luc dung yen"
-      ma dac ta cam.
+      ma dac ta cam — do la ly do van GIU vong kiem (khong doi sang mot co
+      che nang hon), chi RUT NGAN chu ky.
+
+      V4 rut tu 120ms xuong 30ms: dac ta cam moi do tre dau vao (muc 9,
+      "<100ms"), va vong kiem nay la con duong DUY NHAT component biet URL
+      da doi (Next.js khong bao mot su kien nao cho pushState). Do sanh mot
+      chuoi ngan moi 30ms re toi muc khong do luong duoc bang cong cu thong
+      thuong — an toan de rut ngan, khac han viec giam mot animation frame.
     */
     const doc = () => {
       const duong = window.location.pathname;
@@ -97,7 +103,7 @@ export function PageBackground() {
       routeTransitionStore.diTinh(duong);
     };
     doc();
-    const id = window.setInterval(doc, 120);
+    const id = window.setInterval(doc, 30);
     window.addEventListener("popstate", doc);
     return () => {
       window.clearInterval(id);
@@ -105,77 +111,42 @@ export function PageBackground() {
     };
   }, []);
 
-  /*
-    V3 crossfade: co the co HAI `.page-bg-lop` cung luc (`khoa` la so dem
-    rieng — KHONG phai `ten` — de tranh trung khoa khi ten CU va ten MOI
-    khac nhau nhung ta van can render CA HAI dong thoi). `fade`:
-
-      "steady"  binh thuong (opacity 1, co transition) — trang thai on dinh
-      "enter"   moi mount cho lan doi KHONG PHAI lan dau (opacity 0, KHONG
-                transition — tranh mot buoc nhay hoat hinh tai chinh khung
-                hinh mount), duoc chuyen sang "steady" o frame ke tiep de
-                trinh duyet THAT SU noi suy 0->1
-      "exit"    lop CU dang tan (opacity 1->0), tu go khoi mang khi
-                `transitionend` ban (`onTransitionEnd`)
-
-    CHI `.page-bg-lop` (anh + vignette) tan sac — `.hat`/`<AmbientScene>` ben
-    duoi doc `ten` truc tiep, doi CUNG (dac ta cam "fade the whole page";
-    day chi la hai chi tiet trang tri phu, khong can tan sac rieng).
-  */
-  const [cacLop, setCacLop] = useState<
-    { ten: string; khoa: number; fade: "steady" | "enter" | "exit" }[]
-  >([]);
-  const khoaKeTiep = useRef(0);
-  const tenTruocLop = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!ten || ten === tenTruocLop.current) return;
-    const laLanDau = tenTruocLop.current === null;
-    tenTruocLop.current = ten;
-    const khoa = khoaKeTiep.current++;
-    setCacLop((cu) => [
-      ...cu.map((l) => ({ ...l, fade: "exit" as const })),
-      { ten, khoa, fade: laLanDau ? "steady" : "enter" },
-    ]);
-    if (laLanDau) return;
-    // Doi mot khung hinh de trinh duyet ghi nhan trang thai "enter" (opacity
-    // 0, khong transition) TRUOC KHI doi sang "steady" — neu doi ca hai
-    // cung mot lan cap nhat, React gop lai thanh MOT lan render duy nhat va
-    // trinh duyet khong co gi de noi suy tu (khong thay hoat hinh).
-    const id = requestAnimationFrame(() => {
-      setCacLop((cu) => cu.map((l) => (l.khoa === khoa ? { ...l, fade: "steady" } : l)));
-    });
-    return () => cancelAnimationFrame(id);
-  }, [ten]);
-
-  function xoaLop(khoa: number) {
-    setCacLop((cu) => cu.filter((l) => l.khoa !== khoa));
-  }
-
   if (!ten) return null;
 
   return (
     <div className="page-bg" aria-hidden="true">
-      {cacLop.map((lop) => (
+      {/* Lop DUOI — DA ON DINH, khong bao gio hoat hinh. */}
+      <div className="page-bg-lop" data-bg={ten}>
+        {ten === "home" ? (
+          <LiveBackground
+            poster={anhNen(ten)}
+            video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
+            className="home-live-lop"
+          />
+        ) : null}
+      </div>
+
+      {/* Lop TREN — CHI ton tai luc dang "revealing", tiet lo dan qua
+          clip-path (xem RouteTransitionVeil.tsx). */}
+      {tenMoi ? (
         <div
-          className="page-bg-lop"
-          data-bg={lop.ten}
-          data-fade={lop.fade}
-          key={lop.khoa}
-          onTransitionEnd={lop.fade === "exit" ? () => xoaLop(lop.khoa) : undefined}
+          className="page-bg-lop page-bg-reveal"
+          data-bg={tenMoi}
+          key={the}
         >
-          {lop.ten === "home" ? (
+          {tenMoi === "home" ? (
             <LiveBackground
-              poster={anhNen(lop.ten)}
+              poster={anhNen(tenMoi)}
               video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
               className="home-live-lop"
             />
           ) : null}
         </div>
-      ))}
+      ) : null}
 
-      {/* Hat sang — CSS quyet dinh trang nao ve. Mot phan tu, khong phai vai tram. */}
-      <div className="hat" data-bg={ten} />
+      {/* Hat sang — CSS quyet dinh trang nao ve. Uu tien dia diem DICH de
+          khong tre so voi hieu ung reveal. */}
+      <div className="hat" data-bg={tenMoi ?? ten} />
 
       {/*
         Khong khi rieng cua tung khu vuc. Dat o DAY chu khong o `layout.tsx`:

@@ -1,86 +1,90 @@
 /**
- * Kho trang thai DUNG CHUNG cho chuyen canh route — "Cloud Veil Route
- * Transition V1". Thay THE HOAN TOAN cho co che quay-may-ngang cu (xem lich
- * su git `components/PageBackground.tsx` truoc bao cao nay).
+ * Kho trang thai DUNG CHUNG cho chuyen canh route — "Aether Rift Reveal V4".
  *
- * VI SAO MOT KHO RIENG, KHONG DAT TRONG COMPONENT: hai component can CUNG
- * MOT trang thai TAI CUNG MOT THOI DIEM —
+ * LICH SU: V1-V2-V3 (man may/suong) DEU bi tu choi o khau thi giac — V3 cu
+ * the bi nhan xet "doc ra nhu polygon/CSS demo, van cam giac co gi do TRUOT
+ * qua man hinh, chuyen canh cam giac bi TRE (delay dau vao)". Nguyen nhan
+ * KHONG chi o hinh hoc: ca ba ban truoc DEU bat dieu huong CHO mot khoang
+ * toi thieu (V1 400ms, V2/V3 340ms — bien `PHU` cu) TRUOC KHI doi anh nen —
+ * nghia la nguoi dung bam link, thay NavIndicator nhay ngay, nhung nen/anh
+ * moi khong xuat hien cho toi khi man may "che xong". V4 BO HAN co che nay.
  *
- *   `PageBackground.tsx`      quyet dinh HINH ANH nao dang hien (`ten`)
- *   `RouteTransitionVeil.tsx` quyet dinh MAY CHE dang o pha nao (`trangThai`)
+ * MO HINH MOI: khong con "che roi doi roi lo" — thay bang MOT lop REVEAL
+ * duy nhat. Nen MOI (`tenMoi`) duoc ve NGAY LAP TUC (khong cho `napAnh`,
+ * khong cho mot moc toi thieu nao) o TREN nen CU (`ten`, van con nguyen o
+ * duoi, chua bi doi/dich chuyen) — rieng PHAN HINH ANH nao cua nen moi duoc
+ * "lo ra" qua mot `clip-path` SVG (duong bien huu co, xem
+ * `components/RouteTransitionVeil.tsx`) tien dan tu 0% den 100% dien tich
+ * trong khoang `--dur-aether` (~380ms). Khi lop tren da lo HET, no duoc
+ * "chot" thanh `ten` (lop duoi moi) va tu no bien mat — nguoi dung khong
+ * bao gio thay mot buoc nhay.
  *
- * — va chung PHAI dong bo tuyet doi (anh doi DUNG luc man suong che kin),
- * nen khong the la hai state rieng trong hai component doan-thoi-diem-cua-
- * nhau bang setTimeout doc lap (de lech, de dua). MOT kho, hai component
- * cung theo doi qua `useSyncExternalStore`.
+ * DIEU QUAN TRONG NHAT: `diTinh()` KHONG con lam gi cham toi VIEC DIEU
+ * HUONG ca — noi dung trang (do chinh Next.js quan ly qua `{children}`) da
+ * doi NGAY khi route doi, tu truoc gio, KHONG bi kho nay giu lai. Kho nay
+ * chi dieu phoi HIEU UNG TRANG TRI phia sau, va hieu ung do KHOI DONG NGAY
+ * o `diTinh()`, khong cho gi ca.
  *
  * KIEM THU DUOC MA KHONG CAN JSDOM: `taoRouteTransitionStore` nhan moi phu
  * thuoc cham toi trinh duyet (nap anh, hen gio, giam chuyen dong) qua tham
  * so — bo test dung `node:test` co the tiem cac ham gia, dieu khien "gio"
- * bang tay, va kiem tra CHINH XAC may co chay dung trinh tu, dung nguyen tac
- * chong-dua (race) khi dieu huong lien tiep hay khong. Day la phan RUI RO
- * NHAT cua tinh nang nay — dang duoc kiem that, khong chi quet chu trong ma
- * nguon.
+ * bang tay, va kiem tra CHINH XAC hieu ung co chay dung trinh tu, dung
+ * nguyen tac chong-dua (race) khi dieu huong lien tiep hay khong.
  */
 
-export type TrangThaiVeil = "idle" | "covering" | "revealing";
+export type TrangThaiAether = "idle" | "revealing";
 
 export interface RouteTransitionSnapshot {
   duongDan: string;
   /**
-   * Chu de nen dang duoc VE THAT (`PageBackground.tsx` dung gia tri nay).
-   * Van la chu de CU trong suot pha "covering" — chi doi thanh dich luc doi
-   * anh THAT SU xay ra (giua luc man suong che kin). `null` truoc lan phan
-   * giai dau tien.
+   * Chu de nen DA ON DINH — lop DUOI, luon hien thi day du, khong bao gio
+   * bi hoat hinh. `null` truoc lan phan giai dau tien.
    */
   ten: string | null;
   /**
-   * Chu de DICH cua lan chuyen canh dang chay — dung de MAN SUONG chon mau
-   * (`RouteTransitionVeil.tsx`) tu luc bat dau che, TRUOC CA khi `ten` kip
-   * doi. `null` khi khong co chuyen canh nao dang chay (luc do man suong
-   * dung `ten` — xem `RouteTransitionVeil.tsx`).
+   * Chu de dang REVEAL — lop TREN, chi khac `null` trong luc `trangThai ===
+   * "revealing"`. Khi hieu ung xong, gia tri nay duoc "chot" xuong `ten` va
+   * tro lai `null`.
    */
-  tenDich: string | null;
-  trangThai: TrangThaiVeil;
+  tenMoi: string | null;
+  trangThai: TrangThaiAether;
+  /**
+   * The he — tang moi lan MOT LAN REVEAL MOI thuc su bat dau (khong tang
+   * neu dich trung voi lan dang chay). Dung lam React `key` de bat buoc lop
+   * reveal REMOUNT (va do do hoat hinh CSS restart tu 0) moi lan dieu huong
+   * that su khoi dong mot chu ky moi — xem `RouteTransitionVeil.tsx`.
+   */
+  the: number;
 }
 
 export interface Timing {
-  /** Do dai pha "may quet toi" (ms) — cung la MOC toi thieu truoc khi doi anh. */
-  PHU: number;
-  /** Do dai pha "may quet tiep + tan dan" (ms). */
-  LO: number;
+  /** Tong thoi gian hieu ung (ms) — sau moc nay, lop reveal duoc chot thanh nen. */
+  TONG: number;
 }
 
 /**
- * KHOP CHINH XAC voi `--dur-veil-phu`/`--dur-veil-lo` o `globals.css` — hai
- * cho phai noi CUNG mot con so, xem `route-transition-veil.test.mjs`.
+ * KHOP CHINH XAC voi `--dur-aether`/cac hang so lien quan o `globals.css` —
+ * xem `route-transition-veil.test.mjs`.
  *
- * V2: 340 + 50 (dem) + 490 = 880ms tong — trong khoang 780-900ms dac ta
- * (V1 la 650ms, bi nhan xet "van con doc hoi giong mot cu lau" — V2 keo dai
- * VA lam muot hon, nhung KHONG lam cham diem doi anh: `PHU` (340ms) van la
- * moc anh doi, chi rieng qua trinh may quet TIEP TUC sau do (`LO`, 490ms)
- * dai hon de tao cam giac mot duong quet lien tuc thay vi "phinh-xep".
+ * Dac ta V4: tong hieu ung 420-560ms (giam manh tu 780-900ms cua V2/V3) —
+ * "must feel immediate", khong con la mot cong chan dieu huong.
  */
-export const THOI_LUONG_BINH_THUONG: Timing = { PHU: 340, LO: 490 };
-/** `prefers-reduced-motion: reduce` — gan nhu tuc thi, nhung KHONG bao gio 0:
- * doi nen giua hai mau khac nhau van can mot lan che, neu khong se thay mot
- * cai nhay mau song. */
-export const THOI_LUONG_GIAM: Timing = { PHU: 90, LO: 60 };
-
-/**
- * Tran an toan cho viec cho anh nap — mot ket noi mang bi treo (khong bao gio
- * bao `load` lan `error`) se KHONG con lam man suong ket dinh mai. Rat hiem
- * gap trong thuc te (`napAnhThat` da tu giai quyet qua `onerror`), day chi la
- * lop phong ve thu hai.
- */
-const TRAN_CHO_ANH_MS = 2000;
+export const THOI_LUONG_BINH_THUONG: Timing = { TONG: 480 };
+/** `prefers-reduced-motion: reduce` — bo qua Aether Rift, doi nen gan nhu
+ * tuc thi (chi con mot lan mo nhe rat ngan de tranh nhay mau song). */
+export const THOI_LUONG_GIAM: Timing = { TONG: 80 };
 
 export interface RouteTransitionDeps {
   /** `tenNen` — suy chu de nen tu duong dan. */
   layTen: (duongDan: string) => string;
   /** `true` khi nguoi dung chon `prefers-reduced-motion: reduce`. */
   dangGiamChuyenDong: () => boolean;
-  /** Nap truoc anh cua mot chu de; PHAI luon resolve (ke ca khi loi). */
+  /**
+   * Nap truoc anh cua mot chu de — V4 GOI nhung KHONG CHO (fire-and-forget,
+   * chi de lam am cache trinh duyet cho lan sau); khong con quyet dinh thoi
+   * diem doi anh nhu V1-V3. PHAI luon resolve (ke ca khi loi) de khong tao
+   * unhandled rejection.
+   */
   napAnh: (ten: string) => Promise<void>;
   datHen: (fn: () => void, ms: number) => number;
   huyHen: (id: number) => void;
@@ -90,19 +94,12 @@ export function taoRouteTransitionStore(deps: RouteTransitionDeps) {
   let state: RouteTransitionSnapshot = {
     duongDan: "",
     ten: null,
-    tenDich: null,
+    tenMoi: null,
     trangThai: "idle",
+    the: 0,
   };
   const nguoiNghe = new Set<() => void>();
   const henDangCho: number[] = [];
-  /**
-   * The he cua lan dieu huong DANG XU LY. Moi lan `diTinh` goi voi mot chu de
-   * KHAC chu de hien tai se tang bien nay len — bat ky continuation nao (promise
-   * .then) tu mot the he CU hon deu tu kiem tra va bo qua chinh no. Day la
-   * toan bo co che chong dua (race) khi nguoi dung dieu huong lien tiep truoc
-   * khi lan truoc ket thuc: KHONG can huy promise (khong the), chi can lam
-   * ket qua cua no VO NGHIA.
-   */
   let theHe = 0;
 
   function set(phanMoi: Partial<RouteTransitionSnapshot>) {
@@ -117,8 +114,6 @@ export function taoRouteTransitionStore(deps: RouteTransitionDeps) {
     }
   }
 
-  /** Xoa MOT hen khoi so sach ma KHONG dung toi (id da tu chay xong, hoac
-   * chu dong huy rieng no — xem `choCoTheHuy`). */
   function boKhoiSoSach(id: number) {
     const i = henDangCho.indexOf(id);
     if (i !== -1) henDangCho.splice(i, 1);
@@ -133,96 +128,66 @@ export function taoRouteTransitionStore(deps: RouteTransitionDeps) {
     return id;
   }
 
-  function cho(ms: number): Promise<void> {
-    return new Promise((giai) => hen(() => giai(), ms));
-  }
-
-  /**
-   * Nhu `cho`, nhung tra them mot ham HUY RIENG — dung cho `TRAN_CHO_ANH_MS`:
-   * day la mot hen "phong hờ" chay DUA (race) voi viec nap anh, va o duong
-   * day nhanh (anh nap xong truoc) hen nay se KHONG BAO GIO tu chay — neu
-   * khong chu dong huy, no nam lai trong hang doi that cua trinh duyet (hoac
-   * cua dong ho gia trong bai test) den 2 giay sau MOI lan chuyen canh, dung
-   * nguyen dieu "chi phi luc dung yen phai la khong" ma dac ta cam.
-   */
-  function choCoTheHuy(ms: number): [Promise<void>, () => void] {
-    let id = -1;
-    const p = new Promise<void>((giai) => {
-      id = hen(() => giai(), ms);
-    });
-    return [p, () => {
-      boKhoiSoSach(id);
-      deps.huyHen(id);
-    }];
-  }
-
   /**
    * Diem vao DUY NHAT — goi moi lan phat hien `duongDan` doi (xem
-   * `PageBackground.tsx`). Tra ve khong dong bo; trang thai cap nhat qua
-   * `subscribe`.
+   * `PageBackground.tsx`). KHONG lam cham dieu huong: chi cap nhat trang
+   * thai hieu ung trang tri, tra ve ngay lap tuc.
    */
   function diTinh(duongDanMoi: string) {
     const tenMoi = deps.layTen(duongDanMoi);
 
-    // Lan dau: chua co gi de chuyen canh TU — hien thang, khong may che.
+    // Lan dau: chua co gi de reveal TU — hien thang, khong hieu ung.
     if (state.ten === null) {
       huyHenDangCho();
       theHe += 1;
-      set({ duongDan: duongDanMoi, ten: tenMoi, tenDich: null, trangThai: "idle" });
+      set({ duongDan: duongDanMoi, ten: tenMoi, tenMoi: null, trangThai: "idle", the: theHe });
       return;
     }
 
-    // Cung mot chu de (vd `/fanfic` -> `/novels/x`, hoac dieu huong nham quay
-    // ve dung chu de dang hien giua luc mot lan chuyen canh khac con dang
-    // chay): KHONG can may che. Neu dang co mot lan chuyen canh giua chung,
-    // huy sach — day la nhanh "resolve deterministically" khi tenMoi trung
-    // dung chu de dang (hoac se) hien.
-    if (tenMoi === state.ten) {
+    // Dich trung CHINH chu de LOP DUOI (da on dinh) va KHONG co reveal nao
+    // dang chay: khong co gi de lam, chi cap nhat duong dan.
+    if (tenMoi === state.ten && state.trangThai === "idle") {
+      set({ duongDan: duongDanMoi });
+      return;
+    }
+
+    // Dich trung CHINH chu de DANG reveal: KHONG restart (tranh giat hinh
+    // vo ich khi dieu huong noi bo cung mot chu de, vd `/fanfic` -> `/novels/x`).
+    if (state.trangThai === "revealing" && tenMoi === state.tenMoi) {
+      set({ duongDan: duongDanMoi });
+      return;
+    }
+
+    // Dich trung chu de DA ON DINH trong khi mot reveal KHAC dang chay giua
+    // chung: nguoi dung da doi y quay lai dung noi dang hien — huy reveal
+    // do, ve idle NGAY (khong can hoan tat mot hieu ung khong con y nghia).
+    if (tenMoi === state.ten && state.trangThai === "revealing") {
       huyHenDangCho();
       theHe += 1;
-      set({ duongDan: duongDanMoi, trangThai: "idle", tenDich: null });
+      set({ duongDan: duongDanMoi, tenMoi: null, trangThai: "idle", the: theHe });
       return;
     }
 
-    // Khac chu de: (khoi dong lai) mot chu ky phu -> doi anh -> lo. Neu dang
-    // co mot lan chuyen canh khac dang chay, no bi THAY THE hoan toan o day —
-    // khong xep hang, khong chay song song hai hoat hinh.
+    // Khac chu de o CA HAI lop hien co: (khoi dong lai) MOT chu ky reveal
+    // moi. Neu dang co mot reveal khac chay, no bi THAY THE hoan toan o
+    // day (React se remount lop tren qua `key={the}` moi — khong xep hang,
+    // khong chay song song hai hoat hinh, "newest destination wins").
     huyHenDangCho();
     theHe += 1;
     const heNay = theHe;
     const T = deps.dangGiamChuyenDong() ? THOI_LUONG_GIAM : THOI_LUONG_BINH_THUONG;
 
-    set({ duongDan: duongDanMoi, trangThai: "covering", tenDich: tenMoi });
+    // Lam am cache anh cho lan sau — KHONG cho, khong quyet dinh thoi diem
+    // hien thi. Bat ky loi nao cung phai tu nuot (deps.napAnh da dam bao
+    // luon resolve), nen khong can `.catch` o day.
+    void deps.napAnh(tenMoi);
 
-    const [tranAnToan, huyTranAnToan] = choCoTheHuy(TRAN_CHO_ANH_MS);
-    // Huy hen "phong hờ" NGAY khi cuoc dua ket thuc (du ben nao thang) — o
-    // duong day nhanh (nap anh xong truoc), khong de mot hen 2 giay nam lai
-    // vo ich trong hang doi that cua trinh duyet.
-    const sanSang = Promise.race([deps.napAnh(tenMoi), tranAnToan]).then(huyTranAnToan);
-    // Moc PHU la thoi gian TOI THIEU truoc khi doi anh — de pha "may che dan"
-    // luon co du thoi gian hien het tren man hinh truoc khi noi dung phia sau
-    // no doi, ke ca khi anh da nam san trong cache.
-    const choToiThieu = cho(T.PHU);
+    set({ duongDan: duongDanMoi, tenMoi, trangThai: "revealing", the: theHe });
 
-    Promise.all([sanSang, choToiThieu]).then(() => {
+    hen(() => {
       if (heNay !== theHe) return; // co lan dieu huong khac da thay the
-
-      set({ ten: tenMoi, tenDich: null }); // doi NGAY — luc nay man suong dang che kin
-
-      // Dem them mot khoang dem NHO truoc khi lo — dam bao man suong da THAT
-      // SU che kin (khong chi vua doi xong) truoc khi bat dau rut di. Voi
-      // duong day nhanh (anh nam san trong cache), khoang nay + T.PHU vua
-      // khop luc hoat hinh "phu" tu nhien ket thuc (`--dur-veil-phu`), nen
-      // khong co mot buoc nhay nao giua hai pha.
-      hen(() => {
-        if (heNay !== theHe) return;
-        set({ trangThai: "revealing" });
-        hen(() => {
-          if (heNay !== theHe) return;
-          set({ trangThai: "idle" });
-        }, T.LO);
-      }, 50);
-    });
+      set({ ten: tenMoi, tenMoi: null, trangThai: "idle" });
+    }, T.TONG);
   }
 
   return {

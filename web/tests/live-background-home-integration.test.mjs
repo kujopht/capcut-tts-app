@@ -55,9 +55,10 @@ test("KHONG mask/on dinh hoa — danh gia video Gemini nguyen ban nhu nguoi dung
     "đang truyền videoMask — yêu cầu lần thử đầu là KHÔNG mask, đánh giá video Gemini nguyên bản");
 });
 
-test("LiveBackground dung poster tu chinh anhNen(lop.ten), khong hardcode duong dan khac", () => {
+test("LiveBackground dung poster tu chinh anhNen(ten/tenMoi), khong hardcode duong dan khac", () => {
   const s = codeOnly(comp());
-  assert.match(s, /poster=\{anhNen\(lop\.ten\)\}/);
+  assert.match(s, /poster=\{anhNen\(ten\)\}/, "lớp DƯỚI (ten) thiếu poster đúng theo chủ đề");
+  assert.match(s, /poster=\{anhNen\(tenMoi\)\}/, "lớp TRÊN (tenMoi, đang reveal) thiếu poster đúng theo chủ đề");
 });
 
 test("lop video Home dung CUNG object-position voi --diem cua CSS (center 42%)", () => {
@@ -71,24 +72,19 @@ test("lop video Home dung CUNG object-position voi --diem cua CSS (center 42%)",
     "lớp video Home lệch object-position với --diem — sẽ nhảy hình khi crossfade");
 });
 
-test("V3 crossfade: mot NGUON JSX duy nhat cho .page-bg-lop (render qua map, khong hardcode 2 khoi lap lai)", () => {
+test("V4: HAI lop tuong minh (duoi on dinh + tren dang reveal), khong con co che mang lop tu quan ly", () => {
   /*
-    V2: `.route-veil` day dac che kin man hinh dung luc doi anh, nen
-    `PageBackground.tsx` chi can DUNG MOT `.page-bg-lop` voi `key={ten}` —
-    remount cung, an duoc sau man may. V3 (dac ta muc 10) doi anh phai TAN
-    SAC that (may V3 mong hon, khong con che duoc mot cu nhay), nen co THE
-    co HAI lop `.page-bg-lop` CUNG LUC trong DOM khi dang crossfade (`cacLop`
-    o `PageBackground.tsx`, khoa rieng, `data-fade`) — day la thay doi CO Y,
-    khong phai tan du cua co che "tenCu/data-ra" cu (da bi go hoan toan o
-    V1). Bai test nay xac nhan JSX chi khai bao MOT lan `className="page-
-    bg-lop"` (qua `.map()`, khong copy-paste hai khoi tuong tu cho "cu"/
-    "moi") va khong con dung lai bien `tenCu`/`data-ra` cua co che truoc do.
+    V3 tu quan ly mot MANG `cacLop` (khoa rieng, `data-fade`) de crossfade
+    opacity. V4 KHONG con crossfade opacity — kho da tach san CHINH XAC hai
+    lop can ve (`ten`/`tenMoi`), nen component chi can doc truc tiep, khong
+    con state/mang lop noi bo nao.
   */
   const s = codeOnly(comp());
-  assert.ok(!/tenCu|data-ra=/.test(s), "vẫn còn dấu vết lớp CŨ (tenCu/data-ra) của cơ chế cũ");
+  assert.ok(!/tenCu|data-ra=|cacLop/.test(s), "vẫn còn dấu vết cơ chế mảng lớp cũ (cacLop/tenCu/data-ra)");
   assert.equal((s.match(/className="page-bg-lop"/g) ?? []).length, 1,
-    "chỉ nên có MỘT nguồn JSX cho .page-bg-lop (qua map), không copy hai khối lặp lại");
-  assert.match(s, /cacLop\.map\(/, "V3 phải render .page-bg-lop qua danh sách lớp (hỗ trợ crossfade 2 lớp cùng lúc)");
+    "lớp DƯỚI dùng className=\"page-bg-lop\" (không kèm page-bg-reveal)");
+  assert.match(s, /className="page-bg-lop page-bg-reveal"/, "lớp TRÊN (đang reveal) thiếu class page-bg-reveal");
+  assert.match(s, /key=\{the\}/, "lớp TRÊN thiếu key={the} — cần remount mỗi lần một reveal MỚI thật sự bắt đầu");
 });
 
 test("bat bien cu cua PageBackground van dung: khong <img>/style inline TRUC TIEP trong tep nay", () => {

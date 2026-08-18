@@ -85,7 +85,7 @@ khai, đổi liên kết, đổi test. Không làm. Vì vậy: **OpenNext trên 
 |---|---|
 | `web/open-next.config.ts` | Cấu hình adapter. Không khai cache/queue/tag — ứng dụng không dùng ISR |
 | `web/wrangler.jsonc` | Worker: `nodejs_compat`, assets, `compatibility_date` khớp workerd |
-| `web/package.json` | Thêm `cf:build`, `cf:preview`, `cf:deploy`, `cf-typegen` |
+| `web/package.json` | Thêm `cf:build`, `cf:preview`, `cf:deploy:production`, `cf:deploy:staging`, `cf-typegen` |
 
 `npm run dev` **giữ nguyên** `next dev` — quy trình phát triển không đổi.
 
@@ -97,8 +97,8 @@ cd web
 # Xem thử tại chỗ (build + wrangler dev)
 NEXT_PUBLIC_API_BASE=https://<url-api>.onrender.com npm run cf:preview
 
-# Deploy thật
-NEXT_PUBLIC_API_BASE=https://<url-api>.onrender.com npm run cf:deploy
+# Deploy thật (worker `fanfic-web`, domain fanfic.world — wrangler.jsonc)
+NEXT_PUBLIC_API_BASE=https://<url-api>.onrender.com npm run cf:deploy:production
 ```
 
 PowerShell:
@@ -106,12 +106,19 @@ PowerShell:
 ```powershell
 cd web
 $env:NEXT_PUBLIC_API_BASE = "https://<url-api>.onrender.com"
-npm run cf:deploy
+npm run cf:deploy:production
 ```
 
 ⚠️ `NEXT_PUBLIC_API_BASE` được **nướng vào bundle lúc build**, không đọc lúc
 chạy. Đổi URL API thì phải **build lại**, restart không đủ. Đã kiểm: URL truyền
 qua env xuất hiện đúng trong bundle, và không còn vết URL staging.
+
+⚠️ **KHÔNG có lệnh `cf:deploy` trần** — cố ý bỏ (2026-08-18, sau một lần deploy
+nhầm `fanfic-web` production bằng bundle định cho staging). Luôn gọi tường
+minh `cf:deploy:production` (worker `fanfic-web`, domain `fanfic.world`,
+`wrangler.jsonc`) hoặc `cf:deploy:staging` (worker `fanfic-web-staging`,
+domain `staging.fanfic.world`, `wrangler.staging.jsonc` — xem comment trong
+tệp đó để biết `NEXT_PUBLIC_API_BASE` đúng cho staging).
 
 Lần đầu `wrangler` sẽ hỏi đăng nhập Cloudflare.
 

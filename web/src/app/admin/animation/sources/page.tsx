@@ -15,6 +15,7 @@ import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
 import { DanhSachTrangThai, loiApi } from "@/components/AdminShell";
 import { IconLink } from "@/components/Icons";
+import { CountUp } from "@/components/CountUp";
 
 const TRANG = 25;
 
@@ -156,8 +157,8 @@ export default function AdminTrustedSourcesList() {
                     </span>
                   </td>
                   <td className="admin-so mono">{s.mapping_count}</td>
-                  <td className="admin-so mono">{s.imported_count}</td>
-                  <td className="admin-so mono">{s.published_count}</td>
+                  <td className="admin-so mono"><CountUp value={s.imported_count} /></td>
+                  <td className="admin-so mono"><CountUp value={s.published_count} /></td>
                   <td className="hint mono">
                     {[s.auto_discover && "Discover", s.auto_import && "Import",
                      s.auto_publish && "Publish"].filter(Boolean).join(" · ") || "—"}

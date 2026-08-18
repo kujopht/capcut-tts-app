@@ -26,6 +26,7 @@ const list = () => read("../src/app/admin/animation/sources/page.tsx");
 const themMoi = () => read("../src/app/admin/animation/sources/new/page.tsx");
 const chiTiet = () => read("../src/app/admin/animation/sources/[id]/page.tsx");
 const hangDoi = () => read("../src/app/admin/animation/import-queue/page.tsx");
+const countUp = () => read("../src/components/CountUp.tsx");
 
 // -- lop api ------------------------------------------------------------
 
@@ -269,4 +270,28 @@ test("Hang doi nhap: ket qua nhap hang loat bao ro so thanh cong/loi, khong bao 
   const than = src.slice(at, src.indexOf("\n  }", at));
   assert.match(than, /results\.filter\(\(r\) => r\.ok\)\.length/);
   assert.match(than, /thatBai === 0/);
+});
+
+test("CountUp: khong dung framer-motion hay dependency runtime nao, tu ve bang requestAnimationFrame", () => {
+  const src = countUp();
+  assert.ok(!/from "framer-motion"/.test(src), "phải là component tự viết, không kéo runtime nặng");
+  assert.match(src, /requestAnimationFrame/);
+});
+
+test("CountUp: tat hoat hinh khi prefers-reduced-motion, hien luon gia tri cuoi", () => {
+  const src = countUp();
+  assert.match(src, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
+  assert.match(src, /setHien\(den\)/);
+});
+
+test("CountUp: chi chay hoat hinh khi gia tri THAY DOI, khong chay lai moi lan render", () => {
+  const src = countUp();
+  assert.match(src, /if \(tu === den\) return;/);
+});
+
+test("Trang danh sach nguon: cot Da nhap/Da xuat ban dung CountUp thay vi in so tinh", () => {
+  const src = list();
+  assert.match(src, /import \{ CountUp \} from "@\/components\/CountUp";/);
+  assert.match(src, /<CountUp value=\{s\.imported_count\} \/>/);
+  assert.match(src, /<CountUp value=\{s\.published_count\} \/>/);
 });

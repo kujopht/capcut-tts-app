@@ -55,7 +55,11 @@ test("o tim go gon: IDLE tinh, HOVER chi sang vien (khong them glow/animation)",
 });
 
 test("hop tim mo rong (FOCUS): quang TINH, khong keyframe, co vien accessible", () => {
-  const hop = codeOnly(rule(".tim-hop"));
+  // V3 hotfix (2026-08): `.tim-hop` (hop thoai can giua trang) doi ten thanh
+  // `.tim-pop` (popover neo canh nut tim, portal ra document.body) — xem
+  // docstring dau `SearchOverlay.tsx` cho ly do sua (containing-block cua
+  // `.site-header` co `backdrop-filter`).
+  const hop = codeOnly(rule(".tim-pop"));
   assert.match(hop, /box-shadow:/);
   assert.ok(!/animation:/.test(hop), "FOCUS vẫn có animation liên tục");
   // O nhap ben trong van co vien tieu diem ro rang khi dieu huong bang ban phim.

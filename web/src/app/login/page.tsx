@@ -107,14 +107,16 @@ function LoginForm() {
           <MotifPortalHalo />
         </span>
         <LogoMark size={54} title="Fanfic Audio Studio" />
-        <h1 className="page-title">
-          {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}
-        </h1>
-        <p className="hint">
-          {mode === "in"
-            ? "Đăng nhập để tạo audio và quản lý truyện của bạn."
-            : "Tạo tài khoản miễn phí để bắt đầu."}
-        </p>
+        <div className="hero-copy">
+          <h1 className="page-title">
+            {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}
+          </h1>
+          <p className="hint">
+            {mode === "in"
+              ? "Đăng nhập để tạo audio và quản lý truyện của bạn."
+              : "Tạo tài khoản miễn phí để bắt đầu."}
+          </p>
+        </div>
       </header>
 
       <div className="seg auth-seg" role="group" aria-label="Chế độ">

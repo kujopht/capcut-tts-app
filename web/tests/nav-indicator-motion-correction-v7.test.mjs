@@ -121,36 +121,25 @@ test("Công cụ (.btn-ghost) van la be mat trung tinh, khong nen tim nang/glow"
 
 /* ============================================== 11-15: suong doc hero/page = */
 
-test(".hero-v2::before: lop khi quyen NHO GON (chieu cao <= 90%), khong con 128% cu — tranh 'tam panel'", () => {
+test("V3 hotfix: .hero-v2/.page-head KHONG con ::before NAO — khi quyen chuyen het xuong .hero-copy (be rong doan van ban, khong phai ca hero)", () => {
   /*
     PageHero V2 (2026-08) thay MOT elip radial-gradient duy nhat bang BA lop
-    lech tam + mask-image feather (xem `themed-page-hero-v1.test.mjs` cho bo
-    test day du cua kien truc moi) — assertion "transparent 80%" cu (khoa mot
-    STOP CU THE cua elip DUY NHAT) khong con y nghia voi kien truc nhieu lop.
-    O day chi con giu lai dung y GOC: chieu cao elip dau tien khong duoc qua
-    lon, va CA composite lan mask deu phai tan bien hoan toan (khong dut cung).
+    lech tam + mask-image feather — nhung VAN ve tren pseudo-element cua CA
+    `.hero-v2`/`.page-head`, nen nguoi dung phan hoi LAN NUA: van la "mot
+    vung mau to tu trai qua giua man hinh", chi mem hon truoc. V3 (hotfix
+    nay) bo HOAN TOAN `::before` khoi hai selector nay — xem
+    `themed-page-hero-v1.test.mjs` cho bo test day du cua `.hero-copy::before`
+    (khi quyen doc gio chi rong bang doan van ban, xem cong thuc o do).
   */
-  const than = codeOnly(rule(".hero-v2::before"));
-  const m = than.match(/radial-gradient\((\d+)% (\d+)% at/);
-  assert.notEqual(m, null);
-  const h = Number(m[2]);
-  assert.ok(h <= 90, `chiều cao elip ${h}% vẫn quá lớn — dễ đọc ra như một tấm phẳng`);
-  assert.match(than, /transparent\)/, "mỗi lớp radial-gradient phải tan biến hoàn toàn về transparent");
-  assert.match(than, /mask-image:.*transparent/, "phải có mask-image feather toàn bộ composite về transparent");
+  const css_ = codeOnly(css());
+  assert.ok(!css_.includes(".hero-v2::before {"), ".hero-v2::before vẫn tồn tại — V3 yêu cầu PageHero wrapper trong suốt");
+  assert.ok(!css_.includes(".page-head::before {"), ".page-head::before vẫn tồn tại — V3 yêu cầu PageHero wrapper trong suốt");
 });
 
-test(".page-head::before: cung nguyen tac elip nho gon — Explore/Animation dung chung component nay", () => {
-  const than = codeOnly(rule(".page-head::before"));
-  const m = than.match(/radial-gradient\((\d+)% (\d+)% at/);
-  assert.notEqual(m, null);
-  const h = Number(m[2]);
-  assert.ok(h <= 90, `chiều cao elip ${h}% vẫn quá lớn (trước là 145%)`);
-});
-
-test("KHONG co lop overlay hinh CHU NHAT (background thang, khong phai ::before elip) tren .page-head/.hero-v2", () => {
+test("KHONG co lop overlay hinh CHU NHAT (background thang) tren .page-head/.hero-v2", () => {
   for (const sel of [".page-head", ".hero-v2"]) {
     const than = codeOnly(rule(sel));
-    assert.ok(!/background:/.test(than), `${sel} chính không được có background riêng — chỉ ::before lo readability`);
+    assert.ok(!/background:/.test(than), `${sel} chính không được có background riêng — chỉ .hero-copy::before lo readability`);
   }
 });
 

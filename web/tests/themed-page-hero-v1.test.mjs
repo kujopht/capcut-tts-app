@@ -1,18 +1,24 @@
 /*
- * Themed Page Hero V2 "Hero Local Atmosphere" (2026-08) — moi khu vuc chinh
- * co mot ban sac rieng (mau suong/motif/accent) thay vi dung CHUNG mot lop
- * mau navy-den cho MOI trang. Kien truc: cau truc dung chung (`PageHeader`),
- * mau/hoa tiet den tu bien CSS theo `[data-hero-theme]` — khong hardcode
- * mau rieng cho tung trang o noi khac.
+ * Themed Page Hero V3 "Copy-Local Art Direction" (2026-08) — moi khu vuc
+ * chinh co mot ban sac rieng (mau suong/motif/accent) thay vi dung CHUNG mot
+ * lop mau navy-den cho MOI trang. Kien truc: cau truc dung chung
+ * (`PageHeader`), mau/hoa tiet den tu bien CSS theo `[data-hero-theme]` —
+ * khong hardcode mau rieng cho tung trang o noi khac.
  *
  * V1 -> V2: nguoi dung phan hoi V1 van doc ra nhu "mot tam kinh den mo chu
- * nhat" du DA theo theme, vi (1) mist o do sang qua thap (gan den bat ke
- * hue) va (2) `::before` la MOT elip DUY NHAT nen van co mot duong bien hinh
- * hoc doc duoc. V2 sua CA HAI: mist duoc sang hoa (giu hue, tang L), va
- * `::before`/`.auth-head::before` gio la BA lop radial-gradient LECH TAM
- * cong mot `mask-image` feather — khong con mot hinh don nao de "doc".
- * Them BA theme moi (write/account/auth) va mot co che hoa tiet centered
- * rieng cho /login (`.auth-portal-halo`, khong dung `.page-head-motif`).
+ * nhat" du DA theo theme (mist gan den + MOT elip DUY NHAT). V2 sang hoa
+ * mist va doi elip DUY NHAT thanh BA lop lech tam + mask-image — nhung VAN
+ * ve tren pseudo-element cua CA PageHero (`.page-head`/`.hero-v2`/
+ * `.auth-head`), nen vung phu ao van bam theo BE RONG CA HERO.
+ *
+ * V2 -> V3 (hotfix nay): nguoi dung phan hoi LAN NUA — van la "mot vung mau
+ * to tu trai qua giua man hinh", chi mem hon. Sua tan goc: `.page-head`/
+ * `.hero-v2`/`.auth-head` gio KHONG con `::before` NAO CA (PageHero wrapper
+ * phai "gan nhu trong suot"). Khi quyen doc chuyen HOAN TOAN xuong
+ * `.hero-copy` — mot the CON MOI, chi rong bang CHINH doan van ban
+ * (`--hero-copy-width`), dung CHUNG mot cong thuc (hai lop radial-gradient +
+ * mask-image) o ba noi: `.page-head-body` (PageHeader), `.hero-v2 >
+ * .hero-copy` (Trang chu), `.auth-head > .hero-copy` (/login).
  *
  * Chuan hoa CRLF -> LF (xem bai hoc o `admin-trusted-sources.test.mjs`).
  */
@@ -78,17 +84,22 @@ test("moi trang chinh gan DUNG mot data-hero-theme tren the bao ngoai cung", () 
 
 /* ============================== khong con MOT lop mau navy-den chung cho MOI trang */
 
-test(".page-head/.hero-v2/.auth-head KHONG co background rieng — CHI ::before lo mau, va no doc mau tu theme", () => {
+test("V3: PageHero wrapper (.page-head/.hero-v2/.auth-head) KHONG con background/::before NAO — phai 'gan nhu trong suot'", () => {
   for (const sel of [".page-head", ".hero-v2", ".auth-head"]) {
     const than = codeOnly(rule(sel));
     assert.ok(!/background:/.test(than), `${sel} không được có background riêng (kiến trúc "generic black slab" cũ)`);
   }
+  const css_ = codeOnly(css());
   for (const sel of [".page-head::before", ".hero-v2::before", ".auth-head::before"]) {
-    const than = codeOnly(rule(sel));
-    assert.match(than, /var\(--hero-mist-1/, `${sel} phải đọc màu từ --hero-mist-1 theo theme`);
-    assert.match(than, /var\(--hero-mist-2/, `${sel} phải đọc màu từ --hero-mist-2 theo theme`);
-    assert.match(than, /transparent/, `${sel} phải tan biến hoàn toàn, không phải một khối đặc`);
+    assert.ok(!css_.includes(`${sel} {`), `${sel} vẫn tồn tại — hotfix V3 yêu cầu PageHero wrapper không còn readability backdrop nào, chỉ .hero-copy mới được có`);
   }
+});
+
+test("V3: .hero-copy la noi DUY NHAT giu khi quyen doc, doc mau tu theme, tan bien hoan toan", () => {
+  const than = codeOnly(rule(".hero-copy::before"));
+  assert.match(than, /var\(--hero-mist-1/, ".hero-copy::before phải đọc màu từ --hero-mist-1 theo theme");
+  assert.match(than, /var\(--hero-mist-2/, ".hero-copy::before phải đọc màu từ --hero-mist-2 theo theme");
+  assert.match(than, /transparent/, ".hero-copy::before phải tan biến hoàn toàn, không phải một khối đặc");
 });
 
 test("cac theme KHAC NHAU thi mau THAT SU khac nhau — khong phai bia 11 cai ten cho CUNG mot mau", () => {
@@ -121,20 +132,64 @@ test("V2: --hero-mist-1/2 hardcode (hex) phai SANG hon nguong gan-den cu (khong 
   }
 });
 
-test("V2: ::before cua hero KHONG con la MOT radial-gradient duy nhat — phai co NHIEU lop lech tam + mask-image feather", () => {
-  for (const sel of [".page-head::before", ".hero-v2::before", ".auth-head::before"]) {
-    const than = codeOnly(rule(sel));
-    const soLopGradient = (than.match(/radial-gradient\(/g) ?? []).length;
-    assert.ok(soLopGradient >= 3, `${sel} chỉ có ${soLopGradient} lớp radial-gradient — cần ≥3 lớp lệch tâm để không đọc ra một hình elip đơn`);
-    assert.match(than, /mask-image:/, `${sel} thiếu mask-image feather toàn bộ composite`);
+test("V3: .hero-copy::before KHONG la MOT radial-gradient duy nhat — 1-2 lop lech tam + mask-image feather (dac ta B6)", () => {
+  const than = codeOnly(rule(".hero-copy::before"));
+  // Chi dem lop trong `background:` — `mask-image`/`-webkit-mask-image` cung
+  // dung `radial-gradient(...)` cho rieng no (mot lop feather khac muc dich).
+  const nenChinh = than.match(/background:\s*([\s\S]*?);/)?.[1] ?? "";
+  const soLopGradient = (nenChinh.match(/radial-gradient\(/g) ?? []).length;
+  assert.ok(soLopGradient >= 1 && soLopGradient <= 2,
+    `.hero-copy::before có ${soLopGradient} lớp radial-gradient trong background — đặc tả V3 muốn đúng 1-2 lớp nhỏ, không phải 3 lớp lớn như V2`);
+  assert.match(than, /mask-image:/, ".hero-copy::before thiếu mask-image feather");
+});
+
+test("V3: .hero-copy::before KHONG dung mau den thuan (rgba(0,0,0,...)) lam chat lieu chinh", () => {
+  const than = codeOnly(rule(".hero-copy::before"));
+  assert.ok(!/rgba\(\s*0\s*,\s*0\s*,\s*0/.test(than), ".hero-copy::before dùng rgba(0,0,0,...) — phải là màu chromatic theo theme, không phải đen thuần");
+});
+
+test("V3: .hero-copy chi rong bang doan van ban — inset feather nho (khong con bam theo be rong ca PageHero)", () => {
+  const than = codeOnly(rule(".hero-copy::before"));
+  const m = than.match(/inset:\s*(-?\d+)px\s+(-?\d+)px\s+(-?\d+)px\s+(-?\d+)px;/);
+  assert.notEqual(m, null, ".hero-copy::before thiếu khai báo inset 4 giá trị");
+  const [, top, right, bottom, left] = m.map(Number);
+  for (const v of [top, right, bottom, left]) {
+    assert.ok(Math.abs(v) <= 45, `.hero-copy::before inset ${v}px vượt quá phạm vi "content width + 60-120px feather" cho phép (tối đa ~45px mỗi cạnh, phần còn lại do mask-image lo)`);
   }
 });
 
-test("V2: hero KHONG dung mau den thuan (rgba(0,0,0,...)) lam chat lieu chinh", () => {
-  for (const sel of [".page-head::before", ".hero-v2::before", ".auth-head::before"]) {
-    const than = codeOnly(rule(sel));
-    assert.ok(!/rgba\(\s*0\s*,\s*0\s*,\s*0/.test(than), `${sel} dùng rgba(0,0,0,...) — phải là màu chromatic theo theme, không phải đen thuần`);
-  }
+test("V3: .page-head-actions (nut hanh dong) khong co ::before/::after rieng — khong can khi quyen doc nhu chu", () => {
+  const css_ = codeOnly(css());
+  assert.ok(!css_.includes(".page-head-actions::before {"));
+  assert.ok(!css_.includes(".page-head-actions::after {"));
+});
+
+test("V3: ca ba noi (PageHeader/Home/Auth) deu gan class hero-copy dung cho", () => {
+  const ui = codeOnly(read("../src/components/ui.tsx"));
+  assert.match(ui, /className="stack-2 page-head-body hero-copy"/, "PageHeader thiếu class hero-copy trên .page-head-body");
+
+  const home = codeOnly(read("../src/app/page.tsx"));
+  assert.match(home, /<div className="hero-copy">/, "Hero() ở trang chủ thiếu <div className=\"hero-copy\">");
+  // pill + tieu de + mo ta nam TRONG hero-copy, CTA/guest-hint nam NGOAI (khong can khi quyen doc).
+  const atCopy = home.indexOf('<div className="hero-copy">');
+  const atCta = home.indexOf('className="row hero-v2-cta"');
+  assert.ok(atCopy < home.indexOf("hero-v2-title") && home.indexOf("hero-v2-title") < atCta,
+    "tiêu đề phải nằm trong hero-copy, trước CTA");
+
+  const login = codeOnly(read("../src/app/login/page.tsx"));
+  assert.match(login, /<div className="hero-copy">/, "/login thiếu <div className=\"hero-copy\">");
+  const atLogoLogin = login.indexOf("<LogoMark");
+  const atCopyLogin = login.indexOf('<div className="hero-copy">');
+  assert.ok(atLogoLogin < atCopyLogin, "logo phải đứng TRƯỚC hero-copy (không bọc logo trong vùng khí quyển đọc)");
+});
+
+test("V3: hero-copy ke thua dung flex/gap cua tung noi chu (khong doi khoang cach thi giac)", () => {
+  const heroV2 = codeOnly(rule(".hero-v2 > .hero-copy"));
+  assert.match(heroV2, /display:\s*flex/);
+  assert.match(heroV2, /gap:\s*var\(--s3\)/);
+  const authHead = codeOnly(rule(".auth-head > .hero-copy"));
+  assert.match(authHead, /display:\s*flex/);
+  assert.match(authHead, /gap:\s*var\(--s2\)/);
 });
 
 /* =============================================== hoa tiet SVG rieng tung theme */

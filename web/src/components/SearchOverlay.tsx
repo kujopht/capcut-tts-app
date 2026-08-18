@@ -25,8 +25,17 @@
  */
 
 import Link from "next/link";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   api,
   social,
@@ -82,16 +91,46 @@ const DANH_MUC: ReadonlyArray<{
 ];
 type DanhMuc = (typeof DANH_MUC)[number]["khoa"];
 
+/**
+ * V3 (2026-08, hotfix): trươc day day la mot HOP THOAI GIUA TRANG (`.tim-lop`
+ * phu kin man hinh + `.tim-hop` can giua) — render THANG trong cay DOM cua
+ * `<SiteSearch>`, tuc la BEN TRONG `<header class="site-header">`. Header do
+ * co `backdrop-filter` (kinh mo cho thanh dieu huong) — va theo dac ta CSS,
+ * `backdrop-filter` (giong `filter`/`transform`/`perspective`/`contain`) tren
+ * MOT TO TIEN se tao ra containing block MOI cho con `position: fixed`. Ket
+ * qua: `.tim-lop { position: fixed; inset: 0 }` khong con neo vao KHUNG NHIN
+ * that nua ma neo vao HOP CUA `.site-header` — hop do chi cao ~106px, nen
+ * `.tim-hop` (dat giua theo `10vh` cua boundingBox do, khong phai khung nhin
+ * that) bi ep xep con gan nhu 0px chieu cao, va `.tim-lop` (nen toi + blur)
+ * chi phu dung vung navbar — DAY LA NGUON GOC CUA "thanh ngang khong lo mo
+ * duoi navbar" nguoi dung bao.
+ *
+ * SUA TAN GOC (khong phai vien vien lai CSS): `createPortal` toan bo popup ra
+ * THANG `document.body`, thoat hoan toan khoi containing block cua header —
+ * bat ke header co bao nhieu lop backdrop-filter/transform trong tuong lai.
+ * Nhan tien doi kien truc tu HOP THOAI GIUA TRANG sang POPOVER NEO CANH nut
+ * tim (dac ta V3 Phan B2-B7): khong con `.tim-lop` (backdrop toan man hinh),
+ * vi tri/kich thuoc tinh dong tu `anchorRef` qua `layout effect`.
+ */
 export function SearchOverlay({
   mo,
   onDong,
+  anchorRef,
 }: {
   mo: boolean;
   onDong: () => void;
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
 }) {
   const router = useRouter();
   const idGoc = useId();
   const oNhap = useRef<HTMLInputElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+  const [viTri, setViTri] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
   const [q, setQ] = useState("");
   /*
     Ket qua LUON di kem tu khoa da sinh ra no.
@@ -131,6 +170,53 @@ export function SearchOverlay({
         : truyen.length + nguoi.length + bai.length + audio.length + animation.length
           ? "co"
           : "rong";
+
+  /* -- vi tri (neo canh nut tim, KHONG con can giua trang) --------------- */
+
+  useLayoutEffect(() => {
+    if (!mo) return;
+    /*
+      Dac ta V3 B2/B3: rong `clamp(360px, 36vw, 560px)` tren desktop, neo VAO
+      canh phai cua nut tim (nut nam ben phai thanh dieu huong); tren man hep
+      (<=640px) rong het khung nhin tru 24px gutter, khong con can giua theo
+      chieu doc/ngang nhu hop thoai cu. `Math.max(0, ...)` cho `left` dam bao
+      khong bao gio am du nut tim nam sat mep trai.
+    */
+    const dat = () => {
+      const neo = anchorRef.current;
+      if (!neo) return;
+      const r = neo.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const hep = vw <= 640;
+      const rong = hep ? vw - 24 : Math.min(560, Math.max(360, vw * 0.36));
+      const left = hep
+        ? 12
+        : Math.max(12, Math.min(r.right - rong, vw - rong - 12));
+      const top = r.bottom + 10;
+      setViTri({ top, left, width: rong, maxHeight: Math.max(200, Math.min(420, vh - top - 16)) });
+    };
+    dat();
+    window.addEventListener("resize", dat);
+    return () => window.removeEventListener("resize", dat);
+  }, [mo, anchorRef]);
+
+  /* -- bam ra ngoai thi dong (khong con lop backdrop toan man hinh bat) --- */
+
+  useEffect(() => {
+    if (!mo) return;
+    const bam = (e: MouseEvent) => {
+      const dich = e.target as Node;
+      if (popRef.current?.contains(dich)) return;
+      if (anchorRef.current?.contains(dich)) return;
+      onDong();
+    };
+    // `mousedown` chu khong phai `click`: bam giu roi keo tu trong hop ra
+    // ngoai khong duoc tinh la mot lan bam ra ngoai (cung ly do nhu hop thoai
+    // cu tung dung `onMouseDown` tren backdrop).
+    document.addEventListener("mousedown", bam);
+    return () => document.removeEventListener("mousedown", bam);
+  }, [mo, anchorRef, onDong]);
 
   /* -- tim -------------------------------------------------------------- */
 
@@ -247,21 +333,29 @@ export function SearchOverlay({
     if (mo) oNhap.current?.focus();
   }, [mo]);
 
-  if (!mo) return null;
+  if (!mo || !viTri) return null;
 
-  return (
+  /*
+    Portal thang ra `document.body` — day la PHAN BAT BUOC cua sua loi (xem
+    docstring dau ham): render trong cay DOM cua header se lai roi vao chinh
+    containing-block-cho-`position:fixed` ma loi nay tung mac phai, bat ke
+    className/CSS duoc sua the nao. KHONG con `.tim-lop` (backdrop toan man
+    hinh) — day la popover neo canh nut tim, khong phai hop thoai giua trang
+    (dac ta V3 B5 "prefer NO backdrop... this is not a modal dialog"). Dong
+    khi bam ra ngoai gio do mot listener `mousedown` o cap document (xem
+    effect o tren), khong phai div nen bao phu ca trang.
+  */
+  return createPortal(
     <div
-      className="tim-lop"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Tìm kiếm"
-      onMouseDown={(e) => {
-        // Bam ra NGOAI hop thi dong. `mousedown` chu khong phai `click`: bam giu
-        // roi keo tu trong hop ra ngoai khong duoc tinh la mot lan bam ra ngoai.
-        if (e.target === e.currentTarget) onDong();
+      ref={popRef}
+      className="tim-pop kinh"
+      style={{
+        top: viTri.top,
+        left: viTri.left,
+        width: viTri.width,
+        maxHeight: viTri.maxHeight + 57,
       }}
     >
-      <div className="tim-hop kinh">
         <div className="tim-dau">
           {/* SEARCHING: mot chi bao nho BEN TRONG (16px), khong phai ca khung
               tim quay — xem phan hoi thiet ke tai `docs/design/` va lich su
@@ -534,7 +628,7 @@ export function SearchOverlay({
             </Link>
           </div>
         ) : null}
-      </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

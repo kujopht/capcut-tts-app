@@ -40,7 +40,10 @@ function rule(selector) {
 /* ============================================== Hero: quang mo, khong shadow nang */
 
 test("Hero co lop quang mo (::before, radial-gradient) sau khoi chu, KHONG bia text-shadow nang", () => {
-  const than = rule(".hero-v2::before");
+  // V3 hotfix (2026-08): lop quang mo chuyen tu `.hero-v2::before` (ca hero)
+  // xuong `.hero-v2 > .hero-copy::before` (chi doan van ban) — xem
+  // `themed-page-hero-v1.test.mjs` cho bo test kien truc day du.
+  const than = rule(".hero-copy::before");
   assert.match(than, /radial-gradient\(/);
   assert.match(than, /position:\s*absolute/);
   assert.match(than, /z-index:\s*-1/, "phải nằm SAU chữ (z-index âm), không đè lên");

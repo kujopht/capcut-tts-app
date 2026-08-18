@@ -117,16 +117,19 @@ test("khong co pulsing/looping glow moi tren nut Đăng nhập hay .site-header"
 
 /* ============================== J/K: page-head KHONG con hop chu nhat den = */
 
-test(".page-head: nen chinh trong suot — CHI ::before (radial-gradient cuc bo) tao do tuong phan", () => {
+test("V3 hotfix: .page-head nen chinh trong suot — KHONG con ::before nao, khi quyen doc thuoc ve .hero-copy", () => {
   const than = codeOnly(rule(".page-head"));
-  assert.ok(!/background:/.test(than), ".page-head chính không được có background riêng (phải để ::before lo)");
-  const before = codeOnly(rule(".page-head::before"));
+  assert.ok(!/background:/.test(than), ".page-head chính không được có background riêng");
+  const css_ = codeOnly(css());
+  assert.ok(!css_.includes(".page-head::before {"),
+    ".page-head::before vẫn tồn tại — V3 yêu cầu PageHero wrapper trong suốt, xem .hero-copy::before thay thế (themed-page-hero-v1.test.mjs)");
+  const before = codeOnly(rule(".hero-copy::before"));
   assert.match(before, /radial-gradient\(/);
   assert.match(before, /transparent/, "phải tàn dần vào tranh nền — không phải một khối đặc");
 });
 
-test(".page-head::before feather ra ngoai NHIEU DIEM DUNG (khong phai mot lop mo dong deu)", () => {
-  const before = codeOnly(rule(".page-head::before"));
+test(".hero-copy::before feather ra ngoai NHIEU DIEM DUNG (khong phai mot lop mo dong deu)", () => {
+  const before = codeOnly(rule(".hero-copy::before"));
   const stops = before.match(/\d+%/g) ?? [];
   assert.ok(stops.length >= 4, "cần nhiều điểm dừng để tan dần tự nhiên, không phải một khối phẳng");
 });

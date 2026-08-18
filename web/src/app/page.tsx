@@ -217,18 +217,20 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
   return (
     <section className="hero-v2 rise" aria-labelledby="home-hero-title">
       <MotifWaveArcs className="hero-v2-motif" />
-      <span className="pill">
-        <span className="pill-dot" aria-hidden="true" />
-        Đọc · Nghe · Xem · Sáng tác
-      </span>
-      <h1 className="hero-v2-title" id="home-hero-title">
-        Truyện của cộng đồng, <em>đọc bằng mắt hoặc bằng tai</em>
-      </h1>
-      <p className="hero-v2-lead">
-        Fanfic World là nơi đọc và nghe fanfic tiếng Việt do cộng đồng viết,
-        xem Animation từ YouTube, tạo audio bằng giọng đọc tự nhiên, và tham
-        gia thảo luận cùng những người viết khác.
-      </p>
+      <div className="hero-copy">
+        <span className="pill">
+          <span className="pill-dot" aria-hidden="true" />
+          Đọc · Nghe · Xem · Sáng tác
+        </span>
+        <h1 className="hero-v2-title" id="home-hero-title">
+          Truyện của cộng đồng, <em>đọc bằng mắt hoặc bằng tai</em>
+        </h1>
+        <p className="hero-v2-lead">
+          Fanfic World là nơi đọc và nghe fanfic tiếng Việt do cộng đồng viết,
+          xem Animation từ YouTube, tạo audio bằng giọng đọc tự nhiên, và tham
+          gia thảo luận cùng những người viết khác.
+        </p>
+      </div>
       <div className="row hero-v2-cta">
         <Link className="btn btn-primary" href="/fanfic">
           Khám phá

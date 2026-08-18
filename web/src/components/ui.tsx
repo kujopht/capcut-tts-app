@@ -66,7 +66,7 @@ export function PageHeader({
           {motif}
         </span>
       ) : null}
-      <div className="stack-2 page-head-body">
+      <div className="stack-2 page-head-body hero-copy">
         {eyebrow ? (
           <span className="eyebrow eyebrow-icon">
             {icon}

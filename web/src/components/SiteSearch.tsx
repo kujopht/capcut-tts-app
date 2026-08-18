@@ -14,7 +14,7 @@
  * chac chan de hai ben lech nhau.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SearchOverlay } from "@/components/SearchOverlay";
 
 /**
@@ -29,6 +29,7 @@ import { SearchOverlay } from "@/components/SearchOverlay";
  */
 export function SiteSearch() {
   const [mo, setMo] = useState(false);
+  const nutRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     /*
@@ -57,6 +58,7 @@ export function SiteSearch() {
   return (
     <>
       <button
+        ref={nutRef}
         type="button"
         className="site-search tim-nut"
         onClick={() => setMo(true)}
@@ -67,7 +69,7 @@ export function SiteSearch() {
           /
         </kbd>
       </button>
-      <SearchOverlay mo={mo} onDong={() => setMo(false)} />
+      <SearchOverlay mo={mo} onDong={() => setMo(false)} anchorRef={nutRef} />
     </>
   );
 }

@@ -980,24 +980,25 @@ main { overflow-x: clip; }
 
 /*
   ==========================================================================
-  THEMED PAGE HERO V2 "Hero Local Atmosphere" — bien theme dung chung cho
+  THEMED PAGE HERO V3 "Copy-Local Art Direction" — bien theme dung chung cho
   MOI khu vuc chinh.
 
-  V1 (2026-08) tao he bien theo `[data-hero-theme]` nhung van the hien qua
-  MOT elip radial-gradient DUY NHAT o mau gan-den (`--hero-mist-1/2` o do
-  sang rat thap) — nguoi dung phan hoi dung: du "ky thuat la theo theme",
-  no VAN doc ra nhu "mot tam kinh den mo chu nhat" o moi trang, chi khac
-  anh nen phia sau. V2 sua HAI thu tai goc (khong chi tang do mo):
+  V1 (2026-08): mot elip radial-gradient DUY NHAT, mau gan-den, tren pseudo-
+  element cua CA PageHero — doc ra nhu "tam kinh den mo chu nhat".
+  V2 (2026-08): sang hoa mist + doi elip DUY NHAT thanh BA lop lech tam +
+  mask-image — nhung VAN ve tren pseudo-element cua CA PageHero (`.page-head`/
+  `.hero-v2`/`.auth-head`), nen vung phu ao van bam theo BE RONG CA HERO (co
+  the toi ca ngan pixel) — nguoi dung phan hoi dung LAN NUA: van la "mot vung
+  mau/toi to tu trai qua giua man hinh", chi mem hon V1.
+  V3 (2026-08, hotfix nay): chuyen HOAN TOAN khi quyen doc xuong `.hero-copy`
+  — mot the CON chi rong bang CHINH doan van ban (`--hero-copy-width`), khong
+  phai CA PageHero. `.page-head`/`.hero-v2`/`.auth-head` gio KHONG con
+  `::before` nao — PageHero wrapper "gan nhu trong suot" dung dac ta. Xem
+  khoi "PageHero V3 Copy-Local Art Direction" canh `.page-head-motif` cho
+  cong thuc `.hero-copy::before` day du.
 
-    1. Mist sang hon, GIU HUE nhung tang do sang (~20-28% L thay vi ~5-9%)
-       — van "sau" (navy/indigo/ngoc lam dam/tim dam) nhung khong con doc
-       ra la den. Xem tung theme duoi day.
-    2. `::before` khong con MOT elip — la BA lop radial-gradient LECH TAM
-       khac nhau (kich thuoc/vi tri khac nhau tung lop) CONG mot
-       `mask-image` feather toan bo composite — dam bao KHONG bao gio co
-       mot duong vien elip/chu nhat nao co the "doc" duoc bang mat, chi la
-       mot vung khi quyen bat doi xung. Xem cong thuc dung chung o
-       `.page-head::before`/`.hero-v2::before`/`.auth-head::before`.
+  Ba bien mau (`--hero-accent`/`--hero-mist-1`/`--hero-mist-2`) o duoi VAN
+  GIU NGUYEN tu V2 — chi CACH DUNG (pham vi/kich thuoc vung phu ao) doi.
 
   BAY bien, MOT y nghia rieng cho tung cai — xem tung `[data-hero-theme]`
   duoi day de biet gia tri THAT cua tung khu vuc:
@@ -1153,8 +1154,8 @@ main { overflow-x: clip; }
 }
 [data-hero-theme="auth"] {
   /* Cong sao: indigo nua dem + ho phach tim (amethyst) — dung cho bo cuc
-     GIUA trang cua /login (`.auth-head`), xem cong thuc rieng cho khu vuc
-     nay o `.auth-head::before`/`.auth-portal-halo`. */
+     GIUA trang cua /login (`.auth-head`), xem `.auth-head > .hero-copy`
+     (khi quyen doc) va `.auth-portal-halo` (motif trang tri). */
   --hero-accent: #a78bfa;
   --hero-accent-secondary: #6d5bd0;
   --hero-mist-1: #241b4a;
@@ -1177,48 +1178,19 @@ main { overflow-x: clip; }
 }
 
 /*
-  Mang toi mem, CHI BAM QUANH khoi chu — vai tro phu, chu KHONG con la co che
-  chinh: `.page-title` va `.lead` gio tu lo bang mau dac + text-shadow rieng
-  (xem tren).
+  PageHero V3 (2026-08, hotfix "copy-local art direction") — nguoi dung tu
+  choi V2: BA lop lech tam + mask van ve tren pseudo-element cua `.page-head`
+  (CA HERO, khong phai rieng khoi chu), nen mat van thay MOT VUNG MAU/TOI TO
+  bam theo be rong header — chi la "elip mem" thay vi "elip cung", van la
+  cung MOT khai niem "tam nen sau tieu de" bi tu choi tu dau.
+
+  SUA TAN GOC: `.page-head` (VA `.hero-v2`/`.auth-head`) gio KHONG con
+  `::before` nao ca — luat cung dac ta Phan A2: "PageHero wrapper phai gan
+  nhu trong suot". Khi quyen doc duoc chuyen HOAN TOAN xuong `.hero-copy`
+  (xem duoi) — mot the CON, bam theo dung be rong doan van ban (`--hero-
+  copy-width`, ~46-60ch) chu KHONG phai be rong toan bo header (co the toi
+  ca ngan pixel tren desktop khi co nut hanh dong ben phai).
 */
-/*
-  PageHero V2 "Hero Local Atmosphere" — `.page-head::before` KHONG con la
-  MOT elip radial-gradient (V1) ma la BA lop lech tam khac kich thuoc/vi tri,
-  cong mot `mask-image` feather toan bo composite. Ly do doi tu goc (khong
-  chi giam do mo elip cu them lan nua):
-
-    - MOT elip, du mo/nho den dau, van co MOT duong bien hinh hoc doc duoc —
-      dung chinh dieu "black rectangle/oval panel" nguoi dung phan hoi.
-    - BA lop lech tam (khong dong tam, khong cung ty le) tao ra mot silhouette
-      BAT DOI XUNG — mat khong the "khoanh vung" no thanh mot hinh don.
-    - `mask-image` feather THEM mot lan nua tren toan bo composite, dam bao
-      moi canh (ke ca mep cua box `inset`) deu tan chu khong cat cung.
-
-  Lop 1+2 doc mau tu `--hero-mist-1/2` (V2: da sang hoa, khong con gan-den —
-  xem theme block o tren). Lop 3 dung `--hero-accent` lam mot "diem xuyet"
-  mau nhan khac hue, tao cam giac khi quyen nhieu lop thay vi mot khoi mau.
-  Dinh alpha (62/44/22%) THAP HON V1 (78/50%) — khong con "nang do het viec".
-
-  Trang CHUA gan `data-hero-theme` (vd cac trang PageHeader chua duoc theme
-  hoa o dot nay) roi ve fallback `#05070f` — GIU NGUYEN nhu V1 de khong doi
-  visual ngoai pham vi dac ta (chi 9 khu vuc duoc liet ke moi duoc brighten).
-*/
-.page-head::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: -32px -72px -26px -56px;
-  background:
-    radial-gradient(42% 64% at 20% 40%,
-      color-mix(in srgb, var(--hero-mist-1, #05070f) 62%, transparent) 0%, transparent 72%),
-    radial-gradient(36% 56% at 46% 68%,
-      color-mix(in srgb, var(--hero-mist-2, #05070f) 44%, transparent) 0%, transparent 74%),
-    radial-gradient(26% 46% at 6% 18%,
-      color-mix(in srgb, var(--hero-accent, #05070f) 22%, transparent) 0%, transparent 68%);
-  mask-image: radial-gradient(120% 150% at 26% 42%, #000 48%, transparent 88%);
-  -webkit-mask-image: radial-gradient(120% 150% at 26% 42%, #000 48%, transparent 88%);
-  pointer-events: none;
-}
 .page-head-body { min-width: 0; }
 .page-head-actions { flex: 0 0 auto; }
 /*
@@ -1249,6 +1221,69 @@ main { overflow-x: clip; }
   opacity: var(--hero-motif-opacity, 0.1);
   pointer-events: none;
 }
+
+/*
+  ==========================================================================
+  PageHero V3 "Copy-Local Art Direction" (2026-08, hotfix) — KHI QUYEN
+  DOC DUOC gio thuoc ve `.hero-copy`, KHONG con thuoc ve toan bo PageHero.
+
+  Dung o BA noi (dung CHUNG mot cong thuc + bien theme):
+    - `.page-head-body` (PageHeader dung chung — Explore/Animation/Cộng
+      đồng/Thư viện/Audio Studio/Image Studio) — them class `hero-copy`.
+    - `.hero-v2 > .hero-copy` (Trang chủ — boc rieng pill+tieu de+mo ta,
+      KHONG boc CTA/guest-hint — nut bam da tu doc duoc, khong can khi quyen).
+    - `.auth-head > .hero-copy` (/login — boc rieng tieu de+hint, KHONG boc
+      logo — logo la hinh co mau rieng, khong can lop mau nay).
+
+  Vi sao doi tu `.page-head::before` (V2) sang `.hero-copy::before` (V3):
+  `.page-head` la CA HANG (chu + nut hanh dong ben phai), co the rong toi ca
+  ngan pixel tren desktop — du dung ky thuat "nhieu lop lech tam + mask" thi
+  VUNG PHU AO cua no van bam theo be rong CA HANG do, nen mat van thay mot
+  "vung mau to" tu trai qua giua man hinh (dung dieu nguoi dung chi ra o Home).
+  `.hero-copy` chi rong bang CHINH DOAN VAN BAN (`--hero-copy-width`, 46-60ch
+  ~ 400-620px) — feather (-16 den -40px) cong them vao do van la mot vung NHO,
+  khong bao gio cham toi 70% khung nhin nhu dac ta cam.
+
+  Cong thuc: CHI HAI lop radial-gradient (khong con ba — dac ta B6 "1-2 small
+  asymmetric patches"), dinh alpha THAP (46/30%, thap hon ca V2's 62/44/22%),
+  mask-image feather RIENG cho khu vuc nho nay. Mau van tu `--hero-mist-1/2`
+  theo `[data-hero-theme]` (khong doi he theme cua V2), nen bang mau 11 khu
+  vuc van nguyen — chi THU NHO va HA THAP do mo vung phu.
+  ==========================================================================
+*/
+.hero-copy { position: relative; }
+.hero-copy::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -22px -40px -16px -34px;
+  background:
+    radial-gradient(52% 74% at 24% 36%,
+      color-mix(in srgb, var(--hero-mist-1, #05070f) 46%, transparent) 0%, transparent 72%),
+    radial-gradient(42% 62% at 64% 76%,
+      color-mix(in srgb, var(--hero-mist-2, #05070f) 30%, transparent) 0%, transparent 74%);
+  mask-image: radial-gradient(130% 160% at 32% 46%, #000 40%, transparent 82%);
+  -webkit-mask-image: radial-gradient(130% 160% at 32% 46%, #000 40%, transparent 82%);
+  pointer-events: none;
+}
+/* Trang chu: `.hero-copy` la mot the CON moi trong `.hero-v2` (truoc day
+   pill/tieu de/mo ta la con TRUC TIEP) — lap lai chinh xac flex column + gap
+   ma `.hero-v2` von dung cho CA khoi, de khong doi khoang cach thi giac. */
+.hero-v2 > .hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+/* /login: `.hero-copy` boc tieu de+hint (KHONG boc logo) — lap lai flex
+   column can giua cua `.auth-head` cho hai the con nay. */
+.auth-head > .hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+}
+
 /*
   Phan 15 "CTA harmonization": nut chinh trong dau trang KE THUA mau accent
   cua theme thay vi luon la tim thuong hieu chung — CHI o day (khong dung
@@ -3579,15 +3614,13 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   `.home-intro` cu — chi rong hon va co them mot hang loi tat phu.
 */
 /*
-  Phase 3.5, Phan 5 "Hero contrast": tren nen artwork sang (vi du bau troi
-  gan trang/may sang cua `home`), tieu de+doan mo ta Hero tung gan nhu bien
-  mat vi KHONG co lop nao giua chu va tranh (khac `.page-head` o cac trang
-  khac, da co san `.page-head::before` lam dung viec nay). KHONG dung
-  text-shadow nang (dac ta cam ro) — thay bang MOT quang mo/suong xanh-navy
-  RAT feather, bam theo dung vung chu (pill+tieu de+doan mo ta+CTA), lech
-  sang trai vi Hero can le trai (`align-items: flex-start`). Ban kinh/diem
-  dung tat dan o 85% de KHONG bao gio doc ra la "mot hinh chu nhat" — chi la
-  mot vung khi quyen tam roi dan vao tranh nen.
+  PageHero V3 (hotfix): `.hero-v2` KHONG con `::before` — khi quyen doc da
+  chuyen xuong `.hero-v2 > .hero-copy` (xem khoi "Copy-Local Art Direction" o
+  tren, gan `.page-head-body`). Ly do: `.hero-v2::before` (V2) van bam theo BE
+  RONG CA `.hero-v2` (toi 760px, gan het chieu rong cot noi dung) — chinh la
+  "vung mau/toi tu trai qua giua man hinh" nguoi dung chi ra tren Home. Nay
+  `.hero-copy` chi rong bang pill+tieu de+mo ta (khong bao gom CTA), nen vung
+  phu ao nho han han.
 */
 .hero-v2 {
   position: relative;
@@ -3597,32 +3630,6 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   gap: var(--s3);
   padding-block: var(--s5) var(--s6);
   max-width: 760px;
-}
-/*
-  PageHero V2 "Hero Local Atmosphere": cung cong thuc BA-lop-lech-tam +
-  mask-image voi `.page-head::before` (xem ghi chu day du o do) thay vi MOT
-  elip duy nhat — tron mau tu `--hero-mist-*`/`--hero-accent` cua
-  `[data-hero-theme="home"]` (Ocean Sky, da sang hoa o V2) qua `color-mix`,
-  fallback ve `#05070f` navy cu khi chua co theme. Lech tam VE TRAI (20%/8%
-  ngang) khop dac ta "aura left-anchored" cua Home — Hero da can trai san
-  (`align-items: flex-start`) nen khi quyen cung phai bam theo huong do,
-  khong dan deu ra ca hai ben.
-*/
-.hero-v2::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: -52px -110px -46px -80px;
-  background:
-    radial-gradient(44% 66% at 18% 38%,
-      color-mix(in srgb, var(--hero-mist-1, #05070f) 58%, transparent) 0%, transparent 72%),
-    radial-gradient(38% 58% at 44% 64%,
-      color-mix(in srgb, var(--hero-mist-2, #05070f) 42%, transparent) 0%, transparent 74%),
-    radial-gradient(24% 50% at 8% 74%,
-      color-mix(in srgb, var(--hero-accent, #05070f) 20%, transparent) 0%, transparent 68%);
-  mask-image: radial-gradient(130% 160% at 22% 44%, #000 46%, transparent 88%);
-  -webkit-mask-image: radial-gradient(130% 160% at 22% 44%, #000 46%, transparent 88%);
-  pointer-events: none;
 }
 /*
   Hoa tiet rieng cua Hero trang chu (`.hero-v2` KHONG dung `PageHeader`/
@@ -4707,32 +4714,14 @@ body.co-mini { padding-bottom: 74px; }
   text-align: center;
 }
 /*
-  PageHero V2 "Hero Local Atmosphere": `/login` gio co `data-hero-theme="auth"`
-  (Cong sao — indigo nua dem + amethyst, xem theme block o tren) thay vi
-  hardcode `#05070f*` (day la lop DEN THAT SU truoc day, khong qua
-  `--hero-mist-*` nao ca — nang nhat trong ba noi bi phan hoi "tam kinh den
-  chu nhat"). `.auth-head` can GIUA (`align-items: center`) nen bo cuc doi
-  xung theo TRUC DOC hon `.page-head`/`.hero-v2` (hai lop dat SANG HAI BEN
-  ngang tam thay vi lech han mot huong), cong `.auth-portal-halo` (mot vong
-  cong sao rieng, xem duoi) lam tam diem thi giac phia sau logo — khong con
-  chi la mot mang toi phang.
+  PageHero V3 (hotfix): `.auth-head` KHONG con `::before` — day tung la lop
+  NANG NHAT trong ba noi bi phan hoi (V2 van con hardcode-fallback tham chi
+  V1 con hardcode thang `#05070f*`, khong qua theme). Khi quyen doc gio thuoc
+  ve `.auth-head > .hero-copy` (boc rieng tieu de+hint, KHONG boc logo — xem
+  khoi "Copy-Local Art Direction" gan `.page-head-body`). `.auth-portal-halo`
+  (duoi day) la MOTIF trang tri (vong dut net + sao), khac voi khi quyen doc —
+  van giu nguyen, can giua ca logo LAN tieu de.
 */
-.auth-head::before {
-  content: "";
-  position: absolute;
-  inset: -34px -80px -20px;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(48% 118% at 50% 38%,
-      color-mix(in srgb, var(--hero-mist-1, #241b4a) 46%, transparent) 0%, transparent 76%),
-    radial-gradient(28% 56% at 26% 70%,
-      color-mix(in srgb, var(--hero-accent, #241b4a) 20%, transparent) 0%, transparent 70%),
-    radial-gradient(28% 56% at 74% 66%,
-      color-mix(in srgb, var(--hero-mist-2, #241b4a) 30%, transparent) 0%, transparent 70%);
-  mask-image: radial-gradient(150% 170% at 50% 42%, #000 42%, transparent 86%);
-  -webkit-mask-image: radial-gradient(150% 170% at 50% 42%, #000 42%, transparent 86%);
-}
 /*
   Quang cong sau logo/tieu de — mot the SVG rieng (`MotifPortalHalo`), khong
   phai mot khoi tron dac: hai vanh dut net + mot cung rune + vai diem sao.
@@ -5532,22 +5521,25 @@ body.co-mini { padding-bottom: 74px; }
   color: var(--text-3);
 }
 
-.tim-lop {
+/*
+  V3 (2026-08, hotfix) — popover NEO CANH nut tim, KHONG con hop thoai giua
+  trang. Ly do doi kien truc: `.tim-lop` (backdrop `position:fixed; inset:0`)
+  tung nam BEN TRONG cay DOM cua `<header class="site-header">`, va header do
+  co `backdrop-filter` (kinh mo cho thanh dieu huong) — mot to tien co
+  `backdrop-filter` tao containing block MOI cho con `position:fixed`, nen
+  `inset:0` khong con neo vao KHUNG NHIN that ma neo vao hop cua header (~106px
+  cao). Ket qua la thanh ngang mo/toi bat thuong duoi navbar — xem docstring
+  dau `SearchOverlay.tsx` cho chi tiet do luong that.
+
+  Sua: `createPortal` ra thang `document.body` (thoat containing block cua
+  header hoan toan) + doi tu "hop thoai can giua trang, co backdrop toi" sang
+  "popover nho neo canh nut tim, KHONG backdrop" (dac ta V3 Phan B2-B5). Vi
+  tri/kich thuoc (`top`/`left`/`width`/`maxHeight`) tinh dong trong JS tuy
+  theo vi tri THAT cua nut tim va khung nhin — xem `SearchOverlay.tsx`.
+*/
+.tim-pop {
   position: fixed;
-  inset: 0;
-  z-index: 90;
-  display: flex;
-  justify-content: center;
-  /* KHONG dat giua theo chieu doc: hop tim nam gan dinh de no khong nhay len
-     xuong khi so ket qua doi. */
-  padding: 10vh var(--s4) var(--s4);
-  background: #05070fb8;
-  backdrop-filter: blur(3px); /* build tu them ban -webkit- */
-}
-.tim-hop {
-  position: relative;
-  width: min(680px, 100%);
-  max-height: 78vh;
+  z-index: 95;
   display: flex;
   flex-direction: column;
   border-radius: var(--r4);
@@ -5559,7 +5551,9 @@ body.co-mini { padding-bottom: 74px; }
      xem `SearchOverlay.tsx`). Ghi de `box-shadow` cua `.kinh` (dung chung
      selector, nhung khai bao nay nam sau trong tep nen thang) — giu lai net
      sang mep tren cua kinh (`--kinh-sang`) va them mot vien 1px + quang nhe
-     phia ngoai, KHONG animation. */
+     phia ngoai, KHONG animation. Vien 1px mau `--brand-line` chinh la "diem
+     nhan tim/tim nhat" ma dac ta B6 muon, khong can them gi khac.
+  */
   box-shadow: 0 0 0 1px var(--brand-line), 0 0 28px -10px var(--brand-glow),
     var(--do-sau-manh), var(--kinh-sang);
 }
@@ -5591,7 +5585,10 @@ body.co-mini { padding-bottom: 74px; }
 }
 .tim-o::placeholder { color: var(--text-3); }
 
-.tim-than { overflow-y: auto; padding: var(--s2) 0; }
+/* `flex: 1 1 auto` + `min-height: 0` — bat buoc de `.tim-pop`'s `maxHeight`
+   (tinh trong JS, xem `SearchOverlay.tsx`) THAT SU gioi han duoc chieu cao
+   tong, va phan con lai (sau `.tim-dau`) tu cuon thay vi tran ra ngoai. */
+.tim-than { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--s2) 0; }
 .tim-trong {
   padding: var(--s6) var(--s4);
   text-align: center;
@@ -5670,10 +5667,14 @@ body.co-mini { padding-bottom: 74px; }
 }
 
 @media (max-width: 640px) {
-  /* O dien thoai, overlay chiem gan het man hinh: mot hop nho o giua thi ban
-     phim ao che mat mot nua ket qua. */
-  .tim-lop { padding: 0; }
-  .tim-hop { width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; }
+  /*
+    V3: khong con chiem toan man hinh (dac ta B7 cam "huge vertical blank
+    bar"/"distort page layout") — `.tim-pop` van la popover, chi rong het
+    khung nhin tru 24px gutter (tinh trong JS: `top`/`left`/`width` deu tu
+    `SearchOverlay.tsx`, KHONG con o day). CSS chi con lo goc tron nho hon
+    cho hop voi man hep.
+  */
+  .tim-pop { border-radius: var(--r3); }
   /* Huy hieu xuong dong thay vi ep ten nguoi con vai ky tu. */
   .tim-hh { display: none; }
 }

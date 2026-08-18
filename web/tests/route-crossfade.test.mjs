@@ -123,7 +123,9 @@ test("chu nam TRUC TIEP tren tranh deu co mot cach chong nhoe", () => {
   const text = css();
 
   assert.match(text, /\.site-footer::before/, "footer không có mảng tối");
-  assert.match(text, /\.auth-head::before/, "khối tiêu đề /login không có mảng tối");
+  // V3 hotfix: khoi tieu de /login gio duoc `.hero-copy::before` lo (chuyen
+  // tu `.auth-head::before` — xem themed-page-hero-v1.test.mjs).
+  assert.match(text, /\.hero-copy::before/, "khối tiêu đề /login không có mảng tối");
   assert.match(text, /\.page > section:not\(\.card\) > \.hint/,
     "ghi chú cuối mục không được cấp bóng chữ");
 

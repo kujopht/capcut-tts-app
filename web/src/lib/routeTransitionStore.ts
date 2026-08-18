@@ -45,17 +45,23 @@ export interface RouteTransitionSnapshot {
 }
 
 export interface Timing {
-  /** Do dai pha "may che dan" (ms) — cung la MOC toi thieu truoc khi doi anh. */
+  /** Do dai pha "may quet toi" (ms) — cung la MOC toi thieu truoc khi doi anh. */
   PHU: number;
-  /** Do dai pha "may lo dan" (ms). */
+  /** Do dai pha "may quet tiep + tan dan" (ms). */
   LO: number;
 }
 
 /**
  * KHOP CHINH XAC voi `--dur-veil-phu`/`--dur-veil-lo` o `globals.css` — hai
  * cho phai noi CUNG mot con so, xem `route-transition-veil.test.mjs`.
+ *
+ * V2: 340 + 50 (dem) + 490 = 880ms tong — trong khoang 780-900ms dac ta
+ * (V1 la 650ms, bi nhan xet "van con doc hoi giong mot cu lau" — V2 keo dai
+ * VA lam muot hon, nhung KHONG lam cham diem doi anh: `PHU` (340ms) van la
+ * moc anh doi, chi rieng qua trinh may quet TIEP TUC sau do (`LO`, 490ms)
+ * dai hon de tao cam giac mot duong quet lien tuc thay vi "phinh-xep".
  */
-export const THOI_LUONG_BINH_THUONG: Timing = { PHU: 300, LO: 350 };
+export const THOI_LUONG_BINH_THUONG: Timing = { PHU: 340, LO: 490 };
 /** `prefers-reduced-motion: reduce` — gan nhu tuc thi, nhung KHONG bao gio 0:
  * doi nen giua hai mau khac nhau van can mot lan che, neu khong se thay mot
  * cai nhay mau song. */

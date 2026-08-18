@@ -354,13 +354,13 @@ test("moi hieu ung moi deu TAT khi nguoi dung chon giam chuyen dong", () => {
     "nhịp thở của nền không được tắt khi giảm chuyển động");
 
   /*
-    V1 Cloud Veil: chuyen canh route gio la man may/suong
+    Cloud Veil (V1 roi V2): chuyen canh route la man may/suong
     (`.route-veil[data-state=...]`), khong con cu TRUOT NGANG. Duong di
-    (transform/blur) cua ca ba cuc may phai TAT het duoi giam chuyen dong,
-    chi con mot lan mo/an opacity rat ngan — xem
+    (transform/blur) cua CA BON lop may/suong phai TAT het duoi giam chuyen
+    dong, chi con mot lan mo/an opacity rat ngan — xem
     `route-transition-veil.test.mjs` cho cac rang buoc chi tiet ve man suong.
   */
-  assert.match(than, /\.veil-cloud, \.veil-haze \{ filter: none; backdrop-filter: none; \}/,
+  assert.match(than, /\.veil-cloud, \.veil-wisp, \.veil-haze \{ filter: none; backdrop-filter: none; \}/,
     "man suong vẫn còn filter/backdrop-filter khi giảm chuyển động");
 });
 

@@ -174,9 +174,11 @@ test("khac chu de: dung trinh tu phu (covering) -> doi anh -> lo (revealing) -> 
   assert.equal(s.ten, "explore");
 });
 
-test("tong thoi luong (PHU + 50ms dem + LO) nam trong 550-700ms nhu dac ta", () => {
+test("tong thoi luong (PHU + 50ms dem + LO) nam trong 780-900ms nhu dac ta V2", () => {
+  // V2: keo dai + lam muot hon V1 (550-700ms, bi nhan xet "van con giong mot
+  // cu lau") — dac ta V2 yeu cau 780-900ms.
   const tong = THOI_LUONG_BINH_THUONG.PHU + 50 + THOI_LUONG_BINH_THUONG.LO;
-  assert.ok(tong >= 550 && tong <= 700, `${tong}ms — cần 550–700ms theo đặc tả`);
+  assert.ok(tong >= 780 && tong <= 900, `${tong}ms — cần 780–900ms theo đặc tả V2`);
 });
 
 /* ==================================================== hanh vi: chong dua (race) */
@@ -331,22 +333,40 @@ test("mount DUNG MOT LAN o layout.tsx, ngang hang voi PageBackground (khong long
   assert.ok(a !== -1 && b !== -1 && b > a);
 });
 
-test("z-index: duoi thanh dieu huong/mini-player, tren noi dung", () => {
+test("z-index V2: CON AM (duoi noi dung thuong), nhung it am hon nen — NEN < MAY < GIAO DIEN", () => {
   const text = css();
   const at = text.indexOf(".route-veil {");
   const than = text.slice(at, text.indexOf("}", at));
   const zVeil = Number(than.match(/z-index: (-?\d+);/)?.[1]);
+  const zPageBg = Number(text.match(/\.page-bg \{[\s\S]*?z-index: (-?\d+);/)?.[1]);
   const zHeader = Number(text.match(/\.site-header \{[\s\S]*?z-index: (\d+);/)?.[1]);
   const zMini = Number(text.match(/\.mini \{[\s\S]*?z-index: (\d+);/)?.[1]);
+
+  assert.ok(zVeil < 0, "veil phải là z-index ÂM (V2) — đây là lớp con của thế giới, không phải lớp che giao diện");
+  assert.ok(zVeil > zPageBg, `veil z-index ${zVeil} phải LỚN HƠN (ít âm hơn) nền ${zPageBg} — mây phải vẽ trên nền`);
   assert.ok(zVeil < zHeader, `veil z-index ${zVeil} phải nhỏ hơn navbar ${zHeader}`);
   assert.ok(zVeil < zMini, `veil z-index ${zVeil} phải nhỏ hơn mini-player ${zMini}`);
-  assert.ok(zVeil > 0, "veil phải trên nội dung thường (z-index auto/0)");
+
+  /*
+    Z-index am CHI dam bao thu tu dung neu `<main>`/`.wrap` KHONG dinh vi
+    (khong `position`) va khong tao ngu canh xep chong rieng (`transform`/
+    `filter`/`isolation`) — da xac nhan bang kiem tra thuc te (bao cao Cloud
+    Veil V2). Bai test nay giu lai dieu kien do de neu sau nay co ai VO TINH
+    them `position`/`isolation` vao `main`/`.wrap` thi do se BAT NGAY, vi
+    dieu do se lam gay dung z-index am da tinh o tren.
+  */
+  const mainRule = text.match(/\nmain \{([^}]*)\}/)?.[1] ?? "";
+  assert.ok(!/\bposition:|isolation:|transform:|filter:/.test(mainRule),
+    "main đã có position/isolation/transform/filter — điều này sẽ phá vỡ thứ tự z-index âm NỀN < MÂY < GIAO DIỆN");
 });
 
-test("BA cuc may hinh dang BAT QUY TAC — khong phai hinh tron/oval deu", () => {
+test("BA+MOT cuc may/suong hinh dang BAT QUY TAC — khong phai hinh tron/oval deu", () => {
   const text = css();
-  for (const lop of ["veil-cloud", "veil-cloud-a", "veil-cloud-b", "veil-cloud-c"]) {
-    const at = text.indexOf(`.${lop} {`);
+  for (const lop of ["veil-cloud", "veil-wisp", "veil-cloud-a", "veil-cloud-b"]) {
+    // `.veil-cloud` chi ton tai o dang selector CHUNG ".veil-cloud, .veil-wisp {"
+    // (khong co khai bao rieng ".veil-cloud {") nen khong the doi hoi " {" ngay
+    // sau ten lop — chi can xac nhan CHUOI ten lop co xuat hien trong CSS.
+    const at = text.indexOf(`.${lop}`);
     assert.notEqual(at, -1, `thiếu .${lop}`);
   }
   // Moi khai bao border-radius phai co BON gia tri KHAC nhau tren truc ngang
@@ -355,9 +375,9 @@ test("BA cuc may hinh dang BAT QUY TAC — khong phai hinh tron/oval deu", () =>
   const khaiBao = [...text.matchAll(/border-radius: (\d+)% (\d+)% (\d+)% (\d+)%/g)];
   const trongVeil = khaiBao.filter((m) => {
     const truoc = text.slice(Math.max(0, m.index - 400), m.index);
-    return truoc.includes("veil-cloud");
+    return truoc.includes("veil-cloud") || truoc.includes("veil-wisp");
   });
-  assert.ok(trongVeil.length >= 3, "cần ít nhất 3 khai báo border-radius bất quy tắc cho các cục mây");
+  assert.ok(trongVeil.length >= 3, "cần ít nhất 3 khai báo border-radius bất quy tắc cho các cục mây/mũi mây");
   for (const m of trongVeil) {
     const [, a, b, c, d] = m;
     assert.ok(new Set([a, b, c, d]).size >= 3,
@@ -365,16 +385,45 @@ test("BA cuc may hinh dang BAT QUY TAC — khong phai hinh tron/oval deu", () =>
   }
 });
 
-test("moi cuc may co toc do/do tre RIENG — khong ca ba dong bo tuyet doi", () => {
+test("moi lop may co toc do/quang duong RIENG — khong dong bo tuyet doi (chieu sau)", () => {
   const text = css();
-  const doTre = [...text.matchAll(/\.veil-cloud-([abc]) \{[\s\S]*?animation: veil-phu-\1[^;]*?(\d*)ms both/g)];
-  // Cach kiem tra don gian hon: tim cac khai bao co do tre khac 0 tuong minh
-  // (vd "40ms both", "90ms both") tren it nhat hai trong ba cuc may.
-  const coDoTre = (text.match(/animation: veil-phu-[abc] var\(--dur-veil-phu\) cubic-bezier\([^)]+\) \d+ms both/g) ?? []).length;
-  assert.ok(coDoTre >= 2, "ít nhất hai cục mây phải có độ trễ riêng để chuyển động không đồng bộ tuyệt đối — nếu không sẽ đọc ra như MỘT khối duy nhất");
+  // Do tre khoi dong (V2): wisp=0 (dan dau), cloud-a=60ms, cloud-b=110ms.
+  const coDoTre = (text.match(/animation: veil-phu-(a|b) var\(--dur-veil-phu\) cubic-bezier\([^)]+\) \d+ms both/g) ?? []).length;
+  assert.ok(coDoTre >= 2, "ít nhất hai lớp mây phải có độ trễ khởi động riêng — nếu không sẽ đọc ra như MỘT khối duy nhất");
+
+  // Quang duong (khoang cach translate3d) PHAI khac nhau giua wisp/a/b — day
+  // la co che tao "toc do khac nhau" ma KHONG dong bo camera/nen (chi cac
+  // lop may nay tu di chuyen).
+  const quangDuong = (ten) => {
+    const m = text.match(new RegExp(`@keyframes veil-lo-${ten} \\{[\\s\\S]*?to\\s*\\{[^}]*translate3d\\((-?[\\d.]+)vw`));
+    return m ? Math.abs(Number(m[1])) : null;
+  };
+  const dWisp = quangDuong("wisp");
+  const dA = quangDuong("a");
+  const dB = quangDuong("b");
+  assert.ok(dWisp && dA && dB, "thiếu quãng đường cuối (translate3d) của một trong ba lớp");
+  assert.ok(new Set([dWisp, dA, dB]).size === 3,
+    `wisp=${dWisp}vw, a=${dA}vw, b=${dB}vw — phải khác nhau cả ba để tạo cảm giác chiều sâu`);
 });
 
-test("lop suong nen dung backdrop-filter — dam bao che kin ca o khe ho giua cac cuc may", () => {
+test("do bao phu KHONG toi da: do mo dinh cua moi lop may deu duoi 0.6 (con thay duoc nen qua may)", () => {
+  /*
+    Dac ta V2: "at maximum density, it should cover approximately 55-75% of
+    the BACKGROUND visually — not 100%". Kiem tra GIAN TIEP qua do mo dinh
+    (opacity) cua tung lop trong keyframe "to" cua pha phu — V1 dat 0.7-0.94
+    (gan nhu che kin); V2 phai THAP HON HAN vi may gio nam sau giao dien va
+    khong con nhiem vu che giau viec doi DOM nua.
+  */
+  const text = css();
+  for (const ten of ["wisp", "a", "b"]) {
+    const m = text.match(new RegExp(`@keyframes veil-phu-${ten} \\{[\\s\\S]*?to\\s*\\{\\s*opacity:\\s*([\\d.]+);`));
+    assert.ok(m, `thiếu opacity đỉnh của veil-phu-${ten}`);
+    const do_mo = Number(m[1]);
+    assert.ok(do_mo <= 0.6, `veil-phu-${ten} đạt opacity ${do_mo} — quá đặc, phải ≤ 0.6 để không che kín nền`);
+  }
+});
+
+test("lop suong nen dung backdrop-filter — chi lam mo NHE nen, khong con nhiem vu che kin", () => {
   const text = css();
   const at = text.indexOf(".veil-haze {");
   const than = text.slice(at, text.indexOf("}", at));
@@ -383,7 +432,7 @@ test("lop suong nen dung backdrop-filter — dam bao che kin ca o khe ho giua ca
 
 test("chi transform/opacity/filter dong — khong thuoc tinh nao lam tinh lai bo cuc", () => {
   const text = css();
-  for (const ten of ["veil-phu-a", "veil-phu-b", "veil-phu-c", "veil-lo-a", "veil-lo-b", "veil-lo-c"]) {
+  for (const ten of ["veil-phu-wisp", "veil-phu-a", "veil-phu-b", "veil-lo-wisp", "veil-lo-a", "veil-lo-b"]) {
     const at = text.indexOf(`@keyframes ${ten} {`);
     assert.notEqual(at, -1, `thiếu @keyframes ${ten}`);
     const than = text.slice(at, text.indexOf("\n}", at));

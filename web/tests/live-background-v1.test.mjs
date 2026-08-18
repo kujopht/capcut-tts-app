@@ -38,9 +38,19 @@ test("video CHI render khi hienVideo true — khong bao gio render truoc khi kie
 
 /* ==================================== fallback khi loi / khong co nguon === */
 
-test("loi tai video (onError) -> loi=true -> hienVideo tro ve false -> chi con poster", () => {
+test("loi tai video (onError) -> thu tai lai DUNG MOT LAN truoc khi loi=true vinh vien", () => {
+  /*
+   * V3: khong con coi MOI loi la vinh vien ngay lap tuc — mot loi GPU context
+   * loss thoang qua (keo cua so qua man hinh khac) se duoc thu lai mot lan
+   * (`el.load()` + `el.play()`) truoc khi ket luan hong that su. Xem chu
+   * thich V3 o dau `LiveBackground.tsx`.
+   */
   const s = codeOnly(src());
-  assert.match(s, /onError=\{\(\) => setLoi\(true\)\}/);
+  assert.match(s, /onError=\{xuLyLoiVideo\}/);
+  assert.match(s, /const xuLyLoiVideo = \(\) => \{/);
+  assert.match(s, /daThuLaiRef\.current = true;/);
+  assert.match(s, /el\.load\(\);/);
+  assert.match(s, /setLoi\(true\);/, "vẫn phải có một lối ra vĩnh viễn cho lỗi thật");
   // `hienVideo` phu thuoc `!loi` — da xac nhan o test tren.
 });
 
@@ -74,7 +84,7 @@ test("ca hai dinh dang webm/mp4 deu duoc khai bao qua <source>, khong hardcode m
 test("prefers-reduced-motion: reduce -> choPhep=false -> video khong bao gio phat", () => {
   const s = codeOnly(src());
   assert.match(s, /prefers-reduced-motion: reduce/);
-  assert.match(s, /setChoPhep\(!giamChuyenDong && !tietKiemDuLieu/);
+  assert.match(s, /!qGiamChuyenDong\.matches && !tietKiemDuLieu/);
 });
 
 test("navigator.connection.saveData -> uu tien nen tinh, doc AN TOAN (Safari khong co API nay)", () => {
@@ -85,7 +95,7 @@ test("navigator.connection.saveData -> uu tien nen tinh, doc AN TOAN (Safari kho
 test("man hinh <=640px mac dinh KHONG phat video tru khi mobileVideo=true (Phan 20 dac ta)", () => {
   const s = codeOnly(src());
   assert.match(s, /mobileVideo = false/);
-  assert.match(s, /\(!laManHinhNho \|\| mobileVideo\)/);
+  assert.match(s, /\(!qManHinhNho\.matches \|\| mobileVideo\)/);
 });
 
 test("tab an (document.hidden) -> pause(); tab hien lai -> play() lai NEU da san sang va khong loi", () => {

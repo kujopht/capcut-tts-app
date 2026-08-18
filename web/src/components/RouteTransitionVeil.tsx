@@ -1,25 +1,31 @@
 "use client";
 
 /**
- * Man may/suong che chuyen canh route — "Cloud Veil Route Transition V1".
+ * Man may/suong che chuyen canh route — "Cloud Veil Route Transition V2".
  *
- * Y DINH: doi canh trong mot the gioi anime fantasy la di qua mot lan
- * may/suong, KHONG PHAI mot cu quay may ngang nhu slide PowerPoint (ban cu,
- * bi tu choi — xem lich su git). Trinh tu:
+ * Y DINH: doi canh trong mot the gioi anime fantasy la may TROI QUA the
+ * gioi phia SAU giao dien — giao dien (PageHero/nut/o tim/the/Bento) LUON
+ * o TREN, khong bao gio bi may che (khac V1, bi tu choi vi che ca giao
+ * dien — xem lich su git). Trinh tu (mot duong QUET lien tuc, khong con
+ * "phinh to che kin roi xep lai"):
  *
- *   trang HIEN TAI -> may nhe nhang tien vao -> may che kin man hinh trong
- *   choc lat -> nen/route doi SAU man suong -> may thoai di -> trang MOI lo ra
+ *   trang HIEN TAI -> mui may (wisp) di truoc -> khoi may chinh/phu quet
+ *   qua NEN (KHONG qua giao dien) -> nen doi dung luc may day nhat -> may
+ *   tiep tuc quet -> suong tan dan (trailing) -> trang MOI da hien tu truoc
  *
  * KIEN TRUC:
  *
- *   - MOUNT MOT LAN duy nhat o `layout.tsx`, ngang hang voi `PageBackground`
- *     (KHONG long vao ben trong no: `.page-bg` co `z-index: -1`, tao mot
- *     ngu canh xep chong RIENG — bat ky the con nao cua no, du dat z-index
- *     cao bao nhieu, van bi giam trong pham vi -1 do, khong the noi len tren
- *     `.site-header`. Man suong PHAI la anh em CUNG CAP voi `.site-header`
- *     o body de z-index cua no co y nghia toan cuc).
+ *   - MOUNT MOT LAN duy nhat o `layout.tsx`, ngang hang voi `PageBackground`.
+ *     `.route-veil` dat z-index **-1**, `.page-bg` dat z-index **-2** — CA
+ *     HAI la con am, `<main>` (khong dinh vi) LUON ve SAU nhom con am du no
+ *     khong dat z-index nao (CSS2.1 Appendix E) — da kiem thuc te khong co
+ *     `position`/`transform`/`filter`/`isolation` nao tren
+ *     `body`/`html`/`main`/`.wrap` pha vo dieu nay. Ket qua: NEN < MAY <
+ *     GIAO DIEN, dung THU TU dac ta yeu cau — xem chu thich dau khoi
+ *     ".route-veil" o globals.css cho chi tiet.
  *   - Doc trang thai tu `lib/routeTransitionStore.ts` — CUNG mot kho ma
- *     `PageBackground.tsx` doc, qua `useSyncExternalStore`. Component nay
+ *     `PageBackground.tsx` (va `ContentAtmosphere.tsx`, cho vi chuyen canh
+ *     rieng cua noi dung) doc, qua `useSyncExternalStore`. Component nay
  *     KHONG tu theo doi `pathname`: chi PageBackground lam viec do (mot noi
  *     duy nhat goi `diTinh`), tranh hai vong kiem doc lap co the bao nhau
  *     lech nhip.
@@ -30,8 +36,10 @@
  *     chi phi luc dung yen la SO KHONG (dung yeu cau "essentially zero idle
  *     cost").
  *   - KHONG Canvas, KHONG WebGL, KHONG `requestAnimationFrame` — moi chuyen
- *     dong la CSS keyframes tren `transform`/`opacity`/`filter` cua vai
- *     phan tu `<div>` co dinh so luong (ba "cuc may" + mot lop suong nen).
+ *     dong la CSS keyframes tren `transform`/`opacity`/`filter` cua BON
+ *     phan tu `<div>` co dinh so luong: mot mui may dan dau (`.veil-wisp`),
+ *     hai khoi may chinh/phu toc do khac nhau (`.veil-cloud-a/b`), va mot
+ *     lop suong nen tan cham nhat (`.veil-haze`).
  *   - `pointer-events: none` + `aria-hidden`: day la trang tri, khong bao
  *     gio chan click hay lot vao cay truy cap.
  */
@@ -64,9 +72,9 @@ export function RouteTransitionVeil() {
       data-state={trangThai}
       data-theme={chuDeMau}
     >
+      <div className="veil-wisp" />
       <div className="veil-cloud veil-cloud-a" />
       <div className="veil-cloud veil-cloud-b" />
-      <div className="veil-cloud veil-cloud-c" />
       <div className="veil-haze" />
     </div>
   );

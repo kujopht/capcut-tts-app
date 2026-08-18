@@ -7,6 +7,7 @@ import { ToastProvider } from "@/lib/toast";
 import { NavAuth, NavLinks } from "@/components/NavAuth";
 import { PageBackground } from "@/components/PageBackground";
 import { RouteTransitionVeil } from "@/components/RouteTransitionVeil";
+import { ContentAtmosphere } from "@/components/ContentAtmosphere";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { Logo } from "@/components/Logo";
@@ -81,11 +82,13 @@ export default function RootLayout({
             <PageBackground />
 
             {/*
-              Man may/suong che chuyen canh route (Cloud Veil V1) — MOT LAN
-              duy nhat, ngang hang voi `PageBackground` (khong long vao ben
-              trong: `.page-bg` co `z-index:-1`, mot ngu canh xep chong rieng
-              ma the con khong the thoat ra de noi len tren `.site-header`).
-              Xem `components/RouteTransitionVeil.tsx`.
+              Man may/suong chuyen canh route (Cloud Veil V2) — MOT LAN duy
+              nhat, ngang hang voi `PageBackground`. `.route-veil` dat
+              z-index -1 (chi hon `.page-bg` -2 mot bac) — CA HAI la con am,
+              nen LUON ve TRUOC vung noi dung chinh (khong dinh vi) nhung SAU
+              cac lop dieu huong/modal z-index duong. Ket qua: NEN < MAY < GIAO DIEN
+              — may KHONG con che PageHero/nut/the nhu V1 (bi tu choi). Xem
+              `components/RouteTransitionVeil.tsx`.
             */}
             <RouteTransitionVeil />
 
@@ -112,7 +115,7 @@ export default function RootLayout({
             </SiteHeader>
 
             <main id="main">
-              <div className="wrap">{children}</div>
+              <ContentAtmosphere>{children}</ContentAtmosphere>
             </main>
 
             {/*

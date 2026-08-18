@@ -217,7 +217,10 @@ test("lop nen KHONG cuon theo trang va khong nhan chuot", () => {
   const than = text.slice(at, text.indexOf("}", at));
   assert.match(than, /position: fixed/);
   assert.match(than, /pointer-events: none/);
-  assert.match(than, /z-index: -1/);
+  // V2 Cloud Veil: -2 (truoc la -1) — `.route-veil` (man may) gio chiem
+  // -1, MOT bac it am hon, de nam GIUA nen va noi dung. Xem
+  // `route-transition-veil.test.mjs` cho bai test doi chieu ca hai gia tri.
+  assert.match(than, /z-index: -2/);
   // `position: fixed` tren MOT phan tu, khong phai `background-attachment:
   // fixed` tren body — cai sau lam trinh duyet ve lai nen moi khung khi cuon.
   assert.ok(!/background-attachment: fixed/.test(than));

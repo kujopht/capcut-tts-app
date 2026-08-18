@@ -271,27 +271,42 @@ body {
 /*
   Khung chua HAI lop tranh — xem `components/PageBackground.tsx`.
 
-  `z-index: -1` cho khung nay: con am se ve TREN nen cua body nhung DUOI moi
-  noi dung trong luong. Nho vay khong phai gan `z-index` cho header/main/footer.
+  `z-index: -2` (V2 Cloud Veil — truoc la -1): con am se ve TREN nen cua body
+  nhung DUOI moi noi dung trong luong. Nho vay khong phai gan `z-index` cho
+  header/main/footer.
+
+  VI SAO -2 (khong con -1): `.route-veil` (man may chuyen canh) gio dat
+  z-index -1 — MOT BAC IT AM HON, DE NAM GIUA nen va noi dung. Ca hai deu la
+  con am (roi vao nhom "positioned descendants voi z-index am" khi trinh
+  duyet xep chong), nen chung LUON ve TRUOC moi noi dung khong-dinh-vi trong
+  luong nhu `<main>` — bat ke con so am cu the la bao nhieu — nhung GIUA
+  CHUNG VOI NHAU thi so it am hon (`-1`) ve SAU (tren) so it am hon kia
+  (`-2`). Day la ly do MOT PHEP DOI -1 -> -2 don gian nhu the nay dat dung
+  yeu cau "BACKGROUND < CLOUD < CONTENT" ma khong can dung toi `isolation`
+  hay tao ngu canh xep chong moi — da xac nhan bang kiem tra thuc te (xem
+  bao cao Cloud Veil V2): `body`/`html`/`main`/`.wrap` khong co
+  `position`/`transform`/`filter`/`isolation` nao chen vao giua.
 */
 .page-bg {
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: -2;
   pointer-events: none;
   overflow: hidden;
 }
 
 /*
-  Thoi luong man suong/may che chuyen canh (Cloud Veil V1) — KHOP CHINH XAC
+  Thoi luong man suong/may quet chuyen canh (Cloud Veil V2) — KHOP CHINH XAC
   voi `THOI_LUONG_BINH_THUONG` o `lib/routeTransitionStore.ts`. Hai bien
-  rieng (khong con MOT `--dur-nen` gop nhu ban cu) vi hai pha co dang chuyen
-  dong khac nhau: `--dur-veil-phu` la may TIEN VAO che dan, `--dur-veil-lo`
-  la may THOAI RA lo dan — xem khoi ".route-veil" ben duoi.
+  rieng vi hai pha co dang chuyen dong khac nhau: `--dur-veil-phu` la doan
+  dau duong quet (mui may dan dau + khoi chinh tien vao, ket thuc dung luc
+  doi anh), `--dur-veil-lo` la doan sau (duong quet TIEP TUC roi tan dan) —
+  xem khoi ".route-veil" ben duoi. Tong 340+50(dem)+490 = 880ms, trong
+  khoang 780-900ms dac ta V2 (V1 la 300+350=650ms).
 */
 :root {
-  --dur-veil-phu: 300ms;
-  --dur-veil-lo: 350ms;
+  --dur-veil-phu: 340ms;
+  --dur-veil-lo: 490ms;
 }
 
 /*
@@ -372,171 +387,211 @@ body {
 
 /*
   ================================================================
-  CLOUD VEIL ROUTE TRANSITION V1 — man may/suong che khi doi route.
+  CLOUD VEIL ROUTE TRANSITION V2 — man may/suong CHI o LOP NEN.
 
-  THAY THE HOAN TOAN cho co che "quay may ngang" cu (V0 — mot lop troi sang
-  trai/phai theo huong tren truc, xem lich su git neu can doi chieu). Van de
-  cua V0: doc ra nhu mot slide PowerPoint, khong nhu di qua mot the gioi anime
-  fantasy lien mach.
+  SUA LOP (khac biet duy nhat/quan trong nhat so V1): V1 dat `.route-veil` o
+  z-index 45 — TREN CA `<main>` (noi dung/PageHero/nut/the), tam thoi che
+  mat giao dien luc chuyen canh. V2: `.route-veil` gio o z-index **-1** —
+  CHI hon `.page-bg` (**-2**) dung MOT bac, ca hai roi vao nhom "con am"
+  (negative z-index descendants) ma trinh duyet LUON ve TRUOC moi noi dung
+  khong-dinh-vi trong luong nhu `<main>` (xem CSS2.1 Appendix E — da kiem
+  thuc te: `body`/`html`/`main`/`.wrap` khong co `position`/`transform`/
+  `filter`/`isolation` nao pha vo thu tu nay). Ket qua dung 3 tang:
 
-  Y TUONG: thay vi truot canh, MOT MAN SUONG/MAY che dan man hinh, route/nen
-  doi SAU man suong do (xem `lib/routeTransitionStore.ts` cho dong ho chinh
-  xac), roi may lo dan de lo trang moi. Nguoi dung khong bao gio thay canh cu
-  troi di — chi thay may.
+      Z-2  .page-bg          (nen)
+      Z-1  .route-veil       (may/suong)
+      Z0+  <main>, .site-header, .mini, toast, modal...  (giao dien)
 
-  BA "cuc may" (`.veil-cloud-a/b/c`) hinh dang BAT QUY TAC (border-radius
-  lech bon goc, KHONG phai hinh tron/oval deu), moi cuc mot kich thuoc/do
-  mo/do tre RIENG — gop lai doc ra nhu suong troi thay vi MOT khoi dac hinh
-  chu nhat (dieu dac ta cam ro rang). Them mot lop `.veil-haze` lam nen kinh
-  qua `backdrop-filter` de dam bao che kin CA KHI cac cuc may co khe ho giua
-  chung — day la ly do KHONG can moi cuc may phai dat opacity 1 tuyet doi.
+  May gio la mot HIEU UNG CUA THE GIOI, khong con la mot lop che giao dien —
+  PageHero/nut/o tim/the/Bento deu LUON o TREN may, khong bao gio bi che.
 
-  Huong di: DUOI-TRAI -> TREN-PHAI, MOT huong DUY NHAT khong doi theo huong
-  dieu huong (dac ta: "the transition motion itself remains consistent
-  across the site" — chi MAU theo chu de la doi, xem bang `--veil-1/-2` o
-  duoi).
+  VI KHONG CON CHE GIAO DIEN, doi route/anh nen KHONG THE dua vao do mo cua
+  may de an giau nua — noi dung trang tu no co mot vi chuyen canh RIENG, RAT
+  nho (xem `.route-content` va `components/ContentAtmosphere.tsx`), tach
+  biet hoan toan voi may.
+
+  CHUYEN DONG: MOT duong quet lien tuc (khong con "phinh to che kin, giu
+  nguyen, xep lai" nhu V1) — cac cuc may/suong TRAN QUA nen tu duoi-trai len
+  tren-phai, KHONG BAO GIO phu qua 55-75% dien tich nen (van con khe ho thay
+  duoc canh phia sau — "may troi giua nguoi xem va phong canh", khong phai
+  "man hinh tai"). BON lop, moi lop mot toc do/kich thuoc RIENG de tao chieu
+  sau (khong dong bo tuyet doi — dac ta cam mot khoi dac duy nhat):
+
+      .veil-wisp    (nho nhat, DAN DAU, nhanh nhat — "leading wisp")
+      .veil-cloud-a (khoi CHINH, toc do trung binh)
+      .veil-cloud-b (khoi phu, cham hon mot chut — quang duong ngan hon)
+      .veil-haze    (suong nen `backdrop-filter`, CHAM NHAT — o lai lau nhat,
+                     tan dan trong nua sau cua pha lo — "trailing haze")
+
+  QUAN TRONG: CHI cac lop may di chuyen. Nen (`.page-bg`) va camera KHONG
+  BAO GIO bi dich chuyen boi hieu ung nay — dung dac ta "no background
+  parallax, no camera movement".
 
   KHONG Canvas, KHONG WebGL, KHONG requestAnimationFrame. Dieu khien boi
   DUY NHAT mot thuoc tinh DOM tren `.route-veil`: `data-state` (idle /
-  covering / revealing, tu kho). Luc "idle" (mac dinh — gan het thoi gian
-  song cua trang) KHONG mot `animation` nao duoc gan — chi phi luc dung yen
-  la SO KHONG.
+  covering / revealing, tu kho — hai pha CSS noi lien nhau thanh MOT duong
+  quet, xem gia tri "from"/"to" khop nhau giua `veil-phu-*`/`veil-lo-*`).
+  Luc "idle" (mac dinh — gan het thoi gian song cua trang) KHONG mot
+  `animation` nao duoc gan — chi phi luc dung yen la SO KHONG.
   ================================================================
 */
 .route-veil {
   position: fixed;
   inset: 0;
-  /* Duoi `.site-header`/`.nav-vach` (z-index: 50) va `.mini` (60) — hai lop
-     dieu huong dai/thanh phat nho LUON on dinh, dung dac ta "navbar remains
-     visually stable". Tren moi noi dung + nen (`.page-bg`, z-index: -1). */
-  z-index: 45;
+  /* -1: CHI hon `.page-bg` (-2) mot bac — xem chu thich dau khoi. KHONG con
+     lien quan gi toi `.site-header`/`.mini` (ca hai deu z-index duong,
+     khong cung nhom voi con am nay — luon o tren, khong can so sanh). */
+  z-index: -1;
   pointer-events: none;
   overflow: hidden;
   contain: layout style paint;
 }
 
-.veil-cloud {
+.veil-cloud, .veil-wisp {
   position: absolute;
-  width: 78vmax;
-  height: 78vmax;
   opacity: 0;
-  filter: blur(30px);
-  border-radius: 44% 56% 61% 39% / 43% 40% 60% 57%;
   will-change: transform, opacity;
 }
-.veil-cloud-a {
-  left: -22vmax;
-  bottom: -34vmax;
-  background: radial-gradient(60% 60% at 42% 38%,
-    color-mix(in srgb, var(--veil-1, #6366f1) 62%, white 12%) 0%,
-    color-mix(in srgb, var(--veil-1, #6366f1) 38%, transparent) 48%,
-    transparent 76%);
-}
-.veil-cloud-b {
-  left: -8vmax;
-  bottom: -46vmax;
-  width: 62vmax;
-  height: 62vmax;
-  border-radius: 58% 42% 39% 61% / 55% 48% 52% 45%;
-  background: radial-gradient(55% 55% at 55% 40%,
-    color-mix(in srgb, var(--veil-2, #a78bfa) 55%, white 8%) 0%,
-    color-mix(in srgb, var(--veil-2, #a78bfa) 32%, transparent) 50%,
-    transparent 78%);
-}
-.veil-cloud-c {
-  left: 6vmax;
-  bottom: -20vmax;
-  width: 40vmax;
-  height: 40vmax;
-  filter: blur(22px);
-  border-radius: 39% 61% 47% 53% / 57% 44% 56% 43%;
-  background: radial-gradient(55% 55% at 46% 46%,
-    color-mix(in srgb, white 30%, var(--veil-1, #6366f1)) 0%,
-    color-mix(in srgb, var(--veil-1, #6366f1) 30%, transparent) 55%,
+
+/* Lop dan dau — nho, mong, nhanh nhat ("leading wisp" truoc khoi chinh). */
+.veil-wisp {
+  width: 30vmax;
+  height: 22vmax;
+  left: -16vmax;
+  bottom: -8vmax;
+  filter: blur(16px);
+  border-radius: 62% 38% 55% 45% / 48% 60% 40% 52%;
+  background: radial-gradient(55% 55% at 45% 45%,
+    color-mix(in srgb, white 26%, var(--veil-1, #6366f1)) 0%,
+    color-mix(in srgb, var(--veil-1, #6366f1) 26%, transparent) 55%,
     transparent 80%);
 }
-/* Lop suong nen — `backdrop-filter` thuc su lam MO CANH PHIA SAU trong choc
-   lat cao trao, dam bao "substantially concealed" ke ca o nhung khe ho giua
-   ba cuc may (thay vi phai dua moi thu vao mau/do mo cua rieng chung). */
+
+/* Khoi CHINH — lon nhat trong ba cuc may/suong dac, nhung van khong bao gio
+   dat opacity gan 1: dac ta yeu cau con thay duoc nen QUA lop may. */
+.veil-cloud-a {
+  width: 60vmax;
+  height: 42vmax;
+  left: -20vmax;
+  bottom: -22vmax;
+  filter: blur(28px);
+  border-radius: 44% 56% 61% 39% / 43% 40% 60% 57%;
+  background: radial-gradient(58% 58% at 42% 40%,
+    color-mix(in srgb, var(--veil-1, #6366f1) 46%, white 8%) 0%,
+    color-mix(in srgb, var(--veil-1, #6366f1) 26%, transparent) 50%,
+    transparent 78%);
+}
+
+/* Khoi PHU — quang duong NGAN hon khoi chinh trong CUNG mot khoang thoi
+   gian => doc ra CHAM hon, tao chieu sau (khong phai camera/nen di chuyen). */
+.veil-cloud-b {
+  width: 46vmax;
+  height: 34vmax;
+  left: -6vmax;
+  bottom: -30vmax;
+  filter: blur(24px);
+  border-radius: 58% 42% 39% 61% / 55% 48% 52% 45%;
+  background: radial-gradient(55% 55% at 55% 42%,
+    color-mix(in srgb, var(--veil-2, #a78bfa) 40%, white 6%) 0%,
+    color-mix(in srgb, var(--veil-2, #a78bfa) 22%, transparent) 52%,
+    transparent 80%);
+}
+
+/*
+  Suong nen — `backdrop-filter` lam mo NHE canh nen phia sau (KHONG con lam
+  mo noi dung: no ve TRUOC `<main>` trong thu tu xep chong, nen chi co the
+  lam mo nhung gi DA ve truoc do — tuc chinh `.page-bg`). Muc blur giam
+  manh so V1 (V1 dung no de "che kin", V2 chi can mot chut khoi diu mat).
+*/
 .veil-haze {
   position: absolute;
-  inset: -8%;
+  inset: -6%;
   opacity: 0;
-  background: radial-gradient(62% 55% at 46% 52%,
-    color-mix(in srgb, var(--veil-2, #a78bfa) 24%, transparent) 0%, transparent 72%);
+  background: radial-gradient(60% 52% at 44% 50%,
+    color-mix(in srgb, var(--veil-2, #a78bfa) 16%, transparent) 0%, transparent 74%);
   backdrop-filter: blur(0px);
   will-change: opacity, backdrop-filter;
 }
 
-/* --- pha PHU: may tien vao tu duoi-trai, che dan man hinh --------------- */
+/* --- pha PHU: mui thuyen (wisp) di truoc, khoi chinh/phu theo sau -------
+   Gia tri "to" cua moi lop PHAI khop CHINH XAC gia tri "from" cua "lo" ben
+   duoi cung lop do — day la ly do hai pha CSS rieng biet doc ra nhu MOT
+   duong quet lien tuc, khong co buoc nhay o moc chuyen pha. */
+.route-veil[data-state="covering"] .veil-wisp {
+  animation: veil-phu-wisp var(--dur-veil-phu) cubic-bezier(.33, .7, .18, 1) both;
+}
 .route-veil[data-state="covering"] .veil-cloud-a {
-  animation: veil-phu-a var(--dur-veil-phu) cubic-bezier(.22, .8, .2, 1) both;
+  animation: veil-phu-a var(--dur-veil-phu) cubic-bezier(.33, .7, .18, 1) 60ms both;
 }
 .route-veil[data-state="covering"] .veil-cloud-b {
-  animation: veil-phu-b var(--dur-veil-phu) cubic-bezier(.22, .8, .2, 1) 40ms both;
-}
-.route-veil[data-state="covering"] .veil-cloud-c {
-  animation: veil-phu-c var(--dur-veil-phu) cubic-bezier(.22, .8, .2, 1) 90ms both;
+  animation: veil-phu-b var(--dur-veil-phu) cubic-bezier(.33, .7, .18, 1) 110ms both;
 }
 .route-veil[data-state="covering"] .veil-haze {
   animation: veil-phu-haze var(--dur-veil-phu) ease-out both;
 }
 
+@keyframes veil-phu-wisp {
+  from { opacity: 0;    transform: translate3d(0, 0, 0); }
+  to   { opacity: 0.42; transform: translate3d(52vw, -34vh, 0); }
+}
 @keyframes veil-phu-a {
-  from { opacity: 0; transform: translate3d(-14vw, 16vh, 0) scale(0.92); }
-  to   { opacity: 0.94; transform: translate3d(0, 0, 0) scale(1); }
+  from { opacity: 0;    transform: translate3d(0, 0, 0) scale(0.94); }
+  to   { opacity: 0.58; transform: translate3d(38vw, -26vh, 0) scale(1); }
 }
 @keyframes veil-phu-b {
-  from { opacity: 0; transform: translate3d(-10vw, 20vh, 0) scale(0.9); }
-  to   { opacity: 0.8; transform: translate3d(0, 0, 0) scale(1); }
-}
-@keyframes veil-phu-c {
-  from { opacity: 0; transform: translate3d(-8vw, 12vh, 0) scale(0.88); }
-  to   { opacity: 0.7; transform: translate3d(0, 0, 0) scale(1); }
+  from { opacity: 0;    transform: translate3d(0, 0, 0) scale(0.94); }
+  to   { opacity: 0.46; transform: translate3d(26vw, -18vh, 0) scale(1); }
 }
 @keyframes veil-phu-haze {
   from { opacity: 0; backdrop-filter: blur(0px); }
-  to   { opacity: 1; backdrop-filter: blur(14px); }
+  to   { opacity: 1; backdrop-filter: blur(6px); }
 }
 
-/* --- pha LO: may thoai ra tren-phai, lo dan trang moi ------------------- */
+/* --- pha LO: duong quet TIEP TUC (khong doi huong) roi tan dan ---------- */
+.route-veil[data-state="revealing"] .veil-wisp {
+  animation: veil-lo-wisp var(--dur-veil-lo) cubic-bezier(.33, .7, .18, 1) both;
+}
 .route-veil[data-state="revealing"] .veil-cloud-a {
-  animation: veil-lo-a var(--dur-veil-lo) cubic-bezier(.22, .8, .2, 1) both;
+  animation: veil-lo-a var(--dur-veil-lo) cubic-bezier(.33, .7, .18, 1) both;
 }
 .route-veil[data-state="revealing"] .veil-cloud-b {
-  animation: veil-lo-b var(--dur-veil-lo) cubic-bezier(.22, .8, .2, 1) both;
-}
-.route-veil[data-state="revealing"] .veil-cloud-c {
-  animation: veil-lo-c var(--dur-veil-lo) cubic-bezier(.22, .8, .2, 1) both;
+  animation: veil-lo-b var(--dur-veil-lo) cubic-bezier(.33, .7, .18, 1) both;
 }
 .route-veil[data-state="revealing"] .veil-haze {
+  /* "Trailing haze" — o lai gan nhu nguyen ven qua QUA NUA DAU cua pha lo,
+     roi moi tan dan trong nua sau. Day la ly do no doc ra "tan sau cung"
+     du dung chung mot bien thoi luong voi cac lop may khac. */
   animation: veil-lo-haze var(--dur-veil-lo) ease-in both;
 }
 
+@keyframes veil-lo-wisp {
+  from { opacity: 0.42; transform: translate3d(52vw, -34vh, 0); }
+  to   { opacity: 0;    transform: translate3d(112vw, -70vh, 0); }
+}
 @keyframes veil-lo-a {
-  from { opacity: 0.94; transform: translate3d(0, 0, 0) scale(1); }
-  to   { opacity: 0; transform: translate3d(16vw, -18vh, 0) scale(1.06); }
+  from { opacity: 0.58; transform: translate3d(38vw, -26vh, 0) scale(1); }
+  to   { opacity: 0;    transform: translate3d(98vw, -62vh, 0) scale(1.04); }
 }
 @keyframes veil-lo-b {
-  from { opacity: 0.8; transform: translate3d(0, 0, 0) scale(1); }
-  to   { opacity: 0; transform: translate3d(20vw, -22vh, 0) scale(1.08); }
-}
-@keyframes veil-lo-c {
-  from { opacity: 0.7; transform: translate3d(0, 0, 0) scale(1); }
-  to   { opacity: 0; transform: translate3d(12vw, -14vh, 0) scale(1.05); }
+  from { opacity: 0.46; transform: translate3d(26vw, -18vh, 0) scale(1); }
+  to   { opacity: 0;    transform: translate3d(74vw, -46vh, 0) scale(1.03); }
 }
 @keyframes veil-lo-haze {
-  from { opacity: 1; backdrop-filter: blur(14px); }
-  to   { opacity: 0; backdrop-filter: blur(0px); }
+  0%   { opacity: 1;    backdrop-filter: blur(6px); }
+  55%  { opacity: 0.85; backdrop-filter: blur(5px); }
+  100% { opacity: 0;    backdrop-filter: blur(0px); }
 }
 
 /*
   Mau man suong THEO CHU DE dich — dung LAI 8 chu de nen da co
   (`lib/backgrounds.ts`), KHONG bia them mot bang mau rieng cho rieng man
-  suong. Sac DIU: y dinh la "may fantasy diu mat, cao cap", khong phai den
-  quan bar hay hieu ung phep thuat lam dung.
+  suong. Sac DIU HON V1 (V2: may nam SAU giao dien, khong con can du manh
+  de "che" gi ca — chi con nhiem vu la mot lop khi quyen, bo tro cho tranh
+  nen thay vi tranh phan voi no). Do mo dinh o cac keyframe tren (0.42-0.58)
+  da la co che chinh giam cuong do; bang mau duoi day giu nguyen sac (khong
+  can nhat mau them) vi do mo thap da du "diu mat".
 */
-.route-veil[data-theme="home"]    { --veil-1: #22d3ee; --veil-2: #c4b5fd; } /* sky cyan + lavender */
+.route-veil[data-theme="home"]    { --veil-1: #22d3ee; --veil-2: #c4b5fd; } /* sky cyan + pale lavender */
 .route-veil[data-theme="explore"] { --veil-1: #38bdf8; --veil-2: #bfdbfe; } /* azure + pale fantasy blue */
 .route-veil[data-theme="reader"]  { --veil-1: #6366f1; --veil-2: #a78bfa; } /* indigo + violet */
 .route-veil[data-theme="studio"]  { --veil-1: #22d3ee; --veil-2: #e879f9; } /* cyan + magenta */
@@ -544,6 +599,30 @@ body {
 .route-veil[data-theme="library"] { --veil-1: #2563eb; --veil-2: #e4c982; } /* deep sapphire + muted gold */
 .route-veil[data-theme="account"] { --veil-1: #7c6cf0; --veil-2: #c4b5fd; } /* blue-violet */
 .route-veil[data-theme="auth"]    { --veil-1: #312e81; --veil-2: #7c3aed; } /* midnight indigo + purple */
+
+/*
+  V2 — vi chuyen canh RIENG, RAT nho cho noi dung trang (KHONG con dua vao
+  may de che DOM swap — may gio nam SAU giao dien). Xem
+  `components/ContentAtmosphere.tsx`: mot the bao ON DINH quanh `{children}`
+  (khong tu remount khi route doi), doc CUNG kho voi `.route-veil`.
+
+  Bien do CUC NHO (opacity + 3px, ~140-220ms) — dac ta cam moi chuyen dong
+  lon: khong truot ngang, khong scale ca trang, khong quay, khong lam mo.
+*/
+.route-content[data-state="covering"] {
+  animation: noi-dung-lui 180ms ease-out both;
+}
+.route-content[data-state="revealing"] {
+  animation: noi-dung-toi 200ms ease-out both;
+}
+@keyframes noi-dung-lui {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-3px); }
+}
+@keyframes noi-dung-toi {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 
 /*
   Muc phu, do mo va diem canh cua tung tam.
@@ -4723,7 +4802,7 @@ body.co-mini { padding-bottom: 74px; }
   .page-bg-lop[data-bg="home"]::before { animation: none; }
 
   /*
-    Man may/suong (Cloud Veil V1): BO HAN duong di (khong con "may bay qua
+    Man may/suong (Cloud Veil V2): BO HAN duong di (khong con "may bay qua
     man hinh" — transform/blur tat het), chi con MOT lan mo/an rat ngan.
     KHONG bao gio tat opacity hoan toan xuong 0 tuc thi: doi nen giua hai
     chu de khac mau van can MOT lan che dan/lo dan cuc ngan, neu khong nguoi
@@ -4731,25 +4810,31 @@ body.co-mini { padding-bottom: 74px; }
     chuyen dong bi tat.
   */
   :root { --dur-veil-phu: 90ms; --dur-veil-lo: 60ms; }
-  .veil-cloud, .veil-haze { filter: none; backdrop-filter: none; }
+  .veil-cloud, .veil-wisp, .veil-haze { filter: none; backdrop-filter: none; }
+  .route-veil[data-state="covering"] .veil-wisp,
   .route-veil[data-state="covering"] .veil-cloud-a,
   .route-veil[data-state="covering"] .veil-cloud-b,
-  .route-veil[data-state="covering"] .veil-cloud-c {
-    animation: veil-phu-nhe var(--dur-veil-phu) linear both;
-  }
-  .route-veil[data-state="revealing"] .veil-cloud-a,
-  .route-veil[data-state="revealing"] .veil-cloud-b,
-  .route-veil[data-state="revealing"] .veil-cloud-c {
-    animation: veil-lo-nhe var(--dur-veil-lo) linear both;
-  }
   .route-veil[data-state="covering"] .veil-haze {
     animation: veil-phu-nhe var(--dur-veil-phu) linear both;
   }
+  .route-veil[data-state="revealing"] .veil-wisp,
+  .route-veil[data-state="revealing"] .veil-cloud-a,
+  .route-veil[data-state="revealing"] .veil-cloud-b,
   .route-veil[data-state="revealing"] .veil-haze {
     animation: veil-lo-nhe var(--dur-veil-lo) linear both;
   }
-  @keyframes veil-phu-nhe { from { opacity: 0; } to { opacity: 0.85; } }
-  @keyframes veil-lo-nhe  { from { opacity: 0.85; } to { opacity: 0; } }
+  @keyframes veil-phu-nhe { from { opacity: 0; } to { opacity: 0.5; } }
+  @keyframes veil-lo-nhe  { from { opacity: 0.5; } to { opacity: 0; } }
+
+  /*
+    Noi dung trang: giu MOT lan mo/hien opacity-CHI (khong dich Y) va rut
+    RAT ngan — dac ta yeu cau "short content/background opacity transition
+    only, no decorative movement" duoi giam chuyen dong.
+  */
+  .route-content[data-state="covering"] { animation: noi-dung-lui-nhe 80ms linear both; }
+  .route-content[data-state="revealing"] { animation: noi-dung-toi-nhe 80ms linear both; }
+  @keyframes noi-dung-lui-nhe { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes noi-dung-toi-nhe { from { opacity: 0; } to { opacity: 1; } }
 
   .story-card:hover { filter: none; }
 }

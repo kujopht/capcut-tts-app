@@ -1,10 +1,12 @@
 /*
- * Live Wallpaper V1 — tich hop LiveBackground vao trang chu (2026-08).
+ * Live Wallpaper V2 — hybrid cinemagraph tich hop vao trang chu (2026-08).
  *
- * Component kien truc da co tu truoc (`live-background-v1.test.mjs`,
- * `live-background-preference-stub.test.mjs`) — bo test o day xac nhan RIENG
- * phan NOI DAY: PageBackground.tsx goi dung LiveBackground CHI cho "home",
- * dung nguon video that, va khong lam vo cac bat bien da co cua PageBackground
+ * V1 (video toan khung) bi tu choi o QA thu cong — xem lich su git cho
+ * `HOME_LIVE_BAT = false` tam thoi truoc khi on dinh camera + mask duoc xay.
+ * V2: video DA ON DINH CAMERA chi hien qua mot mask (may/nuoc/la), anh tinh
+ * goc luon la lop duoi cung. Bo test o day xac nhan RIENG phan NOI DAY:
+ * PageBackground.tsx goi dung LiveBackground CHI cho "home", dung nguon
+ * video + mask that, va khong lam vo cac bat bien da co cua PageBackground
  * (xem `page-background.test.mjs`).
  *
  * Quet MA NGUON, khong render — dung quy uoc cua repo (khong co jsdom).
@@ -43,6 +45,34 @@ test("nguon video Home tro dung hai tep that tren dia", () => {
 test("LiveBackground dung poster tu chinh anhNen(ten), khong hardcode duong dan khac", () => {
   const s = codeOnly(comp());
   assert.match(s, /poster=\{anhNen\(ten\)\}/);
+});
+
+test("video Home la ban DA ON DINH CAMERA (\"-motion\"), khong phai ban V1 bi tu choi (\"-live\")", () => {
+  const s = comp();
+  assert.match(s, /01-home-sunny-harbor-motion\.webm/, "chưa chuyển sang video đã ổn định camera");
+  assert.match(s, /01-home-sunny-harbor-motion\.mp4/);
+});
+
+test("HOME_LIVE_BAT dang BAT (V2 hybrid da qua QA, khong con la V1 bi tu choi)", () => {
+  const s = codeOnly(comp());
+  assert.match(s, /const HOME_LIVE_BAT = true;/);
+});
+
+test("co videoMask tro dung mot tep that — video KHONG con phu toan khung", () => {
+  const s = comp();
+  const mask = s.match(/const HOME_VIDEO_MASK = "(\/artwork\/fantasy-backgrounds\/[^"]+\.webp)";/)?.[1];
+  assert.ok(mask, "thiếu HOME_VIDEO_MASK");
+  assert.ok(existsSync(new URL(mask.split("/").pop(), THU_MUC)), `không tồn tại: ${mask}`);
+
+  const codeS = codeOnly(s);
+  assert.match(codeS, /videoMask=\{HOME_LIVE_BAT \? HOME_VIDEO_MASK : undefined\}/,
+    "videoMask không được truyền cho LiveBackground — video sẽ phủ toàn khung như V1 đã bị từ chối");
+});
+
+test("mask-position dong bo voi object-position (center 42%) — vung chuyen dong khong troi khoi cho", () => {
+  const cssText = css();
+  const lopVideo = cssText.slice(cssText.indexOf(".home-live-lop"));
+  assert.match(lopVideo, /mask-position: center 42%/);
 });
 
 test("lop video Home dung CUNG object-position voi --diem cua CSS (center 42%)", () => {

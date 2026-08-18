@@ -39,8 +39,18 @@ const TAM = [
 ];
 
 test("du tam anh, moi tam co ban lon va ban cho dien thoai", () => {
-  const co = new Set(readdirSync(THU_MUC).filter((f) => f.endsWith(".webp")));
-  assert.equal(co.size, 16, `có ${co.size} tệp webp, cần 16 (8 lớn + 8 nhỏ)`);
+  /*
+    Loc theo TIEN TO cua 8 tam (khong dem MOI tep .webp trong thu muc): Live
+    Wallpaper V2 them mot mask chuyen dong `.webp` cung thu muc (xem
+    `live-background-home-integration.test.mjs`) — mot tai san khac loai,
+    khong phai tranh nen toan trang, khong nen troi buoc dem nay.
+  */
+  const co = new Set(
+    readdirSync(THU_MUC).filter(
+      (f) => f.endsWith(".webp") && TAM.some((ten) => f === `${ten}.webp` || f === `${ten}-sm.webp`),
+    ),
+  );
+  assert.equal(co.size, 16, `có ${co.size} tệp webp nền trang, cần 16 (8 lớn + 8 nhỏ)`);
   for (const ten of TAM) {
     assert.ok(co.has(`${ten}.webp`), `thiếu ${ten}.webp`);
     assert.ok(co.has(`${ten}-sm.webp`), `thiếu bản điện thoại ${ten}-sm.webp`);

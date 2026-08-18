@@ -466,6 +466,19 @@ body {
 .home-live-lop { width: 100%; height: 100%; }
 .home-live-lop .live-bg-poster,
 .home-live-lop .live-bg-video { object-position: center 42%; }
+
+/*
+  V2 hybrid cinemagraph: `mask-position` phai KHOP `object-position` cua video
+  o tren — `object-fit/object-position` quyet dinh video hien THE NAO trong
+  khung, con `mask-position/mask-size` quyet dinh ANH MASK duoc chieu THE NAO
+  len CHINH khung do. Video va mask cung kich thuoc 1280x720 (cung mot khung
+  hinh goc), nen cung mot diem neo "center 42%" + "cover" giu chung khop pixel
+  — lech diem neo se lam vung chuyen dong (may/nuoc/la) trôi khoi dung cho.
+*/
+.home-live-lop .live-bg-video {
+  -webkit-mask-position: center 42%;
+  mask-position: center 42%;
+}
 .page-bg-lop[data-bg="explore"] { --anh: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom-sm.webp");    --toi: 0.42; --diem: center 38%; --mo: 0px; }
 .page-bg-lop[data-bg="reader"]  { --anh: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine.webp");  --anh-nho: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine-sm.webp");  --toi: 0.38; --diem: center 22%; --mo: 0px; }
 .page-bg-lop[data-bg="studio"]  { --anh: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop-sm.webp");    --toi: 0.46; --diem: center 45%; --mo: 0px; }

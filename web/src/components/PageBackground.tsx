@@ -44,18 +44,22 @@ import { LiveBackground } from "@/components/LiveBackground";
  * `LiveBackground` tu ve poster + video TREN `::before` (anh CSS) va DUOI
  * `::after` (vignette) theo dung thu tu DOM — khong can z-index rieng.
  *
- * TAM TAT (V2, xem bao cao review): Candidate A (video toan khung) bi tu choi
- * — camera zoom dan du duoc yeu cau khoa cung, gay "day hinh" moi vong lap va
- * mo hon anh tinh goc. `HOME_LIVE_BAT` = false trong luc cho thiet ke lai theo
- * huong hybrid (video CHI lam lop chuyen dong cuc bo — may/nuoc/la — de len
- * TREN anh tinh goc, khong thay the toan khung). Giu nguyen kien truc/tai san/
- * test — CHI tat co tren.
+ * V2 — HYBRID CINEMAGRAPH (xem bao cao review Candidate A ban dau, V1):
+ * video toan khung (`01-home-sunny-harbor-live.*`) bi TU CHOI — camera zoom
+ * dan du duoc yeu cau khoa cung (~5%/6s, do dac bang feature-matching, xem
+ * `docs/reports/`), gay "day hinh" moi vong lap va mo hon anh tinh goc. Video
+ * do ON LAI trong repo lam nguon chuyen dong (khong xoa), nhung KHONG con
+ * dung truc tiep — da on dinh camera (offline, warp affine nghich dao theo
+ * mo hinh trôi tuyen tinh do duoc) thanh `01-home-sunny-harbor-motion.*`, roi
+ * CHI hien qua mot `videoMask` (may/nuoc/la ben phai) de len TREN anh tinh
+ * goc — kien truc/anh goc khong bao gio bi thay the.
  */
-const HOME_LIVE_BAT = false;
+const HOME_LIVE_BAT = true;
 const HOME_VIDEO = {
-  webm: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-live.webm",
-  mp4: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-live.mp4",
+  webm: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-motion.webm",
+  mp4: "/artwork/fantasy-backgrounds/01-home-sunny-harbor-motion.mp4",
 };
+const HOME_VIDEO_MASK = "/artwork/fantasy-backgrounds/01-home-sunny-harbor-motion-mask.webp";
 
 /** Khop voi `--dur-nen` o `globals.css`. */
 const THOI_LUONG = 580;
@@ -182,6 +186,7 @@ export function PageBackground() {
           <LiveBackground
             poster={anhNen(ten)}
             video={HOME_LIVE_BAT ? HOME_VIDEO : undefined}
+            videoMask={HOME_LIVE_BAT ? HOME_VIDEO_MASK : undefined}
             className="home-live-lop"
           />
         ) : null}

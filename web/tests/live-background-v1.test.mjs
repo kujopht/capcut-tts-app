@@ -115,3 +115,23 @@ test("video crossfade bang opacity CSS (transition), khong bang JS animation loo
   assert.match(s, /opacity: sanSang \? 1 : 0/);
   assert.match(s, /transition: "opacity 600ms ease"/);
 });
+
+/* ============================================ V2: videoMask (hybrid cinemagraph) */
+
+test("videoMask la TUY CHON — bo trong thi video van phu toan khung nhu V1", () => {
+  const s = codeOnly(src());
+  assert.match(s, /videoMask\?: string/);
+});
+
+test("videoMask ap dung qua CSS mask-image, khong phai Canvas/clip-path JS", () => {
+  const s = codeOnly(src());
+  assert.match(s, /WebkitMaskImage: `url\(\$\{videoMask\}\)`/);
+  assert.match(s, /maskImage: `url\(\$\{videoMask\}\)`/);
+  assert.match(s, /maskSize: "cover"/);
+});
+
+test("videoMask KHONG tu dat mask-position — de tung trang tu dong bo qua CSS class rieng", () => {
+  const s = codeOnly(src());
+  assert.ok(!/maskPosition:/.test(s),
+    "đặt sẵn mask-position trong component sẽ không thể bị CSS ngoài ghi đè (inline style luôn thắng)");
+});

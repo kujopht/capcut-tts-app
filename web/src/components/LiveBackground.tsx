@@ -23,10 +23,12 @@
  *      trang tri — chi mot the `<video>` HTML5 chuan, dieu khien bang su
  *      kien (`canplay`/`error`/`visibilitychange`), khong phai vong lap.
  *
- * CHUA DUOC GAN VAO TRANG NAO — day la ly do: dem nay KHONG co tai san
- * video nao duoc sinh ra (xem bao cao overnight — nghen o buoc sinh video vi
- * khong co provider kha dung trong phien nay). Component o day la kien truc
- * SAN SANG, da kiem thu day du, cho lan tich hop dau tien khi co video that.
+ * V2 (xem bao cao review Candidate A): video toan khung bi tu choi — camera
+ * zoom dan du duoc yeu cau khoa cung, va 720p AI mo hon anh tinh goc. Them
+ * `videoMask` (tuy chon): mot anh mask CSS (`mask-image`) de video CHI hien
+ * qua nhung vung duoc chon (may/nuoc/la) — kien truc "hybrid cinemagraph".
+ * Anh tinh goc luon la lop DUOI CUNG, sac net toan bo; video KHONG BAO GIO
+ * thay the toan khung nua khi co `videoMask`.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -40,6 +42,7 @@ export function LiveBackground({
   poster,
   video,
   mobileVideo = false,
+  videoMask,
   className,
 }: {
   /** Anh tinh — LUON hien, khong phu thuoc video co tai duoc hay khong. */
@@ -55,6 +58,11 @@ export function LiveBackground({
    * rieng cho di dong va CHU DONG bat co nay len.
    */
   mobileVideo?: boolean;
+  /**
+   * V2 hybrid cinemagraph: duong dan mot anh mask (trang = hien video, den =
+   * chi thay anh tinh ben duoi). Bo trong = video phu toan khung nhu V1.
+   */
+  videoMask?: string;
   className?: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -145,6 +153,20 @@ export function LiveBackground({
             opacity: sanSang ? 1 : 0,
             transition: "opacity 600ms ease",
             pointerEvents: "none",
+            ...(videoMask
+              ? {
+                  WebkitMaskImage: `url(${videoMask})`,
+                  maskImage: `url(${videoMask})`,
+                  WebkitMaskSize: "cover",
+                  maskSize: "cover",
+                  WebkitMaskRepeat: "no-repeat",
+                  maskRepeat: "no-repeat",
+                  // KHONG dat mac dinh o day — mask phai dung CHUNG diem neo
+                  // (`object-position`) voi video, va tung trang tu dat qua
+                  // CSS (xem `.home-live-lop` o globals.css) vi inline style
+                  // luon thang CSS ben ngoai, khong the ghi de tu do.
+                }
+              : {}),
           }}
         >
           {video?.webm ? <source src={video.webm} type="video/webm" /> : null}

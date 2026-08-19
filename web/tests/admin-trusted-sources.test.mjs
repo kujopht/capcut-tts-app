@@ -284,6 +284,13 @@ test("CountUp: tat hoat hinh khi prefers-reduced-motion, hien luon gia tri cuoi"
   assert.match(src, /setHien\(den\)/);
 });
 
+test("Anh xa series: payload va bang reload deu giu tu khoa mong doi", () => {
+  const src = chiTiet();
+  assert.match(src, /include_keywords:\s*tachDay\(tuKhoaBaoGom\)/);
+  assert.match(src, /<th scope="col">Từ khoá mong đợi<\/th>/);
+  assert.match(src, /m\.include_keywords\.join\(", "\) \|\| "—"/);
+});
+
 test("CountUp: render dau la 0 o ca server/client, sau mount moi chay toi gia tri that", () => {
   const src = countUp();
   assert.match(src, /useState\(0\)/,

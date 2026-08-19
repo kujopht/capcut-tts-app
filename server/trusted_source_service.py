@@ -393,9 +393,10 @@ class TrustedSourceService:
         Backfill). BI CHAN theo `max_pages` (moi trang 50 video) — muon quet
         tiep thi goi lai voi `next_page_token` tra ve.
 
-        IDEMPOTENT: video DA CO ban ghi `VideoImport` tu truoc (bat ke trang
-        thai) KHONG bi phan loai lai/ghi de — mot quyet dinh quan tri da co
-        (vi du da Tu choi) khong tu nhien doi khi quet lai. Video DA la mot
+        IDEMPOTENT: video DA CO mot QUYET DINH (vi du da Tu choi/Bo qua/Nhap)
+        KHONG bi phan loai lai/ghi de. Rieng ban ghi `NEW` chua khop mapping
+        nao duoc phan loai lai TREN CHINH ban ghi do, de mapping vua tao/sua
+        co hieu luc ma khong tao import trung. Video DA la mot
         `AnimationEpisode` that (o BAT KY series nao) duoc danh dau DUPLICATE
         ngay, khong phan loai.
         """
@@ -426,13 +427,15 @@ class TrustedSourceService:
 
         for v in ung_vien:
             vid = v["video_id"]
-            if vid in da_theo_doi:
+            import_hien_tai = da_theo_doi.get(vid)
+            if (import_hien_tai is not None
+                    and import_hien_tai.status is not ImportStatus.NEW):
                 dem["already_tracked"] += 1
-                continue  # DA CO ban ghi — KHONG phan loai lai (idempotent).
+                continue  # DA CO quyet dinh — KHONG phan loai lai.
 
             trang_thai, matched = self._phan_loai_va_ghi_mot_video(
                 source=source, mappings=mappings, episodes_by_series=episodes_by_series,
-                video=v, da_la_tap=da_la_tap)
+                video=v, da_la_tap=da_la_tap, existing_import=import_hien_tai)
 
             if trang_thai in (ImportStatus.AUTO_IMPORTED, ImportStatus.AUTO_PUBLISHED):
                 dem["auto_imported" if trang_thai is ImportStatus.AUTO_IMPORTED
@@ -456,6 +459,7 @@ class TrustedSourceService:
         self, *, source: TrustedSource, mappings: List[SeriesMapping],
         episodes_by_series: Dict[str, Sequence[int]], video: Dict[str, Any],
         da_la_tap: Dict[str, AnimationEpisode],
+        existing_import: Optional[VideoImport] = None,
     ) -> tuple:
         """
         Phan loai + luu MOT video — dung CHUNG boi `scan_source` (quet thu
@@ -470,13 +474,14 @@ class TrustedSourceService:
         """
         vid = video["video_id"]
         if vid in da_la_tap:
-            self._store.create_import_once(VideoImport(
+            self._luu_ket_qua_phan_loai(VideoImport(
                 trusted_source_id=source.source_id, youtube_video_id=vid,
                 title=video["title"], channel_id=video["channel_id"],
                 channel_title=video["channel_title"], thumbnail_url=video["thumbnail_url"],
                 published_at=video["published_at"], duration_seconds=video["duration_seconds"],
                 status=ImportStatus.DUPLICATE,
-                reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác."))
+                reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác."),
+                existing_import)
             return ImportStatus.DUPLICATE, False
 
         ket_qua = classify_video(
@@ -488,7 +493,7 @@ class TrustedSourceService:
             source=source, mappings_by_id={m.mapping_id: m for m in mappings},
             ket_qua=ket_qua, video=video, episodes_by_series=episodes_by_series)
 
-        self._store.create_import_once(VideoImport(
+        self._luu_ket_qua_phan_loai(VideoImport(
             trusted_source_id=source.source_id, youtube_video_id=vid,
             title=video["title"], channel_id=video["channel_id"],
             channel_title=video["channel_title"], thumbnail_url=video["thumbnail_url"],
@@ -498,8 +503,37 @@ class TrustedSourceService:
             detected_episode_number=ket_qua.episode_number,
             confidence=ket_qua.confidence, signals=list(ket_qua.signals),
             status=trang_thai, reason=ly_do, created_episode_id=episode_id,
-        ))
+        ), existing_import)
         return trang_thai, bool(ket_qua.series_id)
+
+    def _luu_ket_qua_phan_loai(
+        self, ket_qua: VideoImport, existing_import: Optional[VideoImport],
+    ) -> None:
+        """Tao import moi, hoac cap nhat DUNG ban ghi `NEW` dang duoc quet lai.
+
+        Cac truong dinh danh/thoi diem tao va thong tin duyet khong bi ghi de;
+        scanner chi thay metadata va ket qua phan loai tren ban ghi chua co
+        quyet dinh.
+        """
+        if existing_import is None:
+            self._store.create_import_once(ket_qua)
+            return
+        self._store.update_import(existing_import.import_id, {
+            "title": ket_qua.title,
+            "channel_id": ket_qua.channel_id,
+            "channel_title": ket_qua.channel_title,
+            "thumbnail_url": ket_qua.thumbnail_url,
+            "published_at": ket_qua.published_at,
+            "duration_seconds": ket_qua.duration_seconds,
+            "detected_mapping_id": ket_qua.detected_mapping_id,
+            "detected_series_id": ket_qua.detected_series_id,
+            "detected_episode_number": ket_qua.detected_episode_number,
+            "confidence": ket_qua.confidence,
+            "signals": list(ket_qua.signals),
+            "status": ket_qua.status,
+            "reason": ket_qua.reason,
+            "created_episode_id": ket_qua.created_episode_id,
+        })
 
     def _lay_ung_vien(self, yt: YouTubeClient, source: TrustedSource,
                       page_token: str, max_pages: int) -> tuple:

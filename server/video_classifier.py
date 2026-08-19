@@ -92,17 +92,30 @@ def _cham_mot_anh_xa(
     so_tap: Optional[int], kenh_khop: bool,
     cac_tap_da_co: Sequence[int],
 ) -> Optional[ClassificationResult]:
-    """Tra `None` neu KHONG co alias nao khop — video nay khong lien quan gi
-    toi anh xa nay ca, khong tinh diem."""
+    """Tra `None` neu KHONG co bat ky tin hieu dinh danh duong nao khop.
+
+    `aliases` va `include_keywords` deu la gia tri quan tri nhap de nhan dien
+    series. Alias la tin hieu manh hon, nhung tu khoa mong doi PHAI co the tu
+    minh mo mot ung vien — UI cho phep de alias rong, va truoc day kho van luu
+    dung `include_keywords` nhung ham nay tra `None` truoc khi doc chung.
+    """
     alias_khop = next(
         (a for a in mapping.aliases if a.strip() and chuan_hoa(a) in title_chuan_hoa),
         None,
     )
-    if alias_khop is None:
+    tu_khop = [k for k in mapping.include_keywords if _co_tu(title_chuan_hoa, k)]
+    if alias_khop is None and not tu_khop:
         return None
 
-    tin_hieu: List[str] = [f"khớp alias “{alias_khop}”"]
-    diem = _TRONG_SO["alias_khop"]
+    tin_hieu: List[str] = []
+    diem = 0.0
+    if alias_khop is not None:
+        diem += _TRONG_SO["alias_khop"]
+        tin_hieu.append(f"khớp alias “{alias_khop}”")
+
+    if tu_khop:
+        diem += _TRONG_SO["tu_khoa_bao_gom"]
+        tin_hieu.append(f"chứa từ khoá mong đợi: {', '.join(tu_khop)}")
 
     if kenh_khop:
         diem += _TRONG_SO["kenh_khop"]
@@ -114,11 +127,6 @@ def _cham_mot_anh_xa(
         if _tap_lan_can(so_tap, cac_tap_da_co):
             diem += _TRONG_SO["tap_lan_can"]
             tin_hieu.append("khớp mạch tập liền kề đã có")
-
-    tu_khop = [k for k in mapping.include_keywords if _co_tu(title_chuan_hoa, k)]
-    if tu_khop:
-        diem += _TRONG_SO["tu_khoa_bao_gom"]
-        tin_hieu.append(f"chứa từ khoá mong đợi: {', '.join(tu_khop)}")
 
     loai_rieng = [k for k in mapping.exclude_keywords if _co_tu(title_chuan_hoa, k)]
     bi_loai = False
@@ -150,7 +158,7 @@ def classify_video(
 ) -> ClassificationResult:
     """
     Cham diem MOT video doi voi TUNG anh xa cua nguon, tra ve anh xa DIEM
-    CAO NHAT. Khong anh xa nao co alias khop -> tra ve ket qua RONG
+    CAO NHAT. Khong anh xa nao co alias HOAC tu khoa mong doi khop -> tra ve ket qua RONG
     (`mapping_id=""`, `confidence=0.0`) — video "moi" (`ImportStatus.NEW`),
     can quan tri tu gan series bang tay.
 

@@ -528,6 +528,7 @@ function MangAnhXa({
               <tr>
                 <th scope="col">Series</th>
                 <th scope="col">Alias</th>
+                <th scope="col">Từ khoá mong đợi</th>
                 <th scope="col">Tự động</th>
                 <th scope="col"><span className="sr-only">Thao tác</span></th>
               </tr>
@@ -537,6 +538,7 @@ function MangAnhXa({
                 <tr key={m.mapping_id}>
                   <td>{m.series_title || m.animation_series_id}</td>
                   <td className="hint">{m.aliases.join(", ") || "—"}</td>
+                  <td className="hint">{m.include_keywords.join(", ") || "—"}</td>
                   <td className="hint mono">
                     {m.auto_import === null ? "kế thừa" : m.auto_import ? "import" : "—"}
                     {" / "}

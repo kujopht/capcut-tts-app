@@ -305,6 +305,54 @@ class TrustedSourceServiceTest(unittest.TestCase):
         rows, _ = self.store.find_imports(trusted_source_id=source["source_id"])
         self.assertEqual(rows[0].status, ImportStatus.NEW)
 
+    def test_tao_mapping_keyword_roi_quet_lai_cap_nhat_import_new(self):
+        """Dung luong staging: video duoc quet truoc mapping, sau do admin
+        tao expected keyword va quet lai. Keyword phai song qua reload,
+        matcher phai dung no, va import cu duoc cap nhat thay vi tao ban sao.
+        """
+        cid = "UC" + "q" * 22
+        video_id = "vidKEYWORD1"
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh Keyword")
+        upload_playlist = "UUqqq"
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh Keyword",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: ([_video_item(video_id)], "")},
+            videos={video_id: VideoInfo(
+                video_id=video_id, title="Reincarnation no Kaben Tập 1",
+                channel_id=cid, channel_title="Kenh Keyword", thumbnail_url="",
+                published_at="", duration_seconds=1200.0)},
+        )
+        self._dat_client_gia(client)
+
+        first = self.svc.scan_source(self.admin, source["source_id"])
+        rows, total = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(first["matched"], 0)
+        self.assertEqual(total, 1)
+        self.assertEqual(rows[0].status, ImportStatus.NEW)
+        import_id = rows[0].import_id
+
+        created = self.svc.create_mapping(
+            self.admin, source["source_id"],
+            animation_series_id=self.series.series_id, aliases=[],
+            include_keywords=["Reincarnation no Kaben"], exclude_keywords=[])
+        reloaded = self.svc.admin_source_detail(source["source_id"])["mappings"][0]
+        self.assertEqual(created["include_keywords"], ["Reincarnation no Kaben"])
+        self.assertEqual(reloaded["include_keywords"], ["Reincarnation no Kaben"])
+
+        second = self.svc.scan_source(self.admin, source["source_id"])
+        rows, total = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(total, 1)
+        self.assertEqual(rows[0].import_id, import_id)
+        self.assertEqual(rows[0].detected_mapping_id, created["mapping_id"])
+        self.assertEqual(rows[0].detected_series_id, self.series.series_id)
+        self.assertEqual(rows[0].status, ImportStatus.PENDING)
+        self.assertEqual(second["matched"], 1)
+        self.assertEqual(second["pending"], 1)
+        self.assertEqual(second["already_tracked"], 0)
+
     def test_quet_tu_khoa_loai_tru_thanh_ignored(self):
         cid = "UC" + "j" * 22
         source = self.svc.create_source(

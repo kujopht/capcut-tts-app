@@ -21,6 +21,7 @@ from server.trusted_source_domain import (
 )
 from server.trusted_source_store import MockTrustedSourceStore
 from server.tests.test_appwrite_v2_contract import FakeAppwrite, _bo_client
+from server.video_classifier import classify_video
 
 
 def _kho_appwrite(fake: FakeAppwrite) -> AppwriteTrustedSourceStore:
@@ -175,6 +176,39 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                 ds = kho.list_mappings(s.source_id)
                 self.assertEqual(len(ds), 1, ten)
                 self.assertEqual(ds[0].aliases, ["a", "b"], ten)
+
+    def test_tu_khoa_mong_doi_song_qua_reload_va_duoc_matcher_dung(self):
+        """Hoi quy day du cho loi staging: payload `include_keywords` duoc
+        ghi, doc lai tu kho (ke ca Appwrite fake), roi classifier dung no du
+        mapping khong co alias."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                source = kho.create_source(TrustedSource(
+                    source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                    youtube_channel_id="UC_reincarnation",
+                ))
+                created = kho.create_mapping(SeriesMapping(
+                    trusted_source_id=source.source_id,
+                    animation_series_id="ani_websub",
+                    aliases=[],
+                    include_keywords=["Reincarnation no Kaben"],
+                ))
+
+                reloaded = kho.list_mappings(source.source_id)[0]
+                self.assertEqual(
+                    reloaded.include_keywords,
+                    ["Reincarnation no Kaben"],
+                    ten,
+                )
+
+                result = classify_video(
+                    title="ALL IN ONE | Reincarnation no Kaben Tập 1-13",
+                    channel_id="UC_reincarnation",
+                    trusted_source=source,
+                    mappings=[reloaded],
+                )
+                self.assertEqual(result.mapping_id, created.mapping_id, ten)
+                self.assertEqual(result.series_id, "ani_websub", ten)
 
     def test_update_mapping_chi_truong_cho_phep(self):
         for ten, kho in self._cac_kho():

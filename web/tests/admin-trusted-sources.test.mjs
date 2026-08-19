@@ -284,9 +284,20 @@ test("CountUp: tat hoat hinh khi prefers-reduced-motion, hien luon gia tri cuoi"
   assert.match(src, /setHien\(den\)/);
 });
 
-test("CountUp: chi chay hoat hinh khi gia tri THAY DOI, khong chay lai moi lan render", () => {
+test("CountUp: render dau la 0 o ca server/client, sau mount moi chay toi gia tri that", () => {
+  const src = countUp();
+  assert.match(src, /useState\(0\)/,
+    "giá trị đầu phải cố định ở 0 để vừa có hiệu ứng first-mount vừa không hydration mismatch");
+  assert.match(src, /useRef\(0\)/,
+    "mốc nội suy đầu tiên phải là 0, không phải giá trị cuối");
+});
+
+test("CountUp: chi chay khi gia tri thay doi va huy frame khi unmount/doi gia tri", () => {
   const src = countUp();
   assert.match(src, /if \(tu === den\) return;/);
+  assert.match(src, /cancelAnimationFrame\(frameId\)/);
+  assert.match(src, /if \(tiLe < 1\) frameId = requestAnimationFrame\(buoc\)/,
+    "vòng animation phải tự dừng khi đạt giá trị cuối");
 });
 
 test("Trang danh sach nguon: cot Da nhap/Da xuat ban dung CountUp thay vi in so tinh", () => {

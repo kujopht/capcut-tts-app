@@ -42,6 +42,7 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "episode_id", "series_id", "owner_id", "title", "source",
         "external_id", "order_index", "state", "duration_seconds",
         "moderation_state", "removed_by", "removed_reason",
+        "source_channel_id", "source_channel_title",
         "created_at", "updated_at",
     ),
 }

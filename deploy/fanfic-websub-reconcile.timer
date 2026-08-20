@@ -1,0 +1,20 @@
+# Lich chay doi chieu WebSub (Trusted Video Sources, Phase 6) tren backend
+# dev cong khai (fanfic-dev-api, xem docs/DEV_PUBLIC_BACKEND.md).
+
+[Unit]
+Description=Doi chieu WebSub Trusted Video Sources (du phong + gia han dang ky)
+
+[Timer]
+# Doi 5 phut sau khi boot: container fanfic-dev-api can thoi gian healthy
+# truoc khi `docker compose exec` co the chay lot vao no.
+OnBootSec=5min
+# Tan suat THAP co chu y — day la du phong khi WebSub bo lo thong bao va la
+# noi gia han dang ky (RENEWAL_WINDOW=24h trong TrustedSourceService), khong
+# phai polling lien tuc thay the WebSub. Moi 4 gio du de bat kip mot dang ky
+# sap het han (le mac dinh 5 ngay) truoc khi no thuc su het han.
+OnUnitActiveSec=4h
+AccuracySec=5min
+Unit=fanfic-websub-reconcile.service
+
+[Install]
+WantedBy=timers.target

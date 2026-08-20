@@ -56,6 +56,19 @@ Bản ghi A trỏ `api-dev.fanfic.world` → `35.225.209.115` (IP ngoài của
 `fanfic-appwrite-temp`), Proxied qua Cloudflare — cùng khuôn với
 `appwrite-dev.fanfic.world` đã có.
 
+## Đối chiếu WebSub định kỳ (renewal + fallback discovery)
+
+`fanfic-websub-reconcile.timer`/`.service` (`deploy/`, cài trên
+`fanfic-appwrite-temp` qua `/etc/systemd/system/`) chạy mỗi 4 giờ
+`docker compose exec fanfic-dev-api python -m scripts.run_websub_reconciliation`
+— đây là nơi DUY NHẤT tự động gia hạn đăng ký WebSub sắp hết hạn
+(`RENEWAL_WINDOW=24h`, xem `TrustedSourceService`) và bắt lại video bị
+WebSub bỏ lỡ. Không có cơ chế này thì đăng ký chỉ hết hạn âm thầm sau lease
+(mặc định ~5 ngày) mà không ai gia hạn. `Dockerfile.dev-api` đã thêm
+`COPY scripts/` (trước đó chỉ có `server/`/`desktop_app/`) để script này
+chạy được bên trong container. Kiểm tra: `systemctl list-timers
+fanfic-websub-reconcile.timer` trên VM.
+
 ## Trạng thái
 
 Xem `docs/handoffs/public-dev-backend-websub-v1.md` để biết mốc nào đã

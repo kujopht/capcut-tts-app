@@ -19,9 +19,13 @@ RUN pip install --no-cache-dir -r /app/server/requirements.txt
 # Chi copy PHAN backend that su chay toi: server/ (API) + desktop_app/
 # (providers/text_chunker/models/output_manager ma server/tts_bridge.py
 # goi toi, xem CLAUDE.md) — KHONG copy app.py/capcut_tts_api/web/ (khong
-# lien quan toi backend nay).
+# lien quan toi backend nay). scripts/ them cho doi chieu WebSub dinh ky
+# (fanfic-websub-reconcile.timer chay `python -m scripts.run_websub_
+# reconciliation` BEN TRONG container nay qua `docker compose exec`) — chi
+# import server.* co san, khong keo them dependency nao.
 COPY server/ /app/server/
 COPY desktop_app/ /app/desktop_app/
+COPY scripts/ /app/scripts/
 
 # Chay VOI quyen khong phai root — image chi phuc vu API cong khai, khong
 # can quyen ghi ngoai FAS_VAR_DIR.

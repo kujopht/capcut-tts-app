@@ -207,6 +207,19 @@ class MockAnimationStore:
             self.episodes[episode.episode_id] = episode
             return episode
 
+    def create_episode_once(
+        self, episode: AnimationEpisode) -> Tuple[AnimationEpisode, bool]:
+        """Tao-hoac-lay AN TOAN theo `episode.episode_id` TAT DINH (xem
+        `trusted_source_domain.episode_slot_id`) — cung nguyen tac voi
+        `MockTrustedSourceStore.create_import_once`, mo phong Appwrite tu
+        choi POST trung `documentId`."""
+        with self._lock:
+            hien_co = self.episodes.get(episode.episode_id)
+            if hien_co is not None:
+                return hien_co, False
+            self.episodes[episode.episode_id] = episode
+            return episode, True
+
     def get_episode(self, episode_id: str) -> AnimationEpisode:
         episode = self.episodes.get(episode_id)
         if episode is None:

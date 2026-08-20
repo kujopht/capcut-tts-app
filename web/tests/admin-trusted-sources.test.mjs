@@ -169,6 +169,20 @@ test("Chi tiet nguon: quet video co goi scanTrustedSource va hien dem ket qua", 
   assert.match(src, /KHÔNG tự xuất bản toàn bộ kênh/);
 });
 
+test("adminApi: discoverSeriesFromSeed goi dung duong /discover (Auto-Ingestion Phase 1)", () => {
+  const src = api();
+  assert.match(src, /discoverSeriesFromSeed:[\s\S]{0,400}\/discover`/);
+  assert.match(src, /export interface SeriesDiscoveryResult \{[\s\S]{0,100}seed_video_id: string;/);
+});
+
+test("Chi tiet nguon: kham pha series tu seed goi discoverSeriesFromSeed va tai su dung parseYoutubeVideoId", () => {
+  const src = chiTiet();
+  assert.match(src, /import \{ parseYoutubeVideoId \} from "@\/lib\/youtubeUrl";/);
+  assert.match(src, /adminApi\.discoverSeriesFromSeed\(sourceId, videoId\)/);
+  assert.match(src, /Khám phá series từ video này/);
+  assert.match(src, /ketQuaKhamPha\.created_new_series/);
+});
+
 test("Chi tiet nguon: xoa nguon va xoa anh xa deu qua ConfirmDialog", () => {
   const src = chiTiet();
   const soLanConfirm = (src.match(/<ConfirmDialog/g) ?? []).length;

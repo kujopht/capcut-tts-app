@@ -315,6 +315,64 @@ class TrustedSourceRoutesTest(Nen):
         self.assertEqual(len(imports), 1)
         self.assertEqual(imports[0]["status"], "auto_imported")
 
+    def test_discover_tao_series_moi_va_backfill(self):
+        """Auto-Ingestion Phase 1 qua tang HTTP — seed khong khop series nao
+        (chua co mapping) -> tao series/mapping moi, quet kenh cua seed, tra
+        ve dung hinh dang `SeriesDiscoveryResult.to_dict()`."""
+        cid = "UC" + "z" * 22
+        source = self.client.post(
+            "/api/admin/animation/sources", headers=self.tk_admin,
+            json={"source_type": "youtube_video", "youtube_video_id": "vidHttp0001",
+                 "display_name": "Seed HTTP", "auto_import": True,
+                 "minimum_confidence": 0.1}).json()["source"]
+
+        upload_playlist = "UUzzz"
+        seed_id = "vidHttp0001"
+        self._dat_client_gia(FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh Z",
+                                       thumbnail_url="",
+                                       uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: (
+                [{"contentDetails": {"videoId": seed_id}}], "")},
+            videos={seed_id: VideoInfo(
+                video_id=seed_id, title="Reincarnation no Kaben Tập 1",
+                channel_id=cid, channel_title="Kenh Z", thumbnail_url="",
+                published_at="", duration_seconds=100.0)},
+        ))
+
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/discover",
+            headers=self.tk_admin, json={"youtube_video_id": seed_id})
+        self.assertEqual(resp.status_code, 200)
+        result = resp.json()["result"]
+        self.assertFalse(result["resolution"]["matched"])
+        self.assertTrue(result["created_new_series"])
+        self.assertTrue(result["series_id"])
+        self.assertIn(seed_id, result["confident_imports"])
+        self.assertEqual(result["candidates_scanned"], 1)
+
+    def test_discover_nguon_khong_ton_tai_404(self):
+        resp = self.client.post(
+            "/api/admin/animation/sources/khong_ton_tai/discover",
+            headers=self.tk_admin, json={"youtube_video_id": "vidAbc0000001"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_discover_nguoi_thuong_bi_tu_choi_403(self):
+        cid = "UC" + "y" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/discover",
+            headers=self.tk_an, json={"youtube_video_id": "vidAbc0000001"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_discover_khong_dang_nhap_bi_tu_choi_401(self):
+        cid = "UC" + "x" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/discover",
+            json={"youtube_video_id": "vidAbc0000001"})
+        self.assertEqual(resp.status_code, 401)
+
     def test_reject_va_ignore_import(self):
         cid = "UC" + "j" * 22
         source = self.client.post(

@@ -5,7 +5,11 @@ from __future__ import annotations
 import unicodedata
 import unittest
 
-from server.episode_parser import parse_episode_number
+from server.episode_parser import (
+    EpisodeSpanKind,
+    parse_episode_number,
+    parse_episode_span,
+)
 
 
 class ParseEpisodeNumberTest(unittest.TestCase):
@@ -154,6 +158,77 @@ class FuzzCorpusPhase7Test(unittest.TestCase):
         rang: mot tieu de "Trailer Tập 3" VAN tra ve 3 o tang nay."""
         self.assertEqual(parse_episode_number("Tiên Nghịch Trailer Tập 3"), 3)
         self.assertEqual(parse_episode_number("Tiên Nghịch OST Tập 1"), 1)
+
+
+class ParseEpisodeSpanTest(unittest.TestCase):
+    """`parse_episode_span` — mo rong Auto-Ingestion Phase 1. Xem docstring
+    `EpisodeSpan`/`EpisodeSpanKind` ve ly do can representation nay: KHONG
+    duoc thu gon "Tập 1-13" thanh tap 1 mot cach am tham."""
+
+    def test_dai_gach_ngang_dinh_lien(self):
+        for tieu_de, (dau, cuoi) in {
+            "Tập 1-13": (1, 13),
+            "Ep 1-12": (1, 12),
+            "ALL IN ONE | Reincarnation no Kaben Tập 1-13 | Sức Mạnh": (1, 13),
+        }.items():
+            with self.subTest(tieu_de=tieu_de):
+                span = parse_episode_span(tieu_de)
+                self.assertIsNotNone(span)
+                self.assertEqual(span.kind, EpisodeSpanKind.RANGE)
+                self.assertEqual((span.start, span.end), (dau, cuoi))
+                self.assertEqual(span.count, cuoi - dau + 1)
+                self.assertFalse(span.is_single)
+
+    def test_khoang_trang_quanh_gach_khong_phai_dai_tap(self):
+        """"Tập 12 - 2024 Remastered" la MOT so tap voi hau to nam phat hanh,
+        KHONG PHAI dai tap 12-2024 — gach ngang co khoang trang hai ben la
+        ranh gioi cum tu, khac voi dai tap dinh lien "1-13"."""
+        span = parse_episode_span("Tiên Nghịch Tập 12 - 2024 Remastered")
+        self.assertEqual(span.kind, EpisodeSpanKind.SINGLE)
+        self.assertEqual(span.start, 12)
+
+    def test_mot_tap_don_le_van_la_single(self):
+        span = parse_episode_span("Reincarnation no Kaben EP 14")
+        self.assertEqual(span.kind, EpisodeSpanKind.SINGLE)
+        self.assertEqual((span.start, span.end), (14, 14))
+        self.assertTrue(span.is_single)
+        self.assertEqual(span.count, 1)
+
+    def test_video_tong_hop_ca_series(self):
+        for tieu_de in (
+            "Reincarnation no Kaben ALL IN ONE",
+            "Reincarnation no Kaben FULL",
+            "Reincarnation no Kaben Trọn bộ",
+            "Reincarnation no Kaben tron bo",
+        ):
+            with self.subTest(tieu_de=tieu_de):
+                span = parse_episode_span(tieu_de)
+                self.assertIsNotNone(span)
+                self.assertEqual(span.kind, EpisodeSpanKind.COMPILATION)
+                self.assertIsNone(span.start)
+                self.assertIsNone(span.end)
+                self.assertIsNone(span.count)
+
+    def test_khong_khop_gi_tra_none(self):
+        self.assertIsNone(parse_episode_span("Tiên Nghịch Trailer chính thức"))
+        self.assertIsNone(parse_episode_span(""))
+        self.assertIsNone(parse_episode_span("Tiên Nghịch"))
+
+    def test_dai_vo_ly_roi_xuong_so_don(self):
+        """Neu dai doc duoc phi ly (cuoi <= dau), roi xuong doc so don thay
+        vi tra ve mot RANGE sai."""
+        span = parse_episode_span("Tập 13-1")
+        self.assertEqual(span.kind, EpisodeSpanKind.SINGLE)
+        self.assertEqual(span.start, 13)
+
+    def test_tuong_thich_nguoc_voi_parse_episode_number(self):
+        """`parse_episode_span` khong duoc lam sai `parse_episode_number` —
+        moi tieu de single-episode phai cho cung so tap qua ca hai ham."""
+        for tieu_de in ("Tập 12", "EP12", "Episode 12", "E12", "Tap. 8"):
+            with self.subTest(tieu_de=tieu_de):
+                so = parse_episode_number(tieu_de)
+                span = parse_episode_span(tieu_de)
+                self.assertEqual(span.start, so)
 
 
 if __name__ == "__main__":

@@ -17,11 +17,13 @@ import {
   adminApi,
   type AdminSeriesMappingRow,
   type AdminAnimationSeriesRow,
+  type SeriesDiscoveryResult,
   type SubscriptionStatus,
   type TrustedSourceScanResult,
 } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
+import { parseYoutubeVideoId } from "@/lib/youtubeUrl";
 import { ChuaCauHinh, DanhSachTrangThai, loiApi } from "@/components/AdminShell";
 import { ConfirmDialog } from "@/components/ui";
 import { IconLink } from "@/components/Icons";
@@ -77,6 +79,10 @@ export default function AdminTrustedSourceDetailPage({
   const [ketQuaQuet, setKetQuaQuet] = useState<TrustedSourceScanResult | null>(null);
   const [hoiXoaNguon, setHoiXoaNguon] = useState(false);
   const [dangXoa, setDangXoa] = useState(false);
+
+  const [seedInput, setSeedInput] = useState("");
+  const [dangKhamPha, setDangKhamPha] = useState(false);
+  const [ketQuaKhamPha, setKetQuaKhamPha] = useState<SeriesDiscoveryResult | null>(null);
 
   const [dangDangKy, setDangDangKy] = useState(false);
   const [dangDoiChieu, setDangDoiChieu] = useState(false);
@@ -143,6 +149,29 @@ export default function AdminTrustedSourceDetailPage({
       toast.error(loiApi(cause, "Quét thất bại."));
     } finally {
       setDangQuet(false);
+    }
+  }
+
+  async function khamPha() {
+    const videoId = parseYoutubeVideoId(seedInput);
+    if (!videoId) {
+      toast.error("Không đọc được ID video từ ô này — dán link hoặc ID YouTube hợp lệ.");
+      return;
+    }
+    setDangKhamPha(true);
+    setKetQuaKhamPha(null);
+    try {
+      const { result } = await adminApi.discoverSeriesFromSeed(sourceId, videoId);
+      setKetQuaKhamPha(result);
+      toast.ok(
+        result.created_new_series
+          ? "Đã tạo series mới từ video seed."
+          : "Video khớp một series đã có.");
+      reload();
+    } catch (cause) {
+      toast.error(loiApi(cause, "Khám phá thất bại."));
+    } finally {
+      setDangKhamPha(false);
     }
   }
 
@@ -361,6 +390,60 @@ export default function AdminTrustedSourceDetailPage({
                   Xem hàng đợi nhập của nguồn này →
                 </Link>
               </p>
+            </div>
+
+            <div className="card stack-2">
+              <h3 className="section-title">Khám phá series từ video này</h3>
+              <p className="hint">
+                Dán ID hoặc link YouTube của MỘT video seed. Nếu video khớp
+                một series đã có, hệ thống nhập seed đó theo đúng quy tắc
+                nguồn. Nếu không khớp series nào, hệ thống tạo một series
+                nháp mới rồi quét kênh của seed tìm các tập &ldquo;anh chị em&rdquo; —
+                CHỈ video đủ tương đồng mới được đưa vào hàng đợi/tự động
+                nhập, không nhập tràn lan cả kênh.
+              </p>
+              <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                <input className="input" style={{ minWidth: 280 }}
+                       placeholder="ID hoặc link video YouTube"
+                       value={seedInput}
+                       onChange={(e) => setSeedInput(e.target.value)} />
+                <button type="button" className="btn btn-primary" disabled={dangKhamPha}
+                        onClick={khamPha}>
+                  {dangKhamPha ? "Đang khám phá…" : "Khám phá series từ video này"}
+                </button>
+              </div>
+              {ketQuaKhamPha ? (
+                <div className="stack-2">
+                  <p className="hint">
+                    {ketQuaKhamPha.created_new_series
+                      ? "Đã tạo series MỚI: "
+                      : "Khớp series đã có: "}
+                    {ketQuaKhamPha.series_id ? (
+                      <Link href={`/admin/animation/series/${ketQuaKhamPha.series_id}`}>
+                        {ketQuaKhamPha.series_id}
+                      </Link>
+                    ) : "—"}
+                    {" · "}Đã quét {ketQuaKhamPha.candidates_scanned} video
+                  </p>
+                  <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                    <span className="tt tt-duyet">
+                      Tin cậy: {ketQuaKhamPha.confident_imports.length}
+                    </span>
+                    <span className="tt tt-cho">
+                      Chờ duyệt: {ketQuaKhamPha.pending_review.length}
+                    </span>
+                    <span className="tt tt-treo">
+                      Trùng: {ketQuaKhamPha.duplicates.length}
+                    </span>
+                    <span className="tt tt-treo">
+                      Xung đột: {ketQuaKhamPha.conflicts.length}
+                    </span>
+                    <span className="tt tt-trong">
+                      Loại trừ: {ketQuaKhamPha.excluded.length}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <MangAnhXa sourceId={sourceId} mappings={data.mappings}

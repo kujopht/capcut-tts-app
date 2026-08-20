@@ -1656,6 +1656,46 @@ export interface TrustedSourceScanResult {
   next_page_token: string;
 }
 
+/** MOT ung vien xem xet trong luc quet kenh/playlist tim tap cung series
+ * voi seed — xem `SeriesDiscoveryCandidate.to_dict()`. */
+export interface SeriesDiscoveryCandidateRow {
+  video_id: string;
+  title: string;
+  channel_id: string;
+  channel_title: string;
+  published_at: string;
+  duration_seconds: number;
+  canonical_name: string;
+  span_kind: string | null;
+  episode_number: number | null;
+  similarity_to_seed: number;
+  excluded: boolean;
+  exclude_reason: string;
+}
+
+/** Ket qua MOT lan "Kham pha series tu video nay" (Auto-Ingestion Phase 1) —
+ * xem `TrustedSourceService.discover_series_from_seed`/`SeriesDiscoveryResult`. */
+export interface SeriesDiscoveryResult {
+  seed_video_id: string;
+  resolution: {
+    matched: boolean;
+    series_id: string;
+    mapping_id: string;
+    confidence: number;
+    signals: string[];
+  };
+  series_id: string;
+  mapping_id: string;
+  created_new_series: boolean;
+  candidates_scanned: number;
+  confident_imports: string[];
+  pending_review: string[];
+  duplicates: string[];
+  excluded: string[];
+  conflicts: string[];
+  candidates: SeriesDiscoveryCandidateRow[];
+}
+
 export interface AdminImageStudioSpending {
   month: string;
   spent_usd: number;
@@ -1910,6 +1950,12 @@ export const adminApi = {
       `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/scan`,
       { method: "POST", body: JSON.stringify({
         page_token: opts.pageToken ?? "", max_pages: opts.maxPages ?? 2 }) },
+    ),
+
+  discoverSeriesFromSeed: (sourceId: string, youtubeVideoId: string) =>
+    request<{ result: SeriesDiscoveryResult }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/discover`,
+      { method: "POST", body: JSON.stringify({ youtube_video_id: youtubeVideoId }) },
     ),
 
   // -- WebSub / doi chieu dinh ky (Phase 6) --------------------------------

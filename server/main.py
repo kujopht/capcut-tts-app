@@ -5020,6 +5020,10 @@ class ScanSourceIn(BaseModel):
     max_pages: int = DEFAULT_SCAN_PAGES
 
 
+class DiscoverSeriesIn(BaseModel):
+    youtube_video_id: str
+
+
 class SeriesMappingCreateIn(BaseModel):
     animation_series_id: str
     aliases: List[str] = []
@@ -5159,6 +5163,19 @@ def admin_scan_trusted_source(
         page_token=payload.page_token,
         max_pages=max(1, min(MAX_SCAN_PAGES, payload.max_pages)),
         actor_role=settings.admin_role_of(admin.user_id).value)
+
+
+@app.post("/api/admin/animation/sources/{source_id}/discover")
+def admin_discover_series_from_seed(
+    source_id: str, payload: DiscoverSeriesIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Auto-Ingestion Phase 1 ("Seed Video -> Series Discovery -> Backfill") —
+    xem `TrustedSourceService.discover_series_from_seed`."""
+    return {"result": _nguon_tin_cay(
+        trusted_sources.discover_series_from_seed, admin, source_id,
+        youtube_video_id=payload.youtube_video_id,
+        actor_role=settings.admin_role_of(admin.user_id).value).to_dict()}
 
 
 @app.post("/api/admin/animation/sources/{source_id}/mappings")

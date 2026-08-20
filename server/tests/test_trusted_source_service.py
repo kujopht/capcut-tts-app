@@ -278,6 +278,58 @@ class TrustedSourceServiceTest(unittest.TestCase):
         rows_2, total_2 = self.store.find_imports(trusted_source_id=source["source_id"])
         self.assertEqual(total_2, 1)
 
+    def test_quet_dai_tap_hoac_video_tong_hop_khong_bao_gio_tu_dong_nhap(self):
+        """Auto-Ingestion Phase 1: mot video la DAI nhieu tap ("Tập 1-13")
+        hoac ban tong hop ca series ("ALL IN ONE") KHONG duoc phep tu dong
+        thanh MOT `AnimationEpisode` — du nguon bat auto_import/auto_publish
+        VA do tin cay (tru phan tap) co the vuot nguong, `episode_number`
+        van la `None` (xem `video_classifier.ClassificationResult`), va
+        `_quyet_dinh_trang_thai` (khong doi) da coi day la PENDING."""
+        cid = "UC" + "r" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh R", auto_import=True, auto_publish=True,
+            minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+
+        upload_playlist = "UUrrr"
+        v_dai, v_tong_hop = "vidRange0001", "vidAllInOne1"
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh R",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: (
+                [_video_item(v_dai), _video_item(v_tong_hop)], "")},
+            videos={
+                v_dai: VideoInfo(
+                    video_id=v_dai, title="Tiên Nghịch Tập 1-13", channel_id=cid,
+                    channel_title="Kenh R", thumbnail_url="", published_at="2026-01-01",
+                    duration_seconds=1200.0),
+                v_tong_hop: VideoInfo(
+                    video_id=v_tong_hop, title="Tiên Nghịch ALL IN ONE", channel_id=cid,
+                    channel_title="Kenh R", thumbnail_url="", published_at="2026-01-02",
+                    duration_seconds=36000.0),
+            },
+        )
+        self._dat_client_gia(client)
+
+        ket_qua = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(ket_qua["detected"], 2)
+        self.assertEqual(ket_qua.get("auto_imported", 0), 0)
+        self.assertEqual(ket_qua.get("auto_published", 0), 0)
+
+        rows, total = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(total, 2)
+        for row in rows:
+            with self.subTest(video_id=row.youtube_video_id):
+                self.assertEqual(row.status, ImportStatus.PENDING)
+                self.assertIsNone(row.detected_episode_number)
+                self.assertFalse(row.created_episode_id)
+                self.assertTrue(
+                    any("không tự động nhập" in s for s in row.signals),
+                    row.signals)
+
     def test_quet_video_khong_khop_alias_nao_thanh_new(self):
         cid = "UC" + "i" * 22
         source = self.svc.create_source(

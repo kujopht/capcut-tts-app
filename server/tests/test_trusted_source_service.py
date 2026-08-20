@@ -7,7 +7,7 @@ import unittest
 from typing import Dict, List, Tuple
 from unittest import mock
 
-from server.adapters import MockMetadataStore
+from server.adapters import MockMetadataStore, NotFoundError
 from server.animation_domain import AnimationEpisode, AnimationSeries, AnimationSource
 from server.animation_store import MockAnimationStore
 from server.domain import Profile, PublishState
@@ -491,6 +491,145 @@ class TrustedSourceServiceTest(unittest.TestCase):
         self.assertEqual(ket_qua["conflicts"], 1)
         rows, _ = self.store.find_imports(trusted_source_id=source["source_id"])
         self.assertEqual(rows[0].status, ImportStatus.CONFLICT)
+
+    # -- Auto-Ingestion Phase 3: an toan duoi tai dua nhau (concurrency) -------
+
+    def test_hai_video_khac_nhau_dong_thoi_trung_cho_series_episode_thanh_conflict(self):
+        """Hai VIDEO KHAC NHAU cung suy ra trung (series, so tap) khi xu ly
+        GAN NHU DONG THOI (vi du hai thong bao WebSub gan nhu cung luc cho
+        hai video khac nhau) — snapshot `episodes_by_series` (doc TRUOC khi
+        ghi) KHONG bat duoc vi ca hai deu doc thay cho con trong. Chot chan
+        that su la `create_episode_once`/`episode_slot_id` tat dinh: video
+        thu hai PHAI la CONFLICT, KHONG duoc ghi de tap cua video thu nhat."""
+        cid = "UC" + "n" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh N", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+
+        src = self.store.get_source(source["source_id"])
+        mappings = self.store.list_mappings(source["source_id"])
+        # Snapshot RONG dung chung cho "ca hai qua trinh" — mo phong dua
+        # nhau that: khong ai thay cho da bi chiem luc doc.
+        episodes_by_series = {self.series.series_id: ()}
+        video_a = {"video_id": "vidRaceA001", "title": "Tiên Nghịch Tập 7",
+                  "channel_id": cid, "channel_title": "Kenh N", "thumbnail_url": "",
+                  "published_at": "2026-01-01", "duration_seconds": 100.0}
+        video_b = {"video_id": "vidRaceB002", "title": "Tiên Nghịch Tập 7",
+                  "channel_id": cid, "channel_title": "Kenh N", "thumbnail_url": "",
+                  "published_at": "2026-01-01", "duration_seconds": 100.0}
+
+        trang_thai_a, _ = self.svc._phan_loai_va_ghi_mot_video(
+            source=src, mappings=mappings, episodes_by_series=episodes_by_series,
+            video=video_a, da_la_tap={})
+        trang_thai_b, _ = self.svc._phan_loai_va_ghi_mot_video(
+            source=src, mappings=mappings, episodes_by_series=episodes_by_series,
+            video=video_b, da_la_tap={})
+
+        self.assertEqual(trang_thai_a, ImportStatus.AUTO_IMPORTED)
+        self.assertEqual(trang_thai_b, ImportStatus.CONFLICT)
+        tap_7 = [e for e in self.animation.list_episodes(self.series.series_id)
+                if e.order_index == 7]
+        self.assertEqual(len(tap_7), 1)
+        self.assertEqual(tap_7[0].external_id, "vidRaceA001")
+
+    def test_cung_video_xu_ly_gan_nhu_dong_thoi_hai_lan_khong_tao_tap_trung(self):
+        """Cung MOT video duoc phan loai-va-ghi hai lan GAN NHU DONG THOI
+        (vi du hai thong bao WebSub trung lap toi TRUOC khi lan dau kip ghi
+        ban ghi VideoImport) — phai idempotent tuyet doi: chi MOT tap duoc
+        tao trong store, ca hai lan goi deu tra ve DUNG mot trang thai."""
+        cid = "UC" + "o" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh O", auto_import=True, auto_publish=True,
+            minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+
+        src = self.store.get_source(source["source_id"])
+        mappings = self.store.list_mappings(source["source_id"])
+        episodes_by_series = {self.series.series_id: ()}
+        video = {"video_id": "vidSameRace1", "title": "Tiên Nghịch Tập 9",
+                "channel_id": cid, "channel_title": "Kenh O", "thumbnail_url": "",
+                "published_at": "2026-01-01", "duration_seconds": 100.0}
+
+        trang_thai_1, _ = self.svc._phan_loai_va_ghi_mot_video(
+            source=src, mappings=mappings, episodes_by_series=episodes_by_series,
+            video=video, da_la_tap={})
+        trang_thai_2, _ = self.svc._phan_loai_va_ghi_mot_video(
+            source=src, mappings=mappings, episodes_by_series=episodes_by_series,
+            video=video, da_la_tap={})
+
+        self.assertEqual(trang_thai_1, ImportStatus.AUTO_PUBLISHED)
+        self.assertEqual(trang_thai_2, ImportStatus.AUTO_PUBLISHED)
+        tap_9 = [e for e in self.animation.list_episodes(self.series.series_id)
+                if e.order_index == 9]
+        self.assertEqual(len(tap_9), 1)
+        self.assertEqual(tap_9[0].external_id, "vidSameRace1")
+
+    def test_loi_noi_bo_tam_thoi_luc_ghi_mot_video_khong_lam_hong_ca_lo_quet(self):
+        """MOT video gap loi Appwrite tam thoi luc GHI (`NotFoundError` —
+        xem docstring `AppwriteAnimationStore._call` ve vi sao day la kieu
+        loi CHUNG cho ca "khong tim thay" LAN "loi HTTP/mang thoang qua")
+        KHONG duoc lam hong toan bo lan quet: video loi KHONG tao ban ghi
+        nao (khong mac ket o trang thai sai, tu nhien duoc thu lai o lan
+        quet sau), CAC video khac trong CUNG lan quet van xu ly binh
+        thuong."""
+        cid = "UC" + "p" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh P", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+
+        upload_playlist = "UUppp"
+        video_loi = "vidLoi000001"
+        video_ok = "vidOk0000002"
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh P",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: (
+                [_video_item(video_loi), _video_item(video_ok)], "")},
+            videos={
+                video_loi: VideoInfo(
+                    video_id=video_loi, title="Tiên Nghịch Tập 20", channel_id=cid,
+                    channel_title="Kenh P", thumbnail_url="", published_at="2026-01-01",
+                    duration_seconds=100.0),
+                video_ok: VideoInfo(
+                    video_id=video_ok, title="Tiên Nghịch Tập 21", channel_id=cid,
+                    channel_title="Kenh P", thumbnail_url="", published_at="2026-01-01",
+                    duration_seconds=100.0),
+            },
+        )
+        self._dat_client_gia(client)
+
+        goc = self.animation.create_episode_once
+
+        def gia_loi(episode):
+            if episode.external_id == video_loi:
+                raise NotFoundError("Appwrite trả về lỗi thoáng qua (giả lập).")
+            return goc(episode)
+
+        with mock.patch.object(self.animation, "create_episode_once", side_effect=gia_loi):
+            ket_qua = self.svc.scan_source(self.admin, source["source_id"])
+
+        self.assertEqual(ket_qua["internal_errors"], 1)
+        self.assertEqual(ket_qua["auto_imported"], 1)
+
+        rows, _ = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].youtube_video_id, video_ok)
+
+        # Quet lai (khong con loi gia lap) — video loi truoc do duoc THU
+        # LAI binh thuong, khong mac ket o trang thai sai vinh vien.
+        ket_qua_2 = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(ket_qua_2["internal_errors"], 0)
+        rows_2, _ = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(len(rows_2), 2)
 
     def test_quet_du_tin_cay_nhung_khong_bat_auto_import_thi_pending(self):
         cid = "UC" + "m" * 22

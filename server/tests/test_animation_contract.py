@@ -175,6 +175,26 @@ class HopDongAnimationTest(unittest.TestCase):
                 ds = kho.list_episodes(s.series_id)
                 self.assertEqual([e.title for e in ds], ["Tap 1", "Tap 2"], ten)
 
+    def test_create_episode_once_tao_hoac_lay_an_toan_duoi_documentId_trung(self):
+        """`create_episode_once` (Auto-Ingestion Phase 3, xem
+        `trusted_source_domain.episode_slot_id`) — CUNG documentId trung thi
+        lan hai PHAI tra ve DUNG ban ghi da co (`da_tao=False`), KHONG tao
+        ban thu hai, tren CA HAI kho (mock lan Appwrite gia lap)."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="T"))
+                e1, da_tao_1 = kho.create_episode_once(AnimationEpisode(
+                    episode_id="anep_slot_test_001", series_id=s.series_id,
+                    owner_id="u1", title="Tap 1", external_id="a" * 11, order_index=1))
+                e2, da_tao_2 = kho.create_episode_once(AnimationEpisode(
+                    episode_id="anep_slot_test_001", series_id=s.series_id,
+                    owner_id="u1", title="Tap 1 (ban khac)", external_id="b" * 11,
+                    order_index=1))
+                self.assertTrue(da_tao_1, ten)
+                self.assertFalse(da_tao_2, ten)
+                self.assertEqual(e2.external_id, "a" * 11, ten)
+                self.assertEqual(len(kho.list_episodes(s.series_id)), 1, ten)
+
     def test_owned_episode_sai_chu_nem_loi(self):
         for ten, kho in self._cac_kho():
             with self.subTest(kho=ten):

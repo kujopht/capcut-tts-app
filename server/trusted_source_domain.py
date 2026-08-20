@@ -16,6 +16,7 @@ Module nay la Python thuan, cung quy uoc voi `animation_domain.py`.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -32,6 +33,31 @@ def video_import_id(youtube_video_id: str) -> str:
     cung mot video luon tro ve DUNG mot hang, khong tao ban thu hai.
     """
     return f"vimp_{youtube_video_id}"
+
+
+def episode_slot_id(series_id: str, episode_number: int) -> str:
+    """
+    `episode_id` TAT DINH cho MOT cho (series_id, episode_number) trong
+    pipeline TU DONG nhap cua Trusted Sources (Auto-Ingestion Phase 3) —
+    dung boi `TrustedSourceService._quyet_dinh_trang_thai` qua
+    `AnimationStore.create_episode_once`, CUNG ky thuat "POST trung
+    documentId la tao-hoac-lay an toan" voi `video_import_id`/
+    `create_import_once` va `_job_lock_id` (`appwrite_store.py`).
+
+    VI SAO CAN: hai qua trinh xu ly DONG THOI hai video KHAC NHAU nhung
+    cung suy ra (series_id, episode_number) giong nhau (hoac hai qua trinh
+    xu ly LAI CUNG mot video) co the deu doc thay "cho nay con trong" TRUOC
+    khi ben nao ghi xong — doc-roi-kiem-tra khong an toan duoi tai dua nhau.
+    Bam (khong noi truc tiep `series_id`/`episode_number`) vi `series_id` da
+    dai san, noi them so tap de vuot gioi han 36 ky tu `rowId` cua Appwrite
+    (xem ghi chu tuong tu o `server/social.py::_khoa`).
+
+    CHI danh cho episode TAO TU pipeline nay — episode do TAC GIA tu viet
+    tay van dung `new_id("anep")` ngau nhien nhu truoc (khong ap dung rang
+    buoc slot nay, hai chu the hoan toan doc lap).
+    """
+    thong = f"{series_id}\x1f{episode_number}".encode()
+    return "anep_" + hashlib.sha256(thong).hexdigest()[:28]
 
 
 class TrustedSourceType(str, Enum):

@@ -490,6 +490,23 @@ class AppwriteAnimationStore:
                     self._owner_permissions(episode.owner_id))
         return episode
 
+    def create_episode_once(
+        self, episode: AnimationEpisode) -> Tuple[AnimationEpisode, bool]:
+        """
+        Tao-hoac-lay AN TOAN theo `episode.episode_id` TAT DINH (xem
+        `trusted_source_domain.episode_slot_id`) — CUNG ky thuat voi
+        `AppwriteTrustedSourceStore.create_import_once`: Appwrite tu choi
+        `POST` trung `documentId` (409, `_call` boc thanh `NotFoundError`),
+        nen day la tao-hoac-lay an toan duoi tai dua nhau, khong can
+        transaction rieng.
+        """
+        try:
+            self._create(COL_EPISODES, episode.episode_id, episode.to_dict(),
+                        self._owner_permissions(episode.owner_id))
+            return episode, True
+        except NotFoundError:
+            return _episode_from_doc(self._get(COL_EPISODES, episode.episode_id)), False
+
     def get_episode(self, episode_id: str) -> AnimationEpisode:
         return _episode_from_doc(self._get(COL_EPISODES, episode_id))
 

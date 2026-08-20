@@ -17,6 +17,7 @@ import {
   adminApi,
   type AdminSeriesMappingRow,
   type AdminAnimationSeriesRow,
+  type ChannelDiscoveryResult,
   type SeriesDiscoveryResult,
   type SourceHealth,
   type SubscriptionStatus,
@@ -101,6 +102,10 @@ export default function AdminTrustedSourceDetailPage({
   const [seedInput, setSeedInput] = useState("");
   const [dangKhamPha, setDangKhamPha] = useState(false);
   const [ketQuaKhamPha, setKetQuaKhamPha] = useState<SeriesDiscoveryResult | null>(null);
+
+  const [dangKhamPhaToanNguon, setDangKhamPhaToanNguon] = useState(false);
+  const [ketQuaKhamPhaToanNguon, setKetQuaKhamPhaToanNguon] =
+    useState<ChannelDiscoveryResult | null>(null);
 
   const [dangDangKy, setDangDangKy] = useState(false);
   const [dangDoiChieu, setDangDoiChieu] = useState(false);
@@ -190,6 +195,24 @@ export default function AdminTrustedSourceDetailPage({
       toast.error(loiApi(cause, "Khám phá thất bại."));
     } finally {
       setDangKhamPha(false);
+    }
+  }
+
+  async function khamPhaToanNguon() {
+    setDangKhamPhaToanNguon(true);
+    setKetQuaKhamPhaToanNguon(null);
+    try {
+      const { result } = await adminApi.discoverChannel(sourceId, { maxPages: 2 });
+      setKetQuaKhamPhaToanNguon(result);
+      toast.ok(
+        `Đã khám phá ${result.videos_discovered} video: ` +
+        `${result.new_series_created} series mới, ` +
+        `${result.matched_existing_mapping + result.existing_series_reused_by_fingerprint} khớp series đã có.`);
+      reload();
+    } catch (cause) {
+      toast.error(loiApi(cause, "Khám phá toàn nguồn thất bại."));
+    } finally {
+      setDangKhamPhaToanNguon(false);
     }
   }
 
@@ -482,6 +505,87 @@ export default function AdminTrustedSourceDetailPage({
                 </div>
               ) : null}
             </div>
+
+            {s.source_type !== "youtube_video" ? (
+              <div className="card stack-2">
+                <h3 className="section-title">Khám phá toàn nguồn</h3>
+                <p className="hint">
+                  Quét TOÀN BỘ kênh/playlist này, tự động gom video thành
+                  nhiều series khác nhau (không cần chọn video seed) — video
+                  khớp một series đã có được nhập vào đúng series đó, video
+                  không khớp gì được gom nhóm theo độ tương đồng tiêu đề rồi
+                  tạo series NHÁP mới cho từng nhóm. Bổ sung cho &ldquo;Khám
+                  phá series từ video này&rdquo; ở trên, không thay thế.
+                </p>
+                <div className="row">
+                  <button type="button" className="btn btn-primary"
+                          disabled={dangKhamPhaToanNguon} onClick={khamPhaToanNguon}>
+                    {dangKhamPhaToanNguon ? "Đang khám phá…" : "Khám phá toàn nguồn"}
+                  </button>
+                </div>
+                {ketQuaKhamPhaToanNguon ? (
+                  <div className="stack-2">
+                    <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                      <span className="tt tt-trong">
+                        Phát hiện: {ketQuaKhamPhaToanNguon.videos_discovered}
+                      </span>
+                      <span className="tt tt-trong">
+                        Khớp series đã có: {ketQuaKhamPhaToanNguon.matched_existing_mapping
+                          + ketQuaKhamPhaToanNguon.existing_series_reused_by_fingerprint}
+                      </span>
+                      <span className="tt tt-duyet">
+                        Series mới: {ketQuaKhamPhaToanNguon.new_series_created}
+                      </span>
+                      <span className="tt tt-duyet">
+                        Tự nhập: {ketQuaKhamPhaToanNguon.confident_imports.length}
+                      </span>
+                      <span className="tt tt-cho">
+                        Chờ duyệt: {ketQuaKhamPhaToanNguon.pending_review.length}
+                      </span>
+                      <span className="tt tt-treo">
+                        Trùng: {ketQuaKhamPhaToanNguon.duplicates.length}
+                      </span>
+                      <span className="tt tt-treo">
+                        Xung đột: {ketQuaKhamPhaToanNguon.conflicts.length}
+                      </span>
+                      <span className="tt tt-trong">
+                        Đã theo dõi: {ketQuaKhamPhaToanNguon.already_tracked}
+                      </span>
+                    </div>
+                    {ketQuaKhamPhaToanNguon.groups.length > 0 ? (
+                      <div className="admin-bang-boc">
+                        <table className="admin-bang">
+                          <thead>
+                            <tr>
+                              <th scope="col">Series</th>
+                              <th scope="col">Số video</th>
+                              <th scope="col">Nguồn gốc</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ketQuaKhamPhaToanNguon.groups.map((g) => (
+                              <tr key={g.mapping_id}>
+                                <td>
+                                  {g.series_id ? (
+                                    <Link href={`/admin/animation/series/${g.series_id}`}>
+                                      {g.canonical_name}
+                                    </Link>
+                                  ) : g.canonical_name}
+                                </td>
+                                <td className="mono">{g.video_count}</td>
+                                <td className="hint">
+                                  {g.created_new_series ? "Series mới (nháp)" : "Series đã có"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <MangAnhXa sourceId={sourceId} mappings={data.mappings}
                        danhSachSeries={danhSachSeries} onDoi={reload} />

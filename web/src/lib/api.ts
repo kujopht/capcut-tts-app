@@ -1719,6 +1719,43 @@ export interface SeriesDiscoveryResult {
   candidates: SeriesDiscoveryCandidateRow[];
 }
 
+/** MOT cum ung vien suy doan la CUNG mot series trong luc "Khám phá toàn
+ * nguồn" (Auto-Ingestion Phase 5) — xem `ChannelDiscoveryGroup.to_dict()`. */
+export interface ChannelDiscoveryGroupRow {
+  canonical_name: string;
+  representative_video_id: string;
+  video_ids: string[];
+  video_count: number;
+  series_id: string;
+  mapping_id: string;
+  created_new_series: boolean;
+  matched_existing_series: boolean;
+}
+
+/** Ket qua MOT lan "Khám phá toàn nguồn" (Auto-Ingestion Phase 5 —
+ * "Autonomous Multi-Series Channel Ingestion") — kham pha TOAN BO mot nguon
+ * kieu kenh/playlist, co the tao/khop NHIEU series khac nhau cung luc, khac
+ * `SeriesDiscoveryResult` (Phase 1, MOT seed do quan tri chon). Xem
+ * `TrustedSourceService.discover_channel`/`ChannelDiscoveryResult`. */
+export interface ChannelDiscoveryResult {
+  source_id: string;
+  videos_discovered: number;
+  already_tracked: number;
+  matched_existing_mapping: number;
+  candidate_groups: number;
+  new_series_created: number;
+  existing_series_reused_by_fingerprint: number;
+  confident_imports: string[];
+  pending_review: string[];
+  duplicates: string[];
+  excluded: string[];
+  conflicts: string[];
+  excluded_negative_keyword: number;
+  internal_errors: number;
+  groups: ChannelDiscoveryGroupRow[];
+  next_page_token: string;
+}
+
 export interface AdminImageStudioSpending {
   month: string;
   spent_usd: number;
@@ -1979,6 +2016,12 @@ export const adminApi = {
     request<{ result: SeriesDiscoveryResult }>(
       `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/discover`,
       { method: "POST", body: JSON.stringify({ youtube_video_id: youtubeVideoId }) },
+    ),
+
+  discoverChannel: (sourceId: string, opts: { maxPages?: number } = {}) =>
+    request<{ result: ChannelDiscoveryResult }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/discover-channel`,
+      { method: "POST", body: JSON.stringify({ max_pages: opts.maxPages ?? 2 }) },
     ),
 
   // -- WebSub / doi chieu dinh ky (Phase 6) --------------------------------

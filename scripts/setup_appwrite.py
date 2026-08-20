@@ -202,7 +202,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               "websub_subscribe", "websub_unsubscribe", "websub_renew",
               "websub_notification", "websub_failure",
               "auto_video_discover", "auto_video_import", "auto_video_publish",
-              "reconciliation_run"]),
+              "reconciliation_run",
+              # Auto-Ingestion Phase 5 (Multi-Series Channel Ingestion) —
+              # "Khám phá toàn nguồn", MO RONG them, khong thay the
+              # "auto_video_discover" (Phase 1, mot seed do quan tri chon).
+              "trusted_source_channel_discovery"]),
             ("target_user_id", "string", True, 64),
             # Rong = he thong (vd migration grandfather), khong phai mot nguoi.
             ("actor_id", "string", False, 64),

@@ -383,6 +383,75 @@ class TrustedSourceRoutesTest(Nen):
             json={"youtube_video_id": "vidAbc0000001"})
         self.assertEqual(resp.status_code, 401)
 
+    def test_discover_channel_gom_nhieu_series_qua_http(self):
+        """Auto-Ingestion Phase 5 qua tang HTTP — mot kenh co HAI series khac
+        nhau, khong seed nao ca, tra ve dung hinh dang
+        `ChannelDiscoveryResult.to_dict()`."""
+        cid = "UC" + "w" * 22
+        source = self._tao_nguon_kenh(
+            cid=cid, auto_import=True, minimum_confidence=0.1)
+        upload_playlist = "UUwww"
+        v1, v2 = "vidW0000001", "vidW0000002"
+        self._dat_client_gia(FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh W",
+                                       thumbnail_url="",
+                                       uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: (
+                [{"contentDetails": {"videoId": v1}},
+                 {"contentDetails": {"videoId": v2}}], "")},
+            videos={
+                v1: VideoInfo(video_id=v1, title="Tiên Nghịch Tập 1", channel_id=cid,
+                             channel_title="Kenh W", thumbnail_url="",
+                             published_at="2026-01-01", duration_seconds=100.0),
+                v2: VideoInfo(video_id=v2, title="Đấu Phá Thương Khung Tập 1",
+                             channel_id=cid, channel_title="Kenh W", thumbnail_url="",
+                             published_at="2026-01-02", duration_seconds=100.0),
+            },
+        ))
+
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/discover-channel",
+            headers=self.tk_admin, json={})
+        self.assertEqual(resp.status_code, 200)
+        result = resp.json()["result"]
+        self.assertEqual(result["videos_discovered"], 2)
+        self.assertEqual(result["candidate_groups"], 2)
+        self.assertEqual(result["new_series_created"], 2)
+        self.assertIn(v1, result["confident_imports"])
+        self.assertIn(v2, result["confident_imports"])
+
+    def test_discover_channel_nguon_video_don_tra_400(self):
+        source = self.client.post(
+            "/api/admin/animation/sources", headers=self.tk_admin,
+            json={"source_type": "youtube_video", "youtube_video_id": "vidSolo0001",
+                 "display_name": "Video đơn"}).json()["source"]
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/discover-channel",
+            headers=self.tk_admin, json={})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_discover_channel_nguon_khong_ton_tai_404(self):
+        resp = self.client.post(
+            "/api/admin/animation/sources/khong_ton_tai/discover-channel",
+            headers=self.tk_admin, json={})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_discover_channel_nguoi_thuong_bi_tu_choi_403(self):
+        cid = "UC" + "v" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/discover-channel",
+            headers=self.tk_an, json={})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_discover_channel_khong_dang_nhap_bi_tu_choi_401(self):
+        cid = "UC" + "u" * 22
+        source = self._tao_nguon_kenh(cid=cid)
+        resp = self.client.post(
+            f"/api/admin/animation/sources/{source['source_id']}/discover-channel",
+            json={})
+        self.assertEqual(resp.status_code, 401)
+
     def test_reject_va_ignore_import(self):
         cid = "UC" + "j" * 22
         source = self.client.post(

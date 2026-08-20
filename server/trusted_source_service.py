@@ -18,13 +18,17 @@ BA phu thuoc ngoai chinh:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from server.adapters import NotFoundError
 from server.animation_domain import AnimationEpisode, AnimationSeries, AnimationSource
 from server.domain import ModerationEvent, Profile, PublishState, now_iso
+from server.episode_parser import parse_episode_span
 from server.series_discovery_domain import (
+    ChannelDiscoveryGroup,
+    ChannelDiscoveryResult,
     ExistingSeriesResolution,
     SeriesDiscoveryCandidate,
     SeriesDiscoveryResult,
@@ -41,7 +45,7 @@ from server.trusted_source_domain import (
     episode_slot_id,
     video_import_id,
 )
-from server.video_classifier import classify_video
+from server.video_classifier import NEGATIVE_KEYWORDS, chuan_hoa, classify_video
 from server.youtube_client import (
     SourceUrlRef,
     YouTubeApiError,
@@ -854,18 +858,21 @@ class TrustedSourceService:
             title=seed_info.title, channel_id=seed_info.channel_id,
             trusted_source=source, mappings=mappings,
             episodes_by_series=episodes_by_series)
+        seed_fp = extract_fingerprint(
+            seed_info.title, channel_id=seed_info.channel_id,
+            channel_title=seed_info.channel_title)
 
-        resolution = self._giai_quyet_series_da_co(
-            ket_qua=ket_qua, seed_info=seed_info, mappings=mappings)
+        series_id, mapping_id, tao_moi, resolution = self._giai_quyet_hoac_tao_series(
+            admin, source_id, ket_qua=ket_qua, fingerprint=seed_fp,
+            mappings=mappings, actor_role=actor_role)
 
         result = SeriesDiscoveryResult(
-            seed_video_id=youtube_video_id, resolution=resolution)
+            seed_video_id=youtube_video_id, resolution=resolution,
+            series_id=series_id, mapping_id=mapping_id, created_new_series=tao_moi)
 
-        if resolution.matched:
+        if not tao_moi:
             # -- Khop series DA CO: nhap seed qua DUNG pipeline quet thong
             # thuong, khong tao series/mapping moi nao ca. ------------------
-            result.series_id = resolution.series_id
-            result.mapping_id = resolution.mapping_id
             self._xu_ly_mot_video_discovery(
                 source=source, mappings=mappings,
                 episodes_by_series=episodes_by_series,
@@ -873,21 +880,8 @@ class TrustedSourceService:
             result.candidates_scanned = 1
             return result
 
-        # -- KHONG khop series nao — kham pha series MOI tu seed. -----------
-        seed_fp = extract_fingerprint(
-            seed_info.title, channel_id=seed_info.channel_id,
-            channel_title=seed_info.channel_title)
-
-        series = self._animation_store.create_series(
-            AnimationSeries(owner_id=admin.user_id, title=seed_fp.canonical_name))
-        mapping = self.create_mapping(
-            admin, source_id, animation_series_id=series.series_id,
-            aliases=[seed_fp.canonical_name], include_keywords=[],
-            exclude_keywords=[], actor_role=actor_role)
-
-        result.series_id = series.series_id
-        result.mapping_id = mapping["mapping_id"]
-        result.created_new_series = True
+        # -- KHONG khop series nao — series MOI da tao, kham pha video "anh
+        # chi em" tu kenh cua seed. ------------------------------------------
 
         # Nhap CHINH seed truoc (BAO DAM luon duoc xu ly du no co nam trong
         # `DISCOVERY_SCAN_PAGES` trang dau cua kenh hay khong — mot kenh lau
@@ -932,9 +926,16 @@ class TrustedSourceService:
         return result
 
     def _giai_quyet_series_da_co(
-        self, *, ket_qua, seed_info, mappings: List[SeriesMapping],
+        self, *, ket_qua, fingerprint, mappings: List[SeriesMapping],
     ) -> ExistingSeriesResolution:
         """Existing-series resolver.
+
+        `fingerprint`: `SeriesFingerprint` cua video dai dien (seed cua
+        Auto-Ingestion Phase 1, HOAC dai dien mot cum ung vien tu dong gom
+        duoc cua Phase 5 "Multi-Series Channel Ingestion") — nguoi goi tu
+        tinh san, ham nay KHONG con doc `title`/`channel_id` truc tiep, de
+        dung chung duoc cho ca hai nguon dau vao khac hinh dang nhau (mot
+        `VideoInfo` tu YouTube API so voi mot dict ung vien noi bo).
 
         Uu tien 1: `classify_video` da khop MOT mapping qua alias/tu khoa
         (`ket_qua.series_id` khac rong) — day la tin hieu DAC HIEU, tu no DA
@@ -950,8 +951,8 @@ class TrustedSourceService:
         TRUNG LAP moi (bug thuc te tim thay qua real DEV E2E, xem lich su sua).
 
         Uu tien 2 (khi KHONG mapping nao khop alias/tu khoa): tin hieu
-        "previously accepted videos" — quet TAT CA mapping cua nguon nay, seed
-        co tuong dong fingerprint cao voi MOT tap DA CO trong series do
+        "previously accepted videos" — quet TAT CA mapping cua nguon nay,
+        `fingerprint` co tuong dong cao voi MOT tap DA CO trong series do
         khong (mot kenh co the tao mapping RONG alias luc dau, video dau
         tien luon la "series moi" cho toi khi co it nhat mot tap that)."""
         if ket_qua.series_id:
@@ -959,20 +960,46 @@ class TrustedSourceService:
                 matched=True, series_id=ket_qua.series_id, mapping_id=ket_qua.mapping_id,
                 confidence=ket_qua.confidence, signals=list(ket_qua.signals))
 
-        seed_fp = extract_fingerprint(
-            seed_info.title, channel_id=seed_info.channel_id,
-            channel_title=seed_info.channel_title)
         for mapping in mappings:
             for tap in self._animation_store.list_episodes(mapping.animation_series_id):
                 fp_tap = extract_fingerprint(tap.title, channel_id=tap.source_channel_id,
                                              channel_title=tap.source_channel_title)
-                if similarity(seed_fp, fp_tap) >= CANDIDATE_SIMILARITY_THRESHOLD:
+                if similarity(fingerprint, fp_tap) >= CANDIDATE_SIMILARITY_THRESHOLD:
                     return ExistingSeriesResolution(
                         matched=True, series_id=mapping.animation_series_id,
                         mapping_id=mapping.mapping_id, confidence=ket_qua.confidence,
                         signals=[f"tiêu đề tương đồng với tập đã có “{tap.title}”"])
 
         return ExistingSeriesResolution(matched=False)
+
+    def _giai_quyet_hoac_tao_series(
+        self, admin: Profile, source_id: str, *, ket_qua, fingerprint,
+        mappings: List[SeriesMapping], actor_role: str = "",
+    ) -> tuple:
+        """Tra `(series_id, mapping_id, created_new, resolution)`.
+
+        MOT duong quyet dinh "resolve series da co hay tao moi" DUY NHAT,
+        dung chung boi `discover_series_from_seed` (Phase 1, mot seed quan
+        tri chon) va `discover_channel` (Phase 5, dai dien tu dong cua mot
+        cum ung vien) — khong bao gio duoc phep phan ky logic giua hai luong
+        dau vao nay (dac ta Phase 5 "There must remain ONE canonical path").
+
+        Series moi LUON tao o trang thai DRAFT (xem `AnimationSeries` mac
+        dinh `state`), KHONG BAO GIO tu dong xuat ban chi vi duoc tu dong
+        kham pha — xuat ban van do quan tri quyet dinh rieng, giong het
+        hanh vi da co cua Phase 1."""
+        resolution = self._giai_quyet_series_da_co(
+            ket_qua=ket_qua, fingerprint=fingerprint, mappings=mappings)
+        if resolution.matched:
+            return resolution.series_id, resolution.mapping_id, False, resolution
+
+        series = self._animation_store.create_series(
+            AnimationSeries(owner_id=admin.user_id, title=fingerprint.canonical_name))
+        mapping = self.create_mapping(
+            admin, source_id, animation_series_id=series.series_id,
+            aliases=[fingerprint.canonical_name], include_keywords=[],
+            exclude_keywords=[], actor_role=actor_role)
+        return series.series_id, mapping["mapping_id"], True, resolution
 
     def _xu_ly_mot_video_discovery(
         self, *, source: TrustedSource, mappings: List[SeriesMapping],
@@ -1028,6 +1055,206 @@ class TrustedSourceService:
                 span=None, similarity_to_seed=similarity_to_seed,
                 excluded=trang_thai in (ImportStatus.IGNORED, ImportStatus.REJECTED,
                                        ImportStatus.UNAVAILABLE, ImportStatus.FAILED)))
+
+    # ==================================================== Auto-Ingestion Phase 5
+    # "Autonomous Multi-Series Channel Ingestion" — mot nguon kieu kenh/
+    # playlist co the chua NHIEU series khac nhau cung luc (khong nhu Phase 1,
+    # noi MOT seed do quan tri chon dai dien cho DUNG MOT series). Tang nay
+    # CHI dieu phoi them buoc "gom nhom ung vien chua khop mapping nao thanh
+    # cac cum suy doan la CUNG series" — MOI buoc con lai (phan loai, resolve-
+    # hoac-tao-series, nhap/ghi that) TAI SU DUNG y nguyen ha tang Phase 1 o
+    # tren, khong co pipeline rieng nao ca.
+
+    @staticmethod
+    def _khop_tu_khoa_am_mac_dinh(title: str) -> bool:
+        """True neu tieu de khop MOT tu khoa AM MAC DINH (trailer/OST/...).
+
+        Dung lai CHINH XAC danh sach `NEGATIVE_KEYWORDS` cua `video_classifier.py`
+        (mot nguon su that duy nhat cho "tu khoa am mac dinh la gi") nhung tu
+        viet lai phep so khop ranh gioi tu o day (thay vi import `_co_tu` — ham
+        NOI BO cua module do) vi buoc nay chay TRUOC khi biet video co khop
+        mapping nao khong (`classify_video` chi ap dung NEGATIVE_KEYWORDS cho
+        video DA khop it nhat mot mapping, xem `_cham_mot_anh_xa`) — Phase 5
+        can loai cac tieu de nay ngay TU KHI gom nhom, tranh mot trailer/OST
+        tu bien thanh "series moi" cua rieng no."""
+        text_chuan_hoa = chuan_hoa(title)
+        return any(
+            re.search(rf"\b{re.escape(chuan_hoa(tu))}\b", text_chuan_hoa) is not None
+            for tu in NEGATIVE_KEYWORDS
+        )
+
+    def _gom_nhom_ung_vien(
+        self, ung_vien: List[Dict[str, Any]],
+    ) -> List[List[tuple]]:
+        """Gom cac video ung vien (CHUA khop mapping nao) thanh cac cum suy
+        doan la CUNG mot series, dua tren TUONG DONG FINGERPRINT LAN NHAU
+        (khong phai chi so voi mot seed co dinh) — thanh phan lien thong
+        (connected components) tren do thi vo huong voi canh la "similarity
+        >= CANDIDATE_SIMILARITY_THRESHOLD". `similarity()` TAT DINH va doi
+        xung (xem `series_fingerprint.py`), nen ket qua KHONG phu thuoc thu
+        tu duyet — cung mot tap dau vao luon ra cung cac cum.
+
+        Video khop mot TU KHOA AM MAC DINH bi loai HOAN TOAN o day, KHONG
+        bao gio la thanh vien/dai dien cua bat ky cum nao (mot trailer/OST
+        khong tu no la mot series)."""
+        muc: List[tuple] = []
+        for v in ung_vien:
+            if self._khop_tu_khoa_am_mac_dinh(v["title"]):
+                continue
+            fp = extract_fingerprint(
+                v["title"], channel_id=v["channel_id"], channel_title=v["channel_title"])
+            muc.append((v, fp))
+
+        cha: List[int] = list(range(len(muc)))
+
+        def tim(i: int) -> int:
+            while cha[i] != i:
+                cha[i] = cha[cha[i]]
+                i = cha[i]
+            return i
+
+        for i in range(len(muc)):
+            for j in range(i + 1, len(muc)):
+                if similarity(muc[i][1], muc[j][1]) >= CANDIDATE_SIMILARITY_THRESHOLD:
+                    ri, rj = tim(i), tim(j)
+                    if ri != rj:
+                        cha[max(ri, rj)] = min(ri, rj)
+
+        nhom_theo_goc: Dict[int, List[tuple]] = {}
+        for i in range(len(muc)):
+            nhom_theo_goc.setdefault(tim(i), []).append(muc[i])
+        return list(nhom_theo_goc.values())
+
+    @staticmethod
+    def _chon_dai_dien(nhom: List[tuple]) -> Dict[str, Any]:
+        """Chon video DAI DIEN cho MOT cum — DUNG DE dat ten/resolve series
+        (fingerprint cua dai dien quyet dinh `canonical_name` neu tao series
+        moi). Uu tien video co SO TAP DON LE (`EpisodeSpanKind.SINGLE`) THAP
+        NHAT — dang tin cay nhat de dat ten (mot "Tập 1" it co nguy co la
+        nhan quang cao/compilation hon "ALL IN ONE"); neu khong video nao co
+        so tap don le doc duoc, roi ve video xuat ban SOM NHAT (`published_at`
+        tang dan)."""
+        co_so_tap = [
+            (v, fp) for v, fp in nhom
+            if (span := parse_episode_span(v["title"])) is not None and span.is_single
+        ]
+        if co_so_tap:
+            return min(
+                co_so_tap,
+                key=lambda cap: parse_episode_span(cap[0]["title"]).start,
+            )[0]
+        return min(nhom, key=lambda cap: cap[0]["published_at"] or "9999")[0]
+
+    def discover_channel(
+        self, admin: Profile, source_id: str, *,
+        max_pages: int = DISCOVERY_SCAN_PAGES, actor_role: str = "",
+    ) -> ChannelDiscoveryResult:
+        """
+        Kham pha TOAN BO mot nguon kieu KENH/PLAYLIST, co the chua NHIEU
+        series khac nhau cung luc — xem dac ta Auto-Ingestion Phase 5
+        ("Autonomous Multi-Series Channel Ingestion"). Khac `discover_series_
+        from_seed` (Phase 1) o cho KHONG can mot video seed do quan tri chon
+        san de dai dien cho MOT series; thay vao do TU dong gom cac video
+        chua khop mapping nao thanh nhieu cum suy doan la nhieu series khac
+        nhau, resolve-hoac-tao TUNG cum mot bang chinh ha tang Phase 1.
+
+        Chi ap dung cho nguon kieu kenh/playlist — nguon MOT video don le
+        (`YOUTUBE_VIDEO`) khong co gi de "kham pha toan nguon" ca, dung
+        "Quet video co san"/discover-from-seed nhu thuong le.
+        """
+        source = self._store.get_source(source_id)
+        if source.source_type not in (
+            TrustedSourceType.YOUTUBE_CHANNEL, TrustedSourceType.YOUTUBE_PLAYLIST,
+        ):
+            raise TrustedSourceError(
+                "Chỉ nguồn kiểu kênh/playlist mới \"khám phá toàn nguồn\" được — "
+                "nguồn video đơn lẻ dùng \"Quét video có sẵn\".")
+
+        yt = self._youtube()
+        ung_vien, next_token = self._lay_ung_vien(yt, source, "", max_pages)
+
+        result = ChannelDiscoveryResult(
+            source_id=source_id, videos_discovered=len(ung_vien),
+            next_page_token=next_token)
+
+        mappings = self._store.list_mappings(source_id)
+        episodes_by_series = self._tap_da_co_theo_series(
+            [m.animation_series_id for m in mappings])
+
+        chua_xu_ly: List[tuple] = []
+        for v in ung_vien:
+            existing_import = self._store.get_import_by_video_id(v["video_id"])
+            if existing_import is not None and existing_import.status is not ImportStatus.NEW:
+                # Quyet dinh quan tri TRUOC DO luon thang — khong dua video
+                # nay vao gom nhom/phan loai lai (dac ta muc 8: "existing
+                # admin decisions must win").
+                result.already_tracked += 1
+                continue
+
+            ket_qua = classify_video(
+                title=v["title"], channel_id=v["channel_id"], trusted_source=source,
+                mappings=mappings, episodes_by_series=episodes_by_series)
+            if ket_qua.series_id:
+                result.matched_existing_mapping += 1
+                self._xu_ly_mot_video_discovery(
+                    source=source, mappings=mappings, episodes_by_series=episodes_by_series,
+                    video=v, result=result)
+                continue
+
+            chua_xu_ly.append(v)
+
+        for nhom in self._gom_nhom_ung_vien(chua_xu_ly):
+            dai_dien = self._chon_dai_dien(nhom)
+            dai_dien_fp = extract_fingerprint(
+                dai_dien["title"], channel_id=dai_dien["channel_id"],
+                channel_title=dai_dien["channel_title"])
+            ket_qua_dai_dien = classify_video(
+                title=dai_dien["title"], channel_id=dai_dien["channel_id"],
+                trusted_source=source, mappings=mappings,
+                episodes_by_series=episodes_by_series)
+
+            series_id, mapping_id, tao_moi, _resolution = self._giai_quyet_hoac_tao_series(
+                admin, source_id, ket_qua=ket_qua_dai_dien, fingerprint=dai_dien_fp,
+                mappings=mappings, actor_role=actor_role)
+
+            result.candidate_groups += 1
+            if tao_moi:
+                result.new_series_created += 1
+            else:
+                result.existing_series_reused_by_fingerprint += 1
+            result.groups.append(ChannelDiscoveryGroup(
+                canonical_name=dai_dien_fp.canonical_name,
+                representative_video_id=dai_dien["video_id"],
+                video_ids=[item[0]["video_id"] for item in nhom],
+                series_id=series_id, mapping_id=mapping_id,
+                created_new_series=tao_moi, matched_existing_series=not tao_moi))
+
+            # Nap lai mapping/tap da co MOI NHAT — mapping vua tao (hoac tap
+            # vua ghi tu cum truoc) phai duoc cac video CON LAI nhin thay
+            # NGAY trong cung mot lan goi (nhieu cum lien tiep, khong doi
+            # den lan `discover_channel` sau moi thay).
+            mappings = self._store.list_mappings(source_id)
+            episodes_by_series = self._tap_da_co_theo_series(
+                [m.animation_series_id for m in mappings])
+
+            for v, _fp in nhom:
+                self._xu_ly_mot_video_discovery(
+                    source=source, mappings=mappings, episodes_by_series=episodes_by_series,
+                    video=v, result=result)
+
+        result.excluded_negative_keyword = sum(
+            1 for v in chua_xu_ly if self._khop_tu_khoa_am_mac_dinh(v["title"]))
+
+        self._ghi_nhat_ky(
+            "trusted_source_channel_discovery", target_id=source_id,
+            actor_id=admin.user_id, actor_role=actor_role, note=(
+                f"videos_discovered={result.videos_discovered} "
+                f"candidate_groups={result.candidate_groups} "
+                f"new_series_created={result.new_series_created} "
+                f"existing_series_reused={result.existing_series_reused_by_fingerprint} "
+                f"confident_imports={len(result.confident_imports)} "
+                f"pending_review={len(result.pending_review)}"))
+        return result
 
     @staticmethod
     def _video_info_thanh_dict(info) -> Dict[str, Any]:

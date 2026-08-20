@@ -105,6 +105,46 @@ TrustedSourceService.run_reconciliation()
 CÙNG _phan_loai_va_ghi_mot_video() ở trên — không có đường xử lý riêng.
 ```
 
+## Kham pha nhieu series cung luc (Auto-Ingestion Phase 5)
+
+`POST /api/admin/animation/sources/{source_id}/discover-channel` — chi ap
+dung cho nguon kieu kenh/playlist (nguon `youtube_video` tra 400, dung
+`/discover` mot seed nhu cu). Khac `/discover` (Phase 1, MOT video seed do
+quan tri chon dai dien cho MOT series): khong can seed, tu dong quet toan
+nguon roi GOM NHOM cac video CHUA khop mapping nao thanh nhieu cum suy doan
+la nhieu series khac nhau, dua tren tuong dong fingerprint LAN NHAU (thanh
+phan lien thong, khong phai chi so voi mot video co dinh):
+
+```
+discover_channel(source_id)
+    │ _lay_ung_vien() — CUNG ham bounded/batched voi scan_source (khong
+    │                    duong fetch YouTube rieng nao ca)
+    ▼
+Video da co quyet dinh quan tri truoc do (khac NEW)?
+    │ co -> already_tracked++, bo qua (existing admin decisions must win)
+    ▼
+classify_video() khop MOT mapping da co qua alias/tu khoa?
+    │ co -> _xu_ly_mot_video_discovery() ngay, KHONG can gom cum
+    ▼
+Con lai (chua khop mapping nao) — loai truoc tu khoa AM mac dinh
+(NEGATIVE_KEYWORDS: trailer/OST/...), roi GOM NHOM theo similarity()
+fingerprint >= CANDIDATE_SIMILARITY_THRESHOLD (thanh phan lien thong)
+    ▼
+TUNG cum: chon dai dien (uu tien so tap don le thap nhat) ->
+_giai_quyet_hoac_tao_series() — helper CHUNG voi discover_series_from_seed
+(Phase 1), resolve series da co qua fingerprint HOAC tao series MOI (LUON
+DRAFT, khong bao gio tu dong xuat ban)
+    ▼
+_xu_ly_mot_video_discovery() cho TUNG video trong cum — CUNG pipeline
+Phase 1/scan_source, khong co duong ghi rieng nao ca.
+```
+
+Khong them scheduler/timer nao — `discover_channel` la mot HANH DONG quan
+tri chu dong (nut "Kham pha toan nguon"), khac han
+`fanfic-websub-reconcile.timer` (van la vong lap dinh ky DUY NHAT). Mapping
+moi tao ra tu mot cum tuong thich NGAY voi WebSub/doi chieu dinh ky sau do
+(cung mot `SeriesMapping`, khong can kham pha lai).
+
 ## Quy trình triển khai DEV thật sự đang dùng (Phase 4 xác nhận lại)
 
 **KHÔNG phải git-pull.** Repo clone trên VM tại

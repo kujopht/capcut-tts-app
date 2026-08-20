@@ -12,8 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from server.episode_parser import EpisodeSpan
-from server.series_fingerprint import SeriesFingerprint
+from server.episode_parser import EpisodeSpan, parse_episode_span
+from server.series_fingerprint import SeriesFingerprint, similarity
 
 
 @dataclass
@@ -95,6 +95,13 @@ class ChannelDiscoveryGroup:
     mapping_id: str = ""
     created_new_series: bool = False
     matched_existing_series: bool = False
+    #: Ket qua `group_confidence()` — "high"/"medium"/"low". CHI "high" (hoac
+    #: khop series DA CO, `matched_existing_series=True`, khong qua chinh
+    #: sach nay) duoc phep tao `AnimationSeries`/`SeriesMapping` MOI, xem
+    #: docstring `group_confidence`.
+    confidence_tier: str = ""
+    confidence_score: float = 0.0
+    confidence_signals: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -106,7 +113,122 @@ class ChannelDiscoveryGroup:
             "mapping_id": self.mapping_id,
             "created_new_series": self.created_new_series,
             "matched_existing_series": self.matched_existing_series,
+            "confidence_tier": self.confidence_tier,
+            "confidence_score": self.confidence_score,
+            "confidence_signals": list(self.confidence_signals),
         }
+
+
+#: Trong so cho tung tin hieu DUONG cua diem tin cay MOT CUM (Phase 5 — xem
+#: `group_confidence`), cong don roi gioi han [0.0, 1.0]. Cung triet ly voi
+#: `video_classifier._TRONG_SO`: tat dinh, khong LLM, moi diem di kem tin
+#: hieu de giai thich duoc.
+_TRONG_SO_CUM = {
+    "kich_thuoc_3": 0.45,
+    "kich_thuoc_2": 0.30,
+    "nhieu_so_tap": 0.30,   # >= 2 so tap DON LE phan biet trong cum
+    "mot_so_tap": 0.15,     # dung 1 so tap DON LE phan biet
+    "gan_ket_cao": 0.15,    # tuong dong CAP THAP NHAT giua moi cap >= 0.85
+    "nguon_playlist": 0.10,  # nguon la playlist (da duoc quan tri chon loc thu cong)
+}
+#: Phat cho tin hieu AM.
+_PHAT_CUM = {
+    "khong_so_tap_don_le": 0.20,   # KHONG video nao trong cum la mot tap DON LE
+}
+#: Nguong xep hang — xem `group_confidence`.
+NGUONG_TIN_CAY_CAO = 0.55
+NGUONG_TIN_CAY_TRUNG_BINH = 0.10
+
+
+def group_confidence(
+    nhom: List[tuple], *, is_playlist: bool = False,
+) -> tuple:
+    """
+    Diem tin cay TAT DINH cho MOT cum ung vien series MOI (Auto-Ingestion
+    Phase 5) — quyet dinh co nen tao `AnimationSeries`/`SeriesMapping` THAT
+    hay chi giu lai la ung vien cho quan tri xem xet. KHONG dung LLM: cung
+    dau vao LUON ra cung diem so + danh sach tin hieu giai thich duoc, cung
+    nguyen tac voi `video_classifier.classify_video`.
+
+    `nhom`: danh sach `(video_dict, SeriesFingerprint)` — MOT cum da gom
+    (xem `TrustedSourceService._gom_nhom_ung_vien`).
+
+    Ba hang xep hang:
+    - **HIGH** (`diem >= NGUONG_TIN_CAY_CAO`): du bang chung de tao series
+      NHAP MOI ngay — vi du cum co >= 3 video, hoac 2 video voi so tap DON
+      LE phan biet ro rang (khong phai tinh co trung ten).
+    - **MEDIUM** (`NGUONG_TIN_CAY_TRUNG_BINH <= diem < NGUONG_TIN_CAY_CAO`):
+      co MOT SO bang chung that (vi du mot video don le voi so tap doc
+      duoc) nhung KHONG DU de tu tao mot series moi mot minh — giu lai la
+      ung vien de quan tri xem, KHONG tao `AnimationSeries`/`SeriesMapping`.
+    - **LOW** (`diem < NGUONG_TIN_CAY_TRUNG_BINH`): mot video ngau nhien,
+      khong lien quan, hoac chi la ban tong hop/dai tap khong co tap don le
+      nao — KHONG du dieu kien de mot minh no tro thanh mot series, du la
+      de quan tri xem xet.
+
+    Mot video DUY NHAT, khong co bang chung nao khac (khong lap lai, khong
+    so tap phan biet) sẽ KHONG BAO GIO tu dong thanh mot series moi — dung
+    yeu cau ro rang cua dac ta: "A single arbitrary unmatched video from a
+    channel must NOT automatically become a new series."
+    """
+    tin_hieu: List[str] = []
+    diem = 0.0
+    so_video = len(nhom)
+
+    if so_video >= 3:
+        diem += _TRONG_SO_CUM["kich_thuoc_3"]
+        tin_hieu.append(f"cụm có {so_video} video (>= 3)")
+    elif so_video == 2:
+        diem += _TRONG_SO_CUM["kich_thuoc_2"]
+        tin_hieu.append("cụm có 2 video")
+    else:
+        tin_hieu.append("cụm chỉ có 1 video (singleton)")
+
+    so_tap_don_le: set = set()
+    co_tap_don_le = False
+    for v, _fp in nhom:
+        span = parse_episode_span(v.get("title", ""))
+        if span is not None and span.is_single:
+            co_tap_don_le = True
+            so_tap_don_le.add(span.start)
+
+    if len(so_tap_don_le) >= 2:
+        diem += _TRONG_SO_CUM["nhieu_so_tap"]
+        tin_hieu.append(f"phát hiện {len(so_tap_don_le)} số tập đơn lẻ phân biệt")
+    elif len(so_tap_don_le) == 1:
+        diem += _TRONG_SO_CUM["mot_so_tap"]
+        tin_hieu.append("phát hiện đúng 1 số tập đơn lẻ")
+
+    if not co_tap_don_le:
+        diem -= _PHAT_CUM["khong_so_tap_don_le"]
+        tin_hieu.append(
+            "không video nào trong cụm có số tập đơn lẻ rõ ràng "
+            "(có thể chỉ là bản tổng hợp/dải tập/video không liên quan)")
+
+    if so_video >= 2:
+        cap_diem = [
+            similarity(nhom[i][1], nhom[j][1])
+            for i in range(so_video) for j in range(i + 1, so_video)
+        ]
+        min_sim = min(cap_diem) if cap_diem else 0.0
+        if min_sim >= 0.85:
+            diem += _TRONG_SO_CUM["gan_ket_cao"]
+            tin_hieu.append(f"gắn kết cao giữa mọi cặp video (thấp nhất {min_sim:.2f})")
+
+    if is_playlist:
+        diem += _TRONG_SO_CUM["nguon_playlist"]
+        tin_hieu.append("nguồn kiểu playlist (đã được quản trị chọn lọc thủ công)")
+
+    diem = max(0.0, min(1.0, diem))
+
+    if diem >= NGUONG_TIN_CAY_CAO:
+        hang = "high"
+    elif diem >= NGUONG_TIN_CAY_TRUNG_BINH:
+        hang = "medium"
+    else:
+        hang = "low"
+
+    return hang, diem, tin_hieu
 
 
 @dataclass

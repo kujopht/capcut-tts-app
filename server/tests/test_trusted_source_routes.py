@@ -391,21 +391,32 @@ class TrustedSourceRoutesTest(Nen):
         source = self._tao_nguon_kenh(
             cid=cid, auto_import=True, minimum_confidence=0.1)
         upload_playlist = "UUwww"
-        v1, v2 = "vidW0000001", "vidW0000002"
+        # Moi series can >= 2 video (tap don le mach lac) de dat tin cay
+        # HIGH va thuc su tao series — mot video DUY NHAT KHONG con tu tao
+        # series theo chinh sach tin cay (pre-merge hardening).
+        v1, v1b, v2, v2b = "vidW0000001", "vidW0000003", "vidW0000002", "vidW0000004"
         self._dat_client_gia(FakeYouTubeClient(
             channels={cid: ChannelInfo(channel_id=cid, title="Kenh W",
                                        thumbnail_url="",
                                        uploads_playlist_id=upload_playlist)},
             playlist_items={upload_playlist: (
                 [{"contentDetails": {"videoId": v1}},
-                 {"contentDetails": {"videoId": v2}}], "")},
+                 {"contentDetails": {"videoId": v1b}},
+                 {"contentDetails": {"videoId": v2}},
+                 {"contentDetails": {"videoId": v2b}}], "")},
             videos={
                 v1: VideoInfo(video_id=v1, title="Tiên Nghịch Tập 1", channel_id=cid,
                              channel_title="Kenh W", thumbnail_url="",
                              published_at="2026-01-01", duration_seconds=100.0),
+                v1b: VideoInfo(video_id=v1b, title="Tiên Nghịch Tập 2", channel_id=cid,
+                             channel_title="Kenh W", thumbnail_url="",
+                             published_at="2026-01-02", duration_seconds=100.0),
                 v2: VideoInfo(video_id=v2, title="Đấu Phá Thương Khung Tập 1",
                              channel_id=cid, channel_title="Kenh W", thumbnail_url="",
-                             published_at="2026-01-02", duration_seconds=100.0),
+                             published_at="2026-01-03", duration_seconds=100.0),
+                v2b: VideoInfo(video_id=v2b, title="Đấu Phá Thương Khung Tập 2",
+                             channel_id=cid, channel_title="Kenh W", thumbnail_url="",
+                             published_at="2026-01-04", duration_seconds=100.0),
             },
         ))
 
@@ -414,9 +425,11 @@ class TrustedSourceRoutesTest(Nen):
             headers=self.tk_admin, json={})
         self.assertEqual(resp.status_code, 200)
         result = resp.json()["result"]
-        self.assertEqual(result["videos_discovered"], 2)
+        self.assertEqual(result["videos_discovered"], 4)
         self.assertEqual(result["candidate_groups"], 2)
         self.assertEqual(result["new_series_created"], 2)
+        for g in result["groups"]:
+            self.assertEqual(g["confidence_tier"], "high")
         self.assertIn(v1, result["confident_imports"])
         self.assertIn(v2, result["confident_imports"])
 

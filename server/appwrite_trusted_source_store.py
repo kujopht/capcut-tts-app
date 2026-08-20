@@ -468,6 +468,23 @@ class AppwriteTrustedSourceStore:
         self._create(COL_MAPPINGS, mapping.mapping_id, mapping.to_dict())
         return mapping
 
+    def create_mapping_once(self, mapping: SeriesMapping) -> Tuple[SeriesMapping, bool]:
+        """
+        Cuong che DUY NHAT theo `mapping.mapping_id` TAT DINH (xem
+        `trusted_source_domain.inferred_mapping_id`) — cung ky thuat "POST
+        trung documentId la tao-hoac-lay an toan" voi `create_import_once`/
+        `AppwriteAnimationStore.create_episode_once`. Nguoi goi PHAI da gan
+        `mapping.mapping_id` bang `inferred_mapping_id(...)` truoc khi goi.
+        """
+        try:
+            self._create(COL_MAPPINGS, mapping.mapping_id, mapping.to_dict())
+            return mapping, True
+        except NotFoundError:
+            # `_call` boc MOI loi >=400 thanh `NotFoundError` — 409 trung
+            # `documentId` cung roi vao day. Doc lai ban DA CO thay vi doan
+            # la loi that (cung nguyen tac voi `create_import_once`).
+            return _anh_xa_tu_doc(self._get(COL_MAPPINGS, mapping.mapping_id)), False
+
     def get_mapping(self, mapping_id: str) -> SeriesMapping:
         return _anh_xa_tu_doc(self._get(COL_MAPPINGS, mapping_id))
 

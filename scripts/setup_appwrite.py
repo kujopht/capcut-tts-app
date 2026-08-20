@@ -760,6 +760,15 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("created_episode_id", "string", False, 64),
             ("reviewed_by", "string", False, 64),
             ("reviewed_at", "datetime", False, None),
+            # Auto-Ingestion Phase 4 — THEM SAU (additive, khong bat buoc):
+            # trigger nao lam ban ghi nay xuat hien LAN DAU, xem docstring
+            # `VideoImport.discovered_via`. Ban ghi CU truoc Phase 4 doc
+            # thanh "" (tuong thich nguoc, khong phai loi) — KHONG can
+            # migration du lieu nguoc, chi can chay lai script nay de them
+            # thuoc tinh (an toan, "dong-thieu-thi-bo-qua" cung mau voi
+            # `moderation_state` o Phase 4 cu cua Animation).
+            ("discovered_via", "enum", False,
+             ["manual_scan", "reconcile", "websub", "auto_discovery"]),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],

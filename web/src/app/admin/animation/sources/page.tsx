@@ -10,7 +10,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { adminApi, type AdminTrustedSourceRow, type SubscriptionStatus } from "@/lib/api";
+import {
+  adminApi,
+  type AdminTrustedSourceRow,
+  type SourceHealth,
+  type SubscriptionStatus,
+} from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
 import { DanhSachTrangThai, loiApi } from "@/components/AdminShell";
@@ -37,6 +42,14 @@ const NHAN_DANG_KY: Record<SubscriptionStatus, { chu: string; lop: string }> = {
   active: { chu: "Đang hoạt động", lop: "tt-duyet" },
   expired: { chu: "Đã hết hạn", lop: "tt-treo" },
   failed: { chu: "Lỗi", lop: "tt-tuchoi" },
+};
+
+/** Auto-Ingestion Phase 4 — cung nhan/mau voi trang chi tiet nguon. */
+const NHAN_SUC_KHOE: Record<SourceHealth, { chu: string; lop: string }> = {
+  healthy: { chu: "Khoẻ mạnh", lop: "tt-duyet" },
+  degraded: { chu: "Suy giảm", lop: "tt-cho" },
+  action_required: { chu: "Cần thao tác", lop: "tt-tuchoi" },
+  disabled: { chu: "Đã tạm dừng", lop: "tt-trong" },
 };
 
 export default function AdminTrustedSourcesList() {
@@ -117,6 +130,7 @@ export default function AdminTrustedSourcesList() {
                 <th scope="col">Tên</th>
                 <th scope="col">Loại</th>
                 <th scope="col">Bật</th>
+                <th scope="col">Sức khoẻ</th>
                 <th scope="col">WebSub</th>
                 <th scope="col" className="admin-so">Series ánh xạ</th>
                 <th scope="col" className="admin-so">Đã nhập</th>
@@ -149,6 +163,11 @@ export default function AdminTrustedSourcesList() {
                   <td>
                     <span className={`tt ${s.enabled ? "tt-duyet" : "tt-trong"}`}>
                       {s.enabled ? "Đang bật" : "Đã tạm dừng"}
+                    </span>
+                  </td>
+                  <td title={s.health_reasons.join("; ")}>
+                    <span className={`tt ${NHAN_SUC_KHOE[s.health].lop}`}>
+                      {NHAN_SUC_KHOE[s.health].chu}
                     </span>
                   </td>
                   <td>

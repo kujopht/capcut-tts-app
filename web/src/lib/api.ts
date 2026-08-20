@@ -1297,6 +1297,10 @@ export interface AdminOverview {
     error_total?: number;
     reconciliation_total_runs?: number;
     reconciliation_last_run_at?: string | null;
+    /** Auto-Ingestion Phase 4 (Stage H) — xem `compute_source_health` phia server. */
+    health_counts?: Record<SourceHealth, ChiSo>;
+    active_subscriptions?: ChiSo;
+    subscriptions_expiring_soon?: ChiSo;
   };
   traffic: TrafficOverview;
   system: {
@@ -1527,6 +1531,15 @@ export type VideoImportStatus =
   | "new" | "pending" | "auto_imported" | "auto_published" | "imported"
   | "rejected" | "ignored" | "duplicate" | "conflict" | "unavailable" | "failed";
 
+/** Auto-Ingestion Phase 4 — suc khoe tong hop MOT TrustedSource, xem
+    docstring `compute_source_health` phia server. */
+export type SourceHealth = "healthy" | "degraded" | "action_required" | "disabled";
+
+/** Auto-Ingestion Phase 4 — trigger nao lam MOT VideoImport xuat hien LAN
+    DAU (nguon goc phat hien, BAT BIEN qua cac lan phan loai lai sau). Rong
+    ("") cho ban ghi tao TRUOC Phase 4. */
+export type DiscoveredVia = "manual_scan" | "reconcile" | "websub" | "auto_discovery" | "";
+
 export interface TrustedSource {
   source_id: string;
   source_type: TrustedSourceType;
@@ -1568,6 +1581,9 @@ export interface AdminTrustedSourceRow extends TrustedSource {
   imported_count: number;
   /** Trong so `imported_count` do, so tap THAT SU dang o state=published. */
   published_count: number;
+  /** Auto-Ingestion Phase 4 — xem `compute_source_health` phia server. */
+  health: SourceHealth;
+  health_reasons: string[];
 }
 
 export interface SeriesMapping {
@@ -1609,6 +1625,8 @@ export interface VideoImport {
   created_episode_id: string;
   reviewed_by: string;
   reviewed_at: string;
+  /** Auto-Ingestion Phase 4 — xem `VideoImport.discovered_via` phia server. */
+  discovered_via: DiscoveredVia;
   created_at: string;
   updated_at: string;
 }
@@ -1640,6 +1658,11 @@ export interface AdminTrustedSourceDetail {
       CHƯA có URL callback công khai (`YOUTUBE_WEBSUB_CALLBACK_BASE_URL`) —
       hiện "Chưa cấu hình" thay vì một trạng thái đăng ký bịa đặt. */
   websub_configured: boolean;
+  /** Auto-Ingestion Phase 4 — xem `compute_source_health` phia server. */
+  health: SourceHealth;
+  health_reasons: string[];
+  /** So video dang o trang thai "pending" (cho quan tri duyet) cua nguon nay. */
+  pending_count: number;
 }
 
 /** Ket qua MOT lan "Quet video co san" — xem `TrustedSourceService.scan_source`. */

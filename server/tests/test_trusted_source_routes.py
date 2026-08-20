@@ -87,6 +87,8 @@ class Nen(unittest.TestCase):
                                     animation_store=main.animation_store)
         main.creators = CreatorService(main.identity, main.store)
         main.creators.on_decision = main.social.notify_author_decision
+        self._trusted_source_store_cu = main.trusted_source_store
+        self._trusted_sources_cu = main.trusted_sources
         main.trusted_source_store = MockTrustedSourceStore()
         main.trusted_sources = TrustedSourceService(
             main.trusted_source_store, main.animation_store, main.store,
@@ -115,6 +117,14 @@ class Nen(unittest.TestCase):
         main.settings = dataclasses.replace(
             main.settings, admin_user_ids=admin_ids, owner_user_ids=owner_ids,
             moderator_user_ids=mod_ids)
+        # Khoi phuc singleton toan cuc `main.trusted_sources`/
+        # `main.trusted_source_store` — thieu buoc nay lam
+        # `youtube_api_key="fake-key"` RO RI sang cac file test KHAC chay
+        # SAU trong CUNG tien trinh (vd `test_admin.py` doc lai
+        # `youtube_data_api_configured` qua chinh singleton nay va thay
+        # "da cau hinh" gia, phat hien khi chay chung mot lenh unittest).
+        main.trusted_source_store = self._trusted_source_store_cu
+        main.trusted_sources = self._trusted_sources_cu
 
     def _nguoi(self, email: str, ten: str):
         ho_so = main.identity.register(email, "MatKhau123", ten)

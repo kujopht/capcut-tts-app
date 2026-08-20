@@ -45,6 +45,25 @@ const LOP_TRANG_THAI: Record<string, string> = {
   unavailable: "tt-tuchoi", failed: "tt-tuchoi",
 };
 
+/** Auto-Ingestion Phase 4 — nhan de hieu cho `discovered_via` (xem cung ten
+    o trang chi tiet nguon). */
+const NHAN_TRIGGER: Record<string, string> = {
+  manual_scan: "quét thủ công",
+  reconcile: "đối chiếu định kỳ",
+  websub: "WebSub (tự động)",
+  auto_discovery: "khám phá series",
+  "": "không rõ (trước Phase 4)",
+};
+
+/** Auto-Ingestion Phase 4 (Stage E, "explainability") — trang thai
+    AUTO_IMPORTED/AUTO_PUBLISHED la HE THONG tu quyet dinh, `reviewed_by`
+    rong; moi trang thai khac neu co `reviewed_by` la QUAN TRI da bam nut. */
+function nguonQuyetDinh(im: AdminVideoImportRow): string {
+  if (im.status === "auto_imported" || im.status === "auto_published") return "Tự động";
+  if (im.reviewed_by) return "Quản trị";
+  return "—";
+}
+
 const TRANG = 25;
 
 export default function AdminImportQueuePage() {
@@ -320,6 +339,7 @@ function ImportQueue() {
                     <div className="hint">
                       {im.channel_title}
                       {im.source_display_name ? ` · ${im.source_display_name}` : ""}
+                      {" · "}{NHAN_TRIGGER[im.discovered_via] ?? im.discovered_via}
                     </div>
                   </td>
                   <td>
@@ -366,6 +386,7 @@ function ImportQueue() {
                     <span className={`tt ${LOP_TRANG_THAI[im.status] ?? "tt-trong"}`}>
                       {im.status}
                     </span>
+                    <div className="hint">Quyết định: {nguonQuyetDinh(im)}</div>
                     {im.reason ? <div className="hint">{im.reason}</div> : null}
                   </td>
                   <td>

@@ -18,6 +18,7 @@ import {
   type AdminSeriesMappingRow,
   type AdminAnimationSeriesRow,
   type SeriesDiscoveryResult,
+  type SourceHealth,
   type SubscriptionStatus,
   type TrustedSourceScanResult,
 } from "@/lib/api";
@@ -40,6 +41,23 @@ const NHAN_DANG_KY: Record<SubscriptionStatus, { chu: string; lop: string }> = {
   active: { chu: "Đang hoạt động", lop: "tt-duyet" },
   expired: { chu: "Đã hết hạn", lop: "tt-treo" },
   failed: { chu: "Lỗi", lop: "tt-tuchoi" },
+};
+
+/** Auto-Ingestion Phase 4 — xem `compute_source_health` phia server. */
+const NHAN_SUC_KHOE: Record<SourceHealth, { chu: string; lop: string }> = {
+  healthy: { chu: "Khoẻ mạnh", lop: "tt-duyet" },
+  degraded: { chu: "Suy giảm", lop: "tt-cho" },
+  action_required: { chu: "Cần thao tác", lop: "tt-tuchoi" },
+  disabled: { chu: "Đã tạm dừng", lop: "tt-trong" },
+};
+
+/** Auto-Ingestion Phase 4 — nhan de hieu cho `VideoImport.discovered_via`. */
+const NHAN_TRIGGER: Record<string, string> = {
+  manual_scan: "Quét thủ công",
+  reconcile: "Đối chiếu định kỳ",
+  websub: "WebSub (tự động)",
+  auto_discovery: "Khám phá series",
+  "": "—",
 };
 
 export default function AdminTrustedSourceDetailPage({
@@ -228,6 +246,25 @@ export default function AdminTrustedSourceDetailPage({
                 {s.enabled ? "Đang bật" : "Đã tạm dừng"}
               </span>
             </header>
+
+            <div className="card stack-2">
+              <div className="row row-spread">
+                <h3 className="section-title">Automation health</h3>
+                <span className={`tt ${NHAN_SUC_KHOE[data.health].lop}`}>
+                  {NHAN_SUC_KHOE[data.health].chu}
+                </span>
+              </div>
+              {data.health_reasons.length > 0 ? (
+                <ul className="hint" style={{ margin: 0, paddingLeft: "1.2em" }}>
+                  {data.health_reasons.map((ly_do, i) => <li key={i}>{ly_do}</li>)}
+                </ul>
+              ) : (
+                <p className="hint">Không phát hiện dấu hiệu bất thường.</p>
+              )}
+              <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                <span className="tt tt-cho">Đang chờ duyệt: {data.pending_count}</span>
+              </div>
+            </div>
 
             {s.last_error_message && s.last_error_at > s.last_success_at ? (
               <div className="card stack-2" role="alert">
@@ -457,6 +494,7 @@ export default function AdminTrustedSourceDetailPage({
                     <thead>
                       <tr>
                         <th scope="col">Tiêu đề</th>
+                        <th scope="col">Nguồn phát hiện</th>
                         <th scope="col">Tập</th>
                         <th scope="col">Độ tin cậy</th>
                         <th scope="col">Trạng thái</th>
@@ -471,6 +509,7 @@ export default function AdminTrustedSourceDetailPage({
                               {im.title}
                             </a>
                           </td>
+                          <td className="hint">{NHAN_TRIGGER[im.discovered_via] ?? im.discovered_via}</td>
                           <td className="mono">{im.detected_episode_number ?? "—"}</td>
                           <td className="mono">{Math.round(im.confidence * 100)}%</td>
                           <td>{im.status}</td>

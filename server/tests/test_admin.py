@@ -666,6 +666,46 @@ class DashboardMoRongTest(Base):
         # Chua tung doi chieu lan nao trong test nay — None, khong bia chuoi rong.
         self.assertIsNone(ts["reconciliation_last_run_at"])
 
+    def test_trusted_sources_health_counts_phase4(self):
+        """Auto-Ingestion Phase 4 (Stage H, trang He thong): dashboard phai
+        tong hop dung so nguon theo tung muc suc khoe (xem
+        `compute_source_health`) — so sanh TRUOC/SAU de khong phu thuoc du
+        lieu con lai tu bai test khac trong cung tien trinh."""
+        from server.trusted_source_domain import (
+            SubscriptionStatus, TrustedSource, TrustedSourceType)
+
+        truoc = self.client.get("/api/admin/overview", headers=self.h_admin).json()["trusted_sources"]
+
+        tao = [
+            server_main.trusted_source_store.create_source(TrustedSource(
+                source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                youtube_channel_id="UC" + "h4" * 11, display_name="[test-p4] khoẻ",
+                enabled=True, auto_discover=False)),
+            server_main.trusted_source_store.create_source(TrustedSource(
+                source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                youtube_channel_id="UC" + "a4" * 11, display_name="[test-p4] cần thao tác",
+                enabled=True, auto_discover=True,
+                subscription_status=SubscriptionStatus.EXPIRED)),
+            server_main.trusted_source_store.create_source(TrustedSource(
+                source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                youtube_channel_id="UC" + "d4" * 11, display_name="[test-p4] tạm dừng",
+                enabled=False)),
+        ]
+        try:
+            sau = self.client.get("/api/admin/overview", headers=self.h_admin).json()["trusted_sources"]
+            self.assertEqual(
+                sau["health_counts"]["healthy"], truoc["health_counts"]["healthy"] + 1)
+            self.assertEqual(
+                sau["health_counts"]["action_required"],
+                truoc["health_counts"]["action_required"] + 1)
+            self.assertEqual(
+                sau["health_counts"]["disabled"], truoc["health_counts"]["disabled"] + 1)
+        finally:
+            # Don sach — tranh ro ri sang bai test KHAC dung chung
+            # `server_main.trusted_source_store` (singleton module-level).
+            for nguon in tao:
+                server_main.trusted_source_store.delete_source(nguon.source_id)
+
     def test_system_them_trang_thai_youtube_va_websub_phase7(self):
         """Phase 7 — trang He thong: YouTube Data API/WebSub CHUA cau hinh
         trong moi truong test, phai bao ro `not_configured`, khong bia

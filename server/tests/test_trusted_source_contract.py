@@ -299,6 +299,18 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                 self.assertEqual(v1.import_id, v2.import_id, ten)
                 self.assertEqual(v2.title, "Tập 1", ten)  # BAN GHI CU, khong ghi de
 
+    def test_discovered_via_luu_va_doc_lai_ca_hai_kho(self):
+        """Auto-Ingestion Phase 4: `discovered_via` phai luu/doc lai dung
+        tren CA HAI kho (mock lan Appwrite gia lap) — day la truong THEM
+        MOI, tuong thich nguoc (ban ghi cu doc thanh "")."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                v = kho.create_import_once(VideoImport(
+                    youtube_video_id="abc12345679", title="Tập 2",
+                    discovered_via="websub"))[0]
+                lai = kho.get_import(v.import_id)
+                self.assertEqual(lai.discovered_via, "websub", ten)
+
     def test_get_import_by_video_id(self):
         for ten, kho in self._cac_kho():
             with self.subTest(kho=ten):

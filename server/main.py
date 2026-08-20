@@ -84,6 +84,7 @@ from server.animation_domain import (
     AnimationSource,
     parse_youtube_id,
 )
+from server.trusted_source_domain import SubscriptionStatus, compute_source_health
 from server.trusted_source_service import (
     DEFAULT_SCAN_PAGES,
     MAX_SCAN_PAGES,
@@ -3811,8 +3812,28 @@ def _admin_dashboard_them() -> Dict[str, Any]:
 
     def _trusted_sources_rieng() -> Dict[str, Any]:
         # Phan phu thuoc `doi_chieu` duoc ghep VAO SAU o luong chinh.
+        #
+        # Auto-Ingestion Phase 4 (Stage H, trang He thong): `find_sources(
+        # limit=None)` roi lap qua TAT CA de tinh suc khoe tung nguon — VUOT
+        # nguyen tac "khong quet toan bang" cua ham nay NOI CHUNG, nhung
+        # CHAP NHAN DUOC rieng cho Trusted Sources vi so luong du kien HANG
+        # CHUC (khong phai hang nghin/hang trieu nhu users/novels) — cung
+        # gia dinh da dung o `TrustedSourceService._dinh_danh_da_ton_tai`
+        # (cung quet toan bo de chan trung lap).
+        tat_ca_nguon, tong_nguon = trusted_source_store.find_sources(limit=None)
+        dem_suc_khoe = {"healthy": 0, "degraded": 0, "action_required": 0, "disabled": 0}
+        dang_hoat_dong = 0
+        sap_het_han = 0
+        moc_sap_het_han = (now + timedelta(hours=24)).isoformat(timespec="seconds")
+        for s in tat_ca_nguon:
+            suc_khoe, _ = compute_source_health(s)
+            dem_suc_khoe[suc_khoe.value] += 1
+            if s.subscription_status is SubscriptionStatus.ACTIVE:
+                dang_hoat_dong += 1
+                if s.subscription_expires_at and s.subscription_expires_at <= moc_sap_het_han:
+                    sap_het_han += 1
         return {
-            "total": trusted_source_store.find_sources(limit=1)[1],
+            "total": tong_nguon,
             "enabled_total": trusted_source_store.find_sources(
                 enabled=True, limit=1)[1],
             "detected_today": trusted_source_store.find_imports(
@@ -3831,6 +3852,10 @@ def _admin_dashboard_them() -> Dict[str, Any]:
             # duy nhat chung minh hub da tung xac minh dang ky thanh cong —
             # xem `_trang_thai_he_thong` ve ly do "da cau hinh" khong du.
             "websub_subscription_active": trusted_source_store.has_active_websub_subscription(),
+            # Auto-Ingestion Phase 4 (Stage H) — xem `compute_source_health`.
+            "health_counts": dem_suc_khoe,
+            "active_subscriptions": dang_hoat_dong,
+            "subscriptions_expiring_soon": sap_het_han,
         }
 
     def _an_toan(future, mac_dinh):
@@ -3866,7 +3891,10 @@ def _admin_dashboard_them() -> Dict[str, Any]:
         trusted = _an_toan(f_trusted, {
             "total": None, "enabled_total": None, "detected_today": None,
             "auto_imported_total": None, "pending_total": None, "error_total": None,
-            "websub_subscription_active": False})
+            "websub_subscription_active": False,
+            "health_counts": {"healthy": None, "degraded": None,
+                             "action_required": None, "disabled": None},
+            "active_subscriptions": None, "subscriptions_expiring_soon": None})
         traffic = _an_toan(f_traffic, {
             "configured": False, "message": "Tạm thời không đọc được trạng thái.",
             "visits_today": None, "pageviews_today": None, "visits_7d": None,

@@ -69,6 +69,71 @@ WebSub bỏ lỡ. Không có cơ chế này thì đăng ký chỉ hết hạn â
 chạy được bên trong container. Kiểm tra: `systemctl list-timers
 fanfic-websub-reconcile.timer` trên VM.
 
+## Kiến trúc pipeline ingestion (Auto-Ingestion Phase 4)
+
+```
+YouTube
+    │ WebSub (PubSubHubbub) — video mới/cập nhật/gỡ
+    ▼
+POST /api/youtube/websub?source_id=... (api-dev, CÔNG KHAI, không qua admin_profile)
+    │ verify_signature (HMAC) + parse_notification (defusedxml)
+    ▼
+TrustedSourceService.handle_websub_notification()
+    │ tra cứu AUTHORITATIVE qua YouTube Data API (không tin payload)
+    │ _phan_loai_va_ghi_mot_video() — MỘT đường quyết định DUY NHẤT,
+    │ dùng chung bởi WebSub/quét thủ công/đối chiếu/discovery
+    ▼
+VideoImport (idempotent theo youtube_video_id, discovered_via ghi nguồn gốc)
+    │ đủ điều kiện auto_import/auto_publish?
+    ▼
+AnimationEpisode (episode_slot_id tất định theo (series_id, episode_number)
+                  — an toàn dưới tải đua nhau giữa mọi đường: WebSub/quét/
+                  đối chiếu/nhập thủ công)
+```
+
+Đường đối chiếu định kỳ (dự phòng + gia hạn đăng ký):
+
+```
+systemd timer (fanfic-websub-reconcile.timer, mỗi 4h)
+    ▼
+docker compose exec fanfic-dev-api python -m scripts.run_websub_reconciliation
+    ▼
+TrustedSourceService.run_reconciliation()
+    │ quét lại các nguồn enabled+auto_discover (scan_source, bounded 1 trang)
+    │ gia hạn đăng ký WebSub sắp hết hạn (RENEWAL_WINDOW=24h)
+    ▼
+CÙNG _phan_loai_va_ghi_mot_video() ở trên — không có đường xử lý riêng.
+```
+
+## Quy trình triển khai DEV thật sự đang dùng (Phase 4 xác nhận lại)
+
+**KHÔNG phải git-pull.** Repo clone trên VM tại
+`/home/robux/fanfic-dev-api/repo` (nhánh `infra/public-dev-backend-websub-v1`
+lúc clone ban đầu) đã LỆCH lịch sử git so với `origin` — các phiên sau
+(Phase 2-4) đưa code mới lên bằng cách **đồng bộ file trực tiếp**
+(`gcloud compute scp` từng file đã đổi vào `/tmp/` trên VM, rồi `cp` đè vào
+đúng đường dẫn trong repo checkout) thay vì `git pull`/`git push` lên
+nhánh đó. Sau khi file đã đúng, rebuild:
+
+```bash
+# Tại VM (qua SSH), trong deploy/:
+docker compose -f docker-compose.dev-api.yml up -d --build
+```
+
+Đây là quyết định CÓ CHỦ ĐÍCH, không phải sơ suất: nhánh `infra/...` chỉ
+tồn tại để dựng hạ tầng ban đầu (Traefik/DNS/TLS) và không được cập nhật
+song song với nhánh làm việc chính (`feature/...`) mỗi khi có thay đổi
+nghiệp vụ — đồng bộ file trực tiếp tránh phải quản lý một nhánh git thứ hai
+luôn phải rebase theo nhánh chính. Migration schema Appwrite (thêm thuộc
+tính mới, vd `discovered_via`) chạy THỦ CÔNG một lần từ máy cục bộ
+(`FAS_ENV_FILE=server/.env.selfhost python -m scripts.setup_appwrite --only <collection>`)
+TRƯỚC khi rebuild container — script này an toàn chạy lại nhiều lần
+("dòng-thiếu-thì-bỏ-qua").
+
+**Không tự động chuyển sang git-pull** trong phiên này hay bất kỳ phiên
+nào sau — nếu muốn đổi quy trình triển khai, đó là quyết định cần người
+dùng xác nhận trước.
+
 ## Trạng thái
 
 Xem `docs/handoffs/public-dev-backend-websub-v1.md` để biết mốc nào đã

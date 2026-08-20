@@ -37,6 +37,7 @@ from server.trusted_source_domain import (
     TrustedSource,
     TrustedSourceType,
     VideoImport,
+    compute_source_health,
     episode_slot_id,
     video_import_id,
 )
@@ -300,6 +301,9 @@ class TrustedSourceService:
             d["published_count"] = sum(
                 1 for eid in ids
                 if eid in tap_theo_id and tap_theo_id[eid].state is PublishState.PUBLISHED)
+            suc_khoe, ly_do = compute_source_health(s)
+            d["health"] = suc_khoe.value
+            d["health_reasons"] = ly_do
             rows.append(d)
         return {"sources": rows, "total": total, "limit": limit, "offset": offset}
 
@@ -317,6 +321,11 @@ class TrustedSourceService:
             d["series_title"] = ten_series.get(m.animation_series_id, "")
             anh_xa_ra.append(d)
         gan_day, _ = self._store.find_imports(trusted_source_id=source_id, limit=10)
+        # `limit=1` CHI de doc `total`, khong keo document — cung idiom voi
+        # `admin_list_sources`/dashboard (xem docstring Phase 5 muc hieu nang).
+        _, so_cho_duyet = self._store.find_imports(
+            trusted_source_id=source_id, status=ImportStatus.PENDING.value, limit=1)
+        suc_khoe, ly_do_suc_khoe = compute_source_health(source)
         return {
             "source": source.to_dict(),
             "mappings": anh_xa_ra,
@@ -325,6 +334,12 @@ class TrustedSourceService:
             # can biet WebSub co the dung duoc o MOI TRUONG nay hay khong de
             # hien "Chưa cấu hình" thay vi mot trang thai dang ky bia dat.
             "websub_configured": self.websub_configured(),
+            # Auto-Ingestion Phase 4 — suc khoe tong hop (xem
+            # `compute_source_health`) + so video dang cho duyet, de hien thi
+            # khoi "Automation health" tren trang chi tiet nguon.
+            "health": suc_khoe.value,
+            "health_reasons": ly_do_suc_khoe,
+            "pending_count": so_cho_duyet,
         }
 
     def _ten_series_theo_id(self, series_ids: Sequence[str]) -> Dict[str, str]:
@@ -439,7 +454,7 @@ class TrustedSourceService:
 
     def scan_source(self, admin: Profile, source_id: str, *,
                     page_token: str = "", max_pages: int = DEFAULT_SCAN_PAGES,
-                    actor_role: str = "", trigger: str = "manual") -> Dict[str, Any]:
+                    actor_role: str = "", trigger: str = "manual_scan") -> Dict[str, Any]:
         """
         Quet video CO SAN cua mot nguon — xem dac ta Phase 5 muc 11 (Historical
         Backfill). BI CHAN theo `max_pages` (moi trang 50 video) — muon quet
@@ -532,7 +547,7 @@ class TrustedSourceService:
         episodes_by_series: Dict[str, Sequence[int]], video: Dict[str, Any],
         da_la_tap: Dict[str, AnimationEpisode],
         existing_import: Optional[VideoImport] = None,
-        trigger: str = "manual",
+        trigger: str = "manual_scan",
     ) -> tuple:
         """
         Phan loai + luu MOT video — dung CHUNG boi `scan_source` (quet thu
@@ -558,7 +573,8 @@ class TrustedSourceService:
                 channel_title=video["channel_title"], thumbnail_url=video["thumbnail_url"],
                 published_at=video["published_at"], duration_seconds=video["duration_seconds"],
                 status=ImportStatus.DUPLICATE,
-                reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác."),
+                reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác.",
+                discovered_via=trigger),
                 existing_import)
             logger.info(
                 "trusted_source_ingest source_id=%s youtube_video_id=%s "
@@ -587,6 +603,7 @@ class TrustedSourceService:
             detected_episode_number=ket_qua.episode_number,
             confidence=ket_qua.confidence, signals=list(ket_qua.signals),
             status=trang_thai, reason=ly_do, created_episode_id=episode_id,
+            discovered_via=trigger,
         ), existing_import)
         logger.info(
             "trusted_source_ingest source_id=%s youtube_video_id=%s "
@@ -977,7 +994,7 @@ class TrustedSourceService:
             trang_thai, _matched = self._phan_loai_va_ghi_mot_video(
                 source=source, mappings=mappings, episodes_by_series=episodes_by_series,
                 video=video, da_la_tap=da_la_tap, existing_import=existing_import,
-                trigger="discovery")
+                trigger="auto_discovery")
             if trang_thai in (ImportStatus.AUTO_IMPORTED, ImportStatus.AUTO_PUBLISHED):
                 # CAP NHAT `episodes_by_series` NGAY (khong doi den lan goi
                 # sau) — mot lan backfill xu ly NHIEU ung vien lien tiep
@@ -1113,7 +1130,15 @@ class TrustedSourceService:
             })
             return updated.to_dict()
 
-        episode = self._animation_store.create_episode(AnimationEpisode(
+        # `create_episode_once` + `episode_slot_id` TAT DINH (Auto-Ingestion
+        # Phase 4, Stage J) — CUNG cho (series_id, episode_number) voi
+        # duong TU DONG (`_quyet_dinh_trang_thai`), de nhap THU CONG va tu
+        # dong dua nhau vao DUNG luc (vd quan tri bam "Nhap" ngay khi
+        # WebSub/doi chieu cung dang xu ly VIDEO KHAC nham cung so tap) van
+        # chi cho ra DUNG MOT tap, khong bao gio hai duong cung thanh cong
+        # rieng re voi hai ID ngau nhien khac nhau.
+        episode, da_tao_moi = self._animation_store.create_episode_once(AnimationEpisode(
+            episode_id=episode_slot_id(video.detected_series_id, video.detected_episode_number),
             series_id=video.detected_series_id, owner_id=series.owner_id,
             title=video.title, source=AnimationSource.YOUTUBE,
             external_id=video.youtube_video_id,
@@ -1123,9 +1148,21 @@ class TrustedSourceService:
             source_channel_id=video.channel_id,
             source_channel_title=video.channel_title,
         ))
+        if not da_tao_moi and episode.external_id != video.youtube_video_id:
+            # MOT video KHAC da chiem cho nay dung luc quan tri bam nut —
+            # CONFLICT that, KHONG ghi de video da co san.
+            updated = self._store.update_import(import_id, {
+                "status": ImportStatus.CONFLICT,
+                "reason": (f"Tập {video.detected_episode_number} đã có video khác "
+                          "(phát hiện lúc ghi, tránh xung đột đồng thời)."),
+            })
+            return updated.to_dict()
         # `IMPORTED` du khi co publish=True — cac gia tri AUTO_* chi danh
         # cho video HE THONG tu nhap luc quet (xem docstring `ImportStatus`),
-        # day la hanh dong THU CONG cua quan tri.
+        # day la hanh dong THU CONG cua quan tri — ke ca khi tu dong da
+        # thang cuoc dua (`da_tao_moi=False` nhung DUNG video nay), quyet
+        # dinh THU CONG cua quan tri van duoc ghi nhan (reviewed_by/at),
+        # CHI KHONG tao tap thu hai.
         updated = self._store.update_import(import_id, {
             "status": ImportStatus.IMPORTED,
             "created_episode_id": episode.episode_id,

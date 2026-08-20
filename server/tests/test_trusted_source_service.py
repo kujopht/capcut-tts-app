@@ -11,7 +11,7 @@ from server.adapters import MockMetadataStore, NotFoundError
 from server.animation_domain import AnimationEpisode, AnimationSeries, AnimationSource
 from server.animation_store import MockAnimationStore
 from server.domain import Profile, PublishState
-from server.trusted_source_domain import ImportStatus, TrustedSourceType
+from server.trusted_source_domain import ImportStatus, TrustedSourceType, VideoImport
 from server.trusted_source_service import TrustedSourceError, TrustedSourceService
 from server.trusted_source_store import MockTrustedSourceStore
 from server.youtube_client import (
@@ -630,6 +630,122 @@ class TrustedSourceServiceTest(unittest.TestCase):
         self.assertEqual(ket_qua_2["internal_errors"], 0)
         rows_2, _ = self.store.find_imports(trusted_source_id=source["source_id"])
         self.assertEqual(len(rows_2), 2)
+
+    def test_discovered_via_ghi_luc_tao_khong_doi_khi_quet_lai_trigger_khac(self):
+        """Auto-Ingestion Phase 4: `discovered_via` ghi lai trigger nao TAO
+        RA ban ghi lan dau — quet lai voi trigger KHAC (vi du doi chieu tu
+        dong sau khi da phat hien thu cong) KHONG duoc doi lai nguon goc da
+        ghi, kem ca khi ban ghi van con NEW va duoc phan loai lai."""
+        cid = "UC" + "q" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh Q", auto_import=False, minimum_confidence=0.9)
+        upload_playlist = "UUqqq"
+        video_id = "vidTrig00001"
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kenh Q",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: ([_video_item(video_id)], "")},
+            videos={video_id: VideoInfo(
+                video_id=video_id, title="Video lạ Tập 1", channel_id=cid,
+                channel_title="Kenh Q", thumbnail_url="", published_at="2026-01-01",
+                duration_seconds=100.0)},
+        )
+        self._dat_client_gia(client)
+
+        # Lan dau: trigger="manual_scan" (mac dinh cua scan_source).
+        self.svc.scan_source(self.admin, source["source_id"])
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row.discovered_via, "manual_scan")
+        self.assertEqual(row.status, ImportStatus.NEW)  # khong khop mapping nao.
+
+        # Them mapping roi quet lai VOI TRIGGER KHAC ("reconcile") — ban ghi
+        # NEW duoc phan loai lai (mapping vua co hieu luc), nhung
+        # discovered_via PHAI GIU NGUYEN "manual_scan" (nguon goc that su).
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["video la"], include_keywords=[], exclude_keywords=[])
+        self.svc.scan_source(self.admin, source["source_id"], trigger="reconcile")
+        row_2 = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row_2.discovered_via, "manual_scan")
+        self.assertEqual(row_2.status, ImportStatus.PENDING)  # gio da khop, dung tin cay chan tu dong.
+
+    def test_nhap_thu_cong_dua_voi_tu_dong_dang_xu_ly_video_khac_cung_slot(self):
+        """Auto-Ingestion Phase 4 (Stage J): quan tri bam "Nhập" THỦ CÔNG
+        cho video X, DUNG LUC tu dong (WebSub/quet) dang xu ly video Y KHAC
+        nhung cung suy ra (series, so tap) — nhap thu cong dung
+        `create_episode_once` GIONG duong tu dong, nen ca hai KHONG THE
+        cung thanh cong rieng le: ai toi truoc thang, ai toi sau la CONFLICT."""
+        cid = "UC" + "r" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh R", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+        src = self.store.get_source(source["source_id"])
+        mappings = self.store.list_mappings(source["source_id"])
+
+        # Video X: da co ban ghi VideoImport (vi du quan tri da gan series/tap
+        # thu cong truoc do), CHO nhap.
+        video_x, _ = self.store.create_import_once(VideoImport(
+            trusted_source_id=source["source_id"], youtube_video_id="vidManualX01",
+            title="Tiên Nghịch Tập 15", channel_id=cid, channel_title="Kenh R",
+            detected_series_id=self.series.series_id, detected_episode_number=15,
+            status=ImportStatus.PENDING))
+
+        # "Dung luc": video Y KHAC duoc TU DONG phan loai, cung suy ra tap 15.
+        video_y_dict = {"video_id": "vidAutoY0002", "title": "Tiên Nghịch Tập 15",
+                        "channel_id": cid, "channel_title": "Kenh R", "thumbnail_url": "",
+                        "published_at": "2026-01-01", "duration_seconds": 100.0}
+        trang_thai_y, _ = self.svc._phan_loai_va_ghi_mot_video(
+            source=src, mappings=mappings, episodes_by_series={self.series.series_id: ()},
+            video=video_y_dict, da_la_tap={})
+        self.assertEqual(trang_thai_y, ImportStatus.AUTO_IMPORTED)
+
+        # Quan tri bam "Nhap" cho video X NGAY SAU DO — da tre, phai la
+        # CONFLICT, KHONG tao tap thu hai cho cung so tap.
+        ket_qua_x = self.svc.import_video(self.admin, video_x.import_id, publish=False)
+        self.assertEqual(ket_qua_x["status"], "conflict")
+
+        tap_15 = [e for e in self.animation.list_episodes(self.series.series_id)
+                 if e.order_index == 15]
+        self.assertEqual(len(tap_15), 1)
+        self.assertEqual(tap_15[0].external_id, "vidAutoY0002")
+
+    def test_tu_dong_dua_voi_nhap_thu_cong_da_thang_truoc_thanh_conflict(self):
+        """Chieu nguoc lai cua test tren: quan tri nhap THU CONG THANG
+        TRUOC, tu dong (video khac, cung slot) toi SAU phai la CONFLICT."""
+        cid = "UC" + "s" * 22
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kenh S", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tien nghich"], include_keywords=[], exclude_keywords=[])
+        src = self.store.get_source(source["source_id"])
+        mappings = self.store.list_mappings(source["source_id"])
+
+        video_x, _ = self.store.create_import_once(VideoImport(
+            trusted_source_id=source["source_id"], youtube_video_id="vidManualX02",
+            title="Tiên Nghịch Tập 20", channel_id=cid, channel_title="Kenh S",
+            detected_series_id=self.series.series_id, detected_episode_number=20,
+            status=ImportStatus.PENDING))
+        ket_qua_x = self.svc.import_video(self.admin, video_x.import_id, publish=False)
+        self.assertEqual(ket_qua_x["status"], "imported")
+
+        video_y_dict = {"video_id": "vidAutoY0003", "title": "Tiên Nghịch Tập 20",
+                        "channel_id": cid, "channel_title": "Kenh S", "thumbnail_url": "",
+                        "published_at": "2026-01-01", "duration_seconds": 100.0}
+        trang_thai_y, _ = self.svc._phan_loai_va_ghi_mot_video(
+            source=src, mappings=mappings, episodes_by_series={self.series.series_id: ()},
+            video=video_y_dict, da_la_tap={})
+        self.assertEqual(trang_thai_y, ImportStatus.CONFLICT)
+
+        tap_20 = [e for e in self.animation.list_episodes(self.series.series_id)
+                 if e.order_index == 20]
+        self.assertEqual(len(tap_20), 1)
+        self.assertEqual(tap_20[0].external_id, "vidManualX02")
 
     def test_quet_du_tin_cay_nhung_khong_bat_auto_import_thi_pending(self):
         cid = "UC" + "m" * 22

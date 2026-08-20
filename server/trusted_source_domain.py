@@ -16,9 +16,10 @@ Module nay la Python thuan, cung quy uoc voi `animation_domain.py`.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from server.domain import new_id, now_iso
 
@@ -32,6 +33,31 @@ def video_import_id(youtube_video_id: str) -> str:
     cung mot video luon tro ve DUNG mot hang, khong tao ban thu hai.
     """
     return f"vimp_{youtube_video_id}"
+
+
+def episode_slot_id(series_id: str, episode_number: int) -> str:
+    """
+    `episode_id` TAT DINH cho MOT cho (series_id, episode_number) trong
+    pipeline TU DONG nhap cua Trusted Sources (Auto-Ingestion Phase 3) —
+    dung boi `TrustedSourceService._quyet_dinh_trang_thai` qua
+    `AnimationStore.create_episode_once`, CUNG ky thuat "POST trung
+    documentId la tao-hoac-lay an toan" voi `video_import_id`/
+    `create_import_once` va `_job_lock_id` (`appwrite_store.py`).
+
+    VI SAO CAN: hai qua trinh xu ly DONG THOI hai video KHAC NHAU nhung
+    cung suy ra (series_id, episode_number) giong nhau (hoac hai qua trinh
+    xu ly LAI CUNG mot video) co the deu doc thay "cho nay con trong" TRUOC
+    khi ben nao ghi xong — doc-roi-kiem-tra khong an toan duoi tai dua nhau.
+    Bam (khong noi truc tiep `series_id`/`episode_number`) vi `series_id` da
+    dai san, noi them so tap de vuot gioi han 36 ky tu `rowId` cua Appwrite
+    (xem ghi chu tuong tu o `server/social.py::_khoa`).
+
+    CHI danh cho episode TAO TU pipeline nay — episode do TAC GIA tu viet
+    tay van dung `new_id("anep")` ngau nhien nhu truoc (khong ap dung rang
+    buoc slot nay, hai chu the hoan toan doc lap).
+    """
+    thong = f"{series_id}\x1f{episode_number}".encode()
+    return "anep_" + hashlib.sha256(thong).hexdigest()[:28]
 
 
 class TrustedSourceType(str, Enum):
@@ -101,6 +127,69 @@ class ImportStatus(str, Enum):
     CONFLICT = "conflict"
     UNAVAILABLE = "unavailable"
     FAILED = "failed"
+
+
+class SourceHealth(str, Enum):
+    """
+    Auto-Ingestion Phase 4 — trang thai suc khoe TONG HOP cua MOT
+    `TrustedSource`, tinh boi `compute_source_health()` (thuan, khong I/O,
+    xem ham do). Chi bon gia tri, KHONG phai mot he thong giam sat phuc tap:
+
+    `DISABLED` = nguon dang tam dung — khong danh gia gi them (dung y).
+    `ACTION_REQUIRED` = can quan tri BAM MOT NUT cu the (dang ky/dang ky
+    lai WebSub) de tro lai binh thuong — KHONG tu phuc hoi duoc.
+    `DEGRADED` = lan quet/doi chieu GAN NHAT loi, nhung co the la loi tam
+    thoi se tu phuc hoi o lan sau (khong doi hoi hanh dong ngay).
+    `HEALTHY` = khong phat hien dau hieu bat thuong nao trong cac tin hieu
+    co san — KHONG suy ra tu "khong co video moi gan day" (dac ta ro:
+    thieu upload gan day KHONG phai la dau hieu benh).
+    """
+
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    ACTION_REQUIRED = "action_required"
+    DISABLED = "disabled"
+
+
+def compute_source_health(source: "TrustedSource") -> Tuple[SourceHealth, List[str]]:
+    """
+    Tra `(health, ly_do)` — THUAN, khong goi mang/kho, de test doc lap voi
+    logic nghiep vu khac (Auto-Ingestion Phase 4, dac ta "Use deterministic
+    rules and test them"). CHI dua tren cac truong DA CO SAN tren
+    `TrustedSource` — khong them "consecutive failure count" gia (truong do
+    KHONG ton tai that trong schema, bia mot con so se sai voi dac ta
+    "defensible signals").
+
+    Thu tu uu tien: DISABLED > ACTION_REQUIRED (WebSub hong hoac chua dang
+    ky du auto_discover dang bat) > DEGRADED (lan quet/doi chieu gan nhat
+    loi) > HEALTHY.
+    """
+    if not source.enabled:
+        return SourceHealth.DISABLED, ["Nguồn đang tạm dừng."]
+
+    ly_do: List[str] = []
+    if source.auto_discover:
+        if source.subscription_status is SubscriptionStatus.FAILED:
+            ly_do.append("Đăng ký WebSub thất bại — cần đăng ký lại.")
+        elif source.subscription_status is SubscriptionStatus.EXPIRED:
+            ly_do.append("Đăng ký WebSub đã hết hạn — cần đăng ký lại.")
+        elif source.subscription_status is SubscriptionStatus.NONE:
+            ly_do.append("Auto Discover đang bật nhưng chưa từng đăng ký WebSub.")
+    if ly_do:
+        return SourceHealth.ACTION_REQUIRED, ly_do
+
+    # So sanh chuoi ISO — AN TOAN vi `now_iso()` luon cung dinh dang
+    # (`isoformat(timespec="microseconds")`, cung mui gio UTC), CUNG idiom
+    # voi kiem tra da co san o frontend
+    # (`sources/[id]/page.tsx`: `last_error_at > last_success_at`).
+    if source.last_error_at and (
+            not source.last_success_at or source.last_error_at > source.last_success_at):
+        ly_do.append(
+            f"Lần quét/đối chiếu gần nhất lỗi: {source.last_error_message}"
+            if source.last_error_message else "Lần quét/đối chiếu gần nhất lỗi.")
+        return SourceHealth.DEGRADED, ly_do
+
+    return SourceHealth.HEALTHY, []
 
 
 @dataclass
@@ -287,6 +376,15 @@ class VideoImport:
     created_episode_id: str = ""
     reviewed_by: str = ""
     reviewed_at: str = ""
+    #: Auto-Ingestion Phase 4 (observability sau restart — log co cau truc
+    #: KHONG DU vi bien mat khi restart/xoay log): trigger nao lam ban ghi
+    #: NAY xuat hien LAN DAU — "manual_scan"/"reconcile"/"websub"/
+    #: "auto_discovery". CHI ghi luc TAO (xem `TrustedSourceService.
+    #: _luu_ket_qua_phan_loai`) — KHONG doi khi mot ban ghi `NEW` duoc phan
+    #: loai lai o lan quet sau (nguon goc phat hien la BAT BIEN, khac voi
+    #: "lan phan loai gan nhat"). RONG cho ban ghi tao TRUOC Phase 4
+    #: (tuong thich nguoc — doc thanh "" khong phai loi).
+    discovered_via: str = ""
     #: RONG o day CHI la gia tri khoi tao tam — kho (Mock/Appwrite) LUON ghi
     #: de bang `video_import_id(youtube_video_id)` truoc khi luu, xem
     #: docstring ham do. KHONG dua vao gia tri nay TRUOC khi qua
@@ -318,6 +416,7 @@ class VideoImport:
             "created_episode_id": self.created_episode_id,
             "reviewed_by": self.reviewed_by,
             "reviewed_at": self.reviewed_at or None,
+            "discovered_via": self.discovered_via,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

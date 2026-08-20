@@ -112,6 +112,25 @@ class ClassifyVideoTest(unittest.TestCase):
                                  mappings=[co_tu_khoa])
         self.assertGreater(kq_co.confidence, kq_khong.confidence)
 
+    def test_tu_khoa_mong_doi_tu_no_co_the_nhan_dien_mapping(self):
+        """UI cho phep de alias rong; tu khoa mong doi da luu phai duoc dung
+        lam tin hieu dinh danh, khong bi bo qua boi dieu kien alias cu."""
+        nguon = _nguon()
+        anh_xa = _anh_xa(
+            mapping_id="smap_reincarnation",
+            aliases=[],
+            include_keywords=["Reincarnation no Kaben"],
+        )
+        kq = classify_video(
+            title="ALL IN ONE | Reincarnation no Kaben Tập 1-13",
+            channel_id="UC_kenh_A",
+            trusted_source=nguon,
+            mappings=[anh_xa],
+        )
+        self.assertEqual(kq.mapping_id, "smap_reincarnation")
+        self.assertEqual(kq.series_id, "ani_1")
+        self.assertTrue(any("Reincarnation no Kaben" in s for s in kq.signals))
+
     def test_khong_co_anh_xa_nao_tra_rong(self):
         nguon = _nguon()
         kq = classify_video(title="Tiên Nghịch Tập 1", channel_id="UC_kenh_A",

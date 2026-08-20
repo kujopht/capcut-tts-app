@@ -84,6 +84,7 @@ from server.animation_domain import (
     AnimationSource,
     parse_youtube_id,
 )
+from server.trusted_source_domain import SubscriptionStatus, compute_source_health
 from server.trusted_source_service import (
     DEFAULT_SCAN_PAGES,
     MAX_SCAN_PAGES,
@@ -3811,8 +3812,28 @@ def _admin_dashboard_them() -> Dict[str, Any]:
 
     def _trusted_sources_rieng() -> Dict[str, Any]:
         # Phan phu thuoc `doi_chieu` duoc ghep VAO SAU o luong chinh.
+        #
+        # Auto-Ingestion Phase 4 (Stage H, trang He thong): `find_sources(
+        # limit=None)` roi lap qua TAT CA de tinh suc khoe tung nguon — VUOT
+        # nguyen tac "khong quet toan bang" cua ham nay NOI CHUNG, nhung
+        # CHAP NHAN DUOC rieng cho Trusted Sources vi so luong du kien HANG
+        # CHUC (khong phai hang nghin/hang trieu nhu users/novels) — cung
+        # gia dinh da dung o `TrustedSourceService._dinh_danh_da_ton_tai`
+        # (cung quet toan bo de chan trung lap).
+        tat_ca_nguon, tong_nguon = trusted_source_store.find_sources(limit=None)
+        dem_suc_khoe = {"healthy": 0, "degraded": 0, "action_required": 0, "disabled": 0}
+        dang_hoat_dong = 0
+        sap_het_han = 0
+        moc_sap_het_han = (now + timedelta(hours=24)).isoformat(timespec="seconds")
+        for s in tat_ca_nguon:
+            suc_khoe, _ = compute_source_health(s)
+            dem_suc_khoe[suc_khoe.value] += 1
+            if s.subscription_status is SubscriptionStatus.ACTIVE:
+                dang_hoat_dong += 1
+                if s.subscription_expires_at and s.subscription_expires_at <= moc_sap_het_han:
+                    sap_het_han += 1
         return {
-            "total": trusted_source_store.find_sources(limit=1)[1],
+            "total": tong_nguon,
             "enabled_total": trusted_source_store.find_sources(
                 enabled=True, limit=1)[1],
             "detected_today": trusted_source_store.find_imports(
@@ -3831,6 +3852,10 @@ def _admin_dashboard_them() -> Dict[str, Any]:
             # duy nhat chung minh hub da tung xac minh dang ky thanh cong —
             # xem `_trang_thai_he_thong` ve ly do "da cau hinh" khong du.
             "websub_subscription_active": trusted_source_store.has_active_websub_subscription(),
+            # Auto-Ingestion Phase 4 (Stage H) — xem `compute_source_health`.
+            "health_counts": dem_suc_khoe,
+            "active_subscriptions": dang_hoat_dong,
+            "subscriptions_expiring_soon": sap_het_han,
         }
 
     def _an_toan(future, mac_dinh):
@@ -3866,7 +3891,10 @@ def _admin_dashboard_them() -> Dict[str, Any]:
         trusted = _an_toan(f_trusted, {
             "total": None, "enabled_total": None, "detected_today": None,
             "auto_imported_total": None, "pending_total": None, "error_total": None,
-            "websub_subscription_active": False})
+            "websub_subscription_active": False,
+            "health_counts": {"healthy": None, "degraded": None,
+                             "action_required": None, "disabled": None},
+            "active_subscriptions": None, "subscriptions_expiring_soon": None})
         traffic = _an_toan(f_traffic, {
             "configured": False, "message": "Tạm thời không đọc được trạng thái.",
             "visits_today": None, "pageviews_today": None, "visits_7d": None,
@@ -5020,6 +5048,10 @@ class ScanSourceIn(BaseModel):
     max_pages: int = DEFAULT_SCAN_PAGES
 
 
+class DiscoverSeriesIn(BaseModel):
+    youtube_video_id: str
+
+
 class SeriesMappingCreateIn(BaseModel):
     animation_series_id: str
     aliases: List[str] = []
@@ -5046,6 +5078,15 @@ class SetImportSeriesIn(BaseModel):
 
 class ImportVideoIn(BaseModel):
     publish: bool = False
+
+
+class BulkImportItemIn(BaseModel):
+    import_id: str
+    publish: bool = False
+
+
+class BulkImportIn(BaseModel):
+    items: List[BulkImportItemIn]
 
 
 @app.post("/api/admin/animation/sources/preview")
@@ -5152,6 +5193,19 @@ def admin_scan_trusted_source(
         actor_role=settings.admin_role_of(admin.user_id).value)
 
 
+@app.post("/api/admin/animation/sources/{source_id}/discover")
+def admin_discover_series_from_seed(
+    source_id: str, payload: DiscoverSeriesIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Auto-Ingestion Phase 1 ("Seed Video -> Series Discovery -> Backfill") —
+    xem `TrustedSourceService.discover_series_from_seed`."""
+    return {"result": _nguon_tin_cay(
+        trusted_sources.discover_series_from_seed, admin, source_id,
+        youtube_video_id=payload.youtube_video_id,
+        actor_role=settings.admin_role_of(admin.user_id).value).to_dict()}
+
+
 @app.post("/api/admin/animation/sources/{source_id}/mappings")
 def admin_create_series_mapping(
     source_id: str, payload: SeriesMappingCreateIn,
@@ -5230,6 +5284,39 @@ def admin_import_video(
     return {"import": _nguon_tin_cay(
         trusted_sources.import_video, admin, import_id, publish=payload.publish,
         actor_role=settings.admin_role_of(admin.user_id).value)}
+
+
+#: Gioi han so video moi lan nhap hang loat — cung y do voi `max_pages` cua
+#: scan_source (chan mot request don le keo qua nhieu viec): admin chon tay
+#: tu danh sach dang hien (toi da 25 dong/trang, xem `TRANG` o frontend), 50
+#: du du cho ca hai trang lien tiep ma van la mot con so kiem soat duoc.
+GIOI_HAN_NHAP_HANG_LOAT = 50
+
+
+@app.post("/api/admin/animation/imports/bulk-import")
+def admin_bulk_import_videos(
+    payload: BulkImportIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """
+    Nhap NHIEU video cung luc (dac ta "bulk import") — vo mong THEM quanh
+    `import_video()` qua `TrustedSourceService.bulk_import_videos`, KHONG
+    phai mot duong ghi song song rieng. Loi cua MOT video (thieu series, da
+    trung, xung dot) khong lam hong ca lo — moi item tra ve mot trang thai
+    rieng trong `results`, route nay CHI 4xx/5xx cho loi HE THONG (vd sai
+    dinh dang request, chua cau hinh gi do), khong bao gio cho loi cua rieng
+    mot video trong danh sach.
+    """
+    if not payload.items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chưa chọn video nào để nhập.")
+    if len(payload.items) > GIOI_HAN_NHAP_HANG_LOAT:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Tối đa {GIOI_HAN_NHAP_HANG_LOAT} video mỗi lần nhập hàng loạt.")
+    return _nguon_tin_cay(
+        trusted_sources.bulk_import_videos, admin,
+        [item.model_dump() for item in payload.items],
+        actor_role=settings.admin_role_of(admin.user_id).value)
 
 
 @app.post("/api/admin/animation/imports/{import_id}/reject")

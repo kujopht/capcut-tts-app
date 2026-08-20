@@ -26,6 +26,7 @@ const list = () => read("../src/app/admin/animation/sources/page.tsx");
 const themMoi = () => read("../src/app/admin/animation/sources/new/page.tsx");
 const chiTiet = () => read("../src/app/admin/animation/sources/[id]/page.tsx");
 const hangDoi = () => read("../src/app/admin/animation/import-queue/page.tsx");
+const countUp = () => read("../src/components/CountUp.tsx");
 
 // -- lop api ------------------------------------------------------------
 
@@ -82,6 +83,51 @@ test("Danh sach nguon: mot video tac gia thuong KHONG the tu bien kenh thanh tin
   assert.match(src, /KHÔNG BAO GIỜ tự biến/);
 });
 
+test("Danh sach nguon: hien anh dai dien kenh THAT (thumbnail_url), co du phong chu cai khi thieu", () => {
+  const src = list();
+  assert.match(src, /s\.thumbnail_url\s*\?/, "phải kiểm tra thumbnail_url thật trước khi vẽ ảnh");
+  assert.match(src, /<img src=\{s\.thumbnail_url\}/);
+  assert.match(src, /className="admin-avt admin-avt-img"/);
+  // Du phong: KHONG chi ve trong khi khong co anh — van phai co mot span chu cai.
+  assert.match(src, /className="admin-avt" aria-hidden="true"/);
+});
+
+test("Danh sach nguon: hien cot 'Đã nhập'/'Đã xuất bản' tu du lieu that (imported_count/published_count)", () => {
+  const src = list();
+  assert.match(src, /Đã nhập/);
+  assert.match(src, /Đã xuất bản/);
+  assert.match(src, /\{s\.imported_count\}/);
+  assert.match(src, /\{s\.published_count\}/);
+});
+
+test("Danh sach nguon: cot WebSub dung LAI nhan/mau cua trang chi tiet (khong bia lai)", () => {
+  const src = list();
+  assert.match(src, /NHAN_DANG_KY\[s\.subscription_status\]/);
+});
+
+test("Danh sach nguon: hanh dong Tam dung/Tiep tuc TUONG MINH (khong con nhan Bat/Tat)", () => {
+  const src = list();
+  assert.match(src, /"Tạm dừng"/);
+  assert.match(src, /"Tiếp tục"/);
+  assert.match(src, /adminApi\.setTrustedSourceEnabled\(sourceId/);
+  assert.match(src, /onClick=\{\(\) => datBatTat\(s\.source_id, !s\.enabled\)\}/);
+});
+
+test("adminApi.trustedSources: kieu AdminTrustedSourceRow co imported_count/published_count", () => {
+  const src = api();
+  const at = src.indexOf("export interface AdminTrustedSourceRow");
+  const than = src.slice(at, src.indexOf("}", at));
+  assert.match(than, /imported_count:\s*number;/);
+  assert.match(than, /published_count:\s*number;/);
+});
+
+test("Chi tiet nguon: nhan Tam dung/Tiep tuc dong bo voi danh sach (khong con Bat/Tat)", () => {
+  const src = chiTiet();
+  assert.match(src, /"Đã tạm dừng"/);
+  assert.match(src, /"Tạm dừng nguồn"/);
+  assert.match(src, /"Tiếp tục nguồn"/);
+});
+
 // -- them nguon moi -----------------------------------------------------
 
 test("Them nguon: BAT BUOC xem truoc truoc khi co nut xac nhan tao", () => {
@@ -121,6 +167,20 @@ test("Chi tiet nguon: quet video co goi scanTrustedSource va hien dem ket qua", 
   assert.match(src, /adminApi\.scanTrustedSource/);
   assert.match(src, /Phát hiện: \{ketQuaQuet\.detected\}/);
   assert.match(src, /KHÔNG tự xuất bản toàn bộ kênh/);
+});
+
+test("adminApi: discoverSeriesFromSeed goi dung duong /discover (Auto-Ingestion Phase 1)", () => {
+  const src = api();
+  assert.match(src, /discoverSeriesFromSeed:[\s\S]{0,400}\/discover`/);
+  assert.match(src, /export interface SeriesDiscoveryResult \{[\s\S]{0,100}seed_video_id: string;/);
+});
+
+test("Chi tiet nguon: kham pha series tu seed goi discoverSeriesFromSeed va tai su dung parseYoutubeVideoId", () => {
+  const src = chiTiet();
+  assert.match(src, /import \{ parseYoutubeVideoId \} from "@\/lib\/youtubeUrl";/);
+  assert.match(src, /adminApi\.discoverSeriesFromSeed\(sourceId, videoId\)/);
+  assert.match(src, /Khám phá series từ video này/);
+  assert.match(src, /ketQuaKhamPha\.created_new_series/);
 });
 
 test("Chi tiet nguon: xoa nguon va xoa anh xa deu qua ConfirmDialog", () => {
@@ -165,4 +225,105 @@ test("Hang doi nhap: useSearchParams duoc boc trong Suspense (yeu cau Next.js)",
   const src = hangDoi();
   const capNgoai = src.slice(0, src.indexOf("function ImportQueue()"));
   assert.match(capNgoai, /<Suspense/);
+});
+
+// -- nhap hang loat (bulk import) -----------------------------------------
+
+test("Hang doi nhap: adminApi.trustedSources co ham bulkImportVideos, khong tu ghep URL rieng", () => {
+  const src = api();
+  assert.match(src, /bulkImportVideos:\s*\(/);
+  assert.match(src, /\/api\/admin\/animation\/imports\/bulk-import/);
+});
+
+test("Hang doi nhap: checkbox tung dong CHI cho phep chon video DA CO series+tap", () => {
+  const src = hangDoi();
+  assert.match(src, /coTheChon\s*=\s*useCallback\(/);
+  assert.match(src, /Boolean\(im\.detected_series_id\)\s*&&\s*im\.detected_episode_number\s*!==\s*null/);
+  assert.match(src, /disabled={!coTheChon\(im\)}/);
+});
+
+test("Hang doi nhap: lua chon TU DONG don sach khi doi trang/loc (dieu chinh state trong than component, KHONG dung useEffect)", () => {
+  const src = hangDoi();
+  assert.match(src, /const khoaLoc = `\$\{tt\}\|\$\{nguonLoc\}\|\$\{trangThai\}`;/);
+  assert.match(src, /if \(khoaLoc !== khoaLocDaThay\) \{[\s\S]{0,120}setDaChon\(new Set\(\)\);/);
+  // KHONG dung useEffect cho viec nay — trung dung loi lint set-state-in-effect
+  // da tung vap phai o sources/[id]/page.tsx (xem docstring dau ham).
+});
+
+test("Hang doi nhap: thanh hanh dong hang loat CHI hien khi co video da chon, kem nut Bo chon", () => {
+  const src = hangDoi();
+  assert.match(src, /daChon\.size > 0\s*\?/);
+  assert.match(src, /Đã chọn \{daChon\.size\} video/);
+  assert.match(src, /onClick={\(\) => setDaChon\(new Set\(\)\)}/);
+});
+
+test("Hang doi nhap: nhap hang loat BAT BUOC xem truoc qua ConfirmDialog truoc khi goi API", () => {
+  const src = hangDoi();
+  // Nut mo hop thoai (dat `hoiNhapHangLoat`), KHONG goi adminApi truc tiep.
+  assert.match(src, /onClick={\(\) => setHoiNhapHangLoat\(false\)}/);
+  assert.match(src, /onClick={\(\) => setHoiNhapHangLoat\(true\)}/);
+  // Chi ConfirmDialog (onConfirm) moi thuc su goi API nhap hang loat.
+  const atDialog = src.indexOf("hoiNhapHangLoat !== null");
+  const thanDialog = src.slice(atDialog, src.indexOf("/>", atDialog));
+  assert.match(thanDialog, /onConfirm={\(\) => nhapHangLoat\(Boolean\(hoiNhapHangLoat\)\)}/);
+  assert.match(thanDialog, /dsDaChon\.map/, "phải liệt kê ĐÚNG các video sẽ bị tác động trước khi xác nhận");
+});
+
+test("Hang doi nhap: nhapHangLoat dung adminApi.bulkImportVideos (mot request), khong lap goi importVideo tung video", () => {
+  const src = hangDoi();
+  const at = src.indexOf("async function nhapHangLoat");
+  const than = src.slice(at, src.indexOf("\n  }", at));
+  assert.match(than, /adminApi\.bulkImportVideos\(/);
+  assert.ok(!than.includes("adminApi.importVideo("),
+    "nhapHangLoat không được lặp gọi importVideo từng video — phải dùng route bulk-import dùng chung");
+});
+
+test("Hang doi nhap: ket qua nhap hang loat bao ro so thanh cong/loi, khong bao 'thanh cong' gia khi co video loi", () => {
+  const src = hangDoi();
+  const at = src.indexOf("async function nhapHangLoat");
+  const than = src.slice(at, src.indexOf("\n  }", at));
+  assert.match(than, /results\.filter\(\(r\) => r\.ok\)\.length/);
+  assert.match(than, /thatBai === 0/);
+});
+
+test("CountUp: khong dung framer-motion hay dependency runtime nao, tu ve bang requestAnimationFrame", () => {
+  const src = countUp();
+  assert.ok(!/from "framer-motion"/.test(src), "phải là component tự viết, không kéo runtime nặng");
+  assert.match(src, /requestAnimationFrame/);
+});
+
+test("CountUp: tat hoat hinh khi prefers-reduced-motion, hien luon gia tri cuoi", () => {
+  const src = countUp();
+  assert.match(src, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/);
+  assert.match(src, /setHien\(den\)/);
+});
+
+test("Anh xa series: payload va bang reload deu giu tu khoa mong doi", () => {
+  const src = chiTiet();
+  assert.match(src, /include_keywords:\s*tachDay\(tuKhoaBaoGom\)/);
+  assert.match(src, /<th scope="col">Từ khoá mong đợi<\/th>/);
+  assert.match(src, /m\.include_keywords\.join\(", "\) \|\| "—"/);
+});
+
+test("CountUp: render dau la 0 o ca server/client, sau mount moi chay toi gia tri that", () => {
+  const src = countUp();
+  assert.match(src, /useState\(0\)/,
+    "giá trị đầu phải cố định ở 0 để vừa có hiệu ứng first-mount vừa không hydration mismatch");
+  assert.match(src, /useRef\(0\)/,
+    "mốc nội suy đầu tiên phải là 0, không phải giá trị cuối");
+});
+
+test("CountUp: chi chay khi gia tri thay doi va huy frame khi unmount/doi gia tri", () => {
+  const src = countUp();
+  assert.match(src, /if \(tu === den\) return;/);
+  assert.match(src, /cancelAnimationFrame\(frameId\)/);
+  assert.match(src, /if \(tiLe < 1\) frameId = requestAnimationFrame\(buoc\)/,
+    "vòng animation phải tự dừng khi đạt giá trị cuối");
+});
+
+test("Trang danh sach nguon: cot Da nhap/Da xuat ban dung CountUp thay vi in so tinh", () => {
+  const src = list();
+  assert.match(src, /import \{ CountUp \} from "@\/components\/CountUp";/);
+  assert.match(src, /<CountUp value=\{s\.imported_count\} \/>/);
+  assert.match(src, /<CountUp value=\{s\.published_count\} \/>/);
 });

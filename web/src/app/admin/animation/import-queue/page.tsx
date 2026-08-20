@@ -45,6 +45,25 @@ const LOP_TRANG_THAI: Record<string, string> = {
   unavailable: "tt-tuchoi", failed: "tt-tuchoi",
 };
 
+/** Auto-Ingestion Phase 4 — nhan de hieu cho `discovered_via` (xem cung ten
+    o trang chi tiet nguon). */
+const NHAN_TRIGGER: Record<string, string> = {
+  manual_scan: "quét thủ công",
+  reconcile: "đối chiếu định kỳ",
+  websub: "WebSub (tự động)",
+  auto_discovery: "khám phá series",
+  "": "không rõ (trước Phase 4)",
+};
+
+/** Auto-Ingestion Phase 4 (Stage E, "explainability") — trang thai
+    AUTO_IMPORTED/AUTO_PUBLISHED la HE THONG tu quyet dinh, `reviewed_by`
+    rong; moi trang thai khac neu co `reviewed_by` la QUAN TRI da bam nut. */
+function nguonQuyetDinh(im: AdminVideoImportRow): string {
+  if (im.status === "auto_imported" || im.status === "auto_published") return "Tự động";
+  if (im.reviewed_by) return "Quản trị";
+  return "—";
+}
+
 const TRANG = 25;
 
 export default function AdminImportQueuePage() {
@@ -85,6 +104,84 @@ function ImportQueue() {
   const [dangXuLy, setDangXuLy] = useState<string | null>(null);
   const [hoiTuChoi, setHoiTuChoi] = useState<AdminVideoImportRow | null>(null);
   const [lyDo, setLyDo] = useState("");
+
+  /*
+   * Nhap hang loat (bulk import) — chon nhieu dong, xem truoc, roi nhap
+   * cung luc. CHI cho chon video DA co du series+tap (dac ta: "distinguish
+   * videos that cannot yet be imported because a series mapping is
+   * missing") — video thieu du lieu se bi loai khoi tap chon TU DONG (xem
+   * `theoDoiChon`), khong chi disable nut ma con don sach lua chon khi
+   * trang tai lai (vd sau khi gan series cho mot video khac).
+   */
+  const [daChon, setDaChon] = useState<ReadonlySet<string>>(new Set());
+  const [hoiNhapHangLoat, setHoiNhapHangLoat] = useState<boolean | null>(null); // null=dong, true/false = gia tri `publish` dinh dung
+  const [dangNhapHangLoat, setDangNhapHangLoat] = useState(false);
+
+  const coTheChon = useCallback(
+    (im: AdminVideoImportRow) => Boolean(im.detected_series_id) && im.detected_episode_number !== null,
+    [],
+  );
+
+  /*
+   * Don sach lua chon khi doi trang/loc — ID cu co the khong con trong
+   * trang moi, giu lai se hien "da chon N" sai voi thu that thay. Dieu
+   * chinh state NGAY TRONG THAN component (khong dung `useEffect`) — cung
+   * mau voi `sources/[id]/page.tsx` da sua truoc do cho dung loi lint
+   * `react-hooks/set-state-in-effect` (goi setState dong bo trong effect
+   * gay render dom domino khong can thiet).
+   */
+  const khoaLoc = `${tt}|${nguonLoc}|${trangThai}`;
+  const [khoaLocDaThay, setKhoaLocDaThay] = useState(khoaLoc);
+  if (khoaLoc !== khoaLocDaThay) {
+    setKhoaLocDaThay(khoaLoc);
+    setDaChon(new Set());
+  }
+
+  function chuyenChon(importId: string) {
+    setDaChon((truoc) => {
+      const moi = new Set(truoc);
+      if (moi.has(importId)) moi.delete(importId); else moi.add(importId);
+      return moi;
+    });
+  }
+
+  const dsCoTheChonTrongTrang = ds.filter(coTheChon);
+  const daChonHet = dsCoTheChonTrongTrang.length > 0
+    && dsCoTheChonTrongTrang.every((im) => daChon.has(im.import_id));
+
+  function chonTatCaTrongTrang() {
+    setDaChon((truoc) => {
+      if (daChonHet) return new Set();
+      const moi = new Set(truoc);
+      for (const im of dsCoTheChonTrongTrang) moi.add(im.import_id);
+      return moi;
+    });
+  }
+
+  const dsDaChon = ds.filter((im) => daChon.has(im.import_id));
+
+  async function nhapHangLoat(publish: boolean) {
+    if (dsDaChon.length === 0) return;
+    setDangNhapHangLoat(true);
+    try {
+      const { results } = await adminApi.bulkImportVideos(
+        dsDaChon.map((im) => ({ importId: im.import_id, publish })));
+      const thanhCong = results.filter((r) => r.ok).length;
+      const thatBai = results.length - thanhCong;
+      if (thatBai === 0) {
+        toast.ok(`Đã nhập ${thanhCong} video.`);
+      } else {
+        toast.error(`Nhập ${thanhCong}/${results.length} video — ${thatBai} video lỗi (xem trạng thái từng dòng).`);
+      }
+      setDaChon(new Set());
+      setHoiNhapHangLoat(null);
+      reload();
+    } catch (cause) {
+      toast.error(loiApi(cause, "Không nhập được lô video này."));
+    } finally {
+      setDangNhapHangLoat(false);
+    }
+  }
 
   function moGan(im: AdminVideoImportRow) {
     setDangGan(im.import_id);
@@ -180,11 +277,39 @@ function ImportQueue() {
         ))}
       </div>
 
+      {daChon.size > 0 ? (
+        <div className="row row-spread admin-bulk-bar">
+          <span className="hint">Đã chọn {daChon.size} video</span>
+          <div className="row row-tight">
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setDaChon(new Set())}>
+              Bỏ chọn
+            </button>
+            <button type="button" className="btn btn-sm"
+                    onClick={() => setHoiNhapHangLoat(false)}>
+              Nhập đã chọn
+            </button>
+            <button type="button" className="btn btn-sm btn-primary"
+                    onClick={() => setHoiNhapHangLoat(true)}>
+              Nhập + Xuất bản đã chọn
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <DanhSachTrangThai dangTai={loading} loi={error} rong={ds.length === 0} onThuLai={reload}>
         <div className="admin-bang-boc">
           <table className="admin-bang">
             <thead>
               <tr>
+                <th scope="col">
+                  <input
+                    type="checkbox"
+                    aria-label="Chọn tất cả video có thể nhập trong trang này"
+                    checked={daChonHet}
+                    disabled={dsCoTheChonTrongTrang.length === 0}
+                    onChange={chonTatCaTrongTrang}
+                  />
+                </th>
                 <th scope="col">Video</th>
                 <th scope="col">Series / Tập phát hiện</th>
                 <th scope="col">Độ tin cậy</th>
@@ -197,6 +322,16 @@ function ImportQueue() {
               {ds.map((im: AdminVideoImportRow) => (
                 <tr key={im.import_id}>
                   <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Chọn "${im.title}" để nhập hàng loạt`}
+                      checked={daChon.has(im.import_id)}
+                      disabled={!coTheChon(im)}
+                      title={coTheChon(im) ? "" : "Chưa gán series/tập — không thể nhập hàng loạt"}
+                      onChange={() => chuyenChon(im.import_id)}
+                    />
+                  </td>
+                  <td>
                     <a href={`https://www.youtube.com/watch?v=${im.youtube_video_id}`}
                        target="_blank" rel="noreferrer">
                       {im.title}
@@ -204,6 +339,7 @@ function ImportQueue() {
                     <div className="hint">
                       {im.channel_title}
                       {im.source_display_name ? ` · ${im.source_display_name}` : ""}
+                      {" · "}{NHAN_TRIGGER[im.discovered_via] ?? im.discovered_via}
                     </div>
                   </td>
                   <td>
@@ -250,6 +386,7 @@ function ImportQueue() {
                     <span className={`tt ${LOP_TRANG_THAI[im.status] ?? "tt-trong"}`}>
                       {im.status}
                     </span>
+                    <div className="hint">Quyết định: {nguonQuyetDinh(im)}</div>
                     {im.reason ? <div className="hint">{im.reason}</div> : null}
                   </td>
                   <td>
@@ -314,6 +451,41 @@ function ImportQueue() {
         busy={dangXuLy === hoiTuChoi?.import_id}
         onConfirm={tuChoi}
         onCancel={() => setHoiTuChoi(null)}
+      />
+
+      {/*
+        Xem truoc TRUOC KHI nhap hang loat — dac ta cam ro "bulk import
+        should NOT be a mysterious one-click action with no preview". Liet
+        ke DUNG nhung video se bi tac dong, kem series/tap da gan cho tung
+        video, de quan tri xac nhan dung y truoc khi ghi thay doi thuc.
+      */}
+      <ConfirmDialog
+        open={hoiNhapHangLoat !== null}
+        title={hoiNhapHangLoat
+          ? `Nhập + xuất bản ${dsDaChon.length} video?`
+          : `Nhập ${dsDaChon.length} video (bản nháp)?`}
+        body={
+          <div className="stack-2">
+            <p className="hint">
+              {hoiNhapHangLoat
+                ? "Các tập sẽ hiện công khai ngay sau khi nhập."
+                : "Các tập sẽ ở dạng bản nháp, chưa hiện công khai."}
+              {" "}Video đã tồn tại hoặc trùng số tập sẽ tự báo lỗi riêng, không ảnh hưởng video khác trong lô.
+            </p>
+            <ul className="admin-bulk-xem-truoc">
+              {dsDaChon.map((im) => (
+                <li key={im.import_id}>
+                  <strong>{im.title}</strong>
+                  <span className="hint"> — {im.series_title || "?"} · Tập {im.detected_episode_number}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        }
+        confirmLabel={hoiNhapHangLoat ? "Nhập + Xuất bản" : "Nhập"}
+        busy={dangNhapHangLoat}
+        onConfirm={() => nhapHangLoat(Boolean(hoiNhapHangLoat))}
+        onCancel={() => setHoiNhapHangLoat(null)}
       />
     </section>
   );

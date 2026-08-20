@@ -17,12 +17,19 @@ BA phu thuoc ngoai chinh:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from server.adapters import NotFoundError
-from server.animation_domain import AnimationEpisode, AnimationSource
+from server.animation_domain import AnimationEpisode, AnimationSeries, AnimationSource
 from server.domain import ModerationEvent, Profile, PublishState, now_iso
+from server.series_discovery_domain import (
+    ExistingSeriesResolution,
+    SeriesDiscoveryCandidate,
+    SeriesDiscoveryResult,
+)
+from server.series_fingerprint import extract_fingerprint, similarity
 from server.trusted_source_domain import (
     ImportStatus,
     SeriesMapping,
@@ -30,6 +37,9 @@ from server.trusted_source_domain import (
     TrustedSource,
     TrustedSourceType,
     VideoImport,
+    compute_source_health,
+    episode_slot_id,
+    video_import_id,
 )
 from server.video_classifier import classify_video
 from server.youtube_client import (
@@ -65,10 +75,53 @@ RECONCILIATION_MAX_PAGES = 1
 #: KHONG BAO GIO cap thoi han vinh vien (xem `server/youtube_websub.py`).
 RENEWAL_WINDOW = timedelta(hours=24)
 
+#: Auto-Ingestion Phase 1 ("Seed Video -> Series Discovery -> Backfill",
+#: xem `discover_series_from_seed`) — doc lap voi `TrustedSource.
+#: minimum_confidence`/`SeriesMapping.minimum_confidence` (nguong do RIENG
+#: cho quyet dinh TU DONG NHAP mot video, khong doi o day).
+#:
+#: `CANDIDATE_SIMILARITY_THRESHOLD` — do tuong dong fingerprint (`series_
+#: fingerprint.similarity`) TOI THIEU de mot video quet duoc tu kenh cua
+#: seed (hoac mot tap DA CO, xem "previously accepted videos" trong
+#: `_giai_quyet_series_da_co`) duoc coi la "thuoc ve" cung series — duoi muc
+#: nay video bi BO QUA HOAN TOAN (khong tao `VideoImport`), tranh nhap tran
+#: lan ca kenh (dac ta ro "do NOT indiscriminately import the whole channel").
+CANDIDATE_SIMILARITY_THRESHOLD = 0.6
+#: So trang toi da quet KENH cua seed tim video "anh chi em" — cung muc do
+#: voi `DEFAULT_SCAN_PAGES` (bounded YouTube API calls).
+DISCOVERY_SCAN_PAGES = DEFAULT_SCAN_PAGES
+
 
 class TrustedSourceError(Exception):
     """Loi dau vao/nghiep vu (URL khong doc duoc, series khong ton tai,
     trang thai khong hop le...) — tang route doi thanh HTTP 400."""
+
+
+#: Log co cau truc (Auto-Ingestion Phase 3, yeu cau observability) — CHI ghi
+#: ra stdout/stderr qua `logging` chuan (khong them lop luu tru rieng, xem
+#: `docker logs fanfic-dev-api`/journald tren VM). Moi quyet dinh phan loai
+#: MOT video ghi DUNG mot dong o day: source_id/youtube_video_id/mapping_id/
+#: series_id/import_id/decision/confidence/trigger/result — KHONG BAO GIO
+#: chua secret/token/chu ky (chi id/metadata cong khai).
+#:
+#: Gan HANDLER RIENG (khong dua vao `logging.basicConfig`/root logger cua
+#: tien trinh chinh) vi module nay chay o HAI ngu canh khac nhau: server web
+#: (`server.main`, qua uvicorn) VA script CLI doc lap
+#: (`scripts/run_websub_reconciliation.py`, KHONG BAO GIO import `server.
+#: main`) — neu chi cau hinh o `server/main.py` thi log cua duong doi chieu
+#: dinh ky (chay qua systemd timer, chinh la noi debug can nhat) se im lang
+#: bien mat. `propagate = False` de tranh in HAI LAN qua handler root neu
+#: noi khac (vd `logging.basicConfig` cua mot tien trinh khac) cung cau
+#: hinh root logger. KHONG dat level INFO cho root/thu vien ngoai (httpx,
+#: uvicorn...) — chi rieng logger nay moi len INFO, tranh log ngoai y muon.
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logger.addHandler(_handler)
+    logger.propagate = False
 
 
 class TrustedSourceService:
@@ -232,10 +285,25 @@ class TrustedSourceService:
         items, total = self._store.find_sources(
             query=query, enabled=enabled, limit=limit, offset=offset)
         dem = self._store.mapping_counts([s.source_id for s in items])
+        #: "Da nhap"/"Da xuat ban" — MOT lan tra `episode_id` do tung nguon
+        #: tao ra (thu cong lan tu dong), roi MOT lan tra nguoc cac tap do de
+        #: biet cai nao THAT SU da xuat ban (`state`) — khong N+1, cung idiom
+        #: voi `mapping_counts`.
+        theo_nguon = self._store.imported_episode_ids([s.source_id for s in items])
+        tat_ca_id = [eid for ids in theo_nguon.values() for eid in ids]
+        tap_theo_id = self._animation_store.get_episodes_by_ids(tat_ca_id)
         rows = []
         for s in items:
             d = s.to_dict()
             d["mapping_count"] = dem.get(s.source_id, 0)
+            ids = theo_nguon.get(s.source_id, [])
+            d["imported_count"] = len(ids)
+            d["published_count"] = sum(
+                1 for eid in ids
+                if eid in tap_theo_id and tap_theo_id[eid].state is PublishState.PUBLISHED)
+            suc_khoe, ly_do = compute_source_health(s)
+            d["health"] = suc_khoe.value
+            d["health_reasons"] = ly_do
             rows.append(d)
         return {"sources": rows, "total": total, "limit": limit, "offset": offset}
 
@@ -253,6 +321,11 @@ class TrustedSourceService:
             d["series_title"] = ten_series.get(m.animation_series_id, "")
             anh_xa_ra.append(d)
         gan_day, _ = self._store.find_imports(trusted_source_id=source_id, limit=10)
+        # `limit=1` CHI de doc `total`, khong keo document — cung idiom voi
+        # `admin_list_sources`/dashboard (xem docstring Phase 5 muc hieu nang).
+        _, so_cho_duyet = self._store.find_imports(
+            trusted_source_id=source_id, status=ImportStatus.PENDING.value, limit=1)
+        suc_khoe, ly_do_suc_khoe = compute_source_health(source)
         return {
             "source": source.to_dict(),
             "mappings": anh_xa_ra,
@@ -261,6 +334,12 @@ class TrustedSourceService:
             # can biet WebSub co the dung duoc o MOI TRUONG nay hay khong de
             # hien "Chưa cấu hình" thay vi mot trang thai dang ky bia dat.
             "websub_configured": self.websub_configured(),
+            # Auto-Ingestion Phase 4 — suc khoe tong hop (xem
+            # `compute_source_health`) + so video dang cho duyet, de hien thi
+            # khoi "Automation health" tren trang chi tiet nguon.
+            "health": suc_khoe.value,
+            "health_reasons": ly_do_suc_khoe,
+            "pending_count": so_cho_duyet,
         }
 
     def _ten_series_theo_id(self, series_ids: Sequence[str]) -> Dict[str, str]:
@@ -375,15 +454,16 @@ class TrustedSourceService:
 
     def scan_source(self, admin: Profile, source_id: str, *,
                     page_token: str = "", max_pages: int = DEFAULT_SCAN_PAGES,
-                    actor_role: str = "") -> Dict[str, Any]:
+                    actor_role: str = "", trigger: str = "manual_scan") -> Dict[str, Any]:
         """
         Quet video CO SAN cua mot nguon — xem dac ta Phase 5 muc 11 (Historical
         Backfill). BI CHAN theo `max_pages` (moi trang 50 video) — muon quet
         tiep thi goi lai voi `next_page_token` tra ve.
 
-        IDEMPOTENT: video DA CO ban ghi `VideoImport` tu truoc (bat ke trang
-        thai) KHONG bi phan loai lai/ghi de — mot quyet dinh quan tri da co
-        (vi du da Tu choi) khong tu nhien doi khi quet lai. Video DA la mot
+        IDEMPOTENT: video DA CO mot QUYET DINH (vi du da Tu choi/Bo qua/Nhap)
+        KHONG bi phan loai lai/ghi de. Rieng ban ghi `NEW` chua khop mapping
+        nao duoc phan loai lai TREN CHINH ban ghi do, de mapping vua tao/sua
+        co hieu luc ma khong tao import trung. Video DA la mot
         `AnimationEpisode` that (o BAT KY series nao) duoc danh dau DUPLICATE
         ngay, khong phan loai.
         """
@@ -410,17 +490,39 @@ class TrustedSourceService:
 
         dem = {"detected": len(ung_vien), "matched": 0, "pending": 0,
               "auto_imported": 0, "auto_published": 0, "excluded": 0,
-              "conflicts": 0, "duplicates": 0, "already_tracked": 0}
+              "conflicts": 0, "duplicates": 0, "already_tracked": 0,
+              "internal_errors": 0}
 
         for v in ung_vien:
             vid = v["video_id"]
-            if vid in da_theo_doi:
+            import_hien_tai = da_theo_doi.get(vid)
+            if (import_hien_tai is not None
+                    and import_hien_tai.status is not ImportStatus.NEW):
                 dem["already_tracked"] += 1
-                continue  # DA CO ban ghi — KHONG phan loai lai (idempotent).
+                continue  # DA CO quyet dinh — KHONG phan loai lai.
 
-            trang_thai, matched = self._phan_loai_va_ghi_mot_video(
-                source=source, mappings=mappings, episodes_by_series=episodes_by_series,
-                video=v, da_la_tap=da_la_tap)
+            try:
+                trang_thai, matched = self._phan_loai_va_ghi_mot_video(
+                    source=source, mappings=mappings, episodes_by_series=episodes_by_series,
+                    video=v, da_la_tap=da_la_tap, existing_import=import_hien_tai,
+                    trigger=trigger)
+            except NotFoundError as exc:
+                # Loi NOI BO/TAM THOI luc phan loai-va-ghi MOT video (vd
+                # Appwrite tra ve 500/503 thoang qua — `NotFoundError` la
+                # kieu loi CHUNG cho ca "khong tim thay" LAN "loi HTTP/mang",
+                # xem docstring `AppwriteAnimationStore._call`) KHONG duoc
+                # lam sap ca lo quet/doi chieu (cung nguyen tac phan lap loi
+                # tung item voi `bulk_import_videos`). KHONG ghi VideoImport
+                # nao cho video nay — lan quet/thong bao SAU se tu nhien thu
+                # lai (idempotent, khong co ban ghi nao de mac ket o trang
+                # thai sai).
+                dem["internal_errors"] += 1
+                logger.warning(
+                    "trusted_source_ingest source_id=%s youtube_video_id=%s "
+                    "mapping_id= series_id= import_id= decision= confidence= "
+                    "trigger=%s result=internal_error error=%s",
+                    source_id, vid, trigger, exc)
+                continue
 
             if trang_thai in (ImportStatus.AUTO_IMPORTED, ImportStatus.AUTO_PUBLISHED):
                 dem["auto_imported" if trang_thai is ImportStatus.AUTO_IMPORTED
@@ -444,6 +546,8 @@ class TrustedSourceService:
         self, *, source: TrustedSource, mappings: List[SeriesMapping],
         episodes_by_series: Dict[str, Sequence[int]], video: Dict[str, Any],
         da_la_tap: Dict[str, AnimationEpisode],
+        existing_import: Optional[VideoImport] = None,
+        trigger: str = "manual_scan",
     ) -> tuple:
         """
         Phan loai + luu MOT video — dung CHUNG boi `scan_source` (quet thu
@@ -452,19 +556,31 @@ class TrustedSourceService:
         phat hien (quet thu cong vs thong bao tu dong) khong duoc phep dua
         ra ket qua KHAC NHAU cho cung mot video.
 
+        `trigger` ("manual"/"reconcile"/"websub") CHI phuc vu observability
+        (log co cau truc, xem `logger` dau file) — KHONG anh huong quyet
+        dinh nghiep vu nao ca, dung y het nguyen tac "mot duong quyet dinh
+        duy nhat" o tren.
+
         Tra `(status, matched: bool)` — `matched` la co `ket_qua.series_id`
         hay khong (dung de dem "Khớp series", KHONG tinh cho nhanh DUPLICATE
         vi video do chua tung duoc phan loai).
         """
         vid = video["video_id"]
         if vid in da_la_tap:
-            self._store.create_import_once(VideoImport(
+            self._luu_ket_qua_phan_loai(VideoImport(
                 trusted_source_id=source.source_id, youtube_video_id=vid,
                 title=video["title"], channel_id=video["channel_id"],
                 channel_title=video["channel_title"], thumbnail_url=video["thumbnail_url"],
                 published_at=video["published_at"], duration_seconds=video["duration_seconds"],
                 status=ImportStatus.DUPLICATE,
-                reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác."))
+                reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác.",
+                discovered_via=trigger),
+                existing_import)
+            logger.info(
+                "trusted_source_ingest source_id=%s youtube_video_id=%s "
+                "mapping_id= series_id= import_id= decision=%s confidence= "
+                "trigger=%s result=duplicate",
+                source.source_id, vid, ImportStatus.DUPLICATE.value, trigger)
             return ImportStatus.DUPLICATE, False
 
         ket_qua = classify_video(
@@ -476,7 +592,8 @@ class TrustedSourceService:
             source=source, mappings_by_id={m.mapping_id: m for m in mappings},
             ket_qua=ket_qua, video=video, episodes_by_series=episodes_by_series)
 
-        self._store.create_import_once(VideoImport(
+        import_id = existing_import.import_id if existing_import else video_import_id(vid)
+        self._luu_ket_qua_phan_loai(VideoImport(
             trusted_source_id=source.source_id, youtube_video_id=vid,
             title=video["title"], channel_id=video["channel_id"],
             channel_title=video["channel_title"], thumbnail_url=video["thumbnail_url"],
@@ -486,8 +603,44 @@ class TrustedSourceService:
             detected_episode_number=ket_qua.episode_number,
             confidence=ket_qua.confidence, signals=list(ket_qua.signals),
             status=trang_thai, reason=ly_do, created_episode_id=episode_id,
-        ))
+            discovered_via=trigger,
+        ), existing_import)
+        logger.info(
+            "trusted_source_ingest source_id=%s youtube_video_id=%s "
+            "mapping_id=%s series_id=%s import_id=%s decision=%s confidence=%s "
+            "trigger=%s result=ok",
+            source.source_id, vid, ket_qua.mapping_id or "", ket_qua.series_id or "",
+            import_id, trang_thai.value, f"{ket_qua.confidence:.2f}", trigger)
         return trang_thai, bool(ket_qua.series_id)
+
+    def _luu_ket_qua_phan_loai(
+        self, ket_qua: VideoImport, existing_import: Optional[VideoImport],
+    ) -> None:
+        """Tao import moi, hoac cap nhat DUNG ban ghi `NEW` dang duoc quet lai.
+
+        Cac truong dinh danh/thoi diem tao va thong tin duyet khong bi ghi de;
+        scanner chi thay metadata va ket qua phan loai tren ban ghi chua co
+        quyet dinh.
+        """
+        if existing_import is None:
+            self._store.create_import_once(ket_qua)
+            return
+        self._store.update_import(existing_import.import_id, {
+            "title": ket_qua.title,
+            "channel_id": ket_qua.channel_id,
+            "channel_title": ket_qua.channel_title,
+            "thumbnail_url": ket_qua.thumbnail_url,
+            "published_at": ket_qua.published_at,
+            "duration_seconds": ket_qua.duration_seconds,
+            "detected_mapping_id": ket_qua.detected_mapping_id,
+            "detected_series_id": ket_qua.detected_series_id,
+            "detected_episode_number": ket_qua.detected_episode_number,
+            "confidence": ket_qua.confidence,
+            "signals": list(ket_qua.signals),
+            "status": ket_qua.status,
+            "reason": ket_qua.reason,
+            "created_episode_id": ket_qua.created_episode_id,
+        })
 
     def _lay_ung_vien(self, yt: YouTubeClient, source: TrustedSource,
                       page_token: str, max_pages: int) -> tuple:
@@ -518,6 +671,15 @@ class TrustedSourceService:
                 raise YouTubeApiError("Không đọc được danh sách video của kênh này.")
             playlist_id = kenh.uploads_playlist_id
 
+        return self._lay_video_theo_playlist(yt, playlist_id, page_token, max_pages)
+
+    def _lay_video_theo_playlist(self, yt: YouTubeClient, playlist_id: str,
+                                 page_token: str, max_pages: int) -> tuple:
+        """Phan trang MOT playlist (thuong la uploads playlist cua mot kenh)
+        toi da `max_pages` trang, roi lay chi tiet DAY DU tung video qua MOT
+        lan goi `get_videos()` theo lo. Dung CHUNG boi `_lay_ung_vien` (quet
+        nguon thuong) VA `_lay_video_cua_kenh` (Auto-Ingestion Phase 1 — quet
+        mot KENH BAT KY, khong nhat thiet la kenh cau hinh san cua nguon)."""
         items: List[Dict[str, Any]] = []
         token = page_token
         for _ in range(max(1, min(MAX_SCAN_PAGES, max_pages))):
@@ -547,6 +709,22 @@ class TrustedSourceService:
                 "duration_seconds": info.duration_seconds,
             })
         return ung_vien, token
+
+    def _lay_video_cua_kenh(self, yt: YouTubeClient, channel_id: str,
+                            max_pages: int) -> List[Dict[str, Any]]:
+        """Quet toi da `max_pages` trang video TAI LEN cua MOT kenh YouTube
+        BAT KY (theo `channel_id` truc tiep, KHONG qua `TrustedSource.
+        youtube_channel_id`) — dung boi `discover_series_from_seed` (Auto-
+        Ingestion Phase 1) de tim cac video "anh chi em" voi seed, kenh cua
+        seed co the KHAC voi cau hinh cua chinh trusted source (vi du nguon
+        kieu `youtube_video` chi tin MOT video don le, khong gan san mot
+        kenh)."""
+        kenh = yt.get_channel(channel_id)
+        if kenh is None or not kenh.uploads_playlist_id:
+            raise YouTubeApiError("Không đọc được danh sách video của kênh này.")
+        items, _token = self._lay_video_theo_playlist(
+            yt, kenh.uploads_playlist_id, "", max_pages)
+        return items
 
     def _tap_da_co_theo_series(
         self, series_ids: Sequence[str]) -> Dict[str, Sequence[int]]:
@@ -601,16 +779,267 @@ class TrustedSourceService:
         except NotFoundError:
             return ImportStatus.PENDING, "Không tìm thấy series đã ánh xạ.", ""
 
-        episode = self._animation_store.create_episode(AnimationEpisode(
+        # `episode_slot_id` TAT DINH theo (series_id, so_tap) — `da_co` o tren
+        # chi la mot snapshot doc TRUOC khi ghi, khong an toan duoi tai dua
+        # nhau THAT (hai qua trinh xu ly DONG THOI: hai thong bao WebSub cho
+        # cung video, HOAC WebSub+doi chieu dinh ky cung phat hien mot video,
+        # HOAC hai video KHAC NHAU cung suy ra trung (series, so tap)).
+        # `create_episode_once` la nguon su that CUOI CUNG, dung Appwrite tu
+        # choi POST trung documentId — xem docstring `episode_slot_id`.
+        episode, da_tao_moi = self._animation_store.create_episode_once(AnimationEpisode(
+            episode_id=episode_slot_id(ket_qua.series_id, ket_qua.episode_number),
             series_id=ket_qua.series_id, owner_id=series.owner_id,
             title=video["title"], source=AnimationSource.YOUTUBE,
             external_id=video["video_id"], order_index=ket_qua.episode_number,
             state=PublishState.PUBLISHED if auto_publish else PublishState.DRAFT,
             duration_seconds=video["duration_seconds"],
+            source_channel_id=video["channel_id"],
+            source_channel_title=video["channel_title"],
         ))
-        trang_thai = (ImportStatus.AUTO_PUBLISHED if auto_publish
+        if not da_tao_moi:
+            if episode.external_id != video["video_id"]:
+                # MOT video KHAC da chiem dung cho nay ngay luc ghi (khong
+                # phai luc doc snapshot `da_co` o tren) — CONFLICT that,
+                # khong ghi de video da co san.
+                return ImportStatus.CONFLICT, (
+                    f"Series đã có tập {ket_qua.episode_number} từ video khác "
+                    "(phát hiện lúc ghi, tránh xung đột đồng thời)."), ""
+            # CHINH video nay da thang cho o mot lan xu ly dong thoi khac
+            # (vi du hai thong bao WebSub gan nhu cung luc) — idempotent:
+            # tra ve DUNG trang thai da co, khong tao tap thu hai.
+        trang_thai = (ImportStatus.AUTO_PUBLISHED if episode.state is PublishState.PUBLISHED
                      else ImportStatus.AUTO_IMPORTED)
         return trang_thai, "Tự động nhập theo cài đặt nguồn/ánh xạ.", episode.episode_id
+
+    # ==================================================== Auto-Ingestion Phase 1
+    # "Seed Video -> Series Discovery -> Backfill" — xem docstring dau file
+    # nay ve nguyen tac chung; tang nay CHI dieu phoi, moi phep tinh dinh
+    # danh/tuong dong nam o `series_fingerprint.py`, moi phep doc so
+    # tap/dai tap nam o `episode_parser.py`, va TOAN BO quyet dinh trang
+    # thai/tao tap that TAI SU DUNG `_phan_loai_va_ghi_mot_video` — CUNG MOT
+    # duong voi `scan_source` thu cong, khong co quyet dinh RIENG nao cho
+    # discovery ca (dam bao hai duong luon nhat quan, giong nguyen tac o
+    # docstring `_phan_loai_va_ghi_mot_video`).
+
+    def discover_series_from_seed(
+        self, admin: Profile, source_id: str, *, youtube_video_id: str,
+        actor_role: str = "",
+    ) -> SeriesDiscoveryResult:
+        """
+        Tu MOT video seed (da biet la video YouTube "tin cay" qua `source_id`),
+        xac dinh video do thuoc series DA CO hay can kham pha series MOI, roi
+        (neu la series moi) quet kenh cua seed tim cac video "anh chi em" va
+        nhap tat ca ung vien tin cay — xem dac ta Auto-Ingestion Phase 1.
+
+        Y TUONG TRUNG TAM: MOT khi da co mot `SeriesMapping` voi alias la ten
+        series suy ra (`SeriesFingerprint.canonical_name`) — du la mapping DA
+        CO hay VUA TAO — moi video (seed lan ung vien quet kenh) deu di qua
+        DUNG `_phan_loai_va_ghi_mot_video` nhu mot lan quet nguon binh thuong.
+        Day la ly do Phase 1 khong can bien mot bo quy tac tu dong nhap/xuat
+        ban RIENG: no THUA KE nguyen ven nguong tin cay/auto_import/
+        auto_publish da cau hinh san cho `source_id`, y het `scan_source`.
+        """
+        source = self._store.get_source(source_id)
+        yt = self._youtube()
+        seed_info = yt.get_video(youtube_video_id)
+        if seed_info is None:
+            raise YouTubeApiError(
+                "Không còn truy cập được video seed này qua YouTube Data API "
+                "(có thể đã bị gỡ hoặc chuyển riêng tư).")
+
+        mappings = self._store.list_mappings(source_id)
+        episodes_by_series = self._tap_da_co_theo_series(
+            [m.animation_series_id for m in mappings])
+        ket_qua = classify_video(
+            title=seed_info.title, channel_id=seed_info.channel_id,
+            trusted_source=source, mappings=mappings,
+            episodes_by_series=episodes_by_series)
+
+        resolution = self._giai_quyet_series_da_co(
+            ket_qua=ket_qua, seed_info=seed_info, mappings=mappings)
+
+        result = SeriesDiscoveryResult(
+            seed_video_id=youtube_video_id, resolution=resolution)
+
+        if resolution.matched:
+            # -- Khop series DA CO: nhap seed qua DUNG pipeline quet thong
+            # thuong, khong tao series/mapping moi nao ca. ------------------
+            result.series_id = resolution.series_id
+            result.mapping_id = resolution.mapping_id
+            self._xu_ly_mot_video_discovery(
+                source=source, mappings=mappings,
+                episodes_by_series=episodes_by_series,
+                video=self._video_info_thanh_dict(seed_info), result=result)
+            result.candidates_scanned = 1
+            return result
+
+        # -- KHONG khop series nao — kham pha series MOI tu seed. -----------
+        seed_fp = extract_fingerprint(
+            seed_info.title, channel_id=seed_info.channel_id,
+            channel_title=seed_info.channel_title)
+
+        series = self._animation_store.create_series(
+            AnimationSeries(owner_id=admin.user_id, title=seed_fp.canonical_name))
+        mapping = self.create_mapping(
+            admin, source_id, animation_series_id=series.series_id,
+            aliases=[seed_fp.canonical_name], include_keywords=[],
+            exclude_keywords=[], actor_role=actor_role)
+
+        result.series_id = series.series_id
+        result.mapping_id = mapping["mapping_id"]
+        result.created_new_series = True
+
+        # Nhap CHINH seed truoc (BAO DAM luon duoc xu ly du no co nam trong
+        # `DISCOVERY_SCAN_PAGES` trang dau cua kenh hay khong — mot kenh lau
+        # doi co the co seed nam sau trang dau, xem docstring `_lay_video_cua_kenh`).
+        mappings_moi = self._store.list_mappings(source_id)
+        episodes_by_series_moi = self._tap_da_co_theo_series(
+            [m.animation_series_id for m in mappings_moi])
+        self._xu_ly_mot_video_discovery(
+            source=source, mappings=mappings_moi,
+            episodes_by_series=episodes_by_series_moi,
+            video=self._video_info_thanh_dict(seed_info), result=result,
+            fingerprint=seed_fp, similarity_to_seed=1.0)
+
+        # -- Quet kenh cua seed tim video "anh chi em" ------------------------
+        ung_vien_kenh = self._lay_video_cua_kenh(
+            yt, seed_info.channel_id, DISCOVERY_SCAN_PAGES)
+        result.candidates_scanned = len(ung_vien_kenh)
+
+        for video in ung_vien_kenh:
+            if video["video_id"] == youtube_video_id:
+                continue  # da xu ly rieng o tren, tranh tinh hai lan.
+            fp = extract_fingerprint(
+                video["title"], channel_id=video["channel_id"],
+                channel_title=video["channel_title"])
+            do_tuong_dong = similarity(seed_fp, fp)
+            if do_tuong_dong < CANDIDATE_SIMILARITY_THRESHOLD:
+                # KHONG thuoc ve series nay — bo qua HOAN TOAN, khong tao
+                # `VideoImport` (tranh nhap tran lan ca kenh).
+                result.candidates.append(SeriesDiscoveryCandidate(
+                    video_id=video["video_id"], title=video["title"],
+                    channel_id=video["channel_id"], channel_title=video["channel_title"],
+                    published_at=video["published_at"],
+                    duration_seconds=video["duration_seconds"], fingerprint=fp,
+                    span=None, similarity_to_seed=do_tuong_dong, excluded=True,
+                    exclude_reason="không đủ tương đồng với video seed"))
+                continue
+            self._xu_ly_mot_video_discovery(
+                source=source, mappings=mappings_moi,
+                episodes_by_series=episodes_by_series_moi, video=video,
+                result=result, fingerprint=fp, similarity_to_seed=do_tuong_dong)
+
+        return result
+
+    def _giai_quyet_series_da_co(
+        self, *, ket_qua, seed_info, mappings: List[SeriesMapping],
+    ) -> ExistingSeriesResolution:
+        """Existing-series resolver.
+
+        Uu tien 1: `classify_video` da khop MOT mapping qua alias/tu khoa
+        (`ket_qua.series_id` khac rong) — day la tin hieu DAC HIEU, tu no DA
+        DU de ket luan "video nay THUOC VE series do", BAT KE `ket_qua.
+        confidence` tong hop cao/thap the nao (confidence con cong diem
+        kenh/tap/tap lan can — nhung tin hieu KHONG bat buoc phai co de xac
+        nhan danh tinh series, chi de quyet dinh co nen TU DONG NHAP hay
+        khong, mot cau hoi khac hoan toan, xem `_quyet_dinh_trang_thai`).
+        Doi hoi them mot nguong so tren confidence tong hop se lam mot video
+        KHONG co tin hieu kenh/tap (vi du nguon kieu video don le, hoac mot
+        DAI tap khong doc duoc so) khong bao gio duoc nhan la "da khop", du
+        alias RO RANG khop — moi lan discover lai se sinh mot series/mapping
+        TRUNG LAP moi (bug thuc te tim thay qua real DEV E2E, xem lich su sua).
+
+        Uu tien 2 (khi KHONG mapping nao khop alias/tu khoa): tin hieu
+        "previously accepted videos" — quet TAT CA mapping cua nguon nay, seed
+        co tuong dong fingerprint cao voi MOT tap DA CO trong series do
+        khong (mot kenh co the tao mapping RONG alias luc dau, video dau
+        tien luon la "series moi" cho toi khi co it nhat mot tap that)."""
+        if ket_qua.series_id:
+            return ExistingSeriesResolution(
+                matched=True, series_id=ket_qua.series_id, mapping_id=ket_qua.mapping_id,
+                confidence=ket_qua.confidence, signals=list(ket_qua.signals))
+
+        seed_fp = extract_fingerprint(
+            seed_info.title, channel_id=seed_info.channel_id,
+            channel_title=seed_info.channel_title)
+        for mapping in mappings:
+            for tap in self._animation_store.list_episodes(mapping.animation_series_id):
+                fp_tap = extract_fingerprint(tap.title, channel_id=tap.source_channel_id,
+                                             channel_title=tap.source_channel_title)
+                if similarity(seed_fp, fp_tap) >= CANDIDATE_SIMILARITY_THRESHOLD:
+                    return ExistingSeriesResolution(
+                        matched=True, series_id=mapping.animation_series_id,
+                        mapping_id=mapping.mapping_id, confidence=ket_qua.confidence,
+                        signals=[f"tiêu đề tương đồng với tập đã có “{tap.title}”"])
+
+        return ExistingSeriesResolution(matched=False)
+
+    def _xu_ly_mot_video_discovery(
+        self, *, source: TrustedSource, mappings: List[SeriesMapping],
+        episodes_by_series: Dict[str, Sequence[int]], video: Dict[str, Any],
+        result: SeriesDiscoveryResult, fingerprint=None, similarity_to_seed: float = 1.0,
+    ) -> None:
+        """Nhap MOT video (seed hoac ung vien quet kenh) qua DUNG pipeline
+        `_phan_loai_va_ghi_mot_video` dung boi `scan_source`, roi xep trang
+        thai KET QUA vao dung nhom cua `SeriesDiscoveryResult`. Neu video DA
+        CO mot quyet dinh quan tri truoc do (khac `NEW`) — KHONG dung lai
+        pipeline, chi bao cao trang thai hien co (dac ta muc 8: "existing
+        admin decisions must win")."""
+        vid = video["video_id"]
+        existing_import = self._store.get_import_by_video_id(vid)
+        if existing_import is not None and existing_import.status is not ImportStatus.NEW:
+            trang_thai = existing_import.status
+        else:
+            da_la_tap = self._animation_store.episodes_by_external_ids([vid])
+            trang_thai, _matched = self._phan_loai_va_ghi_mot_video(
+                source=source, mappings=mappings, episodes_by_series=episodes_by_series,
+                video=video, da_la_tap=da_la_tap, existing_import=existing_import,
+                trigger="auto_discovery")
+            if trang_thai in (ImportStatus.AUTO_IMPORTED, ImportStatus.AUTO_PUBLISHED):
+                # CAP NHAT `episodes_by_series` NGAY (khong doi den lan goi
+                # sau) — mot lan backfill xu ly NHIEU ung vien lien tiep
+                # TRONG CUNG mot loi goi, khac voi `scan_source` (thuong chi
+                # thay MOT video moi/lan quet dinh ky) nen xung dot so tap
+                # GIUA hai ung vien trong CUNG mot lan backfill phai duoc
+                # bat NGAY, khong doi tap sau lan goi lai moi thay.
+                tap_moi = self._store.get_import_by_video_id(vid)
+                if tap_moi is not None and tap_moi.detected_series_id:
+                    da_co = list(episodes_by_series.get(tap_moi.detected_series_id, ()))
+                    da_co.append(tap_moi.detected_episode_number)
+                    episodes_by_series[tap_moi.detected_series_id] = da_co
+
+        if trang_thai in (ImportStatus.IMPORTED, ImportStatus.AUTO_IMPORTED,
+                         ImportStatus.AUTO_PUBLISHED):
+            result.confident_imports.append(vid)
+        elif trang_thai in (ImportStatus.PENDING, ImportStatus.NEW):
+            result.pending_review.append(vid)
+        elif trang_thai is ImportStatus.DUPLICATE:
+            result.duplicates.append(vid)
+        elif trang_thai is ImportStatus.CONFLICT:
+            result.conflicts.append(vid)
+        else:  # IGNORED / REJECTED / UNAVAILABLE / FAILED
+            result.excluded.append(vid)
+
+        if fingerprint is not None:
+            result.candidates.append(SeriesDiscoveryCandidate(
+                video_id=vid, title=video["title"], channel_id=video["channel_id"],
+                channel_title=video["channel_title"], published_at=video["published_at"],
+                duration_seconds=video["duration_seconds"], fingerprint=fingerprint,
+                span=None, similarity_to_seed=similarity_to_seed,
+                excluded=trang_thai in (ImportStatus.IGNORED, ImportStatus.REJECTED,
+                                       ImportStatus.UNAVAILABLE, ImportStatus.FAILED)))
+
+    @staticmethod
+    def _video_info_thanh_dict(info) -> Dict[str, Any]:
+        """`VideoInfo` (youtube_client) -> dict cung hinh dang voi `_lay_ung_vien`/
+        `_lay_video_cua_kenh` — de mot video seed (doc RIENG qua `get_video`)
+        di qua CUNG duong voi mot ung vien quet duoc tu playlist."""
+        return {
+            "video_id": info.video_id, "title": info.title,
+            "channel_id": info.channel_id, "channel_title": info.channel_title,
+            "thumbnail_url": info.thumbnail_url, "published_at": info.published_at,
+            "duration_seconds": info.duration_seconds,
+        }
 
     # ==================================================== hang doi nhap (thu cong)
 
@@ -701,17 +1130,39 @@ class TrustedSourceService:
             })
             return updated.to_dict()
 
-        episode = self._animation_store.create_episode(AnimationEpisode(
+        # `create_episode_once` + `episode_slot_id` TAT DINH (Auto-Ingestion
+        # Phase 4, Stage J) — CUNG cho (series_id, episode_number) voi
+        # duong TU DONG (`_quyet_dinh_trang_thai`), de nhap THU CONG va tu
+        # dong dua nhau vao DUNG luc (vd quan tri bam "Nhap" ngay khi
+        # WebSub/doi chieu cung dang xu ly VIDEO KHAC nham cung so tap) van
+        # chi cho ra DUNG MOT tap, khong bao gio hai duong cung thanh cong
+        # rieng re voi hai ID ngau nhien khac nhau.
+        episode, da_tao_moi = self._animation_store.create_episode_once(AnimationEpisode(
+            episode_id=episode_slot_id(video.detected_series_id, video.detected_episode_number),
             series_id=video.detected_series_id, owner_id=series.owner_id,
             title=video.title, source=AnimationSource.YOUTUBE,
             external_id=video.youtube_video_id,
             order_index=video.detected_episode_number,
             state=PublishState.PUBLISHED if publish else PublishState.DRAFT,
             duration_seconds=video.duration_seconds,
+            source_channel_id=video.channel_id,
+            source_channel_title=video.channel_title,
         ))
+        if not da_tao_moi and episode.external_id != video.youtube_video_id:
+            # MOT video KHAC da chiem cho nay dung luc quan tri bam nut —
+            # CONFLICT that, KHONG ghi de video da co san.
+            updated = self._store.update_import(import_id, {
+                "status": ImportStatus.CONFLICT,
+                "reason": (f"Tập {video.detected_episode_number} đã có video khác "
+                          "(phát hiện lúc ghi, tránh xung đột đồng thời)."),
+            })
+            return updated.to_dict()
         # `IMPORTED` du khi co publish=True — cac gia tri AUTO_* chi danh
         # cho video HE THONG tu nhap luc quet (xem docstring `ImportStatus`),
-        # day la hanh dong THU CONG cua quan tri.
+        # day la hanh dong THU CONG cua quan tri — ke ca khi tu dong da
+        # thang cuoc dua (`da_tao_moi=False` nhung DUNG video nay), quyet
+        # dinh THU CONG cua quan tri van duoc ghi nhan (reviewed_by/at),
+        # CHI KHONG tao tap thu hai.
         updated = self._store.update_import(import_id, {
             "status": ImportStatus.IMPORTED,
             "created_episode_id": episode.episode_id,
@@ -722,6 +1173,41 @@ class TrustedSourceService:
             target_id=import_id, actor_id=admin.user_id, actor_role=actor_role,
             note=f"episode={episode.episode_id}")
         return updated.to_dict()
+
+    def bulk_import_videos(
+        self, admin: Profile, items: Sequence[Dict[str, Any]], *, actor_role: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Nhap NHIEU video cung luc (nut "Nhập đã chọn" o hang doi nhap) — vo
+        mong THEM quanh `import_video()`, KHONG phai mot duong ghi song song:
+        moi item van di qua DUNG kiem tra series/tap/trung lap/xung dot va
+        DUNG nhat ky kiem duyet nhu nhap tung video mot, chi khac o cho goi
+        lien tiep nhieu lan trong MOT request.
+
+        LOI CUA MOT VIDEO KHONG LAM HONG CA LO: moi item duoc thu doc lap
+        (try/except quanh TUNG loi PHAN NGHIEP VU — `TrustedSourceError`/
+        `NotFoundError`), ket qua tra ve mot danh sach cung do dai voi
+        `items`, moi phan tu mot trang thai `ok`/loi rieng — khong bao gio
+        nem loi lam sap toan bo request giua chung (mot HTTP 400 duy nhat se
+        khien frontend khong biet NHUNG video nao da that su nhap thanh
+        cong truoc do). Loi HE THONG (vd YouTubeConfigError) van duoc de nem
+        thang ra ngoai — do khong phai loi cua rieng mot item, tang tren
+        (route) da co san co che dich sang ma HTTP dung.
+        """
+        ket_qua: List[Dict[str, Any]] = []
+        for item in items:
+            import_id = str(item.get("import_id") or "")
+            publish = bool(item.get("publish", False))
+            if not import_id:
+                ket_qua.append({"import_id": "", "ok": False, "error": "Thiếu import_id."})
+                continue
+            try:
+                updated = self.import_video(
+                    admin, import_id, publish=publish, actor_role=actor_role)
+                ket_qua.append({"import_id": import_id, "ok": True, "import": updated})
+            except (TrustedSourceError, NotFoundError) as exc:
+                ket_qua.append({"import_id": import_id, "ok": False, "error": str(exc)})
+        return {"results": ket_qua}
 
     def reject_import(self, admin: Profile, import_id: str, *, reason: str = "",
                       actor_role: str = "") -> Optional[Dict[str, Any]]:
@@ -925,6 +1411,10 @@ class TrustedSourceService:
             self._ghi_nhat_ky(
                 "websub_failure", target_id=source_id, actor_id="",
                 actor_role="system", note="Chữ ký không hợp lệ.")
+            logger.warning(
+                "trusted_source_ingest source_id=%s youtube_video_id= mapping_id= "
+                "series_id= import_id= decision= confidence= trigger=websub "
+                "result=invalid_signature", source_id)
             return False
 
         self._store.record_websub_notification(source_id)
@@ -936,6 +1426,10 @@ class TrustedSourceService:
             parsed = parse_notification(body)
         except WebSubParseError as exc:
             self._store.record_websub_failure(source_id, error_message=str(exc))
+            logger.warning(
+                "trusted_source_ingest source_id=%s youtube_video_id= mapping_id= "
+                "series_id= import_id= decision= confidence= trigger=websub "
+                "result=malformed_body", source_id)
             return False
 
         if not source.enabled or not source.auto_discover:
@@ -948,6 +1442,22 @@ class TrustedSourceService:
                 self._xu_ly_mot_video_websub(source, entry.video_id)
             except (YouTubeConfigError, YouTubeApiError) as exc:
                 self._store.record_websub_failure(source_id, error_message=str(exc))
+                logger.warning(
+                    "trusted_source_ingest source_id=%s youtube_video_id=%s "
+                    "mapping_id= series_id= import_id= decision= confidence= "
+                    "trigger=websub result=transient_error error=%s",
+                    source_id, entry.video_id, exc)
+            except NotFoundError as exc:
+                # Loi noi bo/tam thoi luc ghi (xem chu thich tuong tu trong
+                # `scan_source`) — MOT video loi khong duoc lam hong ca lo
+                # thong bao (cac entry KHAC trong CUNG payload WebSub van
+                # phai duoc xu ly tiep).
+                self._store.record_websub_failure(source_id, error_message=str(exc))
+                logger.warning(
+                    "trusted_source_ingest source_id=%s youtube_video_id=%s "
+                    "mapping_id= series_id= import_id= decision= confidence= "
+                    "trigger=websub result=internal_error error=%s",
+                    source_id, entry.video_id, exc)
 
         for xoa in parsed.deleted:
             if xoa.channel_id and xoa.channel_id != source.youtube_channel_id:
@@ -995,7 +1505,7 @@ class TrustedSourceService:
         }
         trang_thai, _matched = self._phan_loai_va_ghi_mot_video(
             source=source, mappings=mappings, episodes_by_series=episodes_by_series,
-            video=video_dict, da_la_tap=da_la_tap)
+            video=video_dict, da_la_tap=da_la_tap, trigger="websub")
 
         ban_ghi = self._store.get_import_by_video_id(video_id)
         muc_tieu = ban_ghi.import_id if ban_ghi else source.source_id
@@ -1072,19 +1582,39 @@ class TrustedSourceService:
             try:
                 ket_qua = self.scan_source(
                     Profile(user_id=actor_id or "system", email=""), s.source_id,
-                    max_pages=RECONCILIATION_MAX_PAGES, actor_role=actor_role)
+                    max_pages=RECONCILIATION_MAX_PAGES, actor_role=actor_role,
+                    trigger="reconcile")
                 tong["videos_detected"] += ket_qua["detected"]
                 self._store.record_reconciliation_sync(s.source_id)
             except (YouTubeConfigError, YouTubeApiError):
                 tong["sources_failed"] += 1
+            except NotFoundError as exc:
+                # Loi noi bo/tam thoi (Appwrite) luc doi chieu MOT nguon —
+                # KHONG duoc lam sap doi chieu cua CAC nguon con lai trong
+                # cung lan chay (cung nguyen tac phan lap loi voi vong lap
+                # trong `scan_source`).
+                tong["sources_failed"] += 1
+                logger.warning(
+                    "trusted_source_reconcile source_id=%s trigger=reconcile "
+                    "result=internal_error error=%s", s.source_id, exc)
             if self.websub_configured() and s.source_type is TrustedSourceType.YOUTUBE_CHANNEL:
-                self._gia_han_neu_sap_het_han(s)
+                try:
+                    self._gia_han_neu_sap_het_han(s)
+                except NotFoundError as exc:
+                    logger.warning(
+                        "trusted_source_reconcile source_id=%s trigger=reconcile "
+                        "result=renewal_internal_error error=%s", s.source_id, exc)
 
         self._ghi_nhat_ky(
             "reconciliation_run", target_id=source_id, actor_id=actor_id,
             actor_role=actor_role,
             note=(f"{tong['sources_checked']} nguồn, "
                  f"{tong['videos_detected']} video, {tong['sources_failed']} lỗi"))
+        logger.info(
+            "trusted_source_reconcile source_id=%s sources_checked=%s "
+            "sources_failed=%s videos_detected=%s trigger=reconcile",
+            source_id or "(all)", tong["sources_checked"], tong["sources_failed"],
+            tong["videos_detected"])
         return tong
 
     # ==================================================== ha tang

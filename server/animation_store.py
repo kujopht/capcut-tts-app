@@ -112,6 +112,13 @@ class MockAnimationStore:
             return {sid: self.series[sid]
                     for sid in dict.fromkeys(series_ids) if sid and sid in self.series}
 
+    def get_episodes_by_ids(self, episode_ids: Sequence[str]) -> Dict[str, AnimationEpisode]:
+        """Nhieu tap theo ID trong MOT lan quet — dung cho cot 'da xuat ban'
+        o danh sach Trusted Sources, cung idiom voi `get_series_by_ids`."""
+        with self._lock:
+            return {eid: self.episodes[eid]
+                    for eid in dict.fromkeys(episode_ids) if eid and eid in self.episodes}
+
     def series_tags(self, published_only: bool = True) -> List[str]:
         with self._lock:
             items = list(self.series.values())
@@ -199,6 +206,19 @@ class MockAnimationStore:
         with self._lock:
             self.episodes[episode.episode_id] = episode
             return episode
+
+    def create_episode_once(
+        self, episode: AnimationEpisode) -> Tuple[AnimationEpisode, bool]:
+        """Tao-hoac-lay AN TOAN theo `episode.episode_id` TAT DINH (xem
+        `trusted_source_domain.episode_slot_id`) — cung nguyen tac voi
+        `MockTrustedSourceStore.create_import_once`, mo phong Appwrite tu
+        choi POST trung `documentId`."""
+        with self._lock:
+            hien_co = self.episodes.get(episode.episode_id)
+            if hien_co is not None:
+                return hien_co, False
+            self.episodes[episode.episode_id] = episode
+            return episode, True
 
     def get_episode(self, episode_id: str) -> AnimationEpisode:
         episode = self.episodes.get(episode_id)

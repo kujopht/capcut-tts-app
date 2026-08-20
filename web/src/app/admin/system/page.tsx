@@ -9,6 +9,7 @@
  * `server/main.py::_trang_thai_he_thong`) thay vi suy boolean rieng le.
  */
 
+import Link from "next/link";
 import { useCallback } from "react";
 import { adminApi, type AdminOverview, type TrangThaiHeThong } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
@@ -114,6 +115,48 @@ export default function AdminSystem() {
               hàng đợi&quot; không có giám sát riêng (không có tín hiệu độc
               lập để phát hiện worker chết) — dựa theo tình trạng Appwrite.
             </p>
+          </div>
+        ) : null}
+        {data && data.trusted_sources.health_counts ? (
+          <div className="card stack-2">
+            <h3 className="section-title">Trusted Sources — tổng quan sức khoẻ</h3>
+            <div className="stat-grid admin-luoi">
+              <div className="stat">
+                <span className="stat-value">{data.trusted_sources.enabled_total ?? "—"}</span>
+                <span className="stat-label">Nguồn đang bật</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{data.trusted_sources.health_counts.healthy ?? "—"}</span>
+                <span className="stat-label">Khoẻ mạnh</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{data.trusted_sources.health_counts.degraded ?? "—"}</span>
+                <span className="stat-label">Suy giảm</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">
+                  {data.trusted_sources.health_counts.action_required ?? "—"}
+                </span>
+                <span className="stat-label">Cần thao tác</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{data.trusted_sources.active_subscriptions ?? "—"}</span>
+                <span className="stat-label">Đăng ký WebSub đang hoạt động</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">
+                  {data.trusted_sources.subscriptions_expiring_soon ?? "—"}
+                </span>
+                <span className="stat-label">Sắp hết hạn (24h tới)</span>
+              </div>
+            </div>
+            {(data.trusted_sources.health_counts.action_required ?? 0) > 0 ? (
+              <p className="hint" role="alert">
+                Có {data.trusted_sources.health_counts.action_required} nguồn cần thao tác
+                (đăng ký/đăng ký lại WebSub) —{" "}
+                <Link href="/admin/animation/sources">xem danh sách Trusted Sources</Link>.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </DanhSachTrangThai>

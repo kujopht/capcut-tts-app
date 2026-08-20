@@ -18,7 +18,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
-from server.episode_parser import parse_episode_number
+from server.episode_parser import EpisodeSpan, EpisodeSpanKind, parse_episode_span
 from server.trusted_source_domain import SeriesMapping, TrustedSource
 
 #: Tu khoa PHU DINH mac dinh — video co MOT trong cac tu nay (nguyen tu,
@@ -48,7 +48,18 @@ _PHAT = {
 class ClassificationResult:
     mapping_id: str = ""
     series_id: str = ""
+    #: CHI dien khi video la MOT tap don le (`episode_span.kind is SINGLE`).
+    #: Mot video la DAI nhieu tap (`RANGE`) hoac ban "tong hop ca series"
+    #: (`COMPILATION`) KHONG the tu dong thanh MOT `AnimationEpisode` —
+    #: truong nay o day de `None`, KHONG BAO GIO ghi tam so dau dai (xem
+    #: `episode_span` de biet dai that phat hien duoc). `_quyet_dinh_trang_thai`
+    #: (trusted_source_service.py) da coi `episode_number is None` la
+    #: "chua du de tu dong nhap" — hanh vi PENDING nay AP DUNG DUNG cho ca
+    #: RANGE/COMPILATION ma khong can sua gi them o do.
     episode_number: Optional[int] = None
+    #: Dai tap DAY DU phat hien duoc tu tieu de (SINGLE/RANGE/COMPILATION),
+    #: hoac `None` neu khong doc duoc gi — xem `server.episode_parser.EpisodeSpan`.
+    episode_span: Optional[EpisodeSpan] = None
     confidence: float = 0.0
     signals: List[str] = field(default_factory=list)
     #: True neu mot tu khoa loai tru (rieng cua anh xa HOAC mac dinh) khop —
@@ -89,20 +100,41 @@ def _tap_lan_can(so_tap: int, cac_tap_da_co: Sequence[int]) -> bool:
 
 def _cham_mot_anh_xa(
     *, title_chuan_hoa: str, mapping: SeriesMapping,
-    so_tap: Optional[int], kenh_khop: bool,
+    so_tap_span: Optional[EpisodeSpan], kenh_khop: bool,
     cac_tap_da_co: Sequence[int],
 ) -> Optional[ClassificationResult]:
-    """Tra `None` neu KHONG co alias nao khop — video nay khong lien quan gi
-    toi anh xa nay ca, khong tinh diem."""
+    """Tra `None` neu KHONG co bat ky tin hieu dinh danh duong nao khop.
+
+    `aliases` va `include_keywords` deu la gia tri quan tri nhap de nhan dien
+    series. Alias la tin hieu manh hon, nhung tu khoa mong doi PHAI co the tu
+    minh mo mot ung vien — UI cho phep de alias rong, va truoc day kho van luu
+    dung `include_keywords` nhung ham nay tra `None` truoc khi doc chung.
+    """
     alias_khop = next(
         (a for a in mapping.aliases if a.strip() and chuan_hoa(a) in title_chuan_hoa),
         None,
     )
-    if alias_khop is None:
+    tu_khop = [k for k in mapping.include_keywords if _co_tu(title_chuan_hoa, k)]
+    if alias_khop is None and not tu_khop:
         return None
 
-    tin_hieu: List[str] = [f"khớp alias “{alias_khop}”"]
-    diem = _TRONG_SO["alias_khop"]
+    #: `so_tap` (dung cho diem/tin hieu "phat hien tap") CHI dien khi day la
+    #: MOT tap don le — mot DAI (RANGE) hoac ban tong hop (COMPILATION)
+    #: KHONG duoc phep tu xung la "tap dau tien", xem docstring
+    #: `ClassificationResult.episode_number`.
+    so_tap = (so_tap_span.start
+              if so_tap_span is not None and so_tap_span.kind is EpisodeSpanKind.SINGLE
+              else None)
+
+    tin_hieu: List[str] = []
+    diem = 0.0
+    if alias_khop is not None:
+        diem += _TRONG_SO["alias_khop"]
+        tin_hieu.append(f"khớp alias “{alias_khop}”")
+
+    if tu_khop:
+        diem += _TRONG_SO["tu_khoa_bao_gom"]
+        tin_hieu.append(f"chứa từ khoá mong đợi: {', '.join(tu_khop)}")
 
     if kenh_khop:
         diem += _TRONG_SO["kenh_khop"]
@@ -114,11 +146,14 @@ def _cham_mot_anh_xa(
         if _tap_lan_can(so_tap, cac_tap_da_co):
             diem += _TRONG_SO["tap_lan_can"]
             tin_hieu.append("khớp mạch tập liền kề đã có")
-
-    tu_khop = [k for k in mapping.include_keywords if _co_tu(title_chuan_hoa, k)]
-    if tu_khop:
-        diem += _TRONG_SO["tu_khoa_bao_gom"]
-        tin_hieu.append(f"chứa từ khoá mong đợi: {', '.join(tu_khop)}")
+    elif so_tap_span is not None and so_tap_span.kind is EpisodeSpanKind.RANGE:
+        tin_hieu.append(
+            f"phát hiện dải tập {so_tap_span.start}-{so_tap_span.end} trong một "
+            "video — không tự động nhập, cần quản trị xử lý thủ công")
+    elif so_tap_span is not None and so_tap_span.kind is EpisodeSpanKind.COMPILATION:
+        tin_hieu.append(
+            "có vẻ là video tổng hợp cả series (\"" + so_tap_span.raw_text + "\") — "
+            "không tự động nhập, cần quản trị xử lý thủ công")
 
     loai_rieng = [k for k in mapping.exclude_keywords if _co_tu(title_chuan_hoa, k)]
     bi_loai = False
@@ -137,6 +172,7 @@ def _cham_mot_anh_xa(
         mapping_id=mapping.mapping_id,
         series_id=mapping.animation_series_id,
         episode_number=so_tap,
+        episode_span=so_tap_span,
         confidence=max(0.0, min(1.0, diem)),
         signals=tin_hieu,
         excluded=bi_loai,
@@ -150,7 +186,7 @@ def classify_video(
 ) -> ClassificationResult:
     """
     Cham diem MOT video doi voi TUNG anh xa cua nguon, tra ve anh xa DIEM
-    CAO NHAT. Khong anh xa nao co alias khop -> tra ve ket qua RONG
+    CAO NHAT. Khong anh xa nao co alias HOAC tu khoa mong doi khop -> tra ve ket qua RONG
     (`mapping_id=""`, `confidence=0.0`) — video "moi" (`ImportStatus.NEW`),
     can quan tri tu gan series bang tay.
 
@@ -160,14 +196,14 @@ def classify_video(
     can chinh xac tuyet doi).
     """
     title_chuan_hoa = chuan_hoa(title)
-    so_tap = parse_episode_number(title)
+    so_tap_span = parse_episode_span(title)
     kenh_khop = bool(channel_id) and channel_id == trusted_source.youtube_channel_id
     episodes_by_series = episodes_by_series or {}
 
     ung_vien: List[ClassificationResult] = []
     for mapping in mappings:
         ket_qua = _cham_mot_anh_xa(
-            title_chuan_hoa=title_chuan_hoa, mapping=mapping, so_tap=so_tap,
+            title_chuan_hoa=title_chuan_hoa, mapping=mapping, so_tap_span=so_tap_span,
             kenh_khop=kenh_khop,
             cac_tap_da_co=episodes_by_series.get(mapping.animation_series_id, ()),
         )
@@ -175,6 +211,9 @@ def classify_video(
             ung_vien.append(ket_qua)
 
     if not ung_vien:
-        return ClassificationResult(episode_number=so_tap)
+        so_tap = (so_tap_span.start
+                  if so_tap_span is not None and so_tap_span.kind is EpisodeSpanKind.SINGLE
+                  else None)
+        return ClassificationResult(episode_number=so_tap, episode_span=so_tap_span)
 
     return max(ung_vien, key=lambda r: r.confidence)

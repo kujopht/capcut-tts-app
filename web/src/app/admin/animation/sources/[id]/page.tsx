@@ -17,11 +17,14 @@ import {
   adminApi,
   type AdminSeriesMappingRow,
   type AdminAnimationSeriesRow,
+  type SeriesDiscoveryResult,
+  type SourceHealth,
   type SubscriptionStatus,
   type TrustedSourceScanResult,
 } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
+import { parseYoutubeVideoId } from "@/lib/youtubeUrl";
 import { ChuaCauHinh, DanhSachTrangThai, loiApi } from "@/components/AdminShell";
 import { ConfirmDialog } from "@/components/ui";
 import { IconLink } from "@/components/Icons";
@@ -38,6 +41,23 @@ const NHAN_DANG_KY: Record<SubscriptionStatus, { chu: string; lop: string }> = {
   active: { chu: "Đang hoạt động", lop: "tt-duyet" },
   expired: { chu: "Đã hết hạn", lop: "tt-treo" },
   failed: { chu: "Lỗi", lop: "tt-tuchoi" },
+};
+
+/** Auto-Ingestion Phase 4 — xem `compute_source_health` phia server. */
+const NHAN_SUC_KHOE: Record<SourceHealth, { chu: string; lop: string }> = {
+  healthy: { chu: "Khoẻ mạnh", lop: "tt-duyet" },
+  degraded: { chu: "Suy giảm", lop: "tt-cho" },
+  action_required: { chu: "Cần thao tác", lop: "tt-tuchoi" },
+  disabled: { chu: "Đã tạm dừng", lop: "tt-trong" },
+};
+
+/** Auto-Ingestion Phase 4 — nhan de hieu cho `VideoImport.discovered_via`. */
+const NHAN_TRIGGER: Record<string, string> = {
+  manual_scan: "Quét thủ công",
+  reconcile: "Đối chiếu định kỳ",
+  websub: "WebSub (tự động)",
+  auto_discovery: "Khám phá series",
+  "": "—",
 };
 
 export default function AdminTrustedSourceDetailPage({
@@ -77,6 +97,10 @@ export default function AdminTrustedSourceDetailPage({
   const [ketQuaQuet, setKetQuaQuet] = useState<TrustedSourceScanResult | null>(null);
   const [hoiXoaNguon, setHoiXoaNguon] = useState(false);
   const [dangXoa, setDangXoa] = useState(false);
+
+  const [seedInput, setSeedInput] = useState("");
+  const [dangKhamPha, setDangKhamPha] = useState(false);
+  const [ketQuaKhamPha, setKetQuaKhamPha] = useState<SeriesDiscoveryResult | null>(null);
 
   const [dangDangKy, setDangDangKy] = useState(false);
   const [dangDoiChieu, setDangDoiChieu] = useState(false);
@@ -146,6 +170,29 @@ export default function AdminTrustedSourceDetailPage({
     }
   }
 
+  async function khamPha() {
+    const videoId = parseYoutubeVideoId(seedInput);
+    if (!videoId) {
+      toast.error("Không đọc được ID video từ ô này — dán link hoặc ID YouTube hợp lệ.");
+      return;
+    }
+    setDangKhamPha(true);
+    setKetQuaKhamPha(null);
+    try {
+      const { result } = await adminApi.discoverSeriesFromSeed(sourceId, videoId);
+      setKetQuaKhamPha(result);
+      toast.ok(
+        result.created_new_series
+          ? "Đã tạo series mới từ video seed."
+          : "Video khớp một series đã có.");
+      reload();
+    } catch (cause) {
+      toast.error(loiApi(cause, "Khám phá thất bại."));
+    } finally {
+      setDangKhamPha(false);
+    }
+  }
+
   async function dangKy() {
     setDangDangKy(true);
     try {
@@ -196,9 +243,28 @@ export default function AdminTrustedSourceDetailPage({
                 </span>
               </span>
               <span className={`tt ${s.enabled ? "tt-duyet" : "tt-trong"}`}>
-                {s.enabled ? "Đang bật" : "Đã tắt"}
+                {s.enabled ? "Đang bật" : "Đã tạm dừng"}
               </span>
             </header>
+
+            <div className="card stack-2">
+              <div className="row row-spread">
+                <h3 className="section-title">Automation health</h3>
+                <span className={`tt ${NHAN_SUC_KHOE[data.health].lop}`}>
+                  {NHAN_SUC_KHOE[data.health].chu}
+                </span>
+              </div>
+              {data.health_reasons.length > 0 ? (
+                <ul className="hint" style={{ margin: 0, paddingLeft: "1.2em" }}>
+                  {data.health_reasons.map((ly_do, i) => <li key={i}>{ly_do}</li>)}
+                </ul>
+              ) : (
+                <p className="hint">Không phát hiện dấu hiệu bất thường.</p>
+              )}
+              <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                <span className="tt tt-cho">Đang chờ duyệt: {data.pending_count}</span>
+              </div>
+            </div>
 
             {s.last_error_message && s.last_error_at > s.last_success_at ? (
               <div className="card stack-2" role="alert">
@@ -245,7 +311,7 @@ export default function AdminTrustedSourceDetailPage({
                   </button>
                   <button type="button" className="btn btn-sm"
                           onClick={() => datBatTat(!s.enabled)}>
-                    {s.enabled ? "Tắt nguồn" : "Bật nguồn"}
+                    {s.enabled ? "Tạm dừng nguồn" : "Tiếp tục nguồn"}
                   </button>
                 </div>
                 <button type="button" className="btn btn-sm btn-danger"
@@ -363,6 +429,60 @@ export default function AdminTrustedSourceDetailPage({
               </p>
             </div>
 
+            <div className="card stack-2">
+              <h3 className="section-title">Khám phá series từ video này</h3>
+              <p className="hint">
+                Dán ID hoặc link YouTube của MỘT video seed. Nếu video khớp
+                một series đã có, hệ thống nhập seed đó theo đúng quy tắc
+                nguồn. Nếu không khớp series nào, hệ thống tạo một series
+                nháp mới rồi quét kênh của seed tìm các tập &ldquo;anh chị em&rdquo; —
+                CHỈ video đủ tương đồng mới được đưa vào hàng đợi/tự động
+                nhập, không nhập tràn lan cả kênh.
+              </p>
+              <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                <input className="input" style={{ minWidth: 280 }}
+                       placeholder="ID hoặc link video YouTube"
+                       value={seedInput}
+                       onChange={(e) => setSeedInput(e.target.value)} />
+                <button type="button" className="btn btn-primary" disabled={dangKhamPha}
+                        onClick={khamPha}>
+                  {dangKhamPha ? "Đang khám phá…" : "Khám phá series từ video này"}
+                </button>
+              </div>
+              {ketQuaKhamPha ? (
+                <div className="stack-2">
+                  <p className="hint">
+                    {ketQuaKhamPha.created_new_series
+                      ? "Đã tạo series MỚI: "
+                      : "Khớp series đã có: "}
+                    {ketQuaKhamPha.series_id ? (
+                      <Link href={`/admin/animation/series/${ketQuaKhamPha.series_id}`}>
+                        {ketQuaKhamPha.series_id}
+                      </Link>
+                    ) : "—"}
+                    {" · "}Đã quét {ketQuaKhamPha.candidates_scanned} video
+                  </p>
+                  <div className="row row-tight" style={{ flexWrap: "wrap" }}>
+                    <span className="tt tt-duyet">
+                      Tin cậy: {ketQuaKhamPha.confident_imports.length}
+                    </span>
+                    <span className="tt tt-cho">
+                      Chờ duyệt: {ketQuaKhamPha.pending_review.length}
+                    </span>
+                    <span className="tt tt-treo">
+                      Trùng: {ketQuaKhamPha.duplicates.length}
+                    </span>
+                    <span className="tt tt-treo">
+                      Xung đột: {ketQuaKhamPha.conflicts.length}
+                    </span>
+                    <span className="tt tt-trong">
+                      Loại trừ: {ketQuaKhamPha.excluded.length}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
             <MangAnhXa sourceId={sourceId} mappings={data.mappings}
                        danhSachSeries={danhSachSeries} onDoi={reload} />
 
@@ -374,6 +494,7 @@ export default function AdminTrustedSourceDetailPage({
                     <thead>
                       <tr>
                         <th scope="col">Tiêu đề</th>
+                        <th scope="col">Nguồn phát hiện</th>
                         <th scope="col">Tập</th>
                         <th scope="col">Độ tin cậy</th>
                         <th scope="col">Trạng thái</th>
@@ -388,6 +509,7 @@ export default function AdminTrustedSourceDetailPage({
                               {im.title}
                             </a>
                           </td>
+                          <td className="hint">{NHAN_TRIGGER[im.discovered_via] ?? im.discovered_via}</td>
                           <td className="mono">{im.detected_episode_number ?? "—"}</td>
                           <td className="mono">{Math.round(im.confidence * 100)}%</td>
                           <td>{im.status}</td>
@@ -528,6 +650,7 @@ function MangAnhXa({
               <tr>
                 <th scope="col">Series</th>
                 <th scope="col">Alias</th>
+                <th scope="col">Từ khoá mong đợi</th>
                 <th scope="col">Tự động</th>
                 <th scope="col"><span className="sr-only">Thao tác</span></th>
               </tr>
@@ -537,6 +660,7 @@ function MangAnhXa({
                 <tr key={m.mapping_id}>
                   <td>{m.series_title || m.animation_series_id}</td>
                   <td className="hint">{m.aliases.join(", ") || "—"}</td>
+                  <td className="hint">{m.include_keywords.join(", ") || "—"}</td>
                   <td className="hint mono">
                     {m.auto_import === null ? "kế thừa" : m.auto_import ? "import" : "—"}
                     {" / "}

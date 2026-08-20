@@ -245,6 +245,22 @@ class MockTrustedSourceStore:
                     dem[m.trusted_source_id] += 1
         return dem
 
+    def imported_episode_ids(self, source_ids: Sequence[str]) -> Dict[str, List[str]]:
+        """`episode_id` da tao boi tung nguon (nhap thu cong lan tu dong) —
+        dung cho cot 'da nhap'/'da xuat ban' o danh sach quan tri. CHI can
+        `created_episode_id` khac rong (ca ba trang thai IMPORTED/
+        AUTO_IMPORTED/AUTO_PUBLISHED deu dien truong nay, xem
+        `TrustedSourceService`), khong can biet ten trang thai cu the o tang
+        kho nay — tang dich vu tu tra cuu `AnimationEpisode.state` that de
+        biet cai nao THAT SU da xuat ban."""
+        can = set(source_ids)
+        ra: Dict[str, List[str]] = {sid: [] for sid in can}
+        with self._lock:
+            for i in self.imports.values():
+                if i.trusted_source_id in can and i.created_episode_id:
+                    ra[i.trusted_source_id].append(i.created_episode_id)
+        return ra
+
     # -- video import (hang doi nhap) ----------------------------------------
 
     def create_import_once(self, video_import: VideoImport) -> Tuple[VideoImport, bool]:

@@ -392,6 +392,11 @@ export interface AnimationEpisode {
   moderation_state: "visible" | "removed";
   removed_by: string;
   removed_reason: string;
+  /** Thuoc tinh nguon (Trusted Channels ingestion) — RONG cho tap tao qua
+      luong thu cong thuong, khong tu Trusted Channels. Dung de hien "Nguồn:
+      <tên kênh>" canh trinh phat, KHONG dung de xac thuc/phan quyen. */
+  source_channel_id: string;
+  source_channel_title: string;
   created_at: string;
   updated_at: string;
 }
@@ -1292,6 +1297,10 @@ export interface AdminOverview {
     error_total?: number;
     reconciliation_total_runs?: number;
     reconciliation_last_run_at?: string | null;
+    /** Auto-Ingestion Phase 4 (Stage H) — xem `compute_source_health` phia server. */
+    health_counts?: Record<SourceHealth, ChiSo>;
+    active_subscriptions?: ChiSo;
+    subscriptions_expiring_soon?: ChiSo;
   };
   traffic: TrafficOverview;
   system: {
@@ -1522,6 +1531,15 @@ export type VideoImportStatus =
   | "new" | "pending" | "auto_imported" | "auto_published" | "imported"
   | "rejected" | "ignored" | "duplicate" | "conflict" | "unavailable" | "failed";
 
+/** Auto-Ingestion Phase 4 — suc khoe tong hop MOT TrustedSource, xem
+    docstring `compute_source_health` phia server. */
+export type SourceHealth = "healthy" | "degraded" | "action_required" | "disabled";
+
+/** Auto-Ingestion Phase 4 — trigger nao lam MOT VideoImport xuat hien LAN
+    DAU (nguon goc phat hien, BAT BIEN qua cac lan phan loai lai sau). Rong
+    ("") cho ban ghi tao TRUOC Phase 4. */
+export type DiscoveredVia = "manual_scan" | "reconcile" | "websub" | "auto_discovery" | "";
+
 export interface TrustedSource {
   source_id: string;
   source_type: TrustedSourceType;
@@ -1559,6 +1577,13 @@ export interface TrustedSource {
 
 export interface AdminTrustedSourceRow extends TrustedSource {
   mapping_count: number;
+  /** So video da tao tap (thu cong lan tu dong) tu nguon nay. */
+  imported_count: number;
+  /** Trong so `imported_count` do, so tap THAT SU dang o state=published. */
+  published_count: number;
+  /** Auto-Ingestion Phase 4 — xem `compute_source_health` phia server. */
+  health: SourceHealth;
+  health_reasons: string[];
 }
 
 export interface SeriesMapping {
@@ -1600,6 +1625,8 @@ export interface VideoImport {
   created_episode_id: string;
   reviewed_by: string;
   reviewed_at: string;
+  /** Auto-Ingestion Phase 4 — xem `VideoImport.discovered_via` phia server. */
+  discovered_via: DiscoveredVia;
   created_at: string;
   updated_at: string;
 }
@@ -1631,6 +1658,11 @@ export interface AdminTrustedSourceDetail {
       CHƯA có URL callback công khai (`YOUTUBE_WEBSUB_CALLBACK_BASE_URL`) —
       hiện "Chưa cấu hình" thay vì một trạng thái đăng ký bịa đặt. */
   websub_configured: boolean;
+  /** Auto-Ingestion Phase 4 — xem `compute_source_health` phia server. */
+  health: SourceHealth;
+  health_reasons: string[];
+  /** So video dang o trang thai "pending" (cho quan tri duyet) cua nguon nay. */
+  pending_count: number;
 }
 
 /** Ket qua MOT lan "Quet video co san" — xem `TrustedSourceService.scan_source`. */
@@ -1645,6 +1677,46 @@ export interface TrustedSourceScanResult {
   duplicates: number;
   already_tracked: number;
   next_page_token: string;
+}
+
+/** MOT ung vien xem xet trong luc quet kenh/playlist tim tap cung series
+ * voi seed — xem `SeriesDiscoveryCandidate.to_dict()`. */
+export interface SeriesDiscoveryCandidateRow {
+  video_id: string;
+  title: string;
+  channel_id: string;
+  channel_title: string;
+  published_at: string;
+  duration_seconds: number;
+  canonical_name: string;
+  span_kind: string | null;
+  episode_number: number | null;
+  similarity_to_seed: number;
+  excluded: boolean;
+  exclude_reason: string;
+}
+
+/** Ket qua MOT lan "Kham pha series tu video nay" (Auto-Ingestion Phase 1) —
+ * xem `TrustedSourceService.discover_series_from_seed`/`SeriesDiscoveryResult`. */
+export interface SeriesDiscoveryResult {
+  seed_video_id: string;
+  resolution: {
+    matched: boolean;
+    series_id: string;
+    mapping_id: string;
+    confidence: number;
+    signals: string[];
+  };
+  series_id: string;
+  mapping_id: string;
+  created_new_series: boolean;
+  candidates_scanned: number;
+  confident_imports: string[];
+  pending_review: string[];
+  duplicates: string[];
+  excluded: string[];
+  conflicts: string[];
+  candidates: SeriesDiscoveryCandidateRow[];
 }
 
 export interface AdminImageStudioSpending {
@@ -1903,6 +1975,12 @@ export const adminApi = {
         page_token: opts.pageToken ?? "", max_pages: opts.maxPages ?? 2 }) },
     ),
 
+  discoverSeriesFromSeed: (sourceId: string, youtubeVideoId: string) =>
+    request<{ result: SeriesDiscoveryResult }>(
+      `/api/admin/animation/sources/${encodeURIComponent(sourceId)}/discover`,
+      { method: "POST", body: JSON.stringify({ youtube_video_id: youtubeVideoId }) },
+    ),
+
   // -- WebSub / doi chieu dinh ky (Phase 6) --------------------------------
   //
   // 503 = chưa cấu hình URL callback công khai (backend đang chạy cục bộ,
@@ -1978,6 +2056,25 @@ export const adminApi = {
     request<{ import: VideoImport }>(
       `/api/admin/animation/imports/${encodeURIComponent(importId)}/import`,
       { method: "POST", body: JSON.stringify({ publish }) },
+    ),
+
+  /**
+   * Nhap NHIEU video cung luc (nut "Nhập đã chọn" o hang doi nhap) — vo
+   * mong quanh `importVideo` o server (`TrustedSourceService.
+   * bulk_import_videos`), khong phai duong ghi song song rieng. Loi cua
+   * MOT video KHONG lam hong ca lo: mang `results` tra ve luon co DUNG do
+   * dai voi `items`, moi phan tu mot trang thai `ok`/loi rieng — route CHI
+   * tra loi HTTP (400/...) cho loi HE THONG (rong, qua gioi han), khong bao
+   * gio cho loi cua rieng mot video trong danh sach.
+   */
+  bulkImportVideos: (items: ReadonlyArray<{ importId: string; publish: boolean }>) =>
+    request<{ results: Array<
+      | { import_id: string; ok: true; import: VideoImport }
+      | { import_id: string; ok: false; error: string }
+    > }>(
+      "/api/admin/animation/imports/bulk-import",
+      { method: "POST", body: JSON.stringify({
+        items: items.map((it) => ({ import_id: it.importId, publish: it.publish })) }) },
     ),
 
   rejectVideoImport: (importId: string, reason: string) =>

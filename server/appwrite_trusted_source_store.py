@@ -56,7 +56,7 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "duration_seconds", "detected_mapping_id", "detected_series_id",
         "detected_episode_number", "confidence", "signals", "status",
         "reason", "created_episode_id", "reviewed_by", "reviewed_at",
-        "created_at", "updated_at",
+        "discovered_via", "created_at", "updated_at",
     ),
 }
 
@@ -202,6 +202,7 @@ def _import_tu_doc(doc: Dict[str, Any]) -> VideoImport:
         created_episode_id=str(doc.get("created_episode_id") or ""),
         reviewed_by=str(doc.get("reviewed_by") or ""),
         reviewed_at=str(doc.get("reviewed_at") or ""),
+        discovered_via=str(doc.get("discovered_via") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
@@ -504,6 +505,21 @@ class AppwriteTrustedSourceStore:
                 if sid in dem:
                     dem[sid] += 1
         return dem
+
+    def imported_episode_ids(self, source_ids: Sequence[str]) -> Dict[str, List[str]]:
+        """Xem docstring `MockTrustedSourceStore.imported_episode_ids` —
+        MOT truy van moi lo 50 nguon."""
+        ds = [s for s in dict.fromkeys(source_ids) if s]
+        ra: Dict[str, List[str]] = {sid: [] for sid in ds}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_IMPORTS, [
+                    q_equal("trusted_source_id", *lo)]):
+                sid = str(row.get("trusted_source_id") or "")
+                eid = str(row.get("created_episode_id") or "")
+                if sid in ra and eid:
+                    ra[sid].append(eid)
+        return ra
 
     # -- video import (hang doi nhap) ----------------------------------------
 

@@ -13,7 +13,10 @@ import unittest
 from server.adapters import NotFoundError, PermissionDenied
 from server.animation_domain import AnimationEpisode, AnimationSeries
 from server.animation_store import MockAnimationStore
-from server.appwrite_animation_store import AppwriteAnimationStore
+from server.appwrite_animation_store import (
+    COL_EPISODES,
+    AppwriteAnimationStore,
+)
 from server.config import AppwriteSettings
 from server.domain import ContentState, PublishState
 from server.tests.test_appwrite_v2_contract import FakeAppwrite, _bo_client
@@ -172,6 +175,26 @@ class HopDongAnimationTest(unittest.TestCase):
                 ds = kho.list_episodes(s.series_id)
                 self.assertEqual([e.title for e in ds], ["Tap 1", "Tap 2"], ten)
 
+    def test_create_episode_once_tao_hoac_lay_an_toan_duoi_documentId_trung(self):
+        """`create_episode_once` (Auto-Ingestion Phase 3, xem
+        `trusted_source_domain.episode_slot_id`) — CUNG documentId trung thi
+        lan hai PHAI tra ve DUNG ban ghi da co (`da_tao=False`), KHONG tao
+        ban thu hai, tren CA HAI kho (mock lan Appwrite gia lap)."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="T"))
+                e1, da_tao_1 = kho.create_episode_once(AnimationEpisode(
+                    episode_id="anep_slot_test_001", series_id=s.series_id,
+                    owner_id="u1", title="Tap 1", external_id="a" * 11, order_index=1))
+                e2, da_tao_2 = kho.create_episode_once(AnimationEpisode(
+                    episode_id="anep_slot_test_001", series_id=s.series_id,
+                    owner_id="u1", title="Tap 1 (ban khac)", external_id="b" * 11,
+                    order_index=1))
+                self.assertTrue(da_tao_1, ten)
+                self.assertFalse(da_tao_2, ten)
+                self.assertEqual(e2.external_id, "a" * 11, ten)
+                self.assertEqual(len(kho.list_episodes(s.series_id)), 1, ten)
+
     def test_owned_episode_sai_chu_nem_loi(self):
         for ten, kho in self._cac_kho():
             with self.subTest(kho=ten):
@@ -200,6 +223,54 @@ class HopDongAnimationTest(unittest.TestCase):
                 self.assertEqual(updated.duration_seconds, 120.0, ten)
                 self.assertEqual(updated.owner_id, "u1", ten)
                 self.assertEqual(updated.series_id, s.series_id, ten)
+
+    def test_appwrite_writable_episode_giu_nguon_va_van_loc_truong_la(self):
+        """Allowlist luu tru la bien schema canonic: them provenance vao do
+        khong duoc lam long viec loc cac truong khong duoc phep."""
+        kho = _kho_appwrite(FakeAppwrite())
+        writable = kho._writable(COL_EPISODES, {
+            "title": "Tap 1",
+            "source_channel_id": "UC_nguon_that",
+            "source_channel_title": "Kenh nguon that",
+            "truong_khong_duoc_phep": "khong duoc luu",
+        })
+
+        self.assertEqual(writable["title"], "Tap 1")
+        self.assertEqual(writable["source_channel_id"], "UC_nguon_that")
+        self.assertEqual(writable["source_channel_title"], "Kenh nguon that")
+        self.assertNotIn("truong_khong_duoc_phep", writable)
+
+    def test_appwrite_create_luu_nguon_update_thuong_khong_ghi_de(self):
+        """Create di qua `_writable` phai luu provenance; update cua chu so
+        huu chi sua `EPISODE_EDITABLE`, nen provenance da luu van nguyen va
+        payload gia mao provenance/field la van bi loc."""
+        fake = FakeAppwrite()
+        kho = _kho_appwrite(fake)
+        series = kho.create_series(AnimationSeries(owner_id="u1", title="T"))
+        episode = kho.create_episode(AnimationEpisode(
+            series_id=series.series_id,
+            owner_id="u1",
+            title="Tap 1",
+            external_id="a" * 11,
+            source_channel_id="UC_nguon_that",
+            source_channel_title="Kenh nguon that",
+        ))
+
+        persisted = fake.rows[COL_EPISODES][episode.episode_id]
+        self.assertEqual(persisted["source_channel_id"], "UC_nguon_that")
+        self.assertEqual(persisted["source_channel_title"], "Kenh nguon that")
+
+        updated = kho.update_episode(episode.episode_id, "u1", {
+            "title": "Tap 1 - da sua",
+            "source_channel_id": "UC_gia_mao",
+            "source_channel_title": "Kenh gia mao",
+            "truong_khong_duoc_phep": "khong duoc luu",
+        })
+        persisted_after_update = fake.rows[COL_EPISODES][episode.episode_id]
+        self.assertEqual(updated.title, "Tap 1 - da sua")
+        self.assertEqual(updated.source_channel_id, "UC_nguon_that")
+        self.assertEqual(updated.source_channel_title, "Kenh nguon that")
+        self.assertNotIn("truong_khong_duoc_phep", persisted_after_update)
 
     def test_delete_episode(self):
         for ten, kho in self._cac_kho():
@@ -389,6 +460,19 @@ class HopDongAnimationTest(unittest.TestCase):
                 dem = kho.episodes_by_external_ids(["a" * 11, "z" * 11])
                 self.assertEqual(set(dem.keys()), {"a" * 11}, ten)
                 self.assertEqual(dem["a" * 11].title, "Tập 1", ten)
+
+    def test_get_episodes_by_ids_nhieu_tap_mot_lan(self):
+        """Trusted Channels: cung idiom voi `get_series_by_ids` — dung cho
+        cot 'Đã xuất bản' o danh sach Trusted Sources, khong N+1."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_series(AnimationSeries(owner_id="u1", title="A"))
+                e1 = kho.create_episode(AnimationEpisode(
+                    series_id=s.series_id, owner_id="u1", title="Tập 1",
+                    external_id="b" * 11))
+                dem = kho.get_episodes_by_ids([e1.episode_id, "khong_ton_tai"])
+                self.assertEqual(set(dem.keys()), {e1.episode_id}, ten)
+                self.assertEqual(dem[e1.episode_id].title, "Tập 1", ten)
 
 
 class BuildAnimationStoreTest(unittest.TestCase):

@@ -188,6 +188,15 @@ class AnimationEpisode:
     moderation_state: ContentState = ContentState.VISIBLE
     removed_by: str = ""
     removed_reason: str = ""
+    #: Thuoc tinh nguon (Trusted Channels ingestion) — RONG cho tap tao qua
+    #: luong thu cong thuong (khong tu nguon tin cay). Dien boi
+    #: `TrustedSourceService` luc tao tap tu mot `VideoImport` (ca duong
+    #: auto-import/auto-publish lan duong "Nhap" thu cong), lay THANG tu
+    #: YouTube Data API — KHONG BAO GIO tu nguoi dung go tay, tranh gia mao
+    #: nguon. Dung de hien "Nguon: <ten kenh>" canh trinh phat — KHONG dung
+    #: de xac thuc/phan quyen bat cu dieu gi.
+    source_channel_id: str = ""
+    source_channel_title: str = ""
     episode_id: str = field(default_factory=lambda: new_id("anep"))
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
@@ -206,6 +215,8 @@ class AnimationEpisode:
             "moderation_state": self.moderation_state.value,
             "removed_by": self.removed_by,
             "removed_reason": self.removed_reason,
+            "source_channel_id": self.source_channel_id,
+            "source_channel_title": self.source_channel_title,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

@@ -5,7 +5,7 @@ Kho này chứa **hai sản phẩm** dùng chung một pipeline TTS:
 | Phần | Vị trí | Trạng thái |
 |---|---|---|
 | Ứng dụng desktop Windows (PySide6) | `app.py`, `desktop_app/`, `capcut_tts_api/` | Đang chạy ổn định, đã có installer |
-| Nền tảng web (Next.js + FastAPI) | `web/`, `server/` | Staging đã deploy và nghiệm thu; **production chưa deploy**, chưa thương mại |
+| Nền tảng web (Next.js + FastAPI) | `web/`, `server/` | Staging (`staging.fanfic.world`) và production (`fanfic.world`) đều đã deploy — production chưa thương mại nhưng LÀ site thật, không phải mặc định coi "chưa deploy" |
 
 ## Quy tắc bắt buộc
 
@@ -16,6 +16,15 @@ Kho này chứa **hai sản phẩm** dùng chung một pipeline TTS:
 - **Không commit** model `.onnx`, audio, preview cache, `build/`, `dist/`, `installer_output/`, `node_modules/`, `.env`.
 - **Mọi báo cáo viết bằng tiếng Việt**, bảng so sánh dùng cột `Hạng mục | Trước khi sửa | Sau khi sửa`.
 - Không push GitHub khi chưa được yêu cầu.
+- **Deploy web PHẢI dùng đúng lệnh tường minh** (sau sự cố 2026-08-18: một lần
+  deploy staging bị đẩy nhầm thẳng lên production do gọi lệnh mơ hồ):
+  - **Staging**: worker `fanfic-web-staging`, domain `staging.fanfic.world`,
+    cấu hình `web/wrangler.staging.jsonc`, `npm run cf:deploy:staging`.
+  - **Production**: worker `fanfic-web`, domain `fanfic.world`, cấu hình
+    `web/wrangler.jsonc`, `npm run cf:deploy:production`.
+  - Không có lệnh `cf:deploy` trần — đã bỏ cố ý. Không tự suy ra API base hay
+    đích deploy từ tài liệu cũ; luôn đối chiếu `web/wrangler*.jsonc` và domain
+    thật (`npx wrangler deployments list --name <worker>`) trước khi deploy.
 
 ## Lệnh thường dùng
 

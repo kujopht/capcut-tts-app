@@ -17,12 +17,45 @@
   // ở tên miền khác, nên đó là hành vi mong muốn.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 
+  // `binding: ASSETS` KHÔNG chỉ để phục vụ tệp tĩnh. Nó còn là nơi Worker đọc
+  // các trang đã prerender: `open-next.config.ts` dùng
+  // `static-assets-incremental-cache`, tức cache nằm ở
+  // `.open-next/assets/cdn-cgi/_next_cache/<buildId>/<route>.cache`. Cloudflare
+  // chặn mọi đường dẫn `/cdn-cgi/*` từ Internet, nên các tệp đó CHỈ Worker đọc
+  // được qua binding này. Bỏ binding là mất cả cache lẫn tệp tĩnh.
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   }
 
   // CỐ Ý KHÔNG KHAI, và mỗi thứ vì một lý do:
+  //
+  //   assets.run_worker_first
+  //     Mặc định đã là `false` (kiểm trong
+  //     `node_modules/@opennextjs/cloudflare/dist/api/overrides/asset-resolver/
+  //     index.js`: `isUserWorkerFirst` trả `runWorkerFirst ?? false`), nên khai
+  //     `false` tường minh là dòng vô nghĩa. Khai `true` hoặc một mảng pattern
+  //     phủ `/*` thì TỆ HƠN: request tệp tĩnh cũng phải chạy Worker.
+  //
+  //     Đừng nhầm "Worker vẫn được gọi khi vào `/`" với "run_worker_first đang
+  //     bật". Bộ định tuyến tệp tĩnh chỉ bỏ qua Worker khi CÓ tệp khớp đường
+  //     dẫn; `.open-next/assets` không chứa HTML cho bất kỳ route trang nào
+  //     (OpenNext cố tình không đặt vào đó), nên mọi route trang đều tới
+  //     Worker. Đã đo bằng `wrangler dev`: `/favicon.ico` trả về KHÔNG có
+  //     header `x-opennext*` nào (bộ định tuyến tệp tĩnh, Worker không chạy),
+  //     còn `/fanfic` thì có.
+  //
+  //     VÌ SAO KHÔNG TỰ ĐỔ HTML PRERENDER VÀO `assets` ĐỂ ĂN 0 LẦN GỌI WORKER:
+  //     đã thử bằng một tệp thật (`assets/ziptest.html`) trên `wrangler dev`.
+  //     Bộ định tuyến tệp tĩnh khớp THEO ĐƯỜNG DẪN, bỏ qua query và KHÔNG phân
+  //     biệt header: `GET /ziptest` và `GET /ziptest?_rsc=abc` kèm `RSC: 1`
+  //     trả về CÙNG một HTML. Nghĩa là mỗi lần điều hướng phía client, Next sẽ
+  //     nhận HTML ở chỗ nó chờ payload RSC (`text/x-component`) và phải tải
+  //     lại cả trang. Tải lại cả trang unmount `AudioEngineProvider` ở root
+  //     layout — tức mất tính năng audio sống xuyên route (xem chú thích trong
+  //     `src/app/layout.tsx`). Đổi 1 lần gọi Worker rẻ lấy việc phá tính năng
+  //     đó là lỗ. Cache interception giải quyết đúng chỗ này vì nó CÓ đọc
+  //     header `RSC`/`Next-Router-Segment-Prefetch`.
   //
   //   r2_buckets (NEXT_INC_CACHE_R2_BUCKET)
   //     Cache tăng dần chỉ có ích khi dùng ISR/revalidate. Ứng dụng này không

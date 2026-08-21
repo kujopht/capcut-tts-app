@@ -10,6 +10,13 @@
   //
   //   NEXT_PUBLIC_API_BASE=https://api-dev.fanfic.world npm run cf:build
   //   npx wrangler deploy --config wrangler.staging.jsonc
+  //
+  // PHAI la `npm run cf:build`, khong phai `npx opennextjs-cloudflare build`
+  // tran: script cf:build chay ke tiep `opennextjs-cloudflare populateCache
+  // local`, la buoc sao cache trang da prerender vao
+  // `.open-next/assets/cdn-cgi/_next_cache/`. Thieu buoc do thi khong sap,
+  // nhung moi route tinh quay ve render lai trong Worker (xem
+  // open-next.config.ts).
   "main": ".open-next/worker.js",
   "name": "fanfic-web-staging",
 

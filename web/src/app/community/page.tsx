@@ -24,6 +24,7 @@ import {
   type ServerLimits,
 } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { MotifConstellation } from "@/components/Ornaments";
 import { PageHeader, SkeletonList, ErrorState, EmptyState } from "@/components/ui";
 import { PostCard } from "@/components/PostCard";
 import { PostComposer } from "@/components/PostComposer";
@@ -101,7 +102,7 @@ export default function CommunityPage() {
   }, [trang]);
 
   return (
-    <div className="cong-dong-luoi">
+    <div className="cong-dong-luoi" data-hero-theme="community">
       <div className="stack cong-dong-chinh">
       <PageHeader
         eyebrow="Quảng trường"
@@ -111,6 +112,7 @@ export default function CommunityPage() {
             ? "Bài mới từ những người bạn theo dõi."
             : "Bài mới nhất từ khắp Fanfic World."
         }
+        motif={<MotifConstellation />}
       />
 
       {profile ? (

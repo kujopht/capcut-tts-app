@@ -9,6 +9,7 @@ import { errorMessage, useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { Alert, Loading } from "@/components/ui";
 import { LogoMark } from "@/components/Logo";
+import { MotifPortalHalo } from "@/components/Ornaments";
 import { safeNext } from "@/lib/nav";
 import { api } from "@/lib/api";
 import { FacebookIcon, GoogleIcon } from "@/components/ProviderIcons";
@@ -98,17 +99,24 @@ function LoginForm() {
   }
 
   return (
-    <div className="page auth-page">
+    // Themed Page Hero — Cong sao: indigo nua dem + amethyst, quang cong
+    // (MotifPortalHalo) dat sau logo.
+    <div className="page auth-page" data-hero-theme="auth">
       <header className="auth-head">
+        <span className="auth-portal-halo" aria-hidden="true">
+          <MotifPortalHalo />
+        </span>
         <LogoMark size={54} title="Fanfic Audio Studio" />
-        <h1 className="page-title">
-          {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}
-        </h1>
-        <p className="hint">
-          {mode === "in"
-            ? "Đăng nhập để tạo audio và quản lý truyện của bạn."
-            : "Tạo tài khoản miễn phí để bắt đầu."}
-        </p>
+        <div className="hero-copy">
+          <h1 className="page-title">
+            {mode === "in" ? "Đăng nhập" : "Tạo tài khoản"}
+          </h1>
+          <p className="hint">
+            {mode === "in"
+              ? "Đăng nhập để tạo audio và quản lý truyện của bạn."
+              : "Tạo tài khoản miễn phí để bắt đầu."}
+          </p>
+        </div>
       </header>
 
       <div className="seg auth-seg" role="group" aria-label="Chế độ">

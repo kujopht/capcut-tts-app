@@ -19,6 +19,16 @@ import type { JobStatus } from "@/lib/api";
  * lech, va style inline thi media query khong voi toi — o dien thoai doan mo
  * ta van bi ep o 620px.
  */
+/**
+ * Themed Page Hero — mau/suong cua dau trang doc tu bien CSS (`--hero-*`,
+ * khai bao theo `[data-hero-theme]` o globals.css), KHONG hardcode.
+ * `data-hero-theme` PHAI dat tren the bao NGOAI CUNG cua trang (`<div
+ * className="page" data-hero-theme="...">`), khong phai o day — mau con can
+ * lan toi ca `.filter-bar .input` (mot the ANH EM, khong phai con, cua
+ * `.page-head`), va bien CSS chi ke thua XUONG cay DOM. Component nay chi
+ * dung `motif` de hien mot hoa tiet SVG rieng cua khu vuc, khong tu dat
+ * thuoc tinh theme.
+ */
 export function PageHeader({
   eyebrow,
   icon,
@@ -26,6 +36,7 @@ export function PageHeader({
   lead,
   action,
   id,
+  motif,
 }: {
   eyebrow?: string;
   /** Bieu tuong dat truoc nhan nho. Tuy chon — khong phai dau trang nao cung can. */
@@ -35,10 +46,22 @@ export function PageHeader({
   action?: React.ReactNode;
   /** Dat khi trang can `aria-labelledby` tro toi tieu de nay. */
   id?: string;
+  /**
+   * Hoa tiet SVG nguyen ban RIENG cua khu vuc — mo, dat sau chu, mau/do mo
+   * doc tu `--hero-motif-color`/`--hero-motif-opacity` cua theme dang ap
+   * dung (xem `.page-head-motif`). Tuy chon — trang chua co hoa tiet rieng
+   * thi bo qua, khong bia mot hinh mac dinh.
+   */
+  motif?: React.ReactNode;
 }) {
   return (
     <header className="page-head">
-      <div className="stack-2 page-head-body">
+      {motif ? (
+        <span className="page-head-motif" aria-hidden="true">
+          {motif}
+        </span>
+      ) : null}
+      <div className="stack-2 page-head-body hero-copy">
         {eyebrow ? (
           <span className="eyebrow eyebrow-icon">
             {icon}

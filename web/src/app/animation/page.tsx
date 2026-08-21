@@ -20,6 +20,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, type AnimationSeries } from "@/lib/api";
 import { errorMessage, useSession } from "@/lib/session";
+import { MotifNebulaOrbit } from "@/components/Ornaments";
 import { EmptyState, ErrorState, PageHeader, SkeletonCards } from "@/components/ui";
 import { IconFilm } from "@/components/Icons";
 import { NovelCover } from "@/components/NovelCover";
@@ -110,12 +111,13 @@ function AnimationBrowser() {
   const to = page * PAGE_SIZE + series.length;
 
   return (
-    <div className="page">
+    <div className="page" data-hero-theme="animation">
       <PageHeader
         eyebrow="Animation"
         icon={<IconFilm />}
         title="Animation"
         lead="Xem series animation từ YouTube — video luôn phát trực tiếp từ YouTube, Fanfic không tải lại hay lưu trữ video của ai cả."
+        motif={<MotifNebulaOrbit />}
         action={
           <Link
             className="btn btn-primary"

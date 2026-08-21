@@ -44,6 +44,7 @@ import {
   formatNumber,
 } from "@/components/ui";
 import { IconMic , IconHistory, IconBulb } from "@/components/Icons";
+import { MotifResonanceRings } from "@/components/Ornaments";
 
 /** Gioi han cua Studio — dat o day de tranh job chay qua lau. */
 const MAX_CHARS = 20_000;
@@ -306,8 +307,8 @@ export default function StudioPage() {
 
   if (!profile) {
     return (
-      <div className="page">
-        <h1 className="page-title">Audio Studio</h1>
+      <div className="page" data-hero-theme="audio">
+        <PageHeader eyebrow="Audio Studio" icon={<IconMic />} motif={<MotifResonanceRings />} title="Audio Studio" />
         <EmptyState
           icon="🔐"
           title="Cần đăng nhập để tạo audio"
@@ -323,10 +324,11 @@ export default function StudioPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page" data-hero-theme="audio">
       <PageHeader
         eyebrow="Audio Studio"
         icon={<IconMic />}
+        motif={<MotifResonanceRings />}
         title="Tạo audio từ văn bản"
         lead="Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là riêng tư và không trở thành chương fanfic."
         action={

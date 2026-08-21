@@ -24,6 +24,7 @@ import {
   formatNumber,
 } from "@/components/ui";
 import { IconLibrary , IconMic } from "@/components/Icons";
+import { MotifCelestialDial } from "@/components/Ornaments";
 
 type Source = "all" | "studio" | "fanfic";
 
@@ -129,8 +130,11 @@ export default function LibraryPage() {
 
   if (!profile) {
     return (
-      <div className="page">
-        <h1 className="page-title">Thư viện audio</h1>
+      // Themed Page Hero — "Arcane Archive": navy hoang gia + ngoc bich dam
+      // + vang co dien. Dung PageHeader (khong con <h1> tran) de nhat quan
+      // voi nhanh da dang nhap ben duoi — cung mot he thong.
+      <div className="page" data-hero-theme="library">
+        <PageHeader eyebrow="Thư viện" icon={<IconLibrary />} motif={<MotifCelestialDial />} title="Thư viện audio" />
         <EmptyState
           icon="🔐"
           title="Cần đăng nhập để xem thư viện của bạn"
@@ -146,10 +150,11 @@ export default function LibraryPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page" data-hero-theme="library">
       <PageHeader
         eyebrow="Thư viện"
         icon={<IconLibrary />}
+        motif={<MotifCelestialDial />}
         title="Audio của tôi"
         lead="Tất cả audio đã tạo, gồm cả bản tạo nhanh ở Audio Studio và audio của các chương fanfic."
         action={

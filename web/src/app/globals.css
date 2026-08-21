@@ -263,27 +263,53 @@ body {
 /*
   Khung chua HAI lop tranh — xem `components/PageBackground.tsx`.
 
-  `z-index: -1` cho khung nay: con am se ve TREN nen cua body nhung DUOI moi
-  noi dung trong luong. Nho vay khong phai gan `z-index` cho header/main/footer.
+  `z-index: -2` (V2 Cloud Veil — truoc la -1): con am se ve TREN nen cua body
+  nhung DUOI moi noi dung trong luong. Nho vay khong phai gan `z-index` cho
+  header/main/footer.
+
+  VI SAO -2 (khong con -1): `.route-veil` (man may chuyen canh) gio dat
+  z-index -1 — MOT BAC IT AM HON, DE NAM GIUA nen va noi dung. Ca hai deu la
+  con am (roi vao nhom "positioned descendants voi z-index am" khi trinh
+  duyet xep chong), nen chung LUON ve TRUOC moi noi dung khong-dinh-vi trong
+  luong nhu `<main>` — bat ke con so am cu the la bao nhieu — nhung GIUA
+  CHUNG VOI NHAU thi so it am hon (`-1`) ve SAU (tren) so it am hon kia
+  (`-2`). Day la ly do MOT PHEP DOI -1 -> -2 don gian nhu the nay dat dung
+  yeu cau "BACKGROUND < CLOUD < CONTENT" ma khong can dung toi `isolation`
+  hay tao ngu canh xep chong moi — da xac nhan bang kiem tra thuc te (xem
+  bao cao Cloud Veil V2): `body`/`html`/`main`/`.wrap` khong co
+  `position`/`transform`/`filter`/`isolation` nao chen vao giua.
 */
 .page-bg {
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: -2;
   pointer-events: none;
   overflow: hidden;
 }
 
-/* --dur-nen: khop voi `THOI_LUONG` o `PageBackground.tsx`. */
-:root { --dur-nen: 580ms; }
-
 /*
-  MOT lop tranh. Co the co hai lop cung luc trong luc chuyen canh — mot dang mo
-  ra, mot dang hien vao — va khong bao gio nhieu hon hai.
+  Thoi luong Aether Rift (V4) — KHOP CHINH XAC voi `THOI_LUONG_BINH_THUONG`
+  o `lib/routeTransitionStore.ts`. `--dur-aether` la do dai duong bien
+  huu co (`d` cua path) quet qua the gioi; kho JS giu lop nen CU thanh
+  `--dur-tong` (dai hon mot chut) de cac chi tiet khi quyen phu (wisp/haze/
+  mote) kip tan het truoc khi lop cu bi go — xem khoi ".aether-rift" ben
+  duoi va bao cao V4 cho ly do doi toan bo mo hinh thoi gian.
 */
+:root {
+  --dur-aether: 460ms;
+  --dur-tong: 480ms;
+}
+
 .page-bg-lop {
   position: absolute;
   inset: 0;
+}
+
+/* Lop TREN dang "revealing" — duong bien lo dan dinh nghia boi
+   `#aether-fill-clip` (SVG, xem RouteTransitionVeil.tsx), hoat hinh boi
+   CSS `d` chu KHONG boi component nay. */
+.page-bg-reveal {
+  clip-path: url(#aether-fill-clip);
 }
 
 .page-bg-lop::before,
@@ -332,65 +358,9 @@ body {
 }
 
 /*
-  CHUYEN CANH CO HUONG — mot cu QUAY MAY, khong phai mot cu doi anh.
-
-  Cac khu vuc chinh nam tren MOT TRUC (xem `lib/sections.ts`):
-
-      Trang chu -> Kham pha -> Thu vien -> Viet -> Studio -> Tai khoan
-
-  Di sang PHAI tren truc thi may quay sang phai: tam cu troi ra ben trai, tam moi
-  vao tu ben phai. Di ve trai thi nguoc lai. Nho vay mot cu bam "Quay lai" cua
-  trinh duyet tu dong tra ve dung huong — huong duoc tinh tu hai DUONG DAN, khong
-  tu mot cai co "nguoi dung vua bam Back" ma ta phai tu theo doi.
-
-  BIEN DO NHO, va do la ca quyet dinh: 5vw ra, 8vw vao. Truot ca man hinh 100vw
-  doc ra nhu mot slide PowerPoint; mot cu dich nho doc ra nhu may vua quay sang
-  mot khu khac cua CUNG MOT the gioi. Tam vao di xa han tam ra mot chut de mat
-  thay "cai moi dang tien vao" chu khong phai "hai tam cung troi".
-
-  `nhe` cho trang long (`/novels/*`, `/chapters/*`) va cho moi buoc khong co
-  huong: chung khong phai mot khu vuc rieng, nen chi dich 2vw kem mo dan.
-
-  `transform` + `opacity` — hai thuoc tinh duy nhat trinh duyet ghep duoc tren GPU
-  ma khong phai tinh lai bo cuc.
-*/
-.page-bg-lop[data-vao] { animation: nen-vao var(--dur-nen) var(--ease) both; }
-.page-bg-lop[data-ra]  { animation: nen-ra  var(--dur-nen) var(--ease) both; }
-
-.page-bg-lop[data-vao][data-huong="tien"] { animation-name: vao-tu-phai; }
-.page-bg-lop[data-ra][data-huong="tien"]  { animation-name: ra-sang-trai; }
-.page-bg-lop[data-vao][data-huong="lui"]  { animation-name: vao-tu-trai; }
-.page-bg-lop[data-ra][data-huong="lui"]   { animation-name: ra-sang-phai; }
-.page-bg-lop[data-vao][data-huong="nhe"]  { animation-name: vao-nhe; }
-.page-bg-lop[data-ra][data-huong="nhe"]   { animation-name: ra-nhe; }
-
-@keyframes vao-tu-phai {
-  from { opacity: 0; transform: translate3d(9vw, 0, 0) scale(1.015); }
-  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-@keyframes ra-sang-trai {
-  from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-  to   { opacity: 0; transform: translate3d(-6vw, 0, 0) scale(1.01); }
-}
-@keyframes vao-tu-trai {
-  from { opacity: 0; transform: translate3d(-9vw, 0, 0) scale(1.015); }
-  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-@keyframes ra-sang-phai {
-  from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-  to   { opacity: 0; transform: translate3d(6vw, 0, 0) scale(1.01); }
-}
-@keyframes vao-nhe {
-  from { opacity: 0; transform: translate3d(2vw, 0, 0); }
-  to   { opacity: 1; transform: translate3d(0, 0, 0); }
-}
-@keyframes ra-nhe {
-  from { opacity: 1; transform: translate3d(0, 0, 0); }
-  to   { opacity: 0; transform: translate3d(-2vw, 0, 0); }
-}
-
-/*
-  MOT chuyen dong lien tuc duy nhat trong ca site, va chi o TRANG CHU.
+  Nhip tho lien tuc CUA TRANG CHU — chuyen dong DUY NHAT trong ca site khong
+  gan voi mot lan dieu huong nao (xem ".route-veil" phia duoi cho THE nao
+  chuyen canh route duoc ve).
 
   Ben cang tho rat cham: 1 -> 1.015 trong 54 giay, roi lui lai. Bien do nho hon
   ca mot lan cuon chuot, nen khong ai "thay no dang chay" — chi thay canh khong
@@ -398,37 +368,295 @@ body {
 
   KHONG dat o cac trang lam viec: mot khung nen dang bo ra vao phia sau mot form
   hay mot chuong truyen la thu lam met mat sau nam phut.
-
-  NAM O `::before`, KHONG o the: the gio dung `transform` cho cu truot ngang cua
-  chuyen canh, va hai hieu ung tranh cung mot thuoc tinh thi mot cai bien mat.
-  `::before` da co `nen-lang`, nen phai khai CA HAI trong mot khai bao — mot quy
-  tac rieng se ghi de va lop nen mat luon hieu ung hien vao.
 */
-.page-bg-lop[data-bg="home"][data-vao]::before {
-  animation:
-    nen-lang var(--dur-nen) var(--ease) both,
-    tho-nen 54s ease-in-out var(--dur-nen) infinite alternate;
+.page-bg-lop[data-bg="home"]::before {
+  animation: tho-nen 54s ease-in-out infinite alternate;
 }
 @keyframes tho-nen {
   from { transform: scale(1); }
   to   { transform: scale(1.015); }
 }
 
-@keyframes nen-vao {
-  from { opacity: 0; transform: none; }
-  to   { opacity: 1; transform: none; }
+/*
+  ================================================================
+  AETHER RIFT REVEAL — V4. Thay THE HOAN TOAN "Celestial Mist Ribbon" (V3).
+
+  V3 BI TU CHOI: du hinh dang da giac (khong con tron/oval), van doc ra
+  "vai dai CSS bet phang di qua man hinh" — VAN la mot VAT THE truot qua
+  giao dien, chi khac V2 o CHI TIET hinh hoc, khong khac o BAN CHAT chuyen
+  dong. V4 doi CA nguyen tac: khong con "mot vat troi qua nen", ma la
+  "CHINH the gioi bien hinh sang dia diem moi" — nen B duoc TIET LO dan qua
+  mot DUONG BIEN HUU CO (SVG `clip-path`, duong Bezier bac ba, KHONG con
+  polygon), khong phai mot hinh dang di chuyen ngang qua khung hinh.
+
+  V3 CON CO MOT VAN DE THU HAI, nghiem trong hon ca hinh hoc: dieu huong
+  PHAI CHO mot moc toi thieu (bien `PHU` cu, 340ms) TRUOC KHI anh nen doi —
+  nguoi dung bam link, NavIndicator nhay ngay, nhung nen/anh moi khong xuat
+  hien cho toi khi "man phu xong". Cam giac do la DO TRE DAU VAO, khong
+  phai trang tri. V4 bo han co che nay — xem `lib/routeTransitionStore.ts`:
+  `tenMoi` duoc ve NGAY o `diTinh()`, khong cho `napAnh`, khong cho mot moc
+  nao ca. Tong hieu ung con lai 480ms (giam tu 880ms), va quan trong hon:
+  KHONG con lam cham thoi diem nen moi xuat hien mot chut nao.
+
+  ================== KIEN TRUC 3 LOP DUNG CHUNG MOT DUONG BIEN ============
+
+  Ba phan tu SVG dung LAI CHINH XAC mot duong cong Bezier (chi khac o CACH
+  dung: mot lam VUNG DIEN (fill), hai lam NET VE (stroke)) — dam bao seam/
+  feather LUON BAM DUNG theo mep dang tiet lo, khong bao gio lech nhau:
+
+    .aether-fill-path    (trong <clipPath objectBoundingBox>) — VUNG da lo
+                         ra cua nen B. Duoc PageBackground.tsx tham chieu
+                         qua `clip-path: url(#aether-fill-clip)` tren chinh
+                         lop `.page-bg-lop` dang "revealing".
+    .aether-feather-path  net rong, mo (blur), do mo thap — quang mem NGAY
+                         tai duong bien, cam giac khong khi day dac hon.
+    .aether-seam-path     net mong (~2px thuc te), KHONG mo — "anh sang
+                         khuc xa qua khe chieu khong gian" (dac ta muc 6):
+                         `stroke-dasharray` tao cac doan DUT QUANG, mot vai
+                         doan sang hon cac doan con lai — TUYET DOI khong
+                         phai vien neon lien tuc/glow to.
+
+  DUONG BIEN duoc "quet" bang cach doi TRUC TIEP thuoc tinh CSS `d` cua ca
+  ba path (khong dung `transform`/dich chuyen — moi trinh duyet hien dai
+  deu ho tro noi suy `d` khi hai gia tri CUNG so luong lenh). "from" la
+  duong cong gan het BEN TRAI (gan nhu chua lo gi), "to" la CHINH duong
+  cong do dich sang phai (+1.15 don vi objectBoundingBox cho ban FILL,
+  +115 don vi cho ban STROKE dung viewBox 0-100) — du de phu HET chieu
+  rong khung nhin. Duong cong CO CHU (cubic Bezier, uon lon rong + mot vai
+  chum lom bat doi xung), KHONG mot doan thang/goc nhon/song sin lap lai
+  nao — xem `RouteTransitionVeil.tsx` cho toa do day du.
+
+  KHONG dung `Math.random()` luc chay — duong cong la MOT bo toa do dinh
+  san (hanh van tay), giong het moi lan, chi VI TRI theo % thoi gian la
+  dong (dung dac ta "predetermined set of hand-authored route variants").
+
+  `.aether-rift` (nen B) KHONG bao gio translate/zoom/pan/scale/rotate —
+  CHI duong bien (`d`) doi, dung dac ta muc 12 "this is what makes it feel
+  like the WORLD is transforming rather than a slide transition".
+
+  ================== TRANG TRI PHU (THU YEU, KHONG PHAI HIEU UNG CHINH) ===
+
+  2 lan may mong (`.aether-wisp-1/2`) + 1 dai suong mo tan sau
+  (`.aether-haze`) + 4 dom sang li ti (`.aether-mote-*`) — TAT CA deu la
+  hinh TRON/oval mem (border-radius, KHONG polygon), nho, mo blur nang, di
+  chuyen DOC theo huong quet chinh nhung KHONG PHAI la vat the chinh cua
+  hieu ung — chi la khong khi phu tro lam mem duong bien.
+
+  Rieng chu de `home`: them 2 vet la nho (`.aether-leaf`), CHI xuat hien
+  ~250-350ms roi bien mat — mot chi tiet moi truong cuc nho, KHONG phai he
+  thong hat cua vinh vien. Cac chu de khac KHONG co chi tiet tuong duong
+  (dac ta cho phep bo qua neu "khong tao cam giac tinh te" — 7 bien the
+  con lai — la du, hoa/dom sang/vay tuyet — deu de lai cam giac "hieu ung
+  phep thuat game" hon la mot chi tiet khi quyen kin dao).
+
+  KHONG Canvas, KHONG WebGL, KHONG hoat hinh SVG filter lien tuc (neu co
+  feTurbulence/feDisplacementMap thi CHI tinh, khong bao gio nam trong
+  keyframe). Dieu khien boi DUY NHAT thuoc tinh DOM `data-state` tren
+  `.aether-rift` (idle/revealing) — luc "idle" KHONG mot `animation` nao
+  duoc gan, chi phi luc dung yen la SO KHONG.
+  ================================================================
+*/
+.aether-rift {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* -1: CHI hon `.page-bg` (-2) mot bac — giu nguyen kien truc z-index am
+     da kiem chung tu V2/V3 (NEN < HIEU UNG < GIAO DIEN, xem CSS2.1
+     Appendix E — khong `position`/`transform`/`filter`/`isolation` nao
+     tren `body`/`html`/`main`/`.wrap` pha vo thu tu nay). */
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
 }
-@keyframes nen-ra {
-  from { opacity: 1; }
-  to   { opacity: 0; }
+
+/* SVG hien thi (feather + seam) — viewBox 0-100 khop VOI toa do stroke ben
+   duoi; `preserveAspectRatio="none"` de keo day khung nhin y het cach
+   `objectBoundingBox` keo dan `.aether-fill-path` (hai ben LUON dong bo). */
+.aether-rift-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
-/* Phong to nam o lop ANH, khong o lop bao — de no khong danh nhau voi opacity. */
-/* Tam moi thu tu 1.015 ve 1 — canh "lang xuong" thay vi "bat ra". */
-.page-bg-lop[data-vao]::before { animation: nen-lang var(--dur-nen) var(--ease) both; }
-@keyframes nen-lang {
-  from { transform: scale(1.015); }
-  to   { transform: none; }
+
+.aether-feather-path,
+.aether-seam-path {
+  fill: none;
+  vector-effect: non-scaling-stroke;
 }
+.aether-feather-path {
+  stroke: var(--aether-1, #6366f1);
+  stroke-width: 32;
+  stroke-linecap: round;
+  opacity: 0;
+  filter: blur(14px);
+}
+.aether-seam-path {
+  /* "Anh sang khuc xa" — mong, khong mo, dut quang (dac ta muc 6). */
+  stroke: color-mix(in srgb, white 55%, var(--aether-2, #a78bfa));
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 3 7 9 4 2 8 14 6;
+  opacity: 0;
+}
+
+/* Duong bien FILL (clip-path cho lop nen dang "revealing" trong
+   PageBackground.tsx) — dinh nghia mot lan trong <defs>, dung objectBoundingBox
+   nen tu dong khop moi kich thuoc man hinh. */
+.aether-fill-path {
+  opacity: 1; /* khong lien quan hien/an — chi la mot clipPath, luon "dac" */
+}
+
+/* ===== hoat hinh: CHI thuoc tinh CSS `d` doi (khong transform/dich) ===== */
+.aether-rift[data-state="revealing"] .aether-fill-path,
+.aether-rift[data-state="revealing"] .aether-feather-path,
+.aether-rift[data-state="revealing"] .aether-seam-path {
+  animation-duration: var(--dur-aether);
+  animation-timing-function: cubic-bezier(.4, 0, .2, 1);
+  animation-fill-mode: forwards;
+}
+.aether-rift[data-state="revealing"] .aether-fill-path    { animation-name: aether-sweep-fill; }
+.aether-rift[data-state="revealing"] .aether-feather-path { animation-name: aether-sweep-feather; }
+.aether-rift[data-state="revealing"] .aether-seam-path    { animation-name: aether-sweep-seam; }
+
+/*
+  Toa do objectBoundingBox (0-1). "from": duong cong hau nhu con nam BEN
+  TRAI 0 (nen B GAN NHU CHUA lo ra). "to": CHINH duong cong do, dich +1.15
+  sang phai (nen B lo HET, vi diem TRAI CUNG cua vung dien luc nay <= 0).
+  Uon bang 3 doan Bezier bac ba, rong-hep-rong bat doi xung — KHONG mot
+  doan thang nao ngoai hai canh dong khung o xa ben trai (khong bao gio
+  hien, chi de dong kin vung dien).
+*/
+@keyframes aether-sweep-fill {
+  from { d: path("M 0.02,0 C 0.15,0.08 0.00,0.20 0.10,0.30 C 0.20,0.40 -0.05,0.50 0.05,0.62 C 0.15,0.74 0.00,0.85 0.12,1 L -2,1 L -2,0 Z"); }
+  to   { d: path("M 1.17,0 C 1.30,0.08 1.15,0.20 1.25,0.30 C 1.35,0.40 1.10,0.50 1.20,0.62 C 1.30,0.74 1.15,0.85 1.27,1 L -0.85,1 L -0.85,0 Z"); }
+}
+/* Cung MOT duong cong (chi bo hai canh dong khung) tren he truc 0-100 —
+   dung chung cho feather (net rong, mo) va seam (net mong, sac). */
+@keyframes aether-sweep-feather {
+  from { opacity: 0.5; d: path("M 2,0 C 15,8 0,20 10,30 C 20,40 -5,50 5,62 C 15,74 0,85 12,100"); }
+  to   { opacity: 0;   d: path("M 117,0 C 130,8 115,20 125,30 C 135,40 110,50 120,62 C 130,74 115,85 127,100"); }
+}
+@keyframes aether-sweep-seam {
+  from { opacity: 0.6; d: path("M 2,0 C 15,8 0,20 10,30 C 20,40 -5,50 5,62 C 15,74 0,85 12,100"); }
+  to   { opacity: 0.35; d: path("M 117,0 C 130,8 115,20 125,30 C 135,40 110,50 120,62 C 130,74 115,85 127,100"); }
+}
+
+/* ===== trang tri phu: 2 lan may + 1 dai suong tan + 4 dom sang ========== */
+.aether-wisp {
+  position: absolute;
+  width: 16vmax;
+  height: 5vmax;
+  border-radius: 50%;
+  filter: blur(10px);
+  opacity: 0;
+  background: var(--aether-1, #6366f1);
+  will-change: transform, opacity;
+}
+.aether-wisp-1 { top: 32vh; left: -8vw; }
+.aether-wisp-2 { top: 58vh; left: -12vw; }
+
+.aether-haze {
+  position: absolute;
+  inset: -10% -30%;
+  opacity: 0;
+  background: linear-gradient(100deg,
+    transparent 0%,
+    color-mix(in srgb, var(--aether-2, #a78bfa) 14%, transparent) 45%,
+    color-mix(in srgb, var(--aether-2, #a78bfa) 14%, transparent) 55%,
+    transparent 100%);
+  filter: blur(24px);
+  will-change: opacity;
+}
+
+.aether-mote {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, white 70%, var(--aether-1, #6366f1));
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.aether-mote-1 { top: 24vh; }
+.aether-mote-2 { top: 44vh; }
+.aether-mote-3 { top: 63vh; }
+.aether-mote-4 { top: 78vh; }
+
+.aether-rift[data-state="revealing"] .aether-wisp-1 { animation: aether-wisp-di 360ms cubic-bezier(.4, 0, .2, 1) both; }
+.aether-rift[data-state="revealing"] .aether-wisp-2 { animation: aether-wisp-di 360ms cubic-bezier(.4, 0, .2, 1) 40ms both; }
+.aether-rift[data-state="revealing"] .aether-haze    { animation: aether-haze-di 420ms ease-out 30ms both; }
+.aether-rift[data-state="revealing"] .aether-mote-1  { animation: aether-mote-nhap 260ms ease-out 40ms both; }
+.aether-rift[data-state="revealing"] .aether-mote-2  { animation: aether-mote-nhap 260ms ease-out 140ms both; }
+.aether-rift[data-state="revealing"] .aether-mote-3  { animation: aether-mote-nhap 260ms ease-out 220ms both; }
+.aether-rift[data-state="revealing"] .aether-mote-4  { animation: aether-mote-nhap 260ms ease-out 90ms both; }
+
+@keyframes aether-wisp-di {
+  0%   { opacity: 0;    transform: translate3d(0, 0, 0); }
+  40%  { opacity: 0.22; }
+  100% { opacity: 0;    transform: translate3d(118vw, 0, 0); }
+}
+@keyframes aether-haze-di {
+  0%   { opacity: 0; }
+  50%  { opacity: 0.5; }
+  100% { opacity: 0; }
+}
+@keyframes aether-mote-nhap {
+  0%   { opacity: 0;    transform: translate3d(0, 0, 0) scale(0.6); }
+  45%  { opacity: 0.8;  transform: translate3d(60vw, -4px, 0) scale(1); }
+  100% { opacity: 0;    transform: translate3d(120vw, -6px, 0) scale(0.8); }
+}
+
+/* -- Home CHI: 2 vet la nho, xuat hien ~250-350ms roi bien mat ----------- */
+.aether-leaf {
+  position: absolute;
+  width: 14px;
+  height: 8px;
+  border-radius: 70% 30% 65% 35%;
+  background: linear-gradient(120deg, #bff0c9, #8fd6a3 60%, #d8f5df);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.aether-leaf-1 { top: 30vh; left: 10vw; }
+.aether-leaf-2 { top: 55vh; left: 30vw; }
+.aether-rift[data-theme="home"][data-state="revealing"] .aether-leaf-1 {
+  animation: aether-la-bay 300ms ease-out 60ms both;
+}
+.aether-rift[data-theme="home"][data-state="revealing"] .aether-leaf-2 {
+  animation: aether-la-bay 300ms ease-out 130ms both;
+}
+@keyframes aether-la-bay {
+  0%   { opacity: 0;   transform: translate3d(0, 0, 0) rotate(0deg); }
+  30%  { opacity: 0.7; }
+  100% { opacity: 0;   transform: translate3d(30vw, 6vh, 0) rotate(70deg); }
+}
+
+/*
+  Mau theo CHU DE dich — dung LAI 8 chu de nen (`lib/backgrounds.ts`). Doi
+  ten bien tu `--veil-1/2` (V2/V3) sang `--aether-1/2` (V4) vi day khong
+  con la "man suong", ma la mau CUA DUONG BIEN/khoi may phu tro. Gia tri
+  giu nguyen tu V3 (da dung, kiem chung khong con qua toi — xem lich su
+  git cho ly do doi mau `auth`).
+*/
+.aether-rift[data-theme="home"]    { --aether-1: #22d3ee; --aether-2: #c4b5fd; } /* ocean cyan + pale lavender */
+.aether-rift[data-theme="explore"] { --aether-1: #38bdf8; --aether-2: #bfdbfe; } /* azure + pearl blue */
+.aether-rift[data-theme="reader"]  { --aether-1: #6366f1; --aether-2: #a78bfa; } /* deep indigo + muted violet */
+.aether-rift[data-theme="studio"]  { --aether-1: #22d3ee; --aether-2: #e879f9; } /* cyan + restrained magenta */
+.aether-rift[data-theme="write"]   { --aether-1: #a78bfa; --aether-2: #fb7185; } /* violet + muted rose */
+.aether-rift[data-theme="library"] { --aether-1: #2563eb; --aether-2: #e4c982; } /* sapphire + warm gold */
+.aether-rift[data-theme="account"] { --aether-1: #7c6cf0; --aether-2: #c4b5fd; } /* blue violet */
+.aether-rift[data-theme="auth"]    { --aether-1: #4338ca; --aether-2: #7c3aed; } /* midnight indigo + amethyst */
+
+/*
+  `ContentAtmosphere.tsx` van mount (the bao ON DINH, khong tu remount khi
+  route doi) nhung KHONG con animation nao gan — dac ta V4 muc 11 yeu cau
+  "First attempt: DO NOT fade route UI at all" de tranh cong them BAT KY
+  do tre nao vao cam giac phan hoi. Neu sau nay QA thay cu doi noi dung qua
+  dot ngot, dac ta cho phep mot lan mo RAT ngan (opacity 0.96->1, 80-120ms,
+  KHONG translateY) — chua can toi vi Next.js tu doi `{children}` da du
+  muot voi cac trang hien co.
+*/
 
 /*
   Muc phu, do mo va diem canh cua tung tam.
@@ -442,6 +670,29 @@ body {
   doi soat, va de neu sau nay co ai doi thi test do ngay.
 */
 .page-bg-lop[data-bg="home"]    { --anh: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor.webp");      --anh-nho: url("/artwork/fantasy-backgrounds/01-home-sunny-harbor-sm.webp");      --toi: 0.34; --diem: center 42%; --mo: 0px; }
+
+/*
+  Live Wallpaper — rollout V4, CA 8 chu de. Xem `components/LiveBackground.tsx`
+  va `lib/backgrounds.ts` (`videoNen`).
+
+  `object-position: var(--diem)` KHONG hard-code mot toa do rieng cho home
+  nua — `--diem` la bien CSS da dinh nghia san tren CHINH `.page-bg-lop[data-
+  bg="X"]` (bang tren, tung tam mot gia tri rieng) va THUA KE xuong day, nen
+  poster/video CUNG mot chu de LUON dung CHINH XAC diem neo cua tam tinh ung
+  voi no — khong the lech nhau ma khong ai biet (khac V1 chi co home, phai
+  hard-code `center 42%%` rieng). Neu khong khop diem neo, canh se "nhay" mot
+  chut luc video (object-position mac dinh: center) chong len anh CSS
+  `::before` roi hien dan vao.
+
+  Kich thuoc: lop nay dat trong `.page-bg-lop` (position: absolute; inset: 0),
+  nen chi can rong/cao 100% — `position` van la "relative" tu chinh
+  `LiveBackground.tsx` (khong doi o day), du de lam noi chua cho hai lop con
+  `position: absolute` cua no.
+*/
+.live-wallpaper-lop { width: 100%; height: 100%; }
+.live-wallpaper-lop .live-bg-poster,
+.live-wallpaper-lop .live-bg-video { object-position: var(--diem, center); }
+
 .page-bg-lop[data-bg="explore"] { --anh: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/02-explore-sky-kingdom-sm.webp");    --toi: 0.42; --diem: center 38%; --mo: 0px; }
 .page-bg-lop[data-bg="reader"]  { --anh: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine.webp");  --anh-nho: url("/artwork/fantasy-backgrounds/03-reader-moonlit-shrine-sm.webp");  --toi: 0.38; --diem: center 22%; --mo: 0px; }
 .page-bg-lop[data-bg="studio"]  { --anh: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop.webp");    --anh-nho: url("/artwork/fantasy-backgrounds/04-studio-sky-workshop-sm.webp");    --toi: 0.46; --diem: center 45%; --mo: 0px; }
@@ -3849,6 +4100,9 @@ body.co-mini { padding-bottom: 74px; }
   */
   .card-link:hover, .feature:hover, .story-card:hover, .quick-card:hover,
   .story-card:hover .cover-image { transform: none; }
+  /* .portal-card tu truoc da nhac len khi ru chuot nhung thieu o day — them
+     ca lop nghe thuat/icon moi (Phase 3.5 Phan 8). */
+  .portal-card:hover, .portal-card:hover .portal-art, .portal-card:hover .portal-icon { transform: none; }
   .progress-bar::after { display: none; }
   .rise { animation: none; }
 
@@ -3876,32 +4130,25 @@ body.co-mini { padding-bottom: 74px; }
      an han di. */
   .nav-vach-streak { display: none; }
 
-  /* Chuyen canh nen: bo phan PHONG TO, giu mot lan mo/hien rat ngan de khong
-     giat. Doi anh tuc thi cung duoc, nhung mot cu nhay giua hai tam sang toi
-     khac nhau con kho chiu hon chinh chuyen dong. */
-  :root { --dur-nen: 120ms; }
-  .page-bg-lop[data-vao]::before { animation: none; }
-  /*
-    Chuyen canh CO HUONG: bo han phan DICH NGANG, chi con mot lan mo/hien.
+  /* Nhip tho cua nen trang chu: BO han. */
+  .page-bg-lop[data-bg="home"]::before { animation: none; }
 
-    Phai ghi de ca `animation-name` cho tung huong: quy tac
-    `[data-vao][data-huong="tien"]` co do cu the cao han, nen chi dat lai
-    `animation` o `[data-vao]` thi cu truot ngang van chay.
+  /*
+    Aether Rift (V4): dac ta muc 21 — "skip Aether Rift entirely". KHONG
+    con duong bien quet/seam/feather/wisp/haze/mote/la nao ca — tat ca hoat
+    hinh trong `.aether-rift` bi tat. Nen doi CUNG bang mot lan mo opacity
+    RAT ngan (80ms) tren chinh lop `.page-bg-lop` dang "revealing" — `clip-
+    path` bi go de lop do hien DAY DU ngay, khong con phu thuoc duong bien.
   */
-  .page-bg-lop[data-vao],
-  .page-bg-lop[data-vao][data-huong="tien"],
-  .page-bg-lop[data-vao][data-huong="lui"],
-  .page-bg-lop[data-vao][data-huong="nhe"] {
-    animation: nen-vao var(--dur-nen) linear both;
+  .aether-rift * { animation: none !important; }
+  .aether-fill-path { d: path("M -2,0 L 2,0 L 2,1 L -2,1 Z") !important; }
+  .page-bg-reveal {
+    clip-path: none;
+    opacity: 0;
+    animation: aether-nhe 80ms linear both;
   }
-  .page-bg-lop[data-ra],
-  .page-bg-lop[data-ra][data-huong="tien"],
-  .page-bg-lop[data-ra][data-huong="lui"],
-  .page-bg-lop[data-ra][data-huong="nhe"] {
-    animation: nen-ra var(--dur-nen) linear both;
-  }
-  /* Nhip tho cua nen trang chu: BO han. Giu lai mot lan hien vao rat ngan. */
-  .page-bg-lop[data-bg="home"][data-vao]::before { animation: none; }
+  @keyframes aether-nhe { from { opacity: 0; } to { opacity: 1; } }
+
   .story-card:hover { filter: none; }
 }
 

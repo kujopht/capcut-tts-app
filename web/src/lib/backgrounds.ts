@@ -76,3 +76,38 @@ export function anhNen(ten: string): string {
   const tep = TEP[ten] ?? TEP[MAC_DINH];
   return `/artwork/fantasy-backgrounds/${tep}.webp`;
 }
+
+/**
+ * Live Wallpaper — rollout V4 (2026-08), CA 8 chu de. Video do NGUOI DUNG tu
+ * tao thu cong tu chinh 8 buc tranh tinh o tren (khong qua Pollinations,
+ * khong AI sinh) — xem bao cao rollout cho kiem tra chat luong/vong lap day
+ * du. Ban runtime (H.264, 1920x1080, 30fps, khong am thanh) nam o
+ * `/artwork/fantasy-backgrounds/live/`; ban goc (master) KHONG nam trong
+ * repo (giu o `Downloads/donelive`, tep goc HEVC 2560x1440 60fps qua nang
+ * cho web — xem bao cao ma-hoa).
+ *
+ * MOT TEP MOI CHU DE — `PageBackground.tsx` doc DUY NHAT ham nay, khong tu
+ * ghep chuoi duong dan `ten` -> tep o component (dac ta muc 9: "one
+ * declarative mapping... Do NOT scatter route -> mp4 hardcoded strings").
+ */
+const VIDEO: Record<string, string> = {
+  home: "01-home",
+  explore: "02-explore",
+  reader: "03-reader",
+  studio: "04-studio",
+  write: "05-write",
+  library: "06-library",
+  account: "07-account",
+  auth: "08-auth",
+};
+
+export interface NguonVideoNen {
+  mp4: string;
+}
+
+/** `undefined` = chu de chua co live wallpaper — component chi ve poster. */
+export function videoNen(ten: string): NguonVideoNen | undefined {
+  const tep = VIDEO[ten];
+  if (!tep) return undefined;
+  return { mp4: `/artwork/fantasy-backgrounds/live/${tep}.mp4` };
+}

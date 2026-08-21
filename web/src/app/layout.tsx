@@ -5,6 +5,8 @@ import { SessionProvider } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { NavAuth, NavLinks } from "@/components/NavAuth";
 import { PageBackground } from "@/components/PageBackground";
+import { RouteTransitionVeil } from "@/components/RouteTransitionVeil";
+import { ContentAtmosphere } from "@/components/ContentAtmosphere";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteSearch } from "@/components/SiteSearch";
 import { Logo } from "@/components/Logo";
@@ -60,6 +62,18 @@ export default function RootLayout({
                 lien ket bo qua de no khong bao gio chen vao thu tu tieu diem. */}
             <PageBackground />
 
+            {/*
+              Hieu ung chuyen canh route "Aether Rift Reveal" (V4) — MOT LAN
+              duy nhat, ngang hang voi `PageBackground`. `.aether-rift` dat
+              z-index -1 (chi hon `.page-bg` -2 mot bac) — CA HAI la con am,
+              nen LUON ve TRUOC vung noi dung chinh (khong dinh vi) nhung SAU
+              cac lop dieu huong/modal z-index duong. Ket qua: NEN < HIEU UNG
+              < GIAO DIEN — hieu ung KHONG bao gio che PageHero/nut/the (dung
+              tu V1-V3, tat ca bi tu choi vi hinh dang, khong phai z-index).
+              Xem `components/RouteTransitionVeil.tsx`.
+            */}
+            <RouteTransitionVeil />
+
             <a className="skip-link" href="#main">
               Bỏ qua điều hướng
             </a>
@@ -83,7 +97,7 @@ export default function RootLayout({
             </SiteHeader>
 
             <main id="main">
-              <div className="wrap">{children}</div>
+              <ContentAtmosphere>{children}</ContentAtmosphere>
             </main>
 
             {/*

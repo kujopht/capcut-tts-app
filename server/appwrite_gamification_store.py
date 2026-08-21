@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
-from server.adapters import NotFoundError
+from server.adapters import AppwriteUnavailableError, NotFoundError
 from server.config import AppwriteSettings
 from server.secret_redaction import thong_diep_loi_an_toan
 from server.gamification import (
@@ -288,7 +288,13 @@ class AppwriteGamificationStore:
             response = self._http().request(method, url, json=payload,
                                             params=params, headers=self._headers())
         except httpx.HTTPError as exc:
-            raise NotFoundError(f"Không kết nối được Appwrite: {exc}") from exc
+            # Xem giai thich day du o `appwrite_store.py::AppwriteMetadataStore.
+            # _call` (phat hien khi review PR #23, 2026-08-21) — loi TRANSPORT
+            # phai la `AppwriteUnavailableError` (503, thu lai duoc), khong
+            # phai `NotFoundError` (404), vi ta CHUA BIET ban ghi co ton tai
+            # hay khong khi khong ket noi duoc.
+            raise AppwriteUnavailableError(
+                f"Không kết nối được Appwrite: {exc}") from exc
         if response.status_code == 404:
             raise NotFoundError("Không tìm thấy bản ghi.")
         if response.status_code >= 400:

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
-from server.adapters import NotFoundError, PermissionDenied
+from server.adapters import AppwriteUnavailableError, NotFoundError, PermissionDenied
 from server.appwrite_social import (
     COL_COMMENTS,
     COL_NOTIFICATIONS,
@@ -367,7 +367,17 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             response = self._http().request(method, url, json=payload,
                                             params=params, headers=self._headers())
         except httpx.HTTPError as exc:
-            raise NotFoundError(f"Không kết nối được Appwrite: {exc}") from exc
+            # PHAI la `AppwriteUnavailableError` (loi ha tang TAM THOI, thu lai
+            # duoc), KHONG phai `NotFoundError` (ban ghi that su khong ton
+            # tai): mot loi TRANSPORT (mat mang/DNS/timeout) nghia la ta CHUA
+            # BIET ban ghi co ton tai hay khong, khac han mot response that su
+            # tra 404. Phat hien khi review PR #23 (2026-08-21): truoc day ca
+            # hai bi gop lam mot, nen mot dot Appwrite gian doan giua luc xoa
+            # tai khoan (`AccountDeletionService`) bao ve khach hang la 404
+            # ("khong tim thay gi de xoa") thay vi 503 ("thu lai sau") — dung
+            # cung mau voi `appwrite_adapter.py::AppwriteIdentityAdapter._request`.
+            raise AppwriteUnavailableError(
+                f"Không kết nối được Appwrite: {exc}") from exc
 
         if response.status_code == 404:
             raise NotFoundError("Không tìm thấy bản ghi.")

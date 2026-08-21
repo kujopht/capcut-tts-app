@@ -644,6 +644,38 @@ class RouteXoaTaiKhoan(unittest.TestCase):
         # Tai khoan VAN con — nguoi dung goi lai duoc.
         self.assertIsNotNone(server_main.identity.get_profile(self.uid))
 
+    def test_appwrite_gian_doan_o_kho_metadata_tra_503_khong_phai_404(self):
+        """Phat hien khi review PR #23 (2026-08-21): mot loi TRANSPORT (mat
+        mang/DNS/timeout) khi goi `AppwriteMetadataStore` giua luc xoa tai
+        khoan bi bao thanh 404 ("khong tim thay gi de xoa") thay vi 503 ("thu
+        lai sau") — vi `_call` truoc day gop lam mot loi TRANSPORT (ta CHUA
+        BIET ban ghi co ton tai hay khong) voi mot response That su tra 404.
+        Da sua rieng trong PR nay (`appwrite_store.py`/
+        `appwrite_gamification_store.py`), kem test nay de khoa lai."""
+        import httpx
+
+        from server.appwrite_store import AppwriteMetadataStore
+
+        class _ClientGianDoan:
+            def request(self, method, url, json=None, params=None, headers=None):
+                raise httpx.ConnectError("[Errno 11001] getaddrinfo failed")
+
+        cfg = AppwriteSettings(
+            endpoint="https://appwrite-khong-ton-tai.invalid/v1",
+            project_id="p", api_key="khoa-gia", database_id="db")
+        kho_gian_doan = AppwriteMetadataStore(cfg)
+        kho_gian_doan._pool = _ClientGianDoan()  # "cat mang" — bo qua tao client that
+
+        cu = server_main.store
+        server_main.store = kho_gian_doan
+        try:
+            r = self.client.delete("/api/account", headers=self._auth(self.token))
+        finally:
+            server_main.store = cu
+
+        self.assertEqual(r.status_code, 503, r.text)
+        self.assertNotEqual(r.status_code, 404)
+
     def test_du_an_dich_cua_nguoi_khac_khong_bi_xoa_du_cung_tieu_de(self):
         """`delete_project` nhan `owner_id` — day la phep bao dam cuoi cung
         neu mot ngay nao do `list_projects` loc sai."""

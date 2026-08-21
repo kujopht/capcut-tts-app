@@ -1021,7 +1021,17 @@ class TrustedSourceService:
                 self._animation_store.delete_series(series.series_id, admin.user_id)
             except NotFoundError:
                 pass
-            return mapping.animation_series_id, mapping.mapping_id, False, resolution
+            # Thua trong tao dong thoi (xem docstring o tren) — tra ve
+            # resolution cua BEN THANG, KHONG phai `resolution` "chua khop"
+            # ban dau (phat hien khi review PR #22, 2026-08-21: tra thang
+            # `resolution` cu se bao sai `matched=False`/`series_id=""`
+            # trong khi tuple o tren da la series_id/mapping_id THAT).
+            return (
+                mapping.animation_series_id, mapping.mapping_id, False,
+                ExistingSeriesResolution(
+                    matched=True, series_id=mapping.animation_series_id,
+                    mapping_id=mapping.mapping_id,
+                    signals=["thua trong tạo đồng thời — dùng mapping của tiến trình đã tạo trước"]))
 
         self._ghi_nhat_ky(
             "youtube_mapping_create", target_id=mapping.mapping_id,

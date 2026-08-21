@@ -123,6 +123,16 @@ class ChannelDiscoveryGroup:
 #: `group_confidence`), cong don roi gioi han [0.0, 1.0]. Cung triet ly voi
 #: `video_classifier._TRONG_SO`: tat dinh, khong LLM, moi diem di kem tin
 #: hieu de giai thich duoc.
+#: LUU Y (phat hien khi review PR #22, 2026-08-21): `nhom` luon duoc
+#: `_gom_nhom_ung_vien` gom theo `SeriesFingerprint.normalized_key` CHINH
+#: XAC, nen trong THUC TE moi cap video trong CUNG mot `nhom` LUON co
+#: `similarity() == 1.0` — "gan_ket_cao" ben duoi vi vay LUON duoc cong khi
+#: `so_video >= 2`, no khong con "phan biet" gi nua ma chi con la mot phan
+#: thuong CO CHU DICH cho "2+ video CUNG mot ten chinh tac" (vi du: 1 video
+#: co so tap DON LE that + 1 ban "Tron Bo" cung ten — xem
+#: `test_dai_tap_gom_dung_series_nhung_cho_duyet`). Giu nguyen hanh vi nay —
+#: da duoc kiem chung la CO CHU DICH, khong phai loi — nhung ghi lai o day
+#: de lan sau doc code khong tuong nham day la mot phep do tuong dong THAT.
 _TRONG_SO_CUM = {
     "kich_thuoc_3": 0.45,
     "kich_thuoc_2": 0.30,
@@ -155,8 +165,11 @@ def group_confidence(
 
     Ba hang xep hang:
     - **HIGH** (`diem >= NGUONG_TIN_CAY_CAO`): du bang chung de tao series
-      NHAP MOI ngay — vi du cum co >= 3 video, hoac 2 video voi so tap DON
-      LE phan biet ro rang (khong phai tinh co trung ten).
+      NHAP MOI ngay — vi du cum co >= 3 video, hoac 2 video CUNG mot ten
+      chinh tac voi >= 2 so tap DON LE phan biet, HOAC 2 video cung ten
+      chinh tac ma CHI mot video co so tap DON LE doc duoc (vi du: 1 tap le
+      that + 1 ban "Tron Bo" cung series — video kia van la bang chung gan
+      ket that vi CUNG mot ten chinh tac, du ban than no khong co so tap).
     - **MEDIUM** (`NGUONG_TIN_CAY_TRUNG_BINH <= diem < NGUONG_TIN_CAY_CAO`):
       co MOT SO bang chung that (vi du mot video don le voi so tap doc
       duoc) nhung KHONG DU de tu tao mot series moi mot minh — giu lai la

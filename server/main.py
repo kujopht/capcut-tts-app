@@ -46,6 +46,7 @@ from server.adapters import (
     build_metadata_store,
     build_storage,
 )
+from server.account_deletion import AccountDeletionService
 from server.config import get_settings
 from server.creator import (
     AuthorStateError,
@@ -288,6 +289,26 @@ translation_svc = TranslationService(
     translation_store, store, provider=build_provider(settings),
     inline_worker=settings.translation_inline_worker,
     registry=translation_registry, byok=translation_byok_svc)
+
+
+def account_deletion_service() -> AccountDeletionService:
+    """
+    Dich vu xoa tai khoan, DUNG NEN moi lan goi.
+
+    CO Y KHONG giu mot the hien o cap module nhu `social`/`creators`/
+    `translation_svc`: dich vu nay can SAU kho khac nhau, va mot the hien giu
+    tham chieu CU sau khi ai do gan lai `main.store`/`main.identity` (moi bo
+    test trong kho nay deu lam vay o `setUp`) se xoa du lieu trong MOT KHO
+    KHAC voi kho ma route dang doc. Voi mot thao tac khong the hoan lai, do la
+    loai loi khong duoc phep co.
+
+    Doc bien module tai luc goi thi khong the lech. Chi phi la mot object giu
+    sau tham chieu, tren mot route ma moi nguoi dung goi nhieu nhat mot lan.
+    """
+    return AccountDeletionService(
+        identity, store, storage, gamification_store, translation_store,
+        translation_svc)
+
 
 #: Image Studio V1 (overnight build, PHASE 2-11) — vi/thu vien la kho MOCK
 #: (trong bo nho) cho toi khi Appwrite production duoc mo lai, cung nguyen
@@ -852,6 +873,44 @@ def logout(authorization: Optional[str] = Header(default=None)) -> Dict[str, Any
             da_huy = False
 
     return {"da_huy_phien": da_huy}
+
+
+@app.delete("/api/account")
+def delete_account(profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Nguoi dung TU xoa tai khoan cua CHINH minh, cung moi du lieu cua no.
+
+    KHONG co ban quan tri xoa nguoi khac o duong nay — khu quan tri da co
+    `set_account_enabled` (chan dang nhap) va treo tac gia; mot endpoint xoa
+    vinh vien nguoi khac la thu khong nen ton tai neu chua ai can.
+
+    KHONG doi xac thuc lai (nhap lai mat khau): nguoi dung OAuth khong co mat
+    khau nao de nhap, nen mot rao chan nhu vay se chi ap dung duoc cho mot nua
+    nguoi dung — tuc la mot rao chan gia. Buoc xac nhan la viec cua giao dien.
+
+    Chi tiet chinh sach luu tru — bang nao xoa, bang nao GIU NGUYEN
+    (`moderation_events`, luot nghe phia nguoi nghe), bang nao giu-nhung-an-danh
+    (`author_applications`, `content_reports`) — o
+    `MetadataStore.delete_account`. Thu tu don (danh tinh SAU CUNG) o
+    `server/account_deletion.py`.
+
+    IDEMPOTENT: sau khi xoa, token cua phien nay khong con dung duoc, nen mot
+    lan goi thu hai dung ngay o `current_profile` voi 401 — khong phai 500.
+
+    `AppwriteUnavailableError` -> 503 (thu lai duoc), KHONG phai 200: buoc cuoi
+    cung la xoa danh tinh, va bao "da xoa" cho mot tai khoan van dang nhap duoc
+    la loi hua sai nghiem trong nhat duong nay co the mac. Xem
+    `AppwriteIdentityAdapter.delete_account`.
+    """
+    try:
+        removed = account_deletion_service().delete_account(profile.user_id)
+    except AppwriteUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"deleted": True, "removed": removed}
 
 
 # -----------------------------------------------------------------------------

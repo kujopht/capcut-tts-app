@@ -74,6 +74,40 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
 
 
+#: Gia tri thay cho van ban NHAN DANG cua mot tai khoan DA XOA, o nhung hang
+#: PHAI o lai vi ly do kiem toan — `author_applications` (lich su quyet dinh
+#: cua nguoi duyet) va `content_reports` (bang chung ve nguoi BI bao cao).
+#:
+#: MOT hang so duy nhat, khong phai mot chuoi go lai o moi cho: hai tang kho
+#: (mock/Appwrite) phai ghi DUNG cung mot gia tri, neu khong bo test hop dong
+#: se xanh o mock roi lech o that. Xem `MetadataStore.delete_account`.
+AN_DANH_DA_XOA = "[tài khoản đã xoá]"
+
+#: Cac bang ma `MetadataStore.delete_account` bao cao lai so hang da don.
+#:
+#: Khai o day, KHONG o tung kho: hai ban hien thuc phai tra ve DUNG cung hinh
+#: dang, va bo test hop dong (`test_account_deletion.py`) so sanh truc tiep hai
+#: dict do. Mot ban tu them/bo mot khoa la mot lech khong ai thay ngay.
+BANG_XOA_TAI_KHOAN = (
+    "novels", "chapters", "tts_jobs", "audio_tracks",
+    "posts", "comments", "post_likes",
+    "user_follows", "story_follows", "notifications",
+    "author_stats", "listen_credits",
+    # Hai bang GIU HANG, chi an danh — dem de nguoi van hanh doi soat duoc.
+    "applications_anonymized", "reports_anonymized",
+)
+
+
+def bao_cao_xoa_tai_khoan() -> Dict[str, Any]:
+    """Ban ghi ket qua RONG cho `MetadataStore.delete_account`.
+
+    `object_keys` la khoa doi tuong trong kho tep MA NGUOI GOI phai xoa — kho
+    metadata khong biet gi ve R2."""
+    bc: Dict[str, Any] = {ten: 0 for ten in BANG_XOA_TAI_KHOAN}
+    bc["object_keys"] = []
+    return bc
+
+
 # -----------------------------------------------------------------------------
 # Enum
 # -----------------------------------------------------------------------------

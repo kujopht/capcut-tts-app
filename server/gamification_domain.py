@@ -24,6 +24,21 @@ from typing import Any, Dict, Optional, Sequence
 
 from server.domain import now_iso
 
+#: Cac bang ma `delete_account_data` cua kho gamification bao cao lai.
+#:
+#: Khai o day, KHONG o tung kho: hai ban hien thuc (mock/Appwrite) phai tra ve
+#: DUNG cung hinh dang de bo test hop dong so sanh truc tiep hai dict — cung
+#: ly do voi `domain.BANG_XOA_TAI_KHOAN`.
+BANG_XOA_GAMIFICATION = (
+    "user_progress", "xp_ledger", "achievement_unlocks",
+    "cosmetic_inventory", "reading_streaks", "quest_progress",
+)
+
+
+def bao_cao_xoa_gamification() -> Dict[str, int]:
+    """Ban ghi ket qua RONG cho `delete_account_data`."""
+    return {ten: 0 for ten in BANG_XOA_GAMIFICATION}
+
 
 @dataclass
 class UserProgress:

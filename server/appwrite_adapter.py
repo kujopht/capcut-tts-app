@@ -738,6 +738,52 @@ class AppwriteIdentityAdapter:
             return None
         return _account_from(row)
 
+    def delete_account(self, user_id: str) -> bool:
+        """
+        Xem contract o `IdentityAdapter.delete_account`.
+
+        HAI buoc, va THU TU la co chu dich: hang `profiles` TRUOC, tai khoan
+        Auth SAU.
+
+        Nguoc lai thi mot loi o buoc hai de lai mot hang `profiles` khong con
+        tai khoan nao dang sau — no van hien ra o moi cho doc ho so cong khai
+        (`profile_by_username`, `search_profiles`, the tac gia), tuc la mot
+        nguoi da xoa tai khoan van con mat tren nen tang. Lam theo thu tu nay
+        thi truong hop xau nhat la mot tai khoan khong dang nhap noi va khong
+        co ho so — nguoi dung goi lai la xong (`AccountDeletionService` chay lai
+        duoc tu dau).
+
+        `/v1/users/{id}` cua Appwrite tu huy MOI phien cua tai khoan do, nen
+        khong can goi `terminate_all_sessions` truoc.
+
+        MAT KET NOI thi NEM LEN, khong nuot: `AppwriteUnavailableError` la loi
+        ha tang TAM THOI (con cua `AuthError`, xem `server/adapters.py`). Nuot
+        no o day se bao "da xoa" cho mot tai khoan VAN CON dang nhap duoc —
+        loi hua sai nghiem trong nhat ma duong nay co the mac. Nguoi goi tra
+        503 va nguoi dung bam lai; moi buoc truoc do da idempotent.
+        """
+        user_id = (user_id or "").strip()
+        if not user_id:
+            return False
+        try:
+            self._request("DELETE", self._profile_path(user_id))
+        except AppwriteUnavailableError:
+            raise
+        except AuthError:
+            # Ho so von khong co (nguoi dung OAuth chua tao ho so, hoac mot lan
+            # goi truoc da xoa duoc buoc nay) — khong phai loi, con tai khoan
+            # Auth ben duoi thi van phai xoa.
+            pass
+        try:
+            self._request("DELETE", f"/v1/users/{user_id}")
+        except AppwriteUnavailableError:
+            raise
+        except AuthError:
+            # Tai khoan von khong con: muc tieu da dat. IDEMPOTENT — xem
+            # `logout`/`terminate_session`, cung tinh than.
+            return False
+        return True
+
     def count_accounts(self, *, email_verified: Optional[bool] = None,
                        enabled: Optional[bool] = None) -> int:
         queries: List[str] = [_q_limit(1)]

@@ -27,6 +27,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   api,
   social,
@@ -249,7 +250,23 @@ export function SearchOverlay({
 
   if (!mo) return null;
 
-  return (
+  /*
+    `createPortal` vao `document.body` — KHONG render tai cho `SearchOverlay`
+    duoc goi (ben trong `SiteSearch` -> `SiteHeader`, xem `layout.tsx`).
+
+    VAN DE DA CO: `.site-header` co `backdrop-filter` (xem globals.css), va
+    theo dac ta CSS mot phan tu co `backdrop-filter` tro thanh containing
+    block cho MOI hau due `position: fixed`. `.tim-lop` dung `position: fixed;
+    inset: 0` de phu kin man hinh — nhung khi no la hau due cua `.site-header`,
+    "man hinh" cua no bi tinh lai thanh KHUNG CUA HEADER, khong phai khung
+    nhin that. Ket qua: hop tim khong con phu kin man hinh ma chi la mot dai
+    ngang nam duoi thanh dieu huong.
+
+    `createPortal` dua cay DOM cua overlay ra ngoai, thanh con truc tiep cua
+    `<body>` — khong con containing block nao cua header can duong nua, du cay
+    REACT (props/state/context) khong doi.
+  */
+  return createPortal(
     <div
       className="tim-lop"
       role="dialog"
@@ -535,6 +552,7 @@ export function SearchOverlay({
           </div>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

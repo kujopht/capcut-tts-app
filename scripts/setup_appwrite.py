@@ -1461,6 +1461,30 @@ class Setup:
             if not self.dry_run:
                 self._cho_index_san_sang(base, name)
 
+    def _goi_doc_thoi_thu_lai(self, base: str, han_chot: float) -> Optional[Dict]:
+        """`GET base` (doc_thoi=True) nhưng KHÔNG để một lỗi mạng thoáng qua
+        (vd `httpx.ReadTimeout`, connection reset) làm sập cả vòng chờ.
+
+        Sự cố thật (2026-08-21, cùng self-host PROD): instance MongoDB đôi
+        khi mất >30s để trả lời (đã xác nhận qua log `Utopia\\Mongo\\Exception:
+        Receive timeout`), khiến httpx tự ném `ReadTimeout` — một ngoại lệ
+        Python thật, KHÔNG phải một status Appwrite trả về, nên vòng lặp cũ
+        (chỉ bắt trạng thái 'failed'/'stuck' từ JSON) không bắt được, và cả
+        script sập ngang giữa `_cho_thuoc_tinh_san_sang`/`_cho_index_san_sang`.
+
+        Coi lỗi mạng như MỘT LẦN THỬ THẤT BẠI bình thường trong ngân sách
+        thời gian đã có (`han_chot`), không phải một lý do để dừng khác."""
+        import time
+        try:
+            return self._call("GET", base, doc_thoi=True)
+        except httpx.TransportError as exc:
+            if time.monotonic() >= han_chot:
+                raise SystemExit(
+                    f"Lỗi mạng lặp lại khi hỏi trạng thái {base}, hết thời "
+                    f"gian chờ: {exc}"
+                ) from exc
+            return None
+
     def _cho_thuoc_tinh_san_sang(self, base: str, key: str,
                                  *, timeout_giay: float = 120.0) -> None:
         """Cho DUY NHAT MOT thuoc tinh dat 'available', backoff mu tang dan
@@ -1477,7 +1501,13 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._call("GET", base, doc_thoi=True) or {}
+            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
+            if hien is None:
+                # Loi mang thoang qua, da trong ngan sach thoi gian — thu lai,
+                # KHONG coi la "thuoc tinh bien mat".
+                time.sleep(khoang_cho)
+                khoang_cho = min(khoang_cho * 1.5, 8.0)
+                continue
             thuoc_tinh = next((a for a in hien.get("attributes", [])
                                if a.get("key") == key), None)
             if thuoc_tinh is None:
@@ -1516,7 +1546,11 @@ class Setup:
         han_chot = time.monotonic() + timeout_giay
         khoang_cho = 0.5
         while True:
-            hien = self._call("GET", base, doc_thoi=True) or {}
+            hien = self._goi_doc_thoi_thu_lai(base, han_chot)
+            if hien is None:
+                time.sleep(khoang_cho)
+                khoang_cho = min(khoang_cho * 1.5, 8.0)
+                continue
             idx = next((i for i in hien.get("indexes", []) if i.get("key") == key), None)
             if idx is None:
                 raise SystemExit(
@@ -1609,7 +1643,8 @@ class Setup:
         """Kiểm TRƯỚC KHI POST index: liệt kê rõ thuộc tính nào chưa
         'available' thay vì để Appwrite trả lỗi 400 mơ hồ 'not yet
         available' không nói rõ thuộc tính nào."""
-        hien = self._call("GET", base, doc_thoi=True) or {}
+        import time
+        hien = self._goi_doc_thoi_thu_lai(base, time.monotonic() + 30.0) or {}
         trang_thai = {a.get("key"): a.get("status")
                       for a in hien.get("attributes", [])}
         chua_san_sang = [k for k in keys if trang_thai.get(k) != "available"]

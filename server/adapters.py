@@ -32,6 +32,7 @@ from typing import (
 
 from server.config import ConfigError, Settings
 from server.domain import (
+    AN_DANH_DA_XOA,
     AccountSession,
     AccountStatus,
     AudioStamp,
@@ -47,6 +48,7 @@ from server.domain import (
     Profile,
     PublishState,
     TtsJob,
+    bao_cao_xoa_tai_khoan,
     new_id,
     now_iso,
 )
@@ -224,6 +226,23 @@ class IdentityAdapter(Protocol):
         keo ban ghi) — dung cho o "verified/unverified/suspended" o bang dieu
         khien (Admin Control Center V2, A1). Bo trong ca hai tham so = tong so
         tai khoan.
+        """
+        ...
+
+    def delete_account(self, user_id: str) -> bool:
+        """
+        Xoa DANH TINH cua mot nguoi dung: ban ghi `profiles` VA tai khoan Auth.
+
+        Day la BUOC CUOI CUNG cua `AccountDeletionService.delete_account` — moi
+        du lieu ung dung phai bi don TRUOC. Neu lam nguoc lai (xoa danh tinh
+        truoc) va mot buoc sau hong, ta con lai truyen/chuong/job khong con chu:
+        khong route nao doi lai duoc, va nguoi dung cung khong con duong nao
+        goi lai de don not.
+
+        IDEMPOTENT: tai khoan von khong con thi tra `False`, KHONG nem. Mot
+        request bi thu lai (hoac bam hai lan) khong duoc thanh 500.
+
+        Tra `True` neu that su vua xoa mot tai khoan dang ton tai.
         """
         ...
 
@@ -588,6 +607,64 @@ class MetadataStore(Protocol):
 
     def delete_track(self, track_id: str) -> None: ...
 
+    # -- xoa tai khoan --------------------------------------------------------
+
+    def delete_account(self, user_id: str) -> Dict[str, Any]:
+        """
+        Don MOI du lieu cua mot nguoi dung trong kho nay — mot buoc cua
+        `AccountDeletionService.delete_account`, KHONG phai ca viec xoa tai
+        khoan (gamification, ban dich va danh tinh nam o kho khac).
+
+        XOA HET (noi dung cua chinh nguoi dung, khong ai khac co quyen tren no
+        — KE CA truyen/chuong DA XUAT BAN dang co nguoi doc. Do la mot QUYET
+        DINH SAN PHAM da chot, khong phai mot thieu sot: ta KHONG co co che
+        "tac gia thay the" hay bia mo `[da xoa]`, va giu lai noi dung cua mot
+        nguoi da yeu cau xoa tai khoan thi loi hua "xoa" khong con dung):
+          novels, chapters, tts_jobs (+ job_claims/job_locks cua chung),
+          audio_tracks, posts, comments, post_likes, notifications cua chinh
+          ho, user_follows (CA HAI CHIEU — mot canh theo doi tro toi tai khoan
+          khong con la mot lien ket vo hieu trong danh sach cua nguoi khac),
+          story_follows do ho tao, author_stats.
+
+        GIU NGUYEN, KHONG DUOC DONG TOI:
+          - `moderation_events` — CHI THEM o moi tang, ke ca hang co nguoi nay
+            la actor hay target. Mot nhat ky sua duoc la mot nhat ky vo dung.
+          - `listen_credits` ma nguoi nay la NGUOI NGHE (`listener_id`): hang
+            do da tinh vao uy tin cua MOT TAC GIA KHAC. Xoa chung la lam tut
+            thanh tich cua nguoi khong lien quan.
+
+        GIU HANG NHUNG AN DANH van ban nhan dang (`domain.AN_DANH_DA_XOA`):
+          - `author_applications` — giu `status`/`decided_at`/`reviewer_note`
+            (lich su quyet dinh cua nguoi duyet) va giu ca `user_id` de con
+            truy vet duoc; chi thay `pen_name`/`bio`/`intro`.
+          - `content_reports` ma nguoi nay la NGUOI BAO (`reporter_id`) — bao
+            cao la bang chung ve nguoi BI bao cao, xoa no la xoa bang chung.
+
+        KHONG chay theo hang cua NGUOI KHAC tro toi noi dung vua xoa (luot
+        thich/binh luan tren bai da xoa, theo doi truyen da xoa). Do la dung
+        quy uoc san co cua kho nay: `SocialService.delete_post` va
+        `DELETE /api/novels/{id}` cung de lai nhung hang do — chung khong con
+        duong doc nao (moi truy van deu di qua post_id/novel_id da mat).
+
+        Tra ve so hang da don theo tung bang, kem `object_keys`: khoa doi tuong
+        trong kho tep (audio, phu de, bia truyen, anh bai dang) ma NGUOI GOI
+        phai xoa — kho metadata khong biet gi ve R2, dung phan cong voi
+        `main.py::_purge_chapter`.
+
+        IDEMPOTENT: nguoi dung khong co du lieu nao thi tra ve cac so 0, KHONG
+        nem — mot request bi thu lai khong duoc thanh 500.
+
+        Rieng hai bo dem `*_anonymized` KHONG ve 0 giong nhau o lan goi thu hai,
+        va do la HAI CO CHE TIM khac nhau chu khong phai mot lech:
+          - don tac gia tim theo `rowId` (= `user_id`) nen lan hai VAN thay hang
+            va ghi lai dung gia tri an danh (mot phep TU CHUA neu lan truoc hong
+            nua duong) -> van dem 1;
+          - bao cao tim theo `reporter_id`, ma truong do vua bi thay bang dau an
+            danh, nen lan hai khong con hang nao khop -> dem 0.
+        Ca hai duong deu ve CUNG mot trang thai cuoi.
+        """
+        ...
+
 
 # -----------------------------------------------------------------------------
 # Ban mock: danh tinh
@@ -847,6 +924,30 @@ class MockIdentityAdapter:
                     continue
                 n += 1
             return n
+
+    def delete_account(self, user_id: str) -> bool:
+        """
+        Xem contract o `IdentityAdapter.delete_account`.
+
+        Xoa ca MAT KHAU va MOI TOKEN cua nguoi do trong cung mot lan giu khoa.
+        Bo sot token la mot lo that o ban mock: `profile_from_token` tra ve
+        `self._profiles[user_id]`, nen mot token con sot lai tro toi ho so da
+        mat se thanh `KeyError` (500) o moi request tiep theo, thay vi 401.
+        """
+        with self._lock:
+            profile = self._profiles.pop(user_id, None)
+            if profile is None:
+                return False
+            self._by_email.pop((profile.email or "").strip().lower(), None)
+            self._passwords.pop(user_id, None)
+            self._disabled.discard(user_id)
+            for tok in [t for t, uid in self._tokens.items() if uid == user_id]:
+                del self._tokens[tok]
+                self._session_created_at.pop(tok, None)
+            for secret in [s for s, uid in self._oauth_tokens.items()
+                           if uid == user_id]:
+                del self._oauth_tokens[secret]
+            return True
 
     def profiles_by_ids(self, user_ids: Sequence[str]) -> Dict[str, Profile]:
         """
@@ -1475,6 +1576,104 @@ class MockMetadataStore(MockSocialStore):
     def delete_track(self, track_id: str) -> None:
         with self._lock:
             self.tracks.pop(track_id, None)
+
+    # -- xoa tai khoan --------------------------------------------------------
+
+    def delete_account(self, user_id: str) -> Dict[str, Any]:
+        """Xem contract o `MetadataStore.delete_account` — ban Appwrite
+        (`AppwriteMetadataStore.delete_account`) phai cho ket qua GIONG HET,
+        va `test_account_deletion.py` chay cung mot kich ban qua ca hai."""
+        bc = bao_cao_xoa_tai_khoan()
+        if not user_id:
+            return bc
+
+        with self._lock:
+            # -- noi dung: chuong (kem audio) roi truyen ----------------------
+            for chapter in [c for c in self.chapters.values()
+                            if c.owner_id == user_id]:
+                for track in [t for t in self.tracks.values()
+                              if t.chapter_id == chapter.chapter_id]:
+                    bc["object_keys"] += [k for k in (track.object_key,
+                                                      track.transcript_key) if k]
+                    self.tracks.pop(track.track_id, None)
+                    bc["audio_tracks"] += 1
+                self.chapters.pop(chapter.chapter_id, None)
+                bc["chapters"] += 1
+
+            for novel in [n for n in self.novels.values()
+                          if n.owner_id == user_id]:
+                if novel.cover_key:
+                    bc["object_keys"].append(novel.cover_key)
+                self.novels.pop(novel.novel_id, None)
+                bc["novels"] += 1
+
+            # Job theo CHU SO HUU, khong theo chuong: bat ca job mo coi (chuong
+            # da xoa truoc do bang duong khac) — `delete_job` don luon claim.
+            for job in [j for j in self.jobs.values() if j.owner_id == user_id]:
+                self.delete_job(job.job_id)
+                bc["tts_jobs"] += 1
+            self._job_locks = {k: v for k, v in self._job_locks.items()
+                               if k[0] != user_id}
+
+            # -- xa hoi -------------------------------------------------------
+            for post in [p for p in self._posts.values()
+                         if p.author_user_id == user_id]:
+                bc["object_keys"] += [str(a.get("key") or "")
+                                      for a in post.all_images()
+                                      if a.get("key")]
+                self._posts.pop(post.post_id, None)
+                bc["posts"] += 1
+
+            for cid in [c.comment_id for c in self._comments.values()
+                        if c.author_user_id == user_id]:
+                self._comments.pop(cid, None)
+                bc["comments"] += 1
+
+            for lid in [lk.like_id for lk in self._post_likes.values()
+                        if lk.user_id == user_id]:
+                self._post_likes.pop(lid, None)
+                bc["post_likes"] += 1
+
+            for fid in [f.follow_id for f in self._user_follows.values()
+                        if user_id in (f.follower_id, f.target_id)]:
+                self._user_follows.pop(fid, None)
+                bc["user_follows"] += 1
+
+            for fid in [f.follow_id for f in self._story_follows.values()
+                        if f.follower_id == user_id]:
+                self._story_follows.pop(fid, None)
+                bc["story_follows"] += 1
+
+            for nid in [n.notification_id for n in self._notifications.values()
+                        if n.user_id == user_id]:
+                self._notifications.pop(nid, None)
+                bc["notifications"] += 1
+
+            # -- uy tin tac gia -----------------------------------------------
+            if self._stats.pop(user_id, None) is not None:
+                bc["author_stats"] = 1
+
+            # CHI phia TAC GIA. Hang ma nguoi nay la NGUOI NGHE o lai: chung da
+            # tinh vao uy tin cua mot tac gia KHAC.
+            for cid in [c.credit_id for c in self._credits.values()
+                        if c.author_id == user_id]:
+                self._credits.pop(cid, None)
+                bc["listen_credits"] += 1
+
+            # -- giu hang, an danh --------------------------------------------
+            don = self._applications.get(user_id)
+            if don is not None:
+                don.pen_name = AN_DANH_DA_XOA
+                don.bio = AN_DANH_DA_XOA
+                don.intro = AN_DANH_DA_XOA
+                bc["applications_anonymized"] = 1
+
+            for report in [r for r in self._reports.values()
+                           if r.reporter_id == user_id]:
+                report.reporter_id = AN_DANH_DA_XOA
+                bc["reports_anonymized"] += 1
+
+        return bc
 
 
     # -- doc theo LO -----------------------------------------------------------

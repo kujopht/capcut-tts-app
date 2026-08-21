@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
-from server.adapters import NotFoundError
+from server.adapters import AppwriteUnavailableError, NotFoundError
 from server.config import AppwriteSettings
 from server.secret_redaction import thong_diep_loi_an_toan
 from server.gamification import (
@@ -42,6 +42,7 @@ from server.gamification_domain import (
     UnlockedAchievement,
     UserProgress,
     XpLedgerEntry,
+    bao_cao_xoa_gamification,
 )
 
 COL_PROGRESS = "user_progress"
@@ -287,7 +288,13 @@ class AppwriteGamificationStore:
             response = self._http().request(method, url, json=payload,
                                             params=params, headers=self._headers())
         except httpx.HTTPError as exc:
-            raise NotFoundError(f"Không kết nối được Appwrite: {exc}") from exc
+            # Xem giai thich day du o `appwrite_store.py::AppwriteMetadataStore.
+            # _call` (phat hien khi review PR #23, 2026-08-21) — loi TRANSPORT
+            # phai la `AppwriteUnavailableError` (503, thu lai duoc), khong
+            # phai `NotFoundError` (404), vi ta CHUA BIET ban ghi co ton tai
+            # hay khong khi khong ket noi duoc.
+            raise AppwriteUnavailableError(
+                f"Không kết nối được Appwrite: {exc}") from exc
         if response.status_code == 404:
             raise NotFoundError("Không tìm thấy bản ghi.")
         if response.status_code >= 400:
@@ -350,6 +357,9 @@ class AppwriteGamificationStore:
                data: Dict[str, Any]) -> Dict[str, Any]:
         return self._call("PATCH", f"{self._docs(collection)}/{doc_id}",
                           payload={"data": self._writable(collection, data)})
+
+    def _delete(self, collection: str, doc_id: str) -> None:
+        self._call("DELETE", f"{self._docs(collection)}/{doc_id}")
 
     def _list_all(self, collection: str, queries: List[str]) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
@@ -572,6 +582,39 @@ class AppwriteGamificationStore:
             entry = _xp_entry_from_row(row)
             ra[entry.user_id] = ra.get(entry.user_id, 0) + entry.xp_awarded
         return ra
+
+    # ======================================================== xoa tai khoan
+
+    def delete_account_data(self, user_id: str) -> Dict[str, int]:
+        """Xem contract o `MockGamificationStore.delete_account_data`.
+
+        SAU collection, cung MOT phep loc `equal("user_id", ...)` — moi collection
+        deu co chi muc theo `user_id` (xem `scripts/setup_appwrite.py`), nen
+        khong co truy van nao o day quet toan bang.
+
+        KHONG dung `rowId` tat dinh du biet cach tinh (`id_vat_pham_kho`,
+        `id_tien_do_nhiem_vu`...): lam vay doi hoi biet TRUOC moi
+        `cosmetic_key`/`quest_key`/`period_key` da tung ghi, va bo sot mot khoa
+        la de lai du lieu ca nhan cua mot tai khoan da xoa. Truy van thi don
+        dung nhung gi that su co trong bang."""
+        bc = bao_cao_xoa_gamification()
+        if not user_id:
+            return bc
+        for ten, collection in (
+            ("user_progress", COL_PROGRESS),
+            ("xp_ledger", COL_XP_LEDGER),
+            ("achievement_unlocks", COL_ACHIEVEMENT_UNLOCKS),
+            ("cosmetic_inventory", COL_COSMETIC_INVENTORY),
+            ("reading_streaks", COL_READING_STREAKS),
+            ("quest_progress", COL_QUEST_PROGRESS),
+        ):
+            for row in self._list_all(collection, [q_equal("user_id", user_id)]):
+                doc_id = str(row.get("$id") or "")
+                if not doc_id:
+                    continue
+                self._delete(collection, doc_id)
+                bc[ten] += 1
+        return bc
 
 
 def build_gamification_store(settings: Any):

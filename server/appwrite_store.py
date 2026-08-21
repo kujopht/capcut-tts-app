@@ -20,14 +20,23 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
-from server.adapters import NotFoundError, PermissionDenied
+from server.adapters import AppwriteUnavailableError, NotFoundError, PermissionDenied
 from server.appwrite_social import (
+    COL_COMMENTS,
+    COL_NOTIFICATIONS,
+    COL_POST_LIKES,
+    COL_POSTS,
+    COL_REPORTS,
+    COL_STORY_FOLLOWS,
+    COL_USER_FOLLOWS,
     AppwriteSocialStore,
     SOCIAL_PERSISTED_FIELDS,
+    _post_from,
 )
 from server.config import AppwriteSettings
 from server.secret_redaction import thong_diep_loi_an_toan
 from server.domain import (
+    AN_DANH_DA_XOA,
     AuthorApplication,
     AuthorStats,
     AuthorStatus,
@@ -40,6 +49,7 @@ from server.domain import (
     Novel,
     PublishState,
     TtsJob,
+    bao_cao_xoa_tai_khoan,
     now_iso,
 )
 
@@ -357,7 +367,17 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             response = self._http().request(method, url, json=payload,
                                             params=params, headers=self._headers())
         except httpx.HTTPError as exc:
-            raise NotFoundError(f"Không kết nối được Appwrite: {exc}") from exc
+            # PHAI la `AppwriteUnavailableError` (loi ha tang TAM THOI, thu lai
+            # duoc), KHONG phai `NotFoundError` (ban ghi that su khong ton
+            # tai): mot loi TRANSPORT (mat mang/DNS/timeout) nghia la ta CHUA
+            # BIET ban ghi co ton tai hay khong, khac han mot response that su
+            # tra 404. Phat hien khi review PR #23 (2026-08-21): truoc day ca
+            # hai bi gop lam mot, nen mot dot Appwrite gian doan giua luc xoa
+            # tai khoan (`AccountDeletionService`) bao ve khach hang la 404
+            # ("khong tim thay gi de xoa") thay vi 503 ("thu lai sau") — dung
+            # cung mau voi `appwrite_adapter.py::AppwriteIdentityAdapter._request`.
+            raise AppwriteUnavailableError(
+                f"Không kết nối được Appwrite: {exc}") from exc
 
         if response.status_code == 404:
             raise NotFoundError("Không tìm thấy bản ghi.")
@@ -1557,6 +1577,142 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             )
             for r in rows
         ], total
+
+    # ==================================================== XOA TAI KHOAN
+    #
+    # Xem contract DAY DU o `MetadataStore.delete_account` (server/adapters.py):
+    # bang nao xoa, bang nao GIU NGUYEN (`moderation_events`, `listen_credits`
+    # phia nguoi nghe), bang nao giu-nhung-an-danh.
+    #
+    # Moi truy van o day deu di theo mot chi muc DA CO (`owner_idx` cua
+    # novels/chapters, `idempotency_idx` cua tts_jobs, `chapter_idx` cua
+    # audio_tracks, cac `*_created_idx`/`user_*_idx` cua tang xa hoi,
+    # `author_idx` cua listen_credits) — xem `scripts/setup_appwrite.py`.
+    # KHONG them chi muc nao cho duong nay. Ngoai le duy nhat la `job_locks`
+    # (khong co chi muc nao ca) — xem `_don_job_locks` ben duoi.
+
+    def delete_account(self, user_id: str) -> Dict[str, Any]:
+        """Xem contract o `MetadataStore.delete_account`."""
+        bc = bao_cao_xoa_tai_khoan()
+        if not user_id:
+            return bc
+
+        # -- noi dung: chuong (kem audio) roi truyen --------------------------
+        for chapter in self.chapters_for_owner(user_id):
+            for track in self.tracks_for_chapter(chapter.chapter_id):
+                bc["object_keys"] += [k for k in (track.object_key,
+                                                  track.transcript_key) if k]
+                self._delete(COL_TRACKS, track.track_id)
+                bc["audio_tracks"] += 1
+            self._delete(COL_CHAPTERS, chapter.chapter_id)
+            bc["chapters"] += 1
+
+        for novel in self.list_novels(owner_id=user_id):
+            if novel.cover_key:
+                bc["object_keys"].append(novel.cover_key)
+            self._delete(COL_NOVELS, novel.novel_id)
+            bc["novels"] += 1
+
+        # Job theo CHU SO HUU, khong theo chuong: bat ca job mo coi (chuong da
+        # bi xoa truoc do bang duong khac). `delete_job` don luon `job_claims`.
+        for job in self.list_jobs(user_id):
+            self.delete_job(job.job_id)
+            bc["tts_jobs"] += 1
+        self._don_job_locks(user_id)
+
+        # -- xa hoi -----------------------------------------------------------
+        # Dung `_post_from` (ban doi hang cua tang xa hoi) thay vi tu doc
+        # `images_json`: danh sach anh cua mot bai co HAI dang (mot anh ban cu,
+        # nhieu anh ban V3) va viec lai phep doi do o day la mot cho nua se
+        # lech. `appwrite_social.py` la CUNG mot kho, chi tach tep vi do dai.
+        for row in self._list_all(COL_POSTS, [q_equal("author_user_id", user_id)]):
+            bc["object_keys"] += [str(a.get("key") or "")
+                                  for a in _post_from(row).all_images()
+                                  if a.get("key")]
+            self._delete(COL_POSTS, str(row.get("$id") or ""))
+            bc["posts"] += 1
+
+        bc["comments"] = self._xoa_theo_truy_van(
+            COL_COMMENTS, [q_equal("author_user_id", user_id)])
+        bc["post_likes"] = self._xoa_theo_truy_van(
+            COL_POST_LIKES, [q_equal("user_id", user_id)])
+        # CA HAI CHIEU cua `user_follows` — hai truy van rieng thay vi mot `or`:
+        # moi cai di dung mot chi muc (`follower_created_idx`/
+        # `target_created_idx`), con `or` thi khong dung chi muc nao.
+        bc["user_follows"] = (
+            self._xoa_theo_truy_van(COL_USER_FOLLOWS,
+                                    [q_equal("follower_id", user_id)])
+            + self._xoa_theo_truy_van(COL_USER_FOLLOWS,
+                                      [q_equal("target_id", user_id)]))
+        bc["story_follows"] = self._xoa_theo_truy_van(
+            COL_STORY_FOLLOWS, [q_equal("follower_id", user_id)])
+        bc["notifications"] = self._xoa_theo_truy_van(
+            COL_NOTIFICATIONS, [q_equal("user_id", user_id)])
+
+        # -- uy tin tac gia ---------------------------------------------------
+        # Truy van thay vi `_delete(COL_STATS, user_id)` du `rowId` = `user_id`:
+        # `_call` doi MOI ma >= 400 thanh `NotFoundError`, nen mot loi mang se
+        # khong phan biet duoc voi "khong co hang" va ta se bao cao SAI la da
+        # don. `user_unique` phu truy van nay.
+        bc["author_stats"] = self._xoa_theo_truy_van(
+            COL_STATS, [q_equal("user_id", user_id)])
+
+        # CHI phia TAC GIA. Hang ma nguoi nay la NGUOI NGHE o lai: chung da
+        # tinh vao uy tin cua mot tac gia KHAC.
+        bc["listen_credits"] = self._xoa_theo_truy_van(
+            COL_CREDITS, [q_equal("author_id", user_id)])
+
+        # -- giu hang, an danh ------------------------------------------------
+        # DOC TRUOC roi moi ghi: cung ly do voi `author_stats` o tren, va o day
+        # con quan trong hon — nuot loi ghi nghia la GIU LAI van ban nhan dang
+        # cua mot tai khoan da xoa ma khong ai biet. Ghi hong thi NEM len, lan
+        # xoa nay bi coi la that bai va nguoi dung con goi lai duoc (danh tinh
+        # chi bi xoa o buoc cuoi cung).
+        if self.get_application(user_id) is not None:
+            self._update(COL_APPLICATIONS, user_id,
+                         {"pen_name": AN_DANH_DA_XOA, "bio": AN_DANH_DA_XOA,
+                          "intro": AN_DANH_DA_XOA})
+            bc["applications_anonymized"] = 1
+
+        for row in self._list_all(COL_REPORTS, [q_equal("reporter_id", user_id)]):
+            self._update(COL_REPORTS, str(row.get("$id") or ""),
+                         {"reporter_id": AN_DANH_DA_XOA})
+            bc["reports_anonymized"] += 1
+
+        return bc
+
+    def _xoa_theo_truy_van(self, collection: str, queries: List[str]) -> int:
+        """Xoa MOI hang khop dieu kien, tra ve so hang da xoa.
+
+        Lay HET danh sach TRUOC roi moi xoa (`_list_all` da lat trang): vua xoa
+        vua lat trang thi offset truot va bo sot hang — mot lo kinh dien."""
+        rows = self._list_all(collection, queries)
+        dem = 0
+        for row in rows:
+            doc_id = str(row.get("$id") or "")
+            if not doc_id:
+                continue
+            self._delete(collection, doc_id)
+            dem += 1
+        return dem
+
+    def _don_job_locks(self, user_id: str) -> None:
+        """Don hang `job_locks` cua nguoi dung — NO LUC TOT NHAT.
+
+        Hai ly do khong de loi o day lam vo ca lan xoa tai khoan:
+
+        - `job_locks` KHONG co chi muc nao (`rowId` la bam tat dinh cua
+          (owner_id, chapter_id, fingerprint) — xem `_job_lock_id`), nen mot
+          truy van theo `owner_id` la thu duy nhat lam duoc, va no co the bi
+          Appwrite tu choi tuy cau hinh;
+        - hang khoa con lai la VO HAI: `create_job_once` da xu ly "khoa mo coi"
+          (job da bi xoa) bang cach tro khoa sang job moi. Cung triet ly voi
+          `job_claims` trong `delete_job`.
+        """
+        try:
+            self._xoa_theo_truy_van(COL_JOB_LOCKS, [q_equal("owner_id", user_id)])
+        except Exception:
+            pass
 
 
 def _publish_state_from_doc(doc: Dict[str, Any]) -> PublishState:

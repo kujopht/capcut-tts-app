@@ -28,6 +28,7 @@ from server.gamification_domain import (
     UnlockedAchievement,
     UserProgress,
     XpLedgerEntry,
+    bao_cao_xoa_gamification,
 )
 
 
@@ -175,6 +176,39 @@ class MockGamificationStore:
         khong phai mot truy van rieng cho tung nhiem vu."""
         with self._lock:
             return list(self._quests.get(user_id, {}).values())
+
+    # ======================================================== xoa tai khoan
+
+    def delete_account_data(self, user_id: str) -> Dict[str, int]:
+        """
+        Don MOI trang thai gamification cua mot nguoi dung — XP, nhat ky XP,
+        thanh tuu da mo, kho vat pham, chuoi ngay doc, tien do nhiem vu.
+
+        Day la trang thai CA NHAN cua chinh ho, khong ai khac co quyen tren no:
+        khong co ban ghi nao cua nguoi khac tro toi day (bang xep hang doc
+        truc tiep tu `user_progress`, nen hang mat di la nguoi do mat khoi bang
+        — dung nhu mong doi cho mot tai khoan da xoa).
+
+        IDEMPOTENT: khong co gi de xoa thi tra ve cac so 0, KHONG nem. Ban
+        Appwrite (`AppwriteGamificationStore.delete_account_data`) phai cho ket
+        qua GIONG HET.
+        """
+        bc = bao_cao_xoa_gamification()
+        if not user_id:
+            return bc
+        with self._lock:
+            if self._progress.pop(user_id, None) is not None:
+                bc["user_progress"] = 1
+            for eid in [e.entry_id for e in self._xp_events.values()
+                        if e.user_id == user_id]:
+                self._xp_events.pop(eid, None)
+                bc["xp_ledger"] += 1
+            bc["achievement_unlocks"] = len(self._achievements.pop(user_id, {}))
+            bc["cosmetic_inventory"] = len(self._cosmetics.pop(user_id, {}))
+            if self._streaks.pop(user_id, None) is not None:
+                bc["reading_streaks"] = 1
+            bc["quest_progress"] = len(self._quests.pop(user_id, {}))
+        return bc
 
     # ======================================================== bang xep hang
 

@@ -1,0 +1,40 @@
+# Cac fingerprint (commit:file:rule:line) da duoc RA SOAT THU CONG tung dong
+# mot va xac nhan la false positive tren du lieu KHONG PHAI bi mat, khong
+# phai chi cua rieng file/rule chung (khong dung allowlist rong theo path).
+# Fingerprint gan voi commit cu the — sau nay neu nhanh nay duoc rebase/squash
+# vao main va gitleaks bao lai dung 11 dong nay voi fingerprint moi, chi can
+# them fingerprint moi (khong xoa dong cu) sau khi ra soat lai tuong tu.
+#
+# 1) Vi du JWT cong khai kinh dien cua chinh jwt.io (eyJhbGci...dQw4w9WgXcQ),
+#    duoc trich dan lam tai lieu tham khao — khong phai token that.
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:docs/reports/preprod-security-audit.md:jwt:45
+#
+# 2) docs/reports/cerebras-groq-benchmark-raw.json — du lieu benchmark dich
+#    thuat tho (khong phai cau hinh/secret). 5 dong khop deu la truong JSON
+#    "doan_key": "<slug tieng Viet khong dau>" (vi du "hoi_thoai_xung_ho") —
+#    ten truong co hau to "_key" khien luat "generic-api-key" mac dinh
+#    nham tuong la mot khoa API.
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:docs/reports/cerebras-groq-benchmark-raw.json:generic-api-key:3
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:docs/reports/cerebras-groq-benchmark-raw.json:generic-api-key:17
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:docs/reports/cerebras-groq-benchmark-raw.json:generic-api-key:31
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:docs/reports/cerebras-groq-benchmark-raw.json:generic-api-key:45
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:docs/reports/cerebras-groq-benchmark-raw.json:generic-api-key:59
+#
+# 3) server/tests/test_image_service.py va test_image_byop_service.py —
+#    _MASTER_KEY la khoa AES-256 GIA (base64 cua chuoi dem 0123456789abcdef
+#    lap lai), chi dung de ma hoa/giai ma trong pham vi MOT bai test, ghi
+#    ro trong comment tai cho khai bao ("CHI dung trong test").
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_image_service.py:generic-api-key:29
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_image_byop_service.py:generic-api-key:21
+#
+# 4) web/tests/admin-trusted-sources-websub.test.mjs — mot assertion doc
+#    ma nguon bang regex, khong chua bi mat nao.
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:web/tests/admin-trusted-sources-websub.test.mjs:generic-api-key:22
+#
+# 5) server/tests/test_secret_redaction.py — CHINH hai fixture ma module
+#    nay ton tai de kiem thu: mot chuoi dang "Bearer <toke giao dien bang
+#    chu cai>" va JWT vi du kinh dien o (1). Ca hai deu TU SINH/cong khai,
+#    khong phai bi mat that — day la du lieu VAO co y cua bai test, khong
+#    phai mot bi mat lot vao nham.
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_secret_redaction.py:generic-api-key:117
+ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_secret_redaction.py:jwt:172

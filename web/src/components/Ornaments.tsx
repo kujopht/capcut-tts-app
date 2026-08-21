@@ -58,79 +58,6 @@ export function CornerRune({ className }: { className?: string }) {
   );
 }
 
-/** Truyện — trang sách hé mở, một nét sáng đi qua giữa. */
-export function MotifManuscript({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 160 120"
-      aria-hidden="true"
-      focusable="false"
-      preserveAspectRatio="xMidYMid slice"
-    >
-      <path
-        d="M80 18 C58 8 30 8 14 16 V96 C30 88 58 88 80 98 C102 88 130 88 146 96 V16 C130 8 102 8 80 18 Z"
-        fill="none"
-        stroke="currentColor"
-        strokeOpacity="0.5"
-        strokeWidth="1.4"
-      />
-      <path d="M80 18 V98" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" />
-      <path d="M26 32 H62 M26 46 H58 M26 60 H62" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.2" />
-      <path d="M98 32 H134 M102 46 H134 M98 60 H130" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.2" />
-    </svg>
-  );
-}
-
-/** Animation — khung chiếu điện ảnh, viền lỗ phim hai bên. */
-export function MotifFilmFrame({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 160 120"
-      aria-hidden="true"
-      focusable="false"
-      preserveAspectRatio="xMidYMid slice"
-    >
-      <rect x="30" y="14" width="100" height="92" rx="4" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" />
-      {[22, 42, 62, 82].map((y) => (
-        <g key={y}>
-          <rect x="14" y={y} width="10" height="10" rx="2" fill="currentColor" fillOpacity="0.35" />
-          <rect x="136" y={y} width="10" height="10" rx="2" fill="currentColor" fillOpacity="0.35" />
-        </g>
-      ))}
-      <path d="M68 46 L96 60 L68 74 Z" fill="currentColor" fillOpacity="0.55" />
-    </svg>
-  );
-}
-
-/**
- * Cộng đồng, trạng thái RỖNG — một bếp lửa trại yên tĩnh, chưa ai quây quần
- * (Phase 3.6 Phần U). Trừu tượng: vài nét lửa mảnh + ba khúc củi, không phải
- * biểu tượng lửa trại clip-art.
- */
-export function MotifCampfire({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 160 120"
-      aria-hidden="true"
-      focusable="false"
-      preserveAspectRatio="xMidYMid meet"
-    >
-      <path
-        d="M80 84 C68 84 58 76 58 64 C58 72 64 76 68 74 C64 64 68 50 80 40 C74 54 78 60 84 56 C88 48 84 40 80 32 C96 42 102 56 96 70 C100 66 100 60 98 56 C104 64 104 76 92 82 C88 84 84 84 80 84 Z"
-        fill="none"
-        stroke="currentColor"
-        strokeOpacity="0.55"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-      <path d="M46 96 L74 86 M114 96 L86 86 M80 100 V86" stroke="currentColor" strokeOpacity="0.4" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 /**
  * Explore (PageHero V1) — cung la ban do va mot vong compa mo, "kham pha
  * the gioi" chu khong phai minimap RPG: chi mot cung tron khong khep kin +
@@ -370,29 +297,3 @@ export function MotifPortalHalo({ className }: { className?: string }) {
   );
 }
 
-/** Audio — sóng âm dịu dưới trăng. */
-export function MotifWaveform({ className }: { className?: string }) {
-  const bars = [6, 12, 20, 14, 26, 16, 22, 10, 18, 8];
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 160 60"
-      aria-hidden="true"
-      focusable="false"
-      preserveAspectRatio="xMidYMid meet"
-    >
-      {bars.map((h, i) => (
-        <rect
-          key={i}
-          x={8 + i * 15}
-          y={30 - h / 2}
-          width="6"
-          height={h}
-          rx="3"
-          fill="currentColor"
-          fillOpacity={0.35 + (i % 3) * 0.1}
-        />
-      ))}
-    </svg>
-  );
-}

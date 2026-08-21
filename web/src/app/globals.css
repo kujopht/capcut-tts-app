@@ -1080,7 +1080,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: #2f6fb0;
   --hero-mist-1: #123a5c;
   --hero-mist-2: #1c6b82;
-  --hero-highlight: var(--hero-accent-secondary);
   --hero-motif-color: var(--accent);
   --hero-motif-opacity: 0.12;
   --hero-copy-width: 58ch;
@@ -1090,7 +1089,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: #2dd4bf;
   --hero-mist-1: #154066;
   --hero-mist-2: #1f5f74;
-  --hero-highlight: #e8dfc8;
   --hero-motif-color: #3fa9f0;
   --hero-motif-opacity: 0.16;
   --hero-copy-width: 60ch;
@@ -1100,7 +1098,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: #e0788f;
   --hero-mist-1: #241b5e;
   --hero-mist-2: #3a1f5c;
-  --hero-highlight: var(--accent);
   --hero-motif-color: #8b93ff;
   --hero-motif-opacity: 0.16;
   --hero-copy-width: 60ch;
@@ -1110,7 +1107,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: #d99a52;
   --hero-mist-1: #0f4a44;
   --hero-mist-2: #1a5f52;
-  --hero-highlight: #fda4af;
   --hero-motif-color: #4fd1c5;
   --hero-motif-opacity: 0.14;
   --hero-copy-width: 58ch;
@@ -1123,7 +1119,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: var(--vang);
   --hero-mist-1: #1c2c66;
   --hero-mist-2: #2b3f7a;
-  --hero-highlight: var(--accent);
   --hero-motif-color: var(--accent);
   --hero-motif-opacity: 0.2;
   --hero-copy-width: 60ch;
@@ -1133,7 +1128,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: var(--brand-hover);
   --hero-mist-1: #123f5e;
   --hero-mist-2: #1f3f6e;
-  --hero-highlight: var(--brand-hover);
   --hero-motif-color: var(--accent);
   --hero-motif-opacity: 0.14;
   --hero-copy-width: 60ch;
@@ -1143,7 +1137,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: var(--accent);
   --hero-mist-1: #3a1f5c;
   --hero-mist-2: #4a2a70;
-  --hero-highlight: #f0a6c8;
   --hero-motif-color: #c084fc;
   --hero-motif-opacity: 0.16;
   --hero-copy-width: 58ch;
@@ -1153,7 +1146,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: #c97b96;
   --hero-mist-1: #2a1f5c;
   --hero-mist-2: #3d2a6b;
-  --hero-highlight: var(--hero-accent-secondary);
   --hero-motif-color: var(--hero-accent);
   --hero-motif-opacity: 0.14;
   --hero-copy-width: 58ch;
@@ -1163,7 +1155,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: #4a5bc9;
   --hero-mist-1: #232a5c;
   --hero-mist-2: #2f3a7a;
-  --hero-highlight: var(--hero-accent);
   --hero-motif-color: var(--hero-accent);
   --hero-motif-opacity: 0.1;
   --hero-copy-width: 56ch;
@@ -1173,7 +1164,6 @@ main { overflow-x: clip; }
   --hero-accent-secondary: #6d5bd0;
   --hero-mist-1: #241b4a;
   --hero-mist-2: #3a2a66;
-  --hero-highlight: var(--hero-accent);
   --hero-motif-color: var(--hero-accent);
   --hero-motif-opacity: 0.16;
   --hero-copy-width: 46ch;

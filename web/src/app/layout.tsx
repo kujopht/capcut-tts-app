@@ -19,6 +19,11 @@ const DESCRIPTION =
   "Đọc và nghe fanfic tiếng Việt. Khám phá truyện do cộng đồng xuất bản, nghe bằng giọng đọc tự nhiên.";
 
 export const metadata: Metadata = {
+  // Thieu truong nay lam Next canh bao o MOI request dong (RSC) va tu doan
+  // "http://localhost:3000" cho URL tuyet doi cua og:image/twitter:image —
+  // sai tren production. Phat hien khi kiem tra log Worker that sau khi
+  // deploy Phase V (2026-08-21).
+  metadataBase: new URL("https://fanfic.world"),
   // `template` de moi trang tu dat tieu de rieng ma van giu ten san pham
   title: { default: "Fanfic Audio Studio", template: "%s · Fanfic Audio Studio" },
   description: DESCRIPTION,

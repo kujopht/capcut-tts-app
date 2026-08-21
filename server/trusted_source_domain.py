@@ -60,6 +60,31 @@ def episode_slot_id(series_id: str, episode_number: int) -> str:
     return "anep_" + hashlib.sha256(thong).hexdigest()[:28]
 
 
+def inferred_mapping_id(source_id: str, canonical_name_normalized: str) -> str:
+    """
+    `mapping_id` TAT DINH cho MOT cho (source_id, ten canonical DA CHUAN
+    HOA) khi mot `SeriesMapping` duoc TU DONG suy ra/tao ("khong khop series
+    nao, tao moi") boi Auto-Ingestion Phase 1 (`discover_series_from_seed`)
+    HOAC Phase 5 (`discover_channel`) — CUNG ky thuat "POST trung documentId
+    la tao-hoac-lay an toan" voi `video_import_id`/`episode_slot_id`.
+
+    VI SAO CAN: HAI qua trinh dong thoi (vi du hai lan bam "Khám phá toàn
+    nguồn" gan nhu cung luc, hoac mot lan kham pha toan kenh dung luc mot
+    lan kham pha tu seed) co the deu ket luan "khong co series nao khop ten
+    nay, phai tao moi" cho CUNG mot (source_id, ten) TRUOC khi ben nao ghi
+    xong — sinh HAI series + HAI mapping trung lap cho CUNG mot series that.
+    Bam ca hai truong (khong chi ten, de phan biet nguon KHAC voi CUNG mot
+    ten series, van duoc phep co mapping RIENG cho tung nguon).
+
+    CHI danh cho mapping TAO TU DONG boi hai pipeline discovery nay —
+    mapping quan tri TU TAY tao qua `create_mapping()` (chon mot series co
+    san) van dung `new_id("smap")` ngau nhien nhu truoc, khong ap dung rang
+    buoc slot nay.
+    """
+    thong = f"{source_id}\x1f{canonical_name_normalized}".encode()
+    return "smapi_" + hashlib.sha256(thong).hexdigest()[:28]
+
+
 class TrustedSourceType(str, Enum):
     """
     Chi `YOUTUBE_*` duoc TRIEN KHAI giai doan nay (Phase 5 — chi YouTube Data
@@ -127,6 +152,27 @@ class ImportStatus(str, Enum):
     CONFLICT = "conflict"
     UNAVAILABLE = "unavailable"
     FAILED = "failed"
+
+
+#: Trang thai CON CHO QUYET DINH — du dieu kien duoc PHAN LOAI LAI (goi lai
+#: `classify_video`/`_quyet_dinh_trang_thai`) khi nguon/anh xa doi (mapping
+#: moi tao/sua khien alias khop, nguong/do tin cay du, xung dot so tap duoc
+#: giai toa...). MOI trang thai KHAC trong tap nay la QUYET DINH CUOI CUNG
+#: (thu cong: IMPORTED/REJECTED/IGNORED, hoac tu dong nhung KHONG con quay
+#: lui: AUTO_IMPORTED/AUTO_PUBLISHED/DUPLICATE) — KHONG BAO GIO bi ghi de
+#: boi bat ky duong tu dong nao (quet thu cong/WebSub/doi chieu dinh ky/
+#: kham pha seed/kham pha toan kenh). `UNAVAILABLE`/`FAILED` CO CHU DICH
+#: KHONG nam trong tap nay: chua co chinh sach thu lai rieng cho hai trang
+#: thai do (xem `_danh_dau_video_khong_con_truy_cap`), giu nguyen hanh vi
+#: hien co thay vi tu bien mot chinh sach moi.
+#:
+#: Dung CHUNG boi `scan_source`, `_xu_ly_mot_video_discovery` (Phase 1 seed
+#: discovery VA Phase 5 channel discovery), va `_xu_ly_mot_video_websub` —
+#: MOT dinh nghia duy nhat, tranh bon duong tu dong lech nhau ve viec video
+#: nao con "song" de xu ly lai.
+TRANG_THAI_CHO_QUYET_DINH = (
+    ImportStatus.NEW, ImportStatus.PENDING, ImportStatus.CONFLICT,
+)
 
 
 class SourceHealth(str, Enum):

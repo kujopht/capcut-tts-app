@@ -1051,5 +1051,236 @@ class TrustedSourceServiceTest(unittest.TestCase):
         self.assertEqual(row["series_title"], "Tiên Nghịch")
 
 
+class ImportStateReclassificationPolicyTest(unittest.TestCase):
+    """Auto-Ingestion Phase 5 pre-merge hardening — chinh sach "trang thai
+    nao con duoc phan loai lai" (`TRANG_THAI_CHO_QUYET_DINH`), dung CHUNG boi
+    `scan_source`/`_xu_ly_mot_video_discovery`/`_xu_ly_mot_video_websub`.
+    NEW/PENDING/CONFLICT la QUYET DINH TAM, phai duoc phan loai lai khi dieu
+    kien doi; moi trang thai khac la QUYET DINH CUOI CUNG, KHONG BAO GIO bi
+    ghi de boi bat ky duong tu dong nao."""
+
+    def setUp(self):
+        self.store = MockTrustedSourceStore()
+        self.animation = MockAnimationStore()
+        self.metadata = MockMetadataStore()
+        self.svc = TrustedSourceService(
+            self.store, self.animation, self.metadata, youtube_api_key="fake-key")
+        self.admin = Profile(user_id="admin_1", email="admin@fanfic.world")
+        self.series = self.animation.create_series(
+            AnimationSeries(owner_id="author_1", title="Tiên Nghịch"))
+
+    def _dat_client_gia(self, client: FakeYouTubeClient):
+        self.svc._youtube = lambda: client  # type: ignore[method-assign]
+
+    def _nguon_va_video(self, cid, video_id, title, **kw_nguon):
+        upload_playlist = f"UU{cid[-4:]}"
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh test", **kw_nguon)
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kênh test",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: ([_video_item(video_id)], "")},
+            videos={video_id: VideoInfo(
+                video_id=video_id, title=title, channel_id=cid,
+                channel_title="Kênh test", thumbnail_url="", published_at="2026-01-01",
+                duration_seconds=100.0)},
+        )
+        self._dat_client_gia(client)
+        return source
+
+    def test_pending_voi_mapping_manh_hon_xuat_hien_reclassify_thanh_auto_imported(self):
+        """PENDING (do tin cay duoi nguong luc dau) -> quan tri sua nguong
+        thap hon -> quet lai PHAI phan loai lai thanh AUTO_IMPORTED, khong con
+        ket vien PENDING vinh vien."""
+        cid = "UC" + "s1" * 11
+        video_id = "vidPend0001"
+        source = self._nguon_va_video(
+            cid, video_id, "Tiên Nghịch Tập 3", auto_import=True, minimum_confidence=0.9)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tiên nghịch"], include_keywords=[], exclude_keywords=[])
+
+        lan_1 = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(lan_1["pending"], 1)
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row.status, ImportStatus.PENDING)
+
+        # Nguong tin cay giam -> video CU (dang PENDING) gio du dieu kien.
+        self.svc.update_source(
+            self.admin, source["source_id"], {"minimum_confidence": 0.1},
+            actor_role="owner")
+
+        lan_2 = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(lan_2["already_tracked"], 0, "PENDING phai duoc phan loai lai")
+        self.assertEqual(lan_2["auto_imported"], 1)
+        row_2 = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row_2.status, ImportStatus.AUTO_IMPORTED)
+        self.assertTrue(row_2.created_episode_id)
+        _rows, total = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(total, 1, "khong tao them ban ghi thu hai")
+
+    def test_conflict_duoc_giai_toa_sau_khi_video_chiem_cho_bi_tu_choi(self):
+        """CONFLICT (so tap bi chiem) -> video chiem cho bi quan tri TU CHOI
+        (giai phong tap that trong AnimationEpisode) -> quet lai PHAI
+        reevaluate va thanh cong (khong con ket vien CONFLICT vinh vien khi
+        dieu kien thuc te da doi)."""
+        cid = "UC" + "s2" * 11
+        video_chiem = "vidHold0001"
+        video_conflict = "vidConf0002"
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh test", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tiên nghịch"], include_keywords=[], exclude_keywords=[])
+        upload_playlist = f"UU{cid[-4:]}"
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kênh test",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: ([_video_item(video_chiem)], "")},
+            videos={
+                video_chiem: VideoInfo(
+                    video_id=video_chiem, title="Tiên Nghịch Tập 5", channel_id=cid,
+                    channel_title="Kênh test", thumbnail_url="", published_at="2026-01-01",
+                    duration_seconds=100.0),
+                video_conflict: VideoInfo(
+                    video_id=video_conflict, title="Tiên Nghịch Tập 5", channel_id=cid,
+                    channel_title="Kênh test", thumbnail_url="", published_at="2026-01-02",
+                    duration_seconds=100.0),
+            },
+        )
+        self._dat_client_gia(client)
+        self.svc.scan_source(self.admin, source["source_id"])
+        row_chiem = self.store.get_import_by_video_id(video_chiem)
+        self.assertEqual(row_chiem.status, ImportStatus.AUTO_IMPORTED)
+        episode_id_chiem = row_chiem.created_episode_id
+
+        # Video thu hai, cung so tap -> quet rieng, phai la CONFLICT.
+        client._playlist_items[upload_playlist] = (
+            [_video_item(video_chiem), _video_item(video_conflict)], "")
+        ket_qua = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(ket_qua["conflicts"], 1)
+        row_conflict = self.store.get_import_by_video_id(video_conflict)
+        self.assertEqual(row_conflict.status, ImportStatus.CONFLICT)
+
+        # Quan tri xoa tap dang chiem cho (giai phong so tap 5 that su).
+        self.animation.delete_episode(episode_id_chiem, "author_1")
+
+        # Quet lai — CONFLICT phai duoc reevaluate; nguon van auto_import,
+        # nen video_conflict gio thang cho va duoc tu dong nhap.
+        lan_cuoi = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(lan_cuoi["already_tracked"], 1, "video_chiem van AUTO_IMPORTED, final")
+        row_conflict_2 = self.store.get_import_by_video_id(video_conflict)
+        self.assertEqual(row_conflict_2.status, ImportStatus.AUTO_IMPORTED)
+        self.assertTrue(row_conflict_2.created_episode_id)
+
+    def test_rejected_khong_bao_gio_tu_doi_khi_quet_lai(self):
+        cid = "UC" + "s3" * 11
+        video_id = "vidRej0001"
+        source = self._nguon_va_video(
+            cid, video_id, "Tiên Nghịch Tập 1", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tiên nghịch"], include_keywords=[], exclude_keywords=[])
+        self.svc.scan_source(self.admin, source["source_id"])
+        row = self.store.get_import_by_video_id(video_id)
+        self.svc.reject_import(self.admin, row.import_id, reason="sai series")
+
+        ket_qua = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(ket_qua["already_tracked"], 1)
+        row_2 = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row_2.status, ImportStatus.REJECTED)
+        self.assertIn("sai series", row_2.reason)
+
+    def test_ignored_khong_bao_gio_tu_doi_khi_quet_lai(self):
+        cid = "UC" + "s4" * 11
+        video_id = "vidIgn0001"
+        source = self._nguon_va_video(
+            cid, video_id, "Tiên Nghịch Tập 1", auto_import=True, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tiên nghịch"], include_keywords=[], exclude_keywords=[])
+        self.svc.scan_source(self.admin, source["source_id"])
+        row = self.store.get_import_by_video_id(video_id)
+        self.svc.ignore_import(self.admin, row.import_id)
+
+        ket_qua = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(ket_qua["already_tracked"], 1)
+        row_2 = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row_2.status, ImportStatus.IGNORED)
+
+    def test_imported_khong_bao_gio_tao_them_episode_khi_quet_lai(self):
+        cid = "UC" + "s5" * 11
+        video_id = "vidImp0001"
+        source = self._nguon_va_video(
+            cid, video_id, "Tiên Nghịch Tập 1", auto_import=False, minimum_confidence=0.1)
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tiên nghịch"], include_keywords=[], exclude_keywords=[])
+        self.svc.scan_source(self.admin, source["source_id"])
+        row = self.store.get_import_by_video_id(video_id)
+        self.svc.set_import_series(
+            self.admin, row.import_id, series_id=self.series.series_id, episode_number=1)
+        nhap = self.svc.import_video(self.admin, row.import_id, publish=False)
+        self.assertEqual(nhap["status"], "imported")
+        episode_id_dau = nhap["created_episode_id"]
+
+        ket_qua = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(ket_qua["already_tracked"], 1)
+        row_2 = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row_2.status, ImportStatus.IMPORTED)
+        self.assertEqual(row_2.created_episode_id, episode_id_dau)
+        self.assertEqual(len(self.animation.list_episodes(self.series.series_id)), 1)
+
+    def test_duplicate_khong_bao_gio_tu_doi_khi_quet_lai(self):
+        cid = "UC" + "s6" * 11
+        video_id = "vidDup0001"
+        self.animation.create_episode(AnimationEpisode(
+            series_id=self.series.series_id, owner_id="author_1", title="Đã có",
+            source=AnimationSource.YOUTUBE, external_id=video_id, order_index=1))
+        source = self._nguon_va_video(
+            cid, video_id, "Tiên Nghịch Tập 1", auto_import=True, minimum_confidence=0.1)
+
+        self.svc.scan_source(self.admin, source["source_id"])
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row.status, ImportStatus.DUPLICATE)
+
+        ket_qua = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(ket_qua["already_tracked"], 1)
+        row_2 = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row_2.status, ImportStatus.DUPLICATE)
+
+    def test_websub_reclassify_pending_thanh_auto_imported_khi_mapping_moi_xuat_hien(self):
+        """WebSub phai dung CHUNG chinh sach voi scan_source: mot video PENDING
+        (chua khop mapping nao luc dau -> that ra la NEW, roi mapping xuat
+        hien sau) duoc phan loai lai qua thong bao WebSub TIEP THEO, khong
+        chi lam moi metadata."""
+        cid = "UC" + "s7" * 11
+        video_id = "vidWs0001"
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh WebSub", auto_import=True, minimum_confidence=0.1,
+            auto_discover=True)
+        client = FakeYouTubeClient(videos={video_id: VideoInfo(
+            video_id=video_id, title="Tiên Nghịch Tập 2", channel_id=cid,
+            channel_title="Kênh WebSub", thumbnail_url="", published_at="",
+            duration_seconds=100.0)})
+        self._dat_client_gia(client)
+
+        self.svc._xu_ly_mot_video_websub(self.store.get_source(source["source_id"]), video_id)
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row.status, ImportStatus.NEW)
+
+        self.svc.create_mapping(
+            self.admin, source["source_id"], animation_series_id=self.series.series_id,
+            aliases=["tiên nghịch"], include_keywords=[], exclude_keywords=[])
+        self.svc._xu_ly_mot_video_websub(self.store.get_source(source["source_id"]), video_id)
+        row_2 = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row_2.status, ImportStatus.AUTO_IMPORTED)
+        _rows, total = self.store.find_imports(trusted_source_id=source["source_id"])
+        self.assertEqual(total, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

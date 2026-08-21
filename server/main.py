@@ -87,6 +87,7 @@ from server.animation_domain import (
 from server.trusted_source_domain import SubscriptionStatus, compute_source_health
 from server.trusted_source_service import (
     DEFAULT_SCAN_PAGES,
+    DISCOVERY_SCAN_PAGES,
     MAX_SCAN_PAGES,
     TrustedSourceError,
     TrustedSourceService,
@@ -5052,6 +5053,10 @@ class DiscoverSeriesIn(BaseModel):
     youtube_video_id: str
 
 
+class DiscoverChannelIn(BaseModel):
+    max_pages: int = DISCOVERY_SCAN_PAGES
+
+
 class SeriesMappingCreateIn(BaseModel):
     animation_series_id: str
     aliases: List[str] = []
@@ -5203,6 +5208,21 @@ def admin_discover_series_from_seed(
     return {"result": _nguon_tin_cay(
         trusted_sources.discover_series_from_seed, admin, source_id,
         youtube_video_id=payload.youtube_video_id,
+        actor_role=settings.admin_role_of(admin.user_id).value).to_dict()}
+
+
+@app.post("/api/admin/animation/sources/{source_id}/discover-channel")
+def admin_discover_channel(
+    source_id: str, payload: DiscoverChannelIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Auto-Ingestion Phase 5 ("Autonomous Multi-Series Channel Ingestion") —
+    kham pha TOAN BO mot nguon kieu kenh/playlist, co the tao/khop NHIEU
+    series khac nhau cung luc, xem `TrustedSourceService.discover_channel`.
+    BI CHAN theo `max_pages`, cung nguyen tac voi `/scan`."""
+    return {"result": _nguon_tin_cay(
+        trusted_sources.discover_channel, admin, source_id,
+        max_pages=max(1, min(MAX_SCAN_PAGES, payload.max_pages)),
         actor_role=settings.admin_role_of(admin.user_id).value).to_dict()}
 
 

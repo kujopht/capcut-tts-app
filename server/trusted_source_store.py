@@ -203,6 +203,19 @@ class MockTrustedSourceStore:
             self.mappings[mapping.mapping_id] = mapping
             return mapping
 
+    def create_mapping_once(self, mapping: SeriesMapping) -> Tuple[SeriesMapping, bool]:
+        """Tao-hoac-lay AN TOAN theo `mapping.mapping_id` TAT DINH (xem
+        `trusted_source_domain.inferred_mapping_id`) — cung nguyen tac voi
+        `create_import_once`/`AnimationStore.create_episode_once`, chong hai
+        qua trinh discovery dong thoi cung ket luan "tao series moi" cho
+        CUNG mot (source_id, ten canonical) sinh hai mapping trung lap."""
+        with self._lock:
+            hien_co = self.mappings.get(mapping.mapping_id)
+            if hien_co is not None:
+                return hien_co, False
+            self.mappings[mapping.mapping_id] = mapping
+            return mapping, True
+
     def get_mapping(self, mapping_id: str) -> SeriesMapping:
         mapping = self.mappings.get(mapping_id)
         if mapping is None:

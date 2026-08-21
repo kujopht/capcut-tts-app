@@ -18,6 +18,7 @@ from server.trusted_source_domain import (
     TrustedSource,
     TrustedSourceType,
     VideoImport,
+    inferred_mapping_id,
 )
 from server.trusted_source_store import MockTrustedSourceStore
 from server.tests.test_appwrite_v2_contract import FakeAppwrite, _bo_client
@@ -176,6 +177,28 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                 ds = kho.list_mappings(s.source_id)
                 self.assertEqual(len(ds), 1, ten)
                 self.assertEqual(ds[0].aliases, ["a", "b"], ten)
+
+    def test_create_mapping_once_khong_trung(self):
+        """Auto-Ingestion Phase 5 pre-merge hardening — hai qua trinh dong
+        thoi cung suy ra `inferred_mapping_id` GIONG NHAU (cung source_id,
+        cung ten canonical) phai chi tao MOT mapping, KHONG hai."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_source(TrustedSource(youtube_channel_id="UC_dup"))
+                mid = inferred_mapping_id(s.source_id, "tien nghich")
+                m1, moi1 = kho.create_mapping_once(SeriesMapping(
+                    mapping_id=mid, trusted_source_id=s.source_id,
+                    animation_series_id="ani_A", aliases=["tien nghich"]))
+                m2, moi2 = kho.create_mapping_once(SeriesMapping(
+                    mapping_id=mid, trusted_source_id=s.source_id,
+                    animation_series_id="ani_B", aliases=["tien nghich"]))
+                self.assertTrue(moi1, ten)
+                self.assertFalse(moi2, ten)
+                self.assertEqual(m1.mapping_id, m2.mapping_id, ten)
+                # Ben THUA (m2) phai doc lai ban CUA BEN THANG (ani_A),
+                # KHONG phai gia tri no tu truyen vao (ani_B).
+                self.assertEqual(m2.animation_series_id, "ani_A", ten)
+                self.assertEqual(len(kho.list_mappings(s.source_id)), 1, ten)
 
     def test_tu_khoa_mong_doi_song_qua_reload_va_duoc_matcher_dung(self):
         """Hoi quy day du cho loi staging: payload `include_keywords` duoc

@@ -39,8 +39,18 @@ const TAM = [
 ];
 
 test("du tam anh, moi tam co ban lon va ban cho dien thoai", () => {
-  const co = new Set(readdirSync(THU_MUC).filter((f) => f.endsWith(".webp")));
-  assert.equal(co.size, 16, `có ${co.size} tệp webp, cần 16 (8 lớn + 8 nhỏ)`);
+  /*
+    Loc theo TIEN TO cua 8 tam (khong dem MOI tep .webp trong thu muc): Live
+    Wallpaper V2 them mot mask chuyen dong `.webp` cung thu muc (xem
+    `live-background-home-integration.test.mjs`) — mot tai san khac loai,
+    khong phai tranh nen toan trang, khong nen troi buoc dem nay.
+  */
+  const co = new Set(
+    readdirSync(THU_MUC).filter(
+      (f) => f.endsWith(".webp") && TAM.some((ten) => f === `${ten}.webp` || f === `${ten}-sm.webp`),
+    ),
+  );
+  assert.equal(co.size, 16, `có ${co.size} tệp webp nền trang, cần 16 (8 lớn + 8 nhỏ)`);
   for (const ten of TAM) {
     assert.ok(co.has(`${ten}.webp`), `thiếu ${ten}.webp`);
     assert.ok(co.has(`${ten}-sm.webp`), `thiếu bản điện thoại ${ten}-sm.webp`);
@@ -207,7 +217,10 @@ test("lop nen KHONG cuon theo trang va khong nhan chuot", () => {
   const than = text.slice(at, text.indexOf("}", at));
   assert.match(than, /position: fixed/);
   assert.match(than, /pointer-events: none/);
-  assert.match(than, /z-index: -1/);
+  // V2 Cloud Veil: -2 (truoc la -1) — `.route-veil` (man may) gio chiem
+  // -1, MOT bac it am hon, de nam GIUA nen va noi dung. Xem
+  // `route-transition-veil.test.mjs` cho bai test doi chieu ca hai gia tri.
+  assert.match(than, /z-index: -2/);
   // `position: fixed` tren MOT phan tu, khong phai `background-attachment:
   // fixed` tren body — cai sau lam trinh duyet ve lai nen moi khung khi cuon.
   assert.ok(!/background-attachment: fixed/.test(than));

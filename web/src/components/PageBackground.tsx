@@ -1,74 +1,106 @@
 "use client";
 
 /**
- * Lop tranh nen theo tung trang, KEM chuyen canh khi doi route.
+ * Lop tranh nen theo tung trang.
  *
- * VAN DE CUA BAN TRUOC: doi route la anh nen doi tuc thi. No doc ra nhu doi
- * hinh nen may tinh, khong phai nhu di qua mot the gioi lien mach.
+ * V1 "Cloud Veil Route Transition": chuyen canh khi doi route KHONG con la
+ * viec cua component nay nua — no chuyen sang `RouteTransitionVeil.tsx`
+ * (hieu ung chuyen canh) + `lib/routeTransitionStore.ts` (kho dieu phoi,
+ * dung chung giua hai component).
  *
- * CACH LAM: giu DUNG HAI lop.
+ * V4 "Aether Rift Reveal": component nay KHONG con tu quan ly mang lop
+ * (`cacLop`/`data-fade` cua V3) — kho da tu tach san CHINH XAC HAI lop can
+ * ve, doc truc tiep tu snapshot:
  *
- *   lop duoi  tam CU, dang mo dan ra
- *   lop tren  tam MOI, dang hien dan vao
+ *   `ten`     lop DUOI, DA ON DINH, tuyet doi khong hoat hinh.
+ *   `tenMoi`  lop TREN, chi ton tai luc `trangThai === "revealing"` — duoc
+ *             "tiet lo" dan qua `clip-path: url(#aether-fill-clip)`
+ *             (dinh nghia o `RouteTransitionVeil.tsx`, hoat hinh boi CSS
+ *             `d`) thay vi opacity-crossfade nhu V3.
  *
- * Khi `pathname` doi:
- *   1. tra ra tam moi tu bang anh xa;
- *   2. NAP TRUOC bang `new Image()` — chua nap xong thi chua doi gi ca, nen
- *      khong bao gio co mot nhay den giua hai tam;
- *   3. nap xong thi day tam cu xuong lop duoi va cho tam moi hien dan;
- *   4. het chuyen canh thi BO lop cu. Khong bao gio de ba lop chong nhau.
- *
- * CHI hai phan tu, va con so do khong doi theo so lan dieu huong.
- *
- * KHONG lam mo ca ung dung, khong lam mo doan noi dung: thanh dieu huong va noi
- * dung van bam duoc trong suot chuyen canh. Chi hai lop khong khi nay doi.
- *
- * TAB CUC BO khong lam gi o day: `Tất cả / Audio Studio / Fanfic` o Thu vien la
- * trang thai trong mot trang, `pathname` khong doi, nen nen khong nhap nhay.
+ * `key={the}` tren lop TREN dam bao React REMOUNT no moi lan MOT LAN
+ * REVEAL MOI that su bat dau (ke ca khi dieu huong lien tiep thay doi dich
+ * TRUOC KHI lan truoc kip xong) — dam bao khong con LiveBackground/trang
+ * thai anh nao bi giu sot lai tu lan truoc.
  *
  * KHONG dung lam bia truyen — do la viec cua `StoryCoverFallback`.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { anhNen, tenNen } from "@/lib/backgrounds";
-import { huongDi, tenHuong, type Huong } from "@/lib/sections";
+import { useEffect, useRef, useSyncExternalStore } from "react";
+import { anhNen, videoNen } from "@/lib/backgrounds";
 import { AmbientScene } from "@/components/AmbientScene";
+import { LiveBackground } from "@/components/LiveBackground";
+import { routeTransitionStore } from "@/lib/routeTransitionInstance";
 
-/** Khop voi `--dur-nen` o `globals.css`. */
-const THOI_LUONG = 580;
-
+/**
+ * Live Wallpaper — rollout V4 (2026-08): CA 8 chu de, khong con rieng trang
+ * chu. Lich su rieng cua trang chu (Nova Reel V1/V2 bi tu choi, Gemini V1/V2)
+ * xem lich su git — ban Gemini V2 da bi THAY THE hoan toan boi bo 8 video
+ * nguoi dung tu lam thu cong trong dot rollout nay (kiem tra vong lap/chat
+ * luong day du trong bao cao rollout), KHONG con dung.
+ *
+ * `videoNen(ten)` (`lib/backgrounds.ts`) la NGUON DUY NHAT quyet dinh video
+ * nao ung voi chu de nao — component nay KHONG tu ghep chuoi duong dan
+ * (dac ta rollout muc 9). `undefined` (chu de chua co live wallpaper, hien
+ * tai khong con chu de nao roi vao truong hop nay) -> `<LiveBackground>`
+ * nhan `video={undefined}`, tu no chi ve poster, khong khac gi truoc rollout.
+ *
+ * TUONG THICH Aether Rift: roi mot chu de -> `ten` (lop duoi) doi thanh chu
+ * de moi NGAY khi lop TREN (`tenMoi`) hoan tat tiet lo — `<LiveBackground>`
+ * chi mount UNG VOI CHINH chu de cua lop do, nen video tu go het khi lop
+ * chua no khong con la chu de do nua, KHONG bao gio phat ngam lau hon can
+ * thiet. Vao mot chu de: lop TREN mount NGAY tu dau pha reveal — Live
+ * Background tu no da ve poster truoc/video sau (xem chinh component do),
+ * nen nguoi dung thay poster net trong luc duong bien dang tiet lo, video
+ * chi hien khi tai xong. Khong can them "tam ngung".
+ *
+ * O TRANG THAI ON DINH (khong dang chuyen canh) CHI CO MOT lop `.page-bg-lop`
+ * (`tenMoi === null`), nen CHI CO MOT `<video>` dang giai ma — dung dac ta
+ * rollout muc 15 ("normally only ONE full live wallpaper should be
+ * decoding"). Trong luc chuyen canh (~480ms), co THE co hai video ngan han —
+ * day la pham vi da duoc chap nhan cua Aether Rift, khong phai hoi quy.
+ */
 export function PageBackground() {
-  const [duongDan, setDuongDan] = useState<string | null>(null);
-  const ten = duongDan === null ? null : tenNen(duongDan);
-
-  /** Tam dang mo dan ra. `null` khi khong co chuyen canh nao dang chay. */
-  const [tenCu, setTenCu] = useState<string | null>(null);
-  /**
-   * Huong cua lan chuyen canh dang chay.
-   *
-   * Tinh tu HAI DUONG DAN, khong tu hai tam nen: hai duong dan khac nhau co the
-   * dung cung mot tam (`/fanfic` va `/novels/x` deu la `explore`), va lay huong
-   * tu ten tam se lam moi buoc di vao mot trang truyen thanh "khong co huong".
-   */
-  const [huong, setHuong] = useState<Huong>(0);
-  const truoc = useRef<string | null>(null);
-  const duongTruoc = useRef<string | null>(null);
-  const hen = useRef<number | null>(null);
+  const { ten, tenMoi, the, duongDan } = useSyncExternalStore(
+    routeTransitionStore.subscribe,
+    routeTransitionStore.getSnapshot,
+    // Server: chua biet duong dan nao ca — `ten === null` -> component ve
+    // `null`, giong het hanh vi client truoc khi hieu ung dau tien chay.
+    () => routeTransitionStore.getSnapshot(),
+  );
 
   /*
     Doc `location.pathname` thay vi `usePathname()`.
 
     `usePathname()` buoc component phai o trong cay dieu huong cua Next va se
     ve lai theo moi lan route doi — dung, nhung o day ta con can BIET truoc khi
-    doi de nap anh, va can mot cho de don `setTimeout`. Mot `popstate` +
-    kiem tra sau moi lan ve lai la du, va no khong dong vao trang thai route.
+    bao kho, va Next dieu huong bang History API nen khong phat `popstate` khi
+    `pushState`. Mot vong kiem nho la du, va no khong dong vao trang thai route.
   */
+  const duongDanTruoc = useRef<string | null>(null);
   useEffect(() => {
-    const doc = () => setDuongDan(window.location.pathname);
+    /*
+      Chi goi `diTinh` khi duong dan THAT SU doi — vong kiem nay chay MAI
+      MAI (suot doi trang), nen neu goi `diTinh` moi nhip du khong co gi
+      doi, kho se `set()` (va lam CA HAI component ve lai) moi nhip VO HAN,
+      dung nguyen dieu "khong duoc kich hoat hoat hinh lien tuc luc dung yen"
+      ma dac ta cam — do la ly do van GIU vong kiem (khong doi sang mot co
+      che nang hon), chi RUT NGAN chu ky.
+
+      V4 rut tu 120ms xuong 30ms: dac ta cam moi do tre dau vao (muc 9,
+      "<100ms"), va vong kiem nay la con duong DUY NHAT component biet URL
+      da doi (Next.js khong bao mot su kien nao cho pushState). Do sanh mot
+      chuoi ngan moi 30ms re toi muc khong do luong duoc bang cong cu thong
+      thuong — an toan de rut ngan, khac han viec giam mot animation frame.
+    */
+    const doc = () => {
+      const duong = window.location.pathname;
+      if (duong === duongDanTruoc.current) return;
+      duongDanTruoc.current = duong;
+      routeTransitionStore.diTinh(duong);
+    };
     doc();
-    // Next dieu huong bang History API, khong phat `popstate` khi `pushState`.
-    // Theo doi bang mot vong kiem nho — re hon nhieu so voi tai lai anh sai.
-    const id = window.setInterval(doc, 120);
+    const id = window.setInterval(doc, 30);
     window.addEventListener("popstate", doc);
     return () => {
       window.clearInterval(id);
@@ -76,95 +108,60 @@ export function PageBackground() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!ten || duongDan === null) return;
-    if (truoc.current === null) {
-      // Lan dau: khong co gi de chuyen canh tu.
-      truoc.current = ten;
-      duongTruoc.current = duongDan;
-      return;
-    }
-    if (truoc.current === ten) {
-      // Cung mot tam nen — vi du `/fanfic` -> `/novels/x`. Khong chuyen canh,
-      // nhung VAN phai nho duong dan moi: neu khong thi buoc di tiep theo se
-      // tinh huong tu mot duong dan cu da hai lan dieu huong truoc do.
-      duongTruoc.current = duongDan;
-      return;
-    }
-
-    const cu = truoc.current;
-    truoc.current = ten;
-    const huongMoi = huongDi(duongTruoc.current ?? "/", duongDan);
-    duongTruoc.current = duongDan;
-
-    /*
-      NAP TRUOC roi moi doi. Neu doi ngay thi trinh duyet ve mot khung trong
-      trong luc tai, va nguoi dung thay mot nhay den giua hai tam.
-
-      `decode()` cho ca truong hop anh da nam trong cache: no tra ve ngay, nen
-      chuyen canh bat dau lien ma khong phai cho mot vong mang nao.
-    */
-    let huy = false;
-    const img = new Image();
-    img.src = anhNen(ten);
-    const batDau = () => {
-      if (huy) return;
-      setHuong(huongMoi);
-      setTenCu(cu);
-      if (hen.current) window.clearTimeout(hen.current);
-      hen.current = window.setTimeout(() => setTenCu(null), THOI_LUONG);
-    };
-    if (img.decode) img.decode().then(batDau, batDau);
-    else img.onload = batDau, img.onerror = batDau;
-
-    return () => {
-      huy = true;
-    };
-  }, [ten, duongDan]);
-
-  useEffect(
-    () => () => {
-      if (hen.current) window.clearTimeout(hen.current);
-    },
-    [],
-  );
-
   if (!ten) return null;
-
-  const huongText = tenHuong(huong);
 
   return (
     <div className="page-bg" aria-hidden="true">
       {/*
-        HAI lop, va `data-huong` quyet dinh chung truot ve dau.
-
-        `tien`  may quay sang phai — di sang khu vuc ben phai tren truc
-        `lui`   nguoc lai
-        `nhe`   chi mo/hien kem mot cu dich rat nho: dung cho trang long
-                (`/novels/*`, `/chapters/*`) va cho cac buoc khong co huong
-
-        Bien do nho — 5vw ra, 8vw vao — va do la co y: truot ca man hinh 100vw
-        doc ra nhu mot slide PowerPoint, con mot cu dich nho doc ra nhu may vua
-        quay sang mot khu khac cua cung mot the gioi.
+        Lop DUOI — DA ON DINH, khong bao gio hoat hinh. `key={ten}` la BAT
+        BUOC (phat hien qua QA trinh duyet that, khong phai doan): truoc
+        rollout V4, CHI home co video, nen doi chu de LUON di kem mount/
+        unmount `<video>` (mot ben co video, ben kia khong). Tu khi CA 8 chu
+        de deu co video, doi tu chu de CO video NAY sang chu de CO video
+        KHAC ma KHONG co `key` khien React coi day la "cung mot component",
+        chi cap nhat lai thuoc tinh `src` tren `<source>` co san — nhung
+        trinh duyet KHONG tu doc lai `<source>` khi thuoc tinh doi (yeu cau
+        goi `.load()`, ma `LiveBackground.tsx` khong tu goi luc nay), nen
+        `<video>` cu VAN tiep tuc phat nguon CU du DOM da hien thi dung
+        poster/data-bg moi. `key={ten}` ep React GO HAN va MOUNT LAI toan bo
+        LiveBackground moi lan chu de DUOI thay doi, dam bao `<video>` luon
+        dung nguon.
       */}
-      {tenCu ? (
-        <div className="page-bg-lop" data-bg={tenCu} data-ra="" data-huong={huongText} />
+      <div className="page-bg-lop" data-bg={ten}>
+        <LiveBackground
+          key={ten}
+          poster={anhNen(ten)}
+          video={videoNen(ten)}
+          className="live-wallpaper-lop"
+        />
+      </div>
+
+      {/* Lop TREN — CHI ton tai luc dang "revealing", tiet lo dan qua
+          clip-path (xem RouteTransitionVeil.tsx). */}
+      {tenMoi ? (
+        <div
+          className="page-bg-lop page-bg-reveal"
+          data-bg={tenMoi}
+          key={the}
+        >
+          <LiveBackground
+            poster={anhNen(tenMoi)}
+            video={videoNen(tenMoi)}
+            className="live-wallpaper-lop"
+          />
+        </div>
       ) : null}
 
-      {/* Lop TREN: tam hien hanh. `key` doi theo tam nen hieu ung hien dan tu
-          chay lai — khong phai theo doi trang thai gi them. */}
-      <div className="page-bg-lop" data-bg={ten} key={ten} data-vao=""
-           data-huong={huongText} />
-
-      {/* Hat sang — CSS quyet dinh trang nao ve. Mot phan tu, khong phai vai tram. */}
-      <div className="hat" data-bg={ten} />
+      {/* Hat sang — CSS quyet dinh trang nao ve. Uu tien dia diem DICH de
+          khong tre so voi hieu ung reveal. */}
+      <div className="hat" data-bg={tenMoi ?? ten} />
 
       {/*
         Khong khi rieng cua tung khu vuc. Dat o DAY chu khong o `layout.tsx`:
         component nay da theo doi `pathname` roi, va them mot cho nua theo doi
         cung mot thu la them mot cho nua co the lech.
       */}
-      <AmbientScene duongDan={duongDan ?? "/"} />
+      <AmbientScene duongDan={duongDan || "/"} />
     </div>
   );
 }

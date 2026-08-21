@@ -137,7 +137,11 @@ test("ten huong la CHU, khong phai so", async () => {
 
 /* ==================================================== chuyen canh co huong */
 
-test("moi huong co MOT cap keyframes rieng, va bien do nho", () => {
+// SAU test duoi day (ke ca hai test ngay ben duoi ve keyframes co huong) gan
+// voi noi tai V1-V3 (crossfade co huong) cua `PageBackground.tsx`, da bi THAY
+// THE hoan toan boi kien truc "Aether Rift Reveal" V4 — xem ghi chu day du o
+// nhom BON test phia duoi.
+test("moi huong co MOT cap keyframes rieng, va bien do nho", { skip: "thay bang route-transition-veil.test.mjs (kien truc Aether Rift V4)" }, () => {
   const text = css();
   for (const ten of ["vao-tu-phai", "ra-sang-trai", "vao-tu-trai",
                      "ra-sang-phai", "vao-nhe", "ra-nhe"]) {
@@ -154,7 +158,7 @@ test("moi huong co MOT cap keyframes rieng, va bien do nho", () => {
   }
 });
 
-test("chi dung transform va opacity — khong thuoc tinh nao lam tinh lai bo cuc", () => {
+test("chi dung transform va opacity — khong thuoc tinh nao lam tinh lai bo cuc", { skip: "thay bang route-transition-veil.test.mjs (kien truc Aether Rift V4)" }, () => {
   const text = css();
   for (const ten of ["vao-tu-phai", "ra-sang-trai", "vao-nhe"]) {
     const than = khoi(text, `@keyframes ${ten}`);
@@ -163,9 +167,15 @@ test("chi dung transform va opacity — khong thuoc tinh nao lam tinh lai bo cuc
   }
 });
 
-test("thoi luong 450-650ms va KHOP giua CSS va component", () => {
-  // Lech nhau thi lop cu bi bo TRUOC khi mo het (thay mot nhay) hoac o lai SAU
-  // khi da mo het (mot lop `fixed` thua nam do).
+// BON test duoi day gan voi noi tai V1-V3 (crossfade co huong) cua
+// `PageBackground.tsx`, da bi THAY THE hoan toan boi kien truc "Aether Rift
+// Reveal" V4 (xem `components/RouteTransitionVeil.tsx`,
+// `lib/routeTransitionStore.ts`) trong dot port Visual Renaissance v2-clean.
+// Dac ta/hanh vi tuong duong gio duoc `route-transition-veil.test.mjs` va
+// `route-crossfade.test.mjs` (da cap nhat) kiem tra thay. Giu skip thay vi
+// xoa de lich su/y dinh cu (huong tinh tu duong dan, hai lop toi da) khong
+// mat, phong khi can doi chieu lai sau nay.
+test("thoi luong 450-650ms va KHOP giua CSS va component", { skip: "thay bang route-transition-veil.test.mjs (kien truc Aether Rift V4)" }, () => {
   const ms = Number(css().match(/--dur-nen: (\d+)ms/)?.[1]);
   const js = Number(read("../src/components/PageBackground.tsx")
     .match(/const THOI_LUONG = (\d+);/)?.[1]);
@@ -173,20 +183,14 @@ test("thoi luong 450-650ms va KHOP giua CSS va component", () => {
   assert.ok(ms >= 450 && ms <= 650, `${ms}ms — cần 450–650`);
 });
 
-test("huong duoc tinh tu DUONG DAN, khong tu ten tam nen", () => {
-  /*
-    Hai duong dan khac nhau co the dung cung mot tam (`/fanfic` va `/novels/x`
-    deu la `explore`). Lay huong tu ten tam se lam moi buoc di vao mot trang
-    truyen thanh "khong co huong", va con te han: `/library` -> `/chapters/x`
-    dung tam `reader`, ma `reader` khong nam tren truc.
-  */
+test("huong duoc tinh tu DUONG DAN, khong tu ten tam nen", { skip: "thay bang route-transition-veil.test.mjs (kien truc Aether Rift V4)" }, () => {
   const src = read("../src/components/PageBackground.tsx");
   assert.match(src, /huongDi\(duongTruoc\.current \?\? "\/", duongDan\)/,
     "hướng không được tính từ hai đường dẫn");
   assert.match(src, /duongTruoc\.current = duongDan/);
 });
 
-test("VAN dung HAI lop, khong bao gio nhieu hon", () => {
+test("VAN dung HAI lop, khong bao gio nhieu hon", { skip: "thay bang route-transition-veil.test.mjs (kien truc Aether Rift V4)" }, () => {
   const src = read("../src/components/PageBackground.tsx");
   assert.match(src, /tenCu \? \(/, "lớp cũ không được vẽ có điều kiện");
   assert.match(src, /setTenCu\(null\)/, "không dọn lớp cũ sau khi chuyển cảnh");
@@ -406,7 +410,7 @@ test("sac cua tung khu vuc nam o MOT cho", () => {
   }
 });
 
-test("chuyen canh nen MANH HON nhung van trong khoang cho phep", () => {
+test("chuyen canh nen MANH HON nhung van trong khoang cho phep", { skip: "thay bang route-transition-veil.test.mjs (kien truc Aether Rift V4)" }, () => {
   const text = css();
   const ms = Number(text.match(/--dur-nen: (\d+)ms/)?.[1]);
   assert.ok(ms >= 500 && ms <= 650, `${ms}ms — cần 500–650`);

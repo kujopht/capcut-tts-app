@@ -20,6 +20,8 @@ import os
 import unittest
 from unittest.mock import patch
 
+import httpx
+
 os.environ.setdefault("FAS_ENV_FILE", "")
 
 from scripts.setup_appwrite import Setup  # noqa: E402
@@ -170,6 +172,43 @@ class IdempotentSauThatBaiMotPhanTest(unittest.TestCase):
             # cho truong hop "key in da_co" (bo qua _ensure_attribute nhung
             # VAN goi _cho_thuoc_tinh_san_sang).
             s._cho_thuoc_tinh_san_sang("/v1/.../profiles", "user_id")
+
+
+class LoiMangThoangQuaTest(unittest.TestCase):
+    """Su co that thu hai cung ngay (2026-08-21): tren cung self-host PROD,
+    mot lan GET rieng bi `httpx.ReadTimeout` (loi mang that, khong phai
+    status Appwrite) khien toan bo script sap ngang giua vong cho, ngay sau
+    khi da qua duoc su co dau tien. `_goi_doc_thoi_thu_lai` phai coi day la
+    MOT LAN THU THAT BAI binh thuong, khong phai ly do dung khac
+    ('thuoc tinh bien mat')."""
+
+    def test_read_timeout_duoc_thu_lai_roi_thanh_cong(self):
+        s = _tao_setup()
+        ket_qua = [
+            httpx.ReadTimeout("The read operation timed out"),
+            _thuoc_tinh("user_id", "available"),
+        ]
+
+        def _call_gia(*a, **kw):
+            gia_tri = ket_qua.pop(0)
+            if isinstance(gia_tri, Exception):
+                raise gia_tri
+            return gia_tri
+
+        with patch.object(s, "_call", side_effect=_call_gia), \
+             patch("time.sleep", return_value=None):
+            s._cho_thuoc_tinh_san_sang("/v1/.../profiles", "user_id")
+        self.assertEqual(ket_qua, [])
+
+    def test_read_timeout_lap_lai_het_thoi_gian_nem_loi_ro_rang(self):
+        s = _tao_setup()
+        with patch.object(s, "_call",
+                          side_effect=httpx.ReadTimeout("timed out")), \
+             patch("time.sleep", return_value=None):
+            with self.assertRaises(SystemExit) as ctx:
+                s._cho_thuoc_tinh_san_sang(
+                    "/v1/.../profiles", "user_id", timeout_giay=0.01)
+        self.assertIn("mạng", str(ctx.exception))
 
 
 if __name__ == "__main__":

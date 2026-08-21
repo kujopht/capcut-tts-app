@@ -60,6 +60,7 @@ import { useSession } from "@/lib/session";
 import { StoryCard } from "@/components/StoryCard";
 import { Avatar } from "@/components/Avatar";
 import { NovelCover } from "@/components/NovelCover";
+import { MotifWaveArcs } from "@/components/Ornaments";
 import { EmptyState, ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
 import {
   IconBook,
@@ -191,18 +192,21 @@ function TheTiepTucXem({ muc }: { muc: ContinueWatchItem }) {
 function Hero({ daDangNhap }: { daDangNhap: boolean }) {
   return (
     <section className="hero-v2 rise" aria-labelledby="home-hero-title">
-      <span className="pill">
-        <span className="pill-dot" aria-hidden="true" />
-        Đọc · Nghe · Xem · Sáng tác
-      </span>
-      <h1 className="hero-v2-title" id="home-hero-title">
-        Truyện của cộng đồng, <em>đọc bằng mắt hoặc bằng tai</em>
-      </h1>
-      <p className="hero-v2-lead">
-        Fanfic World là nơi đọc và nghe fanfic tiếng Việt do cộng đồng viết,
-        xem Animation từ YouTube, tạo audio bằng giọng đọc tự nhiên, và tham
-        gia thảo luận cùng những người viết khác.
-      </p>
+      <MotifWaveArcs className="hero-v2-motif" />
+      <div className="hero-copy">
+        <span className="pill">
+          <span className="pill-dot" aria-hidden="true" />
+          Đọc · Nghe · Xem · Sáng tác
+        </span>
+        <h1 className="hero-v2-title" id="home-hero-title">
+          Truyện của cộng đồng, <em>đọc bằng mắt hoặc bằng tai</em>
+        </h1>
+        <p className="hero-v2-lead">
+          Fanfic World là nơi đọc và nghe fanfic tiếng Việt do cộng đồng viết,
+          xem Animation từ YouTube, tạo audio bằng giọng đọc tự nhiên, và tham
+          gia thảo luận cùng những người viết khác.
+        </p>
+      </div>
       <div className="row hero-v2-cta">
         <Link className="btn btn-primary" href="/fanfic">
           Khám phá
@@ -434,7 +438,10 @@ export default function HomePage() {
   const coTiepTuc = Boolean(data?.reading || data?.listening || data?.watching);
 
   return (
-    <div className="page">
+    // Themed Page Hero — "Ocean Sky": bien+troi+phieu luu, cyan troi la
+    // nhan CHINH. Dat o day (khong phai rieng tren .hero-v2) de dong bo voi
+    // cach cac trang khac dat theme tren the bao ngoai cung.
+    <div className="page" data-hero-theme="home">
       <Hero daDangNhap={daDangNhap} />
       <DaiThanhVien gamification={data?.gamification ?? null} />
 

@@ -51,6 +51,7 @@ import {
   formatNumber,
 } from "@/components/ui";
 import { IconFeather , IconBook, IconLibrary } from "@/components/Icons";
+import { MotifInkFlourish } from "@/components/Ornaments";
 
 /** Thao tac xoa dang cho xac nhan. */
 type PendingDelete =
@@ -609,10 +610,11 @@ export default function WritePage() {
   }
 
   return (
-    <div className="page">
+    <div className="page" data-hero-theme="write">
       <PageHeader
         eyebrow="Khu vực tác giả"
         icon={<IconFeather />}
+        motif={<MotifInkFlourish />}
         title="Viết và xuất bản"
         lead="Tạo truyện, thêm chương, tạo audio cho từng chương. Truyện nằm ở bản nháp cho tới khi bạn tự xuất bản."
         action={

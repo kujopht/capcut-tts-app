@@ -167,8 +167,15 @@ test("muc phu nam trong khoang da dat cho tung trang", () => {
 test("co mang toi CUC BO sau chu tieu de trang", () => {
   // Day la thu thay cho viec lam toi ca trang. Khong co no, tieu de nam truc
   // tiep tren tranh sang (02-explore sang 150/255) se mat tuong phan.
+  //
+  // PageHero (port Visual Renaissance, 2026-08): `.page-head::before` da bi
+  // XOA — no bam theo BE RONG CA `.page-head` (toi ca ngan pixel tren desktop
+  // khi co nut hanh dong ben phai), tao ra dung "vung mau to tu trai qua giua
+  // man hinh" ma nhanh nguon port nay da tu phat hien va sua tren chinh no
+  // (V1->V3). Mang toi cuc bo gio thuoc ve `.hero-copy::before` — mot the
+  // CON bam theo dung be rong doan van ban, khong phai ca hang.
   const text = css();
-  assert.match(text, /\.page-head::before/, "thiếu mảng tối sau tiêu đề trang");
+  assert.match(text, /\.hero-copy::before/, "thiếu mảng tối cục bộ sau tiêu đề trang (PageHero)");
   assert.match(text, /\.reader-head::before/, "thiếu mảng tối sau tên chương");
 });
 

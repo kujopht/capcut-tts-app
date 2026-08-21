@@ -14,6 +14,17 @@
  * giờ trước đó, vì trước Play chưa có iframe/YouTube IFrame API nào để đọc vị
  * trí thật.
  *
+ * VÒNG ĐỜI TRÌNH PHÁT YOUTUBE NẰM TRỌN TRONG `YouTubeFacadePlayer` (từ Phần
+ * Fanfic Cinema Controls). Trang này KHÔNG tự dựng trình phát qua YouTube
+ * IFrame API, không giữ tham chiếu tới nó, không tự đặt interval báo tiến độ
+ * — chỉ nhận lại qua `onProgress`. Trước đây trang tự làm hết những việc đó;
+ * để cả hai nơi cùng gắn API vào một iframe là cách chắc chắn nhất để có hai
+ * bộ interval và một trình phát treo khi chuyển tập.
+ *
+ * Hai bài kiểm `tests/animation-player-v2-custom-controls.test.mjs` khoá đúng
+ * điều đó lại: một bài đếm số nơi dựng trình phát trong toàn bộ `src/` (phải
+ * bằng một), một bài chặn tệp này nhắc lại các ký hiệu của IFrame API.
+ *
  * KHÔNG có mục "creator" riêng: `/novels/[id]` (trang truyện) cũng chưa hiển
  * thị tên tác giả trên trang chi tiết — theo đúng tiền lệ đó, trang này không
  * tự chế một tra cứu owner_id → hồ sơ công khai mới cho một mình nó.
@@ -26,7 +37,7 @@
  */
 
 import Link from "next/link";
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { use, useCallback, useMemo, useState } from "react";
 import {
   api,
   type AnimationEpisode,
@@ -35,7 +46,6 @@ import {
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useToast } from "@/lib/toast";
-import { loadYouTubeIframeApi, type YTPlayerInstance } from "@/lib/youtubeIframeApi";
 import { YouTubeFacadePlayer } from "@/components/YouTubeFacadePlayer";
 import { EpisodeComments } from "@/components/EpisodeComments";
 import { EmptyState, ErrorState, SkeletonList } from "@/components/ui";
@@ -49,13 +59,6 @@ interface WatchData {
   nextEpisodeId: string | null;
 }
 
-/** Id ổn định cho iframe — chỉ một trình phát trên trang này tại một thời điểm. */
-const IFRAME_ID = "anim-watch-player";
-
-/** Báo tiến độ mỗi N giây phát — đủ mượt cho "Tiếp tục xem", không dội API
-    mỗi vài trăm mili-giây như `timeupdate` của thẻ `<video>` thường làm. */
-const KHOANG_BAO_CAO_GIAY = 10;
-
 export default function AnimationWatchPage({
   params,
 }: {
@@ -66,8 +69,6 @@ export default function AnimationWatchPage({
   const toast = useToast();
 
   const [moChonTap, setMoChonTap] = useState(false);
-  const player = useRef<YTPlayerInstance | null>(null);
-  const bao = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async (): Promise<WatchData> => {
     const { episode, series, prev_episode_id, next_episode_id } =
@@ -88,44 +89,21 @@ export default function AnimationWatchPage({
 
   const { data, loading, error, missing, reload } = useAsyncData(load);
 
-  useEffect(() => {
-    return () => {
-      if (bao.current) clearInterval(bao.current);
-      player.current?.destroy?.();
-    };
-  }, [id]);
-
-  const guiTienDo = useCallback(() => {
-    if (!player.current || !data) return;
-    const viTri = player.current.getCurrentTime?.();
-    const doDai = player.current.getDuration?.();
-    if (typeof viTri !== "number" || Number.isNaN(viTri)) return;
-    api
-      .reportWatchProgress(
-        data.series.series_id, data.episode.episode_id, viTri, doDai || 0,
-      )
-      .catch(() => {});
-  }, [data]);
-
-  const batDauXem = useCallback(async () => {
-    if (!profile) return;
-    try {
-      const YT = await loadYouTubeIframeApi();
-      // Trinh phat facade da dung `<iframe id={IFRAME_ID}>` vao DOM luc nay
-      // (nguoi xem vua bam Play) — gan YouTube IFrame API vao CHINH iframe do,
-      // khong tao mot iframe thu hai.
-      player.current = new YT.Player(IFRAME_ID, {
-        events: { onReady: () => {
-          bao.current = setInterval(guiTienDo, KHOANG_BAO_CAO_GIAY * 1000);
-        } },
-      });
-    } catch {
-      // API IFrame khong nap duoc (mang cham/bi chan) — nguoi xem VAN xem
-      // duoc binh thuong qua chinh iframe YouTube, chi la "Tiep tuc xem"
-      // se khong ghi duoc tien do cho lan xem nay. Khong chan phat vi chuyen
-      // do.
-    }
-  }, [profile, guiTienDo]);
+  // Nhip 10s do CHINH `YouTubeFacadePlayer` giu (hang so `KHOANG_BAO_CAO_GIAY`
+  // trong component do) — trang nay chi quyet dinh CO ghi hay khong. Giu dung
+  // hanh vi cu: chi nguoi DA DANG NHAP moi ghi tien do; khach vao xem thi van
+  // xem/dieu khien binh thuong, khong dan mot request 401 moi 10 giay.
+  const onProgress = useCallback(
+    (viTriGiay: number, doDaiGiay: number) => {
+      if (!profile || !data) return;
+      api
+        .reportWatchProgress(
+          data.series.series_id, data.episode.episode_id, viTriGiay, doDaiGiay,
+        )
+        .catch(() => {});
+    },
+    [profile, data],
+  );
 
   const soThuTu = useMemo(
     () => new Map((data?.episodes ?? []).map((e, i) => [e.episode_id, i + 1])),
@@ -249,11 +227,20 @@ export default function AnimationWatchPage({
         </div>
       ) : null}
 
+      {/*
+        `key` BAT BUOC: doi tap la doi CA mot trinh phat khac, khong phai doi
+        `src` cua mot iframe dang song. Router cua Next 16 von da thao/dung lai
+        trang nay khi `[id]` doi (`layout-router` khoa subtree theo cache key
+        cua segment, va `MAX_BF_CACHE_ENTRIES = 1` khi khong bat
+        `cacheComponents`) — nhung do la chi tiet NOI BO cua framework. `key` o
+        day khien viec thao `YT.Player` cu TRUOC khi dung cai moi la bao dam
+        cua CHINH ma nay, ke ca khi cung mot tap duoc sua sang video khac.
+      */}
       <YouTubeFacadePlayer
+        key={`${episode.episode_id}:${episode.external_id}`}
         videoId={episode.external_id}
         title={episode.title}
-        iframeId={IFRAME_ID}
-        onPlay={batDauXem}
+        onProgress={onProgress}
       />
 
       {/*

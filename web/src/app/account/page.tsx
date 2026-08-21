@@ -10,6 +10,7 @@ import { errorMessage } from "@/lib/session";
 import { api } from "@/lib/api";
 import { xuLyAnh } from "@/lib/image";
 import { MAX_AVATAR_EDGE } from "@/lib/limits";
+import { MotifSigil } from "@/components/Ornaments";
 import { ConfirmDialog, EmptyState, Loading, formatDate, formatNumber } from "@/components/ui";
 import {
   IconSparkles,
@@ -36,6 +37,8 @@ const TIER_LABEL: Record<string, string> = {
 export default function AccountPage() {
   const { profile, loading, signOut, updateProfile } = useSession();
   const [confirmOut, setConfirmOut] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [xpRefreshKey, setXpRefreshKey] = useState(0);
   const toast = useToast();
@@ -44,6 +47,23 @@ export default function AccountPage() {
     setConfirmOut(false);
     signOut();
   }, [signOut]);
+
+  const doDeleteAccount = useCallback(async () => {
+    setDeletingAccount(true);
+    try {
+      await api.deleteAccount();
+      // KHÔNG gọi `router.push` — `signOut()` xoá `profile` khỏi session,
+      // và trang này TỰ chuyển sang màn "Bạn chưa đăng nhập" (xem nhánh
+      // `if (!profile)` bên dưới), đúng y hệt luồng đăng xuất thường. Gọi
+      // lại `api.logout()` bên trong `signOut()` cho một tài khoản đã xoá
+      // là vô hại — nó đã tự dung thứ lỗi mạng/401 ở đó.
+      await signOut();
+    } catch (cause) {
+      setDeletingAccount(false);
+      setConfirmDelete(false);
+      toast.error(errorMessage(cause));
+    }
+  }, [signOut, toast]);
 
   const chonAvatar = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -114,13 +134,19 @@ export default function AccountPage() {
   }
 
   return (
-    <div className="page">
+    // Themed Page Hero — Tai khoan: xanh lam-tim + indigo, KIEM CHE hon cac
+    // trang noi dung khac (day la ho so ca nhan, khong phai mot "the gioi"
+    // can the hien ro).
+    <div className="page" data-hero-theme="account">
       {/*
         Danh thiep: anh dai dien, ten, email, goi. Bon manh thong tin nay truoc
         day nam o bon khoi roi rac; gom lai mot cho thi doc duoc trong mot lan
         nhin, va do la ca viec cua trang tai khoan.
       */}
       <header className="account-hero">
+        <span className="account-hero-motif" aria-hidden="true">
+          <MotifSigil />
+        </span>
         <label
           className="min0"
           style={{ cursor: savingAvatar ? "wait" : "pointer" }}
@@ -286,6 +312,48 @@ export default function AccountPage() {
         danger
         onConfirm={doSignOut}
         onCancel={() => setConfirmOut(false)}
+      />
+
+      {/* Vung nguy hiem — tach rieng khoi "Phien dang nhap" o tren: dang xuat
+          giu du lieu, xoa tai khoan thi khong. */}
+      <section className="surface-secondary stack card-tight">
+        <h2 className="section-title">Xoá tài khoản</h2>
+        <p className="hint">
+          Xoá vĩnh viễn tài khoản cùng truyện, chương, audio, bài đăng và mọi
+          dữ liệu khác của bạn. Thao tác này{" "}
+          <strong>không hoàn tác được</strong>.
+        </p>
+        <div className="row">
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={() => setConfirmDelete(true)}
+          >
+            Xoá tài khoản
+          </button>
+        </div>
+      </section>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        danger
+        title="Xoá vĩnh viễn tài khoản này?"
+        body={
+          <>
+            <p>
+              Toàn bộ <strong>truyện, chương, audio, bài đăng</strong> và mọi
+              dữ liệu khác của <strong>{profile.display_name || profile.email}</strong>{" "}
+              sẽ bị xoá — kể cả truyện đã xuất bản đang có người đọc.
+            </p>
+            <p className="mt-2">
+              Thao tác này <strong>không hoàn tác được</strong>.
+            </p>
+          </>
+        }
+        confirmLabel="Xoá vĩnh viễn"
+        busy={deletingAccount}
+        onConfirm={doDeleteAccount}
+        onCancel={() => setConfirmDelete(false)}
       />
     </div>
   );

@@ -1,0 +1,60 @@
+# Healthcheck cho TTS worker PRODUCTION. Chạy theo lịch của
+# fanfic-worker-prod-health.timer.
+#
+# Bản PRODUCTION của `fanfic-worker-health.service` — cùng cơ chế, khác
+# đường dẫn (`worker-prod.env`/`FAS_VAR_DIR=/var/lib/fanfic-audio-prod`) và
+# khác service mục tiêu (`fanfic-worker-prod.service`), để hai cặp
+# service+timer không bao giờ dẫm lên nhau khi cả hai cùng chạy trên một VM
+# (xem ghi chú StateDirectory ở đầu `fanfic-worker-prod.service`).
+#
+# PHÁT HIỆN THẬT (2026-08-21, Audio Production Launch Gate): worker prod bị
+# treo vòng quét thật sự — `systemctl status` báo "active (running)" liên
+# tục trong khi job mới ngồi "pending" hơn 60 giây theo dõi trực tiếp qua
+# `journalctl -f`, không một dòng log quét mới nào xuất hiện dù chu kỳ cấu
+# hình là 3 giây. `Restart=always` của service worker KHÔNG cứu được — nó
+# chỉ cứu tiến trình CHẾT, không thấy tiến trình còn sống nhưng đã treo.
+# Khởi động lại thủ công giải quyết ngay (job hoàn tất trong 5 giây), nhưng
+# nguyên nhân gốc của lần treo chưa xác định — cặp service+timer này là lớp
+# phòng vệ tự phục hồi, không phải bản vá nguyên nhân gốc.
+#
+# VÌ SAO CẦN, KHI ĐÃ CÓ `Restart=always`:
+#   `Restart=always` chỉ cứu được worker CHẾT. Nó không thấy worker còn sống
+#   nhưng đã treo — vòng quét kẹt ở một lời gọi mạng không timeout, hoặc thread
+#   chính bị chặn. Lúc đó tiến trình vẫn "đang chạy" với systemd trong khi
+#   không job nào được nhận nữa.
+#
+#   `python -m server.worker --check` đọc tệp nhịp mà vòng quét ghi mỗi chu kỳ.
+#   Nhịp cũ hơn FAS_WORKER_STALE_SECONDS (mặc định 60s) nghĩa là vòng quét đã
+#   ngừng quay, bất kể tiến trình còn hay không.
+
+[Unit]
+Description=Fanfic Audio Studio — kiểm tra nhịp TTS worker (PRODUCTION)
+# Không kiểm tra khi worker đang bị dừng có chủ ý — nếu không mỗi lần bảo trì
+# sẽ tự khởi động lại nó ngay sau lưng người vận hành.
+Requisite=fanfic-worker-prod.service
+After=fanfic-worker-prod.service
+
+[Service]
+Type=oneshot
+# CHẠY BẰNG root, có chủ ý. `systemctl restart` cần quyền, và cách còn lại là
+# viết một luật polkit riêng cho người dùng `fanfic` — thêm một tệp nữa phải
+# bảo trì để đổi lấy đúng một lời gọi. Đổi lại thì unit này phải rất nhỏ: nó
+# đọc một tệp JSON và khởi động lại đúng một service, không hơn.
+WorkingDirectory=/opt/fanfic-audio
+EnvironmentFile=/etc/fanfic-audio/worker-prod.env
+Environment=PYTHONPATH=/opt/fanfic-audio
+Environment=FAS_VAR_DIR=/var/lib/fanfic-audio-prod
+
+# `--check` không mở cổng và không gọi mạng: nó chỉ đọc tệp nhịp. Healthcheck
+# phải rẻ và không có đường nào tự nó hỏng.
+#
+# Restart chứ không phải stop: worker treo thì thứ cần là một bản mới. Job đang
+# dở của bản treo sẽ được nhận lại sau khi lease hết hạn — đúng đường recovery
+# đã có, không thêm gì mới. KHÔNG tạo job/audio trùng: job "dang_chay" của
+# worker cũ chỉ tiếp tục nếu nó còn thật sự đang xử lý (giữ lease); nếu vòng
+# quét đã treo thì không có job nào đang thật sự chạy, nên khởi động lại không
+# làm gián đoạn hay nhân đôi bất cứ công việc thật nào.
+ExecStart=/bin/sh -c '/opt/fanfic-audio/.venv/bin/python -m server.worker --check || { echo "nhịp cũ — khởi động lại worker production"; systemctl restart fanfic-worker-prod.service; }'
+
+ProtectHome=true
+SyslogIdentifier=fanfic-worker-prod-health

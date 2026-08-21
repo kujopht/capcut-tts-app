@@ -292,6 +292,32 @@ Khoá cũ đã được xác nhận thu hồi/xoay trước khi phase này bắt
    nằm trong văn bản nguồn để gitleaks phải bỏ qua. Nếu tương lai một
    allowlist cho file này trở nên "cần thiết", đó là dấu hiệu một bí mật
    thật đã lọt vào lại — phải điều tra trước, không được allowlist ngay.
+
+   Lần chạy CI đầu tiên của cổng này (trên toàn bộ 253 file của R1) phát
+   hiện 11 kết quả — TẤT CẢ đều là false positive của luật mặc định
+   (`generic-api-key`/`jwt`) trên nội dung đã có từ trước, không phải bí
+   mật thật, và luật `appwrite-api-key` riêng KHÔNG khớp lần nào (đúng như
+   mong đợi). Đã rà soát TỪNG dòng thủ công trước khi bỏ qua:
+   - 1 token JWT ví dụ kinh điển công khai của jwt.io, trích trong chính
+     tài liệu này.
+   - 5 dòng trong `docs/reports/cerebras-groq-benchmark-raw.json` — trường
+     `"doan_key"` (slug tiếng Việt, ví dụ `"hoi_thoai_xung_ho"`) bị luật
+     mặc định nhầm vì tên trường có hậu tố `_key`.
+   - 2 dòng `_MASTER_KEY` giả (base64 của chuỗi đếm lặp) trong
+     `test_image_service.py`/`test_image_byop_service.py`, đã ghi rõ
+     "CHỈ dùng trong test" ngay tại chỗ khai báo.
+   - 1 dòng assertion regex trong `admin-trusted-sources-websub.test.mjs`,
+     không chứa giá trị bí mật nào.
+   - 2 dòng CHÍNH LÀ hai fixture mà `test_secret_redaction.py` tồn tại để
+     kiểm thử (chuỗi "Bearer <bảng chữ cái>" và JWT ví dụ ở trên).
+
+   Bỏ qua bằng `.gitleaksignore` ở gốc repo — MỖI dòng là một fingerprint
+   `commit:file:rule:line` cụ thể (không phải allowlist theo path/rule
+   rộng), kèm chú thích lý do. Vì fingerprint gắn với SHA của commit, một
+   lần rebase/squash sau này có thể sinh fingerprint mới cho cùng những
+   dòng này — nếu CI báo lại đúng 11 phát hiện y hệt, chỉ cần rà soát
+   nhanh (đã biết trước là an toàn) rồi thêm fingerprint mới, không cần
+   điều tra lại từ đầu.
 3. **Khuyến nghị bổ sung (chưa bắt buộc bằng công cụ, ghi lại để áp dụng
    thủ công/tổ chức)**:
    - Bật GitHub secret scanning + push protection cho repo (Settings →

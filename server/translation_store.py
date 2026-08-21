@@ -81,6 +81,21 @@ class MockTranslationStore:
         with self._lock:
             return len(self._projects)
 
+    def delete_project(self, project_id: str) -> None:
+        """Xoa du an cung TOAN BO job/thuat ngu/lich su phien ban cua no.
+
+        Phat hien qua E2E chung thuc R1 (2026-08-21): khong co duong nao
+        xoa du an dich, du an QA vo tinh bi mo coi trong production that.
+        """
+        with self._lock:
+            self._projects.pop(project_id, None)
+            self._glossary.pop(project_id, None)
+            self._versions.pop(project_id, None)
+            job_ids = [jid for jid, j in self._jobs.items()
+                      if j.project_id == project_id]
+            for jid in job_ids:
+                self._jobs.pop(jid, None)
+
     # ======================================================== job
 
     def create_job(self, job: TranslationJob) -> TranslationJob:

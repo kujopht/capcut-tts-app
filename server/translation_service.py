@@ -379,6 +379,12 @@ class TranslationService:
     def get_project(self, project_id: str, owner_id: str) -> TranslationProject:
         return self._store.owned_project(project_id, owner_id)
 
+    def delete_project(self, project_id: str, owner_id: str) -> None:
+        """Xac nhan quyen so huu TRUOC khi xoa — cung khuon voi
+        `delete_novel`/`delete_chapter` o `main.py`."""
+        self._store.owned_project(project_id, owner_id)
+        self._store.delete_project(project_id)
+
     def list_projects(self, owner_id: str) -> List[TranslationProject]:
         return self._store.list_projects(owner_id)
 

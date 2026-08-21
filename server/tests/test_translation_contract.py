@@ -406,6 +406,72 @@ class HopDongDich(unittest.TestCase):
                 self.assertEqual(dem.get("quota_exhausted", 0), 1, ten)
                 self.assertNotIn("encrypted_secret", str(dem), ten)
 
+    # ===================================================== XOA DU AN (P2)
+
+    def test_delete_project_xoa_ca_job_thuat_ngu_lich_su(self):
+        """Phat hien qua E2E chung thuc R1 (2026-08-21): khong co duong nao
+        xoa du an dich — mot du an QA bi mo coi trong production that. Xoa
+        phai don sach CA job/thuat ngu/lich su phien ban, khong chi bang
+        du an."""
+        from server.adapters import NotFoundError
+        from server.translation_domain import TranslationVersion
+
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                p = TranslationProject(owner_id="u1", title="x",
+                                       source_text="một câu.",
+                                       created_at="2026-08-14T00:00:00+00:00")
+                kho.create_project(p)
+                kho.create_job(TranslationJob(project_id=p.project_id, owner_id="u1"))
+                kho.add_glossary_entry(GlossaryEntry(
+                    term_id="gls_test1", project_id=p.project_id,
+                    category=GlossaryCategory.CHARACTER,
+                    original="萧炎", translated="Tiêu Viêm"))
+                kho.add_version(TranslationVersion(
+                    project_id=p.project_id, chapter_index=0,
+                    operation="auto_translate", pass_type="translator",
+                    previous_text="", new_text="Tiêu Viêm."))
+
+                kho.delete_project(p.project_id)
+
+                with self.assertRaises(NotFoundError, msg=ten):
+                    kho.get_project(p.project_id)
+                self.assertEqual(kho.jobs_for_project(p.project_id), [], ten)
+                self.assertEqual(kho.list_glossary(p.project_id), [], ten)
+                self.assertEqual(kho.list_versions(p.project_id), [], ten)
+
+    def test_delete_project_khong_anh_huong_du_an_khac(self):
+        """Xoa du an A khong duoc dung tay vao du an B — kiem CA job, thuat
+        ngu, VA lich su phien ban (khong chi job/tieu de nhu ban dau)."""
+        from server.translation_domain import TranslationVersion
+
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                p1 = TranslationProject(owner_id="u1", title="x",
+                                        source_text="một câu.",
+                                        created_at="2026-08-14T00:00:00+00:00")
+                p2 = TranslationProject(owner_id="u1", title="y",
+                                        source_text="câu khác.",
+                                        created_at="2026-08-14T00:00:00+00:00")
+                kho.create_project(p1)
+                kho.create_project(p2)
+                kho.create_job(TranslationJob(project_id=p2.project_id, owner_id="u1"))
+                kho.add_glossary_entry(GlossaryEntry(
+                    term_id="gls_p2", project_id=p2.project_id,
+                    category=GlossaryCategory.CHARACTER,
+                    original="药老", translated="Dược Lão"))
+                kho.add_version(TranslationVersion(
+                    project_id=p2.project_id, chapter_index=0,
+                    operation="auto_translate", pass_type="translator",
+                    previous_text="", new_text="Dược Lão."))
+
+                kho.delete_project(p1.project_id)
+
+                self.assertEqual(kho.get_project(p2.project_id).title, "y", ten)
+                self.assertEqual(len(kho.jobs_for_project(p2.project_id)), 1, ten)
+                self.assertEqual(len(kho.list_glossary(p2.project_id)), 1, ten)
+                self.assertEqual(len(kho.list_versions(p2.project_id)), 1, ten)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

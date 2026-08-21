@@ -539,6 +539,24 @@ class AppwriteTranslationStore:
         `_list_all` (do se keo het ban ghi ve)."""
         return self._dem(COL_PROJECTS, [q_limit(1)])
 
+    def delete_project(self, project_id: str) -> None:
+        """Xoa du an cung TOAN BO job/thuat ngu/lich su phien ban cua no.
+
+        Phat hien qua E2E chung thuc R1 (2026-08-21): khong co duong nao
+        xoa du an dich, du an QA vo tinh bi mo coi trong production that.
+        KHONG xoa rieng `translation_job_claims` — cac hang do chi la khoa
+        khoa mot-lan-cho-moi-lan-thu, tro thanh vo hai (khong con job/du an
+        nao tham chieu) ngay khi job/du an bi xoa, cung triet ly voi
+        `job_locks`/`job_claims` cua pipeline TTS.
+        """
+        for job in self.jobs_for_project(project_id):
+            self._delete(COL_JOBS, job.job_id)
+        for entry in self.list_glossary(project_id):
+            self._delete(COL_GLOSSARY, entry.term_id)
+        for version in self.list_versions(project_id):
+            self._delete(COL_VERSIONS, version.version_id)
+        self._delete(COL_PROJECTS, project_id)
+
     def _dem(self, collection: str, queries: List[str]) -> int:
         """Bo dem BI CHAN — `limit(1)` + doc `total`, KHONG dung `_list_all`
         (se keo het ban ghi ve). Dung chung cho MOI phep dem Phase 7."""

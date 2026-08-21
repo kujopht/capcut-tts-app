@@ -5600,6 +5600,20 @@ def get_translation_project(
     }
 
 
+@app.delete("/api/translate/projects/{project_id}")
+def delete_translation_project(
+    project_id: str, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """Xoa du an dich cung job/thuat ngu/lich su phien ban cua no.
+
+    Phat hien qua E2E chung thuc R1 (2026-08-21): khong co duong nao xoa du
+    an dich — mot du an QA vo tinh bi mo coi trong production that vi khong
+    co API nao de don.
+    """
+    _dich_vu(translation_svc.delete_project, project_id, profile.user_id)
+    return {"deleted": True}
+
+
 @app.post("/api/translate/projects/{project_id}/jobs",
          status_code=status.HTTP_201_CREATED)
 def create_translation_job(

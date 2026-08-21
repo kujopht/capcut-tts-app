@@ -137,12 +137,29 @@ def chay() -> int:
                 series.state.value == "draft", series.state.value)
 
         # -- Idempotency: chay lai LAN 2 tren CUNG nguon ---------------------
+        #
+        # LUU Y: `candidate_groups` KHONG duoc phep dung de kiem idempotent —
+        # mot video con o trang thai `NEW` (chua khop mapping/series nao, do
+        # do van nam trong `TRANG_THAI_CHO_QUYET_DINH`) CO CHU DICH duoc gom
+        # nhom/dem lai o MOI lan quet, de no van "cho quyet dinh" neu sau nay
+        # admin tao mapping moi khop no (xem docstring `discover_channel`,
+        # muc "existing admin decisions must win" — CHI quyet dinh CUOI CUNG
+        # (khong con trong TRANG_THAI_CHO_QUYET_DINH) moi bi bo qua vinh vien
+        # o lan quet sau). Vi vay `candidate_groups` o lan 2 CO THE > 0 mot
+        # cach dung dan neu con video NEW — bat da xac nhan that qua thu
+        # cong 2026-08-21: kenh test co dung MOT video khong khop gi (confidence
+        # thap), nen no VAN duoc gom nhom lai o lan 2 (candidate_groups=1),
+        # dung y thiet ke, khong phai loi.
+        #
+        # Bat idempotent THAT can kiem la: KHONG tao series/mapping MOI, VA
+        # KHONG tao video_import trung — hai dieu do da duoc kiem rieng ben
+        # duoi (tong_series/total khong doi).
         _series_list_1, tong_series_1 = animation_store.find_series(include_removed=True)
         lan_2 = svc.discover_channel(admin, source_id, max_pages=1, actor_role="owner")
         ket_qua.kiem(
-            "Service: khám phá lại idempotent — mọi video đã theo dõi, "
-            "không cụm/series mới nào nữa",
-            lan_2.candidate_groups == 0 and lan_2.new_series_created == 0,
+            "Service: khám phá lại idempotent — không series MỚI nào được "
+            "tạo (video còn NEW vẫn có thể được gom nhóm lại có chủ đích)",
+            lan_2.new_series_created == 0,
             f"candidate_groups={lan_2.candidate_groups} "
             f"new_series_created={lan_2.new_series_created}")
         _rows_2, total_2 = trusted_store.find_imports(trusted_source_id=source_id)

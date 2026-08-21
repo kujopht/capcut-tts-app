@@ -1,0 +1,25 @@
+title = "Fanfic World gitleaks config"
+
+# Su co 2026-08-16/08-20: mot khoa API Appwrite that bi commit nham vao
+# server/tests/test_secret_redaction.py (o dang fixture regression tai hien
+# hinh dang mot loi Appwrite that tra ve). Khoa da duoc xac nhan thu hoi/xoay.
+# Ban vao them cong bao ve nay de KHONG lap lai — chon lop mac dinh cua
+# gitleaks (bao phu AWS, private key, JWT, generic API key...) CONG them mot
+# quy tac rieng cho dinh dang khoa Appwrite (gitleaks khong co san quy tac
+# nay).
+#
+# KHONG co allowlist rieng cho server/tests/test_secret_redaction.py — ban
+# vay sau su co nay xay dung gia tri kiem thu bang CACH GHEP chuoi luc chay
+# (`"standard_" + doan_lap_lai * N`), nen KHONG con mot chuoi lien tuc giong
+# khoa that nam trong van ban nguon de gitleaks phai bo qua. Neu mot allowlist
+# cho file nay tro nen can thiet trong tuong lai, do la dau hieu mot chuoi
+# lien tuc giong bi mat da lot vao lai — dieu tra truoc khi allowlist.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "appwrite-api-key"
+description = "Appwrite API key (dang 'standard_<hex dai>' hoac 'console_<hex dai>') — cung dinh dang voi mau phat hien trong server/secret_redaction.py"
+regex = '''\b(?:standard|console)_[a-f0-9]{40,}\b'''
+keywords = ["standard_", "console_"]

@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Duyệt bình luận toàn hệ thống — TÁCH được hai loại:
+ * Duyệt bình luận toàn hệ thống — TÁCH được BA loại:
  *
  *   Bình luận bài đăng   → nguồn là /posts/{id}
  *   Bình luận chương     → nguồn là /chapters/{id} (bình luận audio)
+ *   Bình luận tập Animation → nguồn là /animation/watch/{id} (Phase 4)
  *
  * Người kiểm duyệt cần biết mình đang nhìn gì: một câu "hay quá!" dưới một
  * chương truyện và dưới một bài quảng cáo là hai ngữ cảnh khác nhau. Backend
@@ -21,13 +22,22 @@ import { formatDate } from "@/components/ui";
 import { DanhSachTrangThai } from "@/components/AdminShell";
 import { dongHo } from "@/lib/time";
 
-const LOAI: ReadonlyArray<{ key: "" | "chapter"; nhan: string }> = [
+type LoaiBinhLuan = "" | "chapter" | "animation_episode";
+
+const LOAI: ReadonlyArray<{ key: LoaiBinhLuan; nhan: string }> = [
   { key: "", nhan: "Bình luận bài đăng" },
   { key: "chapter", nhan: "Bình luận chương (audio)" },
+  { key: "animation_episode", nhan: "Bình luận tập Animation" },
 ];
 
+const NHAN_LOAI: Record<LoaiBinhLuan, string> = {
+  "": "Bài đăng",
+  chapter: "Chương",
+  animation_episode: "Tập Animation",
+};
+
 export default function AdminCommentsPage() {
-  const [loai, setLoai] = useState<"" | "chapter">("");
+  const [loai, setLoai] = useState<LoaiBinhLuan>("");
   const [ds, setDs] = useState<AdminComment[] | null>(null);
   const [tong, setTong] = useState(0);
   const [loi, setLoi] = useState("");
@@ -107,7 +117,7 @@ export default function AdminCommentsPage() {
               <article key={bl.comment_id} className="card stack-2">
                 <header className="row bc-dau">
                   <span className="badge">
-                    {bl.target_kind === "chapter" ? "Chương" : "Bài đăng"}
+                    {NHAN_LOAI[(bl.target_kind || "") as LoaiBinhLuan] ?? "Bài đăng"}
                   </span>
                   {bl.timestamp_ms !== null && bl.timestamp_ms !== undefined ? (
                     <span className="badge">

@@ -32,6 +32,8 @@ from typing import (
 
 from server.config import ConfigError, Settings
 from server.domain import (
+    AccountSession,
+    AccountStatus,
     AudioStamp,
     AudioTrack,
     AuthorApplication,
@@ -64,6 +66,20 @@ class StoredObject:
 
 class AuthError(Exception):
     """Sai thong tin dang nhap hoac phien khong hop le."""
+
+
+class AppwriteUnavailableError(AuthError):
+    """
+    Khong ket noi duoc Appwrite (mang loi/DNS/timeout/host chet) - KHAC voi
+    sai thong tin dang nhap hay phien het han.
+
+    La CON cua `AuthError` (khong phai loai moi hoan toan) de code cu bat
+    `except AuthError` van bat duoc no va khong crash - nhung noi nao CAN
+    phan biet "backend phu thuoc dang gian doan" (503, loi tam thoi, thu lai
+    duoc) voi "nguoi dung sai thong tin" (401/400, loi vinh vien cho toi khi
+    ho sua) PHAI bat lop nay TRUOC `AuthError`. Xem `server/appwrite_adapter.py`
+    (`_request`) noi no duoc nem, va `server/main.py` noi no duoc bat.
+    """
 
 
 class NotFoundError(Exception):
@@ -149,6 +165,65 @@ class IdentityAdapter(Protocol):
         TIM-HOAC-TAO, khong bao gio ghi de: ho so da co thi tra ve NGUYEN VEN.
         Nguoi dung doi ten hien thi trong Fanfic roi mot thang sau dang nhap
         bang Google khong duoc bi Google dat lai ten ho.
+        """
+        ...
+
+    # -- Quan ly tai khoan (Phase 3, Admin Control Center V2) ----------------
+    #
+    # Nam TACH BACH voi cac ham "ho so cong khai" ben duoi (`search_profiles`,
+    # `profiles_by_ids`...): nhung ham do doc bang `profiles` do CHINH backend
+    # ghi, con day la NGUYEN LIEU tu thang Appwrite Auth — mot nguon du lieu
+    # KHAC, khong co ban sao trong `profiles` va khong bao gio nen co.
+
+    def list_accounts(self, query: str = "", limit: int = 25,
+                      offset: int = 0) -> Tuple[List[AccountStatus], int]:
+        """
+        Danh sach TAI KHOAN (native), phan trang o MAY CHU — nguon cho
+        `/api/admin/users`.
+
+        KHAC voi `search_profiles`: tra ve MOI tai khoan da dang ky, ke ca
+        nguoi CHUA chon username/chua co ho so cong khai. Day la quan ly TAI
+        KHOAN (ai co the dang nhap), khong phai danh ba cong khai — mot tai
+        khoan spam moi tao, chua kip chon ten, van phai hien o day de quan tri
+        xu ly duoc.
+        """
+        ...
+
+    def account_status(self, user_id: str) -> Optional[AccountStatus]:
+        """Trang thai tai khoan cua MOT user_id. `None` neu khong ton tai."""
+        ...
+
+    def list_sessions(self, user_id: str) -> List[AccountSession]:
+        """Danh sach phien dang nhap DANG SONG cua mot tai khoan."""
+        ...
+
+    def terminate_session(self, user_id: str, session_id: str) -> bool:
+        """
+        Cham dut MOT phien. Tra True neu vua huy that, False neu phien do von
+        da khong con (IDEMPOTENT — cung tinh than voi `logout`).
+        """
+        ...
+
+    def terminate_all_sessions(self, user_id: str) -> int:
+        """Cham dut MOI phien cua mot tai khoan. Tra ve SO PHIEN da huy."""
+        ...
+
+    def set_account_enabled(self, user_id: str, enabled: bool) -> Optional[AccountStatus]:
+        """
+        Bat/khoa dang nhap cua MOT tai khoan. `enabled=False` chan MOI duong
+        dang nhap (email lan OAuth) — TACH BACH voi treo tac gia
+        (`CreatorService.suspend`, chi chan xuat ban). Tra `None` neu khong
+        tim thay tai khoan.
+        """
+        ...
+
+    def count_accounts(self, *, email_verified: Optional[bool] = None,
+                       enabled: Optional[bool] = None) -> int:
+        """
+        Dem tai khoan theo dieu kien, BI CHAN (`limit(1)` + doc `total`, khong
+        keo ban ghi) — dung cho o "verified/unverified/suspended" o bang dieu
+        khien (Admin Control Center V2, A1). Bo trong ca hai tham so = tong so
+        tai khoan.
         """
         ...
 
@@ -541,6 +616,11 @@ class MockIdentityAdapter:
         self._passwords: Dict[str, tuple] = {}       # user_id -> (salt, hash)
         self._tokens: Dict[str, str] = {}            # token -> user_id
         self._oauth_tokens: Dict[str, str] = {}      # secret dung-1-lan -> user_id
+        #: token = session_id trong ban mock (xem `list_sessions`).
+        self._session_created_at: Dict[str, str] = {}  # token -> ISO
+        #: user_id bi KHOA dang nhap (Phase 3, Admin Control Center V2) — TACH
+        #: BACH voi `Profile.author_status`, xem `AccountStatus`.
+        self._disabled: Set[str] = set()
 
     def register(self, email: str, password: str, display_name: str = "") -> Profile:
         email = (email or "").strip().lower()
@@ -568,8 +648,14 @@ class MockIdentityAdapter:
             salt, expected = self._passwords[user_id]
             if _hash_password(password or "", salt) != expected:
                 raise AuthError("Email hoặc mật khẩu không đúng.")
+            # Kiem TAI KHOAN bi khoa SAU khi mat khau da dung — mot nguoi
+            # khong biet mat khau khong duoc biet them "tai khoan nay dang bi
+            # tam dung", cung ly do voi thong diep loi chung o tren.
+            if user_id in self._disabled:
+                raise AuthError("Tài khoản này đã bị tạm dừng.")
             token = new_id("tok")
             self._tokens[token] = user_id
+            self._session_created_at[token] = now_iso()
             return token
 
     def profile_from_token(self, token: str) -> Profile:
@@ -582,7 +668,9 @@ class MockIdentityAdapter:
     def logout(self, token: str) -> bool:
         """Xem contract o `IdentityAdapter.logout`."""
         with self._lock:
-            return self._tokens.pop((token or "").strip(), None) is not None
+            token = (token or "").strip()
+            self._session_created_at.pop(token, None)
+            return self._tokens.pop(token, None) is not None
 
     # -- ho so cong khai -----------------------------------------------------
     #
@@ -652,9 +740,113 @@ class MockIdentityAdapter:
         khop.sort(key=lambda p: p.username)
         return khop[offset:offset + limit], len(khop)
 
+    def healthcheck(self) -> bool:
+        """Kho trong bo nho luon 'khoe' — chi de CUNG mot chu ky voi ban
+        Appwrite (`AppwriteIdentityAdapter.healthcheck`) khi goi da hinh tu
+        bang dieu khien quan tri (Admin Control Center V2, muc SYSTEM)."""
+        return True
+
+    def count_profiles(self, created_after: str = "") -> int:
+        """Tong so ho so (MOI nguoi dung, khong loc theo username) — dung cho
+        cac o "moi dang ky hom nay/7/30 ngay" o bang dieu khien (Admin
+        Control Center V2, A1)."""
+        with self._lock:
+            if not created_after:
+                return len(self._profiles)
+            return sum(1 for p in self._profiles.values()
+                      if p.created_at >= created_after)
+
     def all_usernames(self) -> List[str]:
         with self._lock:
             return [p.username for p in self._profiles.values() if p.username]
+
+    # -- Quan ly tai khoan (Phase 3, Admin Control Center V2) ----------------
+    #
+    # Mock KHONG co xac minh email/dien thoai that: `email_verified` luon tra
+    # `True` (khong ai o mock "chua xac minh"). Ghi ro dieu nay o TUNG ham thay
+    # vi mot dong comment chung o dau, de ai doc mot ham rieng le van thay ngay.
+
+    def _account_from_profile(self, p: Profile) -> AccountStatus:
+        return AccountStatus(
+            user_id=p.user_id, email=p.email, name=p.display_name,
+            enabled=p.user_id not in self._disabled,
+            email_verified=True, phone_verified=False,
+            registered_at=p.created_at,
+        )
+
+    def list_accounts(self, query: str = "", limit: int = 25,
+                      offset: int = 0) -> Tuple[List[AccountStatus], int]:
+        tu = (query or "").strip().lower()
+        with self._lock:
+            khop = [
+                p for p in self._profiles.values()
+                if not tu or tu in p.email.lower()
+                or tu in (p.display_name or "").lower()
+            ]
+            # Moi dang ky truoc len dau — cung thu tu voi `count_profiles`
+            # "moi dang ky hom nay/7/30 ngay" o bang dieu khien. `user_id` la
+            # nhan phu TAT DINH: hai tai khoan tao trong cung mot giay
+            # (`now_iso()` cat o giay) khong duoc doi thu tu giua hai trang.
+            khop.sort(key=lambda p: (p.created_at, p.user_id), reverse=True)
+            trang = khop[offset:offset + limit]
+            return [self._account_from_profile(p) for p in trang], len(khop)
+
+    def account_status(self, user_id: str) -> Optional[AccountStatus]:
+        with self._lock:
+            profile = self._profiles.get(user_id)
+            return self._account_from_profile(profile) if profile else None
+
+    def list_sessions(self, user_id: str) -> List[AccountSession]:
+        with self._lock:
+            return [
+                AccountSession(
+                    session_id=tok, provider="email", ip="", os_name="",
+                    client_name="", device_name="mock", country_name="",
+                    current=False,
+                    created_at=self._session_created_at.get(tok, ""),
+                )
+                for tok, uid in self._tokens.items() if uid == user_id
+            ]
+
+    def terminate_session(self, user_id: str, session_id: str) -> bool:
+        with self._lock:
+            if self._tokens.get(session_id) != user_id:
+                return False
+            del self._tokens[session_id]
+            self._session_created_at.pop(session_id, None)
+            return True
+
+    def terminate_all_sessions(self, user_id: str) -> int:
+        with self._lock:
+            token_cua_ho = [t for t, uid in self._tokens.items() if uid == user_id]
+            for tok in token_cua_ho:
+                del self._tokens[tok]
+                self._session_created_at.pop(tok, None)
+            return len(token_cua_ho)
+
+    def set_account_enabled(self, user_id: str, enabled: bool) -> Optional[AccountStatus]:
+        with self._lock:
+            if user_id not in self._profiles:
+                return None
+            if enabled:
+                self._disabled.discard(user_id)
+            else:
+                self._disabled.add(user_id)
+            return self._account_from_profile(self._profiles[user_id])
+
+    def count_accounts(self, *, email_verified: Optional[bool] = None,
+                       enabled: Optional[bool] = None) -> int:
+        with self._lock:
+            n = 0
+            for uid in self._profiles:
+                if email_verified is False:
+                    # Mock luon coi MOI tai khoan la da xac minh — khong ai
+                    # khop dieu kien "chua xac minh".
+                    continue
+                if enabled is not None and (uid not in self._disabled) != enabled:
+                    continue
+                n += 1
+            return n
 
     def profiles_by_ids(self, user_ids: Sequence[str]) -> Dict[str, Profile]:
         """
@@ -1211,6 +1403,22 @@ class MockMetadataStore(MockSocialStore):
             self.jobs[job.job_id] = replace(job, attempts=fence)
             return True
 
+    def total_jobs(self) -> int:
+        with self._lock:
+            return len(self.jobs)
+
+    def count_jobs(self, *, status: Optional[JobStatus] = None,
+                  created_after: str = "") -> int:
+        """Bo dem cho bang dieu khien quan tri (Phase 7 analytics) — loc
+        THEO status/ngay tao, khong keo document nao ve."""
+        with self._lock:
+            items = self.jobs.values()
+            if status is not None:
+                items = [j for j in items if j.status is status]
+            if created_after:
+                items = [j for j in items if j.created_at >= created_after]
+            return len(list(items))
+
     def list_jobs_by_status(self, status: JobStatus) -> List[TtsJob]:
         """Xem contract o `MetadataStore.list_jobs_by_status`."""
         with self._lock:
@@ -1323,6 +1531,14 @@ class MockMetadataStore(MockSocialStore):
             return sum(1 for n in self.novels.values()
                        if n.state is PublishState.PUBLISHED)
 
+    def total_novels(self) -> int:
+        with self._lock:
+            return len(self.novels)
+
+    def total_chapters(self) -> int:
+        with self._lock:
+            return len(self.chapters)
+
     def sum_qualified_listens(self) -> int:
         """Tong luot nghe hop le tren toan he thong, tu ban TONG HOP."""
         with self._lock:
@@ -1428,11 +1644,27 @@ class MockMetadataStore(MockSocialStore):
             return event
 
     def list_events(self, target_user_id: str = "", limit: int = 50,
-                    offset: int = 0) -> Tuple[List[ModerationEvent], int]:
-        """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra"."""
+                    offset: int = 0, target_type: str = "",
+                    target_id: str = "", action: str = "",
+                    created_after: str = "") -> Tuple[List[ModerationEvent], int]:
+        """Moi nhat truoc — nguoi doc nhat ky luon hoi "vua co gi xay ra".
+
+        `target_id` (Phase 4, Admin Control Center V2) — loc dung MOT doi
+        tuong khong phai user (vd mot series/tap Animation cu the), cung
+        tinh than voi `target_type`/`action`. `created_after` (Phase 7
+        analytics) — loc theo ngay tao, dung cho bo dem theo khoang thoi
+        gian (vd so lan doi chieu WebSub trong 7 ngay qua)."""
         with self._lock:
             rows = [e for e in self._events
                     if not target_user_id or e.target_user_id == target_user_id]
+            if target_type:
+                rows = [e for e in rows if e.target_type == target_type]
+            if target_id:
+                rows = [e for e in rows if e.target_id == target_id]
+            if action:
+                rows = [e for e in rows if e.action == action]
+            if created_after:
+                rows = [e for e in rows if e.created_at >= created_after]
         # Dao TRUOC roi moi sap xep: `sorted` cua Python on dinh, nen hai ban ghi
         # cung moc thoi gian se giu thu tu ghi dao nguoc — tuc la cai ghi sau
         # dung truoc. Mot lop bao ve nua ben canh moc micro giay.

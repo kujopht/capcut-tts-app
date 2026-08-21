@@ -1,16 +1,25 @@
 """
-Dang ky NHIEU provider dich MIEN PHI (Part Q).
+Dang ky NHIEU provider dich MIEN PHI (Part Q, mo rong da model o Part R —
+overnight Phase 3, V5.2).
 
 MUC TIEU THIET KE (theo dung yeu cau goc):
 - Suy luan tu xa MIEN PHI TRUOC. Khong yeu cau LLM cuc bo, khong yeu cau GPU
   rieng, KHONG BAO GIO tu dong chuyen sang provider TRA PHI.
 - Moi nha cung cap duoc cau hinh qua BIEN MOI TRUONG RIENG cua no, khong dung
   chung mot blob JSON — moi bi mat co the thu hoi doc lap:
-    GROQ_API_KEY, GROQ_MODEL
+    GROQ_API_KEY (+ GROQ_MODEL tuy chon, chi de THEM mot model ngoai danh
+      sach curated — xem `translation_model_profiles.py`)
     CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CLOUDFLARE_WORKERS_AI_MODEL
     TRANSLATION_BASE_URL, TRANSLATION_API_KEY, TRANSLATION_MODEL
       (provider "tuy chinh" — bat ky endpoint tuong thich OpenAI nao, da co
       tu Vong 2 cua V5)
+- Part R (overnight Phase 3): MOT `GROQ_API_KEY` gio dua VAO BA muc catalog
+  rieng (`groq_qwen`/`groq_gpt_oss_120b`/`groq_gpt_oss_20b`), moi muc mang
+  tham so RIENG cua model do (`ModelProfile.extra_payload`) — khong con MOT
+  model duy nhat cho ca credential. `ProviderRegistry` dinh tuyen AUTO theo
+  (quality_mode, vai_tro) qua `_sap_theo_vai_tro`/`route_order` truoc khi ap
+  dung thu tu AUTO/MANUAL cu cua Part Q3 — xem
+  `translation_model_profiles.ROLE_ROUTING`.
 - `TRANSLATION_ALLOW_PAID_PROVIDER` (mac dinh "false") la HANG RAO BAO VE:
   khi false, `build_provider_registry` se KHONG dua bat ky provider nao
   duoc danh dau `free_tier=False` vao registry, du bien moi truong cua no
@@ -25,6 +34,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -32,6 +42,13 @@ from typing import Dict, List, Optional, Tuple
 
 import httpx
 
+from server.translation_usage import usage_recorder
+from server.translation_model_profiles import (
+    CEREBRAS_MODEL_PROFILES,
+    GROQ_MODEL_PROFILES,
+    ModelProfile,
+    route_order,
+)
 from server.translation_providers import (
     TranslationContext,
     TranslationProvider,
@@ -132,6 +149,13 @@ class ProviderProvenance:
     #: biet AI TRA TIEN cho lan goi nay (Part I: "biet nguon credential ma
     #: khong luu bi mat").
     credential_source: str = "shared"
+    #: True = ket qua nay lay tu cache trong tien trinh
+    #: (`TranslationService._TranslationSegmentCache`), KHONG PHAI mot lan
+    #: goi model that — tach RIENG khoi `credential_source` (van giu gia tri
+    #: GOC tu lan dich THAT dau tien) de khong lam sai lech thong ke "ai da
+    #: dich" trong lich su phien ban, dong thoi van biet duoc lan nay khong
+    #: ton chi phi/token nao.
+    from_cache: bool = False
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -142,11 +166,38 @@ class ProviderProvenance:
             "attempted_at": self.attempted_at,
             "error": self.error,
             "credential_source": self.credential_source,
+            "from_cache": self.from_cache,
         }
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+#: Giay — cooldown MAC DINH khi mot provider bao 429/het han muc nhung
+#: KHONG kem header `Retry-After` (Groq da tung tra ve dang nay that su, xem
+#: `test_429_khong_header_van_la_rate_limited_nhung_khong_bia_moc`). TRUOC
+#: V6 cerebras-groq-translation, `_reset_at` bi de RONG trong truong hop
+#: nay -> `is_available_now()` coi provider la KHONG DUNG DUOC MAI MAI (rong
+#: khong co moc reset nao de so sanh) TRONG SUOT vong doi tien trinh — vua
+#: khong dat duoc "cooldown" (khong bao gio thu lai) vua khong dat duoc
+#: "khong hammer lien tuc" theo dung nghia (no cham lien tuc VE MOT PHIA:
+#: khong bao gio goi lai NHUNG cung khong bao gio bao cho ai biet no co the
+#: da hoi phuc). Cho mot cooldown CO HAN thay vi RONG-nghia-la-mai-mai sua
+#: CA HAI: provider duoc NGHI mot khoang hop ly (khong hammer), roi TU DONG
+#: duoc thu lai (khong "chet" vinh vien trong tien trinh dang chay).
+DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 60
+
+
+def _reset_at_mac_dinh(retry_at: str) -> str:
+    """`retry_at` (tu header `Retry-After`, co the RONG) -> moc ISO CHAC
+    CHAN co gia tri — dung cooldown mac dinh khi nha cung cap khong bao moc
+    cu the nao ca."""
+    if retry_at:
+        return retry_at
+    return (datetime.now(timezone.utc)
+            + timedelta(seconds=DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS)
+            ).isoformat(timespec="seconds")
 
 
 #: Mot so model "reasoning" (vd Qwen3 tren Groq) tra ve khoi
@@ -188,20 +239,34 @@ class _OpenAICompatFreeProvider(TranslationProvider):
 
     TIMEOUT_SECONDS = 60.0
 
-    #: Tham so THEM vao than request, ghi de o lop con cho tung nha cung cap
-    #: cu the (vd Groq dung `reasoning_format` de tat khoi suy luan cua cac
-    #: model "reasoning" — xem `GroqProvider`). Rong o day: mot endpoint
-    #: OpenAI-compatible bat ky khong chac hieu tham so rieng cua Groq.
+    #: Tham so THEM vao than request MAC DINH cho lop con — Phan 3C (overnight
+    #: Phase 3): tu day tro di, MOI model nen truyen `extra_payload` RIENG qua
+    #: `__init__` (xem `GroqProvider`) thay vi ghi de thuoc tinh lop nay, vi
+    #: MOT lop provider (`GroqProvider`) gio phuc vu NHIEU model khac nhau
+    #: (Qwen/GPT-OSS), moi model can dung MOT tap tham so cua rieng no — ghi
+    #: de o CAP LOP se khien moi instance dung CHUNG mot tham so sai cho model
+    #: khac. Giu lai thuoc tinh lop de tuong thich nguoc voi ban ghi de cu.
     EXTRA_PAYLOAD: Dict[str, object] = {}
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
-                client: Optional[httpx.Client] = None):
+                client: Optional[httpx.Client] = None,
+                extra_payload: Optional[Dict[str, object]] = None):
         self._model = model
+        self._extra_payload = (
+            extra_payload if extra_payload is not None else self.EXTRA_PAYLOAD)
         self._client = client or httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=self.TIMEOUT_SECONDS,
         )
+        #: So token input/output CUA LAN GOI THANH CONG GAN NHAT — `None` cho
+        #: den lan goi dau tien, hoac neu phan hoi khong kem `usage` (khong
+        #: phai tat ca provider tuong thich OpenAI deu tra truong nay). Doc boi
+        #: `ConfiguredProvider.translate_segment` NGAY SAU khi goi xong de ghi
+        #: vao `UsageEvent` — KHONG BAO GIO chua noi dung dich/bi mat, chi hai
+        #: con so dem token (yeu cau goc muc Usage/Quota: "input/output tokens
+        #: when returned").
+        self.last_usage: Optional[Dict[str, int]] = None
 
     def translate_segment(self, text: str, *,
                           context: TranslationContext) -> str:
@@ -215,7 +280,7 @@ class _OpenAICompatFreeProvider(TranslationProvider):
                 {"role": "user", "content": _nguoi_dung_prompt(sach, context)},
             ],
             "temperature": 0.3,
-            **self.EXTRA_PAYLOAD,
+            **self._extra_payload,
         }
         try:
             resp = self._client.post("/chat/completions", json=payload)
@@ -247,44 +312,88 @@ class _OpenAICompatFreeProvider(TranslationProvider):
         ket_qua = _bo_khoi_nghi((noi_dung or "").strip())
         if not ket_qua:
             raise TranslationProviderError("Dịch vụ dịch trả về nội dung rỗng.")
+
+        # Ghi lai so token NEU phan hoi co kem `usage` (OpenAI-compat chuan) —
+        # rong/thieu truong nao thi bo qua truong do, KHONG bia so.
+        usage = du_lieu.get("usage") if isinstance(du_lieu, dict) else None
+        if isinstance(usage, dict):
+            vao = usage.get("prompt_tokens")
+            ra = usage.get("completion_tokens")
+            self.last_usage = {
+                "input_tokens": int(vao) if isinstance(vao, (int, float)) else None,
+                "output_tokens": int(ra) if isinstance(ra, (int, float)) else None,
+            }
+        else:
+            self.last_usage = None
         return ket_qua
 
 
 class GroqProvider(_OpenAICompatFreeProvider):
     """
-    Groq — REST tuong thich OpenAI, endpoint mien phi cho cac model Qwen.
+    Groq — REST tuong thich OpenAI, endpoint mien phi cho Qwen/GPT-OSS.
 
-    HAI dieu chinh CHI THAT SU can thiet den tu kiem thu SONG voi API that
-    (khong doan duoc tu tai lieu):
+    Overnight Phase 3 (Part R): MOT lop nay gio phuc vu BA model khac nhau
+    (Qwen 3.6 27B, GPT-OSS 120B, GPT-OSS 20B — xem
+    `translation_model_profiles.GROQ_MODEL_PROFILES`), moi model mang
+    `extra_payload` cua RIENG no (Phan 3C — khong gui tham so cua model nay
+    cho model khac). Ban truoc CHI biet MOT model (Qwen) nen `EXTRA_PAYLOAD`
+    la thuoc tinh LOP co dinh; gio no la THAM SO qua `profile`.
 
-    1. `reasoning_format: "hidden"` — cac model "reasoning" (vd
-       `qwen/qwen3.6-27b`) mac dinh tra ve khoi `<think>...</think>` NGAY
-       TRONG `message.content`. `_bo_khoi_nghi` (lop cha) van loc lai LAN
-       NUA cho chac — phong khi mot model/phien ban khong tuan thu tham so
-       nay.
-    2. `max_tokens: 4096` — model nay danh GAN NHU TOAN BO ngan sach token
-       cho suy luan noi bo (do THAT: mot cau ngan don gian da dung toi 3793/
-       4096 token suy luan, chi con ~30 token cho cau tra loi that). KHONG
-       dat gioi han nay, mot doan van tuong doi dai se bi CAT NGANG GIUA
-       CHUNG SUY LUAN — API van tra 200 nhung `message.content` RONG (khong
-       phai loi, khong phai rate limit, chi la het cho truoc khi kip viet
-       cau tra loi) — tung xay ra THAT va gay `TranslationProviderError`
-       "nội dung rỗng" o moi doan van dai vua phai.
+    Lich su tim thay hai dieu chinh sau tu kiem thu SONG voi API that (khong
+    doan duoc tu tai lieu), van giu lai trong ho so Qwen:
+
+    1. `reasoning_format: "hidden"` — Qwen 3.6 27B mac dinh tra ve khoi
+       `<think>...</think>` NGAY TRONG `message.content`. `_bo_khoi_nghi`
+       (lop cha) van loc lai LAN NUA cho chac. THAM SO NAY KHONG duoc gui
+       cho GPT-OSS — tai lieu Groq ghi ro no "not supported" tren hai model
+       do, xem `translation_model_profiles`.
+    2. `max_completion_tokens: 4096` — tham so HIEN HANH cua Groq cho gioi
+       han token dau ra (thay `max_tokens` cu). Ly do can gioi han nay tu
+       dau: mot model "reasoning" co the danh gan het ngan sach cho suy luan
+       noi bo truoc khi kip viet cau tra loi (do THAT tren Qwen: 3793/4096
+       token suy luan, chi con ~30 token cho ban dich) — nhung Phan 3A da
+       tat `reasoning_effort` cho Qwen NGAY TU DAU nen rui ro nay giam han;
+       gioi han van giu lai phong GPT-OSS (van co reasoning_effort=low) roi
+       vao tinh trang tuong tu.
     """
 
     name = "groq"
-    EXTRA_PAYLOAD: Dict[str, object] = {
-        "reasoning_format": "hidden",
-        "max_tokens": 4096,
-    }
 
-    def __init__(self, *, api_key: str, model: str,
+    def __init__(self, *, api_key: str, profile: ModelProfile,
                 client: Optional[httpx.Client] = None):
-        if not (api_key and model):
+        if not (api_key and profile.model_id):
             raise TranslationProviderError(
-                "Thiếu GROQ_API_KEY/GROQ_MODEL.")
+                "Thiếu GROQ_API_KEY hoặc model_id.")
+        self.profile = profile
         super().__init__(base_url="https://api.groq.com/openai/v1",
-                         api_key=api_key, model=model, client=client)
+                         api_key=api_key, model=profile.model_id,
+                         client=client, extra_payload=profile.extra_payload)
+
+
+class CerebrasProvider(_OpenAICompatFreeProvider):
+    """
+    Cerebras Cloud — REST tuong thich OpenAI, dung lam nha cung cap CHINH cho
+    chien luoc san xuat tam thoi (`CEREBRAS_MODEL_PROFILES`: hien CHI GPT-OSS
+    120B — `zai-glm-4.7` da bi go vi Cerebras danh dau Preview/sap ngung ho
+    tro, xem docstring `translation_model_profiles.py`). Cung nen
+    `_OpenAICompatFreeProvider` voi Groq — endpoint/than request giong het,
+    chi khac `base_url`/model/tham so rieng qua `profile`.
+    """
+
+    name = "cerebras"
+
+    #: `inference-docs.cerebras.ai` — xac nhan 2026-08-15.
+    BASE_URL = "https://api.cerebras.ai/v1"
+
+    def __init__(self, *, api_key: str, profile: ModelProfile,
+                client: Optional[httpx.Client] = None):
+        if not (api_key and profile.model_id):
+            raise TranslationProviderError(
+                "Thiếu CEREBRAS_API_KEY hoặc model_id.")
+        self.profile = profile
+        super().__init__(base_url=self.BASE_URL, api_key=api_key,
+                         model=profile.model_id, client=client,
+                         extra_payload=profile.extra_payload)
 
 
 class CloudflareWorkersAIProvider(TranslationProvider):
@@ -400,26 +509,58 @@ class ConfiguredProvider:
 
     def translate_segment(self, text: str, *,
                           context: TranslationContext) -> str:
+        bat_dau = time.monotonic()
+
+        def _do_do_tre_ms() -> int:
+            return round((time.monotonic() - bat_dau) * 1000)
+
         try:
             ket_qua = self.provider.translate_segment(text, context=context)
         except ProviderRateLimited as exc:
             with self._lock:
                 self._status = ProviderStatus.RATE_LIMITED
-                self._reset_at = exc.retry_at
+                self._reset_at = _reset_at_mac_dinh(exc.retry_at)
+            usage_recorder().ghi(
+                provider_id=self.provider_id, model_id=self.model_id,
+                credential_source=self.credential_source,
+                pass_type=context.vai_tro, outcome="rate_limited",
+                latency_ms=_do_do_tre_ms())
             raise
         except ProviderQuotaExhausted as exc:
             with self._lock:
                 self._status = ProviderStatus.QUOTA_EXHAUSTED
-                self._reset_at = exc.retry_at
+                self._reset_at = _reset_at_mac_dinh(exc.retry_at)
+            usage_recorder().ghi(
+                provider_id=self.provider_id, model_id=self.model_id,
+                credential_source=self.credential_source,
+                pass_type=context.vai_tro, outcome="quota_exhausted",
+                latency_ms=_do_do_tre_ms())
             raise
         except TranslationProviderError:
             with self._lock:
                 self._status = ProviderStatus.UNAVAILABLE
                 self._reset_at = ""
+            usage_recorder().ghi(
+                provider_id=self.provider_id, model_id=self.model_id,
+                credential_source=self.credential_source,
+                pass_type=context.vai_tro, outcome="error",
+                latency_ms=_do_do_tre_ms())
             raise
         with self._lock:
             self._status = ProviderStatus.AVAILABLE
             self._reset_at = ""
+        #: `last_usage` la thuoc tinh TUY CHON (duck-typed) — chi cac provider
+        #: tuong thich OpenAI qua `_OpenAICompatFreeProvider` (Groq, Cerebras)
+        #: co no. Provider khac (mock, Cloudflare, tuy chinh) khong co thuoc
+        #: tinh nay -> `getattr` tra `None`, khong ghi token (KHONG bia so).
+        su_dung = getattr(self.provider, "last_usage", None)
+        usage_recorder().ghi(
+            provider_id=self.provider_id, model_id=self.model_id,
+            credential_source=self.credential_source,
+            pass_type=context.vai_tro, outcome="success",
+            latency_ms=_do_do_tre_ms(),
+            input_tokens=(su_dung or {}).get("input_tokens"),
+            output_tokens=(su_dung or {}).get("output_tokens"))
         return ket_qua
 
 
@@ -459,6 +600,94 @@ class ProviderRegistry:
         dung o tang service khi can GHEP them provider CA NHAN (Part F,
         `translate_segment_with_personal`)."""
         return list(self._providers)
+
+    @staticmethod
+    def _groq_model_key(provider_id: str) -> Optional[str]:
+        """`"groq_qwen"` -> `"qwen"`; provider KHONG phai Groq curated (vd
+        `"cloudflare"`, `"custom"`, `"groq"` legacy) -> `None`."""
+        tien_to = "groq_"
+        if provider_id.startswith(tien_to):
+            return provider_id[len(tien_to):]
+        return None
+
+    @staticmethod
+    def _ho_provider(provider_id: str) -> str:
+        """
+        "Ho" (family) cua MOT provider_id — dung DE GIOI HAN fallback BYOK
+        tuong minh (xem `translate_segment_with_personal`): mot ket noi Groq
+        ca nhan duoc phep tu dong chuyen giua CAC MODEL CUA CHINH NO
+        (`groq_qwen` <-> `groq_gpt_oss_120b` <-> `groq_gpt_oss_20b`, cung MOT
+        api key), NHUNG khong bao gio duoc phep "tràn" sang provider dung
+        chung/ho khac — dung y voi yeu cau goc "do NOT silently fall back to
+        shared credentials". Ho "cerebras" hien CHI co MOT model curated
+        (`gpt_oss_120b`, xem `translation_model_profiles.py`) nen khong co
+        fallback noi bo nao xay ra trong thuc te — co che nay VAN giu nguyen
+        cho tuong lai neu Cerebras them model curated thu hai.
+
+        Provider da-model curated (groq_*, cerebras_*) tra ve TEN HO chung
+        ("groq"/"cerebras"); provider don (vd "cloudflare", "custom",
+        "groq" legacy) tra ve CHINH provider_id — moi provider don la ho CUA
+        RIENG NO, khong gop voi ai.
+        """
+        for tien_to in ("groq_", "cerebras_"):
+            if provider_id.startswith(tien_to):
+                return tien_to.rstrip("_")
+        return provider_id
+
+    @classmethod
+    def _sap_theo_vai_tro(cls, providers: List[ConfiguredProvider],
+                          context: TranslationContext
+                          ) -> List[ConfiguredProvider]:
+        """
+        Sap lai NHOM model Groq curated theo (quality_mode, vai_tro) — Phan
+        3D. Provider KHAC (Cloudflare, tuy chinh, Groq legacy, Cerebras, ca
+        nhan BYOK) GIU NGUYEN vi tri tuong doi — nhom Groq da sap duoc CHEN
+        LAI dung tai vi tri no chiem trong danh sach dau vao, KHONG bi day
+        len dau mot cach vo dieu kien. Dieu nay quan trong tu khi Cerebras
+        tro thanh nha cung cap CHIA SE duoc uu tien HON Groq (chien luoc san
+        xuat tam thoi: Cerebras GPT-OSS 120B -> Groq Qwen) —
+        `build_provider_registry` dang ky Cerebras TRUOC Groq trong danh sach
+        dau vao chinh xac de dua vao hanh vi "giu nguyen vi tri" nay; neu ham
+        nay vo dieu kien day nhom Groq len dau (nhu ban truoc Phan R), Groq se
+        luon bi thu TRUOC Cerebras bat cu khi nao `quality_mode`/`vai_tro`
+        khop mot muc trong `ROLE_ROUTING` — sai hoan toan thu tu san xuat
+        mong muon. Vi du mau Phan 3F "Qwen -> GPT-OSS 120B -> GPT-OSS 20B ->
+        Cloudflare -> ca nhan" (khi Groq dung truoc trong danh sach dau vao)
+        van dung y het cach ghep nay — chi la truong hop rieng khi khong co
+        provider nao dung TRUOC nhom Groq.
+
+        Khong dinh tuyen duoc (thieu `quality_mode`, hoac to hop la) thi
+        TRA NGUYEN thu tu dau vao — an toan mac dinh, khong lam gi ca.
+        """
+        thu_tu_khoa = route_order(context.quality_mode, context.vai_tro)
+        if not thu_tu_khoa:
+            return providers
+
+        vi_tri_nhom_groq: Optional[int] = None
+        theo_khoa: Dict[str, ConfiguredProvider] = {}
+        khac: List[ConfiguredProvider] = []
+        for p in providers:
+            khoa = cls._groq_model_key(p.provider_id)
+            if khoa is not None and khoa not in theo_khoa:
+                theo_khoa[khoa] = p
+                if vi_tri_nhom_groq is None:
+                    # Vi tri nhom Groq se duoc CHEN VAO trong `khac` — chinh
+                    # la do dai cua `khac` NGAY LUC gap phan tu Groq DAU TIEN
+                    # (moi phan tu KHAC Groq truoc do da nam trong `khac`).
+                    vi_tri_nhom_groq = len(khac)
+            else:
+                khac.append(p)
+
+        if vi_tri_nhom_groq is None:
+            return providers  # khong co provider Groq nao trong danh sach
+
+        da_dinh_tuyen = [theo_khoa[k] for k in thu_tu_khoa if k in theo_khoa]
+        # Model Groq curated nhung KHONG nam trong bang dinh tuyen (khong nen
+        # xay ra voi ba model hien co, nhung an toan cho tuong lai) — giu lai,
+        # noi vao CUOI nhom Groq thay vi am tham bi rot.
+        con_lai_groq = [p for k, p in theo_khoa.items() if k not in thu_tu_khoa]
+        nhom_groq = da_dinh_tuyen + con_lai_groq
+        return khac[:vi_tri_nhom_groq] + nhom_groq + khac[vi_tri_nhom_groq:]
 
     @staticmethod
     def _thu_theo_thu_tu(thu_tu: List[ConfiguredProvider], text: str, *,
@@ -507,7 +736,9 @@ class ProviderRegistry:
             if allow_fallback:
                 thu_tu += [p for p in self._providers if p is not chon]
         else:
-            thu_tu = list(self._providers)
+            # AUTO: sap theo vai tro/che do (Phan 3D) TRUOC khi thu — MANUAL
+            # giu nguyen (nguoi dung da chon ro, khong tu doi y ho).
+            thu_tu = self._sap_theo_vai_tro(list(self._providers), context)
 
         return self._thu_theo_thu_tu(thu_tu, text, context=context)
 
@@ -543,15 +774,40 @@ class ProviderRegistry:
         dung_chung = list(self._providers)
 
         if mode == "manual" and selected_provider_id:
-            tat_ca = dung_chung + ca_nhan
+            # Provider CA NHAN dung CHINH provider_id voi provider DUNG CHUNG
+            # tuong ung (vd ca hai deu la "groq_qwen" — xem
+            # `translation_byok_service.build_all_model_providers`) — CO CHU
+            # DICH, giu nguyen API cu (AUTO + `prefer_personal_provider` chi
+            # can NOI, khong can PHAN BIET id). Khi MANUAL chon dung id nay,
+            # `tat_ca` PHAI tim ben nao TRUOC quyet dinh ben nao duoc chon
+            # neu ca hai deu khop: `prefer_personal=True` (nguoi dung tuong
+            # minh chon "API key cua toi") tim ca nhan TRUOC — dam bao ho
+            # nhan DUNG ket noi cua chinh ho, khong phai kho dung chung co
+            # cung ten model.
+            tat_ca = (ca_nhan + dung_chung) if prefer_personal else (dung_chung + ca_nhan)
             chon = next((p for p in tat_ca if p.provider_id == selected_provider_id), None)
             thu_tu = [chon] if chon else []
-            if allow_fallback:
-                thu_tu += [p for p in tat_ca if p is not chon]
-        elif prefer_personal:
-            thu_tu = ca_nhan + dung_chung
+            if allow_fallback and chon is not None:
+                if chon.credential_source == "personal":
+                    # BYOK CHON TUONG MINH (yeu cau goc: "use that user's
+                    # provider directly... do not silently fall back to
+                    # shared credentials"): CHI duoc phep chuyen sang MODEL
+                    # KHAC CUNG HO ca nhan (vd Groq Qwen -> Groq GPT-OSS
+                    # 120B, CUNG mot api key nguoi dung) — khong bao gio cham
+                    # toi `dung_chung` hay ca nhan cua ho KHAC.
+                    ho = self._ho_provider(chon.provider_id)
+                    thu_tu += [p for p in ca_nhan
+                              if p is not chon and self._ho_provider(p.provider_id) == ho]
+                else:
+                    thu_tu += [p for p in tat_ca if p is not chon]
         else:
-            thu_tu = dung_chung + ca_nhan
+            # AUTO: sap THEO NHOM (Phan 3D) — dung chung va ca nhan la HAI
+            # nhom Groq doc lap (ca nhan la mot API key rieng), moi nhom sap
+            # rieng theo vai tro/che do roi moi ghep theo thu tu uu tien
+            # dung-chung-truoc/ca-nhan-truoc da co (Part F).
+            dung_chung = self._sap_theo_vai_tro(dung_chung, context)
+            ca_nhan = self._sap_theo_vai_tro(ca_nhan, context)
+            thu_tu = (ca_nhan + dung_chung) if prefer_personal else (dung_chung + ca_nhan)
 
         return self._thu_theo_thu_tu(thu_tu, text, context=context)
 
@@ -619,6 +875,45 @@ def kiem_tra_ket_noi_groq(api_key: str, model: str, *,
             f"Model {model} không khả dụng với API key này.")
 
 
+def kiem_tra_ket_noi_cerebras(api_key: str, model: str, *,
+                              client: Optional[httpx.Client] = None) -> None:
+    """
+    Xac thuc MOT api key Cerebras CA NHAN + kiem tra model co san — cung
+    khuon voi `kiem_tra_ket_noi_groq` (`GET /models`, khong dich thu, khong
+    ton han muc cua nguoi dung).
+    """
+    c = client or httpx.Client(
+        base_url=CerebrasProvider.BASE_URL,
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=_KIEM_TRA_TIMEOUT_SECONDS)
+    try:
+        resp = c.get("/models")
+    except httpx.HTTPError as exc:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE", "Không kết nối được Cerebras.") from exc
+
+    if resp.status_code == 401:
+        raise ConnectionCheckError("INVALID_KEY", "API key không hợp lệ.")
+    if resp.status_code == 429:
+        raise ConnectionCheckError(
+            "RATE_LIMITED", "Đang bị giới hạn tốc độ, thử lại sau.")
+    if resp.status_code != 200:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE", "Cerebras hiện không phản hồi đúng.")
+
+    try:
+        du_lieu = resp.json()
+        cac_model = {m.get("id") for m in (du_lieu.get("data") or [])}
+    except Exception as exc:
+        raise ConnectionCheckError(
+            "PROVIDER_UNAVAILABLE",
+            "Phản hồi từ Cerebras không đúng định dạng mong đợi.") from exc
+    if model not in cac_model:
+        raise ConnectionCheckError(
+            "MODEL_UNAVAILABLE",
+            f"Model {model} không khả dụng với API key này.")
+
+
 def build_provider_registry(env: Optional[Dict[str, str]] = None
                             ) -> ProviderRegistry:
     """
@@ -632,14 +927,56 @@ def build_provider_registry(env: Optional[Dict[str, str]] = None
 
     providers: List[ConfiguredProvider] = []
 
+    # Chien luoc san xuat TAM THOI (yeu cau goc): Cerebras la nha cung cap
+    # CHIA SE CHINH — dang ky TRUOC Groq trong danh sach nay de thu tu AUTO
+    # (`_sap_theo_vai_tro`, giu nguyen vi tri cac provider khong phai Groq)
+    # la Cerebras GPT-OSS 120B -> Groq Qwen -> ... dung y yeu cau "Default
+    # server-managed translation route" (`zai-glm-4.7` da bi go — xem
+    # `translation_model_profiles.py`). `free_tier=True`:
+    # Cerebras Cloud co hang mien phi (rate-limited) tuong tu Groq — cung
+    # tien de voi `TRANSLATION_ALLOW_PAID_PROVIDER` (rao chan CHUA CAN bat
+    # de dung nha cung cap nay).
+    cerebras_key = e.get("CEREBRAS_API_KEY", "").strip()
+    if cerebras_key:
+        for profile_key, profile in CEREBRAS_MODEL_PROFILES.items():
+            providers.append(ConfiguredProvider(
+                provider_id=f"cerebras_{profile_key}", model_id=profile.model_id,
+                display_name=f"Cerebras · {profile.display_name}",
+                quality_hint=profile.quality_hint,
+                provider=CerebrasProvider(api_key=cerebras_key, profile=profile),
+                free_tier=True))
+
     groq_key = e.get("GROQ_API_KEY", "").strip()
-    groq_model = e.get("GROQ_MODEL", "").strip()
-    if groq_key and groq_model:
-        providers.append(ConfiguredProvider(
-            provider_id="groq", model_id=groq_model,
-            display_name=f"Qwen · Groq", quality_hint="nhanh, miễn phí",
-            provider=GroqProvider(api_key=groq_key, model=groq_model),
-            free_tier=True))
+    if groq_key:
+        # Phan 3B (overnight Phase 3): MOT credential Groq, BA model curated
+        # — KHONG can nhieu API key. Danh sach hien qua
+        # `GET /api/translate/providers` (Phan 3H) noi ro tung model/trang
+        # thai rieng (Phan 3E), khong gop chung mot dong "Groq".
+        for profile_key, profile in GROQ_MODEL_PROFILES.items():
+            providers.append(ConfiguredProvider(
+                provider_id=f"groq_{profile_key}", model_id=profile.model_id,
+                display_name=f"Groq · {profile.display_name}",
+                quality_hint=profile.quality_hint,
+                provider=GroqProvider(api_key=groq_key, profile=profile),
+                free_tier=True))
+
+        # `GROQ_MODEL` (cu, tu Vong 2) — TUONG THICH NGUOC: ai da cau hinh
+        # mot model KHONG nam trong ba model curated o tren (vi du mot model
+        # Groq moi ra sau nay) van duoc dua vao registry, CONG THEM ba model
+        # curated chu khong THAY THE chung.
+        legacy_model = e.get("GROQ_MODEL", "").strip()
+        curated_ids = {p.model_id for p in GROQ_MODEL_PROFILES.values()}
+        if legacy_model and legacy_model not in curated_ids:
+            providers.append(ConfiguredProvider(
+                provider_id="groq", model_id=legacy_model,
+                display_name="Groq · tuỳ chỉnh (GROQ_MODEL)",
+                quality_hint="theo cấu hình cũ",
+                provider=GroqProvider(
+                    api_key=groq_key,
+                    profile=ModelProfile(
+                        key="legacy", model_id=legacy_model,
+                        display_name=legacy_model, quality_hint="")),
+                free_tier=True))
 
     cf_account = e.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
     cf_token = e.get("CLOUDFLARE_API_TOKEN", "").strip()

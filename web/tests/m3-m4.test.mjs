@@ -12,6 +12,10 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const write = () => read("../src/app/write/page.tsx");
 const novel = () => read("../src/app/novels/[id]/page.tsx");
 const chapter = () => read("../src/app/chapters/[id]/page.tsx");
+/** Trang Nghe rieng (overnight Phase 2, Phan 2A) — day la noi trinh phat
+    (`<ChapterPlayer>`) va canh bao "audio co the khong con khop" song, tach
+    khoi trang doc (`chapter()`) tu vong nay. */
+const nghe = () => read("../src/app/listen/[id]/page.tsx");
 const api = () => read("../src/lib/api.ts");
 const css = () => read("../src/app/globals.css");
 
@@ -196,14 +200,15 @@ test("M4: cho nguoi dung CHON giu audio hay tao lai", () => {
   assert.match(alert, /Tạo lại audio/, "phai neu lua chon tao lai");
 });
 
-test("M4: trang doc chuong canh bao ngay tren trinh phat", () => {
-  const src = chapter();
+test("M4: trang Nghe canh bao ngay tren trinh phat", () => {
+  // Overnight Phase 2 (Phan 2A): canh bao "audio khong con khop" chuyen tu
+  // trang doc (`/chapters/[id]`, gio CHI CHU) sang trang Nghe rieng
+  // (`/listen/[id]`) — cung mot rang buoc DOM, khac trang.
+  const src = nghe();
   assert.match(src, /audioOutdated/);
   assert.match(src, /alert alert-warn/);
   assert.match(src, /audio có thể không còn khớp/);
-  assert.match(src, /vẫn nghe và tải được/, "phai noi ro audio van dung duoc");
-  // Canh bao phai o TRUOC trinh phat trong DOM. Trinh phat cua trang doc gio
-  // la `<ChapterPlayer>` — rang buoc khong doi, chi doi ten thanh phan.
+  // Canh bao phai o TRUOC trinh phat trong DOM.
   assert.ok(
     src.indexOf("alert alert-warn") < src.indexOf("<ChapterPlayer"),
     "canh bao phai nam tren trinh phat",
@@ -211,12 +216,23 @@ test("M4: trang doc chuong canh bao ngay tren trinh phat", () => {
 });
 
 test("M4: chu so huu duoc chi duong tao lai bang NUT, khong phai link trong cau", () => {
-  const src = chapter();
+  const src = nghe();
   const at = src.indexOf("Tạo lại audio trong khu vực tác giả");
   assert.notEqual(at, -1);
   // Lien ket trong cau chi cao ~17px o mobile — phai la nut that
   assert.match(src.slice(at - 200, at), /className="btn btn-sm"/);
   assert.match(src, /isOwner \? \(/);
+});
+
+test("M4: trang doc KHONG con canh bao audio — do la viec cua trang Nghe", () => {
+  // Rang buoc MOI cua overnight Phase 2: trang doc chi con chu, khong con
+  // gi lien quan toi audio ngoai mot lien ket sang `/listen/[id]`.
+  const src = chapter();
+  assert.ok(!/alert alert-warn/.test(src),
+    "trang doc khong duoc tu ve canh bao audio nua");
+  assert.ok(!/<ChapterPlayer/.test(src),
+    "trang doc khong duoc tu mo ChapterPlayer nua");
+  assert.match(src, /href={`\/listen\/\$\{chapter\.chapter_id\}`}/);
 });
 
 test("M4: danh sach chuong cong khai cung hien canh bao", () => {

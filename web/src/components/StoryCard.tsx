@@ -24,7 +24,82 @@ import { formatDate } from "@/components/ui";
 /** So the toi da hien tren mot the. Nhieu hon thi the truyen thanh dam the. */
 const MAX_TAGS = 3;
 
-export function StoryCard({ novel }: { novel: Novel }) {
+/**
+ * Ba muc do, CUNG mot du lieu `Novel` — khong co bien the rieng nao bia them
+ * truong. Thay `StoryHero` cu (V4 visual completion, Phan E): "featured"
+ * KHONG phai mot hero nua chieu trang, chi la mot the noi bat, gioi han rong
+ * toi da, de mot truyen duy nhat trong kho khong bi thoi phong thanh nua
+ * man hinh.
+ *
+ *   compact   — the nho, dung o dai/rail (vd sidebar, "co the ban thich")
+ *   standard  — the luoi mac dinh (kham pha, trang chu)
+ *   featured  — noi bat mot the, gioi han `max-width`, co nut hanh dong
+ */
+export type StoryCardVariant = "compact" | "standard" | "featured";
+
+export function StoryCard({
+  novel,
+  variant = "standard",
+}: {
+  novel: Novel;
+  variant?: StoryCardVariant;
+}) {
+  if (variant === "compact") {
+    return (
+      <Link
+        href={`/novels/${novel.novel_id}`}
+        className="story-card story-card-compact"
+      >
+        <NovelCover
+          novelId={novel.novel_id}
+          title={novel.title}
+          coverUrl={novel.cover_url}
+          size="card"
+        />
+        <div className="story-body">
+          <h3 className="story-title clamp-1">{novel.title}</h3>
+          <span className="story-meta">Cập nhật {formatDate(novel.updated_at)}</span>
+        </div>
+      </Link>
+    );
+  }
+
+  if (variant === "featured") {
+    return (
+      <article className="story-card-featured">
+        <Link href={`/novels/${novel.novel_id}`} className="story-card-featured-cover">
+          <NovelCover
+            novelId={novel.novel_id}
+            title={novel.title}
+            coverUrl={novel.cover_url}
+            size="wide"
+          />
+        </Link>
+        <div className="story-card-featured-body">
+          <span className="eyebrow">Truyện mới nhất</span>
+          <h3 className="story-card-featured-title">
+            <Link href={`/novels/${novel.novel_id}`}>{novel.title}</Link>
+          </h3>
+          {novel.tags.length > 0 ? (
+            <div className="story-tags">
+              {novel.tags.slice(0, MAX_TAGS).map((tag) => (
+                <span key={tag} className="chip chip-static">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {novel.description ? (
+            <p className="hint clamp-2">{novel.description}</p>
+          ) : null}
+          <Link href={`/novels/${novel.novel_id}`} className="btn btn-primary btn-sm">
+            Đọc truyện
+          </Link>
+        </div>
+      </article>
+    );
+  }
+
   return (
     <Link href={`/novels/${novel.novel_id}`} className="story-card">
       <NovelCover
@@ -50,55 +125,5 @@ export function StoryCard({ novel }: { novel: Novel }) {
         <span className="story-meta">Cập nhật {formatDate(novel.updated_at)}</span>
       </div>
     </Link>
-  );
-}
-
-/**
- * Truyen dat o vi tri hero.
- *
- * Cung du lieu, khac bo cuc: bia rong 16:6 nam tren, chu ben duoi, va co nut
- * goi hanh dong. Khong nhan ban `Novel` va khong them truong nao.
- */
-export function StoryHero({ novel }: { novel: Novel }) {
-  return (
-    <article className="hero-story">
-      <Link href={`/novels/${novel.novel_id}`} className="hero-cover">
-        <NovelCover
-          novelId={novel.novel_id}
-          title={novel.title}
-          coverUrl={novel.cover_url}
-          size="wide"
-        />
-      </Link>
-      <div className="hero-body">
-        <span className="eyebrow">Truyện mới nhất</span>
-        <h2 className="hero-title">
-          <Link href={`/novels/${novel.novel_id}`}>{novel.title}</Link>
-        </h2>
-        {novel.tags.length > 0 ? (
-          <div className="story-tags">
-            {novel.tags.slice(0, MAX_TAGS).map((tag) => (
-              <span key={tag} className="chip chip-static">
-                {tag}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {novel.description ? (
-          <p className="lead clamp-3">{novel.description}</p>
-        ) : null}
-        <div className="row">
-          <Link
-            href={`/novels/${novel.novel_id}`}
-            className="btn btn-primary"
-          >
-            Đọc truyện
-          </Link>
-          <Link href="/fanfic" className="btn btn-ghost">
-            Khám phá thêm
-          </Link>
-        </div>
-      </div>
-    </article>
   );
 }

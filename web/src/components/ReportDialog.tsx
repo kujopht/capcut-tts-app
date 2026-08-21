@@ -40,16 +40,41 @@ export function ReportDialog({
   const [xong, setXong] = useState(false);
   const [loi, setLoi] = useState("");
   const hop = useRef<HTMLDivElement | null>(null);
+  /** Phần tử giữ tiêu điểm TRƯỚC khi mở — trả về đúng nó khi đóng, cùng quy
+      tắc với `ConfirmDialog`/`ImageLightbox`. */
+  const opener = useRef<Element | null>(null);
 
-  /* Tiêu điểm vào hộp thoại khi mở, và Escape đóng. Không có hai thứ này thì
-     người dùng bàn phím vào được mà không ra được. */
+  /* Tiêu điểm vào hộp thoại khi mở, bẫy Tab trong hộp thoại, Escape đóng, và
+     TRẢ tiêu điểm về nút đã mở khi đóng. Thiếu bước trả tiêu điểm thì người
+     dùng bàn phím ra khỏi hộp thoại này lại rơi về `<body>` và mất chỗ đứng. */
   useEffect(() => {
+    opener.current = document.activeElement;
     hop.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab" || !hop.current) return;
+      const items = hop.current.querySelectorAll<HTMLElement>(
+        "button:not(:disabled), [href], input, select, textarea",
+      );
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      (opener.current as HTMLElement | null)?.focus?.();
+    };
   }, [onClose]);
 
   const gui = useCallback(async () => {

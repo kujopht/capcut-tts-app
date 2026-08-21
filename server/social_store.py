@@ -396,6 +396,16 @@ class MockSocialStore:
                 gom[c.post_id].append(c)
         return {pid: list(reversed(ds)) for pid, ds in gom.items()}
 
+    def count_comments(self, *, created_after: str = "") -> int:
+        """Tong so binh luan TREN TOAN NEN TANG (bai dang + tap animation) —
+        bang dieu khien quan tri (Admin Control Center V2, A1 + Phase 7
+        analytics: `created_after` loc theo ngay tao)."""
+        with self._lock:
+            if not created_after:
+                return len(self._comments)
+            return sum(1 for c in self._comments.values()
+                      if c.created_at >= created_after)
+
     def list_comments_all(self, *, target_kind: str = "",
                           limit: int = 25,
                           offset: int = 0) -> Tuple[List[Comment], int]:

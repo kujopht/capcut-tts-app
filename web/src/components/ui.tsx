@@ -235,6 +235,21 @@ export function ConfirmDialog({
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
+  //: Luon giu ham `onCancel` MOI NHAT ma KHONG dua no vao mang phu thuoc cua
+  //: effect ben duoi. Moi noi goi `<ConfirmDialog>` deu truyen `onCancel`
+  //: dang mot ham NEN inline (`() => setHoi(null)`) — mot THAM CHIEU MOI moi
+  //: lan cha render lai. Body cua hop thoai thuong la mot o nhap co kiem
+  //: soat (vi du textarea ghi ly do); MOI phim go deu goi `setState` va lam
+  //: cha render lai. Neu `onCancel` nam trong deps, effect se DON ROI CHAY
+  //: LAI sau MOI PHIM GO — ham don don o duoi tra tieu diem ve nut da mo hop
+  //: thoai, roi effect lai xin lai tieu diem cho nut Xac nhan bang
+  //: `requestAnimationFrame`, giat tieu diem ra khoi o nhap giua chung. Ket
+  //: qua quan sat duoc: go vao o ghi ly do, focus nhay sang nut, chu khong
+  //: o lai o o nhap — nguoi dung KHONG BAO GIO go duoc qua mot ky tu.
+  const onCancelRef = useRef(onCancel);
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -245,7 +260,7 @@ export function ConfirmDialog({
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        onCancel();
+        onCancelRef.current();
         return;
       }
       if (event.key !== "Tab" || !panel.current) return;
@@ -270,13 +285,15 @@ export function ConfirmDialog({
       document.removeEventListener("keydown", onKey);
       (opener.current as HTMLElement | null)?.focus?.();
     };
-  }, [open, onCancel]);
+    // CHI `open`: effect nay khong con dung THANG `onCancel` (luon doc qua
+    // `onCancelRef.current`), nen ESLint khong doi no phai co mat o day.
+  }, [open]);
 
   const onBackdrop = useCallback(
     (event: React.MouseEvent) => {
-      if (event.target === event.currentTarget) onCancel();
+      if (event.target === event.currentTarget) onCancelRef.current();
     },
-    [onCancel],
+    [],
   );
 
   if (!open) return null;

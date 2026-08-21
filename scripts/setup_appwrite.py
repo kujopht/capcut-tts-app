@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from server.config import load_settings
+from server.secret_redaction import thong_diep_loi_an_toan
 
 TIMEOUT = 30.0
 
@@ -58,6 +59,27 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # `novels.cover_key`. 512 la muc rong rai giong het cover_key, du
             # avatar_key thuc te ngan hon nhieu (khong co subject_id).
             ("avatar_key", "string", False, 512),
+            # --- V4 visual completion: "tiep tuc doc/nghe" (Phan B) -----------
+            # CON TRO DUY NHAT toi noi dang do dang, khong phai lich su — xem
+            # `server/domain.py::Profile`. Tat ca deu KHONG bat buoc: thieu
+            # schema nay chi lam module "Tiep tuc..." AN o trang chu, khong
+            # lam vo dang ky/cap nhat ho so (cung co che voi ba truong V2 o
+            # tren, xem `AppwriteIdentityAdapter._writable_profile`).
+            ("last_read_novel_id", "string", False, 64),
+            ("last_read_chapter_id", "string", False, 64),
+            ("last_read_at", "datetime", False, None),
+            ("last_listen_novel_id", "string", False, 64),
+            ("last_listen_chapter_id", "string", False, 64),
+            ("last_listen_position_seconds", "double", False, None),
+            ("last_listen_at", "datetime", False, None),
+            # --- V6 (overnight Phase 5): "tiep tuc xem" Animation --------------
+            # CUNG co che dong-thieu-thi-bo-qua voi ba nhom truong tren — xem
+            # `server/appwrite_adapter.py::_PROFILE_V2_FIELDS`.
+            ("last_watch_series_id", "string", False, 64),
+            ("last_watch_episode_id", "string", False, 64),
+            ("last_watch_position_seconds", "double", False, None),
+            ("last_watch_duration_seconds", "double", False, None),
+            ("last_watch_at", "datetime", False, None),
         ],
         "indexes": [
             ("email_unique", "unique", ["email"]),
@@ -65,6 +87,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # service la de tra ve thong bao doc duoc; cai chan duoc mot cuoc dua
             # giua hai request la index nay.
             ("username_unique", "unique", ["username"]),
+            # Phase 13 (overnight hardening): `profiles_by_ids` (appwrite_adapter.py)
+            # loc `equal("user_id", ...)` hang loat cho khu quan tri (vd
+            # /api/admin/author-applications) — truoc day khong co chi muc nao
+            # phu chi muc nay, dan den quet toan bang moi lan goi.
+            ("user_idx", "key", ["user_id"]),
         ],
     },
     # --- V2: tac gia ---------------------------------------------------------
@@ -129,6 +156,15 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "name": "Moderation events",
         # CHI THEM. Khong co duong sua hay xoa o bat ky tang nao — mot nhat ky
         # sua duoc la mot nhat ky khong dung de lam gi.
+        #
+        # MO RONG (Admin Control Center V2, feature/admin-trusted-video-v2):
+        # day van la MOT nhat ky duy nhat cho MOI hanh dong quan tri — tiep
+        # tuc dung tinh than "mot nhat ky, khong phai hai" da co tu truoc, chi
+        # mo rong tu vựng `action` va them bon truong ngu canh
+        # (actor_role/target_type/target_id/metadata). Cac gia tri
+        # user_*/content_*/trusted_source_*/youtube_mapping_*/auto_* CHUA co
+        # route nao ghi (se den trong cac giai doan sau cua nhanh nay) — them
+        # truoc de tranh phai chay lai migration enum nhieu lan.
         "attributes": [
             ("event_id", "string", True, 64),
             ("action", "enum", True,
@@ -139,11 +175,49 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               # mot nguoi theo thu tu, chu khong phai ghep hai danh sach.
               "post_removed", "post_restored",
               "comment_removed", "comment_restored",
-              "report_resolved", "report_dismissed"]),
+              "report_resolved", "report_dismissed",
+              # Quan ly nguoi dung (A2/A3, Admin Control Center V2).
+              "user_suspend", "user_unsuspend", "user_session_terminate",
+              "user_role_change", "user_delete",
+              # Kiem duyet noi dung ngoai pham vi bai dang/binh luan (A4).
+              "content_unpublish", "content_restore",
+              # Nguon tin cay YouTube va anh xa series (Phan B).
+              "trusted_source_add", "trusted_source_disable",
+              "trusted_source_enable", "youtube_mapping_create",
+              "youtube_mapping_update",
+              # Hang doi nhap tu dong (Phan B4-B6).
+              "auto_import_approve", "auto_import_reject",
+              "auto_publish_toggle",
+              # Phase 5 (Trusted Video Sources) — MO RONG them cac hanh dong
+              # THAT SU dung (khac ten voi bon dong tren, von la du doan tu
+              # Phase 1 truoc khi Phase 5 duoc dac ta chi tiet). KHONG xoa
+              # bon gia tri cu — enum chi duoc MO RONG, khong thu hep.
+              "trusted_source_update", "trusted_source_remove",
+              "youtube_mapping_remove",
+              "video_scan_start", "video_import", "video_import_publish",
+              "video_reject", "video_ignore",
+              # Phase 6 (YouTube WebSub + pipeline tu dong) — dang ky/gia
+              # han/thong bao qua PubSubHubbub, va ket qua pipeline tu dong
+              # (khac voi "video_import"/"video_reject" thu cong o tren).
+              "websub_subscribe", "websub_unsubscribe", "websub_renew",
+              "websub_notification", "websub_failure",
+              "auto_video_discover", "auto_video_import", "auto_video_publish",
+              "reconciliation_run"]),
             ("target_user_id", "string", True, 64),
             # Rong = he thong (vd migration grandfather), khong phai mot nguoi.
             ("actor_id", "string", False, 64),
+            # Vai tro cua actor TAI THOI DIEM hanh dong — "owner"/"admin"/
+            # "moderator". Ghi lai vi vai tro co the doi sau (bien moi truong).
+            ("actor_role", "string", False, 16),
+            # Loai doi tuong khi KHONG PHAI la user (vd "novel",
+            # "animation_series", "trusted_source"). Rong = doi tuong la user.
+            ("target_type", "string", False, 32),
+            ("target_id", "string", False, 64),
             ("note", "string", False, 1000),
+            # JSON, AN TOAN — khong bao gio chua API key/OAuth/BYOP token/
+            # cookie/session secret/khoa ma hoa. Xem docstring
+            # `ModerationEvent.metadata` o server/domain.py.
+            ("metadata", "string", False, 2000),
             # `datetime` cua Appwrite giu duoc micro giay — can dung the: hai
             # thao tac trong cung mot giay phai doc ra dung thu tu.
             ("created_at", "datetime", True, None),
@@ -151,6 +225,17 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         "indexes": [
             ("target_created_idx", "key", ["target_user_id", "created_at"]),
             ("created_idx", "key", ["created_at"]),
+            # Loc nhat ky theo LOAI doi tuong (vd chi xem hanh dong len
+            # trusted_source) — dung cho /admin/audit-log (A5).
+            ("target_type_created_idx", "key", ["target_type", "created_at"]),
+            # Phase 13 (overnight hardening): `list_events(target_id=...)` va
+            # `list_events(action=...)` (appwrite_store.py) loc THEM cho
+            # /admin/audit-log — khong duoc chi muc nao o tren phu (chi muc
+            # hien co deu lay target_user_id/target_type lam cot dau). Nhat ky
+            # nay CHI THEM va lon dan vo han, nen thieu chi muc o day la mot
+            # phep quet toan bang ngay cang cham theo thoi gian.
+            ("target_id_idx", "key", ["target_id"]),
+            ("action_idx", "key", ["action"]),
         ],
     },
     # ========================================================== TANG XA HOI
@@ -237,6 +322,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Bang tin kham pha: loc `state` + moi nhat truoc.
             ("state_created_idx", "key", ["state", "created_at"]),
             ("novel_idx", "key", ["novel_id"]),
+            # Phase 13 (overnight hardening): `posts_by_ids` (appwrite_social.py)
+            # loc `equal("post_id", ...)` hang loat — `post_id` LA `documentId`
+            # (xem `create_post`), nen ve nguyen tac co the doi sang loc `$id`
+            # nhu `get_series_by_ids`; cho toi khi doi, chi muc nay tranh quet
+            # toan bang.
+            ("post_id_idx", "key", ["post_id"]),
         ],
     },
     "post_likes": {
@@ -292,6 +383,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Khu quan tri duyet theo LOAI, moi nhat truoc —
             # `list_comments_all(target_kind=...)`.
             ("kind_created_idx", "key", ["target_kind", "created_at"]),
+            # Phase 13 (overnight hardening): `comments_by_ids` (appwrite_social.py)
+            # loc `equal("comment_id", ...)` hang loat — cung tinh huong voi
+            # `post_id_idx` o `posts` phia tren.
+            ("comment_id_idx", "key", ["comment_id"]),
         ],
     },
     "notifications": {
@@ -309,7 +404,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               "story_chapter",
               # V3: co nguoi binh luan vao mot CHUONG cua minh.
               "chapter_comment",
-              "author_approved", "author_rejected"]),
+              "author_approved", "author_rejected",
+              # V6 (overnight Phase 5): co nguoi binh luan vao mot TAP animation.
+              "episode_comment"]),
             # Rong = he thong (vd don duoc duyet), khong phai mot nguoi.
             ("actor_id", "string", False, 64),
             ("subject_id", "string", False, 64),
@@ -351,6 +448,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # `reports_for_targets` — so bao cao con mo cua ca mot trang.
             ("target_status_idx", "key", ["target_id", "status"]),
             ("reporter_created_idx", "key", ["reporter_id", "created_at"]),
+            # Phase 13 (overnight hardening): `list_reports(target_kind=...)`
+            # co the loc CHI theo target_kind (khong kem status) — khong chi
+            # muc nao o tren co target_kind lam cot dau.
+            ("target_kind_idx", "key", ["target_kind"]),
         ],
     },
     "novels": {
@@ -370,6 +471,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("owner_idx", "key", ["owner_id"]),
             ("state_idx", "key", ["state"]),
             ("state_created_idx", "key", ["state", "created_at"]),
+            # Phase 13 (overnight hardening): `novels_by_ids` (appwrite_store.py)
+            # loc `equal("novel_id", ...)` hang loat de gom nhieu truyen mot
+            # truy van (chong N+1 cho khu quan tri) — cung tinh huong voi
+            # `post_id_idx`/`comment_id_idx` o tren, chua co chi muc phu truoc do.
+            ("novel_id_idx", "key", ["novel_id"]),
         ],
     },
     "chapters": {
@@ -475,6 +581,204 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         ],
         "indexes": [],
     },
+    # ==========================================================================
+    # Animation (V6, overnight Phase 5) — subsystem RIENG, doc lap voi
+    # novels/chapters. Xem `server/animation_domain.py` va
+    # `server/appwrite_animation_store.py` ve vi sao day KHONG dung chung bang
+    # voi Truyen: Animation la mot san pham XEM, khong phai ban chuyen the.
+    "animation_series": {
+        "name": "Animation Series",
+        "attributes": [
+            ("series_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("title", "string", True, 200),
+            ("description", "string", False, 2000),
+            ("cover_key", "string", False, 512),
+            ("state", "enum", True, ["draft", "published", "archived"]),
+            ("tags", "string", False, 64),               # mang
+            # Lien ket TUY CHON toi mot truyen — RONG = khong lien ket. Xem
+            # `AnimationSeries.related_novel_id`.
+            ("related_novel_id", "string", False, 64),
+            # Kiem duyet (Phase 4, Admin Control Center V2) — THEM SAU, KHONG
+            # bat buoc: hang tao TRUOC Phase 4 khong co gia tri, doc thanh
+            # VISIBLE qua `_moderation_state_from_doc` (xem
+            # `appwrite_animation_store.py`). TACH BACH voi `state` o tren —
+            # xem docstring `AnimationSeries.moderation_state`.
+            ("moderation_state", "enum", False, ["visible", "removed"]),
+            ("removed_by", "string", False, 64),
+            ("removed_reason", "string", False, 1000),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("owner_idx", "key", ["owner_id"]),
+            ("state_idx", "key", ["state"]),
+            ("state_created_idx", "key", ["state", "created_at"]),
+            ("moderation_idx", "key", ["moderation_state"]),
+        ],
+    },
+    "animation_episodes": {
+        "name": "Animation Episodes",
+        "attributes": [
+            ("episode_id", "string", True, 64),
+            ("series_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("title", "string", True, 200),
+            # Chi "youtube" duoc trien khai — ba gia tri con lai (native,
+            # google_drive_private, cloudflare_stream) la KIEN TRUC DANH SAN,
+            # xem `AnimationSource`.
+            ("source", "enum", True,
+             ["youtube", "native", "google_drive_private", "cloudflare_stream"]),
+            # ID YouTube 11 ky tu DA CHUAN HOA — KHONG PHAI url tho. Xem
+            # `animation_domain.parse_youtube_id`.
+            ("external_id", "string", True, 32),
+            ("order_index", "integer", True, None),
+            ("state", "enum", True, ["draft", "published", "archived"]),
+            ("duration_seconds", "double", False, None),
+            # Kiem duyet (Phase 4) — cung mau voi `animation_series` o tren.
+            ("moderation_state", "enum", False, ["visible", "removed"]),
+            ("removed_by", "string", False, 64),
+            ("removed_reason", "string", False, 1000),
+            # Thuoc tinh nguon (Trusted Channels ingestion) — RONG cho tap
+            # tao qua luong thu cong thuong (khong tu Trusted Channels). Xem
+            # docstring `AnimationEpisode.source_channel_id` — dung de hien
+            # "Nguon: <ten kenh>" canh trinh phat, KHONG bao gio dung de xac
+            # thuc/phan quyen.
+            ("source_channel_id", "string", False, 64),
+            ("source_channel_title", "string", False, 200),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("series_idx", "key", ["series_id"]),
+            ("series_order_idx", "key", ["series_id", "order_index"]),
+            ("owner_idx", "key", ["owner_id"]),
+            ("moderation_idx", "key", ["moderation_state"]),
+            # Phase 5 (Trusted Video Sources) — phat hien MOT video YouTube
+            # da la mot tap that o BAT KY series nao, tranh nhap trung. Xem
+            # `AnimationStore.episodes_by_external_ids`.
+            ("external_id_idx", "key", ["external_id"]),
+        ],
+    },
+    # ==========================================================================
+    # Trusted Video Sources (Phase 5, Animation Phan B) — subsystem RIENG, DOC
+    # LAP voi animation_series/animation_episodes. Xem
+    # `server/trusted_source_domain.py` ve moi quan he giua ba bang duoi day:
+    # TrustedSource -> SeriesMapping -> AnimationSeries (da co san).
+    "trusted_sources": {
+        "name": "Trusted Sources",
+        "attributes": [
+            ("source_id", "string", True, 64),
+            ("source_type", "enum", True,
+             ["youtube_channel", "youtube_playlist", "youtube_video",
+              "direct_hls", "direct_mp4"]),
+            ("youtube_channel_id", "string", False, 64),
+            ("youtube_playlist_id", "string", False, 64),
+            ("youtube_video_id", "string", False, 32),
+            ("display_name", "string", False, 200),
+            ("thumbnail_url", "string", False, 512),
+            ("enabled", "boolean", True, None),
+            ("auto_discover", "boolean", True, None),
+            ("auto_import", "boolean", True, None),
+            ("auto_publish", "boolean", True, None),
+            ("minimum_confidence", "double", True, None),
+            ("created_by", "string", False, 64),
+            ("last_scan_at", "datetime", False, None),
+            ("last_success_at", "datetime", False, None),
+            ("last_error_at", "datetime", False, None),
+            ("last_error_message", "string", False, 1000),
+            # WebSub (Phase 6) — dang ky/gia han that voi hub PubSubHubbub
+            # cua YouTube, xem `SubscriptionStatus`/`server/youtube_websub.py`.
+            ("subscription_status", "enum", True,
+             ["none", "pending", "active", "expired", "failed"]),
+            ("subscription_expires_at", "datetime", False, None),
+            ("last_subscription_attempt_at", "datetime", False, None),
+            ("last_notification_at", "datetime", False, None),
+            ("last_websub_error", "string", False, 1000),
+            ("last_successful_sync_at", "datetime", False, None),
+            # Bi mat HMAC ky/xac minh thong bao WebSub — KHONG BAO GIO ra
+            # `to_dict()`/API quan tri, xem docstring `TrustedSource.
+            # websub_secret`. Do dai du cho `secrets.token_urlsafe(32)`.
+            ("websub_secret", "string", False, 64),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("channel_idx", "key", ["youtube_channel_id"]),
+            ("playlist_idx", "key", ["youtube_playlist_id"]),
+            ("video_idx", "key", ["youtube_video_id"]),
+            ("enabled_idx", "key", ["enabled"]),
+        ],
+    },
+    "series_mappings": {
+        "name": "Series Mappings",
+        "attributes": [
+            ("mapping_id", "string", True, 64),
+            ("trusted_source_id", "string", True, 64),
+            ("animation_series_id", "string", True, 64),
+            ("aliases", "string", False, 200),           # mang
+            ("include_keywords", "string", False, 100),  # mang
+            ("exclude_keywords", "string", False, 100),   # mang
+            # `None`/vang mat = ke thua `TrustedSource.minimum_confidence` —
+            # KHONG bat buoc, xem `SeriesMapping.minimum_confidence`.
+            ("minimum_confidence", "double", False, None),
+            ("auto_import", "boolean", False, None),
+            ("auto_publish", "boolean", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("source_idx", "key", ["trusted_source_id"]),
+            ("series_idx", "key", ["animation_series_id"]),
+        ],
+    },
+    "video_imports": {
+        "name": "Video Imports",
+        "attributes": [
+            ("import_id", "string", True, 64),
+            ("trusted_source_id", "string", False, 64),
+            # ID video YouTube — DUY NHAT trong toan he thong. `import_id`
+            # TAT DINH tu gia tri nay, xem
+            # `trusted_source_domain.video_import_id`.
+            ("youtube_video_id", "string", True, 32),
+            ("title", "string", False, 300),
+            ("channel_id", "string", False, 64),
+            ("channel_title", "string", False, 200),
+            ("thumbnail_url", "string", False, 512),
+            ("published_at", "datetime", False, None),
+            ("duration_seconds", "double", False, None),
+            ("detected_mapping_id", "string", False, 64),
+            ("detected_series_id", "string", False, 64),
+            ("detected_episode_number", "integer", False, None),
+            ("confidence", "double", False, None),
+            ("signals", "string", False, 300),  # mang
+            ("status", "enum", True,
+             ["new", "pending", "auto_imported", "auto_published", "imported",
+              "rejected", "ignored", "duplicate", "conflict", "unavailable",
+              "failed"]),
+            ("reason", "string", False, 500),
+            ("created_episode_id", "string", False, 64),
+            ("reviewed_by", "string", False, 64),
+            ("reviewed_at", "datetime", False, None),
+            # Auto-Ingestion Phase 4 — THEM SAU (additive, khong bat buoc):
+            # trigger nao lam ban ghi nay xuat hien LAN DAU, xem docstring
+            # `VideoImport.discovered_via`. Ban ghi CU truoc Phase 4 doc
+            # thanh "" (tuong thich nguoc, khong phai loi) — KHONG can
+            # migration du lieu nguoc, chi can chay lai script nay de them
+            # thuoc tinh (an toan, "dong-thieu-thi-bo-qua" cung mau voi
+            # `moderation_state` o Phase 4 cu cua Animation).
+            ("discovered_via", "enum", False,
+             ["manual_scan", "reconcile", "websub", "auto_discovery"]),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("video_idx", "unique", ["youtube_video_id"]),
+            ("source_idx", "key", ["trusted_source_id"]),
+            ("status_idx", "key", ["status"]),
+            ("series_idx", "key", ["detected_series_id"]),
+        ],
+    },
     "audio_tracks": {
         "name": "Audio Tracks",
         "attributes": [
@@ -487,6 +791,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("duration_seconds", "double", False, None),
             ("size_bytes", "integer", False, None),
             ("created_at", "datetime", True, None),
+            # Phu de dong bo (V4, Phan 2H) — additive. Khoa sidecar trong CUNG
+            # kho voi `object_key` (R2/local), KHONG phai noi dung transcript:
+            # xem `server/transcript.py` va docstring `AudioTrack`.
+            ("transcript_key", "string", False, 512),
+            ("transcript_version", "integer", False, None),
+            ("source_content_hash", "string", False, 64),
         ],
         "indexes": [
             ("chapter_idx", "key", ["chapter_id"]),
@@ -684,6 +994,254 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("user_idx", "key", ["user_id"]),
         ],
     },
+    # --- V4 visual completion, Phan G/K/L: cap do + vat pham suu tam --------
+    # THIET KE — logic thuan da co test (server/gamification.py,
+    # server/gamification_domain.py) VA da noi vao route that qua
+    # `MockGamificationStore` (server/gamification_store.py). Bon collection
+    # duoi day CHUA duoc ap len production trong dot nay; chi them vao SCHEMA
+    # de --dry-run the hien dung ke hoach khi lam ban Appwrite that cua kho
+    # (tuong tu `appwrite_translation_store.py`).
+    #
+    # ROLLBACK: xoa ca bon collection — khong anh huong gi den du lieu dang
+    # dung (kho dang chay la `MockGamificationStore` trong bo nho, khong
+    # collection nao o day duoc doc/ghi that hien nay).
+    "user_progress": {
+        "name": "User Progress",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("xp", "integer", True, None),
+            ("equipped_title_key", "string", False, 64),
+            # So goi thuong mien phi dang cho mo — xem
+            # `gamification_domain.UserProgress.goi_thuong_dang_cho`.
+            ("pending_reward_packs", "integer", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "unique", ["user_id"]),
+            # Phase 13 (overnight hardening): `list_all_progress_ranked`
+            # (bang xep hang XP toan thoi gian) sap `orderDesc("xp")`, va
+            # `count_users_above_xp` loc `greaterThan("xp", ...)` — ca hai
+            # deu khong co chi muc nao phu truoc do, nen la mot phep sap toan
+            # bang moi lan mo trang xep hang.
+            ("xp_idx", "key", ["xp"]),
+        ],
+    },
+    "cosmetic_inventory": {
+        "name": "Cosmetic Inventory",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("cosmetic_key", "string", True, 64),
+            ("acquired_at", "datetime", True, None),
+            ("equipped", "boolean", False, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # Nhat ky XP kiem toan duoc — xem `gamification_domain.XpLedgerEntry`.
+    # `entry_id` la khoa idempotency: `MockGamificationStore.record_xp_event`
+    # tu choi ghi neu id da co, chan client refresh/retry cong XP hai lan.
+    "xp_ledger": {
+        "name": "XP Ledger",
+        "attributes": [
+            ("entry_id", "string", True, 128),
+            ("user_id", "string", True, 64),
+            ("event_type", "string", True, 64),
+            ("source_kind", "string", True, 32),
+            ("source_id", "string", True, 64),
+            ("xp_awarded", "integer", True, None),
+            ("created_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("entry_idx", "unique", ["entry_id"]),
+            ("user_idx", "key", ["user_id"]),
+            # Phase 13 (overnight hardening): `xp_earned_since` quet TOAN BO
+            # nhat ky XP (moi nguoi dung) tu mot moc thoi gian — khong co chi
+            # muc nao phu `created_at` truoc do.
+            ("created_idx", "key", ["created_at"]),
+        ],
+    },
+    # Thanh tuu DA MO KHOA that su kem moc thoi gian — xem
+    # `gamification_domain.UnlockedAchievement`. Tach khoi tinh toan tai cho
+    # (`gamification.tinh_trang_thanh_tuu`) de khong "quen mo lai" khi du
+    # lieu nguon giam sau nay (vi du xoa truyen).
+    "achievement_unlocks": {
+        "name": "Achievement Unlocks",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("achievement_key", "string", True, 64),
+            ("unlocked_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_achievement_idx", "unique", ["user_id", "achievement_key"]),
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # V6 gamification (chuoi ngay doc + nhiem vu) — xem
+    # `gamification_domain.ReadingStreak`/`QuestProgress`. THIET KE, chua ap
+    # len production; kho dang chay la `MockGamificationStore` trong bo nho.
+    # `documentId` = `user_id` (giong `user_progress`) nen "user_idx" o day
+    # chi phuc vu truy van tuong minh, khong thay the rang buoc duy nhat.
+    #
+    # ROLLBACK: xoa ca hai collection — khong anh huong du lieu dang dung.
+    "reading_streaks": {
+        "name": "Reading Streaks",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("current_streak", "integer", True, None),
+            ("longest_streak", "integer", True, None),
+            # Ngay ISO "YYYY-MM-DD" theo lich UTC — xem gioi han da ghi trong
+            # `gamification_domain.advance_streak` (chua theo mui gio nguoi
+            # dung). La chuoi, khong phai `datetime`, de tranh lech gio.
+            ("last_read_date", "string", False, 10),
+            ("grace_used_this_run", "boolean", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "unique", ["user_id"]),
+        ],
+    },
+    # `documentId` = `id_tien_do_nhiem_vu(user_id, quest_key, period_key)` —
+    # xem `gamification.py`. Idempotency + tinh duy nhat theo bo ba do khoa
+    # tai lop id, khong can index unique rieng cho ba truong nay.
+    "quest_progress": {
+        "name": "Quest Progress",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("quest_key", "string", True, 64),
+            # "YYYY-MM-DD" (daily) hoac "YYYY-Www" (weekly) — xem
+            # `gamification_domain.quest_period_key`.
+            ("period_key", "string", True, 16),
+            ("count", "integer", True, None),
+            ("claimed", "boolean", False, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # ================================================================
+    # Image Studio V1 (overnight build) — THIET KE, CHUA co adapter Appwrite
+    # that (chay tren `MockWalletStore`/`MockByopConnectionStore`/
+    # `MockImageLibraryStore` trong bo nho, xem `server/image_*.py`).
+    #
+    # Schema o day CHI la chuan bi cho lan bat Appwrite production mo lai —
+    # xem `docs/reports/appwrite-selfhost-gce-summary.md` muc "Phase 7".
+    # KHONG doi mac dinh Shared Premium/BYOP: hai tinh nang do van tat theo
+    # `IMAGE_SHARED_PREMIUM_ENABLED`/`IMAGE_BYOP_MASTER_KEY` du schema da co.
+    # ================================================================
+
+    # So cai vi Fanfic Credit — xem `image_domain.WalletTransaction`.
+    # APPEND-ONLY BAT BUOC: adapter Appwrite sau nay KHONG duoc phep UPDATE
+    # mot document da ghi, chi INSERT moi — cung nguyen tac voi
+    # `MockWalletStore._ghi_giao_dich`. `idempotency_idx` (unique) la diem
+    # chan tru tien hai lan DUY NHAT — day la rang buoc quan trong nhat cua
+    # toan bo Image Studio, phai giu nguyen khi chuyen sang Appwrite that.
+    "image_wallet_transactions": {
+        "name": "Image Wallet Transactions",
+        "attributes": [
+            ("transaction_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            # Rong khi la giao dich TOP_UP (chua gan voi mot lan sinh anh nao).
+            ("generation_id", "string", False, 64),
+            ("entry_type", "enum", True,
+             ["top_up", "reserve", "settle", "release", "refund", "promotional"]),
+            # Am = tru so du kha dung, duong = tra lai/nap them — xem
+            # `WalletTransaction.amount_micro`.
+            ("amount_micro", "integer", True, None),
+            ("idempotency_key", "string", True, 128),
+            ("created_at", "datetime", True, None),
+            ("note", "string", False, 500),
+        ],
+        "indexes": [
+            ("idempotency_idx", "unique", ["idempotency_key"]),
+            ("user_idx", "key", ["user_id"]),
+            ("generation_idx", "key", ["generation_id"]),
+        ],
+    },
+    # Trang thai giu cho MOT lan sinh anh — xem `image_domain.GenerationReservation`.
+    # `documentId` NEN la `generation_id` khi adapter that duoc viet (giong quy
+    # uoc `user_progress`/`documentId = user_id`) — tu than no da la khoa
+    # idempotency, index rieng o day chi phuc vu truy van tuong minh.
+    "image_generation_reservations": {
+        "name": "Image Generation Reservations",
+        "attributes": [
+            ("generation_id", "string", True, 64),
+            ("user_id", "string", True, 64),
+            ("mode", "enum", True,
+             ["quick_free", "shared_premium", "byop", "community_free"]),
+            ("provider_id", "string", True, 64),
+            ("model", "string", True, 80),
+            ("estimated_cost_micro", "integer", True, None),
+            ("status", "enum", True,
+             ["pending", "reserved", "succeeded", "failed", "refunded"]),
+            ("idempotency_key", "string", True, 128),
+            # Rong cho toi khi status == SUCCEEDED va provider tra chi phi that.
+            ("actual_cost_micro", "integer", False, None),
+            ("pricing_snapshot_version", "string", False, 32),
+            ("created_at", "datetime", True, None),
+            ("settled_at", "string", False, 32),
+            ("error_message", "string", False, 500),
+        ],
+        "indexes": [
+            ("generation_idx", "unique", ["generation_id"]),
+            ("idempotency_idx", "unique", ["idempotency_key"]),
+            ("user_idx", "key", ["user_id"]),
+        ],
+    },
+    # Anh nguoi dung CHU DONG "Luu" — xem `image_domain.SavedImage`. CHI ghi
+    # khi nguoi dung bam Luu (PHASE 9: "Do NOT store every generated
+    # candidate permanently") — moi ung vien tam khac song trong bo nho
+    # (`ImageStudioService._anh_tam`), khong bao gio toi day.
+    "image_saved_library": {
+        "name": "Image Saved Library",
+        "attributes": [
+            ("image_id", "string", True, 64),
+            ("owner_user_id", "string", True, 64),
+            ("generation_id", "string", True, 64),
+            ("prompt", "string", True, 2000),
+            ("negative_prompt", "string", False, 1000),
+            ("model", "string", False, 80),
+            ("mode", "enum", True,
+             ["quick_free", "shared_premium", "byop", "community_free"]),
+            ("aspect_ratio", "string", False, 10),
+            # Khoa doi tuong storage (Local/R2), KHONG PHAI url truc tiep —
+            # cung quy uoc voi `novels.cover_key`/`profiles.avatar_key`.
+            ("storage_key", "string", True, 512),
+            ("created_at", "datetime", True, None),
+            ("safety_status", "string", False, 32),
+        ],
+        "indexes": [
+            ("image_idx", "unique", ["image_id"]),
+            ("owner_idx", "key", ["owner_user_id"]),
+        ],
+    },
+    # Ket noi BYOP (Bring-Your-Own-Pollinations) — xem
+    # `image_domain.PollinationsConnection`. TUYET DOI KHONG duoc them thuoc
+    # tinh chua token dang RO — CHI hai truong `encrypted_*` (AES-256-GCM qua
+    # `ByokCrypto`, xem `image_byop_crypto.py`). Kich thuoc 2048 du rong cho
+    # ciphertext + nonce + tag ma hoa base64 cua token OAuth thong thuong.
+    "image_byop_connections": {
+        "name": "Image BYOP Connections",
+        "attributes": [
+            ("user_id", "string", True, 64),
+            ("provider_id", "string", True, 32),
+            ("encrypted_access_token", "string", False, 2048),
+            ("encrypted_refresh_token", "string", False, 2048),
+            ("scope", "string", False, 64),
+            ("expires_at", "string", False, 32),
+            # Ngan sach nguoi dung TU CHON — chi hien thi/canh bao phia Fanfic
+            # World, KHONG phai gioi han that (Pollinations tu quan ly Pollen).
+            ("user_budget_micro", "integer", False, None),
+            ("connected_at", "datetime", True, None),
+            ("revoked_at", "string", False, 32),
+        ],
+        "indexes": [
+            # MOI nguoi dung CHI mot ket noi BYOP dang hieu luc tai mot thoi
+            # diem — khop voi `MockByopConnectionStore` (dict khoa boi user_id).
+            ("user_idx", "unique", ["user_id"]),
+        ],
+    },
 }
 
 #: Cac thuoc tinh la MANG. Appwrite doi co `array: true` luc tao; thieu no thi
@@ -694,9 +1252,15 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
 #: (vi du neu sau nay mot collection khac cung dung ten "aliases" ma KHONG
 #: phai mang) se vo tinh bi ep `array: true`. Chua xay ra o schema hien tai,
 #: ghi chu o day de tranh bay khi them collection moi.
+#:
+#: `include_keywords`/`exclude_keywords`/`signals` them o Phase 5 (Trusted
+#: Video Sources, `series_mappings`/`video_imports`) — DUNG chinh cai bay
+#: nay bi vap THAT luc chay smoke test that voi Appwrite tu luu tru: thieu
+#: ten trong tap nay lam Appwrite tu choi ghi voi loi "invalid type" khi
+#: kho gui mot `List[str]` vao thuoc tinh tuong duoc tao nhu chuoi don.
 ARRAY_ATTRIBUTES = frozenset({
     "tags", "genres", "chapter_summaries", "translated_chapters", "aliases",
-    "chapter_warnings",
+    "chapter_warnings", "include_keywords", "exclude_keywords", "signals",
 })
 
 #: Quyen o muc COLLECTION: khong cap gi cho client.
@@ -779,12 +1343,25 @@ class Setup:
             self.skipped += 1
             return "exists"
         if response.status_code >= 400:
-            message = response.text[:300]
             try:
                 body = response.json()
-                message = body.get("message", message)
             except Exception:
-                pass
+                body = None
+            # `thong_diep_loi_an_toan` loc bi mat theo MAU (vd khoa API dang
+            # "standard_...") ke ca khi roi vao nhanh fallback (JSON khong
+            # doc duoc) — truoc day nhanh do dung `response.text[:300]` THO,
+            # chua qua loc.
+            message = thong_diep_loi_an_toan(
+                body, status_code=response.status_code, gioi_han_ky_tu=2000)
+            # Appwrite 1.9.6 tu-luu-tru: da xac nhan bang cach lap lai that
+            # (khong doan) — tao trung index tra ve HTTP 400 kem thong diep
+            # nay, KHONG PHAI 409 nhu ban Appwrite ma script duoc kiem chung
+            # truoc do dung. Chi khop CHINH XAC thong diep nay (khong phai
+            # moi loi 400) de khong che giau loi that khac.
+            if (response.status_code == 400
+                    and "already an index with the same attributes" in message):
+                self.skipped += 1
+                return "exists"
             # Thieu scope schema: chi ra DUNG viec can lam thay vi mot dong
             # loi tho. Da gap that o production: khoa runtime chi co quyen
             # documents, va 401 nay chan TRUOC khi bat ky thu gi bi ghi.
@@ -857,6 +1434,7 @@ class Setup:
         if not self.dry_run:
             hien = self._call("GET", base, doc_thoi=True) or {}
             da_co = {a.get("key") for a in hien.get("attributes", [])}
+        co_thuoc_tinh_moi = False
         for key, kind, required, extra in spec["attributes"]:
             if key in da_co and kind != "enum":
                 # Enum van di duong rieng: no con phai SO SANH danh sach gia
@@ -865,8 +1443,33 @@ class Setup:
                 print(f"    - {key} ({kind}): đã có")
                 continue
             self._ensure_attribute(base, key, kind, required, extra)
+            co_thuoc_tinh_moi = True
+        if co_thuoc_tinh_moi and not self.dry_run:
+            # Tao thuoc tinh o Appwrite la BAT DONG BO — POST tra ve ngay
+            # nhung thuoc tinh o trang thai "processing" vai giay truoc khi
+            # thanh "available". Tao index tren thuoc tinh con processing bi
+            # tu choi voi HTTP 400 "not yet available" — da gap that (khong
+            # doan) khi collection vua duoc tao xong trong CUNG lan chay nay.
+            # CHI cho khi CO thuoc tinh moi — collection da on dinh tu truoc
+            # thi bo qua, khong lam cham moi lan chay lai.
+            self._doi_thuoc_tinh_san_sang(base, [k for k, *_ in spec["attributes"]])
         for name, kind, keys in spec["indexes"]:
             self._ensure_index(base, name, kind, keys)
+
+    def _doi_thuoc_tinh_san_sang(self, base: str, keys: List[str],
+                                 *, so_lan_thu: int = 30, doi_giay: float = 1.0) -> None:
+        """Cho toi khi MOI thuoc tinh trong `keys` co status "available" —
+        toi da `so_lan_thu` lan, moi lan cach `doi_giay` giay. KHONG nem loi
+        neu het luot thu (de _ensure_index tu bao loi that neu van chua
+        san sang sau tung ay thoi gian — tranh treo vo han)."""
+        import time
+        for _ in range(so_lan_thu):
+            hien = self._call("GET", base, doc_thoi=True) or {}
+            trang_thai = {a.get("key"): a.get("status") for a in hien.get("attributes", [])}
+            con_cho = [k for k in keys if trang_thai.get(k) not in ("available", None)]
+            if not con_cho:
+                return
+            time.sleep(doi_giay)
 
     def _ensure_attribute(self, base: str, key: str, kind: str,
                           required: bool, extra: Any) -> None:

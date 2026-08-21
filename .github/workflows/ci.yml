@@ -26,6 +26,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  secrets:
+    name: Quet bi mat (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Quet toan bo lich su cua RIENG lan push/PR nay (khong phai toan bo
+      # repo moi lan chay) bang cau hinh o .gitleaks.toml — lop mac dinh cua
+      # gitleaks cong them quy tac rieng cho dinh dang khoa Appwrite
+      # (standard_<hex dai> / console_<hex dai>). Xem su co 2026-08-16/08-20
+      # trong docs/reports/preprod-security-audit.md.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
   backend:
     name: Backend tests (moi truong sach)
     runs-on: ubuntu-latest

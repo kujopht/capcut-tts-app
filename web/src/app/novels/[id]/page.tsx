@@ -3,7 +3,7 @@
 /** Chi tiet truyen: thong tin, danh sach chuong kem trang thai audio. */
 
 import Link from "next/link";
-import { use, useCallback, useState } from "react";
+import { use, useCallback } from "react";
 import { api, type Chapter, type Novel } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
@@ -16,7 +16,6 @@ import {
 } from "@/components/ui";
 import { NovelCover } from "@/components/NovelCover";
 import { FollowButton } from "@/components/FollowButton";
-import { AudioPlayer } from "@/components/AudioPlayer";
 
 export default function NovelDetailPage({
   params,
@@ -34,10 +33,6 @@ export default function NovelDetailPage({
   const { data, loading, error, missing, reload } = useAsyncData(fetchNovel);
   const novel: Novel | null = data?.novel ?? null;
   const chapters: Chapter[] = data?.chapters ?? [];
-
-  // Chuong dang mo trinh phat. MOT chuoi id chu khong phai tap hop: mo chuong
-  // khac thi chuong cu dong lai, nen khong bao gio co hai audio cung phat.
-  const [playingId, setPlayingId] = useState("");
 
   if (loading) {
     return (
@@ -172,73 +167,59 @@ export default function NovelDetailPage({
           />
         ) : (
           <div className="list">
-            {chapters.map((chapter, index) => {
-              const playing = playingId === chapter.chapter_id;
-              return (
-                // KHONG con boc ca hang trong <Link>: the <a> khong duoc chua
-                // <button>, va nut nghe phai nam ngay trong hang. Tieu de moi
-                // la lien ket, cac nut la anh em cua no.
-                <div
-                  key={chapter.chapter_id}
-                  className={`list-item${playing ? " list-item-open" : ""}`}
-                >
-                  <span className="list-index" aria-hidden="true">
-                    {index + 1}
+            {chapters.map((chapter, index) => (
+              // KHONG con boc ca hang trong <Link>: the <a> khong duoc chua
+              // <button>/<a> khac, va nut Doc/Nghe phai nam ngay trong hang.
+              // Tieu de moi la lien ket (toi trang Doc), cac nut la anh em.
+              <div key={chapter.chapter_id} className="list-item">
+                <span className="list-index" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <span className="stack-2 list-main">
+                  <Link
+                    href={`/chapters/${chapter.chapter_id}`}
+                    className="truncate list-title"
+                  >
+                    {chapter.title}
+                  </Link>
+                  <span className="hint">
+                    {formatNumber(chapter.char_count)} ký tự
                   </span>
-                  <span className="stack-2 list-main">
-                    <Link
-                      href={`/chapters/${chapter.chapter_id}`}
-                      className="truncate list-title"
-                    >
-                      {chapter.title}
-                    </Link>
-                    <span className="hint">
-                      {formatNumber(chapter.char_count)} ký tự
-                    </span>
-                  </span>
+                </span>
 
-                  <span className="list-actions">
-                    {chapter.has_audio ? (
-                      <>
-                        {/* M4: audio con nghe duoc, chi la co the khong khop
-                            noi dung moi nhat. Noi ro thay vi im lang. */}
-                        {chapter.audio_outdated ? (
-                          <span
-                            className="badge badge-warn"
-                            title="Chương đã sửa sau khi tạo audio — audio có thể không còn khớp"
-                          >
-                            <span aria-hidden="true">⚠</span> Audio cũ
-                          </span>
-                        ) : null}
-                        <button
-                          type="button"
-                          className={`btn btn-sm${playing ? "" : " btn-primary"}`}
-                          aria-expanded={playing}
-                          onClick={() =>
-                            setPlayingId(playing ? "" : chapter.chapter_id)
-                          }
+                <span className="list-actions">
+                  {/* Doc va Nghe la HAI trai nghiem rieng (Phan 2A) — Doc
+                      luon di duoc (chua co audio van doc duoc chu), Nghe chi
+                      hien khi da co audio va dan sang trang Nghe rieng,
+                      KHONG con mo mot trinh phat ngay trong hang nay nua. */}
+                  <Link className="btn btn-sm" href={`/chapters/${chapter.chapter_id}`}>
+                    <span aria-hidden="true">📖</span> Đọc
+                  </Link>
+                  {chapter.has_audio ? (
+                    <>
+                      {/* M4: audio con nghe duoc, chi la co the khong khop
+                          noi dung moi nhat. Noi ro thay vi im lang. */}
+                      {chapter.audio_outdated ? (
+                        <span
+                          className="badge badge-warn"
+                          title="Chương đã sửa sau khi tạo audio — audio có thể không còn khớp"
                         >
-                          <span aria-hidden="true">{playing ? "✕" : "▶"}</span>
-                          {playing ? "Đóng" : "Nghe"}
-                        </button>
-                      </>
-                    ) : (
-                      <span className="badge">Chưa có audio</span>
-                    )}
-                  </span>
-
-                  {playing ? (
-                    <div className="list-player">
-                      <AudioPlayer
-                        chapterId={chapter.chapter_id}
-                        title={chapter.title}
-                        compact
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
+                          <span aria-hidden="true">⚠</span> Audio cũ
+                        </span>
+                      ) : null}
+                      <Link
+                        className="btn btn-sm btn-primary"
+                        href={`/listen/${chapter.chapter_id}`}
+                      >
+                        <span aria-hidden="true">▶</span> Nghe
+                      </Link>
+                    </>
+                  ) : (
+                    <span className="badge">Chưa có audio</span>
+                  )}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </section>

@@ -29,9 +29,35 @@ from server.domain import (
     AuthorApplication,
     AuthorStats,
     AuthorStatus,
+    JobStatus,
     ListenCredit,
     ModerationEvent,
+    TtsJob,
 )
+
+
+def _so_sanh_duoc(v: Any) -> tuple:
+    """
+    Khoa SO SANH DUOC cho MOT gia tri thuoc tinh — dung cho ca sap xep
+    (`orderAsc`/`orderDesc`) lan loc theo nguong (`greaterThan(Equal)`).
+
+    Appwrite THAT so sanh THEO KIEU THUOC TINH khai bao trong schema: so
+    (`integer`/`double`) so sanh nhu SO, con chuoi (ke ca datetime ISO, luu
+    duoi dang chuoi) so sanh tu dien. Ban gia lap nay khong biet kieu khai
+    bao, nen DOAN: chuyen duoc sang `float` thi so la SO (vd XP), khong thi
+    la CHUOI (vd `created_at` ISO — dinh dang ISO 8601 vua hay so sanh tu
+    dien DUNG bang thoi gian, nen khong can xu ly rieng).
+
+    Bay da mac trong THUC TE (sua o day): sap `orderDesc("xp")` truoc day ep
+    gia tri thanh chuoi (`str(...)`) roi so sanh — "150" < "50" theo tu dien
+    (ky tu dau '1' < '5'), lam bang xep hang XP sap SAI thu tu. Chi lo ra
+    khi viet code that dung XP (so), vi moi truy van truoc do chi so/loc
+    theo chuoi (id, ten...).
+    """
+    try:
+        return (0, float(v))
+    except (TypeError, ValueError):
+        return (1, str(v))
 
 
 class FakeAppwrite:
@@ -137,9 +163,13 @@ class FakeAppwrite:
                         if any(_khop(r, dk) for dk in d.get("values") or [])]
             elif m == "greaterThanEqual":
                 # So sanh CHUOI ISO cung dinh dang chinh la so sanh thoi gian —
-                # xem `appwrite_social.q_greater_equal`.
+                # xem `appwrite_social.q_greater_equal`. `_so_sanh_duoc` van
+                # dung so THAT khi thuoc tinh la so (vd XP), khong ep chuoi.
                 rows = [r for r in rows
-                        if vals and str(r.get(attr, "")) >= str(vals[0])]
+                        if vals and _so_sanh_duoc(r.get(attr)) >= _so_sanh_duoc(vals[0])]
+            elif m == "greaterThan":
+                rows = [r for r in rows
+                        if vals and _so_sanh_duoc(r.get(attr)) > _so_sanh_duoc(vals[0])]
             elif m == "select":
                 # Appwrite that CHI tra ve nhung thuoc tinh duoc chon. Ban gia
                 # lap phai bat chuoc dieu do: mot doan ma doc mot truong khong
@@ -156,7 +186,8 @@ class FakeAppwrite:
                 offset = int(vals[0])
 
         if order:
-            rows.sort(key=lambda r: str(r.get(order[0], "")), reverse=order[1])
+            rows.sort(key=lambda r: _so_sanh_duoc(r.get(order[0], "")),
+                     reverse=order[1])
         # `total` DOC LAP voi limit/offset — day la hanh vi that cua Appwrite, va
         # code phan trang dua vao no.
         return {"documents": rows[offset:offset + limit], "total": len(rows)}
@@ -392,6 +423,59 @@ class HopDongV2(unittest.TestCase):
         for ten, kho in self._cac_kho():
             for cam in ("update_event", "delete_event", "save_event"):
                 self.assertFalse(hasattr(kho, cam), f"{ten}.{cam}")
+
+    def test_loc_nhat_ky_theo_ngay_tao_phase7(self):
+        for ten, kho in self._cac_kho():
+            kho.record_event(ModerationEvent(
+                action="reconciliation_run", target_user_id="", event_id="e_cu",
+                created_at="2026-01-01T00:00:00+00:00"))
+            kho.record_event(ModerationEvent(
+                action="reconciliation_run", target_user_id="", event_id="e_moi",
+                created_at="2026-08-16T00:00:00+00:00"))
+            _, tong = kho.list_events(
+                action="reconciliation_run",
+                created_after="2026-08-01T00:00:00+00:00", limit=1)
+            self.assertEqual(tong, 1, ten)
+
+    # -- tts jobs (Phase 7 analytics: count_jobs) -----------------------------
+
+    def test_count_jobs_loc_theo_status_va_ngay_phase7(self):
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.create_job(TtsJob(
+                    owner_id="u1", chapter_id="c1", voice_id="v1",
+                    content_hash="h1", status=JobStatus.COMPLETED,
+                    created_at="2026-01-01T00:00:00+00:00"))
+                kho.create_job(TtsJob(
+                    owner_id="u1", chapter_id="c2", voice_id="v1",
+                    content_hash="h2", status=JobStatus.FAILED,
+                    created_at="2026-08-16T00:00:00+00:00"))
+                self.assertEqual(
+                    kho.count_jobs(status=JobStatus.COMPLETED), 1, ten)
+                self.assertEqual(
+                    kho.count_jobs(status=JobStatus.FAILED), 1, ten)
+                self.assertEqual(
+                    kho.count_jobs(created_after="2026-08-01T00:00:00+00:00"),
+                    1, ten)
+                self.assertEqual(kho.count_jobs(), 2, ten)
+
+    # -- comments (Phase 7 analytics: count_comments created_after) ----------
+
+    def test_count_comments_theo_ngay_tao_phase7(self):
+        from server.domain import Comment
+
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                kho.create_comment(Comment(
+                    comment_id="cm_cu", post_id="p1", author_user_id="u1",
+                    text="cu", created_at="2026-01-01T00:00:00+00:00"))
+                kho.create_comment(Comment(
+                    comment_id="cm_moi", post_id="p1", author_user_id="u1",
+                    text="moi", created_at="2026-08-16T00:00:00+00:00"))
+                self.assertEqual(kho.count_comments(), 2, ten)
+                self.assertEqual(
+                    kho.count_comments(created_after="2026-08-01T00:00:00+00:00"),
+                    1, ten)
 
 
 class QuyenHangTest(unittest.TestCase):

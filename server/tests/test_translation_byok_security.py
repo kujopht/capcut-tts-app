@@ -9,6 +9,7 @@ duoc phu boi `test_translation_byok_crypto.py` (ma hoa/AAD/fail-closed),
 from __future__ import annotations
 
 import inspect
+import re
 import time
 import unittest
 from unittest.mock import patch
@@ -105,12 +106,22 @@ class _LuonThatBai:
         raise TranslationProviderError("het han muc")
 
 
+#: V6 cerebras-groq-translation — xem chu thich tuong duong o
+#: `test_translation_byok_integration.py` (cung ly do: gia lap dau ra "trong
+#: giong ban dich" de khong trigger sai `translation_integrity.kiem_tra_tinh_ven`).
+_MAU_HAN = re.compile(r"[一-鿿]")
+_DOI_DAU_CAU = {"。": ".", "！": "!", "？": "?"}
+
+
 class _LuonThanhCong:
     def __init__(self, name="ok"):
         self.name = name
 
     def translate_segment(self, text, *, context):
-        return f"[{self.name}] {text}"
+        sach = _MAU_HAN.sub("", text)
+        for cu, moi in _DOI_DAU_CAU.items():
+            sach = sach.replace(cu, moi)
+        return f"[{self.name}] {sach}"
 
 
 class PersonalExhaustedFallbackTest(unittest.TestCase):

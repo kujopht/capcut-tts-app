@@ -1,0 +1,40 @@
+# Backend Fanfic World (server/) cho moi truong DEV cong khai — xem
+# docs/DEV_PUBLIC_BACKEND.md. KHONG dung cho production (production van
+# theo con duong Render/GCE rieng, xem docs/GCE-WORKER-CAPACITY.md).
+#
+# CHU DICH: image nho, chi Python + ffmpeg (can cho ghep MP3, xem
+# server/requirements.txt). KHONG cai desktop_app GUI deps
+# (requirements-gui.txt) — server/ khong duoc phep import PySide6 (CLAUDE.md).
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY server/requirements.txt /app/server/requirements.txt
+RUN pip install --no-cache-dir -r /app/server/requirements.txt
+
+# Chi copy PHAN backend that su chay toi: server/ (API) + desktop_app/
+# (providers/text_chunker/models/output_manager ma server/tts_bridge.py
+# goi toi, xem CLAUDE.md) — KHONG copy app.py/capcut_tts_api/web/ (khong
+# lien quan toi backend nay). scripts/ them cho doi chieu WebSub dinh ky
+# (fanfic-websub-reconcile.timer chay `python -m scripts.run_websub_
+# reconciliation` BEN TRONG container nay qua `docker compose exec`) — chi
+# import server.* co san, khong keo them dependency nao.
+COPY server/ /app/server/
+COPY desktop_app/ /app/desktop_app/
+COPY scripts/ /app/scripts/
+
+# Chay VOI quyen khong phai root — image chi phuc vu API cong khai, khong
+# can quyen ghi ngoai FAS_VAR_DIR.
+RUN useradd --create-home --shell /usr/sbin/nologin fasapi \
+    && mkdir -p /app/server/var && chown -R fasapi:fasapi /app
+USER fasapi
+
+EXPOSE 8010
+
+# KHONG --reload (do la cho dev cuc bo, xem CLAUDE.md) — production/dev cong
+# khai chay tien trinh don gian, on dinh.
+CMD ["python", "-m", "uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8010"]

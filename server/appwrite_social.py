@@ -512,6 +512,17 @@ class AppwriteSocialStore:
         rows, total = self._page(COL_COMMENTS, queries)
         return [_comment_from(r) for r in rows], total
 
+    def count_comments(self, *, created_after: str = "") -> int:
+        """Tong so binh luan TREN TOAN NEN TANG (bai dang + tap animation, cung
+        mot bang) — bang dieu khien quan tri (Admin Control Center V2, A1
+        + Phase 7 analytics: `created_after` loc theo ngay tao). `limit(1)`
+        + doc `total`, khong loc theo `post_id`."""
+        from server.appwrite_store import q_greater_equal, q_limit
+        queries = [q_limit(1)]
+        if created_after:
+            queries.append(q_greater_equal("created_at", created_after))
+        return self._page(COL_COMMENTS, queries)[1]
+
     def comments_for_posts(self, post_ids: Sequence[str],
                            moi_bai: int = 2) -> Dict[str, List[Comment]]:
         """

@@ -22,6 +22,10 @@ export const HO_ENDPOINT = [
   // luon la chu token. Mot duong co id la mot duong ai do se thu doi id.
   "account",
   "admin",
+  // Animation (overnight Phase 5, V6) — san pham XEM, DOC LAP voi
+  // novels/chapters, tren kho rieng `animation_store`. Xem
+  // `server/animation_domain.py`.
+  "animation",
   "audio",
   "auth",
   "chapters",
@@ -30,7 +34,16 @@ export const HO_ENDPOINT = [
   "creator",
   "feed",
   "health",
+  // Image Studio V1 (overnight build) — Quick Free/Fanfic Credits/My
+  // Pollinations, doc lap voi moi ho khac. Xem
+  // `docs/reports/image-studio-v1-summary.md`.
+  "image",
   "jobs",
+  // Bang xep hang XP (V6 gamification) — CONG KHAI, khong nam duoi
+  // `/api/account/...` vi khong doi hoi dang nhap (nguoi xem chua dang nhap
+  // van xem duoc, chi thieu `viewer_entry`). Xem
+  // `server/gamification_service.py::leaderboard_all_time/leaderboard_weekly`.
+  "leaderboard",
   // Gioi han do MAY CHU quyet dinh, cho giao dien noi truoc. Xem
   // `server/social.py::mo_ta_gioi_han`.
   "limits",
@@ -38,8 +51,16 @@ export const HO_ENDPOINT = [
   "notifications",
   "novels",
   "posts",
+  // V4 visual completion, Phan B — con tro CA NHAN "tiep tuc doc/nghe". Ho
+  // RIENG voi `listens` co y: `listens` la UY TIN CONG KHAI cua tac gia,
+  // con day la tien ich rieng tu, khac hoan toan quy tac va doi tuong doc.
+  "progress",
   "reports",
   "search",
+  // Subtitle Studio (overnight Phase 4, V6) — cong cu CUC BO, dich tung dong
+  // qua registry chung nhung KHONG tao TranslationProject/job rieng, nen ho
+  // rieng thay vi nam duoi `/api/translate/...`.
+  "tools",
   // V5 — Novel Translation Studio. Ho RIENG: subsystem khong dung chung bang
   // voi tts_jobs/novels, xem `server/translation_service.py`.
   "translate",

@@ -112,6 +112,26 @@ class AuthorStatus(str, Enum):
     SUSPENDED = "suspended"
 
 
+class AdminRole(str, Enum):
+    """
+    Ba muc quan tri (Admin Control Center V2, feature/admin-trusted-video-v2).
+
+    KE THUA triet ly cua `Settings.admin_user_ids`: van la BIEN MOI TRUONG,
+    khong phai cot du lieu — ba danh sach rieng (`FAS_OWNER_USER_IDS`,
+    `FAS_ADMIN_USER_IDS`, `FAS_MODERATOR_USER_IDS`) thay vi mot, nen khong co
+    duong ghi API nao leo thang duoc. Xem `Settings.admin_role_of`.
+
+    NONE khong phai mot "vai tro" that su — no la gia tri tra ve khi user_id
+    khong nam trong ca ba danh sach, dung de cac ham kiem tra so sanh dong
+    nhat (`role != AdminRole.NONE` thay vi kiem `Optional[AdminRole]`).
+    """
+
+    NONE = "none"
+    MODERATOR = "moderator"
+    ADMIN = "admin"
+    OWNER = "owner"
+
+
 class ContentState(str, Enum):
     """
     Noi dung do nguoi dung tao con hien hay da bi go.
@@ -154,6 +174,8 @@ class NotificationKind(str, Enum):
     CHAPTER_COMMENT = "chapter_comment"
     AUTHOR_APPROVED = "author_approved"
     AUTHOR_REJECTED = "author_rejected"
+    #: Co nguoi binh luan vao mot TAP animation cua minh (V6, overnight Phase 5).
+    EPISODE_COMMENT = "episode_comment"
 
 
 class ReportReason(str, Enum):
@@ -217,6 +239,31 @@ class Profile:
     #: url ky (het han) duoc tinh luc tra ve, tu khoa nay — xem `_ho_so_tra_ve`
     #: va `CreatorService._public_bundle`.
     avatar_key: str = ""
+    #: "Tiep tuc doc/nghe" (V4 visual completion) — CON TRO DUY NHAT toi noi
+    #: dang do dang, khong phai lich su. Moi lan ghi de lan truoc: y muon la
+    #: "quay lai cho gan nhat", khong phai danh sach moi truyen dang do dang.
+    #: Rong = chua co gi de tiep tuc — giao dien AN module, khong bia du lieu.
+    last_read_novel_id: str = ""
+    last_read_chapter_id: str = ""
+    last_read_at: str = ""
+    last_listen_novel_id: str = ""
+    last_listen_chapter_id: str = ""
+    #: Giay, TU CLIENT gui len — chi de hien thi vi tri tren thanh tien do, KHONG
+    #: dung lam can cu tinh uy tin (xem `creator.evaluate_listen`, doc do lay tu
+    #: track o may chu). Sai lech vai giay o day chi lam gach tien do hoi le,
+    #: khong anh huong gi khac.
+    last_listen_position_seconds: float = 0.0
+    last_listen_at: str = ""
+    #: "Tiep tuc xem" (V6, overnight Phase 5) — CUNG mau voi last_listen_*:
+    #: con tro DUY NHAT, khong phai lich su. Xem docstring cua last_listen_*.
+    last_watch_series_id: str = ""
+    last_watch_episode_id: str = ""
+    last_watch_position_seconds: float = 0.0
+    #: Do dai TAP dang xem, giay — GHEP VAO luc ghi tien do (client gui,
+    #: xem `/api/progress/watch`) de trang chu hien "12:03 / 24:00" ma khong
+    #: phai hoi lai YouTube. `0` = chua biet.
+    last_watch_duration_seconds: float = 0.0
+    last_watch_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -237,6 +284,18 @@ class Profile:
             "bio": self.bio,
             "author_status": self.author_status.value,
             "avatar_key": self.avatar_key,
+            "last_read_novel_id": self.last_read_novel_id or None,
+            "last_read_chapter_id": self.last_read_chapter_id or None,
+            "last_read_at": self.last_read_at or None,
+            "last_listen_novel_id": self.last_listen_novel_id or None,
+            "last_listen_chapter_id": self.last_listen_chapter_id or None,
+            "last_listen_position_seconds": self.last_listen_position_seconds,
+            "last_listen_at": self.last_listen_at or None,
+            "last_watch_series_id": self.last_watch_series_id or None,
+            "last_watch_episode_id": self.last_watch_episode_id or None,
+            "last_watch_position_seconds": self.last_watch_position_seconds,
+            "last_watch_duration_seconds": self.last_watch_duration_seconds or None,
+            "last_watch_at": self.last_watch_at or None,
         }
 
 
@@ -313,14 +372,36 @@ class ModerationEvent:
     duyet, va `actor_id` cho biet ai dang lam quan tri.
     """
 
-    #: `author_approved` | `author_rejected` | `author_suspended` |
-    #: `author_restored`. Chuoi on dinh, di vao API quan tri va vao test.
+    #: Chuoi ON DINH, di vao API quan tri va vao test — vi du
+    #: `author_approved`/`user_suspend`/`trusted_source_add`. Danh sach day du
+    #: dang duoc CHAP NHAN nam o Appwrite enum `moderation_events.action`
+    #: (`scripts/setup_appwrite.py`) — mo rong enum do khi them hanh dong moi,
+    #: KHONG tu y ghi mot chuoi ngoai danh sach (Appwrite se tu choi).
     action: str
-    #: Nguoi BI tac dong.
+    #: Nguoi BI tac dong (vd user bi treo, hoac rong neu doi tuong khong phai
+    #: mot nguoi dung — xem `target_type`/`target_id` cho truong hop do).
     target_user_id: str
     #: Nguoi THUC HIEN. Rong = he thong (vd migration grandfather).
     actor_id: str = ""
+    #: Vai tro cua actor TAI THOI DIEM hanh dong (owner/admin/moderator) — vai
+    #: tro co the doi sau (bien moi truong), nen ghi lai o day de nhat ky
+    #: khong ke sai "ai co quyen gi luc do".
+    actor_role: str = ""
+    #: Loai doi tuong bi tac dong khi KHONG PHAI la user — vi du "novel",
+    #: "animation_series", "trusted_source". Rong = doi tuong la user (dung
+    #: `target_user_id` o tren), giu tuong thich nguoc voi du lieu cu.
+    target_type: str = ""
+    #: ID cua doi tuong khi `target_type` khac rong (vd series_id, source_id).
+    #: Doc lap voi `target_user_id` — mot hanh dong co the co CA HAI (vi du
+    #: "admin X go xuat ban series Y cua tac gia Z").
+    target_id: str = ""
     note: str = ""
+    #: Metadata AN TOAN, ma hoa JSON — KHONG BAO GIO chua API key/OAuth
+    #: token/BYOP token/cookie/session secret/khoa ma hoa. Xem
+    #: `server/secret_redaction.py` neu can loc truoc khi ghi. Rong theo
+    #: mac dinh — chi dien khi hanh dong that su can ngu canh them (vi du
+    #: gia tri cu/moi cua mot co toggle).
+    metadata: str = ""
     event_id: str = field(default_factory=lambda: new_id("mev"))
     #: MOC THOI GIAN DAY DU, den micro giay — KHONG dung `now_iso()`.
     #:
@@ -344,7 +425,84 @@ class ModerationEvent:
             "action": self.action,
             "target_user_id": self.target_user_id,
             "actor_id": self.actor_id,
+            "actor_role": self.actor_role,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
             "note": self.note,
+            "metadata": self.metadata,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass
+class AccountStatus:
+    """
+    Trang thai tai khoan NATIVE, doc THANG tu Appwrite Users API — TACH BACH
+    voi `Profile.author_status` (quyen XUAT BAN, song trong `profiles`).
+
+    `enabled=False` nghia la tai khoan bi KHOA HOAN TOAN, khong dang nhap
+    duoc nua o BAT KY duong nao (email/OAuth) — khac voi treo TAC GIA, von
+    chi chan xuat ban MOI va van cho dang nhap binh thuong. Hai khai niem
+    nay CO Y tach rieng (Phase 3, Admin Control Center V2): mot tac gia bi
+    treo van la mot doc gia binh thuong, con mot tai khoan bi khoa thi
+    khong dung duoc san pham nua o bat ky vai tro nao.
+
+    KHONG BAO GIO ghi lai vao `profiles` — day la du lieu Appwrite Auth tra
+    ve TRUC TIEP moi lan hoi, khong phai mot ban sao can dong bo.
+    """
+
+    user_id: str
+    email: str
+    name: str
+    enabled: bool
+    email_verified: bool
+    phone_verified: bool
+    registered_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "user_id": self.user_id,
+            "email": self.email,
+            "name": self.name,
+            "enabled": self.enabled,
+            "email_verified": self.email_verified,
+            "phone_verified": self.phone_verified,
+            "registered_at": self.registered_at,
+        }
+
+
+@dataclass
+class AccountSession:
+    """
+    MOT phien dang nhap, doc tu Appwrite Users API (Phase 3).
+
+    `current` chi co y nghia khi may chu tu goi bang chinh session dang xac
+    thuc request do. Moi thao tac quan tri o day goi bang API KEY (khong
+    phai session cua ai ca), nen Appwrite luon tra `False` cho MOI phien —
+    khong the biet "day co phai phien trinh duyet dang mo trang quan tri
+    hay khong" tu goc nhin nay.
+    """
+
+    session_id: str
+    provider: str
+    ip: str
+    os_name: str
+    client_name: str
+    device_name: str
+    country_name: str
+    current: bool
+    created_at: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "provider": self.provider,
+            "ip": self.ip,
+            "os_name": self.os_name,
+            "client_name": self.client_name,
+            "device_name": self.device_name,
+            "country_name": self.country_name,
+            "current": self.current,
             "created_at": self.created_at,
         }
 
@@ -574,6 +732,19 @@ class AudioTrack:
     size_bytes: int = 0
     track_id: str = field(default_factory=lambda: new_id("trk"))
     created_at: str = field(default_factory=now_iso)
+    #: Khoa sidecar phu de dong bo trong CUNG kho voi `object_key` (vi du
+    #: `audio/.../x.mp3` -> `audio/.../x.transcript.json`) — rong khi CHUA co
+    #: (audio cu tu truoc tinh nang nay, hoac ffprobe khong do duoc mot phan
+    #: nao do luc tong hop). Xem `server/transcript.py` (web V4, Phan 2H).
+    transcript_key: str = ""
+    #: Khop `transcript.TRANSCRIPT_VERSION` luc sinh — de sau nay doi cach
+    #: tinh thoi gian ma van biet ban cu dung cong thuc nao.
+    transcript_version: int = 0
+    #: TRUNG VOI `content_hash` tai thoi diem sinh transcript — chua chac
+    #: TRUNG voi `content_hash` cua track (vi du neu sau nay transcript duoc
+    #: sinh lai doc lap). Dung de kiem phien ban truoc khi hien thi, tranh
+    #: dong bo nham phu de cua mot ban van khac (Phan 2L).
+    source_content_hash: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -586,6 +757,9 @@ class AudioTrack:
             "duration_seconds": self.duration_seconds,
             "size_bytes": self.size_bytes,
             "created_at": self.created_at,
+            "transcript_key": self.transcript_key,
+            "transcript_version": self.transcript_version,
+            "source_content_hash": self.source_content_hash,
         }
 
 

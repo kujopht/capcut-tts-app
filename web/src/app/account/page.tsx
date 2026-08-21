@@ -21,6 +21,9 @@ import {
 } from "@/components/Icons";
 import { CreatorSection } from "@/components/CreatorSection";
 import { AccountSocial } from "@/components/AccountSocial";
+import { AchievementGrid } from "@/components/AchievementGrid";
+import { GamificationPanel } from "@/components/GamificationPanel";
+import { QuestPanel } from "@/components/QuestPanel";
 import { Avatar } from "@/components/Avatar";
 
 const TIER_LABEL: Record<string, string> = {
@@ -34,6 +37,7 @@ export default function AccountPage() {
   const { profile, loading, signOut, updateProfile } = useSession();
   const [confirmOut, setConfirmOut] = useState(false);
   const [savingAvatar, setSavingAvatar] = useState(false);
+  const [xpRefreshKey, setXpRefreshKey] = useState(0);
   const toast = useToast();
 
   const doSignOut = useCallback(() => {
@@ -202,7 +206,29 @@ export default function AccountPage() {
       */}
       <AccountSocial />
 
+      <AchievementGrid />
+
+      {/*
+        Nhan qua nhiem vu cong THAT XP, nhung `QuestPanel`/`GamificationPanel`
+        la hai component doc lap voi hai lan `useAsyncData` rieng — khong co
+        cai do, "Cap do" se hien XP cu cho toi khi tai lai trang. `xpRefreshKey`
+        la tin hieu don gian nhat de bao GamificationPanel tai lai, khong can
+        dung mot store/context chi cho mot gia tri.
+      */}
+      <QuestPanel onXpChange={() => setXpRefreshKey((k) => k + 1)} />
+
+      <GamificationPanel refreshKey={xpRefreshKey} />
+
       <CreatorSection />
+
+      {/*
+        V4 visual completion, Phan 8: NGAN CACH bang mat "TUY CHINH HO SO
+        CONG KHAI" (moi thu o tren — thanh tuu, cap do, danh xung, vat
+        pham, danh tinh tac gia) voi "CAI DAT TAI KHOAN" (loi tat, phien
+        dang nhap) o duoi. Cung mot trang, nhung hai y dinh khac nhau.
+      */}
+      <hr className="divider" />
+      <h2 className="section-title">Cài đặt tài khoản</h2>
 
       <section className="stack" aria-labelledby="acc-loi-tat">
         <h2 className="section-title section-title-icon" id="acc-loi-tat">
@@ -233,7 +259,9 @@ export default function AccountPage() {
         </div>
       </section>
 
-      <section className="card stack">
+      {/* V4 visual completion, Phan C: `surface-secondary` thay `card` — mot
+          cau + mot nut khong can toan bo be day kinh cua `.page > .card`. */}
+      <section className="surface-secondary stack card-tight">
         <h2 className="section-title">Phiên đăng nhập</h2>
         <p className="hint">
           Đăng xuất sẽ xoá phiên khỏi trình duyệt này. Dữ liệu của bạn vẫn giữ

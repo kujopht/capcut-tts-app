@@ -16,6 +16,7 @@ Xem `docs/AUTHOR_RANK.md`.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -283,13 +284,13 @@ class CreatorService:
     # mot cai cong mo. Chung o day, duoc kiem thu, cho trang quan tri.
 
     def approve(self, user_id: str, *, note: str = "",
-                actor_id: str = "") -> AuthorApplication:
+                actor_id: str = "", actor_role: str = "") -> AuthorApplication:
         """Duyet. `pending -> approved`."""
         return self._decide(user_id, AuthorStatus.APPROVED, note,
-                            actor_id, "author_approved")
+                            actor_id, "author_approved", actor_role)
 
     def reject(self, user_id: str, *, note: str = "",
-               actor_id: str = "") -> AuthorApplication:
+               actor_id: str = "", actor_role: str = "") -> AuthorApplication:
         """
         Tu choi. `pending -> rejected`.
 
@@ -299,10 +300,10 @@ class CreatorService:
         if not (note or "").strip():
             raise AuthorStateError("Cần ghi chú lý do khi từ chối đơn.")
         return self._decide(user_id, AuthorStatus.REJECTED, note,
-                            actor_id, "author_rejected")
+                            actor_id, "author_rejected", actor_role)
 
     def suspend(self, user_id: str, *, note: str = "",
-                actor_id: str = "") -> AuthorApplication:
+                actor_id: str = "", actor_role: str = "") -> AuthorApplication:
         """
         Tam dung quyen xuat ban. `approved -> suspended`.
 
@@ -311,16 +312,17 @@ class CreatorService:
         khac. Chi chan xuat ban MOI. Ban nhap, chuong va audio deu khong bi cham.
         """
         return self._decide(user_id, AuthorStatus.SUSPENDED, note,
-                            actor_id, "author_suspended")
+                            actor_id, "author_suspended", actor_role)
 
     def restore(self, user_id: str, *, note: str = "",
-                actor_id: str = "") -> AuthorApplication:
+                actor_id: str = "", actor_role: str = "") -> AuthorApplication:
         """Phuc hoi sau khi treo. `suspended -> approved`."""
         return self._decide(user_id, AuthorStatus.APPROVED, note,
-                            actor_id, "author_restored")
+                            actor_id, "author_restored", actor_role)
 
     def _decide(self, user_id: str, moi: AuthorStatus, note: str,
-                actor_id: str = "", hanh_dong: str = "") -> AuthorApplication:
+                actor_id: str = "", hanh_dong: str = "",
+                actor_role: str = "") -> AuthorApplication:
         profile = self._identity.get_profile(user_id)
         cu = profile.author_status
         if not can_transition(cu, moi):
@@ -351,6 +353,7 @@ class CreatorService:
                 action=hanh_dong,
                 target_user_id=user_id,
                 actor_id=actor_id,
+                actor_role=actor_role,
                 note=(note or "").strip(),
             ))
 
@@ -716,21 +719,60 @@ class CreatorService:
 
     def admin_users(self, query: str = "", limit: int = 25,
                     offset: int = 0) -> Dict[str, Any]:
-        """Tim o MAY CHU, phan trang o MAY CHU, lam giau THEO LO cho dung trang."""
-        rows, total = self._identity.search_profiles(query, limit=limit,
-                                                     offset=offset)
-        return {
-            "users": self._lam_giau(rows),
-            "total": total, "limit": limit, "offset": offset,
-        }
+        """
+        Tim o MAY CHU, phan trang o MAY CHU (Phase 3, Admin Control Center V2).
+
+        Nguon CHINH gio la `IdentityAdapter.list_accounts` (Appwrite Users API
+        native) — thay vi chi doc collection `profiles` nhu ban Phase 2: day
+        la quan ly TAI KHOAN (ai dang nhap duoc), nen mot tai khoan CHUA chon
+        username (chua co ho so cong khai) van phai hien o day. Lam giau bang
+        du lieu nghiep vu (rank/so truyen/username) qua CUNG `_lam_giau` voi
+        `admin_authors`, dung MOT truy van theo lo (`profiles_by_ids`) —
+        khong N+1 du trang co bao nhieu tai khoan chua co ho so.
+        """
+        accounts, total = self._identity.list_accounts(query, limit=limit,
+                                                        offset=offset)
+        ho_so = self._identity.profiles_by_ids([a.user_id for a in accounts])
+        gia = [
+            ho_so.get(a.user_id)
+            or Profile(user_id=a.user_id, email=a.email, display_name=a.name,
+                      created_at=a.registered_at)
+            for a in accounts
+        ]
+        ra = self._lam_giau(gia)
+        theo_id = {a.user_id: a for a in accounts}
+        for row in ra:
+            acc = theo_id[row["user_id"]]
+            if not row["email"]:
+                row["email"] = acc.email
+            row["email_verified"] = acc.email_verified
+            row["account_enabled"] = acc.enabled
+            row["registered_at"] = acc.registered_at
+        return {"users": ra, "total": total, "limit": limit, "offset": offset}
 
     def admin_user(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Chi tiet mot nguoi dung, KEM don va nhat ky kiem duyet cua ho."""
+        """
+        Chi tiet mot nguoi dung, KEM don, nhat ky kiem duyet, trang thai TAI
+        KHOAN native va danh sach phien dang nhap (Phase 3).
+
+        Ton tai neu co MOT trong hai: ho so cong khai (`profiles`) HOAC tai
+        khoan Auth (Appwrite Users API) — mot tai khoan moi tinh, chua kip
+        dong bo/chua chon username, van phai xem duoc chi tiet.
+        """
         profile = self._identity.profiles_by_ids([user_id]).get(user_id)
-        if profile is None:
+        tai_khoan = self._identity.account_status(user_id)
+        if profile is None and tai_khoan is None:
             return None
-        data = self._lam_giau([profile])[0]
-        data["bio"] = profile.bio
+        gia = profile or Profile(
+            user_id=user_id, email=tai_khoan.email, display_name=tai_khoan.name,
+            created_at=tai_khoan.registered_at)
+        data = self._lam_giau([gia])[0]
+        data["bio"] = profile.bio if profile else ""
+        data["account"] = tai_khoan.to_dict() if tai_khoan else None
+        data["sessions"] = (
+            [s.to_dict() for s in self._identity.list_sessions(user_id)]
+            if tai_khoan else []
+        )
         app = self._store.get_application(user_id)
         data["application"] = app.to_dict() if app else None
         su_kien, _ = self._store.list_events(target_user_id=user_id, limit=25)
@@ -739,6 +781,58 @@ class CreatorService:
             n.to_dict() for n in self._store.list_novels(owner_id=user_id)
         ]
         return data
+
+    def admin_set_account_enabled(self, user_id: str, enabled: bool, *,
+                                  note: str = "", actor_id: str = "",
+                                  actor_role: str = "") -> Optional[Dict[str, Any]]:
+        """
+        Bat/khoa dang nhap MOT tai khoan (Phase 3) — TACH BACH voi `suspend`/
+        `restore` o tren (chi chan XUAT BAN). `enabled=False` chan MOI duong
+        dang nhap. Ghi nhat ky kiem duyet bang HA TANG SAN CO
+        (`ModerationEvent`/`target_type`/`actor_role`), KHONG xay he thong
+        log thu hai.
+
+        Tra `None` neu khong tim thay tai khoan — route se doi thanh 404.
+        """
+        trang_thai = self._identity.set_account_enabled(user_id, enabled)
+        if trang_thai is None:
+            return None
+        self._store.record_event(ModerationEvent(
+            action=("user_unsuspend" if enabled else "user_suspend"),
+            target_user_id=user_id, actor_id=actor_id, actor_role=actor_role,
+            note=(note or "").strip(),
+        ))
+        return trang_thai.to_dict()
+
+    def admin_terminate_session(self, user_id: str, session_id: str, *,
+                                note: str = "", actor_id: str = "",
+                                actor_role: str = "") -> bool:
+        """Cham dut MOT phien dang nhap. Chi ghi nhat ky khi THAT SU huy duoc
+        mot phien dang song — cham dut mot phien von da mat khong phai mot
+        hanh dong quan tri dang ghi lai."""
+        da_huy = self._identity.terminate_session(user_id, session_id)
+        if da_huy:
+            self._store.record_event(ModerationEvent(
+                action="user_session_terminate", target_user_id=user_id,
+                actor_id=actor_id, actor_role=actor_role,
+                note=(note or "").strip(),
+                metadata=json.dumps({"scope": "single", "session_id": session_id}),
+            ))
+        return da_huy
+
+    def admin_terminate_all_sessions(self, user_id: str, *, note: str = "",
+                                     actor_id: str = "",
+                                     actor_role: str = "") -> int:
+        """Cham dut MOI phien. Luon ghi nhat ky (ke ca khi 0 phien) — mot
+        quan tri bam nut nay la MOT quyet dinh da xay ra, du ket qua la
+        khong con phien nao de huy."""
+        so_luong = self._identity.terminate_all_sessions(user_id)
+        self._store.record_event(ModerationEvent(
+            action="user_session_terminate", target_user_id=user_id,
+            actor_id=actor_id, actor_role=actor_role, note=(note or "").strip(),
+            metadata=json.dumps({"scope": "all", "count": so_luong}),
+        ))
+        return so_luong
 
     def admin_novels(self, query: str = "", state: str = "", limit: int = 25,
                      offset: int = 0) -> Dict[str, Any]:
@@ -773,6 +867,22 @@ class CreatorService:
             ra.append(d)
         return {"novels": ra, "total": total, "limit": limit, "offset": offset}
 
-    def admin_events(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
-        rows, total = self._store.list_events(limit=limit, offset=offset)
+    def admin_events(self, limit: int = 50, offset: int = 0,
+                     target_user_id: str = "", target_type: str = "",
+                     target_id: str = "", action: str = "",
+                     created_after: str = "") -> Dict[str, Any]:
+        """
+        Nhat ky kiem duyet — /admin/audit-log (Admin Control Center V2, A5).
+
+        Cac tham so loc (`target_user_id` co tu truoc; `target_id` moi o
+        Phase 4, cho lich su cua mot series/tap Animation cu the) deu CHI
+        equal, khong tim mo: day la mot nhat ky, nguoi doc muon loc DUNG doi
+        tuong/DUNG hanh dong, khong can tim gan dung. `created_after`
+        (Phase 7 analytics) loc theo ngay tao — dung cho bo dem theo
+        khoang thoi gian (vd so lan doi chieu WebSub trong 7 ngay qua).
+        """
+        rows, total = self._store.list_events(
+            limit=limit, offset=offset, target_user_id=target_user_id,
+            target_type=target_type, target_id=target_id, action=action,
+            created_after=created_after)
         return {"events": [e.to_dict() for e in rows], "total": total}

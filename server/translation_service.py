@@ -8,9 +8,12 @@ Khong biet gi ve HTTP — nem `TranslationError`/`NotFoundError`/
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import threading
 import uuid
+from dataclasses import replace as _thay_the
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -41,8 +44,10 @@ from server.translation_domain import (
     TranslationProject,
     TranslationVersion,
 )
+from server.translation_integrity import kiem_tra_tinh_ven, tom_tat_van_de
 from server.translation_providers import (
     TranslationContext,
+    TranslationIntegrityError,
     TranslationProvider,
     TranslationProviderError,
     build_provider,
@@ -131,6 +136,20 @@ SO_CHUONG_TOM_TAT_NGU_CANH = 2
 #: phinh dan prompt qua nhieu chuong.
 DO_DAI_TOM_TAT = 240
 
+#: V6 cerebras-groq-translation — chi dan SUA LOI gui LAI CUNG provider
+#: (Cerebras) khi `translation_integrity.kiem_tra_tinh_ven` phat hien lan
+#: dich dau khong dat (con sot chu Han/thieu doan/hoi thoai/cat cut). Noi
+#: dung tuong duong yeu cau goc ("Translate every source segment completely;
+#: do not leave Chinese source text untranslated; preserve every paragraph
+#: and dialogue line"), viet lai bang tieng Viet de nhat quan voi toan bo
+#: phan con lai cua prompt he thong (xem `translation_providers._he_thong_prompt`).
+CHI_DAN_SUA_LOI_CEREBRAS = (
+    "Dịch TOÀN BỘ đoạn nguồn một cách đầy đủ — KHÔNG được để sót bất kỳ "
+    "phần tiếng Trung nào chưa dịch. Giữ nguyên đầy đủ MỌI đoạn văn và MỌI "
+    "dòng hội thoại có trong đoạn nguồn, không bỏ sót, không tóm tắt, "
+    "không rút gọn."
+)
+
 
 #: Thu tu vai-tro provider CHAY THAT cho MOI doan, theo che do chat luong.
 #: `NHANH`: chi dich, dung cho ban nhap nhanh. `CAN_BANG`: dich + mot lan QA
@@ -143,6 +162,101 @@ _VAI_TRO_THEO_CHE_DO: Dict[QualityMode, tuple] = {
     QualityMode.CAN_BANG: ("translator", "qa"),
     QualityMode.VAN_HOC: ("translator", "editor", "qa"),
 }
+
+
+#: Doi so nay khi thay doi CACH GOP prompt he thong/nguoi dung (xem
+#: `translation_providers._he_thong_prompt`/`_nguoi_dung_prompt`) de cac muc
+#: cache CU (gop theo cach cu) khong bi dung nham lam ket qua cua cach MOI.
+_CACHE_PROMPT_VERSION = "v1"
+
+
+class _KetQuaCache:
+    """Mot ket qua da dich LUU TRONG CACHE — giu lai provider/model/nguon
+    credential GOC de `ProviderProvenance` cua mot lan CACHE HIT van bao dung
+    "ai da dich lan dau", chi kem co `from_cache=True`."""
+
+    __slots__ = ("van_ban", "provider_id", "model_id", "credential_source")
+
+    def __init__(self, van_ban: str, provider_id: str, model_id: str,
+                credential_source: str):
+        self.van_ban = van_ban
+        self.provider_id = provider_id
+        self.model_id = model_id
+        self.credential_source = credential_source
+
+
+class _TranslationSegmentCache:
+    """
+    Cache dich TRONG TIEN TRINH, THEO TUNG INSTANCE `TranslationService` —
+    KHONG PHAI mot singleton toan cuc cap module. Mot cache dung CHUNG giua
+    nhieu instance (vd giua cac bai test khac nhau trong cung mot tien trinh
+    pytest) se lam MOT test ro ri ket qua sang test khac dung chung van ban —
+    day la loai loi that de gap va kho tim (test B "tinh co" thanh cong vi
+    dung lai ket qua da cache tu test A, thay vi tu goi provider gia cua
+    chinh no) nen kien truc nay CO CHU DICH gan cache vao instance, khong
+    dung bien cap module.
+
+    Khoa la sha256 cua dau vao anh huong ket qua dich: van ban + MOI truong
+    on dinh tu `TranslationContext` (vai_tro/quality_mode/genre/naming_mode/
+    glossary/custom_instruction) + `_CACHE_PROMPT_VERSION` — CO CHU DICH
+    KHONG gom lua chon provider (provider_mode/selected_provider_id): cache
+    nay la "cung dau vao + cung chi dan -> cung ket qua", giong triet ly bo
+    nho dich (translation memory) trong cac cong cu CAT, doc lap voi model
+    NAO thuc su tao ra no lan dau — chuyen provider khong lam mat gia tri
+    cache da co.
+
+    CO CHU DICH KHONG gom `tom_tat_truoc` (tom tat cac chuong TRUOC, xem
+    `SO_CHUONG_TOM_TAT_NGU_CANH`): gia tri nay THAY DOI o HAU NHU MOI chuong
+    (moi chuong dich xong lai doi tom tat chuong truoc do cua CHINH no) —
+    neu dua vao khoa cache, hai doan van GIONG HET nhau o hai chuong khac
+    nhau (vd mot cau hoi thoai lap lai, rat thuong gap trong fanfic mang) se
+    GAN NHU KHONG BAO GIO trung cache duoc, vo hieu hoa gan het gia tri thuc
+    te cua cache nay. Danh doi: mot doan van lap lai co the duoc dich giong
+    het nhau du boi canh chuong truoc da doi — chap nhan duoc vi ban than
+    tom tat chi la "tri nho long", khong phai mot chi dan NGON NGU truc tiep
+    anh huong tu vung/ngu phap cua CHINH doan dang dich.
+    """
+
+    GIOI_HAN = 2000
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._kho: Dict[str, _KetQuaCache] = {}
+        #: FIFO don gian de gioi han kich thuoc — khong can LRU chinh xac,
+        #: chi can khong phinh vo han qua mot phien server chay lau.
+        self._thu_tu: List[str] = []
+
+    @staticmethod
+    def _khoa(text: str, ctx: "TranslationContext") -> str:
+        phan = {
+            "text": text,
+            "vai_tro": ctx.vai_tro,
+            "quality_mode": ctx.quality_mode,
+            "genre": ctx.genre,
+            "naming_mode": ctx.naming_mode,
+            "glossary": sorted(ctx.glossary.items()),
+            "custom_instruction": ctx.custom_instruction,
+            "prompt_version": _CACHE_PROMPT_VERSION,
+        }
+        tho = json.dumps(phan, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(tho.encode("utf-8")).hexdigest()
+
+    def lay(self, text: str, ctx: "TranslationContext") -> Optional[_KetQuaCache]:
+        with self._lock:
+            return self._kho.get(self._khoa(text, ctx))
+
+    def luu(self, text: str, ctx: "TranslationContext", *, van_ban: str,
+           provider_id: str, model_id: str, credential_source: str) -> None:
+        khoa = self._khoa(text, ctx)
+        with self._lock:
+            if khoa not in self._kho and len(self._thu_tu) >= self.GIOI_HAN:
+                cu = self._thu_tu.pop(0)
+                self._kho.pop(cu, None)
+            if khoa not in self._kho:
+                self._thu_tu.append(khoa)
+            self._kho[khoa] = _KetQuaCache(
+                van_ban=van_ban, provider_id=provider_id, model_id=model_id,
+                credential_source=credential_source)
 
 
 def _tom_tat_tho(van_ban_da_dich: str) -> str:
@@ -205,6 +319,18 @@ class TranslationService:
         self._max_concurrent_jobs = (
             max_concurrent_jobs if max_concurrent_jobs is not None
             else int(os.environ.get("FAS_TRANSLATION_MAX_CONCURRENT_JOBS", "3")))
+        #: Cache dich RIENG cua instance nay — xem docstring
+        #: `_TranslationSegmentCache` ve ly do KHONG dung bien cap module.
+        self._cache = _TranslationSegmentCache()
+        #: V6 (yeu cau bo sung "terminology consistency") — snapshot thuat
+        #: ngu {project_id: {tu_goc: ban_dich}} CHO CA MOT LAN CHAY JOB, xem
+        #: `_lay_thuat_ngu_du_an`. Trong bo nho, RIENG cua instance nay (cung
+        #: ly do voi `_cache`) — KHONG ben vung qua restart, KHONG dong bo
+        #: giua nhieu worker process. San sang thay bang kho Appwrite rieng
+        #: sau nay (yeu cau goc muc 7): CHI can doi noi doc/ghi trong
+        #: `_lay_thuat_ngu_du_an`, hinh dang du lieu {tu_goc: ban_dich}
+        #: khong doi.
+        self._thuat_ngu_theo_du_an: Dict[str, Dict[str, str]] = {}
 
     # ==================================================================== DU AN
 
@@ -255,6 +381,22 @@ class TranslationService:
 
     def list_projects(self, owner_id: str) -> List[TranslationProject]:
         return self._store.list_projects(owner_id)
+
+    def admin_total_projects(self) -> int:
+        """Tong so du an dich TREN TOAN NEN TANG — bang dieu khien quan tri
+        (Admin Control Center V2, A1)."""
+        return self._store.total_projects()
+
+    def admin_count_jobs(self, *, status: Optional[TranslationJobStatus] = None,
+                         created_after: str = "") -> int:
+        """Bo dem job dich BI CHAN cho bang dieu khien quan tri (Phase 7
+        analytics) — loc THEO status/ngay tao, khong keo document nao ve."""
+        return self._store.count_jobs(status=status, created_after=created_after)
+
+    def admin_count_connections_by_status(self) -> Dict[str, int]:
+        """Bo dem ket noi BYOK theo trang thai — trang AI/Credits (Phase 7
+        analytics). KHONG bao gio tra secret/key."""
+        return self._store.count_connections_by_status()
 
     def estimate(self, source_text: str) -> Dict[str, int]:
         return uoc_luong(source_text)
@@ -603,6 +745,13 @@ class TranslationService:
         lai TU DAU (chua kip ghi vao `translated_chapters` nen khong co gi
         de mat).
         """
+        # Xoa snapshot thuat ngu CU (neu co, tu mot lan chay TRUOC cua CUNG
+        # du an nay) — moi LAN CHAY job (ke ca resume sau worker chet) lay
+        # MOT snapshot MOI tu kho, roi giu NGUYEN snapshot do cho TOAN BO
+        # chuong con lai cua lan chay nay (xem `_lay_thuat_ngu_du_an`, yeu
+        # cau goc muc 2: nhat quan thuat ngu XUYEN SUOT mot lan chay job).
+        self._thuat_ngu_theo_du_an.pop(project.project_id, None)
+
         chuong = tach_chuong(project.source_text)
         bat_dau_tu = len(project.translated_chapters)
         try:
@@ -719,9 +868,140 @@ class TranslationService:
             except Exception:
                 pass
 
+    def _goi_registry(self, text: str, ctx: TranslationContext,
+                      project: TranslationProject,
+                      personal_providers: List["ConfiguredProvider"], *,
+                      mode: Optional[str] = None,
+                      selected_provider_id: Optional[str] = None,
+                      allow_fallback: Optional[bool] = None,
+                      prefer_personal: Optional[bool] = None
+                      ) -> "tuple[str, ProviderProvenance]":
+        """
+        MOT lan goi provider/registry — tham so MAC DINH lay tu `project`
+        (dung boi lan goi DAU TIEN), nhung CO THE GHI DE (dung boi lan goi
+        SUA LOI/du phong tuong minh o `_sua_loi_cerebras_roi_du_phong_groq`,
+        noi can CHON DUNG mot provider cu the bat ke `project` dang o che do
+        gi). Tach rieng khoi `_goi_dich_mot_doan` de CA hai noi (lan goi dau,
+        lan sua loi, lan du phong) dung CHUNG mot duong goi, khong lap logic
+        registry/khong-registry o ba noi.
+        """
+        mode = project.provider_mode if mode is None else mode
+        selected_provider_id = (
+            project.selected_provider_id if selected_provider_id is None
+            else selected_provider_id)
+        allow_fallback = (
+            project.allow_fallback if allow_fallback is None else allow_fallback)
+        prefer_personal = (
+            project.prefer_personal_provider if prefer_personal is None
+            else prefer_personal)
+
+        if self._registry and self._byok:
+            return self._registry.translate_segment_with_personal(
+                text, context=ctx, mode=mode,
+                selected_provider_id=selected_provider_id,
+                allow_fallback=allow_fallback,
+                personal_providers=personal_providers,
+                prefer_personal=prefer_personal)
+        if self._registry:
+            return self._registry.translate_segment(
+                text, context=ctx, mode=mode,
+                selected_provider_id=selected_provider_id,
+                allow_fallback=allow_fallback)
+        van_ban = self._provider.translate_segment(text, context=ctx)
+        return van_ban, ProviderProvenance(
+            provider_id=self._provider.name, model_id="",
+            pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+
+    @staticmethod
+    def _tim_groq_du_phong(prov_cerebras: ProviderProvenance,
+                           personal_providers: List["ConfiguredProvider"]
+                           ) -> "tuple[Optional[str], bool]":
+        """
+        Xac dinh provider Groq nao DUNG DE DU PHONG sau khi Cerebras that
+        bai tinh ven CA sau khi da sua loi — TON TRONG pham vi credential
+        cua LAN GOI CEREBRAS ban dau (yeu cau goc BYOK: "no silent use of
+        shared credentials"):
+          - Cerebras ban dau la CA NHAN (BYOK) -> CHI duoc dung Groq CA NHAN
+            CUA CHINH nguoi dung nay (neu co ket noi); KHONG BAO GIO roi
+            sang Groq dung chung. Khong co ket noi Groq ca nhan -> tra
+            `(None, False)`, nghia la "khong co Groq de du phong" (dung y
+            "Groq fallback, only if Groq is available").
+          - Cerebras ban dau la DUNG CHUNG (shared) -> dung Groq DUNG CHUNG
+            (`groq_qwen`, model DUY NHAT theo chien luoc san xuat hien tai).
+
+        Tra ve `(selected_provider_id, prefer_personal)` de goi thang
+        `_goi_registry(mode="manual", selected_provider_id=..., allow_fallback=False,
+        prefer_personal=...)`.
+        """
+        if prov_cerebras.credential_source == "personal":
+            groq_ca_nhan = next(
+                (p for p in personal_providers if p.provider_id.startswith("groq_")),
+                None)
+            if groq_ca_nhan is None:
+                return None, False
+            return groq_ca_nhan.provider_id, True
+        return "groq_qwen", False
+
+    def _sua_loi_cerebras_roi_du_phong_groq(
+        self, text: str, ctx: TranslationContext, project: TranslationProject,
+        personal_providers: List["ConfiguredProvider"],
+        prov_1: ProviderProvenance
+    ) -> "tuple[str, ProviderProvenance]":
+        """
+        Cerebras da tra ve mot ban dich KHONG DAT tinh ven (goi luc
+        `_goi_dich_mot_doan`, tham so `prov_1` la provenance cua LAN GOI DAU
+        do). Theo dung so do yeu cau goc:
+
+            Cerebras (lan 1) --that bai tinh ven-->
+            Cerebras (sua loi, CUNG provider/CUNG credential) --con that bai-->
+            Groq (CHI khi co, CUNG pham vi credential voi Cerebras ban dau) -->
+            loi CO KIEM SOAT cho DUNG doan nay (KHONG lam hong ca chuong).
+
+        Groq (neu dung duoc) KHONG duoc kiem tra lai tinh ven o day — chap
+        nhan ket qua cua no VO DIEU KIEN, dung so do yeu cau goc (buoc "sua
+        loi" CHI ap dung cho Cerebras, Groq la diem dung cuoi truoc loi co
+        kiem soat).
+        """
+        # 1) Sua loi — CUNG provider Cerebras vua tra loi, CUNG credential
+        # (shared/personal), them chi dan sua loi vao context.
+        ctx_sua = _thay_the(ctx, chi_dan_sua_loi=CHI_DAN_SUA_LOI_CEREBRAS)
+        try:
+            ket_qua_2, prov_2 = self._goi_registry(
+                text, ctx_sua, project, personal_providers,
+                mode="manual", selected_provider_id=prov_1.provider_id,
+                allow_fallback=False,
+                prefer_personal=(prov_1.credential_source == "personal"))
+            if not kiem_tra_tinh_ven(text, ket_qua_2, glossary=ctx.glossary):
+                return ket_qua_2, prov_2
+        except TranslationProviderError:
+            # Lan sua loi TU NO cung co the that bai (vd rate-limit/loi mang
+            # tam thoi) — khong coi day la loi cuoi cung, van tiep tuc sang
+            # buoc du phong Groq nhu binh thuong.
+            pass
+
+        # 2) Groq du phong — CHI trong CUNG pham vi credential voi Cerebras
+        # ban dau (xem `_tim_groq_du_phong`).
+        groq_id, groq_prefer_personal = self._tim_groq_du_phong(prov_1, personal_providers)
+        if groq_id is None:
+            raise TranslationIntegrityError(
+                "Cerebras trả về bản dịch không đạt yêu cầu (đã thử sửa lỗi "
+                "nhưng vẫn không đạt) và không có Groq khả dụng để dự phòng "
+                "cho đoạn này.")
+        try:
+            return self._goi_registry(
+                text, ctx, project, personal_providers,
+                mode="manual", selected_provider_id=groq_id,
+                allow_fallback=False, prefer_personal=groq_prefer_personal)
+        except TranslationProviderError as exc:
+            raise TranslationIntegrityError(
+                "Cerebras trả về bản dịch không đạt yêu cầu (đã thử sửa lỗi) "
+                f"và Groq dự phòng cũng thất bại cho đoạn này: "
+                f"{self._loi_an_toan(exc)}") from exc
+
     def _goi_dich_mot_doan(self, text: str, ctx: TranslationContext,
                            project: TranslationProject,
-                           personal_providers: List["ConfiguredProvider"]
+                           personal_providers: List["ConfiguredProvider"],
+                           allow_cache: bool = True
                            ) -> "tuple[str, ProviderProvenance]":
         """
         MOT diem goi DUY NHAT vao provider/registry — dung boi CA
@@ -730,23 +1010,100 @@ class TranslationService:
         `translate_segment_with_personal` (Fanfic chung + ca nhan cua CHINH
         chu du an theo dung thu tu `project.prefer_personal_provider`);
         neu khong, hanh vi Y HET truoc V5.1.
+
+        V6 cerebras-groq-translation — TICH VEN (xem `translation_integrity.
+        kiem_tra_tinh_ven`): "Never accept a provider response as successful
+        merely because HTTP returned 200." Ket qua tu Cerebras duoc kiem tra
+        NGAY sau khi nhan ve; khong dat thi sua loi/du phong Groq qua
+        `_sua_loi_cerebras_roi_du_phong_groq` TRUOC KHI duoc coi la thanh
+        cong. Ket qua tu provider KHAC Cerebras (Groq lam SO CAP, vi du
+        BYOK-Groq-rieng) khong dat tinh ven thi KHONG co buoc sua loi nao
+        duoc dinh nghia — nem `TranslationIntegrityError` ngay (loi CO KIEM
+        SOAT cho dung doan nay, khong lam hong ca chuong — xem
+        `TranslationIntegrityError`).
+
+        Cache (xem `_TranslationSegmentCache`) duoc kiem TRUOC TIEN khi
+        `allow_cache=True` — trung cache thi tra ve NGAY, KHONG cham toi
+        provider/registry nao (khong ton request/token, khong ghi usage gia).
+        Chi ket qua THANH CONG VA DAT TINH VEN moi duoc luu vao cache — loi
+        (ke ca loi tinh ven) khong bao gio duoc cache.
+
+        `allow_cache=False` (dung boi `_chay_vai_tro_tren_van_ban`, tuc MOI
+        hanh dong "dịch lại"/"chạy lại pass" cua nguoi dung — Part N): nguoi
+        dung bam "Dịch lại đoạn/chương này" ro rang MUON mot KET QUA MOI, dung
+        cache o day se tra ve Y HET ban dich cu, pha vo hoan toan muc dich
+        cua nut "dịch lại". CHI duong ong TU DONG (`_dich_mot_chuong`) moi
+        duoc dung cache — gia tri that cua no la tranh dich lai NHUNG DOAN DA
+        TUNG THANH CONG khi mot chuong phai lam lai tu dau sau
+        `waiting_for_provider` (xem `_thuc_thi_job`), hoac cac doan trung
+        lap tu nhien giua nhieu chuong (hoi thoai/cau van lap lai).
         """
-        if self._registry and self._byok:
-            return self._registry.translate_segment_with_personal(
-                text, context=ctx, mode=project.provider_mode,
-                selected_provider_id=project.selected_provider_id,
-                allow_fallback=project.allow_fallback,
-                personal_providers=personal_providers,
-                prefer_personal=project.prefer_personal_provider)
-        if self._registry:
-            return self._registry.translate_segment(
-                text, context=ctx, mode=project.provider_mode,
-                selected_provider_id=project.selected_provider_id,
-                allow_fallback=project.allow_fallback)
-        ket_qua = self._provider.translate_segment(text, context=ctx)
-        return ket_qua, ProviderProvenance(
-            provider_id=self._provider.name, model_id="",
-            pass_type=ctx.vai_tro, success=True, attempted_at=now_iso())
+        cache_hit = self._cache.lay(text, ctx) if allow_cache else None
+        if cache_hit is not None:
+            return cache_hit.van_ban, ProviderProvenance(
+                provider_id=cache_hit.provider_id, model_id=cache_hit.model_id,
+                pass_type=ctx.vai_tro, success=True, attempted_at=now_iso(),
+                credential_source=cache_hit.credential_source, from_cache=True)
+
+        ket_qua, prov = self._goi_registry(text, ctx, project, personal_providers)
+
+        # Tich ven CHI ap dung cho ho provider Cerebras/Groq — day la PHAM VI
+        # THAT SU cua yeu cau goc ("Cerebras must produce complete Vietnamese
+        # output... Groq remains fallback"), KHONG PHAI moi provider bat ky.
+        # Quan trong: dieu nay TU NHIEN loai tru duong `self._provider` don
+        # (Mock/DocuTranslate, provider_id="mock"/"docutranslate") VA moi
+        # provider tuy chinh khac (Cloudflare, provider gia trong test —
+        # "sai"/"het-han-muc"/"fake"/...) khoi bi kiem tra — nhung provider
+        # do KHONG PHAI doi tuong cua yeu cau goc nay, va (voi provider gia
+        # trong test) thuong "dich" bang cach ECHO NGUYEN VAN dau vao (vd
+        # `MockTranslationProvider`/`_FakeInnerProvider` — xem docstring cac
+        # lop do) nen SE bi flag han_residue SAI neu bi kiem tra o day.
+        van_de = (kiem_tra_tinh_ven(text, ket_qua, glossary=ctx.glossary)
+                 if prov.provider_id.startswith(("cerebras", "groq")) else [])
+        if van_de:
+            if prov.provider_id.startswith("cerebras"):
+                ket_qua, prov = self._sua_loi_cerebras_roi_du_phong_groq(
+                    text, ctx, project, personal_providers, prov)
+            else:
+                raise TranslationIntegrityError(
+                    f"Bản dịch từ {prov.provider_id} không đạt yêu cầu tính "
+                    f"vẹn: {tom_tat_van_de(van_de)}")
+
+        if allow_cache:
+            self._cache.luu(text, ctx, van_ban=ket_qua, provider_id=prov.provider_id,
+                           model_id=prov.model_id, credential_source=prov.credential_source)
+        return ket_qua, prov
+
+    def _lay_thuat_ngu_du_an(self, project: TranslationProject) -> Dict[str, str]:
+        """
+        Snapshot thuat ngu (glossary) CHO CA MOT LAN CHAY JOB — lay MOT LAN
+        tu kho, roi GIU NGUYEN (khong doc lai) cho TOAN BO cac chuong con
+        lai cua CUNG lan chay nay (yeu cau bo sung "terminology consistency"
+        muc 2: "Preserve a translation-job terminology map across all chunks
+        of the same chapter/job").
+
+        Danh doi CO CHU DICH: neu ai do sua glossary GIUA CHUNG mot job dang
+        chay (vd du an dai nhieu chuong, nguoi dung sua tu dien o giua),
+        thay doi do CHUA co hieu luc cho cac chuong CON LAI cua lan chay
+        HIEN TAI — chi co hieu luc tu LAN CHAY KE TIEP (`_thuc_thi_job` xoa
+        snapshot cu luc bat dau, xem noi goi). Nhat quan XUYEN SUOT mot lan
+        chay quan trong hon phan anh tuc thi mot thay doi giua chung — dung
+        y "cung mot ten rieng/tieu de/mon phai/thuat ngu tu luyen duoc dich
+        nhat quan" cho CA job, khong doi giua chuong 3 va chuong 5 chi vi
+        request doc glossary tinh co roi vao giua mot lan sua.
+
+        CHI DUNG cho duong ong TU DONG (`_dich_mot_chuong`) — hanh dong THU
+        CONG (`_chay_vai_tro_tren_van_ban`: regen doan/chuong, chay lai pass)
+        VAN doc glossary TRUC TIEP tu kho (KHONG qua snapshot nay), vi day
+        la mot hanh dong RIENG LE cua nguoi dung, khong phai "mot chuong
+        trong lan chay job dang dien ra" — nguoi dung bam "dịch lại" luon
+        muon ban MOI NHAT cua glossary, khong phai mot snapshot co the da cu.
+        """
+        if project.project_id not in self._thuat_ngu_theo_du_an:
+            self._thuat_ngu_theo_du_an[project.project_id] = {
+                e.original: e.translated
+                for e in self._store.list_glossary(project.project_id)}
+        return self._thuat_ngu_theo_du_an[project.project_id]
 
     def _dich_mot_chuong(self, project: TranslationProject, noi_dung: str,
                          chuong_idx: int, job: TranslationJob,
@@ -761,8 +1118,7 @@ class TranslationService:
         tom_tat = "\n".join(
             project.chapter_summaries[max(0, chuong_idx - SO_CHUONG_TOM_TAT_NGU_CANH):
                                       chuong_idx])
-        glossary = {e.original: e.translated
-                    for e in self._store.list_glossary(project.project_id)}
+        glossary = self._lay_thuat_ngu_du_an(project)
 
         vai_tro_ds = _VAI_TRO_THEO_CHE_DO[project.quality_mode]
         ket_qua = []
@@ -791,7 +1147,8 @@ class TranslationService:
                 dich = phan
                 for vai_tro in vai_tro_ds:
                     ctx = TranslationContext(
-                        vai_tro=vai_tro, genre=project.genre.value,
+                        vai_tro=vai_tro, quality_mode=project.quality_mode.value,
+                        genre=project.genre.value,
                         naming_mode=project.naming_mode.value,
                         tom_tat_truoc=tom_tat, glossary=glossary,
                         custom_instruction=project.custom_instruction)
@@ -944,12 +1301,14 @@ class TranslationService:
                 dich = phan
                 for vai_tro in vai_tro_ds:
                     ctx = TranslationContext(
-                        vai_tro=vai_tro, genre=project.genre.value,
+                        vai_tro=vai_tro, quality_mode=project.quality_mode.value,
+                        genre=project.genre.value,
                         naming_mode=project.naming_mode.value,
                         tom_tat_truoc=tom_tat, glossary=glossary,
                         custom_instruction=project.custom_instruction)
                     dich, prov = self._goi_dich_mot_doan(
-                        dich, ctx, project, personal_providers)
+                        dich, ctx, project, personal_providers,
+                        allow_cache=False)
                 ket_qua.append(dich)
         finally:
             if self._byok:

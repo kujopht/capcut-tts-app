@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "@/lib/session";
 import { NavIndicator, type BangMuc } from "@/components/NavIndicator";
 import { NotificationBell } from "@/components/NotificationBell";
+import { StreakBadge } from "@/components/StreakBadge";
 import { Avatar } from "@/components/Avatar";
 
 /**
@@ -29,10 +30,18 @@ import { Avatar } from "@/components/Avatar";
  * `cta` KHONG doi thu tu hay cau truc — no chi doi CACH VE. "Viết truyện" van
  * la muc thu tu trong danh sach nay; no duoc ve thanh mot nut co vien tim thay
  * vi mot lien ket tron, de nguoi luot qua thay ngay rang ho tu viet duoc.
+ *
+ * "Animation" (V6, overnight Phase 5) dung NGAY SAU "Khám phá" — cùng nhịp
+ * XEM/ĐỌC "tìm thứ để tiêu thụ", trước khi rẽ sang "Cộng đồng" (tương tác xã
+ * hội). Đây là một sản phẩm ĐỘC LẬP với Truyện/Audio (xem docstring đầu
+ * `server/animation_domain.py`) — Audio KHÔNG lên hàng đầu vì nó vẫn là một
+ * CÔNG CỤ (`/studio`) chứ không phải một khu vực duyệt riêng, còn Animation
+ * thì có trang chủ/series/tập của chính nó, xứng một mục điều hướng chính.
  */
 const LINKS = [
   { href: "/", label: "Trang chủ" },
   { href: "/fanfic", label: "Khám phá" },
+  { href: "/animation", label: "Animation" },
   { href: "/community", label: "Cộng đồng" },
   { href: "/library", label: "Thư viện" },
   { href: "/write", label: "Viết truyện", cta: true },
@@ -170,8 +179,14 @@ function ToolsMenu() {
           <Link href="/studio" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">🎙</span> Audio Studio
           </Link>
+          <Link href="/image-studio" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">🖼</span> Image Studio
+          </Link>
           <Link href="/translate" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">🈺</span> Dịch tiểu thuyết
+          </Link>
+          <Link href="/tools/subtitles" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">🎬</span> Subtitle Studio
           </Link>
         </div>
       ) : null}
@@ -220,6 +235,9 @@ function AccountMenu() {
           <Link href="/account" className="menu-item" role="menuitem" onClick={close}>
             <span aria-hidden="true">👤</span> Tài khoản
           </Link>
+          <Link href="/leaderboard" className="menu-item" role="menuitem" onClick={close}>
+            <span aria-hidden="true">👑</span> Bảng xếp hạng
+          </Link>
           {/*
             Chỉ hiện khi MÁY CHỦ xác nhận (`/api/auth/me` → `is_admin`).
             Không suy từ email hay danh sách nhúng trong frontend — đây chỉ là
@@ -252,6 +270,7 @@ export function NavAuth() {
   return (
     <div className="row nav-right">
       <ToolsMenu />
+      <StreakBadge />
       {/* Chuông đứng TRƯỚC menu tài khoản: nó là thứ người ta nhìn thường
           xuyên hơn, và đặt nó sau avatar sẽ đẩy nó ra rìa màn hình ở mobile. */}
       <NotificationBell />

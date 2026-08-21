@@ -38,6 +38,12 @@ class TranslationContext:
     #: dung de chon he thong-prompt phu hop; mock dung de bo qua bien tap/QA
     #: (tra nguyen van doan dich, xem `MockTranslationProvider`).
     vai_tro: str
+    #: Che do chat luong cua DU AN ("nhanh"/"can_bang"/"van_hoc") — Phan 3D
+    #: (overnight Phase 3): `ProviderRegistry` dung gia tri nay CUNG
+    #: `vai_tro` de chon THU TU model Groq nen thu, xem
+    #: `translation_model_profiles.route_order`. Rong = khong dinh tuyen dac
+    #: biet (vi du goi tu noi chua biet che do, nhu mot so test cu).
+    quality_mode: str = ""
     genre: str = "auto"
     naming_mode: str = "auto"
     #: Tom tat NGAN cac chuong truoc — kiem soat token, KHONG nhet toan bo
@@ -47,10 +53,32 @@ class TranslationContext:
     #: bo tu dien du an (tranh phinh prompt vo ich).
     glossary: Dict[str, str] = field(default_factory=dict)
     custom_instruction: str = ""
+    #: V6 cerebras-groq-translation — chi dan SUA LOI, CHI duoc dien khi day
+    #: la LAN GOI THU HAI (repair retry) sau khi `translation_integrity.
+    #: kiem_tra_tinh_ven` phat hien ban dich lan dau khong dat (con sot chu
+    #: Han/thieu noi dung/cat cut). TACH RIENG khoi `custom_instruction` (do
+    #: la yeu cau CUA NGUOI DUNG cho ca du an, khong lien quan gi toi lan sua
+    #: loi nay) — gop chung se lam mat/lan lon y nguoi dung that su muon.
+    chi_dan_sua_loi: str = ""
 
 
 class TranslationProviderError(Exception):
     """Loi tu phia nha cung cap — tang service doi thanh trang thai `failed`."""
+
+
+class TranslationIntegrityError(TranslationProviderError):
+    """
+    V6 cerebras-groq-translation — ban dich KHONG DAT tinh ven (xem
+    `translation_integrity.kiem_tra_tinh_ven`) SAU KHI da thu sua loi (Cerebras)
+    VA du phong (Groq, neu co) — "controlled per-chunk translation error" theo
+    dung yeu cau goc.
+
+    La MOT `TranslationProviderError` (khong phai lop rieng biet) CO CHU
+    DICH: `_thuc_thi_job` da co san logic bat `TranslationProviderError` va
+    dua job ve trang thai `failed` AN TOAN (chuong TRUOC van con nguyen, xem
+    `_thuc_thi_job`) — tai su dung DUNG co che do, khong can them nhanh xu ly
+    moi cho MOT loai loi moi.
+    """
 
 
 class TranslationProvider(ABC):
@@ -165,28 +193,39 @@ def _he_thong_prompt(context: TranslationContext) -> str:
     )
 
     if context.vai_tro == "translator":
-        return (
+        prompt = (
             goc + " Dịch đoạn văn được đưa vào sang tiếng Việt tự nhiên, "
             "đúng văn phong tiểu thuyết mạng (không dịch từng chữ máy móc). "
             "CHỈ trả về đoạn văn đã dịch, không thêm lời giải thích, không "
             "thêm ký hiệu markdown hay chú thích."
         )
-    if context.vai_tro == "editor":
-        return (
+    elif context.vai_tro == "editor":
+        prompt = (
             goc + " Đoạn văn đưa vào ĐÃ được dịch sang tiếng Việt ở bước "
             "trước. Nhiệm vụ của bạn là biên tập văn học: câu văn mượt hơn, "
             "tự nhiên hơn, đúng giọng văn thể loại — KHÔNG đổi nghĩa, KHÔNG "
             "thêm/bớt tình tiết, KHÔNG đổi tên riêng đã dùng. Nếu đoạn văn "
             "đã tốt, trả về nguyên văn. CHỈ trả về đoạn văn kết quả."
         )
-    # "qa"
-    return (
-        goc + " Đoạn văn đưa vào là bản dịch đã qua biên tập. Kiểm tra lỗi "
-        "sai nghĩa, thiếu câu, xưng hô mâu thuẫn với ngữ cảnh, hoặc lỗi "
-        "chính tả — rồi SỬA CỤC BỘ đúng chỗ sai (patch tại chỗ), KHÔNG viết "
-        "lại toàn bộ đoạn văn nếu phần còn lại đã ổn. Nếu không có lỗi, trả "
-        "về nguyên văn không đổi. CHỈ trả về đoạn văn kết quả."
-    )
+    else:  # "qa"
+        prompt = (
+            goc + " Đoạn văn đưa vào là bản dịch đã qua biên tập. Kiểm tra lỗi "
+            "sai nghĩa, thiếu câu, xưng hô mâu thuẫn với ngữ cảnh, hoặc lỗi "
+            "chính tả — rồi SỬA CỤC BỘ đúng chỗ sai (patch tại chỗ), KHÔNG viết "
+            "lại toàn bộ đoạn văn nếu phần còn lại đã ổn. Nếu không có lỗi, trả "
+            "về nguyên văn không đổi. CHỈ trả về đoạn văn kết quả."
+        )
+
+    if context.chi_dan_sua_loi.strip():
+        # V6 cerebras-groq-translation — lan goi SUA LOI (repair retry) sau
+        # khi `translation_integrity.kiem_tra_tinh_ven` phat hien lan dau
+        # khong dat. Dat O CUOI, tach biet ro rang, de model uu tien no nhu
+        # mot rang buoc THEM (khong thay the chi dan vai-tro o tren).
+        prompt += (
+            "\n\nQUAN TRỌNG — YÊU CẦU SỬA LỖI BẮT BUỘC: "
+            f"{context.chi_dan_sua_loi.strip()}"
+        )
+    return prompt
 
 
 def _nguoi_dung_prompt(text: str, context: TranslationContext) -> str:

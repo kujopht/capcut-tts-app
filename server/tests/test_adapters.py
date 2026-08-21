@@ -247,5 +247,73 @@ class TestProfileFromRow(unittest.TestCase):
         self.assertEqual(p.avatar_key, "")
 
 
+class TestSaveProfileDatetimeCoercion(unittest.TestCase):
+    """
+    Kiem tra thu hoach TU dot Appwrite optional-datetime audit (sau Phase 6):
+    Appwrite (tu luu tru) tu dien gio server HIEN TAI cho mot thuoc tinh
+    `datetime` KHONG bat buoc khi nhan chuoi rong "", thay vi null nhu ky
+    vong (xem `appwrite_trusted_source_store.py::_DATETIME_FIELDS`).
+
+    `save_profile` (PATCH mot ho so DA CO) tung xay dung payload bang
+    `getattr(profile, k)` THO, KHONG qua `Profile.to_dict()` (von da tu
+    doi "" -> None cho ba truong nay) — moi lan goi (vd chi doi bio/avatar)
+    ma nguoi dung CHUA tung doc/nghe/xem gi se ghi de `last_read_at`/
+    `last_listen_at`/`last_watch_at` thanh CHUOI RONG, kich hoat dung tat
+    Appwrite noi tren.
+    """
+
+    def _adapter_gia_lap(self):
+        from server.appwrite_adapter import AppwriteIdentityAdapter
+
+        adapter = AppwriteIdentityAdapter(AppwriteSettings(
+            endpoint="https://x.invalid/v1", project_id="p",
+            api_key="k", database_id="db"))
+        # Gia lap ket qua da hoi schema MOT LAN (tranh goi mang that) — MOI
+        # thuoc tinh V2 coi nhu da co tren Appwrite.
+        adapter._profile_attrs = set(adapter._PROFILE_V2_FIELDS) | {"username"}
+        return adapter
+
+    def test_ho_so_chua_doc_nghe_xem_gi_ghi_null_khong_phai_chuoi_rong(self):
+        from server.domain import Profile
+
+        adapter = self._adapter_gia_lap()
+        captured = {}
+
+        def gia_request(method, path, *, payload=None, params=None,
+                        session="", admin=True):
+            captured["payload"] = payload
+            return {}
+
+        adapter._request = gia_request
+        profile = Profile(user_id="u1", email="a@vidu.vn", username="an")
+        adapter.save_profile(profile)
+
+        data = captured["payload"]["data"]
+        self.assertIsNone(data["last_read_at"])
+        self.assertIsNone(data["last_listen_at"])
+        self.assertIsNone(data["last_watch_at"])
+
+    def test_ho_so_da_co_moc_thoi_gian_that_van_giu_nguyen(self):
+        from server.domain import Profile
+
+        adapter = self._adapter_gia_lap()
+        captured = {}
+
+        def gia_request(method, path, *, payload=None, params=None,
+                        session="", admin=True):
+            captured["payload"] = payload
+            return {}
+
+        adapter._request = gia_request
+        profile = Profile(user_id="u1", email="a@vidu.vn", username="an",
+                          last_read_at="2026-01-01T00:00:00+00:00")
+        adapter.save_profile(profile)
+
+        data = captured["payload"]["data"]
+        self.assertEqual(data["last_read_at"], "2026-01-01T00:00:00+00:00")
+        self.assertIsNone(data["last_listen_at"])
+        self.assertIsNone(data["last_watch_at"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

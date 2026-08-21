@@ -19,7 +19,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
+// Chuan hoa CRLF -> LF: checkout/merge tren Windows co the ghi lai CRLF cho
+// file van la LF trong git blob (xem bai hoc o `admin-trusted-sources.test.mjs`).
+// Thieu buoc nay thi cac test so khop chuoi da dong (\n) se vo co hong sau
+// mot lan `git checkout`/`merge`, du noi dung logic khong doi.
+const read = (p) =>
+  readFileSync(new URL(p, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const css = () => read("../src/app/globals.css");
 
 /**
@@ -132,19 +137,20 @@ test("muc dang xem danh dau bang vach duoi, khong to ca nen", () => {
 
 /* ============================================================= trang chu */
 
-test("trang chu co dai mo dau, va no LUON ve", () => {
+test("trang chu co hero, va no LUON ve", () => {
   const home = read("../src/app/page.tsx");
-  assert.match(home, /<HomeHero daDangNhap=/);
+  assert.match(home, /<Hero daDangNhap=/);
   // Ve TRUOC nhanh loading/error/empty, nen kho trong thi van con thu noi cho
   // nguoi vao lan dau biet ho dang o dau.
-  const at = home.indexOf("<HomeHero");
-  assert.ok(at < home.indexOf("loading ?"), "dải mở đầu nằm sau nhánh loading");
+  const at = home.indexOf("<Hero daDangNhap=");
+  assert.ok(at < home.indexOf('loading ? (\n          <SkeletonCards'),
+    "hero nằm sau nhánh loading");
 });
 
-test("dai mo dau noi ve TRUYEN, khong phai ve cong cu", () => {
+test("hero noi ve TRUYEN, khong phai ve cong cu", () => {
   const home = read("../src/app/page.tsx");
-  const at = home.indexOf("function HomeHero");
-  const than = home.slice(at, home.indexOf("export default"));
+  const at = home.indexOf("function Hero(");
+  const than = home.slice(at, home.indexOf("function DaiThanhVien"));
   assert.match(than, /href="\/fanfic"/, "thiếu lối vào khám phá truyện");
   assert.match(than, /href="\/write"/, "thiếu lối vào viết truyện");
   // Va van khong dan bang logo khong lo — `ui.test.mjs` giu rang buoc do.
@@ -160,7 +166,10 @@ test("da dang nhap thi co loi tat vao thu vien", () => {
 test("trang chu VAN lay truyen that, khong thanh landing tinh", () => {
   const home = read("../src/app/page.tsx");
   assert.match(home, /api\.browseNovels/);
-  assert.match(home, /<StoryHero novel=\{hero\}/);
+  // "featured" thay `StoryHero` cu (V4 visual completion) — mot the noi bat
+  // gioi han rong, dung khi kho chi co DUY NHAT mot truyen. Xem
+  // `components/StoryCard.tsx::StoryCardVariant`.
+  assert.match(home, /variant="featured"/);
   assert.match(home, /<StoryCard key=/);
 });
 
@@ -272,7 +281,7 @@ test("moi bo cuc luoi moi deu xuong dong o mobile", () => {
   assert.notEqual(at, -1);
   const mobile = text.slice(at);
   for (const cls of [
-    ".home-hero",
+    ".hero-v2",
     ".cta-band",
     ".audio-row",
     ".account-hero",

@@ -16,17 +16,20 @@ from urllib.parse import urlencode
 
 import httpx
 
-from server.adapters import AuthError
+from server.adapters import AppwriteUnavailableError, AuthError
 from server.appwrite_store import (
     q_contains as _q_contains,
     q_equal as _q_equal,
+    q_greater_equal as _q_greater_equal,
     q_limit as _q_limit,
     q_offset as _q_offset,
     q_or as _q_or,
     q_order_asc as _q_order_asc,
+    q_order_desc as _q_order_desc,
 )
 from server.config import AppwriteSettings
-from server.domain import AuthorStatus, Profile, Tier
+from server.secret_redaction import thong_diep_loi_an_toan
+from server.domain import AccountSession, AccountStatus, AuthorStatus, Profile, Tier
 
 #: Ten collection tuong ung voi schema trong docs/APPWRITE_SCHEMA.md
 COLLECTION_PROFILES = "profiles"
@@ -137,16 +140,26 @@ class AppwriteIdentityAdapter:
                 headers=self._headers(admin=admin, session=session),
             )
         except httpx.HTTPError as exc:
-            raise AuthError(f"Không kết nối được Appwrite: {exc}") from exc
+            # KHONG dua `exc` thang vao thong diep: no co the chua chi tiet
+            # ha tang noi bo (vd loi DNS/errno cua he dieu hanh, endpoint) -
+            # cung nguyen tac voi `youtube_client.py::_goi`. Phat hien THAT
+            # (Phase 10, overnight hardening): truoc day thong diep noi
+            # `f"...: {exc}"`, nen mot Appwrite khong ket noi duoc se lam
+            # "[Errno 11001] getaddrinfo failed" lot ra tan phan hoi JSON.
+            #
+            # `AppwriteUnavailableError` (con cua `AuthError`, xem
+            # `server/adapters.py`) de noi goi (main.py) tra 503 thay vi
+            # 401/400 - day la loi TAM THOI cua ha tang, khong phai nguoi
+            # dung sai thong tin.
+            raise AppwriteUnavailableError(
+                "Không kết nối được Appwrite. Vui lòng thử lại sau.") from exc
 
         if response.status_code >= 400:
-            message = f"Appwrite trả về lỗi {response.status_code}."
             try:
                 body = response.json()
-                if isinstance(body, dict) and body.get("message"):
-                    message = str(body["message"])
             except Exception:
-                pass
+                body = None
+            message = thong_diep_loi_an_toan(body, status_code=response.status_code)
             if response.status_code in (401, 403):
                 raise AuthError(message)
             raise AuthError(message)
@@ -278,8 +291,8 @@ class AppwriteIdentityAdapter:
 
     def _merge_stored(self, profile: Profile) -> Profile:
         """
-        Ghep `username` / `bio` / `author_status` / `avatar_key` tu hang
-        `profiles` vao.
+        Ghep `username` / `bio` / `author_status` / `avatar_key` / cac truong
+        "tiep tuc doc/nghe" tu hang `profiles` vao.
 
         VI SAO CAN: `/v1/account` cua Appwrite chi biet email va ten — no khong
         biet gi ve ba truong V2. Khong ghep thi moi request tra ve mot ho so
@@ -301,6 +314,21 @@ class AppwriteIdentityAdapter:
         except ValueError:
             profile.author_status = AuthorStatus.NONE
         profile.avatar_key = str(row.get("avatar_key") or "")
+        profile.last_read_novel_id = str(row.get("last_read_novel_id") or "")
+        profile.last_read_chapter_id = str(row.get("last_read_chapter_id") or "")
+        profile.last_read_at = str(row.get("last_read_at") or "")
+        profile.last_listen_novel_id = str(row.get("last_listen_novel_id") or "")
+        profile.last_listen_chapter_id = str(row.get("last_listen_chapter_id") or "")
+        profile.last_listen_position_seconds = float(
+            row.get("last_listen_position_seconds") or 0.0)
+        profile.last_listen_at = str(row.get("last_listen_at") or "")
+        profile.last_watch_series_id = str(row.get("last_watch_series_id") or "")
+        profile.last_watch_episode_id = str(row.get("last_watch_episode_id") or "")
+        profile.last_watch_position_seconds = float(
+            row.get("last_watch_position_seconds") or 0.0)
+        profile.last_watch_duration_seconds = float(
+            row.get("last_watch_duration_seconds") or 0.0)
+        profile.last_watch_at = str(row.get("last_watch_at") or "")
         return profile
 
     def _profile_path(self, user_id: str) -> str:
@@ -403,7 +431,29 @@ class AppwriteIdentityAdapter:
         "user_id", "email", "display_name", "tier",
         "listened_minutes", "tts_characters_used", "created_at",
     )
-    _PROFILE_V2_FIELDS = ("username", "bio", "author_status", "avatar_key")
+    _PROFILE_V2_FIELDS = (
+        "username", "bio", "author_status", "avatar_key",
+        # "Tiep tuc doc/nghe" (V4 visual completion) — them SAU, cung co che
+        # dong-thieu-thi-bo-qua nay: chua chay schema thi tinh nang chi an,
+        # khong lam vo dang ky/cap nhat ho so.
+        "last_read_novel_id", "last_read_chapter_id", "last_read_at",
+        "last_listen_novel_id", "last_listen_chapter_id",
+        "last_listen_position_seconds", "last_listen_at",
+        # "Tiep tuc xem" (V6, overnight Phase 5) — them SAU, cung co che
+        # dong-thieu-thi-bo-qua nay.
+        "last_watch_series_id", "last_watch_episode_id",
+        "last_watch_position_seconds", "last_watch_duration_seconds",
+        "last_watch_at",
+    )
+
+    #: Thuoc tinh KIEU `datetime` (khong bat buoc) trong `_PROFILE_V2_FIELDS` —
+    #: Appwrite (tu luu tru) tu dien gio server HIEN TAI khi nhan chuoi rong ""
+    #: cho mot thuoc tinh datetime khong bat buoc, thay vi null nhu ky vong (da
+    #: xac nhan THAT o Phase 6 nhanh feature/admin-trusted-video-v2, xem
+    #: `appwrite_trusted_source_store.py::_DATETIME_FIELDS`). `save_profile`
+    #: PATCH ca ba truong nay moi lan goi (vd chi doi bio/avatar) — neu nguoi
+    #: dung chua tung doc/nghe/xem gi thi phai gui `None`, khong phai `""`.
+    _PROFILE_DATETIME_FIELDS = ("last_read_at", "last_listen_at", "last_watch_at")
 
     #: Truong co INDEX UNIQUE. Chuoi rong KHONG duoc ghi vao day.
     #:
@@ -464,6 +514,9 @@ class AppwriteIdentityAdapter:
                 if co is not None and k in co}
         if "author_status" in data:
             data["author_status"] = profile.author_status.value
+        for k in self._PROFILE_DATETIME_FIELDS:
+            if data.get(k) == "":
+                data[k] = None
         if not data:
             raise AuthError(
                 "Chưa thể lưu danh tính công khai: bảng `profiles` còn thiếu các "
@@ -560,6 +613,18 @@ class AppwriteIdentityAdapter:
         rows, total = self._page(COLLECTION_PROFILES, queries)
         return [_profile_from(r) for r in rows], total
 
+    def count_profiles(self, created_after: str = "") -> int:
+        """
+        Tong so ho so, TUY CHON chi tinh tu mot moc thoi gian — dung cho cac o
+        "moi dang ky hom nay/7 ngay/30 ngay" o bang dieu khien quan tri (Admin
+        Control Center V2, A1). `limit(1)` + doc `total`, KHONG keo ban ghi
+        ve — cung idiom voi `total_published_novels`/`count_applications`.
+        """
+        queries = [_q_limit(1)]
+        if created_after:
+            queries.insert(0, _q_greater_equal("created_at", created_after))
+        return self._page(COLLECTION_PROFILES, queries)[1]
+
     def all_usernames(self) -> List[str]:
         """
         Cac ten da co, de goi y mot ten chua ai lay.
@@ -596,6 +661,93 @@ class AppwriteIdentityAdapter:
                 if pf.user_id:
                     ra[pf.user_id] = pf
         return ra
+
+    # =========================================================== V3: tai khoan
+    #
+    # Goi THANG Appwrite Users API (`/v1/users*`), KHONG PHAI bang `profiles`
+    # — day la du lieu Auth native (email verification, khoa dang nhap, phien
+    # dang nhap), khong co ban sao va khong bao gio nen ghi vao `profiles`.
+    # Xem `AccountStatus`/`AccountSession` (server/domain.py) va muc "Kien
+    # truc bao mat quan tri" trong handoff Phase 3.
+
+    def list_accounts(self, query: str = "", limit: int = 25,
+                      offset: int = 0) -> Tuple[List[AccountStatus], int]:
+        """
+        Danh sach TAI KHOAN, phan trang o phia Appwrite — nguon cho
+        `/api/admin/users` (Phase 3), thay cho `search_profiles` cu (chi thay
+        nguoi da chon username).
+
+        `search` la THAM SO RIENG cua Appwrite cho `/v1/users` (khac voi
+        `contains`/`search()` trong queries[] cua Databases) — no tim toan
+        van tren name/email/phone do Appwrite tu quan ly index, KHONG can
+        index fulltext tu cau hinh nhu ben `profiles`.
+        """
+        params: Dict[str, Any] = {
+            "queries[]": [_q_order_desc("registration"), _q_limit(limit),
+                         _q_offset(offset)],
+        }
+        tu = (query or "").strip()
+        if tu:
+            params["search"] = tu
+        data = self._request("GET", "/v1/users", params=params)
+        rows = list(data.get("users") or [])
+        total = data.get("total")
+        return ([_account_from(r) for r in rows],
+                int(total) if isinstance(total, int) else len(rows))
+
+    def account_status(self, user_id: str) -> Optional[AccountStatus]:
+        try:
+            row = self._request("GET", f"/v1/users/{user_id}")
+        except AuthError:
+            # `_request` khong giu status code goc (xem ghi chu o `ensure_profile`
+            # ve cung han che nay) — khong the tach 404 khoi loi khac o day,
+            # nen coi MOI loi la "khong tim thay". Cac route goi ham nay chi
+            # dung no de doi ra 404, khong dua vao de phat hien su co ha tang.
+            return None
+        return _account_from(row)
+
+    def list_sessions(self, user_id: str) -> List[AccountSession]:
+        data = self._request("GET", f"/v1/users/{user_id}/sessions")
+        return [_session_from(s) for s in (data.get("sessions") or [])]
+
+    def terminate_session(self, user_id: str, session_id: str) -> bool:
+        """IDEMPOTENT, cung tinh than voi `logout`: phien von da mat thi coi
+        nhu muc tieu da dat, khong nem loi."""
+        try:
+            self._request("DELETE", f"/v1/users/{user_id}/sessions/{session_id}")
+            return True
+        except AuthError:
+            return False
+
+    def terminate_all_sessions(self, user_id: str) -> int:
+        """
+        Appwrite tra `204 No Content` cho lenh xoa hang loat — khong biet da
+        xoa BAO NHIEU tu chinh response do. Dem TRUOC roi moi xoa.
+        """
+        phien = self.list_sessions(user_id)
+        if not phien:
+            return 0
+        self._request("DELETE", f"/v1/users/{user_id}/sessions")
+        return len(phien)
+
+    def set_account_enabled(self, user_id: str, enabled: bool) -> Optional[AccountStatus]:
+        try:
+            row = self._request("PATCH", f"/v1/users/{user_id}/status",
+                                payload={"status": enabled})
+        except AuthError:
+            return None
+        return _account_from(row)
+
+    def count_accounts(self, *, email_verified: Optional[bool] = None,
+                       enabled: Optional[bool] = None) -> int:
+        queries: List[str] = [_q_limit(1)]
+        if email_verified is not None:
+            queries.append(_q_equal("emailVerification", email_verified))
+        if enabled is not None:
+            queries.append(_q_equal("status", enabled))
+        data = self._request("GET", "/v1/users", params={"queries[]": queries})
+        total = data.get("total")
+        return int(total) if isinstance(total, int) else 0
 
     # -- ha tang truy van ----------------------------------------------------
 
@@ -658,4 +810,47 @@ def _profile_from(row: Dict[str, Any]) -> Profile:
         bio=str(row.get("bio") or ""),
         author_status=status,
         avatar_key=str(row.get("avatar_key") or ""),
+        last_read_novel_id=str(row.get("last_read_novel_id") or ""),
+        last_read_chapter_id=str(row.get("last_read_chapter_id") or ""),
+        last_read_at=str(row.get("last_read_at") or ""),
+        last_listen_novel_id=str(row.get("last_listen_novel_id") or ""),
+        last_listen_chapter_id=str(row.get("last_listen_chapter_id") or ""),
+        last_listen_position_seconds=float(
+            row.get("last_listen_position_seconds") or 0.0),
+        last_listen_at=str(row.get("last_listen_at") or ""),
+        last_watch_series_id=str(row.get("last_watch_series_id") or ""),
+        last_watch_episode_id=str(row.get("last_watch_episode_id") or ""),
+        last_watch_position_seconds=float(
+            row.get("last_watch_position_seconds") or 0.0),
+        last_watch_duration_seconds=float(
+            row.get("last_watch_duration_seconds") or 0.0),
+        last_watch_at=str(row.get("last_watch_at") or ""),
+    )
+
+
+def _account_from(row: Dict[str, Any]) -> AccountStatus:
+    """Hang nguoi dung tu Appwrite Users API -> `AccountStatus`. `status` cua
+    Appwrite la bool (`True` = con dung duoc) — CHINH la `enabled`."""
+    return AccountStatus(
+        user_id=str(row.get("$id") or ""),
+        email=str(row.get("email") or ""),
+        name=str(row.get("name") or ""),
+        enabled=bool(row.get("status", True)),
+        email_verified=bool(row.get("emailVerification", False)),
+        phone_verified=bool(row.get("phoneVerification", False)),
+        registered_at=str(row.get("registration") or ""),
+    )
+
+
+def _session_from(row: Dict[str, Any]) -> AccountSession:
+    return AccountSession(
+        session_id=str(row.get("$id") or ""),
+        provider=str(row.get("provider") or ""),
+        ip=str(row.get("ip") or ""),
+        os_name=str(row.get("osName") or ""),
+        client_name=str(row.get("clientName") or ""),
+        device_name=str(row.get("deviceName") or ""),
+        country_name=str(row.get("countryName") or ""),
+        current=bool(row.get("current", False)),
+        created_at=str(row.get("$createdAt") or ""),
     )

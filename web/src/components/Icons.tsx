@@ -75,6 +75,70 @@ export function IconHeadphones(p: Props) {
   );
 }
 
+/** Cuon phim — "video/phu de" (Subtitle Studio, overnight Phase 4). */
+export function IconFilm(p: Props) {
+  return (
+    <Svg {...p}>
+      <rect x="3" y="5" width="18" height="14" rx="1.5" />
+      <path d="M7 5 V19 M17 5 V19" />
+      <path d="M3 9 H7 M3 15 H7 M17 9 H21 M17 15 H21" />
+    </Svg>
+  );
+}
+
+/** Tam giac Play — nut phat cua trinh phat facade YouTube (overnight Phase 5). */
+export function IconPlay(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M7 4.5 L19 12 L7 19.5 Z" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+
+/** Mat xich — nguon tin cay/lien ket ngoai (Trusted Video Sources). */
+export function IconLink(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M10.5 13.5 a3.2 3.2 0 0 0 4.6 0.2 l2.6 -2.6 a3.3 3.3 0 0 0 -4.7 -4.7 l-1.5 1.5" />
+      <path d="M13.5 10.5 a3.2 3.2 0 0 0 -4.6 -0.2 l-2.6 2.6 a3.3 3.3 0 0 0 4.7 4.7 l1.5 -1.5" />
+    </Svg>
+  );
+}
+
+/** Hop thu den — hang doi nhap tu dong (Import Queue). */
+export function IconInbox(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 12.5 H8.5 l1.5 2.5 h4 l1.5 -2.5 H20" />
+      <path d="M5.5 5.5 H18.5 L20 12.5 V18 a1.5 1.5 0 0 1 -1.5 1.5 H5.5 A1.5 1.5 0 0 1 4 18 V12.5 Z" />
+    </Svg>
+  );
+}
+
+/** Cot bieu do — Analytics/phan tich. */
+export function IconChart(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 20 V4" />
+      <path d="M4 20 H20" />
+      <rect x="7" y="13" width="3" height="7" rx="0.5" />
+      <rect x="12.5" y="9" width="3" height="11" rx="0.5" />
+      <rect x="16.5" y="6" width="3" height="14" rx="0.5" />
+    </Svg>
+  );
+}
+
+/** Banh rang — cai dat he thong. */
+export function IconGear(p: Props) {
+  return (
+    <Svg {...p}>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 3.5 v2.4 M12 18.1 v2.4 M20.5 12 h-2.4 M5.9 12 H3.5" />
+      <path d="M17.7 6.3 l-1.7 1.7 M8 16 l-1.7 1.7 M17.7 17.7 l-1.7 -1.7 M8 8 L6.3 6.3" />
+    </Svg>
+  );
+}
+
 /** Micro — "tao giong doc". */
 export function IconMic(p: Props) {
   return (
@@ -198,6 +262,27 @@ export function IconMegaphone(p: Props) {
     <Svg {...p}>
       <path d="M4 10.5v3a1.5 1.5 0 0 0 1.5 1.5H7l2.6 3.4a1 1 0 0 0 1.8-.6V6.2a1 1 0 0 0-1.8-.6L7 9H5.5A1.5 1.5 0 0 0 4 10.5Z" />
       <path d="M14.4 9.1a4 4 0 0 1 0 5.8M17 6.8a7.5 7.5 0 0 1 0 10.4" />
+    </Svg>
+  );
+}
+
+/** Cuon giay — nhiem vu (quest). */
+export function IconScroll(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M6.5 4.5h11v13a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" />
+      <path d="M17.5 4.5a2 2 0 0 1 2 2v1h-2" />
+      <path d="M9 9h6M9 12.5h6M9 16h4" />
+    </Svg>
+  );
+}
+
+/** Vuong mien — bang xep hang. */
+export function IconCrown(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M4 8.5 8 11l4-6.5 4 6.5 4-2.5-1.4 9.5H5.4Z" />
+      <path d="M5.4 18.5h13.2" />
     </Svg>
   );
 }

@@ -1,0 +1,66 @@
+# Router Traefik CHO RIENG api-dev.fanfic.world — dat tai
+# /storage/config/api-dev.fanfic.world.yml TRONG container `appwrite-traefik`
+# (file-provider, --providers.file.watch=true, xem docs/DEV_PUBLIC_BACKEND.md).
+#
+# KHONG dam vao docker-compose.yml/nhan cua Appwrite: Traefik cua Appwrite
+# chi dung docker-provider cho cac container CO nhan
+# `traefik.constraint-label-stack=appwrite` — dich vu nay dung file-provider
+# rieng, hoan toan tach biet, khong sua hanh vi appwrite-dev.fanfic.world.
+#
+# `Host(...)` co do dai/do dac hieu LON HON `PathPrefix('/')` (router mac
+# dinh cua appwrite_api) nen Traefik tu uu tien router nay cho dung
+# api-dev.fanfic.world, khong anh huong request toi appwrite-dev.fanfic.world.
+http:
+  routers:
+    # Uu tien CAO HON (rule dai hon = Host + PathPrefix): thu thach HTTP-01
+    # cua certbot (`-w /storage/certificates`) can duoc Appwrite phuc vu
+    # TINH (Appwrite da lam dieu nay cho appwrite-dev.fanfic.world, dung
+    # chung webroot). Tham chieu CHEO PROVIDER toi dich vu
+    # `appwrite_api@docker` da co san (khong tao dich vu moi, khong dam vao
+    # nhan/docker-compose.yml cua Appwrite) — xem
+    # docs/reports/appwrite-selfhost-gce-summary.md muc 15.3.
+    # HAI entrypoint: `appwrite_web` (yeu cau HTTP-01 goc) VA
+    # `appwrite_websecure` (entrypoint `appwrite_web` co redirect toan cuc
+    # HTTP->HTTPS o cap Appwrite, xem `docker-compose.yml` cua Appwrite —
+    # certbot theo redirect nay va yeu cau HTTPS thuc su tra ve dung file
+    # thu thach, nen router tren CA HAI entrypoint deu phai tro toi
+    # `appwrite_api@docker`, khong chi mot ben).
+    api_dev_acme_challenge:
+      rule: "Host(`api-dev.fanfic.world`) && PathPrefix(`/.well-known/acme-challenge/`)"
+      entryPoints: ["appwrite_web"]
+      service: appwrite_api@docker
+    api_dev_acme_challenge_secure:
+      rule: "Host(`api-dev.fanfic.world`) && PathPrefix(`/.well-known/acme-challenge/`)"
+      entryPoints: ["appwrite_websecure"]
+      service: appwrite_api@docker
+      tls: {}
+    api_dev_web:
+      rule: "Host(`api-dev.fanfic.world`)"
+      entryPoints: ["appwrite_web"]
+      service: api_dev
+    api_dev_websecure:
+      rule: "Host(`api-dev.fanfic.world`)"
+      entryPoints: ["appwrite_websecure"]
+      service: api_dev
+      tls: {}
+  services:
+    api_dev:
+      loadBalancer:
+        servers:
+          # Ten container tren mang `gateway` — Traefik (cung tren mang nay)
+          # phan giai qua DNS noi bo cua Docker.
+          - url: "http://fanfic-dev-api:8010"
+
+# Chung chi Let's Encrypt THAT — cap qua certbot thu cong MOT LAN
+# (`certbot certonly -v --webroot --noninteractive --agree-tos --email
+# <_APP_SYSTEM_EMAIL_ADDRESS> --cert-name api-dev.fanfic.world -w
+# /storage/certificates -d api-dev.fanfic.world`, dung CHINH XAC lenh
+# `Appwrite\Certificates\LetsEncrypt::issueCertificate()` se chay, cung
+# mau voi appwrite-dev.fanfic.world — xem
+# docs/reports/appwrite-selfhost-gce-summary.md muc 15.3). Het han
+# 2026-11-15 — can lap lai thao tac nay truoc ngay do (khong tu renew,
+# giong appwrite-dev.fanfic.world).
+tls:
+  certificates:
+    - certFile: /storage/certificates/api-dev.fanfic.world/fullchain.pem
+      keyFile: /storage/certificates/api-dev.fanfic.world/privkey.pem

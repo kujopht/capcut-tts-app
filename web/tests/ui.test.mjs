@@ -25,7 +25,7 @@ test("du cac route cua hai khu vuc san pham", () => {
   }
 });
 
-test("thanh dieu huong chinh dung NAM muc, theo dung thu tu", () => {
+test("thanh dieu huong chinh dung SAU muc, theo dung thu tu", () => {
   const nav = read("../src/components/NavAuth.tsx");
   // Thu tu la mot quyet dinh san pham, khong phai chuyen thu hang muc. So khop
   // theo VI TRI chu khong phai theo tap hop.
@@ -33,12 +33,16 @@ test("thanh dieu huong chinh dung NAM muc, theo dung thu tu", () => {
   // "Viết truyện" ngang hang voi "Khám phá" va "Thư viện": khong co tac gia
   // thi khong co gi de doc, nen giau no trong menu tai khoan la noi rang viec
   // do la phu.
+  //
+  // "Animation" (V6, overnight Phase 5) dung NGAY SAU "Khám phá" — xem ghi
+  // chu tren `LINKS` trong `NavAuth.tsx`.
   const order = [...nav.matchAll(/href: "([^"]+)", label: "([^"]+)"/g)].map(
     (m) => [m[1], m[2]],
   );
   assert.deepEqual(order, [
     ["/", "Trang chủ"],
     ["/fanfic", "Khám phá"],
+    ["/animation", "Animation"],
     ["/community", "Cộng đồng"],
     ["/library", "Thư viện"],
     ["/write", "Viết truyện"],
@@ -60,7 +64,10 @@ test("trang chu la trang KHAM PHA TRUYEN, khong phai landing gioi thieu cong cu"
   const home = read("../src/app/page.tsx");
   // Phai that su lay truyen ve — truoc day trang chu khong goi mot API nao.
   assert.match(home, /api\.browseNovels/, "trang chủ không lấy truyện");
-  assert.match(home, /StoryHero/);
+  // `StoryHero` (khối bìa+chữ chia đôi trang) đã bị bỏ từ V4 visual
+  // completion, thay bằng `StoryCard variant="featured"` khi kho chỉ có
+  // đúng một truyện — xác nhận KHÔNG có `StoryHero` quay lại.
+  assert.ok(!home.includes("StoryHero"), "StoryHero cũ đã quay lại");
   assert.match(home, /StoryCard/);
   // Hai the tinh nang cu da bien mat: chung dat cong cu ngang hang voi noi
   // dung, dung thu ma ban thiet ke lai nay bo di.
@@ -240,6 +247,31 @@ test("hop thoai xac nhan bay focus va dong bang Escape", () => {
   assert.match(ui, /aria-modal="true"/);
   assert.match(ui, /"Escape"/);
   assert.match(ui, /event\.key !== "Tab"/, "phai bay focus trong hop thoai");
+});
+
+test("ConfirmDialog: effect bay focus KHONG chay lai theo moi phim go trong body", () => {
+  /*
+   * Bug that da gap (Phase 4, Admin Control Center V2, phat hien qua QA
+   * trinh duyet that): effect bay focus/Escape cu co `onCancel` trong mang
+   * phu thuoc. MOI noi goi <ConfirmDialog> truyen `onCancel` la mot ham NEN
+   * inline (vd `() => setHoi(null)`) — mot THAM CHIEU MOI moi lan cha render
+   * lai. Neu body la mot o nhap co kiem soat (textarea ghi ly do), MOI phim
+   * go goi setState -> cha render lai -> effect DON ROI CHAY LAI -> tieu
+   * diem bi giat ra khoi o nhap ve nut da mo hop thoai. Ket qua: nguoi dung
+   * KHONG BAO GIO go duoc qua mot ky tu vao o ly do.
+   *
+   * Sua bang mot ref giu ham `onCancel` MOI NHAT, effect chinh chi con phu
+   * thuoc `open`.
+   */
+  const ui = read("../src/components/ui.tsx");
+  const at = ui.indexOf("export function ConfirmDialog");
+  const than = ui.slice(at, ui.indexOf("export function", at + 1));
+  assert.match(than, /const onCancelRef = useRef\(onCancel\)/,
+    "thieu ref giu onCancel moi nhat");
+  assert.match(than, /onCancelRef\.current\(\)/,
+    "effect bay focus phai goi qua ref, khong goi thang onCancel");
+  assert.match(than, /\},\s*\[open\]\)/,
+    "effect bay focus phai CHI phu thuoc `open` — `onCancel` trong mang phu thuoc se lam no chay lai theo moi phim go");
 });
 
 test("khong dung eslint-disable de lam ngo canh bao", () => {
@@ -642,14 +674,25 @@ test("anh bia duoc dung o ca bon noi", () => {
   assert.ok(!read("../src/app/fanfic/page.tsx").includes("📖"));
 });
 
-test("luong nghe lay bia tu chinh phan hoi cua chuong", () => {
+test("trang doc lay chuong trong DUNG MOT request, khong con can bia/audio", () => {
+  // Overnight Phase 2 (Phan 2A): trang doc khong con ve trinh phat/bia nua
+  // (chi chu), nen no cung khong con ly do de goi `api.getNovel(` — bat biet
+  // "mot request" van dung, chi khac ly do.
   const src = read("../src/app/chapters/[id]/page.tsx");
   assert.match(src, /api\.getChapter\(id\)/);
-  assert.ok(
-    !src.includes("api.getNovel("),
-    "khong con goi them /api/novels — backend da tra kem truyen",
-  );
-  assert.match(src, /coverUrl=\{novel\?\.cover_url\}/);
+  assert.ok(!src.includes("api.getNovel("));
+});
+
+test("trang Nghe dung DUNG HAI request bat ke truyen co bao nhieu chuong", () => {
+  // `getChapter` (chuong + audio + bia truyen) + `getNovel` (danh sach
+  // chuong cho tap truoc/sau + chon tap) — KHONG lap trong vong for, KHONG
+  // goi lai moi chuong: day chinh la rang buoc "khong N+1" cua Phan 2D.
+  const src = read("../src/app/listen/[id]/page.tsx");
+  assert.match(src, /api\.getChapter\(id\)/);
+  assert.match(src, /api\.getNovel\(novelBrief\.novel_id\)/);
+  assert.equal((src.match(/api\.getNovel\(/g) ?? []).length, 1,
+    "chi duoc goi getNovel dung MOT lan trong load()");
+  assert.match(src, /coverUrl={novel\.cover_url}/);
 });
 
 test("lop api khai bao truong moi la tuy chon", () => {
@@ -825,25 +868,23 @@ test("kich thuoc lien ket tai khoan nam trong CSS chu khong phai style inline", 
 });
 
 /* ===================================================================
-   M2 — nghe tai cho o trang chi tiet truyen
+   M2 — nghe tai trang chi tiet truyen
+
+   Vong overnight Phase 2 (Phan 2A): trinh phat KHONG con mo NGAY TRONG
+   HANG nua — hang gio chi co hai lien ket [Đọc]/[Nghe], "Nghe" dan sang
+   trang rieng `/listen/[id]` (dong co toan cuc DUY NHAT, xem
+   `chapter-player.test.mjs`). Cac bai cu kiem hanh vi mo-tai-cho da bi
+   XOA/THAY vi hanh vi do khong con nua, khong phai vi long lo test.
    =================================================================== */
 
-test("trang chi tiet truyen mo duoc trinh phat ngay trong hang", () => {
+test("trang chi tiet truyen KHONG con mo trinh phat ngay trong hang — dan sang /listen", () => {
   const src = read("../src/app/novels/[id]/page.tsx");
-  assert.match(src, /import \{ AudioPlayer \}/);
-  assert.match(src, /<AudioPlayer/);
-  assert.match(src, /compact/);
-});
-
-test("chi mot chuong phat cung luc", () => {
-  const src = read("../src/app/novels/[id]/page.tsx");
-  // Mot chuoi id, KHONG phai Set/mang — mo chuong khac thi chuong cu dong lai
-  assert.match(src, /useState\(""\)/);
   assert.ok(
-    !/playing(Ids|Set)/.test(src),
-    "khong duoc giu nhieu chuong mo cung luc",
+    !/import \{ AudioPlayer \}/.test(src) && !/<AudioPlayer/.test(src),
+    "trang chi tiet truyen khong duoc tu mo AudioPlayer rieng nua — dung dong co toan cuc qua /listen",
   );
-  assert.match(src, /setPlayingId\(playing \? "" : chapter\.chapter_id\)/);
+  assert.match(src, /href={`\/listen\/\$\{chapter\.chapter_id\}`}/);
+  assert.match(src, /href={`\/chapters\/\$\{chapter\.chapter_id\}`}/);
 });
 
 test("chi chuong CO audio moi hien nut nghe", () => {
@@ -855,12 +896,13 @@ test("chi chuong CO audio moi hien nut nghe", () => {
 
 test("hang khong con boc ca trong the <a>", () => {
   const src = read("../src/app/novels/[id]/page.tsx");
-  // <a> khong duoc chua <button>; ban cu boc ca hang trong <Link className="list-item">
+  // <a> khong duoc chua <button>/<a> khac; ban cu boc ca hang trong
+  // <Link className="list-item">.
   assert.ok(
     !/<Link[^>]*className="list-item"/.test(src),
-    "the <a> khong duoc chua <button>",
+    "the <a> khong duoc chua <button>/<a> khac",
   );
-  assert.match(src, /className={`list-item\$\{/);
+  assert.match(src, /className="list-item"/);
 });
 
 test("vung bam cua hang khong bi thu nho lai", () => {

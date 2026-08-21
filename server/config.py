@@ -169,6 +169,55 @@ STORAGE_BACKENDS = ("local", "r2")
 
 
 @dataclass(frozen=True)
+class ImageStudioSettings:
+    """Cau hinh Image Studio V1 (overnight build) — PHASE 7.
+
+    `POLLINATIONS_API_KEY` la khoa SERVER-SIDE cho Shared Premium — KHONG
+    BAO GIO gui xuong trinh duyet, khong bao gio xuat hien trong
+    `describe()`. `POLLINATIONS_CLIENT_ID` (dang `pk_...`) NGUOC LAI la
+    publishable — an toan de lo, dung cho luong BYOP OAuth.
+    """
+
+    #: Cong tac TONG cho Shared Premium — Quick Free/BYOP KHONG bi anh huong.
+    shared_premium_enabled: bool = False
+    monthly_budget_usd: float = 20.0
+    warning_budget_usd: float = 15.0
+    max_cost_per_request_usd: float = 0.10
+    max_concurrent_shared_generations: int = 3
+    markup_multiplier: float = 1.0
+    disabled_models: Tuple[str, ...] = ()
+
+    pollinations_api_key: str = ""
+    pollinations_client_id: str = ""
+    byop_master_key: str = ""
+    byop_redirect_uri: str = ""
+
+    @property
+    def shared_premium_configured(self) -> bool:
+        return self.shared_premium_enabled and bool(self.pollinations_api_key)
+
+    @property
+    def byop_configured(self) -> bool:
+        return bool(
+            self.pollinations_client_id and self.byop_master_key and self.byop_redirect_uri
+        )
+
+    def describe(self) -> dict:
+        """KHONG BAO GIO chua `pollinations_api_key`/`byop_master_key` —
+        chi co/khong co, giong `AppwriteSettings.configured` o tren."""
+        return {
+            "shared_premium_enabled": self.shared_premium_enabled,
+            "shared_premium_configured": self.shared_premium_configured,
+            "byop_configured": self.byop_configured,
+            "monthly_budget_usd": self.monthly_budget_usd,
+            "warning_budget_usd": self.warning_budget_usd,
+            "max_cost_per_request_usd": self.max_cost_per_request_usd,
+            "max_concurrent_shared_generations": self.max_concurrent_shared_generations,
+            "disabled_models": list(self.disabled_models),
+        }
+
+
+@dataclass(frozen=True)
 class Settings:
     """Toan bo cau hinh backend."""
 
@@ -227,6 +276,19 @@ class Settings:
     #: Xem `docs/ADMIN.md` de biet cach tao quan tri dau tien cho production.
     admin_user_ids: tuple = ()
 
+    #: Muc QUAN TRI CAO NHAT (Admin Control Center V2) — toan quyen, bao gom
+    #: ca cai dat ha tang/bi mat/tai chinh ma `admin_user_ids` (muc ADMIN)
+    #: KHONG duoc chieu toi. Doc tu `FAS_OWNER_USER_IDS`, CUNG triet ly voi
+    #: `admin_user_ids`: bien moi truong, khong phai cot du lieu. Xem
+    #: `admin_role_of`.
+    owner_user_ids: tuple = ()
+
+    #: Muc quan tri HEP NHAT — chi xem/xu ly bao cao va kiem duyet noi dung
+    #: (go xuat ban, xoa binh luan, treo user vi ly do kiem duyet). KHONG co
+    #: quyen quan ly vai tro, nguon tin cay YouTube, hay cai dat he
+    #: thong/tai chinh. Doc tu `FAS_MODERATOR_USER_IDS`.
+    moderator_user_ids: tuple = ()
+
     #: Han muc chong spam cua tang xa hoi, GHI DE len mac dinh trong
     #: `server/social.py`. Doc tu `FAS_SOCIAL_LIMITS` dang
     #: `post:10/60,comment:40/60` (so lan / so phut).
@@ -252,6 +314,7 @@ class Settings:
     var_dir: Path = DEFAULT_VAR_DIR
     appwrite: AppwriteSettings = field(default_factory=AppwriteSettings)
     r2: R2Settings = field(default_factory=R2Settings)
+    image_studio: ImageStudioSettings = field(default_factory=ImageStudioSettings)
 
     #: KHONG con la cong chan cho giong cuc bo — xem `local_voices` ngay duoi.
     #:
@@ -328,6 +391,20 @@ class Settings:
     translation_api_key: str = ""
     translation_model: str = ""
 
+    #: YouTube Data API v3 (Phase 5, Trusted Video Sources) — RONG = chua
+    #: cau hinh, cac route/service lien quan phai bao trang thai "chua cau
+    #: hinh" ro rang (xem `server/youtube_client.py::YouTubeConfigError`),
+    #: KHONG bao gio am tham lui ve mock hay gia lap ket qua.
+    youtube_api_key: str = ""
+
+    #: Goc URL cong khai (vd "https://api.fanfic.world") de dang ky WebSub
+    #: voi hub PubSubHubbub cua YouTube (Phase 6) — RONG trong dev cuc bo
+    #: (YouTube khong goi toi localhost duoc), cac route/nut lien quan phai
+    #: bao "chua cau hinh" ro rang (xem
+    #: `TrustedSourceService.websub_configured`), KHONG bao gio dang ky voi
+    #: mot URL noi bo/khong that.
+    youtube_websub_callback_base_url: str = ""
+
     @property
     def is_development(self) -> bool:
         return self.environment.lower() in ("development", "dev", "local")
@@ -339,6 +416,27 @@ class Settings:
     @property
     def identity_mode(self) -> str:
         return self.data_backend
+
+    def admin_role_of(self, user_id: str) -> "AdminRole":
+        """
+        Muc quan tri THAT SU cua mot user_id — nguon su that DUY NHAT cho moi
+        phep kiem quyen quan tri (Admin Control Center V2).
+
+        Thu tu kiem TU CAO XUONG THAP: mot user_id co the (do sai sot cau
+        hinh) nam trong nhieu danh sach cung luc — luc do OWNER thang, khong
+        cong don quyen. Import `AdminRole` cuc bo trong ham (khong o dau tep)
+        de tranh vong lap import: `domain.py` khong dong gi toi `config.py`,
+        nhung nhieu module import ca hai theo thu tu khac nhau.
+        """
+        from server.domain import AdminRole
+
+        if user_id in self.owner_user_ids:
+            return AdminRole.OWNER
+        if user_id in self.admin_user_ids:
+            return AdminRole.ADMIN
+        if user_id in self.moderator_user_ids:
+            return AdminRole.MODERATOR
+        return AdminRole.NONE
 
     def validate(self) -> None:
         """
@@ -415,13 +513,22 @@ class Settings:
             "author_gate_enabled": self.author_gate_enabled,
             # CHI so luong, KHONG bao gio la danh sach: `/api/health` la
             # cong khai, va lo ra `user_id` cua quan tri la chi dung dich.
-            "admin_count": len(self.admin_user_ids),
+            # `admin_count` giu TEN CU (tuong thich nguoc: mot vai cong cu van
+            # doc truong nay) nhung nay la TONG ca ba muc; hai truong rieng
+            # them de nhin ro phan bo giua cac muc.
+            "admin_count": (
+                len(self.owner_user_ids) + len(self.admin_user_ids)
+                + len(self.moderator_user_ids)
+            ),
+            "owner_count": len(self.owner_user_ids),
+            "moderator_count": len(self.moderator_user_ids),
             "env_file_loaded": self.env_file_loaded,
             "inline_worker": self.inline_worker,
             "translation_inline_worker": self.translation_inline_worker,
             "translation_provider_configured": bool(
                 self.translation_base_url and self.translation_api_key
                 and self.translation_model),
+            "image_studio": self.image_studio.describe(),
         }
 
 
@@ -513,6 +620,12 @@ def load_settings() -> Settings:
         admin_user_ids=tuple(
             x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()
         ),
+        owner_user_ids=tuple(
+            x for x in _env_list("FAS_OWNER_USER_IDS", "") if x.strip()
+        ),
+        moderator_user_ids=tuple(
+            x for x in _env_list("FAS_MODERATOR_USER_IDS", "") if x.strip()
+        ),
         social_limits=_social_limits(),
         var_dir=var_dir,
         appwrite=AppwriteSettings(
@@ -540,6 +653,50 @@ def load_settings() -> Settings:
         translation_base_url=_env("TRANSLATION_BASE_URL"),
         translation_api_key=_env("TRANSLATION_API_KEY"),
         translation_model=_env("TRANSLATION_MODEL"),
+        youtube_api_key=_env("YOUTUBE_API_KEY"),
+        youtube_websub_callback_base_url=_env("YOUTUBE_WEBSUB_CALLBACK_BASE_URL"),
+        image_studio=_image_studio_settings(),
+    )
+
+
+def _image_studio_settings() -> ImageStudioSettings:
+    """
+    So VD mac dinh (20/15 USD, 3 dong thoi) la con so KHOI DONG hop ly cho
+    MOT chu site nho — KHONG hard-code trong logic nghiep vu (PHASE 7 yeu
+    cau ro: "Do not hard-code the example numbers"), CHI la default cua
+    dataclass, doi duoc hoan toan qua bien moi truong ma khong sua code.
+    """
+    def _float(name: str, default: float) -> float:
+        raw = _env(name, "").strip()
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            raise ConfigError(f"{name} phải là số, nhận được {raw!r}.")
+
+    def _int(name: str, default: int) -> int:
+        raw = _env(name, "").strip()
+        if not raw:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            raise ConfigError(f"{name} phải là số nguyên, nhận được {raw!r}.")
+
+    return ImageStudioSettings(
+        shared_premium_enabled=_env_bool("IMAGE_SHARED_PREMIUM_ENABLED", False),
+        monthly_budget_usd=_float("IMAGE_MONTHLY_BUDGET_USD", 20.0),
+        warning_budget_usd=_float("IMAGE_WARNING_BUDGET_USD", 15.0),
+        max_cost_per_request_usd=_float("IMAGE_MAX_COST_PER_REQUEST_USD", 0.10),
+        max_concurrent_shared_generations=_int(
+            "IMAGE_MAX_CONCURRENT_SHARED_GENERATIONS", 3),
+        markup_multiplier=_float("IMAGE_MARKUP_MULTIPLIER", 1.0),
+        disabled_models=tuple(_env_list("IMAGE_DISABLED_MODELS", "")),
+        pollinations_api_key=_env("POLLINATIONS_API_KEY"),
+        pollinations_client_id=_env("POLLINATIONS_CLIENT_ID"),
+        byop_master_key=_env("IMAGE_BYOP_MASTER_KEY"),
+        byop_redirect_uri=_env("IMAGE_BYOP_REDIRECT_URI"),
     )
 
 

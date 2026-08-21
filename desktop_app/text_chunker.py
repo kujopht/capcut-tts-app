@@ -120,3 +120,26 @@ def chunk_text(text: str, limit: int = DEFAULT_CHUNK_CHARS) -> List[str]:
 def estimate_part_count(text: str, limit: int = DEFAULT_CHUNK_CHARS) -> int:
     """So phan du kien — dung cho bang file truoc khi chay."""
     return len(chunk_text(text, limit))
+
+
+def split_display_segments(text: str) -> List[str]:
+    """
+    Chia MOT phan tong hop (dau ra cua `chunk_text`) thanh cac doan HIEN THI
+    nho hon — doan van, roi cau — cho phu de dong bo (web V4, Phan 2G).
+
+    KHAC voi `chunk_text`: ham do chia theo GIOI HAN KY TU de gui TTS; ham nay
+    chia theo RANH GIOI NGON NGU de hien thi, khong quan tam gioi han do dai —
+    mot phan 2000 ky tu co the ra vai chuc doan hien thi ngan.
+
+    KHONG dùng cho TTS — chi dùng để hiển thị phụ đề đồng bộ với thời lượng đã
+    đo được của phần cha (xem `server/transcript.py::build_transcript`).
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    doan_van = [p.strip() for p in _PARAGRAPH_SPLIT.split(text) if p.strip()]
+    ra: List[str] = []
+    for doan in doan_van:
+        cau = [c.strip() for c in _SENTENCE_END.split(doan) if c.strip()]
+        ra.extend(cau if len(cau) > 1 else [doan])
+    return ra

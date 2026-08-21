@@ -273,10 +273,12 @@ test("khong pha M1: khoi mobile van nang vung bam len 44px", () => {
 });
 
 test("khong pha M2/M3/M4: cac tinh nang van con", () => {
-  assert.match(novel(), /<AudioPlayer/);              // M2 nghe tai cho
+  // M2: nghe tai cho da doi thanh lien ket sang `/listen/[id]` (overnight
+  // Phase 2, Phan 2A) — dong co toan cuc DUY NHAT thay vi mot AudioPlayer
+  // rieng cho tung hang. Kiem o `ui.test.mjs`.
   assert.match(read("../src/app/write/page.tsx"), /api\.reorderChapters\(/);  // M3
   assert.match(novel(), /chapter\.audio_outdated \?/);                        // M4
-  assert.match(chapter(), /audioOutdated/);
+  assert.match(read("../src/app/listen/[id]/page.tsx"), /audioOutdated/);
 });
 
 test("cac ho endpoint khong doi, chi them duong duoi novels", () => {

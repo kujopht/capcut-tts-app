@@ -273,29 +273,44 @@ export default function LibraryPage() {
 
                 <div className="row audio-row-actions">
                   {!row.fromStudio ? (
-                    <Link
-                      className="btn btn-sm"
-                      href={`/chapters/${row.chapter.chapter_id}`}
+                    <>
+                      <Link
+                        className="btn btn-sm"
+                        href={`/chapters/${row.chapter.chapter_id}`}
+                      >
+                        Mở chương
+                      </Link>
+                      {/* Fanfic — dan sang trang Nghe rieng (Phan 2A), KHONG
+                          con mo trinh phat ngay trong hang nay: dong nhat
+                          voi trang chi tiet truyen, chi CON MOT dong-co-phat
+                          toan cuc cho moi audio fanfic. */}
+                      <Link
+                        className="btn btn-sm btn-primary"
+                        href={`/listen/${row.chapter.chapter_id}`}
+                      >
+                        <span aria-hidden="true">▶</span> Nghe
+                      </Link>
+                    </>
+                  ) : (
+                    // Audio Studio — ban tao nhanh, KHONG gan voi mot "truyen"
+                    // de doc/nghe theo tap, nen giu trinh phat rieng tai cho.
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${dangNghe ? "" : "btn-primary"}`}
+                      aria-expanded={dangNghe}
+                      onClick={() =>
+                        setPlaying(dangNghe ? "" : row.chapter.chapter_id)
+                      }
                     >
-                      Mở chương
-                    </Link>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${dangNghe ? "" : "btn-primary"}`}
-                    aria-expanded={dangNghe}
-                    onClick={() =>
-                      setPlaying(dangNghe ? "" : row.chapter.chapter_id)
-                    }
-                  >
-                    <span aria-hidden="true">{dangNghe ? "✕" : "▶"}</span>
-                    {dangNghe ? "Đóng" : "Nghe"}
-                  </button>
+                      <span aria-hidden="true">{dangNghe ? "✕" : "▶"}</span>
+                      {dangNghe ? "Đóng" : "Nghe"}
+                    </button>
+                  )}
                 </div>
 
                 {/* Trinh phat chiem tron mot hang rieng ben duoi — xem
-                    `.audio-row` o `globals.css`. */}
-                {dangNghe ? (
+                    `.audio-row` o `globals.css`. CHI con cho Audio Studio. */}
+                {row.fromStudio && dangNghe ? (
                   <div className="audio-row-player">
                     <AudioPlayer
                       chapterId={row.chapter.chapter_id}

@@ -69,6 +69,15 @@ type O = {
    * `ref.current` trong than render la thu React khong dam bao.
    */
   truot: boolean;
+  /**
+   * Dem so lan DOI ROUTE THAT (khong tinh do lai vi resize/cuon o CUNG mot
+   * muc). Dung lam `key` cho vet sang mot lan (`.nav-vach-streak`) — doi key
+   * thi React go phan tu cu, gan phan tu moi, va animation CSS tren no chay
+   * lai tu dau. Khong dung mot bien dem ngoai state (vi du `useRef`) vi gia
+   * tri do phai co mat trong LAN RENDER dung key, va doc `ref.current` trong
+   * than render khong duoc dam bao boi React.
+   */
+  tick: number;
 };
 
 export function NavIndicator({
@@ -132,7 +141,17 @@ export function NavIndicator({
           return truoc;
         }
         // `truot` chi bat tu lan do THU HAI tro di — xem `O.truot`.
-        return { moc, x, w, truot: truoc !== null };
+        const truot = truoc !== null;
+        /*
+          `tick` CHI tang khi MUC dang xem thuc su doi (dieu huong that) — KHONG
+          tang khi cung mot muc do lai vi resize/cuon (`truoc.moc === moc` da bi
+          chan o nhanh tren NEU vi tri khong doi; nhung chu tai xong muon van co
+          the lam CUNG mot muc do ra vi tri khac, va do khong phai mot lan dieu
+          huong). Neu tang ca luc do thi vet sang phat lai moi khi ai do resize
+          cua so — sai voi dung y "MOT lan, dung luc doi trang".
+        */
+        const tick = truoc && truoc.moc !== moc ? truoc.tick + 1 : (truoc?.tick ?? 0);
+        return { moc, x, w, truot, tick };
       });
     };
 
@@ -197,6 +216,16 @@ export function NavIndicator({
         ["--sac-1" as string]: `var(--sac-${viTri(moc)}-1, var(--brand))`,
         ["--sac-2" as string]: `var(--sac-${viTri(moc)}-2, var(--brand-hover))`,
       }}
-    />
+    >
+      {/*
+        Vet sang "cong dich" — chay MOT LAN doc vien khi vach vua toi noi, xem
+        `.nav-vach-streak` (dung lai keyframe `sheen` da co, xem
+        `.progress-bar::after`). `key={o.tick}` la co che retrigger: doi key
+        thi React thao phan tu nay va gan mot phan tu MOI, nen animation CSS
+        tren no luon chay tu dau — khong can mot dong ho JS rieng de "reset"
+        animation. Chi ve khi `o.truot` (bo qua lan ve dau tien, xem `O.truot`).
+      */}
+      {o.truot ? <span key={o.tick} className="nav-vach-streak" aria-hidden="true" /> : null}
+    </span>
   );
 }

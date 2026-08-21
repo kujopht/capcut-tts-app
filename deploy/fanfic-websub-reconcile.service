@@ -1,0 +1,30 @@
+# Doi chieu WebSub cho Trusted Video Sources — chay theo lich cua
+# fanfic-websub-reconcile.timer. Goi `scripts/run_websub_reconciliation.py`
+# BEN TRONG container fanfic-dev-api dang chay san (xem
+# deploy/docker-compose.dev-api.yml) — KHONG chay mot tien trinh Python
+# rieng ngoai container, tranh phai cai lai dependency/env hai lan.
+#
+# VI SAO CAN, DU handle_websub_notification DA XU LY THONG BAO THAT:
+#   WebSub la MOT tin hieu phat hien, khong phai nguon su that duy nhat —
+#   hub co the bo lo mot thong bao (gian doan mang, backend restart dung luc
+#   hub goi lai, dang ky het han ma chua ai bam "Dang ky lai"). Doi chieu
+#   dinh ky la luoi an toan DUY NHAT dam bao video khong bi mat vinh vien,
+#   VA la noi DUY NHAT tu dong gia han dang ky truoc khi het han (khong co
+#   scheduler nao khac trong tien trinh — xem docstring RENEWAL_WINDOW o
+#   server/trusted_source_service.py).
+
+[Unit]
+Description=Fanfic World dev — doi chieu WebSub Trusted Video Sources
+Requisite=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/robux/fanfic-dev-api/repo/deploy
+# Khong truyen --source: rong nghia la "moi nguon enabled + auto_discover",
+# dung hanh vi mac dinh cua run_reconciliation() (xem TrustedSourceService).
+ExecStart=/usr/bin/docker compose -f docker-compose.dev-api.yml exec -T fanfic-dev-api python -m scripts.run_websub_reconciliation
+
+# KHONG ProtectHome=true: WorkingDirectory nam duoi /home/robux/... (repo
+# checkout tren VM nay), ProtectHome se an /home di va lam CHDIR that bai.
+SyslogIdentifier=fanfic-websub-reconcile

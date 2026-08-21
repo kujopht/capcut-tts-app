@@ -248,27 +248,34 @@ cd web && npx next build    # production build
 
 ## Giới hạn hiện tại — đọc kỹ
 
-**"Adapter đã viết và test bằng mock" KHÔNG đồng nghĩa với "đã kiểm chứng trên
-tài khoản cloud thật".** Trạng thái chính xác:
+**LỖI THỜI (đã sửa)**: bảng và danh sách dưới đây từng nói "chưa kiểm chứng
+Appwrite/R2 thật" — đúng ở giai đoạn MVP ban đầu, nhưng KHÔNG còn đúng.
+Trạng thái chính xác hiện tại:
 
 | Hạng mục | Trạng thái |
 |---|---|
 | Adapter đã hiện thực | ✅ Appwrite (identity + metadata), R2 storage |
 | Test tự động / mock | ✅ Đạt toàn bộ, chạy offline |
 | Runtime dependencies đã khai báo | ✅ `server/requirements.txt`, gồm `boto3` |
-| Kiểm chứng Appwrite/R2 thật | ❌ **Chưa** — cần tài khoản và credential do người vận hành tự cấu hình ngoài source |
+| Kiểm chứng Appwrite tự lưu trữ dev thật | ✅ **Đã chạy nhiều lần** (đăng ký/đăng nhập/CRUD Admin/Trusted Video Sources/WebSub) trên `appwrite-dev.fanfic.world` — xem `docs/DEV_SELFHOST_APPWRITE.md` + `docs/reports/appwrite-selfhost-gce-summary.md` |
+| Kiểm chứng Appwrite Cloud + R2 thật (staging) | ✅ **Đã chạy** diễn tập với credential thật, 82/82 nghiệm thu — xem `docs/reports/staging/BAO_CAO_STAGING.md` |
+| Kiểm chứng Appwrite Cloud **production** | ⚠️ Production chưa deploy (xem `docs/HANDOFF.md`) — khác với Appwrite Cloud staging/self-host dev đã kiểm chứng ở trên |
 
-Những phần sau mới chỉ được test với client giả lập, **chưa từng chạy với
-credential thật**:
+`scripts/setup_appwrite.py` **đã chạy nhiều lần** với Appwrite thật (self-host
+dev và staging) — không còn "chưa chạy lần nào" như ghi chú cũ.
 
-- `AppwriteIdentityAdapter` — đăng ký, đăng nhập, đọc hồ sơ
-- `AppwriteMetadataStore` — novels, chapters, tts_jobs, audio_tracks
-- `R2StorageAdapter` — upload, head, read, presigned URL
-- `scripts/setup_appwrite.py` — chưa chạy lần nào với Appwrite thật
+Khi Appwrite Cloud **production** được dựng, vẫn cần kiểm lại: CORS
+production thật, domain thật, và — biết trước — khả năng một số hồ sơ
+`profiles` production cũ (nếu có) dính lỗi datetime-rỗng-tự-điền-giờ-hiện-tại
+(xem `docs/handoffs/admin-trusted-video-v2-handoff.md` mục 4f). Việc dọn dữ
+liệu đó là **DEFERRED**, chờ quyền truy cập Appwrite Cloud production được
+khôi phục — KHÔNG coi là đã sửa trên production, chỉ bug ở đường ghi của
+self-host dev đã được vá.
 
-Khi có credential thật, cần kiểm chứng: cú pháp query của Appwrite, hành vi
-document permission, giới hạn kích thước thuộc tính `content`, và việc R2
-presigned URL có phát được trực tiếp trong thẻ `<audio>` hay không.
-
-Ngoài ra: chưa có thanh toán, chưa có lịch sử nghe, chưa trừ quota, chưa có
-moderation. Giọng Piper cục bộ bị đánh dấu `commercial_ready: false`.
+Ngoài ra: chưa có thanh toán, chưa có lịch sử nghe, chưa trừ quota. Ví Fanfic
+Credit mới chỉ có `MockWalletStore` (kiến trúc ví bền vững theo từng người
+dùng — DEFERRED, xem `docs/handoffs/admin-trusted-video-v2-handoff.md` mục
+15). Trường
+`commercial_ready` đã đổi tên thành `public_enabled` từ 2026-08-08 (xem
+`docs/HANDOFF.md` mục "Giọng Ngọc Huyền"); hiện `server/tts_bridge.py` trả
+`"public_enabled": True` cho giọng Piper cục bộ.

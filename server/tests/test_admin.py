@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -45,6 +46,15 @@ class Base(unittest.TestCase):
     def _dat_admin(self, ids) -> None:
         server_main.settings = replace(server_main.settings,
                                        admin_user_ids=tuple(ids))
+
+    def _dat_vai_tro(self, owner=(), admin=(), moderator=()) -> None:
+        """Dat CA BA danh sach vai tro cung luc (Admin Control Center V2)."""
+        server_main.settings = replace(
+            server_main.settings,
+            owner_user_ids=tuple(owner),
+            admin_user_ids=tuple(admin),
+            moderator_user_ids=tuple(moderator),
+        )
 
     def _dang_ky(self, email, ten):
         self.client.post("/api/auth/register", json={
@@ -104,9 +114,11 @@ class AdminAuthTest(Base):
 
     def test_moi_route_admin_deu_duoc_bao_ve(self):
         """
-        Tu liet ke va tu kiem. Mot route `/api/admin/*` moi ma quen
-        `Depends(admin_profile)` se lam bai nay do — khong ai phai nho bo sung
-        mot dong vao danh sach test.
+        Tu liet ke va tu kiem. Mot route `/api/admin/*` moi ma quen mot trong
+        BA phu thuoc quan tri (Admin Control Center V2: `admin_profile` — bat
+        ky muc nao; `admin_or_owner_profile` — ADMIN tro len; `owner_profile`
+        — CHI OWNER, danh cho cai dat he thong/tai chinh) se lam bai nay do —
+        khong ai phai nho bo sung mot dong vao danh sach test.
         """
         duong = sorted({
             getattr(r, "path", "") for r in server_main.app.routes
@@ -114,22 +126,28 @@ class AdminAuthTest(Base):
         })
         self.assertGreaterEqual(len(duong), 10, "chưa có route quản trị nào?")
 
+        PHU_THUOC_HOP_LE = {
+            server_main.admin_profile,
+            server_main.admin_or_owner_profile,
+            server_main.owner_profile,
+        }
         chua_bao_ve = []
         for r in server_main.app.routes:
             d = getattr(r, "path", "")
             if not d.startswith("/api/admin/"):
                 continue
             ten_tham_so = set(getattr(r, "dependant", None).query_params and [] or [])
-            # Tham so `admin` la ket qua cua `Depends(admin_profile)`; kiem theo
-            # chinh ham phu thuoc chu khong theo ten bien.
+            # Tham so `admin` la ket qua cua mot trong ba `Depends(...)` o
+            # tren; kiem theo CHINH ham phu thuoc chu khong theo ten bien.
             phu_thuoc = [
                 sub.call for sub in getattr(r.dependant, "dependencies", [])
             ]
-            if server_main.admin_profile not in phu_thuoc:
+            if not (PHU_THUOC_HOP_LE & set(phu_thuoc)):
                 chua_bao_ve.append(f"{sorted(r.methods)} {d}")
             del ten_tham_so
         self.assertEqual(chua_bao_ve, [],
-                         "route quản trị thiếu Depends(admin_profile)")
+                         "route quản trị thiếu Depends(admin_profile/"
+                         "admin_or_owner_profile/owner_profile)")
 
     def test_khong_co_quan_tri_nao_thi_KHONG_AI_vao_duoc(self):
         """Mac dinh la RONG: mot he thong moi trien khai khong co cua sau nao."""
@@ -142,6 +160,75 @@ class AdminAuthTest(Base):
         # `/api/health` la cong khai. Lo `user_id` cua quan tri la chi dich.
         d = self.client.get("/api/health").json()
         self.assertNotIn(self.admin["user_id"], str(d))
+
+
+class AdminRoleModelTest(Base):
+    """
+    Ba muc quan tri (Admin Control Center V2): OWNER > ADMIN > MODERATOR,
+    van la BIEN MOI TRUONG (xem `Settings.admin_role_of`), khong phai cot du
+    lieu — chi mo rong tu MOT danh sach thanh BA.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.chu, self.h_chu = self._dang_ky("owner@fanfic.local", "Chủ Sở Hữu")
+        self.kiemduyet, self.h_kiemduyet = self._dang_ky(
+            "mod@fanfic.local", "Kiểm Duyệt")
+        self._dat_vai_tro(
+            owner=[self.chu["user_id"]],
+            admin=[self.admin["user_id"]],
+            moderator=[self.kiemduyet["user_id"]],
+        )
+
+    def test_owner_profile_chi_owner_vao_duoc(self):
+        d = "/api/admin/image-studio/kill-switch"
+        payload = {"engaged": True}
+        self.assertEqual(
+            self.client.post(d, json=payload, headers=self.h_chu).status_code, 200)
+        for h in (self.h_admin, self.h_kiemduyet, self.h_thuong):
+            self.assertEqual(
+                self.client.post(d, json=payload, headers=h).status_code, 403)
+
+    def test_admin_or_owner_profile_tu_choi_moderator(self):
+        # `/api/admin/users` dung `admin_or_owner_profile` — MODERATOR khong
+        # duoc quan ly nguoi dung, chi duoc xu ly bao cao/kiem duyet noi dung.
+        d = "/api/admin/users"
+        self.assertEqual(
+            self.client.get(d, headers=self.h_admin).status_code, 200)
+        self.assertEqual(
+            self.client.get(d, headers=self.h_chu).status_code, 200)
+        self.assertEqual(
+            self.client.get(d, headers=self.h_kiemduyet).status_code, 403)
+
+    def test_admin_profile_van_nhan_ca_ba_muc(self):
+        # `/api/admin/overview` dung `admin_profile` — bat ky vai tro nao
+        # trong ba cung vao duoc, dung tinh than "MODERATOR van la quan tri".
+        d = "/api/admin/overview"
+        for h in (self.h_chu, self.h_admin, self.h_kiemduyet):
+            self.assertEqual(self.client.get(d, headers=h).status_code, 200)
+        self.assertEqual(
+            self.client.get(d, headers=self.h_thuong).status_code, 403)
+
+    def test_nam_trong_nhieu_danh_sach_thi_muc_cao_nhat_thang(self):
+        """Sai sot cau hinh (cung mot id trong ca owner lan moderator) khong
+        duoc CONG DON quyen — luon lay muc CAO NHAT."""
+        self._dat_vai_tro(
+            owner=[self.thuong["user_id"]],
+            moderator=[self.thuong["user_id"]],
+        )
+        self.assertEqual(
+            server_main.settings.admin_role_of(self.thuong["user_id"]),
+            server_main.AdminRole.OWNER,
+        )
+
+    def test_auth_me_tra_dung_admin_role_theo_tung_muc(self):
+        for h, muc in (
+            (self.h_chu, "owner"), (self.h_admin, "admin"),
+            (self.h_kiemduyet, "moderator"), (self.h_thuong, "none"),
+        ):
+            d = self.client.get("/api/auth/me", headers=h).json()["profile"]
+            self.assertEqual(d["admin_role"], muc)
+            self.assertEqual(d["is_admin"], muc != "none")
 
 
 class ApplicationQueueTest(Base):
@@ -294,6 +381,133 @@ class UserLookupTest(Base):
                             headers=self.h_admin).status_code, 404)
 
 
+class AccountManagementTest(Base):
+    """
+    Phase 3, Admin Control Center V2: quan ly TAI KHOAN native (Appwrite Users
+    API) — TACH BACH voi `AuthorManagementTest` o tren (chi chan XUAT BAN).
+    """
+
+    def test_tai_khoan_chua_chon_username_van_hien_o_danh_sach(self):
+        """Nguon moi la Appwrite Users API — phai thay CA nguoi chua chon
+        username, khac ban Phase 2 chi doc `profiles` da co username."""
+        moi, _ = self._dang_ky("chuadat@x.local", "Chưa Đặt Tên")
+        d = self.client.get("/api/admin/users?q=chuadat",
+                            headers=self.h_admin).json()
+        self.assertEqual(d["total"], 1)
+        hang = d["users"][0]
+        self.assertEqual(hang["user_id"], moi["user_id"])
+        self.assertEqual(hang["username"], "")
+        self.assertTrue(hang["email_verified"])
+        self.assertTrue(hang["account_enabled"])
+
+    def test_chi_tiet_tai_khoan_kem_trang_thai_va_phien(self):
+        me, h = self._dang_ky("chitiettk@x.local", "Chi Tiết Tài Khoản")
+        self.client.post("/api/auth/login", json={
+            "email": "chitiettk@x.local", "password": "matkhau123"})
+        d = self.client.get(f"/api/admin/users/{me['user_id']}",
+                            headers=self.h_admin).json()["user"]
+        self.assertIsNotNone(d["account"])
+        self.assertTrue(d["account"]["enabled"])
+        self.assertGreaterEqual(len(d["sessions"]), 2)  # dang ky + login them
+        self.assertEqual(d["admin_role"], "none")
+
+    def test_tam_dung_tai_khoan_chan_dang_nhap_hoan_toan(self):
+        me, h = self._dang_ky("khoatk@x.local", "Khoá Tài Khoản")
+        r = self.client.post(f"/api/admin/users/{me['user_id']}/suspend",
+                             headers=self.h_admin, json={"note": "Nghi ngờ gian lận."})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["account"]["enabled"])
+
+        dang_nhap = self.client.post("/api/auth/login", json={
+            "email": "khoatk@x.local", "password": "matkhau123"})
+        self.assertEqual(dang_nhap.status_code, 401)
+
+        r = self.client.post(f"/api/admin/users/{me['user_id']}/unsuspend",
+                             headers=self.h_admin, json={"note": "Đã xác minh."})
+        self.assertTrue(r.json()["account"]["enabled"])
+        dang_nhap_lai = self.client.post("/api/auth/login", json={
+            "email": "khoatk@x.local", "password": "matkhau123"})
+        self.assertEqual(dang_nhap_lai.status_code, 200)
+
+    def test_tam_dung_tai_khoan_KHONG_dong_toi_author_status(self):
+        """Hai khai niem tach rieng: khoa tai khoan khong doi trang thai tac gia."""
+        me, _ = self._tac_gia("khoatk2@x.local", "Khoá 2")
+        self.client.post(f"/api/admin/users/{me['user_id']}/suspend",
+                         headers=self.h_admin, json={"note": "x"})
+        self.assertIs(self.identity.get_profile(me["user_id"]).author_status,
+                      AuthorStatus.APPROVED)
+
+    def test_khong_the_tu_tam_dung_chinh_minh(self):
+        r = self.client.post(f"/api/admin/users/{self.admin['user_id']}/suspend",
+                             headers=self.h_admin, json={"note": "x"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_khong_the_tu_cham_dut_phien_cua_chinh_minh(self):
+        r = self.client.post(
+            f"/api/admin/users/{self.admin['user_id']}/sessions/terminate-all",
+            headers=self.h_admin, json={"note": "x"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_admin_khong_duoc_tam_dung_tai_khoan_quan_tri_khac(self):
+        chu, h_chu = self._dang_ky("chuso@fanfic.local", "Chủ Sở Hữu 2")
+        self._dat_vai_tro(owner=[chu["user_id"]], admin=[self.admin["user_id"]])
+
+        # ADMIN khong duoc dong toi tai khoan cua OWNER.
+        r = self.client.post(f"/api/admin/users/{chu['user_id']}/suspend",
+                             headers=self.h_admin, json={"note": "x"})
+        self.assertEqual(r.status_code, 403)
+
+        # OWNER thi duoc dong toi tai khoan cua ADMIN.
+        r = self.client.post(f"/api/admin/users/{self.admin['user_id']}/suspend",
+                             headers=h_chu, json={"note": "x"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_cham_dut_mot_phien_va_cham_dut_tat_ca(self):
+        me, _ = self._dang_ky("phien@x.local", "Phiên")
+        r2 = self.client.post("/api/auth/login", json={
+            "email": "phien@x.local", "password": "matkhau123"})
+        h2 = {"Authorization": f"Bearer {r2.json()['token']}"}
+
+        chi_tiet = self.client.get(f"/api/admin/users/{me['user_id']}",
+                                   headers=self.h_admin).json()["user"]
+        self.assertGreaterEqual(len(chi_tiet["sessions"]), 2)
+        phien_dau = chi_tiet["sessions"][0]["session_id"]
+
+        r = self.client.post(
+            f"/api/admin/users/{me['user_id']}/sessions/{phien_dau}/terminate",
+            headers=self.h_admin, json={"note": ""})
+        self.assertTrue(r.json()["terminated"])
+
+        r = self.client.post(
+            f"/api/admin/users/{me['user_id']}/sessions/terminate-all",
+            headers=self.h_admin, json={"note": "Chấm dứt toàn bộ."})
+        self.assertGreaterEqual(r.json()["terminated_count"], 1)
+        self.assertEqual(self.client.get("/api/auth/me", headers=h2).status_code, 401)
+
+    def test_tam_dung_va_cham_dut_phien_deu_ghi_nhat_ky(self):
+        me, _ = self._dang_ky("nhatkytk@x.local", "Nhật Ký Tài Khoản")
+        self.client.post(f"/api/admin/users/{me['user_id']}/suspend",
+                         headers=self.h_admin, json={"note": "vi phạm"})
+        self.client.post(f"/api/admin/users/{me['user_id']}/unsuspend",
+                         headers=self.h_admin, json={"note": "đã xử lý"})
+        self.client.post(
+            f"/api/admin/users/{me['user_id']}/sessions/terminate-all",
+            headers=self.h_admin, json={"note": ""})
+        hanh_dong = [e["action"] for e in self.client.get(
+            "/api/admin/events", headers=self.h_admin).json()["events"]]
+        self.assertIn("user_suspend", hanh_dong)
+        self.assertIn("user_unsuspend", hanh_dong)
+        self.assertIn("user_session_terminate", hanh_dong)
+
+    def test_thao_tac_tai_khoan_khong_ton_tai_tra_404(self):
+        for duong in (
+            "/api/admin/users/usr_khong_co/suspend",
+            "/api/admin/users/usr_khong_co/unsuspend",
+        ):
+            r = self.client.post(duong, headers=self.h_admin, json={"note": ""})
+            self.assertEqual(r.status_code, 404, duong)
+
+
 class AuditLogTest(Base):
     def test_moi_thao_tac_deu_de_lai_mot_dong(self):
         me, _ = self._tac_gia("nhatky@x.local", "Nhật Ký", duyet=False)
@@ -373,6 +587,233 @@ class NovelBrowserTest(Base):
                 methods = {m for m in getattr(r, "methods", set())
                            if m not in ("HEAD", "OPTIONS")}
                 self.assertEqual(methods, {"GET"}, d)
+
+
+class DashboardMoRongTest(Base):
+    """
+    Cac muc MOI cua /api/admin/overview (Admin Control Center V2, Phase 2,
+    A1) — cong THEM ben canh cac truong cu, khong thay the.
+    """
+
+    def test_van_giu_cac_truong_cu(self):
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        for khoa in ("pending_applications", "approved_authors",
+                    "rejected_applications", "suspended_authors",
+                    "published_novels", "users_with_username",
+                    "qualified_listens"):
+            self.assertIn(khoa, d)
+
+    def test_co_du_sau_muc_moi(self):
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        for khoa in ("users", "content", "product", "trusted_sources",
+                    "traffic", "system"):
+            self.assertIn(khoa, d)
+
+    def test_dem_nguoi_dung_dung_va_moi_hom_nay(self):
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        # setUp da tao self.admin + self.thuong -> it nhat 2 nguoi.
+        self.assertGreaterEqual(d["users"]["total"], 2)
+        # Ca hai deu vua dang ky trong bai test nay -> phai nam trong "hom nay".
+        self.assertGreaterEqual(d["users"]["new_today"], 2)
+        self.assertGreaterEqual(d["users"]["new_7d"], d["users"]["new_today"])
+        self.assertGreaterEqual(d["users"]["new_30d"], d["users"]["new_7d"])
+
+    def test_truong_chua_theo_doi_tra_None_khong_bia_so_0(self):
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        # Phase 3 (Admin Control Center V2): verified/unverified/suspended gio
+        # doc THAT tu Appwrite Users API (`IdentityAdapter.count_accounts`),
+        # khong con la None — xem `AccountStatus`. Mock luon coi MOI tai
+        # khoan la da xac minh (khong co luong xac minh email that o mock),
+        # nen "unverified" luon la 0 va "verified" bang tong so tai khoan.
+        self.assertGreaterEqual(d["users"]["verified"], 2)
+        self.assertEqual(d["users"]["unverified"], 0)
+        self.assertEqual(d["users"]["suspended"], 0)
+        self.assertIsNone(d["product"]["image_generations_total"])
+
+    def test_dem_noi_dung_dung_sau_khi_tao_truyen_chuong_series(self):
+        me, h = self._tac_gia("dash@x.local", "Dash")
+        truoc = self.client.get("/api/admin/overview",
+                                headers=self.h_admin).json()
+        nid = self.client.post("/api/novels", headers=h,
+                               json={"title": "Truyện Dash"}).json()["novel"]["novel_id"]
+        self.client.post("/api/chapters", headers=h, json={
+            "novel_id": nid, "title": "C1", "content": "x"})
+        sau = self.client.get("/api/admin/overview",
+                              headers=self.h_admin).json()
+        self.assertEqual(sau["content"]["novels_total"],
+                         truoc["content"]["novels_total"] + 1)
+        self.assertEqual(sau["content"]["chapters_total"],
+                         truoc["content"]["chapters_total"] + 1)
+
+    def test_traffic_chua_cau_hinh(self):
+        """Cloudflare traffic analytics CHUA co credential — phai bao ro,
+        khong bia du lieu."""
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        self.assertFalse(d["traffic"]["configured"])
+        self.assertIn("not configured", d["traffic"]["message"])
+
+    def test_trusted_sources_da_xay_phase_5_dem_dung_bounded(self):
+        """Phan B (Trusted Video Sources, Phase 5) — kho da xay, dashboard
+        phai bao `configured=True` kem cac bo dem THAT (bounded-count,
+        khong quet toan bang), khong con bia "chua xay" nhu Phase 2."""
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        ts = d["trusted_sources"]
+        self.assertTrue(ts["configured"])
+        for khoa in ("total", "enabled_total", "auto_imported_total",
+                    "pending_total", "error_total",
+                    "detected_today", "reconciliation_total_runs"):
+            self.assertIsInstance(ts[khoa], int)
+        # Chua tung doi chieu lan nao trong test nay — None, khong bia chuoi rong.
+        self.assertIsNone(ts["reconciliation_last_run_at"])
+
+    def test_trusted_sources_health_counts_phase4(self):
+        """Auto-Ingestion Phase 4 (Stage H, trang He thong): dashboard phai
+        tong hop dung so nguon theo tung muc suc khoe (xem
+        `compute_source_health`) — so sanh TRUOC/SAU de khong phu thuoc du
+        lieu con lai tu bai test khac trong cung tien trinh."""
+        from server.trusted_source_domain import (
+            SubscriptionStatus, TrustedSource, TrustedSourceType)
+
+        truoc = self.client.get("/api/admin/overview", headers=self.h_admin).json()["trusted_sources"]
+
+        tao = [
+            server_main.trusted_source_store.create_source(TrustedSource(
+                source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                youtube_channel_id="UC" + "h4" * 11, display_name="[test-p4] khoẻ",
+                enabled=True, auto_discover=False)),
+            server_main.trusted_source_store.create_source(TrustedSource(
+                source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                youtube_channel_id="UC" + "a4" * 11, display_name="[test-p4] cần thao tác",
+                enabled=True, auto_discover=True,
+                subscription_status=SubscriptionStatus.EXPIRED)),
+            server_main.trusted_source_store.create_source(TrustedSource(
+                source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                youtube_channel_id="UC" + "d4" * 11, display_name="[test-p4] tạm dừng",
+                enabled=False)),
+        ]
+        try:
+            sau = self.client.get("/api/admin/overview", headers=self.h_admin).json()["trusted_sources"]
+            self.assertEqual(
+                sau["health_counts"]["healthy"], truoc["health_counts"]["healthy"] + 1)
+            self.assertEqual(
+                sau["health_counts"]["action_required"],
+                truoc["health_counts"]["action_required"] + 1)
+            self.assertEqual(
+                sau["health_counts"]["disabled"], truoc["health_counts"]["disabled"] + 1)
+        finally:
+            # Don sach — tranh ro ri sang bai test KHAC dung chung
+            # `server_main.trusted_source_store` (singleton module-level).
+            for nguon in tao:
+                server_main.trusted_source_store.delete_source(nguon.source_id)
+
+    def test_system_them_trang_thai_youtube_va_websub_phase7(self):
+        """Phase 7 — trang He thong: YouTube Data API/WebSub CHUA cau hinh
+        trong moi truong test, phai bao ro `not_configured`, khong bia
+        `healthy`. Doi chieu chua chay lan nao -> cung `not_configured`
+        (WebSub la dieu kien tien quyet cua doi chieu tu dong)."""
+        d = self.client.get("/api/admin/overview", headers=self.h_admin).json()
+        he_thong = d["system"]
+        self.assertFalse(he_thong["youtube_data_api_configured"])
+        self.assertFalse(he_thong["youtube_websub_configured"])
+        trang_thai = he_thong["statuses"]
+        self.assertEqual(trang_thai["backend"], "healthy")
+        self.assertEqual(trang_thai["youtube_data_api"], "not_configured")
+        self.assertEqual(trang_thai["youtube_websub"], "not_configured")
+        self.assertEqual(trang_thai["reconciliation"], "not_configured")
+
+    def test_mot_nhom_truy_van_loi_khong_lam_sup_ca_dashboard(self):
+        """
+        Phase 7 — song song hoa `_admin_dashboard_them` (ThreadPoolExecutor):
+        da xac nhan THAT tren Appwrite dev tu luu tru rang truy van dong
+        thoi thinh thoang vuot timeout do VM nho qua tai. Mo phong DUNG
+        tinh huong do (mot nhom nem loi) va xac nhan dashboard van tra 200
+        voi truong bi anh huong la `None` — KHONG 500 ca trang chi vi mot
+        nhom cham/loi.
+        """
+        with patch.object(server_main.social, "social_overview",
+                         side_effect=RuntimeError("gia lap timeout mang")):
+            r = self.client.get("/api/admin/overview", headers=self.h_admin)
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        self.assertIsNone(d["content"]["comments_total"])
+        self.assertIsNone(d["content"]["pending_reports"])
+        # Cac nhom KHAC van phai co du lieu that, khong bi keo theo.
+        self.assertIsInstance(d["users"]["total"], int)
+
+    def test_moderator_van_xem_duoc_dashboard(self):
+        """Dashboard dung `admin_profile` (bat ky vai tro nao) — MODERATOR
+        van can thay tong quan de lam viec, chi khong quan ly duoc user/
+        trusted source (xem AdminRoleModelTest)."""
+        prof_mod, h_mod = self._dang_ky("dashmod@fanfic.local", "Dash Mod")
+        self._dat_vai_tro(admin=[self.admin["user_id"]],
+                          moderator=[prof_mod["user_id"]])
+        self.assertEqual(
+            self.client.get("/api/admin/overview", headers=h_mod).status_code,
+            200)
+
+
+class AnalyticsDetailTest(Base):
+    """Phase 7 — /api/admin/analytics/detail, TACH khoi dashboard chinh."""
+
+    def test_hinh_dang_day_du_va_pham_vi_mac_dinh(self):
+        d = self.client.get("/api/admin/analytics/detail",
+                            headers=self.h_admin).json()
+        self.assertEqual(d["range"], "7d")
+        for khoa in ("users", "content", "ai_product", "trusted_video", "traffic"):
+            self.assertIn(khoa, d)
+        # DAU/WAU/MAU va hoat dong noi dung: KHONG bia so, phai None + note.
+        self.assertIsNone(d["users"]["active_daily"])
+        self.assertTrue(d["users"]["active_note"])
+        self.assertIsNone(d["content"]["novel_reads"])
+        self.assertTrue(d["content"]["content_activity_note"])
+        self.assertIsInstance(d["content"]["comments"], int)
+
+    def test_pham_vi_khong_hop_le_lui_ve_7d(self):
+        d = self.client.get("/api/admin/analytics/detail?range=nam_nay",
+                            headers=self.h_admin).json()
+        self.assertEqual(d["range"], "7d")
+
+    def test_pham_vi_today_dung_moc_dau_ngay(self):
+        d = self.client.get("/api/admin/analytics/detail?range=today",
+                            headers=self.h_admin).json()
+        self.assertEqual(d["range"], "today")
+        self.assertTrue(d["since"].endswith("T00:00:00+00:00"))
+
+    def test_websub_status_breakdown_du_5_gia_tri(self):
+        d = self.client.get("/api/admin/analytics/detail",
+                            headers=self.h_admin).json()
+        vo = d["trusted_video"]["websub_status_breakdown"]
+        for gia_tri in ("none", "pending", "active", "expired", "failed"):
+            self.assertIn(gia_tri, vo)
+
+    def test_moderator_khong_xem_duoc_analytics_detail(self):
+        """`admin_profile` (>= MODERATOR) — nguoi thuong bi 401/403."""
+        self.assertIn(
+            self.client.get("/api/admin/analytics/detail",
+                            headers=self.h_thuong).status_code,
+            (401, 403))
+
+
+class AiCreditsSpendingTest(Base):
+    """Phase 7 mo rong /api/admin/image-studio/spending — them tinh trang
+    van hanh dich/TTS/BYOK, KHONG doi hinh dang cac truong cu."""
+
+    def test_van_giu_truong_cu_va_them_truong_moi(self):
+        d = self.client.get("/api/admin/image-studio/spending",
+                            headers=self.h_admin).json()
+        for khoa in ("month", "spent_usd", "budget_usd", "kill_switch_engaged",
+                    "shared_premium_configured"):
+            self.assertIn(khoa, d)
+        for trang in ("completed", "failed", "cancelled", "in_progress"):
+            self.assertIn(trang, d["translation_jobs_by_status"])
+        for trang in ("pending", "running", "completed", "failed"):
+            self.assertIn(trang, d["tts_jobs_by_status"])
+        self.assertIn("byok_connections_by_status", d)
+        self.assertFalse(d["wallet_configured"])
+        self.assertTrue(d["wallet_note"])
+        # Tuyet doi khong lo secret/key qua duong nay.
+        self.assertNotIn("encrypted_secret", str(d))
+        self.assertNotIn("api_key", str(d).lower())
 
 
 class HoSoKemQuyenTest(Base):

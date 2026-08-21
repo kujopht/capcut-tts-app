@@ -1,0 +1,44 @@
+# Backend Fanfic World DEV cong khai — chay CANH Appwrite tu luu tru tren
+# CUNG VM (fanfic-appwrite-temp), KHONG dung chung file compose voi Appwrite
+# (khong sua docker-compose.yml cua Appwrite). Gan vao mang `gateway` — mang
+# Appwrite Traefik da danh rieng cho dich vu ngoai Appwrite (xem
+# docs/DEV_PUBLIC_BACKEND.md).
+#
+# Trien khai:
+#   docker compose -f docker-compose.dev-api.yml up -d --build
+#
+# Bien moi truong THAT (Appwrite API key, YouTube API key, ...) nam trong
+# `.env` CANH file nay tren VM — KHONG commit vao git (xem .gitignore),
+# KHONG truyen qua tham so dong lenh (se lo trong `docker inspect`/history).
+services:
+  fanfic-dev-api:
+    build:
+      context: .. # goc repo, xem Dockerfile.dev-api
+      dockerfile: deploy/Dockerfile.dev-api
+    container_name: fanfic-dev-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - gateway
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/api/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      # File-provider (khong phai docker-provider) o Traefik xu ly dinh
+      # tuyen that su (xem deploy/traefik-dynamic/api-dev.fanfic.world.yml)
+      # — Traefik cua Appwrite CHI nhan container co nhan
+      # `traefik.constraint-label-stack=appwrite` qua docker provider (xem
+      # docs/DEV_PUBLIC_BACKEND.md muc kien truc), nen KHONG dung nhan o day
+      # de tranh dam vao rang buoc rieng cua stack Appwrite. Nhan nay chi de
+      # ghi chu, khong co tac dung voi Traefik.
+      description: "Fanfic World dev API - dinh tuyen qua Traefik file-provider, xem deploy/traefik-dynamic/"
+
+networks:
+  gateway:
+    external: true
+    name: gateway

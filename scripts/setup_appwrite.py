@@ -1434,42 +1434,109 @@ class Setup:
         if not self.dry_run:
             hien = self._call("GET", base, doc_thoi=True) or {}
             da_co = {a.get("key") for a in hien.get("attributes", [])}
-        co_thuoc_tinh_moi = False
         for key, kind, required, extra in spec["attributes"]:
             if key in da_co and kind != "enum":
                 # Enum van di duong rieng: no con phai SO SANH danh sach gia
                 # tri de mo rong — xem `_ensure_enum`.
                 self.skipped += 1
                 print(f"    - {key} ({kind}): đã có")
-                continue
-            self._ensure_attribute(base, key, kind, required, extra)
-            co_thuoc_tinh_moi = True
-        if co_thuoc_tinh_moi and not self.dry_run:
-            # Tao thuoc tinh o Appwrite la BAT DONG BO — POST tra ve ngay
-            # nhung thuoc tinh o trang thai "processing" vai giay truoc khi
-            # thanh "available". Tao index tren thuoc tinh con processing bi
-            # tu choi voi HTTP 400 "not yet available" — da gap that (khong
-            # doan) khi collection vua duoc tao xong trong CUNG lan chay nay.
-            # CHI cho khi CO thuoc tinh moi — collection da on dinh tu truoc
-            # thi bo qua, khong lam cham moi lan chay lai.
-            self._doi_thuoc_tinh_san_sang(base, [k for k, *_ in spec["attributes"]])
+            else:
+                self._ensure_attribute(base, key, kind, required, extra)
+            if not self.dry_run:
+                # CHỜ RIÊNG cho từng thuộc tính, kể cả khi "đã có" — một
+                # thuộc tính đã TỒN TẠI không có nghĩa là nó DÙNG ĐƯỢC. Sự cố
+                # thật (2026-08-21, self-host PROD): job nền tạo attribute
+                # `profiles.user_id` bị Appwrite đánh dấu "failed" trong hàng
+                # đợi (Utopia queue `*.failed.*`, xác nhận qua Redis) do một
+                # lần Mongo "receive timeout" thoáng qua — KHÔNG có cơ chế
+                # tự động thử lại. Thuộc tính kẹt vĩnh viễn ở "processing",
+                # và mọi lần chạy lại trước đây đều coi "đã có" là xong,
+                # không bao giờ phát hiện ra nó không dùng được, cho tới khi
+                # `_ensure_index` thất bại với lỗi mơ hồ "not yet available".
+                self._cho_thuoc_tinh_san_sang(base, key)
         for name, kind, keys in spec["indexes"]:
+            if not self.dry_run:
+                self._kiem_thuoc_tinh_san_sang_cho_index(base, name, keys)
             self._ensure_index(base, name, kind, keys)
+            if not self.dry_run:
+                self._cho_index_san_sang(base, name)
 
-    def _doi_thuoc_tinh_san_sang(self, base: str, keys: List[str],
-                                 *, so_lan_thu: int = 30, doi_giay: float = 1.0) -> None:
-        """Cho toi khi MOI thuoc tinh trong `keys` co status "available" —
-        toi da `so_lan_thu` lan, moi lan cach `doi_giay` giay. KHONG nem loi
-        neu het luot thu (de _ensure_index tu bao loi that neu van chua
-        san sang sau tung ay thoi gian — tranh treo vo han)."""
+    def _cho_thuoc_tinh_san_sang(self, base: str, key: str,
+                                 *, timeout_giay: float = 120.0) -> None:
+        """Cho DUY NHAT MOT thuoc tinh dat 'available', backoff mu tang dan
+        co gioi han (0.5s -> toi da 8s giua cac lan thu, tong khong qua
+        `timeout_giay`). Nem loi RO RANG (khong im lang bo qua) neu:
+        - thuoc tinh bien mat khoi collection giua chung (khong nen xay ra),
+        - status la 'failed' hoac 'stuck' (job nen da hong han, cho tiep vo
+          ich — xem su co 2026-08-21 o docstring ben tren),
+        - het `timeout_giay` ma van khong 'available'.
+        KHONG bao gio tra ve lang le khi chua san sang — day la khac biet cot
+        loi voi ham cu (`_doi_thuoc_tinh_san_sang`, da bo), von im lang bo
+        qua sau khi het luot thu va de `_ensure_index` tu bao loi mo ho."""
         import time
-        for _ in range(so_lan_thu):
+        han_chot = time.monotonic() + timeout_giay
+        khoang_cho = 0.5
+        while True:
             hien = self._call("GET", base, doc_thoi=True) or {}
-            trang_thai = {a.get("key"): a.get("status") for a in hien.get("attributes", [])}
-            con_cho = [k for k in keys if trang_thai.get(k) not in ("available", None)]
-            if not con_cho:
+            thuoc_tinh = next((a for a in hien.get("attributes", [])
+                               if a.get("key") == key), None)
+            if thuoc_tinh is None:
+                raise SystemExit(
+                    f"Thuộc tính '{key}' biến mất khỏi {base} trong lúc chờ "
+                    "sẵn sàng — không nên xảy ra, kiểm tra thủ công."
+                )
+            trang_thai = thuoc_tinh.get("status")
+            if trang_thai == "available":
                 return
-            time.sleep(doi_giay)
+            if trang_thai in ("failed", "stuck"):
+                raise SystemExit(
+                    f"Thuộc tính '{key}' ở {base} có trạng thái '{trang_thai}': "
+                    f"{thuoc_tinh.get('error') or '(Appwrite không kèm thông điệp lỗi)'}. "
+                    "Job nền tạo thuộc tính này đã hỏng hẳn (không tự thử lại) — "
+                    "cách sửa AN TOÀN NHỎ NHẤT đã xác nhận qua sự cố thật "
+                    "2026-08-21: DELETE thuộc tính này (chỉ khi collection "
+                    "CHƯA có document thật nào phụ thuộc), rồi chạy lại script "
+                    "này để nó tự tạo lại. Xem docs/reports/preprod-security-audit.md"
+                    " hoặc lịch sử sửa lỗi commit này để biết chi tiết."
+                )
+            if time.monotonic() >= han_chot:
+                raise SystemExit(
+                    f"Thuộc tính '{key}' ở {base} vẫn '{trang_thai}' sau "
+                    f"{timeout_giay:.0f}s chờ — có thể job nền bị kẹt/mất "
+                    "(kiểm tra Redis 'utopia-queue.failed.*' và log "
+                    "appwrite-worker-databases trước khi chạy lại)."
+                )
+            time.sleep(khoang_cho)
+            khoang_cho = min(khoang_cho * 1.5, 8.0)
+
+    def _cho_index_san_sang(self, base: str, key: str,
+                            *, timeout_giay: float = 120.0) -> None:
+        """Tuong tu `_cho_thuoc_tinh_san_sang` nhung cho MOT index."""
+        import time
+        han_chot = time.monotonic() + timeout_giay
+        khoang_cho = 0.5
+        while True:
+            hien = self._call("GET", base, doc_thoi=True) or {}
+            idx = next((i for i in hien.get("indexes", []) if i.get("key") == key), None)
+            if idx is None:
+                raise SystemExit(
+                    f"Index '{key}' biến mất khỏi {base} trong lúc chờ sẵn sàng."
+                )
+            trang_thai = idx.get("status")
+            if trang_thai == "available":
+                return
+            if trang_thai in ("failed", "stuck"):
+                raise SystemExit(
+                    f"Index '{key}' ở {base} có trạng thái '{trang_thai}': "
+                    f"{idx.get('error') or '(Appwrite không kèm thông điệp lỗi)'}."
+                )
+            if time.monotonic() >= han_chot:
+                raise SystemExit(
+                    f"Index '{key}' ở {base} vẫn '{trang_thai}' sau "
+                    f"{timeout_giay:.0f}s chờ."
+                )
+            time.sleep(khoang_cho)
+            khoang_cho = min(khoang_cho * 1.5, 8.0)
 
     def _ensure_attribute(self, base: str, key: str, kind: str,
                           required: bool, extra: Any) -> None:
@@ -1536,6 +1603,24 @@ class Setup:
                    {"elements": gop, "required": required, "default": None})
         print(f"    - {key} (enum): MỞ RỘNG {len(dang_co)} -> {len(gop)} "
               f"giá trị (+{', '.join(thieu)})")
+
+    def _kiem_thuoc_tinh_san_sang_cho_index(self, base: str, name: str,
+                                            keys: List[str]) -> None:
+        """Kiểm TRƯỚC KHI POST index: liệt kê rõ thuộc tính nào chưa
+        'available' thay vì để Appwrite trả lỗi 400 mơ hồ 'not yet
+        available' không nói rõ thuộc tính nào."""
+        hien = self._call("GET", base, doc_thoi=True) or {}
+        trang_thai = {a.get("key"): a.get("status")
+                      for a in hien.get("attributes", [])}
+        chua_san_sang = [k for k in keys if trang_thai.get(k) != "available"]
+        if chua_san_sang:
+            raise SystemExit(
+                f"Không thể tạo index '{name}' trên {base}: thuộc tính "
+                f"{chua_san_sang} chưa 'available' (trạng thái: "
+                f"{[trang_thai.get(k) for k in chua_san_sang]}). Kiểm tra "
+                "job nền (Redis utopia-queue.failed.*, log "
+                "appwrite-worker-databases) trước khi chạy lại."
+            )
 
     def _ensure_index(self, base: str, name: str, kind: str, keys: List[str]) -> None:
         result = self._call("POST", f"{base}/indexes", {

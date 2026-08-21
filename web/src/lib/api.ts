@@ -811,6 +811,17 @@ export const api = {
     request<{ da_huy_phien: boolean }>("/api/auth/logout", { method: "POST" }),
 
   /**
+   * Xoá VĨNH VIỄN tài khoản của CHÍNH người gọi, cùng mọi dữ liệu của họ
+   * (server/account_deletion.py — không hoàn tác được). Không có bản "xoá
+   * người khác": token trong header là danh tính duy nhất được dùng.
+   */
+  deleteAccount: () =>
+    request<{ deleted: boolean; removed: Record<string, unknown> }>(
+      "/api/account",
+      { method: "DELETE" },
+    ),
+
+  /**
    * Dia chi bat dau dang nhap bang Google/Facebook.
    *
    * Tra ve CHUOI chu khong phai Promise, va do la chu y: buoc nay phai la mot

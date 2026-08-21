@@ -2,9 +2,17 @@
 `server/secret_redaction.py` — chan bi mat lot vao log/loi/output.
 
 Test quan trong nhat (`test_tai_hien_su_co_that_apikey_trong_trace_long_nhau`)
-tai hien CHINH XAC hinh dang response gay ro ri that 2026-08-16: mot loi
-validate 400 cua Appwrite echo lai toan bo tham so request (bao gom
+tai hien hinh dang response gay ro ri that 2026-08-16 (khong phai NOI DUNG):
+mot loi validate 400 cua Appwrite echo lai toan bo tham so request (bao gom
 `apiKey`) trong `trace[].args[]`, long nhieu tang.
+
+AN TOAN (2026-08-20, sau su co khoa production bi commit nham vao ban cu cua
+chinh file nay): gia tri khoa dung de kiem thu o day la BIA DUNG, TU SINH tu
+mot doan lap lai vo hai luc chay module — KHONG PHAI mot khoa Appwrite that,
+KHONG BAO GIO dung duoc voi bat ky Appwrite nao (Cloud hay tu luu tru). No chi
+can dung DINH DANG "standard_<hex dai>" de khop mau `_MAU_BI_MAT_THEO_GIA_TRI`
+trong `secret_redaction.py`, khong can va TUYET DOI KHONG duoc la mot bi mat
+that. Xem lich su sua o commit sau su co nay de biet chi tiet.
 """
 
 from __future__ import annotations
@@ -17,17 +25,22 @@ from server.secret_redaction import (
     thong_diep_loi_an_toan,
 )
 
-_KHOA_APPWRITE_THAT_DANG = (
-    "standard_b0a9e00a61cd52e3fcb8217d62b848045f8537966494d17fb7d2a05301dd9cd"
-    "07f110924b4e419fb99cba8068425441e8dd7a2cc207b00ae0a19e395607e48ffa1891cf"
-)
+#: BIA DUNG tu sinh — KHONG PHAI khoa Appwrite that. Ghep tu MOT doan hex 12
+#: ky tu lap lai nhieu lan (ro rang khong ngau nhien khi doc bang mat), chi
+#: du dai (>=40 ky tu hex sau "standard_") de khop mau phat hien trong
+#: `secret_redaction.py`. Dung "standard_" (khong phai "console_") vi day la
+#: dinh dang khoa API nguoi dung tao thu cong tren Appwrite, dung hinh dang
+#: voi su co 2026-08-16 dang tai hien.
+_DOAN_HEX_LAP_LAI = "0a1b2c3d4e5f"
+_KHOA_APPWRITE_GIA_LAP = "standard_" + _DOAN_HEX_LAP_LAI * 12
 
 
 class TaiHienSuCoThatTest(unittest.TestCase):
     def test_tai_hien_su_co_that_apikey_trong_trace_long_nhau(self):
-        """Hinh dang THAT cua response loi da gay ro ri: 'message' o dau,
-        nhung 'apiKey' nam sau trong 'trace[1].args[2]' — dung nhu Appwrite
-        1.9.6 tra ve that."""
+        """Tai hien HINH DANG response loi da gay ro ri that (2026-08-16):
+        'message' o dau, nhung 'apiKey' nam sau trong 'trace[1].args[2]' —
+        dung cau truc Appwrite 1.9.6 tra ve that. Gia tri `apiKey` ben duoi
+        la BIA DUNG (`_KHOA_APPWRITE_GIA_LAP`), khong phai khoa that."""
         body = {
             "message": "Invalid `resources` param: Value must a valid array",
             "code": 400,
@@ -43,7 +56,7 @@ class TaiHienSuCoThatTest(unittest.TestCase):
                             "migrationId": "unique()",
                             "endpoint": "https://sgp.cloud.appwrite.io/v1",
                             "projectID": "6a749d140018e367bc2f",
-                            "apiKey": _KHOA_APPWRITE_THAT_DANG,
+                            "apiKey": _KHOA_APPWRITE_GIA_LAP,
                             "resources": ["users", "databases"],
                         },
                         {},
@@ -53,7 +66,7 @@ class TaiHienSuCoThatTest(unittest.TestCase):
         }
         ket_qua = loc_bo_de_qui(body)
         chuoi = str(ket_qua)
-        self.assertNotIn(_KHOA_APPWRITE_THAT_DANG, chuoi)
+        self.assertNotIn(_KHOA_APPWRITE_GIA_LAP, chuoi)
         # Cac truong KHONG nhay cam van con nguyen — khong loc qua tay.
         self.assertIn("projectID", str(ket_qua["trace"][0]["args"][2][2]))
         self.assertIn("resources", chuoi)
@@ -62,9 +75,9 @@ class TaiHienSuCoThatTest(unittest.TestCase):
         """Ngay ca khi 'message' (khong phai mot truong sau) vo tinh chua
         chuoi giong khoa API, van phai bi loc — phong khi Appwrite doi cach
         dinh dang loi trong tuong lai."""
-        body = {"message": f"Lỗi xác thực với khoá {_KHOA_APPWRITE_THAT_DANG}"}
+        body = {"message": f"Lỗi xác thực với khoá {_KHOA_APPWRITE_GIA_LAP}"}
         ra = thong_diep_loi_an_toan(body, status_code=401)
-        self.assertNotIn(_KHOA_APPWRITE_THAT_DANG, ra)
+        self.assertNotIn(_KHOA_APPWRITE_GIA_LAP, ra)
 
     def test_thong_diep_loi_an_toan_binh_thuong_khong_bi_anh_huong(self):
         body = {"message": "Không tìm thấy bản ghi."}
@@ -143,12 +156,12 @@ class LocTheoTenTruongTest(unittest.TestCase):
 
 class LocTheoGiaTriTest(unittest.TestCase):
     """Bi mat lot vao MOT truong khong nam trong danh sach ten da biet —
-    vi du nhu chinh su co that, `apiKey` nam trong mot phan tu mang khong
-    ten (`args[2]`)."""
+    vi du nhu trong su co that dang tai hien (hinh dang, KHONG phai gia
+    tri that), `apiKey` nam trong mot phan tu mang khong ten (`args[2]`)."""
 
     def test_khoa_appwrite_dang_standard_trong_van_ban_tu_do(self):
-        cau = f"Đã gọi API với khoá {_KHOA_APPWRITE_THAT_DANG} nhưng thất bại."
-        self.assertNotIn(_KHOA_APPWRITE_THAT_DANG, loc_bo_theo_gia_tri(cau))
+        cau = f"Đã gọi API với khoá {_KHOA_APPWRITE_GIA_LAP} nhưng thất bại."
+        self.assertNotIn(_KHOA_APPWRITE_GIA_LAP, loc_bo_theo_gia_tri(cau))
 
     def test_bearer_token_trong_van_ban(self):
         cau = "Header gửi đi: Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456"

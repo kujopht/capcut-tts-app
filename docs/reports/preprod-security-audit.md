@@ -246,3 +246,71 @@ có regression.
   vào `_MAU_BI_MAT_THEO_GIA_TRI` trong `server/secret_redaction.py`, dù hiện
   tại `youtube_client.py` đã tự tránh lộ khoá này bằng thiết kế riêng (không
   đưa `exc`/URL vào thông điệp lỗi).
+
+---
+
+## 7. Sự cố 2026-08-20: khoá Appwrite thật lọt vào fixture kiểm thử
+
+### Diễn biến
+
+Commit `82f5ed9` (2026-08-16), khi thêm `server/tests/test_secret_redaction.py`
+để TÁI HIỆN sự cố rò rỉ khoá Appwrite thật ngày 2026-08-16 (xem mục 1-6 phía
+trên), đã vô tình dùng CHÍNH khoá thật đó làm giá trị kiểm thử thay vì một
+giá trị bịa. Khoá lọt vào đúng MỘT commit, MỘT file
+(`server/tests/test_secret_redaction.py`), không có ở bất kỳ nơi nào khác
+trong lịch sử git (đã quét toàn bộ `git log --all` bằng pickaxe regex cho
+`standard_`/`console_`/AWS `AKIA`/PEM private-key/JWT — không tìm thấy bí
+mật thật nào khác).
+
+Phạm vi ảnh hưởng (do kế thừa từ `82f5ed9`): `integration/pre-prod-v1` và
+mọi nhánh nhánh ra từ nó sau 2026-08-16, PR #18 (đã merge — release
+candidate) và PR #19 (đang Draft). `main` và `upstream/main` KHÔNG bị ảnh
+hưởng — cả hai đứng yên tại `d483e90` (2026-08-14), trước khi `82f5ed9` tồn
+tại.
+
+Khoá cũ đã được xác nhận thu hồi/xoay trước khi phase này bắt đầu.
+
+### Biện pháp đã áp dụng (phase containment 2026-08-20)
+
+1. **Sửa fixture** — thay giá trị thật bằng một chuỗi BỊA DÙNG, sinh
+   CHƯƠNG TRÌNH (`"standard_" + đoạn_hex_lặp_lại * 12`) thay vì gõ tay một
+   chuỗi trông giống thật — để không ai (kể cả người review sau này) vô
+   tình copy một chuỗi "trông như khoá thật" vào fixture lần nữa. Đã đổi
+   tên biến (`_KHOA_APPWRITE_THAT_DANG` → `_KHOA_APPWRITE_GIA_LAP`) và viết
+   rõ trong docstring: đây là HÌNH DẠNG, không phải khoá thật, không bao
+   giờ dùng được với Appwrite nào. Toàn bộ 17 test trong file vẫn PASS —
+   độ mạnh của bài kiểm thử redaction không đổi.
+2. **Cổng quét bí mật ở CI** — thêm job `secrets` (`gitleaks/gitleaks-action@v2`)
+   vào `.github/workflows/ci.yml`, chạy trên mọi `push`/`pull_request`.
+   Cấu hình tại `.gitleaks.toml` (gốc repo): kế thừa toàn bộ luật mặc định
+   của gitleaks (AWS, private key, JWT, generic API key...) CỘNG một luật
+   riêng `appwrite-api-key` khớp đúng hình dạng khoá Appwrite
+   (`\b(?:standard|console)_[a-f0-9]{40,}\b`) — cùng mẫu regex với
+   `_MAU_BI_MAT_THEO_GIA_TRI` trong `server/secret_redaction.py`. KHÔNG có
+   allowlist riêng cho `test_secret_redaction.py`: vì giá trị kiểm thử giờ
+   được ghép chuỗi lúc chạy, không còn một chuỗi liên tục giống bí mật thật
+   nằm trong văn bản nguồn để gitleaks phải bỏ qua. Nếu tương lai một
+   allowlist cho file này trở nên "cần thiết", đó là dấu hiệu một bí mật
+   thật đã lọt vào lại — phải điều tra trước, không được allowlist ngay.
+3. **Khuyến nghị bổ sung (chưa bắt buộc bằng công cụ, ghi lại để áp dụng
+   thủ công/tổ chức)**:
+   - Bật GitHub secret scanning + push protection cho repo (Settings →
+     Code security) — đây là lớp chặn ở PHÍA GITHUB, trước khi commit lọt
+     vào remote, độc lập với gitleaks chạy trong CI (chạy SAU khi đã push).
+   - Cân nhắc thêm một pre-commit hook cục bộ (`.pre-commit-config.yaml`,
+     hook `gitleaks protect --staged`) để chặn ở máy dev TRƯỚC khi commit,
+     thay vì chỉ phát hiện sau khi đã push lên CI.
+   - **Quy tắc bắt buộc từ sự cố này**: KHÔNG BAO GIỜ copy một response
+     payload/trace/log THẬT (kể cả khi đang tái hiện một sự cố có thật) vào
+     fixture kiểm thử. Khi cần tái hiện HÌNH DẠNG của response thật (cấu
+     trúc, tên trường, độ sâu lồng nhau), luôn thay MỌI giá trị nhạy cảm
+     bằng giá trị bịa/sinh chương trình trước khi đưa vào file kiểm thử —
+     không có ngoại lệ, kể cả khi khoá/token đó "sắp bị xoay" hay "không
+     còn hiệu lực" tại thời điểm viết test.
+
+### Kết luận
+
+Sự cố đã được khoanh vùng đầy đủ (1 commit, 1 file, không lan sang `main`),
+khoá cũ đã thu hồi, fixture đã sạch, và một cổng CI mới ngăn tái diễn dạng
+bí mật này (cùng các dạng bí mật khác đã có sẵn trong luật mặc định của
+gitleaks) trên mọi nhánh/PR từ đây về sau.

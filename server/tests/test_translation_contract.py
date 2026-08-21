@@ -441,6 +441,10 @@ class HopDongDich(unittest.TestCase):
                 self.assertEqual(kho.list_versions(p.project_id), [], ten)
 
     def test_delete_project_khong_anh_huong_du_an_khac(self):
+        """Xoa du an A khong duoc dung tay vao du an B — kiem CA job, thuat
+        ngu, VA lich su phien ban (khong chi job/tieu de nhu ban dau)."""
+        from server.translation_domain import TranslationVersion
+
         for ten, kho in self._cac_kho():
             with self.subTest(kho=ten):
                 p1 = TranslationProject(owner_id="u1", title="x",
@@ -452,11 +456,21 @@ class HopDongDich(unittest.TestCase):
                 kho.create_project(p1)
                 kho.create_project(p2)
                 kho.create_job(TranslationJob(project_id=p2.project_id, owner_id="u1"))
+                kho.add_glossary_entry(GlossaryEntry(
+                    term_id="gls_p2", project_id=p2.project_id,
+                    category=GlossaryCategory.CHARACTER,
+                    original="药老", translated="Dược Lão"))
+                kho.add_version(TranslationVersion(
+                    project_id=p2.project_id, chapter_index=0,
+                    operation="auto_translate", pass_type="translator",
+                    previous_text="", new_text="Dược Lão."))
 
                 kho.delete_project(p1.project_id)
 
                 self.assertEqual(kho.get_project(p2.project_id).title, "y", ten)
                 self.assertEqual(len(kho.jobs_for_project(p2.project_id)), 1, ten)
+                self.assertEqual(len(kho.list_glossary(p2.project_id)), 1, ten)
+                self.assertEqual(len(kho.list_versions(p2.project_id)), 1, ten)
 
 
 if __name__ == "__main__":

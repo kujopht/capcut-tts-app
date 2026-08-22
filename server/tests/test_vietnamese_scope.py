@@ -200,7 +200,7 @@ class TuChoiGiongNgoaiPhamVi(unittest.TestCase):
         tts_bridge.ensure_voice_public("piper:ngochuyen", CauHinhGia())
 
     def test_route_tao_job_tra_400_chu_khong_500(self) -> None:
-        nguon = inspect.getsource(server_main.create_job)
+        nguon = inspect.getsource(server_main._tao_job_cho_chuong)
         vi_tri = nguon.index("ensure_voice_public")
         self.assertIn("HTTP_400_BAD_REQUEST", nguon[vi_tri:vi_tri + 400])
 

@@ -532,7 +532,9 @@ class KhongSinhAudioTrung(NenTest):
         self.assertLess(1, server_main.JOB_MAX_ATTEMPTS)
 
         server_main._CAN_RUN_JOBS = False
-        nguon = inspect.getsource(server_main.create_job)
+        # Chinh than cua route nam o `_tao_job_cho_chuong` (route la lop vo
+        # mong) — va do la CUNG mot ham ma duong nhap chuong hang loat goi.
+        nguon = inspect.getsource(server_main._tao_job_cho_chuong)
         elif_dong = [d for d in nguon.splitlines()
                      if d.strip().startswith("elif existing.is_stale")]
         self.assertEqual(len(elif_dong), 1)
@@ -541,8 +543,9 @@ class KhongSinhAudioTrung(NenTest):
         self.assertIs(self.store.get_job(job.job_id).status, JobStatus.RUNNING)
 
     def test_duong_tao_job_cung_hoi_truoc_khi_nhan(self) -> None:
-        """Doc thang tu nguon `create_job`: dieu kien phai co `_CAN_RUN_JOBS`."""
-        nguon = inspect.getsource(server_main.create_job)
+        """Doc thang tu nguon `_tao_job_cho_chuong` (chinh than cua route tao
+        job): dieu kien phai co `_CAN_RUN_JOBS`."""
+        nguon = inspect.getsource(server_main._tao_job_cho_chuong)
         truoc_claim = nguon[:nguon.index("_claim_stale_job(existing)")]
         self.assertIn("_CAN_RUN_JOBS", truoc_claim,
                       "route tạo job vẫn nhận job dù không chạy được nó")

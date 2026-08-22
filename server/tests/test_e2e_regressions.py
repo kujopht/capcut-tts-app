@@ -152,7 +152,13 @@ class TestTheInvalidVoicePathIsSafe(Base):
 
     def test_no_substitute_voice_is_ever_chosen(self):
         """Tu choi thi phai tu choi han, khong duoc lang le doi sang giong khac."""
-        nguon = inspect.getsource(server_main.create_job)
+        # Doc `_tao_job_cho_chuong`, KHONG phai `create_job`: route la lop vo
+        # mong, con chinh than nam o ham nay — va no la CUNG mot ham ma duong
+        # nhap chuong hang loat goi, nen rang buoc nay bao ve ca hai duong.
+        self.assertIn("_tao_job_cho_chuong",
+                      inspect.getsource(server_main.create_job),
+                      "route tạo job phải uỷ quyền cho `_tao_job_cho_chuong`")
+        nguon = inspect.getsource(server_main._tao_job_cho_chuong)
         vi_tri = nguon.index("ensure_voice_public")
         # Doan ngay sau lan kiem tra: chi duoc nem HTTPException, khong duoc gan
         # lai `payload.voice_id` thanh mot giong nao khac.

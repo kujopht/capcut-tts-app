@@ -363,6 +363,29 @@ class MetadataStore(Protocol):
 
     # -- chapter -------------------------------------------------------------
     def create_chapter(self, chapter: Chapter) -> Chapter: ...
+
+    def create_chapter_once(self, chapter: Chapter) -> Tuple[Chapter, bool]:
+        """
+        TAO-HOAC-LAY theo `chapter.chapter_id`. Tra `(chuong, vua_tao)`.
+
+        VI SAO CAN: nhap chuong hang loat (`server/bulk_import_service.py`) dat
+        `chapter_id` TAT DINH cho tung muc, roi dua vao tinh duy nhat cua
+        `documentId` ben Appwrite de "tao chuong xong roi chet TRUOC KHI kip ghi
+        id vao muc" KHONG sinh ra chuong trung — lan chay sau tao lai dung id do
+        va nhan ve ban da co.
+
+        Kiem tra "chapter_id da co chua roi moi tao" KHONG thay the duoc cho nay:
+        giua doc va ghi van con mot khe ho, va do la dung khe ho ma mot dot nhap
+        500 chuong se roi vao it nhat mot lan.
+
+        `vua_tao=False` PHAI ngan moi tac dung phu chi duoc phep chay mot lan
+        (thong bao nguoi theo doi, thuong XP) — xem `_tao_chuong_cho_truyen`.
+
+        KHONG BAO GIO ghi de ban da co: noi dung tac gia da sua bang tay thang
+        noi dung trong lo nhap.
+        """
+        ...
+
     def get_chapter(self, chapter_id: str) -> Chapter: ...
     def owned_chapter(self, chapter_id: str, owner_id: str) -> Chapter: ...
     def list_chapters(self, novel_id: str) -> List[Chapter]: ...
@@ -408,6 +431,22 @@ class MetadataStore(Protocol):
                                 fingerprint: str) -> Optional[TtsJob]: ...
     def list_jobs(self, owner_id: str,
                   chapter_id: Optional[str] = None) -> List[TtsJob]: ...
+
+    def jobs_by_ids(self, job_ids: Sequence[str]) -> Dict[str, TtsJob]:
+        """
+        Nhieu job trong SO TRUY VAN KHONG PHU THUOC so job — cung hop dong voi
+        `novels_by_ids`/`chapter_counts`.
+
+        VI SAO CAN: bo dieu phoi nhap hang loat phai doi soat trang thai cua moi
+        muc `job_queued` MOI chu ky quet (3 giay). Goi `get_job` cho tung muc la
+        mot request Appwrite moi muc moi chu ky — dung hinh dang N+1 da bi bo o
+        cac trang khac, va o day no dap vao han muc doc that.
+
+        Id khong ton tai thi VANG MAT trong ket qua, khong nem loi: job co the
+        da bi xoa cung chuong (`_purge_chapter`), va do la mot trang thai hop le
+        ma nguoi goi phai xu ly duoc.
+        """
+        ...
 
     def job_settings(self, owner_id: str,
                      fingerprints: Sequence[str]) -> Dict[str, Tuple[str, int]]:
@@ -1319,6 +1358,18 @@ class MockMetadataStore(MockSocialStore):
             self.chapters[chapter.chapter_id] = chapter
             return chapter
 
+    def create_chapter_once(self, chapter: Chapter) -> Tuple[Chapter, bool]:
+        """Xem contract o `MetadataStore.create_chapter_once`. Mo phong dung
+        hanh vi Appwrite tu choi `POST` trung `documentId`."""
+        with self._lock:
+            hien_co = self.chapters.get(chapter.chapter_id)
+            if hien_co is not None:
+                return hien_co, False
+        # Ghi QUA `create_chapter()`, khong ghi thang vao `self.chapters`: cac
+        # test double ke thua lop nay va ghi de `create_chapter` de theo doi
+        # thu tu ghi — cung ly do voi `create_job_once`.
+        return self.create_chapter(chapter), True
+
     def get_chapter(self, chapter_id: str) -> Chapter:
         chapter = self.chapters.get(chapter_id)
         if chapter is None:
@@ -1419,6 +1470,14 @@ class MockMetadataStore(MockSocialStore):
         if chapter_id:
             items = [j for j in items if j.chapter_id == chapter_id]
         return sorted(items, key=lambda j: j.created_at, reverse=True)
+
+    def jobs_by_ids(self, job_ids: Sequence[str]) -> Dict[str, TtsJob]:
+        """Xem contract o `MetadataStore.jobs_by_ids`."""
+        wanted = {j for j in job_ids if j}
+        if not wanted:
+            return {}
+        with self._lock:
+            return {jid: job for jid, job in self.jobs.items() if jid in wanted}
 
     def job_settings(self, owner_id: str,
                      fingerprints: Sequence[str]) -> Dict[str, Tuple[str, int]]:

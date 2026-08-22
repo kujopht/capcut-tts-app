@@ -16,6 +16,22 @@ export const MAX_CHAPTER_CHARS = 100000;
 export const WARN_RATIO = 0.85;
 
 /**
+ * Số chương tối đa trong MỘT lô nhập hàng loạt. Phải khớp `MAX_IMPORT_ITEMS`
+ * trong `server/main.py` (`FAS_MAX_IMPORT_ITEMS`) — cùng cơ chế đối soát với
+ * `MAX_CHAPTER_CHARS`, xem `server/tests/test_bulk_chapter_import.py`.
+ *
+ * Truyện dài hơn thì chia nhiều lô: các lô nối tiếp nhau đúng thứ tự vì lô sau
+ * đọc `order_index` lớn nhất đang có.
+ */
+export const MAX_IMPORT_ITEMS = 500;
+
+/**
+ * Tổng số ký tự tối đa trong MỘT lô. Đây là giới hạn của một THÂN REQUEST, không
+ * phải của Appwrite. Phải khớp `MAX_IMPORT_TOTAL_CHARS` trong `server/main.py`.
+ */
+export const MAX_IMPORT_TOTAL_CHARS = 5000000;
+
+/**
  * Cạnh dài nhất của ảnh bìa truyện SAU khi xử lý, khớp
  * `CHINH_SACH_ANH["cover"].canh_toi_da` trong `server/social.py`. Cùng cơ chế
  * đối soát với `MAX_CHAPTER_CHARS` — xem `test_giao_dien_va_may_chu...` trong

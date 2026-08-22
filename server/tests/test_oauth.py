@@ -20,6 +20,7 @@ Chay hoan toan offline: dung `MockIdentityAdapter`, khong goi Appwrite.
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
@@ -51,6 +52,50 @@ class DungIdentityGia(unittest.TestCase):
 
 
 class BatDauOAuth(DungIdentityGia):
+
+    def _callback_urls(self, web_base_url: str, next_raw: str = "/") -> tuple[str, str]:
+        old = server_main.settings.web_base_url
+        server_main.settings = replace(server_main.settings, web_base_url=web_base_url)
+        self.addCleanup(
+            setattr,
+            server_main,
+            "settings",
+            replace(server_main.settings, web_base_url=old),
+        )
+        r = self.c.get(
+            f"/api/auth/oauth/google?next={next_raw}",
+            follow_redirects=False,
+        )
+        self.assertEqual(r.status_code, 307)
+        query = parse_qs(urlparse(r.headers["location"]).query)
+        return query["success"][0], query["failure"][0]
+
+    def test_callback_dung_goc_web_theo_moi_truong(self) -> None:
+        for web_base_url in (
+            "http://localhost:3000",
+            "https://staging.fanfic.world",
+            "https://fanfic.world",
+        ):
+            with self.subTest(web_base_url=web_base_url):
+                success, failure = self._callback_urls(web_base_url)
+                self.assertTrue(success.startswith(f"{web_base_url}/auth/callback?"))
+                self.assertTrue(failure.startswith(f"{web_base_url}/login?"))
+
+    def test_callback_staging_khong_bao_gio_roi_ve_localhost(self) -> None:
+        success, failure = self._callback_urls("https://staging.fanfic.world")
+        self.assertNotIn("localhost", success)
+        self.assertNotIn("localhost", failure)
+
+    def test_callback_staging_giu_next_noi_bo_an_toan(self) -> None:
+        success, _ = self._callback_urls(
+            "https://staging.fanfic.world",
+            "/admin/animation/sources?tab=trusted%26page=1",
+        )
+        callback_query = parse_qs(urlparse(success).query)
+        self.assertEqual(
+            callback_query["next"][0],
+            "/admin/animation/sources?tab=trusted&page=1",
+        )
 
     def test_google_tra_ve_307_kem_Location(self) -> None:
         r = self.c.get("/api/auth/oauth/google?next=/write", follow_redirects=False)

@@ -703,6 +703,28 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                      chapter.owner_id)
         return chapter
 
+    def create_chapter_once(self, chapter: Chapter) -> Tuple[Chapter, bool]:
+        """
+        Xem contract o `MetadataStore.create_chapter_once`.
+
+        Appwrite tu choi `POST` trung `documentId` (409, `_call` boc thanh
+        `NotFoundError`) nen day la compare-and-set THAT SU, khong can
+        transaction rieng — cung ky thuat voi
+        `AppwriteAnimationStore.create_episode_once`.
+
+        Loi TRANSPORT khong roi vao nhanh nay: `_call` nem
+        `AppwriteUnavailableError` (con cua `AuthError`, KHONG phai
+        `NotFoundError`), nen mot lan mat mang se noi len that thay vi bien
+        thanh "chuong nay da co roi".
+        """
+        try:
+            self._create(COL_CHAPTERS, chapter.chapter_id, chapter.to_dict(),
+                         chapter.owner_id)
+            return chapter, True
+        except NotFoundError:
+            return _chapter_from_doc(self._get(COL_CHAPTERS,
+                                               chapter.chapter_id)), False
+
     def get_chapter(self, chapter_id: str) -> Chapter:
         return _chapter_from_doc(self._get(COL_CHAPTERS, chapter_id))
 
@@ -882,6 +904,26 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         if chapter_id:
             queries.append(q_equal("chapter_id", chapter_id))
         return [_job_from_doc(d) for d in self._list_all(COL_JOBS, queries)]
+
+    def jobs_by_ids(self, job_ids: Sequence[str]) -> Dict[str, TtsJob]:
+        """
+        Xem contract o `MetadataStore.jobs_by_ids`.
+
+        MOT truy van moi lo 50 id — cung ky thuat voi `job_settings` va
+        `novels_by_ids`. Loc theo `job_id` (thuoc tinh), KHONG theo `$id`: chi
+        muc `job_id` khong ton tai rieng nhung `equal` nhieu gia tri van chay,
+        va cach nay dung y voi cac ham `*_by_ids` khac cua kho nay.
+        """
+        ds = [j for j in dict.fromkeys(job_ids) if j]
+        if not ds:
+            return {}
+        ra: Dict[str, TtsJob] = {}
+        for i in range(0, len(ds), 50):
+            lo = ds[i:i + 50]
+            for row in self._list_all(COL_JOBS, [q_equal("job_id", *lo)]):
+                job = _job_from_doc(row)
+                ra[job.job_id] = job
+        return ra
 
     def save_job(self, job: TtsJob) -> TtsJob:
         """Ghi lai trang thai job sau khi chay xong."""

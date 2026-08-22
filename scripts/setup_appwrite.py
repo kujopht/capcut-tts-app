@@ -543,6 +543,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("status_idx", "key", ["status"]),
             # Quet job ket: tim theo trang thai roi loc theo lease
             ("status_lease_idx", "key", ["status", "lease_expires_at"]),
+            # THEM SAU (nhap chuong hang loat): `jobs_by_ids` loc
+            # `equal("job_id", ...)` hang loat de doi soat mot lo muc
+            # `job_queued` bang MOT truy van thay vi mot request moi muc moi chu
+            # ky quet — cung tinh huong voi `novel_id_idx` o `novels`.
+            ("job_id_idx", "key", ["job_id"]),
         ],
     },
     # Khoa cua viec nhan job. MOT hang cho MOI lan thu cua MOI job, id tat dinh
@@ -584,6 +589,110 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("created_at", "datetime", True, None),
         ],
         "indexes": [],
+    },
+    # ==========================================================================
+    # NHAP CHUONG HANG LOAT — hai bang, xem `server/bulk_import_domain.py`.
+    #
+    # Day la trang thai DIEU PHOI, khong phai noi dung cong bo. Chuong that nam
+    # o `chapters`, audio that nam o `audio_tracks`/R2.
+    #
+    # ROLLBACK: xoa CA HAI collection. Khong mat chuong hay audio nao — chi mat
+    # kha nang TIEP TUC mot dot nhap dang do, va duong cuu la chu gui lai dung
+    # tep cu (dinh danh tat dinh nen lo se duoc dung lai, khong tao chuong
+    # trung). Khong co migration du lieu nguoc nao can chay.
+    #
+    # THU TU TRIEN KHAI an toan: chay script nay TRUOC khi deploy code. Neu code
+    # len truoc, `_supported_fields` se thay collection khong ton tai va moi
+    # route nhap hang loat tra loi ro rang thay vi ghi nua voi.
+    # ==========================================================================
+    "chapter_import_batches": {
+        "name": "Chapter Import Batches",
+        "attributes": [
+            # `$id` = `batch_id` = "imb_" + 24 hex dau cua `fingerprint`. Tinh
+            # DUY NHAT cua `$id` chinh la co che idempotent cua "gui lai cung
+            # mot tep" — xem `create_batch_once`.
+            ("batch_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("novel_id", "string", True, 64),
+            # Bam cua (chu, truyen, danh sach chuong). KHONG gom giong doc —
+            # xem `bulk_import_domain.batch_fingerprint`.
+            ("fingerprint", "string", True, 64),
+            ("total_items", "integer", True, None),
+            ("status", "enum", True,
+             ["preparing", "running", "cancelling", "cancelled", "completed",
+              "partial", "failed"]),
+            # RONG = chi tao chuong, khong tao audio. Trang thai hop le.
+            ("voice_id", "string", False, 128),
+            ("rate", "string", False, 16),
+            ("chunk_chars", "integer", False, None),
+            # `order_index` cua chuong = `order_base + item_index`. Chot MOT LAN
+            # luc tao lo de mot lan chay lai khong day thu tu di.
+            ("order_base", "integer", False, None),
+            ("source_name", "string", False, 200),
+            # Bo dem DAN XUAT nhung duoc LUU: trang tien do poll vai giay mot
+            # lan, va dem lai 500 hang moi lan poll la duong de dot han muc doc
+            # (da co su co dung nhu vay 20/08). Xem docstring `ImportBatch`.
+            ("count_pending", "integer", False, None),
+            ("count_chapter_created", "integer", False, None),
+            ("count_job_queued", "integer", False, None),
+            ("count_completed", "integer", False, None),
+            ("count_failed", "integer", False, None),
+            ("last_error", "string", False, 1000),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+            ("cancelled_at", "datetime", False, None),
+            ("finished_at", "datetime", False, None),
+        ],
+        "indexes": [
+            ("owner_idx", "key", ["owner_id"]),
+            ("novel_idx", "key", ["novel_id"]),
+            # Bo dieu phoi quet theo trang thai MOI chu ky (3 giay) — day la
+            # truy van nong nhat cua ca tinh nang.
+            ("status_idx", "key", ["status"]),
+            ("owner_novel_created_idx", "key",
+             ["owner_id", "novel_id", "created_at"]),
+        ],
+    },
+    "chapter_import_items": {
+        "name": "Chapter Import Items",
+        "attributes": [
+            # `$id` = `item_id` = "{batch_id}-{index:04d}" (33 ky tu, vua tran
+            # 36 cua Appwrite). Tat dinh nen viec ghi danh sach muc co the bi
+            # cat giua chung roi chay lai ma khong sinh ban trung.
+            ("item_id", "string", True, 64),
+            ("batch_id", "string", True, 64),
+            ("owner_id", "string", True, 64),
+            ("novel_id", "string", True, 64),
+            ("item_index", "integer", True, None),
+            ("title", "string", True, 200),
+            # CUNG kich thuoc voi `chapters.content`. KHONG xoa sau khi tao
+            # chuong: day la ban goc de doi soat va la thu duy nhat cho phep tao
+            # lai chuong khi chu xoa nham roi bam "thu lai". Duong doc cua API
+            # luon `select` bo cot nay ra.
+            ("content", "string", False, 1000000),
+            ("content_hash", "string", False, 64),
+            # LUU, khong dan xuat: `char_count` phai doc duoc ma khong keo ca
+            # cot `content` ve.
+            ("char_count", "integer", False, None),
+            ("status", "enum", True,
+             ["pending", "chapter_created", "job_queued", "completed", "failed"]),
+            # Rong cho den khi chuong duoc tao. Gia tri la TAT DINH tu `item_id`
+            # — xem `bulk_import_domain.chapter_id_for`.
+            ("chapter_id", "string", False, 64),
+            ("job_id", "string", False, 64),
+            ("error_message", "string", False, 1000),
+            ("attempts", "integer", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("batch_idx", "key", ["batch_id"]),
+            # Index QUAN TRONG NHAT: bo dieu phoi lay "muc dang cho, theo thu
+            # tu" moi chu ky. Thieu no thi moi chu ky quet la mot lan quet bang.
+            ("batch_status_index_idx", "key", ["batch_id", "status", "item_index"]),
+            ("batch_index_idx", "key", ["batch_id", "item_index"]),
+            ("owner_idx", "key", ["owner_id"]),
+        ],
     },
     # ==========================================================================
     # Animation (V6, overnight Phase 5) — subsystem RIENG, doc lap voi

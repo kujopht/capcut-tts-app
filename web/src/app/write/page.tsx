@@ -618,9 +618,17 @@ export default function WritePage() {
         title="Viết và xuất bản"
         lead="Tạo truyện, thêm chương, tạo audio cho từng chương. Truyện nằm ở bản nháp cho tới khi bạn tự xuất bản."
         action={
-          <Link className="btn" href="/fanfic">
-            Xem trang khám phá
-          </Link>
+          <>
+            {/* Trang nay tao MOT chuong moi lan. Voi mot bo 50-500 chuong thi
+                do la 50-500 lan bam nut, nen loi vao "nhap hang loat" phai nam
+                ngay day chu khong an trong menu. */}
+            <Link className="btn" href="/write/import">
+              Nhập nhiều chương
+            </Link>
+            <Link className="btn" href="/fanfic">
+              Xem trang khám phá
+            </Link>
+          </>
         }
       />
 

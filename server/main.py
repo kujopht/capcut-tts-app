@@ -78,7 +78,22 @@ from server.gamification_service import (
 )
 from server.appwrite_gamification_store import build_gamification_store
 from server.appwrite_animation_store import build_animation_store
+from server.appwrite_bulk_import_store import build_bulk_import_store
 from server.appwrite_trusted_source_store import build_trusted_source_store
+from server.bulk_import_domain import (
+    BulkImportError,
+    BulkImportFormatError,
+    BulkImportStateError,
+    ChapterJobRejected,
+    JobQueueFull,
+    ParsedChapter,
+    parse_input,
+    validate_chapters,
+)
+from server.bulk_import_service import (
+    IMPORT_SWEEP_SECONDS,
+    BulkImportService,
+)
 from server.animation_domain import (
     AnimationEpisode,
     AnimationSeries,
@@ -220,6 +235,14 @@ animation_store = build_animation_store(settings)
 #: (`trusted_sources`/`series_mappings`/`video_imports`), xem docstring dau
 #: `server/trusted_source_domain.py`.
 trusted_source_store = build_trusted_source_store(settings)
+
+#: Kho NHAP CHUONG HANG LOAT — MOT the hien, HAI bang RIENG
+#: (`chapter_import_batches`/`chapter_import_items`), doc lap voi `store`.
+#:
+#: Day la trang thai DIEU PHOI, khong phai noi dung: xoa ca hai bang thi khong
+#: mat chuong hay audio nao, chi mat kha nang tiep tuc mot dot nhap dang do.
+#: Xem `server/bulk_import_domain.py`.
+bulk_import_store = build_bulk_import_store(settings)
 
 #: Tang dich vu Trusted Video Sources (Phase 5) — noi YouTube Data API,
 #: `video_classifier`/`episode_parser`, `trusted_source_store` va
@@ -1563,6 +1586,68 @@ def _thuong_xp_xuat_ban_truyen(novel: Novel, user_id: str) -> None:
 # -----------------------------------------------------------------------------
 
 
+def _tao_chuong_cho_truyen(*, novel: Novel, owner_id: str, title: str,
+                           content: str, order_index: int,
+                           chapter_id: str = "",
+                           bao_nguoi_theo_doi: bool = True
+                           ) -> Tuple[Chapter, bool]:
+    """
+    CHINH THAN cua `POST /api/chapters`. MOT duong tao chuong duy nhat.
+
+    Route ben duoi chi la lop vo kiem quyen + doi hinh dang; bo dieu phoi nhap
+    hang loat (`server/bulk_import_service.py`) goi DUNG ham nay. Khong co ban
+    sao thu hai cua logic tao chuong o dau ca — do la yeu cau cua thiet ke, vi
+    mot ban sao se lech ngay lan dau ai them mot buoc vao mot trong hai duong.
+
+    HAI tham so chi CO nghia cho duong hang loat:
+
+    `chapter_id` — dat `chapter_id` TAT DINH. Rong = de `Chapter` tu sinh id
+    ngau nhien y nhu truoc gio. Xem `MetadataStore.create_chapter_once`.
+
+    `bao_nguoi_theo_doi` — TAT thong bao "co chuong moi". Nhap 500 chuong vao
+    mot truyen DA XUAT BAN se ban 500 thong bao cho TUNG nguoi theo doi; do
+    khong phai "dung lai co che da co" ma la lam dung no. Khoanh khac dang bao
+    cua mot dot nhap la luc truyen duoc xuat ban, va `publish_novel` da lo viec
+    do. XP thi GIU nguyen nhu duong don chuong: no cong theo tung
+    `chapter_id`, khong nhan doi, va `_thuong_xp_xuat_ban_truyen` cung tinh
+    dung cac chuong nay khi truyen duoc xuat ban.
+    """
+    chuong = Chapter(
+        novel_id=novel.novel_id,
+        owner_id=owner_id,
+        title=title.strip(),
+        content=content,
+        order_index=order_index,
+        **({"chapter_id": chapter_id} if chapter_id else {}),
+    )
+    chapter, vua_tao = store.create_chapter_once(chuong)
+    if not vua_tao:
+        # Da co tu truoc (duong hang loat chay lai). TUYET DOI khong lam lai
+        # cac tac dung phu mot lan: thong bao va XP.
+        return chapter, False
+    # Chuong moi trong truyen DA XUAT BAN la mot chuong doc gia doc duoc NGAY:
+    # danh sach chuong cua trang truyen khong loc theo trang thai chuong, chi
+    # theo trang thai truyen. Nen day — chu khong phai mot nut "xuat ban
+    # chuong" khong ton tai — chinh la khoanh khac "co chuong moi" ma nguoi
+    # theo doi truyen can duoc bao. E2E tren staging that da chung minh duong
+    # cu (doi `state` cua chuong qua PATCH) khong bao gio kich hoat duoc:
+    # `ChapterPatch` khong nhan `state`.
+    if bao_nguoi_theo_doi:
+        _bao_chuong_moi(chapter)
+    # Cung ly do: truyen cha DA xuat ban tu truoc thi chuong moi nay LA cong
+    # khai ngay, nen thuong XP tai day. Truyen con nhap thi cho toi khi
+    # `publish_novel` quet qua (xem `_thuong_xp_xuat_ban_truyen`).
+    if novel.state is PublishState.PUBLISHED:
+        try:
+            thuong_xp(gamification_store, owner_id, "publish_chapter",
+                     source_kind="chapter", source_id=chapter.chapter_id)
+            thuong_xp(gamification_store, owner_id, "publish_first_chapter",
+                     source_kind="chapter", source_id=owner_id)
+        except Exception:
+            pass
+    return chapter, True
+
+
 @app.post("/api/chapters", status_code=status.HTTP_201_CREATED)
 def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     try:
@@ -1572,32 +1657,9 @@ def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profil
     except PermissionDenied as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
 
-    chapter = store.create_chapter(Chapter(
-        novel_id=payload.novel_id,
-        owner_id=profile.user_id,
-        title=payload.title.strip(),
-        content=payload.content,
-        order_index=payload.order_index,
-    ))
-    # Chuong moi trong truyen DA XUAT BAN la mot chuong doc gia doc duoc NGAY:
-    # danh sach chuong cua trang truyen khong loc theo trang thai chuong, chi
-    # theo trang thai truyen. Nen day — chu khong phai mot nut "xuat ban
-    # chuong" khong ton tai — chinh la khoanh khac "co chuong moi" ma nguoi
-    # theo doi truyen can duoc bao. E2E tren staging that da chung minh duong
-    # cu (doi `state` cua chuong qua PATCH) khong bao gio kich hoat duoc:
-    # `ChapterPatch` khong nhan `state`.
-    _bao_chuong_moi(chapter)
-    # Cung ly do: truyen cha DA xuat ban tu truoc thi chuong moi nay LA cong
-    # khai ngay, nen thuong XP tai day. Truyen con nhap thi cho toi khi
-    # `publish_novel` quet qua (xem `_thuong_xp_xuat_ban_truyen`).
-    if novel.state is PublishState.PUBLISHED:
-        try:
-            thuong_xp(gamification_store, profile.user_id, "publish_chapter",
-                     source_kind="chapter", source_id=chapter.chapter_id)
-            thuong_xp(gamification_store, profile.user_id, "publish_first_chapter",
-                     source_kind="chapter", source_id=profile.user_id)
-        except Exception:
-            pass
+    chapter, _ = _tao_chuong_cho_truyen(
+        novel=novel, owner_id=profile.user_id, title=payload.title,
+        content=payload.content, order_index=payload.order_index)
     return {"chapter": chapter.to_dict()}
 
 
@@ -2346,16 +2408,24 @@ def stop_translation_job_sweeper() -> None:
     _translation_sweeper_stop.set()
 
 
-@app.post("/api/jobs", status_code=status.HTTP_201_CREATED)
-def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+def _tao_job_cho_chuong(*, owner_id: str, chapter_id: str, voice_id: str,
+                        rate: str = "1.0",
+                        chunk_chars: int = 2000) -> Dict[str, Any]:
     """
-    Tao job tao audio.
+    CHINH THAN cua `POST /api/jobs`. MOT duong tao job duy nhat.
 
-    IDEMPOTENT: cung noi dung + giong + thiet lap thi tra ve job da co, khong
-    tao job moi va khong goi provider lan nua.
+    Route ben duoi chi doi hinh dang tham so; bo dieu phoi nhap hang loat goi
+    DUNG ham nay, nen tinh idempotent theo dau van tay, tran `MAX_ACTIVE_JOBS`,
+    kiem giong cong khai va duong nhan lai job ket deu la CUNG mot ma nguon o
+    ca hai duong — khong co ban sao nao de lech.
+
+    VAN nem `HTTPException` du duoc goi ngoai ngu canh HTTP: ma trang thai la
+    thu phan biet "tran dong thoi, thu lai sau" (429) voi "tu choi vinh vien"
+    (400/403/404), va bo dieu phoi can dung su phan biet do. Lop chuyen doi
+    nam o `_bulk_tao_job` ben duoi.
     """
     try:
-        chapter = store.owned_chapter(payload.chapter_id, profile.user_id)
+        chapter = store.owned_chapter(chapter_id, owner_id)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except PermissionDenied as exc:
@@ -2372,14 +2442,14 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
     # Kiem o day, TRUOC khi tao job: job da ghi xuong roi moi tu choi thi
     # nguoi dung se thay mot job `failed` thay vi mot loi doc duoc.
     try:
-        tts_bridge.ensure_voice_public(payload.voice_id, settings)
+        tts_bridge.ensure_voice_public(voice_id, settings)
     except tts_bridge.TtsBridgeError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, exc.message) from exc
 
     fingerprint = job_fingerprint(
-        chapter.content, payload.voice_id, payload.rate, payload.chunk_chars
+        chapter.content, voice_id, rate, chunk_chars
     )
-    existing = store.find_job_by_fingerprint(profile.user_id, chapter.chapter_id, fingerprint)
+    existing = store.find_job_by_fingerprint(owner_id, chapter.chapter_id, fingerprint)
     if existing is not None:
         # Job KET — `running` ma khong con worker nao giu. Truoc day nhanh nay tra
         # lai chinh cai job chet do, mai mai: nguoi dung bam "Tao audio" va nhan
@@ -2430,7 +2500,7 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
     # Dem o day chi la mot anh chup — hai request song song deu co the thay 2 va
     # cung tao job thu 3. Chap nhan duoc: day la ran de lich su chu khong phai
     # rao bao mat. Thu that su bao ve may worker la concurrency Piper bang 1.
-    dang_xep = sum(1 for j in store.list_jobs(profile.user_id)
+    dang_xep = sum(1 for j in store.list_jobs(owner_id)
                    if j.status in (JobStatus.PENDING, JobStatus.RUNNING))
     if dang_xep >= MAX_ACTIVE_JOBS:
         raise HTTPException(
@@ -2453,12 +2523,12 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
     # ve job CUA NGUOI THANG va khong duoc khoi dong thread nao.
     job, vua_tao = store.create_job_once(
         TtsJob(
-            owner_id=profile.user_id,
+            owner_id=owner_id,
             chapter_id=chapter.chapter_id,
-            voice_id=payload.voice_id,
+            voice_id=voice_id,
             content_hash=fingerprint,
-            rate=payload.rate,
-            chunk_chars=payload.chunk_chars,
+            rate=rate,
+            chunk_chars=chunk_chars,
         ),
         fingerprint,
     )
@@ -2474,6 +2544,23 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
 
     _start_job_thread(job, chapter.content, None, f"tts-job-{job.job_id}")
     return {"job": created, "reused": False}
+
+
+@app.post("/api/jobs", status_code=status.HTTP_201_CREATED)
+def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+    """
+    Tao job tao audio.
+
+    IDEMPOTENT: cung noi dung + giong + thiet lap thi tra ve job da co, khong
+    tao job moi va khong goi provider lan nua.
+
+    Toan bo logic o `_tao_job_cho_chuong` — CUNG mot ham ma bo dieu phoi nhap
+    hang loat goi.
+    """
+    return _tao_job_cho_chuong(
+        owner_id=profile.user_id, chapter_id=payload.chapter_id,
+        voice_id=payload.voice_id, rate=payload.rate,
+        chunk_chars=payload.chunk_chars)
 
 
 @app.get("/api/jobs/{job_id}")
@@ -2547,6 +2634,458 @@ def latest_job_for_chapter(
     ung_vien = [j for j in items if _UU_TIEN_JOB.get(j.status, 9) == uu_tien]
     chon = max(ung_vien, key=lambda j: j.created_at)
     return {"job": chon.to_dict()}
+
+
+# -----------------------------------------------------------------------------
+# Nhap chuong HANG LOAT
+# -----------------------------------------------------------------------------
+#
+# Xem `server/bulk_import_domain.py` (dinh dang dau vao, dinh danh tat dinh) va
+# `server/bulk_import_service.py` (bo dieu phoi). Khu nay CHI la lop vo HTTP:
+# kiem quyen chu-so-huu-truyen, doc dau vao, doi hinh dang loi.
+#
+# QUYEN: `store.owned_novel()` — TAC GIA SO HUU TRUYEN, khong phai `AdminRole`.
+# Cung rao voi `POST /api/chapters`, va co y giong het: nhap hang loat khong mo
+# them quyen nao ma bam mot nut 500 lan khong lam duoc.
+#
+# CONG XUAT BAN khong dat o day. Nhap chuong la tao BAN NHAP; `POST /api/novels/
+# {id}/publish` van la cong duy nhat, va no da co `author_gate` cua no.
+
+#: Bao nhieu chuong duoc nhap trong MOT lo.
+#:
+#: 500 la tran tren cua nhu cau da neu ("50-500 chuong moi truyen"). Truyen dai
+#: hon thi chia nhieu lo — cac lo noi tiep nhau dung thu tu vi `order_base` cua
+#: lo sau doc `order_index` lon nhat dang co.
+MAX_IMPORT_ITEMS = int(os.environ.get("FAS_MAX_IMPORT_ITEMS", "500"))
+
+#: Tong so ky tu trong MOT lo. Khong phai gioi han cua Appwrite ma la gioi han
+#: cua MOT THAN REQUEST: 500 chuong x 100.000 ky tu la 50 MB JSON, va khong
+#: request nao nen to nhu vay. 5 trieu ky tu la khoang 500 chuong x 10.000 —
+#: du rong cho mot bo fanfic that.
+MAX_IMPORT_TOTAL_CHARS = int(
+    os.environ.get("FAS_MAX_IMPORT_TOTAL_CHARS", "5000000"))
+
+
+class ChapterImportItemIn(BaseModel):
+    """DUNG LAI rang buoc do dai cua `ChapterIn` — khong phat minh gioi han
+    moi cho duong hang loat, neu khong hai duong se nhan hai tap dau vao khac
+    nhau va cai lech do se lo ra o chuong thu 300."""
+
+    title: TieuDe
+    content: NoiDungChuong = ""
+
+
+class ChapterImportIn(BaseModel):
+    #: Dang co cau truc — duong cho script van hanh noi dung.
+    chapters: Optional[List[ChapterImportItemIn]] = Field(
+        default=None, max_length=MAX_IMPORT_ITEMS)
+    #: Van ban tho (TXT theo mau `=== Tiêu đề ===`, hoac JSON) — duong cho
+    #: giao dien: trinh duyet doc tep bang `FileReader.readAsText` roi gui
+    #: chuoi. KHONG base64: dinh dang nay la van ban thuan, va base64 chi lam
+    #: than request phong them mot phan ba ma khong duoc gi.
+    text: Annotated[str, StringConstraints(
+        max_length=MAX_IMPORT_TOTAL_CHARS + 200_000)] = ""
+    format: Annotated[str, StringConstraints(max_length=8)] = "txt"
+    #: RONG = chi tao chuong, KHONG tao audio. Trang thai hop le va huu dung.
+    voice_id: Annotated[str, StringConstraints(max_length=128)] = ""
+    rate: Annotated[str, StringConstraints(max_length=16)] = "1.0"
+    chunk_chars: int = Field(default=2000, ge=200, le=20000)
+    source_name: Annotated[str, StringConstraints(max_length=200)] = ""
+
+
+def _doc_dau_vao_nhap(payload: ChapterImportIn) -> List[ParsedChapter]:
+    """
+    Doc + KIEM CA danh sach truoc khi ghi bat ky hang nao.
+
+    Nua voi la trang thai kho don nhat cua ca tinh nang nay, nen tu choi som va
+    tu choi CA lo — xem `validate_chapters`.
+    """
+    if payload.chapters is not None and payload.text.strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Chỉ gửi một trong hai: `chapters` (có cấu trúc) hoặc `text` "
+            "(văn bản thô).")
+    if payload.chapters is not None:
+        from server.bulk_import_domain import chuan_hoa_noi_dung
+
+        items = [ParsedChapter(title=c.title.strip(),
+                               content=chuan_hoa_noi_dung(c.content))
+                 for c in payload.chapters]
+    elif payload.text.strip():
+        try:
+            items = parse_input(payload.text, payload.format)
+        except BulkImportFormatError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    else:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Chưa có nội dung để nhập. Gửi `chapters` hoặc `text`.")
+    try:
+        validate_chapters(items, max_items=MAX_IMPORT_ITEMS,
+                          max_chars_per_item=MAX_CHAPTER_CHARS,
+                          max_total_chars=MAX_IMPORT_TOTAL_CHARS)
+    except BulkImportFormatError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return items
+
+
+def _bulk_tao_chuong(*, novel: Novel, owner_id: str, title: str, content: str,
+                     order_index: int,
+                     chapter_id: str = "") -> Tuple[Chapter, bool]:
+    """Cua ngo duy nhat tu bo dieu phoi vao viec tao chuong — xem
+    `_tao_chuong_cho_truyen` ve ly do TAT thong bao nguoi theo doi."""
+    return _tao_chuong_cho_truyen(
+        novel=novel, owner_id=owner_id, title=title, content=content,
+        order_index=order_index, chapter_id=chapter_id,
+        bao_nguoi_theo_doi=False)
+
+
+def _bulk_tao_job(*, owner_id: str, chapter_id: str, voice_id: str,
+                  rate: str, chunk_chars: int) -> Dict[str, Any]:
+    """
+    Cua ngo duy nhat tu bo dieu phoi vao viec tao job TTS.
+
+    Doi `HTTPException` sang hai ngoai le co Y NGHIA KHAC NHAU, va su phan biet
+    do la thu quyet dinh hanh vi cua ca dot nhap:
+
+      429 -> `JobQueueFull`: tran dong thoi cua chinh nguoi dung. KHONG phai
+             loi cua chuong nay. Bo dieu phoi dung xep them trong chu ky nay
+             roi thu lai — day chinh la cach "gioi han dong thoi" cua tinh nang
+             nay, va no la co che DA CO chu khong phai mot bo dieu tiet moi.
+      con lai -> `ChapterJobRejected`: tu choi VINH VIEN (giong sai, chuong
+             rong, chuong bi xoa). Muc bi danh `failed` va cho chu bam thu lai.
+    """
+    try:
+        return _tao_job_cho_chuong(
+            owner_id=owner_id, chapter_id=chapter_id, voice_id=voice_id,
+            rate=rate, chunk_chars=chunk_chars)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+            raise JobQueueFull(str(exc.detail)) from exc
+        raise ChapterJobRejected(str(exc.detail)) from exc
+
+
+def bulk_import_service() -> BulkImportService:
+    """
+    Dich vu nhap hang loat, DUNG NEN moi lan goi.
+
+    CO Y khong giu mot the hien o cap module nhu `social`/`translation_svc`: no
+    can `main.store` va `main.bulk_import_store` HIEN TAI, va bo test thay ca
+    hai bang ban mock trong `setUp`. Mot the hien giu tham chieu cu se lang le
+    ghi vao mot kho khong ai doc — cung ly do voi `account_deletion_service()`.
+    """
+    return BulkImportService(
+        bulk_import_store, store,
+        tao_chuong=_bulk_tao_chuong, tao_job=_bulk_tao_job,
+        max_active_jobs=MAX_ACTIVE_JOBS)
+
+
+#: Nghi bao lau sau mot chu ky KHONG THAY lo nao dang chay.
+#:
+#: VI SAO CAN: worker quet moi 3 giay, va khong co con nay thi mot he thong
+#: KHONG CO lo nhap nao van ton mot truy van Appwrite moi 3 giay — khoang
+#: 860.000 luot doc mot thang chi de hoi "co viec gi khong". Han muc doc cua
+#: Appwrite da mot lan can kiet tren production (20/08), nen mot duong poll moi
+#: khong duoc mo ra ma khong co phanh.
+#:
+#: Chi nghi khi RONG VIEC. Luc dang co lo chay thi khong tiet che gi ca —
+#: nguoi dung dang xem tien do, va do la luc do tre co y nghia. Dat 0 de tat.
+IMPORT_IDLE_BACKOFF_SECONDS = float(
+    os.environ.get("FAS_IMPORT_IDLE_BACKOFF_SECONDS", "30"))
+
+#: `time.monotonic()` — KHONG phai gio he thong: doi gio/NTP nhay khong duoc
+#: lam bo dieu phoi ngu mot tieng.
+_import_idle_until = 0.0
+
+
+def reset_import_backoff() -> None:
+    """Xoa phanh nghi. Cho bo test — moi bai phai bat dau tu trang thai sach."""
+    global _import_idle_until
+    _import_idle_until = 0.0
+
+
+def drive_chapter_imports() -> Dict[str, int]:
+    """
+    MOT chu ky dieu phoi nhap chuong. Diem vao DUY NHAT cho tien trinh nen.
+
+    `server/worker.py` goi ham nay trong vong quet cua no. Ten ham la mot phan
+    hop dong: doi ten la lam vo worker dang chay tren VM production.
+
+    Goi bao nhieu lan cung duoc, luc nao cung duoc — moi buoc chuyen trang thai
+    ben duoi deu idempotent (xem `server/bulk_import_domain.py`).
+    """
+    global _import_idle_until
+    if IMPORT_IDLE_BACKOFF_SECONDS > 0 and time.monotonic() < _import_idle_until:
+        return {"nghi": 1}
+    bao = bulk_import_service().drive_once()
+    _import_idle_until = (
+        time.monotonic() + IMPORT_IDLE_BACKOFF_SECONDS if not bao.get("lo")
+        else 0.0)
+    return bao
+
+
+#: Bo quet nhap chuong cho CHE DO INLINE (dev). Tach hoan toan voi bo quet TTS
+#: va bo quet dich — event/thread rieng, dung y voi cac subsystem khac.
+_import_sweeper_stop = threading.Event()
+
+
+def _import_sweep_forever() -> None:
+    while True:
+        try:
+            drive_chapter_imports()
+        except Exception:
+            # Bo quet chet la mot lo nhap treo mai mai — khong duoc de mot loi
+            # le lam no dung. Cung triet ly voi `_sweep_forever`.
+            pass
+        if _import_sweeper_stop.wait(IMPORT_SWEEP_SECONDS):
+            return
+
+
+@app.on_event("startup")
+def start_import_sweeper() -> None:
+    """
+    Chi bat khi `inline_worker` BAT (dev/cuc bo).
+
+    O staging/production `FAS_INLINE_WORKER=false` va bo dieu phoi song trong
+    `server/worker.py`. Hai ben cung dieu phoi thi KHONG sai — moi buoc chuyen
+    trang thai deu idempotent nho dinh danh tat dinh — nhung khong can hai, va
+    mot ben nam trong tien trinh phuc vu request la dung cai ma viec tach
+    worker nham loai bo.
+    """
+    if not settings.inline_worker:
+        return
+    threading.Thread(target=_import_sweep_forever, daemon=True,
+                     name="chapter-import-sweeper").start()
+
+
+@app.on_event("shutdown")
+def stop_import_sweeper() -> None:
+    _import_sweeper_stop.set()
+
+
+def _nhap_hang_loat(fn, *args, **kwargs):
+    """Doi ngoai le cua tang dich vu sang ma trang thai HTTP dung."""
+    try:
+        return fn(*args, **kwargs)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except BulkImportFormatError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except BulkImportStateError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except BulkImportError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+def _truyen_cua_toi(novel_id: str, owner_id: str) -> Novel:
+    try:
+        return store.owned_novel(novel_id, owner_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+
+# PHAI khai bao TRUOC `.../chapter-imports/{batch_id}/...`: neu khong "preview"
+# bi coi la mot `batch_id`. Cung bay da xu ly o `/api/chapters?mine=true`.
+@app.post("/api/novels/{novel_id}/chapter-imports/preview")
+def preview_chapter_import(novel_id: str, payload: ChapterImportIn,
+                           profile: Profile = Depends(current_profile)
+                           ) -> Dict[str, Any]:
+    """
+    Doc dau vao va tra ve DANH SACH CHUONG se duoc tao — KHONG ghi gi ca.
+
+    VI SAO CAN mot route chi de xem truoc: mot lan bam sai o day la 500 chuong
+    sai thu tu hoac 500 chuong dinh lam mot. Xem truoc la thu duy nhat bien
+    "quy uoc tach chuong" tu mot dieu phai tin thanh mot dieu kiem duoc.
+
+    Tra kem `batch_id` tat dinh va `already_imported` de giao dien noi duoc
+    "tep nay da nhap roi, day la lo cu" thay vi de nguoi dung tu doan.
+    """
+    novel = _truyen_cua_toi(novel_id, profile.user_id)
+    items = _doc_dau_vao_nhap(payload)
+
+    from server.bulk_import_domain import (
+        batch_fingerprint, batch_id_from_fingerprint)
+
+    fingerprint = batch_fingerprint(profile.user_id, novel.novel_id, items)
+    batch_id = batch_id_from_fingerprint(fingerprint)
+    lo_cu = None
+    try:
+        lo_cu = bulk_import_store.get_batch(batch_id)
+    except Exception:
+        lo_cu = None
+    return {
+        "chapters": [m.to_dict() for m in items],
+        "count": len(items),
+        "total_chars": sum(len(m.content) for m in items),
+        "order_base": max((c.order_index for c in
+                           store.list_chapters(novel.novel_id)), default=0),
+        "fingerprint": fingerprint,
+        "batch_id": batch_id,
+        "already_imported": lo_cu is not None,
+        "existing_batch": lo_cu.to_dict() if lo_cu else None,
+    }
+
+
+@app.post("/api/novels/{novel_id}/chapter-imports",
+          status_code=status.HTTP_201_CREATED)
+def create_chapter_import(novel_id: str, payload: ChapterImportIn,
+                          profile: Profile = Depends(current_profile)
+                          ) -> Dict[str, Any]:
+    """
+    Mo mot dot nhap chuong, hoac TIEP TUC dung dot cu neu dau vao y het.
+
+    IDEMPOTENT: `batch_id` la bam cua (chu, truyen, danh sach chuong), nen gui
+    lai cung mot tep KHONG BAO GIO tao chuong trung — no tiep tuc dung lo cu.
+    Xem `batch_fingerprint`.
+
+    Tra ve NGAY (`201`) voi lo o trang thai `preparing`: viec ghi 500 hang muc
+    chay trong thread nen, va bo dieu phoi o `server/worker.py` moi thuc su tao
+    chuong/xep job. Mot request khong the — va khong nen — giu 500 lan ghi.
+    """
+    novel = _truyen_cua_toi(novel_id, profile.user_id)
+    items = _doc_dau_vao_nhap(payload)
+
+    # Kiem GIONG DOC ngay tai day, truoc khi ghi hang nao. Phat hien giong sai
+    # o chuong thu 300 (khi bo dieu phoi goi `POST /api/jobs`) la mot lo nhap
+    # nua voi va 300 muc `failed` giong nhau.
+    if payload.voice_id:
+        try:
+            tts_bridge.ensure_voice_public(payload.voice_id, settings)
+        except tts_bridge.TtsBridgeError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                exc.message) from exc
+
+    svc = bulk_import_service()
+    ket = _nhap_hang_loat(
+        svc.create_or_resume, profile.user_id, novel, items,
+        voice_id=payload.voice_id, rate=payload.rate,
+        chunk_chars=payload.chunk_chars,
+        source_name=payload.source_name)
+    lo = ket["batch"]
+
+    if ket["created"] or ket["resumed"]:
+        can_ghi = ket.get("items") or []
+        if can_ghi:
+            _bat_dau_ghi_danh_sach_muc(lo.batch_id, can_ghi)
+        # Vua co viec MOI -> bo phanh nghi ngay, khong bat cho het
+        # `IMPORT_IDLE_BACKOFF_SECONDS`. Chu vua bam nut thi phai thay chuong
+        # hien ra trong vong mot chu ky quet, khong phai sau nua phut.
+        reset_import_backoff()
+    return {
+        "batch": lo.to_dict(),
+        "progress": lo.progress(),
+        "created": ket["created"],
+        "resumed": ket["resumed"],
+        # Giong doc cua lan gui TRUOC thang. Noi ro thay vi im lang doi giong
+        # cua ca lo — doi giong la viec cua tung chuong, xem `batch_fingerprint`.
+        "voice_ignored": ket["voice_ignored"],
+    }
+
+
+def _bat_dau_ghi_danh_sach_muc(batch_id: str,
+                               items: List[ParsedChapter]) -> None:
+    """
+    Ghi danh sach muc trong THREAD NEN. Cung khuon voi `_start_job_thread`.
+
+    AN TOAN KHI CHAY LAI (`item_id` tat dinh), nen hai thread cung ghi mot lo
+    khong sinh ban trung — do la ly do cho nay khong can khoa nao.
+
+    Loi thi ghi `last_error` de chu doc duoc, roi de lo o `preparing`: bo dieu
+    phoi se danh `failed` sau `PREPARING_STALE_SECONDS`, va chu cuu duoc bang
+    dung mot hanh dong — gui lai cung tep.
+    """
+    def _chay() -> None:
+        try:
+            bulk_import_service().materialize(batch_id, items)
+        except Exception as exc:
+            try:
+                bulk_import_store.save_batch(batch_id, {
+                    "last_error": f"Chưa ghi xong danh sách chương: "
+                                  f"{type(exc).__name__}. Hãy gửi lại đúng tệp "
+                                  f"cũ để tiếp tục."})
+            except Exception:
+                pass
+
+    threading.Thread(target=_chay, daemon=True,
+                     name=f"chapter-import-{batch_id}").start()
+
+
+@app.get("/api/novels/{novel_id}/chapter-imports")
+def list_chapter_imports(novel_id: str,
+                         profile: Profile = Depends(current_profile)
+                         ) -> Dict[str, Any]:
+    _truyen_cua_toi(novel_id, profile.user_id)
+    return _nhap_hang_loat(bulk_import_service().list_for_novel,
+                           profile.user_id, novel_id)
+
+
+@app.get("/api/novels/{novel_id}/chapter-imports/{batch_id}")
+def get_chapter_import(novel_id: str, batch_id: str, limit: int = 50,
+                       offset: int = 0, status_filter: str = "",
+                       profile: Profile = Depends(current_profile)
+                       ) -> Dict[str, Any]:
+    """
+    Tien do cua mot lo + MOT TRANG danh sach muc.
+
+    `progress` doc tu bo dem da luu tren hang lo, KHONG dem lai 500 hang moi
+    lan poll: trang nay tu lam moi vai giay mot lan, va dem lai moi lan la
+    duong ngan nhat den mot su co han muc doc Appwrite (da xay ra 20/08). Bo
+    dem duoc bo dieu phoi cap nhat theo tung buoc va dem lai chinh xac dung mot
+    lan — luc ket lo. Xem docstring `ImportBatch`.
+
+    `status_filter` (khong phai `status`, tranh trung ten voi module `status`
+    cua FastAPI) loc muc theo trang thai — de giao dien mo rieng danh sach
+    chuong loi.
+    """
+    _truyen_cua_toi(novel_id, profile.user_id)
+    return _nhap_hang_loat(
+        bulk_import_service().batch_view, profile.user_id, novel_id, batch_id,
+        limit=limit, offset=offset, status=status_filter)
+
+
+@app.post("/api/novels/{novel_id}/chapter-imports/{batch_id}/cancel")
+def cancel_chapter_import(novel_id: str, batch_id: str,
+                          profile: Profile = Depends(current_profile)
+                          ) -> Dict[str, Any]:
+    """
+    Huy: dung xep viec MOI. KHONG cat job dang tong hop.
+
+    Audio dang lam van chay den cung va van duoc ghi nhan — bo di dung phan
+    viec dat nhat chi vi mot cai bam "huy" la sai. Xem `BulkImportService.cancel`.
+    """
+    _truyen_cua_toi(novel_id, profile.user_id)
+    return _nhap_hang_loat(bulk_import_service().cancel,
+                           profile.user_id, novel_id, batch_id)
+
+
+@app.post("/api/novels/{novel_id}/chapter-imports/{batch_id}/retry")
+def retry_chapter_import(novel_id: str, batch_id: str,
+                         profile: Profile = Depends(current_profile)
+                         ) -> Dict[str, Any]:
+    """Thu lai MOI muc that bai cua lo. Khong chay lai muc da xong."""
+    _truyen_cua_toi(novel_id, profile.user_id)
+    ket = _nhap_hang_loat(bulk_import_service().retry,
+                          profile.user_id, novel_id, batch_id)
+    reset_import_backoff()      # vua co viec moi — xem `drive_chapter_imports`
+    return ket
+
+
+@app.post("/api/novels/{novel_id}/chapter-imports/{batch_id}"
+          "/items/{item_id}/retry")
+def retry_chapter_import_item(novel_id: str, batch_id: str, item_id: str,
+                              profile: Profile = Depends(current_profile)
+                              ) -> Dict[str, Any]:
+    """Thu lai DUNG MOT chuong that bai — khong chay lai ca lo."""
+    _truyen_cua_toi(novel_id, profile.user_id)
+    ket = _nhap_hang_loat(bulk_import_service().retry,
+                          profile.user_id, novel_id, batch_id,
+                          item_id=item_id)
+    reset_import_backoff()      # vua co viec moi — xem `drive_chapter_imports`
+    return ket
 
 
 # -----------------------------------------------------------------------------

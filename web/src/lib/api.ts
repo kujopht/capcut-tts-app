@@ -338,6 +338,132 @@ export interface Chapter {
   updated_at: string;
 }
 
+// -- Nhập chương hàng loạt ---------------------------------------------------
+//
+// Xem `server/bulk_import_domain.py`. Ba điều quan trọng cho giao diện:
+//
+//  * `completed` nghĩa là MỌI chương đều xong; có chương lỗi thì lô là
+//    `partial`, không phải `completed` — đừng vẽ "hoàn tất" cho `partial`.
+//  * `cancelling` là trạng thái THẬT và tạm thời: đã huỷ nhưng còn job đang
+//    tổng hợp, và những job đó vẫn được ghi nhận khi xong.
+//  * Mục KHÔNG kèm nội dung chương; chỉ có `char_count`.
+
+export type ChapterImportBatchStatus =
+  | "preparing"
+  | "running"
+  | "cancelling"
+  | "cancelled"
+  | "completed"
+  | "partial"
+  | "failed";
+
+export type ChapterImportItemStatus =
+  | "pending"
+  | "chapter_created"
+  | "job_queued"
+  | "completed"
+  | "failed";
+
+export interface ChapterImportBatch {
+  batch_id: string;
+  owner_id: string;
+  novel_id: string;
+  fingerprint: string;
+  total_items: number;
+  status: ChapterImportBatchStatus;
+  /** Rỗng = lô CHỈ tạo chương, không tạo audio. Trạng thái hợp lệ. */
+  voice_id: string;
+  rate: string;
+  chunk_chars: number;
+  /** `order_index` của chương = `order_base + item_index`. */
+  order_base: number;
+  source_name: string;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+  cancelled_at: string;
+  finished_at: string;
+}
+
+/** Bảng tiến độ CỘNG DỒN — xem `ImportBatch.progress()`. */
+export interface ChapterImportProgress {
+  total: number;
+  pending: number;
+  chapters_created: number;
+  jobs_queued: number;
+  completed: number;
+  failed: number;
+  percent: number;
+}
+
+export interface ChapterImportItem {
+  item_id: string;
+  batch_id: string;
+  novel_id: string;
+  item_index: number;
+  title: string;
+  char_count: number;
+  status: ChapterImportItemStatus;
+  /** Rỗng cho đến khi chương được tạo. */
+  chapter_id: string;
+  job_id: string;
+  error_message: string;
+  attempts: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChapterImportInput {
+  /** Văn bản thô (TXT theo mẫu `=== Tiêu đề ===`, hoặc JSON). */
+  text?: string;
+  format?: "txt" | "json";
+  /** Dạng có cấu trúc — dùng một trong hai, không dùng cả hai. */
+  chapters?: { title: string; content: string }[];
+  /** Rỗng = chỉ tạo chương, chưa tạo audio. */
+  voice_id?: string;
+  rate?: string;
+  chunk_chars?: number;
+  source_name?: string;
+}
+
+export interface ChapterImportPreview {
+  chapters: { title: string; char_count: number }[];
+  count: number;
+  total_chars: number;
+  order_base: number;
+  fingerprint: string;
+  batch_id: string;
+  /** Đúng đầu vào này đã có một lô — gửi lại sẽ TIẾP TỤC lô đó. */
+  already_imported: boolean;
+  existing_batch: ChapterImportBatch | null;
+}
+
+export interface ChapterImportCreated {
+  batch: ChapterImportBatch;
+  progress: ChapterImportProgress;
+  created: boolean;
+  /** Lô cũ được tiếp tục (không tạo mới, không tạo chương trùng). */
+  resumed: boolean;
+  /** Giọng của lần gửi TRƯỚC thắng — xem `batch_fingerprint`. */
+  voice_ignored: boolean;
+}
+
+export interface ChapterImportDetail {
+  batch: ChapterImportBatch;
+  progress: ChapterImportProgress;
+  items: ChapterImportItem[];
+  count: number;
+}
+
+export interface ChapterImportAction {
+  batch: ChapterImportBatch;
+  progress: ChapterImportProgress;
+  cancelled?: boolean;
+  already_finished?: boolean;
+  jobs_in_flight?: number;
+  retried?: number;
+}
+
 /**
  * Mot series Animation (V6, overnight Phase 5) — tuong duong `Novel` nhung
  * cho san pham XEM, doc lap voi Truyen/Audio. Xem docstring dau
@@ -1013,6 +1139,81 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ chapter_ids: chapterIds }),
     }),
+
+  // -- Nhập chương hàng loạt -------------------------------------------------
+  //
+  // KHÔNG có `bulkPublish`: xuất bản vốn là cấp TRUYỆN, nên xong lô thì gọi
+  // `publishNovel` như mọi lúc khác. Xem `server/main.py` khu "Nhap chuong
+  // HANG LOAT".
+
+  /** Đọc đầu vào và trả về danh sách chương sẽ tạo — KHÔNG ghi gì cả. */
+  previewChapterImport: (novelId: string, input: ChapterImportInput) =>
+    request<ChapterImportPreview>(
+      `/api/novels/${novelId}/chapter-imports/preview`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+
+  /**
+   * Mở một lô nhập, hoặc TIẾP TỤC đúng lô cũ nếu đầu vào y hệt.
+   *
+   * Gửi lại cùng một tệp KHÔNG BAO GIỜ tạo chương trùng: `batch_id` là băm của
+   * (chủ, truyện, danh sách chương). Trả về ngay với lô ở trạng thái
+   * `preparing`; việc tạo chương/xếp job do worker làm ở tiến trình nền.
+   */
+  createChapterImport: (novelId: string, input: ChapterImportInput) =>
+    request<ChapterImportCreated>(`/api/novels/${novelId}/chapter-imports`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  listChapterImports: (novelId: string) =>
+    request<{
+      batches: ChapterImportBatch[];
+      progress: Record<string, ChapterImportProgress>;
+      count: number;
+    }>(`/api/novels/${novelId}/chapter-imports`),
+
+  /**
+   * Tiến độ + MỘT TRANG danh sách mục.
+   *
+   * `progress` đọc từ bộ đếm đã lưu trên hàng lô, không đếm lại 500 hàng mỗi
+   * lần poll — xem docstring route ở `server/main.py`.
+   */
+  getChapterImport: (
+    novelId: string,
+    batchId: string,
+    opts: { limit?: number; offset?: number; status?: string } = {},
+  ) => {
+    const q = new URLSearchParams();
+    if (opts.limit != null) q.set("limit", String(opts.limit));
+    if (opts.offset != null) q.set("offset", String(opts.offset));
+    if (opts.status) q.set("status_filter", opts.status);
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return request<ChapterImportDetail>(
+      `/api/novels/${novelId}/chapter-imports/${batchId}${suffix}`,
+    );
+  },
+
+  /** Dừng xếp việc MỚI. KHÔNG cắt job đang tổng hợp. */
+  cancelChapterImport: (novelId: string, batchId: string) =>
+    request<ChapterImportAction>(
+      `/api/novels/${novelId}/chapter-imports/${batchId}/cancel`,
+      { method: "POST" },
+    ),
+
+  /** Thử lại MỌI chương lỗi của lô. Không chạy lại chương đã xong. */
+  retryChapterImport: (novelId: string, batchId: string) =>
+    request<ChapterImportAction>(
+      `/api/novels/${novelId}/chapter-imports/${batchId}/retry`,
+      { method: "POST" },
+    ),
+
+  /** Thử lại ĐÚNG MỘT chương lỗi — không chạy lại cả lô. */
+  retryChapterImportItem: (novelId: string, batchId: string, itemId: string) =>
+    request<ChapterImportAction>(
+      `/api/novels/${novelId}/chapter-imports/${batchId}/items/${itemId}/retry`,
+      { method: "POST" },
+    ),
 
   createJob: (chapterId: string, voiceId: string, rate = "1.0") =>
     request<{ job: TtsJob; reused: boolean }>("/api/jobs", {

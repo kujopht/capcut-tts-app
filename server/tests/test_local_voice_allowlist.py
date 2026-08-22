@@ -150,7 +150,12 @@ class MotNguonSuThatDuyNhat(unittest.TestCase):
                       inspect.getsource(tts_bridge.ensure_voice_runnable))
 
     def test_route_tao_job_goi_ensure_voice_allowed(self) -> None:
-        nguon = inspect.getsource(server_main.create_job)
+        # Route la lop vo mong; rao giong nam o chinh than, va chinh than do
+        # duoc CA duong don chuong va duong nhap hang loat dung chung.
+        self.assertIn("_tao_job_cho_chuong",
+                      inspect.getsource(server_main.create_job),
+                      "route tạo job phải uỷ quyền cho `_tao_job_cho_chuong`")
+        nguon = inspect.getsource(server_main._tao_job_cho_chuong)
         self.assertIn("ensure_voice_public", nguon)
         # Phai chan TRUOC khi ghi job xuong kho, khong phai sau.
         self.assertLess(nguon.index("ensure_voice_public"),

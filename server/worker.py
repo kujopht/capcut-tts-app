@@ -17,6 +17,11 @@ web van dung:
     `main._run_job()` voi fencing token nhan duoc.
   - `main._run_job()` — tong hop, upload, tao track, ghi `completed`, moi lan ghi
     deu kem fence.
+  - `main.drive_chapter_imports()` — MOT chu ky dieu phoi cua cac lo nhap chuong
+    hang loat. Cung khong sao chep gi: no goi lai chinh than cua
+    `POST /api/chapters` va `POST /api/jobs`. O DAY vi day la ngu canh nen duy
+    nhat song qua restart cua backend, va mot lo 500 chuong can dung dieu do.
+    Khoi `try` RIENG, khong dinh gi vao chu ky poll / nhip / lease cua job TTS.
 
 Nho vay claim nguyen tu, lease/heartbeat, fencing token, gioi han so lan thu va
 tinh idempotent cua track/object deu la CUNG MOT ma nguon o ca hai che do.
@@ -179,6 +184,28 @@ def chay(doi_moi_truong: Optional[str] = None) -> int:
         except Exception as exc:
             # Mot vong quet loi KHONG duoc lam worker chet — chet la mat recovery.
             _ghi("loi_quet", loai=type(exc).__name__)
+
+        # NHAP CHUONG HANG LOAT — bo dieu phoi cua lo nhap (xem
+        # `server/bulk_import_service.py`).
+        #
+        # O DAY chu khong o tien trinh web: mot lo 500 chuong khong nam trong
+        # mot vong request/response, va yeu cau "tiep tuc duoc sau khi backend
+        # restart" doi mot tien trinh nen SONG LAU — tien trinh nay.
+        #
+        # KHONG dong vao chu ky poll, nhip, hay lease cua khoi tren: mot khoi
+        # `try` RIENG, khong ghi vao `bao_cao`, khong doi `_nhip`. Mot lo nhap
+        # loi tuyet doi khong duoc lam mat recovery cua job TTS.
+        try:
+            nhap = api.drive_chapter_imports()
+            # Chi ghi khi CO viec that. `{"nghi": 1}` (phanh nghi luc rong
+            # viec, xem `main.IMPORT_IDLE_BACKOFF_SECONDS`) va mot chu ky khong
+            # doi gi deu KHONG duoc ghi: mot dong log moi 3 giay noi rang khong
+            # co gi xay ra la mot dong log khong ai doc duoc nua.
+            if nhap.get("lo") and any(v for k, v in nhap.items() if k != "lo"):
+                _ghi("nhap_chuong", **nhap)
+        except Exception as exc:
+            _ghi("loi_nhap_chuong", loai=type(exc).__name__)
+
         _nhip("dang_chay", chu_ky, bao_cao)
         _dung.wait(POLL_SECONDS)
 

@@ -46,6 +46,7 @@ from server.translation_usage import usage_recorder
 from server.translation_model_profiles import (
     CEREBRAS_MODEL_PROFILES,
     GROQ_MODEL_PROFILES,
+    POLLINATIONS_MODEL_PROFILES,
     ModelProfile,
     route_order,
 )
@@ -394,6 +395,86 @@ class CerebrasProvider(_OpenAICompatFreeProvider):
         super().__init__(base_url=self.BASE_URL, api_key=api_key,
                          model=profile.model_id, client=client,
                          extra_payload=profile.extra_payload)
+
+
+class PollinationsProvider(_OpenAICompatFreeProvider):
+    """
+    Pollinations.ai — REST tuong thich OpenAI chat completions. MOT the hien
+    phuc vu MOT model; `build_provider_registry` tao mot `ConfiguredProvider`
+    cho MOI model trong `POLLINATIONS_MODEL_PROFILES`, dung mau voi
+    `GroqProvider`/`CerebrasProvider`.
+
+    PHUC HOI + VIET LAI: cong viec goc (commit 5137ec0/8672550/2ed65fe,
+    2026-08-15) nam tren mot nhanh dung tren `feature/animation-v6` va KHONG
+    the merge thang vao main — main da tien hoa DOC LAP file nay (800 -> 1013
+    dong). Ban nay giu NGUYEN kien truc main hien tai va chi THEM mot lop con
+    nho, thay vi chep lai ~1000 dong lich su.
+
+    TRA PHI THEO MAC DINH — day la diem quan trong nhat. Pollinations dung
+    API key dang `sk_...`, va khong the phan loai mien-phi/tra-phi mot cach
+    dang tin cay tu ben ngoai. Vi vay `build_provider_registry` KHONG dua
+    provider nay vao registry tru khi `POLLINATIONS_FREE_TIER=true` duoc dat
+    TUONG MINH (hoac rao chan chung `TRANSLATION_ALLOW_PAID_PROVIDER=true`) —
+    cung dung mau voi provider "custom" da co san. Khong dat gi thi provider
+    nay IM LANG khong ton tai: khong goi mang, khong rui ro tinh phi.
+
+    THU LAI CUC BO — CHI cho `ProviderRateLimited` (429), co gioi han
+    (`retry_count`, mac dinh 0 = tat). Het luot van 429 thi de loi LAN LEN cho
+    `ProviderRegistry` chuyen sang nha cung cap DOC LAP tiep theo, KHONG thu
+    model Pollinations khac: gioi han toc do cua ho nay la theo TAI KHOAN nen
+    doi model cung nha cung cap la vo nghia.
+
+    KHONG thu lai cac loi khac (401/402 sai credential, JSON sai hinh dang,
+    noi dung rong): cung mot yeu cau se that bai giong het, thu lai chi lam
+    cham chuoi fallback. GIOI HAN DA BIET: lop cha `_OpenAICompatFreeProvider`
+    goi ca loi mang (`httpx.HTTPError`) thanh `TranslationProviderError`
+    chung, nen o day KHONG phan biet duoc "mang chap chon" (dang thu lai) voi
+    "credential sai" (khong dang thu lai). Ban goc giai quyet bang cach THEM
+    mot bo phan loai loi moi (`ProviderTransientError`/`ProviderAccountError`)
+    vao lop cha — day CHINH LA phan gay xung dot voi main, nen CO Y khong port
+    sang. Neu can retry loi mang sau nay: mo rong lop cha mot cach co chu dich
+    trong MOT PR rieng, dung nhet vao day.
+    """
+
+    name = "pollinations"
+
+    #: Cho ghi de qua `POLLINATIONS_BASE_URL` de kiem thu/trien khai rieng.
+    DEFAULT_BASE_URL = "https://gen.pollinations.ai/v1"
+
+    #: Khoang nghi GIUA hai lan thu cuc bo. NHO co y: day la worker chay trong
+    #: vong lap, khong phai request nguoi dung dang cho, nen thu lai nhanh hon
+    #: la bat nguoi dung cho mot backoff day du.
+    RETRY_DELAY_SECONDS = 0.2
+
+    def __init__(self, *, api_key: str, profile: ModelProfile,
+                base_url: str = "",
+                client: Optional[httpx.Client] = None,
+                retry_count: int = 0):
+        if not (api_key and profile.model_id):
+            raise TranslationProviderError(
+                "Thiếu POLLINATIONS_API_KEY hoặc model_id.")
+        self.profile = profile
+        self._retry_count = max(0, int(retry_count))
+        super().__init__(base_url=base_url or self.DEFAULT_BASE_URL,
+                         api_key=api_key, model=profile.model_id,
+                         client=client, extra_payload=profile.extra_payload)
+
+    def translate_segment(self, text: str, *,
+                          context: TranslationContext) -> str:
+        loi_cuoi: Optional[ProviderRateLimited] = None
+        for lan in range(self._retry_count + 1):
+            try:
+                return super().translate_segment(text, context=context)
+            except ProviderRateLimited as exc:
+                loi_cuoi = exc
+                if lan < self._retry_count:
+                    time.sleep(self.RETRY_DELAY_SECONDS)
+                    continue
+                raise
+        # Khong the toi day (vong lap luon return hoac raise) — giu lai cho
+        # ro rang thay vi de ham roi ra `None` neu ai sua vong lap sau nay.
+        raise loi_cuoi if loi_cuoi else TranslationProviderError(
+            "Pollinations: không dịch được và không rõ lý do.")
 
 
 class CloudflareWorkersAIProvider(TranslationProvider):
@@ -988,6 +1069,45 @@ def build_provider_registry(env: Optional[Dict[str, str]] = None
             provider=CloudflareWorkersAIProvider(
                 account_id=cf_account, api_token=cf_token, model=cf_model),
             free_tier=True))
+
+    # Pollinations.ai — dang ky SAU Cloudflare de thu tu AUTO khong bi doi:
+    # Cerebras -> Groq -> Cloudflare -> Pollinations. Thu tu la thu tu CAU
+    # HINH nay, nen viec them provider o CUOI khong lam thay doi lua chon cua
+    # bat ky (che_do, vai_tro) nao dang co (`ROLE_ROUTING` chi chua khoa model
+    # Groq) — khong hoi quy provider cu.
+    #
+    # RAO CHAN TINH PHI, giong het mau "custom" ngay duoi: Pollinations dung
+    # API key `sk_...` va khong the phan loai mien-phi/tra-phi tu ben ngoai
+    # mot cach dang tin cay, nen coi la TRA PHI theo mac dinh.
+    #
+    # HAI LOP CHAN DOC LAP, va lop thu hai manh hon ve tuong: dieu kien duoi
+    # day quyet dinh co TAO `ConfiguredProvider` khong, nhung
+    # `ProviderRegistry.__init__` con loc `free_tier` VO DIEU KIEN. Hau qua
+    # THAT (da kiem o `test_rao_chan_chung_MOT_MINH_van_KHONG_du`):
+    # `TRANSLATION_ALLOW_PAID_PROVIDER=true` MOT MINH KHONG du de dung
+    # Pollinations — duong duy nhat la `POLLINATIONS_FREE_TIER=true`, tuc la
+    # tuyen bo RO rang tai khoan nay o hang mien phi. Khong dat gi thi
+    # provider nay im lang khong ton tai: khong goi mang, khong rui ro phi.
+    poll_key = e.get("POLLINATIONS_API_KEY", "").strip()
+    poll_free = e.get("POLLINATIONS_FREE_TIER", "false").strip().lower() == "true"
+    poll_base = e.get("POLLINATIONS_BASE_URL", "").strip()
+    try:
+        poll_retry = int(e.get("POLLINATIONS_RETRY_COUNT", "0").strip() or "0")
+    except ValueError:
+        # Cau hinh sai KHONG duoc lam sap ca registry — bo qua im lang giong
+        # cach cac provider thieu bien bi bo qua (xem docstring ham nay).
+        poll_retry = 0
+    if poll_key and (poll_free or cho_phep_tra_phi):
+        for profile_key, profile in POLLINATIONS_MODEL_PROFILES.items():
+            providers.append(ConfiguredProvider(
+                provider_id=f"pollinations_{profile_key}",
+                model_id=profile.model_id,
+                display_name=f"Pollinations · {profile.display_name}",
+                quality_hint=profile.quality_hint,
+                provider=PollinationsProvider(
+                    api_key=poll_key, profile=profile,
+                    base_url=poll_base, retry_count=poll_retry),
+                free_tier=poll_free))
 
     # Provider "tuy chinh" (Vong 2) — CHI dua vao registry neu duoc danh dau
     # mien phi qua bien rieng, tranh vo tinh coi mot endpoint tra phi la

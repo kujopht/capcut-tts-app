@@ -159,6 +159,118 @@ class KiemHanMuc(unittest.TestCase):
                               max_total_chars=10_000)
 
 
+class HanMucDUNG_BANG_Tran(unittest.TestCase):
+    """
+    Bien DUNG BANG tran — phia CHAP NHAN.
+
+    `KiemHanMuc` o tren chi kiem phia TU CHOI (6 muc voi tran 5). Thieu ve
+    con lai: DUNG BANG tran phai duoc CHAP NHAN. `validate_chapters` hien
+    dung `>` (dung), nhung khong co test nao giu dieu do: doi mot dau thanh
+    `>=` se lang le tu choi dung lo 500 chuong — dung truong hop ma tinh nang
+    nay ton tai de phuc vu — va CA 86 test hien co van xanh.
+
+    Do la ly do bo test nay tap trung vao bien duoi/tren SAT NHAU thay vi
+    them mot phep kiem "qua tran" thu hai.
+    """
+
+    def _ds(self, n: int, chars: int = 10) -> List[ParsedChapter]:
+        return [ParsedChapter(title=f"C{i}", content="x" * chars)
+                for i in range(1, n + 1)]
+
+    def test_dung_bang_max_items_thi_CHAP_NHAN(self) -> None:
+        validate_chapters(self._ds(5), max_items=5, max_chars_per_item=100,
+                          max_total_chars=10_000)
+
+    def test_hon_max_items_MOT_muc_thi_tu_choi(self) -> None:
+        with self.assertRaises(BulkImportFormatError):
+            validate_chapters(self._ds(6), max_items=5, max_chars_per_item=100,
+                              max_total_chars=10_000)
+
+    def test_dung_bang_max_chars_per_item_thi_CHAP_NHAN(self) -> None:
+        validate_chapters(self._ds(1, chars=100), max_items=5,
+                          max_chars_per_item=100, max_total_chars=10_000)
+
+    def test_hon_max_chars_per_item_MOT_ky_tu_thi_tu_choi(self) -> None:
+        with self.assertRaises(BulkImportFormatError):
+            validate_chapters(self._ds(1, chars=101), max_items=5,
+                              max_chars_per_item=100, max_total_chars=10_000)
+
+    def test_dung_bang_max_total_chars_thi_CHAP_NHAN(self) -> None:
+        # 5 muc x 100 ky tu = 500 = DUNG BANG tong cho phep.
+        validate_chapters(self._ds(5, chars=100), max_items=5,
+                          max_chars_per_item=100, max_total_chars=500)
+
+    def test_hon_max_total_chars_MOT_ky_tu_thi_tu_choi(self) -> None:
+        with self.assertRaises(BulkImportFormatError):
+            validate_chapters(self._ds(5, chars=100), max_items=5,
+                              max_chars_per_item=100, max_total_chars=499)
+
+    def test_dung_bang_max_title_chars_thi_CHAP_NHAN(self) -> None:
+        muc = ParsedChapter(title="T" * 200, content="x" * 10)
+        validate_chapters([muc], max_items=5, max_chars_per_item=100,
+                          max_total_chars=10_000, max_title_chars=200)
+
+    def test_hon_max_title_chars_MOT_ky_tu_thi_tu_choi(self) -> None:
+        muc = ParsedChapter(title="T" * 201, content="x" * 10)
+        with self.assertRaises(BulkImportFormatError):
+            validate_chapters([muc], max_items=5, max_chars_per_item=100,
+                              max_total_chars=10_000, max_title_chars=200)
+
+
+class HanMucOQuyMoTHAT(unittest.TestCase):
+    """
+    Bien o HAN MUC THAT dang cau hinh, khong phai tran thu nho trong test.
+
+    Yeu cau san pham la "khoang 50-500 chuong" (xem `bulk_import_domain`
+    dong 5). Bo test hien co chung minh co che bang tran 5; day chung minh
+    no con dung o CHINH con so ma nguoi dung se gap.
+    """
+
+    def _ds(self, n: int, chars: int = 10) -> List[ParsedChapter]:
+        return [ParsedChapter(title=f"Chương {i}", content="x" * chars)
+                for i in range(1, n + 1)]
+
+    def test_lo_50_chuong_hop_le(self) -> None:
+        validate_chapters(
+            self._ds(50, chars=2_000),
+            max_items=server_main.MAX_IMPORT_ITEMS,
+            max_chars_per_item=server_main.MAX_CHAPTER_CHARS,
+            max_total_chars=server_main.MAX_IMPORT_TOTAL_CHARS)
+
+    def test_lo_DUNG_500_chuong_hop_le(self) -> None:
+        """Dung bang `MAX_IMPORT_ITEMS` that — dau tran tren cua yeu cau."""
+        validate_chapters(
+            self._ds(server_main.MAX_IMPORT_ITEMS, chars=1_000),
+            max_items=server_main.MAX_IMPORT_ITEMS,
+            max_chars_per_item=server_main.MAX_CHAPTER_CHARS,
+            max_total_chars=server_main.MAX_IMPORT_TOTAL_CHARS)
+
+    def test_lo_501_chuong_bi_tu_choi(self) -> None:
+        with self.assertRaises(BulkImportFormatError) as ctx:
+            validate_chapters(
+                self._ds(server_main.MAX_IMPORT_ITEMS + 1, chars=10),
+                max_items=server_main.MAX_IMPORT_ITEMS,
+                max_chars_per_item=server_main.MAX_CHAPTER_CHARS,
+                max_total_chars=server_main.MAX_IMPORT_TOTAL_CHARS)
+        self.assertIn(str(server_main.MAX_IMPORT_ITEMS), str(ctx.exception))
+
+    def test_tong_ky_tu_o_quy_mo_that_bi_chan(self) -> None:
+        """
+        500 chuong x 100.000 ky tu = 50 trieu, vuot `MAX_IMPORT_TOTAL_CHARS`
+        (5 trieu) du TUNG chuong deu hop le. Day chinh la truong hop mo ta o
+        comment cua `MAX_IMPORT_TOTAL_CHARS` ("50 MB JSON"), va no phai bi
+        chan boi TONG chu khong phai boi gioi han tung muc.
+        """
+        with self.assertRaises(BulkImportFormatError) as ctx:
+            validate_chapters(
+                self._ds(server_main.MAX_IMPORT_ITEMS,
+                         chars=server_main.MAX_CHAPTER_CHARS),
+                max_items=server_main.MAX_IMPORT_ITEMS,
+                max_chars_per_item=server_main.MAX_CHAPTER_CHARS,
+                max_total_chars=server_main.MAX_IMPORT_TOTAL_CHARS)
+        self.assertIn("Tổng nội dung", str(ctx.exception))
+
+
 class HanMucGiaoDienKhopMayChu(unittest.TestCase):
     """
     `web/src/lib/limits.ts` chep lai han muc de giao dien noi truoc.

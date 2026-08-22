@@ -37,6 +37,7 @@ THU TU BA PHA trong mot chu ky, va thu tu do quan trong:
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Sequence, Tuple
 
@@ -83,6 +84,79 @@ PREPARING_STALE_SECONDS = int(
 #: Chu ky quet cua bo dieu phoi khi web TU chay (che do inline, dev). O
 #: staging/production `FAS_INLINE_WORKER=false` nen worker rieng lo viec nay.
 IMPORT_SWEEP_SECONDS = int(os.environ.get("FAS_IMPORT_SWEEP_SECONDS", "5"))
+
+#: Nghi bao lau sau mot chu ky KHONG THAY lo nao dang chay. Dat 0 de tat.
+IDLE_BACKOFF_SECONDS = float(
+    os.environ.get("FAS_IMPORT_IDLE_BACKOFF_SECONDS", "30"))
+
+
+class ImportDriveGate:
+    """
+    Phanh nghi cua bo dieu phoi — quyet dinh SUY RA TU KET QUA TRUY VAN.
+
+    VI SAO CAN PHANH: worker quet moi `POLL_SECONDS` (3 giay). Khong co con nay
+    thi mot he thong KHONG CO lo nhap nao van ton mot truy van Appwrite moi 3
+    giay — khoang 860.000 luot doc mot thang chi de hoi "co viec gi khong". Han
+    muc doc cua Appwrite da mot lan can kiet tren production (20/08).
+
+    VI SAO PULL, KHONG PHAI PUSH — va day la mot loi da vap va da sua:
+    ban dau lop nay la mot bien toan cuc trong `server/main.py` kem mot ham
+    `reset_import_backoff()` ma cac route goi khi chu vua mo/thu lai mot lo, VOI
+    Y DINH "danh thuc" bo dieu phoi ngay. Y dinh do KHONG BAO GIO thanh:
+    o production `server/worker.py` la mot TIEN TRINH KHAC, tren mot MAY KHAC
+    (GCE), va `from server import main as api` cho no mot ban module RIENG voi
+    bien toan cuc RIENG. Route chay o tien trinh web reset bien cua chinh tien
+    trinh web — dung cai tien trinh khong dieu phoi gi ca. Bo test cu khong bat
+    duoc vi no goi `drive_chapter_imports()` trong CUNG mot tien trinh.
+
+    Nen bay gio KHONG co tin hieu danh thuc nao, va khong co ai duoc phep day
+    trang thai vao day tu ben ngoai. Phanh chi doc DUY NHAT mot dau vao: chu ky
+    truoc thay bao nhieu lo. Nho vay hai tien trinh chay doc lap co hanh vi
+    GIONG NHAU tuyet doi, va mot lo vua tao duoc nhin thay o chu ky ke tiep cua
+    worker ma khong ai phai bao no.
+
+    MOT THE HIEN = MOT TIEN TRINH. Do la su that ve kien truc, khong phai han
+    che: khong co gi trong lop nay muon duoc chia se qua ranh gioi tien trinh.
+
+    DANH DOI da can: mot lo vua tao co the phai cho toi `backoff_seconds` truoc
+    khi nhich. Chap nhan duoc, va thuong la vo hinh — route tra ve lo o trang
+    thai `preparing`, va viec ghi 500 hang muc con lau hon nhieu so voi 30 giay.
+    Doi lai la khong them mot truy van nao vao chu ky quet luc rong viec. Muon
+    do tre thap hon thi ha `FAS_IMPORT_IDLE_BACKOFF_SECONDS` (10 giay -> khoang
+    260.000 luot doc/thang) hoac dat 0 de tat han (~860.000 luot doc/thang).
+    """
+
+    def __init__(self, backoff_seconds: float = IDLE_BACKOFF_SECONDS,
+                 dong_ho: Callable[[], float] = time.monotonic):
+        #: `time.monotonic` — KHONG phai gio he thong: doi gio/NTP nhay khong
+        #: duoc lam bo dieu phoi ngu mot tieng.
+        self._dong_ho = dong_ho
+        self._backoff = max(0.0, float(backoff_seconds))
+        self._nghi_den = 0.0
+
+    def should_skip(self) -> bool:
+        """Chu ky nay co bo qua khong. KHONG doc gi ngoai trang thai cua chinh
+        the hien nay."""
+        return self._backoff > 0 and self._dong_ho() < self._nghi_den
+
+    def record(self, so_lo_thay_duoc: int) -> None:
+        """
+        Ghi nhan KET QUA truy van cua chu ky vua chay.
+
+        Day la duong VAO DUY NHAT cua lop nay. Khong co `reset()` cong khai, va
+        do la co y: mot ham nhu vay chi co the duoc goi tu tien trinh web, noi
+        no khong co tac dung gi len bo dieu phoi that.
+        """
+        self._nghi_den = (0.0 if so_lo_thay_duoc
+                          else self._dong_ho() + self._backoff)
+
+    def xoa_de_test(self) -> None:
+        """CHI cho bo test — trang thai o cap module phai sach giua hai bai.
+
+        KHONG duoc goi tu route nao. Xem doan "VI SAO PULL" o docstring lop:
+        goi tu tien trinh web la mot phep khong lam gi ca duoc viet ra nhu the
+        no co tac dung."""
+        self._nghi_den = 0.0
 
 
 def _tuoi_giay(stamp: str) -> float:

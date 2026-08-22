@@ -93,6 +93,7 @@ from server.bulk_import_domain import (
 from server.bulk_import_service import (
     IMPORT_SWEEP_SECONDS,
     BulkImportService,
+    ImportDriveGate,
 )
 from server.animation_domain import (
     AnimationEpisode,
@@ -2780,28 +2781,14 @@ def bulk_import_service() -> BulkImportService:
         max_active_jobs=MAX_ACTIVE_JOBS)
 
 
-#: Nghi bao lau sau mot chu ky KHONG THAY lo nao dang chay.
+#: Phanh nghi cua bo dieu phoi — MOT the hien cho MOT TIEN TRINH.
 #:
-#: VI SAO CAN: worker quet moi 3 giay, va khong co con nay thi mot he thong
-#: KHONG CO lo nhap nao van ton mot truy van Appwrite moi 3 giay — khoang
-#: 860.000 luot doc mot thang chi de hoi "co viec gi khong". Han muc doc cua
-#: Appwrite da mot lan can kiet tren production (20/08), nen mot duong poll moi
-#: khong duoc mo ra ma khong co phanh.
-#:
-#: Chi nghi khi RONG VIEC. Luc dang co lo chay thi khong tiet che gi ca —
-#: nguoi dung dang xem tien do, va do la luc do tre co y nghia. Dat 0 de tat.
-IMPORT_IDLE_BACKOFF_SECONDS = float(
-    os.environ.get("FAS_IMPORT_IDLE_BACKOFF_SECONDS", "30"))
-
-#: `time.monotonic()` — KHONG phai gio he thong: doi gio/NTP nhay khong duoc
-#: lam bo dieu phoi ngu mot tieng.
-_import_idle_until = 0.0
-
-
-def reset_import_backoff() -> None:
-    """Xoa phanh nghi. Cho bo test — moi bai phai bat dau tu trang thai sach."""
-    global _import_idle_until
-    _import_idle_until = 0.0
+#: KHONG co duong nao de tien trinh khac day trang thai vao day, va do la co y:
+#: o production `server/worker.py` la tien trinh KHAC tren may KHAC, nen mot ham
+#: "danh thuc" goi tu route se chi sua bien cua tien trinh web — dung cai tien
+#: trinh khong dieu phoi gi ca. Toan bo ly do nam o docstring
+#: `ImportDriveGate`; dung them cho nay mot cua sau.
+_import_gate = ImportDriveGate()
 
 
 def drive_chapter_imports() -> Dict[str, int]:
@@ -2813,14 +2800,16 @@ def drive_chapter_imports() -> Dict[str, int]:
 
     Goi bao nhieu lan cung duoc, luc nao cung duoc — moi buoc chuyen trang thai
     ben duoi deu idempotent (xem `server/bulk_import_domain.py`).
+
+    Quyet dinh "co bo qua chu ky nay khong" duoc SUY RA TU KET QUA truy van cua
+    chu ky truoc, khong tu bat ky tin hieu nao do ben ngoai gui vao. Nho vay hai
+    tien trinh chay doc lap co hanh vi giong nhau tuyet doi, va mot lo vua tao
+    duoc worker nhin thay o chu ky ke tiep cua CHINH NO — khong ai phai bao no.
     """
-    global _import_idle_until
-    if IMPORT_IDLE_BACKOFF_SECONDS > 0 and time.monotonic() < _import_idle_until:
+    if _import_gate.should_skip():
         return {"nghi": 1}
     bao = bulk_import_service().drive_once()
-    _import_idle_until = (
-        time.monotonic() + IMPORT_IDLE_BACKOFF_SECONDS if not bao.get("lo")
-        else 0.0)
+    _import_gate.record(bao.get("lo", 0))
     return bao
 
 
@@ -2967,14 +2956,16 @@ def create_chapter_import(novel_id: str, payload: ChapterImportIn,
         source_name=payload.source_name)
     lo = ket["batch"]
 
+    # KHONG "danh thuc" bo dieu phoi o day. O production no la mot TIEN TRINH
+    # KHAC tren mot MAY KHAC, nen moi tin hieu trong tien trinh nay deu khong
+    # den duoc no; no tu thay lo moi o chu ky quet ke tiep cua chinh no (co the
+    # cham toi `FAS_IMPORT_IDLE_BACKOFF_SECONDS` neu truoc do dang rong viec).
+    # Xem docstring `ImportDriveGate` — day tung la mot ham reset tra ve dung
+    # cam giac an tam ma khong lam gi ca.
     if ket["created"] or ket["resumed"]:
         can_ghi = ket.get("items") or []
         if can_ghi:
             _bat_dau_ghi_danh_sach_muc(lo.batch_id, can_ghi)
-        # Vua co viec MOI -> bo phanh nghi ngay, khong bat cho het
-        # `IMPORT_IDLE_BACKOFF_SECONDS`. Chu vua bam nut thi phai thay chuong
-        # hien ra trong vong mot chu ky quet, khong phai sau nua phut.
-        reset_import_backoff()
     return {
         "batch": lo.to_dict(),
         "progress": lo.progress(),
@@ -3066,12 +3057,14 @@ def cancel_chapter_import(novel_id: str, batch_id: str,
 def retry_chapter_import(novel_id: str, batch_id: str,
                          profile: Profile = Depends(current_profile)
                          ) -> Dict[str, Any]:
-    """Thu lai MOI muc that bai cua lo. Khong chay lai muc da xong."""
+    """
+    Thu lai MOI muc that bai cua lo. Khong chay lai muc da xong.
+
+    KHONG "danh thuc" bo dieu phoi — xem ghi chu o `create_chapter_import`.
+    """
     _truyen_cua_toi(novel_id, profile.user_id)
-    ket = _nhap_hang_loat(bulk_import_service().retry,
-                          profile.user_id, novel_id, batch_id)
-    reset_import_backoff()      # vua co viec moi — xem `drive_chapter_imports`
-    return ket
+    return _nhap_hang_loat(bulk_import_service().retry,
+                           profile.user_id, novel_id, batch_id)
 
 
 @app.post("/api/novels/{novel_id}/chapter-imports/{batch_id}"
@@ -3079,13 +3072,15 @@ def retry_chapter_import(novel_id: str, batch_id: str,
 def retry_chapter_import_item(novel_id: str, batch_id: str, item_id: str,
                               profile: Profile = Depends(current_profile)
                               ) -> Dict[str, Any]:
-    """Thu lai DUNG MOT chuong that bai — khong chay lai ca lo."""
+    """
+    Thu lai DUNG MOT chuong that bai — khong chay lai ca lo.
+
+    KHONG "danh thuc" bo dieu phoi — xem ghi chu o `create_chapter_import`.
+    """
     _truyen_cua_toi(novel_id, profile.user_id)
-    ket = _nhap_hang_loat(bulk_import_service().retry,
-                          profile.user_id, novel_id, batch_id,
-                          item_id=item_id)
-    reset_import_backoff()      # vua co viec moi — xem `drive_chapter_imports`
-    return ket
+    return _nhap_hang_loat(bulk_import_service().retry,
+                           profile.user_id, novel_id, batch_id,
+                           item_id=item_id)
 
 
 # -----------------------------------------------------------------------------

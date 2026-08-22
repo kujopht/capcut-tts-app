@@ -42,6 +42,7 @@ from server.bulk_import_domain import (
     parse_txt,
     validate_chapters,
 )
+from server.bulk_import_service import ImportDriveGate
 from server.bulk_import_store import MockBulkImportStore
 from server.tests.voice_stub import dung_registry_gia
 
@@ -327,10 +328,10 @@ class Base(unittest.TestCase):
         # ket o `job_queued` vinh vien va khong test duoc gi ve doi soat.
         self._can_run_that = server_main._CAN_RUN_JOBS
         server_main._CAN_RUN_JOBS = True
-        # Phanh nghi cua bo dieu phoi la trang thai o CAP MODULE. Mot bai test
-        # ket thuc luc rong viec se dat phanh 30 giay va lam bai KE TIEP nhin
-        # nhu bo dieu phoi chet — nen phai xoa o day, khong phai o tearDown.
-        server_main.reset_import_backoff()
+        # Phanh nghi la trang thai o CAP MODULE cua tien trinh nay. Mot bai
+        # test ket thuc luc rong viec se dat phanh 30 giay va lam bai KE TIEP
+        # nhin nhu bo dieu phoi chet — nen phai xoa o day, khong o tearDown.
+        server_main._import_gate.xoa_de_test()
         self.client = TestClient(server_main.app)
 
     def tearDown(self) -> None:
@@ -338,7 +339,7 @@ class Base(unittest.TestCase):
         server_main.storage = self._storage_that
         server_main.bulk_import_store = self._bulk_that
         server_main._CAN_RUN_JOBS = self._can_run_that
-        server_main.reset_import_backoff()
+        server_main._import_gate.xoa_de_test()
 
     # -- tien ich -------------------------------------------------------------
 
@@ -875,7 +876,7 @@ class PhanhNghiKhiRongViec(Base):
 
     Han muc doc cua Appwrite da mot lan can kiet tren production (20/08), nen
     mot duong poll moi phai co phanh. Nhung phanh chi duoc dap khi RONG VIEC:
-    luc dang co lo chay, nguoi dung dang xem tien do va do tre co y nghia.
+    luc dang co lo chay thi khong tiet che gi ca.
     """
 
     def test_rong_viec_thi_nghi_va_khong_hoi_kho_nua(self) -> None:
@@ -901,41 +902,174 @@ class PhanhNghiKhiRongViec(Base):
         for _ in range(3):
             self.assertNotIn("nghi", server_main.drive_chapter_imports())
 
-    def test_mo_lo_moi_bo_phanh_ngay(self) -> None:
-        """Chủ vừa bấm nút thì phải thấy chương hiện ra trong một chu kỳ quét,
-        không phải sau nửa phút."""
-        server_main.drive_chapter_imports()         # rong viec -> dat phanh
-        self.assertEqual(server_main.drive_chapter_imports(), {"nghi": 1})
-        token = self.user()
-        nid = self.novel(token)
-        self.nhap(token, nid, text=self.txt(2), voice_id="")
-        self.assertNotIn("nghi", server_main.drive_chapter_imports())
+    def test_dat_0_la_tat_phanh(self) -> None:
+        cong = ImportDriveGate(backoff_seconds=0.0)
+        for _ in range(3):
+            cong.record(0)
+            self.assertFalse(cong.should_skip(), "đặt 0 mà vẫn nghỉ")
 
-    def test_thu_lai_cung_bo_phanh(self) -> None:
+
+class PhanhNghiKhongDuaVaoTrangThaiDungChung(Base):
+    """
+    Quyet dinh nghi phai SUY RA TU KET QUA TRUY VAN, khong tu tin hieu do tien
+    trinh khac day vao.
+
+    VI SAO CO NHOM TEST NAY — mot loi that, da vap va da sua: ban dau phanh la
+    mot bien toan cuc trong `server/main.py` kem ham `reset_import_backoff()` ma
+    ba route goi khi chu vua mo/thu lai mot lo, voi y dinh "danh thuc" bo dieu
+    phoi ngay. Y dinh do khong bao gio thanh: o production `server/worker.py` la
+    mot TIEN TRINH KHAC tren mot MAY KHAC, va `from server import main as api`
+    cho no mot ban module RIENG voi bien toan cuc RIENG.
+
+    Bo test cu KHONG bat duoc, vi no goi `drive_chapter_imports()` trong CUNG
+    tien trinh voi route — dung cai truong hop duy nhat ma ham reset co tac
+    dung. Cac bai duoi day mo phong HAI tien trinh bang HAI the hien
+    `ImportDriveGate` doc lap, nen chung se do lai loi do neu no tro lai.
+    """
+
+    def _mot_chu_ky(self, cong) -> Dict[str, Any]:
+        """Y HET than `main.drive_chapter_imports()`, nhung voi phanh CUA RIENG
+        mot tien trinh gia lap."""
+        if cong.should_skip():
+            return {"nghi": 1}
+        bao = server_main.bulk_import_service().drive_once()
+        cong.record(bao.get("lo", 0))
+        return bao
+
+    def test_hai_tien_trinh_doc_lap_quyet_dinh_GIONG_NHAU(self) -> None:
+        """Cung mot chuoi ket qua truy van -> cung mot chuoi quyet dinh. Neu con
+        bat ky trang thai dung chung nao thi hai ben se lech."""
+        a = ImportDriveGate(backoff_seconds=60.0)
+        b = ImportDriveGate(backoff_seconds=60.0)
+        for ket_qua in (0, 0, 3, 0, 2, 2, 0, 0):
+            self.assertEqual(a.should_skip(), b.should_skip())
+            if not a.should_skip():
+                a.record(ket_qua)
+                b.record(ket_qua)
+        self.assertEqual(a.should_skip(), b.should_skip())
+
+    def test_mo_lo_KHONG_dong_vao_phanh_cua_tien_trinh_nao_ca(self) -> None:
+        """
+        Route tao lo tuyet doi khong duoc sua phanh.
+
+        Day chinh la bai test se do lai loi cu: `reset_import_backoff()` tung
+        lam `should_skip()` cua tien trinh WEB thanh False va tao cam giac "da
+        danh thuc" — trong khi tien trinh dieu phoi that khong he hay biet.
+        """
+        server_main.drive_chapter_imports()                # rong viec -> phanh
+        self.assertTrue(server_main._import_gate.should_skip())
+
         token = self.user()
         nid = self.novel(token)
-        d = self.nhap(token, nid, text=self.txt(2), voice_id="")
+        d = self.nhap(token, nid, text=self.txt(3), voice_id="")
+        self.assertTrue(
+            server_main._import_gate.should_skip(),
+            "route tạo lô đã sửa phanh — đó là tín hiệu không đi qua được ranh "
+            "giới tiến trình, nên nó chỉ tạo cảm giác an tâm")
+        self.assertEqual(server_main.drive_chapter_imports(), {"nghi": 1})
+
+        # ...va thu lai cung vay: khong route nao duoc dong vao phanh.
         bid = d["batch"]["batch_id"]
-        self.chay_den_khi_ket(bid)
+        self.cho_ghi_xong(bid)
         muc = sorted(self.bulk.items.values(), key=lambda m: m.item_index)[0]
         self.bulk.save_item(muc.item_id, {"status": ItemStatus.FAILED,
                                           "error_message": "lỗi giả"})
         self.bulk.save_batch(bid, {"status": BatchStatus.PARTIAL,
-                                   "count_completed": 1, "count_failed": 1})
-        server_main.drive_chapter_imports()         # rong viec -> dat phanh
-        self.assertEqual(server_main.drive_chapter_imports(), {"nghi": 1})
+                                   "count_pending": 2, "count_failed": 1})
         self.client.post(f"/api/novels/{nid}/chapter-imports/{bid}/retry",
                          headers=self.auth(token))
-        self.assertNotIn("nghi", server_main.drive_chapter_imports())
+        self.assertTrue(server_main._import_gate.should_skip(),
+                        "route thử lại đã sửa phanh")
 
-    def test_dat_0_la_tat_phanh(self) -> None:
-        that = server_main.IMPORT_IDLE_BACKOFF_SECONDS
-        server_main.IMPORT_IDLE_BACKOFF_SECONDS = 0.0
-        try:
-            for _ in range(3):
-                self.assertNotIn("nghi", server_main.drive_chapter_imports())
-        finally:
-            server_main.IMPORT_IDLE_BACKOFF_SECONDS = that
+    def test_TIEN_TRINH_WORKER_van_thay_lo_moi_o_chu_ky_ke_tiep(self) -> None:
+        """
+        Bai test QUAN TRONG NHAT cua nhom nay.
+
+        Mo phong dung hinh dang production: tien trinh WEB nhan request va dang
+        nghi (phanh cua no dang dap), tien trinh WORKER co phanh RIENG. Worker
+        phai tu thay lo moi o chu ky ke tiep cua chinh no, KHONG can ai bao.
+        """
+        # Tien trinh web: da quet mot lan luc rong viec -> dang nghi.
+        server_main.drive_chapter_imports()
+        self.assertTrue(server_main._import_gate.should_skip())
+
+        token = self.user()
+        nid = self.novel(token)
+        d = self.nhap(token, nid, text=self.txt(4), voice_id="")
+        bid = d["batch"]["batch_id"]
+        self.cho_ghi_xong(bid)
+
+        # Tien trinh WORKER: the hien phanh RIENG, chua tung quet -> khong nghi.
+        worker = ImportDriveGate()
+        self.assertFalse(worker.should_skip())
+        bao = self._mot_chu_ky(worker)
+        self.assertNotIn("nghi", bao)
+        self.assertEqual(bao["lo"], 1, "worker không thấy lô vừa tạo")
+        self.assertGreater(len(self.store.list_chapters(nid)), 0,
+                           "worker không tạo được chương nào ở chu kỳ đầu")
+
+        # Con dang co viec -> worker KHONG nghi o cac chu ky sau.
+        self.assertFalse(worker.should_skip())
+
+        # Va tien trinh web VAN dang nghi — dung nhu thuc te, va vo hai.
+        self.assertTrue(server_main._import_gate.should_skip())
+
+    def test_worker_chay_het_lo_chi_bang_phanh_cua_chinh_no(self) -> None:
+        """Khong mot lan reset nao tu tien trinh web: lo van chay den xong."""
+        token = self.user()
+        nid = self.novel(token)
+        d = self.nhap(token, nid, text=self.txt(5), voice_id="")
+        bid = d["batch"]["batch_id"]
+        self.cho_ghi_xong(bid)
+        worker = ImportDriveGate()
+        han = time.monotonic() + 30
+        while time.monotonic() < han:
+            self._mot_chu_ky(worker)
+            if self.bulk.get_batch(bid).is_terminal:
+                break
+            time.sleep(0.01)
+        self.assertIs(self.bulk.get_batch(bid).status, BatchStatus.COMPLETED)
+        self.assertEqual(len(self.store.list_chapters(nid)), 5)
+
+        # Chu ky VUA KET lo van con THAY lo do (`lo == 1`), nen phanh chua dap —
+        # dung nhu thiet ke: quyet dinh la ket qua truy van, khong phai mot
+        # phong doan ve "chac xong roi". Phai mot chu ky RONG nua moi nghi.
+        self.assertFalse(worker.should_skip())
+        bao = self._mot_chu_ky(worker)
+        self.assertEqual(bao["lo"], 0)
+        self.assertTrue(worker.should_skip())
+
+
+class KhongConDuongDanhThucGiaTao(unittest.TestCase):
+    """
+    Doc thang tu nguon: cua sau "danh thuc lien tien trinh" phai KHONG con.
+
+    Mot bai test hanh vi khong chan duoc viec ai do them lai mot ham reset roi
+    goi no tu route — no chi do duoc khi hai ben da lech nhau.
+    """
+
+    def test_ham_reset_cu_khong_con_ton_tai(self) -> None:
+        self.assertFalse(
+            hasattr(server_main, "reset_import_backoff"),
+            "`reset_import_backoff` là tín hiệu không đi qua được ranh giới "
+            "tiến trình — không được đưa nó trở lại")
+
+    def test_khong_route_nao_dong_vao_phanh(self) -> None:
+        import inspect
+
+        for ten in ("create_chapter_import", "retry_chapter_import",
+                    "retry_chapter_import_item", "cancel_chapter_import"):
+            nguon = inspect.getsource(getattr(server_main, ten))
+            self.assertNotIn("xoa_de_test", nguon, ten)
+            self.assertNotIn("_import_gate", nguon, ten)
+
+    def test_quyet_dinh_nghi_chi_doc_ket_qua_truy_van(self) -> None:
+        """`record()` la duong VAO DUY NHAT, va no chi nhan so lo thay duoc."""
+        import inspect
+
+        nguon = inspect.getsource(server_main.drive_chapter_imports)
+        self.assertIn("_import_gate.should_skip()", nguon)
+        self.assertIn("_import_gate.record(bao.get(", nguon)
 
 
 class PhanQuyen(Base):

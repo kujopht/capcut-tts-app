@@ -6495,7 +6495,18 @@ body.co-mini { padding-bottom: 74px; }
   width: 100%;
   height: 100%;
   border: 0;
+  /*
+    "Dim nhe" luc tam dung — CHI brightness, KHONG blur, KHONG opacity thap
+    toi muc khong doc duoc. Da tu choi hai huong manh hon truoc do (overlay
+    chan hover, roi filter blur(20px)+brightness(15%)) vi che/xoa noi dung la
+    vi pham chinh sach YouTube bat ke cach lam; muc 85% CHI la mot hieu ung
+    dien anh nhe, moi thu trong iframe VAN doc/nhin ro binh thuong.
+  */
+  filter: brightness(100%);
+  transition: filter 0.4s ease;
 }
+
+.yt-facade-paused iframe { filter: brightness(85%); }
 
 .yt-facade-play {
   position: absolute;
@@ -6607,6 +6618,25 @@ body.co-mini { padding-bottom: 74px; }
   border: 1px solid var(--line);
   flex-wrap: wrap;
 }
+
+/* Luc TAM DUNG, thanh dieu khien tro thanh TAM DIEM thi giac thay vi lam mo
+   video (xem `.yt-facade-paused iframe`). Chi doi vien + hao quang, khong
+   che noi dung nao. */
+.yt-controls-focal {
+  border-color: color-mix(in srgb, var(--sac-animation-1) 55%, var(--line));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sac-animation-1) 35%, transparent),
+    0 0 28px 4px color-mix(in srgb, var(--sac-animation-1) 45%, transparent);
+  transition: box-shadow 0.4s ease, border-color 0.4s ease;
+}
+
+@keyframes yt-controls-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--sac-animation-1) 55%, transparent); }
+  50% { transform: scale(1.12); box-shadow: 0 0 0 8px transparent; }
+}
+/* `prefers-reduced-motion` da duoc tat toan cuc o cuoi tep (animation-duration
+   0.01ms cho moi phan tu) — khong can khai bao rieng o day. */
+.yt-controls-btn-pulse { animation: yt-controls-pulse 1.6s ease-in-out infinite; }
 .yt-controls-btn {
   display: flex;
   align-items: center;

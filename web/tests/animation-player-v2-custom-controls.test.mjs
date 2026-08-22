@@ -270,3 +270,74 @@ test("animation/watch/[id]/page.tsx: chi nguoi da dang nhap moi ghi tien do xem 
   assert.match(src, /if \(!profile \|\| !data\) return;/);
   assert.match(src, /api\s*\n?\s*\.reportWatchProgress\(/);
 });
+
+// -- "Dim nhe" luc tam dung + "tam diem" o control bar -----------------
+// (Phan tinh chinh UX — sau khi tu choi 2 huong vi pham chinh sach YouTube:
+// overlay chan hover, roi filter blur(20px)+brightness(15%) xoa noi dung.
+// Ket qua cuoi: CHI brightness(85%) tren CHINH iframe, khong blur, khong
+// che/xoa gi ca; su chu y duoc keo ve control bar cua Fanfic bang glow +
+// nut Play dap nhip, khong dung ky thuat nao cham vao player YouTube.)
+
+test("YouTubeFacadePlayer: dim iframe luc tam dung CHI qua class, khong tinh toan filter ngay trong JSX", () => {
+  const src = facadePlayer();
+  assert.match(
+    src,
+    /className=\{`yt-facade\$\{giaiDoan === "san-sang" && trangThai === "tam-dung" \? " yt-facade-paused" : ""\}`\}/,
+  );
+});
+
+test("globals.css: dim luc tam dung CHI dung brightness, TUYET DOI khong blur/opacity xoa noi dung", () => {
+  const css = globalsCss();
+  const atBase = css.indexOf(".yt-facade iframe {");
+  const khoiBase = css.slice(atBase, css.indexOf("}", atBase));
+  assert.match(khoiBase, /filter:\s*brightness\(100%\);/);
+  assert.match(khoiBase, /transition:\s*filter 0\.4s ease;/);
+
+  const atPaused = css.indexOf(".yt-facade-paused iframe");
+  assert.ok(atPaused > 0, "không tìm thấy .yt-facade-paused iframe");
+  const khoiPaused = css.slice(atPaused, css.indexOf("}", atPaused));
+  assert.match(khoiPaused, /filter:\s*brightness\(85%\);/);
+  // Khong duoc co blur/xoa noi dung trong CHINH khai bao filter o CA HAI khoi
+  // (bo qua comment giai thich lich su, chi xet cu phap `filter: ...blur(`) —
+  // day la ranh gioi chinh sach da thoa thuan lai sau khi tu choi 2 de xuat truoc.
+  assert.doesNotMatch(khoiBase, /filter:\s*[^;]*blur\(/);
+  assert.doesNotMatch(khoiPaused, /filter:\s*[^;]*blur\(/);
+  assert.doesNotMatch(khoiPaused, /opacity:\s*0/);
+});
+
+test("YouTubeFacadePlayer: khong con dau vet cua huong overlay chan hover/pointer-events tren iframe", () => {
+  // Bao ve ngay ranh gioi da thoa thuan — neu ai do sau nay them lai "tam
+  // kinh vo hinh" thi bai nay phai do vo NGAY.
+  const src = facadePlayer();
+  assert.doesNotMatch(src, /pointer-events:\s*auto/);
+  assert.doesNotMatch(src, /invisible.?shield/i);
+});
+
+test("YouTubePlayerControls: control bar la TAM DIEM luc tam dung (glow qua class, khong dung filter)", () => {
+  const src = playerControls();
+  assert.match(src, /const dangTamDung = trangThai === "tam-dung";/);
+  assert.match(
+    src,
+    /className=\{`yt-controls\$\{dangTamDung \? " yt-controls-focal" : ""\}`\}/,
+  );
+});
+
+test("YouTubePlayerControls: CHI nut Play\\/Pause dap nhip luc tam dung, khong phai ca thanh dieu khien", () => {
+  const src = playerControls();
+  const atPlayBtn = src.indexOf('className={`yt-controls-btn${dangTamDung ? " yt-controls-btn-pulse"');
+  assert.ok(atPlayBtn > 0, "không tìm thấy class dập nhịp trên nút Play/Pause");
+  // Cac nut khac (mute, fullscreen) KHONG duoc dap nhip.
+  const soLanPulseClass = (src.match(/yt-controls-btn-pulse/g) ?? []).length;
+  assert.equal(soLanPulseClass, 1, "chỉ nút Play/Pause được gắn class dập nhịp");
+});
+
+test("globals.css: hieu ung dap nhip co keyframes rieng, ton trong prefers-reduced-motion toan cuc", () => {
+  const css = globalsCss();
+  assert.match(css, /@keyframes yt-controls-pulse \{/);
+  assert.match(css, /\.yt-controls-btn-pulse \{ animation: yt-controls-pulse/);
+  // Khong tu khai bao rieng mot khoi prefers-reduced-motion — da co quy tac
+  // toan cuc tat moi animation o cuoi tep, tranh trung lap logic.
+  const atKeyframes = css.indexOf("@keyframes yt-controls-pulse");
+  const doanGanDo = css.slice(Math.max(0, atKeyframes - 400), atKeyframes + 400);
+  assert.match(doanGanDo, /da duoc tat toan cuc o cuoi tep/);
+});

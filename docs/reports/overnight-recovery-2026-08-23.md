@@ -292,3 +292,27 @@ subscription/trả phí thật — ngoài phạm vi tối nay.
 
 Không có SSH key, không có `.env` chứa secret, không có credential AWS/kube/docker
 trên máy này → hạ tầng production Fanfic có vẻ KHÔNG bị lộ từ host này.
+
+## Phase 10 — Dọn dẹp và kiểm tra toàn vẹn cuối
+
+| Kiểm tra | Kết quả |
+|---|---|
+| Việc hợp lệ nằm CHỈ trong file untracked | KHÔNG (0 file untracked) |
+| 8 nhánh đều có working tree sạch | ĐẠT |
+| Bằng chứng phục hồi còn nguyên (bundle + 2 patch + audit-docs) | ĐẠT, bundle vẫn `verify` OK |
+| Bằng chứng sự cố malware còn nguyên | ĐẠT |
+| `PreResetBackup-2026-08-22` trên Drive | KHÔNG chạm |
+| Tiến trình build/test/git còn ghi dữ liệu | KHÔNG |
+| Drive đang upload file mới quan trọng | KHÔNG (`content_cache` delta 0 MB / 6 s; không file nào được ghi lên Drive tối nay) |
+
+**Một phát hiện ở phút cuối, đã xử lý:** sau khi `omniroute stop` báo
+"Server stopped" và cổng 20128 đã đóng, cổng **mở lại**. Nguyên nhân: một tiến
+trình con `dist/server-ws.mjs` (WebSocket daemon) được spawn detached và `stop`
+không reap. Đã kiểm tra kỹ: **KHÔNG có scheduled task, KHÔNG Run key, KHÔNG
+startup folder, KHÔNG autostart** nào của OmniRoute — nên đây là tiến trình sót
+lại, KHÔNG phải persistence, và nó sẽ không quay lại sau khi tắt máy. Đã kill
+5 tiến trình theo đường dẫn sandbox; cổng 20128 đóng; `claude` vẫn 2.1.231 với
+md5 config không đổi.
+
+Đây chính là loại lỗi mà bước "kiểm tra toàn vẹn phút cuối" tồn tại để bắt —
+nếu bỏ qua, một service lạ sẽ được để lại đang chạy sau khi tôi báo "đã xong".

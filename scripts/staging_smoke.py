@@ -267,7 +267,18 @@ def buoc_noi_dung(api: str, tk: Dict[str, Any]) -> Dict[str, str]:
     ma, r = goi(api, "POST", "/api/novels",
                 {"title": f"[SMOKE] {tk['dau']}", "description": "Fixture smoke test."},
                 tok)
-    kt("tao novel", ma in (200, 201), f"HTTP {ma}")
+    if not kt("tao novel", ma in (200, 201), f"HTTP {ma}"):
+        # KHONG duoc doc `r["novel"]` o day: phat hien THAT tren staging
+        # (2026-08-23, su co han muc doc Appwrite) — buoc nay tung doc thang
+        # ma khong kiem `kt()`, nen mot phan hoi loi (khong co khoa "novel")
+        # nem `KeyError` GIUA CHUNG. Ham ket thuc BANG NGOAI LOI, khong bao
+        # gio toi duoc `return`, nen `ids` o `main()` van la `None` — VA
+        # NEU truyen da THUC SU duoc tao truoc buoc nay hong (khong phai
+        # truong hop nay, nhung xem nhanh duoi) thi khong ai biet de don.
+        # Tra ve RONG (chua co gi de don) thay vi nem loi, de `main()` biet
+        # buoc nay chua tao duoc gi ca — dung nghia, khong phai gia vo thanh
+        # cong.
+        return {}
     nid = r["novel"]["novel_id"]
 
     # Ba cau, co y NGAN: phep thu nay do duong di cua he thong, khong do suc
@@ -279,7 +290,18 @@ def buoc_noi_dung(api: str, tk: Dict[str, Any]) -> Dict[str, str]:
     ma, r = goi(api, "POST", "/api/chapters",
                 {"novel_id": nid, "title": "[SMOKE] Chương", "content": NOI_DUNG,
                  "order_index": 1}, tok)
-    kt("tao chapter", ma in (200, 201), f"HTTP {ma}")
+    if not kt("tao chapter", ma in (200, 201), f"HTTP {ma}"):
+        # DAY CHINH LA su co that: truyen (`nid`) DA duoc tao thanh cong o
+        # buoc truoc, nhung chuong thi khong. Truoc day doc thang
+        # `r["chapter"]["chapter_id"]` o day nem `KeyError` — ham ket thuc
+        # bang NGOAI LOI truoc khi kip `return`, nen `main()` khong bao gio
+        # biet `nid` ton tai, va truyen [SMOKE] nay nam lai tren staging
+        # KHONG THE don duoc (`don_dep` nhan `ids=None` thi bo qua hoan
+        # toan). Tra ve PHAN da tao duoc (`novel` nhung KHONG co `chapter`)
+        # de `don_dep` van xoa duoc truyen — `DELETE /api/novels/{id}` xoa
+        # ca chuong PHU THUOC (0 chuong trong truong hop nay), dung nhu no
+        # da lam cho truong hop day du.
+        return {"novel": nid}
     cid = r["chapter"]["chapter_id"]
 
     # "Refresh" = doc lai tu server bang mot token MOI, khong dua vao bo nho client.
@@ -1003,53 +1025,75 @@ def buoc_thu_hoi_va_xuat_ban_lai(api: str, tk: Dict[str, Any],
 
 
 def don_dep(api: str, tk: Dict[str, Any], ids: Optional[Dict[str, str]]) -> None:
+    """
+    Don fixture — PHAI CHIU DUOC tao-do-dang.
+
+    `ids` co the CHI co `novel` (khong co `chapter`) neu `buoc_noi_dung` hong
+    NGAY SAU khi tao truyen (xem ghi chu o do, 2026-08-23) — ham nay khong
+    duoc gia dinh moi khoa deu co mat.
+
+    KHONG de loi trong ham nay THOAT RA NGOAI: day la buoc don dep chay trong
+    `finally` cua `main()`, va mot loi o day (chinh no cung goi Appwrite/HTTP,
+    co the gap dung su co ha tang dang duoc chan doan) khong duoc phep DE LEN
+    loi CHINH dang duoc bao cao. Goi noi bo bat MOI `Exception`, ghi lai la
+    CANH BAO PHU, khong nem tiep.
+    """
     print("\n=== 12. Don fixture ===")
-    if not ids:
-        kt("khong co fixture nao de don", True)
+    if not ids or not ids.get("novel"):
+        kt("khong co fixture nao de don (chua tao duoc truyen nao)", True)
         return
-    # Thu hoi TRUOC khi xoa. Buoc 9.8 co the de lai truyen o trang thai
-    # `published`, va mot truyen dang xuat ban la thu de nhat bi bo lai neu
-    # duong xoa co bat ky rang buoc nao ve trang thai. Goi nay la IDEMPOTENT
-    # va khong sao neu truyen chua tung duoc xuat ban — nen khong kiem ket qua,
-    # chi don duong cho `DELETE`.
-    goi(api, "POST", f"/api/novels/{ids['novel']}/unpublish", {},
-        tk.get("tok_a"))
-    ma, r = goi(api, "DELETE", f"/api/novels/{ids['novel']}", None, tk.get("tok_a"))
-    da_xoa = r.get("removed", {}) or {}
-    kt("xoa truyen [SMOKE] va moi thu phu thuoc", ma in (200, 204),
-       f"HTTP {ma} {json.dumps(da_xoa, ensure_ascii=False)}")
+    try:
+        # Thu hoi TRUOC khi xoa. Buoc 9.8 co the de lai truyen o trang thai
+        # `published`, va mot truyen dang xuat ban la thu de nhat bi bo lai
+        # neu duong xoa co bat ky rang buoc nao ve trang thai. Goi nay la
+        # IDEMPOTENT va khong sao neu truyen chua tung duoc xuat ban — nen
+        # khong kiem ket qua, chi don duong cho `DELETE`.
+        goi(api, "POST", f"/api/novels/{ids['novel']}/unpublish", {},
+            tk.get("tok_a"))
+        ma, r = goi(api, "DELETE", f"/api/novels/{ids['novel']}", None,
+                   tk.get("tok_a"))
+        da_xoa = r.get("removed", {}) or {}
+        kt("xoa truyen [SMOKE] va moi thu phu thuoc", ma in (200, 204),
+           f"HTTP {ma} {json.dumps(da_xoa, ensure_ascii=False)}")
 
-    # Doi soat theo SO chuong da tao, khong doan. Buoc giong cuc bo tao them
-    # chuong thu hai; neu no khong nam trong danh sach vua xoa thi audio va
-    # object cua no o lai tren staging ma khong ai bao.
-    # DEM theo nhung gi that su da tao, khong doan: chuong chinh luon co;
-    # buoc giong cuc bo (8) va buoc doi chung (9.7) moi buoc them MOT chuong
-    # va chi khi buoc do chay den noi. Cong don tu `ids` de con so nay dung
-    # ca khi mot trong hai buoc bi bo qua hoac hong giua chung.
-    mong = 1
-    if ids.get("chapter_cuc_bo"):
-        mong += 1
-    if ids.get("chapter_doi_chung"):
-        mong += 1
-    kt("xoa dung so chuong da tao", da_xoa.get("chapters") == mong,
-       f"mong {mong}, xoa {da_xoa.get('chapters')}")
+        # Doi soat theo SO chuong da tao, khong doan. DEM theo nhung gi that
+        # su da tao: chuong CHINH chi tinh neu `buoc_noi_dung` thuc su tao
+        # duoc no (xem ghi chu tao-do-dang o dau ham do); buoc giong cuc bo
+        # (8) va buoc doi chung (9.7) moi buoc them MOT chuong va chi khi
+        # buoc do chay den noi. Cong don tu `ids` de con so nay dung ca khi
+        # mot trong cac buoc bi bo qua hoac hong giua chung.
+        mong = 1 if ids.get("chapter") else 0
+        if ids.get("chapter_cuc_bo"):
+            mong += 1
+        if ids.get("chapter_doi_chung"):
+            mong += 1
+        kt("xoa dung so chuong da tao", da_xoa.get("chapters") == mong,
+           f"mong {mong}, xoa {da_xoa.get('chapters')}")
 
-    # BAT BIEN "khong nhan ban track" o cap toan luot chay (Phase D, buoc 9.7).
-    # Day la cho DUY NHAT dem duoc so track THAT trong kho qua HTTP cong khai:
-    # phan hoi DELETE bao ro `tracks`. Chuong chinh duoc tao audio HAI lan
-    # (buoc 4, roi tao lai o 9.7) nhung phai chi con MOT track; chuong giong
-    # cuc bo (8) them mot; chuong doi chung (9.7) khong co track nao.
-    mong_track = 1 + (1 if ids.get("chapter_cuc_bo") else 0)
-    kt("khong nhan ban track du da tao lai ban doc",
-       da_xoa.get("tracks") == mong_track,
-       f"mong {mong_track}, xoa {da_xoa.get('tracks')}")
+        # BAT BIEN "khong nhan ban track" o cap toan luot chay (Phase D, buoc
+        # 9.7). Day la cho DUY NHAT dem duoc so track THAT trong kho qua HTTP
+        # cong khai: phan hoi DELETE bao ro `tracks`. Chuong CHINH chi tinh
+        # neu no thuc su duoc tao (cung dieu kien voi `mong` o tren) — duoc
+        # tao audio HAI lan (buoc 4, roi tao lai o 9.7) nhung phai chi con
+        # MOT track; chuong giong cuc bo (8) them mot; chuong doi chung (9.7)
+        # khong co track nao.
+        mong_track = ((1 if ids.get("chapter") else 0)
+                      + (1 if ids.get("chapter_cuc_bo") else 0))
+        kt("khong nhan ban track du da tao lai ban doc",
+           da_xoa.get("tracks") == mong_track,
+           f"mong {mong_track}, xoa {da_xoa.get('tracks')}")
 
-    _, r = goi(api, "GET", "/api/novels?mine=true", None, tk.get("tok_a"))
-    kt("tai khoan A khong con truyen nao", r.get("novels") == [],
-       f"con {len(r.get('novels', []))}")
-    _, r = goi(api, "GET", "/api/jobs", None, tk.get("tok_a"))
-    kt("khong con job nao cua tai khoan A", r.get("count") == 0,
-       f"con {r.get('count')}")
+        _, r = goi(api, "GET", "/api/novels?mine=true", None, tk.get("tok_a"))
+        kt("tai khoan A khong con truyen nao", r.get("novels") == [],
+           f"con {len(r.get('novels', []))}")
+        _, r = goi(api, "GET", "/api/jobs", None, tk.get("tok_a"))
+        kt("khong con job nao cua tai khoan A", r.get("count") == 0,
+           f"con {r.get('count')}")
+    except Exception as exc:
+        kt("don fixture that bai (loi PHU, xem canh bao)", False,
+           f"{type(exc).__name__}: {exc}")
+        print(f"  CANH BAO: don fixture gap loi — co the con [SMOKE] fixture "
+              f"tren server, can don thu cong bang truyen id '{ids.get('novel')}'.")
 
 
 #: Hau to bat buoc cua email tai khoan fixture. Xem `don_tai_khoan`.
@@ -1137,6 +1181,31 @@ def don_tai_khoan(tk: Dict[str, Any], moi_truong: str) -> None:
             kt(f"xoa tai khoan {em}", False, type(exc).__name__)
 
 
+def _don_an_toan(a, tk: Dict[str, Any], ids: Optional[Dict[str, str]]) -> None:
+    """
+    Goi `don_dep`/`don_tai_khoan` tu `finally` cua `main()` MA KHONG BAO GIO
+    tu no nem tiep.
+
+    Ly do tach rieng thay vi `try/except` thang trong `main()`: mac dinh cua
+    Python, mot loi xay ra BEN TRONG `finally` se THAY THE loi dang lan
+    truyen tu `try` — nen neu buoc don fixture (chinh no cung goi HTTP, co
+    the gap dung loai su co ha tang dang duoc chan doan) tu nem loi, loi THAT
+    (nguyen nhan chinh khien script dung giua chung) se bi che mat sau mot
+    traceback khong lien quan. Bat MOI `Exception` o day, chi in canh bao —
+    KHONG dat trong `main()` de khong pham quy tac "main() chi bat DUNG mot
+    loai" (xem `test_the_guard_is_not_a_blanket_except`): quy tac do dung ve
+    con duong LOI CHINH; day la con duong DON DEP, mot moi quan tam khac.
+    """
+    try:
+        if tk.get("tok_a"):
+            don_dep(a.api, tk, ids)
+        don_tai_khoan(tk, a.environment)
+    except Exception as loi_don:
+        print(f"\n  CANH BAO: buoc don dep/tai khoan gap loi rieng "
+              f"({type(loi_don).__name__}: {loi_don}) — co the con fixture "
+              f"[SMOKE] chua duoc don tren server.")
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Smoke test cho ban trien khai staging.")
     p.add_argument("--api", required=True, help="URL goc cua backend, vi du https://fas-staging-api.onrender.com")
@@ -1185,47 +1254,55 @@ def main(argv=None) -> int:
         suc_khoe = buoc_suc_khoe(a.api, a.sha, a.environment)
         tk = buoc_xac_thuc(a.api)
         ids = buoc_noi_dung(a.api, tk)
-        buoc_tts(a.api, tk, ids, a.voice, a.job_timeout)
-        buoc_danh_sach_giong(a.api, a.local_voice, suc_khoe)
-        buoc_tu_choi_giong(a.api, tk, ids)
-        if a.skip_local_voice:
-            kt("bo qua job giong cuc bo (--skip-local-voice)", True,
-               "may tao giong dang tat?")
-        else:
-            buoc_giong_cuc_bo(a.api, tk, ids, a.local_voice, a.job_timeout)
-        buoc_phan_quyen(a.api, tk, ids)
-
-        # --- Vong doi bien tap day du (Phase D) -------------------------
-        # Dat SAU phan quyen va TRUOC dang xuat: cac buoc nay can token con
-        # hieu luc, va buoc 9.4 co y goi mot phan KHONG kem token de kiem
-        # duong cong khai.
-        if a.skip_lifecycle:
-            kt("bo qua vong doi bien tap (--skip-lifecycle)", True)
-        else:
-            buoc_don_xin_tac_gia(a.api, tk)
-            buoc_ranh_gioi_duyet(a.api, tk)
-            da_xuat_ban = buoc_xuat_ban(a.api, tk, ids, suc_khoe)
-            buoc_kham_pha(a.api, tk, ids, da_xuat_ban)
-            buoc_phat_lai(a.api, tk, ids)
-            if da_xuat_ban:
-                buoc_sua_sau_xuat_ban(a.api, tk, ids)
-            buoc_tao_lai_ban_doc(a.api, tk, ids, a.voice, a.job_timeout)
-            if da_xuat_ban:
-                buoc_thu_hoi_va_xuat_ban_lai(a.api, tk, ids)
+        # BAO VE chinh: cac buoc duoi day deu doc thang `ids["chapter"]"
+        # (hoac gia dinh mot chuong co ban da ton tai). `buoc_noi_dung` nay
+        # gio TRA VE THAY VI NEM LOI khi hong giua chung (xem ghi chu o do,
+        # 2026-08-23) - nen `ids` co the la {} hoac chi co "novel" chu KHONG
+        # co "chapter". Kiem CO Y o day, MOT LAN, thay vi de moi ham con lai
+        # (`buoc_tts`, v.v.) tu doan va co the `KeyError` o mot cho khac -
+        # dung nguyen tac "khong dereferece ID chua duoc ghi lai".
+        if kt("co chuong co ban de tiep tuc kiem", bool(ids.get("chapter")),
+             "xem chi tiet o muc 3 - dung som, van don duoc fixture da tao"):
+            buoc_tts(a.api, tk, ids, a.voice, a.job_timeout)
+            buoc_danh_sach_giong(a.api, a.local_voice, suc_khoe)
+            buoc_tu_choi_giong(a.api, tk, ids)
+            if a.skip_local_voice:
+                kt("bo qua job giong cuc bo (--skip-local-voice)", True,
+                   "may tao giong dang tat?")
             else:
-                kt("bo qua thu hoi/xuat ban lai (cong tac gia dang BAT nen "
-                   "chua xuat ban duoc)", True)
+                buoc_giong_cuc_bo(a.api, tk, ids, a.local_voice, a.job_timeout)
+            buoc_phan_quyen(a.api, tk, ids)
 
-        buoc_giao_dien(a.web, a.api)
-        buoc_dang_xuat(a.api, tk)
+            # --- Vong doi bien tap day du (Phase D) ---------------------
+            # Dat SAU phan quyen va TRUOC dang xuat: cac buoc nay can token
+            # con hieu luc, va buoc 9.4 co y goi mot phan KHONG kem token de
+            # kiem duong cong khai.
+            if a.skip_lifecycle:
+                kt("bo qua vong doi bien tap (--skip-lifecycle)", True)
+            else:
+                buoc_don_xin_tac_gia(a.api, tk)
+                buoc_ranh_gioi_duyet(a.api, tk)
+                da_xuat_ban = buoc_xuat_ban(a.api, tk, ids, suc_khoe)
+                buoc_kham_pha(a.api, tk, ids, da_xuat_ban)
+                buoc_phat_lai(a.api, tk, ids)
+                if da_xuat_ban:
+                    buoc_sua_sau_xuat_ban(a.api, tk, ids)
+                buoc_tao_lai_ban_doc(a.api, tk, ids, a.voice, a.job_timeout)
+                if da_xuat_ban:
+                    buoc_thu_hoi_va_xuat_ban_lai(a.api, tk, ids)
+                else:
+                    kt("bo qua thu hoi/xuat ban lai (cong tac gia dang BAT "
+                       "nen chua xuat ban duoc)", True)
+
+            buoc_giao_dien(a.web, a.api)
+            buoc_dang_xuat(a.api, tk)
     except KhongDangNhapDuoc as exc:
         print()
         print(f"  DUNG SOM: {exc}")
     finally:
-        # Don du co buoc nao hong: khong de fixture lai tren staging.
-        if tk.get("tok_a"):
-            don_dep(a.api, tk, ids)
-        don_tai_khoan(tk, a.environment)
+        # Don du co buoc nao hong, KE CA loi khong bat o tren (xem docstring
+        # cua `_don_an_toan`: no khong bao gio tu nem tiep).
+        _don_an_toan(a, tk, ids)
 
     hong = [t for t, ok, _ in KET_QUA if not ok]
     print(f"\n{'=' * 60}")

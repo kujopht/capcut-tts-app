@@ -85,15 +85,20 @@ class TestTheScriptCleansUpAfterItself(unittest.TestCase):
 
     def test_cleanup_runs_even_when_a_step_fails(self):
         """
-        `don_dep` phai nam trong `finally`.
+        `don_dep` phai chay duoc tu `finally` — qua `_don_an_toan` (them
+        2026-08-23 de loi don-fixture khong de len loi CHINH, xem
+        `TestFinallyKhongNemChanLoiChinh`), khong con goi thang.
 
         Mot buoc hong ma khong don thi fixture `[SMOKE]` nam lai tren staging,
         va lan chay sau se doc phai rac cua lan truoc.
         """
         i = self.nguon.find("finally:")
         self.assertGreater(i, 0, "phai co khoi finally")
-        self.assertIn("don_dep(", self.nguon[i:i + 400],
-                      "don dep phai nam trong finally")
+        self.assertIn("_don_an_toan(", self.nguon[i:i + 400],
+                      "finally phai goi buoc don an toan")
+        than_don_an_toan = _than_ham(self.nguon, "_don_an_toan")
+        self.assertIn("don_dep(", than_don_an_toan,
+                      "_don_an_toan phai thuc su goi don_dep")
 
     def test_fixtures_are_clearly_marked(self):
         self.assertIn("[SMOKE]", self.nguon,
@@ -468,7 +473,12 @@ class TestProductionMode(unittest.TestCase):
                              f"co dau hieu xoa theo mau: {cam}")
 
     def test_van_don_trong_finally(self) -> None:
+        """`main()` goi `_don_an_toan` tu `finally` (them 2026-08-23) thay vi
+        goi thang `don_dep`/`don_tai_khoan` — kiem CA HAI tang: `main()` goi
+        dung ham, va ham do thuc su goi ca hai buoc don."""
         than = _than_ham(self.nguon, "main")
         sau = than[than.index("finally:"):]
-        self.assertIn("don_dep(", sau)
-        self.assertIn("don_tai_khoan(", sau)
+        self.assertIn("_don_an_toan(", sau)
+        than_don_an_toan = _than_ham(self.nguon, "_don_an_toan")
+        self.assertIn("don_dep(", than_don_an_toan)
+        self.assertIn("don_tai_khoan(", than_don_an_toan)

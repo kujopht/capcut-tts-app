@@ -71,6 +71,40 @@ COL_EVENTS = "moderation_events"
 
 REQUEST_TIMEOUT = 15.0
 
+#: Cum tu XAC MINH THAT (khong doan) tu thong diep Appwrite Cloud khi mot
+#: du an het han muc — bat tren staging that, 2026-08-23:
+#: "Database reads limit for the current billing cycle has been exceeded.
+#: Please upgrade to a higher plan or update your budget cap."
+#: Khop THEO CUM TU, khong phai toan bo cau: cau chinh xac co the doi (vi du
+#: "writes" thay "reads", hoac Appwrite doi cau chu), nhung ca hai cum deu
+#: la dau hieu chac chan cua HET HAN MUC/RATE LIMIT, khong phai ban ghi that
+#: su khong ton tai. Them cum moi vao day CHI khi da xac nhan qua phan hoi
+#: THAT tu Appwrite — dung mau voi cach `scripts/setup_appwrite.py` khop
+#: "already an index with the same attributes and orders".
+_CUM_TU_HA_TANG_TAM_THOI = (
+    "billing cycle",
+    "usage limit",
+    "rate limit",
+    "too many requests",
+)
+
+
+def _la_loi_ha_tang_tam_thoi(body: Any) -> bool:
+    """
+    Phan biet "Appwrite tam thoi khong phuc vu duoc" (het han muc/rate limit
+    — nen la `AppwriteUnavailableError` -> 503, thu lai duoc) voi "ban ghi
+    that su khong ton tai" (nen la `NotFoundError` -> 404, KHONG thu lai
+    duoc, vi thu lai se tra ve dung ket qua do).
+
+    CHI doc `message` — cung truong `thong_diep_loi_an_toan` uu tien, va la
+    truong DUY NHAT da xac nhan chua cum tu can tim trong phan hoi Appwrite
+    THAT (xem hang so o tren).
+    """
+    if not isinstance(body, dict):
+        return False
+    message = str(body.get("message") or "").lower()
+    return any(cum in message for cum in _CUM_TU_HA_TANG_TAM_THOI)
+
 
 def _job_lock_id(owner_id: str, chapter_id: str, fingerprint: str) -> str:
     """
@@ -379,13 +413,26 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             raise AppwriteUnavailableError(
                 f"Không kết nối được Appwrite: {exc}") from exc
 
-        if response.status_code == 404:
-            raise NotFoundError("Không tìm thấy bản ghi.")
         if response.status_code >= 400:
             try:
                 body = response.json()
             except Exception:
                 body = None
+            # PHAI kiem tra ha tang TAM THOI (quota/rate-limit het han muc)
+            # TRUOC ca hai nhanh duoi day, KE CA truoc `== 404`: phat hien
+            # THAT tren staging (2026-08-23) — Appwrite Cloud het han muc DOC
+            # tra ve mot loi ma tang nay tung doi thanh "khong tim thay ban
+            # ghi", lam MOT truyen vua tao THANH CONG (201) bi bao 404 khi
+            # doc lai NGAY LAP TUC, va `/api/ready` bao sai "loai_loi:
+            # NotFoundError" cho mot su co han muc chu khong phai ban ghi
+            # thieu that. Cung mot loi ha tang co the di kem BAT KY status
+            # code nao Appwrite chon dung cho no — khong gia dinh la 404 hay
+            # 400 cu the, chi doc THONG DIEP.
+            if _la_loi_ha_tang_tam_thoi(body):
+                raise AppwriteUnavailableError(
+                    thong_diep_loi_an_toan(body, status_code=response.status_code))
+            if response.status_code == 404:
+                raise NotFoundError("Không tìm thấy bản ghi.")
             raise NotFoundError(
                 thong_diep_loi_an_toan(body, status_code=response.status_code))
         if response.status_code == 204 or not response.content:

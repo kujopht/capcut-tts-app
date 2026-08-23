@@ -15,7 +15,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, adminSocial, type AdminPost } from "@/lib/api";
-import { formatDate, formatNumber } from "@/components/ui";
+import { ConfirmDialog, formatDate, formatNumber } from "@/components/ui";
 import { DanhSachTrangThai } from "@/components/AdminShell";
 
 export default function AdminPostsPage() {
@@ -25,6 +25,8 @@ export default function AdminPostsPage() {
   const [tong, setTong] = useState(0);
   const [loi, setLoi] = useState("");
   const [dangLam, setDangLam] = useState("");
+  const [hoiGo, setHoiGo] = useState<AdminPost | null>(null);
+  const [ghiChu, setGhiChu] = useState("");
 
   const tai = useCallback(() => {
     setLoi("");
@@ -61,6 +63,23 @@ export default function AdminPostsPage() {
     },
     [tai],
   );
+
+  const goBai = useCallback(async () => {
+    if (!hoiGo) return;
+    const id = hoiGo.post_id;
+    setDangLam(id);
+    setLoi("");
+    try {
+      await adminSocial.removePost(id, ghiChu.trim() || "Vi phạm quy định");
+      setHoiGo(null);
+      setGhiChu("");
+      tai();
+    } catch (e) {
+      setLoi(e instanceof ApiError ? e.message : "Không thực hiện được.");
+    } finally {
+      setDangLam("");
+    }
+  }, [hoiGo, ghiChu, tai]);
 
   return (
     <div className="stack">
@@ -158,16 +177,16 @@ export default function AdminPostsPage() {
                         type="button"
                         className="btn btn-ghost btn-sm"
                         disabled={dangLam === b.post_id}
-                        onClick={() =>
-                          lamViec(b.post_id, () =>
-                            daGo
-                              ? adminSocial.restorePost(b.post_id)
-                              : adminSocial.removePost(
-                                  b.post_id,
-                                  "Vi phạm quy định",
-                                ),
-                          )
-                        }
+                        onClick={() => {
+                          if (daGo) {
+                            lamViec(b.post_id, () =>
+                              adminSocial.restorePost(b.post_id),
+                            );
+                          } else {
+                            setGhiChu("");
+                            setHoiGo(b);
+                          }
+                        }}
                       >
                         {daGo ? "Phục hồi" : "Gỡ"}
                       </button>
@@ -179,6 +198,34 @@ export default function AdminPostsPage() {
           </table>
         </div>
       </DanhSachTrangThai>
+
+      {hoiGo ? (
+        <ConfirmDialog
+          open
+          title="Gỡ bài đăng này?"
+          body={
+            <span className="stack-2">
+              <span>
+                Bài đăng sẽ ẩn khỏi công khai ngay lập tức. Có thể phục hồi
+                sau bằng nút &quot;Phục hồi&quot; ngay tại đây.
+              </span>
+              <textarea
+                className="textarea textarea-sm"
+                placeholder="Lý do (ghi vào nhật ký kiểm duyệt)"
+                value={ghiChu}
+                onChange={(e) => setGhiChu(e.target.value)}
+                maxLength={1000}
+                rows={2}
+              />
+            </span>
+          }
+          confirmLabel="Gỡ"
+          danger
+          busy={dangLam === hoiGo.post_id}
+          onConfirm={goBai}
+          onCancel={() => setHoiGo(null)}
+        />
+      ) : null}
     </div>
   );
 }

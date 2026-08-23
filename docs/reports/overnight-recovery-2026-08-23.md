@@ -316,3 +316,25 @@ md5 config không đổi.
 
 Đây chính là loại lỗi mà bước "kiểm tra toàn vẹn phút cuối" tồn tại để bắt —
 nếu bỏ qua, một service lạ sẽ được để lại đang chạy sau khi tôi báo "đã xong".
+
+## Cập nhật — sáng 2026-08-23: đã push và mở PR
+
+`gh auth status` xác nhận phiên MỚI (`hosts.yml` ghi lúc 07:35:47, sau cửa sổ
+chặn 18:52:46→22:47 tối qua). Đã push cả 5 nhánh phục hồi + nhánh docs + nhánh
+lịch sử `feature/pollinations-translation` (chỉ để tham chiếu, KHÔNG mở PR).
+
+| PR | Nhánh | CI |
+|---|---|---|
+| [#32](https://github.com/kujopht/capcut-tts-app/pull/32) | `recovery/oauth-staging-regression` | ĐẠT (3/3) |
+| [#33](https://github.com/kujopht/capcut-tts-app/pull/33) | `test/bulk-import-boundaries` | fail lần 1 (không liên quan) → rerun |
+| [#34](https://github.com/kujopht/capcut-tts-app/pull/34) | `feature/qa-canary-lifecycle` | ĐẠT (3/3) |
+| [#35](https://github.com/kujopht/capcut-tts-app/pull/35) | `recovery/animation-player-controls` | ĐẠT (3/3) |
+| [#36](https://github.com/kujopht/capcut-tts-app/pull/36) | `recovery/pollinations-translation-v2` | ĐẠT (3/3) |
+
+**PR #33 lần chạy đầu tiên fail**, nhưng KHÔNG do thay đổi của PR: test hỏng là
+`test_translation_job_recovery.KhoiPhucJobSauKhiWorkerChetTest...`, một kịch
+bản đua (race) mô phỏng worker chết giữa chừng — file này KHÔNG nằm trong diff
+của PR (`git diff --stat main..test/bulk-import-boundaries` chỉ đổi
+`server/tests/test_bulk_chapter_import.py`). Chạy lại 5 lần trên `main` sạch,
+cục bộ: **5/5 OK** — kết luận đây là flaky test có trước, nhạy cảm thời gian,
+không phải hồi quy do PR. Đã trigger `gh run rerun --failed`.

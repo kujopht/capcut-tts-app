@@ -2,9 +2,9 @@
 
 /**
  * Muc Animation trong khu quan tri — trang LANDING (Phase 4, Admin Control
- * Center V2). Danh sach/kiem duyet THAT nam o `/admin/animation/series`; day
- * chi la loi vao ngan, de sau nay Trusted Sources/Import Queue (Phase 5) co
- * cho dung chung khi chung het la placeholder.
+ * Center V2). Danh sach/kiem duyet THAT nam o `/admin/animation/series`,
+ * `/admin/animation/sources`, va `/admin/animation/import-queue`; day chi la
+ * loi vao ngan dan sang ba trang do.
  */
 
 import Link from "next/link";
@@ -36,14 +36,14 @@ export default function AdminAnimation() {
           <h3 className="section-title section-title-icon">
             <IconLink size={17} /> Trusted Sources
           </h3>
-          <p className="hint">Chưa xây dựng — thuộc Phase 5.</p>
+          <p className="hint">Quản lý nguồn tin cậy, WebSub, quét/khám phá.</p>
         </Link>
 
         <Link href="/admin/animation/import-queue" className="card stack-2">
           <h3 className="section-title section-title-icon">
             <IconInbox size={17} /> Import Queue
           </h3>
-          <p className="hint">Chưa xây dựng — thuộc Phase 5.</p>
+          <p className="hint">Xem hàng đợi nhập, duyệt/từ chối từng mục.</p>
         </Link>
       </div>
     </section>

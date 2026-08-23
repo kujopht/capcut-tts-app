@@ -231,5 +231,37 @@ class TestTheFreeBlueprintIsCoherent(unittest.TestCase):
         self.assertEqual(len(d["services"]), 3)
 
 
+class DevApiKhongDuocTuChayJobTest(unittest.TestCase):
+    """
+    Su co that (2026-08-23): `fanfic-dev-api` (backend dev cong khai, xem
+    docs/DEV_PUBLIC_BACKEND.md) dung CHUNG database Appwrite voi staging
+    (fas-staging-api-free repoint sang self-host de tranh het quota Appwrite
+    Cloud). `FAS_INLINE_WORKER` mac dinh `True` khi khong dat, nen container
+    nay am tham nhan job TTS cua staging va ghi audio ra dia cuc bo cua chinh
+    no — staging bao job `completed` nhung file khong bao gio co trong R2.
+
+    Bai nay khong the kiem tra CODE (khong co bug logic — `_start_job_thread`
+    dung y muon), ma kiem tai lieu van hanh: bat ky quy trinh cai dat MOI cho
+    mot dich vu dung chung database voi staging deu phai noi ro
+    `FAS_INLINE_WORKER=false`, khong duoc de mac dinh am tham quyet dinh.
+    """
+
+    def test_dev_public_backend_doc_bat_buoc_inline_worker_false(self):
+        import pathlib
+
+        goc = pathlib.Path(__file__).resolve().parents[2]
+        noi_dung = (goc / "docs" / "DEV_PUBLIC_BACKEND.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "FAS_INLINE_WORKER=false", noi_dung,
+            "docs/DEV_PUBLIC_BACKEND.md phai noi ro FAS_INLINE_WORKER=false — "
+            "thieu dong nay la nguyen nhan that cua su co 2026-08-23")
+        # Phai la mot phan cua VI DU bien moi truong (khoi ```), khong phai chi
+        # nhac ten bien o dau do trong van ban giai thich.
+        i = noi_dung.find("FAS_ENV=development")
+        self.assertGreater(i, 0)
+        self.assertIn("FAS_INLINE_WORKER=false", noi_dung[i:i + 200],
+                      "phai nam NGAY canh FAS_ENV trong vi du cau hinh")
+
+
 if __name__ == "__main__":
     unittest.main()

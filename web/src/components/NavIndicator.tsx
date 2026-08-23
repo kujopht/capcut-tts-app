@@ -217,6 +217,21 @@ export function NavIndicator({
         transform: `translateX(${o.x}px)`,
         width: `${o.w}px`,
         /*
+          `height`/`marginTop` DONG BO voi `o.h` do duoc, cung ly do va cung
+          co che voi `width` o tren — thieu dong bo nay la mot loi HINH HOC
+          THAT (phat hien qua review doc lap 2026-08-23): `.nav-vach` dat
+          `height: 34px` co dinh trong CSS, nhung `o.h` do tu `.nav-link`
+          (bao gom padding/border cua CHINH muc, vd 36-38px tuy muc) THUONG
+          KHONG BANG 34. SVG tracer dung `viewBox={0 0 o.w o.h}` +
+          `preserveAspectRatio="none"` — hop thuc te (34px, tu CSS) va he
+          truc SVG (o.h, tu JS) khac nhau se ep SVG co GIAN THEO CHIEU DOC
+          khong deu, lam net tron o hai dau tracer bi meo thanh hinh elip.
+          Ghi de height/marginTop inline (giong width) xoa han su khac biet
+          nay — hop THAT SU cao dung `o.h`, khong con hai nguon so lech nhau.
+        */
+        height: `${o.h}px`,
+        marginTop: `${-o.h / 2}px`,
+        /*
           Sac cua khu vuc dang toi, truyen qua bien de CSS noi mau muot trong
           luc vien thuoc di chuyen. Dat thang mau vao mot lop se lam mau NHAY o
           dau chuyen dong thay vi chuyen dan.

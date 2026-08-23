@@ -1428,6 +1428,12 @@ main { overflow-x: clip; }
   left: 0;
   top: 50%;
   z-index: 0;
+  /* `height`/`margin-top` CHI la gia tri nen truoc khi do xong (khong bao
+     gio thuc su hien vi component tra `null` cho toi luc do) — sau do
+     `NavIndicator.tsx` ghi de CA HAI bang inline style, tinh tu chieu cao
+     THAT cua muc (`o.h`), giong het co che voi `width`. Xem ghi chu day du
+     o noi ghi de — dong bo nay BAT BUOC de SVG tracer (`.nav-vach-tracer`)
+     khong bi meo hinh do lech giua chieu cao CSS va chieu cao thuc te. */
   height: 34px;
   margin-top: -17px;
   border-radius: var(--r-full);

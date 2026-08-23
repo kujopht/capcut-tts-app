@@ -445,6 +445,24 @@ test("tracer do CAO cua o (h), khong dung hang so cung voi height CSS", () => {
   assert.doesNotMatch(src, /34\s*\/\s*2/, "không được lặp lại số 34px của CSS trong JS");
 });
 
+test("hop .nav-vach GHI DE height/marginTop inline tu o.h, khong de lech voi CSS", () => {
+  /*
+    Loi that phat hien qua review doc lap (2026-08-23): `.nav-vach` dat
+    `height: 34px` CO DINH trong CSS, nhung `o.h` do tu `.nav-link` (bao gom
+    padding/border rieng cua muc) THUONG khac 34 (do luong thuc te: 36-38px
+    tuy muc). SVG tracer dung `viewBox` theo `o.h` nhung neu HOP THAT (`.nav-vach`)
+    van cao 34px co dinh theo CSS thi `preserveAspectRatio="none"` se ep truc
+    doc gian/co khong deu — net tron o hai dau tracer meo thanh elip. Ghi de
+    ca `height` LAN `marginTop` (de giu can giua doc, `top: 50%` + `margin-top:
+    -h/2`) tu CHINH `o.h` xoa han nguy co lech — giong het co che voi `width`.
+  */
+  const src = codeOnly(read("../src/components/NavIndicator.tsx"));
+  assert.match(src, /height:\s*`\$\{o\.h\}px`/,
+    "hộp .nav-vach phải ghi đè height inline từ o.h, không để CSS 34px cố định một mình quyết định");
+  assert.match(src, /marginTop:\s*`\$\{-o\.h\s*\/\s*2\}px`/,
+    "phải ghi đè marginTop tương ứng để giữ căn giữa dọc khi height thực tế khác 34px");
+});
+
 test("tracer AN han khi giam chuyen dong, van con vien+nen tinh de bao dang chon", () => {
   const than = khoi(css(), "@media (prefers-reduced-motion: reduce)");
   assert.match(than, /\.nav-vach-tracer \{ display: none; \}/);

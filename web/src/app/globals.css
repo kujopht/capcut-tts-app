@@ -3424,6 +3424,52 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 }
 .shelf-empty-compact > span:first-child { font-size: 20px; flex: 0 0 auto; }
 
+/*
+  O trong minh hoa cho ke "Đang nổi bật" — ke QUAN TRONG NHAT cua trang chu,
+  nen duoc phep co mot hoa tiet + nut CTA rieng, nhung van nho hon nhieu so
+  voi `.empty` (vien dut, padding 48px) dung chung cho toan site.
+
+  Phuc hoi tu `feature/fanfic-visual-renaissance-v1` — DAT TEN CLASS RIENG
+  (khong dung tien to "portal-" cua ban goc, von dung chung he thong class
+  voi The Gioi Cong). The Gioi Cong CHU DINH khong duoc phuc hoi (xem bao cao
+  Phase A, 2026-08-23) — component nay CHI muon dung lai hoa tiet SVG
+  `MotifManuscript` (mot minh hoa doc lap, khong lien quan gi Portal), khong
+  muon keo theo bat ky phu thuoc CSS nao cua he thong Portal chua ton tai.
+*/
+.empty-noibat {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s4) var(--s5);
+  border-radius: var(--r4);
+  border: 1px solid var(--kinh-vien);
+  background: linear-gradient(180deg, #0b0e18d9, #080a11f5);
+  box-shadow: var(--do-sau), var(--kinh-sang);
+}
+.empty-noibat-motif {
+  width: 84px;
+  flex: 0 0 auto;
+  opacity: 0.5;
+  color: var(--sac-explore-1);
+  pointer-events: none;
+}
+.empty-noibat-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.empty-noibat-body .btn { align-self: flex-start; margin-top: 2px; }
+/* Xep chong o mobile: xem khoi @media man hinh hep 640px CHINH (muc M1,
+   phia duoi trong tep) — khong mo mot khoi @media rieng o day, vi
+   `mobileBlock()` trong `ui.test.mjs` gia dinh CHI MOT khoi nhu vay va lay
+   khoi DAU TIEN gap trong tep theo vi tri chuoi ky tu (khong phai AST, nen
+   ca chinh dong ghi chu nay CUNG khong duoc go nguyen van cau truy van do
+   vao, keo lai tro thanh "khoi dau tien" gia). */
+
 /* Ke "Animation moi" tren trang chu — the to hon mot chut so voi luoi duyet
    day dac cua `/animation` (`.anim-grid` goc), cam giac "truong bay" hon
    la "duyet trang". */
@@ -4485,6 +4531,12 @@ body.co-mini { padding-bottom: 74px; }
   /* Bento (Phan D, V4 visual completion): the doi 2 cot tro ve 1 cot khi
      man hinh qua hep de giu ca hai cot doc duoc. */
   .bento-span-2 { grid-column: span 1; }
+
+  /* O trong "Đang nổi bật" (phuc hoi tu visual-renaissance-v1): xep doc,
+     hoa tiet nho lai — o hang ngang qua chat cho ca hoa tiet 84px lan
+     doan van 2-3 dong tren man hinh hep. */
+  .empty-noibat { flex-direction: column; align-items: flex-start; text-align: left; }
+  .empty-noibat-motif { width: 56px; }
 
   :root {
     --t-2xl: 25px; --t-xl: 20px; --t-lg: 18px;

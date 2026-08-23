@@ -365,7 +365,7 @@ test("chuc nang KHONG doi khi giam chuyen dong", () => {
   for (const m of than.matchAll(/^\s*([^{@}\n][^{\n]*)\{([^}]*)\}/gm)) {
     if (!/display: none/.test(m[2])) continue;
     const sel = m[1].trim();
-    assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after|nav-vach-streak/.test(sel),
+    assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after|nav-vach-streak|nav-vach-tracer/.test(sel),
       `${sel} bị ẩn khi giảm chuyển động — có thể đang giấu nội dung`);
   }
 });
@@ -408,6 +408,69 @@ test("sac cua tung khu vuc nam o MOT cho", () => {
                    "../src/components/NavAuth.tsx"]) {
     assert.ok(!/#[0-9a-f]{6}/i.test(codeOnly(read(f))), `${f} tự đặt mã màu`);
   }
+});
+
+/* ============================== V4: tracer vien LIEN TUC (phuc hoi 2026-08-23) */
+
+test("tracer vien chay LIEN TUC (infinite), khac han vet sang mot lan", () => {
+  const than = khoi(css(), ".nav-vach-tracer-stroke {");
+  assert.match(than, /animation: nav-tracer-dash [\d.]+s linear infinite/,
+    "tracer phải lặp vô hạn suốt lúc mục còn được chọn");
+  // Khong dung mot keyframe theo pixel: pathLength chuan hoa ve %, nen
+  // dasharray phai la hai so nho (ti le %), khong phai gia tri pixel lon.
+  assert.match(than, /stroke-dasharray:\s*\d{1,2}\s+\d{1,3}/);
+});
+
+test("@keyframes nav-tracer-dash di dung MOT vong chu vi (pathLength=100)", () => {
+  assert.match(css(), /@keyframes nav-tracer-dash\s*\{\s*to\s*\{\s*stroke-dashoffset:\s*-100;/);
+});
+
+test("SVG tracer dung pathLength de doc lap voi kich thuoc thuc te cua o", () => {
+  const src = codeOnly(read("../src/components/NavIndicator.tsx"));
+  assert.match(src, /pathLength=\{100\}/,
+    "thiếu pathLength — dasharray sẽ sai tỉ lệ khi bề rộng mục đổi (tên dài/ngắn)");
+  assert.match(src, /className="nav-vach-tracer"/);
+  assert.match(src, /className="nav-vach-tracer-stroke"/);
+});
+
+test("tracer do CAO cua o (h), khong dung hang so cung voi height CSS", () => {
+  /*
+    `.nav-vach` co `height: 34px` CO DINH trong CSS (xem test o tren) — neu
+    component tracer LAP LAI con so 34 thay vi do tu DOM, hai noi se lech
+    ngay khi mot ben doi ma ben kia quen cap nhat.
+  */
+  const src = codeOnly(read("../src/components/NavIndicator.tsx"));
+  assert.match(src, /const h = b\.height/, "thiếu đo chiều cao thực tế của mục");
+  assert.match(src, /viewBox=\{`0 0 \$\{o\.w\} \$\{o\.h\}`\}/);
+  assert.doesNotMatch(src, /34\s*\/\s*2/, "không được lặp lại số 34px của CSS trong JS");
+});
+
+test("hop .nav-vach GHI DE height/marginTop inline tu o.h, khong de lech voi CSS", () => {
+  /*
+    Loi that phat hien qua review doc lap (2026-08-23): `.nav-vach` dat
+    `height: 34px` CO DINH trong CSS, nhung `o.h` do tu `.nav-link` (bao gom
+    padding/border rieng cua muc) THUONG khac 34 (do luong thuc te: 36-38px
+    tuy muc). SVG tracer dung `viewBox` theo `o.h` nhung neu HOP THAT (`.nav-vach`)
+    van cao 34px co dinh theo CSS thi `preserveAspectRatio="none"` se ep truc
+    doc gian/co khong deu — net tron o hai dau tracer meo thanh elip. Ghi de
+    ca `height` LAN `marginTop` (de giu can giua doc, `top: 50%` + `margin-top:
+    -h/2`) tu CHINH `o.h` xoa han nguy co lech — giong het co che voi `width`.
+  */
+  const src = codeOnly(read("../src/components/NavIndicator.tsx"));
+  assert.match(src, /height:\s*`\$\{o\.h\}px`/,
+    "hộp .nav-vach phải ghi đè height inline từ o.h, không để CSS 34px cố định một mình quyết định");
+  assert.match(src, /marginTop:\s*`\$\{-o\.h\s*\/\s*2\}px`/,
+    "phải ghi đè marginTop tương ứng để giữ căn giữa dọc khi height thực tế khác 34px");
+});
+
+test("tracer AN han khi giam chuyen dong, van con vien+nen tinh de bao dang chon", () => {
+  const than = khoi(css(), "@media (prefers-reduced-motion: reduce)");
+  assert.match(than, /\.nav-vach-tracer \{ display: none; \}/);
+  // `.nav-vach` (vien + nen) KHONG bi tat trong khoi reduced-motion — chi
+  // `transition` cua no bi tat (kiem o test khac) — nen "dang chon" van
+  // doc duoc qua mau nen/vien tinh du tracer da an.
+  assert.ok(!new RegExp(String.raw`\.nav-vach \{ display: none`).test(than),
+    "vien+nen chinh không được biến mất — đó là tín hiệu 'đang chọn' còn lại khi tắt chuyển động");
 });
 
 test("chuyen canh nen MANH HON nhung van trong khoang cho phep", { skip: "thay bang route-transition-veil.test.mjs (kien truc Aether Rift V4)" }, () => {

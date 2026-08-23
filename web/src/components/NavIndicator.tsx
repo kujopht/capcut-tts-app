@@ -61,6 +61,12 @@ type O = {
   moc: string;
   x: number;
   w: number;
+  /** Cao cua hop, do cung luc voi `w` — dung de ve SVG tracer khop kich
+   * thuoc that (xem `nav-vach-tracer-stroke`). Khong doc tu CSS: `.nav-vach`
+   * dat `height: 34px` co dinh trong CSS, nhung do TRUC TIEP tu DOM giong
+   * `w` thay vi lap lai con so do o hai noi la tranh mot nguon lech neu sau
+   * nay chieu cao doi. */
+  h: number;
   /**
    * Lan do dau tien thi KHONG truot: vao thang `/library` ma thay vien thuoc bo
    * tu "Trang chủ" sang doc ra la mot loi ve, khong phai mot hieu ung.
@@ -133,9 +139,11 @@ export function NavIndicator({
       */
       const x = b.left - a.left + hop.scrollLeft;
       const w = b.width;
+      const h = b.height;
       setO((truoc) => {
         if (truoc && truoc.moc === moc
-            && Math.abs(truoc.x - x) < 0.5 && Math.abs(truoc.w - w) < 0.5) {
+            && Math.abs(truoc.x - x) < 0.5 && Math.abs(truoc.w - w) < 0.5
+            && Math.abs(truoc.h - h) < 0.5) {
           // Khong doi gi — dung tao mot lan ve thua. `ResizeObserver` co the
           // phat vai lan lien tuc khi chu vua tai xong.
           return truoc;
@@ -151,7 +159,7 @@ export function NavIndicator({
           cua so — sai voi dung y "MOT lan, dung luc doi trang".
         */
         const tick = truoc && truoc.moc !== moc ? truoc.tick + 1 : (truoc?.tick ?? 0);
-        return { moc, x, w, truot, tick };
+        return { moc, x, w, h, truot, tick };
       });
     };
 
@@ -209,6 +217,21 @@ export function NavIndicator({
         transform: `translateX(${o.x}px)`,
         width: `${o.w}px`,
         /*
+          `height`/`marginTop` DONG BO voi `o.h` do duoc, cung ly do va cung
+          co che voi `width` o tren — thieu dong bo nay la mot loi HINH HOC
+          THAT (phat hien qua review doc lap 2026-08-23): `.nav-vach` dat
+          `height: 34px` co dinh trong CSS, nhung `o.h` do tu `.nav-link`
+          (bao gom padding/border cua CHINH muc, vd 36-38px tuy muc) THUONG
+          KHONG BANG 34. SVG tracer dung `viewBox={0 0 o.w o.h}` +
+          `preserveAspectRatio="none"` — hop thuc te (34px, tu CSS) va he
+          truc SVG (o.h, tu JS) khac nhau se ep SVG co GIAN THEO CHIEU DOC
+          khong deu, lam net tron o hai dau tracer bi meo thanh hinh elip.
+          Ghi de height/marginTop inline (giong width) xoa han su khac biet
+          nay — hop THAT SU cao dung `o.h`, khong con hai nguon so lech nhau.
+        */
+        height: `${o.h}px`,
+        marginTop: `${-o.h / 2}px`,
+        /*
           Sac cua khu vuc dang toi, truyen qua bien de CSS noi mau muot trong
           luc vien thuoc di chuyen. Dat thang mau vao mot lop se lam mau NHAY o
           dau chuyen dong thay vi chuyen dan.
@@ -226,6 +249,56 @@ export function NavIndicator({
         animation. Chi ve khi `o.truot` (bo qua lan ve dau tien, xem `O.truot`).
       */}
       {o.truot ? <span key={o.tick} className="nav-vach-streak" aria-hidden="true" /> : null}
+      {/*
+        Tracer vien — mot doan sang NGAN chay VONG QUANH vien pill LIEN TUC
+        trong suot luc muc con duoc chon (khac han vet sang o tren, chi chay
+        MOT LAN roi tat). Phuc hoi tu `feature/fanfic-visual-renaissance-v1`
+        (V7), dung ky thuat SVG `stroke-dasharray`/`stroke-dashoffset` thay vi
+        ban dau (`conic-gradient` xoay + mask) — ban SVG la lua chon CUOI CUNG
+        cua nhanh do sau nhieu vong sua, va khong dinh loi "dom mau ket lai"
+        tung gap voi ban conic-gradient.
+
+        `pathLength={100}`: chuan hoa don vi stroke ve % chu vi BAT KE kich
+        thuoc thuc te cua o (o.w doi theo do dai ten muc) — nho vay
+        `stroke-dasharray: 14 86` trong CSS luon nghia la "sang 14%, toi 86%"
+        du o hep hay rong, khong can tinh lai theo pixel.
+
+        `rx`/`ry` = h/2 (tru insert) de khop dung bien tron cua `.nav-vach`
+        (border-radius: var(--r-full), tuc la BO TRON HOAN TOAN theo chieu
+        cao co dinh 34px) — do TRUC TIEP tu `o.h` thay vi hang so, xem ghi chu
+        o kieu `O.h`.
+
+        KHONG ve khi giam chuyen dong: xem quy tac
+        `prefers-reduced-motion` cho `.nav-vach-tracer-stroke` — an han di,
+        chi con vien tinh + nen cua `.nav-vach` de bao "dang chon", dung y
+        cau hoi "reduced-motion fallback phai VAN doc ra dang chon ma khong
+        chuyen dong".
+      */}
+      <svg
+        className="nav-vach-tracer"
+        viewBox={`0 0 ${o.w} ${o.h}`}
+        width="100%"
+        height="100%"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <rect
+          className="nav-vach-tracer-stroke"
+          x={NAV_TRACER_INSET}
+          y={NAV_TRACER_INSET}
+          width={Math.max(0, o.w - NAV_TRACER_INSET * 2)}
+          height={Math.max(0, o.h - NAV_TRACER_INSET * 2)}
+          rx={Math.max(0, o.h / 2 - NAV_TRACER_INSET)}
+          ry={Math.max(0, o.h / 2 - NAV_TRACER_INSET)}
+          pathLength={100}
+          fill="none"
+        />
+      </svg>
     </span>
   );
 }
+
+/** Le vao cua stroke tracer so voi mep `.nav-vach` — giu net khong bi
+ * `overflow: hidden` cua `.nav-vach` cat mat mep ngoai. */
+const NAV_TRACER_INSET = 1.5;

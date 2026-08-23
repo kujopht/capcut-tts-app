@@ -375,7 +375,16 @@ export function YouTubeFacadePlayer({
       {/* Chi HIEN o che do toan man hinh (CSS `:fullscreen`) — khong lap lai
           tieu de tap da co o dau trang trong che do thuong. */}
       <p className="yt-cinema-fs-title truncate">{title}</p>
-      <div className="yt-facade">
+      {/*
+        "Dim nhe" luc tam dung (Phan tinh chinh UX): CHI mot filter sang/toi
+        RAT NHE tren CHINH iframe cua Fanfic (`filter: brightness(85%)`,
+        KHONG blur, KHONG che/xoa noi dung) — tao cam giac "da dung hinh"
+        dien anh, khong nham muc dich lam mo/an branding cua YouTube. Da tu
+        choi huong overlay/filter-manh o nhung lan trao doi truoc vi vi pham
+        chinh sach "khong duoc che player" — muc do nay van giu MOI THU
+        trong iframe hoan toan doc/nhin ro duoc, chi la sang do hon 15%.
+      */}
+      <div className={`yt-facade${giaiDoan === "san-sang" && trangThai === "tam-dung" ? " yt-facade-paused" : ""}`}>
         <iframe
           id={iframeId}
           src={`${YOUTUBE_EMBED_ORIGIN}/embed/${videoId}?${params.toString()}`}

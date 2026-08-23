@@ -11,6 +11,12 @@
  *
  * NAM NGOAI khung 16:9 cua iframe — khong bao gio dat de len tren video dang
  * phat, dung yeu cau "khong overlay/che player" cua chinh sach YouTube.
+ *
+ * HIEU UNG "TAM DIEM" LUC TAM DUNG (Phan tinh chinh UX, sau khi tu choi
+ * huong overlay/filter xoa noi dung — xem lich su trao doi): CHI trang tri
+ * CHINH thanh dieu khien nay (glow + nut Play dap nhip), khong dung bat ky
+ * ky thuat nao tac dong len iframe de che/xoa noi dung cua no. Dim nhe iframe
+ * (`filter: brightness(85%)`, KHONG blur) nam o `YouTubeFacadePlayer.tsx`.
  */
 
 import { useState } from "react";
@@ -60,12 +66,20 @@ export function YouTubePlayerControls({
   // sai lech mot nhip truoc khi `onSeekPreview` cua cha kip cap nhat `hienTai`.
   const [dangKeo, setDangKeo] = useState<number | null>(null);
   const dangTai = trangThai === "dang-tai";
+  // Video dang TAM DUNG — day su chu y ve THANH nay bang glow + nut Play dap
+  // nhip, thay vi cham/lam mo noi dung iframe (khong dung overlay/filter xoa
+  // noi dung, chi trang tri UI CUA CHINH Fanfic).
+  const dangTamDung = trangThai === "tam-dung";
 
   return (
-    <div className="yt-controls" role="group" aria-label="Điều khiển phát">
+    <div
+      className={`yt-controls${dangTamDung ? " yt-controls-focal" : ""}`}
+      role="group"
+      aria-label="Điều khiển phát"
+    >
       <button
         type="button"
-        className="yt-controls-btn"
+        className={`yt-controls-btn${dangTamDung ? " yt-controls-btn-pulse" : ""}`}
         onClick={onTogglePlay}
         disabled={dangTai}
         aria-label={

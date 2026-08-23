@@ -251,16 +251,30 @@ class DevApiKhongDuocTuChayJobTest(unittest.TestCase):
 
         goc = pathlib.Path(__file__).resolve().parents[2]
         noi_dung = (goc / "docs" / "DEV_PUBLIC_BACKEND.md").read_text(encoding="utf-8")
+
+        # Phai la mot phan cua VI DU bien moi truong (trong CHINH khoi ```),
+        # khong phai chi nhac ten bien o dau do trong van ban giai thich —
+        # doan van giai thich NGAY DUOI khoi vi du cung nhac lai ten bien nay
+        # trong dau backtick, nen mot phep kiem "gan FAS_ENV bao nhieu ky tu"
+        # tren TOAN VAN BAN se vo tinh khop ca cau giai thich do du dong that
+        # trong khoi ``` bi xoa — dung cach tach rieng KHOI ``` chua
+        # `FAS_ENV=development` ra truoc, roi chi kiem trong DUNG khoi do.
+        cac_khoi = noi_dung.split("```")
+        # split("```") tra ve xen ke [ngoai, trong, ngoai, trong, ...] — cac
+        # phan tu CHI SO LE la noi dung nam trong hang rao ```.
+        khoi_vi_du = [
+            k for i, k in enumerate(cac_khoi)
+            if i % 2 == 1 and "FAS_ENV=development" in k
+        ]
+        self.assertEqual(
+            len(khoi_vi_du), 1,
+            "phai co DUNG MOT khoi ``` chua vi du FAS_ENV=development")
         self.assertIn(
-            "FAS_INLINE_WORKER=false", noi_dung,
-            "docs/DEV_PUBLIC_BACKEND.md phai noi ro FAS_INLINE_WORKER=false — "
-            "thieu dong nay la nguyen nhan that cua su co 2026-08-23")
-        # Phai la mot phan cua VI DU bien moi truong (khoi ```), khong phai chi
-        # nhac ten bien o dau do trong van ban giai thich.
-        i = noi_dung.find("FAS_ENV=development")
-        self.assertGreater(i, 0)
-        self.assertIn("FAS_INLINE_WORKER=false", noi_dung[i:i + 200],
-                      "phai nam NGAY canh FAS_ENV trong vi du cau hinh")
+            "FAS_INLINE_WORKER=false", khoi_vi_du[0],
+            "docs/DEV_PUBLIC_BACKEND.md phai noi ro FAS_INLINE_WORKER=false "
+            "NGAY TRONG khoi vi du cau hinh (khong chi trong van ban giai "
+            "thich ben ngoai) — thieu dong nay la nguyen nhan that cua su co "
+            "2026-08-23")
 
 
 if __name__ == "__main__":

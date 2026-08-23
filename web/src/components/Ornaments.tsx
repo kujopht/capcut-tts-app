@@ -255,6 +255,33 @@ export function MotifInkFlourish({ className }: { className?: string }) {
   );
 }
 
+/** Truyện — trang sách hé mở, một nét sáng đi qua giữa. Dùng cho ô trống
+ * "Đang nổi bật" trên trang chủ (xem `KeTrongNoiBat` ở `app/page.tsx`) —
+ * phục hồi từ `feature/fanfic-visual-renaissance-v1`, một hoạ tiết SVG độc
+ * lập, không phụ thuộc gì vào hệ thống Storyworld Portal chưa được phục hồi. */
+export function MotifManuscript({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 160 120"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid slice"
+    >
+      <path
+        d="M80 18 C58 8 30 8 14 16 V96 C30 88 58 88 80 98 C102 88 130 88 146 96 V16 C130 8 102 8 80 18 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeOpacity="0.5"
+        strokeWidth="1.4"
+      />
+      <path d="M80 18 V98" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" />
+      <path d="M26 32 H62 M26 46 H58 M26 60 H62" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.2" />
+      <path d="M98 32 H134 M102 46 H134 M98 60 H130" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 /** Tài khoản (PageHero V2) — mot huy hieu/an chuong nho, kiem che hon cac
  * trang noi dung khac. */
 export function MotifSigil({ className }: { className?: string }) {

@@ -175,10 +175,36 @@ test("ke Animation moi / cong dong TU AN khi rong, khong ve hop rong to", () => 
   const src = home();
   assert.match(src, /animationSeries\.length > 0 \? \(/);
   assert.match(src, /communityPosts\.length > 0 \? \(/);
-  // Rong thi tra `null` (khong ve gi), khong phai mot `EmptyState` day du —
-  // `EmptyState` chi con danh cho ke truyen (ke quan trong nhat).
-  const soLanEmptyState = (src.match(/<EmptyState/g) ?? []).length;
-  assert.equal(soLanEmptyState, 1, "chỉ đúng MỘT EmptyState (ke truyện)");
+  /*
+    Rong thi tra `null` (khong ve gi), khong phai mot `EmptyState` day du.
+    Ke truyen (ke quan trong nhat) TUNG la ngoai le DUY NHAT dung `EmptyState`
+    — phuc hoi 2026-08-23 tu `feature/fanfic-visual-renaissance-v1` thay no
+    bang `KeTrongNoiBat` (o trong co hoa tiet minh hoa, xem `globals.css`
+    `.empty-noibat`), nen gio KHONG con `<EmptyState` nao tren trang chu nua.
+  */
+  assert.equal((src.match(/<EmptyState/g) ?? []).length, 0,
+    "trang chủ không còn dùng EmptyState nữa — ke truyện dùng KeTrongNoiBat");
+  assert.match(src, /<KeTrongNoiBat \/>/, "thiếu ô trống minh hoạ cho kệ truyện");
+});
+
+test("KeTrongNoiBat dung hoa tiet rieng, KHONG dinh vao he thong Storyworld Portal", () => {
+  /*
+    Phuc hoi 2026-08-23: ban goc tren `feature/fanfic-visual-renaissance-v1`
+    dung chung ten class voi The Gioi Cong (tien to "portal-"), nhung The
+    Gioi Cong CHU DINH khong duoc phuc hoi (xem bao cao Phase A). Bai nay
+    khoa lai rang lan phuc hoi nay dung TEN CLASS RIENG, khong vo tinh keo
+    theo phu thuoc nao cua he thong Portal.
+  */
+  const src = home();
+  assert.match(src, /import \{ MotifManuscript, MotifWaveArcs \} from "@\/components\/Ornaments"/);
+  assert.match(src, /className="empty-noibat"/);
+  assert.match(src, /className="empty-noibat-motif"/);
+  assert.match(src, /className="empty-noibat-body"/);
+  assert.ok(!/className="portal-/.test(src), "trang chủ không được dùng class hệ thống Portal");
+
+  const than = rule(".empty-noibat");
+  assert.match(than, /border-radius: var\(--r4\)/);
+  assert.match(than, /display: flex/);
 });
 
 test("khong bia so lieu backend khong ho tro (luot xem/nghe/theo doi gia)", () => {

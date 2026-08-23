@@ -60,8 +60,8 @@ import { useSession } from "@/lib/session";
 import { StoryCard } from "@/components/StoryCard";
 import { Avatar } from "@/components/Avatar";
 import { NovelCover } from "@/components/NovelCover";
-import { MotifWaveArcs } from "@/components/Ornaments";
-import { EmptyState, ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
+import { MotifManuscript, MotifWaveArcs } from "@/components/Ornaments";
+import { ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
 import {
   IconBook,
   IconCompass,
@@ -360,6 +360,35 @@ function KeTrongGon({
   );
 }
 
+/**
+ * O trong minh hoa CHO RIENG ke "Đang nổi bật" — day la ke QUAN TRONG NHAT
+ * cua trang chu nen duoc phep co mot hoa tiet + nut CTA rieng, nhung van nho
+ * hon nhieu so voi `EmptyState` (vien dut, padding 48px) dung chung cho toan
+ * site — xem `.empty-noibat` o `globals.css`.
+ *
+ * Phuc hoi tu `feature/fanfic-visual-renaissance-v1` (dat ten class rieng,
+ * KHONG dung tien to "portal-" cua ban goc — ban goc dung chung he thong
+ * class voi The Gioi Cong, con qua trinh phuc hoi nay CHU DINH khong dong
+ * cham den The Gioi Cong, xem bao cao Phase A).
+ */
+function KeTrongNoiBat() {
+  return (
+    <div className="empty-noibat">
+      <MotifManuscript className="empty-noibat-motif" />
+      <span className="empty-noibat-body">
+        <strong>Thư viện vẫn còn một chỗ trống.</strong>
+        <span className="hint">
+          Chưa có truyện nào được xuất bản — chỗ đầu tiên đang chờ tác giả
+          đầu tiên.
+        </span>
+        <Link className="btn btn-primary btn-sm" href="/write">
+          Viết câu chuyện đầu tiên
+        </Link>
+      </span>
+    </div>
+  );
+}
+
 /** The xem truoc mot bai dang cong dong (Phan 10 dac ta). */
 function TheCongDong({ bai }: { bai: Post }) {
   return (
@@ -492,16 +521,7 @@ export default function HomePage() {
         ) : error ? (
           <ErrorState message={error} onRetry={reload} />
         ) : novels.length === 0 ? (
-          <EmptyState
-            icon="📚"
-            title="Chưa có truyện nào được xuất bản"
-            hint="Khi có tác giả xuất bản truyện đầu tiên, nó sẽ xuất hiện ở đây. Trong lúc chờ, bạn có thể tự viết chương đầu tiên."
-            action={
-              <Link className="btn btn-primary" href="/write">
-                Viết truyện đầu tiên
-              </Link>
-            }
-          />
+          <KeTrongNoiBat />
         ) : novels.length === 1 ? (
           // CHI mot truyen trong ca kho: mot the noi bat gioi han rong, KHONG
           // phai mot hero choan nua trang cho mot du lieu duy nhat.

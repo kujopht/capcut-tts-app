@@ -219,6 +219,138 @@ class TestR2AdapterGuards(unittest.TestCase):
         self.assertIn("boto3", str(ctx.exception))
 
 
+class TestR2AdapterProbes(unittest.TestCase):
+    """
+    Bon ham `*_probe` (chi phuc vu `/api/admin/_diag/r2-probe`, su co
+    2026-08-23: PUT bao thanh cong nhung HEAD/GET ngay sau lai bao
+    `NoSuchKey`). Khac `put()`/`get()` binh thuong (vut bo response cua
+    boto3), cac ham nay phai lay duoc METADATA THAT — va KHONG BAO GIO nem
+    loi ra ngoai, ke ca khi object khong ton tai.
+    """
+
+    def _adapter(self):
+        from server.r2_adapter import R2StorageAdapter
+
+        return R2StorageAdapter(R2Settings(
+            account_id="acc123", access_key_id="k", secret_access_key="s",
+            bucket="qa-bucket"))
+
+    def test_put_probe_tra_ve_metadata_that(self):
+        adapter = self._adapter()
+
+        class FakeClient:
+            def put_object(self, **kw):
+                return {"ETag": '"abc123"',
+                       "ResponseMetadata": {"HTTPStatusCode": 200, "RequestId": "req-1"}}
+
+        adapter._client = FakeClient()
+        r = adapter.put_probe("k.txt", b"data")
+        self.assertEqual(r["http_status"], 200)
+        self.assertEqual(r["request_id"], "req-1")
+        self.assertEqual(r["etag"], '"abc123"')
+
+    def test_head_probe_khong_ton_tai_khong_nem_loi(self):
+        adapter = self._adapter()
+
+        class LoiKhongTonTai(Exception):
+            def __init__(self):
+                super().__init__("khong tim thay")
+                self.response = {
+                    "Error": {"Code": "NoSuchKey",
+                             "Message": "The specified key does not exist."},
+                    "ResponseMetadata": {"HTTPStatusCode": 404, "RequestId": "req-2"},
+                }
+
+        class FakeClient:
+            def head_object(self, **kw):
+                raise LoiKhongTonTai()
+
+        adapter._client = FakeClient()
+        r = adapter.head_probe("k.txt")
+        self.assertFalse(r["tim_thay"])
+        self.assertEqual(r["ma_loi"], "NoSuchKey")
+        self.assertEqual(r["http_status"], 404)
+        self.assertEqual(r["request_id"], "req-2")
+
+    def test_head_probe_ton_tai_tra_metadata(self):
+        adapter = self._adapter()
+
+        class FakeClient:
+            def head_object(self, **kw):
+                return {"ETag": '"xyz"', "ContentLength": 1234,
+                       "ResponseMetadata": {"HTTPStatusCode": 200, "RequestId": "req-3"}}
+
+        adapter._client = FakeClient()
+        r = adapter.head_probe("k.txt")
+        self.assertTrue(r["tim_thay"])
+        self.assertEqual(r["content_length"], 1234)
+        self.assertEqual(r["etag"], '"xyz"')
+
+    def test_get_probe_doc_dung_so_byte(self):
+        adapter = self._adapter()
+
+        class FakeBody:
+            def read(self):
+                return b"hello world"
+
+        class FakeClient:
+            def get_object(self, **kw):
+                return {"Body": FakeBody(), "ETag": '"e"',
+                       "ResponseMetadata": {"HTTPStatusCode": 200, "RequestId": "req-4"}}
+
+        adapter._client = FakeClient()
+        r = adapter.get_probe("k.txt")
+        self.assertTrue(r["tim_thay"])
+        self.assertEqual(r["so_byte_doc_duoc"], 11)
+
+    def test_list_probe_tra_danh_sach_khoa(self):
+        adapter = self._adapter()
+
+        class FakeClient:
+            def list_objects_v2(self, **kw):
+                return {"KeyCount": 2, "Contents": [{"Key": "a"}, {"Key": "b"}],
+                       "ResponseMetadata": {"HTTPStatusCode": 200, "RequestId": "req-5"}}
+
+        adapter._client = FakeClient()
+        r = adapter.list_probe("prefix/")
+        self.assertEqual(r["so_khoa"], 2)
+        self.assertEqual(r["khoa"], ["a", "b"])
+
+    def test_khong_bao_gio_chua_thong_tin_bi_mat(self):
+        """
+        Loi tu boto3 co the mang theo `HTTPHeaders` trong `ResponseMetadata`
+        — voi request da ky SigV4, header do CHUA access key id trong
+        `Authorization`. Dam bao `_loi_thanh_dict` CHI lay nhung truong
+        duoc chon ro rang, khong bao gio ca `ResponseMetadata`/`response` goc.
+        """
+        adapter = self._adapter()
+
+        class LoiCoContextNhay(Exception):
+            def __init__(self):
+                super().__init__("tu choi")
+                self.response = {
+                    "Error": {"Code": "AccessDenied", "Message": "loi"},
+                    "ResponseMetadata": {
+                        "HTTPStatusCode": 403, "RequestId": "req-6",
+                        "HTTPHeaders": {
+                            "authorization":
+                                "AWS4-HMAC-SHA256 Credential=BI-MAT-KHONG-DUOC-LO/...",
+                        },
+                    },
+                }
+
+        class FakeClient:
+            def head_object(self, **kw):
+                raise LoiCoContextNhay()
+
+        adapter._client = FakeClient()
+        r = adapter.head_probe("k.txt")
+        self.assertNotIn("HTTPHeaders", r)
+        chuoi = str(r)
+        self.assertNotIn("authorization", chuoi)
+        self.assertNotIn("BI-MAT-KHONG-DUOC-LO", chuoi)
+
+
 class TestProfileFromRow(unittest.TestCase):
     """
     `_profile_from` (hang `profiles` -> `Profile`) la nguon cho MOI duong doc

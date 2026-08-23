@@ -48,6 +48,7 @@ from server.adapters import (
 )
 from server.account_deletion import AccountDeletionService
 from server.config import get_settings
+from server.r2_adapter import R2StorageAdapter
 from server.creator import (
     AuthorStateError,
     RANK_TIERS,
@@ -4356,6 +4357,94 @@ def _an_toan_song_song(future, mac_dinh, *, nhan: str = "admin"):
         print(f"[{nhan}] mot nhom truy van loi, dung gia tri mac dinh: "
               f"{loc_bo_theo_gia_tri(repr(exc))}")
         return mac_dinh
+
+
+@app.post("/api/admin/_diag/r2-probe")
+def r2_probe(owner: Profile = Depends(owner_profile)) -> Dict[str, Any]:
+    """
+    Chan doan R2 THAT SU (khong qua URL ky, khong qua job TTS) — su co
+    2026-08-23: job TTS bao `completed` nhung HEAD/GET ngay sau do lai bao
+    `NoSuchKey`. Xem docstring `R2StorageAdapter` muc "chan doan" ve ly do
+    can bon ham `*_probe` rieng.
+
+    CHI OWNER, CHI o staging (kiem tra ca hai o day, khong tin API key/role
+    duoc cap dung ben ngoai): day la duong ghi/xoa TRUC TIEP vao R2, tuyet
+    doi khong duoc cham toi R2 production du bang bat ky duong nao.
+
+    KHONG nhan tham so tu request — khoa xac dinh CUNG THOI DIEM goi, ngau
+    nhien, duoi tien to `qa-r2-probe/`. Khong co duong nao de goi ghi de/xoa
+    mot khoa tuy y qua endpoint nay.
+
+    Chay HAI phep thu SONG SONG (chung mot khoang thoi gian cho, khong cong
+    don) de tach adapter R2 khoi duong TTS that:
+      - `tiny`: khoa toi thieu, khong lien quan TTS/audio.
+      - `audio_shaped`: cung KHUON khoa voi audio that
+        (`audio/{owner}/{chapter}/{hash}.mp3`) va kich thuoc du lieu xap xi
+        mot doan audio ngan — de xac nhan hanh vi giong het duong that.
+
+    Xoa CA HAI khoa cua chinh no truoc khi tra ve, ke ca khi mot buoc giua
+    chung nem loi.
+    """
+    if settings.environment.lower() != "staging":
+        raise HTTPException(status.HTTP_404_NOT_FOUND)
+    if not isinstance(storage, R2StorageAdapter):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Backend hien khong dung R2 (STORAGE_BACKEND != r2).")
+
+    diag_id = uuid.uuid4().hex[:16]
+    phep_thu = {
+        "tiny": {
+            "key": f"qa-r2-probe/{diag_id}.txt",
+            "body": f"r2 probe {diag_id}".encode("utf-8"),
+            "content_type": "text/plain",
+        },
+        "audio_shaped": {
+            "key": f"audio/qa-r2-probe/{diag_id}/deadbeefcafefeed.mp3",
+            # Kich thuoc xap xi mot doan audio Edge TTS ngan — KHONG phai
+            # MP3 that, chi de xac nhan hanh vi ghi/doc voi kich thuoc va
+            # tien to khoa GIONG HET duong TTS that.
+            "body": b"\x00" * 24_000,
+            "content_type": "audio/mpeg",
+        },
+    }
+
+    ket_qua: Dict[str, Any] = {
+        "bucket": storage._bucket,  # dinh danh, KHONG bi mat (xem quy uoc BAO_CAO_STAGING.md)
+        "diag_id": diag_id,
+        "phep_thu": {},
+    }
+    try:
+        for ten, cfg in phep_thu.items():
+            khoa = cfg["key"]
+            nhanh: Dict[str, Any] = {"key": khoa, "byte_length": len(cfg["body"])}
+            try:
+                nhanh["put"] = storage.put_probe(khoa, cfg["body"], cfg["content_type"])
+                nhanh["put_loi"] = None
+            except Exception as exc:
+                nhanh["put"] = None
+                nhanh["put_loi"] = f"{type(exc).__name__}: {loc_bo_theo_gia_tri(str(exc))}"
+            nhanh["head_ngay"] = storage.head_probe(khoa)
+            nhanh["get_ngay"] = storage.get_probe(khoa)
+            nhanh["list_ngay"] = storage.list_probe(khoa)
+            nhanh["head_tre"] = []
+            ket_qua["phep_thu"][ten] = nhanh
+
+        t0 = time.monotonic()
+        for moc_giay in (1, 3, 10, 30):
+            time.sleep(max(0.0, moc_giay - (time.monotonic() - t0)))
+            for ten in phep_thu:
+                khoa = phep_thu[ten]["key"]
+                ket_qua["phep_thu"][ten]["head_tre"].append({
+                    "moc_giay": moc_giay,
+                    **storage.head_probe(khoa),
+                })
+        return ket_qua
+    finally:
+        for cfg in phep_thu.values():
+            try:
+                storage.delete(cfg["key"])
+            except Exception:
+                pass
 
 
 @app.get("/api/admin/overview")

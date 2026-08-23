@@ -356,6 +356,16 @@ test("MOI chuyen dong moi deu tat khi nguoi dung chon giam chuyen dong", () => {
   assert.match(than, /\.nav-vach \{ transition: none; \}/);
 });
 
+test(".sao-tinh phai duoc an rieng duoi giam chuyen dong, khong the dua vao quy tac chung", () => {
+  // .sao-tinh KHONG co `opacity` o luat co so (chi dat qua keyframe sao-nhay),
+  // khac voi .dom/.la-troi/.vet-gio/.chim deu co san opacity: 0 o luat co so.
+  // Quy tac chung (rut animation-duration ve gan 0, khong fill-mode forwards)
+  // se lam no lui ve opacity: 1 mac dinh — mot cham sang co dinh het co thay
+  // vi bau troi tinh mo dan.
+  const than = khoi(css(), "@media (prefers-reduced-motion: reduce)");
+  assert.match(than, /\.sao-tinh \{ display: none; \}/);
+});
+
 test("chuc nang KHONG doi khi giam chuyen dong", () => {
   /*
     Chi chuyen dong bi tat. Neu khoi giam chuyen dong an mot phan tu nao mang
@@ -365,7 +375,7 @@ test("chuc nang KHONG doi khi giam chuyen dong", () => {
   for (const m of than.matchAll(/^\s*([^{@}\n][^{\n]*)\{([^}]*)\}/gm)) {
     if (!/display: none/.test(m[2])) continue;
     const sel = m[1].trim();
-    assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after|nav-vach-streak|nav-vach-tracer/.test(sel),
+    assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after|nav-vach-streak|nav-vach-tracer|sao-tinh/.test(sel),
       `${sel} bị ẩn khi giảm chuyển động — có thể đang giấu nội dung`);
   }
 });

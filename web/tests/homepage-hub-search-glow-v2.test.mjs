@@ -54,6 +54,17 @@ test("o tim go gon: IDLE tinh, HOVER chi sang vien (khong them glow/animation)",
   assert.ok(!/box-shadow:/.test(hover), "HOVER thêm box-shadow — spec yêu cầu CHỈ viền sáng hơn");
 });
 
+test("lop nen phia sau o tim mo bang fade-in, KHONG dot ngot — nhung o tim (.tim-hop) van tinh", () => {
+  // Truoc day ca lop nen lan hop tim mo/dong dot ngot (khong animation/transition
+  // nao), khong khop ngon ngu chuyen dong con lai cua trang (modal khac deu co
+  // fade-in/modal-in). Chi sua LOP NEN — o tim van phai giu nguyen tinh gian,
+  // dung y "Navigation Motion Correction v1" o test ngay ben duoi.
+  const lop = codeOnly(rule(".tim-lop"));
+  assert.match(lop, /animation: fade-in/);
+  const hop = codeOnly(rule(".tim-hop"));
+  assert.ok(!/animation:/.test(hop), "o tim (.tim-hop) khong duoc them animation");
+});
+
 test("hop tim mo rong (FOCUS): quang TINH, khong keyframe, co vien accessible", () => {
   const hop = codeOnly(rule(".tim-hop"));
   assert.match(hop, /box-shadow:/);

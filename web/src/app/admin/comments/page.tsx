@@ -18,7 +18,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, adminSocial, type AdminComment } from "@/lib/api";
-import { formatDate } from "@/components/ui";
+import { ConfirmDialog, formatDate } from "@/components/ui";
 import { DanhSachTrangThai } from "@/components/AdminShell";
 import { dongHo } from "@/lib/time";
 
@@ -42,6 +42,8 @@ export default function AdminCommentsPage() {
   const [tong, setTong] = useState(0);
   const [loi, setLoi] = useState("");
   const [dangLam, setDangLam] = useState("");
+  const [hoiGo, setHoiGo] = useState<AdminComment | null>(null);
+  const [ghiChu, setGhiChu] = useState("");
 
   const tai = useCallback(() => {
     setLoi("");
@@ -63,16 +65,12 @@ export default function AdminCommentsPage() {
     queueMicrotask(tai);
   }, [tai]);
 
-  const doiTrangThai = useCallback(
+  const phucHoi = useCallback(
     async (bl: AdminComment) => {
       setDangLam(bl.comment_id);
       setLoi("");
       try {
-        if (bl.state === "removed") {
-          await adminSocial.restoreComment(bl.comment_id);
-        } else {
-          await adminSocial.removeComment(bl.comment_id, "Vi phạm quy định");
-        }
+        await adminSocial.restoreComment(bl.comment_id);
         tai();
       } catch (e) {
         setLoi(e instanceof ApiError ? e.message : "Không thực hiện được.");
@@ -82,6 +80,23 @@ export default function AdminCommentsPage() {
     },
     [tai],
   );
+
+  const goBinhLuan = useCallback(async () => {
+    if (!hoiGo) return;
+    const id = hoiGo.comment_id;
+    setDangLam(id);
+    setLoi("");
+    try {
+      await adminSocial.removeComment(id, ghiChu.trim() || "Vi phạm quy định");
+      setHoiGo(null);
+      setGhiChu("");
+      tai();
+    } catch (e) {
+      setLoi(e instanceof ApiError ? e.message : "Không thực hiện được.");
+    } finally {
+      setDangLam("");
+    }
+  }, [hoiGo, ghiChu, tai]);
 
   return (
     <div className="stack">
@@ -155,7 +170,14 @@ export default function AdminCommentsPage() {
                     type="button"
                     className="btn btn-sm"
                     disabled={dangLam === bl.comment_id}
-                    onClick={() => doiTrangThai(bl)}
+                    onClick={() => {
+                      if (daGo) {
+                        phucHoi(bl);
+                      } else {
+                        setGhiChu("");
+                        setHoiGo(bl);
+                      }
+                    }}
                   >
                     {daGo ? "Phục hồi" : "Gỡ"}
                   </button>
@@ -170,6 +192,34 @@ export default function AdminCommentsPage() {
           })}
         </div>
       </DanhSachTrangThai>
+
+      {hoiGo ? (
+        <ConfirmDialog
+          open
+          title="Gỡ bình luận này?"
+          body={
+            <span className="stack-2">
+              <span>
+                Bình luận sẽ ẩn khỏi công khai ngay lập tức. Có thể phục hồi
+                sau bằng nút &quot;Phục hồi&quot; ngay tại đây.
+              </span>
+              <textarea
+                className="textarea textarea-sm"
+                placeholder="Lý do (ghi vào nhật ký kiểm duyệt)"
+                value={ghiChu}
+                onChange={(e) => setGhiChu(e.target.value)}
+                maxLength={1000}
+                rows={2}
+              />
+            </span>
+          }
+          confirmLabel="Gỡ"
+          danger
+          busy={dangLam === hoiGo.comment_id}
+          onConfirm={goBinhLuan}
+          onCancel={() => setHoiGo(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -31,7 +31,7 @@ import {
   adminSocial,
   type ContentReport,
 } from "@/lib/api";
-import { formatDate } from "@/components/ui";
+import { ConfirmDialog, formatDate } from "@/components/ui";
 import { DanhSachTrangThai } from "@/components/AdminShell";
 
 const LOC: ReadonlyArray<{ key: string; nhan: string }> = [
@@ -55,6 +55,8 @@ export default function AdminReportsPage() {
   const [tong, setTong] = useState(0);
   const [loi, setLoi] = useState("");
   const [dangLam, setDangLam] = useState("");
+  const [hoiGo, setHoiGo] = useState<ContentReport | null>(null);
+  const [ghiChu, setGhiChu] = useState("");
 
   const tai = useCallback(() => {
     setLoi("");
@@ -92,6 +94,26 @@ export default function AdminReportsPage() {
     },
     [tai],
   );
+
+  const goNoiDung = useCallback(async () => {
+    if (!hoiGo) return;
+    const { report_id, target_kind, target_id } = hoiGo;
+    setDangLam(report_id);
+    setLoi("");
+    try {
+      const lyDo = ghiChu.trim() || TEN_LY_DO[hoiGo.reason] || hoiGo.reason;
+      await (target_kind === "post"
+        ? adminSocial.removePost(target_id, lyDo)
+        : adminSocial.removeComment(target_id, lyDo));
+      setHoiGo(null);
+      setGhiChu("");
+      tai();
+    } catch (e) {
+      setLoi(e instanceof ApiError ? e.message : "Không thực hiện được.");
+    } finally {
+      setDangLam("");
+    }
+  }, [hoiGo, ghiChu, tai]);
 
   return (
     <div className="stack">
@@ -191,19 +213,10 @@ export default function AdminReportsPage() {
                         type="button"
                         className="btn btn-sm"
                         disabled={dangLam === bc.report_id}
-                        onClick={() =>
-                          lamViec(bc.report_id, () =>
-                            bc.target_kind === "post"
-                              ? adminSocial.removePost(
-                                  bc.target_id,
-                                  TEN_LY_DO[bc.reason] ?? bc.reason,
-                                )
-                              : adminSocial.removeComment(
-                                  bc.target_id,
-                                  TEN_LY_DO[bc.reason] ?? bc.reason,
-                                ),
-                          )
-                        }
+                        onClick={() => {
+                          setGhiChu(TEN_LY_DO[bc.reason] ?? bc.reason);
+                          setHoiGo(bc);
+                        }}
                       >
                         Gỡ nội dung
                       </button>
@@ -258,6 +271,38 @@ export default function AdminReportsPage() {
           })}
         </div>
       </DanhSachTrangThai>
+
+      {hoiGo ? (
+        <ConfirmDialog
+          open
+          title={
+            hoiGo.target_kind === "post"
+              ? "Gỡ bài đăng này?"
+              : "Gỡ bình luận này?"
+          }
+          body={
+            <span className="stack-2">
+              <span>
+                Nội dung sẽ ẩn khỏi công khai ngay lập tức. Có thể phục hồi
+                sau bằng nút &quot;Phục hồi&quot; ngay tại đây.
+              </span>
+              <textarea
+                className="textarea textarea-sm"
+                placeholder="Lý do (ghi vào nhật ký kiểm duyệt)"
+                value={ghiChu}
+                onChange={(e) => setGhiChu(e.target.value)}
+                maxLength={1000}
+                rows={2}
+              />
+            </span>
+          }
+          confirmLabel="Gỡ"
+          danger
+          busy={dangLam === hoiGo.report_id}
+          onConfirm={goNoiDung}
+          onCancel={() => setHoiGo(null)}
+        />
+      ) : null}
     </div>
   );
 }

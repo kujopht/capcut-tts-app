@@ -76,6 +76,7 @@ const postPage = () => read("../src/app/posts/[postId]/page.tsx");
 const tabs = () => read("../src/app/u/[username]/ProfileTabs.tsx");
 const adminReports = () => read("../src/app/admin/reports/page.tsx");
 const adminPosts = () => read("../src/app/admin/posts/page.tsx");
+const adminComments = () => read("../src/app/admin/comments/page.tsx");
 const css = () => read("../src/app/globals.css");
 
 /* ===================================================== lop API va hop dong */
@@ -457,6 +458,21 @@ test("khong co nut xoa that o duong kiem duyet — chi go/phuc hoi", () => {
     assert.ok(!/deletePost|deleteComment/.test(src),
       `${ten} không được xoá thật — gỡ giữ lại bằng chứng`);
     assert.match(src, /restorePost|restoreComment|Phục hồi/);
+  }
+});
+
+test("go noi dung (bai/binh luan/bao cao) phai qua ConfirmDialog, khong bam la go ngay", () => {
+  // Truoc day ca ba trang goi thang API go khi bam nut, khong co buoc xac nhan
+  // nao — khac voi phan con lai cua khu quan tri (tam dung tai khoan, tu choi
+  // don tac gia deu qua ConfirmDialog kem o nhap ly do). Noi dung bien mat
+  // khoi cong khai NGAY LAP TUC khi go (da xac minh qua audit runtime), nen no
+  // van can mot buoc xac nhan du "Phuc hoi" chi la mot cu bam ke ben.
+  for (const [ten, src] of [["posts", adminPosts()],
+                             ["comments", adminComments()],
+                             ["reports", adminReports()]]) {
+    assert.match(src, /import\s*\{[^}]*ConfirmDialog[^}]*\}\s*from\s*"@\/components\/ui"/,
+      `${ten} phải import ConfirmDialog`);
+    assert.match(src, /<ConfirmDialog/, `${ten} phải render ConfirmDialog`);
   }
 });
 

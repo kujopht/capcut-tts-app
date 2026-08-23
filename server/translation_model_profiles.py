@@ -113,6 +113,47 @@ CEREBRAS_MODEL_PROFILES: Dict[str, ModelProfile] = {
         }),
 }
 
+#: Model Pollinations.ai curated — MOT credential (`POLLINATIONS_API_KEY`),
+#: nhieu model, cung mau voi `GROQ_MODEL_PROFILES`. Khoa (`key`) la phan sau
+#: cua provider_id (`pollinations_{key}`).
+#:
+#: NGUON: phuc hoi tu cong viec tien-reimage (commit 5137ec0/8672550/2ed65fe,
+#: 2026-08-15) va viet lai NATIVE cho kien truc main hien tai. Benchmark THAT
+#: kem theo cong viec do (`docs/reports/pollinations-benchmark-summary.md`
+#: tren nhanh `feature/pollinations-translation`) da do bang API that:
+#: deepseek / deepseek-pro / kimi / glm deu dich thanh cong VA giu dung quy
+#: uoc phien am Han Viet cua nen tang ("Tieu Viem" cho 萧炎, "Duoc Lao" cho
+#: 药老) — khop fixture san co trong `test_translation_provider_registry.py`.
+#:
+#: `command-a-plus` CO TIEP CAN DUOC nhung DA BI LOAI KHOI danh sach nay MOT
+#: CACH CO Y: cung benchmark do ghi nhan no dung pinyin/La-tinh thay vi Han
+#: Viet ("Xiao Yan" thay vi "Tieu Viem") va dich SAI ten rieng ("Van Du" thay
+#: vi "Van Van", "thanh U Tan" thay vi "O Than"). Day la lech quy uoc dat ten
+#: co the do duoc, khong phai so thich — them lai chi khi co benchmark MOI
+#: chung minh da sua.
+#:
+#: `extra_payload` de RONG co y: khac Groq/Cerebras (tham so
+#: `reasoning_effort`/`max_completion_tokens` da doi chieu tai lieu nha cung
+#: cap), CHUA co tai lieu nao xac minh Pollinations ho tro tham so nao ngoai
+#: chuan OpenAI chat completions. Nguyen tac cua file nay (xem docstring dau
+#: file) la CHI gui tham so DA XAC MINH — gui tham so doan la gui sai, khong
+#: phai vo hai. Do la ly do KHONG chep `max_tokens` tu bat ky ho so khac sang.
+POLLINATIONS_MODEL_PROFILES: Dict[str, ModelProfile] = {
+    "deepseek": ModelProfile(
+        key="deepseek", model_id="deepseek",
+        display_name="DeepSeek", quality_hint="cân bằng"),
+    "deepseek_pro": ModelProfile(
+        key="deepseek_pro", model_id="deepseek-pro",
+        display_name="DeepSeek Pro", quality_hint="chất lượng cao"),
+    "kimi": ModelProfile(
+        key="kimi", model_id="kimi",
+        display_name="Kimi", quality_hint="chậm hơn"),
+    "glm": ModelProfile(
+        key="glm", model_id="glm",
+        display_name="GLM", quality_hint="cân bằng"),
+}
+
+
 #: Dinh tuyen vai tro TU DONG (yeu cau 3D) — (che_do, vai_tro) -> THU TU khoa
 #: model Groq de thu. CHI liet ke to hop THAT SU xay ra
 #: (`translation_service._VAI_TRO_THEO_CHE_DO`: NHANH chi co "translator";

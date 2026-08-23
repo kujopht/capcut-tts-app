@@ -4415,7 +4415,15 @@ body.co-mini { padding-bottom: 74px; }
   .canh-troi { display: none; }
   /* Moi hieu ung khong khi — dom, la, vet gio, chim, sao tinh, sao bang, canh
      hoa — deu nam TRONG , nen mot dong nay tat het. Them mot lop
-     khong khi o NGOAI phan tu do la tu tao ra mot cho quen tat. */
+     khong khi o NGOAI phan tu do la tu tao ra mot cho quen tat.
+
+     Rieng `.sao-tinh` phai KHAI RO: no khong co `opacity` nen o luat co so
+     (chi dat qua keyframe `sao-nhay`), nen khi hoat hinh bi rut ve gan-0s ma
+     khong co `fill-mode: forwards`, no khong lui ve mo nhu bon anh em con lai
+     (deu co san `opacity: 0` o luat co so) — no lui ve `opacity: 1` mac dinh
+     cua trinh duyet, thanh mot cham sang co dinh het co thay vi bau troi tinh
+     mo dan. */
+  .sao-tinh { display: none; }
   .btn-primary::after { display: none; }
   .play-btn.is-playing::after { animation: none; }
 
@@ -4973,6 +4981,14 @@ body.co-mini { padding-bottom: 74px; }
   background: #05070fb8;
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
+  /* Cung keyframe fade-in dung cho `.modal-backdrop` — lop nen truoc day mo
+     dot ngot (animation: none), khong khop ngon ngu chuyen dong con lai cua
+     trang. CHI ap dung cho lop nen; `.tim-hop` (o tim) CO CHU DICH khong
+     animation — xem test "hop tim mo rong (FOCUS)" o
+     homepage-hub-search-glow-v2.test.mjs, di lai tu lan sua "Navigation
+     Motion Correction v1" khi mot khung nang luong xoay lien tuc quanh o tim
+     bi go bo theo yeu cau nguoi dung. */
+  animation: fade-in 0.16s var(--ease);
 }
 .tim-hop {
   position: relative;

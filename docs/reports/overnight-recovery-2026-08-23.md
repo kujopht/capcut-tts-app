@@ -345,3 +345,70 @@ race test, unrelated to this PR's diff.
 
 **All 5 PRs are open, CI-green, and ready for human review/merge:**
 #32, #33, #34, #35, #36. None merged automatically, per instructions.
+
+## Merge + kiểm chứng cuối cùng (sáng 2026-08-23)
+
+Đọc lại độc lập cả 5 diff (không dựa vào tóm tắt lúc viết) trước khi merge —
+xác nhận không có file trùng giữa 5 PR nên thứ tự merge không tạo xung đột,
+repo dùng merge commit (không squash). Merge theo đúng thứ tự rủi ro tăng dần:
+
+| PR | Merge commit |
+|---|---|
+| #32 | `52d206f` |
+| #33 | `bb3cf9a` |
+| #34 | `e081ccf` |
+| #35 | `73ecc1a` |
+| #36 | `05fa4b0` (HEAD `main` cuối cùng) |
+
+CI trên các merge commit trung gian bị **cancelled** — bình thường, do mỗi lần
+`main` di chuyển thì CI của commit trước bị GitHub huỷ theo concurrency group.
+CI trên trạng thái **kết hợp cuối cùng** (`05fa4b0`): **completed/success**.
+
+### Cổng chất lượng đầy đủ, chạy lại TRÊN `main` đã kéo về
+
+| Lệnh | Kết quả |
+|---|---|
+| Backend `unittest discover` | **2677 OK** (1 skipped) |
+| Desktop `compileall` + `unittest discover` | OK / **372 OK** |
+| `npm test` | **809 test, 803 pass, 0 fail, 6 skipped** |
+| `npm run typecheck` | sạch |
+| `npm run lint` | 0 error (2 warning cũ, không đổi) |
+| `npm run build` | thành công |
+
+`main` sạch, fast-forward `edb7f0c → 05fa4b0`, không có gì phải rebase (0 file
+trùng giữa các nhánh).
+
+## Canary Phase D chạy trên STAGING THẬT
+
+URL do người dùng xác nhận: `https://fas-staging-api-free.onrender.com` /
+`https://fas-staging-web-free.onrender.com` (khớp `deploy/render.free.yaml`,
+"Live" theo `docs/HANDOFF.md`).
+
+**Kết quả: 2 lỗi THẬT, cùng MỘT nguyên nhân gốc.**
+
+`/api/ready` → 503, `metadata.dat=false, loai_loi=NotFoundError`. Tạo chương
+sau khi tạo truyện thành công → **404**. Bắt được nguyên văn thông điệp lỗi
+qua một probe độc lập, tự dọn:
+
+> `"Database reads limit for the current billing cycle has been exceeded.
+> Please upgrade to a higher plan or update your budget cap."`
+
+**Đây là hạn mức ĐỌC của Appwrite staging đã hết trong chu kỳ tính phí —
+KHÔNG phải lỗi code.** Giải thích được TOÀN BỘ triệu chứng: `metadata` ở
+`/api/ready` gọi `list_jobs_by_status` (một phép ĐỌC) → fail; `owned_novel()`
+trong tạo chương cũng là ĐỌC → fail, bị map nhầm thành 404; `GET
+/api/novels?mine=true` cũng ĐỌC → fail nhưng rò ra thành 500 trần (route đó
+không bọc `NotFoundError` như hai route kia — lỗ hổng chất lượng phụ đáng ghi
+nhận, không khẩn). GHI (đăng ký, đăng nhập, tạo truyện) vẫn thành công vì đi
+qua hạn mức khác. Truyện vừa tạo bị 404 NGAY LẬP TỨC (+0s) — không phải trễ
+lan truyền, mà vì MỌI lệnh đọc kế tiếp đều bị chặn ở tầng billing.
+
+**Hậu quả dữ liệu, báo trung thực:** lượt canary gốc bị crash TRƯỚC khi ghi
+novel vào `ids` (lỗi có trước trong `buoc_noi_dung`, không phải do PR nào vừa
+merge) → 1 truyện `[SMOKE]` mồ côi không dọn được. Probe chẩn đoán của tôi
+(1 tài khoản + 1 truyện `[DIAG]`, tự dọn trong `finally`) cũng KHÔNG dọn được
+vì chính lệnh DELETE cũng cần đọc trước — cùng lỗi hạn mức. Đã dừng, không
+thử lại thêm (mọi lần thử tiếp theo sẽ fail giống hệt). `staging.fanfic.world`
+là môi trường 100% dữ liệu giả theo tài liệu sẵn có, nên đây là rác đã biết
+loại, không phải rò rỉ dữ liệu thật — nhưng cần dọn thủ công khi có quyền
+Appwrite, lọc theo tiêu đề `[SMOKE]%` / `[DIAG]%` và email `%@example.test`.

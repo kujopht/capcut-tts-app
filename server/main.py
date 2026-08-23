@@ -208,6 +208,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(AppwriteUnavailableError)
+def _appwrite_unavailable_handler(request: Request,
+                                  exc: AppwriteUnavailableError) -> Response:
+    """
+    LUOI AN TOAN CHUNG cho `AppwriteUnavailableError` (ha tang TAM THOI —
+    mat mang hoac het han muc/rate limit, KHONG PHAI ban ghi thieu that).
+
+    Nhieu route da tu bat loi nay va tra 503 (xem cac route dang nhap/OAuth/
+    xoa tai khoan) — handler nay KHONG thay the chung (try/except trong THAN
+    route luon chay TRUOC, chan loi truoc khi no toi duoc day). No la luoi
+    du phong cho MOI route KHAC chua tung nghi toi truong hop nay, vi
+    `appwrite_store.py::_call()` co the nem loi nay tu BAT KY thao tac doc
+    nao — that tren staging (2026-08-23): `create_chapter` goi
+    `store.owned_novel()` chi bat `NotFoundError`/`PermissionDenied`, nen
+    mot su co het han muc se roi tu do thanh 500 chung chung neu khong co
+    luoi nay, thay vi 503 dung nghia.
+
+    Header `X-Error-Code` la MA ON DINH de cong cu giam sat/canary phan biet
+    "ha tang tam thoi, thu lai duoc" voi cac 503 khac ma khong phai doc
+    (hoac dich) chuoi thong diep tieng Viet.
+    """
+    return Response(
+        content=json.dumps({"detail": str(exc)}, ensure_ascii=False),
+        media_type="application/json",
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        headers={"X-Error-Code": "appwrite_unavailable"},
+    )
+
+
 identity = build_identity(settings)
 storage = build_storage(settings)
 store = build_metadata_store(settings)

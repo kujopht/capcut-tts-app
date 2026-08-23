@@ -1470,7 +1470,12 @@ main { overflow-x: clip; }
   moi noi khac trong san pham.
 
   Y NGHIA: "cong dang toi da di chuyen sang mot the gioi khac" — mot tia sang
-  chay qua vien roi tat, KHONG phai mot vong xoay vinh vien.
+  chay qua vien roi tat. Day la tin hieu "VUA DEN" (mot lan); tin hieu "DANG O
+  DAY" (lien tuc, suot luc con chon) la `.nav-vach-tracer-stroke` ben duoi —
+  hai hieu ung khac muc dich, cung ton tai chu khong doi lap nhau (phuc hoi
+  2026-08-23 tu `feature/fanfic-visual-renaissance-v1`, vong xoay lien tuc
+  tung bi bo tren nhanh chinh vi mot lan hieu nham yeu cau THEM MOI cho o tim
+  kiem, khong lien quan gi den o dieu huong nay).
 */
 .nav-vach-streak {
   position: absolute;
@@ -1478,6 +1483,31 @@ main { overflow-x: clip; }
   border-radius: inherit;
   background: linear-gradient(100deg, transparent, #ffffffb0, transparent);
   animation: sheen 480ms var(--ease) 1;
+}
+
+/*
+  Tracer vien dieu huong — mot doan sang NGAN (~14% chu vi) chay VONG QUANH
+  o pill dang chon, LIEN TUC suot luc con o do (khac han `.nav-vach-streak`
+  o tren, chay MOT LAN roi tat). Phuc hoi tu `feature/fanfic-visual-renaissance-v1`
+  (V7) — xem `NavIndicator.tsx` cho ly do dung SVG `stroke-dasharray` +
+  `pathLength` thay vi ban dau cua nhanh do (`conic-gradient` xoay + mask,
+  bo vi mot loi rieng khong lien quan den chinh ky thuat).
+*/
+.nav-vach-tracer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.nav-vach-tracer-stroke {
+  stroke: var(--sac-1, var(--brand));
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-dasharray: 14 86;
+  animation: nav-tracer-dash 5.4s linear infinite;
+  /* `rx`/`ry` doi theo `o.h` (JS) khi be rong/cao muc doi — khong can
+     transition rieng, vi `.nav-vach` da chuyen dong CHAM hon (420-520ms)
+     nhieu so voi tan so ve lai cua SVG (moi khung hinh theo `useLayoutEffect`
+     cua chinh no), nen mat khong thay giat. */
 }
 
 /*
@@ -2662,6 +2692,10 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 /* Vet sang chay ngang mot lan — dung cho thanh tien do DANG chay, de phan
    biet "dang lam" voi "dung o 40% vi hong". */
 @keyframes sheen    { from { transform: translateX(-100%); } to { transform: translateX(280%); } }
+/* Tracer vien dieu huong (`.nav-vach-tracer-stroke`) — `pathLength={100}` o
+   SVG chuan hoa don vi stroke ve %, nen -100 la DUNG MOT VONG chu vi du o
+   rong hay hep. */
+@keyframes nav-tracer-dash { to { stroke-dashoffset: -100; } }
 
 /*
   Khoi noi dung hien len khi trang nap, lech nhau mot chut de mat di tu tren
@@ -4337,6 +4371,12 @@ body.co-mini { padding-bottom: 74px; }
      giua duong (dung ly do da ghi o dau khoi nay cho `.progress-bar::after`) —
      an han di. */
   .nav-vach-streak { display: none; }
+  /* Tracer vien dieu huong: an han di, KHONG dung o mot vi tri giua duong
+     (`animation: none` de lai stroke dung yen o mot cung nua-sang-nua-toi
+     tuy tien — doc ra nhu loi ve hon la "dang chon"). Vien tinh + nen cua
+     `.nav-vach` da du de bao "dang chon" ma khong can chuyen dong nao them —
+     dung y "reduced-motion fallback phai VAN doc ra dang chon". */
+  .nav-vach-tracer { display: none; }
 
   /* Nhip tho cua nen trang chu: BO han. */
   .page-bg-lop[data-bg="home"]::before { animation: none; }

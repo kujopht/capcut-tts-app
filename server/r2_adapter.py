@@ -173,6 +173,13 @@ class R2StorageAdapter:
         response = getattr(exc, "response", None) or {}
         error = response.get("Error", {}) if isinstance(response, dict) else {}
         meta = response.get("ResponseMetadata", {}) if isinstance(response, dict) else {}
+        # botocore luon dinh dang hai truong nay la dict — nhung "khong bao
+        # gio nem loi" phai dung ke ca voi mot response di dang bat thuong
+        # (vd `Error` la chuoi), khong chi voi hinh dang binh thuong.
+        if not isinstance(error, dict):
+            error = {}
+        if not isinstance(meta, dict):
+            meta = {}
         return {
             "tim_thay": False,
             "http_status": meta.get("HTTPStatusCode"),

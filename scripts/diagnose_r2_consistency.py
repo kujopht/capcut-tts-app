@@ -149,9 +149,10 @@ def chay(api: str, *, job_timeout: float, so_lan_head_lap_lai: int,
     if ma not in (200, 201):
         bao_cao.ket_luan = f"khong tao duoc truyen chan doan: HTTP {ma}"
         return bao_cao
-    nid = r["novel"]["novel_id"]
 
+    nid = None
     try:
+        nid = r["novel"]["novel_id"]
         ma, r = _goi(client, "POST", "/api/chapters",
                     {"novel_id": nid, "title": "c1",
                      "content": "Chan doan do tre R2. " * 100, "order_index": 0}, tok)
@@ -229,10 +230,11 @@ def chay(api: str, *, job_timeout: float, so_lan_head_lap_lai: int,
                                "truyen ba/cache thay vi mat han")
         return bao_cao
     finally:
-        _, xoa = _goi(client, "DELETE", f"/api/novels/{nid}", None, tok)
-        bao_cao.fixture_da_don = bool(xoa.get("deleted"))
-        removed = xoa.get("removed") or {}
-        bao_cao.objects_xoa_server_side = removed.get("objects")
+        if nid is not None:
+            _, xoa = _goi(client, "DELETE", f"/api/novels/{nid}", None, tok)
+            bao_cao.fixture_da_don = bool(xoa.get("deleted"))
+            removed = xoa.get("removed") or {}
+            bao_cao.objects_xoa_server_side = removed.get("objects")
         client.close()
 
 

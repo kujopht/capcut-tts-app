@@ -37,10 +37,14 @@ xem `docs/DEV_PUBLIC_BACKEND.md`) đã thêm:
 
 ```
 FAS_CORS_ORIGINS=https://staging.fanfic.world
+FAS_WEB_BASE_URL=https://staging.fanfic.world
 ```
 
 Thiếu biến này thì mọi gọi API từ `staging.fanfic.world` bị trình duyệt chặn
 CORS (không phải lỗi ứng dụng — xem `CORSMiddleware` trong `server/main.py`).
+`FAS_WEB_BASE_URL` là gốc duy nhất để backend tạo `success`/`failure` OAuth;
+không đặt biến này thì giá trị mặc định dành cho local
+`http://localhost:3000` sẽ làm Google OAuth trên staging thất bại.
 
 ## Phát hiện khi kiểm thử (đáng chú ý, không phải lỗi ứng dụng)
 

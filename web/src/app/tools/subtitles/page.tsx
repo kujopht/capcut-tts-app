@@ -337,12 +337,16 @@ export default function SubtitleStudioPage() {
 
       <section className="card stack-2">
         <h2 className="section-title">1. Chọn video/audio</h2>
-        <input
-          type="file"
-          accept="video/*,audio/*"
-          onChange={(e) => chonFile(e.target.files?.[0] ?? null)}
-          aria-label="Chọn tệp video hoặc audio"
-        />
+        <label className="btn btn-sm">
+          Chọn tệp
+          <input
+            type="file"
+            accept="video/*,audio/*"
+            className="sr-only"
+            onChange={(e) => chonFile(e.target.files?.[0] ?? null)}
+            aria-label="Chọn tệp video hoặc audio"
+          />
+        </label>
         {tenFile ? (
           <p className="hint">
             {tenFile} · {formatBytesGon(kichThuoc)} · {loaiFile}

@@ -246,6 +246,14 @@ test("breadcrumb mo rong vung bam bang ::after, khong bang padding", () => {
   assert.match(rule(".crumb"), /min-width:\s*44px/);
 });
 
+test("breadcrumb tu mang bong chu, khong dua vao vi tri long trong .page", () => {
+  // `.crumb` nam trong `<nav className="reader-crumb">`, la CHAU chu khong
+  // phai CON TRUC TIEP cua `.page` — cac luat `.page > .hint` o tren khong
+  // voi toi no, nen chu se gan nhu bien mat tren nen sang (vd `/novels/[id]`)
+  // neu `.crumb` khong tu mang bong rieng.
+  assert.match(rule(".crumb"), /text-shadow/);
+});
+
 /* =====================================================================
    Khong pha thu da co
    ===================================================================== */
@@ -295,4 +303,16 @@ test("publish, unpublish, xoa, doi thu tu va tai MP3 van con", () => {
     assert.ok(a.includes(fn), `mat ${fn}`);
   }
   assert.match(read("../src/components/AudioPlayer.tsx"), /Tải MP3/);
+});
+
+test("Subtitle Studio: nut chon tep video/audio dung .btn, khong phai input tho", () => {
+  // Muc "2. Phu de nguon" tren cung trang da boc input file trong
+  // <label className="btn ..."> de trong giong nut cua he thong thay vi
+  // hop chon tep mac dinh cua trinh duyet. Muc "1. Chon video/audio" phai
+  // theo cung mot khuon, khong de sot lai input tho.
+  const src = read("../src/app/tools/subtitles/page.tsx");
+  const m = src.match(/<label className="btn[^>]*">[\s\S]*?<\/label>/g) ?? [];
+  const boBoc = m.some((block) => /accept="video\/\*,audio\/\*"/.test(block));
+  assert.ok(boBoc, "input chon video/audio phai duoc boc trong <label className=\"btn ...\">");
+  assert.match(src, /accept="video\/\*,audio\/\*"[\s\S]*?className="sr-only"/);
 });

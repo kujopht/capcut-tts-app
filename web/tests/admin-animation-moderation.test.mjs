@@ -62,6 +62,18 @@ test("Trang landing Animation: chi co lien ket, KHONG goi adminApi", () => {
   assert.match(src, /href="\/admin\/animation\/series"/);
 });
 
+test("Trang landing Animation: KHONG con noi Trusted Sources/Import Queue 'chua xay dung'", () => {
+  // Ca hai trang do da xong (207+ bai kiem backend) — de nguyen dong chu cu
+  // se noi sai voi admin rang cong cu chua ton tai.
+  const src = landing();
+  assert.ok(
+    !/Chưa xây dựng/.test(src),
+    "trang landing Animation van con dong chu 'Chưa xây dựng' cho mot muc da xong",
+  );
+  assert.match(src, /href="\/admin\/animation\/sources"/);
+  assert.match(src, /href="\/admin\/animation\/import-queue"/);
+});
+
 // -- danh sach --------------------------------------------------------------
 
 test("Danh sach series: co tim kiem, loc trang thai VA sap xep, deu goi server", () => {

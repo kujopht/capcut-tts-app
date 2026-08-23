@@ -1602,12 +1602,18 @@ main { overflow-x: clip; }
 /* Lien ket breadcrumb: chu nho, mot dong, nhung phai bam duoc bang ngon tay.
    Neu them `padding` thi vung bam to len ma CHIEU CAO CUA HANG cung to theo.
    Nen mo rong bang mot lop `::after` dat tuyet doi: no khong tham gia layout,
-   hang van cao ~20px, ma vung bam thi du 44px. */
+   hang van cao ~20px, ma vung bam thi du 44px.
+
+   `.crumb` cung tu minh mang bong chu (khong dua vao cac luat `.page > .hint`
+   ben tren) vi no luon nam LONG trong `<nav className="reader-crumb">` — sau
+   `.page`, khong phai con truc tiep — nen nhung luat do khong voi toi, va tren
+   nen sang (vd `/novels/[id]`) chu se gan nhu bien mat neu thieu bong. */
 .crumb {
   position: relative;
   display: inline-flex;
   align-items: center;
   min-width: 44px;
+  text-shadow: 0 1px 12px #05070fd9, 0 0 3px #05070f80;
 }
 .crumb::after {
   content: "";

@@ -5,7 +5,7 @@ Kho này chứa **hai sản phẩm** dùng chung một pipeline TTS:
 | Phần | Vị trí | Trạng thái |
 |---|---|---|
 | Ứng dụng desktop Windows (PySide6) | `app.py`, `desktop_app/`, `capcut_tts_api/` | Đang chạy ổn định, đã có installer |
-| Nền tảng web (Next.js + FastAPI) | `web/`, `server/` | Staging (`staging.fanfic.world`) và production (`fanfic.world`) đều đã deploy — production chưa thương mại nhưng LÀ site thật, không phải mặc định coi "chưa deploy" |
+| Nền tảng web (Next.js + FastAPI) | `web/`, `server/` | Production (`fanfic.world`) đã deploy — chưa thương mại nhưng LÀ site thật, không phải mặc định coi "chưa deploy". `staging.fanfic.world` ĐÃ RETIRED (2026-08) — không tự ý dựng lại; xem `docs/DEV_PUBLIC_STAGING.md` |
 
 ## Quy tắc bắt buộc
 
@@ -19,7 +19,9 @@ Kho này chứa **hai sản phẩm** dùng chung một pipeline TTS:
 - **Deploy web PHẢI dùng đúng lệnh tường minh** (sau sự cố 2026-08-18: một lần
   deploy staging bị đẩy nhầm thẳng lên production do gọi lệnh mơ hồ):
   - **Staging**: worker `fanfic-web-staging`, domain `staging.fanfic.world`,
-    cấu hình `web/wrangler.staging.jsonc`, `npm run cf:deploy:staging`.
+    cấu hình `web/wrangler.staging.jsonc`, `npm run cf:deploy:staging`. ĐÃ
+    RETIRED (2026-08) — KHÔNG chạy lệnh này để tự ý dựng lại staging; giữ
+    nguyên cấu hình ở đây chỉ để biết đích cũ nếu cần tra cứu.
   - **Production**: worker `fanfic-web`, domain `fanfic.world`, cấu hình
     `web/wrangler.jsonc`, `npm run cf:deploy:production`.
   - Không có lệnh `cf:deploy` trần — đã bỏ cố ý. Không tự suy ra API base hay

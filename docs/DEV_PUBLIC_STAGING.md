@@ -1,4 +1,8 @@
-# Frontend pre-production công khai (staging.fanfic.world)
+# Frontend pre-production công khai (staging.fanfic.world) — ĐÃ RETIRED
+
+> **`staging.fanfic.world` đã bị gỡ bỏ (2026-08).** Tài liệu này được GIỮ LẠI
+> làm tham khảo lịch sử — không tự ý deploy lại theo hướng dẫn dưới đây trừ
+> khi được yêu cầu tường minh khôi phục staging.
 
 Đây KHÔNG PHẢI production (`fanfic.world`). Mục tiêu: cho phép kiểm thử thủ
 công toàn bộ Fanfic World (Admin V2, Trusted Video Sources, WebSub, ...) trên

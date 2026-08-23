@@ -551,6 +551,13 @@ def buoc_giong_cuc_bo(api: str, tk: Dict[str, Any], ids: Dict[str, str],
               "dung thiet ke khi may tao giong dang tat)")
         return
 
+    # Chuong (7) luon duoc tao du job co thanh cong hay khong (xem
+    # `ids["chapter_cuc_bo"]` o tren) — nhung TRACK thi chi sinh ra khi job
+    # THAT SU hoan tat. Danh dau rieng de doi soat cuoi luot (`mong_track`)
+    # khong dem nham mot track chua bao gio ton tai khi may nay thieu model
+    # giong cuc bo (that bai HOP LE, xem nhanh return o tren).
+    ids["chapter_cuc_bo_co_track"] = True
+
     kt("chia duoc NHIEU doan (duong ghep ffmpeg da chay)",
        (j.get("total_parts") or 0) >= 2, f"total_parts={j.get('total_parts')}")
     kt("chi chay dung mot lan", (j.get("attempts") or 0) == 1,
@@ -985,10 +992,17 @@ def buoc_tao_lai_ban_doc(api: str, tk: Dict[str, Any], ids: Dict[str, str],
     # con lai trong kho duoc bao ra o phan hoi DELETE, va do la con so duy nhat
     # dem duoc mot cach dang tin cay qua HTTP cong khai.
 
+    # Ky vong DONG theo nhung gi that su da tao truoc buoc nay, cung nguyen
+    # tac voi doi soat cuoi luot (`mong`/`mong_track` o `main()`): chuong
+    # chinh + chuong doi chung vua tao o day, CONG chuong giong cuc bo (7)
+    # NEU buoc do da chay den noi tao chuong — bat ke job cua no thanh cong
+    # hay that bai (that bai la HOP LE khi may nay thieu model, xem
+    # `buoc_giong_cuc_bo`), vi chuong van duoc tao truoc khi job chay.
+    mong_chuong = 2 + (1 if ids.get("chapter_cuc_bo") else 0)
     _, r = goi(api, "GET", f"/api/novels/{ids['novel']}", None, tok)
     kt("tao lai KHONG nhan ban chuong",
-       len(r.get("chapters", []) or []) == 2,
-       f"co {len(r.get('chapters', []) or [])} chuong")
+       len(r.get("chapters", []) or []) == mong_chuong,
+       f"co {len(r.get('chapters', []) or [])} chuong, mong {mong_chuong}")
 
 
 def buoc_thu_hoi_va_xuat_ban_lai(api: str, tk: Dict[str, Any],
@@ -1075,10 +1089,13 @@ def don_dep(api: str, tk: Dict[str, Any], ids: Optional[Dict[str, str]]) -> None
         # cong khai: phan hoi DELETE bao ro `tracks`. Chuong CHINH chi tinh
         # neu no thuc su duoc tao (cung dieu kien voi `mong` o tren) — duoc
         # tao audio HAI lan (buoc 4, roi tao lai o 9.7) nhung phai chi con
-        # MOT track; chuong giong cuc bo (8) them mot; chuong doi chung (9.7)
-        # khong co track nao.
+        # MOT track; chuong giong cuc bo (8) them mot NEU job cua no THAT SU
+        # hoan tat (`chapter_cuc_bo_co_track` — chuong van duoc tao ke ca khi
+        # job that bai vi thieu model tren may nay, nhung khong co track nao
+        # sinh ra trong truong hop do); chuong doi chung (9.7) khong co track
+        # nao.
         mong_track = ((1 if ids.get("chapter") else 0)
-                      + (1 if ids.get("chapter_cuc_bo") else 0))
+                      + (1 if ids.get("chapter_cuc_bo_co_track") else 0))
         kt("khong nhan ban track du da tao lai ban doc",
            da_xoa.get("tracks") == mong_track,
            f"mong {mong_track}, xoa {da_xoa.get('tracks')}")

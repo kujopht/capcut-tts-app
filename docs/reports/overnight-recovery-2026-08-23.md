@@ -338,3 +338,10 @@ của PR (`git diff --stat main..test/bulk-import-boundaries` chỉ đổi
 `server/tests/test_bulk_chapter_import.py`). Chạy lại 5 lần trên `main` sạch,
 cục bộ: **5/5 OK** — kết luận đây là flaky test có trước, nhạy cảm thời gian,
 không phải hồi quy do PR. Đã trigger `gh run rerun --failed`.
+
+**Rerun confirmed green** — all 3 checks pass on `test/bulk-import-boundaries`
+after `gh run rerun --failed`. Triage stands: pre-existing flaky worker-death
+race test, unrelated to this PR's diff.
+
+**All 5 PRs are open, CI-green, and ready for human review/merge:**
+#32, #33, #34, #35, #36. None merged automatically, per instructions.

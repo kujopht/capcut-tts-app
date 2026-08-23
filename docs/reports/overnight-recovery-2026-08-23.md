@@ -412,3 +412,88 @@ thử lại thêm (mọi lần thử tiếp theo sẽ fail giống hệt). `stag
 là môi trường 100% dữ liệu giả theo tài liệu sẵn có, nên đây là rác đã biết
 loại, không phải rò rỉ dữ liệu thật — nhưng cần dọn thủ công khi có quyền
 Appwrite, lọc theo tiêu đề `[SMOKE]%` / `[DIAG]%` và email `%@example.test`.
+
+## Phiên tiếp theo (2026-08-23, muộn hơn) — Phục hồi hạ tầng staging
+
+Yêu cầu: loại bỏ blocker hạn mức Appwrite Cloud bằng cách dựng lại staging
+trên hạ tầng Appwrite tự lưu trữ (self-hosted) đã có sẵn, thay vì Appwrite
+Cloud (đang hết hạn mức) hoặc project production `fanfic-world-prod`.
+
+### Phase 1 — Kiểm kê (read-only)
+
+Tìm thấy **VM Appwrite tự lưu trữ đang chạy thật**: `fanfic-appwrite-temp`
+(GCE, `us-central1-c`), Appwrite **1.9.6**, reachable qua
+`https://appwrite-dev.fanfic.world` (HTTP 200, health check xác nhận version
+đúng). Đã có sẵn project cô lập **`fanfic-world-selfhost-dev`** — schema đầy
+đủ (~29+4 collection), smoke-test thật đã chạy (auth/progress/streak/quest/
+leaderboard/idempotency, kể cả unique-index qua Appwrite thật), backup có
+sẵn (`~/appwrite/backup.sh`, `RESTORE.md`). Chi tiết đầy đủ ở
+`docs/reports/appwrite-selfhost-gce-summary.md` (nhánh
+`infra/appwrite-selfhost-gce`, đã push lên origin, KHÔNG PR).
+
+**Không có credential cục bộ trên máy này** (`server/.env.selfhost` không
+tồn tại — máy mới reimage, file này CHƯA BAO GIỜ được commit hay phục hồi,
+đúng thiết kế). Không có `gcloud` CLI, không có Render API access.
+
+### Quyết định: KHÔNG tự đăng ký tài khoản mới trên self-host
+
+Trước khi mutate bất kỳ thứ gì trên hạ tầng self-hosted (kể cả chỉ là tạo
+MỘT tài khoản/project mới, tách biệt hoàn toàn với `fanfic-world-selfhost-dev`
+và `fanfic-world-prod`), đã dừng lại hỏi người dùng — đây là hành động có
+blast radius thật (tạo danh tính mới trên server của họ mà họ không biết),
+không phải việc đọc cấu hình. Người dùng yêu cầu điều tra thêm trước:
+
+1. **Key cũ còn dùng được server-side không?** → CÓ, rất có thể. VM GCE là
+   máy HOÀN TOÀN riêng biệt với Windows bị compromise; key nằm trong Appwrite
+   console (project `fanfic-world-selfhost-dev`) và trong `.env` NGAY TRÊN VM
+   — không nơi nào bị chạm bởi sự cố malware.
+2. **`.env.selfhost` có bị loại khỏi backup có chủ đích không?** → XÁC NHẬN,
+   hai cách: nằm trong `.gitignore`, `git log --all` không có commit nào
+   chứa file này; và manifest backup trước reimage ghi rõ chính sách "secret
+   files rotate fresh, never copy forward".
+3. **Có thực sự cần tạo key mới không?** → Để CHẠY được: không cần. Để AN
+   TOÀN: phát hiện MỚI đáng chú ý — công việc self-host (và
+   `.env.selfhost`) được tạo **2026-08-16**, sáu ngày TRƯỚC sự cố malware
+   ngày 22. File credential-inventory (viết CÙNG NGÀY sự cố, sau khi dọn
+   malware nhưng trước reimage) xác nhận file đó VẪN CÒN trên đĩa lúc đó —
+   nghĩa là nó tồn tại xuyên suốt cửa sổ compromise SYSTEM-level ~4 tiếng.
+   Không có bằng chứng TRỰC TIẾP key này bị đọc, nhưng cùng logic áp dụng
+   cho Google/GitHub/Cloudflare trước đó: "không tìm thấy bằng chứng" khác
+   "xác nhận không bị chạm". Đã thêm vào danh sách nên xoay vòng.
+4. **Scope tối thiểu nếu tạo key mới**: chỉ cho schema:
+   `databases.*`, `collections.*`, `attributes.*`, `indexes.*`, `documents.*`.
+
+**CHƯA mutate Appwrite, CHƯA đăng ký gì, CHƯA chạm Render.** Đang chờ người
+dùng chọn: tái sử dụng key cũ (tự điền `server/.env.selfhost`) hay xoay
+vòng trước.
+
+### Phase 5 — ĐÃ HOÀN THÀNH ĐỘC LẬP trong lúc chờ
+
+Không cần credential nào — thuần code. → PR **#37**
+(`fix/appwrite-error-classification-and-canary-hardening`).
+
+**Fix 1**: `appwrite_store.py::_call()` từng đổi MỌI status >= 400 thành
+`NotFoundError`. Đã thêm `_la_loi_ha_tang_tam_thoi()` nhận diện đúng cụm từ
+THẬT từ Appwrite ("billing cycle", "usage limit", "rate limit") → đổi thành
+`AppwriteUnavailableError` (503) thay vì `NotFoundError` (404). Thêm
+exception handler TOÀN CỤC trong `main.py` (kèm header `X-Error-Code:
+appwrite_unavailable`) vì `create_chapter` — route THẬT SỰ đã hỏng — chưa
+từng tự bắt riêng lỗi này.
+
+**Fix 2**: `buoc_noi_dung` từng đọc thẳng `r["chapter"]["chapter_id"]` ngay
+sau khi POST thất bại → `KeyError` giữa chừng → `ids=None` → `don_dep` bỏ
+qua hoàn toàn → truyền mồ côi. Đã bọc cả hai lần dereference bằng `kt()`,
+`don_dep` giờ chịu được `ids` chỉ có một phần, và thêm `_don_an_toan()` (gọi
+từ `finally`) đảm bảo lỗi CHÍNH không bao giờ bị lỗi dọn-dẹp đè lên — PHÁT
+HIỆN THẬT khi tự viết test: bản đầu của chính fix này VẪN có lỗ hổng (chỉ
+dựa vào try/except NỘI BỘ của `don_dep`, không bọc lại ở điểm gọi trong
+`finally`) — bài test tự viết bắt được, đã sửa thành hai lớp bảo vệ.
+
+Va chạm với 2 test cấu trúc có sẵn (`test_the_guard_is_not_a_blanket_except`
+— cấm `except Exception` trần trong `main()`, tiền lệ từ MỘT sự cố THẬT
+trước đó cùng hình dạng `KeyError: 'token'`) — tôn trọng nguyên tắc đó bằng
+cách tách logic dọn-an-toàn ra hàm riêng `_don_an_toan()`, không nới lỏng
+test, chỉ cập nhật 2 test kiểm tra chuỗi gọi gián tiếp mới.
+
+21 test mới, backend suite 2698 OK (1 skipped, từ 2677). PR #37 đã mở, CI
+đang chạy.

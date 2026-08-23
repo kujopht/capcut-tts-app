@@ -852,5 +852,120 @@ class HoSoKemQuyenTest(Base):
         self.assertNotIn("is_admin", r.json()["profile"])
 
 
+class R2DiagProbeTest(Base):
+    """
+    `/api/admin/_diag/r2-probe` (su co 2026-08-23: PUT bao thanh cong nhung
+    HEAD/GET ngay sau lai bao NoSuchKey). Ba rao chan PHAI dung dong thoi —
+    day la duong ghi/xoa TRUC TIEP vao R2, tuyet doi khong duoc lo ra o
+    production hay cho ai khac ngoai Owner.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # `owner_profile` doi hoi muc OWNER, khac voi `admin` (chi ADMIN) da
+        # dang ky o `Base.setUp`.
+        self.chu, self.h_chu = self._dang_ky("chu@fanfic.local", "Chủ Hệ Thống")
+        self._dat_vai_tro(owner=[self.chu["user_id"]],
+                          admin=[self.admin["user_id"]])
+
+    def test_khong_dang_nhap_nhan_401(self) -> None:
+        r = self.client.post("/api/admin/_diag/r2-probe")
+        self.assertEqual(r.status_code, 401)
+
+    def test_admin_thuong_khong_phai_owner_nhan_403(self) -> None:
+        r = self.client.post("/api/admin/_diag/r2-probe", headers=self.h_admin)
+        self.assertEqual(r.status_code, 403)
+
+    def test_owner_o_moi_truong_khong_phai_staging_nhan_404(self) -> None:
+        """
+        Rao chan CUNG code, khong phai chi vai tro: du la Owner that, endpoint
+        van tu choi neu `FAS_ENV` khong phai staging — khong bao gio duoc
+        cham toi qua production du bang cach nao.
+        """
+        self._settings_cu2 = server_main.settings
+        server_main.settings = replace(server_main.settings, environment="production")
+        try:
+            r = self.client.post("/api/admin/_diag/r2-probe", headers=self.h_chu)
+            self.assertEqual(r.status_code, 404)
+        finally:
+            server_main.settings = self._settings_cu2
+
+    def test_owner_o_staging_nhung_khong_dung_r2_nhan_400(self) -> None:
+        """MockMetadataStore/backend cuc bo trong test KHONG phai R2 — endpoint
+        phai tu choi ro rang thay vi thu goi thuoc tinh khong ton tai."""
+        self._settings_cu2 = server_main.settings
+        server_main.settings = replace(server_main.settings, environment="staging")
+        try:
+            r = self.client.post("/api/admin/_diag/r2-probe", headers=self.h_chu)
+            self.assertEqual(r.status_code, 400)
+        finally:
+            server_main.settings = self._settings_cu2
+
+    def test_owner_o_staging_voi_r2_chay_duoc_va_tu_don(self) -> None:
+        """Duong vui day du: chay ca hai phep thu, tra ve khong bi mat, va
+        TU XOA ca hai khoa cua chinh no (khong de rac lai trong bucket that)."""
+        from server.config import R2Settings
+        from server.r2_adapter import R2StorageAdapter
+
+        class FakeR2Client:
+            def __init__(self) -> None:
+                self.da_xoa = []
+
+            def put_object(self, Bucket, Key, Body, ContentType):
+                return {"ETag": '"e"',
+                        "ResponseMetadata": {"HTTPStatusCode": 200, "RequestId": "r"}}
+
+            def head_object(self, Bucket, Key):
+                return {"ETag": '"e"', "ContentLength": len(Key),
+                        "ResponseMetadata": {"HTTPStatusCode": 200, "RequestId": "r"}}
+
+            def get_object(self, Bucket, Key):
+                class B:
+                    def read(self_inner):
+                        return b"x"
+                return {"Body": B(), "ETag": '"e"',
+                        "ResponseMetadata": {"HTTPStatusCode": 200, "RequestId": "r"}}
+
+            def list_objects_v2(self, Bucket, Prefix):
+                return {"KeyCount": 1, "Contents": [{"Key": Prefix}],
+                        "ResponseMetadata": {"HTTPStatusCode": 200, "RequestId": "r"}}
+
+            def delete_object(self, Bucket, Key):
+                self.da_xoa.append(Key)
+                return {"ResponseMetadata": {"HTTPStatusCode": 204, "RequestId": "r"}}
+
+            def head_bucket(self, Bucket):
+                return {}
+
+        adapter = R2StorageAdapter(R2Settings(
+            account_id="acc", access_key_id="k", secret_access_key="s",
+            bucket="qa-bucket"))
+        fake_client = FakeR2Client()
+        adapter._client = fake_client
+
+        self._settings_cu2 = server_main.settings
+        self._storage_cu = server_main.storage
+        server_main.settings = replace(server_main.settings, environment="staging")
+        server_main.storage = adapter
+        try:
+            # Endpoint that `time.sleep()` toi 30s de doi cac moc chan doan
+            # tre — gia lap tuc thi de test khong cham.
+            with patch("server.main.time.sleep", return_value=None):
+                r = self.client.post("/api/admin/_diag/r2-probe", headers=self.h_chu)
+            self.assertEqual(r.status_code, 200)
+            body = r.json()
+            self.assertIn("tiny", body["phep_thu"])
+            self.assertIn("audio_shaped", body["phep_thu"])
+            for ten in ("tiny", "audio_shaped"):
+                nhanh = body["phep_thu"][ten]
+                self.assertEqual(nhanh["head_ngay"]["tim_thay"], True)
+                self.assertEqual(len(nhanh["head_tre"]), 4)
+            # Da tu xoa CA HAI khoa cua chinh no.
+            self.assertEqual(len(fake_client.da_xoa), 2)
+        finally:
+            server_main.settings = self._settings_cu2
+            server_main.storage = self._storage_cu
+
+
 if __name__ == "__main__":
     unittest.main()

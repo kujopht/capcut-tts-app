@@ -12,7 +12,7 @@ NGUYEN TAC:
 from __future__ import annotations
 
 from datetime import timezone
-from typing import Any, Iterator, Optional
+from typing import Any, Dict, Iterator, Optional
 
 from server.adapters import NotFoundError, StoredObject
 from server.config import R2Settings
@@ -153,3 +153,87 @@ class R2StorageAdapter:
                 f"Không truy cập được bucket R2 '{self._bucket}': {exc}"
             ) from exc
         return True
+
+    # -- chan doan --------------------------------------------------------
+    #
+    # Bon ham duoi day CHI phuc vu `/api/admin/_diag/r2-probe` (xem
+    # `server/main.py`) — su co 2026-08-23: job TTS bao `completed` (tuc la
+    # `put()` o tren khong nem loi) nhung HEAD/GET ngay sau do bao
+    # `NoSuchKey`. `put()`/`get()` binh thuong VUT BO response cua boto3
+    # (chi tra ve key/bytes), nen khong co cach nao thay duoc ETag/RequestId
+    # that su ma R2 tra ve. Cac ham nay KHONG thay the `put()`/`get()` —
+    # chung ton tai rieng de chan doan, khong bao gio duoc goi tu duong TTS
+    # that.
+    #
+    # KHONG BAO GIO nem loi: moi ket qua (thanh cong lan that bai) deu tra
+    # ve mot dict CHI chua truong khong bi mat (http status, request id,
+    # ETag, ma loi) — khong bao gio chua access key/secret key/URL ky.
+
+    def _loi_thanh_dict(self, exc: Exception) -> Dict[str, Any]:
+        response = getattr(exc, "response", None) or {}
+        error = response.get("Error", {}) if isinstance(response, dict) else {}
+        meta = response.get("ResponseMetadata", {}) if isinstance(response, dict) else {}
+        return {
+            "tim_thay": False,
+            "http_status": meta.get("HTTPStatusCode"),
+            "request_id": meta.get("RequestId"),
+            "ma_loi": error.get("Code") or type(exc).__name__,
+            "thong_diep_loi": error.get("Message"),
+        }
+
+    def put_probe(self, key: str, data: bytes,
+                  content_type: str = "text/plain") -> Dict[str, Any]:
+        """PUT tra ve METADATA THAT cua response, khac `put()` binh thuong
+        (vut bo response, chi tra ve `key`). Nem loi neu PUT that bai — goi
+        nam trong try/except o noi goi, khong nuot loi o day."""
+        resp = self._client.put_object(
+            Bucket=self._bucket, Key=key, Body=data, ContentType=content_type,
+        )
+        meta = resp.get("ResponseMetadata", {})
+        return {
+            "http_status": meta.get("HTTPStatusCode"),
+            "request_id": meta.get("RequestId"),
+            "etag": resp.get("ETag"),
+        }
+
+    def head_probe(self, key: str) -> Dict[str, Any]:
+        try:
+            resp = self._client.head_object(Bucket=self._bucket, Key=key)
+        except Exception as exc:
+            return self._loi_thanh_dict(exc)
+        meta = resp.get("ResponseMetadata", {})
+        return {
+            "tim_thay": True,
+            "http_status": meta.get("HTTPStatusCode"),
+            "request_id": meta.get("RequestId"),
+            "etag": resp.get("ETag"),
+            "content_length": resp.get("ContentLength"),
+        }
+
+    def get_probe(self, key: str) -> Dict[str, Any]:
+        try:
+            resp = self._client.get_object(Bucket=self._bucket, Key=key)
+            so_byte = len(resp["Body"].read())
+        except Exception as exc:
+            return self._loi_thanh_dict(exc)
+        meta = resp.get("ResponseMetadata", {})
+        return {
+            "tim_thay": True,
+            "http_status": meta.get("HTTPStatusCode"),
+            "request_id": meta.get("RequestId"),
+            "etag": resp.get("ETag"),
+            "so_byte_doc_duoc": so_byte,
+        }
+
+    def list_probe(self, prefix: str) -> Dict[str, Any]:
+        try:
+            resp = self._client.list_objects_v2(Bucket=self._bucket, Prefix=prefix)
+        except Exception as exc:
+            return self._loi_thanh_dict(exc)
+        meta = resp.get("ResponseMetadata", {})
+        return {
+            "http_status": meta.get("HTTPStatusCode"),
+            "request_id": meta.get("RequestId"),
+            "so_khoa": resp.get("KeyCount"),
+            "khoa": [item.get("Key") for item in resp.get("Contents", [])],
+        }

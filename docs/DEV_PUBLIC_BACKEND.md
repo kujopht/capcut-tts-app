@@ -48,7 +48,21 @@ thêm:
 ```
 YOUTUBE_WEBSUB_CALLBACK_BASE_URL=https://api-dev.fanfic.world
 FAS_ENV=development
+FAS_INLINE_WORKER=false
 ```
+
+**`FAS_INLINE_WORKER=false` là BẮT BUỘC, không phải tuỳ chọn.** Sự cố thật
+(2026-08-23): container này dùng CHUNG `APPWRITE_DATABASE_ID=fanfic_world_dev`
+với staging (`fas-staging-api-free` trên Render, repoint sang self-host để
+tránh hết quota Appwrite Cloud). `FAS_INLINE_WORKER` mặc định `True` khi không
+đặt — container liền tự chạy `start_job_sweeper()` (server/main.py), âm thầm
+NHẬN job TTS của staging và ghi audio ra **đĩa cục bộ của chính nó**
+(`STORAGE_BACKEND=local` ở đây, khác `r2` của staging), khiến staging báo job
+`completed` nhưng file không bao giờ có trong R2. Không có cách nào phát hiện
+lỗi này qua `/api/health` hay log của container — job cứ thế "thành công" sai
+chỗ. Bất kỳ tiến trình nào dùng chung database Appwrite với staging (dev,
+public dev backend, hay bất kỳ thứ gì sau này) đều phải đặt biến này tường
+minh, không được để mặc định.
 
 ## DNS (thao tác tay — xem báo cáo cuối)
 

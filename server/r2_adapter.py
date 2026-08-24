@@ -60,11 +60,23 @@ class R2StorageAdapter:
         )
         return key
 
-    def put_file(self, key: str, source: Any) -> str:
+    def put_file(self, key: str, source: Any, content_type: str = "audio/mpeg") -> str:
+        """
+        Tai file LEN R2 tu duong dan tren dia, KHONG doc toan bo vao RAM.
+
+        Track dai (audio import toi ~2GB, den 63 gio) khien `put(key,
+        fp.read())` cu (doc het file vao bo nho roi moi goi) tao mot dinh bo
+        nho khong can thiet. `upload_file` cua boto3 tu STREAM tu dia va tu
+        chuyen sang multipart upload khi file vuot nguong, khong bao gio giu
+        toan bo noi dung trong RAM cung mot luc.
+        """
         from pathlib import Path
 
-        with open(Path(source), "rb") as fp:
-            return self.put(key, fp.read())
+        self._client.upload_file(
+            str(Path(source)), self._bucket, key,
+            ExtraArgs={"ContentType": content_type},
+        )
+        return key
 
     def get(self, key: str) -> bytes:
         try:

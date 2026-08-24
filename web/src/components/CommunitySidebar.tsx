@@ -33,10 +33,10 @@ export function TacGiaNoiBat({ gon = false }: { gon?: boolean }) {
         // Sap theo luot nghe hop le — tieu chi THAT va giai thich duoc.
         // Loc bo ho so thieu `username`: link ho so dua thang vao gia tri nay
         // (`/u/${username}`), va mot tai khoan seed/test tao ngoai luong dang
-        // ky binh thuong co the co username rong — hien no ra nhu "noi bat"
-        // ma bam vao lai 404 con te hon la khong hien.
+        // ky binh thuong co the co username rong (hoac toan khoang trang) —
+        // hien no ra nhu "noi bat" ma bam vao lai 404 con te hon la khong hien.
         const xep = r.people
-          .filter((p) => !!p.username)
+          .filter((p) => !!p.username?.trim())
           .sort(
             (a, b) =>
               (b.rank?.qualified_listens ?? 0) - (a.rank?.qualified_listens ?? 0),

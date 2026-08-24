@@ -75,18 +75,19 @@ test("CommunitySidebar (Tác giả nổi bật) hien avatar that cua tung nguoi"
   );
 });
 
-test("CommunitySidebar loc bo ho so thieu username truoc khi hien noi bat", () => {
+test("CommunitySidebar loc bo ho so thieu username (ke ca toan khoang trang) truoc khi hien noi bat", () => {
   /*
     QA that phat hien tren production: mot tai khoan seed/test co
     author_status=approved nhung username rong lot vao danh sach "noi bat",
     link ho so dung thang `/u/${username}` nen ra `/u/` roi 404. Phai loc
-    TRUOC khi sap xep/cat top 5, khong phai an sau khi da hien.
+    TRUOC khi sap xep/cat top 5, khong phai an sau khi da hien. Dung `.trim()`
+    de mot username toan khoang trang cung khong lot qua duoc.
   */
   const src = communitySidebar();
   assert.match(
     src,
-    /\.filter\(\s*\(p\)\s*=>\s*!!p\.username\s*\)/,
-    "phải lọc bỏ hồ sơ có username rỗng/thiếu trước khi hiện danh sách nổi bật",
+    /\.filter\(\s*\(p\)\s*=>\s*!!p\.username\?\.trim\(\)\s*\)/,
+    "phải lọc bỏ hồ sơ có username rỗng/toàn khoảng trắng trước khi hiện danh sách nổi bật",
   );
 });
 

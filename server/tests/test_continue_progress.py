@@ -137,6 +137,69 @@ class BaoCaoNgheTest(ContinueProgressTestCase):
         self.assertIsNone(nghe["duration_seconds"])
 
 
+class BaoCaoNgheDaiHonMotNgayTest(ContinueProgressTestCase):
+    """
+    Hoi quy cho bug tran 24 gio: `ListenProgressIn.position_seconds` tung bi
+    gioi han `le=86_400` (24h), khien track that dai hon 24h (da xac nhan file
+    that toi 63 gio) bi 422 va con tro "Tiep tuc nghe" dong bang o ~24h. Bai
+    test nay bao 25h/40h/50h PHAI duoc CHAP NHAN va doc lai dung qua
+    /api/progress/continue (round-trip qua store that, khong chi validate
+    schema suong).
+    """
+
+    def _bao_va_doc_lai(self, position_seconds: float) -> Dict:
+        token = self.user(f"nghe-dai-{position_seconds}@example.com")
+        uid = self.client.get("/api/auth/me", headers=self.auth(token)) \
+            .json()["profile"]["user_id"]
+        novel_id, chapter_id = self.novel_and_chapter(uid)
+
+        resp = self.client.post(
+            "/api/progress/listen", headers=self.auth(token),
+            json={"novel_id": novel_id, "chapter_id": chapter_id,
+                  "position_seconds": position_seconds})
+        self.assertEqual(resp.status_code, 200, resp.text)
+
+        nghe = self.client.get(
+            "/api/progress/continue", headers=self.auth(token)).json()["listening"]
+        self.assertEqual(nghe["position_seconds"], position_seconds)
+        return nghe
+
+    def test_25_gio_duoc_chap_nhan(self):
+        self._bao_va_doc_lai(90_000)
+
+    def test_40_gio_duoc_chap_nhan(self):
+        self._bao_va_doc_lai(144_000)
+
+    def test_50_gio_duoc_chap_nhan(self):
+        self._bao_va_doc_lai(180_000)
+
+    def test_vi_tri_am_van_bi_tu_choi(self):
+        token = self.user("nghe-am@example.com")
+        uid = self.client.get("/api/auth/me", headers=self.auth(token)) \
+            .json()["profile"]["user_id"]
+        novel_id, chapter_id = self.novel_and_chapter(uid)
+
+        resp = self.client.post(
+            "/api/progress/listen", headers=self.auth(token),
+            json={"novel_id": novel_id, "chapter_id": chapter_id,
+                  "position_seconds": -1})
+        self.assertEqual(resp.status_code, 422)
+
+    def test_vi_tri_qua_lon_van_bi_tu_choi(self):
+        # Van con mot tran an toan (khong phai 24h) de chan du lieu rac —
+        # xem docstring `ListenProgressIn`.
+        token = self.user("nghe-qua-lon@example.com")
+        uid = self.client.get("/api/auth/me", headers=self.auth(token)) \
+            .json()["profile"]["user_id"]
+        novel_id, chapter_id = self.novel_and_chapter(uid)
+
+        resp = self.client.post(
+            "/api/progress/listen", headers=self.auth(token),
+            json={"novel_id": novel_id, "chapter_id": chapter_id,
+                  "position_seconds": 2_000_000})
+        self.assertEqual(resp.status_code, 422)
+
+
 class ConTroToiNoiDaXoaTest(ContinueProgressTestCase):
     def test_chuong_bi_xoa_thi_module_bien_mat_khong_loi(self):
         token = self.user()

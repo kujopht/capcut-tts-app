@@ -49,9 +49,15 @@ export function ContinueListenReporter({
       const viTri = Math.floor(thoiDiemRef.current);
       if (viTri <= 0 || viTri === viTriDaGui.current) return;
       viTriDaGui.current = viTri;
-      void api.reportListenProgress(novelId, chapterId, viTri).catch(() => {
-        // Nuot loi CO Y — cung ly do voi `ListenReporter`: day la tien ich hau
-        // truong, mot lan mat mang khong duoc lam gian doan viec nghe.
+      void api.reportListenProgress(novelId, chapterId, viTri).catch((cause) => {
+        // KHONG lam gian doan viec nghe va KHONG hien gi cho nguoi dung — cung
+        // ly do voi `ListenReporter`: day la tien ich hau truong, mot lan mat
+        // mang khong duoc bien thanh thong bao loi giua chung.
+        //
+        // Nhung KHONG nuot am tham: log ra console de con thay duoc khi debug
+        // (vd server tra 422 vi validation sai — nhu bug tran 24h da tung xay
+        // ra voi `position_seconds`). Chi console.error, khong alert/toast.
+        console.error("reportListenProgress that bai:", cause);
       });
     }, NHIP_GIAY * 1000);
     return () => window.clearInterval(nhip);

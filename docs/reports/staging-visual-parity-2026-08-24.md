@@ -11,10 +11,18 @@ merged, never deployed anywhere)
 ### Evidence this is the correct candidate, not a guess
 
 - Cloudflare's own deployment log shows the ONE real `fanfic-web-staging`
-  deployment ever made (2026-08-21T16:44:59Z) was from commit `d959dbd` — a
-  **strict ancestor** of `4053e95` (confirmed via `git merge-base
-  --is-ancestor`). The real deployed staging predates this work by ~4 days
-  and never had it.
+  deployment ever made (2026-08-21T16:44:59Z) was from commit `d959dbd`, on
+  `main`. Corrected claim (an earlier draft of this report incorrectly
+  called `d959dbd` a "strict ancestor" of `4053e95` — independent review
+  caught this and it does not hold up: `git merge-base --is-ancestor` fails
+  in *both* directions between the two commits): `d959dbd` and `4053e95` are
+  on divergent lines from a common ancestor, `d483e90` (2026-08-14).
+  `d959dbd` is NOT a descendant of `feature/fanfic-visual-renaissance-v1` at
+  all — the real staging deployment came from a separate line of work on
+  `main` that never incorporated the Visual Renaissance branch. The
+  substantive conclusion is unchanged (the real deployed staging never had
+  this work), but it follows from "never merged," not from an ancestor
+  relationship.
 - `d959dbd` was also deployed to production 6 minutes later — staging and
   production were byte-identical at that point, and neither ever had the
   Portal, the leaderboard shelf, or the V7 nav tracer.
@@ -22,10 +30,15 @@ merged, never deployed anywhere)
   author, same session, 2026-08-17 through 2026-08-20) documents an explicit
   V1→V7 iteration sequence for the nav tracer, each commit fixing a specific
   named defect in the previous one (conic-gradient masking bug → SVG stroke
-  rewrite → elliptical-tracer bug → this fix). `4053e95` is the LAST commit
-  in that sequence that touches `NavIndicator.tsx`/`globals.css` before the
-  branch moves on to unrelated backend ingestion work — i.e. the final,
-  most-refined state, not an intermediate one.
+  rewrite → elliptical-tracer bug → this fix). Independently verified (per
+  review): `4053e95` is the LAST commit on the branch that touches
+  `NavIndicator.tsx` or `NavAuth.tsx` at all — no later commit changes
+  either file. The branch does continue afterward with further work (later
+  commits add PageHero V2/V3, a Live Wallpaper rollout, Cloud Veil/Aether
+  Rift transitions, and separately unrelated Trusted Sources/animation
+  ingestion phases), but none of it touches the nav tracer or the homepage
+  Portal/leaderboard content being ported here — `4053e95` remains the
+  final, most-refined state for exactly what this PR restores.
 - The branch's own docstrings self-diagnose the exact bug the user
   remembered ("selected background too bright/obscuring text"): an earlier
   iteration (V1/V3) had a one-shot arrival animation missing

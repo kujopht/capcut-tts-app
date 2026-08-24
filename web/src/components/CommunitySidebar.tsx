@@ -31,10 +31,16 @@ export function TacGiaNoiBat({ gon = false }: { gon?: boolean }) {
       .then((r) => {
         if (huy) return;
         // Sap theo luot nghe hop le — tieu chi THAT va giai thich duoc.
-        const xep = [...r.people].sort(
-          (a, b) =>
-            (b.rank?.qualified_listens ?? 0) - (a.rank?.qualified_listens ?? 0),
-        );
+        // Loc bo ho so thieu `username`: link ho so dua thang vao gia tri nay
+        // (`/u/${username}`), va mot tai khoan seed/test tao ngoai luong dang
+        // ky binh thuong co the co username rong (hoac toan khoang trang) —
+        // hien no ra nhu "noi bat" ma bam vao lai 404 con te hon la khong hien.
+        const xep = r.people
+          .filter((p) => !!p.username?.trim())
+          .sort(
+            (a, b) =>
+              (b.rank?.qualified_listens ?? 0) - (a.rank?.qualified_listens ?? 0),
+          );
         setDs(xep.slice(0, 5));
       })
       .catch(() => {

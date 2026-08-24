@@ -256,9 +256,9 @@ export function MotifInkFlourish({ className }: { className?: string }) {
 }
 
 /** Truyện — trang sách hé mở, một nét sáng đi qua giữa. Dùng cho ô trống
- * "Đang nổi bật" trên trang chủ (xem `KeTrongNoiBat` ở `app/page.tsx`) —
- * phục hồi từ `feature/fanfic-visual-renaissance-v1`, một hoạ tiết SVG độc
- * lập, không phụ thuộc gì vào hệ thống Storyworld Portal chưa được phục hồi. */
+ * "Đang nổi bật" trên trang chủ (`KeTrongNoiBat`) VÀ cho cổng Truyện của
+ * Storyworld Portal (`TheGioiCong`, `.portal-motif` trên `.portal-truyen`)
+ * — cùng một hoạ tiết, hai nơi dùng. */
 export function MotifManuscript({ className }: { className?: string }) {
   return (
     <svg
@@ -278,6 +278,61 @@ export function MotifManuscript({ className }: { className?: string }) {
       <path d="M80 18 V98" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" />
       <path d="M26 32 H62 M26 46 H58 M26 60 H62" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.2" />
       <path d="M98 32 H134 M102 46 H134 M98 60 H130" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
+/** Animation — khung phim 35mm cách điệu, dùng cho cổng Animation của
+ * Storyworld Portal (`.portal-motif` trên `.portal-animation`). Phục hồi từ
+ * `feature/fanfic-visual-renaissance-v1` (đã bị gỡ ở `visual-renaissance-v3-remaining`
+ * cùng lúc Portal bị cắt khỏi nhánh đó — nay Portal phục hồi thì hoạ tiết
+ * này cũng cần theo). */
+export function MotifFilmFrame({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 160 120"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid slice"
+    >
+      <rect x="30" y="14" width="100" height="92" rx="4" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.4" />
+      {[22, 42, 62, 82].map((y) => (
+        <g key={y}>
+          <rect x="14" y={y} width="10" height="10" rx="2" fill="currentColor" fillOpacity="0.35" />
+          <rect x="136" y={y} width="10" height="10" rx="2" fill="currentColor" fillOpacity="0.35" />
+        </g>
+      ))}
+      <path d="M68 46 L96 60 L68 74 Z" fill="currentColor" fillOpacity="0.55" />
+    </svg>
+  );
+}
+
+/** Audio — sóng âm dịu dưới trăng, dùng cho cổng Audio của Storyworld Portal
+ * (`.portal-motif` trên `.portal-audio`). Cùng lịch sử phục hồi với
+ * `MotifFilmFrame` ở trên. */
+export function MotifWaveform({ className }: { className?: string }) {
+  const bars = [6, 12, 20, 14, 26, 16, 22, 10, 18, 8];
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 160 60"
+      aria-hidden="true"
+      focusable="false"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      {bars.map((h, i) => (
+        <rect
+          key={i}
+          x={8 + i * 15}
+          y={30 - h / 2}
+          width="6"
+          height={h}
+          rx="3"
+          fill="currentColor"
+          fillOpacity={0.35 + (i % 3) * 0.1}
+        />
+      ))}
     </svg>
   );
 }

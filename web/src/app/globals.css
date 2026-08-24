@@ -1423,36 +1423,43 @@ main { overflow-x: clip; }
   Nhe han nut CTA "Viết truyện": nen mo han, khong co gradient dac, va quang chi
   la mot vong 1px. Hai thu khong duoc tranh nhau.
 */
+/*
+  RESET — nguyen nhan goc cua "quang mau dinh trong khung" tung gap trong
+  qua trinh phat trien tinh nang nay (da xac nhan): mot hieu ung vet-sang-
+  mot-lan chay animation `sheen` MOT LAN nhung KHONG dat
+  `animation-fill-mode: forwards`. Het 480ms, `transform` cua no quay ve
+  gia tri tac gia (khong khai bao => `none`) THAY VI dung yen o cuoi
+  keyframe (ra ngoai khung) — mot khoi `background: linear-gradient(...)`
+  phu `inset: 0` (KIN long trong) dung yen tai `transform: none` chinh la
+  vung mau "dinh" ben trong khung ma phan hoi mo ta.
+
+  KIEN TRUC: KHONG con pseudo-element/background gradient nao tren
+  `.nav-vach`. Vien LAN tracer deu la <rect fill="none"> trong mot <svg>
+  con (xem `NavIndicator.tsx`) — `fill="none"` nghia la KHONG CO CACH NAO
+  mot lop mau phu kin long trong duoc nua, du code sau nay co sai o dau.
+*/
 .nav-vach {
   position: absolute;
+  /* Vi tri THAT (ca ngang lan doc) nam het trong `transform: translate(x, y)`
+     inline (xem `NavIndicator.tsx`), do THANG tu `getBoundingClientRect()`
+     cua muc dang xem — khong con gia dinh MOI muc cao bang nhau (sai voi
+     "Viết truyện", cao hon cac muc thuong do padding+dau cham rieng cua
+     `.nav-cta`). */
   left: 0;
-  top: 50%;
+  top: 0;
   z-index: 0;
-  /* `height`/`margin-top` CHI la gia tri nen truoc khi do xong (khong bao
-     gio thuc su hien vi component tra `null` cho toi luc do) — sau do
-     `NavIndicator.tsx` ghi de CA HAI bang inline style, tinh tu chieu cao
-     THAT cua muc (`o.h`), giong het co che voi `width`. Xem ghi chu day du
-     o noi ghi de — dong bo nay BAT BUOC de SVG tracer (`.nav-vach-tracer`)
-     khong bi meo hinh do lech giua chieu cao CSS va chieu cao thuc te. */
-  height: 34px;
-  margin-top: -17px;
-  border-radius: var(--r-full);
+  border-radius: var(--r2);
   pointer-events: none;
-  /* Cat vet sang (`.nav-vach-streak`) theo dung hinh vien nhon — xem ghi chu
-     tai dinh nghia streak. Khong anh huong `box-shadow`: no ve NGOAI hop nen
-     khong bi `overflow` cua chinh hop cat mat. */
-  overflow: hidden;
-  background: #ffffff0f;
-  border: 1px solid var(--sac-1, var(--brand-line));
-  box-shadow:
-    0 0 0 1px #ffffff08,
-    0 0 16px -4px var(--sac-1, var(--brand)),
-    inset 0 1px 0 #ffffff1f;
+  /* Dam hon kinh header (`--glass: #0f1119b8`) mot chut — day la "trong
+     KHU VUC dang xem", nen phai doc duoc la mot be mat rieng, khong phai
+     mot vung sang mo. Day la LOP MAU DUY NHAT cua ca khoi — phang, dac,
+     khong gradient. */
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
   /*
-    `cubic-bezier(.22,1,.36,1)` — ease-out manh, khong nay lai. Mot duong cong co
-    do vong (spring) doc ra nhu do choi tren mot thanh dieu huong.
+    `cubic-bezier(.22,.8,.2,1)` — ease-out co kiem soat, khong nay lai: canh
+    toi dich muot nhung khong lo do (do do bi hieu la "do choi").
 
-    `width` CHAM HON `transform` mot chut (520ms so 420ms) — CHU Y, khong phai
+    `width` CHAM HON `transform` mot chut (540ms so 460ms) — CHU Y, khong phai
     lech vo tinh: canh dan (theo `transform`) toi noi truoc, be rong (theo
     `width`) toi sau, nen khung tam thoi "gian" dai hon dich trong luc di
     chuyen roi mem lai dung kich thuoc. Đây la "stretch/compression nhe" ma
@@ -1460,89 +1467,83 @@ main { overflow-x: clip; }
     luong giua hai transition da co san.
   */
   transition:
-    transform 420ms cubic-bezier(.22, 1, .36, 1),
-    width 520ms cubic-bezier(.22, 1, .36, 1),
-    border-color 420ms var(--ease),
-    box-shadow 420ms var(--ease);
+    transform 460ms cubic-bezier(.22, .8, .2, 1),
+    width 540ms cubic-bezier(.22, .8, .2, 1),
+    /* Chieu cao la mot GIA TRI DO duoc (xem O.h) — cung nhip/duong cong voi
+       width, vi ca hai deu la kich thuoc hinh hoc cua cung mot lan doi muc. */
+    height 540ms cubic-bezier(.22, .8, .2, 1),
+    /* Bo goc doi CUNG NHIP voi transform khi hinh dang dich khac hinh dang
+       hien tai (vi du sang/roi "Viết truyện" — CTA vien tron het, cac muc
+       con lai vuong vuc — "shape morph"). */
+    border-radius 460ms cubic-bezier(.22, .8, .2, 1);
 }
 /* Chu phai nam TREN vien thuoc. */
 .nav-link { z-index: 1; }
 
-/*
-  Vet sang "cong dich" — chay MOT LAN doc vien khi vach vua den noi (xem
-  `NavIndicator.tsx`, `key={o.tick}` la co che khien no chay lai moi lan doi
-  route). Dung LAI keyframe `sheen` da co (xem `.progress-bar::after`) thay vi
-  dung mot keyframe rieng — cung mot "vet sang chay ngang mot lan" nhung o
-  moi noi khac trong san pham.
-
-  Y NGHIA: "cong dang toi da di chuyen sang mot the gioi khac" — mot tia sang
-  chay qua vien roi tat. Day la tin hieu "VUA DEN" (mot lan); tin hieu "DANG O
-  DAY" (lien tuc, suot luc con chon) la `.nav-vach-tracer-stroke` ben duoi —
-  hai hieu ung khac muc dich, cung ton tai chu khong doi lap nhau (phuc hoi
-  2026-08-23 tu `feature/fanfic-visual-renaissance-v1`, vong xoay lien tuc
-  tung bi bo tren nhanh chinh vi mot lan hieu nham yeu cau THEM MOI cho o tim
-  kiem, khong lien quan gi den o dieu huong nay).
-*/
-.nav-vach-streak {
+/* SVG chua CA HAI net — nam khop toan bo `.nav-vach`, khong bat su kien. */
+.nav-vach-svg {
   position: absolute;
   inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(100deg, transparent, #ffffffb0, transparent);
-  animation: sheen 480ms var(--ease) 1;
-}
-
-/*
-  Tracer vien dieu huong — mot doan sang NGAN (~14% chu vi) chay VONG QUANH
-  o pill dang chon, LIEN TUC suot luc con o do (khac han `.nav-vach-streak`
-  o tren, chay MOT LAN roi tat). Phuc hoi tu `feature/fanfic-visual-renaissance-v1`
-  (V7) — xem `NavIndicator.tsx` cho ly do dung SVG `stroke-dasharray` +
-  `pathLength` thay vi ban dau cua nhanh do (`conic-gradient` xoay + mask,
-  bo vi mot loi rieng khong lien quan den chinh ky thuat).
-*/
-.nav-vach-tracer {
-  position: absolute;
-  inset: 0;
+  z-index: 0;
   pointer-events: none;
+  overflow: visible;
 }
+
+/*
+  LOP A — vien tinh (khong hoat hinh VI TRI/mau lien tuc), khong glow. Pha
+  tron cyan+tim khu vuc.
+
+  `rx`/`ry` DUOC PHEP chuyen dan ("shape morph") — day la hinh dang, khong
+  phai chuyen dong trang tri, va phai dong bo VOI `border-radius` cua
+  `.nav-vach` (cung mot boi canh doi hinh dang khi sang/roi "Viết truyện").
+  `rx`/`ry` la presentation property CHUAN cua SVG2/CSS — Chrome va Firefox
+  hien dai deu ho tro chuyen dan qua CSS `transition`.
+*/
+.nav-vach-base-stroke {
+  stroke: color-mix(in srgb, var(--sac-1, var(--brand)) 65%, var(--sac-2, var(--brand-hover)) 35%);
+  stroke-width: 1.25px;
+  opacity: 0.75;
+  transition: stroke 420ms var(--ease), rx 460ms cubic-bezier(.22, .8, .2, 1), ry 460ms cubic-bezier(.22, .8, .2, 1);
+}
+
+/*
+  LOP B — tracer: MOT doan ngan (dasharray 14/86 tren pathLength=100, tuc
+  ~14% chu vi) chay quanh vien luc dung yen. `stroke-dashoffset` la thuoc
+  tinh DUY NHAT duoc hoat hinh — khong chinh sua hinh hoc, khong dung
+  `transform: rotate` (khac han khung xoay ca vien, mot ban dau tung bi bo
+  vi mot loi rieng khong lien quan den chinh ky thuat).
+
+  Mau: mot sac DAM hon vien LOP A (tu `--sac-1`, khong pha tron) de phan
+  biet ro doan dang "chay" voi vien tinh ben duoi — khong dung gradient
+  nhieu diem tren <stroke>: gradient + dash tren SVG de goi loi hien thi
+  khong nhat quan giua trinh duyet.
+*/
 .nav-vach-tracer-stroke {
-  stroke: var(--sac-1, var(--brand));
+  stroke: var(--sac-1, var(--accent));
   stroke-width: 1.5px;
   stroke-linecap: round;
   stroke-dasharray: 14 86;
   animation: nav-tracer-dash 5.4s linear infinite;
-  /* `rx`/`ry` doi theo `o.h` (JS) khi be rong/cao muc doi — khong can
-     transition rieng, vi `.nav-vach` da chuyen dong CHAM hon (420-520ms)
-     nhieu so voi tan so ve lai cua SVG (moi khung hinh theo `useLayoutEffect`
-     cua chinh no), nen mat khong thay giat. */
+  /* "shape morph": rx/ry doi CUNG NHIP voi vien LOP A va .nav-vach — xem
+     chu thich o .nav-vach-base-stroke. `animation` (dash) va `transition`
+     (rx/ry) chay tren hai thuoc tinh khac nhau nen khong xung dot. */
+  transition: rx 460ms cubic-bezier(.22, .8, .2, 1), ry 460ms cubic-bezier(.22, .8, .2, 1);
 }
 
 /*
-  Chu cua muc dang xem: sang len va nhan sac cua khu vuc do.
+  Chu cua muc dang xem: MAU GAN-TRANG (moonlight ivory), KHONG con nhan sac
+  rieng cua khu vuc.
 
-  `background-clip: text` cho mot chuyen mau hai tong. Chu KHONG doi co va khong
-  doi khoang cach — doi hai thu do se lam ca hang nhay khi vien thuoc toi noi.
+  SUA: truoc day chu nhan mau cua khu vuc (vi du tim/hong tuy khu vuc) —
+  phan hoi la "chu mau tren nen phat sang" kho doc. Sac cua khu vuc gio CHI
+  con o VIEN/QUANG cua `.nav-vach`; chu dung thang `--text` (gan trang, da
+  la token "gan-trang" san co — khong bia mau moi).
 */
 .nav-link[aria-current="page"] {
   font-weight: 650;
   /* Vien thuoc lo nen roi — muc dang xem khong to nen cua rieng no. */
   background: transparent;
-  /*
-    MAU DAC, khong dung `background-clip: text`.
-
-    LOI DA XAY RA: ban truoc to chu bang mot gradient qua `background-clip: text`
-    cong `color: transparent`. O muc "Viết truyện" — von la mot CTA co quy tac
-    `.nav-cta` rieng dat `background` cua no — quy tac do ghi de gradient nhung
-    KHONG ghi de `color`, nen chu con lai trong suot tren mot nen dac: nhan bien
-    mat hoan toan.
-
-    Bai hoc chung: `background-clip: text` bien mot thuoc tinh TRANG TRI
-    (`background`) thanh thu quyet dinh chu co nhin thay hay khong. Bat ky quy
-    tac nao cham vao `background` sau do deu lam mat chu, va no mat AM THAM.
-
-    Mot mau dac thi khong bao gio bien mat. Sac cua khu vuc van doi dung — do la
-    dieu thuc su can — chi la khong con chuyen hai tong.
-  */
-  color: var(--sac-2, var(--brand-hover));
+  color: var(--text);
 }
 /* Lan do dau tien: hien NGAY tai cho. Mot cu truot tu goc trai man hinh vao luc
    moi mo trang doc ra nhu mot loi ve. */
@@ -1560,6 +1561,17 @@ main { overflow-x: clip; }
   background: var(--brand-soft);
   border: 1px solid var(--brand-line);
   font-weight: 620;
+  /*
+    "khung duy nhat": chuyen dan (khong nhay) khi bi vach dung chung
+    (`.nav-vach`) tam an di luc dang xem, va khi hien lai luc roi trang. Chi
+    mot thoi luong co dinh, KHONG co delay o day — do tre thuc su (cho vach
+    di chuyen xong roi moi hien lai) do `[data-nav-leaving="write"]` ben
+    duoi dam nhiem bang cach GIU trang thai trong suot, khong phai bang
+    transition-delay (transition-delay tren chinh `.nav-cta` se lam ca thao
+    tac di chuot ra/vao nut nay — khong lien quan gi den dieu huong — cung bi
+    tre oan).
+  */
+  transition: background 200ms var(--ease), border-color 200ms var(--ease);
 }
 .nav-cta:hover {
   background: #8b6cff2e;
@@ -1575,12 +1587,40 @@ main { overflow-x: clip; }
   background: var(--grad-brand);
   flex: 0 0 auto;
 }
-/* Dang o `/write` thi bo vach duoi — ca cai nut da la tin hieu roi. */
+/*
+  "khung duy nhat cho MOI muc": "Viết truyện" da co khung CTA rieng
+  (border/background o tren). Khi no DUOC CHON, `NavIndicator` (`.nav-vach`)
+  ve mot khung khac de LEN TREN cung vi tri/hinh dang — neu ca hai cung hien
+  se thanh "vien trong vien". SUA: luc dang xem, tat han background/vien
+  RIENG cua CTA (ve trong suot) — chu, dau cham, hit-target, padding giu
+  nguyen y — de vach dung chung tro thanh khung DUY NHAT con lai.
+*/
 .nav-cta[aria-current="page"] {
-  background: #8b6cff33;
-  border-color: var(--brand);
+  background: transparent;
+  border-color: transparent;
 }
 .nav-cta[aria-current="page"]::after { display: none; }
+/* Di chuot vao luc DANG la trang hien tai KHONG duoc lam vien rieng hien lai
+   — neu khong se tao lai "vien trong vien" ngay khi ru chuot qua. */
+.nav-cta[aria-current="page"]:hover {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+}
+/*
+  "khoang lang khi roi Viết truyện": luc roi trang, `aria-current` mat
+  NGAY LAP TUC — nhung dung luc do vach dung chung VAN CON phu dung hinh
+  dang CTA (no chi vua BAT DAU truot di). Neu vien rieng cua CTA hien lai
+  tuc thi o day, se co mot khoang thoi gian ca hai vien cung hien. `NavIndicator`
+  bat `data-nav-leaving="write"` tren <body> dung bang thoi gian vach can de
+  truot/doi hinh dang xong (xem `CTA_LEAVE_GRACE_MS` trong NavIndicator.tsx,
+  khop voi `width` 540ms cua `.nav-vach`) roi tu go — trong suot khoang do,
+  GIU vien CTA trong suot du `aria-current` da mat.
+*/
+body[data-nav-leaving="write"] .nav-cta:not([aria-current="page"]) {
+  background: transparent;
+  border-color: transparent;
+}
 
 /*
   La mot `<button>` that. Phai TU TAT nen va vien mac dinh cua trinh duyet:
@@ -3369,51 +3409,211 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   max-width: 58ch;
 }
 .hero-v2-cta { margin-top: var(--s1); }
-.hero-v2-secondary { flex-wrap: wrap; }
-.hero-v2-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-full);
-  background: #0b0e18a3;
-  color: var(--text-2);
-  font-size: var(--t-sm);
-  text-decoration: none;
-  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-}
-.hero-v2-pill:hover { border-color: var(--brand-line); color: var(--text); }
-.hero-v2-pill svg { color: var(--brand-hover); }
 .hero-v2-guest-hint { color: var(--text-3); font-size: var(--t-sm); }
 .hero-v2-guest-hint a { color: var(--brand-hover); }
-/* Hoa tiet rieng cua Hero trang chu (`.hero-v2` khong dung `PageHeader`/
-   `.page-head-motif` — xem `Hero()` o `app/page.tsx`). Dat ben PHAI, thap
-   xuong duoi mot chut de khong de len toa lau dai/nhan vat cua tranh nen,
-   mo/sau chu giong het co che `.page-head-motif`. */
-.hero-v2-motif {
-  position: absolute;
-  z-index: -1;
-  top: 18px;
-  right: -8px;
-  width: 220px;
-  height: auto;
-  color: var(--hero-motif-color, var(--text-3));
-  opacity: var(--hero-motif-opacity, 0.1);
-  pointer-events: none;
-}
+/* `.hero-v2-secondary`/`.hero-v2-pill` (hang loi tat Animation/Audio Studio/
+   Cộng đồng) va `.hero-v2-motif` da bi go khoi Hero trang chu khi phuc hoi
+   Storyworld Portal (Candidate A): ba lien ket do nay nam trong ve tinh cua
+   `.portal-satellites`, lap lai lan nua trong Hero se la dieu huong trung —
+   dung tinh than thiet ke goc "tich hop tinh te hon thay vi lap lai o Hero". */
 
 /*
-  Luoi tinh nang / feature hub (Phan 7 dac ta) — dung LAI `.quick-card`/
-  `.quick-icon` (da co san, xem `account/page.tsx` muc "Loi tat") thay vi
-  ve mot he thong the moi: sau khu vuc phai cam giac la MOT san pham, khong
-  phai sau nut roi nhau. `.hub-grid` chi khac `.quick-grid` o so cot mobile
-  (2 cot thay vi 1 — luoi 6 the xuong 1 cot se rat dai tren dien thoai).
+  `.hub-grid`/`.quick-card` — luoi 6 the deu nhau con dung o `/account`
+  (muc "Loi tat"). Trang chu TUNG dung he thong nay cho "Khám phá Fanfic
+  World" nhung da doi sang `.portal-*` (Storyworld Portal) o duoi day khi
+  phuc hoi tu `feature/fanfic-visual-renaissance-v1` — giu nguyen CSS nay vi
+  `/account` van can no, KHONG xoa.
 */
 .hub-grid {
   display: grid;
   gap: var(--s3);
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/*
+  ================================================== CONG THE GIOI (Phase 3)
+
+  Phuc hoi tu `feature/fanfic-visual-renaissance-v1` (commit `4053e95`, xem
+  docs/reports/staging-visual-parity-2026-08-24.md). Thay `.hub-grid` cu tren
+  trang chu (sau the deu nhau, bi phan hoi la "sau the AI chung chung"). Bo
+  cuc BAT DOI XUNG: Truyen la cong THONG TRI (2/3 be rong), Animation/Audio
+  xep doc canh no, ba diem den ve tinh (Cong dong/Sang tac/Image Studio) nam
+  duoi thanh mot dai gon.
+
+  Moi `.portal-card` mang MOT hoa tiet SVG nen (`Ornaments.tsx`) lam "background
+  watermark" — ban sac den tu CHAT LIEU, khong chi tu icon+nhan.
+*/
+.portal-primary {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--s3);
+}
+.portal-stack { display: grid; grid-template-rows: 1fr 1fr; gap: var(--s3); }
+
+.portal-card {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  display: flex;
+  align-items: flex-end;
+  min-height: 150px;
+  padding: var(--s4);
+  border-radius: var(--r4);
+  border: 1px solid var(--kinh-vien);
+  background: linear-gradient(180deg, #0b0e18d9 0%, #080a11f5 100%);
+  box-shadow: var(--do-sau), var(--kinh-sang);
+  color: inherit;
+  text-decoration: none;
+  transition: transform 180ms var(--ease), border-color 180ms var(--ease),
+    box-shadow 180ms var(--ease);
+}
+.portal-card:hover { color: inherit; transform: translateY(-3px); box-shadow: var(--shadow-2), var(--edge); }
+/* Cong Truyen la khoi LON NHAT tren trang. */
+.portal-truyen {
+  min-height: 316px;
+}
+
+/*
+  Truyện + Animation co MOT anh minh hoa that (sinh qua Pollinations, khoa
+  theo aesthetic `fanfic-world-modern-anime-fantasy` — xem
+  docs/design/fanfic-world-modern-anime-fantasy-aesthetic.md). `.portal-art`
+  la LOP DUOI CUNG; `.portal-overlay` la lop phu TOI vua du de chu doc duoc,
+  dat GIAM opacity o TREN (nghe thuat con tham gia bo cuc) va DAM hon o DUOI
+  (noi chu ngoi). `.portal-audio` CHUA co anh rieng — van dung hoa tiet SVG +
+  nen phang, xem `.portal-card` (fallback).
+*/
+.portal-art {
+  object-fit: cover;
+  z-index: 0;
+  /* Lop nghe thuat dich RAT nhe (2px) + phong RAT nhe (<=1.01) khi ru chuot
+     vao ca `.portal-card`. KHONG scale rieng tren `.portal-card` (da du tin
+     hieu tu `translateY` + vien + hoa). */
+  transition: transform 320ms var(--ease);
+}
+.portal-card:hover .portal-art { transform: scale(1.01) translateY(-2px); }
+/* Anh Animation cao~vuong (1200x1000) nhung o rat det (~3:1) — mac dinh
+   "center" chi lo phan troi trong o giua anh. Lech tam nhin XUONG duoi de lo
+   dung may chieu/man chieu (chu the chinh cua anh). */
+.portal-animation .portal-art {
+  object-position: center 78%;
+}
+.portal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.portal-truyen .portal-overlay {
+  background: linear-gradient(180deg, #0b0e1859 0%, #0b0e1888 42%, #080a11e6 100%);
+}
+.portal-animation .portal-overlay {
+  background: linear-gradient(165deg, #0b0e1852 0%, #0b0e1885 48%, #080a11e6 100%);
+}
+
+/* Hoa tiet nen — mo, dat GOC DUOI PHAI, khong bao gio de len chu (z-index
+   thap hon `.portal-body`, va mo du de khong canh tranh voi chu). CHI con
+   dung cho cong CHUA co anh minh hoa that (Audio, va cac ve tinh). */
+.portal-motif {
+  position: absolute;
+  right: -10px;
+  bottom: -10px;
+  width: 62%;
+  height: auto;
+  max-height: 78%;
+  color: var(--text);
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 0;
+}
+.portal-audio .portal-motif { color: var(--sac-studio-1); opacity: 0.16; }
+/* Truyện/Animation co anh that o lop duoi — bo hoa tiet SVG de tranh CHONG
+   hai lop chat lieu cung luc (chi mot lop "chat lieu nen" moi cong). */
+.portal-truyen .portal-motif,
+.portal-animation .portal-motif {
+  display: none;
+}
+
+.portal-rune { position: absolute; top: var(--s3); left: var(--s3); color: var(--sac-explore-1); z-index: 2; }
+
+.portal-body {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.portal-icon {
+  display: grid;
+  place-items: center;
+  width: 34px; height: 34px;
+  margin-bottom: 4px;
+  border-radius: var(--r2);
+  background: var(--brand-soft);
+  border: 1px solid var(--brand-line);
+  color: var(--brand-hover);
+  transition: transform 220ms var(--ease);
+}
+.portal-card:hover .portal-icon { transform: translateY(-1px) scale(1.05); }
+.portal-truyen .portal-icon { color: var(--sac-explore-1); border-color: color-mix(in srgb, var(--sac-explore-1) 45%, transparent); background: color-mix(in srgb, var(--sac-explore-1) 14%, transparent); }
+.portal-animation .portal-icon { color: var(--sac-animation-1); border-color: color-mix(in srgb, var(--sac-animation-1) 45%, transparent); background: color-mix(in srgb, var(--sac-animation-1) 14%, transparent); }
+.portal-audio .portal-icon { color: var(--sac-studio-1); border-color: color-mix(in srgb, var(--sac-studio-1) 45%, transparent); background: color-mix(in srgb, var(--sac-studio-1) 14%, transparent); }
+
+.portal-title { font-size: var(--t-xl); font-weight: 700; letter-spacing: -0.01em; }
+.portal-truyen .portal-title { font-size: var(--t-2xl); }
+
+.portal-truyen:hover { border-color: color-mix(in srgb, var(--sac-explore-1) 55%, transparent); }
+.portal-animation:hover { border-color: color-mix(in srgb, var(--sac-animation-1) 55%, transparent); }
+.portal-audio:hover { border-color: color-mix(in srgb, var(--sac-studio-1) 55%, transparent); }
+
+/* Dai ve tinh: gon hon nhieu so voi cong chinh — mot HANG, khong phai luoi. */
+.portal-satellites {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s3);
+}
+.portal-satellite {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3);
+  border-radius: var(--r3);
+  border: 1px solid var(--kinh-vien);
+  /* Vien TRAI mo — dau hieu phan biet BA ve tinh voi nhau, moi loai mot mau
+     khu vuc rieng, khong can hoa tiet rieng cho tung cai. */
+  border-left: 2px solid var(--kinh-vien);
+  background: #0b0e18b3;
+  color: inherit;
+  text-decoration: none;
+  box-shadow: var(--kinh-sang);
+  transition: border-color 180ms var(--ease), background 180ms var(--ease);
+}
+.portal-satellite:hover { color: inherit; background: #0b0e18e0; }
+.portal-sat-community { border-left-color: color-mix(in srgb, var(--sac-community-1) 55%, transparent); }
+.portal-sat-write { border-left-color: color-mix(in srgb, var(--sac-write-1) 55%, transparent); }
+.portal-sat-image-studio { border-left-color: color-mix(in srgb, var(--brand) 45%, transparent); }
+.portal-satellite-icon {
+  display: grid;
+  place-items: center;
+  width: 30px; height: 30px;
+  flex: 0 0 auto;
+  border-radius: var(--r2);
+  background: var(--brand-soft);
+  color: var(--brand-hover);
+}
+.portal-satellite-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.portal-sat-community .portal-satellite-icon { color: var(--sac-community-1); background: color-mix(in srgb, var(--sac-community-1) 14%, transparent); }
+.portal-sat-community:hover { border-color: color-mix(in srgb, var(--sac-community-1) 45%, transparent); }
+.portal-sat-write .portal-satellite-icon { color: var(--sac-write-1); background: color-mix(in srgb, var(--sac-write-1) 14%, transparent); }
+.portal-sat-write:hover { border-color: color-mix(in srgb, var(--sac-write-1) 45%, transparent); }
+.portal-sat-image-studio:hover { border-color: var(--brand-line); }
+
+/* Duong chia mang giua "chon loi di" va cac ke noi dung — CHI mot lan tren
+   trang, danh dau buoc chuyen tu dieu huong sang noi dung. */
+.home-divider {
+  display: flex;
+  justify-content: center;
+  color: var(--text-3);
+  margin-block: var(--s2);
 }
 
 /* O trong GON cho tung ke (Phan 8 dac ta) — MOT dong, khong phai mot khoi
@@ -3437,10 +3637,12 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 
   Phuc hoi tu `feature/fanfic-visual-renaissance-v1` — DAT TEN CLASS RIENG
   (khong dung tien to "portal-" cua ban goc, von dung chung he thong class
-  voi The Gioi Cong). The Gioi Cong CHU DINH khong duoc phuc hoi (xem bao cao
-  Phase A, 2026-08-23) — component nay CHI muon dung lai hoa tiet SVG
-  `MotifManuscript` (mot minh hoa doc lap, khong lien quan gi Portal), khong
-  muon keo theo bat ky phu thuoc CSS nao cua he thong Portal chua ton tai.
+  voi The Gioi Cong). Ban goc dung `.portal-empty-noibat`; luc phuc hoi dem
+  nay (2026-08-23) The Gioi Cong CHU DINH chua duoc phuc hoi nen component
+  duoc tach rieng de khong keo theo phu thuoc CSS Portal chua ton tai — nay
+  The Gioi Cong da phuc hoi (2026-08-24) nhung TEN RIENG nay van duoc GIU
+  NGUYEN (khong doi lai "portal-empty-noibat") de tranh doi ten khong can
+  thiet cho mot thanh phan da hoat dong dung, da co bai kiem rieng.
 */
 .empty-noibat {
   position: relative;
@@ -3511,20 +3713,44 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   Dat o CUOI, sau khi nguoi doc da xem truyen. Dat no o tren thi thanh ra bao
   nguoi vua vao rang hay di lam viec — trong khi ho den de doc.
 */
+/*
+  Phuc hoi tu `feature/fanfic-visual-renaissance-v1` (Phase 3.5 "Cinematic
+  Homepage Polish"): dai CTA phua het chieu rong man hinh voi mot anh minh
+  hoa that lam nen, thay ban the-vien-tron/nen-gradient truoc day. `.cta-band-art`
+  la lop DUOI CUNG, `.cta-band-overlay` la lop phu toi vua du de chu doc duoc.
+*/
 .cta-band {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--s5);
   flex-wrap: wrap;
-  padding: var(--s6);
-  border-radius: var(--r4);
-  border: 1px solid var(--brand-line);
-  background:
-    radial-gradient(720px 240px at 12% 0%, #8b6cff29, transparent 70%),
-    linear-gradient(180deg, #0a0d1aa3, #070910a8);
+  width: 100vw;
+  margin-inline: calc(50% - 50vw);
+  padding-block: var(--s7);
+  padding-inline: max(var(--s6), calc((100vw - var(--wrap)) / 2 + var(--s5)));
+  border-radius: 0;
+  border: 0;
+  border-block: 1px solid var(--brand-line);
+  background: linear-gradient(180deg, #0a0d1aa3, #070910a8);
   box-shadow: var(--edge);
+  min-height: 340px;
 }
+.cta-band-art {
+  object-fit: cover;
+  object-position: 72% 40%;
+  z-index: 0;
+}
+.cta-band-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(100deg, #080a11f0 0%, #0a0d1ac2 38%, #0a0d1a6b 62%, #0a0d1a3d 100%);
+}
+.cta-band-body, .cta-band > .row { position: relative; z-index: 2; }
 .cta-band-body { display: flex; flex-direction: column; gap: var(--s2); max-width: 62ch; }
 .cta-band h2 { font-size: var(--t-lg); }
 
@@ -4433,16 +4659,11 @@ body.co-mini { padding-bottom: 74px; }
   /* Vach dieu huong: nhay thang sang muc moi, khong truot. */
   .nav-vach { transition: none; }
   .nav-link[aria-current="page"] { transition: none; }
-  /* Vet sang "cong dich": rut thoi luong ve 0 van de lai mot vach sang lo lung
-     giua duong (dung ly do da ghi o dau khoi nay cho `.progress-bar::after`) —
-     an han di. */
-  .nav-vach-streak { display: none; }
-  /* Tracer vien dieu huong: an han di, KHONG dung o mot vi tri giua duong
-     (`animation: none` de lai stroke dung yen o mot cung nua-sang-nua-toi
-     tuy tien — doc ra nhu loi ve hon la "dang chon"). Vien tinh + nen cua
-     `.nav-vach` da du de bao "dang chon" ma khong can chuyen dong nao them —
-     dung y "reduced-motion fallback phai VAN doc ra dang chon". */
-  .nav-vach-tracer { display: none; }
+  /* Tracer (LOP B, SVG): dat han chuyen dong stroke-dashoffset — vien LOP A
+     (`.nav-vach-base-stroke`, tinh, khong bi hang nay dung toi) da du chu vi
+     hoan chinh de nhan biet trang thai active ma khong can chuyen dong nao
+     them — dung y "reduced-motion fallback phai VAN doc ra dang chon". */
+  .nav-vach-tracer-stroke { animation: none; }
 
   /* Nhip tho cua nen trang chu: BO han. */
   .page-bg-lop[data-bg="home"]::before { animation: none; }
@@ -4552,6 +4773,38 @@ body.co-mini { padding-bottom: 74px; }
   .empty-noibat { flex-direction: column; align-items: flex-start; text-align: left; }
   .empty-noibat-motif { width: 56px; }
 
+  /*
+    Cong the gioi o mobile — KHONG xep chong het xuong mot cot dai vo tan.
+    Truyen van la cong lon nguyen mot hang; Animation/Audio xep CANH nhau
+    (2 cot) thay vi tiep tuc xep doc.
+  */
+  .portal-primary { grid-template-columns: 1fr; }
+  .portal-truyen { min-height: 220px; }
+  .portal-stack { grid-template-rows: none; grid-template-columns: 1fr 1fr; }
+
+  /*
+    Dai ve tinh thanh MOT RAY CUON NGANG thay vi luoi 3 cot bi ep chat. Cung
+    ky thuat voi `.nav-links` o breakpoint 900px: an thanh cuon, vet mo mep
+    phai, snap.
+  */
+  .portal-satellites {
+    display: flex;
+    overflow-x: auto;
+    gap: var(--s3);
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, #000 90%, transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 90%, transparent);
+    scroll-snap-type: x proximity;
+  }
+  .portal-satellites::-webkit-scrollbar { display: none; }
+  .portal-satellite {
+    flex: 0 0 auto;
+    width: 78vw;
+    max-width: 300px;
+    scroll-snap-align: start;
+  }
+
   :root {
     --t-2xl: 25px; --t-xl: 20px; --t-lg: 18px;
     /*
@@ -4633,7 +4886,7 @@ body.co-mini { padding-bottom: 74px; }
      Dat `min-height` chu khong phai `height` de nut co chu dai van cao them
      duoc thay vi tran chu ra ngoai. */
   .btn, .btn-sm, .chip, .seg-item, .nav-link, .account-link,
-  .brand, .menu-item, .input-search, .novel-pick, .hero-v2-pill { min-height: 44px; }
+  .brand, .menu-item, .input-search, .novel-pick, .portal-satellite { min-height: 44px; }
   .btn-sm { padding: 8px 13px; }
   /* `.bell` (chuong thong bao) bi bo sot khoi danh sach tren: kich thuoc goc
      34x34 la CO DINH (width/height, khong phai min-height) nen khong tu gian
@@ -4666,8 +4919,9 @@ body.co-mini { padding-bottom: 74px; }
      san, chi can dam bao khong tran). */
   .hero-v2 { padding-block: var(--s4) var(--s5); }
   .hero-v2-cta .btn { flex: 1 1 auto; }
-  .hero-v2-secondary { gap: var(--s2); }
-  .cta-band { padding: var(--s5) var(--s4); }
+  /* `.cta-band` khong can rieng mot ghi de mobile — `max(var(--s6), calc(...))`
+     o luat co so da tu ve padding-inline nho lai dung khi 100vw < var(--wrap),
+     giong het cach Candidate A xu ly (khong co ghi de rieng o do). */
 
   /* Hang audio: bia va ten tren mot hang, nhom nut xuong dong rieng chiem
      tron be ngang — giong hang chuong o tren, va vi cung mot ly do. */

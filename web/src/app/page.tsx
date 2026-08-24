@@ -42,6 +42,7 @@
  * nhap rieng, xem `DaiThanhVien`).
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback } from "react";
 import {
@@ -51,6 +52,7 @@ import {
   type AnimationSeries,
   type ContinueItem,
   type ContinueWatchItem,
+  type LeaderboardEntry,
   type Novel,
   type OwnProgress,
   type Post,
@@ -59,12 +61,20 @@ import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
 import { StoryCard } from "@/components/StoryCard";
 import { Avatar } from "@/components/Avatar";
+import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
 import { NovelCover } from "@/components/NovelCover";
-import { MotifManuscript, MotifWaveArcs } from "@/components/Ornaments";
+import {
+  CelestialDivider,
+  CornerRune,
+  MotifFilmFrame,
+  MotifManuscript,
+  MotifWaveform,
+} from "@/components/Ornaments";
 import { ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
 import {
   IconBook,
   IconCompass,
+  IconCrown,
   IconFeather,
   IconFilm,
   IconFlame,
@@ -81,6 +91,9 @@ const GRID_COUNT = 12;
 const MAX_TAGS = 12;
 /** So series lay ve cho ke "Animation mới" — gon, khong canh tranh voi ke truyen. */
 const ANIM_SHELF_COUNT = 6;
+/** So hang lay ve cho "Bảng vàng tuần" — mot dong nhin luot qua duoc, khong
+ * phai ca bang xep hang (xem /leaderboard cho ban day du). */
+const BANG_VANG_COUNT = 5;
 /** So bai dang lay ve cho o xem truoc cong dong — "2–4 the" theo dac ta. */
 const FEED_SHELF_COUNT = 4;
 
@@ -93,6 +106,10 @@ interface HomeData {
   listening: ContinueItem | null;
   watching: ContinueWatchItem | null;
   gamification: { progress: OwnProgress; thanhTuuMoiNhat: Achievement | null } | null;
+  /** Top XP tuần ISO hiện tại — "Bảng vàng tuần". Rỗng khi chưa ai kiếm XP
+   * trong tuần (`GET /api/leaderboard?mode=weekly` thật, xem
+   * `app/leaderboard/page.tsx` — KHÔNG bịa chỉ số mới nào). */
+  bangVangTuan: LeaderboardEntry[];
 }
 
 function dinhDangGio(giay: number): string {
@@ -185,14 +202,21 @@ function TheTiepTucXem({ muc }: { muc: ContinueWatchItem }) {
 }
 
 /**
- * HERO (Phần 5 đặc tả) — giữ bản sắc fantasy/anime + nền hiện có
- * (`PageBackground`, xem `layout.tsx`), nhưng rút gọn xuống một vùng nội
- * dung hữu ích thay vì một khối trống gần hết màn hình đầu tiên.
+ * HERO — "cổng vào thế giới" (Visual Renaissance Phase 3, xem Visual Bible
+ * mục 2 và 15). Giữ `.hero-copy` (khớp `PageHero`/theme hiện tại của
+ * `layout.tsx` — Candidate A ra đời trước hệ thống này nên không có, nhưng
+ * bỏ đi sẽ mất lớp sương/toả sáng sau chữ dùng nhất quán ở mọi trang khác).
+ *
+ * SUA so voi Homepage Hub V2: ban truoc nhet CA nut chinh LAN mot hang ba
+ * pill lien ket nhanh (Animation/Audio Studio/Cộng đồng) vao Hero — nam CTA
+ * dang-nut trong mot man hinh dau. Ba lien ket do gio nam trong luoi
+ * `TheGioiCong` ngay duoi day (dieu huong phu duoc "tich hop tinh te hon"
+ * thay vi lap lai o Hero) — Hero chi con DUNG MOT hanh dong chinh va MOT
+ * hanh dong phu, dung tinh than "one dominant action, one secondary action".
  */
 function Hero({ daDangNhap }: { daDangNhap: boolean }) {
   return (
     <section className="hero-v2 rise" aria-labelledby="home-hero-title">
-      <MotifWaveArcs className="hero-v2-motif" />
       <div className="hero-copy">
         <span className="pill">
           <span className="pill-dot" aria-hidden="true" />
@@ -213,17 +237,6 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
         </Link>
         <Link className="btn btn-outline" href="/write">
           Viết truyện
-        </Link>
-      </div>
-      <div className="row hero-v2-secondary" aria-label="Lối tắt nhanh">
-        <Link className="hero-v2-pill" href="/animation">
-          <IconFilm size={15} /> Animation
-        </Link>
-        <Link className="hero-v2-pill" href="/studio">
-          <IconHeadphones size={15} /> Audio Studio
-        </Link>
-        <Link className="hero-v2-pill" href="/community">
-          <IconMegaphone size={15} /> Cộng đồng
         </Link>
       </div>
       {!daDangNhap ? (
@@ -269,20 +282,26 @@ function DaiThanhVien({
   );
 }
 
-interface TinhNang {
+interface DiemDen {
   href: string;
   icon: React.ReactNode;
   ten: string;
   mota: string;
 }
 
-/** Luoi tinh nang (Phan 7 dac ta) — CHI tro toi cac duong da co that. */
-const DANH_SACH_TINH_NANG: TinhNang[] = [
+/**
+ * BA diem den CHINH — moi diem la mot "cong" rieng, khong phai mot the trong
+ * mot hang deu nhau (Visual Renaissance Phase 3, thay `DANH_SACH_TINH_NANG`
+ * cu). Thu tu ke ca kich thuoc phan anh dung uu tien san pham: Truyen la ly
+ * do chinh nguoi ta den, Animation la san pham thu hai manh nhat, Audio la
+ * mot cach tieu thu CHINH Truyen (khong phai mot the ngang hang doc lap).
+ */
+const DIEM_DEN_CHINH: DiemDen[] = [
   {
     href: "/fanfic",
-    icon: <IconBook size={19} />,
+    icon: <IconBook size={22} />,
     ten: "Truyện",
-    mota: "Khám phá fanfic cộng đồng",
+    mota: "Khám phá fanfic do cộng đồng viết",
   },
   {
     href: "/animation",
@@ -296,40 +315,113 @@ const DANH_SACH_TINH_NANG: TinhNang[] = [
     ten: "Audio",
     mota: "Nghe truyện bằng giọng đọc",
   },
+];
+
+/** BA diem den VE TINH — nho hon, mot hang gon duoi ba cong chinh. */
+const DIEM_DEN_PHU: DiemDen[] = [
   {
     href: "/community",
-    icon: <IconMegaphone size={19} />,
+    icon: <IconMegaphone size={17} />,
     ten: "Cộng đồng",
     mota: "Thảo luận và chia sẻ",
   },
   {
     href: "/write",
-    icon: <IconFeather size={19} />,
+    icon: <IconFeather size={17} />,
     ten: "Sáng tác",
     mota: "Viết và xuất bản truyện",
   },
   {
     href: "/image-studio",
-    icon: <IconSparkles size={19} />,
+    icon: <IconSparkles size={17} />,
     ten: "Image Studio",
     mota: "Tạo hình ảnh cho thế giới của bạn",
   },
 ];
 
-function LuoiTinhNang() {
+/**
+ * "CHỌN LỐI ĐI CỦA BẠN" — cổng thế giới bất đối xứng (Visual Renaissance
+ * Phase 3), thay lưới 6 thẻ đều nhau cũ (`.hub-grid`/`.quick-card`, vẫn còn
+ * dùng ở `/account`).
+ *
+ * Truyện là cổng THỐNG TRỊ (chiếm 2/3 chiều rộng, cao gấp đôi) — đây là lý do
+ * chính người dùng đến. Animation/Audio xếp dọc bên phải, nhỏ hơn nhưng vẫn
+ * là hai đích đến độc lập. Cộng đồng/Sáng tác/Image Studio là một dải vệ
+ * tinh gọn — trên mobile dải này CUỘN NGANG thay vì xếp chồng vô hạn (xem
+ * `.portal-satellites` ở `globals.css`).
+ *
+ * Mỗi cổng có MỘT hoạ tiết SVG nền riêng (`Ornaments.tsx`) để bản sắc đến từ
+ * chất liệu/hình ảnh, không chỉ icon+nhãn — đúng yêu cầu "destination art".
+ */
+function TheGioiCong() {
   return (
     <section className="stack-2 rise rise-1" aria-labelledby="home-tinh-nang">
       <h2 className="section-title" id="home-tinh-nang">
-        Khám phá Fanfic World
+        Chọn lối đi của bạn
       </h2>
-      <div className="hub-grid">
-        {DANH_SACH_TINH_NANG.map((t) => (
-          <Link key={t.href} className="quick-card" href={t.href}>
-            <span className="quick-icon" aria-hidden="true">
-              {t.icon}
+      <div className="portal-primary">
+        <Link href={DIEM_DEN_CHINH[0].href} className="portal-card portal-truyen">
+          <Image
+            src="/images/portals/truyen-manuscript.webp"
+            alt=""
+            fill
+            priority
+            sizes="(max-width: 900px) 100vw, 66vw"
+            className="portal-art"
+          />
+          <span className="portal-overlay" aria-hidden="true" />
+          <CornerRune className="portal-rune" />
+          <MotifManuscript className="portal-motif" />
+          <span className="portal-body">
+            <span className="portal-icon" aria-hidden="true">
+              {DIEM_DEN_CHINH[0].icon}
             </span>
-            <strong>{t.ten}</strong>
-            <span className="hint">{t.mota}</span>
+            <strong className="portal-title">{DIEM_DEN_CHINH[0].ten}</strong>
+            <span className="hint">{DIEM_DEN_CHINH[0].mota}</span>
+          </span>
+        </Link>
+        <div className="portal-stack">
+          <Link href={DIEM_DEN_CHINH[1].href} className="portal-card portal-animation">
+            <Image
+              src="/images/portals/animation-projector.webp"
+              alt=""
+              fill
+              loading="eager"
+              sizes="(max-width: 900px) 50vw, 33vw"
+              className="portal-art"
+            />
+            <span className="portal-overlay" aria-hidden="true" />
+            <MotifFilmFrame className="portal-motif" />
+            <span className="portal-body">
+              <span className="portal-icon" aria-hidden="true">
+                {DIEM_DEN_CHINH[1].icon}
+              </span>
+              <strong className="portal-title">{DIEM_DEN_CHINH[1].ten}</strong>
+              <span className="hint">{DIEM_DEN_CHINH[1].mota}</span>
+            </span>
+          </Link>
+          <Link href={DIEM_DEN_CHINH[2].href} className="portal-card portal-audio">
+            <MotifWaveform className="portal-motif" />
+            <span className="portal-body">
+              <span className="portal-icon" aria-hidden="true">
+                {DIEM_DEN_CHINH[2].icon}
+              </span>
+              <strong className="portal-title">{DIEM_DEN_CHINH[2].ten}</strong>
+              <span className="hint">{DIEM_DEN_CHINH[2].mota}</span>
+            </span>
+          </Link>
+        </div>
+      </div>
+      <div className="portal-satellites">
+        {DIEM_DEN_PHU.map((d) => (
+          <Link key={d.href} href={d.href} className={`portal-satellite portal-sat-${d.href.replace(/\//g, "")}`}>
+            <span className="portal-satellite-icon" aria-hidden="true">
+              {d.icon}
+            </span>
+            <span className="portal-satellite-body">
+              <strong>{d.ten}</strong>
+              <span className="hint">{d.mota}</span>
+            </span>
           </Link>
         ))}
       </div>
@@ -418,6 +510,83 @@ function TheCongDong({ bai }: { bai: Post }) {
   );
 }
 
+/**
+ * Series Animation DUY NHAT trong kho — chi mot series thi KHONG con nam lot
+ * thom trong mot luoi (`.anim-grid-shelf`), mot the nho co canh trong rat co
+ * don, nhu mot carousel bi gay. Dung LAI dung mau "mot muc duy nhat" da co
+ * san cho Truyen (`.story-card-featured`, xem `StoryCard.tsx`) thay vi bia
+ * mot kieu rieng cho Animation — CUNG mot ngu phap thi giac cho "chi mot thu
+ * trong kho" o ca hai khu vuc.
+ */
+function TheAnimNoiBat({ series }: { series: AnimationSeries }) {
+  return (
+    <article className="story-card-featured">
+      <Link href={`/animation/${series.series_id}`} className="story-card-featured-cover">
+        <NovelCover
+          novelId={series.series_id}
+          title={series.title}
+          coverUrl={series.cover_url}
+          size="wide"
+        />
+      </Link>
+      <div className="story-card-featured-body">
+        <span className="eyebrow">Series mới nhất</span>
+        <h3 className="story-card-featured-title">
+          <Link href={`/animation/${series.series_id}`}>{series.title}</Link>
+        </h3>
+        {series.tags.length > 0 ? (
+          <div className="story-tags">
+            {series.tags.slice(0, 3).map((tag) => (
+              <span key={tag} className="chip chip-static">
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {series.description ? (
+          <p className="hint clamp-2">{series.description}</p>
+        ) : null}
+        <Link href={`/animation/${series.series_id}`} className="btn btn-primary btn-sm">
+          Xem series
+        </Link>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * Mot hang cua "Bảng vàng tuần" — dung LAI nguyen bo lop `.lb-*` cua
+ * `HangXepHang` o `app/leaderboard/page.tsx` (cung mot du lieu, cung mot
+ * ngu phap hang bang xep hang), bo qua huy hieu vang hang 1-3: hang muc nay
+ * la MOT dong xem luot, khong phai ca bang xep hang.
+ */
+function HangBangVang({ it }: { it: LeaderboardEntry }) {
+  return (
+    <li className="lb-row">
+      <span className="lb-rank" aria-hidden="true">#{it.rank}</span>
+      <CosmeticFrame
+        cosmetic={it.equipped_cosmetics.find((c) => c.slot === "avatar_frame")}
+      >
+        <Avatar
+          name={it.display_name || it.username || "?"}
+          avatarUrl={it.avatar_url}
+          className="avatar avatar-sm"
+        />
+      </CosmeticFrame>
+      <span className="lb-info">
+        {it.username ? (
+          <Link href={`/u/${it.username}`} className="binh-luan-ten">
+            {it.display_name || it.username}
+          </Link>
+        ) : (
+          <strong>{it.display_name || "Ẩn danh"}</strong>
+        )}
+      </span>
+      <span className="lb-xp">{it.xp.toLocaleString("vi-VN")} XP</span>
+    </li>
+  );
+}
+
 export default function HomePage() {
   const { profile } = useSession();
   const daDangNhap = Boolean(profile);
@@ -430,7 +599,7 @@ export default function HomePage() {
       duoc keo sap ca trang chu (cung triet ly voi ban V4 cu, mo rong cho hai
       nguon moi).
     */
-    const [page, tags, tiepTuc, gam, animRes, feedRes] = await Promise.all([
+    const [page, tags, tiepTuc, gam, animRes, feedRes, lbRes] = await Promise.all([
       api.browseNovels({ limit: GRID_COUNT }),
       api.novelTags(),
       daDangNhap
@@ -441,6 +610,7 @@ export default function HomePage() {
         : Promise.resolve(null),
       api.listAnimationSeries({ limit: ANIM_SHELF_COUNT }).catch(() => ({ series: [] })),
       social.feed(FEED_SHELF_COUNT).catch(() => ({ items: [] })),
+      api.getLeaderboard("weekly", BANG_VANG_COUNT, 0).catch(() => ({ items: [] })),
     ]);
     const thanhTuuMoiNhat = gam
       ? gam[1].achievements
@@ -452,6 +622,7 @@ export default function HomePage() {
       tags: tags.tags,
       animationSeries: animRes.series,
       communityPosts: feedRes.items,
+      bangVangTuan: lbRes.items,
       reading: tiepTuc.reading,
       listening: tiepTuc.listening,
       watching: tiepTuc.watching,
@@ -464,6 +635,7 @@ export default function HomePage() {
   const novels = data?.novels ?? [];
   const animationSeries = data?.animationSeries ?? [];
   const communityPosts = data?.communityPosts ?? [];
+  const bangVangTuan = data?.bangVangTuan ?? [];
   const coTiepTuc = Boolean(data?.reading || data?.listening || data?.watching);
 
   return (
@@ -504,7 +676,11 @@ export default function HomePage() {
         </section>
       ) : null}
 
-      <LuoiTinhNang />
+      <TheGioiCong />
+
+      <div className="home-divider" aria-hidden="true">
+        <CelestialDivider />
+      </div>
 
       {/* Ke "Đang nổi bật" — moi tao gan day nhat trong kho truyen (Phan 8). */}
       <section className="stack-5 rise rise-2" aria-labelledby="home-noi-bat">
@@ -539,8 +715,25 @@ export default function HomePage() {
         Ke "Animation mới" (Phan 8) — DOC LAP voi ke truyen tren: rong thi tu
         an, KHONG lam rong ca trang du kho truyen dang co du lieu (hoac
         nguoc lai).
+
+        Chi MOT series thi KHONG con nam lot thom trong mot luoi
+        (`.anim-grid-shelf`) — mot the nho co canh trong rat co don. Dung
+        LAI dung mau "mot muc duy nhat" da co san cho Truyen o tren, cung
+        mot ngu phap thi giac cho "chi mot thu trong kho" o ca hai khu vuc.
       */}
-      {!loading && animationSeries.length > 0 ? (
+      {!loading && animationSeries.length === 1 ? (
+        <section className="stack-2 rise rise-2" aria-labelledby="home-animation">
+          <div className="section-head">
+            <h2 className="section-title section-title-icon" id="home-animation">
+              <IconFilm size={20} /> Animation mới
+            </h2>
+            <Link href="/animation" className="section-more">
+              Xem tất cả <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+          <TheAnimNoiBat series={animationSeries[0]} />
+        </section>
+      ) : !loading && animationSeries.length > 1 ? (
         <section className="stack-2 rise rise-2" aria-labelledby="home-animation">
           <div className="section-head">
             <h2 className="section-title section-title-icon" id="home-animation">
@@ -580,6 +773,31 @@ export default function HomePage() {
               <TheCongDong key={bai.post_id} bai={bai} />
             ))}
           </div>
+        </section>
+      ) : null}
+
+      {/*
+        "Bảng vàng tuần" — top XP tuần ISO hiện tại, từ ĐÚNG API bảng xếp
+        hạng đã có (`GET /api/leaderboard?mode=weekly`, xem
+        `app/leaderboard/page.tsx`). Chỉ MỘT hạng mục — backend không tách
+        riêng "tác giả" với "độc giả", nên KHÔNG bịa hai thẻ phân tách ở đây.
+        Rỗng thì ẨN hết, giống mọi kệ khác ở trang này.
+      */}
+      {!loading && bangVangTuan.length > 0 ? (
+        <section className="stack-2 rise rise-2" aria-labelledby="home-bang-vang">
+          <div className="section-head">
+            <h2 className="section-title section-title-icon" id="home-bang-vang">
+              <IconCrown size={20} /> Bảng vàng tuần
+            </h2>
+            <Link href="/leaderboard" className="section-more">
+              Xem bảng xếp hạng <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+          <ol className="lb-list">
+            {bangVangTuan.map((it) => (
+              <HangBangVang key={it.user_id} it={it} />
+            ))}
+          </ol>
         </section>
       ) : null}
 
@@ -624,13 +842,22 @@ export default function HomePage() {
         de doc/xem/nghe.
       */}
       <section className="cta-band" aria-labelledby="home-tac-gia">
+        <Image
+          src="/images/portals/creator-worldbuilding.webp"
+          alt=""
+          fill
+          loading="lazy"
+          sizes="100vw"
+          className="cta-band-art"
+        />
+        <span className="cta-band-overlay" aria-hidden="true" />
         <div className="cta-band-body">
           <h2 className="section-title" id="home-tac-gia">
-            Bạn cũng viết fanfic?
+            Dựng nên thế giới của riêng bạn
           </h2>
           <p className="hint">
-            Tạo truyện, thêm chương, rồi tạo audio bằng giọng đọc tiếng Việt.
-            Truyện để ở bản nháp cho tới khi bạn tự xuất bản.
+            Viết truyện, thêm chương, rồi biến chữ thành giọng đọc và hình
+            ảnh. Truyện để ở bản nháp cho tới khi bạn tự xuất bản.
           </p>
         </div>
         <div className="row">

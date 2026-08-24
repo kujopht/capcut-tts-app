@@ -116,12 +116,72 @@ class BrokenStorage(LocalStorageAdapter):
         raise OSError("ổ đĩa đầy")
 
 
+class FakeR2LikeStorage:
+    """
+    Ban gia lap hinh dang `R2StorageAdapter` — KHONG ke thua `LocalStorageAdapter`.
+
+    Vi sao can rieng mot lop, khong dung `RecordingStorage`: `RecordingStorage`
+    ke thua `LocalStorageAdapter`, nen no luon di qua nhanh `put_file` ke ca
+    TRUOC khi sua loi nay (nhanh `isinstance(storage, LocalStorageAdapter)` cu
+    da bat dung no roi). Loi that su nam o nhanh `else` — duong ma MOI kho
+    khong phai `LocalStorageAdapter` di qua, tuc la R2 trong san xuat. Lop nay
+    mo phong dung hinh dang do (co ca `put(bytes)` LAN `put_file(source)` nhu
+    `R2StorageAdapter`) de chung minh `_run_job` goi `put_file` — khong doc ca
+    file audio vao RAM roi goi `put(dest.read_bytes())` nhu truoc khi sua.
+    """
+
+    mode = "r2"
+
+    def __init__(self, calls: List[str]):
+        self.calls = calls
+        self._objects: Dict[str, bytes] = {}
+
+    def put(self, key: str, data: bytes, content_type: str = "audio/mpeg") -> str:
+        self.calls.append("put_bytes")
+        self._objects[key] = data
+        return key
+
+    def put_file(self, key: str, source: Any, content_type: str = "audio/mpeg") -> str:
+        self.calls.append("upload")
+        self._objects[key] = Path(source).read_bytes()
+        return key
+
+    def get(self, key: str) -> bytes:
+        return self._objects[key]
+
+    def exists(self, key: str) -> bool:
+        return key in self._objects
+
+    def size(self, key: str) -> int:
+        return len(self._objects.get(key, b""))
+
+    def delete(self, key: str) -> bool:
+        return self._objects.pop(key, None) is not None
+
+    def list_objects(self, prefix: str = ""):
+        return iter(())
+
+    def signed_url(self, key: str, expires_seconds: int = 3600,
+                   download_name: Optional[str] = None) -> Optional[str]:
+        return None
+
+
 # -----------------------------------------------------------------------------
 # Nen chung
 # -----------------------------------------------------------------------------
 
 
 class JobLifecycleTestCase(unittest.TestCase):
+    def _make_storage(self) -> Any:
+        """
+        Hook cho subclass doi kho file dang dung.
+
+        Mac dinh dung `RecordingStorage` (ke thua `LocalStorageAdapter`). Cac
+        test can mo phong duong R2 that su (kho KHONG phai
+        `LocalStorageAdapter`) ghi de ham nay — xem `TestR2LikeStorageStreamsUpload`.
+        """
+        return RecordingStorage(Path(self._tmp), self.calls)
+
     def setUp(self) -> None:
         dung_registry_gia(self)
         self.calls: List[str] = []
@@ -131,7 +191,7 @@ class JobLifecycleTestCase(unittest.TestCase):
         self.store = RecordingStore(self.calls)
         server_main.store = self.store
         self._real_storage = server_main.storage
-        server_main.storage = RecordingStorage(Path(self._tmp), self.calls)
+        server_main.storage = self._make_storage()
 
         self._real_synth = tts_bridge.synthesize_chapter
         tts_bridge.synthesize_chapter = self._make_synth()
@@ -434,6 +494,45 @@ class TestWorkerCleanup(JobLifecycleTestCase):
         while server_main._job_threads and time.monotonic() < deadline:
             time.sleep(0.02)
         self.assertEqual(server_main._job_threads, {})
+
+
+# -----------------------------------------------------------------------------
+# 10: upload audio phai STREAM tu dia (khong doc het vao RAM), ke ca voi kho
+# khong phai LocalStorageAdapter (tuc la duong R2 that su trong san xuat)
+# -----------------------------------------------------------------------------
+
+
+class TestR2LikeStorageStreamsUpload(JobLifecycleTestCase):
+    """
+    Regression cho PR #54: `_run_job` tung chi goi `put_file` (STREAM) khi
+    `isinstance(storage, LocalStorageAdapter)` va roi ve `put(dest.read_bytes())`
+    (doc CA FILE vao RAM) cho moi kho khac — tuc la R2 trong san xuat, dung
+    truong hop PR do noi da sua nhung thuc ra chua sua duoc. `FakeR2LikeStorage`
+    khong ke thua `LocalStorageAdapter` nen bai test nay chay dung nhanh `else`
+    cu (nay la nhanh unconditional `put_file`) va se do ngay neu ai do dua nhanh
+    doc-het-vao-RAM tro lai.
+    """
+
+    def _make_storage(self) -> Any:
+        self.fake_storage = FakeR2LikeStorage(self.calls)
+        return self.fake_storage
+
+    def test_completed_job_uploads_via_streaming_put_file_not_put_bytes(self):
+        job = self._run_to_end()
+
+        self.assertEqual(job["status"], JobStatus.COMPLETED.value)
+        self.assertTrue(job["output_key"])
+        self.assertIn("upload", self.calls,
+                       "audio phai duoc dua vao kho qua put_file() (streaming)")
+        self.assertNotIn(
+            "put_bytes", self.calls,
+            "khong duoc doc ca file audio vao RAM roi goi put(bytes) — "
+            "day chinh la loi OOM ma PR #54 phai sua",
+        )
+        # Kiem thuc su object da nam trong kho, dung noi dung
+        self.assertEqual(
+            self.fake_storage.get(job["output_key"]), b"\x00" * 4096
+        )
 
 
 if __name__ == "__main__":

@@ -351,6 +351,56 @@ class TestR2AdapterProbes(unittest.TestCase):
         self.assertNotIn("BI-MAT-KHONG-DUOC-LO", chuoi)
 
 
+class TestR2AdapterPutFile(unittest.TestCase):
+    """
+    `put_file` PHAI STREAM tu dia (dung `upload_file` cua boto3 — tu chuyen
+    sang multipart khi file lon), KHONG doc het file vao RAM roi moi goi
+    `put_object`. File audio import sap toi co the toi ~2GB (dai toi 63 gio),
+    nen doc het vao bo nho truoc la mot dinh RAM khong can thiet.
+    """
+
+    def _adapter(self):
+        from server.r2_adapter import R2StorageAdapter
+
+        return R2StorageAdapter(R2Settings(
+            account_id="acc123", access_key_id="k", secret_access_key="s",
+            bucket="qa-bucket"))
+
+    def test_put_file_dung_upload_file_khong_doc_het_vao_ram(self):
+        adapter = self._adapter()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            nguon = Path(tmp) / "track.mp3"
+            nguon.write_bytes(b"gia-lap-noi-dung-audio")
+
+            class FakeClient:
+                def __init__(self):
+                    self.upload_file_calls = []
+                    self.put_object_calls = []
+
+                def upload_file(self, filename, bucket, key, ExtraArgs=None):
+                    self.upload_file_calls.append((filename, bucket, key, ExtraArgs))
+
+                def put_object(self, **kw):
+                    # KHONG duoc goi duong nay — do la duong `put()` doc het
+                    # vao RAM, chinh la thu put_file phai tranh.
+                    self.put_object_calls.append(kw)
+                    return {}
+
+            fake = FakeClient()
+            adapter._client = fake
+
+            key = adapter.put_file("audio/k.mp3", nguon)
+
+            self.assertEqual(key, "audio/k.mp3")
+            self.assertEqual(len(fake.upload_file_calls), 1)
+            self.assertEqual(len(fake.put_object_calls), 0)
+            filename, bucket, sent_key, extra_args = fake.upload_file_calls[0]
+            self.assertEqual(filename, str(nguon))
+            self.assertEqual(bucket, "qa-bucket")
+            self.assertEqual(sent_key, "audio/k.mp3")
+            self.assertEqual(extra_args, {"ContentType": "audio/mpeg"})
+
 class TestProfileFromRow(unittest.TestCase):
     """
     `_profile_from` (hang `profiles` -> `Profile`) la nguon cho MOI duong doc

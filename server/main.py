@@ -38,7 +38,6 @@ from server.secret_redaction import loc_bo_theo_gia_tri
 from server.adapters import (
     AppwriteUnavailableError,
     AuthError,
-    LocalStorageAdapter,
     MockMetadataStore,
     NotFoundError,
     PermissionDenied,
@@ -2076,10 +2075,13 @@ def _run_job(job: TtsJob, text: str, fence: Optional[int] = None) -> None:
             return
 
         # -- dua file vao kho TRUOC, danh dau hoan tat SAU -------------------
-        if isinstance(storage, LocalStorageAdapter):
-            storage.put_file(output_key, dest)
-        else:
-            storage.put(output_key, dest.read_bytes())
+        #
+        # Luon di qua `put_file` (STREAM tu dia), khong bao gio `put(bytes)`:
+        # track dai (audio import toi ~2GB) khien doc het file vao RAM truoc
+        # khi upload tao mot dinh bo nho khong can thiet. Ca `LocalStorageAdapter`
+        # lan `R2StorageAdapter` deu co `put_file(key, source)` — khong con can
+        # nhanh rieng cho ban mock cuc bo.
+        storage.put_file(output_key, dest)
 
         # `duration_seconds` do tu metadata file that (ffprobe). Khong do duoc
         # thi track van hoan tat voi 0 — thieu thoi luong khong duoc phep lam
@@ -4085,11 +4087,16 @@ class ReadProgressIn(BaseModel):
 class ListenProgressIn(BaseModel):
     """Bao cao vi tri dang nghe. `position_seconds` CHI de hien thi thanh tien
     do — KHONG dung lam can cu tinh uy tin (xem `ListenIn` o tren, do lay tu
-    track o may chu)."""
+    track o may chu).
+
+    Tran tren la 1_000_000 giay (~277 gio) — chi de chan du lieu rac
+    (NaN/Infinity/so am khong lo), KHONG phai 24 gio: audiobook/track that co
+    the dai toi hang chuc gio (da xac nhan file that toi 63 gio), nen KHONG
+    duoc dung 86_400 (24h) lam tran o day."""
 
     novel_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     chapter_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
-    position_seconds: float = Field(ge=0, le=86_400)
+    position_seconds: float = Field(ge=0, le=1_000_000)
 
 
 def _ngay_utc_hom_nay() -> str:

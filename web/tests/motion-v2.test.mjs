@@ -211,10 +211,12 @@ test("MOT vach dung chung, khong phai moi muc mot vach", () => {
 test("vach truot bang transform, KHONG bang left", () => {
   /*
     Doi `left` buoc trinh duyet tinh lai bo cuc moi khung. `transform` chay tren
-    tang ghep va khong cham vao bo cuc.
+    tang ghep va khong cham vao bo cuc. Phuc hoi V7: `translate(x, y)` ca hai
+    truc (khong con chi `translateX` — vi tri DOC gio cung la mot gia tri do
+    duoc, khong con suy tu `top:50%; margin-top` co dinh).
   */
   const src = read("../src/components/NavIndicator.tsx");
-  assert.match(src, /transform: `translateX\(/);
+  assert.match(src, /transform: `translate\(\$\{o\.x\}px, \$\{o\.y\}px\)`/);
   assert.ok(!/left: `/.test(src), "vạch được đặt bằng `left`");
 
   const text = css();
@@ -375,7 +377,7 @@ test("chuc nang KHONG doi khi giam chuyen dong", () => {
   for (const m of than.matchAll(/^\s*([^{@}\n][^{\n]*)\{([^}]*)\}/gm)) {
     if (!/display: none/.test(m[2])) continue;
     const sel = m[1].trim();
-    assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after|nav-vach-streak|nav-vach-tracer|sao-tinh/.test(sel),
+    assert.ok(/hat|canh-troi|progress-bar::after|btn-primary::after|sao-tinh/.test(sel),
       `${sel} bị ẩn khi giảm chuyển động — có thể đang giấu nội dung`);
   }
 });
@@ -386,13 +388,19 @@ test("MOT vien thuoc, khong phai mot vach cho moi muc", () => {
   /*
     Vach 2px cu doc ra la mot gach ngang doi cho. Mot vien thuoc co THE TICH,
     nen mat theo duoc no di qua khoang trong giua hai muc.
+
+    Phuc hoi V7 (2026-08-24): bo goc CO SO la `var(--r2)` (gia tri nen truoc
+    khi do xong) — `NavIndicator.tsx` ghi de bang `o.radius` (DO THAT, clamp
+    an toan theo ca hai truc) ngay khi co phep do dau tien, xem test rieng
+    cho co che nay. Khong con `height: 34px` co dinh — chieu cao gio DO THAT
+    tu `o.h`, khong con mot con so CSS gia dinh truoc.
   */
   const than = khoi(css(), ".nav-vach {");
-  assert.match(than, /border-radius: var\(--r-full\)/, "vẫn là một vạch");
-  assert.match(than, /height: 34px/);
+  assert.match(than, /border-radius: var\(--r2\)/, "vẫn là một vạch, bo góc là giá trị nền trước khi đo xong");
+  assert.ok(!/height: 34px/.test(than), "không còn chiều cao cố định — đo thật từ o.h");
   assert.match(than, /transition:[\s\S]*transform/);
-  // Ease-out manh, KHONG nay lai: mot duong cong co do vong doc ra nhu do choi.
-  assert.match(than, /cubic-bezier\(\.22, 1, \.36, 1\)/);
+  // Ease-out CO KIEM SOAT, khong nay lai (khac ban truoc dung .22,1,.36,1).
+  assert.match(than, /cubic-bezier\(\.22, \.8, \.2, 1\)/);
   const ms = Number(than.match(/transform (\d+)ms/)?.[1]);
   assert.ok(ms >= 350 && ms <= 500, `${ms}ms — cần 350–500`);
 });
@@ -437,9 +445,10 @@ test("@keyframes nav-tracer-dash di dung MOT vong chu vi (pathLength=100)", () =
 
 test("SVG tracer dung pathLength de doc lap voi kich thuoc thuc te cua o", () => {
   const src = codeOnly(read("../src/components/NavIndicator.tsx"));
-  assert.match(src, /pathLength=\{100\}/,
+  assert.match(src, /pathLength="100"/,
     "thiếu pathLength — dasharray sẽ sai tỉ lệ khi bề rộng mục đổi (tên dài/ngắn)");
-  assert.match(src, /className="nav-vach-tracer"/);
+  assert.match(src, /className="nav-vach-svg"/);
+  assert.match(src, /className="nav-vach-base-stroke"/);
   assert.match(src, /className="nav-vach-tracer-stroke"/);
 });
 
@@ -455,30 +464,44 @@ test("tracer do CAO cua o (h), khong dung hang so cung voi height CSS", () => {
   assert.doesNotMatch(src, /34\s*\/\s*2/, "không được lặp lại số 34px của CSS trong JS");
 });
 
-test("hop .nav-vach GHI DE height/marginTop inline tu o.h, khong de lech voi CSS", () => {
+test("hop .nav-vach dinh vi bang translate(x,y) + height that, khong con margin-top co dinh", () => {
   /*
-    Loi that phat hien qua review doc lap (2026-08-23): `.nav-vach` dat
-    `height: 34px` CO DINH trong CSS, nhung `o.h` do tu `.nav-link` (bao gom
-    padding/border rieng cua muc) THUONG khac 34 (do luong thuc te: 36-38px
-    tuy muc). SVG tracer dung `viewBox` theo `o.h` nhung neu HOP THAT (`.nav-vach`)
-    van cao 34px co dinh theo CSS thi `preserveAspectRatio="none"` se ep truc
-    doc gian/co khong deu — net tron o hai dau tracer meo thanh elip. Ghi de
-    ca `height` LAN `marginTop` (de giu can giua doc, `top: 50%` + `margin-top:
-    -h/2`) tu CHINH `o.h` xoa han nguy co lech — giong het co che voi `width`.
+    Phuc hoi V7 (2026-08-24): kien truc CU (2026-08-23) dat `height`/`marginTop`
+    GHI DE tu `o.h` de bu cho `.nav-vach` co CSS `height: 34px`/`top: 50%;
+    margin-top: -17px` co dinh — mot phien ban CHUA vao goc van de. V7 bo han
+    gia dinh do: `left/top` ve 0, VI TRI THAT (ca ngang lan doc) nam het trong
+    `transform: translate(x, y)`, khong con `margin-top` nao ca.
   */
   const src = codeOnly(read("../src/components/NavIndicator.tsx"));
-  assert.match(src, /height:\s*`\$\{o\.h\}px`/,
-    "hộp .nav-vach phải ghi đè height inline từ o.h, không để CSS 34px cố định một mình quyết định");
-  assert.match(src, /marginTop:\s*`\$\{-o\.h\s*\/\s*2\}px`/,
-    "phải ghi đè marginTop tương ứng để giữ căn giữa dọc khi height thực tế khác 34px");
+  assert.match(src, /height:\s*`\$\{o\.h\}px`/, "hộp .nav-vach phải đặt height thật từ o.h");
+  assert.ok(!/marginTop/.test(src), "V7 không còn margin-top — vị trí dọc nằm hết trong transform: translate(x, y)");
+  assert.match(src, /const y = b\.top - a\.top/, "phải đo vị trí dọc thật (o.y), không suy từ top:50%");
+});
+
+test("bo goc tracer CLAMP an toan theo CA HAI truc — sua loi tracer hinh elip", () => {
+  /*
+    Loi goc: `.nav-link` dung `border-radius: var(--r-full)` (mot gia tri PILL
+    rat lon, TU-CLAMP dung trong CSS theo CUNG mot ty le ca hai truc). SVG
+    `rx`/`ry` lai clamp theo TUNG TRUC RIENG BIET (spec SVG2) — tren mot hop
+    RONG HON NHIEU so voi CAO, dat rx=ry=999 se cho ra hai gia tri clamp khac
+    nhau, ve mot goc HINH ELIP thay vi hinh tron. Sua bang cach tu CLAMP truoc
+    trong JS thanh MOT gia tri hieu dung duy nhat.
+  */
+  const src = codeOnly(read("../src/components/NavIndicator.tsx"));
+  assert.match(src, /const radius = Math\.min\(targetRadius, w \/ 2, h \/ 2\)/,
+    "bán kính hiệu dụng phải clamp theo CẢ HAI trục trước khi dùng cho rx/ry");
+  assert.match(src, /getComputedStyle\(muc\)\.borderTopLeftRadius/,
+    "phải đọc bán kính THẬT từ CSS thay vì đoán một hằng số");
 });
 
 test("tracer AN han khi giam chuyen dong, van con vien+nen tinh de bao dang chon", () => {
   const than = khoi(css(), "@media (prefers-reduced-motion: reduce)");
-  assert.match(than, /\.nav-vach-tracer \{ display: none; \}/);
-  // `.nav-vach` (vien + nen) KHONG bi tat trong khoi reduced-motion — chi
-  // `transition` cua no bi tat (kiem o test khac) — nen "dang chon" van
-  // doc duoc qua mau nen/vien tinh du tracer da an.
+  // Phuc hoi V7: chi LOP B (`.nav-vach-tracer-stroke`) tat animation — LOP A
+  // (`.nav-vach-base-stroke`, mot vien TINH ve du chu vi) khong bi dong toi,
+  // nen van du de bao "dang chon" ma khong can an ca lop SVG.
+  assert.match(than, /\.nav-vach-tracer-stroke \{ animation: none; \}/);
+  assert.ok(!/\.nav-vach-base-stroke\s*\{\s*display: none/.test(than),
+    "viền tĩnh (lớp A) không được biến mất — đó là tín hiệu 'đang chọn' còn lại khi tắt chuyển động");
   assert.ok(!new RegExp(String.raw`\.nav-vach \{ display: none`).test(than),
     "vien+nen chinh không được biến mất — đó là tín hiệu 'đang chọn' còn lại khi tắt chuyển động");
 });
@@ -586,7 +609,13 @@ test("nhan muc dang xem KHONG BAO GIO trong suot", () => {
   assert.ok(!/background-clip/.test(than),
     "nhãn mục đang xem lại phụ thuộc background-clip: text");
   assert.ok(!/color: transparent/.test(than), "nhãn mục đang xem trong suốt");
-  assert.match(than, /color: var\(--sac-2/, "nhãn không có màu đặc");
+  /*
+    Phuc hoi V7 (2026-08-24): mau nhan doi tu `--sac-2` (mau rieng cua khu
+    vuc, vi du tim/hong) sang `--text` (gan-trang, "moonlight ivory") — chu
+    mau tren nen phat sang (vien+tracer cua .nav-vach) bi phan hoi la kho
+    doc. Sac cua khu vuc gio CHI con o vien/quang, khong con o chu.
+  */
+  assert.match(than, /color: var\(--text\)/, "nhãn không có màu đặc (đọc được trên nền phát sáng)");
 });
 
 test("vien thuoc do tu BANG THAM CHIEU, khong tu querySelector", () => {

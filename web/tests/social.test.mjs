@@ -642,7 +642,9 @@ test("HOI QUY: /community vao truc khong pha vien thuoc va nhan /write", () => {
   const khoi = than.slice(at, than.indexOf("}", at) + 1)
     .replace(/\/\*[\s\S]*?\*\//g, "");
   assert.ok(!/background-clip/.test(khoi));
-  assert.match(khoi, /color: var\(--sac-2/);
+  // Phuc hoi V7 (2026-08-24): mau nhan la `--text` (gan-trang), khong con
+  // `--sac-2` rieng cua khu vuc — xem motion-v2.test.mjs cho ly do doi.
+  assert.match(khoi, /color: var\(--text\)/);
 });
 
 test("HOI QUY: sections.ts van tinh dung huong quanh community", async () => {

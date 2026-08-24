@@ -120,26 +120,32 @@ test("width TOI DICH cham hon transform mot chut — tao cam giac gian/nen nhe",
   assert.ok(w - t <= 150, "lệch quá xa sẽ trông như lỗi, không phải hiệu ứng có chủ đích");
 });
 
-test("vet sang 'cong dich' chay MOT LAN khi vach den noi, dung lai keyframe sheen da co", () => {
+test("nav-vach KHONG con vet sang mot lan — kien truc V7 khong con pseudo-element/gradient nao", () => {
+  /*
+    Phuc hoi V7 tu `feature/fanfic-visual-renaissance-v1` (2026-08-24): vet
+    sang mot lan (`.nav-vach-streak`, dung keyframe `sheen`) da bi go khoi
+    kien truc nay TU CHINH nhanh do — no la nguyen nhan goc cua loi "quang
+    mau dinh trong khung" (chay animation mot lan nhung khong dat
+    `animation-fill-mode: forwards`). Bai test nay khoa lai rang no khong
+    quay tro lai.
+  */
   const css_ = css();
-  const streak = rule(".nav-vach-streak");
-  assert.match(streak, /animation: sheen \d+ms var\(--ease\) 1\b/, "phải chỉ định 1 lần lặp, không phải infinite");
-  assert.ok(!css_.match(/\.nav-vach-streak[^}]*infinite/s), "vệt sáng lặp vô hạn — spec yêu cầu MỘT LẦN rồi tắt hẳn");
-
+  assert.ok(!css_.includes(".nav-vach-streak"), "kiến trúc V7 không còn `.nav-vach-streak`");
   const src = read("../src/components/NavIndicator.tsx");
-  assert.match(src, /key=\{o\.tick\}/, "vệt sáng phải remount theo tick để animation chạy lại mỗi lần đổi route");
-  // tick CHI tang khi MUC that su doi — khong tang khi do lai vi resize/cuon.
-  assert.match(src, /truoc\.moc !== moc/);
+  assert.ok(!src.includes("nav-vach-streak"), "NavIndicator không được render lại vệt sáng đã bị gỡ");
+  assert.ok(!src.includes("o.tick"), "không còn cơ chế `tick` retrigger — đã bị gỡ cùng vệt sáng");
 });
 
-test("vach + vet sang deu duoc tat/nhay tuc thi duoi prefers-reduced-motion", () => {
+test("vach + tracer deu duoc tat/nhay tuc thi duoi prefers-reduced-motion", () => {
   const css_ = css();
   const khoi = css_.slice(
     css_.indexOf("@media (prefers-reduced-motion: reduce)"),
     css_.indexOf("@media (prefers-reduced-motion: reduce)") + 4000,
   );
   assert.match(khoi, /\.nav-vach \{ transition: none; \}/);
-  assert.match(khoi, /\.nav-vach-streak \{ display: none; \}/);
+  // LOP B (tracer) tat animation; LOP A (`.nav-vach-base-stroke`, khong bi
+  // hàng này đụng tới) vẫn vẽ đủ chu vi tĩnh để báo trạng thái active.
+  assert.match(khoi, /\.nav-vach-tracer-stroke \{ animation: none; \}/);
 });
 
 /* ==================================================== homepage hub ======== */
@@ -155,23 +161,40 @@ test("hero moi la mot vung noi dung, khong phai chia doi 50/50", () => {
   }
 });
 
-test("luoi tinh nang LUON ve, khong phu thuoc so truyen/animation/cong dong", () => {
+test("cong the gioi (Storyworld Portal) LUON ve, khong phu thuoc so truyen/animation/cong dong", () => {
+  // Phuc hoi Storyworld Portal (2026-08-24): `TheGioiCong` thay `LuoiTinhNang`
+  // cu, nhung giu dung bat bien "luon ve" — dieu huong chinh cua trang chu
+  // khong duoc phep bien mat chi vi mot nguon du lieu phu rong/loi.
   const src = home();
-  const at = src.indexOf("<LuoiTinhNang");
+  const at = src.indexOf("<TheGioiCong");
   assert.notEqual(at, -1);
   // Phai nam TRUOC nhanh dieu kien cua ke "Đang nổi bật" (loading/error/rong) —
   // nghia la khong bi mot `&&`/ternary nao cua du lieu truyen bao quanh.
   assert.ok(at < src.indexOf('id="home-noi-bat"'));
   const truoc = src.slice(Math.max(0, at - 200), at);
   assert.ok(!/animationSeries\.length|communityPosts\.length|novels\.length/.test(truoc),
-    "lưới tính năng bị một điều kiện dữ liệu bao quanh");
+    "cổng thế giới bị một điều kiện dữ liệu bao quanh");
 });
 
-test("6 the tinh nang CHI tro toi duong da co that", () => {
+test("6 diem den (cong chinh + ve tinh) CHI tro toi duong da co that", () => {
+  /*
+    Phuc hoi Storyworld Portal (2026-08-24): `DANH_SACH_TINH_NANG` (mot mang
+    6 muc) tach thanh `DIEM_DEN_CHINH` (3 cong chinh: Truyen/Animation/Audio)
+    + `DIEM_DEN_PHU` (3 ve tinh: Cong dong/Sang tac/Image Studio). Trich
+    RIENG tung mang bang chi so bat dau/ket thuc that su, khong dua vao mot
+    chuoi con tinh co xuat hien trong docstring (bai hoc tu chinh mot ban
+    truoc cua bai test nay: dung `indexOf("DANH_SACH_TINH_NANG")` tinh co
+    khop mot cau chu thich, khien slice tran qua het phan con lai cua tep).
+  */
   const src = home();
-  const atDanhSach = src.indexOf("DANH_SACH_TINH_NANG");
-  const than = src.slice(atDanhSach, src.indexOf("function LuoiTinhNang"));
-  const hrefs = [...than.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]);
+  const atChinh = src.indexOf("const DIEM_DEN_CHINH");
+  const atPhu = src.indexOf("const DIEM_DEN_PHU");
+  const atHetPhu = src.indexOf("function TheGioiCong");
+  assert.ok(atChinh !== -1 && atPhu !== -1 && atHetPhu !== -1, "thiếu một trong hai mảng điểm đến");
+  const chinhSrc = src.slice(atChinh, atPhu);
+  const phuSrc = src.slice(atPhu, atHetPhu);
+  const hrefsCua = (s) => [...s.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]);
+  const hrefs = [...hrefsCua(chinhSrc), ...hrefsCua(phuSrc)];
   assert.deepEqual(hrefs, [
     "/fanfic", "/animation", "/studio", "/community", "/write", "/image-studio",
   ]);
@@ -184,7 +207,11 @@ test("6 the tinh nang CHI tro toi duong da co that", () => {
 
 test("ke Animation moi / cong dong TU AN khi rong, khong ve hop rong to", () => {
   const src = home();
-  assert.match(src, /animationSeries\.length > 0 \? \(/);
+  // Phuc hoi Storyworld Portal (2026-08-24): ke Animation them nhanh "chi
+  // mot series" (dung mau `.story-card-featured`, giong ke truyen), nhung
+  // van phai TU AN het khi rong — khong con nhanh nao ca thi la `: null`.
+  assert.match(src, /animationSeries\.length === 1 \? \(/);
+  assert.match(src, /animationSeries\.length > 1 \? \(/);
   assert.match(src, /communityPosts\.length > 0 \? \(/);
   /*
     Rong thi tra `null` (khong ve gi), khong phai mot `EmptyState` day du.
@@ -198,24 +225,39 @@ test("ke Animation moi / cong dong TU AN khi rong, khong ve hop rong to", () => 
   assert.match(src, /<KeTrongNoiBat \/>/, "thiếu ô trống minh hoạ cho kệ truyện");
 });
 
-test("KeTrongNoiBat dung hoa tiet rieng, KHONG dinh vao he thong Storyworld Portal", () => {
+test("KeTrongNoiBat van dung ten class RIENG cua no, du The Gioi Cong da phuc hoi", () => {
   /*
     Phuc hoi 2026-08-23: ban goc tren `feature/fanfic-visual-renaissance-v1`
-    dung chung ten class voi The Gioi Cong (tien to "portal-"), nhung The
-    Gioi Cong CHU DINH khong duoc phuc hoi (xem bao cao Phase A). Bai nay
-    khoa lai rang lan phuc hoi nay dung TEN CLASS RIENG, khong vo tinh keo
-    theo phu thuoc nao cua he thong Portal.
+    dung chung ten class voi The Gioi Cong (tien to "portal-"), nhung luc do
+    The Gioi Cong CHU DINH chua duoc phuc hoi nen component nay tach rieng
+    ten class de khong vo tinh keo theo phu thuoc CSS Portal chua ton tai.
+    Phuc hoi Storyworld Portal (2026-08-24): The Gioi Cong nay DA co that
+    tren trang, nhung KeTrongNoiBat VAN giu ten class rieng (khong doi lai
+    "portal-empty-noibat") — tranh doi ten khong can thiet cho mot thanh
+    phan da hoat dong dung, da co bai kiem rieng (xem globals.css).
   */
   const src = home();
-  assert.match(src, /import \{ MotifManuscript, MotifWaveArcs \} from "@\/components\/Ornaments"/);
   assert.match(src, /className="empty-noibat"/);
   assert.match(src, /className="empty-noibat-motif"/);
   assert.match(src, /className="empty-noibat-body"/);
-  assert.ok(!/className="portal-/.test(src), "trang chủ không được dùng class hệ thống Portal");
 
   const than = rule(".empty-noibat");
   assert.match(than, /border-radius: var\(--r4\)/);
   assert.match(than, /display: flex/);
+});
+
+test("The Gioi Cong (Storyworld Portal) da phuc hoi, dung dung 3 cong chinh + 3 ve tinh", () => {
+  const src = home();
+  assert.match(src, /function TheGioiCong/);
+  assert.match(src, /className="portal-primary"/);
+  assert.match(src, /className="portal-card portal-truyen"/);
+  assert.match(src, /className="portal-card portal-animation"/);
+  assert.match(src, /className="portal-card portal-audio"/);
+  assert.match(src, /className="portal-satellites"/);
+  // Anh minh hoa that cho Truyen/Animation, hoa tiet SVG cho Audio (chua co
+  // anh rieng) — dung tinh than Phase 3.5 "Cinematic Homepage Polish".
+  assert.match(src, /\/images\/portals\/truyen-manuscript\.webp/);
+  assert.match(src, /\/images\/portals\/animation-projector\.webp/);
 });
 
 test("khong bia so lieu backend khong ho tro (luot xem/nghe/theo doi gia)", () => {

@@ -89,6 +89,14 @@ export function NavLinks() {
             href={link.href}
             className={link.cta ? "nav-link nav-cta" : "nav-link"}
             aria-current={active ? "page" : undefined}
+            /*
+              Rieng cho `NavIndicator`: hinh hoc (x/y/w/h/radius) la DO THAT
+              tu chinh phan tu, khong con suy tu "shape". Co nay CHI con phuc
+              vu mot viec: nhan ra "day la CTA co khung rieng can tam an luc
+              duoc chon", de biet luc nao bat `data-nav-leaving` (xem
+              globals.css) — mot moi quan tam KHAC voi hinh hoc.
+            */
+            data-nav-cta={link.cta ? "" : undefined}
             ref={(el) => {
               if (el) bang.current.set(link.href, el);
               else bang.current.delete(link.href);

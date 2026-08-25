@@ -127,6 +127,22 @@ export default function ChapterPage({
       <section className="reader" aria-label="Nội dung chương">
         {chapter.content ? (
           <div className="prose">{chapter.content}</div>
+        ) : audio ? (
+          // Cac tac pham nhap tu audio dai tap (13 truyen Fanfic Staging,
+          // xem docs/reports/) khong co van ban goc — day la trang thai BINH
+          // THUONG cua chung, khong phai loi/thieu du lieu. "Chua co noi
+          // dung" doc nhu mot canh bao hong; trang thai rieng nay noi dung
+          // dieu do ro rang va dua thang toi trai nghiem nghe.
+          <EmptyState
+            icon="🎧"
+            title="Chương này chỉ có bản audio"
+            hint={`Chưa có bản chữ cho chương này${novel ? ` trong ${novel.title}` : ""}. Nghe trọn tập tại trang Nghe.`}
+            action={
+              <Link className="btn btn-primary" href={`/listen/${chapter.chapter_id}`}>
+                <IconHeadphones size={15} /> Nghe tập này
+              </Link>
+            }
+          />
         ) : (
           <p className="hint">Chương này chưa có nội dung.</p>
         )}

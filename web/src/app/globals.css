@@ -1330,8 +1330,17 @@ main { overflow-x: clip; }
   top: 0;
   z-index: 50;
   background: #080a14a8;
+  /*
+    2026-08-26: Lightning CSS (trinh minify cua Next 16) gop mot cap
+    `backdrop-filter` + `-webkit-backdrop-filter` KHAC gia tri thanh MOT,
+    giu lai ban duoc khai bao SAU CUNG (ke ca ten co tien to) va am tham bo
+    ban con lai — Chrome/Edge/Firefox chi con nhan `-webkit-backdrop-filter`
+    (ma cac dong may nay khong doc), nen kinh mo bien mat hoan toan tren moi
+    trinh duyet tru Safari. Ca hai khai bao gio PHAI cung mot gia tri (thu
+    tu: tien to truoc, chuan sau) de dedup con lai ban nao cung dung.
+  */
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.2);
   backdrop-filter: blur(var(--blur)) saturate(1.2);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
   border-bottom: 1px solid transparent;
   border-image: linear-gradient(
       90deg, transparent, var(--line) 22%, var(--line) 78%, transparent
@@ -1787,8 +1796,13 @@ body[data-nav-leaving="write"] .nav-cta:not([aria-current="page"]) {
     nam sau trong tep nen se de len phan `background` o day.
   */
   isolation: isolate;
-  backdrop-filter: blur(var(--blur-the)) saturate(1.18);
+  /*
+    Thu tu: tien to TRUOC, chuan SAU — xem giai thich day du o `.site-header`.
+    Lightning CSS giu ban khai bao SAU CUNG (ke ca ten); dao nguoc thu tu se
+    xoa mat kinh mo tren moi trinh duyet tru Safari.
+  */
   -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.18);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.18);
   border: 1px solid var(--kinh-vien);
   box-shadow: var(--do-sau), var(--kinh-sang);
 }
@@ -1893,8 +1907,8 @@ body[data-nav-leaving="write"] .nav-cta:not([aria-current="page"]) {
   border-radius: var(--r4);
   border: 1px solid var(--kinh-vien);
   isolation: isolate;
-  backdrop-filter: blur(var(--blur-the)) saturate(1.18);
   -webkit-backdrop-filter: blur(var(--blur-the)) saturate(1.18);
+  backdrop-filter: blur(var(--blur-the)) saturate(1.18);
   box-shadow: var(--do-sau), var(--kinh-sang);
 }
 
@@ -2676,8 +2690,8 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
     0 0 0 4px #ffffff14,
     0 0 0 5px #d8b56a30,
     inset 0 1px 0 #ffffff40;
-  backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 
 /*
@@ -2839,8 +2853,8 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   border: 1px solid var(--line-strong);
   border-radius: var(--r3);
   background: var(--glass-strong);
-  backdrop-filter: blur(var(--blur)) saturate(1.5);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
   box-shadow: var(--shadow-3), var(--edge);
   transform-origin: top right;
   animation: menu-in var(--dur-fast) var(--ease);
@@ -4097,8 +4111,8 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   bottom: 0;
   z-index: 60;
   background: var(--glass-strong);
-  backdrop-filter: blur(var(--blur)) saturate(1.5);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(1.5);
+  backdrop-filter: blur(var(--blur)) saturate(1.5);
   border-top: 1px solid var(--kinh-vien);
   box-shadow: 0 -8px 30px #00000059;
   padding-bottom: env(safe-area-inset-bottom, 0);
@@ -5233,8 +5247,8 @@ body.co-mini { padding-bottom: 74px; }
      xuong khi so ket qua doi. */
   padding: 10vh var(--s4) var(--s4);
   background: #05070fb8;
-  backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
   /* Cung keyframe fade-in dung cho `.modal-backdrop` — lop nen truoc day mo
      dot ngot (animation: none), khong khop ngon ngu chuyen dong con lai cua
      trang. CHI ap dung cho lop nen; `.tim-hop` (o tim) CO CHU DICH khong
@@ -6328,8 +6342,15 @@ body.co-mini { padding-bottom: 74px; }
      * xuyên qua lớp kính trộn vào chữ của thông báo. Đã thấy trên 430px thật.
      */
     background: var(--bg-2);
-    backdrop-filter: none;
+    /*
+      Thu tu tien-to-truoc/chuan-sau nhu moi noi khac (xem `.site-header`):
+      day khong chi la don gian mo-thanh-mo, no phai THANG DUOC gia tri
+      `backdrop-filter` kinh THAT ke thua tu `.menu-panel` o desktop — neu
+      Lightning CSS xoa mat khai bao chuan, kinh cu se lo lai va chu "Khám
+      phá" lai xuyen qua nhu bao cao ban dau.
+    */
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .tb-muc { flex-wrap: wrap; }

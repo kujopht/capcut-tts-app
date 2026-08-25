@@ -95,3 +95,91 @@ adds regression tests locking in: exact-match-beyond-old-top-5 is still
 found, URL-form variants are still detected since the check is
 substring-based, and title similarity alone never produces a false
 positive).
+
+## Production schema cleanup (completed)
+
+After PR #57 merged, the erroneous `title_fulltext_idx` was removed from
+the live `novels` collection directly (schema-key operation):
+
+- Pre-check: repo-wide grep confirmed no live code path uses `Query.search()`
+  against `novels` — only `contains()`, which does not need it.
+- Document count before: 18. Document count after: 18 (unchanged).
+- Remaining indexes after cleanup: `owner_idx`, `state_idx`,
+  `state_created_idx`, `novel_id_idx` (all `key` type, all `available`) —
+  exactly matches the corrected `scripts/setup_appwrite.py`.
+- `moderation_events.action` enum re-verified intact: 43 values, includes
+  `trusted_source_channel_discovery`.
+- No document writes occurred at any point in this schema cleanup.
+
+## PR #58 — candidate-window hardening
+
+Merged (commit range `39c9763`..`9c17f1e`, squashed into `main`). Raises
+`_phat_hien_novel_trung`'s candidate window from 5 to 25 and adds 4
+regression tests (see PR body / commit message for detail). Independently
+reviewed twice — first pass found a docstring in one new test overclaimed
+what it exercised (candidate selection vs. final match); fixed in a
+follow-up commit before merge.
+
+## Trusted Sources QA artifact cleanup (completed)
+
+Inventoried and deleted all disposable Trusted Sources canary artifacts
+from production, all confirmed QA-owned (creator/owner
+`6a8db1d6c8c9ed444619`, the earlier temporary QA admin account) before
+deletion:
+
+| Collection | Records deleted | Verification |
+|---|---|---|
+| `trusted_sources` | 2 (Library of Congress, "Nghe Truyen Di Gioi (QA dup-check, do not import)") | both `created_by=6a8db1d6c8c9ed444619` |
+| `video_imports` | 100 | 100% tied to the 2 QA `trusted_source_id`s above; none had `possible_duplicate_novel_id` set (confirms no accidental flagging against the 13 real novels occurred during QA scans) |
+| `animation_series` | 2 (both `state=draft`) | both `owner_id=6a8db1d6c8c9ed444619` |
+| `animation_episodes` | 1 (`state=draft`) | `owner_id=6a8db1d6c8c9ed444619`, tied to one of the 2 QA series above |
+
+All 105 deletions returned `204`. Post-cleanup verification: all four
+collections now show `total=0`. The 13 real Fanfic novels were read-only
+inspected only (title/owner/state/tags), never written to.
+
+**Incidental observations, left untouched (out of scope for tonight,
+predate this work, no action taken):** the `novels` collection has 5
+records beyond the 13 real published works — one draft duplicate of an
+already-published work (`nov_aaa1dd7254e84d44`, same `work:CAT-db51180e7286`
+tag as the published `nov_f9f2ce79889d42a3`, likely an import-retry
+artifact from the earlier, already-completed Drive import task) and 4
+unrelated "Audio Studio" drafts including one explicitly tagged
+`qa-canary`/`test`. None of these are Trusted Sources artifacts; none were
+touched.
+
+## Production certification — BLOCKED on manual deploy
+
+Both fixes are merged to `main`, but `fas-prod-api` on Render has
+`autoDeploy: false` and no `RENDER_API_KEY`/deploy hook is available to
+this session — deploying requires a manual Render dashboard action. Live
+HTTP-level certification of the merged fix (via the real
+`/api/admin/animation/sources/*` endpoints) could not be completed as a
+result. What **was** proven, directly against real production Appwrite
+data using the current `main` code (bypassing only the HTTP/admin-auth
+layer): `_phat_hien_novel_trung` correctly detects the real known overlap
+(see Finding 2 above). This is strong evidence the algorithm itself is
+correct, but does not confirm the currently-deployed Render binary
+contains PR #57/#58's code.
+
+A fresh disposable QA account was registered for when live certification
+becomes possible: user_id `6a8dd1115b1ef86a585a` (credentials saved
+locally, never printed). It is **not yet** in `FAS_ADMIN_USER_IDS` — needs
+the same manual add-env-var-and-redeploy cycle used for prior QA sessions.
+
+**Manual action needed:** trigger a Render deploy of `main` for
+`fas-prod-api` (picks up PR #57 + #58). While doing that, also add
+`6a8dd1115b1ef86a585a` to `FAS_ADMIN_USER_IDS` so live certification can
+run without waking anyone. After certification, remove that user_id again
+per the established QA-access pattern.
+
+## Verdict
+
+Given live HTTP-level certification is outstanding, Trusted Sources is
+reported as **FAIL (blocked on deploy, not a code defect)** rather than an
+unconditional PASS — consistent with "do not declare PASS from mocks alone
+when a production behavior was the bug": here the situation is the
+mirror image (direct-against-production-data evidence is strong, but the
+live deployed binary is unverified), and the same caution applies. The
+Universal Story Scraper work was correspondingly **not started** tonight,
+per the explicit "only if Trusted Sources is fully PASS" gate.

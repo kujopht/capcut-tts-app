@@ -490,7 +490,8 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # NO fulltext index present at all — verified via a disposable
             # reproduction collection in production
             # (fanfic-world-prod/fanfic_world_prod), see
-            # docs/reports/ for the full trace. It also turned out Appwrite
+            # docs/reports/trusted-sources-duplicate-advisor-2026-08-26.md
+            # for the full trace. It also turned out Appwrite
             # only allows ONE fulltext index per collection, so the
             # two-index version above was never deployable as written.
             # Removed both; do not re-add without a live test proving they

@@ -6342,8 +6342,15 @@ body.co-mini { padding-bottom: 74px; }
      * xuyên qua lớp kính trộn vào chữ của thông báo. Đã thấy trên 430px thật.
      */
     background: var(--bg-2);
-    backdrop-filter: none;
+    /*
+      Thu tu tien-to-truoc/chuan-sau nhu moi noi khac (xem `.site-header`):
+      day khong chi la don gian mo-thanh-mo, no phai THANG DUOC gia tri
+      `backdrop-filter` kinh THAT ke thua tu `.menu-panel` o desktop — neu
+      Lightning CSS xoa mat khai bao chuan, kinh cu se lo lai va chu "Khám
+      phá" lai xuyen qua nhu bao cao ban dau.
+    */
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   .tb-muc { flex-wrap: wrap; }

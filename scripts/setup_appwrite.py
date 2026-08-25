@@ -480,6 +480,20 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # truy van (chong N+1 cho khu quan tri) — cung tinh huong voi
             # `post_id_idx`/`comment_id_idx` o tren, chua co chi muc phu truoc do.
             ("novel_id_idx", "key", ["novel_id"]),
+            # Pre-merge hardening (2026-08) — `find_novels(query=...)`
+            # (appwrite_store.py) phat ra `q_or(contains("title", ...),
+            # contains("description", ...))` khi co `query`. Appwrite tu choi
+            # `contains` tren mot thuoc tinh string neu no khong co chi muc
+            # `fulltext` rieng — CA HAI thuoc tinh trong `q_or` deu can chi
+            # muc, thieu MOT ben la ca truy van loi, khong phai chi mot nhanh
+            # cua OR bi bo qua. Duong goi nay dang duoc dung boi
+            # `TrustedSourceService._phat_hien_novel_trung` (canh bao trung
+            # noi dung giua Novel/Chapter va Trusted Sources/Animation, PR
+            # #55) — thieu chi muc lam no LUON tra "khong tim thay" (loi bi
+            # nuot boi try/except co y, xem docstring ham do), khong phai loi
+            # ro rang.
+            ("title_fulltext_idx", "fulltext", ["title"]),
+            ("description_fulltext_idx", "fulltext", ["description"]),
         ],
     },
     "chapters": {

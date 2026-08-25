@@ -19,6 +19,7 @@ from server.trusted_source_domain import (
     TrustedSourceType,
     VideoImport,
     inferred_mapping_id,
+    trusted_source_id,
 )
 from server.trusted_source_store import MockTrustedSourceStore
 from server.tests.test_appwrite_v2_contract import FakeAppwrite, _bo_client
@@ -164,6 +165,29 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                     s.source_id, success=False, error_message="Hết hạn mức API")
                 self.assertTrue(loi.last_error_at, ten)
                 self.assertEqual(loi.last_error_message, "Hết hạn mức API", ten)
+
+    def test_create_source_once_khong_trung(self):
+        """Pre-merge hardening (2026-08), Fix 2 — hai qua trinh dong thoi
+        cung suy ra `trusted_source_id` GIONG NHAU (cung source_type, cung
+        gia tri dinh danh) phai chi tao MOT `TrustedSource`, KHONG hai —
+        cung nguyen tac voi `test_create_mapping_once_khong_trung`."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                sid = trusted_source_id("youtube_channel", "UC_race")
+                s1, moi1 = kho.create_source_once(TrustedSource(
+                    source_id=sid, source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                    youtube_channel_id="UC_race", display_name="Kênh thắng"))
+                s2, moi2 = kho.create_source_once(TrustedSource(
+                    source_id=sid, source_type=TrustedSourceType.YOUTUBE_CHANNEL,
+                    youtube_channel_id="UC_race", display_name="Kênh thua"))
+                self.assertTrue(moi1, ten)
+                self.assertFalse(moi2, ten)
+                self.assertEqual(s1.source_id, s2.source_id, ten)
+                # Ben THUA (s2) phai doc lai ban CUA BEN THANG, KHONG phai
+                # gia tri no tu truyen vao.
+                self.assertEqual(s2.display_name, "Kênh thắng", ten)
+                _rows, tong = kho.find_sources(limit=None)
+                self.assertEqual(tong, 1, ten)
 
     # ===================================================== series mapping
 
@@ -333,6 +357,37 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                     discovered_via="websub"))[0]
                 lai = kho.get_import(v.import_id)
                 self.assertEqual(lai.discovered_via, "websub", ten)
+
+    def test_possible_duplicate_novel_id_luu_va_doc_lai_ca_hai_kho(self):
+        """Pre-merge hardening (2026-08), Fix 1 — `possible_duplicate_novel_id`
+        (canh bao trung lap CHEO mien Novel) phai luu/doc lai dung tren CA
+        HAI kho, VA ban ghi cu (truoc khi truong nay ton tai) doc thanh
+        `None` (tuong thich nguoc), cung mau voi `discovered_via` o tren."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                v = kho.create_import_once(VideoImport(
+                    youtube_video_id="abc12345680", title="Tập 3",
+                    possible_duplicate_novel_id="nov_abc"))[0]
+                lai = kho.get_import(v.import_id)
+                self.assertEqual(lai.possible_duplicate_novel_id, "nov_abc", ten)
+
+                cu = kho.create_import_once(VideoImport(
+                    youtube_video_id="abc12345681", title="Tập cũ"))[0]
+                lai_cu = kho.get_import(cu.import_id)
+                self.assertIsNone(lai_cu.possible_duplicate_novel_id, ten)
+
+    def test_uploads_playlist_id_cache_luu_va_doc_lai_ca_hai_kho(self):
+        """Pre-merge hardening (2026-08), Fix 4 — `record_uploads_playlist_id`
+        phai ghi lai dung tren CA HAI kho, va nguon MOI tao doc thanh `None`
+        (chua tung resolve)."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_source(TrustedSource(youtube_channel_id="UC_cache"))
+                self.assertIsNone(s.uploads_playlist_id, ten)
+                lai = kho.record_uploads_playlist_id(s.source_id, "UUcache123")
+                self.assertEqual(lai.uploads_playlist_id, "UUcache123", ten)
+                self.assertEqual(
+                    kho.get_source(s.source_id).uploads_playlist_id, "UUcache123", ten)
 
     def test_get_import_by_video_id(self):
         for ten, kho in self._cac_kho():

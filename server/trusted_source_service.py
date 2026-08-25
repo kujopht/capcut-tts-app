@@ -46,6 +46,7 @@ from server.trusted_source_domain import (
     compute_source_health,
     episode_slot_id,
     inferred_mapping_id,
+    trusted_source_id,
     video_import_id,
 )
 from server.video_classifier import NEGATIVE_KEYWORDS, chuan_hoa, classify_video
@@ -252,22 +253,47 @@ class TrustedSourceService:
             raise TrustedSourceError(
                 "Loại nguồn này chưa được triển khai (chỉ YouTube ở Phase 5).")
 
+        youtube_channel_id = youtube_channel_id.strip()
+        youtube_playlist_id = youtube_playlist_id.strip()
+        youtube_video_id = youtube_video_id.strip()
+        truong = self._TRUONG_DINH_DANH.get(loai)
+        gia_tri_dinh_danh = ({
+            "youtube_channel_id": youtube_channel_id,
+            "youtube_playlist_id": youtube_playlist_id,
+            "youtube_video_id": youtube_video_id,
+        }.get(truong, "") if truong else "")
+
         moi = TrustedSource(
             source_type=loai,
-            youtube_channel_id=youtube_channel_id.strip(),
-            youtube_playlist_id=youtube_playlist_id.strip(),
-            youtube_video_id=youtube_video_id.strip(),
+            youtube_channel_id=youtube_channel_id,
+            youtube_playlist_id=youtube_playlist_id,
+            youtube_video_id=youtube_video_id,
             display_name=display_name.strip(),
             thumbnail_url=thumbnail_url,
             auto_discover=auto_discover, auto_import=auto_import,
             auto_publish=auto_publish,
             minimum_confidence=max(0.0, min(1.0, minimum_confidence)),
             created_by=admin.user_id,
+            # `source_id` TAT DINH tu (source_type, gia tri dinh danh) — xem
+            # docstring `trusted_source_id`. Day KHONG thay the
+            # `_dinh_danh_da_ton_tai` (van CHAY TRUOC, van gia tri vi cho
+            # thong diep loi than thien hon o truong hop thuong khong dua
+            # nhau) ma la NGUOI CHAN CUOI CUNG thuc su an toan duoi tai dua
+            # nhau: hai yeu cau gan nhu dong thoi cho CUNG mot nguon deu tinh
+            # ra CUNG mot `source_id`, nen `create_source_once` (Appwrite tu
+            # choi POST trung `documentId`) chi cho DUNG mot ben thang.
+            source_id=trusted_source_id(loai.value, gia_tri_dinh_danh),
         )
         if self._dinh_danh_da_ton_tai(moi):
             raise TrustedSourceError("Nguồn này đã được thêm làm nguồn tin cậy trước đó.")
 
-        source = self._store.create_source(moi)
+        source, da_tao_moi = self._store.create_source_once(moi)
+        if not da_tao_moi:
+            # Thua trong cuoc dua that (hiem, xem docstring o tren) — cung
+            # thong diep voi nhanh kiem tra truoc o tren, cho quan tri mot
+            # loi RO RANG thay vi am tham tra ve nguon CUA BEN THANG (co the
+            # khac du lieu ho vua nhap).
+            raise TrustedSourceError("Nguồn này đã được thêm làm nguồn tin cậy trước đó.")
         self._ghi_nhat_ky(
             "trusted_source_add", target_id=source.source_id,
             actor_id=admin.user_id, actor_role=actor_role,
@@ -574,6 +600,7 @@ class TrustedSourceService:
         vi video do chua tung duoc phan loai).
         """
         vid = video["video_id"]
+        trung_novel = self._phat_hien_novel_trung(vid)
         if vid in da_la_tap:
             self._luu_ket_qua_phan_loai(VideoImport(
                 trusted_source_id=source.source_id, youtube_video_id=vid,
@@ -582,7 +609,8 @@ class TrustedSourceService:
                 published_at=video["published_at"], duration_seconds=video["duration_seconds"],
                 status=ImportStatus.DUPLICATE,
                 reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác.",
-                discovered_via=trigger),
+                discovered_via=trigger,
+                possible_duplicate_novel_id=trung_novel),
                 existing_import)
             logger.info(
                 "trusted_source_ingest source_id=%s youtube_video_id=%s "
@@ -612,6 +640,7 @@ class TrustedSourceService:
             confidence=ket_qua.confidence, signals=list(ket_qua.signals),
             status=trang_thai, reason=ly_do, created_episode_id=episode_id,
             discovered_via=trigger,
+            possible_duplicate_novel_id=trung_novel,
         ), existing_import)
         logger.info(
             "trusted_source_ingest source_id=%s youtube_video_id=%s "
@@ -648,7 +677,43 @@ class TrustedSourceService:
             "status": ket_qua.status,
             "reason": ket_qua.reason,
             "created_episode_id": ket_qua.created_episode_id,
+            "possible_duplicate_novel_id": ket_qua.possible_duplicate_novel_id,
         })
+
+    def _phat_hien_novel_trung(self, youtube_video_id: str) -> Optional[str]:
+        """
+        CANH BAO CHI DE THAM KHAO (pre-merge hardening 2026-08) — xem
+        docstring `VideoImport.possible_duplicate_novel_id`: tim MOT Novel
+        (mien Novel/Chapter HOAN TOAN khac, `server/domain.py`) ma
+        `description` CHUA chinh `youtube_video_id` nay o dang van ban tu do
+        (mot so Novel that duoc tao TU CHINH cac video YouTube nay truoc khi
+        Trusted Sources ton tai — xem lich su Fanfic World Studio). KHONG tu
+        dong chan/bo qua video nao ca, CHI gan mot tin hieu cho quan tri.
+
+        Tai su dung `MetadataStore.find_novels(query=...)` DA CO SAN (loc
+        `title`/`description` CHUA chuoi, xem `server/appwrite_store.py`)
+        thay vi tu bien mot duong tim kiem moi — quy mo hien tai (vai chuc
+        Novel) lam cho MOT truy van `contains` nay CHAP NHAN DUOC, khong
+        phai mot tinh nang full-text search rieng.
+
+        KHONG BAO GIO duoc phep lam sap luong phan loai chinh: bat MOI ngoai
+        le (kho Novel chua san sang, loi mang, thieu phuong thuc...) va coi
+        nhu "khong tim thay" — day la advisory, mot loi o day khong duoc
+        phep chan viec tao/cap nhat `VideoImport`.
+        """
+        if not youtube_video_id:
+            return None
+        try:
+            ung_vien, _ = self._metadata_store.find_novels(
+                query=youtube_video_id, limit=5)
+            for novel in ung_vien:
+                if youtube_video_id in (novel.description or ""):
+                    return novel.novel_id
+        except Exception:
+            logger.warning(
+                "trusted_source_duplicate_novel_check_failed "
+                "youtube_video_id=%s", youtube_video_id, exc_info=True)
+        return None
 
     def _lay_ung_vien(self, yt: YouTubeClient, source: TrustedSource,
                       page_token: str, max_pages: int) -> tuple:
@@ -674,10 +739,18 @@ class TrustedSourceService:
         if source.source_type is TrustedSourceType.YOUTUBE_PLAYLIST:
             playlist_id = source.youtube_playlist_id
         else:
-            kenh = yt.get_channel(source.youtube_channel_id)
-            if kenh is None or not kenh.uploads_playlist_id:
-                raise YouTubeApiError("Không đọc được danh sách video của kênh này.")
-            playlist_id = kenh.uploads_playlist_id
+            # `uploads_playlist_id` cua MOT kenh KHONG BAO GIO doi — cache
+            # tren chinh `TrustedSource` sau lan `channels.list` DAU TIEN
+            # (xem docstring `TrustedSource.uploads_playlist_id`) de moi lan
+            # quet/doi chieu SAU KHONG con phai ton 1 don vi quota goi lai
+            # `channels.list` chi de doc lai CUNG mot gia tri.
+            playlist_id = source.uploads_playlist_id or ""
+            if not playlist_id:
+                kenh = yt.get_channel(source.youtube_channel_id)
+                if kenh is None or not kenh.uploads_playlist_id:
+                    raise YouTubeApiError("Không đọc được danh sách video của kênh này.")
+                playlist_id = kenh.uploads_playlist_id
+                self._store.record_uploads_playlist_id(source.source_id, playlist_id)
 
         return self._lay_video_theo_playlist(yt, playlist_id, page_token, max_pages)
 

@@ -787,6 +787,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               "direct_hls", "direct_mp4"]),
             ("youtube_channel_id", "string", False, 64),
             ("youtube_playlist_id", "string", False, 64),
+            # Pre-merge hardening (2026-08) — cache `contentDetails.
+            # relatedPlaylists.uploads` cua kenh (CHI cho source_type
+            # youtube_channel), THEM SAU (additive, khong bat buoc): tranh
+            # goi lai channels.list moi lan quet chi de doc lai gia tri
+            # KHONG BAO GIO doi, xem `TrustedSource.uploads_playlist_id`.
+            ("uploads_playlist_id", "string", False, 64),
             ("youtube_video_id", "string", False, 32),
             ("display_name", "string", False, 200),
             ("thumbnail_url", "string", False, 512),
@@ -882,6 +888,13 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # `moderation_state` o Phase 4 cu cua Animation).
             ("discovered_via", "enum", False,
              ["manual_scan", "reconcile", "websub", "auto_discovery"]),
+            # Pre-merge hardening (2026-08) — THEM SAU (additive, khong bat
+            # buoc): canh bao CHI DE THAM KHAO ve mot Novel (mien HOAN TOAN
+            # khac) co the da duoc tao tu chinh video nay, xem docstring
+            # `VideoImport.possible_duplicate_novel_id`. Ban ghi CU truoc
+            # pre-merge hardening doc thanh vang mat (tuong thich nguoc,
+            # khong phai loi), cung mau voi `discovered_via` o tren.
+            ("possible_duplicate_novel_id", "string", False, 64),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],

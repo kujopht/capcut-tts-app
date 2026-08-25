@@ -10,7 +10,7 @@ from unittest import mock
 from server.adapters import MockMetadataStore, NotFoundError
 from server.animation_domain import AnimationEpisode, AnimationSeries, AnimationSource
 from server.animation_store import MockAnimationStore
-from server.domain import Profile, PublishState
+from server.domain import Novel, Profile, PublishState
 from server.trusted_source_domain import ImportStatus, TrustedSourceType, VideoImport
 from server.trusted_source_service import TrustedSourceError, TrustedSourceService
 from server.trusted_source_store import MockTrustedSourceStore
@@ -1280,6 +1280,197 @@ class ImportStateReclassificationPolicyTest(unittest.TestCase):
         self.assertEqual(row_2.status, ImportStatus.AUTO_IMPORTED)
         _rows, total = self.store.find_imports(trusted_source_id=source["source_id"])
         self.assertEqual(total, 1)
+
+
+class CrossDomainDuplicateAdvisoryTest(unittest.TestCase):
+    """Pre-merge hardening (2026-08), Fix 1 — canh bao CHI DE THAM KHAO khi
+    mot video quet duoc co ID TRUNG voi ID nhung trong `description` (van
+    ban tu do) cua mot Novel co san (mien Novel/Chapter HOAN TOAN khac, xem
+    `VideoImport.possible_duplicate_novel_id`)."""
+
+    def setUp(self):
+        self.store = MockTrustedSourceStore()
+        self.animation = MockAnimationStore()
+        self.metadata = MockMetadataStore()
+        self.svc = TrustedSourceService(
+            self.store, self.animation, self.metadata, youtube_api_key="fake-key")
+        self.admin = Profile(user_id="admin_1", email="admin@fanfic.world")
+
+    def _dat_client_gia(self, client: FakeYouTubeClient):
+        self.svc._youtube = lambda: client  # type: ignore[method-assign]
+
+    def _quet_mot_video(self, cid: str, video_id: str, title: str):
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh test")
+        upload_playlist = f"UU{cid[-4:]}"
+        client = FakeYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kênh test",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: ([_video_item(video_id)], "")},
+            videos={video_id: VideoInfo(
+                video_id=video_id, title=title, channel_id=cid,
+                channel_title="Kênh test", thumbnail_url="", published_at="2026-01-01",
+                duration_seconds=100.0)},
+        )
+        self._dat_client_gia(client)
+        self.svc.scan_source(self.admin, source["source_id"])
+        return source
+
+    def test_khop_novel_gan_co_video_id_trong_mo_ta(self):
+        video_id = "vidDupNov01"
+        novel = self.metadata.create_novel(Novel(
+            owner_id="studio_1", title="Truyện gốc",
+            description=(
+                f"Nguồn: https://www.youtube.com/watch?v={video_id} "
+                "(kênh: vucthamaudio)")))
+        cid = "UC" + "n1" * 11
+        self._quet_mot_video(cid, video_id, "Video không liên quan tên gì cả")
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row.possible_duplicate_novel_id, novel.novel_id)
+
+    def test_khong_khop_novel_nao_giu_none(self):
+        video_id = "vidNoDup001"
+        self.metadata.create_novel(Novel(
+            owner_id="studio_1", title="Truyện khác",
+            description="Không liên quan gì tới video này cả."))
+        cid = "UC" + "n2" * 11
+        self._quet_mot_video(cid, video_id, "Video bình thường")
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertIsNone(row.possible_duplicate_novel_id)
+
+    def test_loi_kho_novel_khong_lam_sap_luong_phan_loai(self):
+        """`find_novels` nem loi (kho Novel tam thoi khong san sang) —
+        advisory PHAI am tham that bai, KHONG duoc phep chan viec tao
+        `VideoImport` (xem docstring `_phat_hien_novel_trung`)."""
+        video_id = "vidErrDup01"
+        self.metadata.find_novels = mock.Mock(side_effect=RuntimeError("boom"))
+        cid = "UC" + "n3" * 11
+        self._quet_mot_video(cid, video_id, "Video bình thường")
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertIsNotNone(row)
+        self.assertIsNone(row.possible_duplicate_novel_id)
+
+
+class CreateSourceRaceConditionTest(unittest.TestCase):
+    """Pre-merge hardening (2026-08), Fix 2 — `create_source` phai dung
+    `source_id` TAT DINH (`trusted_source_domain.trusted_source_id`) + kho
+    tu choi tao trung `documentId`, KHONG chi dua vao doc-truoc-roi-so-sanh
+    (`_dinh_danh_da_ton_tai`), von KHONG an toan duoi tai dua nhau THAT."""
+
+    def setUp(self):
+        self.store = MockTrustedSourceStore()
+        self.animation = MockAnimationStore()
+        self.metadata = MockMetadataStore()
+        self.svc = TrustedSourceService(
+            self.store, self.animation, self.metadata, youtube_api_key="fake-key")
+        self.admin = Profile(user_id="admin_1", email="admin@fanfic.world")
+
+    def test_hai_lan_tao_lien_tiep_cung_kenh_bao_loi_ro_rang(self):
+        cid = "UC" + "r1" * 11
+        self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh R")
+        with self.assertRaises(TrustedSourceError):
+            self.svc.create_source(
+                self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+                display_name="Kênh R (lại)")
+        items, total = self.store.find_sources(limit=None)
+        self.assertEqual(total, 1, "KHONG duoc tao ra ban ghi trung lap thu hai")
+
+    def test_dua_nhau_that_bo_qua_kiem_tra_truoc_van_chi_tao_MOT_ban_ghi(self):
+        """Mo phong RACE THAT: ca hai yeu cau deu doc thay "chua ton tai"
+        (nhu the chung chay gan nhu dong thoi TRUOC khi ben nao ghi xong) —
+        vo hieu hoa `_dinh_danh_da_ton_tai` de bo qua nhanh kiem tra than
+        thien, chi con `source_id` TAT DINH + kho tu choi trung `documentId`
+        lam nguoi chan CUOI CUNG."""
+        cid = "UC" + "r2" * 11
+        self.svc._dinh_danh_da_ton_tai = lambda moi: False  # type: ignore[method-assign]
+
+        source_1 = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh Đua 1")
+        with self.assertRaises(TrustedSourceError):
+            self.svc.create_source(
+                self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+                display_name="Kênh Đua 2")
+
+        items, total = self.store.find_sources(limit=None)
+        self.assertEqual(total, 1, "hai yeu cau dong thoi CHI duoc tao MOT nguon")
+        self.assertEqual(items[0].source_id, source_1["source_id"])
+        # display_name giu NGUYEN cua ben THANG (yeu cau dau tien) — ben THUA
+        # khong am tham ghi de du lieu cua ben thang.
+        self.assertEqual(items[0].display_name, "Kênh Đua 1")
+
+    def test_source_id_tat_dinh_theo_loai_va_dinh_danh(self):
+        """Cung mot ID nhung KHAC loai nguon (video vs kenh) khong duoc phep
+        va cham `source_id` voi nhau."""
+        cung_id = "UCsameid00000000000000"
+        kenh = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cung_id,
+            display_name="Coi là kênh")
+        video = self.svc.create_source(
+            self.admin, source_type="youtube_video", youtube_video_id=cung_id,
+            display_name="Coi là video")
+        self.assertNotEqual(kenh["source_id"], video["source_id"])
+
+
+class UploadsPlaylistIdCacheTest(unittest.TestCase):
+    """Pre-merge hardening (2026-08), Fix 4 — `uploads_playlist_id` cua mot
+    kenh CHI duoc resolve qua `channels.list` MOT LAN roi cache lai tren
+    chinh `TrustedSource`; lan quet sau khong duoc goi lai `channels.list`."""
+
+    def setUp(self):
+        self.store = MockTrustedSourceStore()
+        self.animation = MockAnimationStore()
+        self.metadata = MockMetadataStore()
+        self.svc = TrustedSourceService(
+            self.store, self.animation, self.metadata, youtube_api_key="fake-key")
+        self.admin = Profile(user_id="admin_1", email="admin@fanfic.world")
+
+    def _dat_client_gia(self, client: FakeYouTubeClient):
+        self.svc._youtube = lambda: client  # type: ignore[method-assign]
+
+    def test_quet_lan_hai_khong_goi_lai_channels_list(self):
+        cid = "UC" + "u1" * 11
+        upload_playlist = "UUu1u1"
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh cache")
+
+        so_lan_goi_channel = {"n": 0}
+
+        class _CountingYouTubeClient(FakeYouTubeClient):
+            def get_channel(self, channel_id):
+                so_lan_goi_channel["n"] += 1
+                return super().get_channel(channel_id)
+
+        client = _CountingYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kênh cache",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: ([_video_item("vidCache001")], "")},
+            videos={"vidCache001": VideoInfo(
+                video_id="vidCache001", title="Video 1", channel_id=cid,
+                channel_title="Kênh cache", thumbnail_url="", published_at="2026-01-01",
+                duration_seconds=100.0)},
+        )
+        self._dat_client_gia(client)
+
+        lan_1 = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(lan_1["detected"], 1)
+        self.assertEqual(so_lan_goi_channel["n"], 1, "lan quet dau PHAI goi channels.list")
+        cached = self.store.get_source(source["source_id"])
+        self.assertEqual(cached.uploads_playlist_id, upload_playlist)
+
+        lan_2 = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(
+            so_lan_goi_channel["n"], 1,
+            "lan quet thu hai KHONG duoc goi lai channels.list (dung cache)")
+        # Van phai liet ke duoc video binh thuong tu playlist da biet ID
+        # (khong co mapping nao nen video van o trang thai NEW, con CHO
+        # QUYET DINH, duoc phan loai lai — day KHONG phai muc tieu cua test
+        # nay, chi can xac nhan quet van THANH CONG binh thuong qua cache).
+        self.assertEqual(lan_2["detected"], 1)
 
 
 if __name__ == "__main__":

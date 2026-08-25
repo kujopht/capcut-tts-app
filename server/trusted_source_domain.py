@@ -60,6 +60,29 @@ def episode_slot_id(series_id: str, episode_number: int) -> str:
     return "anep_" + hashlib.sha256(thong).hexdigest()[:28]
 
 
+def trusted_source_id(source_type: str, identity_value: str) -> str:
+    """
+    `source_id` TAT DINH tu (`source_type`, gia tri dinh danh — tuy
+    `source_type` la `youtube_channel_id`/`youtube_playlist_id`/
+    `youtube_video_id`, xem `TrustedSourceService._TRUONG_DINH_DANH`) — dung
+    boi `TrustedSourceService.create_source` qua `AppwriteTrustedSourceStore.
+    create_source_once`, CUNG ky thuat "POST trung documentId la tao-hoac-
+    lay an toan" voi `video_import_id`/`episode_slot_id`/`inferred_mapping_id`
+    o tren.
+
+    VI SAO CAN: `create_source` truoc day doc-toan-bo-roi-so-sanh
+    (`_dinh_danh_da_ton_tai`) roi tao voi `source_id` NGAU NHIEN
+    (`new_id("tsrc")`) — hai yeu cau "Thêm nguồn tin cậy" cho CUNG kenh/
+    playlist/video gan nhu dong thoi co the deu doc thay "chua co", roi ca
+    hai deu tao thanh cong, sinh HAI `TrustedSource` trung lap cho CUNG mot
+    nguon that. Bam CA `source_type` LAN gia tri dinh danh (khong chi rieng
+    gia tri) de phan biet mot kenh vs mot playlist/video TINH CO trung ID
+    chuoi voi nhau.
+    """
+    thong = f"{source_type}\x1f{identity_value}".encode()
+    return "tsrc_" + hashlib.sha256(thong).hexdigest()[:28]
+
+
 def inferred_mapping_id(source_id: str, canonical_name_normalized: str) -> str:
     """
     `mapping_id` TAT DINH cho MOT cho (source_id, ten canonical DA CHUAN
@@ -246,6 +269,15 @@ class TrustedSource:
     youtube_channel_id: str = ""
     #: ID playlist YouTube — CHI dien khi `source_type == YOUTUBE_PLAYLIST`.
     youtube_playlist_id: str = ""
+    #: Pre-merge hardening (2026-08) — CACHE `contentDetails.
+    #: relatedPlaylists.uploads` cua `youtube_channel_id` (CHI cho
+    #: `source_type == YOUTUBE_CHANNEL`), resolve MOT LAN qua `channels.list`
+    #: roi ghi lai vinh vien (gia tri nay KHONG BAO GIO doi cho mot kenh da
+    #: cho truoc) — tranh moi lan quet/doi chieu deu ton 1 don vi quota goi
+    #: lai `channels.list` chi de doc lai CUNG mot gia tri, xem
+    #: `TrustedSourceService._lay_ung_vien`. `None`/rong = CHUA tung resolve
+    #: (nguon tao TRUOC pre-merge hardening nay, hoac chua quet lan nao).
+    uploads_playlist_id: Optional[str] = None
     #: ID video YouTube (11 ky tu) — CHI dien khi `source_type ==
     #: YOUTUBE_VIDEO` (mot video DON LE duoc tin cay, khong gan voi ca
     #: kenh/playlist rong hon).
@@ -315,6 +347,7 @@ class TrustedSource:
             "source_type": self.source_type.value,
             "youtube_channel_id": self.youtube_channel_id,
             "youtube_playlist_id": self.youtube_playlist_id,
+            "uploads_playlist_id": self.uploads_playlist_id,
             "youtube_video_id": self.youtube_video_id,
             "display_name": self.display_name,
             "thumbnail_url": self.thumbnail_url,
@@ -436,6 +469,16 @@ class VideoImport:
     #: docstring ham do. KHONG dua vao gia tri nay TRUOC khi qua
     #: `create_import_once`.
     import_id: str = ""
+    #: Pre-merge hardening (2026-08) — CANH BAO CHI DE THAM KHAO, KHONG BAO
+    #: GIO tu dong chan/bo qua gi ca: `novel_id` cua mot Novel (mien Novel/
+    #: Chapter HOAN TOAN khac, xem `server/domain.py`) ma `description` CHUA
+    #: chinh `youtube_video_id` nay o dang van ban tu do (mot so Novel that
+    #: duoc tao TU CHINH cac video YouTube nay truoc khi Trusted Sources ton
+    #: tai). `None` = khong tim thay Novel nao trung (gia tri MAC DINH, gom
+    #: ca khi kho Novel khong san sang luc kiem tra — xem
+    #: `TrustedSourceService._phat_hien_novel_trung`). Video xuat hien o CA
+    #: HAI mien khong nhat thiet la sai, chi la dang can quan tri liec qua.
+    possible_duplicate_novel_id: Optional[str] = None
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
 
@@ -463,6 +506,7 @@ class VideoImport:
             "reviewed_by": self.reviewed_by,
             "reviewed_at": self.reviewed_at or None,
             "discovered_via": self.discovered_via,
+            "possible_duplicate_novel_id": self.possible_duplicate_novel_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

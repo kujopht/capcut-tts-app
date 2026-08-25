@@ -44,6 +44,19 @@ class MockTrustedSourceStore:
             self.sources[source.source_id] = source
             return source
 
+    def create_source_once(self, source: TrustedSource) -> Tuple[TrustedSource, bool]:
+        """Tao-hoac-lay AN TOAN theo `source.source_id` TAT DINH (xem
+        `trusted_source_domain.trusted_source_id`) — cung nguyen tac voi
+        `create_mapping_once`/`create_import_once`, la NGUOI CHAN CUOI CUNG
+        chong hai yeu cau "Thêm nguồn tin cậy" dong thoi cho CUNG mot kenh/
+        playlist/video."""
+        with self._lock:
+            hien_co = self.sources.get(source.source_id)
+            if hien_co is not None:
+                return hien_co, False
+            self.sources[source.source_id] = source
+            return source, True
+
     def get_sources_by_ids(self, source_ids: Sequence[str]) -> Dict[str, TrustedSource]:
         """Nhieu nguon theo ID trong MOT lan quet — tranh N+1 khi lam giau
         Import Queue (Phase 5 hieu nang), cung idiom voi `mapping_counts`."""

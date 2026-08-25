@@ -46,6 +46,7 @@ from server.trusted_source_domain import (
     compute_source_health,
     episode_slot_id,
     inferred_mapping_id,
+    trusted_source_id,
     video_import_id,
 )
 from server.video_classifier import NEGATIVE_KEYWORDS, chuan_hoa, classify_video
@@ -252,22 +253,47 @@ class TrustedSourceService:
             raise TrustedSourceError(
                 "Loại nguồn này chưa được triển khai (chỉ YouTube ở Phase 5).")
 
+        youtube_channel_id = youtube_channel_id.strip()
+        youtube_playlist_id = youtube_playlist_id.strip()
+        youtube_video_id = youtube_video_id.strip()
+        truong = self._TRUONG_DINH_DANH.get(loai)
+        gia_tri_dinh_danh = ({
+            "youtube_channel_id": youtube_channel_id,
+            "youtube_playlist_id": youtube_playlist_id,
+            "youtube_video_id": youtube_video_id,
+        }.get(truong, "") if truong else "")
+
         moi = TrustedSource(
             source_type=loai,
-            youtube_channel_id=youtube_channel_id.strip(),
-            youtube_playlist_id=youtube_playlist_id.strip(),
-            youtube_video_id=youtube_video_id.strip(),
+            youtube_channel_id=youtube_channel_id,
+            youtube_playlist_id=youtube_playlist_id,
+            youtube_video_id=youtube_video_id,
             display_name=display_name.strip(),
             thumbnail_url=thumbnail_url,
             auto_discover=auto_discover, auto_import=auto_import,
             auto_publish=auto_publish,
             minimum_confidence=max(0.0, min(1.0, minimum_confidence)),
             created_by=admin.user_id,
+            # `source_id` TAT DINH tu (source_type, gia tri dinh danh) — xem
+            # docstring `trusted_source_id`. Day KHONG thay the
+            # `_dinh_danh_da_ton_tai` (van CHAY TRUOC, van gia tri vi cho
+            # thong diep loi than thien hon o truong hop thuong khong dua
+            # nhau) ma la NGUOI CHAN CUOI CUNG thuc su an toan duoi tai dua
+            # nhau: hai yeu cau gan nhu dong thoi cho CUNG mot nguon deu tinh
+            # ra CUNG mot `source_id`, nen `create_source_once` (Appwrite tu
+            # choi POST trung `documentId`) chi cho DUNG mot ben thang.
+            source_id=trusted_source_id(loai.value, gia_tri_dinh_danh),
         )
         if self._dinh_danh_da_ton_tai(moi):
             raise TrustedSourceError("Nguồn này đã được thêm làm nguồn tin cậy trước đó.")
 
-        source = self._store.create_source(moi)
+        source, da_tao_moi = self._store.create_source_once(moi)
+        if not da_tao_moi:
+            # Thua trong cuoc dua that (hiem, xem docstring o tren) — cung
+            # thong diep voi nhanh kiem tra truoc o tren, cho quan tri mot
+            # loi RO RANG thay vi am tham tra ve nguon CUA BEN THANG (co the
+            # khac du lieu ho vua nhap).
+            raise TrustedSourceError("Nguồn này đã được thêm làm nguồn tin cậy trước đó.")
         self._ghi_nhat_ky(
             "trusted_source_add", target_id=source.source_id,
             actor_id=admin.user_id, actor_role=actor_role,

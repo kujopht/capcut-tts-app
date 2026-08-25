@@ -1352,5 +1352,68 @@ class CrossDomainDuplicateAdvisoryTest(unittest.TestCase):
         self.assertIsNone(row.possible_duplicate_novel_id)
 
 
+class CreateSourceRaceConditionTest(unittest.TestCase):
+    """Pre-merge hardening (2026-08), Fix 2 — `create_source` phai dung
+    `source_id` TAT DINH (`trusted_source_domain.trusted_source_id`) + kho
+    tu choi tao trung `documentId`, KHONG chi dua vao doc-truoc-roi-so-sanh
+    (`_dinh_danh_da_ton_tai`), von KHONG an toan duoi tai dua nhau THAT."""
+
+    def setUp(self):
+        self.store = MockTrustedSourceStore()
+        self.animation = MockAnimationStore()
+        self.metadata = MockMetadataStore()
+        self.svc = TrustedSourceService(
+            self.store, self.animation, self.metadata, youtube_api_key="fake-key")
+        self.admin = Profile(user_id="admin_1", email="admin@fanfic.world")
+
+    def test_hai_lan_tao_lien_tiep_cung_kenh_bao_loi_ro_rang(self):
+        cid = "UC" + "r1" * 11
+        self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh R")
+        with self.assertRaises(TrustedSourceError):
+            self.svc.create_source(
+                self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+                display_name="Kênh R (lại)")
+        items, total = self.store.find_sources(limit=None)
+        self.assertEqual(total, 1, "KHONG duoc tao ra ban ghi trung lap thu hai")
+
+    def test_dua_nhau_that_bo_qua_kiem_tra_truoc_van_chi_tao_MOT_ban_ghi(self):
+        """Mo phong RACE THAT: ca hai yeu cau deu doc thay "chua ton tai"
+        (nhu the chung chay gan nhu dong thoi TRUOC khi ben nao ghi xong) —
+        vo hieu hoa `_dinh_danh_da_ton_tai` de bo qua nhanh kiem tra than
+        thien, chi con `source_id` TAT DINH + kho tu choi trung `documentId`
+        lam nguoi chan CUOI CUNG."""
+        cid = "UC" + "r2" * 11
+        self.svc._dinh_danh_da_ton_tai = lambda moi: False  # type: ignore[method-assign]
+
+        source_1 = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh Đua 1")
+        with self.assertRaises(TrustedSourceError):
+            self.svc.create_source(
+                self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+                display_name="Kênh Đua 2")
+
+        items, total = self.store.find_sources(limit=None)
+        self.assertEqual(total, 1, "hai yeu cau dong thoi CHI duoc tao MOT nguon")
+        self.assertEqual(items[0].source_id, source_1["source_id"])
+        # display_name giu NGUYEN cua ben THANG (yeu cau dau tien) — ben THUA
+        # khong am tham ghi de du lieu cua ben thang.
+        self.assertEqual(items[0].display_name, "Kênh Đua 1")
+
+    def test_source_id_tat_dinh_theo_loai_va_dinh_danh(self):
+        """Cung mot ID nhung KHAC loai nguon (video vs kenh) khong duoc phep
+        va cham `source_id` voi nhau."""
+        cung_id = "UCsameid00000000000000"
+        kenh = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cung_id,
+            display_name="Coi là kênh")
+        video = self.svc.create_source(
+            self.admin, source_type="youtube_video", youtube_video_id=cung_id,
+            display_name="Coi là video")
+        self.assertNotEqual(kenh["source_id"], video["source_id"])
+
+
 if __name__ == "__main__":
     unittest.main()

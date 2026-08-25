@@ -60,6 +60,29 @@ def episode_slot_id(series_id: str, episode_number: int) -> str:
     return "anep_" + hashlib.sha256(thong).hexdigest()[:28]
 
 
+def trusted_source_id(source_type: str, identity_value: str) -> str:
+    """
+    `source_id` TAT DINH tu (`source_type`, gia tri dinh danh — tuy
+    `source_type` la `youtube_channel_id`/`youtube_playlist_id`/
+    `youtube_video_id`, xem `TrustedSourceService._TRUONG_DINH_DANH`) — dung
+    boi `TrustedSourceService.create_source` qua `AppwriteTrustedSourceStore.
+    create_source_once`, CUNG ky thuat "POST trung documentId la tao-hoac-
+    lay an toan" voi `video_import_id`/`episode_slot_id`/`inferred_mapping_id`
+    o tren.
+
+    VI SAO CAN: `create_source` truoc day doc-toan-bo-roi-so-sanh
+    (`_dinh_danh_da_ton_tai`) roi tao voi `source_id` NGAU NHIEN
+    (`new_id("tsrc")`) — hai yeu cau "Thêm nguồn tin cậy" cho CUNG kenh/
+    playlist/video gan nhu dong thoi co the deu doc thay "chua co", roi ca
+    hai deu tao thanh cong, sinh HAI `TrustedSource` trung lap cho CUNG mot
+    nguon that. Bam CA `source_type` LAN gia tri dinh danh (khong chi rieng
+    gia tri) de phan biet mot kenh vs mot playlist/video TINH CO trung ID
+    chuoi voi nhau.
+    """
+    thong = f"{source_type}\x1f{identity_value}".encode()
+    return "tsrc_" + hashlib.sha256(thong).hexdigest()[:28]
+
+
 def inferred_mapping_id(source_id: str, canonical_name_normalized: str) -> str:
     """
     `mapping_id` TAT DINH cho MOT cho (source_id, ten canonical DA CHUAN

@@ -347,6 +347,28 @@ class AppwriteTrustedSourceStore:
         self._create(COL_SOURCES, source.source_id, _nguon_thanh_hang(source))
         return source
 
+    def create_source_once(self, source: TrustedSource) -> Tuple[TrustedSource, bool]:
+        """
+        Cuong che DUY NHAT theo `source.source_id` TAT DINH (xem
+        `trusted_source_domain.trusted_source_id`) — cung ky thuat "POST
+        trung documentId la tao-hoac-lay an toan" voi `create_import_once`/
+        `create_mapping_once`. Nguoi goi (`TrustedSourceService.create_source`)
+        PHAI da gan `source.source_id` bang `trusted_source_id(...)` truoc
+        khi goi — day la NGUOI CHAN CUOI CUNG chong hai yeu cau "Thêm nguồn
+        tin cậy" cho CUNG mot kenh/playlist/video gan nhu dong thoi deu vuot
+        qua kiem tra doc-truoc (`_dinh_danh_da_ton_tai`, van CHAY TRUOC vi no
+        cho thong diep loi than thien hon o truong hop thuong, khong dua
+        nhau) va deu tao thanh cong.
+        """
+        try:
+            self._create(COL_SOURCES, source.source_id, _nguon_thanh_hang(source))
+            return source, True
+        except NotFoundError:
+            # `_call` boc MOI loi >=400 thanh `NotFoundError` — 409 trung
+            # `documentId` cung roi vao day. Doc lai ban DA CO thay vi doan
+            # la loi that (cung nguyen tac voi `create_import_once`).
+            return _nguon_tu_doc(self._get(COL_SOURCES, source.source_id)), False
+
     def get_source(self, source_id: str) -> TrustedSource:
         return _nguon_tu_doc(self._get(COL_SOURCES, source_id))
 

@@ -17,6 +17,7 @@ NGUYEN TAC:
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -173,6 +174,18 @@ class YouTubeClient:
     """MOT client dung lai cho toan bo request trong mot lan quet — xem
     ghi chu ve `httpx.Client` tai su dung o `appwrite_adapter.py`."""
 
+    #: Pre-merge hardening (2026-08) — 429 (rate limit tam thoi, KHAC
+    #: `quotaExceeded` — do la het HAN MUC NGAY, thu lai vo ich) va 5xx
+    #: (loi TAM THOI phia YouTube) deu dang thu lai duoc; 4xx con lai
+    #: (400/403/404...) la loi VINH VIEN — thu lai khong lam gi khac di, chi
+    #: ton them thoi gian/quota. TOI DA 3 lan thu (1 goc + 2 thu lai).
+    RETRY_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+    RETRY_MAX_ATTEMPTS = 3
+    #: Giay — CAP LOP hang so de test ghi de/mock (vd
+    #: `mock.patch.object(YouTubeClient, "RETRY_BASE_DELAY_SECONDS", 0)`)
+    #: tranh cho THAT trong bo kiem thu. Backoff mu (0.5s, 1s, ...).
+    RETRY_BASE_DELAY_SECONDS = 0.5
+
     def __init__(self, api_key: str):
         if not api_key:
             raise YouTubeConfigError(
@@ -185,28 +198,53 @@ class YouTubeClient:
             self._client = httpx.Client(timeout=REQUEST_TIMEOUT)
         return self._client
 
+    def _cho_truoc_khi_thu_lai(self, attempt: int, resp: httpx.Response) -> None:
+        """`attempt` la SO THU TU lan goi VUA THAT BAI (1-based) — backoff mu
+        theo `RETRY_BASE_DELAY_SECONDS * 2**(attempt-1)` (0.5s, 1s, 2s, ...).
+        429 CO THE kem `Retry-After` (giay) tu YouTube — TON TRONG gia tri do
+        thay vi backoff cua rieng ta neu co mat va doc duoc."""
+        delay = self.RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    delay = float(retry_after)
+                except (TypeError, ValueError):
+                    pass
+        time.sleep(delay)
+
     def _goi(self, resource: str, params: Dict[str, Any]) -> Dict[str, Any]:
         gui = dict(params)
         gui["key"] = self._api_key
-        try:
-            resp = self._http().get(f"{_API_BASE}/{resource}", params=gui)
-        except httpx.HTTPError as exc:
-            # KHONG dua `exc` (co the chua URL kem key) thang vao thong diep.
-            raise YouTubeApiError("Không kết nối được YouTube Data API.") from exc
-        if resp.status_code >= 400:
+        for attempt in range(1, self.RETRY_MAX_ATTEMPTS + 1):
             try:
-                body = resp.json()
-            except Exception:
-                body = None
-            errors = ((body or {}).get("error") or {}).get("errors") or []
-            reason = str(errors[0].get("reason") or "") if errors else ""
-            if reason == "quotaExceeded":
+                resp = self._http().get(f"{_API_BASE}/{resource}", params=gui)
+            except httpx.HTTPError as exc:
+                # KHONG dua `exc` (co the chua URL kem key) thang vao thong diep.
+                raise YouTubeApiError("Không kết nối được YouTube Data API.") from exc
+            if resp.status_code >= 400:
+                try:
+                    body = resp.json()
+                except Exception:
+                    body = None
+                errors = ((body or {}).get("error") or {}).get("errors") or []
+                reason = str(errors[0].get("reason") or "") if errors else ""
+                if reason == "quotaExceeded":
+                    # Het HAN MUC NGAY — thu lai KHONG BAO GIO giup ich, chi
+                    # ton them lan goi vo ich. That bai NGAY, khac 429/5xx.
+                    raise YouTubeApiError(
+                        "Đã hết hạn mức gọi YouTube Data API hôm nay.", reason=reason)
+                if (resp.status_code in self.RETRY_STATUS_CODES
+                        and attempt < self.RETRY_MAX_ATTEMPTS):
+                    self._cho_truoc_khi_thu_lai(attempt, resp)
+                    continue
                 raise YouTubeApiError(
-                    "Đã hết hạn mức gọi YouTube Data API hôm nay.", reason=reason)
-            raise YouTubeApiError(
-                f"YouTube Data API từ chối yêu cầu (HTTP {resp.status_code}).",
-                reason=reason)
-        return resp.json()
+                    f"YouTube Data API từ chối yêu cầu (HTTP {resp.status_code}).",
+                    reason=reason)
+            return resp.json()
+        # Khong bao gio toi day that su (vong lap luon `return` hoac `raise`
+        # o lan thu CUOI CUNG) — chi de type-checker/an toan doc code yen tam.
+        raise YouTubeApiError("YouTube Data API từ chối yêu cầu nhiều lần liên tiếp.")
 
     # -- video ----------------------------------------------------------------
 

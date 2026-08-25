@@ -680,6 +680,18 @@ class TrustedSourceService:
             "possible_duplicate_novel_id": ket_qua.possible_duplicate_novel_id,
         })
 
+    #: 2026-08-26 hardening — ban dau la 5, qua nho: neu tu 5 Novel tro len
+    #: cung CHUA chuoi `youtube_video_id` nay (vi du video duoc nhac toi o
+    #: nhieu Novel khac), Novel THAT SU trung co the roi ra ngoai trang dau
+    #: va bi bo lo trong im lang — dung dung "khong tim thay" thuc su.
+    #: 25 duoc chon vi day van la MOT truy van `contains` re (khong phai
+    #: full-text search) tren mot bang chi vai chuc dong (xem docstring
+    #: ham duoi) — chi phi them gan nhu bang khong so voi 5, nen khong co
+    #: ly do gi de KHONG lay rong het muc con re, chi lam rong cua so ung
+    #: vien de giam dang ke rui ro do ma khong doi
+    #: kien truc. Xem docs/reports/trusted-sources-duplicate-advisor-2026-08-26.md.
+    _DUPLICATE_ADVISORY_CANDIDATE_LIMIT = 25
+
     def _phat_hien_novel_trung(self, youtube_video_id: str) -> Optional[str]:
         """
         CANH BAO CHI DE THAM KHAO (pre-merge hardening 2026-08) — xem
@@ -690,11 +702,17 @@ class TrustedSourceService:
         Trusted Sources ton tai — xem lich su Fanfic World Studio). KHONG tu
         dong chan/bo qua video nao ca, CHI gan mot tin hieu cho quan tri.
 
+        Vi day la so sanh CHUOI CON (`youtube_video_id in description`), moi
+        dang URL nhac toi video nay (`youtube.com/watch?v=ID`, `youtu.be/ID`,
+        `m.youtube.com/watch?v=ID`, hay chi rieng ID) deu duoc nhan dien nhu
+        nhau mien description co chua chuoi ID — khong can chuan hoa URL rieng.
+
         Tai su dung `MetadataStore.find_novels(query=...)` DA CO SAN (loc
         `title`/`description` CHUA chuoi, xem `server/appwrite_store.py`)
         thay vi tu bien mot duong tim kiem moi — quy mo hien tai (vai chuc
         Novel) lam cho MOT truy van `contains` nay CHAP NHAN DUOC, khong
-        phai mot tinh nang full-text search rieng.
+        phai mot tinh nang full-text search rieng. Cua so ung vien duoc gioi
+        han boi `_DUPLICATE_ADVISORY_CANDIDATE_LIMIT` (xem ghi chu o do).
 
         KHONG BAO GIO duoc phep lam sap luong phan loai chinh: bat MOI ngoai
         le (kho Novel chua san sang, loi mang, thieu phuong thuc...) va coi
@@ -705,7 +723,8 @@ class TrustedSourceService:
             return None
         try:
             ung_vien, _ = self._metadata_store.find_novels(
-                query=youtube_video_id, limit=5)
+                query=youtube_video_id,
+                limit=self._DUPLICATE_ADVISORY_CANDIDATE_LIMIT)
             for novel in ung_vien:
                 if youtube_video_id in (novel.description or ""):
                     return novel.novel_id

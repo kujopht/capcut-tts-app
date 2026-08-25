@@ -480,20 +480,21 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # truy van (chong N+1 cho khu quan tri) — cung tinh huong voi
             # `post_id_idx`/`comment_id_idx` o tren, chua co chi muc phu truoc do.
             ("novel_id_idx", "key", ["novel_id"]),
-            # Pre-merge hardening (2026-08) — `find_novels(query=...)`
-            # (appwrite_store.py) phat ra `q_or(contains("title", ...),
-            # contains("description", ...))` khi co `query`. Appwrite tu choi
-            # `contains` tren mot thuoc tinh string neu no khong co chi muc
-            # `fulltext` rieng — CA HAI thuoc tinh trong `q_or` deu can chi
-            # muc, thieu MOT ben la ca truy van loi, khong phai chi mot nhanh
-            # cua OR bi bo qua. Duong goi nay dang duoc dung boi
-            # `TrustedSourceService._phat_hien_novel_trung` (canh bao trung
-            # noi dung giua Novel/Chapter va Trusted Sources/Animation, PR
-            # #55) — thieu chi muc lam no LUON tra "khong tim thay" (loi bi
-            # nuot boi try/except co y, xem docstring ham do), khong phai loi
-            # ro rang.
-            ("title_fulltext_idx", "fulltext", ["title"]),
-            ("description_fulltext_idx", "fulltext", ["description"]),
+            # 2026-08: a prior hardening pass (PR #56) added
+            # title_fulltext_idx + description_fulltext_idx here on the
+            # (wrong) assumption that Appwrite's `contains()` requires a
+            # fulltext index. Live testing disproved that: `contains()` on
+            # both `title` and `description`, including the exact
+            # `q_or(contains(title,...), contains(description,...))` shape
+            # used by `find_novels(query=...)`, returns correct results with
+            # NO fulltext index present at all — verified via a disposable
+            # reproduction collection in production
+            # (fanfic-world-prod/fanfic_world_prod), see
+            # docs/reports/ for the full trace. It also turned out Appwrite
+            # only allows ONE fulltext index per collection, so the
+            # two-index version above was never deployable as written.
+            # Removed both; do not re-add without a live test proving they
+            # are actually required.
         ],
     },
     "chapters": {

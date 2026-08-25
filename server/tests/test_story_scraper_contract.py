@@ -40,6 +40,40 @@ class CanonicalizeUrlTest(unittest.TestCase):
             canonicalize_url("https://example.com/truyen"),
         )
 
+    def test_url_khong_co_scheme_van_ra_dang_hop_le(self):
+        """2026-08-26, phat hien qua review — `urlsplit` doc mot chuoi
+        khong co `://` nhu duong dan TUONG DOI thuan tuy: toan bo roi vao
+        `path`, `netloc` rong, ra ket qua hong dang `https:example.com/x`.
+        Admin dan url thuong KHONG go `https://` — day la truong hop THAT."""
+        self.assertEqual(
+            canonicalize_url("example.com/truyen/chuong-1"),
+            "https://example.com/truyen/chuong-1",
+        )
+
+    def test_tham_so_that_trung_ten_ngan_voi_tracking_KHONG_bi_xoa(self):
+        """2026-08-26, phat hien qua review — khop THEO TIEN TO tren cac
+        chuoi ngan/chung nhu "ref"/"si" xoa nham tham so THAT: `size`, `sid`,
+        `since`, `referral_code`. Chi `utm_` moi duoc khop tien to (luon co
+        hau to doi); moi ten khac phai khop CHINH XAC."""
+        giu_nguyen = [
+            ("https://example.com/x?size=10", "size"),
+            ("https://example.com/x?sid=abc", "sid"),
+            ("https://example.com/x?since=2026", "since"),
+            ("https://example.com/x?referral_code=xyz", "referral_code"),
+        ]
+        for url, tham_so in giu_nguyen:
+            self.assertIn(tham_so, canonicalize_url(url),
+                          f"{tham_so} la tham so THAT, khong duoc xoa")
+
+    def test_tham_so_theo_doi_THAT_van_bi_xoa(self):
+        for url in [
+            "https://example.com/x?utm_source=fb",
+            "https://example.com/x?fbclid=abc",
+            "https://example.com/x?ref=xyz",
+            "https://example.com/x?si=xyz",
+        ]:
+            self.assertEqual(canonicalize_url(url), "https://example.com/x")
+
     def test_youtube_dang_url_khac_nhau_KHONG_tu_gop(self):
         """`canonicalize_url` chi chuan hoa CHUOI — no khong biet
         `youtu.be/ID` va `youtube.com/watch?v=ID` la CUNG mot video. Muc dinh

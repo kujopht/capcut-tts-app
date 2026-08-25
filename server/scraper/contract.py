@@ -20,10 +20,23 @@ class ScraperTier(Enum):
     UNSUPPORTED = 3
 
 
-#: Cac tham so theo doi/quang cao pho bien, KHONG anh huong noi dung trang —
-#: loai bo khoi URL chuan hoa de hai bien the (co/khong tracking) tro thanh
-#: CUNG mot canonical_url (chong trung).
-_TRACKING_PARAM_PREFIXES = ("utm_", "fbclid", "gclid", "ref", "spm", "si")
+#: CHI tien to thuc su AN TOAN (khong param that nao bat dau bang no) duoc
+#: khop THEO TIEN TO — `utm_source`/`utm_medium`/... co hau to doi nhung
+#: luon bat dau dung `utm_`. Moi ten khac phai khop CHINH XAC (xem
+#: `_TRACKING_PARAM_NAMES`): `startswith("ref")`/`startswith("si")` tung bi
+#: phat hien xoa nham `referral_code`, `refund`, `sid`, `size`, `since` —
+#: nhung tham so THAT, khong phai theo doi.
+_TRACKING_PARAM_PREFIXES = ("utm_",)
+_TRACKING_PARAM_NAMES = {
+    "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "igshid", "mc_cid",
+    "mc_eid", "ref", "referrer", "spm", "si",
+}
+
+
+def _la_tham_so_theo_doi(key: str) -> bool:
+    ha = key.lower()
+    return ha in _TRACKING_PARAM_NAMES or any(
+        ha.startswith(p) for p in _TRACKING_PARAM_PREFIXES)
 
 
 def canonicalize_url(url: str) -> str:
@@ -36,7 +49,15 @@ def canonicalize_url(url: str) -> str:
     KHONG theo redirect — day la chuan hoa CHUOI, khong phai giai quyet
     mang. Giai quyet redirect that su la viec cua `http_fetcher.resolve()`.
     """
-    parts = urlsplit(url.strip())
+    da_strip = url.strip()
+    # `urlsplit` doc mot url KHONG co scheme/`//` (vd "example.com/x") nhu
+    # MOT duong dan tuong doi thuan tuy — toan bo chuoi roi vao `path`,
+    # `netloc` rong, va `urlunsplit` sau do ra mot chuoi hong dang
+    # "https:example.com/x". Them scheme truoc neu chua co ca hai dau hieu.
+    if "://" not in da_strip and not da_strip.startswith("//"):
+        da_strip = f"https://{da_strip}"
+
+    parts = urlsplit(da_strip)
     scheme = (parts.scheme or "https").lower()
     netloc = parts.netloc.lower()
     # Bo cong mac dinh (`:80` cho http, `:443` cho https) — cung mot dich chi
@@ -52,7 +73,7 @@ def canonicalize_url(url: str) -> str:
 
     query_pairs = [
         (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-        if not any(k.lower().startswith(p) for p in _TRACKING_PARAM_PREFIXES)
+        if not _la_tham_so_theo_doi(k)
     ]
     query = urlencode(sorted(query_pairs))
 

@@ -211,5 +211,34 @@ class LoiMangThoangQuaTest(unittest.TestCase):
         self.assertIn("mạng", str(ctx.exception))
 
 
+class NovelsKhongCanFulltextTest(unittest.TestCase):
+    """2026-08-26: PR #56 them title_fulltext_idx + description_fulltext_idx
+    vao `novels` dua tren gia dinh sai la `contains()` can chi muc fulltext.
+    Kiem tra truc tiep tren Appwrite self-host 1.9.6 (khong phai Cloud) —
+    dung mot collection dung mot lan roi tu xoa trong chinh
+    fanfic-world-prod/fanfic_world_prod — chung minh nguoc lai:
+    q_or(contains(title,...), contains(description,...)) tra dung ket qua
+    voi KHONG chi muc fulltext nao ca. Appwrite cung chi cho MOT chi muc
+    fulltext moi collection nen phien ban hai chi muc chua bao gio triem
+    khai duoc nhu code. Test nay khoa lai viec da go ca hai, tranh vo tinh
+    them lai khi chua co bang chung song moi."""
+
+    def test_novels_khong_con_chi_muc_fulltext(self):
+        from scripts.setup_appwrite import SCHEMA
+
+        indexes = SCHEMA["novels"]["indexes"]
+        kinds = [kind for (_key, kind, _attrs) in indexes]
+        self.assertNotIn("fulltext", kinds)
+
+    def test_novels_van_giu_cac_chi_muc_key_khac(self):
+        from scripts.setup_appwrite import SCHEMA
+
+        keys = {key for (key, _kind, _attrs) in SCHEMA["novels"]["indexes"]}
+        self.assertEqual(
+            keys,
+            {"owner_idx", "state_idx", "state_created_idx", "novel_id_idx"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

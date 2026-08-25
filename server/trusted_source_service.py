@@ -684,8 +684,11 @@ class TrustedSourceService:
     #: cung CHUA chuoi `youtube_video_id` nay (vi du video duoc nhac toi o
     #: nhieu Novel khac), Novel THAT SU trung co the roi ra ngoai trang dau
     #: va bi bo lo trong im lang — dung dung "khong tim thay" thuc su.
-    #: 25 van la MOT truy van `contains` re (khong phai full-text search),
-    #: chi lam rong cua so ung vien de giam dang ke rui ro do ma khong doi
+    #: 25 duoc chon vi day van la MOT truy van `contains` re (khong phai
+    #: full-text search) tren mot bang chi vai chuc dong (xem docstring
+    #: ham duoi) — chi phi them gan nhu bang khong so voi 5, nen khong co
+    #: ly do gi de KHONG lay rong het muc con re, chi lam rong cua so ung
+    #: vien de giam dang ke rui ro do ma khong doi
     #: kien truc. Xem docs/reports/trusted-sources-duplicate-advisor-2026-08-26.md.
     _DUPLICATE_ADVISORY_CANDIDATE_LIMIT = 25
 

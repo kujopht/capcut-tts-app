@@ -1424,10 +1424,14 @@ class CrossDomainDuplicateAdvisoryTest(unittest.TestCase):
 
     def test_tieu_de_giong_nhau_nhung_khac_video_khong_bi_bao_trung(self):
         """Yeu cau: khong duoc co false positive CHI vi tieu de/fandom giong
-        nhau. Co che hien tai la so khop CHINH XAC theo video_id trong
-        description (khong phai do tuong dong tieu de), nen dieu nay PHAI
-        dung tu nhien — test nay khoa lai tinh chat do, tranh regression neu
-        sau nay co ai doi sang so khop mo (fuzzy) tren tieu de."""
+        nhau. `find_novels(query=video_id)` — buoc CHON ung vien — loc theo
+        chinh `video_id` dang quet, KHONG theo tieu de: mot Novel co tieu de
+        giong het nhung video nguon khac se KHONG BAO GIO tro thanh ung vien
+        (description/tieu de cua no khong chua `video_id` dang quet), nen
+        khong bao gio toi duoc buoc kiem tra cuoi. Test nay khoa lai chinh
+        tinh chat "chon ung vien theo ID, khong theo tieu de" — tranh
+        regression neu sau nay co ai doi query sang tim theo tieu de/fandom
+        (dieu se mo duong cho false positive that su)."""
         self.metadata.create_novel(Novel(
             owner_id="studio_1", title="Conan Fanfic: Luật Sư Ác Ma",
             description="Nguồn: https://www.youtube.com/watch?v=DIFFERENT_VIDEO_ID"))

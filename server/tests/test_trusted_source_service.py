@@ -1329,6 +1329,33 @@ class CrossDomainDuplicateAdvisoryTest(unittest.TestCase):
         row = self.store.get_import_by_video_id(video_id)
         self.assertEqual(row.possible_duplicate_novel_id, novel.novel_id)
 
+    def test_truong_hop_that_tren_production_2026_08_26(self):
+        """Khoa lai bang chung song: 2026-08-26, chay THANG
+        `_phat_hien_novel_trung` (khong qua HTTP/admin) tren du lieu
+        production THAT (novel nov_6b42f7954f914227, video XtJqhxbd1pY, kenh
+        vucthamaudio, mot trong 13 tac pham Fanfic that nhap tu Google Drive)
+        cho ket qua DUNG. Test nay tai hien CHINH XAC noi dung description
+        that (chi thay novel_id gia de khong phu thuoc production) de dam
+        bao logic khong bao gio regress tren dung truong hop nay — xem
+        docs/reports/trusted-sources-duplicate-advisor-2026-08-26.md."""
+        video_id = "XtJqhxbd1pY"
+        novel = self.metadata.create_novel(Novel(
+            owner_id="studio_1",
+            title=("Conan Fanfic Luật Sư Ác Ma Đối Đầu Nữ Hoàng Phòng Xử Án "
+                   "Kisaki Eri, Ta Thu Những Phu Nhân Cực Phẩm"),
+            description=(
+                "Fandom: Da Fandom Unresolved\n"
+                f"Nguồn: https://www.youtube.com/watch?v={video_id} "
+                "(kênh: vucthamaudio)\n\n"
+                "Bản hiện tại được phát hành dưới dạng một tập audio đầy đủ "
+                "và chưa được tách thành các chương riêng."),
+            tags=["work:CAT-15deb7a2804f", "imported", "long_form_audio",
+                  "fandom:Da Fandom Unresolved"]))
+        cid = "UC" + "vt" * 11
+        self._quet_mot_video(cid, video_id, "Video không liên quan tên gì cả")
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row.possible_duplicate_novel_id, novel.novel_id)
+
     def test_khong_khop_novel_nao_giu_none(self):
         video_id = "vidNoDup001"
         self.metadata.create_novel(Novel(
@@ -1349,6 +1376,65 @@ class CrossDomainDuplicateAdvisoryTest(unittest.TestCase):
         self._quet_mot_video(cid, video_id, "Video bình thường")
         row = self.store.get_import_by_video_id(video_id)
         self.assertIsNotNone(row)
+        self.assertIsNone(row.possible_duplicate_novel_id)
+
+    def test_khop_du_novel_that_su_trung_nam_ngoai_top_5_cu(self):
+        """2026-08-26 hardening — truoc day `limit=5`: neu >=5 Novel KHAC
+        cung chua chuoi video_id (vi du bi nhac lai trong description cua
+        nhieu Novel khong lien quan), Novel THAT SU trung co the bi day ra
+        ngoai trang va bo lo trong im lang. Tao 6 Novel gia (moi cai deu chua
+        chuoi video_id) SOM HON (cu hon, nen dung sau khi sap theo
+        created_at giam dan) roi Novel THAT SU trung — chi qua duoc test nay
+        neu cua so ung vien > 5."""
+        video_id = "vidWideWindow01"
+        # 6 Novel "nhieu": video_id XUAT HIEN TRONG TIEU DE (nen van duoc
+        # `find_novels(query=video_id)` tra ve lam ung vien — day dung DB that
+        # loc title/description CHUA chuoi) nhung KHONG co trong description,
+        # nen phai bi loai o buoc kiem tra chinh xac cuoi cung.
+        for i in range(6):
+            self.metadata.create_novel(Novel(
+                owner_id="studio_1", title=f"Video {video_id} — ban nhac lai {i}",
+                description="Khong lien quan gi den nguon that ca."))
+        # Novel THAT SU trung duoc tao SAU CUNG (moi hon, nen sap len dau neu
+        # khong can thiep) — dat created_at CU HON thu cong de buoc no xep
+        # SAU CA 6 novel gia o tren (tuc: nam ngoai top-5 neu gioi han van la
+        # 5, chi qua duoc test khi cua so ung vien duoc mo rong).
+        that_su_trung_novel = self.metadata.create_novel(Novel(
+            owner_id="studio_1", title="Truyện gốc thật",
+            description=f"Nguồn: https://www.youtube.com/watch?v={video_id} (kênh: that)"))
+        that_su_trung_novel.created_at = "2000-01-01T00:00:00.000+00:00"
+
+        cid = "UC" + "wd" * 11
+        self._quet_mot_video(cid, video_id, "Video không liên quan tên gì cả")
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row.possible_duplicate_novel_id, that_su_trung_novel.novel_id)
+
+    def test_dang_url_youtube_be_van_duoc_nhan_dien(self):
+        """So sanh la CHUOI CON tren `video_id`, khong phai tren URL day du —
+        nen moi dang URL (youtu.be, m.youtube.com, watch?v=...) deu duoc
+        nhan dien nhu nhau mien description co chua chinh ID do."""
+        video_id = "vidShortUrl1"
+        novel = self.metadata.create_novel(Novel(
+            owner_id="studio_1", title="Truyện gốc (youtu.be)",
+            description=f"Nguồn: https://youtu.be/{video_id}"))
+        cid = "UC" + "yt" * 11
+        self._quet_mot_video(cid, video_id, "Video không liên quan")
+        row = self.store.get_import_by_video_id(video_id)
+        self.assertEqual(row.possible_duplicate_novel_id, novel.novel_id)
+
+    def test_tieu_de_giong_nhau_nhung_khac_video_khong_bi_bao_trung(self):
+        """Yeu cau: khong duoc co false positive CHI vi tieu de/fandom giong
+        nhau. Co che hien tai la so khop CHINH XAC theo video_id trong
+        description (khong phai do tuong dong tieu de), nen dieu nay PHAI
+        dung tu nhien — test nay khoa lai tinh chat do, tranh regression neu
+        sau nay co ai doi sang so khop mo (fuzzy) tren tieu de."""
+        self.metadata.create_novel(Novel(
+            owner_id="studio_1", title="Conan Fanfic: Luật Sư Ác Ma",
+            description="Nguồn: https://www.youtube.com/watch?v=DIFFERENT_VIDEO_ID"))
+        video_id = "vidSimilarTitle1"
+        cid = "UC" + "st" * 11
+        self._quet_mot_video(cid, video_id, "Conan Fanfic: Luật Sư Ác Ma (phần 2)")
+        row = self.store.get_import_by_video_id(video_id)
         self.assertIsNone(row.possible_duplicate_novel_id)
 
 

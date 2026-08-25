@@ -209,6 +209,18 @@ class MockTrustedSourceStore:
             self.sources[source_id] = updated
             return updated
 
+    def record_uploads_playlist_id(
+        self, source_id: str, uploads_playlist_id: str) -> TrustedSource:
+        """Ghi lai `uploads_playlist_id` DA RESOLVE qua `channels.list` —
+        xem docstring `TrustedSource.uploads_playlist_id`."""
+        with self._lock:
+            current = self.get_source(source_id)
+            moc = now_iso()
+            updated = replace(
+                current, uploads_playlist_id=uploads_playlist_id, updated_at=moc)
+            self.sources[source_id] = updated
+            return updated
+
     # -- series mapping -----------------------------------------------------
 
     def create_mapping(self, mapping: SeriesMapping) -> SeriesMapping:

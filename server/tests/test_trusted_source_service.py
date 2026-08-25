@@ -1415,5 +1415,63 @@ class CreateSourceRaceConditionTest(unittest.TestCase):
         self.assertNotEqual(kenh["source_id"], video["source_id"])
 
 
+class UploadsPlaylistIdCacheTest(unittest.TestCase):
+    """Pre-merge hardening (2026-08), Fix 4 — `uploads_playlist_id` cua mot
+    kenh CHI duoc resolve qua `channels.list` MOT LAN roi cache lai tren
+    chinh `TrustedSource`; lan quet sau khong duoc goi lai `channels.list`."""
+
+    def setUp(self):
+        self.store = MockTrustedSourceStore()
+        self.animation = MockAnimationStore()
+        self.metadata = MockMetadataStore()
+        self.svc = TrustedSourceService(
+            self.store, self.animation, self.metadata, youtube_api_key="fake-key")
+        self.admin = Profile(user_id="admin_1", email="admin@fanfic.world")
+
+    def _dat_client_gia(self, client: FakeYouTubeClient):
+        self.svc._youtube = lambda: client  # type: ignore[method-assign]
+
+    def test_quet_lan_hai_khong_goi_lai_channels_list(self):
+        cid = "UC" + "u1" * 11
+        upload_playlist = "UUu1u1"
+        source = self.svc.create_source(
+            self.admin, source_type="youtube_channel", youtube_channel_id=cid,
+            display_name="Kênh cache")
+
+        so_lan_goi_channel = {"n": 0}
+
+        class _CountingYouTubeClient(FakeYouTubeClient):
+            def get_channel(self, channel_id):
+                so_lan_goi_channel["n"] += 1
+                return super().get_channel(channel_id)
+
+        client = _CountingYouTubeClient(
+            channels={cid: ChannelInfo(channel_id=cid, title="Kênh cache",
+                                       thumbnail_url="", uploads_playlist_id=upload_playlist)},
+            playlist_items={upload_playlist: ([_video_item("vidCache001")], "")},
+            videos={"vidCache001": VideoInfo(
+                video_id="vidCache001", title="Video 1", channel_id=cid,
+                channel_title="Kênh cache", thumbnail_url="", published_at="2026-01-01",
+                duration_seconds=100.0)},
+        )
+        self._dat_client_gia(client)
+
+        lan_1 = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(lan_1["detected"], 1)
+        self.assertEqual(so_lan_goi_channel["n"], 1, "lan quet dau PHAI goi channels.list")
+        cached = self.store.get_source(source["source_id"])
+        self.assertEqual(cached.uploads_playlist_id, upload_playlist)
+
+        lan_2 = self.svc.scan_source(self.admin, source["source_id"])
+        self.assertEqual(
+            so_lan_goi_channel["n"], 1,
+            "lan quet thu hai KHONG duoc goi lai channels.list (dung cache)")
+        # Van phai liet ke duoc video binh thuong tu playlist da biet ID
+        # (khong co mapping nao nen video van o trang thai NEW, con CHO
+        # QUYET DINH, duoc phan loai lai — day KHONG phai muc tieu cua test
+        # nay, chi can xac nhan quet van THANH CONG binh thuong qua cache).
+        self.assertEqual(lan_2["detected"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

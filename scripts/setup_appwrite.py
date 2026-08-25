@@ -787,6 +787,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               "direct_hls", "direct_mp4"]),
             ("youtube_channel_id", "string", False, 64),
             ("youtube_playlist_id", "string", False, 64),
+            # Pre-merge hardening (2026-08) — cache `contentDetails.
+            # relatedPlaylists.uploads` cua kenh (CHI cho source_type
+            # youtube_channel), THEM SAU (additive, khong bat buoc): tranh
+            # goi lai channels.list moi lan quet chi de doc lai gia tri
+            # KHONG BAO GIO doi, xem `TrustedSource.uploads_playlist_id`.
+            ("uploads_playlist_id", "string", False, 64),
             ("youtube_video_id", "string", False, 32),
             ("display_name", "string", False, 200),
             ("thumbnail_url", "string", False, 512),

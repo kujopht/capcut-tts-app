@@ -376,6 +376,19 @@ class HopDongTrustedSourceTest(unittest.TestCase):
                 lai_cu = kho.get_import(cu.import_id)
                 self.assertIsNone(lai_cu.possible_duplicate_novel_id, ten)
 
+    def test_uploads_playlist_id_cache_luu_va_doc_lai_ca_hai_kho(self):
+        """Pre-merge hardening (2026-08), Fix 4 — `record_uploads_playlist_id`
+        phai ghi lai dung tren CA HAI kho, va nguon MOI tao doc thanh `None`
+        (chua tung resolve)."""
+        for ten, kho in self._cac_kho():
+            with self.subTest(kho=ten):
+                s = kho.create_source(TrustedSource(youtube_channel_id="UC_cache"))
+                self.assertIsNone(s.uploads_playlist_id, ten)
+                lai = kho.record_uploads_playlist_id(s.source_id, "UUcache123")
+                self.assertEqual(lai.uploads_playlist_id, "UUcache123", ten)
+                self.assertEqual(
+                    kho.get_source(s.source_id).uploads_playlist_id, "UUcache123", ten)
+
     def test_get_import_by_video_id(self):
         for ten, kho in self._cac_kho():
             with self.subTest(kho=ten):

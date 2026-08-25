@@ -269,6 +269,15 @@ class TrustedSource:
     youtube_channel_id: str = ""
     #: ID playlist YouTube — CHI dien khi `source_type == YOUTUBE_PLAYLIST`.
     youtube_playlist_id: str = ""
+    #: Pre-merge hardening (2026-08) — CACHE `contentDetails.
+    #: relatedPlaylists.uploads` cua `youtube_channel_id` (CHI cho
+    #: `source_type == YOUTUBE_CHANNEL`), resolve MOT LAN qua `channels.list`
+    #: roi ghi lai vinh vien (gia tri nay KHONG BAO GIO doi cho mot kenh da
+    #: cho truoc) — tranh moi lan quet/doi chieu deu ton 1 don vi quota goi
+    #: lai `channels.list` chi de doc lai CUNG mot gia tri, xem
+    #: `TrustedSourceService._lay_ung_vien`. `None`/rong = CHUA tung resolve
+    #: (nguon tao TRUOC pre-merge hardening nay, hoac chua quet lan nao).
+    uploads_playlist_id: Optional[str] = None
     #: ID video YouTube (11 ky tu) — CHI dien khi `source_type ==
     #: YOUTUBE_VIDEO` (mot video DON LE duoc tin cay, khong gan voi ca
     #: kenh/playlist rong hon).
@@ -338,6 +347,7 @@ class TrustedSource:
             "source_type": self.source_type.value,
             "youtube_channel_id": self.youtube_channel_id,
             "youtube_playlist_id": self.youtube_playlist_id,
+            "uploads_playlist_id": self.uploads_playlist_id,
             "youtube_video_id": self.youtube_video_id,
             "display_name": self.display_name,
             "thumbnail_url": self.thumbnail_url,

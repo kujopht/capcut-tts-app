@@ -36,7 +36,8 @@ COL_IMPORTS = "video_imports"
 _PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_SOURCES: (
         "source_id", "source_type", "youtube_channel_id",
-        "youtube_playlist_id", "youtube_video_id", "display_name",
+        "youtube_playlist_id", "uploads_playlist_id", "youtube_video_id",
+        "display_name",
         "thumbnail_url", "enabled",
         "auto_discover", "auto_import", "auto_publish", "minimum_confidence",
         "created_by", "last_scan_at", "last_success_at", "last_error_at",
@@ -121,6 +122,8 @@ def _nguon_tu_doc(doc: Dict[str, Any]) -> TrustedSource:
         source_type=loai,
         youtube_channel_id=str(doc.get("youtube_channel_id") or ""),
         youtube_playlist_id=str(doc.get("youtube_playlist_id") or ""),
+        uploads_playlist_id=(str(doc["uploads_playlist_id"])
+                             if doc.get("uploads_playlist_id") else None),
         youtube_video_id=str(doc.get("youtube_video_id") or ""),
         display_name=str(doc.get("display_name") or ""),
         thumbnail_url=str(doc.get("thumbnail_url") or ""),
@@ -486,6 +489,18 @@ class AppwriteTrustedSourceStore:
         moc = now_iso()
         self._update(COL_SOURCES, source_id,
                      {"last_successful_sync_at": moc, "updated_at": moc})
+        return self.get_source(source_id)
+
+    def record_uploads_playlist_id(
+        self, source_id: str, uploads_playlist_id: str) -> TrustedSource:
+        """Ghi lai `uploads_playlist_id` DA RESOLVE qua `channels.list` —
+        xem docstring `TrustedSource.uploads_playlist_id`. CHI goi MOT LAN
+        cho moi kenh (lan dau tien `_lay_ung_vien` thay truong nay con
+        rong), cac lan quet/doi chieu sau doc lai gia tri da cache, khong
+        goi lai `channels.list`."""
+        moc = now_iso()
+        self._update(COL_SOURCES, source_id,
+                     {"uploads_playlist_id": uploads_playlist_id, "updated_at": moc})
         return self.get_source(source_id)
 
     # -- series mapping -----------------------------------------------------

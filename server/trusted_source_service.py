@@ -739,10 +739,18 @@ class TrustedSourceService:
         if source.source_type is TrustedSourceType.YOUTUBE_PLAYLIST:
             playlist_id = source.youtube_playlist_id
         else:
-            kenh = yt.get_channel(source.youtube_channel_id)
-            if kenh is None or not kenh.uploads_playlist_id:
-                raise YouTubeApiError("Không đọc được danh sách video của kênh này.")
-            playlist_id = kenh.uploads_playlist_id
+            # `uploads_playlist_id` cua MOT kenh KHONG BAO GIO doi — cache
+            # tren chinh `TrustedSource` sau lan `channels.list` DAU TIEN
+            # (xem docstring `TrustedSource.uploads_playlist_id`) de moi lan
+            # quet/doi chieu SAU KHONG con phai ton 1 don vi quota goi lai
+            # `channels.list` chi de doc lai CUNG mot gia tri.
+            playlist_id = source.uploads_playlist_id or ""
+            if not playlist_id:
+                kenh = yt.get_channel(source.youtube_channel_id)
+                if kenh is None or not kenh.uploads_playlist_id:
+                    raise YouTubeApiError("Không đọc được danh sách video của kênh này.")
+                playlist_id = kenh.uploads_playlist_id
+                self._store.record_uploads_playlist_id(source.source_id, playlist_id)
 
         return self._lay_video_theo_playlist(yt, playlist_id, page_token, max_pages)
 

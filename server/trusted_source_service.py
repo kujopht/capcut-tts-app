@@ -574,6 +574,7 @@ class TrustedSourceService:
         vi video do chua tung duoc phan loai).
         """
         vid = video["video_id"]
+        trung_novel = self._phat_hien_novel_trung(vid)
         if vid in da_la_tap:
             self._luu_ket_qua_phan_loai(VideoImport(
                 trusted_source_id=source.source_id, youtube_video_id=vid,
@@ -582,7 +583,8 @@ class TrustedSourceService:
                 published_at=video["published_at"], duration_seconds=video["duration_seconds"],
                 status=ImportStatus.DUPLICATE,
                 reason=f"Đã là tập {da_la_tap[vid].episode_id} trong series khác.",
-                discovered_via=trigger),
+                discovered_via=trigger,
+                possible_duplicate_novel_id=trung_novel),
                 existing_import)
             logger.info(
                 "trusted_source_ingest source_id=%s youtube_video_id=%s "
@@ -612,6 +614,7 @@ class TrustedSourceService:
             confidence=ket_qua.confidence, signals=list(ket_qua.signals),
             status=trang_thai, reason=ly_do, created_episode_id=episode_id,
             discovered_via=trigger,
+            possible_duplicate_novel_id=trung_novel,
         ), existing_import)
         logger.info(
             "trusted_source_ingest source_id=%s youtube_video_id=%s "
@@ -648,7 +651,43 @@ class TrustedSourceService:
             "status": ket_qua.status,
             "reason": ket_qua.reason,
             "created_episode_id": ket_qua.created_episode_id,
+            "possible_duplicate_novel_id": ket_qua.possible_duplicate_novel_id,
         })
+
+    def _phat_hien_novel_trung(self, youtube_video_id: str) -> Optional[str]:
+        """
+        CANH BAO CHI DE THAM KHAO (pre-merge hardening 2026-08) — xem
+        docstring `VideoImport.possible_duplicate_novel_id`: tim MOT Novel
+        (mien Novel/Chapter HOAN TOAN khac, `server/domain.py`) ma
+        `description` CHUA chinh `youtube_video_id` nay o dang van ban tu do
+        (mot so Novel that duoc tao TU CHINH cac video YouTube nay truoc khi
+        Trusted Sources ton tai — xem lich su Fanfic World Studio). KHONG tu
+        dong chan/bo qua video nao ca, CHI gan mot tin hieu cho quan tri.
+
+        Tai su dung `MetadataStore.find_novels(query=...)` DA CO SAN (loc
+        `title`/`description` CHUA chuoi, xem `server/appwrite_store.py`)
+        thay vi tu bien mot duong tim kiem moi — quy mo hien tai (vai chuc
+        Novel) lam cho MOT truy van `contains` nay CHAP NHAN DUOC, khong
+        phai mot tinh nang full-text search rieng.
+
+        KHONG BAO GIO duoc phep lam sap luong phan loai chinh: bat MOI ngoai
+        le (kho Novel chua san sang, loi mang, thieu phuong thuc...) va coi
+        nhu "khong tim thay" — day la advisory, mot loi o day khong duoc
+        phep chan viec tao/cap nhat `VideoImport`.
+        """
+        if not youtube_video_id:
+            return None
+        try:
+            ung_vien, _ = self._metadata_store.find_novels(
+                query=youtube_video_id, limit=5)
+            for novel in ung_vien:
+                if youtube_video_id in (novel.description or ""):
+                    return novel.novel_id
+        except Exception:
+            logger.warning(
+                "trusted_source_duplicate_novel_check_failed "
+                "youtube_video_id=%s", youtube_video_id, exc_info=True)
+        return None
 
     def _lay_ung_vien(self, yt: YouTubeClient, source: TrustedSource,
                       page_token: str, max_pages: int) -> tuple:

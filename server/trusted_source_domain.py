@@ -436,6 +436,16 @@ class VideoImport:
     #: docstring ham do. KHONG dua vao gia tri nay TRUOC khi qua
     #: `create_import_once`.
     import_id: str = ""
+    #: Pre-merge hardening (2026-08) — CANH BAO CHI DE THAM KHAO, KHONG BAO
+    #: GIO tu dong chan/bo qua gi ca: `novel_id` cua mot Novel (mien Novel/
+    #: Chapter HOAN TOAN khac, xem `server/domain.py`) ma `description` CHUA
+    #: chinh `youtube_video_id` nay o dang van ban tu do (mot so Novel that
+    #: duoc tao TU CHINH cac video YouTube nay truoc khi Trusted Sources ton
+    #: tai). `None` = khong tim thay Novel nao trung (gia tri MAC DINH, gom
+    #: ca khi kho Novel khong san sang luc kiem tra — xem
+    #: `TrustedSourceService._phat_hien_novel_trung`). Video xuat hien o CA
+    #: HAI mien khong nhat thiet la sai, chi la dang can quan tri liec qua.
+    possible_duplicate_novel_id: Optional[str] = None
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
 
@@ -463,6 +473,7 @@ class VideoImport:
             "reviewed_by": self.reviewed_by,
             "reviewed_at": self.reviewed_at or None,
             "discovered_via": self.discovered_via,
+            "possible_duplicate_novel_id": self.possible_duplicate_novel_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

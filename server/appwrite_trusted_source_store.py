@@ -56,7 +56,8 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
         "duration_seconds", "detected_mapping_id", "detected_series_id",
         "detected_episode_number", "confidence", "signals", "status",
         "reason", "created_episode_id", "reviewed_by", "reviewed_at",
-        "discovered_via", "created_at", "updated_at",
+        "discovered_via", "possible_duplicate_novel_id",
+        "created_at", "updated_at",
     ),
 }
 
@@ -203,6 +204,9 @@ def _import_tu_doc(doc: Dict[str, Any]) -> VideoImport:
         reviewed_by=str(doc.get("reviewed_by") or ""),
         reviewed_at=str(doc.get("reviewed_at") or ""),
         discovered_via=str(doc.get("discovered_via") or ""),
+        possible_duplicate_novel_id=(
+            str(doc["possible_duplicate_novel_id"])
+            if doc.get("possible_duplicate_novel_id") else None),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )

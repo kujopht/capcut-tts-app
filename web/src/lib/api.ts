@@ -1839,6 +1839,13 @@ export interface VideoImport {
   reviewed_at: string;
   /** Auto-Ingestion Phase 4 — xem `VideoImport.discovered_via` phia server. */
   discovered_via: DiscoveredVia;
+  /**
+   * Pre-merge hardening (2026-08) — cảnh báo CHỈ ĐỂ THAM KHẢO: `novel_id`
+   * của một Novel (miền hoàn toàn khác) có `description` chứa chính
+   * `youtube_video_id` này, hoặc `null` nếu không tìm thấy. Xem docstring
+   * `VideoImport.possible_duplicate_novel_id` phía server.
+   */
+  possible_duplicate_novel_id: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -102,8 +102,14 @@ test("header la lop kinh mo va biet trang da cuon chua", () => {
   assert.match(head, /backdrop-filter: blur\(var\(--blur\)\)/);
   // Nen doi tu token  sang mot gia tri sang hon o phase L: muc tieu
   // la nhin ra RANH GIOI kinh, khong phai mot mang suong. Rang buoc giu nguyen
-  // y: header phai nua trong suot de tranh nen lot qua.
-  assert.match(head, /background: #[0-9a-f]{6,8};/, "header khong con nua trong suot");
+  // y: header phai nua trong suot de tranh nen lot qua — dang gia tri cu the
+  // (hex co alpha hoac color-mix voi mot phan transparent) deu chap nhan duoc,
+  // mien la KHONG phai mot mau dac tuyet doi.
+  assert.match(
+    head,
+    /background: (#[0-9a-f]{6,8};|color-mix\(in srgb, var\(--bg\) \d+%, transparent\);)/,
+    "header khong con nua trong suot",
+  );
   // Dac them khi da cuon — luc do moi co chu chay qua duoi.
   assert.match(css(), /\.site-header\[data-scrolled="true"\]/);
 
@@ -143,7 +149,7 @@ test("trang chu co hero, va no LUON ve", () => {
   // Ve TRUOC nhanh loading/error/empty, nen kho trong thi van con thu noi cho
   // nguoi vao lan dau biet ho dang o dau.
   const at = home.indexOf("<Hero daDangNhap=");
-  assert.ok(at < home.indexOf('loading ? (\n          <SkeletonCards'),
+  assert.ok(at < home.indexOf('loading ? (\n            <KhungChoDanhSach'),
     "hero nằm sau nhánh loading");
 });
 
@@ -166,11 +172,10 @@ test("da dang nhap thi co loi tat vao thu vien", () => {
 test("trang chu VAN lay truyen that, khong thanh landing tinh", () => {
   const home = read("../src/app/page.tsx");
   assert.match(home, /api\.browseNovels/);
-  // "featured" thay `StoryHero` cu (V4 visual completion) — mot the noi bat
-  // gioi han rong, dung khi kho chi co DUY NHAT mot truyen. Xem
-  // `components/StoryCard.tsx::StoryCardVariant`.
-  assert.match(home, /variant="featured"/);
-  assert.match(home, /<StoryCard key=/);
+  // Trang chu dung hang doc gon; luoi bia day du van o /fanfic.
+  assert.match(home, /function HangTruyenMoi/);
+  assert.match(home, /<HangTruyenMoi key=/);
+  assert.match(home, /className="home-story-list"/);
 });
 
 test("trang chu KHONG bia so lieu backend khong co", () => {

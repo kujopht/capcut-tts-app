@@ -665,11 +665,12 @@ test("anh bia duoc dung o ca bon noi", () => {
   ]) {
     assert.match(read(f), /<NovelCover/, `${f} chua dung anh bia`);
   }
-  // Kham pha va trang chu KHONG goi thang `NovelCover` nua — ca hai di qua
-  // `StoryCard`, nen mot truyen trong giong nhau o hai noi.
-  for (const f of ["../src/app/fanfic/page.tsx", "../src/app/page.tsx"]) {
-    assert.match(read(f), /<StoryCard/, `${f} chua dung the truyen chung`);
-  }
+  // Kham pha dung the day du; trang chu dung hang doc gon de tranh luoi 12
+  // bia keo dai. Ca hai van chia se dung bo NovelCover/fallback.
+  assert.match(read("../src/app/fanfic/page.tsx"), /<StoryCard/,
+    "trang Kham pha chua dung the truyen chung");
+  assert.match(read("../src/app/page.tsx"), /<NovelCover/,
+    "trang chu chua dung bo anh bia chung");
   // Emoji 📖 cu da duoc thay het
   assert.ok(!read("../src/app/fanfic/page.tsx").includes("📖"));
 });

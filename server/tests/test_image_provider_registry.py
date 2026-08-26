@@ -50,6 +50,33 @@ class QuickFreeProviderTest(unittest.TestCase):
         self.assertEqual(anh.content, _ANH_GIA)
         self.assertEqual(anh.provider_id, "quick_free")
 
+    def test_canvas_doc_duoc_gui_ma_khong_bien_thanh_model_selector(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.params["width"], "768")
+            self.assertEqual(request.url.params["height"], "1152")
+            self.assertEqual(request.url.params["negative_prompt"], "text, watermark")
+            self.assertEqual(request.url.params["enhance"], "true")
+            self.assertEqual(request.url.params["safe"], "true")
+            self.assertEqual(request.url.params["nofeed"], "true")
+            self.assertNotIn("model", request.url.params)
+            return httpx.Response(200, content=_ANH_GIA,
+                                  headers={"content-type": "image/jpeg"})
+
+        provider = QuickFreeImageProvider(client=_client_gia(handler))
+        provider.sinh_anh(
+            prompt="portrait cover", aspect_ratio_seed=42, client_ip="1.2.3.4",
+            width=768, height=1152,
+            negative_prompt="text, watermark", enhance=True, safe=True, nofeed=True,
+        )
+
+    def test_canvas_phai_co_du_ca_width_va_height(self):
+        provider = QuickFreeImageProvider(client=_client_gia(lambda request: None))
+        with self.assertRaises(ValueError):
+            provider.sinh_anh(
+                prompt="portrait cover", aspect_ratio_seed=42,
+                client_ip="1.2.3.4", width=768,
+            )
+
     def test_timeout_nem_loi_rieng(self):
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectTimeout("timeout", request=request)

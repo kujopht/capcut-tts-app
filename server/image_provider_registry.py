@@ -180,7 +180,23 @@ class QuickFreeImageProvider:
         # cung nguyen tac an toan voi cuoc do tham goc.
         return httpx.Client(timeout=self._timeout, trust_env=False, headers={})
 
-    def sinh_anh(self, *, prompt: str, aspect_ratio_seed: int, client_ip: str) -> GeneratedImage:
+    def sinh_anh(
+        self, *, prompt: str, aspect_ratio_seed: int, client_ip: str,
+        width: Optional[int] = None, height: Optional[int] = None,
+        negative_prompt: str = "", enhance: bool = False,
+        safe: bool = False, nofeed: bool = False,
+    ) -> GeneratedImage:
+        """Tao anh bang endpoint an danh, voi kich thuoc tuy chon.
+
+        ``width``/``height`` chi la kich thuoc canvas cua endpoint legacy,
+        KHONG phai lua chon model. Hai gia tri phai cung co hoac cung bo trong
+        de cac caller cu van giu nguyen hanh vi mac dinh.
+        """
+        if (width is None) != (height is None):
+            raise ValueError("width va height phai duoc truyen cung nhau")
+        if width is not None and not (256 <= width <= 2048 and 256 <= height <= 2048):
+            raise ValueError("kich thuoc Quick Free phai nam trong 256..2048 px")
+
         con_lai = self._cooldown.dang_cooldown("quick_free")
         if con_lai is not None:
             raise ImageProviderUnavailable(
@@ -195,6 +211,16 @@ class QuickFreeImageProvider:
 
         url = f"{LEGACY_BASE}/{quote(prompt)}"
         tham_so = {"seed": aspect_ratio_seed, "nologo": "true"}
+        if width is not None and height is not None:
+            tham_so.update({"width": width, "height": height})
+        if negative_prompt:
+            tham_so["negative_prompt"] = negative_prompt
+        if enhance:
+            tham_so["enhance"] = "true"
+        if safe:
+            tham_so["safe"] = "true"
+        if nofeed:
+            tham_so["nofeed"] = "true"
         client = self._http_client()
         try:
             resp = client.get(url, params=tham_so)

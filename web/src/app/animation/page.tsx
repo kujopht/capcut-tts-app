@@ -121,7 +121,7 @@ function AnimationBrowser() {
         action={
           <Link
             className="btn btn-primary"
-            href={profile ? "/animation/new" : "/login"}
+            href={profile ? "/animation/new" : "/login"} prefetch={false}
           >
             {profile ? "Tạo series" : "Đăng nhập để tạo"}
           </Link>
@@ -205,7 +205,7 @@ function AnimationBrowser() {
             action={
               <Link
                 className="btn btn-primary"
-                href={profile ? "/animation/new" : "/login"}
+                href={profile ? "/animation/new" : "/login"} prefetch={false}
               >
                 Tạo series
               </Link>

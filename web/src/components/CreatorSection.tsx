@@ -216,7 +216,7 @@ function ONoiDung({ trangThai }: { trangThai: CreatorState }) {
       )}
       <div className="row">
         {trangThai.can_apply ? (
-          <Link className="btn btn-primary btn-sm" href="/creator/apply?next=/account">
+          <Link className="btn btn-primary btn-sm" href="/creator/apply?next=/account" prefetch={false}>
             {s === "rejected" ? "Gửi lại đơn" : "Đăng ký tác giả"}
           </Link>
         ) : (

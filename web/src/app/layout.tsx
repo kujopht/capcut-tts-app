@@ -91,7 +91,7 @@ export default function RootLayout({
             */}
             <SiteHeader>
               <div className="wrap">
-                <Link href="/" className="brand" aria-label="Fanfic World — trang chủ">
+                <Link href="/" className="brand" aria-label="Fanfic World — trang chủ" prefetch={false}>
                   <Logo size={30} />
                 </Link>
                 <NavLinks />
@@ -124,7 +124,7 @@ export default function RootLayout({
 
                 <nav className="footer-col" aria-label="Đọc truyện">
                   <h2 className="footer-title">Đọc truyện</h2>
-                  <Link href="/" className="footer-link">
+                  <Link href="/" className="footer-link" prefetch={false}>
                     Trang chủ
                   </Link>
                   <Link href="/fanfic" className="footer-link" prefetch={false}>

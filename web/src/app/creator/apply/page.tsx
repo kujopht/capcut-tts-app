@@ -95,7 +95,7 @@ function NoiDung() {
           <h1 className="page-title">Đăng ký tác giả</h1>
           <p className="hint">Bạn cần đăng nhập trước khi gửi đơn.</p>
         </header>
-        <Link className="btn btn-primary btn-block" href="/login?next=/creator/apply">
+        <Link className="btn btn-primary btn-block" href="/login?next=/creator/apply" prefetch={false}>
           Đăng nhập
         </Link>
       </div>

@@ -142,7 +142,7 @@ function FanficBrowser() {
         lead="Những truyện đã được tác giả xuất bản. Mỗi chương có thể kèm bản audio để bạn vừa đọc vừa nghe."
         motif={<MotifCompassArc />}
         action={
-          <Link className="btn btn-primary" href={profile ? "/write" : "/login"}>
+          <Link className="btn btn-primary" href={profile ? "/write" : "/login"} prefetch={false}>
             {profile ? "Viết truyện của bạn" : "Đăng nhập để viết"}
           </Link>
         }
@@ -233,7 +233,7 @@ function FanficBrowser() {
             title="Chưa có truyện nào được xuất bản"
             hint="Hãy là người đầu tiên: viết truyện rồi bấm xuất bản."
             action={
-              <Link className="btn btn-primary" href={profile ? "/write" : "/login"}>
+              <Link className="btn btn-primary" href={profile ? "/write" : "/login"} prefetch={false}>
                 Bắt đầu viết
               </Link>
             }

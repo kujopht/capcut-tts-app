@@ -96,7 +96,7 @@ export function AccountSocial() {
             <Link className="btn btn-ghost btn-sm" href="/community" prefetch={false}>
               Tới Cộng đồng
             </Link>
-            <Link className="btn btn-ghost btn-sm" href="/notifications">
+            <Link className="btn btn-ghost btn-sm" href="/notifications" prefetch={false}>
               Thông báo
               {tt.unread_notifications > 0
                 ? ` (${tt.unread_notifications})`

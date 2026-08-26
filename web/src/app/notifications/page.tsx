@@ -97,7 +97,7 @@ export default function NotificationsPage() {
           title="Cần đăng nhập"
           hint="Thông báo là của riêng bạn."
           action={
-            <Link className="btn btn-primary" href="/login?next=%2Fnotifications">
+            <Link className="btn btn-primary" href="/login?next=%2Fnotifications" prefetch={false}>
               Đăng nhập
             </Link>
           }

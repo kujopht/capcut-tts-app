@@ -186,10 +186,13 @@ test("the truyen dat BIA len tren cung", () => {
   assert.ok(cover < title, "bìa phải đứng trước tiêu đề");
 });
 
-test("trang chu va Kham pha dung CHUNG mot the truyen", () => {
-  for (const f of ["../src/app/page.tsx", "../src/app/fanfic/page.tsx"]) {
-    assert.match(read(f), /from "@\/components\/StoryCard"/, f);
+test("trang chu va Kham pha dung CHUNG bo ve bia truyen", () => {
+  // /fanfic dung the day du; trang chu chu dinh dung hang doc gon. Ca hai
+  // van chia se NovelCover de cung URL bia/fallback va khong lech hien thi.
+  for (const f of ["../src/app/page.tsx", "../src/components/StoryCard.tsx"]) {
+    assert.match(read(f), /from "@\/components\/NovelCover"/, f);
   }
+  assert.match(read("../src/app/fanfic/page.tsx"), /from "@\/components\/StoryCard"/);
 });
 
 test("trang chu chi goi so request CO DINH, khong phu thuoc so truyen", () => {

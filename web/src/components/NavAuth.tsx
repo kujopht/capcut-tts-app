@@ -231,6 +231,8 @@ function AccountMenu() {
         ref={buttonRef}
         type="button"
         className="account-link"
+        title={name}
+        aria-label={`Tài khoản của ${name}`}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}

@@ -168,7 +168,7 @@ test("cong the gioi (Storyworld Portal) LUON ve, khong phu thuoc so truyen/anima
   const src = home();
   const at = src.indexOf("<TheGioiCong");
   assert.notEqual(at, -1);
-  // Phai nam TRUOC nhanh dieu kien cua ke "Đang nổi bật" (loading/error/rong) —
+  // Phai nam TRUOC nhanh dieu kien cua ke truyen moi (loading/error/rong) —
   // nghia la khong bi mot `&&`/ternary nao cua du lieu truyen bao quanh.
   assert.ok(at < src.indexOf('id="home-noi-bat"'));
   const truoc = src.slice(Math.max(0, at - 200), at);
@@ -314,8 +314,8 @@ test("moi ke co section rieng voi aria-labelledby", () => {
   const src = home();
   for (const id of [
     "home-hero-title", "home-tiep-tuc", "home-tinh-nang", "home-noi-bat",
-    "home-animation", "home-cong-dong", "home-the", "home-kham-pha-nhanh",
-    "home-tac-gia",
+    "home-bang-vang", "home-animation", "home-cong-dong",
+    "home-kham-pha-nhanh", "home-tac-gia",
   ]) {
     assert.ok(
       src.includes(`id="${id}"`),

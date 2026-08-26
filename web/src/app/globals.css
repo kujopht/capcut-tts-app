@@ -979,6 +979,21 @@ main { overflow-x: clip; }
   justify-content: space-between;
   gap: var(--s4);
   flex-wrap: wrap;
+  padding: var(--s5);
+  border: 1px solid color-mix(in srgb, var(--hero-accent, var(--brand)) 40%, var(--kinh-vien));
+  border-radius: var(--r4);
+  /*
+    Nen chinh la mot lop nen TOI TRUNG TINH (khong tinh mau theme) cong mot
+    diem sang GOC TREN TRAI bam theo `--hero-accent` — day la `background`
+    cua chinh HOP, nen KHONG THE tran ra ngoai bien nhu mot `::before` rong
+    hon hop (xem ghi chu ben duoi ve loi da sua o `.hero-copy`); an toan voi
+    kien truc "quyen doc cuc bo" da chon.
+  */
+  background:
+    radial-gradient(560px 220px at 0% 0%,
+      color-mix(in srgb, var(--hero-accent, var(--brand)) 15%, transparent), transparent 70%),
+    linear-gradient(150deg, #0e1222cf, #080a14d6);
+  box-shadow: var(--shadow-2), var(--edge);
 }
 
 /*
@@ -990,6 +1005,12 @@ main { overflow-x: clip; }
   va sua qua ba lan (V1->V3) tren chinh no. Khi quyen doc gio thuoc ve
   `.hero-copy` — mot the CON bam theo dung be rong doan van ban
   (`--hero-copy-width`, xem khoi bien theme duoi day), khong phai ca hang.
+
+  2026-08-26: `.page-head` ban than TUNG khong co border/background/box-shadow
+  rieng nao — chi la mot flex container trong suot, doc ra la "hop mo nhat
+  khong ban sac" (phan hoi that te). Khoi nay THEM identity kinh cho chinh cai
+  HOP (border-radius/background/box-shadow o tren), TACH BACH voi van de
+  `::before` mist da noi — khong dung lai loi cu.
 */
 .page-head-body { min-width: 0; }
 .page-head-actions { flex: 0 0 auto; }
@@ -1325,11 +1346,25 @@ main { overflow-x: clip; }
   hinh chia trang thanh hai khoi roi rac; vach mo dan thi giu cam giac lien
   tuc ma van tach duoc thanh dieu huong khoi noi dung.
 */
+/*
+  Floating dock (phuc hoi tu phien ChatGPT Work, 2026-08-26): header tach roi
+  khoi vien tren, boc trong mot khung noi 14px voi bo goc — thay cho thanh
+  edge-to-edge cu. Ly do phuc hoi: ban edge-to-edge KHONG co `flex-wrap:
+  nowrap` tren `.nav-right`, nen o vien man hinh vua toi (~1024-1280px) VOI
+  day du Cong cu/streak/chuong/avatar (nguoi da dang nhap), cum ben phai co
+  the vo xuong hang hai — QA truoc do chi kiem tra o vien rong (1920/1440/
+  1280) hoac chua dang nhap nen khong thay. Xem `.nav-right` ben duoi.
+*/
 .site-header {
+  --blur: 14px;
   position: sticky;
-  top: 0;
+  top: 14px;
   z-index: 50;
-  background: #080a14a8;
+  margin: 14px auto 0;
+  width: min(1100px, calc(100% - 32px));
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 58%, transparent);
   /*
     2026-08-26: Lightning CSS (trinh minify cua Next 16) gop mot cap
     `backdrop-filter` + `-webkit-backdrop-filter` KHAC gia tri thanh MOT,
@@ -1337,26 +1372,28 @@ main { overflow-x: clip; }
     ban con lai — Chrome/Edge/Firefox chi con nhan `-webkit-backdrop-filter`
     (ma cac dong may nay khong doc), nen kinh mo bien mat hoan toan tren moi
     trinh duyet tru Safari. Ca hai khai bao gio PHAI cung mot gia tri (thu
-    tu: tien to truoc, chuan sau) de dedup con lai ban nao cung dung.
+    tu: tien to truoc, chuan sau) de dedup con lai ban nao cung dung. Ban
+    dock nay TUNG bi phuc hoi voi thu tu nguoc (chuan truoc, tien to sau) —
+    kiem tra lai thu tu nay truoc khi sua tiep khoi CSS nay.
   */
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.2);
-  backdrop-filter: blur(var(--blur)) saturate(1.2);
-  border-bottom: 1px solid transparent;
-  border-image: linear-gradient(
-      90deg, transparent, var(--line) 22%, var(--line) 78%, transparent
-    ) 1;
-  transition: background var(--dur) var(--ease);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.25);
+  backdrop-filter: blur(var(--blur)) saturate(1.25);
+  box-shadow: 0 10px 30px #00000040;
+  transition: background 280ms var(--ease), border-color 280ms var(--ease),
+    box-shadow 280ms var(--ease);
 }
-/* Cuon xuong thi nen dac hon — noi dung troi qua duoi khong con doc xuyen. */
+/* Cuon xuong chi tang do dac: dock khong doi kich thuoc va khong nay. */
 .site-header[data-scrolled="true"] {
-  background: #070911d9;
-  box-shadow: 0 1px 0 #0000005c, 0 10px 34px #00000052;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  border-color: color-mix(in srgb, var(--line) 95%, transparent);
+  box-shadow: 0 12px 34px #00000055;
 }
 .site-header .wrap {
   display: flex;
   align-items: center;
-  gap: var(--s4);
-  min-height: 66px;
+  gap: var(--s3);
+  min-height: 52px;
+  padding-inline: var(--s4);
 }
 
 .brand {
@@ -1373,13 +1410,21 @@ main { overflow-x: clip; }
 .brand:hover { color: var(--text); }
 .brand svg { flex: 0 0 auto; }
 .brand-text-sub { color: var(--text-3); font-weight: 500; }
+/*
+  An trong CHINH header (van dung o cho khac, vd `.auth-head`): dock noi gio
+  chi cao 52px va can moi pixel ngang cho `.nav-links`/`.tim-nut`/`.nav-right`
+  cung mot hang. Ten "Fanfic" tren logo da du de nhan dien thuong hieu; dong
+  phu ("Audio Studio"...) khong mang thong tin dieu huong nen la muc dau tien
+  bo di khi chat.
+*/
+.site-header .brand-text-sub { display: none; }
 
 .nav-links { display: flex; align-items: center; gap: var(--s1); }
 .nav-link {
   position: relative;
   display: inline-flex;
   align-items: center;
-  padding: 8px 14px;
+  padding: 7px 10px;
   border-radius: var(--r-full);
   color: var(--text-2);
   text-decoration: none;
@@ -1782,6 +1827,8 @@ body[data-nav-leaving="write"] .nav-cta:not([aria-current="page"]) {
   mot so trinh duyet lam mo ca cac phan tu anh em nam duoi trong cung tang.
 */
 .kinh,
+.page-head,
+.reader-head,
 .listen-hero,
 .account-hero,
 .novel-head,
@@ -2619,7 +2666,20 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   position: absolute;
   inset: 0;
 }
-.cover-fallback { display: grid; place-items: center; }
+/*
+  2026-08-26: THIEU ngu canh xep tang rieng o day la nguyen nhan mot loi hien
+  thi that: `.cover-crest` ben trong dung `z-index: 1` voi y dinh CHI can len
+  tren `.cover-fallback::after` (lop toi, cung o day, cung khong co z-index).
+  Nhung vi `.cover-fallback` KHONG tu lap ngu canh xep tang rieng, z-index do
+  "thoat" ra ngoai va duoc so sanh THANG voi `.cover-image` (anh bia that) o
+  ngu canh cua `.cover` (`isolation: isolate` o tren) — `.cover-crest` la
+  z-index:1 (duong), `.cover-image` la z-index:auto (~0), nen huy hieu du
+  phong VAN VE DE LEN TREN anh that du anh da tai xong. Day chinh la "hoa
+  tiet trang tri chan mot phan anh bia" da phat hien o QA truoc: KHONG phai
+  bia bi loi, ma la bia du phong khong bao gio thuc su bi che khuat.
+  `isolation: isolate` o day nhot z-index cua con no lai BEN TRONG chinh no.
+*/
+.cover-fallback { display: grid; place-items: center; isolation: isolate; }
 /*
   Lop toi phu len bia du phong. Khong co no, mot tam gradient bao hoa tren nen
   gan den trong nhu den neon va hut mat manh hon chinh ten truyen ngay ben
@@ -2835,7 +2895,7 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   `.input-search` cua ban truoc (mot o nhap that trong header) da bi bo — header
   gio la mot NUT mo overlay, xem `.tim-nut`.
 */
-.input-search { width: 190px; }
+.input-search { width: 156px; }
 
 /* ------------------------------------------------ menu cong cu / tai khoan */
 
@@ -2884,7 +2944,16 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
   background: var(--line-soft);
 }
 
-.nav-right { gap: var(--s2); }
+.nav-right { gap: var(--s2); flex-wrap: nowrap; flex-shrink: 0; }
+/*
+  An ten tai khoan CHI trong header (van hien o `/account`, o day chi la nut
+  avatar): cung ly do voi `.brand-text-sub` — dock 52px het cho ngang khi da
+  co Cong cu/streak/chuong/avatar. Danh tinh KHONG mat het: avatar van la
+  anh/ten viet tat that su cua nguoi dung (khong phai icon chung), nut co
+  `title`/`aria-label` "Tai khoan cua {ten}" de xac nhan qua hover/doc man
+  hinh, va bam vao mo menu voi cac lua chon that.
+*/
+.site-header .account-name { display: none; }
 
 /* --------------------------------------------------------- dau muc trang */
 
@@ -3430,6 +3499,193 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
    Storyworld Portal (Candidate A): ba lien ket do nay nam trong ve tinh cua
    `.portal-satellites`, lap lai lan nua trong Hero se la dieu huong trung —
    dung tinh than thiet ke goc "tich hop tinh te hon thay vi lap lai o Hero". */
+
+/*
+  DAI DAU TRANG CHU — tren desktop, Hero va cong dieu huong nam canh nhau.
+  Day la mot thay doi ve mat do thong tin, khong xoa noi dung: nguoi dung thay
+  loi chao, CTA va sau diem den trong cung mot khung nhin, roi di thang toi
+  "Tiep tuc"/ke noi dung ben duoi.
+*/
+.page[data-hero-theme="home"] {
+  padding-top: var(--s4);
+  gap: var(--s4);
+}
+.home-entry-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.88fr) minmax(540px, 1.12fr);
+  align-items: start;
+  gap: var(--s5);
+}
+.home-entry-copy { min-width: 0; }
+.home-entry-grid .hero-v2 {
+  max-width: none;
+  gap: var(--s2);
+  padding-block: var(--s4);
+}
+.home-entry-grid .hero-v2-title {
+  font-size: clamp(30px, 3.1vw, 42px);
+}
+.home-entry-grid .hero-v2-lead {
+  max-width: 52ch;
+  font-size: var(--t-sm);
+}
+.home-entry-grid .home-portals { min-width: 0; }
+.home-entry-grid .home-portals > .section-title { font-size: var(--t-md); }
+.home-entry-grid .portal-primary,
+.home-entry-grid .portal-stack,
+.home-entry-grid .portal-satellites { gap: var(--s2); }
+.home-entry-grid .portal-card {
+  min-height: 104px;
+  padding: var(--s3);
+}
+.home-entry-grid .portal-truyen { min-height: 224px; }
+.home-entry-grid .portal-icon {
+  width: 30px;
+  height: 30px;
+}
+.home-entry-grid .portal-title { font-size: var(--t-md); }
+.home-entry-grid .portal-truyen .portal-title { font-size: var(--t-xl); }
+.home-entry-grid .portal-satellite {
+  gap: var(--s2);
+  padding: var(--s2);
+}
+.home-entry-grid .portal-satellite .hint { display: none; }
+
+/*
+  Bang bien tap trang chu: thanh vien ben TRAI, truyen moi ben PHAI tren
+  desktop. Thu tu DOM van la truyen truoc, nen mobile va doc man hinh gap
+  noi dung chinh truoc. Hai khoi cung mot ngon ngu kinh de doc nhu mot cap,
+  thay vi hai section roi rac keo trang dai.
+*/
+.home-editorial-grid {
+  display: grid;
+  grid-template-columns: minmax(270px, 0.72fr) minmax(0, 1.55fr);
+  grid-template-areas: "members stories";
+  gap: var(--s4);
+  align-items: start;
+}
+.home-editorial-stories,
+.home-editorial-members,
+.home-secondary-card,
+.home-discovery-strip {
+  border: 1px solid var(--kinh-vien);
+  border-radius: var(--r4);
+  background:
+    radial-gradient(120% 100% at 0 0, #22d3ee0d, transparent 44%),
+    linear-gradient(165deg, #111827db, #080b13ed 72%);
+  box-shadow: var(--do-sau), var(--kinh-sang);
+}
+.home-editorial-stories { grid-area: stories; padding: var(--s4); }
+.home-editorial-members { grid-area: members; padding: var(--s4); }
+.home-editorial-stories > .empty {
+  min-height: 0;
+  padding: var(--s5);
+}
+.home-story-list { display: grid; gap: 7px; }
+.home-story-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 74px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r2);
+  background: #070a12a3;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.home-story-row:hover {
+  border-color: var(--brand-line);
+  background: #101528de;
+  transform: translateX(2px);
+}
+.home-story-row .cover-thumb { width: 58px; height: 58px; }
+.home-story-row-body { display: grid; min-width: 0; gap: 4px; }
+.home-story-row-title {
+  color: var(--text);
+  font-size: var(--t-base);
+  line-height: var(--lh-tight);
+}
+.home-story-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.home-story-row-meta .chip-static { white-space: nowrap; }
+.home-story-row-meta > .hint { margin-left: auto; white-space: nowrap; }
+.home-story-row-arrow {
+  color: var(--brand-hover);
+  font-size: var(--t-lg);
+  transition: transform var(--dur) var(--ease);
+}
+.home-story-row:hover .home-story-row-arrow { transform: translateX(3px); }
+.home-story-row-loading { pointer-events: none; }
+.home-story-row-cover-sk { width: 58px; height: 58px; border-radius: var(--r2); }
+.home-lb-list .lb-row {
+  padding: 9px 10px;
+  gap: 8px;
+  background: #070a12a3;
+  border-color: transparent;
+}
+.home-lb-list .lb-rank { min-width: 24px; }
+.home-lb-list .lb-xp { font-size: var(--t-xs); color: var(--brand-hover); }
+.home-member-loading { display: grid; gap: 8px; }
+.home-member-loading .sk { height: 55px; border-radius: var(--r2); }
+
+/* Hai ke phu chia doi mot hang. Moi nguon van tu an doc lap khi rong. */
+.home-secondary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s4);
+  align-items: start;
+}
+.home-secondary-card { padding: var(--s4); min-width: 0; }
+.home-secondary-card .story-card-featured { max-width: none; }
+.home-secondary-card .anim-grid-shelf {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s3);
+}
+.home-secondary-card .community-preview-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s2);
+}
+.home-secondary-card .community-preview-card { padding: var(--s3); }
+.home-secondary-card .community-preview-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.home-discovery-strip { padding: var(--s4); }
+.home-discovery-groups { display: grid; gap: var(--s3); }
+.home-discovery-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-3);
+  font-size: var(--t-sm);
+  padding-block: 6px;
+}
+.page[data-hero-theme="home"] .cta-band {
+  min-height: 250px;
+  padding-block: var(--s6);
+}
+
+@media (max-width: 1050px) {
+  .home-entry-grid { grid-template-columns: minmax(0, 1fr); }
+  .home-entry-grid .hero-v2 { max-width: 760px; }
+  .home-entry-grid .portal-satellite .hint { display: inline; }
+  .home-editorial-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "stories" "members";
+  }
+  .home-secondary-grid { grid-template-columns: minmax(0, 1fr); }
+}
 
 /*
   `.hub-grid`/`.quick-card` — luoi 6 the deu nhau con dung o `/account`
@@ -4264,22 +4520,36 @@ body.co-mini { padding-bottom: 74px; }
 
   Chi o day, khong dat cho ca trang: lam toi ca tam thi mat luon buc tranh.
 */
-.reader-head { position: relative; }
+.reader-head {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  max-width: 820px;
+  padding: var(--s5);
+  border: 1px solid color-mix(in srgb, var(--brand) 48%, var(--kinh-vien));
+  border-radius: var(--r4);
+  background:
+    radial-gradient(620px 260px at 0% 0%, #8b6cff26, transparent 70%),
+    linear-gradient(150deg, #0e1222cf, #080a14d6);
+  box-shadow: var(--shadow-2), var(--edge);
+}
 .reader-head::before {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: -60px -180px -48px -140px;
+  inset: 0;
   /*
     Manh hon mang o cac trang khac: mat trang trong tam nay roi DUNG vao vung
-    ten chuong, va o day lop phu toan trang chi con 38%.
+    ten chuong, va o day lop phu toan trang chi con 38%. The gio da co vien/
+    box-shadow rieng (xem tren), nen lop mist nay chi con can NHE hon truoc —
+    dam qua se danh nhau voi vien kinh moi.
 
     Gradient phai TAN HAN truoc khi toi mep hop (`transparent 62%` trong mot hop
     rong hon nhieu). Neu no con mau o mep thi hop bi cat thang va doc ra la mot
     khoi chu nhat dan vao — da thay dung loi do o lan truoc.
   */
   background: radial-gradient(52% 120% at 30% 50%,
-    #04060cf2 0%, #04060cc4 34%, transparent 62%);
+    #04060fa8 0%, #04060f70 34%, transparent 68%);
   pointer-events: none;
 }
 /*
@@ -4527,6 +4797,8 @@ body.co-mini { padding-bottom: 74px; }
   Hai goc DOI DIEN chu khong phai bon goc: bon goc doc ra la mot cai khung
   tranh, hai goc doc ra la mot dau hieu. Va it hon thi de lam dung hon.
 */
+.page-head::after,
+.reader-head::after,
 .listen-hero::after,
 .account-hero::after,
 /* The "featured" o trang chu (V4 visual completion) — thay `.home-hero::after`
@@ -4840,6 +5112,7 @@ body.co-mini { padding-bottom: 74px; }
   .page-bg-lop::before { background-image: var(--anh-nho, var(--anh)); }
   .wrap { padding: 0 var(--s4); }
   .page { padding: var(--s5) 0 var(--s7); gap: var(--s4); }
+  .page-head, .reader-head { padding: var(--s4); }
 
   /* Header da gop hang tu breakpoint 900px — xem khoi o tren. */
 
@@ -4852,6 +5125,44 @@ body.co-mini { padding-bottom: 74px; }
      cho thay nhieu truyen hon trong mot man hinh — dung y cua trang. Chi
      ha nguong xuong 140px. */
   .story-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--s3); }
+
+  /* Bang bien tap: hang truyen gon hon, bo mo ta trung gian tren man hep. */
+  .home-editorial-stories,
+  .home-editorial-members,
+  .home-secondary-card,
+  .home-discovery-strip { padding: var(--s3); }
+  .home-story-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    min-height: 66px;
+    padding: 7px;
+  }
+  .home-story-row .cover-thumb,
+  .home-story-row-cover-sk { width: 50px; height: 50px; }
+  .home-story-row-body > .hint,
+  .home-story-row-arrow { display: none; }
+  .home-story-row-meta > .hint { margin-left: 0; }
+  .home-lb-list,
+  .home-member-loading {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+  .home-lb-list::-webkit-scrollbar,
+  .home-member-loading::-webkit-scrollbar { display: none; }
+  .home-lb-list .lb-row {
+    min-width: min(270px, 82vw);
+    scroll-snap-align: start;
+  }
+  .home-member-loading .sk {
+    flex: 0 0 min(270px, 82vw);
+    scroll-snap-align: start;
+  }
+  .home-secondary-card .anim-grid-shelf { grid-template-columns: minmax(0, 1fr); }
+  .page[data-hero-theme="home"] .cta-band { min-height: 220px; }
 
   .footer-grid { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
 
@@ -5206,6 +5517,26 @@ body.co-mini { padding-bottom: 74px; }
   gap: var(--s3);
   padding: 0 10px 0 14px;
   height: 38px;
+  /*
+    `min-width: 0` + `overflow: hidden` TREN CHINH item flex nay (khong phai
+    chi tren `.tim-nut-chu` ben trong): mac dinh flex-item co "automatic
+    minimum size" = be rong noi dung KHONG the co lai duoc, va vi
+    `.tim-nut-chu` dung `white-space: nowrap`, be rong noi dung do CHINH LA
+    toan bo dong chu chua rut gon — khien nut nay khong the co nho hon o
+    desktop hep (~900-1100px), day noi dung tran ngang header thay vi rut
+    gon bang dau "…" nhu da dinh. Phat hien khi `.nav-right` doi sang
+    `flex-wrap: nowrap` (2026-08-26): truoc do phan tran nay bi "nuot" boi
+    viec `.nav-right` xuong hang thu hai; gio het cho nuot nen phai sua tan
+    goc — `.tim-nut` phai TU co lai duoc.
+
+    `min-width: 64px` (khong phai 0) la SAN, khong phai bo tran: du van con
+    co lai o desktop hep, van phai giu du cho de trong ra la MOT nut co the
+    bam (dau "/" + it nhat vai ky tu), khong duoc rut den mat hoan toan
+    thanh mot vien trong rong kho nhan ra la o tim kiem.
+  */
+  min-width: 64px;
+  flex-shrink: 1;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-full);
   background: #0b0e18a3;

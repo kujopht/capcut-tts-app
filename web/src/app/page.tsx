@@ -8,11 +8,10 @@
  * truyen don le. `published_novels == 0` thi ca trang chi con lai hero +
  * MOT hop "Chưa có truyện nào được xuất bản" chiem giua man hinh.
  *
- * SAU: trang chu la mot HUB gom nhieu module DOC LAP — hero gon, luoi tinh
- * nang (6 khu vuc), roi cac "ke" noi dung rieng cho Truyen/Animation/Cong
- * dong. Moi ke tu quyet dinh AN minh neu nguon du lieu cua no rong — trang
- * KHONG BAO GIO chi con mot hop rong choan giua man hinh nua, du kho truyen
- * co rong that.
+ * SAU: trang chu la mot HUB bien tap gon — hero va cac diem den o dau trang,
+ * tiep theo la mot bang hai cot: thanh vien XP tuan o ben trai, danh sach
+ * truyen moi dang hang o ben phai. Animation/Cong dong cung nam canh nhau,
+ * nen nguoi dung khong phai cuon qua mot luoi 12 bia dai moi thay het trang.
  *
  * VE DU LIEU — day van la phan quan trong nhat khi doc file nay:
  *
@@ -59,7 +58,6 @@ import {
 } from "@/lib/api";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { useSession } from "@/lib/session";
-import { StoryCard } from "@/components/StoryCard";
 import { Avatar } from "@/components/Avatar";
 import { CosmeticFrame } from "@/components/cosmetics/Cosmetics";
 import { NovelCover } from "@/components/NovelCover";
@@ -70,7 +68,7 @@ import {
   MotifManuscript,
   MotifWaveform,
 } from "@/components/Ornaments";
-import { ErrorState, ProgressBar, SkeletonCards } from "@/components/ui";
+import { ErrorState, ProgressBar } from "@/components/ui";
 import {
   IconBook,
   IconCompass,
@@ -85,17 +83,17 @@ import {
   IconUser,
 } from "@/components/Icons";
 
-/** So truyen lay ve cho ke "Đang nổi bật". */
-const GRID_COUNT = 12;
+/** Mot danh sach 6 hang du de quet nhanh ma khong day trang chu qua dai. */
+const GRID_COUNT = 6;
 /** So the hien o muc kham pha theo the. Du de goi y, khong du de thanh mot bai tuong. */
 const MAX_TAGS = 12;
 /** So series lay ve cho ke "Animation mới" — gon, khong canh tranh voi ke truyen. */
-const ANIM_SHELF_COUNT = 6;
+const ANIM_SHELF_COUNT = 4;
 /** So hang lay ve cho "Bảng vàng tuần" — mot dong nhin luot qua duoc, khong
  * phai ca bang xep hang (xem /leaderboard cho ban day du). */
 const BANG_VANG_COUNT = 5;
 /** So bai dang lay ve cho o xem truoc cong dong — "2–4 the" theo dac ta. */
-const FEED_SHELF_COUNT = 4;
+const FEED_SHELF_COUNT = 3;
 
 interface HomeData {
   novels: Novel[];
@@ -355,7 +353,7 @@ const DIEM_DEN_PHU: DiemDen[] = [
  */
 function TheGioiCong() {
   return (
-    <section className="stack-2 rise rise-1" aria-labelledby="home-tinh-nang">
+    <section className="stack-2 rise rise-1 home-portals" aria-labelledby="home-tinh-nang">
       <h2 className="section-title" id="home-tinh-nang">
         Chọn lối đi của bạn
       </h2>
@@ -587,6 +585,53 @@ function HangBangVang({ it }: { it: LeaderboardEntry }) {
   );
 }
 
+/**
+ * Hang truyen gon cho trang chu. API danh sach khong tra tac gia, so chuong
+ * hay luot doc, nen hang chi hien dung cac truong co that: bia, ten, mo ta,
+ * the va ngay tao. Ca hang la mot vung bam lon, de quet nhanh hon luoi bia.
+ */
+function HangTruyenMoi({ novel }: { novel: Novel }) {
+  return (
+    <Link href={`/novels/${novel.novel_id}`} className="home-story-row">
+      <NovelCover
+        novelId={novel.novel_id}
+        title={novel.title}
+        coverUrl={novel.cover_url}
+        size="thumb"
+      />
+      <span className="home-story-row-body">
+        <strong className="home-story-row-title clamp-1">{novel.title}</strong>
+        {novel.description ? (
+          <span className="hint clamp-1">{novel.description}</span>
+        ) : null}
+        <span className="home-story-row-meta">
+          {novel.tags.slice(0, 2).map((tag) => (
+            <span key={tag} className="chip chip-static">{tag}</span>
+          ))}
+          <span className="hint">Xuất bản {dinhDangNgay(novel.created_at)}</span>
+        </span>
+      </span>
+      <span className="home-story-row-arrow" aria-hidden="true">→</span>
+    </Link>
+  );
+}
+
+function KhungChoDanhSach() {
+  return (
+    <div className="home-story-list" role="status" aria-label="Đang tải truyện">
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={i} className="home-story-row home-story-row-loading" aria-hidden="true">
+          <span className="sk home-story-row-cover-sk" />
+          <span className="home-story-row-body">
+            <span className="sk sk-title" />
+            <span className="sk sk-text" />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const { profile } = useSession();
   const daDangNhap = Boolean(profile);
@@ -637,14 +682,35 @@ export default function HomePage() {
   const communityPosts = data?.communityPosts ?? [];
   const bangVangTuan = data?.bangVangTuan ?? [];
   const coTiepTuc = Boolean(data?.reading || data?.listening || data?.watching);
+  /*
+    `.home-secondary-grid` la MOT flex item cua `.page` (co `gap`) — neu ke
+    ben trong deu an (dang tai, hoac ca hai nguon that su rong), div bao
+    ngoai van chiem mot khe `gap` RONG, y het loi "hop rong choan giua trang"
+    ma trang nay tu dat ra la KHONG duoc lam (xem dau tep). Phai an CA khoi
+    bao ngoai khi khong co gi de hien, khong chi tung ke ben trong.
+  */
+  const coKeThuHai = !loading && (animationSeries.length > 0 || communityPosts.length > 0);
 
   return (
     // Themed Page Hero — "Ocean Sky": bien+troi+phieu luu, cyan troi la
     // nhan CHINH. Dat o day (khong phai rieng tren .hero-v2) de dong bo voi
     // cach cac trang khac dat theme tren the bao ngoai cung.
     <div className="page" data-hero-theme="home">
-      <Hero daDangNhap={daDangNhap} />
-      <DaiThanhVien gamification={data?.gamification ?? null} />
+      {/*
+        Desktop: gom loi chao va cac diem den vao CUNG mot dai hai cot. Ban
+        truoc xep doc hai khoi lon, nen rieng phan dieu huong dau trang da an
+        gan tron mot viewport truoc khi nguoi dung thay noi dung that.
+
+        Tablet/mobile tu tro ve mot cot trong CSS; khong doi thu tu DOM, nen
+        doc man hinh va dieu huong ban phim van gap Hero truoc cac diem den.
+      */}
+      <div className="home-entry-grid">
+        <div className="home-entry-copy">
+          <Hero daDangNhap={daDangNhap} />
+          <DaiThanhVien gamification={data?.gamification ?? null} />
+        </div>
+        <TheGioiCong />
+      </div>
 
       {/*
         "Tiếp tục" (Phần 6 đặc tả): người đã đăng nhập nhưng CHƯA có gì để
@@ -676,40 +742,71 @@ export default function HomePage() {
         </section>
       ) : null}
 
-      <TheGioiCong />
-
       <div className="home-divider" aria-hidden="true">
         <CelestialDivider />
       </div>
 
-      {/* Ke "Đang nổi bật" — moi tao gan day nhat trong kho truyen (Phan 8). */}
-      <section className="stack-5 rise rise-2" aria-labelledby="home-noi-bat">
-        <div className="section-head">
-          <h2 className="section-title section-title-icon" id="home-noi-bat">
-            <IconFlame size={20} /> Đang nổi bật
-          </h2>
-          <Link href="/fanfic" className="section-more">
-            Xem tất cả <span aria-hidden="true">→</span>
-          </Link>
-        </div>
-        {loading ? (
-          <SkeletonCards count={6} />
-        ) : error ? (
-          <ErrorState message={error} onRetry={reload} />
-        ) : novels.length === 0 ? (
-          <KeTrongNoiBat />
-        ) : novels.length === 1 ? (
-          // CHI mot truyen trong ca kho: mot the noi bat gioi han rong, KHONG
-          // phai mot hero choan nua trang cho mot du lieu duy nhat.
-          <StoryCard novel={novels[0]} variant="featured" />
-        ) : (
-          <div className="story-grid">
-            {novels.map((novel) => (
-              <StoryCard key={novel.novel_id} novel={novel} />
-            ))}
+      {/*
+        Bang bien tap hai cot. DOM dat truyen truoc de mobile/doc man hinh gap
+        noi dung chinh truoc; CSS dua thanh vien sang cot trai tren desktop.
+      */}
+      <div className="home-editorial-grid rise rise-2">
+        <section className="home-editorial-stories stack-2" aria-labelledby="home-noi-bat">
+          <div className="section-head">
+            <div className="stack-1">
+              <h2 className="section-title section-title-icon" id="home-noi-bat">
+                <IconFlame size={20} /> Truyện mới đáng chú ý
+              </h2>
+              <p className="hint">Sáu truyện vừa xuất bản để bạn chọn nhanh.</p>
+            </div>
+            <Link href="/fanfic" className="section-more">
+              Xem tất cả <span aria-hidden="true">→</span>
+            </Link>
           </div>
-        )}
-      </section>
+          {loading ? (
+            <KhungChoDanhSach />
+          ) : error ? (
+            <ErrorState message={error} onRetry={reload} />
+          ) : novels.length === 0 ? (
+            <KeTrongNoiBat />
+          ) : (
+            <div className="home-story-list">
+              {novels.map((novel) => (
+                <HangTruyenMoi key={novel.novel_id} novel={novel} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <aside className="home-editorial-members stack-2" aria-labelledby="home-bang-vang">
+          <div className="section-head">
+            <div className="stack-1">
+              <h2 className="section-title section-title-icon" id="home-bang-vang">
+                <IconCrown size={20} /> Thành viên nổi bật
+              </h2>
+              <p className="hint">Dẫn đầu XP trong tuần này.</p>
+            </div>
+            <Link href="/leaderboard" className="section-more" aria-label="Xem bảng xếp hạng">
+              Xem hết <span aria-hidden="true">→</span>
+            </Link>
+          </div>
+          {loading ? (
+            <div className="home-member-loading" role="status" aria-label="Đang tải thành viên">
+              {Array.from({ length: 5 }, (_, i) => (
+                <span key={i} className="sk" aria-hidden="true" />
+              ))}
+            </div>
+          ) : bangVangTuan.length > 0 ? (
+            <ol className="lb-list home-lb-list">
+              {bangVangTuan.map((it) => (
+                <HangBangVang key={it.user_id} it={it} />
+              ))}
+            </ol>
+          ) : (
+            <KeTrongGon icon="✨" text="Chưa có thành viên ghi XP trong tuần này." />
+          )}
+        </aside>
+      </div>
 
       {/*
         Ke "Animation mới" (Phan 8) — DOC LAP voi ke truyen tren: rong thi tu
@@ -721,8 +818,10 @@ export default function HomePage() {
         LAI dung mau "mot muc duy nhat" da co san cho Truyen o tren, cung
         mot ngu phap thi giac cho "chi mot thu trong kho" o ca hai khu vuc.
       */}
+      {coKeThuHai ? (
+      <div className="home-secondary-grid rise rise-2">
       {!loading && animationSeries.length === 1 ? (
-        <section className="stack-2 rise rise-2" aria-labelledby="home-animation">
+        <section className="home-secondary-card stack-2" aria-labelledby="home-animation">
           <div className="section-head">
             <h2 className="section-title section-title-icon" id="home-animation">
               <IconFilm size={20} /> Animation mới
@@ -734,7 +833,7 @@ export default function HomePage() {
           <TheAnimNoiBat series={animationSeries[0]} />
         </section>
       ) : !loading && animationSeries.length > 1 ? (
-        <section className="stack-2 rise rise-2" aria-labelledby="home-animation">
+        <section className="home-secondary-card stack-2" aria-labelledby="home-animation">
           <div className="section-head">
             <h2 className="section-title section-title-icon" id="home-animation">
               <IconFilm size={20} /> Animation mới
@@ -759,7 +858,7 @@ export default function HomePage() {
         khong doi dang nhap. Rong thi AN het, khong bia noi dung.
       */}
       {!loading && communityPosts.length > 0 ? (
-        <section className="stack-2 rise rise-2" aria-labelledby="home-cong-dong">
+        <section className="home-secondary-card stack-2" aria-labelledby="home-cong-dong">
           <div className="section-head">
             <h2 className="section-title section-title-icon" id="home-cong-dong">
               <IconMegaphone size={20} /> Cộng đồng đang nói gì
@@ -775,64 +874,36 @@ export default function HomePage() {
           </div>
         </section>
       ) : null}
+      </div>
+      ) : null}
 
-      {/*
-        "Bảng vàng tuần" — top XP tuần ISO hiện tại, từ ĐÚNG API bảng xếp
-        hạng đã có (`GET /api/leaderboard?mode=weekly`, xem
-        `app/leaderboard/page.tsx`). Chỉ MỘT hạng mục — backend không tách
-        riêng "tác giả" với "độc giả", nên KHÔNG bịa hai thẻ phân tách ở đây.
-        Rỗng thì ẨN hết, giống mọi kệ khác ở trang này.
-      */}
-      {!loading && bangVangTuan.length > 0 ? (
-        <section className="stack-2 rise rise-2" aria-labelledby="home-bang-vang">
-          <div className="section-head">
-            <h2 className="section-title section-title-icon" id="home-bang-vang">
-              <IconCrown size={20} /> Bảng vàng tuần
-            </h2>
-            <Link href="/leaderboard" className="section-more">
-              Xem bảng xếp hạng <span aria-hidden="true">→</span>
+      {/* Gom loi tat va the that vao mot dai, thay vi hai section xep doc. */}
+      <section className="home-discovery-strip stack-2" aria-labelledby="home-kham-pha-nhanh">
+        <h2 className="section-title section-title-icon" id="home-kham-pha-nhanh">
+          <IconCompass size={19} /> Khám phá nhanh
+        </h2>
+        <div className="home-discovery-groups">
+          <div className="story-tags">
+            <Link href="/fanfic" className="chip">
+              <IconBook size={13} /> Truyện mới
+            </Link>
+            <Link href="/animation" className="chip">
+              <IconFilm size={13} /> Animation
+            </Link>
+            <Link href="/community" className="chip">
+              <IconUser size={13} /> Cộng đồng
             </Link>
           </div>
-          <ol className="lb-list">
-            {bangVangTuan.map((it) => (
-              <HangBangVang key={it.user_id} it={it} />
-            ))}
-          </ol>
-        </section>
-      ) : null}
-
-      {/* Kham pha theo the (Phan 9) — chi hien khi kho truyen co the that. */}
-      {data && data.tags.length > 0 ? (
-        <section className="stack-2" aria-labelledby="home-the">
-          <h2 className="section-title section-title-icon" id="home-the">
-            <IconTag size={19} /> Khám phá theo thẻ
-          </h2>
-          <p className="hint">Thẻ do chính tác giả đặt khi xuất bản truyện.</p>
-          <div className="story-tags">
-            {data.tags.slice(0, MAX_TAGS).map((tag) => (
-              <Link key={tag} href={`/fanfic?tag=${encodeURIComponent(tag)}`} className="chip">
-                {tag}
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {/* Kham pha nhanh theo khu vuc (Phan 9) — luon hien, khong phu thuoc du lieu. */}
-      <section className="stack-2" aria-labelledby="home-kham-pha-nhanh">
-        <h2 className="section-title section-title-icon" id="home-kham-pha-nhanh">
-          <IconCompass size={19} /> Khám phá theo
-        </h2>
-        <div className="story-tags">
-          <Link href="/fanfic" className="chip">
-            <IconBook size={13} /> Truyện mới
-          </Link>
-          <Link href="/animation" className="chip">
-            <IconFilm size={13} /> Animation
-          </Link>
-          <Link href="/community" className="chip">
-            <IconUser size={13} /> Cộng đồng
-          </Link>
+          {data && data.tags.length > 0 ? (
+            <div className="story-tags" aria-label="Thẻ truyện">
+              <span className="home-discovery-label"><IconTag size={14} /> Thẻ:</span>
+              {data.tags.slice(0, MAX_TAGS).map((tag) => (
+                <Link key={tag} href={`/fanfic?tag=${encodeURIComponent(tag)}`} className="chip">
+                  {tag}
+                </Link>
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
 

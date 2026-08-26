@@ -129,6 +129,17 @@ test("'Viết truyện' noi bat hon muc dieu huong thuong", () => {
   assert.match(cta, /var\(--brand-line\)/, "nút CTA không có viền tím");
 });
 
+test("cac muc dieu huong chinh KHONG tu prefetch (2026-08-26, storm do)", () => {
+  // Do that tren production: 6 muc nay LUON trong khung nhin (header dinh),
+  // nen Next.js prefetch lai segment cua chung hang tram lan/30s idle du yeu
+  // cau truoc do da 200 kem `x-nextjs-stale-time: 300` — mot luong request
+  // nen tang thua thai voi moi tab dang mo. Ca 6 trang deu tinh/prerender
+  // (`enableCacheInterception`), nen tat prefetch khong doi toc do dieu huong
+  // that su, chi cat luong nay tai nguon.
+  const nav = read("../src/components/NavAuth.tsx");
+  assert.match(nav, /prefetch=\{false\}/);
+});
+
 test("muc dang xem danh dau bang vach duoi, khong to ca nen", () => {
   // To ca nen o mot thanh bon muc thi khoi mau do to ngang mot cai nut va hut
   // mat truoc ca ten san pham.

@@ -230,16 +230,23 @@ function Hero({ daDangNhap }: { daDangNhap: boolean }) {
         </p>
       </div>
       <div className="row hero-v2-cta">
-        <Link className="btn btn-primary" href="/fanfic">
+        {/*
+          2026-08-26: Hero LUON nam trong khung nhin dau tien cua trang chu —
+          cung nguyen nhan/cung sua nhu 6 muc header (xem NavAuth.tsx): prefetch
+          tu dong cho cac lien ket TINH nay gay ra mot luong request nen tang
+          lap lai lien tuc. Cac trang dich deu da tinh/prerender nen tat
+          prefetch khong lam cham dieu huong that su.
+        */}
+        <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
           Khám phá
         </Link>
-        <Link className="btn btn-outline" href="/write">
+        <Link className="btn btn-outline" href="/write" prefetch={false}>
           Viết truyện
         </Link>
       </div>
       {!daDangNhap ? (
         <p className="hero-v2-guest-hint">
-          <Link href="/login">Đăng nhập</Link> để lưu tiến độ đọc, nghe và xem.
+          <Link href="/login" prefetch={false}>Đăng nhập</Link> để lưu tiến độ đọc, nghe và xem.
         </p>
       ) : null}
     </section>
@@ -357,8 +364,14 @@ function TheGioiCong() {
       <h2 className="section-title" id="home-tinh-nang">
         Chọn lối đi của bạn
       </h2>
+      {/*
+        Ca 6 cong (chinh + ve tinh) LUON trong khung nhin dau tien cua trang
+        chu, va deu tro toi trang TINH da prerender — cung ly do tat prefetch
+        nhu Hero/header (xem NavAuth.tsx). `prefetch={false}` dat tren TUNG
+        the ben duoi, khong phai o day.
+      */}
       <div className="portal-primary">
-        <Link href={DIEM_DEN_CHINH[0].href} className="portal-card portal-truyen">
+        <Link href={DIEM_DEN_CHINH[0].href} className="portal-card portal-truyen" prefetch={false}>
           <Image
             src="/images/portals/truyen-manuscript.webp"
             alt=""
@@ -379,7 +392,7 @@ function TheGioiCong() {
           </span>
         </Link>
         <div className="portal-stack">
-          <Link href={DIEM_DEN_CHINH[1].href} className="portal-card portal-animation">
+          <Link href={DIEM_DEN_CHINH[1].href} className="portal-card portal-animation" prefetch={false}>
             <Image
               src="/images/portals/animation-projector.webp"
               alt=""
@@ -398,7 +411,7 @@ function TheGioiCong() {
               <span className="hint">{DIEM_DEN_CHINH[1].mota}</span>
             </span>
           </Link>
-          <Link href={DIEM_DEN_CHINH[2].href} className="portal-card portal-audio">
+          <Link href={DIEM_DEN_CHINH[2].href} className="portal-card portal-audio" prefetch={false}>
             <MotifWaveform className="portal-motif" />
             <span className="portal-body">
               <span className="portal-icon" aria-hidden="true">
@@ -412,7 +425,7 @@ function TheGioiCong() {
       </div>
       <div className="portal-satellites">
         {DIEM_DEN_PHU.map((d) => (
-          <Link key={d.href} href={d.href} className={`portal-satellite portal-sat-${d.href.replace(/\//g, "")}`}>
+          <Link key={d.href} href={d.href} className={`portal-satellite portal-sat-${d.href.replace(/\//g, "")}`} prefetch={false}>
             <span className="portal-satellite-icon" aria-hidden="true">
               {d.icon}
             </span>
@@ -471,7 +484,7 @@ function KeTrongNoiBat() {
           Chưa có truyện nào được xuất bản — chỗ đầu tiên đang chờ tác giả
           đầu tiên.
         </span>
-        <Link className="btn btn-primary btn-sm" href="/write">
+        <Link className="btn btn-primary btn-sm" href="/write" prefetch={false}>
           Viết câu chuyện đầu tiên
         </Link>
       </span>
@@ -932,10 +945,10 @@ export default function HomePage() {
           </p>
         </div>
         <div className="row">
-          <Link className="btn btn-primary" href="/write">
+          <Link className="btn btn-primary" href="/write" prefetch={false}>
             Bắt đầu viết
           </Link>
-          <Link className="btn" href="/studio">
+          <Link className="btn" href="/studio" prefetch={false}>
             Thử Audio Studio
           </Link>
         </div>

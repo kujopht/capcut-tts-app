@@ -169,6 +169,27 @@ test("muc dang xem danh dau bang vach duoi, khong to ca nen", () => {
 
 /* ============================================================= trang chu */
 
+test("cac lien ket TINH luon-trong-khung-nhin o trang chu KHONG tu prefetch", () => {
+  // Tiep tuc phat hien o NavAuth.tsx: bao thu he thong nay khong chi rieng
+  // header — MOI <Link> tro toi mot trang tinh ma nam gan dau trang chu
+  // (Hero CTA, 6 cong TheGioiCong, CTA cuoi trang) cung bi cuon vao cung mot
+  // luong prefetch lap lai. Do that tren production SAU KHI chi sua header:
+  // bao van tiep tuc — chi doi sang dung NHUNG lien ket nay (/write, /login)
+  // thay vi 4 muc header cu — chung minh day la hanh vi theo TUNG <Link>
+  // hien trong khung nhin, khong rieng component nao.
+  const home = read("../src/app/page.tsx");
+  const heroCta = home.slice(home.indexOf("hero-v2-cta"), home.indexOf("hero-v2-guest-hint"));
+  assert.match(heroCta, /href="\/fanfic" prefetch=\{false\}/);
+  assert.match(heroCta, /href="\/write" prefetch=\{false\}/);
+  assert.match(home, /href="\/login" prefetch=\{false\}/);
+  const viTriCongChinh = home.indexOf('className="portal-primary"');
+  const congChinh = home.slice(viTriCongChinh, home.indexOf("portal-satellites", viTriCongChinh));
+  assert.match(congChinh, /DIEM_DEN_CHINH\[0\]\.href\} className="portal-card portal-truyen" prefetch=\{false\}/);
+  assert.match(congChinh, /DIEM_DEN_CHINH\[1\]\.href\} className="portal-card portal-animation" prefetch=\{false\}/);
+  assert.match(congChinh, /DIEM_DEN_CHINH\[2\]\.href\} className="portal-card portal-audio" prefetch=\{false\}/);
+  assert.match(home, /href=\{d\.href\} className=\{`portal-satellite[^`]*`\} prefetch=\{false\}/);
+});
+
 test("trang chu co hero, va no LUON ve", () => {
   const home = read("../src/app/page.tsx");
   assert.match(home, /<Hero daDangNhap=/);

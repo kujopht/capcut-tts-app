@@ -96,9 +96,11 @@ export function NavLinks() {
               200 kem `x-nextjs-stale-time: 300` (tuc la con "tuoi" 5 phut).
               Ca 6 trang deu la trang TINH da duoc prerender + phuc vu qua
               tang `enableCacheInterception` (xem `open-next.config.ts`) —
-              dieu huong toi chung van tuc thi du khong prefetch truoc, nen
-              tat prefetch o day khong doi hanh vi nguoi dung, chi cat mot
-              luong yeu cau nen tang thua thai dot voi moi tab dang mo.
+              tat prefetch KHONG doi noi dung dieu huong toi chung, chi doi
+              tu "chuyen tuc thi tu cache router" thanh "mot vong goi mang
+              ngan luc bam" (van rat nhanh vi da qua cache interception, chi
+              khong con la 0ms) — danh doi hop ly de cat mot luong yeu cau
+              nen tang thua thai dot voi moi tab dang mo.
             */
             prefetch={false}
             className={link.cta ? "nav-link nav-cta" : "nav-link"}
@@ -226,8 +228,10 @@ function AccountMenu() {
   }
 
   if (!profile) {
+    // Cung ly do voi 6 muc `LINKS` — cung LUON nam trong khung nhin header
+    // voi khach vang lai, cung tro toi mot trang tinh da prerender.
     return (
-      <Link className="btn btn-primary btn-sm" href="/login">
+      <Link className="btn btn-primary btn-sm" href="/login" prefetch={false}>
         Đăng nhập
       </Link>
     );

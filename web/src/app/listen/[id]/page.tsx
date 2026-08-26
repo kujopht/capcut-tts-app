@@ -143,7 +143,7 @@ export default function ListenPage({
           icon="🔍"
           title="Không tìm thấy chương này"
           action={
-            <Link className="btn btn-primary" href="/fanfic">
+            <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
               Về trang khám phá
             </Link>
           }
@@ -260,7 +260,7 @@ export default function ListenPage({
           }
           action={
             isOwner ? (
-              <Link className="btn btn-primary" href="/write">
+              <Link className="btn btn-primary" href="/write" prefetch={false}>
                 Tạo audio cho chương
               </Link>
             ) : (
@@ -284,7 +284,7 @@ export default function ListenPage({
                 {/* Nut that, khong phai lien ket trong cau (M4): vung bam
                     du to o mobile, va duong dan sang cho tao lai phai RO. */}
                 {isOwner ? (
-                  <Link className="btn btn-sm" href="/write">
+                  <Link className="btn btn-sm" href="/write" prefetch={false}>
                     Tạo lại audio trong khu vực tác giả
                   </Link>
                 ) : null}

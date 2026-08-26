@@ -138,7 +138,7 @@ export default function AnimationWatchPage({
           title="Không tìm thấy tập này"
           hint="Tập có thể đã bị xoá, hoặc series chưa được xuất bản."
           action={
-            <Link className="btn btn-primary" href="/animation">
+            <Link className="btn btn-primary" href="/animation" prefetch={false}>
               Về trang Animation
             </Link>
           }

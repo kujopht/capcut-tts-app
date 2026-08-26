@@ -125,7 +125,7 @@ export default function AnimationSeriesPage({
           title="Không tìm thấy series này"
           hint="Series có thể đã bị xoá hoặc chưa được xuất bản."
           action={
-            <Link className="btn btn-primary" href="/animation">
+            <Link className="btn btn-primary" href="/animation" prefetch={false}>
               Về trang Animation
             </Link>
           }
@@ -147,7 +147,7 @@ export default function AnimationSeriesPage({
   return (
     <div className="page">
       <nav aria-label="Đường dẫn">
-        <Link href="/animation" className="hint crumb">
+        <Link href="/animation" className="hint crumb" prefetch={false}>
           ← Animation
         </Link>
       </nav>

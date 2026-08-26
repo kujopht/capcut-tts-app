@@ -127,23 +127,23 @@ export default function RootLayout({
                   <Link href="/" className="footer-link">
                     Trang chủ
                   </Link>
-                  <Link href="/fanfic" className="footer-link">
+                  <Link href="/fanfic" className="footer-link" prefetch={false}>
                     Khám phá
                   </Link>
-                  <Link href="/library" className="footer-link">
+                  <Link href="/library" className="footer-link" prefetch={false}>
                     Thư viện của bạn
                   </Link>
                 </nav>
 
                 <nav className="footer-col" aria-label="Sáng tác">
                   <h2 className="footer-title">Sáng tác</h2>
-                  <Link href="/write" className="footer-link">
+                  <Link href="/write" className="footer-link" prefetch={false}>
                     Khu vực tác giả
                   </Link>
-                  <Link href="/studio" className="footer-link">
+                  <Link href="/studio" className="footer-link" prefetch={false}>
                     Audio Studio
                   </Link>
-                  <Link href="/account" className="footer-link">
+                  <Link href="/account" className="footer-link" prefetch={false}>
                     Tài khoản
                   </Link>
                 </nav>

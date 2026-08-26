@@ -93,7 +93,7 @@ export function AccountSocial() {
           ) : null}
 
           <div className="row" style={{ gap: 8 }}>
-            <Link className="btn btn-ghost btn-sm" href="/community">
+            <Link className="btn btn-ghost btn-sm" href="/community" prefetch={false}>
               Tới Cộng đồng
             </Link>
             <Link className="btn btn-ghost btn-sm" href="/notifications">

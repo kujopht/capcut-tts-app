@@ -64,7 +64,7 @@ export default function PostPage() {
           title="Bài đăng đã được xoá"
           hint="Nội dung này không còn nữa."
           action={
-            <Link className="btn btn-primary" href="/community">
+            <Link className="btn btn-primary" href="/community" prefetch={false}>
               Về Cộng đồng
             </Link>
           }
@@ -78,7 +78,7 @@ export default function PostPage() {
       <div className="stack">
         <PageHeader title="Bài đăng" />
         <ErrorState message={loi} />
-        <Link className="btn btn-ghost btn-sm" href="/community">
+        <Link className="btn btn-ghost btn-sm" href="/community" prefetch={false}>
           ← Về Cộng đồng
         </Link>
       </div>
@@ -89,7 +89,7 @@ export default function PostPage() {
 
   return (
     <div className="stack">
-      <Link className="btn btn-ghost btn-sm" href="/community">
+      <Link className="btn btn-ghost btn-sm" href="/community" prefetch={false}>
         ← Cộng đồng
       </Link>
       <PostCard

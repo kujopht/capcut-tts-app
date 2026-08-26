@@ -139,7 +139,7 @@ function ONoiDung({ trangThai }: { trangThai: CreatorState }) {
             <AuthorBadge />
             {trangThai.rank ? <RankBadge rank={trangThai.rank} /> : null}
           </span>
-          <Link className="btn btn-sm" href="/write">
+          <Link className="btn btn-sm" href="/write" prefetch={false}>
             Khu vực tác giả
           </Link>
         </div>
@@ -179,7 +179,7 @@ function ONoiDung({ trangThai }: { trangThai: CreatorState }) {
           . Chỉ nút xuất bản là còn khoá.
         </p>
         <div className="row">
-          <Link className="btn btn-sm" href="/write">
+          <Link className="btn btn-sm" href="/write" prefetch={false}>
             Tiếp tục viết
           </Link>
         </div>

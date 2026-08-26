@@ -625,7 +625,7 @@ export default function WritePage() {
             <Link className="btn" href="/write/import">
               Nhập nhiều chương
             </Link>
-            <Link className="btn" href="/fanfic">
+            <Link className="btn" href="/fanfic" prefetch={false}>
               Xem trang khám phá
             </Link>
           </>

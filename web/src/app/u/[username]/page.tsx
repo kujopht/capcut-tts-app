@@ -42,7 +42,7 @@ export default function PublicProfilePage({
           title="Không tìm thấy người dùng này"
           hint="Có thể họ chưa chọn tên công khai, hoặc đường dẫn bị gõ sai."
           action={
-            <Link className="btn btn-primary" href="/fanfic">
+            <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
               Về trang khám phá
             </Link>
           }

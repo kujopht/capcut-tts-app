@@ -736,7 +736,7 @@ export default function HomePage() {
             <h2 className="section-title" id="home-tiep-tuc">
               Tiếp tục của bạn
             </h2>
-            <Link className="section-more" href="/library">
+            <Link className="section-more" href="/library" prefetch={false}>
               Thư viện của bạn <span aria-hidden="true">→</span>
             </Link>
           </div>
@@ -772,7 +772,7 @@ export default function HomePage() {
               </h2>
               <p className="hint">Sáu truyện vừa xuất bản để bạn chọn nhanh.</p>
             </div>
-            <Link href="/fanfic" className="section-more">
+            <Link href="/fanfic" className="section-more" prefetch={false}>
               Xem tất cả <span aria-hidden="true">→</span>
             </Link>
           </div>
@@ -799,7 +799,7 @@ export default function HomePage() {
               </h2>
               <p className="hint">Dẫn đầu XP trong tuần này.</p>
             </div>
-            <Link href="/leaderboard" className="section-more" aria-label="Xem bảng xếp hạng">
+            <Link href="/leaderboard" className="section-more" aria-label="Xem bảng xếp hạng" prefetch={false}>
               Xem hết <span aria-hidden="true">→</span>
             </Link>
           </div>
@@ -839,7 +839,7 @@ export default function HomePage() {
             <h2 className="section-title section-title-icon" id="home-animation">
               <IconFilm size={20} /> Animation mới
             </h2>
-            <Link href="/animation" className="section-more">
+            <Link href="/animation" className="section-more" prefetch={false}>
               Xem tất cả <span aria-hidden="true">→</span>
             </Link>
           </div>
@@ -851,7 +851,7 @@ export default function HomePage() {
             <h2 className="section-title section-title-icon" id="home-animation">
               <IconFilm size={20} /> Animation mới
             </h2>
-            <Link href="/animation" className="section-more">
+            <Link href="/animation" className="section-more" prefetch={false}>
               Xem tất cả <span aria-hidden="true">→</span>
             </Link>
           </div>
@@ -876,7 +876,7 @@ export default function HomePage() {
             <h2 className="section-title section-title-icon" id="home-cong-dong">
               <IconMegaphone size={20} /> Cộng đồng đang nói gì
             </h2>
-            <Link href="/community" className="section-more">
+            <Link href="/community" className="section-more" prefetch={false}>
               Xem cộng đồng <span aria-hidden="true">→</span>
             </Link>
           </div>
@@ -897,13 +897,13 @@ export default function HomePage() {
         </h2>
         <div className="home-discovery-groups">
           <div className="story-tags">
-            <Link href="/fanfic" className="chip">
+            <Link href="/fanfic" className="chip" prefetch={false}>
               <IconBook size={13} /> Truyện mới
             </Link>
-            <Link href="/animation" className="chip">
+            <Link href="/animation" className="chip" prefetch={false}>
               <IconFilm size={13} /> Animation
             </Link>
-            <Link href="/community" className="chip">
+            <Link href="/community" className="chip" prefetch={false}>
               <IconUser size={13} /> Cộng đồng
             </Link>
           </div>

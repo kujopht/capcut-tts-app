@@ -51,7 +51,7 @@ export default function NovelDetailPage({
           title="Không tìm thấy truyện này"
           hint="Truyện có thể đã bị xoá hoặc chưa được xuất bản."
           action={
-            <Link className="btn btn-primary" href="/fanfic">
+            <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
               Về trang khám phá
             </Link>
           }
@@ -73,7 +73,7 @@ export default function NovelDetailPage({
   return (
     <div className="page">
       <nav aria-label="Đường dẫn">
-        <Link href="/fanfic" className="hint crumb">
+        <Link href="/fanfic" className="hint crumb" prefetch={false}>
           ← Khám phá Fanfic
         </Link>
       </nav>
@@ -123,7 +123,7 @@ export default function NovelDetailPage({
               </Link>
             ) : null}
             {isOwner ? (
-              <Link className="btn" href="/write">
+              <Link className="btn" href="/write" prefetch={false}>
                 Quản lý truyện
               </Link>
             ) : null}
@@ -159,7 +159,7 @@ export default function NovelDetailPage({
             title="Truyện chưa có chương nào"
             action={
               isOwner ? (
-                <Link className="btn btn-primary" href="/write">
+                <Link className="btn btn-primary" href="/write" prefetch={false}>
                   Thêm chương đầu tiên
                 </Link>
               ) : undefined

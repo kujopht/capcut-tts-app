@@ -253,7 +253,7 @@ function LoginForm() {
 
       <p className="hint auth-foot">
         Chưa muốn đăng nhập?{" "}
-        <Link href="/fanfic">Xem trang khám phá Fanfic</Link>
+        <Link href="/fanfic" prefetch={false}>Xem trang khám phá Fanfic</Link>
       </p>
     </div>
   );

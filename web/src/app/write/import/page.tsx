@@ -406,7 +406,7 @@ export default function ChapterImportPage() {
         title="Nhập chương hàng loạt"
         lead="Đưa nhiều chương từ một tệp TXT/JSON vào một truyện, rồi tạo audio dần."
         action={
-          <Link href="/write" className="btn btn-ghost">
+          <Link href="/write" className="btn btn-ghost" prefetch={false}>
             Về trang Viết truyện
           </Link>
         }
@@ -418,7 +418,7 @@ export default function ChapterImportPage() {
           title="Chưa có truyện nào"
           hint="Tạo truyện trước, rồi quay lại đây để nhập chương."
           action={
-            <Link href="/write" className="btn btn-primary">
+            <Link href="/write" className="btn btn-primary" prefetch={false}>
               Sang trang Viết truyện
             </Link>
           }

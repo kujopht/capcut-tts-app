@@ -82,7 +82,7 @@ function ByopCallbackInner() {
       <div className="page">
         <Alert kind="error">{error}</Alert>
         <p className="hint">
-          <Link href="/image-studio">Quay lại Image Studio</Link>
+          <Link href="/image-studio" prefetch={false}>Quay lại Image Studio</Link>
         </p>
       </div>
     );

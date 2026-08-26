@@ -314,7 +314,7 @@ export default function StudioPage() {
           title="Cần đăng nhập để tạo audio"
           hint="Audio bạn tạo là riêng tư và gắn với tài khoản của bạn."
           action={
-            <Link className="btn btn-primary" href="/login">
+            <Link className="btn btn-primary" href="/login" prefetch={false}>
               Đăng nhập hoặc tạo tài khoản
             </Link>
           }
@@ -332,7 +332,7 @@ export default function StudioPage() {
         title="Tạo audio từ văn bản"
         lead="Dán đoạn văn bất kỳ, chọn giọng đọc và tốc độ. Audio tạo ở đây là riêng tư và không trở thành chương fanfic."
         action={
-          <Link className="btn" href="/library">
+          <Link className="btn" href="/library" prefetch={false}>
             Thư viện audio của tôi
           </Link>
         }
@@ -632,7 +632,7 @@ export default function StudioPage() {
                 </div>
               )}
               {history.length > 8 ? (
-                <Link className="btn btn-block" href="/library">
+                <Link className="btn btn-block" href="/library" prefetch={false}>
                   Xem tất cả ({history.length})
                 </Link>
               ) : null}

@@ -160,7 +160,7 @@ function NoiDung() {
             <AuthorBadge /> Bạn xuất bản truyện được rồi.
           </p>
           <div className="row">
-            <Link className="btn btn-primary" href="/write">
+            <Link className="btn btn-primary" href="/write" prefetch={false}>
               Về khu vực tác giả
             </Link>
           </div>
@@ -181,7 +181,7 @@ function NoiDung() {
             </dl>
           ) : null}
           <div className="row">
-            <Link className="btn" href="/write">
+            <Link className="btn" href="/write" prefetch={false}>
               Tiếp tục viết bản nháp
             </Link>
           </div>

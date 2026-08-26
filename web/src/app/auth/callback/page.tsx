@@ -132,7 +132,7 @@ function OAuthCallback() {
     return (
       <div className="page auth-callback">
         <Alert kind="error">{error}</Alert>
-        <Link className="btn btn-primary" href="/login">
+        <Link className="btn btn-primary" href="/login" prefetch={false}>
           Về trang đăng nhập
         </Link>
       </div>

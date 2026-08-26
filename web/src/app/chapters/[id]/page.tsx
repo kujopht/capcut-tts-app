@@ -65,7 +65,7 @@ export default function ChapterPage({
           icon="🔍"
           title="Không tìm thấy chương này"
           action={
-            <Link className="btn btn-primary" href="/fanfic">
+            <Link className="btn btn-primary" href="/fanfic" prefetch={false}>
               Về trang khám phá
             </Link>
           }
@@ -113,7 +113,7 @@ export default function ChapterPage({
             <IconHeadphones size={15} /> Nghe chương này
           </Link>
         ) : isOwner ? (
-          <Link className="btn btn-sm btn-ghost" href="/write">
+          <Link className="btn btn-sm btn-ghost" href="/write" prefetch={false}>
             <span aria-hidden="true">🎙️</span> Tạo audio cho chương
           </Link>
         ) : null}
@@ -169,7 +169,7 @@ export default function ChapterPage({
           <Link className="btn" href={`/novels/${novel.novel_id}`}>
             <span aria-hidden="true">←</span> Danh sách chương
           </Link>
-          <Link className="btn btn-ghost" href="/fanfic">
+          <Link className="btn btn-ghost" href="/fanfic" prefetch={false}>
             Khám phá truyện khác
           </Link>
         </nav>

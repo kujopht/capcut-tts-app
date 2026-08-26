@@ -529,7 +529,7 @@ export default function SubtitleStudioPage() {
       </section>
 
       <p className="hint">
-        <Link href="/studio">← Về Audio Studio</Link>
+        <Link href="/studio" prefetch={false}>← Về Audio Studio</Link>
       </p>
     </div>
   );

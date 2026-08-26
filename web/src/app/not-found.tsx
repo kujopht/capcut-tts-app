@@ -24,7 +24,7 @@ export default function NotFound() {
         title="Không tìm thấy trang này"
         hint="Đường dẫn có thể đã đổi hoặc chưa từng tồn tại."
         action={
-          <Link className="btn btn-primary" href="/">
+          <Link className="btn btn-primary" href="/" prefetch={false}>
             Về trang chủ
           </Link>
         }

@@ -200,6 +200,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                       className="admin-muc"
                       aria-current={dang ? "page" : undefined}
                       onClick={() => setMoDieuHuongMobile(false)}
+                      prefetch={false}
                     >
                       <Icon size={17} />
                       <span>{nhan}</span>
@@ -238,11 +239,11 @@ function TuChoi({ daDangNhap, loi }: { daDangNhap: boolean; loi: string }) {
       </header>
       <div className="row" style={{ justifyContent: "center" }}>
         {chuaDangNhap ? (
-          <Link className="btn btn-primary" href="/login?next=/admin">
+          <Link className="btn btn-primary" href="/login?next=/admin" prefetch={false}>
             Đăng nhập
           </Link>
         ) : (
-          <Link className="btn" href="/">
+          <Link className="btn" href="/" prefetch={false}>
             Về trang chủ
           </Link>
         )}

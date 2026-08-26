@@ -133,7 +133,7 @@ export default function CommunityPage() {
         />
       ) : dangTaiPhien ? null : (
         <p className="hint">
-          <Link href="/login?next=%2Fcommunity">Đăng nhập</Link> để đăng bài,
+          <Link href="/login?next=%2Fcommunity" prefetch={false}>Đăng nhập</Link> để đăng bài,
           thích và bình luận.
         </p>
       )}

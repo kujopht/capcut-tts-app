@@ -24,6 +24,20 @@ from server.scraper.http_fetcher import FetchError
 _CHAPTER_NUMBER_RE = re.compile(r"(\d+)")
 
 
+def _dam_bao_la_html(result) -> None:
+    """Chan TRUOC khi parse: mot content-type ro rang KHONG PHAI van ban
+    (anh, PDF, octet-stream, ...) khong duoc dua qua `html.parser` — trinh
+    phan tich khong nem loi tren du lieu nhi phan, no chi tra ve rac (van
+    ban vo nghia trich tu byte nhi phan) ma khong ai phat hien duoc o tang
+    tren. Chan som o day thay vi tin parser tu phat hien."""
+    ct = (result.content_type or "").split(";")[0].strip().lower()
+    if ct and not (ct.startswith("text/") or ct in (
+        "application/xhtml+xml", "application/xml", "application/json",
+    )):
+        raise FetchError(
+            f"{result.final_url} tra ve content-type khong phai van ban: {ct!r}")
+
+
 class GenericIndexAdapter(StoryProvider):
     tier = ScraperTier.DIRECT_HTTP
 
@@ -51,6 +65,7 @@ class GenericIndexAdapter(StoryProvider):
 
     def discover_series(self, url: str) -> SeriesInfo:
         result = self._fetcher.fetch(url)
+        _dam_bao_la_html(result)
         page = extract(result.text)
         title = page.meta.get("og:title") or page.title or "(không có tiêu đề)"
 
@@ -78,6 +93,7 @@ class GenericIndexAdapter(StoryProvider):
 
     def fetch_chapter(self, url: str) -> str:
         result = self._fetcher.fetch(url)
+        _dam_bao_la_html(result)
         return result.text
 
     def normalize_chapter(self, url: str, raw_html: str,

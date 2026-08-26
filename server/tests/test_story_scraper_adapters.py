@@ -9,8 +9,9 @@ import unittest
 
 from server.scraper.adapters.generic_index_adapter import GenericIndexAdapter
 from server.scraper.adapters.json_ld_adapter import JsonLdAwareAdapter
-from server.scraper.dedupe import ScrapeState
-from server.scraper.http_fetcher import FixtureFetcher
+from server.scraper.dedupe import ScrapeState, content_hash
+from server.scraper.html_extract import extract
+from server.scraper.http_fetcher import FetchError, FetchResult, FixtureFetcher
 
 _FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "scraper")
 
@@ -149,6 +150,102 @@ class JsonLdPreferenceTest(unittest.TestCase):
         url = series.chapter_urls[0]
         chapter = adapter.normalize_chapter(url, adapter.fetch_chapter(url), series)
         self.assertIn("đoạn văn đầu tiên", chapter.clean_text)
+
+
+class RobustnessTest(unittest.TestCase):
+    """Cac tinh huong trang THAT thuong gap: HTML hong, than trang rong,
+    JSON-LD hong, lien ket trung, va Unicode tieng Viet — Tier 0 phai song
+    sot TAT CA ma khong nem loi (mot trang xau khong duoc lam hong ca crawl)."""
+
+    def test_the_khong_dong_khong_lam_hong_trich_xuat(self):
+        # <p> khong dong, <div> long nhau khong dong — html.parser (stdlib)
+        # von da khoan dung, nhung day la bang chung TUONG MINH cho hanh vi
+        # do o tang extract() cua chinh du an, khong chi tin vao stdlib.
+        html = (
+            "<html><body><div><p>Đoạn một chưa đóng"
+            "<p>Đoạn hai cũng chưa đóng<div>Lồng thêm không đóng"
+            "</body></html>"
+        )
+        page = extract(html)  # KHONG duoc nem loi
+        self.assertIn("Đoạn một chưa đóng", page.visible_text())
+        self.assertIn("Đoạn hai cũng chưa đóng", page.visible_text())
+
+    def test_than_trang_rong_khong_lam_hong_extract(self):
+        page = extract("")
+        self.assertEqual(page.visible_text(), "")
+        self.assertIsNone(page.title)
+        # content_hash cua chuoi rong la mot gia tri xac dinh, khong loi.
+        self.assertEqual(len(content_hash(page.visible_text())), 64)
+
+    def test_khoi_json_ld_hong_bi_bo_qua_am_tham_khong_lam_hong_trang(self):
+        html = (
+            '<html><head><script type="application/ld+json">'
+            "{khong phai JSON hop le,,,}"
+            "</script></head><body><p>Nội dung vẫn đọc được bình thường."
+            "</p></body></html>"
+        )
+        page = extract(html)  # KHONG duoc nem loi du JSON-LD hong
+        self.assertEqual(page.json_ld, [])
+        self.assertIn("Nội dung vẫn đọc được bình thường", page.visible_text())
+
+    def test_lien_ket_chuong_trung_lap_tren_cung_trang_muc_luc_bi_gop(self):
+        # Mot so site lap lai link chuong trong ca ban desktop lan mobile
+        # cua cung mot trang — discover_series khong duoc dem hai lan.
+        html_muc_luc = (
+            '<html><body><ul class="desktop">'
+            '<li><a href="/truyen/x/chuong-1">Chương 1</a></li>'
+            "</ul>"
+            '<ul class="mobile">'
+            '<li><a href="/truyen/x/chuong-1">Chương 1</a></li>'
+            "</ul></body></html>"
+        )
+        pages = {f"{_BASE}/truyen/x": html_muc_luc}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/truyen/x")
+        self.assertEqual(len(series.chapter_urls), 1,
+                         "link chuong trung lap (desktop+mobile) phai duoc gop, khong nhan doi")
+
+    def test_tieng_viet_co_dau_dich_hash_on_dinh_qua_nhieu_lan_chay(self):
+        html = (
+            "<html><body><p>Chương thử: Nguyễn Thị Bích Ngọc gặp lại "
+            "người xưa ở Đà Lạt, trời se lạnh, sương giăng khắp lối."
+            "</p></body></html>"
+        )
+        text_1 = extract(html).visible_text()
+        text_2 = extract(html).visible_text()
+        self.assertEqual(text_1, text_2)
+        self.assertEqual(content_hash(text_1), content_hash(text_2))
+        self.assertIn("Nguyễn Thị Bích Ngọc", text_1)
+
+    def test_content_type_khong_phai_van_ban_bi_tu_choi_truoc_khi_parse(self):
+        """Mot URL tra ve `image/jpeg` (vd link chuong bi hong, tro nham vao
+        anh bia) khong duoc dua qua html.parser — se ra "van ban" vo nghia
+        ma khong ai phat hien duoc o tang tren. Phai FetchError NGAY."""
+        class _FetcherAnhGia:
+            def fetch(self, url):
+                return FetchResult(final_url=url, status_code=200,
+                                    content_type="image/jpeg", text="\xff\xd8\xff...")
+
+        adapter = GenericIndexAdapter(_FetcherAnhGia(), chapter_href_pattern=r"/chuong-\d+")
+        with self.assertRaises(FetchError):
+            adapter.fetch_chapter(f"{_BASE}/truyen/x/chuong-1")
+        with self.assertRaises(FetchError):
+            adapter.discover_series(f"{_BASE}/truyen/x")
+
+    def test_doi_TIEU_DE_ma_giu_nguyen_noi_dung_KHONG_bi_coi_la_revision(self):
+        """`content_hash` chi tinh tren `clean_text` (than bai, khong gom
+        tieu de) — day la HANH VI CO CHU DICH, khong phai loi: tieu de la
+        SIEU DU LIEU hien thi, revision-detection quan tam NOI DUNG doc
+        duoc thay doi. Ghi lai tuong minh de khong ai "sua" nham sau nay."""
+        state = ScrapeState()
+        than_bai = "Nội dung không đổi giữa hai lần cào."
+        state.record_success(f"{_BASE}/truyen/x/chuong-1",
+                              content_hash_value=content_hash(than_bai))
+        ban_ghi = state.record_success(f"{_BASE}/truyen/x/chuong-1",
+                                        content_hash_value=content_hash(than_bai))
+        self.assertFalse(ban_ghi.get("is_revision"),
+                         "than bai khong doi (du tieu de nguon co doi o ngoai) "
+                         "khong duoc bao la revision")
 
 
 if __name__ == "__main__":

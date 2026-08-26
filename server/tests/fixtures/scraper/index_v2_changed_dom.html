@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Truyện Thử Nghiệm - Trang Web Giả</title>
+  <meta property="og:title" content="Truyện Thử Nghiệm">
+  <meta property="og:description" content="Một bộ truyện dùng để kiểm thử scraper.">
+  <meta name="author" content="Tác Giả Ẩn Danh">
+</head>
+<body>
+  <!--
+    Mo phong site nguon LAM LAI GIAO DIEN THAT SU: khong chi doi ten class/
+    the bao — DOI CA DUONG DAN (`/truyen/.../chuong-N` -> `/doc/.../tap-N`).
+    Mau regex CU (`/chuong-\d+`) se KHONG con khop lien ket nao — day la
+    truong hop DUY NHAT ma Tier 0 (chi dua vao mau href) that su bo tay,
+    va la ly do duy nhat de dung `.relocate()` cua Scrapling: no dinh vi
+    lai phan tu bang do tuong dong NOI DUNG/cau truc (van ban lien ket
+    khong doi: "Chương 1: Khởi đầu"...), roi doc href THAT SU (moi) tu
+    chinh phan tu vua tim duoc — khong phai tu du lieu cu.
+  -->
+  <header class="site-topbar-v2"><a href="/">Trang chủ</a></header>
+  <section class="new-reading-list-container">
+    <span class="episode-row">
+      <a href="/doc/thu-nghiem/tap-1" class="episode-link-v2">Chương 1: Khởi đầu</a>
+    </span>
+    <span class="episode-row">
+      <a href="/doc/thu-nghiem/tap-2" class="episode-link-v2">Chương 2: Tiếp theo</a>
+    </span>
+    <span class="episode-row">
+      <a href="/doc/thu-nghiem/tap-3" class="episode-link-v2">Chương 3: Kết thúc</a>
+    </span>
+  </section>
+  <footer class="site-footer-v2"><a href="/lien-he">Liên hệ</a></footer>
+</body>
+</html>

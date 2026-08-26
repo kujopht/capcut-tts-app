@@ -682,6 +682,14 @@ export default function HomePage() {
   const communityPosts = data?.communityPosts ?? [];
   const bangVangTuan = data?.bangVangTuan ?? [];
   const coTiepTuc = Boolean(data?.reading || data?.listening || data?.watching);
+  /*
+    `.home-secondary-grid` la MOT flex item cua `.page` (co `gap`) — neu ke
+    ben trong deu an (dang tai, hoac ca hai nguon that su rong), div bao
+    ngoai van chiem mot khe `gap` RONG, y het loi "hop rong choan giua trang"
+    ma trang nay tu dat ra la KHONG duoc lam (xem dau tep). Phai an CA khoi
+    bao ngoai khi khong co gi de hien, khong chi tung ke ben trong.
+  */
+  const coKeThuHai = !loading && (animationSeries.length > 0 || communityPosts.length > 0);
 
   return (
     // Themed Page Hero — "Ocean Sky": bien+troi+phieu luu, cyan troi la
@@ -810,6 +818,7 @@ export default function HomePage() {
         LAI dung mau "mot muc duy nhat" da co san cho Truyen o tren, cung
         mot ngu phap thi giac cho "chi mot thu trong kho" o ca hai khu vuc.
       */}
+      {coKeThuHai ? (
       <div className="home-secondary-grid rise rise-2">
       {!loading && animationSeries.length === 1 ? (
         <section className="home-secondary-card stack-2" aria-labelledby="home-animation">
@@ -866,6 +875,7 @@ export default function HomePage() {
         </section>
       ) : null}
       </div>
+      ) : null}
 
       {/* Gom loi tat va the that vao mot dai, thay vi hai section xep doc. */}
       <section className="home-discovery-strip stack-2" aria-labelledby="home-kham-pha-nhanh">

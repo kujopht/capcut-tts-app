@@ -191,11 +191,26 @@ class QuickFreeImageProvider:
         ``width``/``height`` chi la kich thuoc canvas cua endpoint legacy,
         KHONG phai lua chon model. Hai gia tri phai cung co hoac cung bo trong
         de cac caller cu van giu nguyen hanh vi mac dinh.
+
+        CHU Y: cac tham so moi o day (width/height/negative_prompt/enhance/
+        safe/nofeed) CHUA duoc noi toi bat ky route HTTP nao (`main.py`,
+        `image_service.py::sinh_anh_quick_free` van goi ham nay khong kem cac
+        tham so nay) — day la nen tang cho cong viec tao bia truyen dang
+        (portrait 2:3) sau nay, khong phai duong nhan du lieu nguoi dung
+        chua qua kiem duyet.
         """
         if (width is None) != (height is None):
             raise ValueError("width va height phai duoc truyen cung nhau")
-        if width is not None and not (256 <= width <= 2048 and 256 <= height <= 2048):
-            raise ValueError("kich thuoc Quick Free phai nam trong 256..2048 px")
+        if width is not None:
+            # Bat tuong minh kieu du lieu sai (vd chuoi) truoc khi so sanh —
+            # neu khong, `<=` se nem TypeError tho thay vi mot ValueError
+            # ro rang. Chua co duong HTTP nao goi toi day voi du lieu nguoi
+            # dung that (xem docstring o dau ham); kiem tra nay la phong thu
+            # cho ngay duong do duoc noi.
+            if not isinstance(width, int) or not isinstance(height, int):
+                raise ValueError("width va height phai la so nguyen")
+            if not (256 <= width <= 2048 and 256 <= height <= 2048):
+                raise ValueError("kich thuoc Quick Free phai nam trong 256..2048 px")
 
         con_lai = self._cooldown.dang_cooldown("quick_free")
         if con_lai is not None:

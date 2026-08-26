@@ -1410,6 +1410,13 @@ main { overflow-x: clip; }
 .brand:hover { color: var(--text); }
 .brand svg { flex: 0 0 auto; }
 .brand-text-sub { color: var(--text-3); font-weight: 500; }
+/*
+  An trong CHINH header (van dung o cho khac, vd `.auth-head`): dock noi gio
+  chi cao 52px va can moi pixel ngang cho `.nav-links`/`.tim-nut`/`.nav-right`
+  cung mot hang. Ten "Fanfic" tren logo da du de nhan dien thuong hieu; dong
+  phu ("Audio Studio"...) khong mang thong tin dieu huong nen la muc dau tien
+  bo di khi chat.
+*/
 .site-header .brand-text-sub { display: none; }
 
 .nav-links { display: flex; align-items: center; gap: var(--s1); }
@@ -2938,6 +2945,14 @@ button.achievement-card:disabled { cursor: default; opacity: 0.6; }
 }
 
 .nav-right { gap: var(--s2); flex-wrap: nowrap; flex-shrink: 0; }
+/*
+  An ten tai khoan CHI trong header (van hien o `/account`, o day chi la nut
+  avatar): cung ly do voi `.brand-text-sub` — dock 52px het cho ngang khi da
+  co Cong cu/streak/chuong/avatar. Danh tinh KHONG mat het: avatar van la
+  anh/ten viet tat that su cua nguoi dung (khong phai icon chung), nut co
+  `title`/`aria-label` "Tai khoan cua {ten}" de xac nhan qua hover/doc man
+  hinh, va bam vao mo menu voi cac lua chon that.
+*/
 .site-header .account-name { display: none; }
 
 /* --------------------------------------------------------- dau muc trang */
@@ -5513,8 +5528,13 @@ body.co-mini { padding-bottom: 74px; }
     `flex-wrap: nowrap` (2026-08-26): truoc do phan tran nay bi "nuot" boi
     viec `.nav-right` xuong hang thu hai; gio het cho nuot nen phai sua tan
     goc — `.tim-nut` phai TU co lai duoc.
+
+    `min-width: 64px` (khong phai 0) la SAN, khong phai bo tran: du van con
+    co lai o desktop hep, van phai giu du cho de trong ra la MOT nut co the
+    bam (dau "/" + it nhat vai ky tu), khong duoc rut den mat hoan toan
+    thanh mot vien trong rong kho nhan ra la o tim kiem.
   */
-  min-width: 0;
+  min-width: 64px;
   flex-shrink: 1;
   overflow: hidden;
   border: 1px solid var(--line);

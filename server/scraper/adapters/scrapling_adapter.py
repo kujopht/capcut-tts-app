@@ -151,6 +151,10 @@ class ScraplingAdapter(StoryProvider):
         else:
             title_tag = page.css("title")
             title = title_tag[0].text if title_tag else series.title
+        # `og:title`/`<title>`/`series.title` co the deu vang (trang khong
+        # co tieu de nao ca) — khong duoc de mot chuoi rong/None lam vo
+        # `.endswith()`/regex ben duoi.
+        title = title or "(không có tiêu đề)"
         if self._title_suffix and title.endswith(self._title_suffix):
             title = title[: -len(self._title_suffix)].strip()
 

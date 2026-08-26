@@ -87,6 +87,22 @@ export function NavLinks() {
           <Link
             key={link.href}
             href={link.href}
+            /*
+              2026-08-26: cac muc nay LUON nam trong khung nhin (header dinh),
+              nen Next.js tu dong prefetch ca 6 muc tren MOI trang. Do that
+              tren production: prefetch segment (`next-router-segment-
+              prefetch: /_tree`) toi cac muc nay LAP LAI hang tram lan/30s dau
+              vao — mot yeu cau MOI moi ~40ms, du yeu cau truoc do da tra ve
+              200 kem `x-nextjs-stale-time: 300` (tuc la con "tuoi" 5 phut).
+              Ca 6 trang deu la trang TINH da duoc prerender + phuc vu qua
+              tang `enableCacheInterception` (xem `open-next.config.ts`) —
+              tat prefetch KHONG doi noi dung dieu huong toi chung, chi doi
+              tu "chuyen tuc thi tu cache router" thanh "mot vong goi mang
+              ngan luc bam" (van rat nhanh vi da qua cache interception, chi
+              khong con la 0ms) — danh doi hop ly de cat mot luong yeu cau
+              nen tang thua thai dot voi moi tab dang mo.
+            */
+            prefetch={false}
             className={link.cta ? "nav-link nav-cta" : "nav-link"}
             aria-current={active ? "page" : undefined}
             /*
@@ -212,8 +228,10 @@ function AccountMenu() {
   }
 
   if (!profile) {
+    // Cung ly do voi 6 muc `LINKS` — cung LUON nam trong khung nhin header
+    // voi khach vang lai, cung tro toi mot trang tinh da prerender.
     return (
-      <Link className="btn btn-primary btn-sm" href="/login">
+      <Link className="btn btn-primary btn-sm" href="/login" prefetch={false}>
         Đăng nhập
       </Link>
     );

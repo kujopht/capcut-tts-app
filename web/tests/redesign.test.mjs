@@ -129,6 +129,32 @@ test("'Viết truyện' noi bat hon muc dieu huong thuong", () => {
   assert.match(cta, /var\(--brand-line\)/, "nút CTA không có viền tím");
 });
 
+test("cac muc dieu huong chinh KHONG tu prefetch (2026-08-26, storm do)", () => {
+  // Do that tren production: cac muc nay LUON trong khung nhin (header dinh),
+  // nen Next.js prefetch lai segment cua chung hang tram lan/30s idle du yeu
+  // cau truoc do da 200 kem `x-nextjs-stale-time: 300` — mot luong request
+  // nen tang thua thai voi moi tab dang mo. Ca deu la trang tinh/prerender
+  // (`enableCacheInterception`), nen tat prefetch khong doi toc do dieu huong
+  // that su, chi cat luong nay tai nguon.
+  //
+  // Neo TRUC TIEP vao khoi <Link> cua tung muc (khong chi tim chuoi
+  // `prefetch={false}` roi noi chung trong file) — mot lan sua sau nay vo
+  // tinh doi prefetch chi tren MOT trong so cac Link nay van phai lam hong
+  // dung test nay.
+  const nav = read("../src/components/NavAuth.tsx");
+  const khoiLinkChinh = nav.slice(
+    nav.indexOf("<Link\n"),
+    nav.indexOf("{link.label}"),
+  );
+  assert.match(khoiLinkChinh, /prefetch=\{false\}/,
+    "Link cua tung muc dieu huong chinh (LINKS.map) thieu prefetch={false}");
+
+  const viTriLogin = nav.indexOf('href="/login"');
+  const khoiDangNhap = nav.slice(viTriLogin - 100, nav.indexOf("Đăng nhập", viTriLogin));
+  assert.match(khoiDangNhap, /prefetch=\{false\}/,
+    "nut Đăng nhập (cung LUON trong khung nhin header) thieu prefetch={false}");
+});
+
 test("muc dang xem danh dau bang vach duoi, khong to ca nen", () => {
   // To ca nen o mot thanh bon muc thi khoi mau do to ngang mot cai nut va hut
   // mat truoc ca ten san pham.

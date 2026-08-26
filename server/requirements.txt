@@ -65,5 +65,14 @@ cryptography>=42.0,<44.0
 # chan rieng, cung triet ly voi `cryptography` o tren.
 defusedxml>=0.7.1,<0.8
 
+# --- Universal Story Scraper Tier 1 (server/scraper/adapters/scrapling_adapter.py) ---
+# Ban co ban (KHONG cai them extras trinh duyet) chi keo theo lxml/cssselect/
+# orjson/w3lib/tld — khong Playwright. Ly do duy nhat dung no thay vi CHI
+# `html.parser` cua Tier 0: `.save()`/`.relocate()` dinh vi LAI mot phan tu
+# da luu dau van tay bang do tuong dong cau truc/noi dung, song sot duoc ca
+# khi site doi HET class VA the bao ngoai — da kiem chung truc tiep, xem
+# docs/reports/. Tier 0 (GenericIndexAdapter) khong co duong lui nay.
+scrapling>=0.4,<0.5
+
 # --- Ngoai Python ---
 # ffmpeg phai co trong PATH de ghep cac doan MP3 (server/tts_bridge.py).

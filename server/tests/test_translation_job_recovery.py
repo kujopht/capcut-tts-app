@@ -190,15 +190,21 @@ class KhoiPhucJobSauKhiWorkerChetTest(unittest.TestCase):
                          "chapter memory (tóm tắt) phải còn đủ")
 
         # (b) chuong 1-3 KHONG bi dich lai boi provider_a: dung 3 chuong * 3
-        #     pass = 9 lan goi cho chung. Kiem tra mat quyen nam GIUA CAC
+        #     pass = 9 lan goi cho chung. Mat quyen duoc kiem tra GIUA CAC
         #     DOAN (`_nen_dung_lai` truoc moi doan trong `_dich_mot_chuong`),
         #     KHONG nam giua ba vai-tro CUA CUNG mot doan — nen mot khi da
-        #     bi chan o vai-tro dau tien cua chuong 4, worker_a van di NOT
-        #     ca ba vai tro (translator/editor/qa) cho DOAN DUY NHAT do
-        #     truoc khi kiem tra lai va phat hien mat quyen. Tong dung
-        #     9 + 3 = 12 — KHONG duoc goi them lan nao nua sau moc nay (vi
-        #     du neu la 13+ thi tuc la no da lo sang chuong 5, mot loi that).
-        self.assertEqual(provider_a.so_lan_goi, chan_o_lan + SO_PASS_VAN_HOC - 1)
+        #     bi chan o vai-tro dau tien cua chuong 4, worker_a hoac di NOT
+        #     ca ba vai tro (translator/editor/qa) cho DOAN DUY NHAT do (=
+        #     9 + 3 = 12 lan), HOAC — day la mot RACE THAT giua luong
+        #     worker_a duoc `duoc_tha.set()` tha ra va luc no tu kiem tra lai
+        #     fencing/lease — phat hien mat quyen NGAY o dong dau cua doan do
+        #     (chi con lai 10 lan, dung `chan_o_lan`, khong di tiep pass 2/3).
+        #     Ca hai deu la hanh vi DUNG (khong mat du lieu, khong ghi de len
+        #     worker_b — cac assertion khac o duoi da kiem dieu do); chi so
+        #     lan goi CHINH XAC phu thuoc lich CPU thuc te luc chay, quan sat
+        #     duoc CA HAI gia tri tren cac may/CI khac nhau. KHONG duoc vuot
+        #     qua 12 (vi du 13+ nghia la no da lo sang chuong 5, mot loi that).
+        self.assertIn(provider_a.so_lan_goi, (chan_o_lan, chan_o_lan + SO_PASS_VAN_HOC - 1))
 
         # (c) provider_b phai TU LAM LAI chuong 4 tu dau (ca 3 pass, khong
         #     tiep tuc tu giua), roi 4 chuong con lai (5-8) — tong dung

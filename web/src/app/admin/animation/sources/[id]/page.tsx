@@ -113,6 +113,16 @@ export default function AdminTrustedSourceDetailPage({
     { sources_checked: number; sources_failed: number; videos_detected: number } | null
   >(null);
 
+  // Thiet lap nhanh: gop BA thao tac rieng le (quet -> kham pha toan nguon
+  // -> dang ky WebSub) thanh MOT nut cho nguon MOI (chua tung quet thanh
+  // cong lan nao) — operator KHONG can biet truoc thu tu dung, chi bam mot
+  // nut. Goi lai CHINH CAC HAM da co ben duoi (khong nhan ban logic/API nao
+  // — moi buoc van hien ket qua o card rieng cua no nhu truoc).
+  const [buocThietLapNhanh, setBuocThietLapNhanh] = useState<
+    "quet" | "kham_pha" | "dang_ky" | null
+  >(null);
+  const [loiThietLapNhanh, setLoiThietLapNhanh] = useState("");
+
   const [danhSachSeries, setDanhSachSeries] = useState<AdminAnimationSeriesRow[]>([]);
   useEffect(() => {
     adminApi.animationSeries({ limit: 100 }).then(
@@ -160,7 +170,10 @@ export default function AdminTrustedSourceDetailPage({
     }
   }
 
-  async function quet() {
+  /** Tra ve `true`/`false` (thanh cong hay khong) — de "Thiết lập nhanh"
+   * (xem duoi) biet co nen di tiep buoc sau khong, KHONG doi hanh vi/giao
+   * dien cua nut rieng le (van toast + hien ket qua nhu cu). */
+  async function quet(): Promise<boolean> {
     setDangQuet(true);
     setKetQuaQuet(null);
     try {
@@ -168,8 +181,10 @@ export default function AdminTrustedSourceDetailPage({
       setKetQuaQuet(ket_qua);
       toast.ok(`Đã quét: ${ket_qua.detected} video phát hiện.`);
       reload();
+      return true;
     } catch (cause) {
       toast.error(loiApi(cause, "Quét thất bại."));
+      return false;
     } finally {
       setDangQuet(false);
     }
@@ -198,7 +213,7 @@ export default function AdminTrustedSourceDetailPage({
     }
   }
 
-  async function khamPhaToanNguon() {
+  async function khamPhaToanNguon(): Promise<boolean> {
     setDangKhamPhaToanNguon(true);
     setKetQuaKhamPhaToanNguon(null);
     try {
@@ -209,24 +224,61 @@ export default function AdminTrustedSourceDetailPage({
         `${result.new_series_created} series mới, ` +
         `${result.matched_existing_mapping + result.existing_series_reused_by_fingerprint} khớp series đã có.`);
       reload();
+      return true;
     } catch (cause) {
       toast.error(loiApi(cause, "Khám phá toàn nguồn thất bại."));
+      return false;
     } finally {
       setDangKhamPhaToanNguon(false);
     }
   }
 
-  async function dangKy() {
+  async function dangKy(): Promise<boolean> {
     setDangDangKy(true);
     try {
       await adminApi.subscribeTrustedSource(sourceId);
       toast.ok("Đã gửi yêu cầu đăng ký WebSub — chờ YouTube xác minh.");
       reload();
+      return true;
     } catch (cause) {
       toast.error(loiApi(cause, "Không đăng ký được."));
+      return false;
     } finally {
       setDangDangKy(false);
     }
+  }
+
+  /** Nut "Thiết lập nhanh" — chi day cho nguon CHUA TUNG quet thanh cong
+   * (xem dieu kien hien o JSX ben duoi): quet -> kham pha toan nguon (bo
+   * qua neu source_type la mot video don, xem dieu kien o JSX cua card do)
+   * -> dang ky WebSub, DUNG NGAY o buoc nao that bai thay vi lang le di
+   * tiep — moi buoc van dung 3 ham/API da co, khong nhan ban logic. */
+  async function thietLapNhanh() {
+    setLoiThietLapNhanh("");
+    setBuocThietLapNhanh("quet");
+    if (!(await quet())) {
+      setBuocThietLapNhanh(null);
+      setLoiThietLapNhanh("Dừng ở bước quét — xem lỗi phía trên rồi thử lại.");
+      return;
+    }
+    if (s?.source_type !== "youtube_video") {
+      setBuocThietLapNhanh("kham_pha");
+      if (!(await khamPhaToanNguon())) {
+        setBuocThietLapNhanh(null);
+        setLoiThietLapNhanh("Dừng ở bước khám phá series — xem lỗi phía trên rồi thử lại.");
+        return;
+      }
+    }
+    if (data?.websub_configured) {
+      setBuocThietLapNhanh("dang_ky");
+      if (!(await dangKy())) {
+        setBuocThietLapNhanh(null);
+        setLoiThietLapNhanh("Dừng ở bước đăng ký đồng bộ — xem lỗi phía trên rồi thử lại.");
+        return;
+      }
+    }
+    setBuocThietLapNhanh(null);
+    toast.ok("Thiết lập nhanh hoàn tất.");
   }
 
   async function chayDoiChieu() {
@@ -269,6 +321,33 @@ export default function AdminTrustedSourceDetailPage({
                 {s.enabled ? "Đang bật" : "Đã tạm dừng"}
               </span>
             </header>
+
+            {!s.last_success_at ? (
+              <div className="card stack-2" style={{ borderColor: "var(--accent, #7c5cff)" }}>
+                <h3 className="section-title">Thiết lập nhanh</h3>
+                <p className="hint">
+                  Nguồn này chưa từng quét thành công — bấm một nút để chạy
+                  lần lượt: quét video có sẵn
+                  {s.source_type !== "youtube_video" ? " → khám phá + gom series" : ""}
+                  {data.websub_configured ? " → đăng ký đồng bộ tự động (WebSub)" : ""}.
+                  Mỗi bước vẫn hiện kết quả riêng ở card tương ứng bên dưới
+                  như khi bấm tay — nút này chỉ nối chúng lại đúng thứ tự.
+                </p>
+                <div className="row">
+                  <button type="button" className="btn btn-primary"
+                          disabled={buocThietLapNhanh !== null}
+                          onClick={thietLapNhanh}>
+                    {buocThietLapNhanh === "quet" ? "Đang quét…"
+                      : buocThietLapNhanh === "kham_pha" ? "Đang khám phá series…"
+                      : buocThietLapNhanh === "dang_ky" ? "Đang đăng ký đồng bộ…"
+                      : "Thiết lập nhanh"}
+                  </button>
+                </div>
+                {loiThietLapNhanh ? (
+                  <p className="hint" role="alert">{loiThietLapNhanh}</p>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="card stack-2">
               <div className="row row-spread">

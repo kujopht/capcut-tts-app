@@ -189,6 +189,49 @@ test("Chi tiet nguon: xoa nguon va xoa anh xa deu qua ConfirmDialog", () => {
   assert.equal(soLanConfirm, 2, "phải có đúng 2 hộp xác nhận (bỏ tin cậy nguồn + xoá ánh xạ)");
 });
 
+test("Chi tiet nguon: Thiet lap nhanh chi hien cho nguon CHUA tung quet thanh cong", () => {
+  const src = chiTiet();
+  assert.match(src, /!s\.last_success_at \? \(/);
+  assert.match(src, /Thiết lập nhanh/);
+});
+
+test("Chi tiet nguon: Thiet lap nhanh chay dung thu tu va DUNG som khi mot buoc that bai", () => {
+  const src = chiTiet();
+  const than = src.slice(
+    src.indexOf("async function thietLapNhanh"),
+    src.indexOf("async function thietLapNhanh") + 1200,
+  );
+  // Thu tu ĐÚNG: quet() truoc, roi khamPhaToanNguon(), roi dangKy() —
+  // khang dinh bang vi tri xuat hien, khong chi "co goi ca ba".
+  const viTriQuet = than.indexOf("await quet()");
+  const viTriKhamPha = than.indexOf("await khamPhaToanNguon()");
+  const viTriDangKy = than.indexOf("await dangKy()");
+  assert.ok(viTriQuet >= 0 && viTriKhamPha > viTriQuet && viTriDangKy > viTriKhamPha,
+    "phải gọi quet() -> khamPhaToanNguon() -> dangKy() ĐÚNG thứ tự đó");
+  // DUNG SOM: moi buoc phai co "return" ngay sau khi kiem tra ket qua that
+  // bai — khong duoc lang le di tiep buoc sau khi buoc truoc that bai.
+  assert.match(than, /if \(!\(await quet\(\)\)\) \{[\s\S]{0,250}return;/);
+  assert.match(than, /if \(!\(await khamPhaToanNguon\(\)\)\) \{[\s\S]{0,250}return;/);
+  assert.match(than, /if \(!\(await dangKy\(\)\)\) \{[\s\S]{0,250}return;/);
+});
+
+test("Chi tiet nguon: Thiet lap nhanh bo qua kham pha toan nguon cho nguon la MOT video don", () => {
+  const src = chiTiet();
+  const than = src.slice(
+    src.indexOf("async function thietLapNhanh"),
+    src.indexOf("async function thietLapNhanh") + 1200,
+  );
+  assert.match(than, /if \(s\?\.source_type !== "youtube_video"\) \{/,
+    "một video đơn không có 'toàn nguồn' để khám phá — phải bỏ qua bước đó");
+});
+
+test("Chi tiet nguon: quet/khamPhaToanNguon/dangKy tra ve boolean de Thiet lap nhanh biet dung lai", () => {
+  const src = chiTiet();
+  assert.match(src, /async function quet\(\): Promise<boolean>/);
+  assert.match(src, /async function khamPhaToanNguon\(\): Promise<boolean>/);
+  assert.match(src, /async function dangKy\(\): Promise<boolean>/);
+});
+
 test("Chi tiet nguon: dung useRouter().push, KHONG dung window.location.href", () => {
   const src = chiTiet();
   assert.match(src, /useRouter/);

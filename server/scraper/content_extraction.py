@@ -229,7 +229,22 @@ class _TreeBuilder(HTMLParser):
 
         if tag in _VOID_TAGS:
             return
-        if self._tag_stack:
+        # CHI pop khi TEN THE o dinh ngan xep KHOP voi the dong hien tai —
+        # Overnight ("extraction property/fuzz testing"): mot the dong
+        # THUA (khong co the mo tuong ung — vd mot the mo bi "nuot" mot
+        # phan lam thuoc tinh do thieu dau `>`, HTML that su tung gap qua
+        # kiem thu thuoc tinh) truoc day POP VO DIEU KIEN dinh ngan xep,
+        # dong NHAM mot node TO HON (vd dong ca <div>/<article> dang mo
+        # THAT SU) — khien noi dung THAT bi "danh mat" khoi cay (con cua
+        # mot node da bi dong nham truoc do), tra ve trich xuat SAI (tuy
+        # van bao LOW confidence, khong phai crash/silent-wrong-HIGH,
+        # nhung van mat du lieu that khong can thiet). BO QUA the dong
+        # THUA (khong pop gi ca) AN TOAN HON: ngan xep van dung dan cho
+        # cac the mo THAT SU con lai, chi "lech" mot the dong khong khop
+        # — giu nguyen triet ly khoan dung HTML hong da co, chi lam no
+        # CHINH XAC hon (ten the DA duoc luu san trong `_tag_stack`, khong
+        # ton chi phi them).
+        if self._tag_stack and self._tag_stack[-1][0] == tag:
             popped_tag, la_khoi = self._tag_stack.pop()
             if la_khoi and len(self._block_stack) > 1:
                 self._block_stack.pop()

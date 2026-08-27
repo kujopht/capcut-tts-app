@@ -801,6 +801,12 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # mo tao nhanh, lam sai thu tu — phat hien qua mot lan di qua
             # luong operator that). Xem docstring `run_state.ScrapeRunItem`.
             ("sequence", "integer", True, None),
+            # Phase 16 Story Harvester V3 ("races") — moc gio khoa THUE
+            # (lease) cho `claim_pending_items`, tranh hai loi goi
+            # `drive_once` DONG THOI tren CUNG dot doc trung mot lo muc
+            # `pending`. "" = chua claim. Xem docstring
+            # `run_state.ScrapeRunItem.claimed_at`.
+            ("claimed_at", "string", False, 64),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],

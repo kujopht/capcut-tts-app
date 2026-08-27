@@ -41,10 +41,12 @@ import httpx
 from server.adapters import AppwriteUnavailableError, NotFoundError
 from server.config import AppwriteSettings
 from server.scraper.run_state import (
+    CLAIM_LEASE_SECONDS,
     ScrapeItemStatus,
     ScrapeRun,
     ScrapeRunItem,
     ScrapeRunStatus,
+    _da_het_han_thue,
     _now_utc_iso,
 )
 from server.secret_redaction import thong_diep_loi_an_toan
@@ -73,7 +75,7 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "decision", "chapter_title", "chapter_number", "content_hash",
         "error_message", "attempts", "skipped_reason", "duplicate_of_url",
         "quality_passed", "quality_score", "quality_warnings", "sequence",
-        "created_at", "updated_at",
+        "claimed_at", "created_at", "updated_at",
     ),
 }
 
@@ -177,6 +179,7 @@ def _item_from_doc(doc: Dict[str, Any]) -> ScrapeRunItem:
         quality_score=_float(doc.get("quality_score"), 1.0),
         quality_warnings=str(doc.get("quality_warnings") or ""),
         sequence=_int(doc.get("sequence")),
+        claimed_at=str(doc.get("claimed_at") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
@@ -406,6 +409,31 @@ class AppwriteScrapeRunStore:
         fields.setdefault("updated_at", self._now())
         doc = self._update(COL_ITEMS, item_id, fields)
         return _item_from_doc(doc)
+
+    def claim_pending_items(self, run_id: str, limit: int, *,
+                            lease_seconds: int = CLAIM_LEASE_SECONDS
+                           ) -> List[ScrapeRunItem]:
+        """Phien ban BEST-EFFORT tren Appwrite — xem
+        `MockScrapeRunStore.claim_pending_items` cho phien ban NGUYEN TU
+        that su (chi ap dung khi nhieu LUONG chia se CUNG mot tien trinh/
+        kho bo nho). Appwrite (qua REST API don gian ma repo nay dung,
+        KHONG dung optimistic-concurrency/phien ban tai lieu cua no) KHONG
+        cung cap "doc + ghi de nguyen tu" — o day la doc RONG (loc theo
+        `claimed_at`) roi PATCH TUNG muc mot, THU HEP (KHONG xoa het) cua
+        so dua giua NHIEU TIEN TRINH khac nhau cung ghi len CUNG mot
+        `run_id`. Neu day thuc su tro thanh van de trong san xuat (nhieu
+        worker THAT chay song song tren CUNG mot dot), can nang cap len
+        optimistic-concurrency THAT SU cua Appwrite — CHUA lam o day vi
+        khong co moi truong Appwrite that de kiem chung an toan."""
+        with self._lock:
+            ung_vien = self.list_items(
+                run_id, statuses=[ScrapeItemStatus.PENDING],
+                limit=max(1, min(limit * 3, 500)))
+            moc = self._now()
+            con_trong = [i for i in ung_vien
+                        if _da_het_han_thue(i.claimed_at, moc, lease_seconds)]
+            chon = con_trong[:max(0, limit)]
+            return [self.save_item(muc.item_id, claimed_at=moc) for muc in chon]
 
     def list_items(self, run_id: str, *,
                    statuses: Optional[Sequence[ScrapeItemStatus]] = None,

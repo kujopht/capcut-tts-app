@@ -188,7 +188,7 @@ class ScrapeRunService:
                     decision=IngestionDecision.ALREADY_IMPORTED.value,
                     content_hash=ban_ghi.get("content_hash") or "",
                     chapter_number=ban_ghi.get("chapter_number"),
-                    error_message="",
+                    error_message="", claimed_at="",
                 )
 
     # =========================================================================
@@ -215,8 +215,11 @@ class ScrapeRunService:
         if max_chapters is not None:
             gioi_han = min(gioi_han, max(1, int(max_chapters)))
 
-        muc_can_lam = self._store.list_items(
-            run_id, statuses=[ScrapeItemStatus.PENDING], limit=gioi_han)
+        # Phase 16 ("races"): `claim_pending_items` (khong phai `list_items`
+        # thuan doc) — dong khe ho hai loi goi `drive_once` DONG THOI tren
+        # CUNG `run_id` doc TRUNG cung mot lo muc `pending` (tai hien duoc
+        # that qua nhieu luong goi song song, xem docstring ham do).
+        muc_can_lam = self._store.claim_pending_items(run_id, gioi_han)
 
         series = self._series_cache.get(run_id)
         if series is None:
@@ -265,7 +268,8 @@ class ScrapeRunService:
                 state.record_failure(muc.chapter_url)
                 self._store.save_item(
                     muc.item_id, status=ScrapeItemStatus.FAILED,
-                    error_message=str(exc)[:1000], attempts=muc.attempts + 1)
+                    error_message=str(exc)[:1000], attempts=muc.attempts + 1,
+                    claimed_at="")
                 continue
 
             ban_ghi = state.record_success(
@@ -306,7 +310,8 @@ class ScrapeRunService:
                 quality_passed=bao_cao_chat_luong.passed,
                 quality_score=bao_cao_chat_luong.score,
                 quality_warnings=" | ".join(
-                    bao_cao_chat_luong.block_reasons + bao_cao_chat_luong.warn_reasons))
+                    bao_cao_chat_luong.block_reasons + bao_cao_chat_luong.warn_reasons),
+                claimed_at="")
 
         # DEM LAI CHINH XAC dung MOT LAN o cuoi chu ky — khong tin bo dem
         # cong don rai rac trong vong lap. Cung mau voi

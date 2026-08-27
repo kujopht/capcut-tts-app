@@ -11,9 +11,10 @@ goi cau hinh. Cau hinh san mot site that (vd mot chuong cu the tren
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
-from urllib.parse import urljoin
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
+from server.scraper.chapter_ordering import ChapterOrderingSignal, determine_order
 from server.scraper.contract import (
     NormalizedChapter, ScraperTier, SeriesInfo, StoryProvider, canonicalize_url,
 )
@@ -37,6 +38,33 @@ def _dam_bao_la_html(result) -> None:
     )):
         raise FetchError(
             f"{result.final_url} tra ve content-type khong phai van ban: {ct!r}")
+
+
+#: Tien to host PHO BIEN cho phien ban di dong/desktop cua CUNG mot noi
+#: dung — CHI hai tien to nay (khong doan them), boi vi day la quy uoc RO
+#: RANG, pho bien rong rai (khac voi co gang doan "hai domain khac nhau co
+#: the la CUNG mot site" mot cach chung chung, se rui ro gop nham hai
+#: nguon THAT SU khac nhau).
+_TIEN_TO_MOBILE_DESKTOP = ("www.", "m.")
+
+
+def _khoa_gop_trung_mobile_desktop(url: str) -> str:
+    """Phase 3 Story Harvester V3, bien the "duplicated mobile/desktop
+    links": mot so trang liet ke CA hai lien ket toi CUNG mot chuong — mot
+    qua host "m." (di dong) va mot qua "www."/khong tien to (desktop),
+    CUNG duong dan. `canonicalize_url` (contract.py) KHONG tu gop hai bien
+    the nay (chung la hai host KHAC NHAU ve mat chuoi ky tu) — ham nay tra
+    ve mot KHOA GOM NHOM rieng (bo tien to host, CHI dung de PHAT HIEN
+    trung, KHONG phai URL that su duoc luu/tra ve) de lien ket XUAT HIEN
+    SAU trong danh sach bi loai neu da co mot bien the cung duong dan."""
+    canon = canonicalize_url(url)
+    parts = urlsplit(canon)
+    host = parts.netloc
+    for tien_to in _TIEN_TO_MOBILE_DESKTOP:
+        if host.startswith(tien_to):
+            host = host[len(tien_to):]
+            break
+    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
 class GenericIndexAdapter(StoryProvider):
@@ -114,20 +142,24 @@ class GenericIndexAdapter(StoryProvider):
 
         seen_chapter = set()
         seen_index_page = {canonicalize_url(result.final_url)}
-        chapter_urls: List[str] = []
+        #: (href_tuyet_doi, van_ban_lien_ket) THEO DUNG thu tu gap — dau
+        #: vao cho `chapter_ordering.determine_order` (Phase 3 Story
+        #: Harvester V3: uu tien so chuong RO RANG trich tu van ban lien
+        #: ket nay hon thu tu RAW cua chinh danh sach nay).
+        tin_hieu_tho: List[Tuple[str, str]] = []
         trang_hien_tai = page
         base_url = result.final_url
 
         for _ in range(self._max_index_pages):
-            for href, _text in trang_hien_tai.links:
+            for href, text in trang_hien_tai.links:
                 if not self._chapter_re.search(href):
                     continue
                 absolute = urljoin(base_url, href)
-                canon = canonicalize_url(absolute)
-                if canon in seen_chapter:
+                khoa_gop_trung = _khoa_gop_trung_mobile_desktop(absolute)
+                if khoa_gop_trung in seen_chapter:
                     continue
-                seen_chapter.add(canon)
-                chapter_urls.append(absolute)
+                seen_chapter.add(khoa_gop_trung)
+                tin_hieu_tho.append((absolute, text))
 
             if self._next_page_re is None:
                 break
@@ -137,6 +169,8 @@ class GenericIndexAdapter(StoryProvider):
                 break
             base_url, trang_hien_tai = trang_ke
 
+        chapter_urls, ordering_evidence = self._sap_xep_chuong(tin_hieu_tho)
+
         return SeriesInfo(
             canonical_url=canonicalize_url(result.final_url),
             title=title,
@@ -144,7 +178,28 @@ class GenericIndexAdapter(StoryProvider):
             author=page.meta.get("author") or page.meta.get("article:author"),
             description=page.meta.get("og:description") or page.meta.get("description"),
             chapter_urls=chapter_urls,
+            ordering_evidence=ordering_evidence,
         )
+
+    def _sap_xep_chuong(self, tin_hieu_tho: List[Tuple[str, str]]) -> Tuple[List[str], str]:
+        """Ap dung phan cap uu tien thu tu (Phase 3 Story Harvester V3, xem
+        `chapter_ordering.py`) tren cac lien ket chuong da tim thay THEO
+        DUNG thu tu gap tren (cac) trang muc luc — tra ve `(chapter_urls,
+        evidence)`. Tach rieng khoi `discover_series` de test doc lap duoc
+        (khong can mo phong ca mot lan fetch)."""
+        signals = [
+            ChapterOrderingSignal(
+                url=href, index_position=vi_tri,
+                explicit_number=self._so_chuong_tu_van_ban(text))
+            for vi_tri, (href, text) in enumerate(tin_hieu_tho)
+        ]
+        ket_qua = determine_order(signals)
+        return ket_qua.ordered_urls, ket_qua.evidence
+
+    @staticmethod
+    def _so_chuong_tu_van_ban(text: str) -> Optional[int]:
+        khop = _CHAPTER_NUMBER_RE.search(text or "")
+        return int(khop.group(1)) if khop else None
 
     def _tim_trang_tiep_theo(self, trang, base_url: str, da_tham: set):
         """Tra ve `(url_moi, ExtractedPage_moi)` cua trang muc luc TIEP

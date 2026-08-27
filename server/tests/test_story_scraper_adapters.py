@@ -420,5 +420,82 @@ class RobustnessTest(unittest.TestCase):
                          "khong duoc bao la revision")
 
 
+class StructuralVariantsTest(unittest.TestCase):
+    """Phase 3 Story Harvester V3 — bien the cau truc muc luc (xem
+    `chapter_ordering.py`/`generic_index_adapter._khoa_gop_trung_mobile_desktop`)."""
+
+    def test_reverse_chronological_duoc_phat_hien_va_sua_qua_adapter_that(self):
+        html = """
+        <html><head><title>Truyện Ngược</title></head><body><ul>
+        <li><a href="/n/chuong-3">Chương 3</a></li>
+        <li><a href="/n/chuong-2">Chương 2</a></li>
+        <li><a href="/n/chuong-1">Chương 1</a></li>
+        </ul></body></html>
+        """
+        pages = {f"{_BASE}/n": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/n/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/n")
+
+        self.assertTrue(series.chapter_urls[0].endswith("chuong-1"))
+        self.assertTrue(series.chapter_urls[1].endswith("chuong-2"))
+        self.assertTrue(series.chapter_urls[2].endswith("chuong-3"))
+        self.assertIn("reverse chronological", series.ordering_evidence.lower())
+
+    def test_volumes_arcs_tieu_de_xen_giua_khong_pha_thu_tu(self):
+        """Tieu de "Quyển 1"/"Quyển 2" xen giua danh sach chuong (khong
+        phai lien ket) khong duoc lam sai thu tu/danh sach chuong phang."""
+        html = """
+        <html><head><title>Truyện Nhiều Quyển</title></head><body>
+        <h2>Quyển 1</h2>
+        <ul>
+          <li><a href="/q/chuong-1">Chương 1</a></li>
+          <li><a href="/q/chuong-2">Chương 2</a></li>
+        </ul>
+        <h2>Quyển 2</h2>
+        <ul>
+          <li><a href="/q/chuong-3">Chương 3</a></li>
+          <li><a href="/q/chuong-4">Chương 4</a></li>
+        </ul>
+        </body></html>
+        """
+        pages = {f"{_BASE}/q": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/q/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/q")
+
+        self.assertEqual(len(series.chapter_urls), 4)
+        for i, url in enumerate(series.chapter_urls, start=1):
+            self.assertTrue(url.endswith(f"chuong-{i}"))
+
+    def test_lien_ket_mobile_va_desktop_trung_duong_dan_bi_gop(self):
+        html = """
+        <html><head><title>Truyện Song Bản</title></head><body><ul>
+        <li><a href="https://m.vd-truyen.example/s/chuong-1">Chương 1 (mobile)</a></li>
+        <li><a href="https://www.vd-truyen.example/s/chuong-1">Chương 1 (desktop)</a></li>
+        <li><a href="https://www.vd-truyen.example/s/chuong-2">Chương 2</a></li>
+        </ul></body></html>
+        """
+        pages = {f"{_BASE}/s": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/s/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/s")
+
+        self.assertEqual(len(series.chapter_urls), 2,
+                         "hai bien the mobile/desktop cùng chương 1 phải gộp thành một")
+
+    def test_lien_ket_mobile_desktop_khac_duong_dan_khong_bi_gop_nham(self):
+        """Doi chung: hai host CO tien to m./www. nhung KHAC duong dan
+        (hai chuong that su khac nhau) KHONG duoc gop nham."""
+        html = """
+        <html><head><title>Truyện Song Bản</title></head><body><ul>
+        <li><a href="https://m.vd-truyen.example/s/chuong-1">Chương 1</a></li>
+        <li><a href="https://www.vd-truyen.example/s/chuong-2">Chương 2</a></li>
+        </ul></body></html>
+        """
+        pages = {f"{_BASE}/s2": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/s/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/s2")
+
+        self.assertEqual(len(series.chapter_urls), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

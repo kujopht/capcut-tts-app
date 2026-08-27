@@ -542,6 +542,34 @@ class ChapterNumberFalsePositiveTest(unittest.TestCase):
         self.assertTrue(series.chapter_urls[1].endswith("chuong-2"))
 
 
+class VolumeBoundaryResetTest(unittest.TestCase):
+    """Overnight ("pagination/navigation loop defense" — ranh gioi quyen):
+    nhieu truyen dai tieng Viet/dich thuat DAT LAI so chuong ve 1 o dau
+    moi Quyen/Tap (vd Quyển 1 co Chương 1-3, Quyển 2 LAI bat dau tu Chương
+    1) — so chuong THO khong con PHAN BIET giua cac quyen, khong duoc
+    dung de SAP XEP LAI (se lam Quyển 2/Chương 1 nhay LEN TRUOC Quyển
+    1/Chương 3), phai AN TOAN lui ve thu tu kham pha."""
+
+    def test_so_chuong_lap_lai_giua_cac_quyen_khong_lam_sai_thu_tu(self):
+        links = "".join(
+            f'<li><a href="/truyen/x/c{i}">Chương {i} (Quyển 1)</a></li>'
+            for i in range(1, 4))
+        links += "".join(
+            f'<li><a href="/truyen/x/c2-{i}">Chương {i} (Quyển 2)</a></li>'
+            for i in range(1, 3))
+        html = f'<html><head><title>Truyện X</title></head><body><ul>{links}</ul></body></html>'
+        pages = {f"{_BASE}/x": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/truyen/x/c[\d-]+")
+        series = adapter.discover_series(f"{_BASE}/x")
+
+        # PHAI giu NGUYEN thu tu kham pha (Quyển 1 tron ven roi Quyển 2) —
+        # KHONG duoc de "Chương 1 (Quyển 2)" nhay len truoc "Chương 2/3
+        # (Quyển 1)" chi vi so tho trung nhau giua hai quyen.
+        self.assertEqual(
+            [u.rsplit("/", 1)[-1] for u in series.chapter_urls],
+            ["c1", "c2", "c3", "c2-1", "c2-2"])
+
+
 class StructuralVariantsTest(unittest.TestCase):
     """Phase 3 Story Harvester V3 — bien the cau truc muc luc (xem
     `chapter_ordering.py`/`generic_index_adapter._khoa_gop_trung_mobile_desktop`)."""

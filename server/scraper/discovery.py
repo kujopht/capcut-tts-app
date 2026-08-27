@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from html.parser import HTMLParser
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
 
 from server.scraper.contract import ScraperTier, canonicalize_url, same_registrable_host
@@ -377,30 +377,56 @@ def _detect_pagination(groups: Dict[str, List[Tuple[str, str]]], chapter_shape: 
     return PaginationStrategy.NONE, None
 
 
+#: Do uu tien khi trang co NHIEU khoi JSON-LD (Overnight "unknown-site
+#: discovery red team", fixture "nhieu doi tuong Article JSON-LD"): SO
+#: THU TU XUAT HIEN trong mang KHONG lien quan gi den do LIEN QUAN cua no
+#: voi "tac pham" dang xet — mot trang co the co JSON-LD cua widget/khoi
+#: KHONG lien quan (vd mot "Article" gioi thieu tac gia, mot banner tin
+#: tuc) XUAT HIEN TRUOC khoi `Book`/`CreativeWork` THAT SU mo ta chinh bo
+#: truyen. So rank THAP hon = uu tien hon; `Book` la loai CU THE nhat cho
+#: "day la mot cuon sach/bo truyen", `WebSite` chung chung nhat.
+_UU_TIEN_LOAI_JSON_LD = {"Book": 0, "CreativeWork": 1, "Article": 2, "WebSite": 3}
+
+
 def _extract_title_author_description(page, raw_html: str) -> Tuple[
         Optional[str], Optional[str], Optional[str], bool]:
-    """Tra ve `(title, author, description, co_json_ld_co_cau_truc)`."""
+    """Tra ve `(title, author, description, co_json_ld_co_cau_truc)`.
+
+    Khi co NHIEU khoi JSON-LD hop le, CHON MOT khoi DUY NHAT — khoi co
+    `@type` UU TIEN CAO NHAT (`_UU_TIEN_LOAI_JSON_LD`) — lam nguon
+    title/author/description, thay vi tron lan tu NHIEU khoi khac nhau
+    theo THU TU XUAT HIEN (loi that: mot khoi "Article" khong lien quan
+    xuat hien TRUOC khoi "Book" that trong mang se "khoa" title sai truoc
+    khi khoi Book kip duoc xet — phat hien qua kiem thu do lap)."""
     has_structured_json_ld = False
-    title = page.meta.get("og:title")
-    author = page.meta.get("author") or page.meta.get("article:author")
-    description = page.meta.get("og:description") or page.meta.get("description")
+    best_item: Optional[Dict[str, Any]] = None
+    best_rank: Optional[int] = None
 
     for block in page.json_ld:
         candidates = block if isinstance(block, list) else [block]
         for item in candidates:
             if not isinstance(item, dict):
                 continue
-            item_type = item.get("@type")
-            if item_type in ("Book", "CreativeWork", "Article", "WebSite"):
-                has_structured_json_ld = True
-                title = title or item.get("name") or item.get("headline")
-                desc = item.get("description")
-                description = description or (str(desc) if desc else None)
-                author_field = item.get("author")
-                if not author and isinstance(author_field, dict):
-                    author = author_field.get("name")
-                elif not author and isinstance(author_field, str):
-                    author = author_field
+            rank = _UU_TIEN_LOAI_JSON_LD.get(item.get("@type"))
+            if rank is None:
+                continue
+            has_structured_json_ld = True
+            if best_rank is None or rank < best_rank:
+                best_rank, best_item = rank, item
+
+    title = page.meta.get("og:title")
+    author = page.meta.get("author") or page.meta.get("article:author")
+    description = page.meta.get("og:description") or page.meta.get("description")
+
+    if best_item is not None:
+        title = title or best_item.get("name") or best_item.get("headline")
+        desc = best_item.get("description")
+        description = description or (str(desc) if desc else None)
+        author_field = best_item.get("author")
+        if not author and isinstance(author_field, dict):
+            author = author_field.get("name")
+        elif not author and isinstance(author_field, str):
+            author = author_field
 
     title = title or page.title
     return title, author, description, has_structured_json_ld

@@ -291,6 +291,48 @@ class NumberedPaginationPatternTest(unittest.TestCase):
         assert re.search(proposal.next_page_url_pattern, "/truyen/mot-truyen-hay?page=2")
 
 
+class MultipleJsonLdObjectsTest(unittest.TestCase):
+    """Overnight ("unknown-site discovery red team"): mot trang co the co
+    NHIEU khoi JSON-LD, KHONG PHAI tat ca deu lien quan den "tac pham"
+    dang xet (vd mot khoi "Article" gioi thieu/quang cao xuat hien TRUOC
+    khoi "Book" that trong mang) — tieu de KHONG duoc lay tu khoi SAI chi
+    vi no xuat hien truoc theo thu tu mang."""
+
+    def test_khoi_article_khong_lien_quan_xuat_hien_truoc_khoi_book_khong_thang(self):
+        # KHONG dung `_index_html()` — no co san `og:title`, se thang JSON-LD
+        # truoc ca khi xet toi (title = meta.get("og:title") or ...), khong
+        # con kiem tra duoc dung logic uu tien JSON-LD dang xet o day.
+        links = "\n".join(
+            f'<li><a href="/truyen/mot-truyen-hay/chuong-{i}">Chương {i}</a></li>'
+            for i in range(1, 6))
+        html = f"""
+        <html><head><title>Trang không có og:title</title>
+        <script type="application/ld+json">
+        [{{"@type": "Article", "headline": "Bài viết quảng cáo không liên quan"}},
+         {{"@type": "Book", "name": "Tên Truyện Thật Sự",
+           "author": {{"name": "Tác Giả Thật"}}}}]
+        </script>
+        </head><body><ul>{links}</ul></body></html>
+        """
+        pages = {_INDEX_URL: html, _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        self.assertEqual(proposal.work_title, "Tên Truyện Thật Sự")
+        self.assertEqual(proposal.author, "Tác Giả Thật")
+
+    def test_khong_co_khoi_uu_tien_nao_van_lui_ve_meta_binh_thuong(self):
+        # Doi chung: KHONG co Book/CreativeWork/Article/WebSite nao ca ->
+        # van lui ve og:title/page.title binh thuong, khong loi.
+        html = _index_html().replace(
+            "</head>",
+            '<script type="application/ld+json">'
+            '{"@type": "Person", "name": "Không Liên Quan"}'
+            "</script></head>")
+        pages = {_INDEX_URL: html, _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+        self.assertEqual(proposal.work_title, "Một Truyện Hay")
+
+
 class FragmentOnlyClusterTest(unittest.TestCase):
     """Phase 11 (canary that tren Project Gutenberg): mot trang SACH-MOT-
     TRANG dieu huong chuong bang neo noi bo (`#chap01`, `#chap02`, ...)

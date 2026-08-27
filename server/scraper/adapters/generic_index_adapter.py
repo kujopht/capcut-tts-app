@@ -32,11 +32,33 @@ from server.scraper.http_fetcher import FetchError
 #: nhan hien thi) — phat hien qua review doc lap (Codex, tai hien that
 #: bang cac tieu de vi du tren). Danh sach tu khoa GIONG
 #: `discovery._CHAPTER_WORD_RE` — dung chung mot triet ly.
-_CHAPTER_NUMBER_RE = re.compile(
-    r"(?:chương|chuong|chapter|ch\.|episode|phần|phan|tập|tap|hồi|hoi)"
-    r"\s*[:.\-]?\s*(\d+)",
+#:
+#: HAI TANG RIENG (Overnight "unknown-site discovery red team"): tieu de
+#: dang "Quyển 2 Chương 10" (cau truc long nhau Tap/Quyen + Chuong, PHO
+#: BIEN trong truyen dai tieng Viet) truoc day bi doc SAI thanh so 2 (tu
+#: "Tập"/"Quyển" KHOP TRUOC trong van ban, `.search()` chi lay khop DAU
+#: TIEN) thay vi so chuong THAT SU (10) — mot loi SAP XEP nghiem trong
+#: (hai "Quyển 2 Chương X" khac nhau se cung bi doc thanh "chuong 2"),
+#: khong chi mot nhan hien thi sai. Sua bang cach uu tien tu khoa CHUONG
+#: THAT (`_TU_KHOA_CHUONG_CHINH`) truoc, CHI lui ve tu khoa Tap/Phan/Quyen
+#: (`_TU_KHOA_CHUONG_PHU`) khi khong co tu khoa chuong that nao trong van
+#: ban — xem `_tim_so_chuong`.
+_TU_KHOA_CHUONG_CHINH_RE = re.compile(
+    r"(?:chương|chuong|chapter|ch\.|episode|hồi|hoi)\s*[:.\-]?\s*(\d+)",
     re.IGNORECASE,
 )
+_TU_KHOA_CHUONG_PHU_RE = re.compile(
+    r"(?:phần|phan|tập|tap|quyển|quyen)\s*[:.\-]?\s*(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _tim_so_chuong(text: str) -> Optional["re.Match[str]"]:
+    """Uu tien tu khoa CHUONG THAT (`chương`/`chapter`/`hồi`...) — CHI lui
+    ve tu khoa Tap/Phan/Quyen (thuong la SO TAP/QUYEN, khac so chuong)
+    khi van ban khong co tu khoa chuong that nao — xem docstring hang so
+    tren ve loi "Quyển 2 Chương 10" bi doc sai thanh 2."""
+    return _TU_KHOA_CHUONG_CHINH_RE.search(text) or _TU_KHOA_CHUONG_PHU_RE.search(text)
 
 
 def _dam_bao_la_html(result) -> None:
@@ -211,7 +233,7 @@ class GenericIndexAdapter(StoryProvider):
 
     @staticmethod
     def _so_chuong_tu_van_ban(text: str) -> Optional[int]:
-        khop = _CHAPTER_NUMBER_RE.search(text or "")
+        khop = _tim_so_chuong(text or "")
         return int(khop.group(1)) if khop else None
 
     def _tim_trang_tiep_theo(self, trang, base_url: str, da_tham: set):
@@ -272,7 +294,7 @@ class GenericIndexAdapter(StoryProvider):
         # `None` THAT SU (da la Optional[int] tu dau, xem NormalizedChapter),
         # dung thu tu kham pha (`chapter_urls_to_process`) de sap xep thay
         # vi mot con so bia dat.
-        number_match = _CHAPTER_NUMBER_RE.search(title)
+        number_match = _tim_so_chuong(title)
         chapter_number = int(number_match.group(1)) if number_match else None
 
         return NormalizedChapter(

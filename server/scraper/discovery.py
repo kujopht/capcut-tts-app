@@ -49,7 +49,8 @@ _MIN_CONTAINER_CHARS = 200
 _MIN_WORD_FRACTION_FOR_HIGH = 0.3
 
 _CHAPTER_WORD_RE = re.compile(
-    r"(chương|chuong|chapter|ch\.|episode|phần|phan|tập|tap|hồi|hoi)",
+    r"(chương|chuong|chapter|ch\.|episode|phần|phan|tập|tap|hồi|hoi|"
+    r"quyển|quyen)",
     re.IGNORECASE,
 )
 _DIGIT_RUN_RE = re.compile(r"\d+")

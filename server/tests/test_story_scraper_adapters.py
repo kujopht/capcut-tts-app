@@ -498,6 +498,49 @@ class ChapterNumberFalsePositiveTest(unittest.TestCase):
         self.assertTrue(series.chapter_urls[0].endswith("chuong-2"))
         self.assertTrue(series.chapter_urls[1].endswith("chuong-1"))
 
+    def test_tap_quyen_dung_truoc_chuong_khong_lam_sai_so_chuong(self):
+        """Overnight ("unknown-site discovery red team"): tieu de dang
+        "Quyển N Chương M" (cau truc long nhau Tap/Quyen + Chuong, pho bien
+        trong truyen dai tieng Viet) truoc day bi doc SAI thanh so TAP/QUYEN
+        (khop truoc trong van ban) thay vi so CHUONG that su — mot loi sap
+        xep nghiem trong (nhieu chuong khac nhau trong CUNG mot quyen deu
+        bi doc thanh CUNG mot "so chuong")."""
+        html = """
+        <html><head><title>Truyện Nhiều Quyển</title></head><body><ul>
+        <li><a href="/q/chuong-1">Quyển 2 Chương 10: Cao Trào</a></li>
+        <li><a href="/q/chuong-2">Quyển 2 Chương 9: Trước Đó</a></li>
+        <li><a href="/q/chuong-3">Quyển 1 Chương 50: Kết Thúc Quyển 1</a></li>
+        </ul></body></html>
+        """
+        pages = {f"{_BASE}/q": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/q/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/q")
+
+        # Sap theo SO CHUONG that su (9, 10, 50) — KHONG PHAI so quyen
+        # (2, 2, 1, se lam hai chuong dau "bang nhau" va giu nguyen thu tu
+        # kham pha sai: 10 truoc 9).
+        self.assertTrue(series.chapter_urls[0].endswith("chuong-2"))  # Chương 9
+        self.assertTrue(series.chapter_urls[1].endswith("chuong-1"))  # Chương 10
+        self.assertTrue(series.chapter_urls[2].endswith("chuong-3"))  # Chương 50
+
+    def test_quyen_mot_minh_khong_co_chuong_khong_bi_doan_so_chuong(self):
+        html = """
+        <html><head><title>Truyện Theo Quyển</title></head><body><ul>
+        <li><a href="/r/chuong-1">Quyển 1</a></li>
+        <li><a href="/r/chuong-2">Quyển 2</a></li>
+        </ul></body></html>
+        """
+        pages = {f"{_BASE}/r": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/r/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/r")
+        # KHONG co tu khoa CHUONG THAT nao (chi co "Quyển") — van GIU
+        # NGUYEN thu tu kham pha (1, 2) o day, du qua duong nao (tu khoa
+        # phu "quyển" duoc dung nhu tin hieu SO CHUONG cuoi cung khi khong
+        # co gi tot hon, GIONG cach "tập"/"phần" da duoc doi xu tu truoc —
+        # hanh vi KHONG DOI, chi tin hieu USED khac di).
+        self.assertTrue(series.chapter_urls[0].endswith("chuong-1"))
+        self.assertTrue(series.chapter_urls[1].endswith("chuong-2"))
+
 
 class StructuralVariantsTest(unittest.TestCase):
     """Phase 3 Story Harvester V3 — bien the cau truc muc luc (xem

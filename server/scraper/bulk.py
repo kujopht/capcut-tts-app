@@ -325,16 +325,20 @@ class ScrapeRunService:
         dem = self._store.count_items_by_status(run_id)
         truong: Dict[str, Any] = self._truong_dem(dem)
         run_hien_tai = self._store.get_run(run_id)
-        # CHI hoi sinh khi LAN GOI NAY that su dua it nhat mot muc `failed`
-        # ve `pending` (`da_thu > 0`) — KHONG PHAI chi vi dot dang co muc
-        # `pending` VI LY DO KHAC (vd operator vua CHU DONG huy dot, cac
-        # muc chua dung toi con nguyen `pending` theo dung tinh chat huy an
-        # toan). Truoc day chi kiem "co pending hay khong" khien goi
-        # `retry_failed` tren mot dot DA HUY (khong co muc failed nao,
-        # `da_thu == 0`) am tham HOI SINH lai dot do ve RUNNING — huy an
-        # toan bi vo hieu ngoai y muon cua operator. Phat hien qua mot lan
-        # di qua luong operator that (huy roi thu lai).
-        if run_hien_tai.is_terminal and da_thu > 0:
+        # CHI hoi sinh khi CA HAI dung: (1) LAN GOI NAY that su dua it nhat
+        # mot muc `failed` ve `pending` (`da_thu > 0`) — thieu dieu kien
+        # nay khien goi `retry_failed` tren mot dot DA HUY (khong co muc
+        # failed nao) am tham HOI SINH dot do vi cac muc chua dung toi VAN
+        # con `pending` theo dung tinh chat huy an toan, vo hieu quyet dinh
+        # huy cua operator ngoai y muon (phat hien qua mot lan di qua luong
+        # operator that: huy roi thu lai); (2) THAT SU con muc `pending`
+        # LUC DOC dem (`pending > 0`) — thieu dieu kien nay bo mat mot ca
+        # bien hiem nhung that: muc vua duoc thu lai o day co the da bi
+        # `skip` qua mot yeu cau DONG THOI khac truoc khi dem duoc doc,
+        # khien dot bi hoi sinh ve RUNNING nhung khong con viec gi de lam
+        # (phat hien qua review Codex).
+        if (run_hien_tai.is_terminal and da_thu > 0
+                and dem.get(ScrapeItemStatus.PENDING.value, 0) > 0):
             truong.update(status=ScrapeRunStatus.RUNNING, cancelled_at="",
                           finished_at="", last_error="")
         run = self._store.save_run(run_id, **truong)

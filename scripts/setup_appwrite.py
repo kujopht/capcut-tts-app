@@ -711,6 +711,88 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         ],
     },
     # ==========================================================================
+    # QUET HANG LOAT SCRAPER (Router V2 content-ops phase) — hai bang, xem
+    # `server/scraper/run_state.py`/`server/scraper/bulk.py`.
+    #
+    # Day CHI la trang thai DIEU PHOI cua HANG DOI DUYET (KHONG bao gio luu
+    # `clean_text`/noi dung chuong day du — xem docstring `run_state.py` "CO
+    # Y BO SOT"). Khong ghi Novel/Chapter/audio nao ca; do la mot lop tich
+    # hop THEM sau khi operator DUYET tung muc qua UI.
+    #
+    # ROLLBACK: xoa CA HAI collection. Khong mat noi dung nao (chua tung luu
+    # o day) — chi mat kha nang TIEP TUC mot dot quet dang do; chay lai cung
+    # URL series se tao dot moi tu dau (dinh danh tat dinh theo URL, khong
+    # theo lich su cu).
+    "scrape_runs": {
+        "name": "Scrape Runs",
+        "attributes": [
+            # `$id` = `run_id` = "scr_" + 16 hex dau cua fingerprint(canonical
+            # series URL). Xem `run_state.run_id_from_fingerprint`.
+            ("run_id", "string", True, 64),
+            ("source_url", "string", True, 1024),
+            ("fingerprint", "string", True, 64),
+            ("status", "enum", True,
+             ["planning", "running", "cancel_requested", "cancelled",
+              "completed", "partial", "failed"]),
+            ("series_title", "string", False, 300),
+            ("source_domain", "string", False, 128),
+            ("estimated_total", "integer", False, None),
+            ("already_done_count", "integer", False, None),
+            ("total_discovered", "integer", False, None),
+            # Bo dem DAN XUAT nhung duoc LUU — cung ly do voi
+            # `chapter_import_batches.count_*` (tranh dem lai bang moi lan
+            # poll tien do o quy mo 500 muc).
+            ("count_pending", "integer", False, None),
+            ("count_review_ready", "integer", False, None),
+            ("count_failed", "integer", False, None),
+            ("count_skipped", "integer", False, None),
+            ("last_error", "string", False, 1000),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+            ("cancelled_at", "datetime", False, None),
+            ("finished_at", "datetime", False, None),
+        ],
+        "indexes": [
+            # Bo dieu phoi/UI liet ke dot theo trang thai, moi nhat truoc.
+            ("status_created_idx", "key", ["status", "created_at"]),
+            ("created_idx", "key", ["created_at"]),
+        ],
+    },
+    "scrape_run_items": {
+        "name": "Scrape Run Items",
+        "attributes": [
+            # `$id` = `item_id` = "{run_id}-{source_fingerprint[:15]}" — DUNG
+            # 36 ky tu, dung TRAN gioi han `$id` cua Appwrite. KHONG BAO GIO
+            # them tien to/hau to o day — xem `run_state.item_id_for`.
+            ("item_id", "string", True, 64),
+            ("run_id", "string", True, 64),
+            ("chapter_url", "string", True, 1024),
+            ("source_fingerprint", "string", True, 64),
+            ("status", "enum", True,
+             ["pending", "review_ready", "failed", "skipped"]),
+            ("decision", "string", False, 32),
+            ("chapter_title", "string", False, 300),
+            # PHAI la thuoc tinh KHONG bat buoc/nullable — `chapter_number`
+            # la `Optional[int]` that su (chuong khong doc duoc so se la
+            # `None`, khac voi 0). Xem `_int_or_none` trong kho nay.
+            ("chapter_number", "integer", False, None),
+            ("content_hash", "string", False, 64),
+            ("error_message", "string", False, 1000),
+            ("attempts", "integer", False, None),
+            ("skipped_reason", "string", False, 500),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            # Index QUAN TRONG NHAT: `drive_once` lay muc `pending` theo dot,
+            # va MOI bo dem trang thai deu loc theo (run_id, status). Thieu
+            # no thi moi chu ky la mot lan quet bang o quy mo 500 muc.
+            ("run_status_created_idx", "key",
+             ["run_id", "status", "created_at"]),
+            ("run_created_idx", "key", ["run_id", "created_at"]),
+        ],
+    },
+    # ==========================================================================
     # Animation (V6, overnight Phase 5) — subsystem RIENG, doc lap voi
     # novels/chapters. Xem `server/animation_domain.py` va
     # `server/appwrite_animation_store.py` ve vi sao day KHONG dung chung bang

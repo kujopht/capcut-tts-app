@@ -340,6 +340,11 @@ class ScrapeRunService:
         run = self._store.save_run(run_id, **self._truong_dem(dem))
         return {"run": run, "progress": run.progress()}
 
+    def list_runs(self, *, statuses=None):
+        """Chuyen tiep MONG toi `store.list_runs` — dung cho trang danh
+        sach dot scrape cua UI quan tri. KHONG tac dung phu."""
+        return self._store.list_runs(statuses=statuses)
+
     def run_view(self, run_id: str, *, limit: int = 50, offset: int = 0,
                 status: str = "") -> Dict[str, Any]:
         """Doc TIEN DO + danh sach muc cua mot dot — KHONG tac dung phu,

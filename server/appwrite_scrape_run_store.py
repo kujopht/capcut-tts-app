@@ -424,7 +424,18 @@ class AppwriteScrapeRunStore:
         `run_id`. Neu day thuc su tro thanh van de trong san xuat (nhieu
         worker THAT chay song song tren CUNG mot dot), can nang cap len
         optimistic-concurrency THAT SU cua Appwrite — CHUA lam o day vi
-        khong co moi truong Appwrite that de kiem chung an toan."""
+        khong co moi truong Appwrite that de kiem chung an toan.
+
+        AN TOAN KHI LOI GIUA CHUNG (phat hien qua review doc lap, Codex,
+        tren ban dau cua ham nay): PATCH TUNG muc mot co the that bai O
+        GIUA danh sach (vd loi mang tam thoi) — ban dau dung list
+        comprehension nem loi thang ra NGOAI, khien CAC muc DA PATCH
+        thanh cong truoc do bi "mac ket" o trang thai da claim (khong ai
+        biet de xu ly) suot ca `lease_seconds`, trong khi `drive_once` goi
+        ham nay hoan toan KHONG hay biet minh da claim duoc gi. O day BAT
+        loi TUNG muc rieng le va TIEP TUC voi cac muc con lai, tra ve
+        DANH SACH MUC THAT SU claim duoc (co the it hon `limit` neu co
+        loi) thay vi nem loi lam mat dau vet toan bo lo."""
         with self._lock:
             ung_vien = self.list_items(
                 run_id, statuses=[ScrapeItemStatus.PENDING],
@@ -433,7 +444,18 @@ class AppwriteScrapeRunStore:
             con_trong = [i for i in ung_vien
                         if _da_het_han_thue(i.claimed_at, moc, lease_seconds)]
             chon = con_trong[:max(0, limit)]
-            return [self.save_item(muc.item_id, claimed_at=moc) for muc in chon]
+            ra: List[ScrapeRunItem] = []
+            for muc in chon:
+                try:
+                    ra.append(self.save_item(muc.item_id, claimed_at=moc))
+                except (AppwriteUnavailableError, NotFoundError):
+                    # Muc nay that bai khi PATCH — BO QUA, KHONG claim
+                    # duoc, se duoc mot lan `claim_pending_items` SAU thu
+                    # lai (van con `pending`, chua he doi trang thai).
+                    # KHONG de loi o MOT muc lam MAT toan bo cac muc DA
+                    # claim thanh cong truoc do trong vong lap nay.
+                    continue
+            return ra
 
     def list_items(self, run_id: str, *,
                    statuses: Optional[Sequence[ScrapeItemStatus]] = None,

@@ -109,12 +109,23 @@ class ScrapeRunService:
             total_discovered=ke_hoach.total_discovered,
         ))
 
-        for chapter_url in ke_hoach.chapter_urls_to_process:
+        # `sequence` tiep tuc tu SAU `sequence` LON NHAT hien co cua dot
+        # nay (khong phai luon bat dau tu 0, va KHONG PHAI dem so muc —
+        # dem sai khi mot lan `plan_run` truoc do de lai khoang trong
+        # trong day so, vd huy giua chung/lap ke hoach nhieu lan truoc khi
+        # drive; dem se cap phat lai mot `sequence` DA DUNG, gay trung —
+        # phat hien qua review Codex). `create_item_once` la idempotent
+        # nen muc cu giu nguyen `sequence` cu du duoc "cap" lai o day;
+        # muc moi phai noi tiep SAU max that, khong duoc trung voi muc da
+        # co.
+        base_sequence = self._store.max_sequence(run.run_id) + 1
+        for offset, chapter_url in enumerate(ke_hoach.chapter_urls_to_process):
             fp_item = source_fingerprint(chapter_url)
             self._store.create_item_once(ScrapeRunItem(
                 run_id=run.run_id, chapter_url=chapter_url,
                 source_fingerprint=fp_item,
                 item_id=item_id_for(run.run_id, fp_item),
+                sequence=base_sequence + offset,
             ))
 
         self._reconcile_items_from_state(run)
@@ -314,7 +325,19 @@ class ScrapeRunService:
         dem = self._store.count_items_by_status(run_id)
         truong: Dict[str, Any] = self._truong_dem(dem)
         run_hien_tai = self._store.get_run(run_id)
-        if (run_hien_tai.is_terminal
+        # CHI hoi sinh khi CA HAI dung: (1) LAN GOI NAY that su dua it nhat
+        # mot muc `failed` ve `pending` (`da_thu > 0`) — thieu dieu kien
+        # nay khien goi `retry_failed` tren mot dot DA HUY (khong co muc
+        # failed nao) am tham HOI SINH dot do vi cac muc chua dung toi VAN
+        # con `pending` theo dung tinh chat huy an toan, vo hieu quyet dinh
+        # huy cua operator ngoai y muon (phat hien qua mot lan di qua luong
+        # operator that: huy roi thu lai); (2) THAT SU con muc `pending`
+        # LUC DOC dem (`pending > 0`) — thieu dieu kien nay bo mat mot ca
+        # bien hiem nhung that: muc vua duoc thu lai o day co the da bi
+        # `skip` qua mot yeu cau DONG THOI khac truoc khi dem duoc doc,
+        # khien dot bi hoi sinh ve RUNNING nhung khong con viec gi de lam
+        # (phat hien qua review Codex).
+        if (run_hien_tai.is_terminal and da_thu > 0
                 and dem.get(ScrapeItemStatus.PENDING.value, 0) > 0):
             truong.update(status=ScrapeRunStatus.RUNNING, cancelled_at="",
                           finished_at="", last_error="")

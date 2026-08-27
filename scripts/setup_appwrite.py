@@ -780,6 +780,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("error_message", "string", False, 1000),
             ("attempts", "integer", False, None),
             ("skipped_reason", "string", False, 500),
+            # Vi tri THEO THU TU KHAM PHA — thu tu THAT hien cho operator o
+            # hang doi duyet, KHONG PHAI `created_at` (tung trung gio o quy
+            # mo tao nhanh, lam sai thu tu — phat hien qua mot lan di qua
+            # luong operator that). Xem docstring `run_state.ScrapeRunItem`.
+            ("sequence", "integer", True, None),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],
@@ -787,9 +792,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Index QUAN TRONG NHAT: `drive_once` lay muc `pending` theo dot,
             # va MOI bo dem trang thai deu loc theo (run_id, status). Thieu
             # no thi moi chu ky la mot lan quet bang o quy mo 500 muc.
-            ("run_status_created_idx", "key",
-             ["run_id", "status", "created_at"]),
-            ("run_created_idx", "key", ["run_id", "created_at"]),
+            ("run_status_sequence_idx", "key",
+             ["run_id", "status", "sequence"]),
+            ("run_sequence_idx", "key", ["run_id", "sequence"]),
         ],
     },
     # ==========================================================================

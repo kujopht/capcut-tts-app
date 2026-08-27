@@ -241,6 +241,26 @@ class RetryFailedTest(unittest.TestCase):
         dem = store.count_items_by_status(run.run_id)
         self.assertEqual(dem[ScrapeItemStatus.REVIEW_READY.value], 3)
 
+    def test_retry_tren_dot_da_HUY_khong_lam_muc_no_hoi_sinh_lai(self):
+        """Phat hien qua mot lan di qua luong operator that (huy roi bam
+        'Thử lại tất cả lỗi'): mot dot vua bi HUY (chua dung toi muc nao,
+        tat ca con `pending` theo dung tinh chat huy an toan) — goi
+        `retry_failed` (0 muc that su duoc thu lai, vi khong co muc
+        `failed` nao) KHONG duoc am tham dua dot tro lai `RUNNING`. Truoc
+        day dieu kien hoi sinh chi kiem "co pending hay khong" (dung, vi
+        cac muc chua dung toi VAN pending) ma khong kiem da_thu > 0, vo
+        hieu hoa quyet dinh huy cua operator ngoai y muon."""
+        _, store, service = _tao_bo_ba(chapters_per_cycle=5)
+        run = service.plan_run(_SERIES_URL)
+        service.request_cancel(run.run_id)
+        service.drive_once(run.run_id)  # hoan tat huy — muc van con pending
+        self.assertEqual(store.get_run(run.run_id).status, ScrapeRunStatus.CANCELLED)
+
+        ket = service.retry_failed(run.run_id)
+        self.assertEqual(ket["retried"], 0)
+        self.assertEqual(store.get_run(run.run_id).status, ScrapeRunStatus.CANCELLED,
+                         "huy phai duoc GIU NGUYEN, khong bi thu lai hoi sinh am tham")
+
 
 class SkipTest(unittest.TestCase):
     def test_skip_ghi_vao_state_va_bi_loai_khoi_plan_run_sau(self):
@@ -319,6 +339,74 @@ class ChapterLimitGrowthTest(unittest.TestCase):
         run_2 = service.plan_run(_SERIES_URL)
         self.assertEqual(run_2.status, ScrapeRunStatus.PARTIAL,
                          "chi con muc failed -- khong tu hoi sinh qua plan_run")
+
+
+class ItemOrderingTest(unittest.TestCase):
+    """Phat hien qua mot lan di qua luong operator that (khong phai suy
+    doan): hang doi duyet tung sap theo `created_at`, bi trung gio o quy
+    mo tao nhanh (Mock hay Appwrite that), lui ve `item_id` (ma bam,
+    khong lien quan thu tu that) — operator thay chuong hien LON XON
+    (vd 3, 2, 1 thay vi 1, 2, 3). `sequence` (dat MOT LAN luc tao) sua
+    dut diem van de nay."""
+
+    def test_hang_doi_duyet_dung_thu_tu_kham_pha_khong_phai_thu_tu_tao(self):
+        _, store, service = _tao_bo_ba(chapters_per_cycle=5)
+        run = service.plan_run(_SERIES_URL)
+        service.drive_once(run.run_id)
+        muc = store.list_items(run.run_id, limit=None)
+        self.assertEqual([m.chapter_number for m in muc], [1, 2, 3])
+
+    def test_sequence_qua_nhieu_lan_plan_run_van_giu_dung_thu_tu_khong_trung(self):
+        """Cung kich ban voi `ChapterLimitGrowthTest` o tren (canary roi
+        full run) — xac nhan `sequence` khong TRUNG giua muc canary va muc
+        moi (se lam sap sai hang doi duyet). CO THE co khoang trong trong
+        day so (vd 0, 2, 3 thay vi 0, 1, 2) khi mot lan `plan_run` sau lap
+        lai ca chuong da co LAN chuong moi — VAN AN TOAN vi thu tu TUONG
+        DOI van dung, chi kiem tra thu tu tuong doi, khong doi day lien
+        tuc tuyet doi."""
+        _, store, service = _tao_bo_ba(chapters_per_cycle=5)
+        service.plan_run(_SERIES_URL, chapter_limit=1)
+        run_full = service.plan_run(_SERIES_URL)
+        muc = store.list_items(run_full.run_id, limit=None)
+        sequences = [m.sequence for m in muc]
+        self.assertEqual(len(sequences), len(set(sequences)), "khong duoc trung sequence")
+        # `chapter_number` chi co gia tri SAU khi drive — chua drive o day,
+        # nen kiem thu tu bang `chapter_url` (biet truoc thu tu that tu
+        # fixture: chuong-1, chuong-2, chuong-3).
+        muc_theo_thu_tu = sorted(muc, key=lambda m: m.sequence)
+        self.assertTrue(muc_theo_thu_tu[0].chapter_url.endswith("chuong-1"))
+        self.assertTrue(muc_theo_thu_tu[1].chapter_url.endswith("chuong-2"))
+        self.assertTrue(muc_theo_thu_tu[2].chapter_url.endswith("chuong-3"))
+
+    def test_khong_trung_sequence_khi_nguon_co_them_chuong_moi_sau_khoang_trong(self):
+        """Kich ban CU THE Codex chi ra: mot dot da co khoang trong trong
+        `sequence` (canary + full-run truoc khi drive, xem test o tren),
+        RANG DA DRIVE xong, roi nguon co THEM MOT CHUONG MOI — muc moi
+        PHAI khong trung `sequence` voi bat ky muc da co (kien nghi ban
+        dau dung `dem so muc` se cap phat lai mot `sequence` DA DUNG)."""
+        pipeline, store, service = _tao_bo_ba(chapters_per_cycle=5)
+        service.plan_run(_SERIES_URL, chapter_limit=1)  # canary -> khoang trong
+        run = service.plan_run(_SERIES_URL)  # full run -> sequence 0, 2, 3
+        service.drive_once(run.run_id)  # drive HET — dem muc van la 3, khong doi
+
+        pages_moi = dict(_PAGES)
+        pages_moi[f"{_BASE}/truyen/thu-nghiem"] = pages_moi[
+            f"{_BASE}/truyen/thu-nghiem"].replace(
+            "</ul>",
+            '<li><a href="/truyen/thu-nghiem/chuong-4">Chương 4: Mới</a></li></ul>')
+        pages_moi[f"{_BASE}/truyen/thu-nghiem/chuong-4"] = _doc_fixture("chuong-3.html").replace(
+            "Chương 3", "Chương 4")
+        pipeline_moi = _tao_pipeline(pipeline.state, pages_moi)
+        service_moi = ScrapeRunService(pipeline_moi, store, chapters_per_cycle=5)
+        service_moi.plan_run(_SERIES_URL)  # nguon "vua co" chuong 4 moi
+
+        muc = store.list_items(run.run_id, limit=None)
+        sequences = [m.sequence for m in muc]
+        self.assertEqual(len(sequences), len(set(sequences)),
+                         f"sequence bi TRUNG: {sequences}")
+        muc_chuong_4 = next(m for m in muc if m.chapter_url.endswith("chuong-4"))
+        self.assertEqual(muc_chuong_4.sequence, max(sequences),
+                         "chuong moi phai co sequence LON HON tat ca muc da co")
 
 
 class RunViewTest(unittest.TestCase):

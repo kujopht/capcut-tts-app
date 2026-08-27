@@ -80,6 +80,12 @@ from server.appwrite_gamification_store import build_gamification_store
 from server.appwrite_animation_store import build_animation_store
 from server.appwrite_bulk_import_store import build_bulk_import_store
 from server.appwrite_trusted_source_store import build_trusted_source_store
+from server.appwrite_scrape_run_store import build_scrape_run_store
+from server.scraper_ops_service import (
+    ScraperOpsService,
+    ScrapeRunNotFoundError,
+    UnsupportedSiteError,
+)
 from server.bulk_import_domain import (
     BulkImportError,
     BulkImportFormatError,
@@ -274,6 +280,13 @@ trusted_source_store = build_trusted_source_store(settings)
 #: mat chuong hay audio nao, chi mat kha nang tiep tuc mot dot nhap dang do.
 #: Xem `server/bulk_import_domain.py`.
 bulk_import_store = build_bulk_import_store(settings)
+
+#: Kho DIEU PHOI dot QUET (Universal Story Scraper, Router V2 content-ops
+#: phase) — HAI bang RIENG (`scrape_runs`/`scrape_run_items`), doc lap voi
+#: moi kho khac. CHI la trang thai hang doi duyet — khong tu ghi
+#: Novel/Chapter nao. Xem `server/scraper/bulk.py`/`server/appwrite_scrape_run_store.py`.
+scrape_run_store = build_scrape_run_store(settings)
+scraper_ops = ScraperOpsService(scrape_run_store)
 
 #: Tang dich vu Trusted Video Sources (Phase 5) — noi YouTube Data API,
 #: `video_classifier`/`episode_parser`, `trusted_source_store` va
@@ -5219,6 +5232,24 @@ def _xa_hoi(fn, *args, **kwargs):
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
 
+def _quet_hang_loat(fn, *args, **kwargs):
+    """Cung vai tro voi `_xa_hoi()`/`_nguon_tin_cay()` nhung cho
+    `ScraperOpsService` — `UnsupportedSiteError` (domain chua cau hinh) la
+    loi CUA OPERATOR (400, khong phai 500), `ScrapeRunNotFoundError` (404),
+    cac loi `ValueError` da co san tu `ScrapeRunService` (vd huy mot dot da
+    ket thuc) cung la 400."""
+    try:
+        return fn(*args, **kwargs)
+    except UnsupportedSiteError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except ScrapeRunNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+
 def _nguon_tin_cay(fn, *args, **kwargs):
     """
     Cung vai tro voi `_xa_hoi()` nhung cho `TrustedSourceService` (Phase 5) —
@@ -6133,6 +6164,106 @@ def admin_run_reconciliation(
     return _nguon_tin_cay(
         trusted_sources.run_reconciliation, source_id=payload.source_id,
         actor_id=admin.user_id, actor_role=settings.admin_role_of(admin.user_id).value)
+
+
+# =============================================================================
+# UNIVERSAL STORY SCRAPER (Router V2 content-ops phase) — paste URL -> xem
+# truoc -> bat dau/tiep tuc -> tien do -> duyet tung muc. Tang dieu phoi la
+# `ScraperOpsService` (`server/scraper_ops_service.py`); tang duoi la
+# `ScrapeRunService` (`server/scraper/bulk.py`, KHONG sua o day, chi goi).
+# CHI la hang doi duyet — KHONG tu ghi Novel/Chapter nao.
+# =============================================================================
+
+
+class ScraperDiscoverIn(BaseModel):
+    url: str
+
+
+class ScraperStartIn(BaseModel):
+    url: str
+    chapter_limit: Optional[int] = None
+
+
+class ScraperDriveIn(BaseModel):
+    max_chapters: Optional[int] = None
+
+
+class ScraperRetryIn(BaseModel):
+    item_id: str = ""
+
+
+class ScraperSkipIn(BaseModel):
+    reason: str = ""
+
+
+@app.post("/api/admin/scraper/discover")
+def admin_scraper_discover(
+    payload: ScraperDiscoverIn, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Xem truoc — KHONG ghi gi. Buoc dau tien cua luong 'paste URL'."""
+    return _quet_hang_loat(scraper_ops.discover, payload.url)
+
+
+@app.post("/api/admin/scraper/runs")
+def admin_scraper_start_run(
+    payload: ScraperStartIn, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Bat dau (hoac tiep tuc, dinh danh tat dinh theo URL series) mot dot
+    quet that."""
+    return _quet_hang_loat(
+        scraper_ops.start_or_continue, payload.url, chapter_limit=payload.chapter_limit)
+
+
+@app.get("/api/admin/scraper/runs")
+def admin_scraper_list_runs(
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return _quet_hang_loat(scraper_ops.list_runs)
+
+
+@app.get("/api/admin/scraper/runs/{run_id}")
+def admin_scraper_view_run(
+    run_id: str, limit: int = 50, offset: int = 0, status_loc: str = Query("", alias="status"),
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return _quet_hang_loat(
+        scraper_ops.view, run_id, limit=limit, offset=offset, status=status_loc)
+
+
+@app.post("/api/admin/scraper/runs/{run_id}/drive")
+def admin_scraper_drive_run(
+    run_id: str, payload: ScraperDriveIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """MOT chu ky dieu phoi — UI goi lap lai (nut 'Tiep tuc') cho den khi
+    `run.status` la trang thai KET. Khong tu dong lap trong route: moi lan
+    goi la MOT yeu cau HTTP, tranh giu ket noi mo lau cho lo lon."""
+    return _quet_hang_loat(scraper_ops.drive, run_id, max_chapters=payload.max_chapters)
+
+
+@app.post("/api/admin/scraper/runs/{run_id}/cancel")
+def admin_scraper_cancel_run(
+    run_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return _quet_hang_loat(scraper_ops.cancel, run_id)
+
+
+@app.post("/api/admin/scraper/runs/{run_id}/retry")
+def admin_scraper_retry_run(
+    run_id: str, payload: ScraperRetryIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Khong `item_id`: thu lai TAT CA muc loi cua dot. Co `item_id`: chi
+    muc do."""
+    return _quet_hang_loat(scraper_ops.retry, run_id, item_id=payload.item_id)
+
+
+@app.post("/api/admin/scraper/runs/{run_id}/items/{item_id}/skip")
+def admin_scraper_skip_item(
+    run_id: str, item_id: str, payload: ScraperSkipIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    return _quet_hang_loat(scraper_ops.skip, run_id, item_id, reason=payload.reason)
 
 
 @app.get("/api/youtube/websub")

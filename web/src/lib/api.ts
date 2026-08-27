@@ -1743,6 +1743,68 @@ export type VideoImportStatus =
   | "new" | "pending" | "auto_imported" | "auto_published" | "imported"
   | "rejected" | "ignored" | "duplicate" | "conflict" | "unavailable" | "failed";
 
+// -- Universal Story Scraper (Router V2 content-ops phase) ------------------
+// Xem `server/scraper/run_state.py` — hinh dang JSON khop CHINH XAC field
+// cua `ScrapeRun`/`ScrapeRunItem` (Python dataclass -> FastAPI jsonable_encoder,
+// enum thanh `.value`), khong doi ten sang camelCase o day de tranh mot lop
+// anh xa thua.
+
+export type ScrapeRunStatus =
+  | "planning" | "running" | "cancel_requested" | "cancelled"
+  | "completed" | "partial" | "failed";
+
+export type ScrapeItemStatus = "pending" | "review_ready" | "failed" | "skipped";
+
+export interface ScrapeRun {
+  run_id: string;
+  source_url: string;
+  fingerprint: string;
+  status: ScrapeRunStatus;
+  series_title: string;
+  source_domain: string;
+  estimated_total: number;
+  already_done_count: number;
+  total_discovered: number;
+  count_pending: number;
+  count_review_ready: number;
+  count_failed: number;
+  count_skipped: number;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+  cancelled_at: string;
+  finished_at: string;
+}
+
+export interface ScrapeRunProgress {
+  estimated_total: number;
+  already_done_count: number;
+  total_discovered: number;
+  pending: number;
+  review_ready: number;
+  failed: number;
+  skipped: number;
+  done: number;
+  percent: number;
+}
+
+export interface ScrapeRunItem {
+  run_id: string;
+  chapter_url: string;
+  source_fingerprint: string;
+  item_id: string;
+  status: ScrapeItemStatus;
+  decision: string;
+  chapter_title: string;
+  chapter_number: number | null;
+  content_hash: string;
+  error_message: string;
+  attempts: number;
+  skipped_reason: string;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Auto-Ingestion Phase 4 — suc khoe tong hop MOT TrustedSource, xem
     docstring `compute_source_health` phia server. */
 export type SourceHealth = "healthy" | "degraded" | "action_required" | "disabled";
@@ -2349,6 +2411,66 @@ export const adminApi = {
     request<{ import: VideoImport }>(
       `/api/admin/animation/imports/${encodeURIComponent(importId)}/ignore`,
       { method: "POST", body: "{}" },
+    ),
+
+  // -- Universal Story Scraper (Router V2 content-ops phase) --------------
+  // paste URL -> discoverScrape (xem truoc) -> startScrapeRun -> driveScrapeRun
+  // (goi lap lai cho den khi status la trang thai KET) -> getScrapeRun/duyet
+  // tung muc. 400 = domain chua duoc cau hinh (xem `server/scraper/site_registry.py`).
+
+  discoverScrape: (url: string) =>
+    request<{ run: ScrapeRun; supported: boolean }>(
+      "/api/admin/scraper/discover",
+      { method: "POST", body: JSON.stringify({ url }) },
+    ),
+
+  startScrapeRun: (url: string, opts: { chapterLimit?: number } = {}) =>
+    request<{ run: ScrapeRun; progress: ScrapeRunProgress }>(
+      "/api/admin/scraper/runs",
+      { method: "POST", body: JSON.stringify({
+        url, chapter_limit: opts.chapterLimit ?? null }) },
+    ),
+
+  listScrapeRuns: () =>
+    request<{ runs: ScrapeRun[]; supported_domains: string[] }>(
+      "/api/admin/scraper/runs",
+    ),
+
+  getScrapeRun: (
+    runId: string, opts: { limit?: number; offset?: number; status?: ScrapeItemStatus } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (opts.limit != null) qs.set("limit", String(opts.limit));
+    if (opts.offset != null) qs.set("offset", String(opts.offset));
+    if (opts.status) qs.set("status", opts.status);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{ run: ScrapeRun; items: ScrapeRunItem[]; progress: ScrapeRunProgress }>(
+      `/api/admin/scraper/runs/${encodeURIComponent(runId)}${suffix}`,
+    );
+  },
+
+  driveScrapeRun: (runId: string, opts: { maxChapters?: number } = {}) =>
+    request<{ run: ScrapeRun; counts: Record<ScrapeItemStatus, number>; progress: ScrapeRunProgress }>(
+      `/api/admin/scraper/runs/${encodeURIComponent(runId)}/drive`,
+      { method: "POST", body: JSON.stringify({ max_chapters: opts.maxChapters ?? null }) },
+    ),
+
+  cancelScrapeRun: (runId: string) =>
+    request<{ run: ScrapeRun; progress: ScrapeRunProgress }>(
+      `/api/admin/scraper/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: "POST", body: "{}" },
+    ),
+
+  retryScrapeRun: (runId: string, opts: { itemId?: string } = {}) =>
+    request<{ run: ScrapeRun; progress: ScrapeRunProgress; retried: number }>(
+      `/api/admin/scraper/runs/${encodeURIComponent(runId)}/retry`,
+      { method: "POST", body: JSON.stringify({ item_id: opts.itemId ?? "" }) },
+    ),
+
+  skipScrapeItem: (runId: string, itemId: string, reason = "") =>
+    request<{ run: ScrapeRun; progress: ScrapeRunProgress }>(
+      `/api/admin/scraper/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/skip`,
+      { method: "POST", body: JSON.stringify({ reason }) },
     ),
 };
 

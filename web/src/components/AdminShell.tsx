@@ -99,6 +99,15 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
     ],
   },
   {
+    nhom: "Truyện chữ",
+    muc: [
+      {
+        href: "/admin/scraper", nhan: "Quét truyện",
+        icon: IconBook, vaiToiThieu: "admin",
+      },
+    ],
+  },
+  {
     nhom: "Moderation",
     muc: [
       { href: "/admin/reports", nhan: "Báo cáo", icon: IconShield },

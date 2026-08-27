@@ -1,0 +1,32 @@
+# Theo doi request Cloudflare Workers Free — chay theo lich cua
+# fanfic-cloudflare-monitor.timer. Goi scripts/cloudflare_request_monitor.py
+# — CHI stdlib Python (json/urllib/pathlib/datetime), khong can pip install
+# gi them, nhung dung lai venv co san (/opt/fanfic-audio/.venv) cho gon,
+# cung mau voi fanfic-worker-prod.service.
+#
+# VI SAO CAN: su co 2026-08-26 (xem docs/reports/cloudflare-quota-incident-
+# 2026-08-26.md) chi duoc phat hien qua chinh trang bao loi 1027 cua nguoi
+# dung that — khong co canh bao nao truoc do. Don vi nay la luoi an toan de
+# lan sau (neu co) duoc phat hien trong vong toi da 1 gio, khong phai sau
+# khi site da sap.
+#
+# --log GHI mot dong JSON moi lan chay vao /var/log/fanfic-audio/
+# cloudflare-monitor.log — CHINH SACH readonly (>>), khong xoay vong tu
+# dong; don vi nay KHONG tu canh bao qua email/Slack (chua co kenh thong
+# bao nao duoc thiet lap) — dong log la de nguoi van hanh tu kiem tra dinh
+# ky hoac tich hop sau nay, khong phai mot he thong canh bao hoan chinh.
+
+[Unit]
+Description=Fanfic World — theo dõi request Cloudflare Workers Free
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/fanfic-audio
+EnvironmentFile=/etc/fanfic-audio/cloudflare-monitor.env
+Environment=PYTHONPATH=/opt/fanfic-audio
+
+ExecStartPre=/bin/mkdir -p /var/log/fanfic-audio
+ExecStart=/opt/fanfic-audio/.venv/bin/python -m scripts.cloudflare_request_monitor --log /var/log/fanfic-audio/cloudflare-monitor.log
+
+ProtectHome=true
+SyslogIdentifier=fanfic-cloudflare-monitor

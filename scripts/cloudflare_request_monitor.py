@@ -35,6 +35,7 @@ Chay:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -49,13 +50,26 @@ ACCOUNT_ID = "a0084ee7d0f170b2b13bd0ebd5edbd76"
 SCRIPT_NAME = "fanfic-web"
 GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql"
 
-#: Ngong doc token OAuth cua wrangler tu vi tri chuan cua no tren May Windows
-#: nay — KHONG doc tu bien moi truong/tep khac, dung MOT nguon tin cay duy
-#: nhat de tranh vo tinh doc nham token cu/sai tai khoan.
+#: Vi tri tep config cua wrangler — bao gom ca duong dan Windows (may dev
+#: cuc bo, noi token OAuth nay duoc phat hien 2026-08-27 la DA CO san quyen
+#: doc Account Analytics) LAN duong dan XDG chuan tren Linux (VM production
+#: `fanfic-worker-prod`, NEU mot ngay nao do co ai chay `wrangler login` o
+#: do — hien tai CHUA co, xem `CLOUDFLARE_MONITOR_TOKEN` ben duoi cho duong
+#: portable hon khong phu thuoc dang nhap cuc bo).
 _WRANGLER_CONFIG_CANDIDATES = [
     Path.home() / "AppData" / "Roaming" / "xdg.config" / ".wrangler" / "config" / "default.toml",
     Path.home() / ".wrangler" / "config" / "default.toml",
+    Path.home() / ".config" / ".wrangler" / "config" / "default.toml",
 ]
+
+#: Bien moi truong CHUA mot API Token Cloudflare rieng (scope toi thieu:
+#: Account Analytics: Read — xem docs/reports/cloudflare-free-tier-runbook.md
+#: muc "Chay tren GCE VM"), duoc KIEM TRUOC token OAuth cua wrangler. Day
+#: la duong PORTABLE cho may khong co dang nhap wrangler cuc bo (vd VM
+#: production) — script nay KHONG tu tao token nay, nguoi van hanh phai tu
+#: tao qua dashboard Cloudflare va dat bien moi truong nay truoc khi lich
+#: chay tren VM co the hoat dong (xem deploy/fanfic-cloudflare-monitor.service).
+_BIEN_MOI_TRUONG_TOKEN = "CLOUDFLARE_MONITOR_TOKEN"
 
 #: request/gio — duoi day la an toan ro rang so voi ~75-90/gio quan sat duoc
 #: o gio sach dau tien sau khi sua xong (2026-08-27). Con nho de con phong
@@ -67,7 +81,14 @@ NGUONG_NGHIEM_TRONG_MOI_GIO = 4_000   # 4.000/gio * 24 = 96.000/ngay neu keo dai
 NGUONG_NGHIEM_TRONG_TICH_LUY_NGAY = 80_000  # 80% tran 100.000/ngay
 
 
-def _doc_oauth_token() -> str:
+def _doc_token() -> str:
+    """Uu tien bien moi truong (portable, dung cho VM) — chi roi ve doc
+    tep config cua wrangler (cuc bo, gan voi mot lan `wrangler login` cu
+    the) neu bien moi truong khong dat."""
+    tu_env = os.environ.get(_BIEN_MOI_TRUONG_TOKEN, "").strip()
+    if tu_env:
+        return tu_env
+
     for duong_dan in _WRANGLER_CONFIG_CANDIDATES:
         if not duong_dan.exists():
             continue
@@ -76,8 +97,10 @@ def _doc_oauth_token() -> str:
             if dong.startswith("oauth_token"):
                 return dong.split("=", 1)[1].strip().strip('"')
     raise RuntimeError(
-        "Không tìm thấy token OAuth của wrangler — chạy `npx wrangler login` "
-        "trong thư mục web/ trước (script này không tự tạo credential).")
+        f"Không tìm thấy credential nào: đặt biến môi trường "
+        f"{_BIEN_MOI_TRUONG_TOKEN} (API Token riêng, scope Account "
+        f"Analytics: Read), hoặc chạy `npx wrangler login` trong thư mục "
+        f"web/ trước (script này không tự tạo credential nào cả).")
 
 
 @dataclass
@@ -152,7 +175,7 @@ def phan_loai(gio_gan_nhat: int, tong_hom_nay: int) -> tuple:
 
 
 def kiem_tra(token: Optional[str] = None) -> KetQuaTheoDoi:
-    token = token or _doc_oauth_token()
+    token = token or _doc_token()
     bay_gio = datetime.now(timezone.utc)
     dau_ngay_utc = bay_gio.replace(hour=0, minute=0, second=0, microsecond=0)
     # Lay them 2 gio truoc do de khong bo lo gio hien tai (Cloudflare gop

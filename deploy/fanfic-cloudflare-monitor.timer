@@ -1,0 +1,23 @@
+# Lich chay dinh ky cho scripts/cloudflare_request_monitor.py — canh bao
+# SOM truoc khi cham tran 100.000 request/ngay cua Cloudflare Workers Free
+# (xem docs/reports/cloudflare-quota-incident-2026-08-26.md cho su co da
+# xay ra vi thieu canh bao nay).
+
+[Unit]
+Description=Fanfic World — theo doi request Cloudflare Workers Free
+
+[Timer]
+# Doi 5 phut sau khi boot — cung ly do voi fanfic-websub-reconcile.timer:
+# can thoi gian truoc khi may/VM san sang chay lenh.
+OnBootSec=5min
+# Moi gio MOT LAN — day la mot cuoc goi GraphQL Analytics (doc bao cao),
+# KHONG phai request toi chinh Worker dang duoc theo doi, nen chay thuong
+# xuyen hon KHONG lam tang so dang theo doi. Moi gio la du: nguong CANH
+# BAO/NGHIEM TRONG duoc dinh theo GIO (xem module chinh), nen phat hien
+# trong vong toi da ~1 gio la kip thoi.
+OnUnitActiveSec=1h
+AccuracySec=5min
+Unit=fanfic-cloudflare-monitor.service
+
+[Install]
+WantedBy=timers.target

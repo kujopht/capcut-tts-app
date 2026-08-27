@@ -100,14 +100,51 @@ against the 100,000/day budget it's watching.
 | WARNING | ≥ 2,000 req in the latest hour | 2,000/hr sustained for a full day would be 48,000/day — under the cap but a 20-25× jump over the only clean baseline observed is worth a look, not yet an emergency. |
 | CRITICAL | ≥ 4,000 req in the latest hour, OR today's running total ≥ 80,000 | 4,000/hr sustained would be 96,000/day — enough to exhaust the daily cap before it resets. The cumulative-total leg catches a slow burn (no single spiky hour, but too many hours added up) that an hourly-only check would miss. For reference, the actual 2026-08-26 storm hit **122,905 requests in a single hour** — these thresholds sit ~30× below the real incident, not at some untested edge. |
 
-**Not yet scheduled to run automatically** — the script is ready and
-tested (`scripts/tests/test_cloudflare_request_monitor.py`), but wiring it
-into an actual recurring job (Windows Task Scheduler locally, or a cron/
-systemd timer on the existing GCE VM, same pattern as
-`run_websub_reconciliation.py`) is a deliberate operational choice left to
-whoever wants it live, not something to switch on unilaterally.
+**Scheduling — two options, neither activated yet, both ready.**
+
+**Option A — GCE VM (`fanfic-worker-prod`), systemd timer.**
+`deploy/fanfic-cloudflare-monitor.timer` + `.service` are written, mirroring
+the existing `fanfic-worker-prod-health.timer`/`.service` pattern (same
+`/opt/fanfic-audio/.venv`, `ProtectHome=true`, `oneshot`). This is the
+"always on" option — it runs regardless of whether anyone's dev machine is
+open. It needs a **new, dedicated Cloudflare API token** (not the local
+wrangler OAuth token — the VM has never run `wrangler login`, and even if
+it had, that OAuth access token was observed to be short-lived, on the
+order of a few hours, unsuitable for an unattended weeks-long schedule).
+Not created by this session — see `deploy/fanfic-cloudflare-monitor.env.example`
+for exactly what to create (Account Analytics: Read only, nothing else)
+and where it goes (`/etc/fanfic-audio/cloudflare-monitor.env`, root-owned,
+0600, same convention as `fanfic-worker.env.example`). To activate once
+the token exists:
+```
+sudo install -d -m 0750 -o root -g fanfic /etc/fanfic-audio   # if not already present
+sudo install -m 0600 -o root -g fanfic /dev/null /etc/fanfic-audio/cloudflare-monitor.env
+sudo -e /etc/fanfic-audio/cloudflare-monitor.env               # paste CLOUDFLARE_MONITOR_TOKEN=...
+sudo install -m 0644 /opt/fanfic-audio/deploy/fanfic-cloudflare-monitor.service /etc/systemd/system/
+sudo install -m 0644 /opt/fanfic-audio/deploy/fanfic-cloudflare-monitor.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now fanfic-cloudflare-monitor.timer
+```
+
+**Option B — this Windows dev machine, Task Scheduler.** Lower ceremony,
+no new token needed (reads the existing wrangler OAuth token directly) —
+but only runs while this machine is on, and the same short-lived-token
+observation applies: if this machine goes quiet for a long stretch with
+no `wrangler` activity, the token can expire and the scheduled run will
+fail with 401 until the next `wrangler login`/`wrangler whoami`. Fine for
+"catch a regression during an active work stretch," not a substitute for
+Option A's durability.
+
+Both are documented here, neither is switched on — activating either is
+a deliberate choice for whoever wants it live, matching the same posture
+as `run_websub_reconciliation.py`'s own scheduling.
+
 Re-threshold once more days of real (non-testing) traffic accumulate —
-these two hours are a real but thin sample.
+the original 2-hour sample was real but thin; a same-day follow-up
+observation (2026-08-27, 03:00 UTC) already saw a jump to 932 req in one
+hour (still comfortably NORMAL, under the 2,000 WARNING line) — useful
+early confirmation that real traffic varies more than the first two
+clean hours suggested, without yet needing the thresholds changed.
 
 ## Diagnosing a prefetch/request storm specifically
 

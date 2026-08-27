@@ -38,6 +38,10 @@ const TRANG_THAI: ReadonlyArray<{ khoa: "" | VideoImportStatus; nhan: string }> 
   { khoa: "ignored", nhan: "Đã bỏ qua" },
 ];
 
+const NHAN_TRANG_THAI: Record<string, string> = Object.fromEntries(
+  TRANG_THAI.filter((t) => t.khoa).map((t) => [t.khoa, t.nhan]),
+);
+
 const LOP_TRANG_THAI: Record<string, string> = {
   new: "tt-trong", pending: "tt-cho", auto_imported: "tt-duyet",
   auto_published: "tt-duyet", imported: "tt-duyet", rejected: "tt-tuchoi",
@@ -384,7 +388,7 @@ function ImportQueue() {
                   </td>
                   <td>
                     <span className={`tt ${LOP_TRANG_THAI[im.status] ?? "tt-trong"}`}>
-                      {im.status}
+                      {NHAN_TRANG_THAI[im.status] ?? im.status}
                     </span>
                     <div className="hint">Quyết định: {nguonQuyetDinh(im)}</div>
                     {im.reason ? <div className="hint">{im.reason}</div> : null}

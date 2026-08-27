@@ -312,9 +312,6 @@ export default function AdminTrustedSourceDetailPage({
                 </h2>
                 <span className="hint">
                   {TEN_LOAI[s.source_type] ?? s.source_type}
-                  {s.youtube_channel_id ? ` · ${s.youtube_channel_id}` : ""}
-                  {s.youtube_playlist_id ? ` · ${s.youtube_playlist_id}` : ""}
-                  {s.youtube_video_id ? ` · ${s.youtube_video_id}` : ""}
                 </span>
               </span>
               <span className={`tt ${s.enabled ? "tt-duyet" : "tt-trong"}`}>

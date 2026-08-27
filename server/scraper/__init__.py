@@ -64,4 +64,13 @@ va cac kieu du lieu chuan hoa (bao gom `ScraperTier` — moi adapter tu khai
 tier cua no). `dedupe.py` la co che chong trung/resume/phat hien revision.
 `adapters/` la cac trien khai cu the, kiem thu bang fixture cuc bo — xem
 server/tests/test_story_scraper_*.py.
+
+`pipeline.py` la BO DIEU PHOI noi cac manh tren thanh mot luong nhap
+truyen dau-cuoi: resolve -> discover_series -> resume (loc chuong da xong)
+-> voi tung chuong con lai: fetch + normalize + phan loai (NEW/REVISION/
+ALREADY_IMPORTED/FAILED) -> hang doi duyet trong bo nho cua lan goi
+(`IngestionResult.review_items`). Ho tro dry-run (xem truoc, khong ghi
+state) va cham gioi han so chuong/lan goi (`chapter_limit` — dung cho
+canary that su nho, xem Phase 3 trong overnight report). KHONG tu dong
+ghi vao Novel/Chapter that — do la mot lop tich hop rieng, CHUA xay dung.
 """

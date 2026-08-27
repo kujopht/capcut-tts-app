@@ -60,6 +60,7 @@ class NavigationOnlyAdapter(StoryProvider):
         self._next_re = __import__("re").compile(next_href_pattern)
         self._max_chapters = max_chapters
         self._boilerplate_chapter_urls_theo_hash: dict = {}
+        self._da_xac_nhan_boilerplate: set = set()
 
     def resolve(self, url: str) -> str:
         try:
@@ -201,11 +202,19 @@ class NavigationOnlyAdapter(StoryProvider):
     _SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE = 2
 
     def _boilerplate_hashes_cho(self, canon_hien_tai: str) -> set:
+        """Xem docstring cung ten trong `generic_index_adapter.py` (Overnight
+        "memory/CPU characterization", O(N^2) hunt) — CHI xet
+        `_da_xac_nhan_boilerplate` (nho, on dinh), khong quet TOAN BO doan
+        van duy nhat tung thay."""
         return {
-            h for h, urls in self._boilerplate_chapter_urls_theo_hash.items()
-            if len(urls - {canon_hien_tai}) >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE
+            h for h in self._da_xac_nhan_boilerplate
+            if len(self._boilerplate_chapter_urls_theo_hash[h] - {canon_hien_tai})
+            >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE
         }
 
     def _ghi_nhan_doan_van_boilerplate(self, canon_hien_tai: str, hashes: set) -> None:
         for h in hashes:
-            self._boilerplate_chapter_urls_theo_hash.setdefault(h, set()).add(canon_hien_tai)
+            tap = self._boilerplate_chapter_urls_theo_hash.setdefault(h, set())
+            tap.add(canon_hien_tai)
+            if len(tap) >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE:
+                self._da_xac_nhan_boilerplate.add(h)

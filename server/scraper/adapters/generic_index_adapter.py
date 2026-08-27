@@ -144,6 +144,10 @@ class GenericIndexAdapter(StoryProvider):
         #: het noi dung — phat hien qua mot lan chay bo test hien co (khong
         #: phai fixture moi), content_hash ra `sha256("")` o lan goi thu hai.
         self._boilerplate_chapter_urls_theo_hash: Dict[str, set] = {}
+        #: TAP hash DA XAC NHAN vuot nguong boilerplate — Overnight
+        #: ("memory/CPU characterization", O(N^2) hunt): xem docstring
+        #: `_boilerplate_hashes_cho`.
+        self._da_xac_nhan_boilerplate: set = set()
 
     #: So chuong KHAC (khong tinh chinh chuong dang xu ly) tung co MOT doan
     #: van GIONG HET truoc khi doan do bi coi la boilerplate toan site —
@@ -152,14 +156,33 @@ class GenericIndexAdapter(StoryProvider):
     _SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE = 2
 
     def _boilerplate_hashes_cho(self, canon_hien_tai: str) -> set:
+        """CHI xet cac hash DA TUNG vuot nguong (`_da_xac_nhan_boilerplate`,
+        duy tri TANG DAN trong `_ghi_nhan_doan_van_boilerplate`) — Overnight
+        ("memory/CPU characterization", O(N^2) hunt): ban dau ham nay quet
+        TOAN BO `_boilerplate_chapter_urls_theo_hash.items()` (MOI doan van
+        DUY NHAT tung thay tren toan site) o MOI LAN GOI (mot lan cho MOI
+        chuong) — do luong that (cProfile) xac nhan day la nguyen nhan
+        CHINH thu hai cua chi phi O(N^2) tren mot dot dai (~2.6/9.2 giay o
+        4000 chuong). Vi SO LUONG doan van THAT SU lap lai (boilerplate that:
+        header/footer/quang cao) luon nho VA ON DINH bat ke series dai bao
+        nhieu (khac SO LUONG doan van DUY NHAT, tang tuyen tinh theo so
+        chuong), gioi han quet o TAP DA XAC NHAN nay chuyen chi phi tu O(tong
+        so doan van DUY NHAT tung thay) thanh O(so boilerplate THAT SU, gan
+        nhu hang so) — KHONG doi ket qua (van tinh loai tru CHINH chuong
+        dang hoi, xem docstring lop ve ly do can loai tru nay), chi doi
+        TAP CAN QUET."""
         return {
-            h for h, urls in self._boilerplate_chapter_urls_theo_hash.items()
-            if len(urls - {canon_hien_tai}) >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE
+            h for h in self._da_xac_nhan_boilerplate
+            if len(self._boilerplate_chapter_urls_theo_hash[h] - {canon_hien_tai})
+            >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE
         }
 
     def _ghi_nhan_doan_van_boilerplate(self, canon_hien_tai: str, hashes: set) -> None:
         for h in hashes:
-            self._boilerplate_chapter_urls_theo_hash.setdefault(h, set()).add(canon_hien_tai)
+            tap = self._boilerplate_chapter_urls_theo_hash.setdefault(h, set())
+            tap.add(canon_hien_tai)
+            if len(tap) >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE:
+                self._da_xac_nhan_boilerplate.add(h)
 
     def resolve(self, url: str) -> str:
         try:

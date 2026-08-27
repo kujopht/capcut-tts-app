@@ -46,6 +46,14 @@ from server.scraper.run_state import (
     run_id_from_fingerprint,
 )
 
+#: Xem docstring o cho dung (trong `drive_once`) — chan tren SO MUC lay
+#: lam ngu canh "sibling" cho `quality.check_chapter_order` MOI chu ky,
+#: chuyen chi phi tu O(N) moi chu ky (O(N^2) ca dot) thanh O(1) khong doi.
+#: 500 la du cho da so truyen web thuc te; cac dot dai hon van AN TOAN
+#: (chi giam do nhay cua MOT kiem tra WARN bo sung, khong anh huong lop
+#: phat hien trung lap CHINH dua tren content_hash).
+_TRAN_NGU_CANH_SO_CHUONG_LAN_CAN = 500
+
 
 class ScrapeRunService:
     def __init__(self, pipeline: StoryIngestionPipeline, store: MockScrapeRunStore,
@@ -246,12 +254,36 @@ class ScrapeRunService:
         bi_huy = False
 
         # Ngu canh "sibling" cho `check_chapter_order` (quality.py) — LAY TU
-        # TOAN BO cac muc DA XONG cua dot nay (khong chi trong chu ky hien
-        # tai, khac `pipeline.py::run()` — o day co the doc lai tu store),
-        # roi CONG DON THEM trong luc chay chu ky nay.
+        # cac muc DA XONG cua dot nay (khong chi trong chu ky hien tai,
+        # khac `pipeline.py::run()` — o day co the doc lai tu store), roi
+        # CONG DON THEM trong luc chay chu ky nay.
+        #
+        # GIOI HAN CO CHU DICH o `_TRAN_NGU_CANH_SO_CHUONG_LAN_CAN` (Overnight
+        # "memory/CPU characterization" — O(N^2) hunt): ban dau dung
+        # `limit=None` (LAY HET), nghia la MOI chu ky quet LAI TOAN BO so
+        # muc DA XONG tu truoc den nay — do so muc do TANG DAN qua tung chu
+        # ky, tong chi phi ca dot la O(N^2/chapters_per_cycle), do luong
+        # THAT: ty le thoi gian chu ky CUOI/chu ky DAU tang tu 1.2x (500
+        # chuong) len 4.4x (5000 chuong). Tren kho THAT (Appwrite), moi lan
+        # goi con la MOT (hoac nhieu, list_items tu phan trang 100/lan) YEU
+        # CAU MANG THAT — o quy mo 5000 chuong, tong so yeu cau mang CHI
+        # CHO buoc nay co the len toi hang nghin, TANG DAN moi chu ky.
+        #
+        # GIOI HAN o day chuyen chi phi ve O(1) khong doi moi chu ky (O(N)
+        # tong ca dot) — DANH DOI: kiem tra "trung so chuong"/"nhay so qua
+        # xa" (quality.py::check_chapter_order) chi CON hieu luc trong
+        # `_TRAN_NGU_CANH_SO_CHUONG_LAN_CAN` chuong DA XONG dau tien cua
+        # dot, khong con "nho" toan bo lich su cho cac dot RAT dai (hiem,
+        # da so truyen web thuc te duoi nguong nay). Day la kiem tra WARN
+        # bo sung (khong BLOCK, xem quality.py), va da co Phase 8
+        # (`find_canonical_urls_by_content_hash`) lam lop phat hien trung
+        # lap CHINH dua tren NOI DUNG that (khong gioi han nay) — gioi han
+        # o day KHONG lam yeu di lop phong ve chinh.
         cac_so_chuong_da_biet = [
             i.chapter_number for i in
-            self._store.list_items(run_id, statuses=[ScrapeItemStatus.REVIEW_READY], limit=None)
+            self._store.list_items(
+                run_id, statuses=[ScrapeItemStatus.REVIEW_READY],
+                limit=_TRAN_NGU_CANH_SO_CHUONG_LAN_CAN)
             if i.chapter_number is not None
         ]
 

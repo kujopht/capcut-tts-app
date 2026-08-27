@@ -46,10 +46,34 @@ class ScrapeState:
     #: "status" ("ok" | "failed"), "revision_of" (fingerprint cu, chi co khi
     #: phat hien noi dung doi so voi lan truoc)}
     _rows: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: CHI SO NGUOC content_hash -> tap canonical_url dang "ok" VOI hash do
+    #: — Overnight ("memory/CPU characterization", O(N^2) hunt): TRUOC ban
+    #: sua nay, `find_canonical_urls_by_content_hash` QUET TOAN BO `_rows`
+    #: MOI LAN GOI, va no duoc goi MOT LAN CHO MOI CHUONG trong
+    #: `bulk.py::drive_once` — do luong THAT (cProfile) xac nhan day la
+    #: NGUYEN NHAN CHINH cua chi phi O(N^2) tren MOT dot dai (o 4000 chuong,
+    #: rieng ham nay chiem ~3.7/9.2 giay tong thoi gian). Duy tri chi so nay
+    #: TANG DAN (O(1) moi lan ghi) chuyen truy van tren thanh O(1)/O(k) voi
+    #: k = so URL THAT SU cung hash (thuong rat nho, gan nhu luon la 0-1).
+    _chi_so_theo_hash: Dict[str, set] = field(default_factory=dict)
 
     def get(self, canonical_url: str) -> Optional[Dict[str, Any]]:
         fp = hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
         return self._rows.get(fp)
+
+    def _go_khoi_chi_so_hash_neu_can(self, cu: Optional[Dict[str, Any]]) -> None:
+        """Neu ban ghi CU (truoc khi ghi de) dang o trang thai "ok" va co
+        `content_hash`, go no khoi `_chi_so_theo_hash` — goi TRUOC khi
+        chuyen trang thai/content_hash sang gia tri MOI (revision, that
+        bai, hoac bo qua), tranh chi so giu THAM CHIEU CU/SAI."""
+        if cu is None or cu.get("status") != "ok" or not cu.get("content_hash"):
+            return
+        tap = self._chi_so_theo_hash.get(cu["content_hash"])
+        if tap is None:
+            return
+        tap.discard(cu["canonical_url"])
+        if not tap:
+            del self._chi_so_theo_hash[cu["content_hash"]]
 
     def find_canonical_urls_by_content_hash(
             self, content_hash_value: str, *, exclude_canonical: Optional[str] = None
@@ -64,9 +88,8 @@ class ScrapeState:
         no, mot chuong DA co ban ghi cu (dang tu so sanh voi chinh no
         truoc khi ghi de) se tu bao "trung voi chinh minh"."""
         return [
-            row["canonical_url"] for row in self._rows.values()
-            if row.get("status") == "ok" and row.get("content_hash") == content_hash_value
-            and row.get("canonical_url") != exclude_canonical
+            u for u in self._chi_so_theo_hash.get(content_hash_value, ())
+            if u != exclude_canonical
         ]
 
     def record_success(self, url: str, *, content_hash_value: str,
@@ -93,13 +116,17 @@ class ScrapeState:
         }
         if is_revision:
             row["previous_content_hash"] = cu["content_hash"]
+        if is_revision or (cu is not None and cu.get("content_hash") != content_hash_value):
+            self._go_khoi_chi_so_hash_neu_can(cu)
         self._rows[fp] = row
+        self._chi_so_theo_hash.setdefault(content_hash_value, set()).add(canon)
         return row
 
     def record_failure(self, url: str) -> None:
         canon = canonicalize_url(url)
         fp = hashlib.sha256(canon.encode("utf-8")).hexdigest()
         cu = self._rows.get(fp) or {"canonical_url": canon}
+        self._go_khoi_chi_so_hash_neu_can(cu)
         cu["status"] = "failed"
         self._rows[fp] = cu
 
@@ -114,6 +141,7 @@ class ScrapeState:
         """
         canon = canonicalize_url(url)
         fp = hashlib.sha256(canon.encode("utf-8")).hexdigest()
+        self._go_khoi_chi_so_hash_neu_can(self._rows.get(fp))
         self._rows[fp] = {"canonical_url": canon, "status": "skipped"}
 
     def clear_skip(self, url: str) -> None:

@@ -424,3 +424,40 @@ class TierEscalationBlockedReasonTest(unittest.TestCase):
         assert proposal.confidence == SourceConfidence.MEDIUM
         assert not any("auth_required" in e or "captcha" in e or "paywall" in e
                       for e in proposal.evidence)
+
+
+class TrackingQueryParamTest(unittest.TestCase):
+    """Overnight ("unknown-site discovery red team"): tham so theo doi
+    (`utm_source`, ...) tren lien ket chuong KHONG duoc lam sai pattern de
+    xuat (bi khoa cung VOI gia tri tracking, vo hieu ngay khi chien dich
+    quang cao doi) hay dem sai so chuong (cung chuong, khac tracking, bi
+    dem hai lan)."""
+
+    def test_tham_so_theo_doi_khong_bi_dua_vao_pattern_de_xuat(self):
+        links = "\n".join(
+            f'<li><a href="/truyen/mot-truyen-hay/chuong-{i}'
+            '?utm_source=facebook&utm_medium=social">Chương '
+            f'{i}</a></li>' for i in range(1, 6))
+        pages = {_INDEX_URL: _index_html(links), _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_url_pattern is not None
+        assert "utm_source" not in proposal.chapter_url_pattern
+        # Mau van phai khop URL that (co tracking) VA URL sach (khong con
+        # tracking, vd sau khi site doi chien dich quang cao).
+        assert re.search(proposal.chapter_url_pattern,
+                         "/truyen/mot-truyen-hay/chuong-3?utm_source=facebook")
+        assert re.search(proposal.chapter_url_pattern,
+                         "/truyen/mot-truyen-hay/chuong-3")
+
+    def test_cung_chuong_khac_tham_so_theo_doi_khong_bi_dem_hai_lan(self):
+        links = (
+            '<li><a href="/truyen/mot-truyen-hay/chuong-1?utm_source=facebook">C1 (FB)</a></li>'
+            '<li><a href="/truyen/mot-truyen-hay/chuong-1?utm_source=twitter">C1 (TW)</a></li>'
+            '<li><a href="/truyen/mot-truyen-hay/chuong-2">C2</a></li>'
+            '<li><a href="/truyen/mot-truyen-hay/chuong-3">C3</a></li>'
+        )
+        pages = {_INDEX_URL: _index_html(links), _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+        assert proposal.chapter_count_estimate == 3, (
+            "chương 1 xuất hiện 2 lần (khác tracking) phải chỉ tính là MỘT")

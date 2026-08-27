@@ -259,21 +259,35 @@ def _find_link_clusters(links: List[Tuple[str, str]], base_url: str
     xuat sau do la MOT CHUOI VAN BAN THUONG khong neo (`re.search` khop bat
     ky href nao CHUA chuoi con "/read", vd "/read-more", "/already-read")
     — phat hien qua review doc lap (Codex, tai hien that bang mot script
-    goi truc tiep engine)."""
+    goi truc tiep engine).
+
+    DUNG `canonicalize_url` (bo tham so theo doi nhu `utm_source`, sap
+    query con lai) — KHONG PHAI `urlsplit` tho — de tinh hinh dang VA khoa
+    trung lap (Overnight "unknown-site discovery red team"): thieu buoc
+    nay, mot chuong co lien ket dinh kem `?utm_source=facebook` se (1) bi
+    tinh vao PATTERN de xuat NHU MOT PHAN CO DINH cua URL (pattern chi con
+    khop khi tham so theo doi CHINH XAC do con nguyen, vo hieu ngay khi
+    site doi chien dich quang cao/tracking), VA (2) hai lien ket TOI CUNG
+    mot chuong nhung KHAC tham so theo doi (vd chia se tren Facebook voi
+    Twitter) se bi dem thanh HAI chuong rieng biet thay vi MOT. `href`
+    TUYET DOI GOC (chua tham so theo doi) van duoc GIU NGUYEN trong ket
+    qua tra ve — CHI hinh dang/khoa trung lap dung ban da chuan hoa, viec
+    fetch THAT SU van dung dung URL tim thay trong HTML, khong tu y sua."""
     groups: Dict[str, List[Tuple[str, str]]] = {}
     seen_per_group: Dict[str, set] = {}
     for href, text in links:
         absolute = urljoin(base_url, href)
-        parts = urlsplit(absolute)
-        path = parts.path
+        canon = canonicalize_url(absolute)
+        canon_parts = urlsplit(canon)
+        path = canon_parts.path
         if not path or path == "/":
             continue
-        path_va_query = path if not parts.query else f"{path}?{parts.query}"
+        path_va_query = path if not canon_parts.query else f"{path}?{canon_parts.query}"
         shape = _shape_of(path_va_query)
         seen = seen_per_group.setdefault(shape, set())
-        if absolute in seen:
+        if canon in seen:
             continue
-        seen.add(absolute)
+        seen.add(canon)
         groups.setdefault(shape, []).append((absolute, text))
     return groups
 

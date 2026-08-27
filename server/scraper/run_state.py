@@ -93,6 +93,12 @@ class ScrapeRun:
     status: ScrapeRunStatus = ScrapeRunStatus.PLANNING
     series_title: str = ""
     source_domain: str = ""
+    #: Tac gia/mo ta cua SERIES (KHONG PHAI tung chuong) — Phase 7 Story
+    #: Harvester V3: dau vao cho `story_identity.compare_identity` khi kiem
+    #: tra MOT nguon moi co phai mirror cua dot nay hay khong (xem
+    #: `scraper_ops_service.ScraperOpsService.check_possible_mirror`).
+    series_author: str = ""
+    series_description: str = ""
     #: So chuong SE xu ly TINH DEN LAN plan() gan nhat — dan xuat tu
     #: `IngestionPlan.chapter_urls_to_process`, cap nhat lai moi lan
     #: `plan_run()` (co the TANG neu mot lan goi sau them chuong moi).

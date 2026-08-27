@@ -751,6 +751,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # chapter_ordering.py). Sao chep TU LAN plan_run() DAU TIEN,
             # khong doi o cac lan sau (create_run_once la tao-mot-lan).
             ("ordering_evidence", "string", False, 1000),
+            # Phase 7 Story Harvester V3 — dau vao cho
+            # story_identity.compare_identity (kiem tra mirror).
+            ("series_author", "string", False, 300),
+            ("series_description", "string", False, 2000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
             ("cancelled_at", "datetime", False, None),

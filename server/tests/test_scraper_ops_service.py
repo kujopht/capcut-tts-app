@@ -375,6 +375,79 @@ class CheckForUpdatesTest(unittest.TestCase):
             svc.check_for_updates("scr_khong-ton-tai")
 
 
+class CheckPossibleMirrorTest(unittest.TestCase):
+    """Phase 7: `check_possible_mirror` — kham pha nguon MOI (khong ghi
+    gi), so sanh voi cac dot da co trong kho, tra ve nhung dot co
+    confidence >= MEDIUM."""
+
+    _MIRROR_BASE = "https://mirror-cua-x.example"
+
+    def _mirror_pages(self, title: str, tac_gia: str) -> dict:
+        index = f"""<html><head><title>{title}</title>
+        <meta property="og:title" content="{title}">
+        <meta name="author" content="{tac_gia}"></head>
+        <body><ul>
+        <li><a href="/m/chuong-1">Chương 1</a></li>
+        <li><a href="/m/chuong-2">Chương 2</a></li>
+        <li><a href="/m/chuong-3">Chương 3</a></li>
+        </ul></body></html>"""
+        ch = ('<html><body><div class="chapter-content"><p>Nội dung đủ '
+             "dài để vượt ngưỡng tối thiểu cho vùng nội dung hợp lệ trong "
+             "bộ kiểm tra tích hợp mirror này thật sự.</p></div></body></html>")
+        return {
+            f"{self._MIRROR_BASE}/m": index,
+            f"{self._MIRROR_BASE}/m/chuong-1": ch,
+            f"{self._MIRROR_BASE}/m/chuong-2": ch,
+            f"{self._MIRROR_BASE}/m/chuong-3": ch,
+        }
+
+    @patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG)
+    def test_khong_co_dot_nao_trung_tra_ve_danh_sach_rong(self):
+        store = MockScrapeRunStore()
+        svc = _svc(store)
+        svc.start_or_continue(f"{_BASE}/truyen/thu-nghiem")
+
+        pages = self._mirror_pages("Truyện Hoàn Toàn Khác", "Người Khác")
+        svc2 = ScraperOpsService(
+            store, fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)))
+        result = svc2.check_possible_mirror(f"{self._MIRROR_BASE}/m")
+        self.assertEqual(result["possible_mirrors"], [])
+
+    @patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG)
+    def test_title_va_author_khop_bao_MEDIUM(self):
+        store = MockScrapeRunStore()
+        svc = _svc(store)
+        svc.start_or_continue(f"{_BASE}/truyen/thu-nghiem")
+
+        # Fixture goc: title "Truyện Thử Nghiệm", author "Tác Giả Ẩn Danh"
+        # (xem index.html) — dung LAI CA HAI de mo phong mirror THAT.
+        pages = self._mirror_pages("Truyện Thử Nghiệm", "Tác Giả Ẩn Danh")
+        svc2 = ScraperOpsService(
+            store, fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)))
+        result = svc2.check_possible_mirror(f"{self._MIRROR_BASE}/m")
+
+        self.assertEqual(len(result["possible_mirrors"]), 1)
+        mirror = result["possible_mirrors"][0]
+        self.assertEqual(mirror["confidence"], "medium")
+        self.assertIn("title", mirror["matched_signals"])
+        self.assertIn("author", mirror["matched_signals"])
+
+    @patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG)
+    def test_khong_ghi_gi_du_tim_thay_mirror(self):
+        store = MockScrapeRunStore()
+        svc = _svc(store)
+        svc.start_or_continue(f"{_BASE}/truyen/thu-nghiem")
+        so_dot_truoc = len(store.runs)
+
+        pages = self._mirror_pages("Truyện Thử Nghiệm", "Tác Giả Ẩn Danh")
+        svc2 = ScraperOpsService(
+            store, fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)))
+        svc2.check_possible_mirror(f"{self._MIRROR_BASE}/m")
+
+        self.assertEqual(len(store.runs), so_dot_truoc,
+                         "check_possible_mirror() không được tạo/ghi bất kỳ dot nào")
+
+
 class DiscoverAndRunTest(unittest.TestCase):
     @patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG)
     def test_discover_xem_truoc_khong_ghi_gi(self):

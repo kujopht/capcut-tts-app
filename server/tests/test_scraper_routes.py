@@ -204,6 +204,13 @@ class ScraperFlowTest(Nen):
             "/api/admin/scraper/runs/scr_khong_ton_tai/check-updates", headers=self.tk_admin)
         self.assertEqual(resp.status_code, 404)
 
+    def test_check_mirror_khong_co_dot_nao_trung_tra_ve_rong(self):
+        resp = self.client.post(
+            "/api/admin/scraper/check-mirror", headers=self.tk_admin,
+            json={"url": f"{_BASE}/truyen/thu-nghiem"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["possible_mirrors"], [])
+
     def test_view_run_khong_ton_tai_tra_404(self):
         resp = self.client.get(
             "/api/admin/scraper/runs/scr_khong_ton_tai", headers=self.tk_admin)

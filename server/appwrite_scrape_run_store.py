@@ -65,6 +65,7 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "source_domain", "estimated_total", "already_done_count",
         "total_discovered", "count_pending", "count_review_ready",
         "count_failed", "count_skipped", "last_error", "ordering_evidence",
+        "series_author", "series_description",
         "created_at", "updated_at", "cancelled_at", "finished_at",
     ),
     COL_ITEMS: (
@@ -140,6 +141,8 @@ def _run_from_doc(doc: Dict[str, Any]) -> ScrapeRun:
         count_skipped=_int(doc.get("count_skipped")),
         last_error=str(doc.get("last_error") or ""),
         ordering_evidence=str(doc.get("ordering_evidence") or ""),
+        series_author=str(doc.get("series_author") or ""),
+        series_description=str(doc.get("series_description") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
         cancelled_at=str(doc.get("cancelled_at") or ""),

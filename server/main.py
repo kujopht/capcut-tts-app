@@ -6232,6 +6232,17 @@ def admin_scraper_confirm_source(
     return _quet_hang_loat(scraper_ops.confirm_unknown_source, payload.url)
 
 
+@app.post("/api/admin/scraper/check-mirror")
+def admin_scraper_check_mirror(
+    payload: ScraperDiscoverIn, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Phase 7 (Story Harvester V3) — kham pha thong tin nguon MOI (KHONG
+    ghi gi) roi so sanh voi cac dot da co trong kho, tra ve nhung dot co
+    confidence >= MEDIUM la "co the la mirror". KHONG tu dong chan/gop —
+    CHI la thong tin cho operator xem xet truoc khi bat dau quet that."""
+    return _quet_hang_loat(scraper_ops.check_possible_mirror, payload.url)
+
+
 @app.post("/api/admin/scraper/runs")
 def admin_scraper_start_run(
     payload: ScraperStartIn, admin: Profile = Depends(admin_or_owner_profile),

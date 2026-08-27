@@ -33,6 +33,9 @@ from server.scraper.site_profile import (
     MockSiteProfileStore, profile_from_proposal,
 )
 from server.scraper.state_reconstruct import rebuild_state
+from server.scraper.story_identity import (
+    IdentitySignals, SameWorkConfidence, compare_identity,
+)
 
 
 class UnsupportedSiteError(Exception):
@@ -262,6 +265,59 @@ class ScraperOpsService:
             self._profile_store.record_success(domain)
         elif moi_loi > 0:
             self._profile_store.record_failure(domain)
+
+    def check_possible_mirror(self, url: str) -> Dict[str, Any]:
+        """Phase 7 (Story Harvester V3): truoc khi bat dau quet mot nguon
+        MOI, kiem tra xem no co GIONG mot dot da co trong kho hay khong
+        (vd truyen bi dang lai/mirror tren domain khac) — tra ve TAT CA dot
+        hien co voi confidence >= MEDIUM, sap xep confidence cao truoc.
+        KHONG tu dong chan/gop gi — CHI la thong tin cho operator xem xet
+        (xem `story_identity.py`, nguyen tac "khong bao gio gop chi tu
+        title"). CHUA chua NOI DUNG chuong nao (chua quet), nen CHI dung
+        tin hieu tieu de/tac gia/mo ta/so chuong — content_hash (tin hieu
+        manh nhat) khong ap dung duoc o buoc TRUOC KHI quet nay."""
+        tin_hieu_moi = self._tin_hieu_nhan_dang_cho(url)
+        ket_qua: list = []
+        for run in self._store.list_runs():
+            tin_hieu_cu = IdentitySignals(
+                canonical_url=run.source_url,
+                title=run.series_title,
+                author=run.series_author or None,
+                description=run.series_description or None,
+                chapter_count=run.total_discovered or None,
+            )
+            so_sanh = compare_identity(tin_hieu_moi, tin_hieu_cu)
+            if so_sanh.confidence in (SameWorkConfidence.HIGH, SameWorkConfidence.MEDIUM):
+                ket_qua.append({
+                    "run_id": run.run_id,
+                    "series_title": run.series_title,
+                    "source_url": run.source_url,
+                    "confidence": so_sanh.confidence.value,
+                    "evidence": so_sanh.evidence,
+                    "matched_signals": so_sanh.matched_signals,
+                })
+        ket_qua.sort(key=lambda r: r["confidence"] != "high")
+        return {"possible_mirrors": ket_qua}
+
+    def _tin_hieu_nhan_dang_cho(self, url: str) -> IdentitySignals:
+        """Xay `IdentitySignals` cho MOT url — dung duong DA CO CAU HINH
+        (SiteConfig/SiteProfile) neu co, khong thi qua discovery engine
+        (Phase 2) — CA HAI deu cho title/author/description/uoc luong so
+        chuong ma KHONG can operator xac nhan gi truoc (chi kham pha, xem
+        `discover()`)."""
+        if self._co_the_dung_ngay(url):
+            adapter = self._adapter_for_url(url)
+            series = adapter.discover_series(url)
+            return IdentitySignals(
+                canonical_url=series.canonical_url, title=series.title,
+                author=series.author, description=series.description,
+                chapter_count=len(series.chapter_urls) or None)
+        engine = UnknownSiteDiscoveryEngine(self._fetcher_factory())
+        proposal = engine.discover(url)
+        return IdentitySignals(
+            canonical_url=proposal.canonical_url, title=proposal.work_title or "",
+            author=proposal.author, description=proposal.description,
+            chapter_count=proposal.chapter_count_estimate or None)
 
     def cancel(self, run_id: str) -> Dict[str, Any]:
         svc = self._service_for_run(run_id)

@@ -43,6 +43,24 @@ _REGISTRY = {
             "'Lều chõng' (Ngô Tất Tố, 21 chương), xac minh sau khi sua loi "
             "ro ri UI-chrome MediaWiki (server/scraper/html_extract.py)."),
     ),
+    # Cau truc HTML HOAN TOAN khac vi.wikisource.org (khong phai MediaWiki) —
+    # them de kiem tra Tier 0 tren mot dang site khac, khong chi mot ho.
+    # robots.txt (kiem truoc khi them) cho phep bot chung o duong doc chuong
+    # that (chi chan mot vai duong khong lien quan nhu /vote, cong voi cac
+    # bot AI-training co ten rieng nhu GPTBot/CCBot — HttpFetcher trinh dien
+    # nhu mot bot chung, khong bi cac dong chan rieng do ap dung).
+    "royalroad.com": SiteConfig(
+        domain="royalroad.com",
+        # Ap dung cho BAT KY truyen nao tren royalroad.com, khong rieng mot
+        # ID — da kiem tra khong bat nham lien ket sang truyen KHAC (vd o
+        # khung "de xuat") tren cung trang muc luc.
+        chapter_href_pattern=r"/fiction/\d+/[^/\"]+/chapter/\d+/",
+        title_suffix_to_strip=" | Royal Road",
+        verified_via=(
+            "Router V2 content-ops phase, 2026-08-27 — canary that tren "
+            "'Regis and Charlotte' (14 chương, truyện đã hoàn thành), "
+            "robots.txt xac nhan cho phep truoc khi them."),
+    ),
 }
 
 

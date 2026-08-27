@@ -17,6 +17,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import {
   adminApi,
+  type DiscoveryProposal,
   type ScrapeItemStatus,
   type ScrapeRun,
   type ScrapeRunItem,
@@ -90,6 +91,13 @@ function ScraperPageContent() {
   } | null>(null);
   const [loiXemTruoc, setLoiXemTruoc] = useState("");
   const [dangBatDau, setDangBatDau] = useState(false);
+
+  // -- Story Harvester V3 Phase 2/4: nguon MOI chua duoc cau hinh --
+  // `discoverScrape` tra ve de xuat (khong loi) khi domain chua co
+  // SiteConfig/SiteProfile — operator xem bang chung roi tu quyet dinh
+  // co xac nhan hay khong (xem `handleXacNhanNguonMoi`).
+  const [deXuatNguonMoi, setDeXuatNguonMoi] = useState<DiscoveryProposal | null>(null);
+  const [dangXacNhanNguon, setDangXacNhanNguon] = useState(false);
 
   // -- Run dang duoc chon / xem chi tiet --
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -227,17 +235,47 @@ function ScraperPageContent() {
 
     setDangXemTruoc(true);
     setKetQuaXemTruoc(null);
+    setDeXuatNguonMoi(null);
     setLoiXemTruoc("");
     try {
       const res = await adminApi.discoverScrape(url);
-      setKetQuaXemTruoc(res);
-      toast.ok(`Đã phát hiện: "${res.run.series_title || "Truyện"}"`);
+      if (res.supported) {
+        setKetQuaXemTruoc(res);
+        toast.ok(`Đã phát hiện: "${res.run.series_title || "Truyện"}"`);
+      } else {
+        setDeXuatNguonMoi(res.proposal);
+        toast.ok("Phát hiện nguồn mới — xem đề xuất bên dưới trước khi xác nhận.");
+      }
     } catch (cause) {
       const msg = loiApi(cause, "Không thể xem trước URL này.");
       setLoiXemTruoc(msg);
       toast.error(msg);
     } finally {
       setDangXemTruoc(false);
+    }
+  }
+
+  async function handleXacNhanNguonMoi() {
+    const url = deXuatNguonMoi?.source_url?.trim();
+    if (!url) return;
+
+    setDangXacNhanNguon(true);
+    try {
+      await adminApi.confirmScrapeSource(url);
+      toast.ok("Đã xác nhận nguồn mới — đang xem trước lại để bắt đầu quét.");
+      setDeXuatNguonMoi(null);
+      // Xem truoc LAI sau khi xac nhan — gio domain da co SiteProfile
+      // usable, `discoverScrape` se di duong `supported: true` binh
+      // thuong, dua thang vao luong "Bat dau quet" san co, khong can
+      // duong rieng.
+      const res = await adminApi.discoverScrape(url);
+      if (res.supported) {
+        setKetQuaXemTruoc(res);
+      }
+    } catch (cause) {
+      toast.error(loiApi(cause, "Không thể xác nhận nguồn này."));
+    } finally {
+      setDangXacNhanNguon(false);
     }
   }
 
@@ -411,6 +449,7 @@ function ScraperPageContent() {
                 // Sua URL sau khi xem truoc -> huy xac nhan cu, buoc xem
                 // truoc lai truoc khi duoc bat dau (xem `handleBatDauQuet`).
                 setKetQuaXemTruoc(null);
+                setDeXuatNguonMoi(null);
               }}
               disabled={dangXemTruoc || dangBatDau}
             />
@@ -489,6 +528,75 @@ function ScraperPageContent() {
                 className="btn btn-ghost"
                 disabled={dangBatDau}
                 onClick={() => setKetQuaXemTruoc(null)}
+              >
+                Huỷ
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {deXuatNguonMoi ? (
+          <div className="card stack-2" style={{ background: "rgba(234, 179, 8, 0.06)", borderColor: "#eab308" }}>
+            <div className="row row-spread">
+              <h4 className="section-title">Phát hiện nguồn mới</h4>
+              <span className="tt" style={{ background: "#eab308", color: "#1a1a1a" }}>
+                Độ tin cậy:{" "}
+                {deXuatNguonMoi.confidence === "high" ? "Cao"
+                  : deXuatNguonMoi.confidence === "medium" ? "Trung bình" : "Thấp"}
+              </span>
+            </div>
+            <p className="hint">
+              Đây là trang chưa từng được cấu hình sẵn. Hệ thống đã tự phân tích
+              cấu trúc trang — hãy xem kỹ bằng chứng bên dưới trước khi xác nhận
+              (chưa quét gì, chưa ghi gì).
+            </p>
+            <div className="stat-grid admin-luoi">
+              <div className="stat">
+                <span className="stat-value">{deXuatNguonMoi.work_title || "—"}</span>
+                <span className="stat-label">Tên truyện (đoán)</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{deXuatNguonMoi.author || "—"}</span>
+                <span className="stat-label">Tác giả (đoán)</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{deXuatNguonMoi.chapter_count_estimate}</span>
+                <span className="stat-label">Số chương ước lượng</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">
+                  {deXuatNguonMoi.content_container_candidate || "Chưa xác định"}
+                </span>
+                <span className="stat-label">Vùng nội dung phát hiện</span>
+              </div>
+            </div>
+
+            <div className="stack-1">
+              <strong className="hint">Bằng chứng:</strong>
+              <ul className="hint" style={{ margin: 0, paddingLeft: 20 }}>
+                {deXuatNguonMoi.evidence.map((ly_do, idx) => (
+                  <li key={idx}>{ly_do}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="row">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={dangXacNhanNguon || deXuatNguonMoi.confidence === "low"}
+                onClick={handleXacNhanNguonMoi}
+                title={deXuatNguonMoi.confidence === "low"
+                  ? "Độ tin cậy quá thấp — cần một kỹ sư cấu hình thủ công."
+                  : undefined}
+              >
+                {dangXacNhanNguon ? "Đang xác nhận…" : "Xác nhận nguồn này"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={dangXacNhanNguon}
+                onClick={() => setDeXuatNguonMoi(null)}
               >
                 Huỷ
               </button>

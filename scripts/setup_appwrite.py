@@ -798,6 +798,45 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
         ],
     },
     # ==========================================================================
+    # SiteProfile (Story Harvester V3 Phase 4) — cau hinh domain DA HOC tu
+    # `server/scraper/discovery.py`, khac voi `scrape_runs`/`scrape_run_items`
+    # o tren (do la dieu phoi MOT dot quet; day la kien thuc VE MOT DOMAIN,
+    # ton tai qua nhieu dot quet). Xem `server/scraper/site_profile.py`.
+    #
+    # ROLLBACK: xoa collection nay — khong mat ScrapeRun/du lieu duyet nao,
+    # chi mat cau hinh da hoc; lan quet tiep theo cua domain do se roi ve
+    # kham pha lai tu dau (an toan, chi ton them mot lan discovery).
+    "site_profiles": {
+        "name": "Site Profiles",
+        "attributes": [
+            # `$id` = `domain` truc tiep — MOI domain CHI co MOT profile
+            # dang hoat dong, khong can dinh danh tach rieng (khac
+            # `scrape_runs`, noi mot series co the co nhieu dot qua thoi
+            # gian). Xem docstring `site_profile.py`.
+            ("domain", "string", True, 255),
+            ("status", "enum", True,
+             ["learning", "verified", "degraded", "disabled"]),
+            ("revision", "integer", True, None),
+            ("canonical_pattern", "string", False, 1024),
+            ("index_pattern", "string", False, 1024),
+            ("chapter_pattern", "string", False, 512),
+            ("toc_fingerprint", "string", False, 64),
+            ("content_fingerprint", "string", False, 128),
+            ("pagination_strategy", "string", False, 32),
+            ("fetch_tier", "string", False, 32),
+            ("rate_limit_seconds", "double", False, None),
+            ("last_verified_at", "datetime", False, None),
+            ("last_success_at", "datetime", False, None),
+            ("consecutive_failures", "integer", False, None),
+            ("success_count", "integer", False, None),
+            ("created_at", "datetime", True, None),
+            ("updated_at", "datetime", True, None),
+        ],
+        "indexes": [
+            ("status_idx", "key", ["status"]),
+        ],
+    },
+    # ==========================================================================
     # Animation (V6, overnight Phase 5) — subsystem RIENG, doc lap voi
     # novels/chapters. Xem `server/animation_domain.py` va
     # `server/appwrite_animation_store.py` ve vi sao day KHONG dung chung bang

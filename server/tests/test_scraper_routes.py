@@ -46,9 +46,36 @@ _FAKE_CFG = {
         title_suffix_to_strip=" - Trang Web Giả"),
 }
 
+#: Domain KHAC HOAN TOAN, KHONG co trong `_FAKE_CFG` — dung de kiem tra
+#: nhanh Phase 2 (UnknownSiteDiscoveryEngine) tach biet voi nhanh SiteConfig
+#: da xac minh o tren. `routes-test.example/truyen/thu-nghiem-moi` KHONG
+#: dung duoc cho viec nay: cung domain voi `_FAKE_CFG` nen se roi vao nhanh
+#: da-cau-hinh du duong dan khac.
+_UNKNOWN_BASE = "https://chua-biet-routes.example"
+_UNKNOWN_INDEX = f"""
+<html><head><title>Truyện Chưa Biết</title></head><body>
+<ul>{''.join(f'<li><a href="/truyen/y/chuong-{i}">Chương {i}</a></li>' for i in range(1, 4))}</ul>
+</body></html>
+"""
+_UNKNOWN_CHAPTER = """
+<html><head><title>Chương 1</title></head>
+<body><div class="chapter-content">
+<p>Đoạn văn bản đầu tiên của chương một, đủ dài để vượt ngưỡng tối thiểu
+cho một vùng nội dung hợp lệ trong bộ kiểm tra tích hợp này.</p>
+<p>Đoạn văn bản thứ hai để tăng thêm độ dài, tránh bị coi là quá ngắn so
+với ngưỡng tối thiểu đã đặt ra cho vùng nội dung.</p>
+</div></body></html>
+"""
+_UNKNOWN_PAGES = {
+    f"{_UNKNOWN_BASE}/truyen/y": _UNKNOWN_INDEX,
+    f"{_UNKNOWN_BASE}/truyen/y/chuong-1": _UNKNOWN_CHAPTER,
+    f"{_UNKNOWN_BASE}/truyen/y/chuong-2": _UNKNOWN_CHAPTER,
+    f"{_UNKNOWN_BASE}/truyen/y/chuong-3": _UNKNOWN_CHAPTER,
+}
+
 
 def _fixture_fetcher_factory():
-    return FixtureFetcher(dict(_PAGES))
+    return FixtureFetcher({**_PAGES, **_UNKNOWN_PAGES})
 
 
 class Nen(unittest.TestCase):
@@ -103,12 +130,40 @@ class AuthTest(Nen):
 
 
 class ScraperFlowTest(Nen):
-    def test_domain_chua_ho_tro_tra_400(self):
+    def test_url_khong_tai_duoc_tra_400(self):
         resp = self.client.post(
             "/api/admin/scraper/discover", headers=self.tk_admin,
             json={"url": "https://khong-ho-tro.example/x"})
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("chưa được cấu hình", resp.json()["detail"])
+
+    def test_domain_chua_biet_nhung_co_noi_dung_tra_ve_de_xuat_khong_400(self):
+        resp = self.client.post(
+            "/api/admin/scraper/discover", headers=self.tk_admin,
+            json={"url": f"{_UNKNOWN_BASE}/truyen/y"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertFalse(body["supported"])
+        self.assertTrue(body["new_source_detected"])
+        self.assertIn("proposal", body)
+
+    def test_start_run_tren_domain_chua_xac_nhan_tra_400(self):
+        resp = self.client.post(
+            "/api/admin/scraper/runs", headers=self.tk_admin,
+            json={"url": f"{_UNKNOWN_BASE}/truyen/y"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_confirm_source_roi_start_run_thanh_cong(self):
+        confirm_resp = self.client.post(
+            "/api/admin/scraper/confirm-source", headers=self.tk_admin,
+            json={"url": f"{_UNKNOWN_BASE}/truyen/y"})
+        self.assertEqual(confirm_resp.status_code, 200)
+        self.assertEqual(confirm_resp.json()["profile"]["status"], "learning")
+
+        start_resp = self.client.post(
+            "/api/admin/scraper/runs", headers=self.tk_admin,
+            json={"url": f"{_UNKNOWN_BASE}/truyen/y"})
+        self.assertEqual(start_resp.status_code, 200)
+        self.assertEqual(start_resp.json()["progress"]["estimated_total"], 3)
 
     def test_discover_khong_ghi_gi(self):
         resp = self.client.post(

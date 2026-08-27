@@ -10,8 +10,9 @@ import os
 import unittest
 from unittest.mock import patch
 
-from server.scraper.http_fetcher import FixtureFetcher
+from server.scraper.http_fetcher import FetchError, FixtureFetcher
 from server.scraper.run_state import MockScrapeRunStore, ScrapeRunStatus
+from server.scraper.site_profile import MockSiteProfileStore, ProfileStatus
 from server.scraper.site_registry import SiteConfig
 from server.scraper_ops_service import (
     ScraperOpsService,
@@ -41,21 +42,96 @@ _FAKE_CFG = {
         title_suffix_to_strip=" - Trang Web Giả"),
 }
 
+#: Domain CHUA cau hinh nhung CO NOI DUNG that de UnknownSiteDiscoveryEngine
+#: (Phase 2) kham pha — khac voi "khong-ho-tro.example" (khong co trang
+#: fixture nao, mo phong URL SAI/khong phan hoi).
+_UNKNOWN_BASE = "https://chua-biet.example"
+_UNKNOWN_INDEX = f"""
+<html><head><title>Truyện Chưa Biết</title>
+<meta property="og:title" content="Truyện Chưa Biết">
+</head><body>
+<ul>
+{''.join(f'<li><a href="/truyen/x/chuong-{i}">Chương {i}</a></li>' for i in range(1, 6))}
+</ul>
+</body></html>
+"""
+_UNKNOWN_CHAPTER = """
+<html><head><title>Chương 1</title></head>
+<body><div class="chapter-content">
+<p>Đoạn văn bản đầu tiên của chương một, đủ dài để vượt ngưỡng tối thiểu
+cho một vùng nội dung hợp lệ trong bộ kiểm tra tích hợp này.</p>
+<p>Đoạn văn bản thứ hai để tăng thêm độ dài, tránh bị coi là quá ngắn so
+với ngưỡng tối thiểu đã đặt ra cho vùng nội dung.</p>
+</div></body></html>
+"""
+_UNKNOWN_PAGES = {
+    f"{_UNKNOWN_BASE}/truyen/x": _UNKNOWN_INDEX,
+    f"{_UNKNOWN_BASE}/truyen/x/chuong-1": _UNKNOWN_CHAPTER,
+    f"{_UNKNOWN_BASE}/truyen/x/chuong-2": _UNKNOWN_CHAPTER,
+    f"{_UNKNOWN_BASE}/truyen/x/chuong-3": _UNKNOWN_CHAPTER,
+    f"{_UNKNOWN_BASE}/truyen/x/chuong-4": _UNKNOWN_CHAPTER,
+    f"{_UNKNOWN_BASE}/truyen/x/chuong-5": _UNKNOWN_CHAPTER,
+}
+
 
 def _fixture_fetcher_factory():
-    return FixtureFetcher(dict(_PAGES))
+    return FixtureFetcher({**_PAGES, **_UNKNOWN_PAGES})
 
 
-def _svc(store=None) -> ScraperOpsService:
+def _svc(store=None, profile_store=None) -> ScraperOpsService:
     return ScraperOpsService(store or MockScrapeRunStore(),
-                             fetcher_factory=_fixture_fetcher_factory)
+                             fetcher_factory=_fixture_fetcher_factory,
+                             profile_store=profile_store)
 
 
 class UnsupportedSiteTest(unittest.TestCase):
-    def test_domain_chua_cau_hinh_bao_loi_ro_rang(self):
+    def test_url_khong_tai_duoc_nem_FetchError(self):
+        """URL SAI/khong phan hoi (khong co trong fixture) — khac voi domain
+        CHUA cau hinh nhung CO noi dung that (xem UnknownSiteDiscoveryTest
+        duoi day, hanh vi Phase 2 moi: tra ve de xuat thay vi loi)."""
+        svc = _svc()
+        with self.assertRaises(FetchError):
+            svc.discover("https://khong-ho-tro.example/x")
+
+    def test_start_or_continue_tren_domain_chua_xac_nhan_van_bi_tu_choi(self):
+        """`discover()` co the tra ve de xuat cho domain la, nhung
+        `start_or_continue()` PHAI van tu choi cho den khi operator xac
+        nhan qua `confirm_unknown_source()` — khong duoc bo qua buoc duyet."""
         svc = _svc()
         with self.assertRaises(UnsupportedSiteError):
-            svc.discover("https://khong-ho-tro.example/x")
+            svc.start_or_continue(f"{_UNKNOWN_BASE}/truyen/x")
+
+
+class UnknownSiteDiscoveryTest(unittest.TestCase):
+    def test_discover_tren_domain_chua_biet_tra_ve_de_xuat_khong_bao_loi(self):
+        svc = _svc()
+        result = svc.discover(f"{_UNKNOWN_BASE}/truyen/x")
+
+        self.assertFalse(result["supported"])
+        self.assertTrue(result["new_source_detected"])
+        self.assertEqual(result["proposal"].chapter_count_estimate, 5)
+        self.assertIsNotNone(result["proposal"].chapter_url_pattern)
+
+
+class ConfirmUnknownSourceTest(unittest.TestCase):
+    def test_xac_nhan_luu_SiteProfile_va_start_or_continue_hoat_dong(self):
+        profile_store = MockSiteProfileStore()
+        svc = _svc(profile_store=profile_store)
+
+        confirmed = svc.confirm_unknown_source(f"{_UNKNOWN_BASE}/truyen/x")
+        self.assertEqual(confirmed["profile"].status, ProfileStatus.LEARNING)
+        self.assertEqual(profile_store.get("chua-biet.example").status,
+                         ProfileStatus.LEARNING)
+
+        started = svc.start_or_continue(f"{_UNKNOWN_BASE}/truyen/x")
+        self.assertEqual(started["progress"]["estimated_total"], 5)
+
+    def test_domain_da_co_site_config_tu_choi_xac_nhan(self):
+        profile_store = MockSiteProfileStore()
+        svc = _svc(profile_store=profile_store)
+        with patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG):
+            with self.assertRaises(ValueError):
+                svc.confirm_unknown_source(f"{_BASE}/truyen/thu-nghiem")
 
 
 class DiscoverAndRunTest(unittest.TestCase):

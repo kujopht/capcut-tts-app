@@ -81,6 +81,8 @@ from server.appwrite_animation_store import build_animation_store
 from server.appwrite_bulk_import_store import build_bulk_import_store
 from server.appwrite_trusted_source_store import build_trusted_source_store
 from server.appwrite_scrape_run_store import build_scrape_run_store
+from server.appwrite_site_profile_store import build_site_profile_store
+from server.scraper.http_fetcher import FetchError
 from server.scraper.site_registry import ScopeExtractionError
 from server.scraper_ops_service import (
     ScraperOpsService,
@@ -287,7 +289,12 @@ bulk_import_store = build_bulk_import_store(settings)
 #: moi kho khac. CHI la trang thai hang doi duyet — khong tu ghi
 #: Novel/Chapter nao. Xem `server/scraper/bulk.py`/`server/appwrite_scrape_run_store.py`.
 scrape_run_store = build_scrape_run_store(settings)
-scraper_ops = ScraperOpsService(scrape_run_store)
+#: Kho SiteProfile (Story Harvester V3 Phase 4) — cau hinh domain DA HOC tu
+#: `discovery.py`, RIENG voi `scrape_run_store` (kien thuc VE MOT DOMAIN,
+#: ton tai qua nhieu dot quet, khac voi dieu phoi MOT dot). Xem
+#: `server/scraper/site_profile.py`/`server/appwrite_site_profile_store.py`.
+site_profile_store = build_site_profile_store(settings)
+scraper_ops = ScraperOpsService(scrape_run_store, profile_store=site_profile_store)
 
 #: Tang dich vu Trusted Video Sources (Phase 5) — noi YouTube Data API,
 #: `video_classifier`/`episode_parser`, `trusted_source_store` va
@@ -5239,10 +5246,14 @@ def _quet_hang_loat(fn, *args, **kwargs):
     `ScopeExtractionError` (domain co ho tro nhung URL khong khop hinh dang
     mong doi, vd thieu ID truyen) deu la loi CUA OPERATOR (400, khong phai
     500), `ScrapeRunNotFoundError` (404), cac loi `ValueError` da co san tu
-    `ScrapeRunService` (vd huy mot dot da ket thuc) cung la 400."""
+    `ScrapeRunService` (vd huy mot dot da ket thuc) cung la 400.
+    `FetchError` (Phase 2: `UnknownSiteDiscoveryEngine`/adapter khong tai
+    duoc trang muc luc — sai URL, site khong phan hoi, robots.txt tu choi,
+    ...) cung la loi CUA OPERATOR ve URL da dan vao, khong phai loi may
+    chu — 400, khong phai 500."""
     try:
         return fn(*args, **kwargs)
-    except (UnsupportedSiteError, ScopeExtractionError) as exc:
+    except (UnsupportedSiteError, ScopeExtractionError, FetchError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except ScrapeRunNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
@@ -6202,8 +6213,23 @@ class ScraperSkipIn(BaseModel):
 def admin_scraper_discover(
     payload: ScraperDiscoverIn, admin: Profile = Depends(admin_or_owner_profile),
 ) -> Dict[str, Any]:
-    """Xem truoc — KHONG ghi gi. Buoc dau tien cua luong 'paste URL'."""
+    """Xem truoc — KHONG ghi gi. Buoc dau tien cua luong 'paste URL'. Neu
+    domain CHUA co cau hinh, tra ve `{"supported": false, "new_source_detected":
+    true, "proposal": {...}}` (Phase 2) thay vi loi — operator xem de xuat
+    roi tu quyet dinh co goi `/confirm-source` hay khong."""
     return _quet_hang_loat(scraper_ops.discover, payload.url)
+
+
+@app.post("/api/admin/scraper/confirm-source")
+def admin_scraper_confirm_source(
+    payload: ScraperDiscoverIn, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Operator xac nhan mot de xuat 'NEW SOURCE DETECTED' tu `/discover`
+    — luu thanh `SiteProfile` (Phase 4), cho phep `/runs` dung domain nay
+    tu lan goi sau. Tu choi voi 400 neu do tin cay LOW hoac domain da co
+    cau hinh xac minh san (site_registry) — khong can/khong nen xac nhan
+    lai qua discovery."""
+    return _quet_hang_loat(scraper_ops.confirm_unknown_source, payload.url)
 
 
 @app.post("/api/admin/scraper/runs")

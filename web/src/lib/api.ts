@@ -1805,6 +1805,46 @@ export interface ScrapeRunItem {
   updated_at: string;
 }
 
+// -- Story Harvester V3 Phase 2/4: kham pha site chua cau hinh --------------
+// Xem `server/scraper/discovery.py`/`server/scraper/site_profile.py`.
+
+export type SourceConfidence = "high" | "medium" | "low";
+export type PaginationStrategy = "none" | "next_prev" | "numbered_pages";
+
+/** De xuat tra ve boi `/api/admin/scraper/discover` khi domain CHUA co
+    cau hinh — hien thi cho operator nhu "NEW SOURCE DETECTED" truoc khi
+    cho phep xac nhan qua `confirmScrapeSource`. */
+export interface DiscoveryProposal {
+  source_url: string;
+  canonical_url: string;
+  work_title: string | null;
+  author: string | null;
+  description: string | null;
+  index_url: string;
+  chapter_count_estimate: number;
+  chapter_url_pattern: string | null;
+  content_container_candidate: string | null;
+  pagination_strategy: PaginationStrategy;
+  fetch_tier: string;
+  confidence: SourceConfidence;
+  evidence: string[];
+  sample_chapter_urls: string[];
+}
+
+export type SiteProfileStatus = "learning" | "verified" | "degraded" | "disabled";
+
+export interface SiteProfile {
+  domain: string;
+  status: SiteProfileStatus;
+  revision: number;
+  chapter_pattern: string;
+  content_fingerprint: string;
+  pagination_strategy: PaginationStrategy;
+  fetch_tier: string;
+  consecutive_failures: number;
+  success_count: number;
+}
+
 /** Auto-Ingestion Phase 4 — suc khoe tong hop MOT TrustedSource, xem
     docstring `compute_source_health` phia server. */
 export type SourceHealth = "healthy" | "degraded" | "action_required" | "disabled";
@@ -2416,11 +2456,23 @@ export const adminApi = {
   // -- Universal Story Scraper (Router V2 content-ops phase) --------------
   // paste URL -> discoverScrape (xem truoc) -> startScrapeRun -> driveScrapeRun
   // (goi lap lai cho den khi status la trang thai KET) -> getScrapeRun/duyet
-  // tung muc. 400 = domain chua duoc cau hinh (xem `server/scraper/site_registry.py`).
+  // tung muc. Story Harvester V3 Phase 2/4: domain CHUA cau hinh khong con
+  // tra 400 tu discover() — tra `supported: false, new_source_detected: true,
+  // proposal: {...}`; operator xac nhan qua `confirmScrapeSource` truoc khi
+  // `startScrapeRun` (van 400 cho den khi xac nhan).
 
   discoverScrape: (url: string) =>
-    request<{ run: ScrapeRun; supported: boolean }>(
+    request<
+      | { run: ScrapeRun; supported: true }
+      | { supported: false; new_source_detected: true; proposal: DiscoveryProposal }
+    >(
       "/api/admin/scraper/discover",
+      { method: "POST", body: JSON.stringify({ url }) },
+    ),
+
+  confirmScrapeSource: (url: string) =>
+    request<{ profile: SiteProfile; proposal: DiscoveryProposal }>(
+      "/api/admin/scraper/confirm-source",
       { method: "POST", body: JSON.stringify({ url }) },
     ),
 

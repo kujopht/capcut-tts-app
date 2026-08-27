@@ -243,6 +243,59 @@ future session can call manually (or a hook can call, if one is added
 later) when it wants to record a data point; not a background service,
 not a database.
 
+## Lessons from first real use (2026-08-27, product phase 2)
+
+Real engineering work — not a benchmark pass — surfaced two genuine
+process issues worth recording. Neither changes the tier/model policy
+itself (Haiku/Sonnet/Opus routing all performed as expected, see the
+burn-in report), both are about *how agents were run*, not *which model*.
+
+**Project-local `.claude/agents/` definitions did not load in the
+running session.** All 7 custom subagents (`explorer`, `builder`, etc.)
+were unavailable via the `Agent` tool's `subagent_type` in the same
+session that created them — Claude Code apparently reads
+`.claude/agents/` at session start, not on a live filesystem watch.
+Worked around by using the built-in `Explore`/`general-purpose` agent
+types with an explicit `model` override, which achieves the same tier
+routing without the named-agent convenience (system-prompt text, tool
+restrictions, `maxTurns` caps — none of that applied without the real
+named agent). Unverified whether a fresh session actually picks the
+custom agents up; that's the natural next check, not done here since it
+requires restarting the session that would be doing the checking.
+
+**Concurrent agents sharing one working tree with the orchestrating
+session's own `git checkout`/`git stash` is a real, if recoverable,
+hazard.** With three Sonnet builders running in parallel and the parent
+session simultaneously creating/switching/rebasing feature branches for
+already-finished work, one agent's in-progress edits appeared to
+"disappear" mid-task (later traced to the parent session switching the
+shared working directory to a branch that didn't have that agent's
+target file yet) and cost real time to diagnose afterward. Nothing was
+actually lost — the agent had written to the same on-disk path the
+whole time, and `git checkout` doesn't touch untracked files unless
+they'd be overwritten by tracked content, so backing the file up and
+re-checking out cleanly recovered it — but it was a genuine "what
+happened to my work" scare, not a benchmark nitpick. **Recommendation
+for next time:** when the parent session needs to keep branching/
+switching while writer agents are still active, either (a) hold off on
+`git checkout`/`git stash` until those agents report done, or (b) pass
+`isolation: "worktree"` for those specific dispatches so each agent gets
+its own working directory and the parent session's git operations can't
+cross paths with it. The router policy above deliberately leaves
+`isolation` unset by default (real setup cost, only worth it for
+genuinely parallel writers) — this experience adds a second trigger for
+turning it on: not just "multiple agents writing the same files," but
+"the orchestrator itself needs to keep moving branches while agents are
+still working."
+
+**One CLI limitation found, not a bug:** `codex review` does not accept
+a custom prompt combined with `--commit`/`--base` (they're mutually
+exclusive modes) — use `--commit <sha>` alone for a full default review,
+or drop the target flag and let it review the current working-tree diff
+with custom instructions. Worked around by using `--commit` alone; still
+produced a genuinely valuable independent review (see the burn-in
+report) despite not being able to steer it toward one specific concern.
+
 ## Persistence
 
 Stable, project-specific policy lives here (`docs/AI_ROUTER.md`) and in

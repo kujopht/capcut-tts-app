@@ -6249,6 +6249,17 @@ def admin_scraper_list_runs(
     return _quet_hang_loat(scraper_ops.list_runs)
 
 
+@app.get("/api/admin/scraper/runs/{run_id}/check-updates")
+def admin_scraper_check_updates(
+    run_id: str, admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Phase 9 (Story Harvester V3) — MOT LAN tai trang muc luc (KHONG tai
+    chuong nao) de bao co chuong moi/da mat hay khong so voi lan quet
+    truoc. KHONG ghi gi; operator tu quyet dinh co goi lai
+    `/runs` (start_or_continue) hay khong sau khi xem ket qua."""
+    return _quet_hang_loat(scraper_ops.check_for_updates, run_id)
+
+
 @app.get("/api/admin/scraper/runs/{run_id}")
 def admin_scraper_view_run(
     run_id: str, limit: int = 50, offset: int = 0, status_loc: str = Query("", alias="status"),

@@ -66,6 +66,18 @@ class FetchResult:
     status_code: int
     content_type: str
     text: str
+    #: Header `ETag`/`Last-Modified` cua PHAN HOI (rong neu nguon khong gui)
+    #: — luu lai de LAN SAU goi `fetch(..., if_none_match=...)` (Story
+    #: Harvester V3 Phase 9: engine cap nhat gia tang). Rong KHONG co nghia
+    #: la loi, chi la nguon khong ho tro validator nay.
+    etag: str = ""
+    last_modified: str = ""
+    #: `True` khi server tra 304 (noi dung KHONG doi so voi validator da gui
+    #: qua `if_none_match`/`if_modified_since`) — `text` RONG trong truong
+    #: hop nay (than 304 luon rong theo giao thuc HTTP, khong phai loi parse).
+    #: Noi goi PHAI kiem co nay TRUOC khi doc `text`, khong duoc coi mot
+    #: `FetchResult` rong la "trang rong that su".
+    not_modified: bool = False
 
 
 def _host_key(url: str) -> str:
@@ -164,16 +176,30 @@ class HttpFetcher:
         parser.parse(resp.text.splitlines())
         return parser
 
-    def _mot_lan_goi(self, client: httpx.Client, url: str) -> httpx.Response:
+    def _mot_lan_goi(self, client: httpx.Client, url: str,
+                     headers: Dict[str, str]) -> httpx.Response:
         try:
-            return client.get(url)
+            return client.get(url, headers=headers or None)
         except httpx.TimeoutException as exc:
             raise FetchError(f"Hết thời gian tải {url}") from exc
         except httpx.HTTPError as exc:
             raise FetchError(f"Không tải được {url}: {exc}") from exc
 
-    def fetch(self, url: str) -> FetchResult:
+    def fetch(self, url: str, *, if_none_match: Optional[str] = None,
+             if_modified_since: Optional[str] = None) -> FetchResult:
+        """`if_none_match`/`if_modified_since`: validator luu lai tu MOT
+        lan `fetch()` THANH CONG truoc do cua CUNG url (xem
+        `FetchResult.etag`/`last_modified`) — khi nguon tra 304, `fetch()`
+        tra ve `FetchResult(not_modified=True, text="")` NGAY, khong ne
+        than trong ("Nghia La Khong Doi", Phase 9 cua Story Harvester V3:
+        engine cap nhat gia tang dung dieu nay de biet MOT chuong da xong
+        co can tai lai hay khong ma KHONG can tai lai toan bo noi dung)."""
         self._kiem_tra_robots(url)
+        headers: Dict[str, str] = {}
+        if if_none_match:
+            headers["If-None-Match"] = if_none_match
+        if if_modified_since:
+            headers["If-Modified-Since"] = if_modified_since
 
         client = self._http_client()
         try:
@@ -182,15 +208,16 @@ class HttpFetcher:
             for lan in range(self._max_retries + 1):
                 self._cho_gioi_han_toc_do(url)
                 try:
-                    resp = self._mot_lan_goi(client, url)
+                    resp = self._mot_lan_goi(client, url, headers)
                 except FetchError as exc:
                     # Loi MANG (timeout/ket noi) — luon dang thu thu lai.
                     loi_cuoi = exc
                     resp = None
                 else:
                     if resp.status_code < 500:
-                        # Thanh cong HOAC loi phia CLIENT (4xx) — 4xx se
-                        # KHONG tu khac di neu goi lai y het, dung thu.
+                        # Thanh cong (bao gom 304) HOAC loi phia CLIENT
+                        # (4xx) — 4xx se KHONG tu khac di neu goi lai y het,
+                        # dung thu.
                         break
                     loi_cuoi = FetchError(f"{url} trả về HTTP {resp.status_code}")
                 if lan < self._max_retries:
@@ -209,25 +236,43 @@ class HttpFetcher:
             final_url=str(resp.url),
             status_code=resp.status_code,
             content_type=resp.headers.get("content-type", ""),
-            text=resp.text,
+            text="" if resp.status_code == 304 else resp.text,
+            etag=resp.headers.get("etag", ""),
+            last_modified=resp.headers.get("last-modified", ""),
+            not_modified=resp.status_code == 304,
         )
 
 
 class FixtureFetcher:
     """Fetcher GIA cho test — doc tu mot dict `{url: html}` cuc bo thay vi
     goi mang. `final_url` mac dinh CHINH LA `url` (khong mo phong redirect)
-    tru khi duoc chi dinh rieng trong `redirects`."""
+    tru khi duoc chi dinh rieng trong `redirects`.
 
-    def __init__(self, pages: dict, *, redirects: Optional[dict] = None):
+    `etags`: mo phong validator `ETag` (Phase 9 cua Story Harvester V3) —
+    khi `if_none_match` goi vao KHOP gia tri da khai bao cho `url` trong
+    dict nay, tra ve `not_modified=True`/`text=""` (mo phong 304) thay vi
+    noi dung that. RONG (mac dinh) = khong mo phong ETag nao, moi lan goi
+    deu tra noi dung day du (hanh vi CU, khong doi cho test hien co)."""
+
+    def __init__(self, pages: dict, *, redirects: Optional[dict] = None,
+                 etags: Optional[dict] = None):
         self._pages = pages
         self._redirects = redirects or {}
+        self._etags = etags or {}
 
-    def fetch(self, url: str) -> FetchResult:
+    def fetch(self, url: str, *, if_none_match: Optional[str] = None,
+             if_modified_since: Optional[str] = None) -> FetchResult:
         if url not in self._pages:
             raise FetchError(f"Fixture không có trang: {url}")
+        etag = self._etags.get(url, "")
+        if if_none_match and etag and if_none_match == etag:
+            return FetchResult(
+                final_url=self._redirects.get(url, url), status_code=304,
+                content_type="", text="", etag=etag, not_modified=True)
         return FetchResult(
             final_url=self._redirects.get(url, url),
             status_code=200,
             content_type="text/html; charset=utf-8",
             text=self._pages[url],
+            etag=etag,
         )

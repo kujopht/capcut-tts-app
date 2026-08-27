@@ -26,6 +26,7 @@ from server.scraper.discovery import (
     SourceConfidence, UnknownSiteDiscoveryEngine,
 )
 from server.scraper.http_fetcher import HttpFetcher
+from server.scraper.incremental import diff_toc
 from server.scraper.pipeline import StoryIngestionPipeline
 from server.scraper.run_state import run_fingerprint, run_id_from_fingerprint
 from server.scraper.site_profile import (
@@ -178,6 +179,30 @@ class ScraperOpsService:
         svc = self._service_for_new(url)
         run = svc.plan_run(url, chapter_limit=chapter_limit)
         return {"run": run, "progress": run.progress()}
+
+    def check_for_updates(self, run_id: str) -> Dict[str, Any]:
+        """Phase 9 (Story Harvester V3): MOT LAN tai trang muc luc (KHONG
+        tai chuong nao) de biet series nay co chuong MOI/da MAT so voi lan
+        quet truoc hay khong — dung cho operator quyet dinh co dang
+        `start_or_continue` lai hay khong, KHONG tu dong ghi gi (xem
+        `incremental.diff_toc`). Khac `drive()`: khong xu ly muc PENDING
+        nao, chi so sanh URL."""
+        run = self._store.get_run(run_id)
+        if run is None:
+            raise ScrapeRunNotFoundError(f"Không tìm thấy đợt quét: {run_id}")
+        adapter = self._adapter_for_url(run.source_url)
+        state = rebuild_state(self._store, run_id)
+        series = adapter.discover_series(run.source_url)
+        chapter_urls = adapter.list_chapters(series)
+        diff = diff_toc(state, chapter_urls)
+        return {
+            "run_id": run_id,
+            "new_count": len(diff.new_urls),
+            "removed_count": len(diff.removed_urls),
+            "unchanged_count": diff.unchanged_count,
+            "has_changes": diff.has_changes,
+            "removed_urls": diff.removed_urls,
+        }
 
     def drive(self, run_id: str, *, max_chapters: Optional[int] = None) -> Dict[str, Any]:
         svc = self._service_for_run(run_id)

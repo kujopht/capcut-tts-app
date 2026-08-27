@@ -134,6 +134,90 @@ class ConfirmUnknownSourceTest(unittest.TestCase):
                 svc.confirm_unknown_source(f"{_BASE}/truyen/thu-nghiem")
 
 
+class CheckForUpdatesTest(unittest.TestCase):
+    """Phase 9: `check_for_updates` — MOT lan tai trang muc luc, so sanh
+    voi state da luu, KHONG tai lai chuong nao da xong."""
+
+    _UPDATE_BASE = "https://cap-nhat.example"
+    _CFG = {
+        "cap-nhat.example": SiteConfig(
+            domain="cap-nhat.example", chapter_href_pattern=r"/chuong-\d+"),
+    }
+
+    def _chapter_html(self, so: int) -> str:
+        return f"<html><head><title>Chương {so}</title></head><body>nội dung {so}</body></html>"
+
+    def _index_html(self, *so_chuong: int) -> str:
+        links = "".join(
+            f'<li><a href="/truyen/z/chuong-{i}">Chương {i}</a></li>' for i in so_chuong)
+        return f"<html><head><title>Truyện Cập Nhật</title></head><body><ul>{links}</ul></body></html>"
+
+    def _pages(self, *so_chuong: int) -> dict:
+        pages = {f"{self._UPDATE_BASE}/truyen/z": self._index_html(*so_chuong)}
+        for i in so_chuong:
+            pages[f"{self._UPDATE_BASE}/truyen/z/chuong-{i}"] = self._chapter_html(i)
+        return pages
+
+    def test_khong_gi_doi_thi_khong_co_thay_doi(self):
+        pages = self._pages(1, 2, 3)
+        store = MockScrapeRunStore()
+        with patch.dict("server.scraper.site_registry._REGISTRY", self._CFG):
+            svc = ScraperOpsService(store, fetcher_factory=lambda: FixtureFetcher(dict(pages)))
+            started = svc.start_or_continue(f"{self._UPDATE_BASE}/truyen/z")
+            run_id = started["run"].run_id
+            svc.drive(run_id)
+
+            result = svc.check_for_updates(run_id)
+
+        self.assertFalse(result["has_changes"])
+        self.assertEqual(result["new_count"], 0)
+        self.assertEqual(result["removed_count"], 0)
+        self.assertEqual(result["unchanged_count"], 3)
+
+    def test_phat_hien_chuong_moi_va_chuong_bien_mat(self):
+        pages = self._pages(1, 2, 3)
+        store = MockScrapeRunStore()
+        with patch.dict("server.scraper.site_registry._REGISTRY", self._CFG):
+            svc = ScraperOpsService(store, fetcher_factory=lambda: FixtureFetcher(dict(pages)))
+            started = svc.start_or_continue(f"{self._UPDATE_BASE}/truyen/z")
+            run_id = started["run"].run_id
+            svc.drive(run_id)
+
+            # Nguon doi: chuong 2 bien mat, chuong 4 la chuong moi.
+            pages.clear()
+            pages.update(self._pages(1, 3, 4))
+
+            result = svc.check_for_updates(run_id)
+
+        self.assertTrue(result["has_changes"])
+        self.assertEqual(result["new_count"], 1)
+        self.assertEqual(result["removed_count"], 1)
+        self.assertEqual(result["unchanged_count"], 2)
+        self.assertIn(f"{self._UPDATE_BASE}/truyen/z/chuong-2", result["removed_urls"])
+
+    def test_check_for_updates_KHONG_tao_muc_moi_nao(self):
+        pages = self._pages(1, 2, 3)
+        store = MockScrapeRunStore()
+        with patch.dict("server.scraper.site_registry._REGISTRY", self._CFG):
+            svc = ScraperOpsService(store, fetcher_factory=lambda: FixtureFetcher(dict(pages)))
+            started = svc.start_or_continue(f"{self._UPDATE_BASE}/truyen/z")
+            run_id = started["run"].run_id
+            svc.drive(run_id)
+            so_muc_truoc = len(store.list_items(run_id, limit=None))
+
+            pages.clear()
+            pages.update(self._pages(1, 2, 3, 4))
+            svc.check_for_updates(run_id)
+
+            so_muc_sau = len(store.list_items(run_id, limit=None))
+        self.assertEqual(so_muc_truoc, so_muc_sau, "check_for_updates() không được ghi ScrapeRunItem nào")
+
+    def test_run_khong_ton_tai_nem_ScrapeRunNotFoundError(self):
+        svc = _svc()
+        with self.assertRaises(ScrapeRunNotFoundError):
+            svc.check_for_updates("scr_khong-ton-tai")
+
+
 class DiscoverAndRunTest(unittest.TestCase):
     @patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG)
     def test_discover_xem_truoc_khong_ghi_gi(self):

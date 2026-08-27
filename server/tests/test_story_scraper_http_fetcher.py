@@ -213,5 +213,63 @@ class RobotsTest(unittest.TestCase):
         self.assertEqual(ket_qua.text, "van doc duoc vi da tat kiem tra")
 
 
+class ConditionalGetTest(unittest.TestCase):
+    """Story Harvester V3 Phase 9: `If-None-Match`/`If-Modified-Since` —
+    engine cap nhat gia tang dung day de tranh tai lai toan bo noi dung mot
+    chuong da biet KHI nguon xac nhan (304) van la noi dung cu."""
+
+    def test_lan_dau_khong_gui_header_dieu_kien_va_luu_lai_etag(self):
+        nhan_headers = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nhan_headers.append(dict(request.headers))
+            return httpx.Response(200, text="noi dung", headers={"ETag": '"v1"'})
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1")
+
+        self.assertNotIn("if-none-match", nhan_headers[0])
+        self.assertEqual(ket_qua.etag, '"v1"')
+        self.assertFalse(ket_qua.not_modified)
+        self.assertEqual(ket_qua.text, "noi dung")
+
+    def test_gui_if_none_match_khi_duoc_tiem(self):
+        nhan_headers = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nhan_headers.append(dict(request.headers))
+            return httpx.Response(304, headers={"ETag": '"v1"'})
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1", if_none_match='"v1"')
+
+        self.assertEqual(nhan_headers[0].get("if-none-match"), '"v1"')
+        self.assertTrue(ket_qua.not_modified)
+        self.assertEqual(ket_qua.text, "", "thân 304 luôn rỗng, không phải lỗi parse")
+        self.assertEqual(ket_qua.status_code, 304)
+
+    def test_304_khong_bi_thu_lai_nhu_loi(self):
+        so_lan_goi = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan_goi.append(1)
+            return httpx.Response(304)
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=2)
+        fetcher.fetch(f"{_BASE}/chuong-1", if_none_match='"v1"')
+        self.assertEqual(len(so_lan_goi), 1, "304 la thanh cong, khong duoc thu lai")
+
+    def test_noi_dung_doi_tra_ve_200_voi_etag_moi(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="nội dung MỚI", headers={"ETag": '"v2"'})
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1", if_none_match='"v1"')
+
+        self.assertFalse(ket_qua.not_modified)
+        self.assertEqual(ket_qua.etag, '"v2"')
+        self.assertEqual(ket_qua.text, "nội dung MỚI")
+
+
 if __name__ == "__main__":
     unittest.main()

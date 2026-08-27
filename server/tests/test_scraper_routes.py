@@ -194,6 +194,16 @@ class ScraperFlowTest(Nen):
         listed = self.client.get("/api/admin/scraper/runs", headers=self.tk_admin).json()
         self.assertEqual(len(listed["runs"]), 1)
 
+        checked = self.client.get(
+            f"/api/admin/scraper/runs/{run_id}/check-updates", headers=self.tk_admin).json()
+        self.assertFalse(checked["has_changes"])
+        self.assertEqual(checked["unchanged_count"], 3)
+
+    def test_check_updates_run_khong_ton_tai_tra_404(self):
+        resp = self.client.get(
+            "/api/admin/scraper/runs/scr_khong_ton_tai/check-updates", headers=self.tk_admin)
+        self.assertEqual(resp.status_code, 404)
+
     def test_view_run_khong_ton_tai_tra_404(self):
         resp = self.client.get(
             "/api/admin/scraper/runs/scr_khong_ton_tai", headers=self.tk_admin)

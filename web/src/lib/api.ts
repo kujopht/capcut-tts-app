@@ -2488,6 +2488,18 @@ export const adminApi = {
       "/api/admin/scraper/runs",
     ),
 
+  /** Phase 9 (Story Harvester V3) — MOT lan tai trang muc luc (khong tai
+      chuong nao) de biet co chuong moi/da mat hay khong. Khong ghi gi. */
+  checkScrapeUpdates: (runId: string) =>
+    request<{
+      run_id: string;
+      new_count: number;
+      removed_count: number;
+      unchanged_count: number;
+      has_changes: boolean;
+      removed_urls: string[];
+    }>(`/api/admin/scraper/runs/${encodeURIComponent(runId)}/check-updates`),
+
   getScrapeRun: (
     runId: string, opts: { limit?: number; offset?: number; status?: ScrapeItemStatus } = {},
   ) => {

@@ -152,6 +152,16 @@ function ScraperPageContent() {
   const [dangHuyRun, setDangHuyRun] = useState(false);
   const [hoiHuyRun, setHoiHuyRun] = useState(false);
 
+  // -- Story Harvester V3 Phase 9: kiem tra cap nhat (khong tai lai chuong) --
+  const [dangKiemTraCapNhat, setDangKiemTraCapNhat] = useState(false);
+  const [ketQuaCapNhat, setKetQuaCapNhat] = useState<{
+    new_count: number;
+    removed_count: number;
+    unchanged_count: number;
+    has_changes: boolean;
+    removed_urls: string[];
+  } | null>(null);
+
   // -- Thao tac tren tung dong --
   const [dangXuLyItemId, setDangXuLyItemId] = useState<string | null>(null);
   const [hoiBoQuaItem, setHoiBoQuaItem] = useState<ScrapeRunItem | null>(null);
@@ -323,6 +333,23 @@ function ScraperPageContent() {
       toast.error(loiApi(cause, "Không thể tiếp tục quét."));
     } finally {
       setDangDrive(false);
+    }
+  }
+
+  async function handleKiemTraCapNhat() {
+    if (!activeRunId) return;
+    setDangKiemTraCapNhat(true);
+    setKetQuaCapNhat(null);
+    try {
+      const res = await adminApi.checkScrapeUpdates(activeRunId);
+      setKetQuaCapNhat(res);
+      toast.ok(res.has_changes
+        ? `Phát hiện thay đổi: ${res.new_count} chương mới, ${res.removed_count} chương biến mất.`
+        : "Không có thay đổi so với lần quét trước.");
+    } catch (cause) {
+      toast.error(loiApi(cause, "Không thể kiểm tra cập nhật."));
+    } finally {
+      setDangKiemTraCapNhat(false);
     }
   }
 
@@ -733,6 +760,16 @@ function ScraperPageContent() {
                   >
                     Làm mới
                   </button>
+
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    disabled={dangKiemTraCapNhat}
+                    onClick={handleKiemTraCapNhat}
+                    title="Tải lại trang mục lục để xem có chương mới/đã mất hay không — không tải lại chương nào"
+                  >
+                    {dangKiemTraCapNhat ? "Đang kiểm tra…" : "Kiểm tra cập nhật"}
+                  </button>
                 </div>
 
                 {(activeRun.status === "running" || activeRun.status === "planning") ? (
@@ -746,6 +783,31 @@ function ScraperPageContent() {
                   </button>
                 ) : null}
               </div>
+
+              {ketQuaCapNhat ? (
+                <div
+                  className="card stack-1"
+                  style={{
+                    background: ketQuaCapNhat.has_changes
+                      ? "rgba(234, 179, 8, 0.06)" : "rgba(34, 197, 94, 0.06)",
+                  }}
+                >
+                  <strong>
+                    {ketQuaCapNhat.has_changes
+                      ? "Nguồn có thay đổi kể từ lần quét trước:"
+                      : "Không có thay đổi kể từ lần quét trước."}
+                  </strong>
+                  <p className="hint">
+                    {ketQuaCapNhat.new_count} chương mới · {ketQuaCapNhat.removed_count} chương
+                    biến mất · {ketQuaCapNhat.unchanged_count} chương không đổi.
+                  </p>
+                  {ketQuaCapNhat.new_count > 0 ? (
+                    <p className="hint">
+                      Bấm &quot;Tiếp tục quét&quot; để nhập các chương mới.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               {/* Khoi 3: Bang danh sach chuong duyet */}
               <div className="stack-2" style={{ marginTop: "1rem" }}>

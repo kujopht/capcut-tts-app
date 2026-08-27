@@ -110,6 +110,15 @@ class ScrapeState:
         if cu is not None and cu.get("status") == "skipped":
             del self._rows[fp]
 
+    def known_urls(self, *, status: Optional[str] = None) -> list:
+        """Tra ve TAT CA `canonical_url` da co ban ghi trong state — dung
+        cho Phase 9 (Story Harvester V3: engine cap nhat gia tang) de phat
+        hien chuong REMOVED (TUNG co ban ghi "ok" nhung khong con trong muc
+        luc moi — xem `incremental.diff_toc`). Loc theo `status` neu duoc
+        chi dinh (vd chi "ok", bo qua "failed"/"skipped")."""
+        return [row["canonical_url"] for row in self._rows.values()
+                if status is None or row.get("status") == status]
+
     def to_json(self) -> str:
         """Tuan tu hoa DE LUU (Appwrite/dia) — noi goi tu chiu trach nhiem
         ben vung hoa, lop nay chi dinh dang."""

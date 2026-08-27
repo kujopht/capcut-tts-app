@@ -33,6 +33,7 @@ from typing import Any, Dict, Optional
 from server.scraper.contract import SeriesInfo, canonicalize_url
 from server.scraper.dedupe import source_fingerprint
 from server.scraper.pipeline import IngestionDecision, StoryIngestionPipeline
+from server.scraper.quality import assess_chapter_quality
 from server.scraper.run_state import (
     TERMINAL_RUN_STATUSES,
     MockScrapeRunStore,
@@ -228,6 +229,16 @@ class ScrapeRunService:
         state = self._pipeline.state
         bi_huy = False
 
+        # Ngu canh "sibling" cho `check_chapter_order` (quality.py) — LAY TU
+        # TOAN BO cac muc DA XONG cua dot nay (khong chi trong chu ky hien
+        # tai, khac `pipeline.py::run()` — o day co the doc lai tu store),
+        # roi CONG DON THEM trong luc chay chu ky nay.
+        cac_so_chuong_da_biet = [
+            i.chapter_number for i in
+            self._store.list_items(run_id, statuses=[ScrapeItemStatus.REVIEW_READY], limit=None)
+            if i.chapter_number is not None
+        ]
+
         for muc in muc_can_lam:
             # (1) Doc lai trang thai TRUOC KHI dung toi chuong nay — day la
             # DIEM MAU CHOT cua an toan huy: muc nay CHUA bi tai/ghi gi ca
@@ -274,12 +285,28 @@ class ScrapeRunService:
                     trung_voi = danh_sach_trung[0]
                 else:
                     quyet_dinh = IngestionDecision.NEW
+            # Phase 6 ("khong am tham chap nhan trich xuat yeu") — CHUA
+            # tung duoc goi tren duong drive_once THAT (chi co o
+            # `pipeline.py::run()`, duong preview/test rieng) truoc ban sua
+            # nay, nghia la TOAN BO 11 check tat dinh cua quality.py chua
+            # tung chay tren MOT chuong THAT nao tung vao hang doi duyet —
+            # phat hien qua review doc lap (Codex). GAN NHAN, KHONG chan
+            # (giong triet ly quality.py — xem docstring o do).
+            bao_cao_chat_luong = assess_chapter_quality(
+                chapter, sibling_chapter_numbers=cac_so_chuong_da_biet)
+            if chapter.chapter_number is not None:
+                cac_so_chuong_da_biet.append(chapter.chapter_number)
+
             self._store.save_item(
                 muc.item_id, status=ScrapeItemStatus.REVIEW_READY,
                 decision=quyet_dinh.value, chapter_title=chapter.chapter_title,
                 chapter_number=chapter.chapter_number,
                 content_hash=chapter.content_hash, error_message="",
-                duplicate_of_url=trung_voi)
+                duplicate_of_url=trung_voi,
+                quality_passed=bao_cao_chat_luong.passed,
+                quality_score=bao_cao_chat_luong.score,
+                quality_warnings=" | ".join(
+                    bao_cao_chat_luong.block_reasons + bao_cao_chat_luong.warn_reasons))
 
         # DEM LAI CHINH XAC dung MOT LAN o cuoi chu ky — khong tin bo dem
         # cong don rai rac trong vong lap. Cung mau voi

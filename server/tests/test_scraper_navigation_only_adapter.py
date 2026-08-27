@@ -64,6 +64,39 @@ class DiscoverySequenceTest(unittest.TestCase):
         self.assertEqual(len(series.chapter_urls), 3)
 
 
+class PrevBeforeNextLinkOrderTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): mot trang co CA lien
+    ket "chuong truoc" LAN "chuong sau" cung khop `next_href_pattern` (vd
+    cung dang `/c/\\d+`) — neu "truoc" xuat hien TRUOC "sau" trong HTML,
+    kham pha phai VAN tim dung "sau", khong duoc dung ngay chi vi gap
+    "truoc" (da tham) truoc."""
+
+    def test_lien_ket_chuong_truoc_xuat_hien_truoc_van_kham_pha_dung(self):
+        def trang(so: int, tong: int) -> str:
+            truoc = (f'<a class="prev" href="/c/{so - 1}">Trước</a>'
+                     if so > 1 else "")
+            sau = (f'<a class="next" href="/c/{so + 1}">Sau</a>'
+                  if so < tong else "")
+            return f"""
+            <html><head><title>Chương {so}</title></head><body>
+              <div class="chapter-content"><p>Nội dung chương {so}, đủ dài
+              để vượt ngưỡng tối thiểu cho một vùng nội dung hợp lệ trong
+              bộ kiểm thử thứ tự liên kết trước/sau này.</p></div>
+              {truoc}
+              {sau}
+            </body></html>
+            """
+
+        pages = {f"{_BASE}/c/{i}": trang(i, 5) for i in range(1, 6)}
+        adapter = NavigationOnlyAdapter(FixtureFetcher(pages), next_href_pattern=r"/c/\d+")
+        series = adapter.discover_series(f"{_BASE}/c/1")
+
+        self.assertEqual(len(series.chapter_urls), 5,
+                         "phải khám phá đủ 5 chương dù link 'trước' xuất hiện trước 'sau'")
+        for i, url in enumerate(series.chapter_urls, start=1):
+            self.assertTrue(url.endswith(f"/c/{i}"))
+
+
 class MaxChaptersLimitTest(unittest.TestCase):
     def test_gioi_han_max_chapters_dung_lai_va_ghi_ro_trong_evidence(self):
         pages = _pages(10)

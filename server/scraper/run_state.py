@@ -164,6 +164,17 @@ class ScrapeRunItem:
     #: cuu; xem `pipeline.ReviewItem.duplicate_of_urls` cho danh sach day
     #: du o tang trong-bo-nho).
     duplicate_of_url: str = ""
+    #: Ket qua `quality.assess_chapter_quality` (Phase 6 "khong am tham
+    #: chap nhan trich xuat yeu") — GHI LAI o day, KHONG chan hang doi
+    #: duyet (giong triet ly `quality.py`: gan nhan, khong tu loai bo).
+    #: `quality_passed=False` nghia la co check BLOCK that bai — operator
+    #: NEN xem ky truoc khi duyet.
+    quality_passed: bool = True
+    quality_score: float = 1.0
+    #: Cac ly do WARN/BLOCK, noi cach nhau bang " | " (chuoi don gian,
+    #: KHONG phai JSON — du de hien thi truc tiep, khong can may khach
+    #: parse cau truc).
+    quality_warnings: str = ""
     #: Vi tri THEO THU TU KHAM PHA (0, 1, 2, ...) — dat MOT LAN luc tao,
     #: KHONG BAO GIO doi. Day la THU TU HANG DOI DUYET, tach biet voi
     #: `chapter_number` (co the None cho chuong khong doc duoc so tu tieu

@@ -52,6 +52,16 @@ class SiteConfig:
     #: Ghi chu ngan: khi nao/qua canary nao domain nay duoc xac minh —
     #: dung cho nguoi doc code, khong dung trong logic.
     verified_via: str = ""
+    #: "generic_index" (mac dinh, co trang muc luc) hoac "navigation_only"
+    #: (Phase 3 Story Harvester V3: KHONG co trang muc luc, chi theo doi
+    #: lien ket "chuong tiep theo" tuan tu — xem
+    #: `adapters/navigation_only_adapter.py`). Khi la "navigation_only",
+    #: `chapter_href_pattern` duoc HIEU LAI thanh `next_href_pattern` (mau
+    #: khop lien ket "chuong tiep theo" tren MOT trang chuong, khong phai
+    #: mau khop lien ket chuong tren trang muc luc — hai khai niem khac
+    #: nhau nhung dung CHUNG mot truong de tranh them mot truong chi dung
+    #: cho MOT nhanh hiem gap).
+    adapter_kind: str = "generic_index"
 
     def resolved(self, url: str) -> "SiteConfig":
         """Tra ve MOT ban da dien `{scope_id}` bang gia tri that rut ra tu

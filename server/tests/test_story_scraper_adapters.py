@@ -237,6 +237,44 @@ class JsonLdPreferenceTest(unittest.TestCase):
         chapter = adapter.normalize_chapter(url, adapter.fetch_chapter(url), series)
         self.assertIn("đoạn văn đầu tiên", chapter.clean_text)
 
+    def test_json_ld_co_nhung_thieu_articleBody_van_qua_trich_xuat_that(self):
+        """Tai hien phat hien tu review doc lap (Codex): mot trang co
+        JSON-LD Article NHUNG thieu `articleBody` (chi co tieu de/tac gia)
+        tung goi thang `page.visible_text()`, BO QUA ca boundary_matched
+        LAN Phase 6 v3 — tuong duong nhu ca hai co che do CHUA TUNG duoc
+        xay cho dang trang nay. Gio PHAI di qua `super().normalize_chapter()`."""
+        html = """
+        <html><head><title>Trang JSON-LD Thiếu Body</title>
+        <script type="application/ld+json">
+          {"@type": "Article", "headline": "Chương Thiếu Body",
+           "author": {"name": "Tác Giả Thiếu Body"},
+           "datePublished": "2026-02-02T00:00:00Z"}
+        </script></head>
+        <body>
+          <nav><a href="/">Trang chủ</a></nav>
+          <article>
+            <p>Nội dung chương thật sự nằm trong thẻ article, đủ dài để
+            vượt ngưỡng tối thiểu cho một vùng nội dung hợp lệ trong bộ
+            kiểm thử JSON-LD thiếu articleBody của Story Harvester V3.</p>
+          </article>
+        </body></html>
+        """
+        pages = {f"{_BASE}/jl": html}
+        adapter = JsonLdAwareAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/jl")
+        series_gia = type("S", (), {"source_domain": "vd.example",
+                                    "title": "T", "author": None})()
+
+        chapter = adapter.normalize_chapter(f"{_BASE}/jl", pages[f"{_BASE}/jl"], series_gia)
+
+        # Tieu de/tac gia/ngay dang TU JSON-LD (dang tin cay).
+        self.assertEqual(chapter.chapter_title, "Chương Thiếu Body")
+        self.assertEqual(chapter.author, "Tác Giả Thiếu Body")
+        self.assertEqual(chapter.published_at, "2026-02-02T00:00:00Z")
+        # NOI DUNG phai qua trich xuat THAT (loai bo nav), khong phai
+        # `visible_text()` tho.
+        self.assertIn("Nội dung chương thật sự", chapter.clean_text)
+        self.assertNotIn("Trang chủ", chapter.clean_text)
+
 
 class PaginationTest(unittest.TestCase):
     """Muc luc trai dai qua NHIEU trang (vd `?page=1`, `?page=2`, ...) —
@@ -418,6 +456,47 @@ class RobustnessTest(unittest.TestCase):
         self.assertFalse(ban_ghi.get("is_revision"),
                          "than bai khong doi (du tieu de nguon co doi o ngoai) "
                          "khong duoc bao la revision")
+
+
+class ChapterNumberFalsePositiveTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): `_CHAPTER_NUMBER_RE`
+    tung la `r"(\\d+)"` don thuan, bat NHAM so trong tieu de KHONG lien
+    quan chuong (vd "Room 101") lam so chuong — nghiem trong nhat khi dung
+    de SAP XEP LAI thu tu (Phase 3), co the lam SAI thu tu ca series chi
+    vi mot tieu de co so tinh co."""
+
+    def test_tieu_de_co_so_khong_phai_tu_khoa_chuong_khong_bi_doan_nham(self):
+        html = """
+        <html><head><title>Truyện Tiêu Đề Lạ</title></head><body><ul>
+        <li><a href="/g/chuong-1">Room 101</a></li>
+        <li><a href="/g/chuong-2">District 9</a></li>
+        <li><a href="/g/chuong-3">Catch-22</a></li>
+        </ul></body></html>
+        """
+        pages = {f"{_BASE}/g": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/g/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/g")
+
+        # KHONG duoc sap xep lai theo 101/9/22 — phai LUI ve index-sequence
+        # (khong co tu khoa chuong nao trong ba tieu de nay).
+        self.assertTrue(series.chapter_urls[0].endswith("chuong-1"))
+        self.assertTrue(series.chapter_urls[1].endswith("chuong-2"))
+        self.assertTrue(series.chapter_urls[2].endswith("chuong-3"))
+
+    def test_tieu_de_co_tu_khoa_chuong_that_van_trich_dung_so(self):
+        html = """
+        <html><head><title>Truyện Bình Thường</title></head><body><ul>
+        <li><a href="/h/chuong-1">Chương 5: Khởi Đầu</a></li>
+        <li><a href="/h/chuong-2">Chương 3: Trước Đó</a></li>
+        </ul></body></html>
+        """
+        pages = {f"{_BASE}/h": html}
+        adapter = GenericIndexAdapter(FixtureFetcher(pages), chapter_href_pattern=r"/h/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/h")
+
+        # Co tu khoa chuong THAT -> van sap xep lai theo so (3 truoc 5).
+        self.assertTrue(series.chapter_urls[0].endswith("chuong-2"))
+        self.assertTrue(series.chapter_urls[1].endswith("chuong-1"))
 
 
 class StructuralVariantsTest(unittest.TestCase):

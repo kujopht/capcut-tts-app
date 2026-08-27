@@ -8,6 +8,7 @@ thieu JSON-LD la loi.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, Optional
 
 from server.scraper.adapters.generic_index_adapter import GenericIndexAdapter
@@ -27,6 +28,15 @@ def _tim_article_ld(json_ld_blocks: list) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _trich_tac_gia(author_field: Any) -> Optional[str]:
+    if isinstance(author_field, dict):
+        return author_field.get("name")
+    if isinstance(author_field, list) and author_field:
+        first = author_field[0]
+        return first.get("name") if isinstance(first, dict) else str(first)
+    return author_field
+
+
 class JsonLdAwareAdapter(GenericIndexAdapter):
     def normalize_chapter(self, url: str, raw_html: str,
                            series: SeriesInfo) -> NormalizedChapter:
@@ -36,19 +46,32 @@ class JsonLdAwareAdapter(GenericIndexAdapter):
         if article is None:
             return super().normalize_chapter(url, raw_html, series)
 
-        title = (article.get("headline") or article.get("name")
-                 or page.title or series.title)
         body = article.get("articleBody")
-        clean_text = str(body).strip() if body else page.visible_text()
+        if not body:
+            # JSON-LD CO nhung THIEU `articleBody` — van uu tien tieu de/
+            # tac gia/ngay dang tu JSON-LD (dang tin cay), nhung PHAI di
+            # qua duong trich xuat THAT SU cho `clean_text` (boundary_matched
+            # da xac minh tay HOAC Phase 6 v3), KHONG duoc goi thang
+            # `page.visible_text()` — truoc day nhanh nay bo qua CA HAI co
+            # che do, tuong duong lam nhu Phase 6 CHUA TUNG duoc xay cho
+            # nguon nao co JSON-LD-nhung-thieu-body — phat hien qua review
+            # doc lap (Codex).
+            chapter = super().normalize_chapter(url, raw_html, series)
+            tieu_de_ld = article.get("headline") or article.get("name")
+            tac_gia_ld = _trich_tac_gia(article.get("author"))
+            ngay_dang_ld = article.get("datePublished")
+            if tieu_de_ld or tac_gia_ld or ngay_dang_ld:
+                chapter = replace(
+                    chapter,
+                    chapter_title=str(tieu_de_ld) if tieu_de_ld else chapter.chapter_title,
+                    author=tac_gia_ld or chapter.author,
+                    published_at=ngay_dang_ld or chapter.published_at,
+                )
+            return chapter
 
-        author_field = article.get("author")
-        if isinstance(author_field, dict):
-            author = author_field.get("name")
-        elif isinstance(author_field, list) and author_field:
-            first = author_field[0]
-            author = first.get("name") if isinstance(first, dict) else str(first)
-        else:
-            author = author_field
+        title = article.get("headline") or article.get("name") or page.title or series.title
+        clean_text = str(body).strip()
+        author = _trich_tac_gia(article.get("author"))
 
         canon = canonicalize_url(url)
         return NormalizedChapter(

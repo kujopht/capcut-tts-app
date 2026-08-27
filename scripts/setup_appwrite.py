@@ -791,6 +791,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Phase 8 Story Harvester V3 — CHI co gia tri khi decision ==
             # "possible_duplicate" (xem pipeline.py::IngestionDecision).
             ("duplicate_of_url", "string", False, 1024),
+            # Phase 6 Story Harvester V3 — ket qua quality.assess_chapter_quality
+            # tren duong drive_once THAT (xem bulk.py).
+            ("quality_passed", "boolean", False, None),
+            ("quality_score", "double", False, None),
+            ("quality_warnings", "string", False, 2000),
             # Vi tri THEO THU TU KHAM PHA — thu tu THAT hien cho operator o
             # hang doi duyet, KHONG PHAI `created_at` (tung trung gio o quy
             # mo tao nhanh, lam sai thu tu — phat hien qua mot lan di qua

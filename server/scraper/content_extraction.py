@@ -75,7 +75,15 @@ _REJECT_HINT_RE = re.compile(
     r"sidebar|related|recommend|de.?xuat|breadcrumb|pagination|page.?nav|"
     r"chapter.?list|chapter.?nav|chap.?nav|next.?chap|prev.?chap|"
     r"login|signup|sign.?up|subscribe|newsletter|cookie|popup|modal|"
-    r"site.?description|tagline|banner|widget)",
+    r"site.?description|tagline|banner|widget|"
+    # "hop tac gia"/"tieu su" — CO Y THEM RIENG (khong chi dua vao ty le
+    # kich thuoc trong `_uu_tien_con_cu_the_hon`): mot class dang
+    # "post-author-info" VUA khop `_CONTAINER_HINT_RE` (qua "post") VUA
+    # la mot vung KHONG phai noi dung chuong — reject-hint uu tien HON
+    # content-hint (nut bi loai truoc khi cham diem, khong phu thuoc kich
+    # thuoc tuong doi voi ung vien khac) — phat hien qua review doc lap
+    # (Codex).
+    r"author|byline|\bbio\b|tac.?gia)",
     re.IGNORECASE,
 )
 #: The/class/id khop CAI NAY duoc UU TIEN khi cham diem (khong bat buoc)
@@ -343,6 +351,14 @@ def _score(node: _Node, total_len: int, link_len: int, para_count: int,
 #: con phai chiem DA SO ro rang (khong chi vai phan tram), tranh uu tien
 #: nham mot con chi TINH CO co ten khop tu khoa nhung thuc ra rat nho.
 _TY_LE_TOI_THIEU_UU_TIEN_CON = 0.5
+#: Khi CO NHIEU con cung khop tu khoa noi dung (vd "post-content" THAT VA
+#: "post-author-info" chi TINH CO khop chung tu "post"), con LON NHAT phai
+#: gap it nhat NGAN NAY lan con LON THU HAI de duoc coi la "ro rang hon
+#: han", tranh chon nham khi hai ung vien gan bang nhau (that su mo ho ung
+#: vien nao la noi dung chinh) — phat hien qua review doc lap (Codex, vi
+#: du "post"/"entry" trong `_CONTAINER_HINT_RE` khop ca class khong lien
+#: quan noi dung nhu "post-author-info").
+_TY_LE_VUOT_TROI_SO_VOI_CON_THU_HAI = 3.0
 
 
 def _uu_tien_con_cu_the_hon(
@@ -350,20 +366,29 @@ def _uu_tien_con_cu_the_hon(
         tat_ca_ket_qua: Dict[int, Tuple[str, int, int, int, List[str]]],
 ) -> Tuple[str, Optional[str]]:
     """Xem comment goi ham (`extract_content_v3`) — tra ve `(van_ban,
-    chu_ky_ghi_de_hoac_None)`. CHI uu tien khi CHINH XAC MOT con truc tiep
-    khop tu khoa noi dung VA con do chiem >= `_TY_LE_TOI_THIEU_UU_TIEN_CON`
-    van ban cua cha — nhieu con khop cung luc (mo ho ung vien nao that su
-    cu the hon) hoac ty le thap (con qua nho de la ca vung noi dung) thi
-    GIU NGUYEN cha, KHONG doan."""
-    ung_vien_con = [
-        c for c in thang.children
-        if not c.rejected and c.tag in _CANDIDATE_TAGS and c.sig
-        and _CONTAINER_HINT_RE.search(c.sig)
-    ]
-    if len(ung_vien_con) != 1:
+    chu_ky_ghi_de_hoac_None)`. Uu tien con khop tu khoa noi dung LON NHAT
+    khi no (a) chiem >= `_TY_LE_TOI_THIEU_UU_TIEN_CON` van ban cua cha VA
+    (b) vuot troi han con thu hai cung khop (neu co) — CO Y KHONG doi hoi
+    "chinh xac MOT con khop" (tu khoa nhu "post"/"entry" co the khop NHIEU
+    class khac nhau tren cung mot trang, ke ca class KHONG lien quan noi
+    dung) — chon con LON NHAT, chi tu choi khi khong ro rang (gan bang con
+    thu hai) hoac qua nho, GIU NGUYEN cha trong ca hai truong hop do."""
+    ung_vien_con = sorted(
+        (
+            (c, tat_ca_ket_qua[id(c)][1]) for c in thang.children
+            if not c.rejected and c.tag in _CANDIDATE_TAGS and c.sig
+            and _CONTAINER_HINT_RE.search(c.sig)
+        ),
+        key=lambda pair: pair[1], reverse=True,
+    )
+    if not ung_vien_con:
         return van_ban_cha, None
-    con = ung_vien_con[0]
-    con_text, con_len, _link, _para, _headings = tat_ca_ket_qua[id(con)]
+    con, con_len = ung_vien_con[0]
+    if len(ung_vien_con) > 1:
+        _con_nhi, con_len_nhi = ung_vien_con[1]
+        if con_len_nhi > 0 and con_len < con_len_nhi * _TY_LE_VUOT_TROI_SO_VOI_CON_THU_HAI:
+            return van_ban_cha, None
+    con_text = tat_ca_ket_qua[id(con)][0]
     cha_len = len(van_ban_cha.strip())
     if cha_len <= 0 or con_len / cha_len < _TY_LE_TOI_THIEU_UU_TIEN_CON:
         return van_ban_cha, None

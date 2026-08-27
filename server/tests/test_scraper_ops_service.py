@@ -375,6 +375,46 @@ class CheckForUpdatesTest(unittest.TestCase):
             svc.check_for_updates("scr_khong-ton-tai")
 
 
+class NavigationOnlyAdapterDispatchTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): `NavigationOnlyAdapter`
+    (Phase 3) CHUA TUNG duoc tao qua duong that (`_adapter_for_url`/
+    `_adapter_from_config`) — chi test truc tiep goi no. Kiem tra o day
+    di qua DUNG duong operator that (SiteConfig -> discover -> start)."""
+
+    _NAV_BASE = "https://dieu-huong.example"
+    _CFG = {
+        "dieu-huong.example": SiteConfig(
+            domain="dieu-huong.example", chapter_href_pattern=r"/c/\d+",
+            adapter_kind="navigation_only"),
+    }
+
+    def _pages(self, so_chuong: int) -> dict:
+        def trang(so):
+            tiep = (f'<a href="/c/{so + 1}">Tiếp theo</a>' if so < so_chuong else "")
+            return (f'<html><head><title>Chương {so}</title></head><body>'
+                   f'<div class="chapter-content"><p>Nội dung chương {so} đủ '
+                   "dài để vượt ngưỡng tối thiểu cho vùng nội dung hợp lệ "
+                   f"trong bộ kiểm thử điều phối adapter điều hướng.</p></div>"
+                   f"{tiep}</body></html>")
+        return {f"{self._NAV_BASE}/c/{i}": trang(i) for i in range(1, so_chuong + 1)}
+
+    def test_discover_va_start_qua_SiteConfig_navigation_only(self):
+        pages = self._pages(4)
+        with patch.dict("server.scraper.site_registry._REGISTRY", self._CFG):
+            svc = ScraperOpsService(
+                MockScrapeRunStore(),
+                fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)))
+            preview = svc.discover(f"{self._NAV_BASE}/c/1")
+            self.assertTrue(preview["supported"])
+            self.assertEqual(preview["run"].estimated_total, 4)
+
+            started = svc.start_or_continue(f"{self._NAV_BASE}/c/1")
+            run_id = started["run"].run_id
+            driven = svc.drive(run_id)
+            self.assertEqual(driven["run"].status, ScrapeRunStatus.COMPLETED)
+            self.assertEqual(driven["counts"]["review_ready"], 4)
+
+
 class CheckPossibleMirrorTest(unittest.TestCase):
     """Phase 7: `check_possible_mirror` — kham pha nguon MOI (khong ghi
     gi), so sanh voi cac dot da co trong kho, tra ve nhung dot co

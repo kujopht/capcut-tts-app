@@ -89,9 +89,15 @@ class NavigationOnlyAdapter(StoryProvider):
             chapter_urls.append(base_url)
         else:
             # Vong `while` dung vi DAT gioi han (khong phai vi het lien
-            # ket) — CHI khi do moi thuc su "bi chan boi gioi han".
-            tiep_theo_thu = self._tim_lien_ket_tiep_theo(trang_hien_tai, base_url, da_tham)
-            bi_chan_boi_gioi_han = tiep_theo_thu is not None
+            # ket) — CHI khi do moi thuc su "bi chan boi gioi han". Dung
+            # ban KHONG TAI (`_co_lien_ket_tiep_theo_chua_tham`), KHONG
+            # PHAI `_tim_lien_ket_tiep_theo` — ham do THAT SU tai them MOT
+            # trang chi de "kiem tra", vuot qua chinh gioi han dang co
+            # tinh kiem tra, VA neu lan tai do loi (mang) se lam HONG ca
+            # lan `discover_series()` nay du da co du lieu hop le trong
+            # tay — phat hien qua review doc lap (Codex).
+            bi_chan_boi_gioi_han = self._co_lien_ket_tiep_theo_chua_tham(
+                trang_hien_tai, base_url, da_tham)
 
         signals = [
             ChapterOrderingSignal(url=u, navigation_position=i)
@@ -117,6 +123,19 @@ class NavigationOnlyAdapter(StoryProvider):
             ordering_evidence=evidence,
         )
 
+    def _co_lien_ket_tiep_theo_chua_tham(self, trang, base_url: str, da_tham: set) -> bool:
+        """KHONG TAI gi ca — chi quet `trang.links` (da co san trong bo
+        nho) xem co href khop `next_href_pattern` VA CHUA tham hay khong.
+        Dung khi CHI can biet "co con duong hay khong", khong can NOI DUNG
+        trang tiep theo (xem `discover_series`'s nhanh `else`)."""
+        for href, _text in trang.links:
+            if not self._next_re.search(href):
+                continue
+            canon = canonicalize_url(urljoin(base_url, href))
+            if canon not in da_tham:
+                return True
+        return False
+
     def _tim_lien_ket_tiep_theo(self, trang, base_url: str, da_tham: set):
         for href, _text in trang.links:
             if not self._next_re.search(href):
@@ -124,7 +143,14 @@ class NavigationOnlyAdapter(StoryProvider):
             absolute = urljoin(base_url, href)
             canon = canonicalize_url(absolute)
             if canon in da_tham:
-                return None  # da tham — dung, tranh vong lap (tu tro/vong tron).
+                # Lien ket nay DA tham — KHONG dung ngay (mot trang co the
+                # co CA lien ket "chuong truoc" LAN "chuong sau" cung khop
+                # `next_href_pattern`, vd cung dang `/c/\d+`; neu "truoc"
+                # xuat hien TRUOC "sau" trong HTML, dung ngay o day se lam
+                # kham pha DUNG SAI HUONG hoac dung qua som — phat hien qua
+                # review doc lap Codex). Bo qua, THU lien ket khop TIEP
+                # THEO tren CUNG trang truoc khi ket luan "het duong".
+                continue
             da_tham.add(canon)
             ket_qua = self._fetcher.fetch(absolute)
             return ket_qua.final_url, extract(ket_qua.text)

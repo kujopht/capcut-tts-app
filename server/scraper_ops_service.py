@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 from server.scraper import site_registry
 from server.scraper.adapters.generic_index_adapter import GenericIndexAdapter
 from server.scraper.adapters.json_ld_adapter import JsonLdAwareAdapter
+from server.scraper.adapters.navigation_only_adapter import NavigationOnlyAdapter
 from server.scraper.bulk import ScrapeRunService
 from server.scraper.contract import domain_of
 from server.scraper.discovery import (
@@ -68,12 +69,21 @@ class ScraperOpsService:
 
     # -- xay dung pipeline/service MOI moi lan goi --------------------------
 
-    def _adapter_from_config(self, cfg: site_registry.SiteConfig) -> JsonLdAwareAdapter:
+    def _adapter_from_config(self, cfg: site_registry.SiteConfig):
+        if cfg.adapter_kind == "navigation_only":
+            # Phase 3 Story Harvester V3: nguon KHONG co trang muc luc —
+            # `chapter_href_pattern` duoc HIEU LAI thanh `next_href_pattern`
+            # (xem docstring `SiteConfig.adapter_kind`). Truoc ban sua nay,
+            # `NavigationOnlyAdapter` CHUA BAO GIO duoc tao qua duong that
+            # (chi test truc tiep goi no) — phat hien qua review doc lap
+            # (Codex).
+            return NavigationOnlyAdapter(
+                self._fetcher_factory(), next_href_pattern=cfg.chapter_href_pattern)
         return JsonLdAwareAdapter(
             self._fetcher_factory(), chapter_href_pattern=cfg.chapter_href_pattern,
             title_suffix_to_strip=cfg.title_suffix_to_strip or None)
 
-    def _adapter_for_url(self, url: str) -> JsonLdAwareAdapter:
+    def _adapter_for_url(self, url: str):
         """Phan cap Phase 4: SiteConfig da xac minh (ky su) truoc, roi
         SiteProfile da hoc+xac nhan (operator) — CHI dung khi
         `is_usable` (LEARNING/VERIFIED, khong bao gio DEGRADED/DISABLED).

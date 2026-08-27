@@ -71,7 +71,8 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_ITEMS: (
         "item_id", "run_id", "chapter_url", "source_fingerprint", "status",
         "decision", "chapter_title", "chapter_number", "content_hash",
-        "error_message", "attempts", "skipped_reason", "duplicate_of_url", "sequence",
+        "error_message", "attempts", "skipped_reason", "duplicate_of_url",
+        "quality_passed", "quality_score", "quality_warnings", "sequence",
         "created_at", "updated_at",
     ),
 }
@@ -124,6 +125,13 @@ def _int_or_none(value: Any) -> Optional[int]:
         return None
 
 
+def _float(value: Any, mac_dinh: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return mac_dinh
+
+
 def _run_from_doc(doc: Dict[str, Any]) -> ScrapeRun:
     return ScrapeRun(
         source_url=str(doc.get("source_url") or ""),
@@ -165,6 +173,9 @@ def _item_from_doc(doc: Dict[str, Any]) -> ScrapeRunItem:
         attempts=_int(doc.get("attempts")),
         skipped_reason=str(doc.get("skipped_reason") or ""),
         duplicate_of_url=str(doc.get("duplicate_of_url") or ""),
+        quality_passed=bool(doc.get("quality_passed", True)),
+        quality_score=_float(doc.get("quality_score"), 1.0),
+        quality_warnings=str(doc.get("quality_warnings") or ""),
         sequence=_int(doc.get("sequence")),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),

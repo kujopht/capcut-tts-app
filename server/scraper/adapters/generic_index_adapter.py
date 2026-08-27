@@ -23,7 +23,20 @@ from server.scraper.dedupe import content_hash, source_fingerprint
 from server.scraper.html_extract import extract
 from server.scraper.http_fetcher import FetchError
 
-_CHAPTER_NUMBER_RE = re.compile(r"(\d+)")
+#: PHAI co TU KHOA CHUONG ngay TRUOC con so — mot regex "chi tim so
+#: bat ky" (`r"(\d+)"` don thuan) tung bat NHAM so trong tieu de/van ban
+#: lien ket KHONG lien quan chuong (vd "Room 101", "District 9",
+#: "Catch-22" bi doc nham thanh chuong 101/9/22) — nghiem trong hon O
+#: `_so_chuong_tu_van_ban` (Phase 3: dung de SAP XEP LAI thu tu chuong,
+#: mot con so bia dat co the lam SAI thu tu ca series, khong chi sai mot
+#: nhan hien thi) — phat hien qua review doc lap (Codex, tai hien that
+#: bang cac tieu de vi du tren). Danh sach tu khoa GIONG
+#: `discovery._CHAPTER_WORD_RE` — dung chung mot triet ly.
+_CHAPTER_NUMBER_RE = re.compile(
+    r"(?:chương|chuong|chapter|ch\.|episode|phần|phan|tập|tap|hồi|hoi)"
+    r"\s*[:.\-]?\s*(\d+)",
+    re.IGNORECASE,
+)
 
 
 def _dam_bao_la_html(result) -> None:

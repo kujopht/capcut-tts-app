@@ -272,3 +272,32 @@ class SiblingLeakageTest(unittest.TestCase):
         self.assertEqual(result.container_signature, "div.chapter-content")
         self.assertIn(_DOAN_DAI, result.clean_text)
         self.assertNotIn("Giới thiệu tác giả", result.clean_text)
+
+    def test_hop_tac_gia_tinh_co_khop_tu_khoa_noi_dung_van_bi_loai(self):
+        """Tai hien phat hien tu review doc lap (Codex): class
+        "post-author-info" VUA khop `_CONTAINER_HINT_RE` (qua "post") VUA
+        la mot vung KHONG phai noi dung — truoc sua loi, ty le kich thuoc
+        so voi "post-content" khong du chenh lech (~1.4x, duoi nguong 3x)
+        de tinh nang uu tien con cu the hon tu choi lam gi, dan den van
+        giu wrapper cha (lan ca hai vung). Reject-hint gio bat ca "author"
+        du no cung khop content-hint."""
+        gioi_thieu = (
+            "Giới thiệu tác giả: một người viết truyện lâu năm với nhiều "
+            "tác phẩm nổi tiếng trong cộng đồng, đã xuất bản hơn mười đầu "
+            "sách và nhận được nhiều giải thưởng văn học trong nước.")
+        html = f"""
+        <html><body>
+        <article>
+          <h1>Chương 1</h1>
+          <div class="post-content">
+            <p>{_DOAN_DAI}</p>
+            <p>Một đoạn văn thứ hai để tăng thêm điểm số cho ứng viên này.</p>
+          </div>
+          <div class="post-author-info"><p>{gioi_thieu}</p></div>
+        </article>
+        </body></html>
+        """
+        result = extract_content_v3(html, chapter_title="Chương 1")
+        self.assertEqual(result.container_signature, "div.post-content")
+        self.assertIn(_DOAN_DAI, result.clean_text)
+        self.assertNotIn("Giới thiệu tác giả", result.clean_text)

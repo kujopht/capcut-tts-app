@@ -75,6 +75,15 @@ Backend web bọc thêm một lớp mỏng ở `server/tts_bridge.py` — **khô
 - ffmpeg/ffprobe ở `%LOCALAPPDATA%\Microsoft\WinGet\Links\`.
 - Inno Setup nằm ở phạm vi người dùng, không phải `Program Files`.
 
+## AI engineering router
+
+Chính sách chọn model/effort/subagent cho công việc kỹ thuật trong kho
+này (Haiku cho tra cứu, Sonnet mặc định, Opus cho việc khó/rủi ro cao,
+Fable chỉ dành cho việc CỰC LỚN) — xem `docs/AI_ROUTER.md` cho đầy đủ, và
+`.claude/agents/` cho các subagent cụ thể (`explorer`, `test-analyst`,
+`builder`, `frontend-builder`, `code-reviewer`, `incident-architect`,
+`long-horizon-lead`). Không phải một tính năng sản phẩm.
+
 ## Trạng thái
 
 Xem `docs/HANDOFF.md` để biết mốc nào đã xong và việc tiếp theo.

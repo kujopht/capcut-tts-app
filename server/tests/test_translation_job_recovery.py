@@ -190,21 +190,26 @@ class KhoiPhucJobSauKhiWorkerChetTest(unittest.TestCase):
                          "chapter memory (tóm tắt) phải còn đủ")
 
         # (b) chuong 1-3 KHONG bi dich lai boi provider_a: dung 3 chuong * 3
-        #     pass = 9 lan goi cho chung. Mat quyen duoc kiem tra GIUA CAC
-        #     DOAN (`_nen_dung_lai` truoc moi doan trong `_dich_mot_chuong`),
-        #     KHONG nam giua ba vai-tro CUA CUNG mot doan — nen mot khi da
-        #     bi chan o vai-tro dau tien cua chuong 4, worker_a hoac di NOT
-        #     ca ba vai tro (translator/editor/qa) cho DOAN DUY NHAT do (=
-        #     9 + 3 = 12 lan), HOAC — day la mot RACE THAT giua luong
-        #     worker_a duoc `duoc_tha.set()` tha ra va luc no tu kiem tra lai
-        #     fencing/lease — phat hien mat quyen NGAY o dong dau cua doan do
-        #     (chi con lai 10 lan, dung `chan_o_lan`, khong di tiep pass 2/3).
-        #     Ca hai deu la hanh vi DUNG (khong mat du lieu, khong ghi de len
-        #     worker_b — cac assertion khac o duoi da kiem dieu do); chi so
-        #     lan goi CHINH XAC phu thuoc lich CPU thuc te luc chay, quan sat
-        #     duoc CA HAI gia tri tren cac may/CI khac nhau. KHONG duoc vuot
-        #     qua 12 (vi du 13+ nghia la no da lo sang chuong 5, mot loi that).
-        self.assertIn(provider_a.so_lan_goi, (chan_o_lan, chan_o_lan + SO_PASS_VAN_HOC - 1))
+        #     pass = 9 lan goi cho chung. `_nen_dung_lai` (kiem tra mat
+        #     quyen) CHI duoc goi GIUA CAC DOAN, khong giua ba vai-tro cua
+        #     CUNG mot doan — va doan DUY NHAT cua chuong 4 trong fixture
+        #     nay khong co diem kiem tra nao giua pass 1/2/3 ca. Nghia la
+        #     mot khi `provider_a.duoc_tha.set()` tha luong worker_a ra, no
+        #     KHONG BAO GIO tu dung giua chung — no se di NOT ca 3 pass con
+        #     lai (toi 12 lan goi), TRU KHI luong chinh cua test doc
+        #     `so_lan_goi` som hon (dong 219 ben duoi khong join() luong
+        #     worker_a — chi cho `worker_b` qua `cho_job_xong`). Day la mot
+        #     RACE DOC THAT SU tren luong nen (daemon, khong join): gia tri
+        #     quan sat duoc co the la 10 (doc truoc khi worker_a kip chay
+        #     lai), 11 (doc GIUA pass 2 va 3), hoac 12 (doc SAU khi worker_a
+        #     xong het) — CA BA deu la hanh vi DUNG (khong mat du lieu,
+        #     khong ghi de len worker_b — cac assertion khac da kiem dieu
+        #     do), nen dung khoang thay vi liet ke hai gia tri (ban dau chi
+        #     kiem tra 10/12, bo sot 11 — phat hien qua mot benchmark doi
+        #     chieu Sonnet/Opus 2026-08-27, xem docs/AI_ROUTER.md). KHONG
+        #     duoc vuot qua 12 (13+ nghia la da lo sang chuong 5, loi that).
+        self.assertGreaterEqual(provider_a.so_lan_goi, chan_o_lan)
+        self.assertLessEqual(provider_a.so_lan_goi, chan_o_lan + SO_PASS_VAN_HOC - 1)
 
         # (c) provider_b phai TU LAM LAI chuong 4 tu dau (ca 3 pass, khong
         #     tiep tuc tu giua), roi 4 chuong con lai (5-8) — tong dung

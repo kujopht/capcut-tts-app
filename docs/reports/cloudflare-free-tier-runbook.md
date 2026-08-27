@@ -69,11 +69,45 @@ Distinguish this from:
 `fanfic-web` → **Metrics** tab. Shows requests, errors, CPU time, and
 sub-requests over 24h/7d/30d, already available on the Free plan.
 
-**Automatable (needs a one-time token, see below):** the GraphQL Analytics
-API (`workersInvocationsAdaptive` dataset) — query template and setup steps
-in `cloudflare-quota-incident-2026-08-26.md`'s "Monitoring" section. Not
-implemented as a running script yet; that report documents the exact path
-without inventing credentials.
+**Automated: `scripts/cloudflare_request_monitor.py`.** Correction to the
+2026-08-26 incident report's assumption: **no new API token is needed.**
+Tested directly (2026-08-27) — the OAuth token `wrangler` already uses for
+deploys (in `%APPDATA%\xdg.config\.wrangler\config\default.toml`) already
+has Account Analytics read access, confirmed by a real GraphQL query
+against `workersInvocationsAdaptive` returning real data with no
+permission error. The script reads that same token directly; nothing new
+was created.
+
+Run it:
+
+```
+.venv\Scripts\python.exe -m scripts.cloudflare_request_monitor
+.venv\Scripts\python.exe -m scripts.cloudflare_request_monitor --json
+.venv\Scripts\python.exe -m scripts.cloudflare_request_monitor --log path\to\file.log
+```
+
+It sums today's (UTC calendar day) Worker requests hour by hour and prints
+NORMAL/WARNING/CRITICAL (exit code 0/1/2 respectively — script-friendly for
+a scheduled job). This call itself is a GraphQL **analytics read**, not a
+request to the Worker — running it any number of times never counts
+against the 100,000/day budget it's watching.
+
+**Thresholds, from real data, not invented:**
+
+| Level | Trigger | Basis |
+|---|---|---|
+| NORMAL | < 2,000 req in the latest hour, and today's running total < 80,000 | The only confirmed-clean post-fix hours (2026-08-27, 00:00–01:00 UTC) measured 89 and 75 requests/hour — thresholds sit roughly 20-25× above that observed baseline, deliberately leaving headroom for real traffic growth rather than being tuned tight to two hours of very light data. |
+| WARNING | ≥ 2,000 req in the latest hour | 2,000/hr sustained for a full day would be 48,000/day — under the cap but a 20-25× jump over the only clean baseline observed is worth a look, not yet an emergency. |
+| CRITICAL | ≥ 4,000 req in the latest hour, OR today's running total ≥ 80,000 | 4,000/hr sustained would be 96,000/day — enough to exhaust the daily cap before it resets. The cumulative-total leg catches a slow burn (no single spiky hour, but too many hours added up) that an hourly-only check would miss. For reference, the actual 2026-08-26 storm hit **122,905 requests in a single hour** — these thresholds sit ~30× below the real incident, not at some untested edge. |
+
+**Not yet scheduled to run automatically** — the script is ready and
+tested (`scripts/tests/test_cloudflare_request_monitor.py`), but wiring it
+into an actual recurring job (Windows Task Scheduler locally, or a cron/
+systemd timer on the existing GCE VM, same pattern as
+`run_websub_reconciliation.py`) is a deliberate operational choice left to
+whoever wants it live, not something to switch on unilaterally.
+Re-threshold once more days of real (non-testing) traffic accumulate —
+these two hours are a real but thin sample.
 
 ## Diagnosing a prefetch/request storm specifically
 

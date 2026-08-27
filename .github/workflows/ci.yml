@@ -103,6 +103,16 @@ jobs:
         run: |
           "$RUNNER_TEMP/venv/bin/python" -m unittest discover -s server/tests -t . -v
 
+      # scripts/tests/ da ton tai tu truoc (vd test_setup_appwrite_readiness.py)
+      # nhung chua bao gio duoc CI THAT SU chay — buoc "Bien dich" ben duoi chi
+      # kiem tra cu phap, khong chay assertion nao. Them buoc nay de cac test
+      # thuan (khong cham mang/Appwrite that, xem tung tep) that su duoc kiem.
+      - name: Chay scripts/tests
+        env:
+          PYTHONPATH: ""
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m unittest discover -s scripts/tests -t . -v
+
       - name: Bien dich toan bo ma backend
         run: |
           "$RUNNER_TEMP/venv/bin/python" -m compileall -q server scripts

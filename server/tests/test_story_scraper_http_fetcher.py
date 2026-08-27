@@ -403,6 +403,54 @@ class ResponseSizeCapTest(unittest.TestCase):
         ket_qua = fetcher.fetch(f"{_BASE}/chuong-1")
         self.assertEqual(ket_qua.text, "nội dung chương bình thường")
 
+    def test_than_redirect_qua_lon_cung_bi_tu_choi(self):
+        """Phat hien qua review doc lap (Codex, verify pass): nhanh xu ly
+        redirect (3xx) ban dau GOI `resp.read()` KHONG GIOI HAN — mot chang
+        redirect TRUNG GIAN (khong phai phan hoi cuoi cung) do ke tan cong
+        dieu khien co the tra ve than KHONG LO GIOI HAN, tai dien chinh
+        loi "gzip bomb" tren mot nhanh khac. PHAI ap tran cho CA redirect."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                302, content=b"x" * (2 * 1024 * 1024),
+                headers={"Location": "/noi-den"})
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0,
+                                    max_response_bytes=1024 * 1024)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertIn("giới hạn kích thước", str(ctx.exception))
+
+
+class RobotsRedirectHostMismatchTest(unittest.TestCase):
+    """Phat hien qua review doc lap (Codex, verify pass): `_robots_cache`
+    luu ket qua duoi khoa host GOC, nhung neu robots.txt cua host GOC
+    redirect sang MOT HOST KHAC, noi dung do la CUA HOST KIA — ap dung cho
+    host goc se ap SAI chinh sach (qua long hoac qua chat mot cach ngoai
+    y muon)."""
+
+    def test_robots_txt_redirect_sang_host_khac_khong_duoc_tin_dung(self):
+        """Dung mot chinh sach HAN CHE (`Disallow: /`) o host-khac.example
+        — neu loi CU con (cache dua tren host goc nhung noi dung tu host
+        khac) van con, fetch binh thuong toi `vd-truyen.example` se bi
+        CHAN OAN (`RobotsDisallowedError`). Sau ban sua: host goc duoc coi
+        la "khong co robots.txt rieng" (an toan mac dinh la cho phep),
+        KHONG "thua huong" chinh sach han che cua host khac."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "vd-truyen.example" in str(request.url) and request.url.path == "/robots.txt":
+                return httpx.Response(
+                    302, headers={"Location": "https://host-khac.example/robots.txt"})
+            if "host-khac.example" in str(request.url):
+                return httpx.Response(200, text="User-agent: *\nDisallow: /")
+            return httpx.Response(200, text="nội dung bình thường")
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        dh = _DongHoGia()
+        fetcher = HttpFetcher(client=client, sleep_fn=dh.sleep, clock_fn=dh.now,
+                              min_delay_seconds=0, respect_robots=True)
+
+        ket_qua = fetcher.fetch(f"{_BASE}/duong-binh-thuong")
+        self.assertEqual(ket_qua.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

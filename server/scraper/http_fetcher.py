@@ -256,6 +256,18 @@ class HttpFetcher:
             # 404 la truong hop PHO BIEN NHAT (site khong co robots.txt) —
             # nghia la khong co gioi han nao duoc cong bo, KHONG phai loi.
             return None
+        if _host_key(str(resp.url)) != host:
+            # Phat hien qua review doc lap (Codex, verify pass):
+            # `_robots_cache` luu ket qua nay DUOI KHOA `host` GOC, nhung
+            # neu robots.txt cua `host` GOC redirect sang MOT HOST KHAC
+            # (vd chuyen ten mien/CDN), noi dung robots.txt do la CUA HOST
+            # KIA, khong phai `host` — dung no cho `host` se AP SAI chinh
+            # sach (co the qua long luong neu host kia cho phep nhieu hon,
+            # hoac qua chat neu nguoc lai). AN TOAN HON: coi nhu `host` goc
+            # KHONG co robots.txt rieng (tra ve `None`, mac dinh "cho
+            # phep" — cung hanh vi voi truong hop khong tai duoc robots.txt
+            # o tren), KHONG BAO GIO muon chinh sach cua mot host khac.
+            return None
         parser = urllib.robotparser.RobotFileParser()
         parser.parse(resp.text.splitlines())
         return parser
@@ -265,14 +277,15 @@ class HttpFetcher:
         """Dung streaming (KHONG `client.get()` thuan, vao doc toan bo than
         vao bo nho truoc khi co co hoi kiem tra kich thuoc) de co the DUNG
         NGAY khi than phan hoi DA GIAI NEN vuot `_max_response_bytes` — xem
-        docstring hang so do. Redirect (3xx) KHONG co than dang ke nen luon
-        duoc doc day du binh thuong, chi ap tran cho phan hoi THAT SU co
-        noi dung (200/404/...)."""
+        docstring hang so do. Ap dung tran nay cho MOI phan hoi, KE CA
+        redirect (3xx) — phat hien qua review doc lap (Codex, verify pass):
+        ban dau nhanh redirect goi `resp.read()` KHONG GIOI HAN vi "redirect
+        binh thuong khong co than dang ke", nhung KHONG CO GI bat buoc mot
+        chang redirect trung gian do ke tan cong dieu khien phai TRA VE
+        than nho — day chinh la khe ho "gzip bomb" ban dau, tai dien tren
+        MOT nhanh khac (redirect) thay vi phan hoi cuoi cung."""
         try:
             with client.stream("GET", url, headers=headers or None) as resp:
-                if resp.is_redirect:
-                    resp.read()
-                    return resp
                 buffer = bytearray()
                 for chunk in resp.iter_bytes():
                     buffer.extend(chunk)

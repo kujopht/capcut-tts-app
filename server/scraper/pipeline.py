@@ -9,6 +9,8 @@ Bo dieu phoi (orchestrator) noi cac manh Tier 0 da co (`contract.py`,
          loi lan truoc — xem `dedupe.ScrapeState`)
       -> voi TUNG chuong: tai + chuan hoa + tinh fingerprint/dedupe
       -> phan loai NEW / REVISION / ALREADY_IMPORTED / FAILED
+      -> cham diem chat luong TAT DINH (server/scraper/quality.py — khong
+         AI/LLM, xem module do cho triet ly BLOCK/WARN)
       -> tra ve HANG DOI DUYET (review queue) — KHONG tu dong ghi vao
          Novel/Chapter that su o dau ca.
 
@@ -45,6 +47,7 @@ from typing import List, Optional
 from server.scraper.contract import NormalizedChapter, SeriesInfo, StoryProvider
 from server.scraper.dedupe import ScrapeState
 from server.scraper.http_fetcher import FetchError
+from server.scraper.quality import QualityReport, assess_chapter_quality
 
 
 class IngestionDecision(Enum):
@@ -68,12 +71,17 @@ class IngestionDecision(Enum):
 @dataclass
 class ReviewItem:
     """Mot dong trong hang doi duyet — `chapter` la `None` khi `decision`
-    la `FAILED` (khong co gi de duyet, chi co loi de bao)."""
+    la `FAILED` (khong co gi de duyet, chi co loi de bao). `quality` la
+    `None` cung khi `decision` la `FAILED` (khong co chuong nao de cham
+    diem) — xem `server/scraper/quality.py` cho triet ly BLOCK/WARN.
+    `quality.passed is False` la tin hieu operator NEN xem truoc/loai bo
+    truoc khi duyet — pipeline nay KHONG tu loai bo, chi gan nhan."""
 
     url: str
     decision: IngestionDecision
     chapter: Optional[NormalizedChapter] = None
     error: Optional[str] = None
+    quality: Optional[QualityReport] = None
 
 
 @dataclass
@@ -114,6 +122,15 @@ class StoryIngestionPipeline:
         self._provider = provider
         self._state = state
 
+    @property
+    def state(self) -> ScrapeState:
+        """`ScrapeState` ben vung cua pipeline nay — CHI DOC/GHI, khong bao
+        gio thay the doi tuong nay. Loi ra cho mot tang dieu phoi HANG LOAT
+        ben ngoai (xem `server/scraper/bulk.py`) can doi soat/ghi truc tiep
+        theo TUNG chuong ma khong di qua `run()` nguyen khoi (vd dieu phoi
+        theo chu ky voi huy an toan giua chung)."""
+        return self._state
+
     def plan(self, url: str, *, chapter_limit: Optional[int] = None) -> IngestionPlan:
         """Kham pha series + loc con lai can lam — KHONG tai bat ky chuong
         nao. Goi rieng buoc nay khi chi can uoc luong ("con bao nhieu
@@ -137,6 +154,10 @@ class StoryIngestionPipeline:
         huong `resume()`, chi cat bot danh sach SAU khi da loc."""
         ke_hoach = self.plan(url, chapter_limit=chapter_limit)
         review_items: List[ReviewItem] = []
+        # So chuong DA THAY trong CHINH lan chay nay — ngu canh "sibling"
+        # tot nhat co san o day (khong nhin duoc lich su cac lan chay
+        # truoc). Du de bat loi trich so ro rang trong mot lan quet.
+        cac_so_chuong_da_thay: List[int] = []
 
         for chapter_url in ke_hoach.chapter_urls_to_process:
             try:
@@ -163,8 +184,14 @@ class StoryIngestionPipeline:
                 quyet_dinh = (IngestionDecision.REVISION if ban_ghi.get("is_revision")
                               else IngestionDecision.NEW)
 
+            bao_cao_chat_luong = assess_chapter_quality(
+                chapter, sibling_chapter_numbers=cac_so_chuong_da_thay)
+            if chapter.chapter_number is not None:
+                cac_so_chuong_da_thay.append(chapter.chapter_number)
+
             review_items.append(ReviewItem(
-                url=chapter_url, decision=quyet_dinh, chapter=chapter))
+                url=chapter_url, decision=quyet_dinh, chapter=chapter,
+                quality=bao_cao_chat_luong))
 
         return IngestionResult(series=ke_hoach.series, review_items=review_items, dry_run=dry_run)
 

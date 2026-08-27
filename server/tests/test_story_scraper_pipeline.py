@@ -66,6 +66,32 @@ class RunTest(unittest.TestCase):
         self.assertTrue(all(i.chapter is not None for i in ket_qua.review_items))
         self.assertEqual(ket_qua.dem_theo_quyet_dinh()["new"], 3)
 
+    def test_moi_muc_thanh_cong_co_kem_bao_cao_chat_luong(self):
+        pipeline = _tao_pipeline()
+        ket_qua = pipeline.run(f"{_BASE}/truyen/thu-nghiem")
+        self.assertTrue(all(i.quality is not None for i in ket_qua.review_items))
+        # Fixture kiem thu la doan van NGAN (chi vai cau, duoi nguong
+        # text_length_min 200 ky tu that su cua mot chuong) — dung y KHONG
+        # gia lap mot chuong day du dai, nen chi kiem tra "khong loi TIEU
+        # DE/encoding/nav-leakage/URL" (cac check khong phu thuoc do dai),
+        # khong khang dinh `passed` toan phan.
+        for item in ket_qua.review_items:
+            ten_that_bai = {c.name for c in item.quality.checks if not c.passed}
+            self.assertNotIn("title", ten_that_bai)
+            self.assertNotIn("encoding", ten_that_bai)
+            self.assertNotIn("nav_leakage", ten_that_bai)
+            self.assertNotIn("source_url", ten_that_bai)
+
+    def test_muc_FAILED_khong_co_bao_cao_chat_luong(self):
+        pages_hong = dict(_PAGES)
+        del pages_hong[f"{_BASE}/truyen/thu-nghiem/chuong-2"]
+        adapter = GenericIndexAdapter(FixtureFetcher(pages_hong), chapter_href_pattern=r"/chuong-\d+",
+                                       title_suffix_to_strip=" - Trang Web Giả")
+        pipeline = StoryIngestionPipeline(adapter, ScrapeState())
+        ket_qua = pipeline.run(f"{_BASE}/truyen/thu-nghiem")
+        muc_loi = next(i for i in ket_qua.review_items if i.decision == IngestionDecision.FAILED)
+        self.assertIsNone(muc_loi.quality)
+
     def test_chay_lai_ngay_sau_do_khong_con_gi_de_lam(self):
         # Idempotent: state da ghi tu lan chay truoc, resume() phai loc het.
         state = ScrapeState()

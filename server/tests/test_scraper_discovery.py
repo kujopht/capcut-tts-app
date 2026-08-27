@@ -291,6 +291,42 @@ class NumberedPaginationPatternTest(unittest.TestCase):
         assert re.search(proposal.next_page_url_pattern, "/truyen/mot-truyen-hay?page=2")
 
 
+class FragmentOnlyClusterTest(unittest.TestCase):
+    """Phase 11 (canary that tren Project Gutenberg): mot trang SACH-MOT-
+    TRANG dieu huong chuong bang neo noi bo (`#chap01`, `#chap02`, ...)
+    tao ra nhieu href TUYET DOI phan biet (khac fragment) nhung TAT CA
+    cung tro ve MOT URL server-side duy nhat — KHONG duoc de xuat nham la
+    mot danh sach nhieu trang chuong that su."""
+
+    def test_neo_noi_bo_cung_mot_trang_khong_duoc_de_xuat_la_cum_chuong(self):
+        links = "".join(
+            f'<li><a href="/sach/toan-van.htm#chap{i:02d}">Chương {i}</a></li>'
+            for i in range(1, 13)
+        )
+        html = _index_html(links)
+        pages = {_INDEX_URL: html}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_url_pattern is None, (
+            "12 liên kết neo nội bộ cùng một trang KHÔNG được đề xuất "
+            "thành một cụm chương — chúng cùng trỏ về MỘT URL server-side")
+        assert proposal.confidence == SourceConfidence.LOW
+
+    def test_url_khac_nhau_that_su_van_duoc_gop_cum_binh_thuong(self):
+        # Doi chung: cac href PHAN BIET THAT SU (khong chi khac fragment)
+        # van phai duoc gop cum nhu truoc — sua loi khong duoc lam hong
+        # truong hop binh thuong.
+        links = "".join(
+            f'<li><a href="/truyen/mot-truyen-hay/chuong-{i}">Chương {i}</a></li>'
+            for i in range(1, 6)
+        )
+        pages = {_INDEX_URL: _index_html(links), _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_url_pattern is not None
+        assert proposal.chapter_count_estimate == 5
+
+
 class TierEscalationBlockedReasonTest(unittest.TestCase):
     """Phase 10: trang muc luc cong khai, du tin hieu (JSON-LD/tieu de) —
     nhung trang CHUONG MAU thuc te bi chan dang nhap/CAPTCHA/paywall PHAI

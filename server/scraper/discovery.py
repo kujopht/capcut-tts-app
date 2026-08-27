@@ -303,6 +303,20 @@ def _chapterish_fraction(items: List[Tuple[str, str]]) -> float:
     return hits / len(items)
 
 
+def _so_url_phan_biet_bo_qua_fragment(items: List[Tuple[str, str]]) -> int:
+    """So URL PHAN BIET THAT SU trong `items` sau khi bo qua fragment
+    (`#...`) — mot trang SACH-MOT-TRANG dieu huong chuong bang neo noi bo
+    (vd Project Gutenberg: `...11-h.htm#chap01`, `#chap02`, ...) co the
+    tao ra NHIEU href tuyet doi PHAN BIET (khac fragment) nhung TAT CA deu
+    tro ve CUNG mot URL server-side (fragment khong gui len server) — cung
+    NOI DUNG trang duoc fetch lap lai nhieu lan thay vi tung chuong rieng.
+    Dung ham nay o `_pick_chapter_cluster` de LOAI cum nhu vay, thay vi de
+    xuat mot "danh sach chuong" ma thuc ra la MOT trang lap lai — phat
+    hien qua canary that (Phase 11 Story Harvester V3, tren mot dau sach
+    Gutenberg that su dung dieu huong neo noi bo)."""
+    return len({href.split("#", 1)[0] for href, _text in items})
+
+
 def _pick_chapter_cluster(groups: Dict[str, List[Tuple[str, str]]]
                           ) -> Tuple[Optional[str], List[Tuple[str, str]]]:
     """Chon nhom co kha nang la danh sach chuong nhat: uu tien SO LUONG lon
@@ -318,10 +332,18 @@ def _pick_chapter_cluster(groups: Dict[str, List[Tuple[str, str]]]
     de xuat mot pattern khong co `\\d+` se la mot chuoi van ban THUONG
     khong neo, co the khop NHAM bat ky href nao chua no lam chuoi con. Loai
     ung vien nhu vay THAY VI de xuat mot pattern nguy hiem — phat hien qua
-    review doc lap (Codex)."""
+    review doc lap (Codex).
+
+    BAT BUOC THEM (Phase 11, canary that): sau khi bo qua fragment, VAN
+    con it nhat `_MIN_CLUSTER_SIZE` URL PHAN BIET THAT SU — xem
+    `_so_url_phan_biet_bo_qua_fragment`. Thieu dieu kien nay, mot trang
+    dung dieu huong neo noi bo (MOT URL server-side duy nhat, nhieu
+    fragment khac nhau) se bi nham la mot danh sach nhieu trang chuong
+    THAT SU."""
     candidates = [
         (shape, items) for shape, items in groups.items()
         if len(items) >= _MIN_CLUSTER_SIZE and "#" in shape
+        and _so_url_phan_biet_bo_qua_fragment(items) >= _MIN_CLUSTER_SIZE
     ]
     if not candidates:
         return None, []

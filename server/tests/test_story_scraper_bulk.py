@@ -241,6 +241,26 @@ class RetryFailedTest(unittest.TestCase):
         dem = store.count_items_by_status(run.run_id)
         self.assertEqual(dem[ScrapeItemStatus.REVIEW_READY.value], 3)
 
+    def test_retry_tren_dot_da_HUY_khong_lam_muc_no_hoi_sinh_lai(self):
+        """Phat hien qua mot lan di qua luong operator that (huy roi bam
+        'Thử lại tất cả lỗi'): mot dot vua bi HUY (chua dung toi muc nao,
+        tat ca con `pending` theo dung tinh chat huy an toan) — goi
+        `retry_failed` (0 muc that su duoc thu lai, vi khong co muc
+        `failed` nao) KHONG duoc am tham dua dot tro lai `RUNNING`. Truoc
+        day dieu kien hoi sinh chi kiem "co pending hay khong" (dung, vi
+        cac muc chua dung toi VAN pending) ma khong kiem da_thu > 0, vo
+        hieu hoa quyet dinh huy cua operator ngoai y muon."""
+        _, store, service = _tao_bo_ba(chapters_per_cycle=5)
+        run = service.plan_run(_SERIES_URL)
+        service.request_cancel(run.run_id)
+        service.drive_once(run.run_id)  # hoan tat huy — muc van con pending
+        self.assertEqual(store.get_run(run.run_id).status, ScrapeRunStatus.CANCELLED)
+
+        ket = service.retry_failed(run.run_id)
+        self.assertEqual(ket["retried"], 0)
+        self.assertEqual(store.get_run(run.run_id).status, ScrapeRunStatus.CANCELLED,
+                         "huy phai duoc GIU NGUYEN, khong bi thu lai hoi sinh am tham")
+
 
 class SkipTest(unittest.TestCase):
     def test_skip_ghi_vao_state_va_bi_loai_khoi_plan_run_sau(self):

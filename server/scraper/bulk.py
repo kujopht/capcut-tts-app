@@ -325,8 +325,16 @@ class ScrapeRunService:
         dem = self._store.count_items_by_status(run_id)
         truong: Dict[str, Any] = self._truong_dem(dem)
         run_hien_tai = self._store.get_run(run_id)
-        if (run_hien_tai.is_terminal
-                and dem.get(ScrapeItemStatus.PENDING.value, 0) > 0):
+        # CHI hoi sinh khi LAN GOI NAY that su dua it nhat mot muc `failed`
+        # ve `pending` (`da_thu > 0`) — KHONG PHAI chi vi dot dang co muc
+        # `pending` VI LY DO KHAC (vd operator vua CHU DONG huy dot, cac
+        # muc chua dung toi con nguyen `pending` theo dung tinh chat huy an
+        # toan). Truoc day chi kiem "co pending hay khong" khien goi
+        # `retry_failed` tren mot dot DA HUY (khong co muc failed nao,
+        # `da_thu == 0`) am tham HOI SINH lai dot do ve RUNNING — huy an
+        # toan bi vo hieu ngoai y muon cua operator. Phat hien qua mot lan
+        # di qua luong operator that (huy roi thu lai).
+        if run_hien_tai.is_terminal and da_thu > 0:
             truong.update(status=ScrapeRunStatus.RUNNING, cancelled_at="",
                           finished_at="", last_error="")
         run = self._store.save_run(run_id, **truong)

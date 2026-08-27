@@ -105,9 +105,16 @@ _NGOAI_TRUYEN_RE = re.compile(r"\bngoại truyện\b|\bngoai truyen\b", re.IGNOR
 #: XIET CHAT hon MOT BUOC bang loai truong hop "full" di lien ngay truoc mot
 #: nhan do phan giai pho bien, giam sai so ma van giu duoc "full"/"trọn bộ"/
 #: "tổng hợp" dung mot minh (khong kem nhan do phan giai) nhu tin hieu hop le.
+#: LUU Y (sua loi): phan cach giua "full" va nhan do phan giai KHONG chi la
+#: khoang trang ("Full HD") ma con hay gap dang GACH NOI ("Full-HD") hoac
+#: DINH LIEN ("FullHD") — negative lookahead phai chap nhan CA BA dang nay
+#: (`[\s-]*` = 0+ khoang trang/gach noi), neu khong "Full-HD" se lot qua va
+#: bi hieu nham la ban day du (`la_ban_day_du=True`) trong khi day CHI la
+#: nhan chat luong.
 _BAN_DAY_DU_RE = re.compile(
     r"\bfull bộ\b|\bfull bo\b|\btổng hợp\b|\btong hop\b|\btrọn bộ\b|\btron bo\b"
-    r"|\ball in one\b|\bfull\b(?!\s*(?:hd|4k|2k|1080p|720p))",
+    r"|\ball in one\b"
+    r"|\bfull\b(?![\s-]*(?:hd|4k|2k|1080p|720p))",
     re.IGNORECASE,
 )
 
@@ -253,10 +260,42 @@ _TIN_HIEU_STRIP_RE = re.compile(
     re.IGNORECASE,
 )
 
-#: Dau ngoac + noi dung ben trong — nhan chat luong/nguon nhu "[Vietsub]",
-#: "(HD)", "【4K】" gan nhu KHONG BAO GIO mang tin hieu ten series, bo het
-#: ca cap ngoac lan noi dung thay vi chi bo dau ngoac.
-_NGOAC_RE = re.compile(r"\[[^\]]*\]|\([^)]*\)|【[^】]*】|『[^』]*』")
+#: Danh sach ALLOWLIST cac nhan META/CHAT LUONG THUAN TUY — nhung tu KHONG
+#: BAO GIO la mot phan ten series/fandom, chi noi ve nguon/do phan giai/trang
+#: thai dich thuat (vd "Vietsub", "HD", "1080p", "Full"). CO CHU DICH giu
+#: HEP va liet ke tuong minh (cung tinh than voi `_BAN_DAY_DU_RE` o tren —
+#: mot danh sach nhan chat luong tuong tu), KHONG dung mau "khop moi noi
+#: dung trong ngoac" chung chung.
+_NHAN_META_TU = (
+    r"full\s*bộ|full\s*bo|trọn\s*bộ|tron\s*bo|tổng\s*hợp|tong\s*hop"
+    r"|all in one|thuyết minh|thuyet minh|eng\s*sub|vietsub"
+    r"|convert|reup|update|audio"
+    r"|full|hd|4k|2k|1080p|720p|480p|360p"
+)
+#: Dau phan cach GIUA nhieu nhan trong CUNG mot cap ngoac (vd
+#: "[Vietsub - HD]", "[Full/HD]", "[Vietsub HD]") — khoang trang hoac cac
+#: ky hieu phan cach pho bien.
+_NHAN_META_SEP = r"[\s\-,|/+]+"
+
+#: Dau ngoac + noi dung ben trong — SUA LOI (Bug 1, xem doc cua ham
+#: `_chuoi_so_sanh`/lich su sua loi): PHIEN BAN CU bo TOAN BO noi dung trong
+#: ngoac mot cach vo dieu kien, khien "[Naruto] Sasuke Tập 1" va "[One
+#: Piece] Sasuke Tập 1" — HAI FANDOM KHAC NHAU — cung rut gon ve chuoi
+#: "sasuke tap 1" giong het nhau va bi cham CAO/1.0 mot cach SAI (gop nham
+#: hai series khac nhau, dung ngay dieu dac ta cam). PHIEN BAN MOI chi bo
+#: cap ngoac khi TOAN BO noi dung ben trong khop VOI ALLOWLIST nhan meta/
+#: chat luong o tren (`_NHAN_META_TU`, co the la MOT hoac NHIEU nhan noi
+#: voi nhau qua `_NHAN_META_SEP`, vd "[Vietsub - HD]") — noi dung ngoac
+#: KHONG thuoc allowlist (vd ten fandom "[Naruto]", ten kenh) duoc GIU
+#: NGUYEN de tham gia so sanh ten series (dau ngoac ban than se bi
+#: `_KY_TU_THUA_RE` don gian boc bo sau do, chi con lai chu).
+_NGOAC_META_RE = re.compile(
+    r"\[\s*(?:" + _NHAN_META_TU + r")(?:" + _NHAN_META_SEP + r"(?:" + _NHAN_META_TU + r"))*\s*\]"
+    r"|\(\s*(?:" + _NHAN_META_TU + r")(?:" + _NHAN_META_SEP + r"(?:" + _NHAN_META_TU + r"))*\s*\)"
+    r"|【\s*(?:" + _NHAN_META_TU + r")(?:" + _NHAN_META_SEP + r"(?:" + _NHAN_META_TU + r"))*\s*】"
+    r"|『\s*(?:" + _NHAN_META_TU + r")(?:" + _NHAN_META_SEP + r"(?:" + _NHAN_META_TU + r"))*\s*』",
+    re.IGNORECASE,
+)
 _KY_TU_THUA_RE = re.compile(r"[^\w\s]", re.UNICODE)
 _KHOANG_TRANG_RE = re.compile(r"\s+")
 
@@ -274,10 +313,13 @@ def _bo_dau_va_thuong(text: str) -> str:
 
 
 def _chuoi_so_sanh(text: str) -> str:
-    """Chuoi CHUAN HOA DAY DU de so sanh tuong dong: bo ca cap ngoac + noi
-    dung ben trong, bo dau + ve thuong, bo dau cau/ky hieu/emoji con lai, gom
-    khoang trang thanh mot dau cach, cat hai dau."""
-    text = _NGOAC_RE.sub(" ", text or "")
+    """Chuoi CHUAN HOA DAY DU de so sanh tuong dong: bo cap ngoac CHI khi
+    noi dung la nhan meta/chat luong thuan tuy (xem `_NGOAC_META_RE`, KHONG
+    bo bat ky noi dung ngoac nao khac vi co the la ten fandom/series), bo
+    dau + ve thuong, bo dau cau/ky hieu/emoji con lai (ke ca dau ngoac cua
+    noi dung KHONG bi bo — chi ky tu ngoac bien mat, chu ben trong o lai),
+    gom khoang trang thanh mot dau cach, cat hai dau."""
+    text = _NGOAC_META_RE.sub(" ", text or "")
     text = _bo_dau_va_thuong(text)
     text = _KY_TU_THUA_RE.sub(" ", text)
     return _KHOANG_TRANG_RE.sub(" ", text).strip()
@@ -311,7 +353,9 @@ _TU_DEM = frozenset({
 
 def _tach_token_noi_dung(text_sach: str) -> frozenset:
     """Tap token CON Y NGHIA (da bo tu dem) cua mot chuoi da lam sach — dung
-    cho phep so Jaccard o `_do_tuong_dong_van_ban`."""
+    cho phep so Jaccard o `_do_tuong_dong_van_ban`, VA (sau khi sua Bug 2)
+    cung dung de CHAN hai tang khop-tuyet-doi (1.0/0.97) khong duoc tu gan
+    nhan CAO khi khong con token noi dung THAT SU nao."""
     return frozenset(t for t in text_sach.split() if t and t not in _TU_DEM)
 
 
@@ -324,8 +368,11 @@ def _do_tuong_dong_van_ban(a: str, b: str) -> Tuple[float, str]:
        trung lap gan nhu chac chan (kha ca nhan chat luong/emoji khac nhau).
     2. Sau khi CAT tin hieu cau truc (tap/phan/chuong/mua/...), phan con lai
        khop TUYET DOI -> 0.97 — cung mot ten series, chi khac so tap/nhan.
-    3. Mot ben la TIEN TO cua ben kia (>= 2 token moi ben, tranh tien to MOT
-       tu chung chung) -> 0.85 — CUNG trong so 0.85 nhu `server/
+    3. Mot ben la TIEN TO cua ben kia THEO TUNG TOKEN TRON VEN (danh sach
+       token cua ben ngan hon phai TRUNG KHOP CHINH XAC voi doan dau cua
+       danh sach token ben dai hon — KHONG phai tien to KY TU tren chuoi
+       da noi lai, xem sua Bug 4 duoi day) (>= 2 token moi ben, tranh tien
+       to MOT tu chung chung) -> 0.85 — CUNG trong so 0.85 nhu `server/
        series_fingerprint.py::similarity()` dung cho quan he tien to, giu
        nhat quan ngu nghia "0.85 nghia la gi" xuyen he thong du hai module
        khong dung chung code. LUU Y QUAN TRONG: diem nay KHONG du de tu no
@@ -340,22 +387,43 @@ def _do_tuong_dong_van_ban(a: str, b: str) -> Tuple[float, str]:
        — neu MOT trong hai ben khong con token noi dung nao (chi toan tu
        dem, hoac rong), tra 0.0 THANG (khong doan mo ho): tu dem trung mot
        minh KHONG duoc tinh la tin hieu tuong dong.
+
+    SUA LOI (Bug 2): buoc 1 va buoc 2 o tren PHAI co it nhat MOT token noi
+    dung THAT SU (khong tinh tu dem, xem `_TU_DEM`) trong chuoi da cat tin
+    hieu cau truc (`_tieu_de_sach`) truoc khi duoc phep tra thang 1.0/0.97 —
+    neu khong, hai tieu de CHI trung o phan tu dem + tin hieu cau truc (vd
+    hai ban ghi CUNG la "Truyện Audio Full Tập 1" nhung THAT RA la hai video
+    khong lien quan chi tinh co dung chung cach dat ten chung chung) se bi
+    cham DIEM CAO mot cach SAI. Khi bi chan o day, ham RƠI XUONG cac buoc
+    duoi (3/4) mot cach TU NHIEN — khong can nhanh rieng: neu hai chuoi da
+    sach GIONG HET nhau (truong hop dien hinh cua loi nay) thi buoc 3 (tu
+    tien to, ban than mot chuoi luon la "tien to" cua chinh no) se ap dung
+    NEU co >= 2 token, dua ket qua ve 0.85 (TRUNG_BINH, KHONG PHAI CAO —
+    dung yeu cau "khong bao gio CAO"); neu < 2 token thi rot tiep xuong
+    buoc 4, noi `noi_dung_a`/`noi_dung_b` rong se tra thang 0.0 (THAP). Ca
+    hai nhanh rot xuong deu AN TOAN (khong bao gio CAO) — day CHINH la dieu
+    dac ta yeu cau, du truong hop "hai chuoi giong het nhau nhung khong co
+    ten rieng" van con mo ho ve mat y nghia (co the la CUNG mot video, co
+    the la hai video khac nhau dat ten chung chung giong nhau) nen chon
+    phuong an AN TOAN (khong tu dong gop) thay vi doan.
     """
     full_a, full_b = _chuoi_so_sanh(a), _chuoi_so_sanh(b)
-    if full_a and full_a == full_b:
+    sach_a, sach_b = _tieu_de_sach(a), _tieu_de_sach(b)
+    noi_dung_a = _tach_token_noi_dung(sach_a)
+    noi_dung_b = _tach_token_noi_dung(sach_b)
+    co_ten_rieng = bool(noi_dung_a) or bool(noi_dung_b)
+
+    if full_a and full_a == full_b and co_ten_rieng:
         return 1.0, "tieu de trung tuyet doi sau chuan hoa"
 
-    sach_a, sach_b = _tieu_de_sach(a), _tieu_de_sach(b)
-    if sach_a and sach_a == sach_b:
+    if sach_a and sach_a == sach_b and co_ten_rieng:
         return 0.97, "ten series trung tuyet doi sau khi cat tin hieu tap/phan/chuong/mua"
 
     tokens_a, tokens_b = sach_a.split(), sach_b.split()
-    if (sach_a and sach_b and len(tokens_a) >= 2 and len(tokens_b) >= 2
-            and (sach_a.startswith(sach_b) or sach_b.startswith(sach_a))):
-        return 0.85, "mot ten series la tien to cua ten kia"
+    if (len(tokens_a) >= 2 and len(tokens_b) >= 2
+            and (tokens_a[:len(tokens_b)] == tokens_b or tokens_b[:len(tokens_a)] == tokens_a)):
+        return 0.85, "mot ten series la tien to cua ten kia (khop tron ven tung token)"
 
-    noi_dung_a = _tach_token_noi_dung(sach_a)
-    noi_dung_b = _tach_token_noi_dung(sach_b)
     if not noi_dung_a or not noi_dung_b:
         return 0.0, "khong du token noi dung (chi con tu dem hoac rong) de so sanh"
 
@@ -380,6 +448,16 @@ class MucDoTinCay(str, Enum):
     CAO = "cao"
     TRUNG_BINH = "trung_binh"
     THAP = "thap"
+
+
+#: Xep hang SO cua tung muc do tin cay — dung DUY NHAT de SO SANH/CHON tot
+#: nhat giua nhieu ket qua (xem `danh_gia_do_tin_cay`), KHONG dung cho muc
+#: dich nao khac. So cang cao nghia la cang dang tin.
+_XEP_HANG_MUC_DO = {
+    MucDoTinCay.CAO: 2,
+    MucDoTinCay.TRUNG_BINH: 1,
+    MucDoTinCay.THAP: 0,
+}
 
 
 @dataclass
@@ -467,8 +545,25 @@ def danh_gia_do_tin_cay(
     So sanh `tieu_de_moi` voi MOT tieu de khac (truyen mot chuoi), HOAC voi
     TAP HOP ten canonical + alias cua mot series DA CO (truyen mot
     `Iterable[str]`, vd `[series.canonical_name, *series.aliases]`). Voi tap
-    hop, so sanh voi TUNG ung vien va lay KET QUA TOT NHAT (diem cao nhat)
-    — chi can MOT alias khop la du, khong doi hoi TAT CA alias deu khop.
+    hop, so sanh voi TUNG ung vien va lay KET QUA TOT NHAT — chi can MOT
+    alias khop la du, khong doi hoi TAT CA alias deu khop.
+
+    SUA LOI (Bug 3): "TOT NHAT" duoc xep hang theo MUC DO TIN CAY TRUOC
+    (CAO > TRUNG_BINH > THAP, xem `_XEP_HANG_MUC_DO`), diem so tho
+    (`diem_tuong_dong`) CHI dung de PHA THE HOA giua cac ket qua CUNG mot
+    muc do. Ly do: `max()` chi so sanh theo diem tho MOT MINH khong an
+    toan khi CO TRUNG DIEM giua hai alias — vi du kinh dien: tieu de "Tiên
+    Nghịch Ngoại Truyện Tập 5" so voi hai alias ['Tiên Nghịch', 'Tiên
+    Nghịch Ngoại Truyện']; ca hai alias deu cho diem tho 0.97 (ten series
+    trung tuyet doi sau khi cat tin hieu cau truc), NHUNG alias dau tien
+    ("Tiên Nghịch") bi CANH BAO xung dot ngoai-truyen ha xuong TRUNG_BINH,
+    con alias thu hai ("Tiên Nghịch Ngoại Truyện") khop CHINH XAC (ca hai
+    deu la ngoai truyen) nen giu nguyen CAO. `max()` tren diem tho don
+    thuan, khi gap trung diem, tra ve PHAN TU DAU TIEN gap trong danh sach
+    (hanh vi tieu chuan cua Python) — neu alias TRUNG_BINH dung truoc alias
+    CAO trong danh sach dau vao, ket qua CUOI CUNG se sai thanh TRUNG_BINH
+    du co mot alias khac khop CHINH XAC hon o muc CAO. Xep hang theo muc do
+    tin cay TRUOC giai quyet dut diem van de nay.
 
     Tieu de rong/None khong nem loi — tra ve muc `THAP` voi ly do ro rang.
     """
@@ -483,7 +578,10 @@ def danh_gia_do_tin_cay(
             "thieu tieu de hoac danh sach alias de so sanh")
 
     ket_qua = [_danh_gia_mot_cap(tieu_de_moi, ung) for ung in ung_vien]
-    return max(ket_qua, key=lambda r: r.diem_tuong_dong)
+    return max(
+        ket_qua,
+        key=lambda r: (_XEP_HANG_MUC_DO[r.muc_do], r.diem_tuong_dong),
+    )
 
 
 __all__ = [

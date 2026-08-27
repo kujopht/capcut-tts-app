@@ -391,5 +391,85 @@ class KetQuaGiaiThichDuocTest(unittest.TestCase):
                 self.assertLessEqual(kq.diem_tuong_dong, 1.0)
 
 
+class SuaLoiCodexReviewTest(unittest.TestCase):
+    """Regression test cho 5 loi cu the do Codex review phat hien (da chay
+    thu va xac nhan tai hien duoc) tren file nay — moi test tai hien DUNG
+    kich ban bi loi, dam bao khong bao gio tai phat trong tuong lai."""
+
+    def test_bug1_fandom_trong_ngoac_khong_bi_xoa_nham_la_nhan_meta(self):
+        """Bug 1 (P1): truoc sua, `_NGOAC_RE` bo TOAN BO noi dung trong
+        ngoac vo dieu kien, nen "[Naruto] Sasuke Tập 1" va "[One Piece]
+        Sasuke Tập 1" — HAI FANDOM KHAC NHAU — cung rut gon ve "sasuke tap
+        1" giong het va bi cham CAO/1.0 (gop nham hai series khac nhau).
+        Sau sua: ngoac chi duoc bo khi noi dung la nhan meta/chat luong
+        THUAN TUY (allowlist); ten fandom trong ngoac phai duoc GIU LAI."""
+        kq = danh_gia_do_tin_cay(
+            "[Naruto] Sasuke Tập 1", "[One Piece] Sasuke Tập 1")
+        self.assertNotEqual(kq.muc_do, MucDoTinCay.CAO)
+
+    def test_bug2_tieu_de_trung_het_nhung_chi_toan_tu_dem_khong_duoc_cao(self):
+        """Bug 2 (P1): truoc sua, nhanh "khop tuyet doi sau chuan hoa" tra
+        1.0/CAO ma khong kiem tra con token NOI DUNG (khac tu dem) nao hay
+        khong — hai ban ghi chi trung o tu dem chung chung ("truyện",
+        "audio", "full") + tin hieu cau truc (tap) VAN bi cham CAO. Sau
+        sua: nhanh nay doi hoi it nhat MOT token noi dung THAT SU truoc
+        khi duoc phep tra CAO; neu khong co, roi tu nhien xuong cac buoc
+        an toan hon (tien to token hoac Jaccard) va KHONG BAO GIO ra CAO.
+        LUU Y (quyet dinh thiet ke o day, ghi lai vi ban chat mo ho): du
+        hai chuoi dau vao o day GIONG HET nhau tung ky tu, van co CHU DICH
+        khong tra CAO — vi khong the phan biet "day la CUNG mot video"
+        voi "day la HAI video khac nhau tinh co dat ten chung chung giong
+        het nhau" (vd hai kenh khac nhau cung dung mau tieu de "Truyện
+        Audio Full Tập 1"); theo nguyen tac AN TOAN o dau file ("khi con
+        mo ho, chon phuong an AN TOAN hon"), ham nay CHON KHONG tu dong
+        gop trong tinh huong nay thay vi doan la trung lap."""
+        kq = danh_gia_do_tin_cay(
+            "Truyện Audio Full Tập 1", "Truyện Audio Full Tập 1")
+        self.assertNotEqual(kq.muc_do, MucDoTinCay.CAO)
+
+    def test_bug3_chon_alias_theo_muc_do_tin_cay_truoc_diem_tho(self):
+        """Bug 3 (P2): truoc sua, `danh_gia_do_tin_cay` chon alias tot
+        nhat bang `max()` tren `diem_tuong_dong` (diem tho) mot minh — khi
+        hai alias cho CUNG mot diem tho (0.97) nhung khac MUC DO TIN CAY
+        (mot ben bi canh bao xung dot ngoai-truyen ha xuong TRUNG_BINH,
+        ben kia khop chinh xac giu CAO), `max()` tra ve PHAN TU DAU TIEN
+        gap trong danh sach khi trung diem — neu alias TRUNG_BINH dung
+        truoc trong danh sach dau vao, ket qua cuoi cung SAI thanh
+        TRUNG_BINH du co alias khac khop CAO hon. Sau sua: xep hang theo
+        MUC DO TIN CAY truoc (CAO > TRUNG_BINH > THAP), diem tho chi de
+        pha the hoa trong CUNG mot muc do."""
+        kq = danh_gia_do_tin_cay(
+            "Tiên Nghịch Ngoại Truyện Tập 5",
+            ["Tiên Nghịch", "Tiên Nghịch Ngoại Truyện"],
+        )
+        self.assertEqual(kq.muc_do, MucDoTinCay.CAO)
+
+    def test_bug4_tien_to_phai_khop_tron_ven_token_khong_phai_ky_tu(self):
+        """Bug 4 (P2): truoc sua, quan he "tien to" dung `str.startswith`
+        tren chuoi da noi lai bang khoang trang, nen "Dau La" va "Dau Lam"
+        khop nham thanh quan he tien to (0.85/TRUNG_BINH) chi vi chuoi
+        "dau lam" TINH CO bat dau bang cac ky tu "dau la" — hai ten nay
+        CHI chung token dau tien ("Dau"), "La" KHONG phai tien to cua
+        "Lam" o muc TU. Sau sua: quan he tien to chi duoc cong nhan khi
+        TOAN BO danh sach token cua ben ngan hon khop CHINH XAC voi doan
+        dau cua danh sach token ben dai hon; truong hop nay phai roi
+        xuong tang Jaccard (con < nguong "san tap ke can" du so tap 1/2 ke
+        nhau) va ket qua o muc THAP."""
+        kq = danh_gia_do_tin_cay("Dau La Tap 1", "Dau Lam Tap 2")
+        self.assertNotEqual(kq.diem_tuong_dong, 0.85)
+        self.assertEqual(kq.muc_do, MucDoTinCay.THAP)
+
+    def test_bug5_full_gach_noi_hd_khong_bi_hieu_nham_la_ban_day_du(self):
+        """Bug 5 (P2): truoc sua, negative lookahead cua `_BAN_DAY_DU_RE`
+        chi chap nhan khoang trang (`\\s*`) giua "full" va nhan do phan
+        giai, nen dang GACH NOI pho bien "Full-HD" khong duoc loai tru va
+        bi hieu nham la tin hieu "ban day du" (video la toan bo tac pham)
+        trong khi day chi la NHAN CHAT LUONG. Sau sua: lookahead chap
+        nhan ca khoang trang LAN gach noi (`[\\s-]*`)."""
+        r = phan_tich_tieu_de("Vĩnh Dạ Tinh Hà Full-HD Tập 3")
+        self.assertFalse(r.la_ban_day_du)
+        self.assertEqual(r.tap.bat_dau, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

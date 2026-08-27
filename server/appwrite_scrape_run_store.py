@@ -52,6 +52,12 @@ from server.secret_redaction import thong_diep_loi_an_toan
 COL_RUNS = "scrape_runs"
 COL_ITEMS = "scrape_run_items"
 
+
+class _ConflictError(Exception):
+    """RIENG cho `create_*_once` — Appwrite tra 409 (trung `documentId`) —
+    khac voi `NotFoundError` (404, ban ghi khong ton tai) va
+    `AppwriteUnavailableError` (moi loi >=400 khac, that su can lo ra)."""
+
 #: Phai khop CHINH XAC schema trong `scripts/setup_appwrite.py`.
 PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_RUNS: (
@@ -228,12 +234,22 @@ class AppwriteScrapeRunStore:
                 f"Không kết nối được Appwrite: {exc}") from exc
         if response.status_code == 404:
             raise NotFoundError("Không tìm thấy bản ghi.")
+        if response.status_code == 409:
+            # RIENG cho `create_*_once` — "da co ban ghi nay" that su, KHAC
+            # voi moi loi >=400 khac (xem nhanh duoi day). Doc review that
+            # tu Codex: gop chung ca hai truoc day lam 401/loi xac thuc/5xx
+            # bi HIEU NHAM thanh "da ton tai", `create_run_once` im lang
+            # tra ve mot ban ghi KHONG co that thay vi bao loi that.
+            raise _ConflictError("Đã tồn tại bản ghi này.")
         if response.status_code >= 400:
             try:
                 body = response.json()
             except Exception:
                 body = None
-            raise NotFoundError(
+            # KHONG PHAI `NotFoundError` — mot loi 401/400/5xx that su phai
+            # LO RA, khong duoc `get_run`/`get_item` nuot thanh `None` (doc
+            # thanh "khong ton tai" trong khi that ra Appwrite dang loi).
+            raise AppwriteUnavailableError(
                 thong_diep_loi_an_toan(body, status_code=response.status_code))
         if response.status_code == 204 or not response.content:
             return {}
@@ -313,7 +329,7 @@ class AppwriteScrapeRunStore:
 
     def create_run_once(self, run: ScrapeRun) -> ScrapeRun:
         """Tao-hoac-lay AN TOAN theo `run.run_id` TAT DINH — Appwrite tu
-        choi `POST` trung `documentId` (409, boc thanh `NotFoundError`), nen
+        choi `POST` trung `documentId` (409, boc thanh `_ConflictError`), nen
         day la compare-and-set that su."""
         moc = run.created_at or self._now()
         data = _run_to_data(replace(run, created_at=moc,
@@ -321,7 +337,7 @@ class AppwriteScrapeRunStore:
         try:
             self._create(COL_RUNS, run.run_id, data)
             return _run_from_doc({**data, "run_id": run.run_id})
-        except NotFoundError:
+        except _ConflictError:
             return _run_from_doc(self._get(COL_RUNS, run.run_id))
 
     def get_run(self, run_id: str) -> Optional[ScrapeRun]:
@@ -356,7 +372,7 @@ class AppwriteScrapeRunStore:
         try:
             self._create(COL_ITEMS, item.item_id, data)
             return _item_from_doc({**data, "item_id": item.item_id})
-        except NotFoundError:
+        except _ConflictError:
             # Xem diem 3 o docstring dau tep: `bulk.py` khong dung gia tri
             # tra ve o nhanh nay, nen bo GET lai la an toan va re hon.
             return item

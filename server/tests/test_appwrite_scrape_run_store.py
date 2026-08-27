@@ -10,12 +10,13 @@ import threading
 import unittest
 from typing import Any, Dict, List, Optional
 
-from server.adapters import NotFoundError
+from server.adapters import AppwriteUnavailableError, NotFoundError
 from server.appwrite_scrape_run_store import (
     COL_ITEMS,
     COL_RUNS,
     PERSISTED_FIELDS,
     AppwriteScrapeRunStore,
+    _ConflictError,
     _int_or_none,
 )
 from server.scraper.run_state import ScrapeItemStatus, ScrapeRun, ScrapeRunItem, ScrapeRunStatus
@@ -57,17 +58,29 @@ class _FakeAppwriteClient:
     """Mo phong REST Appwrite TRONG BO NHO — du de kiem thu round-trip
     create/get/update/list/count ma khong can mang that."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, force_error_status: Optional[int] = None) -> None:
         self.docs: Dict[str, Dict[str, Dict[str, Any]]] = {COL_RUNS: {}, COL_ITEMS: {}}
         self.lock = threading.RLock()
+        #: Buoc MOI yeu cau (tru GET-1) tra ve loi nay — dung de mo phong
+        #: 401/500 that su (khac 404/409) cho `ErrorMappingTest`.
+        self._force_error_status = force_error_status
 
     def request(self, method: str, url: str, *, json: Optional[Dict] = None,
                params: Optional[Dict] = None, headers=None):
         # KHOP HOP DONG THAT: khi `self._client` duoc tiem, `_call` tra ve
         # KET QUA cua `client.request(...)` TRUC TIEP, khong qua buoc doc
         # status-code/`.json()` — nen fake client nay phai TU minh tra ve
-        # dict cuoi cung hoac tu nem `NotFoundError`, giong het nhung gi
-        # `_call` that se lam sau khi xu ly response HTTP that.
+        # dict cuoi cung hoac tu nem dung loai loi, giong het nhung gi
+        # `_call` that se lam sau khi xu ly response HTTP that (404 ->
+        # `NotFoundError`, 409 -> `_ConflictError`, con lai >=400 ->
+        # `AppwriteUnavailableError`).
+        if self._force_error_status == 404:
+            raise NotFoundError("giả lập 404")
+        if self._force_error_status == 409:
+            raise _ConflictError("giả lập 409")
+        if self._force_error_status is not None:
+            raise AppwriteUnavailableError(f"giả lập {self._force_error_status}")
+
         collection = COL_RUNS if COL_RUNS in url else COL_ITEMS
         with self.lock:
             store = self.docs[collection]
@@ -94,7 +107,7 @@ class _FakeAppwriteClient:
             if method == "POST":
                 doc_id = json["documentId"]
                 if doc_id in store:
-                    raise NotFoundError("already exists")
+                    raise _ConflictError("already exists")
                 doc = dict(json["data"])
                 doc["$id"] = doc_id
                 store[doc_id] = doc
@@ -117,8 +130,8 @@ def _settings():
 
 
 class RoundTripTest(unittest.TestCase):
-    def _store(self) -> AppwriteScrapeRunStore:
-        client = _FakeAppwriteClient()
+    def _store(self, *, force_error_status: Optional[int] = None) -> AppwriteScrapeRunStore:
+        client = _FakeAppwriteClient(force_error_status=force_error_status)
         kho = AppwriteScrapeRunStore(_settings(), client=client, now_fn=lambda: "2026-08-27T00:00:00+00:00")
         kho._attrs_cache = {COL_RUNS: set(), COL_ITEMS: set()}  # "không hỏi được" -> gửi hết
         return kho
@@ -196,6 +209,38 @@ class RoundTripTest(unittest.TestCase):
     def test_get_run_khong_ton_tai_tra_ve_None(self) -> None:
         kho = self._store()
         self.assertIsNone(kho.get_run("scr_khong_ton_tai"))
+
+
+class ErrorMappingTest(unittest.TestCase):
+    """Phat hien qua review Codex: truoc day MOI loi >=400 (401/400/5xx)
+    bi gop chung thanh `NotFoundError`, lam `get_run`/`get_item` tra ve
+    `None` (doc thanh "khong ton tai") va `create_*_once` tra ve "da co
+    ban ghi nay" cho ca nhung loi HA TANG that su. Gio 404/409/con-lai
+    phai la BA loai khac nhau."""
+
+    def _store(self, *, force_error_status: int) -> AppwriteScrapeRunStore:
+        client = _FakeAppwriteClient(force_error_status=force_error_status)
+        return AppwriteScrapeRunStore(_settings(), client=client)
+
+    def test_loi_401_KHONG_bi_nuot_thanh_None(self) -> None:
+        kho = self._store(force_error_status=401)
+        with self.assertRaises(AppwriteUnavailableError):
+            kho.get_run("scr_abc")
+
+    def test_loi_500_KHONG_bi_nuot_thanh_da_ton_tai(self) -> None:
+        kho = self._store(force_error_status=500)
+        run = ScrapeRun(source_url="https://x/y", fingerprint="f" * 16, run_id="scr_abc")
+        with self.assertRaises(AppwriteUnavailableError):
+            kho.create_run_once(run)
+
+    def test_404_that_su_van_tra_ve_None(self) -> None:
+        kho = self._store(force_error_status=404)
+        self.assertIsNone(kho.get_run("scr_abc"))
+
+    # `test_create_run_once_idempotent` o `RoundTripTest` da phu 409-that-su
+    # ("da ton tai" -> `_ConflictError` -> GET lai binh thuong, khong nem
+    # loi) — voi ma cu (moi loi deu la `NotFoundError`) test do van "qua"
+    # tinh co; gio no CHI qua neu `_ConflictError` duoc phan biet dung.
 
 
 if __name__ == "__main__":

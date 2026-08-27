@@ -75,14 +75,19 @@ Backend web bọc thêm một lớp mỏng ở `server/tts_bridge.py` — **khô
 - ffmpeg/ffprobe ở `%LOCALAPPDATA%\Microsoft\WinGet\Links\`.
 - Inno Setup nằm ở phạm vi người dùng, không phải `Program Files`.
 
-## AI engineering router
+## AI engineering router (V2)
 
-Chính sách chọn model/effort/subagent cho công việc kỹ thuật trong kho
-này (Haiku cho tra cứu, Sonnet mặc định, Opus cho việc khó/rủi ro cao,
-Fable chỉ dành cho việc CỰC LỚN) — xem `docs/AI_ROUTER.md` cho đầy đủ, và
-`.claude/agents/` cho các subagent cụ thể (`explorer`, `test-analyst`,
-`builder`, `frontend-builder`, `code-reviewer`, `incident-architect`,
-`long-horizon-lead`). Không phải một tính năng sản phẩm.
+Chính sách chọn model/effort/subagent/**provider** cho công việc kỹ thuật
+trong kho này (Haiku cho tra cứu, Sonnet mặc định, Opus cho việc khó/rủi
+ro cao, Fable chỉ dành cho việc CỰC LỚN — cộng thêm từ V2: Google
+Antigravity CLI [`agy`, quota Google AI Pro riêng] và Codex CLI làm hai
+compute pool ngoài, dùng khi lượng Claude đang căng hoặc cần review độc
+lập khác họ model) — xem `docs/AI_ROUTER.md` cho đầy đủ, và
+`.claude/agents/` cho các subagent Claude cụ thể (`explorer`,
+`test-analyst`, `builder`, `frontend-builder`, `code-reviewer`,
+`incident-architect`, `long-horizon-lead`). Không phải một tính năng sản
+phẩm. Không lưu credential của Antigravity/Codex trong repo — cả hai đọc
+phiên đăng nhập từ nơi lưu trữ riêng của hệ điều hành/CLI.
 
 ## Trạng thái
 

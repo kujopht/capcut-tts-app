@@ -5,6 +5,12 @@ MOT dong JSON moi lan goi, KHONG database, KHONG dich vu chay nen. Muc
 dich: sau nay co du lieu that de dieu chinh nguong routing, thay vi chi
 doan theo cam tinh.
 
+V2: them truong `provider` (CLAUDE / CODEX / ANTIGRAVITY) de phan biet
+cong cu ngoai voi subagent Claude ban dia — `tier` van la nhan do "hang
+chi phi" (haiku/sonnet/opus/fable cho Claude; flash/pro/google-sonnet/
+google-opus/gpt-oss cho Antigravity; codex cho Codex), `provider` moi la
+truong phan loai nha cung cap thuc su.
+
 CHI ghi METADATA khong nhay cam — KHONG BAO GIO ghi prompt, noi dung file,
 hay bat ky du lieu rieng tu nao. Xem `_TRUONG_CHO_PHEP` — bat ky khoa nao
 khac se bi tu choi tuong minh (`log_run` nem `ValueError`) thay vi am
@@ -40,19 +46,24 @@ _DUONG_DAN_LOG = Path(__file__).resolve().parent.parent / ".claude" / "router-te
 #: khac (vd "prompt", "content", "output") bi tu choi tuong minh, xem
 #: `log_run`. Day la HANG RAO chu dong, khong phai quy uoc ngam.
 _TRUONG_CHO_PHEP = {
-    "timestamp", "category", "tier", "model", "effort", "seconds",
+    "timestamp", "category", "tier", "provider", "model", "effort", "seconds",
     "success", "tests_run", "tests_passed", "escalated", "escalation_reason",
 }
 
+_NHA_CUNG_CAP_HOP_LE = {"CLAUDE", "CODEX", "ANTIGRAVITY"}
+
 
 def log_run(*, category: str, tier: str, seconds: float, success: bool,
-            model: str = "", effort: str = "", tests_run: bool = False,
-            tests_passed: bool = False, escalated: bool = False,
-            escalation_reason: str = "") -> Dict[str, Any]:
+            provider: str = "CLAUDE", model: str = "", effort: str = "",
+            tests_run: bool = False, tests_passed: bool = False,
+            escalated: bool = False, escalation_reason: str = "") -> Dict[str, Any]:
+    if provider not in _NHA_CUNG_CAP_HOP_LE:
+        raise ValueError(f"provider không hợp lệ: {provider!r} (phải là {_NHA_CUNG_CAP_HOP_LE})")
     ban_ghi = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "category": category,
         "tier": tier,
+        "provider": provider,
         "model": model,
         "effort": effort,
         "seconds": round(seconds, 2),
@@ -87,6 +98,7 @@ def doc_tat_ca() -> List[Dict[str, Any]]:
 def tom_tat() -> Dict[str, Any]:
     ban_ghi = doc_tat_ca()
     theo_tier: Dict[str, Dict[str, Any]] = {}
+    theo_nha_cung_cap: Dict[str, Dict[str, Any]] = {}
     for r in ban_ghi:
         t = r.get("tier", "?")
         so = theo_tier.setdefault(t, {"lan_chay": 0, "thanh_cong": 0, "tong_giay": 0.0, "leo_thang": 0})
@@ -94,7 +106,13 @@ def tom_tat() -> Dict[str, Any]:
         so["thanh_cong"] += 1 if r.get("success") else 0
         so["tong_giay"] += r.get("seconds", 0)
         so["leo_thang"] += 1 if r.get("escalated") else 0
-    return {"tong_so_ban_ghi": len(ban_ghi), "theo_tier": theo_tier}
+
+        p = r.get("provider", "CLAUDE")
+        sp = theo_nha_cung_cap.setdefault(p, {"lan_chay": 0, "thanh_cong": 0, "tong_giay": 0.0})
+        sp["lan_chay"] += 1
+        sp["thanh_cong"] += 1 if r.get("success") else 0
+        sp["tong_giay"] += r.get("seconds", 0)
+    return {"tong_so_ban_ghi": len(ban_ghi), "theo_tier": theo_tier, "theo_nha_cung_cap": theo_nha_cung_cap}
 
 
 def main(argv: List[str]) -> int:
@@ -103,7 +121,11 @@ def main(argv: List[str]) -> int:
 
     p_log = sub.add_parser("log", help="Ghi một bản ghi telemetry")
     p_log.add_argument("--category", required=True)
-    p_log.add_argument("--tier", required=True, choices=["haiku", "sonnet", "opus", "fable"])
+    p_log.add_argument("--tier", required=True, choices=[
+        "haiku", "sonnet", "opus", "fable",
+        "flash", "pro", "google-sonnet", "google-opus", "gpt-oss", "codex",
+    ])
+    p_log.add_argument("--provider", default="CLAUDE", choices=sorted(_NHA_CUNG_CAP_HOP_LE))
     p_log.add_argument("--model", default="")
     p_log.add_argument("--effort", default="")
     p_log.add_argument("--seconds", type=float, required=True)
@@ -119,7 +141,8 @@ def main(argv: List[str]) -> int:
 
     if args.lenh == "log":
         ban_ghi = log_run(
-            category=args.category, tier=args.tier, model=args.model, effort=args.effort,
+            category=args.category, tier=args.tier, provider=args.provider,
+            model=args.model, effort=args.effort,
             seconds=args.seconds, success=args.success, tests_run=args.tests_run,
             tests_passed=args.tests_passed, escalated=args.escalated,
             escalation_reason=args.escalation_reason)

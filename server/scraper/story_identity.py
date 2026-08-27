@@ -97,15 +97,27 @@ def compare_identity(a: IdentitySignals, b: IdentitySignals) -> IdentityComparis
     evidence: List[str] = []
     matched: List[str] = []
 
-    # -- Tin hieu 0: CUNG domain (sau chuan hoa m./www.) — khong con la
-    # cau hoi mirror, CUNG mot nguon vat ly.
-    if a.canonical_url and b.canonical_url and domain_of(a.canonical_url) == domain_of(b.canonical_url):
+    # -- Tin hieu 0: CUNG domain (sau chuan hoa m./www.) — tin hieu RAT
+    # YEU, KHONG BAO GIO tu no dua ra HIGH (sua loi nghiem trong phat hien
+    # qua review doc lap: ban dau nhanh nay tra ve HIGH NGAY LAP TUC chi
+    # can cung domain, truoc ca khi xet CAC tin hieu khac — nghia la HAI
+    # TRUYEN HOAN TOAN KHAC NHAU tren CUNG mot site tong hop/dich thuat
+    # (binh thuong co RAT NHIEU truyen khac nhau) se LUON bi bao "HIGH
+    # confidence: day la cung mot tac pham", YEU HON CA quy tac "khong
+    # duoc HIGH chi tu title" ma chinh module nay dat ra — mot domain
+    # KHONG noi gi ve nguon goc/tac gia/noi dung, chi noi "cung mot may
+    # chu". CHI dung nhu MOT tin hieu bo sung cung cap trong "MEDIUM can
+    # >=2 tin hieu doc lap" ben duoi, khong bao gio du rieng no).
+    cung_domain = bool(
+        a.canonical_url and b.canonical_url
+        and domain_of(a.canonical_url) == domain_of(b.canonical_url))
+    if cung_domain:
         evidence.append(
             f"Hai URL cùng domain ({domain_of(a.canonical_url)}) sau khi "
-            "chuẩn hóa — đây là CÙNG một nguồn, không phải câu hỏi mirror.")
+            "chuẩn hóa — tín hiệu YẾU một mình (một site có thể lưu trữ "
+            "rất nhiều tác phẩm khác nhau), chỉ có ý nghĩa khi kết hợp với "
+            "tín hiệu khác.")
         matched.append("same_domain")
-        return IdentityComparisonResult(
-            confidence=SameWorkConfidence.HIGH, evidence=evidence, matched_signals=matched)
 
     # -- Tin hieu 1: content_hash TRUNG — manh nhat.
     trung_hash = a.sample_content_hashes & b.sample_content_hashes

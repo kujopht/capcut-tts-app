@@ -17,18 +17,45 @@ def _tin_hieu(**kwargs) -> IdentitySignals:
 
 
 class SameDomainTest(unittest.TestCase):
-    def test_cung_domain_ra_HIGH_ngay_ca_khong_co_tin_hieu_nao_khac(self):
+    """Phat hien qua review doc lap (Codex): ban dau `compare_identity`
+    tra ve HIGH NGAY LAP TUC chi vi hai URL cung domain, TRUOC CA khi xet
+    tin hieu nao khac — nghia la HAI TAC PHAM HOAN TOAN KHAC NHAU tren
+    CUNG mot site tong hop/dich thuat (rat pho bien: mot site luu hang
+    nghin truyen khac nhau) luon bi bao "HIGH confidence: cung mot tac
+    pham". Domain KHONG noi gi ve noi dung/tac gia — phai la tin hieu YEU
+    NHAT, khong bao gio du rieng no (giong "description")."""
+
+    def test_cung_domain_KHONG_du_de_len_HIGH_du_khong_co_tin_hieu_nao_khac(self):
         a = _tin_hieu(canonical_url="https://vd.example/truyen/x", title="A")
-        b = _tin_hieu(canonical_url="https://vd.example/truyen/x-moi-slug", title="B hoàn toàn khác")
+        b = _tin_hieu(canonical_url="https://vd.example/truyen/y-hoan-toan-khac", title="B hoàn toàn khác")
         result = compare_identity(a, b)
-        self.assertEqual(result.confidence, SameWorkConfidence.HIGH)
+        self.assertEqual(result.confidence, SameWorkConfidence.LOW)
         self.assertIn("same_domain", result.matched_signals)
 
-    def test_www_va_khong_www_duoc_coi_la_cung_domain(self):
-        a = _tin_hieu(canonical_url="https://www.vd.example/truyen/x")
-        b = _tin_hieu(canonical_url="https://vd.example/truyen/x-khac-slug")
+    def test_cung_domain_CONG_title_mot_minh_van_khong_du_len_HIGH_hay_MEDIUM(self):
+        # same_domain + title (hai tin hieu "khop") VAN phai LOW — ca hai
+        # deu la tin hieu yeu, khong duoc cong don thanh HIGH/MEDIUM gia.
+        a = _tin_hieu(canonical_url="https://vd.example/truyen/x", title="Cùng Tên")
+        b = _tin_hieu(canonical_url="https://vd.example/truyen/y-khac", title="Cùng Tên")
         result = compare_identity(a, b)
-        self.assertEqual(result.confidence, SameWorkConfidence.HIGH)
+        self.assertEqual(result.confidence, SameWorkConfidence.LOW)
+
+    def test_www_va_khong_www_duoc_coi_la_cung_domain_nhung_van_chi_la_tin_hieu_yeu(self):
+        a = _tin_hieu(canonical_url="https://www.vd.example/truyen/x")
+        b = _tin_hieu(canonical_url="https://vd.example/truyen/x-khac-slug", title="Khác hẳn")
+        result = compare_identity(a, b)
+        self.assertIn("same_domain", result.matched_signals)
+        self.assertEqual(result.confidence, SameWorkConfidence.LOW)
+
+    def test_cung_domain_cong_hai_tin_hieu_doc_lap_khac_van_len_duoc_MEDIUM(self):
+        # same_domain khong CAN, nhung khong CHAN MEDIUM khi cac tin hieu
+        # doc lap khac (author + chapter_count) da du.
+        a = _tin_hieu(canonical_url="https://vd.example/truyen/x", title="A",
+                     author="Nguyễn Văn A", chapter_count=50)
+        b = _tin_hieu(canonical_url="https://vd.example/truyen/y-khac", title="B khác hẳn",
+                     author="Nguyễn Văn A", chapter_count=51)
+        result = compare_identity(a, b)
+        self.assertEqual(result.confidence, SameWorkConfidence.MEDIUM)
 
 
 class ContentHashOverlapTest(unittest.TestCase):

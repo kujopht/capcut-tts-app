@@ -37,11 +37,28 @@ from server.scraper.dedupe import content_hash
 #: Cum tu THUONG GAP tren trang dang nhap/loi/tu choi truy cap — CO Y
 #: NGAN, "chac chan la" hon la co gang doan MOI bien the co the co (cung
 #: triet ly voi `quality._NAV_PHRASES`).
+#:
+#: THEM cum tu loi may chu/xin loi CHUNG CHUNG (Phase 3 "profile poisoning
+#: red team", phat hien qua fixture "trang loi dai giong bai viet that" —
+#: mot trang loi 500/bao tri duoc viet THAN THIEN, nhieu doan van, boc
+#: trong <article> that su tung dat HIGH confidence o CA content_extraction_v3
+#: LAN self_healing truoc ban sua nay, vi cac cum tu cu (dang nhap/404)
+#: khong khop): cac cum tu nay CO Y mang giong "van ban ho tro ky thuat"
+#: (vd "da xay ra su co", "internal server error", "lien he ho tro") —
+#: it co kha nang xuat hien tu nhien trong doi thoai/van xuoi tieu thuyet
+#: that su, khac voi cac tu dan chung "loi"/"su co" don le co the xuat
+#: hien trong noi dung chuong hop phap.
 _LOGIN_OR_ERROR_HINT_RE = re.compile(
     r"(đăng nhập để (đọc|xem)|vui lòng đăng nhập|please log ?in|"
     r"you must be logged in|access denied|forbidden|"
     r"trang không tồn tại|page not found|404 not found|"
-    r"không có quyền truy cập|nội dung không khả dụng)",
+    r"không có quyền truy cập|nội dung không khả dụng|"
+    r"đã xảy ra (một )?(lỗi|sự cố)|something went wrong|"
+    r"an error (has )?occurred|internal server error|"
+    r"service (temporarily )?unavailable|503 service unavailable|"
+    r"hệ thống (đang|tạm thời) (bảo trì|gặp sự cố|quá tải)|"
+    r"(please |vui lòng )?(try again later|thử lại sau (vài|ít) phút)|"
+    r"liên hệ (bộ phận )?hỗ trợ khách hàng|contact (customer )?support)",
     re.IGNORECASE,
 )
 

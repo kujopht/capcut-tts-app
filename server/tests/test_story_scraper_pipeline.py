@@ -120,8 +120,9 @@ class RunTest(unittest.TestCase):
         self.assertNotEqual(chapter_moi.content_hash, "hash_cu_gia_lap")
 
         pipeline = StoryIngestionPipeline(adapter, state)
-        quyet_dinh = pipeline._phan_loai_khong_ghi(chapter_moi)
+        quyet_dinh, trung_voi = pipeline._phan_loai_khong_ghi(chapter_moi)
         self.assertEqual(quyet_dinh, IngestionDecision.REVISION)
+        self.assertEqual(trung_voi, [])
 
     def test_loi_mot_chuong_khong_lam_hong_ca_lo(self):
         pages_hong = dict(_PAGES)
@@ -181,8 +182,62 @@ class DryRunTest(unittest.TestCase):
         state.record_success(url_chuong_1, content_hash_value=chapter.content_hash)
 
         pipeline = StoryIngestionPipeline(adapter, state)
-        quyet_dinh = pipeline._phan_loai_khong_ghi(chapter)
+        quyet_dinh, trung_voi = pipeline._phan_loai_khong_ghi(chapter)
         self.assertEqual(quyet_dinh, IngestionDecision.ALREADY_IMPORTED)
+        self.assertEqual(trung_voi, [])
+
+
+class UnexpectedErrorIsolationTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): `run()` tung chi bat
+    `(FetchError, ValueError)` — mot loi KHONG LUONG TRUOC duoc tu buoc
+    phan tich noi bo (vd `RecursionError` tren HTML long bat thuong, xem
+    `content_extraction.py`) se KHONG bi bat, dung ca dot quet vi MOT
+    chuong. Gio bat `Exception` noi chung."""
+
+    def test_loi_bat_thuong_tu_normalize_chapter_khong_dung_ca_dot(self):
+        class _NhaCungCapLoi:
+            tier = None
+
+            def resolve(self, url):
+                return url
+
+            def discover_series(self, url):
+                from server.scraper.contract import SeriesInfo
+                return SeriesInfo(
+                    canonical_url=url, title="T", source_domain="vd.example",
+                    chapter_urls=[f"{url}/c1", f"{url}/c2"])
+
+            def list_chapters(self, series):
+                return list(series.chapter_urls)
+
+            def fetch_chapter(self, url):
+                return "<html></html>"
+
+            def normalize_chapter(self, url, raw_html, series):
+                if url.endswith("/c1"):
+                    raise RecursionError("mô phỏng lỗi không lường trước được")
+                from server.scraper.contract import NormalizedChapter
+                return NormalizedChapter(
+                    source_url=url, canonical_url=url, source_domain="vd.example",
+                    series_title="T", chapter_title="C2", raw_text=raw_html,
+                    clean_text="Nội dung chương hai hợp lệ.",
+                    content_hash="h", source_fingerprint="f")
+
+            def resume(self, state, chapter_urls):
+                return list(chapter_urls)
+
+            def fingerprint(self, chapter):
+                return chapter.source_fingerprint
+
+        pipeline = StoryIngestionPipeline(_NhaCungCapLoi(), ScrapeState())
+        ket_qua = pipeline.run("https://vd.example/truyen")
+
+        self.assertEqual(len(ket_qua.review_items), 2)
+        c1 = next(i for i in ket_qua.review_items if i.url.endswith("/c1"))
+        c2 = next(i for i in ket_qua.review_items if i.url.endswith("/c2"))
+        self.assertEqual(c1.decision, IngestionDecision.FAILED)
+        self.assertIn("mô phỏng lỗi", c1.error)
+        self.assertEqual(c2.decision, IngestionDecision.NEW)
 
 
 if __name__ == "__main__":

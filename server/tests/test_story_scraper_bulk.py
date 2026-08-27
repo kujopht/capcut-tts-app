@@ -117,6 +117,52 @@ class DriveOnceTest(unittest.TestCase):
         self.assertEqual(run_sau.status, ScrapeRunStatus.PARTIAL)
 
 
+class QualityGateOnDriveTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): `quality.py` (11
+    check tat dinh, Phase 6 "khong am tham chap nhan trich xuat yeu") CHUA
+    TUNG duoc goi tren duong `drive_once` THAT truoc ban sua nay — chi co
+    o `pipeline.py::run()` (duong preview/test rieng). Kiem tra o day dam
+    bao drive_once THAT SU cham diem MOI chuong."""
+
+    def test_chuong_hop_le_duoc_cham_diem_dat(self):
+        noi_dung_du_dai = (
+            "Đây là một đoạn văn bản đủ dài để vượt qua ngưỡng kiểm tra "
+            "chất lượng tối thiểu trong bộ kiểm thử tích hợp cổng chất "
+            "lượng của Story Harvester V3, viết thêm cho chắc chắn vượt "
+            "xa hai trăm ký tự tối thiểu cần có trong bài kiểm tra này."
+        )
+        index = ('<html><head><title>Truyện Đạt Chuẩn</title></head><body><ul>'
+                '<li><a href="/f/chuong-1">Chương 1</a></li></ul></body></html>')
+        chuong = (f'<html><body><div class="chapter-content"><p>{noi_dung_du_dai}'
+                 "</p></div></body></html>")
+        pages = {f"{_BASE}/f": index, f"{_BASE}/f/chuong-1": chuong}
+        _, store, service = _tao_bo_ba(pages=pages)
+        run = service.plan_run(f"{_BASE}/f")
+        service.drive_once(run.run_id)
+
+        muc = store.list_items(run.run_id, limit=None)
+        self.assertTrue(muc)
+        for m in muc:
+            self.assertTrue(m.quality_passed, m.quality_warnings)
+            self.assertGreater(m.quality_score, 0)
+
+    def test_chuong_noi_dung_qua_ngan_duoc_gan_co_quality_passed_False(self):
+        index = ('<html><head><title>Truyện Ngắn</title></head><body><ul>'
+                '<li><a href="/e/chuong-1">Chương 1</a></li></ul></body></html>')
+        chuong_ngan = ('<html><body><div class="chapter-content">'
+                      "<p>Quá ngắn.</p></div></body></html>")
+        pages = {f"{_BASE}/e": index, f"{_BASE}/e/chuong-1": chuong_ngan}
+        _, store, service = _tao_bo_ba(pages=pages)
+        run = service.plan_run(f"{_BASE}/e")
+        service.drive_once(run.run_id)
+
+        muc = store.list_items(run.run_id, limit=None)[0]
+        self.assertFalse(muc.quality_passed)
+        self.assertIn("200", muc.quality_warnings)
+        # VAN vao hang doi duyet (khong tu dong loai bo) — chi GAN NHAN.
+        self.assertEqual(muc.status, ScrapeItemStatus.REVIEW_READY)
+
+
 class CancelSafetyTest(unittest.TestCase):
     """Bai test QUAN TRONG NHAT cua file nay — xem docstring
     `server/scraper/bulk.py` ve tinh chat huy AN TOAN."""
@@ -407,6 +453,45 @@ class ItemOrderingTest(unittest.TestCase):
         muc_chuong_4 = next(m for m in muc if m.chapter_url.endswith("chuong-4"))
         self.assertEqual(muc_chuong_4.sequence, max(sequences),
                          "chuong moi phai co sequence LON HON tat ca muc da co")
+
+
+class PossibleDuplicateTest(unittest.TestCase):
+    """Phase 8 Story Harvester V3 — hai URL KHAC NHAU nhung noi dung
+    (content_hash) TRUNG HET phai duoc gan nhan `possible_duplicate`,
+    KHONG tu dong bo qua (van vao hang doi duyet)."""
+
+    def test_hai_chuong_trung_noi_dung_qua_URL_khac_nhau_duoc_gan_nhan(self):
+        noi_dung_trung = (
+            '<html><body><div class="chapter-content"><p>Nội dung hoàn '
+            "toàn giống hệt nhau giữa hai đường dẫn khác nhau, đủ dài để "
+            "vượt ngưỡng tối thiểu cho một vùng nội dung hợp lệ trong bộ "
+            "kiểm thử phát hiện trùng lặp của Story Harvester V3.</p>"
+            "</div></body></html>")
+        index = (
+            '<html><head><title>Truyện Trùng Lặp</title></head><body><ul>'
+            '<li><a href="/d/chuong-1">Chương 1</a></li>'
+            '<li><a href="/d/chuong-2-trung">Chương 2</a></li>'
+            "</ul></body></html>")
+        pages = {
+            f"{_BASE}/d": index,
+            f"{_BASE}/d/chuong-1": noi_dung_trung,
+            f"{_BASE}/d/chuong-2-trung": noi_dung_trung,
+        }
+        pipeline, store, service = _tao_bo_ba(
+            pages=pages, chapters_per_cycle=5)
+        run = service.plan_run(f"{_BASE}/d")
+        service.drive_once(run.run_id)
+
+        muc = store.list_items(run.run_id, limit=None)
+        self.assertEqual(len(muc), 2)
+        muc_1 = next(m for m in muc if m.chapter_url.endswith("chuong-1"))
+        muc_2 = next(m for m in muc if m.chapter_url.endswith("chuong-2-trung"))
+
+        self.assertEqual(muc_1.decision, IngestionDecision.NEW.value)
+        self.assertEqual(muc_2.decision, IngestionDecision.POSSIBLE_DUPLICATE.value)
+        self.assertTrue(muc_2.duplicate_of_url.endswith("chuong-1"))
+        # VAN vao hang doi duyet (khong tu dong bo qua).
+        self.assertEqual(muc_2.status, ScrapeItemStatus.REVIEW_READY)
 
 
 class RunViewTest(unittest.TestCase):

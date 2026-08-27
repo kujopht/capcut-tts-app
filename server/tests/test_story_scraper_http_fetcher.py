@@ -271,5 +271,276 @@ class ConditionalGetTest(unittest.TestCase):
         self.assertEqual(ket_qua.text, "nội dung MỚI")
 
 
+class SsrfProtectionTest(unittest.TestCase):
+    """Phat hien qua review doc lap (Codex): (1) `httpx.Client(follow_redirects=True)`
+    cu tu dong theo redirect ma KHONG kiem tra lai host dich, (2) URL o
+    TANG CAO NHAT (operator/admin dua vao truc tiep) chua bao gio duoc
+    kiem tra IP-rieng-tu o dau ca. Ca hai deu dong lai qua `SsrfBlockedError` +
+    kiem tra TUNG chang (`_theo_redirect_an_toan`)."""
+
+    def test_url_goc_toi_dia_chi_loopback_bi_tu_choi_ngay(self):
+        so_lan_goi = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan_goi.append(1)
+            return httpx.Response(200, text="không bao giờ tới đây")
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch("http://127.0.0.1:6379/")
+        self.assertIn("IP riêng tư", str(ctx.exception))
+        self.assertEqual(so_lan_goi, [], "KHÔNG được kết nối gì cả — từ chối trước khi gọi")
+
+    def test_url_goc_toi_link_local_bi_tu_choi(self):
+        fetcher, dh = _tao_fetcher(lambda r: httpx.Response(200), min_delay_seconds=0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch("http://169.254.169.254/latest/meta-data/")
+
+    def test_redirect_toi_dia_chi_noi_bo_bi_chan_du_host_dau_an_toan(self):
+        """Tai hien CHINH XAC phat hien cua review: host DAU TIEN an toan
+        (vidu.test, qua MockTransport nen "phan giai" duoc binh thuong),
+        nhung no 302 sang mot dia chi loopback — PHAI bi chan o chang
+        THU HAI, khong duoc am tham theo."""
+        so_lan_goi = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan_goi.append(str(request.url))
+            if "vd-truyen.example" in str(request.url):
+                return httpx.Response(
+                    302, headers={"Location": "http://127.0.0.1:8080/internal-admin"})
+            return httpx.Response(200, text="KHONG DUOC THAY NOI DUNG NAY")
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertIn("IP riêng tư", str(ctx.exception))
+        self.assertEqual(len(so_lan_goi), 1,
+                         "chang thu hai (loopback) KHÔNG được thực sự gọi tới")
+
+    def test_chuoi_redirect_hop_le_van_hoat_dong_binh_thuong(self):
+        """Doi chung: mot chuoi redirect toi host CONG KHAI (khong phai
+        IP rieng tu) van phai duoc theo va tra ve dung noi dung — sua SSRF
+        khong duoc lam vo hanh vi redirect hop phap."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if path == "/chuong-1":
+                return httpx.Response(301, headers={"Location": "/chuong-1-moi"})
+            if path == "/chuong-1-moi":
+                return httpx.Response(200, text="nội dung chương thật",
+                                      headers={"ETag": '"abc"'})
+            return httpx.Response(404)
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(ket_qua.text, "nội dung chương thật")
+        self.assertIn("/chuong-1-moi", ket_qua.final_url)
+
+    def test_qua_nhieu_redirect_nem_loi_ro_rang(self):
+        so_lan = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan.append(1)
+            n = len(so_lan)
+            return httpx.Response(302, headers={"Location": f"/vong-{n}"})
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertIn("chuyển hướng", str(ctx.exception))
+
+    def test_ssrf_khong_duoc_thu_lai_nhu_loi_mang_tam_thoi(self):
+        so_lan_goi = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan_goi.append(1)
+            return httpx.Response(200)
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=3)
+        with self.assertRaises(FetchError):
+            fetcher.fetch("http://127.0.0.1/")
+        self.assertEqual(so_lan_goi, [], "từ chối SSRF không cần/không nên thử lại")
+
+
+class ResponseSizeCapTest(unittest.TestCase):
+    """Phat hien qua review doc lap (Codex, "gzip bomb"): httpx tu dong
+    giai nen `Content-Encoding: gzip` TRUOC khi dua du lieu ra — kiem tra
+    `Content-Length` (kich thuoc TREN DAY) khong bat duoc mot than phan
+    hoi NHO nhung giai nen thanh HANG TRAM MB. Kiem tra o day dung
+    streaming, dem byte DA GIAI NEN THAT SU."""
+
+    def test_than_qua_lon_bi_tu_choi_du_khong_nen(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"x" * (2 * 1024 * 1024))
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0,
+                                    max_response_bytes=1024 * 1024)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertIn("giới hạn kích thước", str(ctx.exception))
+
+    def test_gzip_bomb_bi_chan_theo_kich_thuoc_GIAI_NEN_khong_phai_tren_day(self):
+        import gzip
+
+        noi_dung_giai_nen = b"A" * (5 * 1024 * 1024)  # 5MB giai nen
+        nen = gzip.compress(noi_dung_giai_nen)
+        self.assertLess(len(nen), 1024 * 1024, "phai nen NHO hon tran de kiem tra co y nghia")
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=nen, headers={"Content-Encoding": "gzip"})
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0,
+                                    max_response_bytes=1024 * 1024)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertIn("giới hạn kích thước", str(ctx.exception))
+
+    def test_than_duoi_tran_van_tai_binh_thuong(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="nội dung chương bình thường")
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0,
+                                    max_response_bytes=1024 * 1024)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(ket_qua.text, "nội dung chương bình thường")
+
+    def test_than_redirect_qua_lon_cung_bi_tu_choi(self):
+        """Phat hien qua review doc lap (Codex, verify pass): nhanh xu ly
+        redirect (3xx) ban dau GOI `resp.read()` KHONG GIOI HAN — mot chang
+        redirect TRUNG GIAN (khong phai phan hoi cuoi cung) do ke tan cong
+        dieu khien co the tra ve than KHONG LO GIOI HAN, tai dien chinh
+        loi "gzip bomb" tren mot nhanh khac. PHAI ap tran cho CA redirect."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                302, content=b"x" * (2 * 1024 * 1024),
+                headers={"Location": "/noi-den"})
+
+        fetcher, dh = _tao_fetcher(handler, min_delay_seconds=0, max_retries=0,
+                                    max_response_bytes=1024 * 1024)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertIn("giới hạn kích thước", str(ctx.exception))
+
+
+class RobotsRedirectHostMismatchTest(unittest.TestCase):
+    """Phat hien qua review doc lap (Codex, verify pass): `_robots_cache`
+    luu ket qua duoi khoa host GOC, nhung neu robots.txt cua host GOC
+    redirect sang MOT HOST KHAC, noi dung do la CUA HOST KIA — ap dung cho
+    host goc se ap SAI chinh sach (qua long hoac qua chat mot cach ngoai
+    y muon)."""
+
+    def test_robots_txt_redirect_sang_host_khac_khong_duoc_tin_dung(self):
+        """Dung mot chinh sach HAN CHE (`Disallow: /`) o host-khac.example
+        — neu loi CU con (cache dua tren host goc nhung noi dung tu host
+        khac) van con, fetch binh thuong toi `vd-truyen.example` se bi
+        CHAN OAN (`RobotsDisallowedError`). Sau ban sua: host goc duoc coi
+        la "khong co robots.txt rieng" (an toan mac dinh la cho phep),
+        KHONG "thua huong" chinh sach han che cua host khac."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            if "vd-truyen.example" in str(request.url) and request.url.path == "/robots.txt":
+                return httpx.Response(
+                    302, headers={"Location": "https://host-khac.example/robots.txt"})
+            if "host-khac.example" in str(request.url):
+                return httpx.Response(200, text="User-agent: *\nDisallow: /")
+            return httpx.Response(200, text="nội dung bình thường")
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        dh = _DongHoGia()
+        fetcher = HttpFetcher(client=client, sleep_fn=dh.sleep, clock_fn=dh.now,
+                              min_delay_seconds=0, respect_robots=True)
+
+        ket_qua = fetcher.fetch(f"{_BASE}/duong-binh-thuong")
+        self.assertEqual(ket_qua.status_code, 200)
+
+
+class RetryAfterAndTooManyRequestsTest(unittest.TestCase):
+    """Overnight ("network resilience"): 429 (Too Many Requests) la loi
+    TAM THOI (gioi han toc do), KHONG PHAI loi 4xx vinh vien nhu 404 —
+    truoc ban sua nay bi coi nhu 404 va KHONG BAO GIO duoc thu lai. Khi
+    server co header `Retry-After`, PHAI cho DUNG khoang do thay vi
+    backoff mu."""
+
+    def test_429_duoc_thu_lai_khong_bi_coi_nhu_loi_client_vinh_vien(self):
+        so_lan_goi = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan_goi.append(1)
+            if len(so_lan_goi) < 3:
+                return httpx.Response(429, text="rate limited")
+            return httpx.Response(200, text="nội dung thật")
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=2, min_delay_seconds=0)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(ket_qua.text, "nội dung thật")
+        self.assertEqual(len(so_lan_goi), 3)
+
+    def test_429_qua_so_lan_thu_lai_van_nem_loi_ro_rang(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, text="rate limited")
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertIn("429", str(ctx.exception))
+
+    def test_retry_after_so_giay_duoc_ton_trong_thay_vi_backoff_mu(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, headers={"Retry-After": "17"})
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0,
+                                    backoff_base_seconds=1.0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(dh.slept, [17.0], "phải chờ đúng Retry-After, không phải backoff mũ")
+
+    def test_retry_after_dang_http_date_duoc_doc_dung(self):
+        from email.utils import format_datetime
+        from datetime import datetime, timedelta, timezone
+
+        khi = datetime.now(timezone.utc) + timedelta(seconds=10)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, headers={"Retry-After": format_datetime(khi, usegmt=True)})
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(len(dh.slept), 1)
+        self.assertAlmostEqual(dh.slept[0], 10.0, delta=1.0)
+
+    def test_retry_after_khong_hop_le_lui_ve_backoff_mu(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, headers={"Retry-After": "not-a-valid-value"})
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0,
+                                    backoff_base_seconds=1.0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(dh.slept, [1.0])
+
+    def test_retry_after_qua_lon_bi_gioi_han_hop_ly(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, headers={"Retry-After": "999999999"})
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(dh.slept, [300.0], "phải bị chặn ở trần hợp lý, không tin tuyệt đối server")
+
+    def test_503_co_retry_after_cung_duoc_ton_trong(self):
+        so_lan_goi = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan_goi.append(1)
+            if len(so_lan_goi) < 2:
+                return httpx.Response(503, headers={"Retry-After": "5"})
+            return httpx.Response(200, text="ok")
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0,
+                                    backoff_base_seconds=1.0)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(ket_qua.text, "ok")
+        self.assertEqual(dh.slept, [5.0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -289,3 +289,193 @@ class NumberedPaginationPatternTest(unittest.TestCase):
         assert proposal.pagination_strategy == PaginationStrategy.NUMBERED_PAGES
         assert proposal.next_page_url_pattern is not None
         assert re.search(proposal.next_page_url_pattern, "/truyen/mot-truyen-hay?page=2")
+
+
+class MultipleJsonLdObjectsTest(unittest.TestCase):
+    """Overnight ("unknown-site discovery red team"): mot trang co the co
+    NHIEU khoi JSON-LD, KHONG PHAI tat ca deu lien quan den "tac pham"
+    dang xet (vd mot khoi "Article" gioi thieu/quang cao xuat hien TRUOC
+    khoi "Book" that trong mang) — tieu de KHONG duoc lay tu khoi SAI chi
+    vi no xuat hien truoc theo thu tu mang."""
+
+    def test_khoi_article_khong_lien_quan_xuat_hien_truoc_khoi_book_khong_thang(self):
+        # KHONG dung `_index_html()` — no co san `og:title`, se thang JSON-LD
+        # truoc ca khi xet toi (title = meta.get("og:title") or ...), khong
+        # con kiem tra duoc dung logic uu tien JSON-LD dang xet o day.
+        links = "\n".join(
+            f'<li><a href="/truyen/mot-truyen-hay/chuong-{i}">Chương {i}</a></li>'
+            for i in range(1, 6))
+        html = f"""
+        <html><head><title>Trang không có og:title</title>
+        <script type="application/ld+json">
+        [{{"@type": "Article", "headline": "Bài viết quảng cáo không liên quan"}},
+         {{"@type": "Book", "name": "Tên Truyện Thật Sự",
+           "author": {{"name": "Tác Giả Thật"}}}}]
+        </script>
+        </head><body><ul>{links}</ul></body></html>
+        """
+        pages = {_INDEX_URL: html, _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        self.assertEqual(proposal.work_title, "Tên Truyện Thật Sự")
+        self.assertEqual(proposal.author, "Tác Giả Thật")
+
+    def test_khong_co_khoi_uu_tien_nao_van_lui_ve_meta_binh_thuong(self):
+        # Doi chung: KHONG co Book/CreativeWork/Article/WebSite nao ca ->
+        # van lui ve og:title/page.title binh thuong, khong loi.
+        html = _index_html().replace(
+            "</head>",
+            '<script type="application/ld+json">'
+            '{"@type": "Person", "name": "Không Liên Quan"}'
+            "</script></head>")
+        pages = {_INDEX_URL: html, _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+        self.assertEqual(proposal.work_title, "Một Truyện Hay")
+
+
+class FragmentOnlyClusterTest(unittest.TestCase):
+    """Phase 11 (canary that tren Project Gutenberg): mot trang SACH-MOT-
+    TRANG dieu huong chuong bang neo noi bo (`#chap01`, `#chap02`, ...)
+    tao ra nhieu href TUYET DOI phan biet (khac fragment) nhung TAT CA
+    cung tro ve MOT URL server-side duy nhat — KHONG duoc de xuat nham la
+    mot danh sach nhieu trang chuong that su."""
+
+    def test_neo_noi_bo_cung_mot_trang_khong_duoc_de_xuat_la_cum_chuong(self):
+        links = "".join(
+            f'<li><a href="/sach/toan-van.htm#chap{i:02d}">Chương {i}</a></li>'
+            for i in range(1, 13)
+        )
+        html = _index_html(links)
+        pages = {_INDEX_URL: html}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_url_pattern is None, (
+            "12 liên kết neo nội bộ cùng một trang KHÔNG được đề xuất "
+            "thành một cụm chương — chúng cùng trỏ về MỘT URL server-side")
+        assert proposal.confidence == SourceConfidence.LOW
+
+    def test_url_khac_nhau_that_su_van_duoc_gop_cum_binh_thuong(self):
+        # Doi chung: cac href PHAN BIET THAT SU (khong chi khac fragment)
+        # van phai duoc gop cum nhu truoc — sua loi khong duoc lam hong
+        # truong hop binh thuong.
+        links = "".join(
+            f'<li><a href="/truyen/mot-truyen-hay/chuong-{i}">Chương {i}</a></li>'
+            for i in range(1, 6)
+        )
+        pages = {_INDEX_URL: _index_html(links), _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_url_pattern is not None
+        assert proposal.chapter_count_estimate == 5
+
+
+class TierEscalationBlockedReasonTest(unittest.TestCase):
+    """Phase 10: trang muc luc cong khai, du tin hieu (JSON-LD/tieu de) —
+    nhung trang CHUONG MAU thuc te bi chan dang nhap/CAPTCHA/paywall PHAI
+    ep confidence ve LOW, khong duoc de lot thanh MEDIUM chi vi cac tin
+    hieu KHAC tren trang muc luc van dat diem (tai hien khoang trong ma
+    tier_escalation.py duoc xay de dong lai — truoc ban sua nay, day chi
+    la "khong xac dinh duoc vung noi dung", giong het truong hop mot site
+    chi don gian dung cau truc la, khong canh bao rieng ve chan truy cap)."""
+
+    def test_chuong_mau_giong_trang_dang_nhap_ep_LOW_khong_phai_MEDIUM(self):
+        trang_dang_nhap = (
+            '<html><head><title>Đăng nhập</title></head><body>'
+            "<p>Vui lòng đăng nhập để đọc tiếp nội dung chương này, cảm ơn "
+            "bạn đã quan tâm theo dõi câu chuyện trong suốt thời gian qua.</p>"
+            "</body></html>")
+        pages = {_INDEX_URL: _index_html(), _CHAPTER_1: trang_dang_nhap}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.confidence == SourceConfidence.LOW
+        assert any("auth_required" in e for e in proposal.evidence)
+
+    def test_chuong_mau_giong_captcha_ep_LOW(self):
+        trang_captcha = (
+            '<html><head><title>Xác minh</title></head><body>'
+            "<p>Please complete the CAPTCHA to continue browsing this "
+            "site and verify you are human before proceeding further.</p>"
+            "</body></html>")
+        pages = {_INDEX_URL: _index_html(), _CHAPTER_1: trang_captcha}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.confidence == SourceConfidence.LOW
+        assert any("captcha" in e for e in proposal.evidence)
+
+    def test_chuong_mau_giong_paywall_ep_LOW(self):
+        trang_paywall = (
+            '<html><head><title>Nội dung Premium</title></head><body>'
+            "<p>Subscribe to read the rest of this premium chapter and "
+            "unlock this chapter along with the entire archive today.</p>"
+            "</body></html>")
+        pages = {_INDEX_URL: _index_html(), _CHAPTER_1: trang_paywall}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.confidence == SourceConfidence.LOW
+        assert any("paywall" in e for e in proposal.evidence)
+
+    def test_chuong_mau_khong_co_vung_noi_dung_nhung_khong_bi_chan_van_MEDIUM(self):
+        """Doi chung: mot trang chuong that su khong ro cau truc (khong
+        phai trang chan) van chi la MEDIUM nhu truoc, khong bi ep LOW oan."""
+        trang_khong_ro = "<html><body><p>Nội dung ngắn không rõ cấu trúc.</p></body></html>"
+        pages = {_INDEX_URL: _index_html(), _CHAPTER_1: trang_khong_ro}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.confidence == SourceConfidence.MEDIUM
+        assert not any("auth_required" in e or "captcha" in e or "paywall" in e
+                      for e in proposal.evidence)
+
+
+class TrackingQueryParamTest(unittest.TestCase):
+    """Overnight ("unknown-site discovery red team"): tham so theo doi
+    (`utm_source`, ...) tren lien ket chuong KHONG duoc lam sai pattern de
+    xuat (bi khoa cung VOI gia tri tracking, vo hieu ngay khi chien dich
+    quang cao doi) hay dem sai so chuong (cung chuong, khac tracking, bi
+    dem hai lan)."""
+
+    def test_tham_so_theo_doi_khong_bi_dua_vao_pattern_de_xuat(self):
+        links = "\n".join(
+            f'<li><a href="/truyen/mot-truyen-hay/chuong-{i}'
+            '?utm_source=facebook&utm_medium=social">Chương '
+            f'{i}</a></li>' for i in range(1, 6))
+        pages = {_INDEX_URL: _index_html(links), _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_url_pattern is not None
+        assert "utm_source" not in proposal.chapter_url_pattern
+        # Mau van phai khop URL that (co tracking) VA URL sach (khong con
+        # tracking, vd sau khi site doi chien dich quang cao).
+        assert re.search(proposal.chapter_url_pattern,
+                         "/truyen/mot-truyen-hay/chuong-3?utm_source=facebook")
+        assert re.search(proposal.chapter_url_pattern,
+                         "/truyen/mot-truyen-hay/chuong-3")
+
+    def test_cung_chuong_khac_tham_so_theo_doi_khong_bi_dem_hai_lan(self):
+        links = (
+            '<li><a href="/truyen/mot-truyen-hay/chuong-1?utm_source=facebook">C1 (FB)</a></li>'
+            '<li><a href="/truyen/mot-truyen-hay/chuong-1?utm_source=twitter">C1 (TW)</a></li>'
+            '<li><a href="/truyen/mot-truyen-hay/chuong-2">C2</a></li>'
+            '<li><a href="/truyen/mot-truyen-hay/chuong-3">C3</a></li>'
+        )
+        pages = {_INDEX_URL: _index_html(links), _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+        assert proposal.chapter_count_estimate == 3, (
+            "chương 1 xuất hiện 2 lần (khác tracking) phải chỉ tính là MỘT")
+
+
+class CategoryNavigationMixedWithTocTest(unittest.TestCase):
+    """Overnight ("unknown-site discovery red team"): mot khung dieu huong
+    THE LOAI/TAG (thuong danh so, vd `/the-loai/1`..`/the-loai/N`) KHONG
+    duoc thang danh sach chuong THAT chi vi co NHIEU lien ket hon."""
+
+    def test_khung_the_loai_nhieu_hon_khong_thang_danh_sach_chuong_that(self):
+        the_loai = "".join(
+            f'<a href="/the-loai/{i}">Thể loại {i}</a>' for i in range(1, 8))
+        html = _index_html().replace(
+            "<nav>", f'<nav class="the-loai">{the_loai}')
+        pages = {_INDEX_URL: html, _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_count_estimate == 5
+        assert proposal.chapter_url_pattern is not None
+        assert "the-loai" not in proposal.chapter_url_pattern

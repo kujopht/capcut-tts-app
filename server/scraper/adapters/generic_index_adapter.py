@@ -11,17 +11,54 @@ goi cau hinh. Cau hinh san mot site that (vd mot chuong cu the tren
 from __future__ import annotations
 
 import re
-from typing import List, Optional
-from urllib.parse import urljoin
+from typing import Dict, List, Optional, Tuple
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
+from server.scraper.chapter_ordering import ChapterOrderingSignal, determine_order
 from server.scraper.contract import (
     NormalizedChapter, ScraperTier, SeriesInfo, StoryProvider, canonicalize_url,
 )
+from server.scraper.content_extraction import extract_content_v3
 from server.scraper.dedupe import content_hash, source_fingerprint
 from server.scraper.html_extract import extract
 from server.scraper.http_fetcher import FetchError
 
-_CHAPTER_NUMBER_RE = re.compile(r"(\d+)")
+#: PHAI co TU KHOA CHUONG ngay TRUOC con so — mot regex "chi tim so
+#: bat ky" (`r"(\d+)"` don thuan) tung bat NHAM so trong tieu de/van ban
+#: lien ket KHONG lien quan chuong (vd "Room 101", "District 9",
+#: "Catch-22" bi doc nham thanh chuong 101/9/22) — nghiem trong hon O
+#: `_so_chuong_tu_van_ban` (Phase 3: dung de SAP XEP LAI thu tu chuong,
+#: mot con so bia dat co the lam SAI thu tu ca series, khong chi sai mot
+#: nhan hien thi) — phat hien qua review doc lap (Codex, tai hien that
+#: bang cac tieu de vi du tren). Danh sach tu khoa GIONG
+#: `discovery._CHAPTER_WORD_RE` — dung chung mot triet ly.
+#:
+#: HAI TANG RIENG (Overnight "unknown-site discovery red team"): tieu de
+#: dang "Quyển 2 Chương 10" (cau truc long nhau Tap/Quyen + Chuong, PHO
+#: BIEN trong truyen dai tieng Viet) truoc day bi doc SAI thanh so 2 (tu
+#: "Tập"/"Quyển" KHOP TRUOC trong van ban, `.search()` chi lay khop DAU
+#: TIEN) thay vi so chuong THAT SU (10) — mot loi SAP XEP nghiem trong
+#: (hai "Quyển 2 Chương X" khac nhau se cung bi doc thanh "chuong 2"),
+#: khong chi mot nhan hien thi sai. Sua bang cach uu tien tu khoa CHUONG
+#: THAT (`_TU_KHOA_CHUONG_CHINH`) truoc, CHI lui ve tu khoa Tap/Phan/Quyen
+#: (`_TU_KHOA_CHUONG_PHU`) khi khong co tu khoa chuong that nao trong van
+#: ban — xem `_tim_so_chuong`.
+_TU_KHOA_CHUONG_CHINH_RE = re.compile(
+    r"(?:chương|chuong|chapter|ch\.|episode|hồi|hoi)\s*[:.\-]?\s*(\d+)",
+    re.IGNORECASE,
+)
+_TU_KHOA_CHUONG_PHU_RE = re.compile(
+    r"(?:phần|phan|tập|tap|quyển|quyen)\s*[:.\-]?\s*(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _tim_so_chuong(text: str) -> Optional["re.Match[str]"]:
+    """Uu tien tu khoa CHUONG THAT (`chương`/`chapter`/`hồi`...) — CHI lui
+    ve tu khoa Tap/Phan/Quyen (thuong la SO TAP/QUYEN, khac so chuong)
+    khi van ban khong co tu khoa chuong that nao — xem docstring hang so
+    tren ve loi "Quyển 2 Chương 10" bi doc sai thanh 2."""
+    return _TU_KHOA_CHUONG_CHINH_RE.search(text) or _TU_KHOA_CHUONG_PHU_RE.search(text)
 
 
 def _dam_bao_la_html(result) -> None:
@@ -36,6 +73,33 @@ def _dam_bao_la_html(result) -> None:
     )):
         raise FetchError(
             f"{result.final_url} tra ve content-type khong phai van ban: {ct!r}")
+
+
+#: Tien to host PHO BIEN cho phien ban di dong/desktop cua CUNG mot noi
+#: dung — CHI hai tien to nay (khong doan them), boi vi day la quy uoc RO
+#: RANG, pho bien rong rai (khac voi co gang doan "hai domain khac nhau co
+#: the la CUNG mot site" mot cach chung chung, se rui ro gop nham hai
+#: nguon THAT SU khac nhau).
+_TIEN_TO_MOBILE_DESKTOP = ("www.", "m.")
+
+
+def _khoa_gop_trung_mobile_desktop(url: str) -> str:
+    """Phase 3 Story Harvester V3, bien the "duplicated mobile/desktop
+    links": mot so trang liet ke CA hai lien ket toi CUNG mot chuong — mot
+    qua host "m." (di dong) va mot qua "www."/khong tien to (desktop),
+    CUNG duong dan. `canonicalize_url` (contract.py) KHONG tu gop hai bien
+    the nay (chung la hai host KHAC NHAU ve mat chuoi ky tu) — ham nay tra
+    ve mot KHOA GOM NHOM rieng (bo tien to host, CHI dung de PHAT HIEN
+    trung, KHONG phai URL that su duoc luu/tra ve) de lien ket XUAT HIEN
+    SAU trong danh sach bi loai neu da co mot bien the cung duong dan."""
+    canon = canonicalize_url(url)
+    parts = urlsplit(canon)
+    host = parts.netloc
+    for tien_to in _TIEN_TO_MOBILE_DESKTOP:
+        if host.startswith(tien_to):
+            host = host[len(tien_to):]
+            break
+    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
 class GenericIndexAdapter(StoryProvider):
@@ -67,6 +131,58 @@ class GenericIndexAdapter(StoryProvider):
             re.compile(next_page_href_pattern) if next_page_href_pattern else None
         )
         self._max_index_pages = max_index_pages
+        #: hash doan van -> tap canonical_url cac chuong DA co doan do —
+        #: Phase 6: "boilerplate lap lai qua nhieu trang" (xem
+        #: `content_extraction.py`). CHI dung khi trang KHONG co boundary da
+        #: xac minh tay (xem `normalize_chapter`) — Wikisource/Royal Road
+        #: khong can no. Khoa theo canonical_url (KHONG PHAI mot tap don) de
+        #: `_boilerplate_hashes_cho` co the LOAI TRU chinh chuong dang xu ly
+        #: khi dem — thieu buoc nay, XU LY LAI cung MOT chuong (retry, hoac
+        #: goi `normalize_chapter` hai lan y het, xem
+        #: `IdempotentRerunTest`) se coi CHINH doan van cua no la
+        #: "boilerplate da biet" (tu no xuat hien trong chinh no) va loai bo
+        #: het noi dung — phat hien qua mot lan chay bo test hien co (khong
+        #: phai fixture moi), content_hash ra `sha256("")` o lan goi thu hai.
+        self._boilerplate_chapter_urls_theo_hash: Dict[str, set] = {}
+        #: TAP hash DA XAC NHAN vuot nguong boilerplate — Overnight
+        #: ("memory/CPU characterization", O(N^2) hunt): xem docstring
+        #: `_boilerplate_hashes_cho`.
+        self._da_xac_nhan_boilerplate: set = set()
+
+    #: So chuong KHAC (khong tinh chinh chuong dang xu ly) tung co MOT doan
+    #: van GIONG HET truoc khi doan do bi coi la boilerplate toan site —
+    #: >=2 de tranh loai oan mot doan chi tinh co giong nhau giua HAI chuong
+    #: (vd mot cau thoai lap lai co chu y trong truyen).
+    _SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE = 2
+
+    def _boilerplate_hashes_cho(self, canon_hien_tai: str) -> set:
+        """CHI xet cac hash DA TUNG vuot nguong (`_da_xac_nhan_boilerplate`,
+        duy tri TANG DAN trong `_ghi_nhan_doan_van_boilerplate`) — Overnight
+        ("memory/CPU characterization", O(N^2) hunt): ban dau ham nay quet
+        TOAN BO `_boilerplate_chapter_urls_theo_hash.items()` (MOI doan van
+        DUY NHAT tung thay tren toan site) o MOI LAN GOI (mot lan cho MOI
+        chuong) — do luong that (cProfile) xac nhan day la nguyen nhan
+        CHINH thu hai cua chi phi O(N^2) tren mot dot dai (~2.6/9.2 giay o
+        4000 chuong). Vi SO LUONG doan van THAT SU lap lai (boilerplate that:
+        header/footer/quang cao) luon nho VA ON DINH bat ke series dai bao
+        nhieu (khac SO LUONG doan van DUY NHAT, tang tuyen tinh theo so
+        chuong), gioi han quet o TAP DA XAC NHAN nay chuyen chi phi tu O(tong
+        so doan van DUY NHAT tung thay) thanh O(so boilerplate THAT SU, gan
+        nhu hang so) — KHONG doi ket qua (van tinh loai tru CHINH chuong
+        dang hoi, xem docstring lop ve ly do can loai tru nay), chi doi
+        TAP CAN QUET."""
+        return {
+            h for h in self._da_xac_nhan_boilerplate
+            if len(self._boilerplate_chapter_urls_theo_hash[h] - {canon_hien_tai})
+            >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE
+        }
+
+    def _ghi_nhan_doan_van_boilerplate(self, canon_hien_tai: str, hashes: set) -> None:
+        for h in hashes:
+            tap = self._boilerplate_chapter_urls_theo_hash.setdefault(h, set())
+            tap.add(canon_hien_tai)
+            if len(tap) >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE:
+                self._da_xac_nhan_boilerplate.add(h)
 
     def resolve(self, url: str) -> str:
         try:
@@ -84,20 +200,24 @@ class GenericIndexAdapter(StoryProvider):
 
         seen_chapter = set()
         seen_index_page = {canonicalize_url(result.final_url)}
-        chapter_urls: List[str] = []
+        #: (href_tuyet_doi, van_ban_lien_ket) THEO DUNG thu tu gap — dau
+        #: vao cho `chapter_ordering.determine_order` (Phase 3 Story
+        #: Harvester V3: uu tien so chuong RO RANG trich tu van ban lien
+        #: ket nay hon thu tu RAW cua chinh danh sach nay).
+        tin_hieu_tho: List[Tuple[str, str]] = []
         trang_hien_tai = page
         base_url = result.final_url
 
         for _ in range(self._max_index_pages):
-            for href, _text in trang_hien_tai.links:
+            for href, text in trang_hien_tai.links:
                 if not self._chapter_re.search(href):
                     continue
                 absolute = urljoin(base_url, href)
-                canon = canonicalize_url(absolute)
-                if canon in seen_chapter:
+                khoa_gop_trung = _khoa_gop_trung_mobile_desktop(absolute)
+                if khoa_gop_trung in seen_chapter:
                     continue
-                seen_chapter.add(canon)
-                chapter_urls.append(absolute)
+                seen_chapter.add(khoa_gop_trung)
+                tin_hieu_tho.append((absolute, text))
 
             if self._next_page_re is None:
                 break
@@ -107,6 +227,8 @@ class GenericIndexAdapter(StoryProvider):
                 break
             base_url, trang_hien_tai = trang_ke
 
+        chapter_urls, ordering_evidence = self._sap_xep_chuong(tin_hieu_tho)
+
         return SeriesInfo(
             canonical_url=canonicalize_url(result.final_url),
             title=title,
@@ -114,7 +236,28 @@ class GenericIndexAdapter(StoryProvider):
             author=page.meta.get("author") or page.meta.get("article:author"),
             description=page.meta.get("og:description") or page.meta.get("description"),
             chapter_urls=chapter_urls,
+            ordering_evidence=ordering_evidence,
         )
+
+    def _sap_xep_chuong(self, tin_hieu_tho: List[Tuple[str, str]]) -> Tuple[List[str], str]:
+        """Ap dung phan cap uu tien thu tu (Phase 3 Story Harvester V3, xem
+        `chapter_ordering.py`) tren cac lien ket chuong da tim thay THEO
+        DUNG thu tu gap tren (cac) trang muc luc — tra ve `(chapter_urls,
+        evidence)`. Tach rieng khoi `discover_series` de test doc lap duoc
+        (khong can mo phong ca mot lan fetch)."""
+        signals = [
+            ChapterOrderingSignal(
+                url=href, index_position=vi_tri,
+                explicit_number=self._so_chuong_tu_van_ban(text))
+            for vi_tri, (href, text) in enumerate(tin_hieu_tho)
+        ]
+        ket_qua = determine_order(signals)
+        return ket_qua.ordered_urls, ket_qua.evidence
+
+    @staticmethod
+    def _so_chuong_tu_van_ban(text: str) -> Optional[int]:
+        khop = _tim_so_chuong(text or "")
+        return int(khop.group(1)) if khop else None
 
     def _tim_trang_tiep_theo(self, trang, base_url: str, da_tham: set):
         """Tra ve `(url_moi, ExtractedPage_moi)` cua trang muc luc TIEP
@@ -144,9 +287,25 @@ class GenericIndexAdapter(StoryProvider):
         title = page.meta.get("og:title") or page.title or series.title
         if self._title_suffix and title.endswith(self._title_suffix):
             title = title[: -len(self._title_suffix)].strip()
-
-        clean_text = page.visible_text()
         canon = canonicalize_url(url)
+
+        # `boundary_matched` = trang co the ranh gioi DA XAC MINH TAY (xem
+        # `html_extract.py`, Wikisource/Royal Road) — dung thang, DA CHUNG
+        # MINH dung, khong can cham diem. Nguoc lai (nguon hoc duoc/dang
+        # kham pha, Phase 6 Story Harvester V3): qua `extract_content_v3`
+        # (cham diem ung vien + loai vung rac/boilerplate lap lai), luon
+        # dien `extraction_confidence` de quality gate (xem `quality.py`,
+        # check "Do not silently accept weak extraction").
+        extraction_confidence = ""
+        if page.boundary_matched:
+            clean_text = page.visible_text()
+        else:
+            ket_qua_v3 = extract_content_v3(
+                raw_html, chapter_title=title,
+                known_boilerplate_hashes=self._boilerplate_hashes_cho(canon))
+            clean_text = ket_qua_v3.clean_text
+            extraction_confidence = ket_qua_v3.confidence.value
+            self._ghi_nhan_doan_van_boilerplate(canon, ket_qua_v3.paragraph_hashes)
 
         # CHI tim so trong TIEU DE — tung co nhanh du phong tim trong URL,
         # bo di sau khi phat hien qua review Codex: mot URL dang
@@ -158,7 +317,7 @@ class GenericIndexAdapter(StoryProvider):
         # `None` THAT SU (da la Optional[int] tu dau, xem NormalizedChapter),
         # dung thu tu kham pha (`chapter_urls_to_process`) de sap xep thay
         # vi mot con so bia dat.
-        number_match = _CHAPTER_NUMBER_RE.search(title)
+        number_match = _tim_so_chuong(title)
         chapter_number = int(number_match.group(1)) if number_match else None
 
         return NormalizedChapter(
@@ -174,4 +333,5 @@ class GenericIndexAdapter(StoryProvider):
             chapter_number=chapter_number,
             author=page.meta.get("author") or series.author,
             published_at=page.meta.get("article:published_time"),
+            extraction_confidence=extraction_confidence,
         )

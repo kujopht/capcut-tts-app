@@ -432,7 +432,32 @@ def check_text_length_maximum(chapter: NormalizedChapter) -> CheckResult:
 
 
 # ---------------------------------------------------------------------------
-# 9-10. URL/domain nguon
+# 9. Do tin cay trich xuat V3 (Phase 6 Story Harvester V3)
+# ---------------------------------------------------------------------------
+
+
+def check_extraction_confidence(chapter: NormalizedChapter) -> CheckResult:
+    """`extraction_confidence` CHI duoc dien khi trang KHONG co boundary da
+    xac minh tay (xem `contract.NormalizedChapter.extraction_confidence`,
+    `content_extraction.extract_content_v3`) — rong ("") hoac "high"/"medium"
+    la DAT. "low" nghia la CHINH thuat toan trich xuat da tu danh gia KHONG
+    chac chan ve ket qua cua no — WARN (khong BLOCK, cac check do dai/nav/
+    encoding khac da bat phan lon truong hop THAT su rong/hong; check nay la
+    tin hieu BO SUNG, khong phai gate chinh) de operator biet CAN xem ky
+    chuong nay hon binh thuong, dung theo yeu cau Phase 6 "Do not silently
+    accept weak extraction"."""
+    if chapter.extraction_confidence == "low":
+        return CheckResult(
+            name="extraction_confidence", passed=False, severity=Severity.WARN,
+            reason=("Bo cham diem trich xuat noi dung (Phase 6) tu danh gia "
+                    "ket qua nay la LOW — nguon nay chua co cau hinh xac "
+                    "minh tay, nen he thong khong chac chan da tim dung "
+                    "vung noi dung chuong. Nen xem ky truoc khi duyet."))
+    return CheckResult(name="extraction_confidence", passed=True, severity=Severity.WARN)
+
+
+# ---------------------------------------------------------------------------
+# 10-11. URL/domain nguon
 # ---------------------------------------------------------------------------
 
 
@@ -503,6 +528,7 @@ def assess_chapter_quality(
         check_truncation(chapter),
         check_text_length_minimum(chapter),
         check_text_length_maximum(chapter),
+        check_extraction_confidence(chapter),
         check_source_url(chapter),
         check_source_domain(chapter),
     ]

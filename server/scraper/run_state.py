@@ -93,6 +93,12 @@ class ScrapeRun:
     status: ScrapeRunStatus = ScrapeRunStatus.PLANNING
     series_title: str = ""
     source_domain: str = ""
+    #: Tac gia/mo ta cua SERIES (KHONG PHAI tung chuong) — Phase 7 Story
+    #: Harvester V3: dau vao cho `story_identity.compare_identity` khi kiem
+    #: tra MOT nguon moi co phai mirror cua dot nay hay khong (xem
+    #: `scraper_ops_service.ScraperOpsService.check_possible_mirror`).
+    series_author: str = ""
+    series_description: str = ""
     #: So chuong SE xu ly TINH DEN LAN plan() gan nhat — dan xuat tu
     #: `IngestionPlan.chapter_urls_to_process`, cap nhat lai moi lan
     #: `plan_run()` (co the TANG neu mot lan goi sau them chuong moi).
@@ -104,6 +110,12 @@ class ScrapeRun:
     count_failed: int = 0
     count_skipped: int = 0
     last_error: str = ""
+    #: Giai thich NGUOI DOC duoc ve thu tu chuong (Phase 3 Story Harvester
+    #: V3) — sao chep tu `SeriesInfo.ordering_evidence` cua lan `plan_run()`
+    #: DAU TIEN tao dot nay (khong doi o cac lan `plan_run()` sau, do
+    #: `create_run_once` la tao-mot-lan — chap nhan duoc, ly do it khi thay
+    #: doi giua cac lan cua CUNG mot series).
+    ordering_evidence: str = ""
     created_at: str = ""
     updated_at: str = ""
     cancelled_at: str = ""
@@ -146,6 +158,23 @@ class ScrapeRunItem:
     error_message: str = ""
     attempts: int = 0
     skipped_reason: str = ""
+    #: CHI co gia tri khi `decision == "possible_duplicate"` (Phase 8) —
+    #: canonical_url cua MOT chuong KHAC trong CUNG series co content_hash
+    #: TRUNG HET (chi luu MOT, du co the co nhieu — du de operator tra
+    #: cuu; xem `pipeline.ReviewItem.duplicate_of_urls` cho danh sach day
+    #: du o tang trong-bo-nho).
+    duplicate_of_url: str = ""
+    #: Ket qua `quality.assess_chapter_quality` (Phase 6 "khong am tham
+    #: chap nhan trich xuat yeu") — GHI LAI o day, KHONG chan hang doi
+    #: duyet (giong triet ly `quality.py`: gan nhan, khong tu loai bo).
+    #: `quality_passed=False` nghia la co check BLOCK that bai — operator
+    #: NEN xem ky truoc khi duyet.
+    quality_passed: bool = True
+    quality_score: float = 1.0
+    #: Cac ly do WARN/BLOCK, noi cach nhau bang " | " (chuoi don gian,
+    #: KHONG phai JSON — du de hien thi truc tiep, khong can may khach
+    #: parse cau truc).
+    quality_warnings: str = ""
     #: Vi tri THEO THU TU KHAM PHA (0, 1, 2, ...) — dat MOT LAN luc tao,
     #: KHONG BAO GIO doi. Day la THU TU HANG DOI DUYET, tach biet voi
     #: `chapter_number` (co the None cho chuong khong doc duoc so tu tieu
@@ -160,6 +189,17 @@ class ScrapeRunItem:
     sequence: int = 0
     created_at: str = ""
     updated_at: str = ""
+    #: Phase 16 (Story Harvester V3, "races"): moc gio (ISO UTC) muc nay
+    #: duoc `claim_pending_items` "giu cho" MOT trinh dieu phoi dang xu ly
+    #: — "" nghia la CHUA ai giu (san sang de claim binh thuong). Day la
+    #: khoa THUE (lease), KHONG PHAI khoa vinh vien: mot muc claim qua lau
+    #: (qua `_LEASE_SECONDS`, xem `MockScrapeRunStore.claim_pending_items`)
+    #: duoc coi la "trinh dieu phoi giu no da chet/treo" va CO THE claim
+    #: lai duoc — tranh mot loi that su (tien trinh chet giua chung) khoa
+    #: chet muc do MAI MAI. Duoc XOA VE "" (`save_item(..., claimed_at="")`)
+    #: ngay khi muc chuyen khoi PENDING (thanh cong hay that bai deu vay) —
+    #: xem `bulk.py::drive_once`.
+    claimed_at: str = ""
 
 
 # -----------------------------------------------------------------------------
@@ -169,6 +209,33 @@ class ScrapeRunItem:
 
 def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+#: Thoi gian THUE (giay) mac dinh cho MOT lan claim (xem docstring truong
+#: `ScrapeRunItem.claimed_at`) — du rong de xu ly het MOT chu ky
+#: (`chapters_per_cycle` chuong, moi chuong mot vai giay o Tier 0 HTTP
+#: truc tiep) truoc khi mot trinh dieu phoi KHAC coi no la "da chet/treo"
+#: va claim lai. Qua ngan: hai trinh dieu phoi chay DUNG luc bi coi la
+#: "chet" oan, lam viec trung nhau lang phi. Qua dai: mot lan crash THAT
+#: phai cho lau moi duoc nhat lai.
+CLAIM_LEASE_SECONDS = 300
+
+
+def _da_het_han_thue(claimed_at: str, now_iso: str, lease_seconds: int) -> bool:
+    """`True` neu `claimed_at` RONG (chua tung duoc claim) HOAC da qua
+    `lease_seconds` so voi `now_iso` — nghia la muc nay SAN SANG de claim.
+    AN TOAN MAC DINH: BAT KY loi phan tich chuoi gio nao (vd mot `now_fn`
+    tiem vao trong test tra ve dinh dang khac ISO 8601) deu duoc coi la
+    "da het han" — KHONG BAO GIO khoa chet mot muc vinh vien chi vi mot
+    loi phan tich khong luong truoc duoc."""
+    if not claimed_at:
+        return True
+    try:
+        khi_claim = datetime.fromisoformat(claimed_at)
+        hien_tai = datetime.fromisoformat(now_iso)
+    except (TypeError, ValueError):
+        return True
+    return (hien_tai - khi_claim).total_seconds() >= lease_seconds
 
 
 class MockScrapeRunStore:
@@ -261,6 +328,40 @@ class MockScrapeRunStore:
             moi = replace(hien_tai, **fields)
             self.items[item_id] = moi
             return moi
+
+    def claim_pending_items(self, run_id: str, limit: int, *,
+                            lease_seconds: int = CLAIM_LEASE_SECONDS
+                           ) -> List[ScrapeRunItem]:
+        """Doc + "giu cho" (claim) NGUYEN TU toi da `limit` muc `pending`
+        con TRONG (xem `_da_het_han_thue`) cua dot nay — Phase 16 (Story
+        Harvester V3, "races"): dong khe ho ma `list_items` (chi doc,
+        khong giu cho) de lo khi HAI trinh dieu phoi goi `drive_once` DONG
+        THOI tren CUNG mot `run_id` — tai hien duoc that (kich ban 5 luong
+        goi song song, script doc lap): ca hai deu doc TRUNG mot phan
+        chuong `pending`, ca hai deu fetch/xu ly CHUNG chuong do (lang phi
+        that su, va la nen cho mot loi nghiem trong hon: hai luong CUNG
+        tinh `count_items_by_status`/quyet dinh trang thai KET cua dot tu
+        du lieu doc KHONG dong bo voi nhau).
+
+        Toan bo buoc doc + danh dau claim nam TRONG MOT lan giu `self._lock`
+        — khong luong nao khac co the xen vao giua hai buoc. Muc DA duoc
+        mot trinh dieu phoi KHAC claim (va thue CHUA het han) se KHONG
+        duoc chon lai."""
+        with self._lock:
+            moc = self._now()
+            con_trong = [
+                i for i in self.items.values()
+                if i.run_id == run_id and i.status == ScrapeItemStatus.PENDING
+                and _da_het_han_thue(i.claimed_at, moc, lease_seconds)
+            ]
+            con_trong.sort(key=lambda i: (i.sequence, i.item_id))
+            chon = con_trong[:max(0, limit)]
+            ra: List[ScrapeRunItem] = []
+            for muc in chon:
+                moi = replace(muc, claimed_at=moc, updated_at=moc)
+                self.items[muc.item_id] = moi
+                ra.append(moi)
+            return ra
 
     def list_items(self, run_id: str, *,
                    statuses: Optional[Sequence[ScrapeItemStatus]] = None,

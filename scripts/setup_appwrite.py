@@ -747,6 +747,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("count_failed", "integer", False, None),
             ("count_skipped", "integer", False, None),
             ("last_error", "string", False, 1000),
+            # Phase 3 Story Harvester V3 — giai thich thu tu chuong (xem
+            # chapter_ordering.py). Sao chep TU LAN plan_run() DAU TIEN,
+            # khong doi o cac lan sau (create_run_once la tao-mot-lan).
+            ("ordering_evidence", "string", False, 1000),
+            # Phase 7 Story Harvester V3 — dau vao cho
+            # story_identity.compare_identity (kiem tra mirror).
+            ("series_author", "string", False, 300),
+            ("series_description", "string", False, 2000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
             ("cancelled_at", "datetime", False, None),
@@ -780,11 +788,25 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("error_message", "string", False, 1000),
             ("attempts", "integer", False, None),
             ("skipped_reason", "string", False, 500),
+            # Phase 8 Story Harvester V3 — CHI co gia tri khi decision ==
+            # "possible_duplicate" (xem pipeline.py::IngestionDecision).
+            ("duplicate_of_url", "string", False, 1024),
+            # Phase 6 Story Harvester V3 — ket qua quality.assess_chapter_quality
+            # tren duong drive_once THAT (xem bulk.py).
+            ("quality_passed", "boolean", False, None),
+            ("quality_score", "double", False, None),
+            ("quality_warnings", "string", False, 2000),
             # Vi tri THEO THU TU KHAM PHA — thu tu THAT hien cho operator o
             # hang doi duyet, KHONG PHAI `created_at` (tung trung gio o quy
             # mo tao nhanh, lam sai thu tu — phat hien qua mot lan di qua
             # luong operator that). Xem docstring `run_state.ScrapeRunItem`.
             ("sequence", "integer", True, None),
+            # Phase 16 Story Harvester V3 ("races") — moc gio khoa THUE
+            # (lease) cho `claim_pending_items`, tranh hai loi goi
+            # `drive_once` DONG THOI tren CUNG dot doc trung mot lo muc
+            # `pending`. "" = chua claim. Xem docstring
+            # `run_state.ScrapeRunItem.claimed_at`.
+            ("claimed_at", "string", False, 64),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
         ],

@@ -13,11 +13,15 @@ hay thu lai.
 """
 from __future__ import annotations
 
+import ipaddress
+import socket
 import time
 import urllib.robotparser
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Callable, Dict, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -26,6 +30,16 @@ import httpx
 USER_AGENT = "FanficWorldStoryScraper/0.1 (+https://fanfic.world; contact: admin@fanfic.world)"
 
 DEFAULT_TIMEOUT_SECONDS = 20.0
+
+#: Tran KICH THUOC THAN PHAN HOI DA GIAI NEN (bytes) — phat hien qua review
+#: doc lap (Codex, tai hien that qua "gzip bomb": ~498KB tren day, giai
+#: nen thanh 500MB): httpx TU DONG giai nen `Content-Encoding: gzip/br`
+#: TRUOC KHI dua du lieu ra, nen kiem tra `Content-Length` (kich thuoc TREN
+#: DAY, TRUOC giai nen) la KHONG DU. Kiem tra o day dung streaming
+#: (`client.stream()` + `iter_bytes()`), dem SO BYTE DA GIAI NEN THAT SU
+#: nhan duoc, dung ngay khi vuot tran — mot chuong That khong bao gio can
+#: gan 20MB van ban.
+MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
 #: So lan THU LAI toi da cho loi TAM THOI (timeout/loi mang/5xx) — KHONG
 #: tinh lan goi dau. 2 lan thu lai (3 lan goi tong cong) la muc vua du de
@@ -43,11 +57,78 @@ DEFAULT_BACKOFF_BASE_SECONDS = 1.0
 #: crawler lich su thuong tu 1-3s cho MOT host don le, khong phai mot farm).
 DEFAULT_MIN_DELAY_SECONDS = 1.0
 
+#: So lan CHUYEN HUONG (redirect) toi da theo trong MOT lan `fetch()` —
+#: khop mac dinh cua httpx (`follow_redirects=True` cu) de khong doi hanh
+#: vi cho chuoi redirect hop phap, chi doi CACH theo (thu cong, kiem tra
+#: TUNG chang — xem `_MAX_REDIRECTS`/SSRF o duoi).
+_MAX_REDIRECTS = 20
+
 
 class FetchError(RuntimeError):
     """Loi mang/HTTP khi tai mot trang — phan biet voi loi PHAN TICH (noi
     dung tai duoc nhung khong doc duoc), de noi goi xu ly khac nhau (thu
     lai mang so voi bo qua trang khong dung dinh dang)."""
+
+
+class SsrfBlockedError(FetchError):
+    """URL (URL goc HOAC mot chang redirect trung gian) phan giai ve mot
+    dia chi IP rieng tu/loopback/link-local/reserved/multicast — TU CHOI
+    tai, KHONG PHAN BIET day la URL nguoi van hanh/admin tu tay dua vao
+    hay mot lien ket TIM THAY trong HTML da fetch (vd trang chuong mau).
+
+    Phat hien qua review doc lap (Codex), HAI lo hong rieng biet: (1)
+    truoc ban sua nay, `httpx.Client(follow_redirects=True)` tu dong theo
+    redirect MA KHONG kiem tra lai host dich — mot host CONG KHAI, DA
+    duoc chap thuan (vd qua `same_registrable_host` trong `discovery.py`)
+    co the 302 sang bat ky dia chi noi bo nao; (2) URL o TANG CAO NHAT
+    (do operator/admin dua vao qua `ScraperOpsService.discover`/
+    `confirm_unknown_source`/`start_or_continue`) chua BAO GIO duoc kiem
+    tra IP-rieng-tu o bat ky dau — ca hai deu duoc dong lai O DAY, diem
+    DUY NHAT trong toan bo scraper duoc phep noi mang that (xem docstring
+    dau tep), bang cach kiem tra TRUOC MOI lan ket noi that su (URL goc
+    LAN moi chang redirect), khong chi mot lan o dau.
+
+    GIOI HAN DA BIET (trung thuc, khong phong dai): day la kiem tra
+    "resolve-then-connect", KHONG PHAI mot transport tuy chinh ghim thang
+    vao dia chi IP da kiem tra — van con MOT khe ho ly thuyet kieu "DNS
+    rebinding" (ban ghi DNS doi GIUA luc kiem tra va luc httpx tu resolve
+    lai de ket noi that su). Dong hoan toan khe ho do can mot transport
+    tuy chinh ghim ket noi vao chinh IP da kiem tra — chua lam o day, ghi
+    nhan la viec CAN LAM TIEP, khong am tham coi la da xong."""
+
+
+def _dia_chi_ip_khong_an_toan(dia_chi: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(dia_chi)
+    except ValueError:
+        return True  # Khong phan tich duoc — AN TOAN MAC DINH la tu choi.
+    return (ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
+
+
+def _kiem_tra_host_an_toan(url: str) -> None:
+    """Phan giai DNS THAT (qua `socket.getaddrinfo`, CUNG co che ma httpx/
+    he dieu hanh se dung de ket noi that su — khong tu doan/chuan hoa
+    chuoi host) roi tu choi neu BAT KY dia chi nao tra ve la rieng tu/
+    loopback/link-local/reserved/multicast. Khong nem loi neu KHONG phan
+    giai duoc (host khong ton tai) — do la loi mang binh thuong, se duoc
+    bao qua duong `FetchError` thong thuong khi ket noi that su that bai,
+    khong phai mot van de an toan."""
+    host = urlsplit(url).hostname
+    if not host:
+        return
+    try:
+        ket_qua = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return
+    for entry in ket_qua:
+        dia_chi = entry[4][0]
+        if _dia_chi_ip_khong_an_toan(dia_chi):
+            raise SsrfBlockedError(
+                f"Từ chối tải {url}: host '{host}' phân giải về địa chỉ IP "
+                f"riêng tư/nội bộ ({dia_chi}) — không bao giờ tự động truy "
+                "cập tài nguyên nội bộ, dù URL đến từ đâu (operator cung "
+                "cấp trực tiếp hay tìm thấy trong HTML đã tải).")
 
 
 class RobotsDisallowedError(FetchError):
@@ -85,6 +166,40 @@ def _host_key(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}".lower()
 
 
+#: Tran hop ly cho MOT gia tri `Retry-After` (giay) — Overnight "network
+#: resilience": mot server (loi cau hinh hoac co y) co the gui
+#: `Retry-After: 999999999`; TON TRONG gia tri server (khong lam cang
+#: hon backoff mu that su can) nhung VAN GIOI HAN o muc hop ly, tranh mot
+#: dot quet "treo" hang gio/ngay chi vi TIN mot header khong dang tin.
+_TRAN_RETRY_AFTER_GIAY = 300.0
+
+
+def _doc_retry_after(resp) -> Optional[float]:
+    """Doc header `Retry-After` (RFC 7231 — hoac SO GIAY nguyen, hoac MOT
+    ngay-gio dang HTTP-date) — tra ve SO GIAY can doi, `None` neu KHONG co
+    header nay hoac khong doc duoc (an toan mac dinh: lui ve backoff mu
+    thong thuong, KHONG coi loi phan tich la mot ly do de KHONG thu lai)."""
+    gia_tri = resp.headers.get("retry-after")
+    if not gia_tri:
+        return None
+    gia_tri = gia_tri.strip()
+    try:
+        giay = float(gia_tri)
+    except ValueError:
+        try:
+            khi = parsedate_to_datetime(gia_tri)
+        except (TypeError, ValueError):
+            return None
+        if khi is None:
+            return None
+        if khi.tzinfo is None:
+            khi = khi.replace(tzinfo=timezone.utc)
+        giay = (khi - datetime.now(timezone.utc)).total_seconds()
+    if giay < 0:
+        return 0.0
+    return min(giay, _TRAN_RETRY_AFTER_GIAY)
+
+
 class HttpFetcher:
     """Fetcher THAT — dung httpx, theo redirect, co timeout, KHONG bao gio
     doc bien moi truong proxy ngoai y muon (`trust_env=False`, cung nguyen
@@ -104,6 +219,7 @@ class HttpFetcher:
                  backoff_base_seconds: float = DEFAULT_BACKOFF_BASE_SECONDS,
                  min_delay_seconds: float = DEFAULT_MIN_DELAY_SECONDS,
                  respect_robots: bool = True,
+                 max_response_bytes: int = MAX_RESPONSE_BYTES,
                  sleep_fn: Callable[[float], None] = time.sleep,
                  clock_fn: Callable[[], float] = time.monotonic):
         self._timeout = timeout_seconds
@@ -112,6 +228,7 @@ class HttpFetcher:
         self._backoff_base = backoff_base_seconds
         self._min_delay = min_delay_seconds
         self._respect_robots = respect_robots
+        self._max_response_bytes = max_response_bytes
         self._sleep = sleep_fn
         self._clock = clock_fn
         self._last_request_at: Dict[str, float] = {}
@@ -121,7 +238,10 @@ class HttpFetcher:
         if self._client is not None:
             return self._client
         return httpx.Client(
-            timeout=self._timeout, trust_env=False, follow_redirects=True,
+            # `follow_redirects=False` CO CHU DICH (khac ban truoc) — xem
+            # `SsrfBlockedError`: redirect duoc theo THU CONG trong
+            # `fetch()` de kiem tra an toan TUNG chang, khong chi URL dau.
+            timeout=self._timeout, trust_env=False, follow_redirects=False,
             headers={"User-Agent": USER_AGENT},
         )
 
@@ -159,18 +279,30 @@ class HttpFetcher:
         """
         client = self._http_client()
         try:
-            resp = client.get(f"{host}/robots.txt")
-        except (httpx.TimeoutException, httpx.HTTPError):
-            # Khong tai duoc robots.txt (mang loi, timeout...) — coi nhu
-            # KHONG co gioi han, dung mac dinh "cho phep" cua da so trinh
-            # thu thap khi thieu tep nay.
+            resp = self._theo_redirect_an_toan(client, f"{host}/robots.txt", {})
+        except (FetchError, httpx.TimeoutException, httpx.HTTPError):
+            # Khong tai duoc robots.txt (mang loi, timeout, redirect toi
+            # dia chi rieng tu...) — coi nhu KHONG co gioi han, dung mac
+            # dinh "cho phep" cua da so trinh thu thap khi thieu tep nay.
             return None
         finally:
             if self._client is None:
                 client.close()
-        if resp.status_code >= 400:
+        if resp is None or resp.status_code >= 400:
             # 404 la truong hop PHO BIEN NHAT (site khong co robots.txt) —
             # nghia la khong co gioi han nao duoc cong bo, KHONG phai loi.
+            return None
+        if _host_key(str(resp.url)) != host:
+            # Phat hien qua review doc lap (Codex, verify pass):
+            # `_robots_cache` luu ket qua nay DUOI KHOA `host` GOC, nhung
+            # neu robots.txt cua `host` GOC redirect sang MOT HOST KHAC
+            # (vd chuyen ten mien/CDN), noi dung robots.txt do la CUA HOST
+            # KIA, khong phai `host` — dung no cho `host` se AP SAI chinh
+            # sach (co the qua long luong neu host kia cho phep nhieu hon,
+            # hoac qua chat neu nguoc lai). AN TOAN HON: coi nhu `host` goc
+            # KHONG co robots.txt rieng (tra ve `None`, mac dinh "cho
+            # phep" — cung hanh vi voi truong hop khong tai duoc robots.txt
+            # o tren), KHONG BAO GIO muon chinh sach cua mot host khac.
             return None
         parser = urllib.robotparser.RobotFileParser()
         parser.parse(resp.text.splitlines())
@@ -178,12 +310,50 @@ class HttpFetcher:
 
     def _mot_lan_goi(self, client: httpx.Client, url: str,
                      headers: Dict[str, str]) -> httpx.Response:
+        """Dung streaming (KHONG `client.get()` thuan, vao doc toan bo than
+        vao bo nho truoc khi co co hoi kiem tra kich thuoc) de co the DUNG
+        NGAY khi than phan hoi DA GIAI NEN vuot `_max_response_bytes` — xem
+        docstring hang so do. Ap dung tran nay cho MOI phan hoi, KE CA
+        redirect (3xx) — phat hien qua review doc lap (Codex, verify pass):
+        ban dau nhanh redirect goi `resp.read()` KHONG GIOI HAN vi "redirect
+        binh thuong khong co than dang ke", nhung KHONG CO GI bat buoc mot
+        chang redirect trung gian do ke tan cong dieu khien phai TRA VE
+        than nho — day chinh la khe ho "gzip bomb" ban dau, tai dien tren
+        MOT nhanh khac (redirect) thay vi phan hoi cuoi cung."""
         try:
-            return client.get(url, headers=headers or None)
+            with client.stream("GET", url, headers=headers or None) as resp:
+                buffer = bytearray()
+                for chunk in resp.iter_bytes():
+                    buffer.extend(chunk)
+                    if len(buffer) > self._max_response_bytes:
+                        raise FetchError(
+                            f"{url} vượt quá giới hạn kích thước phản hồi "
+                            f"({self._max_response_bytes} byte đã giải nén) "
+                            "— từ chối tiếp tục tải.")
+                resp._content = bytes(buffer)
+                return resp
         except httpx.TimeoutException as exc:
             raise FetchError(f"Hết thời gian tải {url}") from exc
         except httpx.HTTPError as exc:
             raise FetchError(f"Không tải được {url}: {exc}") from exc
+
+    def _theo_redirect_an_toan(self, client: httpx.Client, url: str,
+                               headers: Dict[str, str]) -> Optional[httpx.Response]:
+        """Theo redirect THU CONG (client duoc tao voi `follow_redirects=False`
+        co chu dich — xem `SsrfBlockedError`), kiem tra an toan SSRF cho
+        TUNG chang TRUOC KHI ket noi, khong chi URL dau. Dung cho ca
+        `_tai_robots` (khong retry/backoff, robots.txt da khoan dung loi
+        san) LAN duoc goi TRONG vong retry cua `fetch()` cho MOI lan thu.
+        Tra ve response KHONG-phai-redirect cuoi cung, hoac `None` neu vuot
+        `_MAX_REDIRECTS`."""
+        current = url
+        for _ in range(_MAX_REDIRECTS + 1):
+            _kiem_tra_host_an_toan(current)
+            resp = self._mot_lan_goi(client, current, headers)
+            if not resp.is_redirect or "location" not in resp.headers:
+                return resp
+            current = urljoin(current, resp.headers["location"])
+        return None
 
     def fetch(self, url: str, *, if_none_match: Optional[str] = None,
              if_modified_since: Optional[str] = None) -> FetchResult:
@@ -193,7 +363,13 @@ class HttpFetcher:
         tra ve `FetchResult(not_modified=True, text="")` NGAY, khong ne
         than trong ("Nghia La Khong Doi", Phase 9 cua Story Harvester V3:
         engine cap nhat gia tang dung dieu nay de biet MOT chuong da xong
-        co can tai lai hay khong ma KHONG can tai lai toan bo noi dung)."""
+        co can tai lai hay khong ma KHONG can tai lai toan bo noi dung).
+
+        AN TOAN SSRF (xem `SsrfBlockedError`): moi chang — URL goc VA moi
+        chang redirect trung gian — duoc kiem tra KHONG phan giai ve dia
+        chi IP rieng tu/noi bo TRUOC KHI ket noi, du day la URL do operator/
+        admin dua vao truc tiep hay mot lien ket TIM THAY trong HTML da
+        fetch tu truoc (vd `discovery.py`'s "trang chuong mau")."""
         self._kiem_tra_robots(url)
         headers: Dict[str, str] = {}
         if if_none_match:
@@ -208,20 +384,37 @@ class HttpFetcher:
             for lan in range(self._max_retries + 1):
                 self._cho_gioi_han_toc_do(url)
                 try:
-                    resp = self._mot_lan_goi(client, url, headers)
+                    resp = self._theo_redirect_an_toan(client, url, headers)
+                    if resp is None:
+                        raise FetchError(
+                            f"Quá {_MAX_REDIRECTS} lần chuyển hướng khi tải {url}")
                 except FetchError as exc:
-                    # Loi MANG (timeout/ket noi) — luon dang thu thu lai.
+                    # Loi MANG (timeout/ket noi/qua nhieu redirect) — luon
+                    # dang thu thu lai (tru SsrfBlockedError, xem duoi).
+                    if isinstance(exc, SsrfBlockedError):
+                        raise
                     loi_cuoi = exc
                     resp = None
                 else:
-                    if resp.status_code < 500:
+                    if resp.status_code < 500 and resp.status_code != 429:
                         # Thanh cong (bao gom 304) HOAC loi phia CLIENT
-                        # (4xx) — 4xx se KHONG tu khac di neu goi lai y het,
-                        # dung thu.
+                        # (4xx, TRU 429) — 4xx thuong se KHONG tu khac di
+                        # neu goi lai y het, dung thu. 429 ("Too Many
+                        # Requests") la NGOAI LE duy nhat: no CHINH LA mot
+                        # tin hieu "thu lai duoc, chi can cho" (thuong kem
+                        # `Retry-After`) — phat hien qua kiem tra "network
+                        # resilience": ban dau 429 bi coi nhu 404 (loi
+                        # client vinh vien), khong bao gio duoc thu lai du
+                        # ro rang la loi TAM THOI do gioi han toc do.
                         break
                     loi_cuoi = FetchError(f"{url} trả về HTTP {resp.status_code}")
                 if lan < self._max_retries:
-                    self._sleep(self._backoff_base * (2 ** lan))
+                    # Uu tien `Retry-After` cua server (RFC 7231) neu co —
+                    # server BIET ro hon backoff mu cua ta can cho bao lau.
+                    retry_after = _doc_retry_after(resp) if resp is not None else None
+                    self._sleep(
+                        retry_after if retry_after is not None
+                        else self._backoff_base * (2 ** lan))
 
             if resp is None:
                 assert loi_cuoi is not None

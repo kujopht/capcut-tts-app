@@ -129,6 +129,17 @@ class HtmlExtractBoundaryTest(unittest.TestCase):
         self.assertIn("Hành trình tiếp tục qua những vùng đất mới.", text)
         self.assertIn("Ghi chú cuối trang của người đăng tải.", text)
 
+    def test_boundary_matched_dung_theo_co_khop_boundary_hay_khong(self):
+        """`boundary_matched` (Phase 6 Story Harvester V3) — noi goi
+        (`GenericIndexAdapter.normalize_chapter`) dung co nay de quyet dinh
+        co qua `content_extraction.extract_content_v3` hay khong."""
+        co_boundary = extract('<html><body><div class="chapter-content">'
+                              '<p>Nội dung.</p></div></body></html>')
+        khong_boundary = extract('<html><body><article><p>Nội dung.</p>'
+                                 '</article></body></html>')
+        self.assertTrue(co_boundary.boundary_matched)
+        self.assertFalse(khong_boundary.boundary_matched)
+
     def test_mediawiki_mw_content_text_fallback_khi_khong_co_mw_parser_output(self):
         """Kiem tra truong hop skin MediaWiki cu chi co `id="mw-content-text"`
         ma khong co `class="mw-parser-output"`: van ban trong `mw-content-text`
@@ -196,6 +207,43 @@ class HtmlExtractBoundaryTest(unittest.TestCase):
         self.assertNotIn("Quảng cáo hoặc ghi chú bên lề", text)
         self.assertNotIn("display: none", text)
         self.assertNotIn("tracking", text)
+
+
+class JsonLdRecursionTest(unittest.TestCase):
+    """Phat hien qua review doc lap (Codex): `RecursionError` la
+    `RuntimeError`, KHONG PHAI `ValueError`, nen mot khoi JSON-LD mang so
+    long nhau rat sau (vd tan cong co chu dich) truoc day thoat THANG ra
+    ngoai `extract()` khong bat — cung lop loi voi RecursionError da sua
+    trong content_extraction.py (commit 04410fe).
+
+    Ban sua DAU TIEN chi bat `RecursionError` SAU KHI thu `json.loads` —
+    phat hien la KHONG DAM BAO CHAY DUOC tren moi nen tang: CI tren Linux
+    runner parse THANH CONG khoi long 4000 cap ma khong nem loi gi (trong
+    khi Windows local nem `RecursionError`), khien test nay PASS tren may
+    nay nhung FAIL tren CI. Sua LAI bang mot gioi han do sau QUYET DINH
+    TRUOC KHI parse (`_do_sau_json_vuot_qua` trong html_extract.py), quet
+    chuoi khong de quy nen ket qua GIONG NHAU tren moi nen tang/phien ban
+    Python."""
+
+    def test_json_ld_long_nhau_rat_sau_khong_lam_sap_extract(self):
+        khoi_json_long = "[" * 4000 + "1" + "]" * 4000
+        html = (
+            f'<html><head><script type="application/ld+json">{khoi_json_long}'
+            "</script></head><body>Nội dung trang vẫn đọc được bình thường."
+            "</body></html>"
+        )
+        page = extract(html)  # KHONG duoc nem RecursionError.
+        self.assertEqual(page.json_ld, [])
+        self.assertIn("Nội dung trang vẫn đọc được bình thường.", page.visible_text())
+
+    def test_json_ld_long_nhau_vua_phai_van_parse_binh_thuong(self):
+        khoi_json_hop_le = "[" * 10 + "1" + "]" * 10
+        html = (
+            f'<html><head><script type="application/ld+json">{khoi_json_hop_le}'
+            "</script></head><body>Noi dung.</body></html>"
+        )
+        page = extract(html)
+        self.assertEqual(len(page.json_ld), 1)
 
 
 if __name__ == "__main__":

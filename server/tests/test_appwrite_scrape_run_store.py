@@ -56,14 +56,24 @@ class IntOrNoneTest(unittest.TestCase):
 
 class _FakeAppwriteClient:
     """Mo phong REST Appwrite TRONG BO NHO — du de kiem thu round-trip
-    create/get/update/list/count ma khong can mang that."""
+    create/get/update/list/count ma khong can mang that.
 
-    def __init__(self, *, force_error_status: Optional[int] = None) -> None:
+    `fail_on_ids` (Phase 16 Story Harvester V3, "races"): tap `$id` se nem
+    `AppwriteUnavailableError` khi PATCH toi CHUNG, du cho
+    `ClaimPendingItemsPartialFailureTest` mo phong loi mang tam thoi GIUA
+    mot lo PATCH lien tiep (khac `force_error_status`: cai do lam MOI yeu
+    cau that bai, con day CHI mot vai `$id` cu the that bai, cac yeu cau
+    khac van thanh cong binh thuong)."""
+
+    def __init__(self, *, force_error_status: Optional[int] = None,
+                 fail_on_ids: Optional[set] = None) -> None:
         self.docs: Dict[str, Dict[str, Dict[str, Any]]] = {COL_RUNS: {}, COL_ITEMS: {}}
         self.lock = threading.RLock()
         #: Buoc MOI yeu cau (tru GET-1) tra ve loi nay — dung de mo phong
         #: 401/500 that su (khac 404/409) cho `ErrorMappingTest`.
         self._force_error_status = force_error_status
+        self.fail_on_ids = fail_on_ids or set()
+        self.patch_calls: List[str] = []
 
     def request(self, method: str, url: str, *, json: Optional[Dict] = None,
                params: Optional[Dict] = None, headers=None):
@@ -114,6 +124,9 @@ class _FakeAppwriteClient:
                 return dict(doc)
             if method == "PATCH":
                 doc_id = url.rsplit("/", 1)[-1]
+                self.patch_calls.append(doc_id)
+                if doc_id in self.fail_on_ids:
+                    raise AppwriteUnavailableError("giả lập lỗi mạng tạm thời")
                 if doc_id not in store:
                     raise NotFoundError("Không tìm thấy bản ghi.")
                 store[doc_id].update(json["data"])
@@ -210,6 +223,17 @@ class RoundTripTest(unittest.TestCase):
         kho = self._store()
         self.assertIsNone(kho.get_run("scr_khong_ton_tai"))
 
+    def test_claimed_at_round_trip(self) -> None:
+        """Phase 16 Story Harvester V3 ("races") — truong claim moi phai
+        di qua PATCH/GET binh thuong nhu bat ky truong nao khac."""
+        kho = self._store()
+        item = ScrapeRunItem(run_id="scr_abc", chapter_url="https://x/c1",
+                             source_fingerprint="a" * 20, item_id="scr_abc-" + "a" * 15)
+        kho.create_item_once(item)
+        kho.save_item(item.item_id, claimed_at="2026-08-27T00:00:00+00:00")
+        self.assertEqual(kho.get_item(item.item_id).claimed_at,
+                         "2026-08-27T00:00:00+00:00")
+
 
 class ErrorMappingTest(unittest.TestCase):
     """Phat hien qua review Codex: truoc day MOI loi >=400 (401/400/5xx)
@@ -241,6 +265,66 @@ class ErrorMappingTest(unittest.TestCase):
     # ("da ton tai" -> `_ConflictError` -> GET lai binh thuong, khong nem
     # loi) — voi ma cu (moi loi deu la `NotFoundError`) test do van "qua"
     # tinh co; gio no CHI qua neu `_ConflictError` duoc phan biet dung.
+
+
+class ClaimPendingItemsPartialFailureTest(unittest.TestCase):
+    """Phase 16 (Story Harvester V3, "races"): tai hien + xac nhan da sua
+    phat hien tu review doc lap (Codex) tren `claim_pending_items` — mot
+    loi PATCH GIUA lo (mo phong loi mang tam thoi) truoc day nem loi ra
+    NGOAI, lam MAT dau vet cac muc DA claim thanh cong TRUOC do trong
+    CUNG lan goi (chung bi "mac ket" o trang thai da claim ma khong ai
+    biet de xu ly, suot ca CLAIM_LEASE_SECONDS). Sau ban sua: ham nay
+    KHONG BAO GIO nem loi vi MOT muc that bai — bo qua muc do (van con
+    `pending`, chua doi trang thai gi), tra ve danh sach cac muc THAT SU
+    claim duoc."""
+
+    def _store(self, client: _FakeAppwriteClient) -> AppwriteScrapeRunStore:
+        kho = AppwriteScrapeRunStore(
+            _settings(), client=client, now_fn=lambda: "2026-08-27T00:00:00+00:00")
+        kho._attrs_cache = {COL_RUNS: set(), COL_ITEMS: set()}
+        return kho
+
+    def _tao_5_muc_pending(self, kho) -> None:
+        kho.create_run_once(ScrapeRun(
+            source_url="https://x.test/", fingerprint="fp", run_id="scr_abc"))
+        for i in range(5):
+            kho.create_item_once(ScrapeRunItem(
+                run_id="scr_abc", chapter_url=f"https://x.test/{i}",
+                source_fingerprint=f"fp{i}" + "0" * 12, item_id=f"scr_abc-fp{i}",
+                sequence=i))
+
+    def test_loi_patch_giua_lo_khong_nem_ra_ngoai_va_khong_lam_mat_cac_muc_da_claim(self):
+        client = _FakeAppwriteClient(fail_on_ids={"scr_abc-fp2"})
+        kho = self._store(client)
+        self._tao_5_muc_pending(kho)
+
+        # KHONG duoc nem loi — day CHINH LA phat hien tu review: ban dau
+        # (list comprehension) se nem `AppwriteUnavailableError` o day.
+        ket_qua = kho.claim_pending_items("scr_abc", 5)
+
+        item_ids_claim_duoc = {m.item_id for m in ket_qua}
+        self.assertEqual(item_ids_claim_duoc,
+                         {"scr_abc-fp0", "scr_abc-fp1", "scr_abc-fp3", "scr_abc-fp4"},
+                         "phải claim được đúng 4/5 mục — bỏ qua mục PATCH lỗi, "
+                         "KHÔNG mất các mục đã claim thành công trước đó")
+        for m in ket_qua:
+            self.assertEqual(m.claimed_at, "2026-08-27T00:00:00+00:00")
+
+        # Muc PATCH loi VAN con pending, claimed_at RONG — khong bi doi
+        # trang thai gi ca, san sang cho lan claim SAU.
+        muc_loi = kho.get_item("scr_abc-fp2")
+        self.assertEqual(muc_loi.status, ScrapeItemStatus.PENDING)
+        self.assertEqual(muc_loi.claimed_at, "")
+
+    def test_lan_claim_sau_lay_duoc_muc_truoc_do_patch_loi(self):
+        client = _FakeAppwriteClient(fail_on_ids={"scr_abc-fp2"})
+        kho = self._store(client)
+        self._tao_5_muc_pending(kho)
+        kho.claim_pending_items("scr_abc", 5)
+
+        client.fail_on_ids = set()  # "mang" da hoi phuc.
+        ket_qua_2 = kho.claim_pending_items("scr_abc", 5)
+        self.assertEqual({m.item_id for m in ket_qua_2}, {"scr_abc-fp2"})
 
 
 if __name__ == "__main__":

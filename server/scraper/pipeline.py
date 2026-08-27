@@ -42,27 +42,46 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from server.scraper.contract import NormalizedChapter, SeriesInfo, StoryProvider
 from server.scraper.dedupe import ScrapeState
-from server.scraper.http_fetcher import FetchError
 from server.scraper.quality import QualityReport, assess_chapter_quality
 
 
 class IngestionDecision(Enum):
+    """Phase 8 Story Harvester V3 ("chapter revision"): vocab spec dung
+    NEW/UNCHANGED/UPDATED_SOURCE/POSSIBLE_DUPLICATE/REMOVED_FROM_SOURCE —
+    bon gia tri o day da ton tai TU TRUOC voi cung Y NGHIA duoi ten khac
+    (`ALREADY_IMPORTED`=UNCHANGED, `REVISION`=UPDATED_SOURCE); GIU NGUYEN
+    ten cu o day (doi ten se anh huong rong: `bulk.py`, kho Appwrite luu
+    `decision` la CHUOI `.value` cua enum nay, moi test hien co) — chi
+    THEM `POSSIBLE_DUPLICATE` (thuc su MOI, xem duoi). REMOVED_FROM_SOURCE
+    KHONG thuoc enum nay — do la ket qua cua `incremental.diff_toc` (Phase
+    9), MOT tang khac (so sanh muc luc, khong phai phan loai TUNG chuong
+    da tai)."""
+
     #: Chuong chua tung thay — chua co ban ghi nao trong state cho url nay.
     NEW = "new"
     #: Da co ban ghi THANH CONG truoc do voi noi dung KHAC — nguon da sua
-    #: lai chuong nay. State CU van con (xem `ScrapeState.record_success`),
-    #: khong bi ghi de am tham.
+    #: lai chuong nay (= "UPDATED_SOURCE" trong vocab Phase 8). State CU
+    #: van con (xem `ScrapeState.record_success`), khong bi ghi de am tham.
     REVISION = "revision"
     #: Da co ban ghi THANH CONG truoc do voi CUNG noi dung — khong co gi
-    #: moi. Trong luong `run()` binh thuong (qua `resume()` loc truoc), day
-    #: hau nhu khong bao gio xay ra (chuong da xong bi loc som hon) — giu
-    #: nhanh nay de xu ly dung khi ai do goi voi mot danh sach url KHONG
-    #: qua `resume()` (vd kiem tra lai thu cong mot chuong cu the).
+    #: moi (= "UNCHANGED" trong vocab Phase 8). Trong luong `run()` binh
+    #: thuong (qua `resume()` loc truoc), day hau nhu khong bao gio xay ra
+    #: (chuong da xong bi loc som hon) — giu nhanh nay de xu ly dung khi ai
+    #: do goi voi mot danh sach url KHONG qua `resume()` (vd kiem tra lai
+    #: thu cong mot chuong cu the).
     ALREADY_IMPORTED = "already_imported"
+    #: MOI (Phase 8): chuong nay co content_hash TRUNG HET voi MOT chuong
+    #: KHAC (URL khac) DA co trong CUNG series — nguon co the liet ke cung
+    #: mot chuong qua hai URL/slug khac nhau, hoac mot redirect chua duoc
+    #: giai quyet dung. VAN duoc dua vao hang doi duyet (khong tu dong bo
+    #: qua — co the la HAI chuong THAT SU giong nhau co chu y, vd loi mo
+    #: dau lap lai), chi GAN NHAN de operator xem xet — xem
+    #: `ReviewItem.duplicate_of_urls`.
+    POSSIBLE_DUPLICATE = "possible_duplicate"
     #: Tai hoac chuan hoa chuong nay that bai — LOI MOT CHUONG khong duoc
     #: lam hong ca lo (xem vong lap trong `run()`).
     FAILED = "failed"
@@ -82,6 +101,10 @@ class ReviewItem:
     chapter: Optional[NormalizedChapter] = None
     error: Optional[str] = None
     quality: Optional[QualityReport] = None
+    #: CHI co gia tri khi `decision` la `POSSIBLE_DUPLICATE` (Phase 8) —
+    #: canonical_url cua (cac) chuong KHAC trong CUNG series co content_hash
+    #: TRUNG HET voi chuong nay.
+    duplicate_of_urls: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -164,25 +187,46 @@ class StoryIngestionPipeline:
                 raw_html = self._provider.fetch_chapter(chapter_url)
                 chapter = self._provider.normalize_chapter(
                     chapter_url, raw_html, ke_hoach.series)
-            except (FetchError, ValueError) as exc:
+            except Exception as exc:
                 # LOI MOT CHUONG khong duoc lam dung ca lo — ghi lai de
                 # `resume()` biet thu lai o lan chay sau, roi TIEP TUC
                 # chuong ke tiep (day la diem mau chot cua "ngat giua
-                # chung mot lo van an toan").
+                # chung mot lo van an toan"). BAT `Exception` NOI CHUNG
+                # (khong chi `FetchError`/`ValueError`) — MOT trang HTML
+                # bat thuong (vd long qua sau) co the lam mot buoc phan
+                # tich noi bo (vd `content_extraction.py`) nem loi khong
+                # luong truoc duoc; mot trang loi khong duoc phep dung ca
+                # dot quet nhieu tram chuong khac — phat hien qua review
+                # doc lap (Codex), tai hien that bang `RecursionError`
+                # tren HTML long ~1000 cap the (da sua o nguon, nhung
+                # nguyen tac "mot chuong loi khong dung ca lo" phai giu
+                # vung ke ca voi loi KHONG LUONG TRUOC duoc trong tuong
+                # lai).
                 if not dry_run:
                     self._state.record_failure(chapter_url)
                 review_items.append(ReviewItem(
                     url=chapter_url, decision=IngestionDecision.FAILED, error=str(exc)))
                 continue
 
+            trung_voi: List[str] = []
             if dry_run:
-                quyet_dinh = self._phan_loai_khong_ghi(chapter)
+                quyet_dinh, trung_voi = self._phan_loai_khong_ghi(chapter)
             else:
                 ban_ghi = self._state.record_success(
                     chapter_url, content_hash_value=chapter.content_hash,
                     chapter_number=chapter.chapter_number)
-                quyet_dinh = (IngestionDecision.REVISION if ban_ghi.get("is_revision")
-                              else IngestionDecision.NEW)
+                if ban_ghi.get("is_revision"):
+                    quyet_dinh = IngestionDecision.REVISION
+                else:
+                    # Phase 8 ("POSSIBLE_DUPLICATE"): CHI kiem tra trung
+                    # noi dung voi chuong KHAC khi day la mot ban ghi MOI
+                    # (khong phai REVISION cua chinh no) — mot chuong sua
+                    # lai noi dung KHONG can so sanh cheo, do la REVISION
+                    # cua CHINH no, khong phai trung voi chuong khac.
+                    trung_voi = self._state.find_canonical_urls_by_content_hash(
+                        chapter.content_hash, exclude_canonical=chapter.canonical_url)
+                    quyet_dinh = (IngestionDecision.POSSIBLE_DUPLICATE if trung_voi
+                                 else IngestionDecision.NEW)
 
             bao_cao_chat_luong = assess_chapter_quality(
                 chapter, sibling_chapter_numbers=cac_so_chuong_da_thay)
@@ -191,18 +235,24 @@ class StoryIngestionPipeline:
 
             review_items.append(ReviewItem(
                 url=chapter_url, decision=quyet_dinh, chapter=chapter,
-                quality=bao_cao_chat_luong))
+                quality=bao_cao_chat_luong, duplicate_of_urls=trung_voi))
 
         return IngestionResult(series=ke_hoach.series, review_items=review_items, dry_run=dry_run)
 
-    def _phan_loai_khong_ghi(self, chapter: NormalizedChapter) -> IngestionDecision:
+    def _phan_loai_khong_ghi(self, chapter: NormalizedChapter
+                             ) -> Tuple[IngestionDecision, List[str]]:
         """Nhanh DRY-RUN cua phan loai — DOC state (khong ghi) de doan
-        truoc `run(dry_run=False)` se phan loai the nao."""
+        truoc `run(dry_run=False)` se phan loai the nao. Tra ve `(quyet_dinh,
+        danh_sach_url_trung)` — danh sach CHI khong rong khi POSSIBLE_DUPLICATE."""
         ban_ghi_cu = self._state.get(chapter.canonical_url)
-        if ban_ghi_cu is None:
-            return IngestionDecision.NEW
-        if ban_ghi_cu.get("status") != "ok":
-            return IngestionDecision.NEW  # lan truoc that bai — coi nhu moi.
+        if ban_ghi_cu is None or ban_ghi_cu.get("status") != "ok":
+            # Chua tung co ban ghi, HOAC lan truoc that bai (coi nhu moi) —
+            # ca hai deu can kiem tra trung voi chuong KHAC (xem `run()`).
+            trung_voi = self._state.find_canonical_urls_by_content_hash(
+                chapter.content_hash, exclude_canonical=chapter.canonical_url)
+            if trung_voi:
+                return IngestionDecision.POSSIBLE_DUPLICATE, trung_voi
+            return IngestionDecision.NEW, []
         if ban_ghi_cu.get("content_hash") == chapter.content_hash:
-            return IngestionDecision.ALREADY_IMPORTED
-        return IngestionDecision.REVISION
+            return IngestionDecision.ALREADY_IMPORTED, []
+        return IngestionDecision.REVISION, []

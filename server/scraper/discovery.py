@@ -22,12 +22,13 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from html.parser import HTMLParser
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
 
 from server.scraper.contract import ScraperTier, canonicalize_url, same_registrable_host
 from server.scraper.html_extract import extract
 from server.scraper.http_fetcher import FetchError
+from server.scraper.tier_escalation import TierFailureReason, classify_page_signal
 
 #: So lien ket TOI THIEU cung "hinh dang" URL (xem `_shape_of`) de duoc coi
 #: la MOT cum chuong that su, khong phai trung hop ngau nhien vai lien ket
@@ -48,7 +49,8 @@ _MIN_CONTAINER_CHARS = 200
 _MIN_WORD_FRACTION_FOR_HIGH = 0.3
 
 _CHAPTER_WORD_RE = re.compile(
-    r"(chương|chuong|chapter|ch\.|episode|phần|phan|tập|tap|hồi|hoi)",
+    r"(chương|chuong|chapter|ch\.|episode|phần|phan|tập|tap|hồi|hoi|"
+    r"quyển|quyen)",
     re.IGNORECASE,
 )
 _DIGIT_RUN_RE = re.compile(r"\d+")
@@ -257,21 +259,35 @@ def _find_link_clusters(links: List[Tuple[str, str]], base_url: str
     xuat sau do la MOT CHUOI VAN BAN THUONG khong neo (`re.search` khop bat
     ky href nao CHUA chuoi con "/read", vd "/read-more", "/already-read")
     — phat hien qua review doc lap (Codex, tai hien that bang mot script
-    goi truc tiep engine)."""
+    goi truc tiep engine).
+
+    DUNG `canonicalize_url` (bo tham so theo doi nhu `utm_source`, sap
+    query con lai) — KHONG PHAI `urlsplit` tho — de tinh hinh dang VA khoa
+    trung lap (Overnight "unknown-site discovery red team"): thieu buoc
+    nay, mot chuong co lien ket dinh kem `?utm_source=facebook` se (1) bi
+    tinh vao PATTERN de xuat NHU MOT PHAN CO DINH cua URL (pattern chi con
+    khop khi tham so theo doi CHINH XAC do con nguyen, vo hieu ngay khi
+    site doi chien dich quang cao/tracking), VA (2) hai lien ket TOI CUNG
+    mot chuong nhung KHAC tham so theo doi (vd chia se tren Facebook voi
+    Twitter) se bi dem thanh HAI chuong rieng biet thay vi MOT. `href`
+    TUYET DOI GOC (chua tham so theo doi) van duoc GIU NGUYEN trong ket
+    qua tra ve — CHI hinh dang/khoa trung lap dung ban da chuan hoa, viec
+    fetch THAT SU van dung dung URL tim thay trong HTML, khong tu y sua."""
     groups: Dict[str, List[Tuple[str, str]]] = {}
     seen_per_group: Dict[str, set] = {}
     for href, text in links:
         absolute = urljoin(base_url, href)
-        parts = urlsplit(absolute)
-        path = parts.path
+        canon = canonicalize_url(absolute)
+        canon_parts = urlsplit(canon)
+        path = canon_parts.path
         if not path or path == "/":
             continue
-        path_va_query = path if not parts.query else f"{path}?{parts.query}"
+        path_va_query = path if not canon_parts.query else f"{path}?{canon_parts.query}"
         shape = _shape_of(path_va_query)
         seen = seen_per_group.setdefault(shape, set())
-        if absolute in seen:
+        if canon in seen:
             continue
-        seen.add(absolute)
+        seen.add(canon)
         groups.setdefault(shape, []).append((absolute, text))
     return groups
 
@@ -302,6 +318,20 @@ def _chapterish_fraction(items: List[Tuple[str, str]]) -> float:
     return hits / len(items)
 
 
+def _so_url_phan_biet_bo_qua_fragment(items: List[Tuple[str, str]]) -> int:
+    """So URL PHAN BIET THAT SU trong `items` sau khi bo qua fragment
+    (`#...`) — mot trang SACH-MOT-TRANG dieu huong chuong bang neo noi bo
+    (vd Project Gutenberg: `...11-h.htm#chap01`, `#chap02`, ...) co the
+    tao ra NHIEU href tuyet doi PHAN BIET (khac fragment) nhung TAT CA deu
+    tro ve CUNG mot URL server-side (fragment khong gui len server) — cung
+    NOI DUNG trang duoc fetch lap lai nhieu lan thay vi tung chuong rieng.
+    Dung ham nay o `_pick_chapter_cluster` de LOAI cum nhu vay, thay vi de
+    xuat mot "danh sach chuong" ma thuc ra la MOT trang lap lai — phat
+    hien qua canary that (Phase 11 Story Harvester V3, tren mot dau sach
+    Gutenberg that su dung dieu huong neo noi bo)."""
+    return len({href.split("#", 1)[0] for href, _text in items})
+
+
 def _pick_chapter_cluster(groups: Dict[str, List[Tuple[str, str]]]
                           ) -> Tuple[Optional[str], List[Tuple[str, str]]]:
     """Chon nhom co kha nang la danh sach chuong nhat: uu tien SO LUONG lon
@@ -317,10 +347,18 @@ def _pick_chapter_cluster(groups: Dict[str, List[Tuple[str, str]]]
     de xuat mot pattern khong co `\\d+` se la mot chuoi van ban THUONG
     khong neo, co the khop NHAM bat ky href nao chua no lam chuoi con. Loai
     ung vien nhu vay THAY VI de xuat mot pattern nguy hiem — phat hien qua
-    review doc lap (Codex)."""
+    review doc lap (Codex).
+
+    BAT BUOC THEM (Phase 11, canary that): sau khi bo qua fragment, VAN
+    con it nhat `_MIN_CLUSTER_SIZE` URL PHAN BIET THAT SU — xem
+    `_so_url_phan_biet_bo_qua_fragment`. Thieu dieu kien nay, mot trang
+    dung dieu huong neo noi bo (MOT URL server-side duy nhat, nhieu
+    fragment khac nhau) se bi nham la mot danh sach nhieu trang chuong
+    THAT SU."""
     candidates = [
         (shape, items) for shape, items in groups.items()
         if len(items) >= _MIN_CLUSTER_SIZE and "#" in shape
+        and _so_url_phan_biet_bo_qua_fragment(items) >= _MIN_CLUSTER_SIZE
     ]
     if not candidates:
         return None, []
@@ -353,30 +391,56 @@ def _detect_pagination(groups: Dict[str, List[Tuple[str, str]]], chapter_shape: 
     return PaginationStrategy.NONE, None
 
 
+#: Do uu tien khi trang co NHIEU khoi JSON-LD (Overnight "unknown-site
+#: discovery red team", fixture "nhieu doi tuong Article JSON-LD"): SO
+#: THU TU XUAT HIEN trong mang KHONG lien quan gi den do LIEN QUAN cua no
+#: voi "tac pham" dang xet — mot trang co the co JSON-LD cua widget/khoi
+#: KHONG lien quan (vd mot "Article" gioi thieu tac gia, mot banner tin
+#: tuc) XUAT HIEN TRUOC khoi `Book`/`CreativeWork` THAT SU mo ta chinh bo
+#: truyen. So rank THAP hon = uu tien hon; `Book` la loai CU THE nhat cho
+#: "day la mot cuon sach/bo truyen", `WebSite` chung chung nhat.
+_UU_TIEN_LOAI_JSON_LD = {"Book": 0, "CreativeWork": 1, "Article": 2, "WebSite": 3}
+
+
 def _extract_title_author_description(page, raw_html: str) -> Tuple[
         Optional[str], Optional[str], Optional[str], bool]:
-    """Tra ve `(title, author, description, co_json_ld_co_cau_truc)`."""
+    """Tra ve `(title, author, description, co_json_ld_co_cau_truc)`.
+
+    Khi co NHIEU khoi JSON-LD hop le, CHON MOT khoi DUY NHAT — khoi co
+    `@type` UU TIEN CAO NHAT (`_UU_TIEN_LOAI_JSON_LD`) — lam nguon
+    title/author/description, thay vi tron lan tu NHIEU khoi khac nhau
+    theo THU TU XUAT HIEN (loi that: mot khoi "Article" khong lien quan
+    xuat hien TRUOC khoi "Book" that trong mang se "khoa" title sai truoc
+    khi khoi Book kip duoc xet — phat hien qua kiem thu do lap)."""
     has_structured_json_ld = False
-    title = page.meta.get("og:title")
-    author = page.meta.get("author") or page.meta.get("article:author")
-    description = page.meta.get("og:description") or page.meta.get("description")
+    best_item: Optional[Dict[str, Any]] = None
+    best_rank: Optional[int] = None
 
     for block in page.json_ld:
         candidates = block if isinstance(block, list) else [block]
         for item in candidates:
             if not isinstance(item, dict):
                 continue
-            item_type = item.get("@type")
-            if item_type in ("Book", "CreativeWork", "Article", "WebSite"):
-                has_structured_json_ld = True
-                title = title or item.get("name") or item.get("headline")
-                desc = item.get("description")
-                description = description or (str(desc) if desc else None)
-                author_field = item.get("author")
-                if not author and isinstance(author_field, dict):
-                    author = author_field.get("name")
-                elif not author and isinstance(author_field, str):
-                    author = author_field
+            rank = _UU_TIEN_LOAI_JSON_LD.get(item.get("@type"))
+            if rank is None:
+                continue
+            has_structured_json_ld = True
+            if best_rank is None or rank < best_rank:
+                best_rank, best_item = rank, item
+
+    title = page.meta.get("og:title")
+    author = page.meta.get("author") or page.meta.get("article:author")
+    description = page.meta.get("og:description") or page.meta.get("description")
+
+    if best_item is not None:
+        title = title or best_item.get("name") or best_item.get("headline")
+        desc = best_item.get("description")
+        description = description or (str(desc) if desc else None)
+        author_field = best_item.get("author")
+        if not author and isinstance(author_field, dict):
+            author = author_field.get("name")
+        elif not author and isinstance(author_field, str):
+            author = author_field
 
     title = title or page.title
     return title, author, description, has_structured_json_ld
@@ -489,6 +553,16 @@ class UnknownSiteDiscoveryEngine:
                 "dùng CDN/subdomain riêng cho nội dung chương.")
 
         container_candidate: Optional[str] = None
+        #: Phase 10 (Story Harvester V3): khi trang chương mẫu KHÔNG có
+        #: vùng nội dung rõ ràng, đây có thể là (a) trang bình thường mà
+        #: bộ quét chưa nhận diện đúng cấu trúc, HOẶC (b) trang chương bị
+        #: chặn đăng nhập/CAPTCHA/paywall — HAI trường hợp này CẦN được
+        #: phân biệt rõ cho operator, không chỉ gộp chung một câu "không
+        #: xác định được" (xem `tier_escalation.py`: chặn đăng nhập/
+        #: CAPTCHA/paywall là RANH GIỚI AN TOÀN CỨNG, phải luôn ép LOW,
+        #: không được để lọt qua thành MEDIUM chỉ vì các tín hiệu khác
+        #: trên trang mục lục — vd tiêu đề, JSON-LD — vẫn đạt điểm).
+        blocked_reason: Optional[TierFailureReason] = None
         if sample_html is not None:
             container_candidate, ratio = _scan_content_container(sample_html)
             if container_candidate:
@@ -497,14 +571,29 @@ class UnknownSiteDiscoveryEngine:
                     f"Trang chương mẫu có vùng nội dung rõ ràng: "
                     f"{container_candidate} (~{ratio:.0%} văn bản trang).")
             else:
-                evidence.append(
-                    "Không xác định được vùng nội dung rõ ràng trên trang "
-                    "chương mẫu (không thẻ nào có đủ "
-                    f"{_MIN_CONTAINER_CHARS} ký tự văn bản với tên gợi ý "
-                    "nội dung/chương) — cần operator kiểm tra thủ công "
-                    "trước khi quét thật.")
+                tin_hieu = classify_page_signal(sample_html)
+                if tin_hieu in (TierFailureReason.AUTH_REQUIRED,
+                               TierFailureReason.CAPTCHA,
+                               TierFailureReason.PAYWALL):
+                    blocked_reason = tin_hieu
+                    evidence.append(
+                        f"Trang chương mẫu có dấu hiệu {tin_hieu.value} — "
+                        "đây có thể KHÔNG PHẢI trang chương công khai thật "
+                        "(nội dung bị chặn sau đăng nhập/CAPTCHA/paywall). "
+                        "KHÔNG BAO GIỜ tự động vượt qua bằng cách nâng "
+                        "tầng xử lý — cần kỹ sư xác minh thủ công trước "
+                        "khi coi đây là nguồn có thể quét tự động.")
+                else:
+                    evidence.append(
+                        "Không xác định được vùng nội dung rõ ràng trên trang "
+                        "chương mẫu (không thẻ nào có đủ "
+                        f"{_MIN_CONTAINER_CHARS} ký tự văn bản với tên gợi ý "
+                        "nội dung/chương) — cần operator kiểm tra thủ công "
+                        "trước khi quét thật.")
 
         if chapter_shape is None:
+            confidence = SourceConfidence.LOW
+        elif blocked_reason is not None:
             confidence = SourceConfidence.LOW
         elif score >= 4 and container_candidate and word_frac >= _MIN_WORD_FRACTION_FOR_HIGH:
             confidence = SourceConfidence.HIGH

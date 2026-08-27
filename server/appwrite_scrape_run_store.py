@@ -41,10 +41,12 @@ import httpx
 from server.adapters import AppwriteUnavailableError, NotFoundError
 from server.config import AppwriteSettings
 from server.scraper.run_state import (
+    CLAIM_LEASE_SECONDS,
     ScrapeItemStatus,
     ScrapeRun,
     ScrapeRunItem,
     ScrapeRunStatus,
+    _da_het_han_thue,
     _now_utc_iso,
 )
 from server.secret_redaction import thong_diep_loi_an_toan
@@ -64,14 +66,16 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "run_id", "source_url", "fingerprint", "status", "series_title",
         "source_domain", "estimated_total", "already_done_count",
         "total_discovered", "count_pending", "count_review_ready",
-        "count_failed", "count_skipped", "last_error", "created_at",
-        "updated_at", "cancelled_at", "finished_at",
+        "count_failed", "count_skipped", "last_error", "ordering_evidence",
+        "series_author", "series_description",
+        "created_at", "updated_at", "cancelled_at", "finished_at",
     ),
     COL_ITEMS: (
         "item_id", "run_id", "chapter_url", "source_fingerprint", "status",
         "decision", "chapter_title", "chapter_number", "content_hash",
-        "error_message", "attempts", "skipped_reason", "sequence",
-        "created_at", "updated_at",
+        "error_message", "attempts", "skipped_reason", "duplicate_of_url",
+        "quality_passed", "quality_score", "quality_warnings", "sequence",
+        "claimed_at", "created_at", "updated_at",
     ),
 }
 
@@ -123,6 +127,13 @@ def _int_or_none(value: Any) -> Optional[int]:
         return None
 
 
+def _float(value: Any, mac_dinh: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return mac_dinh
+
+
 def _run_from_doc(doc: Dict[str, Any]) -> ScrapeRun:
     return ScrapeRun(
         source_url=str(doc.get("source_url") or ""),
@@ -139,6 +150,9 @@ def _run_from_doc(doc: Dict[str, Any]) -> ScrapeRun:
         count_failed=_int(doc.get("count_failed")),
         count_skipped=_int(doc.get("count_skipped")),
         last_error=str(doc.get("last_error") or ""),
+        ordering_evidence=str(doc.get("ordering_evidence") or ""),
+        series_author=str(doc.get("series_author") or ""),
+        series_description=str(doc.get("series_description") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
         cancelled_at=str(doc.get("cancelled_at") or ""),
@@ -160,7 +174,12 @@ def _item_from_doc(doc: Dict[str, Any]) -> ScrapeRunItem:
         error_message=str(doc.get("error_message") or ""),
         attempts=_int(doc.get("attempts")),
         skipped_reason=str(doc.get("skipped_reason") or ""),
+        duplicate_of_url=str(doc.get("duplicate_of_url") or ""),
+        quality_passed=bool(doc.get("quality_passed", True)),
+        quality_score=_float(doc.get("quality_score"), 1.0),
+        quality_warnings=str(doc.get("quality_warnings") or ""),
         sequence=_int(doc.get("sequence")),
+        claimed_at=str(doc.get("claimed_at") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
@@ -390,6 +409,53 @@ class AppwriteScrapeRunStore:
         fields.setdefault("updated_at", self._now())
         doc = self._update(COL_ITEMS, item_id, fields)
         return _item_from_doc(doc)
+
+    def claim_pending_items(self, run_id: str, limit: int, *,
+                            lease_seconds: int = CLAIM_LEASE_SECONDS
+                           ) -> List[ScrapeRunItem]:
+        """Phien ban BEST-EFFORT tren Appwrite — xem
+        `MockScrapeRunStore.claim_pending_items` cho phien ban NGUYEN TU
+        that su (chi ap dung khi nhieu LUONG chia se CUNG mot tien trinh/
+        kho bo nho). Appwrite (qua REST API don gian ma repo nay dung,
+        KHONG dung optimistic-concurrency/phien ban tai lieu cua no) KHONG
+        cung cap "doc + ghi de nguyen tu" — o day la doc RONG (loc theo
+        `claimed_at`) roi PATCH TUNG muc mot, THU HEP (KHONG xoa het) cua
+        so dua giua NHIEU TIEN TRINH khac nhau cung ghi len CUNG mot
+        `run_id`. Neu day thuc su tro thanh van de trong san xuat (nhieu
+        worker THAT chay song song tren CUNG mot dot), can nang cap len
+        optimistic-concurrency THAT SU cua Appwrite — CHUA lam o day vi
+        khong co moi truong Appwrite that de kiem chung an toan.
+
+        AN TOAN KHI LOI GIUA CHUNG (phat hien qua review doc lap, Codex,
+        tren ban dau cua ham nay): PATCH TUNG muc mot co the that bai O
+        GIUA danh sach (vd loi mang tam thoi) — ban dau dung list
+        comprehension nem loi thang ra NGOAI, khien CAC muc DA PATCH
+        thanh cong truoc do bi "mac ket" o trang thai da claim (khong ai
+        biet de xu ly) suot ca `lease_seconds`, trong khi `drive_once` goi
+        ham nay hoan toan KHONG hay biet minh da claim duoc gi. O day BAT
+        loi TUNG muc rieng le va TIEP TUC voi cac muc con lai, tra ve
+        DANH SACH MUC THAT SU claim duoc (co the it hon `limit` neu co
+        loi) thay vi nem loi lam mat dau vet toan bo lo."""
+        with self._lock:
+            ung_vien = self.list_items(
+                run_id, statuses=[ScrapeItemStatus.PENDING],
+                limit=max(1, min(limit * 3, 500)))
+            moc = self._now()
+            con_trong = [i for i in ung_vien
+                        if _da_het_han_thue(i.claimed_at, moc, lease_seconds)]
+            chon = con_trong[:max(0, limit)]
+            ra: List[ScrapeRunItem] = []
+            for muc in chon:
+                try:
+                    ra.append(self.save_item(muc.item_id, claimed_at=moc))
+                except (AppwriteUnavailableError, NotFoundError):
+                    # Muc nay that bai khi PATCH — BO QUA, KHONG claim
+                    # duoc, se duoc mot lan `claim_pending_items` SAU thu
+                    # lai (van con `pending`, chua he doi trang thai).
+                    # KHONG de loi o MOT muc lam MAT toan bo cac muc DA
+                    # claim thanh cong truoc do trong vong lap nay.
+                    continue
+            return ra
 
     def list_items(self, run_id: str, *,
                    statuses: Optional[Sequence[ScrapeItemStatus]] = None,

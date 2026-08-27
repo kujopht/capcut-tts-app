@@ -134,6 +134,133 @@ class ConfirmUnknownSourceTest(unittest.TestCase):
                 svc.confirm_unknown_source(f"{_BASE}/truyen/thu-nghiem")
 
 
+class SelfHealingConfirmTest(unittest.TestCase):
+    """Phase 5: xac nhan LAI mot domain DA DEGRADED phai qua kiem tra cau
+    truc (`self_healing.validate_relocated_content`), khong chi tin
+    discovery confidence don thuan."""
+
+    def test_domain_degraded_duoc_khoi_phuc_khi_chuong_mau_hop_le(self):
+        """CO Y dung noi dung PHAN BIET THAT SU cho tung chuong (khac
+        `_UNKNOWN_PAGES` dung chung, noi CA 5 chuong deu CUNG mot chuoi
+        van ban) — phat hien qua review doc lap (Codex): kiem tra "khong
+        trung chuong TRUOC DO" (xem self_healing.py) CAN mot chuong mau
+        THU HAI THAT SU khac de so sanh; dung fixture noi dung GIONG HET
+        se khien kiem tra do (dung sau ban sua nay) TU CHOI oan mot lan
+        khoi phuc le ra hop le."""
+        base = "https://chua-biet-hop-le.example"
+        index = (
+            '<html><head><title>Truyện Hợp Lệ</title></head><body><ul>'
+            + "".join(f'<li><a href="/truyen/x/chuong-{i}">Chương {i}</a></li>'
+                     for i in range(1, 6))
+            + "</ul></body></html>")
+        pages = {f"{base}/truyen/x": index}
+        for i in range(1, 6):
+            pages[f"{base}/truyen/x/chuong-{i}"] = (
+                f'<html><head><title>Chương {i}</title></head><body>'
+                f'<div class="chapter-content"><p>Đoạn văn bản của riêng '
+                f"chương số {i}, đủ dài để vượt ngưỡng tối thiểu cho một "
+                "vùng nội dung hợp lệ, và khác biệt thật sự với các chương "
+                f"khác trong cùng bộ truyện thử nghiệm số {i}.</p>"
+                "</div></body></html>")
+
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+        svc.confirm_unknown_source(f"{base}/truyen/x")
+        profile_store.save("chua-biet-hop-le.example", status=ProfileStatus.DEGRADED,
+                          consecutive_failures=3)
+
+        confirmed = svc.confirm_unknown_source(f"{base}/truyen/x")
+
+        self.assertEqual(confirmed["profile"].status, ProfileStatus.LEARNING)
+        self.assertEqual(confirmed["profile"].revision, 2)
+
+    def test_domain_degraded_bi_tu_choi_khi_cac_chuong_mau_trung_het_noi_dung(self):
+        """Doi chung TRUC TIEP voi test tren: neu HAI trang chuong mau
+        THAT SU tra ve noi dung GIONG HET nhau (dau hieu selector hong
+        dang lay lai MOT khoi tinh thay vi tung chuong that), khoi phuc
+        PHAI bi tu choi — day CHINH LA kiem tra ma review doc lap (Codex)
+        phat hien la "chet" (khong bao gio duoc kich hoat) truoc ban sua
+        `confirm_unknown_source` tai them chuong mau THU HAI de so sanh."""
+        base = "https://chua-biet-trung-het.example"
+        chuong_tinh = (
+            '<html><head><title>Chương</title></head><body>'
+            '<div class="chapter-content"><p>Nội dung tĩnh không đổi bị '
+            "selector hỏng lấy lại giống hệt nhau cho mọi URL chương, đủ "
+            "dài để vượt ngưỡng tối thiểu cho một vùng nội dung hợp lệ.</p>"
+            "</div></body></html>")
+        index = (
+            '<html><head><title>Truyện Trùng Hết</title></head><body><ul>'
+            + "".join(f'<li><a href="/truyen/x/chuong-{i}">Chương {i}</a></li>'
+                     for i in range(1, 6))
+            + "</ul></body></html>")
+        pages = {f"{base}/truyen/x": index}
+        for i in range(1, 6):
+            pages[f"{base}/truyen/x/chuong-{i}"] = chuong_tinh
+
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+        svc.confirm_unknown_source(f"{base}/truyen/x")
+        profile_store.save("chua-biet-trung-het.example", status=ProfileStatus.DEGRADED,
+                          consecutive_failures=3)
+
+        with self.assertRaises(ValueError):
+            svc.confirm_unknown_source(f"{base}/truyen/x")
+        self.assertEqual(profile_store.get("chua-biet-trung-het.example").status,
+                         ProfileStatus.DEGRADED)
+
+    def test_domain_degraded_bi_tu_choi_khoi_phuc_khi_chuong_mau_giong_dang_nhap(self):
+        """Tich hop Phase 10 (tier_escalation, ep discovery confidence ve
+        LOW khi trang chuong mau giong trang dang nhap) + Phase 5 (self-
+        healing, chi xet CHUONG MAU LUC XAC NHAN LAI, khong phai luc dau):
+        mot domain xac nhan thanh cong LAN DAU (chuong hop le), sau do
+        chuyen DEGRADED, roi "phuc hoi" nhung THAT RA site da doi thanh
+        trang dang nhap — PHAI bi tu choi, du bi chan o lop nao."""
+        dang_nhap_base = "https://dang-nhap.example"
+        chuong_hop_le = (
+            '<html><head><title>Chương 1</title></head><body>'
+            '<div class="chapter-content"><p>Đây là nội dung chương thật '
+            "sự đầy đủ và hợp lệ, đủ dài để vượt qua ngưỡng tối thiểu cho "
+            "một vùng nội dung được công nhận trong bộ kiểm tra này, viết "
+            "thêm một câu nữa cho chắc chắn vượt hẳn hai trăm ký tự yêu "
+            "cầu của ngưỡng kiểm tra vùng nội dung hợp lệ.</p>"
+            "</div></body></html>")
+        trang_dang_nhap = (
+            '<html><body><div class="chapter-content">'
+            "<p>Vui lòng đăng nhập để đọc tiếp nội dung chương này, cảm "
+            "ơn bạn đã quan tâm theo dõi câu chuyện của chúng tôi trong "
+            "suốt thời gian qua, mong bạn tiếp tục ủng hộ.</p>"
+            "</div></body></html>")
+        index = (
+            '<html><head><title>Truyện Đăng Nhập</title></head><body><ul>'
+            + "".join(f'<li><a href="/dn/chuong-{i}">Chương {i}</a></li>' for i in range(1, 6))
+            + "</ul></body></html>")
+        pages = {f"{dang_nhap_base}/dn": index}
+        for i in range(1, 6):
+            pages[f"{dang_nhap_base}/dn/chuong-{i}"] = chuong_hop_le
+
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+        svc.confirm_unknown_source(f"{dang_nhap_base}/dn")
+        profile_store.save("dang-nhap.example", status=ProfileStatus.DEGRADED,
+                          consecutive_failures=3)
+
+        # Site "phuc hoi" nhung THAT RA da doi thanh trang dang nhap.
+        for i in range(1, 6):
+            pages[f"{dang_nhap_base}/dn/chuong-{i}"] = trang_dang_nhap
+
+        with self.assertRaises(ValueError):
+            svc.confirm_unknown_source(f"{dang_nhap_base}/dn")
+        # PHAI van con DEGRADED — khong duoc am tham chap nhan.
+        self.assertEqual(profile_store.get("dang-nhap.example").status,
+                         ProfileStatus.DEGRADED)
+
+
 class ProfileOutcomeSyncTest(unittest.TestCase):
     """Tai hien phat hien tu review doc lap (Codex): mot chu ky drive co CA
     thanh cong LAN loi phai goi `record_success`/`record_failure` DUNG MOT
@@ -373,6 +500,119 @@ class CheckForUpdatesTest(unittest.TestCase):
         svc = _svc()
         with self.assertRaises(ScrapeRunNotFoundError):
             svc.check_for_updates("scr_khong-ton-tai")
+
+
+class NavigationOnlyAdapterDispatchTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): `NavigationOnlyAdapter`
+    (Phase 3) CHUA TUNG duoc tao qua duong that (`_adapter_for_url`/
+    `_adapter_from_config`) — chi test truc tiep goi no. Kiem tra o day
+    di qua DUNG duong operator that (SiteConfig -> discover -> start)."""
+
+    _NAV_BASE = "https://dieu-huong.example"
+    _CFG = {
+        "dieu-huong.example": SiteConfig(
+            domain="dieu-huong.example", chapter_href_pattern=r"/c/\d+",
+            adapter_kind="navigation_only"),
+    }
+
+    def _pages(self, so_chuong: int) -> dict:
+        def trang(so):
+            tiep = (f'<a href="/c/{so + 1}">Tiếp theo</a>' if so < so_chuong else "")
+            return (f'<html><head><title>Chương {so}</title></head><body>'
+                   f'<div class="chapter-content"><p>Nội dung chương {so} đủ '
+                   "dài để vượt ngưỡng tối thiểu cho vùng nội dung hợp lệ "
+                   f"trong bộ kiểm thử điều phối adapter điều hướng.</p></div>"
+                   f"{tiep}</body></html>")
+        return {f"{self._NAV_BASE}/c/{i}": trang(i) for i in range(1, so_chuong + 1)}
+
+    def test_discover_va_start_qua_SiteConfig_navigation_only(self):
+        pages = self._pages(4)
+        with patch.dict("server.scraper.site_registry._REGISTRY", self._CFG):
+            svc = ScraperOpsService(
+                MockScrapeRunStore(),
+                fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)))
+            preview = svc.discover(f"{self._NAV_BASE}/c/1")
+            self.assertTrue(preview["supported"])
+            self.assertEqual(preview["run"].estimated_total, 4)
+
+            started = svc.start_or_continue(f"{self._NAV_BASE}/c/1")
+            run_id = started["run"].run_id
+            driven = svc.drive(run_id)
+            self.assertEqual(driven["run"].status, ScrapeRunStatus.COMPLETED)
+            self.assertEqual(driven["counts"]["review_ready"], 4)
+
+
+class CheckPossibleMirrorTest(unittest.TestCase):
+    """Phase 7: `check_possible_mirror` — kham pha nguon MOI (khong ghi
+    gi), so sanh voi cac dot da co trong kho, tra ve nhung dot co
+    confidence >= MEDIUM."""
+
+    _MIRROR_BASE = "https://mirror-cua-x.example"
+
+    def _mirror_pages(self, title: str, tac_gia: str) -> dict:
+        index = f"""<html><head><title>{title}</title>
+        <meta property="og:title" content="{title}">
+        <meta name="author" content="{tac_gia}"></head>
+        <body><ul>
+        <li><a href="/m/chuong-1">Chương 1</a></li>
+        <li><a href="/m/chuong-2">Chương 2</a></li>
+        <li><a href="/m/chuong-3">Chương 3</a></li>
+        </ul></body></html>"""
+        ch = ('<html><body><div class="chapter-content"><p>Nội dung đủ '
+             "dài để vượt ngưỡng tối thiểu cho vùng nội dung hợp lệ trong "
+             "bộ kiểm tra tích hợp mirror này thật sự.</p></div></body></html>")
+        return {
+            f"{self._MIRROR_BASE}/m": index,
+            f"{self._MIRROR_BASE}/m/chuong-1": ch,
+            f"{self._MIRROR_BASE}/m/chuong-2": ch,
+            f"{self._MIRROR_BASE}/m/chuong-3": ch,
+        }
+
+    @patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG)
+    def test_khong_co_dot_nao_trung_tra_ve_danh_sach_rong(self):
+        store = MockScrapeRunStore()
+        svc = _svc(store)
+        svc.start_or_continue(f"{_BASE}/truyen/thu-nghiem")
+
+        pages = self._mirror_pages("Truyện Hoàn Toàn Khác", "Người Khác")
+        svc2 = ScraperOpsService(
+            store, fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)))
+        result = svc2.check_possible_mirror(f"{self._MIRROR_BASE}/m")
+        self.assertEqual(result["possible_mirrors"], [])
+
+    @patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG)
+    def test_title_va_author_khop_bao_MEDIUM(self):
+        store = MockScrapeRunStore()
+        svc = _svc(store)
+        svc.start_or_continue(f"{_BASE}/truyen/thu-nghiem")
+
+        # Fixture goc: title "Truyện Thử Nghiệm", author "Tác Giả Ẩn Danh"
+        # (xem index.html) — dung LAI CA HAI de mo phong mirror THAT.
+        pages = self._mirror_pages("Truyện Thử Nghiệm", "Tác Giả Ẩn Danh")
+        svc2 = ScraperOpsService(
+            store, fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)))
+        result = svc2.check_possible_mirror(f"{self._MIRROR_BASE}/m")
+
+        self.assertEqual(len(result["possible_mirrors"]), 1)
+        mirror = result["possible_mirrors"][0]
+        self.assertEqual(mirror["confidence"], "medium")
+        self.assertIn("title", mirror["matched_signals"])
+        self.assertIn("author", mirror["matched_signals"])
+
+    @patch.dict("server.scraper.site_registry._REGISTRY", _FAKE_CFG)
+    def test_khong_ghi_gi_du_tim_thay_mirror(self):
+        store = MockScrapeRunStore()
+        svc = _svc(store)
+        svc.start_or_continue(f"{_BASE}/truyen/thu-nghiem")
+        so_dot_truoc = len(store.runs)
+
+        pages = self._mirror_pages("Truyện Thử Nghiệm", "Tác Giả Ẩn Danh")
+        svc2 = ScraperOpsService(
+            store, fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)))
+        svc2.check_possible_mirror(f"{self._MIRROR_BASE}/m")
+
+        self.assertEqual(len(store.runs), so_dot_truoc,
+                         "check_possible_mirror() không được tạo/ghi bất kỳ dot nào")
 
 
 class DiscoverAndRunTest(unittest.TestCase):

@@ -15,24 +15,32 @@ HTTP, moi thu ben vung deu di qua `store` (Mock hoac Appwrite, xem
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, Optional
 
 from server.scraper import site_registry
 from server.scraper.adapters.generic_index_adapter import GenericIndexAdapter
 from server.scraper.adapters.json_ld_adapter import JsonLdAwareAdapter
+from server.scraper.adapters.navigation_only_adapter import NavigationOnlyAdapter
 from server.scraper.bulk import ScrapeRunService
 from server.scraper.contract import domain_of
+from server.scraper.content_extraction import extract_content_v3
+from server.scraper.dedupe import content_hash
 from server.scraper.discovery import (
     SourceConfidence, UnknownSiteDiscoveryEngine,
 )
-from server.scraper.http_fetcher import HttpFetcher
+from server.scraper.http_fetcher import FetchError, HttpFetcher
 from server.scraper.incremental import diff_toc
 from server.scraper.pipeline import StoryIngestionPipeline
 from server.scraper.run_state import run_fingerprint, run_id_from_fingerprint
+from server.scraper.self_healing import RelocationConfidence, validate_relocated_content
 from server.scraper.site_profile import (
-    MockSiteProfileStore, profile_from_proposal,
+    MockSiteProfileStore, ProfileStatus, profile_from_proposal,
 )
 from server.scraper.state_reconstruct import rebuild_state
+from server.scraper.story_identity import (
+    IdentitySignals, SameWorkConfidence, compare_identity,
+)
 
 
 class UnsupportedSiteError(Exception):
@@ -65,12 +73,21 @@ class ScraperOpsService:
 
     # -- xay dung pipeline/service MOI moi lan goi --------------------------
 
-    def _adapter_from_config(self, cfg: site_registry.SiteConfig) -> JsonLdAwareAdapter:
+    def _adapter_from_config(self, cfg: site_registry.SiteConfig):
+        if cfg.adapter_kind == "navigation_only":
+            # Phase 3 Story Harvester V3: nguon KHONG co trang muc luc —
+            # `chapter_href_pattern` duoc HIEU LAI thanh `next_href_pattern`
+            # (xem docstring `SiteConfig.adapter_kind`). Truoc ban sua nay,
+            # `NavigationOnlyAdapter` CHUA BAO GIO duoc tao qua duong that
+            # (chi test truc tiep goi no) — phat hien qua review doc lap
+            # (Codex).
+            return NavigationOnlyAdapter(
+                self._fetcher_factory(), next_href_pattern=cfg.chapter_href_pattern)
         return JsonLdAwareAdapter(
             self._fetcher_factory(), chapter_href_pattern=cfg.chapter_href_pattern,
             title_suffix_to_strip=cfg.title_suffix_to_strip or None)
 
-    def _adapter_for_url(self, url: str) -> JsonLdAwareAdapter:
+    def _adapter_for_url(self, url: str):
         """Phan cap Phase 4: SiteConfig da xac minh (ky su) truoc, roi
         SiteProfile da hoc+xac nhan (operator) — CHI dung khi
         `is_usable` (LEARNING/VERIFIED, khong bao gio DEGRADED/DISABLED).
@@ -158,10 +175,18 @@ class ScraperOpsService:
     def confirm_unknown_source(self, url: str) -> Dict[str, Any]:
         """Operator xac nhan MOT de xuat discovery — chay LAI discovery
         (khong trang thai, toi da hai lan fetch, xem `discovery.py`) de co
-        de xuat TUOI, roi luu thanh `SiteProfile` (status LEARNING). KHONG
-        BAO GIO tu dong goi trong `discover()` — xac nhan PHAI la hanh
-        dong RO RANG cua operator (Phase 2: "MEDIUM cần operator review"),
-        va LOW luon bi tu choi o day (Phase 2: "LOW fails safely")."""
+        de xuat TUOI, roi luu thanh `SiteProfile`. KHONG BAO GIO tu dong
+        goi trong `discover()` — xac nhan PHAI la hanh dong RO RANG cua
+        operator (Phase 2: "MEDIUM cần operator review"), va LOW luon bi
+        tu choi o day (Phase 2: "LOW fails safely").
+
+        Phase 5 (self-healing): neu domain nay DA co mot `SiteProfile`
+        DEGRADED (vuot nguong loi lien tiep), day la mot lan "tu-chua" —
+        KHONG chi tin discovery confidence MEDIUM/HIGH don thuan, con phai
+        qua `validate_relocated_content` (kiem tra cau truc THEM: khong
+        trung chuong truoc/khong giong trang dang nhap-loi) truoc khi chap
+        nhan revision moi. `revision` tang len 1 moi lan xac nhan LAI mot
+        domain DA co profile (bat ke DEGRADED hay khong)."""
         if site_registry.lookup(url) is not None:
             raise ValueError(
                 "Domain này đã có cấu hình xác minh sẵn — không cần xác "
@@ -175,7 +200,62 @@ class ScraperOpsService:
                 "Đây có thể không phải trang mục lục, trang cần "
                 "JavaScript để hiển thị, hoặc cần một kỹ sư cấu hình thủ "
                 "công (site_registry) nếu đây là nguồn quan trọng.")
-        saved = self._profile_store.upsert(profile_from_proposal(proposal))
+
+        domain = domain_of(proposal.canonical_url)
+        profile_cu = self._profile_store.get(domain)
+        profile_moi = profile_from_proposal(proposal)
+        if profile_cu is not None:
+            profile_moi = replace(profile_moi, revision=profile_cu.revision + 1)
+
+        if profile_cu is not None and profile_cu.status == ProfileStatus.DEGRADED:
+            if not proposal.sample_chapter_urls:
+                raise ValueError(
+                    "Nguồn này đang ở trạng thái DEGRADED (nhiều lần lỗi "
+                    "liên tiếp) và lần khám phá lại không tìm được trang "
+                    "chương mẫu để xác nhận cấu trúc — không thể tự động "
+                    "khôi phục, cần kỹ sư kiểm tra thủ công.")
+            try:
+                mau = self._fetcher_factory().fetch(proposal.sample_chapter_urls[0])
+            except FetchError as exc:
+                raise ValueError(
+                    f"Không tải được trang chương mẫu để xác nhận khôi "
+                    f"phục: {exc}") from exc
+
+            # Phase 5 ("kiem tra khong trung chuong TRUOC DO"): tai THEM
+            # mot trang chuong mau THU HAI (neu discovery tim duoc) de co
+            # gi do THAT SU de so sanh — phat hien qua review doc lap
+            # (Codex): thieu buoc nay, `previous_chapter_content_hash`
+            # LUON la `None` (chi fetch DUY NHAT mot trang mau), khien
+            # nhanh kiem tra "trung chuong truoc" cua `validate_relocated_content`
+            # KHONG BAO GIO thuc su chay trong luong nay — mot selector da
+            # hong tra ve CUNG mot noi dung tinh cho MOI URL chuong se
+            # khong bi bat o day (chi bi bat SAU do, khi `drive_once` that
+            # su chay va Phase 8 gan nhan POSSIBLE_DUPLICATE tren tung
+            # chuong — cham hon nhieu so voi muc dich cua cong kiem tra
+            # nay). KHONG bat buoc (`len(...) < 2` hoac fetch loi thi bo
+            # qua kiem tra THEM nay, KHONG chan ca luong khoi phuc — day
+            # la mot lop phong ve BO SUNG, khong phai dieu kien tien quyet).
+            hash_chuong_mau_khac: Optional[str] = None
+            if len(proposal.sample_chapter_urls) >= 2:
+                try:
+                    mau_khac = self._fetcher_factory().fetch(
+                        proposal.sample_chapter_urls[1])
+                    hash_chuong_mau_khac = content_hash(extract_content_v3(
+                        mau_khac.text, chapter_title=proposal.work_title).clean_text)
+                except FetchError:
+                    pass
+
+            xac_thuc = validate_relocated_content(
+                mau.text, chapter_title=proposal.work_title,
+                previous_chapter_content_hash=hash_chuong_mau_khac)
+            if xac_thuc.confidence == RelocationConfidence.LOW:
+                raise ValueError(
+                    "Kiểm tra cấu trúc (Phase 5) từ chối đề xuất khôi "
+                    "phục này: " + " ".join(xac_thuc.evidence) +
+                    " — nguồn vẫn ở trạng thái DEGRADED, cần kỹ sư kiểm "
+                    "tra thủ công thay vì tự động khôi phục.")
+
+        saved = self._profile_store.upsert(profile_moi)
         return {"profile": saved, "proposal": proposal}
 
     def start_or_continue(self, url: str, *, chapter_limit: Optional[int] = None
@@ -262,6 +342,59 @@ class ScraperOpsService:
             self._profile_store.record_success(domain)
         elif moi_loi > 0:
             self._profile_store.record_failure(domain)
+
+    def check_possible_mirror(self, url: str) -> Dict[str, Any]:
+        """Phase 7 (Story Harvester V3): truoc khi bat dau quet mot nguon
+        MOI, kiem tra xem no co GIONG mot dot da co trong kho hay khong
+        (vd truyen bi dang lai/mirror tren domain khac) — tra ve TAT CA dot
+        hien co voi confidence >= MEDIUM, sap xep confidence cao truoc.
+        KHONG tu dong chan/gop gi — CHI la thong tin cho operator xem xet
+        (xem `story_identity.py`, nguyen tac "khong bao gio gop chi tu
+        title"). CHUA chua NOI DUNG chuong nao (chua quet), nen CHI dung
+        tin hieu tieu de/tac gia/mo ta/so chuong — content_hash (tin hieu
+        manh nhat) khong ap dung duoc o buoc TRUOC KHI quet nay."""
+        tin_hieu_moi = self._tin_hieu_nhan_dang_cho(url)
+        ket_qua: list = []
+        for run in self._store.list_runs():
+            tin_hieu_cu = IdentitySignals(
+                canonical_url=run.source_url,
+                title=run.series_title,
+                author=run.series_author or None,
+                description=run.series_description or None,
+                chapter_count=run.total_discovered or None,
+            )
+            so_sanh = compare_identity(tin_hieu_moi, tin_hieu_cu)
+            if so_sanh.confidence in (SameWorkConfidence.HIGH, SameWorkConfidence.MEDIUM):
+                ket_qua.append({
+                    "run_id": run.run_id,
+                    "series_title": run.series_title,
+                    "source_url": run.source_url,
+                    "confidence": so_sanh.confidence.value,
+                    "evidence": so_sanh.evidence,
+                    "matched_signals": so_sanh.matched_signals,
+                })
+        ket_qua.sort(key=lambda r: r["confidence"] != "high")
+        return {"possible_mirrors": ket_qua}
+
+    def _tin_hieu_nhan_dang_cho(self, url: str) -> IdentitySignals:
+        """Xay `IdentitySignals` cho MOT url — dung duong DA CO CAU HINH
+        (SiteConfig/SiteProfile) neu co, khong thi qua discovery engine
+        (Phase 2) — CA HAI deu cho title/author/description/uoc luong so
+        chuong ma KHONG can operator xac nhan gi truoc (chi kham pha, xem
+        `discover()`)."""
+        if self._co_the_dung_ngay(url):
+            adapter = self._adapter_for_url(url)
+            series = adapter.discover_series(url)
+            return IdentitySignals(
+                canonical_url=series.canonical_url, title=series.title,
+                author=series.author, description=series.description,
+                chapter_count=len(series.chapter_urls) or None)
+        engine = UnknownSiteDiscoveryEngine(self._fetcher_factory())
+        proposal = engine.discover(url)
+        return IdentitySignals(
+            canonical_url=proposal.canonical_url, title=proposal.work_title or "",
+            author=proposal.author, description=proposal.description,
+            chapter_count=proposal.chapter_count_estimate or None)
 
     def cancel(self, run_id: str) -> Dict[str, Any]:
         svc = self._service_for_run(run_id)

@@ -32,8 +32,8 @@ from typing import Any, Dict, Optional
 
 from server.scraper.contract import SeriesInfo, canonicalize_url
 from server.scraper.dedupe import source_fingerprint
-from server.scraper.http_fetcher import FetchError
 from server.scraper.pipeline import IngestionDecision, StoryIngestionPipeline
+from server.scraper.quality import assess_chapter_quality
 from server.scraper.run_state import (
     TERMINAL_RUN_STATUSES,
     MockScrapeRunStore,
@@ -45,6 +45,14 @@ from server.scraper.run_state import (
     run_fingerprint,
     run_id_from_fingerprint,
 )
+
+#: Xem docstring o cho dung (trong `drive_once`) — chan tren SO MUC lay
+#: lam ngu canh "sibling" cho `quality.check_chapter_order` MOI chu ky,
+#: chuyen chi phi tu O(N) moi chu ky (O(N^2) ca dot) thanh O(1) khong doi.
+#: 500 la du cho da so truyen web thuc te; cac dot dai hon van AN TOAN
+#: (chi giam do nhay cua MOT kiem tra WARN bo sung, khong anh huong lop
+#: phat hien trung lap CHINH dua tren content_hash).
+_TRAN_NGU_CANH_SO_CHUONG_LAN_CAN = 500
 
 
 class ScrapeRunService:
@@ -92,9 +100,12 @@ class ScrapeRunService:
                 status=ScrapeRunStatus.PLANNING,
                 series_title=ke_hoach.series.title,
                 source_domain=ke_hoach.series.source_domain,
+                series_author=ke_hoach.series.author or "",
+                series_description=ke_hoach.series.description or "",
                 estimated_total=len(ke_hoach.chapter_urls_to_process),
                 already_done_count=ke_hoach.already_done_count,
                 total_discovered=ke_hoach.total_discovered,
+                ordering_evidence=ke_hoach.series.ordering_evidence,
             )
 
         self._series_cache[run_id] = ke_hoach.series
@@ -104,9 +115,12 @@ class ScrapeRunService:
             status=ScrapeRunStatus.PLANNING,
             series_title=ke_hoach.series.title,
             source_domain=ke_hoach.series.source_domain,
+            series_author=ke_hoach.series.author or "",
+            series_description=ke_hoach.series.description or "",
             estimated_total=len(ke_hoach.chapter_urls_to_process),
             already_done_count=ke_hoach.already_done_count,
             total_discovered=ke_hoach.total_discovered,
+            ordering_evidence=ke_hoach.series.ordering_evidence,
         ))
 
         # `sequence` tiep tuc tu SAU `sequence` LON NHAT hien co cua dot
@@ -182,12 +196,25 @@ class ScrapeRunService:
                     decision=IngestionDecision.ALREADY_IMPORTED.value,
                     content_hash=ban_ghi.get("content_hash") or "",
                     chapter_number=ban_ghi.get("chapter_number"),
-                    error_message="",
+                    error_message="", claimed_at="",
                 )
 
     # =========================================================================
     # Bo DIEU PHOI (goi lap lai theo chu ky, tu ben ngoai)
     # =========================================================================
+
+    def _da_bi_skip_giua_chung(self, item_id: str) -> bool:
+        """`True` neu muc nay DA bi chuyen sang `SKIPPED` (qua `skip()`)
+        TRONG LUC dang fetch/xu ly chuong nay — phat hien qua review doc
+        lap (Codex): TRUOC ban sua nay, ghi hoan tat cua `drive_once`
+        (thanh cong hay that bai deu vay) GHI DE VO DIEU KIEN len tren, am
+        tham "hoi sinh" mot muc operator VUA CHU DINH bo qua thanh
+        `REVIEW_READY`/`FAILED` — mat hoan toan quyet dinh cua operator ma
+        khong co loi/canh bao nao. KHONG CAN kiem tra `claimed_at` (muc DA
+        duoc claim, cu the la muc DANG duoc vong lap nay xu ly — chi trang
+        thai co the thay doi tu ben ngoai la dieu can biet)."""
+        muc_hien_tai = self._store.get_item(item_id)
+        return muc_hien_tai is not None and muc_hien_tai.status is ScrapeItemStatus.SKIPPED
 
     def drive_once(self, run_id: str, *, max_chapters: Optional[int] = None
                    ) -> Dict[str, int]:
@@ -209,8 +236,11 @@ class ScrapeRunService:
         if max_chapters is not None:
             gioi_han = min(gioi_han, max(1, int(max_chapters)))
 
-        muc_can_lam = self._store.list_items(
-            run_id, statuses=[ScrapeItemStatus.PENDING], limit=gioi_han)
+        # Phase 16 ("races"): `claim_pending_items` (khong phai `list_items`
+        # thuan doc) — dong khe ho hai loi goi `drive_once` DONG THOI tren
+        # CUNG `run_id` doc TRUNG cung mot lo muc `pending` (tai hien duoc
+        # that qua nhieu luong goi song song, xem docstring ham do).
+        muc_can_lam = self._store.claim_pending_items(run_id, gioi_han)
 
         series = self._series_cache.get(run_id)
         if series is None:
@@ -222,6 +252,40 @@ class ScrapeRunService:
         provider = self._pipeline._provider
         state = self._pipeline.state
         bi_huy = False
+
+        # Ngu canh "sibling" cho `check_chapter_order` (quality.py) — LAY TU
+        # cac muc DA XONG cua dot nay (khong chi trong chu ky hien tai,
+        # khac `pipeline.py::run()` — o day co the doc lai tu store), roi
+        # CONG DON THEM trong luc chay chu ky nay.
+        #
+        # GIOI HAN CO CHU DICH o `_TRAN_NGU_CANH_SO_CHUONG_LAN_CAN` (Overnight
+        # "memory/CPU characterization" — O(N^2) hunt): ban dau dung
+        # `limit=None` (LAY HET), nghia la MOI chu ky quet LAI TOAN BO so
+        # muc DA XONG tu truoc den nay — do so muc do TANG DAN qua tung chu
+        # ky, tong chi phi ca dot la O(N^2/chapters_per_cycle), do luong
+        # THAT: ty le thoi gian chu ky CUOI/chu ky DAU tang tu 1.2x (500
+        # chuong) len 4.4x (5000 chuong). Tren kho THAT (Appwrite), moi lan
+        # goi con la MOT (hoac nhieu, list_items tu phan trang 100/lan) YEU
+        # CAU MANG THAT — o quy mo 5000 chuong, tong so yeu cau mang CHI
+        # CHO buoc nay co the len toi hang nghin, TANG DAN moi chu ky.
+        #
+        # GIOI HAN o day chuyen chi phi ve O(1) khong doi moi chu ky (O(N)
+        # tong ca dot) — DANH DOI: kiem tra "trung so chuong"/"nhay so qua
+        # xa" (quality.py::check_chapter_order) chi CON hieu luc trong
+        # `_TRAN_NGU_CANH_SO_CHUONG_LAN_CAN` chuong DA XONG dau tien cua
+        # dot, khong con "nho" toan bo lich su cho cac dot RAT dai (hiem,
+        # da so truyen web thuc te duoi nguong nay). Day la kiem tra WARN
+        # bo sung (khong BLOCK, xem quality.py), va da co Phase 8
+        # (`find_canonical_urls_by_content_hash`) lam lop phat hien trung
+        # lap CHINH dua tren NOI DUNG that (khong gioi han nay) — gioi han
+        # o day KHONG lam yeu di lop phong ve chinh.
+        cac_so_chuong_da_biet = [
+            i.chapter_number for i in
+            self._store.list_items(
+                run_id, statuses=[ScrapeItemStatus.REVIEW_READY],
+                limit=_TRAN_NGU_CANH_SO_CHUONG_LAN_CAN)
+            if i.chapter_number is not None
+        ]
 
         for muc in muc_can_lam:
             # (1) Doc lai trang thai TRUOC KHI dung toi chuong nay — day la
@@ -236,23 +300,67 @@ class ScrapeRunService:
             try:
                 raw_html = provider.fetch_chapter(muc.chapter_url)
                 chapter = provider.normalize_chapter(muc.chapter_url, raw_html, series)
-            except (FetchError, ValueError) as exc:
+            except Exception as exc:
+                # BAT `Exception` NOI CHUNG (khong chi `FetchError`/
+                # `ValueError`) — cung ly do voi `pipeline.py::run()`: mot
+                # trang HTML bat thuong co the lam mot buoc phan tich noi
+                # bo nem loi khong luong truoc duoc (vd
+                # `content_extraction.py`, tai hien that bang
+                # `RecursionError` tren HTML long ~1000 cap the truoc khi
+                # sua o nguon — xem review doc lap Codex), va MOT chuong
+                # loi khong duoc phep dung ca dot quet hang tram/nghin
+                # chuong khac dang cho o `muc_can_lam`.
+                if self._da_bi_skip_giua_chung(muc.item_id):
+                    continue
                 state.record_failure(muc.chapter_url)
                 self._store.save_item(
                     muc.item_id, status=ScrapeItemStatus.FAILED,
-                    error_message=str(exc)[:1000], attempts=muc.attempts + 1)
+                    error_message=str(exc)[:1000], attempts=muc.attempts + 1,
+                    claimed_at="")
                 continue
 
+            if self._da_bi_skip_giua_chung(muc.item_id):
+                continue
             ban_ghi = state.record_success(
                 muc.chapter_url, content_hash_value=chapter.content_hash,
                 chapter_number=chapter.chapter_number)
-            quyet_dinh = (IngestionDecision.REVISION if ban_ghi.get("is_revision")
-                          else IngestionDecision.NEW)
+            trung_voi: str = ""
+            if ban_ghi.get("is_revision"):
+                quyet_dinh = IngestionDecision.REVISION
+            else:
+                # Phase 8 ("POSSIBLE_DUPLICATE") — xem docstring cung ten
+                # trong `pipeline.py::run()` cho ly do CHI kiem tra o day
+                # (khong phai nhanh REVISION).
+                danh_sach_trung = state.find_canonical_urls_by_content_hash(
+                    chapter.content_hash, exclude_canonical=chapter.canonical_url)
+                if danh_sach_trung:
+                    quyet_dinh = IngestionDecision.POSSIBLE_DUPLICATE
+                    trung_voi = danh_sach_trung[0]
+                else:
+                    quyet_dinh = IngestionDecision.NEW
+            # Phase 6 ("khong am tham chap nhan trich xuat yeu") — CHUA
+            # tung duoc goi tren duong drive_once THAT (chi co o
+            # `pipeline.py::run()`, duong preview/test rieng) truoc ban sua
+            # nay, nghia la TOAN BO 11 check tat dinh cua quality.py chua
+            # tung chay tren MOT chuong THAT nao tung vao hang doi duyet —
+            # phat hien qua review doc lap (Codex). GAN NHAN, KHONG chan
+            # (giong triet ly quality.py — xem docstring o do).
+            bao_cao_chat_luong = assess_chapter_quality(
+                chapter, sibling_chapter_numbers=cac_so_chuong_da_biet)
+            if chapter.chapter_number is not None:
+                cac_so_chuong_da_biet.append(chapter.chapter_number)
+
             self._store.save_item(
                 muc.item_id, status=ScrapeItemStatus.REVIEW_READY,
                 decision=quyet_dinh.value, chapter_title=chapter.chapter_title,
                 chapter_number=chapter.chapter_number,
-                content_hash=chapter.content_hash, error_message="")
+                content_hash=chapter.content_hash, error_message="",
+                duplicate_of_url=trung_voi,
+                quality_passed=bao_cao_chat_luong.passed,
+                quality_score=bao_cao_chat_luong.score,
+                quality_warnings=" | ".join(
+                    bao_cao_chat_luong.block_reasons + bao_cao_chat_luong.warn_reasons),
+                claimed_at="")
 
         # DEM LAI CHINH XAC dung MOT LAN o cuoi chu ky — khong tin bo dem
         # cong don rai rac trong vong lap. Cung mau voi

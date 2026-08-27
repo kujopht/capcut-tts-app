@@ -114,9 +114,17 @@ class SeriesInfo:
     source_domain: str
     author: Optional[str] = None
     description: Optional[str] = None
-    #: URL (CHUA chuan hoa) cua tung chuong, theo DUNG thu tu hien thi tren
-    #: trang muc luc — thu tu la du lieu, khong duoc tu sap lai.
+    #: URL (CHUA chuan hoa) cua tung chuong, THEO THU TU DOC da xac dinh —
+    #: Phase 3 Story Harvester V3: adapter co the da SAP XEP LAI thu tu
+    #: xuat hien tho tren trang muc luc (vd phat hien "reverse chronological
+    #: TOC", uu tien so chuong ro rang hon thu tu HTML tho) — xem
+    #: `ordering_evidence` cho LY DO cu the, `chapter_ordering.py` cho phan
+    #: cap uu tien day du. KHONG BAO GIO bia dat so chuong con thieu.
     chapter_urls: List[str] = field(default_factory=list)
+    #: Giai thich NGUOI DOC duoc ve tang uu tien nao da quyet dinh thu tu
+    #: o tren (xem `chapter_ordering.OrderingResult.evidence`) — rong neu
+    #: adapter khong tinh toan thu tu (VD chua nang cap len Phase 3).
+    ordering_evidence: str = ""
 
 
 @dataclass
@@ -141,6 +149,12 @@ class NormalizedChapter:
     author: Optional[str] = None
     published_at: Optional[str] = None
     language: str = "vi"
+    #: "high"/"medium"/"low" tu `content_extraction.extract_content_v3`
+    #: (Phase 6 Story Harvester V3) — CHI duoc dien khi trang KHONG co
+    #: boundary da xac minh tay (xem `html_extract.ExtractedPage.
+    #: boundary_matched`). RONG ("") nghia la da dung boundary xac minh
+    #: (Wikisource/Royal Road) — KHONG can diem tin cay, da CHUNG MINH dung.
+    extraction_confidence: str = ""
 
 
 class StoryProvider(ABC):

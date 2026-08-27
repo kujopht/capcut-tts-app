@@ -1762,6 +1762,8 @@ export interface ScrapeRun {
   status: ScrapeRunStatus;
   series_title: string;
   source_domain: string;
+  series_author: string;
+  series_description: string;
   estimated_total: number;
   already_done_count: number;
   total_discovered: number;
@@ -1770,6 +1772,9 @@ export interface ScrapeRun {
   count_failed: number;
   count_skipped: number;
   last_error: string;
+  /** Phase 3 Story Harvester V3 — giải thích thứ tự chương (xem
+      server/scraper/chapter_ordering.py). */
+  ordering_evidence: string;
   created_at: string;
   updated_at: string;
   cancelled_at: string;
@@ -2475,6 +2480,24 @@ export const adminApi = {
   confirmScrapeSource: (url: string) =>
     request<{ profile: SiteProfile; proposal: DiscoveryProposal }>(
       "/api/admin/scraper/confirm-source",
+      { method: "POST", body: JSON.stringify({ url }) },
+    ),
+
+  /** Phase 7 (Story Harvester V3) — kham pha nguon MOI (khong ghi gi),
+      so sanh voi cac dot da co, tra ve nhung dot co the la mirror
+      (confidence >= medium). Khong tu dong chan/gop gi ca. */
+  checkScrapeMirror: (url: string) =>
+    request<{
+      possible_mirrors: Array<{
+        run_id: string;
+        series_title: string;
+        source_url: string;
+        confidence: "high" | "medium";
+        evidence: string[];
+        matched_signals: string[];
+      }>;
+    }>(
+      "/api/admin/scraper/check-mirror",
       { method: "POST", body: JSON.stringify({ url }) },
     ),
 

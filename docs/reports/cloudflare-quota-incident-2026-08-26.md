@@ -69,6 +69,16 @@ after any frontend deploy for the first hour or so.
 
 ### Automatable: the GraphQL Analytics API
 
+> **Correction (2026-08-27):** the "needs a dedicated token" assumption
+> below turned out to be wrong — tested directly the next day, the
+> existing `wrangler` OAuth token already has Account Analytics read
+> access. No new token was created. The monitor is implemented at
+> `scripts/cloudflare_request_monitor.py`; see
+> `cloudflare-free-tier-runbook.md` for the current, accurate version of
+> this section with real thresholds. Left the original text below
+> unedited as an honest record of what was believed at the time this
+> report was written, rather than quietly rewriting incident history.
+
 Cloudflare's Analytics API (`https://api.cloudflare.com/client/v4/graphql`)
 exposes a Workers invocation dataset queryable with a plain API token —
 **no Workers Paid plan required**, this is a reporting/control-plane

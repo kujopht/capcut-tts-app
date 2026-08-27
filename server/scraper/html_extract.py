@@ -19,6 +19,23 @@ from typing import Any, Dict, List, Optional, Tuple
 #: dung chuong.
 _NOISE_TAGS = {"script", "style", "noscript", "nav", "header", "footer", "aside"}
 
+#: The rong (void elements) trong HTML5 khong co the dong — tranh lam lech
+#: stack the khi theo doi ranh gioi vung noi dung.
+_VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+}
+
+#: Heuristic ranh gioi noi dung duong tinh (positive content-boundary):
+#: MediaWiki (Wikipedia, Wikisource, ...) dat noi dung bai viet/chuong trong
+#: the co class `mw-parser-output` (uu tien nhat vi chi gom wikitext da parse,
+#: loai bo ca printfooter va catlinks o duoi) hoac id `mw-content-text`
+#: (fallback cho skin cu). Neu co, chi trich xuat van ban ben trong ranh gioi
+#: nay de loai bo UI-chrome (skip-to-content, sidebar, breadcrumb, tim kiem,
+#: footer) bi boc trong <div> thay vi the ngu nghia.
+_CONTENT_BOUNDARY_CLASSES = {"mw-parser-output"}
+_CONTENT_BOUNDARY_IDS = {"mw-content-text"}
+
 
 @dataclass
 class ExtractedPage:
@@ -58,13 +75,49 @@ class _Parser(HTMLParser):
         self._current_href: Optional[str] = None
         self._current_link_text: List[str] = []
 
+        #: (is_parser_output, is_content_text) day cho MOI the mo khong-rong,
+        #: pop VO DIEU KIEN (khong tim ten khop) tren MOI the dong — O(1) moi
+        #: the, tranh do thi O(n^2) tren HTML hong/doi thu voi nhieu the mo
+        #: khong dong (xem review Codex). Cung phong cach voi `_skip_depth`
+        #: co san (dem long nhau don gian, khong khop ten) — HTML that thuong
+        #: khong bao gio dong the dung, du lech nho vi qua tren HTML hong la
+        #: danh doi chap nhan duoc, giong triet ly khoan dung cua module nay.
+        self._tag_stack: List[Tuple[bool, bool]] = []
+        self._mw_parser_output_depth = 0
+        self._mw_content_text_depth = 0
+        #: Da TUNG thay ranh gioi nay hay chua (khac voi "co van ban ben
+        #: trong hay khong") — phan biet "trang MediaWiki that su rong/chi
+        #: co anh" (van phai tra ve RONG, khong fallback ve toan trang) voi
+        #: "khong phai trang MediaWiki" (fallback dung).
+        self._mw_parser_output_seen = False
+        self._mw_content_text_seen = False
+        self._all_text_parts: List[str] = []
+        self._mw_parser_output_parts: List[str] = []
+        self._mw_content_text_parts: List[str] = []
+
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
         attrs_d = {k: v for k, v in attrs if v is not None}
+        classes = set(attrs_d.get("class", "").split())
+        tag_id = attrs_d.get("id", "")
+
+        is_parser_output = bool(_CONTENT_BOUNDARY_CLASSES.intersection(classes))
+        is_content_text = tag_id in _CONTENT_BOUNDARY_IDS
+
+        if is_parser_output:
+            self._mw_parser_output_depth += 1
+            self._mw_parser_output_seen = True
+        if is_content_text:
+            self._mw_content_text_depth += 1
+            self._mw_content_text_seen = True
+
         # JSON-LD PHAI duoc kiem TRUOC quy tac noise-tag chung: `<script>` la
         # mot noise tag (khong dong gop van ban hien thi), nhung mot khoi
         # `<script type="application/ld+json">` van can duoc DOC (chi khong
         # duoc dong gop vao van ban hien thi) — hai muc dich khac nhau tren
         # cung mot the.
+        if tag not in _VOID_TAGS:
+            self._tag_stack.append((is_parser_output, is_content_text))
+
         if tag == "script" and attrs_d.get("type") == "application/ld+json":
             self._in_json_ld = True
             self._json_ld_buffer = []
@@ -92,17 +145,22 @@ class _Parser(HTMLParser):
                     self.page.json_ld.append(json.loads(raw))
                 except (json.JSONDecodeError, ValueError):
                     pass  # khoi JSON-LD hong — bo qua, khong lam hong ca trang.
-            return
-        if tag in _NOISE_TAGS:
+        elif tag in _NOISE_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
-            return
-        if tag == "title":
+        elif tag == "title":
             self._in_title = False
         elif tag == "a" and self._current_href is not None:
             text = "".join(self._current_link_text).strip()
             self.page.links.append((self._current_href, text))
             self._current_href = None
             self._current_link_text = []
+
+        if tag not in _VOID_TAGS and self._tag_stack:
+            is_po, is_ct = self._tag_stack.pop()
+            if is_po:
+                self._mw_parser_output_depth = max(0, self._mw_parser_output_depth - 1)
+            if is_ct:
+                self._mw_content_text_depth = max(0, self._mw_content_text_depth - 1)
 
     def handle_data(self, data: str) -> None:
         if self._in_json_ld:
@@ -116,7 +174,11 @@ class _Parser(HTMLParser):
         if self._current_href is not None:
             self._current_link_text.append(data)
         if data.strip():
-            self.page._text_parts.append(data)
+            self._all_text_parts.append(data)
+            if self._mw_parser_output_depth > 0:
+                self._mw_parser_output_parts.append(data)
+            if self._mw_content_text_depth > 0:
+                self._mw_content_text_parts.append(data)
 
 
 def extract(html: str) -> ExtractedPage:
@@ -128,6 +190,14 @@ def extract(html: str) -> ExtractedPage:
     parser.feed(html)
     parser.close()
     page = parser.page
+    if parser._mw_parser_output_seen:
+        # Ranh gioi CO ton tai — du RONG (vd trang chi co anh) van phai tra
+        # ve RONG, KHONG fallback ve toan trang (se keo lai UI-chrome).
+        page._text_parts = parser._mw_parser_output_parts
+    elif parser._mw_content_text_seen:
+        page._text_parts = parser._mw_content_text_parts
+    else:
+        page._text_parts = parser._all_text_parts
     if page.title:
         page.title = re.sub(r"\s+", " ", page.title).strip()
     return page

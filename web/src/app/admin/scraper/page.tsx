@@ -242,7 +242,11 @@ function ScraperPageContent() {
   }
 
   async function handleBatDauQuet() {
-    const url = inputUrl.trim();
+    // Dung URL cua CHINH lan xem-truoc thanh cong, KHONG dung `inputUrl`
+    // truc tiep — operator co the sua o input SAU khi xem truoc truyen A
+    // ma KHONG bam xem truoc lai, va vo tinh bat dau quet truyen B duoi
+    // danh nghia da xac nhan cua A. Phat hien qua review Codex.
+    const url = ketQuaXemTruoc?.run.source_url?.trim();
     if (!url) return;
 
     setDangBatDau(true);
@@ -288,13 +292,21 @@ function ScraperPageContent() {
     if (!activeRunId) return;
     setDangHuyRun(true);
     try {
-      const res = await adminApi.cancelScrapeRun(activeRunId);
-      setChiTietData((prev) =>
-        prev ? { ...prev, run: res.run, progress: res.progress } : prev,
-      );
+      await adminApi.cancelScrapeRun(activeRunId);
       setTuDongChay(false);
-      toast.ok("Đã gửi yêu cầu huỷ tác vụ.");
       setHoiHuyRun(false);
+      // `cancel` CHI bat co `cancel_requested` — no chi thanh `cancelled`
+      // THAT SU khi mot lan `drive` sau do quan sat thay co nay (xem
+      // docstring backend `bulk.py::request_cancel`). Neu operator dang
+      // KHONG tu dong chay va khong bam "Tiếp tục" nua, dot se ket ket o
+      // `cancel_requested` mai mai — chu dong drive MOT lan ngay o day de
+      // hoan tat huy thay vi cho operator tinh co bam nut khac. Phat hien
+      // qua review Codex.
+      const finalRes = await adminApi.driveScrapeRun(activeRunId);
+      setChiTietData((prev) =>
+        prev ? { ...prev, run: finalRes.run, progress: finalRes.progress } : prev,
+      );
+      toast.ok("Đã huỷ tác vụ.");
       taiLaiChiTiet();
       taiLaiDanhSachRuns();
     } catch (cause) {
@@ -394,7 +406,12 @@ function ScraperPageContent() {
               type="url"
               placeholder="Dán URL trang truyện (vd: https://truyenfull.vn/...)"
               value={inputUrl}
-              onChange={(e) => setInputUrl(e.target.value)}
+              onChange={(e) => {
+                setInputUrl(e.target.value);
+                // Sua URL sau khi xem truoc -> huy xac nhan cu, buoc xem
+                // truoc lai truoc khi duoc bat dau (xem `handleBatDauQuet`).
+                setKetQuaXemTruoc(null);
+              }}
               disabled={dangXemTruoc || dangBatDau}
             />
             <input
@@ -647,7 +664,11 @@ function ScraperPageContent() {
                 <DanhSachTrangThai
                   dangTai={dangTaiChiTiet}
                   loi={loiChiTiet}
-                  rong={activeItems.length === 0}
+                  // CHI thuc su "rong" o trang dau — mot trang SAU rong (vi
+                  // du bo-qua/thu-lai lam tong so muc giam vua het trang
+                  // cuoi) van phai giu nut phan trang de operator lui lai
+                  // duoc, khong bi ket. Phat hien qua review Codex.
+                  rong={activeItems.length === 0 && trangMuc === 0}
                   onThuLai={taiLaiChiTiet}
                 >
                   <div className="admin-bang-boc">

@@ -81,6 +81,7 @@ from server.appwrite_animation_store import build_animation_store
 from server.appwrite_bulk_import_store import build_bulk_import_store
 from server.appwrite_trusted_source_store import build_trusted_source_store
 from server.appwrite_scrape_run_store import build_scrape_run_store
+from server.scraper.site_registry import ScopeExtractionError
 from server.scraper_ops_service import (
     ScraperOpsService,
     ScrapeRunNotFoundError,
@@ -5234,13 +5235,14 @@ def _xa_hoi(fn, *args, **kwargs):
 
 def _quet_hang_loat(fn, *args, **kwargs):
     """Cung vai tro voi `_xa_hoi()`/`_nguon_tin_cay()` nhung cho
-    `ScraperOpsService` — `UnsupportedSiteError` (domain chua cau hinh) la
-    loi CUA OPERATOR (400, khong phai 500), `ScrapeRunNotFoundError` (404),
-    cac loi `ValueError` da co san tu `ScrapeRunService` (vd huy mot dot da
-    ket thuc) cung la 400."""
+    `ScraperOpsService` — `UnsupportedSiteError` (domain chua cau hinh) va
+    `ScopeExtractionError` (domain co ho tro nhung URL khong khop hinh dang
+    mong doi, vd thieu ID truyen) deu la loi CUA OPERATOR (400, khong phai
+    500), `ScrapeRunNotFoundError` (404), cac loi `ValueError` da co san tu
+    `ScrapeRunService` (vd huy mot dot da ket thuc) cung la 400."""
     try:
         return fn(*args, **kwargs)
-    except UnsupportedSiteError as exc:
+    except (UnsupportedSiteError, ScopeExtractionError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except ScrapeRunNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc

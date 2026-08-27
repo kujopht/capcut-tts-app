@@ -86,6 +86,26 @@ class ChapterExtractionTest(unittest.TestCase):
         chapter = adapter.normalize_chapter(url, adapter.fetch_chapter(url), series)
         self.assertEqual(chapter.chapter_number, 2)
 
+    def test_tieu_de_khong_co_so_thi_chapter_number_la_None_khong_doan_tu_URL(self):
+        """Phat hien qua review doc lap (Codex) tren cau hinh Royal Road:
+        mot URL dang '/fiction/{id_truyen}/.../chapter/{id_chuong}/prologue'
+        tung khien nhanh du phong bat NHAM id_truyen (so dau tien trong
+        URL, thuong rat lon) lam chapter_number. Gio KHONG con doan tu
+        URL nua — chuong khong co so trong tieu de la `None` that su."""
+        from server.scraper.contract import SeriesInfo
+
+        adapter = GenericIndexAdapter(
+            FixtureFetcher({}), chapter_href_pattern=r"/fiction/12345/[^/\"]+/chapter/\d+/",
+            title_suffix_to_strip=" | Royal Road")
+        series = SeriesInfo(canonical_url="https://vd.example/fiction/12345/story",
+                            title="Story", source_domain="vd.example", chapter_urls=[])
+        html = ('<title>Prologue | Royal Road</title>'
+                '<div class="chapter-content"><p>' + "x" * 250 + ".</p></div>")
+        chapter = adapter.normalize_chapter(
+            "https://vd.example/fiction/12345/story/chapter/987654/prologue", html, series)
+        self.assertEqual(chapter.chapter_title, "Prologue")
+        self.assertIsNone(chapter.chapter_number)
+
 
 class IdempotentRerunTest(unittest.TestCase):
     def test_chay_lai_cung_url_ra_cung_content_hash_va_fingerprint(self):

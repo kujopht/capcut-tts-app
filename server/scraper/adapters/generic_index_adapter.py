@@ -148,7 +148,17 @@ class GenericIndexAdapter(StoryProvider):
         clean_text = page.visible_text()
         canon = canonicalize_url(url)
 
-        number_match = _CHAPTER_NUMBER_RE.search(title) or _CHAPTER_NUMBER_RE.search(url)
+        # CHI tim so trong TIEU DE — tung co nhanh du phong tim trong URL,
+        # bo di sau khi phat hien qua review Codex: mot URL dang
+        # "/fiction/{id_truyen}/.../chapter/{id_chuong}/{ten-khong-so}"
+        # (Royal Road) khien nhanh do bat NHAM id_truyen (so DAU TIEN trong
+        # URL, thuong rat lon va khong lien quan) lam chapter_number cho
+        # moi chuong khong-so (Prologue, Interlude, ...). KHONG doan tu URL
+        # nua — chuong khong co so trong tieu de thi `chapter_number` la
+        # `None` THAT SU (da la Optional[int] tu dau, xem NormalizedChapter),
+        # dung thu tu kham pha (`chapter_urls_to_process`) de sap xep thay
+        # vi mot con so bia dat.
+        number_match = _CHAPTER_NUMBER_RE.search(title)
         chapter_number = int(number_match.group(1)) if number_match else None
 
         return NormalizedChapter(

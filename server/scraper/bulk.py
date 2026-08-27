@@ -109,12 +109,16 @@ class ScrapeRunService:
             total_discovered=ke_hoach.total_discovered,
         ))
 
-        # `sequence` tiep tuc tu SO MUC DA CO cua dot nay (khong phai luon
-        # bat dau tu 0) — mot lan `plan_run` SAU tren cung dot (vd nguon co
-        # them chuong moi) CHI them muc moi, `create_item_once` la
-        # idempotent nen muc cu giu nguyen `sequence` cu; muc moi phai noi
-        # tiep, khong duoc trung voi muc da co.
-        base_sequence = sum(self._store.count_items_by_status(run.run_id).values())
+        # `sequence` tiep tuc tu SAU `sequence` LON NHAT hien co cua dot
+        # nay (khong phai luon bat dau tu 0, va KHONG PHAI dem so muc —
+        # dem sai khi mot lan `plan_run` truoc do de lai khoang trong
+        # trong day so, vd huy giua chung/lap ke hoach nhieu lan truoc khi
+        # drive; dem se cap phat lai mot `sequence` DA DUNG, gay trung —
+        # phat hien qua review Codex). `create_item_once` la idempotent
+        # nen muc cu giu nguyen `sequence` cu du duoc "cap" lai o day;
+        # muc moi phai noi tiep SAU max that, khong duoc trung voi muc da
+        # co.
+        base_sequence = self._store.max_sequence(run.run_id) + 1
         for offset, chapter_url in enumerate(ke_hoach.chapter_urls_to_process):
             fp_item = source_fingerprint(chapter_url)
             self._store.create_item_once(ScrapeRunItem(

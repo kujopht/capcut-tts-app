@@ -422,6 +422,15 @@ class AppwriteScrapeRunStore:
             for s in ScrapeItemStatus
         }
 
+    def max_sequence(self, run_id: str) -> int:
+        """`sequence` LON NHAT hien co — MOT truy van re (`orderDesc` +
+        `limit(1)`), KHONG keo toan bo muc ve chi de lay max. Dung de cap
+        phat `sequence` tiep theo khong trung, xem `bulk.py::plan_run`.
+        `-1` neu dot chua co muc nao."""
+        docs = self._page(COL_ITEMS, [
+            q_equal("run_id", run_id), q_order_desc("sequence"), q_limit(1)])
+        return int(docs[0].get("sequence") or 0) if docs else -1
+
 
 def build_scrape_run_store(settings: Any):
     """Chon kho theo `DATA_BACKEND` — cung mau voi `build_bulk_import_store`.

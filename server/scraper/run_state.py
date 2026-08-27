@@ -282,6 +282,17 @@ class MockScrapeRunStore:
             ds = ds[:limit]
         return ds
 
+    def max_sequence(self, run_id: str) -> int:
+        """`sequence` LON NHAT hien co cua dot nay, `-1` neu chua co muc
+        nao — dung de cap phat `sequence` TIEP THEO khong trung, xem
+        `bulk.py::plan_run`. PHAI la max THAT, khong phai dem so muc: dem
+        so muc bi sai khi mot lan `plan_run` truoc do de lai khoang trong
+        trong day so (vd huy giua chung/lap ke hoach nhieu lan truoc khi
+        drive) — phat hien qua review Codex."""
+        with self._lock:
+            gia_tri = [i.sequence for i in self.items.values() if i.run_id == run_id]
+        return max(gia_tri) if gia_tri else -1
+
     def count_items_by_status(self, run_id: str) -> Dict[str, int]:
         ra = {s.value: 0 for s in ScrapeItemStatus}
         with self._lock:

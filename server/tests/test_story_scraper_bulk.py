@@ -358,6 +358,36 @@ class ItemOrderingTest(unittest.TestCase):
         self.assertTrue(muc_theo_thu_tu[1].chapter_url.endswith("chuong-2"))
         self.assertTrue(muc_theo_thu_tu[2].chapter_url.endswith("chuong-3"))
 
+    def test_khong_trung_sequence_khi_nguon_co_them_chuong_moi_sau_khoang_trong(self):
+        """Kich ban CU THE Codex chi ra: mot dot da co khoang trong trong
+        `sequence` (canary + full-run truoc khi drive, xem test o tren),
+        RANG DA DRIVE xong, roi nguon co THEM MOT CHUONG MOI — muc moi
+        PHAI khong trung `sequence` voi bat ky muc da co (kien nghi ban
+        dau dung `dem so muc` se cap phat lai mot `sequence` DA DUNG)."""
+        pipeline, store, service = _tao_bo_ba(chapters_per_cycle=5)
+        service.plan_run(_SERIES_URL, chapter_limit=1)  # canary -> khoang trong
+        run = service.plan_run(_SERIES_URL)  # full run -> sequence 0, 2, 3
+        service.drive_once(run.run_id)  # drive HET — dem muc van la 3, khong doi
+
+        pages_moi = dict(_PAGES)
+        pages_moi[f"{_BASE}/truyen/thu-nghiem"] = pages_moi[
+            f"{_BASE}/truyen/thu-nghiem"].replace(
+            "</ul>",
+            '<li><a href="/truyen/thu-nghiem/chuong-4">Chương 4: Mới</a></li></ul>')
+        pages_moi[f"{_BASE}/truyen/thu-nghiem/chuong-4"] = _doc_fixture("chuong-3.html").replace(
+            "Chương 3", "Chương 4")
+        pipeline_moi = _tao_pipeline(pipeline.state, pages_moi)
+        service_moi = ScrapeRunService(pipeline_moi, store, chapters_per_cycle=5)
+        service_moi.plan_run(_SERIES_URL)  # nguon "vua co" chuong 4 moi
+
+        muc = store.list_items(run.run_id, limit=None)
+        sequences = [m.sequence for m in muc]
+        self.assertEqual(len(sequences), len(set(sequences)),
+                         f"sequence bi TRUNG: {sequences}")
+        muc_chuong_4 = next(m for m in muc if m.chapter_url.endswith("chuong-4"))
+        self.assertEqual(muc_chuong_4.sequence, max(sequences),
+                         "chuong moi phai co sequence LON HON tat ca muc da co")
+
 
 class RunViewTest(unittest.TestCase):
     def test_run_view_tra_ve_tien_do_khong_tac_dung_phu(self):

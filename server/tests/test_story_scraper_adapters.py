@@ -120,6 +120,72 @@ class IdempotentRerunTest(unittest.TestCase):
         self.assertEqual(lan_1.source_fingerprint, lan_2.source_fingerprint)
 
 
+class CrossChapterBoilerplateTest(unittest.TestCase):
+    """Phase 6 Story Harvester V3 — mot doan van GIONG HET lap lai tren
+    NHIEU chuong KHAC NHAU cua CUNG series (vd loi keu goi ung ho co dinh)
+    phai bi loai bo SAU KHI da thay du lan lap, nhung KHONG duoc loai bo
+    doan van CHINH CHUONG DO khi no chi don gian duoc xu ly LAI (retry) —
+    xem `GenericIndexAdapter._boilerplate_hashes_cho`."""
+
+    _BOILERPLATE = "Ủng hộ website bằng cách chia sẻ cho bạn bè đọc cùng nhé."
+
+    def _trang(self, so: int, them_boilerplate: bool) -> str:
+        doan_boilerplate = (
+            f"<p>{self._BOILERPLATE}</p>" if them_boilerplate else "")
+        return f"""
+        <html><head><title>Chương {so}</title></head><body>
+        <article>
+          <h1>Chương {so}</h1>
+          <p>Nội dung riêng của chương {so}, đủ dài để vượt ngưỡng tối
+          thiểu cho một vùng nội dung hợp lệ trong bộ kiểm thử tích hợp
+          boilerplate xuyên nhiều chương của Story Harvester V3.</p>
+          {doan_boilerplate}
+        </article>
+        </body></html>
+        """
+
+    def test_doan_lap_qua_it_nhat_hai_chuong_khac_moi_bi_loai_o_chuong_thu_ba(self):
+        pages = {
+            f"{_BASE}/b/c1": self._trang(1, them_boilerplate=True),
+            f"{_BASE}/b/c2": self._trang(2, them_boilerplate=True),
+            f"{_BASE}/b/c3": self._trang(3, them_boilerplate=True),
+        }
+        adapter = GenericIndexAdapter(
+            FixtureFetcher(pages), chapter_href_pattern=r"/b/c\d+")
+        series = type("S", (), {"source_domain": "vd-truyen.example",
+                                "title": "Truyện B", "author": None})()
+
+        c1 = adapter.normalize_chapter(f"{_BASE}/b/c1", pages[f"{_BASE}/b/c1"], series)
+        c2 = adapter.normalize_chapter(f"{_BASE}/b/c2", pages[f"{_BASE}/b/c2"], series)
+        c3 = adapter.normalize_chapter(f"{_BASE}/b/c3", pages[f"{_BASE}/b/c3"], series)
+
+        # Chuong 1 va 2: CHUA du bang chung (chi 0 va 1 chuong KHAC tung co
+        # doan nay) — van giu nguyen, dung triet ly "khong doan bua".
+        self.assertIn(self._BOILERPLATE, c1.clean_text)
+        self.assertIn(self._BOILERPLATE, c2.clean_text)
+        # Chuong 3: DU 2 chuong KHAC (1 va 2) tung co doan nay -> loai.
+        self.assertNotIn(self._BOILERPLATE, c3.clean_text)
+        self.assertIn("riêng của chương 3", c3.clean_text)
+
+    def test_xu_ly_lai_cung_mot_chuong_khong_tu_coi_chinh_no_la_boilerplate(self):
+        """Tai hien loi THAT tim thay: xu ly LAI (retry) chinh mot chuong
+        (KHONG phai chuong khac) khong duoc lam mat noi dung cua no."""
+        url = f"{_BASE}/b/c1"
+        html = self._trang(1, them_boilerplate=True)
+        adapter = GenericIndexAdapter(
+            FixtureFetcher({url: html}), chapter_href_pattern=r"/b/c\d+")
+        series = type("S", (), {"source_domain": "vd-truyen.example",
+                                "title": "Truyện B", "author": None})()
+
+        lan_1 = adapter.normalize_chapter(url, html, series)
+        lan_2 = adapter.normalize_chapter(url, html, series)
+
+        self.assertIn(self._BOILERPLATE, lan_1.clean_text)
+        self.assertIn(self._BOILERPLATE, lan_2.clean_text)
+        self.assertEqual(lan_1.content_hash, lan_2.content_hash)
+        self.assertNotEqual(lan_2.content_hash, content_hash(""))
+
+
 class ResumeAfterInterruptionTest(unittest.TestCase):
     def test_resume_bo_qua_chuong_da_xong_chi_lam_chuong_con_lai(self):
         """Mo phong: crawl bi ngat giua chung sau khi da xu ly xong chuong 1 —

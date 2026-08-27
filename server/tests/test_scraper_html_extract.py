@@ -129,6 +129,17 @@ class HtmlExtractBoundaryTest(unittest.TestCase):
         self.assertIn("Hành trình tiếp tục qua những vùng đất mới.", text)
         self.assertIn("Ghi chú cuối trang của người đăng tải.", text)
 
+    def test_boundary_matched_dung_theo_co_khop_boundary_hay_khong(self):
+        """`boundary_matched` (Phase 6 Story Harvester V3) — noi goi
+        (`GenericIndexAdapter.normalize_chapter`) dung co nay de quyet dinh
+        co qua `content_extraction.extract_content_v3` hay khong."""
+        co_boundary = extract('<html><body><div class="chapter-content">'
+                              '<p>Nội dung.</p></div></body></html>')
+        khong_boundary = extract('<html><body><article><p>Nội dung.</p>'
+                                 '</article></body></html>')
+        self.assertTrue(co_boundary.boundary_matched)
+        self.assertFalse(khong_boundary.boundary_matched)
+
     def test_mediawiki_mw_content_text_fallback_khi_khong_co_mw_parser_output(self):
         """Kiem tra truong hop skin MediaWiki cu chi co `id="mw-content-text"`
         ma khong co `class="mw-parser-output"`: van ban trong `mw-content-text`

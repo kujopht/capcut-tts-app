@@ -11,12 +11,13 @@ goi cau hinh. Cau hinh san mot site that (vd mot chuong cu the tren
 from __future__ import annotations
 
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional
 from urllib.parse import urljoin
 
 from server.scraper.contract import (
     NormalizedChapter, ScraperTier, SeriesInfo, StoryProvider, canonicalize_url,
 )
+from server.scraper.content_extraction import extract_content_v3
 from server.scraper.dedupe import content_hash, source_fingerprint
 from server.scraper.html_extract import extract
 from server.scraper.http_fetcher import FetchError
@@ -67,6 +68,35 @@ class GenericIndexAdapter(StoryProvider):
             re.compile(next_page_href_pattern) if next_page_href_pattern else None
         )
         self._max_index_pages = max_index_pages
+        #: hash doan van -> tap canonical_url cac chuong DA co doan do —
+        #: Phase 6: "boilerplate lap lai qua nhieu trang" (xem
+        #: `content_extraction.py`). CHI dung khi trang KHONG co boundary da
+        #: xac minh tay (xem `normalize_chapter`) — Wikisource/Royal Road
+        #: khong can no. Khoa theo canonical_url (KHONG PHAI mot tap don) de
+        #: `_boilerplate_hashes_cho` co the LOAI TRU chinh chuong dang xu ly
+        #: khi dem — thieu buoc nay, XU LY LAI cung MOT chuong (retry, hoac
+        #: goi `normalize_chapter` hai lan y het, xem
+        #: `IdempotentRerunTest`) se coi CHINH doan van cua no la
+        #: "boilerplate da biet" (tu no xuat hien trong chinh no) va loai bo
+        #: het noi dung — phat hien qua mot lan chay bo test hien co (khong
+        #: phai fixture moi), content_hash ra `sha256("")` o lan goi thu hai.
+        self._boilerplate_chapter_urls_theo_hash: Dict[str, set] = {}
+
+    #: So chuong KHAC (khong tinh chinh chuong dang xu ly) tung co MOT doan
+    #: van GIONG HET truoc khi doan do bi coi la boilerplate toan site —
+    #: >=2 de tranh loai oan mot doan chi tinh co giong nhau giua HAI chuong
+    #: (vd mot cau thoai lap lai co chu y trong truyen).
+    _SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE = 2
+
+    def _boilerplate_hashes_cho(self, canon_hien_tai: str) -> set:
+        return {
+            h for h, urls in self._boilerplate_chapter_urls_theo_hash.items()
+            if len(urls - {canon_hien_tai}) >= self._SO_LAN_LAP_TOI_THIEU_LA_BOILERPLATE
+        }
+
+    def _ghi_nhan_doan_van_boilerplate(self, canon_hien_tai: str, hashes: set) -> None:
+        for h in hashes:
+            self._boilerplate_chapter_urls_theo_hash.setdefault(h, set()).add(canon_hien_tai)
 
     def resolve(self, url: str) -> str:
         try:
@@ -144,9 +174,25 @@ class GenericIndexAdapter(StoryProvider):
         title = page.meta.get("og:title") or page.title or series.title
         if self._title_suffix and title.endswith(self._title_suffix):
             title = title[: -len(self._title_suffix)].strip()
-
-        clean_text = page.visible_text()
         canon = canonicalize_url(url)
+
+        # `boundary_matched` = trang co the ranh gioi DA XAC MINH TAY (xem
+        # `html_extract.py`, Wikisource/Royal Road) — dung thang, DA CHUNG
+        # MINH dung, khong can cham diem. Nguoc lai (nguon hoc duoc/dang
+        # kham pha, Phase 6 Story Harvester V3): qua `extract_content_v3`
+        # (cham diem ung vien + loai vung rac/boilerplate lap lai), luon
+        # dien `extraction_confidence` de quality gate (xem `quality.py`,
+        # check "Do not silently accept weak extraction").
+        extraction_confidence = ""
+        if page.boundary_matched:
+            clean_text = page.visible_text()
+        else:
+            ket_qua_v3 = extract_content_v3(
+                raw_html, chapter_title=title,
+                known_boilerplate_hashes=self._boilerplate_hashes_cho(canon))
+            clean_text = ket_qua_v3.clean_text
+            extraction_confidence = ket_qua_v3.confidence.value
+            self._ghi_nhan_doan_van_boilerplate(canon, ket_qua_v3.paragraph_hashes)
 
         # CHI tim so trong TIEU DE — tung co nhanh du phong tim trong URL,
         # bo di sau khi phat hien qua review Codex: mot URL dang
@@ -174,4 +220,5 @@ class GenericIndexAdapter(StoryProvider):
             chapter_number=chapter_number,
             author=page.meta.get("author") or series.author,
             published_at=page.meta.get("article:published_time"),
+            extraction_confidence=extraction_confidence,
         )

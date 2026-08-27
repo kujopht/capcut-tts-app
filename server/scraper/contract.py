@@ -141,6 +141,12 @@ class NormalizedChapter:
     author: Optional[str] = None
     published_at: Optional[str] = None
     language: str = "vi"
+    #: "high"/"medium"/"low" tu `content_extraction.extract_content_v3`
+    #: (Phase 6 Story Harvester V3) — CHI duoc dien khi trang KHONG co
+    #: boundary da xac minh tay (xem `html_extract.ExtractedPage.
+    #: boundary_matched`). RONG ("") nghia la da dung boundary xac minh
+    #: (Wikisource/Royal Road) — KHONG can diem tin cay, da CHUNG MINH dung.
+    extraction_confidence: str = ""
 
 
 class StoryProvider(ABC):

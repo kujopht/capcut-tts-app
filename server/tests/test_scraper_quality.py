@@ -20,6 +20,7 @@ from server.scraper.quality import (
     check_chapter_order,
     check_duplicate_paragraphs,
     check_encoding,
+    check_extraction_confidence,
     check_nav_leakage,
     check_source_domain,
     check_source_url,
@@ -314,6 +315,26 @@ class SourceUrlDomainTest(unittest.TestCase):
     def test_source_domain_khop_qua(self):
         r = check_source_domain(_chuong())
         self.assertTrue(r.passed)
+
+
+class ExtractionConfidenceTest(unittest.TestCase):
+    def test_rong_qua_khong_bi_gi(self):
+        r = check_extraction_confidence(_chuong(extraction_confidence=""))
+        self.assertTrue(r.passed)
+
+    def test_high_qua(self):
+        r = check_extraction_confidence(_chuong(extraction_confidence="high"))
+        self.assertTrue(r.passed)
+
+    def test_low_la_warn_khong_block(self):
+        r = check_extraction_confidence(_chuong(extraction_confidence="low"))
+        self.assertFalse(r.passed)
+        self.assertEqual(r.severity, Severity.WARN)
+
+    def test_low_khong_chan_report_passed_neu_khong_co_block_khac(self):
+        report = assess_chapter_quality(_chuong(extraction_confidence="low"))
+        self.assertTrue(report.passed)
+        self.assertTrue(report.warn_reasons)
 
 
 class AssessChapterQualityTest(unittest.TestCase):

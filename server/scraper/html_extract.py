@@ -57,6 +57,15 @@ class ExtractedPage:
     #: Van ban hien thi DA loai noise-tag, CHUA lam sach khoang trang —
     #: xem `visible_text()` cho ban da lam sach.
     _text_parts: List[str] = field(default_factory=list, repr=False)
+    #: `True` neu trang co mot the KHOP `_CONTENT_BOUNDARY_CLASSES`/
+    #: `_CONTENT_BOUNDARY_IDS` da xac minh tay (Wikisource/Royal Road) —
+    #: `visible_text()` khi do la KET QUA DA XAC MINH, khong can qua
+    #: `content_extraction.py` (Phase 6 Story Harvester V3). `False` nghia
+    #: la `visible_text()` la "lay het van ban con lai" (tho), va noi goi
+    #: (vd `GenericIndexAdapter.normalize_chapter`) NEN dung
+    #: `content_extraction_v3` thay vi tin thang gia tri nay cho cac nguon
+    #: chua xac minh.
+    boundary_matched: bool = False
 
     def visible_text(self) -> str:
         """Noi cac doan van ban hien thi, gop nhieu khoang trang/dong trong
@@ -200,8 +209,10 @@ def extract(html: str) -> ExtractedPage:
         # Ranh gioi CO ton tai — du RONG (vd trang chi co anh) van phai tra
         # ve RONG, KHONG fallback ve toan trang (se keo lai UI-chrome).
         page._text_parts = parser._primary_boundary_parts
+        page.boundary_matched = True
     elif parser._secondary_boundary_seen:
         page._text_parts = parser._secondary_boundary_parts
+        page.boundary_matched = True
     else:
         page._text_parts = parser._all_text_parts
     if page.title:

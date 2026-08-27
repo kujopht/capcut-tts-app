@@ -151,6 +151,64 @@ class ThousandChapterIdempotencyTest(unittest.TestCase):
         self.assertEqual(run_lai.status, ScrapeRunStatus.COMPLETED)
 
 
+class FiveThousandChapterInventoryTest(unittest.TestCase):
+    """Overnight P11 ("1000/5000 inventory stress test"): quy mo 5000 —
+    THEM kiem tra TOC-diff (Phase 9: phat hien chuong MOI/chuong BIEN MAT)
+    o quy mo lon, khong chi hoan tat/resume nhu o quy mo 1000."""
+
+    def test_5000_chuong_hoan_tat_dung_va_toc_diff_phat_hien_dung_thay_doi(self):
+        pages = _make_pages("truyen-5000", 5000)
+        pipeline, store, service = _make_service(pages, chapters_per_cycle=100)
+        run = service.plan_run(f"{_BASE}/truyen/truyen-5000")
+
+        _drive_to_terminal(service, run.run_id)
+        dem = store.count_items_by_status(run.run_id)
+        self.assertEqual(dem[ScrapeItemStatus.REVIEW_READY.value], 5000)
+
+        muc = store.list_items(run.run_id, limit=None)
+        self.assertEqual(len(muc), 5000)
+        self.assertEqual(len({m.item_id for m in muc}), 5000)
+        self.assertEqual(len({m.sequence for m in muc}), 5000)
+
+        # TOC-diff (Phase 9): nguon them 1 chuong MOI o cuoi VA go 1 chuong
+        # o GIUA (vd chuong 2500 bi tac gia xoa) — phai phat hien DUNG CA
+        # HAI, khong bi anh huong boi quy mo 5000 chuong da co.
+        #
+        # LUU Y: `_make_service` tao `FixtureFetcher(dict(pages))` — MOT
+        # BAN SAO doc lap cua `pages` — nen phai sua qua THAM CHIEU THAT
+        # cua fetcher (`provider._fetcher._pages`), KHONG PHAI bien `pages`
+        # cuc bo o day (sua `pages` khong anh huong gi den fetcher da tao).
+        from server.scraper.incremental import diff_toc
+
+        provider = pipeline._provider
+        pages_that = provider._fetcher._pages
+
+        chuong_moi_url = f"{_BASE}/truyen/truyen-5000/chuong-5001"
+        pages_that[chuong_moi_url] = pages_that[f"{_BASE}/truyen/truyen-5000/chuong-1"]
+        chuong_bi_xoa_url = f"{_BASE}/truyen/truyen-5000/chuong-2500"
+        del pages_that[chuong_bi_xoa_url]
+
+        # Sua index de PHAN ANH DUNG kich ban "chuong-2500 that su bi xoa
+        # khoi muc luc, chuong-5001 that su duoc them vao" (khong chi xoa/
+        # them TRANG chuong ma quen cap nhat muc luc).
+        index_html = pages_that[f"{_BASE}/truyen/truyen-5000"]
+        index_html = index_html.replace(
+            '<li><a href="/truyen/truyen-5000/chuong-2500">Chương 2500</a></li>', "")
+        index_html = index_html.replace(
+            "</ul>",
+            f'<li><a href="/truyen/truyen-5000/chuong-5001">Chương 5001</a></li></ul>')
+        pages_that[f"{_BASE}/truyen/truyen-5000"] = index_html
+        series_moi = provider.discover_series(f"{_BASE}/truyen/truyen-5000")
+        chapter_urls_moi = provider.list_chapters(series_moi)
+
+        ket_qua_diff = diff_toc(pipeline.state, chapter_urls_moi)
+        self.assertEqual(len(ket_qua_diff.new_urls), 1)
+        self.assertTrue(ket_qua_diff.new_urls[0].endswith("chuong-5001"))
+        self.assertEqual(len(ket_qua_diff.removed_urls), 1)
+        self.assertTrue(ket_qua_diff.removed_urls[0].endswith("chuong-2500"))
+        self.assertTrue(ket_qua_diff.has_changes)
+
+
 class RetryFailedAtScaleTest(unittest.TestCase):
     def test_muc_loi_tam_thoi_thanh_cong_het_sau_retry_failed(self):
         pages = _make_pages("truyen-retry", 100)

@@ -1770,6 +1770,9 @@ export interface ScrapeRun {
   count_failed: number;
   count_skipped: number;
   last_error: string;
+  /** Phase 3 Story Harvester V3 — giải thích thứ tự chương (xem
+      server/scraper/chapter_ordering.py). */
+  ordering_evidence: string;
   created_at: string;
   updated_at: string;
   cancelled_at: string;

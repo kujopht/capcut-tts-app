@@ -747,6 +747,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("count_failed", "integer", False, None),
             ("count_skipped", "integer", False, None),
             ("last_error", "string", False, 1000),
+            # Phase 3 Story Harvester V3 — giai thich thu tu chuong (xem
+            # chapter_ordering.py). Sao chep TU LAN plan_run() DAU TIEN,
+            # khong doi o cac lan sau (create_run_once la tao-mot-lan).
+            ("ordering_evidence", "string", False, 1000),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
             ("cancelled_at", "datetime", False, None),

@@ -104,6 +104,12 @@ class ScrapeRun:
     count_failed: int = 0
     count_skipped: int = 0
     last_error: str = ""
+    #: Giai thich NGUOI DOC duoc ve thu tu chuong (Phase 3 Story Harvester
+    #: V3) — sao chep tu `SeriesInfo.ordering_evidence` cua lan `plan_run()`
+    #: DAU TIEN tao dot nay (khong doi o cac lan `plan_run()` sau, do
+    #: `create_run_once` la tao-mot-lan — chap nhan duoc, ly do it khi thay
+    #: doi giua cac lan cua CUNG mot series).
+    ordering_evidence: str = ""
     created_at: str = ""
     updated_at: str = ""
     cancelled_at: str = ""

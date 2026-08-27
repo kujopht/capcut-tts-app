@@ -94,6 +94,7 @@ class ScrapeRunService:
                 estimated_total=len(ke_hoach.chapter_urls_to_process),
                 already_done_count=ke_hoach.already_done_count,
                 total_discovered=ke_hoach.total_discovered,
+                ordering_evidence=ke_hoach.series.ordering_evidence,
             )
 
         self._series_cache[run_id] = ke_hoach.series
@@ -106,6 +107,7 @@ class ScrapeRunService:
             estimated_total=len(ke_hoach.chapter_urls_to_process),
             already_done_count=ke_hoach.already_done_count,
             total_discovered=ke_hoach.total_discovered,
+            ordering_evidence=ke_hoach.series.ordering_evidence,
         ))
 
         # `sequence` tiep tuc tu SAU `sequence` LON NHAT hien co cua dot

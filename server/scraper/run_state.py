@@ -146,6 +146,18 @@ class ScrapeRunItem:
     error_message: str = ""
     attempts: int = 0
     skipped_reason: str = ""
+    #: Vi tri THEO THU TU KHAM PHA (0, 1, 2, ...) — dat MOT LAN luc tao,
+    #: KHONG BAO GIO doi. Day la THU TU HANG DOI DUYET, tach biet voi
+    #: `chapter_number` (co the None cho chuong khong doc duoc so tu tieu
+    #: de, vd "Prologue" — xem generic_index_adapter.py, va du sao cung chi
+    #: co GIA TRI sau khi da drive, khong dung duoc de sap xep muc con
+    #: `pending`). Cung triet ly voi `item_index` cua
+    #: `bulk_import_domain.ImportItem` — phat hien can co truong nay qua
+    #: mot lan di qua luong operator that: sap theo `created_at` bi trung
+    #: gio (do phan giai thoi gian) roi lui ve sap theo `item_id` (mot ma
+    #: bam, khong lien quan thu tu that), lam hang doi duyet hien SAI thu
+    #: tu chuong.
+    sequence: int = 0
     created_at: str = ""
     updated_at: str = ""
 
@@ -259,9 +271,11 @@ class MockScrapeRunStore:
         if statuses:
             can = {ScrapeItemStatus(s) for s in statuses}
             ds = [i for i in ds if i.status in can]
-        # Thu tu TAO (on dinh) — giup UI/test doc theo dung thu tu chuong
-        # da duoc len ke hoach.
-        ds.sort(key=lambda i: (i.created_at, i.item_id))
+        # Thu tu KHAM PHA (`sequence`, xem dataclass) — KHONG dung
+        # `created_at`: tung bi trung gio o quy mo tao nhanh (Mock hay ca
+        # Appwrite that), lam hang doi duyet hien SAI thu tu chuong khi lui
+        # ve `item_id` (ma bam, khong lien quan thu tu that).
+        ds.sort(key=lambda i: (i.sequence, i.item_id))
         if offset:
             ds = ds[offset:]
         if limit is not None:

@@ -321,6 +321,44 @@ class ChapterLimitGrowthTest(unittest.TestCase):
                          "chi con muc failed -- khong tu hoi sinh qua plan_run")
 
 
+class ItemOrderingTest(unittest.TestCase):
+    """Phat hien qua mot lan di qua luong operator that (khong phai suy
+    doan): hang doi duyet tung sap theo `created_at`, bi trung gio o quy
+    mo tao nhanh (Mock hay Appwrite that), lui ve `item_id` (ma bam,
+    khong lien quan thu tu that) — operator thay chuong hien LON XON
+    (vd 3, 2, 1 thay vi 1, 2, 3). `sequence` (dat MOT LAN luc tao) sua
+    dut diem van de nay."""
+
+    def test_hang_doi_duyet_dung_thu_tu_kham_pha_khong_phai_thu_tu_tao(self):
+        _, store, service = _tao_bo_ba(chapters_per_cycle=5)
+        run = service.plan_run(_SERIES_URL)
+        service.drive_once(run.run_id)
+        muc = store.list_items(run.run_id, limit=None)
+        self.assertEqual([m.chapter_number for m in muc], [1, 2, 3])
+
+    def test_sequence_qua_nhieu_lan_plan_run_van_giu_dung_thu_tu_khong_trung(self):
+        """Cung kich ban voi `ChapterLimitGrowthTest` o tren (canary roi
+        full run) — xac nhan `sequence` khong TRUNG giua muc canary va muc
+        moi (se lam sap sai hang doi duyet). CO THE co khoang trong trong
+        day so (vd 0, 2, 3 thay vi 0, 1, 2) khi mot lan `plan_run` sau lap
+        lai ca chuong da co LAN chuong moi — VAN AN TOAN vi thu tu TUONG
+        DOI van dung, chi kiem tra thu tu tuong doi, khong doi day lien
+        tuc tuyet doi."""
+        _, store, service = _tao_bo_ba(chapters_per_cycle=5)
+        service.plan_run(_SERIES_URL, chapter_limit=1)
+        run_full = service.plan_run(_SERIES_URL)
+        muc = store.list_items(run_full.run_id, limit=None)
+        sequences = [m.sequence for m in muc]
+        self.assertEqual(len(sequences), len(set(sequences)), "khong duoc trung sequence")
+        # `chapter_number` chi co gia tri SAU khi drive — chua drive o day,
+        # nen kiem thu tu bang `chapter_url` (biet truoc thu tu that tu
+        # fixture: chuong-1, chuong-2, chuong-3).
+        muc_theo_thu_tu = sorted(muc, key=lambda m: m.sequence)
+        self.assertTrue(muc_theo_thu_tu[0].chapter_url.endswith("chuong-1"))
+        self.assertTrue(muc_theo_thu_tu[1].chapter_url.endswith("chuong-2"))
+        self.assertTrue(muc_theo_thu_tu[2].chapter_url.endswith("chuong-3"))
+
+
 class RunViewTest(unittest.TestCase):
     def test_run_view_tra_ve_tien_do_khong_tac_dung_phu(self):
         _, store, service = _tao_bo_ba()

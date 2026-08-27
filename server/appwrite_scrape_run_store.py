@@ -70,8 +70,8 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_ITEMS: (
         "item_id", "run_id", "chapter_url", "source_fingerprint", "status",
         "decision", "chapter_title", "chapter_number", "content_hash",
-        "error_message", "attempts", "skipped_reason", "created_at",
-        "updated_at",
+        "error_message", "attempts", "skipped_reason", "sequence",
+        "created_at", "updated_at",
     ),
 }
 
@@ -160,6 +160,7 @@ def _item_from_doc(doc: Dict[str, Any]) -> ScrapeRunItem:
         error_message=str(doc.get("error_message") or ""),
         attempts=_int(doc.get("attempts")),
         skipped_reason=str(doc.get("skipped_reason") or ""),
+        sequence=_int(doc.get("sequence")),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )
@@ -398,7 +399,10 @@ class AppwriteScrapeRunStore:
         if statuses:
             queries.append(q_equal("status", *[ScrapeItemStatus(s).value
                                                for s in statuses]))
-        queries.append(q_order_asc("created_at"))
+        # `sequence`, KHONG PHAI `created_at` — xem docstring `sequence`
+        # trong `run_state.ScrapeRunItem` cho ly do (trung gio o quy mo tao
+        # nhanh lam sai thu tu hien thi cho operator).
+        queries.append(q_order_asc("sequence"))
         if limit is None:
             docs = self._list_all(COL_ITEMS, queries)
             if offset:

@@ -452,5 +452,95 @@ class RobotsRedirectHostMismatchTest(unittest.TestCase):
         self.assertEqual(ket_qua.status_code, 200)
 
 
+class RetryAfterAndTooManyRequestsTest(unittest.TestCase):
+    """Overnight ("network resilience"): 429 (Too Many Requests) la loi
+    TAM THOI (gioi han toc do), KHONG PHAI loi 4xx vinh vien nhu 404 —
+    truoc ban sua nay bi coi nhu 404 va KHONG BAO GIO duoc thu lai. Khi
+    server co header `Retry-After`, PHAI cho DUNG khoang do thay vi
+    backoff mu."""
+
+    def test_429_duoc_thu_lai_khong_bi_coi_nhu_loi_client_vinh_vien(self):
+        so_lan_goi = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan_goi.append(1)
+            if len(so_lan_goi) < 3:
+                return httpx.Response(429, text="rate limited")
+            return httpx.Response(200, text="nội dung thật")
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=2, min_delay_seconds=0)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(ket_qua.text, "nội dung thật")
+        self.assertEqual(len(so_lan_goi), 3)
+
+    def test_429_qua_so_lan_thu_lai_van_nem_loi_ro_rang(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, text="rate limited")
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0)
+        with self.assertRaises(FetchError) as ctx:
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertIn("429", str(ctx.exception))
+
+    def test_retry_after_so_giay_duoc_ton_trong_thay_vi_backoff_mu(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, headers={"Retry-After": "17"})
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0,
+                                    backoff_base_seconds=1.0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(dh.slept, [17.0], "phải chờ đúng Retry-After, không phải backoff mũ")
+
+    def test_retry_after_dang_http_date_duoc_doc_dung(self):
+        from email.utils import format_datetime
+        from datetime import datetime, timedelta, timezone
+
+        khi = datetime.now(timezone.utc) + timedelta(seconds=10)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, headers={"Retry-After": format_datetime(khi, usegmt=True)})
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(len(dh.slept), 1)
+        self.assertAlmostEqual(dh.slept[0], 10.0, delta=1.0)
+
+    def test_retry_after_khong_hop_le_lui_ve_backoff_mu(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, headers={"Retry-After": "not-a-valid-value"})
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0,
+                                    backoff_base_seconds=1.0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(dh.slept, [1.0])
+
+    def test_retry_after_qua_lon_bi_gioi_han_hop_ly(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, headers={"Retry-After": "999999999"})
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0)
+        with self.assertRaises(FetchError):
+            fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(dh.slept, [300.0], "phải bị chặn ở trần hợp lý, không tin tuyệt đối server")
+
+    def test_503_co_retry_after_cung_duoc_ton_trong(self):
+        so_lan_goi = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            so_lan_goi.append(1)
+            if len(so_lan_goi) < 2:
+                return httpx.Response(503, headers={"Retry-After": "5"})
+            return httpx.Response(200, text="ok")
+
+        fetcher, dh = _tao_fetcher(handler, max_retries=1, min_delay_seconds=0,
+                                    backoff_base_seconds=1.0)
+        ket_qua = fetcher.fetch(f"{_BASE}/chuong-1")
+        self.assertEqual(ket_qua.text, "ok")
+        self.assertEqual(dh.slept, [5.0])
+
+
 if __name__ == "__main__":
     unittest.main()

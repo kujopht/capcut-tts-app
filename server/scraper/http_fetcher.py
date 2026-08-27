@@ -18,6 +18,8 @@ import socket
 import time
 import urllib.robotparser
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Callable, Dict, Optional
 from urllib.parse import urljoin, urlsplit
 
@@ -162,6 +164,40 @@ class FetchResult:
 def _host_key(url: str) -> str:
     parts = urlsplit(url)
     return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+#: Tran hop ly cho MOT gia tri `Retry-After` (giay) — Overnight "network
+#: resilience": mot server (loi cau hinh hoac co y) co the gui
+#: `Retry-After: 999999999`; TON TRONG gia tri server (khong lam cang
+#: hon backoff mu that su can) nhung VAN GIOI HAN o muc hop ly, tranh mot
+#: dot quet "treo" hang gio/ngay chi vi TIN mot header khong dang tin.
+_TRAN_RETRY_AFTER_GIAY = 300.0
+
+
+def _doc_retry_after(resp) -> Optional[float]:
+    """Doc header `Retry-After` (RFC 7231 — hoac SO GIAY nguyen, hoac MOT
+    ngay-gio dang HTTP-date) — tra ve SO GIAY can doi, `None` neu KHONG co
+    header nay hoac khong doc duoc (an toan mac dinh: lui ve backoff mu
+    thong thuong, KHONG coi loi phan tich la mot ly do de KHONG thu lai)."""
+    gia_tri = resp.headers.get("retry-after")
+    if not gia_tri:
+        return None
+    gia_tri = gia_tri.strip()
+    try:
+        giay = float(gia_tri)
+    except ValueError:
+        try:
+            khi = parsedate_to_datetime(gia_tri)
+        except (TypeError, ValueError):
+            return None
+        if khi is None:
+            return None
+        if khi.tzinfo is None:
+            khi = khi.replace(tzinfo=timezone.utc)
+        giay = (khi - datetime.now(timezone.utc)).total_seconds()
+    if giay < 0:
+        return 0.0
+    return min(giay, _TRAN_RETRY_AFTER_GIAY)
 
 
 class HttpFetcher:
@@ -360,14 +396,25 @@ class HttpFetcher:
                     loi_cuoi = exc
                     resp = None
                 else:
-                    if resp.status_code < 500:
+                    if resp.status_code < 500 and resp.status_code != 429:
                         # Thanh cong (bao gom 304) HOAC loi phia CLIENT
-                        # (4xx) — 4xx se KHONG tu khac di neu goi lai y het,
-                        # dung thu.
+                        # (4xx, TRU 429) — 4xx thuong se KHONG tu khac di
+                        # neu goi lai y het, dung thu. 429 ("Too Many
+                        # Requests") la NGOAI LE duy nhat: no CHINH LA mot
+                        # tin hieu "thu lai duoc, chi can cho" (thuong kem
+                        # `Retry-After`) — phat hien qua kiem tra "network
+                        # resilience": ban dau 429 bi coi nhu 404 (loi
+                        # client vinh vien), khong bao gio duoc thu lai du
+                        # ro rang la loi TAM THOI do gioi han toc do.
                         break
                     loi_cuoi = FetchError(f"{url} trả về HTTP {resp.status_code}")
                 if lan < self._max_retries:
-                    self._sleep(self._backoff_base * (2 ** lan))
+                    # Uu tien `Retry-After` cua server (RFC 7231) neu co —
+                    # server BIET ro hon backoff mu cua ta can cho bao lau.
+                    retry_after = _doc_retry_after(resp) if resp is not None else None
+                    self._sleep(
+                        retry_after if retry_after is not None
+                        else self._backoff_base * (2 ** lan))
 
             if resp is None:
                 assert loi_cuoi is not None

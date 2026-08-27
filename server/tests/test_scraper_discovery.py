@@ -461,3 +461,21 @@ class TrackingQueryParamTest(unittest.TestCase):
         proposal = _engine(pages).discover(_INDEX_URL)
         assert proposal.chapter_count_estimate == 3, (
             "chương 1 xuất hiện 2 lần (khác tracking) phải chỉ tính là MỘT")
+
+
+class CategoryNavigationMixedWithTocTest(unittest.TestCase):
+    """Overnight ("unknown-site discovery red team"): mot khung dieu huong
+    THE LOAI/TAG (thuong danh so, vd `/the-loai/1`..`/the-loai/N`) KHONG
+    duoc thang danh sach chuong THAT chi vi co NHIEU lien ket hon."""
+
+    def test_khung_the_loai_nhieu_hon_khong_thang_danh_sach_chuong_that(self):
+        the_loai = "".join(
+            f'<a href="/the-loai/{i}">Thể loại {i}</a>' for i in range(1, 8))
+        html = _index_html().replace(
+            "<nav>", f'<nav class="the-loai">{the_loai}')
+        pages = {_INDEX_URL: html, _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_count_estimate == 5
+        assert proposal.chapter_url_pattern is not None
+        assert "the-loai" not in proposal.chapter_url_pattern

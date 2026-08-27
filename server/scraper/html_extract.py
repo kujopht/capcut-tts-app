@@ -59,12 +59,27 @@ _CONTENT_BOUNDARY_IDS = {"mw-content-text"}
 #: chung chung/rui ro cao neu dung de LOAI BO lien ket hoan toan (khac
 #: voi chi dung lam "goi y uu tien" nhu trong content_extraction.py).
 #: CHI loai cac danh muc CO DO CHAC CHAN CAO la "chac chan khong phai
-#: chuong" — quang cao/binh luan/de xuat/mang xa hoi/dang nhap.
+#: chuong" — quang cao/binh luan/de xuat/mang xa hoi/dang nhap/danh muc
+#: the loai. THEM "category/genre/tag/the-loai/chuyen-muc" (Overnight
+#: "unknown-site discovery red team"): mot khung dieu huong THE LOAI/TAG
+#: thuong co NHIEU lien ket danh so (vd `/the-loai/1`..`/the-loai/7`) —
+#: neu nhieu HON danh sach chuong THAT (vd 7 the loai > 5 chuong that),
+#: `_pick_chapter_cluster` (uu tien SO LUONG truoc) se CHON NHAM cum the
+#: loai lam "danh sach chuong" — tai hien duoc that qua fixture (khung
+#: `<nav class="the-loai">` voi 7 lien ket dung tren mot chuong danh sach
+#: chuong that su chi co 5). CO Y KHONG loai tag `<nav>` NOI CHUNG (khac
+#: `_NOISE_TAGS` cua `visible_text()`) — lien ket "trang tiep theo"/"chuong
+#: tiep theo" hop phap RAT THUONG duoc boc trong `<nav>` ve mat ngu nghia
+#: (vd dieu khien phan trang), loai ca `<nav>` se lam HONG viec tim lien
+#: ket phan trang/chuong tiep theo that su (`_tim_trang_tiep_theo`,
+#: `NavigationOnlyAdapter`) — CHI loai theo TEN class/id CU THE, khong
+#: theo the HTML.
 _LINK_REJECT_HINT_RE = re.compile(
     r"(comment|binh.?luan|advert|\bads?\b|sponsor|"
     r"related|recommend|de.?xuat|goi.?y|"
     r"social|share|chia.?se|"
-    r"login|signup|sign.?up|subscribe|newsletter)",
+    r"login|signup|sign.?up|subscribe|newsletter|"
+    r"category|categories|genre|\btag(s)?\b|the.?loai|chuyen.?muc)",
     re.IGNORECASE,
 )
 

@@ -140,16 +140,77 @@ class SelfHealingConfirmTest(unittest.TestCase):
     discovery confidence don thuan."""
 
     def test_domain_degraded_duoc_khoi_phuc_khi_chuong_mau_hop_le(self):
+        """CO Y dung noi dung PHAN BIET THAT SU cho tung chuong (khac
+        `_UNKNOWN_PAGES` dung chung, noi CA 5 chuong deu CUNG mot chuoi
+        van ban) — phat hien qua review doc lap (Codex): kiem tra "khong
+        trung chuong TRUOC DO" (xem self_healing.py) CAN mot chuong mau
+        THU HAI THAT SU khac de so sanh; dung fixture noi dung GIONG HET
+        se khien kiem tra do (dung sau ban sua nay) TU CHOI oan mot lan
+        khoi phuc le ra hop le."""
+        base = "https://chua-biet-hop-le.example"
+        index = (
+            '<html><head><title>Truyện Hợp Lệ</title></head><body><ul>'
+            + "".join(f'<li><a href="/truyen/x/chuong-{i}">Chương {i}</a></li>'
+                     for i in range(1, 6))
+            + "</ul></body></html>")
+        pages = {f"{base}/truyen/x": index}
+        for i in range(1, 6):
+            pages[f"{base}/truyen/x/chuong-{i}"] = (
+                f'<html><head><title>Chương {i}</title></head><body>'
+                f'<div class="chapter-content"><p>Đoạn văn bản của riêng '
+                f"chương số {i}, đủ dài để vượt ngưỡng tối thiểu cho một "
+                "vùng nội dung hợp lệ, và khác biệt thật sự với các chương "
+                f"khác trong cùng bộ truyện thử nghiệm số {i}.</p>"
+                "</div></body></html>")
+
         profile_store = MockSiteProfileStore()
-        svc = _svc(profile_store=profile_store)
-        svc.confirm_unknown_source(f"{_UNKNOWN_BASE}/truyen/x")
-        profile_store.save("chua-biet.example", status=ProfileStatus.DEGRADED,
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+        svc.confirm_unknown_source(f"{base}/truyen/x")
+        profile_store.save("chua-biet-hop-le.example", status=ProfileStatus.DEGRADED,
                           consecutive_failures=3)
 
-        confirmed = svc.confirm_unknown_source(f"{_UNKNOWN_BASE}/truyen/x")
+        confirmed = svc.confirm_unknown_source(f"{base}/truyen/x")
 
         self.assertEqual(confirmed["profile"].status, ProfileStatus.LEARNING)
         self.assertEqual(confirmed["profile"].revision, 2)
+
+    def test_domain_degraded_bi_tu_choi_khi_cac_chuong_mau_trung_het_noi_dung(self):
+        """Doi chung TRUC TIEP voi test tren: neu HAI trang chuong mau
+        THAT SU tra ve noi dung GIONG HET nhau (dau hieu selector hong
+        dang lay lai MOT khoi tinh thay vi tung chuong that), khoi phuc
+        PHAI bi tu choi — day CHINH LA kiem tra ma review doc lap (Codex)
+        phat hien la "chet" (khong bao gio duoc kich hoat) truoc ban sua
+        `confirm_unknown_source` tai them chuong mau THU HAI de so sanh."""
+        base = "https://chua-biet-trung-het.example"
+        chuong_tinh = (
+            '<html><head><title>Chương</title></head><body>'
+            '<div class="chapter-content"><p>Nội dung tĩnh không đổi bị '
+            "selector hỏng lấy lại giống hệt nhau cho mọi URL chương, đủ "
+            "dài để vượt ngưỡng tối thiểu cho một vùng nội dung hợp lệ.</p>"
+            "</div></body></html>")
+        index = (
+            '<html><head><title>Truyện Trùng Hết</title></head><body><ul>'
+            + "".join(f'<li><a href="/truyen/x/chuong-{i}">Chương {i}</a></li>'
+                     for i in range(1, 6))
+            + "</ul></body></html>")
+        pages = {f"{base}/truyen/x": index}
+        for i in range(1, 6):
+            pages[f"{base}/truyen/x/chuong-{i}"] = chuong_tinh
+
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+        svc.confirm_unknown_source(f"{base}/truyen/x")
+        profile_store.save("chua-biet-trung-het.example", status=ProfileStatus.DEGRADED,
+                          consecutive_failures=3)
+
+        with self.assertRaises(ValueError):
+            svc.confirm_unknown_source(f"{base}/truyen/x")
+        self.assertEqual(profile_store.get("chua-biet-trung-het.example").status,
+                         ProfileStatus.DEGRADED)
 
     def test_domain_degraded_bi_tu_choi_khoi_phuc_khi_chuong_mau_giong_dang_nhap(self):
         """Tich hop Phase 10 (tier_escalation, ep discovery confidence ve

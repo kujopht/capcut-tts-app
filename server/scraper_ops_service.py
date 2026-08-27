@@ -24,6 +24,8 @@ from server.scraper.adapters.json_ld_adapter import JsonLdAwareAdapter
 from server.scraper.adapters.navigation_only_adapter import NavigationOnlyAdapter
 from server.scraper.bulk import ScrapeRunService
 from server.scraper.contract import domain_of
+from server.scraper.content_extraction import extract_content_v3
+from server.scraper.dedupe import content_hash
 from server.scraper.discovery import (
     SourceConfidence, UnknownSiteDiscoveryEngine,
 )
@@ -218,8 +220,34 @@ class ScraperOpsService:
                 raise ValueError(
                     f"Không tải được trang chương mẫu để xác nhận khôi "
                     f"phục: {exc}") from exc
+
+            # Phase 5 ("kiem tra khong trung chuong TRUOC DO"): tai THEM
+            # mot trang chuong mau THU HAI (neu discovery tim duoc) de co
+            # gi do THAT SU de so sanh — phat hien qua review doc lap
+            # (Codex): thieu buoc nay, `previous_chapter_content_hash`
+            # LUON la `None` (chi fetch DUY NHAT mot trang mau), khien
+            # nhanh kiem tra "trung chuong truoc" cua `validate_relocated_content`
+            # KHONG BAO GIO thuc su chay trong luong nay — mot selector da
+            # hong tra ve CUNG mot noi dung tinh cho MOI URL chuong se
+            # khong bi bat o day (chi bi bat SAU do, khi `drive_once` that
+            # su chay va Phase 8 gan nhan POSSIBLE_DUPLICATE tren tung
+            # chuong — cham hon nhieu so voi muc dich cua cong kiem tra
+            # nay). KHONG bat buoc (`len(...) < 2` hoac fetch loi thi bo
+            # qua kiem tra THEM nay, KHONG chan ca luong khoi phuc — day
+            # la mot lop phong ve BO SUNG, khong phai dieu kien tien quyet).
+            hash_chuong_mau_khac: Optional[str] = None
+            if len(proposal.sample_chapter_urls) >= 2:
+                try:
+                    mau_khac = self._fetcher_factory().fetch(
+                        proposal.sample_chapter_urls[1])
+                    hash_chuong_mau_khac = content_hash(extract_content_v3(
+                        mau_khac.text, chapter_title=proposal.work_title).clean_text)
+                except FetchError:
+                    pass
+
             xac_thuc = validate_relocated_content(
-                mau.text, chapter_title=proposal.work_title)
+                mau.text, chapter_title=proposal.work_title,
+                previous_chapter_content_hash=hash_chuong_mau_khac)
             if xac_thuc.confidence == RelocationConfidence.LOW:
                 raise ValueError(
                     "Kiểm tra cấu trúc (Phase 5) từ chối đề xuất khôi "

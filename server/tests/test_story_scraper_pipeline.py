@@ -120,8 +120,9 @@ class RunTest(unittest.TestCase):
         self.assertNotEqual(chapter_moi.content_hash, "hash_cu_gia_lap")
 
         pipeline = StoryIngestionPipeline(adapter, state)
-        quyet_dinh = pipeline._phan_loai_khong_ghi(chapter_moi)
+        quyet_dinh, trung_voi = pipeline._phan_loai_khong_ghi(chapter_moi)
         self.assertEqual(quyet_dinh, IngestionDecision.REVISION)
+        self.assertEqual(trung_voi, [])
 
     def test_loi_mot_chuong_khong_lam_hong_ca_lo(self):
         pages_hong = dict(_PAGES)
@@ -181,8 +182,9 @@ class DryRunTest(unittest.TestCase):
         state.record_success(url_chuong_1, content_hash_value=chapter.content_hash)
 
         pipeline = StoryIngestionPipeline(adapter, state)
-        quyet_dinh = pipeline._phan_loai_khong_ghi(chapter)
+        quyet_dinh, trung_voi = pipeline._phan_loai_khong_ghi(chapter)
         self.assertEqual(quyet_dinh, IngestionDecision.ALREADY_IMPORTED)
+        self.assertEqual(trung_voi, [])
 
 
 class UnexpectedErrorIsolationTest(unittest.TestCase):

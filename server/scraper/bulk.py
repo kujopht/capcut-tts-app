@@ -260,13 +260,26 @@ class ScrapeRunService:
             ban_ghi = state.record_success(
                 muc.chapter_url, content_hash_value=chapter.content_hash,
                 chapter_number=chapter.chapter_number)
-            quyet_dinh = (IngestionDecision.REVISION if ban_ghi.get("is_revision")
-                          else IngestionDecision.NEW)
+            trung_voi: str = ""
+            if ban_ghi.get("is_revision"):
+                quyet_dinh = IngestionDecision.REVISION
+            else:
+                # Phase 8 ("POSSIBLE_DUPLICATE") — xem docstring cung ten
+                # trong `pipeline.py::run()` cho ly do CHI kiem tra o day
+                # (khong phai nhanh REVISION).
+                danh_sach_trung = state.find_canonical_urls_by_content_hash(
+                    chapter.content_hash, exclude_canonical=chapter.canonical_url)
+                if danh_sach_trung:
+                    quyet_dinh = IngestionDecision.POSSIBLE_DUPLICATE
+                    trung_voi = danh_sach_trung[0]
+                else:
+                    quyet_dinh = IngestionDecision.NEW
             self._store.save_item(
                 muc.item_id, status=ScrapeItemStatus.REVIEW_READY,
                 decision=quyet_dinh.value, chapter_title=chapter.chapter_title,
                 chapter_number=chapter.chapter_number,
-                content_hash=chapter.content_hash, error_message="")
+                content_hash=chapter.content_hash, error_message="",
+                duplicate_of_url=trung_voi)
 
         # DEM LAI CHINH XAC dung MOT LAN o cuoi chu ky — khong tin bo dem
         # cong don rai rac trong vong lap. Cung mau voi

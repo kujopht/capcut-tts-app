@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from server.scraper.contract import canonicalize_url
 
@@ -50,6 +50,24 @@ class ScrapeState:
     def get(self, canonical_url: str) -> Optional[Dict[str, Any]]:
         fp = hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
         return self._rows.get(fp)
+
+    def find_canonical_urls_by_content_hash(
+            self, content_hash_value: str, *, exclude_canonical: Optional[str] = None
+    ) -> List[str]:
+        """Phase 8 Story Harvester V3 ("POSSIBLE_DUPLICATE"): tra ve danh
+        sach `canonical_url` (trang thai "ok") CO CUNG `content_hash_value`
+        NHUNG khac `exclude_canonical` — dung de phat hien MOT chuong MOI
+        (URL khac) co noi dung TRUNG HET voi mot chuong KHAC da co trong
+        CUNG series (vd nguon liet ke cung mot chuong qua hai URL/slug
+        khac nhau, hoac mot redirect chua duoc giai quyet dung). `exclude_canonical`
+        LUON PHAI la canonical_url cua CHINH chuong dang kiem tra — thieu
+        no, mot chuong DA co ban ghi cu (dang tu so sanh voi chinh no
+        truoc khi ghi de) se tu bao "trung voi chinh minh"."""
+        return [
+            row["canonical_url"] for row in self._rows.values()
+            if row.get("status") == "ok" and row.get("content_hash") == content_hash_value
+            and row.get("canonical_url") != exclude_canonical
+        ]
 
     def record_success(self, url: str, *, content_hash_value: str,
                         chapter_number: Optional[int] = None) -> Dict[str, Any]:

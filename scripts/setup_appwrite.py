@@ -788,6 +788,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("error_message", "string", False, 1000),
             ("attempts", "integer", False, None),
             ("skipped_reason", "string", False, 500),
+            # Phase 8 Story Harvester V3 — CHI co gia tri khi decision ==
+            # "possible_duplicate" (xem pipeline.py::IngestionDecision).
+            ("duplicate_of_url", "string", False, 1024),
             # Vi tri THEO THU TU KHAM PHA — thu tu THAT hien cho operator o
             # hang doi duyet, KHONG PHAI `created_at` (tung trung gio o quy
             # mo tao nhanh, lam sai thu tu — phat hien qua mot lan di qua

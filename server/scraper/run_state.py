@@ -158,6 +158,12 @@ class ScrapeRunItem:
     error_message: str = ""
     attempts: int = 0
     skipped_reason: str = ""
+    #: CHI co gia tri khi `decision == "possible_duplicate"` (Phase 8) —
+    #: canonical_url cua MOT chuong KHAC trong CUNG series co content_hash
+    #: TRUNG HET (chi luu MOT, du co the co nhieu — du de operator tra
+    #: cuu; xem `pipeline.ReviewItem.duplicate_of_urls` cho danh sach day
+    #: du o tang trong-bo-nho).
+    duplicate_of_url: str = ""
     #: Vi tri THEO THU TU KHAM PHA (0, 1, 2, ...) — dat MOT LAN luc tao,
     #: KHONG BAO GIO doi. Day la THU TU HANG DOI DUYET, tach biet voi
     #: `chapter_number` (co the None cho chuong khong doc duoc so tu tieu

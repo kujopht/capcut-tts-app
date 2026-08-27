@@ -409,6 +409,45 @@ class ItemOrderingTest(unittest.TestCase):
                          "chuong moi phai co sequence LON HON tat ca muc da co")
 
 
+class PossibleDuplicateTest(unittest.TestCase):
+    """Phase 8 Story Harvester V3 — hai URL KHAC NHAU nhung noi dung
+    (content_hash) TRUNG HET phai duoc gan nhan `possible_duplicate`,
+    KHONG tu dong bo qua (van vao hang doi duyet)."""
+
+    def test_hai_chuong_trung_noi_dung_qua_URL_khac_nhau_duoc_gan_nhan(self):
+        noi_dung_trung = (
+            '<html><body><div class="chapter-content"><p>Nội dung hoàn '
+            "toàn giống hệt nhau giữa hai đường dẫn khác nhau, đủ dài để "
+            "vượt ngưỡng tối thiểu cho một vùng nội dung hợp lệ trong bộ "
+            "kiểm thử phát hiện trùng lặp của Story Harvester V3.</p>"
+            "</div></body></html>")
+        index = (
+            '<html><head><title>Truyện Trùng Lặp</title></head><body><ul>'
+            '<li><a href="/d/chuong-1">Chương 1</a></li>'
+            '<li><a href="/d/chuong-2-trung">Chương 2</a></li>'
+            "</ul></body></html>")
+        pages = {
+            f"{_BASE}/d": index,
+            f"{_BASE}/d/chuong-1": noi_dung_trung,
+            f"{_BASE}/d/chuong-2-trung": noi_dung_trung,
+        }
+        pipeline, store, service = _tao_bo_ba(
+            pages=pages, chapters_per_cycle=5)
+        run = service.plan_run(f"{_BASE}/d")
+        service.drive_once(run.run_id)
+
+        muc = store.list_items(run.run_id, limit=None)
+        self.assertEqual(len(muc), 2)
+        muc_1 = next(m for m in muc if m.chapter_url.endswith("chuong-1"))
+        muc_2 = next(m for m in muc if m.chapter_url.endswith("chuong-2-trung"))
+
+        self.assertEqual(muc_1.decision, IngestionDecision.NEW.value)
+        self.assertEqual(muc_2.decision, IngestionDecision.POSSIBLE_DUPLICATE.value)
+        self.assertTrue(muc_2.duplicate_of_url.endswith("chuong-1"))
+        # VAN vao hang doi duyet (khong tu dong bo qua).
+        self.assertEqual(muc_2.status, ScrapeItemStatus.REVIEW_READY)
+
+
 class RunViewTest(unittest.TestCase):
     def test_run_view_tra_ve_tien_do_khong_tac_dung_phu(self):
         _, store, service = _tao_bo_ba()

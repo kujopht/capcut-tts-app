@@ -152,6 +152,92 @@ class JsonLdPreferenceTest(unittest.TestCase):
         self.assertIn("đoạn văn đầu tiên", chapter.clean_text)
 
 
+class PaginationTest(unittest.TestCase):
+    """Muc luc trai dai qua NHIEU trang (vd `?page=1`, `?page=2`, ...) —
+    tinh nang CONG THEM, tat mac dinh (xem docstring constructor)."""
+
+    def _trang_muc_luc(self, so_trang: int, tong_so_trang: int, tien_to_chuong: str):
+        chuong_html = "".join(
+            f'<li><a href="/truyen/x/{tien_to_chuong}-{n}">Chương {n}</a></li>'
+            for n in range((so_trang - 1) * 2 + 1, (so_trang - 1) * 2 + 3)
+        )
+        next_html = (
+            f'<a href="/truyen/x?page={so_trang + 1}" class="next">Trang sau</a>'
+            if so_trang < tong_so_trang else ""
+        )
+        return f"<html><body><ul>{chuong_html}</ul>{next_html}</body></html>"
+
+    def _tao_adapter_phan_trang(self, pages: dict, max_index_pages: int = 20):
+        return GenericIndexAdapter(
+            FixtureFetcher(pages), chapter_href_pattern=r"/truyen/x/chuong-\d+",
+            next_page_href_pattern=r"/truyen/x\?page=\d+", max_index_pages=max_index_pages)
+
+    def test_gop_chuong_tu_nhieu_trang_muc_luc_THEO_DUNG_THU_TU(self):
+        pages = {
+            f"{_BASE}/truyen/x": self._trang_muc_luc(1, 3, "chuong"),
+            f"{_BASE}/truyen/x?page=2": self._trang_muc_luc(2, 3, "chuong"),
+            f"{_BASE}/truyen/x?page=3": self._trang_muc_luc(3, 3, "chuong"),
+        }
+        adapter = self._tao_adapter_phan_trang(pages)
+        series = adapter.discover_series(f"{_BASE}/truyen/x")
+        self.assertEqual(len(series.chapter_urls), 6, "3 trang x 2 chương/trang = 6")
+        # Thu tu PHAI la 1..6, khong duoc dao lon giua cac trang.
+        so_thu_tu = [int(u.rsplit("-", 1)[1]) for u in series.chapter_urls]
+        self.assertEqual(so_thu_tu, [1, 2, 3, 4, 5, 6])
+
+    def test_khong_cau_hinh_next_page_thi_CHI_lay_MOT_trang(self):
+        # Hanh vi MAC DINH (khong next_page_href_pattern) phai giu nguyen —
+        # day la phep hoi quy chong tinh nang moi lam vo hanh vi cu.
+        pages = {
+            f"{_BASE}/truyen/x": self._trang_muc_luc(1, 3, "chuong"),
+            f"{_BASE}/truyen/x?page=2": self._trang_muc_luc(2, 3, "chuong"),
+        }
+        adapter = GenericIndexAdapter(
+            FixtureFetcher(pages), chapter_href_pattern=r"/truyen/x/chuong-\d+")
+        series = adapter.discover_series(f"{_BASE}/truyen/x")
+        self.assertEqual(len(series.chapter_urls), 2, "không cấu hình pagination — chỉ trang đầu")
+
+    def test_lien_ket_next_page_tro_ve_trang_da_tham_KHONG_lap_vo_han(self):
+        # Trang 2 tro nguoc lai trang 1 (loi cau hinh site, hoac site that
+        # co bug) — adapter phai DUNG, khong duoc treo.
+        vong_lap = {
+            f"{_BASE}/truyen/x": (
+                '<html><body><li><a href="/truyen/x/chuong-1">C1</a></li>'
+                '<a href="/truyen/x?page=2" class="next">Sau</a></body></html>'),
+            f"{_BASE}/truyen/x?page=2": (
+                '<html><body><li><a href="/truyen/x/chuong-2">C2</a></li>'
+                '<a href="/truyen/x" class="next">Quay lại</a></body></html>'),
+        }
+        adapter = self._tao_adapter_phan_trang(vong_lap)
+        series = adapter.discover_series(f"{_BASE}/truyen/x")
+        self.assertEqual(len(series.chapter_urls), 2, "phải dừng sau khi phát hiện vòng lặp")
+
+    def test_max_index_pages_chan_tren_dung_muc(self):
+        pages = {f"{_BASE}/truyen/x": self._trang_muc_luc(1, 10, "chuong")}
+        for i in range(2, 11):
+            pages[f"{_BASE}/truyen/x?page={i}"] = self._trang_muc_luc(i, 10, "chuong")
+        adapter = self._tao_adapter_phan_trang(pages, max_index_pages=3)
+        series = adapter.discover_series(f"{_BASE}/truyen/x")
+        self.assertEqual(len(series.chapter_urls), 6, "3 trang cho phép x 2 chương/trang")
+
+    def test_lien_ket_chuong_trung_giua_cac_trang_van_duoc_gop(self):
+        # Mot so site lap lai chuong dau cua trang truoc o cuoi trang sau
+        # (dieu huong "tiep tuc doc") — khong duoc nhan doi qua bien trang.
+        pages = {
+            f"{_BASE}/truyen/x": (
+                '<html><body><li><a href="/truyen/x/chuong-1">C1</a></li>'
+                '<a href="/truyen/x?page=2" class="next">Sau</a></body></html>'),
+            f"{_BASE}/truyen/x?page=2": (
+                '<html><body>'
+                '<li><a href="/truyen/x/chuong-1">C1 (lặp lại)</a></li>'
+                '<li><a href="/truyen/x/chuong-2">C2</a></li>'
+                '</body></html>'),
+        }
+        adapter = self._tao_adapter_phan_trang(pages)
+        series = adapter.discover_series(f"{_BASE}/truyen/x")
+        self.assertEqual(len(series.chapter_urls), 2)
+
+
 class RobustnessTest(unittest.TestCase):
     """Cac tinh huong trang THAT thuong gap: HTML hong, than trang rong,
     JSON-LD hong, lien ket trung, va Unicode tieng Viet — Tier 0 phai song

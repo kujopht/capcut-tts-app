@@ -42,7 +42,9 @@ class GenericIndexAdapter(StoryProvider):
     tier = ScraperTier.DIRECT_HTTP
 
     def __init__(self, fetcher, *, chapter_href_pattern: str,
-                 title_suffix_to_strip: Optional[str] = None):
+                 title_suffix_to_strip: Optional[str] = None,
+                 next_page_href_pattern: Optional[str] = None,
+                 max_index_pages: int = 20):
         """
         :param fetcher: doi tuong co `.fetch(url) -> FetchResult` (xem
             `http_fetcher.HttpFetcher`/`FixtureFetcher`) — tiem vao de test
@@ -51,10 +53,20 @@ class GenericIndexAdapter(StoryProvider):
             de nhan dien lien ket la MOT chuong, vi du `r"/chuong-\\d+"`.
         :param title_suffix_to_strip: hau to lap lai tren MOI tieu de trang
             chuong (vd `" - Ten Site"`) can bo khi lay tieu de chuong rieng.
+        :param next_page_href_pattern: regex ap len href de nhan dien lien
+            ket "trang muc luc tiep theo" (vd `r"/truyen/x\\?page=\\d+"`).
+            KHONG cau hinh (mac dinh) = mot trang muc luc DUY NHAT, hanh vi
+            CU khong doi — pagination la tinh nang CONG THEM, khong bat buoc.
+        :param max_index_pages: chan tren SO TRANG muc luc se theo — an toan
+            chong vong lap vo han (mot site loi tro next-page ve chinh no).
         """
         self._fetcher = fetcher
         self._chapter_re = re.compile(chapter_href_pattern)
         self._title_suffix = title_suffix_to_strip
+        self._next_page_re = (
+            re.compile(next_page_href_pattern) if next_page_href_pattern else None
+        )
+        self._max_index_pages = max_index_pages
 
     def resolve(self, url: str) -> str:
         try:
@@ -68,20 +80,33 @@ class GenericIndexAdapter(StoryProvider):
         _dam_bao_la_html(result)
         page = extract(result.text)
         title = page.meta.get("og:title") or page.title or "(không có tiêu đề)"
-
-        seen = set()
-        chapter_urls: List[str] = []
-        for href, _text in page.links:
-            if not self._chapter_re.search(href):
-                continue
-            absolute = urljoin(result.final_url, href)
-            canon = canonicalize_url(absolute)
-            if canon in seen:
-                continue
-            seen.add(canon)
-            chapter_urls.append(absolute)
-
         domain = canonicalize_url(result.final_url).split("/")[2]
+
+        seen_chapter = set()
+        seen_index_page = {canonicalize_url(result.final_url)}
+        chapter_urls: List[str] = []
+        trang_hien_tai = page
+        base_url = result.final_url
+
+        for _ in range(self._max_index_pages):
+            for href, _text in trang_hien_tai.links:
+                if not self._chapter_re.search(href):
+                    continue
+                absolute = urljoin(base_url, href)
+                canon = canonicalize_url(absolute)
+                if canon in seen_chapter:
+                    continue
+                seen_chapter.add(canon)
+                chapter_urls.append(absolute)
+
+            if self._next_page_re is None:
+                break
+
+            trang_ke = self._tim_trang_tiep_theo(trang_hien_tai, base_url, seen_index_page)
+            if trang_ke is None:
+                break
+            base_url, trang_hien_tai = trang_ke
+
         return SeriesInfo(
             canonical_url=canonicalize_url(result.final_url),
             title=title,
@@ -90,6 +115,23 @@ class GenericIndexAdapter(StoryProvider):
             description=page.meta.get("og:description") or page.meta.get("description"),
             chapter_urls=chapter_urls,
         )
+
+    def _tim_trang_tiep_theo(self, trang, base_url: str, da_tham: set):
+        """Tra ve `(url_moi, ExtractedPage_moi)` cua trang muc luc TIEP
+        THEO, hoac `None` neu khong co/da tham (chan vong lap). Tach rieng
+        thanh phuong thuc de `discover_series` khong lam qua nhieu viec."""
+        for href, _text in trang.links:
+            if not self._next_page_re.search(href):
+                continue
+            absolute = urljoin(base_url, href)
+            canon = canonicalize_url(absolute)
+            if canon in da_tham:
+                return None  # da tham trang nay roi — dung, tranh vong lap.
+            da_tham.add(canon)
+            ket_qua = self._fetcher.fetch(absolute)
+            _dam_bao_la_html(ket_qua)
+            return ket_qua.final_url, extract(ket_qua.text)
+        return None
 
     def fetch_chapter(self, url: str) -> str:
         result = self._fetcher.fetch(url)

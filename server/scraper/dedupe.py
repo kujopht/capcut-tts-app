@@ -85,6 +85,31 @@ class ScrapeState:
         cu["status"] = "failed"
         self._rows[fp] = cu
 
+    def record_skip(self, url: str) -> None:
+        """
+        Danh dau MOT url la "operator chu dong bo qua" — khac voi
+        `record_failure` (loi ky thuat, se duoc `resume()` thu lai) va khac
+        voi `record_success` (da xu ly xong). `StoryProvider.resume()` (xem
+        `contract.py`) chi thu lai khi `status == "failed"`, nen mot ban ghi
+        `"skipped"` tu dong bi loai khoi danh sach can lam o lan `plan()`
+        sau — KHONG can sua `resume()`.
+        """
+        canon = canonicalize_url(url)
+        fp = hashlib.sha256(canon.encode("utf-8")).hexdigest()
+        self._rows[fp] = {"canonical_url": canon, "status": "skipped"}
+
+    def clear_skip(self, url: str) -> None:
+        """Bo mot luot "bo qua" da danh dau truoc do, cho operator doi y —
+        url nay tro lai dien duoc `resume()` de xuat o lan `plan()` ke tiep.
+        CHI xoa khi ban ghi hien tai THAT SU la "skipped" — goi nham tren
+        mot url dang "ok"/"failed" se khong lam mat du lieu cua trang thai
+        do."""
+        canon = canonicalize_url(url)
+        fp = hashlib.sha256(canon.encode("utf-8")).hexdigest()
+        cu = self._rows.get(fp)
+        if cu is not None and cu.get("status") == "skipped":
+            del self._rows[fp]
+
     def to_json(self) -> str:
         """Tuan tu hoa DE LUU (Appwrite/dia) — noi goi tu chiu trach nhiem
         ben vung hoa, lop nay chi dinh dang."""

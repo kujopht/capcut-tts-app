@@ -89,6 +89,16 @@ lập khác họ model) — xem `docs/AI_ROUTER.md` cho đầy đủ, và
 phẩm. Không lưu credential của Antigravity/Codex trong repo — cả hai đọc
 phiên đăng nhập từ nơi lưu trữ riêng của hệ điều hành/CLI.
 
+**Quan hệ với router toàn cục:** `~/.claude/CLAUDE.md` (tài khoản Windows
+này) chứa phần CHUNG của chính sách này (tier model chung, quota-aware
+routing, review chéo model, chính sách context/test) — áp dụng cho MỌI
+repo trên máy này, không riêng Fanfic. File này + `docs/AI_ROUTER.md` chỉ
+còn phần THẬT SỰ đặc thù Fanfic (production/Appwrite/nội dung, quy ước
+frontend riêng, các con số benchmark của repo này) — Claude Code tự nối
+cả hai (global rồi đến local), không cần lặp lại phần chung ở đây. Đừng
+đưa quy tắc riêng của Fanfic ngược lên `~/.claude/` — file đó phải luôn
+dùng được cho một repo bất kỳ khác.
+
 ## Trạng thái
 
 Xem `docs/HANDOFF.md` để biết mốc nào đã xong và việc tiếp theo.

@@ -1,8 +1,9 @@
 """
 Kiem thu cho `server/scraper/html_extract.py` — parser Tier 0 HTML bang
 `html.parser` co san cua Python, ho tro loc noise-tag va heuristic ranh
-gioi noi dung duong tinh (positive content boundary) cho cac trang dang
-MediaWiki (Wikipedia, Wikisource,...).
+gioi noi dung duong tinh (positive content boundary) cho nhieu dang site
+(MediaWiki nhu Wikipedia/Wikisource, va Royal Road — xem
+`_CONTENT_BOUNDARY_CLASSES`/`_CONTENT_BOUNDARY_IDS`).
 """
 from __future__ import annotations
 
@@ -148,6 +149,33 @@ class HtmlExtractBoundaryTest(unittest.TestCase):
         self.assertIn("Nội dung bài viết trong skin MediaWiki cũ.", text)
         self.assertNotIn("Jump to content", text)
         self.assertNotIn("Search and footer info", text)
+
+    def test_royalroad_chapter_content_loai_bo_chrome_giu_noi_dung_chinh(self):
+        """Fixture dang Royal Road that (khong phai MediaWiki): noi dung
+        chuong nam trong `class="chapter-inner chapter-content"` (nhieu
+        class, xem `site_registry.py` domain royalroad.com), bao quanh boi
+        nav/sidebar/footer chrome cua site. Xac nhan ranh gioi duong tinh
+        HOAT DONG cho MOT site khong phai ho MediaWiki, khong chi mot the."""
+        html = """
+        <html>
+        <body>
+            <nav class="navbar">Best Rated Trending Ongoing Fictions</nav>
+            <div class="fic-header">Regis and Charlotte</div>
+            <div class="chapter-inner chapter-content">
+                <p>Regis closed his eyes and waited.</p>
+                <p>The chief judge was standing up.</p>
+            </div>
+            <footer class="footer">Terms of Service Privacy Policy DMCA</footer>
+        </body>
+        </html>
+        """
+        page = extract(html)
+        text = page.visible_text()
+        self.assertIn("Regis closed his eyes and waited.", text)
+        self.assertIn("The chief judge was standing up.", text)
+        self.assertNotIn("Best Rated", text)
+        self.assertNotIn("Terms of Service", text)
+        self.assertNotIn("Regis and Charlotte", text)  # tieu de o ngoai boundary
 
     def test_noise_tags_ben_trong_boundary_van_duoc_loai_bo(self):
         """Cac the `_NOISE_TAGS` (style, script, aside, nav,...) neu nam

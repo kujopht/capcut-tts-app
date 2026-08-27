@@ -141,3 +141,8 @@ web/public/artwork/backgrounds/
 
 # Bao cao/ghi chep dung mot lan cua phien lam viec — khong thuoc san pham.
 scratchpad/
+
+# Log telemetry cuc bo cua AI router (docs/AI_ROUTER.md) — du lieu may cua
+# TUNG nguoi dung, khong phai cau hinh du an. `.claude/agents/*.md` (dinh
+# nghia subagent) VAN duoc commit — chi rieng tep log nay bi bo qua.
+.claude/router-telemetry.jsonl

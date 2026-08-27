@@ -241,31 +241,70 @@ def _own_text(node: _Node) -> str:
     return "".join(node.own_text_parts)
 
 
-def _collect(node: _Node) -> Tuple[str, int, int, int, List[str]]:
-    """Duyet POST-ORDER, BO QUA con `rejected` — tra ve (van_ban_gop,
-    tong_do_dai, do_dai_lien_ket, so_doan_van_co_chu, tieu_de_gop) cho
-    CHINH `node` (da gom con hop le)."""
-    text_parts = [_own_text(node)]
-    total_len = len(_own_text(node).strip())
-    link_len = node.own_link_text_len
-    para_count = 1 if (node.is_paragraph and total_len > 0) else 0
-    headings = list(node.heading_texts)
-
-    for con in node.children:
-        if con.rejected:
+def _collect_all(root: "_Node") -> Dict[int, Tuple[str, int, int, int, List[str]]]:
+    """Tra ve `{id(node): (van_ban_gop, tong_do_dai, do_dai_lien_ket,
+    so_doan_van_co_chu, tieu_de_gop)}` cho MOI nut trong cay (BO QUA con
+    `rejected` khi cong don vao cha) — duyet POST-ORDER LAP (KHONG DE QUY):
+    mot trang HTML that co the long sau hang nghin cap the (vd wrapper
+    lap lai nhieu lan), va ban de quy ban dau (mot ham/nut) tung tran gioi
+    han de quy mac dinh cua Python (~1000) tren HTML nhu vay, nem
+    `RecursionError` khong duoc `pipeline.py` bat rieng, lam DUNG CA DOT
+    quet vi MOT trang loi — phat hien qua review doc lap (Codex, tai hien
+    that voi ~999 the `<div>` long nhau)."""
+    ket_qua: Dict[int, Tuple[str, int, int, int, List[str]]] = {}
+    #: (nut, DA_day_con_chua) — lan dau gap MOT nut: day lai no (danh dau DA
+    #: xu ly) roi day TAT CA con hop le; lan hai gap LAI (sau khi moi con da
+    #: co ket qua trong `ket_qua`): tinh toan that su cho no.
+    ngan_xep: List[Tuple["_Node", bool]] = [(root, False)]
+    while ngan_xep:
+        node, da_day_con = ngan_xep.pop()
+        if not da_day_con:
+            ngan_xep.append((node, True))
+            for con in node.children:
+                if not con.rejected:
+                    ngan_xep.append((con, False))
             continue
-        con_text, con_len, con_link, con_para, con_headings = _collect(con)
-        text_parts.append(con_text)
-        total_len += con_len
-        link_len += con_link
-        para_count += con_para
-        headings.extend(con_headings)
 
-    return "\n".join(t for t in text_parts if t.strip()), total_len, link_len, para_count, headings
+        text_parts = [_own_text(node)]
+        total_len = len(_own_text(node).strip())
+        link_len = node.own_link_text_len
+        para_count = 1 if (node.is_paragraph and total_len > 0) else 0
+        headings = list(node.heading_texts)
+        for con in node.children:
+            if con.rejected:
+                continue
+            con_text, con_len, con_link, con_para, con_headings = ket_qua[id(con)]
+            text_parts.append(con_text)
+            total_len += con_len
+            link_len += con_link
+            para_count += con_para
+            headings.extend(con_headings)
+
+        ket_qua[id(node)] = (
+            "\n".join(t for t in text_parts if t.strip()), total_len, link_len,
+            para_count, headings)
+    return ket_qua
+
+
+#: So ky tu TOI THIEU de mot con-ung-vien duoc coi la "dang ke" khi dem
+#: `so_con_ung_vien_dang_ke` (xem `_score`) — duoi nguong nay coi nhu
+#: khong dang, tranh phat oan mot wrapper co MOT con that su + vai the
+#: khoi rong/trang trai xung quanh.
+_NGUONG_CON_UNG_VIEN_DANG_KE = 100
+#: Phat MOI con-ung-vien dang ke THEM (tinh tu con thu HAI tro di) — mot
+#: nut bao boc NHIEU khoi noi dung dang ke RIENG BIET (vd "than chuong" +
+#: "tieu su tac gia" + "muc luc" deu la <div> con truc tiep) nhieu kha nang
+#: la MOT WRAPPER THO, khong phai vung noi dung chuong that su — uu tien
+#: mot con CU THE HON thay vi ca khoi cha gom tat ca — phat hien qua review
+#: doc lap (Codex): mot <article> bao mot div.chapter-content that VA mot
+#: khoi "gioi thieu tac gia"/"danh gia" khong khop reject-hint co the
+#: thang nho diem tong cao hon, ke ca noi dung khong lien quan cua khoi kia.
+_PHAT_MOI_CON_UNG_VIEN_THEM = 25
 
 
 def _score(node: _Node, total_len: int, link_len: int, para_count: int,
-          headings: List[str], chapter_title: Optional[str]) -> float:
+          headings: List[str], chapter_title: Optional[str],
+          so_con_ung_vien_dang_ke: int = 0) -> float:
     if total_len <= 0:
         return -1e9
 
@@ -278,6 +317,7 @@ def _score(node: _Node, total_len: int, link_len: int, para_count: int,
 
     link_density = link_len / total_len if total_len else 1.0
     score -= link_density * 40
+    score -= _PHAT_MOI_CON_UNG_VIEN_THEM * max(0, so_con_ung_vien_dang_ke - 1)
 
     if chapter_title:
         chuan_hoa_tieu_de = _normalize_for_compare(chapter_title)
@@ -299,6 +339,37 @@ def _score(node: _Node, total_len: int, link_len: int, para_count: int,
     return score
 
 
+#: Ty le TOI THIEU van ban cua con SO VOI cha de duoc uu tien thay cha —
+#: con phai chiem DA SO ro rang (khong chi vai phan tram), tranh uu tien
+#: nham mot con chi TINH CO co ten khop tu khoa nhung thuc ra rat nho.
+_TY_LE_TOI_THIEU_UU_TIEN_CON = 0.5
+
+
+def _uu_tien_con_cu_the_hon(
+        thang: _Node, van_ban_cha: str,
+        tat_ca_ket_qua: Dict[int, Tuple[str, int, int, int, List[str]]],
+) -> Tuple[str, Optional[str]]:
+    """Xem comment goi ham (`extract_content_v3`) — tra ve `(van_ban,
+    chu_ky_ghi_de_hoac_None)`. CHI uu tien khi CHINH XAC MOT con truc tiep
+    khop tu khoa noi dung VA con do chiem >= `_TY_LE_TOI_THIEU_UU_TIEN_CON`
+    van ban cua cha — nhieu con khop cung luc (mo ho ung vien nao that su
+    cu the hon) hoac ty le thap (con qua nho de la ca vung noi dung) thi
+    GIU NGUYEN cha, KHONG doan."""
+    ung_vien_con = [
+        c for c in thang.children
+        if not c.rejected and c.tag in _CANDIDATE_TAGS and c.sig
+        and _CONTAINER_HINT_RE.search(c.sig)
+    ]
+    if len(ung_vien_con) != 1:
+        return van_ban_cha, None
+    con = ung_vien_con[0]
+    con_text, con_len, _link, _para, _headings = tat_ca_ket_qua[id(con)]
+    cha_len = len(van_ban_cha.strip())
+    if cha_len <= 0 or con_len / cha_len < _TY_LE_TOI_THIEU_UU_TIEN_CON:
+        return van_ban_cha, None
+    return con_text, con.sig
+
+
 def extract_content_v3(html: str, *, chapter_title: Optional[str] = None,
                         known_boilerplate_hashes: Optional[Set[str]] = None
                        ) -> ExtractionResult:
@@ -311,18 +382,26 @@ def extract_content_v3(html: str, *, chapter_title: Optional[str] = None,
     builder.close()
 
     known_hashes = known_boilerplate_hashes or set()
-    ung_vien: List[Tuple[_Node, str, int, int, int, List[str]]] = []
+    tat_ca_ket_qua = _collect_all(builder.root)
 
-    def duyet(node: _Node) -> None:
+    # Danh sach ung vien: MOI nut "khoi" (tru root gia) co the la vung noi
+    # dung — duyet LAP (khong de quy, cung ly do voi `_collect_all`).
+    ung_vien: List[Tuple[_Node, str, int, int, int, List[str], int]] = []
+    ngan_xep: List[_Node] = [builder.root]
+    while ngan_xep:
+        node = ngan_xep.pop()
         for con in node.children:
             if con.rejected:
                 continue
             if con.tag in _CANDIDATE_TAGS:
-                text, total_len, link_len, para_count, headings = _collect(con)
-                ung_vien.append((con, text, total_len, link_len, para_count, headings))
-            duyet(con)
-
-    duyet(builder.root)
+                text, total_len, link_len, para_count, headings = tat_ca_ket_qua[id(con)]
+                so_con_dang_ke = sum(
+                    1 for chau in con.children
+                    if not chau.rejected and chau.tag in _CANDIDATE_TAGS
+                    and tat_ca_ket_qua[id(chau)][1] >= _NGUONG_CON_UNG_VIEN_DANG_KE)
+                ung_vien.append((con, text, total_len, link_len, para_count,
+                                headings, so_con_dang_ke))
+            ngan_xep.append(con)
 
     if not ung_vien:
         return ExtractionResult(
@@ -330,13 +409,26 @@ def extract_content_v3(html: str, *, chapter_title: Optional[str] = None,
             container_signature=None)
 
     da_cham_diem = [
-        (node, text, _score(node, total_len, link_len, para_count, headings, chapter_title))
-        for node, text, total_len, link_len, para_count, headings in ung_vien
+        (node, text, _score(node, total_len, link_len, para_count, headings,
+                            chapter_title, so_con_dang_ke))
+        for node, text, total_len, link_len, para_count, headings, so_con_dang_ke in ung_vien
     ]
     da_cham_diem.sort(key=lambda item: item[2], reverse=True)
     thang, van_ban_tho, diem_thang = da_cham_diem[0]
     diem_nhi = da_cham_diem[1][2] if len(da_cham_diem) > 1 else float("-inf")
     khoang_cach = diem_thang - diem_nhi
+
+    # Uu tien MOT con truc tiep CU THE HON (khop tu khoa noi dung, xem
+    # `_CONTAINER_HINT_RE`) khi no chiem DA SO van ban cua ung vien thang —
+    # ung vien thang co the la mot wrapper NGU NGHIA (vd <article>) gom CA
+    # vung noi dung THAT LAN mot vung khac khong khop reject-hint (vd
+    # "gioi thieu tac gia") nam CANH nhau — mot con cu the hon, chiem da so
+    # van ban, la tin hieu manh hon "day chinh la vung noi dung That",
+    # ngay ca khi wrapper cha thang diem TONG (vd nho tu khoa tieu de trung
+    # voi mot <h1> nam TRUC TIEP trong wrapper). Diem/khoang cach (o tren)
+    # KHONG doi theo buoc nay — van phan anh do tin cay TONG THE cua LUOT
+    # cham diem ban dau. Phat hien qua review doc lap (Codex).
+    van_ban_tho, sig_ghi_de = _uu_tien_con_cu_the_hon(thang, van_ban_tho, tat_ca_ket_qua)
 
     # Loai bo doan TRUNG boilerplate DA BIET (Phase 6: "boilerplate lap lai
     # qua nhieu trang") — tach theo dong (moi phan tu cua `text_parts` la
@@ -372,16 +464,23 @@ def extract_content_v3(html: str, *, chapter_title: Optional[str] = None,
         # `None` khi khong con van ban nao sau khi loc — mot chu ky tro toi
         # mot the RONG (vd "body" cua mot trang trong) khong phai thong tin
         # huu ich, du no ky thuat la "ung vien" duy nhat tim thay.
-        container_signature=(thang.sig or thang.tag) if clean_text else None,
+        container_signature=(sig_ghi_de or thang.sig or thang.tag) if clean_text else None,
         paragraph_hashes=paragraph_hashes,
-        rejected_zone_count=sum(1 for n in _iter_rejected(builder.root)),
+        rejected_zone_count=_dem_vung_bi_loai(builder.root),
         boilerplate_paragraph_count=boilerplate_count,
     )
 
 
-def _iter_rejected(node: _Node):
-    for con in node.children:
-        if con.rejected:
-            yield con
-        else:
-            yield from _iter_rejected(con)
+def _dem_vung_bi_loai(root: "_Node") -> int:
+    """Dem so nut `rejected` trong cay — duyet LAP (khong de quy), cung ly
+    do voi `_collect_all`."""
+    dem = 0
+    ngan_xep: List[_Node] = [root]
+    while ngan_xep:
+        node = ngan_xep.pop()
+        for con in node.children:
+            if con.rejected:
+                dem += 1
+            else:
+                ngan_xep.append(con)
+    return dem

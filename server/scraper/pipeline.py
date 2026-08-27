@@ -46,7 +46,6 @@ from typing import List, Optional
 
 from server.scraper.contract import NormalizedChapter, SeriesInfo, StoryProvider
 from server.scraper.dedupe import ScrapeState
-from server.scraper.http_fetcher import FetchError
 from server.scraper.quality import QualityReport, assess_chapter_quality
 
 
@@ -164,11 +163,21 @@ class StoryIngestionPipeline:
                 raw_html = self._provider.fetch_chapter(chapter_url)
                 chapter = self._provider.normalize_chapter(
                     chapter_url, raw_html, ke_hoach.series)
-            except (FetchError, ValueError) as exc:
+            except Exception as exc:
                 # LOI MOT CHUONG khong duoc lam dung ca lo — ghi lai de
                 # `resume()` biet thu lai o lan chay sau, roi TIEP TUC
                 # chuong ke tiep (day la diem mau chot cua "ngat giua
-                # chung mot lo van an toan").
+                # chung mot lo van an toan"). BAT `Exception` NOI CHUNG
+                # (khong chi `FetchError`/`ValueError`) — MOT trang HTML
+                # bat thuong (vd long qua sau) co the lam mot buoc phan
+                # tich noi bo (vd `content_extraction.py`) nem loi khong
+                # luong truoc duoc; mot trang loi khong duoc phep dung ca
+                # dot quet nhieu tram chuong khac — phat hien qua review
+                # doc lap (Codex), tai hien that bang `RecursionError`
+                # tren HTML long ~1000 cap the (da sua o nguon, nhung
+                # nguyen tac "mot chuong loi khong dung ca lo" phai giu
+                # vung ke ca voi loi KHONG LUONG TRUOC duoc trong tuong
+                # lai).
                 if not dry_run:
                     self._state.record_failure(chapter_url)
                 review_items.append(ReviewItem(

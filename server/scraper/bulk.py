@@ -32,7 +32,6 @@ from typing import Any, Dict, Optional
 
 from server.scraper.contract import SeriesInfo, canonicalize_url
 from server.scraper.dedupe import source_fingerprint
-from server.scraper.http_fetcher import FetchError
 from server.scraper.pipeline import IngestionDecision, StoryIngestionPipeline
 from server.scraper.run_state import (
     TERMINAL_RUN_STATUSES,
@@ -236,7 +235,16 @@ class ScrapeRunService:
             try:
                 raw_html = provider.fetch_chapter(muc.chapter_url)
                 chapter = provider.normalize_chapter(muc.chapter_url, raw_html, series)
-            except (FetchError, ValueError) as exc:
+            except Exception as exc:
+                # BAT `Exception` NOI CHUNG (khong chi `FetchError`/
+                # `ValueError`) — cung ly do voi `pipeline.py::run()`: mot
+                # trang HTML bat thuong co the lam mot buoc phan tich noi
+                # bo nem loi khong luong truoc duoc (vd
+                # `content_extraction.py`, tai hien that bang
+                # `RecursionError` tren HTML long ~1000 cap the truoc khi
+                # sua o nguon — xem review doc lap Codex), va MOT chuong
+                # loi khong duoc phep dung ca dot quet hang tram/nghin
+                # chuong khac dang cho o `muc_can_lam`.
                 state.record_failure(muc.chapter_url)
                 self._store.save_item(
                     muc.item_id, status=ScrapeItemStatus.FAILED,

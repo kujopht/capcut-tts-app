@@ -225,3 +225,50 @@ class BoilerplateAcrossPagesTest(unittest.TestCase):
         self.assertIn(_DOAN_DAI, result.clean_text)
         self.assertNotIn(doan_boilerplate, result.clean_text)
         self.assertEqual(result.boilerplate_paragraph_count, 1)
+
+
+class DeeplyNestedHtmlTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): HTML long RAT sau
+    (vd wrapper `<div>` lap lai hang nghin lan) tung lam de quy vuot gioi
+    han mac dinh cua Python (~1000), nem `RecursionError` KHONG duoc
+    `pipeline.py` bat rieng, lam dung CA DOT quet vi MOT trang loi. Cay
+    duyet gio la LAP (khong de quy) — xem `_collect_all`/`_dem_vung_bi_loai`."""
+
+    def test_ba_nghin_the_div_long_nhau_khong_nem_RecursionError(self):
+        do_sau = 3000
+        html = ("<html><body>" + "<div>" * do_sau
+               + f"<p>{_DOAN_DAI}</p>"
+               + "</div>" * do_sau + "</body></html>")
+
+        result = extract_content_v3(html)  # KHONG duoc nem RecursionError.
+        self.assertIn(_DOAN_DAI, result.clean_text)
+
+
+class SiblingLeakageTest(unittest.TestCase):
+    def test_wrapper_ngu_nghia_co_vung_khong_lien_quan_canh_ung_vien_that(self):
+        """Tai hien phat hien tu review doc lap (Codex): mot <article> bao
+        CA vung noi dung THAT (div.chapter-content) LAN mot vung khac
+        khong khop reject-hint (vd "giới thiệu tác giả") nam CANH nhau —
+        <article> co the thang diem TONG (tu khoa tieu de trung voi <h1>
+        nam truc tiep trong no) nhung van ban cua no se lan ca vung khong
+        lien quan. Phai uu tien con cu the hon (chiem da so van ban)."""
+        gioi_thieu = (
+            "Giới thiệu tác giả: một người viết truyện lâu năm với nhiều "
+            "tác phẩm nổi tiếng trong cộng đồng, đã xuất bản hơn mười đầu "
+            "sách và nhận được nhiều giải thưởng văn học trong nước.")
+        html = f"""
+        <html><body>
+        <article>
+          <h1>Chương 1</h1>
+          <div class="chapter-content">
+            <p>{_DOAN_DAI}</p>
+            <p>Một đoạn văn thứ hai để tăng thêm điểm số cho ứng viên này.</p>
+          </div>
+          <div class="author-bio"><p>{gioi_thieu}</p></div>
+        </article>
+        </body></html>
+        """
+        result = extract_content_v3(html, chapter_title="Chương 1")
+        self.assertEqual(result.container_signature, "div.chapter-content")
+        self.assertIn(_DOAN_DAI, result.clean_text)
+        self.assertNotIn("Giới thiệu tác giả", result.clean_text)

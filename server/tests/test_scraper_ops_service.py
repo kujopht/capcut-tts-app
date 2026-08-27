@@ -134,6 +134,55 @@ class ConfirmUnknownSourceTest(unittest.TestCase):
                 svc.confirm_unknown_source(f"{_BASE}/truyen/thu-nghiem")
 
 
+class SelfHealingConfirmTest(unittest.TestCase):
+    """Phase 5: xac nhan LAI mot domain DA DEGRADED phai qua kiem tra cau
+    truc (`self_healing.validate_relocated_content`), khong chi tin
+    discovery confidence don thuan."""
+
+    def test_domain_degraded_duoc_khoi_phuc_khi_chuong_mau_hop_le(self):
+        profile_store = MockSiteProfileStore()
+        svc = _svc(profile_store=profile_store)
+        svc.confirm_unknown_source(f"{_UNKNOWN_BASE}/truyen/x")
+        profile_store.save("chua-biet.example", status=ProfileStatus.DEGRADED,
+                          consecutive_failures=3)
+
+        confirmed = svc.confirm_unknown_source(f"{_UNKNOWN_BASE}/truyen/x")
+
+        self.assertEqual(confirmed["profile"].status, ProfileStatus.LEARNING)
+        self.assertEqual(confirmed["profile"].revision, 2)
+
+    def test_domain_degraded_bi_tu_choi_khoi_phuc_khi_chuong_mau_giong_dang_nhap(self):
+        dang_nhap_base = "https://dang-nhap.example"
+        trang_dang_nhap = (
+            '<html><body><div class="chapter-content">'
+            "<p>Vui lòng đăng nhập để đọc tiếp nội dung chương này, cảm "
+            "ơn bạn đã quan tâm theo dõi câu chuyện của chúng tôi trong "
+            "suốt thời gian qua, mong bạn tiếp tục ủng hộ.</p>"
+            "</div></body></html>")
+        index = (
+            '<html><head><title>Truyện Đăng Nhập</title></head><body><ul>'
+            + "".join(f'<li><a href="/dn/chuong-{i}">Chương {i}</a></li>' for i in range(1, 6))
+            + "</ul></body></html>")
+        pages = {f"{dang_nhap_base}/dn": index}
+        for i in range(1, 6):
+            pages[f"{dang_nhap_base}/dn/chuong-{i}"] = trang_dang_nhap
+
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kw: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+        svc.confirm_unknown_source(f"{dang_nhap_base}/dn")
+        profile_store.save("dang-nhap.example", status=ProfileStatus.DEGRADED,
+                          consecutive_failures=3)
+
+        with self.assertRaises(ValueError) as ctx:
+            svc.confirm_unknown_source(f"{dang_nhap_base}/dn")
+        self.assertIn("DEGRADED", str(ctx.exception))
+        # PHAI van con DEGRADED — khong duoc am tham chap nhan.
+        self.assertEqual(profile_store.get("dang-nhap.example").status,
+                         ProfileStatus.DEGRADED)
+
+
 class ProfileOutcomeSyncTest(unittest.TestCase):
     """Tai hien phat hien tu review doc lap (Codex): mot chu ky drive co CA
     thanh cong LAN loi phai goi `record_success`/`record_failure` DUNG MOT

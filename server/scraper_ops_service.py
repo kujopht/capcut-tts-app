@@ -15,6 +15,7 @@ HTTP, moi thu ben vung deu di qua `store` (Mock hoac Appwrite, xem
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Dict, Optional
 
 from server.scraper import site_registry
@@ -26,12 +27,13 @@ from server.scraper.contract import domain_of
 from server.scraper.discovery import (
     SourceConfidence, UnknownSiteDiscoveryEngine,
 )
-from server.scraper.http_fetcher import HttpFetcher
+from server.scraper.http_fetcher import FetchError, HttpFetcher
 from server.scraper.incremental import diff_toc
 from server.scraper.pipeline import StoryIngestionPipeline
 from server.scraper.run_state import run_fingerprint, run_id_from_fingerprint
+from server.scraper.self_healing import RelocationConfidence, validate_relocated_content
 from server.scraper.site_profile import (
-    MockSiteProfileStore, profile_from_proposal,
+    MockSiteProfileStore, ProfileStatus, profile_from_proposal,
 )
 from server.scraper.state_reconstruct import rebuild_state
 from server.scraper.story_identity import (
@@ -171,10 +173,18 @@ class ScraperOpsService:
     def confirm_unknown_source(self, url: str) -> Dict[str, Any]:
         """Operator xac nhan MOT de xuat discovery — chay LAI discovery
         (khong trang thai, toi da hai lan fetch, xem `discovery.py`) de co
-        de xuat TUOI, roi luu thanh `SiteProfile` (status LEARNING). KHONG
-        BAO GIO tu dong goi trong `discover()` — xac nhan PHAI la hanh
-        dong RO RANG cua operator (Phase 2: "MEDIUM cần operator review"),
-        va LOW luon bi tu choi o day (Phase 2: "LOW fails safely")."""
+        de xuat TUOI, roi luu thanh `SiteProfile`. KHONG BAO GIO tu dong
+        goi trong `discover()` — xac nhan PHAI la hanh dong RO RANG cua
+        operator (Phase 2: "MEDIUM cần operator review"), va LOW luon bi
+        tu choi o day (Phase 2: "LOW fails safely").
+
+        Phase 5 (self-healing): neu domain nay DA co mot `SiteProfile`
+        DEGRADED (vuot nguong loi lien tiep), day la mot lan "tu-chua" —
+        KHONG chi tin discovery confidence MEDIUM/HIGH don thuan, con phai
+        qua `validate_relocated_content` (kiem tra cau truc THEM: khong
+        trung chuong truoc/khong giong trang dang nhap-loi) truoc khi chap
+        nhan revision moi. `revision` tang len 1 moi lan xac nhan LAI mot
+        domain DA co profile (bat ke DEGRADED hay khong)."""
         if site_registry.lookup(url) is not None:
             raise ValueError(
                 "Domain này đã có cấu hình xác minh sẵn — không cần xác "
@@ -188,7 +198,36 @@ class ScraperOpsService:
                 "Đây có thể không phải trang mục lục, trang cần "
                 "JavaScript để hiển thị, hoặc cần một kỹ sư cấu hình thủ "
                 "công (site_registry) nếu đây là nguồn quan trọng.")
-        saved = self._profile_store.upsert(profile_from_proposal(proposal))
+
+        domain = domain_of(proposal.canonical_url)
+        profile_cu = self._profile_store.get(domain)
+        profile_moi = profile_from_proposal(proposal)
+        if profile_cu is not None:
+            profile_moi = replace(profile_moi, revision=profile_cu.revision + 1)
+
+        if profile_cu is not None and profile_cu.status == ProfileStatus.DEGRADED:
+            if not proposal.sample_chapter_urls:
+                raise ValueError(
+                    "Nguồn này đang ở trạng thái DEGRADED (nhiều lần lỗi "
+                    "liên tiếp) và lần khám phá lại không tìm được trang "
+                    "chương mẫu để xác nhận cấu trúc — không thể tự động "
+                    "khôi phục, cần kỹ sư kiểm tra thủ công.")
+            try:
+                mau = self._fetcher_factory().fetch(proposal.sample_chapter_urls[0])
+            except FetchError as exc:
+                raise ValueError(
+                    f"Không tải được trang chương mẫu để xác nhận khôi "
+                    f"phục: {exc}") from exc
+            xac_thuc = validate_relocated_content(
+                mau.text, chapter_title=proposal.work_title)
+            if xac_thuc.confidence == RelocationConfidence.LOW:
+                raise ValueError(
+                    "Kiểm tra cấu trúc (Phase 5) từ chối đề xuất khôi "
+                    "phục này: " + " ".join(xac_thuc.evidence) +
+                    " — nguồn vẫn ở trạng thái DEGRADED, cần kỹ sư kiểm "
+                    "tra thủ công thay vì tự động khôi phục.")
+
+        saved = self._profile_store.upsert(profile_moi)
         return {"profile": saved, "proposal": proposal}
 
     def start_or_continue(self, url: str, *, chapter_limit: Optional[int] = None

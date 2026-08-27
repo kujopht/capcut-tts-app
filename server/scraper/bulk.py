@@ -195,6 +195,19 @@ class ScrapeRunService:
     # Bo DIEU PHOI (goi lap lai theo chu ky, tu ben ngoai)
     # =========================================================================
 
+    def _da_bi_skip_giua_chung(self, item_id: str) -> bool:
+        """`True` neu muc nay DA bi chuyen sang `SKIPPED` (qua `skip()`)
+        TRONG LUC dang fetch/xu ly chuong nay — phat hien qua review doc
+        lap (Codex): TRUOC ban sua nay, ghi hoan tat cua `drive_once`
+        (thanh cong hay that bai deu vay) GHI DE VO DIEU KIEN len tren, am
+        tham "hoi sinh" mot muc operator VUA CHU DINH bo qua thanh
+        `REVIEW_READY`/`FAILED` — mat hoan toan quyet dinh cua operator ma
+        khong co loi/canh bao nao. KHONG CAN kiem tra `claimed_at` (muc DA
+        duoc claim, cu the la muc DANG duoc vong lap nay xu ly — chi trang
+        thai co the thay doi tu ben ngoai la dieu can biet)."""
+        muc_hien_tai = self._store.get_item(item_id)
+        return muc_hien_tai is not None and muc_hien_tai.status is ScrapeItemStatus.SKIPPED
+
     def drive_once(self, run_id: str, *, max_chapters: Optional[int] = None
                    ) -> Dict[str, int]:
         """MOT chu ky dieu phoi cho MOT dot — tai + phan loai toi da
@@ -265,6 +278,8 @@ class ScrapeRunService:
                 # sua o nguon — xem review doc lap Codex), va MOT chuong
                 # loi khong duoc phep dung ca dot quet hang tram/nghin
                 # chuong khac dang cho o `muc_can_lam`.
+                if self._da_bi_skip_giua_chung(muc.item_id):
+                    continue
                 state.record_failure(muc.chapter_url)
                 self._store.save_item(
                     muc.item_id, status=ScrapeItemStatus.FAILED,
@@ -272,6 +287,8 @@ class ScrapeRunService:
                     claimed_at="")
                 continue
 
+            if self._da_bi_skip_giua_chung(muc.item_id):
+                continue
             ban_ghi = state.record_success(
                 muc.chapter_url, content_hash_value=chapter.content_hash,
                 chapter_number=chapter.chapter_number)

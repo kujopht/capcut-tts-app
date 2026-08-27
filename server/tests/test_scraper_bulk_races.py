@@ -147,5 +147,60 @@ def _run(run_id: str):
     return ScrapeRun(source_url="https://x.test/", fingerprint="fp", run_id=run_id)
 
 
+class _SkipDuringFetchFetcher:
+    """Fetcher that goi MOT callback NGAY TRUOC KHI tra ve noi dung cho
+    MOT url cu the — dung de mo phong "operator bam skip GIUA LUC
+    drive_once dang fetch chuong nay", CHINH XAC thu tu thoi gian ma
+    review doc lap (Codex) tim thay."""
+
+    def __init__(self, inner, url_kich_hoat, callback) -> None:
+        self._inner = inner
+        self._url_kich_hoat = url_kich_hoat
+        self._callback = callback
+        self._da_kich_hoat = False
+
+    def fetch(self, url: str, **kwargs):
+        if url == self._url_kich_hoat and not self._da_kich_hoat:
+            self._da_kich_hoat = True
+            self._callback()
+        return self._inner.fetch(url, **kwargs)
+
+
+class SkipDuringInFlightFetchTest(unittest.TestCase):
+    """Phase 16/adversarial follow-up (phat hien qua review doc lap,
+    Codex): `drive_once` ghi hoan tat (REVIEW_READY/FAILED) VO DIEU KIEN,
+    khong biet muc nay co the DA bi operator bam `skip()` giua luc dang
+    fetch — "hoi sinh" am tham mot quyet dinh operator vua dua ra."""
+
+    def test_skip_giua_luc_dang_fetch_khong_bi_ghi_de_thanh_review_ready(self):
+        pages = _make_pages(5)
+        url_dich = f"{_BASE}/truyen/x/chuong-3"
+
+        adapter = GenericIndexAdapter(FixtureFetcher(dict(pages)), chapter_href_pattern=r"/chuong-\d+")
+        pipeline = StoryIngestionPipeline(adapter, ScrapeState())
+        store = MockScrapeRunStore()
+        service = ScrapeRunService(pipeline, store, chapters_per_cycle=5)
+        run = service.plan_run(f"{_BASE}/truyen/x")
+
+        item_dich = next(m for m in store.list_items(run.run_id, limit=None)
+                         if m.chapter_url == url_dich)
+
+        def gia_lap_operator_bam_skip():
+            service.skip(run.run_id, item_dich.item_id, reason="qua thoi han duyet")
+
+        adapter._fetcher = _SkipDuringFetchFetcher(
+            adapter._fetcher, url_dich, gia_lap_operator_bam_skip)
+
+        service.drive_once(run.run_id)
+
+        muc_sau = store.get_item(item_dich.item_id)
+        self.assertEqual(muc_sau.status, ScrapeItemStatus.SKIPPED,
+                         "skip() giữa lúc fetch KHÔNG được bị drive_once ghi đè lại")
+
+        dem = store.count_items_by_status(run.run_id)
+        self.assertEqual(dem[ScrapeItemStatus.SKIPPED.value], 1)
+        self.assertEqual(dem[ScrapeItemStatus.REVIEW_READY.value], 4)
+
+
 if __name__ == "__main__":
     unittest.main()

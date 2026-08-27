@@ -209,5 +209,24 @@ class HtmlExtractBoundaryTest(unittest.TestCase):
         self.assertNotIn("tracking", text)
 
 
+class JsonLdRecursionTest(unittest.TestCase):
+    """Phat hien qua review doc lap (Codex): `RecursionError` la
+    `RuntimeError`, KHONG PHAI `ValueError`, nen mot khoi JSON-LD mang so
+    long nhau rat sau (vd tan cong co chu dich) truoc day thoat THANG ra
+    ngoai `extract()` khong bat — cung lop loi voi RecursionError da sua
+    trong content_extraction.py (commit 04410fe)."""
+
+    def test_json_ld_long_nhau_rat_sau_khong_lam_sap_extract(self):
+        khoi_json_long = "[" * 4000 + "1" + "]" * 4000
+        html = (
+            f'<html><head><script type="application/ld+json">{khoi_json_long}'
+            "</script></head><body>Nội dung trang vẫn đọc được bình thường."
+            "</body></html>"
+        )
+        page = extract(html)  # KHONG duoc nem RecursionError.
+        self.assertEqual(page.json_ld, [])
+        self.assertIn("Nội dung trang vẫn đọc được bình thường.", page.visible_text())
+
+
 if __name__ == "__main__":
     unittest.main()

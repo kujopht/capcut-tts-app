@@ -42,6 +42,32 @@ _CONTENT_BOUNDARY_CLASSES = {"mw-parser-output", "chapter-content"}
 #: `mw-parser-output`.
 _CONTENT_BOUNDARY_IDS = {"mw-content-text"}
 
+#: Phase 3 Story Harvester V3 ("profile poisoning red team", fixture E):
+#: lien ket TRONG cac vung nay KHONG duoc dua vao `page.links` — mot
+#: trang muc luc that co the co khung "co the ban quan tam"/"binh
+#: luan"/quang cao VOI lien ket dung CHINH XAC hinh dang URL voi chuong
+#: that (vd `/chuong/{id}` toan cuc, khong rieng theo truyen), khien
+#: `discovery.py::_find_link_clusters` GOP NHAM lien ket cua MOT TRUYEN
+#: KHAC vao cum chuong — tai hien duoc that qua fixture (widget "de
+#: xuat" 3 lien ket lam `chapter_count_estimate` sai tu 5 thanh 8).
+#:
+#: CO Y HEP hon `content_extraction._REJECT_HINT_RE`: KHONG bao gom
+#: "chapter-list"/"chapter-nav"/"pagination"/"sidebar"/"widget"/"popup"/
+#: "modal"/"banner"/"cookie"/"breadcrumb" — nhung tu do hoac la noi
+#: CHUA lien ket chuong THAT su (vd chinh `class="chapter-list"`, xuat
+#: hien trong hau het fixture chuong that cua bo test nay), hoac qua
+#: chung chung/rui ro cao neu dung de LOAI BO lien ket hoan toan (khac
+#: voi chi dung lam "goi y uu tien" nhu trong content_extraction.py).
+#: CHI loai cac danh muc CO DO CHAC CHAN CAO la "chac chan khong phai
+#: chuong" — quang cao/binh luan/de xuat/mang xa hoi/dang nhap.
+_LINK_REJECT_HINT_RE = re.compile(
+    r"(comment|binh.?luan|advert|\bads?\b|sponsor|"
+    r"related|recommend|de.?xuat|goi.?y|"
+    r"social|share|chia.?se|"
+    r"login|signup|sign.?up|subscribe|newsletter)",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class ExtractedPage:
@@ -84,6 +110,12 @@ class _Parser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.page = ExtractedPage()
         self._skip_depth = 0
+        #: Phase 3 ("profile poisoning red team") — dem long nhau O(1)/the,
+        #: CUNG phong cach voi `_skip_depth`: > 0 nghia la dang o TRONG mot
+        #: vung quang cao/binh luan/de xuat/dang nhap, cac lien ket <a> gap
+        #: trong luc nay KHONG duoc them vao `page.links` (xem
+        #: `_LINK_REJECT_HINT_RE`).
+        self._link_skip_depth = 0
         self._in_title = False
         self._in_json_ld = False
         self._json_ld_buffer: List[str] = []
@@ -97,7 +129,7 @@ class _Parser(HTMLParser):
         #: (dem long nhau don gian, khong khop ten) — HTML that thuong khong
         #: bao gio dong the dung, du lech nho vi qua tren HTML hong la danh
         #: doi chap nhan duoc, giong triet ly khoan dung cua module nay.
-        self._tag_stack: List[Tuple[bool, bool]] = []
+        self._tag_stack: List[Tuple[bool, bool, bool]] = []
         self._primary_boundary_depth = 0
         self._secondary_boundary_depth = 0
         #: Da TUNG thay ranh gioi nay hay chua (khac voi "co van ban ben
@@ -117,6 +149,8 @@ class _Parser(HTMLParser):
 
         is_primary = bool(_CONTENT_BOUNDARY_CLASSES.intersection(classes))
         is_secondary = tag_id in _CONTENT_BOUNDARY_IDS
+        is_link_reject = bool(_LINK_REJECT_HINT_RE.search(
+            " ".join(classes) + " " + tag_id))
 
         if is_primary:
             self._primary_boundary_depth += 1
@@ -124,6 +158,8 @@ class _Parser(HTMLParser):
         if is_secondary:
             self._secondary_boundary_depth += 1
             self._secondary_boundary_seen = True
+        if is_link_reject:
+            self._link_skip_depth += 1
 
         # JSON-LD PHAI duoc kiem TRUOC quy tac noise-tag chung: `<script>` la
         # mot noise tag (khong dong gop van ban hien thi), nhung mot khoi
@@ -131,7 +167,7 @@ class _Parser(HTMLParser):
         # duoc dong gop vao van ban hien thi) — hai muc dich khac nhau tren
         # cung mot the.
         if tag not in _VOID_TAGS:
-            self._tag_stack.append((is_primary, is_secondary))
+            self._tag_stack.append((is_primary, is_secondary, is_link_reject))
 
         if tag == "script" and attrs_d.get("type") == "application/ld+json":
             self._in_json_ld = True
@@ -158,20 +194,31 @@ class _Parser(HTMLParser):
             if raw:
                 try:
                     self.page.json_ld.append(json.loads(raw))
-                except (json.JSONDecodeError, ValueError):
-                    pass  # khoi JSON-LD hong — bo qua, khong lam hong ca trang.
+                except (json.JSONDecodeError, ValueError, RecursionError):
+                    # Khoi JSON-LD hong/qua long nhau (vd tan cong co chu
+                    # dich, mang so nguyen long hang nghin cap — phat hien
+                    # qua review doc lap, Codex: `RecursionError` la
+                    # `RuntimeError`, KHONG PHAI `ValueError`, nen truoc
+                    # ban sua nay se thoat ra NGOAI `extract()` khong bat —
+                    # cung lop loi voi RecursionError da sua trong
+                    # `content_extraction.py`, commit 04410fe) — bo qua, KHONG
+                    # lam hong ca trang.
+                    pass
         elif tag in _NOISE_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
         elif tag == "title":
             self._in_title = False
         elif tag == "a" and self._current_href is not None:
             text = "".join(self._current_link_text).strip()
-            self.page.links.append((self._current_href, text))
+            if self._link_skip_depth <= 0:
+                self.page.links.append((self._current_href, text))
             self._current_href = None
             self._current_link_text = []
 
         if tag not in _VOID_TAGS and self._tag_stack:
-            is_primary, is_secondary = self._tag_stack.pop()
+            is_primary, is_secondary, is_link_reject = self._tag_stack.pop()
+            if is_link_reject:
+                self._link_skip_depth = max(0, self._link_skip_depth - 1)
             if is_primary:
                 self._primary_boundary_depth = max(0, self._primary_boundary_depth - 1)
             if is_secondary:

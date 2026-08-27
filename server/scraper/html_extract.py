@@ -26,6 +26,45 @@ _VOID_TAGS = {
     "link", "meta", "param", "source", "track", "wbr",
 }
 
+#: Do sau long nhau toi da cho phep khi parse mot khoi JSON-LD. Cac cau
+#: truc schema.org that su khong bao gio long qua vai chuc cap — gioi han
+#: nay chi chan cac khoi bi tan cong co chu dich (vd `[[[[...]]]]` hang
+#: nghin cap). QUAN TRONG: day la gioi han QUYET DINH TRUOC KHI goi
+#: `json.loads`, khong phai bat `RecursionError` SAU khi thu parse — hanh
+#: vi cua trinh phan giai JSON khi gap du lieu long qua sau la KHAC NHAU
+#: giua cac nen tang/phien ban Python (co the nem `RecursionError`, hoac
+#: co the parse THANH CONG ma khong nem gi ca do C-accelerator co gioi han
+#: stack khac Python thuan) — phat hien qua that bai CI tren Linux runner
+#: (parse thanh cong, khong nem loi) sau khi test da qua tren Windows local
+#: (nem RecursionError). Bo bang mot phep quet chuoi khong de quy (khong
+#: dung stack) truoc, thay vi dua vao ngoai le co the co hoac khong co.
+_JSON_LD_MAX_NESTING_DEPTH = 64
+
+
+def _do_sau_json_vuot_qua(raw: str, gioi_han: int) -> bool:
+    do_sau = 0
+    trong_chuoi = False
+    dang_thoat = False
+    for ky_tu in raw:
+        if trong_chuoi:
+            if dang_thoat:
+                dang_thoat = False
+            elif ky_tu == "\\":
+                dang_thoat = True
+            elif ky_tu == '"':
+                trong_chuoi = False
+            continue
+        if ky_tu == '"':
+            trong_chuoi = True
+        elif ky_tu in "[{":
+            do_sau += 1
+            if do_sau > gioi_han:
+                return True
+        elif ky_tu in "]}":
+            do_sau -= 1
+    return False
+
+
 #: Heuristic ranh gioi noi dung duong tinh (positive content-boundary) —
 #: DANH SACH nhieu site, khong rieng MediaWiki (ten bien da tong quat hoa
 #: sau khi them Royal Road, xem lich su sua doi). Neu HTML co mot the voi
@@ -206,6 +245,8 @@ class _Parser(HTMLParser):
         if tag == "script" and self._in_json_ld:
             self._in_json_ld = False
             raw = "".join(self._json_ld_buffer).strip()
+            if raw and _do_sau_json_vuot_qua(raw, _JSON_LD_MAX_NESTING_DEPTH):
+                raw = ""
             if raw:
                 try:
                     self.page.json_ld.append(json.loads(raw))

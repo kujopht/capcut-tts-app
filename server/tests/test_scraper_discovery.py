@@ -289,3 +289,60 @@ class NumberedPaginationPatternTest(unittest.TestCase):
         assert proposal.pagination_strategy == PaginationStrategy.NUMBERED_PAGES
         assert proposal.next_page_url_pattern is not None
         assert re.search(proposal.next_page_url_pattern, "/truyen/mot-truyen-hay?page=2")
+
+
+class TierEscalationBlockedReasonTest(unittest.TestCase):
+    """Phase 10: trang muc luc cong khai, du tin hieu (JSON-LD/tieu de) —
+    nhung trang CHUONG MAU thuc te bi chan dang nhap/CAPTCHA/paywall PHAI
+    ep confidence ve LOW, khong duoc de lot thanh MEDIUM chi vi cac tin
+    hieu KHAC tren trang muc luc van dat diem (tai hien khoang trong ma
+    tier_escalation.py duoc xay de dong lai — truoc ban sua nay, day chi
+    la "khong xac dinh duoc vung noi dung", giong het truong hop mot site
+    chi don gian dung cau truc la, khong canh bao rieng ve chan truy cap)."""
+
+    def test_chuong_mau_giong_trang_dang_nhap_ep_LOW_khong_phai_MEDIUM(self):
+        trang_dang_nhap = (
+            '<html><head><title>Đăng nhập</title></head><body>'
+            "<p>Vui lòng đăng nhập để đọc tiếp nội dung chương này, cảm ơn "
+            "bạn đã quan tâm theo dõi câu chuyện trong suốt thời gian qua.</p>"
+            "</body></html>")
+        pages = {_INDEX_URL: _index_html(), _CHAPTER_1: trang_dang_nhap}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.confidence == SourceConfidence.LOW
+        assert any("auth_required" in e for e in proposal.evidence)
+
+    def test_chuong_mau_giong_captcha_ep_LOW(self):
+        trang_captcha = (
+            '<html><head><title>Xác minh</title></head><body>'
+            "<p>Please complete the CAPTCHA to continue browsing this "
+            "site and verify you are human before proceeding further.</p>"
+            "</body></html>")
+        pages = {_INDEX_URL: _index_html(), _CHAPTER_1: trang_captcha}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.confidence == SourceConfidence.LOW
+        assert any("captcha" in e for e in proposal.evidence)
+
+    def test_chuong_mau_giong_paywall_ep_LOW(self):
+        trang_paywall = (
+            '<html><head><title>Nội dung Premium</title></head><body>'
+            "<p>Subscribe to read the rest of this premium chapter and "
+            "unlock this chapter along with the entire archive today.</p>"
+            "</body></html>")
+        pages = {_INDEX_URL: _index_html(), _CHAPTER_1: trang_paywall}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.confidence == SourceConfidence.LOW
+        assert any("paywall" in e for e in proposal.evidence)
+
+    def test_chuong_mau_khong_co_vung_noi_dung_nhung_khong_bi_chan_van_MEDIUM(self):
+        """Doi chung: mot trang chuong that su khong ro cau truc (khong
+        phai trang chan) van chi la MEDIUM nhu truoc, khong bi ep LOW oan."""
+        trang_khong_ro = "<html><body><p>Nội dung ngắn không rõ cấu trúc.</p></body></html>"
+        pages = {_INDEX_URL: _index_html(), _CHAPTER_1: trang_khong_ro}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.confidence == SourceConfidence.MEDIUM
+        assert not any("auth_required" in e or "captcha" in e or "paywall" in e
+                      for e in proposal.evidence)

@@ -28,6 +28,7 @@ from urllib.parse import urljoin, urlsplit
 from server.scraper.contract import ScraperTier, canonicalize_url, same_registrable_host
 from server.scraper.html_extract import extract
 from server.scraper.http_fetcher import FetchError
+from server.scraper.tier_escalation import TierFailureReason, classify_page_signal
 
 #: So lien ket TOI THIEU cung "hinh dang" URL (xem `_shape_of`) de duoc coi
 #: la MOT cum chuong that su, khong phai trung hop ngau nhien vai lien ket
@@ -489,6 +490,16 @@ class UnknownSiteDiscoveryEngine:
                 "dùng CDN/subdomain riêng cho nội dung chương.")
 
         container_candidate: Optional[str] = None
+        #: Phase 10 (Story Harvester V3): khi trang chương mẫu KHÔNG có
+        #: vùng nội dung rõ ràng, đây có thể là (a) trang bình thường mà
+        #: bộ quét chưa nhận diện đúng cấu trúc, HOẶC (b) trang chương bị
+        #: chặn đăng nhập/CAPTCHA/paywall — HAI trường hợp này CẦN được
+        #: phân biệt rõ cho operator, không chỉ gộp chung một câu "không
+        #: xác định được" (xem `tier_escalation.py`: chặn đăng nhập/
+        #: CAPTCHA/paywall là RANH GIỚI AN TOÀN CỨNG, phải luôn ép LOW,
+        #: không được để lọt qua thành MEDIUM chỉ vì các tín hiệu khác
+        #: trên trang mục lục — vd tiêu đề, JSON-LD — vẫn đạt điểm).
+        blocked_reason: Optional[TierFailureReason] = None
         if sample_html is not None:
             container_candidate, ratio = _scan_content_container(sample_html)
             if container_candidate:
@@ -497,14 +508,29 @@ class UnknownSiteDiscoveryEngine:
                     f"Trang chương mẫu có vùng nội dung rõ ràng: "
                     f"{container_candidate} (~{ratio:.0%} văn bản trang).")
             else:
-                evidence.append(
-                    "Không xác định được vùng nội dung rõ ràng trên trang "
-                    "chương mẫu (không thẻ nào có đủ "
-                    f"{_MIN_CONTAINER_CHARS} ký tự văn bản với tên gợi ý "
-                    "nội dung/chương) — cần operator kiểm tra thủ công "
-                    "trước khi quét thật.")
+                tin_hieu = classify_page_signal(sample_html)
+                if tin_hieu in (TierFailureReason.AUTH_REQUIRED,
+                               TierFailureReason.CAPTCHA,
+                               TierFailureReason.PAYWALL):
+                    blocked_reason = tin_hieu
+                    evidence.append(
+                        f"Trang chương mẫu có dấu hiệu {tin_hieu.value} — "
+                        "đây có thể KHÔNG PHẢI trang chương công khai thật "
+                        "(nội dung bị chặn sau đăng nhập/CAPTCHA/paywall). "
+                        "KHÔNG BAO GIỜ tự động vượt qua bằng cách nâng "
+                        "tầng xử lý — cần kỹ sư xác minh thủ công trước "
+                        "khi coi đây là nguồn có thể quét tự động.")
+                else:
+                    evidence.append(
+                        "Không xác định được vùng nội dung rõ ràng trên trang "
+                        "chương mẫu (không thẻ nào có đủ "
+                        f"{_MIN_CONTAINER_CHARS} ký tự văn bản với tên gợi ý "
+                        "nội dung/chương) — cần operator kiểm tra thủ công "
+                        "trước khi quét thật.")
 
         if chapter_shape is None:
+            confidence = SourceConfidence.LOW
+        elif blocked_reason is not None:
             confidence = SourceConfidence.LOW
         elif score >= 4 and container_candidate and word_frac >= _MIN_WORD_FRACTION_FOR_HIGH:
             confidence = SourceConfidence.HIGH

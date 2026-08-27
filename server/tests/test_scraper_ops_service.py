@@ -152,7 +152,21 @@ class SelfHealingConfirmTest(unittest.TestCase):
         self.assertEqual(confirmed["profile"].revision, 2)
 
     def test_domain_degraded_bi_tu_choi_khoi_phuc_khi_chuong_mau_giong_dang_nhap(self):
+        """Tich hop Phase 10 (tier_escalation, ep discovery confidence ve
+        LOW khi trang chuong mau giong trang dang nhap) + Phase 5 (self-
+        healing, chi xet CHUONG MAU LUC XAC NHAN LAI, khong phai luc dau):
+        mot domain xac nhan thanh cong LAN DAU (chuong hop le), sau do
+        chuyen DEGRADED, roi "phuc hoi" nhung THAT RA site da doi thanh
+        trang dang nhap — PHAI bi tu choi, du bi chan o lop nao."""
         dang_nhap_base = "https://dang-nhap.example"
+        chuong_hop_le = (
+            '<html><head><title>Chương 1</title></head><body>'
+            '<div class="chapter-content"><p>Đây là nội dung chương thật '
+            "sự đầy đủ và hợp lệ, đủ dài để vượt qua ngưỡng tối thiểu cho "
+            "một vùng nội dung được công nhận trong bộ kiểm tra này, viết "
+            "thêm một câu nữa cho chắc chắn vượt hẳn hai trăm ký tự yêu "
+            "cầu của ngưỡng kiểm tra vùng nội dung hợp lệ.</p>"
+            "</div></body></html>")
         trang_dang_nhap = (
             '<html><body><div class="chapter-content">'
             "<p>Vui lòng đăng nhập để đọc tiếp nội dung chương này, cảm "
@@ -165,7 +179,7 @@ class SelfHealingConfirmTest(unittest.TestCase):
             + "</ul></body></html>")
         pages = {f"{dang_nhap_base}/dn": index}
         for i in range(1, 6):
-            pages[f"{dang_nhap_base}/dn/chuong-{i}"] = trang_dang_nhap
+            pages[f"{dang_nhap_base}/dn/chuong-{i}"] = chuong_hop_le
 
         profile_store = MockSiteProfileStore()
         svc = ScraperOpsService(
@@ -175,9 +189,12 @@ class SelfHealingConfirmTest(unittest.TestCase):
         profile_store.save("dang-nhap.example", status=ProfileStatus.DEGRADED,
                           consecutive_failures=3)
 
-        with self.assertRaises(ValueError) as ctx:
+        # Site "phuc hoi" nhung THAT RA da doi thanh trang dang nhap.
+        for i in range(1, 6):
+            pages[f"{dang_nhap_base}/dn/chuong-{i}"] = trang_dang_nhap
+
+        with self.assertRaises(ValueError):
             svc.confirm_unknown_source(f"{dang_nhap_base}/dn")
-        self.assertIn("DEGRADED", str(ctx.exception))
         # PHAI van con DEGRADED — khong duoc am tham chap nhan.
         self.assertEqual(profile_store.get("dang-nhap.example").status,
                          ProfileStatus.DEGRADED)

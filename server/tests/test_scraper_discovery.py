@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import unittest
 
+import re
+
 from server.scraper.discovery import (
-    PaginationStrategy, SourceConfidence, UnknownSiteDiscoveryEngine,
+    PaginationStrategy, SourceConfidence, UnknownSiteDiscoveryEngine, _scan_content_container,
 )
 from server.scraper.http_fetcher import FixtureFetcher
 
@@ -129,6 +131,34 @@ class ClusterVsNoiseTest(unittest.TestCase):
         # 5 chuong van la cum thang (>=3), khong bi 2 lien ket "share" gay nham.
         assert proposal.chapter_count_estimate == 5
 
+    def test_cum_khong_phai_chuong_nhung_co_so_khong_duoc_dat_HIGH(self):
+        """Tai hien that phat hien tu review doc lap (Codex): mot trang CHI
+        co mot cum lien ket "chia sẻ" (khong phai chuong) nhung van ban
+        lien ket co so (1..5) — truoc khi co `_word_fraction` (Phase 2 sua
+        loi), cum nay du diem de dat HIGH chi vi "co so" duoc tinh nhu tin
+        hieu chuong that. Trang chuong mau (`_CHAPTER_1`) van co vung noi
+        dung hop le (dieu kien HIGH khac van dat duoc) — CHI thieu tu khoa
+        chuong that trong van ban cum, phai bi chan o MEDIUM."""
+        html = f"""
+        <html><head><title>Trang Chia Sẻ</title>
+        <meta property="og:title" content="Trang Chia Sẻ">
+        <script type="application/ld+json">
+          {{"@type": "Book", "name": "Trang Chia Sẻ"}}
+        </script>
+        </head><body>
+        <ul>{"".join(f'<li><a href="/share?x={i}">{i}</a></li>' for i in range(1, 6))}</ul>
+        </body></html>
+        """
+        # href la duong dan TUYET DOI ("/share?x=1") nen urljoin() ra domain
+        # goc, KHONG phai duoi `_INDEX_URL` — dung URL "chuong mau" DUNG mau
+        # cum de discovery that su fetch no, giu nguyen vung noi dung hop le.
+        pages = {_INDEX_URL: html, "https://vidu-truyen.test/share?x=1": _CHAPTER_HTML}
+        proposal = UnknownSiteDiscoveryEngine(FixtureFetcher(pages)).discover(_INDEX_URL)
+
+        assert proposal.chapter_count_estimate == 5
+        assert proposal.confidence != SourceConfidence.HIGH
+        assert any("KHÔNG liên kết nào" in e for e in proposal.evidence)
+
 
 class PaginationDetectionTest(unittest.TestCase):
     def test_lien_ket_next_rel_duoc_nhan_dien(self):
@@ -155,3 +185,107 @@ class CanonicalUrlTest(unittest.TestCase):
         proposal = _engine(pages).discover(_INDEX_URL)
 
         assert proposal.canonical_url == "https://vidu-truyen.test/truyen/mot-truyen-hay"
+
+    def test_canonical_khac_domain_bi_bo_qua_dung_final_url(self):
+        """Tai hien phat hien tu review doc lap (Codex): mot trang khai bao
+        `<link rel="canonical">` tro SANG DOMAIN KHAC — chap nhan gia tri
+        do se khien SiteProfile sau nay luu duoi TEN domain khac ("dau
+        doc"). Phai bo qua, dung `final_url` that."""
+        html = _index_html().replace(
+            "<head>", '<head><link rel="canonical" href="https://evil.test/hijacked">')
+        pages = {_INDEX_URL: html, _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.canonical_url == _INDEX_URL
+        assert "evil.test" not in proposal.canonical_url
+
+
+class SsrfGuardTest(unittest.TestCase):
+    def test_chuong_mau_khac_domain_khong_duoc_tu_dong_tai(self):
+        """Tai hien phat hien tu review doc lap (Codex, dat ten "SSRF"):
+        href chuong LA NOI DUNG TRANG (nguoi khac kiem soat), khong phai
+        url operator tu dan — mot href tro sang domain KHAC (vd noi bo/
+        dich vu khac) khong duoc tu dong tai."""
+        links = "".join(
+            f'<li><a href="https://noi-khac.test/x?i={i}">Chương {i}</a></li>'
+            for i in range(1, 6)
+        )
+        html = _index_html(links)
+        # KHONG dua trang o "noi-khac.test" vao fixture — neu engine LO tai
+        # no, `FixtureFetcher` se nem `FetchError` (khong co trang), that
+        # bai ro rang thay vi am tham "thanh cong" theo huong sai.
+        pages = {_INDEX_URL: html}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.content_container_candidate is None
+        assert proposal.confidence != SourceConfidence.HIGH
+        assert any("domain khác" in e for e in proposal.evidence)
+
+
+class QueryStringPatternTest(unittest.TestCase):
+    def test_chuong_danh_so_qua_query_string_ra_mau_co_neo_dung(self):
+        """Tai hien phat hien tu review doc lap (Codex): chuong khac nhau
+        CHI o query string (`?chapter=N`), PATH giong het nhau — truoc sua
+        loi, mau de xuat la chuoi van ban KHONG neo (`/doc`), khop NHAM bat
+        ky href nao chua no lam chuoi con."""
+        links = "".join(
+            f'<li><a href="/doc?chapter={i}">Chương {i}</a></li>' for i in range(1, 6))
+        html = _index_html(links)
+        pages = {_INDEX_URL: html, "https://vidu-truyen.test/doc?chapter=1": _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.chapter_count_estimate == 5
+        assert proposal.chapter_url_pattern is not None
+        assert re.search(proposal.chapter_url_pattern, "/doc?chapter=1")
+        # Mau KHONG duoc khop NHAM mot href khong lien quan chi vi chua
+        # chuoi con "/doc" — day chinh la loi da sua (mau khong neo).
+        assert not re.search(proposal.chapter_url_pattern, "/doc-khac-hoan-toan")
+        assert not re.search(proposal.chapter_url_pattern, "/tai-lieu/doc")
+
+
+class ContainerAggregationTest(unittest.TestCase):
+    def test_nhieu_widget_nho_rieng_biet_khong_cong_don_thanh_ung_vien_gia(self):
+        """Tai hien phat hien tu review doc lap (Codex): nhieu the
+        `<div class="content-item">` RIENG BIET (vd khung "bai viet lien
+        quan"), moi the CHI 30 ky tu (duoi nguong), nhung TONG CONG (5 the
+        x 30 = 150, hoac du de vuot nguong khi cong don sai) truoc day bi
+        tinh gop thanh MOT ung vien "hop le" — trong khi KHONG the nao
+        THAT SU du dai."""
+        widgets = "".join(
+            f'<div class="content-item">Đoạn văn bản ngắn thứ {i} đây thôi.</div>'
+            for i in range(1, 8)
+        )
+        html = f"<html><body>{widgets}</body></html>"
+
+        candidate, _ratio = _scan_content_container(html)
+        assert candidate is None, (
+            "Nhiều widget nhỏ riêng biệt không được cộng dồn thành một ứng viên giả")
+
+    def test_mot_the_duy_nhat_du_dai_van_duoc_nhan_dien(self):
+        """Doi chung voi test tren: MOT the DUY NHAT du dai (khong phai
+        nhieu the nho cong don) van phai duoc nhan dien binh thuong."""
+        html = (
+            '<html><body><div class="chapter-content">'
+            + "Một đoạn văn bản đủ dài để vượt ngưỡng tối thiểu cho một vùng "
+              "nội dung hợp lệ trong bộ kiểm tra này, viết thêm cho chắc chắn "
+              "vượt hẳn hai trăm ký tự yêu cầu, cộng thêm một câu nữa cho thật "
+              "chắc chắn là đã vượt xa hai trăm ký tự tối thiểu cần có."
+            + "</div></body></html>"
+        )
+        candidate, _ratio = _scan_content_container(html)
+        assert candidate == "div.chapter-content"
+
+
+class NumberedPaginationPatternTest(unittest.TestCase):
+    def test_numbered_pages_co_next_page_url_pattern(self):
+        html = _index_html().replace(
+            "</ul>",
+            "</ul>" + "".join(
+                f'<a href="/truyen/mot-truyen-hay?page={i}">{i}</a>' for i in range(2, 5)),
+        )
+        pages = {_INDEX_URL: html, _CHAPTER_1: _CHAPTER_HTML}
+        proposal = _engine(pages).discover(_INDEX_URL)
+
+        assert proposal.pagination_strategy == PaginationStrategy.NUMBERED_PAGES
+        assert proposal.next_page_url_pattern is not None
+        assert re.search(proposal.next_page_url_pattern, "/truyen/mot-truyen-hay?page=2")

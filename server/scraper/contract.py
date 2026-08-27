@@ -80,6 +80,30 @@ def canonicalize_url(url: str) -> str:
     return urlunsplit((scheme, netloc, path, query, ""))
 
 
+def domain_of(url: str) -> str:
+    """Host cua `url`, bo `www.` va vien thuong — dinh nghia DUY NHAT dung
+    CHUNG (`site_registry.lookup`, `scraper_ops_service._adapter_for_url`,
+    `site_profile.profile_from_proposal`) de tranh mot bien the "quen bo
+    www." o MOT noi lam SiteProfile vua xac nhan xong khong tim lai duoc o
+    noi khac (khoa luu voi "www.example.com" nhung tra cuu voi
+    "example.com", hoac nguoc lai) — phat hien qua review doc lap (Codex)."""
+    host = urlsplit(url).netloc.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def same_registrable_host(url_a: str, url_b: str) -> bool:
+    """`True` neu hai url CUNG host (sau khi bo `www.`/vien thuong) — dung
+    de chan tin tuong mot gia tri LAY TU NOI DUNG TRANG (vd href chuong
+    mau, `<link rel=canonical>`) tro sang MOT DOMAIN KHAC domain dang xet:
+    dung cho ca ngan SSRF khi tu dong tai "trang chuong mau" (Phase 2,
+    `discovery.py`) LAN ngan "dau doc" SiteProfile qua canonical link tro
+    cheo domain (phat hien qua review doc lap, Codex). KHONG xu ly quan he
+    subdomain-cua-domain-goc (vd `cdn.example.com` != `example.com`) — co
+    y BAO THU, mot nguon can subdomain rieng phai duoc them qua
+    `site_registry` (ky su xac minh tay), khong qua discovery tu dong."""
+    return domain_of(url_a) == domain_of(url_b)
+
+
 @dataclass
 class SeriesInfo:
     """Ket qua `discover_series()` — thong tin muc luc, CHUA phai danh sach

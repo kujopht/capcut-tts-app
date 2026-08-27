@@ -24,9 +24,9 @@ COL_PROFILES = "site_profiles"
 PERSISTED_FIELDS = (
     "domain", "status", "revision", "canonical_pattern", "index_pattern",
     "chapter_pattern", "toc_fingerprint", "content_fingerprint",
-    "pagination_strategy", "fetch_tier", "rate_limit_seconds",
-    "last_verified_at", "last_success_at", "consecutive_failures",
-    "success_count", "created_at", "updated_at",
+    "pagination_strategy", "next_page_pattern", "fetch_tier",
+    "rate_limit_seconds", "last_verified_at", "last_success_at",
+    "consecutive_failures", "success_count", "created_at", "updated_at",
 )
 _DATETIME_FIELDS = ("last_verified_at", "last_success_at")
 
@@ -63,6 +63,7 @@ def _profile_from_doc(doc: Dict[str, Any]) -> SiteProfile:
         toc_fingerprint=str(doc.get("toc_fingerprint") or ""),
         content_fingerprint=str(doc.get("content_fingerprint") or ""),
         pagination_strategy=str(doc.get("pagination_strategy") or mac_dinh.pagination_strategy),
+        next_page_pattern=str(doc.get("next_page_pattern") or ""),
         fetch_tier=str(doc.get("fetch_tier") or mac_dinh.fetch_tier),
         rate_limit_seconds=_float_or_default(
             doc.get("rate_limit_seconds"), mac_dinh.rate_limit_seconds),
@@ -202,6 +203,18 @@ class AppwriteSiteProfileStore:
         return _profile_from_doc(doc)
 
     def record_success(self, domain: str) -> SiteProfile:
+        """GIOI HAN DA BIET, CHUA XU LY (phat hien qua review doc lap,
+        Codex): GET-roi-PATCH o day KHONG nguyen tu — hai lan goi
+        `record_success`/`record_failure` dong thoi cho CUNG domain co the
+        cung doc mot `hien_tai` cu, roi lan PATCH SAU de ghi de mat cap
+        nhat cua lan TRUOC (vd mot `record_failure` dong thoi voi thao tac
+        DISABLED thu cong cua operator co the "hoi sinh" trang thai da tat
+        mot cach am tham). Day la mau HIEN CO trong TOAN BO cac kho Appwrite
+        cua du an nay (xem `appwrite_scrape_run_store.py::save_run`/
+        `save_item` — cung mau GET/PATCH khong khoa) — KHONG PHAI rieng
+        file nay them ra, va sua dung dan (them truong version + PATCH co
+        dieu kien) la mot thay doi CO HE THONG tren nhieu kho, ngoai pham
+        vi PR nay."""
         hien_tai = self.get(domain)
         if hien_tai is None:
             raise ValueError(f"Chưa có SiteProfile cho domain: {domain}")

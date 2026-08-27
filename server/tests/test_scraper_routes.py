@@ -74,7 +74,7 @@ _UNKNOWN_PAGES = {
 }
 
 
-def _fixture_fetcher_factory():
+def _fixture_fetcher_factory(**_kwargs):
     return FixtureFetcher({**_PAGES, **_UNKNOWN_PAGES})
 
 

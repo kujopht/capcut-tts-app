@@ -823,6 +823,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("toc_fingerprint", "string", False, 64),
             ("content_fingerprint", "string", False, 128),
             ("pagination_strategy", "string", False, 32),
+            # Regex trang-tiep-theo, CHI co gia tri khi pagination_strategy
+            # la "numbered_pages" — xem discovery.py::_detect_pagination.
+            ("next_page_pattern", "string", False, 512),
             ("fetch_tier", "string", False, 32),
             ("rate_limit_seconds", "double", False, None),
             ("last_verified_at", "datetime", False, None),

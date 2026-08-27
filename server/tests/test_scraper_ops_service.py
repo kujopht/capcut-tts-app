@@ -74,7 +74,7 @@ _UNKNOWN_PAGES = {
 }
 
 
-def _fixture_fetcher_factory():
+def _fixture_fetcher_factory(**_kwargs):
     return FixtureFetcher({**_PAGES, **_UNKNOWN_PAGES})
 
 
@@ -134,6 +134,163 @@ class ConfirmUnknownSourceTest(unittest.TestCase):
                 svc.confirm_unknown_source(f"{_BASE}/truyen/thu-nghiem")
 
 
+class ProfileOutcomeSyncTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): mot chu ky drive co CA
+    thanh cong LAN loi phai goi `record_success`/`record_failure` DUNG MOT
+    LAN (uu tien thanh cong), khong lap N lan theo so chuong — lap rieng
+    hai vong "tat ca thanh cong" roi "tat ca loi" co the tinh SAI
+    `consecutive_failures` so voi thu tu that su xay ra trong chu ky."""
+
+    _BASE2 = "https://dong-bo-profile.example"
+    _CFG = {}
+
+    def test_chu_ky_co_ca_thanh_cong_va_loi_uu_tien_thanh_cong(self):
+        html_chuong_ok = (
+            '<html><body><div class="chapter-content">'
+            'Nội dung chương hợp lệ đủ dài để vượt ngưỡng tối thiểu cho '
+            'vùng nội dung trong bộ kiểm tra tích hợp đồng bộ hồ sơ.'
+            '</div></body></html>')
+        index_html = (
+            '<html><head><title>Đồng Bộ Hồ Sơ</title></head><body><ul>'
+            '<li><a href="/truyen/d/chuong-1">Chương 1</a></li>'
+            '<li><a href="/truyen/d/chuong-2">Chương 2</a></li>'
+            '<li><a href="/truyen/d/chuong-3">Chương 3</a></li>'
+            '</ul></body></html>')
+        pages = {
+            f"{self._BASE2}/truyen/d": index_html,
+            f"{self._BASE2}/truyen/d/chuong-1": html_chuong_ok,
+            f"{self._BASE2}/truyen/d/chuong-2": html_chuong_ok,
+            # chuong-3 CO Y KHONG co trong fixture -> FetchError -> loi.
+        }
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kwargs: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+
+        svc.confirm_unknown_source(f"{self._BASE2}/truyen/d")
+        started = svc.start_or_continue(f"{self._BASE2}/truyen/d")
+        run_id = started["run"].run_id
+        svc.drive(run_id)  # 1 chu ky, xu ly ca 3 muc: 2 thanh cong + 1 loi.
+
+        profile = profile_store.get("dong-bo-profile.example")
+        self.assertEqual(profile.status, ProfileStatus.VERIFIED)
+        self.assertEqual(profile.success_count, 1,
+                         "Phải gọi record_success ĐÚNG MỘT LẦN mỗi chu kỳ, không lặp theo số chương")
+        self.assertEqual(profile.consecutive_failures, 0)
+
+
+class WwwMismatchTest(unittest.TestCase):
+    """Tai hien phat hien tu review doc lap (Codex): profile xac nhan tu
+    mot url co "www." phai TIM LAI DUOC ngay sau do — truoc sua loi,
+    `profile_from_proposal` tu tach domain (khong bo "www.") trong khi
+    `_adapter_for_url` tra cuu qua `domain_of()` (co bo "www."), khien mot
+    profile vua xac nhan xong "hong" ngay lap tuc."""
+
+    _WWW_BASE = "https://www.co-www.example"
+    _CFG = {}
+
+    def _pages(self) -> dict:
+        links = "".join(
+            f'<li><a href="/truyen/w/chuong-{i}">Chương {i}</a></li>' for i in range(1, 4))
+        index = f"<html><head><title>Truyện WWW</title></head><body><ul>{links}</ul></body></html>"
+        pages = {f"{self._WWW_BASE}/truyen/w": index}
+        for i in range(1, 4):
+            pages[f"{self._WWW_BASE}/truyen/w/chuong-{i}"] = (
+                f"<html><body><div class=\"chapter-content\">"
+                f"Nội dung chương {i} đủ dài để vượt ngưỡng tối thiểu cho vùng "
+                f"nội dung hợp lệ trong bộ kiểm tra tích hợp này thật sự."
+                f"</div></body></html>")
+        return pages
+
+    def test_xac_nhan_tu_url_co_www_van_dung_duoc_ngay(self):
+        pages = self._pages()
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kwargs: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+
+        svc.confirm_unknown_source(f"{self._WWW_BASE}/truyen/w")
+        # PHAI tim thay ngay — truoc sua loi, day nem `UnsupportedSiteError`.
+        started = svc.start_or_continue(f"{self._WWW_BASE}/truyen/w")
+        self.assertEqual(started["progress"]["estimated_total"], 3)
+
+
+class LearnedRateLimitAndPaginationTest(unittest.TestCase):
+    def test_min_delay_hoc_duoc_duoc_dua_cho_fetcher_factory(self):
+        """Tai hien phat hien tu review doc lap (Codex): `rate_limit_seconds`
+        da hoc PHAI duoc dua cho fetcher, khong duoc bo qua de dung mac
+        dinh cua `HttpFetcher`."""
+        goi_voi_kwargs = []
+
+        def factory(**kwargs):
+            goi_voi_kwargs.append(kwargs)
+            return FixtureFetcher(dict(_UNKNOWN_PAGES))
+
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(MockScrapeRunStore(), fetcher_factory=factory,
+                                profile_store=profile_store)
+        svc.confirm_unknown_source(f"{_UNKNOWN_BASE}/truyen/x")
+        profile_store.save("chua-biet.example", rate_limit_seconds=9.5)
+        goi_voi_kwargs.clear()
+
+        svc.start_or_continue(f"{_UNKNOWN_BASE}/truyen/x")
+
+        self.assertTrue(any(kw.get("min_delay_seconds") == 9.5 for kw in goi_voi_kwargs),
+                        f"Không thấy min_delay_seconds=9.5 trong các lần gọi: {goi_voi_kwargs}")
+
+    def test_next_page_pattern_hoc_duoc_duoc_dung_de_theo_phan_trang(self):
+        """Tai hien phat hien tu review doc lap (Codex): mot nguon hoc duoc
+        co `pagination_strategy == numbered_pages` PHAI thuc su theo duoc
+        trang tiep theo khi quet that, khong chi dung lai o trang dau."""
+        base = "https://phan-trang.example"
+        # Khung phan trang LIET KE nhieu so trang cung luc (page 2 VA page
+        # 3 tu chinh trang 1) — thuc te pho bien, va can >=2 lien ket CUNG
+        # hinh dang de duoc coi la mot cum (xem `_detect_pagination`, mot
+        # lien ket "trang tiep theo" DUY NHAT khong du de phan biet voi
+        # NEXT_PREV).
+        trang_1 = (
+            '<html><head><title>Truyện Phân Trang</title></head><body>'
+            '<ul><li><a href="/truyen/p/chuong-1">Chương 1</a></li>'
+            '<li><a href="/truyen/p/chuong-2">Chương 2</a></li>'
+            '<li><a href="/truyen/p/chuong-3">Chương 3</a></li></ul>'
+            '<a href="/truyen/p?page=2">2</a><a href="/truyen/p?page=3">3</a>'
+            '</body></html>'
+        )
+        trang_2 = (
+            '<html><head><title>Truyện Phân Trang</title></head><body>'
+            '<ul><li><a href="/truyen/p/chuong-4">Chương 4</a></li>'
+            '<li><a href="/truyen/p/chuong-5">Chương 5</a></li></ul>'
+            '</body></html>'
+        )
+        chuong_html = (
+            '<html><body><div class="chapter-content">'
+            'Nội dung chương đủ dài để vượt ngưỡng tối thiểu cho vùng nội '
+            'dung hợp lệ trong bộ kiểm tra tích hợp phân trang này.'
+            '</div></body></html>')
+        pages = {
+            f"{base}/truyen/p": trang_1,
+            f"{base}/truyen/p?page=2": trang_2,
+        }
+        for i in range(1, 6):
+            pages[f"{base}/truyen/p/chuong-{i}"] = chuong_html
+
+        profile_store = MockSiteProfileStore()
+        svc = ScraperOpsService(
+            MockScrapeRunStore(), fetcher_factory=lambda **_kwargs: FixtureFetcher(dict(pages)),
+            profile_store=profile_store)
+
+        proposal = svc.discover(f"{base}/truyen/p")["proposal"]
+        self.assertEqual(proposal.pagination_strategy.value, "numbered_pages")
+        self.assertIsNotNone(proposal.next_page_url_pattern)
+
+        svc.confirm_unknown_source(f"{base}/truyen/p")
+        started = svc.start_or_continue(f"{base}/truyen/p")
+        # 5 chuong TREN CA HAI trang — truoc sua loi (next_page_pattern
+        # khong duoc dua cho adapter), chi 3 chuong cua trang dau se duoc
+        # thay.
+        self.assertEqual(started["progress"]["estimated_total"], 5)
+
+
 class CheckForUpdatesTest(unittest.TestCase):
     """Phase 9: `check_for_updates` — MOT lan tai trang muc luc, so sanh
     voi state da luu, KHONG tai lai chuong nao da xong."""
@@ -162,7 +319,7 @@ class CheckForUpdatesTest(unittest.TestCase):
         pages = self._pages(1, 2, 3)
         store = MockScrapeRunStore()
         with patch.dict("server.scraper.site_registry._REGISTRY", self._CFG):
-            svc = ScraperOpsService(store, fetcher_factory=lambda: FixtureFetcher(dict(pages)))
+            svc = ScraperOpsService(store, fetcher_factory=lambda **_kwargs: FixtureFetcher(dict(pages)))
             started = svc.start_or_continue(f"{self._UPDATE_BASE}/truyen/z")
             run_id = started["run"].run_id
             svc.drive(run_id)
@@ -178,7 +335,7 @@ class CheckForUpdatesTest(unittest.TestCase):
         pages = self._pages(1, 2, 3)
         store = MockScrapeRunStore()
         with patch.dict("server.scraper.site_registry._REGISTRY", self._CFG):
-            svc = ScraperOpsService(store, fetcher_factory=lambda: FixtureFetcher(dict(pages)))
+            svc = ScraperOpsService(store, fetcher_factory=lambda **_kwargs: FixtureFetcher(dict(pages)))
             started = svc.start_or_continue(f"{self._UPDATE_BASE}/truyen/z")
             run_id = started["run"].run_id
             svc.drive(run_id)
@@ -199,7 +356,7 @@ class CheckForUpdatesTest(unittest.TestCase):
         pages = self._pages(1, 2, 3)
         store = MockScrapeRunStore()
         with patch.dict("server.scraper.site_registry._REGISTRY", self._CFG):
-            svc = ScraperOpsService(store, fetcher_factory=lambda: FixtureFetcher(dict(pages)))
+            svc = ScraperOpsService(store, fetcher_factory=lambda **_kwargs: FixtureFetcher(dict(pages)))
             started = svc.start_or_continue(f"{self._UPDATE_BASE}/truyen/z")
             run_id = started["run"].run_id
             svc.drive(run_id)

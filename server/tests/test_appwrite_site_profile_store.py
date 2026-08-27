@@ -93,6 +93,14 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(saved.status, ProfileStatus.LEARNING)
         self.assertEqual(kho.get("vidu.test").chapter_pattern, r"/chuong-\d+")
 
+    def test_next_page_pattern_giu_nguyen_qua_round_trip(self) -> None:
+        kho = self._store()
+        profile = SiteProfile(domain="vidu.test", chapter_pattern=r"/chuong-\d+",
+                              pagination_strategy="numbered_pages",
+                              next_page_pattern=r"/truyen\?page=\d+")
+        kho.upsert(profile)
+        self.assertEqual(kho.get("vidu.test").next_page_pattern, r"/truyen\?page=\d+")
+
     def test_upsert_lai_PATCH_khong_loi_409(self) -> None:
         kho = self._store()
         profile = SiteProfile(domain="vidu.test", chapter_pattern=r"/chuong-\d+")

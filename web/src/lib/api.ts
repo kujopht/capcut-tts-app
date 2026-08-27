@@ -1829,6 +1829,7 @@ export interface DiscoveryProposal {
   confidence: SourceConfidence;
   evidence: string[];
   sample_chapter_urls: string[];
+  next_page_url_pattern: string | null;
 }
 
 export type SiteProfileStatus = "learning" | "verified" | "degraded" | "disabled";
@@ -1840,6 +1841,7 @@ export interface SiteProfile {
   chapter_pattern: string;
   content_fingerprint: string;
   pagination_strategy: PaginationStrategy;
+  next_page_pattern: string;
   fetch_tier: string;
   consecutive_failures: number;
   success_count: number;

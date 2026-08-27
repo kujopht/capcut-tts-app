@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Dict, Optional
 
-from server.scraper.contract import ScraperTier
+from server.scraper.contract import ScraperTier, domain_of
 from server.scraper.discovery import DiscoveryProposal, PaginationStrategy
 
 #: Rate limit MAC DINH (giay giua hai yeu cau CUNG mot domain) cho mot
@@ -85,6 +85,14 @@ class SiteProfile:
     #: gia tri nay truoc khi chap nhan mot selector da doi.
     content_fingerprint: str = ""
     pagination_strategy: str = PaginationStrategy.NONE.value
+    #: Regex trang-tiep-theo — CHI co gia tri khi `pagination_strategy` la
+    #: `numbered_pages` (xem `discovery._detect_pagination`). Thieu truong
+    #: nay, `_adapter_for_url` chi dua duoc `chapter_pattern` cho
+    #: `GenericIndexAdapter` (khong co `next_page_href_pattern`) — mot
+    #: nguon hoc duoc co phan trang se AM THAM chi quet TRANG DAU cua muc
+    #: luc moi lan, khong bao gio thay chuong o cac trang sau — phat hien
+    #: qua review doc lap (Codex).
+    next_page_pattern: str = ""
     fetch_tier: str = ScraperTier.DIRECT_HTTP.name
     rate_limit_seconds: float = DEFAULT_LEARNED_RATE_LIMIT_SECONDS
     last_verified_at: str = ""
@@ -111,10 +119,18 @@ def profile_from_proposal(proposal: DiscoveryProposal) -> SiteProfile:
     `confirm_unknown_source()` (xem `server/scraper_ops_service.py`), KHONG
     BAO GIO tu dong goi ham nay ngay sau `discover()` (do se bo qua buoc
     xac nhan cua operator, vi pham nguyen tac "MEDIUM can operator review"
-    cua Phase 2)."""
-    domain = proposal.canonical_url.split("/")[2] if "://" in proposal.canonical_url else ""
+    cua Phase 2).
+
+    `domain` PHAI dung `domain_of()` (bo `www.`, vien thuong) — CUNG ham
+    duoc `scraper_ops_service._adapter_for_url` dung de TRA CUU lai profile
+    theo domain cua url operator dan vao. Truoc sua nay, ham nay tu tach
+    domain rieng (KHONG bo `www.`), khien mot profile vua xac nhan xong tu
+    mot url co "www." bi luu duoi khoa "www.example.com" nhung tra cuu lai
+    (qua `_adapter_for_url`) voi khoa da bo "www." — "example.com" — KHONG
+    BAO GIO tim thay chinh no, "hong" ngay sau khi xac nhan — phat hien qua
+    review doc lap (Codex)."""
     return SiteProfile(
-        domain=domain,
+        domain=domain_of(proposal.canonical_url),
         status=ProfileStatus.LEARNING,
         revision=1,
         canonical_pattern=proposal.canonical_url,
@@ -122,6 +138,7 @@ def profile_from_proposal(proposal: DiscoveryProposal) -> SiteProfile:
         chapter_pattern=proposal.chapter_url_pattern or "",
         content_fingerprint=proposal.content_container_candidate or "",
         pagination_strategy=proposal.pagination_strategy.value,
+        next_page_pattern=proposal.next_page_url_pattern or "",
         fetch_tier=proposal.fetch_tier.name,
     )
 

@@ -112,15 +112,22 @@ def buoc_suc_khoe_va_sha(api: str, expected_sha: Optional[str]) -> bool:
       r.get("data_backend") == "appwrite", SCRAPER_BUG,
       f"data_backend={r.get('data_backend')}")
     sha_server = r.get("commit_sha") or r.get("sha") or r.get("git_sha")
+    # Ket qua kiem tra SHA PHAI duoc tra ve, khong chi ghi log. Truoc day ham
+    # nay luon `return True`, nen mot deploy CU van di tiep sang buoc quet nho
+    # — tuc la chung nhan VAN cham that vao san xuat (tao du lieu, goi scraper)
+    # trong dung truong hop ma `main()` da co y DUNG SOM de tranh dieu do.
+    # Verdict cuoi cung van FAIL (main() tong hop tu KET_QUA), nen day khong
+    # phai PASS gia — nhung no lang phi va gay hieu nham.
+    sha_ok = True
     if expected_sha:
         if not sha_server:
-            kt("server co cong bo SHA de doi chieu", False, STALE_DEPLOYMENT,
+            sha_ok = kt("server co cong bo SHA de doi chieu", False, STALE_DEPLOYMENT,
               "endpoint /api/health khong co truong sha — khong the xac minh "
               "deploy moi nhat qua API, kiem tra thu cong tren dashboard")
         else:
-            kt("SHA server khop --expected-sha", sha_server.startswith(expected_sha[:12]),
+            sha_ok = kt("SHA server khop --expected-sha", sha_server.startswith(expected_sha[:12]),
               STALE_DEPLOYMENT, f"server={sha_server}, mong={expected_sha}")
-    return True
+    return sha_ok
 
 
 def buoc_cong_admin_that_su_doi_hoi_token(api: str) -> bool:

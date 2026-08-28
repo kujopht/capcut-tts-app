@@ -146,3 +146,7 @@ scratchpad/
 # TUNG nguoi dung, khong phai cau hinh du an. `.claude/agents/*.md` (dinh
 # nghia subagent) VAN duoc commit — chi rieng tep log nay bi bo qua.
 .claude/router-telemetry.jsonl
+
+# Worktree tam do Claude Code sinh ra (`claude remote-control --spawn worktree`).
+# La ban sao lam viec cuc bo, khong phai ma nguon du an.
+.claude/worktrees/

@@ -856,6 +856,13 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("success_count", "integer", False, None),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
+            # P2 (overnight hardening): dau van tay CAU TRUC (JSON, xem
+            # `scrapling_relocation.save_verified_element`) cua vung noi
+            # dung tu lan xac nhan THANH CONG gan nhat — dung cho lan
+            # DEGRADED sau co gi do THAT de Scrapling dinh vi lai, KHONG
+            # PHAI HTML/noi dung tho (nen 2000 ky tu la du, cung nguong voi
+            # cac truong JSON-hoa khac trong file nay, vd "metadata").
+            ("adaptive_fingerprint_json", "string", False, 2000),
         ],
         "indexes": [
             ("status_idx", "key", ["status"]),

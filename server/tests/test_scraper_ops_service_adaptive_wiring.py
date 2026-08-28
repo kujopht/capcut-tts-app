@@ -170,6 +170,25 @@ class DegradedEscalationOrchestrationTest(unittest.TestCase):
         self.assertEqual(profile_store.get("nodai-low.example").status,
                          ProfileStatus.DEGRADED)
 
+    def test_tier0_MEDIUM_khong_co_adaptive_van_duoc_chap_nhan_nhu_cu(self):
+        """Phat hien qua review doc lap (Codex): nhanh nay (Tier 0 tra ve
+        MEDIUM — khong phai LOW — VA khong co dau van tay thich ung/
+        Scrapling khong san sang de leo thang) truoc do KHONG co test
+        rieng, chi duoc suy ra tu docstring. Xac nhan RO RANG day la hanh
+        vi CO CHU DICH (giu nguyen ngu nghia MEDIUM-duoc-chap-nhan cua
+        nhanh KHONG-DEGRADED tu truoc PR nay), khong phai mot lo hong bo
+        sot: kiem tra cau truc THEM (Phase 5, MEDIUM tu Scrapling) CHI
+        nghiem ngat hon KHI THAT SU chay — khong chay duoc thi khong the
+        nghiem ngat hon Tier 0 duoc."""
+        svc, profile_store, base = self._thiet_lap_degraded("nodai-tier0-medium.example")
+        tier0_medium = self._ket_qua_gia(RelocationConfidence.MEDIUM)
+        with patch(f"{_MOD}.validate_relocated_content", return_value=tier0_medium), \
+             patch(f"{_MOD}.is_scrapling_available", return_value=False), \
+             patch(f"{_MOD}.attempt_adaptive_relocation") as gia_lap:
+            confirmed = svc.confirm_unknown_source(f"{base}/truyen/x")
+        gia_lap.assert_not_called()
+        self.assertEqual(confirmed["profile"].status, ProfileStatus.LEARNING)
+
     def test_khong_co_dau_van_tay_cu_bo_qua_adaptive_hoan_toan(self):
         """Domain DEGRADED nhung CHUA TUNG luu dau van tay (vd tao truoc
         khi tinh nang nay ton tai) — PHAI lui ve hanh vi Tier 0 CU HOAN

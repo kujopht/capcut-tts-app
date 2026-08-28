@@ -145,19 +145,46 @@ def save_verified_element(
     (`tempfile.TemporaryDirectory().__exit__`) nem `PermissionError` —
     phat hien qua chay THAT ham nay (khong phai doc code suong).
 
-    DA THU goi `page._storage.close()` truc tiep truoc khi don dep — dung
-    ky thuat, nhung gay ra mot canh bao (khong phai loi that) o LAN GOI
-    KE TIEP: khi cache size-1 cua Scrapling loai bo instance nay,
-    `__del__` cua no tu goi `close()` LAN NUA tren mot ket noi DA dong,
-    nem `sqlite3.ProgrammingError` (bi Python nuot thanh
-    `PytestUnraisableExceptionWarning`, KHONG lam that bai test nao, nhung
-    gay nhieu). Chon phuong an AN TOAN HON: KHONG tu dong close(), chi dua
-    vao `shutil.rmtree(..., ignore_errors=True)` — neu file con bi khoa
-    (chua duoc Scrapling tu dong dong), thu muc tam don gian KHONG bi xoa
-    ngay (ro ri vai KB, don dep sau boi HDH hoac lan cache-eviction ke
-    tiep cua chinh Scrapling), thay vi crash HOAC canh bao. Ham nay CHI
-    duoc goi tu thao tac operator xac nhan nguon (hiem, khong phai duong
-    nong moi chuong), nen danh doi nay chap nhan duoc."""
+    DA THU (VA LOAI BO) hai cach tiep can khac truoc khi ve ban nay — ghi
+    lai vi day la mot vi du that ve hanh vi phu thuoc nen tang can do
+    THAT, khong doan — cach tiep can (3) duoi day duoc XAC MINH BANG DO
+    TRUC TIEP (khong phai suy luan) la KHONG hoat dong nhu ky vong:
+
+    (1) KHONG goi close() gi ca, chi dua vao `shutil.rmtree(...,
+    ignore_errors=True)`, voi gia dinh "ro ri se duoc don dep boi lan
+    cache-eviction ke tiep cua chinh Scrapling". SAI — kiem chung truc
+    tiep (review doc lap, Codex) cho thay tren Windows thu muc tam bi ro
+    ri VINH VIEN: `shutil.rmtree` that bai (file dang mo) roi KHONG BAO
+    GIO duoc thu lai — thu muc da mat, khong ai quay lai xoa no nua.
+
+    (2) Goi `page._storage.close()` truc tiep — day cache size-1 cua
+    Scrapling van giu tham chieu instance nay cho den lan goi KE TIEP,
+    khi do bi loai khoi cache, `__del__` cua no TU GOI `close()` LAN NUA
+    tren mot ket noi DA dong, nem `sqlite3.ProgrammingError` (Python nuot
+    thanh `PytestUnraisableExceptionWarning`, gay nhieu output test).
+
+    (3) [DA THU, KHONG HIEU QUA — do THAT truoc khi ket luan] Sau khi doc
+    xong: `del page`, goi `SQLiteStorageSystem.cache_clear()` (API cong
+    khai cua `functools.lru_cache`), roi `del storage`, ky vong dem-tham-
+    chieu CPython kich hoat `__del__` dong ket noi that truoc khi
+    `shutil.rmtree` chay. DO TRUC TIEP (`sys.getrefcount`) cho thay VAN
+    con MOT tham chieu khac ngoai du kien SAU CA hai buoc do — nguyen
+    nhan: `StorageSystemMixin._get_base_url` (phuong thuc cha cua
+    `SQLiteStorageSystem`) TU NO cung la `@lru_cache(64, typed=True)`
+    tren PHUONG THUC INSTANCE (`self` la mot phan cua khoa cache) — mot
+    lru_cache THU HAI, DOC LAP, giu instance song them ngoai y muon. Xoa
+    ca hai cache noi bo cua mot thu vien ngoai (khong chi mot) de kiem
+    soat vong doi mot doi tuong la qua sau vao chi tiet trien khai rieng,
+    de vo khi Scrapling doi phien ban — TU BO huong nay.
+
+    KET LUAN CUOI CUNG (trung thuc, khong lac quan): giu (1) — mot ro ri
+    THAT, NHO (mot file SQLite vai chuc KB), rat co the TON TAI VINH VIEN
+    tren dia cho den khi HDH/nguoi dung don dep thu muc temp thu cong,
+    KHONG tu dong duoc don boi tien trinh. CHAP NHAN duoc vi ham nay CHI
+    duoc goi tu thao tac operator xac nhan nguon (hiem — moi lan operator
+    xac nhan/khoi phuc MOT domain, khong phai duong nong moi chuong), quy
+    mo ro ri (KB moi lan goi, khong phai MB) khong dang ke so voi rui ro
+    ket hop qua sau vao API noi bo khong on dinh cua mot thu vien ngoai."""
     Selector = _tai_lop_selector()
     import os
     import tempfile
@@ -289,13 +316,33 @@ def attempt_adaptive_relocation(
                       "được JSON) — bỏ qua, không thử định vị lại."],
             relocation_attempted=False,
         )
+    # Phat hien qua review doc lap (Codex): parse JSON thanh cong nhung
+    # SAI HINH DANG (vd mot list/so/chuoi thay vi dict, hoac dict thieu
+    # khoa "tag"/"text"/"attributes"/"path" ma `__calculate_similarity_score`
+    # cua Scrapling truy cap KHONG DIEU KIEN) truoc day nem KeyError/TypeError
+    # THOAT THANG ra ngoai `confirm_unknown_source`, vi pham dung yeu cau
+    # "AN TOAN goi vo dieu kien" o docstring ham nay — kiem tra hinh dang
+    # RO RANG o day, VA boc ca loi goi ben duoi trong except Exception
+    # (khong chi ScraplingUnavailableError) lam luoi an toan thu hai.
+    if (not isinstance(fingerprint, dict)
+            or not {"tag", "text", "attributes", "path"} <= fingerprint.keys()):
+        return AdaptiveRelocationOutcome(
+            confidence=RelocationConfidence.LOW,
+            evidence=["Dấu vân tay thích ứng đã lưu sai hình dạng mong đợi "
+                      "(không phải dict cấu trúc hợp lệ) — bỏ qua, không "
+                      "thử định vị lại."],
+            relocation_attempted=False,
+        )
 
     try:
         candidates = relocate_verified_element(
             new_html, fingerprint, url=url, percentage=percentage)
-    except ScraplingUnavailableError as exc:
+    except Exception as exc:
         return AdaptiveRelocationOutcome(
-            confidence=RelocationConfidence.LOW, evidence=[str(exc)],
+            confidence=RelocationConfidence.LOW,
+            evidence=[f"Định vị lại thích ứng thất bại với lỗi không mong "
+                      f"đợi ({exc}) — từ chối an toàn, không thử suy đoán "
+                      f"thêm."],
             relocation_attempted=False,
         )
 

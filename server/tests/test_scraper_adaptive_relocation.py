@@ -323,6 +323,23 @@ class AttemptAdaptiveRelocationOrchestrationTest(unittest.TestCase):
         self.assertTrue(outcome.candidate_selector)
         self.assertIn("Kien walked on", outcome.clean_text)
 
+    def test_fingerprint_json_sai_hinh_dang_khong_crash(self):
+        """Phat hien qua review doc lap (Codex): `fingerprint_json` la
+        JSON HOP LE (parse duoc) nhung SAI HINH DANG (khong phai dict cau
+        truc, hoac thieu khoa bat buoc) truoc day nem KeyError/TypeError
+        THOAT THANG khoi ham nay — vi pham dung hop dong "AN TOAN goi vo
+        dieu kien" cua chinh docstring `attempt_adaptive_relocation`. Kiem
+        tra CA BON hinh dang sai da xac minh gay loi that su truoc ban
+        sua: list, so, dict-rong, dict-thieu-khoa."""
+        for json_sai in ('[1, 2, 3]', '42', '{}',
+                         '{"tag": "div"}',  # thieu text/attributes/path
+                         '{"tag": null, "attributes": {}, "text": null, "path": null}'):
+            with self.subTest(json_sai=json_sai):
+                outcome = attempt_adaptive_relocation(
+                    json_sai, _KICH_BAN["A_class_da_doi_ten"], url=_URL)
+                self.assertFalse(outcome.relocation_attempted)
+                self.assertEqual(outcome.confidence, RelocationConfidence.LOW)
+
 
 if __name__ == "__main__":
     unittest.main()

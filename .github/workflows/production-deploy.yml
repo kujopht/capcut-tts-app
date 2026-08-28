@@ -1,0 +1,387 @@
+# Manual production deploy — workflow_dispatch ONLY, no other trigger.
+#
+# Design rules (see deploy/RUNBOOK-PRODUCTION-DEPLOY.md for the full operator
+# doc): explicit typed confirmation, exact-commit validation against `main`'s
+# real tip, full existing test suite as a hard gate (reused from ci.yml via
+# workflow_call — not duplicated), one production concurrency group, GitHub
+# `environment: production` for optional required-reviewer protection, deploy
+# via Render deploy hook + Cloudflare API token (never browser clicking),
+# post-deploy health checks with cold-start-tolerant retries AND a real
+# commit-SHA verification, then Phase 15 (optional, writes+cleans real data)
+# and Phase 18 (default on) using the EXISTING verified scripts — no
+# duplicate certification logic written here.
+#
+# IMPORTANT, READ BEFORE DISPATCHING: Render's deploy hook has no "deploy
+# this exact commit" parameter — it always builds whatever is CURRENTLY on
+# the `main` branch (see deploy/render.prod.yaml, `branch: main`,
+# `autoDeploy: false`). The `ref` input below is therefore validated to be
+# EXACTLY `main`'s current tip, not an independent deploy target — if you
+# want to deploy an older commit, revert/reset `main` to it first (see the
+# rollback doc), then dispatch this workflow against the new tip.
+#
+# ALWAYS DISPATCH THIS WORKFLOW FROM `main` (GitHub's default branch
+# selector when you open Actions → Production Deploy → Run workflow).
+# Dispatching from a different branch/tag runs THAT branch's copy of this
+# very file — the `ref` input only controls what gets validated/deployed,
+# not which version of this workflow's own logic executes. `validate`'s
+# first step enforces this.
+#
+# SECURITY NOTE (found via independent review, fixed here): every
+# `workflow_dispatch` input is passed through `env:` and read as a shell
+# variable (`$FOO`), never interpolated directly as `${{ inputs.foo }}`
+# inside a `run:` script body. Direct interpolation would splice
+# attacker-influenceable text straight into the shell command before
+# execution — a crafted input value could inject arbitrary shell commands,
+# including exfiltrating whatever secret happens to be in scope in that
+# step. This applies even though only users who can already dispatch this
+# workflow could exploit it — it's cheap to do correctly and removes an
+# entire bug class, not just a hardening step for untrusted input.
+
+name: Production Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type exactly DEPLOY_PRODUCTION to proceed'
+        required: true
+        type: string
+      ref:
+        description: 'Branch or exact commit SHA to deploy — must resolve to the CURRENT tip of main (see workflow file header)'
+        required: true
+        default: 'main'
+        type: string
+      run_certification:
+        description: 'Run Phase 18 production certification after deploy (read-mostly; safe default)'
+        required: true
+        default: true
+        type: boolean
+      run_canary:
+        description: 'Run Phase 15 direct-to-web canary after deploy (writes + self-cleans real prod data — opt in deliberately)'
+        required: true
+        default: false
+        type: boolean
+      source_url:
+        description: 'Public chapter-index URL for Phase 15/18 (a small, real, publicly accessible source — never one of the 13 real Fanfic series)'
+        required: true
+        type: string
+      chapter_limit:
+        description: 'Max chapters for Phase 15/18 (scripts refuse >10 for canary, >5 for certification regardless of this value)'
+        required: true
+        default: '2'
+        type: string
+
+# Ca dot dispatch deploy dung CHUNG mot nhom — dot MOI xep HANG thay vi huy
+# dot dang chay (khac ci.yml: khong bao gio muon mot deploy dang giua chung
+# bi cat ngang boi mot lan dispatch khac).
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Cong test BAT BUOC — TAI SU DUNG chinh xac cac job cua ci.yml qua
+  # workflow_call thay vi chep lai logic (yeu cau nhiem vu: "reuse existing
+  # verified scripts instead of inventing duplicate certification logic" —
+  # ap dung dung tinh than do cho ca cong test).
+  test_gate:
+    name: Required test gate (reused from ci.yml)
+    uses: ./.github/workflows/ci.yml
+
+  validate:
+    name: Validate confirmation + exact commit
+    needs: test_gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      deployed_sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Refuse to run from a non-main workflow ref
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::This workflow was dispatched from '${{ github.ref }}', not main. Always use the default branch selector in the Actions UI — a different ref would run a different (possibly stale) copy of this workflow file, independent of the 'ref' input below."
+            exit 1
+          fi
+
+      - name: Confirm explicit DEPLOY_PRODUCTION input
+        env:
+          CONFIRM_INPUT: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM_INPUT" != "DEPLOY_PRODUCTION" ]; then
+            echo "::error::confirm input must be exactly DEPLOY_PRODUCTION — refusing to proceed."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Resolve ref and verify it is EXACTLY main's current tip
+        id: resolve
+        env:
+          REF_INPUT: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          RESOLVED_SHA="$(git rev-parse HEAD)"
+          MAIN_SHA="$(git rev-parse origin/main)"
+          echo "Resolved input ref '$REF_INPUT' -> $RESOLVED_SHA"
+          echo "Current origin/main tip         -> $MAIN_SHA"
+          if [ "$RESOLVED_SHA" != "$MAIN_SHA" ]; then
+            echo "::error::Render's deploy hook always deploys the current tip of main, which this ref does NOT match. Dispatch with ref=main, or update main to the commit you intend to deploy first."
+            exit 1
+          fi
+          echo "sha=$RESOLVED_SHA" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy (Render + Cloudflare)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    outputs:
+      deployed_sha: ${{ needs.validate.outputs.deployed_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.deployed_sha }}
+
+      # Render: khong co API deploy-mot-commit-cu-the o day co chu dich
+      # (yeu cau nhiem vu chi de nghi RENDER_DEPLOY_HOOK_URL, pham vi toi
+      # thieu) — hook chi kich hoat build lai branch `main` da cau hinh
+      # san trong deploy/render.prod.yaml. Xac nhan HTTP that thanh cong
+      # (khong chi "gui duoc goi"). Race con lai (mot push MOI len main
+      # giua luc validate va luc Render thuc su fetch code) duoc bat o
+      # buoc "Verify health fields" ben duoi qua `commit_sha` — day la
+      # gioi han THAT cua deploy hook (khong co tham so commit), khong
+      # phai loi cua workflow nay, xem doc dau file.
+      - name: Trigger Render deploy (backend)
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
+            echo "::error::RENDER_DEPLOY_HOOK_URL secret is not set."
+            exit 1
+          fi
+          STATUS=$(curl -sS -o /tmp/render-hook-response.json -w '%{http_code}' \
+            -X POST "$RENDER_DEPLOY_HOOK_URL" --max-time 30)
+          echo "Render deploy hook HTTP status: $STATUS"
+          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
+            echo "::error::Render deploy hook did not return success."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Cloudflare deploy (frontend)
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          NEXT_PUBLIC_API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not set."
+            exit 1
+          fi
+          if [ -z "${NEXT_PUBLIC_API_BASE:-}" ]; then
+            echo "::error::PRODUCTION_API_BASE_URL variable is not set — required to bake the correct API URL into the build."
+            exit 1
+          fi
+          npm ci
+          npm run cf:deploy:production
+
+  post_deploy_checks:
+    name: Post-deploy health checks
+    needs: [validate, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for health (tolerates Render free-tier cold start, ~50s)
+        env:
+          API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_BASE:-}" ]; then
+            echo "::error::PRODUCTION_API_BASE_URL variable is not set."
+            exit 1
+          fi
+          for i in $(seq 1 8); do
+            if BODY=$(curl -sS --max-time 20 -f "$API_BASE/api/health"); then
+              echo "$BODY"
+              echo "$BODY" > /tmp/health.json
+              break
+            fi
+            echo "Attempt $i failed (cold start?), retrying in 15s..."
+            sleep 15
+            if [ "$i" -eq 8 ]; then
+              echo "::error::/api/health never responded successfully."
+              exit 1
+            fi
+          done
+
+      # `commit_sha` (server/main.py, added alongside this workflow) exposes
+      # `RENDER_GIT_COMMIT`, which Render sets automatically for every
+      # build — this is the ONLY thing that can catch the deploy-hook race
+      # described above (a newer push landing on main between validate and
+      # Render's actual fetch). A missing/mismatched SHA fails the gate
+      # here directly, not just optionally inside Phase 18.
+      - name: Verify health fields (including deployed commit)
+        env:
+          EXPECTED_SHA: ${{ needs.validate.outputs.deployed_sha }}
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import json, os, sys
+          d = json.load(open('/tmp/health.json'))
+          expected_sha = os.environ['EXPECTED_SHA']
+          server_sha = d.get('commit_sha')
+          checks = {
+              'environment': (d.get('environment') == 'production'),
+              'inline_worker false': (d.get('inline_worker') is False),
+              'data_backend appwrite': (d.get('data_backend') == 'appwrite'),
+              'storage_backend r2': (d.get('storage_backend') == 'r2'),
+              'commit_sha present': bool(server_sha),
+              'commit_sha matches deployed ref': bool(server_sha) and expected_sha.startswith(server_sha[:12]),
+          }
+          bad = [k for k, ok in checks.items() if not ok]
+          print(json.dumps({'checks': checks, 'server_commit_sha': server_sha,
+                            'expected_sha': expected_sha, 'raw_keys': sorted(d.keys())}, indent=2))
+          if bad:
+              print(f'::error::health check field(s) failed: {bad} — if commit_sha does not match, a newer push landed on main between validation and Render fetching it (see workflow file header); redeploy is required.')
+              sys.exit(1)
+          "
+
+      - name: Verify readiness
+        env:
+          API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          STATUS=$(curl -sS -o /tmp/ready.json -w '%{http_code}' --max-time 20 "$API_BASE/api/ready")
+          cat /tmp/ready.json
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::/api/ready returned $STATUS — a dependency (Appwrite/R2) is not reachable."
+            exit 1
+          fi
+
+  phase18_certification:
+    name: Phase 18 — production certification
+    needs: [validate, post_deploy_checks]
+    if: ${{ inputs.run_certification }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.deployed_sha }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r server/requirements.txt
+      - name: Run existing production certification script
+        env:
+          FANFIC_ADMIN_CANARY_TOKEN: ${{ secrets.FANFIC_ADMIN_CANARY_TOKEN }}
+          API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
+          SOURCE_URL: ${{ inputs.source_url }}
+          CHAPTER_LIMIT: ${{ inputs.chapter_limit }}
+          EXPECTED_SHA: ${{ needs.validate.outputs.deployed_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FANFIC_ADMIN_CANARY_TOKEN:-}" ]; then
+            echo "::error::FANFIC_ADMIN_CANARY_TOKEN secret is not set."
+            exit 1
+          fi
+          python scripts/story_harvester_production_certification.py \
+            --api "$API_BASE" \
+            --admin-token "$FANFIC_ADMIN_CANARY_TOKEN" \
+            --source-url "$SOURCE_URL" \
+            --chapter-limit "$CHAPTER_LIMIT" \
+            --expected-sha "$EXPECTED_SHA" \
+            --json cert-result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase18-certification-result
+          path: cert-result.json
+          retention-days: 14
+
+  phase15_canary:
+    name: Phase 15 — direct-to-web canary (opt-in)
+    needs: [validate, post_deploy_checks]
+    if: ${{ inputs.run_canary }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.deployed_sha }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r server/requirements.txt
+      - name: Run existing direct-to-web canary script
+        env:
+          FANFIC_ADMIN_CANARY_TOKEN: ${{ secrets.FANFIC_ADMIN_CANARY_TOKEN }}
+          API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
+          SOURCE_URL: ${{ inputs.source_url }}
+          CHAPTER_LIMIT: ${{ inputs.chapter_limit }}
+          QA_HARVESTER_XAC_NHAN: production
+        run: |
+          set -euo pipefail
+          if [ -z "${FANFIC_ADMIN_CANARY_TOKEN:-}" ]; then
+            echo "::error::FANFIC_ADMIN_CANARY_TOKEN secret is not set."
+            exit 1
+          fi
+          python scripts/story_harvester_direct_to_web_canary.py \
+            --api "$API_BASE" \
+            --environment production \
+            --admin-token "$FANFIC_ADMIN_CANARY_TOKEN" \
+            --source-url "$SOURCE_URL" \
+            --chapter-limit "$CHAPTER_LIMIT" \
+            --yes \
+            --json canary-result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase15-canary-result
+          path: canary-result.json
+          retention-days: 14
+
+  summary:
+    name: Redacted final summary
+    needs: [validate, deploy, post_deploy_checks, phase18_certification, phase15_canary]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Print redacted summary
+        env:
+          DEPLOYED_SHA: ${{ needs.validate.outputs.deployed_sha }}
+        run: |
+          SHA_DISPLAY="${DEPLOYED_SHA:-N/A (validation failed)}"
+          {
+            echo "## Production Deploy Summary"
+            echo ""
+            echo "- Deployed SHA: \`$SHA_DISPLAY\`"
+            echo "- Validate: ${{ needs.validate.result }}"
+            echo "- Deploy (Render + Cloudflare): ${{ needs.deploy.result }}"
+            echo "- Post-deploy health checks: ${{ needs.post_deploy_checks.result }}"
+            echo "- Phase 18 certification: ${{ needs.phase18_certification.result }}"
+            echo "- Phase 15 canary: ${{ needs.phase15_canary.result }}"
+            echo ""
+            echo "No secret values are printed anywhere in this workflow — only pass/fail per step."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ needs.deploy.result }}" != "success" ] || [ "${{ needs.post_deploy_checks.result }}" != "success" ]; then
+            echo "::error::Deploy did not fully succeed — see job results above. Do NOT assume production is healthy."
+            exit 1
+          fi

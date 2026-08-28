@@ -743,11 +743,23 @@ def health() -> Dict[str, Any]:
     noi thuoc ve `/api/ready`.
 
     KHONG bao gio tra ve gia tri bi mat.
+
+    `commit_sha`: doc tu bien moi truong `RENDER_GIT_COMMIT` — Render TU
+    DONG dat bien nay cho MOI build, khong can cau hinh gi them (xac nhan
+    qua tai lieu Render, khong doan). `None` neu khong chay tren Render
+    (vd dev cuc bo) — day la gia tri AN TOAN MAC DINH, KHONG PHAI loi.
+    Truong nay la thu duy nhat cho phep `scripts/story_harvester_production_certification.py`
+    (`--expected-sha`) VA cong `production-deploy.yml` phat hien that mot
+    lan deploy STALE (Render build xong commit KHAC voi commit da duoc
+    kiem thu/xac nhan) — thieu truong nay, kiem tra do luon that bai an
+    toan (STALE_DEPLOYMENT) thay vi am tham bo qua, xem chinh ham
+    `buoc_suc_khoe_va_sha` trong script tren.
     """
     return {
         "status": "ok",
         "service": "fanfic-audio-api",
         "version": app.version,
+        "commit_sha": os.environ.get("RENDER_GIT_COMMIT"),
         **settings.describe(),
         # Duong khoa job da duoc CHUNG MINH chay chua. BA trang thai, va su
         # khac nhau giua chung la quan trong:

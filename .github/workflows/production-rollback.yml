@@ -1,0 +1,115 @@
+# Manual production rollback — workflow_dispatch ONLY.
+#
+# SCOPE, READ FIRST: this workflow can only do what CLOUDFLARE_API_TOKEN
+# permits — a real, safe, single-command rollback of the Cloudflare Worker
+# (frontend) to its immediately-previous deployment via `wrangler rollback`.
+#
+# It CANNOT roll back the Render backend the same way: this setup
+# deliberately uses only RENDER_DEPLOY_HOOK_URL (a deploy-hook URL, not a
+# full Render API key), and Render's deploy hook has no "roll back" verb —
+# it only re-triggers a build of whatever is currently on `main`. Backend
+# rollback is therefore a documented two-step manual/CI procedure (see
+# deploy/RUNBOOK-PRODUCTION-DEPLOY.md "Rollback"): git revert the bad
+# commit on `main`, then re-run the `Production Deploy` workflow against
+# the new tip — reusing the exact same test gate and confirmation, rather
+# than a separate, less-tested rollback path for the riskier side.
+
+name: Production Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type exactly ROLLBACK_PRODUCTION to proceed'
+        required: true
+        type: string
+      rollback_frontend:
+        description: 'Roll back the Cloudflare Worker (frontend) to its previous deployment'
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate confirmation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Refuse to run from a non-main workflow ref
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::This workflow was dispatched from '${{ github.ref }}', not main. Always use the default branch selector in the Actions UI."
+            exit 1
+          fi
+
+      # `${{ inputs.confirm }}` PHAI di qua `env:` roi doc bang bien shell —
+      # KHONG BAO GIO noi truc tiep vao than script `run:` (phat hien qua
+      # review doc lap, Codex: noi truc tiep cho phep mot gia tri input
+      # duoc soan de thoat khoi ngu canh chuoi va chay lenh shell tuy y).
+      - name: Confirm explicit ROLLBACK_PRODUCTION input
+        env:
+          CONFIRM_INPUT: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM_INPUT" != "ROLLBACK_PRODUCTION" ]; then
+            echo "::error::confirm input must be exactly ROLLBACK_PRODUCTION — refusing to proceed."
+            exit 1
+          fi
+
+  rollback_frontend:
+    name: Roll back Cloudflare Worker
+    needs: validate
+    if: ${{ inputs.rollback_frontend }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: npm ci
+        working-directory: web
+        run: npm ci
+      - name: wrangler rollback
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not set."
+            exit 1
+          fi
+          npx wrangler rollback --message "Automated rollback via production-rollback.yml"
+
+  backend_reminder:
+    name: Backend rollback reminder (manual — see job log)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Print manual backend rollback procedure
+        run: |
+          cat <<'EOF'
+          Render backend was NOT rolled back automatically (see workflow file
+          header for why — deploy-hook-only setup has no rollback verb).
+
+          To roll back the backend:
+            1. git revert <bad-commit-sha> on main (or reset+force-push if the
+               team agrees that's safer for this specific case — prefer revert).
+            2. Push the revert to main through the normal PR process.
+            3. Dispatch the "Production Deploy" workflow with
+               confirm=DEPLOY_PRODUCTION, ref=main.
+          This reuses the exact same test gate and health checks as any other
+          deploy, rather than a separate, less-tested rollback path.
+          EOF

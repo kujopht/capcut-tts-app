@@ -36,9 +36,14 @@ lives in exactly one place and is deliberately not duplicated here — copying
 it would create two sources of truth that drift apart, which is precisely the
 failure this section exists to prevent.
 
-> **As of 2026-08-28 the active profile is `CLAUDE_CONSERVATION`.** Under it,
-> native Claude is a *thin integrator*, not the default engineer. See
-> "Enforcement" below and `~/.claude/CLAUDE.md` for the authoritative table.
+> **Read the active profile before routing** — do not assume it, and do not
+> expect to find its value written here. It is stated once, in the
+> `ACTIVE PROFILE` block of `~/.claude/CLAUDE.md`, together with the pool
+> table that profile implies:
+>
+> ```bash
+> grep -A3 'ACTIVE PROFILE' ~/.claude/CLAUDE.md
+> ```
 
 ## Enforcement — routing is executable, not advisory
 

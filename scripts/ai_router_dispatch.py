@@ -80,7 +80,9 @@ POOLS = {
     "GEMINI_PRO": ("antigravity", r"^gemini-(?P<maj>\d+)\.(?P<min>\d+)-pro-low$"),
     "CLAUDE_SONNET": ("antigravity", r"^claude-sonnet-(?P<maj>\d+)-(?P<min>\d+)$"),
     "CLAUDE_OPUS": ("antigravity", r"^claude-opus-(?P<maj>\d+)-(?P<min>\d+)-thinking$"),
-    "GPT_OSS": ("antigravity", r"^gpt-oss-(?P<maj>\d+)(?P<min>)b-medium$"),
+    # The minor segment is optional: today's ids are gpt-oss-120b-medium, but a
+    # gpt-oss-5-1b-medium shape is plausible and must not silently stop matching.
+    "GPT_OSS": ("antigravity", r"^gpt-oss-(?P<maj>\d+)(?:-(?P<min>\d+))?b-medium$"),
     "CODEX": ("codex", None),
     NATIVE: (None, None),
 }
@@ -95,7 +97,9 @@ CODEX_FORBIDDEN_CLASSES = {"SECURITY_REVIEW"}
 # careless packet does not reach a third-party CLI.
 SECRET_PATTERNS = (
     (r"gh[pousr]_[A-Za-z0-9]{20,}", "GitHub token"),
-    (r"sk-[A-Za-z0-9]{20,}", "OpenAI-style key"),
+    # Hyphens/underscores must be allowed inside the body: `sk-proj-...` is the
+    # common modern shape and a `[A-Za-z0-9]{20,}` body silently misses it.
+    (r"sk-[A-Za-z0-9_-]{20,}", "OpenAI-style key"),
     (r"AKIA[0-9A-Z]{16}", "AWS access key id"),
     (r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "private key block"),
     (r"(?i)\b(api[_-]?key|secret|passwd|password|token)\s*[:=]\s*['\"][^'\"]{12,}", "inline credential assignment"),
@@ -117,8 +121,12 @@ def find_codex() -> Optional[str]:
     # The desktop install lives under a version-hash directory that changes on
     # update. Resolve by glob; never hardcode the hash.
     pattern = os.path.join(os.environ.get("LOCALAPPDATA", ""), "OpenAI", "Codex", "bin", "*", "codex.exe")
-    matches = sorted(glob.glob(pattern))
-    return matches[-1] if matches else None
+    matches = glob.glob(pattern)
+    if not matches:
+        return None
+    # Sort by mtime, not lexicographically: those directory names are opaque
+    # version hashes, so alphabetical order says nothing about which is current.
+    return max(matches, key=os.path.getmtime)
 
 
 def resolve_model(pool: str, timeout: int = 60) -> Tuple[Optional[str], str]:
@@ -160,6 +168,40 @@ def scan_for_secrets(text: str) -> Optional[str]:
     for pattern, label in SECRET_PATTERNS:
         if re.search(pattern, text):
             return label
+    return None
+
+
+# Bounds for --add-dir scanning: enough to catch a stray .env, cheap enough to
+# run before every dispatch.
+_SCAN_MAX_FILES = 400
+_SCAN_MAX_BYTES = 256 * 1024
+_SCAN_SKIP_DIRS = {".git", "node_modules", ".venv", "__pycache__", "dist", "build", ".next"}
+
+
+def scan_dir_for_secrets(root: str) -> Optional[str]:
+    """Scan an opted-in directory before handing it to an external worker.
+
+    A clean prompt paired with a dirty directory would otherwise walk straight
+    past the prompt-only guard -- the worker runs with cwd set to this tree and
+    can read every file in it.
+    """
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SCAN_SKIP_DIRS]
+        for name in filenames:
+            if seen >= _SCAN_MAX_FILES:
+                return None
+            seen += 1
+            path = os.path.join(dirpath, name)
+            try:
+                if os.path.getsize(path) > _SCAN_MAX_BYTES:
+                    continue
+                with open(path, encoding="utf-8", errors="ignore") as fh:
+                    hit = scan_for_secrets(fh.read())
+            except OSError:
+                continue
+            if hit:
+                return f"{hit} in {os.path.relpath(path, root)}"
     return None
 
 
@@ -207,7 +249,8 @@ def run_worker(pool: str, model: Optional[str], prompt: str, timeout: int,
     provider = POOLS[pool][0]
     # Default cwd is a scratch dir so no repository content leaves the machine
     # unless the caller explicitly opts in with --add-dir.
-    workdir = add_dir or tempfile.mkdtemp(prefix="ai-router-")
+    scratch = None if add_dir else tempfile.mkdtemp(prefix="ai-router-")
+    workdir = add_dir or scratch
 
     if provider == "antigravity":
         binary = find_antigravity()
@@ -216,9 +259,10 @@ def run_worker(pool: str, model: Optional[str], prompt: str, timeout: int,
         argv = [binary]
         if model:
             argv += ["--model", model]
-        # --print consumes the next argument as the prompt, so it goes last.
-        argv += ["--output-format", "text", "--print-timeout", f"{timeout}s", "--print", prompt]
-        stdin_data = None
+        # The prompt goes on stdin, not argv: a review packet easily exceeds the
+        # ~32 KB Windows command-line limit, and argv would truncate or fail.
+        argv += ["--output-format", "text", "--print-timeout", f"{timeout}s"]
+        stdin_data = prompt
     elif provider == "codex":
         binary = find_codex()
         if not binary:
@@ -254,6 +298,10 @@ def run_worker(pool: str, model: Optional[str], prompt: str, timeout: int,
     except Exception as exc:
         return {"status": "error", "seconds": round(time.time() - started, 2),
                 "error": f"{type(exc).__name__}: {exc}"}
+    finally:
+        # Only remove what we created; never touch a caller's --add-dir.
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 def main(argv=None) -> int:
@@ -278,13 +326,17 @@ def main(argv=None) -> int:
             raw = subprocess.run([sys.executable, qc], capture_output=True, text=True,
                                  timeout=120, encoding="utf-8", errors="replace").stdout
             safe = json.loads(raw).get("antigravity", {}).get("paid_overage_risk_zero")
-            decision["preflight_paid_overage_risk_zero"] = safe
-            if safe is False:
-                decision["aborted"] = "paid overage risk is NOT zero — refusing to dispatch"
-                print(json.dumps({"decision": decision}, indent=2, ensure_ascii=False))
-                return 2
         except Exception as exc:
-            decision["preflight_paid_overage_risk_zero"] = f"unknown ({type(exc).__name__})"
+            safe = f"unknown ({type(exc).__name__})"
+        decision["preflight_paid_overage_risk_zero"] = safe
+        # Fail CLOSED: only an explicit True proceeds. A crashed checker, bad
+        # JSON, or a missing key previously slipped through as "unknown" and
+        # dispatched anyway, which defeats the point of asking.
+        if safe is not True:
+            decision["aborted"] = f"preflight did not confirm zero paid-overage risk (got {safe!r})"
+            print(json.dumps({"decision": decision, "result": {"status": "refused"}},
+                             indent=2, ensure_ascii=False))
+            return 2
 
     if args.dry_run or decision["native_claude_required"]:
         # Record the decision even when nothing is dispatched: a native-Claude
@@ -313,7 +365,32 @@ def main(argv=None) -> int:
                          indent=2, ensure_ascii=False))
         return 2
 
+    if args.add_dir:
+        # Codex must never be handed a directory: it is the pool barred from
+        # credential-sensitive content, and a directory cannot be vetted as
+        # tightly as a prompt.
+        if decision["pool"] == "CODEX":
+            decision["aborted"] = "--add-dir is not permitted for Codex dispatches"
+            print(json.dumps({"decision": decision, "result": {"status": "refused"}},
+                             indent=2, ensure_ascii=False))
+            return 2
+        dir_leak = scan_dir_for_secrets(args.add_dir)
+        if dir_leak:
+            decision["aborted"] = f"--add-dir contains a {dir_leak}; refusing to expose it to an external CLI"
+            print(json.dumps({"decision": decision, "result": {"status": "refused"}},
+                             indent=2, ensure_ascii=False))
+            return 2
+
     model, model_note = resolve_model(decision["pool"])
+    # Fail CLOSED. Omitting --model lets agy fall back to its own default, which
+    # is a Gemini model -- verified 2026-08-28. A SECURITY_REVIEW routed to
+    # CLAUDE_OPUS would then run on Gemini and still report success, so an
+    # unresolved model must abort rather than quietly downgrade the routing.
+    if POOLS[decision["pool"]][0] == "antigravity" and not model:
+        decision["aborted"] = f"could not resolve a live model for pool {decision['pool']}: {model_note}"
+        print(json.dumps({"decision": decision, "result": {"status": "refused"}},
+                         indent=2, ensure_ascii=False))
+        return 2
     decision["model"] = model or "(provider default)"
     decision["model_resolution"] = model_note
 

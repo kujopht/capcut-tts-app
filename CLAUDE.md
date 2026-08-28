@@ -101,9 +101,12 @@ routing mặc định (bảng tier V1)
 
 Bảng tier trong `docs/AI_ROUTER.md` mô tả hồ sơ **BALANCED**. Khi hồ sơ
 toàn cục khác BALANCED, hồ sơ đó THẮNG mọi câu "mặc định" trong tài liệu
-này — **tính đến 2026-08-28, hồ sơ đang bật là `CLAUDE_CONSERVATION`**, và
-Claude gốc chỉ còn vai trò tích hợp mỏng, KHÔNG phải kỹ sư mặc định. Không
-chép bảng hồ sơ toàn cục vào đây (một nguồn sự thật duy nhất).
+này. **Phải ĐỌC hồ sơ đang bật, không được đoán và cũng không được chép
+giá trị đó vào đây** — nó chỉ tồn tại ở một nơi duy nhất:
+
+```bash
+grep -A3 'ACTIVE PROFILE' ~/.claude/CLAUDE.md
+```
 
 **Router được THỰC THI bằng mã, không chỉ bằng văn xuôi.** Trước mỗi việc
 kỹ thuật đáng kể, chạy quyết định định tuyến (không tốn quota):

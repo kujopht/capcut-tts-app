@@ -43,22 +43,54 @@ mobile app, đăng nhập cùng tài khoản, và cho phép notification ở c�
 ## 3. Quyền tự chủ khi điều khiển từ xa (ĐÃ cấu hình)
 
 Hồ sơ quyền nằm ở `.claude/settings.json` — **phạm vi dự án**, không phải
-toàn cục. Không bật `bypassPermissions`, không dùng
-`--dangerously-skip-permissions`; ngược lại
-`disableBypassPermissionsMode: "disable"` được giữ nguyên nên chế độ bỏ
-qua quyền **không thể bật được** trong dự án này, kể cả bằng tay.
+toàn cục. Hồ sơ được thiết kế cho **hai chế độ**:
 
-Thứ tự áp dụng của Claude Code là **deny > ask > allow**, nên danh sách
-`allow` rộng vẫn không thể vượt qua `deny`/`ask`.
+- **Chế độ A — `auto`** (điện thoại / điều khiển từ xa, mặc định của dự
+  án): việc chỉ-đọc và việc phát triển thường ngày chạy tự chủ; thao tác
+  ghi lên remote (push, tạo/merge PR, deploy) mới hỏi.
+- **Chế độ B — `bypassPermissions`** (khi bạn ngồi trực tiếp ở laptop):
+  không hỏi những việc thường ngày kể trên; **ranh giới cấm tuyệt đối
+  vẫn giữ nguyên** — xem hàng `deny`.
+
+Thứ tự áp dụng, **đo trực tiếp trên Claude Code 2.1.231** (không phải suy
+đoán — xem `docs/reports/permission-two-mode-refactor-2026-08-28.md`):
+
+| Lớp | Đè được `allow`? | Có hiệu lực trong `bypassPermissions`? |
+|---|---|---|
+| `deny` của hook PreToolUse | Có | **Có** |
+| `ask` của hook PreToolUse | Có | (hook tự tắt theo chế độ) |
+| `allow` của hook PreToolUse | **Không — bị bỏ qua** | — |
+| `ask` trong `settings.json` | — | **Có** (nên đã bỏ hết `Bash(...)` khỏi `ask`) |
+
+Vì `ask` trong `settings.json` vẫn kích hoạt cả ở chế độ B, toàn bộ luật
+`ask` dạng `Bash(...)` đã được chuyển vào hook
+`.claude/hooks/guard_indirect_exec.py` — nơi đọc được `permission_mode`
+và quyết định theo từng chế độ. `ask` trong `settings.json` nay **chỉ còn
+các luật `Edit(...)`** bảo vệ chính tệp cấu hình và hook.
 
 | | Nội dung |
 |---|---|
-| **allow** (chạy thẳng, không hỏi) | đọc/tìm/sửa tệp trong repo; `git` chỉ-đọc + add/commit/checkout/stash/worktree; `gh` chỉ-đọc (pr/run/issue/workflow list-view, secret/variable **list tên**); `npm`/`npx`/`node`/`pnpm`/`yarn`; `python`/`pytest`/`pip`/`uv`/`ruff`/`mypy`; lint/typecheck/test/build; `npm run cf:build`, `opennextjs-cloudflare build`, `wrangler types/dev/whoami/deployments list/tail`; `curl` chỉ-đọc; Playwright; PowerShell chỉ-đọc (`Get-*`, `Test-Path`, `Select-String`) |
-| **ask** (vẫn hỏi bạn) | `git push`, `git merge`, `gh pr create/merge`, `gh api`, `gh release`, `gh workflow run`, `gh auth login`, `wrangler login/deploy/rollback/versions deploy`, `npm run cf:deploy*`, gọi deploy hook Render, sửa `.github/workflows/**`, `.claude/settings.json`, `deploy/render*.yaml`, `web/wrangler*.jsonc` |
+| **allow** (chạy thẳng, không hỏi) | đọc/tìm/sửa tệp trong repo; `git` chỉ-đọc + add/commit/checkout/stash/worktree; `gh` chỉ-đọc (`run list/view`, `workflow list/view`, `pr view/list/checks/diff`, `repo view`, `issue list/view`, `release list/view`, `auth status`, `search`, secret/variable **list tên**); `npm`/`npx`/`node`/`pnpm`/`yarn`; `python`/`pytest`/`pip`/`uv`/`ruff`/`mypy`; lint/typecheck/test/build; `npm run cf:build`, `opennextjs-cloudflare build`, `wrangler types/dev/whoami/deployments list/tail`; `curl` chỉ-đọc; Playwright; PowerShell chỉ-đọc (`Get-*`, `Test-Path`, `Select-String`) |
+| **ask** (hỏi ở chế độ A, KHÔNG hỏi ở chế độ B — do hook quyết định) | `git push` thường; `gh pr create/merge/close/review`; `gh workflow run/enable/disable`; `gh run cancel/rerun/delete`; `gh release create/delete/edit`; `gh issue create/edit`; `gh api` với `POST/PUT/PATCH` hoặc `-f/--field/--input`; `gh auth login`; `wrangler login/deploy/rollback/versions deploy`; `npm run cf:deploy*`; gọi deploy hook Render |
+| **ask** (luôn hỏi, cả hai chế độ) | sửa `.github/workflows/**`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/**`, `deploy/render*.yaml`, `web/wrangler*.jsonc` |
 | **deny** (chặn hẳn) | đọc `.env`/khoá riêng/OAuth/cookie/`.wrangler`/`rclone.conf`; `gh auth token`, `gh secret set/delete`; viết lại lịch sử git (`reset --hard`, `rebase`, `filter-branch`, force-push, xoá nhánh từ xa); xoá đệ quy (`rm -r*`, `Remove-Item -Recurse`); `curl` có `-X POST/PUT/PATCH/DELETE`/`-d`/`--data`; xoá tài nguyên production (`wrangler * delete`, `wrangler secret`, `gcloud/aws * delete`, `appwrite * delete`); Defender (`*-MpPreference`); registry (`reg add/delete`, `Set-ItemProperty HK*`); Task Scheduler (`schtasks`, `*-ScheduledTask`); dịch vụ Windows (`sc.exe`, `*-Service`); tường lửa/mạng (`netsh`, `*-NetFirewallRule`); leo thang quyền (`runas`, `Start-Process -Verb RunAs`, `Set-ExecutionPolicy`) |
 
-`defaultMode: "acceptEdits"` — sửa tệp trong repo không hỏi lại từng lần,
-nhưng mọi lệnh Bash vẫn đi qua ba danh sách trên.
+`defaultMode: "auto"` — sửa tệp trong repo không hỏi lại từng lần, nhưng
+mọi lệnh Bash vẫn đi qua ba danh sách trên **và** qua hook PreToolUse.
+
+**Hai lệnh runtime tự chặn, không sửa được bằng hồ sơ quyền:** `gh api`
+và `git push` bị chính Claude Code 2.1.231 bắt xác nhận, kể cả khi đã có
+luật `allow` khớp và kể cả khi gỡ bỏ hoàn toàn hook. Đây **không phải**
+false positive của hồ sơ này. Ở phiên tương tác bạn bấm duyệt là xong; ở
+phiên không tương tác chúng fail-closed. Muốn tra cứu GitHub tự chủ từ
+điện thoại, hãy dùng các lệnh con tương đương thay cho `gh api`:
+
+```bash
+gh run list --limit 10          # thay cho gh api .../actions/runs
+gh workflow list                # thay cho gh api .../actions/workflows
+gh pr view <n> --json state     # thay cho gh api .../pulls/<n>
+gh repo view --json visibility  # thay cho gh api repos/<owner>/<repo>
+```
 
 **Đây là so khớp mẫu văn bản, không phải hộp cát ngữ nghĩa.** Nó chặn
 đúng những dạng lệnh đã liệt kê; một lệnh viết vòng vo đủ khác đi vẫn có
@@ -118,4 +150,5 @@ Windows, tức lưu mật khẩu Windows ở dạng khôi phục được.
 | Không thấy phiên trên điện thoại | Kiểm tra đã đăng nhập ĐÚNG tài khoản claude.ai trên cả hai nơi |
 | Server đóng khi tắt cửa sổ | Bình thường — cần mục 4 (Task Scheduler) để sống qua reboot/đăng xuất |
 | Vẫn bị hỏi phê duyệt việc thường ngày | Hồ sơ quyền chỉ được nạp lúc **bắt đầu phiên**. Khởi động lại `claude remote-control`. Nếu vẫn hỏi, lệnh đó nằm trong `ask`/`deny` ở mục 3 — đó là cố ý |
+| Bị hỏi khi chạy `gh api` hoặc `git push` | Runtime tự chặn, không phải hồ sơ quyền (mục 3). Dùng lệnh con `gh` tương đương cho việc chỉ-đọc; `git push` thì đằng nào cũng thuộc nhóm cần xác nhận |
 | Worktree sinh ra không có `.claude/settings.json` | `--spawn worktree` tạo worktree từ nhánh hiện tại. Hồ sơ quyền chỉ áp dụng cho worktree khi commit chứa nó đã có mặt trên nhánh đó |

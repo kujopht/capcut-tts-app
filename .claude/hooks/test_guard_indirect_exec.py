@@ -2,13 +2,29 @@
 """Adversarial matrix for the PreToolUse Bash guard.
 
 Drives guard_indirect_exec.py the way Claude Code does -- a JSON payload on
-stdin -- and asserts the decision. Two halves that both matter: attacks that
-must be denied, and everyday commands that must stay autonomous. A guard that
-blocks everything passes the first half and fails the project.
+stdin, including the real ``permission_mode`` field -- and asserts the decision
+in BOTH operating modes:
+
+  auto              phone / remote. Read-only inspection and routine
+                    development run unattended; remote mutations ask.
+  bypassPermissions physically at the laptop. Routine remote writes proceed
+                    without a prompt; the hard boundary still denies.
+
+Four expectations, matching the guard's three tiers:
+
+  MUST_DENY        deny in both modes -- the boundary is not mode-dependent
+  MUST_ASK_AUTO    ask in auto, silent in bypassPermissions
+  MUST_ALLOW_READ  explicit "allow" in both modes (read-only inspection)
+  MUST_RUN         silent in both modes -- normal permission flow, no prompt
+                   from this guard
+
+"silent" (the guard printing nothing) is tracked separately from an explicit
+"allow": they mean different things to Claude Code, and conflating them is how
+a read-only command ends up prompting anyway.
 
     python .claude/hooks/test_guard_indirect_exec.py
 
-Exits non-zero on the first mismatch category so it can gate a commit.
+Exits non-zero on any mismatch so it can gate a commit.
 """
 
 from __future__ import annotations
@@ -21,7 +37,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard_indirect_exec.py")
 
-# (label, command) pairs the guard must refuse.
+AUTO = "auto"
+BYPASS = "bypassPermissions"
+
+# Denied in every mode, including bypassPermissions.
 MUST_DENY = [
     ("python -c", 'python -c "import os; os.system(\'echo pwned\')"'),
     ("python3 -c", 'python3 -c "print(1)"'),
@@ -89,10 +108,84 @@ MUST_DENY = [
     ("guard deletion", "rm .claude/hooks/guard_indirect_exec.py"),
     ("guard overwrite via cp", "cp /tmp/fake.py .claude/hooks/guard_indirect_exec.py"),
     ("disableAllHooks", "echo disableAllHooks"),
+    # gh api DELETE is destructive, not merely consequential.
+    ("gh api -X DELETE", "gh api -X DELETE repos/o/r/issues/1"),
+    ("gh api --method DELETE", "gh api --method DELETE repos/o/r/git/refs/heads/x"),
+    ("gh api -XDELETE glued", "gh api -XDELETE repos/o/r/releases/9"),
+    ("gh api --method=DELETE", "gh api --method=DELETE repos/o/r/labels/bug"),
+    # A read-only gh call must not launder a destructive one beside it.
+    ("read gh && rm -rf", "gh api repos/o/r && rm -rf build"),
+    ("read gh -> force push", "gh pr view 1 && git push --force origin main"),
 ]
 
-# (label, command) pairs that must run without the guard interfering.
-MUST_ALLOW = [
+# Genuinely consequential remote mutations: ask in auto, silent in bypass.
+MUST_ASK_AUTO = [
+    ("git push plain", "git push origin feat/x"),
+    ("git push -u", "git push -u origin feat/safe-remote-fanfic-ops"),
+    ("git push tags", "git push origin --tags"),
+    ("gh pr create", 'gh pr create --title "x" --body "y" --base main'),
+    ("gh pr merge", "gh pr merge 42 --squash"),
+    ("gh pr close", "gh pr close 42"),
+    ("gh pr review", "gh pr review 42 --approve"),
+    ("gh workflow run", "gh workflow run ci.yml"),
+    ("gh workflow disable", "gh workflow disable ci.yml"),
+    ("gh run cancel", "gh run cancel 123"),
+    ("gh run rerun", "gh run rerun 123"),
+    ("gh run delete", "gh run delete 123"),
+    ("gh release create", "gh release create v1.0.0"),
+    ("gh issue create", 'gh issue create --title "bug"'),
+    ("gh repo edit", "gh repo edit --visibility private"),
+    ("gh variable set", "gh variable set FOO --body bar"),
+    ("gh auth login", "gh auth login --hostname github.com"),
+    ("gh api -X POST", "gh api -X POST repos/o/r/pulls -f title=x"),
+    ("gh api --method PATCH", "gh api --method PATCH repos/o/r/issues/1 -f state=closed"),
+    ("gh api -f implies POST", "gh api repos/o/r/issues -f title=bug"),
+    ("gh api --input", "gh api repos/o/r/check-runs --input payload.json"),
+    ("gh api --raw-field", "gh api repos/o/r/issues --raw-field title=x"),
+    ("wrangler deploy", "npx wrangler deploy --config web/wrangler.jsonc"),
+    ("wrangler rollback", "npx wrangler rollback --name fanfic-web"),
+    ("wrangler versions deploy", "npx wrangler versions deploy --name fanfic-web"),
+    ("npm run cf:deploy", "npm run cf:deploy:production"),
+    ("opennext deploy", "npx opennextjs-cloudflare deploy"),
+    ("wrangler login", "npx wrangler login"),
+    ("curl render hook", "curl $RENDER_DEPLOY_HOOK"),
+    ("curl deploy-hook", "curl https://example.com/deploy-hook/abc"),
+    # Laundering an ask-tier command through substitution or a chain must still
+    # reach the ask tier rather than slipping past on the read-only half.
+    ("push inside $()", "echo $(git push origin main)"),
+    ("read gh then push", "gh workflow list ; git push origin main"),
+    ("read gh then deploy", "gh api repos/o/r && npm run cf:deploy:production"),
+]
+
+# Provably read-only inspection: explicit allow, identical in both modes.
+MUST_ALLOW_READ = [
+    ("gh api GET default", "gh api repos/kujopht/capcut-tts-app/branches/main/protection"),
+    ("gh api --method GET", "gh api --method GET repos/o/r/commits"),
+    ("gh api -X GET", "gh api -X GET repos/o/r"),
+    ("gh api with --jq", "gh api repos/o/r/contents/.github/workflows --jq '.[].name'"),
+    ("gh api paginated", "gh api --paginate repos/o/r/issues"),
+    ("gh workflow list", "gh workflow list --all"),
+    ("gh workflow view", "gh workflow view ci.yml"),
+    ("gh run list", "gh run list --limit 10"),
+    ("gh run view", "gh run view 123 --log-failed"),
+    ("gh pr view", "gh pr view 42"),
+    ("gh pr checks", "gh pr checks 42"),
+    ("gh pr list", "gh pr list --state all --base main"),
+    ("gh pr diff", "gh pr diff 42"),
+    ("gh repo view", "gh repo view kujopht/capcut-tts-app --json visibility"),
+    ("gh release list", "gh release list"),
+    ("gh release view", "gh release view v1.0.0"),
+    ("gh auth status", "gh auth status"),
+    ("gh issue list", "gh issue list --state open"),
+    ("gh search", "gh search repos fanfic"),
+    ("gh secret list", "gh secret list"),
+    ("gh api piped to head", "gh api repos/o/r | head -3"),
+    ("gh api piped to jq+grep", "gh api repos/o/r | jq . | grep name"),
+    ("gh run list with 2>&1", "gh run list --limit 5 2>&1"),
+]
+
+# Routine work: the guard stays out of the way entirely, in both modes.
+MUST_RUN = [
     ("git status", "git status --porcelain"),
     ("git diff", "git diff HEAD~1"),
     ("git log", "git log --oneline -10"),
@@ -100,9 +193,10 @@ MUST_ALLOW = [
     ("git clean -n", "git clean -nd"),
     ("git add", "git add -A"),
     ("git commit", 'git commit -m "fix: handle rm -rf edge case"'),
-    ("git push plain", "git push origin feat/x"),
+    ("git push --dry-run", "git push --dry-run origin feat/x"),
     ("git rev-parse in $()", 'cd "$(git rev-parse --show-toplevel)"'),
     ("git fetch", "git fetch --all --prune"),
+    ("git merge local", "git merge --ff-only origin/main"),
     ("desktop tests", ".venv/Scripts/python.exe -m unittest discover -s tests -t ."),
     ("backend tests", ".venv/Scripts/python.exe -m unittest discover -s server/tests -t ."),
     ("compileall", ".venv/Scripts/python.exe -m compileall -q app.py desktop_app tests"),
@@ -125,11 +219,21 @@ MUST_ALLOW = [
     ("echo date substitution", 'echo "built at $(date)"'),
     ("reg query", "reg query HKCU\\\\Software\\\\Microsoft"),
     ("uvicorn", ".venv/Scripts/python.exe -m uvicorn server.main:app --port 8000"),
+    # Read-only gh that writes a file is no longer purely read-only, so it must
+    # fall through to the normal flow rather than collect a blanket allow.
+    ("gh api redirected to file", "gh api repos/o/r > out.json"),
+    ("gh api appended to file", "gh api repos/o/r >> out.json"),
 ]
 
 
-def decide(command: str) -> tuple[str, str]:
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+def decide(command: str, mode: str) -> tuple[str, str]:
+    payload = json.dumps(
+        {
+            "tool_name": "Bash",
+            "permission_mode": mode,
+            "tool_input": {"command": command},
+        }
+    )
     proc = subprocess.run(
         [sys.executable, GUARD],
         input=payload,
@@ -141,7 +245,7 @@ def decide(command: str) -> tuple[str, str]:
         return "error", proc.stderr.strip()[:200]
     out = proc.stdout.strip()
     if not out:
-        return "allow", ""
+        return "silent", ""
     try:
         data = json.loads(out)
     except json.JSONDecodeError:
@@ -150,33 +254,50 @@ def decide(command: str) -> tuple[str, str]:
     return spec.get("permissionDecision", "?"), spec.get("permissionDecisionReason", "")
 
 
+def run_half(title: str, cases, mode: str, expected: str, failures: list) -> None:
+    print(f"\n{'=' * 78}\n{title} -- mode={mode}, expect={expected} ({len(cases)} cases)\n{'=' * 78}")
+    for label, cmd in cases:
+        decision, reason = decide(cmd, mode)
+        ok = decision == expected
+        print(f"  [{'PASS' if ok else 'FAIL'}] {label:<28} -> {decision}")
+        if not ok:
+            failures.append((title, mode, label, cmd, decision, expected, reason))
+
+
 def main() -> int:
-    failures = []
+    failures: list = []
+    checks = 0
 
-    print(f"{'=' * 78}\nMUST DENY ({len(MUST_DENY)} cases)\n{'=' * 78}")
-    for label, cmd in MUST_DENY:
-        decision, reason = decide(cmd)
-        ok = decision == "deny"
-        print(f"  [{'PASS' if ok else 'FAIL'}] {label:<28} -> {decision}")
-        if not ok:
-            failures.append(("MUST_DENY", label, cmd, decision, reason))
+    # The boundary is identical in both modes -- that is the whole point.
+    run_half("MUST DENY", MUST_DENY, AUTO, "deny", failures)
+    run_half("MUST DENY", MUST_DENY, BYPASS, "deny", failures)
+    checks += len(MUST_DENY) * 2
 
-    print(f"\n{'=' * 78}\nMUST ALLOW ({len(MUST_ALLOW)} cases)\n{'=' * 78}")
-    for label, cmd in MUST_ALLOW:
-        decision, reason = decide(cmd)
-        ok = decision == "allow"
-        print(f"  [{'PASS' if ok else 'FAIL'}] {label:<28} -> {decision}")
-        if not ok:
-            failures.append(("MUST_ALLOW", label, cmd, decision, reason))
+    run_half("MUST ASK", MUST_ASK_AUTO, AUTO, "ask", failures)
+    run_half("MUST NOT ASK", MUST_ASK_AUTO, BYPASS, "silent", failures)
+    checks += len(MUST_ASK_AUTO) * 2
 
-    total = len(MUST_DENY) + len(MUST_ALLOW)
+    run_half("MUST ALLOW (read-only)", MUST_ALLOW_READ, AUTO, "allow", failures)
+    run_half("MUST ALLOW (read-only)", MUST_ALLOW_READ, BYPASS, "allow", failures)
+    checks += len(MUST_ALLOW_READ) * 2
+
+    run_half("MUST RUN (no interference)", MUST_RUN, AUTO, "silent", failures)
+    run_half("MUST RUN (no interference)", MUST_RUN, BYPASS, "silent", failures)
+    checks += len(MUST_RUN) * 2
+
     print(f"\n{'=' * 78}")
     if failures:
-        print(f"RESULT: {total - len(failures)}/{total} passed, {len(failures)} FAILED\n")
-        for half, label, cmd, decision, reason in failures:
-            print(f"  {half} {label}\n    cmd      : {cmd}\n    got      : {decision}\n    reason   : {reason}")
+        print(f"RESULT: {checks - len(failures)}/{checks} passed, {len(failures)} FAILED\n")
+        for title, mode, label, cmd, decision, expected, reason in failures:
+            print(
+                f"  {title} [{mode}] {label}\n"
+                f"    cmd      : {cmd}\n"
+                f"    expected : {expected}\n"
+                f"    got      : {decision}\n"
+                f"    reason   : {reason}"
+            )
         return 1
-    print(f"RESULT: {total}/{total} passed (0 bypass, 0 broken)")
+    print(f"RESULT: {checks}/{checks} passed (0 bypass, 0 broken, both modes)")
     return 0
 
 

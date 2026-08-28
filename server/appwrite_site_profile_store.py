@@ -27,6 +27,7 @@ PERSISTED_FIELDS = (
     "pagination_strategy", "next_page_pattern", "fetch_tier",
     "rate_limit_seconds", "last_verified_at", "last_success_at",
     "consecutive_failures", "success_count", "created_at", "updated_at",
+    "adaptive_fingerprint_json",
 )
 _DATETIME_FIELDS = ("last_verified_at", "last_success_at")
 
@@ -73,6 +74,7 @@ def _profile_from_doc(doc: Dict[str, Any]) -> SiteProfile:
         success_count=_int(doc.get("success_count")),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
+        adaptive_fingerprint_json=str(doc.get("adaptive_fingerprint_json") or ""),
     )
 
 

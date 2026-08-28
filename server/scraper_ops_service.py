@@ -33,6 +33,9 @@ from server.scraper.http_fetcher import FetchError, HttpFetcher
 from server.scraper.incremental import diff_toc
 from server.scraper.pipeline import StoryIngestionPipeline
 from server.scraper.run_state import run_fingerprint, run_id_from_fingerprint
+from server.scraper.adapters.scrapling_relocation import (
+    attempt_adaptive_relocation, is_scrapling_available, save_verified_element,
+)
 from server.scraper.self_healing import RelocationConfidence, validate_relocated_content
 from server.scraper.site_profile import (
     MockSiteProfileStore, ProfileStatus, profile_from_proposal,
@@ -41,6 +44,11 @@ from server.scraper.state_reconstruct import rebuild_state
 from server.scraper.story_identity import (
     IdentitySignals, SameWorkConfidence, compare_identity,
 )
+
+
+#: PHAI khop `scripts/setup_appwrite.py` (collection `site_profiles`,
+#: thuoc tinh `adaptive_fingerprint_json`) — xem `_thu_luu_dau_van_tay_thich_ung`.
+_GIOI_HAN_KY_TU_DAU_VAN_TAY = 2000
 
 
 class UnsupportedSiteError(Exception):
@@ -186,7 +194,22 @@ class ScraperOpsService:
         qua `validate_relocated_content` (kiem tra cau truc THEM: khong
         trung chuong truoc/khong giong trang dang nhap-loi) truoc khi chap
         nhan revision moi. `revision` tang len 1 moi lan xac nhan LAI mot
-        domain DA co profile (bat ke DEGRADED hay khong)."""
+        domain DA co profile (bat ke DEGRADED hay khong).
+
+        P2 (overnight hardening) — NANG TANG THAT qua Scrapling: neu kiem
+        tra Tier 0 (`validate_relocated_content`, dua tren heuristic mat do
+        doan van/ranh gioi noi dung) o tren KHONG dat HIGH, VA domain nay
+        co dau van tay thich ung da luu tu lan xac nhan THANH CONG gan nhat
+        (`profile_cu.adaptive_fingerprint_json`), thu THEM mot lan dinh vi
+        lai qua Scrapling THAT SU (`attempt_adaptive_relocation`) truoc khi
+        chap nhan/tu choi — dung nguyen tac "chi nang tang khi Tier 0 that
+        bai" cua `tier_escalation.py`. Ket qua CHI co the CAI THIEN quyet
+        dinh Tier 0 (LOW/MEDIUM -> HIGH) hoac CHAN THEM (MEDIUM tu Scrapling
+        -> yeu cau operator xem lai, NGHIEM NGAT hon MEDIUM cua Tier 0 vi
+        day la doan lai cau truc tren toan bo cay HTML, khong phai heuristic
+        don gian) — KHONG BAO GIO lam GIAM mot ket qua Tier 0 da HIGH san
+        (Scrapling khong duoc goi trong truong hop do, xem yeu cau "khong
+        goi khong can thiet" cua nhiem vu)."""
         if site_registry.lookup(url) is not None:
             raise ValueError(
                 "Domain này đã có cấu hình xác minh sẵn — không cần xác "
@@ -207,6 +230,7 @@ class ScraperOpsService:
         if profile_cu is not None:
             profile_moi = replace(profile_moi, revision=profile_cu.revision + 1)
 
+        mau_html_da_tai: Optional[str] = None
         if profile_cu is not None and profile_cu.status == ProfileStatus.DEGRADED:
             if not proposal.sample_chapter_urls:
                 raise ValueError(
@@ -220,6 +244,7 @@ class ScraperOpsService:
                 raise ValueError(
                     f"Không tải được trang chương mẫu để xác nhận khôi "
                     f"phục: {exc}") from exc
+            mau_html_da_tai = mau.text
 
             # Phase 5 ("kiem tra khong trung chuong TRUOC DO"): tai THEM
             # mot trang chuong mau THU HAI (neu discovery tim duoc) de co
@@ -248,6 +273,33 @@ class ScraperOpsService:
             xac_thuc = validate_relocated_content(
                 mau.text, chapter_title=proposal.work_title,
                 previous_chapter_content_hash=hash_chuong_mau_khac)
+
+            if (xac_thuc.confidence != RelocationConfidence.HIGH
+                    and profile_cu.adaptive_fingerprint_json
+                    and is_scrapling_available()):
+                thich_ung = attempt_adaptive_relocation(
+                    profile_cu.adaptive_fingerprint_json, mau.text,
+                    url=proposal.sample_chapter_urls[0],
+                    chapter_title=proposal.work_title,
+                    previous_chapter_content_hash=hash_chuong_mau_khac)
+                if (thich_ung.confidence == RelocationConfidence.HIGH
+                        and not thich_ung.is_ambiguous):
+                    xac_thuc = replace(xac_thuc, confidence=RelocationConfidence.HIGH,
+                                       evidence=xac_thuc.evidence + thich_ung.evidence,
+                                       clean_text=thich_ung.clean_text or xac_thuc.clean_text)
+                    if thich_ung.candidate_selector:
+                        profile_moi = replace(
+                            profile_moi, content_fingerprint=thich_ung.candidate_selector)
+                elif thich_ung.confidence == RelocationConfidence.MEDIUM:
+                    raise ValueError(
+                        "Scrapling định vị lại thích ứng tìm được một ứng "
+                        "viên, nhưng độ tin cậy chỉ ở mức MEDIUM (mơ hồ "
+                        "hoặc bằng chứng nội dung chưa đủ mạnh): " +
+                        " ".join(thich_ung.evidence) +
+                        " — cần kỹ sư/operator xem lại thủ công trước khi "
+                        "chấp nhận khôi phục, KHÔNG tự động ghi đè "
+                        "SiteProfile.")
+
             if xac_thuc.confidence == RelocationConfidence.LOW:
                 raise ValueError(
                     "Kiểm tra cấu trúc (Phase 5) từ chối đề xuất khôi "
@@ -255,8 +307,62 @@ class ScraperOpsService:
                     " — nguồn vẫn ở trạng thái DEGRADED, cần kỹ sư kiểm "
                     "tra thủ công thay vì tự động khôi phục.")
 
+        # P2 (overnight hardening): "known-good chapter element -> save/
+        # fingerprint" — luu lai dau van tay CAU TRUC (KHONG PHAI HTML tho,
+        # xem docstring `scrapling_relocation.save_verified_element`) cua
+        # vung noi dung VUA duoc xac nhan o tren, de LAN DEGRADED SAU (neu
+        # co) co gi do THAT de thu dinh vi lai — BEST-EFFORT TUYET DOI:
+        # bat MOI ngoai le, khong bao gio de buoc nay chan xac nhan dang
+        # thanh cong (Scrapling la kha nang nang tang tuy chon, khong phai
+        # dieu kien de xac nhan mot nguon).
+        profile_moi = replace(
+            profile_moi,
+            adaptive_fingerprint_json=self._thu_luu_dau_van_tay_thich_ung(
+                proposal, profile_cu, sample_html=mau_html_da_tai))
+
         saved = self._profile_store.upsert(profile_moi)
         return {"profile": saved, "proposal": proposal}
+
+    def _thu_luu_dau_van_tay_thich_ung(
+            self, proposal, profile_cu: Optional["SiteProfile"],
+            *, sample_html: Optional[str] = None) -> str:
+        """Tra ve JSON cua dau van tay moi (de ghi vao
+        `SiteProfile.adaptive_fingerprint_json`), hoac chuoi rong neu
+        khong the luu (Scrapling khong san sang, khong co
+        `content_container_candidate`/`sample_chapter_urls`, fetch loi,
+        hoac selector khong khop trang mau) — chuoi rong la trang thai AN
+        TOAN MAC DINH, giu nguyen hanh vi truoc khi co tinh nang nay.
+
+        `sample_html` cho phep tai su dung trang mau DA TAI o nhanh DEGRADED
+        (tranh fetch lai CUNG mot URL lan thu hai trong cung mot lan goi
+        `confirm_unknown_source`)."""
+        if not is_scrapling_available():
+            return ""
+        if not proposal.content_container_candidate or not proposal.sample_chapter_urls:
+            return (profile_cu.adaptive_fingerprint_json
+                    if profile_cu is not None else "")
+        try:
+            if sample_html is None:
+                sample_html = self._fetcher_factory().fetch(
+                    proposal.sample_chapter_urls[0]).text
+            fingerprint = save_verified_element(
+                sample_html, proposal.content_container_candidate,
+                url=proposal.sample_chapter_urls[0])
+        except Exception:
+            return profile_cu.adaptive_fingerprint_json if profile_cu is not None else ""
+        if fingerprint is None:
+            return profile_cu.adaptive_fingerprint_json if profile_cu is not None else ""
+        import json
+        as_json = json.dumps(fingerprint)
+        if len(as_json) > _GIOI_HAN_KY_TU_DAU_VAN_TAY:
+            # Vuot gioi han thuoc tinh Appwrite (xem scripts/setup_appwrite.py,
+            # collection site_profiles) — bo qua BAN GHI MOI thay vi de
+            # Appwrite tu choi ghi sau nay, giu nguyen dau van tay CU (van
+            # con dung duoc cho lan DEGRADED sau, hon la mat trang HOAN
+            # TOAN chi vi mot chuong bat thuong co qua nhieu anh em/thuoc
+            # tinh).
+            return profile_cu.adaptive_fingerprint_json if profile_cu is not None else ""
+        return as_json
 
     def start_or_continue(self, url: str, *, chapter_limit: Optional[int] = None
                           ) -> Dict[str, Any]:

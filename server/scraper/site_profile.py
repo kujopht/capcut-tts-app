@@ -101,6 +101,14 @@ class SiteProfile:
     success_count: int = 0
     created_at: str = ""
     updated_at: str = ""
+    #: P2 (overnight hardening) — dau van tay CAU TRUC (JSON cua dict tra
+    #: ve boi `scrapling_relocation.save_verified_element`, KHONG PHAI
+    #: HTML/noi dung tho — xem docstring module do) cua vung noi dung
+    #: chuong TU LAN XAC NHAN GAN NHAT thanh cong. Rong ("") neu Scrapling
+    #: khong san sang luc xac nhan, hoac chua tung xac nhan lan nao — day
+    #: la truong hop AN TOAN MAC DINH, `confirm_unknown_source` phai luon
+    #: kiem tra rong truoc khi thu dung.
+    adaptive_fingerprint_json: str = ""
 
     @property
     def is_usable(self) -> bool:

@@ -29,12 +29,21 @@ HAI TRACH NHIEM RIENG BIET:
    can bang chung THAT tu MOT nguon cong khai cu the ma Playwright
    thuong khong vuot qua duoc, chua co nguon nao nhu vay duoc xac dinh).
 
-MOI TRUONG NAY: `scrapling` (goi Tier 1) KHONG duoc cai (xac nhan lai o
-day, xem `adapters/scrapling_adapter.py`/`self_healing.py` — da xac nhan
-qua audit Phase 1 la DEAD/UNUSED). `decide_escalation(tier1_available=False)`
-la mac dinh TRUNG THUC cho moi truong nay — noi nao goi ham nay VOI
-`tier1_available=True` PHAI tu kiem tra import Scrapling THAT truoc, KHONG
-BAO GIO gia dinh no san sang.
+CAP NHAT (P2, overnight hardening): `scrapling` GIO DA duoc cai that (xem
+`server/requirements.txt`, `adapters/scrapling_relocation.is_scrapling_available()`
+— tham do THAT qua try/import, KHONG gia dinh). LUU Y RANH GIOI: cac ham
+CUA MODULE NAY (`classify_page_signal`/`decide_escalation`) VAN CHUA duoc
+mot duong that nao goi truc tiep (van la chinh sach da CHINH THUC HOA
+thanh code kiem thu duoc, chua noi day vao pipeline fetch-chuong that su
+— xem docstring goc o tren). Rieng `scraper_ops_service.confirm_unknown_source`
+(nhanh DEGRADED) dung MOT co che nang tang RIENG, cu the hon
+(`scrapling_relocation.attempt_adaptive_relocation`, tu kiem tra
+`is_scrapling_available()` truc tiep) KHONG di qua `decide_escalation()` —
+hai co che nay giai quyet hai van de khac nhau (danh sach chuong/muc luc
+vs vung noi dung mot chuong), xem docstring `scrapling_relocation.py`.
+Nguyen tac KHONG DOI cho CHINH module nay: bat cu noi nao trong TUONG LAI
+goi `decide_escalation` VOI `tier1_available=True` PHAI tu kiem tra kha
+nang that truoc (khong hardcode `True`).
 """
 from __future__ import annotations
 

@@ -5,17 +5,17 @@ LUONG (theo dung yeu cau Phase 5): fingerprint/selector CU (SiteProfile
 da xac minh) ngung khop -> UNG VIEN thay the (adaptive relocation) ->
 KIEM TRA CAU TRUC -> chap nhan (ghi revision) / can duyet / that bai an toan.
 
-CO Y GIOI HAN MOI TRUONG (trung thuc, khong phong dai): `scrapling`
-(package Tier 1) KHONG duoc cai trong moi truong nay (xem
-`adapters/scrapling_adapter.py` — DEAD/UNUSED, xac nhan qua audit Phase 1
-cua Story Harvester V3). Module nay xay dung + KIEM THU DAY DU phan
-"KIEM TRA CAU TRUC" (buoc quyet dinh co CHAP NHAN mot ung vien thay the
-hay khong) — day la phan CO THE xac minh doc lap voi Scrapling, vi no chi
-can MOT chuoi HTML ung vien, khong can chinh Scrapling tim ra ung vien do
-nhu the nao. Phan "TIM ung vien tu dong qua Scrapling" (adaptive
-relocation THAT SU) KHONG duoc noi day trong PR nay — chua co bang chung
-(Phase 12 chua chay) rang Scrapling can thiet, va khong the kiem thu that
-neu khong cai duoc thu vien.
+CAP NHAT (P2, overnight hardening — xem `docs/reports/`): `scrapling` GIO
+DA duoc cai that (xem `server/requirements.txt`, da xac minh phien ban
+0.4.15) va phan "TIM ung vien tu dong qua Scrapling" (adaptive relocation
+THAT SU) DA duoc noi day — xem `adapters/scrapling_relocation.py`
+(`attempt_adaptive_relocation`, goi tu `scraper_ops_service.py` trong
+nhanh DEGRADED) va `test_scraper_adaptive_relocation.py` (ma tran 9 kich
+ban bien doi cau truc A-I, dung Scrapling THAT khong mock). Module NAY
+(`self_healing.py`) van giu nguyen vai tro rieng cua no — buoc "KIEM TRA
+CAU TRUC" ma `validate_relocated_content` thuc hien LA CHUNG cho CA hai
+nguon ung vien (Tier 0 tu discovery.py re-scan LAN Tier 1 tu Scrapling
+relocate), khong bi trung lap logic o hai noi.
 
 TAI SU DUNG `content_extraction.extract_content_v3` (Phase 6) lam tin
 hieu CO SO (do dai/mat do doan van/lien quan tieu de deu da tinh o do) —

@@ -18,15 +18,25 @@ khong the — dung ke hoach adaptive: SAU LAN QUET DAU, luu dau van tay
 cua khu vuc danh sach chuong; LAN QUET SAU, neu mau href cu (hoac CSS cu)
 khong con khop MOT lien ket nao, moi thu `.relocate()` truoc khi bao
 that bai — Tier 0 (`GenericIndexAdapter`) khong co duong lui nay.
-"""
+
+P2 (overnight hardening) — SUA loi `from scrapling.parser import Selector`
+o MUC MODULE: dieu nay khien CHI import module nay thoi (vd mot cong cu
+liet ke adapter, hoac mot test khong lien quan) da lam sap toan bo tien
+trinh neu `scrapling` chua cai — vi pham truc tiep yeu cau "Harvester
+phai hoat dong binh thuong voi Tier 0/HTTP truc tiep, khong crash khi
+khoi dong" cua nhiem vu nay. Nhap `Selector` CHI khi khoi tao instance
+(`__init__`), va nem `ScraplingUnavailableError` (tu
+`scrapling_relocation.py` — dinh nghia CHUNG mot cho, khong lap lai logic
+tham do) voi thong bao ro rang thay vi de `ImportError` tho thoat ra."""
 from __future__ import annotations
 
 import re
 from typing import List, Optional
 from urllib.parse import urljoin
 
-from scrapling.parser import Selector
-
+from server.scraper.adapters.scrapling_relocation import (
+    ScraplingUnavailableError, is_scrapling_available,
+)
 from server.scraper.contract import (
     NormalizedChapter, ScraperTier, SeriesInfo, StoryProvider, canonicalize_url,
 )
@@ -52,6 +62,12 @@ class ScraplingAdapter(StoryProvider):
     def __init__(self, fetcher, *, chapter_href_pattern: str,
                  title_suffix_to_strip: Optional[str] = None,
                  storage_file: Optional[str] = None):
+        if not is_scrapling_available():
+            raise ScraplingUnavailableError(
+                "Gói `scrapling` chưa được cài trong môi trường này — "
+                "ScraplingAdapter không thể khởi tạo. Đây là khả năng "
+                "nâng tầng (Tier 1) tùy chọn, caller phải bắt lỗi này và "
+                "lùi về Tier 0 (GenericIndexAdapter/JsonLdAwareAdapter).")
         self._fetcher = fetcher
         self._chapter_re = re.compile(chapter_href_pattern)
         self._title_suffix = title_suffix_to_strip
@@ -64,7 +80,8 @@ class ScraplingAdapter(StoryProvider):
             raise ValueError(str(exc)) from exc
         return canonicalize_url(result.final_url)
 
-    def _tai_trang(self, url: str, final_url: str, html: str) -> Selector:
+    def _tai_trang(self, url: str, final_url: str, html: str):
+        from scrapling import Selector
         return Selector(html, url=final_url, adaptive=True, storage_args=self._storage_args)
 
     def discover_series(self, url: str) -> SeriesInfo:
@@ -144,6 +161,7 @@ class ScraplingAdapter(StoryProvider):
 
     def normalize_chapter(self, url: str, raw_html: str,
                            series: SeriesInfo) -> NormalizedChapter:
+        from scrapling import Selector
         page = Selector(raw_html, url=url)
         meta_title = page.css("meta[property='og:title']")
         if meta_title:

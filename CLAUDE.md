@@ -89,6 +89,37 @@ lập khác họ model) — xem `docs/AI_ROUTER.md` cho đầy đủ, và
 phẩm. Không lưu credential của Antigravity/Codex trong repo — cả hai đọc
 phiên đăng nhập từ nơi lưu trữ riêng của hệ điều hành/CLI.
 
+**Thứ tự ưu tiên (BẮT BUỘC đọc trước khi chọn model):**
+
+```
+ACTIVE PROFILE toàn cục (~/.claude/CLAUDE.md)
+        >
+chuyên biệt hoá của repo (file này, docs/AI_ROUTER.md)
+        >
+routing mặc định (bảng tier V1)
+```
+
+Bảng tier trong `docs/AI_ROUTER.md` mô tả hồ sơ **BALANCED**. Khi hồ sơ
+toàn cục khác BALANCED, hồ sơ đó THẮNG mọi câu "mặc định" trong tài liệu
+này — **tính đến 2026-08-28, hồ sơ đang bật là `CLAUDE_CONSERVATION`**, và
+Claude gốc chỉ còn vai trò tích hợp mỏng, KHÔNG phải kỹ sư mặc định. Không
+chép bảng hồ sơ toàn cục vào đây (một nguồn sự thật duy nhất).
+
+**Router được THỰC THI bằng mã, không chỉ bằng văn xuôi.** Trước mỗi việc
+kỹ thuật đáng kể, chạy quyết định định tuyến (không tốn quota):
+
+```bash
+python scripts/ai_router_dispatch.py --task-class <CLASS> --risk <LOW|MEDIUM|HIGH> --dry-run
+echo "..." | python scripts/ai_router_dispatch.py --task-class ORDINARY_REVIEW --risk LOW
+```
+
+`scripts/ai_router_dispatch.py` giữ bảng định tuyến trong mã, tự tìm
+`agy`/`codex`, tự phân giải model đang sống, chặn nội dung giống
+credential, và TỰ GHI telemetry — không thể dispatch mà quên ghi.
+`SECURITY_REVIEW` không bao giờ đi tới Codex (bằng chứng thật 2026-08-28:
+Codex từ chối review bảo mật). Xem `docs/AI_ROUTER.md` mục "Precedence" và
+"Enforcement".
+
 **Quan hệ với router toàn cục:** `~/.claude/CLAUDE.md` (tài khoản Windows
 này) chứa phần CHUNG của chính sách này (tier model chung, quota-aware
 routing, review chéo model, chính sách context/test) — áp dụng cho MỌI

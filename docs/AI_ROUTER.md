@@ -10,9 +10,63 @@ expensive model for everything.
 **V2 adds a second and third compute pool** (Google Antigravity/Gemini via
 the user's existing Google AI Pro subscription, and continues treating
 Codex as a separate cross-model worker) **on top of** the V1 Claude-tier
-policy below, which is unchanged and still the default path. V2 does not
-replace V1 — it decides *when* to route ordinary work to a different
-already-paid-for quota pool instead of Claude's, and *when not to*.
+policy below. V2 does not replace V1 — it decides *when* to route ordinary
+work to a different already-paid-for quota pool instead of Claude's, and
+*when not to*.
+
+## Precedence — read this before using any table below
+
+```
+global ACTIVE PROFILE  (~/.claude/CLAUDE.md)
+        >
+repo-specific specialization  (this file, CLAUDE.md)
+        >
+normal/default routing  (the V1 tier tables below)
+```
+
+**The tier tables below describe the DEFAULT (BALANCED) path only.** When
+`~/.claude/CLAUDE.md` declares a non-default `ACTIVE PROFILE`, that profile
+wins over every "default" claim in this document — including "Tier 1 —
+default engineering (Sonnet)" and "Claude Sonnet (native) — primary
+integrator/default engineer". Those sentences are correct under BALANCED and
+**wrong under an active conservation profile**.
+
+Check the active profile first; do not assume it from this file. The profile
+lives in exactly one place and is deliberately not duplicated here — copying
+it would create two sources of truth that drift apart, which is precisely the
+failure this section exists to prevent.
+
+> **As of 2026-08-28 the active profile is `CLAUDE_CONSERVATION`.** Under it,
+> native Claude is a *thin integrator*, not the default engineer. See
+> "Enforcement" below and `~/.claude/CLAUDE.md` for the authoritative table.
+
+## Enforcement — routing is executable, not advisory
+
+Prose cannot refuse to route a security review to Codex; code can. The single
+dispatch path is:
+
+```bash
+# Decide only — no worker runs, no quota spent. Do this BEFORE a substantial task.
+python scripts/ai_router_dispatch.py --task-class SEARCH --risk LOW --dry-run
+
+# Decide and dispatch (prompt via stdin or --prompt-file).
+echo "..." | python scripts/ai_router_dispatch.py --task-class ORDINARY_REVIEW --risk LOW
+```
+
+`scripts/ai_router_dispatch.py` holds the routing table in code, resolves
+`agy`/`codex` dynamically, resolves live model ids (never pinned strings),
+bounds every call with a timeout, refuses to ship anything matching a
+credential shape to a third-party CLI, and **writes telemetry itself** so a
+dispatch cannot happen without being recorded. Task classes: `SEARCH`,
+`MECHANICAL`, `LARGE_CONTEXT`, `IMPLEMENTATION`, `INTEGRATION`,
+`SEMANTIC_REVIEW`, `SECURITY_REVIEW`, `ORDINARY_REVIEW`, `CHALLENGER`.
+
+Hard rules encoded there, not merely written here:
+
+- `SECURITY_REVIEW` can never resolve to Codex.
+- `risk=HIGH` escalates an ordinary/semantic review to Claude Opus.
+- A decision is logged even when the answer is "native Claude", with the
+  reason — so choosing native Claude stays visible instead of silent.
 
 ## Environment inventory (2026-08-27)
 
@@ -76,6 +130,9 @@ to search files — see the benchmark below for why that's not just a
 guideline, it's measurably wasteful.
 
 ### Tier 1 — default engineering (Sonnet, medium effort)
+
+> Applies under the **BALANCED** profile. Under an active conservation
+> profile this tier is delegated externally — see "Precedence" above.
 
 Normal feature implementation, frontend CSS/UI, CRUD, API wiring, routine
 bug fixes, unit tests, refactors with a clear specification, docs, simple
@@ -163,7 +220,7 @@ pressure shifts these defaults.
 |---|---|---|
 | **Claude Haiku** | grep/search, repo archaeology, log analysis, file discovery, test-failure classification, concise read-only summaries | Never for implementation |
 | **Antigravity Gemini Flash** (3.7 first, 3.6/3.5 as overflow) | repetitive edits, fixture/unit-test generation, simple frontend/CSS, docs, data transforms, parsing rules, mechanical refactors, bulk low-risk implementation, independent read-only repo analysis | Anything needing cross-file architectural judgment |
-| **Claude Sonnet (native)** | primary integrator/default engineer — feature implementation, cross-file logic, API integration, backend/frontend coordination, ordinary debugging, merging other agents' work | Pure mechanical bulk work Flash/Haiku can do cheaper |
+| **Claude Sonnet (native)** | *(BALANCED only — under conservation this shrinks to thin integration)* primary integrator/default engineer — feature implementation, cross-file logic, API integration, backend/frontend coordination, ordinary debugging, merging other agents' work | Pure mechanical bulk work Flash/Haiku can do cheaper; under conservation also ordinary implementation, bulk search, and ordinary review |
 | **Antigravity Claude Sonnet** (`claude-sonnet-4-6`) | a **separate compute pool** for isolated Sonnet-level implementation, a genuinely parallel feature branch, or overflow when native Claude quota is under pressure | Running the *same routine task* as native Sonnet redundantly — pick one |
 | **Antigravity Gemini Pro** (3.1) | repo-wide understanding, large-context reasoning, architecture exploration, large-refactor planning, cross-module dependency analysis, alternative plan generation | Treating it as an automatic Opus replacement without the benchmark evidence in Phase 13/14 below |
 | **Codex** | independent implementation, test/fix loops, isolated refactors, regression generation, code review, alternative diagnosis — **especially valuable as cross-family review after Claude/Gemini implementation** | Sending it plaintext secrets/production credentials — same data-minimization rule as V1 |

@@ -85,6 +85,27 @@ class TestHealth(ApiTestCase):
         self.assertEqual(data["data_backend"], "mock")
         self.assertEqual(data["storage_backend"], "local")
 
+    def test_health_khong_co_RENDER_GIT_COMMIT_tra_ve_none(self):
+        """Moi truong dev cuc bo (khong chay tren Render) khong dat bien
+        nay — `None` la gia tri AN TOAN MAC DINH, khong phai loi."""
+        import os
+        from unittest.mock import patch
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RENDER_GIT_COMMIT", None)
+            data = self.client.get("/api/health").json()
+        self.assertIsNone(data["commit_sha"])
+
+    def test_health_co_RENDER_GIT_COMMIT_thi_bao_cao_dung(self):
+        """Xac nhan `scripts/story_harvester_production_certification.py`
+        (`--expected-sha`) co truong that su de doi chieu tren Render —
+        thieu test nay, mot lan doi ten bien/xoa nham dong nay se khong bi
+        phat hien cho den khi chay tren production that."""
+        import os
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"RENDER_GIT_COMMIT": "abc123def456"}):
+            data = self.client.get("/api/health").json()
+        self.assertEqual(data["commit_sha"], "abc123def456")
+
 
 class TestAuth(ApiTestCase):
     def test_register_and_me(self):

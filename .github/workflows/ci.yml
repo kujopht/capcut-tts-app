@@ -16,6 +16,11 @@ on:
   pull_request:
     branches: ["main"]
   workflow_dispatch:
+  # Cho phep production-deploy.yml tai su dung CHINH XAC cac job nay lam
+  # cong required test gate truoc khi deploy that, thay vi chep lai logic
+  # test — khong doi hanh vi cua ba trigger o tren, chi THEM mot duong goi
+  # nua vao CUNG workflow nay.
+  workflow_call:
 
 permissions:
   contents: read

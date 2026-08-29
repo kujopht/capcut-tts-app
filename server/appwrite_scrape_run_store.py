@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 
-from server.adapters import AppwriteUnavailableError, NotFoundError
+from server.adapters import AppwriteUnavailableError, NotFoundError, raise_for_appwrite_404
 from server.config import AppwriteSettings
 from server.scraper.run_state import (
     CLAIM_LEASE_SECONDS,
@@ -253,7 +253,9 @@ class AppwriteScrapeRunStore:
             raise AppwriteUnavailableError(
                 f"Không kết nối được Appwrite: {exc}") from exc
         if response.status_code == 404:
-            raise NotFoundError("Không tìm thấy bản ghi.")
+            # Phan biet "thieu collection" voi "thieu ban ghi" — xem
+            # `adapters.raise_for_appwrite_404`.
+            raise_for_appwrite_404(response, path)
         if response.status_code == 409:
             # RIENG cho `create_*_once` — "da co ban ghi nay" that su, KHAC
             # voi moi loi >=400 khac (xem nhanh duoi day). Doc review that

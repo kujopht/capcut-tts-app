@@ -84,12 +84,90 @@ class AppwriteUnavailableError(AuthError):
     """
 
 
+class AppwriteSchemaMissingError(AppwriteUnavailableError):
+    """
+    Mot COLLECTION bat buoc khong ton tai trong Appwrite — sai cau hinh HA
+    TANG, khong phai "khong tim thay ban ghi".
+
+    Vi sao phai tach khoi `NotFoundError`: Appwrite tra 404 cho CA HAI
+    truong hop, va gop chung lai da gay ra mot su co that (2026-08-29,
+    Story Harvester Phase 15 tren san xuat). Collection `scrape_run_items`
+    chua duoc cap phat; lenh LIET KE tai lieu tra 404; `_call` dich thanh
+    `NotFoundError("Khong tim thay ban ghi")` — mot thong bao NOI DOI: no
+    bao thieu MOT BAN GHI trong khi thieu ca CAI HOP. Loi do khong route nao
+    bat, thanh 500 chung chung, va cuoc dieu tra bat dau tu sai cho hoan
+    toan.
+
+    Phan biet duoc vi mot lenh LIET KE tren collection RONG tra 200 kem
+    `documents: []`, KHONG phai 404. 404 tren lenh liet ke chi co the la
+    collection khong ton tai.
+
+    La CON cua `AppwriteUnavailableError` co chu y: luoi an toan chung o
+    `main.py` da bien no thanh 503, dung nghia hon 404/500 — day la loi cua
+    trien khai, khong phai loi cua nguoi goi, va no khong tu khoi phuc cho
+    toi khi ai do chay cap phat schema.
+    """
+
+
 class NotFoundError(Exception):
     """Khong tim thay ban ghi."""
 
 
 class PermissionDenied(Exception):
     """Nguoi dung khong so huu tai nguyen nay."""
+
+
+def raise_for_appwrite_404(response, path: str) -> None:
+    """Phan loai mot 404 cua Appwrite roi nem dung loai loi.
+
+    Dung chung cho MOI `_call` cua cac store Appwrite: truoc day tung noi
+    tu dich `404 -> NotFoundError`, nen mot collection thieu bi bao cao la
+    mot ban ghi thieu o TAM CHO trong ma nguon.
+
+    Hai tin hieu, theo thu tu tin cay:
+
+      1. Truong `type` trong than loi cua Appwrite (`collection_not_found`,
+         `database_not_found`) — chinh xac nhat khi co.
+      2. Hinh dang duong dan: mot lenh LIET KE ket thuc bang `/documents`
+         (khong co `/{id}` phia sau). Collection ton tai nhung rong tra 200,
+         nen 404 o day chi co the la collection khong ton tai.
+
+    KHONG BAO GIO dua than loi tho cua Appwrite vao thong bao: no co the
+    chua chi tiet noi bo. Chi phan loai, roi dung cau chu cua minh.
+    """
+    kind = ""
+    try:
+        body = response.json()
+        kind = str(body.get("type", "")).lower()
+    except Exception:
+        kind = ""
+
+    # So khop CHINH XAC theo doan duong dan, khong dung `endswith`.
+    #
+    # `endswith("/documents")` cung khop `.../documents/documents` — tuc mot
+    # tai lieu co ID dung bang chuoi "documents". Appwrite CHO PHEP ID tuy
+    # chon, nen truong hop do bien mot 404 "thieu ban ghi" that thanh 503.
+    # Duong liet ke chinh tac la `.../collections/{col}/documents`, nen doan
+    # cuoi phai la "documents" VA doan thu ba tu cuoi phai la "collections".
+    # Doi chieu theo VI TRI tuyet doi, khong phai duoi duong dan. Duong chinh
+    # tac la `/v1/databases/{db}/collections/{col}/documents[/{id}]`, nen tinh
+    # tu doan "collections" DAU TIEN: lenh liet ke co dung 2 doan phia sau no
+    # ({col} va "documents"). Kiem theo duoi se vap khi ca `{col}` lan `{id}`
+    # deu duoc dat ten "collections"/"documents" — Appwrite cho phep ID tuy
+    # chon, va ca hai review doc lap deu chi ra dung cho nay.
+    doan = [p for p in path.split("/") if p]
+    try:
+        moc = doan.index("collections")
+    except ValueError:
+        moc = -1
+    is_list_call = moc >= 0 and len(doan) == moc + 3 and doan[-1] == "documents"
+    if "collection_not_found" in kind or "database_not_found" in kind or is_list_call:
+        # Khong nhac ten khai niem cua backend ("collection") trong thong bao
+        # ra ngoai — no he lo kho du lieu dang gi.
+        raise AppwriteSchemaMissingError(
+            "Kho dữ liệu chưa được cấp phát đầy đủ (thiếu tài nguyên lưu trữ "
+            "bắt buộc). Đây là lỗi cấu hình triển khai, không phải bản ghi thiếu.")
+    raise NotFoundError("Không tìm thấy bản ghi.")
 
 
 # -----------------------------------------------------------------------------

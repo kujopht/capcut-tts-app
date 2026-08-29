@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from server.adapters import AppwriteUnavailableError, NotFoundError
+from server.adapters import AppwriteUnavailableError, NotFoundError, raise_for_appwrite_404
 from server.config import AppwriteSettings
 from server.scraper.site_profile import ProfileStatus, SiteProfile, _now_utc_iso
 from server.secret_redaction import thong_diep_loi_an_toan
@@ -133,7 +133,9 @@ class AppwriteSiteProfileStore:
             raise AppwriteUnavailableError(
                 f"Không kết nối được Appwrite: {exc}") from exc
         if response.status_code == 404:
-            raise NotFoundError("Không tìm thấy bản ghi.")
+            # Phan biet "thieu collection" voi "thieu ban ghi" — xem
+            # `adapters.raise_for_appwrite_404`.
+            raise_for_appwrite_404(response, path)
         if response.status_code == 409:
             raise _ConflictError("Đã tồn tại bản ghi này.")
         if response.status_code >= 400:

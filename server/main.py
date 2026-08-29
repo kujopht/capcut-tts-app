@@ -4325,6 +4325,40 @@ def owner_profile(profile: Profile = Depends(current_profile)) -> Profile:
     return profile
 
 
+#: Nhan BAT BIEN chung minh mot Novel la do canary tao ra va vut di duoc.
+#: Doi chieu theo NHAN, KHONG BAO GIO theo tieu de/ten — so khop ten la cach
+#: de nhat de vo tinh xoa nham mot series that.
+CANARY_TAG_DISPOSABLE = "canary:disposable"
+CANARY_RUN_TAG_PREFIX = "canary:run:"
+
+
+def _canary_or_admin(authorization: Optional[str]) -> Profile:
+    """Token dich vu canary, HOAC admin/owner nguoi that.
+
+    Token dich vu duoc thu TRUOC: canary khong co phien Appwrite, nen di qua
+    duong nguoi dung se luon 401.
+    """
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        if settings.is_canary_service_token(token):
+            return Profile(user_id=settings.canary_user_id,
+                           email="canary@service.local",
+                           display_name="Canary Service")
+    return admin_or_owner_profile(current_profile(authorization))
+
+
+def canary_ops_profile(authorization: Optional[str] = Header(default=None)) -> Profile:
+    """Quyen cho be mat `/api/admin/canary/*` — tao/doc/don TAI NGUYEN VUT DI.
+
+    Tach rieng khoi `/api/novels` cong khai MOT CACH CO CHU Y. Cho token dich
+    vu di vao duong ghi Novel chung se bien mot danh tinh hep thanh mot tai
+    khoan nguoi dung day du: sua duoc truyen dang co, xuat ban duoc, doc duoc
+    du lieu khong lien quan. Be mat rieng nay chi lam dung ba viec Phase 15
+    can, va moi viec deu bi rang buoc boi quyen so huu chung minh duoc.
+    """
+    return _canary_or_admin(authorization)
+
+
 def scraper_ops_profile(authorization: Optional[str] = Header(default=None)) -> Profile:
     """Quyen VAN HANH SCRAPER — cho canary dich vu HOAC admin/owner nguoi that.
 
@@ -4342,15 +4376,9 @@ def scraper_ops_profile(authorization: Optional[str] = Header(default=None)) -> 
     Thu tu kiem quan trong: token dich vu duoc thu TRUOC `current_profile`, vi
     canary khong co phien Appwrite — di qua duong nguoi dung se luon 401.
     """
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(" ", 1)[1].strip()
-        if settings.is_canary_service_token(token):
-            return Profile(user_id=settings.canary_user_id,
-                           email="canary@service.local",
-                           display_name="Canary Service")
     # Khong phai canary -> quay ve duong nguoi that, giu nguyen moi hanh vi cu
     # (401 khi thieu/sai token, 403 khi khong du quyen).
-    return admin_or_owner_profile(current_profile(authorization))
+    return _canary_or_admin(authorization)
 
 
 def admin_or_owner_profile(profile: Profile = Depends(current_profile)) -> Profile:
@@ -6249,6 +6277,122 @@ class ScraperSkipIn(BaseModel):
     reason: str = ""
 
 
+class CanaryNovelIn(BaseModel):
+    title: str
+    canary_run_id: str
+    description: str = ""
+
+
+class CanaryChapterIn(BaseModel):
+    canary_run_id: str
+    title: str
+    content: str
+    order_index: int = 0
+
+
+def _canary_owned_novel(novel_id: str, canary_run_id: str) -> Novel:
+    """Lay mot Novel CHI KHI quyen so huu duoc CHUNG MINH. Fail-closed.
+
+    Bon dieu kien, thieu bat ky dieu nao cung tu choi:
+      1. `canary_run_id` phai co (thieu -> 400, khong doan).
+      2. Novel phai thuoc so huu cua `canary_user_id` — `store.owned_novel`
+         nem PermissionDenied neu khong, nen 13 series that (thuoc nguoi that)
+         khong the loc qua day.
+      3. Novel phai mang nhan `canary:disposable`.
+      4. Novel phai mang dung nhan `canary:run:<id>` cua LAN CHAY nay — mot
+         lan canary khong don duoc do vut di cua lan khac.
+
+    KHONG bao gio so khop theo tieu de. Nhan la BAT BIEN, tieu de thi khong.
+
+    GIOI HAN DA BIET (neu ra qua review bao mat doc lap, chap nhan co y):
+    tinh bat bien cua nhan duoc bao dam boi CHO KHONG CO DUONG SUA — canary
+    chi co dung bon route o day va khong route nao sua duoc `tags`. Mot QUAN
+    TRI VIEN NGUOI THAT, qua duong ghi khac, ve ly thuyet co the go nhan
+    `canary:disposable` (khien doi tuong khong don duoc nua) hoac gan nhan cua
+    lan chay khac. Do la kich ban noi gian tu nguoi da duoc tin cay hoan toan,
+    NGOAI mo hinh de doa nay. Dieu quan trong: khong kich ban nao trong so do
+    cho canary cham vao noi dung cua NGUOI THAT, vi `store.owned_novel` van
+    chan theo `owner_id`.
+    """
+    run_id = (canary_run_id or "").strip()
+    if not run_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "canary_run_id là bắt buộc — không suy đoán quyền sở hữu.")
+    try:
+        novel = store.owned_novel(novel_id, settings.canary_user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    if CANARY_TAG_DISPOSABLE not in (novel.tags or []):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Đối tượng không mang nhãn disposable của canary.")
+    if (CANARY_RUN_TAG_PREFIX + run_id) not in (novel.tags or []):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Đối tượng thuộc một lần chạy canary khác.")
+    return novel
+
+
+@app.post("/api/admin/canary/novels", status_code=status.HTTP_201_CREATED)
+def canary_create_novel(payload: CanaryNovelIn,
+                        actor: Profile = Depends(canary_ops_profile)) -> Dict[str, Any]:
+    """Tao mot Novel VUT DI cho Phase 15.
+
+    `owner_id` LUON la `canary_user_id`, ke ca khi nguoi goi la admin that —
+    nho vay moi doi tuong sinh ra o day deu don duoc bang dung mot co che, va
+    khong bao gio lan vao khong gian so huu cua nguoi dung that.
+
+    Luon o trang thai DRAFT: be mat nay khong co duong xuat ban.
+    """
+    run_id = payload.canary_run_id.strip()
+    if not run_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "canary_run_id là bắt buộc.")
+    novel = store.create_novel(Novel(
+        owner_id=settings.canary_user_id,
+        title=payload.title.strip(),
+        description=payload.description.strip(),
+        tags=[CANARY_TAG_DISPOSABLE, CANARY_RUN_TAG_PREFIX + run_id],
+    ))
+    return {"novel": _novel_out(novel), "canary_run_id": run_id}
+
+
+@app.post("/api/admin/canary/novels/{novel_id}/chapters",
+          status_code=status.HTTP_201_CREATED)
+def canary_create_chapter(novel_id: str, payload: CanaryChapterIn,
+                          actor: Profile = Depends(canary_ops_profile)) -> Dict[str, Any]:
+    novel = _canary_owned_novel(novel_id, payload.canary_run_id)
+    chapter, _ = _tao_chuong_cho_truyen(
+        novel=novel, owner_id=settings.canary_user_id, title=payload.title,
+        content=payload.content, order_index=payload.order_index)
+    return {"chapter": chapter.to_dict()}
+
+
+@app.get("/api/admin/canary/novels/{novel_id}")
+def canary_get_novel(novel_id: str, canary_run_id: str,
+                     actor: Profile = Depends(canary_ops_profile)) -> Dict[str, Any]:
+    novel = _canary_owned_novel(novel_id, canary_run_id)
+    return {"novel": _novel_out(novel),
+            "chapters": len(store.list_chapters(novel.novel_id))}
+
+
+# `canary_run_id` KHONG co gia tri mac dinh, co chu y: no la BAT BUOC o muc
+# schema, khong phai mot tham so tuy chon duoc mot lop kiem tra ben trong cuu.
+# Hinh dang API phai noi dung rang buoc that su.
+@app.delete("/api/admin/canary/novels/{novel_id}")
+def canary_delete_novel(novel_id: str, canary_run_id: str,
+                        actor: Profile = Depends(canary_ops_profile)) -> Dict[str, Any]:
+    """Don dep — chi xoa duoc thu chinh lan chay nay tao ra."""
+    novel = _canary_owned_novel(novel_id, canary_run_id)
+    removed = {"chapters": 0, "tracks": 0, "jobs": 0, "objects": 0}
+    for chapter in store.list_chapters(novel.novel_id):
+        counts = _purge_chapter(chapter)
+        removed["chapters"] += 1
+        for key in ("tracks", "jobs", "objects"):
+            removed[key] += counts[key]
+    store.delete_novel(novel.novel_id, settings.canary_user_id)
+    return {"deleted": True, "removed": removed}
+
+
 @app.post("/api/admin/scraper/discover")
 def admin_scraper_discover(
     payload: ScraperDiscoverIn, admin: Profile = Depends(scraper_ops_profile),
@@ -6314,7 +6458,7 @@ def admin_scraper_check_updates(
 @app.get("/api/admin/scraper/runs/{run_id}")
 def admin_scraper_view_run(
     run_id: str, limit: int = 50, offset: int = 0, status_loc: str = Query("", alias="status"),
-    admin: Profile = Depends(admin_or_owner_profile),
+    admin: Profile = Depends(scraper_ops_profile),
 ) -> Dict[str, Any]:
     return _quet_hang_loat(
         scraper_ops.view, run_id, limit=limit, offset=offset, status=status_loc)
@@ -6323,7 +6467,12 @@ def admin_scraper_view_run(
 @app.post("/api/admin/scraper/runs/{run_id}/drive")
 def admin_scraper_drive_run(
     run_id: str, payload: ScraperDriveIn,
-    admin: Profile = Depends(admin_or_owner_profile),
+    # `scraper_ops_profile` CO CHU Y, khong phai so sot: Phase 15 phai tu day
+    # duoc dot quet cua CHINH NO tien len thi moi chay khong nguoi truc. Day la
+    # ghi len trang thai dot quet — mot dot quet vut di do canary tao — chu
+    # KHONG phai ghi len noi dung nguoi dung. Neu bo dependency nay ve
+    # admin_or_owner_profile thi Phase 15 lai can mot con nguoi.
+    admin: Profile = Depends(scraper_ops_profile),
 ) -> Dict[str, Any]:
     """MOT chu ky dieu phoi — UI goi lap lai (nut 'Tiep tuc') cho den khi
     `run.status` la trang thai KET. Khong tu dong lap trong route: moi lan

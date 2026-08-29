@@ -1,5 +1,12 @@
 # Preflight biên giới credential — Story Harvester V3 production closure
 
+> **CẬP NHẬT (cùng ngày, sau khi migrate):** mục 3 dưới đây mô tả thiết kế CŨ —
+> Bearer token phiên của một admin người thật. Thiết kế đó **đã được thay thế**
+> bằng danh tính dịch vụ `FANFIC_CANARY_SERVICE_TOKEN` (đổi tên từ
+> `FANFIC_ADMIN_CANARY_TOKEN`; đổi tên không tốn gì vì chưa secret nào được
+> tạo). Phần dưới được giữ nguyên làm hồ sơ vì sao thiết kế cũ bị loại.
+> Xem `unattended-production-credentials-migration-2026-08-29.md`.
+
 Ngày: 2026-08-29. Kiểu: **chỉ đọc**. Không tạo/sửa credential, không deploy,
 không chạm 13 series thật, không mass scrape.
 

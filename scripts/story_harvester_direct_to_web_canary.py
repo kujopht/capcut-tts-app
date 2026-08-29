@@ -204,8 +204,8 @@ def buoc_scraper_discover_va_chay(
 
 
 def buoc_duyet_va_ghi_that(
-        api: str, qa_token: str, run_view: Dict[str, Any], chapter_limit: int,
-        source_url: str, dry_run: bool,
+        api: str, service_token: str, run_view: Dict[str, Any], chapter_limit: int,
+        source_url: str, dry_run: bool, canary_run_id: str,
 ) -> Optional[str]:
     """"Duyet" cac muc REVIEW_READY + `quality_passed` (toi da
     `chapter_limit` muc) — TAI LAI + TRICH XUAT LAI noi dung that su
@@ -264,10 +264,13 @@ def buoc_duyet_va_ghi_that(
 
     print("\n=== 6. Ghi THAT vao Novel/Chapter (trang thai draft, KHONG publish) ===")
     dau = uuid.uuid4().hex[:8]
-    ma, r = goi(api, "POST", "/api/novels",
-               {"title": f"{TIEN_TO_QA} {dau}", "description": f"nguồn: {source_url}"},
-               qa_token)
-    if not kt("POST /api/novels", ma in (200, 201), f"HTTP {ma}: {r}"):
+    # Be mat canary RIENG, khong phai `/api/novels` chung: token dich vu khong
+    # phai tai khoan nguoi dung va co chu y KHONG mo duoc duong ghi chung.
+    ma, r = goi(api, "POST", "/api/admin/canary/novels",
+               {"title": f"{TIEN_TO_QA} {dau}", "description": f"nguồn: {source_url}",
+                "canary_run_id": canary_run_id},
+               service_token)
+    if not kt("POST /api/admin/canary/novels", ma in (200, 201), f"HTTP {ma}: {r}"):
         return None
     novel = r.get("novel") or r
     novel_id = novel.get("novel_id", "")
@@ -278,18 +281,23 @@ def buoc_duyet_va_ghi_that(
 
     so_chuong_tao_thanh_cong = 0
     for i, (tieu_de, text) in enumerate(noi_dung_chuong, start=1):
-        ma, r = goi(api, "POST", "/api/chapters",
-                   {"novel_id": novel_id, "title": f"{TIEN_TO_QA} {tieu_de}",
-                    "content": text, "order_index": i}, qa_token)
-        if kt(f"POST /api/chapters ({i}/{len(noi_dung_chuong)})", ma in (200, 201),
+        ma, r = goi(api, "POST", f"/api/admin/canary/novels/{novel_id}/chapters",
+                   {"canary_run_id": canary_run_id,
+                    "title": f"{TIEN_TO_QA} {tieu_de}",
+                    "content": text, "order_index": i}, service_token)
+        if kt(f"POST canary chapters ({i}/{len(noi_dung_chuong)})", ma in (200, 201),
              f"HTTP {ma}"):
             so_chuong_tao_thanh_cong += 1
     kt("tao dung so chuong da duyet", so_chuong_tao_thanh_cong == len(noi_dung_chuong),
       f"mong {len(noi_dung_chuong)}, tao duoc {so_chuong_tao_thanh_cong}")
 
     print("\n=== 7. Xac minh qua API cong khai/rieng tu ===")
-    ma, r = goi(api, "GET", f"/api/novels/{novel_id}", None, qa_token)
-    kt("GET lai novel vua tao", ma == 200 and r.get("title", "").startswith(TIEN_TO_QA),
+    ma, r = goi(api, "GET",
+               f"/api/admin/canary/novels/{novel_id}?canary_run_id={canary_run_id}",
+               None, service_token)
+    novel_doc_lai = (r or {}).get("novel") or {}
+    kt("GET lai novel vua tao",
+      ma == 200 and novel_doc_lai.get("title", "").startswith(TIEN_TO_QA),
       f"HTTP {ma}")
     ma, r = goi(api, "GET", "/api/novels")
     novels_cong_khai = r.get("novels", []) if ma == 200 else []
@@ -299,13 +307,18 @@ def buoc_duyet_va_ghi_that(
     return novel_id
 
 
-def don_fixture(api: str, qa_token: str, novel_id: Optional[str]) -> None:
+def don_fixture(api: str, service_token: str, novel_id: Optional[str],
+                canary_run_id: str) -> None:
     print("\n=== 8. Don fixture ===")
     if not novel_id:
         kt("khong co novel_id de don (chua tao gi hoac dry-run)", True)
         return
     try:
-        ma, r = goi(api, "DELETE", f"/api/novels/{novel_id}", None, qa_token)
+        # `canary_run_id` la BAT BUOC: server tu choi xoa neu khong chung minh
+        # duoc doi tuong thuoc dung lan chay nay.
+        ma, r = goi(api, "DELETE",
+                   f"/api/admin/canary/novels/{novel_id}"
+                   f"?canary_run_id={canary_run_id}", None, service_token)
         kt("xoa novel QA va moi thu phu thuoc", ma in (200, 204), f"HTTP {ma}: {r}")
     except Exception as exc:
         kt("don fixture that bai (loi PHU)", False, f"{type(exc).__name__}: {exc}")
@@ -346,26 +359,27 @@ def main(argv=None) -> int:
         return 2
 
     novel_id: Optional[str] = None
-    qa_token = ""
+    # Mot dinh danh DUY NHAT cho lan chay nay. Server gan no thanh nhan BAT
+    # BIEN tren moi doi tuong canary tao ra, va doi hoi dung nhan do khi don —
+    # nho vay mot lan chay khong the don do cua lan khac, va khong lan nao
+    # cham duoc vao mot Novel that.
+    canary_run_id = f"{time.strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    print(f"  canary_run_id = {canary_run_id}")
     try:
         if not buoc_suc_khoe(a.api):
             return 1
-        qa = buoc_dang_ky_tai_khoan_qa(a.api)
-        qa_token = qa["token"]
-        if not qa_token:
-            return 1
-
+        # KHONG con dang ky tai khoan QA: Phase 15 chay bang DANH TINH DICH VU,
+        # khong phai phien dang nhap cua mot nguoi.
         ket_qua_scrape = buoc_scraper_discover_va_chay(
             a.api, a.admin_token, a.source_url, a.chapter_limit)
         if ket_qua_scrape is None:
             return 1
 
         novel_id = buoc_duyet_va_ghi_that(
-            a.api, qa_token, ket_qua_scrape["run_view"], a.chapter_limit,
-            a.source_url, a.dry_run)
+            a.api, a.admin_token, ket_qua_scrape["run_view"], a.chapter_limit,
+            a.source_url, a.dry_run, canary_run_id)
     finally:
-        if qa_token:
-            don_fixture(a.api, qa_token, novel_id)
+        don_fixture(a.api, a.admin_token, novel_id, canary_run_id)
 
     so_dat = sum(1 for _, ok, _ in KET_QUA if ok)
     so_tong = len(KET_QUA)

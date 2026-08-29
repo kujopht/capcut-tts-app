@@ -99,11 +99,42 @@ TARGET
   → deploy → verify commit_sha → Phase 15 → Phase 18 chạy không cần người
 ```
 
-## 7. Việc còn lại trước khi TARGET chạy trọn vẹn
+## 7. Bề mặt canary riêng (ĐÃ LÀM)
+
+Phase 15 **không còn** đi qua `/api/novels` chung. Một bề mặt riêng, hẹp:
+
+```
+POST   /api/admin/canary/novels                      tạo Novel vứt đi (luôn DRAFT)
+POST   /api/admin/canary/novels/{id}/chapters        thêm chương vào Novel của chính nó
+GET    /api/admin/canary/novels/{id}?canary_run_id=  đọc lại
+DELETE /api/admin/canary/novels/{id}?canary_run_id=  dọn dẹp
+```
+
+Bốn điều kiện, thiếu bất kỳ điều nào cũng **fail-closed**:
+
+1. `canary_run_id` bắt buộc ở mức schema — không đoán quyền sở hữu.
+2. `store.owned_novel(..., canary_user_id)` — 13 series thật thuộc người thật nên không lọt qua.
+3. Phải mang nhãn `canary:disposable`.
+4. Phải mang đúng nhãn `canary:run:<id>` của **lần chạy này**.
+
+**Không bao giờ so khớp theo tiêu đề.** Nhãn là bất biến, tiêu đề thì không.
+
+Token dịch vụ **không** mở được `/api/novels` chung — có test khoá lại.
+
+## 8. Đổi tên secret (ĐÃ LÀM, rủi ro bằng 0)
+
+`FANFIC_ADMIN_CANARY_TOKEN` → **`FANFIC_CANARY_SERVICE_TOKEN`**, đổi nguyên tử
+ở mọi nơi tiêu thụ (workflow, runbook, broker, go-live doc). Rủi ro bằng 0 vì
+**chưa secret nào được tạo** — không có gì để migrate. Tên mới nói đúng bản
+chất: một credential dịch vụ, không phải phiên đăng nhập của người.
+
+## 9. Việc còn lại trước khi TARGET chạy trọn vẹn
 
 1. **Bootstrap có người (một lần):** lấy 3 giá trị từ provider → `broker store` → `broker push-github`.
 2. **Đặt `FAS_CANARY_SERVICE_TOKEN` trên Render** (biến môi trường của `fas-prod-api`) đúng bằng giá trị đã lưu, rồi deploy lại để có hiệu lực.
-3. **Phase 15 còn một mảnh chưa chuyển:** kịch bản canary tạo Novel qua `/api/novels`, vốn dùng phiên người dùng thường chứ không phải route scraper. Cần mở rộng `scraper_ops_profile` (hoặc một dependency song song) sang đúng đường tạo/xoá Novel của canary. **Chưa làm** — đây là thay đổi auth, cần review riêng. Phase 18 thì đã chạy được với danh tính mới.
+3. **Nguồn QA phải đã được cấu hình sẵn.** Canary **không** có quyền
+   `confirm-source` (ghi SiteProfile toàn cục — không phải tài nguyên vứt đi).
+   Đây là giới hạn có chủ ý của least-privilege, không phải thiếu sót.
 
 ## 8. Ranh giới an toàn giữ nguyên
 

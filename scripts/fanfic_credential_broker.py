@@ -66,9 +66,11 @@ ERROR_NOT_FOUND = 1168
 KNOWN_NAMES = (
     "RENDER_DEPLOY_HOOK_URL",
     "CLOUDFLARE_API_TOKEN",
+    # Renamed from FANFIC_ADMIN_CANARY_TOKEN. The rename was free: no secret
+    # of either name had been created yet, so there was nothing to migrate and
+    # every consumer moved in one commit. The name now says what it is -- a
+    # service credential, not a human admin's session.
     "FANFIC_CANARY_SERVICE_TOKEN",
-    # Retained only for the migration window; see the migration plan.
-    "FANFIC_ADMIN_CANARY_TOKEN",
 )
 
 

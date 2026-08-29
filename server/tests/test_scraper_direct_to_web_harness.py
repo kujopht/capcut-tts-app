@@ -184,13 +184,15 @@ class CleanupOnlyDeletesOwnNovelTest(unittest.TestCase):
         gia_lap.novels_da_tao["nov_that_su_khong_lien_quan"] = {
             "novel_id": "nov_that_su_khong_lien_quan", "state": "published"}
 
-        _canary.don_fixture("https://khong-that.invalid", "tok-qa", "nov_gia_lap_123")
+        _canary.don_fixture("https://khong-that.invalid", "tok-svc",
+                            "nov_gia_lap_123", "run-test-1")
         # (goi truc tiep don_fixture voi novel_id gia lap, khong qua goi()
         # that vi don_fixture tu goi ham module-level `goi` — patch lai.)
 
     def test_khong_co_novel_id_thi_khong_goi_delete_gi_ca(self):
         with patch.object(_canary, "goi") as goi_gia:
-            _canary.don_fixture("https://khong-that.invalid", "tok-qa", None)
+            _canary.don_fixture("https://khong-that.invalid", "tok-svc",
+                                None, "run-test-1")
         goi_gia.assert_not_called()
 
     def test_co_novel_id_chi_goi_delete_dung_id_do(self):
@@ -201,9 +203,30 @@ class CleanupOnlyDeletesOwnNovelTest(unittest.TestCase):
             return 200, {"deleted": True, "removed": {}}
 
         with patch.object(_canary, "goi", side_effect=goi_gia):
-            _canary.don_fixture("https://khong-that.invalid", "tok-qa", "nov_gia_lap_123")
+            _canary.don_fixture("https://khong-that.invalid", "tok-svc",
+                                "nov_gia_lap_123", "run-test-1")
 
-        self.assertEqual(goi_ghi_lai, [("DELETE", "/api/novels/nov_gia_lap_123")])
+        # Don dep di qua be mat canary RIENG, va PHAI mang theo canary_run_id —
+        # server tu choi xoa neu khong chung minh duoc quyen so huu.
+        self.assertEqual(
+            goi_ghi_lai,
+            [("DELETE", "/api/admin/canary/novels/nov_gia_lap_123"
+                        "?canary_run_id=run-test-1")])
+
+    def test_don_fixture_luon_mang_theo_canary_run_id(self):
+        """Thieu run id la duong duy nhat khien server phai doan quyen so huu —
+        kich ban khong bao gio duoc de trong."""
+        duong_dan = []
+
+        def goi_gia(api, method, path, payload=None, token=None, timeout=120):
+            duong_dan.append(path)
+            return 200, {"deleted": True, "removed": {}}
+
+        with patch.object(_canary, "goi", side_effect=goi_gia):
+            _canary.don_fixture("https://khong-that.invalid", "tok-svc",
+                                "nov_x", "run-abc")
+        self.assertTrue(duong_dan and "canary_run_id=run-abc" in duong_dan[0],
+                        duong_dan)
 
 
 if __name__ == "__main__":

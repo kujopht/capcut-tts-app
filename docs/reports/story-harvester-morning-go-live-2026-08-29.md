@@ -42,7 +42,7 @@ GitHub → repo `kujopht/capcut-tts-app` → **Settings** → **Environments** �
 
 ---
 
-### 3. `FANFIC_ADMIN_CANARY_TOKEN` (~2 phút)
+### 3. `FANFIC_CANARY_SERVICE_TOKEN` (~2 phút)
 
 **Đọc kỹ: đây KHÔNG phải chuỗi ngẫu nhiên bạn tự nghĩ ra.** Nó là **Bearer
 token phiên đăng nhập** của một tài khoản có quyền admin trên production.
@@ -60,7 +60,7 @@ Tự bịa một chuỗi sẽ luôn bị 401.
   - Nếu CHƯA: thêm `user_id` vào biến môi trường của service `fas-prod-api`
     trên Render → service sẽ redeploy → rồi mới lấy token.
     **Chỉ `user_id` mới cần đặt ở Render — KHÔNG BAO GIỜ đặt giá trị token.**
-- **Nhập vào:** GitHub environment `production`, tên `FANFIC_ADMIN_CANARY_TOKEN`
+- **Nhập vào:** GitHub environment `production`, tên `FANFIC_CANARY_SERVICE_TOKEN`
 - **Cần đặt ở nơi khác không?** Chỉ `FAS_ADMIN_USER_IDS` ở Render (nếu thiếu).
   Appwrite: không cần thao tác gì.
 - **Lưu ý hết hạn:** token phiên **sẽ hết hạn**. Khi đó Phase 15/18 báo
@@ -115,7 +115,7 @@ hiện. Nếu vẫn thiếu → deploy chưa thực sự vào, KHÔNG đi tiếp
 python scripts/story_harvester_direct_to_web_canary.py \
   --api https://fas-prod-api.onrender.com \
   --environment production \
-  --admin-token "$FANFIC_ADMIN_CANARY_TOKEN" \
+  --admin-token "$FANFIC_CANARY_SERVICE_TOKEN" \
   --source-url <URL nguồn QA dùng một lần> \
   --chapter-limit 2
 ```
@@ -134,7 +134,7 @@ gì để dọn" trong khi Novel đã tạo → DỪNG, điều tra thủ công.
 ```bash
 python scripts/story_harvester_production_certification.py \
   --api https://fas-prod-api.onrender.com \
-  --admin-token "$FANFIC_ADMIN_CANARY_TOKEN" \
+  --admin-token "$FANFIC_CANARY_SERVICE_TOKEN" \
   --source-url <URL nguồn QA> \
   --chapter-limit 2 \
   --expected-sha "$(git rev-parse origin/main)" \

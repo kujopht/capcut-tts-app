@@ -143,6 +143,7 @@ class AdminAuthTest(Base):
             server_main.admin_or_owner_profile,
             server_main.owner_profile,
             server_main.scraper_ops_profile,
+            server_main.canary_ops_profile,
         }
         chua_bao_ve = []
         for r in server_main.app.routes:
@@ -170,6 +171,13 @@ class AdminAuthTest(Base):
         phan tich hay tai chinh, thi CI se lang le co quyen o do — dung kieu
         leo thang ma thiet ke nay sinh ra de ngan. Bai nay khoa pham vi lai.
         """
+        # Moi phu thuoc chap nhan TOKEN DICH VU chi duoc xuat hien trong dung
+        # mien cua no. Danh tinh canary khong phai nguoi that, nen mot lan gan
+        # nham sang route khac la mot duong leo thang im lang.
+        PHAM_VI = {
+            server_main.scraper_ops_profile: "/api/admin/scraper/",
+            server_main.canary_ops_profile: "/api/admin/canary/",
+        }
         ngoai_pham_vi = []
         for r in server_main.app.routes:
             d = getattr(r, "path", "")
@@ -179,14 +187,13 @@ class AdminAuthTest(Base):
                 sub.call for sub in getattr(getattr(r, "dependant", None),
                                             "dependencies", [])
             ]
-            if server_main.scraper_ops_profile in phu_thuoc:
-                if "/scraper/" not in d:
-                    ngoai_pham_vi.append(f"{sorted(r.methods)} {d}")
+            for ham, tien_to in PHAM_VI.items():
+                if ham in phu_thuoc and not d.startswith(tien_to):
+                    ngoai_pham_vi.append(f"{ham.__name__}: {sorted(r.methods)} {d}")
         self.assertEqual(
             ngoai_pham_vi, [],
-            "scraper_ops_profile chỉ được dùng cho route /api/admin/scraper/*; "
-            "route ngoài phạm vi phải dùng admin_profile/admin_or_owner_profile/"
-            "owner_profile",
+            "phụ thuộc chấp nhận token dịch vụ bị dùng ngoài phạm vi cho phép; "
+            "route khác phải dùng admin_profile/admin_or_owner_profile/owner_profile",
         )
 
     def test_khong_co_quan_tri_nao_thi_KHONG_AI_vao_duoc(self):
@@ -620,10 +627,41 @@ class NovelBrowserTest(Base):
         """
         Backend chua co luong takedown nao an toan. Dat mot nut xoa len mot luong
         chua thiet ke la cach nhanh nhat de mat noi dung cua nguoi khac.
+
+        MIEN TRU DUY NHAT: `/api/admin/canary/novels/*`. Ly do cua bai test nay
+        la "mat noi dung cua NGUOI KHAC" — be mat canary khong the cham toi noi
+        dung cua ai ca:
+
+          * `store.owned_novel(..., canary_user_id)` nem PermissionDenied voi
+            bat ky Novel nao khong thuoc so huu canary — 13 series that thuoc
+            nguoi that, nen khong loc qua duoc;
+          * doi tuong con phai mang nhan `canary:disposable` VA dung nhan
+            `canary:run:<id>` cua lan chay hien tai;
+          * doi tuong do CHINH be mat nay tao ra, luon o trang thai draft,
+            khong co duong xuat ban.
+
+        Bao dam bu duoc kiem truc tiep o `test_canary_api_surface.py`
+        (`test_canary_khong_xoa_duoc_truyen_that`,
+        `test_canary_khong_don_duoc_do_cua_lan_chay_khac`,
+        `test_thieu_canary_run_id_thi_fail_closed`). Mien tru nay HEP theo dung
+        tien to; bat ky route quan tri nao khac cham toi `novel` van chi duoc GET.
         """
+        MIEN_TRU = "/api/admin/canary/"
         for r in server_main.app.routes:
             d = getattr(r, "path", "")
             if d.startswith("/api/admin/") and "novel" in d:
+                if d.startswith(MIEN_TRU):
+                    # Mien tru chi co gia tri khi route do THUC SU dung dung
+                    # phu thuoc canary — neu ai do doi sang admin thuong, mien
+                    # tru nay khong con che chan nua va bai test phai do.
+                    phu_thuoc = [
+                        sub.call for sub in getattr(getattr(r, "dependant", None),
+                                                    "dependencies", [])
+                    ]
+                    self.assertIn(
+                        server_main.canary_ops_profile, phu_thuoc,
+                        f"{d} nam trong mien tru nhung khong dung canary_ops_profile")
+                    continue
                 methods = {m for m in getattr(r, "methods", set())
                            if m not in ("HEAD", "OPTIONS")}
                 self.assertEqual(methods, {"GET"}, d)

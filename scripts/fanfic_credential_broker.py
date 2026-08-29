@@ -86,7 +86,30 @@ KNOWN_NAMES = (
     # every consumer moved in one commit. The name now says what it is -- a
     # service credential, not a human admin's session.
     "FANFIC_CANARY_SERVICE_TOKEN",
+    # Appwrite key for SCHEMA administration (collections/attributes/indexes).
+    # Deliberately separate from the runtime `APPWRITE_API_KEY` that Render
+    # holds: the backend only needs `documents`, and granting it
+    # `collections.write` would hand schema-mutation power to every process
+    # carrying the runtime key. Migrations are an operator action, so they
+    # carry an operator credential -- and it lives HERE, in the OS credential
+    # store, never in `server/.env`, never on Render.
+    "APPWRITE_SCHEMA_API_KEY",
 )
+
+#: Render env vars this module is permitted to read the VALUE of.
+#:
+#: An allowlist, not a blocklist, and checked before the request is built.
+#: `render_env_names` returns keys only precisely so that a bug here cannot
+#: turn the broker into a secret exfiltrator; this function is the one
+#: deliberate exception, so it is bounded by name rather than by caller
+#: discipline. Every entry is non-secret deployment coordinates that the
+#: operator can already read in the Render dashboard. `APPWRITE_API_KEY` is
+#: absent ON PURPOSE and must never be added.
+RENDER_NON_SECRET_ENV = frozenset({
+    "APPWRITE_ENDPOINT",
+    "APPWRITE_PROJECT_ID",
+    "APPWRITE_DATABASE_ID",
+})
 
 
 class BrokerEnvironmentError(RuntimeError):
@@ -373,6 +396,87 @@ def render_env_names(api_key: str, service_id: str) -> list:
     # An empty list is a legitimate answer (a service with no env vars yet) and
     # is NOT treated as failure: a genuine read error already raised above.
     return sorted(names)
+
+
+def render_non_secret_env(api_key: str, service_id: str) -> dict:
+    """Read the VALUES of the non-secret deployment coordinates, and only those.
+
+    Refuses to return anything outside `RENDER_NON_SECRET_ENV`. The filter is
+    applied to the RESPONSE, so a Render-side rename or an injected extra
+    variable cannot widen what comes back -- the allowlist decides, not the
+    server.
+
+    Raises `RenderError` on an unreadable listing rather than returning a
+    partial map: a caller that silently got three of four coordinates would
+    point schema tooling at the wrong project.
+    """
+    found: dict = {}
+    cursor = None
+    complete = False
+    for _ in range(50):
+        path = f"/services/{service_id}/env-vars?limit=100"
+        if cursor:
+            path += f"&cursor={urllib.parse.quote(cursor)}"
+        _, data = _render(api_key, "GET", path)
+        if not isinstance(data, list):
+            raise RenderError("env var listing returned an unexpected shape")
+        for entry in data:
+            ev = entry.get("envVar", entry) if isinstance(entry, dict) else {}
+            if not isinstance(ev, dict):
+                continue
+            key = ev.get("key")
+            # The allowlist test happens HERE, on the way out. Anything not
+            # named in it is dropped before it can reach a caller, a log, or
+            # a traceback.
+            if key in RENDER_NON_SECRET_ENV:
+                found[key] = ev.get("value") or ""
+        if len(data) < 100:
+            complete = True
+            break
+        cursor = (data[-1] or {}).get("cursor")
+        if not cursor:
+            raise RenderError("env var list looks truncated and offers no cursor")
+    if not complete:
+        raise RenderError("env var list exceeded the pagination ceiling")
+    return found
+
+
+def appwrite_admin_env() -> dict:
+    """Everything `scripts.setup_appwrite` needs, assembled in memory.
+
+    Coordinates come from Render (non-secret, already configured); the schema
+    key comes from the OS credential store. The returned mapping is meant to
+    be pushed straight into `os.environ` of the migration process and NEVER
+    printed, written to a file, or passed as an argument.
+
+    Fails closed and names the missing piece, because a half-populated
+    environment would make `setup_appwrite` talk to the wrong place or fail
+    with an opaque 401.
+    """
+    render_key = fetch("RENDER_API_KEY")
+    if not render_key:
+        raise BrokerEnvironmentError(
+            "RENDER_API_KEY chưa có trong Windows Credential Manager. "
+            "Chạy: fanfic_credential_broker.py store --name RENDER_API_KEY")
+    schema_key = fetch("APPWRITE_SCHEMA_API_KEY")
+    if not schema_key:
+        raise BrokerEnvironmentError(
+            "APPWRITE_SCHEMA_API_KEY chưa có trong Windows Credential Manager. "
+            "Tạo API key trong Appwrite Console với scopes: databases.read, "
+            "collections.read, collections.write, attributes.read, "
+            "attributes.write, indexes.read, indexes.write — rồi chạy: "
+            "fanfic_credential_broker.py store --name APPWRITE_SCHEMA_API_KEY")
+
+    service = render_resolve_service(render_key)
+    coords = render_non_secret_env(render_key, service["id"])
+    thieu = sorted(RENDER_NON_SECRET_ENV - set(coords))
+    if thieu:
+        raise RenderError(
+            "Render thiếu toạ độ Appwrite không phải bí mật: " + ", ".join(thieu))
+
+    env = dict(coords)
+    env["APPWRITE_SCHEMA_API_KEY"] = schema_key
+    return env
 
 
 def render_upsert_env(api_key: str, service_id: str, key: str, value: str) -> None:

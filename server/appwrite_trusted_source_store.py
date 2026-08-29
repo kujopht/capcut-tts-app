@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
-from server.adapters import NotFoundError
+from server.adapters import NotFoundError, raise_for_appwrite_404
 from server.config import AppwriteSettings
 from server.domain import now_iso
 from server.secret_redaction import thong_diep_loi_an_toan
@@ -260,7 +260,9 @@ class AppwriteTrustedSourceStore:
         except httpx.HTTPError as exc:
             raise NotFoundError(f"Không kết nối được Appwrite: {exc}") from exc
         if response.status_code == 404:
-            raise NotFoundError("Không tìm thấy bản ghi.")
+            # Phan biet "thieu collection" voi "thieu ban ghi" — xem
+            # `adapters.raise_for_appwrite_404`.
+            raise_for_appwrite_404(response, path)
         if response.status_code >= 400:
             try:
                 body = response.json()

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import httpx
 
-from server.adapters import AppwriteUnavailableError, NotFoundError, PermissionDenied
+from server.adapters import AppwriteUnavailableError, NotFoundError, PermissionDenied, raise_for_appwrite_404
 from server.appwrite_social import (
     COL_COMMENTS,
     COL_NOTIFICATIONS,
@@ -432,7 +432,8 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                 raise AppwriteUnavailableError(
                     thong_diep_loi_an_toan(body, status_code=response.status_code))
             if response.status_code == 404:
-                raise NotFoundError("Không tìm thấy bản ghi.")
+                # Phan biet "thieu collection" voi "thieu ban ghi".
+                raise_for_appwrite_404(response, path)
             raise NotFoundError(
                 thong_diep_loi_an_toan(body, status_code=response.status_code))
         if response.status_code == 204 or not response.content:

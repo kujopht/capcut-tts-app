@@ -590,7 +590,16 @@ def cmd_sync_render_canary(args) -> int:
         return 3
     print(f"  {CANARY_ENV_KEY}: PRESENT (value not displayed)")
     print(f"  preserved {len(after) - 1} other env vars; none lost")
-    print("  Render redeploys automatically on an env change; poll `render-status`.")
+    # MEASURED, not assumed (2026-08-30): `fas-prod-api` has autoDeploy=no, and
+    # writing an env var through the API does NOT start a deploy. The service
+    # sat on f4833d03 while main had moved four PRs ahead. The previous line
+    # here claimed the opposite, which is the worst kind of wrong: an operator
+    # who believes it polls `render-status`, sees "live", and concludes the new
+    # value is in effect when the running process never restarted.
+    print("  NOTE: this does NOT redeploy. The new value reaches the running")
+    print("  service only after a deploy. Check `autoDeploy` on the service:")
+    print("    autoDeploy=no  -> you must trigger a deploy explicitly")
+    print("    autoDeploy=yes -> a push to the tracked branch deploys it")
     return 0
 
 

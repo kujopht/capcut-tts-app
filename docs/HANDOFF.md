@@ -29,6 +29,8 @@ Tài liệu này để một phiên khác tiếp tục được khi phiên hiệ
 | Schema scraper trên production | **ĐÃ CẤP PHÁT** — audit `EXIT=0` |
 | Staging (`staging.fanfic.world`) | **ĐÃ RETIRED (2026-08)** — xem `docs/DEV_PUBLIC_STAGING.md` |
 | `autoDeploy` của Render | **TẮT** — mọi lần lên production đều phải chủ động |
+| Cổng bắt buộc của `main` | Backend + Web + **gitleaks** |
+| Story Harvester V4 | **ĐANG XÂY** — nền móng, chưa áp gì lên sản xuất |
 
 `autoDeploy=no` là điều dễ vấp nhất ở đây: merge vào `main` **không** đưa mã
 lên production. Đã đo được thật — production nằm lại ở `f4833d03` trong khi
@@ -209,6 +211,61 @@ một trang chưa hydrate xong — `innerText` còn rỗng nên "không thấy" 
 thành "đã đăng nhập". Đã đổi sang dấu hiệu **khẳng định**
 (`[aria-label^="Tài khoản của"]`, chỉ render khi có `profile`), nên trang đang
 tải rơi vào "chưa kết luận được" thay vì âm thầm đi qua.
+
+## Deploy sản xuất — `autoDeploy=no`, và ghi env KHÔNG deploy
+
+Đo được thật (2026-08-30), không phải suy đoán. Hai điều dễ vấp, đã vấp cả hai:
+
+| Hạng mục | Điều dễ tưởng | Thực tế đo được |
+|---|---|---|
+| Merge vào `main` | mã lên sản xuất | **KHÔNG.** `fas-prod-api` có `autoDeploy=no`; production nằm lại ở `f4833d03` trong khi `main` đã đi tiếp bốn PR |
+| Ghi biến môi trường qua API Render | dịch vụ tự khởi động lại | **KHÔNG.** Giá trị mới chỉ tới tiến trình đang chạy sau một lần deploy |
+
+Điểm nguy hiểm của điều thứ hai: người vận hành tin là đã xong, poll
+`render-status`, thấy `live`, và kết luận giá trị mới đang có hiệu lực — trong
+khi tiến trình chưa hề khởi động lại. `fanfic_credential_broker.py` trước đây in
+đúng câu sai đó; nay nó nói ngược lại và nhắc kiểm `autoDeploy`.
+
+Cách deploy có chủ đích (đã dùng thật cho `f201dc7`): xác minh service/branch
+trước, rồi `POST /services/{id}/deploys`, rồi theo dõi tới `live` và **đối chiếu
+commit SHA** trả về với `main` — không tin trạng thái `live` một mình.
+
+## Cổng bắt buộc của `main`
+
+`Quet bi mat (gitleaks)` nay là **required status check**, cùng với Backend và
+Web. Thêm bằng endpoint **chỉ-thêm**
+(`protection/required_status_checks/contexts`) chứ không phải PUT toàn bộ cấu
+hình protection — PUT sẽ thay cả khối và một sơ suất ở đó là **gỡ mất** một lớp
+bảo vệ khác. Đã kiểm lại sau khi thêm: `allow_force_pushes=false`,
+`allow_deletions=false`, không mất gì.
+
+## Story Harvester V4 — nền móng (đang xây)
+
+Đã có trên `main`:
+
+* **Lưới hợp đồng schema Bulk Import** (#102). `appwrite_bulk_import_store.py`
+  khẳng định trong mã rằng có một bộ test đối chiếu `PERSISTED_FIELDS` với
+  `SCHEMA`; **không hề có**. Nay có, cộng trần 36 ký tự của `$id` qua ba tầng
+  `batch_id`→`item_id`→`chapter_id`, và bảy bài cho các trạng thái schema nửa vời.
+* **Phát hiện thay đổi gia tăng** (#103) — `server/scraper/change_detection.py`.
+  Làm nốt phần `incremental.py` nói thẳng là còn thiếu: `UPDATED_CHAPTER`. Dùng
+  validator `ETag`/`Last-Modified` nên một chương không đổi tốn đúng một **304
+  thân rỗng**, không phải cả trang.
+
+Hai cặp dễ lẫn được tách bạch có chủ đích, vì đọc nhầm gây **mất dữ liệu thật**:
+
+* 5xx/429/lỗi mạng → `TRANSIENT_FAILURE`, **không** phải "đã xoá". Gộp lại sẽ
+  khiến một chính sách dọn dẹp tự động xoá nội dung thật vì một sự cố mạng.
+* Trang hỏng → `TRANSIENT_FAILURE`, **không** phải "không đổi". Nuốt lỗi phân
+  tích thành "không đổi" làm bản sửa của nguồn không bao giờ được nhập.
+
+Nhãn `NEEDS_BASELINE` tồn tại vì sự trung thực: một bản ghi thiếu `content_hash`
+**không** có cơ sở để gọi là "đã đổi". Bản ghi từng thất bại cũng vào nhãn này —
+trước đó chúng bị coi là `UNCHANGED` và không bao giờ được thử lại.
+
+**Chưa làm trong V4:** SourceAdapter protocol chính thức
+(`server/scraper/adapters/__init__.py` vẫn rỗng), state machine harvest, tầng
+lập lịch, và telemetry. Không có gì trong V4 được áp lên sản xuất.
 
 ## Bối cảnh
 

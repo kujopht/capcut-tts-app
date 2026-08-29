@@ -89,6 +89,18 @@ jobs:
   test_gate:
     name: Required test gate (reused from ci.yml)
     uses: ./.github/workflows/ci.yml
+    # A reusable workflow can never hold MORE permission than its caller
+    # grants. ci.yml's gitleaks job asks for `pull-requests: write` (it
+    # annotates PRs), while this workflow's top-level grant is `contents:
+    # read` — so the call was rejected before any job started, as
+    # `startup_failure`, with no log to point at the cause.
+    #
+    # Granted on THIS JOB rather than at the top of the file: the deploy and
+    # certification jobs have no business writing to pull requests, and a
+    # workflow-wide grant would hand it to them too.
+    permissions:
+      contents: read
+      pull-requests: write
 
   validate:
     name: Validate confirmation + exact commit

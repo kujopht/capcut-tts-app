@@ -50,7 +50,14 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from ctypes import wintypes
+# `ctypes.wintypes` raises on non-Windows, which would make this whole module
+# unimportable there -- and with it the Render adapter below, whose logic is
+# platform-independent and is the part most worth testing in CI (CI runs on
+# Linux). The credential-store half stays Windows-only and refuses to run
+# elsewhere via `_advapi32()`.
+_WINDOWS = sys.platform == "win32"
+if _WINDOWS:
+    from ctypes import wintypes
 from typing import Optional
 
 for _stream in (sys.stdout, sys.stderr):
@@ -92,31 +99,30 @@ class BrokerEnvironmentError(RuntimeError):
     """
 
 
-class FILETIME(ctypes.Structure):
-    _fields_ = [("dwLowDateTime", wintypes.DWORD),
-                ("dwHighDateTime", wintypes.DWORD)]
+if _WINDOWS:
+    class FILETIME(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", wintypes.DWORD),
+                    ("dwHighDateTime", wintypes.DWORD)]
 
+    class CREDENTIAL_ATTRIBUTE(ctypes.Structure):
+        _fields_ = [("Keyword", wintypes.LPWSTR),
+                    ("Flags", wintypes.DWORD),
+                    ("ValueSize", wintypes.DWORD),
+                    ("Value", ctypes.POINTER(ctypes.c_byte))]
 
-class CREDENTIAL_ATTRIBUTE(ctypes.Structure):
-    _fields_ = [("Keyword", wintypes.LPWSTR),
-                ("Flags", wintypes.DWORD),
-                ("ValueSize", wintypes.DWORD),
-                ("Value", ctypes.POINTER(ctypes.c_byte))]
-
-
-class CREDENTIAL(ctypes.Structure):
-    _fields_ = [("Flags", wintypes.DWORD),
-                ("Type", wintypes.DWORD),
-                ("TargetName", wintypes.LPWSTR),
-                ("Comment", wintypes.LPWSTR),
-                ("LastWritten", FILETIME),
-                ("CredentialBlobSize", wintypes.DWORD),
-                ("CredentialBlob", ctypes.POINTER(ctypes.c_byte)),
-                ("Persist", wintypes.DWORD),
-                ("AttributeCount", wintypes.DWORD),
-                ("Attributes", ctypes.POINTER(CREDENTIAL_ATTRIBUTE)),
-                ("TargetAlias", wintypes.LPWSTR),
-                ("UserName", wintypes.LPWSTR)]
+    class CREDENTIAL(ctypes.Structure):
+        _fields_ = [("Flags", wintypes.DWORD),
+                    ("Type", wintypes.DWORD),
+                    ("TargetName", wintypes.LPWSTR),
+                    ("Comment", wintypes.LPWSTR),
+                    ("LastWritten", FILETIME),
+                    ("CredentialBlobSize", wintypes.DWORD),
+                    ("CredentialBlob", ctypes.POINTER(ctypes.c_byte)),
+                    ("Persist", wintypes.DWORD),
+                    ("AttributeCount", wintypes.DWORD),
+                    ("Attributes", ctypes.POINTER(CREDENTIAL_ATTRIBUTE)),
+                    ("TargetAlias", wintypes.LPWSTR),
+                    ("UserName", wintypes.LPWSTR)]
 
 
 def _advapi32():
@@ -258,15 +264,13 @@ def _render(api_key: str, method: str, path: str, payload=None, timeout: int = 6
         # Authorization header or the {"value": <secret>} body -- and this
         # message is printed to stderr. The status code is enough to act on.
         # Raised by independent security review.
+        # Close WITHOUT reading. An unbounded read of a hostile or oversized
+        # error body buys nothing here -- the body is discarded either way --
+        # and closing alone releases the connection.
         try:
-            exc.read()
+            exc.close()
         except Exception:
-            pass                      # draining is best-effort; never fatal
-        finally:
-            try:
-                exc.close()
-            except Exception:
-                pass
+            pass
         raise RenderError(f"Render API {method} {path} -> HTTP {exc.code} "
                           f"(response body withheld: it can reflect the request)")
     except Exception as exc:
@@ -280,11 +284,15 @@ def render_identity(api_key: str) -> str:
     to mutate configuration on a service we may not have understood.
     """
     _, data = _render(api_key, "GET", "/owners?limit=10")
-    owners = [e.get("owner", {}) for e in (data or [])]
+    if not isinstance(data, list):
+        # A malformed 2xx must surface as a downstream failure, not as an
+        # AttributeError traceback with the wrong exit code.
+        raise RenderError("owner lookup returned an unexpected shape — identity unverified")
+    owners = [e.get("owner", {}) for e in data if isinstance(e, dict)]
     # Owner IDs only, never names or emails. If the wrong tenant's key were
     # ever stored, printing their name/email would disclose it before anyone
     # could react -- and the id is enough to tell tenants apart.
-    ids = [o.get("id", "?") for o in owners]
+    ids = [o.get("id", "?") for o in owners if isinstance(o, dict)]
     if not ids:
         raise RenderError("Render API returned no owner — identity unverified")
     return ", ".join(ids)
@@ -297,8 +305,11 @@ def render_resolve_service(api_key: str, name: str = RENDER_SERVICE) -> dict:
     service would write a production credential into somebody else's config.
     """
     _, data = _render(api_key, "GET", f"/services?name={urllib.parse.quote(name)}&limit=20")
-    entries = data if isinstance(data, list) else []
-    services = [e.get("service", {}) for e in entries if isinstance(e, dict)]
+    if not isinstance(data, list):
+        # NOT "not found": a malformed response is a downstream failure, and
+        # reporting it as not-found would hide a possible ambiguous match.
+        raise RenderError("service lookup returned an unexpected shape")
+    services = [e.get("service", {}) for e in data if isinstance(e, dict)]
     # `?name=` is a FILTER on Render's side, not an exact match, so the
     # equality test below is what actually guarantees the right service.
     exact = [s for s in services if isinstance(s, dict) and s.get("name") == name]
@@ -333,7 +344,13 @@ def render_env_names(api_key: str, service_id: str) -> list:
         if cursor:
             path += f"&cursor={urllib.parse.quote(cursor)}"
         _, data = _render(api_key, "GET", path)
-        page = data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            # Treating a malformed 2xx as "empty and complete" would let the
+            # write proceed against an unverifiable pre-write snapshot, which
+            # is exactly what the before/after check exists to prevent.
+            raise RenderError("env var listing returned an unexpected shape "
+                              "— refusing to modify on an unverifiable snapshot")
+        page = data
         for entry in page:
             ev = entry.get("envVar", entry) if isinstance(entry, dict) else {}
             key = ev.get("key") if isinstance(ev, dict) else None
@@ -372,9 +389,13 @@ def render_upsert_env(api_key: str, service_id: str, key: str, value: str) -> No
 
 def render_latest_deploy(api_key: str, service_id: str) -> dict:
     _, data = _render(api_key, "GET", f"/services/{service_id}/deploys?limit=1")
-    if not data:
+    if not isinstance(data, list) or not data:
         return {}
-    return (data[0] or {}).get("deploy", {})
+    first = data[0]
+    if not isinstance(first, dict):
+        return {}
+    deploy = first.get("deploy", {})
+    return deploy if isinstance(deploy, dict) else {}
 
 
 def cmd_render_status(args) -> int:

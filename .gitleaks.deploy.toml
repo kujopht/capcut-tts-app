@@ -1,0 +1,89 @@
+# Cau hinh gitleaks CHI cho cong deploy (quet cay lam viec).
+#
+# Vi sao co tep RIENG thay vi sua `.gitleaks.toml`: `.gitleaks.toml` duoc
+# dung boi quet PR/CI. Them allowlist vao do se lam yeu ca duong PR — dieu
+# KHONG duoc phep. Tep nay MO RONG cau hinh goc va chi them mien tru cho
+# dung cac fixture tong hop DA XAC MINH, nen:
+#
+#   PR/CI    -> .gitleaks.toml        (khong doi mot dong nao)
+#   deploy   -> .gitleaks.deploy.toml (goc + mien tru hep duoi day)
+#
+# Vi sao can mien tru: dau van tay cua gitleaks o che do lich su CO commit
+# SHA (`<commit>:file:rule:line`), con o che do cay lam viec thi KHONG
+# (`file:rule:line`). Cac muc trong `.gitleaksignore` deu mang commit SHA,
+# nen khong khop khi quet cay. Thay vi doi commit SHA (mong manh, hong lai
+# ngay lan sua tep tiep theo), o day dung allowlist theo DUONG DAN + LUAT.
+#
+# `targetRules` la phan quan trong nhat: moi mien tru chi ap dung cho DUNG
+# mot luat tren DUNG mot tep. Mot bi mat THAT o cung tep nhung khop luat
+# khac VAN bi bat, va moi tep khac trong repo khong bi anh huong gi.
+
+[extend]
+path = ".gitleaks.toml"
+
+# --- Bao cao/benchmark: gia tri minh hoa, khong phai khoa that ------------
+
+[[allowlists]]
+description = """
+docs/reports/cerebras-groq-benchmark-raw.json — ket qua benchmark thô. Cac
+chuoi bi bat la ID/khoa minh hoa trong ban ghi ket qua, khong phai khoa
+that. Da duoc tham dinh truoc do va liet ke trong .gitleaksignore.
+"""
+targetRules = ["generic-api-key"]
+paths = ['''^docs/reports/cerebras-groq-benchmark-raw\.json$''']
+
+[[allowlists]]
+description = """
+docs/reports/preprod-security-audit.md — chinh la bao cao kiem toan bao mat,
+NOI VE cac phat hien cua no. Chuoi JWT bi bat duoc tep tu goi ten la "token
+mau cong khai kinh dien cua jwt.io"
+(eyJhbGciOiJIUzI1NiJ9...dQw4w9WgXcQ — phan payload la ID mot video rickroll).
+Khong phai bi mat.
+"""
+targetRules = ["jwt"]
+paths = ['''^docs/reports/preprod-security-audit\.md$''']
+
+# --- Test fixtures: bi mat tong hop la DIEU KIEN de test ton tai ----------
+
+[[allowlists]]
+description = """
+server/tests/test_secret_redaction.py — bo test cua server/secret_redaction.py,
+ton tai de CHUNG MINH bi mat bi loc khoi log. No BAT BUOC phai chua chuoi
+hinh dang bi mat. Docstring ghi ro no tai hien HINH DANG cua su co
+2026-08-16, "khong phai NOI DUNG"; hang so ten la _KHOA_APPWRITE_GIA_LAP
+("khoa Appwrite gia lap").
+"""
+targetRules = ["generic-api-key", "jwt"]
+paths = ['''^server/tests/test_secret_redaction\.py$''']
+
+[[allowlists]]
+description = """
+Test cua duong anh (BYOP) — khoa nha cung cap gia lap trong fixture. Da
+duoc tham dinh truoc do va liet ke trong .gitleaksignore.
+"""
+targetRules = ["generic-api-key"]
+paths = [
+  '''^server/tests/test_image_service\.py$''',
+  '''^server/tests/test_image_byop_service\.py$''',
+]
+
+[[allowlists]]
+description = """
+Test BYOK dich thuat — nguoi dung tu mang khoa cua ho, nen fixture PHAI co
+chuoi hinh dang khoa. Da doc va xac minh tung dong bi bat:
+`byok.v1.a.secret` (chuoi giu cho hien nhien) va `gsk_abcdefgh1234AB42`
+(hinh dang khoa Groq nhung ruot la day ky tu ban phim). Khong phai khoa that.
+"""
+targetRules = ["generic-api-key"]
+paths = [
+  '''^server/tests/test_translation_byok_store\.py$''',
+  '''^server/tests/test_translation_byok_routes\.py$''',
+]
+
+[[allowlists]]
+description = """
+web/tests/admin-trusted-sources-websub.test.mjs — fixture WebSub. Da duoc
+tham dinh truoc do va liet ke trong .gitleaksignore.
+"""
+targetRules = ["generic-api-key"]
+paths = ['''^web/tests/admin-trusted-sources-websub\.test\.mjs$''']

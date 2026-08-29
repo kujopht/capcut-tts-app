@@ -95,12 +95,15 @@ jobs:
           # hien dai (thay cho `detect --no-git` da bi bo). Neu ban nay chua
           # co `dir`, dung dung duong cu — khong hard-code mot lenh co the da
           # bi loai bo.
+          # `.gitleaks.deploy.toml` MO RONG `.gitleaks.toml` va chi them mien
+          # tru theo duong-dan+luat cho cac fixture tong hop da xac minh.
+          # Cau hinh PR/CI khong bi cham toi.
           if ./gitleaks dir --help >/dev/null 2>&1; then
             echo "che do: gitleaks dir (hien dai)"
-            ./gitleaks dir . --config .gitleaks.toml --redact --exit-code 1 --verbose
+            ./gitleaks dir . --config .gitleaks.deploy.toml --redact --exit-code 1 --verbose
           else
             echo "che do: gitleaks detect --no-git (ban cu)"
-            ./gitleaks detect --no-git --source . --config .gitleaks.toml --redact --exit-code 1 --verbose
+            ./gitleaks detect --no-git --source . --config .gitleaks.deploy.toml --redact --exit-code 1 --verbose
           fi
 
   backend:

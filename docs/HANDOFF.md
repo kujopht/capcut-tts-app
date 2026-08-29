@@ -23,19 +23,16 @@ Tài liệu này để một phiên khác tiếp tục được khi phiên hiệ
 | Hạng mục | Trạng thái |
 |---|---|
 | Repository | **PUBLIC** |
-| Staging (Render) | **ĐÃ DEPLOY** commit `8001cfc`, cả API lẫn web đều Live |
-| Nghiệm thu staging | **82/82 đạt** với `--web`, trên hạ tầng thật |
-| CI của HEAD `14f4a31` | **XANH** |
-| PR #1 → `main` | **CHƯA MERGE** |
-| Production | **CHƯA DEPLOY** — chưa có môi trường production nào được dựng |
+| Production API (Render `fas-prod-api`) | **LIVE** commit `f201dc7` |
+| Kho dữ liệu production | **Appwrite thật** (`/api/health` → `data_backend=appwrite`) |
+| Story Harvester V3 | **ĐÃ CHỨNG NHẬN** — Phase 15: 17/17, Phase 18: 17/17 |
+| Schema scraper trên production | **ĐÃ CẤP PHÁT** — audit `EXIT=0` |
+| Staging (`staging.fanfic.world`) | **ĐÃ RETIRED (2026-08)** — xem `docs/DEV_PUBLIC_STAGING.md` |
+| `autoDeploy` của Render | **TẮT** — mọi lần lên production đều phải chủ động |
 
-Phân biệt hai commit, vì chúng khác nhau và dễ nhầm:
-
-* **`8001cfc`** — mã đang **chạy** trên staging. Toàn bộ kết quả nghiệm thu
-  82/82 là của bản này.
-* **`14f4a31`** — HEAD hiện tại. So với `8001cfc` nó **chỉ thêm tài liệu**
-  (`docs/HANDOFF.md`, `deploy/RUNBOOK-WORKER.md`), không đụng một dòng mã thực
-  thi nào. Vì vậy kết quả 82/82 vẫn áp dụng cho HEAD.
+`autoDeploy=no` là điều dễ vấp nhất ở đây: merge vào `main` **không** đưa mã
+lên production. Đã đo được thật — production nằm lại ở `f4833d03` trong khi
+`main` đã đi tiếp bốn PR.
 
 **82 hay 77?** 82 là tổng số kiểm tra khi chạy kèm `--web` (kiểm cả frontend).
 Bỏ `--web` thì còn 77. Khác **số kiểm tra**, không phải khác kết quả.
@@ -47,6 +44,171 @@ Bỏ `--web` thì còn 77. Khác **số kiểm tra**, không phải khác kết 
   mức" bên dưới để biết cái gì *đã* có.
 * **Chạy NghiTTS/Piper trên GPU đám mây (Modal hoặc tương đương).** Chưa khảo
   sát, chưa dựng gì. Hiện Ngọc Huyền chạy CPU trên laptop Windows.
+
+## Story Harvester V3 — ĐÃ CHỨNG NHẬN SẢN XUẤT (2026-08-30)
+
+Mốc này đã đóng. Mục này ghi lại **trạng thái đã kiểm chứng**, không phải kế
+hoạch: mọi con số dưới đây đến từ một lần chạy thật trên hạ tầng thật.
+
+### Kết quả chứng nhận
+
+| Hạng mục | Kết quả |
+|---|---|
+| Phase 15 (canary direct-to-web) | **17/17 ĐẠT** |
+| Phase 18 (chứng nhận sản xuất) | **17/17 ĐẠT** |
+| Commit đang chạy trên production | `f201dc76ddc30e9a65b8581ccf6cea832f1fc02f` |
+| Kho dữ liệu | **Appwrite thật** — `/api/health` → `data_backend=appwrite` |
+| Schema scraper | `scrape_runs`, `scrape_run_items`, `site_profiles` — **đã cấp phát** |
+| Đối chiếu schema | `fanfic_appwrite_schema.py audit --only <c>` → **EXIT=0** cho cả ba |
+| Dọn fixture canary | **ĐÃ XÁC MINH** — `{'deleted': True, 'removed': {'chapters': 2}}`, tra lại theo ID → 404 |
+| 13 series thật | **KHÔNG BỊ ĐỘNG TỚI** |
+
+Đợt quét thật đã chạy trọn vẹn trên production: khám phá 21 chương của
+`vi.wikisource.org/wiki/Lều_chõng`, quét 2 chương (12.186 và 18.004 ký tự),
+đọc được hàng đợi duyệt, ghi Novel/Chapter thật ở trạng thái `draft`, xác minh
+không lộ ra đường công khai, rồi tự dọn sạch.
+
+### Vì sao "13 series thật không bị động tới" là bằng chứng, không phải lời hứa
+
+Khoá `APPWRITE_SCHEMA_API_KEY` được cấp **đúng bảy scope**: `databases.read`,
+`collections.read/write`, `attributes.read/write`, `indexes.read/write`.
+
+Cố ý **không** cấp `documents.*`. Đã thử thật để chứng minh ranh giới:
+
+```
+[1] Doc CAU TRUC novels  : DUOC PHEP (9 thuoc tinh)
+[2] Doc TAI LIEU novels  : BI TU CHOI — missing scopes (["documents.read"])
+[3] Doc TAI LIEU chapters: BI TU CHOI
+```
+
+Khoá này **không có khả năng** đọc hay sửa một tài liệu nào. Đó là bằng chứng
+cấu trúc, mạnh hơn hẳn một phép đếm trước/sau.
+
+Cũng không cấp `databases.write` — database đã tồn tại, migration không được
+phép tạo hay xoá database.
+
+### Phase 18: 14 kiểm tra canary + 3 kiểm tra admin, chạy TÁCH RỜI
+
+**Đây là điểm phải đọc kỹ trước khi tin con số 17.**
+
+17 kiểm tra của Phase 18 đến từ **hai lần chạy với hai danh tính khác nhau**,
+không phải một lần gọi script duy nhất:
+
+| Nhóm | Số lượng | Danh tính | Vì sao |
+|---|---|---|---|
+| health/SHA, auth gate, route tồn tại, discover, quét nhỏ, resume, hàng đợi duyệt | 14 | `FANFIC_CANARY_SERVICE_TOKEN` | các route này dùng `scraper_ops_profile`, chấp nhận canary |
+| `cancel`, `retry`, `check-updates` | 3 | phiên admin người thật | các route này dùng `admin_or_owner_profile` |
+
+Ba route cuối trả **401** với canary. Đó **không phải lỗi** — là ranh giới
+quyền có chủ ý: `scraper_ops_profile` chỉ mở cho canary đúng những gì Phase 15
+cần để chạy không người trực (`discover`, `runs`, `drive` — route `drive` có
+ghi chú "CÓ CHỦ Ý" ngay trong mã). Việc mở rộng canary sang `cancel`/`retry`
+đã bị **từ chối một cách có ý thức**, vì nó sẽ biến credential dịch vụ thành
+một token admin thường.
+
+**Điều kiện để cộng hai nửa lại:** đã kiểm tra tính liên tục của bản triển
+khai trước khi gộp — SHA máy chủ = SHA mong đợi = `main` cục bộ =
+`f201dc76ddc3`, `data_backend=appwrite` ở cả hai nửa. Nếu SHA lệch, con số gộp
+sẽ vô nghĩa và không được tuyên bố.
+
+### Kiến trúc credential broker
+
+Bí mật **không bao giờ** nằm trong `server/.env`, trong kho mã, hay trong ngữ
+cảnh của model.
+
+* `scripts/fanfic_credential_broker.py` — Windows Credential Manager qua
+  `ctypes`. Nhập bằng `getpass` nên giá trị không vào argv hay lịch sử shell.
+* Toạ độ **không phải bí mật** (`APPWRITE_ENDPOINT`, `APPWRITE_PROJECT_ID`,
+  `APPWRITE_DATABASE_ID`) đọc **tự động** từ Render qua
+  `render_non_secret_env()` — hàm DUY NHẤT trả về *giá trị* biến môi trường
+  của Render, và nó bị chặn bằng một **danh sách cho phép bất biến** áp lên
+  **phản hồi**, không lên request. `APPWRITE_API_KEY` nằm ngoài danh sách
+  **có chủ ý**, kèm một bài kiểm thử tồn tại chỉ để ngăn một bản sửa sau thêm
+  nó vào cho tiện.
+* `scripts/fanfic_appwrite_schema.py` — `audit` (chỉ đọc) và `apply --only C`.
+  Khoá đi thẳng từ credential store vào bộ nhớ tiến trình rồi vào header
+  `X-Appwrite-Key`; `os.environ` được **khôi phục** sau khi chạy nên khoá
+  không sống lâu hơn lệnh và không lọt sang tiến trình con nào sinh ra sau đó.
+
+**`--dry-run` KHÔNG dùng được làm cổng "không còn thay đổi nào".** Nó không hề
+gọi Appwrite (`_exists` trả `False`, `_call` trả `None`), nên nó luôn xanh kể
+cả trên một database trống trơn. Cổng thật là `audit` (EXIT=0 nghĩa là khớp).
+
+### Kiến trúc bootstrap trình duyệt admin
+
+Phiên admin là **session secret của Appwrite**, KHÔNG phải JWT — xem
+`server/appwrite_adapter.py::profile_from_token`: nó dùng header
+`X-Appwrite-Session`, và gửi một JWT vào đó sẽ nhận `"Invalid token:
+Incomplete segments"`. `account.createJWT()` vừa **không gọi được** (web app
+không có SDK Appwrite; `web/package.json` không có phụ thuộc `appwrite`) vừa
+**sai loại credential**.
+
+Không dùng được Claude-in-Chrome cho việc này: **mọi công cụ MCP trả kết quả
+về model**, nên đọc thẳng `localStorage` sẽ đặt credential vào ngữ cảnh model.
+Lối vòng "trang tự đẩy sang `127.0.0.1`" cũng hỏng — Chrome chặn một trang
+CÔNG KHAI gọi vào địa chỉ MẠNG RIÊNG (Private Network Access); thêm header
+`Access-Control-Allow-Private-Network: true` **vẫn bị chặn**, trong khi cùng
+máy chủ đó trả HTTP 204 khi gọi từ chính máy.
+
+Cách chạy được, và là cách đang dùng:
+
+1. Profile Playwright bền vững ở `C:\\Users\\nguye\\.fanfic-browser`, đăng nhập
+   **một lần** bằng Chrome thường.
+2. Một helper cục bộ mở lại đúng profile đó ở chế độ headless và đọc
+   `localStorage["fas.token"]` bằng `page.evaluate()` — giá trị rơi thẳng vào
+   biến của tiến trình helper, **không qua MCP**, nên PNA không áp dụng và
+   không kết quả công cụ nào mang nó.
+3. Helper xác minh `admin_role` qua `/api/auth/me`, **fail closed** nếu không
+   phải `admin`/`owner`.
+4. Token truyền cho tiến trình con **duy nhất qua biến môi trường**
+   `FAS_ADMIN_BEARER_TOKEN` (kịch bản chứng nhận tự thêm tiền tố `Bearer `).
+5. Kết thúc: xoá bản sao trong bộ nhớ. **Không** gọi `/api/auth/logout`,
+   **không** xoá `localStorage` — phiên của người vận hành được giữ nguyên
+   (đã kiểm lại: "VAN CON").
+
+Chỉ **độ dài** (396 ký tự) và **vai trò** (`admin`) từng được in ra.
+
+### Bốn khác biệt schema CÒN LẠI — cố ý không sửa
+
+Audit tìm thấy 7 khác biệt; chỉ 3 collection của scraper được cấp phát. Bốn
+cái còn lại **vẫn nguyên** và **không** được sửa trong mốc này:
+
+| Khác biệt | Vì sao để ngoài phạm vi |
+|---|---|
+| `chapter_import_batches` — thiếu cả collection | Thuộc tính năng **bulk import**, không phải scraper |
+| `chapter_import_items` — thiếu cả collection | Như trên |
+| `tts_jobs` — thiếu index `job_id_idx ['job_id']` | Thuộc TTS, không liên quan |
+| `trusted_sources` — thiếu thuộc tính `uploads_playlist_id` | Thuộc video/nguồn tin cậy |
+
+`chapter_import_*` chỉ xuất hiện trong **docstring** của
+`server/scraper/run_state.py` và `bulk.py` ("cùng hình dạng với…"), không phải
+phụ thuộc thật của scraper — đã kiểm chứng bằng mã nguồn, không suy đoán.
+
+### `feat/browser-ops-operator` — CHƯA MERGE
+
+Nhánh này (`6833d34`, chỉ có ở máy cục bộ, **chưa đẩy lên origin**) chứa
+`scripts/fanfic_browser_ops.mjs`. Nó **KHÔNG** được merge, và **KHÔNG** được
+dùng để lấy credential.
+
+Phần trình duyệt của mốc này chạy bằng **công cụ standalone trong scratchpad**,
+ngoài kho mã:
+
+| Tệp (scratchpad, không trong kho) | Việc |
+|---|---|
+| `fanfic_login_bootstrap.mjs` | mở trình duyệt có giao diện để đăng nhập một lần; **không** đọc localStorage |
+| `phase18_from_profile.mjs` | mở lại profile headless, đọc phiên trong tiến trình, xác minh vai trò, sinh tiến trình con |
+| `phase18_admin_checks.py` | ba kiểm tra admin; đọc token **chỉ** từ `os.environ` |
+| `verify_session_preserved.mjs` | xác nhận phiên còn nguyên sau khi chạy (chỉ trả CÓ/KHÔNG) |
+
+Thứ **duy nhất** dùng lại từ nhánh chưa merge là **đường dẫn profile**
+(`C:\\Users\\nguye\\.fanfic-browser`), không phải mã nguồn của nó.
+
+Một cái bẫy đã vấp và đáng ghi lại: bản dò đăng nhập đầu tiên dùng dấu hiệu
+**phủ định** ("không thấy chữ Đăng nhập") và nó **báo đạt ngay lập tức** trên
+một trang chưa hydrate xong — `innerText` còn rỗng nên "không thấy" bị đọc
+thành "đã đăng nhập". Đã đổi sang dấu hiệu **khẳng định**
+(`[aria-label^="Tài khoản của"]`, chỉ render khi có `profile`), nên trang đang
+tải rơi vào "chưa kết luận được" thay vì âm thầm đi qua.
 
 ## Bối cảnh
 
@@ -130,6 +292,12 @@ Tách bạch cho rõ:
 - `src/lib/api.ts` — lớp gọi backend đầy đủ kiểu
 - Landing page, layout có skip-link và nhãn ARIA
 - `tests/*.test.mjs` — **9 test** bảo vệ: không lộ secret, không hard-code endpoint
+
+### Story Harvester V3 — ✅ ĐÃ CHỨNG NHẬN SẢN XUẤT (2026-08-30)
+
+Phase 15: **17/17**. Phase 18: **17/17**. Production `f201dc7`, Appwrite thật,
+schema scraper đã cấp phát, audit `EXIT=0`. Chi tiết đầy đủ ở mục "Story
+Harvester V3 — ĐÃ CHỨNG NHẬN SẢN XUẤT" gần đầu tệp.
 
 ### Chưa làm — việc tiếp theo
 

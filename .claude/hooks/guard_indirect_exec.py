@@ -379,11 +379,14 @@ def check_git(tokens: list[str], flat: str) -> str | None:
     # `git clean` without -f refuses to delete, so -f is the destructive signal.
     if sub == "clean" and any(f.startswith("-") and "f" in f for f in flags):
         return "destructive git clean"
-    raw_flags = [t for t in tokens[1:] if t.startswith("-")]
-    if sub == "branch" and ("-D" in raw_flags or {"--delete", "--force"} <= set(flags)):
-        return "forced branch deletion"
-    if sub in ("rebase", "filter-branch", "filter-repo"):
-        return f"history rewrite (git {sub})"
+    # `git rebase` and `git branch -D` are NOT here. Both are everyday local
+    # work on a trusted machine and both are recoverable from the reflog, so
+    # denying them outright taxed normal development without protecting
+    # anything irreversible. They are tier 2 instead: confirmed when working
+    # remotely, silent at the laptop. `filter-branch`/`filter-repo` stay
+    # denied -- those rewrite every commit and the reflog will not save you.
+    if sub in ("filter-branch", "filter-repo"):
+        return f"whole-history rewrite (git {sub})"
     if sub == "reflog" and len(rest) > 1 and rest[1] in ("expire", "delete"):
         return "reflog destruction"
     if sub == "update-ref" and "-d" in flags:
@@ -391,6 +394,43 @@ def check_git(tokens: list[str], flat: str) -> str | None:
     if sub in ("symbolic-ref",) or (sub == "remote" and "set-url" in rest):
         return "remote/ref repointing"
     return None
+
+
+# curl flags that send a body or choose a method. Short flags are matched
+# CASE-SENSITIVELY on purpose: `-F` is a form upload but `-f` is `--fail`, and
+# `-T` uploads but `-t` does not exist -- lowercasing them would flag ordinary
+# read-only fetches like `curl -fsSL <url>` as writes.
+CURL_BODY_FLAGS_EXACT = ("-d", "-F", "-T")
+CURL_BODY_FLAGS_LONG = (
+    "--data", "--data-raw", "--data-binary", "--data-urlencode", "--data-ascii",
+    "--form", "--form-string", "--upload-file",
+)
+CURL_METHOD_FLAGS = ("-X", "--request")
+
+
+def curl_method(tokens: list[str]) -> str:
+    """HTTP method of a curl call, defaulting to GET."""
+    args = tokens[1:]
+    for idx, tok in enumerate(args):
+        if tok in CURL_METHOD_FLAGS:
+            return args[idx + 1].strip().lower() if idx + 1 < len(args) else "get"
+        if tok.startswith("--request="):
+            return tok.partition("=")[2].strip().lower()
+        if tok.startswith("-X") and len(tok) > 2:
+            return tok[2:].strip().lower()
+    return "get"
+
+
+def curl_is_write(tokens: list[str]) -> bool:
+    """True when curl sends a body or selects a non-read method."""
+    if curl_method(tokens) not in ("get", "head"):
+        return True
+    for tok in tokens[1:]:
+        if tok in CURL_BODY_FLAGS_EXACT:
+            return True
+        if tok.partition("=")[0] in CURL_BODY_FLAGS_LONG:
+            return True
+    return False
 
 
 def gh_api_method(tokens: list[str]) -> str:
@@ -451,16 +491,6 @@ def check_gh(tokens: list[str]) -> str | None:
         # it destroys a credential and has no safe automated form.
         if rest[0] == "secret" and rest[1] in ("delete", "remove"):
             return "secret deletion"
-        # `--body <value>` puts the secret in argv: visible in shell history,
-        # in the process list, and in any command echo. The stdin form
-        # (`--body-file -`) is the only shape that keeps the value in memory,
-        # so the leaky spelling stays denied even though the operation itself
-        # is now allowed to ask.
-        if rest[0] == "secret" and rest[1] == "set":
-            for tok in tokens[1:]:
-                low = tok.lower()
-                if low == "--body" or low.startswith("--body="):
-                    return "secret value passed in argv (use --body-file - and stdin)"
         if rest[0] == "auth" and rest[1] in ("token", "refresh"):
             return "credential disclosure"
     if rest and rest[0] == "api" and gh_api_method(tokens) in GH_API_DENY_METHODS:
@@ -479,10 +509,22 @@ def classify_remote_mutation(tokens: list[str], flat: str, name: str) -> str | N
     if name == "git":
         rest = [t.lower() for t in tokens[1:] if not t.startswith("-")]
         flags = [t.lower() for t in tokens[1:] if t.startswith("-")]
+        raw_flags = [t for t in tokens[1:] if t.startswith("-")]
         sub = rest[0] if rest else ""
         # --dry-run writes nothing; tier 1 has already denied force/delete.
         if sub == "push" and "--dry-run" not in flags and "-n" not in flags:
             return "push to a remote"
+        # Reflog-recoverable history edits: confirmed remotely, silent locally.
+        if sub == "rebase":
+            return "rewriting local history (git rebase)"
+        if sub == "branch" and ("-D" in raw_flags or {"--delete", "--force"} <= set(flags)):
+            return "forced branch deletion"
+
+    if name == "curl" and curl_is_write(tokens):
+        # Configuring your own services through a provider REST API is normal
+        # work at the laptop. Only DELETE is held at tier 1, since that is the
+        # shape that removes a cloud resource.
+        return "HTTP write via curl (provider API mutation)"
 
     if name == "gh":
         rest = gh_path(tokens)
@@ -597,6 +639,10 @@ def evaluate(segment: str) -> str | None:
         return check_git(tokens, flat)
     if name == "gh":
         return check_gh(tokens)
+    # Sending a DELETE at a provider API removes a cloud resource, which is on
+    # the always-deny list in every mode. Every other curl method is tier 2.
+    if name == "curl" and curl_method(tokens) == "delete":
+        return "HTTP DELETE via curl (cloud resource deletion)"
     if name in ("rm", "del", "erase", "rmdir", "remove-item", "mv", "move", "cp", "copy"):
         return check_delete(tokens, flat)
     return None

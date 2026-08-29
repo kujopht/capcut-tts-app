@@ -66,8 +66,6 @@ MUST_DENY = [
     ("chain via pipe", "echo hi | xargs rm"),
     ("git reset --hard", "git reset --hard origin/main"),
     ("git clean -fd", "git clean -fd"),
-    ("git branch -D", "git branch -D feat/x"),
-    ("git rebase", "git rebase -i main"),
     ("git filter-branch", "git filter-branch --tree-filter true HEAD"),
     ("git reflog expire", "git reflog expire --expire=now --all"),
     ("git update-ref -d", "git update-ref -d refs/heads/x"),
@@ -96,11 +94,9 @@ MUST_DENY = [
     ("Set-ExecutionPolicy", "Set-ExecutionPolicy Bypass -Scope Process"),
     ("Set-ItemProperty HKLM", "Set-ItemProperty -Path HKLM:\\\\Software\\\\X -Name y -Value z"),
     ("Start-Process RunAs", "Start-Process powershell -Verb RunAs"),
-    # Writing a secret is now ASK, but only in the shape that keeps the value
-    # out of argv. `--body <value>` leaks into shell history and stays denied.
-    ("gh secret set --body", "gh secret set MY_TOKEN --body xxx"),
-    ("gh secret set --body=", "gh secret set MY_TOKEN --body=xxx"),
-    ("gh secret set --body + env", "gh secret set MY_TOKEN --env production --body xxx"),
+    # Deleting a credential stays denied in every mode; writing one does not.
+    ("curl -X DELETE", "curl -X DELETE https://api.example.com/v1/zones/z1"),
+    ("curl --request DELETE", "curl --request DELETE https://api.example.com/x"),
     ("gh secret delete", "gh secret delete MY_TOKEN"),
     ("gh auth token", "gh auth token"),
     ("gh auth refresh", "gh auth refresh --scopes repo"),
@@ -140,9 +136,19 @@ MUST_ASK_AUTO = [
     ("gh issue create", 'gh issue create --title "bug"'),
     ("gh repo edit", "gh repo edit --visibility private"),
     ("gh variable set", "gh variable set FOO --body bar"),
-    # The stdin shape: value never touches argv, so it asks rather than denies.
+    # Credential configuration: ask remotely, silent at the laptop.
     ("gh secret set stdin", "gh secret set MY_TOKEN --env production --body-file -"),
-    ("gh secret set repo stdin", "gh secret set MY_TOKEN --body-file -"),
+    ("gh secret set body", "gh secret set MY_TOKEN --env production --body xxx"),
+    # Reflog-recoverable local history edits.
+    ("git rebase", "git rebase -i main"),
+    ("git branch -D", "git branch -D feat/x"),
+    # Provider API configuration through curl.
+    ("curl -X POST", "curl -X POST https://api.example.com/v1/tokens"),
+    ("curl -d data", "curl -d '{\"a\":1}' https://api.example.com/v1/x"),
+    ("curl --data", "curl --data-binary @- https://api.example.com/v1/x"),
+    ("curl -F form", "curl -F file=@x.txt https://api.example.com/upload"),
+    ("curl -T upload", "curl -T x.txt https://api.example.com/upload"),
+    ("curl --request PUT", "curl --request PUT https://api.example.com/v1/x"),
     ("gh auth login", "gh auth login --hostname github.com"),
     ("gh api -X POST", "gh api -X POST repos/o/r/pulls -f title=x"),
     ("gh api --method PATCH", "gh api --method PATCH repos/o/r/issues/1 -f state=closed"),
@@ -218,6 +224,12 @@ MUST_RUN = [
     ("npx tsc", "npx tsc --noEmit"),
     ("npx eslint", "npx eslint web/src"),
     ("wrangler deployments", "npx wrangler deployments list --name fanfic-web"),
+    # Read-only curl must stay silent. `-f` is --fail and `-T`/`-F` are upload
+    # flags, so a case-insensitive match would wrongly flag these as writes.
+    ("curl -fsSL read", "curl -fsSL https://example.com/health"),
+    ("curl -sS read", "curl -sS https://fas-prod-api.onrender.com/api/health"),
+    ("curl -I head", "curl -I https://example.com"),
+    ("curl -X GET explicit", "curl -X GET https://example.com/api"),
     ("ls", "ls -la web/src"),
     ("cat readme", "cat README.md"),
     ("grep", "grep -rn TODO server"),

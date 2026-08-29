@@ -96,7 +96,11 @@ MUST_DENY = [
     ("Set-ExecutionPolicy", "Set-ExecutionPolicy Bypass -Scope Process"),
     ("Set-ItemProperty HKLM", "Set-ItemProperty -Path HKLM:\\\\Software\\\\X -Name y -Value z"),
     ("Start-Process RunAs", "Start-Process powershell -Verb RunAs"),
-    ("gh secret set", "gh secret set MY_TOKEN --body xxx"),
+    # Writing a secret is now ASK, but only in the shape that keeps the value
+    # out of argv. `--body <value>` leaks into shell history and stays denied.
+    ("gh secret set --body", "gh secret set MY_TOKEN --body xxx"),
+    ("gh secret set --body=", "gh secret set MY_TOKEN --body=xxx"),
+    ("gh secret set --body + env", "gh secret set MY_TOKEN --env production --body xxx"),
     ("gh secret delete", "gh secret delete MY_TOKEN"),
     ("gh auth token", "gh auth token"),
     ("gh auth refresh", "gh auth refresh --scopes repo"),
@@ -136,6 +140,9 @@ MUST_ASK_AUTO = [
     ("gh issue create", 'gh issue create --title "bug"'),
     ("gh repo edit", "gh repo edit --visibility private"),
     ("gh variable set", "gh variable set FOO --body bar"),
+    # The stdin shape: value never touches argv, so it asks rather than denies.
+    ("gh secret set stdin", "gh secret set MY_TOKEN --env production --body-file -"),
+    ("gh secret set repo stdin", "gh secret set MY_TOKEN --body-file -"),
     ("gh auth login", "gh auth login --hostname github.com"),
     ("gh api -X POST", "gh api -X POST repos/o/r/pulls -f title=x"),
     ("gh api --method PATCH", "gh api --method PATCH repos/o/r/issues/1 -f state=closed"),

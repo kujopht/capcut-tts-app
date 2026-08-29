@@ -256,6 +256,7 @@ GH_MUTATE_SUBCOMMANDS = {
     ("run", "cancel"): "workflow-run cancellation",
     ("run", "delete"): "workflow-run deletion",
     ("run", "rerun"): "workflow re-run",
+    ("secret", "set"): "writing a repository/environment secret",
     ("variable", "set"): "variable mutation",
     ("variable", "delete"): "variable deletion",
     ("workflow", "disable"): "workflow disable",
@@ -440,8 +441,26 @@ def check_gh(tokens: list[str]) -> str | None:
     """Tier 1 for `gh`: enforced in every mode."""
     rest = gh_path(tokens)
     if len(rest) >= 2:
-        if rest[0] == "secret" and rest[1] in ("set", "delete", "remove"):
-            return "secret mutation"
+        # `secret set` is deliberately NOT here. Writing a secret is the one
+        # credential operation that has a legitimate automated form: piping a
+        # value straight from an authenticated provider CLI into `gh secret
+        # set --body-file -`, so it never reaches a file, argv or shell
+        # history. Denying it outright forced the value through a human
+        # clipboard instead, which is strictly worse. It is tier 2 (ASK) --
+        # see GH_MUTATE_SUBCOMMANDS. Deletion stays denied in every mode:
+        # it destroys a credential and has no safe automated form.
+        if rest[0] == "secret" and rest[1] in ("delete", "remove"):
+            return "secret deletion"
+        # `--body <value>` puts the secret in argv: visible in shell history,
+        # in the process list, and in any command echo. The stdin form
+        # (`--body-file -`) is the only shape that keeps the value in memory,
+        # so the leaky spelling stays denied even though the operation itself
+        # is now allowed to ask.
+        if rest[0] == "secret" and rest[1] == "set":
+            for tok in tokens[1:]:
+                low = tok.lower()
+                if low == "--body" or low.startswith("--body="):
+                    return "secret value passed in argv (use --body-file - and stdin)"
         if rest[0] == "auth" and rest[1] in ("token", "refresh"):
             return "credential disclosure"
     if rest and rest[0] == "api" and gh_api_method(tokens) in GH_API_DENY_METHODS:

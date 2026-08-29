@@ -354,8 +354,12 @@ class ApplyScopeTest(unittest.TestCase):
                  patch("scripts.setup_appwrite.main", side_effect=ghi_lai):
                 b.return_value.appwrite_admin_env.return_value = gia_env
                 self.assertEqual(t.cmd_apply(args), 0)
-            self.assertEqual(thay_gi["APPWRITE_API_KEY"], "",
-                             "khoá runtime phải bị làm rỗng lúc migration chạy")
+            # Điều cần bảo đảm là KHÔNG có khoá chỉ-có-quyền-documents nào
+            # để lui về — chứ không phải khoá runtime bị bỏ trống. Bỏ trống
+            # làm `configured` thành False và `setup_appwrite` thoát ngay
+            # (đã vấp thật ở lần chạy sản xuất đầu tiên).
+            self.assertEqual(thay_gi["APPWRITE_API_KEY"], "sk",
+                             "cả hai tên phải trỏ vào khoá schema")
             self.assertEqual(thay_gi["APPWRITE_SCHEMA_API_KEY"], "sk")
             self.assertEqual(thay_gi["FAS_ENV_FILE"], "")
             self.assertEqual(thay_gi["_argv"], ["--only", "scrape_run_items"])

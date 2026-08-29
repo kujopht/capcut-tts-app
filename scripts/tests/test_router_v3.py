@@ -20,8 +20,9 @@ if _ROOT not in sys.path:
 
 from scripts.router_v3.dag import (DagError, RiskClass, TaskDag, TaskNode,
                                    scopes_overlap)
-from scripts.router_v3.packet import (PacketRefused, TaskPacket, packet_for,
-                                      parse_result, scan_for_secrets)
+from scripts.router_v3.packet import (REDACTED, PacketRefused, TaskPacket,
+                                      packet_for, parse_result, redact,
+                                      scan_for_secrets)
 from scripts.router_v3.policy import (NoWorkerAvailable, PROFILES, SpeedMode,
                                       choose_worker, plan_parallelism)
 from scripts.router_v3.registry import (AG_SLOTS, ExecutionType, Health,
@@ -432,6 +433,96 @@ class WorktreeTenTest(unittest.TestCase):
     def test_worker_id_la_cung_bi_tu_choi(self):
         with self.assertRaises(WorktreeError):
             branch_name("../x", "T1")
+
+
+class LocDuongVeTest(unittest.TestCase):
+    """Đường VỀ từ worker cũng phải lọc — nêu ra qua review bảo mật độc lập.
+
+    Trước bản sửa, `scan_for_secrets` chỉ quét gói ĐI. Một worker đọc phải
+    `.env`, một thông báo lỗi của nhà cung cấp, hay một dòng log có token đều
+    đi thẳng vào `summary`/`integration_notes` rồi vào trạng thái và log của
+    Router — đúng điều mà tiêu chí "không credential nào lọt vào Router" cấm.
+    """
+
+    def test_summary_tu_worker_bi_loc(self):
+        bi_mat = "ghp_" + "a" * 30
+        r = parse_result("t", "W",
+                         '{"status":"ok","summary":"thay khoa ' + bi_mat + '"}', 1.0)
+        self.assertNotIn(bi_mat, r.summary)
+        self.assertIn(REDACTED, r.summary)
+
+    def test_moi_truong_van_ban_deu_duoc_loc(self):
+        bi_mat = "rnd_" + "b" * 25
+        raw = ('{"status":"ok","summary":"' + bi_mat + '",'
+               '"integration_notes":"' + bi_mat + '",'
+               '"tests":"' + bi_mat + '",'
+               '"findings":["' + bi_mat + '"],'
+               '"blockers":["' + bi_mat + '"]}')
+        r = parse_result("t", "W", raw, 1.0)
+        for cho in (r.summary, r.integration_notes, r.tests,
+                    " ".join(r.findings), " ".join(r.blockers)):
+            self.assertNotIn(bi_mat, cho)
+
+    def test_trich_doan_tho_cung_bi_loc(self):
+        """`raw_excerpt` đi vào log/báo cáo, nên nó cũng là đường rò."""
+        bi_mat = "sk-" + "c" * 25
+        r = parse_result("t", "W", "khong phai json, co " + bi_mat, 1.0)
+        self.assertNotIn(bi_mat, r.raw_excerpt)
+
+    def test_loc_chu_KHONG_vut_bo_ket_qua(self):
+        """Một kết quả có ích không nên bị vứt cả vì một chuỗi trông giống
+        credential — worker không phải lúc nào cũng kiểm soát được thứ nó đọc."""
+        r = parse_result("t", "W",
+                         '{"status":"ok","summary":"xong roi, ghp_' + "d" * 30 + '"}',
+                         1.0)
+        self.assertTrue(r.ok)
+        self.assertIn("xong roi", r.summary)
+
+    def test_van_ban_sach_khong_bi_doi(self):
+        self.assertEqual(redact("binh thuong"), "binh thuong")
+
+
+class TranThoiGianNutTest(unittest.TestCase):
+    def test_executor_treo_KHONG_treo_ca_bo_lap_lich(self):
+        """Không có trần này, `cf.wait()` chờ mãi và không nút nào khác được
+        nạp thêm — cả lượt chạy đứng im. Nêu ra qua review độc lập (Codex)."""
+        def treo(packet, worker):
+            time.sleep(30)
+            return '{"status":"ok"}', 30.0
+
+        r = WorkerRegistry()
+        r.register(_w("W0", caps=("implement",)))
+        r.set_health("W0", Health.HEALTHY)
+        t0 = time.perf_counter()
+        bc = Scheduler(r, treo, max_parallel=1, node_timeout=0.3).run(
+            TaskDag([_n("a")]))
+        mat = time.perf_counter() - t0
+        self.assertLess(mat, 5.0, f"khong dung lai: {mat:.1f}s")
+        self.assertEqual(bc.results["a"].status, "timeout")
+
+
+class KhongNghenDauHangTest(unittest.TestCase):
+    def test_nut_khong_co_worker_KHONG_chan_nut_khac(self):
+        """Trước bản sửa, vòng lặp lấy `san[0]`; nếu đúng nút đó không có
+        worker hợp lệ thì cả hàng đợi bị chặn sau nó, kể cả những nút có
+        worker đang rảnh. Nêu ra qua review kiến trúc độc lập (Gemini)."""
+        r = WorkerRegistry()
+        # Chi co worker cho `tests`, KHONG co worker rui ro cao.
+        r.register(_w("T", caps=("tests",), high=False))
+        r.set_health("T", Health.HEALTHY)
+
+        def f(packet, worker):
+            return '{"status":"ok","summary":"xong"}', 0.01
+
+        # `a` la viec rui ro CAO -> khong worker nao hop le.
+        # `b` la viec tests -> co worker.
+        d = TaskDag([
+            _n("a", risk_class=RiskClass.HIGH, required_capabilities=("tests",)),
+            _n("b", required_capabilities=("tests",)),
+        ])
+        bc = Scheduler(r, f, max_parallel=2, node_timeout=5).run(d)
+        self.assertTrue(bc.results["b"].ok,
+                        "nut co worker phai chay du nut kia bi ket")
 
 
 if __name__ == "__main__":

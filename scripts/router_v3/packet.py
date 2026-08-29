@@ -43,6 +43,29 @@ def scan_for_secrets(text: str) -> Optional[str]:
     return None
 
 
+#: Thay cho moi thu giong credential tren DUONG VE.
+REDACTED = "[DA-LOC]"
+
+
+def redact(text: str) -> str:
+    """Loc thu giong credential ra khoi van ban do WORKER tra ve.
+
+    Truoc ban sua nay, `scan_for_secrets` CHI quet goi DI. Duong VE hoan toan
+    mo: mot worker doc phai `.env`, mot thong bao loi cua nha cung cap, hay
+    mot dong log co token deu di thang vao `summary`/`integration_notes` roi
+    vao trang thai va log cua Router. Neu ra qua review bao mat doc lap
+    (Antigravity Claude Opus) — no bac bo dung khang dinh "khong credential
+    nao vao duoc trang thai Router".
+
+    Loc chu KHONG tu choi: mot ket qua co ich khong nen bi vut di ca, va
+    worker khong phai lc nao cung kiem soat duoc thu no doc phai.
+    """
+    ra = str(text or "")
+    for mau in _MAU_BI_MAT:
+        ra = mau.sub(REDACTED, ra)
+    return ra
+
+
 @dataclass(frozen=True)
 class TaskPacket:
     """Thứ worker thực sự nhận được."""
@@ -160,7 +183,9 @@ def parse_result(task_id: str, worker_id: str, raw: str,
     """
     kq = TaskResult(task_id=task_id, worker_id=worker_id,
                     duration_seconds=round(seconds, 2),
-                    raw_excerpt=(raw or "").strip()[:400])
+                    # Trich doan chan doan cung phai loc: no la van ban THO
+                    # tu worker va se di vao log/bao cao.
+                    raw_excerpt=redact((raw or "").strip())[:400])
     khoi = _KHOI_JSON.search(raw or "")
     if not khoi:
         kq.status = "failed"
@@ -179,15 +204,16 @@ def parse_result(task_id: str, worker_id: str, raw: str,
 
     trang_thai = str(d.get("status") or "").lower()
     kq.status = trang_thai if trang_thai in ("ok", "failed", "blocked") else "failed"
-    kq.summary = str(d.get("summary") or "")[:600]
-    kq.commit = str(d.get("commit") or "")[:64]
-    kq.tests = str(d.get("tests") or "")[:300]
-    kq.integration_notes = str(d.get("integration_notes") or "")[:600]
+    # MOI truong den tu worker deu qua `redact` — xem docstring cua no.
+    kq.summary = redact(d.get("summary"))[:600]
+    kq.commit = redact(d.get("commit"))[:64]
+    kq.tests = redact(d.get("tests"))[:300]
+    kq.integration_notes = redact(d.get("integration_notes"))[:600]
     for ten, dich in (("files_changed", kq.files_changed),
                       ("findings", kq.findings), ("blockers", kq.blockers)):
         gt = d.get(ten)
         if isinstance(gt, list):
-            dich.extend(str(x)[:200] for x in gt[:50])
+            dich.extend(redact(x)[:200] for x in gt[:50])
     # Mot worker bao "ok" nhung liet ke blocker la mau thuan — tin blocker.
     if kq.status == "ok" and kq.blockers:
         kq.status = "blocked"

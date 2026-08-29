@@ -58,12 +58,17 @@ class Scheduler:
     def __init__(self, registry: WorkerRegistry, executor: Executor, *,
                  mode: SpeedMode = SpeedMode.NORMAL,
                  max_parallel: Optional[int] = None,
-                 base_sha: str = "unknown"):
+                 base_sha: str = "unknown",
+                 node_timeout: Optional[float] = 900.0):
         self._reg = registry
         self._exec = executor
         self._mode = mode
         self._max_parallel = max_parallel
         self._base_sha = base_sha
+        # Tran thoi gian cho MOI nut. Khong co no, mot executor treo se treo
+        # CA bo lap lich vo han: `cf.wait(...)` cho mai va khong nut nao khac
+        # duoc nap them. Neu ra qua review doc lap (Codex).
+        self._node_timeout = node_timeout
         self._khoa = threading.Lock()
 
     def run(self, dag: TaskDag) -> RunReport:
@@ -79,43 +84,71 @@ class Scheduler:
         dang_id: Set[str] = set()
         t0 = time.perf_counter()
 
-        with cf.ThreadPoolExecutor(max_workers=song_song) as ex:
+        ex = cf.ThreadPoolExecutor(max_workers=song_song)
+        try:
             while True:
                 # Nap them viec cho toi khi day cho.
-                while len(dang_chay) < song_song:
+                # Duyet HET danh sach san sang, khong dung o nut dau tien.
+                #
+                # Truoc ban sua nay vong lap lay `san[0]`; neu dung nut do
+                # khong co worker hop le (vd viec rui ro cao ma worker tin cay
+                # dang ban) thi ca vong `break`, va MOI nut san sang khac —
+                # ke ca nhung nut co worker ranh — bi chan sau no. Day la
+                # nghen dau hang, neu ra qua review kien truc doc lap (Gemini).
+                tien = True
+                while len(dang_chay) < song_song and tien:
+                    tien = False
                     san = [n for n in dag.ready(xong, dang_id)
                            if not self._bi_chan(n, hong, dag)]
                     if not san:
                         break
-                    nut = san[0]
-                    # Mot nut `parallelizable=False` phai chay MOT MINH.
-                    if not nut.parallelizable and dang_chay:
-                        break
-                    try:
-                        worker = choose_worker(self._reg, nut)
-                    except NoWorkerAvailable:
-                        # Khong co worker HOP LE ngay bay gio. Neu dang co viec
-                        # chay thi cho — worker se ranh ra. Neu khong thi
-                        # that su be tac.
-                        if dang_chay:
+                    for nut in san:
+                        if len(dang_chay) >= song_song:
                             break
-                        bao_cao.skipped.append(nut.id)
-                        hong.add(nut.id)
-                        xong.add(nut.id)
-                        continue
-                    dang_id.add(nut.id)
-                    self._reg.mark_started(worker.worker_id, nut.id)
-                    fut = ex.submit(self._chay_mot, nut, worker, dag, bao_cao)
-                    dang_chay[fut] = nut
-                    if not nut.parallelizable:
-                        break
+                        # Mot nut `parallelizable=False` phai chay MOT MINH.
+                        if not nut.parallelizable and dang_chay:
+                            continue
+                        try:
+                            worker = choose_worker(self._reg, nut)
+                        except NoWorkerAvailable:
+                            # Nut NAY chua co worker. Thu nut khac thay vi
+                            # chan ca hang doi.
+                            if not dang_chay and len(san) == 1:
+                                bao_cao.skipped.append(nut.id)
+                                hong.add(nut.id)
+                                xong.add(nut.id)
+                                tien = True
+                            continue
+                        dang_id.add(nut.id)
+                        self._reg.mark_started(worker.worker_id, nut.id)
+                        fut = ex.submit(self._chay_mot, nut, worker, dag, bao_cao)
+                        dang_chay[fut] = nut
+                        tien = True
+                        if not nut.parallelizable:
+                            break
 
                 if not dang_chay:
                     break
                 bao_cao.max_in_flight = max(bao_cao.max_in_flight, len(dang_chay))
 
                 # CHO NUT DAU TIEN XONG, khong cho ca lop.
-                hoan_tat, _ = cf.wait(dang_chay, return_when=cf.FIRST_COMPLETED)
+                hoan_tat, con_cho = cf.wait(
+                    dang_chay, timeout=self._node_timeout,
+                    return_when=cf.FIRST_COMPLETED)
+                if not hoan_tat:
+                    # Het gio ma KHONG nut nao xong -> executor dang treo.
+                    # Danh dau tat ca la timeout va dung, thay vi cho mai.
+                    for fut, nut in list(dang_chay.items()):
+                        fut.cancel()
+                        bao_cao.results[nut.id] = TaskResult(
+                            task_id=nut.id, worker_id="?", status="timeout",
+                            summary=f"vuot tran {self._node_timeout}s",
+                            duration_seconds=self._node_timeout or 0.0)
+                        xong.add(nut.id)
+                        hong.add(nut.id)
+                        dang_id.discard(nut.id)
+                    dang_chay.clear()
+                    continue
                 for fut in hoan_tat:
                     nut = dang_chay.pop(fut)
                     dang_id.discard(nut.id)
@@ -126,6 +159,17 @@ class Scheduler:
                     xong.add(nut.id)
                     if not kq.ok:
                         hong.add(nut.id)
+
+        finally:
+            # KHONG dung `with`: `__exit__` goi `shutdown(wait=True)` va se
+            # CHO mot luong dang treo cho xong — nghia la tran thoi gian o
+            # tren van dung nhung `run()` VAN khong tra ve duoc. Da do duoc:
+            # tran 0.3s ma ca luot van mat 30s.
+            #
+            # `cancel_futures=True` bo cac viec CHUA chay; viec DANG chay thi
+            # Python khong giet duoc, nhung executor that (`run_worker`) co
+            # `subprocess.run(timeout=...)` rieng nen no tu ket thuc.
+            ex.shutdown(wait=False, cancel_futures=True)
 
         # Nut nao phu thuoc mot nut hong thi khong bao gio chay.
         for n in dag.nodes():

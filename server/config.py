@@ -255,6 +255,30 @@ class Settings:
     #: Xem `docs/AUTHOR_RANK.md` muc "Ke hoach migration".
     author_gate_enabled: bool = False
 
+    #: Token dich vu cho CANARY (Phase 15/18), doc tu `FAS_CANARY_SERVICE_TOKEN`.
+    #: MAC DINH RONG — khi rong, KHONG co danh tinh canary nao ton tai va moi
+    #: so khop deu that bai; day la trang thai an toan, khong phai "tat kiem tra".
+    #:
+    #: VI SAO KHONG dung Bearer phien cua mot admin NGUOI THAT (thiet ke cu):
+    #:
+    #:   1. Phien nguoi that HET HAN — CI se hong dinh ky ma khong ai doi gi.
+    #:   2. No doi hoi DANG NHAP TUONG TAC de lay lai — khong the chay khong
+    #:      nguoi truc.
+    #:   3. No cho CI DANH TINH CUA MOT NGUOI: moi hanh dong cua may bi ghi
+    #:      nhan nhu do nguoi do lam, va CI thua huong TOAN BO quyen admin
+    #:      (quan ly nguoi dung, kiem duyet, phan tich) trong khi no chi can
+    #:      vai route scraper.
+    #:
+    #: Danh tinh nay CO CHU Y khong nam trong `AdminRole`: no khong phai mot
+    #: bac trong thang quyen quan tri, ma la mot nang luc HEP va TRUC GIAO —
+    #: xem `is_canary_service_token` va `server/main.py::scraper_ops_profile`.
+    canary_service_token: str = ""
+
+    #: `user_id` tong hop gan cho principal canary. Chi dung de Novel do canary
+    #: tao co CHU SO HUU on dinh, nho vay co che "chi xoa cai minh vua tao" cua
+    #: Phase 15 van hoat dong nguyen ven.
+    canary_user_id: str = "svc_canary"
+
     #: Cac `user_id` duoc quyen QUAN TRI. Doc tu `FAS_ADMIN_USER_IDS`, ngan cach
     #: bang dau phay. MAC DINH RONG — khong ai la quan tri.
     #:
@@ -416,6 +440,46 @@ class Settings:
     @property
     def identity_mode(self) -> str:
         return self.data_backend
+
+    def canary_id_collision(self) -> str:
+        """Ten danh sach dac quyen ma `canary_user_id` bi trung, hoac chuoi rong.
+
+        Neu operator dat `FAS_CANARY_USER_ID` thanh mot id da nam trong danh
+        sach admin/owner/moderator thi hai dieu hong cung luc: co che "chi xoa
+        cai minh vua tao" cua Phase 15 mat y nghia (hai ben cung chu so huu),
+        va `admin_role_of` se tra ve vai tro CO DAC QUYEN cho principal canary
+        — bat ky doan ma nao sau nay kiem quyen theo `profile.user_id` se thay
+        CI nhu mot quan tri vien that. Phat hien qua review bao mat doc lap.
+        """
+        if self.canary_user_id in self.owner_user_ids:
+            return "FAS_OWNER_USER_IDS"
+        if self.canary_user_id in self.admin_user_ids:
+            return "FAS_ADMIN_USER_IDS"
+        if self.canary_user_id in self.moderator_user_ids:
+            return "FAS_MODERATOR_USER_IDS"
+        return ""
+
+    def is_canary_service_token(self, token: str) -> bool:
+        """So khop token dich vu canary bang so sanh HANG SO THOI GIAN.
+
+        Token rong o BAT KY ben nao deu tra False truoc khi so sanh: neu khong
+        thi mot deployment chua cau hinh (`canary_service_token == ""`) se chap
+        nhan mot request cung gui chuoi rong va tu mo cua chinh no.
+
+        `compare_digest` chu khong phai `==`: so sanh chuoi thong thuong thoat
+        ra o ky tu dau tien khac nhau, du de do dac tung ky tu mot.
+        """
+        import hmac
+
+        if not token or not self.canary_service_token:
+            return False
+        # Cau hinh sai (canary trung id voi mot nguoi co dac quyen) thi TU CHOI
+        # thay vi cap mot danh tinh vua-la-dich-vu-vua-la-quan-tri. Fail-closed:
+        # canary ngung hoat dong va operator sua cau hinh, thay vi CI lang le
+        # chay voi quyen rong hon dinh.
+        if self.canary_id_collision():
+            return False
+        return hmac.compare_digest(token, self.canary_service_token)
 
     def admin_role_of(self, user_id: str) -> "AdminRole":
         """
@@ -617,6 +681,8 @@ def load_settings() -> Settings:
         web_base_url=_env("FAS_WEB_BASE_URL", "http://localhost:3000").rstrip("/"),
         facebook_login_enabled=_env_bool("FAS_FACEBOOK_LOGIN", False),
         author_gate_enabled=_env_bool("FAS_AUTHOR_GATE", False),
+        canary_service_token=_env("FAS_CANARY_SERVICE_TOKEN", "").strip(),
+        canary_user_id=_env("FAS_CANARY_USER_ID", "svc_canary").strip() or "svc_canary",
         admin_user_ids=tuple(
             x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()
         ),

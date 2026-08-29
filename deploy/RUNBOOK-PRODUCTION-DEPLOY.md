@@ -23,7 +23,7 @@ người duyệt trước khi job chạm tới secret thật.
 |---|---|---|
 | `RENDER_DEPLOY_HOOK_URL` | Deploy Hook của service `fas-prod-api` (Render → service → Settings → Deploy Hook) | KHÔNG phải Render API key — chỉ một URL kích hoạt build lại `main` |
 | `CLOUDFLARE_API_TOKEN` | Token custom, phạm vi TỐI THIỂU | Xem 1c bên dưới |
-| `FANFIC_ADMIN_CANARY_TOKEN` | Bearer token của MỘT tài khoản admin production có sẵn | Dùng cho Phase 15/18 — KHÔNG BAO GIỜ dán vào code/log |
+| `FANFIC_CANARY_SERVICE_TOKEN` | Bearer token của MỘT tài khoản admin production có sẵn | Dùng cho Phase 15/18 — KHÔNG BAO GIỜ dán vào code/log |
 
 ### 1b. GitHub repository variables (Settings → Secrets and variables → Actions → Variables)
 
@@ -127,5 +127,5 @@ GitHub → Actions → **Production Rollback** → Run workflow, gõ
 | `validate` thất bại "Render's deploy hook always deploys..." | `ref` bạn chọn không phải tip hiện tại của `main` |
 | Health check thất bại sau ~2 phút retry | Render service không khởi động được, hoặc `PRODUCTION_API_BASE_URL` sai |
 | `/api/ready` trả 503 | Appwrite/R2 production không kết nối được — kiểm tra biến môi trường trên Render (không phải lỗi của workflow này) |
-| Phase 18/15 thất bại "FANFIC_ADMIN_CANARY_TOKEN... not set" | Chưa tạo secret, hoặc token đã hết hạn/bị thu hồi |
+| Phase 18/15 thất bại "FANFIC_CANARY_SERVICE_TOKEN... not set" | Chưa tạo secret, hoặc token đã hết hạn/bị thu hồi |
 | Cloudflare deploy thất bại "Authentication error" | `CLOUDFLARE_API_TOKEN` sai phạm vi hoặc đã hết hạn |

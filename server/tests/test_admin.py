@@ -115,10 +115,22 @@ class AdminAuthTest(Base):
     def test_moi_route_admin_deu_duoc_bao_ve(self):
         """
         Tu liet ke va tu kiem. Mot route `/api/admin/*` moi ma quen mot trong
-        BA phu thuoc quan tri (Admin Control Center V2: `admin_profile` — bat
+        BON phu thuoc quan tri (Admin Control Center V2: `admin_profile` — bat
         ky muc nao; `admin_or_owner_profile` — ADMIN tro len; `owner_profile`
-        — CHI OWNER, danh cho cai dat he thong/tai chinh) se lam bai nay do —
+        — CHI OWNER, danh cho cai dat he thong/tai chinh; `scraper_ops_profile`
+        — canary dich vu HOAC admin/owner, xem duoi) se lam bai nay do —
         khong ai phai nho bo sung mot dong vao danh sach test.
+
+        `scraper_ops_profile` duoc them vao danh sach nay MOT CACH CO CAN NHAC.
+        No KHONG phai mot bac quan tri: no cho phep MOT danh tinh dich vu hep
+        (Phase 15/18 chay khong nguoi truc) cham toi dung vai route scraper, va
+        khi khong phai token dich vu thi no uy quyen nguyen ven cho
+        `admin_or_owner_profile`. Ranh gioi that su cua no duoc kiem o
+        `test_canary_service_identity.py` — dac biet la cac test PHU DINH
+        chung minh canary khong nhan duoc vai tro quan tri nao.
+
+        Neu ai do dung `scraper_ops_profile` cho mot route NGOAI mien scraper,
+        bai test duoi day se bat duoc.
         """
         duong = sorted({
             getattr(r, "path", "") for r in server_main.app.routes
@@ -130,6 +142,8 @@ class AdminAuthTest(Base):
             server_main.admin_profile,
             server_main.admin_or_owner_profile,
             server_main.owner_profile,
+            server_main.scraper_ops_profile,
+            server_main.canary_ops_profile,
         }
         chua_bao_ve = []
         for r in server_main.app.routes:
@@ -148,6 +162,39 @@ class AdminAuthTest(Base):
         self.assertEqual(chua_bao_ve, [],
                          "route quản trị thiếu Depends(admin_profile/"
                          "admin_or_owner_profile/owner_profile)")
+
+    def test_scraper_ops_profile_chi_dung_cho_route_scraper(self):
+        """Danh tinh canary phai o NGUYEN trong mien scraper.
+
+        `scraper_ops_profile` chap nhan mot token dich vu KHONG phai nguoi
+        that. Neu no bi gan nham cho mot route quan ly nguoi dung, kiem duyet,
+        phan tich hay tai chinh, thi CI se lang le co quyen o do — dung kieu
+        leo thang ma thiet ke nay sinh ra de ngan. Bai nay khoa pham vi lai.
+        """
+        # Moi phu thuoc chap nhan TOKEN DICH VU chi duoc xuat hien trong dung
+        # mien cua no. Danh tinh canary khong phai nguoi that, nen mot lan gan
+        # nham sang route khac la mot duong leo thang im lang.
+        PHAM_VI = {
+            server_main.scraper_ops_profile: "/api/admin/scraper/",
+            server_main.canary_ops_profile: "/api/admin/canary/",
+        }
+        ngoai_pham_vi = []
+        for r in server_main.app.routes:
+            d = getattr(r, "path", "")
+            if not d:
+                continue
+            phu_thuoc = [
+                sub.call for sub in getattr(getattr(r, "dependant", None),
+                                            "dependencies", [])
+            ]
+            for ham, tien_to in PHAM_VI.items():
+                if ham in phu_thuoc and not d.startswith(tien_to):
+                    ngoai_pham_vi.append(f"{ham.__name__}: {sorted(r.methods)} {d}")
+        self.assertEqual(
+            ngoai_pham_vi, [],
+            "phụ thuộc chấp nhận token dịch vụ bị dùng ngoài phạm vi cho phép; "
+            "route khác phải dùng admin_profile/admin_or_owner_profile/owner_profile",
+        )
 
     def test_khong_co_quan_tri_nao_thi_KHONG_AI_vao_duoc(self):
         """Mac dinh la RONG: mot he thong moi trien khai khong co cua sau nao."""
@@ -580,10 +627,41 @@ class NovelBrowserTest(Base):
         """
         Backend chua co luong takedown nao an toan. Dat mot nut xoa len mot luong
         chua thiet ke la cach nhanh nhat de mat noi dung cua nguoi khac.
+
+        MIEN TRU DUY NHAT: `/api/admin/canary/novels/*`. Ly do cua bai test nay
+        la "mat noi dung cua NGUOI KHAC" — be mat canary khong the cham toi noi
+        dung cua ai ca:
+
+          * `store.owned_novel(..., canary_user_id)` nem PermissionDenied voi
+            bat ky Novel nao khong thuoc so huu canary — 13 series that thuoc
+            nguoi that, nen khong loc qua duoc;
+          * doi tuong con phai mang nhan `canary:disposable` VA dung nhan
+            `canary:run:<id>` cua lan chay hien tai;
+          * doi tuong do CHINH be mat nay tao ra, luon o trang thai draft,
+            khong co duong xuat ban.
+
+        Bao dam bu duoc kiem truc tiep o `test_canary_api_surface.py`
+        (`test_canary_khong_xoa_duoc_truyen_that`,
+        `test_canary_khong_don_duoc_do_cua_lan_chay_khac`,
+        `test_thieu_canary_run_id_thi_fail_closed`). Mien tru nay HEP theo dung
+        tien to; bat ky route quan tri nao khac cham toi `novel` van chi duoc GET.
         """
+        MIEN_TRU = "/api/admin/canary/"
         for r in server_main.app.routes:
             d = getattr(r, "path", "")
             if d.startswith("/api/admin/") and "novel" in d:
+                if d.startswith(MIEN_TRU):
+                    # Mien tru chi co gia tri khi route do THUC SU dung dung
+                    # phu thuoc canary — neu ai do doi sang admin thuong, mien
+                    # tru nay khong con che chan nua va bai test phai do.
+                    phu_thuoc = [
+                        sub.call for sub in getattr(getattr(r, "dependant", None),
+                                                    "dependencies", [])
+                    ]
+                    self.assertIn(
+                        server_main.canary_ops_profile, phu_thuoc,
+                        f"{d} nam trong mien tru nhung khong dung canary_ops_profile")
+                    continue
                 methods = {m for m in getattr(r, "methods", set())
                            if m not in ("HEAD", "OPTIONS")}
                 self.assertEqual(methods, {"GET"}, d)

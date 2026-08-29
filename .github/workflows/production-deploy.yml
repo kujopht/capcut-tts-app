@@ -289,20 +289,20 @@ jobs:
       - run: python -m pip install -r server/requirements.txt
       - name: Run existing production certification script
         env:
-          FANFIC_ADMIN_CANARY_TOKEN: ${{ secrets.FANFIC_ADMIN_CANARY_TOKEN }}
+          FANFIC_CANARY_SERVICE_TOKEN: ${{ secrets.FANFIC_CANARY_SERVICE_TOKEN }}
           API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
           SOURCE_URL: ${{ inputs.source_url }}
           CHAPTER_LIMIT: ${{ inputs.chapter_limit }}
           EXPECTED_SHA: ${{ needs.validate.outputs.deployed_sha }}
         run: |
           set -euo pipefail
-          if [ -z "${FANFIC_ADMIN_CANARY_TOKEN:-}" ]; then
-            echo "::error::FANFIC_ADMIN_CANARY_TOKEN secret is not set."
+          if [ -z "${FANFIC_CANARY_SERVICE_TOKEN:-}" ]; then
+            echo "::error::FANFIC_CANARY_SERVICE_TOKEN secret is not set."
             exit 1
           fi
           python scripts/story_harvester_production_certification.py \
             --api "$API_BASE" \
-            --admin-token "$FANFIC_ADMIN_CANARY_TOKEN" \
+            --admin-token "$FANFIC_CANARY_SERVICE_TOKEN" \
             --source-url "$SOURCE_URL" \
             --chapter-limit "$CHAPTER_LIMIT" \
             --expected-sha "$EXPECTED_SHA" \
@@ -331,21 +331,21 @@ jobs:
       - run: python -m pip install -r server/requirements.txt
       - name: Run existing direct-to-web canary script
         env:
-          FANFIC_ADMIN_CANARY_TOKEN: ${{ secrets.FANFIC_ADMIN_CANARY_TOKEN }}
+          FANFIC_CANARY_SERVICE_TOKEN: ${{ secrets.FANFIC_CANARY_SERVICE_TOKEN }}
           API_BASE: ${{ vars.PRODUCTION_API_BASE_URL }}
           SOURCE_URL: ${{ inputs.source_url }}
           CHAPTER_LIMIT: ${{ inputs.chapter_limit }}
           QA_HARVESTER_XAC_NHAN: production
         run: |
           set -euo pipefail
-          if [ -z "${FANFIC_ADMIN_CANARY_TOKEN:-}" ]; then
-            echo "::error::FANFIC_ADMIN_CANARY_TOKEN secret is not set."
+          if [ -z "${FANFIC_CANARY_SERVICE_TOKEN:-}" ]; then
+            echo "::error::FANFIC_CANARY_SERVICE_TOKEN secret is not set."
             exit 1
           fi
           python scripts/story_harvester_direct_to_web_canary.py \
             --api "$API_BASE" \
             --environment production \
-            --admin-token "$FANFIC_ADMIN_CANARY_TOKEN" \
+            --admin-token "$FANFIC_CANARY_SERVICE_TOKEN" \
             --source-url "$SOURCE_URL" \
             --chapter-limit "$CHAPTER_LIMIT" \
             --yes \

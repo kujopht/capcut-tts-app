@@ -49,7 +49,15 @@ COL_BATCHES = "chapter_import_batches"
 COL_ITEMS = "chapter_import_items"
 
 #: Phai khop CHINH XAC schema trong `scripts/setup_appwrite.py` — bo test hop
-#: dong (`server/tests/test_bulk_chapter_import.py`) so sanh hai tap nay.
+#: dong `server/tests/test_bulk_import_schema_contract.py` so sanh hai tap nay.
+#:
+#: Ghi chu nay TRUOC DAY chi sang `test_bulk_chapter_import.py`, va do la mot
+#: loi: tep do khong he nhac toi `PERSISTED_FIELDS`, con
+#: `test_appwrite_schema_contract.py` chi phu bon collection novels/chapters/
+#: tts_jobs/audio_tracks. Nghia la hai collection nay tung KHONG co luoi nao —
+#: chung khop duoc la nho ky luat, khong nho kiem chung. Them mot truong o day
+#: ma quen khai trong SCHEMA se lam Appwrite tu choi CA ban ghi bang HTTP 400,
+#: va chi lo ra tren moi truong THAT vi store gia trong test nhan moi truong.
 PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_BATCHES: (
         "batch_id", "owner_id", "novel_id", "fingerprint", "total_items",

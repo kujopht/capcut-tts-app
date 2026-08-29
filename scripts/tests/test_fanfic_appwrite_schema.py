@@ -228,6 +228,118 @@ class DiffTest(unittest.TestCase):
         self.assertEqual(self.t._khac_biet_collection("T", self.spec, thua), [])
 
 
+class SchemaTinhTrangNuaVoiTest(unittest.TestCase):
+    """Cac trang thai NUA VOI — thu de doc nham thanh "da xong".
+
+    Mot migration bi ngat giua chung khong de lai "co" hay "khong co", ma de
+    lai mot cai gi do o giua. Neu phep doi chieu doc trang thai do thanh
+    "khop", cong "khong con thay doi nao" se xanh tren mot schema hong.
+    """
+
+    def setUp(self):
+        self.t = _schema_tool()
+        self.spec = {
+            "name": "T",
+            "attributes": [("a", "string", True, 64),
+                           ("b", "integer", False, None),
+                           ("c", "boolean", False, None)],
+            "indexes": [("i1", "key", ["a"]), ("i2", "key", ["a", "b"])],
+        }
+
+    def _hien(self, attrs, idx):
+        return {"attributes": attrs, "indexes": idx}
+
+    def test_schema_moi_lam_mot_nua_bi_bao_la_thieu(self):
+        """Collection CO that, nhung moi tao 1/3 thuoc tinh va 0 index."""
+        hien = self._hien(
+            [{"key": "a", "type": "string", "required": True, "status": "available"}],
+            [])
+        ra = self.t._khac_biet_collection("T", self.spec, hien)
+        self.assertTrue(any("thiếu thuộc tính b" in d for d in ra), ra)
+        self.assertTrue(any("thiếu thuộc tính c" in d for d in ra), ra)
+        self.assertTrue(any("thiếu index i1" in d for d in ra), ra)
+        self.assertTrue(any("thiếu index i2" in d for d in ra), ra)
+
+    def test_kieu_thuoc_tinh_khong_tuong_thich_bi_bat(self):
+        """Kieu SAI la truong hop TE NHAT: Appwrite khong doi kieu duoc, nen
+        phat hien muon nghia la phai xoa cot va mat du lieu. Phai bat o day."""
+        hien = self._hien([
+            {"key": "a", "type": "integer", "required": True, "status": "available"},
+            {"key": "b", "type": "integer", "required": False, "status": "available"},
+            {"key": "c", "type": "boolean", "required": False, "status": "available"},
+        ], [{"key": "i1", "attributes": ["a"], "status": "available"},
+            {"key": "i2", "attributes": ["a", "b"], "status": "available"}])
+        ra = self.t._khac_biet_collection("T", self.spec, hien)
+        self.assertTrue(any("kiểu" in d and "a" in d for d in ra), ra)
+
+    def test_thieu_dung_mot_index_van_bi_bao(self):
+        """De sot nhat: moi thuoc tinh deu co, chi thieu MOT index. Neu bo
+        qua, truy van san xuat thanh quet toan bang ma khong ai hay."""
+        hien = self._hien([
+            {"key": "a", "type": "string", "required": True, "status": "available"},
+            {"key": "b", "type": "integer", "required": False, "status": "available"},
+            {"key": "c", "type": "boolean", "required": False, "status": "available"},
+        ], [{"key": "i1", "attributes": ["a"], "status": "available"}])
+        ra = self.t._khac_biet_collection("T", self.spec, hien)
+        self.assertEqual(len(ra), 1, ra)
+        self.assertIn("thiếu index i2", ra[0])
+
+    def test_index_dung_ten_nhung_sai_cot_bi_bat(self):
+        """Cung ten, khac cot — Appwrite se KHONG tu sua, va truy van dung
+        `['a','b']` van cham. `endswith`/so ten khong bat duoc ca nay."""
+        hien = self._hien([
+            {"key": "a", "type": "string", "required": True, "status": "available"},
+            {"key": "b", "type": "integer", "required": False, "status": "available"},
+            {"key": "c", "type": "boolean", "required": False, "status": "available"},
+        ], [{"key": "i1", "attributes": ["a"], "status": "available"},
+            {"key": "i2", "attributes": ["b", "a"], "status": "available"}])
+        ra = self.t._khac_biet_collection("T", self.spec, hien)
+        self.assertTrue(any("i2" in d and "cột" in d for d in ra), ra)
+
+    def test_index_dang_xay_chua_dung_duoc(self):
+        """Index o trang thai `processing` TON TAI nhung chua phuc vu truy van
+        nao. Coi no la xong chinh la cai bay 2026-08-21 o tang thuoc tinh."""
+        hien = self._hien([
+            {"key": "a", "type": "string", "required": True, "status": "available"},
+            {"key": "b", "type": "integer", "required": False, "status": "available"},
+            {"key": "c", "type": "boolean", "required": False, "status": "available"},
+        ], [{"key": "i1", "attributes": ["a"], "status": "available"},
+            {"key": "i2", "attributes": ["a", "b"], "status": "processing"}])
+        ra = self.t._khac_biet_collection("T", self.spec, hien)
+        self.assertTrue(any("i2" in d and "processing" in d for d in ra), ra)
+
+    def test_schema_day_du_khong_bao_gi(self):
+        """Doi chieu voi mot schema HOAN CHINH phai im lang — neu khong, cong
+        "khong con thay doi nao" khong bao gio xanh duoc."""
+        hien = self._hien([
+            {"key": "a", "type": "string", "required": True, "status": "available"},
+            {"key": "b", "type": "integer", "required": False, "status": "available"},
+            {"key": "c", "type": "boolean", "required": False, "status": "available"},
+        ], [{"key": "i1", "attributes": ["a"], "status": "available"},
+            {"key": "i2", "attributes": ["a", "b"], "status": "available"}])
+        self.assertEqual(self.t._khac_biet_collection("T", self.spec, hien), [])
+
+
+class BulkImportAuditDuocPhuTest(unittest.TestCase):
+    """Cong cu audit phai lam viec duoc voi CA hai collection cua Bulk Import
+    — no von la tong quat tren SCHEMA, bai nay khoa dieu do lai."""
+
+    def test_hai_collection_bulk_import_deu_audit_duoc(self):
+        import os
+        import sys
+        os.environ.setdefault("FAS_ENV_FILE", "")
+        sys.path.insert(0, _ROOT)
+        from scripts.setup_appwrite import SCHEMA
+
+        t = _schema_tool()
+        for cid in ("chapter_import_batches", "chapter_import_items"):
+            self.assertIn(cid, SCHEMA)
+            # Collection thieu han -> phai bao THIEU CA COLLECTION, khong no.
+            ra = t._khac_biet_collection(cid, SCHEMA[cid], None)
+            self.assertEqual(len(ra), 1)
+            self.assertIn("THIẾU CẢ COLLECTION", ra[0])
+
+
 class ReaderIsReadOnlyTest(unittest.TestCase):
     def test_reader_exposes_no_write_method(self):
         t = _schema_tool()

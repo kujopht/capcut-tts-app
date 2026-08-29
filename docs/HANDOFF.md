@@ -263,9 +263,34 @@ Nhãn `NEEDS_BASELINE` tồn tại vì sự trung thực: một bản ghi thiế
 **không** có cơ sở để gọi là "đã đổi". Bản ghi từng thất bại cũng vào nhãn này —
 trước đó chúng bị coi là `UNCHANGED` và không bao giờ được thử lại.
 
-**Chưa làm trong V4:** SourceAdapter protocol chính thức
-(`server/scraper/adapters/__init__.py` vẫn rỗng), state machine harvest, tầng
-lập lịch, và telemetry. Không có gì trong V4 được áp lên sản xuất.
+### Nền móng V4 — ĐÃ ĐÓNG (2026-08-30)
+
+Bốn tiêu chí PASS đều được **chạy thật**:
+
+| Hạng mục | Bằng chứng |
+|---|---|
+| FetchProvider | smoke thật 2 GET tới `vi.wikisource.org`, cả hai HTTP 200 |
+| Sổ đăng ký adapter | `adapters/__init__.py` (trước đây **rỗng**) — quyền sở hữu host + năng lực |
+| ChangeDetector gia tăng | `change_detection.py`, 7 nhãn, dùng ETag/304 |
+| E2E máy trạng thái | `test_scraper_v4_e2e.py`, 5 lượt |
+
+**Máy trạng thái là một TẦNG RIÊNG**, không đổi `ScrapeItemStatus`: enum
+`scrape_run_items.status` trên sản xuất đã cấp phát với đúng bốn giá trị, và
+đổi nó là một thay đổi schema sản xuất. `persisted_status()` chiếu xuống.
+Điều phải giữ: **mọi trạng thái giữa chừng chiếu về `pending`** — nếu một
+trạng thái giữa chừng chiếu về `review_ready`/`failed`, một lần sập sẽ làm mục
+đó **kẹt vĩnh viễn**.
+
+**Hai giới hạn đã biết, cố ý chưa sửa** (kiến trúc, không phải bỏ sót):
+
+* `attempts` sống trong bộ nhớ một lượt chạy, nên một nguồn hỏng dài hạn nhận
+  lại trọn ngân sách thử lại sau **mỗi** lần khởi động lại.
+* Danh tính tất định chặn được **bản ghi trùng** (POST trùng `documentId` →
+  409) nhưng **không** chặn một worker cũ ghi đè trạng thái mới. Cần CAS/lease
+  ở tầng bền vững — nằm ngoài phạm vi máy trạng thái.
+
+**Chưa làm:** tầng lập lịch (Phase 7) và telemetry (Phase 8). Không có gì
+trong V4 được áp lên sản xuất.
 
 ## Bối cảnh
 

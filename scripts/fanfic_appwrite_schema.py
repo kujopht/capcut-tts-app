@@ -276,9 +276,16 @@ def cmd_apply(args) -> int:
 
     b = _broker()
     env = dict(b.appwrite_admin_env())
-    # `setup_appwrite` ưu tiên `APPWRITE_SCHEMA_API_KEY`; đặt rỗng khoá runtime
-    # để không có đường lui âm thầm sang một khoá chỉ có quyền documents.
-    env["APPWRITE_API_KEY"] = ""
+    # Điều thực sự cần bảo đảm: KHÔNG có khoá chỉ-có-quyền-documents nào nằm
+    # trong môi trường để `setup_appwrite` lỡ lui về. Cách đạt được điều đó là
+    # cho CẢ HAI tên cùng trỏ vào khoá schema — không phải bỏ trống khoá
+    # runtime.
+    #
+    # Bỏ trống thì `AppwriteSettings.configured` (đòi cả bốn trường) trả False
+    # và `setup_appwrite` thoát ngay với "Thiếu cấu hình Appwrite" — đã vấp
+    # thật ở lần chạy sản xuất đầu tiên. Đường lui giờ vô hại vì nó lui về
+    # đúng khoá vừa dùng.
+    env["APPWRITE_API_KEY"] = env["APPWRITE_SCHEMA_API_KEY"]
     env["FAS_ENV_FILE"] = ""            # không nạp `server/.env` nào cả
 
     print(f"Áp dụng schema cho {args.only} (chỉ collection này).\n")

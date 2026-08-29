@@ -185,16 +185,54 @@ def _item_from_doc(doc: Dict[str, Any]) -> ScrapeRunItem:
     )
 
 
+#: Tran do dai cho cac truong VAN BAN TU DO, khop voi `scripts/setup_appwrite.py`.
+#:
+#: Appwrite tu choi cung mot ban ghi qua dai bang HTTP 400, va o day 400 co
+#: nghia la ca mot dot quet chet giua chung — vi mot loi bao loi qua dai, hoac
+#: mot phan gioi thieu truyen dai hon binh thuong. Cat ngan mot dong chan doan
+#: la mat mot chut duoi; de nguyen la mat ca dot.
+#:
+#: CHI liet ke van ban tu do. CO Y BO RA cac truong DINH DANH — url, hash,
+#: fingerprint, id, domain, decision: mot URL bi cat ngan khong phai "URL ngan
+#: hon", no la MOT URL KHAC, va no se lam sai ca viec tai lai lan viec khu
+#: trung. O do de Appwrite tra 400 that to moi la dung; hong to hon hong am
+#: tham. Neu ra qua review doc lap (Codex) khi doi chieu schema truoc migration.
+_TRAN_VAN_BAN: Dict[str, Dict[str, int]] = {
+    COL_RUNS: {
+        "series_title": 300,
+        "last_error": 1000,
+        "ordering_evidence": 1000,
+        "series_author": 300,
+        "series_description": 2000,
+    },
+    COL_ITEMS: {
+        "chapter_title": 300,
+        "error_message": 1000,
+        "skipped_reason": 500,
+        "quality_warnings": 2000,
+    },
+}
+
+
+def cat_theo_tran(data: Dict[str, Any], tran: Dict[str, int]) -> Dict[str, Any]:
+    """Cat cac truong van ban tu do ve dung tran cua schema."""
+    for ten, gioi_han in tran.items():
+        gia_tri = data.get(ten)
+        if isinstance(gia_tri, str) and len(gia_tri) > gioi_han:
+            data[ten] = gia_tri[:gioi_han]
+    return data
+
+
 def _run_to_data(run: ScrapeRun) -> Dict[str, Any]:
     data = {f: getattr(run, f) for f in PERSISTED_FIELDS[COL_RUNS] if f != "status"}
     data["status"] = run.status.value
-    return data
+    return cat_theo_tran(data, _TRAN_VAN_BAN[COL_RUNS])
 
 
 def _item_to_data(item: ScrapeRunItem) -> Dict[str, Any]:
     data = {f: getattr(item, f) for f in PERSISTED_FIELDS[COL_ITEMS] if f != "status"}
     data["status"] = item.status.value
-    return data
+    return cat_theo_tran(data, _TRAN_VAN_BAN[COL_ITEMS])
 
 
 class AppwriteScrapeRunStore:

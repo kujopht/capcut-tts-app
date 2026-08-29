@@ -78,9 +78,24 @@ def _profile_from_doc(doc: Dict[str, Any]) -> SiteProfile:
     )
 
 
+#: Tran cua `adaptive_fingerprint_json` trong `scripts/setup_appwrite.py`.
+_TRAN_DAU_VAN_TAY = 2000
+
+
 def _profile_to_data(profile: SiteProfile) -> Dict[str, Any]:
     data = {f: getattr(profile, f) for f in PERSISTED_FIELDS if f != "status"}
     data["status"] = profile.status.value
+    # Dau van tay thich ung la JSON. Qua tran thi BO HAN, khong cat ngan:
+    # mot chuoi JSON bi cat la JSON HONG, va nguoi doc no (`scrapling_
+    # relocation`) se vap khi phan tich — te hon han so voi khong co dau van
+    # tay, truong hop da duoc luong truoc (truong nay von la tuy chon, ""
+    # nghia la "chua hoc duoc gi").
+    #
+    # Khong bo qua im lang: neu de nguyen, Appwrite tra HTTP 400 va lam chet
+    # ca luot cap nhat ho so, chu khong chi mat rieng dau van tay.
+    dau = data.get("adaptive_fingerprint_json")
+    if isinstance(dau, str) and len(dau) > _TRAN_DAU_VAN_TAY:
+        data["adaptive_fingerprint_json"] = ""
     return data
 
 

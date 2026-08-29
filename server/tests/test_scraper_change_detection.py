@@ -185,12 +185,16 @@ class KiemChungQuaMangTest(unittest.TestCase):
                           FixtureFetcher({A: "<<<"}), extract_text=no)
         self.assertIs(_kind(plan, A), ChangeKind.TRANSIENT_FAILURE)
 
-    def test_ban_ghi_cu_khong_co_hash_thi_coi_la_can_tai_lai(self):
+    def test_ban_ghi_cu_khong_co_hash_la_NEEDS_BASELINE(self):
+        """KHONG phai `UPDATED_CHAPTER`: khong co ban cu de so thi khong the
+        noi "da doi". Nhan cu la mot loi noi doi tien loi — neu ra qua review
+        doc lap va da doi."""
         st = ScrapeState()
         st.record_success(A, content_hash_value="")
         plan = revalidate(classify_index(st, [A]), st,
                           FixtureFetcher({A: "noi dung"}), extract_text=_text)
-        self.assertIs(_kind(plan, A), ChangeKind.UPDATED_CHAPTER)
+        self.assertIs(_kind(plan, A), ChangeKind.NEEDS_BASELINE)
+        self.assertIn(A, plan.urls_can_tai)
 
     def test_chuong_moi_KHONG_bi_goi_mang(self):
         """`NEW_CHAPTER` không có gì để so — gọi mạng ở đây là lãng phí thuần."""
@@ -272,6 +276,163 @@ class KeHoachTest(unittest.TestCase):
     def test_counts_phu_het_moi_nhan(self):
         plan = classify_index(_state((A, "x")), [A, B])
         self.assertEqual(set(plan.counts()), {k.value for k in ChangeKind})
+
+
+class BanGhiChuaDungDuocTest(unittest.TestCase):
+    """Ban ghi CO nhung KHONG dung duoc — cho de ket vinh vien nhat.
+
+    Ca hai ban review doc lap deu neu: danh `UNCHANGED` cho mot ban ghi tung
+    THAT BAI se lam chuong do khong bao gio duoc tai lai nua.
+    """
+
+    def test_ban_ghi_that_bai_KHONG_bi_coi_la_khong_doi(self):
+        st = ScrapeState()
+        st.record_failure(A)
+        plan = classify_index(st, [A])
+        self.assertIs(_kind(plan, A), ChangeKind.NEEDS_BASELINE)
+        self.assertIn(A, plan.urls_can_tai)
+
+    def test_304_KHONG_the_lam_mot_ban_ghi_thieu_hash_thanh_UNCHANGED(self):
+        """Loi that do Codex tim ra. 304 chi chung minh tai nguyen khong doi
+        SO VOI validator — no khong chung minh ta DANG co noi dung dung duoc.
+        Truoc ban sua, thu tu kiem dat 304 len truoc nen chuong nay ket lai
+        mai mai o trang thai khong co noi dung."""
+        st = ScrapeState()
+        st.record_success(A, content_hash_value="")
+        f = FixtureFetcher({A: "x"}, etags={A: 'W/"v1"'})
+        plan = revalidate(classify_index(st, [A]), st, f, extract_text=_text,
+                          validators={A: {"etag": 'W/"v1"'}})
+        self.assertIs(_kind(plan, A), ChangeKind.NEEDS_BASELINE)
+        self.assertIn(A, plan.urls_can_tai)
+
+    def test_needs_baseline_KHONG_ton_mot_lan_goi_mang(self):
+        """Khong co gi de so thi kiem chung la lang phi thuan."""
+        goi = []
+
+        class F:
+            def fetch(self, url, **kw):
+                goi.append(url)
+                return FetchResult(final_url=url, status_code=200,
+                                   content_type="text/html", text="x")
+
+        st = ScrapeState()
+        st.record_success(A, content_hash_value="")
+        revalidate(classify_index(st, [A]), st, F(), extract_text=_text)
+        self.assertEqual(goi, [])
+
+
+class KhuTrungTest(unittest.TestCase):
+    """Muc luc liet ke trung — ca hai ban review doc lap deu neu."""
+
+    def test_cung_chuong_hai_lan_chi_sinh_MOT_phan_quyet(self):
+        plan = classify_index(_state((A, "x")), [A, A])
+        self.assertEqual(len(plan.changes), 1)
+
+    def test_bien_the_tracking_param_khong_sinh_phan_quyet_thu_hai(self):
+        plan = classify_index(_state((A, "x")), [A, A + "?utm_source=fb"])
+        self.assertEqual(len(plan.changes), 1)
+
+    def test_trung_lap_KHONG_an_hai_suat_ngan_sach(self):
+        goi = []
+
+        class F:
+            def fetch(self, url, **kw):
+                goi.append(url)
+                return FetchResult(final_url=url, status_code=200,
+                                   content_type="text/html", text="x")
+
+        st = _state((A, "x"))
+        revalidate(classify_index(st, [A, A + "?utm_source=1", A + "/"]), st, F(),
+                   extract_text=_text)
+        self.assertEqual(len(goi), 1, f"goi mang lap: {goi}")
+
+    def test_chuong_moi_trung_lap_cung_chi_mot_lan(self):
+        plan = classify_index(ScrapeState(), [B, B + "?utm_source=1"])
+        self.assertEqual(plan.counts()["new_chapter"], 1)
+
+
+class BangChungKhongDangTinTest(unittest.TestCase):
+    """Noi dung nguon la DU LIEU KHONG DANG TIN — no khong duoc tro thanh
+    chi thi, khong duoc be gay log, khong duoc phinh vo han."""
+
+    def _plan_voi_robots(self, thong_diep):
+        from server.scraper.http_fetcher import RobotsDisallowedError
+
+        class F:
+            def fetch(self, url, **kw):
+                raise RobotsDisallowedError(thong_diep)
+
+        st = _state((A, "x"))
+        return revalidate(classify_index(st, [A]), st, F(), extract_text=_text)
+
+    def test_xuong_dong_tu_nguon_bi_loai(self):
+        """Mot `robots.txt` do ke so huu nguon viet co the chen xuong dong de
+        gia mao mot dong log rieng."""
+        doc = chr(10)
+        cr = chr(13)
+        plan = self._plan_voi_robots(
+            "dong1" + doc + "FAKE LOG: da xoa het" + cr + "dong2")
+        bc = plan.changes[0].evidence
+        self.assertNotIn(doc, bc)
+        self.assertNotIn(cr, bc)
+        self.assertIn("dong1", bc)
+
+    def test_van_ban_qua_dai_bi_cat(self):
+        plan = self._plan_voi_robots("A" * 10000)
+        self.assertLessEqual(len(plan.changes[0].evidence), 260)
+
+    def test_ky_tu_dieu_khien_bi_loai(self):
+        nul = chr(0)
+        esc = chr(27)
+        plan = self._plan_voi_robots("truoc" + nul + esc + "sau")
+        bc = plan.changes[0].evidence
+        self.assertNotIn(nul, bc)
+        self.assertNotIn(esc, bc)
+        self.assertIn("truoc", bc)
+
+
+class LoiNghiemTrongKhongBiNuotTest(unittest.TestCase):
+    def test_MemoryError_duoc_nem_tiep(self):
+        """`MemoryError` ke thua `Exception` trong Python 3, nen mot
+        `except Exception` tran se bien "sap het bo nho" thanh "mot chuong
+        loi tam thoi". Neu ra qua review bao mat doc lap."""
+        def no(html, url):
+            raise MemoryError("het bo nho")
+
+        st = _state((A, "x"))
+        with self.assertRaises(MemoryError):
+            revalidate(classify_index(st, [A]), st,
+                       FixtureFetcher({A: "x"}), extract_text=no)
+
+    def test_RecursionError_duoc_nem_tiep(self):
+        def no(html, url):
+            raise RecursionError("qua sau")
+
+        st = _state((A, "x"))
+        with self.assertRaises(RecursionError):
+            revalidate(classify_index(st, [A]), st,
+                       FixtureFetcher({A: "x"}), extract_text=no)
+
+
+class ChuanHoaUrlTest(unittest.TestCase):
+    def test_canonicalize_url_la_idempotent(self):
+        """`classify_index` goi `canonicalize_url` tren URL DA chuan hoa tu
+        `known_urls`. Neu phep do khong idempotent, mot chuong da biet se bi
+        bao REMOVED oan. Neu ra qua review bao mat doc lap."""
+        from server.scraper.contract import canonicalize_url
+
+        for u in (A, A + "/", A + "?utm_source=x", "HTTPS://VD.TEST/truyen/c1",
+                  "https://vd.test/truyen/c1#phan-1"):
+            mot = canonicalize_url(u)
+            self.assertEqual(canonicalize_url(mot), mot, f"khong idempotent: {u}")
+
+    def test_metadata_tra_ve_url_da_chuan_hoa(self):
+        from server.scraper.contract import canonicalize_url
+
+        c = detect_metadata_change(
+            {"series_title": "Cu", "source_url": A + "?utm_source=x"},
+            {"series_title": "Moi", "source_url": A + "?utm_source=x"})
+        self.assertEqual(c.canonical_url, canonicalize_url(A))
 
 
 if __name__ == "__main__":

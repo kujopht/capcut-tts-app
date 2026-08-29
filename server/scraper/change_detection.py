@@ -32,6 +32,27 @@ from server.scraper.dedupe import ScrapeState, content_hash
 #: 404 = không còn; 410 = đã xoá vĩnh viễn; 451 = gỡ vì lý do pháp lý.
 MA_DA_BIEN_MAT = frozenset({404, 410, 451})
 
+#: Tran do dai cho MOI manh van ban do NGUON kiem soat khi di vao `evidence`.
+_TRAN_BANG_CHUNG = 200
+
+
+def _an_toan(text: str) -> str:
+    """Lam sach mot manh van ban do NGUON kiem soat truoc khi dua vao `evidence`.
+
+    Noi dung nguon la DU LIEU KHONG DANG TIN. `str(exc)` cua
+    `RobotsDisallowedError` mang nguyen van chuoi tu `robots.txt` cua ho — tuc
+    la mot ke so huu nguon quyet dinh duoc noi dung do. Neu `evidence` chay
+    thang vao log, giao dien quan tri, hay ngu canh cua mot tac tu, thi day la
+    diem PHAT SINH cua injection. Neu ra qua review bao mat doc lap.
+
+    Cat xuong dong (chan log injection), bo ky tu dieu khien, va gioi han do
+    dai (chan DoS bo nho log).
+    """
+    # `isprintable()` da loai bo moi ky tu dieu khien, ke ca xuong dong
+    # va tab — nen no vua chan log injection vua chan ky tu vo hinh.
+    sach = "".join(c for c in str(text) if c.isprintable())
+    return sach[:_TRAN_BANG_CHUNG]
+
 
 class ChangeKind(str, Enum):
     """Phân loại BẮT BUỘC — mỗi mục đúng một nhãn, không bao giờ gộp.
@@ -43,6 +64,11 @@ class ChangeKind(str, Enum):
 
     UNCHANGED = "unchanged"
     NEW_CHAPTER = "new_chapter"
+    #: CO ban ghi, nhung KHONG co noi dung dung duoc de so — lan truoc that
+    #: bai, hoac ban ghi cu thieu `content_hash`. KHAC `NEW_CHAPTER` (chua
+    #: tung thay) va KHAC `UPDATED_CHAPTER` (da co ban cu de so). Ep no vao
+    #: `UPDATED_CHAPTER` la noi doi: khong co gi de noi la "da doi".
+    NEEDS_BASELINE = "needs_baseline"
     UPDATED_CHAPTER = "updated_chapter"
     REMOVED_OR_UNAVAILABLE = "removed_or_unavailable"
     SOURCE_METADATA_CHANGED = "source_metadata_changed"
@@ -91,10 +117,18 @@ class HarvestPlan:
 
         `UNCHANGED` bị loại — đó chính là chỗ tiết kiệm. `TRANSIENT_FAILURE`
         cũng bị loại: thử lại là việc của tầng retry có backoff, không phải
-        nhét thẳng vào lô tải của lượt này.
+        nhét thẳng vào lô tải của lượt này. `NEEDS_BASELINE` thì PHẢI có: đó
+        đúng là những chương chưa hề có nội dung dùng được.
+
+        Người gọi vẫn phải TẢI LẠI các URL này — `revalidate` cố ý không giữ
+        thân phản hồi, vì giữ lại nội dung của hàng nghìn chương trong một
+        đối tượng phán quyết là một cách hết bộ nhớ rất nhanh. Hệ quả: hash
+        trong phán quyết là ẢNH CHỤP LÚC PHÁT HIỆN, không phải hash của thứ
+        sẽ được ghi; tầng ghi phải tự băm lại nội dung nó thực sự nhận được.
         """
         return [c.canonical_url for c in self.changes
-                if c.kind in (ChangeKind.NEW_CHAPTER, ChangeKind.UPDATED_CHAPTER)]
+                if c.kind in (ChangeKind.NEW_CHAPTER, ChangeKind.UPDATED_CHAPTER,
+                              ChangeKind.NEEDS_BASELINE)]
 
     @property
     def co_thay_doi(self) -> bool:
@@ -110,26 +144,55 @@ def classify_index(state: ScrapeState, chapter_urls: Sequence[str]) -> HarvestPl
     thứ nâng cấp phán quyết tạm đó thành phán quyết đã kiểm chứng.
     """
     ke_hoach = HarvestPlan()
-    canon_tuoi = {canonicalize_url(u) for u in chapter_urls}
 
+    # KHU TRUNG theo URL da chuan hoa, GIU nguyen thu tu xuat hien.
+    #
+    # Truoc day vong lap nay duyet `chapter_urls` THO trong khi `canon_tuoi`
+    # la mot set: mot muc luc liet ke cung mot chuong hai lan (hoac hai bien
+    # the tracking param) sinh ra HAI phan quyet cho cung mot chuong — tuc la
+    # hai lan goi mang va an hai suat trong `limit`. Neu ra qua ca hai ban
+    # review doc lap.
+    canon_tuoi: List[str] = []
+    da_thay = set()
     for url in chapter_urls:
         canon = canonicalize_url(url)
+        if canon not in da_thay:
+            da_thay.add(canon)
+            canon_tuoi.append(canon)
+
+    for canon in canon_tuoi:
         cu = state.get(canon)
         if cu is None:
             ke_hoach.changes.append(ChapterChange(
                 kind=ChangeKind.NEW_CHAPTER, canonical_url=canon,
                 evidence="chưa có bản ghi nào cho URL này"))
-        else:
+            continue
+        hash_cu = str(cu.get("content_hash") or "")
+        trang_thai = str(cu.get("status") or "")
+        if trang_thai != "ok" or not hash_cu:
+            # CO ban ghi nhung KHONG co gi dung duoc de so. Danh `UNCHANGED`
+            # o day se lam chuong nay khong bao gio duoc tai lai — lan truoc
+            # that bai thi no ket o do vinh vien.
             ke_hoach.changes.append(ChapterChange(
-                kind=ChangeKind.UNCHANGED, canonical_url=canon,
-                previous_content_hash=str(cu.get("content_hash") or ""),
-                evidence="còn trong mục lục; nội dung CHƯA kiểm chứng"))
+                kind=ChangeKind.NEEDS_BASELINE, canonical_url=canon,
+                previous_content_hash=hash_cu,
+                evidence=(f"bản ghi có nhưng chưa dùng được "
+                          f"(status={trang_thai!r}, "
+                          f"{'thiếu' if not hash_cu else 'có'} content_hash)")))
+            continue
+        ke_hoach.changes.append(ChapterChange(
+            kind=ChangeKind.UNCHANGED, canonical_url=canon,
+            previous_content_hash=hash_cu,
+            evidence="còn trong mục lục; nội dung CHƯA kiểm chứng"))
 
+    tap_tuoi = set(canon_tuoi)
+    da_bao = set()
     for canon in state.known_urls(status="ok"):
-        if canonicalize_url(canon) not in canon_tuoi:
+        c = canonicalize_url(canon)
+        if c not in tap_tuoi and c not in da_bao:
+            da_bao.add(c)
             ke_hoach.changes.append(ChapterChange(
-                kind=ChangeKind.REMOVED_OR_UNAVAILABLE,
-                canonical_url=canonicalize_url(canon),
+                kind=ChangeKind.REMOVED_OR_UNAVAILABLE, canonical_url=c,
                 evidence="từng ghi nhận 'ok' nhưng không còn trong mục lục"))
     return ke_hoach
 
@@ -162,6 +225,10 @@ def revalidate(
     moi: List[ChapterChange] = []
 
     for c in plan.changes:
+        # `NEEDS_BASELINE` KHONG duoc kiem chung qua mang: khong co hash cu
+        # thi khong co gi de so, va mot 304 o day cung khong chung minh duoc
+        # ta DANG co noi dung dung duoc — no chi noi tai nguyen khong doi so
+        # voi validator. Cu de nguyen nhan do, no da nam trong `urls_can_tai`.
         if c.kind is not ChangeKind.UNCHANGED:
             moi.append(c)
             continue
@@ -196,7 +263,7 @@ def _kiem_chung_mot(c: ChapterChange, state: ScrapeState, fetcher: Any,
         return ChapterChange(
             kind=ChangeKind.REMOVED_OR_UNAVAILABLE, canonical_url=c.canonical_url,
             previous_content_hash=c.previous_content_hash, revalidated=True,
-            evidence=f"robots.txt từ chối: {exc}")
+            evidence=f"robots.txt từ chối: {_an_toan(exc)}")
     except FetchError as exc:
         return ChapterChange(
             kind=ChangeKind.TRANSIENT_FAILURE, canonical_url=c.canonical_url,
@@ -227,6 +294,13 @@ def _kiem_chung_mot(c: ChapterChange, state: ScrapeState, fetcher: Any,
 
     try:
         moi_hash = content_hash(extract_text(kq.text, kq.final_url))
+    except (MemoryError, RecursionError):
+        # KHONG nuot. Ca hai deu ke thua `Exception` trong Python 3, nen mot
+        # `except Exception` tran se bien "tien trinh sap het bo nho" thanh
+        # "mot chuong loi tam thoi" va worker chay tiep trong trang thai bat
+        # on thay vi chet sach de supervisor khoi dong lai. Neu ra qua review
+        # bao mat doc lap.
+        raise
     except Exception as exc:
         # Trang hỏng/không phân tích được KHÔNG phải "đã xoá" và cũng không
         # phải "không đổi" — nó là một thất bại cần người xem.
@@ -271,6 +345,10 @@ def detect_metadata_change(cu: Dict[str, Any],
                            moi: Dict[str, Any]) -> Optional[ChapterChange]:
     """So metadata series. Trả `None` khi không đổi.
 
+    CẢ HAI tham số phải là **ảnh chụp đầy đủ**, không phải bản vá từng phần:
+    khoá vắng mặt được coi như chuỗi rỗng, nên một dict chỉ chứa các trường
+    *đã đổi* sẽ bị đọc thành "mọi trường khác vừa bị xoá".
+
     Dùng `canonical_url` để chứa khoá series chứ không phải URL chương — đây
     là phán quyết ở mức SERIES, và việc tái dùng cùng một kiểu dữ liệu giữ cho
     người tiêu thụ chỉ phải xử lý một hình dạng.
@@ -279,8 +357,10 @@ def detect_metadata_change(cu: Dict[str, Any],
             if str(cu.get(t) or "") != str(moi.get(t) or "")]
     if not khac:
         return None
+    nguon = str(moi.get("source_url") or cu.get("source_url") or "")
     return ChapterChange(
         kind=ChangeKind.SOURCE_METADATA_CHANGED,
-        canonical_url=str(moi.get("source_url") or cu.get("source_url") or ""),
+        # Chuan hoa cho nhat quan voi moi `canonical_url` khac trong ke hoach.
+        canonical_url=canonicalize_url(nguon) if nguon else "",
         revalidated=True,
         evidence="metadata đổi: " + ", ".join(khac))

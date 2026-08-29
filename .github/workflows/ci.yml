@@ -16,11 +16,23 @@ on:
   pull_request:
     branches: ["main"]
   workflow_dispatch:
+    inputs:
+      secret_scan_mode:
+        description: 'history (mac dinh) hoac tree (chi quet cay lam viec) — dung de THU cong tree ma khong phai deploy'
+        required: false
+        default: 'history'
+        type: string
   # Cho phep production-deploy.yml tai su dung CHINH XAC cac job nay lam
   # cong required test gate truoc khi deploy that, thay vi chep lai logic
   # test — khong doi hanh vi cua ba trigger o tren, chi THEM mot duong goi
   # nua vao CUNG workflow nay.
   workflow_call:
+    inputs:
+      secret_scan_mode:
+        description: 'history (mac dinh, giu nguyen hanh vi push/PR) hoac tree'
+        required: false
+        default: 'history'
+        type: string
 
 permissions:
   contents: read
@@ -47,11 +59,49 @@ jobs:
       # gitleaks cong them quy tac rieng cho dinh dang khoa Appwrite
       # (standard_<hex dai> / console_<hex dai>). Xem su co 2026-08-16/08-20
       # trong docs/reports/preprod-security-audit.md.
-      - name: gitleaks
+      # MAC DINH — push/PR/dispatch thuong. KHONG doi gi so voi truoc.
+      - name: gitleaks (lich su — mac dinh)
+        if: inputs.secret_scan_mode != 'tree'
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
+
+      # CHI cho cong deploy. Quet CAY LAM VIEC dang duoc deploy, khong phai
+      # toan bo lich su repo.
+      #
+      # Vi sao can che do rieng: dau van tay (fingerprint) cua gitleaks CO
+      # CHUA commit SHA. `.gitleaksignore` chi liet ke duoc mot commit cho moi
+      # phat hien, nen khi quet TOAN BO lich su, cung mot chuoi fixture xuat
+      # hien o commit KHAC se khong khop ignore va lam do cong deploy — dung
+      # nhu su co 2026-08-29. Quet cay lam viec hoi dung cau hoi hon cho mot
+      # cong deploy: "ma SAP DEPLOY co chua bi mat khong", chu khong phai
+      # "lich su tung co chua khong".
+      #
+      # KHONG lam yeu viec phat hien: van dung .gitleaks.toml va
+      # .gitleaksignore cua repo, van --exit-code 1, van --redact.
+      - name: gitleaks (cay lam viec — cong deploy)
+        if: inputs.secret_scan_mode == 'tree'
+        env:
+          GITLEAKS_VERSION: "8.30.0"
+        run: |
+          set -euo pipefail
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks version
+
+          # Phat hien NANG LUC chu khong so sanh so phien ban: `dir` la lenh
+          # hien dai (thay cho `detect --no-git` da bi bo). Neu ban nay chua
+          # co `dir`, dung dung duong cu — khong hard-code mot lenh co the da
+          # bi loai bo.
+          if ./gitleaks dir --help >/dev/null 2>&1; then
+            echo "che do: gitleaks dir (hien dai)"
+            ./gitleaks dir . --config .gitleaks.toml --redact --exit-code 1 --verbose
+          else
+            echo "che do: gitleaks detect --no-git (ban cu)"
+            ./gitleaks detect --no-git --source . --config .gitleaks.toml --redact --exit-code 1 --verbose
+          fi
 
   backend:
     name: Backend tests (moi truong sach)

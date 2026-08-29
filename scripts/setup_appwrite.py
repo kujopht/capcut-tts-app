@@ -1996,10 +1996,21 @@ def main(argv: List[str]) -> int:
         print("Chế độ thử: không gọi Appwrite, chỉ in các bước sẽ chạy.\n")
     only = ""
     for i, tham_so in enumerate(argv):
-        if tham_so == "--only" and i + 1 < len(argv):
+        # `--only` KHONG co gia tri phai la loi, khong duoc lui ve "" — vi ""
+        # la falsy nen `run()` doc no y het "khong loc" va chay TOAN BO SCHEMA.
+        # Do la mot cu tut pham vi AM THAM: nguoi van hanh duoc cho phep tao
+        # dung mot bang, mot lan go thieu chu lai ban POST vao moi collection
+        # dang song. Neu ra qua review doi khang doc lap truoc khi chay that.
+        if tham_so == "--only":
+            if i + 1 >= len(argv) or not argv[i + 1].strip():
+                raise SystemExit("--only cần một tên collection ngay sau nó. "
+                                 f"Chọn một trong: {', '.join(SCHEMA)}")
             only = argv[i + 1]
         elif tham_so.startswith("--only="):
-            only = tham_so.split("=", 1)[1]
+            only = tham_so.split("=", 1)[1].strip()
+            if not only:
+                raise SystemExit("--only= cần một tên collection. "
+                                 f"Chọn một trong: {', '.join(SCHEMA)}")
     if only:
         print(f"Chỉ chạm collection: {only}")
     Setup(dry_run=dry_run).run(only=only)

@@ -66,10 +66,17 @@ class MaTranChuyenTiepTest(unittest.TestCase):
             _muc().to(HarvestState.PERSISTED)
         self.assertIn("fetching", str(ctx.exception))
 
-    def test_khong_doi_thi_di_thang_toi_COMPLETED(self):
-        """Chương không đổi thì không ghi gì cả — không đi qua PERSIST."""
-        m = _muc(HarvestState.CHANGE_CLASSIFIED).to(HarvestState.COMPLETED)
-        self.assertIs(m.state, HarvestState.COMPLETED)
+    def test_khong_doi_di_toi_COMPLETED_UNCHANGED(self):
+        """Chương không đổi thì không ghi gì — và KHÔNG được vào hàng đợi
+        duyệt. Trước đây nó dùng chung `COMPLETED` nên chiếu về
+        `review_ready`, đưa một chương chẳng có gì mới vào hàng chờ người
+        duyệt. Nêu ra qua review độc lập."""
+        m = _muc(HarvestState.CHANGE_CLASSIFIED).to(
+            HarvestState.COMPLETED_UNCHANGED)
+        self.assertIs(m.state, HarvestState.COMPLETED_UNCHANGED)
+        self.assertIs(m.persisted, ScrapeItemStatus.SKIPPED)
+        with self.assertRaises(InvalidTransition):
+            _muc(HarvestState.CHANGE_CLASSIFIED).to(HarvestState.COMPLETED)
 
 
 class IdempotentTest(unittest.TestCase):
@@ -289,8 +296,16 @@ class HuyTest(unittest.TestCase):
         self.assertIs(m.cancel().state, HarvestState.CANCELLED)
 
     def test_huy_duoc_tu_moi_trang_thai_chua_ket(self):
-        for s in set(HarvestState) - TERMINAL:
+        for s in set(HarvestState) - TERMINAL - {HarvestState.PERSISTED}:
             self.assertIs(_muc(s).cancel().state, HarvestState.CANCELLED, str(s))
+
+    def test_huy_tu_PERSISTED_thi_HOAN_TAT_chu_khong_ha_cap(self):
+        """`PERSISTED` nghĩa là nội dung ĐÃ nằm trong kho. Huỷ nó xuống
+        `CANCELLED` sẽ chiếu `review_ready` thành `skipped` và giấu mất
+        một chương có thật khỏi hàng đợi duyệt. Nêu ra qua review độc lập."""
+        m = _muc(HarvestState.PERSISTED).cancel()
+        self.assertIs(m.state, HarvestState.COMPLETED)
+        self.assertIs(m.persisted, ScrapeItemStatus.REVIEW_READY)
 
 
 class MotMucHongKhongLamHongCaDotTest(unittest.TestCase):
@@ -301,6 +316,74 @@ class MotMucHongKhongLamHongCaDotTest(unittest.TestCase):
         b = b.to(HarvestState.PARSED)
         self.assertIs(a.state, HarvestState.FAILED_PERMANENT)
         self.assertIs(b.state, HarvestState.PARSED, "một mục hỏng không kéo mục khác")
+
+
+class LoiChiVaoQuaFailTest(unittest.TestCase):
+    """`to()` không đếm `attempts`, nên nó KHÔNG được mở cửa vào lỗi."""
+
+    def test_to_khong_vao_duoc_trang_thai_loi(self):
+        for s in (HarvestState.FAILED_TRANSIENT, HarvestState.FAILED_PERMANENT):
+            with self.assertRaises(InvalidTransition, msg=str(s)):
+                _muc(HarvestState.FETCHING).to(s)
+
+    def test_vong_thu_lai_vo_han_da_bi_chan(self):
+        """Tái hiện đúng lỗi đã tìm ra: FETCHING -> FAILED_TRANSIENT ->
+        RETRY_WAIT -> FETCHING lặp mãi với `attempts` đứng yên ở 0."""
+        m = _muc(HarvestState.FETCHING)
+        with self.assertRaises(InvalidTransition):
+            m.to(HarvestState.FAILED_TRANSIENT)
+
+    def test_moi_lan_hong_deu_tinh_vao_ngan_sach(self):
+        m = _muc(HarvestState.FETCHING, max_attempts=3)
+        for mong in (1, 2):
+            m = m.fail(ErrorCategory.NETWORK)
+            self.assertEqual(m.attempts, mong)
+            m = m.schedule_retry().to(HarvestState.FETCHING)
+        m = m.fail(ErrorCategory.NETWORK)
+        self.assertIs(m.state, HarvestState.FAILED_PERMANENT)
+
+
+class BatBienDoiTuongTest(unittest.TestCase):
+    def test_max_attempts_phai_it_nhat_1(self):
+        with self.assertRaises(ValueError):
+            ItemProgress(item_id="i", max_attempts=0)
+
+    def test_attempts_khong_duoc_vuot_tran(self):
+        with self.assertRaises(ValueError):
+            ItemProgress(item_id="i", attempts=99, max_attempts=3)
+
+    def test_attempts_khong_duoc_am(self):
+        with self.assertRaises(ValueError):
+            ItemProgress(item_id="i", attempts=-1)
+
+
+class TrangThaiKetKhongDoiMetadataTest(unittest.TestCase):
+    def test_bao_loi_den_muon_khong_dan_metadata_vao_muc_da_xong(self):
+        """Ghi lại cùng trạng thái là không-thao-tác THUẦN TUÝ — trước đây nó
+        vẫn cho sửa `category`/`diagnostic` trên một trạng thái KẾT."""
+        goc = _muc(HarvestState.COMPLETED)
+        sau = goc.to(HarvestState.COMPLETED, category=ErrorCategory.NETWORK,
+                     diagnostic="den muon")
+        self.assertIs(sau, goc)
+        self.assertIs(sau.error_category, ErrorCategory.NONE)
+
+    def test_fail_tu_trang_thai_ket_bi_tu_choi(self):
+        for s in TERMINAL:
+            with self.assertRaises(InvalidTransition, msg=str(s)):
+                _muc(s).fail(ErrorCategory.NETWORK)
+
+
+class ChanDoanKhongPhinhTest(unittest.TestCase):
+    def test_dau_vao_rat_lon_khong_duoc_duyet_toan_bo(self):
+        """Cắt TRƯỚC khi lọc: một thông báo lỗi mang thân phản hồi vài MB
+        không được gây một đợt CPU/bộ nhớ vô ích."""
+        import time
+
+        t0 = time.perf_counter()
+        ra = sanitize_diagnostic("A" * 5_000_000)
+        dt = time.perf_counter() - t0
+        self.assertLessEqual(len(ra), 300)
+        self.assertLess(dt, 0.05, f"mat {dt*1000:.0f}ms cho 5MB")
 
 
 if __name__ == "__main__":

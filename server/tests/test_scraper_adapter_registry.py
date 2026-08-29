@@ -42,9 +42,21 @@ class ChuanHoaHostTest(unittest.TestCase):
     def test_chuoi_host_tran_cung_dung(self):
         self.assertEqual(normalize_host("WWW.Vd.Test."), "vd.test")
 
-    def test_ipv6_khong_bi_cat_nham(self):
-        """`split(':')` ngây thơ sẽ cắt nát một host IPv6."""
-        self.assertEqual(normalize_host("http://[::1]:8080/a"), "[::1]")
+    def test_ipv6_duoc_giu_dung(self):
+        """`urlsplit().hostname` trả IPv6 không kèm dấu ngoặc."""
+        self.assertEqual(normalize_host("http://[::1]:8080/a"), "::1")
+
+    def test_authority_hong_tra_ve_RONG_chu_khong_no(self):
+        """`[::1]evil.example` từng bị tự cắt thành `[::1]` — một host
+        KHÁC HẲN — và authority hỏng còn ném `ValueError` chưa bắt. Cả hai
+        nêu ra qua review độc lập. Nay fail closed."""
+        for xau in ("http://[::1]evil.example/x", "http://[chua-dong/x"):
+            self.assertEqual(normalize_host(xau), "", xau)
+
+    def test_userinfo_khong_gia_mao_duoc_host(self):
+        """`https://vd.test@ke-tan-cong.test/` phải ra host THẬT."""
+        self.assertEqual(normalize_host("https://vd.test@ke-tan-cong.test/"),
+                         "ke-tan-cong.test")
 
     def test_chuoi_rong(self):
         self.assertEqual(normalize_host(""), "")
@@ -108,12 +120,31 @@ class QuyenSoHuuHostTest(unittest.TestCase):
         self.assertIn("vd.test", str(ctx.exception))
         self.assertIn("a", str(ctx.exception))
 
-    def test_dang_ky_lai_CHINH_no_thi_khong_sao(self):
-        """Nạp lại cùng một adapter là vô hại; chỉ tranh chấp mới là lỗi."""
+    def test_dang_ky_lai_DUNG_doi_tuong_do_thi_khong_sao(self):
+        """Nạp lại y hệt là vô hại; chỉ tranh chấp mới là lỗi."""
         r = AdapterRegistry()
-        r.register(_reg(name="a"))
-        r.register(_reg(name="a"))
+        reg = _reg(name="a")
+        r.register(reg)
+        r.register(reg)
         self.assertEqual(r.hosts(), ["vd.test"])
+
+    def test_cung_TEN_nhung_khac_khai_bao_bi_tu_choi(self):
+        """Trước đây bản sau âm thầm ghi đè host/build, còn
+        `capabilities_of()` vẫn trả bản đầu — hai nguồn sự thật lệch nhau."""
+        r = AdapterRegistry()
+        r.register(_reg(name="a", hosts=("vd.test",)))
+        with self.assertRaises(InvalidRegistrationError):
+            r.register(_reg(name="a", hosts=("khac.test",)))
+
+    def test_dang_ky_THAT_BAI_khong_de_lai_host_nua_chung(self):
+        """Đăng ký phải NGUYÊN TỬ. Trước đây hàm ghi từng host rồi mới gặp
+        host trùng ở giữa chừng, để lại sổ đăng ký nửa vời."""
+        r = AdapterRegistry()
+        r.register(_reg(name="a", hosts=("x.test",)))
+        with self.assertRaises(DuplicateHostError):
+            r.register(_reg(name="b", hosts=("moi.test", "x.test")))
+        self.assertNotIn("moi.test", r.hosts())
+        self.assertEqual(r.names(), ["a"])
 
     def test_host_khac_nhau_thi_cung_ton_tai_duoc(self):
         r = AdapterRegistry()

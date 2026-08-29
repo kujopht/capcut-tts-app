@@ -75,13 +75,22 @@ def normalize_host(url_or_host: str) -> str:
       adapter chứ không rơi vào "không hỗ trợ".
     """
     raw = (url_or_host or "").strip()
-    host = urlsplit(raw).netloc if "//" in raw else raw
-    host = host.split("@")[-1]            # bo userinfo neu co
-    if host.startswith("["):              # IPv6 dang [::1]:8080
-        host = host.split("]")[0] + "]"
-    else:
-        host = host.split(":")[0]
-    host = host.lower().rstrip(".")
+    if "//" not in raw:
+        # Chuoi host tran — boc thanh URL de dung CHUNG mot bo phan tich,
+        # thay vi tu cat chuoi (tu cat la cho phat sinh loi ben duoi).
+        raw = "//" + raw
+    try:
+        # `.hostname` (khong phai `.netloc`) da bo userinfo va cong, ha chu
+        # thuong, va giu nguyen IPv6 dung cach. Tu cat `netloc` bang
+        # `split(':')` tung bien `[::1]evil.example` thanh `[::1]` — mot host
+        # KHAC HAN — va con nem `ValueError` chua bat tren authority hong.
+        # Ca hai deu neu ra qua review doc lap va da tai hien duoc.
+        host = urlsplit(raw).hostname or ""
+    except ValueError:
+        # Authority hong -> "khong co host". Fail closed: `resolve()` se bao
+        # khong ho tro, chu khong doan mot host gan giong.
+        return ""
+    host = host.rstrip(".")
     if host.startswith("www."):
         host = host[4:]
     return host
@@ -183,17 +192,36 @@ class AdapterRegistry:
         self._dang_ky: List[AdapterRegistration] = []
 
     def register(self, reg: AdapterRegistration) -> None:
+        """Đăng ký NGUYÊN TỬ: kiểm hết rồi mới ghi.
+
+        Trước bản sửa này, hàm ghi từng host rồi mới gặp host trùng ở giữa
+        chừng — khi đó các host trước đã lọt vào bảng dù registration bị từ
+        chối, để lại một sổ đăng ký nửa vời. Nêu ra qua review độc lập và đã
+        tái hiện được.
+        """
         reg.validate()
+        trung_ten = [r for r in self._dang_ky if r.name == reg.name]
         for h in reg.capabilities.supported_hosts:
             chu_cu = self._theo_host.get(h)
             if chu_cu is not None and chu_cu.name != reg.name:
-                # KHONG ghi de. Ai so huu host nay tro thanh chuyen phu thuoc
-                # thu tu import — mot cach hong khong tai hien duoc.
                 raise DuplicateHostError(
                     f"host {h!r} đã thuộc adapter {chu_cu.name!r}; "
                     f"{reg.name!r} cũng nhận nó. Quyền sở hữu host phải là duy "
                     f"nhất — nếu không, adapter nào thắng sẽ phụ thuộc thứ tự "
                     f"import.")
+        if trung_ten and trung_ten[0] is not reg:
+            # Cung ten nhung KHAC noi dung: truoc day ban sau am tham ghi de
+            # host/build cua ban truoc, con `capabilities_of` van tra ban dau
+            # — hai nguon su that lech nhau trong cung mot so dang ky.
+            cu = trung_ten[0]
+            if (cu.capabilities != reg.capabilities or cu.build is not reg.build):
+                raise InvalidRegistrationError(
+                    f"đã có adapter tên {reg.name!r} với khai báo KHÁC. Tên "
+                    f"adapter phải là duy nhất — ghi đè âm thầm sẽ làm "
+                    f"`capabilities_of()` và bảng tra host nói hai điều khác nhau.")
+            return                        # dang ky lai y het: khong-thao-tac
+        # Moi kiem tra da qua -> ghi mot lan.
+        for h in reg.capabilities.supported_hosts:
             self._theo_host[h] = reg
         self._dang_ky.append(reg)
 

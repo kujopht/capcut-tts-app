@@ -114,7 +114,8 @@ class _Harvester:
             m = ItemProgress(item_id=item_id_for(run_id, _fp(c.canonical_url)))
             if c.kind is ChangeKind.UNCHANGED:
                 # Khong doi -> khong ghi gi ca. Day chinh la cho tiet kiem.
-                m = m.to(HarvestState.CHANGE_CLASSIFIED).to(HarvestState.COMPLETED)
+                m = (m.to(HarvestState.CHANGE_CLASSIFIED)
+                      .to(HarvestState.COMPLETED_UNCHANGED))
             elif c.kind in (ChangeKind.NEW_CHAPTER, ChangeKind.UPDATED_CHAPTER,
                             ChangeKind.NEEDS_BASELINE):
                 m = self._tai_va_ghi(m, c, adapter, series, fetcher)

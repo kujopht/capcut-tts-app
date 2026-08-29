@@ -40,6 +40,10 @@ class HarvestState(str, Enum):
     PERSIST_PENDING = "persist_pending"
     PERSISTED = "persisted"
     COMPLETED = "completed"
+    #: Da phan loai la KHONG DOI — xong, nhung KHONG ghi gi moi. Tach khoi
+    #: `COMPLETED` vi phep chieu khac han: mot chuong khong doi KHONG duoc
+    #: vao hang doi duyet (`review_ready`), o do khong co gi de duyet.
+    COMPLETED_UNCHANGED = "completed_unchanged"
 
     #: Có thể thử lại — mạng chập chờn, 5xx, 429.
     FAILED_TRANSIENT = "failed_transient"
@@ -52,6 +56,7 @@ class HarvestState(str, Enum):
 #: Trạng thái KẾT — không đi tiếp được nữa.
 TERMINAL: FrozenSet[HarvestState] = frozenset({
     HarvestState.COMPLETED,
+    HarvestState.COMPLETED_UNCHANGED,
     HarvestState.FAILED_PERMANENT,
     HarvestState.CANCELLED,
 })
@@ -63,8 +68,7 @@ TERMINAL: FrozenSet[HarvestState] = frozenset({
 ALLOWED: Dict[HarvestState, FrozenSet[HarvestState]] = {
     HarvestState.DISCOVERED: frozenset({
         HarvestState.FETCHING, HarvestState.CANCELLED,
-        # Mot muc co the bi loai ngay tu khau phan loai ma khong can tai.
-        HarvestState.CHANGE_CLASSIFIED,
+        HarvestState.CHANGE_CLASSIFIED, HarvestState.FAILED_PERMANENT,
     }),
     HarvestState.FETCHING: frozenset({
         HarvestState.PARSED, HarvestState.FAILED_TRANSIENT,
@@ -76,12 +80,17 @@ ALLOWED: Dict[HarvestState, FrozenSet[HarvestState]] = {
     }),
     HarvestState.NORMALIZED: frozenset({
         HarvestState.CHANGE_CLASSIFIED, HarvestState.FAILED_TRANSIENT,
-        HarvestState.CANCELLED,
+        # `FAILED_PERMANENT` o day tung BI THIEU: mot loi PARSE/QUALITY tai
+        # buoc nay lam `fail()` nem `InvalidTransition` va muc bi KET. Neu ra
+        # qua review doc lap (Codex) va da tai hien duoc.
+        HarvestState.FAILED_PERMANENT, HarvestState.CANCELLED,
     }),
     HarvestState.CHANGE_CLASSIFIED: frozenset({
         HarvestState.PERSIST_PENDING,
-        # Khong doi -> khong ghi gi, xong luon.
-        HarvestState.COMPLETED,
+        HarvestState.COMPLETED_UNCHANGED,
+        # Bo phan loai cung co the hong — truoc day khong co duong loi nao ra
+        # khoi day, nen mot loi o buoc nay lam ket ca muc.
+        HarvestState.FAILED_TRANSIENT, HarvestState.FAILED_PERMANENT,
         HarvestState.CANCELLED,
     }),
     HarvestState.PERSIST_PENDING: frozenset({
@@ -90,20 +99,28 @@ ALLOWED: Dict[HarvestState, FrozenSet[HarvestState]] = {
     }),
     HarvestState.PERSISTED: frozenset({HarvestState.COMPLETED}),
     HarvestState.FAILED_TRANSIENT: frozenset({
-        HarvestState.RETRY_WAIT,
-        # Het luot thu -> thanh vinh vien.
-        HarvestState.FAILED_PERMANENT,
+        HarvestState.RETRY_WAIT, HarvestState.FAILED_PERMANENT,
         HarvestState.CANCELLED,
     }),
     HarvestState.RETRY_WAIT: frozenset({
         HarvestState.FETCHING, HarvestState.CANCELLED,
         HarvestState.FAILED_PERMANENT,
     }),
-    # Ba trang thai KET: khong di dau duoc nua.
     HarvestState.COMPLETED: frozenset(),
+    HarvestState.COMPLETED_UNCHANGED: frozenset(),
     HarvestState.FAILED_PERMANENT: frozenset(),
     HarvestState.CANCELLED: frozenset(),
 }
+
+#: Trang thai loi CHI duoc vao qua `fail()`, khong qua `to()`.
+#:
+#: VI SAO: `to()` khong tang `attempts` va khong doc `ErrorCategory`. Truoc
+#: ban sua nay, chuoi FETCHING -> FAILED_TRANSIENT -> RETRY_WAIT -> FETCHING
+#: lap duoc VO HAN voi `attempts` dung yen o 0 — tran so lan thu bi vo hieu
+#: hoan toan. Da tai hien: 50 vong, attempts=0. Neu ra qua review doc lap.
+_CHI_QUA_FAIL: FrozenSet[HarvestState] = frozenset({
+    HarvestState.FAILED_TRANSIENT, HarvestState.FAILED_PERMANENT,
+})
 
 
 class InvalidTransition(RuntimeError):
@@ -152,7 +169,11 @@ def sanitize_diagnostic(text: str) -> str:
     ngắn. KHÔNG dùng để lọc bí mật — bí mật không được đi vào đây ngay từ đầu;
     đây là lưới cuối, không phải lưới duy nhất.
     """
-    return "".join(c for c in str(text or "") if c.isprintable())[:_TRAN_CHAN_DOAN]
+    # Cat TRUOC khi loc. Loc ca chuoi roi moi cat se duyet toan bo dau vao:
+    # mot thong bao loi mang theo than phan hoi vai MB gay mot dot CPU/bo nho
+    # vo ich. Nhan 4 de con du cho sau khi bo ky tu khong in duoc.
+    raw = str(text or "")[:_TRAN_CHAN_DOAN * 4]
+    return "".join(c for c in raw if c.isprintable())[:_TRAN_CHAN_DOAN]
 
 
 #: Chiếu vòng đời xuống bốn giá trị enum ĐÃ CẤP PHÁT trên sản xuất.
@@ -168,6 +189,8 @@ _CHIEU: Dict[HarvestState, ScrapeItemStatus] = {
     HarvestState.FAILED_TRANSIENT: ScrapeItemStatus.PENDING,
     HarvestState.PERSISTED: ScrapeItemStatus.REVIEW_READY,
     HarvestState.COMPLETED: ScrapeItemStatus.REVIEW_READY,
+    #: KHONG phai `review_ready`: khong ghi gi moi thi khong co gi de duyet.
+    HarvestState.COMPLETED_UNCHANGED: ScrapeItemStatus.SKIPPED,
     HarvestState.FAILED_PERMANENT: ScrapeItemStatus.FAILED,
     HarvestState.CANCELLED: ScrapeItemStatus.SKIPPED,
 }
@@ -207,6 +230,21 @@ class ItemProgress:
     error_category: ErrorCategory = ErrorCategory.NONE
     diagnostic: str = ""
 
+    def __post_init__(self) -> None:
+        """Bất biến của chính đối tượng.
+
+        Không có chỗ này, `ItemProgress(attempts=99, max_attempts=0)` dựng
+        được — và trần số lần thử trở thành vô nghĩa ngay từ lúc khởi tạo.
+        """
+        if self.max_attempts < 1:
+            raise ValueError(f"{self.item_id}: max_attempts phải >= 1")
+        if self.attempts < 0:
+            raise ValueError(f"{self.item_id}: attempts không được âm")
+        if self.attempts > self.max_attempts:
+            raise ValueError(
+                f"{self.item_id}: attempts={self.attempts} vượt "
+                f"max_attempts={self.max_attempts}")
+
     @property
     def is_terminal(self) -> bool:
         return self.state in TERMINAL
@@ -220,15 +258,27 @@ class ItemProgress:
            diagnostic: str = "") -> "ItemProgress":
         """Chuyển tiếp, hoặc ném `InvalidTransition`.
 
-        Ghi lại CÙNG trạng thái là không-thao-tác (idempotent). Mọi cặp khác
-        phải có trong `ALLOWED`.
+        KHÔNG vào được trạng thái lỗi qua đây — dùng `fail()`. Lý do ở
+        `_CHI_QUA_FAIL`: `to()` không tăng `attempts`, nên cho phép nó đặt
+        `FAILED_TRANSIENT` mở ra một vòng thử lại vô hạn.
+
+        Ghi lại CÙNG trạng thái là không-thao-tác (idempotent).
         """
+        if moi in _CHI_QUA_FAIL:
+            raise InvalidTransition(
+                f"{self.item_id}: phải dùng `fail()` để vào {moi.value} — "
+                f"`to()` không đếm số lần thử, và đi đường đó sẽ vô hiệu hoá "
+                f"trần thử lại.")
         if not can_transition(self.state, moi):
             raise InvalidTransition(
                 f"{self.item_id}: {self.state.value} -> {moi.value} không hợp lệ; "
                 f"cho phép: {sorted(s.value for s in ALLOWED.get(self.state, ()))}")
-        if moi == self.state and category is None and not diagnostic:
-            return self                     # khong-thao-tac that su
+        if moi == self.state:
+            # Ghi lai cung trang thai la khong-thao-tac THUAN TUY. Truoc day
+            # no van cho sua `category`/`diagnostic`, ke ca tren mot trang
+            # thai KET — nghia la mot bao loi den muon van dan duoc metadata
+            # vao mot muc da xong. Neu ra qua review doc lap.
+            return self
         return replace(
             self, state=moi,
             error_category=category if category is not None else self.error_category,
@@ -238,15 +288,17 @@ class ItemProgress:
     def fail(self, category: ErrorCategory, diagnostic: str = "") -> "ItemProgress":
         """Ghi một lần hỏng và tự quyết định còn thử lại được hay không.
 
-        Trần số lần thử là **bắt buộc**: không có nó, một nguồn hỏng kéo dài
-        sẽ làm worker quay vòng mãi mãi trên cùng một mục.
+        Đây là lối DUY NHẤT vào hai trạng thái lỗi, nên nó cũng là nơi duy
+        nhất `attempts` tăng — trần thử lại vì thế không thể bị đi vòng.
         """
+        if self.is_terminal:
+            raise InvalidTransition(
+                f"{self.item_id}: không thể báo hỏng từ {self.state.value} "
+                f"(đã kết) — một báo lỗi đến muộn không được lật ngược kết quả.")
         lan = self.attempts + 1
         con_thu = category in RETRYABLE and lan < self.max_attempts
         dich = HarvestState.FAILED_TRANSIENT if con_thu else HarvestState.FAILED_PERMANENT
-        if not can_transition(self.state, dich):
-            # Vd dang o COMPLETED — mot bao loi den muon khong duoc lat nguoc
-            # mot ket qua da xong.
+        if dich not in ALLOWED.get(self.state, frozenset()) and dich != self.state:
             raise InvalidTransition(
                 f"{self.item_id}: không thể báo hỏng từ {self.state.value}")
         return replace(
@@ -263,8 +315,16 @@ class ItemProgress:
         return replace(self, state=HarvestState.RETRY_WAIT)
 
     def cancel(self) -> "ItemProgress":
-        """Huỷ. Một mục ĐÃ KẾT thì giữ nguyên — huỷ không lật ngược kết quả."""
+        """Huỷ. KHÔNG bao giờ hạ cấp một kết quả đã ghi.
+
+        `PERSISTED` nghĩa là nội dung ĐÃ nằm trong kho. Huỷ nó xuống
+        `CANCELLED` sẽ chiếu `review_ready` thành `skipped` và giấu mất một
+        chương có thật khỏi hàng đợi duyệt — mất dữ liệu nhìn từ người vận
+        hành. Nên từ `PERSISTED`, huỷ = hoàn tất. Nêu ra qua review độc lập.
+        """
         if self.is_terminal:
             return self
+        if self.state is HarvestState.PERSISTED:
+            return replace(self, state=HarvestState.COMPLETED)
         return replace(self, state=HarvestState.CANCELLED,
                        error_category=ErrorCategory.CANCELLED)

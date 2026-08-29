@@ -44,8 +44,12 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import json
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from ctypes import wintypes
 from typing import Optional
 
@@ -65,6 +69,10 @@ ERROR_NOT_FOUND = 1168
 # enumerate unrelated secrets out of the user's credential store.
 KNOWN_NAMES = (
     "RENDER_DEPLOY_HOOK_URL",
+    # Render's REST API credential. Lets env vars be managed through the
+    # supported API instead of typing secrets into a browser form -- the last
+    # manual step in the production bootstrap.
+    "RENDER_API_KEY",
     "CLOUDFLARE_API_TOKEN",
     # Renamed from FANFIC_ADMIN_CANARY_TOKEN. The rename was free: no secret
     # of either name had been created yet, so there was nothing to migrate and
@@ -208,6 +216,259 @@ def push_github(name: str, env: str, repo: Optional[str]) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Render provider adapter.
+#
+# Uses Render's supported REST API rather than driving the dashboard. Browser
+# automation would mean typing a secret into a form -- the exact thing this
+# broker exists to avoid -- and it breaks whenever the DOM changes.
+#
+# Neither credential is ever rendered: RENDER_API_KEY goes into an
+# Authorization header, FANFIC_CANARY_SERVICE_TOKEN into a JSON body, both
+# built inside this process. Nothing reaches argv, stdout, a temp file or
+# telemetry.
+# ---------------------------------------------------------------------------
+RENDER_API = "https://api.render.com/v1"
+RENDER_SERVICE = "fas-prod-api"
+CANARY_ENV_KEY = "FAS_CANARY_SERVICE_TOKEN"
+
+
+class RenderError(RuntimeError):
+    """Render API problem. Message is always value-free. Maps to exit 3."""
+
+
+class RenderNotFound(RenderError):
+    """Asked-for thing does not exist. Maps to the documented exit 1, not 3."""
+
+
+def _render(api_key: str, method: str, path: str, payload=None, timeout: int = 60):
+    body = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(RENDER_API + path, data=body, method=method)
+    req.add_header("Authorization", "Bearer " + api_key)
+    req.add_header("Accept", "application/json")
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode()
+            return r.status, (json.loads(raw) if raw.strip() else None)
+    except urllib.error.HTTPError as exc:
+        # The response BODY is deliberately discarded. A 400 from an API can
+        # echo back the request it rejected -- which here would be the
+        # Authorization header or the {"value": <secret>} body -- and this
+        # message is printed to stderr. The status code is enough to act on.
+        # Raised by independent security review.
+        try:
+            exc.read()
+        except Exception:
+            pass                      # draining is best-effort; never fatal
+        finally:
+            try:
+                exc.close()
+            except Exception:
+                pass
+        raise RenderError(f"Render API {method} {path} -> HTTP {exc.code} "
+                          f"(response body withheld: it can reflect the request)")
+    except Exception as exc:
+        raise RenderError(f"Render API {method} {path} failed: {type(exc).__name__}")
+
+
+def render_identity(api_key: str) -> str:
+    """Confirm the key authenticates before it is used for anything else.
+
+    Fail-closed requirement: if identity cannot be established we do not go on
+    to mutate configuration on a service we may not have understood.
+    """
+    _, data = _render(api_key, "GET", "/owners?limit=10")
+    owners = [e.get("owner", {}) for e in (data or [])]
+    # Owner IDs only, never names or emails. If the wrong tenant's key were
+    # ever stored, printing their name/email would disclose it before anyone
+    # could react -- and the id is enough to tell tenants apart.
+    ids = [o.get("id", "?") for o in owners]
+    if not ids:
+        raise RenderError("Render API returned no owner — identity unverified")
+    return ", ".join(ids)
+
+
+def render_resolve_service(api_key: str, name: str = RENDER_SERVICE) -> dict:
+    """Resolve a service by EXACT name. More than one match fails closed.
+
+    An ambiguous name is refused rather than guessed: picking the wrong
+    service would write a production credential into somebody else's config.
+    """
+    _, data = _render(api_key, "GET", f"/services?name={urllib.parse.quote(name)}&limit=20")
+    entries = data if isinstance(data, list) else []
+    services = [e.get("service", {}) for e in entries if isinstance(e, dict)]
+    # `?name=` is a FILTER on Render's side, not an exact match, so the
+    # equality test below is what actually guarantees the right service.
+    exact = [s for s in services if isinstance(s, dict) and s.get("name") == name]
+    if not exact:
+        raise RenderNotFound(f"no Render service named exactly {name!r}")
+    if len(exact) > 1:
+        ids = ", ".join(s.get("id", "?") for s in exact)
+        raise RenderError(f"{len(exact)} services named {name!r} ({ids}) — refusing to guess")
+    svc = exact[0]
+    if not svc.get("id"):
+        # A malformed success response must not surface as a KeyError
+        # traceback and exit 1; it is a downstream failure.
+        raise RenderError("Render returned a service without an id — cannot proceed safely")
+    return svc
+
+
+def render_env_names(api_key: str, service_id: str) -> list:
+    """Every environment variable KEY. Values are never returned or logged.
+
+    Paginated deliberately. A single ``limit=100`` request looks fine until a
+    service exceeds one page: the before/after comparison would then be two
+    PARTIAL snapshots, and a variable past the ceiling could be dropped
+    without ever appearing in either set. That would leave the "nothing else
+    was lost" check silently weaker than it reads. Raised by independent
+    security review.
+    """
+    names: list = []
+    cursor = None
+    complete = False
+    for _ in range(50):                       # hard stop; 5000 vars is absurd
+        path = f"/services/{service_id}/env-vars?limit=100"
+        if cursor:
+            path += f"&cursor={urllib.parse.quote(cursor)}"
+        _, data = _render(api_key, "GET", path)
+        page = data if isinstance(data, list) else []
+        for entry in page:
+            ev = entry.get("envVar", entry) if isinstance(entry, dict) else {}
+            key = ev.get("key") if isinstance(ev, dict) else None
+            if key:
+                names.append(key)
+        if len(page) < 100:
+            complete = True
+            break
+        cursor = (page[-1] or {}).get("cursor")
+        if not cursor:
+            # Full page but no cursor to continue: completeness is
+            # unprovable, so refuse rather than compare partial snapshots.
+            raise RenderError("env var list looks truncated and offers no cursor "
+                              "— refusing to modify on an unverifiable snapshot")
+    if not complete:
+        # Falling out of the loop would silently return a PARTIAL snapshot and
+        # make the later "nothing was lost" comparison meaningless.
+        raise RenderError("env var list exceeded the pagination ceiling "
+                          "— refusing to modify on an incomplete snapshot")
+    # An empty list is a legitimate answer (a service with no env vars yet) and
+    # is NOT treated as failure: a genuine read error already raised above.
+    return sorted(names)
+
+
+def render_upsert_env(api_key: str, service_id: str, key: str, value: str) -> None:
+    """Add or update ONE variable, leaving every other one untouched.
+
+    Single-key PUT on purpose. Render also offers a bulk PUT that REPLACES the
+    whole set; using it would require sending every other secret back and
+    would silently drop anything the read missed. If the single-key endpoint
+    is unavailable we fail closed rather than fall back to the bulk form.
+    """
+    _render(api_key, "PUT", f"/services/{service_id}/env-vars/{urllib.parse.quote(key)}",
+            {"value": value})
+
+
+def render_latest_deploy(api_key: str, service_id: str) -> dict:
+    _, data = _render(api_key, "GET", f"/services/{service_id}/deploys?limit=1")
+    if not data:
+        return {}
+    return (data[0] or {}).get("deploy", {})
+
+
+def cmd_render_status(args) -> int:
+    api_key = fetch("RENDER_API_KEY")
+    if api_key is None:
+        print("RENDER_API_KEY: ABSENT from credential store — run `store --name RENDER_API_KEY`",
+              file=sys.stderr)
+        return 1
+    try:
+        who = render_identity(api_key)
+        svc = render_resolve_service(api_key)
+        names = render_env_names(api_key, svc["id"])
+        deploy = render_latest_deploy(api_key, svc["id"])
+    except RenderNotFound as exc:
+        print(f"render: {exc}", file=sys.stderr)
+        return 1
+    except RenderError as exc:
+        print(f"render: {exc}", file=sys.stderr)
+        return 3
+    print(f"  owner        {who}")
+    print(f"  service      {svc.get('name')} ({svc.get('id')})")
+    print(f"  env var count {len(names)}")
+    print(f"  {CANARY_ENV_KEY}: {'PRESENT' if CANARY_ENV_KEY in names else 'ABSENT'}")
+    print(f"  latest deploy status: {deploy.get('status', '?')} commit "
+          f"{(deploy.get('commit') or {}).get('id', '?')[:12]}")
+    return 0 if CANARY_ENV_KEY in names else 1
+
+
+def cmd_sync_render_canary(args) -> int:
+    """Push the canary service token into Render, without ever showing it."""
+    api_key = fetch("RENDER_API_KEY")
+    if api_key is None:
+        print("RENDER_API_KEY: ABSENT from credential store — bootstrap it first",
+              file=sys.stderr)
+        return 1
+    secret = fetch("FANFIC_CANARY_SERVICE_TOKEN")
+    if secret is None:
+        print("FANFIC_CANARY_SERVICE_TOKEN: ABSENT from credential store", file=sys.stderr)
+        return 1
+
+    try:
+        who = render_identity(api_key)
+        svc = render_resolve_service(api_key)
+        before = render_env_names(api_key, svc["id"])
+    except RenderNotFound as exc:
+        print(f"render: {exc}", file=sys.stderr)
+        return 1
+    except RenderError as exc:
+        print(f"render: {exc}", file=sys.stderr)
+        return 3
+
+    print(f"  owner        {who}")
+    print(f"  service      {svc.get('name')} ({svc.get('id')})")
+    print(f"  env vars now {len(before)}; {CANARY_ENV_KEY} "
+          f"{'PRESENT' if CANARY_ENV_KEY in before else 'ABSENT'}")
+
+    if args.dry_run:
+        action = "update" if CANARY_ENV_KEY in before else "add"
+        print(f"  DRY RUN — would {action} {CANARY_ENV_KEY} and leave "
+              f"{len(before) - (1 if CANARY_ENV_KEY in before else 0)} other vars untouched")
+        return 0
+
+    try:
+        render_upsert_env(api_key, svc["id"], CANARY_ENV_KEY, secret)
+    except RenderError as exc:
+        print(f"render: {exc}", file=sys.stderr)
+        return 3
+    finally:
+        # Drops the binding early. NOT a memory wipe: CPython may leave the
+        # string in freed-but-not-zeroed heap. Defence in depth, not a
+        # guarantee -- stated plainly so nobody reads more into it.
+        del secret
+
+    try:
+        after = render_env_names(api_key, svc["id"])
+    except RenderError as exc:
+        print(f"render: wrote but could not verify: {exc}", file=sys.stderr)
+        return 3
+
+    # Verify by NAME only, and prove nothing else was lost.
+    lost = sorted(set(before) - set(after))
+    if lost:
+        print(f"  ERROR: {len(lost)} pre-existing var(s) disappeared: {', '.join(lost)}",
+              file=sys.stderr)
+        return 3
+    if CANARY_ENV_KEY not in after:
+        print(f"  ERROR: {CANARY_ENV_KEY} still absent after write", file=sys.stderr)
+        return 3
+    print(f"  {CANARY_ENV_KEY}: PRESENT (value not displayed)")
+    print(f"  preserved {len(after) - 1} other env vars; none lost")
+    print("  Render redeploys automatically on an env change; poll `render-status`.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -224,6 +485,14 @@ def main(argv=None) -> int:
     p_push.add_argument("--name", required=True, choices=KNOWN_NAMES)
     p_push.add_argument("--env", default="production")
     p_push.add_argument("--repo", default=None)
+
+    sub.add_parser("render-status", help="Render service + env var NAMES and deploy state")
+
+    p_sync = sub.add_parser(
+        "sync-render-canary",
+        help="set FAS_CANARY_SERVICE_TOKEN on fas-prod-api via the Render API")
+    p_sync.add_argument("--dry-run", action="store_true",
+                        help="report what would change; touch nothing")
 
     a = ap.parse_args(argv)
 
@@ -262,6 +531,12 @@ def main(argv=None) -> int:
 
     if a.cmd == "push-github":
         return push_github(a.name, a.env, a.repo)
+
+    if a.cmd == "render-status":
+        return cmd_render_status(a)
+
+    if a.cmd == "sync-render-canary":
+        return cmd_sync_render_canary(a)
 
     return 2
 

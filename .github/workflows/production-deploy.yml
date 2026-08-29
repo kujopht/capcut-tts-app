@@ -89,6 +89,10 @@ jobs:
   test_gate:
     name: Required test gate (reused from ci.yml)
     uses: ./.github/workflows/ci.yml
+    with:
+      # Quet CAY LAM VIEC sap deploy, khong phai toan bo lich su repo — xem
+      # ly do day du o ci.yml. Push/PR van giu nguyen che do lich su.
+      secret_scan_mode: tree
     # A reusable workflow can never hold MORE permission than its caller
     # grants. ci.yml's gitleaks job asks for `pull-requests: write` (it
     # annotates PRs), while this workflow's top-level grant is `contents:

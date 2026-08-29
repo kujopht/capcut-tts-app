@@ -65,6 +65,62 @@ class StaleDeploymentClassificationTest(unittest.TestCase):
         self.assertEqual(loai, {cert.STALE_DEPLOYMENT})
 
 
+class StaleDeploymentDungSomTest(unittest.TestCase):
+    """`buoc_suc_khoe_va_sha` PHAI tra ve False khi SHA khong dat.
+
+    Cac test o tren chi kiem tra NHAN (`loai`) trong `KET_QUA` — chung van
+    xanh ca khi ham tra ve True, nen chung KHONG bao ve duoc hanh vi dung
+    som. Do chinh la lo hong that: ban dau ham luon `return True`, nen
+    `main()` bo qua nhanh dung som cua chinh no va di tiep toi buoc quet
+    nho — tuc la chung nhan VAN cham that vao san xuat tren mot ban deploy
+    da biet la cu. Verdict cuoi cung van FAIL (main() tong hop tu KET_QUA),
+    nen day khong phai PASS gia, nhung no lam viec thua va gay hieu nham.
+
+    Hai test duoi day la thu DUY NHAT se do neu ai do doi `return sha_ok`
+    nguoc lai thanh `return True`.
+    """
+
+    def test_thieu_sha_tra_ve_False_de_main_dung_som(self):
+        cert = _nap_module()
+
+        def goi_gia(api, method, path, payload=None, token=None, timeout=60):
+            # Dung hinh dang THAT dang chay tren san xuat hom nay: health 200,
+            # kho that, nhung KHONG co truong commit_sha.
+            return 200, {"data_backend": "appwrite"}
+
+        with patch.object(cert, "goi", side_effect=goi_gia):
+            ket_qua = cert.buoc_suc_khoe_va_sha("https://khong-that.invalid", "a" * 40)
+
+        self.assertFalse(
+            ket_qua,
+            "thieu commit_sha phai tra ve False de main() DUNG SOM, "
+            "khong di tiep sang buoc quet nho tren ban deploy cu",
+        )
+
+    def test_sha_khong_khop_tra_ve_False_de_main_dung_som(self):
+        cert = _nap_module()
+
+        def goi_gia(api, method, path, payload=None, token=None, timeout=60):
+            return 200, {"data_backend": "appwrite", "commit_sha": "a" * 40}
+
+        with patch.object(cert, "goi", side_effect=goi_gia):
+            ket_qua = cert.buoc_suc_khoe_va_sha("https://khong-that.invalid", "b" * 40)
+
+        self.assertFalse(ket_qua, "SHA lech phai tra ve False de main() DUNG SOM")
+
+    def test_khong_yeu_cau_sha_van_di_tiep_binh_thuong(self):
+        """Khong duoc chan qua tay: khong truyen --expected-sha thi van True."""
+        cert = _nap_module()
+
+        def goi_gia(api, method, path, payload=None, token=None, timeout=60):
+            return 200, {"data_backend": "appwrite"}
+
+        with patch.object(cert, "goi", side_effect=goi_gia):
+            ket_qua = cert.buoc_suc_khoe_va_sha("https://khong-that.invalid", None)
+
+        self.assertTrue(ket_qua, "khong co --expected-sha thi khong duoc dung som")
+
+
 class AuthFailureClassificationTest(unittest.TestCase):
     def test_cong_khong_doi_hoi_token_bi_gan_nhan_AUTH_FAILURE(self):
         cert = _nap_module()

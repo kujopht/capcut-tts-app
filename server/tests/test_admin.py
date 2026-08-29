@@ -115,10 +115,22 @@ class AdminAuthTest(Base):
     def test_moi_route_admin_deu_duoc_bao_ve(self):
         """
         Tu liet ke va tu kiem. Mot route `/api/admin/*` moi ma quen mot trong
-        BA phu thuoc quan tri (Admin Control Center V2: `admin_profile` — bat
+        BON phu thuoc quan tri (Admin Control Center V2: `admin_profile` — bat
         ky muc nao; `admin_or_owner_profile` — ADMIN tro len; `owner_profile`
-        — CHI OWNER, danh cho cai dat he thong/tai chinh) se lam bai nay do —
+        — CHI OWNER, danh cho cai dat he thong/tai chinh; `scraper_ops_profile`
+        — canary dich vu HOAC admin/owner, xem duoi) se lam bai nay do —
         khong ai phai nho bo sung mot dong vao danh sach test.
+
+        `scraper_ops_profile` duoc them vao danh sach nay MOT CACH CO CAN NHAC.
+        No KHONG phai mot bac quan tri: no cho phep MOT danh tinh dich vu hep
+        (Phase 15/18 chay khong nguoi truc) cham toi dung vai route scraper, va
+        khi khong phai token dich vu thi no uy quyen nguyen ven cho
+        `admin_or_owner_profile`. Ranh gioi that su cua no duoc kiem o
+        `test_canary_service_identity.py` — dac biet la cac test PHU DINH
+        chung minh canary khong nhan duoc vai tro quan tri nao.
+
+        Neu ai do dung `scraper_ops_profile` cho mot route NGOAI mien scraper,
+        bai test duoi day se bat duoc.
         """
         duong = sorted({
             getattr(r, "path", "") for r in server_main.app.routes
@@ -130,6 +142,7 @@ class AdminAuthTest(Base):
             server_main.admin_profile,
             server_main.admin_or_owner_profile,
             server_main.owner_profile,
+            server_main.scraper_ops_profile,
         }
         chua_bao_ve = []
         for r in server_main.app.routes:
@@ -148,6 +161,33 @@ class AdminAuthTest(Base):
         self.assertEqual(chua_bao_ve, [],
                          "route quản trị thiếu Depends(admin_profile/"
                          "admin_or_owner_profile/owner_profile)")
+
+    def test_scraper_ops_profile_chi_dung_cho_route_scraper(self):
+        """Danh tinh canary phai o NGUYEN trong mien scraper.
+
+        `scraper_ops_profile` chap nhan mot token dich vu KHONG phai nguoi
+        that. Neu no bi gan nham cho mot route quan ly nguoi dung, kiem duyet,
+        phan tich hay tai chinh, thi CI se lang le co quyen o do — dung kieu
+        leo thang ma thiet ke nay sinh ra de ngan. Bai nay khoa pham vi lai.
+        """
+        ngoai_pham_vi = []
+        for r in server_main.app.routes:
+            d = getattr(r, "path", "")
+            if not d:
+                continue
+            phu_thuoc = [
+                sub.call for sub in getattr(getattr(r, "dependant", None),
+                                            "dependencies", [])
+            ]
+            if server_main.scraper_ops_profile in phu_thuoc:
+                if "/scraper/" not in d:
+                    ngoai_pham_vi.append(f"{sorted(r.methods)} {d}")
+        self.assertEqual(
+            ngoai_pham_vi, [],
+            "scraper_ops_profile chỉ được dùng cho route /api/admin/scraper/*; "
+            "route ngoài phạm vi phải dùng admin_profile/admin_or_owner_profile/"
+            "owner_profile",
+        )
 
     def test_khong_co_quan_tri_nao_thi_KHONG_AI_vao_duoc(self):
         """Mac dinh la RONG: mot he thong moi trien khai khong co cua sau nao."""

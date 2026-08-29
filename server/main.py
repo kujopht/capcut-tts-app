@@ -4325,6 +4325,34 @@ def owner_profile(profile: Profile = Depends(current_profile)) -> Profile:
     return profile
 
 
+def scraper_ops_profile(authorization: Optional[str] = Header(default=None)) -> Profile:
+    """Quyen VAN HANH SCRAPER — cho canary dich vu HOAC admin/owner nguoi that.
+
+    Day la danh tinh HEP danh cho Phase 15/18 chay khong nguoi truc. No CO CHU
+    Y khong phai mot bac trong `AdminRole`: thang quyen do la tuyen tinh
+    (NONE < MODERATOR < ADMIN < OWNER), nen "them mot bac duoi ADMIN" se hoac
+    thua quyen, hoac vo tinh cap cho MODERATOR nhung thu ho khong duoc co.
+    Nang luc nay TRUC GIAO: chi cac route scraper duoi day nhan no.
+
+    Canary KHONG bao gio nhan duoc, vi khong route nao trong cac mien do dung
+    dependency nay: quan ly nguoi dung, phan vai tro, kiem duyet noi dung,
+    phan tich, tai chinh, hay bat ky thao tac xoa nao ngoai pham vi Phase 15
+    tu don dep chinh no.
+
+    Thu tu kiem quan trong: token dich vu duoc thu TRUOC `current_profile`, vi
+    canary khong co phien Appwrite — di qua duong nguoi dung se luon 401.
+    """
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        if settings.is_canary_service_token(token):
+            return Profile(user_id=settings.canary_user_id,
+                           email="canary@service.local",
+                           display_name="Canary Service")
+    # Khong phai canary -> quay ve duong nguoi that, giu nguyen moi hanh vi cu
+    # (401 khi thieu/sai token, 403 khi khong du quyen).
+    return admin_or_owner_profile(current_profile(authorization))
+
+
 def admin_or_owner_profile(profile: Profile = Depends(current_profile)) -> Profile:
     """
     Muc ADMIN tro len (ADMIN hoac OWNER) — quan ly nguoi dung/noi dung/phan
@@ -6223,7 +6251,7 @@ class ScraperSkipIn(BaseModel):
 
 @app.post("/api/admin/scraper/discover")
 def admin_scraper_discover(
-    payload: ScraperDiscoverIn, admin: Profile = Depends(admin_or_owner_profile),
+    payload: ScraperDiscoverIn, admin: Profile = Depends(scraper_ops_profile),
 ) -> Dict[str, Any]:
     """Xem truoc — KHONG ghi gi. Buoc dau tien cua luong 'paste URL'. Neu
     domain CHUA co cau hinh, tra ve `{"supported": false, "new_source_detected":
@@ -6246,7 +6274,7 @@ def admin_scraper_confirm_source(
 
 @app.post("/api/admin/scraper/check-mirror")
 def admin_scraper_check_mirror(
-    payload: ScraperDiscoverIn, admin: Profile = Depends(admin_or_owner_profile),
+    payload: ScraperDiscoverIn, admin: Profile = Depends(scraper_ops_profile),
 ) -> Dict[str, Any]:
     """Phase 7 (Story Harvester V3) — kham pha thong tin nguon MOI (KHONG
     ghi gi) roi so sanh voi cac dot da co trong kho, tra ve nhung dot co
@@ -6257,7 +6285,7 @@ def admin_scraper_check_mirror(
 
 @app.post("/api/admin/scraper/runs")
 def admin_scraper_start_run(
-    payload: ScraperStartIn, admin: Profile = Depends(admin_or_owner_profile),
+    payload: ScraperStartIn, admin: Profile = Depends(scraper_ops_profile),
 ) -> Dict[str, Any]:
     """Bat dau (hoac tiep tuc, dinh danh tat dinh theo URL series) mot dot
     quet that."""
@@ -6267,7 +6295,7 @@ def admin_scraper_start_run(
 
 @app.get("/api/admin/scraper/runs")
 def admin_scraper_list_runs(
-    admin: Profile = Depends(admin_or_owner_profile),
+    admin: Profile = Depends(scraper_ops_profile),
 ) -> Dict[str, Any]:
     return _quet_hang_loat(scraper_ops.list_runs)
 

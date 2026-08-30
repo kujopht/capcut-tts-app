@@ -156,11 +156,24 @@ def packet_for(node: TaskNode, *, base_sha: str,
 
 @dataclass
 class TaskResult:
-    """Thứ agent dẫn dắt thực sự tiêu thụ."""
+    """Thứ agent dẫn dắt thực sự tiêu thụ.
+
+    Đây LÀ `WorkerResult` của hợp đồng worker Router LTS Phase 1 — không có
+    lớp thứ hai trùng lặp: mọi trường Phase 1 yêu cầu (status/worker_id/
+    provider/model/commit/files_changed/tests/duration/findings/blockers/
+    integration_notes) đã có ở đây từ Router V3, chỉ thiếu `provider`/
+    `model` nên thêm hai trường đó. Tách riêng một class nữa sẽ tạo ra hai
+    nguồn sự thật cho cùng một hình dạng dữ liệu.
+    """
 
     task_id: str
     worker_id: str
     status: str = "failed"           # ok | failed | blocked | timeout
+    #: Router LTS Phase 1: "core KHÔNG được phụ thuộc định dạng riêng của
+    #: nhà cung cấp" — nhưng bảng điều khiển/lịch sử vẫn cần biết AI nào
+    #: thực sự chạy việc này. Rỗng = không rõ (worker cũ chưa điền).
+    provider: str = ""
+    model: str = ""
     summary: str = ""
     commit: str = ""
     files_changed: List[str] = field(default_factory=list)

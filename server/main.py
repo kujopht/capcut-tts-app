@@ -7170,9 +7170,14 @@ def _dich_vu_chat(fn, *args, **kwargs):
 class ChatAskIn(BaseModel):
     novel_id: str
     chapter_id: Optional[str] = None
-    question: str
+    #: Gioi han tim thay qua review doc lap: khong co gioi han do dai truoc
+    #: ban sua nay, mot client co the gui cau hoi/doan van hang megabyte,
+    #: bi nhet thang vao prompt roi gui cho nha cung cap LLM that (ton kem/
+    #: DoS nho). 2000/8000 ky tu la du rong cho mot cau hoi/mot doan van
+    #: doc gia chon that su, khong phai gioi han tuy tien.
+    question: Annotated[str, StringConstraints(max_length=2000)]
     scope: Optional[str] = None
-    selected_text: Optional[str] = None
+    selected_text: Optional[Annotated[str, StringConstraints(max_length=8000)]] = None
     current_chapter_index: int = 1
     spoiler_protection_enabled: bool = True
 

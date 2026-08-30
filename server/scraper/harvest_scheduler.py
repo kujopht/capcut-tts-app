@@ -92,31 +92,78 @@ def next_check_at(
 
 
 class Watcher:
-    """Evaluates items to find non-terminal items that are due for harvesting."""
+    """Evaluates items to find non-terminal items that are due for harvesting.
 
-    @staticmethod
+    STATEFUL BY NECESSITY: `next_check_at(item, now=X)` always returns
+    `X + delay`, so comparing that against the SAME `X` (`check_time <=
+    curr_now`) is always False for any item with a real delay — a
+    backed-off item could never become due again on a later call. There is
+    no persisted "when did this item last fail" field on `ItemProgress`
+    (out of scope for this phase, and it's an immutable dataclass anyway),
+    so the anchor has to live HERE: the first time an item is seen at a
+    given `attempts` count, its due time is computed and cached; later
+    calls compare the CURRENT `now` against that cached anchor instead of
+    recomputing it. Confirmed as a real bug by independent review
+    (2026-08-30) before this fix existed — the original static, stateless
+    version passed all 6 tests because none of them checked "due after
+    enough time actually passes," only "not due immediately."
+    """
+
+    def __init__(self) -> None:
+        # item_id -> (attempts at which this anchor was computed, due_at).
+        # Keyed by attempts too: a NEW failure (attempts bumped) needs a
+        # FRESH anchor, not the stale one from the previous attempt.
+        self._anchor: Dict[str, tuple] = {}
+
     def due(
+        self,
         items: Iterable[ItemProgress],
         *,
         now: Optional[float] = None,
     ) -> List[str]:
         """Return item_ids of non-terminal items due for execution."""
         curr_now = time.time() if now is None else now
+        con_song: set = set()
         ra: List[str] = []
         for item in items:
+            con_song.add(item.item_id)
             if item.is_terminal:
+                self._anchor.pop(item.item_id, None)
                 continue
-            check_time = next_check_at(item, now=curr_now)
-            if check_time <= curr_now:
+            if item.attempts == 0:
                 ra.append(item.item_id)
+                self._anchor.pop(item.item_id, None)
+                continue
+            cache = self._anchor.get(item.item_id)
+            if cache is None or cache[0] != item.attempts:
+                due_at = next_check_at(item, now=curr_now)
+                self._anchor[item.item_id] = (item.attempts, due_at)
+            else:
+                due_at = cache[1]
+            if curr_now >= due_at:
+                ra.append(item.item_id)
+        # Prune items no longer in the input — otherwise an item that
+        # disappears (persisted/purged elsewhere) leaks its anchor forever.
+        for iid in list(self._anchor):
+            if iid not in con_song:
+                self._anchor.pop(iid, None)
         return ra
 
 
 class HarvestScheduler:
-    """Coordinates picking batches of due items with lease acquisition."""
+    """Coordinates picking batches of due items with lease acquisition.
+
+    NOT safe to call `pick_batch` concurrently from multiple threads under
+    the SAME `owner` string: `LeaseTable.claim` deliberately lets an owner
+    renew its own lease (needed for heartbeating a long-running claim), so
+    two concurrent same-owner calls could both successfully claim and
+    return overlapping item_ids. Call it from a single loop per owner —
+    that's the only caller shape this phase's foundation code assumes.
+    """
 
     def __init__(self, lease_table: Optional[LeaseTable] = None) -> None:
         self.lease_table = lease_table if lease_table is not None else LeaseTable()
+        self.watcher = Watcher()
 
     def pick_batch(
         self,
@@ -133,7 +180,7 @@ class HarvestScheduler:
         Returns only the list of successfully claimed item_ids.
         """
         curr_now = time.time() if now is None else now
-        due_item_ids = Watcher.due(items, now=curr_now)
+        due_item_ids = self.watcher.due(items, now=curr_now)
         claimed: List[str] = []
         for item_id in due_item_ids:
             if len(claimed) >= limit:

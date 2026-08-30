@@ -8,6 +8,16 @@ from server.scraper.telemetry import HarvestTelemetry, summarize_run
 
 
 class HarvestTelemetryTest(unittest.TestCase):
+    def test_record_transition_rejects_raw_string(self):
+        """Bai quyet dinh: nhan thang str thay vi HarvestState la duong ro
+        ri item_id/diagnostic vao telemetry neu nguoi goi lo truyen nham."""
+        t = HarvestTelemetry()
+        with self.assertRaises(TypeError):
+            t.record_transition("item-bi-mat-xyz", HarvestState.FETCHING)
+        with self.assertRaises(TypeError):
+            t.record_error("Sensitive token leak: sk-secret-123")
+        assert t.snapshot() == {"transitions": {}, "errors": {}}
+
     def test_transitions_and_errors_increment_correctly(self):
         t = HarvestTelemetry()
         assert t.snapshot() == {"transitions": {}, "errors": {}}

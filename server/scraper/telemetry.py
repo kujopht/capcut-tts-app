@@ -1,5 +1,5 @@
 ﻿import threading
-from typing import Dict, Sequence, Union
+from typing import Dict, Sequence
 
 from server.scraper.harvest_state import ErrorCategory, HarvestState, ItemProgress
 from server.scraper.run_state import ScrapeItemStatus
@@ -11,22 +11,26 @@ class HarvestTelemetry:
         self._transitions: Dict[str, int] = {}
         self._errors: Dict[str, int] = {}
 
-    def record_transition(
-        self,
-        tu: Union[HarvestState, str],
-        den: Union[HarvestState, str],
-    ) -> None:
-        tu_val = tu.value if hasattr(tu, "value") else str(tu)
-        den_val = den.value if hasattr(den, "value") else str(den)
-        key = f"{tu_val}->{den_val}"
-
+    def record_transition(self, tu: HarvestState, den: HarvestState) -> None:
+        # PHAI la dung enum, khong duoc chap nhan str: neu ai do vo tinh
+        # truyen thang mot chuoi diagnostic hay item_id vao day thay vi
+        # HarvestState, no se bi ghi thang vao telemetry — dung ep kieu de
+        # chan tu goc, khong dua vao ky luat cua nguoi goi.
+        if not isinstance(tu, HarvestState) or not isinstance(den, HarvestState):
+            raise TypeError(
+                "record_transition chi nhan HarvestState, khong nhan str — "
+                "truyen thang van ban se ro ri item_id/diagnostic vao telemetry")
+        key = f"{tu.value}->{den.value}"
         with self._lock:
             self._transitions[key] = self._transitions.get(key, 0) + 1
 
-    def record_error(self, category: Union[ErrorCategory, str]) -> None:
-        cat_val = category.value if hasattr(category, "value") else str(category)
+    def record_error(self, category: ErrorCategory) -> None:
+        if not isinstance(category, ErrorCategory):
+            raise TypeError(
+                "record_error chi nhan ErrorCategory, khong nhan str — "
+                "truyen thang van ban se ro ri diagnostic vao telemetry")
         with self._lock:
-            self._errors[cat_val] = self._errors.get(cat_val, 0) + 1
+            self._errors[category.value] = self._errors.get(category.value, 0) + 1
 
     def snapshot(self) -> Dict[str, Dict[str, int]]:
         with self._lock:
@@ -47,14 +51,13 @@ def summarize_run(items: Sequence[ItemProgress]) -> Dict[str, Dict[str, int]]:
     errors: Dict[str, int] = {}
 
     for item in items:
-        st = item.state.value if hasattr(item.state, "value") else str(item.state)
-        states[st] = states.get(st, 0) + 1
-
-        ps = item.persisted.value if hasattr(item.persisted, "value") else str(item.persisted)
-        persisted[ps] = persisted.get(ps, 0) + 1
-
-        err = item.error_category.value if hasattr(item.error_category, "value") else str(item.error_category)
-        errors[err] = errors.get(err, 0) + 1
+        # `.value` khong co fallback str(): ItemProgress.state/error_category
+        # LA enum theo hop dong cua chinh dataclass do (xem harvest_state.py)
+        # — mot fallback str() se am tham chap nhan va ro ri bat cu thu gi
+        # neu hop dong do bi vi pham o dau khac.
+        states[item.state.value] = states.get(item.state.value, 0) + 1
+        persisted[item.persisted.value] = persisted.get(item.persisted.value, 0) + 1
+        errors[item.error_category.value] = errors.get(item.error_category.value, 0) + 1
 
     return {
         "states": states,

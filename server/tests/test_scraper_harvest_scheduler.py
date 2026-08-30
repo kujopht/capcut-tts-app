@@ -95,7 +95,7 @@ class HarvestSchedulerTest(unittest.TestCase):
             ItemProgress(item_id="active", state=HarvestState.DISCOVERED),
         ]
 
-        due_items = Watcher.due(items, now=now)
+        due_items = Watcher().due(items, now=now)
         assert due_items == ["active"]
         assert "completed" not in due_items
         assert "unchanged" not in due_items
@@ -104,20 +104,40 @@ class HarvestSchedulerTest(unittest.TestCase):
 
     def test_due_skips_not_yet_due_items(self):
         """due() bo qua item chua den han."""
-        # it_0 has 0 attempts -> next_check_at(it_0, now=1000.0) == 1000.0 (due at 1000.0)
+        w = Watcher()
         it_0 = ItemProgress(item_id="it_0", attempts=0)
-        # it_1 has 1 attempt -> next_check_at(it_1, now=1000.0) == 1060.0 (not due at 1000.0, due at 1060.0)
         it_1 = ItemProgress(item_id="it_1", attempts=1)
 
-        # When evaluated at now = 1000.0, it_0 is due, it_1 (due at 1060.0) is skipped
-        assert Watcher.due([it_0, it_1], now=1000.0) == ["it_0"]
+        # When evaluated at now = 1000.0, it_0 is due, it_1 is not yet.
+        assert w.due([it_0, it_1], now=1000.0) == ["it_0"]
 
-        # When evaluated with next_check_at base time at 1000.0:
-        check_time_it1 = next_check_at(it_1, now=1000.0)  # 1060.0
-        # At t = 1060.0, check_time_it1 <= 1060.0 -> due
-        assert check_time_it1 <= 1060.0
-        # it_0 is due immediately at any evaluated now
-        assert Watcher.due([it_0], now=1000.0) == ["it_0"]
+    def test_backed_off_item_eventually_becomes_due(self):
+        """Bai quyet dinh: mot item bi backoff PHAI den han lai sau du thoi
+        gian, khong duoc mai mai khong den han (bug that: bai kiem cu chi
+        kiem 'chua den han NGAY', khong bao gio kiem 'den han SAU do')."""
+        w = Watcher()
+        it_1 = ItemProgress(item_id="it_1", attempts=1)  # backoff = 60s tu now
+
+        # Cung mot Watcher, hai lan goi cach nhau du 60s -> phai neo tai lan
+        # dau (now=1000.0) roi den han o lan hai (now=1060.0).
+        assert w.due([it_1], now=1000.0) == []
+        assert w.due([it_1], now=1059.9) == []
+        assert w.due([it_1], now=1060.0) == ["it_1"]
+
+    def test_new_attempt_recomputes_a_fresh_anchor(self):
+        """attempts tang (that bai moi) phai neo lai backoff moi, khong dung
+        anchor cu cua attempts truoc."""
+        w = Watcher()
+        it = ItemProgress(item_id="it", attempts=1)
+        assert w.due([it], now=1000.0) == []
+        assert w.due([it], now=1060.0) == ["it"]
+
+        # That bai lai -> attempts=2, backoff moi (120s) neo tu THOI DIEM
+        # NAY (1060.0), khong phai tu lan neo truoc.
+        it2 = ItemProgress(item_id="it", attempts=2)
+        assert w.due([it2], now=1060.0) == []
+        assert w.due([it2], now=1179.9) == []
+        assert w.due([it2], now=1180.0) == ["it"]
 
     def test_harvest_scheduler_pick_batch(self):
         """Scheduler picks up to limit, claims leases, and skips held items."""

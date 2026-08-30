@@ -262,3 +262,33 @@ class BangDieuKhienTest(unittest.TestCase):
         s = render_v32(self._snap()).lower()
         for cam in ("prompt", "token", "response", "oauth", "password"):
             self.assertNotIn(cam, s)
+
+
+class SyncContextCharsTest(unittest.TestCase):
+    """Router LTS Phase 10: đẩy độ phình ngữ cảnh vào registry để
+    `policy.score_worker` có số thật thay vì luôn 0."""
+
+    def test_day_context_chars_vao_registry(self):
+        reg = WorkerRegistry()
+        reg.register(WorkerSpec(worker_id="AG01", provider_family="antigravity",
+                                execution_type=ExecutionType.LOCAL_CLI, pool="P"))
+        ex = WarmExecutor(model="m")
+        with mock.patch("scripts.router_v3.warm_executor.WarmAgyWorker", _WorkerGia):
+            packet = TaskPacket(task_id="t", base_sha="x", objective="o",
+                                workspace="C:/ws")
+            spec = WorkerSpec(worker_id="AG01", provider_family="antigravity",
+                              execution_type=ExecutionType.LOCAL_CLI, pool="P")
+            ex._lay(spec, packet).stats.chars = 12_345
+        ex.sync_context_chars(reg)
+        self.assertEqual(reg.state("AG01").context_chars, 12_345)
+
+    def test_worker_khong_co_trong_registry_khong_nem_loi(self):
+        reg = WorkerRegistry()
+        ex = WarmExecutor(model="m")
+        with mock.patch("scripts.router_v3.warm_executor.WarmAgyWorker", _WorkerGia):
+            packet = TaskPacket(task_id="t", base_sha="x", objective="o",
+                                workspace="C:/ws")
+            spec = WorkerSpec(worker_id="KHONG_DANG_KY", provider_family="antigravity",
+                              execution_type=ExecutionType.LOCAL_CLI, pool="P")
+            ex._lay(spec, packet)
+        ex.sync_context_chars(reg)  # khong nem KeyError

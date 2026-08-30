@@ -166,6 +166,7 @@ from server.translation_byok_crypto import ByokConfigError, ByokCrypto, build_by
 from server.translation_byok_service import ByokNotConfiguredError, ProviderConnectionService
 from server.translation_service import TranslationService
 from server.translation_store import build_translation_store
+import server.chat_service
 from server.image_domain import GenerationMode, PollinationsConnection, SavedImage
 from server.image_provider_registry import (
     ImageProviderError,
@@ -7138,6 +7139,64 @@ def import_translation_to_draft(
     return _dich_vu(
         translation_svc.import_to_draft, project_id, profile.user_id,
         novel_id=payload.novel_id, new_novel_title=payload.new_novel_title)
+
+
+# -----------------------------------------------------------------------------
+# Fanfic AI Chat V1 — POST /api/chat/ask
+# -----------------------------------------------------------------------------
+
+
+def _dich_vu_chat(fn, *args, **kwargs):
+    """Cung vai tro voi `_dich_vu`/`_dich_vu_anh` nhung cho Fanfic AI Chat —
+    MOT cho doi loi nghiep vu rieng cua chat thanh ma HTTP, khong tai dung
+    `_dich_vu` cua tang dich thuat (ngoai le cua no khong lien quan chat,
+    va nguoc lai — moi tinh nang giu dispatcher rieng, dung quy uoc da co
+    voi `_dich_vu_anh` cho Image Studio)."""
+    from server.llm_gateway.usage_limits import (
+        ChatBudgetExceeded, ChatProviderUnavailable, ChatRateLimited, ChatUsageError,
+    )
+    try:
+        return fn(*args, **kwargs)
+    except ChatRateLimited as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
+    except ChatProviderUnavailable as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except ChatBudgetExceeded as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except ChatUsageError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+class ChatAskIn(BaseModel):
+    novel_id: str
+    chapter_id: Optional[str] = None
+    question: str
+    scope: Optional[str] = None
+    selected_text: Optional[str] = None
+    current_chapter_index: int = 1
+    spoiler_protection_enabled: bool = True
+
+
+@app.post("/api/chat/ask")
+def chat_ask(
+    payload: ChatAskIn,
+    profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    Reader AI Chat question answering route with grounded retrieval and
+    courtesy anti-spoiler bounding.
+    """
+    return _dich_vu_chat(
+        server.chat_service.get_chat_service().ask,
+        payload.question,
+        user_id=profile.user_id,
+        novel_id=payload.novel_id,
+        chapter_id=payload.chapter_id,
+        scope_str=payload.scope,
+        selected_text=payload.selected_text,
+        current_chapter_index=payload.current_chapter_index,
+        spoiler_protection_enabled=payload.spoiler_protection_enabled,
+    )
 
 
 # -----------------------------------------------------------------------------

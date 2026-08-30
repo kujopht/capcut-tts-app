@@ -1,4 +1,4 @@
-"""Quản lý worktree cô lập — Router V3, Phase 4.
+"""Quản lý worktree cô lập — Router V3, Phase 4 (+ gốc dùng chung, V3.2).
 
 Hai worker ghi cùng một cây làm việc là hỏng chắc chắn: cái này `git add` đè
 lên thay đổi dở dang của cái kia, và không ai dựng lại được chuyện gì đã xảy ra.
@@ -7,6 +7,26 @@ Mỗi nút CÓ GHI vì thế nhận một `git worktree` riêng trên một nhá
 KHÔNG TỰ XOÁ. Một worktree hỏng là bằng chứng để điều tra, và xoá tự động
 đúng lúc đang gỡ lỗi là cách nhanh nhất để mất manh mối. `stale()` đánh dấu
 thứ dọn được; việc xoá là do người quyết định.
+
+GỐC DÙNG CHUNG (V3.2) — vì sao KHÔNG chỉ đổi đường dẫn là xong:
+
+Worker AG02 chạy trong một hồ sơ Windows KHÁC và **không** có quyền đọc
+`C:\\Users\\nguye`. Chuyển worktree sang một thư mục dùng chung nghe có vẻ
+đủ, nhưng KHÔNG: một `git worktree` chỉ chứa một tệp `.git` trỏ NGƯỢC về
+`.git/worktrees/<tên>` của kho mẹ. Đã đo:
+
+    gitdir: C:/Users/nguye/Documents/CapCut-TTS-App/.git/worktrees/_probe
+
+AG02 đọc được thư mục làm việc nhưng không đọc được con trỏ đó, nên mọi
+lệnh git đều hỏng.
+
+Cách giải: một **bản sao bare** nằm NGAY TRONG gốc dùng chung. Worktree
+tạo từ bản sao đó tự chứa hoàn toàn:
+
+    gitdir: C:/FanficWorkers/repo.git/worktrees/probe
+
+Router đẩy commit nền sang bản sao; worker làm việc trong worktree của
+bản sao; Router kéo kết quả về. Hồ sơ chính KHÔNG hề mở quyền cho ai.
 """
 from __future__ import annotations
 
@@ -55,13 +75,36 @@ def branch_name(worker_id: str, task_id: str) -> str:
 
 class WorktreeManager:
     def __init__(self, repo_root: Path, *,
-                 runner=subprocess.run):
+                 runner=subprocess.run,
+                 git_dir: Optional[Path] = None,
+                 worktree_root: Optional[Path] = None):
+        """
+        :param repo_root: kho làm việc chính (mặc định là nơi chạy git).
+        :param git_dir: kho **bare** để tạo worktree từ đó. Đặt khi worker
+            chạy dưới một tài khoản không đọc được `repo_root` — xem docstring
+            module. `None` = dùng chính `repo_root` (hành vi cũ).
+        :param worktree_root: nơi đặt worktree. `None` = `repo_root/.router/
+            worktrees` như cũ. Đặt một thư mục dùng chung đã siết ACL khi cần
+            chia sẻ với tài khoản khác.
+        """
         self._root = Path(repo_root)
         self._run = runner
+        # Moi lenh git deu chay tren KHO NAO: bare neu co, khong thi kho chinh.
+        self._git_root = Path(git_dir) if git_dir else self._root
+        self._wt_root = (Path(worktree_root) if worktree_root
+                         else self._root / ROOT_DIR)
         self._cap: Dict[str, WorktreeHandle] = {}
 
+    @property
+    def worktree_root(self) -> Path:
+        return self._wt_root
+
+    @property
+    def git_root(self) -> Path:
+        return self._git_root
+
     def _git(self, *args: str, check: bool = True):
-        p = self._run(["git", "-C", str(self._root), *args],
+        p = self._run(["git", "-C", str(self._git_root), *args],
                       capture_output=True, text=True, encoding="utf-8",
                       errors="replace")
         if check and p.returncode != 0:
@@ -90,7 +133,7 @@ class WorktreeManager:
         if kiem.returncode != 0:
             raise WorktreeError(f"base_sha {goc!r} không phải một commit hợp lệ")
 
-        duong = self._root / ROOT_DIR / worker_id / task_id
+        duong = self._wt_root / worker_id / task_id
         if duong.exists():
             raise WorktreeError(
                 f"đã có worktree ở {duong} — KHÔNG ghi đè. Dọn tay nếu chắc "
@@ -128,7 +171,7 @@ class WorktreeManager:
         động đúng lúc đang gỡ lỗi là cách nhanh nhất để mất manh mối.
         """
         dang_dung = {str(h.path.resolve()) for h in self._cap.values()}
-        goc = (self._root / ROOT_DIR).resolve()
+        goc = self._wt_root.resolve()
         ra = []
         for w in self.list_worktrees():
             p = w.get("worktree", "")

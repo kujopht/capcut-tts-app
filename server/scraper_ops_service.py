@@ -15,9 +15,11 @@ HTTP, moi thu ben vung deu di qua `store` (Mock hoac Appwrite, xem
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
+from server.domain import Chapter, Novel, PublishState
 from server.scraper import site_registry
 from server.scraper.adapters.generic_index_adapter import GenericIndexAdapter
 from server.scraper.adapters.json_ld_adapter import JsonLdAwareAdapter
@@ -32,7 +34,9 @@ from server.scraper.discovery import (
 from server.scraper.http_fetcher import FetchError, HttpFetcher
 from server.scraper.incremental import diff_toc
 from server.scraper.pipeline import StoryIngestionPipeline
-from server.scraper.run_state import run_fingerprint, run_id_from_fingerprint
+from server.scraper.run_state import (
+    ScrapeItemStatus, ScrapeRun, run_fingerprint, run_id_from_fingerprint,
+)
 from server.scraper.adapters.scrapling_relocation import (
     attempt_adaptive_relocation, is_scrapling_available, save_verified_element,
 )
@@ -63,15 +67,58 @@ class ScrapeRunNotFoundError(Exception):
     pass
 
 
+class PublishNotConfiguredError(Exception):
+    """`ScraperOpsService` duoc dung KHONG co `metadata_store` — chi doc/
+    duyet duoc, khong the `publish_reviewed_items`. Xem
+    `server/main.py`'s wiring cua `ScraperOpsService`."""
+
+
+def deterministic_novel_id(run_id: str) -> str:
+    """Novel_id TAT DINH tu run_id — cung MOT dot scrape LUON tao (hoac tai
+    su dung) CUNG mot Novel du `publish_reviewed_items` duoc goi lai bao
+    nhieu lan. Ngan hon `run_id` (da co tien to `scr_`) de tranh nham voi
+    Novel do tac gia that tao (`new_id("nov")`, UUID ngau nhien)."""
+    return "nov_" + hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:20]
+
+
+def deterministic_chapter_id(item_id: str) -> str:
+    """Chapter_id TAT DINH tu item_id — la co so cho tinh idempotent cua
+    `create_chapter_once` qua nhieu lan goi publish cho CUNG mot muc."""
+    return "chp_" + hashlib.sha256(item_id.encode("utf-8")).hexdigest()[:20]
+
+
+def _mo_ta_nguon_goc(run: ScrapeRun) -> str:
+    """Van ban mo ta cho Novel THAT tao boi harvester — provenance may doc
+    duoc THAT SU van la lien ket `ScrapeRun`/`ScrapeRunItem` (run_id ->
+    source_url), day chi la ban tom tat cho NGUOI xem trang quan tri/trang
+    Novel truoc khi publish that su."""
+    phan = []
+    if run.series_description:
+        phan.append(run.series_description)
+    if run.series_author:
+        phan.append(f"Tác giả: {run.series_author}")
+    phan.append(f"Nguồn: {run.source_url}")
+    return "\n\n".join(phan)[:2000]
+
+
 class ScraperOpsService:
     def __init__(self, store, *, chapters_per_cycle: int = 25,
-                fetcher_factory=HttpFetcher, profile_store=None):
+                fetcher_factory=HttpFetcher, profile_store=None,
+                metadata_store=None):
         self._store = store
         self._chapters_per_cycle = chapters_per_cycle
         #: Tiem duoc (mac dinh `HttpFetcher` that) — bo test thay bang
         #: `FixtureFetcher` de khong cham mang that, cung nguyen tac voi
         #: `sleep_fn`/`clock_fn` cua chinh `HttpFetcher`.
         self._fetcher_factory = fetcher_factory
+        #: Kho Novel/Chapter THAT (`server.adapters.MetadataStore`) — RIENG
+        #: voi `self._store` (chi la hang doi duyet). `None` = instance nay
+        #: CHI doc/duyet, `publish_reviewed_items` se tu choi ro rang thay
+        #: vi nem `AttributeError` mo ho. Production Story + Audio
+        #: Harvester Launch — truoc ban nay, khong co duong nao noi hang doi
+        #: duyet toi Novel/Chapter that ca (xem docstring
+        #: `publish_reviewed_items`).
+        self._metadata_store = metadata_store
         #: Kho `SiteProfile` (Phase 4) — mac dinh mot kho bo nho RIENG cho
         #: instance nay neu khong tiem (khop hanh vi CU truoc khi co
         #: SiteProfile: domain chua cau hinh luon that bai ro rang). Route
@@ -524,3 +571,120 @@ class ScraperOpsService:
 
     def list_runs(self) -> Dict[str, Any]:
         return {"runs": self._store.list_runs(), "supported_domains": site_registry.supported_domains()}
+
+    def publish_reviewed_items(
+            self, run_id: str, *, owner_id: str,
+            item_ids: Optional[List[str]] = None,
+            max_items: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Cầu nối còn thiếu (Production Story + Audio Harvester Launch):
+        biến mục `REVIEW_READY` thành Novel/Chapter THẬT ở trạng thái
+        `draft` — trước bản này, hàng đợi duyệt không có đường nào dẫn tới
+        Novel/Chapter thật cả (`run_state.py` cố ý không lưu `clean_text`;
+        đường ghi thật duy nhất từng có là kịch bản canary dùng
+        `settings.canary_user_id`, tạo rồi TỰ XOÁ ngay trong cùng lần chạy).
+
+        KHÔNG tự publish (không gọi `/api/novels/{id}/publish`) — Novel/
+        Chapter tạo ra ở đây LUÔN ở trạng thái `draft`, chờ một bước RÕ
+        RÀNG riêng (operator thật, hoặc một lời gọi publish riêng) trước
+        khi công khai — đúng yêu cầu "staging before publication".
+
+        Idempotent ở CẢ HAI cấp: đợt (`ScrapeRun.published_novel_id`) và
+        từng mục (`ScrapeRunItem.published_chapter_id`) — gọi lại hàm này
+        nhiều lần trên CÙNG một đợt chỉ xử lý các mục CHƯA publish, không
+        tạo trùng Novel/Chapter, kể cả khi tiến trình chết giữa chừng (xem
+        `deterministic_chapter_id`/`create_chapter_once`'s compare-and-set).
+
+        NỘI DUNG ĐƯỢC TẢI LẠI TỪ NGUỒN (không đọc từ `ScrapeRunItem` — cố ý
+        không lưu `clean_text`, xem docstring đầu `run_state.py`) rồi
+        `content_hash` tính lại được SO SÁNH với `content_hash` đã lưu từ
+        lúc duyệt — lệch nhau nghĩa là nội dung nguồn đã đổi KỂ TỪ lúc
+        duyệt, từ chối publish mục đó và báo rõ thay vì âm thầm xuất bản
+        nội dung KHÁC với nội dung đã được duyệt.
+
+        Một mục lỗi (mạng, phân tích, lệch content_hash) KHÔNG được dừng cả
+        đợt publish — ghi lại lỗi của riêng mục đó, tiếp tục các mục còn
+        lại (cùng nguyên tắc với `bulk.py::drive_once`: "một chương lỗi
+        không được dừng cả đợt quét hàng trăm/nghìn chương khác").
+        """
+        if self._metadata_store is None:
+            raise PublishNotConfiguredError(
+                "ScraperOpsService không có metadata_store — không thể publish.")
+        run = self._store.get_run(run_id)
+        if run is None:
+            raise ScrapeRunNotFoundError(f"Không tìm thấy đợt quét: {run_id}")
+
+        ung_vien = self._store.list_items(
+            run_id, statuses=[ScrapeItemStatus.REVIEW_READY], limit=None)
+        if item_ids is not None:
+            muon = set(item_ids)
+            ung_vien = [m for m in ung_vien if m.item_id in muon]
+        # Da publish tu lan goi truoc — bo qua NGAY tu day (khong tai lai
+        # noi dung vo ich), day la lop idempotent CHINH; `create_chapter_once`
+        # ben duoi la lop BACKSTOP cho truong hop tien trinh chet GIUA
+        # fetch xong va `save_item` ghi lai `published_chapter_id`.
+        ung_vien = [m for m in ung_vien if not m.published_chapter_id]
+        if max_items is not None:
+            ung_vien = ung_vien[:max(0, max_items)]
+
+        # Tao Novel CHI khi that su co viec de lam (`ung_vien` khong rong)
+        # HOAC dot nay da tung publish tu truoc (tai su dung, khong tao
+        # lai) — mot loi goi voi `item_ids` loc ra RONG (vd go nham id)
+        # khong duoc phep de lai mot Novel draft MO COI, khong chuong nao.
+        novel_id = run.published_novel_id
+        if not novel_id and ung_vien:
+            novel = Novel(
+                owner_id=owner_id, title=run.series_title or run.source_domain,
+                description=_mo_ta_nguon_goc(run),
+                novel_id=deterministic_novel_id(run_id), state=PublishState.DRAFT)
+            self._metadata_store.create_novel(novel)
+            run = self._store.save_run(run_id, published_novel_id=novel.novel_id)
+            novel_id = novel.novel_id
+
+        adapter = self._adapter_for_url(run.source_url)
+        series = adapter.discover_series(run.source_url) if ung_vien else None
+
+        da_publish: List[str] = []
+        da_co_tu_truoc = 0
+        loi: List[Dict[str, Any]] = []
+        for muc in ung_vien:
+            try:
+                raw_html = adapter.fetch_chapter(muc.chapter_url)
+                chuong_chuan = adapter.normalize_chapter(muc.chapter_url, raw_html, series)
+            except Exception as exc:                            # noqa: BLE001
+                loi.append({"item_id": muc.item_id, "stage": "fetch",
+                           "message": str(exc)[:500]})
+                continue
+
+            hash_hien_tai = content_hash(chuong_chuan.clean_text)
+            if muc.content_hash and hash_hien_tai != muc.content_hash:
+                loi.append({
+                    "item_id": muc.item_id, "stage": "content_mismatch",
+                    "message": (
+                        "Nội dung nguồn đã đổi kể từ lúc duyệt "
+                        f"(hash cũ {muc.content_hash[:12]}, hash mới "
+                        f"{hash_hien_tai[:12]}) - từ chối publish, cần duyệt lại.")})
+                continue
+
+            chapter = Chapter(
+                novel_id=novel_id, owner_id=owner_id,
+                title=muc.chapter_title or chuong_chuan.chapter_title,
+                content=chuong_chuan.clean_text,
+                order_index=muc.chapter_number or (muc.sequence + 1),
+                state=PublishState.DRAFT,
+                chapter_id=deterministic_chapter_id(muc.item_id))
+            da_tao, la_moi = self._metadata_store.create_chapter_once(chapter)
+            self._store.save_item(muc.item_id, published_chapter_id=da_tao.chapter_id)
+            if la_moi:
+                da_publish.append(da_tao.chapter_id)
+            else:
+                da_co_tu_truoc += 1
+
+        return {
+            "run_id": run_id, "novel_id": novel_id,
+            "published_count": len(da_publish),
+            "published_chapter_ids": da_publish,
+            "already_published_count": da_co_tu_truoc,
+            "error_count": len(loi),
+            "errors": loi,
+        }

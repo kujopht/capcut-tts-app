@@ -69,6 +69,7 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "count_failed", "count_skipped", "last_error", "ordering_evidence",
         "series_author", "series_description",
         "created_at", "updated_at", "cancelled_at", "finished_at",
+        "published_novel_id",
     ),
     COL_ITEMS: (
         "item_id", "run_id", "chapter_url", "source_fingerprint", "status",
@@ -76,6 +77,7 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "error_message", "attempts", "skipped_reason", "duplicate_of_url",
         "quality_passed", "quality_score", "quality_warnings", "sequence",
         "claimed_at", "created_at", "updated_at",
+        "published_chapter_id",
     ),
 }
 
@@ -157,6 +159,7 @@ def _run_from_doc(doc: Dict[str, Any]) -> ScrapeRun:
         updated_at=str(doc.get("updated_at") or ""),
         cancelled_at=str(doc.get("cancelled_at") or ""),
         finished_at=str(doc.get("finished_at") or ""),
+        published_novel_id=str(doc.get("published_novel_id") or ""),
     )
 
 
@@ -182,6 +185,7 @@ def _item_from_doc(doc: Dict[str, Any]) -> ScrapeRunItem:
         claimed_at=str(doc.get("claimed_at") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
+        published_chapter_id=str(doc.get("published_chapter_id") or ""),
     )
 
 

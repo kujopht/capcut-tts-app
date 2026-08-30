@@ -85,6 +85,7 @@ from server.appwrite_site_profile_store import build_site_profile_store
 from server.scraper.http_fetcher import FetchError
 from server.scraper.site_registry import ScopeExtractionError
 from server.scraper_ops_service import (
+    PublishNotConfiguredError,
     ScraperOpsService,
     ScrapeRunNotFoundError,
     UnsupportedSiteError,
@@ -295,7 +296,8 @@ scrape_run_store = build_scrape_run_store(settings)
 #: ton tai qua nhieu dot quet, khac voi dieu phoi MOT dot). Xem
 #: `server/scraper/site_profile.py`/`server/appwrite_site_profile_store.py`.
 site_profile_store = build_site_profile_store(settings)
-scraper_ops = ScraperOpsService(scrape_run_store, profile_store=site_profile_store)
+scraper_ops = ScraperOpsService(
+    scrape_run_store, profile_store=site_profile_store, metadata_store=store)
 
 #: Tang dich vu Trusted Video Sources (Phase 5) — noi YouTube Data API,
 #: `video_classifier`/`episode_parser`, `trusted_source_store` va
@@ -5319,13 +5321,19 @@ def _quet_hang_loat(fn, *args, **kwargs):
     `FetchError` (Phase 2: `UnknownSiteDiscoveryEngine`/adapter khong tai
     duoc trang muc luc — sai URL, site khong phan hoi, robots.txt tu choi,
     ...) cung la loi CUA OPERATOR ve URL da dan vao, khong phai loi may
-    chu — 400, khong phai 500."""
+    chu — 400, khong phai 500. `PublishNotConfiguredError` (Production Story
+    + Audio Harvester Launch: `publish_reviewed_items` goi ma khong co
+    `metadata_store`) la loi CAU HINH MAY CHU, khong phai loi operator — 500,
+    kem thong diep ro de vao log thay ngay thieu wiring o dau, khong phai
+    mot 400 im lang khien operator tuong minh go sai URL."""
     try:
         return fn(*args, **kwargs)
     except (UnsupportedSiteError, ScopeExtractionError, FetchError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except ScrapeRunNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PublishNotConfiguredError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except PermissionDenied as exc:
@@ -6278,6 +6286,16 @@ class ScraperSkipIn(BaseModel):
     reason: str = ""
 
 
+class ScraperPublishIn(BaseModel):
+    #: Rong (mac dinh) = publish TAT CA muc REVIEW_READY chua publish cua
+    #: dot quet. Co gia tri = chi publish DUNG cac item_id duoc liet ke —
+    #: cho operator chon loc thay vi tat-hoac-khong.
+    item_ids: Optional[List[str]] = None
+    #: Gioi han so chuong publish trong MOT lan goi nay (vd de kiem canary
+    #: nho truoc khi publish ca dot). None = khong gioi han.
+    max_items: Optional[int] = None
+
+
 class CanaryNovelIn(BaseModel):
     title: str
     canary_run_id: str
@@ -6479,6 +6497,25 @@ def admin_scraper_drive_run(
     `run.status` la trang thai KET. Khong tu dong lap trong route: moi lan
     goi la MOT yeu cau HTTP, tranh giu ket noi mo lau cho lo lon."""
     return _quet_hang_loat(scraper_ops.drive, run_id, max_chapters=payload.max_chapters)
+
+
+@app.post("/api/admin/scraper/runs/{run_id}/publish")
+def admin_scraper_publish_run(
+    run_id: str, payload: ScraperPublishIn,
+    admin: Profile = Depends(admin_or_owner_profile),
+) -> Dict[str, Any]:
+    """Production Story + Audio Harvester Launch — cau noi CON THIEU tu
+    REVIEW_READY sang Novel/Chapter THAT (trang thai `draft`). CO CHU Y dung
+    `admin_or_owner_profile`, khac voi `/drive` dung `scraper_ops_profile`:
+    day la GHI NOI DUNG that (du la draft, cho nguoi xem lai roi tu tay goi
+    `/api/novels/{id}/publish` de len song), khong phai chi tien dot quet
+    cua chinh no — can mot con nguoi that dung sau yeu cau nay. Idempotent:
+    goi lai voi cung run_id se KHONG tao Novel/Chapter trung (xem
+    `ScraperOpsService.publish_reviewed_items`)."""
+    return _quet_hang_loat(
+        scraper_ops.publish_reviewed_items, run_id,
+        owner_id=settings.harvester_owner_user_id,
+        item_ids=payload.item_ids, max_items=payload.max_items)
 
 
 @app.post("/api/admin/scraper/runs/{run_id}/cancel")

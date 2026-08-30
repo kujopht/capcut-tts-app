@@ -120,6 +120,14 @@ class ScrapeRun:
     updated_at: str = ""
     cancelled_at: str = ""
     finished_at: str = ""
+    #: Production Story + Audio Harvester Launch: `novel_id` cua Novel THAT
+    #: (trang thai `draft`) da tao cho dot nay, RONG neu chua tung publish
+    #: lan nao. Dat MOT LAN DUY NHAT boi
+    #: `ScraperOpsService.publish_reviewed_items` — cac lan goi publish SAU
+    #: cua CUNG dot TAI SU DUNG gia tri nay (khong tao Novel thu hai), day la
+    #: co che idempotent O CAP DOT, doc lap voi idempotent o cap tung chuong
+    #: (xem `ScrapeRunItem.published_chapter_id`).
+    published_novel_id: str = ""
 
     @property
     def is_terminal(self) -> bool:
@@ -200,6 +208,14 @@ class ScrapeRunItem:
     #: ngay khi muc chuyen khoi PENDING (thanh cong hay that bai deu vay) —
     #: xem `bulk.py::drive_once`.
     claimed_at: str = ""
+    #: Production Story + Audio Harvester Launch: `chapter_id` cua Chapter
+    #: THAT (trang thai `draft`) da tao cho MUC nay, RONG neu chua publish.
+    #: `chapter_id` duoc dat TAT DINH tu `item_id` (xem
+    #: `scraper_ops_service.deterministic_chapter_id`) truoc khi ghi, nen
+    #: gia tri nay luon khop voi `create_chapter_once` — doc lai duoc de
+    #: KIEM TRA idempotent (`published_chapter_id` da co -> bo qua, khong
+    #: tai/publish lai) MA KHONG can goi Appwrite mot lan nua chi de biet.
+    published_chapter_id: str = ""
 
 
 # -----------------------------------------------------------------------------

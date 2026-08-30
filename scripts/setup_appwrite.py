@@ -759,6 +759,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("updated_at", "datetime", True, None),
             ("cancelled_at", "datetime", False, None),
             ("finished_at", "datetime", False, None),
+            # Production Story + Audio Harvester Launch — Novel THAT (trang
+            # thai draft) da tao cho dot nay, rong neu chua tung publish.
+            # Xem docstring `run_state.ScrapeRun.published_novel_id`.
+            ("published_novel_id", "string", False, 64),
         ],
         "indexes": [
             # Bo dieu phoi/UI liet ke dot theo trang thai, moi nhat truoc.
@@ -809,6 +813,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("claimed_at", "string", False, 64),
             ("created_at", "datetime", True, None),
             ("updated_at", "datetime", True, None),
+            # Production Story + Audio Harvester Launch — Chapter THAT
+            # (trang thai draft) da tao cho muc nay, rong neu chua publish.
+            # Xem docstring `run_state.ScrapeRunItem.published_chapter_id`.
+            ("published_chapter_id", "string", False, 64),
         ],
         "indexes": [
             # Index QUAN TRONG NHAT: `drive_once` lay muc `pending` theo dot,

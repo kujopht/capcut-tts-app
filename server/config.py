@@ -319,6 +319,18 @@ class Settings:
     #: Phase 15 van hoat dong nguyen ven.
     canary_user_id: str = "svc_canary"
 
+    #: `user_id` tong hop CHU SO HUU moi Novel/Chapter THAT do
+    #: `ScraperOpsService.publish_reviewed_items` tao ra (Production Story +
+    #: Audio Harvester Launch) — CO Y TACH RIENG khoi `canary_user_id`: canary
+    #: la du lieu THU NGHIEM, tu xoa trong cung mot lan chay
+    #: (`server/main.py::confirm_canary_cleanup` doc); noi dung harvester THAT
+    #: (o trang thai `draft`, cho operator xem xet roi tu tay `/publish`)
+    #: khong duoc phep vo tinh trung mot quy uoc don dep danh cho du lieu vut
+    #: di. Mot chu so huu CO DINH, RIENG cho toan bo catalog do harvester tao
+    #: cung giup `list_novels(owner_id=harvester_owner_user_id)` liet ke DUNG
+    #: het noi dung nguon-suu-tam, khong lan voi Novel do tac gia that dang.
+    harvester_owner_user_id: str = "svc_harvester"
+
     #: Cac `user_id` duoc quyen QUAN TRI. Doc tu `FAS_ADMIN_USER_IDS`, ngan cach
     #: bang dau phay. MAC DINH RONG — khong ai la quan tri.
     #:
@@ -725,6 +737,8 @@ def load_settings() -> Settings:
         author_gate_enabled=_env_bool("FAS_AUTHOR_GATE", False),
         canary_service_token=_env("FAS_CANARY_SERVICE_TOKEN", "").strip(),
         canary_user_id=_env("FAS_CANARY_USER_ID", "svc_canary").strip() or "svc_canary",
+        harvester_owner_user_id=_env(
+            "FAS_HARVESTER_OWNER_USER_ID", "svc_harvester").strip() or "svc_harvester",
         admin_user_ids=tuple(
             x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()
         ),

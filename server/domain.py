@@ -121,6 +121,18 @@ class PublishState(str, Enum):
     ARCHIVED = "archived"
 
 
+class PublicationMode(str, Enum):
+    """Che do xuat ban cua MOT `Novel` — xem mission "Anime Fanfic Production
+    Canary": khi nguon KHONG the hien ro quyen tai xuat ban toan van (vd
+    FanFiction.net chi cho "use=reference" trong robots.txt), Novel van duoc
+    tao that nhung KHONG chua noi dung chuong day du — chi metadata + link
+    tro ve nguon goc. `Chapter` cho mot Novel `METADATA_ONLY` la RONG hoac
+    khong ton tai — dung `external_chapter_count` de biet do dai that."""
+
+    FULL_TEXT = "full_text"
+    METADATA_ONLY = "metadata_only"
+
+
 class Tier(str, Enum):
     """Cac goi du kien. CHUA co thanh toan trong giai doan nay."""
 
@@ -615,6 +627,31 @@ class Novel:
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
 
+    #: `FULL_TEXT` (mac dinh, tuong thich nguoc voi moi Novel hien co) hoac
+    #: `METADATA_ONLY` khi nguon khong the hien ro quyen tai xuat ban toan
+    #: van — xem `PublicationMode`.
+    publication_mode: PublicationMode = PublicationMode.FULL_TEXT
+    #: Danh sach `Fandom.fandom_id` — List vi mot fic co the la crossover
+    #: nhieu fandom (vd "Naruto + My Hero Academia").
+    fandom_ids: List[str] = field(default_factory=list)
+    #: Ten TAC GIA GOC tren nguon (KHONG phai `owner_id` — voi noi dung
+    #: harvester, `owner_id` la `svc_harvester`, mot tai khoan he thong,
+    #: khong phai nguoi viet that).
+    external_author_name: str = ""
+    #: Link CANONICAL tro ve dung trang nguon — bat buoc co gia tri khi
+    #: `publication_mode == METADATA_ONLY` (day la ly do ton tai cua Novel
+    #: metadata-only: dan doc gia ve doc ban day du o nguon that).
+    external_source_url: str = ""
+    #: So chuong NHU NGUON BAO CAO — khac voi so `Chapter` THAT ta luu (co
+    #: the la 0 cho Novel metadata-only, xem docstring `PublicationMode`).
+    external_chapter_count: int = 0
+    #: Ngay cap nhat gan nhat THEO NGUON (chuoi tho, khong ep dinh dang —
+    #: moi nguon bao cao khac nhau) — khac `updated_at` la thoi diem BAN GHI
+    #: nay duoc sua o he thong minh.
+    external_updated_at: str = ""
+    #: Ma ngon ngu cua noi dung GOC (vd "en", "vi", "ja") — rong neu chua xac dinh.
+    language: str = ""
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "novel_id": self.novel_id,
@@ -626,6 +663,13 @@ class Novel:
             "tags": list(self.tags),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "publication_mode": self.publication_mode.value,
+            "fandom_ids": list(self.fandom_ids),
+            "external_author_name": self.external_author_name,
+            "external_source_url": self.external_source_url,
+            "external_chapter_count": self.external_chapter_count,
+            "external_updated_at": self.external_updated_at,
+            "language": self.language,
         }
 
 
@@ -1275,5 +1319,53 @@ class MediaAsset:
             "size_bytes": self.size_bytes,
             "processing_state": self.processing_state.value,
             "rights_state": self.rights_state.value,
+            "created_at": self.created_at,
+        }
+
+
+class FandomMediaType(str, Enum):
+    ANIME = "anime"
+    MANGA = "manga"
+    LIGHT_NOVEL = "light_novel"
+    OTHER = "other"
+
+
+@dataclass
+class Fandom:
+    """
+    Dinh danh CHUAN HOA cua mot fandom anime/manga/light-novel — nhieu ten
+    goi khac nhau tren nhieu nguon (vd "Boku no Hero Academia", "My Hero
+    Academia", "BNHA", "MHA") deu quy ve MOT `canonical_name`.
+
+    KHONG hardcode chi mot danh sach fandom co dinh — day la mot BAN GHI,
+    dang ky moi duoc them qua vong doi binh thuong (xem
+    `server/fandom_registry.py::FandomRegistry.register`), giong nguyen tac
+    "new source detected" cua `site_registry.py`: fandom CHUA biet duoc gan
+    co ro rang thay vi bi am tham bo qua hoac doan bua.
+    """
+
+    canonical_name: str
+    media_type: FandomMediaType = FandomMediaType.ANIME
+    #: Cac ten khac nhau da biet CUNG mot ngon ngu/khong ngon ngu ro rang
+    #: (viet tat, ten thay the) — vd ["BNHA", "MHA", "Boku no Hero Academia"].
+    aliases: List[str] = field(default_factory=list)
+    #: Ten CHINH XAC nhu nguon cu the hien thi (FFN, AO3, ...) tung dung —
+    #: khac `aliases` o cho day la ghi lai NGUON GOC cua ten, phuc vu doi
+    #: soat/debug khi mot ten moi xuat hien, khong phai danh sach de khop.
+    source_names: List[str] = field(default_factory=list)
+    #: Ten theo tung ma ngon ngu (vd {"ja": "僕のヒーローアカデミア",
+    #: "vi": "Học Viện Anh Hùng Của Tôi"}) — RONG neu chua co ban dich xac nhan.
+    language_aliases: Dict[str, str] = field(default_factory=dict)
+    fandom_id: str = field(default_factory=lambda: new_id("fdm"))
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "fandom_id": self.fandom_id,
+            "canonical_name": self.canonical_name,
+            "media_type": self.media_type.value,
+            "aliases": list(self.aliases),
+            "source_names": list(self.source_names),
+            "language_aliases": dict(self.language_aliases),
             "created_at": self.created_at,
         }

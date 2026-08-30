@@ -47,6 +47,7 @@ from server.domain import (
     Chapter,
     JobStatus,
     Novel,
+    PublicationMode,
     PublishState,
     TtsJob,
     bao_cao_xoa_tai_khoan,
@@ -135,6 +136,10 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_NOVELS: (
         "novel_id", "owner_id", "title", "description", "cover_key",
         "state", "tags", "created_at", "updated_at",
+        # Anime Fanfic Production Canary: fandom + provenance nguon ngoai.
+        "publication_mode", "fandom_ids", "external_author_name",
+        "external_source_url", "external_chapter_count",
+        "external_updated_at", "language",
     ),
     COL_CHAPTERS: (
         "chapter_id", "novel_id", "owner_id", "title", "content",
@@ -1826,7 +1831,22 @@ def _novel_from_doc(doc: Dict[str, Any]) -> Novel:
         tags=list(doc.get("tags") or []),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
+        publication_mode=_publication_mode_from_doc(doc),
+        fandom_ids=list(doc.get("fandom_ids") or []),
+        external_author_name=str(doc.get("external_author_name") or ""),
+        external_source_url=str(doc.get("external_source_url") or ""),
+        external_chapter_count=int(doc.get("external_chapter_count") or 0),
+        external_updated_at=str(doc.get("external_updated_at") or ""),
+        language=str(doc.get("language") or ""),
     )
+
+
+def _publication_mode_from_doc(doc: Dict[str, Any]) -> PublicationMode:
+    raw = str(doc.get("publication_mode") or PublicationMode.FULL_TEXT.value)
+    try:
+        return PublicationMode(raw)
+    except ValueError:
+        return PublicationMode.FULL_TEXT
 
 
 def _chapter_from_doc(doc: Dict[str, Any]) -> Chapter:

@@ -155,12 +155,24 @@ class TestBackwardCompatible(CoverTestCase):
         missing = self.OLD_NOVEL_FIELDS - set(body)
         self.assertEqual(missing, set(), f"mất trường cũ: {missing}")
 
+    #: Anime Fanfic Production Canary: them fandom + provenance nguon ngoai
+    #: len `Novel` (`domain.py`) — CO CHU Y ghi ro o day, khong am tham noi
+    #: rong `OLD_NOVEL_FIELDS`, de lan them truong SAU nay van bi bat neu
+    #: khong duoc xac nhan tuong tu.
+    NEW_FANDOM_FIELDS = {
+        "publication_mode", "fandom_ids", "external_author_name",
+        "external_source_url", "external_chapter_count",
+        "external_updated_at", "language",
+    }
+
     def test_only_cover_url_was_added(self):
         token = self.user()
         novel_id = self.novel(token)
         body = self.client.get(f"/api/novels/{novel_id}",
                                 headers=self.auth(token)).json()["novel"]
-        self.assertEqual(set(body) - self.OLD_NOVEL_FIELDS, {"cover_url"})
+        self.assertEqual(
+            set(body) - self.OLD_NOVEL_FIELDS,
+            {"cover_url"} | self.NEW_FANDOM_FIELDS)
 
     def test_chapter_response_keeps_its_old_shape(self):
         token = self.user()

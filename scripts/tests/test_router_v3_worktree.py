@@ -323,6 +323,12 @@ class GocDungChungTest(unittest.TestCase):
         subprocess.run(["git", "clone", "--bare", "--quiet",
                         str(self.repo), str(self.bare)],
                        capture_output=True, text=True, check=True)
+        # Ban sao bare KHONG ke thua config cua kho nguon, va worktree tao tu
+        # no cung vay. Tren may co danh tinh git toan cuc thi commit van chay,
+        # nen loi chi lo ra tren CI ("Author identity unknown") — dung kieu
+        # bai test chi hong o mot moi truong.
+        _git(self.bare, "config", "user.email", "t@t.test")
+        _git(self.bare, "config", "user.name", "t")
 
     def tearDown(self):
         for goc in (self.bare,):

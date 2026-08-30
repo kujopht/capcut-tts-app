@@ -77,3 +77,65 @@ def utilization(registry: WorkerRegistry, wall_seconds: float) -> List[Dict]:
             "busy_ratio": round(ban / wall_seconds, 3) if wall_seconds else 0.0,
         })
     return ra
+
+
+#: Ngưỡng phân loại độ phình ngữ cảnh cho bảng — cùng bậc với `RecyclePolicy`.
+_NGU_CANH = ((20_000, "low"), (45_000, "med"))
+
+
+def _muc_ngu_canh(chars: int) -> str:
+    for tran, nhan in _NGU_CANH:
+        if chars < tran:
+            return nhan
+    return "HIGH"
+
+
+def render_v32(warm_snapshot, *, registry=None, metrics=None,
+               parallelism: int = 0, done: int = 0, total: int = 0,
+               task_name: str = "") -> str:
+    """Bảng cho Router V3.2 — thêm trạng thái ẤM và độ phình ngữ cảnh.
+
+    `cold_starts_avoided` là con số nói lên giá trị của bể ấm; tổng số lượt
+    thì không. Hiển thị nó để người vận hành thấy bể có đang làm việc hay chỉ
+    đang tồn tại.
+
+    KHÔNG in prompt, không in nội dung, không in token — chỉ id và số đo.
+    """
+    dong = ["ROUTER V3.2", ""]
+    if task_name:
+        dong += [f"TASK: {task_name}", ""]
+
+    theo_id = {h["worker_id"]: h for h in warm_snapshot}
+    ten = sorted(theo_id) or []
+    for wid in ten:
+        h = theo_id[wid]
+        tt = {"warm_idle": "WARM-IDLE", "warm_busy": "WARM-BUSY",
+              "cold": "COLD", "failed": "FAILED"}.get(h["state"], h["state"])
+        dong.append(f"{wid:<10} {tt:<11} {(h.get('family') or '-'):<16} "
+                    f"context={_muc_ngu_canh(h.get('context_chars', 0))} "
+                    f"turns={h.get('turns', 0)}")
+
+    if registry is not None:
+        for hang in registry.snapshot():
+            if hang["worker_id"] in theo_id:
+                continue
+            tt = "UNAVAILABLE" if hang["health"] == "unavailable" else (
+                "BUSY" if hang["current_task"] else "IDLE")
+            dong.append(f"{hang['worker_id']:<10} {tt:<11} "
+                        f"{(hang['current_task'] or '-'):<16}")
+
+    dong.append("")
+    if parallelism:
+        dong.append(f"Worker song song      : {parallelism}")
+    if total:
+        dong.append(f"Nut hoan tat          : {done}/{total}")
+    if metrics is not None:
+        m = metrics.snapshot() if hasattr(metrics, "snapshot") else dict(metrics)
+        dong += [
+            f"Tranh duoc khoi dong  : {m.get('cold_starts_avoided', 0)}",
+            f"Do tre trung binh (am): {m.get('avg_warm_seconds', 0)}s",
+            f"So lan tai tao        : {m.get('recycles', 0)}",
+            f"Khoi dong lanh        : {m.get('cold_starts', 0)} "
+            f"({m.get('cold_start_seconds', 0)}s)",
+        ]
+    return "\n".join(dong)

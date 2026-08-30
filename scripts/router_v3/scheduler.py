@@ -23,6 +23,7 @@ from scripts.router_v3.packet import TaskPacket, TaskResult, packet_for
 from scripts.router_v3.policy import (NoWorkerAvailable, SpeedMode,
                                       choose_worker, plan_parallelism)
 from scripts.router_v3.registry import WorkerRegistry, WorkerSpec
+from scripts.router_v3.worktree import WorktreeError, WorktreeManager
 
 #: `(packet, worker) -> (raw_output, seconds)`. Tiêm vào để kiểm thử tất định
 #: mà không gọi mạng — và để bộ lập lịch không phụ thuộc một CLI cụ thể.
@@ -38,6 +39,10 @@ class RunReport:
     skipped: List[str] = field(default_factory=list)
     parallelism: int = 1
     parallelism_reason: str = ""
+    #: task_id -> nhanh/duong worktree, de tich hop doc lai duoc.
+    workspaces: Dict[str, str] = field(default_factory=dict)
+    #: Nut vi pham WRITE_SCOPE — hop dong bi pha, khong duoc gop.
+    scope_violations: Dict[str, List[str]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -59,7 +64,8 @@ class Scheduler:
                  mode: SpeedMode = SpeedMode.NORMAL,
                  max_parallel: Optional[int] = None,
                  base_sha: str = "unknown",
-                 node_timeout: Optional[float] = 900.0):
+                 node_timeout: Optional[float] = 900.0,
+                 worktrees: Optional[WorktreeManager] = None):
         self._reg = registry
         self._exec = executor
         self._mode = mode
@@ -69,6 +75,11 @@ class Scheduler:
         # CA bo lap lich vo han: `cf.wait(...)` cho mai va khong nut nao khac
         # duoc nap them. Neu ra qua review doc lap (Codex).
         self._node_timeout = node_timeout
+        # Khong co manager -> khong co co lap. Cac nut CO GHI khi do bi
+        # TU CHOI thay vi am tham dung chung cay lam viec chinh: hai
+        # worker ghi chung mot cay la hong chac chan, va no hong theo
+        # kieu khong dung lai duoc de dieu tra.
+        self._wt = worktrees
         self._khoa = threading.Lock()
 
     def run(self, dag: TaskDag) -> RunReport:
@@ -76,6 +87,19 @@ class Scheduler:
         if self._max_parallel is not None:
             song_song = max(1, self._max_parallel)
             ly_do = f"do người gọi ép: {song_song}"
+
+        ghi = [n for n in dag.nodes() if n.is_write]
+        if ghi and self._wt is None:
+            raise WorktreeError(
+                f"{len(ghi)} nút CÓ GHI nhưng không có WorktreeManager — "
+                f"từ chối chạy. Chạy chúng trên cây làm việc chung sẽ để "
+                f"hai worker giẫm lên nhau.")
+        if ghi and self._wt is not None and self._wt.is_dirty():
+            # SHA goc phai la mot diem xuat phat SACH. Cay ban nghia la
+            # worktree moi se ke thua thay doi chua commit cua nguoi khac.
+            raise WorktreeError(
+                "cây làm việc chính đang BẨN — dọn hoặc commit trước khi "
+                "chạy các nút có ghi.")
 
         bao_cao = RunReport(parallelism=song_song, parallelism_reason=ly_do)
         xong: Set[str] = set()
@@ -193,8 +217,24 @@ class Scheduler:
             tom_tat = {d: (bao_cao.results[d].summary
                            if d in bao_cao.results else "")
                        for d in nut.dependencies}
+        handle = None
+        if nut.is_write and self._wt is not None:
+            try:
+                handle = self._wt.create(worker.worker_id, nut.id,
+                                         base_sha=self._base_sha)
+            except WorktreeError as exc:
+                self._reg.mark_finished(worker.worker_id, ok=False, seconds=0.0,
+                                        error=str(exc))
+                return TaskResult(task_id=nut.id, worker_id=worker.worker_id,
+                                  status="failed",
+                                  summary=f"không dựng được worktree: {exc}"[:300])
+            with self._khoa:
+                bao_cao.workspaces[nut.id] = str(handle.path)
+
         goi = packet_for(nut, base_sha=self._base_sha,
-                         dependency_summaries=tom_tat)
+                         dependency_summaries=tom_tat,
+                         workspace=str(handle.path) if handle else "",
+                         branch=handle.branch if handle else "")
         t0 = time.perf_counter()
         try:
             raw, giay = self._exec(goi, worker)
@@ -209,6 +249,24 @@ class Scheduler:
             kq = TaskResult(task_id=nut.id, worker_id=worker.worker_id,
                             status="failed", summary=loi[:300],
                             duration_seconds=round(giay, 2))
+        if handle is not None:
+            # HOP DONG: `write_scope` khong phai loi khuyen. Mot worker co the
+            # pha no, va neu tich hop tin vao ket qua ma khong kiem thi thay
+            # doi ngoai pham vi se len main ma khong ai thay.
+            try:
+                vi_pham = self._wt.verify_scope(handle, nut.write_scope)
+            except WorktreeError as exc:
+                vi_pham = [f"(khong kiem duoc: {exc})"]
+            if vi_pham:
+                with self._khoa:
+                    bao_cao.scope_violations[nut.id] = vi_pham
+                kq.status = "blocked"
+                kq.blockers.append(
+                    f"ghi NGOÀI write_scope: {', '.join(vi_pham[:5])}")
+            kq.integration_notes = (
+                f"branch={handle.branch} base={handle.base_sha[:12]} "
+                f"{kq.integration_notes}").strip()
+
         self._reg.mark_finished(worker.worker_id, ok=kq.ok,
                                 seconds=kq.duration_seconds,
                                 error="" if kq.ok else kq.summary)

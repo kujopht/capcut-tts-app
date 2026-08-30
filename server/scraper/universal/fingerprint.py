@@ -44,12 +44,26 @@ _EMBEDDED_JSON_SCRIPT = re.compile(
     re.IGNORECASE | re.DOTALL)
 
 
+#: URL userinfo (`scheme://user:pass@host`) - a fingerprint's link sample
+#: is later sent to an LLM (see `schema_proposal.build_llm_prompt`); a page
+#: embedding a credential-bearing link must never carry that credential
+#: through into a prompt or a log. Matches greedily up to the required `@`
+#: so `user:pass@` is removed and the URL is still readable without it.
+_URL_USERINFO = re.compile(r"(https?://)[^/@\s]+@")
+
+
+def _redact_credential_like(text: str) -> str:
+    return _URL_USERINFO.sub(r"\1", text)
+
+
 def _clip(text: str) -> str:
     """Same discipline as `change_detection._an_toan`: strip control
     characters, bound length - a fingerprint field is metadata about
-    scraped content, not a place to mirror it verbatim."""
+    scraped content, not a place to mirror it verbatim. Also redacts
+    URL-embedded credentials (see `_redact_credential_like`) - applied
+    here so EVERY field that goes through `_clip` gets this for free."""
     printable = "".join(c for c in str(text) if c.isprintable())
-    return printable[:_MAX_FIELD_LEN]
+    return _redact_credential_like(printable)[:_MAX_FIELD_LEN]
 
 
 class _TagHistogramParser(HTMLParser):

@@ -150,3 +150,7 @@ scratchpad/
 # Worktree tam do Claude Code sinh ra (`claude remote-control --spawn worktree`).
 # La ban sao lam viec cuc bo, khong phai ma nguon du an.
 .claude/worktrees/
+
+# Worktree cua Router V3 khi dung goc MAC DINH (repo/.router/worktrees).
+# Goc DUNG CHUNG (C:\FanficWorkers) nam ngoai kho nen khong can o day.
+.router/

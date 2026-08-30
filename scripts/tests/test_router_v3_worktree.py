@@ -295,3 +295,98 @@ class GhiTepCanWorkspaceTest(unittest.TestCase):
         r = run_native("x", model="m", allow_edits=True, workspace=None)
         self.assertFalse(r.ok)
         self.assertIn("add-dir", r.error)
+
+
+class GocDungChungTest(unittest.TestCase):
+    """Worktree phải TỰ CHỨA khi worker chạy dưới tài khoản khác.
+
+    Đây là bài quan trọng nhất của topology dùng chung: chuyển worktree sang
+    thư mục chia sẻ là CHƯA đủ, vì tệp `.git` của nó trỏ ngược về kho mẹ.
+    Một tài khoản không đọc được kho mẹ sẽ hỏng ở mọi lệnh git.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="rv32-goc-"))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        _git(self.repo, "init", "-q", "-b", "main")
+        _git(self.repo, "config", "user.email", "t@t.test")
+        _git(self.repo, "config", "user.name", "t")
+        (self.repo / "a.txt").write_text("goc\n", encoding="utf-8")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-q", "-m", "goc")
+
+        # Ban sao BARE trong "goc dung chung".
+        self.chung = self.tmp / "shared"
+        self.chung.mkdir()
+        self.bare = self.chung / "repo.git"
+        subprocess.run(["git", "clone", "--bare", "--quiet",
+                        str(self.repo), str(self.bare)],
+                       capture_output=True, text=True, check=True)
+        # Ban sao bare KHONG ke thua config cua kho nguon, va worktree tao tu
+        # no cung vay. Tren may co danh tinh git toan cuc thi commit van chay,
+        # nen loi chi lo ra tren CI ("Author identity unknown") — dung kieu
+        # bai test chi hong o mot moi truong.
+        _git(self.bare, "config", "user.email", "t@t.test")
+        _git(self.bare, "config", "user.name", "t")
+
+    def tearDown(self):
+        for goc in (self.bare,):
+            try:
+                for w in subprocess.run(
+                        ["git", "-C", str(goc), "worktree", "list", "--porcelain"],
+                        capture_output=True, text=True).stdout.splitlines():
+                    if w.startswith("worktree "):
+                        subprocess.run(["git", "-C", str(goc), "worktree",
+                                        "remove", "--force", w.split(" ", 1)[1]],
+                                       capture_output=True, text=True)
+            except Exception:
+                pass
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _wt(self):
+        return WorktreeManager(self.repo, git_dir=self.bare,
+                               worktree_root=self.chung / "workers")
+
+    def test_worktree_nam_trong_GOC_DUNG_CHUNG(self):
+        wt = self._wt()
+        h = wt.create("AG02", "T1", base_sha=wt.base_sha())
+        self.assertTrue(str(h.path).startswith(str(self.chung)),
+                        f"{h.path} phải nằm trong {self.chung}")
+
+    def test_gitdir_TU_CHUA_khong_tro_ve_kho_me(self):
+        """Điều kiện quyết định để AG02 dùng được: `.git` không được trỏ về
+        hồ sơ mà AG02 không đọc được."""
+        wt = self._wt()
+        h = wt.create("AG02", "T1", base_sha=wt.base_sha())
+        tro = (h.path / ".git").read_text(encoding="utf-8")
+        self.assertIn(str(self.bare.name), tro)
+        self.assertNotIn(str(self.repo), tro,
+                         "worktree vẫn phụ thuộc kho mẹ -> AG02 sẽ hỏng")
+
+    def test_worker_lam_viec_va_commit_duoc_trong_goc_chung(self):
+        wt = self._wt()
+        h = wt.create("AG02", "T1", base_sha=wt.base_sha())
+        (h.path / "a.txt").write_text("AG02 sua\n", encoding="utf-8")
+        self.assertEqual(wt.verify_scope(h, ["a.txt"]), [])
+        _git(h.path, "add", "-A")
+        _git(h.path, "commit", "-q", "-m", "AG02 sua")
+        sha = _git(h.path, "rev-parse", "HEAD").strip()
+        self.assertTrue(sha)
+
+    def test_hai_worker_hai_cay_rieng_trong_goc_chung(self):
+        wt = self._wt()
+        sha = wt.base_sha()
+        a = wt.create("AG01", "TA", base_sha=sha)
+        b = wt.create("AG02", "TB", base_sha=sha)
+        self.assertNotEqual(a.path, b.path)
+        (a.path / "a.txt").write_text("A\n", encoding="utf-8")
+        (b.path / "a.txt").write_text("B\n", encoding="utf-8")
+        self.assertEqual((a.path / "a.txt").read_text(encoding="utf-8"), "A\n")
+        self.assertEqual((b.path / "a.txt").read_text(encoding="utf-8"), "B\n")
+
+    def test_KHONG_dat_goc_chung_thi_giu_hanh_vi_cu(self):
+        """Mặc định vẫn là `repo/.router/worktrees` — không phá cấu hình cũ."""
+        wt = WorktreeManager(self.repo)
+        self.assertTrue(str(wt.worktree_root).startswith(str(self.repo)))
+        self.assertEqual(wt.git_root, self.repo)

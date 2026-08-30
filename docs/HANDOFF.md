@@ -31,6 +31,7 @@ Tài liệu này để một phiên khác tiếp tục được khi phiên hiệ
 | `autoDeploy` của Render | **TẮT** — mọi lần lên production đều phải chủ động |
 | Cổng bắt buộc của `main` | Backend + Web + **gitleaks** |
 | Story Harvester V4 | **ĐANG XÂY** — nền móng, chưa áp gì lên sản xuất |
+| Story Harvester V5 (Universal Source Intelligence) | **ĐANG XÂY** — `server/scraper/universal/`, nền móng + adapter YouTube/Bilibili/web-fiction, chưa áp gì lên sản xuất, xem `docs/UNIVERSAL_SOURCE_INTELLIGENCE.md` |
 
 `autoDeploy=no` là điều dễ vấp nhất ở đây: merge vào `main` **không** đưa mã
 lên production. Đã đo được thật — production nằm lại ở `f4833d03` trong khi

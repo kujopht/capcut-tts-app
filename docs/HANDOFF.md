@@ -32,6 +32,7 @@ Tài liệu này để một phiên khác tiếp tục được khi phiên hiệ
 | Cổng bắt buộc của `main` | Backend + Web + **gitleaks** |
 | Story Harvester V4 | **ĐANG XÂY** — nền móng, chưa áp gì lên sản xuất |
 | Story Harvester V5 (Universal Source Intelligence) | **ĐANG XÂY** — `server/scraper/universal/`, nền móng + adapter YouTube/Bilibili/web-fiction, chưa áp gì lên sản xuất, xem `docs/UNIVERSAL_SOURCE_INTELLIGENCE.md` |
+| Fanfic AI Chat V1 | **ĐANG XÂY** — `server/chat/`, `server/llm_gateway/`, `POST /api/chat/ask`, chỉ dùng `MockLLMProvider` (chưa có API key thật), chưa áp gì lên sản xuất, xem `docs/FANFIC_AI_CHAT.md` |
 
 `autoDeploy=no` là điều dễ vấp nhất ở đây: merge vào `main` **không** đưa mã
 lên production. Đã đo được thật — production nằm lại ở `f4833d03` trong khi

@@ -1215,3 +1215,65 @@ def job_fingerprint(content: str, voice_id: str, rate: str, chunk_chars: int) ->
 
     payload = f"{content}\x1f{voice_id}\x1f{rate}\x1f{chunk_chars}"
     return content_hash(payload)
+
+
+class MediaType(str, Enum):
+    AUDIO = "audio"
+    IMAGE = "image"
+    SUBTITLES = "subtitles"
+    UNKNOWN = "unknown"
+
+
+class StorageTier(str, Enum):
+    HOT = "hot"
+    ARCHIVE = "archive"
+
+
+class MediaProcessingState(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
+@dataclass
+class MediaAsset:
+    """
+    Tai san da phuong tien tong quat (audio, anh bia, phu de).
+
+    Dung cho Production Story + Audio Harvester, theo doi theo luong (tier) va
+    vong doi xu ly rieng, khong phu thuoc vao luong TTS chuong (AudioTrack).
+    """
+
+    owner_id: str
+    media_type: MediaType
+    storage_tier: StorageTier
+    object_key: str
+    content_hash: str
+    source: str = ""
+    codec: str = ""
+    bitrate: int = 0
+    duration_seconds: float = 0.0
+    size_bytes: int = 0
+    processing_state: MediaProcessingState = MediaProcessingState.PENDING
+    rights_state: PublishState = PublishState.DRAFT
+    asset_id: str = field(default_factory=lambda: new_id("mas"))
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "asset_id": self.asset_id,
+            "owner_id": self.owner_id,
+            "media_type": self.media_type.value,
+            "storage_tier": self.storage_tier.value,
+            "object_key": self.object_key,
+            "content_hash": self.content_hash,
+            "source": self.source,
+            "codec": self.codec,
+            "bitrate": self.bitrate,
+            "duration_seconds": self.duration_seconds,
+            "size_bytes": self.size_bytes,
+            "processing_state": self.processing_state.value,
+            "rights_state": self.rights_state.value,
+            "created_at": self.created_at,
+        }

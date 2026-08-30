@@ -51,6 +51,7 @@ from server.domain import (
     bao_cao_xoa_tai_khoan,
     new_id,
     now_iso,
+    MediaAsset,
 )
 from server.social_store import MockSocialStore
 
@@ -2007,6 +2008,32 @@ class MockMetadataStore(MockSocialStore):
         rows.reverse()
         rows.sort(key=lambda e: e.created_at, reverse=True)
         return rows[offset:offset + limit], len(rows)
+
+
+class MediaAssetStore(Protocol):
+    def create_asset(self, asset: MediaAsset) -> MediaAsset: ...
+    def get_asset(self, asset_id: str) -> MediaAsset: ...
+    def list_assets(self, owner_id: str) -> List[MediaAsset]: ...
+
+class MockMediaAssetStore:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._assets: Dict[str, MediaAsset] = {}
+
+    def create_asset(self, asset: MediaAsset) -> MediaAsset:
+        with self._lock:
+            self._assets[asset.asset_id] = asset
+            return asset
+
+    def get_asset(self, asset_id: str) -> MediaAsset:
+        with self._lock:
+            if asset_id not in self._assets:
+                raise NotFoundError("Không tìm thấy media asset.")
+            return self._assets[asset_id]
+
+    def list_assets(self, owner_id: str) -> List[MediaAsset]:
+        with self._lock:
+            return [a for a in self._assets.values() if a.owner_id == owner_id]
 
 
 # -----------------------------------------------------------------------------

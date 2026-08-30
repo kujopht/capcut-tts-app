@@ -15,6 +15,7 @@ import socket
 import sys
 import time
 import unittest
+from unittest import mock
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -106,6 +107,40 @@ class BeWorkerTest(unittest.TestCase):
         for hang in WarmPool([w]).snapshot():
             self.assertNotIn("prompt", hang)
             self.assertNotIn("response", hang)
+
+
+class ArgvKhoiDongTest(unittest.TestCase):
+    """`start()` phải dựng đúng cờ — bằng chứng thật (2026-08-30): một mô
+    hình chọn công cụ lệnh-shell để tạo MỘT tệp, và `accept-edits` không phủ
+    trường hợp đó (chỉ ghi tệp), chỉ `--dangerously-skip-permissions` mới."""
+
+    def _argv_da_dung(self, **kw) -> list:
+        w = WarmAgyWorker("X", model="m", binary="agy.exe", **kw)
+        with mock.patch("scripts.router_v3.warm_pool.subprocess.Popen") as gia:
+            gia.return_value.stdout = None
+            gia.return_value.stderr = None
+            w.start()
+        return gia.call_args[0][0]
+
+    def test_mac_dinh_khong_co_co_nao(self):
+        argv = self._argv_da_dung()
+        self.assertNotIn("--mode", argv)
+        self.assertNotIn("--dangerously-skip-permissions", argv)
+
+    def test_allow_edits_them_mode_accept_edits(self):
+        argv = self._argv_da_dung(allow_edits=True)
+        self.assertIn("--mode", argv)
+        self.assertEqual(argv[argv.index("--mode") + 1], "accept-edits")
+
+    def test_dangerously_skip_permissions_them_dung_co(self):
+        argv = self._argv_da_dung(dangerously_skip_permissions=True)
+        self.assertIn("--dangerously-skip-permissions", argv)
+
+    def test_ca_hai_dat_duoc_cung_luc(self):
+        argv = self._argv_da_dung(allow_edits=True,
+                                  dangerously_skip_permissions=True)
+        self.assertIn("--mode", argv)
+        self.assertIn("--dangerously-skip-permissions", argv)
 
 
 class _CauNoiThu(unittest.TestCase):

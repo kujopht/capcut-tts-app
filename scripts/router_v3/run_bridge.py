@@ -44,6 +44,10 @@ def main(argv=None) -> int:
     ap.add_argument("--port", type=int, default=0, help="0 = HĐH tự chọn")
     ap.add_argument("--workspace", default="", help="thư mục cho --add-dir")
     ap.add_argument("--allow-edits", action="store_true")
+    ap.add_argument("--dangerously-skip-permissions", action="store_true",
+                    help="tự duyệt MỌI quyền (gồm lệnh shell) — chỉ dùng khi "
+                         "việc chạy trong worktree cô lập, có write_scope "
+                         "và verify_scope() chặn sau")
     a = ap.parse_args(argv)
 
     exe = find_agy()
@@ -55,6 +59,7 @@ def main(argv=None) -> int:
     worker = WarmAgyWorker(
         a.worker_id, model=a.model,
         workspace=a.workspace or None, allow_edits=a.allow_edits,
+        dangerously_skip_permissions=a.dangerously_skip_permissions,
         policy=RecyclePolicy())
 
     print(f"agy      : {exe}")

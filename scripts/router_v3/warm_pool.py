@@ -117,14 +117,26 @@ class WarmAgyWorker:
     def __init__(self, worker_id: str, *, model: str,
                  cwd: Optional[str] = None, workspace: Optional[str] = None,
                  allow_edits: bool = False,
+                 dangerously_skip_permissions: bool = False,
                  policy: Optional[RecyclePolicy] = None,
                  binary: Optional[str] = None,
                  turn_timeout: float = 240.0):
+        """
+        :param dangerously_skip_permissions: bật `--dangerously-skip-permissions`.
+            MẶC ĐỊNH TẮT — nó tự duyệt MỌI quyền, gồm cả chạy lệnh shell, rộng
+            hơn hẳn `accept-edits` (chỉ ghi tệp). Chỉ bật khi việc chạy trong
+            một worktree cô lập, có `write_scope`/`DO_NOT_TOUCH` và
+            `verify_scope()` chặn sau — xem CLAUDE.md mục "Known real CLI
+            quirks". Bằng chứng thật (2026-08-30): một mô hình chọn công cụ
+            lệnh-shell để tạo MỘT tệp thay vì công cụ ghi tệp; `accept-edits`
+            không phủ trường hợp đó, chỉ `--dangerously-skip-permissions` mới.
+        """
         self.worker_id = worker_id
         self._model = model
         self._cwd = cwd
         self._workspace = workspace
         self._allow_edits = allow_edits
+        self._dangerously_skip_permissions = dangerously_skip_permissions
         self._policy = policy or RecyclePolicy()
         self._binary = binary
         self._turn_timeout = turn_timeout
@@ -164,6 +176,8 @@ class WarmAgyWorker:
             argv += ["--add-dir", str(self._workspace)]
         if self._allow_edits:
             argv += ["--mode", "accept-edits"]
+        if self._dangerously_skip_permissions:
+            argv += ["--dangerously-skip-permissions"]
 
         t0 = time.perf_counter()
         try:

@@ -341,6 +341,16 @@ def default_registry(*, probe: bool = True) -> WorkerRegistry:
         trusted_for_high_risk=False,
         notes="review thường/độc lập; KHÔNG BAO GIỜ review bảo mật"))
 
+    # Adapter plugin (Phase 2-4): tu dang ky WorkerSpec cua chinh no qua
+    # register(), registry core khong biet gi ve hinh dang lenh/API rieng
+    # cua tung provider. Import tre de tranh vong lap (cac module adapter
+    # nay tu import nguoc lai registry.py).
+    from scripts.router_v3.grok_adapter import GrokBuildAdapter
+    from scripts.router_v3.opencode_adapter import OpenCodeAdapter
+
+    reg.register(GrokBuildAdapter("GROK01").register())
+    reg.register(OpenCodeAdapter("OPENCODE01").register())
+
     if not probe:
         return reg
 
@@ -366,4 +376,9 @@ def default_registry(*, probe: bool = True) -> WorkerRegistry:
                    Health.HEALTHY if co_codex else Health.UNAVAILABLE,
                    "" if co_codex else "không tìm thấy codex")
     reg.set_health("CLAUDE_LEAD", Health.HEALTHY)
+
+    grok_health = GrokBuildAdapter("GROK01").health()
+    reg.set_health("GROK01", grok_health.state, grok_health.detail)
+    oc_health = OpenCodeAdapter("OPENCODE01").health()
+    reg.set_health("OPENCODE01", oc_health.state, oc_health.detail)
     return reg

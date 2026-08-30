@@ -60,6 +60,14 @@ class WorkersTest(_CoCheckpointTest):
         self.assertIn("provider=", ra)
         self.assertIn("success_rate=", ra)
 
+    def test_adapter_plugin_GROK01_va_OPENCODE01_co_mat(self):
+        """Grok/OpenCode la plugin adapter (Phase 2-4), khong phai AG_SLOTS
+        cung — phai xuat hien trong danh sach worker that qua chinh
+        register() cua adapter, khong phan cung trong registry core."""
+        ra = self._chay("workers")
+        self.assertIn("GROK01", ra)
+        self.assertIn("OPENCODE01", ra)
+
 
 class TaskTest(_CoCheckpointTest):
     def test_khong_co_checkpoint_bao_loi(self):

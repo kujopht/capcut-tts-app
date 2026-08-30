@@ -123,6 +123,11 @@ class WorkerState:
     #: Không có cờ này, N nút cùng sẵn sàng sẽ cùng lúc dò lại một worker
     #: vừa hồi — nếu nó vẫn hỏng, mạch mở lại N lần liền thay vì một.
     probe_in_flight: bool = False
+    #: Router LTS Phase 10 — số ký tự ngữ cảnh đã tích luỹ ở tiến trình ẤM
+    #: của worker này (nếu có). `policy.score_worker` đọc để hạ điểm nhẹ một
+    #: worker đang "ấm nhưng phình ngữ cảnh không liên quan". Không phải mọi
+    #: worker đều có khái niệm "ấm" — mặc định 0 nghĩa là không áp dụng.
+    context_chars: int = 0
 
     @property
     def success_rate(self) -> float:

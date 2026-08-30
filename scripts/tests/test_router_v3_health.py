@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import unittest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -66,6 +67,18 @@ class CauDapMachTest(unittest.TestCase):
             r.mark_started("A", "t")
             r.mark_finished("A", ok=False, seconds=1.0, now=1000.0)
         self.assertEqual(len(r.available(now=1000.0)), 1)
+
+    def test_circuit_opens_KHONG_tang_khi_hong_duoi_nguong(self):
+        """Bai quyet dinh: review doc lap tim thay `circuit_opens += 1` bi
+        thut le sai (nam ngoai khoi `if`) sau khi them khoa luong — no tang
+        o MOI lan hong thay vi CHI khi mach that su mo. Sua roi; bai nay
+        khoa lai."""
+        r = _reg()
+        for _ in range(NGUONG_MO_MACH - 1):
+            r.mark_started("A", "t")
+            r.mark_finished("A", ok=False, seconds=1.0, now=1000.0)
+        self.assertEqual(r.state("A").circuit_opens, 0,
+                         "chua du nguong -> mach CHUA MO -> circuit_opens phai la 0")
 
     def test_hong_du_NGUONG_thi_mach_MO_loai_khoi_available(self):
         r = _reg()
@@ -132,6 +145,36 @@ class CauDapMachTest(unittest.TestCase):
         r.mark_started("A", "t")
         r.mark_finished("A", ok=True, seconds=1.0, now=1000.0)
         self.assertEqual(r.state("A").health, Health.UNAVAILABLE)
+
+
+class AnToanLuongTest(unittest.TestCase):
+    """Bang chung that (review doc lap, 2026-08-30): `Scheduler` goi
+    `mark_finished` tu NHIEU LUONG worker qua ThreadPoolExecutor, va mot
+    worker co `max_concurrent > 1` (vd AG_SLOTS trong default_registry)
+    THAT SU co nhieu luot cung ket thuc dong thoi. Truoc khi them khoa,
+    chuoi doc-sua-ghi cua cau dap mach khong atomic qua nhieu cau lenh."""
+
+    def test_nhieu_luong_hong_dong_thoi_khong_lam_hong_bo_dem(self):
+        r = _reg(max_concurrent=50)
+        SO_LUONG = 50
+
+        def _mot_luot():
+            r.mark_started("A", "t")
+            r.mark_finished("A", ok=False, seconds=0.001, now=1000.0)
+
+        luong = [threading.Thread(target=_mot_luot) for _ in range(SO_LUONG)]
+        for t in luong:
+            t.start()
+        for t in luong:
+            t.join()
+
+        st = r.state("A")
+        self.assertEqual(st.failed, SO_LUONG, "moi luot hong phai duoc dem")
+        self.assertEqual(st.in_flight, 0, "moi luot phai giam in_flight dung mot lan")
+        # consecutive_failures co the vuot NGUONG nhieu — nhung khong duoc
+        # VUOT so luong THAT (bang chung khong co ghi de/mat cap nhat).
+        self.assertLessEqual(st.consecutive_failures, SO_LUONG)
+        self.assertGreaterEqual(st.consecutive_failures, NGUONG_MO_MACH)
 
 
 if __name__ == "__main__":

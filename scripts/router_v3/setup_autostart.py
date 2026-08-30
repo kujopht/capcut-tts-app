@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -40,22 +41,59 @@ def _chay(argv) -> subprocess.CompletedProcess:
                           encoding="utf-8", errors="replace")
 
 
+#: `worker_id`/`model` khong bao gio can ky tu ngoai tap nay — ep NGHIEM
+#: NGAT tu choi thay vi co loc, vi gia tri nay se nam trong MOT chuoi
+#: `cmd /c "..."` duoc `schtasks` chay lai o LAN KICH HOAT SAU (khong phai
+#: ngay luc goi ham nay). Bang chung that (review doc lap, 2026-08-30):
+#: truoc ban sua nay, mot worker_id chua ky tu dieu khien cmd (`&`, `|`,
+#: `"`, ...) co the chen them lenh vao chuoi ma schtasks se CHAY THAT khi
+#: tai khoan do dang nhap lan sau.
+_MAU_AN_TOAN = re.compile(r"^[A-Za-z0-9_.-]+$")
+#: Duong dan duoc phep rong hon (co the co khoang trang/dau hai cham o
+#: Windows) nhung TUYET DOI khong duoc chua ky tu dieu khien cmd.
+_CAM_TRONG_DUONG_DAN = set('&|<>^"\r\n')
+
+
+def _kiem_an_toan(gia_tri: str, ten_truong: str) -> str:
+    if not _MAU_AN_TOAN.match(gia_tri):
+        raise ValueError(
+            f"{ten_truong}={gia_tri!r} chứa ký tự không cho phép — chỉ "
+            f"chữ/số/._- (chặn ở đây để không lọt vào lệnh schtasks chạy "
+            f"sau này).")
+    return gia_tri
+
+
+def _kiem_duong_dan_an_toan(gia_tri: str, ten_truong: str) -> str:
+    if any(c in _CAM_TRONG_DUONG_DAN for c in gia_tri):
+        raise ValueError(
+            f"{ten_truong}={gia_tri!r} chứa ký tự điều khiển cmd — TỪ CHỐI.")
+    return gia_tri
+
+
 def dung_lenh_khoi_dong(worker_id: str, *, workspace_root: str,
                         model: str, allow_edits: bool,
                         dangerously_skip_permissions: bool,
                         pairing_file: str) -> str:
+    worker_id = _kiem_an_toan(worker_id, "worker_id")
+    model = _kiem_an_toan(model, "model")
+    workspace_root = _kiem_duong_dan_an_toan(workspace_root, "workspace_root")
+    if pairing_file:
+        pairing_file = _kiem_duong_dan_an_toan(pairing_file, "pairing_file")
+
     python_exe = sys.executable
     co = [python_exe, "-m", "scripts.router_v3.run_bridge",
          "--worker-id", worker_id, "--model", model,
-         "--workspace", workspace_root]
+         "--workspace", f'"{workspace_root}"']
     if allow_edits:
         co.append("--allow-edits")
     if dangerously_skip_permissions:
         co.append("--dangerously-skip-permissions")
     if pairing_file:
-        co += ["--pairing-file", pairing_file]
+        co += ["--pairing-file", f'"{pairing_file}"']
     # schtasks /tr can MOT chuoi — nen dua ca lenh qua mot dong, va dat
-    # thu muc lam viec bang `cd /d` de -m tim dung goi `scripts`.
+    # thu muc lam viec bang `cd /d` de -m tim dung goi `scripts`. Moi gia
+    # tri da duoc kiem/boc ngoac o tren — khong con gia tri "tho" nao duoc
+    # noi thang vao chuoi cmd nay.
     return f'cmd /c "cd /d {_ROOT} && {" ".join(co)}"'
 
 

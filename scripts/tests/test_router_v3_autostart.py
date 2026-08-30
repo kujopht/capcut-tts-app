@@ -35,7 +35,7 @@ class DungLenhTest(unittest.TestCase):
             model="gemini-3.7-flash-low", allow_edits=True,
             dangerously_skip_permissions=True, pairing_file="")
         self.assertIn("--worker-id AG02", lenh)
-        self.assertIn("--workspace C:/FanficWorkers/workers", lenh)
+        self.assertIn('--workspace "C:/FanficWorkers/workers"', lenh)
         self.assertIn("--allow-edits", lenh)
         self.assertIn("--dangerously-skip-permissions", lenh)
 
@@ -45,12 +45,44 @@ class DungLenhTest(unittest.TestCase):
             dangerously_skip_permissions=False, pairing_file="")
         self.assertNotIn("--pairing-file", lenh)
 
+    def test_worker_id_chua_ky_tu_dieu_khien_cmd_bi_TU_CHOI(self):
+        """Bai quyet dinh: review doc lap tim thay worker_id/duong dan noi
+        THANG vao chuoi cmd cho schtasks se chay lai o lan kich hoat sau —
+        mot worker_id nhu `AG02" & calc.exe & "` se CHEN THEM lenh that."""
+        for xau_hong in ('AG02" & calc.exe & "', "AG02;rm -rf", 'AG"02'):
+            with self.assertRaises(ValueError):
+                sa.dung_lenh_khoi_dong(
+                    xau_hong, workspace_root="C:/ws", model="m",
+                    allow_edits=False, dangerously_skip_permissions=False,
+                    pairing_file="")
+
+    def test_model_chua_ky_tu_dieu_khien_cmd_bi_TU_CHOI(self):
+        with self.assertRaises(ValueError):
+            sa.dung_lenh_khoi_dong(
+                "AG02", workspace_root="C:/ws", model='m" & calc.exe & "',
+                allow_edits=False, dangerously_skip_permissions=False,
+                pairing_file="")
+
+    def test_duong_dan_chua_dau_ngoac_kep_bi_TU_CHOI(self):
+        with self.assertRaises(ValueError):
+            sa.dung_lenh_khoi_dong(
+                "AG02", workspace_root='C:/ws" & calc.exe & "x', model="m",
+                allow_edits=False, dangerously_skip_permissions=False,
+                pairing_file="")
+
+    def test_worker_id_binh_thuong_van_qua_duoc(self):
+        lenh = sa.dung_lenh_khoi_dong(
+            "AG02", workspace_root="C:/ws", model="gemini-3.7-flash-low",
+            allow_edits=False, dangerously_skip_permissions=False,
+            pairing_file="")
+        self.assertIn("--worker-id AG02", lenh)
+
     def test_co_pairing_file_thi_co_duong_dan(self):
         lenh = sa.dung_lenh_khoi_dong(
             "AG02", workspace_root="C:/ws", model="m", allow_edits=False,
             dangerously_skip_permissions=False,
             pairing_file="C:/FanficWorkers/pairing/AG02.pair")
-        self.assertIn("--pairing-file C:/FanficWorkers/pairing/AG02.pair", lenh)
+        self.assertIn('--pairing-file "C:/FanficWorkers/pairing/AG02.pair"', lenh)
 
 
 class TenTaskTest(unittest.TestCase):

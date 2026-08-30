@@ -83,6 +83,19 @@ class WorkerAdapter(ABC):
         adapter CÓ GHI. Trả `False` nếu dựng hỏng, KHÔNG được ném lỗi cho
         một thứ có thể đoán trước (chưa cài, chưa đăng nhập) — đó là việc
         của `health()` báo trước khi gọi đến đây.
+
+        CẢNH BÁO CHO NGƯỜI HIỆN THỰC (review độc lập, 2026-08-30): với một
+        WORKER THƯỜNG TRỰC đã khởi động TRƯỚC bằng phạm vi thư mục CỐ ĐỊNH
+        (`AntigravityBridgeAdapter`, `OpenCodeAdapter`) — `workspace` KHÔNG
+        đổi được phạm vi đó theo từng lệnh gọi. Trả `True` trong trường hợp
+        đó là ĐÚNG cho tình trạng "phiên khoẻ", nhưng KHÔNG chứng minh
+        `workspace` yêu cầu thực sự nằm trong phạm vi mà worker có thể ghi
+        vào — bên gọi PHẢI tự đảm bảo `workspace` là thư mục con của phạm
+        vi cố định đó (xem cách `dispatch_phase7_phase8.py` của Story
+        Harvester V4 làm: cấp `--add-dir` là thư mục CHA chung, rồi mọi
+        worktree việc sau đều là thư mục con của nó). Trả `True` mà im lặng
+        bỏ qua `workspace` không kiểm được là nguồn của một lớp lỗi ĐẶC BIỆT
+        khó chẩn đoán: việc "thành công" nhưng ghi nhầm chỗ.
         """
 
     @abstractmethod

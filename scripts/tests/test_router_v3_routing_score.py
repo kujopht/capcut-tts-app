@@ -137,6 +137,18 @@ class LichSuTrenDiaTest(unittest.TestCase):
         self.assertEqual(th.so_luot, 0)
         self.assertEqual(th.ty_le_thanh_cong, 1.0)
 
+    def test_limit_dong_chi_lay_phan_GAN_NHAT(self):
+        for i in range(5):
+            ghi(BanGhiKetQua(provider=f"p{i}"), duong=self.duong)
+        ds = doc_tat_ca(duong=self.duong, limit_dong=2)
+        self.assertEqual([b.provider for b in ds], ["p3", "p4"])
+
+    def test_khong_dat_limit_dong_thi_doc_het_nhu_cu(self):
+        for i in range(5):
+            ghi(BanGhiKetQua(provider=f"p{i}"), duong=self.duong)
+        ds = doc_tat_ca(duong=self.duong)
+        self.assertEqual(len(ds), 5)
+
     def test_tu_choi_ghi_ban_ghi_giong_credential(self):
         with self.assertRaises(ValueError):
             ghi(BanGhiKetQua(provider="a", test_result="sk-" + "x" * 30),

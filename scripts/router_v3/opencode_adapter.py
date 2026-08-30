@@ -102,6 +102,11 @@ class OpenCodeAdapter(WorkerAdapter):
         return self.register().capabilities
 
     def start_session(self, *, workspace: Optional[str] = None) -> bool:
+        # CANH BAO (xem WorkerAdapter.start_session): `workspace` KHONG doi
+        # duoc thu muc lam viec cua `opencode serve` — no da co dinh tu luc
+        # server khoi dong. Tra True o day chi nghia la "dung duoc phien",
+        # KHONG chung minh workspace yeu cau nam trong pham vi server co
+        # the ghi vao. Ben goi PHAI tu dam bao dieu do.
         if self.health().state not in (Health.HEALTHY,):
             return False
         try:

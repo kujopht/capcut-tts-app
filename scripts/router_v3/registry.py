@@ -16,6 +16,7 @@ trường nào chứa được bí mật — và có bài kiểm thử khoá đi
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -155,6 +156,16 @@ class WorkerRegistry:
     def __init__(self) -> None:
         self._specs: Dict[str, WorkerSpec] = {}
         self._states: Dict[str, WorkerState] = {}
+        # Bang chung that (review doc lap, 2026-08-30): `Scheduler` goi
+        # `mark_finished` TU NHIEU LUONG worker (moi nut dispatch qua
+        # ThreadPoolExecutor), va mot worker co `max_concurrent > 1`
+        # (vd AG_SLOTS trong default_registry) THAT SU co the co hai luot
+        # cung ket thuc dong thoi. Chuoi doc-sua-ghi cua cau dap mach
+        # (`consecutive_failures += 1` roi kiem nguong roi mo mach) KHONG
+        # atomic qua nhieu cau lenh — thieu khoa nay, hai lan hong dong thoi
+        # co the CUNG mo mach hai lan, pha dung bat bien "chi mot luot do
+        # nua-mo" ma WorkerState.probe_in_flight duoc dung de bao dam.
+        self._khoa = threading.Lock()
 
     def register(self, spec: WorkerSpec) -> None:
         spec.validate()
@@ -173,10 +184,11 @@ class WorkerRegistry:
         return sorted(self._specs)
 
     def set_health(self, worker_id: str, health: Health, error: str = "") -> None:
-        st = self._states[worker_id]
-        st.health = health
-        if error:
-            st.last_error = error[:200]
+        with self._khoa:
+            st = self._states[worker_id]
+            st.health = health
+            if error:
+                st.last_error = error[:200]
 
     def available(self, *, capability: Optional[str] = None,
                   high_risk: bool = False, now: Optional[float] = None
@@ -191,63 +203,66 @@ class WorkerRegistry:
         Mạch ĐANG MỞ thì loại, TRỪ đúng một lượt "dò" (nửa mở) khi mạch vừa
         hết giờ mở và chưa có lượt dò nào đang bay — xem `WorkerState`.
         """
-        ra = []
-        for wid, spec in self._specs.items():
-            st = self._states[wid]
-            if st.health in _KHONG_BAO_GIO_CHON:
-                continue
-            if st.in_flight >= spec.max_concurrent:
-                continue
-            if st.circuit_is_open(now=now):
-                continue
-            if st.consecutive_failures >= NGUONG_MO_MACH and st.probe_in_flight:
-                continue          # mach nua-mo, da co mot luot do dang bay
-            if capability and capability not in spec.capabilities:
-                continue
-            if high_risk and not spec.trusted_for_high_risk:
-                continue
-            ra.append(spec)
-        return ra
+        with self._khoa:
+            ra = []
+            for wid, spec in self._specs.items():
+                st = self._states[wid]
+                if st.health in _KHONG_BAO_GIO_CHON:
+                    continue
+                if st.in_flight >= spec.max_concurrent:
+                    continue
+                if st.circuit_is_open(now=now):
+                    continue
+                if st.consecutive_failures >= NGUONG_MO_MACH and st.probe_in_flight:
+                    continue          # mach nua-mo, da co mot luot do dang bay
+                if capability and capability not in spec.capabilities:
+                    continue
+                if high_risk and not spec.trusted_for_high_risk:
+                    continue
+                ra.append(spec)
+            return ra
 
     # -- ghi nhan ket qua ---------------------------------------------------
 
     def mark_started(self, worker_id: str, task_id: str) -> None:
-        st = self._states[worker_id]
-        st.in_flight += 1
-        st.current_task = task_id
-        if st.consecutive_failures >= NGUONG_MO_MACH:
-            st.probe_in_flight = True     # day la luot do nua-mo
+        with self._khoa:
+            st = self._states[worker_id]
+            st.in_flight += 1
+            st.current_task = task_id
+            if st.consecutive_failures >= NGUONG_MO_MACH:
+                st.probe_in_flight = True     # day la luot do nua-mo
 
     def mark_finished(self, worker_id: str, *, ok: bool, seconds: float,
                       error: str = "", now: Optional[float] = None) -> None:
-        st = self._states[worker_id]
-        st.in_flight = max(0, st.in_flight - 1)
-        st.current_task = None
-        curr = time.time() if now is None else now
-        dang_do = st.probe_in_flight
-        st.probe_in_flight = False
+        with self._khoa:
+            st = self._states[worker_id]
+            st.in_flight = max(0, st.in_flight - 1)
+            st.current_task = None
+            curr = time.time() if now is None else now
+            dang_do = st.probe_in_flight
+            st.probe_in_flight = False
 
-        if ok:
-            st.completed += 1
-            st.total_seconds += seconds
-            st.consecutive_failures = 0
-            st.circuit_open_until = None
-            if st.health is not Health.UNAVAILABLE:
-                st.health = Health.HEALTHY
-        else:
-            st.failed += 1
-            st.last_error = (error or "")[:200]
-            st.consecutive_failures += 1
-            if st.health not in (Health.UNAVAILABLE, Health.AUTH_REQUIRED,
-                                 Health.RATE_LIMITED):
-                st.health = Health.DEGRADED
-            if dang_do or st.consecutive_failures >= NGUONG_MO_MACH:
-                # Vua hong luot do nua-mo -> mo lai VOI BACKOFF DAI HON,
-                # khong quay ve tier dau — mot nguon van con hong thi mo
-                # mach lien tuc voi cung mot do dai la vo nghia.
-                bac = min(st.circuit_opens, len(BACKOFF_MO_MACH) - 1)
-                st.circuit_open_until = curr + BACKOFF_MO_MACH[bac]
-                st.circuit_opens += 1
+            if ok:
+                st.completed += 1
+                st.total_seconds += seconds
+                st.consecutive_failures = 0
+                st.circuit_open_until = None
+                if st.health is not Health.UNAVAILABLE:
+                    st.health = Health.HEALTHY
+            else:
+                st.failed += 1
+                st.last_error = (error or "")[:200]
+                st.consecutive_failures += 1
+                if st.health not in (Health.UNAVAILABLE, Health.AUTH_REQUIRED,
+                                     Health.RATE_LIMITED):
+                    st.health = Health.DEGRADED
+                if dang_do or st.consecutive_failures >= NGUONG_MO_MACH:
+                    # Vua hong luot do nua-mo -> mo lai VOI BACKOFF DAI HON,
+                    # khong quay ve tier dau — mot nguon van con hong thi mo
+                    # mach lien tuc voi cung mot do dai la vo nghia.
+                    bac = min(st.circuit_opens, len(BACKOFF_MO_MACH) - 1)
+                    st.circuit_open_until = curr + BACKOFF_MO_MACH[bac]
+                    st.circuit_opens += 1
 
     def snapshot(self) -> List[Dict]:
         """Dữ liệu cho bảng điều khiển. KHÔNG chứa prompt hay bí mật."""

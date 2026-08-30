@@ -67,12 +67,25 @@ def ghi(ban_ghi: BanGhiKetQua, *, duong: Optional[Path] = None) -> None:
         f.write(dong + "\n")
 
 
-def doc_tat_ca(*, duong: Optional[Path] = None) -> List[BanGhiKetQua]:
+def doc_tat_ca(*, duong: Optional[Path] = None,
+               limit_dong: Optional[int] = None) -> List[BanGhiKetQua]:
+    """Đọc toàn bộ (hoặc `limit_dong` dòng CUỐI, nếu đặt).
+
+    Nhật ký nối đuôi KHÔNG tự giới hạn kích thước — review độc lập
+    (2026-08-30) đúng khi chỉ ra đọc/parse toàn bộ tệp trên MỖI lần gọi sẽ
+    thành nút thắt I/O khi lịch sử lớn dần. `limit_dong` cho phép bên gọi
+    chỉ lấy phần GẦN NHẤT (đủ cho hầu hết quyết định định tuyến, vốn quan
+    tâm hiệu năng gần đây hơn lịch sử toàn thời gian) mà không phải đổi
+    định dạng lưu trữ. Mặc định `None` = đọc hết, giữ hành vi cũ.
+    """
     p = duong or duong_mac_dinh()
     if not p.exists():
         return []
+    tat_ca_dong = p.read_text(encoding="utf-8").splitlines()
+    if limit_dong is not None and limit_dong > 0:
+        tat_ca_dong = tat_ca_dong[-limit_dong:]
     ra = []
-    for dong in p.read_text(encoding="utf-8").splitlines():
+    for dong in tat_ca_dong:
         dong = dong.strip()
         if not dong:
             continue

@@ -186,23 +186,62 @@ def choose_worker(reg: WorkerRegistry, node: TaskNode, *,
         w, reg, node, history=history, quota_remaining=quota_remaining).total)
 
 
-def plan_parallelism(dag, mode: SpeedMode, *, ceiling: int = 8) -> Tuple[int, str]:
+#: Router LTS Phase 11 — trần THEO CỠ đồ thị, đo bằng chính BỀ RỘNG đo được
+#: (`recommended_workers()`) — KHÔNG phải một trục riêng theo số nút. Từng
+#: dùng số nút làm trục riêng và nó MÂU THUẪN với bề rộng đã đo (một đồ thị
+#: 7 nút nhưng rộng 6 bị ép tier "large" trần 5, đè lên phép đo bề rộng
+#: đúng — vỡ bài kiểm cũ). Trần ở mỗi bậc >= biên trên của bề rộng ở bậc
+#: đó, nên tier không bao giờ mâu thuẫn với `rong` — chỉ GẮN NHÃN cho nó.
+_TIER_THEO_RONG = (
+    (1, "tiny", 1),
+    (3, "normal", 3),
+    (5, "large", 5),
+    (float("inf"), "mega", 6),
+)
+
+
+def phan_loai_co_dag(dag, *, ceiling: int = 8) -> Tuple[str, int]:
+    """(tên tier, trần khuyến nghị) — suy từ CHÍNH bề rộng đo được, nên
+    không bao giờ mâu thuẫn với `recommended_workers()`."""
+    rong = dag.recommended_workers(ceiling=ceiling)
+    for nguong, ten, tran in _TIER_THEO_RONG:
+        if rong <= nguong:
+            return ten, tran
+    return "mega", 6            # khong bao gio toi day (inf o cuoi bang)
+
+
+def plan_parallelism(dag, mode: SpeedMode, *, ceiling: int = 8,
+                     reserve: int = 0) -> Tuple[int, str]:
     """Số worker NÊN dùng, kèm lý do.
 
-    Song song tối đa không phải lúc nào cũng nhanh nhất. Ba thứ chặn trên:
+    Song song tối đa không phải lúc nào cũng nhanh nhất. Bốn thứ chặn trên:
     bề rộng của đồ thị (không thể chạy nhiều hơn số nút sẵn sàng), trần của
-    chế độ, và đường tới hạn — không worker nào rút ngắn được nó.
+    chế độ, trần theo CỠ đồ thị (Phase 11 — tiny/normal/large/mega, xem
+    `phan_loai_co_dag`), và đường tới hạn — không worker nào rút ngắn được
+    nó. `reserve` giữ lại một số khe KHÔNG giao cho DAG chính — dành cho
+    điều tra blocker/review challenger/khôi phục khi có sự cố giữa chừng.
+
+    Trần "mega" mặc định là 6, không phải 8: "chỉ dùng 7-8 khi cấu trúc đồ
+    thị ĐO ĐƯỢC đòi hỏi" — nếu bề rộng thật (`rong`) đã vượt 6 sẵn thì trần
+    tier được nới theo đúng bề rộng đó, không phải nới tuỳ ý.
     """
     rong = dag.recommended_workers(ceiling=ceiling)
+    tier, tran_tier = phan_loai_co_dag(dag, ceiling=ceiling)
+    if tier == "mega" and rong > tran_tier:
+        tran_tier = min(rong, ceiling)
     tran_che_do = PROFILES[mode].max_parallel
-    chon = max(1, min(rong, tran_che_do, ceiling))
+    chon = max(1, min(rong, tran_che_do, tran_tier, ceiling) - max(0, reserve))
     _, tt = dag.critical_path()
     tong = sum(n.estimated_seconds for n in dag.nodes())
     if chon == 1:
         ly_do = "đồ thị tuần tự — thêm worker không giúp gì"
-    elif rong <= tran_che_do:
+    elif rong <= tran_che_do and rong <= tran_tier:
         ly_do = f"bề rộng đồ thị là {rong}; chế độ cho phép tới {tran_che_do}"
+    elif tran_tier < tran_che_do:
+        ly_do = f"tier {tier} (bề rộng {rong}) giới hạn ở {tran_tier}"
     else:
         ly_do = f"chế độ {mode.value} giới hạn ở {tran_che_do} (đồ thị rộng {rong})"
+    if reserve:
+        ly_do += f"; giữ lại {reserve} khe cho blocker/review/khôi phục"
     ly_do += f"; đường tới hạn {tt:.0f}s trên tổng {tong:.0f}s worker"
     return chon, ly_do

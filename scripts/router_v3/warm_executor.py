@@ -134,6 +134,20 @@ class WarmExecutor:
         w = self._workers.get(worker_id)
         return w.state if w else WarmState.COLD
 
+    def sync_context_chars(self, reg) -> None:
+        """Đẩy độ phình ngữ cảnh vào `WorkerRegistry` — Router LTS Phase 10.
+
+        `policy.score_worker` đọc `WorkerState.context_chars` để hạ điểm nhẹ
+        một worker đang ấm nhưng ngữ cảnh không còn liên quan; không ai đẩy
+        số đó vào thì trường đó mãi là 0 và chiều điểm này vô nghĩa. Gọi
+        hàm này sau mỗi lượt (hoặc định kỳ) từ phía gọi `WarmExecutor`.
+        """
+        for hang in self.snapshot():
+            try:
+                reg.state(hang["worker_id"]).context_chars = hang["context_chars"]
+            except KeyError:
+                pass          # worker am chua dang ky trong registry nay
+
     def snapshot(self) -> List[dict]:
         with self._khoa_bang:
             ws = list(self._workers.values())

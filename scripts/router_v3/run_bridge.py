@@ -24,7 +24,7 @@ if str(_ROOT) not in sys.path:
 
 from scripts.router_v3.bridge import BridgeConfig, WorkerBridge
 from scripts.router_v3.native_worker import find_agy
-from scripts.router_v3 import pairing_file
+from scripts.router_v3 import pairing_file, worker_identity
 from scripts.router_v3.warm_pool import RecyclePolicy, WarmAgyWorker
 
 
@@ -55,6 +55,12 @@ def main(argv=None) -> int:
                          "pairing\\AG02.pair. Thư mục cha phải đã có ACL "
                          "siết (setup_shared_root.py). pair_bridge.py đọc "
                          "và xoá tệp này sau khi ghép xong.")
+    ap.add_argument("--no-persist-identity", action="store_true",
+                    help="KHÔNG lưu cổng+token để dùng lại lần sau — mỗi lần "
+                         "khởi động sinh danh tính MỚI (hành vi cũ, buộc "
+                         "ghép lại mỗi lần). Mặc định: dùng lại nếu có, cho "
+                         "phép khởi động lại bình thường mà không cần ghép "
+                         "lại phía Router.")
     a = ap.parse_args(argv)
 
     exe = find_agy()
@@ -88,10 +94,37 @@ def main(argv=None) -> int:
             ra["stderr_tail"] = worker.stderr_tail[-2000:]
         return ra
 
-    bridge = WorkerBridge(BridgeConfig(worker_id=a.worker_id, port=a.port),
-                          chay, health_fn=lambda: worker.state.value != "failed",
-                          state_fn=lambda: worker.state.value)
+    if a.no_persist_identity:
+        cfg = BridgeConfig(worker_id=a.worker_id, port=a.port)
+    else:
+        danh_tinh = worker_identity.doc_hoac_tao(a.worker_id)
+        cfg = BridgeConfig(worker_id=a.worker_id, port=danh_tinh["port"],
+                           token=danh_tinh["token"])
+        if danh_tinh["port"]:
+            print(f"dùng lại danh tính đã lưu (cổng {danh_tinh['port']}) — "
+                 f"Router không cần ghép lại nếu vẫn còn pairing cũ.")
+
+    try:
+        bridge = WorkerBridge(cfg, chay,
+                              health_fn=lambda: worker.state.value != "failed",
+                              state_fn=lambda: worker.state.value)
+    except OSError as exc:
+        if a.no_persist_identity or not cfg.port:
+            raise
+        # Cong da luu khong bind duoc (vd bi chiem boi tien trinh khac) —
+        # roi ve danh tinh MOI thay vi treo hoan toan. Buoc ghep lai LAN
+        # NAY, nhung khong lam hong ca lan khoi dong.
+        print(f"cổng đã lưu {cfg.port} không bind được ({exc}) — "
+             f"sinh danh tính MỚI, cần ghép lại.")
+        danh_tinh = worker_identity.xoay_token(a.worker_id)
+        cfg = BridgeConfig(worker_id=a.worker_id, port=danh_tinh["port"],
+                           token=danh_tinh["token"])
+        bridge = WorkerBridge(cfg, chay,
+                              health_fn=lambda: worker.state.value != "failed",
+                              state_fn=lambda: worker.state.value)
     bridge.start()
+    if not a.no_persist_identity:
+        worker_identity.ghi_cong_that_su(a.worker_id, bridge.port)
 
     print("=" * 58)
     print(f"  CẦU NỐI {a.worker_id} ĐÃ SẴN SÀNG")

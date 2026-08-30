@@ -237,3 +237,61 @@ class NativeWorkerHopDongTest(unittest.TestCase):
         from scripts.router_v3.worktree import WorktreeManager
 
         self.assertTrue(hasattr(WorktreeManager, "verify_scope"))
+
+
+class WarmWorkerHopDongTest(unittest.TestCase):
+    """Worker ấm — hợp đồng, không gọi mạng."""
+
+    def test_hinh_dang_ban_tin_dung_chuan(self):
+        """PHẢI có `event` (không phải `type`) và `message`. Sai hình dạng thì
+        CLI trả ERROR: 'stream input message is missing the "event" field'."""
+        import json as _json
+
+        from scripts.router_v3.native_worker import _ban_tin
+
+        d = _json.loads(_ban_tin("xin chao"))
+        self.assertEqual(d["event"], "user")
+        self.assertEqual(d["message"]["role"], "user")
+        self.assertEqual(d["message"]["content"], "xin chao")
+        self.assertNotIn("type", d)
+
+    def test_thieu_ket_qua_KHONG_bi_nuot(self):
+        """Lô bị cắt giữa chừng mà trả về ít kết quả hơn số việc sẽ làm nơi
+        gọi GHÉP NHẦM kết quả với việc — hỏng im lặng, khó thấy nhất."""
+        from unittest import mock
+
+        from scripts.router_v3 import native_worker as nw
+
+        gia = mock.Mock()
+        gia.stdout = ('{"event":"result","result":{"status":"SUCCESS",'
+                      '"response":"1"}}\n')
+        gia.stderr = ""
+        with mock.patch.object(nw.subprocess, "run", return_value=gia), \
+             mock.patch.object(nw, "find_agy", return_value="agy"):
+            ra = nw.run_warm_batch(["a", "b", "c"], model="m")
+        self.assertEqual(len(ra), 3)
+        self.assertTrue(ra[0].ok)
+        self.assertFalse(ra[1].ok)
+        self.assertIn("không nhận được kết quả", ra[1].error)
+
+    def test_khong_co_agy_thi_moi_viec_deu_that_bai(self):
+        from unittest import mock
+
+        from scripts.router_v3 import native_worker as nw
+
+        with mock.patch.object(nw, "find_agy", return_value=None):
+            ra = nw.run_warm_batch(["a", "b"], model="m")
+        self.assertEqual(len(ra), 2)
+        self.assertFalse(any(r.ok for r in ra))
+
+
+class GhiTepCanWorkspaceTest(unittest.TestCase):
+    def test_allow_edits_ma_thieu_workspace_bi_TU_CHOI(self):
+        """`--add-dir` là BẮT BUỘC cho việc có ghi. Thiếu nó, worker im lặng
+        không làm gì — chính điểm này từng làm một phép đo kết luận nhầm rằng
+        headless không ghi được."""
+        from scripts.router_v3.native_worker import run_native
+
+        r = run_native("x", model="m", allow_edits=True, workspace=None)
+        self.assertFalse(r.ok)
+        self.assertIn("add-dir", r.error)

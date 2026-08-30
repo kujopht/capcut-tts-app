@@ -28,6 +28,16 @@ from scripts.router_v3.warm_pool import RecyclePolicy, WarmAgyWorker
 
 
 def main(argv=None) -> int:
+    # PHAI o TRUOC parse_args: console Windows mac dinh dung code page ANSI
+    # (vd cp1252), khong ma hoa duoc dau tieng Viet. `--help`/loi cu phap goi
+    # `print_help()` NGAY TRONG luc parse — dat reconfigure sau parse_args thi
+    # `--help` vo tinh vo` UnicodeEncodeError truoc khi kip chay toi day.
+    for luong in (sys.stdout, sys.stderr):
+        try:
+            luong.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--worker-id", default="AG02")
     ap.add_argument("--model", default="gemini-3.7-flash-low")
@@ -35,12 +45,6 @@ def main(argv=None) -> int:
     ap.add_argument("--workspace", default="", help="thư mục cho --add-dir")
     ap.add_argument("--allow-edits", action="store_true")
     a = ap.parse_args(argv)
-
-    for luong in (sys.stdout, sys.stderr):
-        try:
-            luong.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
 
     exe = find_agy()
     if not exe:

@@ -142,14 +142,23 @@ def main(argv=None) -> int:
     for viec in sieu_quyen(str(goc), tk, may):
         print(f"  {viec}")
 
+    #: `git clone --bare` KHÔNG tự đặt refspec fetch — `git fetch --all` sau đó
+    #: chỉ tải object mới chứ KHÔNG cập nhật `main` cục bộ. Bản sao trông như
+    #: "đã cập nhật" (thoát mã 0) nhưng vẫn đứng yên ở commit lúc clone — âm
+    #: thầm cho AG02 chạy mã cũ. Phải đặt refspec tường minh.
+    REFSPEC = "+refs/heads/*:refs/heads/*"
     if bare.exists():
-        r = _chay(["git", "-C", str(bare), "fetch", "--all", "--quiet"])
-        print(f"  cập nhật bản sao bare ({'ok' if r.returncode == 0 else 'hỏng'})")
+        _chay(["git", "-C", str(bare), "config", "remote.origin.fetch", REFSPEC])
+        r = _chay(["git", "-C", str(bare), "fetch", "origin", REFSPEC, "--quiet"])
+        moi = _chay(["git", "-C", str(bare), "log", "-1", "--format=%h %s", "main"])
+        print(f"  cập nhật bản sao bare ({'ok' if r.returncode == 0 else 'hỏng'})"
+              f" -> main = {moi.stdout.strip()}")
     else:
         r = _chay(["git", "clone", "--bare", "--quiet", a.repo, str(bare)])
         if r.returncode != 0:
             raise SystemExit(f"clone bare hỏng: {r.stderr[:300]}")
-        print(f"  đã tạo bản sao bare {bare}")
+        _chay(["git", "-C", str(bare), "config", "remote.origin.fetch", REFSPEC])
+        print(f"  đã tạo bản sao bare {bare} (đặt refspec fetch tường minh)")
 
     print("\n--- KIỂM LẠI ---")
     van_de = kiem_acl(str(goc)) + kiem_ho_so_chinh(may, tk)

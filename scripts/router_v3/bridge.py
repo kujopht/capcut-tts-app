@@ -84,8 +84,11 @@ class _Handler(socketserver.BaseRequestHandler):
 
         loai = str(msg.get("op") or "")
         if loai == "health":
-            self._tra({"status": "ok", "worker_id": srv.worker_id,
-                       "healthy": srv.health_fn()})
+            dap = {"status": "ok", "worker_id": srv.worker_id,
+                  "healthy": srv.health_fn()}
+            if srv.state_fn is not None:
+                dap["state"] = srv.state_fn()
+            self._tra(dap)
             return
         if loai == "run":
             prompt = str(msg.get("prompt") or "")
@@ -115,21 +118,28 @@ class _Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-    def __init__(self, cfg: BridgeConfig, run_fn, health_fn):
+    def __init__(self, cfg: BridgeConfig, run_fn, health_fn, state_fn=None):
         # CHI 127.0.0.1. Bind 0.0.0.0 se mo cau noi ra ca mang LAN.
         super().__init__((LOOPBACK, cfg.port), _Handler)
         self.worker_id = cfg.worker_id
         self.token = cfg.token or secrets.token_urlsafe(32)
         self.run_fn = run_fn
         self.health_fn = health_fn
+        self.state_fn = state_fn
 
 
 class WorkerBridge:
     """Chạy TRONG phiên Windows của AG02, cạnh tiến trình `agy` đã xác thực."""
 
     def __init__(self, cfg: BridgeConfig, run_fn: Callable[[str, str], dict],
-                 health_fn: Callable[[], bool] = lambda: True):
-        self._srv = _Server(cfg, run_fn, health_fn)
+                 health_fn: Callable[[], bool] = lambda: True,
+                 state_fn: Optional[Callable[[], str]] = None):
+        """
+        :param state_fn: nếu có, giá trị của nó (vd "warm_idle") đi kèm phản
+            hồi "health" dưới khoá `state` — cho phép Router phân biệt
+            KHOẺ-NHƯNG-BẬN với KHOẺ-VÀ-SẴN-SÀNG thay vì chỉ true/false.
+        """
+        self._srv = _Server(cfg, run_fn, health_fn, state_fn)
         self._t: Optional[threading.Thread] = None
 
     @property

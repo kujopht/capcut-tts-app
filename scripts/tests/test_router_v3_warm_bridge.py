@@ -15,6 +15,7 @@ import socket
 import sys
 import time
 import unittest
+from unittest import mock
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -108,6 +109,54 @@ class BeWorkerTest(unittest.TestCase):
             self.assertNotIn("response", hang)
 
 
+class ArgvKhoiDongTest(unittest.TestCase):
+    """`start()` phải dựng đúng cờ — bằng chứng thật (2026-08-30): một mô
+    hình chọn công cụ lệnh-shell để tạo MỘT tệp, và `accept-edits` không phủ
+    trường hợp đó (chỉ ghi tệp), chỉ `--dangerously-skip-permissions` mới."""
+
+    def _argv_da_dung(self, **kw) -> list:
+        w = WarmAgyWorker("X", model="m", binary="agy.exe", **kw)
+        with mock.patch("scripts.router_v3.warm_pool.subprocess.Popen") as gia:
+            gia.return_value.stdout = None
+            gia.return_value.stderr = None
+            w.start()
+        return gia.call_args[0][0]
+
+    def test_mac_dinh_khong_co_co_nao(self):
+        argv = self._argv_da_dung()
+        self.assertNotIn("--mode", argv)
+        self.assertNotIn("--dangerously-skip-permissions", argv)
+
+    def test_allow_edits_them_mode_accept_edits(self):
+        argv = self._argv_da_dung(allow_edits=True)
+        self.assertIn("--mode", argv)
+        self.assertEqual(argv[argv.index("--mode") + 1], "accept-edits")
+
+    def test_dangerously_skip_permissions_them_dung_co(self):
+        argv = self._argv_da_dung(dangerously_skip_permissions=True,
+                                  workspace="C:/mot/worktree")
+        self.assertIn("--dangerously-skip-permissions", argv)
+
+    def test_ca_hai_dat_duoc_cung_luc(self):
+        argv = self._argv_da_dung(allow_edits=True,
+                                  dangerously_skip_permissions=True,
+                                  workspace="C:/mot/worktree")
+        self.assertIn("--mode", argv)
+        self.assertIn("--dangerously-skip-permissions", argv)
+
+    def test_dangerously_skip_permissions_THIEU_workspace_FAIL_CLOSED(self):
+        """Khong co --add-dir, co nay tu duyet lenh shell TREN CA HE THONG,
+        khong gioi han vao worktree nao — phai tu choi khoi dong, khong
+        duoc lang le chay khong gioi han."""
+        w = WarmAgyWorker("X", model="m", binary="agy.exe",
+                          dangerously_skip_permissions=True)
+        with mock.patch("scripts.router_v3.warm_pool.subprocess.Popen") as gia:
+            ok = w.start()
+        self.assertFalse(ok)
+        self.assertEqual(w.state, WarmState.FAILED)
+        gia.assert_not_called()
+
+
 class _CauNoiThu(unittest.TestCase):
     def setUp(self):
         self.goi = []
@@ -179,6 +228,40 @@ class CauNoiTest(_CauNoiThu):
             self.assertIn("RuntimeError", r["error"])
             # Cau noi VAN song sau mot lan hong.
             self.assertEqual(c.health()["status"], "ok")
+        finally:
+            b.stop()
+
+
+class CauNoiCoStateFnTest(unittest.TestCase):
+    """`state_fn` cho Router phân biệt KHOẺ-BẬN với KHOẺ-RẢNH, không chỉ true/false."""
+
+    def setUp(self):
+        self.trang_thai = "warm_idle"
+        self.bridge = WorkerBridge(
+            BridgeConfig(worker_id="AG02"), lambda p, f: {"ok": True},
+            health_fn=lambda: self.trang_thai != "failed",
+            state_fn=lambda: self.trang_thai)
+        self.bridge.start()
+        self.client = BridgeClient(self.bridge.port, self.bridge.token, timeout=10)
+
+    def tearDown(self):
+        self.bridge.stop()
+
+    def test_health_kem_state_khi_co_state_fn(self):
+        r = self.client.health()
+        self.assertEqual(r["state"], "warm_idle")
+        self.assertTrue(r["healthy"])
+
+    def test_state_doi_theo_thoi_gian_thuc(self):
+        self.trang_thai = "warm_busy"
+        self.assertEqual(self.client.health()["state"], "warm_busy")
+
+    def test_khong_co_state_fn_thi_khong_co_khoa_state(self):
+        b = WorkerBridge(BridgeConfig(worker_id="AG01"), lambda p, f: {"ok": True})
+        b.start()
+        try:
+            r = BridgeClient(b.port, b.token, timeout=10).health()
+            self.assertNotIn("state", r)
         finally:
             b.stop()
 

@@ -97,10 +97,12 @@ class WarmExecutor:
 
     def __init__(self, *, model: str, workspace_for=None,
                  allow_edits: bool = False,
+                 dangerously_skip_permissions: bool = False,
                  policy: Optional[RecyclePolicy] = None,
                  turn_timeout: float = 240.0):
         self._model = model
         self._allow_edits = allow_edits
+        self._dangerously_skip_permissions = dangerously_skip_permissions
         self._policy = policy or RecyclePolicy()
         self._turn_timeout = turn_timeout
         #: `(packet) -> đường dẫn workspace`. Nút có ghi cần `--add-dir`.
@@ -121,8 +123,9 @@ class WarmExecutor:
                       else (packet.workspace or None))
                 w = WarmAgyWorker(
                     spec.worker_id, model=self._model, cwd=ws, workspace=ws,
-                    allow_edits=self._allow_edits, policy=self._policy,
-                    turn_timeout=self._turn_timeout)
+                    allow_edits=self._allow_edits,
+                    dangerously_skip_permissions=self._dangerously_skip_permissions,
+                    policy=self._policy, turn_timeout=self._turn_timeout)
                 self._workers[spec.worker_id] = w
                 self._khoa_worker[spec.worker_id] = threading.Lock()
             return w

@@ -24,23 +24,38 @@ if str(_ROOT) not in sys.path:
 
 from scripts.router_v3.bridge import BridgeConfig, WorkerBridge
 from scripts.router_v3.native_worker import find_agy
+from scripts.router_v3 import pairing_file
 from scripts.router_v3.warm_pool import RecyclePolicy, WarmAgyWorker
 
 
 def main(argv=None) -> int:
+    # PHAI o TRUOC parse_args: console Windows mac dinh dung code page ANSI
+    # (vd cp1252), khong ma hoa duoc dau tieng Viet. `--help`/loi cu phap goi
+    # `print_help()` NGAY TRONG luc parse — dat reconfigure sau parse_args thi
+    # `--help` vo tinh vo` UnicodeEncodeError truoc khi kip chay toi day.
+    for luong in (sys.stdout, sys.stderr):
+        try:
+            luong.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--worker-id", default="AG02")
     ap.add_argument("--model", default="gemini-3.7-flash-low")
     ap.add_argument("--port", type=int, default=0, help="0 = HĐH tự chọn")
     ap.add_argument("--workspace", default="", help="thư mục cho --add-dir")
     ap.add_argument("--allow-edits", action="store_true")
+    ap.add_argument("--dangerously-skip-permissions", action="store_true",
+                    help="tự duyệt MỌI quyền (gồm lệnh shell) — chỉ dùng khi "
+                         "việc chạy trong worktree cô lập, có write_scope "
+                         "và verify_scope() chặn sau")
+    ap.add_argument("--pairing-file", default="",
+                    help="ghi cổng+token vào tệp dùng chung MỘT LẦN thay vì "
+                         "in ra màn hình để gõ tay — vd C:\\FanficWorkers\\"
+                         "pairing\\AG02.pair. Thư mục cha phải đã có ACL "
+                         "siết (setup_shared_root.py). pair_bridge.py đọc "
+                         "và xoá tệp này sau khi ghép xong.")
     a = ap.parse_args(argv)
-
-    for luong in (sys.stdout, sys.stderr):
-        try:
-            luong.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
 
     exe = find_agy()
     if not exe:
@@ -51,6 +66,7 @@ def main(argv=None) -> int:
     worker = WarmAgyWorker(
         a.worker_id, model=a.model,
         workspace=a.workspace or None, allow_edits=a.allow_edits,
+        dangerously_skip_permissions=a.dangerously_skip_permissions,
         policy=RecyclePolicy())
 
     print(f"agy      : {exe}")
@@ -64,19 +80,39 @@ def main(argv=None) -> int:
 
     def chay(prompt: str, family: str) -> dict:
         t = worker.send(prompt, family=family)
-        return {"ok": t.ok, "response": t.response, "error": t.error,
-                "seconds": round(t.seconds, 2), "turns": worker.stats.turns}
+        ra = {"ok": t.ok, "response": t.response, "error": t.error,
+             "seconds": round(t.seconds, 2), "turns": worker.stats.turns}
+        # Chi kem stderr khi co van de ro rang — "ok" ma response RONG van la
+        # dau hieu dang ngo, vi mot luot that thanh cong khong bao gio rong.
+        if not t.ok or not t.response.strip():
+            ra["stderr_tail"] = worker.stderr_tail[-2000:]
+        return ra
 
     bridge = WorkerBridge(BridgeConfig(worker_id=a.worker_id, port=a.port),
-                          chay, health_fn=lambda: worker.state.value != "failed")
+                          chay, health_fn=lambda: worker.state.value != "failed",
+                          state_fn=lambda: worker.state.value)
     bridge.start()
 
     print("=" * 58)
     print(f"  CẦU NỐI {a.worker_id} ĐÃ SẴN SÀNG")
     print(f"  cổng  : {bridge.port}")
-    print(f"  token : {bridge.token}")
+    if a.pairing_file:
+        duong = pathlib.Path(a.pairing_file)
+        try:
+            pairing_file.write(duong, worker_id=a.worker_id, port=bridge.port,
+                               token=bridge.token)
+            print(f"  token : đã ghi vào {duong} (KHÔNG hiện ở đây)")
+        except FileNotFoundError as exc:
+            print(f"  token : GHI TỆP HỎNG — {exc}")
+            print(f"  token : {bridge.token}  (rơi về gõ tay do lỗi trên)")
+    else:
+        print(f"  token : {bridge.token}")
     print("=" * 58)
-    print("\nChép CỔNG và TOKEN sang phiên Router chính.")
+    if a.pairing_file:
+        print("\nBên Router chạy: python -m scripts.router_v3.pair_bridge "
+             f"--pairing-file {a.pairing_file}")
+    else:
+        print("\nChép CỔNG và TOKEN sang phiên Router chính.")
     print("Cầu nối chỉ nghe trên 127.0.0.1. Ctrl+C để dừng.\n")
 
     try:

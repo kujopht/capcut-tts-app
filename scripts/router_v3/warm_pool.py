@@ -117,20 +117,37 @@ class WarmAgyWorker:
     def __init__(self, worker_id: str, *, model: str,
                  cwd: Optional[str] = None, workspace: Optional[str] = None,
                  allow_edits: bool = False,
+                 dangerously_skip_permissions: bool = False,
                  policy: Optional[RecyclePolicy] = None,
                  binary: Optional[str] = None,
                  turn_timeout: float = 240.0):
+        """
+        :param dangerously_skip_permissions: bật `--dangerously-skip-permissions`.
+            MẶC ĐỊNH TẮT — nó tự duyệt MỌI quyền, gồm cả chạy lệnh shell, rộng
+            hơn hẳn `accept-edits` (chỉ ghi tệp). Chỉ bật khi việc chạy trong
+            một worktree cô lập, có `write_scope`/`DO_NOT_TOUCH` và
+            `verify_scope()` chặn sau — xem CLAUDE.md mục "Known real CLI
+            quirks". Bằng chứng thật (2026-08-30): một mô hình chọn công cụ
+            lệnh-shell để tạo MỘT tệp thay vì công cụ ghi tệp; `accept-edits`
+            không phủ trường hợp đó, chỉ `--dangerously-skip-permissions` mới.
+        """
         self.worker_id = worker_id
         self._model = model
         self._cwd = cwd
         self._workspace = workspace
         self._allow_edits = allow_edits
+        self._dangerously_skip_permissions = dangerously_skip_permissions
         self._policy = policy or RecyclePolicy()
         self._binary = binary
         self._turn_timeout = turn_timeout
 
         self._p: Optional[subprocess.Popen] = None
         self._q: "Queue[str]" = Queue()
+        # Truoc ban sua nay stderr cua agy khong ai doc: PIPE ma khong drain
+        # nghia la mot loi tu choi quyen/permission bi NUOT im lang, va ca
+        # nguoi van hanh lan Router deu khong thay duoc VI SAO mot luot tra
+        # ve rong. Giu 200 dong cuoi — du de chan doan, khong giu ca output.
+        self._stderr_tail: List[str] = []
         self._state = WarmState.COLD
         self.stats = SessionStats()
         self.cold_starts = 0
@@ -147,6 +164,13 @@ class WarmAgyWorker:
         return self._state
 
     def start(self) -> bool:
+        # `--dangerously-skip-permissions` tu duyet MOI quyen, ke ca lenh
+        # shell — thieu `--add-dir` no khong bi gioi han vao worktree nao
+        # ca, worker se ghi duoc BAT CU DAU tai khoan he dieu hanh cho phep.
+        # FAIL CLOSED thay vi tin nguoi goi luon nho truyen workspace.
+        if self._dangerously_skip_permissions and not self._workspace:
+            self._state = WarmState.FAILED
+            return False
         exe = self._binary or find_agy()
         if not exe:
             self._state = WarmState.FAILED
@@ -159,6 +183,8 @@ class WarmAgyWorker:
             argv += ["--add-dir", str(self._workspace)]
         if self._allow_edits:
             argv += ["--mode", "accept-edits"]
+        if self._dangerously_skip_permissions:
+            argv += ["--dangerously-skip-permissions"]
 
         t0 = time.perf_counter()
         try:
@@ -168,7 +194,9 @@ class WarmAgyWorker:
         except OSError as exc:
             self._state = WarmState.FAILED
             return False
+        self._stderr_tail = []
         threading.Thread(target=self._doc_stdout, daemon=True).start()
+        threading.Thread(target=self._doc_stderr, daemon=True).start()
         d = self._cho("init", timeout=self._turn_timeout)
         self.cold_start_seconds += time.perf_counter() - t0
         self.cold_starts += 1
@@ -188,6 +216,27 @@ class WarmAgyWorker:
                 self._q.put(raw.decode("utf-8", "replace").strip())
             except Exception:
                 break
+
+    def _doc_stderr(self) -> None:
+        p = self._p
+        if p is None or p.stderr is None:
+            return
+        for raw in iter(p.stderr.readline, b""):
+            try:
+                dong = raw.decode("utf-8", "replace").rstrip()
+            except Exception:
+                break
+            if not dong:
+                continue
+            self._stderr_tail.append(dong)
+            del self._stderr_tail[:-200]
+
+    @property
+    def stderr_tail(self) -> str:
+        """200 dong stderr GẦN NHẤT của `agy` — để chẩn đoán khi một lượt trả
+        về "ok" nhưng rỗng/vô lý. Không phải log toàn bộ, chỉ đủ để thấy một
+        lời từ chối quyền hay một traceback."""
+        return "\n".join(self._stderr_tail[-200:])
 
     def _cho(self, event: str, timeout: float):
         het = time.time() + timeout

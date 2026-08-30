@@ -183,6 +183,40 @@ class CauNoiTest(_CauNoiThu):
             b.stop()
 
 
+class CauNoiCoStateFnTest(unittest.TestCase):
+    """`state_fn` cho Router phân biệt KHOẺ-BẬN với KHOẺ-RẢNH, không chỉ true/false."""
+
+    def setUp(self):
+        self.trang_thai = "warm_idle"
+        self.bridge = WorkerBridge(
+            BridgeConfig(worker_id="AG02"), lambda p, f: {"ok": True},
+            health_fn=lambda: self.trang_thai != "failed",
+            state_fn=lambda: self.trang_thai)
+        self.bridge.start()
+        self.client = BridgeClient(self.bridge.port, self.bridge.token, timeout=10)
+
+    def tearDown(self):
+        self.bridge.stop()
+
+    def test_health_kem_state_khi_co_state_fn(self):
+        r = self.client.health()
+        self.assertEqual(r["state"], "warm_idle")
+        self.assertTrue(r["healthy"])
+
+    def test_state_doi_theo_thoi_gian_thuc(self):
+        self.trang_thai = "warm_busy"
+        self.assertEqual(self.client.health()["state"], "warm_busy")
+
+    def test_khong_co_state_fn_thi_khong_co_khoa_state(self):
+        b = WorkerBridge(BridgeConfig(worker_id="AG01"), lambda p, f: {"ok": True})
+        b.start()
+        try:
+            r = BridgeClient(b.port, b.token, timeout=10).health()
+            self.assertNotIn("state", r)
+        finally:
+            b.stop()
+
+
 class RanhGioiBaoMatTest(_CauNoiThu):
     """Những gì cầu nối KHÔNG được làm."""
 

@@ -131,6 +131,11 @@ class WarmAgyWorker:
 
         self._p: Optional[subprocess.Popen] = None
         self._q: "Queue[str]" = Queue()
+        # Truoc ban sua nay stderr cua agy khong ai doc: PIPE ma khong drain
+        # nghia la mot loi tu choi quyen/permission bi NUOT im lang, va ca
+        # nguoi van hanh lan Router deu khong thay duoc VI SAO mot luot tra
+        # ve rong. Giu 200 dong cuoi — du de chan doan, khong giu ca output.
+        self._stderr_tail: List[str] = []
         self._state = WarmState.COLD
         self.stats = SessionStats()
         self.cold_starts = 0
@@ -168,7 +173,9 @@ class WarmAgyWorker:
         except OSError as exc:
             self._state = WarmState.FAILED
             return False
+        self._stderr_tail = []
         threading.Thread(target=self._doc_stdout, daemon=True).start()
+        threading.Thread(target=self._doc_stderr, daemon=True).start()
         d = self._cho("init", timeout=self._turn_timeout)
         self.cold_start_seconds += time.perf_counter() - t0
         self.cold_starts += 1
@@ -188,6 +195,27 @@ class WarmAgyWorker:
                 self._q.put(raw.decode("utf-8", "replace").strip())
             except Exception:
                 break
+
+    def _doc_stderr(self) -> None:
+        p = self._p
+        if p is None or p.stderr is None:
+            return
+        for raw in iter(p.stderr.readline, b""):
+            try:
+                dong = raw.decode("utf-8", "replace").rstrip()
+            except Exception:
+                break
+            if not dong:
+                continue
+            self._stderr_tail.append(dong)
+            del self._stderr_tail[:-200]
+
+    @property
+    def stderr_tail(self) -> str:
+        """200 dong stderr GẦN NHẤT của `agy` — để chẩn đoán khi một lượt trả
+        về "ok" nhưng rỗng/vô lý. Không phải log toàn bộ, chỉ đủ để thấy một
+        lời từ chối quyền hay một traceback."""
+        return "\n".join(self._stderr_tail[-200:])
 
     def _cho(self, event: str, timeout: float):
         het = time.time() + timeout

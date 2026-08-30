@@ -68,11 +68,17 @@ def main(argv=None) -> int:
 
     def chay(prompt: str, family: str) -> dict:
         t = worker.send(prompt, family=family)
-        return {"ok": t.ok, "response": t.response, "error": t.error,
-                "seconds": round(t.seconds, 2), "turns": worker.stats.turns}
+        ra = {"ok": t.ok, "response": t.response, "error": t.error,
+             "seconds": round(t.seconds, 2), "turns": worker.stats.turns}
+        # Chi kem stderr khi co van de ro rang — "ok" ma response RONG van la
+        # dau hieu dang ngo, vi mot luot that thanh cong khong bao gio rong.
+        if not t.ok or not t.response.strip():
+            ra["stderr_tail"] = worker.stderr_tail[-2000:]
+        return ra
 
     bridge = WorkerBridge(BridgeConfig(worker_id=a.worker_id, port=a.port),
-                          chay, health_fn=lambda: worker.state.value != "failed")
+                          chay, health_fn=lambda: worker.state.value != "failed",
+                          state_fn=lambda: worker.state.value)
     bridge.start()
 
     print("=" * 58)

@@ -24,6 +24,7 @@ if str(_ROOT) not in sys.path:
 
 from scripts.router_v3.bridge import BridgeConfig, WorkerBridge
 from scripts.router_v3.native_worker import find_agy
+from scripts.router_v3 import pairing_file
 from scripts.router_v3.warm_pool import RecyclePolicy, WarmAgyWorker
 
 
@@ -48,6 +49,12 @@ def main(argv=None) -> int:
                     help="tự duyệt MỌI quyền (gồm lệnh shell) — chỉ dùng khi "
                          "việc chạy trong worktree cô lập, có write_scope "
                          "và verify_scope() chặn sau")
+    ap.add_argument("--pairing-file", default="",
+                    help="ghi cổng+token vào tệp dùng chung MỘT LẦN thay vì "
+                         "in ra màn hình để gõ tay — vd C:\\FanficWorkers\\"
+                         "pairing\\AG02.pair. Thư mục cha phải đã có ACL "
+                         "siết (setup_shared_root.py). pair_bridge.py đọc "
+                         "và xoá tệp này sau khi ghép xong.")
     a = ap.parse_args(argv)
 
     exe = find_agy()
@@ -89,9 +96,23 @@ def main(argv=None) -> int:
     print("=" * 58)
     print(f"  CẦU NỐI {a.worker_id} ĐÃ SẴN SÀNG")
     print(f"  cổng  : {bridge.port}")
-    print(f"  token : {bridge.token}")
+    if a.pairing_file:
+        duong = pathlib.Path(a.pairing_file)
+        try:
+            pairing_file.write(duong, worker_id=a.worker_id, port=bridge.port,
+                               token=bridge.token)
+            print(f"  token : đã ghi vào {duong} (KHÔNG hiện ở đây)")
+        except FileNotFoundError as exc:
+            print(f"  token : GHI TỆP HỎNG — {exc}")
+            print(f"  token : {bridge.token}  (rơi về gõ tay do lỗi trên)")
+    else:
+        print(f"  token : {bridge.token}")
     print("=" * 58)
-    print("\nChép CỔNG và TOKEN sang phiên Router chính.")
+    if a.pairing_file:
+        print("\nBên Router chạy: python -m scripts.router_v3.pair_bridge "
+             f"--pairing-file {a.pairing_file}")
+    else:
+        print("\nChép CỔNG và TOKEN sang phiên Router chính.")
     print("Cầu nối chỉ nghe trên 127.0.0.1. Ctrl+C để dừng.\n")
 
     try:

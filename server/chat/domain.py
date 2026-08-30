@@ -40,9 +40,14 @@ class UserReadingContext:
 
     user_id: str
     novel_id: str
-    #: 1-based, matching this repo's existing `Chapter.chapter_index`
-    #: convention (see `web/src/lib/api.ts`). A user who has read chapters
-    #: 1..N has `current_chapter_index = N`.
+    #: 1-based reading-order position - maps to this repo's
+    #: `Chapter.order_index` field (`server/domain.py`, `web/src/lib/api.ts`)
+    #: at the integration layer; named `chapter_index` here (matching the
+    #: mission brief's own vocabulary) rather than reusing `order_index`
+    #: verbatim, since this is a distinct chat-domain concept (reading
+    #: PROGRESS, not a chapter's own position field) even though the
+    #: numeric value is the same. A user who has read chapters 1..N has
+    #: `current_chapter_index = N`.
     current_chapter_index: int
     #: Explicit user opt-out, per the mission brief ("unless the user
     #: explicitly disables spoiler protection") — default ON. Never

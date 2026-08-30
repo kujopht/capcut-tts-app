@@ -17,6 +17,7 @@ import { api, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
 import { ChapterComments } from "@/components/ChapterComments";
+import { AskAiPanel } from "@/components/AskAiPanel";
 import { EmptyState, ErrorState, SkeletonList, formatNumber } from "@/components/ui";
 import { IconBook, IconHeadphones } from "@/components/Icons";
 
@@ -147,6 +148,14 @@ export default function ChapterPage({
           <p className="hint">Chương này chưa có nội dung.</p>
         )}
       </section>
+
+      {/* Hỏi AI — trợ lý hỏi đáp về truyện/chương (xem AskAiPanel.tsx). */}
+      <AskAiPanel
+        novelId={chapter.novel_id}
+        chapterId={chapter.chapter_id}
+        chapterIndex={chapter.order_index}
+        chapterContent={chapter.content}
+      />
 
       {/* Binh luan chuong — luon hien du co audio hay khong: day la binh
           luan ve NOI DUNG chuong, khong phai chi rieng ban audio. */}

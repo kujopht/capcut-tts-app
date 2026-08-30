@@ -218,6 +218,46 @@ class ImageStudioSettings:
 
 
 @dataclass(frozen=True)
+class LlmGatewaySettings:
+    """Cau hinh LLM Gateway (Fanfic AI Chat V1) — ha tang goi model cho
+    NGUOI DUNG CUOI, hoan toan tach biet AI_ROUTER_LTS (`scripts/router_v3/`,
+    chi danh cho tac tu ky su phat trien). Moi khoa CHI song o day/bien moi
+    truong, khong bao gio xuong browser — cung nguyen tac voi
+    `AppwriteSettings`/`ImageStudioSettings`. Thieu toan bo khoa KHONG lam
+    backend chet: `server/llm_gateway/gateway.py` chi don gian khong co
+    provider nao de goi, roi tra loi bang `MockLLMProvider` o tang goi.
+    """
+
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""
+    #: URL/khoa cho mot model tu luu tru (vLLM/Ollama o che do tuong thich
+    #: OpenAI) — rong nghia la khong cau hinh, khong phai loi.
+    self_hosted_base_url: str = ""
+    self_hosted_api_key: str = ""
+
+    @property
+    def any_provider_configured(self) -> bool:
+        return bool(
+            self.openai_api_key or self.openrouter_api_key or self.gemini_api_key
+            or self.anthropic_api_key or self.self_hosted_base_url)
+
+    def describe(self) -> dict:
+        """KHONG BAO GIO chua API key that — chi co/khong co, giong quy
+        uoc `AppwriteSettings.configured`/`ImageStudioSettings.describe`."""
+        return {
+            "openai_configured": bool(self.openai_api_key),
+            "openrouter_configured": bool(self.openrouter_api_key),
+            "gemini_configured": bool(self.gemini_api_key),
+            "anthropic_configured": bool(self.anthropic_api_key),
+            "self_hosted_configured": bool(self.self_hosted_base_url),
+        }
+
+
+@dataclass(frozen=True)
 class Settings:
     """Toan bo cau hinh backend."""
 
@@ -339,6 +379,7 @@ class Settings:
     appwrite: AppwriteSettings = field(default_factory=AppwriteSettings)
     r2: R2Settings = field(default_factory=R2Settings)
     image_studio: ImageStudioSettings = field(default_factory=ImageStudioSettings)
+    llm_gateway: LlmGatewaySettings = field(default_factory=LlmGatewaySettings)
 
     #: KHONG con la cong chan cho giong cuc bo — xem `local_voices` ngay duoi.
     #:
@@ -593,6 +634,7 @@ class Settings:
                 self.translation_base_url and self.translation_api_key
                 and self.translation_model),
             "image_studio": self.image_studio.describe(),
+            "llm_gateway": self.llm_gateway.describe(),
         }
 
 
@@ -722,6 +764,7 @@ def load_settings() -> Settings:
         youtube_api_key=_env("YOUTUBE_API_KEY"),
         youtube_websub_callback_base_url=_env("YOUTUBE_WEBSUB_CALLBACK_BASE_URL"),
         image_studio=_image_studio_settings(),
+        llm_gateway=_llm_gateway_settings(),
     )
 
 
@@ -763,6 +806,19 @@ def _image_studio_settings() -> ImageStudioSettings:
         pollinations_client_id=_env("POLLINATIONS_CLIENT_ID"),
         byop_master_key=_env("IMAGE_BYOP_MASTER_KEY"),
         byop_redirect_uri=_env("IMAGE_BYOP_REDIRECT_URI"),
+    )
+
+
+def _llm_gateway_settings() -> LlmGatewaySettings:
+    return LlmGatewaySettings(
+        openai_api_key=_env("LLM_OPENAI_API_KEY"),
+        openai_base_url=_env("LLM_OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        openrouter_api_key=_env("LLM_OPENROUTER_API_KEY"),
+        openrouter_base_url=_env("LLM_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        gemini_api_key=_env("LLM_GEMINI_API_KEY"),
+        anthropic_api_key=_env("LLM_ANTHROPIC_API_KEY"),
+        self_hosted_base_url=_env("LLM_SELF_HOSTED_BASE_URL"),
+        self_hosted_api_key=_env("LLM_SELF_HOSTED_API_KEY"),
     )
 
 

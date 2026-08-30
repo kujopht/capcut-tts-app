@@ -1,25 +1,33 @@
 """Adapter Grok Build qua CLI headless có cấu trúc — Router LTS Phase 4.
 
-KHÔNG cài trên máy này lúc viết module này (2026-08-30) — `where grok`
-không thấy gì. Viết theo tài liệu chính thức (docs.x.ai/build, tra cứu
-trực tiếp lúc viết):
+Ban đầu viết khi CHƯA cài `grok` (2026-08-30), chỉ theo tài liệu chính
+thức. Đã kiểm chứng THẬT với `grok` 1.0.13 đã cài+đăng nhập (2026-08-30):
 
     grok -p "<prompt>" --output-format json --always-approve -m <model>
     grok agent stdio          # ACP thật, JSON-RPC qua stdin/stdout
 
 Grok Build công bố ACP THẬT (ưu tiên #1 của `TransportKind`) qua
 `grok agent stdio`, nhưng đó là một client JSON-RPC phiên dài (session/
-prompt, session/update dạng stream) — xây đúng cho một lần dùng chưa từng
-kiểm chứng được (không có `grok` để chạy thử) là rủi ro cao hơn lợi ích lúc
-này. Module này dùng CLI headless có cấu trúc (ưu tiên #3) trước — hình
-dạng đơn giản hơn, gần giống hệt `native_worker.run_native` đã chứng minh
-thật với `agy`. Nâng lên ACP là việc CÓ THỂ làm sau, không phải làm lại.
+prompt, session/update dạng stream). Module này dùng CLI headless có cấu
+trúc (ưu tiên #3) có chủ đích — hình dạng đơn giản hơn, đã chứng minh thật
+qua 3 lệnh gọi thật (trinh sát repo, cài đặt thật trong worktree cô lập,
+sinh test), không cần kiến trúc JSON-RPC mới cho lần xác thực này. Nâng
+lên ACP vẫn là việc CÓ THỂ làm sau, không phải làm lại.
 
-GIỚI HẠN CHƯA KIỂM CHỨNG ĐƯỢC:
-- Hình dạng chính xác của JSON `--output-format json` (tài liệu chỉ nói
-  "một khối JSON ở cuối", không liệt kê hết tên trường).
-- `--always-approve` là cờ ĐÚNG cho phép ghi tệp không tương tác theo tài
-  liệu, nhưng chưa chạy thật để xác nhận nó phủ được cả lệnh shell.
+ĐÃ KIỂM CHỨNG THẬT (2026-08-30, không còn là suy đoán):
+- Nhị phân thật nằm ở `~/.grok/bin/grok.exe` (thư mục home người dùng),
+  KHÔNG phải `%LOCALAPPDATA%\\grok\\bin\\grok.exe` như suy đoán ban đầu —
+  `find_grok()` đã sửa để tìm đúng cả hai, ưu tiên vị trí thật.
+- Hình dạng JSON thật của `--output-format json`: đối tượng phẳng với khoá
+  `text` (câu trả lời), `stopReason`, `sessionId`, `usage`, `total_cost_usd`,
+  `modelUsage`, ... — khoá `text` NẰM TRONG danh sách đã đoán ở
+  `_rut_van_ban_grok`, nên hàm đó ĐÚNG với API thật mà không cần sửa.
+- `--always-approve` xác nhận ghi tệp không tương tác được (task B: sinh
+  file thật trong worktree cô lập, không bị chặn xin quyền).
+- `--cwd`/`cwd=` (subprocess) đặt đúng thư mục làm việc cho từng worktree —
+  KHÔNG có lỗi phạm vi làm việc kiểu OpenCode (`start_session`
+  `workspace=` không tự áp `cwd`; adapter dựa vào cwd của
+  `subprocess.run`, được set đúng qua `self._workspace`).
 """
 from __future__ import annotations
 
@@ -34,14 +42,18 @@ from scripts.router_v3.packet import TaskPacket, TaskResult, parse_result
 from scripts.router_v3.registry import ExecutionType, Health, WorkerSpec
 from scripts.router_v3.worker_adapter import HealthReport, TransportKind, WorkerAdapter
 
-DEFAULT_GROK = Path(__import__("os").environ.get("LOCALAPPDATA", "")) / "grok" / "bin" / "grok.exe"
+_UNG_VIEN_GROK = (
+    Path.home() / ".grok" / "bin" / "grok.exe",
+    Path.home() / ".grok" / "bin" / "grok",
+    Path(__import__("os").environ.get("LOCALAPPDATA", "")) / "grok" / "bin" / "grok.exe",
+)
 
 
 def find_grok() -> Optional[str]:
     tren_path = shutil.which("grok")
     if tren_path:
         return tren_path
-    for ung_vien in (DEFAULT_GROK, DEFAULT_GROK.with_suffix("")):
+    for ung_vien in _UNG_VIEN_GROK:
         if ung_vien.exists():
             return str(ung_vien)
     return None
@@ -67,13 +79,21 @@ class GrokBuildAdapter(WorkerAdapter):
             execution_type=ExecutionType.LOCAL_CLI, pool="GROK",
             capabilities=frozenset({"implement", "tests", "review", "challenger"}),
             max_concurrent=1,
-            notes="grok -p --output-format json --always-approve, chưa cài trên máy này")
+            notes="grok -p --output-format json --always-approve, đã cài+đăng nhập, đã kiểm chứng thật 2026-08-30")
 
     def health(self) -> HealthReport:
         exe = self._binary or find_grok()
         if not exe:
             return HealthReport(Health.UNAVAILABLE, "không tìm thấy `grok` trên máy này")
-        return HealthReport(Health.UNKNOWN, f"tìm thấy {exe}, chưa kiểm đăng nhập")
+        try:
+            p = subprocess.run([exe, "models"], capture_output=True, text=True,
+                               timeout=15, encoding="utf-8", errors="replace")
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return HealthReport(Health.UNAVAILABLE, f"{type(exc).__name__}: {exc}"[:200])
+        ra = (p.stdout or "") + (p.stderr or "")
+        if p.returncode != 0 or "logged in" not in ra.lower():
+            return HealthReport(Health.AUTH_REQUIRED, ra.strip()[:200] or "chưa đăng nhập")
+        return HealthReport(Health.HEALTHY, ra.strip().splitlines()[0] if ra.strip() else "healthy")
 
     def capabilities(self) -> FrozenSet[str]:
         return self.register().capabilities

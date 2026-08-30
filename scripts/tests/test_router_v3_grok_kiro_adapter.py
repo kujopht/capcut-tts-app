@@ -1,6 +1,12 @@
 """Adapter Grok Build + Kiro CLI — Router LTS Phase 4 + 5.
 
-Cả hai KHÔNG cài trên máy này — `health()` phải báo UNAVAILABLE THẬT
+Grok Build ĐÃ CÀI+ĐĂNG NHẬP thật trên máy này (2026-08-30) — các bài trong
+`GrokChuaCaiTest` MÔ PHỎNG máy chưa cài (mock `find_grok` -> None) để giữ
+đường dẫn phòng thủ được kiểm định kín, tách khỏi trạng thái máy thật.
+`GrokDaCaiThatTest` chỉ chạy khi `grok` thật sự có mặt, gọi `health()`
+THẬT (không mock) để xác nhận đăng nhập còn hiệu lực.
+
+Kiro KHÔNG cài trên máy này — `health()` phải báo UNAVAILABLE THẬT
 (không mock việc thiếu binary), và không adapter nào được giả vờ gọi
 subprocess với cờ dòng lệnh chưa xác nhận (Kiro).
 """
@@ -16,7 +22,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from scripts.router_v3.dag import TaskNode
-from scripts.router_v3.grok_adapter import GrokBuildAdapter, _rut_van_ban_grok
+from scripts.router_v3.grok_adapter import GrokBuildAdapter, find_grok, _rut_van_ban_grok
 from scripts.router_v3.kiro_adapter import KiroAdapter
 from scripts.router_v3.packet import packet_for
 from scripts.router_v3.registry import CAPABILITIES, Health
@@ -27,25 +33,44 @@ def _goi_packet():
     return packet_for(node, base_sha="deadbeef", workspace="C:/ws")
 
 
-class GrokKhongCaiTest(unittest.TestCase):
-    def test_health_UNAVAILABLE_that(self):
+class GrokChuaCaiTest(unittest.TestCase):
+    """Mo phong may chua cai grok (mock find_grok), khong phu thuoc may that."""
+
+    def test_health_UNAVAILABLE_khi_khong_tim_thay_binary(self):
         a = GrokBuildAdapter("GROK01")
-        h = a.health()
+        with mock.patch("scripts.router_v3.grok_adapter.find_grok", return_value=None):
+            h = a.health()
         self.assertEqual(h.state, Health.UNAVAILABLE)
         self.assertIn("không tìm thấy", h.detail)
 
-    def test_start_session_that_bai(self):
+    def test_start_session_that_bai_khi_khong_tim_thay_binary(self):
         a = GrokBuildAdapter("GROK01")
-        self.assertFalse(a.start_session(workspace="C:/ws"))
+        with mock.patch("scripts.router_v3.grok_adapter.find_grok", return_value=None):
+            self.assertFalse(a.start_session(workspace="C:/ws"))
 
-    def test_send_task_bao_hong_khong_nem_loi(self):
+    def test_send_task_bao_hong_khong_nem_loi_khi_khong_tim_thay_binary(self):
         a = GrokBuildAdapter("GROK01")
-        kq = a.send_task(_goi_packet())
+        with mock.patch("scripts.router_v3.grok_adapter.find_grok", return_value=None):
+            kq = a.send_task(_goi_packet())
         self.assertEqual(kq.status, "failed")
 
     def test_capabilities_hop_le(self):
         a = GrokBuildAdapter("GROK01")
         self.assertLessEqual(a.capabilities(), CAPABILITIES)
+
+
+@unittest.skipUnless(find_grok(), "grok chưa cài/đăng nhập trên máy này")
+class GrokDaCaiThatTest(unittest.TestCase):
+    """grok THẬT có mặt — kiểm health() that, khong mock subprocess."""
+
+    def test_health_that_bao_healthy_hoac_auth_required(self):
+        a = GrokBuildAdapter("GROK01")
+        h = a.health()
+        self.assertIn(h.state, (Health.HEALTHY, Health.AUTH_REQUIRED))
+
+    def test_find_grok_tra_duong_dan_thuc_su_ton_tai(self):
+        duong_dan = find_grok()
+        self.assertTrue(os.path.exists(duong_dan))
 
 
 class RutVanBanGrokTest(unittest.TestCase):

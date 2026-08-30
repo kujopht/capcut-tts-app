@@ -82,6 +82,11 @@ class TaskPacket:
     risk_class: RiskClass = RiskClass.LOW
     #: Tóm tắt kết quả các nút phụ thuộc — KHÔNG phải hội thoại của chúng.
     dependency_summaries: Dict[str, str] = field(default_factory=dict)
+    #: Worktree CÔ LẬP của nút này. Rỗng với việc chỉ đọc (chúng dùng chung
+    #: kho vì không sửa được gì). Worker PHẢI làm việc ở đây, không phải ở
+    #: cây làm việc chính — hai worker ghi chung một cây là hỏng chắc chắn.
+    workspace: str = ""
+    branch: str = ""
 
     def render(self) -> str:
         """Chuỗi gửi cho worker. Cố ý là văn bản thuần: mọi CLI đều đọc được."""
@@ -135,8 +140,10 @@ class TaskPacket:
 def packet_for(node: TaskNode, *, base_sha: str,
                dependency_summaries: Optional[Dict[str, str]] = None,
                do_not_touch: Sequence[str] = (),
-               tests_required: Sequence[str] = ()) -> TaskPacket:
+               tests_required: Sequence[str] = (),
+               workspace: str = "", branch: str = "") -> TaskPacket:
     p = TaskPacket(
+        workspace=workspace, branch=branch,
         task_id=node.id, base_sha=base_sha, objective=node.objective,
         dependencies=tuple(node.dependencies), read_scope=tuple(node.read_scope),
         write_scope=tuple(node.write_scope), do_not_touch=tuple(do_not_touch),

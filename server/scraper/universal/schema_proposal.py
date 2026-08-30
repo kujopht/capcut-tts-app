@@ -39,7 +39,18 @@ _VALID_FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 #: How the LLM is asked to reply - CSS-selector-or-JSONPath-STYLE hints
 #: only, i.e. plain strings describing WHERE to look, never executable
 #: code. Enforced by `_VALID_HINT` below, not just requested in the prompt.
+#: This is a SYNTAX-FAMILY check, not a semantic safety guarantee - it
+#: cannot distinguish a legitimate CSS attribute selector from a
+#: superficially similar malicious string built from the same character
+#: set (found by independent review). The real, enforced boundary is
+#: `_HAS_SHELL_OR_PATH_TRAVERSAL_SHAPE` below: characters/sequences with
+#: NO legitimate use in any CSS-selector-or-JSONPath-style hint are always
+#: rejected, on top of the character-class allowlist. A `ProposedSchema`
+#: hint must still be treated as an INERT, UNTRUSTED literal string by
+#: whatever `extractor_fn` a caller supplies - never interpolated into a
+#: shell command, file path, or a raw string-concatenated query.
 _VALID_HINT = re.compile(r"^[\w\s.#\[\]='\"\-:/$>]{1,200}$")
+_HAS_SHELL_OR_PATH_TRAVERSAL_SHAPE = re.compile(r"\.\.|[;|`]|\$\(")
 
 
 def build_llm_prompt(fingerprint: SourceFingerprint) -> str:
@@ -105,6 +116,9 @@ def propose_extraction_schema(
             raise SchemaProposalError(f"Ten truong khong hop le tu LLM: {name!r}")
         if not isinstance(hint, str) or not _VALID_HINT.match(hint):
             raise SchemaProposalError(f"Goi y trich xuat khong hop le cho '{name}': {hint!r}")
+        if _HAS_SHELL_OR_PATH_TRAVERSAL_SHAPE.search(hint):
+            raise SchemaProposalError(
+                f"Goi y trich xuat co hinh dang shell/path-traversal cho '{name}': {hint!r}")
         validated_fields[name] = hint
 
     confidence = parsed.get("confidence", 0.0)

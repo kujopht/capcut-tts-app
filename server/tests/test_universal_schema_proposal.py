@@ -46,6 +46,34 @@ class ProposeExtractionSchemaTest(unittest.TestCase):
         with self.assertRaises(SchemaProposalError):
             propose_extraction_schema(_FP, llm_fn=_fake_llm(json.dumps({"confidence": 0.5})))
 
+    def test_shell_command_substitution_shaped_hint_rejected(self):
+        """Bai quyet dinh: review doc lap tim thay _VALID_HINT chi kiem
+        hinh dang ky tu, khong chan duoc chuoi mang hinh dang shell/path-
+        traversal du hop le ve mat ky tu (vd '$(...)', '..', ';', '|',
+        backtick) - da them _HAS_SHELL_OR_PATH_TRAVERSAL_SHAPE lam lop
+        chan rieng."""
+        response = json.dumps({"fields": {"title": "div$(whoami)"}, "confidence": 0.5})
+        with self.assertRaises(SchemaProposalError):
+            propose_extraction_schema(_FP, llm_fn=_fake_llm(response))
+
+    def test_path_traversal_shaped_hint_rejected(self):
+        response = json.dumps({"fields": {"title": "../../etc/passwd"}, "confidence": 0.5})
+        with self.assertRaises(SchemaProposalError):
+            propose_extraction_schema(_FP, llm_fn=_fake_llm(response))
+
+    def test_pipe_and_semicolon_shaped_hint_rejected(self):
+        for bad_hint in ("div | cat /etc/passwd", "div; rm -rf /", "div `whoami`"):
+            response = json.dumps({"fields": {"title": bad_hint}, "confidence": 0.5})
+            with self.assertRaises(SchemaProposalError):
+                propose_extraction_schema(_FP, llm_fn=_fake_llm(response))
+
+    def test_legitimate_css_attribute_selector_still_accepted(self):
+        """The new shell/path-traversal denylist must not break real CSS
+        attribute selectors, which legitimately use $=/^=/*= operators."""
+        response = json.dumps({"fields": {"title": "[data-testid$='title']"}, "confidence": 0.5})
+        schema = propose_extraction_schema(_FP, llm_fn=_fake_llm(response))
+        self.assertEqual(schema.fields["title"], "[data-testid$='title']")
+
     def test_invalid_field_name_raises(self):
         response = json.dumps({"fields": {"BAD NAME!!": "h1"}, "confidence": 0.5})
         with self.assertRaises(SchemaProposalError):

@@ -1,5 +1,6 @@
 import json
 import unittest
+from urllib.parse import urlencode
 
 from server.scraper.http_fetcher import FixtureFetcher
 from server.scraper.universal.acquisition import (
@@ -32,7 +33,8 @@ class TestUniversalYouTubeAdapter(unittest.TestCase):
             "html": "<iframe ...></iframe>",
         }
         self.canonical_watch = "https://www.youtube.com/watch?v=VIDEO_ID"
-        self.oembed_url = f"https://www.youtube.com/oembed?url={self.canonical_watch}&format=json"
+        self.oembed_url = "https://www.youtube.com/oembed?" + urlencode(
+            {"url": self.canonical_watch, "format": "json"})
         self.fetcher = FixtureFetcher({
             self.oembed_url: json.dumps(self.sample_oembed),
         })
@@ -50,6 +52,18 @@ class TestUniversalYouTubeAdapter(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(_extract_youtube_id(url), expected_id)
                 self.assertEqual(self.adapter.canonicalize(url), f"https://www.youtube.com/watch?v={expected_id}")
+
+    def test_oembed_url_properly_encodes_inner_url_as_one_query_param(self):
+        """Bai quyet dinh: review doc lap tim thay URL oEmbed truoc day
+        ghep chuoi tho, khien "&format=json" mo ho ve viec no thuoc query
+        cua URL NGOAI hay URL TRONG. urlencode() gio bao dam url trong
+        luon la MOT gia tri param duy nhat."""
+        oembed_url = YouTubeAdapter._oembed_url("https://www.youtube.com/watch?v=X&t=5s")
+        from urllib.parse import parse_qs, urlsplit
+        parsed = urlsplit(oembed_url)
+        qs = parse_qs(parsed.query)
+        self.assertEqual(qs["url"], ["https://www.youtube.com/watch?v=X&t=5s"])
+        self.assertEqual(qs["format"], ["json"])
 
     def test_probe_true_and_false(self):
         valid_urls = [

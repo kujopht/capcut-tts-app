@@ -51,9 +51,20 @@ _EMBEDDED_JSON_SCRIPT = re.compile(
 #: so `user:pass@` is removed and the URL is still readable without it.
 _URL_USERINFO = re.compile(r"(https?://)[^/@\s]+@")
 
+#: Credential-shaped QUERY PARAMETERS - found by independent review: the
+#: userinfo redaction above missed the far more common real-world pattern
+#: of an API key/token/session secret passed as `?api_key=...`/`?token=...`
+#: rather than URL userinfo. Redacts the VALUE only, keeps the param name
+#: visible (still useful structural signal for a fingerprint) so this
+#: still says "this page has an api_key param" without leaking the value.
+_CREDENTIAL_QUERY_PARAM = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?token|auth|token|secret|password|"
+    r"session[_-]?id|api[_-]?secret)=)[^&\s]+")
+
 
 def _redact_credential_like(text: str) -> str:
-    return _URL_USERINFO.sub(r"\1", text)
+    without_userinfo = _URL_USERINFO.sub(r"\1", text)
+    return _CREDENTIAL_QUERY_PARAM.sub(r"\1[REDACTED]", without_userinfo)
 
 
 def _clip(text: str) -> str:
@@ -160,7 +171,10 @@ def build_fingerprint(html: str, url: str) -> SourceFingerprint:
             break
 
     return SourceFingerprint(
-        canonical_url=url,
+        # Clipped like every other field (found by independent review: this
+        # previously bypassed _clip(), so a caller-supplied URL carrying
+        # credentials/an unbounded length would reach the LLM prompt as-is).
+        canonical_url=_clip(url),
         dom_tag_histogram=histogram,
         json_ld_types=_json_ld_types(html),
         embedded_json_top_level_keys=_embedded_json_top_level_keys(html),

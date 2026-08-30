@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict, List, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from server.scraper.http_fetcher import FetchResult, HttpFetcher
 from server.scraper.universal.acquisition import (
@@ -91,10 +91,18 @@ class YouTubeAdapter(SourceAdapter):
         video_id = _extract_youtube_id(url)
         return f"https://www.youtube.com/watch?v={video_id}"
 
+    @staticmethod
+    def _oembed_url(canonical_url: str) -> str:
+        # Properly URL-encoded (found by independent review: raw string
+        # concatenation left the inner canonical_url's own "?v=..." query
+        # ambiguously joined with the outer oEmbed URL's "&format=json").
+        return "https://www.youtube.com/oembed?" + urlencode(
+            {"url": canonical_url, "format": "json"})
+
     def extract_metadata(self, url: str) -> Dict[str, Any]:
         canonical_url = self.canonicalize(url)
         video_id = _extract_youtube_id(url)
-        oembed_url = f"https://www.youtube.com/oembed?url={canonical_url}&format=json"
+        oembed_url = self._oembed_url(canonical_url)
         fetch_res: FetchResult = self._fetcher.fetch(oembed_url)
         data = json.loads(fetch_res.text)
 
@@ -114,7 +122,7 @@ class YouTubeAdapter(SourceAdapter):
     def fetch_unit(self, unit_ref: str) -> AcquisitionResult:
         try:
             canonical_url = self.canonicalize(unit_ref)
-            oembed_url = f"https://www.youtube.com/oembed?url={canonical_url}&format=json"
+            oembed_url = self._oembed_url(canonical_url)
             fetch_res: FetchResult = self._fetcher.fetch(oembed_url)
             data = json.loads(fetch_res.text)
             return AcquisitionResult(

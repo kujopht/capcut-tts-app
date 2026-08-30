@@ -132,6 +132,25 @@ class CredentialRedactionInFingerprintTest(unittest.TestCase):
         fp = build_fingerprint(html, "https://example.com/page")
         self.assertTrue(any("example.com/normal-page" in link for link in fp.link_graph_sample))
 
+    def test_credential_shaped_query_param_value_redacted(self):
+        """Bai quyet dinh: review doc lap tim thay redaction ban dau chi
+        chan URL userinfo (user:pass@host), bo sot mau hinh THAT SU pho
+        bien hon: api key/token dua qua query param (?api_key=...)."""
+        html = '<a href="https://example.com/api?api_key=sk-live-SECRETVALUE123">x</a>'
+        fp = build_fingerprint(html, "https://example.com/page")
+        joined = " ".join(fp.link_graph_sample)
+        self.assertNotIn("SECRETVALUE123", joined)
+        self.assertIn("api_key=", joined)
+
+    def test_canonical_url_itself_is_clipped_and_redacted(self):
+        """Bai quyet dinh: review doc lap tim thay canonical_url bo qua
+        _clip() hoan toan, mang credential/do dai khong gioi han thang
+        vao prompt LLM."""
+        url_with_credential = "https://user:secretpw@example.com/page?token=SECRETTOKEN456"
+        fp = build_fingerprint("<html></html>", url_with_credential)
+        self.assertNotIn("secretpw", fp.canonical_url)
+        self.assertNotIn("SECRETTOKEN456", fp.canonical_url)
+
 
 class OversizedCandidateResponseTest(unittest.TestCase):
     """Reproduces the existing `ResponseSizeCapTest` intent, at the

@@ -36,6 +36,16 @@ class TestBenchmarkMetrics(unittest.TestCase):
         self.assertEqual(result["coordination_overhead_seconds"], 0.0)
         self.assertEqual(result["speedup"], 1.0)
 
+    def test_wall_seconds_zero_with_non_empty_input_does_not_raise(self):
+        """Bai quyet dinh: review doc lap tim thay ZeroDivisionError o
+        nhanh utilization khi wall_seconds=0 va individual_seconds khong
+        rong (nhanh speedup da co bao ve nhung utilization thi chua)."""
+        result = compute({"w1": 4.0, "w2": 6.0}, 0.0)
+        self.assertEqual(result["utilization"], {"w1": 0.0, "w2": 0.0})
+        self.assertEqual(result["average_utilization"], 0.0)
+        self.assertEqual(result["coordination_overhead_seconds"], 0.0)
+        self.assertEqual(result["speedup"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

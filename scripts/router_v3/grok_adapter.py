@@ -42,11 +42,12 @@ from scripts.router_v3.packet import TaskPacket, TaskResult, parse_result
 from scripts.router_v3.registry import ExecutionType, Health, WorkerSpec
 from scripts.router_v3.worker_adapter import HealthReport, TransportKind, WorkerAdapter
 
+_LOCALAPPDATA = __import__("os").environ.get("LOCALAPPDATA", "")
+
 _UNG_VIEN_GROK = (
     Path.home() / ".grok" / "bin" / "grok.exe",
     Path.home() / ".grok" / "bin" / "grok",
-    Path(__import__("os").environ.get("LOCALAPPDATA", "")) / "grok" / "bin" / "grok.exe",
-)
+) + ((Path(_LOCALAPPDATA) / "grok" / "bin" / "grok.exe",) if _LOCALAPPDATA else ())
 
 
 def find_grok() -> Optional[str]:

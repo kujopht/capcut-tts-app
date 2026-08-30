@@ -8,9 +8,9 @@ coordination overhead (wall time beyond the slowest worker), and speedup
 
 
 def compute(individual_seconds: dict, wall_seconds: float) -> dict:
-    if not individual_seconds:
+    if not individual_seconds or wall_seconds == 0:
         return {
-            "utilization": {},
+            "utilization": {wid: 0.0 for wid in individual_seconds},
             "average_utilization": 0.0,
             "coordination_overhead_seconds": 0.0,
             "speedup": 0.0,
@@ -27,9 +27,5 @@ def compute(individual_seconds: dict, wall_seconds: float) -> dict:
         "coordination_overhead_seconds": (
             wall_seconds - max(individual_seconds.values())
         ),
-        "speedup": (
-            0.0
-            if wall_seconds == 0
-            else sum(individual_seconds.values()) / wall_seconds
-        ),
+        "speedup": sum(individual_seconds.values()) / wall_seconds,
     }

@@ -331,6 +331,12 @@ class Settings:
     #: het noi dung nguon-suu-tam, khong lan voi Novel do tac gia that dang.
     harvester_owner_user_id: str = "svc_harvester"
 
+    #: Ngan sach dung luong mem cho kho luu tru media asset (vi du R2).
+    #: Mac dinh la 10 GB (10 * 1024 * 1024 * 1024 bytes). Doc tu 
+    #: `FAS_MEDIA_ASSET_STORAGE_BUDGET_BYTES`. R2 free tier co han, khong 
+    #: dua vao luu tru vo han.
+    media_asset_storage_budget_bytes: int = 10 * 1024 * 1024 * 1024
+
     #: Cac `user_id` duoc quyen QUAN TRI. Doc tu `FAS_ADMIN_USER_IDS`, ngan cach
     #: bang dau phay. MAC DINH RONG — khong ai la quan tri.
     #:
@@ -739,6 +745,7 @@ def load_settings() -> Settings:
         canary_user_id=_env("FAS_CANARY_USER_ID", "svc_canary").strip() or "svc_canary",
         harvester_owner_user_id=_env(
             "FAS_HARVESTER_OWNER_USER_ID", "svc_harvester").strip() or "svc_harvester",
+        media_asset_storage_budget_bytes=int(_env("FAS_MEDIA_ASSET_STORAGE_BUDGET_BYTES", str(10 * 1024 * 1024 * 1024))),
         admin_user_ids=tuple(
             x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()
         ),

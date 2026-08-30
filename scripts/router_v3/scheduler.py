@@ -82,7 +82,15 @@ class Scheduler:
         self._wt = worktrees
         self._khoa = threading.Lock()
 
-    def run(self, dag: TaskDag) -> RunReport:
+    def run(self, dag: TaskDag,
+           already_done: Optional[Dict[str, TaskResult]] = None) -> RunReport:
+        """Chạy DAG. `already_done` là kết quả từ một lượt TRƯỚC (Router LTS
+        Phase 14 — resume sau crash): các nút đó KHÔNG được dispatch lại,
+        kết quả đã lưu của chúng vẫn đi vào `dependency_summaries` của các
+        nút phụ thuộc y hệt như thể chúng vừa chạy xong trong lượt này.
+        Chỉ nút `status == "ok"` mới được coi là xong thật — một nút từng
+        `failed`/`blocked` phải chạy lại, không phải giả vờ đã xong.
+        """
         song_song, ly_do = plan_parallelism(dag, self._mode)
         if self._max_parallel is not None:
             song_song = max(1, self._max_parallel)
@@ -104,6 +112,15 @@ class Scheduler:
         bao_cao = RunReport(parallelism=song_song, parallelism_reason=ly_do)
         xong: Set[str] = set()
         hong: Set[str] = set()
+        for tid, kq in (already_done or {}).items():
+            if tid not in dag:
+                continue
+            if kq.ok:
+                bao_cao.results[tid] = kq
+                xong.add(tid)
+            # khac "ok" (failed/blocked/timeout) -> KHONG dua vao xong, chay
+            # lai binh thuong o duoi — resume khong duoc gia vo mot loi cu
+            # da tu het.
         dang_chay: Dict[cf.Future, TaskNode] = {}
         dang_id: Set[str] = set()
         t0 = time.perf_counter()

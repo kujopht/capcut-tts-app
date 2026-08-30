@@ -4,24 +4,34 @@ Dùng chế độ headless CHÍNH THỨC của `agy` (`--output-format json`), n
 tách bạch được **độ trễ model** với **thời gian dựng tiến trình** — hai thứ
 mà một phép đo wall-clock trần gộp làm một.
 
-GIỚI HẠN ĐÃ ĐO ĐƯỢC (2026-08-30) — `agy --print` KHÔNG THỰC THI CÔNG CỤ SỬA TỆP.
+GHI TỆP HEADLESS — HOẠT ĐỘNG. (Sửa lại một kết luận SAI trước đó.)
 
-Đo trực tiếp, ba cấu hình, trong thư mục tạm sạch:
+Một bản ghi chú trước trong tệp này khẳng định `agy --print` "không thực thi
+công cụ sửa tệp". Điều đó **SAI**, và nó sai vì phép đo hỏng theo hai cách
+cùng lúc:
 
-    không cờ            -> status=SUCCESS, num_turns=1, KHÔNG tạo tệp
-    --mode accept-edits -> status=SUCCESS, num_turns=1, KHÔNG tạo tệp
-    --dangerously-skip-permissions -> status=SUCCESS, trả lời "XONG.",
-                           num_turns=1, VẪN KHÔNG tạo tệp
+  1. Chạy trong một thư mục tạm TRẦN, không có `--add-dir`. `agy` có khái
+     niệm WORKSPACE tách khỏi cwd, nên `write_file` không có đích hợp lệ.
+  2. KHÔNG đọc stderr. Câu trả lời nằm nguyên ở đó:
 
-`num_turns=1` nghĩa là không hề có vòng gọi công cụ nào. Nguy hiểm ở chỗ nó
-**trả lời như thể đã làm** — nên một bộ điều phối tin vào `status` sẽ ghi nhận
-thành công cho một việc chưa từng xảy ra. Chính vì vậy mọi nút CÓ GHI phải
-được kiểm bằng `WorktreeManager.verify_scope()` trên tệp THẬT, chứ không bao
-giờ tin lời worker.
+        "a tool required the \"write_file\" permission that headless mode
+         cannot prompt for, so it was auto-denied"
 
-Hệ quả: worker Antigravity native qua giao diện headless chính thức dùng được
-cho ĐỌC/PHÂN TÍCH/REVIEW (đã chứng minh), KHÔNG dùng được cho việc tự sửa tệp.
-Nút CÓ GHI cần một executor khác.
+Công cụ CÓ chạy — nó bị TỪ CHỐI QUYỀN, không phải vắng mặt. Chế độ headless
+không hỏi được nên tự động từ chối.
+
+Đo lại trong một `git worktree` thật kèm `--add-dir` (tệp thật, nội dung
+kiểm từng byte):
+
+    không cờ                        -> KHÔNG ghi (tự động từ chối)
+    --mode accept-edits             -> GHI ĐƯỢC, nội dung đúng
+    --dangerously-skip-permissions  -> GHI ĐƯỢC, nội dung đúng
+
+Bài học rút ra đáng giữ hơn kết luận: `status=SUCCESS` kèm `num_turns=1` và
+một câu trả lời tự tin KHÔNG phải bằng chứng thực thi. Bằng chứng là tệp trên
+đĩa. Đó vẫn là lý do mọi nút CÓ GHI phải qua `verify_scope()`.
+
+`--add-dir` là BẮT BUỘC cho việc có ghi: thiếu nó, worker im lặng không làm gì.
 
 RANH GIỚI CREDENTIAL — bất biến:
 Module này KHÔNG BAO GIỜ đọc, sao chép, hay truyền credential. `agy` tự giữ
@@ -84,28 +94,41 @@ class NativeRun:
 def run_native(prompt: str, *, model: str, timeout: int = 300,
                cwd: Optional[str] = None,
                binary: Optional[str] = None,
-               allow_edits: bool = False) -> NativeRun:
+               allow_edits: bool = False,
+               workspace: Optional[str] = None) -> NativeRun:
     """Chạy MỘT lượt qua `agy` headless và tách bạch các phần thời gian.
 
     Prompt đi qua **stdin**, không phải argv: một gói việc thật dễ vượt giới
     hạn ~32 KB của dòng lệnh Windows, và argv sẽ cắt cụt hoặc lỗi.
 
     :param allow_edits: bật `--mode accept-edits`. MẶC ĐỊNH TẮT: một worker
-        chỉ-đọc không được có quyền ghi. Không có cờ này, `agy` **không sửa
-        được tệp nào** — đo được thật: một lượt "hai worker ghi" trả về 0/2
-        vì worker không có quyền ghi, và nếu không kiểm từng tệp thì con số
-        wall-clock trông vẫn "hợp lý" mà hoàn toàn vô nghĩa.
+        chỉ-đọc không được có quyền ghi. Thiếu cờ này, headless **tự động từ
+        chối** quyền `write_file` (nó không hỏi được) và worker im lặng không
+        làm gì.
 
         CỐ Ý KHÔNG dùng `--dangerously-skip-permissions`: nó tự duyệt MỌI
-        yêu cầu quyền, gồm cả chạy lệnh shell. `accept-edits` chỉ mở phần
-        sửa tệp — đúng thứ một nút CÓ GHI cần, không hơn.
+        yêu cầu quyền, gồm cả chạy lệnh shell. `accept-edits` đủ để ghi tệp —
+        đã đo — và đó là đúng thứ một nút CÓ GHI cần, không hơn.
+
+    :param workspace: thư mục đưa vào WORKSPACE qua `--add-dir`. BẮT BUỘC khi
+        `allow_edits=True`: `agy` phân biệt workspace với cwd, và thiếu nó thì
+        `write_file` không có đích hợp lệ. Bỏ sót đúng điểm này là lý do một
+        phép đo trước kết luận nhầm rằng headless không ghi được.
     """
+    if allow_edits and not workspace:
+        return NativeRun(
+            status="failed",
+            error="allow_edits=True nhưng thiếu `workspace` — `--add-dir` là "
+                  "bắt buộc cho việc có ghi, nếu không worker im lặng không "
+                  "làm gì.")
     exe = binary or find_agy()
     if not exe:
         return NativeRun(status="unavailable", error="không tìm thấy agy")
 
     argv = [exe, "--model", model, "--output-format", "json",
             "--print-timeout", f"{timeout}s"]
+    if workspace:
+        argv += ["--add-dir", str(workspace)]
     if allow_edits:
         argv += ["--mode", "accept-edits"]
     t0 = time.perf_counter()
@@ -140,3 +163,85 @@ def run_native(prompt: str, *, model: str, timeout: int = 300,
         usage={k: int(v) for k, v in (d.get("usage") or {}).items()
                if isinstance(v, (int, float))},
         error="" if tt == "SUCCESS" else str(d.get("error") or tt))
+
+
+# ---------------------------------------------------------------------------
+# Worker ẤM — một tiến trình, nhiều lượt
+# ---------------------------------------------------------------------------
+
+#: Hình dạng bản tin đầu vào cho `--input-format stream-json`.
+#:
+#: PHẢI có trường `event` (không phải `type`) và, với `event="user"`, phải có
+#: `message`. Sai hình dạng thì CLI trả `status=ERROR` kèm đúng lý do — đã dò
+#: từng dạng để tìm ra cái đúng:
+#:     {"event":"user","message":{"role":"user","content":"..."}}
+def _ban_tin(prompt: str) -> str:
+    return json.dumps({"event": "user",
+                       "message": {"role": "user", "content": prompt}})
+
+
+@dataclass
+class WarmResult:
+    """Kết quả của MỘT lượt trong tiến trình ấm."""
+
+    ok: bool
+    response: str = ""
+    error: str = ""
+
+
+def run_warm_batch(prompts, *, model: str, timeout: int = 900,
+                   cwd: Optional[str] = None,
+                   binary: Optional[str] = None):
+    """Chạy NHIỀU lượt trong MỘT tiến trình `agy`.
+
+    VÌ SAO ĐÁNG LÀM — đo được (10 việc nhỏ, 10/10 thành công cả hai cách):
+
+        sinh mới một tiến trình mỗi việc : 59.10s  (5.91s/việc, 77% là overhead)
+        một tiến trình ấm                : 16.31s  (1.63s/việc)
+        => nhanh hơn 3.62 lần
+
+    Đây là khoản lợi LỚN HƠN việc thêm worker (đo trước đó: 2.19x ở 6 worker),
+    và hai thứ này cộng dồn được: nhiều worker ấm chạy song song.
+
+    ĐÁNH ĐỔI PHẢI BIẾT: cả lô dùng CHUNG một hội thoại, nên ngữ cảnh tích luỹ
+    qua từng lượt. Với các việc ĐỘC LẬP thì đó là token lãng phí và có thể làm
+    lượt sau nhiễu. Chỉ gộp những việc thật sự cùng một mạch, và giữ lô nhỏ.
+
+    KHÔNG đọc `duration_seconds` của từng lượt ở chế độ này để suy ra độ trễ
+    model: đo được nó là thời gian hội thoại TÍCH LUỸ (tổng 65.35s trong một
+    lượt chạy chỉ mất 16.31s), nên trừ ra sẽ cho "overhead âm" vô nghĩa.
+    """
+    exe = binary or find_agy()
+    if not exe:
+        return [WarmResult(ok=False, error="không tìm thấy agy") for _ in prompts]
+
+    argv = [exe, "--model", model, "--input-format", "stream-json",
+            "--output-format", "stream-json", "--print-timeout", f"{timeout}s"]
+    data = "".join(_ban_tin(p) + "\n" for p in prompts)
+    try:
+        p = subprocess.run(argv, input=data, capture_output=True, text=True,
+                           timeout=timeout + 60, cwd=cwd, encoding="utf-8",
+                           errors="replace")
+    except subprocess.TimeoutExpired:
+        return [WarmResult(ok=False, error=f"vượt {timeout}s") for _ in prompts]
+
+    ra = []
+    for dong in (p.stdout or "").splitlines():
+        dong = dong.strip()
+        if not dong.startswith("{"):
+            continue
+        try:
+            o = json.loads(dong)
+        except json.JSONDecodeError:
+            continue
+        if o.get("event") != "result":
+            continue
+        r = o.get("result") or {}
+        ra.append(WarmResult(ok=(str(r.get("status")).upper() == "SUCCESS"),
+                             response=str(r.get("response") or ""),
+                             error=str(r.get("error") or "")))
+    # Thieu ket qua = lo bi cat giua chung. KHONG im lang tra ve it hon so
+    # viec da gui: noi goi se ghep nham ket qua voi viec.
+    while len(ra) < len(prompts):
+        ra.append(WarmResult(ok=False, error="không nhận được kết quả cho lượt này"))
+    return ra[:len(prompts)]

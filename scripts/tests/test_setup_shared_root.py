@@ -8,6 +8,7 @@ sao bare dùng cho AG02 vẫn đứng ở commit trước PR #111 dù đã "cậ
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -21,6 +22,14 @@ from scripts.router_v3 import setup_shared_root as ssr
 #: cục bộ có sẵn trên mọi máy Windows và không đụng hồ sơ của ai.
 _TK_THAT = "Guest"
 
+#: `setup_shared_root.py` gọi `icacls` trực tiếp — không có trên CI Linux
+#: (`ubuntu-latest`). Bỏ qua thay vì giả cross-platform cho một tính năng
+#: vốn CHỈ tồn tại vì ACL NTFS của Windows. Bỏ sót đúng chỗ này lúc đầu:
+#: PR #112 báo "scripts 212 OK" ở máy Windows cục bộ nhưng CI (Ubuntu) báo
+#: "errors=2" — bài kiểm "đạt cục bộ" không phải bằng chứng "đạt CI".
+_BO_QUA_KHONG_WINDOWS = unittest.skipUnless(
+    os.name == "nt", "setup_shared_root.py dùng icacls — chỉ có trên Windows")
+
 
 def _git(cwd: Path, *args) -> subprocess.CompletedProcess:
     r = subprocess.run(["git", "-C", str(cwd), *args],
@@ -32,6 +41,7 @@ def _tip(cwd: Path, ref: str = "main") -> str:
     return _git(cwd, "log", "-1", "--format=%H", ref).stdout.strip()
 
 
+@_BO_QUA_KHONG_WINDOWS
 class CapNhatBanSaoBareTest(unittest.TestCase):
     """Chạy lại `setup_shared_root.main()` phải kéo commit MỚI vào bare."""
 

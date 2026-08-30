@@ -164,6 +164,13 @@ class WarmAgyWorker:
         return self._state
 
     def start(self) -> bool:
+        # `--dangerously-skip-permissions` tu duyet MOI quyen, ke ca lenh
+        # shell — thieu `--add-dir` no khong bi gioi han vao worktree nao
+        # ca, worker se ghi duoc BAT CU DAU tai khoan he dieu hanh cho phep.
+        # FAIL CLOSED thay vi tin nguoi goi luon nho truyen workspace.
+        if self._dangerously_skip_permissions and not self._workspace:
+            self._state = WarmState.FAILED
+            return False
         exe = self._binary or find_agy()
         if not exe:
             self._state = WarmState.FAILED

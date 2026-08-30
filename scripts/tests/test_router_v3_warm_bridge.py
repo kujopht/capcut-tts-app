@@ -133,14 +133,28 @@ class ArgvKhoiDongTest(unittest.TestCase):
         self.assertEqual(argv[argv.index("--mode") + 1], "accept-edits")
 
     def test_dangerously_skip_permissions_them_dung_co(self):
-        argv = self._argv_da_dung(dangerously_skip_permissions=True)
+        argv = self._argv_da_dung(dangerously_skip_permissions=True,
+                                  workspace="C:/mot/worktree")
         self.assertIn("--dangerously-skip-permissions", argv)
 
     def test_ca_hai_dat_duoc_cung_luc(self):
         argv = self._argv_da_dung(allow_edits=True,
-                                  dangerously_skip_permissions=True)
+                                  dangerously_skip_permissions=True,
+                                  workspace="C:/mot/worktree")
         self.assertIn("--mode", argv)
         self.assertIn("--dangerously-skip-permissions", argv)
+
+    def test_dangerously_skip_permissions_THIEU_workspace_FAIL_CLOSED(self):
+        """Khong co --add-dir, co nay tu duyet lenh shell TREN CA HE THONG,
+        khong gioi han vao worktree nao — phai tu choi khoi dong, khong
+        duoc lang le chay khong gioi han."""
+        w = WarmAgyWorker("X", model="m", binary="agy.exe",
+                          dangerously_skip_permissions=True)
+        with mock.patch("scripts.router_v3.warm_pool.subprocess.Popen") as gia:
+            ok = w.start()
+        self.assertFalse(ok)
+        self.assertEqual(w.state, WarmState.FAILED)
+        gia.assert_not_called()
 
 
 class _CauNoiThu(unittest.TestCase):

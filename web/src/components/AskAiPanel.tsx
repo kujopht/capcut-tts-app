@@ -346,10 +346,12 @@ export function AskAiPanel({
     if (!mo) return;
     nguoiMo.current = document.activeElement;
 
-    const doanTruoc = layLuaChon();
-    if (doanTruoc) setDoan(doanTruoc);
-
+    // `setDoan` doi vao khung ve sau (cung mot cho voi focus ben duoi) —
+    // goi setState dong bo ngay trong than effect gay render day chuyen
+    // (react-hooks/set-state-in-effect, bat o CI qua ESLint).
     const frame = requestAnimationFrame(() => {
+      const doanTruoc = layLuaChon();
+      if (doanTruoc) setDoan(doanTruoc);
       panel.current
         ?.querySelector<HTMLElement>("[data-autofocus]")
         ?.focus();

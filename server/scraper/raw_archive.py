@@ -35,7 +35,13 @@ _SENSITIVE_PATTERNS = (
     (r"AKIA[0-9A-Z]{16}", "AWS access key id"),
     (r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "private key block"),
     (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "dia chi email"),
-    (r"(?:\+84|0)(?:3|5|7|8|9)\d{8}\b", "so dien thoai VN"),
+    #: `(?<!\d)`/`(?!\d)` bat buoc token DUNG 9-10 chu so, khong duoc la mot
+    #: doan cua chuoi so dai hon — thieu no, moi timestamp cache MediaWiki 14
+    #: chu so (vd "20260827145508" o footer parser-cache cua chinh
+    #: vi.wikisource.org) deu chua mot doan con khop "so dien thoai", bao
+    #: dong gia lien tuc tren MOI trang MediaWiki. Phat hien qua chinh lan
+    #: chay that dau tien cua RAW ARCHIVE gate, khong phai doan truoc.
+    (r"(?<!\d)(?:\+84|0)(?:3|5|7|8|9)\d{8}(?!\d)", "so dien thoai VN"),
 )
 
 

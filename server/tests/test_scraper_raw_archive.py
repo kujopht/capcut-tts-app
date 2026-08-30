@@ -34,6 +34,19 @@ class ScanForSensitiveDataTest(unittest.TestCase):
         self.assertEqual(
             scan_for_sensitive_data("ghp_" + "a" * 36), "GitHub token")
 
+    def test_phat_hien_so_dien_thoai_dung_token_doc_lap(self):
+        self.assertEqual(
+            scan_for_sensitive_data("goi cho toi: 0912345678 nhe"), "so dien thoai VN")
+
+    def test_khong_bao_dong_gia_voi_timestamp_cache_mediawiki(self):
+        """Phat hien that qua lan chay dau tien tren vi.wikisource.org:
+        footer parser-cache cua MediaWiki co timestamp 14 chu so (vd
+        "Cached time: 20260827145508") — mot doan con cua no khop dung
+        hinh dang "so dien thoai VN" neu pattern khong doi hoi ranh gioi
+        chu so o CA HAI dau."""
+        self.assertIsNone(scan_for_sensitive_data(
+            "Cached time: 20260827145508\nCache expiry: 2592000"))
+
 
 class FetchAndSpoolRawTest(unittest.TestCase):
     def setUp(self):

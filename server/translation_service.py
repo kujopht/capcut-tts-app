@@ -43,6 +43,8 @@ from server.translation_domain import (
     TranslationJob,
     TranslationProject,
     TranslationVersion,
+    _hash_text,
+    detect_source_language,
 )
 from server.translation_integrity import kiem_tra_tinh_ven, tom_tat_van_de
 from server.translation_providers import (
@@ -336,6 +338,7 @@ class TranslationService:
 
     def create_project(self, owner_id: str, *, title: str, source_text: str,
                        source_filename: str = "",
+                       source_language: Optional[str] = None,
                        genre: str = "auto", naming_mode: str = "auto",
                        quality_mode: str = "can_bang",
                        custom_instruction: str = "") -> TranslationProject:
@@ -364,17 +367,67 @@ class TranslationService:
         except ValueError:
             quality_e = QualityMode.CAN_BANG
 
+        resolved_lang = source_language if source_language else detect_source_language(sach)
+        source_hash = _hash_text(sach)
+
         now = now_iso()
         project = TranslationProject(
             owner_id=owner_id,
             title=(title or "").strip()[:200] or "Bản dịch không tên",
             source_text=sach,
+            source_language=resolved_lang,
+            source_text_hash=source_hash,
             source_filename=source_filename[:200],
             genre=genre_e, naming_mode=naming_e, quality_mode=quality_e,
             custom_instruction=(custom_instruction or "").strip()[:1000],
             created_at=now, updated_at=now,
         )
         return self._store.create_project(project)
+
+    def create_project_or_reuse(self, owner_id: str, *, title: str,
+                                source_text: str,
+                                source_filename: str = "",
+                                source_language: Optional[str] = None,
+                                genre: str = "auto",
+                                naming_mode: str = "auto",
+                                quality_mode: str = "can_bang",
+                                custom_instruction: str = ""
+                                ) -> TranslationProject:
+        """
+        Idempotent: neu da co du an CUNG owner + CUNG title + CUNG
+        source_text_hash va job cuoi cung da hoan thanh thanh cong, tra ve
+        du an CU thay vi tao moi / chay lai. Mirror pattern cua
+        `create_job` (~line 420): "Idempotent (returns existing non-terminal
+        job)".
+
+        Khong thay the `create_project` — chi boc them mot lop kiem tra
+        truoc khi goi `create_project` thong thuong. Neu khong khop dieu
+        kien reuse, hanh vi hoan toan giong `create_project`.
+        """
+        sach = (source_text or "").strip()
+        if not sach:
+            raise TranslationError("Thiếu nội dung cần dịch.")
+        s_hash = _hash_text(sach)
+        title_s = (title or "").strip()[:200] or "Bản dịch không tên"
+
+        for p in self._store.list_projects(owner_id):
+            if p.title != title_s or p.source_text_hash != s_hash:
+                continue
+            # Tim job CUOI CUNG cua du an nay
+            all_jobs = self._store.jobs_for_project(p.project_id)
+            if not all_jobs:
+                continue
+            latest = all_jobs[0]  # da sorted reverse by created_at
+            if latest.status is TranslationJobStatus.COMPLETED:
+                return p
+        # Khong tim thay du an reuse duoc — tao moi
+        return self.create_project(
+            owner_id, title=title, source_text=source_text,
+            source_filename=source_filename,
+            source_language=source_language,
+            genre=genre, naming_mode=naming_mode,
+            quality_mode=quality_mode,
+            custom_instruction=custom_instruction)
 
     def get_project(self, project_id: str, owner_id: str) -> TranslationProject:
         return self._store.owned_project(project_id, owner_id)
@@ -1195,12 +1248,14 @@ class TranslationService:
         gio nem loi ra ngoai — mat mot ban ghi provenance khong duoc phep lam
         hong ca job dich."""
         try:
+            dich_hash = _hash_text(ban_dich)
             for vai_tro, prov in provenance_by_role.items():
                 self._store.add_version(TranslationVersion(
                     project_id=project_id, chapter_index=chuong_idx,
                     operation="auto_translate", pass_type=vai_tro,
                     previous_text="", new_text=ban_dich,
                     provider_id=prov.provider_id, model_id=prov.model_id,
+                    translated_content_hash=dich_hash,
                     created_at=now_iso_us()))
         except Exception:
             pass

@@ -8,9 +8,106 @@ chung bang voi `tts_jobs`/`Novel`/`Chapter`.
 
 from __future__ import annotations
 
+import hashlib
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+
+def _normalize_whitespace(text: str) -> str:
+    """Collapse runs of whitespace to a single space and strip — the
+    normalization used before hashing source_text for content-comparison."""
+    import re
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _hash_text(text: str) -> str:
+    """SHA-256 of normalized text — deterministic, dependency-free."""
+    return hashlib.sha256(_normalize_whitespace(text).encode("utf-8")).hexdigest()
+
+
+def detect_source_language(text: str) -> str:
+    """
+    Dependency-free heuristic language detector using Unicode script-range
+    counting (no langdetect/fasttext/polyglot).
+
+    Returns an ISO-639-1-ish code: "zh", "ja", "ko", "vi", "en", or
+    "unknown" when the input is too short or ambiguous.
+
+    Algorithm:
+      - Count characters in each script range.
+      - If CJK Unified Ideographs dominate and Hiragana/Katakana are
+        present (>= 3% of CJK chars): "ja".
+      - If Hangul syllables dominate (>= 3% of total): "ko".
+      - If CJK Unified Ideographs dominate without kana: "zh".
+      - If Vietnamese-specific diacritic-stacked Latin characters are
+        detected (>= 2 such chars): "vi" (if Latin is dominant script).
+      - If Latin script dominates: "en".
+      - Otherwise: "unknown".
+    """
+    s = (text or "").strip()
+    if not s:
+        return "unknown"
+    # Too short to be confident — avoid bad guesses on 1-2 chars
+    if len(s) < 6:
+        return "unknown"
+
+    cjk = 0
+    hiragana = 0
+    katakana = 0
+    hangul = 0
+    latin = 0
+    vietnamese_specific = 0
+    total_alpha = 0
+
+    for ch in s:
+        cp = ord(ch)
+        # Vietnamese-specific stacked-diacritic Latin (U+1EA0–U+1EF9,
+        # U+0110, U+0111 — the uniquely-Vietnamese characters that are
+        # strong signals, not just accented Latin found in other languages)
+        if (0x1EA0 <= cp <= 0x1EF9) or cp in (0x0110, 0x0111):
+            vietnamese_specific += 1
+            latin += 1
+            total_alpha += 1
+            continue
+        cat = unicodedata.category(ch)
+        if cat.startswith("L"):
+            total_alpha += 1
+        block = unicodedata.name(ch, "")
+        # CJK Unified Ideographs (U+4E00–U+9FFF is the core block)
+        if 0x4E00 <= cp <= 0x9FFF:
+            cjk += 1
+            total_alpha += 1
+        elif 0x3040 <= cp <= 0x309F:  # Hiragana
+            hiragana += 1
+            total_alpha += 1
+        elif 0x30A0 <= cp <= 0x30FF:  # Katakana
+            katakana += 1
+            total_alpha += 1
+        elif 0xAC00 <= cp <= 0xD7AF:  # Hangul Syllables
+            hangul += 1
+            total_alpha += 1
+        elif cat.startswith("L") and cp < 0x0600:
+            # ASCII/Latin letters (covers en, vi basic latin, etc.)
+            latin += 1
+
+    if total_alpha == 0:
+        return "unknown"
+
+    kana = hiragana + katakana
+    if cjk > 0 and kana / max(cjk, 1) >= 0.03:
+        return "ja"
+    if hangul / max(total_alpha, 1) >= 0.03:
+        return "ko"
+    if cjk > total_alpha * 0.3:
+        return "zh"
+    # Vietnamese: Latin-dominant text with Vietnamese-specific chars
+    if latin > total_alpha * 0.3 and vietnamese_specific >= 2:
+        return "vi"
+    if latin > total_alpha * 0.3:
+        return "en"
+    return "unknown"
 
 from server.translation import (
     GenrePreset,
@@ -39,6 +136,7 @@ class TranslationProject:
     title: str
     source_text: str
     source_language: str = "zh"
+    source_text_hash: str = ""
     target_language: str = "vi"
     genre: GenrePreset = GenrePreset.AUTO
     naming_mode: NamingMode = NamingMode.AUTO
@@ -85,6 +183,7 @@ class TranslationProject:
             "owner_id": self.owner_id,
             "title": self.title,
             "source_language": self.source_language,
+            "source_text_hash": self.source_text_hash or None,
             "target_language": self.target_language,
             "genre": self.genre.value,
             "genre_label": GENRE_LABELS.get(self.genre.value, self.genre.value),
@@ -247,6 +346,7 @@ class TranslationVersion:
     actor_id: str = ""
     provider_id: str = ""
     model_id: str = ""
+    translated_content_hash: str = ""
     #: None = ca chuong. Co gia tri = chi mot doan cu the (regen doan).
     paragraph_index: Optional[int] = None
     version_id: str = field(default_factory=lambda: _id("trv"))
@@ -265,6 +365,7 @@ class TranslationVersion:
             "actor_id": self.actor_id or None,
             "provider_id": self.provider_id or None,
             "model_id": self.model_id or None,
+            "translated_content_hash": self.translated_content_hash or None,
             "created_at": self.created_at,
         }
 

@@ -6834,6 +6834,8 @@ class TranslateProjectIn(BaseModel):
     naming_mode: Annotated[str, StringConstraints(max_length=20)] = "auto"
     quality_mode: Annotated[str, StringConstraints(max_length=20)] = "can_bang"
     custom_instruction: Annotated[str, StringConstraints(max_length=1000)] = ""
+    #: Rong (None) = tu dong phat hien nguon tu `source_text`.
+    source_language: Optional[str] = None
 
 
 @app.post("/api/translate/estimate")
@@ -6851,6 +6853,7 @@ def create_translation_project(
     project = _dich_vu(
         translation_svc.create_project, profile.user_id,
         title=payload.title, source_text=payload.source_text,
+        source_language=payload.source_language,
         genre=payload.genre, naming_mode=payload.naming_mode,
         quality_mode=payload.quality_mode,
         custom_instruction=payload.custom_instruction)

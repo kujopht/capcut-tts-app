@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from server.domain import Fandom, FandomMediaType, PublicationMode
+from server.domain import Fandom, FandomMediaType, Novel, NovelStatus, PublicationMode
 from server.fandom_registry import FandomRegistry, UnknownFandomError
 
 
@@ -63,14 +63,18 @@ class ClassifyManyTest(unittest.TestCase):
 
 class NovelPublicationModeTest(unittest.TestCase):
     def test_mac_dinh_full_text_tuong_thich_nguoc(self):
-        from server.domain import Novel
         novel = Novel(owner_id="u1", title="T")
         self.assertEqual(novel.publication_mode, PublicationMode.FULL_TEXT)
         self.assertEqual(novel.fandom_ids, [])
+        self.assertEqual(novel.characters, [])
+        self.assertEqual(novel.pairings, [])
+        self.assertEqual(novel.status, NovelStatus.ONGOING)
         self.assertEqual(novel.to_dict()["publication_mode"], "full_text")
+        self.assertEqual(novel.to_dict()["characters"], [])
+        self.assertEqual(novel.to_dict()["pairings"], [])
+        self.assertEqual(novel.to_dict()["status"], "ongoing")
 
     def test_metadata_only_giu_duoc_external_source_url(self):
-        from server.domain import Novel
         novel = Novel(
             owner_id="svc_harvester", title="Ninja's Hero Academia",
             publication_mode=PublicationMode.METADATA_ONLY,
@@ -81,6 +85,31 @@ class NovelPublicationModeTest(unittest.TestCase):
         self.assertEqual(data["publication_mode"], "metadata_only")
         self.assertEqual(data["external_chapter_count"], 25)
         self.assertTrue(data["external_source_url"])
+
+    def test_novel_taxonomy_characters_pairings_status_round_trip(self):
+        novel = Novel(
+            owner_id="u1",
+            title="Naruto: The New Beginning",
+            characters=["Uzumaki Naruto", "Uchiha Sasuke", "Haruno Sakura"],
+            pairings=["Naruto/Hinata", "Sasuke/Sakura"],
+            status=NovelStatus.COMPLETED,
+        )
+        self.assertEqual(novel.characters, ["Uzumaki Naruto", "Uchiha Sasuke", "Haruno Sakura"])
+        self.assertEqual(novel.pairings, ["Naruto/Hinata", "Sasuke/Sakura"])
+        self.assertEqual(novel.status, NovelStatus.COMPLETED)
+
+        data = novel.to_dict()
+        self.assertEqual(data["characters"], ["Uzumaki Naruto", "Uchiha Sasuke", "Haruno Sakura"])
+        self.assertEqual(data["pairings"], ["Naruto/Hinata", "Sasuke/Sakura"])
+        self.assertEqual(data["status"], "completed")
+
+    def test_novel_status_enum_values(self):
+        self.assertEqual(NovelStatus.ONGOING.value, "ongoing")
+        self.assertEqual(NovelStatus.COMPLETED.value, "completed")
+        self.assertEqual(NovelStatus.HIATUS.value, "hiatus")
+        self.assertEqual(NovelStatus("ongoing"), NovelStatus.ONGOING)
+        self.assertEqual(NovelStatus("completed"), NovelStatus.COMPLETED)
+        self.assertEqual(NovelStatus("hiatus"), NovelStatus.HIATUS)
 
 
 if __name__ == "__main__":

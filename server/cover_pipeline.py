@@ -143,14 +143,30 @@ class HttpImageCoverProvider:
     Ho tro hai kieu API chinh:
       - "a1111": Automatic1111 stable-diffusion-webui REST
         (POST /sdapi/v1/txt2img, response {"images": ["<base64>", ...]})
-      - "simple": Custom REST
-        (POST /generate, response {"image_base64": "..."} hoac raw bytes)
+      - "simple": Custom REST, path CO THE CAU HINH qua `simple_path`
+        (mac dinh "/generate" — GIU NGUYEN hanh vi cu cho moi provider
+        "simple" hien co, response {"image_base64": "..."} hoac raw bytes)
+
+    `simple_path` ton tai vi khong phai moi dich vu "simple" dung CUNG
+    duong dan: mot Beam Cloud `@endpoint` (xem beam_apps/cover_illustrious_app.py)
+    duoc goi bang POST THANG vao chinh URL deploy — KHONG co duong dan con
+    "/generate" nao ca, URL deploy DA LA "endpoint" roi. Truoc ban va nay,
+    class nay hardcode "/generate" cho MOI provider "simple", nen mot Beam
+    endpoint that (deploy thanh cong) van tra 404 khi goi — day la loi tich
+    hop THAT (khong phai loi GPU/model), phat hien qua chay benchmark that
+    tren Cloud Shell. `simple_path=""` (chuoi rong) nghia la POST THANG vao
+    goc URL deploy, khong noi them gi ca.
 
     Mau goc tu `_OpenAICompatFreeProvider` — dung httpx.Client, timeout
     dai, x loi typed (CoverProviderError) thay vi de lo httpx exception.
     """
 
     TIMEOUT_SECONDS: float = 120.0
+    #: Duong dan mac dinh cho kieu "simple" — GIU NGUYEN de khong doi hanh
+    #: vi cua moi provider "simple" hien co (vd cac test/deploy da viet
+    #: truoc ban va nay). Beam va cac dich vu tuong tu truyen
+    #: `simple_path=""` rieng qua constructor.
+    DEFAULT_SIMPLE_PATH = "/generate"
 
     def __init__(
         self,
@@ -158,10 +174,12 @@ class HttpImageCoverProvider:
         base_url: str,
         api_key: str = "",
         api_style: Literal["a1111", "simple"] = "a1111",
+        simple_path: str = DEFAULT_SIMPLE_PATH,
         timeout_seconds: float = 120.0,
         client: Optional[httpx.Client] = None,
     ):
         self._api_style = api_style
+        self._simple_path = simple_path
         self._timeout = timeout_seconds
         if client is not None:
             self._client = client
@@ -219,7 +237,7 @@ class HttpImageCoverProvider:
     def _call_simple(self, prompt: str) -> bytes:
         payload = {"prompt": prompt}
         try:
-            resp = self._client.post("/generate", json=payload)
+            resp = self._client.post(self._simple_path, json=payload)
         except httpx.HTTPError as exc:
             raise CoverProviderError(
                 f"Loi goi dich vu sinh anh: {exc}") from exc

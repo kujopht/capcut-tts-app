@@ -504,6 +504,71 @@ class TestHttpImageCoverProviderSimple(unittest.TestCase):
             provider.generate(_req())
         self.assertIn("500", str(ctx.exception))
 
+    def test_default_simple_path_posts_to_generate(self):
+        """Hanh vi cu GIU NGUYEN: provider 'simple' mac dinh (khong truyen
+        simple_path) van POST vao /generate."""
+        captured = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["path"] = request.url.path
+            return httpx.Response(
+                200, headers={"content-type": "application/json"},
+                json={"image_base64": _TINY_PNG_B64})
+
+        client = _mock_client(handler)
+        provider = HttpImageCoverProvider(
+            base_url=_MOCK_BASE_URL, api_style="simple", client=client)
+        result = provider.generate(_req())
+        self.assertEqual(captured["path"], "/generate")
+        self.assertEqual(result, _TINY_PNG_BYTES)
+
+    def test_beam_style_empty_simple_path_posts_to_deployment_root(self):
+        """simple_path='' (kieu Beam Cloud @endpoint) POST THANG vao goc
+        URL deploy, khong con /generate — day la fix cho loi 404 that tren
+        Cloud Shell benchmark."""
+        captured = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["path"] = request.url.path
+            return httpx.Response(
+                200, headers={"content-type": "application/json"},
+                json={"image_base64": _TINY_PNG_B64})
+
+        client = _mock_client(handler)
+        provider = HttpImageCoverProvider(
+            base_url=_MOCK_BASE_URL, api_style="simple", simple_path="",
+            client=client)
+        result = provider.generate(_req())
+        self.assertEqual(captured["path"], "/")
+        self.assertEqual(result, _TINY_PNG_BYTES)
+
+    def test_beam_style_empty_simple_path_preserves_auth_header(self):
+        """Header Authorization van duoc gan dung du simple_path la gi."""
+        captured = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["auth"] = request.headers.get("authorization", "")
+            return httpx.Response(
+                200, headers={"content-type": "application/json"},
+                json={"image_base64": _TINY_PNG_B64})
+
+        client = _mock_client(handler)
+        provider = HttpImageCoverProvider(
+            base_url=_MOCK_BASE_URL, api_key="beam-token-xyz",
+            api_style="simple", simple_path="", client=client)
+        provider.generate(_req())
+        self.assertEqual(captured["auth"], "Bearer beam-token-xyz")
+
+    def test_beam_style_empty_simple_path_parses_image_base64_response(self):
+        """Response {"image_base64": ...} van duoc parse dung khi goi
+        goc URL deploy (khong co /generate)."""
+        client = _mock_client(_make_simple_json_handler())
+        provider = HttpImageCoverProvider(
+            base_url=_MOCK_BASE_URL, api_style="simple", simple_path="",
+            client=client)
+        result = provider.generate(_req())
+        self.assertEqual(result, _TINY_PNG_BYTES)
+
 
 class TestHttpImageCoverProviderTimeout(unittest.TestCase):
     def test_timeout_raises_cover_provider_error(self):

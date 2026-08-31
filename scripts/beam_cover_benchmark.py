@@ -81,9 +81,13 @@ def main() -> int:
     print("Prompt (deterministic, from real Novel metadata):")
     print(f"  {prompt}")
 
+    # Beam Cloud's @endpoint deployment IS the invocable URL - there is no
+    # /generate sub-path (confirmed via a real HTTP 404 on the deployed
+    # endpoint). simple_path="" posts to the deployment root instead of
+    # the default "/generate" used by other "simple"-style providers.
     real_provider = HttpImageCoverProvider(
         base_url=a.endpoint_url, api_key=token, api_style="simple",
-        timeout_seconds=300.0,
+        simple_path="", timeout_seconds=300.0,
     )
 
     class _CapturingProvider:

@@ -184,28 +184,29 @@ _KNOWN_SOURCE_POLICIES: Dict[str, SourcePolicyRecord] = {
     ),
     "docln.net": SourcePolicyRecord(
         domain="docln.net",
-        technical_access=TechnicalAccess.CAPTCHA_OR_BOT_CHALLENGE,
+        technical_access=TechnicalAccess.PUBLIC_BROWSER_RENDERED,
         rights_risk=RightsRisk.OWNER_ACCEPTED_UNVERIFIED,
         tos_prohibits_automation=False,
         evidence=(
-            "KET LUAN SAU DIEU TRA THUC TE, DA SUA LAI mot lan phan loai "
-            "sai truoc do trong CUNG phien lam viec nay: trang HTML tai "
-            "duoc that (HTTP 200) VA `site_registry.py` co the tim dung "
-            "`chapter_href_pattern` that (177 lien ket chuong that), NHUNG "
-            "noi dung chuong THAT nam trong `id=\"chapter-c-protected\"` bi "
-            "MA HOA phia may chu (`data-s=\"xor_shuffle\"`, kem "
-            "`data-k`/`data-c`) — chi giai ma duoc bang JavaScript RIENG "
-            "cua chinh site chay trong trinh duyet that. Day KHONG PHAI "
-            "'chi can trinh duyet render JS' (Case 1, hop le) — day la MOT "
-            "CO CHE CHONG SAO CHEP CHU DICH (Case 2), tuong duong ve BAN "
-            "CHAT voi mot CAPTCHA/bot-challenge du hinh thuc khac. Giai ma "
-            "chuoi XOR-shuffle nay se la HANH VI PHA VO MOT CO CHE BAO VE "
-            "KY THUAT RO RANG — dung lam, bat ke chinh sach rui ro ban "
-            "quyen noi dung o tren. Phat hien qua kiem tra thuc te ket qua "
-            "quet (chuoi lay duoc chi la panel dieu khien trinh doc TTS "
-            "cua chinh docln.net, `id=\"tts-panel\"`, hoac sau khi sua "
-            "boundary — chi lay duoc dung dong tieu de an, khong phai noi "
-            "dung), khong phai suy doan."),
+            "SUA LAI LAN HAI sau khi thuc hien dung yeu cau kiem tra that "
+            "cua chu san pham: mot phien trinh duyet that (mcp__claude-in- "
+            "chrome__*), duong di nguoi doc thong thuong KHONG dang nhap, "
+            "KHONG chen ma giai ma/trich khoa/bo qua CAPTCHA. Ket qua: JS "
+            "GOC cua chinh docln.net tu giai ma chuoi XOR-shuffle va dat "
+            "van ban that vao DOM cho MOI khach vang lai, KHONG co bat ky "
+            "thu thach/CAPTCHA nao xuat hien — xac nhan qua "
+            "docln_chuong_100.txt (van ban chuong that, tieng Viet, doc "
+            "duoc hoan toan). KET LUAN TRUOC DO (CAPTCHA_OR_BOT_CHALLENGE, "
+            "coi XOR-shuffle tuong duong bo bao ve ky thuat) la MOT LOI "
+            "PHAN LOAI THAT: da nham lan 'noi dung bi bien doi trong HTML "
+            "ban dau' voi 'kiem soat truy cap/thu thach bot' — day la Case "
+            "1 (trinh duyet thuong render JS cong khai, hop le), khong "
+            "phai Case 2. Day KHONG PHAI giai ma/tai hien co che ma hoa "
+            "cua site — chi la doc lai DOM ma trinh duyet cua NGUOI DUNG "
+            "THUONG da tu hien thi san, khong khac gi View Page Source sau "
+            "khi JS chay xong. Vi vay dung T2 (browser-rendered) lam tang "
+            "acquisition, KHONG tu giai ma XOR-shuffle trong ma nguon cua "
+            "chung ta."),
         verified_at="2026-08-31",
     ),
     "forums.spacebattles.com": SourcePolicyRecord(

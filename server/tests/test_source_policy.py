@@ -87,20 +87,25 @@ class TechnicalAccessGateTest(unittest.TestCase):
                 self.assertEqual(record.technical_access, TechnicalAccess.ACCESS_DENIED)
 
 
-class DoclnBlockedByContentEncryptionTest(unittest.TestCase):
-    """docln.net: dieu tra THUC TE (khong phai suy doan) phat hien noi
-    dung chuong that bi ma hoa phia may chu (XOR-shuffle, giai ma bang
-    JS rieng cua site) — day la mot co che chong sao chep chu dich
-    (CAPTCHA_OR_BOT_CHALLENGE ve BAN CHAT), nen VAN bi chan du RightsRisk
-    la OWNER_ACCEPTED_UNVERIFIED (khong phai cau hoi quyen noi dung)."""
+class DoclnPublicBrowserRenderedTest(unittest.TestCase):
+    """docln.net: SUA LAI LAN HAI (2026-08-31) sau khi thuc hien mot phien
+    trinh duyet THAT (mcp__claude-in-chrome__*, duong di khach vang lai
+    thong thuong, khong dang nhap, khong chen ma giai ma/bo qua CAPTCHA).
+    Ket qua: JS GOC cua chinh site tu giai ma noi dung XOR-shuffle vao DOM
+    cho MOI khach, KHONG co thu thach/CAPTCHA nao xuat hien — day la Case 1
+    (trinh duyet thuong render JS cong khai, hop le), khong phai Case 2.
+    Phan loai CAPTCHA_OR_BOT_CHALLENGE truoc do la mot loi phan loai that,
+    da nham 'noi dung bi bien doi trong HTML ban dau' voi 'thu thach bot'
+    — xem evidence trong source_policy.py de biet chi tiet."""
 
-    def test_docln_bi_chan_vi_co_che_ma_hoa_noi_dung(self):
+    def test_docln_khong_con_bi_chan_sau_khi_xac_minh_browser_that(self):
         record = check_source_policy("https://docln.net/truyen/14376-thien-su-nha-ben")
-        self.assertEqual(record.technical_access, TechnicalAccess.CAPTCHA_OR_BOT_CHALLENGE)
+        self.assertEqual(record.technical_access, TechnicalAccess.PUBLIC_BROWSER_RENDERED)
         self.assertFalse(record.tos_prohibits_automation)
         self.assertEqual(record.rights_risk, RightsRisk.OWNER_ACCEPTED_UNVERIFIED)
-        with self.assertRaises(SourcePolicyBlockedError):
-            assert_source_not_blocked("https://docln.net/truyen/14376-thien-su-nha-ben")
+        # Khong raise nua - PUBLIC_BROWSER_RENDERED khong nam trong
+        # _BLOCKED_TECHNICAL_ACCESS.
+        assert_source_not_blocked("https://docln.net/truyen/14376-thien-su-nha-ben")
 
 
 class ScraperOpsServiceGateCoverageTest(unittest.TestCase):
@@ -118,14 +123,6 @@ class ScraperOpsServiceGateCoverageTest(unittest.TestCase):
         svc = ScraperOpsService(MockScrapeRunStore())
         with self.assertRaises(SourcePolicyBlockedError):
             svc.start_or_continue("https://royalroad.com/fiction/12345/mot-truyen")
-
-    def test_start_or_continue_tu_choi_docln_du_site_registry_tim_dung_pattern(self):
-        """docln.net CO SiteConfig hop le trong site_registry.py (URL chuong
-        tim dung) — nhung van phai bi chan o day vi noi dung ma hoa, khong
-        duoc de site_registry hop le lam qua mat gate."""
-        svc = ScraperOpsService(MockScrapeRunStore())
-        with self.assertRaises(SourcePolicyBlockedError):
-            svc.start_or_continue("https://docln.net/truyen/14376-thien-su-nha-ben")
 
     def test_domain_hop_le_van_di_qua_binh_thuong(self):
         fake_cfg = {"nguon-hop-le.example": SiteConfig(

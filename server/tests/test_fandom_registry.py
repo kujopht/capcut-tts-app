@@ -4,7 +4,9 @@ from __future__ import annotations
 import unittest
 
 from server.domain import Fandom, FandomMediaType, Novel, NovelStatus, PublicationMode
-from server.fandom_registry import FandomRegistry, UnknownFandomError
+from server.fandom_registry import (
+    AnimeFandomEligibilityError, FandomRegistry, UnknownFandomError,
+)
 
 
 class SeedAliasTest(unittest.TestCase):
@@ -110,6 +112,37 @@ class NovelPublicationModeTest(unittest.TestCase):
         self.assertEqual(NovelStatus("ongoing"), NovelStatus.ONGOING)
         self.assertEqual(NovelStatus("completed"), NovelStatus.COMPLETED)
         self.assertEqual(NovelStatus("hiatus"), NovelStatus.HIATUS)
+
+
+class AnimeFandomEligibilityGateTest(unittest.TestCase):
+    """Mission G correction (2026-08-31): fandom=unmatched (vd mot web novel
+    goc, khong phai fanfic cua mot IP anime/manga/LN da biet) khong duoc
+    am tham vao anime-fanfic production batch."""
+
+    def setUp(self):
+        self.reg = FandomRegistry()
+
+    def test_matched_khong_rong_thi_qua_cong(self):
+        result = self.reg.classify_many(["Naruto"])
+        self.reg.assert_anime_fandom_eligible(result)  # khong nem loi
+
+    def test_unmatched_toan_bo_thi_bi_chan(self):
+        result = self.reg.classify_many(["Mot Web Novel Goc Khong Ro Fandom"])
+        self.assertEqual(result["matched"], [])
+        with self.assertRaises(AnimeFandomEligibilityError):
+            self.reg.assert_anime_fandom_eligible(result, work_title="Web Novel Goc")
+
+    def test_crossover_mot_matched_mot_unmatched_van_qua_cong(self):
+        """CO matched (du kem unmatched) van du dieu kien — cong chi doi
+        hoi >=1 fandom da biet khop, khong doi hoi TOAN BO danh sach khop."""
+        result = self.reg.classify_many(["Naruto", "Mot OC Fandom La"])
+        self.assertEqual(result["unmatched"], ["Mot OC Fandom La"])
+        self.reg.assert_anime_fandom_eligible(result)  # khong nem loi
+
+    def test_danh_sach_rong_cung_bi_chan(self):
+        result = self.reg.classify_many([])
+        with self.assertRaises(AnimeFandomEligibilityError):
+            self.reg.assert_anime_fandom_eligible(result)
 
 
 if __name__ == "__main__":

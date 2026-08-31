@@ -40,6 +40,20 @@ _SEED_FANDOMS = (
 )
 
 
+class AnimeFandomEligibilityError(Exception):
+    """`classify_many()` returned zero matched fandom — the content is not
+    eligible for the anime/manga/light-novel fanfic production batch.
+
+    Universal Acquisition Engine Hardening / Mission G correction
+    (2026-08-31): an original web novel with no tie to an existing
+    anime/manga/light-novel franchise (`Chàng anh hùng và Nàng ma nữ đầm
+    lầy` — real acquisition, real Drive archive, but fandom=unmatched) was
+    about to silently enter the anime-fanfic batch alongside genuine
+    fanfic. `fandom=unmatched` must never silently qualify — Drive/local
+    evidence for such a work stays as technical acquisition proof only,
+    never a production Novel/Chapter DRAFT via this gate."""
+
+
 class UnknownFandomError(Exception):
     """Ten fandom KHONG khop bat ky `canonical_name`/alias nao da dang ky.
 
@@ -137,6 +151,31 @@ class FandomRegistry:
             else:
                 matched.append(fandom.fandom_id)
         return {"matched": matched, "unmatched": unmatched}
+
+    def assert_anime_fandom_eligible(
+            self, classify_result: Dict[str, List[str]], *, work_title: str = "") -> None:
+        """GATE cho pipeline bootstrap anime-fanfic san xuat — goi voi ket
+        qua CHINH XAC tu `classify_many()`. Nem `AnimeFandomEligibilityError`
+        neu `matched` rong, bat ke `unmatched` co gi — mot tac pham CHUA
+        khop duoc voi fandom anime/manga/light-novel da biet nao KHONG DUOC
+        vao hang doi DRAFT san xuat cua batch nay, du acquisition/Drive
+        archive van la bang chung ky thuat hop le doc lap voi cong nay.
+
+        Day la cong THU HAI, doc lap voi `TechnicalAccess`/`RightsRisk`
+        (`source_policy.py`) — cong do quyet dinh nguon co TAI DUOC hay
+        khong; cong nay quyet dinh noi dung DA tai duoc co PHU HOP voi
+        pham vi san pham "anime/manga/light-novel fanfic" hay khong. Mot
+        nguon duoc phep tai (PUBLIC_BROWSER_RENDERED) van co the tra ve
+        noi dung khong dat cong nay (vd mot web novel goc, khong phai fanfic
+        cua mot IP anime/manga/LN da biet)."""
+        if classify_result.get("matched"):
+            return
+        ten = f" ({work_title!r})" if work_title else ""
+        raise AnimeFandomEligibilityError(
+            f"fandom=unmatched{ten} — khong co fandom anime/manga/light-novel "
+            f"nao duoc xac nhan khop. Khong du dieu kien vao anime-fanfic "
+            f"production batch (Drive/local evidence van giu lai lam bang "
+            f"chung ky thuat, KHONG tao Novel/Chapter DRAFT qua cong nay).")
 
     def get(self, fandom_id: str) -> Optional[Fandom]:
         with self._lock:

@@ -18,6 +18,7 @@ from typing import Any, List, Literal, Optional, Protocol
 
 import httpx
 
+from server.character_identity import CharacterIdentityRegistry
 from server.domain import (
     MediaAsset,
     MediaProcessingState,
@@ -105,10 +106,21 @@ class CoverPromptBuilder:
     day du cua truyen) nua: dua thang toan bo characters[] vao prompt tung
     tao ra bia "poster ensemble" dong nguoi/nhan vat trung lap, khong dung
     lam bia san xuat duoc (bang chung that: ban Re:Zero dau tien).
+
+    `identity_registry` (tuy chon, mac dinh None = hanh vi cu khong doi):
+    tra ten nhan vat sang `CharacterVisualIdentity` that (toc/mat/trang
+    phuc/dac diem — xem server/character_identity.py) — fix cho van de
+    THAT: 3 candidate dau tien co bo cuc dung nhung Subaru/Anastasia tro
+    thanh nhan vat anime CHUNG CHUNG, vi prompt chi co TEN, model khong
+    "biet" ho la ai. Nhan vat CHUA co ho so (identity_registry.lookup tra
+    None) van lui ve hanh vi CHI-TEN nhu truoc — khong chan tien trinh.
     """
 
     @staticmethod
-    def build_prompt(request: CoverGenerationRequest) -> str:
+    def build_prompt(
+        request: CoverGenerationRequest,
+        identity_registry: Optional[CharacterIdentityRegistry] = None,
+    ) -> str:
         cast = [
             c for c in (
                 request.primary_character,
@@ -116,26 +128,33 @@ class CoverPromptBuilder:
                 request.tertiary_character,
             ) if c
         ][:max(0, request.max_visible_characters)]
+        identities = [
+            identity_registry.lookup(request.fandom, name) if identity_registry else None
+            for name in cast
+        ]
 
         parts: List[str] = ["light novel cover"]
 
         if request.fandom:
             parts.append(f"{request.fandom} fanart style")
 
-        if len(cast) == 1:
-            parts.append("solo")
-        elif len(cast) == 2:
-            parts.append("2people")
-        elif len(cast) >= 3:
-            parts.append(f"{len(cast)}people")
+        count_tag = CoverPromptBuilder._build_count_tag(cast, identities)
+        if count_tag:
+            parts.append(count_tag)
 
         if cast:
             parts.append("clear focal hierarchy")
-            parts.append(f"{cast[0]} in foreground, focal point")
+            parts.append(
+                f"{CoverPromptBuilder._cast_block(cast[0], identities[0])} "
+                f"in foreground, focal point")
             if len(cast) >= 2:
-                parts.append(f"{cast[1]} positioned beside/behind {cast[0]}")
+                parts.append(
+                    f"{CoverPromptBuilder._cast_block(cast[1], identities[1])} "
+                    f"positioned beside/behind {cast[0]}")
             if len(cast) >= 3:
-                parts.append(f"{cast[2]} further back in the background")
+                parts.append(
+                    f"{CoverPromptBuilder._cast_block(cast[2], identities[2])} "
+                    f"further back in the background")
 
         if request.mood:
             parts.append(f"{request.mood} mood")
@@ -155,6 +174,68 @@ class CoverPromptBuilder:
         parts.append("high quality")
 
         return ", ".join(parts)
+
+    @staticmethod
+    def _cast_block(name: str, identity: Optional[Any]) -> str:
+        """Ten + (neu co ho so) tag mo ta hinh anh. Giu lai ten (khong chi
+        dung mo ta) vi mot so model anime CO nhan biet tag ten nhan vat
+        that (Danbooru-style) — mo ta la lop bao dam DU BIET TEN HAY
+        KHONG, khong phai thay the ten."""
+        if identity is None:
+            return name
+        descriptor = identity.to_prompt_descriptor()
+        return f"{name}, {descriptor}" if descriptor else name
+
+    @staticmethod
+    def _build_count_tag(cast: List[str], identities: List[Optional[Any]]) -> str:
+        """1boy/1girl/... khi TAT CA nhan vat HIEN THI co gender_presentation
+        biet ro; lui ve solo/Npeople neu BAT KY ai chua biet (tranh tag
+        dem sai/khong nhat quan khi tron ho so biet va chua biet)."""
+        if not cast:
+            return ""
+        categories = [i.count_tag_category() if i else "" for i in identities]
+        if all(categories):
+            boys = categories.count("boy")
+            girls = categories.count("girl")
+            bits: List[str] = []
+            if boys:
+                bits.append(f"{boys}boy" if boys == 1 else f"{boys}boys")
+            if girls:
+                bits.append(f"{girls}girl" if girls == 1 else f"{girls}girls")
+            return ", ".join(bits)
+        if len(cast) == 1:
+            return "solo"
+        if len(cast) == 2:
+            return "2people"
+        return f"{len(cast)}people"
+
+    @staticmethod
+    def build_character_negative_traits(
+        request: CoverGenerationRequest,
+        identity_registry: Optional[CharacterIdentityRegistry] = None,
+    ) -> List[str]:
+        """Gop `negative_traits` tu ho so cua dan dien vien HIEN THI tren
+        bia (visible cast) — CHUA duoc noi vao request HTTP that
+        (HttpImageCoverProvider hien chi gui {"prompt": ...}), day la buoc
+        TINH TOAN san sang cho buoc noi day tiep theo, khong phai loi
+        thieu sot."""
+        if identity_registry is None:
+            return []
+        cast = [
+            c for c in (
+                request.primary_character,
+                request.secondary_character,
+                request.tertiary_character,
+            ) if c
+        ][:max(0, request.max_visible_characters)]
+        traits: List[str] = []
+        for name in cast:
+            identity = identity_registry.lookup(request.fandom, name)
+            if identity:
+                for trait in identity.negative_traits:
+                    if trait not in traits:
+                        traits.append(trait)
+        return traits
 
 
 def wrap_raster_as_overlayable_svg(

@@ -4,6 +4,9 @@ import unittest
 import httpx
 
 from server.adapters import MockMediaAssetStore
+from server.character_identity import (
+    CharacterIdentityRegistry, CharacterVisualIdentity,
+)
 from server.cover_pipeline import (
     CoverGenerationRequest,
     CoverJob,
@@ -445,6 +448,91 @@ class TestCoverPromptBuilder(unittest.TestCase):
         prompt = CoverPromptBuilder.build_prompt(req)
         self.assertIn("light novel cover", prompt)
         self.assertIn("high quality", prompt)
+
+
+def _rezero_req(**overrides) -> CoverGenerationRequest:
+    defaults = dict(
+        novel_id="nov_rezero", fandom="Re:Zero",
+        title="Re: Zero - Hai Vi Sao Bi Quen Lang",
+        summary="A story.",
+        characters=["Natsuki Subaru", "Anastasia Hoshin", "Felix Argyle"],
+        genres=["Isekai", "Fantasy"], mood="bittersweet",
+        primary_character="Natsuki Subaru", secondary_character="Anastasia Hoshin",
+    )
+    defaults.update(overrides)
+    return CoverGenerationRequest(**defaults)
+
+
+class TestCoverPromptBuilderWithCharacterIdentity(unittest.TestCase):
+    """Item 8 cua Mission 'Character Identity Layer': chung minh nhan
+    dang hinh anh THAT (khong phai chi ten) di vao prompt, nhan vat
+    khong lien quan thi khong, cap ho so day du (Subaru+Anastasia) dung
+    tag dem 1boy/1girl, va registry la metadata dung chung/tai su dung
+    duoc (khong hardcode Re:Zero trong CoverPromptBuilder)."""
+
+    def setUp(self):
+        self.registry = CharacterIdentityRegistry()
+
+    def test_subaru_descriptors_enter_the_prompt(self):
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertIn("black hair", prompt.lower())
+        self.assertIn("tracksuit", prompt.lower())
+
+    def test_anastasia_descriptors_enter_the_prompt(self):
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertIn("purple hair", prompt.lower())
+        self.assertIn("fur", prompt.lower())
+
+    def test_unrelated_character_without_profile_gets_name_only_no_descriptor(self):
+        req = _rezero_req(
+            tertiary_character="Felix Argyle", max_visible_characters=3)
+        prompt = CoverPromptBuilder.build_prompt(req, self.registry)
+        self.assertIn("Felix Argyle", prompt)
+        # Felix has no seed profile -> _cast_block returns the bare name,
+        # never "Felix Argyle," followed by descriptor tags.
+        self.assertNotIn("Felix Argyle,", prompt)
+
+    def test_no_more_than_two_characters_visible_by_default_even_with_identities(self):
+        req = _rezero_req(tertiary_character="Felix Argyle")
+        prompt = CoverPromptBuilder.build_prompt(req, self.registry)
+        self.assertNotIn("Felix Argyle", prompt)
+        self.assertIn("1boy, 1girl", prompt)
+
+    def test_gender_known_pair_uses_1boy_1girl_not_generic_2people(self):
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertIn("1boy, 1girl", prompt)
+        self.assertNotIn("2people", prompt)
+
+    def test_omitting_identity_registry_falls_back_to_name_only_unchanged(self):
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req())
+        self.assertIn("2people", prompt)
+        self.assertNotIn("black hair", prompt.lower())
+
+    def test_custom_registry_without_seed_data_still_works(self):
+        """Provider-trung-lap / tai su dung duoc: mot registry HOAN TOAN
+        tuy chinh (khong dung du lieu hat giong Re:Zero co san) van hoat
+        dong dung - chung minh day la co che metadata dung chung, khong
+        hardcode rieng cho Re:Zero trong CoverPromptBuilder."""
+        custom_registry = CharacterIdentityRegistry(seed=False)
+        custom_registry.register(CharacterVisualIdentity(
+            canonical_name="Monkey D. Luffy", fandom="One Piece",
+            gender_presentation="male", hair_description="messy black hair",
+            outfit_description="red vest, straw hat"))
+        req = CoverGenerationRequest(
+            novel_id="n", fandom="One Piece", title="t", summary="s",
+            primary_character="Monkey D. Luffy")
+        prompt = CoverPromptBuilder.build_prompt(req, custom_registry)
+        self.assertIn("straw hat", prompt)
+
+    def test_build_character_negative_traits_returns_traits_for_visible_cast(self):
+        traits = CoverPromptBuilder.build_character_negative_traits(
+            _rezero_req(), self.registry)
+        self.assertIn("blonde hair", traits)
+        self.assertIn("armor", traits)
+
+    def test_build_character_negative_traits_empty_without_registry(self):
+        traits = CoverPromptBuilder.build_character_negative_traits(_rezero_req())
+        self.assertEqual(traits, [])
 
 
 class TestWrapRasterAsOverlayableSvg(unittest.TestCase):

@@ -15,8 +15,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cover_illustrious_logic import (  # noqa: E402
-    DEFAULT_NEGATIVE_PROMPT, IP_ADAPTER_EXPECTED_HIDDEN_SIZE,
-    IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER, IPAdapterEncoderMismatchError,
+    DEFAULT_NEGATIVE_PROMPT, DeviceMismatchError,
+    IP_ADAPTER_EXPECTED_HIDDEN_SIZE, IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER,
+    IPAdapterEncoderMismatchError, assert_component_on_cuda,
     assert_ip_adapter_encoder_compatible, build_left_right_masks,
     build_reference_conditioning_metadata, build_response_payload,
     resolve_negative_prompt,
@@ -232,6 +233,48 @@ class TestAssertIpAdapterEncoderCompatible(unittest.TestCase):
             assert_ip_adapter_encoder_compatible(
                 1664, "ip-adapter-plus-face_sdxl_vit-h.safetensors")
         self.assertIn("mat1 and mat2", str(ctx.exception))
+
+
+class TestAssertComponentOnCuda(unittest.TestCase):
+    """Real regression guard for a real Beam v9 incident: RuntimeError
+    "Expected all tensors to be on the same device, but got index is on
+    cpu, different from other tensors on cuda:0" - the explicitly-loaded
+    IP-Adapter image encoder (added to fix the ViT-bigG/ViT-H mismatch)
+    was constructed but never moved to CUDA. Pure string check, no
+    torch/CUDA runtime needed - load_pipeline() calls this with real
+    `str(param.device)` values from actually-loaded torch modules."""
+
+    def test_cuda_zero_does_not_raise(self):
+        try:
+            assert_component_on_cuda("ip_adapter_image_encoder", "cuda:0")
+        except DeviceMismatchError as exc:
+            self.fail(f"cuda:0 raised unexpectedly: {exc}")
+
+    def test_bare_cuda_does_not_raise(self):
+        try:
+            assert_component_on_cuda("unet", "cuda")
+        except DeviceMismatchError as exc:
+            self.fail(f"cuda raised unexpectedly: {exc}")
+
+    def test_cpu_raises_reproducing_real_incident(self):
+        """The EXACT real incident: image encoder left on CPU while the
+        rest of the pipeline (shared from the base pipe) is on cuda:0."""
+        with self.assertRaises(DeviceMismatchError) as ctx:
+            assert_component_on_cuda("ip_adapter_image_encoder", "cpu")
+        self.assertIn("cpu", str(ctx.exception))
+
+    def test_error_message_cites_the_real_prior_runtimeerror(self):
+        with self.assertRaises(DeviceMismatchError) as ctx:
+            assert_component_on_cuda("ip_adapter_image_encoder", "cpu")
+        self.assertIn("Expected all tensors to be on the same device",
+                       str(ctx.exception))
+
+    def test_error_message_includes_component_name(self):
+        """Actionable - names WHICH component was misplaced, not just
+        that something was wrong."""
+        with self.assertRaises(DeviceMismatchError) as ctx:
+            assert_component_on_cuda("unet.encoder_hid_proj", "cpu")
+        self.assertIn("unet.encoder_hid_proj", str(ctx.exception))
 
 
 if __name__ == "__main__":

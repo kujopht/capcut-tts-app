@@ -138,6 +138,33 @@ def assert_ip_adapter_encoder_compatible(hidden_size: int, weight_name: str) -> 
             f"{IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER!r}).")
 
 
+class DeviceMismatchError(Exception):
+    """A component required for reference-conditioned inference ended up
+    on the wrong torch device (e.g. CPU while the rest of the pipeline is
+    on CUDA) - raised at on_start (container startup) instead of
+    surfacing as a cryptic mid-inference RuntimeError."""
+
+
+def assert_component_on_cuda(component_name: str, device_str: str) -> None:
+    """Real regression guard for a real incident: RuntimeError "Expected
+    all tensors to be on the same device, but got index is on cpu,
+    different from other tensors on cuda:0". Root cause: the explicitly-
+    loaded IP-Adapter image encoder (added to fix the earlier ViT-bigG/
+    ViT-H mismatch) was constructed via `.from_pretrained()` but never
+    moved to CUDA, while the REST of the pipeline's tensors (shared from
+    the base pipe, already `.to("cuda")`'d) were on cuda:0.
+
+    Pure string check (no torch import needed) so this is real-unit-
+    testable without a GPU/CUDA runtime - `load_pipeline()` calls this
+    with `str(some_param.device)` from REAL loaded torch modules."""
+    if not device_str.startswith("cuda"):
+        raise DeviceMismatchError(
+            f"{component_name} is on device {device_str!r}, expected a "
+            f"CUDA device. Real prior incident: RuntimeError 'Expected "
+            f"all tensors to be on the same device, but got index is on "
+            f"cpu, different from other tensors on cuda:0'.")
+
+
 def build_reference_conditioning_metadata(*, used: bool, strength: float = 0.0) -> dict:
     """Metadata rieng VE VIEC reference-conditioning (IP-Adapter) co duoc
     dung cho request nay hay khong - TACH KHOI `build_response_payload()`

@@ -91,6 +91,24 @@ reference-conditioned mode, chosen and researched for real (not assumed):
   also asserts `hidden_size == 1280` at startup (see
   `assert_ip_adapter_encoder_compatible()` in cover_illustrious_logic.py)
   so a future mismatch fails loudly at container start, not mid-inference.
+- DEVICE PLACEMENT (real bug, real fix): the NEXT real proof call raised
+  `RuntimeError: Expected all tensors to be on the same device, but got
+  index is on cpu, different from other tensors on cuda:0`. Root cause:
+  the explicitly-loaded ViT-H image encoder above was constructed via
+  `.from_pretrained()` but never moved to CUDA, while everything else
+  (shared from the base `pipe`, already `.to("cuda")`'d) was on cuda:0.
+  Fixed by chaining `.to("cuda")` on the encoder itself, on the
+  constructed `ip_adapter_pipe` (official diffusers pattern: construct
+  with the explicit `image_encoder=`, then `.to("cuda")` the whole
+  pipeline), and AGAIN after `load_ip_adapter()` (which installs new
+  adapter/image-projection modules into the UNet that also need moving -
+  `.to("cuda")` is idempotent and version-agnostic, so this is the real
+  guarantee rather than depending on a specific, version-sensitive
+  internal attribute name). `load_pipeline()` also asserts the encoder,
+  the UNet, and (when present) the UNet's `encoder_hid_proj` are all on
+  CUDA at startup (see `assert_component_on_cuda()` in
+  cover_illustrious_logic.py) so a future device mismatch fails loudly
+  at container start, not mid-inference.
 - Two independent identities without blending: diffusers documents a
   real, exact mechanism for this - ONE IP-Adapter checkpoint loaded once,
   invoked with `ip_adapter_image=[[img1, img2]]` (nested list) plus
@@ -165,9 +183,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from beam import Image, Volume, endpoint  # noqa: E402
 
 from cover_illustrious_logic import (  # noqa: E402
-    IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER, assert_ip_adapter_encoder_compatible,
-    build_left_right_masks, build_reference_conditioning_metadata,
-    build_response_payload, resolve_negative_prompt,
+    IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER, assert_component_on_cuda,
+    assert_ip_adapter_encoder_compatible, build_left_right_masks,
+    build_reference_conditioning_metadata, build_response_payload,
+    resolve_negative_prompt,
 )
 
 MODEL_ID = "cagliostrolab/animagine-xl-4.0"
@@ -221,12 +240,20 @@ def load_pipeline():
         cache_dir=CACHE_PATH,
     ).to("cuda")
 
+    # Real bug fix: this encoder is constructed fresh (not inherited from
+    # `pipe.components`, which is already CUDA-resident since `pipe` was
+    # `.to("cuda")`'d above) - `.from_pretrained()` defaults to CPU, and
+    # nothing else moves a constructor-supplied `image_encoder=` kwarg
+    # for you. Real evidence: RuntimeError "Expected all tensors to be
+    # on the same device, but got index is on cpu, different from other
+    # tensors on cuda:0" on a real Beam GPU call - this exact `.to("cuda")`
+    # was missing.
     ip_adapter_image_encoder = CLIPVisionModelWithProjection.from_pretrained(
         IP_ADAPTER_REPO, subfolder=IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER,
         torch_dtype=torch.float16, cache_dir=CACHE_PATH,
-    )
+    ).to("cuda")
     # Fail LOUDLY here (on_start/container startup) instead of a cryptic
-    # matmul RuntimeError mid-inference (Requirement 3).
+    # matmul RuntimeError mid-inference (Requirement 3, prior incident).
     assert_ip_adapter_encoder_compatible(
         ip_adapter_image_encoder.config.hidden_size, IP_ADAPTER_WEIGHT_NAME)
 
@@ -235,12 +262,47 @@ def load_pipeline():
     # below is not shadowed by a duplicate/conflicting kwarg.
     ip_adapter_components = dict(pipe.components)
     ip_adapter_components.pop("image_encoder", None)
+    # Official diffusers pattern: construct with the explicit image
+    # encoder, THEN .to("cuda") the whole pipeline - idempotent for the
+    # components already on CUDA (shared from `pipe`), and the real fix
+    # for the encoder itself (redundant with the .to("cuda") above, kept
+    # anyway to match the documented pattern exactly and as defense in
+    # depth if a future edit ever constructs the encoder without it).
     ip_adapter_pipe = StableDiffusionXLPipeline(
-        **ip_adapter_components, image_encoder=ip_adapter_image_encoder)
+        **ip_adapter_components, image_encoder=ip_adapter_image_encoder,
+    ).to("cuda")
     ip_adapter_pipe.load_ip_adapter(
         IP_ADAPTER_REPO, subfolder="sdxl_models",
         weight_name=[IP_ADAPTER_WEIGHT_NAME], cache_dir=CACHE_PATH,
     )
+    # load_ip_adapter() installs NEW adapter/image-projection modules
+    # into the UNet (Requirement 3) - re-assert full-CUDA placement
+    # afterward. .to("cuda") is idempotent and moves everything currently
+    # registered on the pipeline, without needing to know the exact
+    # internal attribute name diffusers uses for the newly-installed
+    # projection layer (version-sensitive - ImageProjection/Resampler
+    # depending on the IP-Adapter variant).
+    ip_adapter_pipe.to("cuda")
+
+    # Requirement 4 - fail loudly at startup if any critical component
+    # ended up on the wrong device, instead of a cryptic mid-inference
+    # "Expected all tensors to be on the same device" error.
+    assert_component_on_cuda(
+        "ip_adapter_image_encoder",
+        str(next(ip_adapter_image_encoder.parameters()).device))
+    assert_component_on_cuda(
+        "ip_adapter_pipe.unet", str(next(ip_adapter_pipe.unet.parameters()).device))
+    # The IP-Adapter image-projection layer lives on unet.encoder_hid_proj
+    # once load_ip_adapter() has run, for every IP-Adapter variant this
+    # code supports today - checked when present. The unconditional
+    # .to("cuda") calls above are the real, version-agnostic guarantee;
+    # this is an extra, more specific confirmation on top of that.
+    encoder_hid_proj = getattr(ip_adapter_pipe.unet, "encoder_hid_proj", None)
+    if encoder_hid_proj is not None:
+        proj_params = list(encoder_hid_proj.parameters())
+        if proj_params:
+            assert_component_on_cuda(
+                "ip_adapter_pipe.unet.encoder_hid_proj", str(proj_params[0].device))
 
     load_seconds = time.monotonic() - t0
     return pipe, ip_adapter_pipe, load_seconds

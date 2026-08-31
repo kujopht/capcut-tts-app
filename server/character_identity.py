@@ -15,10 +15,13 @@ CoverPromptBuilder.build_prompt(), giong nguyen tac cua
 `server/fandom_registry.py`.
 
 CHUA gan LoRA that (`lora_reference_id` la truong DU PHONG, khong code nao
-doc). `reference_image`/`reference_strength`/`reference_source` DA duoc
+doc). `reference_images`/`reference_strength`/`reference_source` DA duoc
 noi day that qua reference-conditioning (IP-Adapter, xem
 beam_apps/cover_illustrious_app.py) — nhung module NAY van hoan toan
-provider-trung-lap: khong import beam/torch/diffusers, chi luu du lieu.
+provider-trung-lap: khong import beam/torch/diffusers/PIL, chi luu du
+lieu (xem test_character_identity_module_has_no_provider_specific_imports
+trong server/tests/test_character_identity.py — kiem tra THAT bang AST,
+khong chi ghi trong docstring).
 """
 from __future__ import annotations
 
@@ -67,27 +70,31 @@ class CharacterVisualIdentity:
     #: Du phong cho LoRA nhan vat rieng trong tuong lai — CHUA train/tai
     #: LoRA nao (chua den luot co che nay), KHONG code nao doc truong nay.
     lora_reference_id: str = ""
-    #: Anh tham chieu (duong dan/URL) cho reference-conditioning THAT
-    #: (IP-Adapter, xem beam_apps/cover_illustrious_app.py) — TU "mission
-    #: Character Identity Layer" (chi la placeholder) DA duoc noi day that
-    #: o "mission Reference-Conditioned Cover Proof": beam_apps layer doc
-    #: truong nay (qua script, khong tu dong doc registry) de biet load
-    #: anh nao lam dieu kien. Rong = khong dung reference-conditioning cho
-    #: nhan vat nay (van lui ve mo ta van ban thuan — hanh vi khong doi).
-    reference_image: str = ""
+    #: Danh sach duong dan/URL anh tham chieu cho reference-conditioning
+    #: THAT (IP-Adapter, xem beam_apps/cover_illustrious_app.py). NHIEU
+    #: anh moi nhan vat duoc ho tro O CAP SCHEMA/REQUEST (vd nhieu goc
+    #: chup de trung binh embedding, ben vung hon 1 anh don) - nhung code
+    #: dieu kien hoa THAT trong beam_apps hien CHI dung anh DAU TIEN cho
+    #: moi nhan vat (xem generate()'s own docstring): tron viec "nhieu anh
+    #: cho 1 nhan vat" voi "regional mask cho 2 nhan vat" la mot to hop
+    #: API diffusers CHUA duoc xac minh, nen co tinh de lai cho phien ban
+    #: sau, tranh chong chat 2 co che chua kiem chung cung luc. Rong =
+    #: khong dung reference-conditioning cho nhan vat nay (van lui ve mo
+    #: ta van ban thuan — hanh vi khong doi).
+    reference_images: List[str] = field(default_factory=list)
     #: Cuong do dieu kien hoa (ip_adapter_scale, thuong 0.5-0.8) — 0.0 =
     #: chua thiet lap/khong dung.
     reference_strength: float = 0.0
     #: Nguon goc anh tham chieu — bat buoc VE MAT QUY UOC (nhu
-    #: source_provenance) khi `reference_image` duoc dien, de biet anh
+    #: source_provenance) khi `reference_images` duoc dien, de biet anh
     #: nay tu dau (fan art, key visual chinh thuc, anh chup tu tap anime...).
     reference_source: str = ""
     #: Nguon goc cac mo ta o tren — bat buoc VE MAT QUY UOC (khong ep bang
     #: code) de nhan dang co the doi soat lai duoc, khong phai doan.
     source_provenance: str = ""
 
-    def has_reference_image(self) -> bool:
-        return bool(self.reference_image)
+    def has_reference_images(self) -> bool:
+        return bool(self.reference_images)
 
     def count_tag_category(self) -> str:
         """"boy"/"girl" neu `gender_presentation` biet ro, nguoc lai

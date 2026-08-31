@@ -113,9 +113,24 @@ reference-conditioned mode, chosen and researched for real (not assumed):
   measured 39.749s cold load, cached in the same Beam Volume thereafter.
   Warm inference: estimated +0.5-2s over the measured 5.211s baseline for
   the added CLIP image-embedding forward pass(es).
+
+MULTI-IMAGE PER CHARACTER (schema-level only, "V1" mission): each side
+accepts a LIST of reference images (`primary_reference_images_base64`/
+`secondary_reference_images_base64`, matching
+server/character_identity.py::CharacterVisualIdentity.reference_images) -
+diffusers DOES support averaging multiple images for one adapter slot
+(`ip_adapter_image=[img1, img2]` when only one adapter is loaded), but
+combining that with the masked-dual-identity path below would be a
+SECOND unverified API-combination stacked on the first (`.components`
+sharing + `load_ip_adapter()`). To avoid compounding unverified
+diffusers-API assumptions in one deploy, `generate()` currently uses only
+the FIRST image in each list for actual conditioning - the schema accepts
+more for forward-compatibility, but only the first is read for now (see
+inline comment at the point images are selected).
 """
 import sys
 from pathlib import Path
+from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -187,8 +202,8 @@ def load_pipeline():
 )
 def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,
             width: int = 1024, height: int = 1536, seed: int = -1,
-            primary_reference_image_base64: str = "",
-            secondary_reference_image_base64: str = "",
+            primary_reference_images_base64: Optional[List[str]] = None,
+            secondary_reference_images_base64: Optional[List[str]] = None,
             reference_strength: float = 0.6) -> dict:
     import base64
     import io
@@ -207,8 +222,10 @@ def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,
     if seed >= 0:
         generator = torch.Generator(device="cuda").manual_seed(seed)
 
-    has_primary_ref = bool(primary_reference_image_base64)
-    has_secondary_ref = bool(secondary_reference_image_base64)
+    primary_refs = primary_reference_images_base64 or []
+    secondary_refs = secondary_reference_images_base64 or []
+    has_primary_ref = bool(primary_refs)
+    has_secondary_ref = bool(secondary_refs)
     used_references = has_primary_ref or has_secondary_ref
 
     t_infer_start = time.monotonic()
@@ -229,11 +246,17 @@ def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,
         def _decode(b64: str):
             return PILImage.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
 
+        # Only the FIRST image per side is used for actual conditioning -
+        # see module docstring "MULTI-IMAGE PER CHARACTER": averaging
+        # multiple images for one identity AND masking two identities at
+        # once would stack two unverified diffusers-API combinations in
+        # one deploy. The schema accepts a list for forward-compat; this
+        # code deliberately only reads index 0 for now.
         if has_primary_ref and has_secondary_ref:
             from diffusers.image_processor import IPAdapterMaskProcessor
 
-            primary_img = _decode(primary_reference_image_base64)
-            secondary_img = _decode(secondary_reference_image_base64)
+            primary_img = _decode(primary_refs[0])
+            secondary_img = _decode(secondary_refs[0])
             mask_primary, mask_secondary = build_left_right_masks(width, height)
             processed = IPAdapterMaskProcessor().preprocess(
                 [mask_primary, mask_secondary], height=height, width=width)
@@ -253,10 +276,10 @@ def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,
                 cross_attention_kwargs={"ip_adapter_masks": masks},
             )
         else:
-            # Exactly one reference supplied - no masking needed, applies
-            # globally (see Requirement 5: "at least one primary, one
+            # Exactly one side supplied - no masking needed, applies
+            # globally (see Requirement 4: "at least one primary, one
             # secondary" - each slot is supported independently too).
-            single_b64 = primary_reference_image_base64 or secondary_reference_image_base64
+            single_b64 = (primary_refs or secondary_refs)[0]
             single_img = _decode(single_b64)
             ip_adapter_pipe.set_ip_adapter_scale(reference_strength)
             result = ip_adapter_pipe(

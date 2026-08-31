@@ -137,12 +137,12 @@ class TestGenerateAcceptsReferenceConditioningKeywords(unittest.TestCase):
         except TypeError as exc:
             self.fail(f"binding without reference kwargs raised TypeError: {exc}")
 
-    def test_call_with_both_reference_images_and_strength_does_not_raise(self):
+    def test_call_with_both_reference_image_lists_and_strength_does_not_raise(self):
         try:
             self.sig.bind(
                 context=object(), prompt="a cover prompt", seed=1,
-                primary_reference_image_base64="ZmFrZQ==",
-                secondary_reference_image_base64="ZmFrZQ==",
+                primary_reference_images_base64=["ZmFrZQ=="],
+                secondary_reference_images_base64=["ZmFrZQ=="],
                 reference_strength=0.6)
         except TypeError as exc:
             self.fail(
@@ -150,19 +150,30 @@ class TestGenerateAcceptsReferenceConditioningKeywords(unittest.TestCase):
                 f"- this is the exact class of error the real seed incident "
                 f"was (task 04d22fcf-55f3-4f5e-acd3-337de6ff4432)")
 
-    def test_call_with_only_primary_reference_does_not_raise(self):
+    def test_call_with_only_primary_reference_list_does_not_raise(self):
         try:
             self.sig.bind(
                 context=object(), prompt="a cover prompt",
-                primary_reference_image_base64="ZmFrZQ==")
+                primary_reference_images_base64=["ZmFrZQ=="])
         except TypeError as exc:
             self.fail(f"binding with only primary reference raised TypeError: {exc}")
 
-    def test_reference_kwargs_exist_with_empty_string_defaults(self):
-        for name in ("primary_reference_image_base64",
-                     "secondary_reference_image_base64"):
+    def test_call_with_multiple_images_in_one_list_does_not_raise(self):
+        """Item 3 cua mission V1 - reference_images[] o cap schema/request
+        ho tro NHIEU anh/nhan vat, du generate() hien chi dung anh dau
+        tien (xem module docstring "MULTI-IMAGE PER CHARACTER")."""
+        try:
+            self.sig.bind(
+                context=object(), prompt="a cover prompt",
+                primary_reference_images_base64=["ZmFrZQ==", "ZmFrZTI="])
+        except TypeError as exc:
+            self.fail(f"binding with multiple images in one list raised TypeError: {exc}")
+
+    def test_reference_kwargs_exist_with_none_defaults(self):
+        for name in ("primary_reference_images_base64",
+                     "secondary_reference_images_base64"):
             self.assertIn(name, self.sig.parameters)
-            self.assertEqual(self.sig.parameters[name].default, "")
+            self.assertIsNone(self.sig.parameters[name].default)
 
     def test_reference_strength_defaults_to_0_6(self):
         self.assertIn("reference_strength", self.sig.parameters)

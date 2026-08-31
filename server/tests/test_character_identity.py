@@ -1,5 +1,8 @@
+import ast
+import inspect
 import unittest
 
+from server import character_identity
 from server.character_identity import (
     CharacterIdentityRegistry, CharacterVisualIdentity,
 )
@@ -103,17 +106,55 @@ class TestCharacterIdentityRegistry(unittest.TestCase):
 
     def test_reference_conditioning_fields_default_empty(self):
         identity = self.registry.lookup("Re:Zero", "Natsuki Subaru")
-        self.assertEqual(identity.reference_image, "")
+        self.assertEqual(identity.reference_images, [])
         self.assertEqual(identity.reference_strength, 0.0)
         self.assertEqual(identity.reference_source, "")
-        self.assertFalse(identity.has_reference_image())
+        self.assertFalse(identity.has_reference_images())
 
-    def test_has_reference_image_true_when_set(self):
+    def test_has_reference_images_true_when_set(self):
         identity = CharacterVisualIdentity(
             canonical_name="A", fandom="F",
-            reference_image="reference_images/a.png",
+            reference_images=["reference_images/a.png"],
             reference_strength=0.6, reference_source="fan art, example.com")
-        self.assertTrue(identity.has_reference_image())
+        self.assertTrue(identity.has_reference_images())
+
+    def test_reference_images_supports_multiple_paths_per_character(self):
+        """Item 3 cua mission 'Reference-Conditioned Cover V1' - schema ho
+        tro NHIEU anh/nhan vat (vd nhieu goc chup de trung binh embedding
+        sau nay), du code dieu kien hoa THAT trong beam_apps hien chi
+        dung anh dau tien (xem docstring cua truong nay)."""
+        identity = CharacterVisualIdentity(
+            canonical_name="A", fandom="F",
+            reference_images=["ref1.png", "ref2.png", "ref3.png"])
+        self.assertEqual(len(identity.reference_images), 3)
+        self.assertTrue(identity.has_reference_images())
+
+
+class TestCharacterIdentityModuleIsProviderNeutral(unittest.TestCase):
+    """Item 9 cua mission 'Reference-Conditioned Cover V1' - kiem tra THAT
+    (AST, khong chi doc docstring) rang server/character_identity.py
+    khong import beam/torch/diffusers/PIL - metadata nhan vat phai doc
+    lap voi bat ky provider sinh anh cu the nao."""
+
+    _FORBIDDEN_MODULES = {"beam", "torch", "diffusers", "PIL"}
+
+    def test_no_provider_specific_top_level_imports(self):
+        source = inspect.getsource(character_identity)
+        tree = ast.parse(source)
+        imported_roots = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    imported_roots.add(alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    imported_roots.add(node.module.split(".")[0])
+        forbidden_found = imported_roots & self._FORBIDDEN_MODULES
+        self.assertEqual(
+            forbidden_found, set(),
+            f"server/character_identity.py imports provider-specific "
+            f"module(s) {forbidden_found} - this module must stay "
+            f"provider-neutral (metadata only).")
 
 
 if __name__ == "__main__":

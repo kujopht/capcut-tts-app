@@ -24,7 +24,7 @@ Reads BEAM_TOKEN from this process's own environment at execution time.
 Never printed/logged.
 
 REQUIRES REDEPLOY FIRST: this script sends
-primary_reference_image_base64/secondary_reference_image_base64/
+primary_reference_images_base64/secondary_reference_images_base64/
 reference_strength - new optional kwargs on generate(). A container still
 running the pre-reference-conditioning build will 500/error on these
 (same class of failure as the real seed incident, task
@@ -35,9 +35,12 @@ container, not a code defect) rather than repeating it.
 
 Registers the supplied images into a REAL CharacterIdentityRegistry
 (server/character_identity.py) - not a side-channel - so the reference
-fields (reference_image/reference_strength/reference_source) are
-genuinely exercised, and the SAME identity-aware CoverPromptBuilder
-prompt from the prior mission is reused (reference conditioning
+fields (reference_images/reference_strength/reference_source) are
+genuinely exercised (each as a one-element list here - the schema
+supports more per character for future multi-image averaging, see
+character_identity.py's own docstring, but this v1 proof uses exactly
+one canonical image per character), and the SAME identity-aware
+CoverPromptBuilder prompt from the prior mission is reused (reference conditioning
 AUGMENTS text descriptors, it does not replace them).
 
 This script makes EXACTLY ONE real GPU call (seed=20260905, distinct from
@@ -136,7 +139,7 @@ def main() -> int:
         distinctive_traits=["athletic build", "determined expression"],
         negative_traits=["blonde hair", "glasses", "formal suit"],
         source_provenance="rezero.fandom.com/wiki/Natsuki_Subaru",
-        reference_image=str(primary_path), reference_strength=a.reference_strength,
+        reference_images=[str(primary_path)], reference_strength=a.reference_strength,
         reference_source=a.primary_reference_source,
     ))
     registry.register(CharacterVisualIdentity(
@@ -153,7 +156,7 @@ def main() -> int:
             "petite doll-like figure"],
         negative_traits=["short hair", "armor", "modern clothing"],
         source_provenance="rezero.fandom.com/wiki/Anastasia_Hoshin",
-        reference_image=str(secondary_path), reference_strength=a.reference_strength,
+        reference_images=[str(secondary_path)], reference_strength=a.reference_strength,
         reference_source=a.secondary_reference_source,
     ))
 
@@ -198,8 +201,8 @@ def main() -> int:
     resp = client.post("", json={
         "prompt": prompt,
         "seed": SEED,
-        "primary_reference_image_base64": primary_b64,
-        "secondary_reference_image_base64": secondary_b64,
+        "primary_reference_images_base64": [primary_b64],
+        "secondary_reference_images_base64": [secondary_b64],
         "reference_strength": a.reference_strength,
     })
     wall_seconds = time.monotonic() - t0

@@ -130,11 +130,13 @@ from server.domain import (
     JobStatus,
     Novel,
     Profile,
+    PublicationMode,
     PublishState,
     TtsJob,
     job_fingerprint,
     now_iso,
 )
+from server.fandom_registry import FandomRegistry, UnknownFandomError
 from server.social import (
     COMMENT_MAX_CHARS,
     POST_MAX_CHARS,
@@ -298,6 +300,13 @@ scrape_run_store = build_scrape_run_store(settings)
 site_profile_store = build_site_profile_store(settings)
 scraper_ops = ScraperOpsService(
     scrape_run_store, profile_store=site_profile_store, metadata_store=store)
+
+#: Chuan hoa ten fandom anime/manga/light-novel (Anime Fanfic Production
+#: Canary) — o BO NHO, MOT tien trinh, giong `site_profile_store` truoc khi
+#: co lop ben vung rieng. Hat giong san co (Naruto, One Piece, ...) cong
+#: voi kha nang dang ky them qua `fandom_registry.register()`/`add_alias()`
+#: — xem `server/fandom_registry.py`.
+fandom_registry = FandomRegistry()
 
 #: Tang dich vu Trusted Video Sources (Phase 5) — noi YouTube Data API,
 #: `video_classifier`/`episode_parser`, `trusted_source_store` va
@@ -599,6 +608,17 @@ class NovelIn(BaseModel):
     title: TieuDe
     description: str = ""
     tags: List[str] = Field(default_factory=list)
+    #: Ten fandom THO (vd "Naruto", "BNHA") — server tu chuan hoa qua
+    #: `fandom_registry` thanh `fandom_ids`. Rong = khong gan fandom nao
+    #: (Novel khong phai fanfic anime/manga, vd noi dung goc).
+    fandom_names: List[str] = Field(default_factory=list)
+    #: "full_text" (mac dinh) hoac "metadata_only" — xem `PublicationMode`.
+    publication_mode: str = "full_text"
+    external_author_name: str = ""
+    external_source_url: str = ""
+    external_chapter_count: int = 0
+    external_updated_at: str = ""
+    language: str = ""
 
 
 class ChapterIn(BaseModel):
@@ -614,6 +634,13 @@ class NovelPatch(BaseModel):
     title: Optional[TieuDe] = None
     description: Optional[str] = None
     tags: Optional[List[str]] = None
+    fandom_names: Optional[List[str]] = None
+    publication_mode: Optional[str] = None
+    external_author_name: Optional[str] = None
+    external_source_url: Optional[str] = None
+    external_chapter_count: Optional[int] = None
+    external_updated_at: Optional[str] = None
+    language: Optional[str] = None
 
 
 class ChapterPatch(BaseModel):
@@ -1284,6 +1311,27 @@ def list_novel_tags() -> Dict[str, Any]:
     return {"tags": tags, "count": len(tags)}
 
 
+def _resolve_fandom_ids(fandom_names: List[str]) -> List[str]:
+    """Chuan hoa ten fandom THO thanh `fandom_id` qua `fandom_registry`.
+
+    Nem `HTTPException(400)` ro rang cho ten CHUA biet — KHONG am tham bo
+    qua hay gan mot fandom "khac", cung nguyen tac voi `UnsupportedSiteError`
+    cua scraper (xem `_quet_hang_loat`)."""
+    try:
+        return [fandom_registry.resolve(name).fandom_id for name in fandom_names]
+    except UnknownFandomError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+def _parse_publication_mode(raw: str) -> PublicationMode:
+    try:
+        return PublicationMode(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"publication_mode không hợp lệ: {raw!r}") from exc
+
+
 @app.post("/api/novels", status_code=status.HTTP_201_CREATED)
 def create_novel(payload: NovelIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     novel = store.create_novel(Novel(
@@ -1291,6 +1339,13 @@ def create_novel(payload: NovelIn, profile: Profile = Depends(current_profile)) 
         title=payload.title.strip(),
         description=payload.description.strip(),
         tags=payload.tags,
+        fandom_ids=_resolve_fandom_ids(payload.fandom_names),
+        publication_mode=_parse_publication_mode(payload.publication_mode),
+        external_author_name=payload.external_author_name.strip(),
+        external_source_url=payload.external_source_url.strip(),
+        external_chapter_count=payload.external_chapter_count,
+        external_updated_at=payload.external_updated_at,
+        language=payload.language.strip(),
     ))
     return {"novel": _novel_out(novel)}
 
@@ -1487,6 +1542,10 @@ def update_novel(novel_id: str, payload: NovelPatch,
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
     if isinstance(fields.get("title"), str):
         fields["title"] = fields["title"].strip()
+    if "fandom_names" in fields:
+        fields["fandom_ids"] = _resolve_fandom_ids(fields.pop("fandom_names"))
+    if "publication_mode" in fields:
+        fields["publication_mode"] = _parse_publication_mode(fields["publication_mode"])
     try:
         novel = store.update_novel(novel_id, profile.user_id, fields)
     except NotFoundError as exc:

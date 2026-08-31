@@ -691,17 +691,28 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         return published
 
     #: Chi nhung truong nay moi cho nguoi dung sua.
-    NOVEL_EDITABLE = ("title", "description", "tags")
+    NOVEL_EDITABLE = (
+        "title", "description", "tags",
+        "fandom_ids", "publication_mode", "external_author_name",
+        "external_source_url", "external_chapter_count",
+        "external_updated_at", "language",
+    )
 
     def update_novel(self, novel_id: str, owner_id: str,
                      fields: Dict[str, Any]) -> Novel:
         current = self.owned_novel(novel_id, owner_id)
         allowed = {k: v for k, v in fields.items() if k in self.NOVEL_EDITABLE}
         updated = replace(current, **allowed, updated_at=now_iso())
+        # `publication_mode` la enum trong `allowed` (can the cho `replace()`
+        # o tren) nhung Appwrite can `.value` — cung quy uoc voi `state` o
+        # `publish_novel`/`unpublish_novel`.
+        wire = dict(allowed)
+        if "publication_mode" in wire:
+            wire["publication_mode"] = wire["publication_mode"].value
         # KHONG gui `permissions`: sua noi dung khong duoc dong toi pham vi
         # hien thi. Doi cong khai/rieng tu chi qua publish/unpublish.
         self._update(COL_NOVELS, novel_id,
-                     {**allowed, "updated_at": updated.updated_at})
+                     {**wire, "updated_at": updated.updated_at})
         return updated
 
     def set_novel_cover(self, novel_id: str, owner_id: str,

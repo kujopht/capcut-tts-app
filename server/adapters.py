@@ -1355,7 +1355,12 @@ class MockMetadataStore(MockSocialStore):
 
     #: Chi nhung truong nay moi cho nguoi dung sua. `state`, `owner_id`,
     #: `novel_id` deu do SERVER quyet dinh.
-    NOVEL_EDITABLE = ("title", "description", "tags")
+    NOVEL_EDITABLE = (
+        "title", "description", "tags",
+        "fandom_ids", "publication_mode", "external_author_name",
+        "external_source_url", "external_chapter_count",
+        "external_updated_at", "language",
+    )
 
     def update_novel(self, novel_id: str, owner_id: str,
                      fields: Dict[str, Any]) -> Novel:

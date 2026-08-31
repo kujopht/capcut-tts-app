@@ -69,6 +69,42 @@ class NotConfiguredCoverProvider:
         )
 
 
+#: Mau nen TAT DINH theo bang bam — cung fandom+mood LUON ra cung mau, khong
+#: ngau nhien, khong can model. Bang mau ngan, de doc, KHONG phai bang tra
+#: cuu day du — muc dich la phan biet truc quan cac truyen khac nhau tren
+#: trang danh sach, khong phai mot he thong thiet ke.
+_MAU_NEN = (
+    "#3b3a63", "#5c3d5c", "#3d5c56", "#5c4a3d", "#3d4a5c", "#5c3d3d", "#3d5c4f",
+)
+
+
+class PlaceholderCoverProvider:
+    """
+    Anh bia TAM THOI khi CHUA chon model sinh anh that (mission: "Do NOT
+    leave first real works without a visual asset... create deterministic
+    placeholder/templated cover assets"). Sinh SVG (van ban thuan, KHONG
+    can Pillow/thu vien anh nao) — nen mau tat dinh tu hash(fandom+mood),
+    CHUA co tieu de: `CoverPipelineService.render_deterministic_overlay`
+    chen tieu de sau, cung mot co che.
+
+    CO CHU Y day KHONG PHAI "model sinh anh" — day la khung/nen trong, giu
+    dung ranh gioi `CoverProvider` de sau nay thay bang provider that ma
+    khong doi `CoverPipelineService`/HTTP route nao ca."""
+
+    provider_name: str = "placeholder_svg"
+
+    def generate(self, request: CoverGenerationRequest) -> bytes:
+        seed = f"{request.fandom}|{request.mood}".encode("utf-8")
+        mau = _MAU_NEN[int(hashlib.sha256(seed).hexdigest(), 16) % len(_MAU_NEN)]
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" '
+            'viewBox="0 0 600 800">'
+            f'<rect width="600" height="800" fill="{mau}"/>'
+            '</svg>'
+        )
+        return svg.encode("utf-8")
+
+
 class CoverJobStatus(str, Enum):
     """
     Trạng thái vòng đời của một công việc sinh ảnh bìa.
@@ -111,14 +147,40 @@ class CoverPipelineService:
         Ghi đè tiêu đề một cách tất định lên ảnh bìa gốc.
 
         Không phụ thuộc vào mô hình AI để render chữ nhằm tránh lỗi chính tả.
-        Do chưa tích hợp thư viện xử lý ảnh (ví dụ: Pillow), phương thức này giữ nguyên
-        hợp đồng giao diện: trả về ảnh gốc nếu tiêu đề rỗng, hoặc raise NotImplementedError.
+
+        SVG là trường hợp ĐẶC BIỆT: chèn một thẻ `<text>` vào ngay trước
+        `</svg>` là thao tác chuỗi thuần tuý, không cần Pillow/thư viện ảnh
+        nào — trình duyệt/trình xem tự render chữ đó khi hiển thị, đây vẫn
+        là "code quyết định chữ nằm ở đâu", không phải model đoán. Với ảnh
+        RASTER (PNG/JPEG chẳng hạn, từ một provider thật sau này), phương
+        thức vẫn giữ nguyên hành vi cũ: trả ảnh gốc nếu tiêu đề rỗng, hoặc
+        raise NotImplementedError vì việc đó cần quyết định thư viện ảnh
+        (vd Pillow) chưa được đưa ra.
         """
         if not title:
             return base_image
+        text_thap = base_image.lstrip()[:200].lower()
+        if text_thap.startswith(b"<?xml") or text_thap.startswith(b"<svg"):
+            return self._chen_tieu_de_vao_svg(base_image, title)
         raise NotImplementedError(
             "Text overlay rendering requires an image manipulation library decision (e.g. Pillow) which has not yet been made."
         )
+
+    @staticmethod
+    def _chen_tieu_de_vao_svg(svg_bytes: bytes, title: str) -> bytes:
+        """Chen mot the `<text>` TAT DINH ngay truoc `</svg>` — escape XML
+        that su (khong chi thay the '<'/'>' rieng le, con '&' truoc ca hai
+        de khong tao thuc the XML sai)."""
+        an_toan = (
+            title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
+        the_van_ban = (
+            '<text x="300" y="740" text-anchor="middle" '
+            'font-family="sans-serif" font-size="32" fill="#ffffff">'
+            f"{an_toan}</text>"
+        )
+        svg_text = svg_bytes.decode("utf-8")
+        return svg_text.replace("</svg>", the_van_ban + "</svg>").encode("utf-8")
 
     def run_job(self, job: CoverJob) -> CoverJob:
         """
@@ -142,7 +204,13 @@ class CoverPipelineService:
             )
 
             content_hash = hashlib.sha256(final_bytes).hexdigest()
-            object_key = f"covers/{job.novel_id}/{job.job_id}.png"
+            # Duoi tep THEO DUNG dinh dang byte that su tra ve — mot provider
+            # SVG (vd `PlaceholderCoverProvider`) khong duoc dat ten `.png`,
+            # se sai dinh dang khi mot client khac (hay chinh trinh duyet)
+            # doc theo phan duoi.
+            duoi = "svg" if final_bytes.lstrip()[:5].lower().startswith(b"<?xml") \
+                or final_bytes.lstrip()[:4].lower().startswith(b"<svg") else "png"
+            object_key = f"covers/{job.novel_id}/{job.job_id}.{duoi}"
 
             asset = MediaAsset(
                 owner_id=job.novel_id,

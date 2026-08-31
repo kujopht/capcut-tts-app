@@ -206,3 +206,61 @@ class TestCoverPipeline(unittest.TestCase):
         self.assertEqual(finished_job.status, CoverJobStatus.FAILED)
         self.assertIn("Text overlay rendering requires", finished_job.error_message)
         self.assertIsNone(finished_job.media_asset_id)
+
+
+class TestPlaceholderCoverProvider(unittest.TestCase):
+    """Anh bia tam thoi (SVG, khong Pillow) — mission: 'do not leave first
+    real works without a visual asset' truoc khi chon model that."""
+
+    def setUp(self):
+        self.store = MockMediaAssetStore()
+
+    def test_generate_tra_ve_svg_hop_le(self):
+        from server.cover_pipeline import PlaceholderCoverProvider
+        provider = PlaceholderCoverProvider()
+        req = CoverGenerationRequest(
+            novel_id="nov_1", fandom="Naruto", title="T", summary="S")
+        svg_bytes = provider.generate(req)
+        self.assertTrue(svg_bytes.startswith(b"<svg"))
+        self.assertIn(b"</svg>", svg_bytes)
+
+    def test_tat_dinh_cung_fandom_mood_ra_cung_mau(self):
+        from server.cover_pipeline import PlaceholderCoverProvider
+        provider = PlaceholderCoverProvider()
+        req1 = CoverGenerationRequest(
+            novel_id="nov_1", fandom="Naruto", title="T", summary="S", mood="dark")
+        req2 = CoverGenerationRequest(
+            novel_id="nov_2", fandom="Naruto", title="Khac", summary="Khac", mood="dark")
+        self.assertEqual(provider.generate(req1), provider.generate(req2))
+
+    def test_run_job_voi_placeholder_thanh_cong_va_de_duoc_svg(self):
+        from server.cover_pipeline import PlaceholderCoverProvider
+        service = CoverPipelineService(
+            media_asset_store=self.store, provider=PlaceholderCoverProvider())
+        req = CoverGenerationRequest(
+            novel_id="nov_ph", fandom="Naruto", title="Truyện thử nghiệm",
+            summary="S")
+        job = service.run_job(CoverJob(novel_id="nov_ph", request=req))
+
+        self.assertEqual(job.status, CoverJobStatus.DONE)
+        self.assertIsNotNone(job.media_asset_id)
+        asset = self.store.get_asset(job.media_asset_id)
+        self.assertTrue(asset.object_key.endswith(".svg"))
+        self.assertEqual(asset.media_type, MediaType.IMAGE)
+
+
+class TestSvgTextOverlay(unittest.TestCase):
+    def test_chen_tieu_de_vao_svg_va_escape_ky_tu_dac_biet(self):
+        service = CoverPipelineService(
+            media_asset_store=MockMediaAssetStore(), provider=NotConfiguredCoverProvider())
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+        ket_qua = service.render_deterministic_overlay(svg, "A & B <C>")
+        text = ket_qua.decode("utf-8")
+        self.assertIn("A &amp; B &lt;C&gt;", text)
+        self.assertTrue(text.rstrip().endswith("</svg>"))
+
+    def test_svg_tieu_de_rong_tra_ve_nguyen_ban(self):
+        service = CoverPipelineService(
+            media_asset_store=MockMediaAssetStore(), provider=NotConfiguredCoverProvider())
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+        self.assertEqual(service.render_deterministic_overlay(svg, ""), svg)

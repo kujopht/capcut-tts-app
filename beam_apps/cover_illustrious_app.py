@@ -127,6 +127,18 @@ diffusers-API assumptions in one deploy, `generate()` currently uses only
 the FIRST image in each list for actual conditioning - the schema accepts
 more for forward-compatibility, but only the first is read for now (see
 inline comment at the point images are selected).
+
+TIMEOUT: `@endpoint(timeout=900, ...)` - real bug, real fix. A real
+reference-proof call ended in the Beam dashboard as task
+status=Cancelled with Started="-"/Duration="-" (never actually ran).
+Beam's own `timeout` default is 180s (confirmed via
+docs.beam.cloud/v2/reference/py-sdk.md), and a cold container running
+on_start (base SDXL weights + the separate IP-Adapter pipeline's weights,
+all first-time downloads if the Volume cache is empty) plus real GPU
+inference can plausibly exceed that. See the `@endpoint(...)` call's own
+comment for the full citation. `keep_warm_seconds` (the scale-to-zero
+knob) is untouched - this only changes how long a single task is allowed
+to run, not container idle lifecycle.
 """
 import sys
 from pathlib import Path
@@ -195,9 +207,31 @@ def load_pipeline():
     gpu="RTX4090",  # 24GB VRAM - comfortable headroom over Animagine XL's ~8GB
     cpu=4,
     memory="16Gi",
-    # Real GPU-hours only bill while a request is in flight (Beam scale-to-zero,
-    # confirmed via docs.beam.cloud/v2/resources/pricing-and-billing: "You are
-    # only charged when your containers are running" - no charge while idle,
+    timeout=900,
+    # Real bug (user-reported): a real reference-proof call ended with the
+    # Beam dashboard showing task status=Cancelled, Started="-",
+    # Duration="-" - i.e. the task never got to actually run before being
+    # killed. Beam's @endpoint `timeout` defaults to 180 SECONDS (confirmed
+    # via docs.beam.cloud/v2/reference/py-sdk.md's own decorator signature:
+    # `timeout: float = 180` - "maximum number of seconds a task can run
+    # before it times out"), and "Endpoints are RESTful APIs, designed for
+    # synchronous tasks that can complete in 180 seconds or less"
+    # (docs.beam.cloud/v2/endpoint/overview). A genuinely cold container
+    # running on_start (base SDXL weights + the SEPARATE IP-Adapter
+    # pipeline's CLIP image encoder + adapter weights, all first-time
+    # downloads if the Volume cache is empty) can plausibly exceed that,
+    # especially combined with actual GPU inference on the same request.
+    # 900s (15 min) gives generous headroom for a fully-cold first call
+    # without disabling the timeout entirely (`timeout=-1` would remove
+    # crash/hang protection - not done here).
+    # keep_warm_seconds is DELIBERATELY left at its default (300s) - this
+    # is the scale-to-zero/idle-shutdown knob, a DIFFERENT setting from
+    # `timeout` above. Do not confuse the two: raising `timeout` makes a
+    # single task allowed to run longer; it does not keep the container
+    # warm between requests. Real GPU-hours only bill while a request is
+    # in flight (Beam scale-to-zero, confirmed via
+    # docs.beam.cloud/v2/resources/pricing-and-billing: "You are only
+    # charged when your containers are running" - no charge while idle,
     # no charge for cold-start machine spin-up).
 )
 def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,

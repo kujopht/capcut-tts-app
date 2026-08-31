@@ -72,6 +72,102 @@ def _load_generate_with_fake_beam():
     return mod.generate
 
 
+def _load_module_and_capture_endpoint_kwargs():
+    """Same fake-`beam`-module technique as _load_generate_with_fake_beam(),
+    but the fake `endpoint` CAPTURES the kwargs it was called with instead
+    of discarding them - proving exactly what the real source file passes
+    to `@endpoint(...)` (name, timeout, gpu, etc.), since that's a
+    decorator ARGUMENT, not a parameter of generate() itself, and
+    inspect.signature() on generate() cannot see it."""
+    fake_beam = types.ModuleType("beam")
+    captured_kwargs = {}
+
+    class _FakeImage:
+        def __init__(self, *a, **kw):
+            pass
+
+        def add_python_packages(self, *a, **kw):
+            return self
+
+    class _FakeVolume:
+        def __init__(self, *a, **kw):
+            pass
+
+    def _fake_endpoint(**kw):
+        captured_kwargs.update(kw)
+
+        def _decorator(fn):
+            return fn
+        return _decorator
+
+    fake_beam.Image = _FakeImage
+    fake_beam.Volume = _FakeVolume
+    fake_beam.endpoint = _fake_endpoint
+
+    app_dir = str(Path(__file__).resolve().parent.parent)
+    with mock.patch.dict(sys.modules, {"beam": fake_beam}):
+        sys.path.insert(0, app_dir)
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "cover_illustrious_app_endpoint_kwargs_test",
+                Path(app_dir) / "cover_illustrious_app.py")
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        finally:
+            sys.path.remove(app_dir)
+    return captured_kwargs
+
+
+class TestEndpointTimeoutConfig(unittest.TestCase):
+    """Regression test for a REAL production incident: a reference-proof
+    call ended in the Beam dashboard as task status=Cancelled with
+    Started="-"/Duration="-" - the task never actually ran before being
+    killed by Beam's own @endpoint `timeout` (default 180s, confirmed via
+    docs.beam.cloud/v2/reference/py-sdk.md's own decorator signature).
+    Protects the actual `@endpoint(...)` call in the source file - if
+    `timeout` is ever removed or shrunk back below what a cold reference-
+    model startup needs, this fails locally before a deploy."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.endpoint_kwargs = _load_module_and_capture_endpoint_kwargs()
+
+    def test_timeout_is_explicitly_set(self):
+        self.assertIn("timeout", self.endpoint_kwargs)
+
+    def test_timeout_is_900_seconds(self):
+        self.assertEqual(self.endpoint_kwargs["timeout"], 900)
+
+    def test_timeout_exceeds_beam_sdk_180_second_default(self):
+        """900 must genuinely be more headroom than the SDK default this
+        incident was caused by, not just 'set to something'."""
+        BEAM_SDK_DEFAULT_TIMEOUT_SECONDS = 180
+        self.assertGreater(
+            self.endpoint_kwargs["timeout"], BEAM_SDK_DEFAULT_TIMEOUT_SECONDS)
+
+    def test_timeout_is_not_disabled(self):
+        """timeout=-1 disables the timeout entirely (per the real SDK
+        docs) - that would remove crash/hang protection, which was never
+        asked for; only more headroom was."""
+        self.assertNotEqual(self.endpoint_kwargs["timeout"], -1)
+
+    def test_keep_warm_seconds_left_at_scale_to_zero_default(self):
+        """Requirement 3 - must NOT force a permanently warm GPU. This
+        source file must not explicitly set keep_warm_seconds at all
+        (leaving the SDK's own default - the scale-to-zero idle-shutdown
+        knob - untouched, distinct from `timeout` above)."""
+        self.assertNotIn("keep_warm_seconds", self.endpoint_kwargs)
+
+    def test_gpu_and_model_config_unchanged(self):
+        """Requirement 2 - do not change model/GPU/proof logic alongside
+        the timeout fix."""
+        self.assertEqual(self.endpoint_kwargs.get("gpu"), "RTX4090")
+        self.assertEqual(self.endpoint_kwargs.get("cpu"), 4)
+        self.assertEqual(self.endpoint_kwargs.get("memory"), "16Gi")
+        self.assertEqual(self.endpoint_kwargs.get("name"), "cover-illustrious")
+
+
 class TestGenerateAcceptsSeedKeyword(unittest.TestCase):
     """Bind-only (does NOT execute the body - no torch/diffusers/CUDA
     needed), proving the exact calling convention Beam uses against the

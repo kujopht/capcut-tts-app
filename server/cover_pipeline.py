@@ -10,10 +10,13 @@ nào ở giai đoạn này (tương tự như DriveArchiveBackend trong storage_
 
 from __future__ import annotations
 
+import base64
 import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, List, Optional, Protocol
+from typing import Any, List, Literal, Optional, Protocol
+
+import httpx
 
 from server.domain import (
     MediaAsset,
@@ -67,6 +70,174 @@ class NotConfiguredCoverProvider:
         raise NotImplementedError(
             "Cover generation model has not been chosen or deployed yet."
         )
+
+
+class CoverProviderError(Exception):
+    """Loi chung khi goi provider sinh anh bia that that bai (HTTP 500, timeout, v.v.)."""
+
+
+class CoverPromptBuilder:
+    """
+    Xay dung prompt text cho model sinh anh bia (anime cover art).
+    TAT DINH — cung input luon ra cung prompt, khong ngau nhien.
+    KHONG bao gom ten tieu de thuan — model chi ve ART, application code
+    chen tieu de qua overlay SVG (xem render_deterministic_overlay).
+    """
+
+    @staticmethod
+    def build_prompt(request: CoverGenerationRequest) -> str:
+        parts: List[str] = ["anime light novel cover illustration"]
+
+        if request.fandom:
+            parts.append(f"{request.fandom} fanart style")
+
+        if request.characters:
+            chars = ", ".join(request.characters)
+            parts.append(f"featuring {chars}")
+
+        if request.mood:
+            parts.append(f"{request.mood} mood")
+
+        if request.genres:
+            genres = ", ".join(request.genres)
+            parts.append(f"{genres} genre")
+
+        if request.visual_style:
+            parts.append(request.visual_style)
+
+        parts.append("detailed anime digital painting")
+        parts.append("dynamic pose")
+        parts.append("vibrant colors")
+        parts.append("high quality")
+
+        return ", ".join(parts)
+
+
+def wrap_raster_as_overlayable_svg(
+    png_bytes: bytes, *, width: int = 1024, height: int = 1536,
+) -> bytes:
+    """
+    Cuon anh raster (PNG) vao mot tai lieu SVG de co the ap dung
+    render_deterministic_overlay (SVG text injection) tren do.
+
+    Phuong phap: data:image/png;base64,... trong the <image>.
+    Khong can Pillow — toan bo la chuan SVG.
+    """
+    b64 = base64.b64encode(png_bytes).decode("ascii")
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}">'
+        f'<image width="100%" height="100%" '
+        f'href="data:image/png;base64,{b64}"/>'
+        f'</svg>'
+    )
+    return svg.encode("utf-8")
+
+
+class HttpImageCoverProvider:
+    """
+    Provider sinh anh bia that — goi endpoint self-hosted image generation
+    (Illustrious/SDXL-class) qua HTTP.
+
+    Ho tro hai kieu API chinh:
+      - "a1111": Automatic1111 stable-diffusion-webui REST
+        (POST /sdapi/v1/txt2img, response {"images": ["<base64>", ...]})
+      - "simple": Custom REST
+        (POST /generate, response {"image_base64": "..."} hoac raw bytes)
+
+    Mau goc tu `_OpenAICompatFreeProvider` — dung httpx.Client, timeout
+    dai, x loi typed (CoverProviderError) thay vi de lo httpx exception.
+    """
+
+    TIMEOUT_SECONDS: float = 120.0
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str = "",
+        api_style: Literal["a1111", "simple"] = "a1111",
+        timeout_seconds: float = 120.0,
+        client: Optional[httpx.Client] = None,
+    ):
+        self._api_style = api_style
+        self._timeout = timeout_seconds
+        if client is not None:
+            self._client = client
+            if api_key:
+                self._client.headers["Authorization"] = f"Bearer {api_key}"
+        else:
+            headers: dict[str, str] = {}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            self._client = httpx.Client(
+                base_url=base_url.rstrip("/"),
+                headers=headers,
+                timeout=self._timeout,
+            )
+
+    provider_name: str = "http_image"
+
+    def generate(self, request: CoverGenerationRequest) -> bytes:
+        prompt = CoverPromptBuilder.build_prompt(request)
+
+        try:
+            if self._api_style == "a1111":
+                return self._call_a1111(prompt)
+            return self._call_simple(prompt)
+        except httpx.HTTPError as exc:
+            raise CoverProviderError(
+                f"Loi goi dich vu sinh anh: {exc}") from exc
+
+    def _call_a1111(self, prompt: str) -> bytes:
+        payload = {
+            "prompt": prompt,
+            "steps": 28,
+            "width": 1024,
+            "height": 1536,
+        }
+        try:
+            resp = self._client.post("/sdapi/v1/txt2img", json=payload)
+        except httpx.HTTPError as exc:
+            raise CoverProviderError(
+                f"Loi goi dich vu sinh anh: {exc}") from exc
+
+        if resp.status_code != 200:
+            raise CoverProviderError(
+                f"Dich vu sinh anh tra loi {resp.status_code}: {resp.text[:300]}")
+
+        try:
+            data = resp.json()
+            raw_b64 = data["images"][0]
+        except (KeyError, IndexError, ValueError) as exc:
+            raise CoverProviderError(
+                "Phan hoi dich vu sinh anh khong dung dinh dang.") from exc
+
+        return base64.b64decode(raw_b64)
+
+    def _call_simple(self, prompt: str) -> bytes:
+        payload = {"prompt": prompt}
+        try:
+            resp = self._client.post("/generate", json=payload)
+        except httpx.HTTPError as exc:
+            raise CoverProviderError(
+                f"Loi goi dich vu sinh anh: {exc}") from exc
+
+        if resp.status_code != 200:
+            raise CoverProviderError(
+                f"Dich vu sinh anh tra loi {resp.status_code}: {resp.text[:300]}")
+
+        ct = resp.headers.get("content-type", "")
+        if "application/json" in ct:
+            try:
+                data = resp.json()
+                return base64.b64decode(data["image_base64"])
+            except (KeyError, ValueError) as exc:
+                raise CoverProviderError(
+                    "Phan hoi JSON khong co image_base64 hop le.") from exc
+
+        return resp.content
 
 
 #: Mau nen TAT DINH theo bang bam — cung fandom+mood LUON ra cung mau, khong
@@ -199,8 +370,23 @@ class CoverPipelineService:
 
         try:
             raw_bytes = self._provider.generate(job.request)
+            # Provider tra RASTER (PNG tu HttpImageCoverProvider that su) +
+            # co tieu de can chen: render_deterministic_overlay chi biet chen
+            # <text> vao SVG, nem NotImplementedError voi raster thuan (quyet
+            # dinh thu vien anh nhu Pillow chua duoc dua ra). Cuon raster vao
+            # mot SVG bao ngoai (wrap_raster_as_overlayable_svg) TRUOC —
+            # khong can Pillow, ket qua van la SVG hop le de overlay chen
+            # chu binh thuong. Chi ap dung khi CO tieu de: khong tieu de thi
+            # giu nguyen dinh dang provider tra ve (vd PlaceholderCoverProvider
+            # tra SVG, khong can cuon).
+            overlay_input = raw_bytes
+            if job.request.title:
+                dau = raw_bytes.lstrip()[:5].lower()
+                la_svg = dau.startswith(b"<?xml") or dau.startswith(b"<svg")
+                if not la_svg:
+                    overlay_input = wrap_raster_as_overlayable_svg(raw_bytes)
             final_bytes = self.render_deterministic_overlay(
-                raw_bytes, job.request.title
+                overlay_input, job.request.title
             )
 
             content_hash = hashlib.sha256(final_bytes).hexdigest()

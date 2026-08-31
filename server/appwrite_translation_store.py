@@ -65,6 +65,7 @@ COL_PROVIDER_CONNECTIONS = "translation_provider_connections"
 _PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_PROJECTS: (
         "project_id", "owner_id", "title", "source_text", "source_language",
+        "source_text_hash",
         "target_language", "genre", "naming_mode", "quality_mode",
         "custom_instruction", "source_filename", "chapter_summaries",
         "translated_chapters", "imported_to_novel_id", "chapter_warnings",
@@ -87,7 +88,7 @@ _PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_VERSIONS: (
         "version_id", "project_id", "chapter_index", "paragraph_index",
         "operation", "pass_type", "previous_text", "new_text", "actor_id",
-        "provider_id", "model_id", "created_at",
+        "provider_id", "model_id", "translated_content_hash", "created_at",
     ),
     COL_PROVIDER_CONNECTIONS: (
         "connection_id", "user_id", "provider_id", "encrypted_secret",
@@ -139,6 +140,7 @@ def _project_to_row(p: TranslationProject) -> Dict[str, Any]:
         "title": p.title,
         "source_text": p.source_text,
         "source_language": p.source_language,
+        "source_text_hash": p.source_text_hash,
         "target_language": p.target_language,
         "genre": p.genre.value,
         "naming_mode": p.naming_mode.value,
@@ -180,6 +182,7 @@ def _project_from_row(row: Dict[str, Any]) -> TranslationProject:
         title=str(row.get("title") or ""),
         source_text=str(row.get("source_text") or ""),
         source_language=str(row.get("source_language") or "zh"),
+        source_text_hash=str(row.get("source_text_hash") or ""),
         target_language=str(row.get("target_language") or "vi"),
         genre=genre,
         naming_mode=naming,
@@ -319,6 +322,7 @@ def _version_to_row(v: TranslationVersion) -> Dict[str, Any]:
         "actor_id": v.actor_id,
         "provider_id": v.provider_id,
         "model_id": v.model_id,
+        "translated_content_hash": v.translated_content_hash,
         "created_at": v.created_at,
     }
 
@@ -337,6 +341,7 @@ def _version_from_row(row: Dict[str, Any]) -> TranslationVersion:
         actor_id=str(row.get("actor_id") or ""),
         provider_id=str(row.get("provider_id") or ""),
         model_id=str(row.get("model_id") or ""),
+        translated_content_hash=str(row.get("translated_content_hash") or ""),
         created_at=str(row.get("created_at") or ""),
     )
 

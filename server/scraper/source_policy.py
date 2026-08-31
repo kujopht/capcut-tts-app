@@ -107,6 +107,24 @@ _KNOWN_SOURCE_POLICIES: Dict[str, SourcePolicyRecord] = {
                   "duoc chinh sach that su, va ha tang tu choi fetch tu dong."),
         verified_at="2026-08-31",
     ),
+    "royalroad.com": SourcePolicyRecord(
+        domain="royalroad.com",
+        policy_class=SourcePolicyClass.POLICY_BLOCKED,
+        evidence=(
+            "Domain nay DA nam san trong `site_registry.py` tu mot mission "
+            "truoc (robots.txt cho phep tai lien ket chuong, nen da them "
+            "vao) — nhung ToS (cap nhat 2025-03-03) cam RO RANG: 'use or "
+            "launch any manual or automated system or software, devices, "
+            "scripts robots, other means or processes to access, scrape, "
+            "crawl, cache, spider any web page or other service contained "
+            "in our Services'. robots.txt cho phep KHONG co nghia ToS cho "
+            "phep — hai thu khac nhau, va ToS la rang buoc phap ly that su. "
+            "site_registry.py CO CHU Y khong bi xoa cau hinh (lich su ky "
+            "thuat) nhung moi lan `discover`/`start_or_continue`/`confirm_"
+            "unknown_source` goi domain nay deu bi chan o day TRUOC KHI "
+            "cham toi site_registry."),
+        verified_at="2026-08-31",
+    ),
     "quotev.com": SourcePolicyRecord(
         domain="quotev.com",
         policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,

@@ -31,6 +31,10 @@ class CheckSourcePolicyTest(unittest.TestCase):
         record = check_source_policy("https://www.fanfiction.net/s/123/1/T")
         self.assertEqual(record.policy_class, SourcePolicyClass.TECHNICALLY_UNSTABLE)
 
+    def test_royalroad_la_policy_blocked(self):
+        record = check_source_policy("https://www.royalroad.com/fiction/1/x")
+        self.assertEqual(record.policy_class, SourcePolicyClass.POLICY_BLOCKED)
+
     def test_khop_ca_www_prefix(self):
         record = check_source_policy("https://www.archiveofourown.org/works/123")
         self.assertIsNotNone(record)
@@ -55,6 +59,14 @@ class ScraperOpsServiceRejectsBlockedSourceTest(unittest.TestCase):
         svc = ScraperOpsService(MockScrapeRunStore())
         with self.assertRaises(SourcePolicyBlockedError):
             svc.confirm_unknown_source("https://archiveofourown.org/works/123")
+
+    def test_start_or_continue_tu_choi_royalroad_du_da_co_trong_site_registry(self):
+        """royalroad.com DA co SiteConfig san (`_co_the_dung_ngay` tra ve
+        True) — dung day de khoa gate nay THAT SU chan duong tat 'domain da
+        biet di thang vao /runs', khong chi chan duong discovery."""
+        svc = ScraperOpsService(MockScrapeRunStore())
+        with self.assertRaises(SourcePolicyBlockedError):
+            svc.start_or_continue("https://royalroad.com/fiction/12345/mot-truyen")
 
     def test_domain_hop_le_van_di_qua_binh_thuong(self):
         fake_cfg = {"nguon-hop-le.example": SiteConfig(

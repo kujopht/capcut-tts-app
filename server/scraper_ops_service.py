@@ -421,6 +421,15 @@ class ScraperOpsService:
 
     def start_or_continue(self, url: str, *, chapter_limit: Optional[int] = None
                           ) -> Dict[str, Any]:
+        """Anime Fanfic Production Canary: `assert_source_not_blocked` o
+        DAY, khong chi o `discover()` — domain "da biet" (co san trong
+        `site_registry.py` tu truoc khi khao sat chinh sach nay ton tai, vd
+        Royal Road: ToS cam scrape ro rang nhung van con cau hinh cu) di
+        THANG vao day qua `POST /api/admin/scraper/runs`, KHONG bat buoc
+        qua `/discover` truoc (xem runbook, muc 1: "nguon da biet... chi
+        can dan thang vao /runs"). Thieu kiem tra o day thi gate o
+        `discover()` vo nghia voi moi domain da duoc cau hinh san."""
+        assert_source_not_blocked(url)
         svc = self._service_for_new(url)
         run = svc.plan_run(url, chapter_limit=chapter_limit)
         return {"run": run, "progress": run.progress()}

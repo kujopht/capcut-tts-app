@@ -135,3 +135,54 @@ def fetch_and_spool_raw(
     return RawArchiveResult(
         local_dir=local_dir, manifest_path=manifest_path, raw_path=raw_path,
         manifest=manifest)
+
+
+def spool_uploaded_raw(
+        data: bytes, *, spool_root: Path, filename: str,
+        importer_user_id: str, scan_text: Optional[str] = None) -> RawArchiveResult:
+    """Nhu `fetch_and_spool_raw` nhung cho FILE NGUOI DUNG TAI LEN (Authorized
+    Import), khong phai mot URL fetch — khong co `FetchResult`/HTTP, nen
+    manifest ghi lai danh tinh nguoi nhap + ten tep goc thay vi final_url/
+    status_code.
+
+    `scan_text`: van ban DA GIAI MA/TRICH XUAT dung de quet du lieu nhay
+    cam — dinh dang nhi phan (EPUB/DOCX/ZIP nen) KHONG the quet truc tiep
+    tren byte tho (se la rac nhi phan, khong phai loi regex co y nghia).
+    `None` (mac dinh) = BO QUA quet, ghi ro `sensitive_scan.status =
+    "skipped_binary"` trong manifest — KHONG bao gio bao "clean" cho mot
+    thu chua thuc su quet."""
+    if scan_text is not None:
+        hit = scan_for_sensitive_data(scan_text)
+        if hit:
+            raise SensitiveContentDetected(
+                f"Phat hien du lieu nhay cam ({hit}) trong tep tai len "
+                f"{filename!r} — tu choi dua vao raw archive spool.")
+
+    raw_sha256 = hashlib.sha256(data).hexdigest()
+    slug = raw_sha256[:16]
+    local_dir = spool_root / slug
+    local_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = local_dir / (filename or "upload.bin")
+    raw_path.write_bytes(data)
+
+    manifest = {
+        "importer_user_id": importer_user_id,
+        "original_filename": filename,
+        "raw_file": raw_path.name,
+        "raw_bytes": len(data),
+        "raw_sha256": raw_sha256,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "source": "authorized_upload",
+        "sensitive_scan": (
+            {"status": "clean", "patterns_checked": len(_SENSITIVE_PATTERNS)}
+            if scan_text is not None
+            else {"status": "skipped_binary", "patterns_checked": 0}
+        ),
+    }
+    manifest_path = local_dir / MANIFEST_FILENAME
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return RawArchiveResult(
+        local_dir=local_dir, manifest_path=manifest_path, raw_path=raw_path,
+        manifest=manifest)

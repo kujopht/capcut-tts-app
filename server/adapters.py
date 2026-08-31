@@ -52,6 +52,7 @@ from server.domain import (
     new_id,
     now_iso,
     MediaAsset,
+    ImportRecord,
 )
 from server.social_store import MockSocialStore
 
@@ -2040,6 +2041,32 @@ class MockMediaAssetStore:
     def list_assets(self, owner_id: str) -> List[MediaAsset]:
         with self._lock:
             return [a for a in self._assets.values() if a.owner_id == owner_id]
+
+
+class MockImportRecordStore:
+    """Ban ghi nguon goc/trach nhiem giai trinh cho Authorized Import — xem
+    `ImportRecord`. O bo nho, MOT tien trinh, giong het cac Mock store khac
+    trong file nay; lop ben vung that (Appwrite) la mot boc rieng sau, khong
+    doi hop dong nay."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._records: Dict[str, ImportRecord] = {}
+
+    def create_record(self, record: ImportRecord) -> ImportRecord:
+        with self._lock:
+            self._records[record.import_id] = record
+            return record
+
+    def get_record(self, import_id: str) -> ImportRecord:
+        with self._lock:
+            if import_id not in self._records:
+                raise NotFoundError("Không tìm thấy bản ghi nhập.")
+            return self._records[import_id]
+
+    def list_by_novel(self, novel_id: str) -> List[ImportRecord]:
+        with self._lock:
+            return [r for r in self._records.values() if r.novel_id == novel_id]
 
 
 # -----------------------------------------------------------------------------

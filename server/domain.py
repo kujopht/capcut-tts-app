@@ -1390,3 +1390,59 @@ class Fandom:
             "language_aliases": dict(self.language_aliases),
             "created_at": self.created_at,
         }
+
+
+class RightsBasis(str, Enum):
+    """Co so quyen ma nguoi nhap TU KHAI khi nhap noi dung day du (Authorized
+    Import). Day la mot TIN HIEU KIEM DUYET/TRACH NHIEM GIAI TRINH, KHONG
+    PHAI bang chung so huu — xem `ImportRecord`."""
+
+    AUTHOR = "author"
+    PERMISSION_GRANTED = "permission_granted"
+
+
+@dataclass
+class ImportRecord:
+    """
+    Ban ghi nguon goc/trach nhiem giai trinh cho MOT lan nhap noi dung day du
+    qua Authorized Import — KHONG PHAI bang chung phap ly ve quyen so huu.
+
+    Tu khai `rights_basis` (nguoi nhap tu nhan la tac gia HOAC da duoc tac
+    gia cho phep) duoc LUU LAI kem danh tinh/thoi diem/nguon/dau van tay tep —
+    du de kiem duyet dieu tra khi co khieu nai, KHONG du de tu dong xac minh
+    quyen that su. Xem mission "AUTHORIZED FANFIC INGESTION": "Do not treat
+    this checkbox as proof of ownership; it is provenance/accountability
+    metadata and a moderation signal."
+
+    `original_file_hash` (sha256 cua BYTE THO nguoi dung tai len, TRUOC khi
+    trich xuat/chuan hoa) khac `content_hash` (sha256 cua van ban DA CHUAN
+    HOA, cung quy uoc voi `bulk_import_domain.py::chuan_hoa_noi_dung`) — hai
+    hash phuc vu hai muc dich khac nhau: cai truoc doi soat CHINH XAC tep da
+    tai len (khieu nai ban quyen thuong dan chieu tep goc), cai sau phat hien
+    NOI DUNG trung lap du dinh dang tep khac nhau.
+    """
+
+    novel_id: str
+    importer_user_id: str
+    rights_basis: RightsBasis
+    #: "authorized_upload" cho luong tai tep len; mot URL that cho truong hop
+    #: nhap-tu-URL duoc cho phep ro rang (hiem, xem mission brief muc 1).
+    source: str
+    original_filename: str
+    original_file_hash: str
+    content_hash: str
+    import_id: str = field(default_factory=lambda: new_id("imr"))
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "import_id": self.import_id,
+            "novel_id": self.novel_id,
+            "importer_user_id": self.importer_user_id,
+            "rights_basis": self.rights_basis.value,
+            "source": self.source,
+            "original_filename": self.original_filename,
+            "original_file_hash": self.original_file_hash,
+            "content_hash": self.content_hash,
+            "created_at": self.created_at,
+        }

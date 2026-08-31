@@ -97,10 +97,23 @@ class TestCharacterIdentityRegistry(unittest.TestCase):
         self.assertIsNotNone(identity)
         self.assertEqual(identity.canonical_name, "Monkey D. Luffy")
 
-    def test_lora_and_reference_fields_default_empty_unused_placeholders(self):
+    def test_lora_field_defaults_empty_unused_placeholder(self):
         identity = self.registry.lookup("Re:Zero", "Natsuki Subaru")
         self.assertEqual(identity.lora_reference_id, "")
-        self.assertEqual(identity.reference_asset_url, "")
+
+    def test_reference_conditioning_fields_default_empty(self):
+        identity = self.registry.lookup("Re:Zero", "Natsuki Subaru")
+        self.assertEqual(identity.reference_image, "")
+        self.assertEqual(identity.reference_strength, 0.0)
+        self.assertEqual(identity.reference_source, "")
+        self.assertFalse(identity.has_reference_image())
+
+    def test_has_reference_image_true_when_set(self):
+        identity = CharacterVisualIdentity(
+            canonical_name="A", fandom="F",
+            reference_image="reference_images/a.png",
+            reference_strength=0.6, reference_source="fan art, example.com")
+        self.assertTrue(identity.has_reference_image())
 
 
 if __name__ == "__main__":

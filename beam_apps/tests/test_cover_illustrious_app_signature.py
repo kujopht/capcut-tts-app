@@ -116,5 +116,58 @@ class TestGenerateAcceptsSeedKeyword(unittest.TestCase):
         self.assertNotEqual(seed_param.default, inspect.Parameter.empty)
 
 
+class TestGenerateAcceptsReferenceConditioningKeywords(unittest.TestCase):
+    """Same bind-only technique as TestGenerateAcceptsSeedKeyword, applied
+    PROACTIVELY (before any deploy) to the reference-conditioning kwargs
+    added for the "Reference-Conditioned Cover Proof" mission - the exact
+    class of bug that caused the real seed incident (a client sending a
+    kwarg the deployed generate() doesn't accept) is checked here BEFORE
+    scripts/beam_cover_reference_proof.py ever makes a real GPU call."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.generate = _load_generate_with_fake_beam()
+        cls.sig = inspect.signature(cls.generate)
+
+    def test_call_with_no_reference_kwargs_does_not_raise(self):
+        """Requirement 9 - fallback: no references -> must keep binding
+        exactly like the pre-reference-conditioning signature."""
+        try:
+            self.sig.bind(context=object(), prompt="a cover prompt", seed=1)
+        except TypeError as exc:
+            self.fail(f"binding without reference kwargs raised TypeError: {exc}")
+
+    def test_call_with_both_reference_images_and_strength_does_not_raise(self):
+        try:
+            self.sig.bind(
+                context=object(), prompt="a cover prompt", seed=1,
+                primary_reference_image_base64="ZmFrZQ==",
+                secondary_reference_image_base64="ZmFrZQ==",
+                reference_strength=0.6)
+        except TypeError as exc:
+            self.fail(
+                f"binding with both reference kwargs raised TypeError: {exc} "
+                f"- this is the exact class of error the real seed incident "
+                f"was (task 04d22fcf-55f3-4f5e-acd3-337de6ff4432)")
+
+    def test_call_with_only_primary_reference_does_not_raise(self):
+        try:
+            self.sig.bind(
+                context=object(), prompt="a cover prompt",
+                primary_reference_image_base64="ZmFrZQ==")
+        except TypeError as exc:
+            self.fail(f"binding with only primary reference raised TypeError: {exc}")
+
+    def test_reference_kwargs_exist_with_empty_string_defaults(self):
+        for name in ("primary_reference_image_base64",
+                     "secondary_reference_image_base64"):
+            self.assertIn(name, self.sig.parameters)
+            self.assertEqual(self.sig.parameters[name].default, "")
+
+    def test_reference_strength_defaults_to_0_6(self):
+        self.assertIn("reference_strength", self.sig.parameters)
+        self.assertEqual(self.sig.parameters["reference_strength"].default, 0.6)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cover_illustrious_logic import (  # noqa: E402
-    DEFAULT_NEGATIVE_PROMPT, build_response_payload, resolve_negative_prompt,
+    DEFAULT_NEGATIVE_PROMPT, build_left_right_masks,
+    build_reference_conditioning_metadata, build_response_payload,
+    resolve_negative_prompt,
 )
 
 _TINY_PNG_BYTES = base64.b64decode(
@@ -111,6 +113,71 @@ class TestDefaultNegativePromptCoversCrowding(unittest.TestCase):
     def test_original_quality_terms_still_present(self):
         for term in ("lowres", "bad anatomy", "watermark", "blurry"):
             self.assertIn(term, DEFAULT_NEGATIVE_PROMPT)
+
+
+class TestBuildReferenceConditioningMetadata(unittest.TestCase):
+    def test_unused_returns_false_and_zero_strength(self):
+        meta = build_reference_conditioning_metadata(used=False, strength=0.6)
+        self.assertEqual(meta, {
+            "reference_conditioned": False, "reference_strength_used": 0.0})
+
+    def test_used_returns_true_and_actual_strength(self):
+        meta = build_reference_conditioning_metadata(used=True, strength=0.6)
+        self.assertEqual(meta, {
+            "reference_conditioned": True, "reference_strength_used": 0.6})
+
+    def test_keys_are_disjoint_from_build_response_payload_keys(self):
+        """Requirement 9 - khong tham chieu thi response GIONG HET truoc
+        day: generate() chi .update() metadata nay vao KHI used=True, nen
+        cac khoa o day khong duoc trung voi build_response_payload() (neu
+        trung, .update() se GHI DE mot khoa da co, thay vi CHI THEM khoa
+        moi khi thuc su dung reference-conditioning)."""
+        base_keys = set(build_response_payload(
+            b"x", model_load_seconds=1.0, inference_seconds=1.0,
+            width=1, height=1).keys())
+        meta_keys = set(build_reference_conditioning_metadata(used=True).keys())
+        self.assertEqual(base_keys & meta_keys, set())
+
+
+class TestBuildLeftRightMasks(unittest.TestCase):
+    def test_returns_two_masks_of_requested_size(self):
+        primary, secondary = build_left_right_masks(1024, 1536)
+        self.assertEqual(primary.size, (1024, 1536))
+        self.assertEqual(secondary.size, (1024, 1536))
+        self.assertEqual(primary.mode, "L")
+        self.assertEqual(secondary.mode, "L")
+
+    def test_primary_mask_covers_left_side(self):
+        primary, _ = build_left_right_masks(1000, 1000)
+        self.assertEqual(primary.getpixel((10, 500)), 255)
+
+    def test_primary_mask_excludes_far_right(self):
+        primary, _ = build_left_right_masks(1000, 1000)
+        self.assertEqual(primary.getpixel((990, 500)), 0)
+
+    def test_secondary_mask_covers_right_side(self):
+        _, secondary = build_left_right_masks(1000, 1000)
+        self.assertEqual(secondary.getpixel((990, 500)), 255)
+
+    def test_secondary_mask_excludes_far_left(self):
+        _, secondary = build_left_right_masks(1000, 1000)
+        self.assertEqual(secondary.getpixel((10, 500)), 0)
+
+    def test_masks_overlap_in_the_middle_no_hard_seam(self):
+        """split_fraction=0.55, overlap_fraction=0.08 mac dinh tren
+        width=1000 -> split=550, overlap=80 -> vung chong lan [470, 630)."""
+        primary, secondary = build_left_right_masks(1000, 1000)
+        self.assertEqual(primary.getpixel((500, 500)), 255)
+        self.assertEqual(secondary.getpixel((500, 500)), 255)
+
+    def test_custom_split_fraction_changes_boundary(self):
+        primary_default, _ = build_left_right_masks(1000, 1000)
+        primary_narrow, _ = build_left_right_masks(
+            1000, 1000, split_fraction=0.3, overlap_fraction=0.0)
+        # o x=400: mac dinh (split=550) van la primary; split hep hon
+        # (split=300) thi x=400 da la ngoai vung primary.
+        self.assertEqual(primary_default.getpixel((400, 500)), 255)
+        self.assertEqual(primary_narrow.getpixel((400, 500)), 0)
 
 
 if __name__ == "__main__":

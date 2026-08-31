@@ -305,6 +305,40 @@ export interface Novel {
   cover_url?: string | null;
   state: PublishState;
   tags: string[];
+  /**
+   * ID fandom da duoc backend doi chieu thanh cong. Giu ID thay vi ten tu do
+   * de bo loc/discovery khong bi tach thanh nhieu ban ghi do khac chinh ta.
+   */
+  fandom_ids: string[];
+  /**
+   * `metadata_only` khong co nghia la tep nhap bi rong: do la che do chi giu
+   * metadata khi khong du quyen tai xuat ban toan van.
+   */
+  publication_mode: string;
+  /** Danh sach tu do de discovery biet nhan vat nao xuat hien trong truyen. */
+  characters: string[];
+  /** Tach rieng quan he/cap doi khoi `characters` de loc dung y dinh doc. */
+  pairings: string[];
+  /** Trang thai tien do tac pham, doc lap voi `state` ban nhap/xuat ban. */
+  status: string;
+  /**
+   * Ten tac gia tai nguon goc; khong duoc suy tu `owner_id`, vi chu ban ghi co
+   * the la tai khoan he thong nhap metadata.
+   */
+  external_author_name: string;
+  /**
+   * Link chinh tac ve nguon; dac biet quan trong voi `metadata_only`, noi doc
+   * gia phai den de doc ban day du.
+   */
+  external_source_url: string;
+  /**
+   * So chuong nguon cong bo, co the khac so `Chapter` dang luu trong he thong.
+   */
+  external_chapter_count: number;
+  /** Moc cap nhat theo nguon, khac `updated_at` cua ban ghi Fanfic World. */
+  external_updated_at: string;
+  /** Ma ngon ngu noi dung goc; chuoi rong khi backend chua xac dinh duoc. */
+  language: string;
   created_at: string;
   updated_at: string;
 }
@@ -336,6 +370,42 @@ export interface Chapter {
   audio_outdated?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export type AuthorizedImportFormat =
+  | "txt"
+  | "html"
+  | "epub"
+  | "docx"
+  | "zip";
+export type AuthorizedImportRightsBasis = "author" | "permission_granted";
+export type AuthorizedImportPublicationMode = "full_text" | "metadata_only";
+
+/**
+ * Dau vet trach nhiem cho lan tai tep len. Hai hash phuc vu doi soat/kiem
+ * trung, khong phai bang chung so huu ban quyen.
+ */
+export interface AuthorizedImportRecord {
+  import_id: string;
+  novel_id: string;
+  importer_user_id: string;
+  rights_basis: AuthorizedImportRightsBasis;
+  source: string;
+  original_filename: string;
+  original_file_hash: string;
+  content_hash: string;
+  created_at: string;
+}
+
+export interface AuthorizedImportResult {
+  novel: Novel;
+  chapters: Chapter[];
+  import_record: AuthorizedImportRecord;
+  /**
+   * Ten khong khop KHONG duoc gan vao truyen; giao dien phai bao de tac gia
+   * sua thay vi im lang bo qua.
+   */
+  fandom_match: { matched: string[]; unmatched: string[] };
 }
 
 // -- Nhập chương hàng loạt ---------------------------------------------------
@@ -1016,6 +1086,28 @@ export const api = {
     request<{ novel: Novel }>("/api/novels", {
       method: "POST",
       body: JSON.stringify({ title, description, tags }),
+    }),
+
+  importAuthorizedWork: (payload: {
+    filename: string;
+    format: AuthorizedImportFormat;
+    base64: string;
+    title: string;
+    rightsBasis: AuthorizedImportRightsBasis;
+    fandomNames: string[];
+    publicationMode: AuthorizedImportPublicationMode;
+  }) =>
+    request<AuthorizedImportResult>("/api/import/authorized", {
+      method: "POST",
+      body: JSON.stringify({
+        filename: payload.filename,
+        format: payload.format,
+        base64: payload.base64,
+        title: payload.title,
+        rights_basis: payload.rightsBasis,
+        fandom_names: payload.fandomNames,
+        publication_mode: payload.publicationMode,
+      }),
     }),
 
   getNovel: (novelId: string) =>

@@ -38,6 +38,9 @@ export const HO_ENDPOINT = [
   // Pollinations, doc lap voi moi ho khac. Xem
   // `docs/reports/image-studio-v1-summary.md`.
   "image",
+  // Authorized Import — nhap tep do tac gia/nguoi duoc cho phep tai len.
+  // Ho rieng vi body la du lieu nguon + tu khai quyen, khong phai CRUD Novel.
+  "import",
   "jobs",
   // Bang xep hang XP (V6 gamification) — CONG KHAI, khong nam duoi
   // `/api/account/...` vi khong doi hoi dang nhap (nguoi xem chua dang nhap

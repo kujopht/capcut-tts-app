@@ -64,7 +64,12 @@ VOICE_ID = "piper:ngochuyennew"
 VOICE_DISPLAY_NAME_EXPECTED = "Ngọc Huyền (Mới)"
 
 POLL_INTERVAL_SECONDS = 5
-POLL_TIMEOUT_SECONDS = 240  # generous: Render free-tier cold start + real synthesis
+#: Real measurement (2026-08-31, this exact chapter, ~34,100 chars):
+#: synthesis took 1792.76s (~30 min) end to end. 240s was never a real
+#: estimate of synthesis time - raise the default well past the observed
+#: real duration, and treat exceeding even this as TIMEOUT (see below),
+#: never as silent success or a bare FAIL.
+POLL_TIMEOUT_SECONDS = 2700  # 45 min
 
 KET_QUA = []
 
@@ -199,8 +204,18 @@ def main(argv=None) -> int:
             break
         time.sleep(POLL_INTERVAL_SECONDS)
 
-    if final_job.get("status") not in ("completed", "failed") and not saw_live_lease:
-        print(f"\nBLOCKED: job {job_id} is still {final_job.get('status')!r} after "
+    # Three genuinely different outcomes at this point - RUNNING is never
+    # "terminal" and a timeout while running is never a FAIL, it means the
+    # worker is real and busy but synthesis outlasted the poll window (a
+    # real chapter measured at 1792.76s / ~30min - see POLL_TIMEOUT_SECONDS
+    # comment). Conflating "still running" with "reached a terminal state:
+    # FAIL" was a real bug in an earlier version of this script.
+    final_status = final_job.get("status")
+
+    if final_status in ("completed", "failed"):
+        pass  # loop broke on a real terminal state - fall through below
+    elif final_status == "pending" and not saw_live_lease:
+        print(f"\nBLOCKED: job {job_id} is still 'pending' after "
               f"{POLL_TIMEOUT_SECONDS}s, and no worker ever claimed it (lease_expires_at "
               f"never set). The laptop Piper worker is not running/connected.")
         print("\nExact command to start it (run in your own trusted shell, with real "
@@ -211,11 +226,20 @@ def main(argv=None) -> int:
         print(f"\nThen re-run this script - it will reuse job {job_id} instead of "
               "creating a duplicate.")
         return 3
+    else:
+        # status == "running" (or pending-but-a-lease-was-seen at some
+        # point), still not terminal when the poll window ran out. This is
+        # NOT a failure: a real worker IS processing this job.
+        print(f"\nTIMEOUT (not a failure): job {job_id} is still {final_status!r} after "
+              f"{POLL_TIMEOUT_SECONDS}s. A worker IS actively processing it "
+              f"(lease_expires_at was observed live) - synthesis for a chapter this "
+              f"size can genuinely take longer than this poll window.")
+        print(f"\nRe-run this script later - step 2's idempotent reuse check will find "
+              f"job {job_id} and, once it has actually completed, proceed straight to "
+              f"verification without creating a duplicate or re-queuing synthesis.")
+        return 4
 
-    if not kt("job reached a terminal state", final_job.get("status") in ("completed", "failed"),
-              f"status={final_job.get('status')}"):
-        return 1
-    if not kt("job status == completed (not failed)", final_job.get("status") == "completed",
+    if not kt("job status == completed (not failed)", final_status == "completed",
               f"error_kind={final_job.get('error_kind')} "
               f"error_message={final_job.get('error_message')!r}"):
         return 1

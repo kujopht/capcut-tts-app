@@ -184,26 +184,28 @@ _KNOWN_SOURCE_POLICIES: Dict[str, SourcePolicyRecord] = {
     ),
     "docln.net": SourcePolicyRecord(
         domain="docln.net",
-        technical_access=TechnicalAccess.PUBLIC_DIRECT,
+        technical_access=TechnicalAccess.CAPTCHA_OR_BOT_CHALLENGE,
         rights_risk=RightsRisk.OWNER_ACCEPTED_UNVERIFIED,
         tos_prohibits_automation=False,
         evidence=(
-            "KY THUAT tai duoc that qua HTTP truc tiep (`HttpFetcher` nhan "
-            "HTTP 200, noi dung that tren trang chu/trang truyen/trang "
-            "sang-tac) — nguon DUY NHAT trong toan bo dot khao sat khong bi "
-            "403/rong/timeout/SSL-loi lien tuc (mot lan fetch rieng le sau "
-            "do GAP loi SSL tam thoi trong dot khao sat nay — dang thu lai "
-            "de xac dinh do on dinh that su truoc khi quet hang loat). "
-            "Tim kiem THAT khong thay dieu khoan "
-            "cam tu dong hoa nao (khac han AO3/Wattpad/Royal Road/XenForo/"
-            "Narou, ca 5 deu co dan chung ro rang). Rui ro quyen la CO THAT "
-            "va duoc GHI LAI trung thuc (khu Light Novel dich: chinh site "
-            "tu nhan 'Truyen co chu so huu ban quyen se bi xoa' — phan lon "
-            "la ban dich khong cap phep; khu 'Truyen Sang Tac': noi dung cua "
-            "TUNG tac gia, chua co dong y tung nguoi) — nhung day la RUI RO "
-            "BAN QUYEN chu so huu san pham CHAP NHAN theo Owner Policy "
-            "Update 2026-08-31, khong phai mot rao can truy cap cua ben thu "
-            "ba. Duoc chon lam NGUON DAU TIEN."),
+            "KET LUAN SAU DIEU TRA THUC TE, DA SUA LAI mot lan phan loai "
+            "sai truoc do trong CUNG phien lam viec nay: trang HTML tai "
+            "duoc that (HTTP 200) VA `site_registry.py` co the tim dung "
+            "`chapter_href_pattern` that (177 lien ket chuong that), NHUNG "
+            "noi dung chuong THAT nam trong `id=\"chapter-c-protected\"` bi "
+            "MA HOA phia may chu (`data-s=\"xor_shuffle\"`, kem "
+            "`data-k`/`data-c`) — chi giai ma duoc bang JavaScript RIENG "
+            "cua chinh site chay trong trinh duyet that. Day KHONG PHAI "
+            "'chi can trinh duyet render JS' (Case 1, hop le) — day la MOT "
+            "CO CHE CHONG SAO CHEP CHU DICH (Case 2), tuong duong ve BAN "
+            "CHAT voi mot CAPTCHA/bot-challenge du hinh thuc khac. Giai ma "
+            "chuoi XOR-shuffle nay se la HANH VI PHA VO MOT CO CHE BAO VE "
+            "KY THUAT RO RANG — dung lam, bat ke chinh sach rui ro ban "
+            "quyen noi dung o tren. Phat hien qua kiem tra thuc te ket qua "
+            "quet (chuoi lay duoc chi la panel dieu khien trinh doc TTS "
+            "cua chinh docln.net, `id=\"tts-panel\"`, hoac sau khi sua "
+            "boundary — chi lay duoc dung dong tieu de an, khong phai noi "
+            "dung), khong phai suy doan."),
         verified_at="2026-08-31",
     ),
     "forums.spacebattles.com": SourcePolicyRecord(

@@ -78,8 +78,13 @@ def _do_sau_json_vuot_qua(raw: str, gioi_han: int) -> bool:
 #:   `site_registry.py`, domain `royalroad.com`).
 _CONTENT_BOUNDARY_CLASSES = {"mw-parser-output", "chapter-content"}
 #: `mw-content-text`: MediaWiki skin cu, fallback khi khong co
-#: `mw-parser-output`.
-_CONTENT_BOUNDARY_IDS = {"mw-content-text"}
+#: `mw-parser-output`. `chapter-content`: docln.net dung CHINH TEN NAY
+#: nhung o thuoc tinh `id`, khong phai `class` (khac Royal Road o tren,
+#: trung ten TINH CO, khac trang/khac thuoc tinh) — xac minh qua canary
+#: that: thieu dong nay, bo trich xuat lay nham panel dieu khien TTS cua
+#: chinh docln.net (`id="tts-panel"`, xuat hien TRUOC noi dung chuong
+#: trong DOM) lam "noi dung", cho ra vai tram ky tu rac thay vi ca chuong.
+_CONTENT_BOUNDARY_IDS = {"mw-content-text", "chapter-content"}
 
 #: Phase 3 Story Harvester V3 ("profile poisoning red team", fixture E):
 #: lien ket TRONG cac vung nay KHONG duoc dua vao `page.links` — mot

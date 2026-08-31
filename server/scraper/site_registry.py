@@ -113,6 +113,28 @@ _REGISTRY = {
             "'Regis and Charlotte' (14 chương, truyện đã hoàn thành), "
             "robots.txt xac nhan cho phep truoc khi them."),
     ),
+    # THU tim nguon dau tien cho Anime Fanfic (Owner Policy Update,
+    # 2026-08-31) — cau hinh nay TIM DUNG duong dan chuong that (177 lien
+    # ket khop, `discover()` chi bao LOW vi heuristic khong gop duoc href
+    # tuyet doi/tuong doi cung nhom). NHUNG dieu tra sau do phat hien noi
+    # dung chuong THAT bi ma hoa phia may chu (XOR-shuffle, xem
+    # `source_policy.py` domain nay) — day la mot co che chong sao chep
+    # chu dich, KHONG phai gioi han cua chinh SiteConfig nay. Gia tri o
+    # duoi VAN DUNG (URL chuong/tieu de tim dung), nhung
+    # `source_policy.py::assert_source_not_blocked` chan domain nay TRUOC
+    # khi cham toi cau hinh nay — giu lai o day cho tham khao ky thuat,
+    # cung nguyen tac voi royalroad.com (khong xoa cau hinh du bi chan).
+    "docln.net": SiteConfig(
+        domain="docln.net",
+        chapter_href_pattern=r"/truyen/{scope_id}-[^/\"]*/c\d+-chuong-\d+",
+        scope_id_pattern=r"/truyen/(\d+)-",
+        title_suffix_to_strip=" - Cổng Light Novel - Đọc Light Novel",
+        verified_via=(
+            "Anime Fanfic Production Canary (Owner Policy Update), "
+            "2026-08-31 — them tay sau khi discover() bao LOW confidence; "
+            "kiem tra thu cong tren 'Thiên sứ nhà bên' (177 lien ket chuong "
+            "khop mau /c\\d+-chuong-\\d+ that su ton tai trong HTML)."),
+    ),
 }
 
 

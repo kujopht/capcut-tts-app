@@ -5,18 +5,33 @@ Split out so this logic can be real-unit-tested: `beam`/`torch`/`diffusers`
 are remote-deploy-only dependencies (see cover_illustrious_app.py's own
 docstring) and are NOT installed in this repo's own venv, so any module
 that imports them at top level cannot be imported locally at all, let
-alone tested. This file imports NONE of those three - only stdlib plus
-Pillow (`PIL`), which genuinely IS installed in this repo's venv already
-(desktop app dependency) and is ALSO a transitive dependency of
-`diffusers` on the remote side (cover_illustrious_app.py already calls
-`img.save(buf, format="PNG")` on a PIL Image returned by the pipeline) -
-so using it here adds no new dependency on either side.
+alone tested. This file imports NONE of those three at module level.
+
+PIL/Pillow is ALSO imported LAZILY (inside build_left_right_masks()
+itself, not here) - real fix for a real bug: `beam deploy
+beam_apps/cover_illustrious_app.py:generate` failed BEFORE reaching the
+remote container build, at a module-level `from PIL import Image,
+ImageDraw` that used to live here. Root cause: `beam deploy`'s
+DISCOVERY step imports this file locally (in whatever environment runs
+the `beam` CLI, e.g. a bare Cloud Shell python3) to introspect the
+`@endpoint`-decorated function - a completely separate environment from
+the REMOTE container that `Image().add_python_packages([...])` builds in
+cover_illustrious_app.py. That local discovery environment has never
+been guaranteed to have Pillow installed (it runs no inference), so the
+module-level import broke deploy discovery entirely, before any GPU
+container was even built. Pillow genuinely IS installed in THIS repo's
+own venv (desktop app dependency) and is ALSO an explicit remote
+container package (see cover_illustrious_app.py's `Image().add_python_packages`
+list) - so lazy-importing it here costs nothing on either side, it only
+removes the assumption that the LOCAL DEPLOY-DISCOVERY environment has it.
 """
 from __future__ import annotations
 
 import base64
+from typing import TYPE_CHECKING, Tuple
 
-from PIL import Image, ImageDraw
+if TYPE_CHECKING:
+    from PIL import Image as PILImageModule
 
 #: Ban goc chi co cac tag chat luong chung. Them cac tag chong "bia dong
 #: nguoi" sau khi ban Re:Zero dau tien thuc te tro thanh poster ensemble
@@ -90,7 +105,7 @@ def build_reference_conditioning_metadata(*, used: bool, strength: float = 0.0) 
 def build_left_right_masks(
     width: int, height: int, *,
     split_fraction: float = 0.55, overlap_fraction: float = 0.08,
-):
+) -> Tuple[PILImageModule.Image, PILImageModule.Image]:
     """
     Mat na nhi phan (che do "L", trang=vung anh huong) chia TRAI/PHAI cho
     2 nhan vat - dung voi `diffusers.image_processor.IPAdapterMaskProcessor`
@@ -110,7 +125,15 @@ def build_left_right_masks(
     Tra ve (mask_primary, mask_secondary) — hai doi tuong `PIL.Image`
     che do "L", CHUA qua IPAdapterMaskProcessor.preprocess() (buoc do
     thuoc ve cover_illustrious_app.py, module do co diffusers that).
+
+    PIL duoc import O DAY (khong o dau file) - day la HAM DUY NHAT trong
+    module nay thuc su dung PIL, nen day cung la NOI DUY NHAT can import
+    no. Import o dau file (module-level) tung la nguyen nhan that khien
+    `beam deploy` that bai o buoc discovery (import cuc bo de doc
+    @endpoint) truoc ca khi build container that.
     """
+    from PIL import Image, ImageDraw
+
     split_px = int(width * split_fraction)
     overlap_px = int(width * overlap_fraction)
 

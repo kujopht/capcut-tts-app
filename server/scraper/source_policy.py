@@ -159,6 +159,64 @@ _KNOWN_SOURCE_POLICIES: Dict[str, SourcePolicyRecord] = {
                   "(/forums/creative-writing.20/)."),
         verified_at="2026-08-31",
     ),
+    "syosetu.org": SourcePolicyRecord(
+        domain="syosetu.org",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence="Hameln — HTTP 403 tren ca robots.txt lan trang chu qua HttpFetcher that.",
+        verified_at="2026-08-31",
+    ),
+    "forums.sufficientvelocity.com": SourcePolicyRecord(
+        domain="forums.sufficientvelocity.com",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence=("robots.txt cho phep (cung Content-Signal voi SpaceBattles/"
+                  "FFN), nhung HttpFetcher that nhan HTTP 403 tren forum "
+                  "that (/forums/creative-writing.2/)."),
+        verified_at="2026-08-31",
+    ),
+    "metruyenchu.com": SourcePolicyRecord(
+        domain="metruyenchu.com",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence="robots.txt cho phep hau het duong dan, nhung HttpFetcher that nhan HTTP 403 tren trang chu.",
+        verified_at="2026-08-31",
+    ),
+    "truyenfull.today": SourcePolicyRecord(
+        domain="truyenfull.today",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence=("Loi SSL handshake (UNEXPECTED_EOF_WHILE_READING) LAP LAI "
+                  "qua hai lan thu that (khong phai loi tam thoi mot lan) — "
+                  "nghi la chan o tang TLS/CDN, khong doc duoc noi dung."),
+        verified_at="2026-08-31",
+    ),
+    "truyen.tangthuvien.vn": SourcePolicyRecord(
+        domain="truyen.tangthuvien.vn",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence="HttpFetcher that: het thoi gian ket noi (timeout) — khong xac dinh duoc la chan hay chi cham.",
+        verified_at="2026-08-31",
+    ),
+    "syosetu.com": SourcePolicyRecord(
+        domain="syosetu.com",
+        policy_class=SourcePolicyClass.POLICY_BLOCKED,
+        evidence=(
+            "Narou (syosetu.com) — trang chu HttpFetcher that tai duoc "
+            "(HTTP 200), NHUNG chinh API chinh thuc cua ho (\"なろうデベロッパー"
+            "\", dev.syosetu.com) cong khai liet ke hanh vi BI CAM: 'lay noi "
+            "dung tieu thuyet mot cach may moc roi hien thi/tai xuong trong "
+            "app hoac website'. Day la nguon RO RANG NHAT trong toan bo khao "
+            "sat: chinh chu so huu tu noi qua API chinh thuc rang khong "
+            "duoc tai xuat ban toan van, khong phai suy doan tu ToS chung "
+            "chung."),
+        verified_at="2026-08-31",
+    ),
+    "kakuyomu.jp": SourcePolicyRecord(
+        domain="kakuyomu.jp",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence=(
+            "Trang chu tai duoc that (HTTP 200), nhung robots.txt CHAN "
+            "DUNG duong dan doc chuong that: "
+            "'/works/*/episodes/*/read$' — nghia la trang chu cho phep "
+            "nhung noi dung chuong (thu that su can) bi chan rieng."),
+        verified_at="2026-08-31",
+    ),
 }
 
 

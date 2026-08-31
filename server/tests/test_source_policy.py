@@ -47,6 +47,20 @@ class CheckSourcePolicyTest(unittest.TestCase):
             "https://forums.spacebattles.com/forums/creative-writing.20/")
         self.assertEqual(record.policy_class, SourcePolicyClass.TECHNICALLY_UNSTABLE)
 
+    def test_syosetu_com_la_policy_blocked_qua_chinh_api_chinh_thuc(self):
+        record = check_source_policy("https://syosetu.com/")
+        self.assertEqual(record.policy_class, SourcePolicyClass.POLICY_BLOCKED)
+
+    def test_cac_nguon_mo_rong_technically_unstable(self):
+        for domain in (
+            "syosetu.org", "forums.sufficientvelocity.com", "metruyenchu.com",
+            "truyenfull.today", "truyen.tangthuvien.vn", "kakuyomu.jp",
+        ):
+            with self.subTest(domain=domain):
+                record = check_source_policy(f"https://{domain}/")
+                self.assertEqual(record.policy_class,
+                                 SourcePolicyClass.TECHNICALLY_UNSTABLE)
+
     def test_khop_ca_www_prefix(self):
         record = check_source_policy("https://www.archiveofourown.org/works/123")
         self.assertIsNotNone(record)

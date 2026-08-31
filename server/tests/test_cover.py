@@ -164,6 +164,9 @@ class TestBackwardCompatible(CoverTestCase):
         "external_source_url", "external_chapter_count",
         "external_updated_at", "language",
     }
+    NEW_TAXONOMY_FIELDS = {
+        "characters", "pairings", "status",
+    }
 
     def test_only_cover_url_was_added(self):
         token = self.user()
@@ -172,7 +175,7 @@ class TestBackwardCompatible(CoverTestCase):
                                 headers=self.auth(token)).json()["novel"]
         self.assertEqual(
             set(body) - self.OLD_NOVEL_FIELDS,
-            {"cover_url"} | self.NEW_FANDOM_FIELDS)
+            {"cover_url"} | self.NEW_FANDOM_FIELDS | self.NEW_TAXONOMY_FIELDS)
 
     def test_chapter_response_keeps_its_old_shape(self):
         token = self.user()

@@ -110,6 +110,75 @@ class NovelFandomTestCase(unittest.TestCase):
         get_resp = self.client.get(f"/api/novels/{novel_id}", headers=self.auth(token))
         self.assertEqual(len(get_resp.json()["novel"]["fandom_ids"]), 1)
 
+    def test_tao_novel_voi_characters_pairings_status(self):
+        token = self.user()
+        resp = self.client.post(
+            "/api/novels",
+            json={
+                "title": "Fic day du taxonomy",
+                "characters": ["Naruto", "Sasuke"],
+                "pairings": ["Naruto/Hinata"],
+                "status": "completed",
+            },
+            headers=self.auth(token))
+        self.assertEqual(resp.status_code, 201)
+        novel = resp.json()["novel"]
+        self.assertEqual(novel["characters"], ["Naruto", "Sasuke"])
+        self.assertEqual(novel["pairings"], ["Naruto/Hinata"])
+        self.assertEqual(novel["status"], "completed")
+
+    def test_novel_status_mac_dinh_ongoing(self):
+        token = self.user()
+        resp = self.client.post(
+            "/api/novels",
+            json={"title": "Fic mac dinh status"},
+            headers=self.auth(token))
+        self.assertEqual(resp.status_code, 201)
+        novel = resp.json()["novel"]
+        self.assertEqual(novel["characters"], [])
+        self.assertEqual(novel["pairings"], [])
+        self.assertEqual(novel["status"], "ongoing")
+
+    def test_novel_status_khong_hop_le_tra_ve_400(self):
+        token = self.user()
+        resp = self.client.post(
+            "/api/novels",
+            json={"title": "T", "status": "khong-hop-le"},
+            headers=self.auth(token))
+        self.assertEqual(resp.status_code, 400)
+
+    def test_patch_novel_characters_pairings_status(self):
+        token = self.user()
+        novel_id = self.client.post(
+            "/api/novels", json={"title": "T"}, headers=self.auth(token)
+        ).json()["novel"]["novel_id"]
+
+        resp = self.client.patch(
+            f"/api/novels/{novel_id}",
+            json={
+                "characters": ["Kakashi", "Obito"],
+                "pairings": ["Kakashi & Obito"],
+                "status": "hiatus",
+            },
+            headers=self.auth(token))
+        self.assertEqual(resp.status_code, 200)
+        novel = resp.json()["novel"]
+        self.assertEqual(novel["characters"], ["Kakashi", "Obito"])
+        self.assertEqual(novel["pairings"], ["Kakashi & Obito"])
+        self.assertEqual(novel["status"], "hiatus")
+
+    def test_patch_status_khong_hop_le_tra_ve_400(self):
+        token = self.user()
+        novel_id = self.client.post(
+            "/api/novels", json={"title": "T"}, headers=self.auth(token)
+        ).json()["novel"]["novel_id"]
+
+        resp = self.client.patch(
+            f"/api/novels/{novel_id}",
+            json={"status": "invalid-status"},
+            headers=self.auth(token))
+        self.assertEqual(resp.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

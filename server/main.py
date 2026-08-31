@@ -130,6 +130,7 @@ from server.domain import (
     ContentState,
     JobStatus,
     Novel,
+    NovelStatus,
     Profile,
     PublicationMode,
     PublishState,
@@ -620,6 +621,9 @@ class NovelIn(BaseModel):
     external_chapter_count: int = 0
     external_updated_at: str = ""
     language: str = ""
+    characters: List[str] = Field(default_factory=list)
+    pairings: List[str] = Field(default_factory=list)
+    status: str = "ongoing"
 
 
 class ChapterIn(BaseModel):
@@ -642,6 +646,9 @@ class NovelPatch(BaseModel):
     external_chapter_count: Optional[int] = None
     external_updated_at: Optional[str] = None
     language: Optional[str] = None
+    characters: Optional[List[str]] = None
+    pairings: Optional[List[str]] = None
+    status: Optional[str] = None
 
 
 class ChapterPatch(BaseModel):
@@ -1333,6 +1340,15 @@ def _parse_publication_mode(raw: str) -> PublicationMode:
             f"publication_mode không hợp lệ: {raw!r}") from exc
 
 
+def _parse_novel_status(raw: str) -> NovelStatus:
+    try:
+        return NovelStatus(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"status không hợp lệ: {raw!r}") from exc
+
+
 @app.post("/api/novels", status_code=status.HTTP_201_CREATED)
 def create_novel(payload: NovelIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
     novel = store.create_novel(Novel(
@@ -1347,6 +1363,9 @@ def create_novel(payload: NovelIn, profile: Profile = Depends(current_profile)) 
         external_chapter_count=payload.external_chapter_count,
         external_updated_at=payload.external_updated_at,
         language=payload.language.strip(),
+        characters=payload.characters,
+        pairings=payload.pairings,
+        status=_parse_novel_status(payload.status),
     ))
     return {"novel": _novel_out(novel)}
 
@@ -1547,6 +1566,8 @@ def update_novel(novel_id: str, payload: NovelPatch,
         fields["fandom_ids"] = _resolve_fandom_ids(fields.pop("fandom_names"))
     if "publication_mode" in fields:
         fields["publication_mode"] = _parse_publication_mode(fields["publication_mode"])
+    if "status" in fields:
+        fields["status"] = _parse_novel_status(fields["status"])
     try:
         novel = store.update_novel(novel_id, profile.user_id, fields)
     except NotFoundError as exc:

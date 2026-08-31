@@ -133,6 +133,16 @@ class PublicationMode(str, Enum):
     METADATA_ONLY = "metadata_only"
 
 
+class NovelStatus(str, Enum):
+    """Trang thai hoan thanh cua mot `Novel`: dang viet (ongoing), da hoan
+    thanh (completed), hoac tam ngung (hiatus). Dung cho discovery taxonomy
+    va bo loc tim kiem truyen."""
+
+    ONGOING = "ongoing"
+    COMPLETED = "completed"
+    HIATUS = "hiatus"
+
+
 class Tier(str, Enum):
     """Cac goi du kien. CHUA co thanh toan trong giai doan nay."""
 
@@ -651,6 +661,14 @@ class Novel:
     external_updated_at: str = ""
     #: Ma ngon ngu cua noi dung GOC (vd "en", "vi", "ja") — rong neu chua xac dinh.
     language: str = ""
+    #: Danh sach nhan vat trong truyen (Anime Fanfic Discovery Taxonomy) —
+    #: List[str] chuoi tu do (vd ["Uzumaki Naruto", "Uchiha Sasuke"]).
+    characters: List[str] = field(default_factory=list)
+    #: Danh sach cap doi (pairings / relationships) — chuoi tu do
+    #: (vd ["Naruto/Hinata", "Sasuke & Sakura"]).
+    pairings: List[str] = field(default_factory=list)
+    #: Trang thai hoan thanh (ongoing/completed/hiatus) — mac dinh la ONGOING.
+    status: NovelStatus = NovelStatus.ONGOING
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -670,6 +688,9 @@ class Novel:
             "external_chapter_count": self.external_chapter_count,
             "external_updated_at": self.external_updated_at,
             "language": self.language,
+            "characters": list(self.characters),
+            "pairings": list(self.pairings),
+            "status": self.status.value,
         }
 
 

@@ -1360,6 +1360,7 @@ class MockMetadataStore(MockSocialStore):
         "fandom_ids", "publication_mode", "external_author_name",
         "external_source_url", "external_chapter_count",
         "external_updated_at", "language",
+        "characters", "pairings", "status",
     )
 
     def update_novel(self, novel_id: str, owner_id: str,

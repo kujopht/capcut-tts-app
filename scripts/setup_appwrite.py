@@ -473,6 +473,9 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # Anime Fanfic Production Canary: fandom + provenance nguon ngoai.
             ("publication_mode", "enum", False, ["full_text", "metadata_only"]),
             ("fandom_ids", "string", False, 64),    # mang
+            ("characters", "string", False, 100),  # mang
+            ("pairings", "string", False, 100),  # mang
+            ("status", "enum", False, ["ongoing", "completed", "hiatus"]),
             ("external_author_name", "string", False, 200),
             ("external_source_url", "string", False, 1000),
             ("external_chapter_count", "integer", False, None),
@@ -1577,7 +1580,7 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
 ARRAY_ATTRIBUTES = frozenset({
     "tags", "genres", "chapter_summaries", "translated_chapters", "aliases",
     "chapter_warnings", "include_keywords", "exclude_keywords", "signals",
-    "fandom_ids",
+    "fandom_ids", "characters", "pairings",
 })
 
 #: Quyen o muc COLLECTION: khong cap gi cho client.

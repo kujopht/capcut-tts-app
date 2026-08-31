@@ -19,6 +19,9 @@ cổng chặn thật thi hành trong code.
 | scribblehub.com | HTTP 403 (không đọc được) | HTTP 403 (không đọc được) | HTTP 403 | **TECHNICALLY_UNSTABLE** |
 | quotev.com | Cho phép hầu hết đường dẫn | Chưa xác định được văn bản chính thức | HTTP 200 nhưng thân trang **RỖNG** (1 ký tự) trên cả trang chủ lẫn `/stories/fanfiction` | **TECHNICALLY_UNSTABLE** |
 | tapas.io | Cho phép hầu hết đường dẫn | Chưa kiểm tra | `/genre/FAN_FICTION` trả 404 (đường dẫn sai hoặc mục fanfic không tồn tại ở đó) — **CHƯA XÁC MINH ĐẦY ĐỦ**, ưu tiên thấp vì ít fanfic anime hơn các nền tảng khác | Chưa phân loại — không đưa vào `source_policy.py` |
+| royalroad.com | Cho phép (đã đăng ký `SiteConfig` từ mission trước) | *"use or launch any manual or automated system... to access, scrape, crawl, cache, spider any web page"* (cập nhật 2025-03-03) | Không cần kiểm tra — ToS đã cấm dứt khoát | **POLICY_BLOCKED** — xem mục "Lỗ hổng thật đã sửa" bên dưới |
+| docln.net (Cổng Light Novel) | Cho phép | Chưa thấy văn bản ToS đầy đủ, nhưng chính site công bố: *"Truyện có chủ sở hữu bản quyền sẽ bị xóa"* | **HTTP 200 thật, ~170KB nội dung thật** — nguồn DUY NHẤT khảo sát được mà không bị 403/thân trang rỗng | **AUTHOR_OPT_IN_REQUIRED** — xem giải thích bên dưới |
+| forums.spacebattles.com | Cho phép, `Content-Signal: search=yes,ai-train=no,use=reference` | Chưa kiểm tra | HTTP 403 trên forum thật (`/forums/creative-writing.20/`) | **TECHNICALLY_UNSTABLE** |
 
 ## Kết luận thật, không tô hồng
 
@@ -32,6 +35,30 @@ nhất quán, không phải trùng hợp — khớp với phát hiện thật kh
 `ai-train=no` trong `robots.txt` — tức là làn sóng cứng hoá chống scraping
 (đặc biệt chống AI) trên diện rộng đang khiến ngay cả một bot minh bạch,
 tuân thủ tốc độ người, tự nhận diện rõ ràng cũng bị chặn.
+
+## Lỗ hổng thật đã sửa: `royalroad.com`
+
+`site_registry.py` đã có sẵn cấu hình `SiteConfig` cho `royalroad.com` từ
+một mission trước (robots.txt cho phép nên đã thêm) — nhưng `assert_source_
+not_blocked()` ban đầu CHỈ được gọi trong `discover()`/`confirm_unknown_
+source()`, không phải `start_or_continue()`. Runbook của chính hệ thống
+(`deploy/RUNBOOK-STORY-HARVESTER.md`, mục 1) nói rõ: domain "đã biết" đi
+THẲNG vào `POST /api/admin/scraper/runs`, không bắt buộc qua `/discover`
+trước. Nghĩa là cổng chặn ban đầu **vô nghĩa với đúng domain nguy hiểm
+nhất** — domain đã có cấu hình sẵn. Đã sửa bằng cách thêm cùng lệnh gọi vào
+`start_or_continue()`, kèm test hồi quy khởi động thật một run nhắm vào
+`royalroad.com` để chứng minh gate cháy ở đường này, không chỉ đường
+discovery.
+
+## Vì sao `docln.net` (nguồn duy nhất tải được thật) vẫn không dùng được
+
+Kỹ thuật tải được không có nghĩa là được phép dùng. Khu "Truyện Sáng Tác"
+(sáng tác gốc, nơi fanfic thật sự nằm) là nội dung CỦA TỪNG TÁC GIẢ —
+giống hệt lý do AO3 cần đồng ý từng người, không thể khái quát hoá một lần
+cho cả site. Khu Light Novel dịch (phần lớn nội dung site) còn tệ hơn:
+chính site tự thừa nhận sẽ xoá truyện khi chủ sở hữu bản quyền khiếu nại —
+tức là phần lớn nội dung ở đó là bản dịch KHÔNG được cấp phép, không phải
+một nguồn hợp pháp dù có tải được.
 
 ## Không làm gì để "vượt qua"
 

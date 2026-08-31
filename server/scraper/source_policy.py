@@ -134,6 +134,31 @@ _KNOWN_SOURCE_POLICIES: Dict[str, SourcePolicyRecord] = {
                   "phai loi tam thoi."),
         verified_at="2026-08-31",
     ),
+    "docln.net": SourcePolicyRecord(
+        domain="docln.net",
+        policy_class=SourcePolicyClass.AUTHOR_OPT_IN_REQUIRED,
+        evidence=(
+            "KY THUAT co the tai duoc that (`HttpFetcher` nhan HTTP 200, "
+            "~170KB noi dung that tren trang chu — nguon DUY NHAT trong dot "
+            "khao sat nay khong bi 403/rong) — nhung KHONG rights-clear: "
+            "khu 'Truyen Sang Tac' (sang tac/fanfic goc) la noi dung CUA "
+            "TUNG TAC GIA, giong nguyen tac AO3 (can dong y tung nguoi, "
+            "khong the tong quat hoa). RIENG khu Light Novel dich (phan "
+            "lon noi dung site) TE HON: chinh site tu nhan 'Truyen co chu "
+            "so huu ban quyen se bi xoa' — nghia la phan lon la ban dich "
+            "KHONG duoc cap phep, dang cho tac gia/nha xuat ban khieu nai. "
+            "KHONG dung khu do lam nguon du reachable ve mat ky thuat."),
+        verified_at="2026-08-31",
+    ),
+    "forums.spacebattles.com": SourcePolicyRecord(
+        domain="forums.spacebattles.com",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence=("robots.txt cho phep (Content-Signal: search=yes,ai-"
+                  "train=no,use=reference — giong FFN/docln), nhung "
+                  "`HttpFetcher` that nhan HTTP 403 tren mot forum that "
+                  "(/forums/creative-writing.20/)."),
+        verified_at="2026-08-31",
+    ),
 }
 
 

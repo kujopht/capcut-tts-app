@@ -35,6 +35,18 @@ class CheckSourcePolicyTest(unittest.TestCase):
         record = check_source_policy("https://www.royalroad.com/fiction/1/x")
         self.assertEqual(record.policy_class, SourcePolicyClass.POLICY_BLOCKED)
 
+    def test_docln_reachable_ve_ky_thuat_nhung_van_author_opt_in(self):
+        """docln.net la nguon DUY NHAT khao sat duoc ma HttpFetcher tai
+        that thanh cong — nhung van bi chan vi ly do QUYEN, khong phai
+        ky thuat, nen van phai nam trong _BLOCKED_CLASSES."""
+        record = check_source_policy("https://docln.net/truyen/123")
+        self.assertEqual(record.policy_class, SourcePolicyClass.AUTHOR_OPT_IN_REQUIRED)
+
+    def test_spacebattles_la_technically_unstable(self):
+        record = check_source_policy(
+            "https://forums.spacebattles.com/forums/creative-writing.20/")
+        self.assertEqual(record.policy_class, SourcePolicyClass.TECHNICALLY_UNSTABLE)
+
     def test_khop_ca_www_prefix(self):
         record = check_source_policy("https://www.archiveofourown.org/works/123")
         self.assertIsNotNone(record)

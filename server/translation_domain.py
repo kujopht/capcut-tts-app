@@ -429,3 +429,137 @@ class ProviderConnection:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+
+# =============================================================================
+# Metrics PROVIDER-TRUNG-LAP cho MOT lan dich (mot benchmark call don le,
+# vd `scripts/beam_translation_benchmark.py` — hoac trong tuong lai, mot
+# job that) — mission "Hy-MT2 1.8B translation production readiness".
+#
+# TACH RIENG khoi `TranslationProject`/`TranslationVersion`: hai entity do
+# la TRANG THAI BEN VUNG cua du an (luu vao kho, doc lai nhieu lan qua
+# nhieu request) va DA co san `source_text_hash`/`translated_content_hash`
+# rieng cho muc dich do. `TranslationRunMetrics` la du lieu QUAN SAT tuc
+# thoi cho MOT LAN GOI cu the (chars/tokens in-out, thoi gian, canh bao cat
+# cut) — dung de BAO CAO/SO SANH benchmark, khong phai them cot moi vao
+# `appwrite_translation_store.py` chi vi mot lan do dac.
+#
+# PROVIDER-TRUNG-LAP THAT (khong chi trong docstring): module nay KHONG
+# import beam/torch/diffusers/vllm — xem
+# `test_translation_domain_module_has_no_provider_specific_imports` trong
+# `server/tests/test_translation_domain.py` (kiem tra bang AST, cung ky
+# thuat voi `server/tests/test_character_identity.py`). `build_translation_run_metrics()`
+# chi nhan CHUOI/SO — khong biet Beam, vLLM, hay bat ky provider cu the nao
+# ton tai; caller (vd beam_translation_benchmark.py) la noi DUY NHAT biet
+# ve Beam.
+# =============================================================================
+
+#: Nguong ty le do dai (ky tu ban dich / ky tu nguon) DUOI muc nay bi coi la
+#: KHA NGHI thieu/cat cut — day la mot THAM SO heuristic, KHONG PHAI mot
+#: chan ly tuyet doi: dich giua hai ngon ngu khac he chu viet thuong DAI RA
+#: chu khong ngan lai (vd zh -> vi, mot chu Han thuong no ra vai am tiet
+#: Latin), nen mot ban dich NGAN HON dang ke so voi nguon la mot tin hieu
+#: dang chu y (co the mo hinh bo sot doan/cat cut o gioi han token), khong
+#: phai chuyen binh thuong. 0.25 duoc chon RAT RONG RAI (chi bao dong khi
+#: ban dich CHUA BANG 1/4 do dai nguon) de tranh bao dong gia cho cac cap
+#: ngon ngu von di nen chu hon (vd tieng Trung -> tieng Anh).
+TRUNCATION_LENGTH_RATIO_THRESHOLD = 0.25
+
+
+@dataclass
+class TranslationRunMetrics:
+    """
+    Ket qua do dac PROVIDER-TRUNG-LAP cho MOT lan dich (mot doan/mot job).
+
+    Cac truong TUY CHON (`Optional`) phan anh THAT su lieu co san hay khong
+    — vd `source_tokens`/`translated_tokens` chi co khi provider tra ve
+    `usage` (khong phai moi provider tuong thich OpenAI deu lam vay, xem
+    `ConfiguredProvider.translate_segment`'s cach doc `last_usage` bang
+    `getattr`), va `model_load_seconds` chi co y nghia cho MOT lan goi qua
+    endpoint Beam that (mot job qua `TranslationService` binh thuong khong
+    biet gi ve thoi gian nap model o phia server).
+    """
+
+    source_language: str
+    target_language: str
+    model_id: str
+    source_chars: int
+    translated_chars: int
+    source_text_hash: str
+    translated_content_hash: str
+    wall_seconds: float = 0.0
+    model_load_seconds: Optional[float] = None
+    inference_seconds: Optional[float] = None
+    source_tokens: Optional[int] = None
+    translated_tokens: Optional[int] = None
+    #: True neu ban dich NGAN HON dang ke so voi nguon (xem
+    #: `TRUNCATION_LENGTH_RATIO_THRESHOLD`) — mot TIN HIEU that de nguoi
+    #: danh gia thu cong chu y, KHONG PHAI mot khang dinh chac chan co bo
+    #: sot noi dung.
+    possibly_truncated: bool = False
+
+    def chars_per_second(self) -> Optional[float]:
+        """Toc do dich xuoi (ky tu ban dich / giay) — None neu khong do
+        duoc thoi gian that (wall_seconds <= 0, vd du lieu gia lap)."""
+        if self.wall_seconds <= 0:
+            return None
+        return self.translated_chars / self.wall_seconds
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source_language": self.source_language,
+            "target_language": self.target_language,
+            "model_id": self.model_id,
+            "source_chars": self.source_chars,
+            "translated_chars": self.translated_chars,
+            "source_text_hash": self.source_text_hash,
+            "translated_content_hash": self.translated_content_hash,
+            "wall_seconds": round(self.wall_seconds, 3),
+            "model_load_seconds": (
+                round(self.model_load_seconds, 3)
+                if self.model_load_seconds is not None else None),
+            "inference_seconds": (
+                round(self.inference_seconds, 3)
+                if self.inference_seconds is not None else None),
+            "source_tokens": self.source_tokens,
+            "translated_tokens": self.translated_tokens,
+            "possibly_truncated": self.possibly_truncated,
+            "chars_per_second": (
+                round(cps, 2) if (cps := self.chars_per_second()) is not None
+                else None),
+        }
+
+
+def build_translation_run_metrics(
+    *, source_text: str, translated_text: str, source_language: str,
+    target_language: str, model_id: str, wall_seconds: float = 0.0,
+    model_load_seconds: Optional[float] = None,
+    inference_seconds: Optional[float] = None,
+    source_tokens: Optional[int] = None,
+    translated_tokens: Optional[int] = None,
+) -> TranslationRunMetrics:
+    """
+    Lap rap `TranslationRunMetrics` tu MOT cap (nguon, ban dich) that —
+    ham THUAN (khong goi mang, khong doc dong ho tru phi caller truyen
+    `wall_seconds` vao), nen test duoc TRUC TIEP khong can mock HTTP.
+
+    `possibly_truncated`: rong -> rong (nguon rong) KHONG bi coi la cat cut
+    (khong co gi de dich); nguon co noi dung nhung ban dich RONG hoac qua
+    ngan so voi nguon (< `TRUNCATION_LENGTH_RATIO_THRESHOLD`) MOI bi gan co.
+    """
+    source_chars = len(source_text or "")
+    translated_chars = len(translated_text or "")
+    possibly_truncated = (
+        source_chars > 0
+        and (translated_chars / source_chars) < TRUNCATION_LENGTH_RATIO_THRESHOLD)
+    return TranslationRunMetrics(
+        source_language=source_language, target_language=target_language,
+        model_id=model_id, source_chars=source_chars,
+        translated_chars=translated_chars,
+        source_text_hash=_hash_text(source_text or ""),
+        translated_content_hash=_hash_text(translated_text or ""),
+        wall_seconds=wall_seconds, model_load_seconds=model_load_seconds,
+        inference_seconds=inference_seconds, source_tokens=source_tokens,
+        translated_tokens=translated_tokens,
+        possibly_truncated=possibly_truncated,
+    )

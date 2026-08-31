@@ -202,6 +202,72 @@ class DocuTranslateProviderTest(unittest.TestCase):
         with self.assertRaises(TranslationProviderError):
             p.translate_segment("   ", context=TranslationContext(vai_tro="translator"))
 
+    def test_last_usage_none_truoc_lan_goi_dau(self):
+        """Mission 'Hy-MT2 1.8B translation production readiness' - real gap
+        fix: truoc day lop nay khong doc `usage` tu phan hoi (khac
+        `_OpenAICompatFreeProvider`), du mot endpoint self-hosted (vLLM)
+        van tra truong nay dung chuan OpenAI-compat."""
+        p = DocuTranslateProvider(base_url="https://vidu.test", api_key="k",
+                                  model="m")
+        self.assertIsNone(p.last_usage)
+
+    def test_last_usage_doc_duoc_tu_phan_hoi_co_usage(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={
+                "choices": [{"message": {"content": "kết quả"}}],
+                "usage": {"prompt_tokens": 42, "completion_tokens": 17},
+            })
+
+        p = DocuTranslateProvider(base_url="https://vidu.test", api_key="k",
+                                  model="m", client=_client_gia(handler))
+        p.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(p.last_usage, {"input_tokens": 42, "output_tokens": 17})
+
+    def test_last_usage_none_khi_phan_hoi_khong_kem_usage(self):
+        p = DocuTranslateProvider(base_url="https://vidu.test", api_key="k",
+                                  model="m", client=_client_gia(
+                                      lambda r: _tra_loi_chat("kết quả")))
+        p.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        self.assertIsNone(p.last_usage)
+
+    def test_extra_payload_mac_dinh_rong_khong_doi_hanh_vi(self):
+        """Mac dinh (khong truyen extra_payload) -> than request Y HET
+        truoc mission nay: chi model/messages/temperature=0.3."""
+        thay = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            thay["body"] = json.loads(request.content)
+            return _tra_loi_chat("kết quả")
+
+        p = DocuTranslateProvider(base_url="https://vidu.test", api_key="k",
+                                  model="m", client=_client_gia(handler))
+        p.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(thay["body"]["temperature"], 0.3)
+        self.assertNotIn("top_p", thay["body"])
+        self.assertNotIn("max_tokens", thay["body"])
+
+    def test_extra_payload_ghi_de_duoc_gui_trong_than_request(self):
+        """Khi caller truyen extra_payload (vd khuyen nghi model-card cua
+        Hy-MT2), cac tham so do PHAI xuat hien trong than request that,
+        va co the ghi de ca `temperature` mac dinh."""
+        thay = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            thay["body"] = json.loads(request.content)
+            return _tra_loi_chat("kết quả")
+
+        p = DocuTranslateProvider(
+            base_url="https://vidu.test", api_key="k", model="m",
+            client=_client_gia(handler),
+            extra_payload={"temperature": 0.7, "top_p": 0.6, "top_k": 20,
+                          "repetition_penalty": 1.05, "max_tokens": 4096})
+        p.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(thay["body"]["temperature"], 0.7)
+        self.assertEqual(thay["body"]["top_p"], 0.6)
+        self.assertEqual(thay["body"]["top_k"], 20)
+        self.assertEqual(thay["body"]["repetition_penalty"], 1.05)
+        self.assertEqual(thay["body"]["max_tokens"], 4096)
+
 
 class ChonProviderTest(unittest.TestCase):
     def test_khong_co_settings_ra_mock(self):

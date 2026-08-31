@@ -1121,11 +1121,34 @@ def build_provider_registry(env: Optional[Dict[str, str]] = None
     if custom_url and custom_key and custom_model and (custom_free or cho_phep_tra_phi):
         from server.translation_providers import DocuTranslateProvider
 
+        # Mission "Hy-MT2 1.8B translation production readiness" (Track B):
+        # TUY CHON — cho phep nguoi van hanh ghi de tham so sinh (temperature/
+        # top_p/top_k/repetition_penalty/max_tokens...) cho RIENG endpoint
+        # "custom" nay, vd de ap dung dung khuyen nghi model-card cua Hy-MT2
+        # (huggingface.co/tencent/Hy-MT2-1.8B, fetched 2026-09-01: temperature
+        # 0.7, top_p 0.6, top_k 20, repetition_penalty 1.05, max_tokens 4096)
+        # SAU KHI co bang chung that tu benchmark that. Rong/khong dat/JSON
+        # sai dang -> `{}`, tuc hanh vi Y HET truoc mission nay (temperature=0.3
+        # co dinh, khong tham so them) — mot bien cau hinh sai KHONG duoc lam
+        # sap ca registry, cung nguyen tac voi cach `poll_retry` duoc doc o
+        # tren trong ham nay.
+        custom_extra_payload: Dict[str, object] = {}
+        raw_generation_params = e.get("TRANSLATION_CUSTOM_GENERATION_PARAMS", "").strip()
+        if raw_generation_params:
+            try:
+                import json as _json
+                parsed = _json.loads(raw_generation_params)
+                if isinstance(parsed, dict):
+                    custom_extra_payload = parsed
+            except ValueError:
+                custom_extra_payload = {}
+
         providers.append(ConfiguredProvider(
             provider_id="custom", model_id=custom_model,
             display_name="Tuỳ chỉnh", quality_hint="theo cấu hình riêng",
             provider=DocuTranslateProvider(
-                base_url=custom_url, api_key=custom_key, model=custom_model),
+                base_url=custom_url, api_key=custom_key, model=custom_model,
+                extra_payload=custom_extra_payload),
             free_tier=custom_free))
 
     if not cho_phep_tra_phi:

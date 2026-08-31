@@ -242,6 +242,102 @@ class CustomProviderHyMT2Test(unittest.TestCase):
         self.assertEqual(ya_gui["model"], "hy-mt2-7b")
         self.assertEqual(ya_gui["messages"][1]["role"], "user")
 
+    def test_custom_generation_params_env_ghi_de_toi_provider(self):
+        """Mission 'Hy-MT2 1.8B translation production readiness': bien
+        TRANSLATION_CUSTOM_GENERATION_PARAMS (JSON) phai toi duoc than
+        request that, khong can sua code — kiem qua MockTransport nhu mot
+        endpoint Hy-MT2 that."""
+        config = {
+            "TRANSLATION_BASE_URL": "https://hymt2.selfhost.test/v1",
+            "TRANSLATION_API_KEY": "sk-local-hymt2",
+            "TRANSLATION_MODEL": "tencent/Hy-MT2-1.8B",
+            "TRANSLATION_CUSTOM_PROVIDER_FREE": "true",
+            "TRANSLATION_CUSTOM_GENERATION_PARAMS": (
+                '{"temperature": 0.7, "top_p": 0.6, "top_k": 20, '
+                '"repetition_penalty": 1.05, "max_tokens": 4096}'),
+        }
+        reg = build_provider_registry(env=config)
+        custom = reg.get("custom")
+        self.assertIsNotNone(custom)
+
+        gui: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            import json as _json
+            nonlocal gui
+            gui = _json.loads(request.content)
+            return _tra_loi_chat_hy_mt2("Xin chào thế giới.")
+
+        custom.provider._client = httpx.Client(
+            base_url="https://hymt2.selfhost.test/v1",
+            transport=httpx.MockTransport(handler))
+        custom.translate_segment(
+            "Hello world.", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(gui["temperature"], 0.7)
+        self.assertEqual(gui["top_p"], 0.6)
+        self.assertEqual(gui["max_tokens"], 4096)
+
+    def test_custom_generation_params_khong_dat_thi_khong_doi_hanh_vi(self):
+        """Khong dat bien moi -> than request Y HET truoc mission nay
+        (chi temperature=0.3 co dinh) - rao chan hoi quy."""
+        config = {
+            "TRANSLATION_BASE_URL": "https://hymt2.selfhost.test/v1",
+            "TRANSLATION_API_KEY": "sk-local-hymt2",
+            "TRANSLATION_MODEL": "tencent/Hy-MT2-1.8B",
+            "TRANSLATION_CUSTOM_PROVIDER_FREE": "true",
+        }
+        reg = build_provider_registry(env=config)
+        custom = reg.get("custom")
+
+        gui: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            import json as _json
+            nonlocal gui
+            gui = _json.loads(request.content)
+            return _tra_loi_chat_hy_mt2("Xin chào thế giới.")
+
+        custom.provider._client = httpx.Client(
+            base_url="https://hymt2.selfhost.test/v1",
+            transport=httpx.MockTransport(handler))
+        custom.translate_segment(
+            "Hello world.", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(gui["temperature"], 0.3)
+        self.assertNotIn("top_p", gui)
+
+    def test_custom_generation_params_json_sai_dang_khong_lam_sap_registry(self):
+        config = {
+            "TRANSLATION_BASE_URL": "https://hymt2.selfhost.test/v1",
+            "TRANSLATION_API_KEY": "sk-local-hymt2",
+            "TRANSLATION_MODEL": "tencent/Hy-MT2-1.8B",
+            "TRANSLATION_CUSTOM_PROVIDER_FREE": "true",
+            "TRANSLATION_CUSTOM_GENERATION_PARAMS": "{not valid json",
+        }
+        reg = build_provider_registry(env=config)
+        self.assertTrue(bool(reg))
+        self.assertIsNotNone(reg.get("custom"))
+
+    def test_custom_provider_ghi_lai_usage_tu_phan_hoi_hy_mt2(self):
+        """Mission 'Hy-MT2 1.8B translation production readiness': provider
+        'custom' gio phai doc duoc `usage` (token in/out) tu mot phan hoi
+        Hy-MT2 that qua vLLM, cung mau voi Groq/Cerebras."""
+        config = {
+            "TRANSLATION_BASE_URL": "https://hymt2.selfhost.test/v1",
+            "TRANSLATION_API_KEY": "sk-local-hymt2",
+            "TRANSLATION_MODEL": "tencent/Hy-MT2-1.8B",
+            "TRANSLATION_CUSTOM_PROVIDER_FREE": "true",
+        }
+        reg = build_provider_registry(env=config)
+        custom = reg.get("custom")
+        custom.provider._client = httpx.Client(
+            base_url="https://hymt2.selfhost.test/v1",
+            transport=httpx.MockTransport(
+                lambda r: _tra_loi_chat_hy_mt2("Xin chào thế giới.")))
+        custom.translate_segment(
+            "Hello world.", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(custom.provider.last_usage,
+                         {"input_tokens": 120, "output_tokens": 45})
+
     def test_custom_provider_mac_dinh_khong_duoc_coi_la_mien_phi(self):
         """Khong dat TRANSLATION_CUSTOM_PROVIDER_FREE cung khong bat
         TRANSLATION_ALLOW_PAID_PROVIDER -> custom im lang khong ton tai."""

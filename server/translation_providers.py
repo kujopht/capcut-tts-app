@@ -267,12 +267,29 @@ class DocuTranslateProvider(TranslationProvider):
     TIMEOUT_SECONDS = 60.0
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
-                client: Optional[httpx.Client] = None):
+                client: Optional[httpx.Client] = None,
+                extra_payload: Optional[Dict[str, object]] = None):
         if not (base_url and api_key and model):
             raise TranslationProviderError(
                 "Thiếu cấu hình TRANSLATION_BASE_URL/API_KEY/MODEL — "
                 "chưa thể dùng DocuTranslateProvider.")
         self._model = model
+        # Mission "Hy-MT2 1.8B translation production readiness" (Track B):
+        # TUY CHON, mac dinh rong -> hanh vi Y HET truoc day (temperature=0.3
+        # co dinh, khong top_p/top_k/repetition_penalty/max_tokens). Ly do
+        # KHONG doi mac dinh: lop nay phuc vu BAT KY endpoint tuong thich
+        # OpenAI nao qua bien TRANSLATION_* (khong rieng Hy-MT2) va da duoc
+        # kiem chung trong san xuat o temperature=0.3 — doi mac dinh chung se
+        # anh huong moi trien khai "custom" hien co ma KHONG co bang chung
+        # that (chua benchmark GPU that) rang gia tri model-card cua rieng
+        # Hy-MT2 (temperature=0.7, top_p=0.6, top_k=20, repetition_penalty=1.05,
+        # max_tokens=4096 — xem huggingface.co/tencent/Hy-MT2-1.8B, fetched
+        # 2026-09-01) tot hon cho tac vu dich fanfic. Toan tu nay cho phep
+        # NGUOI VAN HANH tu bat cac gia tri do (vd qua bien moi truong
+        # TRANSLATION_CUSTOM_GENERATION_PARAMS, xem
+        # translation_provider_registry.py) SAU KHI co bang chung that tu
+        # benchmark, thay vi hardcode mot phong doan vao code dung chung.
+        self._extra_payload = extra_payload or {}
         # `client` tiem duoc de test dung `httpx.MockTransport` — khong bao
         # gio goi mang that trong bo test (xem test_translation_providers.py).
         self._client = client or httpx.Client(
@@ -280,6 +297,18 @@ class DocuTranslateProvider(TranslationProvider):
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=self.TIMEOUT_SECONDS,
         )
+        #: So token input/output CUA LAN GOI THANH CONG GAN NHAT — cung mau
+        #: voi `_OpenAICompatFreeProvider.last_usage` (xem
+        #: translation_provider_registry.py). Truoc mission nay, lop nay
+        #: KHONG doc `usage` tu phan hoi (Groq/Cerebras co, "custom" thi
+        #: khong) — day la mot khoang trong that: mot endpoint self-hosted
+        #: (vd Hy-MT2 qua vLLM) van tra `usage` chuan OpenAI-compat, nhung
+        #: khong ai doc no ca. `None` cho den lan goi dau tien, hoac neu
+        #: phan hoi khong kem `usage`. `ConfiguredProvider.translate_segment`
+        #: da doc thuoc tinh nay bang `getattr` (duck-typed) tu truoc, nen
+        #: chi can THEM thuoc tinh nay la usage-recording tu dong hoat dong,
+        #: khong can sua ConfiguredProvider.
+        self.last_usage: Optional[Dict[str, int]] = None
 
     def translate_segment(self, text: str, *,
                           context: TranslationContext) -> str:
@@ -294,6 +323,7 @@ class DocuTranslateProvider(TranslationProvider):
                 {"role": "user", "content": _nguoi_dung_prompt(sach, context)},
             ],
             "temperature": 0.3,
+            **self._extra_payload,
         }
         try:
             resp = self._client.post("/chat/completions", json=payload)
@@ -317,6 +347,20 @@ class DocuTranslateProvider(TranslationProvider):
         if not ket_qua:
             raise TranslationProviderError(
                 "Dịch vụ dịch trả về nội dung rỗng.")
+
+        # Ghi lai so token NEU phan hoi co kem `usage` (OpenAI-compat chuan,
+        # vLLM/TGI deu tra truong nay) — rong/thieu truong nao thi bo qua,
+        # KHONG bia so (cung nguyen tac voi _OpenAICompatFreeProvider).
+        usage = du_lieu.get("usage") if isinstance(du_lieu, dict) else None
+        if isinstance(usage, dict):
+            vao = usage.get("prompt_tokens")
+            ra = usage.get("completion_tokens")
+            self.last_usage = {
+                "input_tokens": int(vao) if isinstance(vao, (int, float)) else None,
+                "output_tokens": int(ra) if isinstance(ra, (int, float)) else None,
+            }
+        else:
+            self.last_usage = None
         return ket_qua
 
 

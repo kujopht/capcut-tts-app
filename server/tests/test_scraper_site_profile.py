@@ -131,3 +131,101 @@ class IsUsableTest(unittest.TestCase):
         assert base.__class__(**{**base.__dict__, "status": ProfileStatus.VERIFIED}).is_usable
         assert not base.__class__(**{**base.__dict__, "status": ProfileStatus.DEGRADED}).is_usable
         assert not base.__class__(**{**base.__dict__, "status": ProfileStatus.DISABLED}).is_usable
+
+
+class SuccessRatioTest(unittest.TestCase):
+    def test_thanh_cong_ratio_1_0_cho_profile_moi_chua_co_loi(self):
+        store = MockSiteProfileStore()
+        store.upsert(profile_from_proposal(_proposal()))
+
+        profile = store.get("vidu.test")
+
+        assert profile.success_ratio == 1.0
+
+    def test_thanh_cong_ratio_bang_N_chia_N_plus_M(self):
+        store = MockSiteProfileStore()
+        store.upsert(profile_from_proposal(_proposal()))
+
+        for _ in range(3):
+            store.record_success("vidu.test")
+        store.record_failure("vidu.test")
+
+        profile = store.get("vidu.test")
+
+        assert profile.success_ratio == 0.75
+
+    def test_thanh_cong_ratio_tinh_theo_failure_count_ever_khong_phai_lien_tiep(self):
+        store = MockSiteProfileStore()
+        store.upsert(profile_from_proposal(_proposal()))
+        store.record_failure("vidu.test")
+        store.record_success("vidu.test")
+
+        profile = store.get("vidu.test")
+
+        assert profile.success_ratio == 0.5
+
+
+class RecordFailureModeTest(unittest.TestCase):
+    def test_them_the_moi_vao_known_failure_modes(self):
+        store = MockSiteProfileStore()
+        store.upsert(profile_from_proposal(_proposal()))
+
+        updated = store.record_failure_mode("vidu.test", "captcha_seen_once")
+
+        assert updated.known_failure_modes == ["captcha_seen_once"]
+
+    def test_cung_the_hai_lan_chi_mot_phan_tu(self):
+        store = MockSiteProfileStore()
+        store.upsert(profile_from_proposal(_proposal()))
+        store.record_failure_mode("vidu.test", "captcha_seen_once")
+
+        updated = store.record_failure_mode("vidu.test", "captcha_seen_once")
+
+        assert updated.known_failure_modes == ["captcha_seen_once"]
+        assert len(updated.known_failure_modes) == 1
+
+    def test_the_khac_nhau_tao_hai_phan_tu(self):
+        store = MockSiteProfileStore()
+        store.upsert(profile_from_proposal(_proposal()))
+        store.record_failure_mode("vidu.test", "captcha_seen_once")
+
+        updated = store.record_failure_mode("vidu.test", "browser_render_required")
+
+        assert updated.known_failure_modes == [
+            "captcha_seen_once", "browser_render_required"]
+
+    def test_record_failure_mode_khong_lam_doi_counters(self):
+        store = MockSiteProfileStore()
+        store.upsert(profile_from_proposal(_proposal()))
+        store.record_success("vidu.test")
+        before = store.get("vidu.test")
+
+        updated = store.record_failure_mode("vidu.test", "captcha_seen_once")
+
+        assert updated.success_count == before.success_count
+        assert updated.consecutive_failures == before.consecutive_failures
+        assert updated.failure_count_ever == before.failure_count_ever
+
+    def test_domain_khong_ton_tai_nem_ValueError(self):
+        store = MockSiteProfileStore()
+
+        with self.assertRaises(ValueError) as ctx:
+            store.record_failure_mode("khong-co.test", "captcha_seen_once")
+
+        assert "Chưa có SiteProfile cho domain: khong-co.test" in str(ctx.exception)
+
+
+class PreferredAcquisitionTierTest(unittest.TestCase):
+    def test_mac_dinh_la_chuoi_rong(self):
+        profile = profile_from_proposal(_proposal())
+
+        assert profile.preferred_acquisition_tier == ""
+
+    def test_duoc_set_qua_save_va_doc_lai_binh_thuong(self):
+        store = MockSiteProfileStore()
+        store.upsert(profile_from_proposal(_proposal()))
+
+        updated = store.save("vidu.test", preferred_acquisition_tier="T2_BROWSER_RENDERED")
+
+        assert updated.preferred_acquisition_tier == "T2_BROWSER_RENDERED"
+        assert store.get("vidu.test").preferred_acquisition_tier == "T2_BROWSER_RENDERED"

@@ -1,0 +1,141 @@
+"""
+Chinh sach nguon fanfic anime/manga — ket qua NGHIEN CUU THAT (Anime Fanfic
+Production Canary, xac minh 2026-08-31), khong phai suy doan.
+
+VI SAO FILE NAY TON TAI: moi domain o day da duoc kiem tra TOAN VEN — doc
+robots.txt/ToS THAT (khong chi tra loi tu tri nho huan luyen) VA thu fetch
+THAT qua `server/scraper/http_fetcher.py::HttpFetcher` (chinh fetcher san
+xuat, khong phai mot cong cu doc trang rieng biet co User-Agent/TLS khac).
+Ket luan o day la MOT LAN, tranh cho agent/operator sau nay lap lai dung
+nghien cuu da lam, hoac te hon — vo tinh thu goi mot domain da biet ro la
+chan quyen tac gia/ToS/ky thuat.
+
+`check_source_policy()` duoc goi TRUOC bat ky discovery/fetch nao trong
+`ScraperOpsService.discover()`/`confirm_unknown_source()` — domain nam
+trong `BLOCKED_CLASSES` bi tu choi NGAY, khong chay heuristic, khong gui
+mot request nao ve domain do.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, Optional
+from urllib.parse import urlsplit
+
+
+class SourcePolicyClass(str, Enum):
+    FULL_TEXT_ALLOWED = "full_text_allowed"
+    METADATA_AND_LINK_ONLY = "metadata_and_link_only"
+    AUTHOR_OPT_IN_REQUIRED = "author_opt_in_required"
+    POLICY_BLOCKED = "policy_blocked"
+    AUTH_REQUIRED = "auth_required"
+    TECHNICALLY_UNSTABLE = "technically_unstable"
+
+
+#: Cac lop KHONG duoc phep di qua discovery/scrape tu dong — domain khop
+#: mot trong so nay bi `check_source_policy()` tu choi truoc ca khi fetch.
+#: `AUTH_REQUIRED` CO CHU Y khong nam trong tap nay: mot nguon can dang
+#: nhap co the van hop le qua mot luong rieng (chua xay dung) sau nay,
+#: khac han POLICY_BLOCKED/TECHNICALLY_UNSTABLE/AUTHOR_OPT_IN_REQUIRED —
+#: ca ba deu la "khong the/khong duoc tu dong hoa BAY GIO", khong phai
+#: "can them mot buoc ky thuat".
+_BLOCKED_CLASSES = frozenset({
+    SourcePolicyClass.POLICY_BLOCKED,
+    SourcePolicyClass.AUTHOR_OPT_IN_REQUIRED,
+    SourcePolicyClass.TECHNICALLY_UNSTABLE,
+})
+
+
+@dataclass(frozen=True)
+class SourcePolicyRecord:
+    domain: str
+    policy_class: SourcePolicyClass
+    #: Bang chung THAT (trich dan ToS/robots.txt, ma HTTP that quan sat
+    #: duoc) — khong phai "co ve nguy hiem".
+    evidence: str
+    verified_at: str  # ISO date, vd "2026-08-31"
+
+
+class SourcePolicyBlockedError(Exception):
+    """Domain da duoc XAC MINH thuoc mot lop khong tu dong hoa duoc BAY
+    GIO — xem `SourcePolicyRecord.evidence` trong thong diep loi."""
+
+
+#: HAT GIONG tu khao sat nguon anime/manga fanfic that (khong phai vi du) —
+#: dang ky them qua registry nay khi co nghien cuu moi, KHONG hardcode ranh
+#: gioi o noi khac.
+_KNOWN_SOURCE_POLICIES: Dict[str, SourcePolicyRecord] = {
+    "archiveofourown.org": SourcePolicyRecord(
+        domain="archiveofourown.org",
+        policy_class=SourcePolicyClass.AUTHOR_OPT_IN_REQUIRED,
+        evidence=(
+            "Moi fanwork la ban quyen CUA TAC GIA, khong phai cua AO3/OTW — "
+            "AO3 khong the cap quyen tai xuat ban thay tac gia du muon. OTW "
+            "cong khai: 'khong ngoai le... cho nguoi muon tao dataset', chu "
+            "dong gioi han toc do/giam sat, va da yeu cau Common Crawl ngung "
+            "quet nam 2022. THEM: `HttpFetcher` that (User-Agent tu nhan "
+            "dang minh bach) nhan HTTP 403 tren ca trang ToS lan trang "
+            "/tags/{fandom}/works that."),
+        verified_at="2026-08-31",
+    ),
+    "fanfiction.net": SourcePolicyRecord(
+        domain="fanfiction.net",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence=(
+            "robots.txt cho phep tai (Content-Signal: search=yes,ai-train=no,"
+            "use=reference) va ToS cho phep automation TOC DO NGUOI, nhung "
+            "loai tru 'caches or archives' khoi ngoai le search-engine. "
+            "THEM (quyet dinh hon): `HttpFetcher` that nhan HTTP 403 tren "
+            "mot trang truyen that (Ninja's Hero Academia, /s/13530962/...) "
+            "— ha tang chan bot du ToS/robots.txt nghe co ve chap nhan."),
+        verified_at="2026-08-31",
+    ),
+    "wattpad.com": SourcePolicyRecord(
+        domain="wattpad.com",
+        policy_class=SourcePolicyClass.POLICY_BLOCKED,
+        evidence=(
+            "ToS cam RO RANG, khong dieu kien: \"Don't use any kind of "
+            "software, device or method (whether it's manual or automated) "
+            "to 'crawl', 'spider' or otherwise remove any content\" — ap "
+            "dung cho CA metadata, khong chi full-text."),
+        verified_at="2026-08-31",
+    ),
+    "scribblehub.com": SourcePolicyRecord(
+        domain="scribblehub.com",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence=("HTTP 403 tren CA robots.txt lan trang ToS — khong doc "
+                  "duoc chinh sach that su, va ha tang tu choi fetch tu dong."),
+        verified_at="2026-08-31",
+    ),
+    "quotev.com": SourcePolicyRecord(
+        domain="quotev.com",
+        policy_class=SourcePolicyClass.TECHNICALLY_UNSTABLE,
+        evidence=("robots.txt cho phep, nhung `HttpFetcher` that nhan HTTP "
+                  "200 voi than trang RONG (1 ky tu) tren trang chu VA trang "
+                  "muc fanfiction — nghi la chan bot bang trang gia, khong "
+                  "phai loi tam thoi."),
+        verified_at="2026-08-31",
+    ),
+}
+
+
+def check_source_policy(url: str) -> Optional[SourcePolicyRecord]:
+    """Tra ve `SourcePolicyRecord` neu domain cua `url` da duoc khao sat,
+    `None` neu chua biet (KHONG suy doan — domain chua khao sat di qua
+    duong discovery binh thuong nhu truoc)."""
+    host = urlsplit(url).netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return _KNOWN_SOURCE_POLICIES.get(host)
+
+
+def assert_source_not_blocked(url: str) -> None:
+    """Nem `SourcePolicyBlockedError` NEU domain thuoc mot lop bi chan —
+    goi o dau `discover()`/`confirm_unknown_source()`, TRUOC fetch/heuristic
+    nao. Domain chua biet hoac hop le (FULL_TEXT_ALLOWED/METADATA_AND_
+    LINK_ONLY/AUTH_REQUIRED) di qua binh thuong."""
+    record = check_source_policy(url)
+    if record is not None and record.policy_class in _BLOCKED_CLASSES:
+        raise SourcePolicyBlockedError(
+            f"{record.domain} đã được xác minh là {record.policy_class.value} "
+            f"({record.verified_at}) — {record.evidence}")

@@ -41,6 +41,7 @@ from server.scraper.adapters.scrapling_relocation import (
     attempt_adaptive_relocation, is_scrapling_available, save_verified_element,
 )
 from server.scraper.self_healing import RelocationConfidence, validate_relocated_content
+from server.scraper.source_policy import assert_source_not_blocked
 from server.scraper.site_profile import (
     MockSiteProfileStore, ProfileStatus, profile_from_proposal,
 )
@@ -217,7 +218,13 @@ class ScraperOpsService:
         truoc khi operator bam 'Bắt đầu nhập'. Domain CHUA co cau hinh:
         chay `UnknownSiteDiscoveryEngine` (Phase 2), tra ve DE XUAT
         ('NEW SOURCE DETECTED') thay vi bat loi — operator xac nhan qua
-        `confirm_unknown_source()` neu muon dung tiep."""
+        `confirm_unknown_source()` neu muon dung tiep.
+
+        Anime Fanfic Production Canary: domain da duoc XAC MINH thuoc mot
+        lop khong tu dong hoa duoc (`server/scraper/source_policy.py`) bi
+        tu choi O DAY, TRUOC ca `_co_the_dung_ngay`/discovery — khong gui
+        mot request nao ve mot domain da biet ro la 403/ToS-cam."""
+        assert_source_not_blocked(url)
         if self._co_the_dung_ngay(url):
             svc = self._service_for_new(url)
             run = svc.plan_run(url, dry_run=True)
@@ -257,6 +264,7 @@ class ScraperOpsService:
         don gian) — KHONG BAO GIO lam GIAM mot ket qua Tier 0 da HIGH san
         (Scrapling khong duoc goi trong truong hop do, xem yeu cau "khong
         goi khong can thiet" cua nhiem vu)."""
+        assert_source_not_blocked(url)
         if site_registry.lookup(url) is not None:
             raise ValueError(
                 "Domain này đã có cấu hình xác minh sẵn — không cần xác "

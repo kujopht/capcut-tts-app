@@ -84,6 +84,7 @@ from server.appwrite_scrape_run_store import build_scrape_run_store
 from server.appwrite_site_profile_store import build_site_profile_store
 from server.scraper.http_fetcher import FetchError
 from server.scraper.site_registry import ScopeExtractionError
+from server.scraper.source_policy import SourcePolicyBlockedError
 from server.scraper_ops_service import (
     PublishNotConfiguredError,
     ScraperOpsService,
@@ -5387,7 +5388,8 @@ def _quet_hang_loat(fn, *args, **kwargs):
     mot 400 im lang khien operator tuong minh go sai URL."""
     try:
         return fn(*args, **kwargs)
-    except (UnsupportedSiteError, ScopeExtractionError, FetchError) as exc:
+    except (UnsupportedSiteError, ScopeExtractionError, FetchError,
+            SourcePolicyBlockedError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except ScrapeRunNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc

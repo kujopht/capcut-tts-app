@@ -138,6 +138,12 @@ def main() -> int:
             "stripe down the side, black sneakers with orange laces"),
         distinctive_traits=["athletic build", "determined expression"],
         negative_traits=["blonde hair", "glasses", "formal suit"],
+        # Real fix: without compact_visual_tags, CoverPromptBuilder's
+        # compact mode (>= 2 resolved identities with compact tags)
+        # never engages, and this script would still send the FULL
+        # descriptor prompt that measured 216 tokens against CLIP's
+        # 77-token limit on a real Beam call.
+        compact_visual_tags=["black and orange tracksuit", "messy black hair"],
         source_provenance="rezero.fandom.com/wiki/Natsuki_Subaru",
         reference_images=[str(primary_path)], reference_strength=a.reference_strength,
         reference_source=a.primary_reference_source,
@@ -155,6 +161,7 @@ def main() -> int:
             "yellow star-shaped hairpin", "small teal pendant necklace",
             "petite doll-like figure"],
         negative_traits=["short hair", "armor", "modern clothing"],
+        compact_visual_tags=["white fur ushanka hat", "long purple hair"],
         source_provenance="rezero.fandom.com/wiki/Anastasia_Hoshin",
         reference_images=[str(secondary_path)], reference_strength=a.reference_strength,
         reference_source=a.secondary_reference_source,

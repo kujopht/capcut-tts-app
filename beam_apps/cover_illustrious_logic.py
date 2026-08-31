@@ -88,6 +88,56 @@ def build_response_payload(
     }
 
 
+#: Real bug fix: h94/IP-Adapter's `load_ip_adapter(subfolder="sdxl_models",
+#: ...)` default `image_encoder_folder="image_encoder"` is JOINED with
+#: `subfolder`, silently resolving to "sdxl_models/image_encoder" - that
+#: is OpenCLIP ViT-bigG (hidden_size=1664), NOT the ViT-H encoder
+#: (hidden_size=1280) the "*_vit-h" checkpoint actually needs. Real
+#: evidence: RuntimeError "mat1 and mat2 shapes cannot be multiplied
+#: (1028x1664 and 1280x1280)" on a real Beam GPU call. The OFFICIAL
+#: diffusers IP-Adapter guide's own "Model variants" example loads the
+#: correct encoder from this TOP-LEVEL path instead (confirmed via
+#: docs.huggingface.co/diffusers/using-diffusers/ip_adapter, fetched
+#: 2026-08-31/09-01 - not assumed).
+IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER = "models/image_encoder"
+#: ViT-H/14's real hidden_size (LAION OpenCLIP) - what the "*_vit-h"
+#: IP-Adapter checkpoint's cross-attention weights actually expect.
+IP_ADAPTER_EXPECTED_HIDDEN_SIZE = 1280
+
+
+class IPAdapterEncoderMismatchError(Exception):
+    """Loaded IP-Adapter image encoder does not match what the selected
+    checkpoint expects - raised at on_start (container startup) instead
+    of surfacing as a cryptic mid-inference matmul RuntimeError."""
+
+
+def assert_ip_adapter_encoder_compatible(hidden_size: int, weight_name: str) -> None:
+    """Real regression guard for a real incident (see
+    IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER's own docstring for the full
+    citation). Raises `IPAdapterEncoderMismatchError` with an actionable
+    message if the checkpoint/encoder pairing is wrong; does nothing if
+    it's correct. Only understands "*_vit-h" checkpoints today - any
+    other checkpoint name is rejected rather than silently assumed
+    compatible, since compatibility hasn't been verified for it."""
+    if "vit-h" not in weight_name.lower():
+        raise IPAdapterEncoderMismatchError(
+            f"IP-Adapter checkpoint {weight_name!r} is not a recognized "
+            f"*_vit-h variant, but the image encoder explicitly loaded "
+            f"here is specifically the ViT-H one "
+            f"(hidden_size={IP_ADAPTER_EXPECTED_HIDDEN_SIZE}) - "
+            f"checkpoint/encoder pairing is unverified for this name.")
+    if hidden_size != IP_ADAPTER_EXPECTED_HIDDEN_SIZE:
+        raise IPAdapterEncoderMismatchError(
+            f"IP-Adapter image encoder hidden_size mismatch: got "
+            f"{hidden_size}, expected {IP_ADAPTER_EXPECTED_HIDDEN_SIZE} "
+            f"(ViT-H) for checkpoint {weight_name!r}. Real prior incident: "
+            f"RuntimeError 'mat1 and mat2 shapes cannot be multiplied "
+            f"(1028x1664 and 1280x1280)' - hidden_size=1664 is OpenCLIP "
+            f"ViT-bigG, loaded from the WRONG subfolder "
+            f"('sdxl_models/image_encoder' instead of "
+            f"{IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER!r}).")
+
+
 def build_reference_conditioning_metadata(*, used: bool, strength: float = 0.0) -> dict:
     """Metadata rieng VE VIEC reference-conditioning (IP-Adapter) co duoc
     dung cho request nay hay khong - TACH KHOI `build_response_payload()`

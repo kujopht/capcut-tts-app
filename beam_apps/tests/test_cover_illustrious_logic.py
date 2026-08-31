@@ -15,7 +15,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cover_illustrious_logic import (  # noqa: E402
-    DEFAULT_NEGATIVE_PROMPT, build_left_right_masks,
+    DEFAULT_NEGATIVE_PROMPT, IP_ADAPTER_EXPECTED_HIDDEN_SIZE,
+    IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER, IPAdapterEncoderMismatchError,
+    assert_ip_adapter_encoder_compatible, build_left_right_masks,
     build_reference_conditioning_metadata, build_response_payload,
     resolve_negative_prompt,
 )
@@ -178,6 +180,58 @@ class TestBuildLeftRightMasks(unittest.TestCase):
         # (split=300) thi x=400 da la ngoai vung primary.
         self.assertEqual(primary_default.getpixel((400, 500)), 255)
         self.assertEqual(primary_narrow.getpixel((400, 500)), 0)
+
+
+class TestIpAdapterEncoderSubfolder(unittest.TestCase):
+    """Direct regression guard on the exact root-cause string - the real
+    bug was `load_ip_adapter(subfolder="sdxl_models")`'s DEFAULT
+    image_encoder_folder resolving to "sdxl_models/image_encoder" (wrong,
+    ViT-bigG). The fix must use the TOP-LEVEL "models/image_encoder"
+    path, never anything under "sdxl_models/"."""
+
+    def test_subfolder_is_top_level_models_image_encoder(self):
+        self.assertEqual(
+            IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER, "models/image_encoder")
+
+    def test_subfolder_is_not_under_sdxl_models(self):
+        self.assertNotIn("sdxl_models", IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER)
+
+    def test_expected_hidden_size_is_vit_h_not_vit_biggg(self):
+        self.assertEqual(IP_ADAPTER_EXPECTED_HIDDEN_SIZE, 1280)
+        self.assertNotEqual(IP_ADAPTER_EXPECTED_HIDDEN_SIZE, 1664)
+
+
+class TestAssertIpAdapterEncoderCompatible(unittest.TestCase):
+    def test_correct_hidden_size_and_vit_h_checkpoint_does_not_raise(self):
+        try:
+            assert_ip_adapter_encoder_compatible(
+                1280, "ip-adapter-plus-face_sdxl_vit-h.safetensors")
+        except IPAdapterEncoderMismatchError as exc:
+            self.fail(f"correct pairing raised unexpectedly: {exc}")
+
+    def test_wrong_hidden_size_1664_raises_reproducing_real_incident(self):
+        """The EXACT real incident: ViT-bigG (1664) silently paired with
+        a *_vit-h checkpoint that expects 1280."""
+        with self.assertRaises(IPAdapterEncoderMismatchError) as ctx:
+            assert_ip_adapter_encoder_compatible(
+                1664, "ip-adapter-plus-face_sdxl_vit-h.safetensors")
+        self.assertIn("1664", str(ctx.exception))
+        self.assertIn("1280", str(ctx.exception))
+
+    def test_non_vit_h_checkpoint_name_raises(self):
+        """Defends against a future checkpoint swap without updating the
+        explicitly-loaded encoder to match."""
+        with self.assertRaises(IPAdapterEncoderMismatchError):
+            assert_ip_adapter_encoder_compatible(
+                1280, "ip-adapter-plus_sdxl_vit-g.safetensors")
+
+    def test_error_message_cites_the_real_prior_runtimeerror(self):
+        """Actionable message - a future operator seeing this should
+        recognize it as the same class of failure, not a new mystery."""
+        with self.assertRaises(IPAdapterEncoderMismatchError) as ctx:
+            assert_ip_adapter_encoder_compatible(
+                1664, "ip-adapter-plus-face_sdxl_vit-h.safetensors")
+        self.assertIn("mat1 and mat2", str(ctx.exception))
 
 
 if __name__ == "__main__":

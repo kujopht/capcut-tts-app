@@ -535,6 +535,85 @@ class TestCoverPromptBuilderWithCharacterIdentity(unittest.TestCase):
         self.assertEqual(traits, [])
 
 
+class TestCoverPromptBuilderCompactModeTokenBudget(unittest.TestCase):
+    """Real fix for a real Beam failure: RuntimeError aside, the same log
+    also showed "Token indices sequence length 216 > maximum 77" - the
+    FULL-descriptor 2-person prompt (980 chars) overflowed CLIP's 77-token
+    hard limit. `transformers`/a real CLIP tokenizer is NOT installed in
+    this repo's venv (deploy-only dependency, same constraint as beam_apps
+    all mission), so exact BPE token counts cannot be computed locally.
+    Instead this uses a REAL, evidence-CALIBRATED character-length proxy:
+    the actual incident reported 980 chars -> 216 tokens, i.e. ~4.54
+    chars/token. A comfortable target of well under 350 chars (77 tokens
+    * ~4.54 chars/token, rounded down for safety margin) is used as the
+    proxy ceiling - not exact tokenization, but grounded in the real
+    incident's own numbers rather than an arbitrary guess."""
+
+    #: 980 real chars / 216 real tokens from the actual Beam log line.
+    _REAL_CHARS_PER_TOKEN = 980 / 216
+    _REAL_CLIP_TOKEN_LIMIT = 77
+    #: Deliberately conservative (well under the raw 77*ratio~=350) so a
+    #: less token-efficient BPE split on some words still leaves margin.
+    _SAFE_CHAR_CEILING = 300
+
+    def setUp(self):
+        self.registry = CharacterIdentityRegistry()
+
+    def test_two_identity_prompt_stays_under_the_safe_character_ceiling(self):
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertLess(
+            len(prompt), self._SAFE_CHAR_CEILING,
+            f"prompt is {len(prompt)} chars - estimated "
+            f"~{len(prompt) / self._REAL_CHARS_PER_TOKEN:.0f} tokens "
+            f"against a real {self._REAL_CLIP_TOKEN_LIMIT}-token CLIP "
+            f"limit (real incident: 980 chars measured as 216 tokens)")
+
+    def test_compact_mode_drops_verbose_only_markers(self):
+        """Proves compact mode actually engaged (not just coincidentally
+        short) - none of the FULL-descriptor path's verbose phrasing
+        should appear once 2 identities with compact tags are resolved."""
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertNotIn("clear focal hierarchy", prompt)
+        self.assertNotIn("focal point", prompt)
+        self.assertNotIn("positioned beside/behind", prompt)
+        self.assertNotIn("cinematic fantasy background", prompt)
+        self.assertNotIn("dynamic pose", prompt)
+
+    def test_compact_mode_does_not_simply_discard_identity(self):
+        """Requirement 6 - "Do not simply discard character identity."
+        Compact != empty: the most distinctive tags must still survive."""
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertIn("tracksuit", prompt.lower())
+        self.assertIn("black hair", prompt.lower())
+        self.assertIn("purple hair", prompt.lower())
+        self.assertIn("fur", prompt.lower())
+
+    def test_compact_mode_drops_genre_words(self):
+        """Requirement 7 - "Move/remove ... genre words" from the
+        identity-aware compact path."""
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        for genre_word in ("Isekai", "Fantasy", "Drama", "genre"):
+            self.assertNotIn(genre_word, prompt)
+
+    def test_compact_mode_keeps_title_negative_space(self):
+        """Requirement 4 preservation list - title negative space must
+        survive trimming, it is product-critical (app-side title overlay
+        composition), not a low-priority detail."""
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertIn("negative space for title", prompt)
+
+    def test_single_identity_prompt_unaffected_by_compact_mode(self):
+        """Only >= 2 resolved identities with compact tags trigger
+        compact mode - a single-character prompt keeps its existing full
+        descriptor behavior unchanged (it was never the source of the
+        216-token overflow, which needed TWO full descriptor blocks)."""
+        req = CoverGenerationRequest(
+            novel_id="n", fandom="Re:Zero", title="t", summary="s",
+            primary_character="Natsuki Subaru")
+        prompt = CoverPromptBuilder.build_prompt(req, self.registry)
+        self.assertIn("swept back and unkempt", prompt)  # full hair_description text
+
+
 class TestWrapRasterAsOverlayableSvg(unittest.TestCase):
     def test_produces_valid_svg_with_embedded_png(self):
         svg_bytes = wrap_raster_as_overlayable_svg(_TINY_PNG_BYTES)

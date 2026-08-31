@@ -114,6 +114,19 @@ class CoverPromptBuilder:
     thanh nhan vat anime CHUNG CHUNG, vi prompt chi co TEN, model khong
     "biet" ho la ai. Nhan vat CHUA co ho so (identity_registry.lookup tra
     None) van lui ve hanh vi CHI-TEN nhu truoc — khong chan tien trinh.
+
+    CHE DO COMPACT (khi >= 2 nhan vat HIEN THI co `compact_visual_tags`):
+    fix cho loi that tren Beam - prompt DAY DU (mo ta hoan chinh cho CA
+    HAI nhan vat) dai ~980 ky tu nhung thuc te la 216 token CLIP, vuot
+    gioi han cung 77 ("Token indices sequence length 216 > maximum 77" -
+    log that tu Beam). Khi >= 2 nhan vat trong cast co san
+    `compact_visual_tags`, build_prompt() tu dong chuyen sang phien ban
+    RUT GON (ten + toi da 2 tag noi bat nhat/nhan vat, bo genre/mood/cau
+    van dai) thay vi phien ban day du - KHONG bo hoan toan nhan dang
+    (item 6: "Do not simply discard character identity"), chi giu lai
+    PHAN QUAN TRONG NHAT. Nhan vat CHUA co compact_visual_tags (vd chi co
+    1 nhan vat, hoac khong co identity_registry) van dung phien ban day
+    du nhu truoc - KHONG doi hanh vi cho cac truong hop do.
     """
 
     @staticmethod
@@ -133,12 +146,19 @@ class CoverPromptBuilder:
             for name in cast
         ]
 
+        count_tag = CoverPromptBuilder._build_count_tag(cast, identities)
+
+        resolved_with_compact_tags = [
+            i for i in identities if i and i.compact_visual_tags]
+        if len(resolved_with_compact_tags) >= 2:
+            return CoverPromptBuilder._build_compact_prompt(
+                request, cast, identities, count_tag)
+
         parts: List[str] = ["light novel cover"]
 
         if request.fandom:
             parts.append(f"{request.fandom} fanart style")
 
-        count_tag = CoverPromptBuilder._build_count_tag(cast, identities)
         if count_tag:
             parts.append(count_tag)
 
@@ -172,6 +192,50 @@ class CoverPromptBuilder:
         parts.append("dynamic pose")
         parts.append("vibrant colors")
         parts.append("high quality")
+
+        return ", ".join(parts)
+
+    @staticmethod
+    def _build_compact_prompt(
+        request: CoverGenerationRequest, cast: List[str],
+        identities: List[Optional[Any]], count_tag: str,
+    ) -> str:
+        """Phien ban RUT GON - xem build_prompt()'s own docstring "CHE DO
+        COMPACT" cho ly do that. Chi giu: "light novel cover", fandom,
+        count_tag, ten+toi da 2 tag noi bat/nhan vat, "negative space for
+        title" (can cho overlay tieu de ung dung, khong phai chi tiet tuy
+        chon), va 2 tag chat luong ngan gon - bo genre/mood/van xuoi dai/
+        chi tiet uu tien thap (dung theo yeu cau: "Move/remove redundant
+        prose, genre words, repeated descriptions, and low-priority
+        details")."""
+        parts: List[str] = ["light novel cover"]
+
+        if request.fandom:
+            parts.append(f"{request.fandom} fanart style")
+
+        if count_tag:
+            parts.append(count_tag)
+
+        primary_descriptor = identities[0].to_compact_prompt_descriptor() if identities[0] else ""
+        primary_block = f"{cast[0]}, {primary_descriptor}" if primary_descriptor else cast[0]
+        parts.append(f"{primary_block}, foreground")
+
+        if len(cast) >= 2:
+            secondary_descriptor = (
+                identities[1].to_compact_prompt_descriptor() if identities[1] else "")
+            secondary_block = (
+                f"{cast[1]}, {secondary_descriptor}" if secondary_descriptor else cast[1])
+            parts.append(f"{secondary_block}, beside {cast[0]}")
+
+        if len(cast) >= 3:
+            tertiary_descriptor = (
+                identities[2].to_compact_prompt_descriptor() if identities[2] else "")
+            tertiary_block = (
+                f"{cast[2]}, {tertiary_descriptor}" if tertiary_descriptor else cast[2])
+            parts.append(f"{tertiary_block} in the background")
+
+        parts.append("negative space for title")
+        parts.append("detailed anime art, high quality")
 
         return ", ".join(parts)
 

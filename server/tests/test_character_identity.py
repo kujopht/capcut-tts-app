@@ -48,6 +48,23 @@ class TestCharacterVisualIdentity(unittest.TestCase):
             hair_description="black hair")
         self.assertNotIn("Natsuki Subaru", identity.to_prompt_descriptor())
 
+    def test_to_compact_prompt_descriptor_returns_at_most_max_tags(self):
+        identity = CharacterVisualIdentity(
+            canonical_name="A", fandom="F",
+            compact_visual_tags=["tag1", "tag2", "tag3"])
+        self.assertEqual(identity.to_compact_prompt_descriptor(max_tags=2),
+                          "tag1, tag2")
+
+    def test_to_compact_prompt_descriptor_empty_when_unset(self):
+        identity = CharacterVisualIdentity(canonical_name="A", fandom="F")
+        self.assertEqual(identity.to_compact_prompt_descriptor(), "")
+
+    def test_to_compact_prompt_descriptor_default_max_tags_is_two(self):
+        identity = CharacterVisualIdentity(
+            canonical_name="A", fandom="F",
+            compact_visual_tags=["tag1", "tag2", "tag3", "tag4"])
+        self.assertEqual(identity.to_compact_prompt_descriptor(), "tag1, tag2")
+
 
 class TestCharacterIdentityRegistry(unittest.TestCase):
     def setUp(self):
@@ -89,6 +106,21 @@ class TestCharacterIdentityRegistry(unittest.TestCase):
             self.assertTrue(
                 identity.source_provenance,
                 f"{identity.canonical_name} missing source_provenance")
+
+    def test_seed_characters_have_compact_visual_tags(self):
+        """Real fix requirement - the two seed characters (Subaru,
+        Anastasia) are exactly the pair whose FULL descriptors together
+        overflowed CLIP's 77-token budget (real Beam log: "Token indices
+        sequence length 216 > maximum 77"). Both must have compact tags
+        so CoverPromptBuilder's compact mode actually engages for them."""
+        for identity in self.registry.list_all():
+            self.assertTrue(
+                identity.compact_visual_tags,
+                f"{identity.canonical_name} missing compact_visual_tags")
+            self.assertLessEqual(
+                len(identity.to_compact_prompt_descriptor()), 60,
+                f"{identity.canonical_name}'s compact descriptor is "
+                f"unexpectedly long for a token-budget-constrained tag")
 
     def test_register_new_identity_is_immediately_lookupable(self):
         registry = CharacterIdentityRegistry(seed=False)

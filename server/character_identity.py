@@ -67,6 +67,16 @@ class CharacterVisualIdentity:
     outfit_description: str = ""
     distinctive_traits: List[str] = field(default_factory=list)
     negative_traits: List[str] = field(default_factory=list)
+    #: Danh sach NGAN, DA CHON LOC cac tag hinh anh de nhan ra nhat (vd
+    #: 1-3 muc, "trang phuc dac trung" + "mau toc") — dung cho duong dan
+    #: prompt CO GIOI HAN NGAN SACH TOKEN (xem
+    #: CoverPromptBuilder.build_prompt()'s che do compact). KHAC voi
+    #: hair_description/outfit_description/distinctive_traits (van xuoi
+    #: DAY DU, dung khi khong bi han che ngan sach) — bug that: mot prompt
+    #: 2-nhan-vat dung mo ta DAY DU cho CA HAI dai ~980 ky tu, thuc te ra
+    #: 216 token CLIP (gioi han cung la 77) — Beam log that:
+    #: "Token indices sequence length 216 > maximum 77".
+    compact_visual_tags: List[str] = field(default_factory=list)
     #: Du phong cho LoRA nhan vat rieng trong tuong lai — CHUA train/tai
     #: LoRA nao (chua den luot co che nay), KHONG code nao doc truong nay.
     lora_reference_id: str = ""
@@ -106,6 +116,12 @@ class CharacterVisualIdentity:
             return "girl"
         return ""
 
+    def to_compact_prompt_descriptor(self, max_tags: int = 2) -> str:
+        """`max_tags` tag DAU TIEN trong `compact_visual_tags` — dung khi
+        ngan sach token eo hep (2 nhan vat cung mot prompt). Rong neu
+        `compact_visual_tags` chua duoc dien (caller lui ve chi-ten)."""
+        return ", ".join(self.compact_visual_tags[:max_tags])
+
     def to_prompt_descriptor(self) -> str:
         """Chuoi tag mo ta hinh anh (toc, mat, trang phuc, dac diem rieng)
         — DUNG lam noi dung PROMPT DUONG (positive), khong bao gom ten."""
@@ -140,6 +156,10 @@ _SEED_CHARACTERS: Tuple[CharacterVisualIdentity, ...] = (
         ),
         distinctive_traits=["athletic build", "determined expression"],
         negative_traits=["blonde hair", "glasses", "formal suit"],
+        #: Chon loc ngan gon tu hair_description/outfit_description o
+        #: tren (cung nguon, khong phai thong tin moi) - xem
+        #: compact_visual_tags's own docstring cho ly do can truong nay.
+        compact_visual_tags=["black and orange tracksuit", "messy black hair"],
         source_provenance=(
             "rezero.fandom.com/wiki/Natsuki_Subaru "
             "(cross-checked otakumode.com/otapedia, 2026-08-31)"
@@ -162,6 +182,7 @@ _SEED_CHARACTERS: Tuple[CharacterVisualIdentity, ...] = (
             "petite doll-like figure",
         ],
         negative_traits=["short hair", "armor", "modern clothing"],
+        compact_visual_tags=["white fur ushanka hat", "long purple hair"],
         source_provenance=(
             "rezero.fandom.com/wiki/Anastasia_Hoshin "
             "(cross-checked otakumode.com/otapedia, 2026-08-31)"

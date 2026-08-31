@@ -75,6 +75,22 @@ reference-conditioned mode, chosen and researched for real (not assumed):
   itself an SDXL fine-tune, so this SHOULD attach cleanly - NOT yet
   verified against a real GPU call from here (see Requirement 11 - one
   real proof call is prepared but not executed by this codebase).
+- IMAGE ENCODER (real bug, real fix): the first real proof call raised
+  `RuntimeError: mat1 and mat2 shapes cannot be multiplied (1028x1664 and
+  1280x1280)`. Root cause: `load_ip_adapter(subfolder="sdxl_models", ...)`
+  defaults `image_encoder_folder="image_encoder"`, JOINED with
+  `subfolder` - resolving to "h94/IP-Adapter/sdxl_models/image_encoder",
+  which is OpenCLIP ViT-bigG (hidden_size=1664), not the ViT-H encoder
+  (hidden_size=1280) the `*_vit-h` checkpoint actually expects. Fixed by
+  explicitly loading `CLIPVisionModelWithProjection.from_pretrained(
+  IP_ADAPTER_REPO, subfolder="models/image_encoder", ...)` (the TOP-LEVEL
+  path, matching the official diffusers guide's own "Model variants"
+  example for `*_vit-h` checkpoints exactly) and passing it to the
+  pipeline CONSTRUCTOR before `load_ip_adapter()` runs - diffusers does
+  not override an already-set, non-None `image_encoder`. `load_pipeline()`
+  also asserts `hidden_size == 1280` at startup (see
+  `assert_ip_adapter_encoder_compatible()` in cover_illustrious_logic.py)
+  so a future mismatch fails loudly at container start, not mid-inference.
 - Two independent identities without blending: diffusers documents a
   real, exact mechanism for this - ONE IP-Adapter checkpoint loaded once,
   invoked with `ip_adapter_image=[[img1, img2]]` (nested list) plus
@@ -149,6 +165,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from beam import Image, Volume, endpoint  # noqa: E402
 
 from cover_illustrious_logic import (  # noqa: E402
+    IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER, assert_ip_adapter_encoder_compatible,
     build_left_right_masks, build_reference_conditioning_metadata,
     build_response_payload, resolve_negative_prompt,
 )
@@ -177,11 +194,26 @@ def load_pipeline():
     text_encoders voi `pipe_thuong` (qua `StableDiffusionXLPipeline(**pipe.components)`)
     - KHONG goi load_ip_adapter() truc tiep tren `pipe_thuong`, vi lam vay
     se buoc MOI request sau nay tren pipe do phai truyen ip_adapter_image,
-    pha vo duong dan prompt-only cu (xem docstring module)."""
+    pha vo duong dan prompt-only cu (xem docstring module).
+
+    Real bug fix: image encoder cho IP-Adapter duoc nap TUONG MINH tu
+    `IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER` ("models/image_encoder" - dung
+    ViT-H) va truyen vao HAM DUNG cua `ip_adapter_pipe`, thay vi de
+    `load_ip_adapter()` tu suy ra duong dan (mac dinh
+    "sdxl_models/image_encoder" khi `subfolder="sdxl_models"` - do la
+    ViT-bigG SAI, xem IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER's own docstring
+    trong cover_illustrious_logic.py cho bang chung that). Mau nay khop
+    CHINH XAC vi du chinh thuc cua diffusers cho cac bien the "*_vit-h"
+    (docs.huggingface.co/diffusers/using-diffusers/ip_adapter, muc "Model
+    variants"): nap CLIPVisionModelWithProjection tuong minh, truyen vao
+    constructor cua pipeline (KHONG phai load_ip_adapter()) - diffusers
+    KHONG ghi de mot `image_encoder` da duoc gan san, khac None, tren
+    pipeline object."""
     import time
 
     import torch
     from diffusers import StableDiffusionXLPipeline
+    from transformers import CLIPVisionModelWithProjection
 
     t0 = time.monotonic()
     pipe = StableDiffusionXLPipeline.from_pretrained(
@@ -189,7 +221,22 @@ def load_pipeline():
         cache_dir=CACHE_PATH,
     ).to("cuda")
 
-    ip_adapter_pipe = StableDiffusionXLPipeline(**pipe.components)
+    ip_adapter_image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+        IP_ADAPTER_REPO, subfolder=IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER,
+        torch_dtype=torch.float16, cache_dir=CACHE_PATH,
+    )
+    # Fail LOUDLY here (on_start/container startup) instead of a cryptic
+    # matmul RuntimeError mid-inference (Requirement 3).
+    assert_ip_adapter_encoder_compatible(
+        ip_adapter_image_encoder.config.hidden_size, IP_ADAPTER_WEIGHT_NAME)
+
+    # pipe.components may include an `image_encoder: None` entry (plain
+    # SDXL checkpoints have none) - drop it so the explicit real encoder
+    # below is not shadowed by a duplicate/conflicting kwarg.
+    ip_adapter_components = dict(pipe.components)
+    ip_adapter_components.pop("image_encoder", None)
+    ip_adapter_pipe = StableDiffusionXLPipeline(
+        **ip_adapter_components, image_encoder=ip_adapter_image_encoder)
     ip_adapter_pipe.load_ip_adapter(
         IP_ADAPTER_REPO, subfolder="sdxl_models",
         weight_name=[IP_ADAPTER_WEIGHT_NAME], cache_dir=CACHE_PATH,

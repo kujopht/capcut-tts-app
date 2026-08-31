@@ -16,12 +16,14 @@ import base64
 import json
 import os
 import random
+import tempfile
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -38,6 +40,7 @@ from server.secret_redaction import loc_bo_theo_gia_tri
 from server.adapters import (
     AppwriteUnavailableError,
     AuthError,
+    MockImportRecordStore,
     MockMetadataStore,
     NotFoundError,
     PermissionDenied,
@@ -134,11 +137,20 @@ from server.domain import (
     Profile,
     PublicationMode,
     PublishState,
+    RightsBasis,
     TtsJob,
     job_fingerprint,
     now_iso,
 )
 from server.fandom_registry import FandomRegistry, UnknownFandomError
+from server.import_pipeline.formats import (
+    CorruptImportFileError, UnsupportedImportFormatError as ImportFormatError,
+)
+from server.import_pipeline.pipeline import (
+    AuthorizedImportService, NoContentExtractedError,
+)
+from server.import_pipeline.safe_zip import UnsafeZipError
+from server.scraper.raw_archive import SensitiveContentDetected
 from server.social import (
     COMMENT_MAX_CHARS,
     POST_MAX_CHARS,
@@ -1794,6 +1806,93 @@ def _tao_chuong_cho_truyen(*, novel: Novel, owner_id: str, title: str,
         except Exception:
             pass
     return chapter, True
+
+
+#: Authorized Import ("Import my fanfic") — dat SAU `_tao_chuong_cho_truyen`
+#: CO CHU Y: tiem ham nay vao service qua tham so `tao_chuong` (dependency
+#: injection, cung mau voi `bulk_import_service.py::TaoChuong`) de tranh
+#: import vong (`import_pipeline` khong duoc import `server.main`). Neu dat
+#: o gan cac singleton khac (dau file) thi ham chua ton tai luc do.
+#:
+#: `spool_root`: thu muc tam THOI, KHONG phai kho luu tru lau dai — chi la
+#: buoc dem truoc khi (o mot phien lam viec rieng, tu tay) day len Google
+#: Drive qua `scripts/rclone_archive_copy.py`. Backend web CHUA tu dong hoa
+#: buoc day-len-Drive nay (rclone/credential Drive chua duoc cau hinh tren
+#: moi truong trien khai that — xem bao cao AUTHORIZED_FANFIC_INGESTION).
+authorized_import_service = AuthorizedImportService(
+    store, MockImportRecordStore(), tao_chuong=_tao_chuong_cho_truyen,
+    fandom_registry=fandom_registry,
+    spool_root=Path(tempfile.gettempdir()) / "fanfic_world_authorized_import_spool")
+
+
+class AuthorizedImportIn(BaseModel):
+    """Tep dang base64 — CUNG ly do voi `PostIn.image_base64`/
+    `TranslateUploadIn.base64`: multipart doi `python-multipart`, chua khai
+    bao trong `server/requirements.txt`."""
+
+    filename: Annotated[str, StringConstraints(max_length=200)]
+    #: "txt" | "html" | "epub" | "docx" | "zip".
+    format: Annotated[str, StringConstraints(max_length=10)]
+    #: 20 MB truoc base64 -> ~27 MB chuoi; lam tron len cho an toan. Rong
+    #: hon `TranslateUploadIn` (10 MB) vi ZIP nhieu chuong/EPUB co anh bia
+    #: thuong lon hon mot tep dich don.
+    base64: Annotated[str, StringConstraints(min_length=1, max_length=28_000_000)]
+    title: Annotated[str, StringConstraints(max_length=200)]
+    #: "author" | "permission_granted" — xem `RightsBasis`.
+    rights_basis: Annotated[str, StringConstraints(max_length=30)]
+    fandom_names: List[str] = Field(default_factory=list)
+    publication_mode: str = "full_text"
+
+
+def _parse_rights_basis(raw: str) -> RightsBasis:
+    try:
+        return RightsBasis(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"rights_basis không hợp lệ: {raw!r} — cần 'author' hoặc "
+            f"'permission_granted'.") from exc
+
+
+@app.post("/api/import/authorized", status_code=status.HTTP_201_CREATED)
+def import_authorized_work(
+    payload: AuthorizedImportIn, profile: Profile = Depends(current_profile),
+) -> Dict[str, Any]:
+    """
+    "Import my fanfic" — nhap noi dung DAY DU tu tep tac gia tu tai len.
+
+    `rights_basis` la TU KHAI, khong phai bang chung so huu — xem
+    `ImportRecord`/mission "AUTHORIZED FANFIC INGESTION" muc 2. Chu so huu
+    Novel tao ra LUON la `profile.user_id` (nguoi goi that, tu token da xac
+    minh) — khong nhan owner_id tu body, cung nguyen tac voi `create_novel`.
+    """
+    import binascii
+
+    try:
+        du_lieu = base64.b64decode(payload.base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tệp không hợp lệ.") from exc
+
+    rights_basis = _parse_rights_basis(payload.rights_basis)
+    publication_mode = _parse_publication_mode(payload.publication_mode)
+
+    try:
+        ket_qua = authorized_import_service.import_authorized_work(
+            data=du_lieu, filename=payload.filename,
+            declared_format=payload.format, owner_id=profile.user_id,
+            title=payload.title, rights_basis=rights_basis,
+            fandom_names=payload.fandom_names,
+            publication_mode=publication_mode)
+    except (ImportFormatError, CorruptImportFileError, NoContentExtractedError,
+            UnsafeZipError, BulkImportFormatError, SensitiveContentDetected) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return {
+        "novel": _novel_out(ket_qua.novel),
+        "chapters": [c.to_dict(include_content=False) for c in ket_qua.chapters],
+        "import_record": ket_qua.import_record.to_dict(),
+        "fandom_match": ket_qua.fandom_match_summary,
+    }
 
 
 @app.post("/api/chapters", status_code=status.HTTP_201_CREATED)

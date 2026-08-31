@@ -11,10 +11,17 @@ from __future__ import annotations
 
 import base64
 
+#: Ban goc chi co cac tag chat luong chung. Them cac tag chong "bia dong
+#: nguoi" sau khi ban Re:Zero dau tien thuc te tro thanh poster ensemble
+#: dong duc/nhan vat trung lap - khong dung lam bia san xuat duoc (xem
+#: CoverPromptBuilder's docstring trong server/cover_pipeline.py).
 DEFAULT_NEGATIVE_PROMPT = (
     "lowres, bad anatomy, bad hands, text, error, missing fingers, "
     "extra digit, fewer digits, cropped, worst quality, low quality, "
-    "normal quality, jpeg artifacts, signature, watermark, blurry"
+    "normal quality, jpeg artifacts, signature, watermark, blurry, "
+    "crowd, group, ensemble cast, extra person, background character, "
+    "duplicate character, cloned face, multiple girls, multiple boys, "
+    "collage, character sheet"
 )
 
 
@@ -30,6 +37,7 @@ def build_response_payload(
     inference_seconds: float,
     width: int,
     height: int,
+    seed: int = -1,
 ) -> dict:
     """
     Lap rap dung response contract cua endpoint (xem
@@ -41,6 +49,11 @@ def build_response_payload(
     request tren CUNG mot container se bao cung gia tri nay, KHONG phai 0,
     vi day la so lieu that cua lan load that su, khong phai "khong load
     lai" bi bao sai thanh 0.
+
+    `seed` la seed THAT SU duoc dung de sinh anh (-1 nghia la khong duoc
+    yeu cau seed cu the, model tu chon ngau nhien) - tra ve de caller ghi
+    lai, phuc vu so sanh nhieu candidate (xem
+    scripts/beam_cover_refinement.py).
     """
     return {
         "image_base64": base64.b64encode(png_bytes).decode("ascii"),
@@ -49,4 +62,5 @@ def build_response_payload(
         "width": width,
         "height": height,
         "size_bytes": len(png_bytes),
+        "seed": seed,
     }

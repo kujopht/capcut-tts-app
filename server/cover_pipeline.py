@@ -38,10 +38,24 @@ class CoverGenerationRequest:
     fandom: str
     title: str
     summary: str
+    #: Danh sach nhan vat DAY DU cua truyen - CHI la metadata/tham khao,
+    #: KHONG con duoc dua thang vao prompt ve anh nua (xem CoverPromptBuilder:
+    #: bia dong nguoi -> anh bia tro thanh "poster ensemble" dong duc, khong
+    #: dung lam bia san xuat duoc). Dan dien vien HIEN THI tren bia dung
+    #: primary_character/secondary_character/tertiary_character ben duoi.
     characters: List[str] = field(default_factory=list)
     genres: List[str] = field(default_factory=list)
     mood: str = ""
     visual_style: str = ""
+    #: Dan dien vien HIEN THI tren bia (khac voi `characters` metadata o tren).
+    #: Rong = khong ve nhan vat cu the nao (bia phong canh/bieu tuong).
+    primary_character: str = ""
+    secondary_character: str = ""
+    tertiary_character: str = ""
+    #: So nhan vat toi da XUAT HIEN tren bia, tinh tu primary tro di. Mac
+    #: dinh 2 (chi primary+secondary) de tranh bia dong nguoi - ngay ca khi
+    #: tertiary_character duoc dien, no chi xuat hien khi gia tri nay >= 3.
+    max_visible_characters: int = 2
 
 
 class CoverProvider(Protocol):
@@ -82,18 +96,46 @@ class CoverPromptBuilder:
     TAT DINH — cung input luon ra cung prompt, khong ngau nhien.
     KHONG bao gom ten tieu de thuan — model chi ve ART, application code
     chen tieu de qua overlay SVG (xem render_deterministic_overlay).
+
+    Phong cach tag-oriented (booru-style, ngan gon) thay vi van xuoi dai —
+    cac model anime (Illustrious/Animagine-class) bam theo tag chinh xac
+    hon cau van tu nhien. Dan dien vien HIEN THI tren bia dung
+    primary_character/secondary_character/(tertiary_character neu duoc
+    phep boi max_visible_characters) — KHONG dung `characters[]` (metadata
+    day du cua truyen) nua: dua thang toan bo characters[] vao prompt tung
+    tao ra bia "poster ensemble" dong nguoi/nhan vat trung lap, khong dung
+    lam bia san xuat duoc (bang chung that: ban Re:Zero dau tien).
     """
 
     @staticmethod
     def build_prompt(request: CoverGenerationRequest) -> str:
-        parts: List[str] = ["anime light novel cover illustration"]
+        cast = [
+            c for c in (
+                request.primary_character,
+                request.secondary_character,
+                request.tertiary_character,
+            ) if c
+        ][:max(0, request.max_visible_characters)]
+
+        parts: List[str] = ["light novel cover"]
 
         if request.fandom:
             parts.append(f"{request.fandom} fanart style")
 
-        if request.characters:
-            chars = ", ".join(request.characters)
-            parts.append(f"featuring {chars}")
+        if len(cast) == 1:
+            parts.append("solo")
+        elif len(cast) == 2:
+            parts.append("2people")
+        elif len(cast) >= 3:
+            parts.append(f"{len(cast)}people")
+
+        if cast:
+            parts.append("clear focal hierarchy")
+            parts.append(f"{cast[0]} in foreground, focal point")
+            if len(cast) >= 2:
+                parts.append(f"{cast[1]} positioned beside/behind {cast[0]}")
+            if len(cast) >= 3:
+                parts.append(f"{cast[2]} further back in the background")
 
         if request.mood:
             parts.append(f"{request.mood} mood")
@@ -105,6 +147,8 @@ class CoverPromptBuilder:
         if request.visual_style:
             parts.append(request.visual_style)
 
+        parts.append("cinematic fantasy background")
+        parts.append("negative space for title")
         parts.append("detailed anime digital painting")
         parts.append("dynamic pose")
         parts.append("vibrant colors")

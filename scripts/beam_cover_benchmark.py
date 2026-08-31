@@ -2,6 +2,14 @@
 """Real Beam Cloud cover-generation benchmark - Illustrious/Animagine-XL,
 ONE representative cover for the Re:Zero DRAFT (nov_1e38f5532fab4681).
 
+STATUS: this script's job (proving the Beam cold/warm execution path) is
+DONE - real evidence: 74.60s cold / 16.05s warm, see
+docs/reports/... or the commit history for the on_start fix. Per explicit
+instruction, do NOT re-run this for infrastructure benchmarking anymore.
+For iterating on COVER QUALITY (prompt/cast/composition), use
+scripts/beam_cover_refinement.py instead, which is hard-capped at 3 calls
+per run and records seed/prompt metadata per candidate for comparison.
+
 Reads BEAM_TOKEN from this process's own environment at execution time.
 Never printed/logged. Run from the shell that has it, after
 `scripts/beam_setup_check.py` reports clean:
@@ -188,9 +196,12 @@ def main() -> int:
             "ten tuoi sau tran chien Priestella, tinh co gap nhau va lap "
             "mot moi quan he doi tac tren duong toi Kararagi."
         ),
+        # Metadata only - does NOT drive the prompt (see CoverPromptBuilder).
         characters=["Natsuki Subaru", "Anastasia Hoshin", "Felix Argyle"],
         genres=["Isekai", "Fantasy", "Drama"],
         mood="bittersweet",
+        primary_character="Natsuki Subaru",
+        secondary_character="Anastasia Hoshin",
     )
     prompt = CoverPromptBuilder.build_prompt(req)
     print("Prompt (deterministic, from real Novel metadata):")

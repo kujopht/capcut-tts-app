@@ -340,9 +340,10 @@ def _make_error_handler(status_code: int = 500):
 def _req(**overrides) -> CoverGenerationRequest:
     defaults = dict(
         novel_id="nov_test", fandom="Naruto", title="Hidden Leaf Secrets",
-        summary="A story.", characters=["Naruto", "Sakura"],
+        summary="A story.", characters=["Naruto", "Sakura", "Kakashi"],
         genres=["Action", "Adventure"], mood="Hopeful",
         visual_style="modern anime style",
+        primary_character="Naruto", secondary_character="Sakura",
     )
     defaults.update(overrides)
     return CoverGenerationRequest(**defaults)
@@ -360,10 +361,63 @@ class TestCoverPromptBuilder(unittest.TestCase):
         p2 = CoverPromptBuilder.build_prompt(_req(fandom="One Piece"))
         self.assertNotEqual(p1, p2)
 
-    def test_different_characters_different_prompt(self):
-        p1 = CoverPromptBuilder.build_prompt(_req(characters=["Naruto"]))
-        p2 = CoverPromptBuilder.build_prompt(_req(characters=["Luffy", "Zoro"]))
+    def test_different_cast_different_prompt(self):
+        p1 = CoverPromptBuilder.build_prompt(
+            _req(primary_character="Naruto", secondary_character=""))
+        p2 = CoverPromptBuilder.build_prompt(
+            _req(primary_character="Luffy", secondary_character="Zoro"))
         self.assertNotEqual(p1, p2)
+
+    def test_characters_metadata_list_alone_does_not_affect_prompt(self):
+        """`characters[]` la metadata day du cua truyen, KHONG con duoc dua
+        thang vao prompt anh nua - chi primary/secondary/tertiary_character
+        moi anh huong toi dan dien vien tren bia (tranh bia dong nguoi)."""
+        p1 = CoverPromptBuilder.build_prompt(
+            _req(characters=["Naruto"], primary_character="Naruto",
+                 secondary_character="Sakura"))
+        p2 = CoverPromptBuilder.build_prompt(
+            _req(characters=["Naruto", "Sakura", "Kakashi", "Sasuke", "Sai"],
+                 primary_character="Naruto", secondary_character="Sakura"))
+        self.assertEqual(p1, p2)
+
+    def test_default_max_visible_characters_is_two_excludes_tertiary(self):
+        req = _req(
+            primary_character="Naruto", secondary_character="Sakura",
+            tertiary_character="Kakashi")
+        self.assertEqual(req.max_visible_characters, 2)
+        prompt = CoverPromptBuilder.build_prompt(req)
+        self.assertIn("Naruto", prompt)
+        self.assertIn("Sakura", prompt)
+        self.assertNotIn("Kakashi", prompt)
+        self.assertIn("2people", prompt)
+
+    def test_max_visible_characters_override_includes_tertiary(self):
+        req = _req(
+            primary_character="Naruto", secondary_character="Sakura",
+            tertiary_character="Kakashi", max_visible_characters=3)
+        prompt = CoverPromptBuilder.build_prompt(req)
+        self.assertIn("Naruto", prompt)
+        self.assertIn("Sakura", prompt)
+        self.assertIn("Kakashi", prompt)
+        self.assertIn("3people", prompt)
+
+    def test_solo_character_uses_solo_tag_not_people_count(self):
+        prompt = CoverPromptBuilder.build_prompt(
+            _req(primary_character="Naruto", secondary_character=""))
+        self.assertIn("solo", prompt)
+        self.assertNotIn("people", prompt)
+
+    def test_no_cast_produces_no_focal_hierarchy_tags(self):
+        prompt = CoverPromptBuilder.build_prompt(
+            _req(primary_character="", secondary_character=""))
+        self.assertNotIn("focal point", prompt)
+        self.assertNotIn("clear focal hierarchy", prompt)
+
+    def test_focal_hierarchy_wording_present_for_two_person_cast(self):
+        prompt = CoverPromptBuilder.build_prompt(
+            _req(primary_character="Naruto", secondary_character="Sakura"))
+        self.assertIn("Naruto in foreground, focal point", prompt)
+        self.assertIn("Sakura positioned beside/behind Naruto", prompt)
 
     def test_different_mood_different_prompt(self):
         p1 = CoverPromptBuilder.build_prompt(_req(mood="dark"))
@@ -378,12 +432,18 @@ class TestCoverPromptBuilder(unittest.TestCase):
         # Cung khong xuat hien khong dau/cu trong prompt
         self.assertNotIn("hat giong", prompt.lower())
 
+    def test_negative_space_and_cinematic_background_tags_present(self):
+        """Danh cho tieu de overlay sau nay + tranh bia bi rop hinh."""
+        prompt = CoverPromptBuilder.build_prompt(_req())
+        self.assertIn("negative space for title", prompt)
+        self.assertIn("cinematic fantasy background", prompt)
+
     def test_empty_optional_fields_still_produces_valid_prompt(self):
         req = CoverGenerationRequest(
             novel_id="n", fandom="", title="", summary="",
         )
         prompt = CoverPromptBuilder.build_prompt(req)
-        self.assertIn("anime light novel cover illustration", prompt)
+        self.assertIn("light novel cover", prompt)
         self.assertIn("high quality", prompt)
 
 

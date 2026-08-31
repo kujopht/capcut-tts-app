@@ -40,6 +40,13 @@ weights persist across container restarts too, not just within one
 container's lifetime — a cold container after this change still needs to
 run `on_start` once, but skips re-downloading weights it already fetched
 in an earlier container.
+
+SEED: `generate()` accepts an optional `seed` (default -1 = unseeded,
+unchanged prior behavior). seed >= 0 builds a `torch.Generator` for
+deterministic output, and the ACTUAL seed used is echoed back in the
+response so multiple prompt-refinement candidates
+(scripts/beam_cover_refinement.py) can be recorded and compared 1:1
+against the image that produced them.
 """
 import sys
 from pathlib import Path
@@ -97,12 +104,22 @@ def load_pipeline():
     # no charge for cold-start machine spin-up).
 )
 def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,
-            width: int = 1024, height: int = 1536) -> dict:
+            width: int = 1024, height: int = 1536, seed: int = -1) -> dict:
     import io
     import time
 
+    import torch
+
     # Model already loaded by on_start - generate() ONLY does inference.
     pipe, model_load_seconds = context.on_start_value
+
+    # seed >= 0 -> deterministic (torch.Generator), so multiple refinement
+    # candidates (scripts/beam_cover_refinement.py) can be recorded and
+    # compared by seed. seed < 0 (default) -> model's own randomness,
+    # unchanged from before this parameter existed.
+    generator = None
+    if seed >= 0:
+        generator = torch.Generator(device="cuda").manual_seed(seed)
 
     t_infer_start = time.monotonic()
     result = pipe(
@@ -111,6 +128,7 @@ def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,
         num_inference_steps=steps,
         width=width,
         height=height,
+        generator=generator,
     )
     inference_seconds = time.monotonic() - t_infer_start
 
@@ -125,4 +143,5 @@ def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,
         inference_seconds=inference_seconds,
         width=width,
         height=height,
+        seed=seed,
     )

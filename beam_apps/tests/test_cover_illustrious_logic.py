@@ -40,7 +40,7 @@ class TestBuildResponsePayload(unittest.TestCase):
         self.assertEqual(
             set(payload.keys()),
             {"image_base64", "model_load_seconds", "inference_seconds",
-             "width", "height", "size_bytes"})
+             "width", "height", "size_bytes", "seed"})
 
     def test_image_base64_roundtrips_to_original_bytes(self):
         payload = build_response_payload(
@@ -83,6 +83,34 @@ class TestBuildResponsePayload(unittest.TestCase):
             width=768, height=1152)
         self.assertEqual(payload["width"], 768)
         self.assertEqual(payload["height"], 1152)
+
+    def test_seed_defaults_to_minus_one_when_unrequested(self):
+        payload = build_response_payload(
+            _TINY_PNG_BYTES, model_load_seconds=1.0, inference_seconds=1.0,
+            width=1024, height=1536)
+        self.assertEqual(payload["seed"], -1)
+
+    def test_seed_is_echoed_back_verbatim(self):
+        payload = build_response_payload(
+            _TINY_PNG_BYTES, model_load_seconds=1.0, inference_seconds=1.0,
+            width=1024, height=1536, seed=20260901)
+        self.assertEqual(payload["seed"], 20260901)
+
+
+class TestDefaultNegativePromptCoversCrowding(unittest.TestCase):
+    """Ban Re:Zero dau tien la mot poster ensemble dong nguoi/nhan vat
+    trung lap that su - dam bao negative prompt chan cu the dieu nay."""
+
+    def test_contains_anti_crowd_terms(self):
+        for term in ("crowd", "group", "ensemble cast", "extra person",
+                     "background character", "duplicate character",
+                     "cloned face", "multiple girls", "multiple boys",
+                     "collage", "character sheet"):
+            self.assertIn(term, DEFAULT_NEGATIVE_PROMPT)
+
+    def test_original_quality_terms_still_present(self):
+        for term in ("lowres", "bad anatomy", "watermark", "blurry"):
+            self.assertIn(term, DEFAULT_NEGATIVE_PROMPT)
 
 
 if __name__ == "__main__":

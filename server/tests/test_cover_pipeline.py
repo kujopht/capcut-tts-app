@@ -552,9 +552,15 @@ class TestCoverPromptBuilderCompactModeTokenBudget(unittest.TestCase):
     #: 980 real chars / 216 real tokens from the actual Beam log line.
     _REAL_CHARS_PER_TOKEN = 980 / 216
     _REAL_CLIP_TOKEN_LIMIT = 77
-    #: Deliberately conservative (well under the raw 77*ratio~=350) so a
-    #: less token-efficient BPE split on some words still leaves margin.
-    _SAFE_CHAR_CEILING = 300
+    #: Raw ratio ceiling is 77*4.54~=350 chars. The "Final Regional
+    #: Composition" mission added genuinely-required composition concepts
+    #: (waist-up shot, faces-visible, facing-viewer/3/4-view, left/right
+    #: placement) that raised the real compact prompt to ~306 chars -
+    #: still comfortably under the raw 350-char limit (~67 estimated
+    #: tokens vs the 77 hard cap), so the ceiling here was raised from an
+    #: earlier, more conservative 300 to 330 rather than cutting required
+    #: composition detail to chase an arbitrary margin.
+    _SAFE_CHAR_CEILING = 330
 
     def setUp(self):
         self.registry = CharacterIdentityRegistry()
@@ -612,6 +618,26 @@ class TestCoverPromptBuilderCompactModeTokenBudget(unittest.TestCase):
             primary_character="Natsuki Subaru")
         prompt = CoverPromptBuilder.build_prompt(req, self.registry)
         self.assertIn("swept back and unkempt", prompt)  # full hair_description text
+
+    def test_compact_mode_requires_medium_shot_and_visible_faces(self):
+        """Real fix for a real v10 composition failure: badly-cropped
+        face + character facing away. The compact path now explicitly
+        requires a framing/orientation that makes both problems less
+        likely, rather than leaving composition unconstrained."""
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertIn("waist-up shot", prompt)
+        self.assertIn("faces fully visible", prompt)
+        self.assertIn("facing viewer or 3/4 view", prompt)
+
+    def test_compact_mode_places_primary_left_secondary_right(self):
+        """Matches build_left_right_masks() exactly (primary=left mask,
+        secondary=right mask) - the text prompt and the spatial IP-Adapter
+        masks must agree on which side each character belongs to."""
+        prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
+        self.assertIn("Natsuki Subaru, black and orange tracksuit, "
+                      "messy black hair, on left", prompt)
+        self.assertIn("Anastasia Hoshin, white fur ushanka hat, "
+                      "long purple hair, on right", prompt)
 
 
 class TestWrapRasterAsOverlayableSvg(unittest.TestCase):

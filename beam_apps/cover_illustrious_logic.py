@@ -36,14 +36,21 @@ if TYPE_CHECKING:
 #: Ban goc chi co cac tag chat luong chung. Them cac tag chong "bia dong
 #: nguoi" sau khi ban Re:Zero dau tien thuc te tro thanh poster ensemble
 #: dong duc/nhan vat trung lap - khong dung lam bia san xuat duoc (xem
-#: CoverPromptBuilder's docstring trong server/cover_pipeline.py).
+#: CoverPromptBuilder's docstring trong server/cover_pipeline.py). Them
+#: LAN 2 (mission "Final IP-Adapter Regional Composition") sau mot proof
+#: that (v10) that bai bo cuc theo dung 3 kieu: mat/dau nhan vat chinh bi
+#: cat xen, nhan vat phu quay lung/khong thay mat, va mot glyph/artifact
+#: giong chu viet lon xuat hien khong mong muon - moi kieu duoc them tag
+#: rieng thay vi chi dua vao cac tag chung da co ("cropped", "text").
 DEFAULT_NEGATIVE_PROMPT = (
     "lowres, bad anatomy, bad hands, text, error, missing fingers, "
     "extra digit, fewer digits, cropped, worst quality, low quality, "
     "normal quality, jpeg artifacts, signature, watermark, blurry, "
     "crowd, group, ensemble cast, extra person, background character, "
     "duplicate character, cloned face, multiple girls, multiple boys, "
-    "collage, character sheet"
+    "collage, character sheet, "
+    "third person, cropped face, cut-off head, back facing viewer, "
+    "rear view, letters, symbols, logo"
 )
 
 
@@ -181,23 +188,35 @@ def build_reference_conditioning_metadata(*, used: bool, strength: float = 0.0) 
 
 def build_left_right_masks(
     width: int, height: int, *,
-    split_fraction: float = 0.55, overlap_fraction: float = 0.08,
+    split_fraction: float = 0.5, gap_fraction: float = 0.04,
 ) -> Tuple[PILImageModule.Image, PILImageModule.Image]:
     """
     Mat na nhi phan (che do "L", trang=vung anh huong) chia TRAI/PHAI cho
     2 nhan vat - dung voi `diffusers.image_processor.IPAdapterMaskProcessor`
     de reference-conditioning cua nhan vat CHINH (primary, ben trai) va
     nhan vat PHU (secondary, ben phai) KHONG bi tron lan vao nhau (xem
-    "Requirement 6" cua mission - da xac nhan qua tai lieu diffusers that
-    la co che dung cho truong hop nay: nhieu ip_adapter_image + mask
+    "Requirement 6" cua mission goc - da xac nhan qua tai lieu diffusers
+    that la co che dung cho truong hop nay: nhieu ip_adapter_image + mask
     rieng, khong phai doan).
 
-    Mac dinh khop voi ngu nghia bo cuc van ban da co trong
-    server/cover_pipeline.py::CoverPromptBuilder ("primary in foreground,
-    focal point" / "secondary positioned beside/behind primary") - primary
-    chiem phan lon hon (`split_fraction` mac dinh 0.55) va CHUNG LAN mot
-    dai o giua (`overlap_fraction`) de tranh duong ranh gioi cung/gay
-    "ghep 2 nua anh" thay vi mot bo cuc lien mach.
+    Real bug fix (mission "Final IP-Adapter Regional Composition Proof"):
+    ban truoc CHU DINH cho 2 mask CHONG LAN mot dai o giua
+    (`overlap_fraction`, mac dinh 0.08) de tranh duong ranh gioi cung -
+    nhung mot proof that (v10) cho thay dung 2 loai loi thuong gap voi
+    mask chong lan: nhan vat phu (Anastasia) quay lung/mat khuat, va mot
+    nhan vat NGOAI Y MUON xuat hien - ca hai phu hop voi viec 2 tin hieu
+    IP-Adapter cung anh huong len CUNG mot vung pixel o giua. Fix: 2 mask
+    gio KHONG CHONG LAN — `gap_fraction` (mac dinh 0.04, ~4% chieu rong)
+    la mot VUNG CHET (khong thuoc ve nhan vat nao) o giua thay vi mot
+    vung CHONG LAN, dam bao ZERO pixel chung ke ca khi
+    IPAdapterMaskProcessor.preprocess() co resize/noi suy o ranh gioi.
+    `gap_fraction=0.0` van hop le (2 vung ke sat nhau, van khong chong
+    lan - chi khac o cho khong co vung chet).
+
+    `split_fraction` mac dinh doi tu 0.55 (primary lon hon, khop khung
+    van ban cu "in foreground") sang 0.5 (chia deu) - khop voi khung
+    van ban MOI ("waist-up/medium shot", "both faces fully visible",
+    khong con nhan manh mot nhan vat lon hon nhan vat kia).
 
     Tra ve (mask_primary, mask_secondary) — hai doi tuong `PIL.Image`
     che do "L", CHUA qua IPAdapterMaskProcessor.preprocess() (buoc do
@@ -212,14 +231,19 @@ def build_left_right_masks(
     from PIL import Image, ImageDraw
 
     split_px = int(width * split_fraction)
-    overlap_px = int(width * overlap_fraction)
+    half_gap_px = max(0, int(width * gap_fraction)) // 2
+
+    primary_end_px = split_px - half_gap_px          # exclusive
+    secondary_start_px = split_px + half_gap_px       # inclusive
 
     mask_primary = Image.new("L", (width, height), 0)
-    ImageDraw.Draw(mask_primary).rectangle(
-        [0, 0, min(width, split_px + overlap_px), height], fill=255)
+    if primary_end_px > 0:
+        ImageDraw.Draw(mask_primary).rectangle(
+            [0, 0, primary_end_px - 1, height], fill=255)
 
     mask_secondary = Image.new("L", (width, height), 0)
-    ImageDraw.Draw(mask_secondary).rectangle(
-        [max(0, split_px - overlap_px), 0, width, height], fill=255)
+    if secondary_start_px < width:
+        ImageDraw.Draw(mask_secondary).rectangle(
+            [secondary_start_px, 0, width, height], fill=255)
 
     return mask_primary, mask_secondary

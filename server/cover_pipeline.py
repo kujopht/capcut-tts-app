@@ -202,12 +202,20 @@ class CoverPromptBuilder:
     ) -> str:
         """Phien ban RUT GON - xem build_prompt()'s own docstring "CHE DO
         COMPACT" cho ly do that. Chi giu: "light novel cover", fandom,
-        count_tag, ten+toi da 2 tag noi bat/nhan vat, "negative space for
-        title" (can cho overlay tieu de ung dung, khong phai chi tiet tuy
-        chon), va 2 tag chat luong ngan gon - bo genre/mood/van xuoi dai/
-        chi tiet uu tien thap (dung theo yeu cau: "Move/remove redundant
-        prose, genre words, repeated descriptions, and low-priority
-        details")."""
+        count_tag, bo cuc COT LOI (chinh xac 2 nhan vat, waist-up, ca hai
+        mat/khuon mat lo ro, nhin ve nguoi xem hoac goc 3/4), ten+toi da 2
+        tag noi bat/nhan vat, "negative space for title" (can cho overlay
+        tieu de ung dung, khong phai chi tiet tuy chon), va 2 tag chat
+        luong ngan gon - bo genre/mood/van xuoi dai/chi tiet uu tien thap.
+
+        Bo cuc "on left"/"on right" khop CHINH XAC voi
+        beam_apps/cover_illustrious_logic.py::build_left_right_masks()
+        (primary = mask TRAI, secondary = mask PHAI) - real fix cho mot
+        that bai bo cuc that (proof v10): mat/dau nhan vat chinh bi cat
+        xen nang, nhan vat phu quay lung, mot nhan vat NGOAI Y MUON xuat
+        hien, va mot glyph/artifact giong chu viet lon - bo cuc RUT GON
+        cu chi noi "foreground"/"beside" khong du rang buoc, phien ban nay
+        yeu cau ro rang khung hinh/huong nhin/vi tri."""
         parts: List[str] = ["light novel cover"]
 
         if request.fandom:
@@ -216,16 +224,23 @@ class CoverPromptBuilder:
         if count_tag:
             parts.append(count_tag)
 
+        # "1boy, 1girl" (count_tag) already implies exactly two - no
+        # separate "exactly two characters" tag needed (redundant,
+        # budget-costly). Composition concepts kept short/token-cheap.
+        parts.append("waist-up shot")
+        parts.append("faces fully visible")
+        parts.append("facing viewer or 3/4 view")
+
         primary_descriptor = identities[0].to_compact_prompt_descriptor() if identities[0] else ""
         primary_block = f"{cast[0]}, {primary_descriptor}" if primary_descriptor else cast[0]
-        parts.append(f"{primary_block}, foreground")
+        parts.append(f"{primary_block}, on left")
 
         if len(cast) >= 2:
             secondary_descriptor = (
                 identities[1].to_compact_prompt_descriptor() if identities[1] else "")
             secondary_block = (
                 f"{cast[1]}, {secondary_descriptor}" if secondary_descriptor else cast[1])
-            parts.append(f"{secondary_block}, beside {cast[0]}")
+            parts.append(f"{secondary_block}, on right")
 
         if len(cast) >= 3:
             tertiary_descriptor = (
@@ -235,7 +250,7 @@ class CoverPromptBuilder:
             parts.append(f"{tertiary_block} in the background")
 
         parts.append("negative space for title")
-        parts.append("detailed anime art, high quality")
+        parts.append("anime art, high quality")
 
         return ", ".join(parts)
 

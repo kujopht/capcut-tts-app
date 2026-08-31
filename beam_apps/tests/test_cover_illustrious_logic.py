@@ -117,6 +117,16 @@ class TestDefaultNegativePromptCoversCrowding(unittest.TestCase):
         for term in ("lowres", "bad anatomy", "watermark", "blurry"):
             self.assertIn(term, DEFAULT_NEGATIVE_PROMPT)
 
+    def test_contains_composition_failure_terms_from_real_v10_incident(self):
+        """Real v10 proof failed 3 distinct ways: cropped face, a
+        character facing away, and an extra/unwanted person - each gets
+        its own explicit negative term now, not just the generic
+        "cropped"/"extra person" already present."""
+        for term in ("third person", "cropped face", "cut-off head",
+                     "back facing viewer", "rear view", "letters",
+                     "symbols", "logo"):
+            self.assertIn(term, DEFAULT_NEGATIVE_PROMPT)
+
 
 class TestBuildReferenceConditioningMetadata(unittest.TestCase):
     def test_unused_returns_false_and_zero_strength(self):
@@ -166,18 +176,51 @@ class TestBuildLeftRightMasks(unittest.TestCase):
         _, secondary = build_left_right_masks(1000, 1000)
         self.assertEqual(secondary.getpixel((10, 500)), 0)
 
-    def test_masks_overlap_in_the_middle_no_hard_seam(self):
-        """split_fraction=0.55, overlap_fraction=0.08 mac dinh tren
-        width=1000 -> split=550, overlap=80 -> vung chong lan [470, 630)."""
+    def test_masks_never_overlap_at_any_column(self):
+        """Real fix for a real composition failure (v10 proof: extra/
+        background character + face-cropping/back-facing artifacts,
+        traced to the OLD deliberately-overlapping masks letting both
+        IP-Adapter references condition the same pixels). Exhaustively
+        checks every column - no x may be 255 in BOTH masks."""
         primary, secondary = build_left_right_masks(1000, 1000)
-        self.assertEqual(primary.getpixel((500, 500)), 255)
-        self.assertEqual(secondary.getpixel((500, 500)), 255)
+        for x in range(0, 1000, 5):
+            self.assertFalse(
+                primary.getpixel((x, 500)) == 255 and
+                secondary.getpixel((x, 500)) == 255,
+                f"masks overlap at x={x}")
+
+    def test_default_gap_is_a_dead_zone_belonging_to_neither(self):
+        """gap_fraction=0.04 default on width=1000 -> ~40px gap centered
+        on the split (500) - x=500 itself must belong to NEITHER mask."""
+        primary, secondary = build_left_right_masks(1000, 1000)
+        self.assertEqual(primary.getpixel((500, 500)), 0)
+        self.assertEqual(secondary.getpixel((500, 500)), 0)
+
+    def test_zero_gap_still_does_not_overlap(self):
+        """gap_fraction=0.0 (bare adjacent split, no dead zone) must
+        still guarantee zero overlap - this is the boundary condition
+        most likely to regress back into a 1px overlap bug."""
+        primary, secondary = build_left_right_masks(
+            1000, 1000, gap_fraction=0.0)
+        for x in range(495, 506):
+            self.assertFalse(
+                primary.getpixel((x, 500)) == 255 and
+                secondary.getpixel((x, 500)) == 255,
+                f"masks overlap at x={x} even with gap_fraction=0.0")
+
+    def test_default_split_is_even_not_primary_favored(self):
+        """split_fraction default changed 0.55 -> 0.5 (equal halves) to
+        match the new waist-up/medium-shot dual-portrait composition,
+        which no longer frames one character as visually larger."""
+        primary, secondary = build_left_right_masks(1000, 1000)
+        self.assertEqual(primary.getpixel((200, 500)), 255)
+        self.assertEqual(secondary.getpixel((800, 500)), 255)
 
     def test_custom_split_fraction_changes_boundary(self):
         primary_default, _ = build_left_right_masks(1000, 1000)
         primary_narrow, _ = build_left_right_masks(
-            1000, 1000, split_fraction=0.3, overlap_fraction=0.0)
-        # o x=400: mac dinh (split=550) van la primary; split hep hon
+            1000, 1000, split_fraction=0.3, gap_fraction=0.0)
+        # o x=400: mac dinh (split=500) van la primary; split hep hon
         # (split=300) thi x=400 da la ngoai vung primary.
         self.assertEqual(primary_default.getpixel((400, 500)), 255)
         self.assertEqual(primary_narrow.getpixel((400, 500)), 0)

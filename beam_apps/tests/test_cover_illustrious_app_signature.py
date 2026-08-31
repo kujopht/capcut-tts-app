@@ -271,9 +271,15 @@ class TestGenerateAcceptsReferenceConditioningKeywords(unittest.TestCase):
             self.assertIn(name, self.sig.parameters)
             self.assertIsNone(self.sig.parameters[name].default)
 
-    def test_reference_strength_defaults_to_0_6(self):
+    def test_reference_strength_defaults_to_0_5(self):
+        """Real fix: lowered from 0.6 (mission 'Final IP-Adapter Regional
+        Composition') - a real v10 proof showed identity signal was
+        present but composition control was weak (cropping, wrong facing
+        direction, extra person); 0.5 trades a little identity strength
+        for more headroom for the text prompt's composition
+        instructions."""
         self.assertIn("reference_strength", self.sig.parameters)
-        self.assertEqual(self.sig.parameters["reference_strength"].default, 0.6)
+        self.assertEqual(self.sig.parameters["reference_strength"].default, 0.5)
 
 
 if __name__ == "__main__":

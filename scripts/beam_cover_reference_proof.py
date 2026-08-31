@@ -1,12 +1,26 @@
 #!/usr/bin/env python3
 """Real Beam Cloud REFERENCE-CONDITIONED cover PROOF - EXACTLY ONE real
-GPU call, testing whether IP-Adapter reference conditioning (see
-beam_apps/cover_illustrious_app.py's own docstring for the real research
-behind this choice) fixes character identity where prompt-only text
-descriptors did not: 3 refinement candidates had good composition but
-wrong character count/identity, and the identity-descriptor layer's own
-proof still produced 2 males + 1 female with incorrect Anastasia
-identity. STOP prompt-only iteration - this is a different mechanism.
+GPU call. This is the FINAL IP-Adapter regional-composition iteration
+before an explicit PASS/FAIL decision on whether prompt+IP-Adapter
+tuning can reach a usable cover, or whether the next architecture step
+must be character LoRA + regional composition.
+
+History (each real, each on a real Beam GPU call):
+- Prompt-only descriptors: 3 refinement candidates had good composition
+  but wrong character count/identity.
+- First reference-conditioned proof (seed=20260905): identity signal was
+  REAL and recognizable (Subaru's tracksuit, Anastasia's hair/fur), but
+  composition FAILED 3 ways - primary face/head badly cropped, secondary
+  character facing mostly away, an extra/unwanted background character,
+  and a text-like glyph/artifact. Root cause: the masks used then
+  deliberately OVERLAPPED near the center (to avoid a hard seam), which
+  let both IP-Adapter references condition the same pixels.
+- This proof (seed=20260906): non-overlapping masks (a dead-zone gap
+  instead of an overlap - see build_left_right_masks()), a lower
+  reference_strength (0.5, down from 0.6), and an explicit composition
+  prompt (waist-up shot, both faces visible, facing viewer/3-4 view,
+  Subaru-left/Anastasia-right) plus strengthened negatives targeting the
+  exact 3 real failure modes above.
 
 REQUIRES the operator's OWN reference images - this script does not
 fetch, embed, or assume any specific image. Place two real reference
@@ -26,37 +40,33 @@ Never printed/logged.
 REQUIRES REDEPLOY FIRST: this script sends
 primary_reference_images_base64/secondary_reference_images_base64/
 reference_strength - new optional kwargs on generate(). A container still
-running the pre-reference-conditioning build will 500/error on these
-(same class of failure as the real seed incident, task
-04d22fcf-55f3-4f5e-acd3-337de6ff4432) - always confirm
-`git log --oneline -1` shows the reference-conditioning commit BEFORE
-`beam deploy`, matching that incident's actual root cause (a stale
-container, not a code defect) rather than repeating it.
+running an older build will 500/error on these (same class of failure as
+the real seed incident, task 04d22fcf-55f3-4f5e-acd3-337de6ff4432) -
+always confirm `git log --oneline -1` shows the latest commit BEFORE
+`beam deploy`.
 
 Registers the supplied images into a REAL CharacterIdentityRegistry
 (server/character_identity.py) - not a side-channel - so the reference
 fields (reference_images/reference_strength/reference_source) are
 genuinely exercised (each as a one-element list here - the schema
 supports more per character for future multi-image averaging, see
-character_identity.py's own docstring, but this v1 proof uses exactly
-one canonical image per character), and the SAME identity-aware
-CoverPromptBuilder prompt from the prior mission is reused (reference conditioning
-AUGMENTS text descriptors, it does not replace them).
+character_identity.py's own docstring, but this proof uses exactly one
+canonical image per character), and the SAME identity-aware
+CoverPromptBuilder prompt is reused (reference conditioning AUGMENTS
+text descriptors, it does not replace them).
 
-This script makes EXACTLY ONE real GPU call (seed=20260905, distinct from
+This script makes EXACTLY ONE real GPU call (seed=20260906, distinct from
 every other seed already used this mission), no CLI flag to raise that.
 
-PASS criteria (manual, visual - this script cannot judge the image
-itself): approximately exactly 2 visible characters, Subaru recognizable,
-Anastasia recognizable, identities not blended, no duplicate Subaru,
-usable cover composition. If this still fails, per instruction: STOP and
-report which is the smaller next step - regional conditioning (already
-attempted here via left/right masks; if masks under-separated the two
-identities, tightening split_fraction/overlap_fraction in
-beam_apps/cover_illustrious_logic.py::build_left_right_masks, or trying
-non-overlapping masks, is the next code-level lever) vs. character LoRA
-(a materially bigger lift - training/hosting a LoRA per character,
-deferred by instruction so far).
+DECISION GATE (manual, visual - this script cannot judge the image
+itself):
+  PASS: approximately exactly 2 visible characters, both faces visible,
+  Subaru recognizable, Anastasia recognizable, no blending/duplicate,
+  usable cover composition.
+  FAIL: stop IP-Adapter tuning entirely - the next architecture is
+  character LoRA (a materially bigger lift - training/hosting a LoRA per
+  character) + regional composition, not further prompt/mask/strength
+  iteration on this mechanism.
 """
 from __future__ import annotations
 
@@ -84,8 +94,11 @@ TOKEN_ENV_VAR = "BEAM_TOKEN"
 RTX4090_PER_SECOND_USD = 0.000191667
 
 #: One fixed seed - reproducible, distinct from every other seed already
-#: used this mission (20260901-903 refinement, 20260904 identity proof).
-SEED = 20260905
+#: used this mission (20260901-903 refinement, 20260904 identity proof,
+#: 20260905 first reference proof - identity PASS, composition FAIL).
+#: This is the FINAL regional-composition proof before an IP-Adapter
+#: PASS/FAIL decision (see this script's own module docstring).
+SEED = 20260906
 
 
 def main() -> int:
@@ -101,9 +114,15 @@ def main() -> int:
                    help="Local path to a real reference image of Anastasia Hoshin")
     p.add_argument("--secondary-reference-source", default="operator-provided",
                    help="Provenance note for the secondary reference image")
-    p.add_argument("--reference-strength", type=float, default=0.6,
-                   help="IP-Adapter scale (0.5-0.8 typical per diffusers docs)")
-    p.add_argument("--out-prefix", default="rezero_cover_reference_proof")
+    p.add_argument("--reference-strength", type=float, default=0.5,
+                   help="IP-Adapter scale - lowered from 0.6 to a "
+                        "conservative 0.5 after a real v10 proof showed "
+                        "identity signal was present but composition "
+                        "control was weak (cropping, wrong facing "
+                        "direction, extra person); 0.5 trades a little "
+                        "identity strength for more headroom for the "
+                        "text prompt's composition instructions")
+    p.add_argument("--out-prefix", default="rezero_cover_regional_composition_proof")
     p.add_argument("--timeout-seconds", type=float, default=300.0)
     a = p.parse_args()
 
@@ -269,13 +288,13 @@ def main() -> int:
           f"load={manifest['model_load_seconds']}s "
           f"infer={manifest['inference_seconds']}s "
           f"size={manifest['size_bytes']} cost=${manifest['approx_cost_usd']}")
-    print("\nManually judge PASS criteria: ~2 visible characters, Subaru "
-          "recognizable, Anastasia recognizable, identities NOT blended, "
-          "no duplicate Subaru, usable cover composition. If this still "
-          "fails, STOP - report which is the smaller next step: tighten "
-          "the regional mask split (adjust split_fraction/overlap_fraction "
-          "in beam_apps/cover_illustrious_logic.py::build_left_right_masks) "
-          "vs. character LoRA (a materially bigger lift). Do not publish.")
+    print("\nDECISION GATE (final IP-Adapter iteration - manual, visual): "
+          "PASS = ~2 visible characters, both faces visible, Subaru "
+          "recognizable, Anastasia recognizable, no blending/duplicate, "
+          "usable cover composition. FAIL = STOP IP-Adapter tuning "
+          "entirely - the next architecture is character LoRA + regional "
+          "composition, not further prompt/mask/strength iteration on "
+          "this mechanism. Do not publish.")
     return 0
 
 

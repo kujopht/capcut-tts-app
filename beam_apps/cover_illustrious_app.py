@@ -118,10 +118,26 @@ reference-conditioned mode, chosen and researched for real (not assumed):
   the real answer to "is masked/independent conditioning needed to avoid
   blending" (yes, and this is the documented way to do it, not a guess).
   The masks themselves (deterministic left/right split, matching the
-  existing "primary foreground / secondary beside" text composition) are
-  built by `cover_illustrious_logic.build_left_right_masks()` - real-
-  unit-tested there since it only needs Pillow (already a transitive
-  diffusers dependency), not torch/diffusers/beam.
+  "waist-up shot, on left/on right" text composition) are built by
+  `cover_illustrious_logic.build_left_right_masks()` - real-unit-tested
+  there since it only needs Pillow (already a transitive diffusers
+  dependency), not torch/diffusers/beam. REAL FIX (mission "Final
+  IP-Adapter Regional Composition"): a real v10 proof showed exactly the
+  failure mode overlapping masks risk - an unwanted extra/background
+  character plus a text-like artifact, alongside a badly-cropped primary
+  face and a secondary character facing away. The masks are now
+  NON-OVERLAPPING (a small dead-zone gap at the center instead of a
+  deliberately-shared band) so neither identity's reference conditions
+  the other's pixels.
+- REFERENCE STRENGTH lowered 0.6 -> 0.5 (mission "Final IP-Adapter
+  Regional Composition"): the v10 proof's identity signal was real and
+  recognizable (Subaru's tracksuit, Anastasia's hair/fur) but composition
+  control was weak (cropping, wrong facing direction, extra person) - a
+  more conservative scale trades a little identity strength for more
+  headroom for the text prompt's composition instructions to actually
+  govern framing/pose, per diffusers' own documented guidance that lower
+  IP-Adapter scale values (0.5-0.8 typical) balance image and text
+  conditioning rather than letting the image reference dominate.
 - Fallback preservation (no references -> unchanged): calling
   `load_ip_adapter()` on a diffusers pipeline object makes
   `ip_adapter_image`/`ip_adapter_image_embeds` effectively REQUIRED on
@@ -347,7 +363,7 @@ def generate(context, prompt: str, negative_prompt: str = "", steps: int = 28,
             width: int = 1024, height: int = 1536, seed: int = -1,
             primary_reference_images_base64: Optional[List[str]] = None,
             secondary_reference_images_base64: Optional[List[str]] = None,
-            reference_strength: float = 0.6) -> dict:
+            reference_strength: float = 0.5) -> dict:
     import base64
     import io
     import time

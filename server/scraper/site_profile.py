@@ -27,10 +27,10 @@ CAU TRUC trang (pattern/fingerprint), khong phai thong tin xac thuc.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from server.scraper.contract import ScraperTier, domain_of
 from server.scraper.discovery import DiscoveryProposal, PaginationStrategy
@@ -94,10 +94,39 @@ class SiteProfile:
     #: qua review doc lap (Codex).
     next_page_pattern: str = ""
     fetch_tier: str = ScraperTier.DIRECT_HTTP.name
+    #: Tang THU LAM VIEC CHI TIET (T0-T5) da CHUNG MINH hoat dong cho domain
+    #: nay — mot trong `AcquisitionTier` (T0_DIRECT...T5_MANAGED_PROVIDER,
+    #: xem `server/scraper/universal/router.py`), luu duoi dang `.name`.
+    #: TUYET DOI KHAC VOI `fetch_tier` o tren:
+    #:   - `fetch_tier` = `ScraperTier` (contract.py) — enum LEGACY 2-gia-tri
+    #:     CHI CO `DIRECT_HTTP`/`BROWSER` v.v., dinh nghia TANG XU LY, ton tai
+    #:     TRUOC thang T0-T5.
+    #:   - `preferred_acquisition_tier` = `AcquisitionTier` (router.py) —
+    #:     thang T0-T5 MOI, tra loi "dung co che NAO khi HUC tu ngoi nguon
+    #:     nay" (truc tiep / structured / browser-rendered /...).
+    #: Hay dung khi co bang chung thuc te (mot lan quet thanh cong bang cos
+    #: che do) ghi lai GIA TRI NAO DA HIEU QUA; rong ("") nghia la chua co
+    #: bang chung — khong tu doan truoc. Khong trung lap, khong thay the
+    #: `fetch_tier` — ca hai song song, hai y niem khac nhau CUNG goi la
+    #: "tier".
+    preferred_acquisition_tier: str = ""
     rate_limit_seconds: float = DEFAULT_LEARNED_RATE_LIMIT_SECONDS
     last_verified_at: str = ""
     last_success_at: str = ""
     consecutive_failures: int = 0
+    #: TONG SO loi DA GHI NHAN TU XUA DEN NAY — KHONG BAO GIO reset ve 0
+    #: (trai nguoc hoan toan voi `consecutive_failures` o tren, truong nay
+    #: CO Y reset ve 0 sau moi lan thanh cong). Dung lam mau so chung cho
+    #: `success_ratio` — phan anh ty le thanh cong TICH LUY cua domain,
+    #: khong phai chuoi loi gan nhat.
+    failure_count_ever: int = 0
+    #: Cac the van ban TU DO tich luy qua thoi gian minh hoa cac che do loi
+    #: TU DONG HOC duoc cua domain nay (vd "captcha_seen_once",
+    #: "structured_json_absent", "browser_render_required") — de Universal
+    #: Acquisition Engine doan truoc che do nao co kha nang gap va chon
+    #: cos che phu hop. Chi them boi `record_failure_mode` (idempotent:
+    #: mot the da co KHONG duoc them lan hai).
+    known_failure_modes: List[str] = field(default_factory=list)
     success_count: int = 0
     created_at: str = ""
     updated_at: str = ""
@@ -115,6 +144,18 @@ class SiteProfile:
         """Co duoc `_adapter_for_url` TU DONG dung cho dot quet moi hay
         khong — CHI hai trang thai an toan, khong bao gio DEGRADED/DISABLED."""
         return self.status in (ProfileStatus.LEARNING, ProfileStatus.VERIFIED)
+
+    @property
+    def success_ratio(self) -> float:
+        """Ty le thanh cong TICH LUY: `success_count / (success_count +
+        failure_count_ever)`. Tra ve 1.0 khi CHUA CO LAN NAO duoc ghi nhan
+        (`success_count == 0` va `failure_count_ever == 0`) de tranh
+        ZeroDivisionError — cung phan "mac dinh an toan" voi `is_usable`
+        (trang thai chua-kiem-chung-nhung-chua-loi duoc xem nhu dung duoc)."""
+        tong_ca_thu = self.success_count + self.failure_count_ever
+        if tong_ca_thu == 0:
+            return 1.0
+        return self.success_count / tong_ca_thu
 
 
 def _now_utc_iso() -> str:
@@ -224,4 +265,21 @@ class MockSiteProfileStore:
             else:
                 trang_thai_moi = hien_tai.status
             return self.save(domain, status=trang_thai_moi,
-                             consecutive_failures=loi_lien_tiep)
+                             consecutive_failures=loi_lien_tiep,
+                             failure_count_ever=hien_tai.failure_count_ever + 1)
+
+    def record_failure_mode(self, domain: str, mode: str) -> SiteProfile:
+        """Them mot the van ban (chi dinh mot CHE DO LOI tu-dong-hoc duoc)
+        vao `known_failure_modes` cua domain — KHONG TRUNG LAP: the da co
+        KHONG duoc them lan hai. Doc lap voi `record_failure` (khong lam doi
+        `consecutive_failures`/`failure_count_ever`/status) — day chi la ghi
+        nhan "nguyen nhan loi gap", khong phai ban than lan loi."""
+        with self._lock:
+            hien_tai = self.profiles.get(domain)
+            if hien_tai is None:
+                raise ValueError(f"Chưa có SiteProfile cho domain: {domain}")
+            if mode in hien_tai.known_failure_modes:
+                # Idempotent: the da co -> khong doi gi ca.
+                return self.save(domain, known_failure_modes=hien_tai.known_failure_modes)
+            moi = hien_tai.known_failure_modes + [mode]
+            return self.save(domain, known_failure_modes=moi)

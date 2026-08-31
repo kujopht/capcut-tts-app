@@ -29,6 +29,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
+from time import monotonic as _monotonic
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from server.scraper.contract import domain_of
@@ -105,6 +106,28 @@ _TIER_TO_METHOD = {
 }
 
 
+@dataclass(frozen=True)
+class TierAttempt:
+    """One tier actually TRIED during an `acquire_with_attempts()` call —
+    observability record for `universal/report.py`'s `AcquisitionReport`.
+    A tier the router SKIPPED (no plugin registered, or registered but
+    `available()` reports False) never gets a `TierAttempt` - that
+    distinction (tried-and-failed vs not-applicable) matters for the
+    escalation-policy narrative a report builds on top of this list."""
+
+    tier: AcquisitionTier
+    success: bool
+    status: AcquisitionStatus
+    latency_seconds: float
+    #: len(html or text_markdown) - NOT a network byte count (this router
+    #: does not currently track raw transfer size; `HttpFetcher` enforces
+    #: its own MAX_RESPONSE_BYTES independently) - a rough usefulness
+    #: signal for the report, documented as such rather than presented as
+    #: a precise wire-byte count.
+    bytes_received: int
+    error_message: str = ""
+
+
 @dataclass
 class AcquisitionRouter:
     http_fetcher: HttpFetcher = field(default_factory=HttpFetcher)
@@ -147,30 +170,50 @@ class AcquisitionRouter:
 
     def acquire(self, url: str, *,
                source_hint: SourceClass = SourceClass.UNKNOWN) -> AcquisitionResult:
+        result, _attempts = self.acquire_with_attempts(url, source_hint=source_hint)
+        return result
+
+    def acquire_with_attempts(
+        self, url: str, *, source_hint: SourceClass = SourceClass.UNKNOWN,
+    ) -> Tuple[AcquisitionResult, List["TierAttempt"]]:
+        """Same escalation as `acquire()`, but also returns one `TierAttempt`
+        per tier actually tried (SKIPPED tiers - no plugin registered/none
+        available - are NOT recorded here; a caller wanting "not applicable"
+        visibility distinguishes that from "tried and failed" by checking
+        which `AcquisitionTier` members are absent from the returned list).
+        `acquire()` is a thin wrapper around this - one escalation
+        implementation, not two to keep in sync."""
         order = _order_from(self.preferred_tier(url))
         last_result: Optional[AcquisitionResult] = None
-        tried: List[AcquisitionTier] = []
+        attempts: List[TierAttempt] = []
         for tier in order:
             if tier == AcquisitionTier.T0_DIRECT:
+                start = _monotonic()
                 result = self._acquire_t0_direct(url, source_hint)
-                tried.append(tier)
+                latency = _monotonic() - start
             else:
                 plugins = self._plugins_for(tier)
                 if not plugins:
                     continue
+                start = _monotonic()
                 result = plugins[0].acquire(url, source_hint=source_hint)
-                tried.append(tier)
+                latency = _monotonic() - start
+            attempts.append(TierAttempt(
+                tier=tier, success=result.ok, status=result.status,
+                latency_seconds=latency,
+                bytes_received=len((result.html or "") + (result.text_markdown or "")),
+                error_message=result.errors[0].message if result.errors else ""))
             if result.ok:
                 self.record_observation(url, tier, success=True)
-                return result
+                return result, attempts
             last_result = result
 
         if last_result is not None:
-            return last_result
+            return last_result, attempts
         return AcquisitionResult(
             final_url=url, source_type=source_hint, status=AcquisitionStatus.FAILED,
             acquisition_method=AcquisitionMethod.DIRECT_HTTP,
             errors=[AcquisitionError(
                 stage="route", recoverable=False,
                 message="Khong co tang acquisition nao kha dung (khong plugin "
-                       "T1-T5 nao duoc dang ky va T0 that bai).")])
+                       "T1-T5 nao duoc dang ky va T0 that bai).")]), attempts

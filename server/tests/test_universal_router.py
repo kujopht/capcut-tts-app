@@ -5,7 +5,8 @@ from server.scraper.universal.acquisition import (
     AcquisitionMethod, AcquisitionResult, AcquisitionStatus, SourceClass,
 )
 from server.scraper.universal.router import (
-    AcquisitionPlugin, AcquisitionRouter, AcquisitionTier, _order_from,
+    AcquisitionPlugin, AcquisitionRouter, AcquisitionTier, TierAttempt,
+    _order_from,
 )
 
 _URL = "https://example.com/story/1"
@@ -118,6 +119,53 @@ class TierOrderGenerationTest(unittest.TestCase):
             AcquisitionTier.T2_BROWSER_RENDERED, AcquisitionTier.T3_PUBLIC_NETWORK,
             AcquisitionTier.T4_DOCUMENT, AcquisitionTier.T5_MANAGED_PROVIDER,
         ))
+
+
+class AcquireWithAttemptsTest(unittest.TestCase):
+    """Universal Acquisition Engine Hardening (2026-08-31): `acquire()`'s
+    escalation loop, but with a per-tier `TierAttempt` trail for
+    observability (`universal/report.py` builds on this)."""
+
+    def test_t0_success_records_exactly_one_attempt(self):
+        fetcher = FixtureFetcher({_URL: "<html><body>hi</body></html>"})
+        router = AcquisitionRouter(http_fetcher=fetcher)
+        result, attempts = router.acquire_with_attempts(_URL)
+        self.assertTrue(result.ok)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0].tier, AcquisitionTier.T0_DIRECT)
+        self.assertTrue(attempts[0].success)
+        self.assertGreaterEqual(attempts[0].latency_seconds, 0.0)
+
+    def test_t0_fail_then_t2_success_records_both_attempts_in_order(self):
+        fetcher = FixtureFetcher({})
+        plugin = _FakePlugin(AcquisitionTier.T2_BROWSER_RENDERED)
+        router = AcquisitionRouter(http_fetcher=fetcher, plugins=[plugin])
+        result, attempts = router.acquire_with_attempts(_URL)
+        self.assertTrue(result.ok)
+        self.assertEqual([a.tier for a in attempts],
+                        [AcquisitionTier.T0_DIRECT, AcquisitionTier.T2_BROWSER_RENDERED])
+        self.assertFalse(attempts[0].success)
+        self.assertTrue(attempts[1].success)
+
+    def test_skipped_tier_no_plugin_gets_no_attempt_record(self):
+        fetcher = FixtureFetcher({})
+        plugin = _FakePlugin(AcquisitionTier.T3_PUBLIC_NETWORK, succeeds=False)
+        router = AcquisitionRouter(http_fetcher=fetcher, plugins=[plugin])
+        _result, attempts = router.acquire_with_attempts(_URL)
+        tiers_seen = {a.tier for a in attempts}
+        self.assertIn(AcquisitionTier.T0_DIRECT, tiers_seen)
+        self.assertIn(AcquisitionTier.T3_PUBLIC_NETWORK, tiers_seen)
+        self.assertNotIn(AcquisitionTier.T1_STRUCTURED, tiers_seen)
+        self.assertNotIn(AcquisitionTier.T2_BROWSER_RENDERED, tiers_seen)
+
+    def test_acquire_and_acquire_with_attempts_agree_on_final_result(self):
+        fetcher = FixtureFetcher({_URL: "<html><body>hi</body></html>"})
+        router_a = AcquisitionRouter(http_fetcher=fetcher)
+        router_b = AcquisitionRouter(http_fetcher=fetcher)
+        plain_result = router_a.acquire(_URL)
+        verbose_result, _attempts = router_b.acquire_with_attempts(_URL)
+        self.assertEqual(plain_result.status, verbose_result.status)
+        self.assertEqual(plain_result.acquisition_method, verbose_result.acquisition_method)
 
 
 if __name__ == "__main__":

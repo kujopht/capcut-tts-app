@@ -30,12 +30,21 @@ class SourceClass(Enum):
 
 class AcquisitionMethod(Enum):
     """Which acquisition tier actually produced this result — see
-    `router.py` for the tier ladder this enum names."""
+    `router.py` for the full T0-T5 tier ladder this enum names.
+
+    `NETWORK_OBSERVED`/`DOCUMENT` them o Universal Acquisition Engine
+    Hardening (2026-08-31) cho T3/T4 — CO CHU Y KHONG doi ten 4 gia tri cu:
+    `STRUCTURED_API` da duoc adapter THAT dung (YouTube oEmbed, Bilibili
+    view-info), doi ten se pha vo ca adapter lan test da xanh. `PLUGIN` van
+    la gia tri T5 (Optional Managed Provider) — T5 CHINH LA "provider quan
+    ly ben ngoai qua plugin", khong can mot ten rieng thu 7."""
 
     DIRECT_HTTP = "direct_http"
     BROWSER_RENDER = "browser_render"
     STRUCTURED_API = "structured_api"
     PLUGIN = "plugin"
+    NETWORK_OBSERVED = "network_observed"
+    DOCUMENT = "document"
 
 
 class AcquisitionStatus(Enum):

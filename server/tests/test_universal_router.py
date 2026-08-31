@@ -5,7 +5,7 @@ from server.scraper.universal.acquisition import (
     AcquisitionMethod, AcquisitionResult, AcquisitionStatus, SourceClass,
 )
 from server.scraper.universal.router import (
-    AcquisitionPlugin, AcquisitionRouter, AcquisitionTier,
+    AcquisitionPlugin, AcquisitionRouter, AcquisitionTier, _order_from,
 )
 
 _URL = "https://example.com/story/1"
@@ -28,20 +28,20 @@ class _FakePlugin(AcquisitionPlugin):
         return AcquisitionResult(
             final_url=url, source_type=source_hint, status=status,
             acquisition_method=AcquisitionMethod.BROWSER_RENDER
-            if self.tier == AcquisitionTier.TIER2_BROWSER
+            if self.tier == AcquisitionTier.T2_BROWSER_RENDERED
             else AcquisitionMethod.STRUCTURED_API,
             provenance=self.name)
 
 
-class Tier1OnlyTest(unittest.TestCase):
-    def test_tier1_succeeds_with_no_plugins_registered(self):
+class T0OnlyTest(unittest.TestCase):
+    def test_t0_succeeds_with_no_plugins_registered(self):
         fetcher = FixtureFetcher({_URL: "<html><body>hi</body></html>"})
         router = AcquisitionRouter(http_fetcher=fetcher)
         result = router.acquire(_URL, source_hint=SourceClass.WEB_FICTION)
         self.assertTrue(result.ok)
         self.assertEqual(result.acquisition_method, AcquisitionMethod.DIRECT_HTTP)
 
-    def test_tier1_failure_with_no_plugins_returns_failed_not_exception(self):
+    def test_t0_failure_with_no_plugins_returns_failed_not_exception(self):
         fetcher = FixtureFetcher({})
         router = AcquisitionRouter(http_fetcher=fetcher)
         result = router.acquire(_URL)
@@ -51,9 +51,9 @@ class Tier1OnlyTest(unittest.TestCase):
 
 
 class PluginFallbackTest(unittest.TestCase):
-    def test_falls_back_to_tier2_plugin_when_tier1_fails(self):
+    def test_falls_back_to_t2_plugin_when_t0_fails(self):
         fetcher = FixtureFetcher({})
-        plugin = _FakePlugin(AcquisitionTier.TIER2_BROWSER)
+        plugin = _FakePlugin(AcquisitionTier.T2_BROWSER_RENDERED)
         router = AcquisitionRouter(http_fetcher=fetcher, plugins=[plugin])
         result = router.acquire(_URL)
         self.assertTrue(result.ok)
@@ -61,7 +61,7 @@ class PluginFallbackTest(unittest.TestCase):
 
     def test_unavailable_plugin_is_skipped(self):
         fetcher = FixtureFetcher({})
-        plugin = _FakePlugin(AcquisitionTier.TIER2_BROWSER, is_available=False)
+        plugin = _FakePlugin(AcquisitionTier.T2_BROWSER_RENDERED, is_available=False)
         router = AcquisitionRouter(http_fetcher=fetcher, plugins=[plugin])
         result = router.acquire(_URL)
         self.assertFalse(result.ok)
@@ -69,7 +69,7 @@ class PluginFallbackTest(unittest.TestCase):
 
     def test_all_tiers_fail_returns_last_failure_not_generic_error(self):
         fetcher = FixtureFetcher({})
-        plugin = _FakePlugin(AcquisitionTier.TIER2_BROWSER, succeeds=False)
+        plugin = _FakePlugin(AcquisitionTier.T2_BROWSER_RENDERED, succeeds=False)
         router = AcquisitionRouter(http_fetcher=fetcher, plugins=[plugin])
         result = router.acquire(_URL)
         self.assertFalse(result.ok)
@@ -79,23 +79,45 @@ class PluginFallbackTest(unittest.TestCase):
 class HistoryDrivenSelectionTest(unittest.TestCase):
     def test_successful_tier_is_remembered_and_preferred_next_time(self):
         fetcher = FixtureFetcher({})
-        plugin = _FakePlugin(AcquisitionTier.TIER3_STRUCTURED)
+        plugin = _FakePlugin(AcquisitionTier.T3_PUBLIC_NETWORK)
         router = AcquisitionRouter(http_fetcher=fetcher, plugins=[plugin])
 
         router.acquire(_URL)
-        self.assertEqual(router.preferred_tier(_URL), AcquisitionTier.TIER3_STRUCTURED)
+        self.assertEqual(router.preferred_tier(_URL), AcquisitionTier.T3_PUBLIC_NETWORK)
 
         router.acquire(_URL)
         self.assertEqual(plugin.calls, 2)
 
     def test_record_observation_ignores_failed_attempts(self):
         router = AcquisitionRouter(http_fetcher=FixtureFetcher({}))
-        router.record_observation(_URL, AcquisitionTier.TIER2_BROWSER, success=False)
-        self.assertEqual(router.preferred_tier(_URL), AcquisitionTier.TIER1_DIRECT_HTTP)
+        router.record_observation(_URL, AcquisitionTier.T2_BROWSER_RENDERED, success=False)
+        self.assertEqual(router.preferred_tier(_URL), AcquisitionTier.T0_DIRECT)
 
-    def test_default_preferred_tier_is_tier1(self):
+    def test_default_preferred_tier_is_t0(self):
         router = AcquisitionRouter(http_fetcher=FixtureFetcher({}))
-        self.assertEqual(router.preferred_tier(_URL), AcquisitionTier.TIER1_DIRECT_HTTP)
+        self.assertEqual(router.preferred_tier(_URL), AcquisitionTier.T0_DIRECT)
+
+
+class TierOrderGenerationTest(unittest.TestCase):
+    """Universal Acquisition Engine Hardening (2026-08-31): thay danh sach
+    hoan vi liet ke tay bang mot ham sinh thu tu tu `_CANONICAL_ORDER` -
+    xac nhan ca 6 tang deu co mat, dung mot lan, va tang uu tien luon dung dau."""
+
+    def test_ca_sau_tang_co_mat_dung_mot_lan_voi_moi_tang_uu_tien(self):
+        for preferred in AcquisitionTier:
+            with self.subTest(preferred=preferred):
+                order = _order_from(preferred)
+                self.assertEqual(len(order), 6)
+                self.assertEqual(set(order), set(AcquisitionTier))
+                self.assertEqual(order[0], preferred)
+
+    def test_thu_tu_mac_dinh_re_nhat_truoc_khi_khong_co_lich_su(self):
+        order = _order_from(AcquisitionTier.T0_DIRECT)
+        self.assertEqual(order, (
+            AcquisitionTier.T0_DIRECT, AcquisitionTier.T1_STRUCTURED,
+            AcquisitionTier.T2_BROWSER_RENDERED, AcquisitionTier.T3_PUBLIC_NETWORK,
+            AcquisitionTier.T4_DOCUMENT, AcquisitionTier.T5_MANAGED_PROVIDER,
+        ))
 
 
 if __name__ == "__main__":

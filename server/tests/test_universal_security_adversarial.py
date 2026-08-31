@@ -69,7 +69,7 @@ class RouterDoesNotRetryBeyondOneAttemptPerTierTest(unittest.TestCase):
         )
 
         class _CountingFailingPlugin(AcquisitionPlugin):
-            tier = AcquisitionTier.TIER2_BROWSER
+            tier = AcquisitionTier.T2_BROWSER_RENDERED
             name = "counting"
 
             def __init__(self):

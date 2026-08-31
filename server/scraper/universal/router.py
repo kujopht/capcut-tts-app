@@ -1,16 +1,23 @@
 """
-Acquisition Router — Story Harvester V5 Phase 2.
+Acquisition Router — Universal Acquisition Engine (Story Harvester V5 Phase 2,
+hardened 2026-08-31 into the full T0-T5 ladder).
 
-Tiered acquisition: Tier 1 (direct HTTP, real, always available - reuses
-the EXISTING `HttpFetcher`, so every SSRF/robots.txt/response-size/redirect
-protection already proven in `http_fetcher.py` applies here for free, not
-reimplemented) then Tier 2 (browser rendering) then Tier 3 (structured/
-network intelligence) as PLUGIN hooks. No paid service is mandatory: a
-router with zero plugins registered is a fully supported configuration
-(Tier-1-only), matching this repo's actual current dependencies.
+Escalation order is CHEAPEST-FIRST: T0 direct HTTP (reuses the EXISTING
+`HttpFetcher`, so every SSRF/robots.txt/response-size/redirect protection
+already proven in `http_fetcher.py` applies here for free, not
+reimplemented), then T1 structured data (JSON-LD/embedded JSON/RSS/
+sitemap/documented APIs — cheap, no browser needed), then T2 browser
+rendering, then T3 observing the public network requests a normal page
+already makes, then T4 documents (PDF/OCR), then T5 an optional managed
+provider (Firecrawl/Bright Data/Crawl4AI-shaped external service) as a
+LAST resort. T1-T5 are PLUGIN hooks (`AcquisitionPlugin`) — a router with
+zero plugins registered is a fully supported configuration (T0-only),
+matching this repo's actual current dependencies (no Playwright, no PDF
+library, no managed-provider credential exists here today; adding any of
+those is a real, explicit dependency decision, not made by this module).
 
 Strategy selection uses simple, transparent history: the last tier that
-worked for a given host is preferred next time, avoiding a repeat Tier-1
+worked for a given host is preferred next time, avoiding a repeat T0
 failure when a plugin is known to work for that host - mirrors the
 existing "learn from history" precedent in `site_profile.py` (a per-host
 learned fact persisted by the CALLER, not by this module - this module is
@@ -22,7 +29,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from server.scraper.contract import domain_of
 from server.scraper.http_fetcher import FetchError, HttpFetcher
@@ -33,17 +40,24 @@ from server.scraper.universal.acquisition import (
 
 
 class AcquisitionTier(Enum):
-    TIER1_DIRECT_HTTP = 1
-    TIER2_BROWSER = 2
-    TIER3_STRUCTURED = 3
+    """T0-T5, gia tri SO CO Y NGHIA THU TU (re nhat truoc) — dung de sap
+    `_CANONICAL_ORDER` on dinh ma khong can liet ke tay tung hoan vi."""
+
+    T0_DIRECT = 0
+    T1_STRUCTURED = 1
+    T2_BROWSER_RENDERED = 2
+    T3_PUBLIC_NETWORK = 3
+    T4_DOCUMENT = 4
+    T5_MANAGED_PROVIDER = 5
 
 
 class AcquisitionPlugin(ABC):
-    """A Tier-2/Tier-3 strategy - Firecrawl, Bright Data, Crawl4AI, or a
-    provider-specific API are all expected to be one of these. NONE are
-    implemented in this repo (no such dependency/credential exists here) -
-    this ABC is the seam a future adapter plugs into without touching the
-    router's core selection logic."""
+    """A T1-T5 strategy - Firecrawl, Bright Data, Crawl4AI, a real browser
+    renderer, an RSS/sitemap fetcher, or a provider-specific API are all
+    expected to be one of these. NONE are implemented in this repo by
+    default (no such dependency/credential exists here) - this ABC is the
+    seam a future adapter plugs into without touching the router's core
+    selection logic."""
 
     tier: AcquisitionTier
     name: str
@@ -60,22 +74,34 @@ class AcquisitionPlugin(ABC):
         ...
 
 
-_TIER_ORDER_FROM = {
-    AcquisitionTier.TIER1_DIRECT_HTTP: (
-        AcquisitionTier.TIER1_DIRECT_HTTP, AcquisitionTier.TIER2_BROWSER,
-        AcquisitionTier.TIER3_STRUCTURED),
-    AcquisitionTier.TIER2_BROWSER: (
-        AcquisitionTier.TIER2_BROWSER, AcquisitionTier.TIER1_DIRECT_HTTP,
-        AcquisitionTier.TIER3_STRUCTURED),
-    AcquisitionTier.TIER3_STRUCTURED: (
-        AcquisitionTier.TIER3_STRUCTURED, AcquisitionTier.TIER1_DIRECT_HTTP,
-        AcquisitionTier.TIER2_BROWSER),
-}
+#: Re nhat -> dat nhat, dung lam thu tu MAC DINH khi khong co lich su cho
+#: mot host. KHONG con la mot dict liet ke tay tung hoan vi (3! = 6 truoc
+#: day, gio la 6! = 720 neu lam kieu cu) — `_order_from()` sinh thu tu tu
+#: danh sach nay MOI LAN goi, dat tang uu tien len dau.
+_CANONICAL_ORDER: Tuple[AcquisitionTier, ...] = (
+    AcquisitionTier.T0_DIRECT,
+    AcquisitionTier.T1_STRUCTURED,
+    AcquisitionTier.T2_BROWSER_RENDERED,
+    AcquisitionTier.T3_PUBLIC_NETWORK,
+    AcquisitionTier.T4_DOCUMENT,
+    AcquisitionTier.T5_MANAGED_PROVIDER,
+)
+
+
+def _order_from(preferred: AcquisitionTier) -> Tuple[AcquisitionTier, ...]:
+    """Tang UU TIEN (thanh cong lan truoc cho host nay) len dau, phan con
+    lai giu nguyen thu tu RE-NHAT-TRUOC chinh tac — khong doan mot thu tu
+    "hop ly hon" cho phan con lai, tranh hanh vi ngac nhien khi them tang moi."""
+    return (preferred,) + tuple(t for t in _CANONICAL_ORDER if t != preferred)
+
 
 _TIER_TO_METHOD = {
-    AcquisitionTier.TIER1_DIRECT_HTTP: AcquisitionMethod.DIRECT_HTTP,
-    AcquisitionTier.TIER2_BROWSER: AcquisitionMethod.BROWSER_RENDER,
-    AcquisitionTier.TIER3_STRUCTURED: AcquisitionMethod.STRUCTURED_API,
+    AcquisitionTier.T0_DIRECT: AcquisitionMethod.DIRECT_HTTP,
+    AcquisitionTier.T1_STRUCTURED: AcquisitionMethod.STRUCTURED_API,
+    AcquisitionTier.T2_BROWSER_RENDERED: AcquisitionMethod.BROWSER_RENDER,
+    AcquisitionTier.T3_PUBLIC_NETWORK: AcquisitionMethod.NETWORK_OBSERVED,
+    AcquisitionTier.T4_DOCUMENT: AcquisitionMethod.DOCUMENT,
+    AcquisitionTier.T5_MANAGED_PROVIDER: AcquisitionMethod.PLUGIN,
 }
 
 
@@ -90,7 +116,7 @@ class AcquisitionRouter:
     _history: Dict[str, AcquisitionTier] = field(default_factory=dict, repr=False)
 
     def preferred_tier(self, url: str) -> AcquisitionTier:
-        return self._history.get(domain_of(url), AcquisitionTier.TIER1_DIRECT_HTTP)
+        return self._history.get(domain_of(url), AcquisitionTier.T0_DIRECT)
 
     def record_observation(self, url: str, tier: AcquisitionTier, *, success: bool) -> None:
         if success:
@@ -99,7 +125,7 @@ class AcquisitionRouter:
     def _plugins_for(self, tier: AcquisitionTier) -> List[AcquisitionPlugin]:
         return [p for p in self.plugins if p.tier == tier and p.available()]
 
-    def _acquire_tier1(self, url: str, source_hint: SourceClass) -> AcquisitionResult:
+    def _acquire_t0_direct(self, url: str, source_hint: SourceClass) -> AcquisitionResult:
         try:
             fetched = self.http_fetcher.fetch(url)
         except FetchError as exc:
@@ -117,16 +143,16 @@ class AcquisitionRouter:
             html=fetched.text if "html" in fetched.content_type.lower() or not fetched.content_type else None,
             text_markdown=None,
             metadata={"etag": fetched.etag, "last_modified": fetched.last_modified},
-            provenance="AcquisitionRouter/tier1_direct_http")
+            provenance="AcquisitionRouter/t0_direct")
 
     def acquire(self, url: str, *,
                source_hint: SourceClass = SourceClass.UNKNOWN) -> AcquisitionResult:
-        order = _TIER_ORDER_FROM[self.preferred_tier(url)]
+        order = _order_from(self.preferred_tier(url))
         last_result: Optional[AcquisitionResult] = None
         tried: List[AcquisitionTier] = []
         for tier in order:
-            if tier == AcquisitionTier.TIER1_DIRECT_HTTP:
-                result = self._acquire_tier1(url, source_hint)
+            if tier == AcquisitionTier.T0_DIRECT:
+                result = self._acquire_t0_direct(url, source_hint)
                 tried.append(tier)
             else:
                 plugins = self._plugins_for(tier)
@@ -147,4 +173,4 @@ class AcquisitionRouter:
             errors=[AcquisitionError(
                 stage="route", recoverable=False,
                 message="Khong co tang acquisition nao kha dung (khong plugin "
-                       "Tier-2/Tier-3 nao duoc dang ky va Tier-1 that bai).")])
+                       "T1-T5 nao duoc dang ky va T0 that bai).")])

@@ -51,11 +51,40 @@ file):
   `trust_remote_code=True`.
 - 33 languages (already stated, CONFIRMED accurate): the model card states
   "support translation among 33 languages" with a full language table.
-- vLLM compatibility (CONFIRMED, not assumed): the model card publishes
-  ITS OWN vLLM serving instructions
-  (`vllm serve tencent/Hy-MT2-1.8B --tensor-parallel-size 1`) - i.e. the
-  model publisher, not just Beam, has verified vLLM support for this exact
-  architecture.
+- vLLM compatibility - CORRECTED BY REAL DEPLOY EVIDENCE (2026-09-01,
+  mission "REMOVE THE HUMAN FROM BEAM OPERATIONS" cost-safety follow-up):
+  the prior mission's citation of `vllm serve tencent/Hy-MT2-1.8B
+  --tensor-parallel-size 1` as proof of vLLM compatibility was TECHNICALLY
+  ACCURATE BUT INCOMPLETE - the SAME model card's installation section
+  ALSO instructs "Build vLLM from source" (`git clone
+  https://github.com/vllm-project/vllm.git && ... pip install --editable
+  .`), which was not caught in the earlier citation. This means Hy-MT2's
+  architecture (`HunYuanDenseV1ForCausalLM`) is NOT YET supported by ANY
+  tagged/PyPI-published vLLM release - confirmed by checking PyPI directly:
+  vLLM's latest published release as of this writing is 0.19.1
+  (2026-04-18), which PREDATES Hy-MT2's own release (2026-05-21) and
+  therefore cannot possibly contain native support for it.
+  `beam.integrations.VLLM`'s `vllm_version` parameter DEFAULTS TO
+  `"0.8.4"` (an even older, unrelated release) and only supports pinning
+  a PyPI version string via `image.add_python_packages(["vllm==..."])` -
+  it has NO mechanism to build vLLM from git source. REAL SYMPTOM
+  observed: `beam deploy ...:hymt2_1_8b` succeeds (the stub/container
+  registers correctly), but the deployed endpoint's `/v1/models` returns
+  a persistent HTTP 500, and `beam volume list`/`beam ls vllm_cache` shows
+  the model-weight cache Volume completely EMPTY (0 items, 0 bytes) even
+  after multiple real deploy+cold-start attempts - consistent with vLLM
+  failing during model/architecture registration before weight download
+  ever begins, not a slow cold start. CONCLUSION: Hy-MT2-1.8B cannot be
+  served through this file's current architecture until either (a) vLLM
+  ships a tagged release with native HunYuanDenseV1 support, or (b) the
+  `image=` passed to `VLLM(...)` is customized to build vLLM from source
+  inside the container - a materially larger, riskier change (unreleased
+  main-branch vLLM, longer/costlier cold starts) that needs explicit
+  operator sign-off, not an automatic retry. DO NOT bump `vllm_version=`
+  to a newer PyPI tag as a "quick fix" without first confirming on
+  PyPI/vLLM's own release notes that HunYuanDenseV1 support has actually
+  landed - guessing would spend another real, billed GPU cold-start on an
+  already-falsified hypothesis.
 - dtype (NOT set explicitly here, CONFIRMED this is correct): `config.json`
   reports `"torch_dtype": "bfloat16"`. vLLM's own default dtype is `"auto"`,
   which reads this field from the checkpoint config - no explicit

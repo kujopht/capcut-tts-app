@@ -28,6 +28,7 @@ citations):
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -49,8 +50,23 @@ def beam_subprocess_env(token: str) -> dict:
     return env
 
 
+def _beam_executable():
+    """Resolve `beam` - `beam-client` installs `beam.exe` into
+    `.venv\\Scripts\\` alongside `python.exe`, but that directory is NOT
+    automatically on PATH for a subprocess just because this interpreter's
+    full path was used to launch this script (confirmed by reproducing:
+    `shutil.which("beam")` returned None despite the file existing right
+    next to `sys.executable`)."""
+    found = shutil.which("beam")
+    if found:
+        return found
+    candidate = Path(sys.executable).parent / (
+        "beam.exe" if os.name == "nt" else "beam")
+    return str(candidate) if candidate.is_file() else None
+
+
 def main() -> int:
-    beam_bin = shutil.which("beam")
+    beam_bin = _beam_executable()
     print(f"beam CLI on PATH: {'yes at ' + beam_bin if beam_bin else 'NO'}")
     if not beam_bin:
         print("\nBLOCKED: install the Beam CLI first (real, tested command):")
@@ -77,7 +93,7 @@ def main() -> int:
     # never placed in argv/logged here.
     try:
         result = subprocess.run(
-            ["beam", "machine", "list"], capture_output=True, text=True,
+            [beam_bin, "machine", "list"], capture_output=True, text=True,
             timeout=60, env=beam_subprocess_env(token))
     except FileNotFoundError:
         print("\nBLOCKED: 'beam' binary not runnable despite being on PATH.")

@@ -784,6 +784,63 @@ def optional_profile(authorization: Optional[str] = None) -> Optional[Profile]:
         return None
 
 
+#: Mission "PIVOT AUTH — CREATE FIRST-CLASS HARVESTER SERVICE CREDENTIAL"
+#: (2026-09-01): a dedicated, narrowly-scoped machine principal for the
+#: unattended acquisition/shipping pipeline. Deliberately NOT a human user
+#: and NOT the canary principal — see `AppwriteSettings.harvester_service_token`
+#: / `is_harvester_service_token` docstrings for why the two are kept apart.
+#:
+#: This is an IDENTITY check only, same as `current_profile`/`optional_profile`
+#: — it says WHO is calling, not what they may do. Authorization (what the
+#: resulting `svc_harvester` profile is allowed to touch) is enforced the
+#: same way it already is for every other owner: `store.owned_novel`/
+#: `store.owned_chapter`/`update_novel`'s own `NovelPatch` (which has no
+#: `state` field — publish/unpublish are separate routes below that
+#: deliberately still require `current_profile` only, so this identity can
+#: never reach them no matter what payload it sends).
+def _harvester_or_user(authorization: Optional[str]) -> Profile:
+    """Harvester service token, HOẶC người dùng thật qua phiên Appwrite.
+
+    Token dịch vụ được thử TRƯỚC: harvester không có phiên Appwrite, nên đi
+    qua đường người dùng sẽ luôn 401 — cùng thứ tự kiểm với `_canary_or_admin`.
+    """
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        if settings.is_harvester_service_token(token):
+            return Profile(user_id=settings.harvester_owner_user_id,
+                           email="harvester@service.local",
+                           display_name="Harvester Service")
+    return current_profile(authorization)
+
+
+def harvester_or_user_profile(
+    authorization: Optional[str] = Header(default=None),
+) -> Profile:
+    """FastAPI dependency form of `_harvester_or_user` — wire this in place
+    of `Depends(current_profile)` on exactly the routes the harvester
+    pipeline needs (novel/chapter create+update, TTS job create+read,
+    audio playback read). Every other route — publish, unpublish, delete,
+    user/role/schema/billing management — keeps `current_profile` or a
+    stricter admin dependency unchanged, so this identity fails closed
+    outside its explicit scope by simple omission, not by a runtime check
+    that could be bypassed."""
+    return _harvester_or_user(authorization)
+
+
+def _optional_harvester_or_user(authorization: Optional[str]) -> Optional[Profile]:
+    """Like `optional_profile`, but also recognizes the harvester service
+    token — needed so the harvester can read back its OWN draft novels/
+    chapters (e.g. to verify a POST actually persisted) without a route
+    that otherwise tolerates anonymous readers rejecting it outright."""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        if settings.is_harvester_service_token(token):
+            return Profile(user_id=settings.harvester_owner_user_id,
+                           email="harvester@service.local",
+                           display_name="Harvester Service")
+    return optional_profile(authorization)
+
+
 # -----------------------------------------------------------------------------
 # Healthcheck
 # -----------------------------------------------------------------------------
@@ -1305,7 +1362,7 @@ def list_novels(mine: bool = False, q: str = "", tag: str = "",
     """
     owner_id = None
     if mine:
-        owner_id = current_profile(authorization).user_id
+        owner_id = _harvester_or_user(authorization).user_id
 
     page_size = None if limit is None else max(1, min(limit, MAX_PAGE_SIZE))
     items, total = store.find_novels(
@@ -1368,7 +1425,7 @@ def _parse_novel_status(raw: str) -> NovelStatus:
 
 
 @app.post("/api/novels", status_code=status.HTTP_201_CREATED)
-def create_novel(payload: NovelIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+def create_novel(payload: NovelIn, profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
     novel = store.create_novel(Novel(
         owner_id=profile.user_id,
         title=payload.title.strip(),
@@ -1514,7 +1571,7 @@ def get_novel(novel_id: str,
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
     # 404 chu khong phai 403: nguoi la khong can biet truyen nhap nay ton tai.
-    if not _may_read(novel, optional_profile(authorization)):
+    if not _may_read(novel, _optional_harvester_or_user(authorization)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy tiểu thuyết.")
 
     chapters = store.list_chapters(novel_id)
@@ -1577,7 +1634,7 @@ def _purge_chapter(chapter: Chapter) -> Dict[str, int]:
 
 @app.patch("/api/novels/{novel_id}")
 def update_novel(novel_id: str, payload: NovelPatch,
-                 profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+                 profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
     """Sua truyen. Chi chu so huu; `state` khong doi duoc qua day."""
     fields = payload.model_dump(exclude_none=True)
     if not fields:
@@ -1906,7 +1963,7 @@ def import_authorized_work(
 
 
 @app.post("/api/chapters", status_code=status.HTTP_201_CREATED)
-def create_chapter(payload: ChapterIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+def create_chapter(payload: ChapterIn, profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
     try:
         novel = store.owned_novel(payload.novel_id, profile.user_id)
     except NotFoundError as exc:
@@ -2041,7 +2098,7 @@ def get_chapter_transcript(
 
 @app.patch("/api/chapters/{chapter_id}")
 def update_chapter(chapter_id: str, payload: ChapterPatch,
-                   profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+                   profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
     fields = payload.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
@@ -2807,7 +2864,7 @@ def _tao_job_cho_chuong(*, owner_id: str, chapter_id: str, voice_id: str,
 
 
 @app.post("/api/jobs", status_code=status.HTTP_201_CREATED)
-def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+def create_job(payload: JobIn, profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
     """
     Tao job tao audio.
 
@@ -2824,7 +2881,7 @@ def create_job(payload: JobIn, profile: Profile = Depends(current_profile)) -> D
 
 
 @app.get("/api/jobs/{job_id}")
-def get_job(job_id: str, profile: Profile = Depends(current_profile)) -> Dict[str, Any]:
+def get_job(job_id: str, profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
     try:
         job = store.owned_job(job_id, profile.user_id)
     except NotFoundError as exc:
@@ -3367,7 +3424,7 @@ def _may_listen(chapter_id: str, authorization: Optional[str]) -> None:
         return
 
     # Ban nhap: bat buoc dang nhap va phai dung chu so huu
-    profile = current_profile(authorization)
+    profile = _harvester_or_user(authorization)
     if chapter.owner_id != profile.user_id:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Bạn không có quyền nghe chương này."
@@ -4007,7 +4064,7 @@ def list_animation_series(mine: bool = False, q: str = "", tag: str = "",
     `mine=true` — cung contract voi `GET /api/novels`."""
     owner_id = None
     if mine:
-        owner_id = current_profile(authorization).user_id
+        owner_id = _harvester_or_user(authorization).user_id
 
     page_size = None if limit is None else max(1, min(limit, MAX_PAGE_SIZE))
     items, total = animation_store.find_series(

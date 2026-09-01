@@ -24,8 +24,10 @@ attached to these same draft entries later (idempotent reuse below, keyed
 on external_source_url, exactly matches mission_g_rezero_draft_runner.py's
 own pattern).
 
-Reads FAS_HARVESTER_TOKEN from the credential broker — never the shell env,
-never argv, never printed/logged.
+Reads FAS_HARVESTER_SERVICE_TOKEN from the credential broker — mission
+"PIVOT AUTH" (2026-09-01) replaced the earlier, abandoned FAS_HARVESTER_TOKEN
+(a harvested interactive user session) with this dedicated, narrowly-scoped
+machine credential — never the shell env, never argv, never printed/logged.
 
 Never publishes: only POST /api/novels and GET verification calls. No
 PUT/PATCH/DELETE/publish call exists in this file.
@@ -73,9 +75,10 @@ VIDEOS: List[Dict[str, Any]] = [
 
 
 def main() -> int:
-    token = broker.fetch("FAS_HARVESTER_TOKEN")
+    token = broker.fetch("FAS_HARVESTER_SERVICE_TOKEN")
     if not token:
-        print(json.dumps({"status": "BLOCKED", "reason": "FAS_HARVESTER_TOKEN not stored"}))
+        print(json.dumps({"status": "BLOCKED",
+                          "reason": "FAS_HARVESTER_SERVICE_TOKEN not stored"}))
         return 2
 
     print("=== 1. Health check ===")

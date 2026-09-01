@@ -331,6 +331,15 @@ class Settings:
     #: het noi dung nguon-suu-tam, khong lan voi Novel do tac gia that dang.
     harvester_owner_user_id: str = "svc_harvester"
 
+    #: Token dich vu cho HARVESTER (mission "PIVOT AUTH", 2026-09-01), doc tu
+    #: `FAS_HARVESTER_SERVICE_TOKEN`. Tach RIENG khoi `canary_service_token`
+    #: co chu y — canary la du lieu vut di (Phase 15), harvester la nguon
+    #: dua noi dung THAT (draft cho toi khi operator tu tay `/publish`).
+    #: Dung chung mot token cho ca hai se lam mot loi cau hinh o mien nay
+    #: (vd rotate/leak token canary) am tham cap luon quyen ghi noi dung
+    #: that. Xem `is_harvester_service_token`/`server/main.py::harvester_ops_profile`.
+    harvester_service_token: str = ""
+
     #: Ngan sach dung luong mem cho kho luu tru media asset (vi du R2).
     #: Mac dinh la 10 GB (10 * 1024 * 1024 * 1024 bytes). Doc tu 
     #: `FAS_MEDIA_ASSET_STORAGE_BUDGET_BYTES`. R2 free tier co han, khong 
@@ -540,6 +549,30 @@ class Settings:
             return False
         return hmac.compare_digest(token, self.canary_service_token)
 
+    def harvester_id_collision(self) -> str:
+        """Nhu `canary_id_collision` nhung cho `harvester_owner_user_id` —
+        cung mot ly do that su: fail-closed thay vi vo tinh cap quyen quan
+        tri cho mot principal dich vu hep."""
+        if self.harvester_owner_user_id in self.owner_user_ids:
+            return "FAS_OWNER_USER_IDS"
+        if self.harvester_owner_user_id in self.admin_user_ids:
+            return "FAS_ADMIN_USER_IDS"
+        if self.harvester_owner_user_id in self.moderator_user_ids:
+            return "FAS_MODERATOR_USER_IDS"
+        return ""
+
+    def is_harvester_service_token(self, token: str) -> bool:
+        """So khop token dich vu harvester bang so sanh HANG SO THOI GIAN —
+        y het `is_canary_service_token`, token RIENG, danh tinh RIENG
+        (`harvester_owner_user_id`, khong phai `canary_user_id`)."""
+        import hmac
+
+        if not token or not self.harvester_service_token:
+            return False
+        if self.harvester_id_collision():
+            return False
+        return hmac.compare_digest(token, self.harvester_service_token)
+
     def admin_role_of(self, user_id: str) -> "AdminRole":
         """
         Muc quan tri THAT SU cua mot user_id — nguon su that DUY NHAT cho moi
@@ -745,6 +778,7 @@ def load_settings() -> Settings:
         canary_user_id=_env("FAS_CANARY_USER_ID", "svc_canary").strip() or "svc_canary",
         harvester_owner_user_id=_env(
             "FAS_HARVESTER_OWNER_USER_ID", "svc_harvester").strip() or "svc_harvester",
+        harvester_service_token=_env("FAS_HARVESTER_SERVICE_TOKEN", "").strip(),
         media_asset_storage_budget_bytes=int(_env("FAS_MEDIA_ASSET_STORAGE_BUDGET_BYTES", str(10 * 1024 * 1024 * 1024))),
         admin_user_ids=tuple(
             x for x in _env_list("FAS_ADMIN_USER_IDS", "") if x.strip()

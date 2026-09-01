@@ -12,9 +12,12 @@ the author's explicit permission — see NOVEL_DESCRIPTION in
 mission_g_rezero_draft_runner.py) — translation is correctly a no-op here,
 not a bug: this script does NOT call any translation provider.
 
-Reads FAS_HARVESTER_TOKEN from the credential broker (never the shell env,
-never argv, never printed/logged) — store it once via:
-    python scripts/fanfic_credential_broker.py store --name FAS_HARVESTER_TOKEN
+Reads FAS_HARVESTER_SERVICE_TOKEN from the credential broker (never the
+shell env, never argv, never printed/logged) — mission "PIVOT AUTH" (2026-
+09-01) replaced the earlier, abandoned FAS_HARVESTER_TOKEN (a harvested
+interactive user session) with this dedicated, narrowly-scoped machine
+credential. Set up via `scripts/setup_harvester_service_token.py` (never
+by hand).
 
 Never publishes: only POST to /api/novels, /api/chapters, /api/jobs and GET
 verification calls. No PUT/PATCH/DELETE/publish call exists in this file.
@@ -64,9 +67,10 @@ def qa_check(text: str, expected_min_chars: int) -> Dict[str, Any]:
 
 
 def main() -> int:
-    token = broker.fetch("FAS_HARVESTER_TOKEN")
+    token = broker.fetch("FAS_HARVESTER_SERVICE_TOKEN")
     if not token:
-        print(json.dumps({"status": "BLOCKED", "reason": "FAS_HARVESTER_TOKEN not stored"}))
+        print(json.dumps({"status": "BLOCKED",
+                          "reason": "FAS_HARVESTER_SERVICE_TOKEN not stored"}))
         return 2
 
     print("=== 1. Health check ===")

@@ -104,19 +104,23 @@ KNOWN_NAMES = (
     # re-exporting `$env:BEAM_TOKEN` every session. See
     # `scripts/beam_credential.py::resolve_beam_token` for the read side.
     "BEAM_TOKEN",
-    # Owner/admin-authenticated bearer token for fas-prod-api's real
-    # `/api/novels` and `/api/chapters` write paths. Mission "SHIP A REAL
-    # STORY NOW" (2026-09-01): the only credential already in this broker
-    # that authenticates against fas-prod-api is FANFIC_CANARY_SERVICE_TOKEN,
-    # and it is DELIBERATELY excluded from the general Novel/Chapter write
-    # path by server design (`server/main.py::canary_ops_profile`'s own
-    # docstring: letting the service token into the general write path would
-    # turn a narrow identity into a full user account) -- there is no way to
-    # self-mint this from anything else stored locally. Read by
-    # `scripts/mission_g_rezero_draft_runner.py` via
-    # `os.environ[TOKEN_ENV_VAR]`, so store it and then export it into that
-    # process's env before running the runner.
-    "FAS_HARVESTER_TOKEN",
+    # Scoped machine credential for the harvester/content-shipping pipeline.
+    # Mission "PIVOT AUTH -- CREATE FIRST-CLASS HARVESTER SERVICE CREDENTIAL"
+    # (2026-09-01): supersedes an earlier, abandoned attempt
+    # (`FAS_HARVESTER_TOKEN`) that tried to reuse a harvested interactive
+    # user session -- deliberately NOT that: this is a random, locally-
+    # generated secret compared server-side via
+    # `AppwriteSettings.is_harvester_service_token` (constant-time, same
+    # pattern as `FANFIC_CANARY_SERVICE_TOKEN`/`is_canary_service_token`),
+    # authenticating as the FIXED `svc_harvester` service identity, not any
+    # human. Scope is enforced by which routes accept
+    # `harvester_or_user_profile` in `server/main.py` -- publish/unpublish/
+    # delete/user/schema/billing routes still require a real user session
+    # and never look at this token at all. Set locally here AND on Render
+    # (via `scripts/setup_harvester_service_token.py`, which uses
+    # `RENDER_API_KEY` to push the same value) -- never printed in either
+    # place.
+    "FAS_HARVESTER_SERVICE_TOKEN",
 )
 
 #: Render env vars this module is permitted to read the VALUE of.

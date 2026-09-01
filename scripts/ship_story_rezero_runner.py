@@ -42,12 +42,20 @@ from mission_g_rezero_draft_runner import (  # noqa: E402
 CHARACTERS_TO_CHECK = ["Subaru", "Anastasia"]
 VOICE_ID = "piper:ngochuyennew"
 JOB_POLL_SECONDS = 5
-JOB_MAX_WAIT_SECONDS = 300
+JOB_MAX_WAIT_SECONDS = 600
+#: Real chapters legitimately repeat short lines (scene-break dividers,
+#: one-word exclamations, dialogue tags) — only a repeated line at least
+#: this long is evidence of an actual duplicated PARAGRAPH, not incidental
+#: short-line repetition. Found via a real false positive on this exact
+#: story's own already-100%-validated chapters (12/18 "duplicates" that
+#: were all short lines) — not a hypothetical.
+MIN_PARAGRAPH_CHARS_FOR_DUPE_CHECK = 40
 
 
 def qa_check(text: str, expected_min_chars: int) -> Dict[str, Any]:
     """Cheap deterministic checks per mission Rule G — NOT another LLM call."""
-    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()
+                 and len(p.strip()) >= MIN_PARAGRAPH_CHARS_FOR_DUPE_CHECK]
     dupes = len(paragraphs) - len(set(paragraphs))
     names_present = {n: (n in text) for n in CHARACTERS_TO_CHECK}
     ascii_only_run = re.search(r"[A-Za-z]{80,}(?:\s[A-Za-z]{3,}){10,}", text)

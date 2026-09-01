@@ -670,6 +670,26 @@ class Novel:
     #: Trang thai hoan thanh (ongoing/completed/hiatus) — mac dinh la ONGOING.
     status: NovelStatus = NovelStatus.ONGOING
 
+    #: --- Video draft fields (mission "SHIP 3 CHINESE AI-ANIMATION VIDEO
+    #: DRAFTS", 2026-09-01) --- Reuses `Novel`/`METADATA_ONLY` rather than a
+    #: new collection: METADATA_ONLY already means "we don't own the full
+    #: content, just metadata + a link back to source", which is exactly
+    #: what a video draft needs. All four are rong ("") for ordinary
+    #: text novels and simply unused there.
+    #: Nen tang nguon: "youtube", "bilibili", ... Rong neu khong phai video.
+    platform: str = ""
+    #: "EMBED_ONLY" (khong sao chep media, chi nhung player goc) hoac
+    #: "REHOST_ALLOWED" (co quyen chuyen ma va luu ban sao) — xem
+    #: mission's step 8. Rong neu khong phai video.
+    rights_mode: str = ""
+    #: "PENDING_SOURCE" (chua co phu de goc/ASR), "READY" (da co file
+    #: WebVTT/SRT), hoac rong neu khong phai video.
+    subtitle_status: str = ""
+    #: ID/tham chieu nhung video tren nen tang goc (vd YouTube video_id) —
+    #: du de dung lai player nhung, khong phai URL day du (da co o
+    #: `external_source_url`).
+    embed_ref: str = ""
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "novel_id": self.novel_id,
@@ -691,6 +711,10 @@ class Novel:
             "characters": list(self.characters),
             "pairings": list(self.pairings),
             "status": self.status.value,
+            "platform": self.platform,
+            "rights_mode": self.rights_mode,
+            "subtitle_status": self.subtitle_status,
+            "embed_ref": self.embed_ref,
         }
 
 

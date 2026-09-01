@@ -636,6 +636,12 @@ class NovelIn(BaseModel):
     characters: List[str] = Field(default_factory=list)
     pairings: List[str] = Field(default_factory=list)
     status: str = "ongoing"
+    #: Video draft fields (mission "SHIP 3 CHINESE AI-ANIMATION VIDEO
+    #: DRAFTS") — rong cho Novel van ban thong thuong, xem Novel.to_dict().
+    platform: str = ""
+    rights_mode: str = ""
+    subtitle_status: str = ""
+    embed_ref: str = ""
 
 
 class ChapterIn(BaseModel):
@@ -1378,6 +1384,10 @@ def create_novel(payload: NovelIn, profile: Profile = Depends(current_profile)) 
         characters=payload.characters,
         pairings=payload.pairings,
         status=_parse_novel_status(payload.status),
+        platform=payload.platform.strip(),
+        rights_mode=payload.rights_mode.strip(),
+        subtitle_status=payload.subtitle_status.strip(),
+        embed_ref=payload.embed_ref.strip(),
     ))
     return {"novel": _novel_out(novel)}
 

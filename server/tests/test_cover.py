@@ -167,6 +167,13 @@ class TestBackwardCompatible(CoverTestCase):
     NEW_TAXONOMY_FIELDS = {
         "characters", "pairings", "status",
     }
+    #: Mission "SHIP 3 CHINESE AI-ANIMATION VIDEO DRAFTS" (2026-09-01):
+    #: reuses Novel/METADATA_ONLY for video drafts instead of a new
+    #: collection — see Novel's own docstring. Same explicit-confirmation
+    #: discipline as the two sets above.
+    NEW_VIDEO_DRAFT_FIELDS = {
+        "platform", "rights_mode", "subtitle_status", "embed_ref",
+    }
 
     def test_only_cover_url_was_added(self):
         token = self.user()
@@ -175,7 +182,8 @@ class TestBackwardCompatible(CoverTestCase):
                                 headers=self.auth(token)).json()["novel"]
         self.assertEqual(
             set(body) - self.OLD_NOVEL_FIELDS,
-            {"cover_url"} | self.NEW_FANDOM_FIELDS | self.NEW_TAXONOMY_FIELDS)
+            {"cover_url"} | self.NEW_FANDOM_FIELDS | self.NEW_TAXONOMY_FIELDS
+            | self.NEW_VIDEO_DRAFT_FIELDS)
 
     def test_chapter_response_keeps_its_old_shape(self):
         token = self.user()

@@ -142,6 +142,11 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         "external_source_url", "external_chapter_count",
         "external_updated_at", "language",
         "characters", "pairings", "status",
+        # Video draft fields (mission "SHIP 3 CHINESE AI-ANIMATION VIDEO
+        # DRAFTS", 2026-09-01) — see Novel's own docstring. `_supported_fields`
+        # drops these automatically until the Appwrite migration adding them
+        # actually runs, same recovery-field pattern as COL_JOBS above.
+        "platform", "rights_mode", "subtitle_status", "embed_ref",
     ),
     COL_CHAPTERS: (
         "chapter_id", "novel_id", "owner_id", "title", "content",
@@ -1857,6 +1862,10 @@ def _novel_from_doc(doc: Dict[str, Any]) -> Novel:
         characters=list(doc.get("characters") or []),
         pairings=list(doc.get("pairings") or []),
         status=_novel_status_from_doc(doc),
+        platform=str(doc.get("platform") or ""),
+        rights_mode=str(doc.get("rights_mode") or ""),
+        subtitle_status=str(doc.get("subtitle_status") or ""),
+        embed_ref=str(doc.get("embed_ref") or ""),
     )
 
 

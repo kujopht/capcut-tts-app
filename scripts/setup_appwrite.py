@@ -481,6 +481,13 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("external_chapter_count", "integer", False, None),
             ("external_updated_at", "string", False, 64),
             ("language", "string", False, 16),
+            # Video draft fields (mission "SHIP 3 CHINESE AI-ANIMATION VIDEO
+            # DRAFTS", 2026-09-01) — see Novel.to_dict()'s own docstring for
+            # why these reuse Novel/METADATA_ONLY instead of a new collection.
+            ("platform", "string", False, 32),
+            ("rights_mode", "string", False, 32),
+            ("subtitle_status", "string", False, 32),
+            ("embed_ref", "string", False, 256),
         ],
         "indexes": [
             ("owner_idx", "key", ["owner_id"]),

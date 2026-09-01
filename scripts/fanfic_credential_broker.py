@@ -104,6 +104,19 @@ KNOWN_NAMES = (
     # re-exporting `$env:BEAM_TOKEN` every session. See
     # `scripts/beam_credential.py::resolve_beam_token` for the read side.
     "BEAM_TOKEN",
+    # Owner/admin-authenticated bearer token for fas-prod-api's real
+    # `/api/novels` and `/api/chapters` write paths. Mission "SHIP A REAL
+    # STORY NOW" (2026-09-01): the only credential already in this broker
+    # that authenticates against fas-prod-api is FANFIC_CANARY_SERVICE_TOKEN,
+    # and it is DELIBERATELY excluded from the general Novel/Chapter write
+    # path by server design (`server/main.py::canary_ops_profile`'s own
+    # docstring: letting the service token into the general write path would
+    # turn a narrow identity into a full user account) -- there is no way to
+    # self-mint this from anything else stored locally. Read by
+    # `scripts/mission_g_rezero_draft_runner.py` via
+    # `os.environ[TOKEN_ENV_VAR]`, so store it and then export it into that
+    # process's env before running the runner.
+    "FAS_HARVESTER_TOKEN",
 )
 
 #: Render env vars this module is permitted to read the VALUE of.

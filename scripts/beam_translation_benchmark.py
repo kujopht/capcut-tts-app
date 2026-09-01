@@ -58,19 +58,28 @@ numbers that don't exist in this response shape - see
 `server/translation_domain.py::TranslationRunMetrics` for the same
 Optional-field convention.
 
-COST ESTIMATE - REAL RESEARCH FINDING (fetched 2026-09-01): unlike
-`scripts/beam_cover_benchmark.py`'s RTX4090 rate (confirmed directly on
-beam.cloud/pricing), Beam's OWN current public pricing page does NOT
-publish a per-second rate for EITHER "T4" or "A10G" - cross-checked
-against beam.cloud/pricing itself plus two independent third-party
-aggregators (computestacker.com, cloudgpuprices.com), all agreeing T4/A10G
-are absent from the current serverless rate table. A third aggregator
-(gputracker.dev) does list numbers, but they don't match Beam's own
-precise per-second billing pattern seen elsewhere and could not be
-confirmed on Beam's own site - printed below, but labeled UNVERIFIED,
-THIRD-PARTY, NOT a Beam-published rate. The real, authoritative cost is
-whatever Beam's own dashboard/invoice reports after this run - check that,
-don't trust this number.
+COST ESTIMATE - CORRECTED BY REAL DEPLOY EVIDENCE (2026-09-01): a real
+`beam deploy beam_apps/translation_hymt2_app.py:hymt2_1_8b` with `gpu="T4"`
+FAILED with Beam's own error "This GPU type is not supported. Please use
+an A10G or RTX 4090 instead." - 1.8B is deployed on `gpu="RTX4090"` now
+(see `beam_apps/translation_hymt2_app.py`'s own "GPU TIER - CORRECTED BY
+REAL DEPLOY EVIDENCE" docstring section for the full citation), which
+means 1.8B's cost estimate below uses the SAME Beam-PUBLISHED, MEASURED
+per-second rate `scripts/beam_cover_benchmark.py::RTX4090_PER_SECOND_USD`
+already uses ($0.000191667/s, confirmed directly on beam.cloud/pricing) -
+no longer a third-party guess for this model. 7B stays on `gpu="A10G"`
+(untouched this track), for which Beam's own current public pricing page
+still does NOT publish a per-second rate - cross-checked against two
+independent third-party aggregators (computestacker.com,
+cloudgpuprices.com), which agree A10G is absent from the current
+serverless rate table. A third aggregator (gputracker.dev) does list a
+number ($1.10/hr), but it does not match Beam's own precise per-second
+billing pattern seen elsewhere and could not be independently confirmed on
+Beam's own site - printed below for 7B only, clearly labeled UNVERIFIED,
+THIRD-PARTY, NOT a Beam-published rate, and never conflated with 1.8B's
+now-measured figure. The real, authoritative cost for either model is
+still whatever Beam's own dashboard/invoice reports after a run - check
+that, don't trust either number blindly.
 
 Sample text is a SHORT, SELF-AUTHORED (not scraped, not copyrighted)
 English paragraph written in an anime-fanfic style, deliberately
@@ -108,21 +117,27 @@ from server.translation_store import MockTranslationStore  # noqa: E402
 TOKEN_ENV_VAR = "BEAM_TOKEN"
 
 #: gpu= tier each model is actually deployed on
-#: (beam_apps/translation_hymt2_app.py) - used ONLY to pick which
-#: (unverified) rate to print below, not for any deploy/config decision.
+#: (beam_apps/translation_hymt2_app.py) - used ONLY to pick which rate to
+#: print below, not for any deploy/config decision. 1.8B corrected from
+#: "T4" to "RTX4090" 2026-09-01 after a real deploy of hymt2_1_8b with
+#: gpu="T4" failed with Beam's own "This GPU type is not supported" error.
 MODEL_TO_GPU_TIER = {
-    "tencent/Hy-MT2-1.8B": "T4",
+    "tencent/Hy-MT2-1.8B": "RTX4090",
     "tencent/Hy-MT2-7B": "A10G",
 }
 
-# UNVERIFIED, THIRD-PARTY rates (gputracker.dev, fetched 2026-09-01) - NOT
-# confirmed on beam.cloud/pricing itself, which currently does not list a
-# T4/A10G rate at all (see module docstring "COST ESTIMATE" section for
-# the full citation). Kept ONLY so the printed report has a rough order-
-# of-magnitude figure; the real charge is whatever Beam's own
-# dashboard/invoice shows for this run.
+# Beam-PUBLISHED, MEASURED rate (beam.cloud/pricing, confirmed directly,
+# same figure scripts/beam_cover_benchmark.py::RTX4090_PER_SECOND_USD
+# already uses) - NOT an estimate, unlike the A10G rate below.
+RTX4090_PER_SECOND_USD = 0.000191667
+
+# UNVERIFIED, THIRD-PARTY hourly rate (gputracker.dev, fetched 2026-09-01)
+# for A10G ONLY (7B) - NOT confirmed on beam.cloud/pricing itself, which
+# currently does not list an A10G rate at all (see module docstring "COST
+# ESTIMATE" section for the full citation). Kept ONLY so the printed
+# report has a rough order-of-magnitude figure for 7B; the real charge is
+# whatever Beam's own dashboard/invoice shows for this run.
 GPU_HOURLY_RATE_USD_UNVERIFIED_THIRD_PARTY = {
-    "T4": 0.310,
     "A10G": 1.10,
 }
 
@@ -281,7 +296,26 @@ def main() -> int:
         return 1
 
     gpu_tier = MODEL_TO_GPU_TIER.get(a.model, "")
-    rate = GPU_HOURLY_RATE_USD_UNVERIFIED_THIRD_PARTY.get(gpu_tier)
+    is_measured = gpu_tier == "RTX4090"
+    if is_measured:
+        cold_cost = round(cold.wall_seconds * RTX4090_PER_SECOND_USD, 5)
+        warm_cost = round(warm.wall_seconds * RTX4090_PER_SECOND_USD, 5)
+        rate_source = (
+            "MEASURED - Beam-published per-second rate ($0.000191667/s, "
+            "confirmed directly on beam.cloud/pricing, same figure "
+            "scripts/beam_cover_benchmark.py::RTX4090_PER_SECOND_USD uses). "
+            "See module docstring's 'COST ESTIMATE' section.")
+        rate_field_usd_per_hour = round(RTX4090_PER_SECOND_USD * 3600, 4)
+    else:
+        rate = GPU_HOURLY_RATE_USD_UNVERIFIED_THIRD_PARTY.get(gpu_tier)
+        cold_cost = round(cold.wall_seconds * rate / 3600, 5) if rate else None
+        warm_cost = round(warm.wall_seconds * rate / 3600, 5) if rate else None
+        rate_source = (
+            "UNVERIFIED THIRD-PARTY (gputracker.dev, fetched 2026-09-01) "
+            "- Beam's own beam.cloud/pricing page does NOT currently "
+            "list an A10G rate; this is a rough estimate only, not a "
+            "Beam-published figure. See module docstring.")
+        rate_field_usd_per_hour = rate
     manifest = {
         "model": a.model,
         "endpoint_url": a.endpoint_url,
@@ -291,27 +325,24 @@ def main() -> int:
         "warm": warm.to_dict(),
         "cost_estimate_usd": {
             "gpu_tier": gpu_tier,
-            "rate_usd_per_hour": rate,
-            "rate_source": (
-                "UNVERIFIED THIRD-PARTY (gputracker.dev, fetched 2026-09-01) "
-                "- Beam's own beam.cloud/pricing page does NOT currently "
-                "list a T4/A10G rate; this is a rough estimate only, not a "
-                "Beam-published figure. See module docstring."),
-            "cold_estimate": (
-                round(cold.wall_seconds * rate / 3600, 5) if rate else None),
-            "warm_estimate": (
-                round(warm.wall_seconds * rate / 3600, 5) if rate else None),
+            "measured": is_measured,
+            "rate_usd_per_hour": rate_field_usd_per_hour,
+            "rate_source": rate_source,
+            "cold_estimate": cold_cost,
+            "warm_estimate": warm_cost,
             "authoritative_source": (
                 "Check Beam's own dashboard/invoice for the real charge "
-                "of this run - do not trust the estimate above."),
+                "of this run - even a MEASURED rate here is still a "
+                "wall-clock-time-based estimate, not the invoice itself."),
         },
     }
     manifest_path = Path(f"{a.out_prefix}_manifest.json")
     manifest_path.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    print(f"\n=== SUMMARY (real measurements; cost is an UNVERIFIED "
-          f"third-party rate estimate, never treat as measured) ===")
+    cost_label = ("MEASURED Beam-published rate" if is_measured
+                  else "an UNVERIFIED third-party rate estimate")
+    print(f"\n=== SUMMARY (real measurements; cost is {cost_label}) ===")
     print(f"manifest saved: {manifest_path}")
     for label, m in (("cold", cold), ("warm", warm)):
         cps = m.chars_per_second()

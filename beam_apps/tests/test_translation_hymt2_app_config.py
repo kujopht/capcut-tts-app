@@ -63,8 +63,14 @@ class TranslationHyMT2AppConfigTest(unittest.TestCase):
     def test_both_deployments_registered(self):
         self.assertEqual(len(self.recorded["calls"]), 2)
 
-    def test_1_8b_uses_t4_gpu(self):
-        self.assertEqual(self.module.hymt2_1_8b.kwargs["gpu"], "T4")
+    def test_1_8b_uses_rtx4090_gpu(self):
+        """Real deploy evidence (2026-09-01): `gpu="T4"` FAILED with Beam's
+        own error "This GPU type is not supported. Please use an A10G or
+        RTX 4090 instead." - this must never regress back to T4."""
+        self.assertEqual(self.module.hymt2_1_8b.kwargs["gpu"], "RTX4090")
+
+    def test_1_8b_does_not_use_t4_gpu(self):
+        self.assertNotEqual(self.module.hymt2_1_8b.kwargs["gpu"], "T4")
 
     def test_7b_uses_a10g_gpu(self):
         self.assertEqual(self.module.hymt2_7b.kwargs["gpu"], "A10G")

@@ -87,35 +87,42 @@ file):
   server/translation_provider_registry.py) for operators to use AFTER a
   real benchmark run.
 
-GPU TIER VERIFICATION (fetched 2026-09-01, docs.beam.cloud/v2/environment/gpu):
-`"T4"` (16Gi VRAM) and `"A10G"` (24Gi VRAM) are BOTH confirmed real,
-CURRENTLY VALID, "available"/"ready" serverless `gpu=` enum values for
-Beam - not deprecated, not placeholders. VRAM sizing is realistic: Hy-MT2-
-1.8B at bf16 is ~3.6GB of weights, comfortable on a 16GB T4 with
-`gpu_memory_utilization=0.90` (~14.4GB budget) leaving ample room for
-KV cache; Hy-MT2-7B at bf16 is ~14GB of weights, fitting a 24GB A10G at
-the same utilization (~21.6GB budget) with real but tighter headroom -
-consistent with why 7B is gated to a bigger GPU tier, not the same T4.
+GPU TIER - CORRECTED BY REAL DEPLOY EVIDENCE (2026-09-01, supersedes the
+prior turn's docs-only claim below): a real
+`beam deploy beam_apps/translation_hymt2_app.py:hymt2_1_8b` with `gpu="T4"`
+FAILED with Beam's own error: "This GPU type is not supported. Please use
+an A10G or RTX 4090 instead." This disproves the earlier assumption (based
+only on docs.beam.cloud/v2/environment/gpu listing `"T4"` as an enum value)
+that T4 was actually accepted for this `beam.integrations.VLLM` construct -
+docs listing a string as a valid enum value is not the same as Beam's
+serverless scheduler actually having T4 capacity available for it. 1.8B is
+therefore deployed on `gpu="RTX4090"` (24Gi VRAM) instead: Hy-MT2-1.8B at
+bf16 is ~3.6GB of weights, so at `gpu_memory_utilization=0.90` (~21.6GB
+budget) there is ample headroom for KV cache - MORE than the original
+16GB-T4 sizing assumed, not less. 7B stays on `"A10G"` (24Gi VRAM,
+untouched this track) - the real error message's own wording ("use an
+A10G or RTX 4090 instead") independently CONFIRMS A10G remains a valid,
+accepted tier for this same `VLLM` construct, so 7B's existing citation
+below is not affected by this correction. Hy-MT2-7B at bf16 is ~14GB of
+weights, fitting the same 24GB A10G budget with real but tighter headroom
+than 1.8B now has on RTX4090 - consistent with why 7B stays gated to its
+own dedicated tier rather than sharing 1.8B's.
 
-REAL CAVEAT found this track, NOT present in the prior mission turn's
-citations: Beam's OWN current public pricing page (beam.cloud/pricing,
-checked 2026-09-01) does NOT publish a per-second rate for EITHER "T4" or
-"A10G" - its serverless GPU price table currently starts at RTX4090 and
-goes up (RTX4090, RTX5090, L40S, A6000, A100 80GB, RTX PRO 6000, H100,
-H200, B200). This was cross-checked against two independent third-party
-aggregators (computestacker.com, cloudgpuprices.com) which agree T4/A10G
-have no current Beam-published rate. A third aggregator (gputracker.dev)
-does show numbers (T4 $0.310/hr, A10G $1.10/hr), but these do not match
-Beam's own precise per-second billing pattern seen elsewhere (e.g. RTX4090
-= $0.000191667/s exactly) and could NOT be independently confirmed on
-Beam's own site - treat as an UNVERIFIED third-party estimate only, never
-as a Beam-published rate. This does NOT block using T4/A10G (the `gpu=`
-strings themselves are still valid and billed per-second like any other
-tier - Beam's dashboard/invoice will show the real charge after the one
-real benchmark call), it only means
-`scripts/beam_translation_benchmark.py` cannot print a "published rate"
-cost figure with the same confidence `scripts/beam_cover_benchmark.py`
-does for RTX4090 - see that script's own comments for how this is labeled.
+COST RATE - IMPROVED BY THE SAME CORRECTION: unlike the superseded T4
+assumption, Beam's OWN current public pricing page (beam.cloud/pricing,
+checked 2026-09-01) DOES publish a per-second rate for RTX4090
+(`$0.000191667/s` exactly - the SAME published figure
+`scripts/beam_cover_benchmark.py::RTX4090_PER_SECOND_USD` already uses for
+the cover pipeline). 1.8B's cost estimate is therefore now a real,
+Beam-published MEASURED rate, not a third-party guess. A10G still has NO
+published rate on that same pricing page (cross-checked against two
+independent third-party aggregators, computestacker.com and
+cloudgpuprices.com, which agree A10G is absent from the current serverless
+rate table; a third aggregator, gputracker.dev, lists $1.10/hr for A10G
+but this could not be independently confirmed on Beam's own site) - 7B's
+cost estimate in `scripts/beam_translation_benchmark.py` therefore remains
+an UNVERIFIED third-party estimate, clearly labeled as such and never
+conflated with 1.8B's now-measured RTX4090 figure.
 
 MODEL LOADS EXACTLY ONCE PER CONTAINER (confirmed via Beam's own docs, not
 assumed): `docs.beam.cloud/v2/reference/py-sdk.md`'s `VLLM` class exists
@@ -181,12 +188,17 @@ hymt2_1_8b = VLLM(
     name="hymt2-1-8b",
     cpu=4,
     memory="16Gi",
-    # T4 (16Gi VRAM) - confirmed real/valid/available Beam serverless gpu=
-    # value (docs.beam.cloud/v2/environment/gpu, fetched 2026-09-01); 1.8B
-    # at bf16 (~3.6GB weights) fits comfortably - see module docstring's
-    # "GPU TIER VERIFICATION" for the full citation and the real caveat
-    # about Beam's current pricing page not listing a T4 rate.
-    gpu="T4",
+    # RTX4090 (24Gi VRAM) - REAL deploy evidence (2026-09-01): a real
+    # `beam deploy ...:hymt2_1_8b` with gpu="T4" FAILED with Beam's own
+    # error "This GPU type is not supported. Please use an A10G or RTX
+    # 4090 instead." - T4 was never actually schedulable for this VLLM
+    # construct despite being listed as a docs enum value. RTX4090 has
+    # MORE VRAM headroom for 1.8B's ~3.6GB weights than the original T4
+    # assumption, and a Beam-PUBLISHED per-second rate ($0.000191667/s,
+    # same as scripts/beam_cover_benchmark.py::RTX4090_PER_SECOND_USD) -
+    # see module docstring's "GPU TIER - CORRECTED BY REAL DEPLOY
+    # EVIDENCE" for the full citation.
+    gpu="RTX4090",
     gpu_count=1,
     workers=1,
     vllm_args=VLLMArgs(
@@ -194,9 +206,12 @@ hymt2_1_8b = VLLM(
         served_model_name=[HYMT2_1_8B],
         trust_remote_code=True,  # CONFIRMED required - see module docstring
         # 8192 << max_position_embeddings=262144 (config.json, confirmed
-        # real) - a DELIBERATE reduction for KV-cache VRAM headroom on a
-        # 16GB T4, sized to this repo's own ~2000-char chunking, not an
-        # oversight. See module docstring's own paragraph on this value.
+        # real) - a DELIBERATE reduction for KV-cache VRAM headroom, sized
+        # to this repo's own ~2000-char chunking, not an oversight - kept
+        # unchanged by the T4->RTX4090 GPU-tier correction above (this
+        # value was never about a specific GPU tier's VRAM, only about not
+        # reserving KV-cache for context length this repo never uses). See
+        # module docstring's own paragraph on this value.
         max_model_len=8192,
         gpu_memory_utilization=0.90,
     ),

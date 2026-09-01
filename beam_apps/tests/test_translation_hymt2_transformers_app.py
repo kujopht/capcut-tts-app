@@ -110,6 +110,25 @@ class AsgiConfigTest(unittest.TestCase):
         self.assertNotIn("sglang", joined)
 
 
+def _state(**overrides):
+    """Default `load_model()` state dict shape, overridable per test - mirrors
+    the REAL keys the app's own load_model()/health()/chat_completions() read
+    (see that file - this is not a re-implementation, just a fixture)."""
+    base = {
+        "phase": "ready",
+        "tokenizer_loaded": True,
+        "model_loaded": True,
+        "device": "cuda:0",
+        "tokenizer_load_seconds": 1.1,
+        "model_load_seconds": 12.3,
+        "load_error": "",
+        "tokenizer": "fake-tokenizer",
+        "model": "fake-model",
+    }
+    base.update(overrides)
+    return base
+
+
 class RouteRegistrationTest(unittest.TestCase):
     """`web_server(context)` must register BOTH real OpenAI-compatible
     routes without needing torch (route DEFINITION is torch-free; only
@@ -121,9 +140,9 @@ class RouteRegistrationTest(unittest.TestCase):
     def setUpClass(cls):
         cls.module, _ = _load_module_with_fake_beam()
 
-    def _build_app(self):
+    def _build_app(self, state=None):
         class _FakeContext:
-            on_start_value = ("fake-tokenizer", "fake-model", 12.3, "")
+            on_start_value = state if state is not None else _state()
         return self.module.web_server(_FakeContext())
 
     def test_chat_completions_route_registered(self):
@@ -149,17 +168,32 @@ class RouteRegistrationTest(unittest.TestCase):
             def generate(self, *a, **kw):
                 raise AssertionError("/health must never call generate()")
 
-        class _FakeContext:
-            on_start_value = ("fake-tokenizer", _ExplodingModel(), 12.3, "")
-
-        app = self.module.web_server(_FakeContext())
+        app = self._build_app(_state(model=_ExplodingModel()))
         client = TestClient(app)
         resp = client.post("/health")
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["status"], "ready")
         self.assertEqual(body["device"], "cuda:0")
         self.assertEqual(body["model_load_seconds"], 12.3)
+
+    def test_health_reports_loading_phase_not_ready(self):
+        """Mission 'COMBINED MISSION' Phase 2 (2026-09-01): on_start returns
+        immediately and loads in a background thread - /health must report
+        the REAL intermediate phase (not silently claim ready) while that
+        thread is still working, and must not crash on a None model."""
+        from starlette.testclient import TestClient
+
+        app = self._build_app(_state(
+            phase="model_loading", model_loaded=False, model=None,
+            device=None, model_load_seconds=None))
+        client = TestClient(app)
+        resp = client.post("/health")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["status"], "loading")
+        self.assertEqual(body["phase"], "model_loading")
+        self.assertFalse(body["model_loaded"])
 
     def test_health_surfaces_load_error_without_crashing(self):
         """Real incident (2026-09-01): a failed on_start left /health
@@ -169,29 +203,41 @@ class RouteRegistrationTest(unittest.TestCase):
         cleanly instead of raising on None tokenizer/model."""
         from starlette.testclient import TestClient
 
-        class _FakeContext:
-            on_start_value = (None, None, 3.4, "ImportError: bad transformers pin")
-
-        app = self.module.web_server(_FakeContext())
+        app = self._build_app(_state(
+            phase="startup_failed", tokenizer_loaded=False, model_loaded=False,
+            tokenizer=None, model=None, device=None,
+            load_error="ImportError: bad transformers pin"))
         client = TestClient(app)
         resp = client.post("/health")
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        self.assertEqual(body["status"], "error")
+        self.assertEqual(body["status"], "startup_failed")
         self.assertEqual(body["load_error"], "ImportError: bad transformers pin")
         self.assertFalse(body["model_loaded"])
 
     def test_chat_completions_reports_load_error_instead_of_crashing(self):
-        class _FakeContext:
-            on_start_value = (None, None, 3.4, "some load failure")
-
-        app = self.module.web_server(_FakeContext())
+        app = self._build_app(_state(
+            phase="startup_failed", tokenizer=None, model=None,
+            load_error="some load failure"))
         from starlette.testclient import TestClient
         client = TestClient(app)
         resp = client.post("/chat/completions", json={
             "messages": [{"role": "user", "content": "hi"}]})
         self.assertEqual(resp.status_code, 200)
         self.assertIn("some load failure", resp.json()["error"])
+
+    def test_chat_completions_refuses_while_still_loading(self):
+        """Must not attempt generation against a None/half-loaded model
+        while the background thread is still mid-flight."""
+        app = self._build_app(_state(
+            phase="tokenizer_loading", model_loaded=False, model=None,
+            device=None, model_load_seconds=None))
+        from starlette.testclient import TestClient
+        client = TestClient(app)
+        resp = client.post("/chat/completions", json={
+            "messages": [{"role": "user", "content": "hi"}]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("not ready", resp.json()["error"])
 
 
 class ExtractPromptTextTest(unittest.TestCase):

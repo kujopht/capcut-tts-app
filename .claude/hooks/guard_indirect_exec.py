@@ -22,10 +22,21 @@ Three tiers, in strict precedence order:
      scheduled-task/Defender/firewall mutation, credential disclosure, and
      indirect arbitrary execution. Enforced in *every* mode, including
      ``bypassPermissions``. This is the hard boundary.
-  2. ASK   -- genuinely consequential remote mutations: ordinary ``git push``,
-     PR create/merge, workflow dispatch, production deploy. Applied in every
-     mode EXCEPT ``bypassPermissions``, where the operator is physically at
-     the machine and has already accepted routine remote writes.
+  2. ASK   -- genuinely consequential remote mutations: PR create/merge,
+     workflow dispatch, production deploy. Applied in every mode EXCEPT
+     ``bypassPermissions``, where the operator is physically at the machine
+     and has already accepted routine remote writes.
+
+     Ordinary, non-destructive ``git push`` (no ``--force``/``-f``/
+     ``--force-with-lease``/``--delete``/``+refspec``) is deliberately NOT in
+     this tier as of the "COMBINED MISSION -- FULL AUTOMATION PERMISSIONS"
+     request (2026-09-01): the operator explicitly authorized auto-allowing
+     routine pushes in every mode while requiring every destructive push
+     shape to stay hard-denied in every mode via tier 1 below, which is
+     unchanged by this. ``settings.json``'s own ``permissions.allow`` now
+     carries the explicit ``Bash(git push)``/``Bash(git push *)`` rules that
+     make this deterministic rather than left to the ``auto`` classifier -
+     see that file's own comment at the same rules for the citation.
   3. ALLOW -- provably read-only inspection (notably read-only ``gh``) that a
      glob in ``settings.json`` cannot recognise, because the read/write
      distinction lives in flags rather than in a command prefix. Emitted only
@@ -374,6 +385,16 @@ def check_git(tokens: list[str], flat: str) -> str | None:
             return "force/delete push"
         if re.search(r"\s\+[\w./-]+:", flat):
             return "force push via +refspec"
+        # Bare leading colon (empty source ref, e.g. `git push origin
+        # :branch`) is git's OTHER delete syntax alongside --delete - found
+        # while verifying tier 1 independently covers every destructive push
+        # shape for the "COMBINED MISSION" push-automation change (2026-09-01):
+        # previously this relied SOLELY on settings.json's `Bash(git push
+        # *:*)` glob, with no independent hook-level check. Defense in depth,
+        # not a new gap: `main:main`/`HEAD:refs/heads/x` (source ref present)
+        # are ordinary, unaffected pushes and do not match.
+        if any(r.startswith(":") and len(r) > 1 for r in rest[1:]):
+            return "branch deletion via :refspec"
     if sub == "reset" and "--hard" in flags:
         return "destructive git reset"
     # `git clean` without -f refuses to delete, so -f is the destructive signal.
@@ -511,9 +532,12 @@ def classify_remote_mutation(tokens: list[str], flat: str, name: str) -> str | N
         flags = [t.lower() for t in tokens[1:] if t.startswith("-")]
         raw_flags = [t for t in tokens[1:] if t.startswith("-")]
         sub = rest[0] if rest else ""
-        # --dry-run writes nothing; tier 1 has already denied force/delete.
-        if sub == "push" and "--dry-run" not in flags and "-n" not in flags:
-            return "push to a remote"
+        # Ordinary push is intentionally NOT tier 2 (see this function's own
+        # module-docstring citation, "COMBINED MISSION" 2026-09-01) - tier 1
+        # (check_git, above) already hard-denies every force/delete shape in
+        # every mode, so a plain `git push` falls through silently to
+        # settings.json's explicit `Bash(git push)`/`Bash(git push *)` allow
+        # rules instead of prompting here.
         # Reflog-recoverable history edits: confirmed remotely, silent locally.
         if sub == "rebase":
             return "rewriting local history (git rebase)"

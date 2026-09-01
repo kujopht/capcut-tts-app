@@ -108,6 +108,7 @@ inconsistent state by the failed VLLM attempts) is mounted as
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -148,36 +149,81 @@ GENERATION_PARAMS: Dict[str, Any] = dict(
 )
 
 
-def load_model():
-    """on_start hook - runs ONCE per container, never per-request (same
-    principle as cover_illustrious_app.py::load_pipeline - see that
-    file's own docstring for the real incident this pattern prevents)."""
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+def load_model() -> Dict[str, Any]:
+    """on_start hook — returns almost IMMEDIATELY, spawning a background
+    thread that does the real (slow) loading work, instead of blocking
+    on_start itself until the model is fully loaded.
 
-    t0 = time.monotonic()
-    # REAL incident (2026-09-01): the first deploy of this file returned a
-    # persistent HTTP 500 from /health with an empty weight-cache Volume,
-    # and this session's `beam logs` access was independently blocked by
-    # an unrelated local SSL/SNI error reaching Beam's realtime log
-    # websocket (`rt.beam.cloud`) - there was no way to see the real
-    # traceback. Catching here and returning the error STRING (never the
-    # exception object/traceback - see /health's own docstring for why)
-    # means the NEXT attempt can self-diagnose via /health alone, with no
-    # dependency on `beam logs` working at all.
-    try:
-        tokenizer = AutoTokenizer.from_pretrained(
-            MODEL_ID, trust_remote_code=True, cache_dir=CACHE_PATH)
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID, dtype=torch.bfloat16, device_map="auto",
-            trust_remote_code=True, cache_dir=CACHE_PATH,
-        )
-        model.eval()
-    except Exception as exc:  # noqa: BLE001 - deliberately broad, see above
-        model_load_seconds = time.monotonic() - t0
-        return None, None, model_load_seconds, f"{type(exc).__name__}: {exc}"
-    model_load_seconds = time.monotonic() - t0
-    return tokenizer, model, model_load_seconds, ""
+    WHY (mission "COMBINED MISSION" Phase 2, 2026-09-01): Beam does not
+    start routing HTTP requests to the ASGI app until on_start AND
+    web_server() have BOTH returned — a state machine that blocks inside
+    on_start could never be OBSERVED mid-flight, because by the time
+    /health is reachable at all, on_start has already finished (success or
+    failure). Returning immediately and loading in a background thread
+    means the container becomes reachable within seconds of starting, and
+    /health can report REAL, live phase transitions
+    (process_started -> tokenizer_loading -> model_loading -> ready, or
+    -> startup_failed) while a first-ever ~4GB weight download is still in
+    progress — `wait-ready` gets real signal throughout instead of
+    blocking silently for minutes with zero information.
+
+    Returns the SAME mutable dict `state` that `web_server()` closes over
+    and both routes read live — CPython's GIL makes individual dict
+    get/set operations atomic, which is all this needs (no invariant here
+    spans more than one key at a time).
+
+    REAL incident this file's error-capture already survived once
+    (2026-09-01): the first deploy of this file returned a persistent
+    HTTP 500 from /health with an empty weight-cache Volume, and this
+    session's `beam logs` access was independently blocked by an
+    unrelated local SSL/SNI error reaching Beam's realtime log websocket
+    (`rt.beam.cloud`) — there was no way to see the real traceback.
+    Catching here and storing the error STRING (never the exception
+    object/traceback) means the NEXT attempt can self-diagnose via
+    /health alone, with no dependency on `beam logs` working at all."""
+    state: Dict[str, Any] = {
+        "phase": "process_started",
+        "tokenizer_loaded": False,
+        "model_loaded": False,
+        "device": None,
+        "tokenizer_load_seconds": None,
+        "model_load_seconds": None,
+        "load_error": "",
+        "tokenizer": None,
+        "model": None,
+    }
+
+    def _worker() -> None:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        try:
+            state["phase"] = "tokenizer_loading"
+            t0 = time.monotonic()
+            tokenizer = AutoTokenizer.from_pretrained(
+                MODEL_ID, trust_remote_code=True, cache_dir=CACHE_PATH)
+            state["tokenizer"] = tokenizer
+            state["tokenizer_loaded"] = True
+            state["tokenizer_load_seconds"] = round(time.monotonic() - t0, 2)
+
+            state["phase"] = "model_loading"
+            t1 = time.monotonic()
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_ID, dtype=torch.bfloat16, device_map="auto",
+                trust_remote_code=True, cache_dir=CACHE_PATH,
+            )
+            model.eval()
+            state["model"] = model
+            state["model_loaded"] = True
+            state["model_load_seconds"] = round(time.monotonic() - t1, 2)
+            state["device"] = str(next(model.parameters()).device)
+            state["phase"] = "ready"
+        except Exception as exc:  # noqa: BLE001 - deliberately broad, see above
+            state["load_error"] = f"{type(exc).__name__}: {exc}"
+            state["phase"] = "startup_failed"
+
+    threading.Thread(target=_worker, name="hymt2-model-loader", daemon=True).start()
+    return state
 
 
 def _extract_prompt_text(messages: List[Dict[str, str]]) -> str:
@@ -231,42 +277,45 @@ def web_server(context):
     # TestClient call, not assumed. Moving the import to module level
     # (see top of file) puts `Request` in the module's own `__globals__`,
     # which the postponed string annotation resolves against correctly.
-    tokenizer, model, model_load_seconds, load_error = context.on_start_value
+    state = context.on_start_value
     app = FastAPI()
 
     @app.post("/health")
     async def health():
-        # Mission Section E: MUST NOT run generation. Only confirms
-        # process/tokenizer/model state - real device check, not an
-        # assumption that on_start succeeding implies CUDA placement held.
-        if load_error:
+        # Mission Section E: MUST NOT run generation - reads `state` only,
+        # never touches the model/tokenizer objects themselves. `status` is
+        # the coarse 3-value field wait-ready keys off; `phase` is the full
+        # granular state machine for humans/logs.
+        phase = state["phase"]
+        status = ("ready" if phase == "ready"
+                 else "startup_failed" if phase == "startup_failed"
+                 else "loading")
+        return {
+            "status": status,
+            "phase": phase,
+            "process_running": True,
+            "tokenizer_loaded": state["tokenizer_loaded"],
+            "model_loaded": state["model_loaded"],
+            "device": state["device"],
+            "tokenizer_load_seconds": state["tokenizer_load_seconds"],
+            "model_load_seconds": state["model_load_seconds"],
             # Self-diagnosing on purpose (see load_model()'s own comment):
             # this is the ONLY way to see the real failure reason without
             # `beam logs` working. Exception STRING only, never a raw
             # traceback object.
-            return {
-                "status": "error",
-                "process_running": True,
-                "tokenizer_loaded": False,
-                "model_loaded": False,
-                "load_error": load_error,
-                "model_load_seconds": round(model_load_seconds, 2),
-            }
-        device = str(next(model.parameters()).device)
-        return {
-            "status": "ok",
-            "process_running": True,
-            "tokenizer_loaded": tokenizer is not None,
-            "model_loaded": model is not None,
-            "device": device,
-            "model_load_seconds": round(model_load_seconds, 2),
+            "load_error": state["load_error"],
         }
 
     @app.post("/chat/completions")
     async def chat_completions(request: Request):
-        if load_error:
-            return {"error": f"model failed to load: {load_error}"}
+        if state["phase"] == "startup_failed":
+            return {"error": f"model failed to load: {state['load_error']}"}
+        if state["phase"] != "ready":
+            return {"error": f"model not ready yet (phase={state['phase']})"}
         import torch
+
+        tokenizer = state["tokenizer"]
+        model = state["model"]
 
         body = await request.json()
         messages = body.get("messages", [])
@@ -306,7 +355,8 @@ def web_server(context):
                 "completion_tokens": output_token_count,
                 "total_tokens": input_token_count + output_token_count,
             },
-            "model_load_seconds": round(model_load_seconds, 2),
+            "model_load_seconds": state["model_load_seconds"],
+            "tokenizer_load_seconds": state["tokenizer_load_seconds"],
             "generation_seconds": round(generation_seconds, 2),
         }
 

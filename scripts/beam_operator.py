@@ -684,25 +684,41 @@ def cmd_wait_ready(url: str, token: str, *, kind: str,
                        else client.post(check_url, headers=headers))
                 if resp.status_code == 200:
                     # `translation_hymt2_transformers_app.py`'s /health
-                    # can return HTTP 200 with a body {"status": "error",
-                    # "load_error": "..."} when on_start's model load
-                    # failed (self-diagnosing on purpose - see that file's
-                    # own comment) - a 200 status code alone does NOT mean
-                    # ready for kind="transformers"; a real deterministic
-                    # failure here must surface immediately, not be
-                    # reported as READY.
+                    # ALWAYS returns HTTP 200 - the real state lives in the
+                    # body's "status" field, one of "ready"/"loading"/
+                    # "startup_failed" (mission "COMBINED MISSION" Phase 2,
+                    # 2026-09-01: on_start returns almost immediately and
+                    # loads in a background thread, so the container - and
+                    # therefore /health - is reachable within seconds even
+                    # while a multi-GB weight download is still running;
+                    # "loading" is the EXPECTED, normal state for most of a
+                    # cold start, not an error). A 200 status code alone
+                    # does NOT mean ready for kind="transformers".
                     if kind == "transformers":
                         try:
                             body = resp.json()
                         except ValueError:
                             body = {}
-                        if body.get("status") == "error":
+                        body_status = body.get("status", "")
+                        if body_status == "startup_failed":
                             return {
                                 "status": "FAILED",
                                 "attempts": attempt,
                                 "load_error": body.get("load_error", ""),
                                 "elapsed_seconds": round(time.monotonic() - started, 1),
                             }
+                        if body_status != "ready":
+                            # "loading" (or an unrecognized/missing status,
+                            # failing safe toward "keep waiting" rather than
+                            # a false READY) - real, expected progress, not
+                            # a transient network hiccup.
+                            last_error = f"loading (phase={body.get('phase', '?')})"
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                break
+                            time.sleep(min(delay, remaining))
+                            delay = min(delay * 2, max_delay_seconds)
+                            continue
                     return {
                         "status": "READY",
                         "attempts": attempt,

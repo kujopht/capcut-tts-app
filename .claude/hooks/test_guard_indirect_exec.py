@@ -74,6 +74,10 @@ MUST_DENY = [
     ("force push -f", "git push -f origin main"),
     ("force push +refspec", "git push origin +main:main"),
     ("push --delete", "git push --delete origin main"),
+    ("push :refspec delete", "git push origin :branch"),
+    ("force push bare", "git push --force"),
+    ("force-with-lease", "git push --force-with-lease origin main"),
+    ("push --delete branch literal", "git push --delete origin branch"),
     ("rm -rf", "rm -rf build"),
     ("rm -r", "rm -r build"),
     ("rm -f", "rm -f x.txt"),
@@ -120,9 +124,6 @@ MUST_DENY = [
 
 # Genuinely consequential remote mutations: ask in auto, silent in bypass.
 MUST_ASK_AUTO = [
-    ("git push plain", "git push origin feat/x"),
-    ("git push -u", "git push -u origin feat/safe-remote-fanfic-ops"),
-    ("git push tags", "git push origin --tags"),
     ("gh pr create", 'gh pr create --title "x" --body "y" --base main'),
     ("gh pr merge", "gh pr merge 42 --squash"),
     ("gh pr close", "gh pr close 42"),
@@ -165,8 +166,6 @@ MUST_ASK_AUTO = [
     ("curl deploy-hook", "curl https://example.com/deploy-hook/abc"),
     # Laundering an ask-tier command through substitution or a chain must still
     # reach the ask tier rather than slipping past on the read-only half.
-    ("push inside $()", "echo $(git push origin main)"),
-    ("read gh then push", "gh workflow list ; git push origin main"),
     ("read gh then deploy", "gh api repos/o/r && npm run cf:deploy:production"),
 ]
 
@@ -207,6 +206,21 @@ MUST_RUN = [
     ("git add", "git add -A"),
     ("git commit", 'git commit -m "fix: handle rm -rf edge case"'),
     ("git push --dry-run", "git push --dry-run origin feat/x"),
+    # Ordinary, non-destructive push - mission "COMBINED MISSION -- FULL
+    # AUTOMATION PERMISSIONS" (2026-09-01) explicitly authorized removing
+    # this from the ask tier; settings.json's own Bash(git push)/Bash(git
+    # push *) allow rules make the actual permission decision now, this
+    # guard just needs to stay out of the way. Every destructive shape
+    # (--force/-f/--force-with-lease/--delete/+refspec) stays in MUST_DENY,
+    # completely unaffected by this move.
+    ("git push bare", "git push"),
+    ("git push origin main literal", "git push origin main"),
+    ("git push origin feature literal", "git push origin feature/foo"),
+    ("git push plain", "git push origin feat/x"),
+    ("git push -u", "git push -u origin feat/safe-remote-fanfic-ops"),
+    ("git push tags", "git push origin --tags"),
+    ("push inside $()", "echo $(git push origin main)"),
+    ("read gh then push", "gh workflow list ; git push origin main"),
     ("git rev-parse in $()", 'cd "$(git rev-parse --show-toplevel)"'),
     ("git fetch", "git fetch --all --prune"),
     ("git merge local", "git merge --ff-only origin/main"),

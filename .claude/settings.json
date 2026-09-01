@@ -578,7 +578,9 @@
       "Bash(curl -I:*)",
       "Bash(curl -sI:*)",
       "Bash(git reflog show:*)",
-      "Bash(git reflog)"
+      "Bash(git reflog)",
+      "Bash(git push)",
+      "Bash(git push *)"
     ]
   },
   "hooks": {

@@ -165,7 +165,8 @@ class WaitReadyClassificationTest(unittest.TestCase):
         architecture - wait-ready must POST to /health instead."""
         mod = _load()
         fake_client = MagicMock()
-        fake_client.__enter__.return_value.post.return_value = httpx.Response(200)
+        fake_client.__enter__.return_value.post.return_value = httpx.Response(
+            200, json={"status": "ready", "phase": "ready"})
         with patch("httpx.Client", return_value=fake_client):
             result = mod.cmd_wait_ready(
                 "https://x.app.beam.cloud", "tok", kind="transformers",
@@ -174,6 +175,42 @@ class WaitReadyClassificationTest(unittest.TestCase):
         called_url = fake_client.__enter__.return_value.post.call_args[0][0]
         self.assertTrue(called_url.endswith("/health"))
         fake_client.__enter__.return_value.get.assert_not_called()
+
+    def test_transformers_kind_loading_phase_is_not_ready(self):
+        """Mission 'COMBINED MISSION' Phase 2 (2026-09-01): on_start
+        returns immediately and loads in a background thread, so a real
+        HTTP 200 with status="loading" is the EXPECTED state for most of
+        a cold start - wait-ready must keep polling, not report READY."""
+        mod = _load()
+        responses = [
+            httpx.Response(200, json={"status": "loading", "phase": "model_loading"}),
+            httpx.Response(200, json={"status": "ready", "phase": "ready"}),
+        ]
+        fake_client = MagicMock()
+        fake_client.__enter__.return_value.post.side_effect = responses
+        with patch("httpx.Client", return_value=fake_client), \
+             patch("time.sleep"):
+            result = mod.cmd_wait_ready(
+                "https://x.app.beam.cloud", "tok", kind="transformers",
+                max_wait_seconds=30, initial_delay_seconds=0.01)
+        self.assertEqual(result["status"], "READY")
+        self.assertEqual(result["attempts"], 2)
+
+    def test_transformers_kind_startup_failed_fails_fast(self):
+        """A real HTTP 200 with status="startup_failed" is a deterministic
+        code/dependency failure (mission Section F) - must surface
+        immediately with load_error, never be retried as if transient."""
+        mod = _load()
+        fake_client = MagicMock()
+        fake_client.__enter__.return_value.post.return_value = httpx.Response(
+            200, json={"status": "startup_failed", "phase": "startup_failed",
+                      "load_error": "ImportError: bad transformers pin"})
+        with patch("httpx.Client", return_value=fake_client):
+            result = mod.cmd_wait_ready(
+                "https://x.app.beam.cloud", "tok", kind="transformers",
+                max_wait_seconds=30)
+        self.assertEqual(result["status"], "FAILED")
+        self.assertEqual(result["load_error"], "ImportError: bad transformers pin")
 
 
 class SecretRedactionTest(unittest.TestCase):

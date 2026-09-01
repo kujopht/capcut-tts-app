@@ -51,6 +51,8 @@ from server.translation_model_profiles import (
     route_order,
 )
 from server.translation_providers import (
+    PermanentProviderError,
+    TransientProviderError,
     TranslationContext,
     TranslationProvider,
     TranslationProviderError,
@@ -89,18 +91,32 @@ class AllProvidersUnavailable(TranslationProviderError):
     """
     TAT CA provider (mien phi) da cau hinh hien khong dung duoc.
 
-    KHONG PHAI mot loi that theo nghia "job hong" — tang service phai doi
-    trang thai job thanh `waiting_for_provider`, KHONG PHAI `failed` (xem
-    `TranslationService._thuc_thi_job`, Part Q4). `retry_not_before` la moc
-    SOM NHAT trong cac moc reset ma provider da bao (rong neu khong provider
-    nao bao — khi do dung backoff mac dinh o tang service, KHONG bia so).
+    MAC DINH khong phai mot loi that theo nghia "job hong" — tang service
+    doi trang thai job thanh `waiting_for_provider`, KHONG PHAI `failed`
+    (xem `TranslationService._thuc_thi_job`, Part Q4). `retry_not_before` la
+    moc SOM NHAT trong cac moc reset ma provider da bao (rong neu khong
+    provider nao bao — khi do dung backoff mac dinh o tang service, KHONG
+    bia so).
+
+    NGOAI LE (mission "REMOVE THE HUMAN FROM BEAM OPERATIONS", muc E):
+    `all_permanent=True` khi MOI provider da thu that bai vi
+    `PermanentProviderError` cu the (khong phai vi dang trong thoi gian cho
+    tam thoi/rate-limit) — `TranslationService._thuc_thi_job` dua vao co
+    nay de FAIL FAST (job -> `failed` ngay, kem `last_error_message` that)
+    thay vi `waiting_for_provider` mai mai cho mot loi se khong bao gio tu
+    sua duoc (sai credential, model khong ho tro, cau hinh sai dang...).
     """
 
-    def __init__(self, retry_not_before: str = ""):
+    def __init__(self, retry_not_before: str = "", all_permanent: bool = False,
+                 last_error_message: str = ""):
         self.retry_not_before = retry_not_before
-        super().__init__(
-            "Tất cả model dịch miễn phí đã cấu hình hiện đều không dùng "
-            "được (hết hạn mức hoặc đang gặp lỗi).")
+        self.all_permanent = all_permanent
+        self.last_error_message = last_error_message
+        msg = ("Tất cả model dịch miễn phí đã cấu hình hiện đều không dùng "
+              "được (hết hạn mức hoặc đang gặp lỗi).")
+        if all_permanent and last_error_message:
+            msg += f" Lỗi vĩnh viễn thực tế (không tự thử lại được): {last_error_message}"
+        super().__init__(msg)
 
 
 @dataclass
@@ -119,6 +135,13 @@ class ProviderCatalogEntry:
     free_tier: bool
     status: ProviderStatus
     reset_at: str = ""  # ISO, RONG neu khong biet — KHONG BAO GIO bia so
+    #: "" (chua co loi/thanh cong) | "transient" | "permanent" |
+    #: "rate_limited" | "quota_exhausted" | "unclassified" (loi chua duoc
+    #: phan loai cu the, hanh vi cu — xem `ConfiguredProvider.
+    #: translate_segment`). Muc dich CHINH: chan doan an toan cho benchmark
+    #: script/CLI operator (mission "REMOVE THE HUMAN FROM BEAM OPERATIONS"
+    #: muc F) — KHONG BAO GIO chua chi tiet response/header goc.
+    error_class: str = ""
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -129,6 +152,7 @@ class ProviderCatalogEntry:
             "free_tier": self.free_tier,
             "status": self.status.value,
             "reset_at": self.reset_at,
+            "error_class": self.error_class,
         }
 
 
@@ -189,15 +213,29 @@ def _now_iso() -> str:
 #: duoc thu lai (khong "chet" vinh vien trong tien trinh dang chay).
 DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS = 60
 
+#: Giay — cooldown MAC DINH cho `TransientProviderError` (mission "REMOVE
+#: THE HUMAN FROM BEAM OPERATIONS", muc E): mot serverless GPU (Beam VLLM)
+#: dang khoi dong lanh thuong san sang lai trong vong vai chuc giay, ngan
+#: hon nhieu so voi chu ky rate-limit-mien-phi 60s o tren (con so do phu
+#: hop voi nhip "het han muc theo phut", khong phai "container dang boot").
+#: NGAN HON de mot lan cold-start THOANG QUA khong khien nguoi/script goi
+#: phai cho lau hon can thiet trong khi Beam co the da san sang tro lai.
+DEFAULT_TRANSIENT_COOLDOWN_SECONDS = 20
 
-def _reset_at_mac_dinh(retry_at: str) -> str:
+
+def _reset_at_mac_dinh(
+    retry_at: str, cooldown_seconds: int = DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS
+) -> str:
     """`retry_at` (tu header `Retry-After`, co the RONG) -> moc ISO CHAC
-    CHAN co gia tri — dung cooldown mac dinh khi nha cung cap khong bao moc
-    cu the nao ca."""
+    CHAN co gia tri — dung `cooldown_seconds` khi nha cung cap khong bao moc
+    cu the nao ca. Tham so nay cho phep mot cooldown NGAN HON cho loi TAM
+    THOI (`DEFAULT_TRANSIENT_COOLDOWN_SECONDS`) khac voi mac dinh rate-limit
+    mien phi (`DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS`) — hai ban chat khac
+    nhau (het han muc theo chu ky vs mot lan cold-start thoang qua)."""
     if retry_at:
         return retry_at
     return (datetime.now(timezone.utc)
-            + timedelta(seconds=DEFAULT_RATE_LIMIT_COOLDOWN_SECONDS)
+            + timedelta(seconds=cooldown_seconds)
             ).isoformat(timespec="seconds")
 
 
@@ -564,6 +602,9 @@ class ConfiguredProvider:
     credential_source: str = "shared"
     _status: ProviderStatus = field(default=ProviderStatus.UNKNOWN, repr=False)
     _reset_at: str = field(default="", repr=False)
+    #: Xem `ProviderCatalogEntry.error_class`'s own docstring cho danh sach
+    #: gia tri hop le.
+    _error_class: str = field(default="", repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def catalog_entry(self) -> ProviderCatalogEntry:
@@ -572,7 +613,7 @@ class ConfiguredProvider:
                 provider_id=self.provider_id, model_id=self.model_id,
                 display_name=self.display_name, quality_hint=self.quality_hint,
                 free_tier=self.free_tier, status=self._status,
-                reset_at=self._reset_at)
+                reset_at=self._reset_at, error_class=self._error_class)
 
     def is_available_now(self) -> bool:
         with self._lock:
@@ -601,6 +642,7 @@ class ConfiguredProvider:
             with self._lock:
                 self._status = ProviderStatus.RATE_LIMITED
                 self._reset_at = _reset_at_mac_dinh(exc.retry_at)
+                self._error_class = "rate_limited"
             usage_recorder().ghi(
                 provider_id=self.provider_id, model_id=self.model_id,
                 credential_source=self.credential_source,
@@ -611,16 +653,56 @@ class ConfiguredProvider:
             with self._lock:
                 self._status = ProviderStatus.QUOTA_EXHAUSTED
                 self._reset_at = _reset_at_mac_dinh(exc.retry_at)
+                self._error_class = "quota_exhausted"
             usage_recorder().ghi(
                 provider_id=self.provider_id, model_id=self.model_id,
                 credential_source=self.credential_source,
                 pass_type=context.vai_tro, outcome="quota_exhausted",
                 latency_ms=_do_do_tre_ms())
             raise
-        except TranslationProviderError:
+        except PermanentProviderError:
+            # KHONG gan reset_at (giu rong CO CHU DICH) — loi tai khoan/cau
+            # hinh se KHONG tu het khi cho, xem PermanentProviderError's own
+            # docstring va AllProvidersUnavailable.all_permanent.
             with self._lock:
                 self._status = ProviderStatus.UNAVAILABLE
                 self._reset_at = ""
+                self._error_class = "permanent"
+            usage_recorder().ghi(
+                provider_id=self.provider_id, model_id=self.model_id,
+                credential_source=self.credential_source,
+                pass_type=context.vai_tro, outcome="error",
+                latency_ms=_do_do_tre_ms())
+            raise
+        except TransientProviderError:
+            # SUA LOI THAT (mission "REMOVE THE HUMAN FROM BEAM OPERATIONS"
+            # muc E): TRUOC DAY moi TranslationProviderError deu roi vao
+            # nhanh chung ben duoi voi reset_at="" -> is_available_now() coi
+            # provider la khong-dung-duoc-MAI-MAI trong tien trinh, du loi
+            # chi la mot lan cold-start serverless THOANG QUA. Gan mot
+            # reset_at HUU HAN o day de provider TU DUOC THU LAI sau cooldown
+            # ngan, thay vi vong lap waiting_for_provider vo han.
+            with self._lock:
+                self._status = ProviderStatus.UNAVAILABLE
+                self._reset_at = _reset_at_mac_dinh(
+                    "", cooldown_seconds=DEFAULT_TRANSIENT_COOLDOWN_SECONDS)
+                self._error_class = "transient"
+            usage_recorder().ghi(
+                provider_id=self.provider_id, model_id=self.model_id,
+                credential_source=self.credential_source,
+                pass_type=context.vai_tro, outcome="error",
+                latency_ms=_do_do_tre_ms())
+            raise
+        except TranslationProviderError:
+            # Hanh vi CU, giu lai cho loi CHUA duoc phan loai ro (vd cac
+            # thong bao "PROVIDER_UNAVAILABLE" tu Groq/Cerebras o duoi file
+            # nay) — KHONG doi hanh vi cua nhung duong nay, chi ten
+            # error_class de chan doan trung thuc rang day la loi "khong
+            # ro nhom".
+            with self._lock:
+                self._status = ProviderStatus.UNAVAILABLE
+                self._reset_at = ""
+                self._error_class = "unclassified"
             usage_recorder().ghi(
                 provider_id=self.provider_id, model_id=self.model_id,
                 credential_source=self.credential_source,
@@ -630,6 +712,7 @@ class ConfiguredProvider:
         with self._lock:
             self._status = ProviderStatus.AVAILABLE
             self._reset_at = ""
+            self._error_class = ""
         #: `last_usage` la thuoc tinh TUY CHON (duck-typed) — chi cac provider
         #: tuong thich OpenAI qua `_OpenAICompatFreeProvider` (Groq, Cerebras)
         #: co no. Provider khac (mock, Cloudflare, tuy chinh) khong co thuoc
@@ -777,8 +860,20 @@ class ProviderRegistry:
         """Vong lap LOI CHUNG — thu LAN LUOT dung thu tu da quyet dinh san
         (boi `translate_segment`/`translate_segment_with_personal`), dung o
         provider DAU TIEN con dung duoc. Tach rieng de CA HAI ham goi cung
-        MOT logic, khong lap lai."""
+        MOT logic, khong lap lai.
+
+        Theo doi THEM (mission "REMOVE THE HUMAN FROM BEAM OPERATIONS" muc
+        E): `so_luot_thu`/`so_luot_vinh_vien` de biet TOAN BO provider da
+        thu trong lan goi nay that bai vi `PermanentProviderError` cu the
+        hay khong — chi khi do `AllProvidersUnavailable.all_permanent` moi
+        duoc dat True (fail fast), con lai (bao gom truong hop mot phan la
+        transient/rate/quota, hoac mot provider dang trong cooldown voi moc
+        reset trong tuong lai) van giu nguyen ngu nghia `waiting_for_
+        provider` cu."""
         som_nhat_reset = ""
+        so_luot_thu = 0
+        so_luot_vinh_vien = 0
+        loi_vinh_vien_gan_nhat = ""
         for cp in thu_tu:
             if cp is None:
                 continue
@@ -787,21 +882,34 @@ class ProviderRegistry:
                 if entry.reset_at and (not som_nhat_reset
                                        or entry.reset_at < som_nhat_reset):
                     som_nhat_reset = entry.reset_at
+                # Dang trong cooldown VOI mot moc reset trong tuong lai
+                # (rate-limit/transient) - se TU phuc hoi, khong tinh la
+                # "vinh vien" du hien tai chua thu duoc.
+                so_luot_thu += 1
                 continue
             try:
                 ket_qua = cp.translate_segment(text, context=context)
+            except PermanentProviderError as exc:
+                so_luot_thu += 1
+                so_luot_vinh_vien += 1
+                loi_vinh_vien_gan_nhat = str(exc)
+                continue
             except TranslationProviderError:
                 entry = cp.catalog_entry()
                 if entry.reset_at and (not som_nhat_reset
                                        or entry.reset_at < som_nhat_reset):
                     som_nhat_reset = entry.reset_at
+                so_luot_thu += 1
                 continue
             return ket_qua, ProviderProvenance(
                 provider_id=cp.provider_id, model_id=cp.model_id,
                 pass_type=context.vai_tro, success=True,
                 attempted_at=_now_iso(),
                 credential_source=cp.credential_source)
-        raise AllProvidersUnavailable(retry_not_before=som_nhat_reset)
+        tat_ca_vinh_vien = so_luot_thu > 0 and so_luot_thu == so_luot_vinh_vien
+        raise AllProvidersUnavailable(
+            retry_not_before=som_nhat_reset, all_permanent=tat_ca_vinh_vien,
+            last_error_message=loi_vinh_vien_gan_nhat)
 
     def translate_segment(self, text: str, *, context: TranslationContext,
                           mode: str = "auto",

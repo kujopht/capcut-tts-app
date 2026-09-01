@@ -873,6 +873,23 @@ class TranslationService:
             job.lease_expires_at = ""
             self._store.save_job_fenced(job, fence, self._worker_id)
         except AllProvidersUnavailable as exc:
+            if exc.all_permanent:
+                # Mission "REMOVE THE HUMAN FROM BEAM OPERATIONS" muc E: MOI
+                # provider da thu that bai vi loi VINH VIEN (sai credential,
+                # model khong ho tro, cau hinh sai dang...) — cho se KHONG
+                # bao gio tu sua duoc loi nay, nen FAIL FAST thay vi
+                # `waiting_for_provider` mai mai (chinh trieu chung that da
+                # gay ra vong lap "status=waiting_for_provider" vo han truoc
+                # mission nay). Cac chuong da xong VAN CON NGUYEN, giong nhu
+                # nhanh `TranslationProviderError` ben duoi.
+                job.status = TranslationJobStatus.FAILED
+                job.error = self._loi_an_toan(exc)
+                job.finished_at = now_iso()
+                job.updated_at = job.finished_at
+                job.lease_owner = ""
+                job.lease_expires_at = ""
+                self._store.save_job_fenced(job, fence, self._worker_id)
+                return
             # Part Q4: KHONG PHAI mot loi that — tat ca provider mien phi da
             # cau hinh dang het han muc/gap loi TAM THOI. Nha lease nhung dat
             # `lease_expires_at` bang moc "khong nhan lai truoc" (tai su dung

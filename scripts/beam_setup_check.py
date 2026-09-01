@@ -1,50 +1,84 @@
 #!/usr/bin/env python3
 """Read-only Beam Cloud setup check — run BEFORE any deploy/benchmark.
 
-Reads BEAM_TOKEN from this process's own environment (never printed/
-logged). Confirms: beam CLI installed, auth resolves, and reports what
-`beam machine list` shows for this account (real GPU availability, not
-guessed). Deploys nothing, spends nothing.
+Resolves BEAM_TOKEN via `beam_credential.resolve_beam_token()` (never
+printed/logged — see that module's docstring for the env-var-first,
+Windows-Credential-Manager-fallback resolution order). Confirms: beam CLI
+installed, auth resolves, and reports what `beam machine list` shows for
+this account (real GPU availability, not guessed). Deploys nothing, spends
+nothing.
 
     .venv\\Scripts\\python.exe scripts\\beam_setup_check.py
+
+Mission "REMOVE THE HUMAN FROM BEAM OPERATIONS" (2026-09-01) findings baked
+in here (see docs/reports/beam-unattended-operator-2026-09-01.md for full
+citations):
+  - `beam-client` is a REAL, clean native Windows pip install (confirmed —
+    `pip install --dry-run beam-client` resolved with zero conflicts against
+    this repo's existing venv). The previous "install inside WSL Ubuntu"
+    guidance was an untested assumption, not a real requirement — no WSL2,
+    no container, no Cloud Shell needed.
+  - A bare `beam` CLI call on a fresh machine (empty `~/.beam/config.ini`)
+    crashes with `UnicodeEncodeError` trying to print an emoji banner under
+    Windows' default cp1252 console code page — reproduced directly, not
+    assumed. Setting `CI=1` in the subprocess environment skips that
+    interactive first-auth path entirely (the ONLY use of `os.getenv("CI")`
+    in the installed beta9 0.1.265 source — grepped, not guessed), so every
+    `beam` subprocess call in this repo's tooling sets it.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
-TOKEN_ENV_VAR = "BEAM_TOKEN"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from beam_credential import TOKEN_ENV_VAR, resolve_beam_token  # noqa: E402
+
+
+def beam_subprocess_env(token: str) -> dict:
+    """Env for a `beam` subprocess call: the real process env plus `CI=1`
+    (skip the interactive/crashing first-auth banner) and the resolved
+    token. Never mutates this process's own `os.environ` — a fresh dict
+    only, passed via `subprocess.run(..., env=...)`."""
+    import os
+    env = dict(os.environ)
+    env["CI"] = "1"
+    env[TOKEN_ENV_VAR] = token
+    return env
 
 
 def main() -> int:
     beam_bin = shutil.which("beam")
     print(f"beam CLI on PATH: {'yes at ' + beam_bin if beam_bin else 'NO'}")
     if not beam_bin:
-        print("\nBLOCKED: install the Beam CLI first (real, documented command):")
-        print("  uv tool install beam-client")
-        print("(Windows: install inside WSL Ubuntu 22.04 per docs.beam.cloud)")
+        print("\nBLOCKED: install the Beam CLI first (real, tested command):")
+        print("  .venv\\Scripts\\python.exe -m pip install beam-client==0.2.207")
+        print("(native Windows install, confirmed clean — no WSL2/container "
+              "needed. Pin this version; see beam_operator.py's own version "
+              "check for why pinning matters.)")
         return 2
 
-    token = os.environ.get(TOKEN_ENV_VAR)
-    print(f"{TOKEN_ENV_VAR} in process env: {'present' if token else 'ABSENT'}")
+    token = resolve_beam_token()
+    print(f"{TOKEN_ENV_VAR} resolved: {'yes (value withheld)' if token else 'ABSENT'}")
     if not token:
-        print(f"\nBLOCKED: {TOKEN_ENV_VAR} is not set in this process's environment.")
-        print("Get one from the Beam dashboard (beam.cloud) after creating an "
-              "account, then either:")
-        print(f'  $env:{TOKEN_ENV_VAR} = "<your token>"   # this shell session only')
-        print("  beam config create                      # persists to "
-              "~/.beam/config.ini instead, if you prefer that over an env var")
+        print(f"\nBLOCKED: {TOKEN_ENV_VAR} not found in this process's "
+              "environment or the Windows Credential Manager broker.")
+        print("ONE-TIME setup (value typed on stdin — never seen by Claude, "
+              "never in argv/shell history):")
+        print("  python scripts/fanfic_credential_broker.py store --name BEAM_TOKEN")
+        print("Or, for this shell session only:")
+        print(f'  $env:{TOKEN_ENV_VAR} = "<your token>"')
         return 2
 
     # `beam machine list` is a real, read-only account inspection call - does
-    # not deploy or reserve anything. Token is inherited via os.environ by the
-    # subprocess automatically; never placed in argv/logged here.
+    # not deploy or reserve anything. Token passed via subprocess env only;
+    # never placed in argv/logged here.
     try:
         result = subprocess.run(
             ["beam", "machine", "list"], capture_output=True, text=True,
-            timeout=60)
+            timeout=60, env=beam_subprocess_env(token))
     except FileNotFoundError:
         print("\nBLOCKED: 'beam' binary not runnable despite being on PATH.")
         return 2
@@ -57,7 +91,7 @@ def main() -> int:
         return 1
 
     print("\nSetup looks real and usable. Next: deploy the two apps in "
-          "beam_apps/ via the benchmark scripts.")
+          "beam_apps/ via the benchmark scripts, or use scripts/beam_operator.py.")
     return 0
 
 

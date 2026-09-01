@@ -14,7 +14,12 @@ import unittest
 import httpx
 
 from server.translation_model_profiles import GROQ_MODEL_PROFILES
-from server.translation_providers import TranslationContext, TranslationProviderError
+from server.translation_providers import (
+    PermanentProviderError,
+    TransientProviderError,
+    TranslationContext,
+    TranslationProviderError,
+)
 from server.translation_provider_registry import (
     AllProvidersUnavailable,
     CloudflareWorkersAIProvider,
@@ -262,6 +267,82 @@ class ConfiguredProviderStatusTest(unittest.TestCase):
         with self.assertRaises(ProviderRateLimited):
             cp.translate_segment("x", context=TranslationContext(vai_tro="translator"))
         self.assertTrue(cp.is_available_now())  # moc da qua
+
+
+class ConfiguredProviderTransientPermanentTest(unittest.TestCase):
+    """Mission 'REMOVE THE HUMAN FROM BEAM OPERATIONS' muc E — bang chung
+    that: mot loi TransientProviderError (vd Beam serverless cold-start)
+    KHONG duoc phep khoa provider vinh vien nhu truoc (reset_at="" ->
+    is_available_now() False mai mai -> vong lap waiting_for_provider vo
+    han), con PermanentProviderError thi PHAI giu nguyen "khong tu phuc
+    hoi" (dung y, khac voi mot bug)."""
+
+    def test_transient_gets_finite_reset_at_not_poisoned_forever(self):
+        cp = _cp("a", [TransientProviderError("Beam đang khởi động lạnh")])
+        with self.assertRaises(TransientProviderError):
+            cp.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        entry = cp.catalog_entry()
+        self.assertEqual(entry.status, ProviderStatus.UNAVAILABLE)
+        self.assertEqual(entry.error_class, "transient")
+        self.assertTrue(
+            entry.reset_at,
+            "transient error PHAI có reset_at hữu hạn, không được để rỗng "
+            "— rỗng chính là lỗi thật đã gây vòng lặp waiting_for_provider "
+            "vô hạn trước mission này")
+        self.assertFalse(cp.is_available_now())  # con trong cooldown
+
+    def test_transient_tu_phuc_hoi_sau_cooldown_va_goi_lai_duoc_that(self):
+        cp = _cp("a", [TransientProviderError("cold start")])
+        with self.assertRaises(TransientProviderError):
+            cp.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        # Gia lap da qua cooldown, giong nguyen tac cua
+        # test_qua_moc_reset_thi_lai_dung_duoc o tren.
+        cp._reset_at = "2000-01-01T00:00:00+00:00"
+        self.assertTrue(cp.is_available_now())
+        ra = cp.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        self.assertEqual(ra, "[fake] x")
+        self.assertEqual(cp.catalog_entry().status, ProviderStatus.AVAILABLE)
+        self.assertEqual(cp.catalog_entry().error_class, "")
+
+    def test_permanent_khong_co_reset_at_va_error_class_permanent(self):
+        cp = _cp("a", [PermanentProviderError("sai API key")])
+        with self.assertRaises(PermanentProviderError):
+            cp.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        entry = cp.catalog_entry()
+        self.assertEqual(entry.error_class, "permanent")
+        self.assertEqual(entry.reset_at, "")
+        self.assertFalse(cp.is_available_now())
+
+
+class AllProvidersUnavailableFailFastTest(unittest.TestCase):
+    """`all_permanent` — chi True khi TOAN BO provider da thu that bai vi
+    PermanentProviderError; mot lan TransientProviderError/loi chua phan
+    loai xen vao PHAI giu nguyen ngu nghia waiting_for_provider cu."""
+
+    def test_toan_bo_permanent_dat_all_permanent_true(self):
+        reg = ProviderRegistry([_cp("a", [PermanentProviderError("sai API key")])])
+        with self.assertRaises(AllProvidersUnavailable) as ctx:
+            reg.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        self.assertTrue(ctx.exception.all_permanent)
+        self.assertIn("sai API key", ctx.exception.last_error_message)
+
+    def test_mix_transient_permanent_khong_phai_all_permanent(self):
+        reg = ProviderRegistry([
+            _cp("a", [PermanentProviderError("sai API key")]),
+            _cp("b", [TransientProviderError("cold start")]),
+        ])
+        with self.assertRaises(AllProvidersUnavailable) as ctx:
+            reg.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        self.assertFalse(ctx.exception.all_permanent)
+
+    def test_bare_translation_provider_error_khong_phai_all_permanent(self):
+        """Hanh vi CU (loi chua duoc phan loai ro, vd cac thong bao
+        PROVIDER_UNAVAILABLE tu Groq/Cerebras) khong duoc VO TINH bi coi la
+        vinh vien — chi PermanentProviderError cu the moi dem."""
+        reg = ProviderRegistry([_cp("a", [TranslationProviderError("khong ro loai")])])
+        with self.assertRaises(AllProvidersUnavailable) as ctx:
+            reg.translate_segment("x", context=TranslationContext(vai_tro="translator"))
+        self.assertFalse(ctx.exception.all_permanent)
 
 
 class ProviderCatalogSafetyTest(unittest.TestCase):

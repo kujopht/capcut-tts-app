@@ -47,6 +47,8 @@ import httpx  # noqa: E402
 from beam_apps.cover_illustrious_logic import DEFAULT_NEGATIVE_PROMPT  # noqa: E402
 from server.cover_pipeline import CoverGenerationRequest, CoverPromptBuilder  # noqa: E402
 
+from scripts.beam_credential import resolve_beam_token  # noqa: E402
+
 TOKEN_ENV_VAR = "BEAM_TOKEN"
 
 # Real published RTX4090 on-demand rate - see beam_cover_benchmark.py for
@@ -84,9 +86,11 @@ def main() -> int:
     p.add_argument("--timeout-seconds", type=float, default=300.0)
     a = p.parse_args()
 
-    token = os.environ.get(TOKEN_ENV_VAR)
+    token = resolve_beam_token()
     if not token:
-        print(f"BLOCKED: {TOKEN_ENV_VAR} is not set in this process's environment.",
+        print(f"BLOCKED: {TOKEN_ENV_VAR} not found in process env or the "
+              "credential broker. One-time setup: python "
+              "scripts/fanfic_credential_broker.py store --name BEAM_TOKEN",
               file=sys.stderr)
         return 2
 

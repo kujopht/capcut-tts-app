@@ -10,6 +10,8 @@ import httpx
 from server.translation_providers import (
     DocuTranslateProvider,
     MockTranslationProvider,
+    PermanentProviderError,
+    TransientProviderError,
     TranslationContext,
     TranslationProviderError,
     build_provider,
@@ -312,6 +314,89 @@ class ChonProviderTest(unittest.TestCase):
         day_du = Settings(translation_base_url="https://vidu.test",
                           translation_api_key="k", translation_model="m")
         self.assertIsInstance(build_provider(day_du), DocuTranslateProvider)
+
+
+class DocuTranslateProviderErrorClassificationTest(unittest.TestCase):
+    """Mission 'REMOVE THE HUMAN FROM BEAM OPERATIONS' muc E — moi loai loi
+    that PHAI anh xa dung nhom TAM THOI/VINH VIEN, khong con roi tat ca vao
+    mot `TranslationProviderError` chung chung nhu truoc (nguyen nhan goc
+    cua vong lap `waiting_for_provider` vo han that da quan sat duoc)."""
+
+    def _p(self, handler):
+        return DocuTranslateProvider(base_url="https://vidu.test", api_key="k",
+                                     model="m", client=_client_gia(handler))
+
+    def test_timeout_la_transient(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timed out", request=request)
+
+        with self.assertRaises(TransientProviderError):
+            self._p(handler).translate_segment(
+                "x", context=TranslationContext(vai_tro="translator"))
+
+    def test_connect_error_la_transient(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused", request=request)
+
+        with self.assertRaises(TransientProviderError):
+            self._p(handler).translate_segment(
+                "x", context=TranslationContext(vai_tro="translator"))
+
+    def test_502_503_504_la_transient(self):
+        for status in (502, 503, 504):
+            with self.subTest(status=status):
+                def handler(request: httpx.Request, status=status) -> httpx.Response:
+                    return httpx.Response(status, text="bad gateway")
+
+                with self.assertRaises(TransientProviderError):
+                    self._p(handler).translate_segment(
+                        "x", context=TranslationContext(vai_tro="translator"))
+
+    def test_429_la_transient(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429, text="too many requests")
+
+        with self.assertRaises(TransientProviderError):
+            self._p(handler).translate_segment(
+                "x", context=TranslationContext(vai_tro="translator"))
+
+    def test_noi_dung_rong_la_transient(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return _tra_loi_chat("   ")
+
+        with self.assertRaises(TransientProviderError):
+            self._p(handler).translate_segment(
+                "x", context=TranslationContext(vai_tro="translator"))
+
+    def test_401_403_la_permanent(self):
+        for status in (401, 403):
+            with self.subTest(status=status):
+                def handler(request: httpx.Request, status=status) -> httpx.Response:
+                    return httpx.Response(status, text="unauthorized")
+
+                with self.assertRaises(PermanentProviderError):
+                    self._p(handler).translate_segment(
+                        "x", context=TranslationContext(vai_tro="translator"))
+
+    def test_404_la_permanent(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(404, text="not found")
+
+        with self.assertRaises(PermanentProviderError):
+            self._p(handler).translate_segment(
+                "x", context=TranslationContext(vai_tro="translator"))
+
+    def test_dinh_dang_sai_la_permanent(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"khong_dung_dang": True})
+
+        with self.assertRaises(PermanentProviderError):
+            self._p(handler).translate_segment(
+                "x", context=TranslationContext(vai_tro="translator"))
+
+    def test_thieu_cau_hinh_la_permanent(self):
+        with self.assertRaises(PermanentProviderError):
+            DocuTranslateProvider(base_url="", api_key="", model="")
 
 
 if __name__ == "__main__":

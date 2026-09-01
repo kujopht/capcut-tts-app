@@ -15,7 +15,11 @@ from server.translation_provider_registry import (
     ConfiguredProvider,
     ProviderRegistry,
 )
-from server.translation_providers import TranslationContext, TranslationProviderError
+from server.translation_providers import (
+    PermanentProviderError,
+    TranslationContext,
+    TranslationProviderError,
+)
 from server.translation_service import TRANSLATION_JOB_MAX_ATTEMPTS, TranslationService
 from server.translation_store import MockTranslationStore
 from server.tests.test_translation_service import cho_job_xong
@@ -290,6 +294,52 @@ class WaitingForProviderTest(unittest.TestCase):
             time.sleep(0.005)
         self.assertEqual(job.status, TranslationJobStatus.WAITING_FOR_PROVIDER)
         self.assertNotEqual(job.status, TranslationJobStatus.FAILED)
+
+
+class _LuonLoiVinhVienProvider:
+    """Provider gia LUON nem `PermanentProviderError` — mo phong sai
+    credential/model khong ho tro/cau hinh sai dang, khac voi
+    `_LuonHetHanMucProvider` (loi TAM THOI, khong ro loai) o tren."""
+
+    name = "loi-vinh-vien"
+
+    def translate_segment(self, text, *, context):
+        raise PermanentProviderError("Sai TRANSLATION_API_KEY (401).")
+
+
+class PermanentProviderFailsFastTest(unittest.TestCase):
+    """Mission 'REMOVE THE HUMAN FROM BEAM OPERATIONS' muc E: khi TOAN BO
+    provider that bai vi loi VINH VIEN (sai credential/model/cau hinh), job
+    phai thanh `failed` NGAY kem thong bao loi that — KHONG duoc phep treo
+    o `waiting_for_provider` cho mot thu se khong bao gio tu sua duoc,
+    khac voi `WaitingForProviderTest` o tren (loi TAM THOI/chua phan loai
+    ro van giu nguyen ngu nghia cho)."""
+
+    def setUp(self) -> None:
+        self.identity = MockIdentityAdapter()
+        self.novels = MockMetadataStore()
+        self.store = MockTranslationStore()
+        cp = ConfiguredProvider(
+            provider_id="loi-vinh-vien", model_id="m", display_name="x",
+            quality_hint="x", provider=_LuonLoiVinhVienProvider())
+        self.registry = ProviderRegistry([cp])
+        self.svc = TranslationService(self.store, self.novels,
+                                      registry=self.registry)
+        self.an = self.identity.register("an@vidu.vn", "MatKhau123", "An")
+
+    def test_job_that_bai_ngay_khong_cho_waiting_for_provider(self):
+        p = self.svc.create_project(self.an.user_id, title="x",
+                                    source_text=VB_MOT_CHUONG)
+        job = self.svc.create_job(p.project_id, self.an.user_id)
+        han = time.time() + 5
+        while time.time() < han:
+            job = self.svc.get_job(job.job_id, self.an.user_id)
+            if job.status in (TranslationJobStatus.FAILED,
+                             TranslationJobStatus.WAITING_FOR_PROVIDER):
+                break
+            time.sleep(0.005)
+        self.assertEqual(job.status, TranslationJobStatus.FAILED)
+        self.assertIn("Sai TRANSLATION_API_KEY", job.error)
 
 
 class _ProviderTraSai:

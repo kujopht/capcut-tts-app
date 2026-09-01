@@ -66,6 +66,41 @@ class TranslationProviderError(Exception):
     """Loi tu phia nha cung cap — tang service doi thanh trang thai `failed`."""
 
 
+class TransientProviderError(TranslationProviderError):
+    """
+    Loi TAM THOI, KHONG PHAI dau hieu cau hinh/tai khoan sai — vi du: mat ket
+    noi (connection refused/reset), timeout luc serverless dang khoi dong
+    lanh, HTTP 502/503/504, "service starting". `ConfiguredProvider.
+    translate_segment` (translation_provider_registry.py) phai gan mot
+    `reset_at` HUU HAN cho loi nay (khac voi truoc day, khi moi
+    `TranslationProviderError` deu bi coi la lam provider "chet vinh vien"
+    trong tien trinh do `reset_at` bi de rong) — de mot lan cold-start/mang
+    chap chon THOANG QUA khong bien provider thanh khong-dung-duoc-mai-mai
+    trong khi Beam (hay bat ky serverless backend nao khac) da khoe manh tro
+    lai chi vai chuc giay sau. Xem mission "REMOVE THE HUMAN FROM BEAM
+    OPERATIONS", muc E, cho boi canh day du (bao gom bang chung that: mot
+    loi cold-start THOANG QUA tung khien `scripts/beam_translation_benchmark.py`
+    in `status=waiting_for_provider` mai mai vi provider bi "dau doc" vinh
+    vien trong bo nho tien trinh).
+    """
+
+
+class PermanentProviderError(TranslationProviderError):
+    """
+    Loi VE TAI KHOAN/CAU HINH — se KHONG tu het neu chi cho/thu lai, vi du:
+    401/403 do sai credential, model khong duoc ho tro, cau hinh sai dang
+    (vd endpoint tra ve dinh dang khong phai OpenAI chat-completions), 404
+    ON DINH do sai duong dan API. `ConfiguredProvider.translate_segment` giu
+    `reset_at` rong cho loi nay (dung y, provider nay se KHONG tu phuc hoi
+    trong tien trinh) NHUNG khac voi loi chua phan loai duoc o mot diem quan
+    trong: `AllProvidersUnavailable.all_permanent` (translation_provider_
+    registry.py) duoc dat True khi TOAN BO provider da thu deu that bai vi
+    loi nay — `TranslationService._thuc_thi_job` dua vao co nay de cho job
+    thanh `failed` NGAY (kem thong bao loi that), thay vi `waiting_for_
+    provider` mai mai cho mot thu se khong bao gio tu sua duoc.
+    """
+
+
 class TranslationIntegrityError(TranslationProviderError):
     """
     V6 cerebras-groq-translation — ban dich KHONG DAT tinh ven (xem
@@ -270,7 +305,11 @@ class DocuTranslateProvider(TranslationProvider):
                 client: Optional[httpx.Client] = None,
                 extra_payload: Optional[Dict[str, object]] = None):
         if not (base_url and api_key and model):
-            raise TranslationProviderError(
+            # PermanentProviderError, khong phai TranslationProviderError tran
+            # — thieu cau hinh se KHONG tu het neu cho/thu lai (mission "REMOVE
+            # THE HUMAN FROM BEAM OPERATIONS" muc E liet ke "malformed
+            # configuration" thuoc nhom PERMANENT).
+            raise PermanentProviderError(
                 "Thiếu cấu hình TRANSLATION_BASE_URL/API_KEY/MODEL — "
                 "chưa thể dùng DocuTranslateProvider.")
         self._model = model
@@ -325,12 +364,55 @@ class DocuTranslateProvider(TranslationProvider):
             "temperature": 0.3,
             **self._extra_payload,
         }
+        # Phan loai TAM THOI/VINH VIEN o chinh diem goi mang — day la noi
+        # DUY NHAT biet duoc nguyen nhan that (ma trang thai HTTP/loai
+        # exception), ConfiguredProvider (translation_provider_registry.py)
+        # chi biet DUA VAO loai exception nay de quyet dinh reset_at. Xem
+        # TransientProviderError/PermanentProviderError's own docstrings cho
+        # boi canh mission day du.
         try:
             resp = self._client.post("/chat/completions", json=payload)
+        except httpx.TimeoutException as exc:
+            # Timeout luc serverless dang khoi dong lanh - CHINH XAC trieu
+            # chung that da gay ra vong lap waiting_for_provider vo han.
+            raise TransientProviderError(
+                f"Timeout khi gọi dịch vụ dịch (có thể do serverless đang "
+                f"khởi động lạnh): {exc}") from exc
         except httpx.HTTPError as exc:
-            raise TranslationProviderError(
+            # Bao gom ConnectError (connection refused/reset) va cac loi
+            # mang khac chua duoc dat ten rieng - deu la TAM THOI theo dung
+            # danh sach mission liet ke, khong phai dau hieu tai khoan/cau
+            # hinh sai.
+            raise TransientProviderError(
                 f"Không gọi được dịch vụ dịch: {exc}") from exc
 
+        if resp.status_code == 401 or resp.status_code == 403:
+            raise PermanentProviderError(
+                f"Dịch vụ dịch từ chối xác thực (HTTP {resp.status_code}) — "
+                f"kiểm tra TRANSLATION_API_KEY, không tự thử lại được.")
+        if resp.status_code == 404:
+            # 404 ON DINH tu dung API path - mot serverless dang khoi dong
+            # thuong tra ve 502/503 tu gateway (xem nhanh duoi day), khong
+            # phai 404 tu chinh ung dung; 404 nghia la duong dan/model sai,
+            # se KHONG tu het khi cho.
+            raise PermanentProviderError(
+                f"Dịch vụ dịch trả 404 — kiểm tra TRANSLATION_BASE_URL "
+                f"(đường dẫn endpoint có thể sai), không tự thử lại được.")
+        if resp.status_code in (500, 502, 503, 504):
+            raise TransientProviderError(
+                f"Dịch vụ dịch trả lỗi hạ tầng tạm thời (HTTP "
+                f"{resp.status_code}) — có thể do serverless đang khởi động "
+                f"lạnh, sẽ thử lại.")
+        if resp.status_code == 429:
+            # Endpoint OpenAI-compat TUY CHINH bat ky (khong rieng Beam) co
+            # the la self-hosted don-thue - dieu tri nhu TAM THOI (lui roi
+            # thu lai) don gian hon la keo theo may nha cung cap he thong
+            # rate-limit rieng (ProviderRateLimited song o
+            # translation_provider_registry.py, mot lop CAO HON module nay,
+            # import nguoc se tao vong lap) - hanh vi quan sat duoc (lui roi
+            # thu lai co han) la dung du cho truong hop nay.
+            raise TransientProviderError(
+                f"Dịch vụ dịch trả 429 (quá tải tạm thời) — sẽ thử lại.")
         if resp.status_code != 200:
             raise TranslationProviderError(
                 f"Dịch vụ dịch trả lỗi {resp.status_code}: "
@@ -340,13 +422,22 @@ class DocuTranslateProvider(TranslationProvider):
             du_lieu = resp.json()
             noi_dung = du_lieu["choices"][0]["message"]["content"]
         except (KeyError, IndexError, ValueError) as exc:
-            raise TranslationProviderError(
-                "Phản hồi dịch vụ dịch không đúng định dạng mong đợi.") from exc
+            # Dinh dang phan hoi sai co the la mot cau hinh SAI ON DINH (vd
+            # endpoint khong thuc su tuong thich OpenAI chat-completions) -
+            # se KHONG tu het khi cho, xep vao PERMANENT.
+            raise PermanentProviderError(
+                "Phản hồi dịch vụ dịch không đúng định dạng mong đợi — "
+                "kiểm tra endpoint có thực sự tương thích OpenAI "
+                "chat-completions không.") from exc
 
         ket_qua = (noi_dung or "").strip()
         if not ket_qua:
-            raise TranslationProviderError(
-                "Dịch vụ dịch trả về nội dung rỗng.")
+            # Mot lan sinh rong CO THE la trieu chung tam thoi cua model
+            # (khac voi sai dinh dang o tren, la mot loi cau hinh on dinh) -
+            # xep TRANSIENT, cho phep thu lai co han thay vi coi la hong
+            # vinh vien.
+            raise TransientProviderError(
+                "Dịch vụ dịch trả về nội dung rỗng — sẽ thử lại.")
 
         # Ghi lai so token NEU phan hoi co kem `usage` (OpenAI-compat chuan,
         # vLLM/TGI deu tra truong nay) — rong/thieu truong nao thi bo qua,

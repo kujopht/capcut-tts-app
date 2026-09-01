@@ -114,6 +114,8 @@ from server.translation_provider_registry import build_provider_registry  # noqa
 from server.translation_service import TranslationService  # noqa: E402
 from server.translation_store import MockTranslationStore  # noqa: E402
 
+from scripts.beam_credential import resolve_beam_token  # noqa: E402
+
 TOKEN_ENV_VAR = "BEAM_TOKEN"
 
 #: gpu= tier each model is actually deployed on
@@ -164,6 +166,21 @@ def _sha256(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+def _safe_wait_diagnostic(registry, provider_id: str) -> str:
+    """Mot dong CHAN DOAN AN TOAN cho MOT provider dang `waiting_for_
+    provider` — provider_id/status/error_class/reset_at CHI, KHONG BAO GIO
+    token/header/noi dung loi tho tu provider. Mission "REMOVE THE HUMAN
+    FROM BEAM OPERATIONS" muc F: script nay KHONG duoc phep im lang in
+    `status=waiting_for_provider` ma khong giai thich LY DO."""
+    cp = registry.get(provider_id) if registry else None
+    if cp is None:
+        return "(khong tim thay provider trong registry de chan doan them)"
+    entry = cp.catalog_entry()
+    return (f"provider_id={entry.provider_id} error_class="
+           f"{entry.error_class or '(chua ro)'} retry_at="
+           f"{entry.reset_at or '(chua biet)'}")
+
+
 def _run_one_translation(
     label: str, svc: TranslationService, registry, model: str,
     poll_timeout_seconds: int,
@@ -188,16 +205,35 @@ def _run_one_translation(
 
     deadline = time.time() + poll_timeout_seconds
     final_job = job
+    last_status = ""
     while time.time() < deadline:
         final_job = svc.get_job(job.job_id, "beam_benchmark")
-        print(f"  status={final_job.status.value}")
-        if final_job.status.value in ("completed", "failed"):
+        elapsed = time.monotonic() - t0
+        status = final_job.status.value
+        # Mission "REMOVE THE HUMAN FROM BEAM OPERATIONS" muc F: MOI dong
+        # in trang thai phai tu giai thich - khong con "status=
+        # waiting_for_provider" tran khong ro ly do. In lai KHI trang thai
+        # doi (khong spam dong giong het moi 5s) HOAC khi van waiting (can
+        # thay retry_at cap nhat).
+        if status == "waiting_for_provider":
+            retry_at = getattr(final_job, "waiting_retry_at", "")
+            print(f"  status=waiting_for_provider elapsed={elapsed:.1f}s "
+                 f"retry_at={retry_at or '(chua biet)'} "
+                 f"{_safe_wait_diagnostic(registry, 'custom')}")
+        elif status != last_status:
+            print(f"  status={status} elapsed={elapsed:.1f}s")
+        last_status = status
+        if status in ("completed", "failed"):
             break
         time.sleep(5)
     wall_seconds = time.monotonic() - t0
 
     if final_job.status.value != "completed":
-        print(f"\nNOT completed after {poll_timeout_seconds}s "
+        # Voi kien truc da sua (mission muc E): mot loi VINH VIEN gio day
+        # dua job ve `failed` NGAY, khong con treo o `waiting_for_provider`
+        # cho toi khi het `poll_timeout_seconds` - nen nhanh nay THAT SU la
+        # "that bai that", khong phai chi la "chua kip xong".
+        print(f"\nNOT completed after {wall_seconds:.1f}s (budget {poll_timeout_seconds}s) "
               f"(status={final_job.status.value}) - real error, not estimated:",
               file=sys.stderr)
         print(f"  {getattr(final_job, 'error_message', '') or final_job.error}",
@@ -251,9 +287,11 @@ def main() -> int:
                    help="Manifest saved to <prefix>_manifest.json")
     a = p.parse_args()
 
-    token = os.environ.get(TOKEN_ENV_VAR)
+    token = resolve_beam_token()
     if not token:
-        print(f"BLOCKED: {TOKEN_ENV_VAR} is not set in this process's environment.",
+        print(f"BLOCKED: {TOKEN_ENV_VAR} not found in process env or the "
+              "credential broker. One-time setup: python "
+              "scripts/fanfic_credential_broker.py store --name BEAM_TOKEN",
               file=sys.stderr)
         return 2
 

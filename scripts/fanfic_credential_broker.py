@@ -94,6 +94,16 @@ KNOWN_NAMES = (
     # carry an operator credential -- and it lives HERE, in the OS credential
     # store, never in `server/.env`, never on Render.
     "APPWRITE_SCHEMA_API_KEY",
+    # Beam Cloud API token (beam.cloud dashboard -> settings/api-keys).
+    # Mission "REMOVE THE HUMAN FROM BEAM OPERATIONS" (2026-09-01): every
+    # `beam` CLI invocation and every `scripts/beam_*.py` HTTP call reads
+    # this from the process environment (`beta9`'s own `SDKSettings` does
+    # `os.getenv("BEAM_TOKEN")` -- confirmed by reading the installed
+    # package source, not assumed) -- storing it here means the operator
+    # types it ONCE (this broker's `store` command, stdin only) instead of
+    # re-exporting `$env:BEAM_TOKEN` every session. See
+    # `scripts/beam_credential.py::resolve_beam_token` for the read side.
+    "BEAM_TOKEN",
 )
 
 #: Render env vars this module is permitted to read the VALUE of.

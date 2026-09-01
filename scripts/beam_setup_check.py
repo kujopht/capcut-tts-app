@@ -40,12 +40,19 @@ from beam_credential import TOKEN_ENV_VAR, resolve_beam_token  # noqa: E402
 
 def beam_subprocess_env(token: str) -> dict:
     """Env for a `beam` subprocess call: the real process env plus `CI=1`
-    (skip the interactive/crashing first-auth banner) and the resolved
-    token. Never mutates this process's own `os.environ` — a fresh dict
-    only, passed via `subprocess.run(..., env=...)`."""
+    (skip the interactive/crashing first-auth banner), `PYTHONIOENCODING=
+    utf-8` (a SECOND, separate Windows console crash found deploying
+    translation_hymt2_transformers_app.py, 2026-09-01: `rich`'s legacy
+    Windows console writer can raise `UnicodeEncodeError` under the
+    default cp1252 code page even with CI=1 set and even when stdout is
+    piped — see scripts/beam_operator.py::_beam_subprocess_env for the
+    full citation), and the resolved token. Never mutates this process's
+    own `os.environ` — a fresh dict only, passed via
+    `subprocess.run(..., env=...)`."""
     import os
     env = dict(os.environ)
     env["CI"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     env[TOKEN_ENV_VAR] = token
     return env
 

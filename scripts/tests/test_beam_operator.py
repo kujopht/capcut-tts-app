@@ -25,6 +25,22 @@ def _load():
     return mod
 
 
+class BeamSubprocessEnvTest(unittest.TestCase):
+    def test_sets_ci_and_utf8_encoding_without_mutating_process_env(self):
+        """Two separate real Windows console crashes (2026-09-01): the
+        interactive first-auth banner (CI=1) and a plain UnicodeEncodeError
+        in `rich`'s legacy console writer during normal deploy output
+        (PYTHONIOENCODING=utf-8) - both must be set on every beam
+        subprocess call, and neither may leak into this process's own env."""
+        mod = _load()
+        before = dict(os.environ)
+        env = mod._beam_subprocess_env("tok")
+        self.assertEqual(env["CI"], "1")
+        self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
+        self.assertEqual(env[mod.TOKEN_ENV_VAR], "tok")
+        self.assertEqual(dict(os.environ), before)
+
+
 class DeployEndpointParsingTest(unittest.TestCase):
     def test_clean_json_response_extracts_fields(self):
         mod = _load()
@@ -59,6 +75,23 @@ class DeployEndpointParsingTest(unittest.TestCase):
         with patch("subprocess.run", return_value=fake_result):
             result = mod.cmd_deploy_endpoint("app.py:generate", "tok")
         self.assertEqual(result["status"], "ERROR")
+
+    def test_forward_slash_handler_normalized_to_os_separator(self):
+        """Real bug (2026-09-01): beta9's own load_module_spec converts a
+        handler path to a module name via
+        `.replace(os.path.sep, ".")` - on Windows that's a backslash, so a
+        forward-slash handler (this repo's own convention everywhere)
+        silently failed with ModuleNotFoundError, never reaching Beam's
+        gateway. cmd_deploy_endpoint must normalize before shelling out."""
+        mod = _load()
+        fake_result = MagicMock(returncode=0, stdout=json.dumps({
+            "deployment_id": "dep_1", "invoke_url": "https://x.app.beam.cloud",
+        }), stderr="")
+        with patch("subprocess.run", return_value=fake_result) as mock_run:
+            mod.cmd_deploy_endpoint("beam_apps/foo.py:handler", "tok")
+        argv = mock_run.call_args[0][0]
+        handler_arg = argv[argv.index("deploy") + 1]
+        self.assertEqual(handler_arg, "beam_apps/foo.py:handler".replace("/", os.sep))
 
 
 class WaitReadyClassificationTest(unittest.TestCase):
@@ -125,6 +158,22 @@ class WaitReadyClassificationTest(unittest.TestCase):
         mod = _load()
         result = mod.cmd_wait_ready("https://x", "tok", kind="endpoint")
         self.assertEqual(result["status"], "ERROR")
+
+    def test_transformers_kind_posts_to_health_not_v1_models(self):
+        """Mission 'HY-MT2 1.8B TRANSFORMERS FALLBACK' muc E: the old
+        vLLM /v1/models readiness signal is meaningless for this
+        architecture - wait-ready must POST to /health instead."""
+        mod = _load()
+        fake_client = MagicMock()
+        fake_client.__enter__.return_value.post.return_value = httpx.Response(200)
+        with patch("httpx.Client", return_value=fake_client):
+            result = mod.cmd_wait_ready(
+                "https://x.app.beam.cloud", "tok", kind="transformers",
+                max_wait_seconds=30)
+        self.assertEqual(result["status"], "READY")
+        called_url = fake_client.__enter__.return_value.post.call_args[0][0]
+        self.assertTrue(called_url.endswith("/health"))
+        fake_client.__enter__.return_value.get.assert_not_called()
 
 
 class SecretRedactionTest(unittest.TestCase):

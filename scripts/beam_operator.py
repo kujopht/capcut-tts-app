@@ -214,10 +214,25 @@ def _beam_executable() -> Optional[str]:
 
 
 def _beam_subprocess_env(token: str) -> dict:
-    """Env cho MOT subprocess `beam` - CI=1 (bo qua banner crash) + token,
-    khong bao gio sua `os.environ` cua chinh tien trinh nay."""
+    """Env cho MOT subprocess `beam` - CI=1 (bo qua banner crash) + token +
+    PYTHONIOENCODING=utf-8, khong bao gio sua `os.environ` cua chinh tien
+    trinh nay.
+
+    REAL BUG found deploying translation_hymt2_transformers_app.py
+    (2026-09-01, KHAC voi loi CI=1 da sua truoc do): ngay ca voi CI=1 (bo
+    qua banner first-auth), ban than qua trinh deploy BINH THUONG (in
+    "Deploying"/"Deployed" qua `rich`) van co the crash tren Windows voi
+    `UnicodeEncodeError: 'charmap' codec can't encode characters` - `rich`
+    dung duong dan console Windows cu (`_win32_console.py`) doc theo code
+    page cp1252 mac dinh cua he thong ngay ca khi stdout that ra dang bi
+    redirect qua pipe (subprocess.run capture_output=True). Dat
+    `PYTHONIOENCODING=utf-8` la cach sua CHUAN, pho bien cho dung lop loi
+    nay voi cac cong cu Python dung `rich`/`click` tren Windows console
+    mac dinh - ep Python tu dung UTF-8 cho stdout/stderr bat ke code page
+    console that su la gi."""
     env = dict(os.environ)
     env["CI"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     env[TOKEN_ENV_VAR] = token
     return env
 
@@ -268,7 +283,7 @@ def cmd_check_version() -> Dict[str, Any]:
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "show", "beam-client"],
-            capture_output=True, text=True, timeout=30)
+            capture_output=True, encoding="utf-8", errors="replace", timeout=30)
     except Exception as exc:
         return _err(f"could not run pip show: {exc}")
     installed_version = ""
@@ -302,14 +317,29 @@ def cmd_deploy_endpoint(handler: str, token: str,
                         timeout_seconds: int = 300) -> Dict[str, Any]:
     """`@endpoint`-style app (vd cover_illustrious_app.py) - KHONG bi loi
     VLLM/rollout (xem module docstring muc 3) - subprocess CLI binh
-    thuong voi `--format json` la du."""
+    thuong voi `--format json` la du.
+
+    REAL BUG found deploying translation_hymt2_transformers_app.py
+    (mission "HY-MT2 1.8B TRANSFORMERS FALLBACK", 2026-09-01):
+    `beta9/utils.py::load_module_spec` converts the handler's FILE PATH
+    into a Python module name via
+    `module_path.replace(".py", "").replace(os.path.sep, ".")` - on
+    Windows `os.path.sep` is `\\`, so a forward-slash handler string
+    (`beam_apps/foo.py:func`, this repo's own convention everywhere else)
+    is left with the slash UN-converted, producing
+    `ModuleNotFoundError: No module named 'beam_apps/foo'`. Normalizing
+    to the OS-native separator here means callers can keep writing
+    forward-slash handler paths (matches every other command/doc in this
+    file) regardless of platform - deterministic, local, zero-GPU-cost
+    fix (this failed before ever reaching Beam's gateway)."""
+    handler = handler.replace("/", os.sep)
     beam_bin = _beam_executable()
     if not beam_bin:
         return _err("'beam' binary not found on PATH or next to the interpreter")
     try:
         result = subprocess.run(
             [beam_bin, "deploy", handler, "--format", "json"],
-            capture_output=True, text=True, timeout=timeout_seconds,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=timeout_seconds,
             env=_beam_subprocess_env(token))
     except FileNotFoundError:
         return _err("'beam' binary not found on PATH")
@@ -428,7 +458,7 @@ def cmd_list(token: str) -> Dict[str, Any]:
     try:
         result = subprocess.run(
             [beam_bin, "deployment", "list", "--format", "json"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
             env=_beam_subprocess_env(token))
     except FileNotFoundError:
         return _err("'beam' binary not found on PATH")
@@ -465,7 +495,7 @@ def cmd_volumes(token: str) -> Dict[str, Any]:
     try:
         result = subprocess.run(
             [beam_bin, "volume", "list"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
             env=_beam_subprocess_env(token))
     except FileNotFoundError:
         return _err("'beam' binary not found on PATH")
@@ -490,7 +520,7 @@ def cmd_ls_volume(token: str, remote_path: str) -> Dict[str, Any]:
     try:
         result = subprocess.run(
             [beam_bin, "ls", remote_path],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
             env=_beam_subprocess_env(token))
     except FileNotFoundError:
         return _err("'beam' binary not found on PATH")
@@ -512,7 +542,7 @@ def cmd_containers(token: str, deployment_id: str = "") -> Dict[str, Any]:
     try:
         result = subprocess.run(
             [beam_bin, "container", "list", "--format", "json"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
             env=_beam_subprocess_env(token))
     except FileNotFoundError:
         return _err("'beam' binary not found on PATH")
@@ -544,7 +574,7 @@ def cmd_stop_container(token: str, container_id: str) -> Dict[str, Any]:
     try:
         result = subprocess.run(
             [beam_bin, "container", "stop", container_id],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, encoding="utf-8", errors="replace", timeout=60,
             env=_beam_subprocess_env(token))
     except FileNotFoundError:
         return _err("'beam' binary not found on PATH")
@@ -559,7 +589,20 @@ def cmd_logs(token: str, *, deployment_id: str = "", container_id: str = "",
     """`beam logs` — nguon THAT DUY NHAT de biet TAI SAO mot container tra
     loi 500/timeout thay vi doan mo mam qua ma HTTP don le, roi thu lai mu
     quang (dung mission 'COST SAFETY OVERRIDE' quy tac 5: "Never blindly
-    retry a failed GPU operation")."""
+    retry a failed GPU operation").
+
+    REAL BUG found using this for the first time (2026-09-01):
+    `subprocess.run(..., text=True)` decodes the child's stdout/stderr
+    using Python's platform-default encoding (cp1252 on this Windows
+    machine) regardless of `PYTHONIOENCODING` set in the CHILD's env -
+    that only affects how the CHILD itself encodes, not how THIS parent
+    process decodes what it reads back. Real container log lines can
+    contain raw non-cp1252 bytes (0x90 observed directly), crashing a
+    background reader thread with `UnicodeDecodeError` and leaving
+    `result.stderr` as `None`. Fixed by decoding explicitly as UTF-8 with
+    `errors="replace"` here (the PARENT side of the same fix
+    `_beam_subprocess_env`'s `PYTHONIOENCODING=utf-8` applies to the
+    CHILD)."""
     beam_bin = _beam_executable()
     if not beam_bin:
         return _err("'beam' binary not found on PATH or next to the interpreter")
@@ -575,10 +618,12 @@ def cmd_logs(token: str, *, deployment_id: str = "", container_id: str = "",
         argv += ["--container-id", container_id]
     try:
         result = subprocess.run(
-            argv, capture_output=True, text=True, timeout=60,
-            env=_beam_subprocess_env(token))
+            argv, capture_output=True, encoding="utf-8", errors="replace",
+            timeout=60, env=_beam_subprocess_env(token))
     except FileNotFoundError:
         return _err("'beam' binary not found on PATH")
+    except (subprocess.TimeoutExpired, UnicodeError) as exc:
+        return _err(f"beam logs failed: {_redact_secrets(str(exc))}")
     if result.returncode != 0:
         return {"status": "ERROR", "returncode": result.returncode,
                 "stderr": _redact_secrets(result.stderr[-2000:])}
@@ -605,14 +650,26 @@ def cmd_wait_ready(url: str, token: str, *, kind: str,
     len 120s (van BI GIOI HAN boi `max_wait_seconds` tong the) de mot lan
     goi co co hoi that su cho het cold-start, thay vi bi cat giua chung
     lien tuc va khong bao gio biet duoc endpoint co thuc su san sang hay
-    khong."""
+    khong.
+
+    `kind="transformers"` (mission "HY-MT2 1.8B TRANSFORMERS FALLBACK, NO
+    MANAGED VLLM", 2026-09-01): POST rong toi `/health` -
+    `translation_hymt2_transformers_app.py`'s own readiness route, XAC
+    NHAN THAT KHONG goi `model.generate()` (xem file do va test
+    `test_health_never_calls_generate`) - khac `/v1/models` cua duong VLLM
+    da bo, vo nghia cho kien truc nay."""
     import httpx
 
-    if kind != "vllm":
-        return _err(f"wait-ready only implements the 'vllm' /v1/models "
-                    f"check today (got kind={kind!r})")
+    if kind == "vllm":
+        check_url = url.rstrip("/") + "/v1/models"
+        method = "GET"
+    elif kind == "transformers":
+        check_url = url.rstrip("/") + "/health"
+        method = "POST"
+    else:
+        return _err(f"wait-ready only implements 'vllm' (/v1/models) or "
+                    f"'transformers' (/health) (got kind={kind!r})")
 
-    check_url = url.rstrip("/") + "/v1/models"
     headers = {"Authorization": f"Bearer {token}"}
     deadline = time.monotonic() + max_wait_seconds
     delay = initial_delay_seconds
@@ -623,8 +680,29 @@ def cmd_wait_ready(url: str, token: str, *, kind: str,
         while time.monotonic() < deadline:
             attempt += 1
             try:
-                resp = client.get(check_url, headers=headers)
+                resp = (client.get(check_url, headers=headers) if method == "GET"
+                       else client.post(check_url, headers=headers))
                 if resp.status_code == 200:
+                    # `translation_hymt2_transformers_app.py`'s /health
+                    # can return HTTP 200 with a body {"status": "error",
+                    # "load_error": "..."} when on_start's model load
+                    # failed (self-diagnosing on purpose - see that file's
+                    # own comment) - a 200 status code alone does NOT mean
+                    # ready for kind="transformers"; a real deterministic
+                    # failure here must surface immediately, not be
+                    # reported as READY.
+                    if kind == "transformers":
+                        try:
+                            body = resp.json()
+                        except ValueError:
+                            body = {}
+                        if body.get("status") == "error":
+                            return {
+                                "status": "FAILED",
+                                "attempts": attempt,
+                                "load_error": body.get("load_error", ""),
+                                "elapsed_seconds": round(time.monotonic() - started, 1),
+                            }
                     return {
                         "status": "READY",
                         "attempts": attempt,
@@ -690,7 +768,7 @@ def main() -> int:
 
     p_ready = sub.add_parser("wait-ready", help="poll until endpoint is ready")
     p_ready.add_argument("--url", required=True)
-    p_ready.add_argument("--kind", required=True, choices=["vllm"])
+    p_ready.add_argument("--kind", required=True, choices=["vllm", "transformers"])
     p_ready.add_argument("--max-wait-seconds", type=int, default=600)
     p_ready.add_argument("--request-timeout-seconds", type=float, default=120.0)
 

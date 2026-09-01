@@ -55,7 +55,7 @@ class ImageGenerationCapability(str, Enum):
     CoverPromptBuilder va reference-conditioning IP-Adapter trong
     beam_apps/cover_illustrious_app.py). CHARACTER_LORA la kha nang
     TUONG LAI - CHUA co provider/backend nao ho tro (chua train/tai LoRA
-    nhan vat rieng nao, xem CharacterVisualIdentity.lora_reference_id's
+    nhan vat rieng nao, xem CharacterVisualIdentity.lora_asset_id's
     own docstring) - van la mot gia tri enum HOP LE (yeu cau mission:
     thiet ke "future-ready") de mot yeu cau co the KHAI BAO can no, va
     ImageRouter se raise NoCapableProviderError mot cach RO RANG (khong
@@ -196,7 +196,7 @@ BEAM_RTX4090_PER_SECOND_USD = 0.000191667
 #: beam_apps/cover_illustrious_app.py qua server/cover_pipeline.py::HttpImageCoverProvider.
 #: Ho tro PROMPT_ONLY + REFERENCE_CONDITIONED (IP-Adapter, da hoat dong
 #: that) - CHUA ho tro CHARACTER_LORA (chua train/tai LoRA nao, xem
-#: CharacterVisualIdentity.lora_reference_id). `is_free_or_subsidized=False`
+#: CharacterVisualIdentity.lora_asset_id). `is_free_or_subsidized=False`
 #: vi day la GPU tinh phi THAT theo giay (RTX4090 on-demand cua Beam),
 #: khong phai bac free-tier - KHONG duoc doi thanh True chi vi la lua chon
 #: hien tai.

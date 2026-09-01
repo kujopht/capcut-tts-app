@@ -17,8 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cover_illustrious_logic import (  # noqa: E402
     DEFAULT_NEGATIVE_PROMPT, DeviceMismatchError,
     IP_ADAPTER_EXPECTED_HIDDEN_SIZE, IP_ADAPTER_IMAGE_ENCODER_SUBFOLDER,
-    IPAdapterEncoderMismatchError, assert_component_on_cuda,
-    assert_ip_adapter_encoder_compatible, build_left_right_masks,
+    IPAdapterEncoderMismatchError, LoraCompatibilityError,
+    SimultaneousLoraNotSupportedError, assert_component_on_cuda,
+    assert_ip_adapter_encoder_compatible, assert_lora_compatible_with_base_model,
+    assert_lora_plan_executable, build_left_right_masks,
     build_reference_conditioning_metadata, build_response_payload,
     resolve_negative_prompt,
 )
@@ -125,6 +127,21 @@ class TestDefaultNegativePromptCoversCrowding(unittest.TestCase):
         for term in ("third person", "cropped face", "cut-off head",
                      "back facing viewer", "rear view", "letters",
                      "symbols", "logo"):
+            self.assertIn(term, DEFAULT_NEGATIVE_PROMPT)
+
+    def test_contains_generated_text_suppression_terms(self):
+        """Mission 'Character LoRA + Controlled Two-Character Cover V1',
+        Track C - a LATER real proof still generated a large bogus title/
+        logo despite the earlier "text, letters, symbols, logo" terms
+        already being present. Strengthened with more SPECIFIC terms
+        targeting the exact class of artifact (fake glyphs styled like a
+        book title), not just the generic word "text"."""
+        for term in ("title text", "book title", "gibberish text",
+                     "random characters", "fake text", "illegible text",
+                     "text overlay", "typography", "caption",
+                     "japanese text", "chinese text", "korean text",
+                     "english text", "writing", "calligraphy", "stamp",
+                     "seal"):
             self.assertIn(term, DEFAULT_NEGATIVE_PROMPT)
 
 
@@ -318,6 +335,61 @@ class TestAssertComponentOnCuda(unittest.TestCase):
         with self.assertRaises(DeviceMismatchError) as ctx:
             assert_component_on_cuda("unet.encoder_hid_proj", "cpu")
         self.assertIn("unet.encoder_hid_proj", str(ctx.exception))
+
+
+class TestAssertLoraCompatibleWithBaseModel(unittest.TestCase):
+    """Real regression guard: 'LoRA cua animagineXL V3 khong dung duoc
+    cho animagineXL V4' (nghien cuu that 2026-09-01) - the exact same
+    class of bug already fixed once this mission (ViT-bigG/ViT-H image
+    encoder mismatch)."""
+
+    def test_matching_base_model_does_not_raise(self):
+        try:
+            assert_lora_compatible_with_base_model(
+                "cagliostrolab/animagine-xl-4.0",
+                "cagliostrolab/animagine-xl-4.0")
+        except LoraCompatibilityError as exc:
+            self.fail(f"matching base model raised unexpectedly: {exc}")
+
+    def test_mismatched_base_model_raises(self):
+        with self.assertRaises(LoraCompatibilityError) as ctx:
+            assert_lora_compatible_with_base_model(
+                "cagliostrolab/animagine-xl-3.0",
+                "cagliostrolab/animagine-xl-4.0")
+        self.assertIn("animagine-xl-3.0", str(ctx.exception))
+        self.assertIn("animagine-xl-4.0", str(ctx.exception))
+
+    def test_empty_compatible_base_model_raises(self):
+        """An unspecified compatible_base_model must NOT be treated as
+        'assume compatible' - fail closed."""
+        with self.assertRaises(LoraCompatibilityError):
+            assert_lora_compatible_with_base_model(
+                "", "cagliostrolab/animagine-xl-4.0")
+
+
+class TestAssertLoraPlanExecutable(unittest.TestCase):
+    """Real finding: diffusers has no native regional LoRA masking
+    (confirmed via an official diffusers GitHub discussion), so loading 2
+    character LoRAs simultaneously carries a real identity-bleed risk."""
+
+    def test_zero_lora_does_not_raise(self):
+        try:
+            assert_lora_plan_executable(["", ""])
+        except SimultaneousLoraNotSupportedError as exc:
+            self.fail(f"zero LoRA raised unexpectedly: {exc}")
+
+    def test_one_lora_does_not_raise(self):
+        try:
+            assert_lora_plan_executable(["loras/subaru_v1.safetensors", ""])
+        except SimultaneousLoraNotSupportedError as exc:
+            self.fail(f"one LoRA raised unexpectedly: {exc}")
+
+    def test_two_lora_raises(self):
+        with self.assertRaises(SimultaneousLoraNotSupportedError) as ctx:
+            assert_lora_plan_executable(
+                ["loras/subaru_v1.safetensors", "loras/anastasia_v1.safetensors"])
+        self.assertIn("subaru_v1.safetensors", str(ctx.exception))
+        self.assertIn("anastasia_v1.safetensors", str(ctx.exception))
 
 
 if __name__ == "__main__":

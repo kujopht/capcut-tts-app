@@ -16,6 +16,8 @@ from server.cover_pipeline import (
     CoverProviderError,
     CoverPromptBuilder,
     HttpImageCoverProvider,
+    LoraPlan,
+    LoraPlanEntry,
     NotConfiguredCoverProvider,
     wrap_raster_as_overlayable_svg,
 )
@@ -438,7 +440,7 @@ class TestCoverPromptBuilder(unittest.TestCase):
     def test_negative_space_and_cinematic_background_tags_present(self):
         """Danh cho tieu de overlay sau nay + tranh bia bi rop hinh."""
         prompt = CoverPromptBuilder.build_prompt(_req())
-        self.assertIn("negative space for title", prompt)
+        self.assertIn("clean blank area for title placement", prompt)
         self.assertIn("cinematic fantasy background", prompt)
 
     def test_empty_optional_fields_still_produces_valid_prompt(self):
@@ -604,9 +606,15 @@ class TestCoverPromptBuilderCompactModeTokenBudget(unittest.TestCase):
     def test_compact_mode_keeps_title_negative_space(self):
         """Requirement 4 preservation list - title negative space must
         survive trimming, it is product-critical (app-side title overlay
-        composition), not a low-priority detail."""
+        composition), not a low-priority detail. Phrasing avoids the word
+        "text" in the POSITIVE prompt (real CLIP-negation caveat: text
+        encoders do not reliably process negation, so "no text" as a
+        positive-prompt instruction can sometimes backfire - describe the
+        desired blank-space STATE instead, and rely on the negative
+        prompt channel for the actual suppression)."""
         prompt = CoverPromptBuilder.build_prompt(_rezero_req(), self.registry)
-        self.assertIn("negative space for title", prompt)
+        self.assertIn("blank space reserved for title", prompt)
+        self.assertNotIn("no text", prompt.lower())
 
     def test_single_identity_prompt_unaffected_by_compact_mode(self):
         """Only >= 2 resolved identities with compact tags trigger
@@ -638,6 +646,104 @@ class TestCoverPromptBuilderCompactModeTokenBudget(unittest.TestCase):
                       "messy black hair, on left", prompt)
         self.assertIn("Anastasia Hoshin, white fur ushanka hat, "
                       "long purple hair, on right", prompt)
+
+
+class TestBuildLoraPlan(unittest.TestCase):
+    """Mission 'Character LoRA + Controlled Two-Character Cover V1',
+    Requirement 3 (zero/one/two LoRA support) + Requirement 4 (investigate
+    cross-character LoRA bleed). Seed data has empty LoRA fields (no
+    verified-compatible LoRA exists yet - real finding, not an oversight),
+    so tests register their own LoRA-equipped identities."""
+
+    def setUp(self):
+        self.registry = CharacterIdentityRegistry()
+
+    def test_no_registry_returns_none_mode(self):
+        plan = CoverPromptBuilder.build_lora_plan(_rezero_req())
+        self.assertEqual(plan.mode, "none")
+        self.assertEqual(plan.entries, [])
+
+    def test_no_lora_on_any_character_returns_none_mode(self):
+        """Seed data (Subaru/Anastasia) has empty lora_asset_id - existing
+        generic path (prompt/reference-conditioning) must be unaffected."""
+        plan = CoverPromptBuilder.build_lora_plan(_rezero_req(), self.registry)
+        self.assertEqual(plan.mode, "none")
+        self.assertEqual(plan.entries, [])
+
+    def test_one_character_with_lora_returns_single_mode(self):
+        self.registry.register(CharacterVisualIdentity(
+            canonical_name="Natsuki Subaru", fandom="Re:Zero",
+            gender_presentation="male",
+            lora_asset_id="loras/subaru_v1.safetensors",
+            lora_trigger_tokens=["subaru_natsuki"],
+            lora_recommended_strength=0.8,
+            lora_compatible_base_model="cagliostrolab/animagine-xl-4.0",
+            lora_provenance="trained in-house"))
+        plan = CoverPromptBuilder.build_lora_plan(_rezero_req(), self.registry)
+        self.assertEqual(plan.mode, "single")
+        self.assertEqual(len(plan.entries), 1)
+        self.assertEqual(plan.entries[0].character_name, "Natsuki Subaru")
+        self.assertEqual(plan.entries[0].slot, "primary")
+        self.assertEqual(plan.entries[0].asset_id, "loras/subaru_v1.safetensors")
+        self.assertEqual(plan.entries[0].strength, 0.8)
+
+    def test_two_characters_with_lora_returns_simultaneous_unsupported(self):
+        """Requirement 4 - the real finding: diffusers has no native
+        regional LoRA masking, so 2 simultaneous character LoRAs carry a
+        real identity-bleed risk. The plan must flag this, not silently
+        proceed."""
+        self._register_both_with_lora()
+        plan = CoverPromptBuilder.build_lora_plan(_rezero_req(), self.registry)
+        self.assertEqual(plan.mode, "simultaneous_unsupported")
+        self.assertEqual(len(plan.entries), 2)
+        self.assertTrue(any("regional LoRA masking" in w for w in plan.warnings))
+
+    def test_missing_compatible_base_model_is_skipped_with_warning(self):
+        """Real risk (not hypothetical): a LoRA trained on a different
+        SDXL checkpoint (Illustrious, Pony Diffusion, an older Animagine
+        version) can produce garbage output - the exact same class of bug
+        as the ViT-bigG/ViT-H image encoder mismatch fixed earlier this
+        mission. Skip rather than guess compatibility."""
+        self.registry.register(CharacterVisualIdentity(
+            canonical_name="Natsuki Subaru", fandom="Re:Zero",
+            gender_presentation="male",
+            lora_asset_id="loras/subaru_v1.safetensors",
+            lora_compatible_base_model=""))
+        plan = CoverPromptBuilder.build_lora_plan(_rezero_req(), self.registry)
+        self.assertEqual(plan.mode, "none")
+        self.assertTrue(any("lora_compatible_base_model" in w for w in plan.warnings))
+
+    def test_duplicate_trigger_tokens_across_characters_produce_warning(self):
+        self.registry.register(CharacterVisualIdentity(
+            canonical_name="Natsuki Subaru", fandom="Re:Zero",
+            gender_presentation="male",
+            lora_asset_id="loras/subaru_v1.safetensors",
+            lora_trigger_tokens=["shared_token"],
+            lora_compatible_base_model="cagliostrolab/animagine-xl-4.0"))
+        self.registry.register(CharacterVisualIdentity(
+            canonical_name="Anastasia Hoshin", fandom="Re:Zero",
+            gender_presentation="female",
+            lora_asset_id="loras/anastasia_v1.safetensors",
+            lora_trigger_tokens=["shared_token"],
+            lora_compatible_base_model="cagliostrolab/animagine-xl-4.0"))
+        plan = CoverPromptBuilder.build_lora_plan(_rezero_req(), self.registry)
+        self.assertTrue(any("shared_token" in w for w in plan.warnings))
+
+    def _register_both_with_lora(self):
+        self.registry.register(CharacterVisualIdentity(
+            canonical_name="Natsuki Subaru", fandom="Re:Zero",
+            gender_presentation="male",
+            lora_asset_id="loras/subaru_v1.safetensors",
+            lora_trigger_tokens=["subaru_natsuki"],
+            lora_recommended_strength=0.8,
+            lora_compatible_base_model="cagliostrolab/animagine-xl-4.0"))
+        self.registry.register(CharacterVisualIdentity(
+            canonical_name="Anastasia Hoshin", fandom="Re:Zero",
+            gender_presentation="female",
+            lora_asset_id="loras/anastasia_v1.safetensors",
+            lora_trigger_tokens=["anastasia_hoshin"],
+            lora_recommended_strength=0.8,
+            lora_compatible_base_model="cagliostrolab/animagine-xl-4.0"))
 
 
 class TestWrapRasterAsOverlayableSvg(unittest.TestCase):

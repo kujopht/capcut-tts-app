@@ -132,9 +132,28 @@ class TestCharacterIdentityRegistry(unittest.TestCase):
         self.assertIsNotNone(identity)
         self.assertEqual(identity.canonical_name, "Monkey D. Luffy")
 
-    def test_lora_field_defaults_empty_unused_placeholder(self):
+    def test_lora_fields_default_empty_unused_placeholder(self):
+        """Tinh den 2026-09-01: chua co LoRA da xac minh tuong thich
+        animagine-xl-4.0 nao cho Subaru/Anastasia (nghien cuu that qua
+        Civitai/HuggingFace) - seed data phai con RONG, khong duoc dien
+        boi mot LoRA CHUA kiem chung."""
         identity = self.registry.lookup("Re:Zero", "Natsuki Subaru")
-        self.assertEqual(identity.lora_reference_id, "")
+        self.assertEqual(identity.lora_asset_id, "")
+        self.assertEqual(identity.lora_trigger_tokens, [])
+        self.assertEqual(identity.lora_recommended_strength, 0.0)
+        self.assertEqual(identity.lora_compatible_base_model, "")
+        self.assertEqual(identity.lora_provenance, "")
+        self.assertFalse(identity.has_lora())
+
+    def test_has_lora_true_when_asset_id_set(self):
+        identity = CharacterVisualIdentity(
+            canonical_name="A", fandom="F",
+            lora_asset_id="loras/subaru_v1.safetensors",
+            lora_trigger_tokens=["subaru_natsuki"],
+            lora_recommended_strength=0.8,
+            lora_compatible_base_model="cagliostrolab/animagine-xl-4.0",
+            lora_provenance="trained in-house, 40-image curated dataset")
+        self.assertTrue(identity.has_lora())
 
     def test_reference_conditioning_fields_default_empty(self):
         identity = self.registry.lookup("Re:Zero", "Natsuki Subaru")

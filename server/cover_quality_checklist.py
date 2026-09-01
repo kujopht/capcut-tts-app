@@ -39,8 +39,14 @@ class CoverQualityEvaluation:
         (khung hinh, can bang, khong loi ky la ro rang).
       - `text_artifact_observed`: model co "ve" ra chu/glyph gia (khong
         phai chu that, thuong la artifact cua model anh khi gap tu ngu
-        trong prompt) - anh huong den vung "negative space for title" du
-        dinh danh cho overlay tieu de that.
+        trong prompt) - anh huong den vung tieu de du dinh danh cho
+        overlay ung dung that (xem CoverPromptBuilder's "blank space
+        reserved for title" positive phrasing va DEFAULT_NEGATIVE_PROMPT
+        trong beam_apps/cover_illustrious_logic.py). CHINH LA truong
+        `generated_text_artifact` duoc yeu cau trong mission "Character
+        LoRA + Controlled Two-Character Cover V1" Track C - giu nguyen
+        ten da co o day (khong tao truong trung lap) vi cung mot y nghia
+        chinh xac, da ton tai tu mission truoc.
       - `production_ready`: KET LUAN cuoi cung cua nguoi danh gia - anh
         nay co du dung duoc cho san xuat (hien thi cho nguoi doc that)
         hay khong.

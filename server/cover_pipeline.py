@@ -14,7 +14,7 @@ import base64
 import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, List, Literal, Optional, Protocol
+from typing import Any, Dict, List, Literal, Optional, Protocol
 
 import httpx
 
@@ -89,6 +89,41 @@ class NotConfiguredCoverProvider:
 
 class CoverProviderError(Exception):
     """Loi chung khi goi provider sinh anh bia that that bai (HTTP 500, timeout, v.v.)."""
+
+
+@dataclass
+class LoraPlanEntry:
+    """MOT muc trong ke hoach nap LoRA - ung voi MOT nhan vat HIEN THI
+    tren bia co `lora_asset_id`. Du lieu THUAN - khong chua bat ky kieu
+    Diffusers/Beam nao (xem `CoverPromptBuilder.build_lora_plan`'s own
+    docstring)."""
+
+    character_name: str
+    slot: Literal["primary", "secondary", "tertiary"]
+    asset_id: str
+    trigger_tokens: List[str] = field(default_factory=list)
+    strength: float = 0.0
+    compatible_base_model: str = ""
+
+
+@dataclass
+class LoraPlan:
+    """Ke hoach nap LoRA cho MOT lan sinh anh bia - xem
+    `CoverPromptBuilder.build_lora_plan`'s own docstring cho day du ly do
+    va bang chung. `mode`:
+      - "none": khong nhan vat nao co LoRA - duong dan hien co (prompt-
+        only/reference-conditioning) khong doi.
+      - "single": DUNG MOT nhan vat co LoRA - diffusers ho tro TRUC TIEP
+        (load_lora_weights + set_adapters), khong can co che vung/mask
+        nao them.
+      - "simultaneous_unsupported": >= 2 nhan vat co LoRA CUNG LUC - xem
+        `warnings`. generate() PHAI tu choi (raise) truong hop nay, KHONG
+        duoc am tham chay.
+    """
+
+    mode: Literal["none", "single", "simultaneous_unsupported"]
+    entries: List[LoraPlanEntry] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
 
 
 class CoverPromptBuilder:
@@ -187,7 +222,7 @@ class CoverPromptBuilder:
             parts.append(request.visual_style)
 
         parts.append("cinematic fantasy background")
-        parts.append("negative space for title")
+        parts.append("clean blank area for title placement, no artwork detail there")
         parts.append("detailed anime digital painting")
         parts.append("dynamic pose")
         parts.append("vibrant colors")
@@ -204,8 +239,10 @@ class CoverPromptBuilder:
         COMPACT" cho ly do that. Chi giu: "light novel cover", fandom,
         count_tag, bo cuc COT LOI (chinh xac 2 nhan vat, waist-up, ca hai
         mat/khuon mat lo ro, nhin ve nguoi xem hoac goc 3/4), ten+toi da 2
-        tag noi bat/nhan vat, "negative space for title" (can cho overlay
-        tieu de ung dung, khong phai chi tiet tuy chon), va 2 tag chat
+        tag noi bat/nhan vat, "blank space reserved for title" (can cho
+        overlay tieu de ung dung, khong phai chi tiet tuy chon - phrasing
+        TRANH tu "text" o kenh prompt DUONG, xem mission "Character LoRA
+        + Controlled Two-Character Cover V1" Track C), va 2 tag chat
         luong ngan gon - bo genre/mood/van xuoi dai/chi tiet uu tien thap.
 
         Bo cuc "on left"/"on right" khop CHINH XAC voi
@@ -249,7 +286,7 @@ class CoverPromptBuilder:
                 f"{cast[2]}, {tertiary_descriptor}" if tertiary_descriptor else cast[2])
             parts.append(f"{tertiary_block} in the background")
 
-        parts.append("negative space for title")
+        parts.append("blank space reserved for title")
         parts.append("anime art, high quality")
 
         return ", ".join(parts)
@@ -315,6 +352,97 @@ class CoverPromptBuilder:
                     if trait not in traits:
                         traits.append(trait)
         return traits
+
+    @staticmethod
+    def build_lora_plan(
+        request: CoverGenerationRequest,
+        identity_registry: Optional[CharacterIdentityRegistry] = None,
+    ) -> "LoraPlan":
+        """
+        Ke hoach nap LoRA CHO CAST HIEN THI tren bia - mission "Character
+        LoRA + Controlled Two-Character Cover V1", Requirement 3 ("zero
+        LoRA -> existing generic path; one character LoRA; two separate
+        character LoRAs") + Requirement 4 ("Investigate cross-character
+        LoRA bleed"). KHONG goi diffusers/beam o day (server-side, thuan)
+        - `beam_apps/cover_illustrious_app.py` la noi THUC THI ke hoach
+        nay that (goi load_lora_weights/set_adapters/unload_lora_weights).
+
+        Phat hien that (2026-09-01, khong doan): diffusers KHONG co co
+        che regional-LoRA-masking san co (mot cuoc thao luan GitHub chinh
+        thuc cua diffusers xac nhan "supplying a mask for LoRA output is
+        currently not supported by PEFT") - khac voi IP-Adapter, von CO
+        `ip_adapter_masks` chinh thuc. Vi vay nap 2 LoRA nhan vat CUNG
+        LUC mang rui ro "lan" dac trung (identity bleed) THAT, khong phai
+        ly thuyet - `mode="simultaneous_unsupported"` bao hieu dieu nay
+        ro rang thay vi am tham chay.
+
+        Cung kiem tra: (a) `lora_compatible_base_model` phai duoc dien -
+        LoRA train tren checkpoint KHAC animagine-xl-4.0 co the sinh ket
+        qua hong (bang chung that: "LoRA animagineXL V3 khong dung duoc
+        cho V4"), tuong tu loi ViT-bigG/ViT-H da gap va sua truoc do
+        trong cung mission nay; (b) trung token kich hoat (trigger
+        tokens) giua 2 nhan vat - mot rui ro lan dac trung KHAC, o cap
+        prompt chu khong phai o cap trong so mo hinh.
+        """
+        if identity_registry is None:
+            return LoraPlan(mode="none")
+
+        cast = [
+            (slot, name) for slot, name in (
+                ("primary", request.primary_character),
+                ("secondary", request.secondary_character),
+                ("tertiary", request.tertiary_character),
+            ) if name
+        ][:max(0, request.max_visible_characters)]
+
+        entries: List[LoraPlanEntry] = []
+        warnings: List[str] = []
+        seen_trigger_tokens: Dict[str, str] = {}
+
+        for slot, name in cast:
+            identity = identity_registry.lookup(request.fandom, name)
+            if identity is None or not identity.has_lora():
+                continue
+            if not identity.lora_compatible_base_model:
+                warnings.append(
+                    f"{name}: lora_asset_id da dien nhung "
+                    f"lora_compatible_base_model con rong - KHONG the xac "
+                    f"minh tuong thich checkpoint, bo qua LoRA nay de an "
+                    f"toan (xem bang chung that ve loi tuong thich cheo "
+                    f"checkpoint LoRA trong module docstring).")
+                continue
+            for token in identity.lora_trigger_tokens:
+                other = seen_trigger_tokens.get(token)
+                if other and other != name:
+                    warnings.append(
+                        f"trigger token {token!r} dung chung boi {other!r} "
+                        f"va {name!r} - co the gay nham lan dac trung luc "
+                        f"suy luan.")
+                seen_trigger_tokens[token] = name
+            entries.append(LoraPlanEntry(
+                character_name=name, slot=slot,
+                asset_id=identity.lora_asset_id,
+                trigger_tokens=list(identity.lora_trigger_tokens),
+                strength=identity.lora_recommended_strength,
+                compatible_base_model=identity.lora_compatible_base_model,
+            ))
+
+        if not entries:
+            return LoraPlan(mode="none", warnings=warnings)
+        if len(entries) == 1:
+            return LoraPlan(mode="single", entries=entries, warnings=warnings)
+
+        warnings.append(
+            f"{len(entries)} nhan vat cung co LoRA - diffusers KHONG co "
+            f"regional LoRA masking san co (xac minh that 2026-09-01), nen "
+            f"KHONG the nap dong thoi ma khong co rui ro lan dac trung "
+            f"(identity bleed). Can co che 'staged regional inpainting' "
+            f"(tung LoRA MOT trong tung lan goi rieng, tren vung mask "
+            f"rieng) - CHUA duoc xay dung. generate() se TU CHOI truong "
+            f"hop nay (raise ro rang) thay vi am tham chay voi rui ro "
+            f"that.")
+        return LoraPlan(
+            mode="simultaneous_unsupported", entries=entries, warnings=warnings)
 
 
 def wrap_raster_as_overlayable_svg(

@@ -28,7 +28,7 @@ removes the assumption that the LOCAL DEPLOY-DISCOVERY environment has it.
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 if TYPE_CHECKING:
     from PIL import Image as PILImageModule
@@ -41,7 +41,13 @@ if TYPE_CHECKING:
 #: that (v10) that bai bo cuc theo dung 3 kieu: mat/dau nhan vat chinh bi
 #: cat xen, nhan vat phu quay lung/khong thay mat, va mot glyph/artifact
 #: giong chu viet lon xuat hien khong mong muon - moi kieu duoc them tag
-#: rieng thay vi chi dua vao cac tag chung da co ("cropped", "text").
+#: rieng thay vi chi dua vao cac tag chung da co ("cropped", "text"). Them
+#: LAN 3 (mission "Character LoRA + Controlled Two-Character Cover V1"):
+#: mot proof KHAC sau do van sinh "generated text/gibberish" lon du da co
+#: "text, letters, symbols, logo" - tag chung co the chua du CU THE khi
+#: model manh dang co xu huong ve tieu de/logo cho phong cach "bia sach".
+#: Them tag CU THE hon (khong chi noi chung chung "text") de tang trong
+#: so phu dinh dung vao dung dang glyph gia thuong gap.
 DEFAULT_NEGATIVE_PROMPT = (
     "lowres, bad anatomy, bad hands, text, error, missing fingers, "
     "extra digit, fewer digits, cropped, worst quality, low quality, "
@@ -50,7 +56,11 @@ DEFAULT_NEGATIVE_PROMPT = (
     "duplicate character, cloned face, multiple girls, multiple boys, "
     "collage, character sheet, "
     "third person, cropped face, cut-off head, back facing viewer, "
-    "rear view, letters, symbols, logo"
+    "rear view, letters, symbols, logo, "
+    "title text, book title, gibberish text, random characters, "
+    "fake text, illegible text, text overlay, typography, caption, "
+    "subtitle, chapter text, japanese text, chinese text, korean text, "
+    "english text, writing, calligraphy, stamp, seal"
 )
 
 
@@ -170,6 +180,61 @@ def assert_component_on_cuda(component_name: str, device_str: str) -> None:
             f"CUDA device. Real prior incident: RuntimeError 'Expected "
             f"all tensors to be on the same device, but got index is on "
             f"cpu, different from other tensors on cuda:0'.")
+
+
+class LoraCompatibilityError(Exception):
+    """Mot LoRA duoc yeu cau nap khong tuong thich voi checkpoint dang
+    chay - fail LOUD tai thoi diem nap (on_start hoac dau generate()),
+    khong phai giua suy luan. Real bug class da gap: checkpoint LoRA sai
+    (vd Illustrious/Pony Diffusion/animagine-xl-3.x) tren animagine-xl-4.0
+    co the sinh ket qua hong/vo nghia - tuong tu loi ViT-bigG/ViT-H image
+    encoder sai da gap va sua truoc do trong cung mission nay."""
+
+
+def assert_lora_compatible_with_base_model(
+        lora_compatible_base_model: str, actual_base_model: str) -> None:
+    """Real regression guard (nghien cuu that 2026-09-01, khong doan):
+    "LoRA cua animagineXL V3 KHONG dung duoc cho animagineXL V4" (xac
+    nhan tu chinh trang model animagine-xl-4.0-zero). So khop CHINH XAC
+    (khong doan gan dung/tien to chung) - mot LoRA ghi
+    `lora_compatible_base_model="cagliostrolab/animagine-xl-3.0"` (hay
+    bat ky checkpoint nao khac `actual_base_model`) bi TU CHOI, khong
+    duoc gia dinh "co le van on"."""
+    if lora_compatible_base_model != actual_base_model:
+        raise LoraCompatibilityError(
+            f"LoRA duoc train/kiem chung cho checkpoint "
+            f"{lora_compatible_base_model!r} nhung server dang chay "
+            f"{actual_base_model!r} - LoRA KHONG tuong thich cheo "
+            f"checkpoint (bang chung that: LoRA animagineXL V3 khong "
+            f"dung duoc cho V4). Tu choi nap de tranh sinh ket qua hong/"
+            f"vo nghia thay vi doan lieu no co the van chay duoc.")
+
+
+class SimultaneousLoraNotSupportedError(Exception):
+    """>= 2 LoRA nhan vat duoc yeu cau nap CUNG LUC. Real finding
+    (2026-09-01, xac nhan qua thao luan GitHub chinh thuc cua diffusers -
+    "supplying a mask for LoRA output is currently not supported by
+    PEFT"): diffusers KHONG co co che regional-LoRA-masking san co, khac
+    voi IP-Adapter (co `ip_adapter_masks` chinh thuc). Nap 2 LoRA nhan
+    vat dong thoi mang rui ro LAN dac trung (identity bleed) THAT giua 2
+    nhan vat, khong phai ly thuyet. Co che dung de giai quyet dieu nay -
+    "staged regional inpainting" (nap/nap lai TUNG LoRA MOT, moi lan chi
+    anh huong len vung mask rieng cua no qua img2img/inpaint mask, khong
+    bao gio 2 LoRA cung active) - CHUA duoc xay dung. generate() PHAI tu
+    choi (raise loi nay) thay vi am tham chay voi rui ro lan that."""
+
+
+def assert_lora_plan_executable(lora_asset_ids: List[str]) -> None:
+    """Nhan mot danh sach `lora_asset_id` (rong = khong dung LoRA cho
+    nhan vat do) tu request, raise `SimultaneousLoraNotSupportedError`
+    neu >= 2 gia tri KHAC RONG duoc yeu cau cung luc. 0 hoac 1 LoRA thi
+    khong lam gi (duong dan da duoc diffusers ho tro truc tiep)."""
+    non_empty = [a for a in lora_asset_ids if a]
+    if len(non_empty) >= 2:
+        raise SimultaneousLoraNotSupportedError(
+            f"{len(non_empty)} LoRA nhan vat duoc yeu cau nap cung luc "
+            f"({non_empty!r}) - chua ho tro (xem "
+            f"SimultaneousLoraNotSupportedError's own docstring).")
 
 
 def build_reference_conditioning_metadata(*, used: bool, strength: float = 0.0) -> dict:

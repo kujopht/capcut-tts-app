@@ -14,12 +14,16 @@ METADATA fandom/nhan vat co the tai su dung, o day va trong
 CoverPromptBuilder.build_prompt(), giong nguyen tac cua
 `server/fandom_registry.py`.
 
-CHUA gan LoRA that (`lora_reference_id` la truong DU PHONG, khong code nao
-doc). `reference_images`/`reference_strength`/`reference_source` DA duoc
-noi day that qua reference-conditioning (IP-Adapter, xem
-beam_apps/cover_illustrious_app.py) — nhung module NAY van hoan toan
-provider-trung-lap: khong import beam/torch/diffusers/PIL, chi luu du
-lieu (xem test_character_identity_module_has_no_provider_specific_imports
+`reference_images`/`reference_strength`/`reference_source` DA duoc noi
+day that qua reference-conditioning (IP-Adapter, xem
+beam_apps/cover_illustrious_app.py). `lora_asset_id` va cac truong LoRA
+lien quan (mission "Character LoRA + Controlled Two-Character Cover V1")
+la SCHEMA DA SAN SANG nhung CHUA train/tai LoRA nao — xem
+`lora_asset_id`'s own docstring cho ly do that (khong co LoRA da xac
+minh tuong thich cho Subaru/Anastasia tren animagine-xl-4.0 tinh den
+2026-09-01, nghien cuu that qua Civitai/HuggingFace, khong doan). Module
+NAY van hoan toan provider-trung-lap: khong import beam/torch/diffusers/
+PIL, chi luu du lieu (xem test_character_identity_module_has_no_provider_specific_imports
 trong server/tests/test_character_identity.py — kiem tra THAT bang AST,
 khong chi ghi trong docstring).
 """
@@ -77,9 +81,41 @@ class CharacterVisualIdentity:
     #: 216 token CLIP (gioi han cung la 77) — Beam log that:
     #: "Token indices sequence length 216 > maximum 77".
     compact_visual_tags: List[str] = field(default_factory=list)
-    #: Du phong cho LoRA nhan vat rieng trong tuong lai — CHUA train/tai
-    #: LoRA nao (chua den luot co che nay), KHONG code nao doc truong nay.
-    lora_reference_id: str = ""
+    #: Duong dan/dinh danh file LoRA nhan vat that (vd R2 object key, HF
+    #: repo id, hoac duong dan cuc bo) - RONG = CHUA co LoRA nao cho nhan
+    #: vat nay (van lui ve mo ta van ban/reference-conditioning nhu truoc,
+    #: KHONG chan tien trinh sinh bia). CHUA train/tai LoRA nao tinh den
+    #: 2026-09-01 - nghien cuu that (Civitai/HuggingFace) khong tim thay
+    #: LoRA nao da XAC MINH tuong thich voi animagine-xl-4.0 cho Subaru
+    #: hay Anastasia (co LoRA cong dong nhung train tren checkpoint KHAC
+    #: - Illustrious, Pony Diffusion, NovelAI, animagine-xl-3.x - CHUA
+    #: chac tuong thich, xem `lora_compatible_base_model`).
+    lora_asset_id: str = ""
+    #: Tu/cum tu kich hoat (trigger token) LoRA nay mong doi xuat hien
+    #: trong prompt de kich hoat dung dac trung da hoc luc train - vd
+    #: "subaru_natsuki" hoac cum ten dat luc train. RONG neu
+    #: `lora_asset_id` rong.
+    lora_trigger_tokens: List[str] = field(default_factory=list)
+    #: Cuong do LoRA de xuat (tham so `set_adapters()` cua diffusers,
+    #: thuong 0.6-1.0 cho LoRA nhan vat) - KHAC voi `reference_strength`
+    #: (do la ip_adapter_scale, mot co che khac hoan toan). 0.0 = chua
+    #: thiet lap/khong dung.
+    lora_recommended_strength: float = 0.0
+    #: Checkpoint SDXL/Animagine CHINH XAC ma LoRA nay da duoc train/kiem
+    #: chung tuong thich - BAT BUOC VE MAT QUY UOC khi `lora_asset_id`
+    #: duoc dien. THAT QUAN TRONG (nghien cuu that 2026-09-01, khong
+    #: doan): LoRA KHONG tuong thich cheo giua cac phien ban checkpoint -
+    #: "LoRA cua animagineXL V3 KHONG dung duoc cho animagineXL V4"
+    #: (xac nhan tu chinh trang model animagine-xl-4.0-zero). Mot LoRA
+    #: train tren checkpoint KHAC animagine-xl-4.0 (Illustrious, Pony
+    #: Diffusion, NovelAI...) rat co the sinh ket qua hong/vo nghia - y
+    #: het loi ViT-bigG/ViT-H sai encoder da gap va sua truoc do trong
+    #: cung mission nay.
+    lora_compatible_base_model: str = ""
+    #: Nguon goc/xuat xu cua file LoRA (ai train, tap du lieu nao, giay
+    #: phep gi) - BAT BUOC VE MAT QUY UOC khi `lora_asset_id` duoc dien,
+    #: cung nguyen tac voi `source_provenance`/`reference_source`.
+    lora_provenance: str = ""
     #: Danh sach duong dan/URL anh tham chieu cho reference-conditioning
     #: THAT (IP-Adapter, xem beam_apps/cover_illustrious_app.py). NHIEU
     #: anh moi nhan vat duoc ho tro O CAP SCHEMA/REQUEST (vd nhieu goc
@@ -105,6 +141,9 @@ class CharacterVisualIdentity:
 
     def has_reference_images(self) -> bool:
         return bool(self.reference_images)
+
+    def has_lora(self) -> bool:
+        return bool(self.lora_asset_id)
 
     def count_tag_category(self) -> str:
         """"boy"/"girl" neu `gender_presentation` biet ro, nguoc lai

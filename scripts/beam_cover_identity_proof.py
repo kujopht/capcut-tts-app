@@ -28,7 +28,7 @@ Subaru + Anastasia (messy black hair + tracksuit vs. long purple hair +
 white fur-hat dress), no crowd/duplicates, usable light-novel-cover
 composition. If this single proof still fails character identity,
 STOP - the next lever is LoRA or reference/IP-Adapter conditioning
-(server/character_identity.py already has lora_reference_id/
+(server/character_identity.py already has lora_asset_id/
 reference_asset_url placeholder fields for exactly that, unwired by
 design - see that file's own docstring), not more prompt iteration.
 """

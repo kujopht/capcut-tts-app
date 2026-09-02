@@ -101,6 +101,19 @@ MUST_DENY = [
     # Deleting a credential stays denied in every mode; writing one does not.
     ("curl -X DELETE", "curl -X DELETE https://api.example.com/v1/zones/z1"),
     ("curl --request DELETE", "curl --request DELETE https://api.example.com/x"),
+    # curl file downloads (2026-09-02): denied unless https + GET + no
+    # credentials/body + output confined to the Claude scratch tree. Every
+    # way one of those four conditions can fail must still deny, in every
+    # mode -- this is what replaced the old blanket settings.json deny.
+    ("curl download plain http", 'curl -fsSL http://example.com/x -o "C:\\Users\\u\\AppData\\Local\\Temp\\claude\\proj\\sess\\scratchpad\\x"'),
+    ("curl download outside scratch", 'curl -fsSL https://example.com/x -o "C:\\Users\\u\\Documents\\CapCut-TTS-App\\x"'),
+    ("curl download into .claude", 'curl -fsSL https://example.com/x -o ".claude/hooks/x"'),
+    ("curl download with Authorization header", 'curl -H "Authorization: Bearer t" https://example.com/x -o "C:\\Users\\u\\AppData\\Local\\Temp\\claude\\proj\\sess\\scratchpad\\x"'),
+    ("curl download with cookie", 'curl -b "session=abc" https://example.com/x -o "C:\\Users\\u\\AppData\\Local\\Temp\\claude\\proj\\sess\\scratchpad\\x"'),
+    ("curl download non-GET", 'curl -X POST https://example.com/x -o "C:\\Users\\u\\AppData\\Local\\Temp\\claude\\proj\\sess\\scratchpad\\x"'),
+    ("curl download with body", 'curl -d "a=1" https://example.com/x -o "C:\\Users\\u\\AppData\\Local\\Temp\\claude\\proj\\sess\\scratchpad\\x"'),
+    ("curl -O bare (CWD, not scratch)", 'curl -O https://example.com/x.webm'),
+    ("curl --remote-name bare", 'curl --remote-name https://example.com/x.webm'),
     ("gh secret delete", "gh secret delete MY_TOKEN"),
     ("gh auth token", "gh auth token"),
     ("gh auth refresh", "gh auth refresh --scopes repo"),
@@ -244,6 +257,9 @@ MUST_RUN = [
     ("curl -sS read", "curl -sS https://fas-prod-api.onrender.com/api/health"),
     ("curl -I head", "curl -I https://example.com"),
     ("curl -X GET explicit", "curl -X GET https://example.com/api"),
+    # Safe download: https, GET, no credentials, output confined to the
+    # Claude scratch tree -- must run without a prompt in either mode.
+    ("curl safe download to scratch", 'curl -fsSL https://upload.wikimedia.org/x.webm -o "C:\\Users\\u\\AppData\\Local\\Temp\\claude\\proj\\sess\\scratchpad\\x.webm"'),
     ("ls", "ls -la web/src"),
     ("cat readme", "cat README.md"),
     ("grep", "grep -rn TODO server"),

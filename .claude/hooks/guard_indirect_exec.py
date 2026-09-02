@@ -22,6 +22,17 @@ Three tiers, in strict precedence order:
      scheduled-task/Defender/firewall mutation, credential disclosure, and
      indirect arbitrary execution. Enforced in *every* mode, including
      ``bypassPermissions``. This is the hard boundary.
+
+     ``curl`` file downloads (``-o``/``-O``/``--output``/``--remote-name``)
+     are a narrower case of this same tier, not an exception to it: denied
+     unless the call is HTTPS, plain GET, carries no credentials/body, AND
+     writes only inside this machine's Claude scratch tree (see
+     ``curl_download_violation``). settings.json's own allow/deny lists
+     cannot express "safe except for these four independent conditions" --
+     only this hook can, which is why the download rule was moved here
+     (2026-09-02, explicit operator confirmation) instead of staying a
+     blanket settings.json deny that also blocked legitimately-licensed
+     fetches.
   2. ASK   -- genuinely consequential remote mutations: PR create/merge,
      workflow dispatch, production deploy. Applied in every mode EXCEPT
      ``bypassPermissions``, where the operator is physically at the machine
@@ -454,6 +465,89 @@ def curl_is_write(tokens: list[str]) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# curl file downloads (-o/-O/--output/--remote-name).
+#
+# Narrowed from a blanket settings.json deny (2026-09-02, operator-approved
+# via explicit confirmation, not inferred): the old rule blocked EVERY curl
+# download regardless of source or destination, which was blunt enough to
+# also block a legitimately CC-BY-SA-licensed Wikimedia Commons fetch. The
+# protection now lives HERE instead, precise rather than blanket: a download
+# is allowed only when it is HTTPS, plain GET, carries no credentials/body,
+# and lands inside this machine's Claude scratch tree -- never inside the
+# repo, never anywhere a downloaded file could be mistaken for or overwrite
+# real project/source content. Everything that fails any one of those checks
+# stays hard-denied, in EVERY mode including bypassPermissions, same as
+# every other tier-1 rule in this file.
+# ---------------------------------------------------------------------------
+CURL_OUTPUT_FLAGS_LONG = ("--output", "--remote-name")
+CURL_CREDENTIAL_FLAGS = (
+    "-u", "--user", "-h", "--header", "-b", "--cookie",
+    "--netrc", "--netrc-file", "--oauth2-bearer",
+)
+
+#: Confined to this machine's Claude scratch tree ONLY -- never the repo,
+#: never `.claude/`, never an arbitrary OS temp path some other process
+#: might also write into. Extend this (with the same care as any other
+#: tier-1 rule) if a real project-level media workspace convention is
+#: established later; until then, narrower is safer.
+SAFE_DOWNLOAD_DIR_MARKER = "/appdata/local/temp/claude/"
+
+
+def curl_has_output_flag(tokens: list[str]) -> bool:
+    for tok in tokens[1:]:
+        if tok in ("-o", "-O", "--remote-name"):
+            return True
+        if tok.partition("=")[0] in CURL_OUTPUT_FLAGS_LONG:
+            return True
+    return False
+
+
+def curl_output_path(tokens: list[str]) -> str:
+    """Value passed to -o/--output. Empty string if absent (including -O,
+    which derives a filename from the URL into the CWD -- deliberately NOT
+    resolved here, since a confirmed scratch destination must be explicit)."""
+    args = tokens[1:]
+    for idx, tok in enumerate(args):
+        if tok in ("-o", "--output"):
+            return args[idx + 1] if idx + 1 < len(args) else ""
+        if tok.startswith("--output="):
+            return tok.partition("=")[2]
+    return ""
+
+
+def curl_download_violation(tokens: list[str]) -> str | None:
+    """None when this curl call is a SAFE download, or isn't a download at
+    all. Otherwise the reason it must stay denied."""
+    if not curl_has_output_flag(tokens):
+        return None
+
+    if curl_method(tokens) != "get":
+        return "curl download with a non-GET method"
+    for tok in tokens[1:]:
+        if tok in CURL_BODY_FLAGS_EXACT or tok.partition("=")[0] in CURL_BODY_FLAGS_LONG:
+            return "curl download with a request body"
+        if tok.lower() in CURL_CREDENTIAL_FLAGS:
+            return "curl download with credentials/cookies/custom headers attached"
+
+    urls = [t for t in tokens[1:] if not t.startswith("-")
+            and t.lower().startswith(("http://", "https://"))]
+    if not urls:
+        return "curl download target not recognised as an http(s) URL"
+    if any(u.lower().startswith("http://") for u in urls):
+        return "curl download over plain http, not https"
+
+    if any(t == "-O" or t.partition("=")[0] == "--remote-name" for t in tokens[1:]):
+        return ("curl -O/--remote-name writes into the current directory, not "
+                "a confirmed scratch path -- use -o <scratch-path> explicitly")
+
+    out_path = curl_output_path(tokens).replace("\\", "/").lower()
+    if SAFE_DOWNLOAD_DIR_MARKER not in out_path:
+        return "curl download output path is outside the Claude scratch workspace"
+
+    return None
+
+
 def gh_api_method(tokens: list[str]) -> str:
     """HTTP method of a `gh api` call. Defaults to GET, as gh itself does.
 
@@ -667,6 +761,10 @@ def evaluate(segment: str) -> str | None:
     # the always-deny list in every mode. Every other curl method is tier 2.
     if name == "curl" and curl_method(tokens) == "delete":
         return "HTTP DELETE via curl (cloud resource deletion)"
+    if name == "curl":
+        reason = curl_download_violation(tokens)
+        if reason:
+            return reason
     if name in ("rm", "del", "erase", "rmdir", "remove-item", "mv", "move", "cp", "copy"):
         return check_delete(tokens, flat)
     return None

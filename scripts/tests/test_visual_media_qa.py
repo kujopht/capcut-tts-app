@@ -192,6 +192,64 @@ class WatchPlanTest(unittest.TestCase):
         self.assertTrue(plan.skipped)
 
 
+class RecurrencePreventionGateTest(unittest.TestCase):
+    """Mission section 6 - the gate that must have caught the real
+    wikitongues_henan defect before DRAFT_READY, and must not fire on the
+    real fixed result."""
+
+    def _clean_visual(self):
+        return vmq.VisualFindings(
+            reviewed=True, visual_continuity_ok=True, subtitles_present_readable=True,
+            black_or_broken_frames_seen=False, aspect_ratio_ok=True,
+            visual_quality_acceptable=True, usable_as_draft=True)
+
+    def test_coverage_thap_hon_nguong_la_qa_fail_du_visual_tot(self):
+        """The real un-fixed shape: 7/55 segments (12.7%), nowhere near
+        95% - must be QA_FAIL even with an all-positive visual read."""
+        check = vmq.DeterministicCheckResult(video_path=Path("x"), ok=True, hard_fail=False)
+        coverage = vmq.SpeechCoverageMetrics(
+            source_segment_count=55, dub_segment_count=7, segment_count_ratio=7 / 55,
+            source_speech_duration=217.0, dub_speech_duration=30.0,
+            speech_coverage_ratio=0.138, first_dubbed_timestamp=0.18,
+            last_dubbed_timestamp=30.18, largest_missing_gap=187.0,
+            largest_missing_gap_window=(30.18, 217.18))
+        verdict = vmq.synthesize_verdict(check, self._clean_visual(), speech_coverage=coverage)
+        self.assertEqual(verdict, vmq.QAVerdict.QA_FAIL)
+
+    def test_khoang_trong_lon_don_le_cung_la_qa_fail_du_ty_le_tong_the_cao(self):
+        """100% segment count coverage can still hide one big hole - a
+        single gap over the threshold fails the gate on its own."""
+        check = vmq.DeterministicCheckResult(video_path=Path("x"), ok=True, hard_fail=False)
+        coverage = vmq.SpeechCoverageMetrics(
+            source_segment_count=10, dub_segment_count=10, segment_count_ratio=1.0,
+            source_speech_duration=100.0, dub_speech_duration=80.0,
+            speech_coverage_ratio=0.8, first_dubbed_timestamp=0.0,
+            last_dubbed_timestamp=100.0, largest_missing_gap=20.0,
+            largest_missing_gap_window=(40.0, 60.0))
+        verdict = vmq.synthesize_verdict(check, self._clean_visual(), speech_coverage=coverage)
+        self.assertEqual(verdict, vmq.QAVerdict.QA_FAIL)
+
+    def test_coverage_that_da_sua_qua_gate_that(self):
+        """The real fixed result: 55/55 segments (100%), largest gap
+        2.68s - must clear the gate, matching the real rebuild."""
+        check = vmq.DeterministicCheckResult(video_path=Path("x"), ok=True, hard_fail=False)
+        coverage = vmq.SpeechCoverageMetrics(
+            source_segment_count=55, dub_segment_count=55, segment_count_ratio=1.0,
+            source_speech_duration=217.0, dub_speech_duration=182.41,
+            speech_coverage_ratio=0.839, first_dubbed_timestamp=0.18,
+            last_dubbed_timestamp=217.53, largest_missing_gap=2.68,
+            largest_missing_gap_window=(198.5, 201.18))
+        verdict = vmq.synthesize_verdict(check, self._clean_visual(), speech_coverage=coverage)
+        self.assertEqual(verdict, vmq.QAVerdict.QA_PASS)
+
+    def test_khong_truyen_speech_coverage_khong_kich_hoat_gate(self):
+        """Callers with no speech/dub content (e.g. a pure video-only QA
+        pass) are unaffected - the gate is opt-in via the parameter."""
+        check = vmq.DeterministicCheckResult(video_path=Path("x"), ok=True, hard_fail=False)
+        verdict = vmq.synthesize_verdict(check, self._clean_visual(), speech_coverage=None)
+        self.assertEqual(verdict, vmq.QAVerdict.QA_PASS)
+
+
 class VerdictSynthesisTest(unittest.TestCase):
     def test_hard_fail_luon_la_qa_fail(self):
         check = vmq.DeterministicCheckResult(
@@ -306,6 +364,74 @@ class ProviderNeutralCliTest(unittest.TestCase):
         self.assertEqual(len(invocations), 1)
         for item in invocations[0]:
             self.assertIsInstance(item, str)
+
+
+class SpeechCoverageTest(unittest.TestCase):
+    """The metric that replaces the naive dub_duration/video_duration
+    ratio (mission "FIX REAL CHINESE DUB COVERAGE", section 3) - grounded
+    directly in the real wikitongues_henan numbers where relevant."""
+
+    def test_dub_khop_hoan_toan_voi_nguon_la_100_phan_tram(self):
+        source = [(0.0, 6.0), (6.0, 9.0), (9.0, 13.0)]
+        dub = [(0.0, 6.0), (6.0, 9.0), (9.0, 13.0)]
+        m = vmq.compute_speech_coverage(source, dub)
+        self.assertAlmostEqual(m.speech_coverage_ratio, 1.0)
+        self.assertAlmostEqual(m.segment_count_ratio, 1.0)
+        self.assertEqual(m.largest_missing_gap, 0.0)
+        self.assertTrue(m.passes())
+
+    def test_khop_that_wikitongues_henan_truoc_khi_sua(self):
+        """The real, un-fixed shape: 55 source segments spanning 217.9s,
+        but only the first ~7 segments (up to t=32.9s, matching the real
+        32.9s dub file) actually got dubbed - everything after is a huge
+        missing gap, and segment_count_ratio is nowhere near 95%."""
+        # Real segment boundaries from the actual wikitongues_henan_vi.srt
+        # (segments 1-7, seconds).
+        source = [(0.18, 6.18), (6.18, 9.18), (9.18, 13.18), (13.18, 16.18),
+                  (16.18, 21.18), (21.18, 26.18), (26.18, 30.18)]
+        # ...plus 48 more real segments continuing to 217.97s - represented
+        # here as evenly-spaced stand-ins since only the first 7 matter for
+        # this assertion (the remaining ones are provably undubbed either way).
+        for i in range(7, 55):
+            start = 30.18 + (i - 7) * 3.4
+            source.append((start, start + 3.4))
+        dub = [(0.18, 6.18), (6.18, 9.18), (9.18, 13.18), (13.18, 16.18),
+               (16.18, 21.18), (21.18, 26.18), (26.18, 30.18)]  # only 7/55 real
+
+        m = vmq.compute_speech_coverage(source, dub)
+        self.assertEqual(m.source_segment_count, 55)
+        self.assertAlmostEqual(m.segment_count_ratio, 7 / 55, places=3)
+        self.assertFalse(m.passes())  # nowhere near the 95% production threshold
+        self.assertGreater(m.largest_missing_gap, 150.0)  # the huge undubbed tail
+
+    def test_mot_khoang_trong_giua_duoc_phat_hien_dung(self):
+        source = [(0.0, 5.0), (10.0, 15.0), (20.0, 25.0)]
+        dub = [(0.0, 5.0), (20.0, 25.0)]  # middle segment missing entirely
+        m = vmq.compute_speech_coverage(source, dub)
+        self.assertAlmostEqual(m.largest_missing_gap, 5.0)
+        self.assertEqual(m.largest_missing_gap_window, (10.0, 15.0))
+        self.assertAlmostEqual(m.segment_count_ratio, 2 / 3, places=3)
+
+    def test_first_last_dubbed_timestamp(self):
+        source = [(0.0, 5.0), (10.0, 15.0)]
+        dub = [(1.0, 4.0), (11.0, 14.0)]
+        m = vmq.compute_speech_coverage(source, dub)
+        self.assertEqual(m.first_dubbed_timestamp, 1.0)
+        self.assertEqual(m.last_dubbed_timestamp, 14.0)
+
+    def test_khong_co_nguon_khong_chia_cho_0(self):
+        m = vmq.compute_speech_coverage([], [])
+        self.assertEqual(m.speech_coverage_ratio, 0.0)
+        self.assertEqual(m.segment_count_ratio, 0.0)
+
+    def test_dub_choang_ra_ngoai_nguon_khong_lam_ratio_vuot_qua_1(self):
+        source = [(0.0, 5.0)]
+        dub = [(0.0, 8.0)]  # overran the window, spilled past source end
+        m = vmq.compute_speech_coverage(source, dub)
+        self.assertLessEqual(m.speech_coverage_ratio, 1.0)
+
+    def test_nguong_mac_dinh_la_95_phan_tram(self):
+        self.assertEqual(vmq.MIN_SEGMENT_COVERAGE_RATIO, 0.95)
 
 
 if __name__ == "__main__":

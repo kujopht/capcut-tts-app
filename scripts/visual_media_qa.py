@@ -56,7 +56,7 @@ import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 #: Above this, default to `efficient` detail and a focused (not full) watch
 #: pass — matches the "long video: efficient first, only zoom into
@@ -408,8 +408,161 @@ class VisualFindings:
     notes: str = ""
 
 
+#: The other half of the recurrence-prevention gate (mission "FIX REAL
+#: CHINESE DUB COVERAGE", section 6) — even 100% segment coverage can hide
+#: one large hole (a whole scene with no dub), so a big enough single gap
+#: fails the gate on its own regardless of the aggregate ratio.
+MAX_UNEXPLAINED_MISSING_GAP_SECONDS = 15.0
+
+
+# ---------------------------------------------------------------------------
+# Speech/dub coverage — the deterministic metric the wikitongues_henan
+# defect exposed a gap in. `dub_duration / full_video_duration` alone is
+# the WRONG metric (mission "FIX REAL CHINESE DUB COVERAGE", section 3):
+# a video can legitimately have long non-speech stretches, so what matters
+# is how much of the SOURCE SPEECH TIME actually got a matching dub, not
+# how much of the raw video runtime did. Interval-based, not a single
+# duration ratio — generic enough that it takes plain (start, end) tuples,
+# not this repo's own Segment/DubSegmentResult types, so it composes with
+# any pipeline's own data shapes rather than importing them. Defined here,
+# ahead of `synthesize_verdict()`, because that function takes
+# `MIN_SEGMENT_COVERAGE_RATIO` as a default parameter value — module-level
+# names must exist before the `def` that references them as a default.
+# ---------------------------------------------------------------------------
+
+#: Production default per the mission — a caller may pass a different
+#: threshold for a source explicitly excluded by QA policy.
+MIN_SEGMENT_COVERAGE_RATIO = 0.95
+
+
+@dataclass
+class SpeechCoverageMetrics:
+    source_segment_count: int
+    dub_segment_count: int
+    segment_count_ratio: float
+    source_speech_duration: float
+    dub_speech_duration: float
+    speech_coverage_ratio: float
+    first_dubbed_timestamp: Optional[float]
+    last_dubbed_timestamp: Optional[float]
+    largest_missing_gap: float
+    largest_missing_gap_window: Optional[Tuple[float, float]]
+
+    def passes(self, min_ratio: float = MIN_SEGMENT_COVERAGE_RATIO) -> bool:
+        return self.segment_count_ratio >= min_ratio
+
+
+#: Two interval boundaries this close are "touching", not a real gap.
+#: Guards against floating-point noise: two segments computed as
+#: `start + duration` vs `start_of_next` via a different arithmetic path
+#: (e.g. one via repeated addition, the other via multiplication) can
+#: differ by a few ULPs even when mathematically adjacent — real,
+#: reproduced case, not theoretical (see test suite). Real SRT-derived
+#: timestamps are millisecond-quantized (>= 0.001s apart when genuinely
+#: distinct), so this is far below any real gap that should count.
+INTERVAL_ADJACENCY_EPSILON = 1e-6
+
+
+def _merge_intervals(intervals: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    """Sorted, non-overlapping union — the shared primitive both duration
+    sums and gap-finding are built on."""
+    if not intervals:
+        return []
+    ordered = sorted((max(0.0, s), max(0.0, e)) for s, e in intervals if e > s)
+    merged: List[Tuple[float, float]] = []
+    for start, end in ordered:
+        if merged and start <= merged[-1][1] + INTERVAL_ADJACENCY_EPSILON:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _interval_duration(intervals: List[Tuple[float, float]]) -> float:
+    return sum(end - start for start, end in intervals)
+
+
+def _covered_duration(
+    source: List[Tuple[float, float]], dub: List[Tuple[float, float]],
+) -> float:
+    """Total time inside `source`'s union that overlaps `dub`'s union —
+    the numerator for `speech_coverage_ratio`."""
+    covered = 0.0
+    for s_start, s_end in source:
+        for d_start, d_end in dub:
+            overlap = min(s_end, d_end) - max(s_start, d_start)
+            if overlap > 0:
+                covered += overlap
+    return covered
+
+
+def compute_speech_coverage(
+    source_intervals: List[Tuple[float, float]],
+    dub_intervals: List[Tuple[float, float]],
+) -> SpeechCoverageMetrics:
+    """The real metric the mission asked for, in place of the naive
+    `dub_duration / full_video_duration`:
+
+        source_speech_duration = union of source ASR/SRT speech intervals
+        dub_speech_duration    = union of placed dub intervals
+        speech_coverage_ratio  = time-overlap(source, dub) / source_speech_duration
+        segment_count_ratio    = (# source segments with ANY dub overlap) / (# source segments)
+
+    Also reports first/last dubbed timestamp and the single largest
+    contiguous gap in source speech time that has no dub coverage at all —
+    the number an operator actually needs to answer "is the ending cut
+    off?" or "is there one big silent hole in the middle?".
+    """
+    merged_source = _merge_intervals(source_intervals)
+    merged_dub = _merge_intervals(dub_intervals)
+
+    source_duration = _interval_duration(merged_source)
+    dub_duration = _interval_duration(merged_dub)
+    covered = _covered_duration(merged_source, merged_dub)
+    coverage_ratio = (covered / source_duration) if source_duration > 0 else 0.0
+
+    covered_source_segments = sum(
+        1 for s_start, s_end in source_intervals
+        if any(min(s_end, d_end) - max(s_start, d_start) > 0 for d_start, d_end in merged_dub))
+    count_ratio = (
+        covered_source_segments / len(source_intervals) if source_intervals else 0.0)
+
+    first_ts = merged_dub[0][0] if merged_dub else None
+    last_ts = merged_dub[-1][1] if merged_dub else None
+
+    largest_gap = 0.0
+    largest_gap_window: Optional[Tuple[float, float]] = None
+    for s_start, s_end in merged_source:
+        cursor = s_start
+        for d_start, d_end in merged_dub:
+            if d_end <= cursor or d_start >= s_end:
+                continue
+            gap = max(0.0, min(d_start, s_end) - cursor)
+            if gap > largest_gap:
+                largest_gap, largest_gap_window = gap, (cursor, min(d_start, s_end))
+            cursor = max(cursor, d_end)
+        tail_gap = max(0.0, s_end - cursor)
+        if tail_gap > largest_gap:
+            largest_gap, largest_gap_window = tail_gap, (cursor, s_end)
+
+    return SpeechCoverageMetrics(
+        source_segment_count=len(source_intervals),
+        dub_segment_count=len(dub_intervals),
+        segment_count_ratio=count_ratio,
+        source_speech_duration=source_duration,
+        dub_speech_duration=dub_duration,
+        speech_coverage_ratio=coverage_ratio,
+        first_dubbed_timestamp=first_ts,
+        last_dubbed_timestamp=last_ts,
+        largest_missing_gap=largest_gap,
+        largest_missing_gap_window=largest_gap_window)
+
+
 def synthesize_verdict(
-    check: DeterministicCheckResult, visual: Optional[VisualFindings] = None,
+    check: DeterministicCheckResult, visual: Optional[VisualFindings] = None, *,
+    speech_coverage: Optional["SpeechCoverageMetrics"] = None,
+    min_coverage_ratio: float = MIN_SEGMENT_COVERAGE_RATIO,
+    max_missing_gap_seconds: float = MAX_UNEXPLAINED_MISSING_GAP_SECONDS,
 ) -> QAVerdict:
     """Combine deterministic facts with an optional visual pass — module
     docstring principle 4. A deterministic hard-fail always wins. A clean
@@ -417,9 +570,22 @@ def synthesize_verdict(
     QA is optional) is QA_REVIEW, not QA_PASS: an unreviewed draft must
     never look identical to a reviewed-and-clean one. QA_PASS requires both
     a clean deterministic pass AND an explicit, positive visual read.
+
+    `speech_coverage`, if given, is the OTHER hard gate this function
+    enforces (mission section 6 — "prevent recurrence" of the real
+    wikitongues_henan defect): segment coverage below `min_coverage_ratio`
+    or a single missing-speech gap above `max_missing_gap_seconds` is
+    QA_FAIL regardless of how clean the visual read was — a beautiful-
+    looking video that is 85% silent must never reach DRAFT_READY.
     """
     if check.hard_fail:
         return QAVerdict.QA_FAIL
+
+    if speech_coverage is not None:
+        if not speech_coverage.passes(min_coverage_ratio):
+            return QAVerdict.QA_FAIL
+        if speech_coverage.largest_missing_gap > max_missing_gap_seconds:
+            return QAVerdict.QA_FAIL
 
     if visual is None or not visual.reviewed:
         return QAVerdict.QA_REVIEW
@@ -450,12 +616,16 @@ class QAGateResult:
     check: DeterministicCheckResult
     plan: WatchPlan
     visual: Optional[VisualFindings]
+    speech_coverage: Optional[SpeechCoverageMetrics] = None
 
 
 def run_qa_gate(
     video_path: Path, *,
     visual_reviewer: Optional[Any] = None,
     force_full_pass: bool = False,
+    speech_coverage: Optional[SpeechCoverageMetrics] = None,
+    min_coverage_ratio: float = MIN_SEGMENT_COVERAGE_RATIO,
+    max_missing_gap_seconds: float = MAX_UNEXPLAINED_MISSING_GAP_SECONDS,
 ) -> QAGateResult:
     """The full stage in one call:
 
@@ -477,11 +647,24 @@ def run_qa_gate(
     that shells out to the installed `/watch` plugin and reads frames with
     the Read tool, exactly as done for the real proof this module is
     grounded in.
+
+    `speech_coverage`, if given (a caller-computed `compute_speech_coverage()`
+    result — this module has no ASR/dub-timing knowledge of its own, so it
+    never computes this itself), is the recurrence-prevention gate from
+    mission "FIX REAL CHINESE DUB COVERAGE" section 6: coverage below
+    `min_coverage_ratio` or a missing-speech gap above
+    `max_missing_gap_seconds` forces QA_FAIL regardless of the visual read.
     """
     check = deterministic_checks(video_path)
     plan = build_watch_plan(check, force_full_pass=force_full_pass)
     visual: Optional[VisualFindings] = None
     if visual_reviewer is not None and not plan.skipped:
         visual = visual_reviewer(plan)
-    verdict = synthesize_verdict(check, visual)
-    return QAGateResult(verdict=verdict, check=check, plan=plan, visual=visual)
+    verdict = synthesize_verdict(
+        check, visual, speech_coverage=speech_coverage,
+        min_coverage_ratio=min_coverage_ratio,
+        max_missing_gap_seconds=max_missing_gap_seconds)
+    return QAGateResult(verdict=verdict, check=check, plan=plan, visual=visual,
+                        speech_coverage=speech_coverage)
+
+

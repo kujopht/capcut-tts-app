@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -204,15 +205,111 @@ def write_srt(segments: List[Segment], path: Path) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+_SRT_TIME_RE = re.compile(
+    r"(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})")
+
+
+def _parse_srt_timestamp(hh: str, mm: str, ss: str, ms: str) -> float:
+    return int(hh) * 3600 + int(mm) * 60 + int(ss) + int(ms) / 1000.0
+
+
+def parse_srt(path: Path) -> List[Segment]:
+    """Inverse of `write_srt()` — reconstructs `Segment`s (start/end/
+    vi_text) from an already-written .srt so a re-dub can reuse a prior
+    run's ASR+translation instead of repeating them (mission "FIX REAL
+    CHINESE DUB COVERAGE", section 4: "Avoid repeating ASR/translation if
+    unchanged"). `zh_text` is left empty — the .srt never carried it, and
+    `dub_segments()` only reads `vi_text`/`start`/`end`."""
+    blocks = path.read_text(encoding="utf-8").strip().split("\n\n")
+    segments: List[Segment] = []
+    for block in blocks:
+        lines = block.strip().splitlines()
+        if len(lines) < 3:
+            continue
+        m = _SRT_TIME_RE.search(lines[1])
+        if not m:
+            continue
+        start = _parse_srt_timestamp(*m.groups()[0:4])
+        end = _parse_srt_timestamp(*m.groups()[4:8])
+        text = "\n".join(lines[2:]).strip()
+        segments.append(Segment(start=start, end=end, zh_text="", vi_text=text))
+    return segments
+
+
 # --------------------------------------------------------------------------
-# Stage 5 (optional): Ngoc Huyen Moi dub. Best-effort timing: each segment
-# is synthesized independently and padded/trimmed to its own [start, end]
-# window so the dub track's total length matches the source, but this is
-# NOT prosody-matched dubbing — a segment's spoken length rarely equals its
-# source window exactly. Honest limitation, not hidden.
+# Stage 5 (optional): Ngoc Huyen Moi dub.
+#
+# ROOT-CAUSE FIX (2026-09-02, "FIX REAL CHINESE DUB COVERAGE" mission): the
+# previous version advanced its placement `cursor` by the ASSUMED source
+# window length (`seg.end - seg.start`) instead of the synthesized audio's
+# ACTUAL measured duration, and never verified `provider.synthesize()`
+# actually produced usable output. On the real wikitongues_henan artifact
+# this silently produced a dub covering only 32.9s of a 217.9s video
+# (15.1%) — a real production defect caught by VisualMediaQA. Real proof
+# this fix addresses it: docs/reports/dub-coverage-fix-2026-09-02.md.
+#
+# Fixed behavior, per segment:
+#   1. Synthesize at natural rate (1.0).
+#   2. MEASURE the actual rendered duration (ffprobe) — never assumed.
+#   3. If it fits the source window: place as-is, cursor advances by the
+#      real measured duration (not the window length) — self-correcting,
+#      so a short/long segment never silently drifts every later segment.
+#   4. If it overruns the window: retry at a bounded faster rate (capped
+#      at MAX_DUB_RATE) rather than accepting arbitrarily fast speech.
+#   5. If it STILL overruns after the rate cap: allow it to spill into
+#      whatever real silence exists before the next segment's own start
+#      time (never overlapping the next segment's speech). If the overrun
+#      exceeds even that available slack, the segment is flagged
+#      `needs_review=True` in the returned `List[DubSegmentResult]` —
+#      placed anyway (better than silently dropped), but the caller can
+#      gate on this list before DRAFT_READY.
+#
+# Returns per-segment diagnostics so a caller can compute real
+# TTS_REQUESTED/TTS_SUCCEEDED/FINAL_DUB_SEGMENTS counts — see
+# `dub_coverage_metrics()` below.
 # --------------------------------------------------------------------------
 
-def dub_segments(segments: List[Segment], out_path: Path, ffmpeg: str) -> None:
+#: A segment that would need to speed up MORE than this to fit its source
+#: window instead spills into adjacent silence (or is flagged for review)
+#: rather than being sped up further — "do not create absurdly fast speech
+#: just to fit a short interval" (mission requirement, section 2).
+MAX_DUB_RATE = 1.3
+
+
+@dataclass
+class DubSegmentResult:
+    index: int
+    requested: bool  # non-empty vi_text -> a synthesis attempt was made
+    synth_ok: bool = False
+    actual_duration: float = 0.0
+    window_duration: float = 0.0
+    rate_used: float = 1.0
+    placed_start: float = 0.0
+    overrun_seconds: float = 0.0
+    needs_review: bool = False
+    reason: str = ""
+
+
+def _probe_audio_duration(path: Path, ffmpeg: str) -> float:
+    """Real measured duration via ffprobe (sits next to `ffmpeg` in the
+    same install — same discovery the caller already used for `ffmpeg`
+    itself, so no new binary dependency)."""
+    ffprobe = str(Path(ffmpeg).with_name(
+        Path(ffmpeg).name.replace("ffmpeg", "ffprobe")))
+    proc = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, timeout=30)
+    try:
+        return float(proc.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+def dub_segments(
+    segments: List[Segment], out_path: Path, ffmpeg: str, *,
+    max_rate: float = MAX_DUB_RATE,
+) -> List[DubSegmentResult]:
     from desktop_app.providers.piper_models import PiperModelManager
     from desktop_app.providers.piper_provider import PiperLocalProvider
     from desktop_app.providers.base import Voice
@@ -227,12 +324,17 @@ def dub_segments(segments: List[Segment], out_path: Path, ffmpeg: str) -> None:
                   language="vi", installed=True)
 
     total_end = max((s.end for s in segments), default=0.0)
+    results: List[DubSegmentResult] = []
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         concat_list = tmp_dir / "concat.txt"
         entries = []
         cursor = 0.0
         for i, seg in enumerate(segments):
+            window = seg.end - seg.start
+            result = DubSegmentResult(
+                index=i, requested=bool(seg.vi_text.strip()), window_duration=window)
+
             gap = max(0.0, seg.start - cursor)
             if gap > 0.02:
                 silence = tmp_dir / f"gap_{i}.wav"
@@ -241,19 +343,95 @@ def dub_segments(segments: List[Segment], out_path: Path, ffmpeg: str) -> None:
                                "-t", f"{gap:.3f}", str(silence)], check=True)
                 entries.append(silence)
                 cursor += gap
-            seg_mp3 = tmp_dir / f"seg_{i}.mp3"
-            if seg.vi_text.strip():
-                provider.synthesize(text=seg.vi_text, voice=voice, dest=seg_mp3)
+
+            if not result.requested:
+                result.reason = "empty translated text"
+                results.append(result)
+                continue
+
+            result.placed_start = cursor
+            next_start = segments[i + 1].start if i + 1 < len(segments) else None
+
+            try:
+                seg_mp3 = tmp_dir / f"seg_{i}_r100.mp3"
+                provider.synthesize(text=seg.vi_text, voice=voice, dest=seg_mp3, rate="1.0")
+                actual = _probe_audio_duration(seg_mp3, ffmpeg)
+                rate_used = 1.0
+
+                if actual > window and window > 0:
+                    needed_rate = min(actual / window, max_rate)
+                    if needed_rate > 1.01:
+                        sped_mp3 = tmp_dir / f"seg_{i}_sped.mp3"
+                        provider.synthesize(text=seg.vi_text, voice=voice,
+                                            dest=sped_mp3, rate=f"{needed_rate:.3f}")
+                        sped_actual = _probe_audio_duration(sped_mp3, ffmpeg)
+                        if sped_actual > 0:
+                            seg_mp3, actual, rate_used = sped_mp3, sped_actual, needed_rate
+
                 entries.append(seg_mp3)
-                cursor += seg.end - seg.start  # approximate: fits the window
+                result.synth_ok = actual > 0
+                result.actual_duration = actual
+                result.rate_used = rate_used
+                cursor += actual  # real measured duration, not the assumed window
+
+                overrun = max(0.0, actual - window)
+                if overrun > 0.05:
+                    result.overrun_seconds = overrun
+                    available_slack = (next_start - cursor) if next_start is not None else None
+                    if available_slack is not None and available_slack < 0:
+                        result.needs_review = True
+                        result.reason = (
+                            f"overran by {overrun:.2f}s even at rate={rate_used:.2f} "
+                            f"and exceeded available silence before the next segment")
+                    else:
+                        result.reason = (
+                            f"overran by {overrun:.2f}s at rate={rate_used:.2f}; "
+                            f"spilled into adjacent silence, no collision")
+            except Exception as exc:
+                result.synth_ok = False
+                result.needs_review = True
+                result.reason = f"synthesize() raised: {type(exc).__name__}: {exc}"
+
+            results.append(result)
+
+        # SECOND real bug this fix addresses (found while rebuilding the
+        # real wikitongues_henan dub): the concat DEMUXER (`-f concat`)
+        # stream-copies its inputs — it requires every input to share
+        # identical codec parameters. `entries` mixes raw PCM WAV silence
+        # files with Piper's MP3 segment output; feeding that straight to
+        # the demuxer produced "Invalid PCM packet" decode errors and
+        # silently truncated the real rebuild's output to 67s even though
+        # per-segment diagnostics showed all 55 segments correctly placed
+        # through 217.6s. Fix: normalize every piece to the SAME WAV specs
+        # the silence generator already uses (22050Hz mono PCM) before
+        # concatenating, then encode to the final format once at the end —
+        # the demuxer only ever sees uniform input.
+        normalized: List[Path] = []
+        for idx, e in enumerate(entries):
+            if e.suffix.lower() == ".wav":
+                normalized.append(e)
+                continue
+            norm = tmp_dir / f"norm_{idx}.wav"
+            subprocess.run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                           "-i", str(e), "-ar", "22050", "-ac", "1", str(norm)], check=True)
+            normalized.append(norm)
+
         with open(concat_list, "w", encoding="utf-8") as f:
-            for e in entries:
+            for e in normalized:
                 f.write(f"file '{e.as_posix()}'\n")
+        concat_wav = tmp_dir / "concat_out.wav"
         subprocess.run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
                        "-f", "concat", "-safe", "0", "-i", str(concat_list),
-                       str(out_path)], check=True)
+                       str(concat_wav)], check=True)
+        subprocess.run([ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
+                       "-i", str(concat_wav), str(out_path)], check=True)
+
+    placed = sum(1 for r in results if r.synth_ok)
+    review = sum(1 for r in results if r.needs_review)
     print(f"[dub] wrote {out_path} ({out_path.stat().st_size} bytes, "
-          f"target length ~{total_end:.1f}s)")
+          f"target length ~{total_end:.1f}s) — {placed}/{len(results)} segments placed, "
+          f"{review} flagged for review")
+    return results
 
 
 # --------------------------------------------------------------------------

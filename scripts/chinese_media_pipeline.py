@@ -169,11 +169,26 @@ def translate_zh_to_vi(segments: List[Segment], timeout: str = "3m") -> None:
     if not segments:
         return
     payload = [s.zh_text for s in segments]
+    # Ro rang cam agy tu goi cong cu/lenh nao: voi payload lon (vd 1147
+    # doan That), agy tu y muon chay "python -c ..." de tu kiem tra hieu
+    # dung cua no truoc khi tra loi - o che do headless khong co ai xac
+    # nhan quyen "command" nay, bi tu choi, va toan bo dich That bai
+    # (ValueError "no JSON array in agy output", da xac minh That qua
+    # C:\Users\nguye\.gemini\antigravity-cli\conversations\*.db, buoc
+    # step_type=132: "permission check failed for command \"python -c
+    # ...\""). Day KHONG PHAI mot buoc can thiet cho tac vu — chi la thoi
+    # quen tu kiem tra cua agy. Cau nay chan No o goc, khong can mo them
+    # bat ky permission/allow-rule nao trong settings.json cua agy — da
+    # xac minh That: cung mot payload 1147 phan tu, chi them cau nay,
+    # dich thanh cong 1147/1147, JSON hop le, khong con bi tu choi quyen.
     prompt = (
         "Dich cac cau tieng Trung sau sang tieng Viet. Tra ve DUY NHAT mot "
         "mang JSON cung do dai, cung thu tu, moi phan tu la ban dich tieng "
         "Viet tuong ung — khong giai thich them, khong danh so, khong bao "
-        "boc trong markdown.\n\n" + json.dumps(payload, ensure_ascii=False)
+        "boc trong markdown. KHONG duoc chay bat ky lenh/script/cong cu nao de "
+        "kiem tra hay xac minh — day la mot yeu cau van ban thuan tuy, tra loi "
+        "truc tiep bang JSON, khong goi cong cu nao ca.\n\n"
+        + json.dumps(payload, ensure_ascii=False)
     )
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
                                      encoding="utf-8") as f:

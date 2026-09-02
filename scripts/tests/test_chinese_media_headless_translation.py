@@ -115,9 +115,9 @@ class HeadlessTranslationPermissionRegressionTest(unittest.TestCase):
         for seg in segments:
             self.assertTrue(seg.vi_text.startswith("[vi] "))
             self.assertNotEqual(seg.vi_text.strip(), "")
-        # Only one subprocess call - a single batched translation request,
-        # not a per-segment loop, matching ship_draft()'s real usage.
-        self.assertEqual(mock_run.call_count, 1)
+        # Chunked into batch_size=150 calls (real fifth-defect fix, see
+        # ChunkedTranslationRegressionTest) - ceil(1147/150) = 8, not 1.
+        self.assertEqual(mock_run.call_count, 8)
 
     @mock.patch("subprocess.run")
     def test_pre_fix_prompt_would_have_been_denied(self, mock_run):
@@ -216,6 +216,100 @@ class ControlCharacterJsonRegressionTest(unittest.TestCase):
         cmp.translate_zh_to_vi(segments)  # must not raise
         self.assertIn("\n", segments[0].vi_text)
         self.assertEqual(segments[1].vi_text, "cau thu hai")
+
+
+class ChunkedTranslationRegressionTest(unittest.TestCase):
+    """Real FIFTH defect: even after fixing permission/PATH/timeout/
+    control-chars, a genuinely malformed JSON array (JSONDecodeError:
+    "Expecting ',' delimiter", almost certainly an unescaped quote inside
+    dialogue) still occurred on a real 1147-item single-shot batch - the
+    fourth distinct real, costly (each requiring a fresh ~35-90 min ASR
+    re-run) failure on that same architecture. The actual fix is
+    architectural: chunk into small batches so one malformed batch costs
+    a retry of THAT batch, never the whole run, and never touches ASR."""
+
+    def _segments(self, n: int) -> list:
+        return [cmp.Segment(start=float(i), end=float(i) + 1.0, zh_text=f"zh{i}")
+                for i in range(n)]
+
+    @mock.patch("subprocess.run")
+    def test_batches_split_at_150(self, mock_run):
+        def _respond(*a, stdin=None, **kw):
+            prompt_text = stdin.read()
+            payload = json.loads(prompt_text[prompt_text.find("["):])
+            return mock.Mock(returncode=0,
+                              stdout=json.dumps([f"vi{p}" for p in payload]), stderr="")
+        mock_run.side_effect = _respond
+
+        segments = self._segments(310)  # ceil(310/150) = 3 batches
+        cmp.translate_zh_to_vi(segments)
+
+        self.assertEqual(mock_run.call_count, 3)
+        for seg in segments:
+            self.assertTrue(seg.vi_text.startswith("vi"))
+
+    @mock.patch("subprocess.run")
+    def test_malformed_batch_retried_once_then_succeeds(self, mock_run):
+        """The exact real failure class: first attempt on a batch returns
+        JSON broken by a missing comma (simulating an unescaped quote);
+        retry on the SAME batch succeeds. Only that one batch's call is
+        repeated - proves the fix doesn't require touching ASR/other
+        batches to recover from a single bad batch."""
+        calls = {"n": 0}
+
+        def _respond(*a, stdin=None, **kw):
+            calls["n"] += 1
+            prompt_text = stdin.read()
+            payload = json.loads(prompt_text[prompt_text.find("["):])
+            if calls["n"] == 1:
+                # Missing comma between array elements - real observed
+                # JSONDecodeError class ("Expecting ',' delimiter").
+                return mock.Mock(returncode=0,
+                                  stdout='["vi0" "vi1"]', stderr="")
+            return mock.Mock(returncode=0,
+                              stdout=json.dumps([f"vi{p}" for p in payload]), stderr="")
+        mock_run.side_effect = _respond
+
+        segments = self._segments(2)
+        cmp.translate_zh_to_vi(segments)
+
+        self.assertEqual(calls["n"], 2)  # exactly one retry, not more
+        self.assertEqual(segments[0].vi_text, "vizh0")
+        self.assertEqual(segments[1].vi_text, "vizh1")
+
+    @mock.patch("subprocess.run")
+    def test_malformed_batch_twice_raises_not_infinite_retry(self, mock_run):
+        """A batch that fails on both the original attempt AND the retry
+        must raise, not loop forever or silently drop segments."""
+        mock_run.return_value = mock.Mock(returncode=0, stdout='["vi0" "vi1"]', stderr="")
+        with self.assertRaises(json.JSONDecodeError):
+            cmp.translate_zh_to_vi(self._segments(2))
+        self.assertEqual(mock_run.call_count, 2)  # original + exactly 1 retry
+
+    @mock.patch("subprocess.run")
+    def test_one_bad_batch_does_not_affect_other_batches(self, mock_run):
+        """A malformed response on batch 2 of 3 must not corrupt or skip
+        the segments already translated in batch 1, nor prevent batch 3
+        from being attempted with its own fresh call once batch 2 is
+        retried successfully."""
+        seen_batches = []
+
+        def _respond(*a, stdin=None, **kw):
+            prompt_text = stdin.read()
+            payload = json.loads(prompt_text[prompt_text.find("["):])
+            seen_batches.append(payload)
+            # Fail only the FIRST time we see the second batch's content.
+            if payload[0] == "zh150" and seen_batches.count(payload) == 1:
+                return mock.Mock(returncode=0, stdout='["x" "y"]', stderr="")
+            return mock.Mock(returncode=0,
+                              stdout=json.dumps([f"vi{p}" for p in payload]), stderr="")
+        mock_run.side_effect = _respond
+
+        segments = self._segments(310)  # batches: [0:150], [150:300], [300:310]
+        cmp.translate_zh_to_vi(segments)
+
+        for seg in segments:
+            self.assertTrue(seg.vi_text.startswith("vi"), seg.vi_text)
 
 
 if __name__ == "__main__":

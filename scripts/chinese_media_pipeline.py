@@ -184,21 +184,42 @@ def transcribe_mandarin(audio_path: Path, model_size: str = "small") -> List[Seg
 # or splitting lines).
 # --------------------------------------------------------------------------
 
-def translate_zh_to_vi(segments: List[Segment], timeout: str = "12m") -> None:
-    """Mutates each Segment's vi_text in place.
+def translate_zh_to_vi(segments: List[Segment], timeout: str = "12m",
+                        batch_size: int = 150) -> None:
+    """Mutates each Segment's vi_text in place. Translates in batches of
+    `batch_size` (2026-09-02, real FIFTH defect fix - see below).
 
-    `timeout` default raised from the original "3m" to "12m" (2026-09-02) -
-    a real, THIRD distinct defect found resuming candidate #2: the 3-minute
-    budget was enough for small batches (27 segments) but a real 1147-
-    segment batch of substantive narrative Chinese genuinely needs more
-    generation time than a same-sized batch of trivially-repetitive text
-    (confirmed by the real failure: agy had already generated a large,
-    well-formed partial JSON array before "Error: timeout waiting for
-    response" cut it off - not a permission/security issue at all, pure
-    capacity). Not unbounded - still a real ceiling, just sized for the
-    largest real batch seen so far with headroom, not the smallest one."""
+    Root architectural issue found across FOUR real, costly attempts to
+    resume candidate #2 (each requiring a fresh ~35-90 min ASR re-run,
+    since transcript output is never checkpointed to disk): a single
+    agy call asked to translate and return all 1147 segments as ONE giant
+    JSON array is fragile at that scale. Four DISTINCT real defects were
+    found and fixed one at a time this way - a "command"-permission
+    denial, an unresolvable "agy" PATH lookup, a too-short timeout, and a
+    strict-JSON control-character rejection - and a FIFTH
+    (JSONDecodeError: "Expecting ',' delimiter", almost certainly an
+    unescaped quote inside one segment's dialogue text) still occurred
+    even after all four were fixed. Patching individual JSON-syntax
+    quirks one at a time is not converging: ANY single malformed
+    character anywhere in a 1147-item response invalidates the entire
+    batch. Chunking is the actual fix for that class of fragility - a
+    parse failure now costs one small batch, not the whole run, and never
+    requires re-running ASR (this function receives already-transcribed
+    Segment objects; chunking here never re-touches transcribe_mandarin())."""
     if not segments:
         return
+    for start_i in range(0, len(segments), batch_size):
+        batch = segments[start_i:start_i + batch_size]
+        _translate_one_batch(batch, timeout=timeout)
+
+
+def _translate_one_batch(segments: List[Segment], timeout: str,
+                          _retried: bool = False) -> None:
+    """Translate ONE batch (mutates vi_text in place). Retries exactly
+    once on a JSON-parse failure - a fresh agy call on the identical
+    (small) batch is cheap and often avoids whatever one-off malformation
+    the model produced the first time, unlike retrying the full 1147-item
+    batch which is what made this class of failure so costly to diagnose."""
     payload = [s.zh_text for s in segments]
     # Ro rang cam agy tu goi cong cu/lenh nao: voi payload lon (vd 1147
     # doan That), agy tu y muon chay "python -c ..." de tu kiem tra hieu
@@ -243,20 +264,29 @@ def translate_zh_to_vi(segments: List[Segment], timeout: str = "12m") -> None:
                 f"no JSON array in agy output (exit={result.returncode}): "
                 f"stdout={raw[:300]!r} stderr={result.stderr[:300]!r}"
             )
-        # strict=False: a real 1147-item realistic-content measurement run
-        # (2026-09-02, done specifically to avoid a 4th costly ASR re-run
-        # before committing to another live attempt) hit a genuine
-        # JSONDecodeError - agy embedded a raw, unescaped control character
-        # inside one translated string, which strict JSON rejects but is a
-        # well-known, common minor LLM-JSON-generation quirk. Tolerating it
-        # here is the standard stdlib fix, not a data-integrity risk: the
-        # array structure/length/content are otherwise unaffected.
-        translated = json.loads(raw[start:end + 1], strict=False)
-        if len(translated) != len(segments):
-            raise ValueError(
-                f"length mismatch: {len(translated)} translations for "
-                f"{len(segments)} segments"
-            )
+        try:
+            # strict=False: a real measurement run (2026-09-02) hit a
+            # genuine JSONDecodeError from an embedded raw control
+            # character inside one translated string - strict JSON
+            # rejects that, but it's a well-known, common minor LLM-JSON
+            # quirk. Tolerating it here is the standard stdlib fix, not a
+            # data-integrity risk.
+            translated = json.loads(raw[start:end + 1], strict=False)
+            if len(translated) != len(segments):
+                raise ValueError(
+                    f"length mismatch: {len(translated)} translations for "
+                    f"{len(segments)} segments"
+                )
+        except (json.JSONDecodeError, ValueError):
+            # A genuinely malformed batch (e.g. an unescaped quote inside
+            # dialogue breaking the array structure - the real fifth
+            # defect this retry exists for) is not worth patching one
+            # quirk at a time forever. One retry on the SAME small batch
+            # is cheap and often sidesteps whatever one-off malformation
+            # occurred, without ever touching ASR.
+            if _retried:
+                raise
+            return _translate_one_batch(segments, timeout, _retried=True)
         for seg, vi in zip(segments, translated):
             seg.vi_text = str(vi).strip()
     finally:

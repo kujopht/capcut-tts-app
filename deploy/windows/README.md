@@ -1,6 +1,8 @@
-# Worker TTS tu khoi dong tren Windows (laptop nay)
+# Tien trinh nen tu khoi dong tren Windows (laptop nay)
 
-Co che THAT, khong phai Scheduled Task, khong phai systemd.
+Co che THAT, khong phai Scheduled Task, khong phai systemd. Hai tien
+trinh dung chung mot co che: worker TTS (`run_worker.bat`) va
+`opencode serve` cho Router V3 (`run_opencode_serve.bat`).
 
 ## Vi sao Startup folder, khong phai Scheduled Task
 
@@ -69,6 +71,25 @@ del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\start_worker_silent
 Roi dong tien trinh `python.exe` dang chay worker (Task Manager, hoac
 `taskkill /PID <pid>` voi pid doc tu heartbeat.json) neu muon dung ngay
 thay vi doi den lan dang xuat/dang nhap tiep theo.
+
+## opencode serve (Router V3)
+
+`scripts/router_v3/opencode_adapter.py` bao cao `OPENCODE01` la
+UNAVAILABLE tru khi `opencode serve --port 4096` dang chay o dia phuong —
+adapter kiem tra `GET /global/health` cua tien trinh do, KHONG kiem tra
+CLI `opencode` co tren PATH hay khong. Phat hien khi dieu tra mission
+"Chinese Media Watcher + Drive Archive Proof" (2026-09-02): CLI da cai
+va da dang nhap tu truoc, chi thieu tien trinh server nay — khong phai
+loi trong ma nguon router.
+
+`start_opencode_serve_silent.vbs` (cung Startup folder, cung co che
+tu khoi dong lai) giai quyet dung diem thieu do. Kiem tra:
+
+```
+.venv\Scripts\python.exe -m scripts.router_v3.router_cli status
+```
+
+`OPENCODE01` phai la `IDLE` (khong phai `UNAVAILABLE`).
 
 ## Gioi han that su, khong che giau
 

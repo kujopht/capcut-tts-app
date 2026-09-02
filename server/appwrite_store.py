@@ -147,6 +147,9 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         # drops these automatically until the Appwrite migration adding them
         # actually runs, same recovery-field pattern as COL_JOBS above.
         "platform", "rights_mode", "subtitle_status", "embed_ref",
+        # Chinese Media Watcher foundation (2026-09-02) — same recovery-field
+        # pattern: dropped by `_supported_fields` until the migration runs.
+        "subtitle_key", "dub_audio_key",
     ),
     COL_CHAPTERS: (
         "chapter_id", "novel_id", "owner_id", "title", "content",
@@ -1866,6 +1869,8 @@ def _novel_from_doc(doc: Dict[str, Any]) -> Novel:
         rights_mode=str(doc.get("rights_mode") or ""),
         subtitle_status=str(doc.get("subtitle_status") or ""),
         embed_ref=str(doc.get("embed_ref") or ""),
+        subtitle_key=str(doc.get("subtitle_key") or ""),
+        dub_audio_key=str(doc.get("dub_audio_key") or ""),
     )
 
 

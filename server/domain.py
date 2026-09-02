@@ -689,6 +689,13 @@ class Novel:
     #: du de dung lai player nhung, khong phai URL day du (da co o
     #: `external_source_url`).
     embed_ref: str = ""
+    #: Khoa R2 cua phu de da dich (.srt) khi `subtitle_status == "READY"` —
+    #: mission "Chinese Media Watcher foundation" (2026-09-02). Cung mau voi
+    #: `cover_key`: khoa doi tuong, khong phai URL (URL ky het han).
+    subtitle_key: str = ""
+    #: Khoa R2 cua ban dub tieng Viet (mp3), neu pipeline co tao — rong neu
+    #: khong dub (dub la buoc TUY CHON theo dung dac ta mission).
+    dub_audio_key: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -715,6 +722,8 @@ class Novel:
             "rights_mode": self.rights_mode,
             "subtitle_status": self.subtitle_status,
             "embed_ref": self.embed_ref,
+            "subtitle_key": self.subtitle_key,
+            "dub_audio_key": self.dub_audio_key,
         }
 
 

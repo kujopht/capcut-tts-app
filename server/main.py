@@ -642,6 +642,9 @@ class NovelIn(BaseModel):
     rights_mode: str = ""
     subtitle_status: str = ""
     embed_ref: str = ""
+    #: Chinese Media Watcher foundation (2026-09-02) — xem Novel.to_dict().
+    subtitle_key: str = ""
+    dub_audio_key: str = ""
 
 
 class ChapterIn(BaseModel):
@@ -1445,6 +1448,8 @@ def create_novel(payload: NovelIn, profile: Profile = Depends(harvester_or_user_
         rights_mode=payload.rights_mode.strip(),
         subtitle_status=payload.subtitle_status.strip(),
         embed_ref=payload.embed_ref.strip(),
+        subtitle_key=payload.subtitle_key.strip(),
+        dub_audio_key=payload.dub_audio_key.strip(),
     ))
     return {"novel": _novel_out(novel)}
 

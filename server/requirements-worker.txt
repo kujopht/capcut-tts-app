@@ -29,3 +29,13 @@
 # `%LOCALAPPDATA%\FanficAudioStudio\models\piper\ngochuyen.onnx` (60,57 MB).
 # `.gitignore` chặn `*.onnx`, `*.onnx.json`, `models/` và `models.json`.
 piper-tts==1.6.0
+
+# --- Chinese Media Watcher foundation (2026-09-02): Mandarin ASR fallback ---
+#
+# Used only by `scripts/chinese_media_pipeline.py`, run on this same laptop
+# worker. Downloads its own model weights from the standard, official
+# faster-whisper/Systran model repos on first use via huggingface_hub — a
+# different situation from the Piper voice-pack question: this is the
+# library's own well-known, widely-used distribution channel, not a
+# third-party mirror of an unverified private asset.
+faster-whisper==1.0.3

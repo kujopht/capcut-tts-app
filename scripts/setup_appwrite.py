@@ -488,6 +488,10 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("rights_mode", "string", False, 32),
             ("subtitle_status", "string", False, 32),
             ("embed_ref", "string", False, 256),
+            # Chinese Media Watcher foundation (2026-09-02) — R2 object keys,
+            # same pattern as cover_key (not signed URLs, which expire).
+            ("subtitle_key", "string", False, 512),
+            ("dub_audio_key", "string", False, 512),
         ],
         "indexes": [
             ("owner_idx", "key", ["owner_id"]),

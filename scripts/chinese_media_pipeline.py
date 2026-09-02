@@ -184,8 +184,19 @@ def transcribe_mandarin(audio_path: Path, model_size: str = "small") -> List[Seg
 # or splitting lines).
 # --------------------------------------------------------------------------
 
-def translate_zh_to_vi(segments: List[Segment], timeout: str = "3m") -> None:
-    """Mutates each Segment's vi_text in place."""
+def translate_zh_to_vi(segments: List[Segment], timeout: str = "12m") -> None:
+    """Mutates each Segment's vi_text in place.
+
+    `timeout` default raised from the original "3m" to "12m" (2026-09-02) -
+    a real, THIRD distinct defect found resuming candidate #2: the 3-minute
+    budget was enough for small batches (27 segments) but a real 1147-
+    segment batch of substantive narrative Chinese genuinely needs more
+    generation time than a same-sized batch of trivially-repetitive text
+    (confirmed by the real failure: agy had already generated a large,
+    well-formed partial JSON array before "Error: timeout waiting for
+    response" cut it off - not a permission/security issue at all, pure
+    capacity). Not unbounded - still a real ceiling, just sized for the
+    largest real batch seen so far with headroom, not the smallest one."""
     if not segments:
         return
     payload = [s.zh_text for s in segments]
@@ -219,7 +230,10 @@ def translate_zh_to_vi(segments: List[Segment], timeout: str = "3m") -> None:
             result = subprocess.run(
                 [_agy_binary(), "--print-timeout", timeout],
                 stdin=stdin_f,
-                capture_output=True, text=True, encoding="utf-8", timeout=240,
+                # Python-level hard cap must exceed agy's own --print-timeout
+                # (12m = 720s) so agy's own clean timeout message surfaces
+                # first, not an abrupt TimeoutExpired kill mid-generation.
+                capture_output=True, text=True, encoding="utf-8", timeout=780,
             )
         raw = result.stdout.strip()
         start = raw.find("[")

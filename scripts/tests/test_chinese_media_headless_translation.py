@@ -168,5 +168,31 @@ class AgyBinaryResolutionTest(unittest.TestCase):
         self.assertEqual(cmp._agy_binary(), "agy")
 
 
+class TranslationTimeoutBudgetTest(unittest.TestCase):
+    """Real THIRD defect found completing the actual resume: the original
+    3-minute --print-timeout was enough for small batches but genuinely
+    too short for a real 1147-segment batch of substantive narrative
+    Chinese (agy had already generated a large well-formed partial JSON
+    array before being cut off - a pure capacity issue, not permissions).
+    Locks in the raised default so it can't silently regress back to a
+    value already proven too small on real content."""
+
+    def test_default_timeout_was_raised_from_3m(self):
+        import inspect
+        sig = inspect.signature(cmp.translate_zh_to_vi)
+        self.assertEqual(sig.parameters["timeout"].default, "12m")
+
+    @mock.patch("subprocess.run")
+    def test_subprocess_hard_cap_exceeds_agy_print_timeout(self, mock_run):
+        """The Python-level subprocess timeout must stay larger than
+        whatever --print-timeout value is passed, so agy's own clean
+        timeout message surfaces instead of an abrupt TimeoutExpired."""
+        mock_run.return_value = mock.Mock(
+            returncode=0, stdout=json.dumps(["vi"]), stderr="")
+        cmp.translate_zh_to_vi([cmp.Segment(start=0.0, end=1.0, zh_text="zh")])
+        call_kwargs = mock_run.call_args.kwargs
+        self.assertGreater(call_kwargs["timeout"], 720)  # > 12m in seconds
+
+
 if __name__ == "__main__":
     unittest.main()

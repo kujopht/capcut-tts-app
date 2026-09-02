@@ -266,13 +266,18 @@ def dub_segments(segments: List[Segment], out_path: Path, ffmpeg: str) -> None:
 
 def compose_with_source(source_media: Path, srt_path: Path,
                         dub_path: Optional[Path], out_path: Path, ffmpeg: str) -> None:
+    # Subtitle codec is CONTAINER-specific, not universal: `mov_text` is the
+    # MP4/MOV subtitle codec and fails outright ("Function not implemented")
+    # when muxed into Matroska, which wants `srt` (plain SubRip passthrough)
+    # instead. Measured against a real render, not assumed.
+    subtitle_codec = "mov_text" if out_path.suffix.lower() in (".mp4", ".mov", ".m4v") else "srt"
     args = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(source_media), "-i", str(srt_path)]
     maps = ["-map", "0:v", "-map", "0:a", "-map", "1"]
     if dub_path is not None:
         args += ["-i", str(dub_path)]
         maps += ["-map", "2:a"]
-    args += maps + ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text", str(out_path)]
+    args += maps + ["-c:v", "copy", "-c:a", "copy", "-c:s", subtitle_codec, str(out_path)]
     subprocess.run(args, check=True)
 
 

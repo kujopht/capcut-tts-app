@@ -243,7 +243,15 @@ def translate_zh_to_vi(segments: List[Segment], timeout: str = "12m") -> None:
                 f"no JSON array in agy output (exit={result.returncode}): "
                 f"stdout={raw[:300]!r} stderr={result.stderr[:300]!r}"
             )
-        translated = json.loads(raw[start:end + 1])
+        # strict=False: a real 1147-item realistic-content measurement run
+        # (2026-09-02, done specifically to avoid a 4th costly ASR re-run
+        # before committing to another live attempt) hit a genuine
+        # JSONDecodeError - agy embedded a raw, unescaped control character
+        # inside one translated string, which strict JSON rejects but is a
+        # well-known, common minor LLM-JSON-generation quirk. Tolerating it
+        # here is the standard stdlib fix, not a data-integrity risk: the
+        # array structure/length/content are otherwise unaffected.
+        translated = json.loads(raw[start:end + 1], strict=False)
         if len(translated) != len(segments):
             raise ValueError(
                 f"length mismatch: {len(translated)} translations for "

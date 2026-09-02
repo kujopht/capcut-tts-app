@@ -194,5 +194,29 @@ class TranslationTimeoutBudgetTest(unittest.TestCase):
         self.assertGreater(call_kwargs["timeout"], 720)  # > 12m in seconds
 
 
+class ControlCharacterJsonRegressionTest(unittest.TestCase):
+    """Real FOURTH defect, caught by a deliberate cheap empirical timing
+    measurement (a realistic 1147-item varied-content payload) run BEFORE
+    committing to another ~30-40 min real ASR cycle: agy embedded a raw,
+    unescaped control character inside one translated string on real
+    varied narrative content. Strict json.loads() rejects that even
+    though the array structure is otherwise perfectly well-formed - a
+    well-known, common minor LLM-JSON-generation quirk, not a data
+    integrity problem."""
+
+    @mock.patch("subprocess.run")
+    def test_embedded_control_character_does_not_crash_translation(self, mock_run):
+        # A literal (unescaped) newline inside a string value - invalid
+        # strict JSON, valid under strict=False.
+        raw_with_control_char = '["dịch co ky tu dieu khien\nbi loi", "cau thu hai"]'
+        mock_run.return_value = mock.Mock(
+            returncode=0, stdout=raw_with_control_char, stderr="")
+        segments = [cmp.Segment(start=0.0, end=1.0, zh_text="a"),
+                    cmp.Segment(start=1.0, end=2.0, zh_text="b")]
+        cmp.translate_zh_to_vi(segments)  # must not raise
+        self.assertIn("\n", segments[0].vi_text)
+        self.assertEqual(segments[1].vi_text, "cau thu hai")
+
+
 if __name__ == "__main__":
     unittest.main()

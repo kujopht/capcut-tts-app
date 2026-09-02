@@ -206,6 +206,18 @@ def chay(doi_moi_truong: Optional[str] = None) -> int:
         except Exception as exc:
             _ghi("loi_nhap_chuong", loai=type(exc).__name__)
 
+        # DRIVE ARCHIVE RETRY — xem `server/scraper/raw_archive.py`. Cung
+        # nguyen tac voi khoi nhap chuong o tren: khoi `try` RIENG, chi ghi
+        # log khi CO viec that, mot lan Drive loi tuyet doi khong duoc lam
+        # mat vong quet TTS ben canh. Duong nhanh khi hang doi rong chi la
+        # mot lan kiem tra file ton tai — khong dang ke so voi chu ky 3s.
+        try:
+            tu_rclone = api.drain_archive_queue()
+            if tu_rclone.get("da_thu"):
+                _ghi("drive_archive_retry", **tu_rclone)
+        except Exception as exc:
+            _ghi("loi_drive_archive", loai=type(exc).__name__)
+
         _nhip("dang_chay", chu_ky, bao_cao)
         _dung.wait(POLL_SECONDS)
 

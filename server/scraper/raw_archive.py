@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +25,95 @@ from server.scraper.http_fetcher import FetchResult, HttpFetcher
 from server.scraper.site_registry import lookup as site_lookup
 
 MANIFEST_FILENAME = "manifest.json"
+
+#: Goc tren Google Drive, dung chung voi `scripts/rclone_archive_copy.py`'s
+#: docstring vi du. Ten remote (`fanfic-gdrive`) da duoc xac thuc san tren
+#: may bang `rclone config` — module nay KHONG tu cau hinh OAuth, chi goi
+#: rclone da san sang, dung nguyen tac "adapter khong giu credential".
+DRIVE_ARCHIVE_REMOTE = "fanfic-gdrive:FanficWorld/archive/scraping/raw"
+
+ARCHIVE_QUEUE_FILENAME = "archive_queue.jsonl"
+
+
+def _archive_queue_path() -> Path:
+    from server.config import get_settings
+
+    return get_settings().var_dir / "archive" / ARCHIVE_QUEUE_FILENAME
+
+
+def _append_to_queue(entry: dict) -> None:
+    path = _archive_queue_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _try_copy_to_drive(local_dir: Path, remote_path: str, timeout: int = 120) -> bool:
+    try:
+        proc = subprocess.run(
+            ["rclone", "copy", str(local_dir), remote_path, "--checksum"],
+            capture_output=True, timeout=timeout)
+        return proc.returncode == 0
+    except Exception:
+        # rclone missing/misconfigured/timed out -- NEVER raise from here.
+        # A failed archive push must not fail the acquisition it followed.
+        return False
+
+
+def queue_drive_archive(local_dir: Path, story_slug: str) -> None:
+    """Best-effort, NON-BLOCKING push of one spooled chapter to Drive.
+
+    Tries immediately in a background daemon thread so a slow/offline
+    rclone never delays the caller (job creation, chapter write, mission
+    completion). On failure, appends a retry entry to the local queue file
+    instead of raising -- `drain_archive_queue()` (called every worker
+    cycle, see `server/worker.py`) retries it later. Never blocks, never
+    raises: archive is a side effect, not a gate on production content.
+    """
+    remote_path = f"{DRIVE_ARCHIVE_REMOTE}/{story_slug}"
+
+    def _run() -> None:
+        if not _try_copy_to_drive(local_dir, remote_path):
+            _append_to_queue({
+                "local_dir": str(local_dir), "remote_path": remote_path,
+                "queued_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+    threading.Thread(target=_run, daemon=True, name="drive-archive").start()
+
+
+def drain_archive_queue() -> dict:
+    """Retry every pending queue entry ONCE. Re-queues whatever still fails.
+
+    Called from the worker's own poll loop, in its own try block (same
+    pattern as `main.drive_chapter_imports()` — a queue drain failing must
+    not touch the TTS scan cycle next to it). Safe to call with an empty/
+    missing queue (returns immediately, does nothing).
+    """
+    path = _archive_queue_path()
+    if not path.is_file():
+        return {"da_thu": 0, "thanh_cong": 0}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        path.unlink()
+    except OSError:
+        return {"da_thu": 0, "thanh_cong": 0}
+
+    da_thu = 0
+    thanh_cong = 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        da_thu += 1
+        if _try_copy_to_drive(Path(entry["local_dir"]), entry["remote_path"]):
+            thanh_cong += 1
+        else:
+            _append_to_queue(entry)
+    return {"da_thu": da_thu, "thanh_cong": thanh_cong}
 
 #: Mau du lieu nhay cam CO CHU DICH GIU DON GIAN — day la mot GATE truoc khi
 #: day noi dung THO ra ngoai (Google Drive), khong phai bo quet PII day du.
@@ -132,6 +223,7 @@ def fetch_and_spool_raw(
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    queue_drive_archive(local_dir, spool_root.name)
     return RawArchiveResult(
         local_dir=local_dir, manifest_path=manifest_path, raw_path=raw_path,
         manifest=manifest)
@@ -183,6 +275,7 @@ def spool_uploaded_raw(
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    queue_drive_archive(local_dir, spool_root.name)
     return RawArchiveResult(
         local_dir=local_dir, manifest_path=manifest_path, raw_path=raw_path,
         manifest=manifest)

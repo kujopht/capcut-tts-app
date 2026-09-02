@@ -174,6 +174,13 @@ class TestBackwardCompatible(CoverTestCase):
     NEW_VIDEO_DRAFT_FIELDS = {
         "platform", "rights_mode", "subtitle_status", "embed_ref",
     }
+    #: Mission "Chinese Media Watcher foundation" (2026-09-02): mirrors
+    #: `cover_key` for the pipeline's real output (subtitle/dub R2 keys),
+    #: not just the `subtitle_status` flag added above. Same explicit-
+    #: confirmation discipline as every set above.
+    NEW_CHINESE_MEDIA_FIELDS = {
+        "subtitle_key", "dub_audio_key",
+    }
 
     def test_only_cover_url_was_added(self):
         token = self.user()
@@ -183,7 +190,7 @@ class TestBackwardCompatible(CoverTestCase):
         self.assertEqual(
             set(body) - self.OLD_NOVEL_FIELDS,
             {"cover_url"} | self.NEW_FANDOM_FIELDS | self.NEW_TAXONOMY_FIELDS
-            | self.NEW_VIDEO_DRAFT_FIELDS)
+            | self.NEW_VIDEO_DRAFT_FIELDS | self.NEW_CHINESE_MEDIA_FIELDS)
 
     def test_chapter_response_keeps_its_old_shape(self):
         token = self.user()

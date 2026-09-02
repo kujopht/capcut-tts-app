@@ -150,7 +150,7 @@ from server.import_pipeline.pipeline import (
     AuthorizedImportService, NoContentExtractedError,
 )
 from server.import_pipeline.safe_zip import UnsafeZipError
-from server.scraper.raw_archive import SensitiveContentDetected
+from server.scraper.raw_archive import SensitiveContentDetected, drain_archive_queue
 from server.social import (
     COMMENT_MAX_CHARS,
     POST_MAX_CHARS,

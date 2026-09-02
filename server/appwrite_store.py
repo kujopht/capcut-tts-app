@@ -40,6 +40,7 @@ from server.domain import (
     AuthorApplication,
     AuthorStats,
     AuthorStatus,
+    ChineseMediaQueueItem,
     ListenCredit,
     ModerationEvent,
     AudioStamp,
@@ -62,6 +63,12 @@ COL_TRACKS = "audio_tracks"
 COL_CLAIMS = "job_claims"
 #: Khoa tat dinh chan hai request cung tao mot job. Xem `create_job_once`.
 COL_JOB_LOCKS = "job_locks"
+#: Chinese Media Watcher foundation (2026-09-02) -- hang doi phat hien/xu ly,
+#: doc lap voi novels (chi ghi vao novels luc THAT SU tao duoc draft).
+COL_CONTENT_QUEUE = "content_queue"
+#: Danh tinh dich vu ghi hang doi nay -- tu dong hoa, khong phai nguoi dung
+#: that, cung mau voi `harvester_owner_user_id` ("svc_harvester") o noi khac.
+CONTENT_QUEUE_OWNER = "svc_harvester"
 
 #: --- V2: tac gia -----------------------------------------------------------
 #: Bon bang moi. Moi bang mot cach dat `rowId` khac nhau, va do la thu quyet
@@ -154,6 +161,13 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
     COL_CHAPTERS: (
         "chapter_id", "novel_id", "owner_id", "title", "content",
         "order_index", "state", "created_at", "updated_at",
+    ),
+    COL_CONTENT_QUEUE: (
+        "item_id", "source_id", "platform", "series_slug", "episode_ref",
+        "title", "source_url", "discovered_at", "rights_mode",
+        "transcript_state", "translation_state", "subtitle_state",
+        "dub_state", "render_state", "draft_state", "novel_id",
+        "transcript_key", "attempts", "last_error", "updated_at", "created_at",
     ),
     COL_JOBS: (
         "job_id", "owner_id", "chapter_id", "voice_id", "content_hash",
@@ -801,6 +815,43 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         except NotFoundError:
             return _chapter_from_doc(self._get(COL_CHAPTERS,
                                                chapter.chapter_id)), False
+
+    # -- Chinese Media Watcher hang doi (2026-09-02) --------------------------
+
+    def create_queue_item_once(
+            self, item: ChineseMediaQueueItem) -> Tuple[ChineseMediaQueueItem, bool]:
+        """Dedup vinh vien theo (platform, episode_ref): xem
+        `chinese_media_watcher.py::queue_item_id` — `item.item_id` sinh TAT
+        DINH tu hai truong do, nen goi lai voi CUNG video la mot no-op an
+        toan, cung ky thuat voi `create_chapter_once` (409 -> NotFoundError
+        -> coi la 'da co', khong phai loi)."""
+        try:
+            self._create(COL_CONTENT_QUEUE, item.item_id, item.to_dict(),
+                        CONTENT_QUEUE_OWNER)
+            return item, True
+        except NotFoundError:
+            return _queue_item_from_doc(
+                self._get(COL_CONTENT_QUEUE, item.item_id)), False
+
+    def get_queue_item(self, item_id: str) -> ChineseMediaQueueItem:
+        return _queue_item_from_doc(self._get(COL_CONTENT_QUEUE, item_id))
+
+    def update_queue_item(self, item_id: str, **fields: Any) -> ChineseMediaQueueItem:
+        """Cap nhat MOT vai truong (vd `transcript_state="DONE"`) — luon them
+        `updated_at` moi, khong bao gio ghi de `item_id`/`created_at`."""
+        fields.pop("item_id", None)
+        fields.pop("created_at", None)
+        fields["updated_at"] = now_iso()
+        self._update(COL_CONTENT_QUEUE, item_id, fields)
+        return self.get_queue_item(item_id)
+
+    def list_queue_items_by_state(
+            self, *, stage: str, state: str, limit: int = 50) -> List[ChineseMediaQueueItem]:
+        """Vd `stage="transcript_state", state="PENDING"` — muc dich duy nhat
+        cua ham nay la nguon viec cho `chinese_media_orchestrator.py`."""
+        docs = self._list(COL_CONTENT_QUEUE,
+                          [q_equal(stage, state), q_limit(limit)])
+        return [_queue_item_from_doc(d) for d in docs]
 
     def get_chapter(self, chapter_id: str) -> Chapter:
         return _chapter_from_doc(self._get(COL_CHAPTERS, chapter_id))
@@ -1901,6 +1952,32 @@ def _chapter_from_doc(doc: Dict[str, Any]) -> Chapter:
         state=_publish_state_from_doc(doc),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
+    )
+
+
+def _queue_item_from_doc(doc: Dict[str, Any]) -> ChineseMediaQueueItem:
+    return ChineseMediaQueueItem(
+        item_id=str(doc.get("item_id") or doc.get("$id") or ""),
+        source_id=str(doc.get("source_id") or ""),
+        platform=str(doc.get("platform") or ""),
+        series_slug=str(doc.get("series_slug") or ""),
+        episode_ref=str(doc.get("episode_ref") or ""),
+        title=str(doc.get("title") or ""),
+        source_url=str(doc.get("source_url") or ""),
+        discovered_at=str(doc.get("discovered_at") or ""),
+        rights_mode=str(doc.get("rights_mode") or "REFERENCE_ONLY"),
+        transcript_state=str(doc.get("transcript_state") or "PENDING"),
+        translation_state=str(doc.get("translation_state") or "PENDING"),
+        subtitle_state=str(doc.get("subtitle_state") or "PENDING"),
+        dub_state=str(doc.get("dub_state") or "PENDING"),
+        render_state=str(doc.get("render_state") or "PENDING"),
+        draft_state=str(doc.get("draft_state") or "PENDING"),
+        novel_id=str(doc.get("novel_id") or ""),
+        transcript_key=str(doc.get("transcript_key") or ""),
+        attempts=int(doc.get("attempts") or 0),
+        last_error=str(doc.get("last_error") or ""),
+        updated_at=str(doc.get("updated_at") or ""),
+        created_at=str(doc.get("created_at") or ""),
     )
 
 

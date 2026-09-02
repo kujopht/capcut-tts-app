@@ -1479,3 +1479,80 @@ class ImportRecord:
             "content_hash": self.content_hash,
             "created_at": self.created_at,
         }
+
+
+#: Trang thai cua TUNG cong doan trong hang doi Chinese Media Watcher — moi
+#: cong doan doc lap de mot lan chay sau chi lam LAI cong doan con do, khong
+#: lam lai ASR/dich/dub/render da xong. "SKIPPED" nghia la co chu dich bo qua
+#: (vd rights_mode khong cho phep render), khac "PENDING" (chua toi luot).
+QUEUE_STAGE_STATES = ("PENDING", "RUNNING", "DONE", "SKIPPED", "FAILED")
+
+
+@dataclass
+class ChineseMediaQueueItem:
+    """
+    MOT tap/video da phat hien, tu luc dang ky den luc thanh Novel draft (hoac
+    dung han co ly do). Day la hang doi "future autonomous workers" doc/ghi —
+    xem `scripts/chinese_media_watcher.py` (tao) va
+    `scripts/chinese_media_orchestrator.py` (chay tiep).
+
+    Idempotent theo THIET KE: `item_id` sinh TAT DINH tu (platform,
+    episode_ref), nen goi lai watcher tren cung mot video khong tao ban ghi
+    thu hai — Appwrite tu choi tao trung `documentId` (409), xem
+    `AppwriteMetadataStore.create_queue_item_once`.
+    """
+
+    item_id: str
+    source_id: str
+    platform: str
+    series_slug: str
+    episode_ref: str
+    title: str = ""
+    source_url: str = ""
+    discovered_at: str = field(default_factory=now_iso)
+    #: "REHOST_ALLOWED" | "EMBED_ONLY" | "REFERENCE_ONLY" — xem
+    #: `server/scraper/chinese_media_sources.py::classify_rights`.
+    rights_mode: str = "REFERENCE_ONLY"
+    transcript_state: str = "PENDING"
+    translation_state: str = "PENDING"
+    subtitle_state: str = "PENDING"
+    dub_state: str = "PENDING"
+    render_state: str = "PENDING"
+    #: "PENDING" cho toi khi mot Novel draft that su duoc tao; luc do
+    #: `draft_state="DONE"` va `novel_id` duoc dien.
+    draft_state: str = "PENDING"
+    novel_id: str = ""
+    #: Khoa R2 cua ban ghi transcript THO (JSON: doan + timestamp + van ban
+    #: tieng Trung, CHUA dich) — luu ngay khi `transcript_state="DONE"" de
+    #: mot lan chay lai KHONG BAO GIO lam lai ASR (cong doan ton kem nhat)
+    #: du cac cong doan sau chua xong.
+    transcript_key: str = ""
+    attempts: int = 0
+    last_error: str = ""
+    updated_at: str = field(default_factory=now_iso)
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "item_id": self.item_id,
+            "source_id": self.source_id,
+            "platform": self.platform,
+            "series_slug": self.series_slug,
+            "episode_ref": self.episode_ref,
+            "title": self.title,
+            "source_url": self.source_url,
+            "discovered_at": self.discovered_at,
+            "rights_mode": self.rights_mode,
+            "transcript_state": self.transcript_state,
+            "translation_state": self.translation_state,
+            "subtitle_state": self.subtitle_state,
+            "dub_state": self.dub_state,
+            "render_state": self.render_state,
+            "draft_state": self.draft_state,
+            "novel_id": self.novel_id,
+            "transcript_key": self.transcript_key,
+            "attempts": self.attempts,
+            "last_error": self.last_error,
+            "updated_at": self.updated_at,
+            "created_at": self.created_at,
+        }

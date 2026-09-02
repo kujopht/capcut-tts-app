@@ -539,6 +539,48 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("owner_idx", "key", ["owner_id"]),
         ],
     },
+    # Chinese Media Watcher foundation (2026-09-02) — discovery/processing
+    # queue, doc lap voi `novels` (chi ghi vao do luc THAT SU co draft). Xem
+    # `server/domain.py::ChineseMediaQueueItem`'s own docstring.
+    "content_queue": {
+        "name": "Content Queue",
+        "attributes": [
+            ("item_id", "string", True, 64),
+            ("source_id", "string", True, 64),
+            ("platform", "string", True, 32),
+            ("series_slug", "string", True, 128),
+            ("episode_ref", "string", True, 256),
+            ("title", "string", False, 300),
+            ("source_url", "string", False, 1000),
+            ("discovered_at", "string", False, 64),
+            ("rights_mode", "enum", True,
+             ["REHOST_ALLOWED", "EMBED_ONLY", "REFERENCE_ONLY"]),
+            ("transcript_state", "enum", True,
+             ["PENDING", "RUNNING", "DONE", "SKIPPED", "FAILED"]),
+            ("translation_state", "enum", True,
+             ["PENDING", "RUNNING", "DONE", "SKIPPED", "FAILED"]),
+            ("subtitle_state", "enum", True,
+             ["PENDING", "RUNNING", "DONE", "SKIPPED", "FAILED"]),
+            ("dub_state", "enum", True,
+             ["PENDING", "RUNNING", "DONE", "SKIPPED", "FAILED"]),
+            ("render_state", "enum", True,
+             ["PENDING", "RUNNING", "DONE", "SKIPPED", "FAILED"]),
+            ("draft_state", "enum", True,
+             ["PENDING", "RUNNING", "DONE", "SKIPPED", "FAILED"]),
+            ("novel_id", "string", False, 64),
+            ("transcript_key", "string", False, 512),
+            ("attempts", "integer", False, None),
+            ("last_error", "string", False, 1000),
+            ("updated_at", "string", False, 64),
+            ("created_at", "string", False, 64),
+        ],
+        "indexes": [
+            ("source_idx", "key", ["source_id"]),
+            ("platform_idx", "key", ["platform"]),
+            ("transcript_state_idx", "key", ["transcript_state"]),
+            ("draft_state_idx", "key", ["draft_state"]),
+        ],
+    },
     "tts_jobs": {
         "name": "TTS Jobs",
         "attributes": [

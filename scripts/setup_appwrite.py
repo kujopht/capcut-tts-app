@@ -492,6 +492,14 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             # same pattern as cover_key (not signed URLs, which expire).
             ("subtitle_key", "string", False, 512),
             ("dub_audio_key", "string", False, 512),
+            # Media-processing update path (2026-09-02): rendered video key
+            # (same R2-object-key pattern as subtitle_key/dub_audio_key),
+            # plain-string mirror of scripts/visual_media_qa.py's QAVerdict,
+            # and a free-text last-error field — see
+            # AppwriteMetadataStore.update_novel_media_processing.
+            ("rendered_media_key", "string", False, 512),
+            ("qa_state", "string", False, 32),
+            ("processing_error", "string", False, 2000),
         ],
         "indexes": [
             ("owner_idx", "key", ["owner_id"]),

@@ -487,6 +487,34 @@ def ship_draft(*, title: str, source_url: str, author: str, rights_mode: str,
         dub_key = subtitle_key.replace("/subtitles/", "/dub_audio/").replace(".srt", ".mp3")
         upload_to_r2(dub_key, dub_bytes, "audio/mpeg")
 
+    # Idempotent lookup BEFORE creating anything: a placeholder Novel for
+    # this exact source may already exist (e.g. ship_video_drafts_runner.py
+    # created it earlier with subtitle_status=PENDING_SOURCE, no subtitle/dub
+    # yet). Same GET/keying pattern as ship_video_drafts_runner.py and
+    # mission_g_rezero_draft_runner.py — keyed on external_source_url, the
+    # canonical identity used everywhere in this codebase for this purpose.
+    # Reusing it here (instead of always POSTing) is the actual fix for the
+    # real, disclosed duplicate Appwrite document this mission hit in
+    # production.
+    if source_url:
+        ma, r = goi(DEFAULT_API, "GET", "/api/novels?mine=true&limit=200", token=token)
+        if ma != 200:
+            raise RuntimeError(f"GET /api/novels?mine=true -> {ma}: {r}")
+        existing = next(
+            (n for n in r.get("novels", []) if n.get("external_source_url") == source_url),
+            None,
+        )
+        if existing:
+            novel_id = existing["novel_id"]
+            ma, r = goi(DEFAULT_API, "PATCH", f"/api/novels/{novel_id}/media-processing", {
+                "subtitle_key": subtitle_key,
+                "dub_audio_key": dub_key,
+                "subtitle_status": "READY",
+            }, token=token)
+            if ma != 200:
+                raise RuntimeError(f"PATCH /api/novels/{novel_id}/media-processing -> {ma}: {r}")
+            return novel_id
+
     ma, r = goi(DEFAULT_API, "POST", "/api/novels", {
         "title": title,
         "description": (

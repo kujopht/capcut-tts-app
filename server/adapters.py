@@ -421,6 +421,13 @@ class MetadataStore(Protocol):
         """Sua truyen. Chi chu so huu; chi nhan cac truong nguoi dung duoc sua."""
         ...
 
+    def update_novel_media_processing(self, novel_id: str, owner_id: str,
+                                       fields: Dict[str, Any]) -> Novel:
+        """Cap nhat CHI cac truong xu ly media (subtitle/dub/render/QA/loi) —
+        duong rieng, HEP HON `update_novel`, xem
+        `AppwriteMetadataStore.update_novel_media_processing`."""
+        ...
+
     def set_novel_cover(self, novel_id: str, owner_id: str,
                         cover_key: Optional[str]) -> Novel:
         """
@@ -1369,6 +1376,22 @@ class MockMetadataStore(MockSocialStore):
         with self._lock:
             current = self.owned_novel(novel_id, owner_id)
             allowed = {k: v for k, v in fields.items() if k in self.NOVEL_EDITABLE}
+            updated = replace(current, **allowed, updated_at=now_iso())
+            self.novels[novel_id] = updated
+            return updated
+
+    #: Chi 6 truong xu ly media (ASR/dich/dub/render/QA) — xem
+    #: `AppwriteMetadataStore.update_novel_media_processing` cho ly do ton tai.
+    NOVEL_MEDIA_PROCESSING_EDITABLE = (
+        "subtitle_key", "dub_audio_key", "rendered_media_key",
+        "subtitle_status", "qa_state", "processing_error",
+    )
+
+    def update_novel_media_processing(self, novel_id: str, owner_id: str,
+                                       fields: Dict[str, Any]) -> Novel:
+        with self._lock:
+            current = self.owned_novel(novel_id, owner_id)
+            allowed = {k: v for k, v in fields.items() if k in self.NOVEL_MEDIA_PROCESSING_EDITABLE}
             updated = replace(current, **allowed, updated_at=now_iso())
             self.novels[novel_id] = updated
             return updated

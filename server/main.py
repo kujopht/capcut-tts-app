@@ -672,6 +672,19 @@ class NovelPatch(BaseModel):
     status: Optional[str] = None
 
 
+class NovelMediaProcessingPatch(BaseModel):
+    """Duong cap nhat RIENG, HEP cho pipeline xu ly media - xem
+    AppwriteMetadataStore.update_novel_media_processing(). Khong bao gio
+    them truong nao khac vao day: day CHINH LA ranh gioi bao mat."""
+
+    subtitle_key: Optional[str] = None
+    dub_audio_key: Optional[str] = None
+    rendered_media_key: Optional[str] = None
+    subtitle_status: Optional[str] = None
+    qa_state: Optional[str] = None
+    processing_error: Optional[str] = None
+
+
 class ChapterPatch(BaseModel):
     title: Optional[TieuDe] = None
     # CUNG rang buoc voi `ChapterIn`. Chan luc tao ma khong chan luc sua thi
@@ -1654,6 +1667,24 @@ def update_novel(novel_id: str, payload: NovelPatch,
         fields["status"] = _parse_novel_status(fields["status"])
     try:
         novel = store.update_novel(novel_id, profile.user_id, fields)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionDenied as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return {"novel": _novel_out(novel)}
+
+
+@app.patch("/api/novels/{novel_id}/media-processing")
+def update_novel_media_processing(novel_id: str, payload: NovelMediaProcessingPatch,
+                                  profile: Profile = Depends(harvester_or_user_profile)) -> Dict[str, Any]:
+    """Cap nhat CHI cac truong xu ly media (subtitle/dub/render/QA/loi) cua
+    mot Novel da co. Duong RIENG, HEP HON `update_novel` o tren - xem
+    `NovelMediaProcessingPatch`/`AppwriteMetadataStore.update_novel_media_processing`."""
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không có gì để sửa.")
+    try:
+        novel = store.update_novel_media_processing(novel_id, profile.user_id, fields)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except PermissionDenied as exc:

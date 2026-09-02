@@ -197,6 +197,95 @@ class TestUpdateNovel(CrudTestCase):
         self.assertEqual(r.status_code, 404)
 
 
+# ============================================ sua truong xu ly media (rieng)
+
+
+class TestUpdateNovelMediaProcessing(CrudTestCase):
+    """`PATCH /api/novels/{id}/media-processing` - duong RIENG, HEP cho
+    pipeline xu ly media. Trong tam: chi 6 truong media duoc phep doi, moi
+    truong khac (title/rights_mode/external_source_url/...) khong bao gio bi
+    cham toi qua duong nay, va goi lap lai cung gia tri la idempotent."""
+
+    def test_chi_doi_6_truong_media_khong_dung_toi_truong_khac(self):
+        token = self.user("chu@example.com")
+        novel_id = self.novel(token, "Giu nguyen tieu de")
+        before = self.client.get(f"/api/novels/{novel_id}",
+                                 headers=self.auth(token)).json()["novel"]
+
+        r = self.client.patch(
+            f"/api/novels/{novel_id}/media-processing",
+            json={
+                "subtitle_key": "subtitles/x.srt",
+                "dub_audio_key": "dub_audio/x.mp3",
+                "rendered_media_key": "rendered/x.mp4",
+                "subtitle_status": "READY",
+                "qa_state": "QA_PASS",
+                "processing_error": "",
+                # Cac truong duoi day KHONG thuoc 6 truong duoc phep - phai
+                # bi bo qua hoan toan, khong duoc gay loi va khong duoc doi.
+                "title": "Bi chiem doat",
+                "rights_mode": "REHOST_ALLOWED",
+                "external_source_url": "https://khac.example.com/video",
+            },
+            headers=self.auth(token),
+        )
+        self.assertEqual(r.status_code, 200)
+        novel = r.json()["novel"]
+
+        self.assertEqual(novel["subtitle_key"], "subtitles/x.srt")
+        self.assertEqual(novel["dub_audio_key"], "dub_audio/x.mp3")
+        self.assertEqual(novel["rendered_media_key"], "rendered/x.mp4")
+        self.assertEqual(novel["subtitle_status"], "READY")
+        self.assertEqual(novel["qa_state"], "QA_PASS")
+        self.assertEqual(novel["processing_error"], "")
+
+        # Nhung truong KHONG thuoc danh sach 6 truong phai giu nguyen gia tri cu.
+        self.assertEqual(novel["title"], before["title"])
+        self.assertEqual(novel["rights_mode"], before["rights_mode"])
+        self.assertEqual(novel["external_source_url"], before["external_source_url"])
+
+    def test_goi_lap_lai_cung_gia_tri_la_idempotent(self):
+        token = self.user("chu@example.com")
+        novel_id = self.novel(token)
+        payload = {
+            "subtitle_key": "subtitles/y.srt",
+            "dub_audio_key": "dub_audio/y.mp3",
+            "subtitle_status": "READY",
+        }
+        first = self.client.patch(f"/api/novels/{novel_id}/media-processing",
+                                  json=payload, headers=self.auth(token))
+        second = self.client.patch(f"/api/novels/{novel_id}/media-processing",
+                                   json=payload, headers=self.auth(token))
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()["novel"]["subtitle_key"],
+                         second.json()["novel"]["subtitle_key"])
+        self.assertEqual(second.json()["novel"]["subtitle_status"], "READY")
+
+    def test_non_owner_cannot_patch_media_processing(self):
+        owner = self.user("chu@example.com")
+        novel_id = self.novel(owner)
+        intruder = self.user("ke-la@example.com")
+        r = self.client.patch(f"/api/novels/{novel_id}/media-processing",
+                              json={"subtitle_status": "READY"},
+                              headers=self.auth(intruder))
+        self.assertEqual(r.status_code, 403)
+
+    def test_empty_patch_is_rejected(self):
+        token = self.user("chu@example.com")
+        novel_id = self.novel(token)
+        r = self.client.patch(f"/api/novels/{novel_id}/media-processing", json={},
+                              headers=self.auth(token))
+        self.assertEqual(r.status_code, 400)
+
+    def test_unknown_novel_is_404(self):
+        token = self.user("chu@example.com")
+        r = self.client.patch("/api/novels/nov_khong_co/media-processing",
+                              json={"subtitle_status": "READY"},
+                              headers=self.auth(token))
+        self.assertEqual(r.status_code, 404)
+
+
 # ============================================================== sua chuong
 
 
@@ -506,7 +595,8 @@ class TestBothStoresShareTheContract(unittest.TestCase):
 
         from server.appwrite_store import AppwriteMetadataStore
 
-        for name in ("update_novel", "unpublish_novel", "delete_novel",
+        for name in ("update_novel", "update_novel_media_processing",
+                     "unpublish_novel", "delete_novel",
                      "update_chapter", "delete_chapter", "delete_job",
                      "tracks_for_chapter", "delete_track"):
             mock = getattr(MockMetadataStore, name, None)
@@ -525,11 +615,34 @@ class TestBothStoresShareTheContract(unittest.TestCase):
                          AppwriteMetadataStore.NOVEL_EDITABLE)
         self.assertEqual(MockMetadataStore.CHAPTER_EDITABLE,
                          AppwriteMetadataStore.CHAPTER_EDITABLE)
+        self.assertEqual(MockMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE,
+                         AppwriteMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE)
 
     def test_editable_lists_exclude_server_owned_fields(self):
         for forbidden in ("state", "owner_id", "novel_id", "chapter_id"):
             self.assertNotIn(forbidden, MockMetadataStore.NOVEL_EDITABLE)
             self.assertNotIn(forbidden, MockMetadataStore.CHAPTER_EDITABLE)
+
+    def test_media_processing_editable_list_is_exactly_the_6_media_fields(self):
+        """Day CHINH LA ranh gioi bao mat: duong update_novel_media_processing
+        phai VAT LY khong the cham toi bat ky truong nao khac ngoai 6 truong
+        xu ly media - kiem bang danh sach, khong phai bang logic loc runtime."""
+        from server.appwrite_store import AppwriteMetadataStore
+
+        expected = {
+            "subtitle_key", "dub_audio_key", "rendered_media_key",
+            "subtitle_status", "qa_state", "processing_error",
+        }
+        self.assertEqual(set(MockMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE), expected)
+        for forbidden in (
+            "title", "description", "tags", "fandom_ids", "publication_mode",
+            "external_author_name", "external_source_url",
+            "external_chapter_count", "external_updated_at", "language",
+            "characters", "pairings", "status", "rights_mode", "platform",
+            "embed_ref", "state", "owner_id", "novel_id",
+        ):
+            self.assertNotIn(forbidden, MockMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE)
+            self.assertNotIn(forbidden, AppwriteMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE)
 
     def test_storage_adapters_can_delete(self):
         from server.r2_adapter import R2StorageAdapter

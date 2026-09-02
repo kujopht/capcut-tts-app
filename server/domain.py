@@ -696,6 +696,17 @@ class Novel:
     #: Khoa R2 cua ban dub tieng Viet (mp3), neu pipeline co tao — rong neu
     #: khong dub (dub la buoc TUY CHON theo dung dac ta mission).
     dub_audio_key: str = ""
+    #: Khoa R2 cua video da ghep/render (khi duong REHOST_ALLOWED cua pipeline
+    #: THAT SU tao ra mot ban render) — cung mau voi `dub_audio_key`. Rong voi
+    #: EMBED_ONLY/REFERENCE_ONLY, hai loai nay khong bao gio co render.
+    rendered_media_key: str = ""
+    #: Phan anh cac gia tri `QAVerdict` cua scripts/visual_media_qa.py duoi
+    #: dang chuoi thuan: "", "QA_PASS", "QA_REVIEW", "QA_FAIL" — rong nghia la
+    #: chua duoc danh gia. server/ khong import scripts/visual_media_qa (ranh
+    #: gioi khong duoc pha), nen chi luu chuoi, khong import enum that.
+    qa_state: str = ""
+    #: Loi xu ly gan nhat neu co (van ban tu do) — rong nghia la khong co loi.
+    processing_error: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -724,6 +735,9 @@ class Novel:
             "embed_ref": self.embed_ref,
             "subtitle_key": self.subtitle_key,
             "dub_audio_key": self.dub_audio_key,
+            "rendered_media_key": self.rendered_media_key,
+            "qa_state": self.qa_state,
+            "processing_error": self.processing_error,
         }
 
 

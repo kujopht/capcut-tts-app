@@ -181,6 +181,13 @@ class TestBackwardCompatible(CoverTestCase):
     NEW_CHINESE_MEDIA_FIELDS = {
         "subtitle_key", "dub_audio_key",
     }
+    #: Media-processing update path (2026-09-02): `rendered_media_key`
+    #: mirrors `dub_audio_key`, `qa_state`/`processing_error` are new — see
+    #: `AppwriteMetadataStore.update_novel_media_processing`. Same explicit-
+    #: confirmation discipline as every set above.
+    NEW_MEDIA_PROCESSING_FIELDS = {
+        "rendered_media_key", "qa_state", "processing_error",
+    }
 
     def test_only_cover_url_was_added(self):
         token = self.user()
@@ -190,7 +197,8 @@ class TestBackwardCompatible(CoverTestCase):
         self.assertEqual(
             set(body) - self.OLD_NOVEL_FIELDS,
             {"cover_url"} | self.NEW_FANDOM_FIELDS | self.NEW_TAXONOMY_FIELDS
-            | self.NEW_VIDEO_DRAFT_FIELDS | self.NEW_CHINESE_MEDIA_FIELDS)
+            | self.NEW_VIDEO_DRAFT_FIELDS | self.NEW_CHINESE_MEDIA_FIELDS
+            | self.NEW_MEDIA_PROCESSING_FIELDS)
 
     def test_chapter_response_keeps_its_old_shape(self):
         token = self.user()

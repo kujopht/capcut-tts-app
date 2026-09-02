@@ -683,6 +683,12 @@ class NovelMediaProcessingPatch(BaseModel):
     subtitle_status: Optional[str] = None
     qa_state: Optional[str] = None
     processing_error: Optional[str] = None
+    #: Final-render archival (2026-09-02) — xem docstring `rendered_archive_file_id`
+    #: o server/domain.py::Novel. KHONG dua vao NovelPatch: day la ket qua
+    #: BO PIPELINE TU TINH, khong phai truong nguoi dung go tay.
+    rendered_archive_file_id: Optional[str] = None
+    rendered_checksum: Optional[str] = None
+    rendered_size_bytes: Optional[int] = None
 
 
 class ChapterPatch(BaseModel):

@@ -1380,11 +1380,14 @@ class MockMetadataStore(MockSocialStore):
             self.novels[novel_id] = updated
             return updated
 
-    #: Chi 6 truong xu ly media (ASR/dich/dub/render/QA) — xem
+    #: Chi 9 truong xu ly media (ASR/dich/dub/render/QA + archival) — xem
     #: `AppwriteMetadataStore.update_novel_media_processing` cho ly do ton tai.
+    #: PHAI giu byte-identical voi ban Appwrite o tren — mot ban tu them/bo
+    #: mot truong la lam mock va that lech nhau khong ai thay ngay.
     NOVEL_MEDIA_PROCESSING_EDITABLE = (
         "subtitle_key", "dub_audio_key", "rendered_media_key",
         "subtitle_status", "qa_state", "processing_error",
+        "rendered_archive_file_id", "rendered_checksum", "rendered_size_bytes",
     )
 
     def update_novel_media_processing(self, novel_id: str, owner_id: str,

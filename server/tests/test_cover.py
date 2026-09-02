@@ -185,8 +185,13 @@ class TestBackwardCompatible(CoverTestCase):
     #: mirrors `dub_audio_key`, `qa_state`/`processing_error` are new — see
     #: `AppwriteMetadataStore.update_novel_media_processing`. Same explicit-
     #: confirmation discipline as every set above.
+    #: Final-media-durability (2026-09-02): `rendered_archive_file_id`
+    #: (Google Drive cold-archive id), `rendered_checksum` (sha256),
+    #: `rendered_size_bytes` — see `archive_final_render()` in
+    #: `scripts/chinese_media_pipeline.py`.
     NEW_MEDIA_PROCESSING_FIELDS = {
         "rendered_media_key", "qa_state", "processing_error",
+        "rendered_archive_file_id", "rendered_checksum", "rendered_size_bytes",
     }
 
     def test_only_cover_url_was_added(self):

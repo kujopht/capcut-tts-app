@@ -160,6 +160,10 @@ PERSISTED_FIELDS: Dict[str, tuple] = {
         # Media-processing update path (2026-09-02) — same recovery-field
         # pattern, see `update_novel_media_processing`.
         "rendered_media_key", "qa_state", "processing_error",
+        # Final-render archival (2026-09-02) — same recovery-field pattern,
+        # see `NOVEL_MEDIA_PROCESSING_EDITABLE` and
+        # scripts/chinese_media_pipeline.py::archive_final_render.
+        "rendered_archive_file_id", "rendered_checksum", "rendered_size_bytes",
     ),
     COL_CHAPTERS: (
         "chapter_id", "novel_id", "owner_id", "title", "content",
@@ -745,21 +749,26 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                      {**wire, "updated_at": updated.updated_at})
         return updated
 
-    #: Chi 6 truong xu ly media (ASR/dich/dub/render/QA) — xem
+    #: Chi 9 truong xu ly media (ASR/dich/dub/render/QA + archival) — xem
     #: `update_novel_media_processing` ngay duoi day cho ly do ton tai rieng.
+    #: Ba truong cuoi (final-render archival, 2026-09-02) khong trung ten voi
+    #: bat ky truong nao trong `NOVEL_EDITABLE` — hai whitelist nay phai
+    #: KHONG GIAO NHAU (xem docstring `NOVEL_EDITABLE`).
     NOVEL_MEDIA_PROCESSING_EDITABLE = (
         "subtitle_key", "dub_audio_key", "rendered_media_key",
         "subtitle_status", "qa_state", "processing_error",
+        "rendered_archive_file_id", "rendered_checksum", "rendered_size_bytes",
     )
 
     def update_novel_media_processing(self, novel_id: str, owner_id: str,
                                        fields: Dict[str, Any]) -> Novel:
-        """Cap nhat CHI cac truong xu ly media (subtitle/dub/render/QA/loi) cua
-        mot Novel da co - duong rieng, HEP HON update_novel() mot cach co chu
-        dich: dung cho pipeline xu ly media (ASR/dich/dub/render/QA) cap nhat
-        ket qua vao BAN GHI DA TON TAI thay vi tao ban ghi moi, khong bao gio
-        cham toi quyen so huu/rights/danh tinh nguon. Xem NOVEL_MEDIA_PROCESSING_EDITABLE
-        o tren cho danh sach day du, CHINH XAC 6 truong duoc phep."""
+        """Cap nhat CHI cac truong xu ly media (subtitle/dub/render/QA/loi/
+        archival) cua mot Novel da co - duong rieng, HEP HON update_novel()
+        mot cach co chu dich: dung cho pipeline xu ly media (ASR/dich/dub/
+        render/QA) cap nhat ket qua vao BAN GHI DA TON TAI thay vi tao ban
+        ghi moi, khong bao gio cham toi quyen so huu/rights/danh tinh nguon.
+        Xem NOVEL_MEDIA_PROCESSING_EDITABLE o tren cho danh sach day du,
+        CHINH XAC 9 truong duoc phep."""
         current = self.owned_novel(novel_id, owner_id)
         allowed = {k: v for k, v in fields.items() if k in self.NOVEL_MEDIA_PROCESSING_EDITABLE}
         updated = replace(current, **allowed, updated_at=now_iso())
@@ -1949,6 +1958,9 @@ def _novel_from_doc(doc: Dict[str, Any]) -> Novel:
         rendered_media_key=str(doc.get("rendered_media_key") or ""),
         qa_state=str(doc.get("qa_state") or ""),
         processing_error=str(doc.get("processing_error") or ""),
+        rendered_archive_file_id=str(doc.get("rendered_archive_file_id") or ""),
+        rendered_checksum=str(doc.get("rendered_checksum") or ""),
+        rendered_size_bytes=int(doc.get("rendered_size_bytes") or 0),
     )
 
 

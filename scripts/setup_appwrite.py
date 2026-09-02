@@ -500,6 +500,17 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("rendered_media_key", "string", False, 512),
             ("qa_state", "string", False, 32),
             ("processing_error", "string", False, 2000),
+            # Final-render archival (2026-09-02): Google Drive file id (or,
+            # as a documented fallback, a remote path — see
+            # scripts/chinese_media_pipeline.py::archive_final_render) +
+            # sha256 checksum + size of the archived final render, so a
+            # rendered_media_key on R2 can be verified/re-derived even if
+            # the R2 hot copy is ever lost.
+            # 256, not 128: the fallback value (a full rclone remote path,
+            # not just a bare Drive file id) can run longer than a bare id.
+            ("rendered_archive_file_id", "string", False, 256),
+            ("rendered_checksum", "string", False, 64),
+            ("rendered_size_bytes", "integer", False, None),
         ],
         "indexes": [
             ("owner_idx", "key", ["owner_id"]),

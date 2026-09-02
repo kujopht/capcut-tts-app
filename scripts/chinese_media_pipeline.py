@@ -53,6 +53,7 @@ subtitle/dub outputs. Never publishes: only POST /api/novels.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -63,7 +64,7 @@ import urllib.request
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -71,9 +72,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import fanfic_credential_broker as broker  # noqa: E402
 from mission_g_rezero_draft_runner import DEFAULT_API, goi  # noqa: E402
+from rclone_archive_copy import rclone_copy, rclone_verify  # noqa: E402
 
 VALID_RIGHTS_MODES = ("REFERENCE_ONLY", "EMBED_ONLY", "REHOST_ALLOWED")
 VOICE_ID = "piper:ngochuyennew"
+
+#: Goc COLD-archive tren Google Drive cho video da RENDER XONG (final, khong
+#: phai raw). CO Y tach rieng khoi `server/scraper/raw_archive.py::DRIVE_ARCHIVE_REMOTE`
+#: ("archive/scraping/raw") — do la spool response THO truoc xu ly; day la
+#: SAN PHAM CUOI CUNG sau render, ban chat khac han nen goc khac han, xem
+#: `archive_final_render()` duoi day.
+DRIVE_FINAL_MEDIA_REMOTE = "fanfic-gdrive:FanficWorld/archive/final/rendered"
+
+#: Content-Type theo duoi tep — chi hai dinh dang render thuc te dung
+#: (mkv/mp4); dinh dang khac roi ve octet-stream thay vi doan sai.
+_RENDER_CONTENT_TYPES = {
+    ".mkv": "video/x-matroska",
+    ".mp4": "video/mp4",
+}
+
+#: `slug` trong `archive_final_render()` bi noi truc tiep vao ca R2 key
+#: lan duong dan Google Drive remote (qua rclone) — allowlist chat de
+#: chan path traversal ("..", "/", "\\") va ky tu la tren nhanh rclone
+#: Drive (rclone coi day la thanh phan duong dan that, khac R2 key chi
+#: la chuoi). Chi chu thuong/so, noi bang "-", khong dau "-" o dau/cuoi.
+_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 @dataclass
@@ -539,6 +562,152 @@ def ship_draft(*, title: str, source_url: str, author: str, rights_mode: str,
         raise RuntimeError(f"POST /api/novels -> {ma}: {r}")
     novel = r.get("novel") or r
     return novel["novel_id"]
+
+
+# --------------------------------------------------------------------------
+# Final-render archival (mission "Persist the one real QA_PASS rendered
+# video", 2026-09-02). NOT part of the ASR/translate/dub/compose chain above
+# — those stages are FROZEN and untouched. This is a separate, additive
+# step a caller runs AFTER `compose_with_source()` (or any other already-
+# finished REHOST_ALLOWED render) has produced ONE local video file, to
+# durably persist it: a HOT copy on R2 (served/downloaded from) + a COLD
+# copy on Google Drive (disaster-recovery), plus a sha256 checksum + size
+# recorded on the Novel so the archive can be verified later without
+# re-deriving anything. Never touches disposable pipeline intermediates
+# (temp audio, per-segment TTS files, ASR working files) — it only ever
+# sees the one finished `local_render_path` a caller hands it.
+# --------------------------------------------------------------------------
+
+
+def _sha256_and_size(path: Path, chunk_size: int = 1024 * 1024) -> Tuple[str, int]:
+    """Streamed sha256 + byte count — never loads the whole file into
+    memory (the real backfill target is ~47MB; this scales to much larger
+    files the same way)."""
+    hasher = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            hasher.update(chunk)
+            size += len(chunk)
+    return hasher.hexdigest(), size
+
+
+def archive_final_render(*, local_render_path: Path, novel_id: str,
+                         slug: str, token: str) -> Dict:
+    """Archive ONE already-finished rendered video for a REHOST_ALLOWED
+    Novel (the caller is responsible for having already verified those
+    rights — this function does not re-check `rights_mode`).
+
+    Order of operations:
+      1. sha256 + size of `local_render_path` (streamed, see
+         `_sha256_and_size`).
+      2. HOT copy to R2 via `upload_to_r2()` at a CONTENT-ADDRESSED key —
+         `rendered_media/svc_harvester/{slug}-{sha256[:16]}{ext}` — never a
+         random suffix (unlike `ship_draft()`'s subtitle/dub keys): the key
+         is a pure function of (slug, file content), so a re-run with the
+         identical file reproduces the identical key and overwrites the
+         same R2 object instead of creating a new one.
+      3. COLD copy to Google Drive under `DRIVE_FINAL_MEDIA_REMOTE`, one
+         subdirectory per (slug, content) — same content-addressing, same
+         idempotency reasoning. Reuses `rclone_archive_copy.rclone_copy`/
+         `rclone_verify` (copy-only, never sync/move/delete/purge — see
+         that module's own docstring); `rclone copy <single-file>
+         <remote-dir>` places the file at `<remote-dir>/<basename>` (rclone
+         treats a file source + directory dest as "copy into it" — verified
+         locally against a real rclone binary before relying on it here),
+         so no separate local staging directory is needed.
+      4. A REAL Google Drive file id, parsed from the `lsjson` output
+         `rclone_verify()` already fetched (no extra rclone call) — NOT a
+         path string. Confirmed against this repo's own already-
+         authenticated `fanfic-gdrive:` remote (Google Drive backend) that
+         `lsjson` DOES expose a real "ID" field for every entry (checked
+         2026-09-02 by listing the existing raw-source archive root — every
+         file and directory carried one, e.g.
+         "ID":"1Wvrc5KNkz8LFQJapogj49wlXtGynno-a"). The fallback below
+         (storing the remote directory path itself) exists only for a
+         differently-configured rclone backend that doesn't expose Drive
+         ids — it is documented but has never actually been exercised
+         against this repo's real remote.
+      5. PATCH /api/novels/{novel_id}/media-processing with EXACTLY
+         `rendered_media_key`/`rendered_archive_file_id`/
+         `rendered_checksum`/`rendered_size_bytes`. Deliberately does NOT
+         set `qa_state` — QA verdict is the caller's own decision, set
+         separately (same or a follow-up PATCH call).
+
+    IDEMPOTENT by construction: re-running with the identical local file
+    recomputes the identical sha256, therefore the identical R2 key and
+    the identical Drive remote directory, so both uploads are safe
+    overwrites of the same objects (never a new/duplicate object), and the
+    PATCH re-writes the Novel with the same values — a safe no-op re-write,
+    never a second Novel record.
+    """
+    if not _SLUG_RE.match(slug):
+        raise ValueError(
+            f"slug khong hop le: {slug!r} — chi cho phep chu thuong/so, noi "
+            f"bang '-', khong dau '-' o dau/cuoi (chan path traversal khi "
+            f"noi vao R2 key va duong dan Google Drive)"
+        )
+
+    local_render_path = Path(local_render_path)
+    sha256_hex, size_bytes = _sha256_and_size(local_render_path)
+
+    ext = local_render_path.suffix.lower() or ".mp4"
+    content_type = _RENDER_CONTENT_TYPES.get(ext, "application/octet-stream")
+    r2_key = f"rendered_media/svc_harvester/{slug}-{sha256_hex[:16]}{ext}"
+    upload_to_r2(r2_key, local_render_path.read_bytes(), content_type)
+
+    drive_remote_dir = f"{DRIVE_FINAL_MEDIA_REMOTE}/{slug}-{sha256_hex[:16]}"
+    copy_result = rclone_copy(str(local_render_path), drive_remote_dir)
+    if copy_result["exit_code"] != 0:
+        raise RuntimeError(
+            f"rclone copy to {drive_remote_dir} failed "
+            f"(exit={copy_result['exit_code']}): {copy_result['stderr_tail']}"
+        )
+    verify_result = rclone_verify(str(local_render_path), drive_remote_dir)
+    if verify_result["check_exit_code"] != 0:
+        raise RuntimeError(
+            f"rclone check against {drive_remote_dir} failed "
+            f"(exit={verify_result['check_exit_code']}): "
+            f"{verify_result['check_stderr_tail']}"
+        )
+
+    # See docstring point 4: real Drive file id when the backend exposes
+    # one, else the remote directory path as a documented fallback.
+    drive_file_id = drive_remote_dir
+    try:
+        entries = json.loads(verify_result.get("lsjson") or "[]")
+        match = next(
+            (e for e in entries
+             if e.get("Name") == local_render_path.name and not e.get("IsDir")),
+            None,
+        )
+        if match and match.get("ID"):
+            drive_file_id = match["ID"]
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    ma, r = goi(DEFAULT_API, "PATCH", f"/api/novels/{novel_id}/media-processing", {
+        "rendered_media_key": r2_key,
+        "rendered_archive_file_id": drive_file_id,
+        "rendered_checksum": sha256_hex,
+        "rendered_size_bytes": size_bytes,
+    }, token=token)
+    if ma != 200:
+        raise RuntimeError(
+            f"PATCH /api/novels/{novel_id}/media-processing -> {ma}: {r}")
+
+    return {
+        "novel_id": novel_id,
+        "r2_key": r2_key,
+        "drive_remote_dir": drive_remote_dir,
+        "drive_file_id": drive_file_id,
+        "sha256": sha256_hex,
+        "size_bytes": size_bytes,
+        "content_type": content_type,
+    }
 
 
 def main() -> int:

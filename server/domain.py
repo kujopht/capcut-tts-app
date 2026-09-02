@@ -707,6 +707,19 @@ class Novel:
     qa_state: str = ""
     #: Loi xu ly gan nhat neu co (van ban tu do) — rong nghia la khong co loi.
     processing_error: str = ""
+    #: --- Final-render archival (mission "Persist the one real QA_PASS
+    #: rendered video", 2026-09-02) --- Cung mau voi `rendered_media_key`:
+    #: rong nghia la chua duoc luu tru. `rendered_media_key` la ban HOT (R2,
+    #: phuc vu truc tiep); ba truong nay la ban COLD (Google Drive, qua
+    #: `scripts/chinese_media_pipeline.py::archive_final_render`) + dau van
+    #: tay de xac minh toan ven, doc lap voi noi luu.
+    #: ID tep THAT tren Google Drive (tu `rclone lsjson`), khong phai duong
+    #: dan — xem docstring `archive_final_render`.
+    rendered_archive_file_id: str = ""
+    #: sha256 hex DAY DU cua tep video render cuoi cung.
+    rendered_checksum: str = ""
+    #: Kich thuoc tep render cuoi cung, byte.
+    rendered_size_bytes: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -738,6 +751,9 @@ class Novel:
             "rendered_media_key": self.rendered_media_key,
             "qa_state": self.qa_state,
             "processing_error": self.processing_error,
+            "rendered_archive_file_id": self.rendered_archive_file_id,
+            "rendered_checksum": self.rendered_checksum,
+            "rendered_size_bytes": self.rendered_size_bytes,
         }
 
 

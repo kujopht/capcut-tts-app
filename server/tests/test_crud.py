@@ -202,11 +202,13 @@ class TestUpdateNovel(CrudTestCase):
 
 class TestUpdateNovelMediaProcessing(CrudTestCase):
     """`PATCH /api/novels/{id}/media-processing` - duong RIENG, HEP cho
-    pipeline xu ly media. Trong tam: chi 6 truong media duoc phep doi, moi
-    truong khac (title/rights_mode/external_source_url/...) khong bao gio bi
-    cham toi qua duong nay, va goi lap lai cung gia tri la idempotent."""
+    pipeline xu ly media. Trong tam: chi 9 truong media duoc phep doi (6
+    truong ASR/dich/dub/render/QA + 3 truong final-render archival,
+    2026-09-02), moi truong khac (title/rights_mode/external_source_url/...)
+    khong bao gio bi cham toi qua duong nay, va goi lap lai cung gia tri la
+    idempotent."""
 
-    def test_chi_doi_6_truong_media_khong_dung_toi_truong_khac(self):
+    def test_chi_doi_9_truong_media_khong_dung_toi_truong_khac(self):
         token = self.user("chu@example.com")
         novel_id = self.novel(token, "Giu nguyen tieu de")
         before = self.client.get(f"/api/novels/{novel_id}",
@@ -221,7 +223,10 @@ class TestUpdateNovelMediaProcessing(CrudTestCase):
                 "subtitle_status": "READY",
                 "qa_state": "QA_PASS",
                 "processing_error": "",
-                # Cac truong duoi day KHONG thuoc 6 truong duoc phep - phai
+                "rendered_archive_file_id": "1DriveFileIdExample",
+                "rendered_checksum": "a" * 64,
+                "rendered_size_bytes": 47_000_000,
+                # Cac truong duoi day KHONG thuoc 9 truong duoc phep - phai
                 # bi bo qua hoan toan, khong duoc gay loi va khong duoc doi.
                 "title": "Bi chiem doat",
                 "rights_mode": "REHOST_ALLOWED",
@@ -238,8 +243,11 @@ class TestUpdateNovelMediaProcessing(CrudTestCase):
         self.assertEqual(novel["subtitle_status"], "READY")
         self.assertEqual(novel["qa_state"], "QA_PASS")
         self.assertEqual(novel["processing_error"], "")
+        self.assertEqual(novel["rendered_archive_file_id"], "1DriveFileIdExample")
+        self.assertEqual(novel["rendered_checksum"], "a" * 64)
+        self.assertEqual(novel["rendered_size_bytes"], 47_000_000)
 
-        # Nhung truong KHONG thuoc danh sach 6 truong phai giu nguyen gia tri cu.
+        # Nhung truong KHONG thuoc danh sach 9 truong phai giu nguyen gia tri cu.
         self.assertEqual(novel["title"], before["title"])
         self.assertEqual(novel["rights_mode"], before["rights_mode"])
         self.assertEqual(novel["external_source_url"], before["external_source_url"])
@@ -623,15 +631,18 @@ class TestBothStoresShareTheContract(unittest.TestCase):
             self.assertNotIn(forbidden, MockMetadataStore.NOVEL_EDITABLE)
             self.assertNotIn(forbidden, MockMetadataStore.CHAPTER_EDITABLE)
 
-    def test_media_processing_editable_list_is_exactly_the_6_media_fields(self):
+    def test_media_processing_editable_list_is_exactly_the_9_media_fields(self):
         """Day CHINH LA ranh gioi bao mat: duong update_novel_media_processing
-        phai VAT LY khong the cham toi bat ky truong nao khac ngoai 6 truong
-        xu ly media - kiem bang danh sach, khong phai bang logic loc runtime."""
+        phai VAT LY khong the cham toi bat ky truong nao khac ngoai 9 truong
+        xu ly media (6 truong ASR/dich/dub/render/QA + 3 truong final-render
+        archival, 2026-09-02) - kiem bang danh sach, khong phai bang logic
+        loc runtime."""
         from server.appwrite_store import AppwriteMetadataStore
 
         expected = {
             "subtitle_key", "dub_audio_key", "rendered_media_key",
             "subtitle_status", "qa_state", "processing_error",
+            "rendered_archive_file_id", "rendered_checksum", "rendered_size_bytes",
         }
         self.assertEqual(set(MockMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE), expected)
         for forbidden in (
@@ -643,6 +654,14 @@ class TestBothStoresShareTheContract(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, MockMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE)
             self.assertNotIn(forbidden, AppwriteMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE)
+        # Khong giao nhau voi whitelist chung (NOVEL_EDITABLE) - hai duong ghi
+        # phai roi nhau HOAN TOAN, khong mot truong nao di qua duoc ca hai.
+        self.assertTrue(
+            set(MockMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE).isdisjoint(
+                MockMetadataStore.NOVEL_EDITABLE))
+        self.assertTrue(
+            set(AppwriteMetadataStore.NOVEL_MEDIA_PROCESSING_EDITABLE).isdisjoint(
+                AppwriteMetadataStore.NOVEL_EDITABLE))
 
     def test_storage_adapters_can_delete(self):
         from server.r2_adapter import R2StorageAdapter

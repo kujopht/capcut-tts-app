@@ -57,6 +57,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -97,6 +98,25 @@ _RENDER_CONTENT_TYPES = {
 #: Drive (rclone coi day la thanh phan duong dan that, khac R2 key chi
 #: la chuoi). Chi chu thuong/so, noi bang "-", khong dau "-" o dau/cuoi.
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def _agy_binary() -> str:
+    """Absolute path to the `agy` (Antigravity) CLI. Real, observed defect
+    (2026-09-02): bare "agy" resolves fine in some execution contexts (an
+    interactive shell with the right PATH) but NOT in a plain
+    subprocess.run(["agy", ...]) from a background-task process, which
+    raises FileNotFoundError - a genuinely different failure than the
+    "command" permission denial this module also guards against (see
+    translate_zh_to_vi()'s prompt). Same resolve-fresh-every-call pattern
+    as `_fanficfare_binary()` in server/scraper/fanficfare_provider.py -
+    PATH first, known install location as fallback, never assume."""
+    found = shutil.which("agy")
+    if found:
+        return found
+    local_candidate = Path(os.environ.get("LOCALAPPDATA", "")) / "agy" / "bin" / "agy.exe"
+    if local_candidate.is_file():
+        return str(local_candidate)
+    return "agy"  # last resort - let subprocess raise its own clear error
 
 
 @dataclass
@@ -197,7 +217,7 @@ def translate_zh_to_vi(segments: List[Segment], timeout: str = "3m") -> None:
     try:
         with open(prompt_path, "r", encoding="utf-8") as stdin_f:
             result = subprocess.run(
-                ["agy", "--print-timeout", timeout],
+                [_agy_binary(), "--print-timeout", timeout],
                 stdin=stdin_f,
                 capture_output=True, text=True, encoding="utf-8", timeout=240,
             )

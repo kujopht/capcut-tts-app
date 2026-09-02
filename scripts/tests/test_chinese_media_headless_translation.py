@@ -19,6 +19,13 @@ settings.json) - verified for real against the live agy binary with a
 test was written. These tests mock subprocess.run to encode that exact
 observed behavior (denial without the anti-tool-use instruction present,
 success with it) so a regression in the prompt text fails this suite.
+
+A second, distinct real defect surfaced on the actual resume attempt:
+bare "agy" resolves fine in some execution contexts but raised
+FileNotFoundError from a background-task subprocess.run(["agy", ...]).
+_agy_binary() (shutil.which with a known-install-path fallback, same
+pattern as _fanficfare_binary()) fixes that independently of the
+permission issue - covered by AgyBinaryResolutionTest below.
 """
 from __future__ import annotations
 
@@ -130,6 +137,35 @@ class HeadlessTranslationPermissionRegressionTest(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn('permission', result.stderr.lower())
         self.assertIn('"command"', result.stderr)
+
+
+class AgyBinaryResolutionTest(unittest.TestCase):
+    """The real second defect found while resuming candidate #2: bare "agy"
+    isn't reliably resolvable via PATH from every subprocess execution
+    context (a background-task process raised FileNotFoundError even
+    though the same call succeeded in a foreground shell). _agy_binary()
+    must never trust bare PATH resolution alone."""
+
+    @mock.patch("shutil.which", return_value=r"C:\fake\PATH\agy.exe")
+    def test_prefers_path_when_resolvable(self, mock_which):
+        self.assertEqual(cmp._agy_binary(), r"C:\fake\PATH\agy.exe")
+
+    @mock.patch("shutil.which", return_value=None)
+    @mock.patch.dict("os.environ", {"LOCALAPPDATA": r"C:\fake\localappdata"})
+    @mock.patch("pathlib.Path.is_file", return_value=True)
+    def test_falls_back_to_known_install_location(self, mock_is_file, mock_which):
+        result = cmp._agy_binary()
+        self.assertEqual(result, r"C:\fake\localappdata\agy\bin\agy.exe")
+
+    @mock.patch("shutil.which", return_value=None)
+    @mock.patch.dict("os.environ", {"LOCALAPPDATA": r"C:\fake\localappdata"})
+    @mock.patch("pathlib.Path.is_file", return_value=False)
+    def test_last_resort_is_bare_agy_not_a_crash(self, mock_is_file, mock_which):
+        """Neither PATH nor the known install location has it - must not
+        raise, must return something subprocess.run can still try (and
+        fail with ITS OWN clear FileNotFoundError, not an opaque one from
+        this resolver)."""
+        self.assertEqual(cmp._agy_binary(), "agy")
 
 
 if __name__ == "__main__":

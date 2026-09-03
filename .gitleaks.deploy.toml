@@ -95,13 +95,17 @@ test_secret_redaction.py o tren: bai `test_explicit_leak_test` ton tai de
 CHUNG MINH telemetry KHONG lam ro ri chuoi hinh dang bi mat, nen no bat buoc
 phai chua mot chuoi nhu vay.
 
-Da doc dung dong bi bat (dong 122) va xac minh la fixture tong hop:
+Da doc dung dong bi bat (dong 122) va xac minh la fixture tong hop: bien
+`secret_diagnostic`, gan mot chuoi mo dau bang "Sensitive token leak: " roi
+mot tien to hinh dang khoa OpenAI, va RUOT chi la day so 1-9-0 lap lai. Mot
+hang so tu mo ta, khong phai khoa that; cac bien khac trong cung bai test
+cung the (`item-bi-mat-xyz`, mot URL tren `example.com`).
 
-    secret_diagnostic = "Sensitive token leak: sk-secret-12345678901234567890"
-
-Ruot la day so 1234567890 lap lai sau tien to `sk-secret-` — mot hang so tu
-mo ta, khong phai khoa that, va bien con lai trong cung bai test cung the
-(`item-bi-mat-xyz`, `https://example.com/secret/...`).
+CO Y KHONG chep nguyen dong do vao day: lam vay thi chinh tep NAY thanh mot
+dong khop luat `generic-api-key`, va cong PR (quet `history`, dung
+`.gitleaks.toml` — tep nay khong duoc mien tru o do) se do. Da do that: lan
+dau viet muc nay co chep nguyen van, va gitleaks bat dung `.gitleaks.deploy.toml`
+dong 100. Mo ta hinh dang, dung dan nguyen van.
 
 VI SAO DEN GIO MOI CHAN: dong nay vao repo ngay 2026-08-30 (PR #113, Story
 Harvester V4 Phase 7/8), tuc SAU lan deploy thanh cong cuoi (2026-08-29).

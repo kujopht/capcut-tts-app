@@ -1,0 +1,73 @@
+{
+  "_ghi_chu": [
+    "Baseline DO THAT tren fanfic-worker-prod, khong phai suy dien.",
+    "Dung de `scripts/ops/worker_staging_acceptance.py` so AWS staging vs GCE.",
+    "Do bang SSH doc-chi-doc; khong sua gi tren may production.",
+    "KHONG chua bi mat: khong co gia tri bien moi truong nao o day, chi so lieu may."
+  ],
+  "do_luc": "2026-09-03T16:20:00Z",
+  "may": {
+    "ten": "fanfic-worker-prod",
+    "nha_cung_cap": "GCE",
+    "zone": "asia-southeast1-b",
+    "loai": "e2-medium",
+    "os": "Ubuntu 24.04.4 LTS",
+    "muc_tieu_aws": "t3a.medium (2 vCPU / 4 GiB, ap-southeast-1) — khop dung",
+    "network_tag": "khong co -> KHONG mo cong vao",
+    "docker": "KHONG cai"
+  },
+  "vai_tro": {
+    "dich_vu": [
+      "fanfic-worker-prod.service (TTS, server.worker --require-env production)",
+      "fanfic-translation-worker-prod.service (server.translation_worker)",
+      "fanfic-worker-prod-health.timer (moi 2 phut)"
+    ],
+    "health_probe": "server.worker --check; nhip cu -> systemctl restart worker",
+    "restart": "Restart=always, RestartSec=10, RestartPreventExitStatus=2, StartLimitBurst=5/300s",
+    "dung_sach": "SIGTERM, TimeoutStopSec=300, KillMode=mixed",
+    "logging": "journald, SyslogIdentifier rieng, ban ghi JSON co cau truc (muc=da_quet)",
+    "duong_dan": {
+      "ma_nguon": "/opt/fanfic-audio (+ .venv)",
+      "model_piper": "/opt/fanfic-models/nghitts/piper-tts (~1.5GB)",
+      "env": "/etc/fanfic-audio/{worker-prod,translation-worker-prod}.env",
+      "state": "/var/lib/fanfic-audio-prod, /var/lib/fanfic-audio-translation-prod"
+    }
+  },
+  "so_lieu": {
+    "cpu_logic": 2,
+    "ram_tong_mb": 3910,
+    "ram_con_mb": 2074,
+    "ram_dung_mb": 1835,
+    "swap": "0B",
+    "disk_tong_gb": 19.0,
+    "disk_dung_gb": 9.0,
+    "load_1p": 0.06,
+    "kernel": "6.17.0-1022-gcp",
+    "so_goi_python": 49,
+    "so_model_onnx": 25,
+    "ffmpeg": "6.1.1-3ubuntu5",
+    "python": "3.12.3",
+    "uptime_giay": 888657,
+    "do_tre_appwrite_ms": 212,
+    "do_tre_appwrite_mau": [252, 212, 207]
+  },
+  "model_piper": {
+    "so_onnx": 25,
+    "byte_moi_onnx": 63516050,
+    "cau_truc": "25 x <voice_key>.onnx + MOT config.json dung chung + 25 SYMLINK <voice_key>.onnx.json -> config.json",
+    "canh_bao_sao_chep": "KHONG deref symlink khi copy, neu khong se phong to vo ich",
+    "ngoc_huyen": {
+      "ngochuyen": "Ngoc Huyen",
+      "ngochuyennew": "Ngoc Huyen (Moi) — MODEL KHAC, phai co mat rieng",
+      "bat_bien": "voice_id = piper:<voice_key> da nam trong job cu VA gop phan sinh output_key tren R2 -> ten tep KHONG duoc doi"
+    }
+  },
+  "mang": {
+    "cong_vao": "khong co",
+    "goi_ra": ["Appwrite Cloud 443", "Cloudflare R2 443", "Render API 443", "Google Drive 443"],
+    "yeu_cau_aws": "security group chi mo SSH tu IP nguoi van hanh; khong ELB, khong Elastic IP, khong 80/443 vao"
+  },
+  "khac_biet_co_y_tren_aws": {
+    "swap": "them 2GiB (GCE dang 0B) — de mot dot ghep audio/dich khong bi OOM-kill giua job"
+  }
+}

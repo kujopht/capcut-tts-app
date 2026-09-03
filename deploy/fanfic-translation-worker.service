@@ -1,0 +1,119 @@
+# Unit systemd cho worker DỊCH THUẬT (staging).
+#
+# Cài đặt: `scripts/ops/worker_bootstrap.sh --role staging` (Ubuntu 24.04 bất
+# kỳ — EC2, GCE, Hetzner, VPS trần; không phụ thuộc dịch vụ riêng của AWS).
+#
+# TỆP NÀY KHÔNG CHỨA GIÁ TRỊ BÍ MẬT NÀO. Secret nằm ở
+# /etc/fanfic-audio/translation-worker.env, quyền 0640 root:fanfic, không bao
+# giờ vào git.
+#
+# ============================================================================
+#  VÌ SAO TỆP NÀY MỚI CÓ
+# ============================================================================
+#
+#  `deploy/` đã có ba cặp unit theo quy ước "không hậu tố = staging,
+#  `-prod` = production":
+#
+#    fanfic-worker.service              <-> fanfic-worker-prod.service
+#    fanfic-worker-health.service       <-> fanfic-worker-prod-health.service
+#    fanfic-worker-health.timer         <-> fanfic-worker-prod-health.timer
+#
+#  Nhưng worker DỊCH THUẬT chỉ có bản `-prod`. Nghĩa là không thể dựng lại
+#  ĐẦY ĐỦ vai trò của `fanfic-worker-prod` (đang chạy CẢ HAI worker) trên một
+#  máy staging mà không tự bày ra một unit tại chỗ. Tệp này lấp đúng chỗ
+#  trống đó, sao từ bản `-prod` và chỉ đổi những gì bảng dưới ghi.
+#
+# ============================================================================
+#  KHÁC GÌ `fanfic-translation-worker-prod.service`
+# ============================================================================
+#
+#  | Hạng mục         | production                      | staging (tệp này)             |
+#  |------------------|---------------------------------|-------------------------------|
+#  | `--require-env`  | production                      | **staging**                   |
+#  | EnvironmentFile  | translation-worker-prod.env     | **translation-worker.env**    |
+#  | StateDirectory   | fanfic-audio-translation-prod   | **fanfic-audio-translation**  |
+#  | SyslogIdentifier | fanfic-translation-worker-prod  | **fanfic-translation-worker** |
+#
+#  Mọi rào chắn quyền giữ NGUYÊN như bản production — staging không phải là
+#  cái cớ để nới lỏng hardening, và một staging chạy khác production thì
+#  không chứng minh được gì về production.
+#
+#  `--require-env staging` là rào chắn quan trọng nhất ở đây: nếu tệp env bị
+#  đặt nhầm bằng cấu hình production, worker THOÁT NGAY với mã 2 thay vì lặng
+#  lẽ tranh claim job THẬT của production.
+#
+# ============================================================================
+#  VÌ SAO `User=fanfic` — xem chú thích đầy đủ trong `fanfic-worker-prod.service`.
+# ============================================================================
+
+[Unit]
+Description=Fanfic Audio Studio — translation worker (staging)
+Documentation=file:/opt/fanfic-audio/docs/AWS_STAGING_MIGRATION.md
+# `network-online` chứ không phải `network`: worker gọi Appwrite và provider
+# dịch (Groq/...) ngay ở vòng quét đầu tiên.
+After=network-online.target
+Wants=network-online.target
+# Sập 5 lần trong 5 phút thì dừng hẳn. Crash liên tục là lỗi cấu hình, và một
+# tiến trình restart mãi chỉ làm log ngập mà không ai để ý.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=fanfic
+Group=fanfic
+WorkingDirectory=/opt/fanfic-audio
+
+# SECRET CHỈ ĐẾN TỪ ĐÂY — bao gồm TRANSLATION_BYOK_MASTER_KEY, PHẢI cùng giá
+# trị với biến cùng tên trên backend API của CÙNG môi trường (cả hai giải mã
+# chung ProviderConnection.encrypted_secret). Không `Environment=` nào mang
+# giá trị nhạy cảm, nên `systemctl show` và `ps auxe` không lộ gì.
+EnvironmentFile=/etc/fanfic-audio/translation-worker.env
+
+# Không bí mật — để ở đây cho rõ, và để tệp env chỉ còn đúng secret.
+Environment=PYTHONPATH=/opt/fanfic-audio
+Environment=PYTHONUNBUFFERED=1
+Environment=FAS_VAR_DIR=/var/lib/fanfic-audio-translation
+Environment=FAS_INLINE_WORKER=false
+Environment=FAS_TRANSLATION_INLINE_WORKER=false
+
+ExecStart=/opt/fanfic-audio/.venv/bin/python -m server.translation_worker --require-env staging
+
+Restart=always
+RestartSec=10
+# Mã 2 = "FAS_ENV không khớp". Lỗi cấu hình, restart bao nhiêu lần cũng không
+# tự khỏi — dừng hẳn để người vận hành thấy.
+RestartPreventExitStatus=2
+
+# DỪNG SẠCH. Worker bắt SIGTERM, ngừng nhận job mới, rồi chờ job đang chạy
+# xong trong FAS_TRANSLATION_WORKER_GRACE_SECONDS. TimeoutStopSec phải DÀI
+# HƠN con số đó, nếu không systemd sẽ SIGKILL đúng lúc worker đang chờ tử tế.
+KillSignal=SIGTERM
+TimeoutStopSec=300
+KillMode=mixed
+
+# /var/lib/fanfic-audio-translation — systemd tự tạo, tự chown, còn nguyên
+# sau reboot. RIÊNG với thư mục của worker TTS.
+StateDirectory=fanfic-audio-translation
+StateDirectoryMode=0750
+
+# -- rào chắn quyền ----------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# `ProtectSystem=strict` khoá toàn hệ thống ở chế độ chỉ đọc. Đây là ngoại lệ
+# DUY NHẤT được mở ra để ghi.
+ReadWritePaths=/var/lib/fanfic-audio-translation
+
+# Worker KHÔNG mở cổng nào. Nó không phục vụ request, nên không cần cổng vào,
+# và máy không cần mở 80/443 cho nó.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fanfic-translation-worker
+
+[Install]
+WantedBy=multi-user.target

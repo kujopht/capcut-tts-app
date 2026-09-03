@@ -363,3 +363,126 @@ buoc an toan quan trong nhat cua toan bo ke hoach.
 
 **Khong** lam trong pham vi tai lieu nay: doi DNS, dong bang ghi production,
 tat GCE.
+
+---
+
+# GIAI DOAN 2 — CONG CU DA DUNG SAN (2026-09-03)
+
+Bon tep, hai buoc can quyen. Moi thu khac tu dong.
+
+## A. Dua backup Appwrite RA KHOI VM (uu tien 1)
+
+| Tep | Chay o dau | Viec |
+|---|---|---|
+| `scripts/ops/appwrite_backup_offvm.sh` | **tren VM, mot lan, can quyen root** | kiem ke -> chay `backup.sh` da phe chuan -> tar + SHA256 + manifest tung tep -> de o `/var/tmp/...` cho user SSH doc duoc |
+| `scripts/ops/appwrite_backup_to_drive.py` | may dieu hanh, tu dong | keo ve -> doi soat SHA -> `rclone copy` len Drive -> `rclone check` doc lap -> **tai LAI tu Drive** -> giai nen -> doi soat tung tep voi manifest |
+
+Dich tren kho lanh: `fanfic-gdrive:FanficWorld/archive/infra/appwrite-selfhost/<stamp>`
+(theo dung quy uoc `archive/<nhom>/...` da co: animation-worker, experiments,
+final, scraping).
+
+**Duong ong da duoc CHUNG MINH truoc khi du lieu that di qua no** — chay tren
+mot fixture tong hop mo phong dung layout staging:
+
+| Buoc | Ket qua |
+|---|---|
+| `rclone copy --checksum` | exit 0 |
+| `rclone check --one-way` | exit 0, 3 tep / 2539 byte tren Drive |
+| tai LAI tu Drive | SHA256 khop ban goc |
+| giai nen ban tu Drive | 6 tep / 7283 byte |
+| doi soat tung tep voi manifest | 0 lech |
+| nhan dang cau truc | mongo / mariadb / postgres / redis / uploads / RESTORE.md |
+| **ket luan** | **PASS** |
+
+Drive con **4.78 TiB** trong 5 TiB — du rong cho ban 566 MB.
+
+**KHONG day truc tiep tu VM len Drive** (co y): `rclone` khong co tren VM va
+cung khong nen co — dat credential Drive len mot may dang mo 80/443 ra
+Internet la mo rong be mat tan cong khong can thiet. Ban backup di
+VM -> may dieu hanh -> Drive.
+
+**KHONG xoa ban local.** Ca hai script chi DOC va TAO THEM.
+
+### Vi sao can dung MOT lenh co quyen
+
+| Ro can | Ly do |
+|---|---|
+| doc `/home/robux/appwrite/backups/` | thuoc user khac, mode 0750 |
+| goi Docker de dong bang volume | user SSH cua phien (`nguye`) khong o trong group `docker` |
+
+`groups` cua `nguye` CO `google-sudoers`, nen leo thang quyen se chay duoc —
+nhung guard cua kho (`.claude/hooks/guard_indirect_exec.py`) chan viec do nhu
+mot ranh gioi cung, va lach mot deny rule khong phai cach lam. Nen buoc do la
+cua nguoi van hanh.
+
+## B. Dung lai vai tro worker tren AWS (uu tien 2)
+
+| Tep | Viec |
+|---|---|
+| `scripts/ops/worker_bootstrap.sh` | idempotent, Ubuntu 24.04 bat ky. apt + venv + systemd. **Khong CloudFormation, khong SSM, khong AMI rieng, khong userdata phu thuoc EC2** — dung y nguyen duoc tren EC2/GCE/Hetzner/VPS tran |
+| `deploy/fanfic-translation-worker.service` | **MOI** — `deploy/` chi co ban `-prod` cho worker dich; thieu ban staging thi khong dung lai duoc DAY DU vai tro cua `fanfic-worker-prod` (dang chay CA HAI worker) |
+| `scripts/ops/worker_staging_acceptance.py` | nghiem thu, chay tren may staging |
+| `docs/reports/gce-worker-baseline.json` | baseline **do that** tren GCE de so AWS vs GCE |
+
+Bootstrap dung **dung quy uoc ten san co** cua `deploy/` (khong hau to =
+staging, `-prod` = production) — khong bay ra ten `-staging` moi. Model Piper
+duoc them bang **drop-in** systemd (`10-piper-models.conf`) thay vi sua unit
+da phe chuan trong kho, nen `deploy/*.service` con doi chieu duoc voi
+production khi co su co.
+
+### Rao chan quan trong nhat
+
+`worker_staging_acceptance.py` kiem **truoc moi thu khac** va TU CHOI chay
+tiep neu khong dat:
+
+```
+FAS_ENV             == staging
+R2_BUCKET           != fanfic-prod
+APPWRITE_PROJECT_ID != du an production   (khi truyen --prod-project-id)
+FAS_INLINE_WORKER   == false
+```
+
+Neu staging tro vao du an/bucket production thi hai worker se tranh claim
+**job THAT** cua production. Do la che do that bai nguy hiem nhat cua ca ke
+hoach, nen no la bai kiem so 0.
+
+Bo nghiem thu con kiem: worker len lai sau reboot (`is-enabled`), phu thuoc
+runtime, `ngochuyennew.onnx` (= "Ngoc Huyen (Moi)", **model KHAC**
+`ngochuyen.onnx`) con dung, ket noi Appwrite Cloud / R2 / API / Drive, nhip
+`--check`, log JSON qua journald, va rang worker **TU CHOI** khi bi ep
+`--require-env production` (mong doi exit 2).
+
+### Chi tiet tai san xuat de nham
+
+`.onnx.json` cua ca 25 giong la **SYMLINK** tro vao MOT `config.json` dung
+chung. Copy ma deref symlink se phong to vo ich. Va `ngochuyennew` la mot
+model KHAC `ngochuyen` — `voice_id` (`piper:<voice_key>`) da nam trong job cu
+VA gop phan sinh `output_key` tren R2, nen ten tep KHONG duoc doi.
+
+## C. Chua provision AWS — va viec DUY NHAT can de mo duong
+
+| Dieu kien | Trang thai do that |
+|---|---|
+| `aws` CLI | **khong cai** |
+| `~/.aws` | **khong ton tai** |
+| bien moi truong `AWS_*` | **khong co** |
+| khoa `.pem` | **khong co** — chi co khoa GCE |
+| terraform / pulumi | **khong cai** |
+
+Dieu kien "if credentials permit" cua nhiem vu **khong thoa**. Khong bia
+trang thai AWS.
+
+**Mot viec duy nhat can nguoi van hanh** — cap duong vao instance
+`t3a.medium` da ton tai o `ap-southeast-1`, bang MOT trong hai:
+
+```
+# (1) chi can SSH la DU cho toan bo worker_bootstrap.sh
+ssh -i <khoa>.pem ubuntu@<ip-t3a-medium>
+
+# (2) hoac cap mot IAM principal han che trong ap-southeast-1, neu muon
+#     tao/sua chinh instance
+aws configure --profile fanfic-staging     # sau khi cai AWS CLI
+```
+
+`worker_bootstrap.sh` **khong goi mot API AWS nao**, nen chi SSH la du. IAM
+chi can neu muon dung/sua vong doi instance.

@@ -305,3 +305,81 @@ không tự chạm credential, cấm cờ nguy hiểm — kiểm trên cây cú 
   cần một lần chạy dài > 1 giờ.
 - Cả 8 vẫn chia sẻ **một** khoá credential; an toàn **chỉ vì** có khoá
   `switch → spawn`. Bỏ khoá đó là mở lại lỗi im lặng.
+
+---
+
+# NHẬT KÝ XÁC MINH acc8 (đóng phiên Router)
+
+Mục này tồn tại vì việc "đã relogin acc8" đã được báo **hai lần** và cả hai
+lần **không hề xảy ra trên đĩa**. Ghi lại bằng chứng để phiên sau không phải
+điều tra lại từ đầu.
+
+| Lần | Báo cáo | Bằng chứng kiểm | Kết quả |
+|---|---|---|---|
+| 1 | "đã relogin acc8" | `acc8.bin` giống hệt từng byte; `cli.log` acc8 vẫn mang danh tính của acc1 | **KHÔNG xảy ra** — nguyên nhân: ACL đang hỏng, Python không mở được `agy_profile.py` |
+| 2 | "đã tạo lại/relogin acc8 bằng tài khoản Google khác" | ba nguồn độc lập cùng nói không: (a) băm BẢN RÕ `acc8.bin` vẫn `b20d2ca4264c`; (b) mtime thư mục `saved_profiles` vẫn `15:22:56` = đúng lúc di trú DPAPI, **chưa profile nào được ghi kể từ đó**; (c) `cli.log` acc8 vẫn chỉ có danh tính `0e3bf022f7d3` = của acc1 | **KHÔNG xảy ra** |
+
+Không có tệp `.tmp` sót lại, nên cũng không phải "ghi hỏng giữa đường".
+
+## Cái bẫy khiến việc này lặp lại
+
+Đọc `login_flow` trong `agy_profile.py`:
+
+```python
+def login_flow(name, force=False):
+    if os.path.exists(prof_path) and not force:
+        # CHỈ mở agy với profile CŨ rồi return — KHÔNG đăng nhập lại
+        subprocess.run([run-acc.cmd, num]); return
+    delete_current_credential()
+    subprocess.run(["agy.exe"], env=env)   # TƯƠNG TÁC
+    if get_current_credential(): save_profile(name)
+```
+
+và bộ điều phối lệnh:
+
+```
+acc 8        -> login_flow('8', force=False)   # early return, KHÔNG relogin
+acc login 8  -> login_flow('8', force=False)   # early return, KHÔNG relogin
+acc relogin 8 -> login_flow('8', force=True)   # DUY NHẤT đường relogin thật
+```
+
+Ba điều kiện **đều** phải đúng, nếu thiếu một thì không có gì thay đổi và
+**không có thông báo lỗi nào**:
+
+1. Phải gõ đúng `acc relogin 8` — `acc 8` và `acc login 8` chỉ mở lại
+   profile cũ.
+2. Trong trình duyệt phải chọn một tài khoản Google **KHÁC**.
+3. Phải **thoát agy cho đúng** (`/exit` hoặc Ctrl+D) — `save_profile` chỉ
+   chạy **sau khi** `agy.exe` kết thúc. Đóng cửa sổ/Ctrl+C thì token mới
+   không bao giờ được lưu.
+
+**Giả thuyết CHƯA kiểm chứng, nói rõ là giả thuyết:** `.agy-sessions/acc8`
+vẫn giữ trạng thái phiên của lần đăng nhập bằng tài khoản acc1. Nếu `agy`
+dùng lại thứ gì trong đó để tự xác thực, nó có thể quay về **đúng tài khoản
+cũ** dù đã xoá credential. Nếu bước (1)–(3) làm đúng mà acc8 vẫn trùng, hãy
+đổi tên `.agy-sessions/acc8` sang `.agy-sessions/acc8.old` rồi relogin để
+`agy` bắt đầu với phiên trắng.
+
+## Khuyến nghị đã nêu, vẫn chưa làm
+
+`save_profile` nên **so blob mới với các profile đã lưu và CẢNH BÁO khi
+trùng danh tính**. Nếu có, nó đã bắt được cả hai lần thất bại ngay tại chỗ
+thay vì để chúng lọt qua im lặng rồi phát hiện ba lần sau. Tôi cố ý **không**
+tự thêm ở lần đóng phiên này (phạm vi là *chỉ xác minh*).
+
+## Trạng thái các hạng mục khác — ĐẠT
+
+| Hạng mục | Kết quả |
+|---|---|
+| 8 runtime đăng ký + dò sức khoẻ thật | 8/8 |
+| 8 tiến trình cùng sống, mỗi cái làm một việc thật qua đường launcher | 8/8 `PONG` |
+| Trôi danh tính | **không** |
+| ACL với `CodexSandboxUsers` | **0 ACE** toàn cây; chỉ `SYSTEM` + `nguye` |
+| 8 profile mã hoá DPAPI | 8/8 header `AGYP1`, giải mã OK |
+| Token dạng thuần còn sót trên đĩa | **0** (quét toàn cây `agy-profiles`) |
+| Control Room chiếu runtime thật | 11/11 khớp fabric 1:1, 8/8 khe AG hiện ra, **0** worker giả |
+| Kiểm thử | 522 Router + 25 Control Room, tất cả ĐẠT |
+
+**Danh tính Google riêng biệt: 7/8.** Đây là hạng mục DUY NHẤT chưa đạt, và
+nó cần một hành động tương tác của người vận hành — không thể tự động hoá mà
+không có credential của họ.

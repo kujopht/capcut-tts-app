@@ -1,0 +1,45 @@
+# ============================================================
+#  Fanfic World Control Room — phu thuoc cua TUI dieu hanh (fanfic-ctl)
+#
+#  Cai dat:
+#      .\.venv\Scripts\python.exe -m pip install -r requirements-control-room.txt
+#
+#  Chay:
+#      .\fanfic-ctl.cmd            (Windows)
+#      ./fanfic-ctl                (bash)
+#
+#  VI SAO LA MOT TEP RIENG — va vi sao KHONG duoc nhap vao ba tep kia:
+#
+#    server/requirements.txt   Job `backend` tren CI ton tai de chung minh
+#                              DUNG MOT dieu: tep ay la DU de chay backend
+#                              web, va khong keo theo GUI. Control Room la
+#                              cong cu DIEU HANH cho router, backend luc
+#                              chay khong bao gio import no. Nhet textual
+#                              vao do la lam hong chinh phep thu ay.
+#    server/requirements-dev.txt  Cong cu cho test CUA BACKEND. CI cai tep
+#                              nay roi chay `unittest discover -s
+#                              scripts/tests`. Bo test control room KHONG
+#                              nam o do (no o `tests/`, CI khong chay) nen
+#                              CI khong can textual — va khong nen tai ve.
+#    requirements-gui.txt      Ung dung desktop PySide6. Control Room la
+#                              TUI trong terminal, khong lien quan.
+#
+#  Trang thai truoc khi co tep nay: `textual` KHONG duoc khai bao o bat ky
+#  dau, va khong duoc cai o bat ky venv nao tren may — nghia la `fanfic-ctl`
+#  va 25 bai test control room trong `tests/` khong the chay lai duoc tu
+#  mot may sach, du da tung duoc bao la PASS. Do la ly do tep nay ra doi.
+# ============================================================
+
+# --- Bat buoc: khung TUI ---
+# scripts/router_v3/control_room/app.py, screens/*, widgets/* import truc
+# tiep `textual.*`. Pin theo major: textual doi API widget kha thuong xuyen
+# trong cac ban minor, con day la mot man hinh dieu hanh THAT — vo API la
+# mat kha nang quan sat router.
+textual>=0.80,<7.0
+
+# --- Bat buoc: dung de kết xuất trong widget ---
+# widgets/* va screens/* import `rich.text.Text`, `rich.panel.Panel`,
+# `rich.table.Table`. textual da keo theo rich, nhung ma nguon o day import
+# rich TRUC TIEP nen phai khai bao tuong minh — khong dua vao phu thuoc
+# gian tiep cua goi khac.
+rich>=13.0,<15.0

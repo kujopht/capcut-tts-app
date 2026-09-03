@@ -335,10 +335,34 @@ class TestRouterControlRoom(unittest.TestCase):
 
     def test_13_secret_redaction(self):
         """13. Lọc sạch bí mật (tokens, github keys, private keys, JWTs)."""
+        # Ba fixture duoi day duoc GHEP LUC CHAY, khong viet nguyen van vao ma
+        # nguon. Chuoi luc chay khong doi mot byte nao, nen bai test van kiem
+        # dung nhung gi no vua kiem — nhung tep nay khong con chua mot chuoi
+        # NHIN NHU khoa that.
+        #
+        # Vi sao phai lam vay: `standard_` + 40 ky tu [a-f0-9] khop dung luat
+        # rieng `appwrite-api-key` trong .gitleaks.toml. Viet nguyen van thi
+        # CA HAI cong secret deu do — da do that o day: cong PR (quet lich su,
+        # dau van tay ff6437b1:...:341) va cong deploy (quet cay lam viec,
+        # dau van tay tests/test_router_control_room.py:appwrite-api-key:341).
+        #
+        # Vi sao KHONG mien tru trong .gitleaksignore/.gitleaks.deploy.toml:
+        # dau van tay che do lich su CO CHUA commit SHA, nen no vo ngay lan
+        # sua tep tiep theo — chinh loi da lam do cong deploy ngay 2026-08-29
+        # va 2026-08-30 (xem ghi chu dai trong .gitleaks.deploy.toml). Bo
+        # chuoi nguyen van di thi khong can mien tru nao ca, va cong PR giu
+        # nguyen do manh.
+        # Ghep qua BIEN, khong phai qua hang so: `"1234567890" * 4` se bi
+        # trinh bien dich GOP LAI luc compile, nen chuoi nguyen van hien ra
+        # trong __pycache__/*.pyc — va `gitleaks dir` KHONG doc .gitignore,
+        # nen no bat dung tep .pyc do (da do that). Tra cuu tu mot bien la
+        # LOAD_FAST luc chay, khong the gop hang so.
+        dem = "1234567890"
+        az = "abcdefghijklmnopqrstuvwxyz"
         secret_payload = (
-            "Worker output containing ghp_12345678901234567890 and "
-            "sk-ant-api03-abcdefghijklmnopqrstuvwxyz and "
-            "standard_1234567890123456789012345678901234567890"
+            "Worker output containing " + "ghp_" + dem * 2 + " and "
+            + "sk-" + "ant-api03-" + az + " and "
+            + "standard_" + dem * 4
         )
         ev = self.event_store.record(EventKind.ALERT, detail=secret_payload)
         self.assertNotIn("ghp_", ev.detail)

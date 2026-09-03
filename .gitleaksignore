@@ -56,3 +56,29 @@ ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_secret_redaction.py:j
 #    .gitleaks.deploy.toml VA voi .gitleaks.toml). Muc nay chi de che mot
 #    dau van tay LICH SU, khong noi long gi cho tuong lai.
 9337071f05e625246d1abbf5ff880cc659320372:.gitleaks.deploy.toml:generic-api-key:100
+#
+# 7) tests/test_router_control_room.py, commit ff6437b — fixture tong hop
+#    cua `test_13_secret_redaction`, bai test ton tai de CHUNG MINH
+#    `scripts/router_v3/control_room/event_store.py` loc sach bi mat truoc
+#    khi ghi, nen no BAT BUOC phai co chuoi hinh dang khoa. Dong bi bat gan
+#    tien to khoa Appwrite ("standard_") voi 40 ky tu ma RUOT chi la day
+#    dem 1-2-3...-0 lap lai bon lan; hai fixture con lai trong cung bai la
+#    tien to khoa GitHub + day dem, va tien to khoa Anthropic + day chu cai
+#    a-z theo thu tu. Khong co gia tri that nao.
+#
+#    CAY LAM VIEC HIEN TAI DA SACH — khong can mien tru cho cong deploy.
+#    Chuoi nguyen van da bi BO khoi ma nguon: fixture gio duoc GHEP LUC CHAY
+#    tu cac manh roi, chuoi luc chay khong doi mot byte nao (da do sha256).
+#    Nen `.gitleaks.deploy.toml` KHONG duoc them muc nao cho tep nay, va
+#    cong PR giu nguyen do manh cho moi commit ve sau.
+#
+#    Muc nay chi che dau van tay LICH SU cua ff6437b — commit da day len
+#    origin/feat/autonomous-ag-pool, khong rebase lai (se viet lai lich su
+#    da cong bo). Vi chuoi khong con o HEAD, se KHONG sinh them dau van tay
+#    moi nao cho tep nay.
+#
+#    VI SAO DEN GIO MOI CHAN: CI chi chay tren push nhanh "main" va
+#    "feature/**". Nhanh router ten "feat/autonomous-ag-pool" (feat/, khong
+#    phai feature/) nen 8 commit cua no CHUA TUNG duoc gitleaks quet lan nao
+#    truoc PR hop nhat nay.
+ff6437b1df9e2f45c537bda41ce7db1b8d473483:tests/test_router_control_room.py:appwrite-api-key:341

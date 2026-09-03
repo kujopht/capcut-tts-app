@@ -10,7 +10,20 @@ _ROOT = Path(__file__).resolve().parents[3]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from scripts.router_v3.control_room.app import ControlRoomApp
+try:
+    from scripts.router_v3.control_room.app import ControlRoomApp
+except ModuleNotFoundError as e:  # thieu textual/rich — noi ro phai lam gi
+    if e.name not in ("textual", "rich") and not str(e.name or "").startswith(
+        ("textual.", "rich.")
+    ):
+        raise
+    sys.stderr.write(
+        f"fanfic-ctl: thieu goi '{e.name}' — Control Room chua co phu thuoc TUI.\n"
+        f"  Cai dat:  python -m pip install -r requirements-control-room.txt\n"
+        f"  (Phu thuoc CO Y tach khoi server/requirements.txt — xem ghi chu\n"
+        f"   trong requirements-control-room.txt.)\n"
+    )
+    raise SystemExit(2)
 
 
 def main() -> int:

@@ -74,11 +74,23 @@ class DungThuMucTest(unittest.TestCase):
         self.assertEqual(noi_dung.count(".router/"), 1)
 
     def test_KHONG_dung_gi_ngoai_thu_muc_muc_tieu(self):
-        """Bai quyet dinh: chi tao ben trong goc du an duoc chi dinh."""
-        truoc = set(self.tmp.parent.iterdir())
-        ri.dung(self.tmp)
-        sau = set(self.tmp.parent.iterdir())
-        self.assertEqual(truoc, sau)
+        """Bai quyet dinh: chi tao ben trong goc du an duoc chi dinh.
+
+        Chup anh mot thu muc CHA DO CHINH BAI KIEM TAO, khong phai thu muc
+        temp cua he dieu hanh. Ban truoc dung `self.tmp.parent` — tuc la
+        `C:\\...\\AppData\\Local\\Temp` — nen BAT KY tien trinh nao tren may
+        tao mot tep tam giua hai lan chup deu lam bai kiem hong. Da vap
+        that: mot lan chay day du hong vi mot `.tmp` la xuat hien, roi lan
+        chay ngay sau do xanh. Mot bai kiem chi dung khi may khong lam gi
+        khac thi khong phai mot bai kiem.
+        """
+        cha = Path(tempfile.mkdtemp(prefix="rv-init-scope-"))
+        muc_tieu = cha / "du_an"
+        muc_tieu.mkdir()
+        subprocess.run(["git", "init", "--quiet"], cwd=muc_tieu, check=True)
+        truoc = set(cha.iterdir())
+        ri.dung(muc_tieu)
+        self.assertEqual(truoc, set(cha.iterdir()))
 
 
 class MainCliTest(unittest.TestCase):

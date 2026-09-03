@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Fanfic World Control Room — TUI dieu hanh Router V4.
+#
+# Phu thuoc: requirements-control-room.txt (textual, rich). Neu thieu,
+# scripts/router_v3/control_room/__main__.py se bao ro phai cai gi.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "$DIR"
+
+# UTF-8 BAT BUOC — xem ghi chu trong fanfic-ctl.cmd: van ban giao dien la
+# tieng Viet co dau, console khong-UTF8 lam do ngay o `--help`.
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
+# Uu tien venv cua kho (Windows roi Linux/macOS), roi moi den PATH.
+if [ -x ".venv/Scripts/python.exe" ]; then
+  exec ".venv/Scripts/python.exe" -m scripts.router_v3.control_room "$@"
+elif [ -x ".venv/bin/python" ]; then
+  exec ".venv/bin/python" -m scripts.router_v3.control_room "$@"
+elif command -v python3 >/dev/null 2>&1; then
+  exec python3 -m scripts.router_v3.control_room "$@"
+else
+  exec python -m scripts.router_v3.control_room "$@"
+fi

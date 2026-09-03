@@ -505,7 +505,21 @@ class RetryAfterAndTooManyRequestsTest(unittest.TestCase):
         with self.assertRaises(FetchError):
             fetcher.fetch(f"{_BASE}/chuong-1")
         self.assertEqual(len(dh.slept), 1)
-        self.assertAlmostEqual(dh.slept[0], 10.0, delta=1.0)
+        # `Retry-After` dang HTTP-date chi co do phan giai MOT GIAY
+        # (`format_datetime` bo phan le), va giua luc tinh `khi` o tren va
+        # luc ma nguon goi `now()` con mot khoang thuc thi that. Hai sai so
+        # nay CONG lai, nen `delta=1.0` bang dung sai so luong tu cua chinh
+        # header — khong con bien nao cho thoi gian chay. Bai test vi vay
+        # flaky NGAY TU THIET KE, khong phai do may cham.
+        #
+        # Da do that tren CI (run 33762888831): `8.983369 != 10.0 within 1.0
+        # delta (1.0166 difference)`. Tep nay khong doi mot byte nao so voi
+        # main — day la loi co san, khong phai do lan hop nhat Router V4.
+        #
+        # `delta=2.0` van phan biet duoc dung dieu bai test NAY ton tai de
+        # phan biet: doc HTTP-date thanh MOC TUYET DOI (~10s) so voi lui ve
+        # backoff mu (~1s, lech 9.0 -> van do). Khong lam yeu phep thu.
+        self.assertAlmostEqual(dh.slept[0], 10.0, delta=2.0)
 
     def test_retry_after_khong_hop_le_lui_ve_backoff_mu(self):
         def handler(request: httpx.Request) -> httpx.Response:

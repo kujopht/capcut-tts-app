@@ -120,7 +120,8 @@ class WarmAgyWorker:
                  dangerously_skip_permissions: bool = False,
                  policy: Optional[RecyclePolicy] = None,
                  binary: Optional[str] = None,
-                 turn_timeout: float = 240.0):
+                 turn_timeout: float = 240.0,
+                 env: Optional[dict] = None):
         """
         :param dangerously_skip_permissions: bật `--dangerously-skip-permissions`.
             MẶC ĐỊNH TẮT — nó tự duyệt MỌI quyền, gồm cả chạy lệnh shell, rộng
@@ -140,6 +141,11 @@ class WarmAgyWorker:
         self._policy = policy or RecyclePolicy()
         self._binary = binary
         self._turn_timeout = turn_timeout
+        # Moi truong cho tien trinh con. Can thiet cho launcher da-tai-khoan:
+        # moi danh tinh Antigravity chay voi mot `USERPROFILE`/`HOME` rieng
+        # (`.agy-sessions/accN`) de trang thai chat/cache/SQLite khong dung
+        # chung. `None` = ke thua moi truong cua tien trinh cha (hanh vi cu).
+        self._env = env
 
         self._p: Optional[subprocess.Popen] = None
         self._q: "Queue[str]" = Queue()
@@ -190,7 +196,8 @@ class WarmAgyWorker:
         try:
             self._p = subprocess.Popen(
                 argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, cwd=self._cwd, bufsize=0)
+                stderr=subprocess.PIPE, cwd=self._cwd, bufsize=0,
+                env=self._env)
         except OSError as exc:
             self._state = WarmState.FAILED
             return False

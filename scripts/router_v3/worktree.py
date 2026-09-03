@@ -192,8 +192,13 @@ class WorktreeManager:
 
         Đây là lưới cuối: `write_scope` trong gói việc là một hợp đồng, và một
         worker có thể phá hợp đồng đó. Rỗng = tuân thủ.
+
+        `-uall` liệt kê TỪNG tệp chưa theo dõi thay vì gộp thành một dòng thư
+        mục (`?? pkg/`). Bản gộp làm phép so phạm vi kém chính xác: nó so
+        `pkg/` với danh sách cho phép thay vì so từng tệp thật bên trong.
         """
-        p = self._run(["git", "-C", str(handle.path), "status", "--porcelain"],
+        p = self._run(["git", "-C", str(handle.path), "status", "--porcelain",
+                       "-uall"],
                       capture_output=True, text=True, encoding="utf-8",
                       errors="replace")
         if p.returncode != 0:

@@ -56,7 +56,26 @@ def sha256_file(p: Path, *, chunk: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+def phan_giai(ten: str) -> str:
+    """Duong dan THUC cua mot cong cu CLI.
+
+    Tren Windows `gcloud` la `gcloud.cmd`, va `subprocess.run` KHONG dung
+    shell nen no khong tu tim duoi `.cmd`/`.bat` — goi bang ten tran se nem
+    `FileNotFoundError: [WinError 2]`. Da do that o lan chay dau. `which`
+    xu ly dung PATHEXT nen tra ve dung tep chay duoc.
+    """
+    p = shutil.which(ten)
+    if p:
+        return p
+    for duoi in (".cmd", ".exe", ".bat"):
+        p = shutil.which(ten + duoi)
+        if p:
+            return p
+    return ten  # de subprocess bao loi ro rang thay vi im lang
+
+
 def run(cmd: list[str], *, timeout: int = 1800) -> subprocess.CompletedProcess:
+    cmd = [phan_giai(cmd[0])] + list(cmd[1:])
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                           encoding="utf-8", errors="replace")
 
@@ -126,7 +145,8 @@ def main() -> int:
         ket["so_tep_trong_manifest"] = len(m.get("noi_dung") or [])
 
     buoc("BUOC 3 — DAY len kho lanh Drive (chi `rclone copy --checksum`)")
-    cp = rclone_copy(str(local), remote, timeout=3600)
+    cp = rclone_copy(str(local), remote, rclone_bin=phan_giai("rclone"),
+                     timeout=3600)
     print(f"  exit_code: {cp['exit_code']}")
     if cp["stderr_tail"].strip():
         print(f"  stderr   : {cp['stderr_tail'][-400:]}")
@@ -135,7 +155,8 @@ def main() -> int:
         return 4
 
     buoc("BUOC 4 — DOI SOAT DOC LAP doi tuong tren Drive")
-    vr = rclone_verify(str(local), remote, timeout=900)
+    vr = rclone_verify(str(local), remote, rclone_bin=phan_giai("rclone"),
+                       timeout=900)
     print(f"  rclone check --one-way exit: {vr['check_exit_code']}")
     if vr["check_stderr_tail"].strip():
         print(f"    {vr['check_stderr_tail'][-300:]}")

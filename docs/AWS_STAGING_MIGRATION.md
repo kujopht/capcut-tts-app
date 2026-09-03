@@ -486,3 +486,94 @@ aws configure --profile fanfic-staging     # sau khi cai AWS CLI
 
 `worker_bootstrap.sh` **khong goi mot API AWS nao**, nen chi SSH la du. IAM
 chi can neu muon dung/sua vong doi instance.
+
+---
+
+# UU TIEN 1 — DA XONG THAT (2026-09-03)
+
+Ban backup Appwrite **da nam ngoai VM no bao ve**, va da duoc chung minh
+khoi phuc duoc TU BAN TREN DRIVE.
+
+## Ban backup that
+
+| Hang muc | Gia tri |
+|---|---|
+| Stamp | `20260903T163727Z` |
+| Nguon tren VM | `/home/robux/appwrite/backups/20260903T163728Z/` |
+| Tep | `appwrite-selfhost-20260903T163727Z.tar.gz` |
+| Kich co | **956.401.009 byte (~912 MiB)** |
+| SHA256 | `4f445101040b160b0756c320ba0d1e9af7185581894dc41e2b6810bbfe5977cc` |
+| Dich kho lanh | `fanfic-gdrive:FanficWorld/archive/infra/appwrite-selfhost/20260903T163727Z` |
+| Appwrite | 1.9.6 |
+
+## 11 muc ben trong — dung tung volume mot
+
+```
+RESTORE.md
+appwrite_appwrite-certificates.tar.gz
+appwrite_appwrite-config.tar.gz
+appwrite_appwrite-mariadb.tar.gz
+appwrite_appwrite-models.tar.gz
+appwrite_appwrite-mongodb-keyfile.tar.gz
+appwrite_appwrite-mongodb.tar.gz
+appwrite_appwrite-postgresql.tar.gz
+appwrite_appwrite-redis.tar.gz
+appwrite_appwrite-uploads.tar.gz
+env.snapshot
+```
+
+Khop dung kien truc DB da kiem ke o muc 2: MongoDB la adapter chinh,
+PostgreSQL cho vector DB, MariaDB con trong stack, Redis lam cache.
+
+> ⚠️ **`env.snapshot` CO CHUA BI MAT.** Do la ban chup `~/appwrite/.env`, nen
+> gan nhu chac chan mang `_APP_OPENSSL_KEY_V1` cung mat khau DB. Dieu nay
+> **DUNG** cho mot ban backup khoi phuc duoc — thieu khoa ma hoa thi du lieu
+> vo dung. Hai he qua phai nho:
+>
+> 1. Doi tuong tren Drive la **bi mat cap production** cua Appwrite tu luu
+>    tru. Kho lanh dang rieng tu; dung chia se link.
+> 2. Duong ong **khong bao gio in noi dung** tep nao — chi ten, kich co,
+>    bam. Ban sao cuc bo tren may dieu hanh nam trong thu muc scratchpad
+>    theo-phien; xoa no khi khong con can.
+
+## Bang chung — do that, tung buoc
+
+| Buoc | Phep do | Ket qua |
+|---|---|---|
+| 1 | keo tu VM ve | 956.401.009 byte |
+| 2 | SHA256 tren VM vs sau khi truyen | **KHOP** (`4f445101…5977cc`) |
+| 3 | `rclone copy --checksum` len Drive | exit **0** |
+| 4 | `rclone check --one-way` (doi soat DOC LAP) | exit **0** — *0 differences found, 3 matching files* |
+| 4 | `rclone size` tren Drive | 3 tep, 956.403.092 byte |
+| 5 | **tai LAI tu Drive** vao thu muc HOAN TOAN MOI | exit **0** |
+| 5 | SHA256 ban tai tu Drive vs ban goc | **KHOP** |
+| 5 | giai nen ban tu Drive | 11 tep, 958.556.819 byte |
+| 5 | doi soat **tung tep** voi manifest | **0 lech** / 11 |
+| 5 | nhan dang cau truc | mongo · mariadb · postgres · redis · uploads · RESTORE.md |
+| | **KET LUAN** | **PASS** |
+
+PASS o day co nghia hep va dung: ban **tren Drive** tai lai duoc, bam khop,
+giai nen duoc, va tung tep khop manifest. KHONG phai "`rclone copy` tra
+exit 0".
+
+**Ban local tren VM VAN CON** — khong xoa gi, dung nhu yeu cau.
+
+## Con lai chua chung minh
+
+Restore o muc **CONTAINER** (nap volume vao mot Appwrite dang chay) chua
+duoc chung minh. Viec do can Docker + `docker-compose.yml` + `.env` tren mot
+VM **dung-mot-lan**, va tuyet doi khong chay tren VM dang phuc vu. Do la mot
+nhiem vu rieng.
+
+## Loi da sua trong chinh duong ong
+
+Lan chay dau **do ngay o buoc 1**:
+
+```
+FileNotFoundError: [WinError 2] The system cannot find the file specified
+```
+
+Tren Windows `gcloud` la `gcloud.cmd`, va `subprocess.run` khong dung shell
+nen khong tu do duoi theo `PATHEXT`. Da them `phan_giai()` — giai duong dan
+that cua CLI bang `shutil.which` truoc khi goi, ap dung cho ca `gcloud` va
+`rclone`.

@@ -38,3 +38,21 @@ ad654dedf5595fb468c44d90bf66c85eb79d8bf8:web/tests/admin-trusted-sources-websub.
 #    phai mot bi mat lot vao nham.
 ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_secret_redaction.py:generic-api-key:117
 ad654dedf5595fb468c44d90bf66c85eb79d8bf8:server/tests/test_secret_redaction.py:jwt:172
+#
+# 6) .gitleaks.deploy.toml, commit 9337071 — KHONG phai bi mat, va cung
+#    khong phai ma nguon: la mot dong GHI CHU trong chinh muc mien trù mo
+#    ta fixture tong hop cua server/tests/test_scraper_telemetry.py (xem
+#    muc tuong ung trong .gitleaks.deploy.toml).
+#
+#    Loi cua nguoi viet, ghi lai thay vi xoa dau: ban dau muc mien trù do
+#    CHEP NGUYEN VAN dong fixture vao phan `description` de giai thich, nen
+#    tep cau hinh TU NO thanh mot dong khop luat `generic-api-key`. Noi dung
+#    da duoc sua ngay o commit ke tiep (14f1376) — gio chi mo ta hinh dang
+#    thay vi dan nguyen van — nhung che do quet `history` doc CA cac commit
+#    cu, nen dau van tay cua commit 9337071 con o lai.
+#
+#    Cay lam viec HIEN TAI sach voi ca hai cau hinh (da do bang gitleaks
+#    8.30.0 tren ban `git archive HEAD`: `no leaks found` voi
+#    .gitleaks.deploy.toml VA voi .gitleaks.toml). Muc nay chi de che mot
+#    dau van tay LICH SU, khong noi long gi cho tuong lai.
+9337071f05e625246d1abbf5ff880cc659320372:.gitleaks.deploy.toml:generic-api-key:100

@@ -181,14 +181,43 @@ def dung_fabric(cfg: Dict) -> Fabric:
             ACC_CUA_RUNTIME, SESSIONS_DIR, profile_ton_tai)
     except ImportError:
         ACC_CUA_RUNTIME, SESSIONS_DIR, profile_ton_tai = {}, None, None
+    # Doi chieu phai la HAI CHIEU. Ban dau doan nay chi XOA
+    # `needs_provisioning` khi thay profile, khong bao gio DAT lai khi khong
+    # thay — nen AG01 (khai `needs_provisioning: null` tinh trong
+    # fabric.json, tu thoi no la tai khoan duy nhat) bao `provisioned=True`
+    # tren MOI may, ke ca may khong co `acc1.bin` nao. Do dung la "worker
+    # gia": mot khe bao san sang ma khong co MOT bang chung nao.
+    #
+    # Da do that, khong phai suy luan: CI Linux (run 33760902870) do 3 bai
+    # — `test_trang_thai_khe_AG_khop_voi_THUC_TE_tren_dia`,
+    # `test_dem_tai_khoan_khong_thoi_phong`,
+    # `test_khe_co_profile_thi_dung_transport_launcher` — deu cung mot goc:
+    # "AG01: khong co acc1.bin" nhung `provisioned` van True. Tren may nguoi
+    # van hanh ba bai do DAT vi `acc1.bin` co that, nen loi an duoc rat lau.
+    #
+    # `provisioned` = `not needs_provisioning`, va no chan ca
+    # `trang_thai_hien_tai()` (-> OFFLINE) lan `dem_tai_khoan()`. Nen mot
+    # cho sua nay dong ca ba bai.
     if profile_ton_tai is not None:
         for r in runtimes:
             acc = ACC_CUA_RUNTIME.get(r.runtime_id)
-            if acc and r.provider == 'antigravity' and profile_ton_tai(acc):
+            if not acc or r.provider != 'antigravity':
+                continue
+            if profile_ton_tai(acc):
                 r.transport = 'launcher'
                 r.auth_profile = f'agy-launcher:{acc}'
                 r.needs_provisioning = ''
                 r.workspace = str(Path(SESSIONS_DIR) / acc)
+            elif not r.needs_provisioning:
+                # Khong co bang chung tren dia -> KHONG duoc khai la da cap
+                # phat. Chi ghi de khi cau hinh de trong: AG02..AG08 da co
+                # ly do cap phat rieng, cu the hon, phai giu nguyen.
+                r.needs_provisioning = (
+                    f"Chua co ho so launcher {acc}.bin tren dia. Chay "
+                    f"scripts/migrate_agy_profiles_dpapi.py de ma hoa ho so "
+                    f"agy san co, hoac dang nhap Antigravity mot lan trong "
+                    f"phien Windows cua khe {r.runtime_id} roi luu ho so."
+                )
 
     for r in runtimes:
         f.add_runtime(r)

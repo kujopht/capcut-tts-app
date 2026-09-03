@@ -770,3 +770,53 @@ class TestLeoThangCheDo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Test07bLeaseDaLuong(unittest.TestCase):
+    """Lease phải chịu được nhiều LUỒNG thật.
+
+    Bài này tồn tại vì một lỗi có thật: `LeaseStore` từng dùng MỘT kết nối
+    sqlite dùng chung, và ba nút chạy song song làm nó ném `InterfaceError:
+    bad parameter or other API misuse` — cả ba nút hỏng trước khi kịp gửi
+    việc đi. Không bài kiểm đơn luồng nào thấy được chuyện đó.
+    """
+
+    def setUp(self):
+        import tempfile
+        from scripts.router_v4.leases import LeaseStore
+        self._d = tempfile.TemporaryDirectory()
+        self.ls = LeaseStore(root=self._d.name, ttl=60.0)
+
+    def tearDown(self):
+        self.ls.close()
+        try:
+            self._d.cleanup()
+        except (OSError, PermissionError):
+            pass
+
+    def test_nhieu_luong_giành_khe_khong_ném_loi_sqlite(self):
+        import threading
+        thang, loi = [], []
+        rao = threading.Barrier(8)
+
+        def thu(i):
+            try:
+                rao.wait()
+                for khe in range(3):
+                    if self.ls.acquire(f"AG01#{khe}", f"chu-{i}",
+                                       task_id=f"t{i}") is not None:
+                        thang.append((i, khe))
+                        return
+            except Exception as exc:                      # noqa: BLE001
+                loi.append(f"{type(exc).__name__}: {exc}")
+
+        ts = [threading.Thread(target=thu, args=(i,)) for i in range(8)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+        self.assertEqual(loi, [], f"lease ném lỗi dưới tải song song: {loi}")
+        # 3 khe -> dung 3 ben thang, moi ben mot khe khac nhau.
+        self.assertEqual(len(thang), 3, f"phải đúng 3 khe được cấp: {thang}")
+        self.assertEqual(len({khe for _, khe in thang}), 3,
+                         "hai luồng không được cùng giữ một khe")

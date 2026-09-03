@@ -155,9 +155,20 @@ class Executor:
             BenchmarkStore(root=self.root)
         self.logs = logs if logs is not None else RawLogStore(root=self.root)
         self._cache: Dict[str, object] = {}
+        # Ma NGAN cua LAN CHAY nay, di vao ten worktree/nhanh.
+        #
+        # Khong co no, chay lai cung mot mission se dung dung ten worktree cu
+        # (`AG01/T3-a1`), va `WorktreeManager.create` TU CHOI ghi de — dung
+        # nhu thiet ke (khong bao gio de mat bang chung cua mot lan chay
+        # truoc), nhung hau qua la lan chay thu hai hong ngay tu nut dau cho
+        # toi khi co nguoi don tay. Da vap that trong lan chay bang chung
+        # dau tien.
+        import uuid as _uuid
+        self.run_tag = _uuid.uuid4().hex[:6]
 
     def run(self, c: TaskContract, p: Placement, *, base_sha: str = "",
             dependency_summaries: Optional[Dict[str, str]] = None,
+            dependency_workspaces: Optional[Dict[str, str]] = None,
             attempt: int = 1, reassigned: bool = False) -> ExecutionResult:
         t0 = time.time()
         m = self.fabric.model(p.model_id)
@@ -165,7 +176,7 @@ class Executor:
         try:
             if c.execution.worktree_required:
                 handle = self.worktrees.create(
-                    p.runtime_id, f"{c.task_id}-a{attempt}",
+                    p.runtime_id, f"{c.task_id}-{self.run_tag}-a{attempt}",
                     base_sha=base_sha or self.worktrees.base_sha())
 
             adapter = dung_adapter(self.fabric, p,
@@ -178,29 +189,46 @@ class Executor:
             #          rong mot cach kho hieu. Nhung no KHONG duoc kem
             #          quyen ghi — xem `PoolAntigravityAdapter.set_write_mode`.
             ws = str(handle.path) if handle else ""
-            doc = ws or str(self.root)
+            # NOI DOC cua mot viec CHI DOC.
+            #
+            # Mac dinh la goc kho. NHUNG neu viec nay phu thuoc vao mot viec
+            # CO GHI, ket qua cua viec kia nam trong WORKTREE CO LAP cua no,
+            # KHONG nam o goc kho. Bang chung that (luot chay 2026-09-03):
+            # nut review T4 bao "khong tim thay scripts/router_v4/report.py"
+            # trong khi tep do CO ton tai — chi la o worktree cua T3. Co lap
+            # worktree la dung; thieu buoc TRO reviewer sang do moi la loi.
+            doc = ws or self._noi_doc_phu_thuoc(dependency_workspaces)
+            doc = doc or str(self.root)
             if hasattr(adapter, "set_write_mode"):
                 adapter.set_write_mode(bool(handle))
             adapter.start_session(workspace=doc)
-            goi = _packet_gia(c, workspace=ws,
+            goi = _packet_gia(c, workspace=doc,
                               branch=handle.branch if handle else "",
                               deps=dependency_summaries)
             kq = adapter.send_task(goi)
             giay = time.time() - t0
 
-            # `TaskResult` cua V3 -> phong bi V4. Dung `raw_excerpt` khi co,
-            # va bo sung tu cac truong da phan tich: adapter V3 da doc JSON
-            # roi, doc lai chuoi tho se mat thong tin no da chuan hoa.
-            pb = from_worker_output(
-                c.task_id, kq.raw_excerpt or "", worker=p.runtime_id,
-                model=m.model_id, provider=m.provider, seconds=giay,
-                log_store=self.logs)
-            pb.status = kq.status
-            pb.summary = pb.summary or kq.summary
-            pb.changes = pb.changes or list(kq.files_changed)
-            pb.findings = pb.findings or list(kq.findings)
-            pb.risks = pb.risks or list(kq.blockers)
-            pb.failure_reason = kq.failure_reason or pb.failure_reason
+            # `TaskResult` cua V3 -> phong bi V4.
+            #
+            # DUNG TU TRUONG DA PHAN TICH, khong doc lai `raw_excerpt`.
+            # Bang chung that (2026-09-03): `parse_result` cua V3 CAT
+            # `raw_excerpt` con 400 ky tu, nen doc lai chuoi do gan nhu luon
+            # gap mot khoi JSON bi cat cut -> `no_json_block` -> moi viec
+            # THANH CONG deu bi gan mot `failure_reason` gia va mot `summary`
+            # rac. Adapter da doc JSON dung roi; doc lai la vua thua vua sai.
+            pb = ResultEnvelope(
+                task_id=c.task_id, status=kq.status, summary=kq.summary,
+                changes=list(kq.files_changed), findings=list(kq.findings),
+                risks=list(kq.blockers), artifacts=list(kq.artifacts),
+                worker=p.runtime_id, model=m.model_id, provider=m.provider,
+                duration=giay, failure_reason=kq.failure_reason,
+                commit=kq.commit)
+            if kq.tests:
+                from scripts.router_v4.envelope import Tests
+                pb.tests = Tests(detail=str(kq.tests)[:240])
+            # Nhat ky THO van duoc giu lai tren dia de chan doan — chi la no
+            # khong con la nguon de suy ra trang thai nua.
+            pb.raw_log_ref = self.logs.write(c.task_id, kq.raw_excerpt or "")
             pb.branch = handle.branch if handle else ""
             pb.started_at, pb.ended_at = t0, time.time()
             pb.duration = giay
@@ -208,6 +236,7 @@ class Executor:
             pb.resource_usage.retries = max(0, attempt - 1)
 
             bc = self._kiem_dinh(c, pb, handle)
+            self._bang_chung_lan_at_loi_khai(c, pb, bc, handle)
             if bc is not None and not bc.passed:
                 hong = bc.failed_gates
                 pb.status = "blocked" if "security" in hong else "failed"
@@ -229,6 +258,58 @@ class Executor:
                 started_at=t0, ended_at=time.time())
             self._ghi_lich_su(c, p, pb, None, reassigned=reassigned)
             return ExecutionResult(envelope=pb)
+
+    @staticmethod
+    def _noi_doc_phu_thuoc(dws: Optional[Dict[str, str]]) -> str:
+        """Worktree DUY NHAT cua cac phu thuoc, neu chi co dung mot.
+
+        Nhieu phu thuoc CO GHI o cac worktree khac nhau thi khong thu muc
+        nao chua ca hai; luc do tra rong (roi ve goc kho) va de duong dan
+        tung nhanh trong `dependency_summaries` cho worker tu dieu huong.
+        Doan bua mot trong hai se cho reviewer doc nham nua ket qua.
+        """
+        duong = sorted({v for v in (dws or {}).values() if v})
+        return duong[0] if len(duong) == 1 else ""
+
+    def _bang_chung_lan_at_loi_khai(self, c: TaskContract, pb: ResultEnvelope,
+                                    bc, handle: Optional[WorktreeHandle]) -> None:
+        """BẰNG CHỨNG THẮNG LỜI KHAI — theo cả hai chiều.
+
+        Nguyên tắc "không tin worker tự khai PASS" có một vế đối xứng ít ai
+        để ý: cũng KHÔNG nên tin một worker khai HỎNG (hoặc không khai gì)
+        khi bằng chứng khách quan nói việc đã xong.
+
+        Bằng chứng thật (lượt chạy bằng chứng 2026-09-03): một worker viết
+        ĐÚNG tệp được yêu cầu, đúng phạm vi, nội dung biên dịch được — rồi
+        kết thúc lượt với phản hồi văn bản RỖNG. Không có khối JSON nào, nên
+        phong bì thành `failed`, việc bị giao lại cho worker khác, và cả một
+        lượt làm đúng bị vứt đi. Lặp lại ba lần thì mission "hỏng" trong khi
+        trên đĩa đã có đúng thứ cần.
+
+        Nâng trạng thái CHỈ KHI hợp đồng có bằng chứng KHÁCH QUAN và bằng
+        chứng đó ĐẠT: mọi cổng kiểm định xanh, và hợp đồng có ít nhất một
+        `artifact_checks` hoặc `tests` để kiểm. Không có gì kiểm được thì
+        một phản hồi rỗng vẫn là hỏng — đúng như trước.
+        """
+        if pb.ok or bc is None or not bc.passed:
+            return
+        co_bang_chung = bool(c.verification.artifact_checks
+                             or c.verification.tests)
+        if not co_bang_chung:
+            return
+        # Voi viec CO GHI: phai co thay doi THAT tren dia, trong pham vi.
+        if c.execution.worktree_required:
+            if not bc.files_changed_observed or bc.scope_violations:
+                return
+        cu = pb.status
+        pb.status = "ok"
+        pb.warnings.append(
+            f"worker kết thúc với trạng thái {cu!r} (phản hồi không đọc được), "
+            f"nhưng MỌI cổng kiểm định đều đạt: "
+            f"{len(bc.files_changed_observed)} tệp đổi đúng phạm vi, "
+            f"{len(bc.tests_ran)} lệnh test xanh, hiện vật đầy đủ. "
+            f"Trạng thái lấy theo BẰNG CHỨNG, không theo lời khai.")
+        pb.failure_reason = ""
 
     def _kiem_dinh(self, c: TaskContract, pb: ResultEnvelope,
                    handle: Optional[WorktreeHandle]):

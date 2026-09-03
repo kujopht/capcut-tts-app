@@ -185,8 +185,21 @@ def cong_diff(kq: TaskResult, quan_sat: Sequence[str], *,
                           "báo ok cho một việc CÓ GHI nhưng không tệp nào đổi")
     thieu = sorted(khai - that)
     if thieu:
-        return GateResult("diff", False,
-                          f"khai sửa nhưng đĩa không có: {thieu[:5]}")
+        # KHÔNG chặn. Bằng chứng thật (lượt chạy 2026-09-03): một worker ghi
+        # ĐÚNG tệp yêu cầu, đúng phạm vi, nội dung hợp lệ — nhưng điền vào
+        # `changes` một câu MÔ TẢ ("Thêm render_mission_report(...) với
+        # docstring") thay vì đường dẫn. Bản trước chặn cứng ở đây, nên một
+        # việc LÀM ĐÚNG bị đánh hỏng rồi giao lại cho worker khác.
+        #
+        # Mục đích thật của cổng này là bắt HỎNG IM LẶNG: khai có sửa mà đĩa
+        # SẠCH. Điều đó đã bị chặn ở nhánh trên. Khi đĩa THẬT SỰ đổi và mọi
+        # thay đổi nằm trong phạm vi (cổng `scope` kiểm riêng), việc worker
+        # mô tả thay vì liệt kê đường dẫn là chuyện định dạng — đáng một
+        # CẢNH BÁO, không đáng vứt bỏ một việc đã làm xong.
+        return GateResult(
+            "diff", True,
+            f"{len(that)} tệp đổi thật; `changes` của worker không khớp đường "
+            f"dẫn ({thieu[:3]}) — coi là mô tả, không phải hỏng")
     return GateResult("diff", True, f"{len(that)} tệp đổi thật")
 
 

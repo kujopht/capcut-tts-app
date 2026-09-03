@@ -106,6 +106,10 @@ class TaskOutcome:
     placement: Optional[Placement]
     attempts: int
     mode: str = "solo"
+    #: Worktree co lap nut nay da ghi vao (rong voi viec chi doc). Nut PHU
+    #: THUOC can duong nay moi doc duoc ket qua — xem
+    #: `Executor._noi_doc_phu_thuoc`.
+    workspace: str = ""
     review: Optional[ResultEnvelope] = None
     hypotheses: List[ResultEnvelope] = field(default_factory=list)
     decision: Optional[Decision] = None
@@ -283,6 +287,7 @@ class RouterV4:
         try:
             kq = self.run_task(c, demand=nhu_cau, base_sha=base_sha,
                                dependency_summaries=self._tom_tat(c, ket_qua),
+                               dependency_workspaces=self._noi_lam_viec(c, ket_qua),
                                on_event=phat)
         except Exception as exc:                          # noqa: BLE001
             kq = TaskOutcome(
@@ -313,9 +318,16 @@ class RouterV4:
 
     # -- 4. Chay MOT viec, co leo thang + thu lai ---------------------------
 
+    def _noi_lam_viec(self, c: TaskContract,
+                      ket_qua: Dict[str, TaskOutcome]) -> Dict[str, str]:
+        with self._khoa:
+            return {d: ket_qua[d].workspace for d in c.dependencies
+                    if d in ket_qua and ket_qua[d].workspace}
+
     def run_task(self, c: TaskContract, *, demand: Optional[Demand] = None,
                  base_sha: str = "",
                  dependency_summaries: Optional[Dict[str, str]] = None,
+                 dependency_workspaces: Optional[Dict[str, str]] = None,
                  on_event=None) -> TaskOutcome:
         so_lan_hong = self._dem_hong_truoc(c)
         cd = chon_che_do(c, policy=self.escalation, failure_history=so_lan_hong)
@@ -328,6 +340,7 @@ class RouterV4:
 
         kq = self._chay_co_thu_lai(c, demand=demand, base_sha=base_sha,
                                    dependency_summaries=dependency_summaries,
+                                   dependency_workspaces=dependency_workspaces,
                                    on_event=on_event)
         kq.mode = cd.mode.value
 
@@ -337,6 +350,8 @@ class RouterV4:
             r = self._chay_co_thu_lai(
                 hd_review, demand=demand, base_sha=base_sha,
                 dependency_summaries={c.task_id: kq.envelope.summary},
+                dependency_workspaces=({c.task_id: kq.workspace}
+                                       if kq.workspace else None),
                 author_family=ho_tac_gia, on_event=on_event)
             kq.review = r.envelope
             # Review tim ra van de KHONG tu dong lam viec that bai — no la
@@ -348,9 +363,30 @@ class RouterV4:
                     for x in r.envelope.findings[:10])
         return kq
 
+    def _muon_lease(self, chon: Placement, task_id: str) -> Optional[str]:
+        """Giành MỘT KHE của runtime. Trả khoá lease, hoặc `None` nếu hết khe.
+
+        Lease theo KHE (`AG01#0`, `AG01#1`, ...), KHÔNG theo runtime. Bằng
+        chứng thật (2026-09-03): bản đầu khoá theo `runtime_id`, nên AG01 —
+        vốn chạy được 3 tiến trình `agy` song song — bị ép xuống đúng 1 việc
+        một lúc. Ba nút độc lập cùng được định tuyến tới AG01 thì hai nút bị
+        đẩy sang worker khác hoặc phải chờ, và "song song" mất sạch ý nghĩa
+        trong khi vẫn trông như đang chạy.
+
+        Vẫn giữ nguyên tính chất cần thiết: một KHE chỉ có một chủ, nên
+        không có chuyện giao trùng hay hai bộ lập lịch cùng sở hữu một khe.
+        """
+        r = self.fabric.runtimes.get(chon.runtime_id)
+        so_khe = max(1, r.concurrency if r else 1)
+        for i in range(so_khe):
+            khoa = f"{chon.runtime_id}#{i}"
+            if self.leases.acquire(khoa, self.owner, task_id=task_id) is not None:
+                return khoa
+        return None
+
     def _chay_co_thu_lai(self, c: TaskContract, *, demand, base_sha: str,
-                         dependency_summaries=None, author_family: str = "",
-                         on_event=None) -> TaskOutcome:
+                         dependency_summaries=None, dependency_workspaces=None,
+                         author_family: str = "", on_event=None) -> TaskOutcome:
         da_thu: List[str] = []
         cuoi: Optional[ExecutionResult] = None
         chon: Optional[Placement] = None
@@ -366,11 +402,10 @@ class RouterV4:
             if qd.selected is None:
                 break
             chon = qd.selected
-            lease = self.leases.acquire(chon.runtime_id, self.owner,
-                                        task_id=c.task_id)
-            if lease is None:
-                # Runtime dang bi tien trinh khac giu — thu placement khac
-                # thay vi cho, va KHONG tinh la mot luot hong.
+            khoa_lease = self._muon_lease(chon, c.task_id)
+            if khoa_lease is None:
+                # Runtime het KHE — thu placement khac thay vi cho, va KHONG
+                # tinh la mot luot hong (worker khong lam sai gi).
                 da_thu.append(chon.key)
                 continue
             try:
@@ -378,13 +413,14 @@ class RouterV4:
                 cuoi = self.executor.run(
                     c, chon, base_sha=base_sha,
                     dependency_summaries=dependency_summaries,
+                    dependency_workspaces=dependency_workspaces,
                     attempt=luot, reassigned=(luot >= 2))
             finally:
                 self.fabric.mark_finished(
                     chon.runtime_id, c.task_id,
                     ok=bool(cuoi and cuoi.ok), model_id=chon.model_id,
                     seconds=cuoi.envelope.duration if cuoi else 0.0)
-                self.leases.release(chon.runtime_id, self.owner)
+                self.leases.release(khoa_lease, self.owner)
             if cuoi.ok:
                 break
             da_thu.append(chon.key)
@@ -404,7 +440,8 @@ class RouterV4:
         return TaskOutcome(task_id=c.task_id, placement=chon,
                            attempts=max(1, len(da_thu) if not cuoi.ok
                                         else len(da_thu) + 1),
-                           envelope=cuoi.envelope, decision=qd)
+                           envelope=cuoi.envelope, decision=qd,
+                           workspace=cuoi.worktree)
 
     def _chay_gia_thuyet(self, c: TaskContract, cd: ModeDecision, *, demand,
                          base_sha: str, on_event=None) -> TaskOutcome:
@@ -460,8 +497,17 @@ class RouterV4:
                            envelope=gop, mode=cd.mode.value, hypotheses=ra)
 
     def _dem_hong_truoc(self, c: TaskContract) -> int:
+        """Số lần hỏng trước ĐÚNG loại việc này. 0 khi chưa đủ bằng chứng.
+
+        PHẢI khớp `task_type` thật. `summary_for` có đường NỚI: thiếu mẫu ở
+        phạm vi hẹp thì nó lùi về thống kê toàn bộ lịch sử. Đường nới đó hợp
+        lý cho việc CHẤM ĐIỂM model, nhưng sai hoàn toàn ở đây: nó khiến một
+        lần hỏng ở bất kỳ loại việc nào cũng đẩy MỌI việc khác leo thang lên
+        primary_critic/hypotheses. Đã vấp thật — sau một lượt chạy có lỗi,
+        cả bốn nút của lượt sau đều bị leo thang dù ba nút chưa từng hỏng.
+        """
         s = self.history.summary_for(task_type=c.type)
-        if not s:
+        if not s or s.get("scope") != "model+task_type":
             return 0
         return int(round((1.0 - s["success_rate"]) * min(3, s["samples"])))
 

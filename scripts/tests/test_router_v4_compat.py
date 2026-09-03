@@ -233,3 +233,115 @@ class TestKhongDungCoNguyHiem(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBangChungLanAtLoiKhai(unittest.TestCase):
+    """Bằng chứng khách quan thắng lời khai của worker — CẢ HAI CHIỀU.
+
+    Khoá lại một lỗi có thật (lượt chạy bằng chứng 2026-09-03): một worker
+    viết ĐÚNG tệp được yêu cầu, biên dịch được, đúng phạm vi — rồi kết thúc
+    lượt với phản hồi văn bản RỖNG. Phong bì thành `failed`, việc bị giao
+    lại cho worker khác, và cả một lượt làm đúng bị vứt đi ba lần liên tiếp.
+    """
+
+    def _executor(self, root):
+        from scripts.router_v4.executor import Executor
+        from scripts.router_v4.runtime import Fabric
+        return Executor(Fabric(), root=root)
+
+    def _hop_dong(self, *, co_bang_chung: bool, co_ghi: bool = True):
+        from scripts.router_v4.capabilities import Requirements
+        from scripts.router_v4.contract import Execution, TaskContract, Verification
+        return TaskContract(
+            task_id="T", objective="viết tệp",
+            requirements=Requirements(coding=True, repo_read=True,
+                                      repo_write=co_ghi),
+            allowed_scope=("pkg",) if co_ghi else (),
+            execution=Execution(worktree_required=co_ghi),
+            verification=(Verification(artifact_checks=("pkg/x.py",))
+                          if co_bang_chung else Verification()))
+
+    def _bao_cao(self, *, dat: bool, tep=("pkg/x.py",)):
+        from scripts.router_v3.pool.validation import GateResult, ValidationReport
+        bc = ValidationReport()
+        bc.gates.append(GateResult("diff", dat, ""))
+        bc.files_changed_observed = list(tep)
+        bc.tests_ran = ["python -m compileall"]
+        return bc
+
+    def test_phan_hoi_rong_nhung_bang_chung_dat_thi_duoc_nang_len_ok(self):
+        import tempfile
+        from scripts.router_v4.envelope import ResultEnvelope
+        with tempfile.TemporaryDirectory() as d:
+            ex = self._executor(d)
+            pb = ResultEnvelope(task_id="T", status="failed",
+                                failure_reason="no_json_block")
+            ex._bang_chung_lan_at_loi_khai(
+                self._hop_dong(co_bang_chung=True), pb,
+                self._bao_cao(dat=True), handle=object())
+            self.assertEqual(pb.status, "ok")
+            self.assertEqual(pb.failure_reason, "")
+            self.assertTrue(pb.warnings, "phải ghi rõ đã nâng theo bằng chứng")
+
+    def test_khong_co_bang_chung_khach_quan_thi_KHONG_nang(self):
+        """Hợp đồng không có artifact_checks/tests thì một phản hồi rỗng vẫn
+        là hỏng — nâng bừa ở đây sẽ biến mọi lượt câm thành 'thành công'."""
+        import tempfile
+        from scripts.router_v4.envelope import ResultEnvelope
+        with tempfile.TemporaryDirectory() as d:
+            ex = self._executor(d)
+            pb = ResultEnvelope(task_id="T", status="failed",
+                                failure_reason="no_json_block")
+            ex._bang_chung_lan_at_loi_khai(
+                self._hop_dong(co_bang_chung=False), pb,
+                self._bao_cao(dat=True), handle=object())
+            self.assertEqual(pb.status, "failed")
+
+    def test_cong_kiem_dinh_hong_thi_KHONG_nang(self):
+        import tempfile
+        from scripts.router_v4.envelope import ResultEnvelope
+        with tempfile.TemporaryDirectory() as d:
+            ex = self._executor(d)
+            pb = ResultEnvelope(task_id="T", status="failed")
+            ex._bang_chung_lan_at_loi_khai(
+                self._hop_dong(co_bang_chung=True), pb,
+                self._bao_cao(dat=False), handle=object())
+            self.assertEqual(pb.status, "failed")
+
+    def test_viec_co_ghi_ma_dia_sach_thi_KHONG_nang(self):
+        import tempfile
+        from scripts.router_v4.envelope import ResultEnvelope
+        with tempfile.TemporaryDirectory() as d:
+            ex = self._executor(d)
+            pb = ResultEnvelope(task_id="T", status="failed")
+            ex._bang_chung_lan_at_loi_khai(
+                self._hop_dong(co_bang_chung=True), pb,
+                self._bao_cao(dat=True, tep=()), handle=object())
+            self.assertEqual(pb.status, "failed")
+
+
+class TestNoiDocPhuThuoc(unittest.TestCase):
+    """Nút phụ thuộc phải đọc được kết quả nằm trong worktree CÔ LẬP của
+    nút trước. Khoá lại lỗi thật: reviewer báo 'không tìm thấy tệp' trong
+    khi tệp có thật — chỉ là ở worktree của nút kia."""
+
+    def _ex(self):
+        import tempfile
+        from scripts.router_v4.executor import Executor
+        from scripts.router_v4.runtime import Fabric
+        self._d = tempfile.TemporaryDirectory()
+        return Executor(Fabric(), root=self._d.name)
+
+    def test_mot_phu_thuoc_thi_doc_o_worktree_do(self):
+        ex = self._ex()
+        self.assertEqual(ex._noi_doc_phu_thuoc({"T3": "C:/wt/T3"}), "C:/wt/T3")
+
+    def test_nhieu_worktree_khac_nhau_thi_khong_doan_bua(self):
+        ex = self._ex()
+        self.assertEqual(
+            ex._noi_doc_phu_thuoc({"A": "C:/wt/A", "B": "C:/wt/B"}), "")
+
+    def test_khong_phu_thuoc_co_ghi_thi_rong(self):
+        ex = self._ex()
+        self.assertEqual(ex._noi_doc_phu_thuoc({"A": ""}), "")
+        self.assertEqual(ex._noi_doc_phu_thuoc(None), "")

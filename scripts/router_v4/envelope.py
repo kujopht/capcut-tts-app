@@ -94,6 +94,13 @@ class ResultEnvelope:
     findings: List[str] = field(default_factory=list)
     risks: List[str] = field(default_factory=list)
     followups: List[str] = field(default_factory=list)
+    #: Ghi chu KHONG chan viec gop. Tach khoi `risks` (thu can nguoi tich
+    #: hop can nhac) va `findings` (phat hien ve MA NGUON): mot canh bao
+    #: nhu "worker khong tra ve van ban nhung bang chung tren dia deu dat"
+    #: la thong tin ve LUOT CHAY, khong phai ve ma nguon. Truong nay cung
+    #: co trong `TaskResult` cua V3 — giu cung hinh dang de hai tang khong
+    #: lech nhau.
+    warnings: List[str] = field(default_factory=list)
 
     requires_decision: bool = False
     decision_request: str = ""
@@ -125,6 +132,7 @@ class ResultEnvelope:
             "changes": list(self.changes), "tests": self.tests.to_dict(),
             "artifacts": list(self.artifacts), "findings": list(self.findings),
             "risks": list(self.risks), "followups": list(self.followups),
+            "warnings": list(self.warnings),
             "requires_decision": self.requires_decision,
             "decision_request": self.decision_request,
             "raw_log_ref": self.raw_log_ref, "worker": self.worker,
@@ -153,6 +161,7 @@ class ResultEnvelope:
             findings=list(d.get("findings") or []),
             risks=list(d.get("risks") or []),
             followups=list(d.get("followups") or []),
+            warnings=list(d.get("warnings") or []),
             requires_decision=bool(d.get("requires_decision")),
             decision_request=str(d.get("decision_request") or ""),
             raw_log_ref=str(d.get("raw_log_ref") or ""),
@@ -254,6 +263,7 @@ def from_worker_output(task_id: str, raw: str, *, worker: str = "",
     pb.findings = _cat_list(d.get("findings"))
     pb.risks = _cat_list(d.get("risks") or d.get("blockers"))
     pb.followups = _cat_list(d.get("followups"))
+    pb.warnings = _cat_list(d.get("warnings"))
     pb.branch = _cat(d.get("branch"), MAX_ITEM)
     pb.commit = _cat(d.get("commit"), 64)
     pb.failure_reason = _cat(d.get("failure_reason"), 120)

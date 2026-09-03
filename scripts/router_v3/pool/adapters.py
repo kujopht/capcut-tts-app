@@ -247,9 +247,29 @@ class PoolAntigravityAdapter(AntigravityNativeAdapter):
         self._cho_ghi = bool(cho_ghi)
 
     def start_session(self, *, workspace: Optional[str] = None) -> bool:
+        """Dung tien trinh am voi `cwd` DAT VAO workspace.
+
+        Lop cha khong dat `cwd`, nen `agy` ke thua thu muc lam viec cua tien
+        trinh Python — thuong la GOC KHO CHINH. Bang chung that (2026-09-03):
+        mot worker duoc bao tao `scripts/router_v4/report.py` (duong dan
+        TUONG DOI) da giai ra thanh duong dan trong kho chinh, NGOAI
+        `--add-dir`, nen lenh ghi bi tu choi va viec "thanh cong" ma khong
+        co tep nao. Dat `cwd` = worktree lam duong dan tuong doi roi dung
+        cho, va giu moi thao tac ben trong vung da cach ly.
+        """
+        from scripts.router_v3.warm_pool import RecyclePolicy, WarmAgyWorker
         self._dsp = False
         self._allow_edits = bool(workspace) and self._cho_ghi
-        return super().start_session(workspace=workspace)
+        if self._worker is not None:
+            self.shutdown()
+        self._cancelled = False
+        self._worker = WarmAgyWorker(
+            self._worker_id, model=self._model, workspace=workspace,
+            cwd=workspace or None,
+            allow_edits=self._allow_edits,
+            dangerously_skip_permissions=False,
+            policy=RecyclePolicy(), turn_timeout=self._turn_timeout)
+        return self._worker.start()
 
 
 class MultiSlotAdapter(WorkerAdapter):

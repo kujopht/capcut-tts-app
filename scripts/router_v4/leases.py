@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -80,24 +81,36 @@ class LeaseStore:
         self.path = Path(path) if path else goc / ".router" / "v4" / "pool.db"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.ttl = ttl
-        self._conn: Optional[sqlite3.Connection] = None
+        # MOT ket noi MOI LUONG.
+        #
+        # Ban dau day la mot ket noi DUY NHAT dung chung voi
+        # `check_same_thread=False`. Co do chi tat kiem tra cua Python; no
+        # KHONG lam `sqlite3.Connection` an toan khi nhieu luong cung goi
+        # `execute`. Bang chung that (lượt chạy bằng chứng 2026-09-03): ba
+        # nut chay song song cung giành lease -> `InterfaceError: bad
+        # parameter or other API misuse`, va CA BA nut hong truoc khi kip
+        # gui viec di. Loi kieu nay chi lo ra duoi tai that, nen no khong
+        # xuat hien o bat ky bai kiem don luong nao.
+        self._local = threading.local()
         with self._c() as c:
             c.executescript(SCHEMA)
 
     def _c(self) -> sqlite3.Connection:
-        if self._conn is None:
+        c = getattr(self._local, "conn", None)
+        if c is None:
             c = sqlite3.connect(str(self.path), timeout=30.0,
-                                isolation_level=None, check_same_thread=False)
+                                isolation_level=None)
             c.row_factory = sqlite3.Row
             c.execute("PRAGMA journal_mode=WAL")
             c.execute("PRAGMA busy_timeout=30000")
-            self._conn = c
-        return self._conn
+            self._local.conn = c
+        return c
 
     def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        c = getattr(self._local, "conn", None)
+        if c is not None:
+            c.close()
+            self._local.conn = None
 
     # -- giành / giữ / trả --------------------------------------------------
 

@@ -119,7 +119,8 @@ class TaskPacket:
             "",
             "TRẢ VỀ một khối JSON DUY NHẤT, không kèm giải thích ngoài khối:",
             '{"status":"ok|failed|blocked","summary":"...","files_changed":[],'
-            '"tests":"...","findings":[],"blockers":[],"integration_notes":"..."}',
+            '"tests":"...","artifacts":[],"warnings":[],"failure_reason":"",'
+            '"findings":[],"blockers":[],"integration_notes":"..."}',
         ]
         return "\n".join(dong)
 
@@ -184,9 +185,64 @@ class TaskResult:
     integration_notes: str = ""
     raw_excerpt: str = ""            # chi de chan doan, da cat ngan
 
+    # -- Phong bi ket qua day du (Pool Phase 7) ------------------------------
+    # Bon truong duoi day TUNG bi nhoi vao `integration_notes` duoi dang chuoi
+    # ("branch=... base=...") va ben tich hop phai TACH CHUOI de lay ra. Doc
+    # nguoc mot chuoi da ghep la nguon loi im lang: doi dinh dang mot lan la
+    # moi noi doc no cung hong ma khong ai bao. Chung la truong THAT.
+    branch: str = ""
+    #: Duong dan hien vat worker de lai (log, bao cao, anh chup) — KHONG phai
+    #: tep ma nguon da sua (thu do o `files_changed`).
+    artifacts: List[str] = field(default_factory=list)
+    #: Canh bao KHONG chan viec gop — khac `blockers` (chan) va `findings`
+    #: (phat hien ve MA NGUON). Gop chung ba thu lam ben tich hop khong biet
+    #: cai nao bat buoc phai xu ly.
+    warnings: List[str] = field(default_factory=list)
+    #: Ly do hong DOC DUOC BANG MAY (vd "timeout", "worker_unavailable",
+    #: "scope_violation") — `summary` la van ban tu do, khong phan loai duoc.
+    failure_reason: str = ""
+    #: Moc thoi gian tuyet doi (epoch). `duration_seconds` mot minh khong cho
+    #: biet viec CHAY LUC NAO, nen khong dung de dung lai dong thoi gian mot
+    #: lan chay song song.
+    started_at: float = 0.0
+    ended_at: float = 0.0
+
     @property
     def ok(self) -> bool:
         return self.status == "ok"
+
+    @property
+    def timing(self) -> Dict[str, float]:
+        """Phan `timing` cua phong bi, gop lai de ghi/doc mot lan."""
+        return {"started_at": round(self.started_at, 3),
+                "ended_at": round(self.ended_at, 3),
+                "duration_seconds": round(self.duration_seconds, 3)}
+
+    def envelope(self) -> Dict[str, Any]:
+        """Phong bi ket qua DAY DU, doc duoc bang may — dung hinh dang ma
+        moi worker phai tra ve va moi tang tren (kiem dinh, tich hop, bang
+        dieu khien) doc lai. Khong co truong nao la chuoi da ghep."""
+        return {
+            "status": self.status,
+            "worker_id": self.worker_id,
+            "job_id": self.task_id,
+            "summary": self.summary,
+            "files_changed": list(self.files_changed),
+            "branch": self.branch,
+            "commit": self.commit,
+            "tests": self.tests,
+            "artifacts": list(self.artifacts),
+            "warnings": list(self.warnings),
+            "failure_reason": self.failure_reason,
+            "timing": self.timing,
+            # Ngoai hop dong toi thieu nhung da co tu Router V3 va ben tich
+            # hop dang dung — bo di se pha thu dang chay.
+            "provider": self.provider,
+            "model": self.model,
+            "findings": list(self.findings),
+            "blockers": list(self.blockers),
+            "integration_notes": self.integration_notes,
+        }
 
 
 _KHOI_JSON = re.compile(r"\{.*\}", re.DOTALL)
@@ -229,12 +285,20 @@ def parse_result(task_id: str, worker_id: str, raw: str,
     kq.commit = redact(d.get("commit"))[:64]
     kq.tests = redact(d.get("tests"))[:300]
     kq.integration_notes = redact(d.get("integration_notes"))[:600]
+    kq.branch = redact(d.get("branch"))[:200]
+    kq.failure_reason = redact(d.get("failure_reason"))[:120]
     for ten, dich in (("files_changed", kq.files_changed),
-                      ("findings", kq.findings), ("blockers", kq.blockers)):
+                      ("findings", kq.findings), ("blockers", kq.blockers),
+                      ("artifacts", kq.artifacts), ("warnings", kq.warnings)):
         gt = d.get(ten)
         if isinstance(gt, list):
             dich.extend(redact(x)[:200] for x in gt[:50])
     # Mot worker bao "ok" nhung liet ke blocker la mau thuan — tin blocker.
     if kq.status == "ok" and kq.blockers:
         kq.status = "blocked"
+    # `failure_reason` phai co gia tri MOI KHI khong ok: tang tren phan loai
+    # loi de quyet dinh thu lai hay doi worker, va mot chuoi rong buoc no
+    # phai doan tu `summary` — dung thu da tranh o tren.
+    if kq.status != "ok" and not kq.failure_reason:
+        kq.failure_reason = "worker_reported_" + kq.status
     return kq

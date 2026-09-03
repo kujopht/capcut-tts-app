@@ -219,6 +219,84 @@ class TestKhoaSwitch(unittest.TestCase):
         k2.release()
 
 
+class TestUuTienBangChungDanhTinh(unittest.TestCase):
+    """Một blob hồ sơ ĐÃ CŨ không được lấn át bằng chứng từ một runtime đã
+    xác thực.
+
+    Sự cố thật (2026-09-03): kết luận "acc8 trùng danh tính với acc1" được
+    ghi vào commit 1aab01b lúc 10:25:21Z, nhưng `acc8.bin` được ghi lại lúc
+    12:06:22Z — lần đăng nhập lại hạ cánh 1h41m SAU khi kết luận được ghi.
+    Kết luận đúng lúc ghi, sai ngay sau đó, và không ai đo lại. Đo lại cho
+    thấy cả 8 tài khoản có 8 dấu vân tay KHÁC NHAU.
+    """
+
+    def test_blob_CU_hon_thi_live_thang(self):
+        fp, nguon = AL.danh_tinh_uu_tien(
+            blob_fp="aaaaaaaaaaaa", blob_at=1000.0,
+            live_fp="bbbbbbbbbbbb", live_at=2000.0)
+        self.assertEqual(fp, "bbbbbbbbbbbb")
+        self.assertEqual(nguon, AL.NGUON_LIVE)
+
+    def test_blob_MOI_hon_thi_blob_thang(self):
+        """Một lần đăng nhập vừa được lưu LÀ bằng chứng mới nhất."""
+        fp, nguon = AL.danh_tinh_uu_tien(
+            blob_fp="aaaaaaaaaaaa", blob_at=3000.0,
+            live_fp="bbbbbbbbbbbb", live_at=2000.0)
+        self.assertEqual(fp, "aaaaaaaaaaaa")
+        self.assertEqual(nguon, AL.NGUON_BLOB)
+
+    def test_bang_diem_thi_live_thang(self):
+        """Blob cùng tuổi KHÔNG mạnh hơn chính phiên đã xác thực."""
+        fp, nguon = AL.danh_tinh_uu_tien(
+            blob_fp="aaaaaaaaaaaa", blob_at=2000.0,
+            live_fp="bbbbbbbbbbbb", live_at=2000.0)
+        self.assertEqual(nguon, AL.NGUON_LIVE)
+
+    def test_chi_co_mot_nguon_thi_dung_nguon_do(self):
+        self.assertEqual(
+            AL.danh_tinh_uu_tien(blob_fp="", blob_at=0.0,
+                                 live_fp="bbbbbbbbbbbb", live_at=1.0),
+            ("bbbbbbbbbbbb", AL.NGUON_LIVE))
+        self.assertEqual(
+            AL.danh_tinh_uu_tien(blob_fp="aaaaaaaaaaaa", blob_at=1.0,
+                                 live_fp="", live_at=0.0),
+            ("aaaaaaaaaaaa", AL.NGUON_BLOB))
+        self.assertEqual(
+            AL.danh_tinh_uu_tien(blob_fp="", blob_at=0.0,
+                                 live_fp="", live_at=0.0), ("", ""))
+
+    def test_tai_hien_dung_su_co_acc8(self):
+        """Đúng các mốc thời gian thật của sự cố, bằng dấu vân tay giả."""
+        luc_ket_luan = 1767_000_000.0            # 10:25:21Z (commit 1aab01b)
+        luc_relogin = luc_ket_luan + 6061.0      # 12:06:22Z (acc8.bin)
+        # Ở THỜI ĐIỂM kết luận: blob acc8 còn cũ, chưa có bằng chứng live.
+        fp_cu, _ = AL.danh_tinh_uu_tien(
+            blob_fp="giong_acc1__", blob_at=luc_ket_luan - 7200,
+            live_fp="", live_at=0.0)
+        self.assertEqual(fp_cu, "giong_acc1__",
+                         "lúc đó chỉ có blob cũ — kết luận cũ giải thích được")
+        # SAU relogin: blob mới hơn -> danh tính mới thắng, không còn trùng.
+        fp_moi, nguon = AL.danh_tinh_uu_tien(
+            blob_fp="acc8_that___", blob_at=luc_relogin,
+            live_fp="giong_acc1__", live_at=luc_ket_luan)
+        self.assertEqual(fp_moi, "acc8_that___")
+        self.assertEqual(nguon, AL.NGUON_BLOB)
+        self.assertNotEqual(fp_moi, fp_cu,
+                            "sau relogin acc8 KHÔNG còn mang danh tính cũ")
+
+    def test_khong_bao_gio_tra_ve_chuoi_hinh_dang_email(self):
+        """Hàm chỉ nhận/trả DẤU VÂN TAY. Nếu một ngày ai đó truyền email thô
+        vào đây, bài này không chặn được — nhưng nó chốt rằng bản thân hàm
+        không tự đi tìm email ở đâu cả: cùng đầu vào, cùng đầu ra, không đọc
+        tệp, không gọi mạng."""
+        import inspect
+        src = inspect.getsource(AL.danh_tinh_uu_tien)
+        for xau in ("@", "open(", "read_text", "read_bytes", "requests",
+                    "httpx", "subprocess"):
+            self.assertNotIn(xau, src.split('"""')[-1],
+                             f"thân hàm không được chứa {xau!r}")
+
+
 class TestSoDangKyThat(unittest.TestCase):
     """Fabric thật với launcher — bất biến một-runtime-một-hồ-sơ vẫn giữ."""
 

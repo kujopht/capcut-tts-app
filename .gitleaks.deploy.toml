@@ -87,3 +87,31 @@ tham dinh truoc do va liet ke trong .gitleaksignore.
 """
 targetRules = ["generic-api-key"]
 paths = ['''^web/tests/admin-trusted-sources-websub\.test\.mjs$''']
+
+[[allowlists]]
+description = """
+server/tests/test_scraper_telemetry.py — CUNG mot ly do voi
+test_secret_redaction.py o tren: bai `test_explicit_leak_test` ton tai de
+CHUNG MINH telemetry KHONG lam ro ri chuoi hinh dang bi mat, nen no bat buoc
+phai chua mot chuoi nhu vay.
+
+Da doc dung dong bi bat (dong 122) va xac minh la fixture tong hop:
+
+    secret_diagnostic = "Sensitive token leak: sk-secret-12345678901234567890"
+
+Ruot la day so 1234567890 lap lai sau tien to `sk-secret-` — mot hang so tu
+mo ta, khong phai khoa that, va bien con lai trong cung bai test cung the
+(`item-bi-mat-xyz`, `https://example.com/secret/...`).
+
+VI SAO DEN GIO MOI CHAN: dong nay vao repo ngay 2026-08-30 (PR #113, Story
+Harvester V4 Phase 7/8), tuc SAU lan deploy thanh cong cuoi (2026-08-29).
+Che do quet PR/CI la `history` nen `.gitleaksignore` che duoc; cong deploy
+quet `tree` (khong co commit SHA trong dau van tay) nen khong. Nghia la moi
+lan deploy tu 2026-08-30 tro di deu bi chan o day — chi khong ai chay deploy
+nen khong ai thay.
+
+Mien tru HEP nhu moi muc khac: dung mot tep, dung mot luat. Mot bi mat THAT
+trong cung tep ma khop luat khac VAN bi bat.
+"""
+targetRules = ["generic-api-key"]
+paths = ['''^server/tests/test_scraper_telemetry\.py$''']

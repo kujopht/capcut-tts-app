@@ -154,8 +154,20 @@ class AgyBinaryResolutionTest(unittest.TestCase):
     @mock.patch.dict("os.environ", {"LOCALAPPDATA": r"C:\fake\localappdata"})
     @mock.patch("pathlib.Path.is_file", return_value=True)
     def test_falls_back_to_known_install_location(self, mock_is_file, mock_which):
-        result = cmp._agy_binary()
-        self.assertEqual(result, r"C:\fake\localappdata\agy\bin\agy.exe")
+        """Ky vong duoc DUNG bang chinh phep noi duong dan cua ma nguon.
+
+        Ban truoc go cung dau `\\`, nen bai test chi dung tren Windows: tren
+        Linux (CI) `pathlib` noi bang `/` va phep so sanh do voi
+        `'C:\\fake\\localappdata/agy/bin/agy.exe'`. Dau phan cach la chi tiet
+        CUA NEN TANG, khong phai dieu bai test muon khang dinh — dieu no khang
+        dinh la "tra ve dung thu muc cai dat duoi LOCALAPPDATA".
+
+        Dung `Path(...)` o ky vong giu NGUYEN suc manh cua phep kiem (van chot
+        dung chuoi thu muc va dung ten tep) va chay that o CA HAI nen tang,
+        thay vi phai bo qua tren Linux.
+        """
+        mong_doi = str(Path(r"C:\fake\localappdata") / "agy" / "bin" / "agy.exe")
+        self.assertEqual(cmp._agy_binary(), mong_doi)
 
     @mock.patch("shutil.which", return_value=None)
     @mock.patch.dict("os.environ", {"LOCALAPPDATA": r"C:\fake\localappdata"})

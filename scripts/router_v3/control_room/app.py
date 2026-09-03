@@ -113,6 +113,14 @@ class ControlRoomApp(App):
         self.selected_worker: Optional[WorkerDetailView] = None
         self.current_event_filter = "ALL"
 
+    #: Dem so lan DOC trang thai that bai, va loi gan nhat (da loc).
+    #: Ton tai de thanh trang thai noi duoc "dang doc loi" thay vi
+    #: ve lai so lieu cu mot cach im lang.
+    _doc_that_bai: int = 0
+    _loi_gan_nhat: str = ""
+    #: Dem rieng cho truong hop "doc hong VA bao loi cung hong".
+    _bao_loi_that_bai: int = 0
+
     def compose(self) -> ComposeResult:
         # Initial empty snapshot
         snap = self.state_reader.snapshot(run_id=self.run_id, event_category=self.current_event_filter)
@@ -178,9 +186,49 @@ class ControlRoomApp(App):
             events_w = self.query_one("#events-widget", EventsWidget)
             events_w.update_events(snap.events, self.current_event_filter)
 
-        except Exception as e:
-            # Không bao giờ để lỗi đọc làm sập UI
-            pass
+            # Lỗi do TẦNG ĐỌC ghi nhận (vd dò fabric hỏng) vẫn phải hiện ra,
+            # ngay cả khi khung hình này vẽ thành công.
+            self._bao_loi(snap.errors, nguon=snap.worker_source)
+
+        except Exception as exc:                          # noqa: BLE001
+            # GIỮ TUI SỐNG, nhưng KHÔNG BAO GIỜ im lặng.
+            #
+            # Bản trước là `except Exception as e: pass`. Hậu quả thật: bảng
+            # điều khiển tiếp tục vẽ SỐ LIỆU CŨ của khung hình trước và
+            # trông hoàn toàn bình thường, trong khi việc đọc trạng thái đã
+            # hỏng từ lâu. Người vận hành ra quyết định dựa trên số liệu
+            # chết mà không có một dấu hiệu nào. Một bảng điều khiển nói
+            # "KHÔNG ĐỌC ĐƯỢC" hữu ích hơn nhiều một bảng nói dối.
+            #
+            # Thông điệp đi qua `redact()` trước khi tới màn hình: một
+            # traceback có thể mang đường dẫn hoặc chuỗi giống credential.
+            self._doc_that_bai += 1
+            from scripts.router_v3.packet import redact
+            self._loi_gan_nhat = redact(
+                f"{type(exc).__name__}: {exc}")[:160]
+            try:
+                self._bao_loi([self._loi_gan_nhat], nguon="")
+            except Exception:                             # noqa: BLE001
+                # Ngay cả đường BÁO LỖI cũng không được làm sập TUI — nhưng
+                # nó cũng KHÔNG được im lặng. Một `pass` trơn ở đây nghĩa là
+                # "đọc hỏng VÀ không báo được" trở thành vô hình, tức đúng
+                # cái chế độ hỏng mà cả khối này tồn tại để chặn. Đếm lại để
+                # bài kiểm bất biến "không nuốt Exception" đúng tuyệt đối và
+                # để người vận hành thấy con số leo lên.
+                self._bao_loi_that_bai += 1
+
+    def _bao_loi(self, loi: list, *, nguon: str) -> None:
+        """Đưa chỉ báo lỗi/nguồn dữ liệu lên thanh trạng thái.
+
+        Đây là toàn bộ "chỉ báo" mà yêu cầu #5 nói tới: không popup, không
+        chặn, chỉ một dòng luôn nhìn thấy được cho biết dữ liệu đang đọc
+        được hay không và đến từ đâu.
+        """
+        sb = self.query_one("#status-widget", StatusBarWidget)
+        sb.set_health(errors=list(loi or []),
+                      failures=self._doc_that_bai,
+                      source=nguon,
+                      last_error=self._loi_gan_nhat)
 
     def on_task_dag_widget_task_selected(self, event: TaskDagWidget.TaskSelected) -> None:
         self.selected_task = event.task

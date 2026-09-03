@@ -167,15 +167,126 @@ class ControlRoomSnapshot:
     alerts: List[str]
     worktrees: List[Dict[str, str]]
     timestamp: float = 0.0
+    #: Loi DOC TRANG THAI, da loc bi mat. KHONG BAO GIO nuot am tham:
+    #: mot bang dieu khien hien thi so lieu cu ma khong bao gi ca la thu
+    #: te hon mot bang dieu khien bao "khong doc duoc".
+    errors: List[str] = field(default_factory=list)
+    #: Nguon lay danh sach worker: "fabric_v4" (trang thai runtime THAT) hay
+    #: "pool_store" (bang SQLite cua tang V3, co the CU). Hien ra de nguoi
+    #: van hanh biet minh dang nhin gi.
+    worker_source: str = "" 
 
 
 class StateReader:
     """Đọc và phóng chiếu trạng thái Router từ SQLite và tệp cấu trúc."""
 
-    def __init__(self, *, root: Optional[Path] = None, store: Optional[PoolStore] = None, event_store: Optional[EventStore] = None):
+    def __init__(self, *, root: Optional[Path] = None,
+                 store: Optional[PoolStore] = None,
+                 event_store: Optional[EventStore] = None,
+                 fabric=None, use_fabric: Optional[bool] = None):
+        """
+        :param use_fabric: lay danh sach worker tu Fabric V4 (trang thai
+            runtime THAT) thay vi bang `workers` cua PoolStore.
+
+            MAC DINH THONG MINH, va day la diem quan trong: neu nguoi goi
+            TIEM `store` tuong minh thi mac dinh la KHONG dung fabric. Ly do:
+            mot `store` duoc tiem nghia la "doc DUNG nguon nay" — kiem thu va
+            `proof_run` deu lam vay tren mot thu muc tam. Neu tang doc van
+            voi ra trang thai TOAN MAY thi no bo qua nguon duoc tiem, va moi
+            bai kiem tro thanh phu thuoc vao may dang chay. Da vap that: mot
+            bai kiem dung 1 worker trong store tam nhan ve 11 runtime cua may.
+
+            Truyen `use_fabric=True` de ep dung fabric ke ca khi co store.
+        """
         self.root = Path(root) if root else Path.cwd()
+        self._store_da_tiem = store is not None
         self.store = store or PoolStore(root=self.root)
         self.event_store = event_store or EventStore(root=self.root)
+        self.use_fabric = ((not self._store_da_tiem) if use_fabric is None
+                           else bool(use_fabric))
+        self._fabric_cache = fabric
+        self._fabric_probed_at = time.time() if fabric is not None else 0.0
+        self._loi_doc: List[str] = []
+
+    #: Bao lau moi do lai suc khoe THAT cua fabric (giay). Do lai moi lan
+    #: ve khung hinh se goi `codex login status` va mot loat HTTP moi ~2s —
+    #: vua vo ich vua lam nhieu chinh thu dang do.
+    CHU_KY_DO_FABRIC = 20.0
+
+    def _doc_worker(self) -> "tuple[List[Dict], str]":
+        """Danh sach worker + NGUON cua no.
+
+        Uu tien Fabric V4 (trang thai runtime THAT, co do suc khoe). Roi ve
+        bang `workers` cua PoolStore neu Fabric khong nap duoc — va NOI RO
+        minh da roi ve, thay vi hien so lieu cu nhu that.
+        """
+        import time as _t
+        if not self.use_fabric:
+            # Nguoi goi da chi dinh nguon tuong minh — ton trong nó.
+            return list(self.store.workers()), "pool_store"
+        gio = _t.time()
+        if (self._fabric_cache is None
+                or gio - self._fabric_probed_at > self.CHU_KY_DO_FABRIC):
+            try:
+                from scripts.router_v4 import fabric_config as _FC
+                f, _, _ = _FC.nap(root=self.root, probe=True)
+                self._fabric_cache = f
+                self._fabric_probed_at = gio
+            except Exception as exc:                      # noqa: BLE001
+                # KHONG nuot: ghi lai de bang dieu khien hien duoc.
+                self._ghi_loi("fabric_probe", exc)
+                self._fabric_cache = None
+
+        f = self._fabric_cache
+        if f is None:
+            return list(self.store.workers()), "pool_store"
+
+        ra: List[Dict] = []
+        for r in sorted(f.runtimes.values(), key=lambda x: x.runtime_id):
+            d = r.to_dict()
+            # Model HIEN THI: runtime V4 ho tro NHIEU model, nen chon model
+            # dang chay neu co, khong thi model dau tien no khai. KHONG bia.
+            model = (r.supported_models[0] if r.supported_models else "")
+            ra.append({
+                "worker_id": r.runtime_id,
+                "provider": r.provider,
+                "model": model,
+                "state": d["status"],
+                "active_job": ",".join(r.running_tasks),
+                "failure_count": r.failed,
+                "quota_signal": self._tin_hieu_quota(f, r),
+                "account_slot": 1,
+                "lane_of": "",
+                "detail": (r.needs_provisioning or r.health_detail or ""),
+                "auth_profile": r.auth_profile,
+                "concurrency": r.concurrency,
+            })
+        return ra, "fabric_v4"
+
+    @staticmethod
+    def _tin_hieu_quota(f, r) -> str:
+        """Tin hieu quota CHI khi DA DO THAT SU. Khong doan, khong lam tron.
+
+        `Source.DECLARED` nghia la con so den tu UI/tai lieu nha cung cap va
+        CHUA he duoc do bang may. Hien "75%" cho mot con so nhu vay la bia
+        so lieu — dung thu ma bai kiem "khong bia so lieu" cua Control Room
+        chan, va no da bat duoc ban dau tien cua ham nay. Chi `PROBED` moi
+        duoc hien thanh so; con lai la UNKNOWN.
+        """
+        from scripts.router_v4.runtime import Placement, Source
+        for m in r.supported_models:
+            pool = f.pool_cua_placement(Placement(r.runtime_id, m))
+            if pool is not None and pool.source is Source.PROBED:
+                return f"{pool.health:.0%} (probed)"
+        return "UNKNOWN"
+
+    def _ghi_loi(self, o_dau: str, exc: BaseException) -> None:
+        """Ghi mot loi doc trang thai, DA LOC bi mat, co gioi han."""
+        from scripts.router_v3.packet import redact
+        msg = redact(f"{o_dau}: {type(exc).__name__}: {exc}")[:200]
+        if msg not in self._loi_doc:
+            self._loi_doc.append(msg)
+        del self._loi_doc[:-5]
 
     def get_current_branch(self) -> str:
         try:
@@ -343,8 +454,15 @@ class StateReader:
         mission.failed_tasks = sum(1 for t in tasks if t.state == TaskState.FAILED)
         mission.running_tasks = sum(1 for t in tasks if t.state == TaskState.RUNNING)
 
-        # 3. Đọc workers
-        db_workers = self.store.workers()
+        # 3. Đọc workers — NGUON LA FABRIC V4 THAT
+        #
+        # Ban dau doan nay doc bang `workers` cua `PoolStore` (SQLite tang
+        # V3). Bang do chi duoc ghi khi mot lan chay cua tang pool V3 dong
+        # bo no, nen tren mot he da chuyen sang Router V4 no hoac RONG hoac
+        # CU — va bang dieu khien se hien AG02..AG08 la OFFLINE trong khi
+        # launcher da-tai-khoan that su dang chay ca 8. Fabric V4 la nguon
+        # su that ve runtime; bang SQLite chi la du phong.
+        db_workers, nguon = self._doc_worker()
         workers: List[WorkerDetailView] = []
         running_worker_count = 0
 
@@ -440,6 +558,8 @@ class StateReader:
             events=events,
             alerts=alerts,
             worktrees=self.get_worktrees(),
+            errors=list(self._loi_doc),
+            worker_source=nguon,
             timestamp=now,
         )
 

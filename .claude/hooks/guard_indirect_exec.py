@@ -194,10 +194,67 @@ INLINE_SOURCE_FLAGS = {
 # -EncodedC and -ec all work. Prefix-match rather than listing spellings.
 POWERSHELL_PARAMS = ("command", "encodedcommand", "file")
 
-# The only mode in which tier 2 (ASK) is relaxed. Everything else -- "auto",
-# "default", "acceptEdits", "plan", an unknown future name, or a missing field
-# -- keeps the prompt.
+# The mode in which tier 2 (ASK) is relaxed WHOLESALE: physically at the
+# laptop, every routine remote write proceeds. Tier 1 still denies.
 BYPASS_MODE = "bypassPermissions"
+
+# `auto` relaxes tier 2 only for the NARROW allowlist below. Every other mode
+# -- "default", "acceptEdits", "plan", an unknown future name, or a missing
+# field -- keeps the prompt for the whole of tier 2.
+AUTO_MODE = "auto"
+
+# ---------------------------------------------------------------------------
+# Auto-mode sanctioned development operations.
+#
+# WHY THIS EXISTS: tier 2 returned ASK for `gh pr create`/`merge`/`review` and
+# `gh run rerun` in every mode except bypassPermissions. Those are the ordinary
+# steps of shipping a change through this repo's protected-main PR process, so
+# an unattended `auto` session stalled on a prompt at exactly the point it was
+# supposed to be autonomous.
+#
+# This is deliberately an ALLOWLIST, not "tier 2 is off in auto". Everything
+# absent from it still asks in `auto`: repository/settings mutation, secrets,
+# variables, releases, labels, gists, issue creation, workflow enable/disable,
+# arbitrary `gh api` writes, provider API writes via curl, `git rebase`,
+# `git branch -D`, and every direct deploy. Interactive authentication
+# (`gh auth login`/`logout`) is deliberately NOT here -- it needs a human at a
+# browser, so it stays operator-required.
+#
+# Nothing here can reach a tier-1 shape: tier 1 short-circuits before this is
+# consulted, in every mode.
+# ---------------------------------------------------------------------------
+AUTO_REMOTE_MUTATIONS = {
+    ("pr", "create"),
+    ("pr", "edit"),
+    ("pr", "ready"),
+    ("pr", "review"),
+    ("pr", "merge"),     # through the normal protected-branch process
+    ("pr", "comment"),
+    ("run", "rerun"),    # normal CI retry
+}
+
+# Requirement 5: only an ALREADY-SANCTIONED repository deployment workflow may
+# run unattended, and only while the repo's own gates still stand. These two
+# are dispatch-only workflows whose gating GitHub enforces server-side, so a
+# dispatch cannot skip them:
+#
+#   production-deploy.yml  workflow_dispatch ONLY -> `test_gate` reuses
+#                          ci.yml (secret_scan_mode: tree) -> `validate` ->
+#                          `deploy`/`phase18_certification`/`phase15_canary`
+#                          each pinned to `environment: production`, which is
+#                          where required-reviewer protection applies.
+#   ci.yml                 the test gate itself; runs no deploy step.
+#
+# This is NOT a generic "deploys are allowed" rule. A direct `wrangler deploy`,
+# `npm run cf:deploy:*`, `opennextjs-cloudflare deploy` or a Render deploy hook
+# goes straight at the origin and BYPASSES every gate above, so all of those
+# stay at tier 2 (ASK) in `auto` -- see DEPLOY_PATTERNS. Deploying by dispatch
+# keeps the gates; deploying by hand removes them, and only the first is safe
+# to do unattended.
+AUTO_SANCTIONED_WORKFLOWS = frozenset({
+    "production-deploy.yml",
+    "ci.yml",
+})
 
 # ---------------------------------------------------------------------------
 # Tier 3: read-only `gh`.
@@ -333,6 +390,11 @@ STREAM_REDIRECT = re.compile(r"\d?>&\d?")
 def is_bypass(mode: str) -> bool:
     """True only for the exact bypassPermissions string -- unknown fails safe."""
     return mode == BYPASS_MODE
+
+
+def is_auto(mode: str) -> bool:
+    """True only for the exact "auto" string -- unknown fails safe (asks)."""
+    return mode == AUTO_MODE
 
 
 def emit(decision: str, reason: str) -> None:
@@ -608,6 +670,25 @@ def check_gh(tokens: list[str]) -> str | None:
             return "secret deletion"
         if rest[0] == "auth" and rest[1] in ("token", "refresh"):
             return "credential disclosure"
+        # Repository-level destruction and settings changes. Promoted from
+        # tier 2 to tier 1 when `auto` gained an allowlist: an operation whose
+        # blast radius is the whole repository must not depend on the mode
+        # string being right, and none of these has a legitimate unattended
+        # form in this mission.
+        if rest[0] == "repo" and rest[1] in (
+            "archive", "delete", "rename", "edit", "unarchive",
+        ):
+            return f"repository {rest[1]} (destructive repository operation)"
+        # Every `gh <noun> delete` removes remote state. `secret delete` was
+        # already here; the rest followed for the same reason -- deletion has
+        # no safe automated form, so it is denied in EVERY mode rather than
+        # merely confirmed. Read-only `gh` and creation/edit paths are
+        # untouched.
+        if rest[1] in ("delete", "remove") and rest[0] in (
+            "cache", "gist", "issue", "label", "release", "run", "variable",
+            "ruleset", "workflow",
+        ):
+            return f"{rest[0]} deletion"
     if rest and rest[0] == "api" and gh_api_method(tokens) in GH_API_DENY_METHODS:
         return "destructive GitHub API call (DELETE)"
     return None
@@ -655,6 +736,46 @@ def classify_remote_mutation(tokens: list[str], flat: str, name: str) -> str | N
                 return GH_MUTATE_SUBCOMMANDS[rest[:depth]]
 
     return None
+
+
+def gh_workflow_target(tokens: list[str]) -> str:
+    """The workflow file/name argument of `gh workflow run <target>`."""
+    rest = gh_path(tokens)
+    # gh_path() drops flags, so the target is the third bare word:
+    # ("workflow", "run", "<target>").
+    return rest[2] if len(rest) >= 3 else ""
+
+
+def auto_sanctioned(tokens: list[str], flat: str, name: str) -> bool:
+    """Tier 2.5: a tier-2 command routine enough to run unattended in `auto`.
+
+    Consulted ONLY after tier 1 has cleared the command and tier 2 has already
+    decided it is a remote mutation. Returning True means "do not prompt in
+    auto"; it can never turn a tier-1 denial into an allow.
+    """
+    if name != "gh":
+        # Deploys, curl writes, `git rebase`, `git branch -D`: not sanctioned
+        # for unattended use. A direct deploy in particular bypasses the CI
+        # and protected-environment gates -- see AUTO_SANCTIONED_WORKFLOWS.
+        return False
+
+    rest = gh_path(tokens)
+    if not rest:
+        return False
+
+    # An arbitrary `gh api` write is not a "routine development operation" --
+    # it can reach any endpoint, including ones with no equivalent subcommand.
+    if rest[0] == "api":
+        return False
+
+    if len(rest) >= 2 and (rest[0], rest[1]) in AUTO_REMOTE_MUTATIONS:
+        return True
+
+    # The one sanctioned deployment path: dispatching a gated workflow.
+    if len(rest) >= 2 and (rest[0], rest[1]) == ("workflow", "run"):
+        return gh_workflow_target(tokens) in AUTO_SANCTIONED_WORKFLOWS
+
+    return False
 
 
 def classify_read_only(tokens: list[str], name: str) -> bool:
@@ -789,6 +910,10 @@ def main() -> int:
 
         ask_reason: str | None = None
         ask_segment = ""
+        # Stays True only while every tier-2 segment seen is on the narrow
+        # `auto` allowlist. One non-sanctioned mutation anywhere in the command
+        # sends the whole command back to the prompt.
+        auto_ok = True
         # Tier 3 is granted only if at least one segment is a read-only `gh`
         # call and no segment is anything else of substance.
         saw_read_only = False
@@ -817,11 +942,17 @@ def main() -> int:
 
                 # Tier 2 -- remote mutation. Recorded, not emitted yet: a later
                 # segment may still trip tier 1, which outranks it.
-                if ask_reason is None:
-                    mutation = classify_remote_mutation(tokens, flat, name)
-                    if mutation:
+                mutation = classify_remote_mutation(tokens, flat, name)
+                if mutation:
+                    if ask_reason is None:
                         ask_reason = mutation
                         ask_segment = flat
+                    # EVERY ask-tier segment must be auto-sanctioned for the
+                    # command to run unattended. Checked per segment, not just
+                    # for the first: `gh pr create && npm run cf:deploy:prod`
+                    # must still prompt on account of the deploy half.
+                    if not auto_sanctioned(tokens, flat, name):
+                        auto_ok = False
 
                 # Tier 3 bookkeeping.
                 if classify_read_only(tokens, name):
@@ -837,6 +968,14 @@ def main() -> int:
             if is_bypass(mode):
                 # Physically at the machine: routine remote writes proceed. The
                 # tier-1 boundary above still applied, and still denied.
+                return 0
+            if is_auto(mode) and auto_ok:
+                # Sanctioned development operation in an unattended session:
+                # PR create/edit/ready/review/merge/comment, CI re-run, or a
+                # dispatch of a gated deploy workflow. Silent fall-through --
+                # settings.json still makes the actual permission decision, the
+                # guard just stops standing in the way. Tier 1 already denied
+                # every destructive shape, in this mode too.
                 return 0
             emit(
                 "ask",

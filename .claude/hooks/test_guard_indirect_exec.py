@@ -5,15 +5,21 @@ Drives guard_indirect_exec.py the way Claude Code does -- a JSON payload on
 stdin, including the real ``permission_mode`` field -- and asserts the decision
 in BOTH operating modes:
 
-  auto              phone / remote. Read-only inspection and routine
-                    development run unattended; remote mutations ask.
+  auto              unattended session. Read-only inspection, routine
+                    development, and the narrow AUTO_REMOTE_MUTATIONS
+                    allowlist run without a prompt; every other remote
+                    mutation still asks.
   bypassPermissions physically at the laptop. Routine remote writes proceed
                     without a prompt; the hard boundary still denies.
+  default           nothing is relaxed: the whole of tier 2 still asks.
 
-Four expectations, matching the guard's three tiers:
+Five expectations, matching the guard's tiers:
 
-  MUST_DENY        deny in both modes -- the boundary is not mode-dependent
+  MUST_DENY        deny in ALL THREE modes -- the boundary is not
+                   mode-dependent, and the auto allowlist must not dent it
   MUST_ASK_AUTO    ask in auto, silent in bypassPermissions
+  MUST_RUN_IN_AUTO silent in auto AND bypassPermissions, but still ask in
+                   default -- the narrow sanctioned-development allowlist
   MUST_ALLOW_READ  explicit "allow" in both modes (read-only inspection)
   MUST_RUN         silent in both modes -- normal permission flow, no prompt
                    from this guard
@@ -39,6 +45,10 @@ GUARD = os.path.join(HERE, "guard_indirect_exec.py")
 
 AUTO = "auto"
 BYPASS = "bypassPermissions"
+# A third mode matters now that `auto` has its own allowlist: the same command
+# must be silent in `auto` and still prompt in `default`. Testing only auto and
+# bypass could not tell "auto relaxed it" from "the guard stopped caring".
+DEFAULT = "default"
 
 # Denied in every mode, including bypassPermissions.
 MUST_DENY = [
@@ -117,6 +127,29 @@ MUST_DENY = [
     ("gh secret delete", "gh secret delete MY_TOKEN"),
     ("gh auth token", "gh auth token"),
     ("gh auth refresh", "gh auth refresh --scopes repo"),
+    # Promoted from tier 2 to tier 1 when `auto` gained its allowlist: an
+    # operation whose blast radius is the whole repository must not depend on
+    # the mode string being right, and none has a safe unattended form.
+    ("gh repo delete", "gh repo delete kujopht/capcut-tts-app --yes"),
+    ("gh repo archive", "gh repo archive kujopht/capcut-tts-app"),
+    ("gh repo rename", "gh repo rename newname"),
+    ("gh repo edit visibility", "gh repo edit --visibility private"),
+    ("gh repo edit default-branch", "gh repo edit --default-branch dev"),
+    # Deletion of remote state has no safe automated form -- denied in EVERY
+    # mode, matching `gh secret delete` above rather than merely asking.
+    ("gh run delete", "gh run delete 123"),
+    ("gh release delete", "gh release delete v1.0.0 --yes"),
+    ("gh label delete", "gh label delete bug --yes"),
+    ("gh issue delete", "gh issue delete 42 --yes"),
+    ("gh cache delete", "gh cache delete 99"),
+    ("gh variable delete", "gh variable delete FOO"),
+    ("gh gist delete", "gh gist delete abc123"),
+    ("gh ruleset delete", "gh ruleset delete 7"),
+    # A sanctioned PR step must not launder a tier-1 command beside it.
+    ("pr create then rm -rf", "gh pr create --title x --body y && rm -rf build"),
+    ("pr merge then force push", "gh pr merge 42 --merge && git push --force origin main"),
+    ("rerun then gh auth token", "gh run rerun 1 && gh auth token"),
+    ("pr create then api DELETE", "gh pr create --title x --body y ; gh api -X DELETE repos/o/r"),
     ("awk system()", "awk 'BEGIN{system(\"echo pwned\")}'"),
     ("xargs", "echo x | xargs echo"),
     ("eval", "eval echo hi"),
@@ -136,20 +169,45 @@ MUST_DENY = [
 ]
 
 # Genuinely consequential remote mutations: ask in auto, silent in bypass.
-MUST_ASK_AUTO = [
+# Silent in `auto` (the narrow AUTO_REMOTE_MUTATIONS allowlist) AND in
+# bypassPermissions, but still ASK in `default`. These are the ordinary steps
+# of shipping a change through this repo's protected-main PR process, which an
+# unattended session must be able to take without a prompt.
+#
+# Tier 1 is unaffected: every destructive shape below still denies in `auto`
+# -- see MUST_DENY, which is run in AUTO mode.
+MUST_RUN_IN_AUTO = [
     ("gh pr create", 'gh pr create --title "x" --body "y" --base main'),
-    ("gh pr merge", "gh pr merge 42 --squash"),
-    ("gh pr close", "gh pr close 42"),
+    ("gh pr create body-file", 'gh pr create --base main --head feat/x --body-file b.md'),
+    ("gh pr edit", 'gh pr edit 42 --add-label ready'),
+    ("gh pr ready", "gh pr ready 42"),
     ("gh pr review", "gh pr review 42 --approve"),
-    ("gh workflow run", "gh workflow run ci.yml"),
+    ("gh pr merge", "gh pr merge 42 --squash"),
+    ("gh pr merge --merge", "gh pr merge 121 --merge"),
+    ("gh pr comment", 'gh pr comment 42 --body "CI green"'),
+    ("gh run rerun", "gh run rerun 123"),
+    ("gh run rerun --failed", "gh run rerun 123 --failed"),
+    # Requirement 5: dispatching an ALREADY-GATED deploy workflow. GitHub
+    # enforces test_gate -> validate -> `environment: production` server-side,
+    # so a dispatch cannot skip them.
+    ("gh workflow run ci.yml", "gh workflow run ci.yml"),
+    ("gh workflow run production-deploy", "gh workflow run production-deploy.yml"),
+    # A sanctioned PR step beside a read-only call keeps its fall-through.
+    ("read gh then pr create", 'gh pr list ; gh pr create --title x --body y'),
+]
+
+MUST_ASK_AUTO = [
+    ("gh pr close", "gh pr close 42"),
+    ("gh pr reopen", "gh pr reopen 42"),
     ("gh workflow disable", "gh workflow disable ci.yml"),
     ("gh run cancel", "gh run cancel 123"),
-    ("gh run rerun", "gh run rerun 123"),
-    ("gh run delete", "gh run delete 123"),
     ("gh release create", "gh release create v1.0.0"),
     ("gh issue create", 'gh issue create --title "bug"'),
-    ("gh repo edit", "gh repo edit --visibility private"),
     ("gh variable set", "gh variable set FOO --body bar"),
+    # NOT sanctioned for unattended dispatch: not one of this repo's gated
+    # deploy workflows, so it keeps the prompt even in `auto`.
+    ("gh workflow run other", "gh workflow run release-please.yml"),
+    ("gh workflow run by name", "gh workflow run Deploy"),
     # Credential configuration: ask remotely, silent at the laptop.
     ("gh secret set stdin", "gh secret set MY_TOKEN --env production --body-file -"),
     ("gh secret set body", "gh secret set MY_TOKEN --env production --body xxx"),
@@ -180,6 +238,12 @@ MUST_ASK_AUTO = [
     # Laundering an ask-tier command through substitution or a chain must still
     # reach the ask tier rather than slipping past on the read-only half.
     ("read gh then deploy", "gh api repos/o/r && npm run cf:deploy:production"),
+    # A SANCTIONED operation must not launder a non-sanctioned one beside it:
+    # `auto` requires EVERY tier-2 segment to be on the allowlist.
+    ("pr create then deploy", "gh pr create --title x --body y && npm run cf:deploy:production"),
+    ("pr merge then wrangler", "gh pr merge 42 --merge && npx wrangler deploy"),
+    ("pr create then secret set", "gh pr create --title x --body y && gh secret set T --body v"),
+    ("rerun then workflow disable", "gh run rerun 1 ; gh workflow disable ci.yml"),
 ]
 
 # Provably read-only inspection: explicit allow, identical in both modes.
@@ -317,14 +381,26 @@ def main() -> int:
     failures: list = []
     checks = 0
 
-    # The boundary is identical in both modes -- that is the whole point.
+    # The boundary is identical in EVERY mode -- that is the whole point, and
+    # it is why `default` is exercised here too: adding the `auto` allowlist
+    # must not have opened a single tier-1 shape in any mode.
     run_half("MUST DENY", MUST_DENY, AUTO, "deny", failures)
     run_half("MUST DENY", MUST_DENY, BYPASS, "deny", failures)
-    checks += len(MUST_DENY) * 2
+    run_half("MUST DENY", MUST_DENY, DEFAULT, "deny", failures)
+    checks += len(MUST_DENY) * 3
 
     run_half("MUST ASK", MUST_ASK_AUTO, AUTO, "ask", failures)
     run_half("MUST NOT ASK", MUST_ASK_AUTO, BYPASS, "silent", failures)
     checks += len(MUST_ASK_AUTO) * 2
+
+    # The narrow `auto` allowlist: silent unattended, silent at the laptop,
+    # still confirmed in `default`. All three halves matter -- the third is
+    # what proves `auto` was relaxed deliberately rather than the guard
+    # having stopped classifying these at all.
+    run_half("AUTO SANCTIONED (no prompt)", MUST_RUN_IN_AUTO, AUTO, "silent", failures)
+    run_half("AUTO SANCTIONED (no prompt)", MUST_RUN_IN_AUTO, BYPASS, "silent", failures)
+    run_half("STILL ASKS IN default", MUST_RUN_IN_AUTO, DEFAULT, "ask", failures)
+    checks += len(MUST_RUN_IN_AUTO) * 3
 
     run_half("MUST ALLOW (read-only)", MUST_ALLOW_READ, AUTO, "allow", failures)
     run_half("MUST ALLOW (read-only)", MUST_ALLOW_READ, BYPASS, "allow", failures)

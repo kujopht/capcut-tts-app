@@ -204,24 +204,51 @@ class AdapterError(RuntimeError):
 
 
 class PoolAntigravityAdapter(AntigravityNativeAdapter):
-    """`AntigravityNativeAdapter` + quyền theo TỪNG việc.
+    """`AntigravityNativeAdapter` + quyền TỐI THIỂU theo TỪNG việc.
 
     Lớp cha nhận `dangerously_skip_permissions` một lần lúc dựng. Bể thì cần
     hai chế độ khác nhau trên CÙNG một danh tính:
 
-        việc CÓ GHI   -> có worktree cô lập -> cần quyền ghi (và `--add-dir`)
-        việc CHỈ ĐỌC  -> không có worktree  -> KHÔNG cần quyền gì
+        việc CÓ GHI   -> `--mode accept-edits` + `--add-dir <worktree>`
+        việc CHỈ ĐỌC  -> KHÔNG cờ quyền nào
 
-    Quan trọng hơn: `WarmAgyWorker.start()` FAIL CLOSED khi bật
-    `--dangerously-skip-permissions` mà thiếu `--add-dir` (đúng — thiếu nó
-    worker ghi được bất cứ đâu tài khoản HĐH cho phép). Nên một adapter đóng
-    cứng cờ đó sẽ KHÔNG BAO GIỜ khởi động được cho việc chỉ đọc. Đã vấp thật
-    khi nối adapter vào bể.
+    **KHÔNG BAO GIỜ `--dangerously-skip-permissions`.** Cờ đó tự duyệt MỌI
+    yêu cầu quyền, gồm cả chạy lệnh shell tuỳ ý — rộng hơn hẳn thứ một việc
+    sửa tệp cần. Router V4 cấm nó ở mức chính sách, và `_KHONG_BAO_GIO_DUNG`
+    dưới đây chặn nó ở mức mã để một lần "tạm bật cho tiện" về sau không lọt
+    qua review.
+
+    ĐÁNH ĐỔI ĐÃ BIẾT, ghi rõ thay vì giấu: `accept-edits` chỉ phủ công cụ
+    GHI TỆP. Bằng chứng thật (2026-08-30, `native_worker.py`) cho thấy một
+    model đôi khi chọn công cụ LỆNH SHELL để tạo tệp; lượt đó sẽ bị headless
+    tự động từ chối và việc trả về "không sửa gì". Đó là hỏng THẤY ĐƯỢC —
+    cổng `diff` của `validation.py` bắt đúng trường hợp này và việc được thử
+    lại/đổi worker. Một lần hỏng nhìn thấy được đáng giá hơn nhiều so với
+    cấp quyền chạy shell tuỳ ý cho mọi việc.
     """
 
+    #: Co bi cam tuyet doi trong Router V4. Kiem o `start_session` chu khong
+    #: chi trong tai lieu: mot quy tac an toan khong duoc thuc thi bang ma
+    #: chi la mot loi khuyen.
+    _KHONG_BAO_GIO_DUNG = ("--dangerously-skip-permissions",)
+
+    #: Luot toi co duoc GHI khong. MAC DINH KHONG.
+    #:
+    #: Tach khoi `workspace` co chu dich, va day la mot phan biet THAT chu
+    #: khong phai kieu cach: mot viec CHI DOC van can `--add-dir` de doc
+    #: duoc tep trong kho (thieu no, `agy` khong thay gi ca), nhung no
+    #: TUYET DOI khong duoc kem `--mode accept-edits`. Ban dau lop nay suy
+    #: quyen ghi tu `bool(workspace)`, nghia la moi viec chi doc muon doc
+    #: duoc kho deu vo tinh duoc cap quyen ghi. Fail closed: mac dinh False,
+    #: nguoi goi phai NOI RO.
+    _cho_ghi: bool = False
+
+    def set_write_mode(self, cho_ghi: bool) -> None:
+        self._cho_ghi = bool(cho_ghi)
+
     def start_session(self, *, workspace: Optional[str] = None) -> bool:
-        self._dsp = bool(workspace)
-        self._allow_edits = bool(workspace)
+        self._dsp = False
+        self._allow_edits = bool(workspace) and self._cho_ghi
         return super().start_session(workspace=workspace)
 
 
@@ -290,6 +317,17 @@ class MultiSlotAdapter(WorkerAdapter):
 
     def capabilities(self) -> FrozenSet[str]:
         return self._mau.capabilities()
+
+    def set_write_mode(self, cho_ghi: bool) -> None:
+        """Chuyen tiep xuong khe cua LUONG hien tai.
+
+        Phai muon khe TRUOC khi dat che do: dat len `self` roi hy vong khe
+        doc duoc se im lang mat tac dung, va viec chi doc se chay voi quyen
+        ghi (hoac nguoc lai) — dung loai loi khong ai thay cho toi luc mot
+        worker ghi nham cho."""
+        a = self._muon()
+        if a is not None and hasattr(a, "set_write_mode"):
+            a.set_write_mode(cho_ghi)
 
     def start_session(self, *, workspace: Optional[str] = None) -> bool:
         a = self._muon()
@@ -365,9 +403,13 @@ def dung_adapter(idn: Identity, *, timeout: float = 1200.0
     if idn.provider == "antigravity":
         if idn.transport is Transport.NATIVE:
             def _tao():
+                # `dangerously_skip_permissions=False` CO Y va la bat bien:
+                # `PoolAntigravityAdapter.start_session` cung ep lai False moi
+                # lan. Hai lop chan cho mot quy tac an toan la co y — mot cho
+                # o noi DUNG adapter, mot cho o noi CHAY no.
                 return PoolAntigravityAdapter(
                     idn.worker_id, model=idn.model, allow_edits=True,
-                    dangerously_skip_permissions=True, turn_timeout=timeout)
+                    dangerously_skip_permissions=False, turn_timeout=timeout)
             if idn.max_concurrent > 1:
                 return MultiSlotAdapter(idn.worker_id, _tao,
                                         slots=idn.max_concurrent)

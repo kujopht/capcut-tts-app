@@ -1,0 +1,263 @@
+{
+  "_note": [
+    "Cấu hình fabric Router V4. MỌI thứ đặc thù nhà cung cấp sống ở ĐÂY, không",
+    "rải rác trong mã. Thêm một tài khoản hay một model = sửa tệp này.",
+    "",
+    "`source` cho từng năng lực: 'probed' = ĐÃ ĐO trên máy này (ghi ngày trong",
+    "notes); 'declared' = lấy từ UI/tài liệu nhà cung cấp, CHƯA đo. Bộ lập lịch",
+    "hạ điểm thứ chưa đo (`evidence_discount`), nên khai bừa 'probed' sẽ làm sai",
+    "định tuyến chứ không làm nó nhanh hơn.",
+    "",
+    "TÊN MODEL KHÔNG PHẢI ĐỊNH DANH VĨNH VIỄN. Chúng đến từ `agy models` ngày",
+    "2026-09-03. Chạy `router models --refresh` để đối chiếu lại."
+  ],
+
+  "weights": {
+    "capability_match": 30.0,
+    "benchmark_quality": 15.0,
+    "availability": 12.0,
+    "quota_health": 10.0,
+    "reliability": 12.0,
+    "independence_bonus": 10.0,
+    "scarcity_penalty": 20.0,
+    "latency": 8.0,
+    "expected_cost": 6.0,
+    "reasoning_fit": 10.0,
+    "evidence_discount": 6.0
+  },
+
+  "escalation": {
+    "nguong_critic": 0.25,
+    "nguong_hypotheses": 0.60,
+    "phat_moi_lan_hong": 0.15,
+    "so_gia_thuyet": 3,
+    "ton_trong_yeu_cau_review": true
+  },
+
+  "quota_pool_templates": [
+    {
+      "pool_id": "antigravity_gemini",
+      "note": "UI Antigravity gom các model Gemini vào MỘT nhóm hạn mức.",
+      "source": "declared",
+      "rolling_window_seconds": 18000
+    },
+    {
+      "pool_id": "antigravity_claude_gpt",
+      "note": "UI Antigravity gom Claude VÀ GPT vào CÙNG một nhóm hạn mức. GPT-OSS KHÔNG miễn phí chỉ vì nó yếu hơn — nó rút từ đúng bể mà Claude Opus rút.",
+      "source": "declared",
+      "rolling_window_seconds": 18000
+    }
+  ],
+
+  "models": [
+    {
+      "model_id": "gemini-3.8-flash-high",
+      "model_family": "gemini",
+      "provider": "antigravity",
+      "quota_pool": "antigravity_gemini",
+      "reasoning": "high",
+      "capabilities": ["coding", "repo_read", "repo_write", "shell", "multimodal", "image", "video", "audio", "long_context", "structured_output"],
+      "capability_source": {
+        "coding": "probed",
+        "repo_read": "probed",
+        "repo_write": "probed",
+        "structured_output": "probed",
+        "image": "probed",
+        "multimodal": "probed",
+        "video": "declared",
+        "audio": "declared",
+        "long_context": "declared",
+        "shell": "declared"
+      },
+      "benchmark_profile": 0.8,
+      "latency_profile": 25.0,
+      "reliability": 0.9,
+      "cost_profile": 0.3,
+      "notes": "image PROBED 2026-09-03: đọc docs/screenshots/01-home-desktop.png và mô tả đúng phần tử UI tiếng Việt có thật. video/audio mới là lời khai theo UI, chưa đo."
+    },
+    {
+      "model_id": "gemini-3.8-flash-medium",
+      "model_family": "gemini",
+      "provider": "antigravity",
+      "quota_pool": "antigravity_gemini",
+      "reasoning": "medium",
+      "capabilities": ["coding", "repo_read", "repo_write", "multimodal", "image", "long_context", "structured_output"],
+      "capability_source": {"coding": "declared", "repo_read": "declared", "repo_write": "declared", "structured_output": "declared", "image": "declared", "multimodal": "declared", "long_context": "declared"},
+      "benchmark_profile": 0.62,
+      "latency_profile": 18.0,
+      "reliability": 0.88,
+      "cost_profile": 0.15,
+      "notes": "Rẻ hơn, nhanh hơn. Cùng bể quota Gemini."
+    },
+    {
+      "model_id": "gemini-3.1-pro-low",
+      "model_family": "gemini",
+      "provider": "antigravity",
+      "quota_pool": "antigravity_gemini",
+      "reasoning": "high",
+      "capabilities": ["coding", "repo_read", "repo_write", "multimodal", "image", "video", "audio", "long_context", "structured_output"],
+      "capability_source": {"coding": "declared", "repo_read": "declared", "repo_write": "declared", "structured_output": "declared", "image": "declared", "multimodal": "declared", "video": "declared", "audio": "declared", "long_context": "declared"},
+      "benchmark_profile": 0.78,
+      "latency_profile": 60.0,
+      "reliability": 0.88,
+      "cost_profile": 0.6,
+      "notes": "Ngữ cảnh dài / phân tích repo rộng."
+    },
+    {
+      "model_id": "claude-opus-4-6-thinking",
+      "model_family": "claude",
+      "provider": "antigravity",
+      "quota_pool": "antigravity_claude_gpt",
+      "reasoning": "high",
+      "capabilities": ["coding", "repo_read", "repo_write", "long_context", "structured_output"],
+      "capability_source": {"coding": "declared", "repo_read": "declared", "repo_write": "declared", "structured_output": "declared", "long_context": "declared"},
+      "benchmark_profile": 0.9,
+      "latency_profile": 90.0,
+      "reliability": 0.93,
+      "cost_profile": 0.9,
+      "notes": "KHÔNG khai multimodal — chưa đo qua đường Antigravity CLI. Rút CÙNG bể với GPT-OSS."
+    },
+    {
+      "model_id": "claude-sonnet-4-6",
+      "model_family": "claude",
+      "provider": "antigravity",
+      "quota_pool": "antigravity_claude_gpt",
+      "reasoning": "high",
+      "capabilities": ["coding", "repo_read", "repo_write", "long_context", "structured_output"],
+      "capability_source": {"coding": "declared", "repo_read": "declared", "repo_write": "declared", "structured_output": "declared", "long_context": "declared"},
+      "benchmark_profile": 0.8,
+      "latency_profile": 45.0,
+      "reliability": 0.92,
+      "cost_profile": 0.6
+    },
+    {
+      "model_id": "gpt-oss-120b-medium",
+      "model_family": "gpt",
+      "provider": "antigravity",
+      "quota_pool": "antigravity_claude_gpt",
+      "reasoning": "medium",
+      "capabilities": ["coding", "repo_read", "structured_output", "long_context"],
+      "capability_source": {"coding": "declared", "repo_read": "declared", "structured_output": "declared", "long_context": "declared"},
+      "benchmark_profile": 0.55,
+      "latency_profile": 30.0,
+      "reliability": 0.85,
+      "cost_profile": 0.5,
+      "notes": "Ứng viên benchmark bình thường, KHÔNG có vai trò cố định. Rút CÙNG bể với Claude Opus — dùng nó không 'miễn phí'."
+    },
+    {
+      "model_id": "codex-default",
+      "model_family": "codex",
+      "provider": "codex",
+      "quota_pool": "codex_chatgpt",
+      "reasoning": "high",
+      "capabilities": ["coding", "repo_read", "repo_write", "shell", "multimodal", "image", "structured_output", "long_context"],
+      "capability_source": {"coding": "probed", "repo_read": "probed", "image": "probed", "multimodal": "probed", "repo_write": "declared", "shell": "declared", "structured_output": "declared", "long_context": "declared"},
+      "benchmark_profile": 0.82,
+      "latency_profile": 50.0,
+      "reliability": 0.9,
+      "cost_profile": 0.5,
+      "notes": "image PROBED 2026-09-03 (đọc đúng screenshot thật). TỪ CHỐI việc hình dạng bảo mật — bằng chứng 2026-08-28: trả kết quả rỗng kèm 'flagged for possible cybersecurity risk'. Xem `security_refusal_family` bên dưới."
+    },
+    {
+      "model_id": "opencode-default",
+      "model_family": "opencode",
+      "provider": "opencode",
+      "quota_pool": "opencode_zen",
+      "reasoning": "medium",
+      "capabilities": ["coding", "repo_read", "repo_write", "structured_output"],
+      "capability_source": {"coding": "declared", "repo_read": "declared", "repo_write": "declared", "structured_output": "declared"},
+      "benchmark_profile": 0.6,
+      "latency_profile": 40.0,
+      "reliability": 0.85,
+      "cost_profile": 0.4
+    },
+    {
+      "model_id": "claude-code-session",
+      "model_family": "claude",
+      "provider": "claude",
+      "quota_pool": "claude_code",
+      "reasoning": "high",
+      "capabilities": ["coding", "repo_read", "repo_write", "shell", "long_context", "structured_output"],
+      "capability_source": {"coding": "probed", "repo_read": "probed", "repo_write": "probed", "shell": "probed", "long_context": "declared", "structured_output": "declared"},
+      "benchmark_profile": 0.95,
+      "latency_profile": 120.0,
+      "reliability": 0.95,
+      "cost_profile": 1.0,
+      "notes": "Chính phiên đang chạy. KHÔNG dispatch được ra ngoài — có mặt để lập kế hoạch/tích hợp coi nó là một ứng viên tường minh, và để `explain` nói được vì sao nó KHÔNG được chọn cho việc cơ học."
+    }
+  ],
+
+  "runtimes": [
+    {
+      "runtime_id": "AG01",
+      "provider": "antigravity",
+      "account_id": "ag-account-01",
+      "auth_profile": "windows-user:${USERNAME}",
+      "transport": "native",
+      "concurrency": 3,
+      "supported_models": ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.1-pro-low", "claude-opus-4-6-thinking", "claude-sonnet-4-6", "gpt-oss-120b-medium"],
+      "notes": "Tài khoản Antigravity của hồ sơ Windows đang chạy Router. MỘT vật chứa, NHIỀU model — không phải 'worker Gemini'."
+    },
+    {
+      "runtime_id": "AG02",
+      "provider": "antigravity",
+      "account_id": "ag-account-02",
+      "auth_profile": "windows-user:AG02",
+      "transport": "bridge",
+      "concurrency": 1,
+      "supported_models": ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.1-pro-low", "claude-opus-4-6-thinking", "claude-sonnet-4-6", "gpt-oss-120b-medium"],
+      "needs_provisioning": "Hồ sơ Windows AG02 ĐÃ tồn tại nhưng cầu nối chưa chạy. Đăng nhập phiên AG02, rồi chạy: python -m scripts.router_v3.run_bridge --worker-id AG02"
+    },
+    {
+      "runtime_id": "CODEX01",
+      "provider": "codex",
+      "account_id": "codex-account-01",
+      "auth_profile": "codex-cli:default",
+      "transport": "cli",
+      "concurrency": 1,
+      "supported_models": ["codex-default"]
+    },
+    {
+      "runtime_id": "OPENCODE01",
+      "provider": "opencode",
+      "account_id": "opencode-account-01",
+      "auth_profile": "opencode-server:127.0.0.1:4096",
+      "transport": "http",
+      "port": 4096,
+      "concurrency": 1,
+      "supported_models": ["opencode-default"]
+    },
+    {
+      "runtime_id": "CLAUDE_LEAD",
+      "provider": "claude",
+      "account_id": "claude-code-session",
+      "auth_profile": "claude-code:session",
+      "transport": "native",
+      "concurrency": 1,
+      "supported_models": ["claude-code-session"],
+      "dispatchable": false,
+      "notes": "Phiên điều phối. Không nhận dispatch — có mặt trong fabric để `explain` nói được vì sao nó không được chọn, chứ không phải để giao việc."
+    }
+  ],
+
+  "ag_slot_template": {
+    "_note": "AG03..AG08 sinh từ mẫu này, đều ở trạng thái chưa cấp phát. Chúng CÓ MẶT trong sổ để bảng điều khiển hiển thị và để cấp phát chỉ là một bước vận hành, KHÔNG phải sửa mã.",
+    "provider": "antigravity",
+    "transport": "bridge",
+    "concurrency": 1,
+    "supported_models": ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.1-pro-low", "claude-opus-4-6-thinking", "claude-sonnet-4-6", "gpt-oss-120b-medium"],
+    "needs_provisioning": "Chưa có hồ sơ Windows {slot}. Danh tính cố định đòi một Windows Credential Manager riêng (đo được 2026-09-03: agy giữ phiên trong Credential Manager của TỪNG tài khoản Windows, MỘT mục cho mỗi tài khoản — chuyển hướng HOME/thư mục cấu hình KHÔNG tách được, đã thử). Tạo tài khoản Windows {slot}, đăng nhập Antigravity một lần bằng tài khoản Google riêng của khe, rồi chạy run_bridge.py trong phiên đó. TUYỆT ĐỐI không dùng công cụ đổi tài khoản để giả lập nhiều danh tính."
+  },
+
+  "security": {
+    "_note": "Rào an toàn KHÔNG cấu hình được ở đây — chúng nằm trong mã. Mục này chỉ GHI LẠI chúng để người vận hành đọc được ở một chỗ.",
+    "security_refusal_family": "codex",
+    "never_flag": "--dangerously-skip-permissions",
+    "enforced_in_code": [
+      "review bảo mật không bao giờ định tuyến sang Codex (router_v3/policy.py, router_v3/pool/routing.py)",
+      "adapter Antigravity không bao giờ dùng --dangerously-skip-permissions (router_v3/pool/adapters.py)",
+      "hai runtime không bao giờ dùng chung auth_profile (router_v4/runtime.py::Fabric.validate)",
+      "forbidden_scope thắng allowed_scope (router_v4/contract.py)"
+    ]
+  }
+}

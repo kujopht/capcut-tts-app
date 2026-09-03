@@ -23,11 +23,16 @@ REPO_REF="${REPO_REF:-main}"
 APP_DIR="/opt/fanfic-audio"
 MODELS_DIR="/opt/fanfic-models/nghitts/piper-tts"
 SVC_USER="fanfic"
+#: Thu muc da co san 25 `.onnx` + `config.json` (vd da scp truoc vao
+#: /home/ubuntu/piper-tts). Co tham so nay thi buoc 7 tu cai model va tu tao
+#: lai 25 symlink, nen NGUOI VAN HANH chi phai chay DUNG MOT lenh co quyen.
+MODELS_FROM=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --role) ROLE="$2"; shift 2 ;;
-    --ref)  REPO_REF="$2"; shift 2 ;;
+    --role)        ROLE="$2"; shift 2 ;;
+    --ref)         REPO_REF="$2"; shift 2 ;;
+    --models-from) MODELS_FROM="$2"; shift 2 ;;
     *) echo "tham so la: $1" >&2; exit 2 ;;
   esac
 done
@@ -125,11 +130,94 @@ done
 install -d -m 0750 /etc/fanfic-audio
 chgrp "$SVC_USER" /etc/fanfic-audio
 
+# Viet SAN mau env — chi TEN bien, KHONG mot gia tri nao. Nguoi van hanh chi
+# con dien vao cho trong, khong phai tu soan tep. KHONG ghi de neu tep that
+# da ton tai: mot lan chay lai bootstrap khong duoc xoa credential.
+for m in worker translation-worker; do
+  mau="/etc/fanfic-audio/${m}.env"
+  if [ -f "$mau" ]; then
+    echo "  giu nguyen $mau (da co)"
+    continue
+  fi
+  cat > "$mau" <<'ENVMAU'
+# Bien moi truong worker STAGING. Dien gia tri vao sau dau `=`.
+#
+# TUYET DOI KHONG dung gia tri PRODUCTION o day. `worker_staging_acceptance.py`
+# kiem dieu nay TRUOC moi thu khac va se TU CHOI chay tiep neu trung — vi hai
+# worker cung claim job cua CUNG mot du an se tranh job THAT cua production.
+#
+# Tep nay quyen 0640 root:fanfic. Khong bao gio vao git.
+
+FAS_ENV=staging
+FAS_INLINE_WORKER=false
+DATA_BACKEND=appwrite
+STORAGE_BACKEND=r2
+
+# --- Appwrite (du an STAGING, KHONG phai production) ---
+APPWRITE_ENDPOINT=
+APPWRITE_PROJECT_ID=
+APPWRITE_DATABASE_ID=
+APPWRITE_API_KEY=
+
+# --- Cloudflare R2 (bucket STAGING, KHONG phai `fanfic-prod`) ---
+R2_ACCOUNT_ID=
+R2_BUCKET=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+
+# --- Giong cuc bo ---
+# De TRONG de tat giong Piper; hoac `piper:ngochuyen` / `piper:ngochuyennew`
+# de bat. Model da duoc cai san o /opt/fanfic-models/nghitts/piper-tts.
+FAS_LOCAL_VOICES=
+ENVMAU
+  chmod 0640 "$mau"
+  chown root:"$SVC_USER" "$mau"
+  echo "  da viet mau $mau (chi TEN bien, khong gia tri)"
+done
+
 echo
 echo "=== 7. MODEL PIPER ==="
 install -d -m 0755 "$MODELS_DIR"
+
+if [ -n "$MODELS_FROM" ]; then
+  if [ ! -d "$MODELS_FROM" ]; then
+    echo "  LOI: --models-from '$MODELS_FROM' khong phai thu muc" >&2
+    exit 5
+  fi
+  echo "  cai model tu $MODELS_FROM"
+  # `cp` chu khong `mv`: giu nguyen ban da scp de chay lai duoc, va de
+  # nguoi van hanh tu xoa khi da hai long.
+  cp -f "$MODELS_FROM"/*.onnx "$MODELS_DIR"/ 2>/dev/null || true
+  cp -f "$MODELS_FROM"/config.json "$MODELS_DIR"/ 2>/dev/null || true
+  # TAO LAI 25 symlink. Kho lanh/scp deref symlink nen ban chuyen den chi co
+  # 25 `.onnx` + MOT `config.json`; thieu buoc nay thi `PiperModelManager`
+  # khong tim thay cau hinh cho tung giong.
+  if [ -f "$MODELS_DIR/config.json" ]; then
+    n=0
+    for f in "$MODELS_DIR"/*.onnx; do
+      [ -e "$f" ] || continue
+      ln -sfn config.json "${f}.json"
+      n=$((n + 1))
+    done
+    echo "  da tao lai $n symlink <voice_key>.onnx.json -> config.json"
+  else
+    echo "  CANH BAO: thieu config.json — khong tao duoc symlink nao" >&2
+  fi
+  chown -R root:root "$MODELS_DIR" 2>/dev/null || true
+  chmod -R a+rX "/opt/fanfic-models"
+fi
+
 SO_ONNX="$(find "$MODELS_DIR" -maxdepth 1 -name '*.onnx' 2>/dev/null | wc -l)"
+SO_LINK="$(find "$MODELS_DIR" -maxdepth 1 -name '*.onnx.json' 2>/dev/null | wc -l)"
 echo "  model dang co: $SO_ONNX / 25 (production co 25, moi ban ~63.5MB, tong ~1.5GB)"
+echo "  cau hinh giong: $SO_LINK / 25 (<voice_key>.onnx.json)"
+for k in ngochuyen ngochuyennew; do
+  if [ -f "$MODELS_DIR/$k.onnx" ]; then
+    echo "  CO    $k.onnx"
+  else
+    echo "  THIEU $k.onnx"
+  fi
+done
 if [ "$SO_ONNX" -lt 25 ]; then
   cat <<'MODELNOTE'
   CHUA DU MODEL. KHONG tai tu Internet o day: cac tep .onnx nay la tai san

@@ -135,16 +135,34 @@ if [ "$SO_ONNX" -lt 25 ]; then
   CHUA DU MODEL. KHONG tai tu Internet o day: cac tep .onnx nay la tai san
   cua du an, khong phai goi cong khai, nen script se KHONG doan mot URL.
 
-  Cach dua model len (chon mot), luu y CAU TRUC that tren production:
+  Da co ban tren kho lanh Drive tu 2026-09-04 (28 tep, 1.587.941.103 byte,
+  `rclone check --one-way` exit 0). Truoc do bo model TON TAI DUY NHAT tren
+  dia boot cua fanfic-worker-prod — xem scripts/ops/piper_models_to_drive.py.
+
+  Cach dua model len — chay TU MAY DIEU HANH (noi da co remote
+  `fanfic-gdrive` xac thuc san), KHONG cai rclone tren may staging:
+
+    # 1. tai tu kho lanh ve may dieu hanh
+    rclone copy fanfic-gdrive:FanficWorld/archive/infra/piper-models \
+        ./piper-tts --checksum
+
+    # 2. day len may staging
+    scp -i <khoa>.pem -r ./piper-tts/* \
+        ubuntu@<host>:/opt/fanfic-models/nghitts/piper-tts/
+
+    # 3. TREN may staging — dung lai 25 symlink
+    bash /opt/fanfic-models/nghitts/piper-tts/TAO_LAI_SYMLINK.sh \
+        /opt/fanfic-models/nghitts/piper-tts
+
+  Buoc 3 la BAT BUOC. Cau truc that tren production la:
     - 25 tep <voice_key>.onnx (moi ban ~63.516.050 byte)
     - MOT tep config.json dung chung
     - 25 SYMLINK <voice_key>.onnx.json -> config.json
-    KHONG deref symlink khi copy, neu khong se phong to vo ich.
-
-    # tu may dieu hanh, giu nguyen symlink (-l = links, -H = hard/soft):
-    rsync -aL --info=progress2 <nguon>/ root@<host>:/opt/fanfic-models/nghitts/piper-tts/
+  Kho lanh CO Y khong luu 25 symlink (scp/rclone deref chung thanh 25 ban
+  sao giong nhau cua cung mot tep), nen phai tao lai o dau ben nay.
 
   Giong "Ngoc Huyen (Moi)" = `ngochuyennew.onnx` (KHAC `ngochuyen.onnx`).
+  Ca hai da duoc kiem co mat trong ban tren Drive.
   `voice_id` (`piper:<voice_key>`) da nam trong job cu VA gop phan sinh
   `output_key` tren R2, nen ten tep KHONG duoc doi.
 MODELNOTE

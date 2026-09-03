@@ -71,6 +71,23 @@ CAPABILITIES = frozenset({
 })
 
 
+class PoolState(str, Enum):
+    """Trạng thái worker theo NGÔN NGỮ CỦA BỂ (mission "worker pool").
+
+    Khác `Health` có chủ đích. `Health` trả lời "nhà cung cấp đang thế nào";
+    `PoolState` trả lời "bộ điều phối làm gì với worker này ngay bây giờ", và
+    nó gộp cả TẢI (`in_flight`) — thứ `Health` cố ý không biết. Một worker có
+    thể `Health.HEALTHY` mà `PoolState.BUSY`; giữ hai thang đo tách nhau để
+    bảng điều khiển không phải suy diễn ngược.
+    """
+
+    READY = "READY"
+    BUSY = "BUSY"
+    QUOTA_COOLDOWN = "QUOTA_COOLDOWN"
+    OFFLINE = "OFFLINE"
+    FAILED = "FAILED"
+
+
 @dataclass(frozen=True)
 class WorkerSpec:
     """MÔ TẢ một worker. Cố ý không có chỗ nào chứa credential."""
@@ -85,6 +102,19 @@ class WorkerSpec:
     trusted_for_high_risk: bool = False
     max_concurrent: int = 1
     notes: str = ""
+    #: Model CỤ THỂ worker này chạy. Trước đây chỉ có `pool` (nhãn thô như
+    #: "GEMINI_FLASH"), nên hai worker cùng pool nhưng khác model — đúng thứ
+    #: mission yêu cầu định tuyến theo năng lực — không phân biệt được.
+    model: str = ""
+    #: Thư mục làm việc CỐ ĐỊNH của worker (gốc `--add-dir` với worker thường
+    #: trực). Rỗng = worker nhận workspace theo từng việc.
+    workspace: str = ""
+    #: DANH TÍNH XÁC THỰC worker này dùng — vd "windows-user:nguye",
+    #: "opencode-server:127.0.0.1:4096", "codex-cli:default". KHÔNG phải
+    #: credential: đây là NHÃN CHỈ CHỖ phiên đăng nhập nằm, để bất biến
+    #: "một danh tính = một tài khoản" kiểm được bằng máy. Xem
+    #: `pool/identity.py::assert_khong_xoay_tai_khoan`.
+    auth_realm: str = ""
 
     def validate(self) -> None:
         if not self.worker_id.strip():
@@ -129,6 +159,56 @@ class WorkerState:
     #: worker đang "ấm nhưng phình ngữ cảnh không liên quan". Không phải mọi
     #: worker đều có khái niệm "ấm" — mặc định 0 nghĩa là không áp dụng.
     context_chars: int = 0
+    #: Lần cuối quan sát được worker này (epoch). Phân biệt "đang KHOẺ" với
+    #: "lần cuối nhìn thấy nó khoẻ là 40 phút trước" — một tiến trình nền có
+    #: thể chết im lặng và `health` cũ vẫn nói HEALTHY mãi.
+    last_seen: float = 0.0
+    #: Hạ nhiệt do QUOTA nhà cung cấp (epoch). TÁCH khỏi `circuit_open_until`
+    #: có chủ đích: cầu dập mạch là QUYẾT ĐỊNH của Router sau nhiều lần hỏng;
+    #: cái này là giới hạn của NHÀ CUNG CẤP. Gộp chung thì một lần chạm quota
+    #: sẽ bị đếm như một lỗi của worker và đẩy nó vào backoff sai loại.
+    quota_cooldown_until: Optional[float] = None
+    #: Tín hiệu quota THẬT nếu nhà cung cấp có công bố — văn bản ngắn, không
+    #: bao giờ đoán. Rỗng = không quan sát được (phần lớn trường hợp).
+    quota_signal: str = ""
+    #: Việc đang chạy — tên rõ nghĩa theo mission ("active_job"). `current_task`
+    #: giữ nguyên làm bí danh để mã cũ không vỡ.
+    @property
+    def active_job(self) -> Optional[str]:
+        return self.current_task
+
+    def cooldown_dang_bat(self, *, now: Optional[float] = None) -> bool:
+        if self.quota_cooldown_until is None:
+            return False
+        curr = time.time() if now is None else now
+        return curr < self.quota_cooldown_until
+
+    def pool_state(self, spec: "WorkerSpec", *,
+                   now: Optional[float] = None) -> "PoolState":
+        """Trạng thái bể. THỨ TỰ ƯU TIÊN có chủ đích và không đổi được:
+
+        OFFLINE > FAILED > QUOTA_COOLDOWN > BUSY > READY
+
+        `OFFLINE` đứng trước tất cả vì nó là thứ DUY NHẤT cần người vận hành
+        (chưa cài / chưa đăng nhập); hiển thị nó thành "FAILED" hay
+        "QUOTA_COOLDOWN" sẽ khiến người vận hành ngồi đợi một thứ không bao
+        giờ tự hồi.
+        """
+        if self.health in _KHONG_BAO_GIO_CHON:
+            return PoolState.OFFLINE
+        if self.health is Health.FAILED or self.circuit_is_open(now=now):
+            return PoolState.FAILED
+        if self.health is Health.RATE_LIMITED or self.cooldown_dang_bat(now=now):
+            return PoolState.QUOTA_COOLDOWN
+        if self.in_flight > 0:
+            return PoolState.BUSY
+        return PoolState.READY
+
+    def con_cho(self, spec: "WorkerSpec") -> bool:
+        """Còn khe nhận thêm việc không. KHÁC `pool_state() == READY`: một
+        worker `max_concurrent=3` đang chạy 1 việc là BUSY nhưng VẪN nhận
+        thêm được — trộn hai khái niệm sẽ bỏ phí 2/3 công suất."""
+        return self.in_flight < spec.max_concurrent
 
     @property
     def success_rate(self) -> float:
@@ -187,8 +267,38 @@ class WorkerRegistry:
         with self._khoa:
             st = self._states[worker_id]
             st.health = health
+            st.last_seen = time.time()
             if error:
                 st.last_error = error[:200]
+
+    def set_quota_cooldown(self, worker_id: str, seconds: float, *,
+                           signal: str = "", now: Optional[float] = None) -> None:
+        """Đánh dấu worker chạm giới hạn quota của NHÀ CUNG CẤP.
+
+        KHÔNG tăng `consecutive_failures`: chạm quota không phải worker hỏng,
+        và tính nó như lỗi sẽ đẩy một worker khoẻ vào backoff cầu dập mạch —
+        rồi nó ở lại đó rất lâu sau khi quota đã hồi.
+        """
+        curr = time.time() if now is None else now
+        with self._khoa:
+            st = self._states[worker_id]
+            st.quota_cooldown_until = curr + max(0.0, seconds)
+            st.health = Health.RATE_LIMITED
+            st.last_seen = curr
+            if signal:
+                st.quota_signal = signal[:200]
+
+    def clear_quota_cooldown(self, worker_id: str) -> None:
+        with self._khoa:
+            st = self._states[worker_id]
+            st.quota_cooldown_until = None
+            if st.health is Health.RATE_LIMITED:
+                st.health = Health.HEALTHY
+
+    def touch(self, worker_id: str, *, now: Optional[float] = None) -> None:
+        """Ghi nhận vừa quan sát được worker này còn sống."""
+        with self._khoa:
+            self._states[worker_id].last_seen = time.time() if now is None else now
 
     def available(self, *, capability: Optional[str] = None,
                   high_risk: bool = False, now: Optional[float] = None
@@ -213,6 +323,8 @@ class WorkerRegistry:
                     continue
                 if st.circuit_is_open(now=now):
                     continue
+                if st.cooldown_dang_bat(now=now):
+                    continue          # quota nha cung cap — tu hoi theo gio
                 if st.consecutive_failures >= NGUONG_MO_MACH and st.probe_in_flight:
                     continue          # mach nua-mo, da co mot luot do dang bay
                 if capability and capability not in spec.capabilities:
@@ -282,6 +394,21 @@ class WorkerRegistry:
                 "circuit_open": st.circuit_is_open(),
                 "circuit_opens": st.circuit_opens,
                 "consecutive_failures": st.consecutive_failures,
+                # -- so dang ky worker theo mission (Pool Phase 3) -----------
+                "model": s.model,
+                "capabilities": sorted(s.capabilities),
+                "workspace": s.workspace,
+                "auth_realm": s.auth_realm,
+                "state": st.pool_state(s).value,
+                "active_job": st.active_job,
+                "last_seen": round(st.last_seen, 3),
+                "failure_count": st.failed,
+                "cooldown_until": (round(st.quota_cooldown_until, 3)
+                                   if st.quota_cooldown_until else None),
+                "quota_signal": st.quota_signal,
+                "max_concurrent": s.max_concurrent,
+                "has_capacity": st.con_cho(s),
+                "detail": st.last_error,
             })
         return ra
 

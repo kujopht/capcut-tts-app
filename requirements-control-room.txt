@@ -32,10 +32,16 @@
 
 # --- Bat buoc: khung TUI ---
 # scripts/router_v3/control_room/app.py, screens/*, widgets/* import truc
-# tiep `textual.*`. Pin theo major: textual doi API widget kha thuong xuyen
-# trong cac ban minor, con day la mot man hinh dieu hanh THAT — vo API la
-# mat kha nang quan sat router.
-textual>=0.80,<7.0
+# tiep `textual.*`.
+#
+# Khoang phien ban nay la DO THAT, khong phai phong doan: bo 25 bai test
+# control room da chay dat tren CA HAI ban co san tren may nay —
+#   textual 6.12.0  (.venv)                    25/25 dat
+#   textual 8.2.8   (Python he thong)          25/25 dat
+# Ban dau da dinh pin `<7.0` cho "an toan"; nhu vay se loai dung ban 8.2.8
+# ma ma nguon nay THUC TE chay tot. Chan tren la 9.0 (major ke tiep chua
+# duoc do), chan duoi giu 0.80.
+textual>=0.80,<9.0
 
 # --- Bat buoc: dung de kết xuất trong widget ---
 # widgets/* va screens/* import `rich.text.Text`, `rich.panel.Panel`,

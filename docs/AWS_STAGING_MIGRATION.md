@@ -577,3 +577,63 @@ Tren Windows `gcloud` la `gcloud.cmd`, va `subprocess.run` khong dung shell
 nen khong tu do duoi theo `PATHEXT`. Da them `phan_giai()` — giai duong dan
 that cua CLI bang `shutil.which` truoc khi goi, ap dung cho ca `gcloud` va
 `rclone`.
+
+---
+
+# MODEL PIPER DA CO BAN THU HAI (2026-09-04)
+
+Phat hien khi chuan bi bootstrap AWS: **25 model Piper (~1.5 GB) ton tai DUY
+NHAT tren dia boot cua `fanfic-worker-prod`.** Khong co ban nao tren Drive
+(`rclone lsd .../archive` khong co muc nao ten model/piper/nghitts/voice),
+khong co ban nao tren R2.
+
+Mat VM do = mat 25 giong doc, trong do `ngochuyennew` = **"Ngọc Huyền (Mới)"**
+dang duoc chao ban trong san pham. Dung MOT LOAI van de voi "backup nam tren
+chinh VM no bao ve" — va no cung **chan** AWS staging, vi bootstrap can 25
+model co mat de kiem duoc giong cuc bo.
+
+## Da khac phuc
+
+| Hang muc | Gia tri |
+|---|---|
+| Cong cu | `scripts/ops/piper_models_to_drive.py` |
+| Dich | `fanfic-gdrive:FanficWorld/archive/infra/piper-models` |
+| Keo tu VM | **25/25** `.onnx` + `config.json` |
+| Kich co cuc bo | 1.587.935.613 byte (1,48 GiB) |
+| Tren Drive | **28 tep, 1.587.941.103 byte** |
+| `rclone check --one-way` | exit **0** |
+| `ngochuyen` / `ngochuyennew` | **CO / CO** (kiem tuong minh, chan neu thieu) |
+| **KET LUAN** | **PASS** |
+
+28 tep = 25 `.onnx` + `config.json` + `manifest.json` + `TAO_LAI_SYMLINK.sh`.
+
+## Cau truc — cho co y KHONG luu symlink
+
+Tren VM: 25 `.onnx` + **MOT** `config.json` dung chung + **25 SYMLINK**
+`<voice_key>.onnx.json -> config.json`.
+
+`scp`/`rclone` **deref** symlink, nen luu chung se thanh 25 ban sao giong
+nhau cua cung mot tep. Kho lanh vi vay chi giu 25 `.onnx` + mot
+`config.json`, kem `TAO_LAI_SYMLINK.sh` de dung lai dung cau truc o dau ben
+kia. Buoc tao lai la **bat buoc** — thieu no thi `PiperModelManager` khong
+tim thay cau hinh cho tung giong.
+
+Model **khong phai bi mat** (la trong so TTS), nen khac ban backup Appwrite:
+o day khong co van de credential.
+
+## Lay ve
+
+```bash
+rclone copy fanfic-gdrive:FanficWorld/archive/infra/piper-models ./piper-tts --checksum
+scp -i <khoa>.pem -r ./piper-tts/* ubuntu@<host>:/opt/fanfic-models/nghitts/piper-tts/
+bash /opt/fanfic-models/nghitts/piper-tts/TAO_LAI_SYMLINK.sh /opt/fanfic-models/nghitts/piper-tts
+```
+
+## Loi that trong duong ong, lo ra khi CHAY
+
+```
+ERROR: (gcloud.compute.scp) Multiple remote sources not supported by PuTTY.
+```
+
+Tren Windows `gcloud compute scp` di qua `pscp`, khong nhan nhieu nguon tu xa
+trong mot lan goi. Da tach thanh hai lan goi tuan tu.

@@ -167,3 +167,141 @@ Hai lỗi lập lịch **thật** bị lộ ra ở lần chạy đầu (đã s�
 - **7** tài khoản Google riêng, không phải 8 (acc1 ≡ acc8).
 - Tất cả 8 chia sẻ **một** khoá credential; cơ chế an toàn **chỉ vì** có
   khoá `switch → spawn`. Bỏ khoá đó đi là mở lại lỗi im lặng.
+
+---
+
+# ĐÓNG HỒ SƠ BẢO MẬT (2026-09-03, sau khắc phục của người vận hành)
+
+## A. ACL — ĐẠT, nhưng lần khắc phục đầu đã làm hỏng launcher
+
+Trạng thái cuối, đã xác minh:
+
+```
+C:\Users\nguye\agy-profiles          SYSTEM:(OI)(CI)(F)   KUJOPHT\nguye:(OI)(CI)(F)
+...\saved_profiles\accN.bin          SYSTEM:(I)(F)        KUJOPHT\nguye:(I)(F)
+icacls ... /T | grep -c CodexSandbox  ->  0
+```
+
+`CodexSandboxUsers` **không còn quyền nào** trên toàn bộ cây. Vấn đề đã đóng.
+
+**NHƯNG:** lần khắc phục đầu tiên (`/inheritance:r` áp dụng đệ quy) đã xoá
+ACE kế thừa của **mọi tệp** mà không cấp ACE tường minh nào — để lại DACL
+**rỗng**. Hệ quả đo được: cả 8 `.bin` **và** chính `agy_profile.py` trở nên
+**không đọc được kể cả với chủ sở hữu**:
+
+```
+acc1..acc8       : PermissionError
+agy_profile.py   : [Errno 13] Permission denied
+```
+
+Tức là **toàn bộ launcher đa-tài-khoản đã ngừng hoạt động**. Đã khôi phục
+bằng cách cho tệp con kế thừa lại ACL sạch của thư mục cha, rồi bảo vệ lại
+thư mục cha (KHÔNG cấp lại gì cho Codex):
+
+```powershell
+icacls "C:\Users\nguye\agy-profiles" /reset /T
+icacls "C:\Users\nguye\agy-profiles" /inheritance:r ^
+       /grant:r "nguye:(OI)(CI)F" /grant:r "SYSTEM:(OI)(CI)F"
+```
+
+**Bài học:** `icacls /inheritance:r /T` gỡ quyền kế thừa của con mà không
+thay bằng gì. Muốn siết một cây thì siết ở **thư mục** rồi để con **kế thừa**,
+đừng phá kế thừa ở từng tệp.
+
+## B. Danh tính riêng biệt — CHƯA ĐẠT: vẫn 7, không phải 8
+
+`acc8.bin` **giống hệt từng byte** so với trước khi báo là đã relogin:
+
+```
+profile  bam TRUOC      bam GIO        doi?
+acc1     e291e7274e73   e291e7274e73   khong
+...
+acc8     b20d2ca4264c   b20d2ca4264c   khong      <== KHONG he duoc ghi lai
+```
+
+Và dấu hiệu danh tính trong `cli.log` từng phiên vẫn cho `acc1 == acc8`
+(băm `0e3bf022f7d3`).
+
+**Nguyên nhân đã xác định:** lệnh `acc relogin 8` được chạy **trong lúc ACL
+đang hỏng**, nên Python còn không mở được `agy_profile.py`
+(`[Errno 13] Permission denied`) — lệnh **không làm gì cả** và thất bại im
+lặng.
+
+Không thể rút định danh tài khoản từ chính tệp profile: nội dung `token` chỉ
+có `access_token`, `expiry`, `refresh_token`, `token_type` — **không có
+`id_token`, không có `email`, không có `sub`**. Nên cách duy nhất để biết một
+profile thuộc tài khoản nào là **dùng nó** và đọc dấu hiệu mà phiên tự ghi.
+
+**Việc cần người vận hành:** ACL giờ đã đúng, hãy chạy lại
+
+```
+acc relogin 8
+```
+
+và chọn một tài khoản Google **khác**. Sau đó xác minh lại bằng
+`scripts/tests/test_router_v4_launcher.py` cộng phép so dấu hiệu phiên.
+
+## C. Mã hoá profile tại chỗ — ĐÃ LÀM
+
+Thiết kế **hẹp nhất**, tương thích ngược:
+
+| Thành phần | Vai trò |
+|---|---|
+| `scripts/router_v4/profile_crypto.py` | DPAPI phạm vi NGƯỜI DÙNG + magic header `AGYP1\0`; `doc_blob()` tự nhận định dạng; `ghi_blob()` ghi **nguyên tử** qua `os.replace` |
+| `scripts/migrate_agy_profiles_dpapi.py` | `--check` / `--apply` / `--rollback`; sao lưu trước, vá launcher **idempotent**, xác minh **vòng tròn từng tệp** ngay sau khi ghi |
+| vá trong `agy_profile.py` | thêm `read_profile_blob`/`write_profile_blob` **tự chứa** (chỉ stdlib) và đổi đúng **3** chỗ đọc/ghi/so khớp |
+
+**Tương thích ngược là bắt buộc:** hàm đọc nhìn magic header; không có thì
+trả nguyên văn. Nên tệp cũ vẫn chạy, trạng thái nửa-di-trú vẫn chạy, và hoàn
+tác chỉ là đặt lại tệp cũ.
+
+Kết quả áp dụng — 8/8, mỗi tệp được xác minh vòng tròn ngay sau khi ghi:
+
+```
+acc1..acc8: THUAN (500-503 byte) -> DA MA HOA (732 byte), vong tron OK
+```
+
+Chỉ **tài khoản Windows này** giải mã được. Một tài khoản khác — kể cả
+`CodexSandbox*` — dù đọc được byte cũng **không dùng được**: khoá nằm trong
+dữ liệu bảo vệ của hồ sơ người dùng, không nằm trong tệp. Đây là lớp phòng
+thủ thứ hai, độc lập với ACL — đúng thứ đã thiếu khi ACL bị đặt sai.
+
+**Bản lưu dạng thuần đã được XOÁ AN TOÀN** (ghi đè byte ngẫu nhiên rồi xoá)
+sau khi di trú được chứng minh — giữ 8 token thuần trong thư mục sao lưu sẽ
+vô hiệu hoá toàn bộ việc mã hoá. Bản lưu `agy_profile.py` (không phải bí mật)
+được giữ lại cho đường hoàn tác của phần mã.
+
+## D. Bằng chứng 8 tài khoản đồng thời SAU khi mã hoá
+
+Chạy qua **đúng đường của launcher** (`agy_profile.py switch accN`), không tự
+CredWrite:
+
+| Phép đo | Kết quả |
+|---|---|
+| `acc list` (đi qua đường giải mã để so khớp) | 8/8 liệt kê đúng |
+| `switch acc3` (đi qua đường giải mã) | ĐẠT |
+| 8 tiến trình khởi động lần lượt, giữ cả 8 sống | **8/8** |
+| Cả 8 gọi model sau khi slot bị ghi đè 7 lần | **8/8 trả lời đúng** |
+| Trôi danh tính | **không** |
+| Lập lịch cấp Router (`router_v4_multiaccount_proof.py --tasks 8`) | **8/8 việc trên 8 runtime KHÁC NHAU**, 179.7s |
+
+Ghi chú trung thực về thời gian: 179.7s so với 49.2s ở lần chạy trước khi có
+khoá. Nguyên nhân là **khoá `switch → spawn`** nay tuần tự hoá 8 lần khởi
+động nguội (~5–12s mỗi lần) — đó là **cái giá đúng** của việc chặn lỗi hai
+worker cùng một danh tính. Không phải hồi quy hiệu năng cần sửa.
+
+## E. Kiểm thử
+
+`522` bài kiểm router ĐẠT, gồm 15 bài mới cho mã hoá profile
+(vòng tròn, bản mã không chứa bản rõ, tệp thuần vẫn đọc được, nửa-di-trú,
+ghi nguyên tử, giải mã hỏng phải NÉM, entropy sai không lọt) và 18 bài
+launcher (khoá loại trừ lẫn nhau 8 luồng, thu hồi khoá bỏ hoang, Router
+không tự chạm credential, cấm cờ nguy hiểm — kiểm trên cây cú pháp).
+
+## F. Còn lại
+
+- **`acc relogin 8` cần chạy lại** (ACL đã đúng) → mới đạt 8 tài khoản riêng.
+- Hành vi **lúc làm mới token** quá hạn ~1 giờ vẫn chưa chứng minh được;
+  cần một lần chạy dài > 1 giờ.
+- Cả 8 vẫn chia sẻ **một** khoá credential; an toàn **chỉ vì** có khoá
+  `switch → spawn`. Bỏ khoá đó là mở lại lỗi im lặng.

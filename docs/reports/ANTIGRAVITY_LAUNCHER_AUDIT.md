@@ -100,6 +100,13 @@ vì blob thuần, để một lần đọc tệp không đủ để dùng lại 
 
 ## 5. Phát hiện: 8 profile nhưng chỉ **7 tài khoản Google**
 
+> ⚠️ **MỤC NÀY ĐÃ LẠC HẬU — xem mục "ĐỐI CHIẾU LẠI acc1/acc8" ở cuối tệp.**
+> Kết luận dưới đây ĐÚNG ở thời điểm đo (2026-09-03, trước 10:25:21Z) và
+> **sai từ 12:06:22Z** trở đi, khi lần `acc relogin 8` thật sự hạ cánh. Đo
+> lại ngày 2026-09-03 cho thấy **8/8 danh tính khác nhau**. Giữ nguyên văn ở
+> đây vì phần *nguyên nhân gốc* bên dưới vẫn đúng và vẫn là lý do sự cố xảy
+> ra ngay từ đầu.
+
 So dấu hiệu danh tính ghi trong `cli.log` từng phiên (đối chiếu bằng **băm**,
 không in email):
 
@@ -164,7 +171,9 @@ Hai lỗi lập lịch **thật** bị lộ ra ở lần chạy đầu (đã s�
   Bằng chứng gián tiếp nghiêng về an toàn (tiến trình không đọc lại slot), và
   làm mới dùng refresh token **trong bộ nhớ**. Cần một lần chạy dài > 1 giờ
   mới kết luận được.
-- **7** tài khoản Google riêng, không phải 8 (acc1 ≡ acc8).
+- ~~**7** tài khoản Google riêng, không phải 8 (acc1 ≡ acc8).~~
+  **ĐÃ LẠC HẬU** — đo lại 2026-09-03 sau khi `acc relogin 8` hạ cánh:
+  **8/8 danh tính khác nhau**. Xem mục "ĐỐI CHIẾU LẠI acc1/acc8" ở cuối tệp.
 - Tất cả 8 chia sẻ **một** khoá credential; cơ chế an toàn **chỉ vì** có
   khoá `switch → spawn`. Bỏ khoá đó đi là mở lại lỗi im lặng.
 
@@ -383,3 +392,87 @@ tự thêm ở lần đóng phiên này (phạm vi là *chỉ xác minh*).
 **Danh tính Google riêng biệt: 7/8.** Đây là hạng mục DUY NHẤT chưa đạt, và
 nó cần một hành động tương tác của người vận hành — không thể tự động hoá mà
 không có credential của họ.
+
+---
+
+# ĐỐI CHIẾU LẠI acc1/acc8 (2026-09-03, sau xác minh thủ công của người vận hành)
+
+Người vận hành báo: `acc login 8` và `acc login 1` **hiện** xác thực thành hai
+tài khoản Google KHÁC NHAU. Đối chiếu lại bằng máy, chỉ dùng **băm** — không
+in email, không in token.
+
+## Kết quả: 8/8 danh tính KHÁC NHAU
+
+| Khe | acc | dấu vân tay danh tính (sha256[:12]) | dấu vân tay blob `.bin` |
+|---|---|---|---|
+| AG01 | acc1 | `0e3bf022f7d3` | `f57dd6abf11f` |
+| AG02 | acc2 | `5b6457dc41be` | `1850c36f707f` |
+| AG03 | acc3 | `ee27930c1951` | `23379575a0fe` |
+| AG04 | acc4 | `db4a5d5511b6` | `9be68db8ab39` |
+| AG05 | acc5 | `bdc334d102dc` | `a7364ddff8d6` |
+| AG06 | acc6 | `a3a960f5d6c0` | `f23d73e399b3` |
+| AG07 | acc7 | `7c342c37b5f5` | `d91b490a131a` |
+| AG08 | acc8 | `218b93efc5a7` | `29a0b1efe502` |
+
+`acc1 ∩ acc8 = ∅`. Không một cặp nào trùng, kể cả theo bộ đo CŨ. Cả 8 blob
+cũng khác nhau.
+
+## Nguyên nhân kết luận cũ: **hồ sơ acc8 CŨ ở thời điểm đo**
+
+Không phải lỗi của bộ đo về mặt số học — là chuyện **thời điểm**:
+
+| Mốc (UTC) | Việc |
+|---|---|
+| trước 10:25:21Z | đo danh tính: acc8 còn mang danh tính của acc1 |
+| **10:25:21Z** | commit `1aab01b` ghi *"relogin has not landed (2nd time)"* |
+| **12:06:22Z** | `acc8.bin` **được ghi lại** — lần relogin THẬT SỰ hạ cánh |
+| 2026-09-03 | đo lại (mục này): **8/8 khác nhau** |
+
+Kết luận cũ **đúng vào lúc nó được ghi** và **sai 1h41m sau đó**. Không ai đo
+lại, nên nó nằm lại trong báo cáo và bị mang sang cả brief nhiệm vụ.
+
+Vì sao acc8 từng mang danh tính acc1 ngay từ đầu: đúng như mục 5 đã chỉ ra —
+`login_flow` gọi `save_profile(name)` lưu **bất kể** credential nào đang có
+trong slot sau khi `agy` thoát, **không kiểm** xem một lần đăng nhập MỚI có
+hoàn tất hay không. Chẩn đoán đó vẫn đúng; nó giải thích *nguồn gốc*, còn
+mục này ghi lại *đã khắc phục xong*.
+
+## Điểm yếu thứ hai của bộ đo cũ (đã vá bằng bài kiểm)
+
+`dau_hieu(acc)` lấy **HỢP TẤT CẢ** email tìm thấy trong
+`.agy-sessions/<acc>/.gemini/antigravity-cli/cli.log`. `cli.log` là log **ghi
+thêm**, nên một cái hợp như vậy trả lời câu *"tài khoản này TỪNG là ai"*, chứ
+không phải *"HIỆN GIỜ là ai"*. Với dữ liệu hiện tại hai câu trùng nhau (mỗi
+log chỉ còn đúng một danh tính), nhưng nó là một cái bẫy đang chờ.
+
+Đã thêm `antigravity_launcher.danh_tinh_uu_tien()` — thuần, không đọc tệp,
+không gọi mạng, **chỉ nhận dấu vân tay đã băm** nên không thể làm lộ email:
+
+```
+bằng chứng từ runtime ĐÃ XÁC THỰC  >  blob đã lưu, KHI blob cũ hơn
+blob đã lưu                        >  bằng chứng live, KHI blob mới hơn
+bằng điểm                          ->  ưu tiên live
+```
+
+Sáu bài kiểm trong `TestUuTienBangChungDanhTinh`
+(`scripts/tests/test_router_v4_launcher.py`), trong đó có một bài **tái hiện
+đúng các mốc thời gian của sự cố này**, nên một blob cũ không thể lấn át bằng
+chứng mạnh hơn từ một runtime đang xác thực được nữa.
+
+## Trạng thái AG08
+
+**KHÔNG còn bị coi là trùng/không khả dụng.** Cả 8 khe AG01..AG08 là 8 runtime
+riêng biệt với 8 `auth_profile` riêng, và điều đó vẫn được kiểm bằng máy:
+
+- `Fabric.validate()` — bất biến "một runtime = một tài khoản"
+- `test_moi_runtime_AG_la_mot_TAI_KHOAN_rieng` — 8 khe phải là 8 hồ sơ
+- `test_khong_khe_nao_dung_chung_acc` — không khe nào dùng chung `accN`
+- `scripts/control_room_projection_proof.py` — Control Room chiếu **8/8** khe
+  AG từ trạng thái runtime thật, không có worker giả
+
+Lưu ý cách đọc đúng: Control Room **chưa bao giờ** đóng cứng "AG08 offline".
+Nó chiếu trạng thái fabric, và khe chỉ được coi là cấp phát khi
+`saved_profiles/accN.bin` **có thật trên đĩa** (xem mục 6). Phân loại
+"AG08 không khả dụng" là một ghi chú **của người vận hành trong tài liệu**,
+không phải một trạng thái trong mã — nên việc bỏ nó đi chỉ cần sửa tài liệu,
+không cần sửa mã.

@@ -209,6 +209,53 @@ def cac_acc_da_luu() -> List[str]:
                   key=lambda s: (len(s), s))
 
 
+#: Nguon bang chung danh tinh, theo THU TU TIN CAY tang dan.
+#: "live" = phien runtime da xac thuc that (log phien do chinh agy ghi ra khi
+#: dang nhap thanh cong). "blob" = ho so DPAPI da luu tren dia.
+NGUON_BLOB = "blob"
+NGUON_LIVE = "live"
+
+
+def danh_tinh_uu_tien(*, blob_fp: str, blob_at: float,
+                      live_fp: str, live_at: float) -> tuple[str, str]:
+    """Chon dau van tay danh tinh DUNG khi hai nguon bang chung khong khop.
+
+    Tra `(dau_van_tay, nguon)`. CHI nhan dau van tay da bam san — ham nay
+    khong bao gio thay email hay token, nen khong the lo chung.
+
+    QUY TAC: bang chung tu mot runtime DA XAC THUC (`live`) THANG mot blob
+    da luu khi blob CU HON. Mot blob chi thang khi no MOI hon — tuc vua co
+    mot lan dang nhap moi duoc luu.
+
+    VI SAO CAN QUY TAC NAY (su co that, 2026-09-03):
+
+      Ket luan "acc8 trung danh tinh voi acc1" duoc ghi vao commit 1aab01b
+      luc 10:25:21Z. Nhung `acc8.bin` duoc ghi lai luc 12:06:22Z — tuc lan
+      dang nhap lai HA CANH 1h41m SAU khi ket luan duoc ghi. Ket luan do
+      DUNG o thoi diem no duoc ghi va thanh SAI ngay sau do, va khong ai do
+      lai. Do lai ngay 2026-09-03: ca 8 tai khoan co 8 dau van tay KHAC
+      NHAU, 8 blob KHAC NHAU — khong he trung.
+
+      Bo do cu con mot diem yeu thu hai: no lay HOP TAT CA email tim thay
+      trong `cli.log`, ma `cli.log` la log GHI THEM. Mot hop nhu vay tra loi
+      cau "tai khoan nay TUNG la ai", khong phai "HIEN GIO la ai". Ham nay
+      nhan dau van tay kem MOC THOI GIAN de tra dung cau hoi thu hai.
+
+    `live_at`/`blob_at` la epoch giay; thieu bang chung thi truyen `0.0`.
+    """
+    if not live_fp and not blob_fp:
+        return "", ""
+    if not live_fp:
+        return blob_fp, NGUON_BLOB
+    if not blob_fp:
+        return live_fp, NGUON_LIVE
+    # Blob chi thang khi no THUC SU moi hon. Bang diem -> uu tien `live`:
+    # mot blob cung tuoi khong manh hon chinh phien da xac thuc.
+    if blob_at > live_at:
+        return blob_fp, NGUON_BLOB
+    return live_fp, NGUON_LIVE
+
+
 def switch(acc: str, *, timeout: float = 60.0) -> tuple[bool, str]:
     """Gọi launcher CÓ SẴN để nạp credential của `acc`.
 

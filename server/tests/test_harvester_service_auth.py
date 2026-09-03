@@ -218,6 +218,70 @@ class HarvesterApiAllowTest(unittest.TestCase):
         r = self.client.get(f"/api/jobs/{job_id}", headers=_h(TOKEN))
         self.assertEqual(r.status_code, 200, r.text)
 
+    # ----------------------------------------------------------------------
+    # DOC LAI CHUONG cua chinh minh — lo hong that tren san xuat (2026-09-03).
+    #
+    # `test_doc_novel_cua_chinh_minh_duoc_phep` o tren da co san, nhung KHONG co
+    # cai tuong duong cho CHUONG — va do dung la khe ma loi di qua: tren san
+    # xuat, voi truyen nhap `nov_6764055a19c44e63` (harvester so huu),
+    # `GET /api/novels/{id}` tra 200 kem ca 15 chuong va `GET /api/audio/{id}/url`
+    # tra 200 kem URL R2 ky, nhung `GET /api/chapters/{id}` tra 404. Nguoi xem
+    # truoc duoc phep thay muc luc va NGHE duoc audio, ma trang doc thi 404.
+    #
+    # Ba test duoi day khoa CA HAI chieu: doc duoc (allow), va van kin voi nguoi
+    # khac (deny) — mot ban va chi mo dung danh tinh harvester thi moi dung.
+    # ----------------------------------------------------------------------
+
+    def _novel_va_chuong(self):
+        novel_id = self._tao_novel().json()["novel"]["novel_id"]
+        chapter_id = self.client.post(
+            "/api/chapters", json={"novel_id": novel_id, "title": "Ch1",
+                                   "content": "noi dung that cua chuong",
+                                   "order_index": 1},
+            headers=_h(TOKEN)).json()["chapter"]["chapter_id"]
+        return novel_id, chapter_id
+
+    def test_doc_chuong_cua_chinh_minh_duoc_phep(self):
+        """Va phai tra ve CHU that, khong chi 200 rong."""
+        _, chapter_id = self._novel_va_chuong()
+        r = self.client.get(f"/api/chapters/{chapter_id}", headers=_h(TOKEN))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["chapter"]["content"], "noi dung that cua chuong")
+
+    def test_doc_phu_de_chuong_cua_chinh_minh_khong_bi_404(self):
+        """Chua co audio thi `{"available": false}` — trang thai HOP LE. Dieu
+        can chung minh la khong con bi 404 vi DANH TINH."""
+        _, chapter_id = self._novel_va_chuong()
+        r = self.client.get(f"/api/chapters/{chapter_id}/transcript",
+                            headers=_h(TOKEN))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("available", r.json())
+
+    def test_optional_profile_mot_minh_khong_du_cho_harvester(self):
+        """VI SAO hai test tren can ban va — chot lai chinh co che gay loi.
+
+        `optional_profile` phan giai token qua PHIEN Appwrite; harvester khong co
+        phien nao, nen no tra None, va `_may_read(ban_nhap, None)` la False ->
+        404. Chi `_optional_harvester_or_user` nhan ra danh tinh nay.
+
+        Giu test nay de mot lan "don dep" gop hai ham lai se lam do o day, chu
+        khong am tham lam trang doc 404 tren san xuat lan nua.
+        """
+        header = f"Bearer {TOKEN}"
+        self.assertIsNone(server_main.optional_profile(header))
+        ho_so = server_main._optional_harvester_or_user(header)
+        self.assertIsNotNone(ho_so)
+        self.assertEqual(ho_so.user_id, server_main.settings.harvester_owner_user_id)
+
+    def test_ban_nhap_van_kin_voi_khach_va_token_sai(self):
+        """Mo cho harvester KHONG duoc keo theo mo cho bat ky ai khac."""
+        _, chapter_id = self._novel_va_chuong()
+        for headers in ({}, _h("token-hoan-toan-sai")):
+            for duong_dan in (f"/api/chapters/{chapter_id}",
+                              f"/api/chapters/{chapter_id}/transcript"):
+                r = self.client.get(duong_dan, headers=headers)
+                self.assertEqual(r.status_code, 404, f"{duong_dan} {headers}: {r.text}")
+
 
 class HarvesterApiDenyTest(unittest.TestCase):
     """Nhung viec harvester KHONG duoc lam — trong tam that su cua thiet ke."""

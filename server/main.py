@@ -2060,9 +2060,18 @@ def get_chapter(chapter_id: str,
     Quyen doc bam theo TRUYEN CHA, giong `GET /api/novels/{id}`: chan o route
     truyen ma bo ngo o day thi vo nghia, chi can biet id chuong la doc duoc het
     noi dung cua mot truyen chua xuat ban.
+
+    Dung `_optional_harvester_or_user`, KHONG phai `optional_profile`: "giong
+    `GET /api/novels/{id}`" phai dung ca voi DANH TINH nguoi goi, khong chi voi
+    phep kiem quyen. Do lech that tren san xuat (2026-09-03): voi truyen nhap do
+    harvester so huu, `GET /api/novels/{id}` tra 200 kem ca danh sach chuong va
+    `GET /api/audio/{id}/url` tra 200 kem URL ky, nhung route NAY tra 404 — tuc
+    la xem duoc muc luc va nghe duoc audio ma khong doc duoc chu. Chinh docstring
+    cua `_optional_harvester_or_user` da noi ro no ton tai de harvester doc lai
+    novel/CHUONG cua chinh minh; cho nay bi bo sot chu khong phai co y that chat.
     """
     chapter, novel = _chapter_with_novel_or_404(chapter_id)
-    viewer = optional_profile(authorization)
+    viewer = _optional_harvester_or_user(authorization)
     if not _can_read_chapter(chapter, novel, viewer):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
 
@@ -2123,7 +2132,10 @@ def get_chapter_transcript(
         la mot trang thai nguoi dung CO THE gap va giao dien phai ve duoc.
     """
     chapter, novel = _chapter_with_novel_or_404(chapter_id)
-    viewer = optional_profile(authorization)
+    # CUNG danh tinh voi `GET /api/chapters/{id}` — xem ghi chu o do. Hai route
+    # nay dung chung `_chapter_with_novel_or_404` chinh de khong lech nhau ve
+    # "ai xem duoc gi"; de lech o buoc phan giai danh tinh thi cai y do mat.
+    viewer = _optional_harvester_or_user(authorization)
     if not _can_read_chapter(chapter, novel, viewer):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy chương.")
 

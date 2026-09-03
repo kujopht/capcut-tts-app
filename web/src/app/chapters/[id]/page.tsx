@@ -12,7 +12,7 @@
  */
 
 import Link from "next/link";
-import { use, useCallback, useEffect } from "react";
+import { use, useCallback, useEffect, useMemo } from "react";
 import { api, type AudioTrack, type Chapter, type NovelBrief } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useAsyncData } from "@/lib/useAsyncData";
@@ -29,14 +29,50 @@ export default function ChapterPage({
   const { id } = use(params);
   const { profile } = useSession();
 
-  // Backend tra kem `novel` trong chinh phan hoi cua chuong, nen khong con
-  // phai goi them mot vong `/api/novels/{id}` chi de lay ten va anh bia.
-  const fetchChapter = useCallback(() => api.getChapter(id), [id]);
+  /*
+    HAI request, khong phu thuoc so chuong: chuong hien tai (`getChapter`, da
+    kem san `novel` nen khong phai goi them chi de lay ten truyen) + danh sach
+    chuong cua truyen, de biet chuong TRUOC va chuong SAU la gi.
+
+    Danh sach chuong lay theo kieu KHONG DUOC PHEP LAM HONG VIEC DOC: neu
+    `getNovel` that bai thi `dsChuong` chi la rong, mat hai cai nut dieu huong,
+    va chu van hien ra binh thuong. Bat nguoc lai — de mot loi cua request phu
+    lam ca trang doc thanh trang loi — la doi mat noi dung chinh de lay mot
+    tien ich.
+  */
+  const fetchChapter = useCallback(async () => {
+    const ket_qua = await api.getChapter(id);
+    const novelId = ket_qua.novel?.novel_id ?? ket_qua.chapter?.novel_id;
+    if (!novelId) return { ...ket_qua, dsChuong: [] as Chapter[] };
+    const dsChuong = await api
+      .getNovel(novelId)
+      .then((r) => r.chapters)
+      .catch(() => [] as Chapter[]);
+    return { ...ket_qua, dsChuong };
+  }, [id]);
 
   const { data, loading, error, missing, reload } = useAsyncData(fetchChapter);
   const chapter: Chapter | null = data?.chapter ?? null;
   const audio: AudioTrack | null = data?.audio ?? null;
   const novel: NovelBrief | null = data?.novel ?? null;
+
+  /*
+    KHONG tu sap xep lai theo `order_index` — cung ly do da ghi o
+    `/listen/[id]`: chuong tao binh thuong deu mang gia tri MAC DINH giong het
+    nhau, nen sap theo do se tron hang. `GET /api/novels/{id}` da tra ve DUNG
+    thu tu hien thi, va `/novels/[id]` dung thang mang nay.
+  */
+  const { chuongTruoc, chuongSau, soThuTu, tongSo } = useMemo(() => {
+    const ds = data?.dsChuong ?? [];
+    const i = ds.findIndex((c) => c.chapter_id === id);
+    return {
+      chuongTruoc: i > 0 ? ds[i - 1] : null,
+      chuongSau: i >= 0 && i < ds.length - 1 ? ds[i + 1] : null,
+      // Vi tri trong mang, khong phai `order_index` — xem ghi chu o tren.
+      soThuTu: i >= 0 ? i + 1 : 0,
+      tongSo: ds.length,
+    };
+  }, [data, id]);
 
   /*
     Ghi con tro "Tiếp tục đọc" (Phần B, V4 visual completion) — MỘT LẦN khi mở
@@ -168,19 +204,64 @@ export default function ChapterPage({
         trang — bat ho cuon nguoc len de tim duong sang chuong sau la mot viec
         thua.
 
-        KHONG co nut "chuong truoc / chuong sau" o DAY: trang Nghe rieng
-        (`/listen/[id]`) da co dieu do, dung `GET /api/novels/{id}` de lay ca
-        danh sach chuong. Trang doc (trang nay) co ich hon khi chi dan thang
-        ve trang truyen — nguoi con muon doc tiep se thay danh sach o do.
+        CO nut "chuong truoc / chuong sau" o day. Ban truoc CO Y khong co, voi ly
+        do "trang Nghe da co roi, trang doc chi can dan ve trang truyen" — do la
+        mot quyet dinh sai voi nguoi DOC: doc xong mot chuong roi phai quay ve
+        muc luc, tim lai dong vua doc, rồi bam chuong ke tiep la ba thao tac
+        cho mot viec dang le la mot cai bam. Tren mobile con te hon, vi muc luc
+        cua truyen 15 chuong phai cuon.
+
+        `prefetch={false}` cho hai nut nay: mot chuong la mot payload lon, va
+        Next se nap san CA HAI phia neu de mac dinh.
       */}
       {novel ? (
-        <nav className="reader-foot" aria-label="Điều hướng chương">
-          <Link className="btn" href={`/novels/${novel.novel_id}`}>
-            <span aria-hidden="true">←</span> Danh sách chương
+        <nav className="reader-foot reader-nav" aria-label="Điều hướng chương">
+          {chuongTruoc ? (
+            <Link
+              className="btn reader-nav-prev"
+              href={`/chapters/${chuongTruoc.chapter_id}`}
+              prefetch={false}
+              rel="prev"
+            >
+              <span aria-hidden="true">←</span>
+              <span className="reader-nav-label">
+                <span className="reader-nav-cap">Chương trước</span>
+                <span className="truncate reader-nav-title">{chuongTruoc.title}</span>
+              </span>
+            </Link>
+          ) : (
+            /* Giu o trong de nut "sau" khong nhay sang trai o chuong dau. */
+            <span className="reader-nav-prev" aria-hidden="true" />
+          )}
+
+          <Link className="btn btn-ghost reader-nav-up" href={`/novels/${novel.novel_id}`}>
+            <span aria-hidden="true">☰</span> Danh sách chương
+            {tongSo > 0 ? (
+              <span className="hint reader-nav-count">
+                {soThuTu}/{tongSo}
+              </span>
+            ) : null}
           </Link>
-          <Link className="btn btn-ghost" href="/fanfic" prefetch={false}>
-            Khám phá truyện khác
-          </Link>
+
+          {chuongSau ? (
+            <Link
+              className="btn btn-primary reader-nav-next"
+              href={`/chapters/${chuongSau.chapter_id}`}
+              prefetch={false}
+              rel="next"
+            >
+              <span className="reader-nav-label">
+                <span className="reader-nav-cap">Chương sau</span>
+                <span className="truncate reader-nav-title">{chuongSau.title}</span>
+              </span>
+              <span aria-hidden="true">→</span>
+            </Link>
+          ) : (
+            /* Het truyen: noi ro thay vi de mot cho trong khong giai thich. */
+            <span className="hint reader-nav-next reader-nav-end">
+              Hết chương hiện có
+            </span>
+          )}
         </nav>
       ) : null}
     </div>

@@ -17,6 +17,24 @@ import {
 import { NovelCover } from "@/components/NovelCover";
 import { FollowButton } from "@/components/FollowButton";
 
+/**
+ * Tien do tac pham -> nhan tieng Viet.
+ *
+ * Gia tri khong nam trong bang thi TRA VE NGUYEN VAN, khong doi thanh "Khac"
+ * hay chuoi rong: backend co the them trang thai moi truoc frontend, va luc do
+ * hien dung chu cua backend van dung hon la giau no di.
+ */
+const NHAN_TIEN_DO: Record<string, string> = {
+  ongoing: "Đang ra",
+  completed: "Hoàn thành",
+  hiatus: "Tạm ngưng",
+  abandoned: "Đã bỏ",
+};
+
+function nhanTienDo(status: string): string {
+  return NHAN_TIEN_DO[status] ?? status;
+}
+
 export default function NovelDetailPage({
   params,
 }: {
@@ -69,6 +87,9 @@ export default function NovelDetailPage({
   }
 
   const isOwner = profile?.user_id === novel.owner_id;
+  // `has_audio` da co san trong danh sach chuong (xem ghi chu o `fetchNovel`),
+  // nen tong hop nay khong ton them request nao.
+  const soChuongCoAudio = chapters.filter((c) => c.has_audio).length;
 
   return (
     <div className="page">
@@ -99,6 +120,15 @@ export default function NovelDetailPage({
             <span className={`badge ${novel.state === "published" ? "badge-ok" : ""}`}>
               {novel.state === "published" ? "Đã xuất bản" : "Bản nháp"}
             </span>
+            {/*
+              Tien do TAC PHAM (`status`), khac han trang thai XUAT BAN
+              (`state`) o badge ben canh: mot truyen da hoan thanh van co the
+              dang la ban nhap. Hai khai niem nay tu truoc van bi bo mat mot
+              nua o day, du backend luon tra ve ca hai.
+            */}
+            {novel.status ? (
+              <span className="badge">{nhanTienDo(novel.status)}</span>
+            ) : null}
             {novel.tags.map((tag) => (
               <span key={tag} className="badge">
                 {tag}
@@ -110,8 +140,50 @@ export default function NovelDetailPage({
             {novel.description || "Chưa có mô tả."}
           </p>
           <span className="hint">
-            {chapters.length} chương · cập nhật {formatDate(novel.updated_at)}
+            {chapters.length} chương
+            {soChuongCoAudio > 0 ? ` · ${soChuongCoAudio} chương có audio` : ""}
+            {" · cập nhật "}
+            {formatDate(novel.updated_at)}
           </span>
+
+          {/*
+            GHI CONG NGUON. Kho nay chua fanfic NHAP tu noi khac, nen ten tac
+            gia goc va duong ve nguon khong phai "metadata cho dep" — do la dieu
+            toi thieu phai hien. Backend luon tra ve ba truong nay; trang nay
+            truoc day khong ve mot cai nao.
+
+            `nofollow` tren lien ket ngoai: day la link do nguoi nhap dat, khong
+            phai mot su gioi thieu cua Fanfic World.
+          */}
+          {novel.external_author_name || novel.external_source_url || novel.language ? (
+            <span className="hint novel-head-source">
+              {novel.external_author_name ? (
+                <span>Tác giả gốc: {novel.external_author_name}</span>
+              ) : null}
+              {novel.language ? <span>Ngôn ngữ gốc: {novel.language}</span> : null}
+              {novel.external_source_url ? (
+                <a
+                  href={novel.external_source_url}
+                  target="_blank"
+                  rel="noopener noreferrer nofollow"
+                >
+                  Nguồn gốc ↗
+                </a>
+              ) : null}
+            </span>
+          ) : null}
+
+          {/*
+            Nguon cong bo NHIEU chuong hon so dang co o day. KHONG che con so
+            nay va cung khong "hoa giai" hai con so: mot ban nhap moi nhap duoc
+            15/60 chuong la su that ma nguoi doc can biet truoc khi bat dau.
+          */}
+          {novel.external_chapter_count > 0 &&
+          novel.external_chapter_count !== chapters.length ? (
+            <span className="hint">
+              Nguồn công bố {formatNumber(novel.external_chapter_count)} chương
+            </span>
+          ) : null}
 
           <div className="row novel-head-actions">
             {chapters.length > 0 ? (

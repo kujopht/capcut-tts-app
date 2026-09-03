@@ -854,13 +854,20 @@ class CreatorService:
             # nhan la mot han che, khong giau no di.
             rows = [n for n in rows if n.state is PublishState.DRAFT]
 
-        so_chuong = self._store.chapter_counts([n.novel_id for n in rows])
+        ids = [n.novel_id for n in rows]
+        so_chuong = self._store.chapter_counts(ids)
+        # Cot "audio" cua bang quan tri. Theo lo, KHONG mo tung truyen ra dem —
+        # xem hop dong o `MetadataStore.audio_chapter_counts`.
+        so_chuong_audio = self._store.audio_chapter_counts(ids)
         ho_so = self._identity.profiles_by_ids([n.owner_id for n in rows])
 
         ra = []
         for n in rows:
             d = n.to_dict()
             d["chapters"] = so_chuong.get(n.novel_id, 0)
+            # Quan tri phai thay duoc "san sang xuat ban den dau" ma khong doan:
+            # 0/15 va 15/15 la hai quyet dinh rat khac nhau.
+            d["chapters_with_audio"] = so_chuong_audio.get(n.novel_id, 0)
             chu = ho_so.get(n.owner_id)
             d["owner"] = ({"display_name": chu.display_name,
                            "username": chu.username} if chu else None)

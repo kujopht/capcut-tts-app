@@ -4,10 +4,12 @@ credential — mission "REMOVE THE HUMAN FROM BEAM OPERATIONS" (2026-09-01).
 """
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import os
 import sys
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -41,6 +43,73 @@ class BeamSubprocessEnvTest(unittest.TestCase):
         self.assertEqual(dict(os.environ), before)
 
 
+#: `beam` la mot phu thuoc TUY CHON (goi `beam-client`, keo theo `beta9`) —
+#: cong cu GPU/anh bia, KHONG phai phu thuoc runtime cua backend, nen CI co ly
+#: khi khong cai no (`ci.yml` chi cai `server/requirements.txt`).
+#:
+#: HE QUA phai xu ly trong CHINH cac bai test nay: `cmd_deploy_endpoint`/
+#: `cmd_list` mo dau bang `_beam_executable()` va tra ve ngay `ERROR` khi
+#: khong tim thay tep nhi phan `beam`. Mot bai test chi va `subprocess.run`
+#: se KHONG BAO GIO cham toi phan phan tich ma no muon kiem — no chi tinh co
+#: xanh tren may CO cai beam (may dev), va do tren may khong cai (CI Linux).
+#:
+#: `test_list_filters_out_connection_string_secret` o duoi da lam DUNG tu
+#: truoc (va vi vay van xanh tren CI): va CA `_beam_executable`. Hang so nay
+#: chi dat ten cho khuon do de moi bai test dung chung mot cach.
+_FAKE_BEAM_BIN = "beam"
+
+def _co_beta9() -> bool:
+    """`beta9` co cai hay khong. Chi dung cho cac bai test KHONG THE gia lap
+    no — xem `_CAN_BETA9`.
+
+    Boc try/except vi `find_spec` KHONG chi tra None: no nem `ImportError` khi
+    goi cha cua module bi loi, va `ValueError` khi module da nam trong
+    `sys.modules` nhung `__spec__` la None. O ca hai truong hop, cau tra loi
+    dung cho muc dich o day la "coi nhu khong co" — mot phep DO moi truong
+    khong duoc phep tu no lam sap ca bo test.
+    """
+    try:
+        return importlib.util.find_spec("beta9") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+_CO_BETA9 = _co_beta9()
+
+
+@contextlib.contextmanager
+def _stub_beta9_gateway():
+    """Cho `from beta9.clients.gateway import GetUrlRequest` chay duoc, ke ca
+    khi `beta9` khong duoc cai (CI — xem ghi chu o `_FAKE_BEAM_BIN`).
+
+    VI SAO KHONG bo qua bai test dung cai nay: no la bai canh gac cho MOT SU CO
+    RO RI TOKEN THAT (2026-09-01, xem docstring cua `SecretRedactionTest`).
+    Bo qua no tren CI la bo canh gac o dung noi hoi quy bi bat. Cai duy nhat
+    thieu tren CI la mot KIEU DU LIEU request; `gateway_stub` gia trong bai
+    test da bo qua tham so do roi, nen thay the no KHONG lam yeu phep kiem —
+    phep kiem van la "khong bao gio goi `print_invocation_snippet`" va "URL
+    phai den tu stub".
+
+    Va LUON LUON, khong chi khi thieu: nhu vay hanh vi giong nhau tren moi may,
+    khong con chuyen xanh-o-day-do-o-kia.
+    """
+    gateway = types.ModuleType("beta9.clients.gateway")
+
+    class GetUrlRequest:  # noqa: D401 - chi la mot the mang tham so
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    gateway.GetUrlRequest = GetUrlRequest
+    clients = types.ModuleType("beta9.clients")
+    clients.gateway = gateway
+    beta9 = types.ModuleType("beta9")
+    beta9.clients = clients
+    with patch.dict(sys.modules, {"beta9": beta9,
+                                  "beta9.clients": clients,
+                                  "beta9.clients.gateway": gateway}):
+        yield
+
+
 class DeployEndpointParsingTest(unittest.TestCase):
     def test_clean_json_response_extracts_fields(self):
         mod = _load()
@@ -48,7 +117,8 @@ class DeployEndpointParsingTest(unittest.TestCase):
             "deployment_id": "dep_1", "deployment_name": "cover-illustrious",
             "invoke_url": "https://x.app.beam.cloud", "version": 3,
         }), stderr="")
-        with patch("subprocess.run", return_value=fake_result):
+        with patch("subprocess.run", return_value=fake_result), \
+             patch.object(mod, "_beam_executable", return_value=_FAKE_BEAM_BIN):
             result = mod.cmd_deploy_endpoint("app.py:generate", "tok")
         self.assertEqual(result["status"], "DEPLOYED")
         self.assertEqual(result["invoke_url"], "https://x.app.beam.cloud")
@@ -57,22 +127,35 @@ class DeployEndpointParsingTest(unittest.TestCase):
     def test_nonzero_exit_is_deploy_failed_not_a_crash(self):
         mod = _load()
         fake_result = MagicMock(returncode=1, stdout="", stderr="auth error")
-        with patch("subprocess.run", return_value=fake_result):
+        with patch("subprocess.run", return_value=fake_result), \
+             patch.object(mod, "_beam_executable", return_value=_FAKE_BEAM_BIN):
             result = mod.cmd_deploy_endpoint("app.py:generate", "tok")
         self.assertEqual(result["status"], "DEPLOY_FAILED")
 
     def test_beam_binary_missing_reports_error_not_traceback(self):
+        """Va `_beam_executable` phai tra ve MOT gia tri o day.
+
+        Neu khong, tren may khong cai beam bai test nay xanh vi mot ly do
+        KHAC han dieu no noi: no bao "ERROR" tu phep kiem tep nhi phan, chu
+        khong phai tu `FileNotFoundError` cua `subprocess.run` — tuc la khong
+        con kiem gi ca. Chot lai duong `FileNotFoundError` cho that.
+        """
         mod = _load()
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
+        with patch("subprocess.run", side_effect=FileNotFoundError()), \
+             patch.object(mod, "_beam_executable", return_value=_FAKE_BEAM_BIN):
             result = mod.cmd_deploy_endpoint("app.py:generate", "tok")
         self.assertEqual(result["status"], "ERROR")
 
     def test_zero_exit_but_garbage_stdout_reports_error_not_crash(self):
         """`beam deploy` exiting 0 with non-JSON stdout must be reported as
-        a structured error, never let a JSONDecodeError escape uncaught."""
+        a structured error, never let a JSONDecodeError escape uncaught.
+
+        Cung ly do voi bai tren: khong va `_beam_executable` thi tren CI bai
+        nay xanh ma khong he doc tro toi `json.loads`."""
         mod = _load()
         fake_result = MagicMock(returncode=0, stdout="not json at all", stderr="")
-        with patch("subprocess.run", return_value=fake_result):
+        with patch("subprocess.run", return_value=fake_result), \
+             patch.object(mod, "_beam_executable", return_value=_FAKE_BEAM_BIN):
             result = mod.cmd_deploy_endpoint("app.py:generate", "tok")
         self.assertEqual(result["status"], "ERROR")
 
@@ -87,7 +170,8 @@ class DeployEndpointParsingTest(unittest.TestCase):
         fake_result = MagicMock(returncode=0, stdout=json.dumps({
             "deployment_id": "dep_1", "invoke_url": "https://x.app.beam.cloud",
         }), stderr="")
-        with patch("subprocess.run", return_value=fake_result) as mock_run:
+        with patch("subprocess.run", return_value=fake_result) as mock_run, \
+             patch.object(mod, "_beam_executable", return_value=_FAKE_BEAM_BIN):
             mod.cmd_deploy_endpoint("beam_apps/foo.py:handler", "tok")
         argv = mock_run.call_args[0][0]
         handler_arg = argv[argv.index("deploy") + 1]
@@ -274,7 +358,8 @@ class SecretRedactionTest(unittest.TestCase):
                 fake_module = type(sys)("fake_handler")
                 fake_module.hymt2_1_8b = _FakeVLLM()
                 fake_from_spec.return_value = fake_module
-                with patch("importlib.util.spec_from_file_location"):
+                with patch("importlib.util.spec_from_file_location"), \
+                        _stub_beta9_gateway():
                     result = mod.cmd_deploy_vllm(f"{handler_path}:hymt2_1_8b", "tok")
         finally:
             os.unlink(handler_path)
@@ -286,7 +371,8 @@ class SecretRedactionTest(unittest.TestCase):
         fake_result = MagicMock(
             returncode=1, stdout="",
             stderr="failed: Authorization: Bearer abcdEFGH12345678ijkl")
-        with patch("subprocess.run", return_value=fake_result):
+        with patch("subprocess.run", return_value=fake_result), \
+             patch.object(mod, "_beam_executable", return_value=_FAKE_BEAM_BIN):
             result = mod.cmd_deploy_endpoint("app.py:generate", "tok")
         self.assertNotIn("abcdEFGH12345678ijkl", result["stderr"])
 
@@ -309,6 +395,22 @@ class SecretRedactionTest(unittest.TestCase):
         self.assertNotIn("connection_string_secret", dumped)
 
 
+#: Ly do bo qua, dung chung cho DUNG cac bai can `beta9` that.
+#:
+#: `cmd_check_payload_size` CO CHU DICH dung chinh `beta9.vendor.pathspec` de
+#: sao lai dung logic `.beamignore` cua beta9. Gia lap pathspec o day se thanh
+#: kiem mot bo doi sanh TU VIET — tuc la bo mat chinh dieu bai test ton tai de
+#: bao dam (su co 2.64 GB, 2026-09-01). `beam-client` la phu thuoc TUY CHON
+#: (cong cu GPU), CI khong cai, nen o do cac bai nay BAO LA SKIP — khong phai
+#: pass — va van chay day du tren may co cai.
+#:
+#: CO Y dat tren TUNG BAI, khong tren ca lop: `test_missing_beamignore_reports_error`
+#: tra ve TRUOC cho import beta9, nen no chay that duoc o moi noi va phai giu
+#: nguyen do phu tren CI.
+_CAN_BETA9 = unittest.skipUnless(
+    _CO_BETA9, "can `beta9` that (beam-client) — xem ghi chu o _CAN_BETA9")
+
+
 class CheckPayloadSizeTest(unittest.TestCase):
     """Real incident, 2026-09-01: `beam deploy` collected 2.64 GB per
     deploy because `.beamignore` didn't cover this repo's own large
@@ -317,6 +419,7 @@ class CheckPayloadSizeTest(unittest.TestCase):
     muc 5 asked for: treat >500MB (before model weights, which never
     live in the local repo) as a packaging regression."""
 
+    @_CAN_BETA9
     def test_real_repo_payload_is_under_threshold(self):
         """Regression guard against the ACTUAL current .beamignore and
         repo tree - this is what would have caught the 2.64 GB incident
@@ -334,6 +437,7 @@ class CheckPayloadSizeTest(unittest.TestCase):
             result = mod.cmd_check_payload_size(repo_root=Path(tmp))
         self.assertEqual(result["status"], "ERROR")
 
+    @_CAN_BETA9
     def test_large_untracked_directory_triggers_regression(self):
         """Isolated fixture, not the real repo: a big file NOT covered by
         any ignore pattern must be caught, proving the check actually
@@ -354,6 +458,7 @@ class CheckPayloadSizeTest(unittest.TestCase):
         self.assertIn("big_untracked_blob.bin",
                       [f["path"] for f in result["largest_files"]])
 
+    @_CAN_BETA9
     def test_ignored_directory_is_pruned_not_just_filtered(self):
         """Pruning during os.walk (like beta9's own _collect_files) means
         an ignored directory's contents are never even statted - functional

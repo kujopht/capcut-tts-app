@@ -20,7 +20,7 @@ import unittest
 import httpx
 
 from server.adapters import MockIdentityAdapter, MockMetadataStore
-from server.translation import TranslationJobStatus
+from server.translation import TERMINAL_STATUSES, TranslationJobStatus
 from server.translation_domain import (
     TranslationProject,
     TranslationVersion,
@@ -166,12 +166,40 @@ class CreateProjectOrReuseTest(unittest.TestCase):
         self.assertEqual(len(self.store.list_projects(self.an.user_id)), 2)
 
     def test_job_chua_hoan_thanh_khong_reuse(self):
-        """Neu job gio het dong cua du an cu, khong duoc dung lai du an do."""
-        p1 = self.svc.create_project(self.an.user_id, title="Đấu Phá",
-                                     source_text=VB_MOT_CHUONG)
+        """Neu job gio het dong cua du an cu, khong duoc dung lai du an do.
+
+        `inline_worker=False` la phan BAT BUOC, khong phai tuy chon.
+
+        `self.svc` mac dinh `inline_worker=True`, nen `create_job` khoi dong
+        NGAY mot thread chay job (xem docstring cua `create_job`). Ban truoc
+        cua bai test nay tao job roi kiem `create_project_or_reuse` lien —
+        tuc la DUA voi thread do: no chi dung khi thread CHUA kip xong.
+
+        Thua cuoc dua that tren CI (2026-09-03, GitHub Actions ubuntu: ca bo
+        4278 test chay 38.7s so voi ~205s tren laptop Windows). May nhanh thi
+        mock provider dich xong truoc khi kiem tra, job thanh COMPLETED, va
+        `create_project_or_reuse` reuse du an CU dung theo hop dong cua no ->
+        `p1.project_id == p2.project_id` -> do. Khong phai loi cua ma san
+        pham: chinh tien de cua bai test ("job chua hoan thanh") moi la thu
+        khong duoc bao dam.
+
+        Tat han viec chay job trong tien trinh nay thi job o lai `queued`
+        MOT CACH TAT DINH, va bai test do dung dieu no noi la se do — khong
+        phu thuoc toc do may. Kho (`self.store`) dung chung nen du an tao boi
+        service nao cung nhin thay duoc.
+
+        KHONG sua bang `sleep`/`retry`: nhu vay chi la doi ben thang cuoc dua.
+        """
+        svc = TranslationService(self.store, self.novels, inline_worker=False)
+        p1 = svc.create_project(self.an.user_id, title="Đấu Phá",
+                                source_text=VB_MOT_CHUONG)
         # Tao job nhung KHONG cho no hoan thanh -> khong co su that reuse.
-        self.svc.create_job(p1.project_id, self.an.user_id)
-        p2 = self.svc.create_project_or_reuse(
+        job = svc.create_job(p1.project_id, self.an.user_id)
+        # Chot lai tien de cua bai test thay vi tin vao no.
+        self.assertNotIn(svc.get_job(job.job_id, self.an.user_id).status,
+                         TERMINAL_STATUSES,
+                         "tien de sai: job da ket thuc truoc khi kiem tra reuse")
+        p2 = svc.create_project_or_reuse(
             self.an.user_id, title="Đấu Phá", source_text=VB_MOT_CHUONG)
         self.assertNotEqual(p1.project_id, p2.project_id)
 

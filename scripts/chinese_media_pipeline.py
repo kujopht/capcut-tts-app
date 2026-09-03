@@ -57,6 +57,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -97,6 +98,25 @@ _RENDER_CONTENT_TYPES = {
 #: Drive (rclone coi day la thanh phan duong dan that, khac R2 key chi
 #: la chuoi). Chi chu thuong/so, noi bang "-", khong dau "-" o dau/cuoi.
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def _agy_binary() -> str:
+    """Absolute path to the `agy` (Antigravity) CLI. Real, observed defect
+    (2026-09-02): bare "agy" resolves fine in some execution contexts (an
+    interactive shell with the right PATH) but NOT in a plain
+    subprocess.run(["agy", ...]) from a background-task process, which
+    raises FileNotFoundError - a genuinely different failure than the
+    "command" permission denial this module also guards against (see
+    translate_zh_to_vi()'s prompt). Same resolve-fresh-every-call pattern
+    as `_fanficfare_binary()` in server/scraper/fanficfare_provider.py -
+    PATH first, known install location as fallback, never assume."""
+    found = shutil.which("agy")
+    if found:
+        return found
+    local_candidate = Path(os.environ.get("LOCALAPPDATA", "")) / "agy" / "bin" / "agy.exe"
+    if local_candidate.is_file():
+        return str(local_candidate)
+    return "agy"  # last resort - let subprocess raise its own clear error
 
 
 @dataclass
@@ -164,16 +184,63 @@ def transcribe_mandarin(audio_path: Path, model_size: str = "small") -> List[Seg
 # or splitting lines).
 # --------------------------------------------------------------------------
 
-def translate_zh_to_vi(segments: List[Segment], timeout: str = "3m") -> None:
-    """Mutates each Segment's vi_text in place."""
+def translate_zh_to_vi(segments: List[Segment], timeout: str = "12m",
+                        batch_size: int = 150) -> None:
+    """Mutates each Segment's vi_text in place. Translates in batches of
+    `batch_size` (2026-09-02, real FIFTH defect fix - see below).
+
+    Root architectural issue found across FOUR real, costly attempts to
+    resume candidate #2 (each requiring a fresh ~35-90 min ASR re-run,
+    since transcript output is never checkpointed to disk): a single
+    agy call asked to translate and return all 1147 segments as ONE giant
+    JSON array is fragile at that scale. Four DISTINCT real defects were
+    found and fixed one at a time this way - a "command"-permission
+    denial, an unresolvable "agy" PATH lookup, a too-short timeout, and a
+    strict-JSON control-character rejection - and a FIFTH
+    (JSONDecodeError: "Expecting ',' delimiter", almost certainly an
+    unescaped quote inside one segment's dialogue text) still occurred
+    even after all four were fixed. Patching individual JSON-syntax
+    quirks one at a time is not converging: ANY single malformed
+    character anywhere in a 1147-item response invalidates the entire
+    batch. Chunking is the actual fix for that class of fragility - a
+    parse failure now costs one small batch, not the whole run, and never
+    requires re-running ASR (this function receives already-transcribed
+    Segment objects; chunking here never re-touches transcribe_mandarin())."""
     if not segments:
         return
+    for start_i in range(0, len(segments), batch_size):
+        batch = segments[start_i:start_i + batch_size]
+        _translate_one_batch(batch, timeout=timeout)
+
+
+def _translate_one_batch(segments: List[Segment], timeout: str,
+                          _retried: bool = False) -> None:
+    """Translate ONE batch (mutates vi_text in place). Retries exactly
+    once on a JSON-parse failure - a fresh agy call on the identical
+    (small) batch is cheap and often avoids whatever one-off malformation
+    the model produced the first time, unlike retrying the full 1147-item
+    batch which is what made this class of failure so costly to diagnose."""
     payload = [s.zh_text for s in segments]
+    # Ro rang cam agy tu goi cong cu/lenh nao: voi payload lon (vd 1147
+    # doan That), agy tu y muon chay "python -c ..." de tu kiem tra hieu
+    # dung cua no truoc khi tra loi - o che do headless khong co ai xac
+    # nhan quyen "command" nay, bi tu choi, va toan bo dich That bai
+    # (ValueError "no JSON array in agy output", da xac minh That qua
+    # C:\Users\nguye\.gemini\antigravity-cli\conversations\*.db, buoc
+    # step_type=132: "permission check failed for command \"python -c
+    # ...\""). Day KHONG PHAI mot buoc can thiet cho tac vu — chi la thoi
+    # quen tu kiem tra cua agy. Cau nay chan No o goc, khong can mo them
+    # bat ky permission/allow-rule nao trong settings.json cua agy — da
+    # xac minh That: cung mot payload 1147 phan tu, chi them cau nay,
+    # dich thanh cong 1147/1147, JSON hop le, khong con bi tu choi quyen.
     prompt = (
         "Dich cac cau tieng Trung sau sang tieng Viet. Tra ve DUY NHAT mot "
         "mang JSON cung do dai, cung thu tu, moi phan tu la ban dich tieng "
         "Viet tuong ung — khong giai thich them, khong danh so, khong bao "
-        "boc trong markdown.\n\n" + json.dumps(payload, ensure_ascii=False)
+        "boc trong markdown. KHONG duoc chay bat ky lenh/script/cong cu nao de "
+        "kiem tra hay xac minh — day la mot yeu cau van ban thuan tuy, tra loi "
+        "truc tiep bang JSON, khong goi cong cu nao ca.\n\n"
+        + json.dumps(payload, ensure_ascii=False)
     )
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False,
                                      encoding="utf-8") as f:
@@ -182,9 +249,12 @@ def translate_zh_to_vi(segments: List[Segment], timeout: str = "3m") -> None:
     try:
         with open(prompt_path, "r", encoding="utf-8") as stdin_f:
             result = subprocess.run(
-                ["agy", "--print-timeout", timeout],
+                [_agy_binary(), "--print-timeout", timeout],
                 stdin=stdin_f,
-                capture_output=True, text=True, encoding="utf-8", timeout=240,
+                # Python-level hard cap must exceed agy's own --print-timeout
+                # (12m = 720s) so agy's own clean timeout message surfaces
+                # first, not an abrupt TimeoutExpired kill mid-generation.
+                capture_output=True, text=True, encoding="utf-8", timeout=780,
             )
         raw = result.stdout.strip()
         start = raw.find("[")
@@ -194,12 +264,29 @@ def translate_zh_to_vi(segments: List[Segment], timeout: str = "3m") -> None:
                 f"no JSON array in agy output (exit={result.returncode}): "
                 f"stdout={raw[:300]!r} stderr={result.stderr[:300]!r}"
             )
-        translated = json.loads(raw[start:end + 1])
-        if len(translated) != len(segments):
-            raise ValueError(
-                f"length mismatch: {len(translated)} translations for "
-                f"{len(segments)} segments"
-            )
+        try:
+            # strict=False: a real measurement run (2026-09-02) hit a
+            # genuine JSONDecodeError from an embedded raw control
+            # character inside one translated string - strict JSON
+            # rejects that, but it's a well-known, common minor LLM-JSON
+            # quirk. Tolerating it here is the standard stdlib fix, not a
+            # data-integrity risk.
+            translated = json.loads(raw[start:end + 1], strict=False)
+            if len(translated) != len(segments):
+                raise ValueError(
+                    f"length mismatch: {len(translated)} translations for "
+                    f"{len(segments)} segments"
+                )
+        except (json.JSONDecodeError, ValueError):
+            # A genuinely malformed batch (e.g. an unescaped quote inside
+            # dialogue breaking the array structure - the real fifth
+            # defect this retry exists for) is not worth patching one
+            # quirk at a time forever. One retry on the SAME small batch
+            # is cheap and often sidesteps whatever one-off malformation
+            # occurred, without ever touching ASR.
+            if _retried:
+                raise
+            return _translate_one_batch(segments, timeout, _retried=True)
         for seg, vi in zip(segments, translated):
             seg.vi_text = str(vi).strip()
     finally:

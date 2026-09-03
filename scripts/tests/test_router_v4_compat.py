@@ -132,13 +132,30 @@ class TestNapCauHinhThat(unittest.TestCase):
         for i in range(1, 9):
             self.assertIn(f"AG{i:02d}", self.f.runtimes)
 
-    def test_khe_chua_cap_phat_bao_OFFLINE_chu_khong_gia_vo_san_sang(self):
+    def test_trang_thai_khe_AG_khop_voi_THUC_TE_tren_dia(self):
+        """Khe AG chỉ được coi là cấp phát khi có bằng chứng TRÊN ĐĨA.
+
+        Bản trước khẳng định thẳng AG03..AG08 luôn OFFLINE. Điều đó đúng cho
+        tới khi người vận hành dựng launcher đa-tài-khoản (2026-09-03), rồi
+        bài kiểm thành sai. Giờ nó kiểm QUAN HỆ — trạng thái phải khớp với
+        việc `saved_profiles/accN.bin` có tồn tại hay không — nên nó đúng ở
+        cả hai thế giới và không bao giờ nói dối.
+        """
+        from scripts.router_v4.antigravity_launcher import (ACC_CUA_RUNTIME,
+                                                            profile_ton_tai)
         from scripts.router_v4.runtime import RuntimeStatus
-        for i in range(3, 9):
-            r = self.f.runtime(f"AG{i:02d}")
-            self.assertFalse(r.provisioned)
-            self.assertEqual(r.trang_thai_hien_tai(), RuntimeStatus.OFFLINE)
-            self.assertIn("hồ sơ Windows", r.needs_provisioning)
+        for i in range(1, 9):
+            rid = f"AG{i:02d}"
+            r = self.f.runtime(rid)
+            acc = ACC_CUA_RUNTIME[rid]
+            if profile_ton_tai(acc):
+                self.assertTrue(r.provisioned, f"{rid}: có {acc}.bin")
+                self.assertEqual(r.transport, "launcher", rid)
+            else:
+                self.assertFalse(r.provisioned, f"{rid}: không có {acc}.bin")
+                self.assertEqual(r.trang_thai_hien_tai(),
+                                 RuntimeStatus.OFFLINE, rid)
+                self.assertTrue(r.needs_provisioning, rid)
 
     def test_moi_runtime_AG_la_mot_TAI_KHOAN_rieng(self):
         ho_so = [self.f.runtime(f"AG{i:02d}").auth_profile for i in range(1, 9)]
@@ -168,10 +185,23 @@ class TestNapCauHinhThat(unittest.TestCase):
                             "tài khoản hết quota kéo cả hai xuống")
 
     def test_dem_tai_khoan_khong_thoi_phong(self):
+        """Đếm TÀI KHOẢN phải khớp số khe CÓ THẬT, không khớp số placement.
+
+        Bản trước đóng cứng `== 1`. Con số đó đúng cho tới khi launcher
+        đa-tài-khoản xuất hiện; giờ nó kiểm ĐÚNG THỨ CẦN KIỂM — số tài khoản
+        bằng số profile trên đĩa, và LUÔN nhỏ hơn số placement (nhiều model
+        trên một tài khoản không phải nhiều tài khoản).
+        """
+        from scripts.router_v4.antigravity_launcher import (ACC_CUA_RUNTIME,
+                                                            profile_ton_tai)
         dem = self.f.dem_tai_khoan()
-        self.assertEqual(dem.get("antigravity"), 1,
-                         "chỉ AG01 đã cấp phát — 51 placement không phải 51 "
-                         "tài khoản")
+        mong_doi = sum(1 for acc in ACC_CUA_RUNTIME.values()
+                       if profile_ton_tai(acc))
+        self.assertEqual(dem.get("antigravity", 0), mong_doi,
+                         "số tài khoản AG phải bằng số profile CÓ THẬT trên đĩa")
+        self.assertLess(sum(dem.values()), len(self.f.placements()),
+                        "số tài khoản phải NHỎ HƠN số placement — nhiều model "
+                        "trên một tài khoản không phải nhiều tài khoản")
 
     def test_khong_co_vai_tro_dong_cung_trong_cau_hinh(self):
         """Không runtime nào được khai kiểu 'AG01 = coding'."""

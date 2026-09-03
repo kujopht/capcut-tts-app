@@ -158,6 +158,10 @@ class RouterV4:
         self.leases = leases if leases is not None else LeaseStore(root=self.root)
         self.owner = owner_id()
         self._khoa = threading.Lock()
+        # Khoa RIENG cho duong lap lich. Tach khoi `self._khoa` (bao ve
+        # bang ket qua) de mot viec dang ghi ket qua khong chan mot viec
+        # khac dang chon worker.
+        self._khoa_lap_lich = threading.Lock()
         self.decisions: Dict[str, Decision] = {}
 
     # -- 1. Yeu cau NANG LUC ------------------------------------------------
@@ -394,22 +398,38 @@ class RouterV4:
         for luot in range(1, MAX_ATTEMPTS + 1):
             # Luot 1 khong loai ai; tu luot 2 loai moi placement DA THU.
             loai = tuple(da_thu) if luot >= 2 else ()
-            qd = self.scheduler.decide(c, exclude=loai, demand=demand,
-                                       author_family=author_family)
-            self.decisions[c.task_id] = qd
+            # QUYET DINH + GIU KHE + GHI NHAN BAT DAU phai NGUYEN TU.
+            #
+            # Bang chung that (2026-09-03): khong co khoa nay, 4 viec doc lap
+            # chay song song CUNG goi `decide()` truoc khi bat ky viec nao kip
+            # `mark_started`. Ca 4 deu thay AG01 dang 0/3 va deu chon AG01 —
+            # 8 tai khoan dang ky ma chi MOT tai khoan duoc dung, trong khi
+            # bang dieu khien van bao "da chon xong". Chi phi cua khoa gan
+            # nhu bang khong: `decide()` la tinh toan thuan, khong goi mang.
+            with self._khoa_lap_lich:
+                qd = self.scheduler.decide(c, exclude=loai, demand=demand,
+                                           author_family=author_family)
+                self.decisions[c.task_id] = qd
+                if qd.selected is None:
+                    chon = None
+                else:
+                    chon = qd.selected
+                    khoa_lease = self._muon_lease(chon, c.task_id)
+                    if khoa_lease is not None:
+                        self.fabric.mark_started(chon.runtime_id, c.task_id)
             if on_event:
                 on_event("decision", qd.to_dict())
-            if qd.selected is None:
+            if chon is None:
                 break
-            chon = qd.selected
-            khoa_lease = self._muon_lease(chon, c.task_id)
             if khoa_lease is None:
-                # Runtime het KHE — thu placement khac thay vi cho, va KHONG
-                # tinh la mot luot hong (worker khong lam sai gi).
-                da_thu.append(chon.key)
+                # Runtime het KHE. LOAI CA RUNTIME, khong chi placement nay:
+                # cac placement khac cua CUNG runtime do dung chung han muc
+                # dong thoi, nen thu tiep sang `AG01/<model khac>` chi lam
+                # hong lan nua. Da vap that — retry quay lai dung tai khoan
+                # vua het khe.
+                da_thu.append(chon.runtime_id)
                 continue
             try:
-                self.fabric.mark_started(chon.runtime_id, c.task_id)
                 cuoi = self.executor.run(
                     c, chon, base_sha=base_sha,
                     dependency_summaries=dependency_summaries,

@@ -167,6 +167,29 @@ def dung_fabric(cfg: Dict) -> Fabric:
                 "needs_provisioning": str(
                     mau.get("needs_provisioning") or "").replace("{slot}", slot),
             }))
+    # Khe AG nao da co profile launcher tren DIA thi KHONG con "chua cap
+    # phat" nua — bang chung la tep, khong phai cau hinh. Nguoc lai, khe
+    # khong co profile van giu ly do cap phat cua no.
+    # KHONG bao boc bang `except Exception: pass`. Da vap that: ban dau
+    # doan nay dung `pathlib.Path` trong khi module chi import `Path`, va
+    # `NameError` bi chinh cai `except` do NUOT — 7 khe launcher am tham
+    # khong duoc dang ky, bang dieu khien van bao OFFLINE, va khong co
+    # mot dong loi nao. Chi bat ImportError (launcher vang mat la truong
+    # hop HOP LE tren may khac); moi loi khac phai noi ra.
+    try:
+        from scripts.router_v4.antigravity_launcher import (
+            ACC_CUA_RUNTIME, SESSIONS_DIR, profile_ton_tai)
+    except ImportError:
+        ACC_CUA_RUNTIME, SESSIONS_DIR, profile_ton_tai = {}, None, None
+    if profile_ton_tai is not None:
+        for r in runtimes:
+            acc = ACC_CUA_RUNTIME.get(r.runtime_id)
+            if acc and r.provider == 'antigravity' and profile_ton_tai(acc):
+                r.transport = 'launcher'
+                r.auth_profile = f'agy-launcher:{acc}'
+                r.needs_provisioning = ''
+                r.workspace = str(Path(SESSIONS_DIR) / acc)
+
     for r in runtimes:
         f.add_runtime(r)
 
@@ -236,6 +259,20 @@ def _dò_mot(r: WorkerRuntime) -> Tuple[bool, str]:
     if r.provider == "claude":
         return True, "phiên Claude đang chạy"
     if r.provider == "antigravity":
+        if r.transport == "launcher":
+            # Khe di qua launcher da-tai-khoan CO SAN. "Song" = co profile
+            # da luu tren DIA, khong phai co ten trong cau hinh.
+            from scripts.router_v4.antigravity_launcher import (
+                LAUNCHER, acc_cua, profile_ton_tai)
+            if not LAUNCHER.is_file():
+                return False, f"thiếu launcher {LAUNCHER.name}"
+            acc = acc_cua(r.runtime_id)
+            if not acc:
+                return False, f"không có ánh xạ acc cho {r.runtime_id}"
+            if not profile_ton_tai(acc):
+                return False, (f"chưa lưu profile {acc} — chạy `acc login "
+                               f"{acc[3:]}` một lần trong phiên người dùng")
+            return True, f"launcher, profile {acc} đã lưu"
         if r.transport == "native":
             from scripts.router_v3.native_worker import find_agy
             exe = find_agy()

@@ -81,7 +81,12 @@ def dung_adapter(f: Fabric, p: Placement, *, timeout: float,
         raise ExecutorError(f"{p.key}: runtime chưa cấp phát — {r.needs_provisioning}")
 
     if m.provider == "antigravity":
-        if r.transport == "native":
+        if r.transport == "launcher":
+            from scripts.router_v4.antigravity_launcher import \
+                AntigravityLauncherAdapter
+            a = AntigravityLauncherAdapter(r.runtime_id, model=m.model_id,
+                                           turn_timeout=timeout)
+        elif r.transport == "native":
             def _tao():
                 return PoolAntigravityAdapter(
                     r.runtime_id, model=m.model_id, allow_edits=True,

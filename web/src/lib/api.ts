@@ -1797,6 +1797,15 @@ export interface ModerationEvent {
 
 export interface AdminNovel extends Novel {
   chapters: number;
+  /**
+   * So chuong DA co audio. Quan tri can con so nay de quyet dinh xuat ban:
+   * 0/15 va 15/15 la hai tinh huong rat khac nhau, va truoc day bang quan tri
+   * khong hien gi ca nen phai mo tung truyen ra dem.
+   *
+   * Tuy chon de client cu (chua biet truong nay) van bien dich duoc; thieu thi
+   * coi nhu chua biet, KHONG coi nhu 0.
+   */
+  chapters_with_audio?: number;
   owner: { display_name: string; username: string } | null;
 }
 

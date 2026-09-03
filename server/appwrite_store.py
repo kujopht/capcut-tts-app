@@ -1526,6 +1526,50 @@ class AppwriteMetadataStore(AppwriteSocialStore):
                     dem[nid] += 1
         return dem
 
+    def audio_chapter_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """
+        So chuong DA co audio theo tung truyen — xem hop dong o
+        `MetadataStore.audio_chapter_counts`.
+
+        HAI buoc theo lo, KHONG phai mot vong lap tren tung truyen:
+          1. lay `(chapter_id, novel_id)` cua moi chuong thuoc cac truyen nay —
+             cung idiom `q_equal(..., *lo)` + `q_select` nhu `chapter_counts`;
+          2. hoi `audio_by_chapter` MOT lan cho toan bo chuong vua lay, va chinh
+             ham do da tu chia lo.
+
+        Nho vay so vong goi phu thuoc so LO, khong phu thuoc so truyen hay so
+        chuong. Ban truoc cua bang quan tri khong co cot nay chinh vi cach lam
+        hien nhien (mo tung truyen ra dem) la mot N+1 25 lan moi trang.
+
+        `q_select("novel_id")` van tra ve `$id` cua document — Appwrite luon kem
+        cac truong he thong — nen khong phai liet ke no ra, va cung khong phai
+        keo ca noi dung chuong ve chi de dem.
+        """
+        ds = [n for n in dict.fromkeys(novel_ids) if n]
+        if not ds:
+            return {}
+        dem = {nid: 0 for nid in ds}
+
+        # chapter_id -> novel_id, chi cho cac truyen dang hoi
+        thuoc_ve: Dict[str, str] = {}
+        for lo in _theo_lo(ds):
+            for row in self._list_all(COL_CHAPTERS,
+                                      [q_equal("novel_id", *lo),
+                                       q_select("novel_id")]):
+                cid = str(row.get("$id") or "")
+                nid = str(row.get("novel_id") or "")
+                if cid and nid in dem:
+                    thuoc_ve[cid] = nid
+
+        if not thuoc_ve:
+            return dem
+
+        for chapter_id in self.audio_by_chapter(list(thuoc_ve)):
+            nid = thuoc_ve.get(chapter_id)
+            if nid is not None:
+                dem[nid] += 1
+        return dem
+
     def total_published_novels(self) -> int:
         """
         Dung `total` cua Appwrite, KHONG keo ban ghi ve.

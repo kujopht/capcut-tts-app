@@ -15,10 +15,32 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from unittest import mock
+
 from server import main as server_main
 from server.adapters import MockIdentityAdapter, MockMetadataStore
 from server.creator_service import CreatorService
-from server.domain import AuthorStatus, Novel, PublishState
+from server.domain import AudioTrack, AuthorStatus, Novel, PublishState
+
+
+def _track_gia(chapter_id: str, owner_id: str, hau_to: str = "") -> AudioTrack:
+    """Mot ban ghi audio toi thieu — du de `audio_chapter_counts` dem duoc.
+
+    KHONG di qua duong TTS that: bai test o day noi ve viec DEM, con viec tong
+    hop audio da co bai test rieng. `object_key`/`content_hash` phai KHAC nhau
+    giua cac lan goi, vi `create_track` la TIM-HOAC-TAO: track co cung
+    `(chapter_id, content_hash)` se tra ve ban ghi cu thay vi tao moi — va
+    chinh su khac nhau do la dieu bai
+    `test_tao_lai_audio_KHONG_lam_phong_so_dem` can.
+    """
+    return AudioTrack(
+        chapter_id=chapter_id,
+        owner_id=owner_id,
+        voice_id="piper:ngochuyennew",
+        object_key=f"audio/{owner_id}/{chapter_id}/{hau_to or 'a'}.mp3",
+        content_hash=f"hash-{chapter_id}-{hau_to or 'a'}",
+        size_bytes=1024,
+    )
 
 
 class Base(unittest.TestCase):
@@ -622,6 +644,93 @@ class NovelBrowserTest(Base):
         d = self.client.get("/api/admin/novels?state=draft",
                             headers=self.h_admin).json()
         self.assertTrue(all(n["state"] == "draft" for n in d["novels"]))
+
+    def test_liet_ke_kem_so_chuong_DA_CO_AUDIO(self):
+        """
+        Quan tri phai thay "san sang xuat ban den dau" NGAY TRONG BANG.
+
+        Truoc day bang nay chi co tong so chuong, nen cau hoi that su ("truyen
+        nay co audio chua?") phai di mo tung truyen ra dem — voi 25 truyen mot
+        trang thi khong ai lam viec do, va quyet dinh xuat ban thanh doan mo.
+        """
+        me, h = self._tac_gia("audio@x.local", "Có Audio")
+        nid = self.client.post("/api/novels", headers=h,
+                               json={"title": "Truyện có audio"}).json()["novel"]["novel_id"]
+        ids = [
+            self.client.post("/api/chapters", headers=h, json={
+                "novel_id": nid, "title": f"C{i}", "content": "x"},
+            ).json()["chapter"]["chapter_id"]
+            for i in range(3)
+        ]
+        # DUNG mot chuong co audio trong ba chuong.
+        server_main.store.create_track(
+            _track_gia(chapter_id=ids[0], owner_id=me["user_id"]))
+
+        d = self.client.get("/api/admin/novels", headers=self.h_admin).json()
+        row = next(n for n in d["novels"] if n["novel_id"] == nid)
+        self.assertEqual(row["chapters"], 3)
+        self.assertEqual(row["chapters_with_audio"], 1)
+
+    def test_tao_lai_audio_KHONG_lam_phong_so_dem(self):
+        """
+        Mot chuong co the co NHIEU track (moi lan tao lai audio la mot ban ghi).
+        Cot nay dem CHUONG nghe duoc, khong dem so lan da render — neu khong,
+        mot truyen mot chuong render ba lan se hien "3/1".
+        """
+        me, h = self._tac_gia("relam@x.local", "Làm Lại")
+        nid = self.client.post("/api/novels", headers=h,
+                               json={"title": "Làm lại audio"}).json()["novel"]["novel_id"]
+        cid = self.client.post("/api/chapters", headers=h, json={
+            "novel_id": nid, "title": "C1", "content": "x"},
+        ).json()["chapter"]["chapter_id"]
+        for lan in range(3):
+            server_main.store.create_track(
+                _track_gia(chapter_id=cid, owner_id=me["user_id"], hau_to=str(lan)))
+
+        d = self.client.get("/api/admin/novels", headers=self.h_admin).json()
+        row = next(n for n in d["novels"] if n["novel_id"] == nid)
+        self.assertEqual(row["chapters_with_audio"], 1, "dem track thay vi dem chuong")
+
+    def test_truyen_khong_co_audio_hien_0_chu_khong_vang_mat(self):
+        """`0` va "khong biet" la hai dieu khac nhau — giao dien ve chung khac
+        nhau ("0/3" so voi "—"), nen truong nay phai LUON co mat."""
+        me, h = self._tac_gia("khong@x.local", "Không Audio")
+        nid = self.client.post("/api/novels", headers=h,
+                               json={"title": "Chưa có audio"}).json()["novel"]["novel_id"]
+        self.client.post("/api/chapters", headers=h, json={
+            "novel_id": nid, "title": "C1", "content": "x"})
+        d = self.client.get("/api/admin/novels", headers=self.h_admin).json()
+        row = next(n for n in d["novels"] if n["novel_id"] == nid)
+        self.assertIn("chapters_with_audio", row)
+        self.assertEqual(row["chapters_with_audio"], 0)
+
+    def test_so_truy_van_KHONG_tang_theo_so_truyen(self):
+        """
+        Rang buoc that su cua `audio_chapter_counts`: theo LO, khong phai mot
+        vong lap tren tung truyen. Dem so lan kho bi goi, khong doc code.
+        """
+        me, h = self._tac_gia("nplus1@x.local", "N Plus Một")
+        for i in range(6):
+            nid = self.client.post("/api/novels", headers=h,
+                                   json={"title": f"T{i}"}).json()["novel"]["novel_id"]
+            self.client.post("/api/chapters", headers=h, json={
+                "novel_id": nid, "title": "C1", "content": "x"})
+
+        goc = server_main.store.audio_chapter_counts
+        dem = {"lan": 0}
+
+        def dem_lai(novel_ids):
+            dem["lan"] += 1
+            return goc(novel_ids)
+
+        with mock.patch.object(server_main.store, "audio_chapter_counts", dem_lai):
+            self.client.get("/api/admin/novels", headers=self.h_admin)
+        self.assertEqual(dem["lan"], 1,
+                         "phai goi DUNG mot lan cho ca trang, khong phai moi truyen")
+
+    def test_danh_sach_rong_khong_goi_kho(self):
+        """Hop dong o Protocol: danh sach rong -> dict rong, khong di kho."""
+        self.assertEqual(server_main.store.audio_chapter_counts([]), {})
 
     def test_KHONG_co_route_xoa_truyen_o_khu_quan_tri(self):
         """

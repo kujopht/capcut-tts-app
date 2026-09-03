@@ -731,6 +731,26 @@ class MetadataStore(Protocol):
         """
         ...
 
+    def audio_chapter_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """
+        MOI TRUYEN co bao nhieu chuong DA co audio.
+
+        VI SAO CAN: khu quan tri phai tra loi duoc "truyen nay san sang xuat ban
+        chua" ma khong mo tung truyen ra dem tay. `chapter_counts` cho tong so
+        chuong; cai con thieu la bao nhieu trong so do da co ban audio.
+
+        CUNG rang buoc voi `chapter_counts`/`audio_by_chapter`: so truy van
+        KHONG duoc phu thuoc so TRUYEN hay so CHUONG (hang so, hoac theo lo).
+        Ban cai dat nao goi vong lap tren tung truyen la sai hop dong — bang
+        quan tri co 25 truyen mot trang, va do la 25 lan di kho.
+
+        - Danh sach rong -> tra ve dict rong, KHONG duoc goi kho.
+        - Truyen khong co chuong nao co audio -> co mat trong ket qua voi gia
+          tri 0, khong phai vang mat: nguoi goi dang ve mot cot so, va mot khoa
+          thieu se thanh mot o trong khong giai thich duoc.
+        """
+        ...
+
     def delete_track(self, track_id: str) -> None: ...
 
     # -- xoa tai khoan --------------------------------------------------------
@@ -1893,6 +1913,25 @@ class MockMetadataStore(MockSocialStore):
         with self._lock:
             for c in self.chapters.values():
                 if c.novel_id in can:
+                    dem[c.novel_id] += 1
+        return dem
+
+    def audio_chapter_counts(self, novel_ids: Sequence[str]) -> Dict[str, int]:
+        """So chuong DA co audio, theo tung truyen — xem hop dong o Protocol.
+
+        Mot chuong co the co NHIEU track (moi lan tao lai audio la mot ban ghi
+        moi), nen dem theo `chapter_id` DUY NHAT, khong dem so track: nguoi doc
+        cot nay muon biet bao nhieu chuong nghe duoc, khong phai bao nhieu lan
+        da render.
+        """
+        can = set(novel_ids)
+        if not can:
+            return {}
+        dem = {nid: 0 for nid in can}
+        with self._lock:
+            co_audio = {t.chapter_id for t in self.tracks.values()}
+            for c in self.chapters.values():
+                if c.novel_id in can and c.chapter_id in co_audio:
                     dem[c.novel_id] += 1
         return dem
 

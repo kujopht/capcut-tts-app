@@ -27,6 +27,24 @@ const TRANG_THAI = [
   { khoa: "draft", nhan: "Bản nháp" },
 ];
 
+/**
+ * Ten mien cua nguon, de o "Nguồn" doc duoc trong mot bang.
+ *
+ * URL day du cua Wattpad/Fandom dai hon ca o ban ghi; ten mien la phan nguoi
+ * quan tri thuc su can doc nhanh, con URL day du van nam o `title` va o chinh
+ * lien ket. `www.` bi bo vi no khong phan biet gi.
+ *
+ * URL rac thi tra ve nguyen van thay vi nem loi: mot dong bang khong duoc phep
+ * lam sap ca trang quan tri.
+ */
+function nhanNguon(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 export default function AdminStories() {
   const [go, setGo] = useState("");
   const [tu, setTu] = useState("");
@@ -86,7 +104,10 @@ export default function AdminStories() {
                 <th scope="col">Truyện</th>
                 <th scope="col">Tác giả</th>
                 <th scope="col" className="admin-so">Chương</th>
+                {/* Quyet dinh xuat ban can biet audio da san sang bao nhieu. */}
+                <th scope="col" className="admin-so">Audio</th>
                 <th scope="col">Trạng thái</th>
+                <th scope="col">Nguồn</th>
                 <th scope="col">Cập nhật</th>
               </tr>
             </thead>
@@ -106,12 +127,58 @@ export default function AdminStories() {
                     )}
                   </td>
                   <td className="admin-so mono">{n.chapters}</td>
+                  {/*
+                    "x/y", khong phai mot dau tich. Mot truyen 3/15 chuong co
+                    audio va mot truyen 15/15 deu se hien "co audio" neu chi ve
+                    boolean — trong khi day dung la con so de quyet dinh xuat
+                    ban hay cho.
+
+                    `undefined` (backend cu chua tra truong nay) hien "—", KHONG
+                    hien "0/15": khong biet va biet-la-khong khac nhau.
+                  */}
+                  <td className="admin-so mono">
+                    {n.chapters_with_audio === undefined ? (
+                      <span className="hint">—</span>
+                    ) : (
+                      <span
+                        className={
+                          n.chapters > 0 && n.chapters_with_audio === n.chapters
+                            ? "tt tt-duyet"
+                            : n.chapters_with_audio === 0
+                              ? "hint"
+                              : undefined
+                        }
+                      >
+                        {n.chapters_with_audio}/{n.chapters}
+                      </span>
+                    )}
+                  </td>
                   <td>
                     <span
                       className={`tt ${n.state === "published" ? "tt-duyet" : "tt-trong"}`}
                     >
                       {n.state === "published" ? "Đã xuất bản" : "Bản nháp"}
                     </span>
+                  </td>
+                  {/*
+                    Xuat xu. Voi noi dung nhap tu noi khac, "no den tu dau" la
+                    dieu quan tri phai kiem duoc TRUOC khi bam xuat ban — khong
+                    phai thu di tra o mot trang khac.
+                  */}
+                  <td>
+                    {n.external_source_url ? (
+                      <a
+                        href={n.external_source_url}
+                        target="_blank"
+                        rel="noopener noreferrer nofollow"
+                        className="hint"
+                        title={n.external_source_url}
+                      >
+                        {nhanNguon(n.external_source_url)} ↗
+                      </a>
+                    ) : (
+                      <span className="hint">—</span>
+                    )}
                   </td>
                   <td className="hint">
                     {new Date(n.updated_at).toLocaleDateString("vi-VN")}

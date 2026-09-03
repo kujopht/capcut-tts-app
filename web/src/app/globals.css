@@ -4578,6 +4578,56 @@ body.co-mini { padding-bottom: 74px; }
   border-top: 1px solid var(--line-soft);
 }
 
+/* ------------------------------------------- chuong truoc / sau o cuoi bai */
+/*
+  Ba o: TRUOC | muc luc | SAU. Grid chu khong flex, va cot giua `auto`: hai
+  nut hai ben giu DUNG mot be rong bang nhau bat ke ten chuong dai ngan the
+  nao, nen cai nut "Chương sau" khong nhay ngang mỗi lần đổi chương.
+
+  `min-width: 0` tren ca ba o la thu bat buoc de `.truncate` ben trong thuc su
+  cat duoc: mot o grid mac dinh khong co nho hon noi dung cua no.
+*/
+.reader-nav {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--s3);
+}
+.reader-nav > * { min-width: 0; }
+
+.reader-nav-prev,
+.reader-nav-next {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+.reader-nav-next { justify-content: flex-end; }
+/* Chu trong nut xep hai dong: nhan nho o tren, ten chuong o duoi. */
+.reader-nav-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.25;
+  text-align: left;
+}
+.reader-nav-next .reader-nav-label { align-items: flex-end; text-align: right; }
+.reader-nav-cap {
+  font-size: var(--t-xs);
+  opacity: 0.72;
+  white-space: nowrap;
+}
+.reader-nav-title { max-width: 100%; font-weight: 600; }
+.reader-nav-up { flex-direction: column; gap: 2px; white-space: nowrap; }
+.reader-nav-count { font-variant-numeric: tabular-nums; }
+/* Het truyen: mot dong chu, khong phai mot nut chet bam vao khong lam gi. */
+.reader-nav-end {
+  align-self: center;
+  text-align: right;
+  font-size: var(--t-xs);
+}
+
 .listen-player { flex: 1; min-width: 0; }
 
 /* ------------------------------------------------- chon truyen o cot trai */
@@ -5276,6 +5326,50 @@ body.co-mini { padding-bottom: 74px; }
   .reader { padding: var(--s4) 0; }
   .reader .prose { font-size: var(--t-base); line-height: 1.85; }
   .reader-foot .btn { flex: 1 1 auto; }
+
+  /*
+    Dieu huong chuong tren dien thoai: HAI hang, khong phai ba cot.
+
+    O 375px, ba cot chia ra thi moi nut con khoang 110px — vua khong doc duoc
+    ten chuong, vua nho hon nguong bam an tay. Hang tren la TRUOC | SAU (hai
+    viec nguoi doc thuc su lam), hang duoi la muc luc chiem ca be rang.
+
+    Ten chuong bi AN o day, chi con nhan "Chương trước"/"Chương sau": mot ten
+    chuong bi cat con ba chu khong giup gi, ma lai an mat cho cua nhan.
+  */
+  .reader-nav {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .reader-nav-title { display: none; }
+  .reader-nav-cap { font-size: var(--t-base); }
+  /* Nguong bam an tay — 44px la muc toi thieu, khong phai muc mong muon. */
+  .reader-nav-prev,
+  .reader-nav-next { min-height: 44px; }
+  .reader-nav-prev { justify-content: flex-start; }
+  .reader-nav-next { justify-content: flex-end; }
+  /*
+    `order` la phan BAT BUOC, khong phai trang tri.
+
+    Thu tu trong DOM la TRUOC / muc luc / SAU — dung o desktop (ba cot), nhung
+    o hai cot thi `grid-column: 1 / -1` cua muc luc cat ngang giua hai nut:
+    tu dong xep thanh BA hang (truoc | rong / muc luc / sau | rong) thay vi
+    hai. Do duoc that o 390px truoc khi sua.
+
+    Day muc luc xuong CUOI bang `order` de hai nut dieu huong dung chung hang
+    dau — DOM giu nguyen (muc luc van nam giua, dung cho ban phim va trinh doc
+    man hinh o desktop), chi thu tu HIEN THI doi.
+  */
+  .reader-nav-prev { order: 1; }
+  .reader-nav-next { order: 2; }
+  /* Muc luc xuong hang rieng, tra lai chieu ngang cho hai nut o tren. */
+  .reader-nav-up {
+    order: 3;
+    grid-column: 1 / -1;
+    flex-direction: row;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .reader-nav-end { order: 2; grid-column: auto; }
 
   /* --- khu nghe tren dien thoai ------------------------------------------
      Bia nam TREN, chu va dieu khien o duoi. Hai cot o 375px thi bia con hon
@@ -7550,4 +7644,17 @@ body.co-mini { padding-bottom: 74px; }
 @media (max-width: 640px) {
   .lb-rank { min-width: 24px; }
   .lb-xp { font-size: var(--t-sm); }
+}
+
+/* ---------------------------------------------- ghi cong nguon o trang truyen */
+/*
+  Ba manh thong tin nguon (tac gia goc, ngon ngu, link) tren MOT dong khi vua,
+  tu xuong dong khi khong. `gap` lo ngang lam dau phan cach — khong chen ky tu
+  "·" bang CSS, vi trinh doc man hinh se doc no ra thanh mot tu.
+*/
+.novel-head-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--s3);
 }

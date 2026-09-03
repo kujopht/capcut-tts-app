@@ -168,12 +168,43 @@ class TestKhoaSwitch(unittest.TestCase):
         k = AL.KhoaLauncher(self.p, ttl=300.0)
         self.assertFalse(k.acquire(timeout=1))
 
-    def test_khoa_hong_coi_nhu_bo_hoang(self):
-        """Một tệp khoá không đọc được mà giữ mãi sẽ treo cả bể."""
+    def test_khoa_hong_CHUA_qua_TTL_thi_KHONG_bi_cuop(self):
+        """Khoá không đọc được nhưng MỚI tạo phải được tôn trọng.
+
+        Bài này thay cho `test_khoa_hong_coi_nhu_bo_hoang` cũ, bài đó đòi
+        thu hồi NGAY một khoá hỏng còn mới. Chính đòi hỏi đó là lỗ hổng:
+        `acquire()` tạo tệp bằng `O_CREAT|O_EXCL` RỒI MỚI `os.write` nội
+        dung, nên giữa hai bước tệp tồn tại mà RỖNG — không đọc được, y như
+        một tệp hỏng. Thu hồi ngay = xoá khoá của bên vừa được cấp hợp lệ,
+        và cả hai bên cùng vào vùng tới hạn.
+
+        Đã đo thật: CI Linux (run 33766689852) đánh sập
+        `test_nhieu_luong_vao_ra_tuan_tu_khong_chong_nhau` với "2 != 1: có
+        lúc 2 bên cùng ở trong vùng tới hạn". Trên Windows bài đó ĐẠT, nhưng
+        chỉ vì tình cờ — `unlink()` một tệp đang mở bị Windows từ chối, còn
+        POSIX thì cho phép.
+
+        Yêu cầu gốc ("khoá hỏng không được treo cả bể") vẫn được giữ, chỉ
+        chuyển từ NGAY sang SAU TTL — xem bài kế tiếp.
+        """
         self.p.parent.mkdir(parents=True, exist_ok=True)
         self.p.write_text("khong-phai-json", encoding="utf-8")
         k = AL.KhoaLauncher(self.p, ttl=300.0)
-        self.assertTrue(k.acquire(timeout=5))
+        self.assertFalse(k.acquire(timeout=1),
+                         "khoá hỏng còn mới phải được coi là ĐANG GIỮ")
+
+    def test_khoa_hong_QUA_TTL_thi_thu_hoi_duoc(self):
+        """Nửa còn lại: một khoá hỏng THẬT SỰ bỏ hoang vẫn phải hết hiệu lực,
+        nếu không cả bể worker treo vĩnh viễn."""
+        self.p.parent.mkdir(parents=True, exist_ok=True)
+        self.p.write_text("khong-phai-json", encoding="utf-8")
+        # Lùi mtime ra quá TTL: đây chính là tín hiệu mà `_cu_qua()` lui về
+        # dùng khi không đọc được ruột tệp.
+        cu = time.time() - 999
+        os.utime(self.p, (cu, cu))
+        k = AL.KhoaLauncher(self.p, ttl=1.0)
+        self.assertTrue(k.acquire(timeout=5),
+                        "khoá hỏng đã quá TTL phải thu hồi được")
         k.release()
 
     def test_context_manager_nha_khoa_khi_co_loi(self):

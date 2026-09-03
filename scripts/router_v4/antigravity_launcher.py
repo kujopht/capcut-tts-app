@@ -100,9 +100,37 @@ class KhoaLauncher:
             d = json.loads(self.path.read_text(encoding="utf-8"))
             return (time.time() - float(d.get("at") or 0)) > self.ttl
         except (OSError, ValueError, json.JSONDecodeError):
-            # Khoa hong/doc khong duoc -> coi la bo hoang. Giu mot khoa
-            # khong doc duoc mai mai se treo ca be worker.
-            return True
+            # Khoa hong/doc khong duoc/CHUA GHI XONG.
+            #
+            # KHONG duoc tra True thang o day. `acquire()` lam HAI buoc khong
+            # nguyen tu voi nhau:
+            #
+            #     fd = os.open(path, O_CREAT|O_EXCL|O_WRONLY)   # tep XUAT
+            #                                                   # HIEN, RONG
+            #     os.write(fd, json.dumps({...}))               # moi co ruot
+            #
+            # Giua hai buoc do tep TON TAI nhung RONG, nen `json.loads("")`
+            # nem JSONDecodeError. Tra True luc ay = coi mot khoa VUA duoc
+            # cap hop le la bo hoang, roi `acquire()` se `unlink()` no va
+            # ca hai ben cung vao vung toi han.
+            #
+            # Do that: CI Linux (run 33766689852) do
+            # `test_nhieu_luong_vao_ra_tuan_tu_khong_chong_nhau` voi
+            # "2 != 1: co luc 2 ben cung o trong vung toi han". Tren Windows
+            # bai do DAT — nhung chi vi tinh co: `unlink()` mot tep dang mo
+            # bi Windows tu choi, con POSIX thi CHO PHEP. Tinh dung dan cua
+            # mot khoa khong duoc dua vao dac thu file-locking cua Windows.
+            #
+            # Lui ve mtime cua chinh he tep: no ton tai NGAY tu buoc os.open,
+            # nen mot khoa vua tao luon "con han" du ruot chua kip ghi. Van
+            # giu duoc yeu cau goc — mot khoa that su hong/bo hoang se gia
+            # theo mtime va bi thu hoi sau TTL, khong treo ca be worker.
+            try:
+                return (time.time() - self.path.stat().st_mtime) > self.ttl
+            except OSError:
+                # Tep bien mat giua hai loi goi -> khong con gi de thu hoi;
+                # `os.open(O_EXCL)` o vong sau se phan xu mot cach nguyen tu.
+                return True
 
     def acquire(self, *, timeout: float = 180.0, poll: float = 0.25) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,10 +165,23 @@ class KhoaLauncher:
             except OSError:
                 pass
             self._fd = None
-        try:
-            self.path.unlink()
-        except OSError:
-            pass
+        # Bo qua that bai cua `unlink()` thi khoa BI RO RI: tep con lai voi
+        # JSON hop le, nen moi ben khac phai cho het TTL (mac dinh 120s) du
+        # chu khoa da nha tu lau. Do that: 30 luot x 8 luong -> 3 lan
+        # `release()` de lai tep, keo theo 12 lan `acquire()` het thoi gian
+        # cho. Nguyen nhan tren Windows: `_cu_qua()` cua ben khac dang
+        # `read_text()` dung luc nay -> sharing violation.
+        #
+        # Thu lai co gioi han. Khong vong vo han: neu van khong xoa duoc thi
+        # co che TTL o `_cu_qua()` van la luoi an toan cuoi.
+        for lan in range(5):
+            try:
+                self.path.unlink()
+                return
+            except FileNotFoundError:
+                return
+            except OSError:
+                time.sleep(0.02 * (lan + 1))
 
     def __enter__(self) -> "KhoaLauncher":
         if not self.acquire():

@@ -637,3 +637,50 @@ ERROR: (gcloud.compute.scp) Multiple remote sources not supported by PuTTY.
 
 Tren Windows `gcloud compute scp` di qua `pscp`, khong nhan nhieu nguon tu xa
 trong mot lan goi. Da tach thanh hai lan goi tuan tu.
+
+---
+
+# XU LY BAN BACKUP NHU TAI LIEU KHOI PHUC THAM HOA (DR)
+
+Chinh sach nguoi van hanh dat ra, ghi lai o day de khong phai nho:
+
+| Quy tac | Trang thai |
+|---|---|
+| Giu kho Drive **RIENG TU** | Dang rieng tu. Khong tao link chia se, khong dat quyen "bat ky ai co link" |
+| **KHONG in noi dung `env.snapshot`** | Duong ong chi in ten/kich co/bam. Khong buoc nao doc noi dung tep |
+| Xoa ban lam viec **cuc bo** khi khong con can | **DA XOA** `appwrite-selfhost-20260903T163727Z.tar.gz` (956.401.009 byte) khoi scratchpad. Giu lai `SHA256SUMS` + `manifest.json` lam bang chung — hai tep nay chi chua ten/kich co/bam, khong chua bi mat |
+| Restore muc CONTAINER **chua duoc chung minh** | Ghi nhan ben duoi |
+
+## Dien tap DR con thieu — restore o muc CONTAINER
+
+**Da chung minh:** ban tren Drive tai lai duoc, SHA khop, giai nen duoc, va
+tung tep khop manifest (0 lech / 11).
+
+**CHUA chung minh:** nap 9 volume do vao mot Appwrite 1.9.6 dang chay va thay
+no phuc vu duoc. Do la mot dien tap RIENG, va no doi:
+
+- mot VM **dung-mot-lan** (tuyet doi khong chay tren VM dang phuc vu)
+- Docker + dung `docker-compose.yml`/`.env` phien ban 1.9.6 — hai tep nay
+  **chi ton tai tren VM**, khong co trong kho (GAP-2)
+- `mongo-entrypoint.sh` + `mongo-init.js` cung tag, neu khong MongoDB do voi
+  exit 126 (loi that da gap, xem bao cao ha tang muc 3)
+- doc `RESTORE.md` di kem trong chinh ban backup
+
+Cho den khi dien tap do chay xong, cau dung nhat de noi la: **"ban backup
+toan ven va giai nen duoc tu kho lanh"**, KHONG phai "da chung minh khoi
+phuc duoc dich vu".
+
+## Bat bien kien truc — KHONG duoc lan lon
+
+| | Duong PRODUCTION | `fanfic-appwrite-temp` |
+|---|---|---|
+| Appwrite | **Appwrite Cloud (SaaS)** | tu luu tru 1.9.6 |
+| Vai tro | dang phuc vu that | dev/staging, ten may co chu `temp` |
+| Ban backup nay bao ve cai nao | — | **cai nay** |
+
+Ban backup 912 MiB o tren la cua **`fanfic-appwrite-temp`**. No **KHONG** phai
+ban backup cua Appwrite production — production la SaaS do nha cung cap van
+hanh, va khong co volume nao tren may nao cua chung ta de sao luu.
+
+Va `fanfic-worker-prod` (may worker o Singapore) **khong chua Appwrite gi
+ca** — no chi chay hai worker. Ba thu nay la ba thu khac nhau.

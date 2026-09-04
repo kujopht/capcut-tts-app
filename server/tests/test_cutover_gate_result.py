@@ -271,5 +271,47 @@ class EnvWorkerDich(unittest.TestCase):
             encoding="utf-8", errors="replace")
         self.assertIn("env-translation.stage", sh)
 
+
+class DongBoCongKhongDuocIMLANG(unittest.TestCase):
+    """LOI THAT: `ProtectSystem=full` lam /usr CHI DOC, nen verb `update`
+    khong bao gio ghi duoc ban root cua cong. Loi bi nuot bang
+    `2>/dev/null || true`, nen `update` bao THANH CONG trong khi cong tren
+    may van chay ban CU — mot verb vua merge khong bao gio toi noi."""
+
+    def test_update_KHONG_nuot_loi_khi_dong_bo(self):
+        sh = (GOC / "scripts" / "ops" / "fanfic_prod_admin.sh").read_text(
+            encoding="utf-8", errors="replace")
+        i = sh.index("vh_update()")
+        than = sh[i:sh.index("vh_canary()", i)]
+        # Chi soi DONG dong bo ban root cua cong. `git config
+        # --add safe.directory ... || true` ben tren la mot lan nuot loi
+        # KHAC va hoan toan vo hai — soi ca ham thi bai kiem truot vi mot
+        # dong khong lien quan.
+        dong_dong_bo = [d for d in than.splitlines()
+                        if "/usr/local/sbin/fanfic-prod-admin" in d]
+        self.assertTrue(dong_dong_bo)
+        for d in dong_dong_bo:
+            self.assertNotIn("2>/dev/null", d,
+                             "buoc dong bo cong khong duoc nuot loi")
+            self.assertNotIn("|| true", d)
+        self.assertIn("CANH BAO", than)
+        self.assertIn("return 1", than)
+
+    def test_unit_drain_cho_phep_ghi_usr_local_sbin(self):
+        sh = (GOC / "scripts" / "ops" / "install_prod_admin.sh").read_text(
+            encoding="utf-8", errors="replace")
+        rwp = [d for d in sh.splitlines() if d.startswith("ReadWritePaths=")]
+        self.assertTrue(rwp, "khong tim thay ReadWritePaths")
+        self.assertIn("/usr/local/sbin", rwp[0],
+                      "thieu duong nay thi `update` khong bao gio dong bo duoc cong")
+
+    def test_update_tao_moi_tep_stage_con_thieu(self):
+        sh = (GOC / "scripts" / "ops" / "fanfic_prod_admin.sh").read_text(
+            encoding="utf-8", errors="replace")
+        i = sh.index("vh_update()")
+        than = sh[i:sh.index("vh_canary()", i)]
+        self.assertIn("env-translation.stage", than)
+        self.assertIn("0620", than)
+
 if __name__ == "__main__":
     unittest.main()

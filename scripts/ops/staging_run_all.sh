@@ -34,14 +34,33 @@ for u in fanfic-worker.service fanfic-translation-worker.service fanfic-worker-h
   printf '  %-38s %s\n' "$u" "$(systemctl is-active "$u" 2>/dev/null)"
 done
 
+hr "0a. DUA BAN CHECKOUT VE origin/main"
+# Phep chung minh phai chay tren dung ma nguon da merge, khong phai tren ban
+# bootstrap luc 00:13. `server/` cua tien trinh worker den tu day.
+if [ -d "$APP/.git" ]; then
+  git config --global --add safe.directory "$APP" 2>/dev/null || true
+  git -C "$APP" fetch --quiet origin 2>&1 | sed 's/^/  /' || true
+  git -C "$APP" reset --quiet --hard origin/main 2>&1 | sed 's/^/  /' || true
+  echo "  SHA: $(git -C "$APP" rev-parse --short HEAD 2>/dev/null)"
+else
+  echo "  CANH BAO: $APP khong phai git checkout — bo qua"
+fi
+
 hr "0b. DONG BO CHINH SACH ENV (khong cham bi mat, khong them R2)"
-if [ -f "$APP/scripts/ops/staging_reconcile_env.sh" ]; then
-  bash "$APP/scripts/ops/staging_reconcile_env.sh" 2>&1 | sed 's/^/  /'
+# Uu tien ban vua duoc stage vao /home/ubuntu (moi nhat), roi den ban trong
+# checkout. Hai duong de mot lan chay khong phu thuoc vao thu tu cap nhat.
+REC=""
+for c in /home/ubuntu/staging_reconcile_env.sh "$APP/scripts/ops/staging_reconcile_env.sh"; do
+  [ -f "$c" ] && { REC="$c"; break; }
+done
+if [ -n "$REC" ]; then
+  echo "  dung: $REC"
+  bash "$REC" 2>&1 | sed 's/^/  /'
   rc=${PIPESTATUS[0]}
   echo "  -> exit=$rc"
   [ "$rc" -eq 0 ] || { echo; echo "FAIL: dong bo chinh sach that bai."; exit 2; }
 else
-  echo "  THIEU $APP/scripts/ops/staging_reconcile_env.sh"
+  echo "  THIEU staging_reconcile_env.sh o ca hai duong"
   exit 2
 fi
 

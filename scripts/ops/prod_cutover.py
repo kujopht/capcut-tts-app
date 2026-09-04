@@ -225,18 +225,15 @@ def pha_prepare(a) -> int:
     print("=== PREPARE ===")
     print("Khong bat dich vu nao trong pha nay. GCE khong bi cham.\n")
 
-    # 1. checkout AWS ve dung SHA
-    print("1. dua checkout AWS ve origin/main")
-    rc, out, err = aws(
-        "git config --global --add safe.directory /opt/fanfic-audio; "
-        "git -C /opt/fanfic-audio fetch --quiet origin && "
-        "git -C /opt/fanfic-audio rev-parse origin/main", han=180)
-    sha = out.strip().splitlines()[-1] if out.strip() else "?"
-    print(f"   origin/main = {sha}")
-    ghi_audit("prepare.fetch", rc=rc, sha=sha[:12])
-
-    # 2. stage ma dieu hanh (khong dac quyen, chi la tep trong /home)
-    print("2. stage ma dieu hanh len /home/ubuntu")
+    # 1. stage ma dieu hanh (khong dac quyen, chi la tep trong /home)
+    #
+    # PHAI di TRUOC moi thu: trinh cai lay ma dac quyen tu day khi checkout
+    # chua co no. Va checkout KHONG the duoc cap nhat tu ben khong-dac-quyen
+    # — `/opt/fanfic-audio/.git` thuoc root (dung nhu vay), nen mot
+    # `git fetch` chay bang `ubuntu` chi tra ve
+    # `cannot open '.git/FETCH_HEAD': Permission denied`. Viec cap nhat
+    # checkout thuoc verb `update`, chay bang root.
+    print("1. stage ma dieu hanh len /home/ubuntu")
     for ten in ("fanfic_prod_admin.sh", "install_prod_admin.sh"):
         p = GOC / "scripts" / "ops" / ten
         rc, _, err = _chay(["scp", "-i", AWS_KEY, "-o", "BatchMode=yes",
@@ -247,10 +244,10 @@ def pha_prepare(a) -> int:
         if rc != 0:
             return 2
 
-    # 3. da co cong dieu hanh chua?
+    # 2. da co cong dieu hanh chua?
     rc, out, _ = aws("test -x /usr/local/sbin/fanfic-prod-admin && echo CO || echo CHUA")
     da_cai = "CO" in out
-    print(f"3. cong dieu hanh production: {'DA CAI' if da_cai else 'CHUA CAI'}")
+    print(f"2. cong dieu hanh production: {'DA CAI' if da_cai else 'CHUA CAI'}")
     if not da_cai:
         print("\n  ===================================================")
         print("  CAN DUNG MOT LENH CO QUYEN — chay tren may nay:")
@@ -260,6 +257,18 @@ def pha_prepare(a) -> int:
         print("  ===================================================")
         ghi_audit("prepare.can_nguoi", buoc="install_prod_admin")
         return 10
+
+    # 3. dua checkout ve origin/main — QUA verb `update` (root), vi
+    # `/opt/fanfic-audio/.git` thuoc root.
+    print("3. dua checkout AWS ve origin/main (verb `update`, chay bang root)")
+    ma, out = cong("update", han=420)
+    print("\n".join("   " + d for d in out.splitlines() if d.strip()))
+    ghi_audit("prepare.update", exit=ma)
+    if ma != 0:
+        return 6
+    rc, sha, _ = aws("git -C /opt/fanfic-audio rev-parse HEAD 2>/dev/null")
+    print(f"   SHA hien tai = {sha.strip()}")
+    ghi_audit("prepare.sha", sha=sha.strip()[:12])
 
     # 4. dat tep env production
     print("4. dat tep env production (bi mat khong qua argv, khong xuong dia)")

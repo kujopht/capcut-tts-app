@@ -1,0 +1,4 @@
+{"luc": "2026-09-04T15:13:10Z", "su_kien": "prepare.fetch", "rc": 255, "sha": "?"}
+{"luc": "2026-09-04T15:13:11Z", "su_kien": "prepare.stage", "tep": "fanfic_prod_admin.sh", "rc": 0}
+{"luc": "2026-09-04T15:13:13Z", "su_kien": "prepare.stage", "tep": "install_prod_admin.sh", "rc": 0}
+{"luc": "2026-09-04T15:13:14Z", "su_kien": "prepare.can_nguoi", "buoc": "install_prod_admin"}

@@ -225,6 +225,7 @@ class Observe(unittest.TestCase):
         out = ("fanfic-worker-prod.service=inactive \n0\n0.1\n2000\n0\n20%\n")
         with _vaProbe(ban_do()), \
              mock.patch.object(pc, "aws", return_value=(0, out, "")), \
+             mock.patch.object(pc, "_units_gce", return_value=units_gce(False)), \
              mock.patch.object(pc, "pha_rollback", return_value=0) as rb, \
              mock.patch.object(pc, "ghi_audit"):
             ma = pc.pha_observe(ns(minutes=1, every=0))
@@ -235,11 +236,28 @@ class Observe(unittest.TestCase):
         out = ("fanfic-worker-prod.service=active \n0\n0.1\n2000\n0\n20%\n")
         with _vaProbe(ban_do(treo=1)), \
              mock.patch.object(pc, "aws", return_value=(0, out, "")), \
+             mock.patch.object(pc, "_units_gce", return_value=units_gce(False)), \
              mock.patch.object(pc, "pha_rollback", return_value=0) as rb, \
              mock.patch.object(pc, "ghi_audit"):
             ma = pc.pha_observe(ns(minutes=1, every=0))
         rb.assert_called_once()
         self.assertEqual(ma, 20)
+
+    def test_GCE_song_lai_thi_DUNG_QUAN_SAT_va_KHONG_tu_dong_lui(self):
+        """F6 — mot dong doi bat lai GCE giua cua so quan sat.
+
+        KHONG tu dong lui o day: lui nghia la bat GCE, ma GCE dang chay
+        san. Hai worker dang tranh nhau; chon giu ben nao la viec cua
+        nguoi, khong phai cua mot vong lap."""
+        out = ("fanfic-worker-prod.service=active \n0\n0.1\n2000\n0\n20%\n")
+        with _vaProbe(ban_do()), \
+             mock.patch.object(pc, "aws", return_value=(0, out, "")), \
+             mock.patch.object(pc, "_units_gce", return_value=units_gce(True)), \
+             mock.patch.object(pc, "pha_rollback", return_value=0) as rb, \
+             mock.patch.object(pc, "ghi_audit"):
+            ma = pc.pha_observe(ns(minutes=1, every=0))
+        self.assertEqual(ma, 5)
+        rb.assert_not_called()
 
 
 class Commit(unittest.TestCase):
@@ -272,11 +290,15 @@ class RollbackDocLap(unittest.TestCase):
             self.assertNotIn(xau, src,
                              f"rollback khong duoc phu thuoc trang thai luu san ({xau})")
 
+    #: Nhip that ma `--check` in ra khi vong quet dang quay.
+    NHIP = '{"trang_thai": "dang_chay", "tuoi_nhip_giay": 2}'
+
     def test_chay_duoc_khi_cong_dieu_hanh_CHUA_cai(self):
         """Prepare that bai giua chung -> van phai lui duoc."""
         with mock.patch.object(pc, "aws", return_value=(0, "CHUA", "")), \
-             mock.patch.object(pc, "gce", return_value=(0, "", "")), \
+             mock.patch.object(pc, "gce", return_value=(0, self.NHIP, "")), \
              mock.patch.object(pc, "_units_gce", return_value=units_gce(True)), \
+             mock.patch.object(pc, "_units_aws", return_value=units(active_prod=False)), \
              mock.patch.object(pc, "cong") as c, \
              mock.patch.object(pc, "ghi_audit"), \
              mock.patch.object(pc.time, "sleep"):
@@ -289,11 +311,12 @@ class RollbackDocLap(unittest.TestCase):
 
         def _gce(l, han=300):
             lenh.append(l)
-            return 0, "", ""
+            return 0, self.NHIP, ""
 
         with mock.patch.object(pc, "aws", return_value=(0, "CHUA", "")), \
              mock.patch.object(pc, "gce", side_effect=_gce), \
              mock.patch.object(pc, "_units_gce", return_value=units_gce(True)), \
+             mock.patch.object(pc, "_units_aws", return_value=units(active_prod=False)), \
              mock.patch.object(pc, "ghi_audit"), \
              mock.patch.object(pc.time, "sleep"):
             pc.pha_rollback(ns())
@@ -306,9 +329,34 @@ class RollbackDocLap(unittest.TestCase):
         with mock.patch.object(pc, "aws", return_value=(0, "CHUA", "")), \
              mock.patch.object(pc, "gce", return_value=(0, "", "")), \
              mock.patch.object(pc, "_units_gce", return_value=units_gce(False)), \
+             mock.patch.object(pc, "_units_aws", return_value=units(active_prod=False)), \
              mock.patch.object(pc, "ghi_audit"), \
              mock.patch.object(pc.time, "sleep"):
             self.assertEqual(pc.pha_rollback(ns()), 2)
+
+    def test_F10_unit_active_nhung_KHONG_co_nhip_thi_van_la_THAT_BAI(self):
+        """Mot worker khoi dong duoc roi chet ngay van bao `active` vai
+        giay dau. `is-active` chung minh tien trinh con song; NHIP moi
+        chung minh vong quet DANG QUAY."""
+        with mock.patch.object(pc, "aws", return_value=(0, "CHUA", "")), \
+             mock.patch.object(pc, "gce", return_value=(0, "khong co nhip", "")), \
+             mock.patch.object(pc, "_units_gce", return_value=units_gce(True)), \
+             mock.patch.object(pc, "_units_aws", return_value=units(active_prod=False)), \
+             mock.patch.object(pc, "ghi_audit"), \
+             mock.patch.object(pc.time, "sleep"):
+            self.assertEqual(pc.pha_rollback(ns()), 4)
+
+    def test_F7_KHONG_bat_GCE_khi_AWS_chua_dung_duoc(self):
+        """Bat GCE trong khi AWS van chay = hai worker claim mot hang doi."""
+        with mock.patch.object(pc, "aws", return_value=(0, "CO", "")), \
+             mock.patch.object(pc, "cong", return_value=(1, "stop that bai")), \
+             mock.patch.object(pc, "_units_aws", return_value=units(active_prod=True)), \
+             mock.patch.object(pc, "gce") as g, \
+             mock.patch.object(pc, "ghi_audit"), \
+             mock.patch.object(pc.time, "sleep"):
+            ma = pc.pha_rollback(ns())
+        self.assertEqual(ma, 3)
+        g.assert_not_called()
 
 
 class KhongLoBiMat(unittest.TestCase):

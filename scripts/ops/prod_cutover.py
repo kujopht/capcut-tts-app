@@ -62,7 +62,19 @@ GCE_ZONE = "asia-southeast1-b"
 #: cung mot vai tro, hai may. Chi mot trong hai duoc chay.
 GCE_UNITS = PROD_UNITS
 
-NHAT_KY = GOC / "docs" / "reports" / "cutover-audit.jsonl"
+#: Nhat ky kiem toan — CO Y nam NGOAI cay lam viec cua git.
+#:
+#: Ban truoc de o `docs/reports/cutover-audit.jsonl`, tuc mot `git add -A`
+#: se commit no. Hom nay no chi chua ten su kien va ma thoat, nhung mot
+#: lan goi `ghi_audit` bat can trong tuong lai se ghim thu do vao lich su
+#: kho vinh vien. No cung lo IP may, moc thoi gian dieu hanh va trang thai
+#: unit cho bat ky ai doc duoc kho.
+#:
+#: Doi lai: nhat ky khong con di theo kho. Ban BEN nam trong
+#: `/var/log/fanfic-prod-admin.log` tren chinh may AWS, do root giu.
+NHAT_KY = Path(
+    os.environ.get("FANFIC_CUTOVER_AUDIT")
+    or (Path.home() / ".fanfic" / "cutover-audit.jsonl"))
 
 
 def _luc() -> str:
@@ -249,10 +261,17 @@ def pha_prepare(a) -> int:
     da_cai = "CO" in out
     print(f"2. cong dieu hanh production: {'DA CAI' if da_cai else 'CHUA CAI'}")
     if not da_cai:
+        # Lenh nay chay trinh cai TU CHECKOUT (`/opt`, thuoc root), khong
+        # tu `/home/ubuntu`. Ban truoc tro vao /home, va do la mot cua so
+        # TOCTOU that: giua luc `scp` va luc nguoi van hanh go lenh,
+        # `ubuntu` THAY DUOC tep do — nguoi van hanh se chay ma cua ke tan
+        # cong bang root.
         print("\n  ===================================================")
         print("  CAN DUNG MOT LENH CO QUYEN — chay tren may nay:")
-        print(f"\n    ssh -i {AWS_KEY} {AWS_USER}@{AWS_HOST} "
-              f"'sudo bash /home/{AWS_USER}/install_prod_admin.sh'")
+        print(f"\n    ssh -i {AWS_KEY} {AWS_USER}@{AWS_HOST} \\\n"
+              "      'sudo git -C /opt/fanfic-audio fetch origin \\\n"
+              "       && sudo git -C /opt/fanfic-audio reset --hard origin/main \\\n"
+              "       && sudo bash /opt/fanfic-audio/scripts/ops/install_prod_admin.sh'")
         print("\n  Sau do chay lai: prod_cutover.py prepare")
         print("  ===================================================")
         ghi_audit("prepare.can_nguoi", buoc="install_prod_admin")
@@ -338,7 +357,23 @@ def pha_drain(a) -> int:
         print("\n--dry-run: KHONG dung GCE.")
         return 0
 
-    print("\n3. dung + disable CHI ba unit worker production tren GCE")
+    # DO LAI ngay truoc khi dung. Giua luc `cho_hang_doi_rong` tra ve va
+    # luc SIGTERM toi, worker GCE VAN dang nhan job — va no dung `stop`
+    # giua mot ban tong hop thi ban do bi bo lai (da xay ra that
+    # 2026-09-03: core dump, 4 job bi bo). Phep do lai nay thu hep cua so
+    # do xuong con mot lan goi mang; no khong dong duoc hoan toan, va
+    # khong gia vo la dong duoc.
+    print("\n3. do lai ngay truoc khi dung (thu hep cua so TOCTOU)")
+    lai = prod_probe.do_hang_doi()
+    print(f"   running={lai['so_luong'].get('running')} "
+          f"pending={lai['so_luong'].get('pending')} "
+          f"lease_treo={len(lai['lease_treo'])}")
+    if lai["so_luong"].get("running", 0) or lai["lease_treo"]:
+        print("\nDRAIN_FAIL: job moi xuat hien giua hai lan do. KHONG dung GCE.")
+        ghi_audit("drain.toctou", running=lai["so_luong"].get("running"))
+        return 5
+
+    print("\n4. dung + disable CHI ba unit worker production tren GCE")
     print("   (VM KHONG bi tat, KHONG bi xoa)")
     lenh = "; ".join(
         f"sudo systemctl disable --now {u}" for u in GCE_UNITS)
@@ -443,6 +478,21 @@ def pha_observe(a) -> int:
               f"pending={m['pending']} running={m['running']} "
               f"lease_treo={m['lease_treo']}")
 
+        # GCE co song lai khong? Mot dong doi khoi dong lai no bang tay,
+        # mot chinh sach restart cua VM, hay mot lan reboot — bat ky cai
+        # nao cung lam HAI worker cung claim mot hang doi, va cua so quan
+        # sat mac dinh la 30 phut.
+        tt_gce = _units_gce()
+        gce_song = [u for u, v in tt_gce.items() if v == "active"]
+        m["gce_song"] = gce_song
+        if gce_song:
+            ghi_audit("observe.hoi_quy", ly_do="GCE song lai", units=gce_song)
+            print(f"\nOBSERVE_FAIL: GCE dang chay tro lai {gce_song} — "
+                  "hai worker cung claim mot hang doi.")
+            print("   Dung quan sat NGAY. Khong tu dong lui: lui la bat GCE, "
+                  "ma GCE dang chay san. Can nguoi quyet dinh giu ben nao.")
+            return 5
+
         # Hoi quy nghiem trong -> rollback.
         if "fanfic-worker-prod.service=active" not in m["units"]:
             ghi_audit("observe.hoi_quy", ly_do="worker khong active", mau=m)
@@ -518,8 +568,28 @@ def pha_rollback(a) -> int:
         ma, o = cong("stop", han=600)
         print("\n".join("   " + d for d in o.splitlines()))
         ghi_audit("rollback.dung_aws", exit=ma)
+        # PHAI kiem: neu AWS khong dung duoc ma ta van bat GCE, hai ben
+        # cung claim mot hang doi. Doc lai trang thai THAT thay vi tin ma
+        # thoat cua verb.
+        tt_aws = _units_aws()
+        con_aws = [u for u in PROD_UNITS if tt_aws.get(u) == "active"]
+        if con_aws:
+            print(f"\nROLLBACK_FAIL: AWS VAN CON chay {con_aws} — "
+                  "KHONG bat GCE (se trung lap cong viec).")
+            print("   Xu ly AWS truoc, roi chay lai `rollback`.")
+            ghi_audit("rollback.dung_aws_that_bai", con_aws=con_aws)
+            return 3
+        print("   AWS: da dung (da doc lai trang thai that)")
     else:
-        print("   (cong dieu hanh chua cai — bo qua)")
+        # Cong chua cai => worker production chua bao gio duoc bat o day.
+        # Van doc lai de chac chan, thay vi suy dien.
+        tt_aws = _units_aws()
+        con_aws = [u for u in PROD_UNITS if tt_aws.get(u) == "active"]
+        if con_aws:
+            print(f"\nROLLBACK_FAIL: cong chua cai nhung AWS dang chay {con_aws}.")
+            ghi_audit("rollback.aws_chay_khong_cong", con_aws=con_aws)
+            return 3
+        print("   (cong dieu hanh chua cai; khong unit production nao active)")
 
     print("\n2. bat lai worker production tren GCE")
     lenh = "; ".join(f"sudo systemctl enable --now {u}" for u in GCE_UNITS)
@@ -527,25 +597,47 @@ def pha_rollback(a) -> int:
                        "systemctl is-active " + " ".join(GCE_UNITS) + " 2>&1", han=420)
     print("\n".join("   " + d for d in (out + err).splitlines() if d.strip()))
 
-    print("\n3. cho GCE khoe lai")
-    time.sleep(15)
-    tt = _units_gce()
-    for u, v in tt.items():
-        print(f"   {u:44} {v}")
-    chet = [u for u, v in tt.items() if v != "active"]
-    ghi_audit("rollback.ket_qua", chet=chet)
+    # Doi lau hon MOT lan ngu 15 giay, va doc lai HAI lan cach nhau.
+    #
+    # Mot worker khoi dong duoc roi chet ngay (khong toi duoc Appwrite,
+    # thieu model, env cu) van bao `active` trong vai giay dau. Mot lan
+    # doc duy nhat ngay sau khi bat se bao ROLLBACK_PASS cho mot worker
+    # sap chet.
+    print("\n3. cho GCE khoe lai (doc hai lan, cach nhau)")
+    time.sleep(20)
+    tt1 = _units_gce()
+    time.sleep(25)
+    tt2 = _units_gce()
+    for u in GCE_UNITS:
+        print(f"   {u:44} {tt1.get(u)} -> {tt2.get(u)}")
+    chet = [u for u in GCE_UNITS if tt2.get(u) != "active"]
     if chet:
         print(f"\nROLLBACK_FAIL: GCE chua khoe: {chet}")
+        ghi_audit("rollback.ket_qua", chet=chet)
         return 2
 
-    rc, out, _ = gce("journalctl -u fanfic-worker-prod-health.service -n 3 "
-                     "--no-pager -o cat 2>/dev/null | tail -3")
-    print("\n4. nhip GCE:")
+    # NHIP, khong chi `is-active`. `--check` doc tep nhip ma vong quet ghi
+    # moi chu ky; nhip moi la bang chung vong quet DANG QUAY, con
+    # `is-active` chi la bang chung tien trinh con song. Da tung co su co
+    # that: `active (running)` lien tuc trong khi vong quet dung han.
+    rc, out, _ = gce(
+        "sudo systemctl start fanfic-worker-prod-health.service 2>/dev/null; "
+        "journalctl -u fanfic-worker-prod-health.service -n 5 "
+        "--no-pager -o cat 2>/dev/null | tail -5", han=240)
+    print("\n4. nhip GCE (bang chung vong quet dang quay):")
+    nhip_moi = False
     for d in out.splitlines():
         if d.strip():
             print(f"   {d.strip()}")
+        if '"trang_thai": "dang_chay"' in d:
+            nhip_moi = True
+    ghi_audit("rollback.ket_qua", chet=[], nhip_moi=nhip_moi)
+    if not nhip_moi:
+        print("\nROLLBACK_FAIL: unit `active` nhung KHONG doc duoc nhip moi.")
+        print("   Khong bao cao 'da lui' khi chua chung minh GCE dang phuc vu.")
+        return 4
 
-    print("\nROLLBACK_PASS: GCE dang phuc vu tro lai.")
+    print("\nROLLBACK_PASS: GCE dang phuc vu tro lai (unit active + nhip moi).")
     return 0
 
 

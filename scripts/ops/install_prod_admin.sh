@@ -39,18 +39,29 @@ NGUOI="${NGUOI_KHONG_DAC_QUYEN:-ubuntu}"
 [ "$(id -u)" -eq 0 ] || { echo "phai chay bang root" >&2; exit 1; }
 id -u fanfic >/dev/null 2>&1 || { echo "thieu user 'fanfic' — chay worker_bootstrap.sh truoc" >&2; exit 1; }
 
-if [ ! -f "$SRC" ] && [ -d "$APP/.git" ]; then
-  echo "=== 0. checkout chua co ma dac quyen — dua ve origin/main ==="
-  git config --global --add safe.directory "$APP" 2>/dev/null || true
-  git -C "$APP" fetch --quiet origin 2>&1 | sed 's/^/  /' || true
-  git -C "$APP" reset --quiet --hard origin/main 2>&1 | sed 's/^/  /' || true
-  echo "  SHA: $(git -C "$APP" rev-parse --short HEAD 2>/dev/null || echo '?')"
-fi
-if [ ! -f "$SRC" ] && [ -f /home/"$NGUOI"/fanfic_prod_admin.sh ]; then
-  echo "  dung ban da stage o /home/$NGUOI/fanfic_prod_admin.sh"
-  SRC=/home/"$NGUOI"/fanfic_prod_admin.sh
-fi
-[ -f "$SRC" ] || { echo "THIEU ma dac quyen: $SRC" >&2; exit 2; }
+# NGUON DUY NHAT la checkout git. KHONG co duong lui sang /home/$NGUOI.
+#
+# Ban truoc co mot nhanh lui: neu checkout thieu tep thi lay
+# `/home/ubuntu/fanfic_prod_admin.sh`. Do la mot lo hong that — thu muc do
+# thuoc ben KHONG-DAC-QUYEN, nen mot lan `git fetch` that bai (mat mang,
+# DNS hong, kho hong) se lam trinh cai dat MA CUA KE TAN CONG vao
+# /usr/local/sbin/fanfic-prod-admin, chay bang root moi 15 giay.
+#
+# Cung ly le do ap cho chinh trinh cai nay: hay chay no TU CHECKOUT
+# (`/opt/fanfic-audio`, thuoc root), dung chay ban trong /home.
+echo "=== 0. dua checkout ve origin/main ==="
+[ -d "$APP/.git" ] || { echo "THIEU checkout git tai $APP" >&2; exit 2; }
+git config --global --add safe.directory "$APP" 2>/dev/null || true
+git -C "$APP" fetch origin 2>&1 | sed 's/^/  /' || { echo "fetch that bai" >&2; exit 2; }
+git -C "$APP" reset --quiet --hard origin/main 2>&1 | sed 's/^/  /' \
+  || { echo "reset that bai" >&2; exit 2; }
+echo "  SHA: $(git -C "$APP" rev-parse HEAD 2>/dev/null || echo '?')"
+
+[ -f "$SRC" ] || {
+  echo "THIEU ma dac quyen trong checkout: $SRC" >&2
+  echo "(khong co duong lui sang /home — day la co y, xem ghi chu o tren)" >&2
+  exit 2
+}
 
 echo "=== 1. ma dac quyen ==="
 install -m 0755 -o root -g root "$SRC" /usr/local/sbin/fanfic-prod-admin

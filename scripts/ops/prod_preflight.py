@@ -27,6 +27,7 @@ from scripts.ops.cutover_target import (  # noqa: E402
     PROD_R2_BUCKET,
     CutoverRefused,
     khang_dinh_production,
+    nap_env_tu_tep,
 )
 
 #: Tien to CO Y nam ngoai `audio/` — khong duong doc nao cua san pham cham toi.
@@ -38,15 +39,28 @@ def _in(nhan: str, gt) -> None:
 
 
 def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--env-file", default="",
+                    help="tep env production. Duoc PHAN TICH, khong bao gio "
+                         "duoc chay — xem `chay_python` trong fanfic_prod_admin.sh")
+    a = ap.parse_args()
     loi = 0
 
     # --- 1. env cua chinh tien trinh nay phai la production ---------------
     print("=== A. KHANG DINH MOI TRUONG ===")
     try:
+        if a.env_file:
+            for k, v in nap_env_tu_tep(a.env_file).items():
+                os.environ[k] = v
         khang_dinh_production(os.environ)
         _in("khang dinh env", "DAT")
     except CutoverRefused as exc:
         print(f"  TU CHOI: {exc}")
+        return 2
+    except OSError as exc:
+        print(f"  TU CHOI: khong doc duoc tep env: {exc.strerror}")
         return 2
 
     from server.config import get_settings

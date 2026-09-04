@@ -39,6 +39,7 @@ from scripts.ops.cutover_target import (  # noqa: E402
     PROD_R2_BUCKET,
     CutoverRefused,
     khang_dinh_production,
+    nap_env_tu_tep,
 )
 
 TIEN_TO = "[CANARY-PROD]"
@@ -49,13 +50,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--timeout", type=float, default=420.0)
     ap.add_argument("--voice", default="")
+    ap.add_argument("--env-file", default="",
+                    help="tep env production. Duoc PHAN TICH, khong bao gio "
+                         "duoc chay — xem `chay_python` trong fanfic_prod_admin.sh")
     a = ap.parse_args()
 
     # --- cong 0: day CO PHAI production khong ------------------------------
     try:
+        if a.env_file:
+            for k, v in nap_env_tu_tep(a.env_file).items():
+                os.environ[k] = v
         khang_dinh_production(os.environ)
     except CutoverRefused as exc:
         print(f"DUNG LAI: {exc}")
+        return 2
+    except OSError as exc:
+        print(f"DUNG LAI: khong doc duoc tep env: {exc.strerror}")
         return 2
 
     from server.config import get_settings

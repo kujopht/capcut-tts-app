@@ -118,11 +118,22 @@ ExecStart=/usr/local/sbin/fanfic-prod-admin drain
 # Hep quyen y het ban staging. ProtectHome=true nghia la cong nay KHONG
 # NHIN THAY /home — moi duong dan no dung deu phai nam trong /opt, /etc,
 # /var. Da tung mat mot vong go loi vi quen dieu do.
+#
+# `/usr/local/sbin` nam trong ReadWritePaths vi mot ly do cu the: verb
+# `update` dong bo ban root cua chinh cong nay tu checkout. `ProtectSystem=full`
+# lam /usr CHI DOC, nen khong co dong do thi `update` khong bao gio thay
+# duoc ma cua cong — va vi loi bi nuot (`2>/dev/null || true`) nen no bao
+# thanh cong. Da xay ra that: mot verb moi duoc merge vao kho nhung cong
+# tren may van chay ban cu, im lang.
+#
+# Rui ro chap nhan duoc: nguon cua ban copy la `/opt/fanfic-audio` — thuoc
+# `root:root` hoan toan tren may nay (da kiem), nen khong co nguoi dung
+# khong-dac-quyen nao chen duoc ma vao do.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=/etc/fanfic-audio /var/lib/fanfic-prod-admin /var/log/fanfic-prod-admin.log /var/lib/fanfic-audio-prod /var/lib/fanfic-audio-translation-prod
+ReadWritePaths=/etc/fanfic-audio /var/lib/fanfic-prod-admin /var/log/fanfic-prod-admin.log /var/lib/fanfic-audio-prod /var/lib/fanfic-audio-translation-prod /usr/local/sbin
 EOF
 cat > /etc/systemd/system/fanfic-prod-admin.timer <<'EOF'
 [Unit]

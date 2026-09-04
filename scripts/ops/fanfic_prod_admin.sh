@@ -309,9 +309,23 @@ vh_update() {
   git config --global --add safe.directory "$APP" 2>/dev/null || true
   git -C "$APP" fetch --quiet origin && git -C "$APP" reset --quiet --hard origin/main
   echo "  SHA: $(git -C "$APP" rev-parse HEAD 2>/dev/null)"
-  # Dong bo ban root voi kho, y het ban staging.
-  install -m 0755 "$APP/scripts/ops/fanfic_prod_admin.sh" \
-    /usr/local/sbin/fanfic-prod-admin 2>/dev/null || true
+  # Dong bo ban root cua chinh cong nay voi kho.
+  #
+  # KHONG nuot loi o day. Ban truoc viet `2>/dev/null || true`, va hau qua
+  # that la: `ProtectSystem=full` lam /usr CHI DOC, `install` that bai im
+  # lang, cong tren may van chay ban CU trong khi kho da co verb moi — va
+  # `update` van bao thanh cong. Mot buoc dong bo that bai am tham con toi
+  # hon khong co buoc dong bo nao.
+  if install -m 0755 "$APP/scripts/ops/fanfic_prod_admin.sh" \
+       /usr/local/sbin/fanfic-prod-admin 2>&1; then
+    echo "  da dong bo /usr/local/sbin/fanfic-prod-admin"
+  else
+    echo "  CANH BAO: KHONG ghi duoc /usr/local/sbin/fanfic-prod-admin"
+    echo "            (thieu /usr/local/sbin trong ReadWritePaths cua unit?)"
+    echo "            Cong dang chay ban CU — chay lai trinh cai bang root."
+    ghi_audit "update: KHONG dong bo duoc ban root cua cong"
+    return 1
+  fi
   # Bao dam moi tep stage ton tai voi dung quyen.
   #
   # `/var/lib/fanfic-prod-admin` la 0755 root:root, nen ben khong-dac-quyen

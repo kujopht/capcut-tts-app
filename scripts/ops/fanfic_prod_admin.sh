@@ -33,15 +33,17 @@ BASE=/var/lib/fanfic-prod-admin
 REQ="$BASE/req"
 RES="$BASE/res"
 STAGE="$BASE/env.stage"
+STAGE_TR="$BASE/env-translation.stage"
 AUDIT=/var/log/fanfic-prod-admin.log
 APP=/opt/fanfic-audio
 ENVD=/etc/fanfic-audio
 PY="$APP/.venv/bin/python"
 MODELS=/opt/fanfic-models/nghitts/piper-tts
 ENV_PROD="$ENVD/worker-prod.env"
+ENV_TR="$ENVD/translation-worker-prod.env"
 
 #: DUY NHAT nhung verb nay. Bat ky thu khac -> tu choi.
-ALLOW="status install-env preflight stop-staging start stop logs update canary rollback-note"
+ALLOW="status install-env install-translation-env preflight stop-staging start stop logs update canary rollback-note"
 
 #: Unit DONG CUNG, khong bao gio nhan tu yeu cau.
 UNITS_PROD=(fanfic-worker-prod.service fanfic-translation-worker-prod.service fanfic-worker-prod-health.timer)
@@ -174,12 +176,47 @@ vh_install_env() {
   kiem_env_production
 }
 
+vh_install_translation_env() {
+  # Tep env RIENG cho worker dich. Hinh dang KHAC worker TTS — khong R2,
+  # `STORAGE_BACKEND=local` — khop dung ban tren GCE.
+  #
+  # Thieu tep nay, `fanfic-translation-worker-prod.service` chet voi
+  # "Failed to load environment files: No such file or directory" roi
+  # restart vo han. Da xay ra that trong lan canary dau tien.
+  [ -f "$STAGE_TR" ] || { echo "TU CHOI: khong co $STAGE_TR"; return 1; }
+  local moi; moi="$(mktemp)"
+  chmod 0600 "$moi"
+  if ! "$PY" "$APP/scripts/ops/validate_prod_env.py" --translation --emit "$STAGE_TR" > "$moi"; then
+    ghi_audit "TU CHOI install-translation-env: khang dinh that bai"
+    rm -f "$moi" "$STAGE_TR"
+    return 1
+  fi
+  if ! "$PY" "$APP/scripts/ops/validate_prod_env.py" --translation "$moi"; then
+    ghi_audit "TU CHOI install-translation-env: ban sinh lai khong qua khang dinh"
+    rm -f "$moi" "$STAGE_TR"
+    return 1
+  fi
+  install -d -m 0755 -o root -g root "$ENVD"
+  install -m 0640 -o root -g fanfic "$moi" "$ENV_TR"
+  rm -f "$moi"
+  : > "$STAGE_TR"
+  ghi_audit "install-translation-env: da ghi $ENV_TR"
+  echo "  $ENV_TR ($(stat -c '%a %U:%G' "$ENV_TR"))"
+  "$PY" "$APP/scripts/ops/validate_prod_env.py" --translation "$ENV_TR"
+}
+
 vh_preflight() {
   # Nghiem thu HINH DANG PRODUCTION ma KHONG tieu mot job that nao va
   # KHONG khoi dong worker.
   local loi=0
   echo "=== 1. ENV ==="
   kiem_env_production || loi=1
+  echo "=== 1b. ENV WORKER DICH ==="
+  if [ -f "$ENV_TR" ]; then
+    "$PY" "$APP/scripts/ops/validate_prod_env.py" --translation "$ENV_TR" || loi=1
+  else
+    echo "  THIEU $ENV_TR — worker dich se chet khi khoi dong"; loi=1
+  fi
   echo "=== 2. STAGING DA TAT ==="
   kiem_staging_da_tat && echo "  khong co unit staging nao dang chay" || loi=1
   echo "=== 3. MODEL ==="
@@ -307,6 +344,7 @@ chay_verb() {
   case "$v" in
     status)        vh_status ;;
     install-env)   vh_install_env ;;
+    install-translation-env) vh_install_translation_env ;;
     preflight)     vh_preflight ;;
     stop-staging)  vh_stop_staging ;;
     start)         vh_start ;;

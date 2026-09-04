@@ -40,12 +40,51 @@ GOC = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(GOC))
 sys.path.insert(0, str(GOC / "scripts"))
 
+# Console Windows mac dinh la cp1252, con `systemd`/`journalctl` tren may
+# dich tra ve tieng Viet co dau va cac ky tu nhu `—`, `→`. In thang se nem
+# `UnicodeEncodeError`.
+#
+# Da xay ra THAT, va o dung cho toi te nhat: giua mot lan TU DONG ROLLBACK.
+# Lenh bat lai GCE DA chay, nhung tien trinh chet ngay sau do khi in ket
+# qua — nen ban ghi noi "dang lui" roi im, va khong ai biet lui xong hay
+# chua. Mot loi HIEN THI khong bao gio duoc phep lam do mot duong khoi phuc.
+for _luong in (sys.stdout, sys.stderr):
+    try:
+        _luong.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
+
+def _in(*phan) -> None:
+    """In mot dong, khong bao gio nem ngoai le.
+
+    Dung cho MOI thu den tu may tu xa. Duong khoi phuc phai chay duoc ke ca
+    khi console khong hien thi noi mot ky tu nao trong do.
+    """
+    van_ban = " ".join(str(p) for p in phan)
+    try:
+        print(van_ban)
+    except (UnicodeEncodeError, OSError):
+        try:
+            print(van_ban.encode("ascii", "replace").decode("ascii"))
+        except Exception:  # noqa: BLE001 — het cach thi im lang con hon chet
+            pass
+
+
+def _in_khoi(van_ban: str, thut: str = "   ") -> None:
+    """In nhieu dong tu xa, an toan tung dong."""
+    for d in (van_ban or "").splitlines():
+        if d.strip():
+            _in(thut + d.rstrip())
+
 from scripts.ops.cutover_target import (  # noqa: E402
     PROD_UNITS,
     REQUIRED_ENV_NAMES,
     STAGING_UNITS,
+    TRANSLATION_REQUIRED_ENV_NAMES,
     CutoverRefused,
     khang_dinh_production,
+    khang_dinh_translation_production,
     render_env_text,
     tom_tat_env,
 )
@@ -190,6 +229,33 @@ def lay_env_production() -> Dict[str, str]:
     return env
 
 
+def lay_env_translation(env_tts: Dict[str, str]) -> Dict[str, str]:
+    """Dung tep env cua WORKER DICH tu bo bien cua worker TTS.
+
+    Khop dung ban dang chay tren GCE, do tu log khoi dong cua
+    `fanfic-translation-worker-prod` (2026-08-24):
+
+        storage: local · r2_configured: false · local_voices: ["piper:ngochuyen"]
+
+    Worker dich sinh VAN BAN, khong sinh audio, nen no khong can — va
+    khong duoc nhan — credential R2.
+    """
+    env = {
+        "FAS_ENV": "production",
+        "DATA_BACKEND": "appwrite",
+        "STORAGE_BACKEND": "local",
+        "FAS_INLINE_WORKER": "false",
+        "FAS_TRANSLATION_INLINE_WORKER": "false",
+        "APPWRITE_ENDPOINT": env_tts["APPWRITE_ENDPOINT"],
+        "APPWRITE_PROJECT_ID": env_tts["APPWRITE_PROJECT_ID"],
+        "APPWRITE_DATABASE_ID": env_tts["APPWRITE_DATABASE_ID"],
+        "APPWRITE_API_KEY": env_tts["APPWRITE_API_KEY"],
+        "FAS_LOCAL_VOICES": "piper:ngochuyen",
+    }
+    khang_dinh_translation_production(env)
+    return env
+
+
 # --- do trang thai ----------------------------------------------------------
 
 def _units_gce() -> Dict[str, str]:
@@ -289,7 +355,7 @@ def pha_prepare(a) -> int:
     # `/opt/fanfic-audio/.git` thuoc root.
     print("3. dua checkout AWS ve origin/main (verb `update`, chay bang root)")
     ma, out = cong("update", han=420)
-    print("\n".join("   " + d for d in out.splitlines() if d.strip()))
+    _in_khoi(out)
     ghi_audit("prepare.update", exit=ma)
     if ma != 0:
         return 6
@@ -312,10 +378,33 @@ def pha_prepare(a) -> int:
     ghi_audit("prepare.env_stage", rc=0, so_bien=len(env))
 
     ma, out = cong("install-env")
-    print("\n".join("   " + d for d in out.splitlines()))
+    _in_khoi(out)
     ghi_audit("prepare.install_env", exit=ma)
     if ma != 0:
         return 4
+
+    # 4b. tep env RIENG cho worker dich.
+    #
+    # Thieu no, `fanfic-translation-worker-prod.service` chet voi "Failed to
+    # load environment files" roi restart vo han — da xay ra that trong lan
+    # canary dau tien. Hinh dang khac worker TTS: khong R2,
+    # `STORAGE_BACKEND=local`, mot giong. Khop dung ban tren GCE.
+    print("\n4b. dat tep env cho worker dich")
+    env_tr = lay_env_translation(env)
+    for d in tom_tat_env(env_tr, TRANSLATION_REQUIRED_ENV_NAMES):
+        print(f"   {d}")
+    rc, _, err = aws("cat > /var/lib/fanfic-prod-admin/env-translation.stage",
+                     nhap=render_env_text(env_tr, TRANSLATION_REQUIRED_ENV_NAMES)
+                     .encode("utf-8"))
+    if rc != 0:
+        print(f"   LOI khi stage env worker dich: {err.strip()[:200]}")
+        ghi_audit("prepare.env_tr_stage", rc=rc)
+        return 8
+    ma, out = cong("install-translation-env")
+    _in_khoi(out)
+    ghi_audit("prepare.install_translation_env", exit=ma)
+    if ma != 0:
+        return 9
 
     # 5. tat unit STAGING cua may nay
     #
@@ -328,7 +417,7 @@ def pha_prepare(a) -> int:
     # tat chung khong cham gi den hang doi production. GCE van dang phuc vu.
     print("\n5. tat unit staging cua may AWS (khong cham production)")
     ma, out = cong("stop-staging", han=420)
-    print("\n".join("   " + d for d in out.splitlines() if d.strip()))
+    _in_khoi(out)
     ghi_audit("prepare.stop_staging", exit=ma)
     if ma != 0:
         return 7
@@ -336,7 +425,7 @@ def pha_prepare(a) -> int:
     # 6. preflight
     print("\n6. preflight (khong tieu job that nao)")
     ma, out = cong("preflight", han=900)
-    print("\n".join("   " + d for d in out.splitlines()))
+    _in_khoi(out)
     ghi_audit("prepare.preflight", exit=ma)
     if ma != 0:
         print("\nPREPARE_FAIL: preflight khong dat. GCE VAN DANG CHAY.")
@@ -403,7 +492,7 @@ def pha_drain(a) -> int:
         f"sudo systemctl disable --now {u}" for u in GCE_UNITS)
     rc, out, err = gce(lenh + " 2>&1; echo '--- sau khi dung ---'; "
                        "systemctl is-active " + " ".join(GCE_UNITS) + " 2>&1", han=420)
-    print("\n".join("   " + d for d in (out + err).splitlines() if d.strip()))
+    _in_khoi((out + err))
     tt = _units_gce()
     con_song = [u for u, v in tt.items() if v == "active"]
     ghi_audit("drain.dung_gce", con_song=con_song)
@@ -430,12 +519,12 @@ def pha_canary(a) -> int:
 
     print("\n1. tat unit staging tren AWS")
     ma, out = cong("stop-staging")
-    print("\n".join("   " + d for d in out.splitlines()))
+    _in_khoi(out)
     ghi_audit("canary.stop_staging", exit=ma)
 
     print("\n2. bat worker production tren AWS")
     ma, out = cong("start", han=600)
-    print("\n".join("   " + d for d in out.splitlines()))
+    _in_khoi(out)
     ghi_audit("canary.start", exit=ma)
     if ma != 0:
         print("\nCANARY_FAIL: worker AWS khong len duoc.")
@@ -443,7 +532,7 @@ def pha_canary(a) -> int:
 
     print("\n3. job DRAFT that (khong bao gio thanh PUBLIC)")
     ma, out = cong("canary", han=900)
-    print("\n".join("   " + d for d in out.splitlines()))
+    _in_khoi(out)
     ghi_audit("canary.job", exit=ma)
     if ma != 0:
         print("\nCANARY_FAIL: job canary khong dat.")
@@ -590,7 +679,7 @@ def pha_rollback(a) -> int:
     rc, out, _ = aws("test -x /usr/local/sbin/fanfic-prod-admin && echo CO || echo CHUA")
     if "CO" in out:
         ma, o = cong("stop", han=600)
-        print("\n".join("   " + d for d in o.splitlines()))
+        _in_khoi(o)
         ghi_audit("rollback.dung_aws", exit=ma)
         # PHAI kiem: neu AWS khong dung duoc ma ta van bat GCE, hai ben
         # cung claim mot hang doi. Doc lai trang thai THAT thay vi tin ma
@@ -619,7 +708,7 @@ def pha_rollback(a) -> int:
     lenh = "; ".join(f"sudo systemctl enable --now {u}" for u in GCE_UNITS)
     rc, out, err = gce(lenh + " 2>&1; echo '--- sau khi bat ---'; "
                        "systemctl is-active " + " ".join(GCE_UNITS) + " 2>&1", han=420)
-    print("\n".join("   " + d for d in (out + err).splitlines() if d.strip()))
+    _in_khoi((out + err))
 
     # Doi lau hon MOT lan ngu 15 giay, va doc lai HAI lan cach nhau.
     #

@@ -243,9 +243,21 @@ def khong_cham_production() -> None:
          os.environ.get("R2_BUCKET", "") != PROD_R2_BUCKET)
     kiem("FAS_ENV khong phai production",
          os.environ.get("FAS_ENV", "").lower() != "production")
-    # `--require-env staging` trong unit se lam worker thoat ma 2 neu env lech.
-    p = sh([sys.executable, "-m", "server.worker", "--require-env", "production",
-            "--check"], timeout=120)
+    # `--require-env` la rao chan chong tro nham tai nguyen. Voi FAS_ENV=staging,
+    # ep `--require-env production` phai lam worker THOAT MA 2 ngay.
+    #
+    # KHONG duoc them `--check`: `server/worker.py` co
+    #     if tham_so.check: sys.exit(kiem_tra())
+    # nen `--check` SHORT-CIRCUIT truoc khi `--require-env` duoc doc — co y,
+    # vi `--check` chi doc tep nhip, khong mo cong, khong goi mang. Ban truoc
+    # cua bai nay truyen ca hai va doi 2, nen no do voi "exit 0": no dang do
+    # mot duong ma rao chan KHONG he nam tren do.
+    #
+    # Bo `--check` di thi bai kiem cham dung `chay()` — noi rao chan that su
+    # o (`server/worker.py:140`, `return 2`). Worker thoat truoc khi lam bat
+    # ky viec gi, nen goi nhu the nay hoan toan an toan.
+    p = sh([sys.executable, "-m", "server.worker",
+            "--require-env", "production"], timeout=120)
     kiem("worker TU CHOI khi bi ep --require-env production",
          p.returncode == 2, f"exit {p.returncode} (mong doi 2)")
     # Khong bai nao trong bo nay chuyen trang thai sang PUBLIC. Ghi lai tuong

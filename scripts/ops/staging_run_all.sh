@@ -98,13 +98,37 @@ done
 [ "$loi" -eq 0 ] || { echo; echo "FAIL: dich vu khong len duoc."; exit 3; }
 
 # Nap env cho cac lenh chay TAY ben duoi (unit tu nap qua EnvironmentFile).
+#
+# Nap qua mot ban SACH: `systemd` cat bo \r khi doc EnvironmentFile nhung `.`
+# cua bash thi KHONG. Tep env tung mang CRLF (script duoc scp tu Windows,
+# heredoc sinh ra tep CRLF) va hau qua la `APPWRITE_ENDPOINT` co \r o cuoi ->
+# "InvalidURL: ... '\r' at position 36". `staging_reconcile_env.sh` da chuan
+# hoa tep, day la lop phong ve thu hai ngay tai cho nap.
+_env_sach="$(mktemp)"
+tr -d '\r' < "$ENVD/worker.env" > "$_env_sach"
 set -a
 # shellcheck disable=SC1090
-. "$ENVD/worker.env"
+. "$_env_sach"
 set +a
+rm -f "$_env_sach"
+
 export PYTHONPATH="$APP"
 export FAS_PIPER_MODELS_DIR="$MODELS"
 export PYTHONUTF8=1
+
+# FAS_VAR_DIR phai KHOP unit cua worker TTS, khong duoc de mac dinh.
+#
+# `FAS_VAR_DIR` khong nam trong tep env — no la `Environment=` trong unit. Bo
+# qua no thi `settings.var_dir` lui ve `server/var` TUONG DOI voi kho, nen ban
+# chung minh di tim hien vat o /opt/fanfic-audio/server/var/storage trong khi
+# worker da ghi vao /var/lib/fanfic-audio/storage. Da do that: job COMPLETED
+# nhung "ton tai=False" -> exit 7.
+#
+# Lay THANG tu unit de hai ben khong bao gio lech nhau.
+_vd="$(systemctl show fanfic-worker.service -p Environment 2>/dev/null \
+        | tr ' ' '\n' | sed -n 's/^FAS_VAR_DIR=//p' | tail -1)"
+export FAS_VAR_DIR="${_vd:-/var/lib/fanfic-audio}"
+echo "  FAS_VAR_DIR (tu unit) = $FAS_VAR_DIR"
 
 hr "3. BO NGHIEM THU DAY DU"
 "$PY" "$APP/scripts/ops/worker_staging_acceptance.py" \

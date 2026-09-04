@@ -167,6 +167,31 @@ class TestChinhSachStagingDongNhat(unittest.TestCase):
         self.assertEqual(n2.count("STORAGE_BACKEND="), 1,
                          "khong duoc nhan doi dong chinh sach")
 
+    def test_CRLF_duoc_chuan_hoa_ve_LF(self):
+        """`systemd` cat bo \\r khi doc EnvironmentFile, nhung `.` cua bash
+        thi KHONG — nen mot tep env CRLF lam moi gia tri doc bang shell mang
+        \\r o cuoi.
+
+        Da do that: bo nghiem thu bao
+            InvalidURL: Invalid non-printable ASCII character in URL,
+            '\\r' at position 36
+        va ba bai khac do theo, tat ca vi APPWRITE_ENDPOINT co \\r o cuoi.
+        """
+        # Ghi bang BYTE: `write_text` tren Windows tu doi \n -> \r\n nen khong
+        # kiem soat duoc, va `read_text(newline=...)` chi co tu Python 3.13.
+        crlf = MOI_LOCAL.replace("\n", "\r\n").encode("utf-8")
+        for f in ("worker.env", "translation-worker.env"):
+            (self.dir / f).write_bytes(crlf)
+        self.assertIn(b"\r", (self.dir / "worker.env").read_bytes(),
+                      "fixture phai co CRLF")
+        self.assertEqual(self.chay().returncode, 0)
+        for f in ("worker.env", "translation-worker.env"):
+            self.assertNotIn(b"\r", (self.dir / f).read_bytes(),
+                             f"{f} phai duoc chuan hoa ve LF")
+        # Va gia tri phai sach, khong con \r dinh o cuoi.
+        self.assertEqual(self.doc_cuoi("worker.env", "APPWRITE_ENDPOINT"),
+                         "https://vi-du.test/v1")
+
     def test_print_only_KHONG_sua_gi(self):
         self.viet(CU_R2, CU_R2)
         truoc = (self.dir / "worker.env").read_text(encoding="utf-8")

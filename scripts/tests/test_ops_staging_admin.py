@@ -173,6 +173,26 @@ class TestRunnerKhongPhuThuocHome(unittest.TestCase):
         self.assertIn("ProtectHome=true", s,
                       "khong duoc noi long hardening de lam duong dan chay duoc")
 
+    def test_runner_dat_FAS_VAR_DIR_theo_unit(self):
+        """`FAS_VAR_DIR` khong nam trong tep env — no la `Environment=` cua
+        unit. Bo qua no thi `settings.var_dir` lui ve `server/var` tuong doi
+        voi kho, nen ban chung minh di tim hien vat SAI CHO.
+
+        Da do that: job COMPLETED nhung "ton tai=False" -> exit 7, vi worker
+        ghi vao /var/lib/fanfic-audio/storage con ban chung minh doc
+        /opt/fanfic-audio/server/var/storage.
+        """
+        s = (GOC / "scripts" / "ops" / "staging_run_all.sh").read_text(encoding="utf-8")
+        self.assertIn("FAS_VAR_DIR", s, "runner phai dat FAS_VAR_DIR")
+        self.assertIn("systemctl show fanfic-worker.service -p Environment", s,
+                      "phai lay THANG tu unit de khong lech nhau")
+
+    def test_runner_cat_bo_CR_khi_nap_env(self):
+        """`.` cua bash khong cat \\r nhu systemd — phai tu lo."""
+        s = (GOC / "scripts" / "ops" / "staging_run_all.sh").read_text(encoding="utf-8")
+        self.assertIn("tr -d '\\r'", s,
+                      "phai cat \\r truoc khi source tep env")
+
     def test_runner_dung_script_trong_checkout(self):
         s = (GOC / "scripts" / "ops" / "staging_run_all.sh").read_text(encoding="utf-8")
         for ten in ("worker_staging_acceptance.py", "staging_draft_job_proof.py",

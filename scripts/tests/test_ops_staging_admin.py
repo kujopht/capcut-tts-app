@@ -24,7 +24,8 @@ GOC = Path(__file__).resolve().parents[2]
 ADMIN = GOC / "scripts" / "ops" / "fanfic_staging_admin.sh"
 INSTALL = GOC / "scripts" / "ops" / "install_staging_admin.sh"
 
-VERB_DUOC_PHEP = {"status", "reconcile", "restart", "logs", "run-proof", "update"}
+VERB_DUOC_PHEP = {"status", "reconcile", "reconcile-r2", "restart", "logs",
+                  "run-proof", "update"}
 
 
 def co_bash() -> bool:
@@ -68,9 +69,31 @@ class TestAllowlist(unittest.TestCase):
                     f"dong {i} dung $verb khong an toan: {t}")
 
     def test_loc_ky_tu_cua_verb(self):
-        """Verb doc tu tep phai bi loc con [a-z-], chan moi ky tu shell."""
-        self.assertIn("tr -cd 'a-z-'", self.src,
-                      "phai loc verb con chu thuong va dau gach")
+        """Verb doc tu tep phai bi loc con [a-z0-9-], chan moi ky tu shell.
+
+        Chu SO can co: `reconcile-r2` la verb hop le. Loc cu (`a-z-`) cat mat
+        so 2, bien no thanh `reconcile-r` roi bi allowlist tu choi mot cach
+        kho hieu.
+        """
+        self.assertIn("tr -cd 'a-z0-9-'", self.src,
+                      "phai loc verb con chu thuong, chu so va dau gach")
+
+    def test_reconcile_r2_fail_closed(self):
+        """`reconcile-r2` phai TU CHOI khi chua du dieu kien."""
+        self.assertIn("vh_reconcile_r2", self.src)
+        # Phai kiem bon bien R2 va allowlist bucket TRUOC khi doi chinh sach.
+        for k in ("R2_ACCOUNT_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"):
+            self.assertIn(k, self.src, f"phai kiem {k}")
+        self.assertIn("fanfic-prod", self.src,
+                      "phai chan tuong minh bucket production")
+        self.assertIn("BUCKET_STAGING", self.src, "phai co allowlist bucket")
+
+    def test_hai_verb_rieng_cho_hai_chinh_sach_luu_tru(self):
+        """`reconcile` va `reconcile-r2` la HAI verb, khong phai mot verb
+        nhan tham so — de lua chon kho luu tru la tuong minh trong allowlist
+        va trong audit log."""
+        self.assertIn("reconcile) vh_reconcile ;;", self.src)
+        self.assertIn("reconcile-r2) vh_reconcile_r2 ;;", self.src)
 
     def test_chan_unit_production(self):
         self.assertIn("*prod*", self.src, "phai TU CHOI unit mang chu prod")

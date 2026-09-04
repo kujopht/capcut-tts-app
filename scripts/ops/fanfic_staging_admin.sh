@@ -38,7 +38,19 @@ APP=/opt/fanfic-audio
 ENVD=/etc/fanfic-audio
 
 #: DUY NHAT nhung verb nay duoc phep. Bat ky thu khac -> tu choi.
-ALLOW="status reconcile restart logs run-proof update"
+#:
+#: `reconcile`    -> chinh sach luu tru LOCAL  (mac dinh)
+#: `reconcile-r2` -> chinh sach luu tru R2     (chan R2 cua nghiem thu)
+#:
+#: HAI verb RIENG chu khong mot verb nhan tham so: bien "dung kho nao" thanh
+#: mot lua chon TUONG MINH trong allowlist va trong audit log, thay vi mot
+#: doi so ma ben goi dien tu do. `reconcile-r2` con TU CHOI neu bon bien R2
+#: chua co hoac bucket khong nam trong danh sach staging — fail closed.
+ALLOW="status reconcile reconcile-r2 restart logs run-proof update"
+
+#: Bucket R2 duoc phep cho staging. Khop voi `apply_staging_r2.sh` va
+#: `worker_staging_acceptance.py` — ba cho phai cung mot y.
+BUCKET_STAGING="fanfic-staging fanfic-dev"
 
 #: Unit duoc phep cham. Danh sach DONG CUNG, khong nhan tu yeu cau.
 UNITS=(fanfic-worker.service fanfic-translation-worker.service fanfic-worker-health.timer)
@@ -95,6 +107,31 @@ vh_status() {
 
 vh_reconcile() { bash "$APP/scripts/ops/staging_reconcile_env.sh"; }
 
+vh_reconcile_r2() {
+  # FAIL CLOSED: khong chuyen sang R2 khi chua du dieu kien.
+  local p="$ENVD/worker.env"
+  [ -f "$p" ] || { echo "TU CHOI: thieu $p"; return 1; }
+  for k in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET; do
+    grep -qE "^${k}=..*" "$p" \
+      || { echo "TU CHOI: thieu $k — chay apply_staging_r2.sh truoc"; return 1; }
+  done
+  local b
+  b="$(grep -E '^R2_BUCKET=' "$p" | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
+  if [ "$b" = "fanfic-prod" ]; then
+    ghi_audit "TU CHOI reconcile-r2: bucket PRODUCTION"
+    echo "TU CHOI: R2_BUCKET la PRODUCTION (fanfic-prod)"; return 1
+  fi
+  local ok=0
+  for x in $BUCKET_STAGING; do [ "$x" = "$b" ] && ok=1; done
+  if [ "$ok" -ne 1 ]; then
+    ghi_audit "TU CHOI reconcile-r2: bucket ngoai allowlist ($b)"
+    echo "TU CHOI: bucket '$b' khong nam trong danh sach staging ($BUCKET_STAGING)"
+    return 1
+  fi
+  echo "  bucket=$b (staging) — chuyen chinh sach sang R2"
+  STORAGE_BACKEND_MONG_MUON=r2 bash "$APP/scripts/ops/staging_reconcile_env.sh"
+}
+
 vh_restart() {
   for u in "${UNITS[@]}"; do
     kiem_unit "$u" || continue
@@ -144,6 +181,7 @@ chay_verb() {
   case "$v" in
     status)    vh_status ;;
     reconcile) vh_reconcile ;;
+    reconcile-r2) vh_reconcile_r2 ;;
     restart)   vh_restart ;;
     logs)      vh_logs ;;
     update)    vh_update ;;
@@ -158,7 +196,10 @@ drain() {
   for t in "$REQ"/*.req; do
     id="$(basename "$t" .req)"
     # CHI doc dong dau, CHI lay ky tu chu-so-gach — khong bao gio dua vao shell.
-    verb="$(head -c 64 "$t" 2>/dev/null | head -1 | tr -cd 'a-z-')"
+    # Loc con [a-z0-9-]: chan moi ky tu shell. Chu SO can co vi mot verb hop
+    # le la `reconcile-r2` — loc cu (`a-z-`) cat mat so 2 va bien no thanh
+    # `reconcile-r`, roi bi allowlist tu choi mot cach kho hieu.
+    verb="$(head -c 64 "$t" 2>/dev/null | head -1 | tr -cd 'a-z0-9-')"
     rm -f "$t"
     out="$RES/$id.out"
     {

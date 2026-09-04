@@ -12,9 +12,9 @@
 #
 # IDEMPOTENT: chay lai nhieu lan an toan, chi bo sung phan con thieu.
 #
-# KHONG lam (co y): khong ghi mot gia tri bi mat nao, khong tao
-# `/etc/fanfic-audio/*.env` (nguoi van hanh dat, xem muc CUOI), khong bat
-# dich vu neu env con thieu, khong cham gi den GCE.
+# KHONG lam (co y): khong ghi mot GIA TRI bi mat nao, khong bat dich vu,
+# khong cham gi den GCE. Co tao hai tep env nhung CHI voi TEN bien de trong —
+# gia tri do nguoi van hanh nap sau bang `scripts/ops/apply_staging_env.sh`.
 set -euo pipefail
 
 ROLE="staging"
@@ -178,8 +178,22 @@ FAS_LOCAL_VOICES=
 ENVMAU
   chmod 0640 "$mau"
   chown root:"$SVC_USER" "$mau"
-  echo "  da viet mau $mau (chi TEN bien, khong gia tri)"
+  # KIEM LAI truoc khi bao. Ban truoc in "da viet mau ..." ngay sau `cat >`
+  # ma khong he kiem, nen bao cao co the noi tep da co trong khi no khong co
+  # — va nguoi doc khong co cach nao biet. Bao cao phai noi ve thu DA DO.
+  if [ ! -s "$mau" ]; then
+    echo "  LOI: viet mau $mau that bai (tep khong ton tai hoac rong)" >&2
+    exit 6
+  fi
+  echo "  da viet mau $mau ($(stat -c '%a %U:%G, %s byte' "$mau"))"
 done
+
+# Kiem lai LAN CUOI ca hai tep, va in dung nhung gi do duoc.
+for m in worker translation-worker; do
+  mau="/etc/fanfic-audio/${m}.env"
+  [ -f "$mau" ] || { echo "  LOI: thieu $mau sau khi tao" >&2; exit 6; }
+done
+echo "  da kiem lai: 2/2 tep env co that tren dia"
 
 echo
 echo "=== 7. MODEL PIPER ==="
@@ -313,31 +327,28 @@ echo "==================================================================="
 echo "  BOOTSTRAP XONG — DICH VU CHUA DUOC BAT (co y)"
 echo "==================================================================="
 cat <<'CUOI'
-Con DUNG MOT viec, va no phai do nguoi van hanh lam vi no chua bi mat:
+Hai tep env DA duoc tao san (chi TEN bien, khong mot gia tri nao):
 
   /etc/fanfic-audio/worker.env
   /etc/fanfic-audio/translation-worker.env              (mode 0640 root:fanfic)
 
-Cac BIEN can co (chi TEN — khong bao gio ghi gia tri vao kho hay vao log):
-  FAS_ENV                 phai la `staging`
-  FAS_INLINE_WORKER       phai la `false`
-  DATA_BACKEND            `appwrite`
-  STORAGE_BACKEND         `r2`
-  APPWRITE_ENDPOINT       endpoint Appwrite Cloud
+Con thieu DUNG BON gia tri, va chung la bi mat nen phai do nguoi van hanh nap:
+
+  APPWRITE_ENDPOINT       endpoint Appwrite staging/dev
   APPWRITE_PROJECT_ID     *** DU AN STAGING — KHONG duoc la du an production
   APPWRITE_DATABASE_ID    database staging
   APPWRITE_API_KEY        khoa runtime, quyen toi thieu
-  R2_ACCOUNT_ID           tai khoan R2
-  R2_BUCKET               *** BUCKET STAGING — KHONG duoc la `fanfic-prod`
-  R2_ACCESS_KEY_ID        khoa R2
-  R2_SECRET_ACCESS_KEY    khoa R2
-  FAS_LOCAL_VOICES        de trong `[]` de tat giong cuc bo, hoac
-                          `piper:ngochuyen` / `piper:ngochuyennew` de bat
 
-HAI dong co dau *** la rao chan quan trong nhat cua ca ke hoach: neu staging
-tro vao du an/bucket PRODUCTION thi hai worker se tranh claim JOB THAT cua
-production. `worker_staging_acceptance.py` kiem dung dieu do truoc moi thu
-khac va se TU CHOI chay tiep neu trung.
+Bon bien R2 KHONG can khi `STORAGE_BACKEND=local` (mac dinh trong mau) —
+`server/config.py` chi kiem R2 khi `storage_backend == "r2"`.
+
+Cach nap, KHONG in gia tri va KHONG sua gi neu nguon thieu:
+  <nguon> | ssh ... "sudo bash /home/ubuntu/apply_staging_env.sh"
+
+Dong co dau *** la rao chan quan trong nhat cua ca ke hoach: neu staging tro
+vao du an PRODUCTION thi hai worker se tranh claim JOB THAT cua production.
+`worker_staging_acceptance.py` kiem dung dieu do truoc moi thu khac va se TU
+CHOI chay tiep neu trung.
 
 Bat dich vu:
   systemctl enable --now fanfic-worker.service

@@ -113,6 +113,21 @@ for f in "${TEP[@]}"; do
   p="${DICH_DIR}/${f}"
   [ -f "$p" ] || { echo "  bo qua $f (khong co)"; continue; }
   tmp="$(mktemp)"; chmod 600 "$tmp"
+  # CHUAN HOA VE LF truoc khi lam gi khac.
+  #
+  # Cac script nay duoc `scp` tu mot may Windows, nen chung mang CRLF; heredoc
+  # trong bootstrap vi vay sinh ra tep env CUNG mang CRLF. `systemd` cat bo
+  # \r khi doc `EnvironmentFile` nen WORKER chay binh thuong — nhung `.` (source)
+  # cua bash thi KHONG, nen moi gia tri doc bang shell deu co \r o cuoi.
+  #
+  # Da do that: bo nghiem thu bao
+  #   InvalidURL: Invalid non-printable ASCII character in URL, '\r' at position 36
+  # va ba bai khac do theo, tat ca vi `APPWRITE_ENDPOINT` mang \r o cuoi.
+  if grep -q $'\r' "$p" 2>/dev/null; then
+    echo "  $f: phat hien CRLF -> chuan hoa ve LF"
+    tr -d '\r' < "$p" > "$p.lf" && mv -f "$p.lf" "$p"
+    chmod 0640 "$p"; chown "root:${NHOM}" "$p" 2>/dev/null || true
+  fi
   # Bo moi dong chinh sach cu VA dong ghi chu do chinh script nay them o lan
   # truoc, giu NGUYEN VEN moi dong khac (ke ca bi mat). Bo ca dong ghi chu la
   # dieu kien de IDEMPOTENT: neu khong, moi lan chay lai se noi them mot khoi

@@ -651,6 +651,58 @@ def pha_commit(a) -> int:
     prod_probe.nap_env_production()
     ban_do = prod_probe.do_hang_doi()
 
+    # --- job trung lap -----------------------------------------------------
+    #
+    # Hai worker cung claim mot hang doi se lo ra o day: `output_key` tat
+    # dinh theo `content_hash`, nen hai lan chay KHONG tao hai object —
+    # nhung chung tao hai JOB cho cung mot (chapter_id, content_hash). Do
+    # la dau vet duy nhat con lai, nen day la cho phai nhin.
+    from server.domain import JobStatus
+
+    store = prod_probe._store()[0]
+    xong = store.list_jobs_by_status(JobStatus.COMPLETED)
+    dem: Dict[Tuple[str, str], int] = {}
+    for j in xong:
+        k = (j.chapter_id, j.content_hash)
+        dem[k] = dem.get(k, 0) + 1
+    trung = sorted((v, k) for k, v in dem.items() if v > 1)
+    print(f"\n  job completed        : {len(xong)}")
+    print(f"  cap (chuong, bam) trung: {len(trung)}")
+    for v, k in trung[:5]:
+        print(f"    {v} job cho chuong {k[0]}")
+
+    # --- audio nguoi dung con lay duoc khong -------------------------------
+    #
+    # Doi may worker khong duoc dong toi duong DOC. Lay mau vai object that
+    # dang phuc vu va xac nhan chung van `head` duoc.
+    from server.adapters import build_storage
+
+    kho = build_storage(prod_probe._store()[1])
+    mau = 0
+    lay_duoc = 0
+    tong_obj = 0
+    for o in kho.list_objects("audio/"):
+        tong_obj += 1
+        if mau < 5:
+            mau += 1
+            key = getattr(o, "key", None) or str(o)
+            h = kho.head_probe(key) if hasattr(kho, "head_probe") else {}
+            if h.get("tim_thay") and isinstance(h.get("content_length"), int) \
+                    and h["content_length"] > 0:
+                lay_duoc += 1
+    print(f"  object duoi 'audio/' : {tong_obj}")
+    print(f"  mau lay lai duoc     : {lay_duoc}/{mau}")
+
+    if trung:
+        print("\nTU CHOI commit: co job TRUNG LAP — dau hieu hai worker cung claim.")
+        ghi_audit("commit.tu_choi", ly_do="job trung lap", so_cap=len(trung))
+        return 5
+    if mau and lay_duoc != mau:
+        print("\nTU CHOI commit: audio nguoi dung khong lay lai duoc day du.")
+        ghi_audit("commit.tu_choi", ly_do="audio khong lay duoc",
+                  lay_duoc=lay_duoc, mau=mau)
+        return 6
+
     chot = {
         "luc": _luc(),
         "worker_hoat_dong": "AWS",

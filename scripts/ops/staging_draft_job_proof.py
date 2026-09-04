@@ -148,16 +148,28 @@ def main() -> int:
         cuoi = time.time() + a.timeout
         truoc = ""
         chu = None
+        # GIU LAI chu so huu lease quan sat duoc GIUA LUC CHAY.
+        #
+        # `server/main.py:2478-2487` ghi job `completed` voi `lease_owner=None`
+        # — CO Y, vi job xong thi khong con ai giu lease. Ban truoc cua bai
+        # nay doc `lease_owner` SAU khi hoan tat, nen luon nhan chuoi rong va
+        # bao exit=7 ("khong chung minh duoc may nay nhan job") du job DA
+        # chay xong tot dep. Loi cua phep do, khong phai cua san pham.
+        chu_quan_sat = ""
         while time.time() < cuoi:
             chu = store.get_job(job.job_id)
             tt = chu.status.value
+            if chu.lease_owner:
+                chu_quan_sat = chu.lease_owner
             if tt != truoc:
                 print(f"    [{time.time() - t0:6.1f}s] {tt}"
                       + (f"  lease_owner={chu.lease_owner}" if chu.lease_owner else ""))
                 truoc = tt
             if chu.status in (JobStatus.COMPLETED, JobStatus.FAILED):
                 break
-            time.sleep(2.0)
+            # Poll day hon 2s: cua so `running` co the rat ngan voi mot doan
+            # van ban ngan, va bo mat no la mat bang chung lease.
+            time.sleep(0.4)
 
         giay = time.time() - t0
         if chu is None:
@@ -175,25 +187,52 @@ def main() -> int:
             print("\nFAIL: job khong hoan tat.")
             return 6
 
-        # -- CHINH MAY NAY da nhan job chua? --------------------------------
-        # `WORKER_ID` = "<pid>-<hex>". Tien trinh worker chay o dich vu rieng
-        # nen pid khac tien trinh nay; doi chieu bang cach hoi he thong xem pid
-        # do co phai worker cua may nay khong.
-        chu_so_huu = chu.lease_owner or ""
-        pid = chu_so_huu.split("-")[0] if "-" in chu_so_huu else ""
-        cua_may_nay = False
-        if pid.isdigit():
-            cua_may_nay = Path(f"/proc/{pid}").exists()
-        print(f"\n  pid trong lease_owner : {pid or '(khong ro)'}")
-        print(f"  pid do co tren MAY NAY: {cua_may_nay}")
-        if not cua_may_nay:
-            print("\nFAIL: khong chung minh duoc chinh may nay nhan job.")
+        # -- CHINH MAY NAY da lam job nay chua? -----------------------------
+        #
+        # BANG CHUNG CHINH (ben, khong dua vao thoi diem do): voi
+        # `STORAGE_BACKEND=local`, `LocalStorageAdapter` ghi vao
+        # `settings.var_dir / "storage" / <output_key>` — tuc TREN DIA MAY NAY
+        # (`server/adapters.py:2166`). Tep audio ton tai o day la bang chung
+        # VAT LY rang chinh may nay da tong hop, khong phai suy dien tu mot
+        # truong metadata co the bi xoa.
+        print("\n  --- bang chung 1 (BEN): hien vat tren dia may nay ---")
+        goc = Path(s.var_dir) / "storage"
+        tep_ra = goc / (chu.output_key or "")
+        co_hien_vat = bool(chu.output_key) and tep_ra.is_file()
+        print(f"  goc luu tru cuc bo : {goc}")
+        print(f"  tep audio          : {tep_ra}")
+        print(f"  ton tai            : {co_hien_vat}"
+              + (f"  ({tep_ra.stat().st_size} byte)" if co_hien_vat else ""))
+
+        # BANG CHUNG PHU (co the vang neu bo mat cua so `running`): chu lease
+        # quan sat duoc giua luc chay. `WORKER_ID` = "<pid>-<hex>".
+        print("\n  --- bang chung 2 (phu): chu lease giua luc chay ---")
+        pid = chu_quan_sat.split("-")[0] if "-" in chu_quan_sat else ""
+        pid_o_day = Path(f"/proc/{pid}").exists() if pid.isdigit() else False
+        print(f"  lease_owner quan sat: {chu_quan_sat or '(bo mat cua so running)'}")
+        print(f"  pid con tren may nay: {pid_o_day}")
+
+        if not co_hien_vat:
+            print("\nFAIL: khong thay hien vat audio tren dia may nay — "
+                  "khong chung minh duoc chinh may nay tong hop.")
             return 7
 
         print("\nPASS: may NAY nhan va hoan tat mot job DRAFT that.")
+        print(f"  hien vat: {tep_ra.stat().st_size} byte tai {goc}")
         print(f"AWS_DRAFT_SECONDS={giay:.1f}")
         return 0
     finally:
+        # Hien vat audio smoke: xoa luon, no chi la rac cua phep do.
+        try:
+            if job is not None:
+                j2 = store.get_job(job.job_id)
+                if getattr(j2, "output_key", None):
+                    t = Path(s.var_dir) / "storage" / j2.output_key
+                    if t.is_file():
+                        t.unlink()
+                        print(f"  da xoa hien vat {t.name}")
+        except Exception:  # noqa: BLE001
+            pass
         # Don sach, ke ca khi that bai o tren.
         for ten, ham, doi in (
                 ("job", getattr(store, "delete_job", None),

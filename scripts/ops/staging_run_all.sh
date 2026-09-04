@@ -23,6 +23,28 @@ loi=0
 
 hr() { printf '\n%s\n  %s\n%s\n' "======================================================================" "$1" "======================================================================"; }
 
+hr "0. DUNG TAM CAC UNIT STAGING CUA MAY NAY (chi may nay)"
+# Chi ba unit staging TREN CHINH MAY NAY. KHONG cham GCE: khong
+# fanfic-worker-prod, khong fanfic-staging-worker.
+for u in fanfic-worker.service fanfic-translation-worker.service fanfic-worker-health.timer; do
+  systemctl stop "$u" >/dev/null 2>&1 || true
+  # `Restart=always` + `StartLimitBurst` co the da day unit vao
+  # `start-limit-hit`; khong reset thi `start` sau nay bi tu choi ngay.
+  systemctl reset-failed "$u" >/dev/null 2>&1 || true
+  printf '  %-38s %s\n' "$u" "$(systemctl is-active "$u" 2>/dev/null)"
+done
+
+hr "0b. DONG BO CHINH SACH ENV (khong cham bi mat, khong them R2)"
+if [ -f "$APP/scripts/ops/staging_reconcile_env.sh" ]; then
+  bash "$APP/scripts/ops/staging_reconcile_env.sh" 2>&1 | sed 's/^/  /'
+  rc=${PIPESTATUS[0]}
+  echo "  -> exit=$rc"
+  [ "$rc" -eq 0 ] || { echo; echo "FAIL: dong bo chinh sach that bai."; exit 2; }
+else
+  echo "  THIEU $APP/scripts/ops/staging_reconcile_env.sh"
+  exit 2
+fi
+
 hr "1. KIEM TEN BIEN (khong in gia tri)"
 for f in worker.env translation-worker.env; do
   p="$ENVD/$f"

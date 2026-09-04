@@ -46,8 +46,16 @@ declare -A CHINH_SACH=(
   [DATA_BACKEND]="${DATA_BACKEND_MONG_MUON:-appwrite}"
   [STORAGE_BACKEND]="${STORAGE_BACKEND_MONG_MUON:-local}"
   [FAS_INLINE_WORKER]="${FAS_INLINE_WORKER_MONG_MUON:-false}"
+  # `FAS_LOCAL_VOICES` la KHOA CHINH SACH, khong phai bi mat — va de trong no
+  # KHONG phai la "khong dat". `server/config.py:719` phan biet ro:
+  #     khong dat  -> mac dinh cua Settings = ("piper:ngochuyen",)
+  #     dat = rong -> () , CO Y tat het giong cuc bo
+  # Ban mau cu ghi `FAS_LOCAL_VOICES=` nen worker chay voi `local_voices: []`
+  # va TU CHOI moi giong Piper. Dat tuong minh bang dung MAC DINH CUA MA
+  # NGUON: khong noi rong pham vi san pham, chi thoi khong tat nham.
+  [FAS_LOCAL_VOICES]="${FAS_LOCAL_VOICES_MONG_MUON:-piper:ngochuyen}"
 )
-KHOA=(FAS_ENV DATA_BACKEND STORAGE_BACKEND FAS_INLINE_WORKER)
+KHOA=(FAS_ENV DATA_BACKEND STORAGE_BACKEND FAS_INLINE_WORKER FAS_LOCAL_VOICES)
 
 chi_in=0
 [ "${1:-}" = "--print-only" ] && chi_in=1

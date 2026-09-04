@@ -37,15 +37,20 @@ RECONCILE = GOC / "scripts" / "ops" / "staging_reconcile_env.sh"
 BOOTSTRAP = GOC / "scripts" / "ops" / "worker_bootstrap.sh"
 
 KHOA_CHINH_SACH = ("FAS_ENV", "DATA_BACKEND", "STORAGE_BACKEND",
-                   "FAS_INLINE_WORKER")
+                   "FAS_INLINE_WORKER", "FAS_LOCAL_VOICES")
 BI_MAT = ("APPWRITE_ENDPOINT", "APPWRITE_PROJECT_ID",
           "APPWRITE_DATABASE_ID", "APPWRITE_API_KEY")
 
-#: Ban mau CU — dung cai da gay ra su co: STORAGE_BACKEND=r2.
+#: Ban mau CU — dung hai loi da gay ra su co that:
+#:   STORAGE_BACKEND=r2   -> ConfigError, worker khong khoi dong duoc
+#:   FAS_LOCAL_VOICES=    -> `local_voices: []`, worker NHAN job roi that bai
+#:                           voi VOICE_NOT_FOUND (vi model CO tren dia nen
+#:                           cong vat ly cho qua, con cong san pham thi khong)
 CU_R2 = """FAS_ENV=staging
 FAS_INLINE_WORKER=false
 DATA_BACKEND=appwrite
 STORAGE_BACKEND=r2
+FAS_LOCAL_VOICES=
 APPWRITE_ENDPOINT=https://vi-du.test/v1
 APPWRITE_PROJECT_ID=duan-gia
 APPWRITE_DATABASE_ID=db-gia
@@ -54,7 +59,9 @@ R2_ACCOUNT_ID=
 R2_BUCKET=
 """
 
-MOI_LOCAL = CU_R2.replace("STORAGE_BACKEND=r2", "STORAGE_BACKEND=local")
+MOI_LOCAL = (CU_R2.replace("STORAGE_BACKEND=r2", "STORAGE_BACKEND=local")
+                  .replace("FAS_LOCAL_VOICES=\n",
+                           "FAS_LOCAL_VOICES=piper:ngochuyen\n"))
 
 
 def co_bash() -> bool:
@@ -172,6 +179,40 @@ class TestChinhSachStagingDongNhat(unittest.TestCase):
         kq = self.chay("--print-only")
         self.assertEqual(kq.returncode, 0, kq.stdout)
         self.assertIn("khong lech", kq.stdout)
+
+    # -- SU CO GIONG: FAS_LOCAL_VOICES rong -> tat HET giong cuc bo ----------
+    def test_FAS_LOCAL_VOICES_rong_bi_phat_hien_va_sua(self):
+        """De TRONG khac han voi KHONG DAT (server/config.py:719).
+
+        Ban mau cu ghi `FAS_LOCAL_VOICES=` nen worker chay voi
+        `local_voices: []` va tu choi MOI giong Piper. Vi model CO tren dia,
+        worker NHAN job (cong vat ly cho qua) roi that bai voi
+        VOICE_NOT_FOUND — job chet chu khong duoc nhuong.
+        """
+        self.viet(CU_R2, CU_R2)
+        kq = self.chay("--print-only")
+        self.assertNotEqual(kq.returncode, 0, "phai phat hien FAS_LOCAL_VOICES rong")
+        self.assertIn("FAS_LOCAL_VOICES", kq.stdout)
+
+        self.assertEqual(self.chay().returncode, 0)
+        for f in ("worker.env", "translation-worker.env"):
+            self.assertEqual(self.doc_cuoi(f, "FAS_LOCAL_VOICES"),
+                             "piper:ngochuyen",
+                             f"{f}: phai dat tuong minh bang mac dinh ma nguon")
+
+    def test_khong_noi_rong_pham_vi_giong(self):
+        """Sua bang cach dat DUNG mac dinh cua ma nguon, khong them giong moi.
+
+        `server/config.py:431` -> Settings.local_voices = ("piper:ngochuyen",).
+        Neu mot ngay ai do them giong vao day, bai nay bat phai co y.
+        """
+        self.viet(CU_R2, CU_R2)
+        self.assertEqual(self.chay().returncode, 0)
+        gt = self.doc_cuoi("worker.env", "FAS_LOCAL_VOICES")
+        self.assertEqual(gt, "piper:ngochuyen",
+                         "khong duoc chao ban them giong nao ngoai mac dinh")
+        self.assertNotIn("ngochuyennew", gt,
+                         "`ngochuyennew` KHONG nam trong mac dinh san pham")
 
 
 @unittest.skipUnless(co_bash(), "can bash")

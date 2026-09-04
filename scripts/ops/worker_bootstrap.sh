@@ -172,9 +172,15 @@ R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 
 # --- Giong cuc bo ---
-# De TRONG de tat giong Piper; hoac `piper:ngochuyen` / `piper:ngochuyennew`
-# de bat. Model da duoc cai san o /opt/fanfic-models/nghitts/piper-tts.
-FAS_LOCAL_VOICES=
+# CAN THAN: de TRONG KHONG phai la "khong dat". `server/config.py:719` phan
+# biet ro hai truong hop:
+#     khong dat  -> mac dinh cua Settings = ("piper:ngochuyen",)
+#     dat = RONG -> ()  , CO Y tat HET giong cuc bo
+# Ban mau truoc ghi `FAS_LOCAL_VOICES=` nen worker chay voi `local_voices: []`
+# va tu choi MOI giong Piper: job bi NHAN (vi model co tren dia) roi that bai
+# voi VOICE_NOT_FOUND. Dat tuong minh bang DUNG mac dinh cua ma nguon —
+# khong noi rong pham vi san pham, chi thoi khong tat nham.
+FAS_LOCAL_VOICES=piper:ngochuyen
 ENVMAU
   chmod 0640 "$mau"
   chown root:"$SVC_USER" "$mau"

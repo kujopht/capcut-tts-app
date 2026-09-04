@@ -312,6 +312,20 @@ vh_update() {
   # Dong bo ban root voi kho, y het ban staging.
   install -m 0755 "$APP/scripts/ops/fanfic_prod_admin.sh" \
     /usr/local/sbin/fanfic-prod-admin 2>/dev/null || true
+  # Bao dam moi tep stage ton tai voi dung quyen.
+  #
+  # `/var/lib/fanfic-prod-admin` la 0755 root:root, nen ben khong-dac-quyen
+  # KHONG tao duoc tep moi trong do — no chi ghi duoc vao tep da co san voi
+  # mode 0620 root:ubuntu. Khi mot tep stage MOI duoc them vao kho (vi du
+  # `env-translation.stage`), no phai duoc tao o day; neu khong buoc duy
+  # nhat con lai la nho nguoi van hanh chay lai trinh cai bang root.
+  local nguoi="${NGUOI_KHONG_DAC_QUYEN:-ubuntu}"
+  for t in env.stage env-translation.stage; do
+    if [ ! -f "$BASE/$t" ]; then
+      install -m 0620 -o root -g "$nguoi" /dev/null "$BASE/$t"
+      echo "  da tao $BASE/$t ($(stat -c '%a %U:%G' "$BASE/$t"))"
+    fi
+  done
 }
 
 vh_canary() {

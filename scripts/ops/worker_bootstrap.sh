@@ -195,6 +195,26 @@ for m in worker translation-worker; do
 done
 echo "  da kiem lai: 2/2 tep env co that tren dia"
 
+# DONG BO CHINH SACH — bat buoc, ke ca khi tep da ton tai tu truoc.
+#
+# Quy tac "khong ghi de tep da co" o tren la DUNG cho BI MAT, nhung neu ap
+# cho ca tep thi mot gia tri CHINH SACH cu se song mai va mot lan chay lai
+# bootstrap KHONG sua duoc. Da hong that: tep sinh tu ban mau cu (con
+# `STORAGE_BACKEND=r2`) lam `fanfic-translation-worker` chet voi
+# "STORAGE_BACKEND=r2 nhung thieu R2_*", trong khi `fanfic-worker` van song —
+# hai tep da lech nhau ma khong ai thay.
+#
+# `staging_reconcile_env.sh` chi dong bo khoa KHONG bi mat va giu nguyen
+# APPWRITE_*/R2_*.
+if [ -x "$APP_DIR/scripts/ops/staging_reconcile_env.sh" ] \
+   || [ -f "$APP_DIR/scripts/ops/staging_reconcile_env.sh" ]; then
+  bash "$APP_DIR/scripts/ops/staging_reconcile_env.sh" | sed 's/^/  /'
+  rc=${PIPESTATUS[0]}
+  [ "$rc" -eq 0 ] || { echo "  LOI: dong bo chinh sach that bai" >&2; exit 7; }
+else
+  echo "  CANH BAO: khong thay staging_reconcile_env.sh — bo qua dong bo" >&2
+fi
+
 echo
 echo "=== 7. MODEL PIPER ==="
 install -d -m 0755 "$MODELS_DIR"

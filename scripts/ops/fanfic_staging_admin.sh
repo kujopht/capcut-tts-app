@@ -72,6 +72,18 @@ vh_status() {
     for k in APPWRITE_ENDPOINT APPWRITE_PROJECT_ID APPWRITE_DATABASE_ID APPWRITE_API_KEY; do
       if grep -qE "^${k}=..*" "$p"; then echo "    $k=<CO>"; else echo "    $k=<THIEU>"; fi
     done
+    # R2: bao CO/THIEU cho ba khoa bi mat, nhung IN THANG `R2_BUCKET` —
+    # ten bucket KHONG phai bi mat, va no la thu quan trong nhat can doc
+    # duoc de biet staging co tro nham vao production hay khong.
+    for k in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY; do
+      if grep -qE "^${k}=..*" "$p"; then echo "    $k=<CO>"; else echo "    $k=<THIEU>"; fi
+    done
+    b="$(grep -E '^R2_BUCKET=' "$p" | tail -1 | cut -d= -f2-)"
+    case "$b" in
+      fanfic-prod) echo "    R2_BUCKET=$b   <-- PRODUCTION, TUYET DOI SAI" ;;
+      "")          echo "    R2_BUCKET=<TRONG>" ;;
+      *)           echo "    R2_BUCKET=$b" ;;
+    esac
   done
   echo "=== MODEL ==="
   echo "  .onnx: $(find /opt/fanfic-models/nghitts/piper-tts -maxdepth 1 -name '*.onnx' 2>/dev/null | wc -l)"

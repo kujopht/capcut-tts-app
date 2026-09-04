@@ -30,6 +30,13 @@ sys.path.insert(0, str(ROOT))
 #: Ten tai nguyen PRODUCTION. Staging trung bat ky dong nao la DUNG NGAY.
 PROD_R2_BUCKET = "fanfic-prod"
 
+#: Bucket R2 duoc phep cho staging — ALLOWLIST, khong phai denylist.
+#: `docs/FIRST_REAL_SERIES_CHECKLIST.md` ghi nhan `fanfic-staging` da chay
+#: that (12 chuong, ~126s). Fail closed: mot ten khong nam o day bi TU CHOI,
+#: ke ca khi no "khong phai fanfic-prod" — mot bucket production KHAC hoac
+#: mot lan go sai deu phai bi chan.
+R2_BUCKET_STAGING = frozenset({"fanfic-staging", "fanfic-dev"})
+
 KQ: list[tuple[str, bool, str]] = []
 SO_LIEU: dict = {}
 
@@ -74,6 +81,17 @@ def rao_chan_cach_ly(prod_project_id: str) -> bool:
     if sb == "r2":
         ok &= kiem("R2_BUCKET KHAC bucket production", bucket != PROD_R2_BUCKET,
                    f"staging dung: {bucket!r}")
+        # Bucket phai la MOT trong cac bucket staging da biet. Fail closed:
+        # mot ten la (go sai, hoac mot bucket production khac) bi TU CHOI,
+        # khong duoc "khong phai fanfic-prod nen coi la an toan".
+        ok &= kiem("R2_BUCKET nam trong danh sach staging da biet",
+                   bucket in R2_BUCKET_STAGING,
+                   f"{bucket!r} — cho phep: {sorted(R2_BUCKET_STAGING)}")
+        # Bon bien R2 phai CO GIA TRI. Chi bao CO/THIEU, khong in gia tri.
+        for v in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID",
+                  "R2_SECRET_ACCESS_KEY", "R2_BUCKET"):
+            ok &= kiem(f"{v} co gia tri", bool(os.environ.get(v, "").strip()),
+                       "CO" if os.environ.get(v, "").strip() else "THIEU")
     else:
         # Van chan truong hop tro nham: bucket production ma lai de backend
         # local thi cau hinh do tu mau thuan, phai noi ra.
@@ -295,13 +313,30 @@ def so_lieu_may() -> None:
     except Exception:  # noqa: BLE001
         pass
     SO_LIEU["kernel"] = platform.release()
-    try:
-        import urllib.request
-        t0 = time.time()
-        urllib.request.urlopen("https://cloud.appwrite.io/v1/health/version",
-                               timeout=20).read(1)
-        SO_LIEU["do_tre_appwrite_ms"] = round((time.time() - t0) * 1000)
-    except Exception:  # noqa: BLE001
+    # Do tre tro vao DUNG endpoint dang duoc cau hinh, khong phai mot URL
+    # dong cung.
+    #
+    # Ban truoc do `https://cloud.appwrite.io/v1/health/version` — dia chi
+    # cua Appwrite Cloud. Nhung staging tro vao Appwrite TU LUU TRU
+    # (`appwrite-dev.fanfic.world`), nen phep do hoac do mot he thong KHAC
+    # han, hoac that bai va ghi `None`. Da xay ra: bai kiem ket noi bao
+    # HTTP 200 trong khi o lieu ghi `do_tre_appwrite_ms: None` — hai con so
+    # noi ve hai thu khac nhau, va do la mot khoang trong BAO CAO chu khong
+    # phai su co ket noi.
+    #
+    # Chi doi cach DO, khong doi hanh vi luc chay va khong noi long cong nao.
+    ep = (os.environ.get("APPWRITE_ENDPOINT", "") or "").rstrip("/")
+    SO_LIEU["do_tre_appwrite_endpoint"] = "tu cau hinh" if ep else "(khong dat)"
+    if ep:
+        try:
+            import urllib.request
+            t0 = time.time()
+            urllib.request.urlopen(f"{ep}/health/version", timeout=20).read(1)
+            SO_LIEU["do_tre_appwrite_ms"] = round((time.time() - t0) * 1000)
+        except Exception as exc:  # noqa: BLE001
+            SO_LIEU["do_tre_appwrite_ms"] = None
+            SO_LIEU["do_tre_appwrite_loi"] = type(exc).__name__
+    else:
         SO_LIEU["do_tre_appwrite_ms"] = None
     for k, v in SO_LIEU.items():
         print(f"    {k:28} {v}")

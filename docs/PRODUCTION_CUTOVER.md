@@ -392,6 +392,40 @@ tren may nay (da kiem), nen khong ai khong-dac-quyen chen duoc ma vao do.
 
 ---
 
+## 6b-2. RA SOAT VONG HAI — SAFE, khong hoi quy
+
+Sau khi sua bon loi o tren, toan bo phan thay doi duoc gui lai cho cung
+ban ra soat doi khang (Antigravity Claude Opus, 186 giay, packet 45 KB).
+
+**STATUS: SAFE.** Khong co hoi quy: ca ba sua cua vong mot (chan chen lenh
+F1, khong nuot loi trong `update`, doc ket qua khong fail-open) deu con
+nguyen hoac manh hon.
+
+| Muc tieu | Ket luan |
+|---|---|
+| `/usr/local/sbin` co thanh duong leo thang quyen khong | **khong** — nguon la `/opt/fanfic-audio` thuoc root, `ubuntu` khong ghi duoc, `NoNewPrivileges=true` |
+| Verb moi co lam song lai lo hong F1 khong | **khong** — cung duong sinh-lai-tu-allowlist, khong cho nao `source` tep |
+| Hai bo khang dinh co lan sang nhau duoc khong | **khong** — tep stage, duong dich va co validator deu dong cung theo tung verb |
+| `cong()` co bi lua tra ve 0 khong | rui ro **THAP**, xem duoi |
+| `_in`/`_in_khoi` nuot ngoai le co giau that bai khong | **khong** — chi la ham hien thi; moi luong dieu khien dung ma thoat |
+| `pha_commit` co bao PASS tren trang thai xau khong | **khong** — job trung hoac audio khong lay duoc deu TU CHOI |
+
+### Viec con lai (THAP, co y hoan)
+
+`cong()` lay dong `# exit=` **cuoi cung**. Ban ra soat chi ra rang neu bo
+drain bi giet dung khoanh khac giua hai lenh VA dau ra cua verb tu no chua
+mot dong bat dau bang `# exit=`, ket qua co the bi doc nham. Trong thuc te
+ke tan cong khong dieu khien duoc ma cua verb (checkout thuoc root) va
+khong ep duoc mot lan giet chinh xac den vay.
+
+**Co y KHONG sua trong luc cutover dang chay:** doi `cong()` bay gio nghia
+la ma chay pha COMMIT khac ma da chay pha DRAIN/CANARY. Doi mot cong cu
+dieu hanh giua chung mot thao tac la rui ro lon hon chinh cai no sua. Sua
+sau khi chot, kem bai kiem doi dau `# exit=` phai la dong khong-rong CUOI
+CUNG cua tep.
+
+---
+
 ## 6c. WORKER DICH CO HINH DANG ENV KHAC
 
 Do that tu log khoi dong `fanfic-translation-worker-prod` tren GCE

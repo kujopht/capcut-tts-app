@@ -64,9 +64,22 @@ def rao_chan_cach_ly(prod_project_id: str) -> bool:
     env = (getattr(s, "environment", "") or os.environ.get("FAS_ENV", "")).lower()
     ok = kiem("FAS_ENV == staging", env == "staging", f"doc duoc: {env!r}")
 
+    # `STORAGE_BACKEND=local` la lua chon HOP LE cho staging va la mac dinh
+    # cua `server/config.py`. No khong doi MOT bien R2 nao, nen staging chay
+    # duoc ma khong phai tao/di chuyen them credential nao. Danh doi da biet:
+    # khong tap duong DAY LEN R2 — ghi ro o phan ket luan, khong lam ngo.
+    sb = (os.environ.get("STORAGE_BACKEND", "") or "local").lower()
+    SO_LIEU["storage_backend"] = sb
     bucket = os.environ.get("R2_BUCKET", "")
-    ok &= kiem("R2_BUCKET KHAC bucket production", bucket != PROD_R2_BUCKET,
-               f"staging dung: {bucket!r}")
+    if sb == "r2":
+        ok &= kiem("R2_BUCKET KHAC bucket production", bucket != PROD_R2_BUCKET,
+                   f"staging dung: {bucket!r}")
+    else:
+        # Van chan truong hop tro nham: bucket production ma lai de backend
+        # local thi cau hinh do tu mau thuan, phai noi ra.
+        ok &= kiem("khong tham chieu bucket production",
+                   bucket != PROD_R2_BUCKET,
+                   f"STORAGE_BACKEND={sb}, R2 khong duoc dung")
 
     pid = os.environ.get("APPWRITE_PROJECT_ID", "")
     if prod_project_id:
@@ -151,24 +164,29 @@ def ket_noi() -> None:
     except Exception as exc:  # noqa: BLE001
         kiem("Appwrite Cloud tra loi", False, f"{type(exc).__name__}: {exc}")
 
-    try:
-        from server.r2_adapter import R2Storage  # noqa: F401
-        import boto3  # noqa: F401
-        acc = os.environ.get("R2_ACCOUNT_ID", "")
-        bk = os.environ.get("R2_BUCKET", "")
-        if acc and bk:
+    sb = (os.environ.get("STORAGE_BACKEND", "") or "local").lower()
+    if sb != "r2":
+        kiem("luu tru cuc bo (khong dung R2)", True,
+             f"STORAGE_BACKEND={sb} — khong can credential R2; duong DAY LEN "
+             f"R2 KHONG duoc tap o lan chay nay")
+    else:
+        try:
             import boto3 as b3
-            cl = b3.client(
-                "s3", endpoint_url=f"https://{acc}.r2.cloudflarestorage.com",
-                aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-                aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
-                region_name="auto")
-            cl.head_bucket(Bucket=bk)
-            kiem("R2 head_bucket thanh cong", True, f"bucket={bk}")
-        else:
-            kiem("cau hinh R2 day du", False)
-    except Exception as exc:  # noqa: BLE001
-        kiem("R2 head_bucket thanh cong", False, f"{type(exc).__name__}: {exc}")
+            acc = os.environ.get("R2_ACCOUNT_ID", "")
+            bk = os.environ.get("R2_BUCKET", "")
+            if acc and bk:
+                cl = b3.client(
+                    "s3", endpoint_url=f"https://{acc}.r2.cloudflarestorage.com",
+                    aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
+                    aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+                    region_name="auto")
+                cl.head_bucket(Bucket=bk)
+                kiem("R2 head_bucket thanh cong", True, f"bucket={bk}")
+            else:
+                kiem("cau hinh R2 day du", False)
+        except Exception as exc:  # noqa: BLE001
+            kiem("R2 head_bucket thanh cong", False,
+                 f"{type(exc).__name__}: {exc}")
 
     api = os.environ.get("FAS_API_BASE_URL") or os.environ.get("PUBLIC_API_BASE", "")
     if api:

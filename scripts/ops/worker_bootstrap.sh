@@ -151,15 +151,21 @@ for m in worker translation-worker; do
 FAS_ENV=staging
 FAS_INLINE_WORKER=false
 DATA_BACKEND=appwrite
-STORAGE_BACKEND=r2
 
-# --- Appwrite (du an STAGING, KHONG phai production) ---
+# `local` la MAC DINH cua server/config.py va la lua chon HOP LE cho staging.
+# Chon no thi KHONG can mot bien R2 nao — staging chay duoc ma khong phai
+# tao hay di chuyen them credential. Danh doi da biet: khong tap duong DAY
+# LEN R2. Doi thanh `r2` va dien bon bien duoi neu muon tap ca duong do.
+STORAGE_BACKEND=local
+
+# --- Appwrite (du an STAGING/DEV, KHONG phai production) ---
 APPWRITE_ENDPOINT=
 APPWRITE_PROJECT_ID=
 APPWRITE_DATABASE_ID=
 APPWRITE_API_KEY=
 
-# --- Cloudflare R2 (bucket STAGING, KHONG phai `fanfic-prod`) ---
+# --- Cloudflare R2 — CHI can khi STORAGE_BACKEND=r2 ---
+# Bucket phai la STAGING (vd `fanfic-staging`), KHONG bao gio `fanfic-prod`.
 R2_ACCOUNT_ID=
 R2_BUCKET=
 R2_ACCESS_KEY_ID=

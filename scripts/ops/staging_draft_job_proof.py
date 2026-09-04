@@ -195,10 +195,64 @@ def main() -> int:
         # (`server/adapters.py:2166`). Tep audio ton tai o day la bang chung
         # VAT LY rang chinh may nay da tong hop, khong phai suy dien tu mot
         # truong metadata co the bi xoa.
-        print("\n  --- bang chung 1 (BEN): hien vat tren dia may nay ---")
         goc = Path(s.var_dir) / "storage"
         tep_ra = goc / (chu.output_key or "")
-        co_hien_vat = bool(chu.output_key) and tep_ra.is_file()
+        co_tep_cuc_bo = bool(chu.output_key) and tep_ra.is_file()
+        sb = (s.storage_backend or "local").lower()
+
+        if sb == "r2":
+            # --- CHAN R2 -------------------------------------------------
+            # Hien vat phai nam TREN R2, va PHAI KHONG nam tren dia may nay.
+            # Kiem ca hai chieu: mot ban local con lai se lam "da upload"
+            # thanh mot ket luan gia (local-only false positive).
+            print("\n  --- bang chung 1 (BEN): doi tuong tren R2 ---")
+            from server.adapters import build_storage
+            kho = build_storage(s)
+            key = chu.output_key or ""
+            print(f"  bucket             : {os.environ.get('R2_BUCKET', '?')}")
+            print(f"  key                : {key}")
+
+            head = kho.head_probe(key) if hasattr(kho, "head_probe") else {}
+            co_tren_r2 = bool(head.get("tim_thay"))
+            so_byte = head.get("content_length")
+            print(f"  head_object        : tim_thay={co_tren_r2} "
+                  f"http={head.get('http_status')} etag={head.get('etag')}")
+            print(f"  content_length     : {so_byte}")
+
+            getp = kho.get_probe(key) if hasattr(kho, "get_probe") else {}
+            doc_duoc = bool(getp.get("tim_thay"))
+            byte_doc = getp.get("so_byte_doc_duoc")
+            print(f"  get_object         : doc_duoc={doc_duoc} "
+                  f"so_byte={byte_doc}")
+
+            print("\n  --- khong co false positive tu luu tru cuc bo ---")
+            print(f"  tep cuc bo         : {tep_ra}")
+            print(f"  ton tai cuc bo     : {co_tep_cuc_bo}  (PHAI la False)")
+
+            ok_r2 = (co_tren_r2 and doc_duoc
+                     and isinstance(so_byte, int) and so_byte > 0
+                     and byte_doc == so_byte
+                     and not co_tep_cuc_bo)
+            if not ok_r2:
+                print("\nFAIL: chan R2 khong dat.")
+                if not co_tren_r2:
+                    print("  - khong thay doi tuong tren R2")
+                if not doc_duoc:
+                    print("  - khong tai lai duoc doi tuong tu R2")
+                if isinstance(so_byte, int) and byte_doc != so_byte:
+                    print(f"  - kich co lech: head={so_byte} get={byte_doc}")
+                if co_tep_cuc_bo:
+                    print("  - CON tep cuc bo -> ket luan 'da upload' se la GIA")
+                return 7
+            print("\nPASS: may NAY nhan, tong hop, va DAY LEN R2 mot job DRAFT that.")
+            print(f"  doi tuong R2: {so_byte} byte, tai lai duoc {byte_doc} byte")
+            print(f"AWS_R2_DRAFT_SECONDS={giay:.1f}")
+            print(f"AWS_R2_OBJECT_BYTES={so_byte}")
+            return 0
+
+        # --- CHAN LUU TRU CUC BO -----------------------------------------
+        print("\n  --- bang chung 1 (BEN): hien vat tren dia may nay ---")
+        co_hien_vat = co_tep_cuc_bo
         print(f"  goc luu tru cuc bo : {goc}")
         print(f"  tep audio          : {tep_ra}")
         print(f"  ton tai            : {co_hien_vat}"
@@ -223,16 +277,26 @@ def main() -> int:
         return 0
     finally:
         # Hien vat audio smoke: xoa luon, no chi la rac cua phep do.
+        # Don CA HAI kho: cuc bo VA R2 (chan R2 de lai mot doi tuong that
+        # trong bucket staging, phai xoa di).
         try:
             if job is not None:
                 j2 = store.get_job(job.job_id)
-                if getattr(j2, "output_key", None):
-                    t = Path(s.var_dir) / "storage" / j2.output_key
+                key = getattr(j2, "output_key", None)
+                if key:
+                    t = Path(s.var_dir) / "storage" / key
                     if t.is_file():
                         t.unlink()
-                        print(f"  da xoa hien vat {t.name}")
-        except Exception:  # noqa: BLE001
-            pass
+                        print(f"  da xoa hien vat cuc bo {t.name}")
+                    if (s.storage_backend or "").lower() == "r2":
+                        from server.adapters import build_storage
+                        kho = build_storage(s)
+                        if kho.delete(key):
+                            print(f"  da xoa doi tuong R2 {key.rsplit('/', 1)[-1]}")
+                        else:
+                            print(f"  CANH BAO: chua xoa duoc doi tuong R2 {key}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  CANH BAO: don hien vat that bai: {type(exc).__name__}")
         # Don sach, ke ca khi that bai o tren.
         for ten, ham, doi in (
                 ("job", getattr(store, "delete_job", None),

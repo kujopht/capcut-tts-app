@@ -28,9 +28,24 @@ NGUOI="${NGUOI_KHONG_DAC_QUYEN:-ubuntu}"
 
 [ "$(id -u)" -eq 0 ] || { echo "phai chay bang root" >&2; exit 1; }
 
+# Tim ma dac quyen: uu tien checkout (nguon su that), roi den ban da stage.
+# Trinh cai nay duoc chay DUNG MOT LAN boi nguoi van hanh, nen no phai tu lo
+# duoc moi truong hop thay vi that bai va doi mot luot nua.
+if [ ! -f "$SRC" ] && [ -d "$APP/.git" ]; then
+  echo "=== 0. checkout chua co ma dac quyen — dua ve origin/main ==="
+  git config --global --add safe.directory "$APP" 2>/dev/null || true
+  git -C "$APP" fetch --quiet origin 2>&1 | sed 's/^/  /' || true
+  git -C "$APP" reset --quiet --hard origin/main 2>&1 | sed 's/^/  /' || true
+  echo "  SHA: $(git -C "$APP" rev-parse --short HEAD 2>/dev/null || echo '?')"
+fi
+if [ ! -f "$SRC" ] && [ -f /home/"$NGUOI"/fanfic_staging_admin.sh ]; then
+  echo "  dung ban da stage o /home/$NGUOI/fanfic_staging_admin.sh"
+  SRC=/home/"$NGUOI"/fanfic_staging_admin.sh
+fi
 if [ ! -f "$SRC" ]; then
-  echo "THIEU $SRC — dua checkout ve origin/main truoc:" >&2
-  echo "  git -C $APP fetch origin && git -C $APP reset --hard origin/main" >&2
+  echo "THIEU ma dac quyen o ca hai duong:" >&2
+  echo "  $APP/scripts/ops/fanfic_staging_admin.sh" >&2
+  echo "  /home/$NGUOI/fanfic_staging_admin.sh" >&2
   exit 2
 fi
 

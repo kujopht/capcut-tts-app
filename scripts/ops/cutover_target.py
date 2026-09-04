@@ -71,6 +71,37 @@ REQUIRED_ENV_NAMES: Tuple[str, ...] = (
     "FAS_PUBLIC_VOICE_LANGUAGES",
 )
 
+#: Bien bat buoc cho tep env cua WORKER DICH production.
+#:
+#: Hinh dang KHAC worker TTS, va do la co y — do that tu log khoi dong cua
+#: `fanfic-translation-worker-prod` tren GCE (2026-08-24):
+#:
+#:     storage: local · r2_configured: false · local_voices: ["piper:ngochuyen"]
+#:
+#: Worker dich sinh ra VAN BAN, khong sinh audio, nen no khong can R2. Ep
+#: no dung bo bien cua worker TTS se la sao chep sai ban goc.
+TRANSLATION_REQUIRED_ENV_NAMES: Tuple[str, ...] = (
+    "FAS_ENV",
+    "DATA_BACKEND",
+    "STORAGE_BACKEND",
+    "FAS_INLINE_WORKER",
+    "FAS_TRANSLATION_INLINE_WORKER",
+    "APPWRITE_ENDPOINT",
+    "APPWRITE_PROJECT_ID",
+    "APPWRITE_DATABASE_ID",
+    "APPWRITE_API_KEY",
+    "FAS_LOCAL_VOICES",
+)
+
+#: Gia tri co dinh cho worker dich. `STORAGE_BACKEND=local` khop GCE.
+TRANSLATION_FIXED_ENV_VALUES: Dict[str, str] = {
+    "FAS_ENV": "production",
+    "DATA_BACKEND": "appwrite",
+    "STORAGE_BACKEND": "local",
+    "FAS_INLINE_WORKER": "false",
+    "FAS_TRANSLATION_INLINE_WORKER": "false",
+}
+
 #: Nhung bien mang gia tri BI MAT. Khong bao giờ in gia tri cua chung —
 #: chi bao CO/THIEU va do dai.
 SECRET_ENV_NAMES: Tuple[str, ...] = (
@@ -218,6 +249,51 @@ def khang_dinh_production(env: Mapping[str, str]) -> None:
             f"allowlist (production={PROD_R2_BUCKET!r})")
 
 
+def khang_dinh_translation_production(env: Mapping[str, str]) -> None:
+    """Khang dinh cho tep env cua WORKER DICH production.
+
+    Cung danh tinh Appwrite production nhu worker TTS, nhung KHONG doi R2:
+    worker dich khong sinh audio. Xem `TRANSLATION_REQUIRED_ENV_NAMES`.
+    """
+    thieu = [n for n in TRANSLATION_REQUIRED_ENV_NAMES if not _sach(env.get(n))]
+    if thieu:
+        raise CutoverRefused(f"thieu bien bat buoc: {', '.join(thieu)}")
+
+    for ten, mong_muon in TRANSLATION_FIXED_ENV_VALUES.items():
+        thuc_te = _sach(env.get(ten)).lower()
+        if thuc_te != mong_muon:
+            raise CutoverRefused(
+                f"{ten} phai la {mong_muon!r}, dang la {thuc_te!r}")
+
+    for ten, mong_muon in (("APPWRITE_ENDPOINT", PROD_APPWRITE_ENDPOINT),
+                           ("APPWRITE_PROJECT_ID", PROD_APPWRITE_PROJECT_ID),
+                           ("APPWRITE_DATABASE_ID", PROD_APPWRITE_DATABASE_ID)):
+        if _sach(env.get(ten)) != mong_muon:
+            raise CutoverRefused(
+                f"{ten} khong khop production: mong doi {mong_muon!r}, "
+                f"dang la {_sach(env.get(ten))!r}")
+
+    # Worker dich KHONG duoc mang credential R2. No khong can, va mot khoa
+    # thua la mot khoa co the ro ri ma khong ai co ly do de dung.
+    thua = [k for k in ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")
+            if _sach(env.get(k))]
+    if thua:
+        raise CutoverRefused(
+            f"worker dich khong duoc mang credential R2: {', '.join(thua)}")
+
+
+def khang_dinh_tep_env_translation(env: Mapping[str, str]) -> None:
+    """Ban NGHIEM NGAT cho TEP env cua worker dich."""
+    xau = bien_nguy_hiem(env)
+    if xau:
+        raise CutoverRefused(f"gia tri chua ky tu chay duoc o: {', '.join(xau)}")
+    la = sorted(set(env) - set(TRANSLATION_REQUIRED_ENV_NAMES))
+    if la:
+        raise CutoverRefused(
+            f"bien ngoai allowlist trong tep env worker dich: {', '.join(la)}")
+    khang_dinh_translation_production(env)
+
+
 def khang_dinh_tep_env(env: Mapping[str, str]) -> None:
     """Khang dinh cho mot TEP env production. Nghiem ngat hon `os.environ`.
 
@@ -275,14 +351,18 @@ def kiem_unit_staging(unit: str) -> None:
         raise CutoverRefused(f"unit {unit!r} khong nam trong danh sach staging")
 
 
-def tom_tat_env(env: Mapping[str, str]) -> List[str]:
+def tom_tat_env(env: Mapping[str, str],
+                ten_bien: Optional[Iterable[str]] = None) -> List[str]:
     """Dong tom tat AN TOAN de in ra log/bao cao.
 
     Bien bi mat -> `<CO len=N>` hoac `<THIEU>`. Toa do khong bi mat -> in
     thang, vi khong doc duoc chung thi khong biet co tro nham hay khong.
+
+    `ten_bien` mac dinh la bo cua worker TTS; truyen
+    `TRANSLATION_REQUIRED_ENV_NAMES` cho worker dich.
     """
     dong: List[str] = []
-    for ten in REQUIRED_ENV_NAMES:
+    for ten in (ten_bien or REQUIRED_ENV_NAMES):
         gt = _sach(env.get(ten))
         if ten in SECRET_ENV_NAMES:
             dong.append(f"{ten}=<CO len={len(gt)}>" if gt else f"{ten}=<THIEU>")

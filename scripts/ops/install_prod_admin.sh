@@ -75,7 +75,10 @@ install -d -m 0755 -o root -g root "$BASE/res"
 # env.stage: `ubuntu` GHI duoc (0620) nhung KHONG DOC lai duoc. Tep nay
 # mang bi mat production trong vai giay; khong ai ngoai root doc lai no.
 install -m 0620 -o root -g "$NGUOI" /dev/null "$BASE/env.stage"
-for p in "$BASE" "$BASE/req" "$BASE/res" "$BASE/env.stage"; do
+# Tep stage THU HAI cho worker dich — hinh dang env khac han (khong R2,
+# STORAGE_BACKEND=local), nen no co duong rieng thay vi dung chung.
+install -m 0620 -o root -g "$NGUOI" /dev/null "$BASE/env-translation.stage"
+for p in "$BASE" "$BASE/req" "$BASE/res" "$BASE/env.stage" "$BASE/env-translation.stage"; do
   echo "  $p ($(stat -c '%a %U:%G' "$p"))"
 done
 

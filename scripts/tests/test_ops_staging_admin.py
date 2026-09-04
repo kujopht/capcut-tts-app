@@ -147,6 +147,40 @@ class TestHanhViThat(unittest.TestCase):
         self.assertNotIn("khong nam trong allowlist", kq.stdout + kq.stderr)
 
 
+class TestRunnerKhongPhuThuocHome(unittest.TestCase):
+    """`staging_run_all.sh` chay QUA cong dieu hanh, va unit cua cong do co
+    `ProtectHome=true` — /home KHONG nhin thay duoc.
+
+    Su co that (2026-09-04): runner tro vao /home/ubuntu/*.py nen ca hai
+    buoc do voi "No such file or directory" -> nghiem thu=2, job=2,
+    AWS_STAGING_FAIL. Chinh lop bao ve toi them vao lam vo duong dan.
+    """
+
+    def test_runner_khong_tro_vao_home(self):
+        p = GOC / "scripts" / "ops" / "staging_run_all.sh"
+        xau = []
+        for i, l in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            t = l.strip()
+            if not t or t.startswith("#"):
+                continue
+            if "/home/" in t:
+                xau.append(f"dong {i}: {t[:80]}")
+        self.assertEqual(xau, [], f"ProtectHome=true -> /home khong doc duoc: {xau}")
+
+    def test_unit_van_giu_ProtectHome(self):
+        """Sua bang cach doi duong dan, KHONG bang cach bo lop bao ve."""
+        s = INSTALL.read_text(encoding="utf-8")
+        self.assertIn("ProtectHome=true", s,
+                      "khong duoc noi long hardening de lam duong dan chay duoc")
+
+    def test_runner_dung_script_trong_checkout(self):
+        s = (GOC / "scripts" / "ops" / "staging_run_all.sh").read_text(encoding="utf-8")
+        for ten in ("worker_staging_acceptance.py", "staging_draft_job_proof.py",
+                    "staging_reconcile_env.sh"):
+            self.assertIn(f'$APP/scripts/ops/{ten}', s,
+                          f"{ten} phai lay tu checkout (ma nguon da merge)")
+
+
 class TestTrinhCai(unittest.TestCase):
 
     def test_installer_khong_mo_rong_quyen(self):

@@ -2,7 +2,8 @@
 # Chay TOAN BO phan con lai cua nghiem thu AWS staging, bang root, tren chinh
 # may staging:
 #
-#     sudo bash /home/ubuntu/staging_run_all.sh
+#     fanfic-staging-admin run-proof     (cong dieu hanh HEP, khong can sudo
+#                                         tu ben khong-dac-quyen)
 #
 # 1. kiem TEN bien trong hai tep env (khong bao gio in gia tri)
 # 2. bat va khoi dong cac unit staging
@@ -47,12 +48,16 @@ else
 fi
 
 hr "0b. DONG BO CHINH SACH ENV (khong cham bi mat, khong them R2)"
-# Uu tien ban vua duoc stage vao /home/ubuntu (moi nhat), roi den ban trong
-# checkout. Hai duong de mot lan chay khong phu thuoc vao thu tu cap nhat.
-REC=""
-for c in /home/ubuntu/staging_reconcile_env.sh "$APP/scripts/ops/staging_reconcile_env.sh"; do
-  [ -f "$c" ] && { REC="$c"; break; }
-done
+# CHI dung ban trong CHECKOUT. Truoc day uu tien ban stage o /home/ubuntu,
+# nhung `fanfic-staging-admin.service` co `ProtectHome=true` (co y, de lam
+# hep quyen) nen /home KHONG NHIN THAY duoc tu dich vu — moi lenh tro vao do
+# bao "No such file or directory". Da do that: nghiem thu=2, job=2.
+#
+# Dung checkout con DUNG HON ve ban chat: ban chung minh phai chay tren ma
+# nguon DA MERGE, khong phai mot ban chep tay. Verb `update` lo viec dua
+# checkout ve origin/main.
+REC="$APP/scripts/ops/staging_reconcile_env.sh"
+[ -f "$REC" ] || REC=""
 if [ -n "$REC" ]; then
   echo "  dung: $REC"
   bash "$REC" 2>&1 | sed 's/^/  /'
@@ -102,14 +107,14 @@ export FAS_PIPER_MODELS_DIR="$MODELS"
 export PYTHONUTF8=1
 
 hr "3. BO NGHIEM THU DAY DU"
-"$PY" /home/ubuntu/worker_staging_acceptance.py \
+"$PY" "$APP/scripts/ops/worker_staging_acceptance.py" \
   --baseline docs/reports/gce-worker-baseline.json 2>&1 | sed 's/^/  /'
 ket_nt=${PIPESTATUS[0]}
 echo "  -> exit=$ket_nt"
 
 hr "4. MOT JOB DRAFT THAT — chung minh MAY NAY nhan"
 cd "$APP" || exit 4
-"$PY" /home/ubuntu/staging_draft_job_proof.py 2>&1 | sed 's/^/  /'
+"$PY" "$APP/scripts/ops/staging_draft_job_proof.py" 2>&1 | sed 's/^/  /'
 ket_job=${PIPESTATUS[0]}
 echo "  -> exit=$ket_job"
 
@@ -124,8 +129,17 @@ echo "  python          : $("$PY" --version 2>&1 | cut -d' ' -f2)"
 echo "  ffmpeg          : $(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f3)"
 echo "  goi python      : $("$PY" -m pip list --format=freeze 2>/dev/null | wc -l)"
 echo "  model .onnx     : $(find "$MODELS" -maxdepth 1 -name '*.onnx' 2>/dev/null | wc -l)"
-echo -n "  do tre Appwrite : "
-curl -s -o /dev/null -w '%{time_total}s\n' "${APPWRITE_ENDPOINT%/}/health/version" 2>/dev/null || echo "khong do duoc"
+# Do tre Appwrite: chi la SO LIEU de so voi GCE, khong phai cong. In mot
+# dong duy nhat trong moi truong hop — ban truoc in ca "0.000000s" LAN
+# "khong do duoc" vi `curl` that bai van in `%{time_total}` roi `||` moi chay.
+printf '  do tre Appwrite : '
+if [ -n "${APPWRITE_ENDPOINT:-}" ] \
+   && t=$(curl -sS -o /dev/null -m 20 -w '%{time_total}' \
+          "${APPWRITE_ENDPOINT%/}/health/version" 2>/dev/null); then
+  echo "${t}s"
+else
+  echo "khong do duoc"
+fi
 echo "  cong lang nghe  :"
 ss -tulnp 2>/dev/null | awk '/0.0.0.0|\[::\]/{print "    " $1, $5}' | head -5
 

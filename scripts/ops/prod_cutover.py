@@ -149,16 +149,24 @@ def cong(verb: str, han: int = 900) -> Tuple[int, str]:
     while time.time() < het:
         rc, out, _ = aws(f"cat /var/lib/fanfic-prod-admin/res/{ma}.out 2>/dev/null")
         if rc == 0 and out.strip():
-            ma_thoat = 0
-            for d in out.splitlines():
-                if d.startswith("# exit="):
-                    try:
-                        ma_thoat = int(d.split("=", 1)[1])
-                    except ValueError:
-                        ma_thoat = 1
-            return ma_thoat, out
+            # DOI CHO DEN KHI CO DAU KET THUC. Mot ket qua khong co dong
+            # `# exit=` la mot ket qua CHUA XONG (hoac bi cat), khong phai
+            # mot ket qua thanh cong.
+            #
+            # Ban truoc tra ve ngay khi tep khac rong VA mac dinh
+            # `ma_thoat = 0` khi thieu dau do. Hau qua that: doc trung phan
+            # dau cua mot ban preflight dang chay, khong thay `# exit=`,
+            # roi bao PREPARE_PASS cho mot preflight da FAIL. Fail-open o
+            # dung cho khong duoc phep fail-open.
+            dau = [d for d in out.splitlines() if d.startswith("# exit=")]
+            if dau:
+                try:
+                    return int(dau[-1].split("=", 1)[1]), out
+                except ValueError:
+                    return 1, out
         time.sleep(3)
-    return 124, f"het gio cho verb {verb!r}"
+    # Het gio ma khong thay dau ket thuc -> THAT BAI, khong phai thanh cong.
+    return 124, f"het gio cho verb {verb!r} (khong thay dong '# exit=')"
 
 
 # --- credential -------------------------------------------------------------
@@ -309,8 +317,24 @@ def pha_prepare(a) -> int:
     if ma != 0:
         return 4
 
-    # 5. preflight
-    print("\n5. preflight (khong tieu job that nao)")
+    # 5. tat unit STAGING cua may nay
+    #
+    # Phai lam TRUOC preflight: preflight tu choi chay khi con unit staging
+    # song (rao chan chong "mot may claim job cua ca hai du an"). Truoc day
+    # buoc nay nam trong `canary`, nen `prepare` khong bao gio qua duoc
+    # preflight.
+    #
+    # An toan voi PRODUCTION: cac unit nay tro vao du an/bucket STAGING, nen
+    # tat chung khong cham gi den hang doi production. GCE van dang phuc vu.
+    print("\n5. tat unit staging cua may AWS (khong cham production)")
+    ma, out = cong("stop-staging", han=420)
+    print("\n".join("   " + d for d in out.splitlines() if d.strip()))
+    ghi_audit("prepare.stop_staging", exit=ma)
+    if ma != 0:
+        return 7
+
+    # 6. preflight
+    print("\n6. preflight (khong tieu job that nao)")
     ma, out = cong("preflight", han=900)
     print("\n".join("   " + d for d in out.splitlines()))
     ghi_audit("prepare.preflight", exit=ma)

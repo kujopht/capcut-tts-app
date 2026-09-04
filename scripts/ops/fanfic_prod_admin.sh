@@ -328,12 +328,22 @@ drain() {
     verb="$(head -c 64 "$t" 2>/dev/null | head -1 | tr -cd 'a-z0-9-')"
     rm -f "$t"
     out="$RES/$id.out"
+    # Ghi vao tep TAM roi `mv` vao cho — `mv` trong cung mot he tep la
+    # NGUYEN TU, nen ben goi khong bao gio nhin thay mot ket qua dang viet
+    # do dang.
+    #
+    # Ban truoc ghi thang vao "$out", va bo dieu phoi thi doc ngay khi tep
+    # khac rong. Hau qua that: no doc duoc phan dau cua mot ban preflight
+    # CHUA xong, khong thay dong `# exit=`, roi mac dinh coi la thanh cong
+    # — bao PREPARE_PASS cho mot preflight that ra da FAIL.
+    tam="$RES/.$id.partial"
     {
       echo "# verb=$verb luc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
       chay_verb "$verb"
       echo "# exit=$?"
-    } > "$out" 2>&1
-    chmod 0644 "$out"
+    } > "$tam" 2>&1
+    chmod 0644 "$tam"
+    mv -f "$tam" "$out"
   done
 }
 

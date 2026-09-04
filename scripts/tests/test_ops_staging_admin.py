@@ -216,6 +216,23 @@ class TestRunnerKhongPhuThuocHome(unittest.TestCase):
         self.assertIn("tr -d '\\r'", s,
                       "phai cat \\r truoc khi source tep env")
 
+    def test_runner_KHONG_ep_storage_backend_ve_local(self):
+        """`run-proof` phai GIU NGUYEN kho luu tru dang duoc cau hinh.
+
+        Su co that (2026-09-04): runner goi reconcile khong kem tham so, nen
+        no ap mac dinh `STORAGE_BACKEND=local`. Sau khi `reconcile-r2` da dat
+        r2, mot lan `run-proof` LAT NGUOC ve local roi chay nghiem thu + job
+        DRAFT o che do local — va bao PASS. Do la PASS GIA cho chan R2: no
+        chung minh lai dung cai da chung minh roi.
+        """
+        s = (GOC / "scripts" / "ops" / "staging_run_all.sh").read_text(encoding="utf-8")
+        self.assertIn("STORAGE_BACKEND_MONG_MUON", s,
+                      "runner phai truyen kho luu tru hien tai cho reconcile")
+        # Va phai DOC gia tri hien tai tu tep env, khong dong cung.
+        self.assertRegex(
+            s, r"grep -E '\^STORAGE_BACKEND=' \"\$ENVD/worker\.env\"",
+            "phai doc STORAGE_BACKEND hien tai tu worker.env")
+
     def test_runner_dung_script_trong_checkout(self):
         s = (GOC / "scripts" / "ops" / "staging_run_all.sh").read_text(encoding="utf-8")
         for ten in ("worker_staging_acceptance.py", "staging_draft_job_proof.py",

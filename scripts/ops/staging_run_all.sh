@@ -60,7 +60,28 @@ REC="$APP/scripts/ops/staging_reconcile_env.sh"
 [ -f "$REC" ] || REC=""
 if [ -n "$REC" ]; then
   echo "  dung: $REC"
-  bash "$REC" 2>&1 | sed 's/^/  /'
+  # GIU NGUYEN kho luu tru dang duoc cau hinh — KHONG ep ve `local`.
+  #
+  # Ban truoc goi reconcile khong kem tham so, nen no ap chinh sach mac dinh
+  # `STORAGE_BACKEND=local`. Hau qua: sau khi `reconcile-r2` da dat r2, mot
+  # lan `run-proof` LAT NGUOC no ve local roi chay nghiem thu + job DRAFT o
+  # che do local — va bao PASS. Da xay ra that:
+  #     STORAGE_BACKEND r2
+  #     SAI CHINH SACH STORAGE_BACKEND: mong muon='local'
+  #     STORAGE_BACKEND local
+  # Do la mot PASS GIA cho chan R2: no chung minh dung cai da chung minh roi.
+  #
+  # Viec cua reconcile la lam HAI TEP DONG NHAT, khong phai quyet dinh dung
+  # kho nao. Lua chon kho thuoc ve `reconcile` / `reconcile-r2`.
+  _sb="$(grep -E '^STORAGE_BACKEND=' "$ENVD/worker.env" 2>/dev/null \
+          | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
+  case "$_sb" in
+    local|r2) : ;;
+    *) echo "  STORAGE_BACKEND hien tai la '$_sb' — khong hop le, dung 'local'"
+       _sb=local ;;
+  esac
+  echo "  giu nguyen STORAGE_BACKEND=$_sb"
+  STORAGE_BACKEND_MONG_MUON="$_sb" bash "$REC" 2>&1 | sed 's/^/  /'
   rc=${PIPESTATUS[0]}
   echo "  -> exit=$rc"
   [ "$rc" -eq 0 ] || { echo; echo "FAIL: dong bo chinh sach that bai."; exit 2; }

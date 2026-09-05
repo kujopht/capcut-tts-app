@@ -128,12 +128,45 @@ docker exec mongo-fix mongosh --quiet --eval \
   'db.adminCommand({listDatabases:1}).databases.forEach(d => print(d.name, d.sizeOnDisk))' \
   || echo "  KHONG mo duoc kho — ban khoi phuc HONG"
 
+# GHI LAI cau hinh cu TRUOC khi doi. Thanh vien replset o day rat co the la
+# `mongodb:27017` — ten DICH VU trong docker-compose, khong phai ten may —
+# nen no von da di chuyen duoc. In ra de biet chac thay vi doan.
+echo "--- cau hinh replset dang co trong ban khoi phuc ---"
+docker exec mongo-fix mongosh --quiet --eval \
+  'const c = db.getSiblingDB("local").system.replset.findOne();
+   if (!c) { print("(khong co cau hinh replset)"); }
+   else { print("_id:", c._id);
+          c.members.forEach(m => print("  member", m._id, m.host)); }' || true
+
 echo "--- go cau hinh replset cu ---"
 docker exec mongo-fix mongosh --quiet --eval \
   'const r = db.getSiblingDB("local").system.replset.deleteMany({}); print("da xoa cau hinh replset:", r.deletedCount)' \
   || true
 
 docker stop mongo-fix >/dev/null 2>&1 || true
+
+# BUOC NAY TUNG BI THIEU va la mot cai bay im lang: xoa cau hinh replset roi
+# khoi dong lai voi `--replSet rs0` thi mongod nam o trang thai STARTUP va
+# KHONG BAO GIO tu thanh primary. `listDatabases` van tra loi binh thuong,
+# nen moi phep kiem chi-doc deu xanh trong khi Appwrite khong ghi duoc mot
+# dong nao. Phai `rs.initiate()` lai mot cach tuong minh.
+log "BUOC 5b — khoi tao lai replica set MOT thanh vien"
+RS_HOST="${RS_HOST:-mongodb:27017}"
+echo "se khoi tao rs0 voi thanh vien: $RS_HOST"
+echo "(dat RS_HOST=... neu docker-compose dat ten dich vu khac)"
+cat <<'HD'
+
+Sau khi `docker compose up -d` lam mongod chay voi --replSet rs0, chay MOT lan:
+
+    docker compose exec -T mongodb mongosh --quiet --eval \
+      'rs.initiate({_id:"rs0", members:[{_id:0, host:"mongodb:27017"}]})'
+
+Roi XAC NHAN no that su la primary — day moi la bang chung ghi duoc:
+
+    docker compose exec -T mongodb mongosh --quiet --eval \
+      'print(db.hello().isWritablePrimary)'      # phai in: true
+
+HD
 
 log "BUOC 6 — dung stack"
 echo "Chay tu thu muc co docker-compose.yml:"

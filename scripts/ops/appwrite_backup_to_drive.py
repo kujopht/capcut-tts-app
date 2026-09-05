@@ -34,6 +34,10 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from scripts.ops.appwrite_backup_verify import (  # noqa: E402
+    NGUON_TAR_SONG,
+    kiem_backup,
+)
 from scripts.rclone_archive_copy import rclone_copy, rclone_verify  # noqa: E402
 
 #: Theo dung quy uoc `archive/<nhom>/...` da co tren Drive (animation-worker,
@@ -247,16 +251,44 @@ def main() -> int:
         print(f"    {'CO   ' if v else 'khong'} {k}")
     ket["nhan_dang"] = nhan
 
+    print("\n  --- doi soat NHAT QUAN ben trong tung volume ---")
+    # VI SAO BUOC NAY TON TAI. Moi thu o tren chi chung minh ban sao khong
+    # hong DUONG TRUYEN: tai lai duoc, sha256 khop, giai nen duoc. Mot ban
+    # tar cua thu muc du lieu MongoDB dang chay khop sha256 hoan hao va van
+    # co the khong mo lai duoc — `WiredTiger.turtle` bi ghi de giua chung
+    # lan chep. Ban 20260903T163727Z chinh la truong hop do (journal moi hon
+    # turtle 44 giay). Neu khong co cong nay, tep nay se bao PASS cho no.
+    goc = next((d for d in [ra, *sorted(p for p in ra.iterdir() if p.is_dir())]
+                if any(d.glob("*.tar.gz"))), None)
+    nhat_quan = None
+    if goc is None:
+        print("  KHONG thay volume *.tar.gz nao de doi soat.")
+        nhat_quan = {"ket_luan": "FAIL", "phat_hien": [], "kho_song": []}
+    else:
+        # Duong nay LUON la `tar` thu muc volume dang song — do chinh
+        # `appwrite_backup_offvm.sh` tao ra. Anh chup khoi di duong khac.
+        nhat_quan = kiem_backup(goc, NGUON_TAR_SONG)
+        print(f"  kho song: {', '.join(nhat_quan['kho_song']) or '(khong ro)'}")
+        for f in nhat_quan["phat_hien"]:
+            print(f"    [{f['muc']:9}] {f['ma']}: {f['thong_diep']}")
+        print(f"  nhat quan: {nhat_quan['ket_luan']}")
+    ket["nhat_quan"] = nhat_quan
+
     ok = (dl.returncode == 0 and sha_drive == sha_local and not lech
-          and len(files) > 0)
+          and len(files) > 0 and nhat_quan["ket_luan"] == "PASS")
     buoc(f"KET LUAN: {'PASS' if ok else 'FAIL'}")
     if ok:
-        print("  Ban tren Drive TAI LAI duoc, SHA khop, giai nen duoc, va")
-        print("  tung tep khop manifest. Ban local VAN CON — chua xoa gi.")
+        print("  Ban tren Drive TAI LAI duoc, SHA khop, giai nen duoc, tung")
+        print("  tep khop manifest, VA ben trong tung volume nhat quan.")
+        print("  Ban local VAN CON — chua xoa gi.")
         print("\n  CHUA chung minh: restore o muc CONTAINER (nap volume vao")
         print("  Appwrite dang chay). Do can Docker + compose tren mot VM")
         print("  dung-mot-lan, la mot nhiem vu rieng — KHONG chay tren VM")
         print("  dang phuc vu.")
+    elif nhat_quan["ket_luan"] != "PASS":
+        print("  Vo ngoai co the van dung, nhung BEN TRONG volume KHONG nhat")
+        print("  quan — xem cac dong FAIL o tren. Ban nay KHONG duoc coi la")
+        print("  co the khoi phuc, va KHONG duoc dung lam can cu cutover.")
     print(f"\n{json.dumps(ket, ensure_ascii=False, indent=2)}")
     try:
         shutil.rmtree(fresh, ignore_errors=True)

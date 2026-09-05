@@ -1,0 +1,14 @@
+{
+  "architecture": "X86_64",
+  "creationTimestamp": "2026-09-05T01:52:34.757-07:00",
+  "diskSizeGb": "50",
+  "labels": {
+    "mission": "appwrite-migration",
+    "purpose": "restore-rehearsal"
+  },
+  "name": "appwrite-prod-rehearsal-20260905",
+  "sourceDisk": "https://www.googleapis.com/compute/v1/projects/gen-lang-client-0793420657/zones/us-central1-c/disks/fanfic-appwrite-temp",
+  "sourceDiskId": "8268184344177979716",
+  "status": "READY",
+  "storageBytes": "1121306624"
+}

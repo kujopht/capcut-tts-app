@@ -231,6 +231,86 @@ với mục 4: 8 GiB là **sàn đo được**, không phải mức thoải mái
 Đây là **quyết định chi tiêu của con người**. Phiên này không chọn thay.
 Số liệu để chọn đã đủ ở mục 4.
 
+## 6c. Đã có sẵn một cơ chế backup NHẤT QUÁN mà đợt trước không thấy
+
+Đợt trước chỉ soi các bản `tar` nên bỏ sót điều này: **đĩa production đã được
+snapshot tự động hằng ngày từ trước tới nay.**
+
+```
+resource policy : fanfic-appwrite-daily  (us-central1)
+lịch            : hằng ngày 03:00 UTC, giữ 14 ngày
+đã có           : 16 snapshot, tất cả READY
+mới nhất theo lịch: ...-20260905031112-oqfzi9rz  (2026-09-05 03:11 UTC)
+```
+
+Đây là khác biệt **về bản chất** so với bản `tar`, không phải khác về mức độ:
+
+| Hạng mục | `tar` thư mục volume đang sống | Snapshot đĩa GCE |
+|---|---|---|
+| Tính nguyên tử | **Không** — chép tuần tự qua nhiều phút | **Có** — một thời điểm duy nhất trên toàn đĩa |
+| Kết quả đo được | RÁCH: journal mới hơn `turtle` 44 s | không có hiện tượng rách |
+| Thời gian dừng | 0 | **0** |
+| Cần quyền root trên VM | Có | **Không** |
+| Rủi ro lộ bí mật | `env.snapshot` nằm trong gói | không tạo thêm bản sao bí mật nào |
+
+### Bản đã tạo cho đợt diễn tập này
+
+```
+name          : appwrite-prod-rehearsal-20260905
+status        : READY
+sourceDisk    : fanfic-appwrite-temp   (sourceDiskId 8268184344177979716)
+diskSizeGb    : 50
+storageBytes  : 1.121.306.624
+creation      : 2026-09-05T01:52:34-07:00
+architecture  : X86_64
+```
+
+Production **không bị dừng một giây nào**; kiểm ngay sau khi tạo:
+`GET /v1/health/version` → `{"version":"1.9.6"}`.
+
+### Bảo đảm THẬT SỰ đạt được là gì — nói chính xác
+
+Snapshot này là **crash-consistent**, không phải **quiesced**. Đã kiểm:
+`/etc/google/snapshot-config.yaml` và `/etc/google/snapshot_scripts/`
+**không tồn tại**, nên `--guest-flush` chưa được cấu hình.
+
+Điều đó **vẫn** đủ để làm backup MongoDB hợp lệ, vì đúng hai điều kiện của
+MongoDB đều thoả:
+
+1. journaling bật (mặc định), và
+2. journal nằm **cùng một volume** với tệp dữ liệu — ở đây cả stack nằm trên
+   **một** đĩa boot duy nhất (`hyperdisk-balanced` 50 GB), không LVM trải
+   nhiều đĩa, không mount mạng.
+
+Khôi phục từ nó tương đương khôi phục sau mất điện: ext4 replay journal, rồi
+WiredTiger replay journal của nó. Đó là đường phục hồi **được hỗ trợ**.
+
+**Phần phơi nhiễm còn lại, có giới hạn:** các ghi đã ack nhưng chưa kịp flush
+journal (mặc định WiredTiger flush ~100 ms, hoặc ngay lập tức với `j:true`)
+có thể mất. Đó là **mất vài trăm mili-giây ghi cuối**, KHÔNG phải hỏng dữ
+liệu — khác hẳn bản `tar`, thứ có thể **không mở được**.
+
+Một vòng phản biện khác họ model đã tấn công đúng luận điểm này và trả
+`CLAIM_FAILS`. Hai điểm nó đúng, đã tiếp thu: (a) phải gọi đây là
+crash-consistent chứ không được gọi là "production-consistent" trống không;
+(b) khôi phục một thành viên replica set đơn lẻ cần xử lý riêng. Ba điểm nó
+sai và **không** sửa theo: MongoDB *có* chấp nhận volume snapshot khi hai
+điều kiện trên thoả; việc đĩa còn chứa dịch vụ khác **không** phá tính khôi
+phục được của MongoDB; và "zero-downtime" ở đây nói về **lúc BACKUP**, còn
+việc restore diễn ra trên máy dùng-một-lần nên không liên quan.
+
+**Muốn quiesced hoàn toàn thì phải trả giá**, và cả hai lựa chọn đều đụng
+production nên phiên này KHÔNG tự làm:
+
+| Cách | Dừng bao lâu | Vì sao chưa làm |
+|---|---|---|
+| `--guest-flush` | ~dưới 1 s (freeze/thaw) | phải cấu hình `snapshot_scripts` trên production trước; `fsfreeze` trên **root fs** mà thaw hỏng thì treo cả máy |
+| `db.fsyncLock()` | vài phút (chặn ghi) | cần quyền docker/root trên VM; guard của kho chặn `sudo` |
+| `docker compose stop` | vài phút (dừng hẳn) | dừng production thật |
+
+Vì bản crash-consistent đã là backup hợp lệ, **không cần dừng production** để
+có một bản dùng được cho diễn tập.
+
 ## 7. Điều đang CHẶN
 
 Diễn tập khôi phục **chưa chạy được**, vì nó cần một đích Linux + Docker cô
@@ -244,16 +324,74 @@ lập:
 Yêu cầu đã đo xong và ghi ở mục 4, đúng theo điều kiện "không dựng máy tính
 tiền trước khi báo cáo yêu cầu đã đo".
 
-**Việc người vận hành cần làm, theo thứ tự:**
+**CẬP NHẬT 2026-09-05.** Điều kiện "chưa có backup nhất quán" ở trên
+**đã được gỡ** bằng snapshot đĩa (mục 6c) — không cần dừng production.
+Chặn còn lại **chỉ còn một**: không có đường vào AWS.
 
-1. Duyệt dựng **một** EC2 `t3a.large` dùng-một-lần ở `ap-southeast-1` cho
-   diễn tập (dựng, chứng minh, huỷ).
-2. Chạy một lần trên VM nguồn, để có bản backup **nhất quán** đầu tiên:
-   dừng stack rồi mới `tar`, hoặc thêm `mongodump --oplog` vào
-   `~/appwrite/backup.sh` (tệp đó nằm ngoài kho git, chỉ có trên VM).
-3. Xác nhận `appwrite-postgresql` rỗng là đúng.
-4. Xác nhận `fanfic-worker-prod` trên GCE còn cần chạy hay không.
+### Chặn thật sự: phiên này không có quyền AWS nào
 
-Cho tới khi bước 1 và 2 xong, **không có bản backup Appwrite production nào
-được chứng minh là khôi phục được** — và đó là rủi ro lớn nhất hiện tại,
-độc lập với việc có di trú hay không.
+Đã kiểm, cả ba đều không có:
+
+```
+aws CLI trên PATH        : không có
+~/.aws/ (profile/creds)  : không tồn tại
+biến môi trường AWS_*    : không có
+```
+
+`docs/AWS_STAGING_MIGRATION.md` đã ghi đúng tình trạng này từ 2026-09-03:
+EC2 hiện tại do **người vận hành tạo tay**, `worker_bootstrap.sh` chỉ cần
+SSH nên chưa bao giờ cần IAM. Nghĩa là **chưa từng** có credential AWS trên
+máy này để dựng instance.
+
+Vì vậy mục 2 và 3 của nhiệm vụ (dựng `t3a.large`, khôi phục lên đó) **không
+thể tự động hoá** cho tới khi có một trong hai:
+
+* một IAM principal giới hạn trong `ap-southeast-1` (`ec2:RunInstances`,
+  `ec2:CreateSecurityGroup`, `ec2:CreateVolume`, `ec2:*KeyPair*`,
+  `ec2:Describe*`, `ec2:TerminateInstances`) + `aws configure`; **hoặc**
+* người vận hành tự tạo instance rồi đưa IP + khoá SSH; phần còn lại
+  (khôi phục + chứng minh) chạy tự động qua SSH.
+
+### Lệnh sẵn sàng chạy — chỉ thiếu quyền
+
+```bash
+# (1) đưa dữ liệu ra khỏi GCP. Snapshot -> disk -> image -> export.
+gcloud compute disks create appwrite-rehearsal-disk \
+    --source-snapshot=appwrite-prod-rehearsal-20260905 \
+    --zone=us-central1-c
+
+# (2) dựng đích dùng-một-lần (CẦN QUYỀN AWS — đang thiếu)
+aws ec2 run-instances --region ap-southeast-1 \
+    --instance-type t3a.large \
+    --image-id <ubuntu-24.04-amd64> \
+    --block-device-mappings \
+      'DeviceName=/dev/sda1,Ebs={VolumeSize=64,VolumeType=gp3}' \
+    --key-name <khoa> --security-group-ids <sg-chi-mo-SSH> \
+    --tag-specifications \
+      'ResourceType=instance,Tags=[{Key=Name,Value=appwrite-rehearsal},{Key=disposable,Value=true}]'
+
+# (3) trên đích: 4 GiB swap
+sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+
+# (4) khôi phục — KHÔNG được `docker compose up` thẳng, xem mục 6b/6c
+python -m scripts.ops.appwrite_restore_rehearsal plan \
+    --stamp appwrite-prod-rehearsal-20260905 --host <ip-dich>
+```
+
+**Bước 4 phải xử lý replica set trước khi dựng stack.** Khởi động mongod
+**standalone** trên thư mục dữ liệu đã khôi phục, gỡ cấu hình replset cũ
+(nó trỏ tới danh tính máy GCE), rồi mới `docker compose up`. Bỏ bước này thì
+`listDatabases` vẫn xanh trong khi Appwrite không ghi được — đúng loại lỗi
+mà cổng chỉ-đọc không bắt.
+
+### Không huỷ gì
+
+Snapshot `appwrite-prod-rehearsal-20260905` **được giữ nguyên** cho tới khi
+diễn tập chạy xong và bằng chứng được ghi lại (điều kiện 6 của nhiệm vụ).
+Lịch `fanfic-appwrite-daily` cũng giữ nguyên, không đụng tới.
+
+### Hai việc còn để ngỏ từ đợt trước
+
+1. Xác nhận `appwrite-postgresql` rỗng là đúng.
+2. Xác nhận `fanfic-worker-prod` trên GCE còn cần chạy hay không.

@@ -381,5 +381,126 @@ class CongDieuHanh(unittest.TestCase):
         self.assertIn("shlex.quote(verb)", inspect.getsource(pc.cong))
 
 
+
+class GceKhongLienLacDuoc(unittest.TestCase):
+    """LOI THAT, lo ra dung trong pha COMMIT that: `_units_gce()` tra `?`
+    khi SSH hong, va ca `canary` lan `commit` chi loc `== "active"` — nen
+    mot may GCE KHONG LIEN LAC DUOC di lot qua cong y het mot may da dung.
+
+    Fail-open o dung cai cong duoc dung de CHUNG MINH GCE khong con chay.
+    (Lan do that: GCE that su da dung, nen ket luan dung — nhung cong da
+    khong chung minh duoc dieu do.)
+    """
+
+    KHONG_RO = {u: "?" for u in PROD_UNITS}
+
+    def test_commit_TU_CHOI_khi_khong_doc_duoc_trang_thai_GCE(self):
+        with mock.patch.object(pc, "_units_gce", return_value=dict(self.KHONG_RO)), \
+             mock.patch.object(pc, "_units_aws", return_value=units(active_prod=True)), \
+             mock.patch.object(pc, "ghi_audit"):
+            self.assertEqual(pc.pha_commit(ns()), 7)
+
+    def test_canary_TU_CHOI_khi_khong_doc_duoc_trang_thai_GCE(self):
+        goi = []
+        with mock.patch.object(pc, "_units_gce", return_value=dict(self.KHONG_RO)), \
+             mock.patch.object(pc, "cong",
+                               side_effect=lambda v, han=900: goi.append(v) or (0, "")), \
+             mock.patch.object(pc, "ghi_audit"):
+            self.assertEqual(pc.pha_canary(ns()), 6)
+        self.assertEqual(goi, [], "KHONG duoc bat AWS khi chua biet GCE the nao")
+
+    def test_mot_unit_khong_ro_cung_du_de_TU_CHOI(self):
+        tt = units_gce(False)
+        tt[PROD_UNITS[0]] = "?"
+        with mock.patch.object(pc, "_units_gce", return_value=tt), \
+             mock.patch.object(pc, "_units_aws", return_value=units(active_prod=True)), \
+             mock.patch.object(pc, "ghi_audit"):
+            self.assertEqual(pc.pha_commit(ns()), 7)
+
+    def test_units_gce_thu_lai_truoc_khi_bo_cuoc(self):
+        """SSH qua `gcloud` that bai chap chon la chuyen co that."""
+        lan = {"n": 0}
+
+        def _gce(l, han=300):
+            lan["n"] += 1
+            if lan["n"] < 3:
+                return 255, "", "ssh hong"
+            return 0, "\n".join(["inactive"] * len(PROD_UNITS)) + "\n---\n", ""
+
+        with mock.patch.object(pc, "gce", side_effect=_gce), \
+             mock.patch.object(pc.time, "sleep"):
+            tt = pc._units_gce()
+        self.assertEqual(lan["n"], 3)
+        self.assertEqual(pc._gce_chua_ro(tt), [])
+
+    def test_het_lan_thu_thi_tra_KHONG_RO(self):
+        with mock.patch.object(pc, "gce", return_value=(255, "", "hong")), \
+             mock.patch.object(pc.time, "sleep"):
+            tt = pc._units_gce()
+        self.assertEqual(len(pc._gce_chua_ro(tt)), len(PROD_UNITS))
+
+    def test_dau_ra_thieu_dong_cung_la_KHONG_RO(self):
+        """Doc duoc mot phan cung khong du de ket luan."""
+        with mock.patch.object(pc, "gce", return_value=(0, "inactive\n---\n", "")), \
+             mock.patch.object(pc.time, "sleep"):
+            tt = pc._units_gce()
+        self.assertEqual(len(pc._gce_chua_ro(tt)), len(PROD_UNITS))
+
+
+class MaThoatCuaSystemctlLaMOT_PHAN_CAU_TRA_LOI(unittest.TestCase):
+    """LOI THAT, chi lo ra SAU khi GCE that su dung — tuc dung luc no gay
+    hai nhat.
+
+    `systemctl is-active` thoat KHAC 0 khi unit KHONG active, va `gcloud
+    compute ssh` truyen ma thoat cua lenh tu xa ra ngoai. Nen mot may GCE
+    da dung DUNG NHU MONG DOI lai lam `rc != 0`, va bo doc trang thai coi
+    do la "khong lien lac duoc" -> pha COMMIT tu choi vi tuong mat lien
+    lac, trong khi that ra no vua doc duoc dung cai trang thai no can.
+    """
+
+    def _ra(self, trang_thai):
+        return ("\n".join(trang_thai) + "\n---\n"
+                + "\n".join(["disabled"] * len(PROD_UNITS)) + "\n")
+
+    def test_doc_duoc_DU_ma_thoat_khac_0(self):
+        """Day la ca bai kiem: rc != 0 nhung dau ra hop le."""
+        with mock.patch.object(pc, "gce",
+                               return_value=(3, self._ra(["inactive"] * len(PROD_UNITS)), "")), \
+             mock.patch.object(pc.time, "sleep"):
+            tt = pc._units_gce()
+        self.assertEqual(pc._gce_chua_ro(tt), [])
+        self.assertTrue(all(v == "inactive" for v in tt.values()))
+
+    def test_van_doc_duoc_khi_dang_active_va_rc_bang_0(self):
+        with mock.patch.object(pc, "gce",
+                               return_value=(0, self._ra(["active"] * len(PROD_UNITS)), "")), \
+             mock.patch.object(pc.time, "sleep"):
+            tt = pc._units_gce()
+        self.assertEqual(pc._gce_chua_ro(tt), [])
+        self.assertTrue(all(v == "active" for v in tt.values()))
+
+    def test_dau_ra_RAC_van_la_KHONG_RO(self):
+        """Noi long ma thoat khong duoc bien thanh 'chap nhan moi thu'."""
+        rac = "ERROR: (gcloud.compute.ssh) plink.exe exited with return code [1]\n"
+        with mock.patch.object(pc, "gce", return_value=(1, rac, "")), \
+             mock.patch.object(pc.time, "sleep"):
+            tt = pc._units_gce()
+        self.assertEqual(len(pc._gce_chua_ro(tt)), len(PROD_UNITS))
+
+    def test_tu_la_khong_phai_trang_thai_systemd_thi_KHONG_RO(self):
+        with mock.patch.object(pc, "gce",
+                               return_value=(0, self._ra(["yes", "no", "maybe"]), "")), \
+             mock.patch.object(pc.time, "sleep"):
+            tt = pc._units_gce()
+        self.assertEqual(len(pc._gce_chua_ro(tt)), len(PROD_UNITS))
+
+    def test_lenh_khong_de_ma_thoat_tu_xa_lam_nhieu(self):
+        lenh = []
+        with mock.patch.object(pc, "gce",
+                               side_effect=lambda l, han=300: (lenh.append(l), (0, "", ""))[1]), \
+             mock.patch.object(pc.time, "sleep"):
+            pc._units_gce(so_lan=1)
+        self.assertTrue(lenh[0].rstrip().endswith("exit 0"))
+
 if __name__ == "__main__":
     unittest.main()

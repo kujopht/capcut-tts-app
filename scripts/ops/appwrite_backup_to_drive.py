@@ -34,7 +34,10 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from scripts.ops.appwrite_backup_verify import kiem_backup  # noqa: E402
+from scripts.ops.appwrite_backup_verify import (  # noqa: E402
+    NGUON_TAR_SONG,
+    kiem_backup,
+)
 from scripts.rclone_archive_copy import rclone_copy, rclone_verify  # noqa: E402
 
 #: Theo dung quy uoc `archive/<nhom>/...` da co tren Drive (animation-worker,
@@ -262,7 +265,9 @@ def main() -> int:
         print("  KHONG thay volume *.tar.gz nao de doi soat.")
         nhat_quan = {"ket_luan": "FAIL", "phat_hien": [], "kho_song": []}
     else:
-        nhat_quan = kiem_backup(goc)
+        # Duong nay LUON la `tar` thu muc volume dang song — do chinh
+        # `appwrite_backup_offvm.sh` tao ra. Anh chup khoi di duong khac.
+        nhat_quan = kiem_backup(goc, NGUON_TAR_SONG)
         print(f"  kho song: {', '.join(nhat_quan['kho_song']) or '(khong ro)'}")
         for f in nhat_quan["phat_hien"]:
             print(f"    [{f['muc']:9}] {f['ma']}: {f['thong_diep']}")

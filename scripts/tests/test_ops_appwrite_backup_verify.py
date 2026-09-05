@@ -19,6 +19,8 @@ from pathlib import Path
 from scripts.ops.appwrite_backup_verify import (
     CANH_BAO,
     FAIL,
+    NGUON_ANH_CHUP,
+    NGUON_TAR_SONG,
     THONG_TIN,
     doc_volume,
     kiem_backup,
@@ -259,6 +261,85 @@ class TestKiemBackup(unittest.TestCase):
         kq = kiem_backup(self.tmp)
         self.assertEqual(kq["kho_song"], [])
         self.assertEqual(kq["ket_luan"], "FAIL")
+
+
+class TestNguonAnhChup(unittest.TestCase):
+    """Cung mot hinh dang tep, hai ket luan — vi CACH CHEP khac nhau.
+
+    Day la bai hoc dat nhat cua ca dot: ban `tar` RACH (20260903T163727Z) va
+    ban trich tu ANH CHUP KHOI (20260905) co be ngoai GIONG HET NHAU. Neu
+    cong khong biet `nguon`, no phai chon mot trong hai cai sai: hoac cho
+    ban rach di qua, hoac chan ban anh chup hoan toan tot.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="nguon-test-"))
+
+    def _hinh_dang_that(self):
+        # Do that tu ca hai ban: lock 2 byte, journal moi hon turtle ~60s.
+        tep = mongo_lanh()
+        tep["mongod.lock"] = (b"1\n", T0 - 900_000)
+        tep["journal/WiredTigerLog.0000000013"] = (b"x" * 4096, T0 + 60)
+        return tep
+
+    def _vol(self, tep):
+        p = viet_tar(self.tmp / "appwrite_appwrite-mongodb.tar.gz", tep)
+        return doc_volume(p)
+
+    def test_cung_hinh_dang_tar_song_thi_FAIL(self):
+        kq = kiem_wiredtiger(self._vol(self._hinh_dang_that()), NGUON_TAR_SONG)
+        ma = {f.ma for f in kq}
+        self.assertIn("WT_MONGOD_DANG_CHAY", ma)
+        self.assertIn("WT_SAO_CHEP_RACH", ma)
+        self.assertTrue(any(f.muc == FAIL for f in kq))
+
+    def test_cung_hinh_dang_anh_chup_thi_KHONG_FAIL(self):
+        kq = kiem_wiredtiger(self._vol(self._hinh_dang_that()), NGUON_ANH_CHUP)
+        ma = {f.ma for f in kq}
+        self.assertNotIn("WT_MONGOD_DANG_CHAY", ma)
+        self.assertNotIn("WT_SAO_CHEP_RACH", ma)
+        self.assertIn("WT_ANH_CHUP_MONGOD_DANG_CHAY", ma)
+        self.assertIn("WT_ANH_CHUP_JOURNAL_DI_TRUOC", ma)
+        self.assertFalse([f.ma for f in kq if f.muc == FAIL])
+
+    def test_anh_chup_thieu_journal_la_FAIL(self):
+        # Voi anh chup, journal la thu DUY NHAT bit lai khoang cach tu
+        # checkpoint cuoi toi thoi diem chup. Thieu no la mat du lieu.
+        tep = self._hinh_dang_that()
+        for k in [t for t in tep if t.startswith("journal/")]:
+            del tep[k]
+        kq = kiem_wiredtiger(self._vol(tep), NGUON_ANH_CHUP)
+        self.assertIn("WT_ANH_CHUP_THIEU_JOURNAL", {f.ma for f in kq})
+        self.assertTrue(any(f.muc == FAIL for f in kq))
+
+    def test_tar_song_thieu_journal_khong_bi_bat_nham(self):
+        # Ban tar cua mot mongod DA TAT SACH co the khong con journal, va do
+        # khong phai loi. Chi anh chup moi bat buoc phai co.
+        tep = mongo_lanh()
+        for k in [t for t in tep if t.startswith("journal/")]:
+            del tep[k]
+        kq = kiem_wiredtiger(self._vol(tep), NGUON_TAR_SONG)
+        self.assertNotIn("WT_ANH_CHUP_THIEU_JOURNAL", {f.ma for f in kq})
+
+    def test_nguon_sai_bi_tu_choi(self):
+        with self.assertRaises(ValueError):
+            kiem_backup(self.tmp, "khong_ton_tai")
+
+
+class TestThieuVolume(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="thieu-test-"))
+
+    def test_backup_thieu_volume_bi_bao(self):
+        # `backup.sh` cu lay 9 volume trong khi stack that co 14. Khong tep
+        # nao hong, khong sha256 nao lech — kho chi bien mat.
+        viet_tar(self.tmp / "appwrite_appwrite-mongodb.tar.gz", mongo_lanh())
+        kq = kiem_backup(self.tmp)
+        thieu = [f for f in kq["phat_hien"] if f["ma"] == "THIEU_VOLUME"]
+        self.assertEqual(len(thieu), 1)
+        self.assertEqual(thieu[0]["muc"], CANH_BAO)
+        for v in ("appwrite-builds", "appwrite-cache", "appwrite-sites"):
+            self.assertIn(v, thieu[0]["thong_diep"])
 
 
 if __name__ == "__main__":  # pragma: no cover

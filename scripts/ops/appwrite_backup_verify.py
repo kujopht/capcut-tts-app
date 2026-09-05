@@ -232,10 +232,17 @@ def kiem_wiredtiger(v: Volume, nguon: str = NGUON_TAR_SONG) -> list[Phat_hien]:
             "chung mongod da dung."))
 
     if not any(f.muc == FAIL for f in ra):
-        ra.append(Phat_hien(
-            THONG_TIN, "WT_ON_DINH",
-            f"{v.ten}: {WT_TURTLE} moi bang hoac moi hon moi tep du lieu, va "
-            f"{WT_LOCK} rong — ban chep nay nhat quan."))
+        # Ly do PHAI khop voi nguon. Ban dau dong nay luon noi "mongod.lock
+        # rong va turtle moi nhat" — ca hai deu SAI tren duong anh chup
+        # (lock 2 byte, journal di truoc turtle 32s). Mot cong in ly do sai
+        # thi ngay ca khi ket luan dung cung khong con dang tin.
+        if la_anh_chup:
+            ly_do = ("anh chup khoi lay toan dia tai MOT thoi diem, va co "
+                     "journal de replay — nhat quan o muc khoi phuc sau su co")
+        else:
+            ly_do = (f"{WT_TURTLE} moi bang hoac moi hon moi tep du lieu, va "
+                     f"{WT_LOCK} rong — mongod da dung han luc chep")
+        ra.append(Phat_hien(THONG_TIN, "WT_ON_DINH", f"{v.ten}: {ly_do}."))
     return ra
 
 

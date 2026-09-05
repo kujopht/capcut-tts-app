@@ -321,6 +321,20 @@ class TestNguonAnhChup(unittest.TestCase):
         kq = kiem_wiredtiger(self._vol(tep), NGUON_TAR_SONG)
         self.assertNotIn("WT_ANH_CHUP_THIEU_JOURNAL", {f.ma for f in kq})
 
+
+    def test_ly_do_on_dinh_phai_khop_nguon(self):
+        # Cong in ly do SAI thi ket luan dung cung khong con dang tin.
+        # Duong anh chup KHONG duoc noi "mongod.lock rong" khi no 2 byte.
+        kq = kiem_wiredtiger(self._vol(self._hinh_dang_that()), NGUON_ANH_CHUP)
+        od = next(f for f in kq if f.ma == "WT_ON_DINH")
+        self.assertNotIn("rong", od.thong_diep)
+        self.assertIn("MOT thoi diem", od.thong_diep)
+
+    def test_ly_do_on_dinh_duong_tar_van_noi_ve_lock(self):
+        kq = kiem_wiredtiger(self._vol(mongo_lanh()), NGUON_TAR_SONG)
+        od = next(f for f in kq if f.ma == "WT_ON_DINH")
+        self.assertIn("mongod.lock rong", od.thong_diep)
+
     def test_nguon_sai_bi_tu_choi(self):
         with self.assertRaises(ValueError):
             kiem_backup(self.tmp, "khong_ton_tai")

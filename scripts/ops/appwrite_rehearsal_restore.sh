@@ -17,11 +17,14 @@
 #      ra. Nen: SMTP bi vo hieu, ACME bi tat, domain doi ve chinh may nay.
 #   3. KHONG cham DNS, khong cham R2, khong cham production.
 #
-# VI SAO PHAI SUA REPLICA SET. Thu muc du lieu mang theo cau hinh replica
-# set tro toi danh tinh may GCE cu (`local.system.replset`). Bat len nguyen
-# xi thi mongod chay nhung KHONG tu bau thanh primary, nen Appwrite doc
-# duoc ma khong ghi duoc — va `listDatabases` van xanh, nen mot phep kiem
-# chi-doc se bao "dat" tren mot he khong dung duoc.
+# VE REPLICA SET — da do that 2026-09-05, KHONG con la gia dinh.
+# Thu muc du lieu mang theo `local.system.replset`, nhung thanh vien duoc
+# dia chi hoa bang TEN CONTAINER (`appwrite-mongodb:27017`), khong phai ten
+# may, nen cau hinh di chuyen duoc nguyen ven: tren EC2 dien tap mongod tu
+# len PRIMARY ngay lan dau, khong can sua gi. Van phai KIEM (`isWritable
+# Primary`) chu khong duoc tin: mot mongod ket o STARTUP van tra loi
+# `listDatabases` binh thuong, nen phep kiem chi-doc se bao "dat" tren mot
+# he khong ghi duoc.
 set -uo pipefail
 
 VOLDIR="${1:-}"
@@ -138,33 +141,39 @@ docker exec mongo-fix mongosh --quiet --eval \
    else { print("_id:", c._id);
           c.members.forEach(m => print("  member", m._id, m.host)); }' || true
 
-echo "--- go cau hinh replset cu ---"
-docker exec mongo-fix mongosh --quiet --eval \
-  'const r = db.getSiblingDB("local").system.replset.deleteMany({}); print("da xoa cau hinh replset:", r.deletedCount)' \
-  || true
-
 docker stop mongo-fix >/dev/null 2>&1 || true
 
-# BUOC NAY TUNG BI THIEU va la mot cai bay im lang: xoa cau hinh replset roi
-# khoi dong lai voi `--replSet rs0` thi mongod nam o trang thai STARTUP va
-# KHONG BAO GIO tu thanh primary. `listDatabases` van tra loi binh thuong,
-# nen moi phep kiem chi-doc deu xanh trong khi Appwrite khong ghi duoc mot
-# dong nao. Phai `rs.initiate()` lai mot cach tuong minh.
-log "BUOC 5b — khoi tao lai replica set MOT thanh vien"
-RS_HOST="${RS_HOST:-mongodb:27017}"
-echo "se khoi tao rs0 voi thanh vien: $RS_HOST"
-echo "(dat RS_HOST=... neu docker-compose dat ten dich vu khac)"
+# DIEN TAP THAT 2026-09-05 DA BAC BO buoc "xoa cau hinh replset" o day.
+#
+# Ban truoc cua tep nay xoa `local.system.replset` roi khoi tao lai. Chay
+# that cho thay dieu do vua THUA vua NGUY HIEM: thanh vien duoc dia chi hoa
+# la `appwrite-mongodb:27017` — TEN CONTAINER trong docker-compose, khong
+# phai ten may — nen cau hinh von da di chuyen duoc nguyen ven sang may
+# khac. Do duoc tren EC2 dien tap:
+#
+#     isWritablePrimary = true  ngay o lan thu DAU TIEN
+#     rs.status()       -> set: rs0, myState: 1, appwrite-mongodb:27017 PRIMARY
+#
+# Xoa cau hinh se vut di oplog config ma khong duoc gi, va neu quen
+# `rs.initiate()` thi mongod ket o STARTUP: doc van duoc, GHI thi khong,
+# trong khi moi phep kiem chi-doc van xanh.
+#
+# Nen: KIEM TRUOC. Chi can can thiep khi thanh vien duoc dia chi hoa bang
+# ten may hoac IP cu the.
+
+log "BUOC 5b — chi khoi tao lai replica set NEU can"
 cat <<'HD'
+Sau `docker compose up -d`, XAC NHAN truoc khi lam gi them:
 
-Sau khi `docker compose up -d` lam mongod chay voi --replSet rs0, chay MOT lan:
+    docker compose exec -T mongodb mongosh --quiet --eval       'print(db.hello().isWritablePrimary)'
 
-    docker compose exec -T mongodb mongosh --quiet --eval \
-      'rs.initiate({_id:"rs0", members:[{_id:0, host:"mongodb:27017"}]})'
+  true  -> XONG. Cau hinh replset di chuyen duoc, khong dung toi gi nua.
+  false -> chi khi do moi khoi tao lai, voi dung ten dich vu trong compose:
 
-Roi XAC NHAN no that su la primary — day moi la bang chung ghi duoc:
+    docker compose exec -T mongodb mongosh --quiet --eval       'rs.initiate({_id:"rs0", members:[{_id:0, host:"appwrite-mongodb:27017"}]})'
 
-    docker compose exec -T mongodb mongosh --quiet --eval \
-      'print(db.hello().isWritablePrimary)'      # phai in: true
+GHI duoc moi la bang chung, khong phai doc duoc. Mot mongod ket o STARTUP
+van tra loi `listDatabases` binh thuong.
 
 HD
 

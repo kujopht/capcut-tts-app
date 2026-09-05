@@ -4,10 +4,16 @@ Ngày đo: **2026-09-05**. Mọi con số dưới đây đến từ một lần 
 tầng thật, không lấy lại từ tài liệu cũ. Nhiệm vụ này **không** chốt cutover
 và **không** đụng vào production.
 
-> **Kết luận một dòng:** bản backup mới nhất **KHÔNG được coi là khôi phục
-> được**. Nó nguyên vẹn về đường truyền nhưng bên trong là một bản chép
-> RÁCH của MongoDB đang chạy. Cutover dựa trên bản này là đánh cược toàn bộ
-> dữ liệu production.
+> **Kết luận một dòng (cập nhật 2026-09-05 sau khi diễn tập CHẠY THẬT):**
+> đường khôi phục an toàn **đã có và đã được chứng minh** — bằng **snapshot
+> đĩa**, không phải bằng `tar`. Snapshot khôi phục được thật: MongoDB replay
+> journal, tự lên PRIMARY, ghi được, và **1.571 document production** đọc lại
+> đúng. Xem mục 8.
+>
+> Ngược lại, các bản **`tar` do `backup.sh`/`backup_v2.sh` tạo vẫn KHÔNG
+> được coi là khôi phục được**: chúng nguyên vẹn về đường truyền nhưng bên
+> trong là bản chép RÁCH của MongoDB đang chạy, và còn thiếu hẳn 5 volume.
+> Đừng cutover dựa trên chúng.
 
 ---
 
@@ -395,3 +401,97 @@ Lịch `fanfic-appwrite-daily` cũng giữ nguyên, không đụng tới.
 
 1. Xác nhận `appwrite-postgresql` rỗng là đúng.
 2. Xác nhận `fanfic-worker-prod` trên GCE còn cần chạy hay không.
+
+## 8. DIỄN TẬP KHÔI PHỤC ĐÃ CHẠY THẬT — 2026-09-05
+
+Chạy trên EC2 dùng-một-lần `47.128.228.81` (`ip-172-31-33-185`), 2 vCPU /
+7840 MB / 61 GB / Ubuntu 24.04.4, swap 4 GiB. Xác nhận **không phải** máy
+worker TTS production: không có `/opt/fanfic-audio`, 0 dịch vụ `fanfic`.
+Production GCE, DNS và worker TTS **không bị chạm tới**.
+
+### Chuỗi bằng chứng
+
+| Bước | Kết quả |
+|---|---|
+| Nguồn | snapshot `appwrite-prod-rehearsal-20260905` (crash-consistent, 0 downtime) |
+| Truyền | 14/14 volume, 910 MB, `sha256sum -c` **14 OK / 0 FAILED** |
+| Nạp volume | 14/14 vào Docker; thư mục dữ liệu MongoDB 756,8 MB |
+| **WiredTiger mở được** | `"starting WiredTiger recovery"`, `"Recovering log 13 through 14"`, `"Main recovery loop: starting at 13,32691072 to 14,256"` — journal replay chạy đúng như dự đoán, 0 lỗi hỏng |
+| Database | `appwrite` 48,5 MB · `local` 257 MB (oplog) · `admin` · `config` |
+| Replica set | `rs0`, thành viên `appwrite-mongodb:27017` |
+| **Lên PRIMARY** | `isWritablePrimary=true` **ngay lần đầu**, `rs.status()` → `myState: 1` |
+| Đọc/ghi | INSERT ack · READBACK đúng · UPDATE 1/1 · **TRANSACTION commit=true** · dọn sạch |
+| Dữ liệu thật còn nguyên | `NOVELS_VAN_CON=50` sau khi ghi/xoá |
+
+### Dữ liệu mức ứng dụng đã khôi phục
+
+`fanfic_world_prod` — 43 collection khai báo, 27 có dữ liệu, **1.571 document**:
+
+| Collection | Docs | Collection | Docs |
+|---|---|---|---|
+| Chapters | 290 | Job Claims | 255 |
+| Job Locks | 240 | Audio Tracks | 238 |
+| TTS Jobs | 237 | Moderation events | 104 |
+| Video Imports | 51 | Novels | 50 |
+| Content Queue | 30 | XP Ledger | 16 |
+| Profiles | 15 | Quest Progress | 12 |
+
+`fanfic_world_dev` — 41 collection, 19 có dữ liệu, 620 document.
+
+Nội dung **đọc được thật**, không chỉ đếm được: tiêu đề tiếng Việt còn dấu
+đúng (`"TỔNG HỢP Bóng Rổ Fanfic Kích Hoạt Hệ Thống Chó"`), 290 chương chứa
+**3.158.180 ký tự**, index sống sót (novels 9, chapters 8, audio 7).
+
+### Bất biến tham chiếu
+
+| Quan hệ | So sánh được | Mồ côi | Kết quả |
+|---|---|---|---|
+| Chapter → Novel (`novel_id`) | 290/290 | 0 | **ĐẠT** |
+| Audio → Chapter (`chapter_id`) | 238/238 | 1 | xem dưới |
+
+**Một audio track mồ côi — KHÔNG phải lỗi khôi phục.** `trk_9d9c36f8a83a45a2`
+tạo lúc `2026-09-04 23:37:31Z`, tức **9 giờ TRƯỚC** snapshot (08:51Z); bản ghi
+mới nhất trong kho cũng đã 6,5 giờ trước snapshot. Nó nằm ngoài hẳn cửa sổ
+crash-consistency, nên đây là **rác có sẵn trên production** (chương bị xoá
+còn để lại audio), không phải mất mát do di trú. Cần dọn ở production.
+
+### Hai lần phép kiểm tự báo ĐẠT trong khi không kiểm gì
+
+Ghi lại vì đây đúng là loại "bằng chứng giả" mà cả nhiệm vụ này sinh ra để
+chặn:
+
+1. Đếm document bằng `r.$id` rồi `r._uid` → **mọi collection ra 0 document**.
+   Một kết quả trong sạch trong khi 1.571 document vẫn nằm nguyên đó. ID thật
+   nằm ở `r._id`.
+2. Kiểm tham chiếu bằng `novelId` (camelCase) trong khi kho dùng `novel_id`
+   → cả 290 chương "thiếu novelId", và phép kiểm in **"ĐẠT — không có tham
+   chiếu mồ côi"** dù chưa so sánh một cặp nào.
+
+Nên `integrity2.js` giờ **từ chối kết luận ĐẠT khi số bản ghi so sánh được
+bằng 0** — không kết luận còn hơn kết luận sai.
+
+### Điều diễn tập BÁC BỎ trong thiết kế trước đó
+
+Bản trước của `appwrite_rehearsal_restore.sh` xoá `local.system.replset` rồi
+`rs.initiate()` lại. Chạy thật cho thấy việc đó **thừa**: thành viên được địa
+chỉ hoá bằng **tên container**, không phải tên máy, nên cấu hình di chuyển
+được nguyên vẹn — `isWritablePrimary=true` ngay lần đầu, không sửa gì. Script
+giờ **kiểm trước, chỉ can thiệp khi thật sự cần**.
+
+### Còn thiếu: HTTP mức Appwrite
+
+Chưa dựng được stack Appwrite đầy đủ vì `.env` không chuyển sang được (bị
+cổng phân loại chặn hai lần). `.env` chứa `_APP_OPENSSL_KEY_V1`; thiếu nó thì
+stack vẫn lên và schema vẫn đúng trong khi các trường được mã hoá **không
+giải mã được** — đúng loại "khôi phục thành công" giả. **Không tự sinh khoá
+mới để lấp chỗ đó.**
+
+Người vận hành chạy một lệnh là xong:
+
+```bash
+scp -i C:\Users\nguye\.ssh\fanficappwrrite.pem \
+    <thu-muc>/.env ubuntu@47.128.228.81:/home/ubuntu/rehearsal/stack/.env
+```
+
+Sau đó `docker compose -p appwrite up -d` (tên project **phải** là `appwrite`,
+vì volume đã nạp mang tiền tố `appwrite_`).

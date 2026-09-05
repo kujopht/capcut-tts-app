@@ -336,6 +336,119 @@ Bao cao cuoi phai noi ro con so job that dat duoc, khong duoc lam tron len.
 
 ---
 
+## 6b. BON LOI TIM RA BANG CACH CHAY THAT (2026-09-04)
+
+Ban ra soat bao mat tim 10 phat hien bang cach DOC. Bon loi duoi day chi
+lo ra khi CHAY that — va ba trong so do nam o dung cho nguy hiem nhat:
+duong bao "an toan" va duong khoi phuc.
+
+### L1 — cong an toan bao DAT trong khi no dang TU CHOI
+
+Cong ghi ket qua bang `{ ...; echo "# exit=$?"; } > "$out"`, tuc tep lon
+dan trong luc verb chay. Bo dieu phoi doc `cat $out` moi 3 giay va tra ve
+**ngay khi tep khac rong**, voi `ma_thoat` mac dinh `0`.
+
+Hau qua do duoc: `preflight` tra ve dung `# exit=1` (unit staging con
+chay), nhung bo dieu phoi doc trung phan dau, khong thay dau ket thuc, va
+bao **PREPARE_PASS**.
+
+| Hang muc | Truoc | Sau |
+|---|---|---|
+| Cong ghi ket qua | thang vao `$out` | tep tam roi `mv` — **nguyen tu** |
+| Thieu `# exit=` | **thanh cong (0)** | chua xong, doi tiep |
+| Het gio ma van thieu | — | **that bai (124)** |
+
+### L2 — `UnicodeEncodeError` lam DO mot lan TU DONG ROLLBACK
+
+Console Windows la cp1252; `journalctl` tra ve `—`, `→`. Tien trinh chet
+**dung giua pha rollback**. Lenh bat lai GCE DA chay truoc do, nhung ban
+ghi noi "dang lui" roi im — khong ai biet lui xong hay chua. (Kiem tay
+ngay sau: GCE 3/3 `active`, nhip 1 giay.)
+
+Sua: `reconfigure(utf-8, replace)` cho stdout/stderr, va MOI dau ra tu xa
+di qua `_in_khoi()` — mot ham khong bao gio nem. **Mot loi HIEN THI khong
+duoc phep lam do mot duong khoi phuc.**
+
+### L3 — thieu `translation-worker-prod.env`
+
+`fanfic-translation-worker-prod.service` chet voi "Failed to load
+environment files" roi restart vo han. Trinh cai chi tao tep env cua
+worker TTS. Worker dich co hinh dang env KHAC (xem muc 6c).
+
+**Rao chan da lam dung viec:** worker TTS len `active`, worker dich khong
+len -> `start` tra `exit=1` -> canary FAIL -> rollback. Cai hong la duong
+hien thi cua rollback, khong phai rao chan.
+
+### L4 — `update` bao thanh cong trong khi khong dong bo duoc cong
+
+`ProtectSystem=full` lam `/usr` chi doc, nen
+`install ... /usr/local/sbin/fanfic-prod-admin` luon that bai. Loi bi nuot
+bang `2>/dev/null || true`. Do that: sau HAI lan `update` bao `exit=0`,
+`grep -c install-translation-env` tren ban root van tra ve **0**.
+
+Sua: them `/usr/local/sbin` vao `ReadWritePaths`, va buoc dong bo khong
+con nuot loi. Nguon copy la `/opt/fanfic-audio` — `root:root` hoan toan
+tren may nay (da kiem), nen khong ai khong-dac-quyen chen duoc ma vao do.
+
+---
+
+## 6b-2. RA SOAT VONG HAI — SAFE, khong hoi quy
+
+Sau khi sua bon loi o tren, toan bo phan thay doi duoc gui lai cho cung
+ban ra soat doi khang (Antigravity Claude Opus, 186 giay, packet 45 KB).
+
+**STATUS: SAFE.** Khong co hoi quy: ca ba sua cua vong mot (chan chen lenh
+F1, khong nuot loi trong `update`, doc ket qua khong fail-open) deu con
+nguyen hoac manh hon.
+
+| Muc tieu | Ket luan |
+|---|---|
+| `/usr/local/sbin` co thanh duong leo thang quyen khong | **khong** — nguon la `/opt/fanfic-audio` thuoc root, `ubuntu` khong ghi duoc, `NoNewPrivileges=true` |
+| Verb moi co lam song lai lo hong F1 khong | **khong** — cung duong sinh-lai-tu-allowlist, khong cho nao `source` tep |
+| Hai bo khang dinh co lan sang nhau duoc khong | **khong** — tep stage, duong dich va co validator deu dong cung theo tung verb |
+| `cong()` co bi lua tra ve 0 khong | rui ro **THAP**, xem duoi |
+| `_in`/`_in_khoi` nuot ngoai le co giau that bai khong | **khong** — chi la ham hien thi; moi luong dieu khien dung ma thoat |
+| `pha_commit` co bao PASS tren trang thai xau khong | **khong** — job trung hoac audio khong lay duoc deu TU CHOI |
+
+### Viec con lai (THAP, co y hoan)
+
+`cong()` lay dong `# exit=` **cuoi cung**. Ban ra soat chi ra rang neu bo
+drain bi giet dung khoanh khac giua hai lenh VA dau ra cua verb tu no chua
+mot dong bat dau bang `# exit=`, ket qua co the bi doc nham. Trong thuc te
+ke tan cong khong dieu khien duoc ma cua verb (checkout thuoc root) va
+khong ep duoc mot lan giet chinh xac den vay.
+
+**Co y KHONG sua trong luc cutover dang chay:** doi `cong()` bay gio nghia
+la ma chay pha COMMIT khac ma da chay pha DRAIN/CANARY. Doi mot cong cu
+dieu hanh giua chung mot thao tac la rui ro lon hon chinh cai no sua. Sua
+sau khi chot, kem bai kiem doi dau `# exit=` phai la dong khong-rong CUOI
+CUNG cua tep.
+
+---
+
+## 6c. WORKER DICH CO HINH DANG ENV KHAC
+
+Do that tu log khoi dong `fanfic-translation-worker-prod` tren GCE
+(2026-08-24). KHONG suy dien tu worker TTS.
+
+| Bien | Worker TTS | Worker dich |
+|---|---|---|
+| `STORAGE_BACKEND` | `r2` | **`local`** |
+| Credential R2 | co | **khong** — khang dinh chan tuong minh |
+| `FAS_LOCAL_VOICES` | 25 giong | **`piper:ngochuyen`** |
+| `FAS_TRANSLATION_INLINE_WORKER` | — | **`false`** |
+
+Worker dich sinh VAN BAN, khong sinh audio, nen no khong can va khong duoc
+nhan credential R2. Mot khoa thua la mot khoa co the ro ri ma khong ai co
+ly do de dung.
+
+**Ghi lai de khong ai tuong nham:** tren GCE worker nay co
+`translation_provider_configured: false` — no dang chay nhung khong dich
+duoc gi. Ban sao tren AWS giu nguyen tinh trang do; cuoc chuyen nay khong
+sua no, va cung khong lam no te hon.
+
+---
+
 ## 7. GIU DUONG LUI
 
 * GCE **khong** bi terminate, khong bi xoa disk, khong bi doi cau hinh.

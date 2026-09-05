@@ -258,14 +258,59 @@ def lay_env_translation(env_tts: Dict[str, str]) -> Dict[str, str]:
 
 # --- do trang thai ----------------------------------------------------------
 
-def _units_gce() -> Dict[str, str]:
-    rc, out, _ = gce("systemctl is-active " + " ".join(GCE_UNITS) + " 2>&1; "
-                     "echo '---'; systemctl is-enabled " + " ".join(GCE_UNITS) + " 2>&1")
-    if rc != 0:
-        return {u: "?" for u in GCE_UNITS}
-    phan = out.split("---")
-    hoat = [d.strip() for d in phan[0].strip().splitlines() if d.strip()]
-    return {u: (hoat[i] if i < len(hoat) else "?") for i, u in enumerate(GCE_UNITS)}
+#: Gia tri bao "khong biet". KHONG BAO GIO duoc coi la "da dung".
+KHONG_RO = "?"
+
+
+def _units_gce(so_lan: int = 3) -> Dict[str, str]:
+    """Trang thai ba unit production tren GCE.
+
+    Thu lai vai lan: SSH qua `gcloud` that bai chap chon la chuyen co that
+    (da gap mot lan dung giua pha COMMIT). Van khong doc duoc thi tra
+    `KHONG_RO` — va ben goi PHAI coi do la mot cau tra loi khong dat, chu
+    khong phai "khong active".
+    """
+    # `; exit 0` KHONG phai de nuot loi — no de tach hai cau hoi khac nhau.
+    #
+    # `systemctl is-active` thoat KHAC 0 khi unit KHONG active, va `gcloud
+    # compute ssh` truyen ma thoat cua lenh tu xa ra ngoai. Nen mot may GCE
+    # da dung dung nhu mong doi lai lam `rc != 0`, va ban truoc doc do
+    # thanh "khong lien lac duoc".
+    #
+    # Loi nay chi lo ra SAU khi GCE that su dung — tuc dung luc no gay hai
+    # nhat: pha COMMIT tu choi vi tuong mat lien lac, trong khi that ra no
+    # vua doc duoc dung cai trang thai no can.
+    #
+    # Ket luan "doc duoc hay khong" gio dua vao SO DONG dau ra, khong dua
+    # vao ma thoat cua mot lenh ma ma thoat la MOT PHAN CAU TRA LOI.
+    lenh = ("systemctl is-active " + " ".join(GCE_UNITS) + " 2>&1; "
+            "echo '---'; "
+            "systemctl is-enabled " + " ".join(GCE_UNITS) + " 2>&1; "
+            "exit 0")
+    for lan in range(so_lan):
+        _rc, out, _err = gce(lenh)
+        hoat = [d.strip() for d in out.split("---")[0].strip().splitlines()
+                if d.strip()]
+        # Chi nhung tu da biet moi duoc coi la mot cau tra loi.
+        hop_le = {"active", "inactive", "failed", "activating", "deactivating",
+                  "unknown", "reloading"}
+        if len(hoat) >= len(GCE_UNITS) and all(
+                h in hop_le for h in hoat[:len(GCE_UNITS)]):
+            return {u: hoat[i] for i, u in enumerate(GCE_UNITS)}
+        if lan < so_lan - 1:
+            time.sleep(10)
+    return {u: KHONG_RO for u in GCE_UNITS}
+
+
+def _gce_chua_ro(tt: Dict[str, str]) -> List[str]:
+    """Ten cac unit GCE ma ta KHONG doc duoc trang thai.
+
+    Ton tai vi mot loi that: `_units_gce()` tra `?` khi SSH hong, va ca
+    `canary` lan `commit` chi loc `== "active"` — nen mot may GCE KHONG
+    LIEN LAC DUOC di lot qua cong y het mot may da dung. Do la fail-open o
+    dung cai cong duoc dung de chung minh GCE khong con chay.
+    """
+    return [u for u, v in tt.items() if v == KHONG_RO]
 
 
 def _units_aws() -> Dict[str, str]:
@@ -510,6 +555,12 @@ def pha_canary(a) -> int:
 
     print("0. rao chan: GCE phai da dung (khong hai worker cung claim)")
     tt = _units_gce()
+    chua_ro = _gce_chua_ro(tt)
+    if chua_ro and not a.allow_both:
+        print(f"   TU CHOI: KHONG doc duoc trang thai GCE {chua_ro}.")
+        print("            Khong lien lac duoc KHONG dong nghia da dung.")
+        ghi_audit("canary.tu_choi", ly_do="gce khong ro", units=chua_ro)
+        return 6
     con_song = [u for u, v in tt.items() if v == "active"]
     if con_song and not a.allow_both:
         print(f"   TU CHOI: GCE con chay {con_song}. Chay `drain` truoc.")
@@ -633,6 +684,13 @@ def pha_commit(a) -> int:
     print("=== COMMIT ===")
     tt_gce = _units_gce()
     tt_aws = _units_aws()
+    chua_ro = _gce_chua_ro(tt_gce)
+    if chua_ro:
+        print(f"TU CHOI commit: KHONG doc duoc trang thai GCE {chua_ro}.")
+        print("                Khong lien lac duoc KHONG dong nghia da dung —")
+        print("                va cong nay ton tai de CHUNG MINH GCE khong chay.")
+        ghi_audit("commit.tu_choi", ly_do="gce khong ro", units=chua_ro)
+        return 7
     con_gce = [u for u, v in tt_gce.items() if v == "active"]
     if con_gce:
         print(f"TU CHOI commit: GCE con chay {con_gce} — se trung lap cong viec.")
@@ -650,6 +708,58 @@ def pha_commit(a) -> int:
     from scripts.ops import prod_probe
     prod_probe.nap_env_production()
     ban_do = prod_probe.do_hang_doi()
+
+    # --- job trung lap -----------------------------------------------------
+    #
+    # Hai worker cung claim mot hang doi se lo ra o day: `output_key` tat
+    # dinh theo `content_hash`, nen hai lan chay KHONG tao hai object —
+    # nhung chung tao hai JOB cho cung mot (chapter_id, content_hash). Do
+    # la dau vet duy nhat con lai, nen day la cho phai nhin.
+    from server.domain import JobStatus
+
+    store = prod_probe._store()[0]
+    xong = store.list_jobs_by_status(JobStatus.COMPLETED)
+    dem: Dict[Tuple[str, str], int] = {}
+    for j in xong:
+        k = (j.chapter_id, j.content_hash)
+        dem[k] = dem.get(k, 0) + 1
+    trung = sorted((v, k) for k, v in dem.items() if v > 1)
+    print(f"\n  job completed        : {len(xong)}")
+    print(f"  cap (chuong, bam) trung: {len(trung)}")
+    for v, k in trung[:5]:
+        print(f"    {v} job cho chuong {k[0]}")
+
+    # --- audio nguoi dung con lay duoc khong -------------------------------
+    #
+    # Doi may worker khong duoc dong toi duong DOC. Lay mau vai object that
+    # dang phuc vu va xac nhan chung van `head` duoc.
+    from server.adapters import build_storage
+
+    kho = build_storage(prod_probe._store()[1])
+    mau = 0
+    lay_duoc = 0
+    tong_obj = 0
+    for o in kho.list_objects("audio/"):
+        tong_obj += 1
+        if mau < 5:
+            mau += 1
+            key = getattr(o, "key", None) or str(o)
+            h = kho.head_probe(key) if hasattr(kho, "head_probe") else {}
+            if h.get("tim_thay") and isinstance(h.get("content_length"), int) \
+                    and h["content_length"] > 0:
+                lay_duoc += 1
+    print(f"  object duoi 'audio/' : {tong_obj}")
+    print(f"  mau lay lai duoc     : {lay_duoc}/{mau}")
+
+    if trung:
+        print("\nTU CHOI commit: co job TRUNG LAP — dau hieu hai worker cung claim.")
+        ghi_audit("commit.tu_choi", ly_do="job trung lap", so_cap=len(trung))
+        return 5
+    if mau and lay_duoc != mau:
+        print("\nTU CHOI commit: audio nguoi dung khong lay lai duoc day du.")
+        ghi_audit("commit.tu_choi", ly_do="audio khong lay duoc",
+                  lay_duoc=lay_duoc, mau=mau)
+        return 6
 
     chot = {
         "luc": _luc(),

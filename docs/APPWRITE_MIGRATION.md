@@ -495,3 +495,116 @@ scp -i C:\Users\nguye\.ssh\fanficappwrrite.pem \
 
 Sau đó `docker compose -p appwrite up -d` (tên project **phải** là `appwrite`,
 vì volume đã nạp mang tiền tố `appwrite_`).
+
+## 9. TOÀN BỘ STACK APPWRITE ĐÃ CHẠY THẬT TRÊN BẢN KHÔI PHỤC — 2026-09-05
+
+Phần còn thiếu ở mục 8 (HTTP mức Appwrite) nay đã xong. `.env` production
+được đưa sang bằng một lệnh `scp` duy nhất, `chmod 600`, và **không giá trị
+bí mật nào được in ra** ở bất kỳ bước nào.
+
+### Trung hoà đối ngoại TRƯỚC khi `up` — bắt buộc
+
+Bản khôi phục là bản sao **đầy đủ** của production, nên nếu bật lên nguyên xi
+nó sẽ gửi email thật tới người dùng thật và xin chứng chỉ cho tên miền thật.
+Đã vô hiệu **trước** khi khởi động:
+
+| Khoá | Thành |
+|---|---|
+| `_APP_SMTP_HOST/PORT/USERNAME/PASSWORD/SECURE` | rỗng |
+| `_APP_DOMAIN`, `_APP_DOMAIN_FUNCTIONS`, `_APP_DOMAIN_SITES` | `localhost` |
+| `_APP_DOMAIN_TARGET_A/AAAA/CNAME/CAA` | localhost / rỗng |
+| `_APP_OPTIONS_FORCE_HTTPS`, `_APP_OPTIONS_ABUSE` | `disabled` |
+| `_APP_OPENSSL_KEY_V1` | **giữ nguyên** (bắt buộc, xem dưới) |
+
+### Stack lên đủ
+
+**32/32 container `running`**, không cái nào restart-loop hay exited.
+`http://` bị Traefik 301 sang `https://` (chứng chỉ tự ký vì ACME đã tắt):
+
+```
+GET https://localhost/v1/health/version -> {"version":"1.9.6"}   [HTTP 200]
+GET https://localhost/console           -> <!doctype html>       [HTTP 200]
+```
+
+### `_APP_OPENSSL_KEY_V1` GIẢI MÃ ĐƯỢC DỮ LIỆU PRODUCTION THẬT
+
+Đây là phép thử **quyết định**, và nó không thể làm giả được. Tạo một user mới
+rồi đọc lại chỉ chứng minh Appwrite tự nhất quán với khoá của **chính nó** —
+kể cả khi đó là khoá SAI. Chỉ việc giải mã được **ciphertext có sẵn** mới
+chứng minh khoá khớp dữ liệu cũ.
+
+Trong bản khôi phục có **15 trường mã hoá** (`aes-128-gcm`): mật khẩu người
+dùng, secret của API key, OAuth access/refresh token, secret của session.
+Giải mã trực tiếp bằng khoá trong `.env`:
+
+| Ciphertext | Kết quả |
+|---|---|
+| `_console_keys.secret` | **GIẢI MÃ ĐƯỢC** → 265 ký tự |
+| `_console_users.password` | **GIẢI MÃ ĐƯỢC** → 97 ký tự |
+| `identities.providerAccessToken` (OAuth) | **GIẢI MÃ ĐƯỢC** → 253 ký tự |
+| user password của project | **GIẢI MÃ ĐƯỢC** → 97 ký tự |
+
+`GIAI_MA_DAT=4  GIAI_MA_HONG=0`. **Không bản rõ nào được in** — chỉ độ dài và
+loại ký tự, đủ để kết luận mà không lộ bí mật.
+
+Khép kín thêm một vòng: API key `backend-runtime-key-v2` giải mã từ
+`_console_keys` rồi dùng thật để gọi API — Appwrite **chấp nhận**, tức là
+chuỗi khoá → key → dữ liệu đúng từ đầu tới cuối.
+
+### Kiểm tra qua chính REST API
+
+| Lệnh gọi | Kết quả |
+|---|---|
+| `GET /databases/fanfic_world_prod/collections` | **HTTP 200**, `total=43` |
+| `GET .../collections/novels/documents` | **HTTP 200**, `total=50`, tiêu đề thật |
+| `POST .../novels/documents` (bản ghi đánh dấu) | **HTTP 201** |
+| `GET .../novels/documents/rehearsal_probe_20260905` | **HTTP 200**, đọc lại đúng |
+| `DELETE .../rehearsal_probe_20260905` | **HTTP 204** |
+| Đối chiếu sau cùng | novels `50 → 50` — **trả về nguyên trạng** |
+
+Ghi **có đảo ngược thật**: tạo → đọc lại → xoá → số lượng về đúng như cũ,
+không để lại rác.
+
+### RAM/swap dưới toàn bộ stack — số liệu quyết định cho việc chọn máy
+
+```
+Mem:  total 7840 MB | used 3859 | buff/cache 3958 | available 3980
+Swap: total 4095 MB | used 8 KB          <-- gần như KHÔNG chạm swap
+32 container running | disk 17G/61G (28%)
+```
+
+| Container | RAM |
+|---|---|
+| `appwrite-embedding` | 856 MB |
+| `appwrite-mongodb` | 442 MB (CPU 102% — no một lõi lúc khởi động) |
+| `appwrite-browser` | 227 MB |
+| `appwrite` | 173 MB |
+
+**Điều này xác nhận khuyến nghị 8 GiB ở mục 4.** Toàn bộ 32 container chạy
+trong 3,86 GB và **không đụng tới swap** (8 KB), còn dư ~3,98 GB. Máy GCE
+hiện tại phải đẩy 2,53 GB ra swap chỉ vì nó có ít RAM hơn (6,93 GiB) và đã
+chạy liên tục 20 ngày.
+
+**Giới hạn của số đo này, nói thẳng:** đây là stack **không có tải thật** —
+không người dùng đồng thời, không job TTS, không quét truyện. Nó chứng minh
+8 GiB đủ cho *mức nền*, **chưa** chứng minh cho *đỉnh tải*. Biên 4 GB còn lại
+là lý do vẫn nên giữ 4 GiB swap.
+
+### Ghi chú về scope của API key (phát hiện phụ)
+
+Đối chiếu `_console_keys` theo `resourceId`:
+
+| Key | Project | `documents.write` |
+|---|---|---|
+| `fanfic-schema-provisioner` | `fanfic-world-prod` | **không** |
+| `schema-migration-key` | `fanfic-world-prod` | **có** |
+| `backend-runtime-key-v2` | `fanfic-world-prod` | có (đúng vai trò) |
+| `schema-migration-key-v2` | dev | có |
+| `staging-schema-runtime-2026-08-23` | dev | có — **26 scope**, gồm buckets/files/tokens |
+
+`docs/HANDOFF.md` nói khoá schema được cấp **đúng bảy scope, cố ý không có
+`documents.*`** — điều đó **đúng** với `fanfic-schema-provisioner`. Nhưng trên
+cùng project production còn `schema-migration-key` **có** `documents.write`.
+Nếu `APPWRITE_SCHEMA_API_KEY` đang trỏ vào khoá đó thì lập luận "13 series
+thật không thể bị động tới" **không còn đứng vững**. Cần người vận hành đối
+chiếu xem biến môi trường đang dùng khoá nào — không kết luận thay.

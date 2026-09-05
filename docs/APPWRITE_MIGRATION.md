@@ -197,6 +197,40 @@ bao giờ in, không commit, không gửi cho worker ngoài. Công cụ trong kh
 đọc *tên* biến môi trường qua `fanfic_credential_broker`. Không tệp nào ở
 PR này đọc `env.snapshot`.
 
+## 6b. Phản biện độc lập — những gì thiết kế trên còn THIẾU
+
+Thiết kế mục 6 đã qua một vòng phản biện khác họ model (`gpt-oss-120b` qua
+Antigravity). Dưới đây chỉ giữ những điểm **đã kiểm chứng lại được**, kèm
+điểm còn để ngỏ. Ba điểm đầu là lỗ hổng thật trong bản thiết kế đầu tiên.
+
+| # | Lỗ hổng | Trạng thái |
+|---|---|---|
+| 1 | **MongoDB chạy dạng replica set.** Cấu hình replset nằm TRONG thư mục dữ liệu (`local.system.replset`) và trỏ tới danh tính máy CŨ. Khôi phục nguyên xi lên máy mới ⇒ node lên nhưng **không tự bầu thành primary**, Appwrite treo hoặc từ chối ghi. | **ĐÃ KIỂM CHỨNG** — `_mdb_catalog.wt` chứa `replset.oplogTruncateAfterPoint`, `local.startup_log`, và có volume `mongodb-keyfile` |
+| 2 | **Chứng chỉ TLS trên máy đích.** Mục 6 nói "không đổi DNS, chỉ đổi biến môi trường" — nhưng nếu `APPWRITE_ENDPOINT` trỏ sang host mới thì host đó phải có chứng chỉ hợp lệ cho **chính tên** đó. Không có DNS mới + chứng chỉ mới thì bước 7 hỏng bắt tay TLS ngay. | **ĐÚNG** — thiết kế đầu bỏ sót |
+| 3 | **Redis không được nhắc tới.** Redis giữ session và hàng đợi. Khôi phục volume Redis rỗng ⇒ đăng xuất toàn bộ người dùng đang đăng nhập. | **ĐÚNG** — volume Redis 2,7 MB có trong backup nhưng mục 6 không có bước nào nạp nó |
+| 4 | `_APP_*` mã hoá hostname (`_APP_DOMAIN`, `_APP_DOMAIN_TARGET`) phải sửa theo máy đích | **ĐÚNG**, cần đối chiếu `env.snapshot` lúc khôi phục (không in ra) |
+| 5 | Worker nền của Appwrite tự chạy lại trên đích ⇒ có thể xử lý trùng job với GCE | **HỢP LÝ** — giảm nhẹ nhờ bước 1 đóng băng ghi, nhưng cần dừng worker trên đích cho tới sau bước 6 |
+| 6 | Đổi vùng `us-central1` → `ap-southeast-1` làm đổi RTT Render→Appwrite | **ĐỂ NGỎ** — chưa đo vùng của Render; **phải đo trước**, vì nó có thể tốt lên chứ không chỉ xấu đi |
+
+**Sửa lại bước 3 của mục 6:** sau khi nạp volume và TRƯỚC khi `docker compose
+up`, phải khởi động mongod **standalone**, gỡ cấu hình replset cũ (hoặc
+`rs.reconfig(..., {force:true})` với danh tính máy mới), rồi mới dựng stack.
+Bỏ bước này thì bước 4 (`listDatabases`) vẫn xanh trong khi Appwrite không
+ghi được — đúng loại lỗi mà cổng kiểm chỉ đọc không bắt.
+
+**Về kích thước máy — phản biện đề xuất ≥ 12 GiB.** Lập luận: 8 GiB trừ đi
+4,7 GiB ẩn danh chỉ còn ~3 GiB cho OS, page cache và đỉnh tải, mà dựng lại
+index trên 1.635 index là đỉnh tải thật. Điều đó hợp lý và **không mâu thuẫn**
+với mục 4: 8 GiB là **sàn đo được**, không phải mức thoải mái.
+
+| Lựa chọn | Khi nào chọn |
+|---|---|
+| `t3a.large` — 2 vCPU / 8 GiB | sàn an toàn, vẫn phụ thuộc swap như hiện nay |
+| `t3a.xlarge` — 4 vCPU / 16 GiB | bỏ hẳn phụ thuộc swap, có biên cho dựng index |
+
+Đây là **quyết định chi tiêu của con người**. Phiên này không chọn thay.
+Số liệu để chọn đã đủ ở mục 4.
+
 ## 7. Điều đang CHẶN
 
 Diễn tập khôi phục **chưa chạy được**, vì nó cần một đích Linux + Docker cô

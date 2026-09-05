@@ -181,7 +181,17 @@ hang doi    : pending=0 running=0 suot ca cua so
 | Hang muc | Gia tri |
 |---|---|
 | Worker production hoat dong | **AWS** `13.212.224.218` |
-| SHA trien khai | `34f3953226d2c39036b8b7e4be4396107a6de40b` |
+| SHA tien trinh worker DANG CHAY | `34f3953226d2c39036b8b7e4be4396107a6de40b` |
+| SHA checkout tren dia (sau khi merge PR cuoi) | `a755f7f0e6ca132e2dd9e7a0bfeeee7dc5223f30` |
+
+Hai SHA khac nhau, va do la **binh thuong**: `git reset --hard` doi tep
+tren dia, khong khoi dong lai tien trinh. Tien trinh worker van chay ma
+cua `34f3953`.
+
+Da doi chieu de chac chan dieu do khong quan trong: giua hai SHA, phan
+`server/` chi khac **dung mot tep test** (`test_prod_cutover.py`, +121
+dong). Khong mot dong ma chay nao cua worker thay doi. Lan khoi dong lai
+tiep theo se nhan `a755f7f` ma khong doi hanh vi.
 | Unit AWS | 3/3 `active` |
 | Unit GCE | 3/3 `inactive` (**doc that duoc**, khong suy dien) |
 | VM GCE | **CON NGUYEN** — chi dung dich vu, khong terminate |

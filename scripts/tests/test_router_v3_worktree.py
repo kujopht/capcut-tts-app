@@ -24,7 +24,13 @@ from scripts.router_v3.dag import RiskClass, TaskDag, TaskNode
 from scripts.router_v3.registry import (ExecutionType, Health, WorkerRegistry,
                                         WorkerSpec)
 from scripts.router_v3.scheduler import Scheduler
-from scripts.router_v3.worktree import WorktreeError, WorktreeManager
+from scripts.router_v3.worktree import (
+    WorktreeError,
+    WorktreeHandle,
+    WorktreeManager,
+    normalize_worktree_metadata_attributes,
+    resolve_worktree_metadata_dir,
+)
 
 
 def _git(cwd, *a):
@@ -390,3 +396,181 @@ class GocDungChungTest(unittest.TestCase):
         wt = WorktreeManager(self.repo)
         self.assertTrue(str(wt.worktree_root).startswith(str(self.repo)))
         self.assertEqual(wt.git_root, self.repo)
+
+
+class WindowsWorktreeCleanupTest(_KhoTam):
+    """Kiểm tra việc dọn dẹp worktree và giải phóng thuộc tính READONLY trên Windows."""
+
+    def test_regression_reproduce_incident_and_cleanup_succeeds(self):
+        """Tái hiện chính xác sự cố: worktree đã mất cây vật lý nhưng còn
+        metadata trong .git/worktrees/<tên>, thư mục logs/ và refs/ bị đặt cờ
+        FILE_ATTRIBUTE_READONLY trên Windows khiến git worktree prune thất bại.
+        Chứng minh: sau khi chuẩn hoá thuộc tính, dọn dẹp thành công không lỗi."""
+        h = self.wt.create("AG01", "reproduce-task", base_sha=self.sha)
+        self.assertTrue(h.path.exists())
+
+        meta_dir = self.wt.find_metadata_dir(h)
+        self.assertIsNotNone(meta_dir)
+        self.assertTrue(meta_dir.exists())
+
+        # Tạo cấu trúc con logs và refs giống môi trường git thực tế
+        logs_dir = meta_dir / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        (logs_dir / "HEAD").write_text("dummy reflog content\n", encoding="utf-8")
+        refs_dir = meta_dir / "refs"
+        refs_dir.mkdir(exist_ok=True)
+        (refs_dir / "bad").write_text("dummy ref\n", encoding="utf-8")
+
+        # Xoá cây làm việc vật lý để biến nó thành worktree stale/mồ côi
+        shutil.rmtree(h.path)
+        self.assertFalse(h.path.exists())
+
+        # Xoá tệp gitdir trong metadata để tái hiện trạng thái hỏng như agy-story-meta
+        gitdir_file = meta_dir / "gitdir"
+        if gitdir_file.exists():
+            gitdir_file.unlink()
+
+        # Đặt cờ READONLY trên Windows
+        if sys.platform == "win32":
+            import ctypes
+            k = ctypes.windll.kernel32
+            k.SetFileAttributesW(str(logs_dir / "HEAD"), 1)
+            k.SetFileAttributesW(str(logs_dir), 1)
+            k.SetFileAttributesW(str(refs_dir / "bad"), 1)
+            k.SetFileAttributesW(str(refs_dir), 1)
+            k.SetFileAttributesW(str(meta_dir), 1)
+
+            # Xác minh rằng nếu không gỡ READONLY, lệnh rmdir của hệ thống sẽ thất bại với Access is denied
+            with self.assertRaises(PermissionError):
+                os.rmdir(str(logs_dir))
+
+        # Thực hiện prune_stale cho đúng worktree này
+        self.wt.prune_stale(worktree_name=meta_dir.name)
+
+        # Chứng minh: metadata đã bị dọn sạch hoàn toàn, không còn thư mục ma
+        self.assertFalse(meta_dir.exists())
+
+    def test_unrelated_active_worktrees_remain_byte_for_byte_unchanged(self):
+        """Dọn dẹp một worktree stale tuyệt đối không ảnh hưởng đến các worktree đang sống:
+        nội dung tệp nguyên vẹn từng byte, đăng ký git worktree giữ nguyên."""
+        w1 = self.wt.create("AG01", "active-one", base_sha=self.sha)
+        w2 = self.wt.create("AG02", "active-two", base_sha=self.sha)
+
+        file_w1 = w1.path / "file1.txt"
+        file_w1.write_text("content-one-unique", encoding="utf-8")
+        file_w2 = w2.path / "file2.txt"
+        content_w2_expected = "content-two-unique-byte-for-byte-12345\n"
+        file_w2.write_text(content_w2_expected, encoding="utf-8")
+
+        w2_meta = self.wt.find_metadata_dir(w2)
+        self.assertIsNotNone(w2_meta)
+        w2_meta_files_before = {f.name: f.stat().st_size for f in w2_meta.iterdir() if f.is_file()}
+
+        # Gỡ bỏ w1
+        self.wt.remove(w1)
+        self.assertFalse(w1.path.exists())
+
+        # Xác minh w2 hoàn toàn nguyên vẹn
+        self.assertTrue(w2.path.exists())
+        self.assertEqual(file_w2.read_text(encoding="utf-8"), content_w2_expected)
+        self.assertTrue(w2_meta.exists())
+        w2_meta_files_after = {f.name: f.stat().st_size for f in w2_meta.iterdir() if f.is_file()}
+        self.assertEqual(w2_meta_files_before, w2_meta_files_after)
+
+        # Xác minh w2 vẫn nằm trong danh sách worktree đang hoạt động
+        active_paths = [Path(w["worktree"]).resolve() for w in self.wt.list_worktrees() if w.get("worktree")]
+        self.assertIn(w2.path.resolve(), active_paths)
+        self.assertNotIn(w1.path.resolve(), active_paths)
+
+    def test_branch_not_deleted_on_worktree_remove(self):
+        """Gỡ worktree chỉ xoá cây làm việc và metadata, KHÔNG tự ý xoá nhánh git."""
+        h = self.wt.create("AG01", "branch-persist", base_sha=self.sha)
+        nhanh = h.branch
+
+        test_file = h.path / "new_file.txt"
+        test_file.write_text("branch data\n", encoding="utf-8")
+        _git(h.path, "add", "new_file.txt")
+        _git(h.path, "commit", "-q", "-m", "commit on branch")
+        commit_sha = _git(h.path, "rev-parse", "HEAD").strip()
+
+        # Remove worktree
+        self.wt.remove(h)
+        self.assertFalse(h.path.exists())
+
+        # Nhánh git vẫn tồn tại trong repo và trỏ đến đúng commit_sha
+        sha_after = _git(self.tmp, "rev-parse", nhanh).strip()
+        self.assertEqual(commit_sha, sha_after)
+
+    def test_repeated_cleanup_is_idempotent(self):
+        """Xoá nhiều lần liên tiếp không bao giờ sinh ngoại lệ (idempotent)."""
+        h = self.wt.create("AG01", "idempotent-task", base_sha=self.sha)
+        name = h.path.name
+        self.wt.remove(h)
+        self.assertFalse(h.path.exists())
+
+        # Gọi lại lần 2, lần 3 trên handle
+        self.wt.remove(h)
+        self.wt.remove(h)
+
+        # Gọi lại trên đường dẫn hoặc tên metadata
+        self.wt.remove(name)
+        self.wt.prune_stale(worktree_name=name)
+        self.wt.prune_stale()
+
+    def test_non_windows_noop(self):
+        """Trên nền tảng phi-Windows, hàm normalize_worktree_metadata_attributes là no-op."""
+        called = []
+        def mock_setter(p, attrs):
+            called.append(p)
+            return True
+
+        meta_dir = self.wt.git_common_dir / "worktrees"
+        normalize_worktree_metadata_attributes(meta_dir, _platform="linux", _setter=mock_setter)
+        self.assertEqual(called, [])
+
+    def test_attribute_clearing_failure_surfaced_honestly(self):
+        """Khi việc xoá thuộc tính thất bại, lỗi phải được báo cáo trung thực qua WorktreeError."""
+        test_dir = self.tmp / "test_attr_failure"
+        test_dir.mkdir()
+        (test_dir / "child.txt").write_text("test")
+
+        def failing_setter(path_str, attrs):
+            raise WorktreeError(f"mô phỏng lỗi quyền trên {path_str}")
+
+        with self.assertRaises(WorktreeError) as ctx:
+            normalize_worktree_metadata_attributes(test_dir, _platform="win32", _setter=failing_setter)
+        self.assertIn("mô phỏng lỗi quyền", str(ctx.exception))
+
+    def test_path_traversal_and_outside_paths_rejected(self):
+        """Chặn đường dẫn ra ngoài thư mục worktree metadata hoặc ký tự traversal."""
+        with self.assertRaises(WorktreeError):
+            resolve_worktree_metadata_dir(self.wt.git_common_dir, "../outside")
+
+        with self.assertRaises(WorktreeError):
+            resolve_worktree_metadata_dir(self.wt.git_common_dir, "..\\outside")
+
+        with self.assertRaises(WorktreeError):
+            resolve_worktree_metadata_dir(self.wt.git_common_dir, "sub/dir")
+
+        with self.assertRaises(WorktreeError):
+            resolve_worktree_metadata_dir(self.wt.git_common_dir, "")
+
+        with self.assertRaises(WorktreeError):
+            self.wt.find_metadata_dir("../../malicious")
+
+    def test_worktree_with_special_characters_and_spaces_in_metadata_dir(self):
+        """Hỗ trợ worktree có tên chứa ký tự đặc biệt hợp lệ và kiểm tra tên metadata có khoảng trắng."""
+        h = self.wt.create("AG01", "task_v1.0-fix", base_sha=self.sha)
+        self.assertTrue(h.path.exists())
+        meta = self.wt.find_metadata_dir(h)
+        self.assertIsNotNone(meta)
+
+        self.wt.remove(h)
+        self.assertFalse(h.path.exists())
+        self.assertFalse(meta.exists())
+
+        # Kiểm tra resolve_worktree_metadata_dir với tên có khoảng trắng
+        space_meta = resolve_worktree_metadata_dir(self.wt.git_common_dir, "my worktree name")
+        self.assertEqual(space_meta.name, "my worktree name")
+        self.assertEqual(space_meta.parent, (self.wt.git_common_dir / "worktrees").resolve())
+

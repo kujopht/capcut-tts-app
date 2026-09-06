@@ -40,13 +40,64 @@ tuyệt đối không được lặp lại. Nếu service trỏ vào `fanfic_wor
 tạo `audio_track` trỏ vào object mà đường đọc production không phân giải được —
 trình phát hỏng câm lặng cho người dùng thật.
 
-Cần thêm bộ khoá R2 **production** vào Secret Manager (hiện chỉ có khoá phạm vi
-`fanfic-staging`):
+Cần thêm khoá R2 **production** vào Secret Manager (hiện chỉ có khoá phạm vi
+`fanfic-staging`).
+
+**Chỉ cần HAI giá trị, không phải bốn — và không cần tạo token Cloudflare mới.**
+Đo được: `HeadBucket("fanfic-prod")` bằng khoá staging trả **403**, không phải
+404. 403 nghĩa là bucket **tồn tại trong cùng tài khoản Cloudflare**
+(`a0084e…`), chỉ là token không được cấp phạm vi tới nó. Nên
+`tts-r2-account-id` đang có **dùng lại được y nguyên**; chỉ thiếu cặp khoá đã
+được cấp phạm vi `fanfic-prod`:
 
 ```
 tts-r2-prod-access-key-id
 tts-r2-prod-secret-access-key
 ```
+
+Cặp đó **đã tồn tại** — worker AWS production đang dùng nó để phục vụ audio thật
+lúc này. Nó nằm trong `/etc/fanfic-audio/worker-prod.env` (`root:fanfic 0640`),
+tên biến là `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` theo
+`scripts/ops/cutover_target.py::REQUIRED_ENV_NAMES`.
+
+**Ranh giới quyền.** Đọc tệp đó cần `root` trên máy production. `ubuntu` không
+thuộc nhóm `fanfic` (đo được: `head -c 1` thất bại), và cổng điều hành
+`fanfic-prod-admin` **không có verb đọc** — `ALLOW` chỉ gồm
+`status install-env … canary rollback-note`, trong đó `status` che giá trị và
+`install-env` chỉ GHI từ stdin. Nên việc chuyển phải do người có `root` thực
+hiện. Đây là ranh giới root-of-trust thật, không phải một hàng rào đi vòng được.
+
+**Lệnh chuyển — chạy trong Git Bash, giá trị không bao giờ hiện ra hay xuống đĩa:**
+
+```bash
+ssh -i ~/.ssh/fanficappwrrite.pem ubuntu@13.212.224.218 \
+  "sudo grep -m1 '^R2_ACCESS_KEY_ID=' /etc/fanfic-audio/worker-prod.env | cut -d= -f2- | tr -d '\r\n'" \
+| gcloud secrets create tts-r2-prod-access-key-id \
+    --data-file=- --replication-policy=automatic --project=gen-lang-client-0793420657
+
+ssh -i ~/.ssh/fanficappwrrite.pem ubuntu@13.212.224.218 \
+  "sudo grep -m1 '^R2_SECRET_ACCESS_KEY=' /etc/fanfic-audio/worker-prod.env | cut -d= -f2- | tr -d '\r\n'" \
+| gcloud secrets create tts-r2-prod-secret-access-key \
+    --data-file=- --replication-policy=automatic --project=gen-lang-client-0793420657
+```
+
+`tr -d '\r\n'` là bắt buộc: `--data-file=-` đọc **nguyên xi byte** trên stdin, và
+một dấu xuống dòng lạc vào khoá sẽ làm chữ ký S3 sai — lỗi lúc đó không hề gọi
+tên nguyên nhân. (Trình đọc `verify_prod_r2_credential.py` cũng `.strip()` một
+lần nữa, nên nếu bạn chạy bằng PowerShell thì dấu xuống dòng cuối vẫn được tha.)
+
+**Kiểm ngay sau khi chuyển — CHỈ ĐỌC, không ghi gì vào `fanfic-prod`:**
+
+```bash
+python scripts/ops/verify_prod_r2_credential.py
+```
+
+Nó xác thực, `HeadBucket`, `ListObjectsV2(MaxKeys=1)`, in **độ dài** khoá chứ
+không in giá trị, và cảnh báo nếu khoá mới nhìn thấy được cả `fanfic-staging`
+(phạm vi rộng hơn mức cần). Quyền GHI **không** được thử ở đây: chứng minh một
+khoá ghi được bằng cách ghi-rồi-xoá trên bucket audio thật của người dùng là
+đánh đổi sai. Quyền ghi được chứng minh ở bước 1 của canary — một job thật, một
+object thật, kiểm được bằng mắt.
 
 **b. Dọn ba thứ còn lại** — xem mục 9 của
 `docs/reports/cloudrun-tts-gates-3-6-2026-09-06.md`: xoá job `tts-worker-diag`,
@@ -132,13 +183,27 @@ thời gian: rò rỉ bộ nhớ, lease treo lúc tải cao, chi phí thật c�
 Chỉ bàn sau khi bước 4 đạt. Và rút đúng thứ tự: **dừng** unit AWS trước, quan
 sát 24 giờ, rồi mới huỷ máy — không bao giờ làm ngược.
 
-## 4. Những gì kế hoạch này KHÔNG giải quyết
+## 4. Ba vấn đề đã sửa (commit `56203b6`)
 
-- **Ảnh chỉ có `ngochuyennew`.** Nếu production còn phục vụ `piper:ngochuyen`,
-  Cloud Run sẽ **nhường** (`bo_qua_thieu_model`) và AWS phải ở lại. Phải kiểm
-  `FAS_LOCAL_VOICES` thật của production trước bước 3.
-- **Nhánh bỏ qua của `recover_stale_jobs` không ghi log.** Một worker khoẻ và
-  một worker không bao giờ giành được job nhìn giống hệt nhau. Nên sửa trước
-  bước 3, nếu không việc theo dõi canary sẽ phải đoán.
-- **`voice_runnable_on_this_machine` trả `True` khi thiếu gói Piper** — worker
-  nhận việc nó không làm nổi rồi đốt hết lượt thử. Cùng lý do, nên sửa trước.
+Ba thứ mục này từng liệt là "kế hoạch không giải quyết" — nay đã sửa và có test.
+
+- **`voice_runnable_on_this_machine` trả `True` khi thiếu gói Piper.** Nay hỏi
+  RUNTIME trước, MODEL sau: thiếu `piper-tts` → **nhường**, không nhận rồi đốt
+  `attempts`. Có test chạy qua đúng vòng quét thật, và đã kiểm test có răng.
+- **Nhánh bỏ qua của `recover_stale_jobs` im lặng.** Nay ghi log khi tình hình
+  ĐỔI, cộng nhịp nhắc lại ~5 phút. Một worker không bao giờ giành được job giờ
+  trông khác hẳn một worker khoẻ.
+- **`piper:ngochuyen` khi ảnh chỉ có `ngochuyennew`.** Service trả **200** kèm
+  `nhuong_thieu_model` chứ không 409: ảnh này sẽ không bao giờ có thêm model
+  nên 409 chỉ làm Cloud Tasks xoay vòng đến hết `max-attempts`. Ack, và để
+  đường quét (AWS, đủ bộ model) nhặt. **Vẫn phải kiểm `FAS_LOCAL_VOICES` thật
+  của production trước bước 3**: nếu production còn phục vụ `piper:ngochuyen`
+  thì AWS phải ở lại, và đó là điều kiện của bước 5 chứ không phải của canary.
+
+## 5. Những gì kế hoạch này KHÔNG giải quyết
+
+- **Quyền GHI vào `fanfic-prod` chưa được chứng minh**, chỉ suy ra từ việc
+  worker AWS đang dùng đúng cặp khoá đó để phục vụ audio thật. Bước 1 là nơi
+  chứng minh.
+- **Ảnh Cloud Run chỉ có một giọng.** Muốn Cloud Run thay hẳn AWS thì phải bake
+  đủ bộ NghiTTS, và đó là một vòng nghiệm thu tương đương nữa.

@@ -25,10 +25,35 @@
 # 1.6.0 là bản ĐÃ probe thật trên máy này: nạp model 2,3 giây, sinh MP3
 # 22050 Hz đọc được, có tiếng nói thật.
 #
+# NÂNG LÊN 1.7.0 (2026-09-06) — VÌ ĐÂY LÀ BẢN PRODUCTION THẬT SỰ ĐANG CHẠY.
+# Ghim 1.6.0 ở trên là ghim theo cái đã probe trên LAPTOP, và nó đã lệch khỏi
+# production mà không ai biết. Đo thẳng trên máy worker production
+# (`13.212.224.218`, `/opt/fanfic-audio/.venv`):
+#
+#     Name: piper-tts
+#     Version: 1.7.0
+#
+# Vì sao đổi mà KHÔNG mù: cổng "tương đương đầu ra" đòi Cloud Run chạy CÙNG
+# runtime với AWS, nên bản đúng phải là bản production dùng. Bốn chứng cứ:
+#
+#   1. Khác biệt phụ thuộc 1.6.0 -> 1.7.0 nằm TRỌN trong extras không dùng
+#      (`dev`, `ja`, `zh`). Phần bắt buộc — `onnxruntime<2,>=1`,
+#      `pathvalidate<4,>=3` — KHÔNG đổi. Không có xung đột nào để mà gặp.
+#   2. `pip install piper-tts==1.7.0` chồng lên `requirements.txt` chạy sạch,
+#      pip không báo xung đột nào.
+#   3. `import piper` được kiểm ngay trong `docker build`, không đợi tới lúc chạy.
+#   4. Chạy thật 10/10 job trên Cloud Run (`tts-worker:v3`): mỗi job 3/3 đoạn,
+#      MP3 517–527 KB, 62,3–63,6 giây, nghe được.
+#
+# Lệch thời lượng giữa 1.7.0 và 1.6.0 trên cùng văn bản: tối đa 0,62% — NHỎ HƠN
+# nhiễu tự thân của chính một bản chạy hai lần (0,87%). Piper là họ VITS nên
+# tổng hợp có lấy mẫu ngẫu nhiên; đừng bao giờ so đầu ra bằng sha256.
+# Xem `docs/reports/cloudrun-tts-gates-3-6-2026-09-06.md`.
+#
 # Model KHÔNG nằm trong repository — nó ở
 # `%LOCALAPPDATA%\FanficAudioStudio\models\piper\ngochuyen.onnx` (60,57 MB).
 # `.gitignore` chặn `*.onnx`, `*.onnx.json`, `models/` và `models.json`.
-piper-tts==1.6.0
+piper-tts==1.7.0
 
 # --- Chinese Media Watcher foundation (2026-09-02): Mandarin ASR fallback ---
 #

@@ -33,6 +33,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, StringConstraints
 
 from server import tts_bridge
+from server import tts_dispatch
 from server import traffic_analytics
 from server.transcript import TRANSCRIPT_VERSION, build_transcript
 from server.translation_usage import usage_recorder
@@ -2914,6 +2915,14 @@ def _tao_job_cho_chuong(*, owner_id: str, chapter_id: str, voice_id: str,
         return {"job": created, "reused": True}
 
     _start_job_thread(job, chapter.content, None, f"tts-job-{job.job_id}")
+
+    # BAO cho worker biet co job moi — TAT MAC DINH, xem `server/tts_dispatch.py`.
+    #
+    # Dat SAU `_start_job_thread` va sau khi job da nam ben vung, co y: day chi
+    # la mot toi uu ve DO TRE, khong phai nguon su that. `enqueue` khong bao gio
+    # nem va khi cong tat thi tra ve ngay — duong tao job y het nhu truoc khi co
+    # dong nay. `test_tts_dispatch.py` khoa lai ca hai tinh chat do.
+    tts_dispatch.enqueue(job.job_id)
     return {"job": created, "reused": False}
 
 

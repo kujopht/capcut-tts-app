@@ -377,9 +377,16 @@ class GhimPhuThuocWorker(unittest.TestCase):
         self.assertTrue((self.GOC / "server" / "requirements-worker.txt").is_file())
 
     def test_ghim_chinh_xac_phien_ban(self) -> None:
+        # SO PHIEN BAN chi ton tai o MOT cho: `PIPER_PRODUCTION` trong
+        # `test_worker_runtime_pin.py`. Truoc day cho nay ghi thang "1.6.0", va
+        # khi ban production that su nhay len 1.7.0 thi khong co gi keu len —
+        # hai cho khang dinh cung mot tinh chat bang hai con so roi lech nhau la
+        # cach chac chan nhat de mot cai tro thanh sai lang le.
+        from server.tests.test_worker_runtime_pin import PIPER_PRODUCTION
+
         noi_dung = (self.GOC / "server" / "requirements-worker.txt").read_text(
             encoding="utf-8")
-        self.assertIn("piper-tts==1.6.0", noi_dung)
+        self.assertIn(f"piper-tts=={PIPER_PRODUCTION}", noi_dung)
         self.assertNotIn("piper-tts>=", noi_dung,
                          "phải ghim chính xác: các bản Piper đổi chữ ký API")
 

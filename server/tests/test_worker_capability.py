@@ -80,6 +80,37 @@ class BoQuetNhuongJobThieuModelTest(unittest.TestCase):
         self.assertIs(server_main.store.get_job(job.job_id).status,
                       JobStatus.PENDING)
 
+    def test_thieu_RUNTIME_piper_cung_phai_nhuong(self):
+        """
+        Su co Cloud Run 2026-09-06, chay lai qua DUNG vong quet that.
+
+        Khac hai test kia: o day FILE MODEL CO DU (`installed=True`) nhung goi
+        `piper-tts` khong import duoc tren may nay. Truoc ban sua,
+        `voice_runnable_on_this_machine` chi hoi ve file model nen tra `True`,
+        vong quet NHAN job, `_run_job` chet ngay voi `provider_not_installed`,
+        va `attempts` bi dot. Lam ba lan la job chet vinh vien — trong khi
+        worker AWS co du runtime va lam duoc.
+
+        Job phai o lai `pending` va bo dem phai noi ro ly do.
+        """
+        server_main.settings = replace(server_main.settings,
+                                       inline_worker=False)
+        server_main._CAN_RUN_JOBS = True
+        # File model CO — dung cai lam ban cu tra `True`.
+        tts_bridge._registry.voices[0].installed = True
+        # ...nhung RUNTIME thi khong.
+        tts_bridge._registry.dat_runtime("piper", installed=False)
+        job = self._job_piper_pending()
+
+        report = server_main.recover_stale_jobs(pending_min_age_seconds=0)
+
+        self.assertEqual(report.get("bo_qua_thieu_model"), 1)
+        sau = server_main.store.get_job(job.job_id)
+        self.assertIs(sau.status, JobStatus.PENDING)
+        self.assertEqual(sau.attempts or 0, 0,
+                         "khong duoc dot mot luot `attempts` cho viec minh "
+                         "khong lam noi")
+
     def test_che_do_inline_van_nhan_va_bao_loi(self):
         """
         inline BAT (dev, mot tien trinh): khong co ai de nhuong — job phai

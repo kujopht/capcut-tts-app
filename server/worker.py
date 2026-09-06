@@ -115,6 +115,46 @@ def _nhip(trang_thai: str, chu_ky: int, bao_cao: Dict[str, int] | None) -> None:
         pass
 
 
+#: Cu bao nhieu chu ky thi nhac lai mot bao cao khong doi. 100 chu ky x 3 giay
+#: ~ 5 phut: du thua de biet worker con quet, du tha de khong lam ngap log.
+NHAC_LAI_MOI = int(os.environ.get("FAS_WORKER_REPORT_EVERY_CYCLES", "100"))
+
+#: Chu ky cuoi cung da ghi, va van tay cua bao cao luc do.
+_lan_ghi_cuoi = {"chu_ky": 0, "van_tay": None}
+
+
+def _dang_ghi_bao_cao(bao_cao: Dict[str, int], chu_ky: int) -> bool:
+    """
+    Vong quet nay co gi dang ghi khong.
+
+    VI SAO KHONG GIU DIEU KIEN CU. Truoc day chi ghi khi `chay_lai` hoac
+    `het_luot_thu` khac 0 — nghia la MOI nhanh bo qua deu im lang tuyet doi:
+    `bo_qua_thieu_model`, `khong_nhan_duoc`, `bo_qua_con_lease`,
+    `khong_duoc_phep_chay`. Hau qua do duoc hai lan trong mot ngay
+    (2026-09-06): mot worker quet deu 10 job `pending` ma khong nhan duoc cai
+    nao — lan dau vi thieu model, lan sau vi hang `job_claims` con sot lam
+    transaction claim hong — va log CHI co dong `khoi_dong`. Mot worker khoe
+    va mot worker khong bao gio giành duoc viec nhin GIONG HET NHAU. Mat mot
+    vong chan doan chi de biet dieu ma bo dem da biet san.
+
+    Nhung cung khong duoc ghi moi chu ky: 3 giay mot dong "khong co gi xay ra"
+    la mot dong log khong ai doc nua. Nen quy tac la ghi khi TINH HINH DOI,
+    cong mot nhip nhac lai tha de biet worker con song va con thay gi.
+    """
+    co_tin_hieu = any(v for k, v in bao_cao.items() if k != "da_quet")
+    if not co_tin_hieu and not bao_cao.get("da_quet"):
+        # Hang doi rong that su. `_nhip()` da ghi tep heartbeat; khong can log.
+        return False
+    van_tay = tuple(sorted((k, v) for k, v in bao_cao.items() if v))
+    if van_tay != _lan_ghi_cuoi["van_tay"]:
+        _lan_ghi_cuoi.update(chu_ky=chu_ky, van_tay=van_tay)
+        return True
+    if chu_ky - _lan_ghi_cuoi["chu_ky"] >= NHAC_LAI_MOI:
+        _lan_ghi_cuoi["chu_ky"] = chu_ky
+        return True
+    return False
+
+
 def _so_job_dang_chay() -> int:
     with api._job_lock:
         return sum(1 for t in api._job_threads.values() if t.is_alive())
@@ -179,7 +219,7 @@ def chay(doi_moi_truong: Optional[str] = None) -> int:
             # `pending_min_age_seconds=0`: khong co thread nao trong tien trinh
             # web dang lo job moi, nen nhan ngay thay vi cho het lease.
             bao_cao = api.recover_stale_jobs(pending_min_age_seconds=0)
-            if bao_cao.get("chay_lai") or bao_cao.get("het_luot_thu"):
+            if _dang_ghi_bao_cao(bao_cao, chu_ky):
                 _ghi("da_quet", **bao_cao)
         except Exception as exc:
             # Mot vong quet loi KHONG duoc lam worker chet — chet la mat recovery.

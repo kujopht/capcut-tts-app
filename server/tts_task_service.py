@@ -95,6 +95,27 @@ def chay_task(payload: TaskIn, request: Request) -> Dict[str, Any]:
             "FAS_TTS_HTTP_ENABLED chua bat — ban trien khai toi, chua nhan viec.",
         )
 
+    # FAIL CLOSED tren cau hinh, TRUOC khi cham vao bat cu thu gi.
+    #
+    # `Settings.validate()` chua phep kiem ghep kho/bucket: kho metadata
+    # production PHAI di voi bucket production. Goi no o DAY, khong phai chi
+    # luc khoi dong, vi mot lan `gcloud run services update` co the doi bien
+    # moi truong ma khong ai doc lai log khoi dong. Job dau tien di qua duong
+    # nay se dung han thay vi ghi audio vao bucket sai.
+    #
+    # 500 chu khong 503: day la loi cua NGUOI TRIEN KHAI, va Cloud Tasks nen
+    # thu lai — de khi cau hinh duoc sua thi task con trong hang doi tu chay
+    # tiep, khong mat viec.
+    from server.config import ConfigError, get_settings
+
+    try:
+        get_settings().validate()
+    except ConfigError as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"cau hinh khong hop le, tu choi lam viec: {exc}",
+        ) from exc
+
     api = _api()
     from server.adapters import NotFoundError
     from server.domain import JobStatus
@@ -133,9 +154,19 @@ def chay_task(payload: TaskIn, request: Request) -> Dict[str, Any]:
     # Giong cuc bo ma MAY NAY khong co model -> NHUONG, khong nhan. Cung ly le
     # nhu `recover_stale_jobs`: nhan mot job minh khong chay duoc roi danh dau
     # `failed` la giet vinh vien mot job ma worker khac lam duoc.
+    #
+    # TRA 200, KHONG PHAI 409 — va day la mot lua chon co can nhac. 409 se lam
+    # Cloud Tasks thu lai theo backoff, nhung anh container nay se KHONG BAO GIO
+    # co them model: thu lai la xoay vong vo nghia cho den khi het
+    # `max-attempts`. Truong hop that dang cho: anh Cloud Run hien chi co
+    # `ngochuyennew`, nen mot job `piper:ngochuyen` roi vao day.
+    #
+    # Ack va de duong QUET lam viec. Worker AWS giu du bo NghiTTS va van dang
+    # chay, nen job se duoc nhat o do — dung nhu thiet ke nhieu-worker-khac-bo-
+    # model da co. Hang doi chi la mot cach BAO som, khong phai nguon su that.
     if not api.tts_bridge.voice_runnable_on_this_machine(job.voice_id):
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            "may nay khong co model cho giong do")
+        return {"job_id": job.job_id, "ket_qua": "nhuong_thieu_model",
+                "voice_id": job.voice_id}
 
     try:
         chapter = api.store.get_chapter(job.chapter_id)

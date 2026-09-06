@@ -84,7 +84,29 @@ tắt trong mã nguồn.
 Công cụ: `canh_dem.py` — chỉ đọc, mỗi mẫu tự kết luận `OK`/`LECH` theo kỳ vọng
 tường minh, nên sáng ra chỉ cần đọc dòng `LECH`.
 
-*(Số liệu tổng kết được điền khi phiên giám sát kết thúc — xem MORNING HANDOFF.)*
+### ĐỘ PHỦ THẬT — có một khoảng mù, phải nói rõ
+
+Tiến trình canh đêm **bị dừng** (`killed`) sau mẫu 3 lúc `16:48Z`, và điều đó
+chỉ lộ ra khi hệ thống báo tác vụ nền kết thúc lúc `23:04Z`. Nghĩa là:
+
+| Khoảng | Trạng thái giám sát |
+|---|---|
+| `16:27Z` – `16:48Z` | 3 mẫu, tất cả `OK` |
+| `16:48Z` – `23:04Z` (**6h16m**) | **KHÔNG có mẫu nào** — khoảng mù |
+| `23:04Z` trở đi | lấy mẫu lại, mỗi 10 phút |
+
+**Không được đọc tài liệu này như thể đã giám sát liên tục 6 giờ.** Yêu cầu
+"giám sát tối thiểu 6 giờ" **chưa** đạt trong đêm này.
+
+Điều duy nhất nói được về khoảng mù là một phép đo **sau sự việc** lúc `23:04Z`:
+mọi bất biến còn nguyên, và `completed=306 / failed=13 / pending=0 / running=0`
+**giống hệt** lúc `16:48Z`. Không job production nào chạy trong khoảng đó — nên
+khoảng mù không che giấu hành vi nào, đơn giản vì không có hành vi nào để che.
+Đó là một sự an ủi, không phải một bằng chứng.
+
+Bài học đã áp dụng ngay: chạy lại canh đêm theo **từng chặng ~3 giờ** thay vì
+một tiến trình 7 giờ. Mỗi chặng kết thúc sẽ đánh thức phiên làm việc, nên một
+lần bị dừng lộ ra sau vài giờ chứ không phải sau cả đêm.
 
 Bất biến được kiểm mỗi 10 phút:
 `/health` = `enabled:false` · `POST /tasks/tts` = `503` · queue = `PAUSED` ·

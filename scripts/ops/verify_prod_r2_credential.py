@@ -21,11 +21,36 @@ Ma thoat: 0 dat, 1 khong dat, 2 loi moi truong.
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 GCP_PROJECT = "gen-lang-client-0793420657"
 BUCKET_MONG_DOI = "fanfic-prod"
+
+
+def _tim_gcloud() -> str:
+    """
+    Duong dan THAT toi gcloud.
+
+    Tren Windows `gcloud` la mot tep `.cmd`; goi bang ten tran qua
+    `subprocess.run` khong co shell se nem `FileNotFoundError [WinError 2]` —
+    va thong bao do khong he goi ten nguyen nhan, no chi noi "khong tim thay
+    tep". Da mac dung cai bay nay khi chay cong dieu kien tien quyet lan dau.
+    """
+    for ten in ("gcloud.cmd", "gcloud"):
+        duong = shutil.which(ten)
+        if duong:
+            return duong
+    mac_dinh = Path(r"C:\Program Files (x86)\Google\Cloud SDK"
+                    r"\google-cloud-sdk\bin\gcloud.cmd")
+    if mac_dinh.is_file():
+        return str(mac_dinh)
+    raise SystemExit("khong tim thay gcloud tren may nay")
+
+
+GCLOUD = _tim_gcloud()
 
 SECRETS = {
     "account_id": "tts-r2-account-id",
@@ -37,7 +62,7 @@ SECRETS = {
 def doc_secret(ten: str) -> str:
     """Doc mot secret. Gia tri di qua stdout cua tien trinh con, khong qua shell."""
     r = subprocess.run(
-        ["gcloud", "secrets", "versions", "access", "latest",
+        [GCLOUD, "secrets", "versions", "access", "latest",
          f"--secret={ten}", f"--project={GCP_PROJECT}"],
         capture_output=True, text=True,
     )

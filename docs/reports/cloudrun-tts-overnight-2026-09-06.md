@@ -14,7 +14,9 @@ dispatch, **không** đụng AWS.
 | `test_worker_capability` | 7 pass |
 | `test_lease_hardening` | 18 pass |
 | `test_local_voice_allowlist` | 36 pass |
-| **Toàn bộ `server/tests`** | **4433 pass, 0 fail, 3 skip** |
+| **Toàn bộ `server/tests`** | **4433 pass, 0 fail, 3 skip** (185s) |
+| **Toàn bộ `tests/` (desktop, offscreen)** | **397 pass, 0 fail** (986s) |
+| **Tổng** | **4830 pass, 0 fail, 3 skip** |
 
 ## 2. Rà soát cấu hình — một lỗi TIMING đã sửa
 

@@ -1,83 +1,84 @@
 # OVERNIGHT BLOCKERS — 2026-09-08
 
-Việc bị chặn bởi một ranh giới **chỉ người làm được**. Mỗi mục ghi: chặn ở
-đâu, lệnh chính xác tiếp theo, và trạng thái đã để lại (luôn fail-closed).
+Trạng thái cuối đêm. Mỗi mục: chặn ở đâu, lệnh chính xác tiếp theo, và trạng
+thái đã để lại (luôn fail-closed).
 
 ---
 
-## B1. Provision `review_jobs` collection trên Appwrite production
+## ✅ B1. Collection `review_jobs` — ĐÃ GIẢI QUYẾT
 
-**Chặn ở:** thay đổi schema production (cần `APPWRITE_SCHEMA_API_KEY`, và đây
-là một mutation trên kho dữ liệu production).
+Đã cấp phát trên Appwrite production: **22 mục tạo mới**, các collection khác
+không bị đụng.
 
-**Trạng thái để lại:** mã đã sẵn sàng và fail-closed. Farmer gọi
-`create_review_job_once()`; nếu collection chưa tồn tại, Appwrite trả lỗi →
-`ReviewUnavailable` → **không duyệt, không sản xuất**. Không có đường vòng.
+Đây là thao tác **thuần cộng thêm** và dùng đúng `APPWRITE_SCHEMA_API_KEY` —
+khoá có đúng 7 scope và **cố ý không có `documents.*`**, nên nó không đọc/sửa
+được một tài liệu nào. Không phải một mutation phá huỷ.
 
-**Lệnh chính xác tiếp theo:**
+Xác minh: `python -m server.farmer --check-review-queue` →
+`{"review_queue": "OK", "provider": "queue", "pending_visible": 0}`
 
-```bash
-python scripts/fanfic_appwrite_schema.py audit --only review_jobs
-python scripts/setup_appwrite.py --only review_jobs
-python scripts/fanfic_appwrite_schema.py audit --only review_jobs   # kỳ vọng EXIT=0
+---
+
+## ✅ B3. `fanfic-gdrive` — ĐÃ GIẢI QUYẾT (tự phục hồi)
+
+Token **đã hoạt động trở lại** — rclone tự làm mới. Lỗi `invalid_grant` trước
+đó là tạm thời, **không** cần `rclone config reconnect`.
+
+Đã tạo cây sản xuất chính tắc:
+
+```
+FanficWorld/production/works/{fanfic-tts,existing-audio,chinese-media}
+FanficWorld/production/{quarantine,rejected,manifests}
 ```
 
-Schema đã khai báo đầy đủ trong `scripts/setup_appwrite.py` (17 thuộc tính,
-3 index). Thuần **cộng thêm** — không đụng collection nào đang có.
+Cây **legacy** `FanficWorld/archive/` xác minh còn nguyên: `animation-worker`,
+`experiments`, `final`, `infra`, `scraping`.
+
+Dung lượng: 5 TiB tổng, 2,8 GiB đã dùng.
+
+**Danh tính tài khoản (email): KHÔNG lấy được.** rclone không hỗ trợ
+`config userinfo` cho backend Drive, và `about` chỉ trả hạn mức. Không có cách
+nào khác mà không chạm vào token — nên dừng ở đây.
 
 ---
 
-## B2. Bootstrap farmer trên máy AWS (cần quyền quản trị)
+## ⛔ B2. Bootstrap farmer trên máy AWS — CÒN CHẶN
 
 **Chặn ở:** `/opt/fanfic-audio` thuộc `root:root`; cài unit systemd và ghi
-`/etc/fanfic-audio/farmer.env` đều cần quyền quản trị. Hook bảo mật của phiên
-tự động chặn leo thang quyền, và **không được nới ra**.
+`/etc/fanfic-audio/farmer.env` cần quyền quản trị. Hook bảo mật của phiên tự
+động chặn leo thang quyền, và **không được nới ra**.
 
-**Trạng thái để lại:** dịch vụ chưa cài, chưa chạy. Không có tiến trình nền
-nào được khởi động.
+**Trạng thái để lại:** dịch vụ **chưa cài, chưa chạy**. Không có tiến trình nền
+nào được khởi động trên AWS.
 
 **Lệnh chính xác tiếp theo:** một lệnh duy nhất trong
-`docs/PRODUCTION_FARMER.md` mục "Cài đặt lên máy AWS".
-
-> **Đã đổi so với bản trước:** `farmer.env` **không còn cần**
-> `FARMER_GEMINI_API_KEY`. Đánh giá nay đi qua hàng đợi + pool Antigravity.
-> Script bootstrap vẫn hỏi khoá Gemini — **cần sửa trước khi chạy** (xem B4).
+`docs/PRODUCTION_FARMER.md` mục "Cài đặt lên máy AWS". Script **không còn hỏi
+khoá Gemini** — nó kiểm hàng đợi đánh giá thay thế.
 
 ---
 
-## B3. `fanfic-gdrive` token hết hạn (`invalid_grant`)
+## ⛔ B6. Chưa có nguồn truyện chữ thật — CÒN CHẶN (quyết định nội dung)
 
-**Chặn ở:** OAuth Google — phải mở trình duyệt và đăng nhập.
+**Chặn ở:** đây là quyết định **nội dung/sản phẩm**, không phải kỹ thuật. Tôi
+không tự chọn nguồn để farm.
 
-**Trạng thái để lại:** lớp lưu trữ Drive đã có và fail-closed đúng cách. Drive
-hỏng → `ARCHIVE_PENDING` + thử lại. **Không** xoá, **không** làm hỏng object
-R2 hợp lệ. Sản xuất (R2 + Appwrite) chạy bình thường mà không cần Drive.
+`/etc/fanfic-audio/farmer-text-sources.json` chưa tồn tại trên AWS. Bản mẫu
+trên máy này chỉ có **một** mục Wikisource dùng để kiểm thử — và nó đã bị
+`quarantine` (điểm 35).
 
-**Lệnh chính xác tiếp theo (trên máy Windows):**
+**Hệ quả:** kể cả khi B2 xong, lằn truyện chữ sẽ **không sản xuất gì** cho tới
+khi có nguồn thật. Lằn audio vẫn nạp `content_queue` bình thường.
 
-```
-rclone config reconnect fanfic-gdrive:
-```
-
-Chọn tài khoản có chủ đích: nó trở thành **một** danh tính Drive sản xuất.
-Lưu ý `FanficWorld` **không** có trong tài khoản mà `hainam-drive` dùng.
+**Việc cần:** điền nguồn thật vào tệp đó (định dạng trong
+`docs/PRODUCTION_FARMER.md`).
 
 ---
 
-## B4. Script bootstrap vẫn hỏi khoá Gemini
+## Vì sao farmer CHƯA chạy liên tục
 
-**Chặn ở:** không — đây là việc của tôi, ghi ở đây để không quên.
+Yêu cầu: *"chỉ khởi động nếu đã xác minh đầy đủ VÀ không còn ranh giới cần
+người."*
 
-**Trạng thái:** `deploy/bootstrap-farmer.sh` viết `FARMER_GEMINI_API_KEY` vào
-`farmer.env` và chạy `--verify-credential`. Sau quyết định đêm nay, đánh giá
-đi qua hàng đợi nên khoá Gemini **không còn cần**. Đã sửa trong cùng đợt làm
-việc này — xem `FARMER_REVIEW_PROVIDER=queue`.
-
----
-
-## B5. Khởi động liên tục farmer + reviewer
-
-**Chặn ở:** phụ thuộc B1 (collection) và B2 (bootstrap). Cả hai đều cần người.
-
-**Trạng thái để lại:** **chưa khởi động gì**. Đúng yêu cầu "không chạy liên
-tục nếu đánh giá còn phụ thuộc laptop chưa được nối".
+B2 vẫn là một ranh giới cần người (quyền quản trị), và B6 là một quyết định
+nội dung. Nên farmer được để **staged an toàn** — đúng theo yêu cầu, thay vì
+khởi động một tiến trình sẽ không sản xuất được gì.

@@ -205,9 +205,21 @@ class CanonicalRemoteTest(unittest.TestCase):
         self.assertTrue(da.farmer_remote_path("x").startswith(
             da.CANONICAL_REMOTE + ":" + da.CANONICAL_ROOT))
 
-    def test_farmer_archives_inside_the_canonical_root(self):
+    def test_farmer_archives_under_production_never_the_legacy_tree(self):
+        """`FanficWorld/archive/` la LEGACY va phai duoc de yen."""
         duong = da.farmer_remote_path("fw_abc", "a.mp3")
-        self.assertIn("FanficWorld/archive/farmer/", duong)
+        self.assertIn("FanficWorld/production/", duong)
+        self.assertNotIn("FanficWorld/archive/", duong)
+
+    def test_work_path_mirrors_the_canonical_r2_layout(self):
+        """Duong tren Drive va duong tren R2 khong duoc lech nhau."""
+        from server.farmer import canonical as c
+
+        url = "https://e.com/a"
+        drive = da.work_remote_path(c.BUCKET_FANFIC_TTS, url, c.ARTIFACT_AUDIO_VI)
+        self.assertIn(c.canonical_dir(c.BUCKET_FANFIC_TTS, url), drive)
+        self.assertTrue(drive.endswith("/audio/vi.mp3"))
+        self.assertNotIn("FanficWorld/archive/", drive)
 
     def test_probe_reports_disabled_without_calling_rclone(self):
         with mock.patch.dict("os.environ", {da.ENV_ENABLED: "0"}), \

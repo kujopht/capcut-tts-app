@@ -49,18 +49,35 @@ from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 #     the phuc vu hay proxy bat cu thu gi.
 #
 # Cai VAN dung: chinh ENDPOINT duoi day. Cai KHONG con dung: gan endpoint
-# do voi mot may GCE cu the. Origin that nam sau proxy Cloudflare (ban ghi
-# A tra ve IP cua Cloudflare; token Cloudflare cua may nay khong co quyen
-# doc DNS nen khong tra ra origin) va KHONG phai Appwrite Cloud — Cloud
-# dang la 2.0.0 voi `Server: Appwrite`, con endpoint nay la 1.9.6 voi
-# `Server: cloudflare`. No cung khong nam tren may worker AWS (khong co
-# `docker`, chi lang nghe cong 22 va 53), khong nam tren bat ky GCE
-# instance nao cua hai tai khoan Google da kiem.
+# do voi mot may GCE cu the.
 #
-# KET LUAN VAN HANH: khong duoc suy ra "con phu thuoc GCE" tu tep nay
-# nua. Nhung cung KHONG duoc coi la da biet origin — no chua duoc dinh
-# danh. Truoc khi XOA dia cua `fanfic-appwrite-temp`, phai xac nhan noi o
-# that cua du lieu Appwrite va co ban sao luu doc duoc.
+# ORIGIN THAT (do duoc 2026-09-07, sau khi token Cloudflare co DNS:Read):
+#
+#     A  appwrite-dev.fanfic.world -> 54.179.200.223  proxied=True
+#
+# Goi THANG vao IP do bang `--resolve` (bo han Cloudflare) tra ve
+# `Server: Appwrite` + `{"version":"1.9.6"}` — trung khop duong qua
+# Cloudflare. Nen "da di tru production Appwrite sang AWS" la DUNG:
+#
+#     54.179.200.223   Appwrite (database + API)
+#     13.212.224.218   worker TTS + dich production
+#
+# Ca hai deu la AWS ap-southeast-1. Cau chuyen nghe nhu mau thuan chi vi
+# do la HAI MAY AWS KHAC NHAU, khong phai mot.
+#
+# SAI SOT DA MAC (ghi de khong lap): vong dieu tra truoc ket luan "khong
+# nam tren AWS" sau khi chi kiem MOT may AWS (may worker). Loai tru phai
+# loai tru HOST, khong duoc loai tru NHA CUNG CAP. Va `54.179.200.223` da
+# nam san trong `~/.ssh/known_hosts` cua may dieu hanh tu lan do dau tien.
+#
+# LUU Y VAN HANH: SSH cong 22 toi 54.179.200.223 bi timeout tu may dieu
+# hanh (dung dang bao mat), nen KHONG quan sat duoc CPU/RAM cua host
+# Appwrite — giam sat hien nay chi o muc API health. Va storage device cua
+# Appwrite la DIA CUC BO (`/v1/health/storage/local` pass), nen host do dang
+# giu file Appwrite ngoai R2 va ngoai moi snapshot GCE.
+#
+# Snapshot cua `fanfic-appwrite-temp` la DI SAN cua kien truc da roi di,
+# KHONG phai ban sao luu cua production dang chay. Dung coi la duong lui.
 # --------------------------------------------------------------------------
 PROD_APPWRITE_ENDPOINT = "https://appwrite-dev.fanfic.world/v1"
 PROD_APPWRITE_PROJECT_ID = "fanfic-world-prod"

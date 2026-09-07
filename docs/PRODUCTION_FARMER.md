@@ -70,6 +70,51 @@ lượt gọi Gemini 10.000 lần mà không bao giờ chạm trần "2 cái cù
 Biến môi trường đánh sai (`abc`, `0`, `-5`) → quay về mặc định, **không** mở
 toang cổng.
 
+## Triển khai HYBRID — hai máy, hàng đợi kéo
+
+```
+   AWS t3a.medium                     Appwrite                Windows laptop
+   ──────────────                     ────────                ──────────────
+   khám phá nguồn                                             Router V4
+   FanFicFare                    review_jobs                  pool Antigravity
+   khử trùng lặp     ──ghi PENDING──►  (hàng)  ◄──poll RA NGOÀI──  reviewer
+   điều phối                                                   (chọn tài khoản)
+   TTS dispatch      ◄──đọc bản án──                          
+   R2 / Appwrite
+   fanfic-gdrive
+```
+
+**Laptop không mở cổng nào.** Nó gọi ra, giành việc, chạy, ghi kết quả. Đó là
+lý do hàng đợi nằm ở Appwrite chứ không phải một HTTP endpoint trên máy cá
+nhân.
+
+**Router V4 chọn tài khoản.** Farmer không đọc, không chọn, và không bao giờ
+biết tài khoản Antigravity nào đã chạy — kết quả chỉ ghi tên *nhà cung cấp*
+(`antigravity`). Tính khả dụng, hạn mức/cooldown và thử lại đều là việc của
+Router V4.
+
+**Nội dung không nằm trong hàng đợi.** `sample_key`/`verdict_key` trỏ tới R2:
+một chương dài vượt giới hạn chuỗi của Appwrite, và nhét nó vào một cột sẽ làm
+mọi truy vấn hàng đợi kéo cả nội dung về.
+
+### Máy đánh giá tắt = công việc chờ mãi
+
+Đó là hành vi **đúng**. Farmer thấy `REVIEW_PENDING`, đếm nó vào
+`lanes.text.review_pending`, và **không sản xuất gì**. Không có đường rơi về
+Gemini API — một bản rơi về âm thầm sang một hạn mức **có trả phí** là đúng
+thứ đã được nói không.
+
+Một lần `agy` hỏng trả công việc về `PENDING` chứ không phải `FAILED`: sự cố
+tạm thời của máy đánh giá không phải một phán xét về tác phẩm.
+
+### Chạy máy đánh giá (trên Windows)
+
+```bash
+python scripts/router_review_worker.py --dry-run --once   # giành rồi trả lại
+python scripts/router_review_worker.py --once             # một lượt thật
+python scripts/router_review_worker.py                    # poll liên tục
+```
+
 ## Kho sản xuất chính tắc
 
 `FanficWorld/archive/` là **LEGACY** và được để yên: raw scraping, rendered

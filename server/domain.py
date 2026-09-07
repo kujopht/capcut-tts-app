@@ -1586,3 +1586,78 @@ class ChineseMediaQueueItem:
             "updated_at": self.updated_at,
             "created_at": self.created_at,
         }
+
+
+#: Trang thai mot cong viec DANH GIA. `PENDING` la trang thai AN TOAN: neu
+#: may danh gia bien mat, cong viec o lai day mai mai chu khong bao gio "tu
+#: duyet".
+REVIEW_STATUSES = ("PENDING", "CLAIMED", "DONE", "FAILED")
+REVIEW_DECISIONS = ("pending", "approve", "quarantine", "reject")
+
+
+@dataclass
+class ReviewJob:
+    """MOT yeu cau danh gia noi dung, dung chung giua HAI may.
+
+    Kien truc la mot hang doi KEO, khong phai day:
+
+        May AWS (farmer)  ---ghi PENDING-->  Appwrite  <--poll--- Laptop
+                                                                  (Router V4
+                                                                   + pool
+                                                                   Antigravity)
+
+    Laptop **goi ra ngoai**, khong mo cong nao. Do la ca ly do hang doi nam o
+    Appwrite thay vi mot HTTP endpoint tren may ca nhan.
+
+    Noi dung KHONG nam trong hang: `sample_key`/`verdict_key` tro toi R2. Mot
+    chuong truyen dai vuot gioi han chuoi cua Appwrite, va nhet no vao mot cot
+    se lam moi truy van hang doi keo ca noi dung ve.
+
+    `job_id` = `work_id` (tat dinh tu danh tinh nguon), nen hai lan xep cung
+    mot tac pham la mot no-op — Appwrite tu choi tao trung `documentId`.
+    """
+
+    job_id: str
+    work_id: str
+    bucket: str
+    lane: str
+    source_url: str = ""
+    title: str = ""
+    #: Khoa R2 cua mau noi dung gui di danh gia.
+    sample_key: str = ""
+    #: Khoa R2 cua ban an DAY DU (JSON co cau truc). Rong cho toi khi xong.
+    verdict_key: str = ""
+    status: str = "PENDING"
+    decision: str = "pending"
+    score: int = 0
+    #: TEN NHA CUNG CAP, khong phai tai khoan. Farmer khong duoc biet tai
+    #: khoan Antigravity nao da chay — do la viec cua Router V4.
+    reviewed_by_provider: str = ""
+    lease_owner: str = ""
+    lease_expires_at: str = ""
+    attempts: int = 0
+    last_error: str = ""
+    created_at: str = field(default_factory=now_iso)
+    updated_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "job_id": self.job_id,
+            "work_id": self.work_id,
+            "bucket": self.bucket,
+            "lane": self.lane,
+            "source_url": self.source_url,
+            "title": self.title,
+            "sample_key": self.sample_key,
+            "verdict_key": self.verdict_key,
+            "status": self.status,
+            "decision": self.decision,
+            "score": self.score,
+            "reviewed_by_provider": self.reviewed_by_provider,
+            "lease_owner": self.lease_owner,
+            "lease_expires_at": self.lease_expires_at,
+            "attempts": self.attempts,
+            "last_error": self.last_error,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }

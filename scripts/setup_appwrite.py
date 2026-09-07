@@ -600,6 +600,43 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
             ("draft_state_idx", "key", ["draft_state"]),
         ],
     },
+    # Hang doi DANH GIA dung chung giua may AWS (farmer, ghi PENDING) va may
+    # Windows (Router V4 + pool Antigravity, poll ra ngoai va tra ban an).
+    # Laptop KHONG mo cong nao — do la ly do hang doi nam o day chu khong o
+    # mot HTTP endpoint tren may ca nhan.
+    #
+    # Noi dung KHONG nam trong bang: `sample_key`/`verdict_key` tro toi R2.
+    "review_jobs": {
+        "name": "Review Jobs",
+        "attributes": [
+            ("job_id", "string", True, 64),
+            ("work_id", "string", True, 64),
+            ("bucket", "string", True, 64),
+            ("lane", "string", True, 16),
+            ("source_url", "string", False, 1000),
+            ("title", "string", False, 300),
+            ("sample_key", "string", False, 512),
+            ("verdict_key", "string", False, 512),
+            ("status", "enum", True, ["PENDING", "CLAIMED", "DONE", "FAILED"]),
+            ("decision", "enum", True,
+             ["pending", "approve", "quarantine", "reject"]),
+            ("score", "integer", False, None),
+            # TEN NHA CUNG CAP, khong phai tai khoan: farmer khong duoc biet
+            # tai khoan Antigravity nao da chay.
+            ("reviewed_by_provider", "string", False, 64),
+            ("lease_owner", "string", False, 64),
+            ("lease_expires_at", "string", False, 64),
+            ("attempts", "integer", False, None),
+            ("last_error", "string", False, 1000),
+            ("created_at", "string", False, 64),
+            ("updated_at", "string", False, 64),
+        ],
+        "indexes": [
+            ("status_idx", "key", ["status"]),
+            ("work_idx", "key", ["work_id"]),
+            ("lane_status_idx", "key", ["lane", "status"]),
+        ],
+    },
     "tts_jobs": {
         "name": "TTS Jobs",
         "attributes": [

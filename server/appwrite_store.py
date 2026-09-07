@@ -33,6 +33,8 @@ from server.appwrite_social import (
     SOCIAL_PERSISTED_FIELDS,
     _post_from,
 )
+from datetime import datetime, timezone
+
 from server.config import AppwriteSettings
 from server.secret_redaction import thong_diep_loi_an_toan
 from server.domain import (
@@ -41,6 +43,7 @@ from server.domain import (
     AuthorStats,
     AuthorStatus,
     ChineseMediaQueueItem,
+    ReviewJob,
     ListenCredit,
     ModerationEvent,
     AudioStamp,
@@ -66,6 +69,7 @@ COL_JOB_LOCKS = "job_locks"
 #: Chinese Media Watcher foundation (2026-09-02) -- hang doi phat hien/xu ly,
 #: doc lap voi novels (chi ghi vao novels luc THAT SU tao duoc draft).
 COL_CONTENT_QUEUE = "content_queue"
+COL_REVIEW_JOBS = "review_jobs"
 #: Danh tinh dich vu ghi hang doi nay -- tu dong hoa, khong phai nguoi dung
 #: that, cung mau voi `harvester_owner_user_id` ("svc_harvester") o noi khac.
 CONTENT_QUEUE_OWNER = "svc_harvester"
@@ -893,6 +897,68 @@ class AppwriteMetadataStore(AppwriteSocialStore):
             queries.append(q_offset(offset))
         docs = self._list(COL_CONTENT_QUEUE, queries)
         return [_queue_item_from_doc(d) for d in docs]
+
+    # -- hang doi DANH GIA (hybrid AWS farmer <-> laptop Router V4) ----------
+
+    def create_review_job_once(self, job: ReviewJob) -> Tuple[ReviewJob, bool]:
+        """Dedup vinh vien theo `job_id` (= `work_id`, tat dinh tu danh tinh
+        nguon) — cung ky thuat voi `create_queue_item_once`: 409 -> da co."""
+        try:
+            self._create(COL_REVIEW_JOBS, job.job_id, job.to_dict(),
+                         CONTENT_QUEUE_OWNER)
+            return job, True
+        except NotFoundError:
+            return _review_job_from_doc(
+                self._get(COL_REVIEW_JOBS, job.job_id)), False
+
+    def get_review_job(self, job_id: str) -> ReviewJob:
+        return _review_job_from_doc(self._get(COL_REVIEW_JOBS, job_id))
+
+    def update_review_job(self, job_id: str, **fields: Any) -> ReviewJob:
+        fields.pop("job_id", None)
+        fields.pop("created_at", None)
+        fields["updated_at"] = now_iso()
+        self._update(COL_REVIEW_JOBS, job_id, fields)
+        return self.get_review_job(job_id)
+
+    def list_review_jobs(self, *, status: str = "PENDING",
+                         limit: int = 25, offset: int = 0) -> List[ReviewJob]:
+        queries = [q_equal("status", status), q_limit(limit)]
+        if offset:
+            queries.append(q_offset(offset))
+        return [_review_job_from_doc(d)
+                for d in self._list(COL_REVIEW_JOBS, queries)]
+
+    def claim_review_job(self, job_id: str, worker_id: str,
+                         lease_expires_at: str) -> Optional[ReviewJob]:
+        """Gianh MOT cong viec danh gia.
+
+        Doc-roi-ghi, KHONG phai compare-and-set that su — Appwrite khong cho
+        cap nhat co dieu kien tren mot hang thuong, va o day chi co DUNG MOT
+        may danh gia (laptop) nen mot lease don gian la du. Neu sau nay co
+        nhieu may danh gia, doi sang cung ky thuat transaction ma
+        `claim_job()` (TTS) dang dung — dung tu tin vao ban nay.
+
+        Tra `None` khi khong gianh duoc. Nguoi goi PHAI dung lai, khong thu
+        lai mu quang.
+        """
+        current = self.get_review_job(job_id)
+        if current.status in ("DONE", "FAILED"):
+            return None
+        if current.status == "CLAIMED" and current.lease_expires_at:
+            try:
+                het_han = datetime.fromisoformat(
+                    current.lease_expires_at.replace("Z", "+00:00"))
+            except ValueError:
+                # Dau thoi gian khong doc duoc -> coi nhu CON SONG. An toan hon
+                # la doan da het roi cuop viec cua mot may dang chay that.
+                return None
+            if het_han > datetime.now(timezone.utc):
+                return None
+        return self.update_review_job(
+            job_id, status="CLAIMED", lease_owner=worker_id,
+            lease_expires_at=lease_expires_at,
+            attempts=(current.attempts or 0) + 1)
 
     def get_chapter(self, chapter_id: str) -> Chapter:
         return _chapter_from_doc(self._get(COL_CHAPTERS, chapter_id))
@@ -2041,6 +2107,29 @@ def _chapter_from_doc(doc: Dict[str, Any]) -> Chapter:
         content=str(doc.get("content") or ""),
         order_index=int(doc.get("order_index") or 1),
         state=_publish_state_from_doc(doc),
+        created_at=str(doc.get("created_at") or ""),
+        updated_at=str(doc.get("updated_at") or ""),
+    )
+
+
+def _review_job_from_doc(doc: Dict[str, Any]) -> ReviewJob:
+    return ReviewJob(
+        job_id=str(doc.get("job_id") or doc.get("$id") or ""),
+        work_id=str(doc.get("work_id") or ""),
+        bucket=str(doc.get("bucket") or ""),
+        lane=str(doc.get("lane") or ""),
+        source_url=str(doc.get("source_url") or ""),
+        title=str(doc.get("title") or ""),
+        sample_key=str(doc.get("sample_key") or ""),
+        verdict_key=str(doc.get("verdict_key") or ""),
+        status=str(doc.get("status") or "PENDING"),
+        decision=str(doc.get("decision") or "pending"),
+        score=int(doc.get("score") or 0),
+        reviewed_by_provider=str(doc.get("reviewed_by_provider") or ""),
+        lease_owner=str(doc.get("lease_owner") or ""),
+        lease_expires_at=str(doc.get("lease_expires_at") or ""),
+        attempts=int(doc.get("attempts") or 0),
+        last_error=str(doc.get("last_error") or ""),
         created_at=str(doc.get("created_at") or ""),
         updated_at=str(doc.get("updated_at") or ""),
     )

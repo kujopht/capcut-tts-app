@@ -28,6 +28,19 @@ from server.farmer.dedup import (
 from server.farmer.metrics import LaneMetrics, MetricsWriter
 from server.farmer.quotas import FarmerQuotas, QuotaExceeded
 from server.farmer.review import QualityReviewer, ReviewUnavailable
+from server.farmer.review_provider import ReviewPending, ReviewProvider
+
+
+def _la_provider(obj: Any) -> bool:
+    """Phan biet `ReviewProvider` (nhan mot `ReviewRequest`) voi
+    `QualityReviewer` cu (nhan tham so roi)."""
+    return isinstance(obj, ReviewProvider)
+
+
+def _work_id_cho(bucket: str, url: str) -> str:
+    from server.farmer.canonical import work_id
+
+    return work_id(bucket, url)
 
 #: Nghi giua hai vong. Mac dinh 15 phut: du thua de theo kip nguon dang
 #: dang moi vai gio mot lan, va du thua de khong lam phien hai worker.
@@ -210,8 +223,14 @@ class ProductionFarmer:
                 m.skipped_quota += 1
                 continue
             try:
-                verdict = self._reviewer.review(
-                    title=c.title, body=body, lane=LANE_TEXT, source_url=c.url)
+                verdict = self._review(c, body)
+            except ReviewPending as exc:
+                # Da xep vao hang doi; may danh gia (laptop) chua tra ban an.
+                # KHONG phai loi, va tuyet doi KHONG duoc coi la duyet — tac
+                # pham cho vong sau. May danh gia tat = cho mai mai, dung y.
+                m.review_pending += 1
+                m.note_error(f"cho danh gia {c.url}: {exc}")
+                continue
             except ReviewUnavailable as exc:
                 # FAIL CLOSED: khong danh gia duoc thi KHONG duyet.
                 m.note_error(f"khong danh gia duoc {c.url}: {exc}")
@@ -300,6 +319,24 @@ class ProductionFarmer:
             unhealthy_reason="co cong doan that bai trong vong nay" if co_loi else "",
             archive=self._archive_status(), integrity=self._integrity)
         return lanes
+
+    def _review(self, c: Candidate, body: str):
+        """Goi cong danh gia.
+
+        Ho tro CA HAI hinh dang: `ReviewProvider` moi (nhan mot
+        `ReviewRequest`) va `QualityReviewer` cu (nhan tham so roi). Giu ca
+        hai de mot ban trien khai dang chay khong vo khi doi nha cung cap.
+        """
+        if hasattr(self._reviewer, "review") and _la_provider(self._reviewer):
+            from server.farmer.canonical import bucket_for_lane
+            from server.farmer.review_provider import ReviewRequest
+
+            bucket = bucket_for_lane(LANE_TEXT)
+            return self._reviewer.review(ReviewRequest(
+                work_id=_work_id_cho(bucket, c.url), bucket=bucket,
+                lane=LANE_TEXT, title=c.title, body=body, source_url=c.url))
+        return self._reviewer.review(
+            title=c.title, body=body, lane=LANE_TEXT, source_url=c.url)
 
     def _archive_status(self) -> Dict[str, Any]:
         """Tinh trang Drive cho `status.json`. CHI DOC, va khong bao gio lam

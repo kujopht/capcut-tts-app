@@ -112,11 +112,11 @@ ok "kho da dong bo bang root: $BEFORE_SHA -> $AFTER_SHA"
 [ -f "$REPO/deploy/fanfic-farmer.service" ] \
   || die "khong thay unit sau khi dong bo — ban trien khai khong dung"
 
-# --------------------------------------------------------------- 1. khoa --
-printf 'Dan FARMER_GEMINI_API_KEY (khong hien khi go, Enter de xac nhan):\n> '
-read -rs GEMINI_KEY
-printf '\n\n'
-[ -n "${GEMINI_KEY:-}" ] || die "khoa rong — dung lai, khong ghi gi"
+# --------------------------------------------------- 1. (khong con khoa) --
+# Danh gia noi dung DI QUA HANG DOI + pool Antigravity tren may Windows, nen
+# may nay KHONG can khoa Gemini nao ca. Doan hoi khoa da duoc bo co y: hoi
+# mot bi mat khong dung toi la mot cach de no bi ro ri ma khong duoc gi.
+info "che do danh gia: hang doi (FARMER_REVIEW_PROVIDER=queue) — khong can khoa Gemini"
 
 # ------------------------------------------------------- 2. tep cau hinh --
 info "ghi $ENV_FILE (0600 $SVC_USER)"
@@ -126,8 +126,9 @@ install -o "$SVC_USER" -g "$SVC_USER" -m 600 /dev/null "$ENV_FILE"
 # nao. Ghi qua stdin vao tep da tao san dung quyen.
 {
   printf '# Sinh boi deploy/bootstrap-farmer.sh — KHONG commit tep nay.\n'
-  printf 'FARMER_GEMINI_API_KEY=%s\n' "$GEMINI_KEY"
-  printf 'FARMER_REVIEW_MODEL=gemini-3.8-flash\n'
+  # Danh gia qua HANG DOI: may nay xep viec, may Windows (Router V4 + pool
+  # Antigravity) poll ra ngoai va tra ban an. Khong khoa Gemini o day.
+  printf 'FARMER_REVIEW_PROVIDER=queue\n'
   printf 'FARMER_REVIEW_MIN_SCORE=70\n'
   printf 'FARMER_MAX_CONCURRENT_DOWNLOADS=2\n'
   printf 'FARMER_MAX_REVIEW_REQUESTS=8\n'
@@ -140,8 +141,7 @@ install -o "$SVC_USER" -g "$SVC_USER" -m 600 /dev/null "$ENV_FILE"
   printf 'FARMER_TEXT_SOURCES=%s\n' "$SRC_FILE"
 } > "$ENV_FILE"
 
-unset GEMINI_KEY   # khong giu trong bo nho script lau hon can thiet
-ok "cau hinh farmer da ghi (khoa khong bao gio duoc in ra)"
+ok "cau hinh farmer da ghi ($ENV_FILE)"
 
 # Nguon truyen chu — chi tao neu CHUA co, de khong de len danh sach that.
 if [ ! -f "$SRC_FILE" ]; then
@@ -173,19 +173,23 @@ install -o root -g root -m 644 "$REPO/deploy/fanfic-farmer.service" "$UNIT"
 systemctl daemon-reload
 ok "unit da cai ($UNIT)"
 
-# ------------------------------------------- 4. kiem khoa (khong in khoa) --
-info "kiem khoa Gemini bang MOT lan goi that"
-# Khoa di tu tep -> moi truong cua CHINH tien trinh python, KHONG qua argv.
-# `runuser` doc tep env bang quyen cua `fanfic`, dung chu so huu that.
-CRED_OUT="$(runuser -u "$SVC_USER" -- env -i \
+# ---------------------------------------------- 4. kiem hang doi danh gia --
+# KHONG con kiem khoa Gemini: may nay khong danh gia. Thay vao do kiem thu
+# duong ma cong danh gia THAT SU se di — hang doi Appwrite. Neu collection
+# `review_jobs` chua duoc cap phat, buoc nay bao ro, va farmer se fail closed
+# thay vi san xuat noi dung chua ai duyet.
+info "kiem duong hang doi danh gia (khong goi model nao)"
+QUEUE_OUT="$(runuser -u "$SVC_USER" -- env -i \
   HOME="/var/lib/fanfic-farmer" PATH=/usr/bin:/bin \
   bash -c "set -a; . '$ENV_FILE'; . '$ETC/worker-prod.env'; set +a; \
-           cd '$REPO' && exec '$VENV' -m server.farmer --verify-credential" \
+           cd '$REPO' && exec '$VENV' -m server.farmer --check-review-queue" \
   2>&1 || true)"
 
-case "$CRED_OUT" in
-  *'"credential": "OK"'*) ok "khoa Gemini dung duoc — $CRED_OUT" ;;
-  *) die "khoa Gemini KHONG dung duoc: $CRED_OUT" ;;
+case "$QUEUE_OUT" in
+  *'"review_queue": "OK"'*) ok "hang doi danh gia san sang — $QUEUE_OUT" ;;
+  *) die "hang doi danh gia CHUA san sang: $QUEUE_OUT
+   Nhieu kha nang collection 'review_jobs' chua duoc cap phat. Xem
+   docs/reports/OVERNIGHT_BLOCKERS.md muc B1." ;;
 esac
 
 # ------------------------------------------------ 5. lo chay co kiem soat --

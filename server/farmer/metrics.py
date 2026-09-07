@@ -47,6 +47,10 @@ class LaneMetrics:
     produced: int = 0
     published_candidates: int = 0
     blocked_no_cover: int = 0
+    #: Da xep vao hang doi danh gia, chua co ban an. KHAC `rejected` (da danh
+    #: gia va truot) va KHAC `failed` (hong). Mot con so lon o day nghia la
+    #: may danh gia dang tat, khong phai nguon dang kem.
+    review_pending: int = 0
     failed: int = 0
     skipped_quota: int = 0
     errors: List[str] = field(default_factory=list)
@@ -62,6 +66,7 @@ class LaneMetrics:
             "rejected": self.rejected, "produced": self.produced,
             "published_candidates": self.published_candidates,
             "blocked_no_cover": self.blocked_no_cover,
+            "review_pending": self.review_pending,
             "failed": self.failed, "skipped_quota": self.skipped_quota,
             "errors": list(self.errors),
         }

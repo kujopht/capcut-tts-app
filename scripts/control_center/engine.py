@@ -290,6 +290,20 @@ class ControlCenter:
             raise KeyError(task_id)
         if t.permission != PermissionClass.GATED.value:
             return t
+        # GHI DAU DUYET LEN CHINH VIEC, khong chi vao nhat ky su kien.
+        #
+        # Mot su kien la thu doc lai duoc, khong phai thu KIEM duoc luc lap
+        # lich. Bo lap lich can tra loi "viec nay da duoc duyet chua" bang
+        # mot phep doc re, ngay tren hang cua no — xem `_da_duyet_cong`.
+        hd = dict(t.contract or {})
+        pq = dict(hd.get("_permission") or {})
+        pq["approved_by"] = str(approved_by)[:80]
+        pq["approved_at"] = time.time()
+        pq["approval_note"] = str(note)[:300]
+        hd["_permission"] = pq
+        t.contract = hd
+        self.store.luu_task(t)
+
         self.store.ghi_su_kien(
             "GATE_APPROVED", project_id=t.project_id, task_id=task_id,
             level="ALERT",
@@ -298,6 +312,17 @@ class ControlCenter:
                   "gate_reason": t.gate_reason})
         return self.store.doi_trang_thai(task_id, TaskState.QUEUED,
                                          reason="người dùng đã duyệt cổng")
+
+    @staticmethod
+    def _da_duyet_cong(t: Task) -> bool:
+        """Việc GATED này đã được NGƯỜI duyệt chưa.
+
+        Việc không GATED thì luôn `True` — không có cổng nào để duyệt.
+        """
+        if t.permission != PermissionClass.GATED.value:
+            return True
+        pq = (t.contract or {}).get("_permission") or {}
+        return bool(pq.get("approved_by"))
 
     # -- 3. Vong lap dieu phoi ----------------------------------------------
 
@@ -341,6 +366,31 @@ class ControlCenter:
         tat_ca = {t.task_id: t for t in self.store.tasks(project_id)}
         for t in tat_ca.values():
             if t.state not in (TaskState.QUEUED, TaskState.WAITING):
+                continue
+            # LƯỚI CUỐI CỦA CỔNG AN TOÀN, và nó nằm ĐÚNG ở đây có lý do.
+            #
+            # `chat()` đã đặt việc GATED vào thẳng `BLOCKED`, nhưng đó là MỘT
+            # đường. Bất kỳ đường nào khác đưa nó về `QUEUED` đều mở cổng mà
+            # không ai duyệt. Đã có một đường như thế và nó CHẠY ĐƯỢC THẬT:
+            #
+            #     pause(việc GATED)   BLOCKED -> PAUSED   (hợp lệ)
+            #     resume(việc đó)     PAUSED  -> QUEUED   (hợp lệ)
+            #     -> tick() giao việc, agent chạy, KHÔNG một lần duyệt nào
+            #
+            # Sửa riêng `resume()` là bịt đúng một lỗ và để ngỏ mọi lỗ chưa
+            # nghĩ ra. Kiểm ở CỔNG VÀO của bộ lập lịch thì mọi đường — hiện
+            # tại và về sau — đều phải đi qua đây.
+            if not self._da_duyet_cong(t):
+                self.store.doi_trang_thai(
+                    t.task_id, TaskState.BLOCKED, force=True,
+                    reason=(f"việc GATED chưa được duyệt ({t.gate_reason}) — "
+                            f"đưa lại BLOCKED. Chỉ `mo_khoa_gated()` mới mở "
+                            f"được cổng này."))
+                self.store.ghi_su_kien(
+                    "GATE_REASSERTED", project_id=t.project_id,
+                    task_id=t.task_id, level="ALERT",
+                    detail=(f"việc GATED lọt vào hàng đợi mà chưa có ai duyệt "
+                            f"— đã chặn lại trước khi giao"))
                 continue
             deps = [tat_ca.get(d) for d in t.dependencies]
             if any(d is not None and d.state is TaskState.FAILED for d in deps):
@@ -825,9 +875,26 @@ class ControlCenter:
         return t2
 
     def resume(self, task_id: str) -> Task:
+        """Tiếp tục một việc đã tạm dừng.
+
+        `resume` KHÔNG phải một cách duyệt cổng. Một việc GATED chưa ai duyệt
+        thì quay về `BLOCKED`, không phải `QUEUED` — nếu không thì
+        `pause` rồi `resume` là một đường vòng đầy đủ quanh cổng an toàn
+        (đã kiểm: nó chạy được thật trước bản này).
+        """
         t = self.store.task(task_id)
         if t is None:
             raise KeyError(task_id)
+        if not self._da_duyet_cong(t):
+            self.store.ghi_su_kien(
+                "GATE_HELD", project_id=t.project_id, task_id=task_id,
+                level="ALERT",
+                detail=("`resume` KHÔNG mở được cổng an toàn — việc vẫn "
+                        "BLOCKED cho tới khi có người duyệt"))
+            return self.store.doi_trang_thai(
+                task_id, TaskState.BLOCKED, force=True,
+                reason=(f"{t.gate_reason} — `resume` không phải là duyệt. "
+                        f"Dùng `mo_khoa_gated()` (phím `g` trên giao diện)."))
         if t.owner_session:
             s = self.store.session(t.owner_session)
             if s is not None and s.state is SessionState.DRAINING:

@@ -278,6 +278,70 @@ class TestVerticalSlice(unittest.TestCase):
         self.assertEqual(kq["dispatched"], [],
                          "việc GATED không bao giờ được tự giao")
 
+    def test_pause_roi_resume_KHONG_mo_duoc_cong_an_toan(self):
+        """LỖI THẬT đã tồn tại và chạy được trước bản này.
+
+            pause(việc GATED)   BLOCKED -> PAUSED   (hợp lệ)
+            resume(việc đó)     PAUSED  -> QUEUED   (hợp lệ)
+            -> tick() giao việc, agent chạy, KHÔNG một lần duyệt nào
+
+        Hai bước hợp lệ nối lại thành một đường vòng đầy đủ quanh cổng an
+        toàn quan trọng nhất của hệ thống.
+        """
+        self.cc.chat("demo", "deploy the web to production")
+        t = self.cc.store.tasks("demo")[0]
+        self.assertIs(t.state, TaskState.BLOCKED)
+
+        self.cc.pause(t.task_id)
+        self.cc.resume(t.task_id)
+        self.assertIs(self.cc.store.task(t.task_id).state, TaskState.BLOCKED,
+                      "`resume` KHÔNG phải một cách duyệt cổng")
+        self.assertEqual(self.cc.tick()["dispatched"], [])
+        self.assertEqual(self.cc.store.task(t.task_id).attempts, 0)
+
+    def test_viec_GATED_lot_vao_hang_doi_van_bi_CHAN_o_bo_lap_lich(self):
+        """Lưới cuối: dù đường nào đưa nó về QUEUED, nó vẫn không chạy.
+
+        Sửa riêng `resume()` là bịt đúng một lỗ và để ngỏ mọi lỗ chưa nghĩ
+        ra. Bài kiểm này ép việc GATED vào thẳng `QUEUED` — mô phỏng một
+        đường vòng TƯƠNG LAI — và đòi bộ lập lịch vẫn phải chặn.
+        """
+        self.cc.chat("demo", "deploy the web to production")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.doi_trang_thai(tid, TaskState.QUEUED, force=True)
+
+        self.assertEqual(self.cc.tick()["dispatched"], [])
+        t = self.cc.store.task(tid)
+        self.assertIs(t.state, TaskState.BLOCKED)
+        self.assertEqual(t.attempts, 0)
+        self.assertTrue([e for e in self.cc.store.su_kien(task_id=tid)
+                         if e["kind"] == "GATE_REASSERTED"])
+
+    def test_sau_khi_DUYET_thi_viec_GATED_chay_binh_thuong(self):
+        """Cổng chặn chứ không phải khoá chết: duyệt xong là chạy."""
+        self.cc.chat("demo", "deploy the web to production")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.mo_khoa_gated(tid, approved_by="nam")
+        self.assertEqual(self.cc.tick()["dispatched"], [tid])
+        _xong(self.cc, tid)
+        self.assertIs(self.cc.store.task(tid).state, TaskState.DONE)
+
+    def test_dau_duyet_nam_TREN_VIEC_va_ben_qua_khoi_dong_lai(self):
+        """Dấu duyệt phải kiểm được lúc lập lịch, không chỉ đọc lại được
+        trong nhật ký — và phải sống sót qua khởi động lại."""
+        self.cc.chat("demo", "deploy the web to production")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.mo_khoa_gated(tid, approved_by="nam", note="đã xem")
+        pq = (self.cc.store.task(tid).contract or {}).get("_permission") or {}
+        self.assertEqual(pq.get("approved_by"), "nam")
+
+        moi = ControlCenter(root=self.repo, fabric=fabric_gia(), probe=False,
+                            executor_factory=lambda p, f: FakeExecutor())
+        try:
+            self.assertTrue(moi._da_duyet_cong(moi.store.task(tid)))
+        finally:
+            moi.shutdown()
+
     def test_mo_khoa_gated_can_nguoi_va_de_lai_dau_vet(self):
         self.cc.chat("demo", "deploy the web to production")
         tid = self.cc.store.tasks("demo")[0].task_id

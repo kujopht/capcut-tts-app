@@ -38,10 +38,29 @@ ENV_MIN_SCORE = "FARMER_REVIEW_MIN_SCORE"
 MAX_SAMPLE_CHARS = 6000
 
 _SYSTEM = """Ban la bien tap vien kiem dinh chat luong cho mot nen tang doc/nghe truyen.
-Nhiem vu: cham diem MOT tac pham xem co du chat luong de dua vao san xuat khong.
+Nhiem vu: cham diem MOT tac pham VA chuan hoa sieu du lieu cua no.
 
 Tra ve DUY NHAT mot doi tuong JSON, khong kem giai thich ngoai JSON:
-{"score": <0-100>, "verdict": "approve"|"reject", "reasons": ["..."], "language": "<ma ngon ngu>"}
+{"score": <0-100>,
+ "verdict": "approve"|"quarantine"|"reject",
+ "reasons": ["..."],
+ "canonical_title": "<tieu de chuan, khong hau to rac>",
+ "display_title": "<tieu de hien thi cho nguoi doc>",
+ "fandom": "<fandom hoac chuoi rong>",
+ "category": "<the loai chinh>",
+ "author": "<tac gia goc neu doc duoc, khong thi rong>",
+ "language": "<ma ngon ngu, vd vi/en/zh>",
+ "content_type": "<fanfic|novel|audio|other>",
+ "completeness": "<complete|ongoing|fragment|unknown>",
+ "tags": ["..."]}
+
+QUAN TRONG: cac truong tren la SIEU DU LIEU. Chung KHONG duoc dung lam ten
+tep hay ten thu muc, va ban khong can quan tam toi duong dan luu tru — phan
+do do ma nguon tu quyet dinh.
+
+"quarantine" nghia la: co the dung duoc nhung can nguoi xem lai (vd nghi ngo
+ban quyen, noi dung nhay cam, sieu du lieu mau thuan). "reject" la rac/khong
+dung duoc.
 
 Tieu chi cham diem:
 - Van ban co mach lac va doc duoc khong (khong phai rac, khong phai loi ma hoa)?
@@ -53,6 +72,24 @@ KHONG cham diem theo so thich the loai. Mot tac pham the loai binh dan viet tot
 van dat diem cao. Chi danh gia CHAT LUONG THUC THI."""
 
 
+#: Do dai toi da cho MOI truong sieu du lieu tu model. Mot model tra ve mot
+#: doan van dai lam tieu de se lam phinh manifest va log; cat o day, mot cho.
+_MAX_FIELD = 300
+_MAX_TAGS = 12
+
+
+def _field(data: dict, khoa: str, mac_dinh: str = "") -> str:
+    """Doc MOT truong chuoi tu phan hoi model — luon cat, luon ep kieu.
+
+    Khong tin do dai, khong tin kieu: mot truong `null`, mot so, hay mot doan
+    van 40 KB deu la ket qua co that tu mot model.
+    """
+    gia_tri = data.get(khoa, mac_dinh)
+    if gia_tri is None:
+        return mac_dinh
+    return str(gia_tri).strip()[:_MAX_FIELD]
+
+
 @dataclass(frozen=True)
 class ReviewVerdict:
     approved: bool
@@ -60,6 +97,19 @@ class ReviewVerdict:
     reasons: tuple
     language: str
     model: str
+    #: Quyet dinh day du: approve | quarantine | reject.
+    decision: str = "reject"
+    # --- sieu du lieu DA CHUAN HOA -----------------------------------------
+    # KHONG mot truong nao trong so nay duoc dung de dung duong dan; xem
+    # `server/farmer/canonical.py`.
+    canonical_title: str = ""
+    display_title: str = ""
+    fandom: str = ""
+    category: str = ""
+    author: str = ""
+    content_type: str = ""
+    completeness: str = ""
+    tags: tuple = ()
     #: Token that su dung — de Router Control Center theo doi chi phi.
     input_tokens: int = 0
     output_tokens: int = 0
@@ -67,8 +117,14 @@ class ReviewVerdict:
     def as_dict(self) -> dict:
         return {
             "approved": self.approved, "score": self.score,
+            "decision": self.decision,
             "reasons": list(self.reasons), "language": self.language,
             "model": self.model,
+            "canonical_title": self.canonical_title,
+            "display_title": self.display_title,
+            "fandom": self.fandom, "category": self.category,
+            "author": self.author, "content_type": self.content_type,
+            "completeness": self.completeness, "tags": list(self.tags),
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
         }
@@ -147,7 +203,8 @@ class QualityReviewer:
                source_url: str = "") -> ReviewVerdict:
         if not (body or "").strip():
             # Khong can goi API de biet mot tac pham rong thi khong dat.
-            return ReviewVerdict(False, 0, ("noi dung rong",), "", self._model)
+            return ReviewVerdict(False, 0, ("noi dung rong",), "", self._model,
+                                 decision="reject")
 
         user = (
             f"Lan san xuat: {lane}\n"
@@ -176,7 +233,7 @@ class QualityReviewer:
             raise ReviewUnavailable(f"score ngoai khoang 0-100: {score}")
 
         verdict_raw = str(data.get("verdict", "")).strip().lower()
-        if verdict_raw not in ("approve", "reject"):
+        if verdict_raw not in ("approve", "quarantine", "reject"):
             raise ReviewUnavailable(f"verdict khong hop le: {verdict_raw!r}")
 
         reasons = data.get("reasons") or []
@@ -186,17 +243,34 @@ class QualityReviewer:
         # Duyet can CA HAI: model noi approve VA diem dat nguong. Model doi
         # khi noi "approve" kem diem thap; nguong la tieng noi cuoi cung, va
         # no la cua ta chu khong phai cua model.
-        approved = verdict_raw == "approve" and score >= self._min_score
+        decision = verdict_raw
         if verdict_raw == "approve" and score < self._min_score:
+            # Ha xuong CACH LY chu khong loai han: model thay no dung duoc,
+            # chi la diem khong dat nguong tu dong — do la dung viec cho mot
+            # nguoi xem lai, khong phai viec de vut di.
+            decision = "quarantine"
             reasons = list(reasons) + [
                 f"model duyet nhung diem {score} < nguong {self._min_score}"]
 
+        tags_raw = data.get("tags") or []
+        if isinstance(tags_raw, str):
+            tags_raw = [tags_raw]
+
         return ReviewVerdict(
-            approved=approved,
+            approved=decision == "approve",
+            decision=decision,
             score=score,
             reasons=tuple(str(r)[:200] for r in reasons[:5]),
-            language=str(data.get("language", ""))[:16],
+            language=_field(data, "language")[:16],
             model=completion.model or self._model,
+            canonical_title=_field(data, "canonical_title"),
+            display_title=_field(data, "display_title"),
+            fandom=_field(data, "fandom"),
+            category=_field(data, "category"),
+            author=_field(data, "author"),
+            content_type=_field(data, "content_type"),
+            completeness=_field(data, "completeness"),
+            tags=tuple(str(t).strip()[:60] for t in tags_raw[:_MAX_TAGS] if str(t).strip()),
             input_tokens=completion.input_tokens,
             output_tokens=completion.output_tokens,
         )

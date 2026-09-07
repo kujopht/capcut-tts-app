@@ -102,6 +102,9 @@ class ProductionFarmer:
         self._enqueue_tts = enqueue_tts
         self._enqueue_audio_item = enqueue_audio_item
         self._batch = batch_per_lane or _int_env(ENV_BATCH, DEFAULT_BATCH_PER_LANE)
+        #: Bao cao toan ven trinh thong dich — dien boi `__main__` luc khoi
+        #: dong (noi da CHAN duoc neu khong dat). O day chi de bao cao lai.
+        self._integrity: Dict[str, Any] = {}
 
     # -- LAN A: audio co san ------------------------------------------------
     def run_audio_lane(self) -> LaneMetrics:
@@ -282,7 +285,8 @@ class ProductionFarmer:
             lanes = {LANE_AUDIO: LaneMetrics(), LANE_TEXT: LaneMetrics()}
             self._metrics.write(
                 lanes=lanes, quotas=self._quotas.snapshot().as_dict(),
-                round_started=bat_dau, healthy=False, unhealthy_reason=ly_do)
+                round_started=bat_dau, healthy=False, unhealthy_reason=ly_do,
+                archive=self._archive_status(), integrity=self._integrity)
             return lanes
 
         lanes = {
@@ -293,8 +297,20 @@ class ProductionFarmer:
         self._metrics.write(
             lanes=lanes, quotas=self._quotas.snapshot().as_dict(),
             round_started=bat_dau, healthy=not co_loi,
-            unhealthy_reason="co cong doan that bai trong vong nay" if co_loi else "")
+            unhealthy_reason="co cong doan that bai trong vong nay" if co_loi else "",
+            archive=self._archive_status(), integrity=self._integrity)
         return lanes
+
+    def _archive_status(self) -> Dict[str, Any]:
+        """Tinh trang Drive cho `status.json`. CHI DOC, va khong bao gio lam
+        do mot vong: mot su co Drive la thong tin, khong phai loi san xuat."""
+        try:
+            from server.farmer import drive_archive
+
+            return drive_archive.probe()
+        except Exception as exc:                                # noqa: BLE001
+            return {"status": "ARCHIVE_UNAVAILABLE",
+                    "detail": f"{type(exc).__name__}: {exc}"[:300]}
 
     def run_forever(self, *, sleep_seconds: Optional[int] = None,
                     max_rounds: int = 0) -> int:

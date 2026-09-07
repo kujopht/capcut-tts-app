@@ -70,6 +70,48 @@ mới cho mỗi việc), và là lý do Control Center gọi thẳng `Executor.r
 | 8 | Việc CHỈ ĐỌC hiện worktree nó không sở hữu (thừa hưởng từ phiên) | chỉ ghi worktree cho việc có ghi |
 | 9 | Khai báo `write:` bị hiểu thành một dịch vụ khoá được | bỏ tiền tố khỏi bảng tài nguyên |
 | 10 | Việc có ghi không được bảo phải khai `changes` ⇒ cổng `diff` đánh hỏng lượt làm đúng | hợp đồng nêu rõ, có ví dụ |
+| 11 | **`pause` rồi `resume` chạy được một việc GATED mà KHÔNG ai duyệt** | xem §4a — sửa ở 3 chỗ, lưới cuối ở bộ lập lịch |
+| 12 | `"and"` nối hai DANH TỪ bị cắt thành hai việc (`"investigate the auth"` + `"permission checks in …"`) ⇒ đốt một lượt agent cho một câu hỏi không tồn tại | vế phải phải mở đầu bằng ĐỘNG TỪ |
+| 13 | Mất lease bị bỏ qua im lặng, phá đúng chế độ hỏng "hai chủ" mà lease tồn tại để chặn | sự kiện ALERT `LEASE_LOST` + ngừng đập nhịp |
+| 14 | Một lượt hỏng = việc hỏng vĩnh viễn (không có đường thử lại nào) | thử lại có trần, đổi chỗ, 4 lý do không bao giờ thử lại |
+| 15 | Ở tab Agent, phím vận hành tác động lên con trỏ bảng Việc — dừng nhầm việc, và `s` giết tiến trình thật | chọn theo tab đang mở |
+
+## 4a. LỖI NGHIÊM TRỌNG NHẤT, tìm bằng cách TỰ TẤN CÔNG bất biến
+
+Sau khi bộ kiểm đã xanh, tôi viết một kịch bản cố **phá bất biến số 1**:
+"việc GATED không bao giờ chạy nếu chưa có người duyệt". Nó phá được:
+
+```
+after chat      : BLOCKED | permission: GATED
+after pause     : PAUSED          <- hợp lệ
+after resume    : QUEUED          <- hợp lệ
+tick dispatched : ['demo.t5ee9-1']
+final state     : RUNNING | attempts: 1
+GATE_APPROVED   : 0
+>>> BYPASS: một việc GATED đã chạy với KHÔNG một lần duyệt nào.
+```
+
+Hai bước **đều hợp lệ** nối lại thành một đường vòng đầy đủ quanh cổng an
+toàn quan trọng nhất của hệ thống. Một `deploy … production` sẽ chạy thật.
+
+Đã sửa ở **ba** chỗ, và chỗ thứ hai mới là chỗ đáng kể:
+
+1. `mo_khoa_gated` ghi **dấu duyệt lên chính việc** (`contract._permission.
+   approved_by`), không chỉ vào nhật ký sự kiện. Một sự kiện là thứ *đọc lại
+   được*; bộ lập lịch cần thứ *kiểm được*.
+2. `_san_sang` — **lưới cuối**. Bất kỳ việc GATED nào lọt vào `QUEUED` mà
+   chưa được duyệt đều bị đẩy lại `BLOCKED` kèm sự kiện `GATE_REASSERTED`
+   mức ALERT. Sửa riêng `resume()` là bịt đúng một lỗ và để ngỏ mọi lỗ chưa
+   nghĩ ra; kiểm ở **cổng vào của bộ lập lịch** thì mọi đường — hiện tại và
+   về sau — đều phải đi qua đó.
+3. `resume()` từ chối tường minh và chỉ người dùng sang phím `g`.
+
+Sau khi sửa, cùng kịch bản đó: `>>> held: cổng sống sót qua đường
+pause/resume.` 4 bài kiểm khoá lại cả đường tấn công lẫn đường hợp lệ.
+
+**Bài học đáng giữ:** bộ kiểm xanh không có nghĩa là bất biến đúng. Bộ kiểm
+chỉ kiểm những đường tôi đã nghĩ ra; tấn công bất biến tìm ra đường tôi chưa
+nghĩ tới.
 
 ## 4b. Khép vòng REVIEW (thêm sau lượt chạy đầu)
 

@@ -87,6 +87,48 @@ sudo systemctl enable --now fanfic-farmer
 journalctl -u fanfic-farmer -f
 ```
 
+## Cài đặt lên máy AWS
+
+Hai bước dưới đây cần `sudo` và một **bí mật** — đó là lý do chúng nằm ở đây
+thay vì được chạy tự động. Kho mã ở `/opt/fanfic-audio` thuộc user `fanfic`,
+và `worker-prod.env` **cố ý không đọc được** bởi `ubuntu`.
+
+```bash
+ssh -i <khoá>.pem ubuntu@13.212.224.218
+
+# 1. Mã nguồn
+sudo -u fanfic git -C /opt/fanfic-audio fetch origin
+sudo -u fanfic git -C /opt/fanfic-audio checkout main
+sudo -u fanfic git -C /opt/fanfic-audio pull --ff-only
+
+# 2. Cấu hình farmer (chứa KHOÁ GEMINI — không commit, không in ra)
+sudo install -o fanfic -g fanfic -m 600 /dev/null /etc/fanfic-audio/farmer.env
+sudo -e /etc/fanfic-audio/farmer.env      # dán nội dung ở mục "Cấu hình"
+
+# 3. Nguồn truyện chữ
+sudo -e /etc/fanfic-audio/farmer-text-sources.json
+
+# 4. Dịch vụ
+sudo cp /opt/fanfic-audio/deploy/fanfic-farmer.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# 5. Kiểm TRƯỚC khi bật chạy mãi — một vòng, không ghi gì
+sudo -u fanfic env $(cat /etc/fanfic-audio/farmer.env | xargs) \
+  /opt/fanfic-audio/.venv/bin/python -m server.farmer --dry-run
+
+# 6. Lô có kiểm soát — một vòng, có ghi
+sudo systemctl start fanfic-farmer
+sleep 60 && sudo -u fanfic /opt/fanfic-audio/.venv/bin/python -m server.farmer --status
+
+# 7. Chỉ bật chạy mãi khi bước 6 xanh
+sudo systemctl enable fanfic-farmer
+```
+
+Gỡ nhanh nếu cần: `sudo systemctl disable --now fanfic-farmer`. Farmer không
+giữ trạng thái nào ngoài `/var/lib/fanfic-farmer`, nên tắt nó không để lại gì
+dở dang — mỗi công đoạn đã ghi vào Appwrite/R2 vẫn nguyên vẹn và
+orchestrator/worker vẫn xử lý tiếp bình thường.
+
 ## Cấu hình
 
 `/etc/fanfic-audio/farmer.env` (nạp *sau* `worker-prod.env`, nên ghi đè được):

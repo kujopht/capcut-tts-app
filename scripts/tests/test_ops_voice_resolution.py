@@ -111,7 +111,7 @@ class TestPhanGiaiGiong(unittest.TestCase):
     # model gia tren dia la khong tat dinh: registry co the da duoc dung tu
     # truoc trong cung tien trinh. Thay vao do TIEM registry — kiem dung HOP
     # DONG cua ham, khong kiem cache cua registry.
-    def _voi_registry(self, ten_giong, installed):
+    def _voi_registry(self, ten_giong, installed, runtime_co=True):
         from unittest import mock
         from server import tts_bridge as b
 
@@ -120,9 +120,27 @@ class TestPhanGiaiGiong(unittest.TestCase):
         g = Giong()
         g.installed = installed
 
+        class BoChay:
+            """Provider gia. `installed` o day nghia la GOI piper co import
+            duoc khong — khac han `Giong.installed` (file model co tren dia
+            khong)."""
+
+            def __init__(self, co):
+                self.installed = co
+
         class Reg:
+            # `get()` PHAI co: `voice_runnable_on_this_machine` hoi registry
+            # HAI cau khac nhau — runtime co san khong (`get(provider)`), va
+            # file model co san khong (`voice_by_id(id)`). Ban gia thieu `get`
+            # se nem AttributeError, va do la cach bo test nay do khi ham duoc
+            # sua de hoi runtime TRUOC (su co Cloud Run 2026-09-06: thieu goi
+            # piper-tts thi ham cu tra True, worker nhan job roi chet).
+            def get(self, provider_id):
+                return BoChay(runtime_co)
+
             def voice_by_id(self, vid):
                 return g if vid == ten_giong else None
+
         return mock.patch.object(b, "get_registry", lambda: Reg())
 
     def test_cong_vat_ly_CHO_QUA_khi_model_DA_CAI(self):

@@ -82,6 +82,11 @@ class FarmerStatus:
     unhealthy_reason: str = ""
     lanes: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     quotas: Dict[str, Any] = field(default_factory=dict)
+    #: Dich luu tru ben vung (Google Drive) — remote/goc/tinh trang. Router
+    #: Control Center se hien phan nay; giu hinh dang on dinh.
+    archive: Dict[str, Any] = field(default_factory=dict)
+    #: Toan ven trinh thong dich luc khoi dong.
+    integrity: Dict[str, Any] = field(default_factory=dict)
     #: Tong don gian tich luy tron doi tien trinh — de ve do thi.
     totals: Dict[str, int] = field(default_factory=dict)
 
@@ -99,6 +104,8 @@ class FarmerStatus:
             "unhealthy_reason": self.unhealthy_reason,
             "lanes": self.lanes,
             "quotas": self.quotas,
+            "archive": self.archive,
+            "integrity": self.integrity,
             "totals": dict(self.totals),
         }
 
@@ -132,9 +139,13 @@ class MetricsWriter:
 
     def write(self, *, lanes: Dict[str, LaneMetrics], quotas: Dict[str, Any],
               round_started: float, healthy: bool = True,
-              unhealthy_reason: str = "") -> FarmerStatus:
+              unhealthy_reason: str = "",
+              archive: Optional[Dict[str, Any]] = None,
+              integrity: Optional[Dict[str, Any]] = None) -> FarmerStatus:
         self._accumulate(lanes)
         status = FarmerStatus(
+            archive=dict(archive or {}),
+            integrity=dict(integrity or {}),
             started_at=self._started_at,
             updated_at=_now(),
             round_number=self._round,

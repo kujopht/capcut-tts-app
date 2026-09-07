@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from server.farmer.covers import CoverGate, build_cover_provider
+from server.farmer.integrity import InterpreterNotSecure, assert_interpreter_secure
 from server.farmer.loop import ProductionFarmer
 from server.farmer.metrics import MetricsWriter, status_path
 from server.farmer.quotas import FarmerQuotas
@@ -43,6 +44,11 @@ def _build(dry_run: bool) -> ProductionFarmer:
     from server.config import load_settings
     from server.cover_pipeline import CoverPipelineService
     from server.farmer import adapters
+
+    # CONG TOAN VEN — truoc moi thu khac. Neu trinh thong dich (hoac duong
+    # dan toi no) ghi duoc boi group/other thi moi bao dam con lai deu vo
+    # nghia, va farmer khong duoc khoi dong.
+    integrity = assert_interpreter_secure()
 
     settings = load_settings()
     store = AppwriteMetadataStore(settings.appwrite)
@@ -79,7 +85,7 @@ def _build(dry_run: bool) -> ProductionFarmer:
         enqueue_tts = adapters.make_tts_enqueuer(token)
         enqueue_audio = adapters.make_audio_enqueuer(store)
 
-    return ProductionFarmer(
+    farmer = ProductionFarmer(
         store=store, quotas=quotas, reviewer=reviewer, cover_gate=covers,
         metrics_writer=MetricsWriter(),
         discover_audio=adapters.make_audio_discovery(store),
@@ -87,6 +93,8 @@ def _build(dry_run: bool) -> ProductionFarmer:
         fetch_text=adapters.make_text_fetcher(),
         publish_text=publish, enqueue_tts=enqueue_tts,
         enqueue_audio_item=enqueue_audio)
+    farmer._integrity = integrity.as_dict()
+    return farmer
 
 
 def _text_discovery():
@@ -187,6 +195,10 @@ def main(argv=None) -> int:
 
     try:
         farmer = _build(args.dry_run)
+    except InterpreterNotSecure as exc:
+        print(json.dumps({"status": "BLOCKED", "reason": str(exc)},
+                         ensure_ascii=False))
+        return 4
     except ReviewUnavailable as exc:
         # Fail closed ngay tu luc khoi dong: khong co cong danh gia thi
         # farmer khong duoc phep san xuat gi ca.

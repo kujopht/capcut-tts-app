@@ -70,6 +70,77 @@ lượt gọi Gemini 10.000 lần mà không bao giờ chạm trần "2 cái cù
 Biến môi trường đánh sai (`abc`, `0`, `-5`) → quay về mặc định, **không** mở
 toang cổng.
 
+## Kho sản xuất chính tắc
+
+`FanficWorld/archive/` là **LEGACY** và được để yên: raw scraping, rendered
+cũ, backup hạ tầng. Không đổi tên, không sắp xếp lại.
+
+Sản phẩm **mới** đi vào `FanficWorld/production/`:
+
+```
+works/fanfic-tts/     works/existing-audio/     works/chinese-media/
+quarantine/           rejected/                 manifests/
+```
+
+Mỗi tác phẩm được duyệt có **một** thư mục chính tắc và bộ tên cố định:
+
+```
+manifest.json · source/original.* · text/normalized.txt
+transcript/transcript.json · subtitles/vi.srt · audio/vi.mp3
+artwork/cover.webp · artwork/background.webp
+```
+
+### Gemini chuẩn hoá siêu dữ liệu; MÃ đặt tên
+
+Đây là ranh giới quan trọng nhất của phần này, và nó là một *tính chất* chứ
+không phải sở thích:
+
+> Cùng một tác phẩm chạm qua hai lần đánh giá có thể ra hai tiêu đề hơi khác
+> ("Lều chõng" / "Leu Chong" / "Lều Chõng (bản đầy đủ)"). Nếu tên thư mục bám
+> vào tiêu đề, một lần **thử lại** sẽ đẻ ra thư mục thứ hai cho cùng tác phẩm
+> — đúng điều khử trùng lặp tồn tại để ngăn.
+
+Nên định danh được dẫn ra từ **danh tính nguồn**, thứ không đổi:
+
+| Thứ | Nguồn |
+|---|---|
+| `work_id` | `sha256(bucket + canonical_url)` — tất định, ổn định mãi mãi |
+| slug thư mục | **đường dẫn URL**, không phải tiêu đề |
+| thùng (`bucket`) | **lằn sản xuất** (mã biết), không phải `content_type` của model |
+
+Gemini trả về: canonical/display title, fandom, category, author, language,
+content type, completeness, quality score, tags, và quyết định
+`approve`/`quarantine`/`reject` kèm lý do. **Không** trường nào trong số đó
+chạm vào một đường dẫn.
+
+Điểm thấp hơn ngưỡng nhưng model nói "approve" → hạ xuống **quarantine**, không
+phải reject: model thấy nó dùng được, chỉ là chưa đạt ngưỡng tự động — đó là
+việc cho người xem lại.
+
+`manifest.json` giữ **nguyên vẹn** bản gốc (tiêu đề nguồn, URL, provider ID,
+hashes, toàn bộ metadata thô) bên cạnh bản chuẩn hoá. Nếu sau này phép chuẩn
+hoá đổi, còn đối chiếu được.
+
+### Ảnh bìa + nền là cổng cứng
+
+`artwork/cover.webp` **và** `artwork/background.webp` đều phải có trước
+READY/PUBLISHABLE. Thiếu một cái → chưa xuất bản được.
+
+## Lưu trữ Drive là gương, không phải đường phục vụ
+
+| Vai | Nơi |
+|---|---|
+| **Phục vụ** (người dùng đọc/nghe) | R2 + Appwrite |
+| **Gương bền vững** | Google Drive, remote chính tắc `fanfic-gdrive` |
+
+`server/farmer/drive_archive.py` chỉ `copy` — không `sync`, `move`, `delete`,
+`purge`, và không bao giờ chạm tới R2. Có bài test đọc **cây cú pháp** để chặn
+điều đó: `sync` ở đây sẽ biến một lỗi cục bộ thành mất dữ liệu trên bản lưu
+trữ.
+
+Drive hỏng → `ARCHIVE_PENDING` + thử lại vòng sau. **Không** xoá, **không**
+làm hỏng một object R2 hợp lệ.
+
 ## Chạy
 
 ```bash

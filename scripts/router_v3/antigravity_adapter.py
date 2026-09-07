@@ -98,6 +98,37 @@ class AntigravityNativeAdapter(WorkerAdapter):
                             status="failed", provider=self.provider,
                             model=self._model, summary=(t.error or "hỏng")[:300],
                             duration_seconds=round(giay, 2))
+        elif not (t.response or "").strip():
+            # LƯỢT "THÀNH CÔNG" NHƯNG RỖNG — nói được VÌ SAO, thay vì để
+            # `parse_result` báo một câu vô nghĩa.
+            #
+            # `agy` báo SUCCESS với `response` rỗng khi một công cụ nó muốn
+            # dùng bị TỪ CHỐI QUYỀN: chế độ headless không hỏi được người
+            # dùng nên nó tự chối, và lý do chỉ nằm ở **stderr**. Đo thật
+            # 2026-09-08:
+            #
+            #   "no output produced — a tool required the \"command\"
+            #    permission that headless mode cannot prompt for, so it was
+            #    auto-denied."
+            #
+            # Không đọc stderr thì phong bì chỉ nói "worker không trả về
+            # khối JSON nào" — đúng về mặt chữ nghĩa và vô dụng khi gỡ lỗi:
+            # nó chỉ vào bộ đọc JSON trong khi lỗi nằm ở cấu hình quyền.
+            # `stderr_tail` đã được thu thập sẵn CHÍNH VÌ trường hợp này
+            # (xem docstring của nó); trước bản này nó chưa bao giờ được
+            # đưa ra ngoài.
+            duoi = (self._worker.stderr_tail or "").strip()
+            kq = TaskResult(
+                task_id=packet.task_id, worker_id=self._worker_id,
+                status="failed", provider=self.provider, model=self._model,
+                duration_seconds=round(giay, 2),
+                failure_reason=("tool_permission_denied"
+                                if "permission" in duoi.lower()
+                                else "empty_response"),
+                summary=("worker kết thúc lượt mà KHÔNG trả về văn bản nào. "
+                         + (f"stderr của agy: {duoi[-400:]}" if duoi
+                            else "stderr cũng rỗng — không có manh mối nào.")),
+                raw_excerpt=duoi[-2000:])
         else:
             kq = parse_result(packet.task_id, self._worker_id, t.response, giay)
             kq.provider, kq.model = self.provider, self._model

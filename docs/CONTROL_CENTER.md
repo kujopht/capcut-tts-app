@@ -1,0 +1,299 @@
+# Router Control Center V0.1
+
+Phòng điều khiển cho Router V4 **đã có**. Mở một dự án, gõ mục tiêu vào ô
+chat, và Router tự phân rã việc, chọn agent, dựng worktree, dựng/dùng lại
+phiên, khoá tài nguyên, chạy, báo cáo — không phải mở tay một terminal
+Claude/Codex/Antigravity nào.
+
+> **Nó KHÔNG thiết kế lại Router V4.** Bốn thứ khó nhất — chấm điểm
+> placement theo năng lực, cô lập worktree, cổng kiểm định "không tin worker
+> tự khai PASS", phong bì kết quả — đã có, đã chạy thật, và được dùng
+> NGUYÊN VẸN. Xem `docs/AI_ROUTER_V4.md` và
+> `docs/reports/ROUTER_V4_REAL_PROOF.md`.
+
+---
+
+## 1. Chạy
+
+```bash
+# giao dien
+python -m scripts.control_center
+
+# khong co TTY / kiem nhanh / CI
+python -m scripts.control_center --headless
+
+# gui mot cau vao o chat roi thoat
+python -m scripts.control_center --chat "finish the production web and separately investigate AWS cleanup"
+```
+
+Phụ thuộc TUI dùng chung với Control Room đã có:
+
+```bash
+python -m pip install -r requirements-control-room.txt
+```
+
+| Cờ | Ý nghĩa |
+|---|---|
+| `--root` | thư mục giữ sổ `.router/control_center/control.db` (mặc định `cwd`) |
+| `--probe` | dò sức khoẻ provider lúc khởi động. **CHẬM và tốn một lượt mỗi provider** — mặc định TẮT |
+| `--max-parallel` | trần việc chạy song song (mặc định 3, trùng trần WRITE worker của router toàn cục) |
+| `--no-recover` | bỏ qua đối soát phục hồi lúc khởi động |
+
+Phím trong giao diện: `q` thoát · `enter` chi tiết việc · `p` tạm dừng ·
+`o` tiếp tục · `s` dừng hẳn · `r` giao lại · `g` duyệt cổng · `u` đo usage.
+
+---
+
+## 2. Ranh giới với Router V4
+
+Chỗ duy nhất đáng tranh cãi trong bản này, nên nói thẳng.
+
+| Việc | Ai làm |
+|---|---|
+| Chấm điểm và chọn `(runtime, model)` | **Router V4** `Scheduler.decide()` |
+| Dựng adapter, gọi tiến trình agent | **Router V4** `Executor.run()` |
+| Cô lập worktree, kiểm phạm vi ghi | **Router V3** `WorktreeManager` + `pool/validation` |
+| Lease KHE runtime | **Router V4** `LeaseStore` |
+| Phong bì kết quả, nhật ký thô | **Router V4** `ResultEnvelope` / `RawLogStore` |
+| Dự án, ô chat, phân rã ý định | Control Center |
+| Trạng thái việc 8 giá trị, phụ thuộc, ưu tiên | Control Center |
+| REUSE / CREATE / WAIT phiên | Control Center |
+| Khoá tài nguyên fs/dịch vụ/production | Control Center |
+| Phong bì quyền AUTO/GATED | Control Center |
+| Bền + phục hồi sau khởi động lại | Control Center |
+
+**Vì sao Control Center gọi thẳng `Executor.run()` chứ không gọi
+`RouterV4.run_task()`:** `run_task` tự chọn placement cho từng việc — đúng
+cho một mission chạy một lần, nhưng nó **không thể dùng lại một phiên**, vì
+với nó phiên không tồn tại. Dùng lại phiên là yêu cầu lõi của V0.1, nên
+placement do `SessionManager` chốt, còn mọi cơ chế bên trong `Executor`
+chạy y nguyên.
+
+### Thay đổi DUY NHẤT chạm vào Router V4
+
+`scripts/router_v4/executor.py` được thêm **một tham số tuỳ chọn**:
+
+```python
+Executor(..., worktree_provider=None)
+```
+
+`None` = hành vi mặc định, không đổi một bit nào (177 bài kiểm V3/V4 vẫn
+xanh). Điểm nối này tồn tại cho một bên gọi sống lâu hơn một mission:
+Control Center giữ một phiên agent ấm qua nhiều việc, và phiên đó sở hữu
+MỘT worktree. Không có hook này, bên gọi phải chép lại cả `run()` chỉ để
+đổi ba dòng tạo cây — và bản chép sẽ lệch dần khỏi bản thật.
+
+---
+
+## 3. Trạng thái việc
+
+```
+QUEUED    sẵn sàng, chờ tới lượt.                    Không phải làm gì.
+WAITING   chờ thứ SẼ TỰ HẾT: phụ thuộc, hoặc khoá.   Không phải làm gì.
+BLOCKED   chờ thứ KHÔNG tự hết: cần NGƯỜI quyết.     ← phải can thiệp
+RUNNING   đang chạy trên một phiên agent.
+REVIEW    xong, nhưng hợp đồng đòi review độc lập.
+DONE / FAILED / PAUSED
+```
+
+Tách `WAITING` khỏi `QUEUED` và `BLOCKED` là để bảng điều khiển trả lời
+được câu hỏi quan trọng nhất lúc 3 giờ sáng: **"có việc nào đang chờ TÔI
+không?"** Gộp ba trạng thái này (như hàng đợi V3 làm với `queued`) thì
+không trả lời được.
+
+Chuyển trạng thái được **kiểm bằng máy** (`model.kiem_chuyen`). `DONE` là
+ngõ cụt — một việc đã DONE quay lại RUNNING sẽ ghi đè `ended_at` và làm sai
+mọi báo cáo theo thời gian, một cách im lặng.
+
+---
+
+## 4. Phiên: REUSE / CREATE / WAIT
+
+Luật xét **theo đúng thứ tự này**; luật chặn đứng trước luật cấp phát.
+
+| # | Điều kiện | Kết luận |
+|---|---|---|
+| 0 | tài nguyên đang do việc khác giữ | **WAIT** |
+| 1 | phạm vi ghi giẫm lên một phiên đang BẬN | **WAIT** |
+| 2 | có phiên RẢNH, khoẻ, phạm vi tương thích | **REUSE** |
+| 3 | đã chạm trần phiên/dự án | **WAIT** |
+| 4 | còn lại | **CREATE** |
+
+Xét luật 1 trước luật 2 có lý do: một phiên đang chạy việc khác trên cùng
+phạm vi thì **không được dùng lại**, và cũng **không được** để việc mới
+chạy song song vào đó bằng một phiên khác.
+
+Tương thích phạm vi = phạm vi việc **nằm gọn trong** phạm vi phiên. Cho
+phép vượt ra nghĩa là phiên âm thầm mở rộng quyền ghi của chính nó qua từng
+việc. Việc CHỈ ĐỌC tương thích với mọi phiên rảnh.
+
+Mỗi quyết định mang theo `trace` — danh sách luật đã xét, theo thứ tự. Một
+bộ chọn phiên không nói được vì sao nó dựng phiên thứ tư là một bộ chọn
+không ai gỡ lỗi được.
+
+---
+
+## 5. Khoá tài nguyên
+
+Ba lớp, **không cùng luật**:
+
+| Lớp | Xung đột khi | Tự thu hồi khi hết hạn |
+|---|---|---|
+| `FILESYSTEM` | giao nhau **tiền tố đường dẫn**, cả hai chiều | có |
+| `SERVICE` | trùng khớp định danh | có |
+| `PRODUCTION` | trùng khớp định danh | **KHÔNG BAO GIỜ** |
+
+`web/admin` xung đột với `web/admin/content-queue` theo **cả hai chiều** —
+cha chặn con, con chặn cha. So theo ĐOẠN chứ không theo chuỗi trần:
+`web/admin` **không** được xung đột với `web/administration`.
+
+**Vì sao khoá production không tự hết hạn.** Khoá có hạn tồn tại để một
+tiến trình chết không khoá hệ thống vĩnh viễn — đánh đổi đó đúng cho
+worktree và SAI cho production. Một khoá production quá hạn có hai khả
+năng: tiến trình đã chết, hoặc một thao tác production đang chạy lâu hơn
+dự kiến. Đoán sai khả năng thứ hai nghĩa là để việc thứ hai chen vào giữa
+một lần cutover. Nên `reclaim()` chỉ đụng hai lớp đầu; khoá production quá
+hạn được **báo cáo cho người**, và chỉ người mới gỡ được. Dấu hết hạn ở lớp
+đó là **ngưỡng báo động**, không phải hạn thuê.
+
+Xin khoá là **tất cả hoặc không cái nào**, và thứ tự xin được **sắp xếp** —
+hai việc xin cùng hai tài nguyên luôn xin theo cùng thứ tự, nên không ôm
+chéo nhau.
+
+---
+
+## 6. Phong bì quyền
+
+| AUTO — tự làm, không hỏi | GATED — DỪNG, hỏi người |
+|---|---|
+| đọc/tìm kiếm kho | deploy production |
+| sửa tệp **trong worktree mình sở hữu** | thay đổi phá huỷ trên production |
+| lint / test / build | IAM / gốc tin cậy |
+| xem phụ thuộc | xoay hoặc lộ bí mật |
+| commit cục bộ | hoá đơn / mở rộng tài nguyên |
+| | `git push`, viết lại lịch sử |
+
+Việc chạm lớp GATED được tạo thẳng ở `BLOCKED` kèm **câu hỏi cụ thể** —
+không bao giờ vào hàng đợi. Cho nó `QUEUED` rồi chặn ở bước sau nghĩa là
+chỉ cần MỘT lỗi lập lịch là nó chạy.
+
+Mở cổng chỉ có một đường: người dùng bấm `g` và xác nhận. Việc đó ghi một
+sự kiện `GATE_APPROVED` mức `ALERT` kèm tên người duyệt.
+
+**Ba thứ module này KHÔNG làm:**
+
+1. **Không nới rào có sẵn.** Phong bì chỉ biết nói KHÔNG.
+   `destructive_actions_allowed` vẫn luôn `False`, `forbidden_scope` vẫn
+   được `contract.py` nhồi thêm `FORBIDDEN_ALWAYS`, cổng kiểm định của V3
+   vẫn chạy y nguyên. Đây là tầng thứ BA, không phải tầng thay thế.
+2. **Không `--dangerously-skip-permissions`, không `bypassPermissions`.**
+3. **Không tự quyết việc GATED.** `PermissionClass` chỉ có hai giá trị và
+   không giá trị nào nghĩa là "bỏ qua".
+
+Phong bì được **render vào chính văn bản hợp đồng gửi agent**, không chỉ
+lưu bên cạnh: một agent không biết vì sao nó bị chặn sẽ thử một đường vòng
+khác thay vì dừng và báo `blocked`.
+
+---
+
+## 7. Worktree
+
+- Một **phiên** sở hữu **một** worktree. Việc tiếp theo của chính phiên đó
+  dùng lại nó.
+- **Không dùng lại giữa hai phiên**, kể cả khi phạm vi trông rời nhau.
+  "Phạm vi rời nhau" là lời khai của hợp đồng; thứ thật sự nằm trên đĩa là
+  `git status`. Một worktree thừa tốn vài trăm MB; một lần trộn công việc
+  của hai agent tốn cả buổi để gỡ.
+- Cây **bẩn** (còn thay đổi chưa commit) **không** được dùng lại — và cũng
+  **không** bị xoá. Việc mới nhận cây sạch, cây cũ được đánh dấu `DIRTY`.
+- **KHÔNG TỰ XOÁ, không bao giờ.** `doi_soat()` chỉ đánh dấu. Một cây hỏng
+  là bằng chứng, và nó có thể chứa công việc chưa commit của một agent vừa
+  chết.
+- `assert_exclusive()` **ném** thay vì cảnh báo. Một cảnh báo sẽ bị nuốt
+  trong log lúc 3 giờ sáng và hai agent vẫn giẫm lên nhau.
+
+---
+
+## 8. Usage — không bao giờ bịa số
+
+| Nhãn | Nghĩa |
+|---|---|
+| `ACTUAL` | Control Center hoặc Router **tự đếm được tại chỗ**. |
+| `ESTIMATED` | ước lượng có nguồn khai báo (`Source.DECLARED` của V4). |
+| `UNAVAILABLE` | không quan sát được. Giá trị là `None`, **không phải `0`**. |
+
+Vế cuối được ép bằng `UsageMetric.__post_init__` — khai `UNAVAILABLE` mà
+vẫn có giá trị thì ném lỗi. Lý do: `0` trong cột "còn lại" đọc thành "đã
+cạn", `0` trong cột "đã dùng" đọc thành "chưa tiêu gì". Cả hai đều là kết
+luận, và cả hai đều sai khi sự thật là "không đo được".
+
+Sự thật đo được về từng nhà cung cấp:
+
+| Provider | Quan sát được gì |
+|---|---|
+| Antigravity | `agy --print /credits` trả **văn bản cho người đọc**. Đọc được dòng `Remaining credits` thì đó là ACTUAL; phần còn lại giữ nguyên làm văn bản thô. |
+| Codex | **không có** lệnh usage/quota. Tín hiệu duy nhất: còn đăng nhập hay không → `UNAVAILABLE`. |
+| Claude Code | **không lộ ra** usage. Chỉ suy ra được từ phản hồi rate-limit thật → `UNAVAILABLE`. |
+
+Gọi CLI nhà cung cấp là thao tác **chậm và tốn một lượt**, nên nó **không
+bao giờ** chạy trong vòng lặp vẽ giao diện — chỉ khi người dùng bấm `u`.
+Có một bài kiểm khoá lại điều đó.
+
+---
+
+## 9. Bền + phục hồi
+
+Sổ ở `.router/control_center/control.db` (SQLite, WAL, một kết nối mỗi
+luồng — cùng khuôn đã chứng minh của `router_v3/pool/store.py`).
+
+`recover()` chạy lúc khởi động, theo thứ tự an toàn tăng dần:
+
+1. **khoá** — hết hạn thì thu, **trừ** khoá production (cần người).
+2. **phiên** — có PID sống → gắn lại; chết → `DEAD`; **không có PID → KHÔNG
+   coi là chết**, chỉ đưa về `IDLE`. Tuyên bố chết một phiên còn sống sẽ
+   khiến Control Center dựng phiên thứ hai chồng lên nó.
+3. **worktree** — đối soát với đĩa; chỉ đánh dấu.
+4. **việc** — `RUNNING` mà chủ đã chết → `QUEUED` để xét lại, **không phải
+   `FAILED`**. Tiến trình agent có thể vẫn đang chạy thật (tắt Control
+   Center không giết nó); đánh `FAILED` là vứt luôn công việc đã làm. Chỉ
+   khi đã cạn lượt thử mới chuyển `BLOCKED` để người xem.
+
+`shutdown()` **không** giết agent đang chạy và **không** xoá worktree. Tắt
+Control Center không được phép phá công việc đang dở.
+
+---
+
+## 10. Bằng chứng
+
+| Loại | Ở đâu | Chạy gì |
+|---|---|---|
+| Lát cắt dọc, tất định, offline | `scripts/tests/test_control_center_slice.py` | agent giả **ghi tệp thật vào worktree thật** |
+| Lõi: sổ, khoá, quyền, phân rã | `scripts/tests/test_control_center_core.py` | thuần hàm |
+| Giao diện | `scripts/tests/test_control_center_ui.py` | Textual `run_test()`, không cần màn hình |
+| **Agent THẬT** | `scripts/control_center_real_proof.py` | tiến trình `agy`/`codex` thật, kho thật |
+
+```bash
+python -m unittest discover -s scripts/tests -t .
+python scripts/control_center_real_proof.py --probe          # tốn quota
+```
+
+Bằng chứng thật tách khỏi bộ kiểm có chủ đích: nó **tốn quota**, **không
+tất định**, và **chậm**. Ba lý do đó không làm nó bớt cần thiết — nhưng một
+bộ kiểm tự tiêu quota mỗi lần chạy là một bộ kiểm không ai dám chạy.
+
+---
+
+## 11. Chưa làm (cố ý, V0.1)
+
+Không phải thiếu sót — là ranh giới đã chọn:
+
+- **Bộ phân rã mặc định chạy theo LUẬT**, không gọi model.
+  `RouterPlanner` (nhờ một worker rẻ phân rã) đã có và đã kiểm, nhưng phải
+  bật tường minh. Ô chat là cổng vào của mọi thứ khác; nếu nó chỉ hoạt động
+  khi có mạng và còn quota thì cả Control Center cũng vậy.
+- **Không tự xoá worktree.** Sẽ cần một lệnh dọn *do người bấm*.
+- **Không tự gộp nhánh, không tự push, không deploy.**
+- **`pause` một việc ĐANG chạy không cắt lượt đang bay.** `Executor.run`
+  là đồng bộ; cách duy nhất cắt thật là giết tiến trình, và đó là `stop`.
+  Nói rõ thay vì giả vờ đã dừng.
+- **Chưa có Browser Operator, chưa có app di động, chưa có cloud.**

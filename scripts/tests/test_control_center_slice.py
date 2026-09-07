@@ -1,0 +1,720 @@
+"""LÁT CẮT DỌC của Control Center V0.1 — bài kiểm quan trọng nhất của bản này.
+
+Chứng minh đúng chuỗi đề bài đòi, đầu tới cuối, trên một KHO GIT THẬT:
+
+    ô chat -> tạo việc -> quyết định định tuyến -> tạo/dùng lại worktree cô
+    lập -> dựng phiên agent được quản lý -> chạy -> phát sự kiện/log -> ghi
+    sổ việc+phiên -> Pause/Stop -> SỐNG SÓT qua khởi động lại Control Center
+
+KHÔNG GỌI AGENT THẬT. Tiến trình `agy`/`codex` được thay bằng một
+`FakeExecutor` **có ghi tệp thật vào worktree thật**. Đó là ranh giới đúng:
+
+  - Mọi thứ ở phía Control Center — sổ, khoá, phiên, worktree, trạng thái,
+    phục hồi — chạy y hệt bản thật, và bài kiểm ép được chúng.
+  - Chỉ tiến trình mô hình ngôn ngữ bị thay. Nó vốn không tất định, chậm,
+    và tốn quota; ép nó vào một bài kiểm là biến bài kiểm thành một thứ
+    không ai dám chạy.
+
+Bằng chứng chạy với agent THẬT nằm ở `scripts/control_center_real_proof.py`
+và báo cáo của nó — hai thứ khác nhau, và cả hai đều cần.
+"""
+from __future__ import annotations
+
+import subprocess
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from scripts.router_v3.pool import validation as V
+from scripts.router_v4.contract import TaskContract
+from scripts.router_v4.envelope import ResultEnvelope
+from scripts.router_v4.executor import ExecutionResult
+from scripts.router_v4.runtime import (Fabric, ModelCapability, Placement,
+                                       QuotaPool, RuntimeStatus, Source,
+                                       WorkerRuntime)
+from scripts.control_center.bootstrap import khoi_tao
+from scripts.control_center.engine import ControlCenter
+from scripts.control_center.model import (LockKind, Project, SessionState,
+                                          TaskState)
+from scripts.control_center.store import ControlStore
+
+
+# ---------------------------------------------------------------------------
+# Do gia
+# ---------------------------------------------------------------------------
+
+def kho_git_tam() -> Path:
+    """Một kho git THẬT — `git worktree add` không chạy trên thư mục trần."""
+    goc = Path(tempfile.mkdtemp(prefix="cc-repo-"))
+    def g(*a: str) -> None:
+        p = subprocess.run(["git", "-C", str(goc), *a], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace")
+        if p.returncode != 0:
+            raise RuntimeError(f"git {a[0]} hỏng: {p.stderr[:300]}")
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "test@example.invalid")
+    g("config", "user.name", "cc-test")
+    g("config", "commit.gpgsign", "false")
+    (goc / "web").mkdir()
+    (goc / "web" / "index.txt").write_text("xin chào\n", encoding="utf-8")
+    (goc / "server").mkdir()
+    (goc / "server" / "api.txt").write_text("api\n", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-q", "-m", "khởi tạo")
+    return goc
+
+
+def fabric_gia() -> Fabric:
+    """Fabric hai runtime, ba model. Không chạm mạng, không đọc cấu hình.
+
+    Cố ý KHÔNG gõ vai trò vào tên: bộ lập lịch phải chọn theo NĂNG LỰC, và
+    một fabric giả có "AG_CODER"/"AG_REVIEWER" sẽ khiến bài kiểm xanh trong
+    khi luật kiến trúc trung tâm của V4 đã bị phá.
+    """
+    f = Fabric()
+    f.pool_groups.add("pool_a")
+    for tk in ("acct-1", "acct-2"):
+        f.add_pool(QuotaPool(pool_id=f"{tk}:pool_a", account_id=tk,
+                             member_models=frozenset({"m-manh", "m-re"}),
+                             remaining_estimate=0.8, source=Source.DECLARED))
+    f.add_model(ModelCapability(
+        model_id="m-manh", model_family="ho-x", provider="antigravity",
+        capabilities=frozenset({"coding", "repo_read", "repo_write",
+                                "structured_output", "long_context"}),
+        quota_pool="pool_a", benchmark_profile=0.8, latency_profile=20.0))
+    f.add_model(ModelCapability(
+        model_id="m-re", model_family="ho-y", provider="antigravity",
+        capabilities=frozenset({"coding", "repo_read", "repo_write",
+                                "structured_output"}),
+        quota_pool="pool_a", benchmark_profile=0.5, latency_profile=8.0))
+    for i, tk in enumerate(("acct-1", "acct-2"), start=1):
+        f.add_runtime(WorkerRuntime(
+            runtime_id=f"RT{i:02d}", provider="antigravity", account_id=tk,
+            auth_profile=f"gia:{tk}", supported_models=("m-manh", "m-re"),
+            concurrency=2, status=RuntimeStatus.IDLE))
+    f.validate()
+    return f
+
+
+class FakeExecutor:
+    """Đứng thay `router_v4.Executor`. GHI TỆP THẬT vào worktree thật.
+
+    Ghi thật chứ không giả vờ, vì đúng thứ bài kiểm cần chứng minh là
+    worktree được tạo, được trỏ đúng chỗ, và ghi được. Một executor chỉ trả
+    về `status="ok"` sẽ xanh ngay cả khi worktree chưa từng tồn tại.
+    """
+
+    def __init__(self, *, status: str = "ok", cham: float = 0.0,
+                 ghi: str = "ket-qua.txt"):
+        self.status = status
+        self.cham = cham
+        self.ghi = ghi
+        self._cache: Dict[str, object] = {}
+        self.worktree_provider = None
+        self.da_chay: List[str] = []
+
+    def run(self, c: TaskContract, p: Placement, *, base_sha: str = "",
+            dependency_summaries=None, dependency_workspaces=None,
+            attempt: int = 1, reassigned: bool = False) -> ExecutionResult:
+        self.da_chay.append(c.task_id)
+        if self.cham:
+            time.sleep(self.cham)
+        h = None
+        duong = ""
+        if c.execution.worktree_required and self.worktree_provider is not None:
+            h = self.worktree_provider(c, p, base_sha, attempt)
+        if h is not None:
+            duong = str(h.path)
+            # GHI THAT, va ghi TRONG pham vi cho phep — mot bai kiem ghi ra
+            # ngoai pham vi se lam cong `contract_scope` bao dong dung.
+            goc = Path(duong)
+            pv = c.allowed_scope[0] if c.allowed_scope else ""
+            tep = (goc / pv / self.ghi) if pv else (goc / self.ghi)
+            tep.parent.mkdir(parents=True, exist_ok=True)
+            tep.write_text(f"{c.task_id} đã chạy trên {p.key}\n",
+                           encoding="utf-8")
+        pb = ResultEnvelope(
+            task_id=c.task_id, status=self.status,
+            summary=f"fake worker chạy {c.task_id} trên {p.key}",
+            worker=p.runtime_id, model=p.model_id, provider="antigravity",
+            duration=0.01, changes=[self.ghi] if h is not None else [],
+            failure_reason="" if self.status == "ok" else "gia_lap_hong")
+        return ExecutionResult(envelope=pb, validation=None, worktree=duong,
+                               branch=h.branch if h is not None else "")
+
+    def shutdown(self) -> None:
+        pass
+
+
+def _cc(repo: Path, *, ex: Optional[FakeExecutor] = None,
+        root: Optional[Path] = None, max_parallel: int = 3) -> ControlCenter:
+    goc = root or repo
+    cc = ControlCenter(root=goc, fabric=fabric_gia(), probe=False,
+                       max_parallel=max_parallel,
+                       executor_factory=lambda p, f: (ex or FakeExecutor()))
+    cc.them_project(Project(
+        project_id="demo", name="Demo", repo_path=str(repo),
+        resources=("write:web", "prod:fanfic.world", "tts-worker-queue")))
+    return cc
+
+
+def _cho(dieu_kien, *, giay: float = 20.0, nhip: float = 0.05) -> bool:
+    het = time.time() + giay
+    while time.time() < het:
+        if dieu_kien():
+            return True
+        time.sleep(nhip)
+    return False
+
+
+def _xong(cc: ControlCenter, *task_ids: str, giay: float = 20.0) -> bool:
+    """Chờ việc XONG HẲN — trạng thái cuối VÀ đã ra khỏi `in_flight`.
+
+    Chỉ chờ trạng thái cuối là một cuộc đua trong chính bài kiểm: `_chay`
+    ghi trạng thái cuối TRƯỚC, rồi mới nhả lease/khoá và rời `in_flight`
+    trong `finally`. Bài kiểm nào kiểm khoá ngay sau khi thấy `DONE` sẽ hỏng
+    ngẫu nhiên vài lần trong một trăm lần chạy — loại hỏng tệ nhất.
+    """
+    def _du() -> bool:
+        with cc._khoa:
+            bay = set(cc._dang_chay)
+        return all(cc.store.task(x).state.terminal and x not in bay
+                   for x in task_ids)
+    return _cho(_du, giay=giay)
+
+
+def _chay_het(cc: ControlCenter, *task_ids: str, giay: float = 30.0) -> bool:
+    """Đạp nhịp điều phối tới khi mọi việc xong. Thay cho vòng lặp nền.
+
+    Bài kiểm gọi `tick()` tay thay vì `start()` có chủ đích: một vòng lặp
+    nền làm bài kiểm phụ thuộc thời gian thực và hỏng vặt trên máy chậm.
+    Ở đây nhịp là tường minh, nên hỏng là hỏng thật.
+    """
+    het = time.time() + giay
+    while time.time() < het:
+        if _xong(cc, *task_ids, giay=0.01):
+            return True
+        cc.tick()
+        time.sleep(0.1)
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Lat cat doc
+# ---------------------------------------------------------------------------
+
+class TestVerticalSlice(unittest.TestCase):
+
+    def setUp(self):
+        self.repo = kho_git_tam()
+        self.ex = FakeExecutor()
+        self.cc = _cc(self.repo, ex=self.ex)
+
+    def tearDown(self):
+        try:
+            self.cc.shutdown()
+        except Exception:                                 # noqa: BLE001
+            pass
+
+    # -- 1. chat -> viec ----------------------------------------------------
+
+    def test_chat_tao_viec_duoc_quan_ly(self):
+        kq = self.cc.chat(
+            "demo",
+            "finish the production web and separately investigate AWS cleanup")
+        self.assertEqual(len(kq["tasks"]), 2)
+        ts = self.cc.store.tasks("demo")
+        self.assertEqual(len(ts), 2)
+        self.assertTrue(all(t.state is TaskState.QUEUED for t in ts))
+        self.assertIn("Đã tách thành 2 việc", kq["reply"])
+
+    def test_chat_duoc_ghi_lai_ca_hai_chieu(self):
+        self.cc.chat("demo", "fix web/admin")
+        tin = self.cc.store.chat("demo")
+        self.assertEqual([m.role for m in tin], ["user", "router"])
+
+    def test_viec_GATED_vao_BLOCKED_chu_KHONG_vao_hang_doi(self):
+        """Việc chạm cổng KHÔNG được nằm ở `QUEUED`.
+
+        Cho nó vào hàng đợi rồi chặn ở bước sau nghĩa là chỉ cần MỘT lỗi
+        lập lịch là nó chạy. Chặn ngay từ lúc tạo thì không có bước sau nào
+        để lỗi.
+        """
+        self.cc.chat("demo", "deploy the web to production")
+        t = self.cc.store.tasks("demo")[0]
+        self.assertIs(t.state, TaskState.BLOCKED)
+        self.assertEqual(t.permission, "GATED")
+        self.assertIn("production_deploy", t.blocked_reason)
+
+        kq = self.cc.tick()
+        self.assertEqual(kq["dispatched"], [],
+                         "việc GATED không bao giờ được tự giao")
+
+    def test_mo_khoa_gated_can_nguoi_va_de_lai_dau_vet(self):
+        self.cc.chat("demo", "deploy the web to production")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        t = self.cc.mo_khoa_gated(tid, approved_by="nam", note="đã xem xong")
+        self.assertIs(t.state, TaskState.QUEUED)
+        sk = [e for e in self.cc.store.su_kien(task_id=tid)
+              if e["kind"] == "GATE_APPROVED"]
+        self.assertEqual(len(sk), 1)
+        self.assertEqual(sk[0]["level"], "ALERT")
+        self.assertEqual(sk[0]["meta"]["approved_by"], "nam")
+
+    # -- 2. tick -> phien + worktree + chay ---------------------------------
+
+    def test_lat_cat_day_du_mot_viec(self):
+        """chat -> tick -> phiên -> worktree -> chạy -> DONE, có bằng chứng."""
+        self.cc.chat("demo", "fix the styling in web/admin")
+        t0 = self.cc.store.tasks("demo")[0]
+
+        kq = self.cc.tick()
+        self.assertEqual(kq["dispatched"], [t0.task_id], kq)
+
+        self.assertTrue(_xong(self.cc, t0.task_id),
+                        f"việc không xong: {self.cc.store.task(t0.task_id).state}")
+        self.assertIs(self.cc.store.task(t0.task_id).state, TaskState.DONE)
+
+        t = self.cc.store.task(t0.task_id)
+        # (a) phien duoc dung va duoc ghi so
+        self.assertTrue(t.owner_session)
+        s = self.cc.store.session(t.owner_session)
+        self.assertIsNotNone(s)
+        self.assertIs(s.state, SessionState.IDLE, "phiên giữ ấm sau khi xong")
+        self.assertEqual(s.task_count, 1)
+        # (b) worktree CO LAP that, khong phai kho goc
+        self.assertTrue(t.worktree)
+        self.assertNotEqual(Path(t.worktree).resolve(), self.repo.resolve())
+        self.assertTrue(Path(t.worktree).exists())
+        # (c) nhanh rieng
+        self.assertTrue(t.branch.startswith("router/"))
+        # (d) agent GHI THAT vao worktree, DUNG trong pham vi cho phep
+        pv = TaskContract.from_dict(t.contract).allowed_scope[0]
+        tep = Path(t.worktree) / pv / "ket-qua.txt"
+        self.assertTrue(tep.exists(), f"không thấy {tep}")
+        # (e) kho GOC khong he bi dung toi
+        self.assertFalse((self.repo / pv / "ket-qua.txt").exists(),
+                         "worktree cô lập KHÔNG được rò ra kho gốc")
+
+    def test_su_kien_va_log_duoc_phat_ra(self):
+        self.cc.chat("demo", "fix the styling in web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        _xong(self.cc, tid)
+
+        loai = {e["kind"] for e in self.cc.store.su_kien(task_id=tid)}
+        for can in ("TASK_CREATED", "SESSION_DECISION", "WORKTREE_CREATED",
+                    "TASK_CLAIMED", "TASK_STARTED", "TASK_FINISHED"):
+            self.assertIn(can, loai, f"thiếu sự kiện {can}")
+
+        log = self.cc.log_cua_viec(tid)
+        self.assertIn(tid, log)
+        self.assertIn("SỰ KIỆN", log)
+
+    def test_quyet_dinh_dinh_tuyen_GIAI_THICH_DUOC(self):
+        self.cc.chat("demo", "fix the styling in web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        e = [x for x in self.cc.store.su_kien(task_id=tid)
+             if x["kind"] == "SESSION_DECISION"][0]
+        self.assertIn(e["meta"]["action"], ("CREATE", "REUSE"))
+        self.assertTrue(e["meta"]["reason"])
+        self.assertTrue(e["meta"]["trace"], "phải ghi lại các luật đã xét")
+        self.assertTrue(e["meta"]["routing"]["selected"])
+
+    # -- 3. DUNG LAI phien --------------------------------------------------
+
+    def test_viec_thu_hai_cung_pham_vi_DUNG_LAI_phien(self):
+        """Cùng phạm vi + phiên khoẻ -> REUSE, không đẻ tiến trình thứ hai."""
+        self.cc.chat("demo", "fix the styling in web/admin")
+        t1 = self.cc.store.tasks("demo")[0]
+        self.cc.tick()
+        self.assertTrue(_xong(self.cc, t1.task_id))
+
+        self.cc.chat("demo", "update the spacing in web/admin")
+        t2 = [t for t in self.cc.store.tasks("demo")
+              if t.task_id != t1.task_id][0]
+        kq = self.cc.tick()
+        self.assertEqual(kq["dispatched"], [t2.task_id], kq)
+
+        self.assertTrue(_xong(self.cc, t2.task_id))
+        s1 = self.cc.store.task(t1.task_id).owner_session
+        s2 = self.cc.store.task(t2.task_id).owner_session
+        self.assertEqual(s1, s2, "việc tương thích phải DÙNG LẠI phiên")
+        self.assertEqual(len(self.cc.store.sessions("demo")), 1)
+
+    def test_dung_lai_phien_thi_dung_lai_ca_worktree(self):
+        # CA HAI viec phai la viec CO GHI that. Ban dau cau thu hai dung
+        # dong tu "adjust" — bo phan loai khong biet no, nen viec roi ve
+        # CHI DOC va bai kiem xanh VI MOT LY DO SAI: no chi dang do lai
+        # `s.worktree` ma viec chi doc thua huong tu phien.
+
+        self.cc.chat("demo", "fix the styling in web/admin")
+        t1 = self.cc.store.tasks("demo")[0]
+        self.cc.tick()
+        _xong(self.cc, t1.task_id)
+        self.cc.chat("demo", "update the spacing in web/admin")
+        t2 = [t for t in self.cc.store.tasks("demo")
+              if t.task_id != t1.task_id][0]
+        self.cc.tick()
+        _xong(self.cc, t2.task_id)
+
+        self.assertEqual(self.cc.store.task(t1.task_id).worktree,
+                         self.cc.store.task(t2.task_id).worktree)
+        self.assertEqual(len(self.cc.store.worktrees("demo")), 1)
+
+    def test_viec_CHI_DOC_dung_lai_bat_ky_phien_ranh_nao(self):
+        self.cc.chat("demo", "fix the styling in web/admin")
+        t1 = self.cc.store.tasks("demo")[0]
+        self.cc.tick()
+        _xong(self.cc, t1.task_id)
+
+        self.cc.chat("demo", "investigate why the build is slow")
+        t2 = [t for t in self.cc.store.tasks("demo")
+              if t.task_id != t1.task_id][0]
+        self.cc.tick()
+        _xong(self.cc, t2.task_id)
+        self.assertEqual(self.cc.store.task(t2.task_id).owner_session,
+                         self.cc.store.task(t1.task_id).owner_session)
+
+    # -- 4. CHO khi xung dot ------------------------------------------------
+
+    def test_hai_viec_cung_tai_nguyen_thi_mot_viec_CHO(self):
+        """Đúng ví dụ đề bài: B chờ, không chạy đua với A."""
+        cham = FakeExecutor(cham=1.5)
+        cc = _cc(kho_git_tam(), ex=cham)
+        try:
+            cc.chat("demo", "fix web/admin/content-queue")
+            cc.chat("demo", "clean up web/admin/content-queue markup")
+            ts = cc.store.tasks("demo")
+            self.assertEqual(len(ts), 2)
+
+            cc.tick()
+            time.sleep(0.3)
+            cc.tick()
+            trang_thai = {t.task_id: cc.store.task(t.task_id).state
+                          for t in ts}
+            self.assertEqual(
+                sum(1 for s in trang_thai.values() if s is TaskState.RUNNING),
+                1, f"đúng MỘT việc được chạy: {trang_thai}")
+            self.assertEqual(
+                sum(1 for s in trang_thai.values() if s is TaskState.WAITING),
+                1, f"việc kia phải CHỜ: {trang_thai}")
+        finally:
+            cc.shutdown()
+
+    def test_viec_cho_chay_duoc_sau_khi_khoa_duoc_nha(self):
+        cc = _cc(kho_git_tam(), ex=FakeExecutor(cham=0.4))
+        try:
+            cc.chat("demo", "fix web/admin/content-queue")
+            cc.chat("demo", "clean up web/admin/content-queue markup")
+            ts = [t.task_id for t in cc.store.tasks("demo")]
+            self.assertTrue(_chay_het(cc, *ts),
+                            {x: cc.store.task(x).state for x in ts})
+        finally:
+            cc.shutdown()
+
+    def test_khoa_duoc_nha_het_sau_khi_viec_xong(self):
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        _xong(self.cc, tid)
+        self.assertEqual(self.cc.store.locks("demo"), [],
+                         "mọi khoá phải được nhả trong `finally`")
+
+    def test_khoa_duoc_nha_ca_khi_viec_HONG(self):
+        cc = _cc(kho_git_tam(), ex=FakeExecutor(status="failed"))
+        try:
+            cc.chat("demo", "fix web/admin/content-queue")
+            tid = cc.store.tasks("demo")[0].task_id
+            cc.tick()
+            _xong(cc, tid)
+            self.assertIs(cc.store.task(tid).state, TaskState.FAILED)
+            self.assertEqual(cc.store.locks("demo"), [])
+        finally:
+            cc.shutdown()
+
+    # -- 5. Phu thuoc -------------------------------------------------------
+
+    def test_viec_phu_thuoc_CHO_den_khi_viec_truoc_XONG(self):
+        self.cc.chat("demo", "fix web/admin then investigate the result")
+        ts = self.cc.store.tasks("demo")
+        self.assertEqual(len(ts), 2)
+        sau = [t for t in ts if t.dependencies][0]
+        self.cc.tick()
+        self.assertIs(self.cc.store.task(sau.task_id).state, TaskState.WAITING)
+        self.assertTrue(
+            _chay_het(self.cc, *[t.task_id for t in ts]),
+            {t.task_id: self.cc.store.task(t.task_id).state for t in ts})
+
+    def test_phu_thuoc_HONG_thi_viec_con_bi_CHAN_chu_khong_treo(self):
+        cc = _cc(kho_git_tam(), ex=FakeExecutor(status="failed"))
+        try:
+            cc.chat("demo", "fix web/admin then investigate the result")
+            ts = cc.store.tasks("demo")
+            truoc = [t for t in ts if not t.dependencies][0]
+            sau = [t for t in ts if t.dependencies][0]
+            cc.tick()
+            _xong(cc, truoc.task_id)
+            cc.tick()
+            self.assertIs(cc.store.task(sau.task_id).state, TaskState.BLOCKED)
+            self.assertIn("phụ thuộc", cc.store.task(sau.task_id).blocked_reason)
+        finally:
+            cc.shutdown()
+
+    # -- 6. Pause / Stop / Reassign -----------------------------------------
+
+    def test_pause_giu_viec_lai_khoi_hang_doi(self):
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.pause(tid)
+        self.assertIs(self.cc.store.task(tid).state, TaskState.PAUSED)
+        self.assertEqual(self.cc.tick()["dispatched"], [])
+
+    def test_resume_dua_viec_ve_hang_doi(self):
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.pause(tid)
+        self.cc.resume(tid)
+        self.assertIs(self.cc.store.task(tid).state, TaskState.QUEUED)
+        self.assertEqual(self.cc.tick()["dispatched"], [tid])
+
+    def test_stop_dung_han_va_nha_khoa(self):
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        _xong(self.cc, tid)
+        self.cc.stop(tid, reason="người dùng dừng")
+        self.assertIs(self.cc.store.task(tid).state, TaskState.FAILED)
+        self.assertEqual(self.cc.store.locks("demo"), [])
+
+    def test_stop_ghi_ro_co_cat_duoc_tien_trinh_hay_khong(self):
+        """Không giả vờ đã cắt. Sự kiện nói rõ có giết được gì không."""
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        _xong(self.cc, tid)
+        self.cc.stop(tid)
+        e = [x for x in self.cc.store.su_kien(task_id=tid)
+             if x["kind"] == "TASK_STOPPED"][0]
+        self.assertIn("agent_killed", e["meta"])
+
+    def test_reassign_nha_phien_cu_va_ve_hang_doi(self):
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        _xong(self.cc, tid)
+        cu = self.cc.store.task(tid).owner_session
+
+        self.cc.reassign(tid)
+        t = self.cc.store.task(tid)
+        self.assertIs(t.state, TaskState.QUEUED)
+        self.assertEqual(t.owner_session, "")
+        self.assertIs(self.cc.store.session(cu).state, SessionState.STOPPED)
+
+        self.cc.tick()
+        _xong(self.cc, tid)
+        self.assertNotEqual(self.cc.store.task(tid).owner_session, cu)
+
+    # -- 7. SONG SOT qua khoi dong lai --------------------------------------
+
+    def test_moi_thu_song_sot_qua_khoi_dong_lai(self):
+        """Yêu cầu #10: dự án, việc, phiên, worktree, khoá, sự kiện.
+
+        Dựng một `ControlCenter` HOÀN TOÀN MỚI trên cùng thư mục gốc —
+        đúng như mở lại ứng dụng.
+        """
+        self.cc.chat("demo", "fix the styling in web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        _xong(self.cc, tid)
+        cu = self.cc.store.task(tid)
+        so_sk = len(self.cc.store.su_kien(project_id="demo", limit=1000))
+        self.cc.shutdown()
+
+        moi = ControlCenter(root=self.repo, fabric=fabric_gia(), probe=False,
+                            executor_factory=lambda p, f: FakeExecutor())
+        try:
+            self.assertEqual([p.project_id for p in moi.projects()], ["demo"])
+            t = moi.store.task(tid)
+            self.assertIsNotNone(t)
+            self.assertIs(t.state, TaskState.DONE)
+            self.assertEqual(t.worktree, cu.worktree)
+            self.assertEqual(t.branch, cu.branch)
+            self.assertTrue(moi.store.session(cu.owner_session))
+            self.assertTrue(moi.store.worktrees("demo"))
+            self.assertGreaterEqual(
+                len(moi.store.su_kien(project_id="demo", limit=1000)), so_sk)
+            self.assertTrue(moi.store.chat("demo"))
+        finally:
+            moi.shutdown()
+
+    def test_recover_dua_viec_MO_COI_ve_hang_doi_chu_khong_danh_HONG(self):
+        """Việc `RUNNING` mồ côi -> `QUEUED`, không phải `FAILED`.
+
+        Tiến trình agent có thể vẫn đang chạy thật (tắt Control Center không
+        giết nó). Đánh `FAILED` là vứt luôn công việc đã làm; đưa về hàng
+        đợi là hành vi thu hồi được.
+        """
+        from scripts.control_center.model import Session, Task
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.luu_session(Session(
+            session_id="s-chet", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.BUSY,
+            pid=999999, current_task=tid))
+        t = self.cc.store.task(tid)
+        t.state, t.owner_session, t.attempts = TaskState.RUNNING, "s-chet", 1
+        self.cc.store.luu_task(t)
+
+        bc = self.cc.recover()
+        self.assertIn(tid, bc["tasks"])
+        self.assertIs(self.cc.store.task(tid).state, TaskState.QUEUED)
+        self.assertIs(self.cc.store.session("s-chet").state, SessionState.DEAD)
+
+    def test_recover_CHAN_viec_da_can_luot_thu(self):
+        from scripts.control_center.model import Session
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.luu_session(Session(
+            session_id="s-chet", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.BUSY,
+            pid=999999))
+        t = self.cc.store.task(tid)
+        t.state, t.owner_session, t.attempts = TaskState.RUNNING, "s-chet", 3
+        self.cc.store.luu_task(t)
+        self.cc.recover()
+        self.assertIs(self.cc.store.task(tid).state, TaskState.BLOCKED)
+
+    def test_recover_thu_hoi_khoa_chet_nhung_KHONG_dung_khoa_production(self):
+        from scripts.control_center.locks import LockManager
+        lm = LockManager(self.cc.store)
+        lm.xin("demo", [(LockKind.FILESYSTEM, "web")], task_id="chet",
+               ttl=-1.0)
+        lm.xin("demo", [(LockKind.PRODUCTION, "fanfic.world")],
+               task_id="chet-prod", ttl=-1.0)
+        bc = self.cc.recover()
+        self.assertEqual(len(bc["locks"]["reclaimed"]), 1)
+        self.assertEqual(len(bc["locks"]["needs_human"]), 1)
+        con = {l.kind for l in self.cc.store.locks("demo")}
+        self.assertEqual(con, {LockKind.PRODUCTION})
+
+    def test_recover_KHONG_xoa_worktree_nao(self):
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        _xong(self.cc, tid)
+        duong = self.cc.store.task(tid).worktree
+        self.cc.recover()
+        self.assertTrue(Path(duong).exists(),
+                        "phục hồi chỉ ĐÁNH DẤU, không bao giờ xoá worktree")
+
+    # -- 8. Anh chup cho giao dien ------------------------------------------
+
+    def test_snapshot_du_cho_bay_man_hinh(self):
+        self.cc.chat("demo", "fix web/admin")
+        self.cc.tick()
+        s = self.cc.snapshot("demo")
+        for k in ("projects", "tasks", "sessions", "locks", "worktrees",
+                  "events", "chat", "in_flight"):
+            self.assertIn(k, s)
+        self.assertEqual(s["selected"], "demo")
+
+
+class TestWorktreeSafety(unittest.TestCase):
+    """Bất biến: hai phiên KHÔNG BAO GIỜ cùng ghi một worktree."""
+
+    def setUp(self):
+        self.repo = kho_git_tam()
+        self.cc = _cc(self.repo)
+
+    def tearDown(self):
+        self.cc.shutdown()
+
+    def test_hai_phien_khong_the_cung_ghi_mot_worktree(self):
+        from scripts.router_v3.worktree import WorktreeError
+        wt = self.cc.ctx("demo").worktrees
+        lease = wt.tao_moi(session_id="s1", task_id="t1")
+        wt.assert_exclusive(lease.path, "s1")             # chủ thật thì được
+        with self.assertRaises(WorktreeError):
+            wt.assert_exclusive(lease.path, "s2")
+
+    def test_cay_ban_TRONG_pham_vi_van_duoc_dung_lai(self):
+        """Thay đổi chưa commit của CHÍNH phiên đó không cản việc dùng lại.
+
+        Bản đầu tiên từ chối mọi cây bẩn. Nghe an toàn, nhưng một phiên giữ
+        ấm qua nhiều việc gần như LUÔN để lại thay đổi chưa commit từ việc
+        trước — nên nó không bao giờ dùng lại được cây, và cả ý tưởng "một
+        phiên sở hữu một cây" mất sạch ý nghĩa.
+        """
+        wt = self.cc.ctx("demo").worktrees
+        a = wt.tao_moi(session_id="s1", task_id="t1")
+        (Path(a.path) / "web").mkdir(parents=True, exist_ok=True)
+        (Path(a.path) / "web" / "wip.txt").write_text("dở dang",
+                                                      encoding="utf-8")
+        b = wt.ensure_for(session_id="s1", task_id="t2", scope=("web",))
+        self.assertFalse(b.created, "thay đổi trong phạm vi -> dùng lại")
+        self.assertEqual(a.path, b.path)
+
+    def test_cay_ban_NGOAI_pham_vi_thi_cap_cay_moi(self):
+        """Thay đổi ngoài phạm vi là dấu hiệu có thứ khác đang ghi vào cây."""
+        wt = self.cc.ctx("demo").worktrees
+        a = wt.tao_moi(session_id="s1", task_id="t1")
+        (Path(a.path) / "server").mkdir(parents=True, exist_ok=True)
+        (Path(a.path) / "server" / "la.txt").write_text("ngoài phạm vi",
+                                                        encoding="utf-8")
+        b = wt.ensure_for(session_id="s1", task_id="t2", scope=("web",))
+        self.assertTrue(b.created)
+        self.assertNotEqual(a.path, b.path)
+        self.assertTrue(Path(a.path).exists(), "cây cũ KHÔNG bị xoá")
+        self.assertEqual(self.cc.store.worktree(a.path)["state"], "DIRTY")
+
+    def test_khong_hoi_duoc_git_thi_coi_la_dang_ngo(self):
+        """`git` không trả lời -> KHÔNG dùng lại. Đoán 'sạch' là ghi đè
+        công việc chưa lưu của agent trước — không hoàn tác được."""
+        wt = self.cc.ctx("demo").worktrees
+        wt.duong_dan_da_doi = lambda _p: None
+        self.assertTrue(wt._ban_theo_cach_la("bất kỳ", ("web",)))
+
+    def test_worktree_BAN_khong_duoc_dung_lai_nhung_cung_khong_bi_xoa(self):
+        wt = self.cc.ctx("demo").worktrees
+        a = wt.tao_moi(session_id="s1", task_id="t1")
+        (Path(a.path) / "rac.txt").write_text("chưa commit", encoding="utf-8")
+        self.assertTrue(wt.is_dirty(a.path))
+
+        # `scope` rong = phien chua so huu pham vi ghi nao, nen MOI thay doi
+        # deu la "ngoai pham vi".
+        b = wt.ensure_for(session_id="s1", task_id="t2")
+        self.assertTrue(b.created, "cây bẩn không được dùng lại")
+        self.assertNotEqual(a.path, b.path)
+        self.assertTrue(Path(a.path).exists(), "và cũng KHÔNG bị xoá")
+        self.assertEqual(self.cc.store.worktree(a.path)["state"], "DIRTY")
+
+    def test_cay_sach_cua_chinh_phien_do_duoc_dung_lai(self):
+        wt = self.cc.ctx("demo").worktrees
+        a = wt.tao_moi(session_id="s1", task_id="t1")
+        b = wt.ensure_for(session_id="s1", task_id="t2")
+        self.assertFalse(b.created)
+        self.assertEqual(a.path, b.path)
+
+    def test_doi_soat_danh_dau_cay_bien_mat(self):
+        import shutil
+        wt = self.cc.ctx("demo").worktrees
+        a = wt.tao_moi(session_id="s1", task_id="t1")
+        shutil.rmtree(a.path, ignore_errors=True)
+        bc = wt.doi_soat()
+        self.assertIn(a.path, bc["missing"])
+        self.assertEqual(self.cc.store.worktree(a.path)["state"], "STALE")
+
+    def test_ten_viec_co_ky_tu_la_khong_thoat_ra_ngoai_thu_muc(self):
+        """`../` trong task_id không được tạo worktree ngoài thư mục dự định."""
+        wt = self.cc.ctx("demo").worktrees
+        lease = wt.tao_moi(session_id="s1", task_id="../../thoat")
+        goc = wt.manager.worktree_root.resolve()
+        self.assertTrue(str(Path(lease.path).resolve()).startswith(str(goc)))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -151,9 +151,20 @@ class Executor:
     def __init__(self, fabric: Fabric, *, root: Optional[Path] = None,
                  worktrees: Optional[WorktreeManager] = None,
                  history: Optional[BenchmarkStore] = None,
-                 logs: Optional[RawLogStore] = None):
+                 logs: Optional[RawLogStore] = None,
+                 worktree_provider=None):
         self.fabric = fabric
         self.root = Path(root) if root else Path.cwd()
+        #: Ai cap worktree cho mot viec CO GHI. `None` = hanh vi mac dinh
+        #: (tao mot cay MOI cho moi luot, nhu tu truoc toi nay).
+        #:
+        #: Diem noi nay ton tai cho mot ben goi SONG LAU HON mot mission —
+        #: Control Center giu mot phien agent am qua nhieu viec, va phien do
+        #: so huu MOT worktree. Khong co hook nay, ben goi phai chep lai ca
+        #: `run()` chi de doi ba dong tao cay, va ban chep se lech dan khoi
+        #: ban that. Chu ky: `(contract, placement, base_sha, attempt) ->
+        #: WorktreeHandle | None`; tra `None` de roi ve hanh vi mac dinh.
+        self.worktree_provider = worktree_provider
         self.worktrees = worktrees if worktrees is not None else \
             WorktreeManager(self.root)
         self.history = history if history is not None else \
@@ -180,9 +191,8 @@ class Executor:
         handle: Optional[WorktreeHandle] = None
         try:
             if c.execution.worktree_required:
-                handle = self.worktrees.create(
-                    p.runtime_id, f"{c.task_id}-{self.run_tag}-a{attempt}",
-                    base_sha=base_sha or self.worktrees.base_sha())
+                handle = self._lay_worktree(c, p, base_sha=base_sha,
+                                            attempt=attempt)
 
             adapter = dung_adapter(self.fabric, p,
                                    timeout=c.execution.max_wall_time,
@@ -263,6 +273,23 @@ class Executor:
                 started_at=t0, ended_at=time.time())
             self._ghi_lich_su(c, p, pb, None, reassigned=reassigned)
             return ExecutionResult(envelope=pb)
+
+    def _lay_worktree(self, c: TaskContract, p: Placement, *, base_sha: str,
+                      attempt: int) -> WorktreeHandle:
+        """Cây làm việc cô lập cho một việc CÓ GHI.
+
+        Hỏi `worktree_provider` trước; nó trả `None` (hoặc không được đặt)
+        thì tạo cây mới như cũ. Tách ra thành một phương thức để đường mặc
+        định và đường tiêm CHUNG một chỗ — hai đường song song sẽ lệch nhau
+        ngay lần sửa `run_tag` tiếp theo.
+        """
+        if self.worktree_provider is not None:
+            h = self.worktree_provider(c, p, base_sha, attempt)
+            if h is not None:
+                return h
+        return self.worktrees.create(
+            p.runtime_id, f"{c.task_id}-{self.run_tag}-a{attempt}",
+            base_sha=base_sha or self.worktrees.base_sha())
 
     @staticmethod
     def _noi_doc_phu_thuoc(dws: Optional[Dict[str, str]]) -> str:

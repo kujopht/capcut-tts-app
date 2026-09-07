@@ -1,0 +1,246 @@
+"""Phong bì QUYỀN theo từng việc — Control Center V0.1, yêu cầu #9.
+
+MỤC TIÊU: việc thường lệ KHÔNG hỏi người dùng lần nào; việc nguy hiểm KHÔNG
+BAO GIỜ tự chạy. Hai vế đó phải cùng đúng — nới một vế để đạt vế kia là
+đúng thứ hỏng mà module này tồn tại để chặn.
+
+    AUTO   đọc/tìm kiếm kho, sửa tệp TRONG worktree mình sở hữu,
+           lint/test/build, xem phụ thuộc, commit cục bộ
+    GATED  deploy production, thay đổi phá huỷ trên production, IAM/gốc tin
+           cậy, xoay/lộ bí mật, thay đổi hoá đơn/mở rộng tài nguyên
+
+BA ĐIỀU MODULE NÀY KHÔNG LÀM, và không được ai làm hộ:
+
+1. **KHÔNG nới rào có sẵn.** Phong bì chỉ biết NÓI KHÔNG. Nó không cấp thêm
+   quyền cho ai: `TaskContract` vẫn giữ `destructive_actions_allowed=False`,
+   `forbidden_scope` vẫn được `contract.py` nhồi thêm `FORBIDDEN_ALWAYS`, và
+   cổng kiểm định của V3 vẫn chạy y nguyên. Đây là tầng thứ BA, không phải
+   tầng thay thế.
+2. **KHÔNG dùng `--dangerously-skip-permissions`.** `router_v4/executor.py`
+   đã đóng cứng `dangerously_skip_permissions=False`; ở đây chỉ nhắc lại
+   bằng một bài kiểm để không ai bật nó qua một đường vòng.
+3. **KHÔNG tự quyết việc GATED.** Một việc chạm lớp GATED đi thẳng vào
+   `BLOCKED` kèm câu hỏi cụ thể cho người dùng. Không có cờ nào trong V0.1
+   biến `GATED` thành `AUTO`.
+
+VÌ SAO PHÂN LOẠI BẰNG TỪ KHOÁ, VÀ VÌ SAO NHƯ VẬY LÀ ĐỦ Ở V0.1:
+
+Phân loại chạy trên **ý định người dùng gõ vào** và trên **mục tiêu hợp
+đồng** — văn bản, không phải lời gọi hệ thống. Nên nó là một bộ lọc THÔ, và
+nó cố ý nghiêng về phía chặn nhầm: một việc bị hỏi thừa tốn của người dùng
+mười giây; một lần `deploy` chạy lúc 3 giờ sáng tốn nhiều hơn thế rất nhiều.
+Rào THẬT (phạm vi ghi, worktree cô lập, cổng kiểm định, quyền của chính CLI)
+nằm ở tầng dưới và không phụ thuộc bộ lọc này.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
+
+from scripts.control_center.model import PermissionClass
+
+#: Thao tac AUTO — mo ta de HIEN THI va de kiem, khong phai de cap quyen.
+AUTO_OPERATIONS: Tuple[str, ...] = (
+    "repo_read",
+    "repo_search",
+    "edit_in_owned_worktree",
+    "run_tests",
+    "run_lint",
+    "run_build",
+    "inspect_dependencies",
+    "local_commit",
+)
+
+#: Thao tac GATED — cham vao la DUNG, hoi nguoi dung.
+GATED_OPERATIONS: Tuple[str, ...] = (
+    "production_deploy",
+    "production_mutation",
+    "iam_change",
+    "secret_rotation",
+    "secret_disclosure",
+    "billing_change",
+    "resource_expansion",
+    "history_rewrite",
+    "remote_push",
+)
+
+#: Mau nhan dien lop GATED tu VAN BAN. Tieng Viet va tieng Anh — nguoi dung
+#: kho nay gõ ca hai, va mot bo loc chi biet mot thu tieng se lot dung
+#: nhung cau nguy hiem nhat.
+#:
+#: Moi mau ANH XA toi mot thao tac GATED co ten, de cau hoi gui nguoi dung
+#: noi duoc CU THE viec gi bi chan chu khong chi "co gi do nguy hiem".
+_MAU_GATED: Tuple[Tuple[str, re.Pattern], ...] = (
+    ("production_deploy", re.compile(
+        r"\b(deploy|deployment|cutover|go[\s-]?live|ship to prod|"
+        r"publish to production|wrangler\s+deploy|cf:deploy|"
+        r"trien khai|triển khai|len production|lên production|"
+        r"day len prod|đẩy lên prod)\b", re.I)),
+    ("production_mutation", re.compile(
+        r"\b(drop\s+(table|database)|truncate\s+table|delete\s+from\s+prod|"
+        r"prod(uction)?\s+(db|database|data)\s+(wipe|reset|delete|purge)|"
+        r"xoa\s+du\s+lieu|xoá\s+dữ\s+liệu|reset\s+production)\b", re.I)),
+    ("iam_change", re.compile(
+        r"\b(iam|service\s+account|role\s+binding|grant\s+role|"
+        r"api\s+token\s+create|root\s+of\s+trust|acl\s+change|"
+        r"phan\s+quyen|phân\s+quyền|cap\s+quyen|cấp\s+quyền)\b", re.I)),
+    # Cho phep toi 3 tu chen giua dong tu va danh tu: "rotate the R2 secret",
+    # "reissue the production api key". Doi hai tu dinh nhau se de lot dung
+    # cach nguoi ta thuc su viet cau — da vap that o bai kiem khoi dau.
+    ("secret_rotation", re.compile(
+        r"\b(?:rotate|re[\s-]?issue|regenerate|revoke)\s+(?:\w+\s+){0,3}"
+        r"(?:secret|key|keys|token|tokens|credential|credentials)\b"
+        r"|\bsecret\s+rotation\b"
+        r"|\bxoay\s+(?:\w+\s+){0,2}(?:bi\s+mat|bí\s+mật|khoa|khoá|token)\b",
+        re.I)),
+    ("secret_disclosure", re.compile(
+        r"\b(?:print|echo|dump|reveal|show|paste|expose)\s+(?:\w+\s+){0,3}"
+        r"(?:secret|secrets|token|tokens|api[\s_-]?key|password|credential|"
+        r"credentials)\b", re.I)),
+    ("billing_change", re.compile(
+        r"\b(billing|invoice|purchase\s+credits?|buy\s+credits?|"
+        r"upgrade\s+plan|enable\s+overage|paid\s+tier|"
+        r"mua\s+credit|nang\s+goi|nâng\s+gói|thanh\s+toan|thanh\s+toán)\b",
+        re.I)),
+    ("resource_expansion", re.compile(
+        r"\b(provision|scale\s+up|create\s+(instance|cluster|bucket|vm)|"
+        r"new\s+(gce|ec2|cloud\s+run)\s+(instance|service)|"
+        r"terraform\s+apply|cap\s+phat\s+may|cấp\s+phát\s+máy)\b", re.I)),
+    ("history_rewrite", re.compile(
+        r"\b(force[\s-]?push|push\s+--force|git\s+reset\s+--hard\s+origin|"
+        r"rebase\s+.*\bmain\b.*--force|filter[\s-]?branch|"
+        r"xoa\s+lich\s+su|xoá\s+lịch\s+sử)\b", re.I)),
+    ("remote_push", re.compile(
+        r"\b(git\s+push|push\s+to\s+(github|origin|remote)|"
+        r"open\s+a\s+pull\s+request|create\s+pr\b|"
+        r"day\s+len\s+github|đẩy\s+lên\s+github)\b", re.I)),
+)
+
+
+@dataclass(frozen=True)
+class GateHit:
+    """Một lần chạm lớp GATED, kèm BẰNG CHỨNG là đoạn văn bản đã khớp."""
+
+    operation: str
+    matched: str
+
+    def render(self) -> str:
+        return f"{self.operation} (khớp: {self.matched!r})"
+
+
+@dataclass(frozen=True)
+class PermissionEnvelope:
+    """Quyền của MỘT việc. Bất biến — dựng một lần, không sửa tại chỗ.
+
+    Một phong bì sửa được sau khi dựng là một phong bì có thể bị nới ở giữa
+    đường chạy, và lúc đó không ai dựng lại được nó đã cho phép những gì.
+    """
+
+    task_id: str
+    decision: PermissionClass
+    auto_operations: Tuple[str, ...] = AUTO_OPERATIONS
+    gate_hits: Tuple[GateHit, ...] = ()
+    #: Pham vi ghi ma viec nay SO HUU. Ngoai day la vi pham, du la AUTO.
+    owned_scope: Tuple[str, ...] = ()
+
+    @property
+    def auto(self) -> bool:
+        return self.decision is PermissionClass.AUTO
+
+    @property
+    def gated(self) -> bool:
+        return self.decision is PermissionClass.GATED
+
+    @property
+    def gated_operations(self) -> Tuple[str, ...]:
+        return tuple(dict.fromkeys(h.operation for h in self.gate_hits))
+
+    def ly_do(self) -> str:
+        if self.auto:
+            return ""
+        return "; ".join(h.render() for h in self.gate_hits)
+
+    def cau_hoi_cho_nguoi_dung(self) -> str:
+        """Câu hỏi CỤ THỂ, không phải một cảnh báo chung chung.
+
+        Người dùng đọc dòng này lúc vừa ngủ dậy. Nó phải nói được: việc nào,
+        chạm cổng nào, và cần họ quyết định điều gì.
+        """
+        if self.auto:
+            return ""
+        ops = ", ".join(self.gated_operations)
+        return (
+            f"Việc {self.task_id} chạm lớp GATED ({ops}). Control Center "
+            f"KHÔNG tự chạy loại thao tác này. Cần bạn xác nhận rõ ràng "
+            f"trước khi nó được đưa lại vào hàng đợi. Bằng chứng khớp: "
+            f"{self.ly_do()}")
+
+    def render_for_agent(self) -> str:
+        """Khối văn bản chèn vào hợp đồng gửi agent.
+
+        Agent PHẢI biết ranh giới của nó bằng chữ, không chỉ bằng việc lệnh
+        bị từ chối — một agent không biết vì sao mình bị chặn sẽ thử một
+        đường vòng khác thay vì dừng lại và báo `blocked`.
+        """
+        d = ["PERMISSION_ENVELOPE (phong bì quyền của việc này):",
+             "  ĐƯỢC TỰ LÀM, không phải hỏi:"]
+        d += [f"    - {o}" for o in self.auto_operations]
+        if self.owned_scope:
+            d += ["  Chỉ được GHI trong phạm vi sở hữu:"]
+            d += [f"    - {p}" for p in self.owned_scope]
+        else:
+            d += ["  Việc này KHÔNG sở hữu phạm vi ghi nào — chỉ đọc."]
+        d += ["  TUYỆT ĐỐI KHÔNG tự làm (dừng và trả `blocked` kèm "
+              "`requires_decision=true`):"]
+        d += [f"    - {o}" for o in GATED_OPERATIONS]
+        d += ["  Gặp bất kỳ mục nào ở trên: ĐỪNG tìm đường vòng, ĐỪNG đoán ý "
+              "người dùng. Trả `blocked` và nói rõ cần quyết định gì."]
+        return "\n".join(d)
+
+    def to_dict(self) -> Dict:
+        return {"task_id": self.task_id, "decision": self.decision.value,
+                "auto_operations": list(self.auto_operations),
+                "gated_operations": list(self.gated_operations),
+                "gate_hits": [{"operation": h.operation, "matched": h.matched}
+                              for h in self.gate_hits],
+                "owned_scope": list(self.owned_scope),
+                "reason": self.ly_do()}
+
+
+def do_gated(*texts: str) -> Tuple[GateHit, ...]:
+    """Quét văn bản tìm lớp GATED. Trả về MỌI lần chạm, không chỉ lần đầu.
+
+    Trả hết có chủ đích: một câu vừa `deploy` vừa `rotate secret` cần hiện
+    ra cả hai, vì người dùng có thể đồng ý một nửa.
+    """
+    ra: List[GateHit] = []
+    for t in texts:
+        if not t:
+            continue
+        for op, mau in _MAU_GATED:
+            for m in mau.finditer(t):
+                doan = m.group(0).strip()
+                if not any(h.operation == op and h.matched == doan for h in ra):
+                    ra.append(GateHit(operation=op, matched=doan[:80]))
+    return tuple(ra)
+
+
+def classify(*texts: str) -> PermissionClass:
+    return PermissionClass.GATED if do_gated(*texts) else PermissionClass.AUTO
+
+
+def envelope_for(task_id: str, *, objective: str = "", intent: str = "",
+                 owned_scope: Sequence[str] = ()) -> PermissionEnvelope:
+    """Dựng phong bì cho một việc từ mục tiêu + ý định gốc của người dùng.
+
+    Quét CẢ HAI: bộ lập kế hoạch có thể diễn đạt lại ý định thành một mục
+    tiêu nghe vô hại ("cập nhật cấu hình worker") trong khi câu gốc của
+    người dùng nói rõ "deploy". Chỉ quét mục tiêu là bỏ lọt đúng trường hợp
+    nguy hiểm nhất.
+    """
+    hits = do_gated(objective, intent)
+    return PermissionEnvelope(
+        task_id=task_id,
+        decision=PermissionClass.GATED if hits else PermissionClass.AUTO,
+        gate_hits=hits, owned_scope=tuple(owned_scope))

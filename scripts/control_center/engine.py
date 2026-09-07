@@ -537,6 +537,69 @@ class ControlCenter:
                     f"{ho or '(không rõ)'} để tác giả không tự chấm bài"),
             meta={"parent": task_id, "exclude_family": ho})
 
+    #: Ly do hong KHONG BAO GIO duoc thu lai tu dong.
+    #:
+    #: `security_gate` lay thang tu Router V4: thu lai chi tang co hoi lot
+    #: mot thay doi chua thu giong credential (xem `orchestrator.py`).
+    #: `tool_permission_denied` la mot buc tuong CAU HINH — chay lai y het
+    #: se bi tu choi y het, chi ton them mot luot quota.
+    KHONG_THU_LAI = frozenset({
+        "security_gate", "requires_decision", "tool_permission_denied",
+        "codex_security_shaped_refusal", "no_eligible_placement",
+    })
+
+    def _thu_lai_neu_dang(self, ctx: ProjectContext, task_id: str, pb,
+                          session_id: str) -> None:
+        """Thử lại một việc hỏng — CÓ TRẦN, và đổi chỗ chạy.
+
+        VÌ SAO CẦN: `Executor.run()` chạy đúng MỘT lượt. Đường thử lại của
+        Router V4 nằm trong `RouterV4._chay_co_thu_lai`, mà Control Center cố
+        ý không đi qua (nó cần giữ placement của phiên). Không có gì ở đây
+        thì một lần nhà cung cấp hắt hơi là việc hỏng vĩnh viễn — với một hệ
+        chạy qua đêm không người trực, đó là chế độ hỏng thường gặp nhất.
+
+        VÌ SAO PHẢI CÓ TRẦN: thử lại vô hạn là "bão thử lại", đúng chế độ
+        hỏng số 4 mà `leases.py` liệt kê. `attempts` do `claim_task` tự tăng
+        nên trần này đếm được, không tin vào bộ nhớ.
+
+        VÌ SAO DỪNG PHIÊN: lượt sau phải chạy ở CHỖ KHÁC. Nhả phiên hiện tại
+        rồi để `decide()` chọn lại — cùng cơ chế `reassign`, không phải một
+        đường định tuyến thứ hai. Lặp lại đúng bài học của V4: "từ lượt 2,
+        ĐỔI placement".
+        """
+        t = self.store.task(task_id)
+        if t is None:
+            return
+        ly_do = (pb.failure_reason or "").strip()
+        if ly_do in self.KHONG_THU_LAI or pb.requires_decision:
+            self.store.ghi_su_kien(
+                "RETRY_REFUSED", project_id=t.project_id, task_id=task_id,
+                level="WARNING",
+                detail=(f"KHÔNG thử lại {ly_do!r} — chạy lại y hệt sẽ hỏng y "
+                        f"hệt, chỉ tốn thêm một lượt quota"))
+            return
+        if t.attempts >= MAX_ATTEMPTS:
+            self.store.ghi_su_kien(
+                "RETRY_EXHAUSTED", project_id=t.project_id, task_id=task_id,
+                level="WARNING",
+                detail=f"đã cạn {MAX_ATTEMPTS} lượt thử — để người xem")
+            return
+
+        if t.owner_session:
+            ctx.sessions.dung(
+                t.owner_session, state=SessionState.STOPPED,
+                reason=f"thử lại {task_id} ở chỗ khác (lượt {t.attempts})")
+        t.owner_session = ""
+        self.store.luu_task(t)
+        self.store.doi_trang_thai(
+            task_id, TaskState.QUEUED, force=True,
+            reason=(f"thử lại tự động lượt {t.attempts + 1}/{MAX_ATTEMPTS} "
+                    f"sau lỗi {ly_do or 'không rõ'}"))
+        self.store.ghi_su_kien(
+            "RETRY_QUEUED", project_id=t.project_id, task_id=task_id,
+            detail=(f"lượt {t.attempts}/{MAX_ATTEMPTS} hỏng ({ly_do}); nhả "
+                    f"phiên cũ để lượt sau chọn chỗ khác"))
+
     def _khep_review(self, t: Task) -> None:
         """Việc review xong -> đóng việc CHA.
 
@@ -703,6 +766,8 @@ class ControlCenter:
                       "findings": pb.findings[:10], "risks": pb.risks[:10],
                       "placement": p.key, "duration": round(pb.duration, 2)})
             ctx.sessions.ket_thuc_viec(session_id, task_id, ok=kq.ok, pid=pid)
+            if moi is TaskState.FAILED:
+                self._thu_lai_neu_dang(ctx, task_id, pb, session_id)
             # Viec vua xong la mot REVIEW -> khep viec CHA lai. Lam sau khi
             # da ghi trang thai/su kien cua chinh no, de neu buoc khep hong
             # thi ket qua review van con nguyen tren so.

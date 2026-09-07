@@ -35,7 +35,7 @@ from scripts.router_v4.runtime import (Fabric, ModelCapability, Placement,
                                        QuotaPool, RuntimeStatus, Source,
                                        WorkerRuntime)
 from scripts.control_center.bootstrap import khoi_tao
-from scripts.control_center.engine import ControlCenter
+from scripts.control_center.engine import MAX_ATTEMPTS, ControlCenter
 from scripts.control_center.model import (LockKind, Project, SessionState,
                                           TaskState)
 from scripts.control_center.store import ControlStore
@@ -183,6 +183,32 @@ def _xong(cc: ControlCenter, *task_ids: str, giay: float = 20.0) -> bool:
         return all(cc.store.task(x).state.terminal and x not in bay
                    for x in task_ids)
     return _cho(_du, giay=giay)
+
+
+def _can_luot(cc: ControlCenter, task_id: str, *,
+              giay: float = 60.0) -> bool:
+    """Đạp nhịp tới khi một việc HỎNG HẲN — đã cạn lượt thử tự động.
+
+    Việc hỏng nay được thử lại có trần, nên một `tick()` chỉ cho ra `QUEUED`
+    chứ chưa phải trạng thái cuối. Bài kiểm nào muốn thấy trạng thái cuối
+    phải chạy tới khi hết lượt.
+
+    PHẢI kiểm cả ba điều CÙNG LÚC, không phải lần lượt: `FAILED` **và** đã
+    rời `in_flight` **và** đã cạn lượt. Giữa lúc `_chay` ghi `FAILED` và lúc
+    nó requeue có một khe hở mà việc TRÔNG như đã hỏng hẳn; bản đầu tiên của
+    hàm này rơi đúng vào đó rồi bỏ cuộc.
+    """
+    het = time.time() + giay
+    while time.time() < het:
+        t = cc.store.task(task_id)
+        with cc._khoa:
+            bay = task_id in cc._dang_chay
+        if (t is not None and t.state is TaskState.FAILED and not bay
+                and t.attempts >= MAX_ATTEMPTS):
+            return True
+        cc.tick()
+        time.sleep(0.1)
+    return False
 
 
 def _chay_het(cc: ControlCenter, *task_ids: str, giay: float = 30.0) -> bool:
@@ -429,10 +455,12 @@ class TestVerticalSlice(unittest.TestCase):
         try:
             cc.chat("demo", "fix web/admin/content-queue")
             tid = cc.store.tasks("demo")[0].task_id
-            cc.tick()
-            _xong(cc, tid)
+            # Chay toi khi CAN LUOT THU: viec hong duoc thu lai co tran, nen
+            # mot `tick()` chi cho ra `QUEUED` chu chua phai `FAILED`.
+            self.assertTrue(_can_luot(cc, tid))
             self.assertIs(cc.store.task(tid).state, TaskState.FAILED)
-            self.assertEqual(cc.store.locks("demo"), [])
+            self.assertEqual(cc.store.locks("demo"), [],
+                             "khoá phải được nhả sau MỌI lượt, kể cả lượt hỏng")
         finally:
             cc.shutdown()
 
@@ -456,8 +484,8 @@ class TestVerticalSlice(unittest.TestCase):
             ts = cc.store.tasks("demo")
             truoc = [t for t in ts if not t.dependencies][0]
             sau = [t for t in ts if t.dependencies][0]
-            cc.tick()
-            _xong(cc, truoc.task_id)
+            # Viec truoc phai HONG HAN (can luot thu) thi viec con moi bi chan.
+            self.assertTrue(_can_luot(cc, truoc.task_id))
             cc.tick()
             self.assertIs(cc.store.task(sau.task_id).state, TaskState.BLOCKED)
             self.assertIn("phụ thuộc", cc.store.task(sau.task_id).blocked_reason)
@@ -541,6 +569,99 @@ class TestVerticalSlice(unittest.TestCase):
         rs = [t for t in self.cc.store.tasks("demo")
               if t.task_id.endswith("-review")]
         self.assertEqual(len(rs), 1)
+
+    # -- 5c. Thu lai co tran ------------------------------------------------
+
+    def test_viec_hong_duoc_thu_lai_o_CHO_KHAC(self):
+        """Một lần nhà cung cấp hắt hơi không được làm hỏng việc vĩnh viễn.
+
+        `Executor.run()` chạy đúng MỘT lượt; đường thử lại của Router V4 nằm
+        trong `run_task`, mà Control Center cố ý không đi qua. Không có gì ở
+        đây thì với một hệ chạy qua đêm không người trực, đó là chế độ hỏng
+        thường gặp nhất.
+        """
+        cc = _cc(kho_git_tam(), ex=FakeExecutor(status="failed"))
+        try:
+            cc.chat("demo", "fix web/admin")
+            tid = cc.store.tasks("demo")[0].task_id
+            cc.tick()
+            _xong(cc, tid)
+            t = cc.store.task(tid)
+            self.assertIs(t.state, TaskState.QUEUED, "phải quay lại hàng đợi")
+            self.assertEqual(t.owner_session, "", "phải nhả phiên cũ")
+            self.assertEqual(t.attempts, 1)
+        finally:
+            cc.shutdown()
+
+    def test_thu_lai_CO_TRAN_khong_lap_vo_han(self):
+        """Thử lại vô hạn là 'bão thử lại' — chế độ hỏng số 4 của `leases.py`."""
+        cc = _cc(kho_git_tam(), ex=FakeExecutor(status="failed"))
+        try:
+            cc.chat("demo", "fix web/admin")
+            tid = cc.store.tasks("demo")[0].task_id
+            for _ in range(8):
+                cc.tick()
+                _xong(cc, tid, giay=10)
+                if cc.store.task(tid).state is TaskState.FAILED:
+                    break
+            t = cc.store.task(tid)
+            self.assertIs(t.state, TaskState.FAILED)
+            self.assertLessEqual(t.attempts, 3,
+                                 f"chạy {t.attempts} lượt — vượt trần")
+        finally:
+            cc.shutdown()
+
+    def test_hong_CONG_BAO_MAT_KHONG_BAO_GIO_thu_lai(self):
+        """Thử lại một cổng bảo mật chỉ tăng cơ hội lọt một thay đổi chưa
+        thử giống credential — luật lấy thẳng từ Router V4."""
+        cc = _cc(kho_git_tam())
+        try:
+            ctx = cc.ctx("demo")
+            cc.chat("demo", "fix web/admin")
+            tid = cc.store.tasks("demo")[0].task_id
+            t = cc.store.task(tid)
+            t.state, t.attempts = TaskState.RUNNING, 1
+            cc.store.luu_task(t)
+            from scripts.router_v4.envelope import ResultEnvelope
+            pb = ResultEnvelope(task_id=tid, status="failed",
+                                failure_reason="security_gate")
+            cc.store.doi_trang_thai(tid, TaskState.FAILED, force=True)
+            cc._thu_lai_neu_dang(ctx, tid, pb, "s-x")
+            self.assertIs(cc.store.task(tid).state, TaskState.FAILED)
+        finally:
+            cc.shutdown()
+
+    def test_hong_do_TU_CHOI_QUYEN_khong_thu_lai(self):
+        """Chạy lại y hệt sẽ bị từ chối y hệt — chỉ tốn thêm một lượt quota."""
+        cc = _cc(kho_git_tam())
+        try:
+            ctx = cc.ctx("demo")
+            cc.chat("demo", "fix web/admin")
+            tid = cc.store.tasks("demo")[0].task_id
+            cc.store.doi_trang_thai(tid, TaskState.FAILED, force=True)
+            from scripts.router_v4.envelope import ResultEnvelope
+            cc._thu_lai_neu_dang(
+                ctx, tid,
+                ResultEnvelope(task_id=tid, status="failed",
+                               failure_reason="tool_permission_denied"), "s-x")
+            self.assertIs(cc.store.task(tid).state, TaskState.FAILED)
+        finally:
+            cc.shutdown()
+
+    def test_viec_doi_QUYET_DINH_khong_thu_lai_ma_cho_nguoi(self):
+        cc = _cc(kho_git_tam())
+        try:
+            ctx = cc.ctx("demo")
+            cc.chat("demo", "fix web/admin")
+            tid = cc.store.tasks("demo")[0].task_id
+            cc.store.doi_trang_thai(tid, TaskState.FAILED, force=True)
+            from scripts.router_v4.envelope import ResultEnvelope
+            pb = ResultEnvelope(task_id=tid, status="blocked")
+            pb.requires_decision = True
+            cc._thu_lai_neu_dang(ctx, tid, pb, "s-x")
+            self.assertIs(cc.store.task(tid).state, TaskState.FAILED)
+        finally:
+            cc.shutdown()
 
     # -- 6. Pause / Stop / Reassign -----------------------------------------
 

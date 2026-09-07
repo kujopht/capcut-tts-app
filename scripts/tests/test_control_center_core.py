@@ -593,6 +593,24 @@ class TestRulePlanner(unittest.TestCase):
         self.assertIn("changes", t.objective)
         self.assertIn("git status", t.objective)
 
+    def test_vi_du_duong_dan_trong_hop_dong_phai_HOP_LY(self):
+        """Phạm vi có thể là một TỆP, không phải thư mục.
+
+        Nối thêm `/vi-du.md` vào sau `docs/reports/note.md` sinh ra
+        `docs/reports/note.md/vi-du.md` — một đường dẫn không tồn tại, đặt
+        ngay trong câu đang dạy agent khai đường dẫn cho đúng. Đã thấy thật
+        trong một hợp đồng đã gửi đi.
+        """
+        kq = self.pl.plan("create docs/reports/note.md about the chunker",
+                          self.pj)
+        muc_tieu = kq.tasks[0].objective
+        self.assertIn("docs/reports/note.md", muc_tieu)
+        self.assertNotIn("note.md/vi-du.md", muc_tieu)
+
+    def test_vi_du_duong_dan_cho_pham_vi_THU_MUC_van_co_ten_tep(self):
+        kq = self.pl.plan("fix the bug in web/admin", self.pj)
+        self.assertIn("web/admin/vi-du.md", kq.tasks[0].objective)
+
     def test_viec_CHI_DOC_khong_bi_bat_khai_changes(self):
         """Việc chỉ đọc không ghi gì, nên đòi nó khai `changes` là nhiễu."""
         kq = self.pl.plan("investigate why the build is slow", self.pj)

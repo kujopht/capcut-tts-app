@@ -837,6 +837,77 @@ class TestVerticalSlice(unittest.TestCase):
         self.assertIs(self.cc.store.task(tid).state, TaskState.QUEUED)
         self.assertIs(self.cc.store.session("s-chet").state, SessionState.DEAD)
 
+    def test_recover_cuu_viec_mo_coi_khi_phien_con_SONG_nhung_DANG_RANH(self):
+        """LỖI THẬT: "phiên còn sống" KHÔNG đủ — phải là "đang chạy ĐÚNG
+        việc này".
+
+        Một phiên RẢNH (`IDLE`, `current_task` rỗng) vẫn "còn sống", nên một
+        việc mà phiên chủ đã bỏ lại sẽ ở `RUNNING` VĨNH VIỄN: `recover()` bỏ
+        qua nó, và bộ lập lịch không bao giờ nhặt nó lên vì nó không ở
+        QUEUED/WAITING.
+
+        Đo thật 2026-09-08: `rev2.tda87-1` kẹt ở RUNNING qua BA lần gọi
+        `--headless` liên tiếp, mỗi lần đều chạy `recover()`.
+        """
+        from scripts.control_center.model import Session, SessionState
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.luu_session(Session(
+            session_id="s-ranh", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.IDLE,
+            pid=None, current_task=""))          # SỐNG, nhưng RẢNH
+        t = self.cc.store.task(tid)
+        t.state, t.owner_session, t.attempts = TaskState.RUNNING, "s-ranh", 1
+        self.cc.store.luu_task(t)
+
+        bc = self.cc.recover()
+        self.assertIn(tid, bc["tasks"])
+        self.assertIs(self.cc.store.task(tid).state, TaskState.QUEUED)
+
+    def test_recover_DE_YEN_viec_ma_phien_dang_that_su_chay(self):
+        """Vế đối xứng: đừng cướp một việc đang chạy THẬT.
+
+        "Thật" ở đây đòi BẰNG CHỨNG: một PID còn sống. Dùng PID của chính
+        tiến trình bài kiểm — nó chắc chắn còn sống, và đó là đúng loại bằng
+        chứng `SessionManager.recover()` đi tìm.
+        """
+        import os
+        from scripts.control_center.model import Session, SessionState
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.luu_session(Session(
+            session_id="s-ban", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.BUSY,
+            pid=os.getpid(), current_task=tid))
+        t = self.cc.store.task(tid)
+        t.state, t.owner_session = TaskState.RUNNING, "s-ban"
+        self.cc.store.luu_task(t)
+
+        self.cc.recover()
+        self.assertIs(self.cc.store.task(tid).state, TaskState.RUNNING)
+
+    def test_recover_phien_BAN_ma_KHONG_CO_PID_thi_viec_van_duoc_cuu(self):
+        """Không có PID = không kiểm được = không được coi là đang chạy.
+
+        Sau một lần khởi động lại, tiến trình agent (nếu còn sống) là con của
+        một Control Center đã chết — không ai còn thu kết quả của nó nữa, nên
+        công việc đó mất dù thế nào. Đưa việc về hàng đợi là thu hồi được;
+        để nó `RUNNING` là mất luôn.
+        """
+        from scripts.control_center.model import Session, SessionState
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.luu_session(Session(
+            session_id="s-mo", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.BUSY,
+            pid=None, current_task=tid))
+        t = self.cc.store.task(tid)
+        t.state, t.owner_session, t.attempts = TaskState.RUNNING, "s-mo", 1
+        self.cc.store.luu_task(t)
+
+        self.cc.recover()
+        self.assertIs(self.cc.store.task(tid).state, TaskState.QUEUED)
+
     def test_recover_CHAN_viec_da_can_luot_thu(self):
         from scripts.control_center.model import Session
         self.cc.chat("demo", "fix web/admin")

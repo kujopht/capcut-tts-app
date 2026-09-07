@@ -992,11 +992,25 @@ class ControlCenter:
             bc["sessions"][p.project_id] = ctx.sessions.recover()
             bc["worktrees"][p.project_id] = ctx.worktrees.doi_soat()
 
-            song = {s.session_id for s in
-                    self.store.sessions(p.project_id, alive_only=True)}
             for t in self.store.tasks(p.project_id, states=(TaskState.RUNNING,)):
-                if t.owner_session and t.owner_session in song:
-                    continue                  # phien con song -> de yen
+                # "PHIEN CON SONG" KHONG DU — phai la "phien DANG CHAY DUNG
+                # VIEC NAY".
+                #
+                # Ban dau cho nay chi hoi phien co con song khong. Nhung mot
+                # phien RANH (IDLE, `current_task` rong) van "con song", nen
+                # mot viec ma phien chu da bo lai se o `RUNNING` VINH VIEN:
+                # `recover()` bo qua no, va bo lap lich khong bao gio nhat no
+                # len vi no khong o QUEUED/WAITING.
+                #
+                # Do that 2026-09-08: `rev2.tda87-1` ket o RUNNING qua BA lan
+                # goi `--headless` lien tiep, moi lan deu chay `recover()`.
+                # Day dung la che do hong ma `recover()` ton tai de chan, va
+                # no song sot duoc vi phep kiem hoi sai cau hoi.
+                s = (self.store.session(t.owner_session)
+                     if t.owner_session else None)
+                if s is not None and s.state.alive and \
+                        s.current_task == t.task_id:
+                    continue                  # that su dang chay -> de yen
                 if t.attempts >= MAX_ATTEMPTS:
                     self.store.doi_trang_thai(
                         t.task_id, TaskState.BLOCKED, force=True,

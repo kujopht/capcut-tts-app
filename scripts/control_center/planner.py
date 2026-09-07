@@ -493,10 +493,18 @@ class RulePlanner:
             # kiem dinh: cong do la thu duy nhat chan mot worker sua tep
             # ngoai pham vi ma khong ai biet.
             d.append("")
+            # Vi du phai la mot duong dan HOP LY. `scope[0]` co the la mot
+            # TEP (`docs/reports/note.md`) chu khong phai thu muc, va noi
+            # them `/vi-du.md` vao sau se sinh ra `.../note.md/vi-du.md` —
+            # mot duong dan khong ton tai, dat ngay trong cau dang day agent
+            # khai duong dan cho dung. Da thay that trong mot hop dong da
+            # gui di.
+            mau = str(scope[0])
+            vi_du = mau if "." in mau.rsplit("/", 1)[-1] else mau + "/vi-du.md"
             d.append(
                 "BẮT BUỘC KHI TRẢ KẾT QUẢ: liệt kê ĐƯỜNG DẪN của TỪNG tệp bạn "
                 "đã tạo hoặc sửa vào trường `changes` — ví dụ "
-                '`"changes": ["' + str(scope[0]) + '/vi-du.md"]`. '
+                '`"changes": ["' + vi_du + '"]`. '
                 "Đường dẫn THẬT, tương đối so với gốc cây làm việc, KHÔNG "
                 "phải lời mô tả. Cổng kiểm định đối chiếu danh sách này với "
                 "`git status` thật: khai thiếu thì việc bị tính là HỎNG dù "

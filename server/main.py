@@ -117,6 +117,8 @@ from server.animation_domain import (
     parse_youtube_id,
 )
 from server.trusted_source_domain import SubscriptionStatus, compute_source_health
+from server import content_queue_service
+from server.content_queue_service import QueueActionError
 from server.trusted_source_service import (
     DEFAULT_SCAN_PAGES,
     DISCOVERY_SCAN_PAGES,
@@ -4741,6 +4743,12 @@ class NoteIn(BaseModel):
     note: Annotated[str, StringConstraints(max_length=1000)] = ""
 
 
+class RequeueStageIn(BaseModel):
+    """Cong doan can xep lai. Danh sach dong — mot chuoi la se bi tu choi o
+    tang dich vu chu khong bao gio cham toi store."""
+    stage: Annotated[str, StringConstraints(max_length=32)]
+
+
 def _an_toan_song_song(future, mac_dinh, *, nhan: str = "admin"):
     """
     Lay ket qua MOT future chay song song qua `ThreadPoolExecutor` — LOI (vd
@@ -5501,6 +5509,64 @@ def admin_novels(q: str = "", state: str = "", limit: int = 25, offset: int = 0,
     return creators.admin_novels(query=q, state=state,
                                  limit=max(1, min(100, limit)),
                                  offset=max(0, offset))
+
+
+# --------------------------------------------------------------------------
+# Hang doi san xuat noi dung (`content_queue`).
+#
+# BE MAT WEB XEP VIEC VA QUAN LY VIEC — KHONG BAO GIO CHAY VIEC.
+#
+# Khong route nao duoi day duoc phep khoi chay `chinese_media_orchestrator`
+# (khong `subprocess`, khong BackgroundTasks, khong thread). Mot request "chay
+# lai" chi doi trang thai mot cong doan ve PENDING; tien trinh orchestrator
+# DUY NHAT nhat no o lan quet ke tiep.
+#
+# Day khong phai so thich kien truc. Appwrite khong co cap nhat co dieu kien
+# va `content_queue` chua co truong lease, nen hai ban tieu thu chay cung luc
+# se gianh cung mot muc, cung chay ASR, va ghi de len nhau. Neu moi request
+# sinh mot tien trinh thi so ban tieu thu bang so nguoi bam nut.
+# --------------------------------------------------------------------------
+
+@app.get("/api/admin/content-queue")
+def admin_content_queue(overall: str = "", limit: int = 50, offset: int = 0,
+                        admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    return content_queue_service.list_items(
+        store, overall=overall, limit=max(1, min(100, limit)),
+        offset=max(0, offset))
+
+
+@app.get("/api/admin/content-queue/summary")
+def admin_content_queue_summary(
+        admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """Cung hinh dang ma `chinese_media_orchestrator --status` in ra, de man
+    hinh quan tri va dong lenh khong bao gio ke hai cau chuyen khac nhau."""
+    return content_queue_service.summary(store)
+
+
+@app.get("/api/admin/content-queue/{item_id}")
+def admin_content_queue_item(
+        item_id: str,
+        admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    try:
+        return content_queue_service.get_item(store, item_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy mục trong hàng đợi.") from exc
+
+
+@app.post("/api/admin/content-queue/{item_id}/requeue")
+def admin_content_queue_requeue(
+        item_id: str, payload: RequeueStageIn,
+        admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """Xep lai MOT cong doan. Doi mot truong trang thai — khong chay gi ca."""
+    try:
+        return content_queue_service.requeue_stage(
+            store, item_id, payload.stage, actor_id=admin.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Không tìm thấy mục trong hàng đợi.") from exc
+    except QueueActionError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
 
 @app.get("/api/admin/events")

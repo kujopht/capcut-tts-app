@@ -195,10 +195,42 @@ Nếu đánh `DONE` khi còn thiếu, công đoạn phụ đề sẽ lặng lẽ
 dịch và cho ra một bản phụ đề thiếu nội dung — mà công đoạn dịch thì không bao
 giờ chạy lại nữa.
 
+## Bề mặt web (`/api/admin/content-queue/*`)
+
+Web **xếp việc và quản lý việc. Web KHÔNG bao giờ chạy việc.**
+
+| Route | Việc |
+|---|---|
+| `GET /api/admin/content-queue` | Danh sách, kèm trạng thái từng công đoạn và nhãn `overall` |
+| `GET /api/admin/content-queue/summary` | Đúng hình dạng mà `--status` in ra |
+| `GET /api/admin/content-queue/{item_id}` | Một mục |
+| `POST /api/admin/content-queue/{item_id}/requeue` | Đặt **một** công đoạn về `PENDING` |
+
+`requeue` **chỉ đổi một trường trạng thái** — không `subprocess`, không
+`BackgroundTasks`, không thread. Tiến trình orchestrator **duy nhất** nhặt nó
+ở lần quét kế tiếp. Có bài test đọc **cây cú pháp** của
+`server/content_queue_service.py` để chặn mọi import/lời gọi có thể khởi chạy
+tiến trình — nếu ai đó thêm `subprocess` vào tầng này, CI đỏ.
+
+Lý do không phải sở thích kiến trúc: nếu mỗi request sinh một tiến trình thì
+số bản tiêu thụ bằng số người bấm nút, và giả định MỘT-người-ghi ở trên vỡ.
+
+Hai điều `requeue` **từ chối**, cả hai đều trả 409:
+
+- **Công đoạn `render` của mục không phải `REHOST_ALLOWED`.** Cổng quyền không
+  đi vòng qua được bằng một cú bấm nút.
+- **Công đoạn `RUNNING` mới cập nhật gần đây** (< 120 phút) — xếp lại nó sẽ tạo
+  ra bản tiêu thụ thứ hai cho chính mục đó.
+
+`DONE` cũng không xếp lại được (sẽ làm lại việc đã xong và sinh bản trùng);
+`SKIPPED` thì không bao giờ (đó là một quyết định chính sách).
+
 ## Test
 
 ```bash
 python -m unittest scripts.tests.test_chinese_media_orchestrator
+python -m unittest server.tests.test_content_queue_service
+python -m unittest server.tests.test_content_queue_routes
 ```
 
 44 bài, không Appwrite, không R2, không HTTP — store là bản giả trong bộ nhớ,

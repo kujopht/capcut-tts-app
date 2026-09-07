@@ -39,6 +39,31 @@ info(){ printf '  [ .. ] %s\n' "$1"; }
 [ -x "$VENV" ]  || die "khong thay venv $VENV"
 id "$SVC_USER" >/dev/null 2>&1 || die "khong co user $SVC_USER"
 
+# --- MO HINH QUYEN: root so huu va DONG BO kho; fanfic chi DOC va chay ------
+#
+# Kho `/opt/fanfic-audio` thuoc root:root 755. Do la mo hinh dung, va script
+# nay KHONG duoc pha no:
+#
+#   - Dong bo git la viec cua ROOT (danh tinh trien khai hop phap). Chay
+#     `git` bang `fanfic` o day se hong khi ghi `.git`, va "sua" no bang
+#     `chown` hay `safe.directory` chi la di vong qua mo hinh quyen chu khong
+#     phai ton trong no.
+#   - Dich vu luc CHAY van la `fanfic` (khong dac quyen). No chi can bit `r-x`
+#     cho `other` tren kho — da co san — va quyen ghi vao thu muc trang thai
+#     CUA RIENG NO.
+#
+# Kiem thanh that thay vi gia dinh: neu ai do da chown kho sang `fanfic`, mo
+# hinh da bi doi va ta muon biet, khong muon lang le chay tiep.
+REPO_OWNER="$(stat -c '%U' "$REPO")"
+[ "$REPO_OWNER" = "root" ] || die \
+  "kho $REPO thuoc '$REPO_OWNER', khong phai root — mo hinh trien khai da bi
+   doi. Dung lai thay vi tu y sua quyen."
+
+# `fanfic` phai DOC duoc kho (bit r-x cho other), nhung KHONG duoc so huu no.
+[ "$(stat -c '%A' "$REPO" | cut -c8-10)" = "r-x" ] || die \
+  "$REPO khong cho 'other' doc/di qua — dich vu chay bang $SVC_USER se khong
+   doc duoc ma nguon. Khong tu noi long o day."
+
 # Ghi lai quyen cua worker-prod.env TRUOC khi lam gi — de chung minh o cuoi
 # rang khong co gi bi noi long.
 WPE="$ETC/worker-prod.env"
@@ -46,6 +71,46 @@ WPE_BEFORE=""
 [ -f "$WPE" ] && WPE_BEFORE="$(stat -c '%U:%G %a' "$WPE")"
 
 printf '\n=== Bootstrap Production Farmer ===\n\n'
+
+# ------------------------------------------- 0. dong bo kho BANG QUYEN ROOT --
+# Chay TRUOC khi cham vao bat cu thu gi khac, va fail closed: neu khong dua
+# duoc kho ve dung ban can trien khai thi khong cau hinh, khong cai dat,
+# khong bat dich vu.
+info "kiem ket noi toi remote (khong in URL/credential)"
+# `ls-remote` xac minh CA ket noi lan quyen doc, va khong in gi khi thanh
+# cong. Deliberately vut stdout: mot remote HTTPS co the mang token trong
+# URL, va no khong duoc phep loang ra man hinh hay journal.
+if ! git -C "$REPO" ls-remote --exit-code origin HEAD >/dev/null 2>&1; then
+  die "danh tinh trien khai (root) khong truy cap duoc remote — dung lai,
+   khong sua gi. Kiem tra mang/quyen doc kho roi chay lai."
+fi
+ok "remote truy cap duoc bang danh tinh trien khai (root)"
+
+BEFORE_SHA="$(git -C "$REPO" rev-parse --short HEAD)"
+info "dong bo kho bang root (truoc: $BEFORE_SHA)"
+
+# Cay lam viec phai SACH: `merge --ff-only` se tu choi neu co thay doi cuc bo,
+# va do la dieu ta muon — mot ban va tay tren may san xuat phai duoc nhin thay
+# chu khong bi ghi de am tham.
+if ! git -C "$REPO" diff --quiet || ! git -C "$REPO" diff --cached --quiet; then
+  die "cay lam viec tai $REPO co thay doi cuc bo chua commit — dung lai.
+   Xem: git -C $REPO status"
+fi
+
+git -C "$REPO" fetch --quiet origin || die "git fetch that bai (root)"
+git -C "$REPO" checkout --quiet main || die "khong checkout duoc main"
+git -C "$REPO" merge --ff-only --quiet origin/main \
+  || die "khong fast-forward duoc len origin/main — dung lai thay vi ep."
+
+AFTER_SHA="$(git -C "$REPO" rev-parse --short HEAD)"
+ok "kho da dong bo bang root: $BEFORE_SHA -> $AFTER_SHA"
+
+# Sau khi dong bo, quyen phai VAN nhu cu — git khong doi chu so huu, nhung
+# kiem lai de mot buoc nao do sau nay khong lang le lam hong mo hinh.
+[ "$(stat -c '%U' "$REPO")" = "root" ] || die "chu so huu kho da doi sau khi dong bo"
+
+[ -f "$REPO/deploy/fanfic-farmer.service" ] \
+  || die "khong thay unit sau khi dong bo — ban trien khai khong dung"
 
 # --------------------------------------------------------------- 1. khoa --
 printf 'Dan FARMER_GEMINI_API_KEY (khong hien khi go, Enter de xac nhan):\n> '

@@ -63,20 +63,27 @@ SOURCES: Tuple[ChineseMediaSource, ...] = (
         source_id="tiantian_xiaoshuo_dongman",
         platform="youtube",
         display_name="天天小說動漫",
-        channel_id="UC1WCXZHBHi2sfgd2IgnpN8g",
+        # Da giai truoc day, nhung RSS tra 404 ca o 2026-09-02 lan 2026-09-07.
+        # Bo TRONG theo dung quy uoc cua chinh danh sach nay ("biet that,
+        # chua poll duoc") thay vi giu mot id chet de watcher bao loi moi lan
+        # chay — id cu van con trong `channel_url` de tra cuu lai.
+        channel_id="",
         category="有声小说动画",
         channel_url="https://www.youtube.com/channel/UC1WCXZHBHi2sfgd2IgnpN8g",
+        notes="RSS 404 (kiem lai 2026-09-07, cung ket qua voi 2026-09-02) — "
+             "kenh co the da doi id hoac bi go. Khong doan id moi.",
     ),
     ChineseMediaSource(
         source_id="kk_aikan",
         platform="youtube",
         display_name="KK爱看",
-        channel_id="",
+        channel_id="UCbM7SQSOEpla-sDOkpdNouQ",
         category="AI漫剧",
         channel_url="https://www.youtube.com/@KKAIKAN",
-        notes="Da dung lam ung vien video-draft mission truoc (2026-09-01) — "
-             "channel that, nhung channel_id (UC...) chua duoc giai (trang "
-             "kenh la SPA, WebFetch khong lay duoc metadata JS-render).",
+        notes="channel_id GIAI DUOC 2026-09-07 qua `yt-dlp --skip-download "
+             "--print %(channel_id)s` tren MOT video cua kenh — WebFetch trươc "
+             "do that bai vi trang kenh la SPA. RSS da xac minh: HTTP 200, 15 "
+             "muc. Do dai upload gan day 44-137 phut, co muc DUOI nguong 2 gio.",
     ),
     ChineseMediaSource(
         source_id="guanguan_manju",
@@ -91,10 +98,14 @@ SOURCES: Tuple[ChineseMediaSource, ...] = (
         source_id="tepi_dongman",
         platform="youtube",
         display_name="TePi动漫推荐",
-        channel_id="",
+        channel_id="UCDDvjG2iJqzLA4KCBqQ3RHA",
         category="AI动画",
         channel_url="https://www.youtube.com/@TePi%E5%8A%A8%E6%BC%AB%E6%8E%A8%E8%8D%90",
-        notes="Cung ly do voi kk_aikan — channel that, id chua giai.",
+        notes="channel_id GIAI DUOC 2026-09-07, cung cach voi kk_aikan. RSS "
+             "da xac minh: HTTP 200, 15 muc. Day la nguon DUNG HINH DANG nhat "
+             "cho duong day hien tai — 12/12 upload gan day deu 22-93 phut, "
+             "tuc TUNG TAP chu khong phai ban tong hop 10-60 gio nhu "
+             "bobo_manju/dongman_shuwu.",
     ),
 )
 

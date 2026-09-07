@@ -96,6 +96,10 @@ const NHOM_DIEU_HUONG: NhomDieuHuong[] = [
         href: "/admin/animation/import-queue", nhan: "Import Queue",
         icon: IconInbox, vaiToiThieu: "admin",
       },
+      {
+        href: "/admin/content-queue", nhan: "Hàng đợi sản xuất",
+        icon: IconInbox, vaiToiThieu: "admin",
+      },
     ],
   },
   {

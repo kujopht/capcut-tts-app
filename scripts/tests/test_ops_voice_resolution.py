@@ -166,9 +166,38 @@ class TestPhanGiaiGiong(unittest.TestCase):
     def test_giong_LA_KHONG_BIET_van_cho_qua(self):
         """Hop dong da ghi trong docstring: giong khong co trong registry tra
         True, de duong cu xu ly (nhan -> that bai co thong diep) thay vi de
-        job treo `pending` vo han. De day de khoi ai 'sua' nham."""
+        job treo `pending` vo han. De day de khoi ai 'sua' nham.
+
+        PHAI TIEM REGISTRY, khong duoc dua vao registry that. Truoc day bai
+        nay goi registry that nen ket qua PHU THUOC MAY: may lap trinh vien co
+        goi `piper-tts` -> runtime co -> True (dat); CI la moi truong sach,
+        `requirements.txt` co y KHONG cai piper -> runtime khong co -> False
+        (do). Cung mot bai test, hai ket qua, khong lien quan gi den hop dong
+        no muon khoa. Nay noi RO runtime co san, nen no do dung mot thu: giong
+        LA thi cho qua.
+        """
         b = self._bridge()
-        self.assertTrue(b.voice_runnable_on_this_machine(GIONG_KHONG_CO_MODEL))
+        with self._voi_registry("piper:mot-giong-khac", installed=True,
+                                runtime_co=True):
+            self.assertTrue(b.voice_runnable_on_this_machine(GIONG_KHONG_CO_MODEL))
+
+    def test_thieu_RUNTIME_thi_NHUONG_ke_ca_giong_LA(self):
+        """Thu tu uu tien: RUNTIME truoc, 'giong la' sau.
+
+        Day la su co Cloud Run 2026-09-06. Khi goi `piper-tts` khong co,
+        `voice_by_id` tra None cho MOI giong piper — khong the phan biet 'giong
+        la' voi 'ca provider khong chay duoc'. Neu nhanh 'giong la -> True'
+        thang o day thi worker nhan ca 10 job roi chet ngay voi
+        `provider_not_installed`, dot het `attempts` va giet vinh vien nhung
+        job ma worker khac (co runtime) lam duoc.
+
+        Nen khi KHONG co runtime, cau tra loi dung la NHUONG.
+        """
+        b = self._bridge()
+        with self._voi_registry("piper:mot-giong-khac", installed=True,
+                                runtime_co=False):
+            self.assertFalse(b.voice_runnable_on_this_machine(GIONG_KHONG_CO_MODEL))
+            self.assertFalse(b.voice_runnable_on_this_machine("piper:mot-giong-khac"))
 
     def test_giong_KHONG_cuc_bo_luon_chay_duoc(self):
         b = self._bridge()

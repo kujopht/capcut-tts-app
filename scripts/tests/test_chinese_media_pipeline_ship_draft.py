@@ -96,5 +96,72 @@ class ShipDraftIdempotencyTest(unittest.TestCase):
         self.assertEqual(payload["subtitle_status"], "READY")
 
 
+class ShipDraftKeyTest(unittest.TestCase):
+    """Khoa R2 cua phu de/dub (2026-09-07).
+
+    Hai loi that o day, ca hai deu KHONG bi bat boi cac bai tren vi chung
+    khong he nhin vao khoa duoc dung de tai len:
+
+    1. `subtitle_key.replace("/subtitles/", "/dub_audio/")` — khoa KHONG co
+       dau "/" o dau, nen phep thay the khong bao gio khop va ban dub bi ghi
+       vao chinh tien to `subtitles/`.
+    2. Khoa mac dinh chua `os.urandom(4)`, nen moi lan chay lai bo lai mot
+       object mo coi. `chinese_media_orchestrator.py` truyen khoa tat dinh de
+       tranh dieu do; duong mac dinh giu nguyen hanh vi cu.
+    """
+
+    def _upload_keys(self, **kwargs):
+        kwargs.setdefault("dub_bytes", None)
+        uploads: list = []
+        with mock.patch.object(cmp, "goi", side_effect=_fake_goi_without_existing([])), \
+             mock.patch.object(cmp, "upload_to_r2",
+                               side_effect=lambda k, d, c: uploads.append((k, c))):
+            cmp.ship_draft(
+                title="Tieu de", source_url=SOURCE_URL, author="tac gia",
+                rights_mode="REFERENCE_ONLY", platform="youtube",
+                embed_ref="existing123", srt_bytes=b"srt", token="fake-token",
+                **kwargs,
+            )
+        return uploads
+
+    def test_dub_khong_bao_gio_bi_ghi_vao_tien_to_subtitles(self):
+        uploads = self._upload_keys(dub_bytes=b"mp3")
+        dub_uploads = [(k, c) for k, c in uploads if c == "audio/mpeg"]
+
+        self.assertEqual(len(dub_uploads), 1)
+        dub_k = dub_uploads[0][0]
+        self.assertTrue(dub_k.startswith("dub_audio/"),
+                        f"dub phai nam duoi dub_audio/, dang o: {dub_k}")
+        self.assertFalse(dub_k.startswith("subtitles/"))
+        self.assertTrue(dub_k.endswith(".mp3"))
+
+    def test_khoa_tuong_minh_duoc_dung_nguyen_van(self):
+        uploads = self._upload_keys(
+            dub_bytes=b"mp3",
+            subtitle_key="subtitles/svc_harvester/cmq_abc.srt",
+            dub_key="dub_audio/svc_harvester/cmq_abc.mp3",
+        )
+        self.assertEqual(sorted(k for k, _ in uploads),
+                         ["dub_audio/svc_harvester/cmq_abc.mp3",
+                          "subtitles/svc_harvester/cmq_abc.srt"])
+
+    def test_khoa_tuong_minh_lap_lai_y_het_qua_nhieu_lan_chay(self):
+        first = self._upload_keys(subtitle_key="subtitles/svc_harvester/cmq_abc.srt")
+        second = self._upload_keys(subtitle_key="subtitles/svc_harvester/cmq_abc.srt")
+        self.assertEqual(first, second)
+
+    def test_khoa_mac_dinh_giu_nguyen_hanh_vi_cu(self):
+        uploads = self._upload_keys()
+        self.assertEqual(len(uploads), 1)
+        key, content_type = uploads[0]
+        self.assertTrue(key.startswith("subtitles/svc_harvester/"))
+        self.assertTrue(key.endswith(".srt"))
+        self.assertEqual(content_type, "text/srt")
+
+    def test_khong_co_dub_thi_khong_tai_len_gi_ngoai_phu_de(self):
+        uploads = self._upload_keys(dub_bytes=None)
+        self.assertEqual([c for _, c in uploads], ["text/srt"])
+
+
 if __name__ == "__main__":
     unittest.main()

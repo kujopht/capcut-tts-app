@@ -12,7 +12,10 @@ Cập nhật: 2026-08-08 · Branch `feature/web-mvp` · HEAD `14f4a31`
 > `docs/ADMIN.md`, `docs/DEV_SELFHOST_APPWRITE.md`,
 > `docs/handoffs/admin-trusted-video-v2-handoff.md`,
 > `docs/handoffs/preprod-overnight-hardening-v1.md`, và
-> `docs/reports/preprod-*.md`. Không viết lại toàn bộ file này trong đợt
+> `docs/reports/preprod-*.md`. Về **công cụ sản xuất nội dung** (hàng đợi
+> `content_queue` → bản nháp), xem `docs/CONTENT_ORCHESTRATOR.md` (vận hành)
+> và `docs/reports/content-orchestrator-v1-2026-09-07.md` (trạng thái).
+> Không viết lại toàn bộ file này trong đợt
 > hardening này (rủi ro/khối lượng vượt phạm vi "tài liệu lỗi thời, sửa nhỏ
 > an toàn") — để nguyên làm hồ sơ lịch sử của mốc `feature/web-mvp`.
 

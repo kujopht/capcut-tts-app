@@ -879,11 +879,19 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         return self.get_queue_item(item_id)
 
     def list_queue_items_by_state(
-            self, *, stage: str, state: str, limit: int = 50) -> List[ChineseMediaQueueItem]:
+            self, *, stage: str, state: str, limit: int = 50,
+            offset: int = 0) -> List[ChineseMediaQueueItem]:
         """Vd `stage="transcript_state", state="PENDING"` — muc dich duy nhat
-        cua ham nay la nguon viec cho `chinese_media_orchestrator.py`."""
-        docs = self._list(COL_CONTENT_QUEUE,
-                          [q_equal(stage, state), q_limit(limit)])
+        cua ham nay la nguon viec cho `chinese_media_orchestrator.py`.
+
+        `offset` (them 2026-09-07) de goi ben goi PHAN TRANG duoc. Khong co no,
+        mot dam muc da het luot thu nam o dau danh sach se lam ca hang doi chet
+        doi: moi truy van tra ve dung chung, ben goi loai het, roi ve tay
+        khong — muc con chay duoc nam phia sau khong bao gio toi luot."""
+        queries = [q_equal(stage, state), q_limit(limit)]
+        if offset:
+            queries.append(q_offset(offset))
+        docs = self._list(COL_CONTENT_QUEUE, queries)
         return [_queue_item_from_doc(d) for d in docs]
 
     def get_chapter(self, chapter_id: str) -> Chapter:

@@ -701,6 +701,70 @@ class TestVerticalSlice(unittest.TestCase):
         self.assertEqual(s["selected"], "demo")
 
 
+class TestHaiTienTrinh(unittest.TestCase):
+    """HAI Control Center cùng một sổ — chuyện bình thường trong kho này.
+
+    Giao diện mở ở một cửa sổ, một lệnh CLI chạy ở cửa sổ khác, hoặc đơn giản
+    là người dùng mở app hai lần. Sổ nằm trên đĩa và cả hai đều ghi, nên mọi
+    bất biến loại trừ phải đúng GIỮA CÁC TIẾN TRÌNH, không chỉ giữa các luồng.
+    """
+
+    def setUp(self):
+        self.repo = kho_git_tam()
+        self.a = _cc(self.repo, ex=FakeExecutor(cham=0.4))
+        # Ban thu hai dung CHUNG thu muc goc -> chung tep SQLite.
+        self.b = ControlCenter(root=self.repo, fabric=fabric_gia(), probe=False,
+                               executor_factory=lambda p, f: FakeExecutor(cham=0.4))
+
+    def tearDown(self):
+        for cc in (self.a, self.b):
+            try:
+                cc.shutdown()
+            except Exception:                             # noqa: BLE001
+                pass
+
+    def test_ban_thu_hai_THAY_du_an_va_viec_cua_ban_thu_nhat(self):
+        self.a.chat("demo", "fix web/admin")
+        self.assertEqual([p.project_id for p in self.b.projects()], ["demo"])
+        self.assertEqual(len(self.b.store.tasks("demo")), 1)
+
+    def test_MOT_viec_KHONG_bao_gio_bi_giao_hai_lan(self):
+        """`claim_task` là một câu `UPDATE` có điều kiện — hai bên cùng gọi
+        thì đúng một bên thấy `rowcount == 1`.
+
+        Đây là bất biến mà cả hàng đợi V3 lẫn lease V4 đều dựa vào; kiểm nó
+        ở tầng này để một lần sửa `store.py` về sau không âm thầm phá nó.
+        """
+        self.a.chat("demo", "fix web/admin")
+        tid = self.a.store.tasks("demo")[0].task_id
+        self.assertTrue(self.a.store.claim_task(tid, "s-A"))
+        self.assertFalse(self.b.store.claim_task(tid, "s-B"),
+                         "bản thứ hai KHÔNG được nhận lại việc đã có chủ")
+        self.assertEqual(self.b.store.task(tid).owner_session, "s-A")
+
+    def test_hai_vong_lap_cung_tick_thi_viec_van_chi_chay_MOT_lan(self):
+        self.a.chat("demo", "fix web/admin/content-queue")
+        tid = self.a.store.tasks("demo")[0].task_id
+        ka, kb = self.a.tick(), self.b.tick()
+        giao = ka["dispatched"] + kb["dispatched"]
+        self.assertEqual(giao.count(tid), 1,
+                         f"việc bị giao {giao.count(tid)} lần: {ka} / {kb}")
+        _xong(self.a, tid, giay=30)
+        _xong(self.b, tid, giay=30)
+        self.assertEqual(self.a.store.task(tid).attempts, 1)
+
+    def test_khoa_tai_nguyen_co_hieu_luc_GIUA_hai_ban(self):
+        from scripts.control_center.locks import LockManager
+        g = LockManager(self.a.store).xin(
+            "demo", [(LockKind.FILESYSTEM, "web/admin")], task_id="A")
+        self.assertTrue(g.granted)
+        g2 = LockManager(self.b.store).xin(
+            "demo", [(LockKind.FILESYSTEM, "web/admin/content-queue")],
+            task_id="B")
+        self.assertFalse(g2.granted, "khoá phải chặn qua ranh giới tiến trình")
+        self.assertEqual(g2.conflict_holder_task, "A")
+
+
 class TestWorktreeSafety(unittest.TestCase):
     """Bất biến: hai phiên KHÔNG BAO GIỜ cùng ghi một worktree."""
 

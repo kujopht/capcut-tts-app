@@ -31,14 +31,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-#: Ten remote CHINH TAC. Giu dong bo voi `raw_archive.DRIVE_ARCHIVE_REMOTE`
-#: va `chinese_media_pipeline.DRIVE_FINAL_MEDIA_REMOTE` — cung mot tai khoan,
-#: cung mot goc.
+#: Ten remote CHINH TAC — cung tai khoan Drive ma `raw_archive` va
+#: `chinese_media_pipeline` dang dung. MOT danh tinh san xuat, khong hai.
 CANONICAL_REMOTE = "fanfic-gdrive"
-CANONICAL_ROOT = "FanficWorld/archive"
 
-#: Goc cua rieng farmer, nam TRONG cung cay archive chinh tac.
-FARMER_SUBTREE = "farmer"
+#: Goc cua farmer la `FanficWorld/production` — KHONG phai
+#: `FanficWorld/archive`.
+#:
+#: `FanficWorld/archive/` la LEGACY (raw scraping, rendered cu, backup ha
+#: tang) va phai duoc de yen: khong doi ten, khong sap xep lai, khong ghi
+#: them vao. San pham MOI di vao mot cay rieng.
+#:
+#: Duong dan lay tu `canonical.py` chu khong ghep chuoi o day — mot goc thu
+#: hai se lang le tach kho luu tru lam doi.
+from server.farmer.canonical import PRODUCTION_ROOT  # noqa: E402
+
+CANONICAL_ROOT = PRODUCTION_ROOT
+
+#: Goc LEGACY, chi de doi chieu/kiem tra — KHONG BAO GIO ghi vao.
+LEGACY_ROOT = "FanficWorld/archive"
 
 ENV_REMOTE = "FARMER_DRIVE_REMOTE"
 ENV_ENABLED = "FARMER_DRIVE_ARCHIVE"
@@ -76,8 +87,23 @@ def enabled() -> bool:
 
 
 def farmer_remote_path(*parts: str) -> str:
+    """Duong dan Drive cho san pham farmer — LUON duoi `production/`."""
     duoi = "/".join(p.strip("/") for p in parts if p)
-    goc = f"{remote_name()}:{CANONICAL_ROOT}/{FARMER_SUBTREE}"
+    goc = f"{remote_name()}:{CANONICAL_ROOT}"
+    return f"{goc}/{duoi}" if duoi else goc
+
+
+def work_remote_path(bucket: str, url: str, *parts: str) -> str:
+    """Duong dan Drive cua MOT tac pham, guong dung bo cuc chinh tac.
+
+    Dung `canonical.canonical_dir` de duong tren Drive va duong tren R2 khong
+    bao gio lech nhau — cung `work_id`, cung slug, cung thung.
+    """
+    from server.farmer.canonical import canonical_dir
+
+    thu_muc = canonical_dir(bucket, url)          # da bat dau bang production/
+    duoi = "/".join(p.strip("/") for p in parts if p)
+    goc = f"{remote_name()}:{thu_muc}"
     return f"{goc}/{duoi}" if duoi else goc
 
 
@@ -93,7 +119,8 @@ def probe() -> Dict[str, Any]:
     """
     ket_qua: Dict[str, Any] = {
         "remote": remote_name(),
-        "root": f"{remote_name()}:{CANONICAL_ROOT}/{FARMER_SUBTREE}",
+        "root": f"{remote_name()}:{CANONICAL_ROOT}",
+        "legacy_root_untouched": f"{remote_name()}:{LEGACY_ROOT}",
         "enabled": enabled(),
         "rclone_installed": False,
         "reachable": False,

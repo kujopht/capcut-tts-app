@@ -122,6 +122,44 @@ def _text_discovery():
     return discover
 
 
+def _verify_credential() -> int:
+    """Goi Gemini DUNG MOT lan bang mot cau re nhat, roi bao OK/FAIL.
+
+    KHONG BAO GIO in khoa, va khong in ca do dai khoa hay bon ky tu dau —
+    mot "prefix de nhan dang" van la mot phan cua bi mat.
+
+    Ton tai vi buoc kiem trong script bootstrap khong duoc phep dat khoa vao
+    dong lenh (`ps` doc duoc argv cua moi tien trinh tren may). O day khoa di
+    tu tep env -> bien moi truong cua CHINH tien trinh nay, khong qua argv.
+    """
+    try:
+        reviewer = build_reviewer()
+    except ReviewUnavailable as exc:
+        print(json.dumps({"credential": "MISSING", "detail": str(exc)},
+                         ensure_ascii=False))
+        return 2
+
+    try:
+        verdict = reviewer.review(
+            title="kiem tra khoa",
+            body="Day la mot doan van ban ngan de kiem tra khoa API. "
+                 "Noi dung khong quan trong; chi can mot lan goi thanh cong.",
+            lane="text")
+    except ReviewUnavailable as exc:
+        print(json.dumps({"credential": "UNUSABLE", "detail": str(exc)[:300]},
+                         ensure_ascii=False))
+        return 3
+
+    print(json.dumps({
+        "credential": "OK",
+        "model": verdict.model,
+        "min_score": reviewer.min_score,
+        # Bang chung khoa THAT SU dung duoc: mot phan hoi co cau truc da ve.
+        "sample_score": verdict.score,
+    }, ensure_ascii=False))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--once", action="store_true", help="chay MOT vong roi thoat")
@@ -131,7 +169,13 @@ def main(argv=None) -> int:
                     help="giay nghi giua hai vong (mac dinh lay tu cau hinh)")
     ap.add_argument("--status", action="store_true",
                     help="in tep trang thai hien tai roi thoat")
+    ap.add_argument("--verify-credential", action="store_true",
+                    help="goi Gemini MOT lan de kiem khoa; in OK/FAIL, "
+                         "KHONG BAO GIO in khoa")
     args = ap.parse_args(argv)
+
+    if args.verify_credential:
+        return _verify_credential()
 
     if args.status:
         p = status_path()

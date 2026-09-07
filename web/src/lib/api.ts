@@ -2203,6 +2203,59 @@ export interface AdminImageStudioSpending {
   wallet_note: string;
 }
 
+// --------------------------------------------------------------------------
+// Hang doi san xuat noi dung (`content_queue`).
+//
+// Cac ten nay PHAI khop `server/content_queue_service.py`: `STAGES`,
+// `QUEUE_STAGE_STATES` cua `server/domain.py`, va nhan `overall` dan xuat.
+// --------------------------------------------------------------------------
+
+export type ContentQueueStage =
+  | "transcript" | "translation" | "subtitle" | "dub" | "draft" | "render";
+
+export type ContentQueueStageState =
+  | "PENDING" | "RUNNING" | "DONE" | "SKIPPED" | "FAILED";
+
+/** Nhan tong hop DAN XUAT o server, khong phai mot cot trong kho du lieu.
+    `INELIGIBLE` = nguon qua dai/khong truy cap duoc; moi cong doan `SKIPPED`
+    nhung KHONG mot giay noi dung nao duoc san xuat — nen no khong duoc phep
+    hien ra nhu `COMPLETE`. */
+export type ContentQueueOverall =
+  | "PENDING" | "RUNNING" | "FAILED" | "COMPLETE" | "INELIGIBLE";
+
+export interface ContentQueueRow {
+  item_id: string;
+  source_id: string;
+  platform: string;
+  title: string;
+  source_url: string;
+  rights_mode: string;
+  overall: ContentQueueOverall;
+  stages: Record<ContentQueueStage, ContentQueueStageState>;
+  novel_id: string;
+  has_transcript_checkpoint: boolean;
+  attempts: number;
+  last_error: string;
+  /** `CHO:` — dang doi dau vao nguoi van hanh, KHONG phai hong. */
+  waiting: boolean;
+  /** `INELIGIBLE:` — bi hoan vi do dai/khong truy cap duoc. */
+  ineligible: boolean;
+  updated_at: string;
+}
+
+export interface ContentQueueList {
+  total: number;
+  limit: number;
+  offset: number;
+  items: ContentQueueRow[];
+}
+
+export interface ContentQueueSummary {
+  total: number;
+  by_stage: Record<ContentQueueStage, Record<ContentQueueStageState, number>>;
+  by_overall: Partial<Record<ContentQueueOverall, number>>;
+}
+
 export const adminApi = {
   overview: () => request<AdminOverview>("/api/admin/overview"),
 
@@ -2219,6 +2272,31 @@ export const adminApi = {
     request<{ kill_switch_engaged: boolean }>(
       "/api/admin/image-studio/kill-switch",
       { method: "POST", body: JSON.stringify({ engaged }) },
+    ),
+
+  // --- Hang doi san xuat noi dung (`content_queue`) -----------------------
+  // Bon route DA CO o backend; khong them route moi. Web XEP viec va QUAN LY
+  // viec — no KHONG BAO GIO chay viec: `contentQueueRequeue` chi doi mot
+  // truong trang thai, con tien trinh orchestrator DUY NHAT nhat len o lan
+  // quet ke tiep. Xem `server/content_queue_service.py`.
+  contentQueue: (overall = "", limit = 50, offset = 0) =>
+    request<ContentQueueList>(
+      `/api/admin/content-queue?overall=${encodeURIComponent(overall)}` +
+        `&limit=${limit}&offset=${offset}`,
+    ),
+
+  contentQueueSummary: () =>
+    request<ContentQueueSummary>("/api/admin/content-queue/summary"),
+
+  contentQueueItem: (itemId: string) =>
+    request<{ item: ContentQueueRow }>(
+      `/api/admin/content-queue/${encodeURIComponent(itemId)}`,
+    ),
+
+  contentQueueRequeue: (itemId: string, stage: ContentQueueStage) =>
+    request<{ item: ContentQueueRow }>(
+      `/api/admin/content-queue/${encodeURIComponent(itemId)}/requeue`,
+      { method: "POST", body: JSON.stringify({ stage }) },
     ),
 
   applications: (status = "", limit = 25, offset = 0) =>

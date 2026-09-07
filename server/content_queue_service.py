@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from server.domain import ChineseMediaQueueItem, QUEUE_STAGE_STATES
+from server.scraper.media_eligibility import is_ineligible_marker
 
 #: Giu DONG BO voi `scripts/chinese_media_orchestrator.py::STAGE_ORDER`.
 #: Khong import cheo: `server/` khong duoc phep phu thuoc vao `scripts/`.
@@ -47,6 +48,12 @@ class QueueActionError(RuntimeError):
 def _overall(item: ChineseMediaQueueItem) -> str:
     """Mot nhan gon cho giao dien, dan xuat chu KHONG luu them truong nao."""
     states = [getattr(item, f"{s}_state") for s in STAGES]
+    # Muc bi loai vi do dai co MOI cong doan `SKIPPED`, nen neu chi nhin trang
+    # thai thi no trong y het mot muc da xong. Bao no la "COMPLETE" se noi doi
+    # voi nguoi van hanh: khong mot giay noi dung nao duoc san xuat.
+    if (is_ineligible_marker(item.last_error)
+            and all(s == "SKIPPED" for s in states)):
+        return "INELIGIBLE"
     if any(s == "FAILED" for s in states):
         return "FAILED"
     if any(s == "RUNNING" for s in states):
@@ -75,6 +82,7 @@ def item_view(item: ChineseMediaQueueItem) -> Dict[str, Any]:
         "last_error": item.last_error,
         "waiting": item.last_error.split(": ", 1)[-1].startswith("CHO: ")
                    if item.last_error else False,
+        "ineligible": is_ineligible_marker(item.last_error),
         "updated_at": item.updated_at,
     }
 

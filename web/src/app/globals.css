@@ -7658,3 +7658,49 @@ body.co-mini { padding-bottom: 74px; }
   align-items: baseline;
   gap: 2px var(--s3);
 }
+
+/* ------------------------------------------- hang doi san xuat noi dung ----
+   Day cong doan la mot thanh tien do SAU O, moi o mot cong doan. Ky hieu
+   (·/▶/✓/—/✕) chi la lop thu hai: mau da noi trang thai, nhung mau mot minh
+   thi nguoi mu mau doc khong ra, va `title` cua tung o mang ten + trang thai
+   day du cho trinh doc man hinh. */
+.cq-o {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-sm, 4px);
+  border: 1px solid var(--line);
+  background: #ffffff08;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1;
+}
+.cq-o-chay { color: #fb923c; border-color: #fb923c55; background: #fb923c14; }
+.cq-o-xong { color: #4ade80; border-color: #4ade8055; background: #4ade8014; }
+.cq-o-bo   { color: var(--text-3); border-style: dashed; }
+.cq-o-loi  { color: #f87171; border-color: #f8717155; background: #f8717114; }
+
+/* The tong hop kiem luon lam nut loc — bam mot the la loc theo dung trang
+   thai do, bam lai la bo loc. */
+.cq-the {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  min-width: 92px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 8px);
+  background: #ffffff05;
+  text-align: left;
+}
+button.cq-the { cursor: pointer; }
+button.cq-the:hover { background: #ffffff0a; }
+/* Trang thai DUOC CHON dung `--brand`, giong `.seg-item[aria-pressed]` — CO Y
+   khong dung vang: ngan sach vang cua trang co tran cung (xem
+   `tests/fantasy-identity.test.mjs`), va mot bo loc quan tri khong phai cho
+   dat diem nhan ban sac. */
+.cq-the-chon { border-color: var(--brand); background: #8b6cff14; }
+.cq-the-so { font-size: 20px; font-weight: 650; line-height: 1.1; }

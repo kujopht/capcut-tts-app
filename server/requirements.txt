@@ -74,5 +74,23 @@ defusedxml>=0.7.1,<0.8
 # docs/reports/. Tier 0 (GenericIndexAdapter) khong co duong lui nay.
 scrapling>=0.4,<0.5
 
+# --- Cloud Tasks: duong DAY job TTS sang Cloud Run (server/tts_dispatch.py) ---
+#
+# TIEN TRINH WEB can goi nay, khong phai worker: chinh `POST /api/jobs` la noi
+# day task. Nen no thuoc `requirements.txt`, khong phai `requirements-worker.txt`.
+#
+# VI SAO PHAI GHIM O DAY chu khong de "co thi dung": `tts_dispatch.enqueue()`
+# bat MOI exception va tra `None` — CO Y, de mot su co Cloud Tasks khong bao gio
+# lam hong duong tao job. Nhung dieu do co mat toi: THIEU GOI cung im lang y
+# het mot su co tam thoi. Neu `FAS_TTS_DISPATCH=cloudtasks` duoc bat trong khi
+# goi nay khong duoc cai, khong task nao duoc day va KHONG CO GI keu len —
+# duong quet cua worker se gánh het. Ngay ta dung worker AWS, do se thanh
+# "khong con gi tao audio" ma khong mot dong log nao noi tai sao.
+#
+# `test_tts_dispatch.py::test_thu_vien_cloud_tasks_phai_duoc_khai_bao` khoa
+# lai dieu nay, vi mot phep thu "import duoc khong" o may lap trinh vien khong
+# chung minh duoc gi ve moi truong production.
+google-cloud-tasks>=2.16,<3
+
 # --- Ngoai Python ---
 # ffmpeg phai co trong PATH de ghep cac doan MP3 (server/tts_bridge.py).

@@ -589,12 +589,29 @@ def upload_to_r2(key: str, data: bytes, content_type: str) -> None:
 
 def ship_draft(*, title: str, source_url: str, author: str, rights_mode: str,
                platform: str, embed_ref: str, srt_bytes: bytes,
-               dub_bytes: Optional[bytes], token: str) -> str:
-    subtitle_key = f"subtitles/svc_harvester/{Path(source_url).stem or 'clip'}-{os.urandom(4).hex()}.srt"
+               dub_bytes: Optional[bytes], token: str,
+               subtitle_key: Optional[str] = None,
+               dub_key: Optional[str] = None) -> str:
+    """`subtitle_key`/`dub_key` TUY CHON (2026-09-07). Bo trong -> giu nguyen
+    hanh vi cu tung byte, de moi caller san co khong doi gi.
+
+    `chinese_media_orchestrator.py` truyen khoa TAT DINH theo `item_id` de mot
+    lan chay lai GHI DE dung object cu. Khoa mac dinh duoi day co
+    `os.urandom(4)` nen moi lan chay lai sinh mot khoa moi va bo lai object cu
+    lam rac mo coi — dung lop loi da ghi nhan o
+    `docs/reports/cloudrun-gate-orphan-objects-2026-09-06.md`."""
+    if subtitle_key is None:
+        subtitle_key = (f"subtitles/svc_harvester/"
+                        f"{Path(source_url).stem or 'clip'}-{os.urandom(4).hex()}.srt")
     upload_to_r2(subtitle_key, srt_bytes, "text/srt")
-    dub_key = ""
+    if dub_bytes is None:
+        dub_key = ""
+    elif dub_key is None:
+        # Loi that: khoa KHONG co dau "/" dau, nen `"/subtitles/"` khong bao
+        # gio khop va ban dub cu bi ghi vao chinh tien to `subtitles/`. Doi
+        # sang tien to khong dau "/" de phep thay the khop dung.
+        dub_key = subtitle_key.replace("subtitles/", "dub_audio/").replace(".srt", ".mp3")
     if dub_bytes is not None:
-        dub_key = subtitle_key.replace("/subtitles/", "/dub_audio/").replace(".srt", ".mp3")
         upload_to_r2(dub_key, dub_bytes, "audio/mpeg")
 
     # Idempotent lookup BEFORE creating anything: a placeholder Novel for

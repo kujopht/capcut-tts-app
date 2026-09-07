@@ -105,6 +105,32 @@ Chuyển trạng thái được **kiểm bằng máy** (`model.kiem_chuyen`). `D
 ngõ cụt — một việc đã DONE quay lại RUNNING sẽ ghi đè `ended_at` và làm sai
 mọi báo cáo theo thời gian, một cách im lặng.
 
+### Thử lại: có trần, và đổi chỗ
+
+`Executor.run()` chạy đúng MỘT lượt. Đường thử lại của Router V4 nằm trong
+`RouterV4._chay_co_thu_lai`, mà Control Center cố ý không đi qua (nó cần giữ
+placement của phiên). Không có gì bù lại thì **một lần nhà cung cấp hắt hơi
+là việc hỏng vĩnh viễn** — với một hệ chạy qua đêm không người trực, đó là
+chế độ hỏng thường gặp nhất.
+
+Nên: hỏng → nhả phiên cũ → về `QUEUED` → lượt sau `decide()` chọn **chỗ
+khác**. Cùng cơ chế `reassign`, không phải một đường định tuyến thứ hai. Đo
+thật: lượt 1 `RT01`, lượt 2 `RT02`, lượt 3 `RT01`, rồi `RETRY_EXHAUSTED`.
+
+Trần là `MAX_ATTEMPTS = 3`, đếm bằng `attempts` do `claim_task` tự tăng (nên
+nó đếm được, không tin vào bộ nhớ). Thử lại vô hạn là "bão thử lại" — đúng
+chế độ hỏng số 4 mà `leases.py` liệt kê.
+
+**KHÔNG BAO GIỜ thử lại** bốn lý do sau, vì chạy lại y hệt sẽ hỏng y hệt và
+chỉ tốn thêm quota:
+
+| Lý do | Vì sao |
+|---|---|
+| `security_gate` | luật lấy thẳng từ V4 — thử lại chỉ tăng cơ hội lọt một thay đổi chưa thử giống credential |
+| `tool_permission_denied` | bức tường **cấu hình**, không phải nhiễu |
+| `requires_decision` | cần NGƯỜI, không cần lượt nữa |
+| `no_eligible_placement` | không có worker đủ năng lực; lượt sau vẫn thế |
+
 ---
 
 ## 4. Phiên: REUSE / CREATE / WAIT

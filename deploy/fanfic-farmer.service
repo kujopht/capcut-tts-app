@@ -1,0 +1,68 @@
+# Fanfic Production Farmer — vong lap san xuat noi dung 24/7.
+#
+# Chay tren CUNG may t3a.medium voi `fanfic-worker-prod` va
+# `fanfic-translation-worker-prod`. Do la ly do moi gioi han duoi day ton
+# tai: farmer la khach o nho, khong phai chu nha. No khong duoc phep lam do
+# hai worker production dang chay that.
+#
+# Cai dat:
+#   sudo cp deploy/fanfic-farmer.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fanfic-farmer
+#
+# Xem:
+#   systemctl status fanfic-farmer
+#   journalctl -u fanfic-farmer -f
+#   /opt/fanfic-audio/.venv/bin/python -m server.farmer --status
+
+[Unit]
+Description=Fanfic Audio Studio — Production Farmer (content lanes A+B)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fanfic
+Group=fanfic
+WorkingDirectory=/opt/fanfic-audio
+EnvironmentFile=/etc/fanfic-audio/worker-prod.env
+EnvironmentFile=-/etc/fanfic-audio/farmer.env
+ExecStart=/opt/fanfic-audio/.venv/bin/python -m server.farmer
+
+# Khoi dong lai khi hong, nhung KHONG dap lien tuc: mot farmer chet vi
+# Appwrite sap se chi lam moi thu te hon neu no thu lai moi giay.
+Restart=always
+RestartSec=60
+StartLimitBurst=5
+StartLimitIntervalSec=600
+
+# --- Uu tien THAP hon hai worker production ---------------------------------
+# Farmer la viec nen. Khi may cang CPU hay I/O, no phai nhuong truoc.
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=20
+IOWeight=20
+
+# --- Tran tai nguyen CUNG ----------------------------------------------------
+# May co 4 GiB va hai worker dang dung chung. 1 GiB la tran that su, khong
+# phai goi y: vuot thi systemd giet farmer chu khong de no day hai worker
+# kia vao swap.
+MemoryMax=1G
+MemoryHigh=768M
+TasksMax=64
+
+# --- Cach ly he tep ----------------------------------------------------------
+# Farmer chi duoc ghi vao thu muc lam viec + trang thai cua chinh no.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+StateDirectory=fanfic-farmer
+ReadWritePaths=/var/lib/fanfic-farmer
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fanfic-farmer
+
+[Install]
+WantedBy=multi-user.target

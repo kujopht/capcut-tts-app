@@ -301,6 +301,26 @@ class ControlCenterApp(App):
     # -- hanh dong ----------------------------------------------------------
 
     def _viec_dang_chon(self) -> Optional[str]:
+        """Việc mà các phím vận hành sẽ tác động — THEO TAB ĐANG MỞ.
+
+        Ở tab Agent, người dùng đang nhìn một PHIÊN, không nhìn một việc.
+        Nếu `p`/`s`/`r` cứ tác động lên con trỏ của bảng Việc (có thể đang
+        ở một dòng hoàn toàn khác, thậm chí không nhìn thấy), thì người
+        dùng dừng nhầm việc — và `s` thì giết tiến trình thật. Nên ở tab
+        đó, phím tác động lên việc mà phiên ĐANG chạy.
+
+        Phiên rảnh (`current_task` rỗng) trả `None`: không có việc nào để
+        dừng, và đoán bừa một việc cũ của phiên đó còn tệ hơn.
+        """
+        try:
+            tab = self.query_one("#tabs", TabbedContent).active
+        except Exception:                                 # noqa: BLE001
+            tab = ""
+        if tab == "tab-agents":
+            sid = self.query_one("#agents", AgentTable).selected_session
+            s = next((x for x in self.snap.get("sessions", [])
+                      if x["session_id"] == sid), None)
+            return (s or {}).get("current_task") or None
         return self.query_one("#tasks", TaskTable).selected_task
 
     def _mo_chi_tiet(self, task_id: str) -> None:

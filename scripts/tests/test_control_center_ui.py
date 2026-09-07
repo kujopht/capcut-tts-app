@@ -168,6 +168,49 @@ class TestControlCenterUI(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIs(self.cc.store.task(tid).state, TaskState.PAUSED)
 
+    async def test_o_tab_AGENT_phim_tac_dong_len_viec_cua_PHIEN(self):
+        """Ở tab Agent, `p`/`s`/`r` phải tác động lên việc của phiên đang
+        chọn — KHÔNG phải con trỏ của bảng Việc.
+
+        Bảng Việc có thể đang trỏ vào một dòng hoàn toàn khác, thậm chí
+        không nhìn thấy. Dừng nhầm việc là tệ; `s` còn giết tiến trình thật.
+        """
+        from scripts.control_center.model import Session, SessionState
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.luu_session(Session(
+            session_id="s-x", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.BUSY,
+            current_task=tid))
+        app = self._app()
+        async with app.run_test() as pilot:
+            await self._mo(pilot)
+            app.project_id = "demo"
+            app.lam_moi()
+            await pilot.pause()
+            app.query_one("#tabs").active = "tab-agents"
+            await pilot.pause()
+            app.query_one("#agents").move_cursor(row=0)
+            self.assertEqual(app._viec_dang_chon(), tid)
+
+    async def test_o_tab_AGENT_phien_RANH_thi_khong_co_viec_de_tac_dong(self):
+        """Phiên rảnh -> `None`. Đoán bừa một việc CŨ của phiên còn tệ hơn."""
+        from scripts.control_center.model import Session, SessionState
+        self.cc.store.luu_session(Session(
+            session_id="s-idle", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.IDLE,
+            current_task=""))
+        app = self._app()
+        async with app.run_test() as pilot:
+            await self._mo(pilot)
+            app.project_id = "demo"
+            app.lam_moi()
+            await pilot.pause()
+            app.query_one("#tabs").active = "tab-agents"
+            await pilot.pause()
+            app.query_one("#agents").move_cursor(row=0)
+            self.assertIsNone(app._viec_dang_chon())
+
     async def test_chi_tiet_viec_mo_duoc(self):
         from scripts.control_center.ui.app import TaskDetail
         self.cc.chat("demo", "fix web/admin")

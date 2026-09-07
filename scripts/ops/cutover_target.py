@@ -31,9 +31,36 @@ from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 # TRA VE, nen mot bien bi doi ten phia Render khong the noi rong duoc).
 #
 # Luu y kien truc QUAN TRONG: production KHONG dung Appwrite Cloud. No
-# dung ban TU LUU TRU o `appwrite-dev.fanfic.world` (may GCE
-# `fanfic-appwrite-temp`). `docs/AWS_STAGING_MIGRATION.md` muc 0 noi
-# nguoc lai — tai lieu do da CU. Xem `docs/PRODUCTION_CUTOVER.md`.
+# dung ban TU LUU TRU o `appwrite-dev.fanfic.world`.
+# `docs/AWS_STAGING_MIGRATION.md` muc 0 noi nguoc lai — tai lieu do da CU.
+# Xem `docs/PRODUCTION_CUTOVER.md`.
+#
+# DA SUA 2026-09-07: cau tren truoc day con ghi "(may GCE
+# `fanfic-appwrite-temp`)". Ve MAY thi cau do DA SAI, va no la nguon duy
+# nhat trong ma nguon khien nguoi doc ket luan production con phu thuoc
+# GCE. Do truc tiep:
+#
+#   - `fanfic-appwrite-temp` (us-central1-c): TERMINATED, quan sat nhieu
+#     lan trong ~31 gio (2026-09-06 16:0xZ -> 2026-09-07 00:3xZ);
+#   - trong CUNG khoang do `appwrite-dev.fanfic.world` phuc vu that:
+#     health 200 o moi lan lay mau, worker AWS chay xong 10 job qua no,
+#     va mot database tam da duoc tao/xoa qua no;
+#   - mot GCE instance TERMINATED khong co compute nao chay, nen no khong
+#     the phuc vu hay proxy bat cu thu gi.
+#
+# Cai VAN dung: chinh ENDPOINT duoi day. Cai KHONG con dung: gan endpoint
+# do voi mot may GCE cu the. Origin that nam sau proxy Cloudflare (ban ghi
+# A tra ve IP cua Cloudflare; token Cloudflare cua may nay khong co quyen
+# doc DNS nen khong tra ra origin) va KHONG phai Appwrite Cloud — Cloud
+# dang la 2.0.0 voi `Server: Appwrite`, con endpoint nay la 1.9.6 voi
+# `Server: cloudflare`. No cung khong nam tren may worker AWS (khong co
+# `docker`, chi lang nghe cong 22 va 53), khong nam tren bat ky GCE
+# instance nao cua hai tai khoan Google da kiem.
+#
+# KET LUAN VAN HANH: khong duoc suy ra "con phu thuoc GCE" tu tep nay
+# nua. Nhung cung KHONG duoc coi la da biet origin — no chua duoc dinh
+# danh. Truoc khi XOA dia cua `fanfic-appwrite-temp`, phai xac nhan noi o
+# that cua du lieu Appwrite va co ban sao luu doc duoc.
 # --------------------------------------------------------------------------
 PROD_APPWRITE_ENDPOINT = "https://appwrite-dev.fanfic.world/v1"
 PROD_APPWRITE_PROJECT_ID = "fanfic-world-prod"

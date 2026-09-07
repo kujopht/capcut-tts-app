@@ -143,6 +143,37 @@ Quy ước: mỗi mục ghi **cần gì / vì sao chặn / đã làm gì thay th
   `allowed_scope` (cổng `scope` đã xanh)? Đó là vế đối xứng của nguyên tắc
   "bằng chứng thắng lời khai" mà `Executor` đã áp theo chiều ngược lại.
 
+## B6. Câu "chỉ AG01 là thật" trong `AI_ROUTER_V4.md` đã CŨ
+
+- **Đo được đêm nay:** việc chạy thật trên **AG01, AG02 và AG03**, trên cả
+  Gemini (`gemini-3.8-flash-high/medium`) lẫn Claude (`claude-sonnet-4-6`).
+  Trên đĩa có đủ **8** hồ sơ launcher `acc1.bin`…`acc8.bin`
+  (`agy-profiles/saved_profiles/`, tạo 2026-09-03 14:00–14:20), và
+  `fabric_config` kiểm chúng bằng `profile_ton_tai()` chứ không tin lời khai
+  — nên `antigravity=8` trong bảng usage có bằng chứng, không phải con số
+  thổi phồng.
+- **Vì sao KHÔNG tự sửa tài liệu:** `docs/AI_ROUTER_V4.md` §2.1 là bản ghi
+  một phép đo có ngày tháng (2026-09-03), không phải một câu mô tả trạng
+  thái hiện tại. Sửa đè lên một bản ghi lịch sử sẽ xoá mất bối cảnh vì sao
+  AG03–08 từng ở `needs_provisioning`.
+- **Quyết định buổi sáng:** thêm một dòng ghi ngày mới bên dưới §2.1 (không
+  sửa dòng cũ), hoặc để nguyên nếu bạn coi 8 hồ sơ đó là chưa chính thức.
+
+## B7. Hai dự án THỬ NGHIỆM còn trong sổ Control Center
+
+`proof` và `rev2` (tên hiển thị "ReviewProof") là dự án do các lượt chạy bằng
+chứng đêm nay tạo ra. Chúng nằm trong `.router/control_center/control.db`
+(đã `.gitignore`, không vào kho).
+
+**Không có việc nào sẽ tự chạy khi bạn mở app**: mọi việc trong đó đều ở
+`BLOCKED` / `DONE` / `FAILED`, và vòng lặp điều phối chỉ nhận việc ở
+`QUEUED`/`WAITING`. Đã kiểm.
+
+Giữ chúng lại có chủ đích — mở `./router-cc` là thấy ngay lịch sử thật, kể
+cả 8 việc `deploy … production` bị chặn đúng. Xoá thì chỉ cần xoá tệp
+`.router/control_center/control.db`; **đó là quyết định của bạn, không phải
+việc tôi tự làm lúc bạn đang ngủ.**
+
 ---
 
 *(Không có mục nào khác tính tới lần cập nhật cuối. Đêm nay KHÔNG deploy,

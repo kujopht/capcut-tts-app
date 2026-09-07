@@ -78,6 +78,43 @@ class CongTat(unittest.TestCase):
         self.assertIsNone(td.enqueue("job_abc"))
 
 
+class PhuThuocPhaiDuocKhaiBao(unittest.TestCase):
+
+    def test_thu_vien_cloud_tasks_phai_duoc_khai_bao(self):
+        """
+        `google-cloud-tasks` PHAI nam trong `server/requirements.txt`.
+
+        VI SAO CAN MOT BAI TEST CHO MOT DONG REQUIREMENTS. `enqueue()` bat MOI
+        exception va tra `None` — co y, de su co Cloud Tasks khong lam hong
+        duong tao job. Mat toi cua thiet ke do: THIEU GOI im lang y het mot su
+        co tam thoi. Bat `FAS_TTS_DISPATCH=cloudtasks` khi goi chua duoc cai
+        thi khong task nao duoc day va khong gi keu len; duong quet cua worker
+        gánh het. Den ngay dung worker AWS, do thanh "khong con gi tao audio"
+        ma khong mot dong log nao noi tai sao.
+
+        Da MAC dung loi nay: commit d8e3062 duoc deploy len production voi
+        `tts_dispatch.py` day du nhung KHONG co `google-cloud-tasks` trong
+        requirements — va bo test cu van xanh, vi no chi kiem nhanh "thieu goi
+        thi khong nem".
+
+        Kiem VAN BAN requirements, khong phai `import`: import thanh cong o may
+        lap trinh vien khong noi gi ve moi truong production.
+        """
+        from pathlib import Path
+
+        req = (Path(__file__).resolve().parents[1] / "requirements.txt")
+        dong_hieu_luc = [
+            d.strip() for d in req.read_text(encoding="utf-8").splitlines()
+            if d.strip() and not d.strip().startswith("#")
+        ]
+        self.assertTrue(
+            any(d.lower().startswith("google-cloud-tasks") for d in dong_hieu_luc),
+            "server/requirements.txt phai khai bao google-cloud-tasks — tien "
+            "trinh WEB la noi goi enqueue, nen no thuoc tep nay chu khong phai "
+            "requirements-worker.txt.",
+        )
+
+
 class DuongTaoJobKhongDoi(unittest.TestCase):
 
     def test_main_goi_enqueue_dung_mot_lan_va_sau_khi_ghi_ben_vung(self):

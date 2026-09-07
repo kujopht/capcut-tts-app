@@ -133,6 +133,36 @@ cả hai (global rồi đến local), không cần lặp lại phần chung ở 
 đưa quy tắc riêng của Fanfic ngược lên `~/.claude/` — file đó phải luôn
 dùng được cho một repo bất kỳ khác.
 
+## Router Control Center (V0.1)
+
+Phòng điều khiển cho Router V4: mở một dự án, gõ mục tiêu vào ô chat, Router
+tự phân rã việc, chọn agent theo năng lực, dựng worktree cô lập, dựng/dùng
+lại phiên agent, khoá tài nguyên, chạy, báo cáo — không phải mở tay terminal
+Claude/Codex/Antigravity nào.
+
+```bash
+./router-cc                 # giao dien Textual
+./router-cc --headless      # anh chup JSON, khong can TTY
+./router-cc --chat "..."    # gui mot cau vao o chat roi thoat
+```
+
+Mã ở `scripts/control_center/`; đầy đủ ở `docs/CONTROL_CENTER.md`; bằng
+chứng chạy thật ở `docs/reports/CONTROL_CENTER_V01_PROOF.md`.
+
+**Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
+vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
+(dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,
+bền qua khởi động lại). Thay đổi duy nhất chạm V4 là một tham số tuỳ chọn
+`Executor(worktree_provider=...)`, mặc định `None` = hành vi cũ.
+
+Ba luật không được phá khi sửa gói này:
+1. **Không nới rào an toàn.** Không `--dangerously-skip-permissions`, không
+   `bypassPermissions`, `destructive_actions_allowed` luôn `False`, việc
+   chạm lớp GATED thì DỪNG chờ người.
+2. **Không bịa số usage.** Không đo được thì `UNAVAILABLE` + `None`, không
+   phải `0`.
+3. **Không tự xoá worktree.** Chỉ đánh dấu.
+
 ## Trạng thái
 
 Xem `docs/HANDOFF.md` để biết mốc nào đã xong và việc tiếp theo.

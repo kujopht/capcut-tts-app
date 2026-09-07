@@ -82,6 +82,45 @@ Quy ước: mỗi mục ghi **cần gì / vì sao chặn / đã làm gì thay th
   3. Việc CHỈ ĐỌC chạy THẬT, thành công, lặp lại được — xem
      `docs/reports/CONTROL_CENTER_V01_PROOF.md`.
 
+- **Xác nhận độc lập (không phải lỗi của Control Center):** dispatcher
+  RIÊNG của kho, `scripts/ai_router_dispatch.py`, gặp ĐÚNG bức tường đó khi
+  gửi một gói review sang `claude-opus-4-6-thinking` qua Antigravity:
+
+  ```
+  "status": "failed", "seconds": 9.41, "output": "",
+  "stderr_tail": "jetski: no output produced — a tool required the
+   \"read_file\" permission that headless mode cannot prompt for..."
+  ```
+
+  Nên đây là ranh giới của `agy` headless **trên máy này**, chạm tới mọi
+  đường dispatch, không riêng Control Center.
+
+- **Một quan sát phụ, và nó ĐÁNG GIỮ:** khi thử `--add-dir` vào GỐC KHO,
+  chính dispatcher đã **TỪ CHỐI** vì tìm thấy chuỗi giống khoá OpenAI trong
+  một tệp `docs/reports/*` nằm bên trong worktree tạm của một lượt chạy thử:
+
+  ```
+  "aborted": "--add-dir contains a OpenAI-style key in
+   .router/worktrees/<worktree tam>/docs/reports/
+   cloudrun-tts-canary-plan-2026-09-06.md;
+   refusing to expose it to an external CLI"
+  ```
+
+  Rào đó hoạt động đúng, và cách đi tiếp là **thu hẹp `--add-dir`** xuống
+  đúng thư mục cần review — không phải tắt rào. Đã làm vậy và gói việc đi
+  qua.
+
+  **ĐÃ KIỂM: đây là DƯƠNG TÍNH GIẢ, không có bí mật nào trong kho.** Chuỗi
+  bị khớp là một **tên dịch vụ Cloud Run** dạng `tts-task-server-…` — mẫu
+  dò khoá OpenAI (`sk-` + chuỗi dài) khớp phải đoạn `…ta`**`sk-ser`**`ver…`
+  nằm GIỮA một từ. Không cần xoay khoá, không cần sửa tệp.
+
+  **Việc nên làm (nhỏ, chưa làm — nằm ngoài phạm vi V0.1):** thêm ranh giới
+  từ vào mẫu dò của `ai_router_dispatch.py` để `sk-` phải đứng đầu một từ.
+  Hiện tại mọi tên tài nguyên chứa `task-ser…`, `disk-ser…` v.v. đều làm
+  dispatcher từ chối, và một rào báo động giả thường xuyên là một rào rồi
+  sẽ bị ai đó tắt.
+
 - **Quyết định buổi sáng:** bạn có muốn thêm allow-rule hẹp cho `agy`
   (ví dụ chỉ `read_file`) để mở đường việc CÓ GHI không? Nếu có, nên hẹp
   tới mức nào.

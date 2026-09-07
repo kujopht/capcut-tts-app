@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Router Control Center V0.1 — phong dieu khien cho Router V4.
+#
+# Mo mot du an, go muc tieu vao o chat, Router lo phan con lai.
+# Xem docs/CONTROL_CENTER.md.
+#
+# Phu thuoc: requirements-control-room.txt (textual, rich) — dung chung voi
+# Control Room. Neu thieu, scripts/control_center/__main__.py bao ro phai
+# cai gi va thoat 2 thay vi do mot traceback.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "$DIR"
+
+# UTF-8 BAT BUOC — xem ghi chu trong fanfic-ctl.cmd: van ban giao dien la
+# tieng Viet co dau, console khong-UTF8 lam do ngay o `--help`.
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
+# Uu tien venv cua kho (Windows roi Linux/macOS), roi moi den PATH.
+if [ -x ".venv/Scripts/python.exe" ]; then
+  exec ".venv/Scripts/python.exe" -m scripts.control_center "$@"
+elif [ -x ".venv/bin/python" ]; then
+  exec ".venv/bin/python" -m scripts.control_center "$@"
+elif command -v python3 >/dev/null 2>&1; then
+  exec python3 -m scripts.control_center "$@"
+else
+  exec python -m scripts.control_center "$@"
+fi

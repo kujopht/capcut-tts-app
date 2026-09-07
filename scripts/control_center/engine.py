@@ -620,10 +620,36 @@ class ControlCenter:
             # Viec dai hon TTL van phai giu duoc lease VA khoa cua no.
             while not nhip.wait(20.0):
                 try:
-                    ctx.leases.heartbeat(khoa_lease, self.owner)
+                    con_giu = ctx.leases.heartbeat(khoa_lease, self.owner)
                     lm.gia_han(ctx.project.project_id, task_id)
                 except Exception:                         # noqa: BLE001
                     return
+                if con_giu:
+                    continue
+                # LEASE DA BI CUOP. Hop dong cua `LeaseStore.heartbeat` noi
+                # ro: `False` nghia la ta khong con so huu khe do nua.
+                #
+                # KHONG giet luot dang bay, va day la mot danh doi CO Y CHON,
+                # khong phai bo sot: TTL 90s / nhip 20s nghia la phai truot
+                # BON nhip lien tiep moi mat lease — gan nhu chac chan la mot
+                # lan SQLite kho tho, khong phai mot bo lap lich thu hai that
+                # su. Giet mot luot agent dang chay dung 60 giay vi mot cai
+                # nac cua o dia la doi mot hong hiem lay mot hong thuong xuyen.
+                #
+                # Nhung cung KHONG im lang: neu that su co hai chu, do la
+                # dung che do hong ma lease ton tai de chan, va no phai hien
+                # ra o muc ALERT chu khong chim trong log. Ngung dap nhip —
+                # tiep tuc dap la gia vo con so huu mot thu da mat.
+                self.store.ghi_su_kien(
+                    "LEASE_LOST", project_id=ctx.project.project_id,
+                    task_id=task_id, session_id=session_id, level="ALERT",
+                    detail=(f"lease {khoa_lease} đã bị chủ khác giành — việc "
+                            f"này KHÔNG còn sở hữu khe đó. Lượt đang bay vẫn "
+                            f"chạy nốt (giết nó vì một lần nghẽn sổ còn tệ "
+                            f"hơn), nhưng nếu thấy sự kiện này thì CÓ một bộ "
+                            f"lập lịch thứ hai đang chạy — kiểm tra ngay."),
+                    meta={"lease": khoa_lease, "owner": self.owner})
+                return
 
         tim = threading.Thread(target=_dap_nhip, daemon=True,
                                name=f"cc-hb-{task_id}")

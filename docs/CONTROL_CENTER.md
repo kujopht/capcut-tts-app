@@ -336,4 +336,13 @@ Không phải thiếu sót — là ranh giới đã chọn:
 - **`pause` một việc ĐANG chạy không cắt lượt đang bay.** `Executor.run`
   là đồng bộ; cách duy nhất cắt thật là giết tiến trình, và đó là `stop`.
   Nói rõ thay vì giả vờ đã dừng.
+- **"Stream log" ở đây là stream SỰ KIỆN, không phải stream token.** Sự kiện
+  (`SESSION_DECISION`, `WORKTREE_CREATED`, `TASK_STARTED`…) hiện ra ngay khi
+  chúng xảy ra. Nhưng đầu ra THÔ của agent chỉ có sau khi lượt kết thúc:
+  `agy` ở chế độ này trả một sự kiện `result` duy nhất, nên **không có gì
+  để stream dần** — không phải Control Center bỏ qua, mà là nhà cung cấp
+  không đưa ra. Nhật ký thô nằm sau `raw_log_ref` và mở được ở Chi tiết việc.
+- **Việc mở lại một dự án KHÔNG tự chạy gì.** Vòng lặp điều phối chỉ nhận
+  việc ở `QUEUED`/`WAITING`; `BLOCKED` (gồm mọi việc GATED) đứng yên cho tới
+  khi có người duyệt.
 - **Chưa có Browser Operator, chưa có app di động, chưa có cloud.**

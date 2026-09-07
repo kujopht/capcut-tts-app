@@ -480,6 +480,36 @@ class TestRulePlanner(unittest.TestCase):
         self.assertEqual(len(kq.tasks), 2)
         self.assertEqual(kq.tasks[1].dependencies, ())
 
+    def test_and_noi_hai_DANH_TU_thi_KHONG_tach(self):
+        """LỖI THẬT trên một câu người dùng gõ thật (2026-09-08).
+
+            "investigate the auth and permission checks in
+             scripts/control_center/permissions.py"
+
+        bị cắt thành "investigate the auth" + "permission checks in …".
+        Vế trái là một mảnh câu vô nghĩa, và Router dispatch nó như một việc
+        thật. "auth and permission" là MỘT cụm danh từ, không phải hai mệnh
+        đề — phân biệt bằng "vế phải có mở đầu bằng động từ không".
+        """
+        for cau in (
+            "investigate the auth and permission checks in server/auth.py",
+            "fix the login and signup flow",
+            "review the schema and migration plan",
+        ):
+            with self.subTest(cau=cau):
+                self.assertEqual(len(self.pl.plan(cau, self.pj).tasks), 1,
+                                 f"{cau!r} là MỘT việc")
+
+    def test_and_noi_hai_MENH_DE_thi_van_tach(self):
+        """Vế phải mở đầu bằng động từ -> hai việc thật."""
+        for cau in (
+            "refactor server/tts_bridge.py and update web/admin styling",
+            "fix web/admin and investigate the slow build",
+        ):
+            with self.subTest(cau=cau):
+                self.assertEqual(len(self.pl.plan(cau, self.pj).tasks), 2,
+                                 f"{cau!r} là HAI việc")
+
     def test_gach_dau_dong_thanh_viec_rieng(self):
         kq = self.pl.plan("Cần làm:\n- sửa scripts/foo.py\n- viết tài liệu",
                           self.pj)

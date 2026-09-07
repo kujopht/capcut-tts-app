@@ -247,14 +247,31 @@ class RulePlanner:
         for m in re.finditer(r"(?:^|\s),?\s*(?:and|và|va)\s(?=\S)", s, re.I):
             if any(a <= m.start() < b for a, b, _ in moc):
                 continue
-            # Hai ben deu phai du dai de la mot menh de THAT. Nguong 2 tu
-            # (khong phai 3): "refactor server/tts_bridge.py" chi co 2 tu ma
-            # van la mot viec tron ven, trong khi nguong 3 nuot mat no. Con
-            # 1 tu thi gan nhu luon la mot danh sach ("read and write",
-            # "tests and docs"), khong phai hai viec.
+            # Hai dieu kien, va dieu kien thu hai moi la thu quan trong.
+            #
+            # (a) hai ben deu du dai de la mot menh de THAT (>= 2 tu).
+            # (b) VE PHAI PHAI BAT DAU BANG MOT DONG TU cong viec.
+            #
+            # Khong co (b), "and" noi hai DANH TU bi cat nham thanh hai viec.
+            # Do that 2026-09-08 tren mot cau nguoi dung go that:
+            #
+            #   "investigate the auth and permission checks in
+            #    scripts/control_center/permissions.py"
+            #
+            # bi cat thanh "investigate the auth" + "permission checks in
+            # ..." — ve trai la mot manh cau vo nghia, va Router dispatch no
+            # nhu mot viec that. "auth and permission" la MOT cum danh tu,
+            # khong phai hai menh de.
+            #
+            # Doi ve phai mo dau bang dong tu ("update ...", "investigate
+            # ...", "viet ...") giai dung ca hai kieu, va giai bang dung thu
+            # von phan biet chung.
             trai, phai = s[:m.start()].strip(), s[m.end():].strip()
-            if len(trai.split()) >= 2 and len(phai.split()) >= 2:
-                moc.append((m.start(), m.end(), True))
+            if len(trai.split()) < 2 or len(phai.split()) < 2:
+                continue
+            if not any(mau.match(phai) for _ten, mau in _LOAI_VIEC):
+                continue
+            moc.append((m.start(), m.end(), True))
         moc.sort()
 
         if not moc:

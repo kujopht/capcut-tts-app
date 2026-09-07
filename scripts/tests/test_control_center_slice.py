@@ -464,6 +464,84 @@ class TestVerticalSlice(unittest.TestCase):
         finally:
             cc.shutdown()
 
+    # -- 5b. Review doc lap -------------------------------------------------
+
+    def test_viec_RUI_RO_CAO_de_ra_mot_viec_review_LA_CON(self):
+        """`REVIEW` không được là ngõ cụt.
+
+        Hợp đồng của việc rủi ro cao đòi review độc lập, nên việc xong đi vào
+        `REVIEW`. Nếu không có gì đưa nó ra khỏi đó thì trạng thái ấy tệ hơn
+        là không tồn tại — việc nằm im mãi và không ai biết vì sao.
+        """
+        self.cc.chat("demo", "fix the auth permission check in web/admin")
+        goc = self.cc.store.tasks("demo")[0]
+        self.assertTrue(
+            TaskContract.from_dict(goc.contract)
+            .verification.independent_review_required)
+
+        self.cc.tick()
+        _xong(self.cc, goc.task_id)
+        self.assertIs(self.cc.store.task(goc.task_id).state, TaskState.REVIEW)
+
+        review = self.cc.store.task(f"{goc.task_id}-review")
+        self.assertIsNotNone(review, "phải đặt một việc review")
+        self.assertEqual(review.parent_id, goc.task_id)
+        self.assertEqual(review.dependencies, (goc.task_id,))
+
+    def test_review_KHONG_duoc_cung_ho_model_voi_tac_gia(self):
+        """Tác giả không được tự chấm bài của mình."""
+        self.cc.chat("demo", "fix the auth permission check in web/admin")
+        goc = self.cc.store.tasks("demo")[0]
+        self.cc.tick()
+        _xong(self.cc, goc.task_id)
+
+        review = self.cc.store.task(f"{goc.task_id}-review")
+        hd = TaskContract.from_dict(review.contract)
+        s = self.cc.store.session(self.cc.store.task(goc.task_id).owner_session)
+        ho_tac_gia = self.cc.fabric.model(s.model_id).model_family
+        self.assertIn(ho_tac_gia, hd.requirements.exclude_families)
+        self.assertFalse(hd.requirements.repo_write,
+                         "reviewer sửa được thì không còn độc lập")
+
+    def test_review_xong_thi_viec_CHA_thanh_DONE(self):
+        self.cc.chat("demo", "fix the auth permission check in web/admin")
+        goc = self.cc.store.tasks("demo")[0]
+        self.assertTrue(_chay_het(self.cc, goc.task_id,
+                                  f"{goc.task_id}-review", giay=40),
+                        {t.task_id: t.state for t in self.cc.store.tasks("demo")})
+        self.assertIs(self.cc.store.task(goc.task_id).state, TaskState.DONE)
+
+    def test_review_HONG_thi_viec_CHA_bi_CHAN_chu_khong_thanh_DONE(self):
+        """Không kiểm chéo được thì KHÔNG được tuyên bố là xong."""
+        cc = _cc(kho_git_tam(), ex=FakeExecutor())
+        try:
+            cc.chat("demo", "fix the auth permission check in web/admin")
+            goc = cc.store.tasks("demo")[0]
+            cc.tick()
+            _xong(cc, goc.task_id)
+            rid = f"{goc.task_id}-review"
+            r = cc.store.task(rid)
+            r.state, r.parent_id = TaskState.RUNNING, goc.task_id
+            cc.store.luu_task(r)
+            cc.store.doi_trang_thai(rid, TaskState.FAILED, force=True)
+            cc._khep_review(cc.store.task(rid))
+            self.assertIs(cc.store.task(goc.task_id).state, TaskState.BLOCKED)
+        finally:
+            cc.shutdown()
+
+    def test_review_KHONG_bi_dat_hai_lan(self):
+        self.cc.chat("demo", "fix the auth permission check in web/admin")
+        goc = self.cc.store.tasks("demo")[0]
+        self.cc.tick()
+        _xong(self.cc, goc.task_id)
+        ctx = self.cc.ctx("demo")
+        hd = TaskContract.from_dict(goc.contract)
+        from scripts.router_v4.runtime import Placement
+        self.cc._dat_review(ctx, goc.task_id, hd, Placement("RT01", "m-re"))
+        rs = [t for t in self.cc.store.tasks("demo")
+              if t.task_id.endswith("-review")]
+        self.assertEqual(len(rs), 1)
+
     # -- 6. Pause / Stop / Reassign -----------------------------------------
 
     def test_pause_giu_viec_lai_khoi_hang_doi(self):

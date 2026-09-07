@@ -131,6 +131,46 @@ Mỗi quyết định mang theo `trace` — danh sách luật đã xét, theo th
 bộ chọn phiên không nói được vì sao nó dựng phiên thứ tư là một bộ chọn
 không ai gỡ lỗi được.
 
+### REVIEW không phải ngõ cụt
+
+Hợp đồng của việc rủi ro cao (`production`, `auth`, `security`, `migration`,
+`concurrency`…) đặt `independent_review_required`, nên việc xong đi vào
+`REVIEW` chứ không nhảy thẳng `DONE`. Control Center **tự đặt một việc
+review là CON của nó**:
+
+```
+demo.t1           fix the auth permission check in web/admin   REVIEW
+└─ demo.t1-review review độc lập: fix the auth permission…     QUEUED
+```
+
+Độc lập THẬT, không chỉ trên danh nghĩa — dùng thẳng `hop_dong_review()`
+của Router V4:
+
+- `exclude_families=(họ model của tác giả,)` — tác giả không tự chấm bài.
+- **không** `repo_write` — reviewer đọc và báo cáo, không sửa. Một reviewer
+  sửa được thì không còn là kiểm tra độc lập, và không ai review phần sửa đó.
+- reviewer được trỏ vào **worktree của việc cha**, không phải gốc kho. Bằng
+  chứng thật 2026-09-03: một nút review báo "không tìm thấy tệp" trong khi
+  tệp CÓ tồn tại — chỉ là ở worktree của nút trước.
+
+Khép lại:
+
+| Review kết thúc | Việc cha thành |
+|---|---|
+| xong, không phát hiện gì | `DONE` |
+| xong, có phát hiện | `DONE`, phát hiện được gắn vào phong bì của cha + sự kiện mức `WARNING` |
+| **không chạy được** | `BLOCKED` — không kiểm chéo được thì KHÔNG được tuyên bố là xong |
+
+Phát hiện của reviewer **không** tự động làm việc cha thất bại (nó là thông
+tin cho người tích hợp, đúng như `RouterV4.run_task` đã quyết) — nhưng nó
+PHẢI hiện ra, nếu không cả lượt review chỉ là đốt quota.
+
+Một nới lỏng hẹp trong bộ chọn việc sẵn sàng làm cho việc này chạy được:
+việc review phụ thuộc vào cha, mà cha chỉ rời `REVIEW` **sau khi** review
+xong. Đòi cha phải `DONE` trước thì hai bên khoá nhau vĩnh viễn. Nên với
+đúng quan hệ cha–con này, `REVIEW` là đủ điều kiện. Nới lỏng chỉ áp cho
+`parent_id` của chính việc đó; phụ thuộc thường vẫn phải `DONE` thật.
+
 ---
 
 ## 5. Khoá tài nguyên

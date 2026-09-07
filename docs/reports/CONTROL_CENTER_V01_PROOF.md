@@ -71,6 +71,23 @@ mới cho mỗi việc), và là lý do Control Center gọi thẳng `Executor.r
 | 9 | Khai báo `write:` bị hiểu thành một dịch vụ khoá được | bỏ tiền tố khỏi bảng tài nguyên |
 | 10 | Việc có ghi không được bảo phải khai `changes` ⇒ cổng `diff` đánh hỏng lượt làm đúng | hợp đồng nêu rõ, có ví dụ |
 
+## 4b. Khép vòng REVIEW (thêm sau lượt chạy đầu)
+
+Lượt chạy đầu để lộ một lỗ: hợp đồng rủi ro cao đòi review độc lập, việc vào
+`REVIEW` — rồi **nằm đó mãi mãi**. Một trạng thái không ai đưa ra khỏi được
+tệ hơn là không có trạng thái đó.
+
+Nay Control Center tự đặt một việc review **là CON** của việc vừa xong, dùng
+thẳng `hop_dong_review()` của Router V4 (loại họ model tác giả, không cấp
+`repo_write`, trỏ reviewer vào worktree của cha). Review xong → cha `DONE`;
+review **không chạy được** → cha `BLOCKED`, vì không kiểm chéo được thì không
+được tuyên bố là xong.
+
+Kèm một nới lỏng HẸP trong bộ chọn việc sẵn sàng: việc review phụ thuộc vào
+cha, mà cha chỉ rời `REVIEW` sau khi review xong — đòi cha `DONE` trước thì
+hai bên khoá nhau vĩnh viễn. Nới lỏng chỉ áp cho đúng `parent_id` của chính
+việc đó; phụ thuộc thường vẫn phải `DONE` thật. 5 bài kiểm khoá lại.
+
 ## 5. Còn chặn (cần người) — xem `ROUTER_CONTROL_CENTER_OVERNIGHT_BLOCKERS.md`
 
 - **B4** `agy` headless tự chối quyền `command`/`read_file` ⇒ việc CÓ GHI
@@ -86,10 +103,10 @@ mới cho mỗi việc), và là lý do Control Center gọi thẳng `Executor.r
 
 ```
 scripts/tests/test_control_center_core.py    66 bài — sổ, khoá, quyền, phân rã
-scripts/tests/test_control_center_slice.py   35 bài — lát cắt dọc, kho git thật
+scripts/tests/test_control_center_slice.py   40 bài — lát cắt dọc, kho git thật
 scripts/tests/test_control_center_ui.py      11 bài — 7 màn hình, Textual headless
                                             ─────
-toàn bộ scripts/tests                      1062 bài — OK (1 skipped)
+toàn bộ scripts/tests                      1067 bài — OK (1 skipped)
 tests/ (desktop, kiểm hồi quy)               397 bài — OK
 ```
 

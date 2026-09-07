@@ -79,9 +79,18 @@ class TestControlCenterUI(unittest.IsolatedAsyncioTestCase):
             app.project_id = "demo"
             app.query_one("#chat").post_message(
                 app.query_one("#chat").Submitted("fix the styling in web/admin"))
-            await pilot.pause()
+            # `post_message` giao tin BAT DONG BO: mot `pause()` khong bao
+            # dam tin da toi tay handler VA handler da chay xong `chat()` +
+            # `lam_moi()`. Cho co chan thay vi doan mot nhip la du — bai kiem
+            # nay tung hong khoang 1/4 so lan chay vi dung mot `pause()`.
+            for _ in range(40):
+                if self.cc.store.tasks("demo"):
+                    break
+                await pilot.pause()
             ts = self.cc.store.tasks("demo")
             self.assertEqual(len(ts), 1)
+            app.lam_moi()
+            await pilot.pause()
             self.assertEqual(app.query_one("#tasks").row_count, 1)
 
     async def test_bang_viec_ve_dung_so_dong(self):

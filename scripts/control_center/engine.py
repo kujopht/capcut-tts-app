@@ -46,6 +46,7 @@ from scripts.router_v4.executor import Executor, ExecutionResult
 from scripts.router_v4.history import BenchmarkStore
 from scripts.router_v4.leases import LeaseStore, owner_id
 from scripts.router_v4.runtime import Fabric, Placement
+from scripts.router_v4.modes import hop_dong_review
 from scripts.router_v4.scheduler import Demand, Scheduler
 
 from scripts.control_center.locks import LockManager
@@ -347,8 +348,20 @@ class ControlCenter:
                     t.task_id, TaskState.BLOCKED,
                     reason="phụ thuộc đã hỏng — không tự chạy tiếp")
                 continue
+            # Mot viec REVIEW phu thuoc vao CHA cua no, nhung cha chi thoat
+            # `REVIEW` SAU KHI review chay xong. Doi cha phai `DONE` truoc
+            # thi hai ben khoa nhau vinh vien: cha cho review, review cho
+            # cha. Nen voi dung quan he cha-con nay, `REVIEW` la du dieu
+            # kien — do chinh la trang thai "da xong phan viec, dang cho
+            # kiem cheo".
+            #
+            # Not loi nay hep co chu dich: chi ap cho `parent_id` cua chinh
+            # viec do, khong ap cho phu thuoc thuong. Mot viec thuong van
+            # phai cho phu thuoc `DONE` that.
             chua = [d.task_id for d in deps
-                    if d is not None and d.state is not TaskState.DONE]
+                    if d is not None and d.state is not TaskState.DONE
+                    and not (d.task_id == t.parent_id
+                             and d.state is TaskState.REVIEW)]
             if chua:
                 if t.state is not TaskState.WAITING:
                     self.store.doi_trang_thai(
@@ -468,6 +481,101 @@ class ControlCenter:
                 "session_id": s.session_id, "placement": s.placement_key,
                 "action": qd.action.value}
 
+    def _dat_review(self, ctx: ProjectContext, task_id: str,
+                    hd: TaskContract, p: Placement) -> None:
+        """Đặt một việc REVIEW ĐỘC LẬP làm CON của việc vừa xong.
+
+        VÌ SAO PHẢI CÓ: không có bước này, `REVIEW` là ngõ cụt — việc xong,
+        hợp đồng đòi review, và nó nằm đó mãi mãi. Một trạng thái không ai
+        đưa ra khỏi được thì tệ hơn là không có trạng thái đó.
+
+        ĐỘC LẬP THẬT, không chỉ trên danh nghĩa: `hop_dong_review()` của
+        Router V4 loại HỌ MODEL của tác giả (`exclude_families`) và KHÔNG
+        cấp `repo_write`. Một reviewer cùng họ với tác giả, hoặc sửa được
+        thứ nó vừa chấm, không phải kiểm tra độc lập.
+
+        Việc review là CON (`parent_id`) chứ không phải anh em: nó không tồn
+        tại nếu không có việc cha, và bảng điều khiển phải xếp nó dưới cha
+        thay vì thành một dòng lơ lửng không ai hiểu từ đâu ra.
+        """
+        try:
+            ho = ctx.fabric.model(p.model_id).model_family
+        except KeyError:
+            ho = ""
+        rid = f"{task_id}-review"
+        if self.store.task(rid) is not None:
+            return                            # da dat roi — khong nhan doi
+        try:
+            hd_review = hop_dong_review(hd, author_family=ho, review_id=rid)
+        except (ContractError, ValueError) as exc:
+            self.store.ghi_su_kien(
+                "REVIEW_SKIPPED", project_id=ctx.project.project_id,
+                task_id=task_id, level="WARNING",
+                detail=f"không dựng được hợp đồng review: {exc}"[:300])
+            return
+
+        cha = self.store.task(task_id)
+        d = hd_review.to_dict()
+        # Reviewer phai DOC duoc ket qua no dang cham. Voi viec CO GHI, ket
+        # qua nam trong worktree co lap, KHONG nam o goc kho — bang chung
+        # that 2026-09-03: mot nut review bao "khong tim thay tep" trong khi
+        # tep CO ton tai, chi la o worktree cua nut truoc.
+        if cha is not None and cha.worktree:
+            d["objective"] += (
+                f"\n\nĐỌC KẾT QUẢ Ở ĐÂY (không phải ở gốc kho): "
+                f"{cha.worktree}\nnhánh: {cha.branch}")
+        self.store.luu_task(Task(
+            task_id=rid, project_id=ctx.project.project_id,
+            title=f"review độc lập: {(cha.title if cha else task_id)}"[:120],
+            objective=d["objective"], state=TaskState.QUEUED,
+            priority=(cha.priority - 1 if cha else 40),
+            parent_id=task_id, dependencies=(task_id,), contract=d,
+            permission=PermissionClass.AUTO.value))
+        self.store.ghi_su_kien(
+            "REVIEW_QUEUED", project_id=ctx.project.project_id, task_id=rid,
+            detail=(f"review độc lập cho {task_id}; loại họ model "
+                    f"{ho or '(không rõ)'} để tác giả không tự chấm bài"),
+            meta={"parent": task_id, "exclude_family": ho})
+
+    def _khep_review(self, t: Task) -> None:
+        """Việc review xong -> đóng việc CHA.
+
+        Phát hiện của reviewer KHÔNG tự động làm việc cha thất bại — nó là
+        thông tin cho người tích hợp, đúng như `RouterV4.run_task` đã quyết.
+        Nhưng nó PHẢI hiện ra: một lượt review tốn tiền mà không ai thấy kết
+        quả thì chỉ là đốt quota.
+        """
+        cha = self.store.task(t.parent_id)
+        if cha is None or cha.state is not TaskState.REVIEW:
+            return
+        pb = ((t.result or {}).get("envelope") or {})
+        pham = list(pb.get("findings") or [])
+        if t.state is TaskState.FAILED:
+            self.store.doi_trang_thai(
+                cha.task_id, TaskState.BLOCKED,
+                reason=(f"review độc lập ({t.task_id}) không chạy được — "
+                        f"kết quả CHƯA được kiểm tra chéo"))
+            return
+        self.store.doi_trang_thai(
+            cha.task_id, TaskState.DONE,
+            reason=(f"review độc lập xong: {len(pham)} phát hiện"
+                    if pham else "review độc lập không thấy vấn đề"))
+        if pham:
+            c = self.store.task(cha.task_id)
+            if c is not None:
+                kq = dict(c.result or {})
+                env = dict(kq.get("envelope") or {})
+                env["findings"] = list(env.get("findings") or []) + [
+                    f"[review/{pb.get('model', '?')}] {x}" for x in pham[:10]]
+                kq["envelope"] = env
+                c.result = kq
+                self.store.luu_task(c)
+            self.store.ghi_su_kien(
+                "REVIEW_FINDINGS", project_id=cha.project_id,
+                task_id=cha.task_id, level="WARNING",
+                detail=f"{len(pham)} phát hiện từ review độc lập",
+                meta={"findings": pham[:10], "reviewer": pb.get("model", "")})
+
     def _sang_waiting(self, t: Task, reason: str) -> None:
         if t.state is not TaskState.WAITING:
             try:
@@ -556,6 +664,8 @@ class ControlCenter:
                          "agent yêu cầu một quyết định")
             self.store.doi_trang_thai(task_id, moi, reason=ly_do[:600],
                                       session_id=session_id)
+            if moi is TaskState.REVIEW:
+                self._dat_review(ctx, task_id, hd, p)
             self.store.ghi_su_kien(
                 "TASK_FINISHED", project_id=ctx.project.project_id,
                 task_id=task_id, session_id=session_id,
@@ -567,6 +677,12 @@ class ControlCenter:
                       "findings": pb.findings[:10], "risks": pb.risks[:10],
                       "placement": p.key, "duration": round(pb.duration, 2)})
             ctx.sessions.ket_thuc_viec(session_id, task_id, ok=kq.ok, pid=pid)
+            # Viec vua xong la mot REVIEW -> khep viec CHA lai. Lam sau khi
+            # da ghi trang thai/su kien cua chinh no, de neu buoc khep hong
+            # thi ket qua review van con nguyen tren so.
+            xong = self.store.task(task_id)
+            if xong is not None and xong.parent_id:
+                self._khep_review(xong)
 
         except Exception as exc:                          # noqa: BLE001
             self.store.ghi_su_kien(

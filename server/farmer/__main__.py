@@ -21,6 +21,23 @@ from server.farmer.quotas import FarmerQuotas
 from server.farmer.review import ReviewUnavailable, build_reviewer
 
 
+class _ReviewerVangMat:
+    """Cho `--dry-run` khi chua co khoa Gemini.
+
+    No KHONG duyet gi — no nem `ReviewUnavailable`, dung nhu mot cong danh
+    gia hong that su, nen vong lap fail closed y het. Muc dich duy nhat la
+    de `--dry-run` chay den duoc buoc do va BAO CAO thieu khoa, thay vi
+    chet ngay luc khoi dung.
+    """
+
+    model = "(chua cau hinh)"
+    min_score = 0
+
+    def review(self, **kwargs):
+        raise ReviewUnavailable(
+            "chua co FARMER_GEMINI_API_KEY tren may nay — cong danh gia dong")
+
+
 def _build(dry_run: bool) -> ProductionFarmer:
     from server.appwrite_store import AppwriteMetadataStore
     from server.config import load_settings
@@ -30,7 +47,21 @@ def _build(dry_run: bool) -> ProductionFarmer:
     settings = load_settings()
     store = AppwriteMetadataStore(settings.appwrite)
     quotas = FarmerQuotas()
-    reviewer = build_reviewer()
+
+    # `--dry-run` van chay duoc khi CHUA co khoa Gemini: no chi kham pha,
+    # khu trung lap, va do han muc — khong muc nao di toi cong danh gia vi
+    # khong muc nao duoc san xuat. Nho vay nguoi van hanh kiem duoc nua duoi
+    # cua duong day TRUOC khi dat khoa vao may.
+    #
+    # Duong CHAY THAT thi khong: `build_reviewer()` nem, va `main()` tra
+    # BLOCKED. Khong co khoa thi khong duyet, khong duyet thi khong san xuat.
+    if dry_run:
+        try:
+            reviewer = build_reviewer()
+        except ReviewUnavailable:
+            reviewer = _ReviewerVangMat()
+    else:
+        reviewer = build_reviewer()
 
     covers = CoverGate(
         CoverPipelineService(media_asset_store=store,

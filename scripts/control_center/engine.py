@@ -389,10 +389,10 @@ class ControlCenter:
                     "reason": "hợp đồng hỏng"}
 
         # (1) khoa tai nguyen
+        lm = LockManager(self.store)
         xin = [(LockKind(r.split(":", 1)[0]), r.split(":", 1)[1])
                for r in t.resources if ":" in r]
-        grant = ctx.sessions and LockManager(self.store).xin(
-            t.project_id, xin, task_id=t.task_id) if xin else None
+        grant = lm.xin(t.project_id, xin, task_id=t.task_id) if xin else None
         if grant is not None and not grant.granted:
             self._sang_waiting(t, grant.reason)
             return {"task_id": t.task_id, "dispatched": False,
@@ -418,7 +418,7 @@ class ControlCenter:
             detail=f"{qd.action.value}: {qd.reason}"[:400], meta=qd.to_dict())
 
         if qd.action is SessionAction.WAIT:
-            LockManager(self.store).tra(t.project_id, t.task_id)
+            lm.tra(t.project_id, t.task_id)
             self._sang_waiting(t, qd.reason)
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": qd.reason, "decision": qd.to_dict()}
@@ -429,7 +429,7 @@ class ControlCenter:
             else:
                 s = ctx.sessions.create(qd, t, contract=hd)
         except (WorktreeError, ValueError) as exc:
-            LockManager(self.store).tra(t.project_id, t.task_id)
+            lm.tra(t.project_id, t.task_id)
             self.store.doi_trang_thai(
                 t.task_id, TaskState.BLOCKED,
                 reason=f"không cấp được cây làm việc: {exc}"[:400])
@@ -439,7 +439,7 @@ class ControlCenter:
         # (3) lease KHE runtime cua Router V4
         khoa_lease = self._muon_lease(ctx, s.runtime_id, t.task_id)
         if khoa_lease is None:
-            LockManager(self.store).tra(t.project_id, t.task_id)
+            lm.tra(t.project_id, t.task_id)
             ly_do = (f"runtime {s.runtime_id} hết khe đồng thời — chờ lượt "
                      f"sau thay vì đẩy thêm vào một tài khoản đã đầy")
             self._sang_waiting(t, ly_do)
@@ -448,7 +448,7 @@ class ControlCenter:
         # (4) NHAN VIEC — nguyen tu. Truoc buoc nay moi thu deu hoan tac duoc.
         if not self.store.claim_task(t.task_id, s.session_id):
             ctx.leases.release(khoa_lease, self.owner)
-            LockManager(self.store).tra(t.project_id, t.task_id)
+            lm.tra(t.project_id, t.task_id)
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": "việc đã bị một vòng lập lịch khác nhận trước"}
 

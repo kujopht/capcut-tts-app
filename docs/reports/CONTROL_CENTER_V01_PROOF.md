@@ -75,6 +75,8 @@ mới cho mỗi việc), và là lý do Control Center gọi thẳng `Executor.r
 | 13 | Mất lease bị bỏ qua im lặng, phá đúng chế độ hỏng "hai chủ" mà lease tồn tại để chặn | sự kiện ALERT `LEASE_LOST` + ngừng đập nhịp |
 | 14 | Một lượt hỏng = việc hỏng vĩnh viễn (không có đường thử lại nào) | thử lại có trần, đổi chỗ, 4 lý do không bao giờ thử lại |
 | 15 | Ở tab Agent, phím vận hành tác động lên con trỏ bảng Việc — dừng nhầm việc, và `s` giết tiến trình thật | chọn theo tab đang mở |
+| 16 | **Việc mồ côi kẹt `RUNNING` VĨNH VIỄN** khi phiên chủ còn sống nhưng đang rảnh — `recover()` bỏ qua, bộ lập lịch không nhặt (nó không ở QUEUED). Đo thật: kẹt qua BA lần `recover()` liên tiếp | đòi cả ba: phiên tồn tại + còn sống + `current_task == task_id` |
+| 17 | Ví dụ đường dẫn trong hợp đồng sinh ra `docs/reports/note.md/vi-du.md` — một đường dẫn không tồn tại, đặt ngay trong câu đang dạy agent khai đường dẫn cho đúng | nhận biết phạm vi là tệp hay thư mục |
 
 ## 4a. LỖI NGHIÊM TRỌNG NHẤT, tìm bằng cách TỰ TẤN CÔNG bất biến
 
@@ -130,6 +132,40 @@ cha, mà cha chỉ rời `REVIEW` sau khi review xong — đòi cha `DONE` trư�
 hai bên khoá nhau vĩnh viễn. Nới lỏng chỉ áp cho đúng `parent_id` của chính
 việc đó; phụ thuộc thường vẫn phải `DONE` thật. 5 bài kiểm khoá lại.
 
+## 4c. Review độc lập bằng agent THẬT — CHƯA chứng minh được
+
+Vòng REVIEW được khoá bằng 5 bài kiểm (đặt việc con, loại họ model tác giả,
+không cấp `repo_write`, khép cha `DONE`/`BLOCKED`, không đặt hai lần). Nhưng
+chứng minh nó bằng **agent thật** thì **chưa đạt**, và lý do nằm ở B4:
+
+Review độc lập chỉ kích hoạt cho việc **rủi ro cao CÓ GHI** — mà đúng loại
+việc đó là loại đang bị bức tường quyền của `agy` headless chặn. Lượt thử
+cuối chạy trên `AG03/claude-sonnet-4-6` (tài khoản thứ BA, họ model khác),
+xác nhận `independent_review_required: True`, rồi việc cha hỏng ở tầng
+worker trước khi kịp vào `REVIEW`.
+
+Nói rõ ra thay vì để bảng bài kiểm xanh ngụ ý nhiều hơn sự thật: **vòng
+REVIEW đúng theo bài kiểm, chưa đúng theo bằng chứng chạy thật.**
+
+Một điểm phụ đáng giữ: lượt đó cho thấy **AG01, AG02 và AG03 đều dùng được**,
+trên cả Gemini lẫn Claude. Câu "chỉ AG01 là thật" trong
+`docs/AI_ROUTER_V4.md` §2.1 (ghi 2026-09-03) nay đã **cũ**.
+
+## 4d. Review đối kháng ngoài — KHÔNG trả về
+
+Đã thử hai đường, cả hai đều không cho kết quả dùng được:
+
+1. `ai_router_dispatch.py --task-class SECURITY_REVIEW --risk HIGH` →
+   `claude-opus-4-6-thinking` qua Antigravity → hỏng sau 9.4s với đúng bức
+   tường quyền của B4.
+2. Một `code-reviewer` (Claude, chỉ đọc) chạy **hơn một tiếng** không trả
+   kết quả, kể cả sau khi được nhắc thu gọn.
+
+Nên **phần review đối kháng của đêm nay là do tôi tự làm**, bằng cách viết
+kịch bản tấn công từng bất biến. Nó tìm ra lỗi #11 (lỗ hổng GATED) và #16
+(việc kẹt RUNNING) — hai lỗi nghiêm trọng nhất trong danh sách. Ghi rõ như
+vậy để không ai đọc báo cáo này mà tưởng đã có một cặp mắt độc lập.
+
 ## 5. Còn chặn (cần người) — xem `ROUTER_CONTROL_CENTER_OVERNIGHT_BLOCKERS.md`
 
 - **B4** `agy` headless tự chối quyền `command`/`read_file` ⇒ việc CÓ GHI
@@ -144,11 +180,11 @@ việc đó; phụ thuộc thường vẫn phải `DONE` thật. 5 bài kiểm k
 ## 6. Bài kiểm
 
 ```
-scripts/tests/test_control_center_core.py    66 bài — sổ, khoá, quyền, phân rã
-scripts/tests/test_control_center_slice.py   40 bài — lát cắt dọc, kho git thật
-scripts/tests/test_control_center_ui.py      11 bài — 7 màn hình, Textual headless
+scripts/tests/test_control_center_core.py    78 bài — sổ, khoá, quyền, phân rã, rào tĩnh
+scripts/tests/test_control_center_slice.py   56 bài — lát cắt dọc, kho git thật, 2 tiến trình
+scripts/tests/test_control_center_ui.py      13 bài — 7 màn hình, Textual headless
                                             ─────
-toàn bộ scripts/tests                      1067 bài — OK (1 skipped)
+toàn bộ scripts/tests                      1094 bài — OK (1 skipped)
 tests/ (desktop, kiểm hồi quy)               397 bài — OK
 ```
 

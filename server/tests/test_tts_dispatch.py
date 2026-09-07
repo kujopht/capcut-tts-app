@@ -11,9 +11,11 @@ Ba tinh chat can giu:
 
   1. TAT thi `enqueue()` khong lam gi va khong cham mang.
   2. TAT thi `POST /api/jobs` di dung duong cu — khong them mot lan goi nao.
-  3. BAT ma hong thi VAN khong nem: job da nam ben vung o `pending`, va duong
-     quet cu se nhat no. Mot su co hang doi khong duoc bien thanh "khong tao
-     duoc audio" truoc mat nguoi dung.
+  3. BAT ma hong thi PHAI NEM (doi 2026-09-07). Nhanh `except` am tham cu la
+     thu lam hai su co that tro nen vo hinh: thieu goi `google-cloud-tasks`,
+     roi thieu credential GCP tren Render. Ca hai lan `POST /api/jobs` van tra
+     201 va hang doi van RONG. Muon job van tao duoc khi Cloud Tasks su co thi
+     TAT `FAS_TTS_DISPATCH` — tuong minh, khong am tham.
 """
 from __future__ import annotations
 
@@ -57,25 +59,51 @@ class CongTat(unittest.TestCase):
             self.assertIsNone(td.enqueue("job_abc"))
             cau_hinh.assert_not_called()
 
-    def test_bat_nhung_thieu_cau_hinh_thi_khong_nem(self):
+    def test_bat_nhung_thieu_cau_hinh_thi_NEM(self):
+        """
+        DOI HOP DONG 2026-09-07: truoc day tra None, nay NEM.
+
+        Ly do doi nam o docstring cua `tts_dispatch`: nhanh `except` am tham
+        chinh la thu lam hai su co that tro nen vo hinh (thieu goi
+        google-cloud-tasks, roi thieu credential GCP tren Render). Ca hai lan
+        `POST /api/jobs` van tra 201 va hang doi van rong.
+        """
         td = _nap_lai({"FAS_TTS_DISPATCH": "cloudtasks",
                        "FAS_TTS_TASKS_QUEUE": ""})
         self.assertTrue(td.duoc_bat())
-        self.assertFalse(td.cau_hinh_du())
-        self.assertIsNone(td.enqueue("job_abc"))      # khong nem
+        with self.assertRaises(td.DispatchError):
+            td.enqueue("job_abc")
 
-    def test_bat_va_thu_vien_no_loi_thi_khong_nem(self):
-        """Su co Cloud Tasks khong duoc noi len duong tao job."""
+    def test_thieu_SA_JSON_thi_NEM_chu_khong_roi_ve_ADC(self):
+        """
+        Thieu credential PHAI nem, KHONG duoc am tham dung ADC.
+
+        Day la su co that: tren Render khong co ADC nen
+        `CloudTasksClient()` nem DefaultCredentialsError, bi nuot, va moi task
+        bien mat trong im lang. Neu ai do bo `SA_JSON` di de "don gian hoa",
+        bai nay do.
+        """
         td = _nap_lai({
             "FAS_TTS_DISPATCH": "cloudtasks",
             "FAS_TTS_TASKS_QUEUE": "q", "FAS_TTS_TASKS_LOCATION": "asia-southeast1",
             "FAS_TTS_TASKS_PROJECT": "p", "FAS_TTS_TASKS_TARGET_URL": "https://x/tasks/tts",
             "FAS_TTS_TASKS_OIDC_SA": "sa@example.invalid",
+            "FAS_TTS_TASKS_SA_JSON": "",
         })
         self.assertTrue(td.cau_hinh_du())
-        # Khong co `google.cloud.tasks_v2` trong moi truong test -> import loi.
-        # Dung cai do lam phep thu: `enqueue` phai nuot loi va tra None.
-        self.assertIsNone(td.enqueue("job_abc"))
+        with self.assertRaisesRegex(td.DispatchError, "FAS_TTS_TASKS_SA_JSON"):
+            td.enqueue("job_abc")
+
+    def test_SA_JSON_khong_phai_json_thi_NEM(self):
+        td = _nap_lai({
+            "FAS_TTS_DISPATCH": "cloudtasks",
+            "FAS_TTS_TASKS_QUEUE": "q", "FAS_TTS_TASKS_LOCATION": "asia-southeast1",
+            "FAS_TTS_TASKS_PROJECT": "p", "FAS_TTS_TASKS_TARGET_URL": "https://x/tasks/tts",
+            "FAS_TTS_TASKS_OIDC_SA": "sa@example.invalid",
+            "FAS_TTS_TASKS_SA_JSON": "khong-phai-json",
+        })
+        with self.assertRaises(td.DispatchError):
+            td.enqueue("job_abc")
 
 
 class PhuThuocPhaiDuocKhaiBao(unittest.TestCase):
@@ -84,13 +112,12 @@ class PhuThuocPhaiDuocKhaiBao(unittest.TestCase):
         """
         `google-cloud-tasks` PHAI nam trong `server/requirements.txt`.
 
-        VI SAO CAN MOT BAI TEST CHO MOT DONG REQUIREMENTS. `enqueue()` bat MOI
-        exception va tra `None` — co y, de su co Cloud Tasks khong lam hong
-        duong tao job. Mat toi cua thiet ke do: THIEU GOI im lang y het mot su
-        co tam thoi. Bat `FAS_TTS_DISPATCH=cloudtasks` khi goi chua duoc cai
-        thi khong task nao duoc day va khong gi keu len; duong quet cua worker
-        gánh het. Den ngay dung worker AWS, do thanh "khong con gi tao audio"
-        ma khong mot dong log nao noi tai sao.
+        VI SAO CAN MOT BAI TEST CHO MOT DONG REQUIREMENTS. Khi bai nay duoc
+        viet, `enqueue()` con bat MOI exception va tra `None`, nen THIEU GOI im
+        lang y het mot su co tam thoi: bat `FAS_TTS_DISPATCH=cloudtasks` ma
+        khong task nao duoc day va khong gi keu len. `enqueue()` nay da nem,
+        nhung dong requirements van phai duoc khoa — mot `DispatchError` luc
+        chay that van la su co production, con bai test nay chan no tu truoc.
 
         Da MAC dung loi nay: commit d8e3062 duoc deploy len production voi
         `tts_dispatch.py` day du nhung KHONG co `google-cloud-tasks` trong

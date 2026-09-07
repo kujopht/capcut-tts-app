@@ -46,9 +46,33 @@ class _TrangThaiGia:
     reason = ""
 
 
+class _BoChayGia:
+    """Mot provider gia — chi can dung thuoc tinh ma ma nguon that doc."""
+
+    def __init__(self, installed: bool = True):
+        self.installed = installed
+
+
 class _RegistryGia:
     def __init__(self, voice_ids):
         self.voices: List[Any] = [_GiongGia(v) for v in voice_ids]
+        #: Provider co RUNTIME hay khong — mac dinh la CO.
+        #:
+        #: Phai co `get()` vi `tts_bridge.voice_runnable_on_this_machine` hoi
+        #: registry hai cau khac nhau: "goi piper co import duoc tren may nay
+        #: khong" (`get(provider).installed`) va "file model co tren dia khong"
+        #: (`voice_by_id(id).installed`). Ban gia truoc day chi tra loi cau thu
+        #: hai, nen no chap nhan duoc ca doan ma bo mat cau thu nhat — dung
+        #: kieu bay ma `docs/HANDOFF.md` da ghi: "kiem o tang mock la vo nghia"
+        #: khi mock khong mo phong dung be mat that.
+        self.bo_chay: dict = {}
+
+    def dat_runtime(self, provider_id: str, installed: bool) -> None:
+        """Cho mot bai test noi 'may nay THIEU runtime cua provider nay'."""
+        self.bo_chay[provider_id] = _BoChayGia(installed)
+
+    def get(self, provider_id: str):
+        return self.bo_chay.get(provider_id, _BoChayGia(True))
 
     def voice_by_id(self, voice_id: str):
         for v in self.voices:

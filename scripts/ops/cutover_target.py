@@ -31,9 +31,53 @@ from typing import Dict, Iterable, List, Mapping, Optional, Tuple
 # TRA VE, nen mot bien bi doi ten phia Render khong the noi rong duoc).
 #
 # Luu y kien truc QUAN TRONG: production KHONG dung Appwrite Cloud. No
-# dung ban TU LUU TRU o `appwrite-dev.fanfic.world` (may GCE
-# `fanfic-appwrite-temp`). `docs/AWS_STAGING_MIGRATION.md` muc 0 noi
-# nguoc lai — tai lieu do da CU. Xem `docs/PRODUCTION_CUTOVER.md`.
+# dung ban TU LUU TRU o `appwrite-dev.fanfic.world`.
+# `docs/AWS_STAGING_MIGRATION.md` muc 0 noi nguoc lai — tai lieu do da CU.
+# Xem `docs/PRODUCTION_CUTOVER.md`.
+#
+# DA SUA 2026-09-07: cau tren truoc day con ghi "(may GCE
+# `fanfic-appwrite-temp`)". Ve MAY thi cau do DA SAI, va no la nguon duy
+# nhat trong ma nguon khien nguoi doc ket luan production con phu thuoc
+# GCE. Do truc tiep:
+#
+#   - `fanfic-appwrite-temp` (us-central1-c): TERMINATED, quan sat nhieu
+#     lan trong ~31 gio (2026-09-06 16:0xZ -> 2026-09-07 00:3xZ);
+#   - trong CUNG khoang do `appwrite-dev.fanfic.world` phuc vu that:
+#     health 200 o moi lan lay mau, worker AWS chay xong 10 job qua no,
+#     va mot database tam da duoc tao/xoa qua no;
+#   - mot GCE instance TERMINATED khong co compute nao chay, nen no khong
+#     the phuc vu hay proxy bat cu thu gi.
+#
+# Cai VAN dung: chinh ENDPOINT duoi day. Cai KHONG con dung: gan endpoint
+# do voi mot may GCE cu the.
+#
+# ORIGIN THAT (do duoc 2026-09-07, sau khi token Cloudflare co DNS:Read):
+#
+#     A  appwrite-dev.fanfic.world -> 54.179.200.223  proxied=True
+#
+# Goi THANG vao IP do bang `--resolve` (bo han Cloudflare) tra ve
+# `Server: Appwrite` + `{"version":"1.9.6"}` — trung khop duong qua
+# Cloudflare. Nen "da di tru production Appwrite sang AWS" la DUNG:
+#
+#     54.179.200.223   Appwrite (database + API)
+#     13.212.224.218   worker TTS + dich production
+#
+# Ca hai deu la AWS ap-southeast-1. Cau chuyen nghe nhu mau thuan chi vi
+# do la HAI MAY AWS KHAC NHAU, khong phai mot.
+#
+# SAI SOT DA MAC (ghi de khong lap): vong dieu tra truoc ket luan "khong
+# nam tren AWS" sau khi chi kiem MOT may AWS (may worker). Loai tru phai
+# loai tru HOST, khong duoc loai tru NHA CUNG CAP. Va `54.179.200.223` da
+# nam san trong `~/.ssh/known_hosts` cua may dieu hanh tu lan do dau tien.
+#
+# LUU Y VAN HANH: SSH cong 22 toi 54.179.200.223 bi timeout tu may dieu
+# hanh (dung dang bao mat), nen KHONG quan sat duoc CPU/RAM cua host
+# Appwrite — giam sat hien nay chi o muc API health. Va storage device cua
+# Appwrite la DIA CUC BO (`/v1/health/storage/local` pass), nen host do dang
+# giu file Appwrite ngoai R2 va ngoai moi snapshot GCE.
+#
+# Snapshot cua `fanfic-appwrite-temp` la DI SAN cua kien truc da roi di,
+# KHONG phai ban sao luu cua production dang chay. Dung coi la duong lui.
 # --------------------------------------------------------------------------
 PROD_APPWRITE_ENDPOINT = "https://appwrite-dev.fanfic.world/v1"
 PROD_APPWRITE_PROJECT_ID = "fanfic-world-prod"

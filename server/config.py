@@ -648,6 +648,59 @@ class Settings:
                 "FAS_ALLOW_INLINE_WORKER_IN_REAL_ENV=true."
             )
 
+        self._kiem_ghep_kho_va_bucket()
+
+    #: Cặp kho metadata ↔ bucket BẮT BUỘC. Khoá là `APPWRITE_DATABASE_ID`,
+    #: giá trị là `R2_BUCKET` duy nhất được phép đi cùng.
+    #:
+    #: Toạ độ lấy từ `scripts/ops/cutover_target.py` — nguồn sự thật duy nhất
+    #: trong mã nguồn. KHÔNG lặp lại con số ở đây thành một bản thứ hai: chỉ
+    #: lặp lại QUAN HỆ, còn danh tính production thì tra ở đó.
+    GHEP_BAT_BUOC = {"fanfic_world_prod": "fanfic-prod"}
+
+    def _kiem_ghep_kho_va_bucket(self) -> None:
+        """
+        Kho metadata production PHẢI đi với bucket production. FAIL CLOSED.
+
+        VÌ SAO CÓ HÀM NÀY — một sự cố thật, 2026-09-06. Một worker Cloud Run
+        được cấu hình `APPWRITE_DATABASE_ID=fanfic_world_prod` (kho THẬT của
+        production) nhưng `R2_BUCKET=fanfic-staging`. Không biến nào thiếu,
+        không biến nào sai cú pháp, nên `validate()` cũ cho qua sạch sẽ.
+        Hậu quả nếu worker đó giành được một job production thật: nó tổng hợp
+        xong, upload vào bucket STAGING, rồi ghi `audio_track` trỏ vào khoá đó.
+        Đường đọc production tra bucket production → không thấy gì. Người dùng
+        thấy một trình phát hỏng CÂM LẶNG, và metadata thì trông hoàn toàn khoẻ.
+        Không có log nào kêu lên, vì không thao tác nào thất bại.
+
+        Đó là lý do phép kiểm này thuộc `validate()` chứ không phải một checklist
+        vận hành: một cặp lệch phải làm tiến trình CHẾT LÚC KHỞI ĐỘNG, chứ không
+        phải hỏng âm thầm lúc job thứ nhất chạy qua.
+
+        Chiều ngược lại KHÔNG bị chặn: một kho staging/tạm dùng bucket nào là
+        việc của staging. Chỉ có kho production là bị ràng buộc, vì chỉ nó mới
+        có dữ liệu thật để làm hỏng.
+        """
+        if self.data_backend != "appwrite" or self.storage_backend != "r2":
+            return
+        db = (self.appwrite.database_id or "").strip()
+        bucket_bat_buoc = self.GHEP_BAT_BUOC.get(db)
+        if bucket_bat_buoc is None:
+            return
+        bucket = (self.r2.bucket or "").strip()
+        if bucket != bucket_bat_buoc:
+            raise ConfigError(
+                f"GHÉP LỆCH KHO/BUCKET: APPWRITE_DATABASE_ID={db!r} là kho "
+                f"metadata PRODUCTION, nhưng R2_BUCKET={bucket!r} — bắt buộc "
+                f"phải là {bucket_bat_buoc!r}.\n\n"
+                "Cặp lệch này không làm thao tác nào thất bại: audio vẫn upload, "
+                "`audio_track` vẫn ghi, job vẫn `completed`. Nhưng đường đọc "
+                "production tra bucket production nên không bao giờ thấy object "
+                "đó — người dùng nhận một trình phát hỏng câm lặng. Đã xảy ra "
+                "thật ngày 2026-09-06.\n\n"
+                "Sửa MỘT trong hai cho khớp nhau. Nếu đang cố ý chạy thử, hãy "
+                "dùng một database KHÁC, đừng trỏ vào kho production."
+            )
+
     def describe(self) -> dict:
         """Tom tat cau hinh - KHONG bao gio chua gia tri bi mat."""
         return {

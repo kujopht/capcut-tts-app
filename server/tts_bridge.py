@@ -263,8 +263,31 @@ def voice_runnable_on_this_machine(voice_id: str) -> bool:
     provider = (voice_id or "").split(":", 1)[0]
     if provider != LOCAL_PROVIDER:
         return True
-    voice = get_registry().voice_by_id(voice_id)
+
+    registry = get_registry()
+
+    # RUNTIME truoc, MODEL sau — va thu tu nay la ca noi dung ban sua.
+    #
+    # Ban truoc chi hoi "file model co tren dia khong". Thieu goi `piper-tts`
+    # thi `registry.voice_by_id()` tra `None` (khong dung duoc provider), roi
+    # ham nay roi vao nhanh "khong biet giong nay -> cu nhan" va tra `True`.
+    # Ket qua do duoc tren Cloud Run ngay 2026-09-06: worker NHAN ca 10 job roi
+    # that bai ngay voi `provider_not_installed`, dot het `attempts` cua chung
+    # va lam job chet vinh vien — trong khi mot worker khac (AWS) co du runtime
+    # va lam duoc. Dung cai ma nhanh "nhuong" nay ton tai de tranh.
+    #
+    # `PiperLocalProvider.installed` la `self.module is not None`, tuc DUNG cau
+    # hoi "goi piper co import duoc tren may nay khong". Hoi no TRUOC khi hoi
+    # ve file model: khong co runtime thi ca thu muc model day du cung vo dung.
+    bo_chay = registry.get(provider)
+    if bo_chay is not None and not getattr(bo_chay, "installed", True):
+        return False
+
+    voice = registry.voice_by_id(voice_id)
     if voice is None:
+        # THAT SU khong biet giong nay (khong phai vi thieu runtime — da loai o
+        # tren). De duong cu xu ly: nhan roi that bai voi thong diep doc duoc,
+        # tot hon mot job treo `pending` vo han.
         return True
     return bool(getattr(voice, "installed", True))
 

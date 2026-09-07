@@ -9,11 +9,13 @@ Lát cắt dọc (chat -> việc -> phiên -> worktree -> chạy -> khởi độ
 """
 from __future__ import annotations
 
+import ast
 import tempfile
 import time
 import threading
 import unittest
 from pathlib import Path
+from typing import List
 
 from scripts.control_center import permissions as P
 from scripts.control_center.locks import LockManager, xung_dot
@@ -192,6 +194,104 @@ class TestPermissions(unittest.TestCase):
         for x in PermissionClass:
             self.assertNotIn("bypass", x.value.lower())
             self.assertNotIn("skip", x.value.lower())
+
+
+# ---------------------------------------------------------------------------
+# Rao an toan kiem BANG MA NGUON
+# ---------------------------------------------------------------------------
+
+class TestRaoAnToanTinh(unittest.TestCase):
+    """Vài bất biến rẻ nhất để kiểm và đắt nhất để mất.
+
+    Kiểm bằng cách ĐỌC MÃ NGUỒN có chủ đích: chúng phải đúng ở MỌI đường,
+    kể cả đường chưa ai viết bài kiểm hành vi. Một quy tắc an toàn chỉ nằm
+    trong tài liệu là một lời khuyên.
+
+    Kiểm trên CÂY CÚ PHÁP, không phải trên văn bản thô. Bản đầu tiên grep cả
+    tệp và lập tức báo động vì chính các docstring GIẢI THÍCH rằng ta không
+    bao giờ dùng cờ đó — một bài kiểm mà cách duy nhất làm nó xanh là ngừng
+    viết tài liệu về rào an toàn thì tự nó là một vấn đề.
+    """
+
+    CAM = ("--dangerously-skip-permissions", "bypassPermissions")
+
+    @staticmethod
+    def _tep():
+        goc = Path(__file__).resolve().parents[1] / "control_center"
+        return sorted(goc.rglob("*.py"))
+
+    @staticmethod
+    def _chuoi_trong_ma(cay: ast.AST) -> List[str]:
+        """Mọi hằng chuỗi TRỪ docstring — tức là chuỗi thật sự chạy."""
+        docs = set()
+        for n in ast.walk(cay):
+            if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                              ast.AsyncFunctionDef)):
+                d = ast.get_docstring(n, clean=False)
+                if d is not None and n.body:
+                    first = n.body[0]
+                    if isinstance(first, ast.Expr):
+                        docs.add(id(first.value))
+        return [n.value for n in ast.walk(cay)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                and id(n) not in docs]
+
+    def test_co_bo_qua_quyen_KHONG_xuat_hien_trong_MA_CHAY(self):
+        """Cờ `--dangerously-skip-permissions` tự duyệt MỌI yêu cầu quyền,
+        gồm chạy lệnh shell tuỳ ý — rộng hơn hẳn thứ bất kỳ việc nào cần."""
+        for tep in self._tep():
+            cay = ast.parse(tep.read_text(encoding="utf-8"))
+            chuoi = self._chuoi_trong_ma(cay)
+            for cam in self.CAM:
+                with self.subTest(tep=tep.name, co=cam):
+                    self.assertFalse(
+                        [x for x in chuoi if cam in x],
+                        f"{tep.name}: cờ {cam!r} nằm trong mã CHẠY, không "
+                        f"phải trong tài liệu")
+
+    def test_khong_dau_dat_dangerously_skip_permissions_bang_True(self):
+        for tep in self._tep():
+            cay = ast.parse(tep.read_text(encoding="utf-8"))
+            for n in ast.walk(cay):
+                if isinstance(n, ast.keyword) and                         n.arg == "dangerously_skip_permissions":
+                    with self.subTest(tep=tep.name):
+                        self.assertFalse(
+                            isinstance(n.value, ast.Constant)
+                            and n.value.value is True)
+
+    def test_khong_dau_dat_destructive_actions_allowed_bang_True(self):
+        """Cho phép nó `True` ở một chỗ nghĩa là có một loại việc được
+        xoá/reset/push mà không ai duyệt."""
+        for tep in self._tep():
+            cay = ast.parse(tep.read_text(encoding="utf-8"))
+            for n in ast.walk(cay):
+                if isinstance(n, ast.keyword) and                         n.arg == "destructive_actions_allowed":
+                    with self.subTest(tep=tep.name):
+                        self.assertFalse(
+                            isinstance(n.value, ast.Constant)
+                            and n.value.value is True)
+
+    def test_moi_hop_dong_do_bo_lap_ke_hoach_dung_deu_KHONG_pha_huy(self):
+        pl = RulePlanner(default_write_scope=("web",))
+        for cau in ("fix web/admin", "investigate the slow build",
+                    "write tests for the chunker", "clean up scripts/"):
+            for t in pl.plan(cau, _du_an()).tasks:
+                with self.subTest(cau=cau):
+                    self.assertFalse(
+                        t.contract.execution.destructive_actions_allowed)
+
+    def test_pham_vi_CAM_luon_duoc_nhoi_vao_moi_hop_dong(self):
+        """`.git/`, `.env`, `.claude/hooks/`… phải cấm dù hợp đồng không khai.
+
+        `TaskContract.__post_init__` của V4 làm việc này; bài kiểm ở đây khoá
+        lại rằng Control Center KHÔNG đi vòng qua nó (ví dụ bằng cách tự dựng
+        dict hợp đồng rồi bỏ qua `from_dict`).
+        """
+        pl = RulePlanner(default_write_scope=("web",))
+        t = pl.plan("fix web/admin", _du_an()).tasks[0]
+        cam = set(t.contract.forbidden_scope)
+        for duong in (".git", ".env", ".claude/hooks", ".github/workflows"):
+            self.assertIn(duong, cam, f"thiếu đường cấm {duong}")
 
 
 # ---------------------------------------------------------------------------

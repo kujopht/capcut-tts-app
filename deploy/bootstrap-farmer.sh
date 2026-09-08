@@ -120,7 +120,21 @@ info "che do danh gia: hang doi (FARMER_REVIEW_PROVIDER=queue) — khong can kho
 
 # ------------------------------------------------------- 2. tep cau hinh --
 info "ghi $ENV_FILE (0600 $SVC_USER)"
-install -o "$SVC_USER" -g "$SVC_USER" -m 600 /dev/null "$ENV_FILE"
+
+# Script nay SO HUU cac khoa `FARMER_*` va chi cac khoa do. Moi dong khac —
+# dac biet la bi mat do mot buoc khac dat vao, vd
+# `FAS_HARVESTER_SERVICE_TOKEN` — duoc GIU LAI.
+#
+# Truoc day o day la mot lan ghi de tron goi, va no da xoa mat token vua
+# duoc day sang (su co that 2026-09-08: finish-deploy xac nhan token co mat,
+# roi bootstrap ghi de len va chinh phep kiem cua bootstrap bao thieu token).
+# Mot script cai dat khong duoc pha thu no khong tao ra.
+#
+# Dong giu lai duoc chep TU TEP SANG TEP, khong bao gio di qua mot bien shell
+# — nen bi mat khong nam trong bo nho script, khong lo qua `set -x`, va khong
+# vao bat ky thong diep loi nao.
+ENV_TMP="$ENV_FILE.new.$$"
+install -o "$SVC_USER" -g "$SVC_USER" -m 600 /dev/null "$ENV_TMP"
 
 # `printf` la builtin cua bash => khoa KHONG di qua argv cua mot tien trinh
 # nao. Ghi qua stdin vao tep da tao san dung quyen.
@@ -139,9 +153,21 @@ install -o "$SVC_USER" -g "$SVC_USER" -m 600 /dev/null "$ENV_FILE"
   printf 'FARMER_WORK_DIR=/var/lib/fanfic-farmer/work\n'
   printf 'FARMER_STATUS_PATH=/var/lib/fanfic-farmer/status.json\n'
   printf 'FARMER_TEXT_SOURCES=%s\n' "$SRC_FILE"
-} > "$ENV_FILE"
+} > "$ENV_TMP"
 
-ok "cau hinh farmer da ghi ($ENV_FILE)"
+# Giu lai moi dong KHONG phai `FARMER_*` va khong phai chu thich cua chinh
+# script nay (vd `FAS_HARVESTER_SERVICE_TOKEN=...`). Chep thang tep -> tep.
+GIU=0
+if [ -f "$ENV_FILE" ]; then
+  if grep -vE '^(#|FARMER_|[[:space:]]*$)' "$ENV_FILE" >> "$ENV_TMP" 2>/dev/null; then
+    GIU=$(grep -cvE '^(#|FARMER_|[[:space:]]*$)' "$ENV_FILE" 2>/dev/null || echo 0)
+  fi
+fi
+mv -f "$ENV_TMP" "$ENV_FILE"
+chown "$SVC_USER:$SVC_USER" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
+ok "cau hinh farmer da ghi ($ENV_FILE); giu lai $GIU dong khong-FARMER_ (bi mat khong bi in)"
 
 # Nguon truyen chu — chi tao neu CHUA co, de khong de len danh sach that.
 if [ ! -f "$SRC_FILE" ]; then

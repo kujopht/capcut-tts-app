@@ -15,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-from server.farmer.covers import CoverGate, build_cover_provider
+from server.farmer.covers import build_cover_gate, build_cover_provider
 from server.farmer.integrity import InterpreterNotSecure, assert_interpreter_secure
 from server.farmer.loop import ProductionFarmer
 from server.farmer.metrics import MetricsWriter, status_path
@@ -63,7 +63,7 @@ def _r2_io():
     def tai_len(key: str, data: bytes) -> None:
         adapter.put(key, data, "application/json")
 
-    return tai_len, adapter.get, adapter.put
+    return tai_len, adapter.get, adapter.put, adapter.get_file
 
 
 def _build(dry_run: bool) -> ProductionFarmer:
@@ -88,7 +88,7 @@ def _build(dry_run: bool) -> ProductionFarmer:
     from server.farmer import review_keys
     from server.farmer.review_provider import build_review_provider
 
-    tai_len, tai_ve, dat_object = _r2_io()
+    tai_len, tai_ve, dat_object, tai_xuong = _r2_io()
     reviewer = build_review_provider(
         store,
         upload_sample=tai_len,
@@ -96,10 +96,15 @@ def _build(dry_run: bool) -> ProductionFarmer:
         sample_key_for=review_keys.sample_key,
         verdict_key_for=review_keys.verdict_key)
 
-    covers = CoverGate(
+    # Bia duong PHUC VU: dung neu kho ho tro media asset, CACH LY neu khong.
+    # `AppwriteMetadataStore` hien khong co `list_assets` (chua co collection
+    # `media_assets`), nen tren may san xuat duong nay bi cach ly — mot dong
+    # trong `status.json` thay vi mot `AttributeError` cho tung tac pham moi
+    # vong. Cong tranh THAT nam o kho chinh tac.
+    covers = build_cover_gate(
+        store,
         CoverPipelineService(media_asset_store=store,
-                             provider=build_cover_provider()),
-        media_asset_store=store)
+                             provider=build_cover_provider()))
 
     token = "" if dry_run else adapters.harvester_token()
 
@@ -107,7 +112,7 @@ def _build(dry_run: bool) -> ProductionFarmer:
     # writer — va `run_text_lane` cung khong bao gio den do vi buoc tao ban
     # nhap da nem truoc.
     writer = None if dry_run else ProductionWriter(
-        put_object=dat_object, get_object=tai_ve)
+        put_object=dat_object, get_object=tai_ve, download_object=tai_xuong)
 
     if dry_run:
         def khong_ghi(*a, **k):

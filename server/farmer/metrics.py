@@ -51,6 +51,12 @@ class LaneMetrics:
     #: gia va truot) va KHAC `failed` (hong). Mot con so lon o day nghia la
     #: may danh gia dang tat, khong phai nguon dang kem.
     review_pending: int = 0
+    #: Tac pham DANG DO duoc chay tiep: da co ban nhap tu mot lan truoc,
+    #: nhung chua co bo hien vat. KHAC `deduped` (da xong that su).
+    resumed: int = 0
+    #: Ban mp3 da xong duoc gan vao manifest trong vong nay. TTS chay bat
+    #: dong bo nen viec nay hau nhu luon xay ra o mot vong SAU vong duyet.
+    audio_attached: int = 0
     #: Da guong xong len Google Drive trong vong nay.
     archived: int = 0
     #: Ghi R2 xong nhung Drive chua nhan. KHAC `failed`: tac pham VAN hop le
@@ -72,6 +78,8 @@ class LaneMetrics:
             "published_candidates": self.published_candidates,
             "blocked_no_cover": self.blocked_no_cover,
             "review_pending": self.review_pending,
+            "resumed": self.resumed,
+            "audio_attached": self.audio_attached,
             "archived": self.archived,
             "archive_pending": self.archive_pending,
             "failed": self.failed, "skipped_quota": self.skipped_quota,
@@ -99,6 +107,10 @@ class FarmerStatus:
     archive: Dict[str, Any] = field(default_factory=dict)
     #: Toan ven trinh thong dich luc khoi dong.
     integrity: Dict[str, Any] = field(default_factory=dict)
+    #: Bia duong PHUC VU (MediaAsset cua Appwrite). Mot khoang thieu DA BIET
+    #: va duoc noi ro MOT lan o day, thay vi mot dong loi cho tung tac pham
+    #: moi vong. Cong tranh THAT nam o kho chinh tac, khong o day.
+    serving_cover: Dict[str, Any] = field(default_factory=dict)
     #: Tong don gian tich luy tron doi tien trinh — de ve do thi.
     totals: Dict[str, int] = field(default_factory=dict)
 
@@ -118,6 +130,7 @@ class FarmerStatus:
             "quotas": self.quotas,
             "archive": self.archive,
             "integrity": self.integrity,
+            "serving_cover": self.serving_cover,
             "totals": dict(self.totals),
         }
 
@@ -153,11 +166,13 @@ class MetricsWriter:
               round_started: float, healthy: bool = True,
               unhealthy_reason: str = "",
               archive: Optional[Dict[str, Any]] = None,
-              integrity: Optional[Dict[str, Any]] = None) -> FarmerStatus:
+              integrity: Optional[Dict[str, Any]] = None,
+              serving_cover: Optional[Dict[str, Any]] = None) -> FarmerStatus:
         self._accumulate(lanes)
         status = FarmerStatus(
             archive=dict(archive or {}),
             integrity=dict(integrity or {}),
+            serving_cover=dict(serving_cover or {}),
             started_at=self._started_at,
             updated_at=_now(),
             round_number=self._round,

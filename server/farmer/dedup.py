@@ -135,6 +135,99 @@ class DedupIndex:
         return any(canonicalize_url(n.external_source_url or "") == canon
                    for n in novels if n.external_source_url)
 
+    def novel_has_tts_job(self, novel_id: str,
+                          owner_id: str = FARMER_OWNER) -> bool:
+        """Tac pham nay DA co job TTS chua — hoi kho, khong suy dien.
+
+        Can cho lan chay tiep. Suy dien "dang chay tiep tuc la lan truoc da
+        xep TTS roi" NGHE hop ly nhung SAI: buoc xuat ban va buoc TTS la hai
+        buoc khac nhau, va mot tac pham co the da co ban nhap ma chua bao gio
+        xep duoc TTS (vd loi mang dung giua hai buoc). Suy dien nhu vay se de
+        no CAM LANG vinh vien — cung hinh dang loi voi cai vua sua o tren,
+        chi khac cho.
+
+        `DedupError` khi khong hoi duoc. Ben goi BO QUA TTS vong nay roi thu
+        lai vong sau: mot su co Appwrite la tam thoi, con mot job TTS trung
+        la tien tinh that cho cung mot ban thu am.
+        """
+        try:
+            for ch in self._store.list_chapters(novel_id):
+                if self._store.list_jobs(owner_id, ch.chapter_id):
+                    return True
+            return False
+        except Exception as exc:
+            raise DedupError(
+                f"khong kiem duoc job TTS cua {novel_id}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
+    def novel_has_chapter(self, novel_id: str) -> bool:
+        """Ban nhap nay co chuong nao doc duoc khong.
+
+        Mot `novel` KHONG co chuong la mot ban nhap HONG, khong phai mot ban
+        nhap dung lai duoc: `POST /api/novels` va `POST /api/chapters` la hai
+        loi goi, va loi goi thu hai co the truot rieng.
+
+        Da xay ra that: `MAX_CHAPTER_CHARS` = 100.000 (server/main.py). Hai
+        tac pham 224k va 117k ky tu tao duoc novel roi bi tu choi o buoc
+        chuong. Lan chay tiep dung lai cai novel rong do, bo qua buoc xuat
+        ban, va van dat READY — mot tac pham "san sang" ma tren trang khong
+        co gi de doc.
+        """
+        try:
+            return bool(self._store.list_chapters(novel_id))
+        except Exception as exc:
+            raise DedupError(
+                f"khong doc duoc chuong cua {novel_id}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
+    def finished_tts_output_key(self, novel_id: str,
+                                owner_id: str = FARMER_OWNER):
+        """`output_key` cua job TTS DA XONG, hoac None.
+
+        Tach khoi `novel_has_tts_job` vi hai cau hoi khac nhau: "co can xep
+        khong" va "da co am thanh de gan vao manifest chua". Mot job dang
+        chay tra loi CO cho cau dau va CHUA cho cau sau.
+        """
+        try:
+            for ch in self._store.list_chapters(novel_id):
+                for j in self._store.list_jobs(owner_id, ch.chapter_id):
+                    trang_thai = getattr(j.status, "value", j.status)
+                    if str(trang_thai).lower() == "completed" and j.output_key:
+                        return j.output_key
+            return None
+        except Exception as exc:
+            raise DedupError(
+                f"khong doc duoc ket qua TTS cua {novel_id}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
+    def existing_text_novel_id(self, canonical_url: str,
+                               owner_id: str = FARMER_OWNER):
+        """`novel_id` cua ban nhap DA CO cho nguon nay, hoac None.
+
+        Ton tai de mot lan chay lai KHONG tao ban trung. `text_already_farmed`
+        tra ve mot chu "roi" — con o day ta can chinh CAI DINH DANH, de buoc
+        xuat ban duoc BO QUA thay vi POST them mot novel thu hai cho cung mot
+        tac pham.
+
+        Do la khac biet giua "da gat roi" va "da gat DEN DAU". Mot tac pham co
+        ban ghi novel nhung chua co hien vat la mot tac pham DANG DO, khong
+        phai mot tac pham xong.
+        """
+        try:
+            novels, _ = self._store.find_novels(owner_id=owner_id,
+                                                limit=NOVEL_SCAN_LIMIT)
+        except Exception as exc:
+            raise DedupError(
+                f"khong tra cuu duoc ban nhap cho {canonical_url}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
+        canon = canonicalize_url(canonical_url)
+        for n in novels:
+            if n.external_source_url and \
+                    canonicalize_url(n.external_source_url) == canon:
+                return n.novel_id
+        return None
+
 
 def _la_khong_tim_thay(exc: Exception) -> bool:
     """Phan biet '404 — chua co' voi 'mang hong'. Chi 404 moi duoc doc thanh

@@ -105,6 +105,7 @@ class ProductionWriter:
 
     def __init__(self, *, put_object: PutObject,
                  get_object: Optional[Callable[[str], bytes]] = None,
+                 download_object: Optional[Callable[[str, Path], Any]] = None,
                  generate_artwork: Optional[Callable[[str], Any]] = None,
                  archive_file: Optional[Callable[..., Any]] = None,
                  mirror_to_drive: bool = True):
@@ -112,9 +113,44 @@ class ProductionWriter:
         #: Chi can cho `attach_audio` (doc lai manifest cu de BO SUNG thay vi
         #: ghi de). Duong ghi chinh khong bao gio doc lai gi, nen no tuy chon.
         self._get = get_object
+        #: Tai mot object XUONG DIA. Rieng khoi `get_object` (tra `bytes`) vi
+        #: ban mp3 co the vai tram MB va dich vu chay duoi `MemoryMax=1G`.
+        self._download = download_object
         self._art = generate_artwork or artwork.generate
         self._archive = archive_file or drive_archive.archive_file
         self._mirror = mirror_to_drive
+
+    def manifest_for(self, bucket: str, url: str):
+        """Manifest cua mot tac pham, hoac None. Duong doc, khong ghi gi."""
+        return self.read_manifest(canonical_dir(bucket, url))
+
+    def work_complete(self, bucket: str, url: str) -> bool:
+        """Tac pham nay DA XONG chua — do bang HIEN VAT, khong bang ban ghi.
+
+        Day la dinh nghia "da gat roi" dung dan, va no thay cho phep kiem cu
+        ("co ban ghi novel chua"). Su khac biet khong hoc thuat chut nao:
+
+            Mot tac pham co novel nhung khong co manifest la mot tac pham
+            DANG DO. Phep kiem cu goi no la "xong", nen no khong bao gio
+            duoc thu lai — mot lan hong o giua duong bien thanh vinh vien.
+
+        Da xay ra HAI lan tren may san xuat: bon tac pham fanfiction that,
+        deu da qua cong danh gia, deu tao novel va xep TTS, roi dung o buoc
+        bia va bi khoa lai mai mai vi novel cua chinh chung lam chung "trung
+        lap" voi chinh minh.
+
+        Fail closed: khong doc duoc thi coi la CHUA xong. Doan "chac xong roi"
+        se lang le bo qua mot tac pham that; doan nguoc lai chi ton mot vong
+        lam lai, va buoc xuat ban da biet dung lai ban nhap cu.
+        """
+        if self._get is None:
+            return False
+        try:
+            man = WorkManifest.from_dict(json.loads(
+                self._get(f"{canonical_dir(bucket, url)}/{ARTIFACT_MANIFEST}")))
+        except Exception:                                       # noqa: BLE001
+            return False
+        return bool(man.ready)
 
     # -- duong chinh --------------------------------------------------------
     def write_approved(self, *, bucket: str, url: str, title: str, body: str,
@@ -161,9 +197,11 @@ class ProductionWriter:
 
         # 3. Guong Drive — TRUOC khi ghi manifest, de manifest noi dung su
         #    that ve trang thai luu tru thay vi mot du doan.
+        self._da_guong: List[str] = []
         ket_qua_luu = self._mirror_files(bucket, url, cuc_bo)
         man.archive_state = ket_qua_luu.status
         man.archive_path = ket_qua_luu.remote_path
+        man.archived_artifacts = list(self._da_guong)
 
         # 4. Manifest — SAU cung, vi no mo ta moi thu tren.
         man.decision = canonical.DECISION_APPROVE
@@ -203,24 +241,77 @@ class ProductionWriter:
             blocked_reason=f"quyet dinh: {quyet_dinh}",
             artifacts_written=[ARTIFACT_MANIFEST])
 
-    def attach_audio(self, *, bucket: str, url: str, object_key: str,
-                     local_path: Optional[Path] = None) -> None:
-        """Ghi nhan ban audio da xong vao manifest (va guong len Drive).
+    def audio_archived(self, man: WorkManifest) -> bool:
+        """Ban mp3 da co ban sao ben vung chua.
+
+        KHAC voi "da gan vao manifest": mot khoa R2 nam trong `artifacts` chi
+        noi rang tep co tren duong PHUC VU. Gop hai cau hoi lam mot chinh la
+        ly do bon tac pham dau tien co manifest ghi audio ma tren Drive khong
+        he co tep mp3 nao.
+        """
+        return ARTIFACT_AUDIO_VI in (man.archived_artifacts or [])
+
+    def attach_audio(self, *, bucket: str, url: str, object_key: str) -> str:
+        """Gan ban audio vao manifest VA guong len Drive.
 
         Tach rieng vi TTS chay BAT DONG BO tren Cloud Run: khoanh khac tac
         pham duoc duyet va khoanh khac co tep mp3 khong bao gio la mot.
+
+        Idempotent va chay tiep duoc — tra ve mot trong:
+
+            "KHONG_CO_MANIFEST" | "DA_DAY_DU" | "DA_GAN" | "DA_GUONG"
+            | "GUONG_HOAN"
+
+        Goi lai khi da day du la mot lan doc, khong phai mot lan ghi. Con khi
+        `artifacts` da co audio ma Drive thi chua, no lam NOT phan con thieu —
+        do la duong sua cho nhung tac pham da gan audio truoc khi buoc guong
+        ton tai.
         """
         thu_muc = canonical_dir(bucket, url)
-        man = self._read_manifest(thu_muc)
+        man = self.read_manifest(thu_muc)
         if man is None:
-            return
+            return "KHONG_CO_MANIFEST"
+
+        da_gan = man.artifacts.get(ARTIFACT_AUDIO_VI) == object_key
+        if da_gan and self.audio_archived(man):
+            return "DA_DAY_DU"
+
         man.artifacts[ARTIFACT_AUDIO_VI] = object_key
-        if local_path is not None and self._mirror:
-            ket_qua = self._archive(
-                local_path, work_key=f"{_rel(thu_muc)}/audio")
-            man.archive_state = ket_qua.status
-            man.archive_path = ket_qua.remote_path or man.archive_path
+        ket_qua = self._mirror_audio(man, thu_muc, object_key)
         self._write_manifest(man, thu_muc)
+        if ket_qua is None:
+            return "DA_GAN"
+        return "DA_GUONG" if ket_qua else "GUONG_HOAN"
+
+    def _mirror_audio(self, man: WorkManifest, thu_muc: str,
+                      object_key: str) -> Optional[bool]:
+        """Tai mp3 tu R2 xuong dia roi COPY len Drive.
+
+        `None` = khong thu (guong tat, hoac khong co duong tai). `True`/`False`
+        = da thu va thanh cong/that bai.
+
+        Tai XUONG DIA chu khong vao RAM: dich vu chay duoi `MemoryMax=1G` va
+        mot track dai co the vai tram MB — `get()` se lam no bi giet chu khong
+        chi cham.
+        """
+        if not self._mirror or self._download is None:
+            return None
+        duoi = Path(object_key).suffix or ".mp3"
+        try:
+            with tempfile.TemporaryDirectory(prefix="farmer-audio-") as tmp:
+                tep = Path(tmp) / (Path(ARTIFACT_AUDIO_VI).stem + duoi)
+                self._download(object_key, tep)
+                ket_qua = self._archive(
+                    tep, work_key=f"{_rel(thu_muc)}/audio")
+        except Exception as exc:                                # noqa: BLE001
+            man.archive_state = drive_archive.ARCHIVE_PENDING
+            return False
+        if ket_qua.status != drive_archive.ARCHIVE_DONE:
+            man.archive_state = drive_archive.ARCHIVE_PENDING
+            return False
+        if ARTIFACT_AUDIO_VI not in man.archived_artifacts:
+            man.archived_artifacts.append(ARTIFACT_AUDIO_VI)
+        return True
 
     # -- ben trong ----------------------------------------------------------
     def _manifest(self, *, wid: str, thu_muc: str, bucket: str, url: str,
@@ -272,7 +363,7 @@ class ProductionWriter:
                 f"khong ghi duoc manifest cho {man.work_id}: "
                 f"{type(exc).__name__}: {exc}") from exc
 
-    def _read_manifest(self, thu_muc: str) -> Optional[WorkManifest]:
+    def read_manifest(self, thu_muc: str) -> Optional[WorkManifest]:
         doc = self._get
         if doc is None:
             return None
@@ -292,6 +383,7 @@ class ProductionWriter:
                 detail="guong Drive tat cho lan ghi nay")
         goc_tuong_doi = _rel(canonical_dir(bucket, url))
         cuoi = drive_archive.ArchiveOutcome(drive_archive.ARCHIVE_PENDING)
+        self._da_guong = []
         try:
             with tempfile.TemporaryDirectory(prefix="farmer-arc-") as tmp:
                 for ten, du_lieu in noi_dung.items():
@@ -305,6 +397,7 @@ class ProductionWriter:
                         # Mot tep hong thi ca bo la CHUA xong — bao dung su
                         # that thay vi bao xong vi tep cuoi tinh co thanh cong.
                         return cuoi
+                    self._da_guong.append(ten)
         except Exception as exc:                                # noqa: BLE001
             return drive_archive.ArchiveOutcome(
                 drive_archive.ARCHIVE_PENDING,

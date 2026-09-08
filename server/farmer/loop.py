@@ -204,10 +204,38 @@ class ProductionFarmer:
                 m.failed += 1
                 continue
 
+            # KHU TRUNG LAP do bang HIEN VAT, khong bang ban ghi.
+            #
+            # "Da co novel" va "da xong" la hai chuyen khac nhau, va nham lan
+            # chung da khoa vinh vien bon tac pham fanfiction that tren may
+            # san xuat: chung tao novel, xep TTS, roi hong o buoc bia — sau do
+            # chinh novel cua chung lam chung "trung lap" voi chinh minh.
+            #
+            # Nen: xong = CO MANIFEST va da READY. Co novel ma chua co manifest
+            # = DANG DO, va phai duoc chay tiep (dung lai ban nhap cu, khong
+            # tao ban thu hai).
+            from server.farmer.canonical import bucket_for_lane
+
+            bucket = bucket_for_lane(LANE_TEXT)
             try:
-                if self._dedup.text_already_farmed(khoa.canonical_url):
+                if self._writer is not None:
+                    if self._writer.work_complete(bucket, c.url):
+                        m.deduped += 1
+                        # DA XONG khong co nghia la KHONG CON VIEC GI.
+                        # READY khong doi hoi am thanh (TTS chay bat dong bo),
+                        # nen mot tac pham co the xong bo hien vat ma ban mp3
+                        # van dang chay — hoac chua tung duoc xep. Doi soat o
+                        # day, KHONG tai lai noi dung va KHONG danh gia lai.
+                        self._doi_soat_am_thanh(bucket, c, m)
+                        continue
+                    novel_co_san = self._dedup.existing_text_novel_id(
+                        khoa.canonical_url)
+                elif self._dedup.text_already_farmed(khoa.canonical_url):
+                    # Khong co writer (dry-run/kiem thu): giu hanh vi cu.
                     m.deduped += 1
                     continue
+                else:
+                    novel_co_san = None
             except DedupError as exc:
                 m.note_error(f"bo qua (khong kiem duoc trung lap): {exc}")
                 m.skipped_quota += 1
@@ -260,21 +288,67 @@ class ProductionFarmer:
                 continue
             m.approved += 1
 
-            # 3. Xuat ban thanh ban nhap (chua public).
-            try:
-                novel_id = self._publish_text(c, body)
-            except Exception as exc:                            # noqa: BLE001
-                m.note_error(f"tao ban nhap that bai {c.url}: "
-                             f"{type(exc).__name__}: {exc}")
-                m.failed += 1
-                continue
+            # 3. Ban nhap. DUNG LAI ban da co neu day la mot lan chay tiep —
+            #    POST them mot novel thu hai cho cung mot tac pham chinh la
+            #    dieu khu trung lap ton tai de ngan.
+            if novel_co_san:
+                # Ban nhap co that KHONG dong nghia ban nhap DUNG DUOC. Mot
+                # novel khong co chuong la mot ban nhap hong: hai loi goi API
+                # rieng biet, va cai thu hai truot duoc rieng.
+                try:
+                    du_dung = self._dedup.novel_has_chapter(novel_co_san)
+                except DedupError as exc:
+                    m.note_error(f"bo qua (khong doc duoc chuong): {exc}")
+                    m.skipped_quota += 1
+                    continue
+                if not du_dung:
+                    # KHONG di tiep toi buoc dat READY. Mot tac pham "san
+                    # sang" ma tren trang khong co gi de doc con te hon mot
+                    # tac pham chua san sang, vi khong ai thay no hong.
+                    m.failed += 1
+                    m.note_error(
+                        f"ban nhap {novel_co_san} khong co chuong nao — "
+                        f"van ban {len(body):,} ky tu, gioi han moi chuong la "
+                        f"100.000 (FAS_MAX_CHAPTER_CHARS). Can cat chuong "
+                        f"truoc khi tac pham nay xuat ban duoc: {c.url}")
+                    continue
+                novel_id = novel_co_san
+                m.resumed += 1
+            else:
+                try:
+                    novel_id = self._publish_text(c, body)
+                except Exception as exc:                        # noqa: BLE001
+                    m.note_error(f"tao ban nhap that bai {c.url}: "
+                                 f"{type(exc).__name__}: {exc}")
+                    m.failed += 1
+                    continue
 
             # 4. TTS qua Cloud Run — khong tong hop tren may nay.
-            from server.farmer.canonical import bucket_for_lane
-
-            bucket = bucket_for_lane(LANE_TEXT)
+            #
+            # Lan chay TIEP: HOI xem da co job TTS chua, khong suy dien.
+            #
+            # Xep lai mu quang se chat dong job trung cho cung mot chuong moi
+            # vong. Nhung BO QUA mu quang thi te hon: buoc xuat ban va buoc
+            # TTS la hai buoc khac nhau, nen mot tac pham co the da co ban
+            # nhap ma chua bao gio xep duoc TTS — va no se CAM LANG vinh vien.
+            # Da co that: hai tac pham READY o vong truoc khong he co job TTS.
             tts_job_id = ""
-            khe_tts = self._quotas.try_slot(FarmerQuotas.TTS)
+            can_tts = True
+            if novel_co_san:
+                try:
+                    can_tts = not self._dedup.novel_has_tts_job(novel_id)
+                except DedupError as exc:
+                    # Khong hoi duoc -> bo qua VONG NAY roi thu lai. Su co
+                    # Appwrite la tam thoi; job TTS trung thi ton tien that.
+                    can_tts = False
+                    m.note_error(f"chay tiep {novel_id}: hoan TTS ({exc})")
+                else:
+                    m.note_error(
+                        f"chay tiep {novel_id}: "
+                        + ("xep TTS (chua co job nao)" if can_tts
+                           else "khong xep lai TTS (da co job)"))
+            khe_tts = (self._quotas.try_slot(FarmerQuotas.TTS) if can_tts
+                       else None)
             if khe_tts is not None:
                 try:
                     tts_job_id = self._enqueue_tts(novel_id) or ""
@@ -283,28 +357,41 @@ class ProductionFarmer:
                                  f"{type(exc).__name__}: {exc}")
                 finally:
                     khe_tts.__exit__(None, None, None)
-            else:
+            elif can_tts:
+                # Het han muc TTS that su. Khac han "khong can xep" (da co
+                # job roi) — gop hai cai lam mot se bao dong gia moi vong.
                 m.skipped_quota += 1
 
             m.produced += 1
 
-            # 5. CONG BIA tren duong PHUC VU (Appwrite media asset). Rieng
-            #    voi buoc 6: cai nay gan bia vao ban ghi novel; buoc 6 ghi
-            #    tranh vao KHO SAN XUAT chinh tac.
-            try:
-                self._covers.ensure_cover(novel_id=novel_id, title=c.title)
-                self._covers.assert_publishable(novel_id)
-            except CoverRequired as exc:
-                # Tac pham VAN ton tai o trang thai nhap; no chi khong duoc
-                # gan nhan ung vien xuat ban. Vong sau se thu sinh bia lai.
-                m.blocked_no_cover += 1
-                m.note_error(f"chan xuat ban (chua co bia) {novel_id}: {exc}")
-                continue
-            except Exception as exc:                            # noqa: BLE001
-                m.blocked_no_cover += 1
-                m.note_error(f"loi cong bia {novel_id}: "
-                             f"{type(exc).__name__}: {exc}")
-                continue
+            # 5. Bia tren duong PHUC VU (MediaAsset cua Appwrite) — CO GANG,
+            #    KHONG phai cong.
+            #
+            #    `MediaAssetStore` la mot Protocol ma ban trien khai DUY NHAT
+            #    la `MockMediaAssetStore`; `AppwriteMetadataStore` khong co
+            #    `list_assets`. Nen o may san xuat that, buoc nay nem
+            #    `AttributeError` MOI LAN. Truoc day no `continue`, va do la
+            #    ly do that su khien hai tac pham DA DUOC DUYET (82 va 78
+            #    diem) khong bao gio co hien vat nao: chung dung o day, im
+            #    lang, sau khi da tao novel va da xep TTS.
+            #
+            #    Yeu cau "phai co tranh truoc READY" KHONG bi noi long — no
+            #    duoc cuong che o BUOC 6 bang `WorkManifest.publishable()`,
+            #    tren hai tep `artwork/cover.webp` va `artwork/background.webp`
+            #    co that trong kho chinh tac. Do la mot cong KIEM DUOC; buoc 5
+            #    thi dang cho mot kho chua ton tai.
+            if getattr(self._covers, "available", True):
+                try:
+                    self._covers.ensure_cover(novel_id=novel_id, title=c.title)
+                    self._covers.assert_publishable(novel_id)
+                except Exception as exc:                        # noqa: BLE001
+                    # Ghi lai de khong mat dau vet, roi DI TIEP: cong that o
+                    # buoc 6.
+                    m.note_error(f"bia duong phuc vu chua san sang {novel_id} "
+                                 f"(khong chan): {type(exc).__name__}: {exc}")
+            # Bi CACH LY thi khong goi, va khong bao lai o day: ly do da nam
+            # MOT dong trong `status.json`. Lap lai no cho tung tac pham moi
+            # vong chi lam nhung loi that kho thay hon.
 
             # 6. KHO SAN XUAT CHINH TAC — van ban chuan hoa, tranh, manifest,
             #    guong Drive. Cong READY nam o day chu khong o buoc 5: mot
@@ -339,6 +426,94 @@ class ProductionFarmer:
                 m.note_error(f"chua READY {ket_qua.work_id}: "
                              f"{ket_qua.blocked_reason}")
         return m
+
+    def _doi_soat_am_thanh(self, bucket: str, c: Candidate,
+                           m: LaneMetrics) -> None:
+        """Gan ban mp3 da xong vao manifest, hoac xep TTS neu chua tung xep.
+
+        Ton tai vi READY **khong** doi hoi am thanh: TTS chay bat dong bo tren
+        Cloud Run, nen khoanh khac bo hien vat day du va khoanh khac co tep
+        mp3 khong bao gio la mot. Ma "da xong" lai la dieu kien de vong lap
+        BO QUA mot tac pham — nen neu khong doi soat o day, mot tac pham dat
+        READY truoc khi co am thanh se khong bao gio duoc nhin lai.
+
+        Da xay ra that: hai tac pham dat READY ma khong he co job TTS nao
+        (ban va truoc cua chinh toi bo qua buoc TTS khi chay tiep). Chung se
+        cam lang vinh vien, va khong mot bo dem nao bao dieu do.
+
+        KHONG tai lai noi dung va KHONG danh gia lai — chi doc kho va gan.
+        """
+        if self._writer is None:
+            return
+        try:
+            man = self._writer.manifest_for(bucket, c.url)
+        except Exception as exc:                                # noqa: BLE001
+            m.note_error(f"khong doc duoc manifest {c.url}: "
+                         f"{type(exc).__name__}: {exc}")
+            return
+        if man is None or not man.novel_id:
+            return
+
+        from server.farmer.canonical import ARTIFACT_AUDIO_VI
+
+        khoa_da_gan = man.artifacts.get(ARTIFACT_AUDIO_VI)
+        if khoa_da_gan and self._writer.audio_archived(man):
+            return                          # co tren ca hai duong, xong han
+
+        # Da gan nhung CHUA len Drive van la viec chua xong. Do la trang thai
+        # cua moi tac pham duoc san xuat truoc khi buoc guong am thanh ton
+        # tai — chung co mp3 tren duong phuc vu va khong co ban sao ben vung
+        # nao. Duong nay la duong sua cho chung.
+        khoa = khoa_da_gan
+        if not khoa:
+            try:
+                khoa = self._dedup.finished_tts_output_key(man.novel_id)
+            except DedupError as exc:
+                m.note_error(f"hoan doi soat am thanh {man.novel_id}: {exc}")
+                return
+
+        if khoa:
+            try:
+                ket_qua = self._writer.attach_audio(
+                    bucket=bucket, url=c.url, object_key=khoa)
+            except Exception as exc:                            # noqa: BLE001
+                m.note_error(f"gan am thanh that bai {man.novel_id}: "
+                             f"{type(exc).__name__}: {exc}")
+                return
+            if ket_qua == "DA_GUONG":
+                m.audio_attached += 1
+                m.archived += 1
+            elif ket_qua == "GUONG_HOAN":
+                m.audio_attached += 1
+                m.archive_pending += 1
+                m.note_error(f"am thanh da gan nhung Drive chua nhan "
+                             f"{man.novel_id} — se thu lai vong sau")
+            elif ket_qua == "DA_GAN":
+                m.audio_attached += 1
+            return
+
+        # Chua co ban mp3. Neu cung chua co job nao thi xep — day la duong
+        # cuu mot tac pham da READY nhung bi bo quen khong co TTS.
+        try:
+            if self._dedup.novel_has_tts_job(man.novel_id):
+                return                              # dang chay, cho vong sau
+        except DedupError as exc:
+            m.note_error(f"hoan xep TTS {man.novel_id}: {exc}")
+            return
+
+        khe = self._quotas.try_slot(FarmerQuotas.TTS)
+        if khe is None:
+            m.skipped_quota += 1
+            return
+        try:
+            self._enqueue_tts(man.novel_id)
+            m.note_error(f"da READY nhung thieu TTS — da xep bu "
+                         f"{man.novel_id}")
+        except Exception as exc:                                # noqa: BLE001
+            m.note_error(f"xep TTS bu that bai {man.novel_id}: "
+                         f"{type(exc).__name__}: {exc}")
+        finally:
+            khe.__exit__(None, None, None)
 
     def _ghi_ban_an(self, c: Candidate, body: str, verdict: Any,
                     m: LaneMetrics) -> None:
@@ -377,7 +552,8 @@ class ProductionFarmer:
             self._metrics.write(
                 lanes=lanes, quotas=self._quotas.snapshot().as_dict(),
                 round_started=bat_dau, healthy=False, unhealthy_reason=ly_do,
-                archive=self._archive_status(), integrity=self._integrity)
+                archive=self._archive_status(), integrity=self._integrity,
+                serving_cover=self._serving_cover_status())
             return lanes
 
         lanes = {
@@ -389,8 +565,18 @@ class ProductionFarmer:
             lanes=lanes, quotas=self._quotas.snapshot().as_dict(),
             round_started=bat_dau, healthy=not co_loi,
             unhealthy_reason="co cong doan that bai trong vong nay" if co_loi else "",
-            archive=self._archive_status(), integrity=self._integrity)
+            archive=self._archive_status(), integrity=self._integrity,
+            serving_cover=self._serving_cover_status())
         return lanes
+
+    def _serving_cover_status(self) -> Dict[str, Any]:
+        """Bia duong PHUC VU — MOT dong trong status, khong phai mot dong loi
+        cho tung tac pham moi vong."""
+        if hasattr(self._covers, "status"):
+            return self._covers.status()
+        from server.farmer.covers import SERVING_COVER_OK
+
+        return {"state": SERVING_COVER_OK, "reason": ""}
 
     def _review(self, c: Candidate, body: str):
         """Goi cong danh gia.

@@ -113,13 +113,19 @@ class _Harness:
         # Kho san xuat chinh tac, gia lap toan bo: R2 la mot dict, tranh la
         # hai chuoi byte, Drive la mot danh sach. Duong ma duoc chay THAT —
         # chi ba bien gioi ngoai la gia.
-        self.objects, self.archived = {}, []
+        self.objects, self.archived, self.downloaded = {}, [], []
 
         def put(key, data, content_type="application/octet-stream"):
             self.objects[key] = data
 
         def get(key):
             return self.objects[key]
+
+        def tai_xuong(key, dest):
+            # Ban mp3 duoc tai XUONG DIA (khong vao RAM) truoc khi guong len
+            # Drive — cung duong ma `R2StorageAdapter.get_file` di.
+            self.downloaded.append(key)
+            Path(dest).write_bytes(b"ID3fake-mp3:" + key.encode())
 
         def sinh_tranh(wid):
             return (b"COVER:" + wid.encode(), b"BG:" + wid.encode())
@@ -130,7 +136,8 @@ class _Harness:
                                   remote_path=f"fanfic-gdrive:{work_key}")
 
         self.writer = ProductionWriter(
-            put_object=put, get_object=get, generate_artwork=sinh_tranh,
+            put_object=put, get_object=get, download_object=tai_xuong,
+            generate_artwork=sinh_tranh,
             archive_file=luu_tru) if with_writer else None
 
         self.farmer = ProductionFarmer(
@@ -176,21 +183,66 @@ class TextLaneOrderTest(unittest.TestCase):
         # Da guong len Drive.
         self.assertTrue(h.archived, "chua guong tep nao len Drive")
 
-    def test_a_duplicate_is_never_fetched(self):
-        """Khu trung lap dat TRUOC khi tai — day la diem ca ranh gioi do ton
-        tai: khong tai lai thu da co."""
-        class _Co(_Store):
-            def find_novels(self, owner_id=None, limit=None, **kw):
-                n = mock.Mock(external_source_url="https://e.com/a")
-                return [n], 1
+    def test_a_finished_work_is_never_fetched_again(self):
+        """Khu trung lap dat TRUOC khi tai — khong tai lai thu da XONG.
 
+        "Xong" duoc do bang HIEN VAT (manifest da READY), khong bang ban ghi
+        novel. Xem `test_a_half_finished_work_is_resumed` ngay duoi de biet vi
+        sao su khac biet do quan trong.
+        """
         with TemporaryDirectory() as d:
-            h = _Harness(tmp=Path(d), store=_Co(),
+            h = _Harness(tmp=Path(d),
                          text_candidates=[_text("https://e.com/a")])
+            # Chay mot lan cho tac pham hoan tat that su...
+            h.farmer.run_text_lane()
+            self.assertEqual(h.fetched, ["https://e.com/a"])
+            # ...roi chay lai: khong duoc cham vao no nua.
             m = h.farmer.run_text_lane()
         self.assertEqual(m.deduped, 1)
-        self.assertEqual(h.fetched, [])
-        self.assertEqual(h.published, [])
+        self.assertEqual(h.fetched, ["https://e.com/a"])   # khong tai lan hai
+        self.assertEqual(len(h.published), 1)              # khong tao ban trung
+
+    def test_a_half_finished_work_is_resumed_not_skipped(self):
+        """Co novel nhung CHUA co hien vat = DANG DO, phai chay tiep.
+
+        Day la loi da khoa vinh vien bon tac pham fanfiction that tren may san
+        xuat: chung tao novel, xep TTS, roi hong o buoc bia — sau do chinh
+        novel cua chung lam chung "trung lap" voi chinh minh, mai mai.
+
+        Chay tiep phai DUNG LAI ban nhap cu (khong POST novel thu hai) va
+        KHONG xep lai TTS (lan truoc da xep).
+        """
+        class _CoNovel(_Store):
+            def find_novels(self, owner_id=None, limit=None, **kw):
+                n = mock.Mock(external_source_url="https://e.com/a",
+                              novel_id="nov_cu")
+                return [n], 1
+
+            def list_chapters(self, novel_id):
+                # Ban nhap DUNG DUOC: co chuong that. Xem
+                # `test_a_draft_with_no_chapter_is_not_reusable` cho nhanh kia.
+                return [mock.Mock(chapter_id="ch_1")]
+
+            def list_jobs(self, owner_id, chapter_id=None):
+                return [mock.Mock(job_id="job_cu")]
+
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d), store=_CoNovel(),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+
+        self.assertEqual(m.resumed, 1)
+        self.assertEqual(m.deduped, 0)
+        self.assertEqual(h.published, [])          # KHONG tao novel thu hai
+        self.assertEqual(h.tts, [])                # KHONG xep lai TTS
+        self.assertEqual(m.published_candidates, 1)
+        # Hien vat duoc ghi duoi work_id cua nguon, gan voi novel DA CO.
+        man = [k for k in h.objects if k.endswith("/manifest.json")]
+        self.assertTrue(man, sorted(h.objects))
+        import json as _json
+        noi_dung = _json.loads(h.objects[
+            [k for k in man if "/manifests/" not in k][0]])
+        self.assertEqual(noi_dung["serving"]["novel_id"], "nov_cu")
 
     def test_a_rejected_work_never_reaches_tts(self):
         """Duyet dat TRUOC san xuat — khong tra tien TTS cho rac."""
@@ -217,12 +269,42 @@ class TextLaneOrderTest(unittest.TestCase):
         self.assertEqual(h.published, [])
         self.assertEqual(h.tts, [])
 
-    def test_a_work_without_a_cover_is_not_a_publish_candidate(self):
-        """Tac pham VAN ton tai o dang nhap — no chi khong duoc gan nhan ung
-        vien xuat ban. Vong sau se thu sinh bia lai."""
+    def test_a_failing_serving_cover_no_longer_blocks_the_work(self):
+        """Bia duong PHUC VU khong con la cong — va do la mot sua loi, khong
+        phai mot lan noi long.
+
+        `MediaAssetStore` la mot Protocol ma ban trien khai duy nhat la mock;
+        `AppwriteMetadataStore` khong co `list_assets`. Tren may san xuat that
+        buoc nay hong MOI LAN, va vong lap cu `continue` — nen hai tac pham
+        duoc duyet 82 va 78 diem khong bao gio co lay mot hien vat nao, sau
+        khi da tao novel va da xep TTS.
+
+        Cong THAT ("phai co tranh truoc READY") nam o buoc kho chinh tac, tren
+        hai tep co that. Xem `test_the_real_artwork_gate_still_blocks` ngay
+        duoi.
+        """
         with TemporaryDirectory() as d:
             h = _Harness(tmp=Path(d), covers=_covers_failing(),
                          text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+        self.assertEqual(m.produced, 1)
+        self.assertEqual(m.published_candidates, 1)
+        # Su co van duoc ghi lai — di tiep khong phai nuot im lang.
+        self.assertTrue(any("bia duong phuc vu" in e for e in m.errors), m.errors)
+
+    def test_the_real_artwork_gate_still_blocks(self):
+        """Khong co tranh trong kho chinh tac thi KHONG phai ung vien xuat
+        ban — cong nay van cung y nhu truoc."""
+        from server.farmer.artwork import ArtworkError
+
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d),
+                         text_candidates=[_text("https://e.com/a")])
+
+            def tranh_hong(wid):
+                raise ArtworkError("ffmpeg vang mat")
+
+            h.writer._art = tranh_hong
             m = h.farmer.run_text_lane()
         self.assertEqual(m.produced, 1)
         self.assertEqual(m.published_candidates, 0)
@@ -307,15 +389,264 @@ class RoundTest(unittest.TestCase):
         self.assertEqual(vong, 2)
 
     def test_usage_budget_resets_between_rounds(self):
+        """HAI tac pham, han muc MOT lan danh gia moi vong.
+
+        Phai dung hai nguon khac nhau chu khong lap lai mot nguon: khu trung
+        lap se chan lan thu hai cua CUNG mot tac pham (dung y — no da xong),
+        va luc do phep do se noi ve khu trung lap chu khong ve han muc.
+        """
         with TemporaryDirectory() as d:
             q = FarmerQuotas(max_concurrent_downloads=5, max_review_requests=1,
                              max_tts_jobs=5, min_free_disk_bytes=1, work_dir=d)
             h = _Harness(tmp=Path(d), quotas=q,
-                         text_candidates=[_text("https://e.com/a")])
-            h.farmer.run_once()
-            h.farmer.run_once()
+                         text_candidates=[_text("https://e.com/a"),
+                                          _text("https://e.com/b")])
+            mot = h.farmer.run_once()
+            hai = h.farmer.run_once()
+
+        # Vong 1: mot cai qua duoc, cai kia het han muc.
+        self.assertEqual(mot[LANE_TEXT].reviewed, 1)
+        self.assertEqual(mot[LANE_TEXT].skipped_quota, 1)
+        # Vong 2: cai da xong bi khu trung lap, cai con lai duoc danh gia —
+        # tuc la han muc DA duoc dat lai.
+        self.assertEqual(hai[LANE_TEXT].deduped, 1)
+        self.assertEqual(hai[LANE_TEXT].reviewed, 1)
         self.assertEqual(h.provider.calls, 2)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResumeTtsTest(unittest.TestCase):
+    """Lan chay tiep phai HOI xem da co job TTS chua, khong suy dien.
+
+    Suy dien "dang chay tiep tuc la lan truoc da xep TTS" nghe hop ly nhung
+    sai: xuat ban va TTS la hai buoc khac nhau. Hai tac pham that da READY
+    ma khong he co job TTS nao — chung se cam lang vinh vien.
+    """
+
+    class _CoNovel(_Store):
+        def __init__(self, jobs, chapters=1):
+            super().__init__()
+            self._jobs = jobs
+            self._chapters = chapters
+
+        def find_novels(self, owner_id=None, limit=None, **kw):
+            return [mock.Mock(external_source_url="https://e.com/a",
+                              novel_id="nov_cu")], 1
+
+        def list_chapters(self, novel_id):
+            return [mock.Mock(chapter_id=f"ch_{i}")
+                    for i in range(self._chapters)]
+
+        def list_jobs(self, owner_id, chapter_id=None):
+            return list(self._jobs)
+
+    def test_a_draft_with_no_chapter_is_not_reusable(self):
+        """Ban nhap CO THAT khong dong nghia ban nhap DUNG DUOC.
+
+        `POST /api/novels` va `POST /api/chapters` la hai loi goi rieng. Da
+        xay ra that: hai tac pham 224k va 117k ky tu vuot MAX_CHAPTER_CHARS
+        (100.000), tao duoc novel roi truot o buoc chuong. Lan chay tiep dung
+        lai cai novel RONG do va van dat READY — mot tac pham "san sang" ma
+        tren trang khong co gi de doc.
+        """
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d),
+                         store=self._CoNovel(jobs=[], chapters=0),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+
+        self.assertEqual(m.failed, 1)
+        self.assertEqual(m.resumed, 0)
+        self.assertEqual(m.published_candidates, 0)
+        self.assertFalse([k for k in h.objects if k.endswith("/manifest.json")],
+                         "khong duoc ghi manifest cho mot ban nhap hong")
+        self.assertTrue(any("khong co chuong nao" in e for e in m.errors),
+                        m.errors)
+
+    def test_resume_enqueues_tts_when_none_exists(self):
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d), store=self._CoNovel(jobs=[]),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+        self.assertEqual(m.resumed, 1)
+        self.assertEqual(h.tts, ["nov_cu"])          # DA xep
+        self.assertEqual(m.published_candidates, 1)
+
+    def test_resume_does_not_enqueue_a_second_tts_job(self):
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d),
+                         store=self._CoNovel(jobs=[mock.Mock(job_id="job_cu")]),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+        self.assertEqual(m.resumed, 1)
+        self.assertEqual(h.tts, [])                  # KHONG xep trung
+        self.assertEqual(m.published_candidates, 1)
+
+    def test_an_unreadable_job_list_defers_tts_instead_of_duplicating(self):
+        class _Hong(self._CoNovel):
+            def list_jobs(self, owner_id, chapter_id=None):
+                raise RuntimeError("Appwrite tu choi")
+
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d), store=_Hong(jobs=[]),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+        self.assertEqual(h.tts, [])                  # hoan, khong doan
+        self.assertEqual(m.skipped_quota, 0)         # KHONG phai het han muc
+        self.assertTrue(any("hoan TTS" in e for e in m.errors), m.errors)
+
+
+class AudioReconcileTest(unittest.TestCase):
+    """Mot tac pham DA XONG van con viec: gan ban mp3 vao manifest.
+
+    READY khong doi hoi am thanh (TTS chay bat dong bo), nhung "da xong" lai
+    la dieu kien de vong lap BO QUA. Khong doi soat thi mot tac pham dat
+    READY truoc khi co am thanh se khong bao gio duoc nhin lai.
+    """
+
+    class _KhoTTS(_Store):
+        def __init__(self, jobs):
+            super().__init__()
+            self._jobs = jobs
+
+        def list_chapters(self, novel_id):
+            return [mock.Mock(chapter_id="ch_1")]
+
+        def list_jobs(self, owner_id, chapter_id=None):
+            return list(self._jobs)
+
+    @staticmethod
+    def _job(status="completed", key="audio/x/y.mp3"):
+        return mock.Mock(status=status, output_key=key)
+
+    def _chay_xong_roi(self, d, jobs):
+        """Chay mot vong cho tac pham hoan tat, roi chay vong hai."""
+        h = _Harness(tmp=Path(d), store=self._KhoTTS(jobs=jobs),
+                     text_candidates=[_text("https://e.com/a")])
+        h.farmer.run_text_lane()               # vong 1: san xuat, dat READY
+        return h, h.farmer.run_text_lane()     # vong 2: doi soat
+
+    def test_finished_audio_is_attached_to_the_manifest(self):
+        import json as _json
+
+        with TemporaryDirectory() as d:
+            h, m = self._chay_xong_roi(d, [self._job()])
+            self.assertEqual(m.deduped, 1)
+            self.assertEqual(m.audio_attached, 1)
+            khoa = [k for k in h.objects
+                    if k.endswith("/manifest.json") and "/manifests/" not in k]
+            man = _json.loads(h.objects[khoa[0]])
+        self.assertEqual(man["artifacts"]["audio/vi.mp3"], "audio/x/y.mp3")
+
+    def test_a_ready_work_with_no_tts_job_gets_one_queued(self):
+        """Duong cuu tac pham da READY nhung bi bo quen khong co TTS — dung
+        tinh huong ma ban va truoc cua toi tao ra tren may san xuat."""
+        with TemporaryDirectory() as d:
+            h, m = self._chay_xong_roi(d, [])
+        # Vong 1 xep mot lan (tac pham moi), vong 2 KHONG xep bu vi vong 1 da
+        # xep — nhung neu kho bao khong co job nao thi phai xep bu.
+        self.assertEqual(m.deduped, 1)
+        self.assertTrue(any("xep bu" in e for e in m.errors), m.errors)
+        self.assertEqual(h.tts, ["nov_1", "nov_1"])
+
+    def test_a_running_job_is_left_alone(self):
+        with TemporaryDirectory() as d:
+            h, m = self._chay_xong_roi(
+                d, [self._job(status="processing", key="")])
+        self.assertEqual(m.audio_attached, 0)
+        self.assertEqual(h.tts, ["nov_1"])       # khong xep them
+        self.assertFalse([e for e in m.errors if "xep bu" in e])
+
+    def test_audio_is_mirrored_to_drive_not_just_attached(self):
+        """Gan vao manifest KHAC voi co ban sao ben vung.
+
+        Bon tac pham dau tien co manifest ghi khoa mp3 ma tren Drive khong he
+        co tep audio nao — hai cau hoi bi gop lam mot.
+        """
+        import json as _json
+
+        with TemporaryDirectory() as d:
+            h, m = self._chay_xong_roi(d, [self._job()])
+            self.assertEqual(m.audio_attached, 1)
+            # Tep mp3 THAT SU di len Drive, vao dung thu muc con `audio`.
+            self.assertTrue([k for k in h.archived if k.endswith("/audio")],
+                            h.archived)
+            khoa = [k for k in h.objects
+                    if k.endswith("/manifest.json") and "/manifests/" not in k]
+            man = _json.loads(h.objects[khoa[0]])
+        self.assertIn("audio/vi.mp3", man["archive"]["artifacts"])
+
+    def test_an_already_complete_work_is_not_rewritten(self):
+        """Doi soat lan hai la mot lan DOC, khong phai mot lan ghi."""
+        with TemporaryDirectory() as d:
+            h, _ = self._chay_xong_roi(d, [self._job()])
+            truoc = len(h.archived)
+            m = h.farmer.run_text_lane()      # vong 3
+        self.assertEqual(m.audio_attached, 0)
+        self.assertEqual(len(h.archived), truoc, "khong duoc guong lai")
+
+    def test_audio_attached_but_never_mirrored_gets_repaired(self):
+        """Duong SUA cho tac pham san xuat truoc khi buoc guong ton tai."""
+        import json as _json
+
+        with TemporaryDirectory() as d:
+            h, _ = self._chay_xong_roi(d, [self._job()])
+            # Gia lap trang thai cu: da gan audio, chua guong bao gio.
+            khoa = [k for k in h.objects
+                    if k.endswith("/manifest.json") and "/manifests/" not in k][0]
+            man = _json.loads(h.objects[khoa])
+            man["archive"]["artifacts"] = [a for a in man["archive"]["artifacts"]
+                                           if a != "audio/vi.mp3"]
+            h.objects[khoa] = _json.dumps(man).encode("utf-8")
+            truoc = len(h.archived)
+
+            m = h.farmer.run_text_lane()
+            sau = _json.loads(h.objects[khoa])
+
+        self.assertEqual(m.audio_attached, 1)
+        self.assertGreater(len(h.archived), truoc, "phai guong bu ban mp3")
+        self.assertIn("audio/vi.mp3", sau["archive"]["artifacts"])
+
+
+class QuarantinedServingCoverTest(unittest.TestCase):
+    """Kho khong ho tro media asset => cong bia duong phuc vu bi CACH LY."""
+
+    def test_a_store_without_list_assets_is_quarantined(self):
+        from server.farmer.covers import (
+            SERVING_COVER_QUARANTINED, build_cover_gate,
+        )
+
+        gate = build_cover_gate(_Store())
+        self.assertFalse(gate.available)
+        self.assertEqual(gate.status()["state"], SERVING_COVER_QUARANTINED)
+        self.assertIn("media_assets", gate.status()["reason"])
+
+    def test_a_quarantined_gate_is_never_called_and_stays_quiet(self):
+        from server.farmer.covers import build_cover_gate
+
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d), covers=build_cover_gate(_Store()),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+
+        # Tac pham van di het duong...
+        self.assertEqual(m.published_candidates, 1)
+        # ...va KHONG co dong loi lap lai nao ve bia duong phuc vu.
+        self.assertFalse([e for e in m.errors if "bia duong phuc vu" in e],
+                         m.errors)
+
+    def test_a_capable_store_still_gets_a_real_gate(self):
+        from server.farmer.covers import CoverGate, build_cover_gate
+
+        class _CoAsset(_Store):
+            def list_assets(self, owner_id):
+                return []
+
+            def create_asset(self, asset):
+                return asset
+
+        gate = build_cover_gate(_CoAsset(), mock.Mock())
+        self.assertIsInstance(gate, CoverGate)

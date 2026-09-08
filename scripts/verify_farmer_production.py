@@ -98,6 +98,8 @@ for wid in sorted(work_ids):
     print(f"    [{{'OK' if man.ready else 'XX'}}] co READY (publishable)")
     print(f"    novel_id={{man.novel_id or '(khong)'}} "
           f"tts_job_id={{man.tts_job_id or '(khong)'}}")
+    am = man.artifacts.get(canonical.ARTIFACT_AUDIO_VI) or "(chua co)"
+    print(f"    audio   : {{am}}")
     print(f"    luu tru : {{man.archive_state}} {{man.archive_path}}")
 
     tren_drive = drive_ls(f"{{drive_archive.remote_name()}}:{{d}}")

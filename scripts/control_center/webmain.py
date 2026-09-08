@@ -97,13 +97,23 @@ def main(argv=None) -> int:
         _bao_thieu_goi(str(exc.name or "uvicorn"))
         return 2
 
+    from scripts.control_center.bootstrap import khoi_tao
     from scripts.control_center.engine import ControlCenter
     from scripts.control_center.webapi import PhienWeb, dung_app
 
     cong = a.port or cong_rong()
     token = secrets.token_urlsafe(32)
-    cc = ControlCenter(root=Path(a.root) if a.root else None,
-                       max_parallel=a.max_parallel)
+    goc = Path(a.root).resolve() if a.root else Path.cwd()
+    cc = ControlCenter(root=goc, max_parallel=a.max_parallel)
+    # `khoi_tao` GIEO du an mac dinh cua ban phat hanh (`fanfic`, `router`).
+    #
+    # Ban dau webmain dung `ControlCenter` truc tiep va BO QUA buoc nay, nen
+    # mo giao dien web tren mot may moi ra mot sidebar RONG — khong du an
+    # nao, va duong duy nhat vao la tu go duong dan kho. Hai launcher kia
+    # (`__main__.py` cua TUI va cua Qt) deu goi `khoi_tao`; bo qua no o day
+    # lam ba duong vao khong con giong nhau. Phat hien bang cach chup DOM
+    # that bang Chrome cuc bo, khong bang bai kiem nao.
+    khoi_tao(cc.store, root=goc)
     if not a.no_recover:
         try:
             cc.recover()
@@ -115,17 +125,23 @@ def main(argv=None) -> int:
     app = dung_app(phien)
 
     dia = f"http://{DIA_CHI}:{cong}"
-    print("=" * 66)
+    duong_day_du = f"{dia}/?t={token}"
+    print("=" * 78)
     print("  Router Control Center — giao diện web")
-    print(f"  {dia}")
+    print(f"  {duong_day_du}")
     print("  (chỉ localhost · mọi request đòi token phiên)")
-    print("=" * 66)
+    print("=" * 78)
+    # IN CA TOKEN, va co ly do: khong in thi voi `--khong-mo` KHONG CO CACH
+    # NAO mo duoc giao dien, va neu nguoi dung dong tab thi ho mat luon
+    # duong vao cho tan khi khoi dong lai server. Console nay la cua chinh
+    # ho, tren may cua ho; token chi song trong mot lan chay.
+    sys.stdout.flush()
 
     if not a.khong_mo:
         # Mo trinh duyet SAU khi server san sang. Doi mot nhip ngan thay vi
         # mo ngay: mo truoc khi uvicorn bind xong se cho ra mot trang loi
         # ket noi, va nguoi dung phai tu bam tai lai.
-        duong = f"{dia}/?t={token}"
+        duong = duong_day_du
         if a.project:
             duong += f"#project={a.project}"
         threading.Timer(0.8, lambda: webbrowser.open(duong)).start()

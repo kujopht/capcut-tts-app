@@ -180,6 +180,63 @@ class TestWrapperChanDiVong(unittest.TestCase):
                 self.assertIn("TỪ CHỐI", p.stdout + p.stderr)
                 self.assertNotIn("mã lạ đã chạy", p.stdout + p.stderr)
 
+    def test_cwd_gia_o_BAT_KY_dau_khong_chay_duoc_ma_cua_no(self):
+        """Rào `cwd` chấp nhận **bất kỳ** đường dẫn có `.router/worktrees`
+        kề nhau trong tổ tiên — kể cả một cây dựng ở chỗ khác trên đĩa.
+
+        Phải nới như vậy vì worktree của dự án `fanfic` nằm dưới KHO CHÍNH,
+        không dưới `REPO_ROOT` của tệp này; bản siết chặt hơn đã từ chối
+        100% động từ trên đúng dự án MẶC ĐỊNH (xem review đối kháng #4).
+
+        Nới rào chỉ an toàn vì MỘT lý do, và lý do đó là bất biến mà bài
+        kiểm này khoá lại: **không động từ nào ĐƯỢC CẤP nạp mã theo `cwd`.**
+        `changes` chạy `git status`; `compile` chỉ BIÊN DỊCH (ghi `.pyc`,
+        không thực thi). Động từ duy nhất từng chạy mã của `cwd` là `tests`,
+        và nó đã bị rút khỏi allowlist.
+
+        Nếu ai đó cấp lại một động từ chạy mã, bài kiểm này hỏng — và đó
+        đúng là lúc `_kiem_cwd` phải được siết lại, không phải lúc sửa bài
+        kiểm cho xanh.
+        """
+        gia = Path(tempfile.mkdtemp(prefix="cc-fake-")) / ".router" / "worktrees" / "x"
+        (gia / "scripts" / "tests").mkdir(parents=True)
+        # `__init__.py` KHONG phai chi tiet trang tri. Tu Python 3.11,
+        # `unittest discover` chi nap thu muc IMPORT DUOC — thieu hai tep nay
+        # thi khong tim thay gi va bai kiem XANH MA KHONG KIEM GI. Da kiem
+        # bang mutation: cap lai `tests` khi thieu chung -> van xanh.
+        # Cay that cua agent LA mot ban checkout cua kho, nen no CO san hai
+        # tep nay; cay gia phai giong cho do moi la mo hinh doi thu dung.
+        for goi in (gia / "scripts", gia / "scripts" / "tests"):
+            (goi / "__init__.py").write_text("", encoding="utf-8")
+        # Tep nay CHAY duoc neu bi `unittest discover` nap. Neu mot dong tu
+        # duoc cap nao nap no, tep chung tich duoi day se xuat hien.
+        dau = gia / "DA_CHAY.txt"
+        (gia / "scripts" / "tests" / "test_evil.py").write_text(
+            "import pathlib\n"
+            f"pathlib.Path(r'{dau}').write_text('x', encoding='utf-8')\n",
+            encoding="utf-8")
+
+        # Rao THAT SU chap nhan cwd nay — bai kiem khong vo tinh xanh vi bi
+        # tu choi tu vong ngoai.
+        # Kiem DUNG cai rao, khong kiem ma thoat cua lenh: `git status` o mot
+        # cay khong phai kho se thoat 128 du rao da cho qua. Chung cu rao cho
+        # qua la VANG mat loi tu choi (`TuChoi` luon thoat 2 kem "TU CHOI").
+        p = self._chay("changes", gia)
+        self.assertNotEqual(p.returncode, 2, "rào phải chấp nhận cwd này")
+        self.assertNotIn("TỪ CHỐI", p.stdout + p.stderr)
+
+        for verb in {c.rsplit(" ", 1)[1] for c in LENH_CHO_PHEP}:
+            with self.subTest(verb=verb):
+                # Xoa dau truoc MOI dong tu: neu de lai, dong tu dau tien
+                # chay ma se lam moi dong tu sau do bao loi oan.
+                if dau.exists():
+                    dau.unlink()
+                self._chay(verb, gia)
+                self.assertFalse(
+                    dau.exists(),
+                    f"động từ được cấp {verb!r} đã CHẠY mã của cwd — "
+                    f"phải siết lại `_kiem_cwd`, không phải sửa bài kiểm")
+
     def test_cwd_TRONG_kho_duoc_chap_nhan(self):
         """Siết chặt không được biến công cụ thành vô dụng."""
         p = self._chay("changes", REPO)

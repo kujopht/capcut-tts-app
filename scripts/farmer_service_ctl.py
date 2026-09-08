@@ -70,7 +70,7 @@ cat {STATUS_JSON} 2>/dev/null || echo "(chua co)"
 
 _RESTART = f"systemctl restart {UNIT}"
 
-_LOGS = f"journalctl -u {UNIT} -n 60 --no-pager -o cat"
+_LOGS = f"journalctl -u {UNIT} --since '-90 min' --no-pager -o cat | tail -80"
 
 
 def main(argv=None) -> int:

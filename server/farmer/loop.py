@@ -288,23 +288,29 @@ class ProductionFarmer:
 
             m.produced += 1
 
-            # 5. CONG BIA tren duong PHUC VU (Appwrite media asset). Rieng
-            #    voi buoc 6: cai nay gan bia vao ban ghi novel; buoc 6 ghi
-            #    tranh vao KHO SAN XUAT chinh tac.
+            # 5. Bia tren duong PHUC VU (MediaAsset cua Appwrite) — CO GANG,
+            #    KHONG phai cong.
+            #
+            #    `MediaAssetStore` la mot Protocol ma ban trien khai DUY NHAT
+            #    la `MockMediaAssetStore`; `AppwriteMetadataStore` khong co
+            #    `list_assets`. Nen o may san xuat that, buoc nay nem
+            #    `AttributeError` MOI LAN. Truoc day no `continue`, va do la
+            #    ly do that su khien hai tac pham DA DUOC DUYET (82 va 78
+            #    diem) khong bao gio co hien vat nao: chung dung o day, im
+            #    lang, sau khi da tao novel va da xep TTS.
+            #
+            #    Yeu cau "phai co tranh truoc READY" KHONG bi noi long — no
+            #    duoc cuong che o BUOC 6 bang `WorkManifest.publishable()`,
+            #    tren hai tep `artwork/cover.webp` va `artwork/background.webp`
+            #    co that trong kho chinh tac. Do la mot cong KIEM DUOC; buoc 5
+            #    thi dang cho mot kho chua ton tai.
             try:
                 self._covers.ensure_cover(novel_id=novel_id, title=c.title)
                 self._covers.assert_publishable(novel_id)
-            except CoverRequired as exc:
-                # Tac pham VAN ton tai o trang thai nhap; no chi khong duoc
-                # gan nhan ung vien xuat ban. Vong sau se thu sinh bia lai.
-                m.blocked_no_cover += 1
-                m.note_error(f"chan xuat ban (chua co bia) {novel_id}: {exc}")
-                continue
             except Exception as exc:                            # noqa: BLE001
-                m.blocked_no_cover += 1
-                m.note_error(f"loi cong bia {novel_id}: "
-                             f"{type(exc).__name__}: {exc}")
-                continue
+                # Ghi lai de khong mat dau vet, roi DI TIEP: cong that o buoc 6.
+                m.note_error(f"bia duong phuc vu chua san sang {novel_id} "
+                             f"(khong chan): {type(exc).__name__}: {exc}")
 
             # 6. KHO SAN XUAT CHINH TAC — van ban chuan hoa, tranh, manifest,
             #    guong Drive. Cong READY nam o day chu khong o buoc 5: mot

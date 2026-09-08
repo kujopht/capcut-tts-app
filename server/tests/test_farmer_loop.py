@@ -217,12 +217,42 @@ class TextLaneOrderTest(unittest.TestCase):
         self.assertEqual(h.published, [])
         self.assertEqual(h.tts, [])
 
-    def test_a_work_without_a_cover_is_not_a_publish_candidate(self):
-        """Tac pham VAN ton tai o dang nhap — no chi khong duoc gan nhan ung
-        vien xuat ban. Vong sau se thu sinh bia lai."""
+    def test_a_failing_serving_cover_no_longer_blocks_the_work(self):
+        """Bia duong PHUC VU khong con la cong — va do la mot sua loi, khong
+        phai mot lan noi long.
+
+        `MediaAssetStore` la mot Protocol ma ban trien khai duy nhat la mock;
+        `AppwriteMetadataStore` khong co `list_assets`. Tren may san xuat that
+        buoc nay hong MOI LAN, va vong lap cu `continue` — nen hai tac pham
+        duoc duyet 82 va 78 diem khong bao gio co lay mot hien vat nao, sau
+        khi da tao novel va da xep TTS.
+
+        Cong THAT ("phai co tranh truoc READY") nam o buoc kho chinh tac, tren
+        hai tep co that. Xem `test_the_real_artwork_gate_still_blocks` ngay
+        duoi.
+        """
         with TemporaryDirectory() as d:
             h = _Harness(tmp=Path(d), covers=_covers_failing(),
                          text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+        self.assertEqual(m.produced, 1)
+        self.assertEqual(m.published_candidates, 1)
+        # Su co van duoc ghi lai — di tiep khong phai nuot im lang.
+        self.assertTrue(any("bia duong phuc vu" in e for e in m.errors), m.errors)
+
+    def test_the_real_artwork_gate_still_blocks(self):
+        """Khong co tranh trong kho chinh tac thi KHONG phai ung vien xuat
+        ban — cong nay van cung y nhu truoc."""
+        from server.farmer.artwork import ArtworkError
+
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d),
+                         text_candidates=[_text("https://e.com/a")])
+
+            def tranh_hong(wid):
+                raise ArtworkError("ffmpeg vang mat")
+
+            h.writer._art = tranh_hong
             m = h.farmer.run_text_lane()
         self.assertEqual(m.produced, 1)
         self.assertEqual(m.published_candidates, 0)

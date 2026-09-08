@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 #: Cay tep dua vao goi. Thu tu khong quan trong; noi dung thi co.
 GOM: Tuple[str, ...] = (
@@ -139,10 +139,18 @@ def dong_goi(ra_thu_muc: Path) -> Tuple[Path, str, int]:
     dong_manifest = [
         f"Router Control Center v{VERSION}",
         "",
-        "Chay:",
+        "GIAO DIEN DO HOA (duong chinh):",
+        "  python -m pip install -r requirements-control-center-gui.txt",
+        "  router-cc-gui.cmd        # bam doi duoc tu Explorer",
+        "  ./router-cc-gui          # hoac tu dong lenh",
+        "",
+        "GIAO DIEN TERMINAL (du phong / go loi):",
         "  python -m pip install -r requirements-control-room.txt",
         "  ./router-cc              # giao dien Textual",
         "  ./router-cc --headless   # anh chup JSON, khong can TTY",
+        "",
+        "Ca hai dung CHUNG mot so SQLite, nen mo canh nhau van thay cung",
+        "du an/viec/phien.",
         "",
         "SHA-256 cua tung tep:",
     ]

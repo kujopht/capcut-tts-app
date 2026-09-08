@@ -367,12 +367,17 @@ class HopThoai(QDialog):
         nhan.setStyleSheet("font-size:14px; font-weight:700;")
         thanh.addWidget(nhan)
         thanh.addStretch(1)
-        self.nut_x = QPushButton("✕")
+        # `×` (U+00D7 MULTIPLICATION SIGN), KHONG dung `✕`
+        # (U+2715 MULTIPLICATION X): Segoe UI khong co glyph cho
+        # U+2715 nen no ra HINH O VUONG. Mot o vuong tofu khong phai
+        # "nut X nhin thay duoc" — do la yeu cau nghiem thu so 4, nen
+        # day khong phai chuyen tham my.
+        self.nut_x = QPushButton("×")
         self.nut_x.setToolTip("Đóng (Esc)")
         self.nut_x.setCursor(Qt.PointingHandCursor)
-        self.nut_x.setFixedSize(28, 26)
+        self.nut_x.setFixedSize(30, 26)
         self.nut_x.setStyleSheet(
-            "QPushButton{border:none; font-size:15px; color:#5a6070;}"
+            "QPushButton{border:none; font-size:19px; color:#5a6070;}"
             "QPushButton:hover{background:#e8eaf0; border-radius:5px;}")
         self.nut_x.clicked.connect(self.reject)
         thanh.addWidget(self.nut_x)

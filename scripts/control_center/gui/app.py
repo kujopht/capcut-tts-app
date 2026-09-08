@@ -114,10 +114,13 @@ class CuaSoChinh(QMainWindow):
         self.nut_tro_giup.clicked.connect(self.mo_tro_giup)
         h.addWidget(self.nut_tro_giup)
 
-        self.nut_cai_dat = QPushButton("⚙")
+        # CHU, khong phai bieu tuong: `⚙` (U+2699 GEAR) khong co
+        # trong Segoe UI nen ra o vuong. Va mot nhan chu con dung hon
+        # voi luat "tooltip cho dieu khien la" — khong ai phai doan.
+        self.nut_cai_dat = QPushButton("Cài đặt")
         self.nut_cai_dat.setToolTip("Cài đặt")
         self.nut_cai_dat.setCursor(Qt.PointingHandCursor)
-        self.nut_cai_dat.setFixedSize(28, 26)
+        self.nut_cai_dat.setFixedHeight(26)
         self.nut_cai_dat.clicked.connect(self.mo_cai_dat)
         h.addWidget(self.nut_cai_dat)
         return khung
@@ -147,7 +150,7 @@ class CuaSoChinh(QMainWindow):
         self.nut_project_moi.clicked.connect(self.mo_project_moi)
         v.addWidget(self.nut_project_moi)
 
-        self.nut_cai_dat2 = QPushButton("⚙  Cài đặt")
+        self.nut_cai_dat2 = QPushButton("Cài đặt")
         self.nut_cai_dat2.setCursor(Qt.PointingHandCursor)
         self.nut_cai_dat2.clicked.connect(self.mo_cai_dat)
         v.addWidget(self.nut_cai_dat2)

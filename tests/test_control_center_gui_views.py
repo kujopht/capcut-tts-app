@@ -288,10 +288,42 @@ class TestHopThoaiVaTroGiup(unittest.TestCase):
         cls.app = _app()
 
     def test_hop_thoai_co_nut_X_nhin_thay_duoc(self):
+        """"Nhìn thấy được" nghĩa là PHÔNG CHỮ VẼ ĐƯỢC nó.
+
+        Bản đầu khẳng định đúng ký tự `✕` (U+2715). Nhưng Segoe UI —
+        phông mặc định của Windows — KHÔNG có glyph cho U+2715, nên nút
+        hiện ra một **hình ô vuông tofu**. Một ô vuông không phải "nút X
+        nhìn thấy được", và đó là yêu cầu nghiệm thu số 4.
+
+        Nên bài kiểm không khẳng định ký tự nào cả; nó hỏi phông chữ xem
+        có vẽ được ký tự đang dùng hay không. Như vậy nó bắt được CẢ LỚP
+        lỗi này, kể cả khi ai đó đổi sang một biểu tượng lạ khác.
+        """
+        from PySide6.QtGui import QFontDatabase, QFontMetrics
         h = HopThoai("thử", None)
         self.assertTrue(h.nut_x.isVisibleTo(h))
-        self.assertEqual(h.nut_x.text(), "✕")
+        self.assertTrue(h.nut_x.text().strip(), "nút X không có nhãn")
         self.assertIn("Esc", h.nut_x.toolTip())
+
+        # Nen `offscreen` khong tu nap phong nao, nen phai nap tay tu
+        # `C:/Windows/Fonts` — neu khong bai kiem se BO QUA thay vi kiem,
+        # va mot bai kiem bo qua thi khong bao ve gi ca.
+        for ten in ("segoeui.ttf", "arial.ttf", "tahoma.ttf"):
+            d = Path("C:/Windows/Fonts") / ten
+            if d.is_file():
+                QFontDatabase.addApplicationFont(str(d))
+        ho = [x for x in ("Segoe UI", "Arial", "Tahoma")
+              if x in QFontDatabase.families()]
+        if not ho:
+            self.skipTest("máy này không có phông Windows để hỏi")
+        from PySide6.QtGui import QFont
+        fm = QFontMetrics(QFont(ho[0], 12))
+        for ch in h.nut_x.text():
+            with self.subTest(ky_tu=hex(ord(ch))):
+                self.assertTrue(
+                    fm.inFontUcs4(ord(ch)),
+                    f"phông {ho[0]!r} không vẽ được {ch!r} "
+                    f"({hex(ord(ch))}) — nút sẽ ra ô vuông tofu")
 
     def test_nut_X_dong_hop_thoai(self):
         h = HopThoai("thử", None)

@@ -135,6 +135,31 @@ class DedupIndex:
         return any(canonicalize_url(n.external_source_url or "") == canon
                    for n in novels if n.external_source_url)
 
+    def novel_has_tts_job(self, novel_id: str,
+                          owner_id: str = FARMER_OWNER) -> bool:
+        """Tac pham nay DA co job TTS chua — hoi kho, khong suy dien.
+
+        Can cho lan chay tiep. Suy dien "dang chay tiep tuc la lan truoc da
+        xep TTS roi" NGHE hop ly nhung SAI: buoc xuat ban va buoc TTS la hai
+        buoc khac nhau, va mot tac pham co the da co ban nhap ma chua bao gio
+        xep duoc TTS (vd loi mang dung giua hai buoc). Suy dien nhu vay se de
+        no CAM LANG vinh vien — cung hinh dang loi voi cai vua sua o tren,
+        chi khac cho.
+
+        `DedupError` khi khong hoi duoc. Ben goi BO QUA TTS vong nay roi thu
+        lai vong sau: mot su co Appwrite la tam thoi, con mot job TTS trung
+        la tien tinh that cho cung mot ban thu am.
+        """
+        try:
+            for ch in self._store.list_chapters(novel_id):
+                if self._store.list_jobs(owner_id, ch.chapter_id):
+                    return True
+            return False
+        except Exception as exc:
+            raise DedupError(
+                f"khong kiem duoc job TTS cua {novel_id}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
     def existing_text_novel_id(self, canonical_url: str,
                                owner_id: str = FARMER_OWNER):
         """`novel_id` cua ban nhap DA CO cho nguon nay, hoac None.

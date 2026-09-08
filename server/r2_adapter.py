@@ -85,6 +85,28 @@ class R2StorageAdapter:
             raise NotFoundError(f"Không đọc được object '{key}' từ R2: {exc}") from exc
         return response["Body"].read()
 
+    def get_file(self, key: str, dest: Any) -> str:
+        """
+        Tai object XUONG DIA, KHONG doc toan bo vao RAM.
+
+        Doi xung voi `put_file`, va vi cung mot ly do. `get()` tra ve `bytes`,
+        nen guong mot track dai (audio import toi ~2GB) len Google Drive bang
+        `get()` se nap ca tep vao bo nho. Dich vu farmer chay duoi
+        `MemoryMax=1G`, nen do khong phai mot dinh bo nho ma la mot lan bi
+        giet.
+
+        `download_file` cua boto3 tu STREAM xuong dia va tu chuyen sang
+        multipart khi can.
+        """
+        from pathlib import Path
+
+        try:
+            self._client.download_file(self._bucket, key, str(Path(dest)))
+        except Exception as exc:
+            raise NotFoundError(
+                f"Không tải được object '{key}' từ R2: {exc}") from exc
+        return str(dest)
+
     def exists(self, key: str) -> bool:
         try:
             self._client.head_object(Bucket=self._bucket, Key=key)

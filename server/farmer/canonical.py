@@ -194,6 +194,11 @@ class WorkManifest:
     artifacts: Dict[str, str] = field(default_factory=dict)
     archive_state: str = ""
     archive_path: str = ""
+    #: Ten hien vat DA len duoc Drive. Tach khoi `artifacts` vi hai cau hoi
+    #: khac nhau: "co tren duong phuc vu chua" va "da co ban sao ben vung
+    #: chua". Ban mp3 hau nhu luon dat trang thai dau truoc trang thai sau —
+    #: TTS chay bat dong bo, con guong Drive chi chay o mot vong sau do.
+    archived_artifacts: List[str] = field(default_factory=list)
     #: Ket qua CUOI cua cong READY tai luc ghi. Duoc luu chu khong tinh lai
     #: khi doc: mot manifest phai noi duoc no da di qua cong o trang thai nao,
     #: ke ca khi luat cong doi sau nay.
@@ -246,7 +251,8 @@ class WorkManifest:
                 "tags": list(self.tags),
             },
             "artifacts": dict(self.artifacts),
-            "archive": {"state": self.archive_state, "path": self.archive_path},
+            "archive": {"state": self.archive_state, "path": self.archive_path,
+                        "artifacts": list(self.archived_artifacts)},
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -291,6 +297,7 @@ class WorkManifest:
             artifacts=dict(data.get("artifacts") or {}),
             archive_state=str(luu.get("state", "")),
             archive_path=str(luu.get("path", "")),
+            archived_artifacts=[str(a) for a in (luu.get("artifacts") or [])],
             ready=bool(data.get("ready", False)),
             created_at=str(data.get("created_at", "")),
             updated_at=str(data.get("updated_at", "")),

@@ -116,13 +116,20 @@ def dem_webview2() -> int:
     la giao dien dang o trong cua so cua minh.
     """
     try:
+        # CHE DO NHI PHAN, co y: `text=True` se giai ma dau ra cua
+        # `tasklist` bang codec cua LOCALE, va `tasklist` ghi ra bang
+        # code page cua console voi thong diep da dia phuong hoa. Tren
+        # may Viet phep giai ma do co the nem `UnicodeDecodeError`, roi
+        # `except` ben duoi tra 0 — bao "khong co WebView2 nao" trong
+        # khi cua so dang mo. Ten tien trinh la ASCII nen so khop byte
+        # vua chinh xac vua khong the sai vi locale.
         r = subprocess.run(["tasklist", "/fo", "csv", "/nh"],
-                           capture_output=True, text=True, timeout=25)
+                           capture_output=True, timeout=25)
     except Exception:                                       # noqa: BLE001
         return 0
     n = 0
-    for dong in (r.stdout or "").splitlines():
-        if "msedgewebview2.exe" in dong.lower():
+    for dong in (r.stdout or b"").splitlines():
+        if b"msedgewebview2.exe" in dong.lower():
             n += 1
     return n
 
@@ -137,6 +144,50 @@ def kho_git_tam() -> Path:
               ["git", "add", "-A"], ["git", "commit", "-q", "-m", "seed"]):
         subprocess.run(c, cwd=goc, check=True, capture_output=True)
     return goc
+
+
+#: Trang thai tieng Viet gieo san. Ba cau nay la ba cau yeu cau
+#: nghiem thu doi dung tung chu.
+DU_AN_VIET = "Hàng đợi sản xuất"
+CHAT_VIET = ("Đường dẫn thử nghiệm — Người dùng"
+             " | ă â đ ê ô ơ ư Ă Â Đ Ê Ô Ơ Ư")
+TEP_VIET = "Đường dẫn thử nghiệm.csv"
+
+
+def gieo_trang_thai_tieng_viet(goc: Path) -> dict:
+    """Ghi san mot so co TIENG VIET, TRUOC khi EXE duoc mo lan dau.
+
+    Vi sao phai gieo truoc: yeu cau nghiem thu la "mo EXE tren trang
+    thai da co san". Su co cp1252 lo ra dung o luc KHOI DONG, nen mot
+    so rong khong chung minh duoc gi — pha co san chu tieng Viet trong
+    ten du an, trong chat, va trong ten tep dinh kem thi lan mo moi di
+    qua dung nhung duong da vo.
+    """
+    from scripts.control_center.attachments import KhoDinhKem
+    from scripts.control_center.bootstrap import khoi_tao
+    from scripts.control_center.model import Project
+    from scripts.control_center.store import ControlStore
+
+    st = ControlStore(root=goc)
+    try:
+        # Gieo du an mac dinh TRUOC (`khoi_tao` chi gieo khi so rong),
+        # de duong "gui mot viec that" ben duoi khong doi hanh vi.
+        khoi_tao(st, root=goc)
+        st.luu_project(Project(project_id="viet", name=DU_AN_VIET,
+                               repo_path=str(goc)))
+        # Gan dinh kem vao DUNG BAN TIN, khong chi vao du an: giao dien
+        # ve dinh kem BEN TRONG bong bong tin nhan
+        # (`dinh_kem_cua_message`), nen mot dinh kem chi thuoc du an
+        # thi khong hien o dau ca.
+        tin = st.them_chat("viet", "user", CHAT_VIET)
+        noi_dung = ("cột1,cột2\nĐường,dẫn\n"
+                    ).encode("utf-8")
+        dk = KhoDinhKem(st, goc=goc).them_tu_bytes(
+            "viet", noi_dung, TEP_VIET, message_id=tin.message_id)
+        return {"sha": dk.sha256, "co": dk.size_bytes,
+                "ten": dk.filename}
+    finally:
+        st.close()               # nha WAL truoc khi EXE mo cung so
 
 
 def mo_app(exe: str, goc: Path, cdp: int, log: Path):
@@ -154,8 +205,23 @@ def mo_app(exe: str, goc: Path, cdp: int, log: Path):
     else:
         lenh = [sys.executable, "-m", "scripts.control_center.desktop",
                 "--root", str(goc), "--debug-cdp", str(cdp)]
-    moi = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONUTF8="1",
-               PYTHONIOENCODING="utf-8")
+    # KHONG tiem `PYTHONUTF8` / `PYTHONIOENCODING` vao day, va day la
+    # dinh chinh CUA CHINH BO NGHIEM THU NAY. Ban truoc tiem ca hai, nen
+    # no do mot moi truong KHONG NGUOI DUNG NAO CO: bam doi tu Explorer
+    # thi khong ai dat bien nao ca. Ket qua la 19/19 xanh tren mot duong
+    # khong ai di, trong khi EXE that chet ngay khi mo voi
+    # `UnicodeEncodeError` tren chu `ư`.
+    #
+    # Bo nghiem thu phai chay EXE nhu NGUOI DUNG chay no: locale cua may,
+    # khong bien moi truong nao. Neu ma nguon can mot bien de song thi
+    # do la loi cua ma nguon.
+    #
+    # `PYTHONUNBUFFERED` thi giu: no khong lien quan gi den encoding, chi
+    # de nhat ky con hien ra ngay thay vi nam trong bo dem.
+    moi = dict(os.environ, PYTHONUNBUFFERED="1")
+    for _bien in ("PYTHONUTF8", "PYTHONIOENCODING",
+                  "PYTHONLEGACYWINDOWSSTDIO"):
+        moi.pop(_bien, None)            # ke ca khi CHA co san
     f = open(log, "wb")
     return subprocess.Popen(lenh, stdout=f, stderr=subprocess.STDOUT,
                             cwd=str(GOC), env=moi), f
@@ -171,6 +237,7 @@ def main(argv=None) -> int:
 
     bd = Bang()
     goc = kho_git_tam()
+    gieo = gieo_trang_thai_tieng_viet(goc)
     tam = Path(tempfile.mkdtemp(prefix="cc-desk-log-"))
     ph = None
     f1 = None
@@ -179,6 +246,7 @@ def main(argv=None) -> int:
     print("NGHIỆM THU VỎ DESKTOP — WebView2 THẬT")
     print(f"  chạy   : {a.exe or 'từ mã nguồn (python -m …desktop)'}")
     print(f"  kho tạm: {goc}")
+    print(f"  gieo   : {gieo['ten']!r} sha={gieo['sha'][:12]}…")
     print("=" * 78)
 
     try:
@@ -227,6 +295,69 @@ def main(argv=None) -> int:
                cdp.cho("return !!document.querySelector('#ds-project li')"),
                cdp.js("return [...document.querySelectorAll('#ds-project li')]"
                       ".map(x=>x.dataset.pid).join(',')"))
+        # -- 7v. TIENG VIET tren trang thai DA CO SAN ----------------------
+        #
+        # Day la bai kiem cho su co that: EXE chet ngay khi mo voi
+        # `UnicodeEncodeError` tren chu `ư`. Ba phep kiem duoi doi dung ba
+        # thu nguoi dung nhin thay — ten du an, chat, ten tep dinh kem —
+        # tren mot so DA CO chu tieng Viet TRUOC khi EXE duoc mo.
+        cdp.js("const li=document.querySelector('#ds-project li"
+               "[data-pid=\"viet\"]'); if(li) li.click(); return 1;")
+        bd.ghi("7v. tên dự án tiếng Việt hiện đúng trong sidebar",
+               cdp.cho("return [...document.querySelectorAll('#ds-project "
+                       "li')].some(x => x.textContent.includes("
+                       + json.dumps(DU_AN_VIET) + "))"),
+               DU_AN_VIET)
+        bd.ghi("7w. chat tiếng Việt đã lưu hiện đúng (ă â đ ê ô ơ ư …)",
+               cdp.cho("return (document.querySelector('#ds-tin')"
+                       ".textContent || '').includes("
+                       + json.dumps(CHAT_VIET) + ")"),
+               CHAT_VIET[:40] + "…")
+        bd.ghi("7x. tên tệp đính kèm tiếng Việt hiện đúng",
+               cdp.cho("return (document.querySelector('#ds-tin')"
+                       ".textContent || '').includes("
+                       + json.dumps(TEP_VIET) + ")"),
+               TEP_VIET)
+
+        # Byte tren dia phai KHOP hash da ghi trong so. Doc lai va bam
+        # hash DOC LAP thay vi tin con so trong SQLite: neu mot lop nao
+        # tren duong luu tru da "sua" van ban tieng Viet (bo dau, doi
+        # codec) thi hash se lech, va do la phep kiem "nguyen ven tung
+        # byte" that su.
+        from scripts.control_center.attachments import KhoDinhKem
+        from scripts.control_center.store import ControlStore
+        _st = ControlStore(root=goc)
+        try:
+            _ds = [x for x in _st.dinh_kem_cua_project("viet")
+                   if x.filename == TEP_VIET]
+            _p = KhoDinhKem(_st, goc=goc).duong_dan(_ds[0].attachment_id) \
+                if _ds else None
+            _tho = _p.read_bytes() if _p and _p.is_file() else b""
+        finally:
+            _st.close()
+        bd.ghi("7u. đính kèm tên tiếng Việt: hash + cỡ khớp từng byte",
+               bool(_tho)
+               and hashlib.sha256(_tho).hexdigest() == gieo["sha"]
+               and len(_tho) == gieo["co"],
+               f"sha256={gieo['sha'][:12]}… cỡ={gieo['co']} byte")
+
+        # Nhat ky cua chinh lan mo nay: KHONG duoc co ngoai le encoding, va
+        # phai la UTF-8 hop le. Doc BYTE roi giai ma nghiem ngat — neu vo
+        # thi tep khong phai UTF-8 va bai kiem dung phai do.
+        tho = (tam / "lan1.log").read_bytes()
+        try:
+            van = tho.decode("utf-8")
+            la_utf8 = True
+        except UnicodeDecodeError as exc:
+            van, la_utf8 = repr(exc), False
+        bd.ghi("7y. nhật ký khởi động là UTF-8 hợp lệ, KHÔNG UnicodeEncodeError",
+               la_utf8 and "UnicodeEncodeError" not in van
+               and "charmap" not in van,
+               f"{len(tho)} byte" if la_utf8 else van[:80])
+        bd.ghi("7z. nhật ký giữ nguyên chữ 'ư' (U+01B0)",
+               la_utf8 and "ư" in van,
+               next((d for d in van.splitlines() if "ư" in d), "")[:60])
+
         bd.ghi("7c. WebSocket sống",
                cdp.cho("return (document.querySelector('#tt-noi')"
                        ".textContent||'').includes('kết nối')"),
@@ -347,16 +478,37 @@ def main(argv=None) -> int:
         ph2, f2 = mo_app(a.exe, goc, a.cdp + 1, tam / "lan2.log")
         try:
             cdp2 = CDP(a.cdp + 1)
+            # Chon dung du an tieng Viet TRUOC MOI PHEP DOC: bang Tasks va
+            # danh sach tin nhan deu THEO DU AN, va moi thu da gui o lan mo
+            # truoc deu thuoc du an nay. Lan mo moi khong nhat thiet chon
+            # lai dung du an do — doc truoc khi chon thi doc mot bang RONG,
+            # va do la loi cua BAI KIEM, khong phai cua san pham.
+            cdp2.cho("const li=document.querySelector('#ds-project li"
+                     "[data-pid=\"viet\"]'); if(li){li.click(); return 1;} "
+                     "return 0;", han=30)
             con_viec = cdp2.cho("return document.querySelectorAll("
                                 "'#bang-tasks tbody tr').length >= 1", han=45)
             so_tin = cdp2.js("return document.querySelectorAll("
                              "'#ds-tin .tin').length")
             bd.ghi("9b. mở lại: việc và tin nhắn còn nguyên (SQLite)",
-                   con_viec and (so_tin or 0) >= 1,
-                   f"{so_tin} tin nhắn")
+                   bool(con_viec) and (so_tin or 0) >= 1,
+                   f"{so_tin} tin nhắn, {'có' if con_viec else 'KHÔNG có'} việc")
             bd.ghi("9c. đính kèm cũ vẫn xem được sau khi mở lại",
-                   cdp2.js("return !!document.querySelector('#ds-tin img')"
-                           ) is not None, "")
+                   bool(cdp2.cho("return !!document.querySelector("
+                                 "'#ds-tin img')", han=30)),
+                   "thumbnail ảnh đã dán còn hiển thị")
+            # Va tieng Viet van dung sau mot vong dong/mo — day la lan mo
+            # THU HAI tren so da co, dung tinh huong nguoi dung gap.
+            bd.ghi("9d. tiếng Việt còn nguyên sau khi đóng và mở lại",
+                   bool(cdp2.cho("return (document.querySelector('#ds-tin')"
+                                 ".textContent || '').includes("
+                                 + json.dumps(CHAT_VIET) + ")", han=30)),
+                   CHAT_VIET[:40] + "…")
+            tho2 = (tam / "lan2.log").read_bytes()
+            bd.ghi("9e. nhật ký lần mở thứ hai cũng sạch UnicodeEncodeError",
+                   b"UnicodeEncodeError" not in tho2
+                   and b"charmap" not in tho2,
+                   f"{len(tho2)} byte")
             cdp2.dong()
         finally:
             ph2.terminate()

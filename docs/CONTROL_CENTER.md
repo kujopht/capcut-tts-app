@@ -741,7 +741,83 @@ nháp. Nút **Gửi** là đường chính.
 
 ---
 
-## 14. Chưa làm (cố ý — ranh giới đã chọn)
+## 14. UTF-8 tường minh — vì sao locale không được quyết định codec
+
+**Sự cố:** `Router Control Center.exe` đã đóng gói **chết ngay khi bấm
+đôi**, trên máy Windows locale mặc định:
+
+```
+Failed to execute script 'desktop' due to unhandled exception:
+UnicodeEncodeError: 'charmap' codec can't encode character 'ư'
+character maps to <undefined>
+  ... desktop.py line 145 -> encodings/cp1252.py
+```
+
+`U+01B0` là chữ **ư**. Dòng gây lỗi là `print(f"[desktop] {kh.ly_do}")`,
+và ở lần mở đầu tiên `quyet_dinh()` trả về `ly_do = "chưa có backend nào
+— tự chạy"`. Câu ấy có bốn ký tự ngoài cp1252: `ư` `—` `ự` `ạ`.
+
+**Gốc rễ, nói cho đúng:** `print()` giao chuỗi cho **tầng văn bản** của
+luồng, và codec của tầng đó do **locale của Windows** quyết định. Lỗi
+không nằm ở tiếng Việt và không nằm ở console — lỗi là *để locale quyết
+định codec* cho dữ liệu ta đã biết chắc là Unicode.
+
+**Cách sửa:** `scripts/control_center/ghi_utf8.py`. Tự mã hoá sang UTF-8
+rồi ghi **BYTE** vào tầng nhị phân của luồng. UTF-8 biểu diễn được mọi
+điểm mã Unicode, nên phép mã hoá này **không thể thất bại** — không cần
+`errors=` gì cả, và không mất một byte tiếng Việt nào. Cùng đối tượng đó
+ghi thêm vào một tệp nhật ký mở với `encoding="utf-8"` tường minh, ở
+`.router/control_center/desktop.log` — với bản `--noconsole` thì đó là
+nơi DUY NHẤT đọc được chẩn đoán.
+
+### Những cách KHÔNG dùng, và vì sao
+
+| Cách | Vì sao không |
+|---|---|
+| `chcp 65001` | đổi console của người dùng, không sửa mã |
+| đổi locale Windows | bắt người dùng đổi hệ thống vì lỗi của ta |
+| đòi `PYTHONUTF8=1` | một biến bị quên là lỗi quay lại; bấm đôi trong Explorer thì không ai đặt |
+| bọc bằng `.cmd` | EXE phải tự đúng; launcher chỉ là tiện nghi |
+| `errors="replace"` / `"ignore"` | biến `ư` thành `?` hoặc mất hẳn — làm hỏng dữ liệu để giấu lỗi |
+| bỏ dấu / phiên âm | văn bản tiếng Việt phải nguyên vẹn từng byte |
+
+Bản trước **đã** dùng `sys.stdout.reconfigure(encoding="utf-8",
+errors="replace")` và nó vừa lossy vừa **không đủ**: trong bản build
+`--noconsole`, `sys.stdout` có thể là `None` hoặc không có
+`.reconfigure`, nên phép gọi bị bỏ qua âm thầm rồi `print()` vẫn đi qua
+codec của locale.
+
+### Luật cho mọi tệp Router sở hữu
+
+- `Path.read_text(encoding="utf-8")` / `write_text(..., encoding="utf-8")`
+- `open(..., encoding="utf-8")` — hoặc chế độ **nhị phân**, không có codec
+- `json.dumps(..., ensure_ascii=False)` cho mọi thứ người sẽ đọc
+- `subprocess.run(..., text=True)` **phải** kèm `encoding=` — nếu đầu ra
+  không ai đọc thì bỏ `text=True` và ở chế độ nhị phân
+
+Cưỡng chế bằng `scripts/tests/test_control_center_utf8_locale.py`: nó
+tính **bao đóng import** của `desktop.py` bằng AST rồi soi từng lời gọi
+trên đó, nên thêm một import mới không làm phạm vi lặng lẽ hụt đi. Miễn
+trừ phải ghi kèm lý do, và một miễn trừ **mồ côi** cũng làm bài kiểm đỏ.
+
+### Vì sao 19/19 bài kiểm cũ vẫn xanh khi EXE đang chết
+
+`control_center_desktop_acceptance.py` **tự tiêm `PYTHONUTF8=1` và
+`PYTHONIOENCODING=utf-8`** vào tiến trình con — đúng hai thứ không được
+phép dựa vào. Nó đo một môi trường không người dùng nào có: bấm đôi từ
+Explorer thì không ai đặt biến nào cả.
+
+Giờ bộ nghiệm thu **gỡ** các biến đó ra khỏi môi trường con, và có một
+bài kiểm quét bằng AST để nó không thể quay lại. Bài kiểm cp1252 thì làm
+điều ngược lại — nó **cưỡng chế** `PYTHONIOENCODING=cp1252:strict` cho
+tiến trình con *để làm hẹp*, và tự xác minh rằng mình đã làm hẹp được
+(mã cũ phải VẪN chết trong khung đó) trước khi tin bất kỳ kết quả nào.
+
+Bài học chung, và nó lớn hơn Unicode: **một bài kiểm chạy trong môi
+trường do chính nó dựng lên chỉ chứng minh được điều gì nếu môi trường ấy
+là môi trường người dùng có.**
+
+## 15. Chưa làm (cố ý — ranh giới đã chọn)
 
 Không phải thiếu sót — là ranh giới đã chọn:
 

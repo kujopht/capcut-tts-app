@@ -26,42 +26,42 @@ endpoint.
 """
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 import threading
 import time
 from pathlib import Path
 
-# Console Windows mac dinh la cp1252 va van ban o day co dau. Xem ghi chu
-# day du o `webmain.py` — cung ly do, cung ban va.
-for _luong in (sys.stdout, sys.stderr):
-    try:
-        if _luong and (_luong.encoding or "").lower() != "utf-8":
-            _luong.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:                                       # noqa: BLE001
-        pass
+from scripts.control_center.ghi_utf8 import (BoDocUTF8, GhiUTF8,
+                                             duong_nhat_ky,
+                                             hop_thoai_loi)
 
+# KHONG `sys.stdout.reconfigure(...)` o day, va do la mot dinh chinh:
+# ban truoc dung `reconfigure(encoding='utf-8', errors='replace')`, va no
+# vua LOSSY (bien `ư` thanh `?`) vua KHONG DU — trong ban build
+# `--noconsole`, `sys.stdout` co the la `None` hoac khong co
+# `.reconfigure`, nen phep goi bi bo qua am tham roi `print()` van di
+# qua codec cua locale va no ngoai le.
+#
+# Moi chan doan gio di qua `GhiUTF8`: ma hoa UTF-8 roi ghi BYTE. Xem
+# `ghi_utf8.py` cho ca cau chuyen.
 TIEU_DE = "Router Control Center"
+
+#: Doi tuong ghi chan doan. Nhan tep nhat ky trong `main()` khi da
+#: biet thu muc goc. Truoc do van ghi duoc ra luong — chi chua co
+#: tep.
+ghi = GhiUTF8()
 
 
 def _bao_loi(thong_diep: str) -> None:
-    """Báo lỗi theo đường NGƯỜI DÙNG THẤY.
+    """Bao loi theo duong NGUOI DUNG THAY.
 
-    EXE này build ở chế độ `--noconsole`, nên `stderr` không có ai đọc.
-    Đây là cùng bài học đã gặp ở `router-cc-gui.cmd`: bấm đôi mà thiếu phụ
-    thuộc thì im lặng hoàn toàn, và người dùng không có cách nào biết.
+    EXE build o che do `--noconsole`, nen `stderr` khong co ai doc. Ca
+    hai duong o day deu an toan voi Unicode: `GhiUTF8` ghi byte UTF-8,
+    va `MessageBoxW` la API wide (UTF-16).
     """
-    try:
-        sys.stderr.write(thong_diep + "\n")
-    except Exception:                                       # noqa: BLE001
-        pass
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(None, thong_diep, TIEU_DE, 0x10)
-        except Exception:                                   # noqa: BLE001
-            pass
+    ghi(thong_diep)
+    hop_thoai_loi(TIEU_DE, thong_diep)
 
 
 def _goc_mac_dinh() -> Path:
@@ -77,8 +77,13 @@ def _goc_mac_dinh() -> Path:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(
-        prog="Router Control Center",
+    # `BoDocUTF8`, khong phai `ArgumentParser`: moi chuoi `help=`
+    # duoi day la tieng Viet, va `argparse` ghi chung thang ra tang
+    # VAN BAN cua luong. Voi bo doc thuong thi `--help` tren may
+    # cp1252 nem `UnicodeEncodeError` tren chu `ứ` — dung loai loi da
+    # lam EXE chet, chi khac cho phat sinh.
+    ap = BoDocUTF8(
+        prog="Router Control Center", ghi=ghi,
         description="Router Control Center V0.2 — ứng dụng desktop")
     ap.add_argument("--root", default="", help="thư mục gốc giữ sổ .router/")
     ap.add_argument("--project", default="", help="dự án mở sẵn")
@@ -106,7 +111,7 @@ def main(argv=None) -> int:
                 "    python -m pip install -r "
                 "requirements-control-center-desktop.txt")
             return 2
-        print("phụ thuộc desktop: đủ")
+        ghi("phụ thuộc desktop: đủ")
         return 0
 
     try:
@@ -124,6 +129,12 @@ def main(argv=None) -> int:
 
     goc = Path(a.root).resolve() if a.root else _goc_mac_dinh()
 
+    # Tu day chan doan cung duoc ghi vao mot TEP UTF-8 canh so. Voi ban
+    # `--noconsole` thi day la NOI DUY NHAT doc duoc chan doan, nen no
+    # khong phai tien nghi — no la cach duy nhat de go loi mot lan mo
+    # that.
+    ghi.dat_tep(duong_nhat_ky(goc))
+
     # CDP cua WebView2 phai duoc dat TRUOC khi cua so duoc dung. Chi bat
     # khi co `--debug-cdp`: mo mot cong DevTools mac dinh la mo mot duong
     # dieu khien vao chinh cua so nay.
@@ -138,11 +149,11 @@ def main(argv=None) -> int:
         # KHONG bao loi bang MessageBox o day: bam doi hai lan la thao tac
         # binh thuong, va mot hop thoai loi cho viec do la lam nguoi dung
         # tuong minh vua lam sai.
-        print(f"[desktop] {kh.ly_do} — thoát.")
+        ghi(f"[desktop] {kh.ly_do} — thoát.")
         mot.nha()
         return 0
 
-    print(f"[desktop] {kh.ly_do}")
+    ghi(f"[desktop] {kh.ly_do}")
     cc = None
     sv = None
     luong = None
@@ -166,7 +177,7 @@ def main(argv=None) -> int:
             try:
                 cc.recover()
             except Exception as exc:                        # noqa: BLE001
-                print(f"[desktop] phục hồi bỏ qua: {exc}")
+                ghi(f"[desktop] phục hồi bỏ qua: {exc}")
         cc.start()
 
         phien = PhienWeb(cc, token=kh.token, cong=kh.cong)
@@ -190,7 +201,7 @@ def main(argv=None) -> int:
         ghi_tep_khoa(goc, ThongTinPhien(pid=os.getpid(), cong=kh.cong,
                                         token=kh.token,
                                         bat_dau_luc=time.time()))
-        print(f"[desktop] backend sẵn sàng ở 127.0.0.1:{kh.cong}")
+        ghi(f"[desktop] backend sẵn sàng ở 127.0.0.1:{kh.cong}")
 
     duong = duong_giao_dien(kh.cong, kh.token)
     if a.project:
@@ -199,10 +210,10 @@ def main(argv=None) -> int:
     def _khi_dong():
         """Đóng cửa sổ = tắt backend, TRỪ KHI ta không sở hữu nó."""
         if not kh.so_huu:
-            print("[desktop] backend do tiến trình khác sở hữu — để nguyên.")
+            ghi("[desktop] backend do tiến trình khác sở hữu — để nguyên.")
             mot.nha()
             return
-        print("[desktop] đang tắt backend…")
+        ghi("[desktop] đang tắt backend…")
         if sv is not None:
             sv.should_exit = True
         if luong is not None:
@@ -211,7 +222,7 @@ def main(argv=None) -> int:
             try:
                 cc.shutdown()
             except Exception as exc:                        # noqa: BLE001
-                print(f"[desktop] shutdown: {exc}")
+                ghi(f"[desktop] shutdown: {exc}")
         xoa_tep_khoa(goc)
         mot.nha()
 

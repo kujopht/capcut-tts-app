@@ -23,7 +23,6 @@ BA ĐIỀU VỀ AN TOÀN, vì một localhost server không phải là riêng t�
 """
 from __future__ import annotations
 
-import argparse
 import secrets
 import socket
 import sys
@@ -31,21 +30,22 @@ import threading
 import webbrowser
 from pathlib import Path
 
-# Console Windows mac dinh la cp1252, va MOI dong tep nay in ra deu la
-# tieng Viet co dau. Khong tu bao ve thi `--check` do UnicodeEncodeError va
-# THOAT 1 — nghia la cai cong kiem phu thuoc cua launcher bao "thieu goi"
-# trong khi khong thieu gi.
+from scripts.control_center.ghi_utf8 import (BoDocUTF8, GhiUTF8,
+                                             duong_nhat_ky,
+                                             hop_thoai_loi)
+
+# KHONG `reconfigure(encoding='utf-8', errors='replace')` o day nua, va
+# do la mot dinh chinh sau mot su co that: ban truoc lam dung the, va no
+# vua LOSSY (`errors='replace'` bien `ư` thanh `?`) vua KHONG DU —
+# khi `sys.stdout` la `None` hoac khong co `.reconfigure` thi phep goi bi
+# bo qua AM THAM, roi `print()` van di qua codec cua locale va no ngoai
+# le. Do dung la cach `Router Control Center.exe` chet luc mo.
 #
-# `router-cc-web.cmd` co dat PYTHONUTF8=1, nen duong bam doi khong bi. Nhung
-# lenh `python -m scripts.control_center.webmain` (co trong tai lieu) thi
-# bi — va do la lenh nguoi ta go khi go loi. Da vap dung loi nay o
-# `fanfic-ctl.cmd` va `router-cc.cmd`; lan nay chan ngay tai nguon.
-for _luong in (sys.stdout, sys.stderr):
-    try:
-        if _luong and (_luong.encoding or "").lower() != "utf-8":
-            _luong.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:                                       # noqa: BLE001
-        pass
+# Gio moi dong chan doan di qua `GhiUTF8`: ma hoa UTF-8 roi ghi BYTE vao
+# tang nhi phan. UTF-8 bieu dien duoc moi diem ma Unicode nen phep ma
+# hoa do khong the that bai, va khong mot byte tieng Viet nao bi mat.
+# Xem `ghi_utf8.py` cho ca cau chuyen.
+ghi = GhiUTF8()
 
 #: Dia chi bind. HANG SO, va co bai kiem doi no la 127.0.0.1.
 DIA_CHI = "127.0.0.1"
@@ -68,22 +68,15 @@ def _bao_thieu_goi(ten: str) -> None:
            "Cài đặt:\n"
            "    python -m pip install -r requirements-control-center-web.txt\n\n"
            "Hoặc dùng giao diện terminal:\n    router-cc")
-    try:
-        sys.stderr.write("control-center-web: " + loi + "\n")
-    except Exception:                                       # noqa: BLE001
-        pass
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                None, loi, "Router Control Center", 0x10)
-        except Exception:                                   # noqa: BLE001
-            pass
+    ghi("control-center-web: " + loi)
+    hop_thoai_loi("Router Control Center", loi)
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(
-        prog="control-center-web",
+    # Xem `BoDocUTF8`: chuoi `help=` tieng Viet + tang van ban cua
+    # luong theo locale = `--help` no tren may cp1252.
+    ap = BoDocUTF8(
+        prog="control-center-web", ghi=ghi,
         description="Router Control Center V0.2 — giao diện web cục bộ")
     ap.add_argument("--root", default="", help="thư mục gốc giữ sổ .router/")
     ap.add_argument("--project", default="", help="dự án mở sẵn")
@@ -104,7 +97,7 @@ def main(argv=None) -> int:
             except ModuleNotFoundError:
                 _bao_thieu_goi(ten)
                 return 2
-        print("phụ thuộc giao diện web: đủ")
+        ghi("phụ thuộc giao diện web: đủ")
         return 0
 
     try:
@@ -120,6 +113,7 @@ def main(argv=None) -> int:
     cong = a.port or cong_rong()
     token = secrets.token_urlsafe(32)
     goc = Path(a.root).resolve() if a.root else Path.cwd()
+    ghi.dat_tep(duong_nhat_ky(goc))
     cc = ControlCenter(root=goc, max_parallel=a.max_parallel)
     # `khoi_tao` GIEO du an mac dinh cua ban phat hanh (`fanfic`, `router`).
     #
@@ -134,7 +128,7 @@ def main(argv=None) -> int:
         try:
             cc.recover()
         except Exception as exc:                            # noqa: BLE001
-            sys.stderr.write(f"phục hồi bỏ qua: {exc}\n")
+            ghi(f"phục hồi bỏ qua: {exc}")
     cc.start()
 
     phien = PhienWeb(cc, token=token, cong=cong)
@@ -142,16 +136,15 @@ def main(argv=None) -> int:
 
     dia = f"http://{DIA_CHI}:{cong}"
     duong_day_du = f"{dia}/?t={token}"
-    print("=" * 78)
-    print("  Router Control Center — giao diện web")
-    print(f"  {duong_day_du}")
-    print("  (chỉ localhost · mọi request đòi token phiên)")
-    print("=" * 78)
+    ghi("=" * 78)
+    ghi("  Router Control Center — giao diện web")
+    ghi(f"  {duong_day_du}")
+    ghi("  (chỉ localhost · mọi request đòi token phiên)")
+    ghi("=" * 78)
     # IN CA TOKEN, va co ly do: khong in thi voi `--khong-mo` KHONG CO CACH
     # NAO mo duoc giao dien, va neu nguoi dung dong tab thi ho mat luon
     # duong vao cho tan khi khoi dong lai server. Console nay la cua chinh
     # ho, tren may cua ho; token chi song trong mot lan chay.
-    sys.stdout.flush()
 
     if not a.khong_mo:
         # Mo trinh duyet SAU khi server san sang. Doi mot nhip ngan thay vi

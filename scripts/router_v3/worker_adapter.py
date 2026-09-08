@@ -141,8 +141,10 @@ def adapter_executor(adapters: dict):
     def _thuc_thi(packet: TaskPacket, spec: WorkerSpec):
         adapter = adapters.get(spec.worker_id)
         if adapter is None:
-            return json.dumps({"status": "failed",
-                               "summary": f"không có adapter cho {spec.worker_id}"}), 0.0
+            return json.dumps(
+                {"status": "failed",
+                 "summary": f"không có adapter cho {spec.worker_id}"},
+                ensure_ascii=False), 0.0
         t0 = time.perf_counter()
         kq = adapter.send_task(packet)
         giay = time.perf_counter() - t0

@@ -96,7 +96,12 @@ def ghi_tep_khoa(goc: Path, tt: ThongTinPhien) -> Path:
     p = duong_tep_khoa(goc)
     p.parent.mkdir(parents=True, exist_ok=True)
     tam = p.with_suffix(".lock.tmp")
-    tam.write_text(json.dumps(tt.to_dict()), encoding="utf-8")
+    # `ensure_ascii=False` + `encoding="utf-8"` TUONG MINH: tep nay la
+    # mot tep van ban Router so huu, va no phai doc duoc bang mat khi
+    # go loi. Hom nay noi dung toan ASCII, nhung mot mac dinh dung
+    # duoc dat bay gio thi khong ai phai nho lai no ve sau.
+    tam.write_text(json.dumps(tt.to_dict(), ensure_ascii=False),
+                   encoding="utf-8")
     try:
         os.chmod(tam, 0o600)
     except OSError:

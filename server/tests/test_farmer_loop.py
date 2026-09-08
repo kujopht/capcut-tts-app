@@ -21,6 +21,8 @@ from server.farmer.covers import CoverGate, CoverRequired
 from server.farmer.dedup import LANE_AUDIO, LANE_TEXT
 from server.farmer.loop import Candidate, ProductionFarmer
 from server.farmer.metrics import MetricsWriter
+from server.farmer.drive_archive import ARCHIVE_DONE, ArchiveOutcome
+from server.farmer.production_writer import ProductionWriter
 from server.farmer.quotas import FarmerQuotas
 from server.farmer.review import QualityReviewer
 from server.llm_gateway.provider import LLMCompletion
@@ -82,7 +84,8 @@ class _Harness:
     """Dung mot farmer day du phu thuoc gia, quota rong rai."""
 
     def __init__(self, *, tmp: Path, store=None, covers=None, provider=None,
-                 text_candidates=(), audio_candidates=(), quotas=None):
+                 text_candidates=(), audio_candidates=(), quotas=None,
+                 with_writer=True):
         self.store = store or _Store()
         self.provider = provider or _Provider()
         self.covers = covers or _covers_ok()
@@ -107,6 +110,29 @@ class _Harness:
         def enqueue_audio(c):
             self.queued.append(c.url)
 
+        # Kho san xuat chinh tac, gia lap toan bo: R2 la mot dict, tranh la
+        # hai chuoi byte, Drive la mot danh sach. Duong ma duoc chay THAT —
+        # chi ba bien gioi ngoai la gia.
+        self.objects, self.archived = {}, []
+
+        def put(key, data, content_type="application/octet-stream"):
+            self.objects[key] = data
+
+        def get(key):
+            return self.objects[key]
+
+        def sinh_tranh(wid):
+            return (b"COVER:" + wid.encode(), b"BG:" + wid.encode())
+
+        def luu_tru(path, *, work_key, timeout=300):
+            self.archived.append(work_key)
+            return ArchiveOutcome(ARCHIVE_DONE,
+                                  remote_path=f"fanfic-gdrive:{work_key}")
+
+        self.writer = ProductionWriter(
+            put_object=put, get_object=get, generate_artwork=sinh_tranh,
+            archive_file=luu_tru) if with_writer else None
+
         self.farmer = ProductionFarmer(
             store=self.store, quotas=self.quotas,
             reviewer=QualityReviewer(self.provider, min_score=70),
@@ -115,7 +141,7 @@ class _Harness:
             discover_text=lambda n: list(text_candidates)[:n],
             fetch_text=fetch, publish_text=publish,
             enqueue_tts=enqueue_tts, enqueue_audio_item=enqueue_audio,
-            batch_per_lane=10)
+            production_writer=self.writer, batch_per_lane=10)
 
 
 def _text(url, title="Tieu de"):
@@ -135,6 +161,20 @@ class TextLaneOrderTest(unittest.TestCase):
         self.assertEqual(m.produced, 1)
         self.assertEqual(m.published_candidates, 1)
         self.assertEqual(h.tts, ["nov_1"])
+
+        # Cong READY moi: bo hien vat CHINH TAC phai co that, khong chi mot
+        # bo dem tang len. Day la thu ma dot ra soat du dieu kien phat hien
+        # la thieu — cac module da co nhung khong ai goi.
+        khoa = sorted(h.objects)
+        self.assertTrue(any(k.endswith("/text/normalized.txt") for k in khoa), khoa)
+        self.assertTrue(any(k.endswith("/artwork/cover.webp") for k in khoa), khoa)
+        self.assertTrue(any(k.endswith("/artwork/background.webp") for k in khoa), khoa)
+        self.assertTrue(any(k.endswith("/manifest.json") for k in khoa), khoa)
+        self.assertTrue(all(k.startswith("FanficWorld/production/") for k in khoa), khoa)
+        # KHONG duoc cham vao cay legacy.
+        self.assertFalse([k for k in khoa if k.startswith("FanficWorld/archive")])
+        # Da guong len Drive.
+        self.assertTrue(h.archived, "chua guong tep nao len Drive")
 
     def test_a_duplicate_is_never_fetched(self):
         """Khu trung lap dat TRUOC khi tai — day la diem ca ranh gioi do ton

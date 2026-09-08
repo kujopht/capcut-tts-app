@@ -7,12 +7,18 @@ kip san xuat duoc gi.
 
 Thu tu trong ca hai lan la co chu dich:
 
-    kham pha -> KHU TRUNG LAP -> lay noi dung -> DUYET -> san xuat -> BIA ->
+    kham pha -> KHU TRUNG LAP -> lay noi dung -> DUYET -> ban nhap -> TTS ->
+    bia -> KHO CHINH TAC (van ban + tranh + manifest + guong Drive) ->
     ung vien xuat ban
 
 Khu trung lap dat TRUOC khi lay noi dung (dung tai ve thu ta da co), va duyet
-dat TRUOC khi san xuat (dung tra tien TTS cho rac). Bia la cong CUOI, va no
-la cong CUNG: khong bia thi khong ung vien.
+dat TRUOC khi san xuat (dung tra tien TTS cho rac).
+
+Cong READY nam o BUOC CUOI, tai `production_writer`, chu khong o buoc bia.
+Do la mot su khac biet that: mot ban ghi novel co anh van co the thieu van ban
+chuan hoa, thieu manifest, hoac chua len duoc kho luu tru. Truoc day day
+chuyen dung o buoc bia va cac module kho chinh tac khong ai goi — chung duoc
+xay xong roi de do.
 """
 from __future__ import annotations
 
@@ -101,6 +107,7 @@ class ProductionFarmer:
                  publish_text: Callable[[Candidate, str], str],
                  enqueue_tts: Callable[[str], Optional[str]],
                  enqueue_audio_item: Callable[[Candidate], None],
+                 production_writer: Any = None,
                  batch_per_lane: int = 0):
         self._store = store
         self._quotas = quotas
@@ -114,6 +121,10 @@ class ProductionFarmer:
         self._publish_text = publish_text
         self._enqueue_tts = enqueue_tts
         self._enqueue_audio_item = enqueue_audio_item
+        #: Ghi bo hien vat CHINH TAC (van ban chuan hoa + tranh + manifest +
+        #: guong Drive). `None` = khong ghi kho san xuat — chi hop le trong
+        #: `--dry-run` va trong kiem thu; duong san xuat that LUON co.
+        self._writer = production_writer
         self._batch = batch_per_lane or _int_env(ENV_BATCH, DEFAULT_BATCH_PER_LANE)
         #: Bao cao toan ven trinh thong dich — dien boi `__main__` luc khoi
         #: dong (noi da CHAN duoc neu khong dat). O day chi de bao cao lai.
@@ -242,6 +253,10 @@ class ProductionFarmer:
             m.reviewed += 1
             if not verdict.approved:
                 m.rejected += 1
+                # Ban an cua mot tac pham bi loai phai TIM LAI DUOC. Khong
+                # ghi lai thi mot lan xem lai bang tay khong biet vi sao no
+                # truot, va cung tac pham do se duoc lay ve o vong sau.
+                self._ghi_ban_an(c, body, verdict, m)
                 continue
             m.approved += 1
 
@@ -255,10 +270,14 @@ class ProductionFarmer:
                 continue
 
             # 4. TTS qua Cloud Run — khong tong hop tren may nay.
+            from server.farmer.canonical import bucket_for_lane
+
+            bucket = bucket_for_lane(LANE_TEXT)
+            tts_job_id = ""
             khe_tts = self._quotas.try_slot(FarmerQuotas.TTS)
             if khe_tts is not None:
                 try:
-                    self._enqueue_tts(novel_id)
+                    tts_job_id = self._enqueue_tts(novel_id) or ""
                 except Exception as exc:                        # noqa: BLE001
                     m.note_error(f"xep TTS that bai {novel_id}: "
                                  f"{type(exc).__name__}: {exc}")
@@ -269,21 +288,74 @@ class ProductionFarmer:
 
             m.produced += 1
 
-            # 5. CONG BIA — cung, va cuoi cung.
+            # 5. CONG BIA tren duong PHUC VU (Appwrite media asset). Rieng
+            #    voi buoc 6: cai nay gan bia vao ban ghi novel; buoc 6 ghi
+            #    tranh vao KHO SAN XUAT chinh tac.
             try:
                 self._covers.ensure_cover(novel_id=novel_id, title=c.title)
                 self._covers.assert_publishable(novel_id)
-                m.published_candidates += 1
             except CoverRequired as exc:
                 # Tac pham VAN ton tai o trang thai nhap; no chi khong duoc
                 # gan nhan ung vien xuat ban. Vong sau se thu sinh bia lai.
                 m.blocked_no_cover += 1
                 m.note_error(f"chan xuat ban (chua co bia) {novel_id}: {exc}")
+                continue
             except Exception as exc:                            # noqa: BLE001
                 m.blocked_no_cover += 1
                 m.note_error(f"loi cong bia {novel_id}: "
                              f"{type(exc).__name__}: {exc}")
+                continue
+
+            # 6. KHO SAN XUAT CHINH TAC — van ban chuan hoa, tranh, manifest,
+            #    guong Drive. Cong READY nam o day chu khong o buoc 5: mot
+            #    tac pham chi la ung vien xuat ban khi bo hien vat cua no day
+            #    du, chu khong khi rieng ban ghi novel co anh.
+            if self._writer is None:
+                m.note_error("khong co ProductionWriter — bo qua kho chinh tac")
+                continue
+            try:
+                ket_qua = self._writer.write_approved(
+                    bucket=bucket, url=c.url, title=c.title, body=body,
+                    verdict=verdict, novel_id=novel_id, tts_job_id=tts_job_id,
+                    source_meta=c.meta or {})
+            except Exception as exc:                            # noqa: BLE001
+                m.failed += 1
+                m.note_error(f"ghi kho chinh tac that bai {c.url}: "
+                             f"{type(exc).__name__}: {exc}")
+                continue
+
+            # Doc HANG SO chu khong chuoi tran: mot chuoi go tay o day se im
+            # lang dem sai neu `drive_archive` doi ten trang thai.
+            from server.farmer.drive_archive import ARCHIVE_DONE, ARCHIVE_PENDING
+
+            if ket_qua.archive_status == ARCHIVE_DONE:
+                m.archived += 1
+            elif ket_qua.archive_status == ARCHIVE_PENDING:
+                m.archive_pending += 1
+            if ket_qua.ready:
+                m.published_candidates += 1
+            else:
+                m.blocked_no_cover += 1
+                m.note_error(f"chua READY {ket_qua.work_id}: "
+                             f"{ket_qua.blocked_reason}")
         return m
+
+    def _ghi_ban_an(self, c: Candidate, body: str, verdict: Any,
+                    m: LaneMetrics) -> None:
+        """Ghi manifest cho mot tac pham bi cach ly/loai. KHONG BAO GIO lam
+        do mot vong: mot ban an khong ghi duoc la mat thong tin, khong phai
+        mat san pham."""
+        if self._writer is None:
+            return
+        try:
+            from server.farmer.canonical import bucket_for_lane
+
+            self._writer.write_holding(
+                bucket=bucket_for_lane(LANE_TEXT), url=c.url, title=c.title,
+                body=body, verdict=verdict, source_meta=c.meta or {})
+        except Exception as exc:                                # noqa: BLE001
+            m.note_error(f"khong ghi duoc ban an {c.url}: "
+                         f"{type(exc).__name__}: {exc}")
 
     # -- vong lap -----------------------------------------------------------
     def run_once(self) -> Dict[str, LaneMetrics]:

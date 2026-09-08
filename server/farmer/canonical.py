@@ -182,10 +182,22 @@ class WorkManifest:
     tags: List[str] = field(default_factory=list)
     decision_reason: str = ""
 
+    # --- duong PHUC VU (R2/Appwrite) ---------------------------------------
+    # Dinh danh ben duong phuc vu. Chung KHONG dung de dung duong dan — duong
+    # dan chi den tu (thung, URL). Chung o day de mot tac pham tren kho luu
+    # tru truy nguoc duoc ve ban dang phat, va nguoc lai.
+    novel_id: str = ""
+    tts_job_id: str = ""
+    review_model: str = ""
+
     # --- trang thai ---------------------------------------------------------
     artifacts: Dict[str, str] = field(default_factory=dict)
     archive_state: str = ""
     archive_path: str = ""
+    #: Ket qua CUOI cua cong READY tai luc ghi. Duoc luu chu khong tinh lai
+    #: khi doc: mot manifest phai noi duoc no da di qua cong o trang thai nao,
+    #: ke ca khi luat cong doi sau nay.
+    ready: bool = False
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(
@@ -204,6 +216,12 @@ class WorkManifest:
         return {
             "schema_version": self.schema_version,
             "work_id": self.work_id,
+            "ready": self.ready,
+            "serving": {
+                "novel_id": self.novel_id,
+                "tts_job_id": self.tts_job_id,
+                "review_model": self.review_model,
+            },
             "bucket": self.bucket,
             "canonical_dir": self.canonical_dir,
             "decision": self.decision,
@@ -232,3 +250,48 @@ class WorkManifest:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkManifest":
+        """Doc lai mot manifest da ghi.
+
+        Ton tai vi TTS chay BAT DONG BO: khoanh khac tac pham duoc duyet va
+        khoanh khac co tep mp3 khong bao gio la mot, nen phai mo lai duoc
+        manifest cu de bo sung thay vi ghi de bang mot ban moi tinh (se lam
+        mat `created_at`, ban an, va sieu du lieu goc).
+        """
+        nguon = data.get("source") or {}
+        chuan = data.get("normalized") or {}
+        phuc_vu = data.get("serving") or {}
+        luu = data.get("archive") or {}
+        return cls(
+            work_id=str(data.get("work_id", "")),
+            bucket=str(data.get("bucket", "")),
+            canonical_dir=str(data.get("canonical_dir", "")),
+            decision=str(data.get("decision", "")),
+            decision_reason=str(data.get("decision_reason", "")),
+            source_url=str(nguon.get("url", "")),
+            source_title=str(nguon.get("title", "")),
+            source_provider_id=str(nguon.get("provider_id", "")),
+            source_hashes=dict(nguon.get("hashes") or {}),
+            source_metadata_raw=dict(nguon.get("metadata_raw") or {}),
+            canonical_title=str(chuan.get("canonical_title", "")),
+            display_title=str(chuan.get("display_title", "")),
+            fandom=str(chuan.get("fandom", "")),
+            category=str(chuan.get("category", "")),
+            author=str(chuan.get("author", "")),
+            language=str(chuan.get("language", "")),
+            content_type=str(chuan.get("content_type", "")),
+            completeness=str(chuan.get("completeness", "")),
+            quality_score=int(chuan.get("quality_score") or 0),
+            tags=[str(t) for t in (chuan.get("tags") or [])],
+            novel_id=str(phuc_vu.get("novel_id", "")),
+            tts_job_id=str(phuc_vu.get("tts_job_id", "")),
+            review_model=str(phuc_vu.get("review_model", "")),
+            artifacts=dict(data.get("artifacts") or {}),
+            archive_state=str(luu.get("state", "")),
+            archive_path=str(luu.get("path", "")),
+            ready=bool(data.get("ready", False)),
+            created_at=str(data.get("created_at", "")),
+            updated_at=str(data.get("updated_at", "")),
+        )

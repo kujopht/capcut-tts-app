@@ -31,6 +31,22 @@ import threading
 import webbrowser
 from pathlib import Path
 
+# Console Windows mac dinh la cp1252, va MOI dong tep nay in ra deu la
+# tieng Viet co dau. Khong tu bao ve thi `--check` do UnicodeEncodeError va
+# THOAT 1 — nghia la cai cong kiem phu thuoc cua launcher bao "thieu goi"
+# trong khi khong thieu gi.
+#
+# `router-cc-web.cmd` co dat PYTHONUTF8=1, nen duong bam doi khong bi. Nhung
+# lenh `python -m scripts.control_center.webmain` (co trong tai lieu) thi
+# bi — va do la lenh nguoi ta go khi go loi. Da vap dung loi nay o
+# `fanfic-ctl.cmd` va `router-cc.cmd`; lan nay chan ngay tai nguon.
+for _luong in (sys.stdout, sys.stderr):
+    try:
+        if _luong and (_luong.encoding or "").lower() != "utf-8":
+            _luong.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:                                       # noqa: BLE001
+        pass
+
 #: Dia chi bind. HANG SO, va co bai kiem doi no la 127.0.0.1.
 DIA_CHI = "127.0.0.1"
 

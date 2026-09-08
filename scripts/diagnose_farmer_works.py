@@ -76,7 +76,7 @@ for n in farmer_novels:
         print(f"    job TTS : {len(jobs)}")
         for j in jobs[:3]:
             print(f"       {j.job_id} {getattr(j.status, 'value', j.status)} "
-                  f"key={getattr(j, 'output_object_key', '') or '(chua co)'}")
+                  f"key={getattr(j, 'output_key', '') or '(chua co)'}")
     except Exception as exc:
         print(f"    job TTS : LOI {type(exc).__name__}: {exc}")
 

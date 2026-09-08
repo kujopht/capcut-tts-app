@@ -160,6 +160,26 @@ class DedupIndex:
                 f"khong kiem duoc job TTS cua {novel_id}: "
                 f"{type(exc).__name__}: {exc}") from exc
 
+    def finished_tts_output_key(self, novel_id: str,
+                                owner_id: str = FARMER_OWNER):
+        """`output_key` cua job TTS DA XONG, hoac None.
+
+        Tach khoi `novel_has_tts_job` vi hai cau hoi khac nhau: "co can xep
+        khong" va "da co am thanh de gan vao manifest chua". Mot job dang
+        chay tra loi CO cho cau dau va CHUA cho cau sau.
+        """
+        try:
+            for ch in self._store.list_chapters(novel_id):
+                for j in self._store.list_jobs(owner_id, ch.chapter_id):
+                    trang_thai = getattr(j.status, "value", j.status)
+                    if str(trang_thai).lower() == "completed" and j.output_key:
+                        return j.output_key
+            return None
+        except Exception as exc:
+            raise DedupError(
+                f"khong doc duoc ket qua TTS cua {novel_id}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
     def existing_text_novel_id(self, canonical_url: str,
                                owner_id: str = FARMER_OWNER):
         """`novel_id` cua ban nhap DA CO cho nguon nay, hoac None.

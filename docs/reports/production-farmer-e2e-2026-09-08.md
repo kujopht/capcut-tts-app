@@ -129,11 +129,28 @@ cơ chế chính dịch vụ farmer đang dùng.
 - `FanficWorld/archive` (legacy) — 240 mục, **0** object mới lọt vào
 - Hạn mức giữ nguyên: 2 tải đồng thời, 8 đánh giá/vòng, 3 TTS/vòng, sàn đĩa 5 GB
 
+### 5. Một tác phẩm ĐÃ XONG vẫn còn việc — và không ai nhìn lại nó
+
+READY **không** đòi hỏi âm thanh (TTS bất đồng bộ). Nhưng *"đã xong"* lại là
+điều kiện để vòng lặp **bỏ qua** một tác phẩm. Nên một tác phẩm đạt READY
+trước khi có âm thanh sẽ không bao giờ được nhìn lại.
+
+Đo thật: `Let it Ride` và `Always Know Where Your Towel Is` có job TTS
+`completed` và mp3 thật trên R2. `Fire Bird` và `With Sprinkles 2` **không có
+job TTS nào** — hậu quả trực tiếp của bản vá số 4b của chính tôi. Chúng đã
+READY nên sẽ câm lặng vĩnh viễn, và **không một bộ đếm nào báo điều đó**.
+
+`_doi_soat_am_thanh` chạy trên tác phẩm đã xong và chỉ đọc kho: có mp3 thì
+gắn vào manifest, đang chạy thì để yên, **không có job nào thì xếp bù**.
+
+Lại đúng khuôn mẫu *"xây xong rồi để đó"*: `attach_audio` là hàm duy nhất đọc
+manifest và **nó không có người gọi** — ở chính module tôi vừa viết, ngay sau
+khi phê phán khuôn mẫu đó.
+
 ## Còn lại
 
-1. **`manifest.json` không ghi `tts_job_id` cho tác phẩm chạy tiếp.** Job TTS
-   được xếp ở một lần chạy trước nên manifest không tham chiếu được. Truy
-   nguyên vẫn làm được qua `novel_id`, nhưng phải đi vòng.
+1. **Bản mp3 không được gương lên Drive.** Phải tải từ R2 về trước, và kích
+   thước đáng kể. Manifest ghi khoá R2 nên vẫn truy nguyên được.
 2. **`MediaAssetStore` chưa có bản triển khai Appwrite.** Bìa đường phục vụ sẽ
    còn báo lỗi (không chặn) cho tới khi có.
 3. **`StartLimitIntervalSec` đặt sai mục** trong `fanfic-farmer.service`

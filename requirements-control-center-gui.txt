@@ -1,0 +1,42 @@
+# ============================================================
+#  Router Control Center V0.1.1 — phu thuoc cua GIAO DIEN DO HOA
+#
+#  Cai dat:
+#      .\.venv\Scripts\python.exe -m pip install -r requirements-control-center-gui.txt
+#
+#  Chay:
+#      .\router-cc-gui.cmd         (Windows, bam doi duoc)
+#      ./router-cc-gui             (bash)
+#
+#  VI SAO LA MOT TEP RIENG:
+#
+#    requirements-control-room.txt  Giao dien TERMINAL (textual, rich). Van
+#                                   con, lam duong du phong/go loi. Nguoi
+#                                   chi dung GUI khong can tai textual, va
+#                                   nguoc lai.
+#    requirements-gui.txt           Ung dung desktop Fanfic (PySide6 + moi
+#                                   thu cua no: onnx, audio, ...). Control
+#                                   Center CHI can PySide6; nhet no vao day
+#                                   se bat nguoi dung tai ca mot pipeline
+#                                   TTS de mo mot cua so dieu khien.
+#    server/requirements.txt        Backend web. Job CI `backend` ton tai de
+#                                   chung minh tep ay KHONG keo theo GUI —
+#                                   them PySide6 vao do la pha chinh phep
+#                                   thu ay.
+#
+#  Day cung la ly do bo kiem GUI nam o `tests/`, KHONG o `scripts/tests`:
+#  CI chay `unittest discover -s scripts/tests` voi ĐUNG
+#  `server/requirements.txt`, nen mot bai kiem import PySide6 o do se lam
+#  hong CI tren mot may khong he sai gi.
+# ============================================================
+
+# --- Bat buoc: khung giao dien ---
+#
+# Khoang phien ban: >=6.6 la ban da co trong `requirements-gui.txt` cua kho
+# nay, tuc la ban DA duoc chay thuc te tren may nay. Chan tren 7.0 vi major
+# ke tiep chua duoc do.
+#
+# `QPlainTextEdit`/`QTextEdit`/`QTableWidget` — ba widget mang toan bo
+# clipboard va chon-bang-chuot cua ban nay — on dinh tu lau truoc 6.6, nen
+# khong co tinh nang moi nao bi phu thuoc o day.
+PySide6>=6.6.0,<7.0

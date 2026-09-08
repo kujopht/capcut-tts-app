@@ -133,7 +133,7 @@ cả hai (global rồi đến local), không cần lặp lại phần chung ở 
 đưa quy tắc riêng của Fanfic ngược lên `~/.claude/` — file đó phải luôn
 dùng được cho một repo bất kỳ khác.
 
-## Router Control Center (V0.1)
+## Router Control Center (V0.1.1)
 
 Phòng điều khiển cho Router V4: mở một dự án, gõ mục tiêu vào ô chat, Router
 tự phân rã việc, chọn agent theo năng lực, dựng worktree cô lập, dựng/dùng
@@ -141,10 +141,31 @@ lại phiên agent, khoá tài nguyên, chạy, báo cáo — không phải mở
 Claude/Codex/Antigravity nào.
 
 ```bash
-./router-cc                 # giao dien Textual
+.\router-cc-gui.cmd         # GIAO DIEN CHINH — bam doi duoc tu Explorer
+./router-cc-gui             # (ban bash)
+
+./router-cc                 # TUI Textual — duong DU PHONG / go loi
 ./router-cc --headless      # anh chup JSON, khong can TTY
 ./router-cc --chat "..."    # gui mot cau vao o chat roi thoat
 ```
+
+**Từ V0.1.1, GUI là đường chính.** Lý do rất cụ thể: trong terminal,
+clipboard không đáng tin, và dán một prompt nhiều dòng là việc thường ngày.
+Cả hai giao diện dùng **chung một sổ SQLite** nên mở cạnh nhau vẫn thấy cùng
+dự án/việc/phiên.
+
+Ba luật của tầng GUI, và cả ba đều có bài kiểm khoá lại
+(`tests/test_control_center_gui_*.py`, 75 bài):
+
+1. **Không giành Ctrl+C/V/X/A.** Không một `QShortcut`/`QAction` nào — ở
+   BẤT KỲ phạm vi nào, kể cả `WindowShortcut` mặc định — được đăng ký các
+   tổ hợp đó. Giành một cái là lấy mất clipboard của mọi ô chỉ-đọc.
+2. **Ô chỉ-đọc dùng `setReadOnly(True)`, không bao giờ `setEnabled(False)`**
+   — cách thứ hai làm mất luôn khả năng chọn.
+3. **Vẽ lại không được giết vùng đang bôi đen.** Mọi chỗ ghi văn bản theo
+   nhịp phải đi qua `dat_van_ban_giu_chon()`. Ghi thô bằng
+   `setPlainText()` mỗi giây là một **lỗi clipboard**, dù trông như lỗi
+   hiệu năng.
 
 Mã ở `scripts/control_center/`; đầy đủ ở `docs/CONTROL_CENTER.md`; bằng
 chứng chạy thật ở `docs/reports/CONTROL_CENTER_V01_PROOF.md`.

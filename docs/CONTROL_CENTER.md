@@ -1,9 +1,15 @@
-# Router Control Center V0.1
+# Router Control Center V0.1.1
 
 Phòng điều khiển cho Router V4 **đã có**. Mở một dự án, gõ mục tiêu vào ô
 chat, và Router tự phân rã việc, chọn agent, dựng worktree, dựng/dùng lại
 phiên, khoá tài nguyên, chạy, báo cáo — không phải mở tay một terminal
 Claude/Codex/Antigravity nào.
+
+> **V0.1.1 là bản UI/UX.** Backend điều phối của V0.1 không đổi một dòng
+> nào. Cái đổi là **giao diện chính giờ là một app desktop dùng chuột**
+> (`router-cc-gui.cmd`, bấm đôi được), còn TUI terminal ở lại làm đường
+> dự phòng/gỡ lỗi. Lý do rất cụ thể: trong terminal, clipboard không đáng
+> tin, và dán một prompt nhiều dòng là việc thường ngày.
 
 > **Nó KHÔNG thiết kế lại Router V4.** Bốn thứ khó nhất — chấm điểm
 > placement theo năng lực, cô lập worktree, cổng kiểm định "không tin worker
@@ -14,6 +20,39 @@ Claude/Codex/Antigravity nào.
 ---
 
 ## 1. Chạy
+
+### Giao diện ĐỒ HOẠ (đường chính từ V0.1.1)
+
+Bấm đôi `router-cc-gui.cmd` trong Explorer. Hết. Không cần terminal, không
+cần đặt biến môi trường nào trước.
+
+```bash
+# hoac tu dong lenh
+./router-cc-gui
+python -m scripts.control_center.gui
+
+# phu thuoc: chi PySide6
+python -m pip install -r requirements-control-center-gui.txt
+```
+
+Bố cục: thanh trên (dự án · đang chạy · bị chặn · pool · tìm · `?` · `⚙`),
+sidebar dự án bên trái, năm khung ở giữa (**Chat** mặc định · Tasks ·
+Agents · Logs · Usage), inspector "đang chạy" bên phải gấp lại được.
+
+**Dùng được mà không cần nhớ phím nào.** Mọi thao tác có nút. Hai lối tắt
+duy nhất là *tuỳ chọn* và đều có nút tương đương: `Ctrl+Enter` gửi tin,
+`F1` mở trợ giúp. `Esc` đóng hộp thoại. Clipboard hoạt động đúng như mọi
+app Windows khác — xem mục 11.
+
+`router-cc-gui.cmd` chạy bằng `pythonw.exe` nên **không** nhảy ra một cửa
+sổ console đen kèm theo. Nếu không tìm thấy venv nào, nó rơi về `python`
+trên PATH và **giữ cửa sổ lại** khi lỗi, để câu "thiếu PySide6" còn đọc
+được thay vì nhấp nháy rồi mất.
+
+### Giao diện TERMINAL (dự phòng / gỡ lỗi)
+
+Vẫn nguyên vẹn, vẫn dùng **chung một sổ SQLite**, nên mở cạnh GUI vẫn thấy
+cùng dự án/việc/phiên.
 
 ```bash
 # giao dien
@@ -499,7 +538,54 @@ bộ kiểm tự tiêu quota mỗi lần chạy là một bộ kiểm không ai 
 
 ---
 
-## 11. Chưa làm (cố ý, V0.1)
+## 11. Clipboard và chuột — cổng nghiệm thu của V0.1.1
+
+Bản V0.1 bị từ chối vì đúng một câu: *"ordinary clipboard interaction is not
+reliable"*. Nên đây không phải một mục tính năng, nó là **điều kiện phát
+hành**, và nó được kiểm bằng máy ở
+`tests/test_control_center_gui_clipboard.py` (17 bài).
+
+Nguyên tắc duy nhất, và mọi thứ khác là hệ quả: **để Qt làm việc của Qt.**
+`QPlainTextEdit`/`QTextEdit`/`QTableWidget` đã mang sẵn clipboard thật của
+Windows. Gần như mọi lỗi clipboard trong một app Qt là do tác giả *giành*
+tổ hợp phím hoặc *chặn* `keyPressEvent`. Nên ba luật:
+
+| Luật | Vì sao |
+|---|---|
+| Không `QShortcut`/`QAction` nào ở phạm vi ứng dụng đăng ký Ctrl+C/V/X/A | Giành một trong số đó là lấy mất hành vi clipboard của chính ô đang gõ. Bài kiểm **quét cửa sổ thật** và đòi danh sách rỗng |
+| `keyPressEvent` chỉ bắt ĐÚNG `Ctrl+Return`, mọi phím khác gọi `super()` | Một `return` sớm cho "mọi phím có Ctrl" là cách dễ nhất ăn mất Ctrl+V |
+| Ô chỉ-đọc dùng `setReadOnly(True)`, **không bao giờ** `setEnabled(False)` | Cách thứ hai làm mất luôn khả năng chọn — và nó là cách phổ biến nhất người ta làm một ô "chỉ đọc" |
+
+Còn `Ctrl+Enter` (gửi tin) ở **phạm vi widget**, không phạm vi ứng dụng: ở
+phạm vi ứng dụng nó sẽ bắn cả khi con trỏ đang ở ô tìm kiếm.
+
+Cụ thể những gì hoạt động, và ở đâu:
+
+| Việc | Đường chuột | Đường bàn phím |
+|---|---|---|
+| Dán prompt nhiều dòng vào ô chat | chuột phải → Paste | Ctrl+V |
+| Copy tin nhắn / báo cáo agent | bôi đen → chuột phải → Copy | Ctrl+C |
+| Copy một khối mã | nút **Copy** trên khối | Ctrl+C sau khi bôi đen |
+| Copy nhật ký | nút **Copy** / **Copy All** | Ctrl+A rồi Ctrl+C |
+| Copy hàng bảng Tasks/Agents/Usage | **Copy hàng đang chọn** / **Copy All** | Ctrl+C |
+| Đóng hộp thoại | nút **✕** | `Esc` |
+
+Ba thứ được kiểm riêng vì chúng là ba dòng riêng trong danh sách nghiệm
+thu: **nhiều dòng** dán nguyên vẹn (kể cả dấu xuống dòng cuối), **tiếng
+Việt có dấu** không hỏng, và **prompt 200 000 ký tự** không bị cắt.
+
+Một chi tiết nhỏ nhưng hay sai: `QTextCursor.selectedText()` trả U+2029
+(PARAGRAPH SEPARATOR) thay cho mọi ngắt dòng. Copy thẳng giá trị đó ra
+clipboard sẽ khiến người dùng dán vào Notepad và thấy **một dòng dài**.
+`KhungNhatKy.copy_chon()` đổi lại thành `\n`, và có bài kiểm khoá.
+
+**Enter xuống dòng, KHÔNG gửi.** Ngược thói quen của nhiều app chat, nhưng
+ở đây gõ nhiều dòng là việc thường ngày và một cú Enter vô tình sẽ mất bản
+nháp. Nút **Gửi** là đường chính.
+
+---
+
+## 12. Chưa làm (cố ý — ranh giới đã chọn)
 
 Không phải thiếu sót — là ranh giới đã chọn:
 

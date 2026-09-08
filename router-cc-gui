@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Router Control Center V0.1.1 — giao dien do hoa (ban bash).
+#
+# Tren Windows thi dung `router-cc-gui.cmd` (bam doi duoc). Tep nay de chay
+# tu bash/WSL/macOS/Linux.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "$DIR"
+
+# UTF-8 BAT BUOC — xem ghi chu trong router-cc.cmd.
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
+# Uu tien venv cua kho chinh (noi PySide6 that su duoc cai), roi venv cuc
+# bo, roi PATH.
+for p in \
+  "/c/Users/nguye/Documents/CapCut-TTS-App/.venv/Scripts/python.exe" \
+  "$DIR/.venv/Scripts/python.exe" \
+  "$DIR/.venv/bin/python"
+do
+  if [ -x "$p" ]; then
+    exec "$p" -m scripts.control_center.gui "$@"
+  fi
+done
+
+exec python -m scripts.control_center.gui "$@"

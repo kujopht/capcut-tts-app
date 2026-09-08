@@ -382,7 +382,11 @@ class TestGoiKhongRoTrangThaiThuNghiem(unittest.TestCase):
         kiểm hiện vật, không kiểm ý định.
         """
         import zipfile
-        goi = REPO / "dist" / "router-control-center-v0.1.0.zip"
+        # Lay TU `VERSION` cua chinh bo dong goi, khong go cung: go cung
+        # thi bump phien ban se lam bai kiem im lang bo qua (tep khong ton
+        # tai -> `skipTest`) thay vi kiem goi that.
+        from scripts.package_control_center import VERSION
+        goi = REPO / "dist" / f"router-control-center-v{VERSION}.zip"
         if not goi.is_file():
             self.skipTest("chưa dựng gói")
         with zipfile.ZipFile(goi) as z:
@@ -400,6 +404,32 @@ class TestGoiKhongRoTrangThaiThuNghiem(unittest.TestCase):
         self.assertEqual(
             sorted(p.project_id for p in du_an_mac_dinh()),
             ["fanfic", "router"])
+
+    def test_goi_PHAI_gom_loi_vao_GIAO_DIEN_DO_HOA(self):
+        """Từ V0.1.1, GUI là đường CHÍNH — gói thiếu nó là gói hỏng.
+
+        Đây là loại lỗi im lặng nhất của cả bản đóng gói:
+        `scripts/control_center` là một thư mục nên `gui/` tự đi theo, và
+        gói vẫn "chạy được" — bằng TUI. Không ai phát hiện đường chính đã
+        biến mất cho tới khi bấm đôi vào một tệp không tồn tại.
+        """
+        from scripts.package_control_center import GOM
+        for x in ("router-cc-gui", "router-cc-gui.cmd",
+                  "requirements-control-center-gui.txt"):
+            with self.subTest(muc=x):
+                self.assertIn(x, GOM)
+                self.assertTrue((REPO / x).is_file(),
+                                f"{x} có trong GOM nhưng KHÔNG có trên đĩa")
+
+    def test_goi_PHAI_gom_ma_nguon_giao_dien(self):
+        """Và `gui/` phải thật sự nằm dưới một mục của `GOM`."""
+        from scripts.package_control_center import GOM
+        self.assertIn("scripts/control_center", GOM)
+        for ten in ("app.py", "bridge.py", "widgets.py", "views.py",
+                    "views_chat.py", "__main__.py"):
+            with self.subTest(tep=ten):
+                self.assertTrue(
+                    (REPO / "scripts" / "control_center" / "gui" / ten).is_file())
 
 
 if __name__ == "__main__":

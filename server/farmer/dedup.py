@@ -135,6 +135,34 @@ class DedupIndex:
         return any(canonicalize_url(n.external_source_url or "") == canon
                    for n in novels if n.external_source_url)
 
+    def existing_text_novel_id(self, canonical_url: str,
+                               owner_id: str = FARMER_OWNER):
+        """`novel_id` cua ban nhap DA CO cho nguon nay, hoac None.
+
+        Ton tai de mot lan chay lai KHONG tao ban trung. `text_already_farmed`
+        tra ve mot chu "roi" — con o day ta can chinh CAI DINH DANH, de buoc
+        xuat ban duoc BO QUA thay vi POST them mot novel thu hai cho cung mot
+        tac pham.
+
+        Do la khac biet giua "da gat roi" va "da gat DEN DAU". Mot tac pham co
+        ban ghi novel nhung chua co hien vat la mot tac pham DANG DO, khong
+        phai mot tac pham xong.
+        """
+        try:
+            novels, _ = self._store.find_novels(owner_id=owner_id,
+                                                limit=NOVEL_SCAN_LIMIT)
+        except Exception as exc:
+            raise DedupError(
+                f"khong tra cuu duoc ban nhap cho {canonical_url}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
+        canon = canonicalize_url(canonical_url)
+        for n in novels:
+            if n.external_source_url and \
+                    canonicalize_url(n.external_source_url) == canon:
+                return n.novel_id
+        return None
+
 
 def _la_khong_tim_thay(exc: Exception) -> bool:
     """Phan biet '404 — chua co' voi 'mang hong'. Chi 404 moi duoc doc thanh

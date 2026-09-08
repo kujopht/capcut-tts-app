@@ -204,10 +204,32 @@ class ProductionFarmer:
                 m.failed += 1
                 continue
 
+            # KHU TRUNG LAP do bang HIEN VAT, khong bang ban ghi.
+            #
+            # "Da co novel" va "da xong" la hai chuyen khac nhau, va nham lan
+            # chung da khoa vinh vien bon tac pham fanfiction that tren may
+            # san xuat: chung tao novel, xep TTS, roi hong o buoc bia — sau do
+            # chinh novel cua chung lam chung "trung lap" voi chinh minh.
+            #
+            # Nen: xong = CO MANIFEST va da READY. Co novel ma chua co manifest
+            # = DANG DO, va phai duoc chay tiep (dung lai ban nhap cu, khong
+            # tao ban thu hai).
+            from server.farmer.canonical import bucket_for_lane
+
+            bucket = bucket_for_lane(LANE_TEXT)
             try:
-                if self._dedup.text_already_farmed(khoa.canonical_url):
+                if self._writer is not None:
+                    if self._writer.work_complete(bucket, c.url):
+                        m.deduped += 1
+                        continue
+                    novel_co_san = self._dedup.existing_text_novel_id(
+                        khoa.canonical_url)
+                elif self._dedup.text_already_farmed(khoa.canonical_url):
+                    # Khong co writer (dry-run/kiem thu): giu hanh vi cu.
                     m.deduped += 1
                     continue
+                else:
+                    novel_co_san = None
             except DedupError as exc:
                 m.note_error(f"bo qua (khong kiem duoc trung lap): {exc}")
                 m.skipped_quota += 1
@@ -260,21 +282,33 @@ class ProductionFarmer:
                 continue
             m.approved += 1
 
-            # 3. Xuat ban thanh ban nhap (chua public).
-            try:
-                novel_id = self._publish_text(c, body)
-            except Exception as exc:                            # noqa: BLE001
-                m.note_error(f"tao ban nhap that bai {c.url}: "
-                             f"{type(exc).__name__}: {exc}")
-                m.failed += 1
-                continue
+            # 3. Ban nhap. DUNG LAI ban da co neu day la mot lan chay tiep —
+            #    POST them mot novel thu hai cho cung mot tac pham chinh la
+            #    dieu khu trung lap ton tai de ngan.
+            if novel_co_san:
+                novel_id = novel_co_san
+                m.resumed += 1
+            else:
+                try:
+                    novel_id = self._publish_text(c, body)
+                except Exception as exc:                        # noqa: BLE001
+                    m.note_error(f"tao ban nhap that bai {c.url}: "
+                                 f"{type(exc).__name__}: {exc}")
+                    m.failed += 1
+                    continue
 
             # 4. TTS qua Cloud Run — khong tong hop tren may nay.
-            from server.farmer.canonical import bucket_for_lane
-
-            bucket = bucket_for_lane(LANE_TEXT)
+            #
+            # Lan chay TIEP thi KHONG xep lai: lan truoc da xep roi (buoc nay
+            # nam truoc cho no hong). Xep lai moi vong se chat dong job trung
+            # cho cung mot chuong cho den khi tranh sinh duoc — mot vong lap
+            # tra tien cho cung mot ban thu am nhieu lan.
             tts_job_id = ""
-            khe_tts = self._quotas.try_slot(FarmerQuotas.TTS)
+            khe_tts = (None if novel_co_san
+                       else self._quotas.try_slot(FarmerQuotas.TTS))
+            if novel_co_san:
+                m.note_error(f"chay tiep {novel_id}: khong xep lai TTS "
+                             f"(lan truoc da xep)")
             if khe_tts is not None:
                 try:
                     tts_job_id = self._enqueue_tts(novel_id) or ""
@@ -283,7 +317,7 @@ class ProductionFarmer:
                                  f"{type(exc).__name__}: {exc}")
                 finally:
                     khe_tts.__exit__(None, None, None)
-            else:
+            elif not novel_co_san:
                 m.skipped_quota += 1
 
             m.produced += 1

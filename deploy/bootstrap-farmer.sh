@@ -148,12 +148,35 @@ if [ ! -f "$SRC_FILE" ]; then
   install -o "$SVC_USER" -g "$SVC_USER" -m 640 /dev/null "$SRC_FILE"
   cat > "$SRC_FILE" <<'JSON'
 {
-  "_note": "Nguon truyen chu cho lan B. Them muc vao day; khong can deploy lai.",
+  "_note": [
+    "Nguon truyen chu cho lan B. Them/bot muc o day; khong can deploy lai.",
+    "Cac host duoi day deu duoc FanFicFare ho tro (xem",
+    "server/scraper/fanficfare_provider.py::resolve_acquisition_route).",
+    "Host KHONG duoc ho tro van chay duoc — roi ve trich xuat HTTP tong quat.",
+    "Ba muc duoi day la van hoc THUOC PHAM VI CONG CONG tren Wikisource, da",
+    "kiem HTTP 200 truoc khi ghi vao day. Chung dung de mo may an toan; them",
+    "URL AO3/FFN/Wattpad that khi ban chon xong tac pham (dat `_disabled`:",
+    "true de tam tat mot muc ma khong xoa no).",
+    "CO Y de it: han muc bao thu (3 muc/lan/vong), va moi tac pham deu phai",
+    "qua cong danh gia Antigravity truoc khi ton mot dong nao cho TTS."
+  ],
   "sources": [
     {
       "url": "https://vi.wikisource.org/wiki/L%E1%BB%81u_ch%C3%B5ng",
       "title": "Leu chong",
       "author": "Ngo Tat To",
+      "language": "vi"
+    },
+    {
+      "url": "https://vi.wikisource.org/wiki/T%E1%BB%91_T%C3%A2m",
+      "title": "To Tam",
+      "author": "Hoang Ngoc Phach",
+      "language": "vi"
+    },
+    {
+      "url": "https://vi.wikisource.org/wiki/Vi%E1%BB%87t_Nam_s%E1%BB%AD_l%C6%B0%E1%BB%A3c",
+      "title": "Viet Nam su luoc",
+      "author": "Tran Trong Kim",
       "language": "vi"
     }
   ]

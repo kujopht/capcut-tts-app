@@ -19,7 +19,7 @@ from server.farmer.covers import CoverGate, build_cover_provider
 from server.farmer.integrity import InterpreterNotSecure, assert_interpreter_secure
 from server.farmer.loop import ProductionFarmer
 from server.farmer.metrics import MetricsWriter, status_path
-from server.farmer.quotas import FarmerQuotas
+from server.farmer.quotas import AlreadyRunning, FarmerQuotas, SingleInstanceLock
 from server.farmer.review import ReviewUnavailable, build_reviewer
 
 
@@ -141,7 +141,14 @@ def _text_discovery():
         except ValueError:
             return []
         ra = []
-        for muc in (data.get("sources") or [])[:gioi_han]:
+        for muc in (data.get("sources") or []):
+            if len(ra) >= gioi_han:
+                break
+            # `_disabled: true` = tam tat MOT muc ma khong phai xoa no. Loc
+            # TRUOC khi cat theo `gioi_han`, neu khong mot muc da tat van
+            # chiem mot suat va lam vong do khong lam duoc gi.
+            if muc.get("_disabled"):
+                continue
             url = (muc.get("url") or "").strip()
             if not url:
                 continue
@@ -265,6 +272,23 @@ def main(argv=None) -> int:
                          ensure_ascii=False))
         return 2
 
+    # DUNG MOT farmer tai mot thoi diem — ke ca khi mot lan chay tay dam vao
+    # dich vu systemd dang chay.
+    khoa = SingleInstanceLock()
+    try:
+        khoa.acquire()
+    except AlreadyRunning as exc:
+        print(json.dumps({"status": "ALREADY_RUNNING", "reason": str(exc)},
+                         ensure_ascii=False))
+        return 6
+
+    try:
+        return _run(farmer, args)
+    finally:
+        khoa.release()
+
+
+def _run(farmer: ProductionFarmer, args) -> int:
     if args.once or args.dry_run:
         lanes = farmer.run_once()
         print(json.dumps(

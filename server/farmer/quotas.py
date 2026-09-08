@@ -51,6 +51,100 @@ class QuotaExceeded(RuntimeError):
     """Het han muc, hoac cong dia dong. KHONG phai loi — la phanh."""
 
 
+class AlreadyRunning(RuntimeError):
+    """Da co MOT farmer dang chay. Ban thu hai phai dung lai."""
+
+
+class SingleInstanceLock:
+    """DUNG MOT farmer tai mot thoi diem.
+
+    systemd da cho mot dich vu, nhung no khong ngan mot lan chay TAY (`--once`)
+    dam vao dich vu dang chay. Hai farmer cung luc se gianh cung mot muc trong
+    hang doi va cung tra tien TTS hai lan cho mot tac pham — chinh dieu ma
+    `content_queue` khong the tu chan (Appwrite khong co cap nhat co dieu
+    kien).
+
+    Khoa la MOT tep chua PID trong thu muc lam viec. Khoa cu cua mot tien
+    trinh da chet duoc thu hoi; khoa cua mot tien trinh CON SONG thi khong.
+    """
+
+    def __init__(self, work_dir: Optional[str] = None, name: str = "farmer.lock"):
+        goc = work_dir or os.environ.get(ENV_WORK_DIR) or DEFAULT_WORK_DIR
+        self.path = os.path.join(goc, name)
+        self._held = False
+
+    @staticmethod
+    def _con_song(pid: int) -> bool:
+        """PID nay con chay khong. Khong doan bua: khong xac dinh duoc thi coi
+        nhu CON SONG (fail closed) — thu hoi nham mot khoa dang duoc giu la
+        cach tao ra dung hai farmer."""
+        if pid <= 0:
+            return False
+        if os.name == "nt":
+            import subprocess
+            try:
+                out = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}"],
+                    capture_output=True, text=True, timeout=15)
+                return str(pid) in (out.stdout or "")
+            except Exception:                                   # noqa: BLE001
+                return True
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except Exception:                                       # noqa: BLE001
+            return True
+
+    def acquire(self) -> None:
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        if os.path.exists(self.path):
+            try:
+                with open(self.path, encoding="utf-8") as fh:
+                    cu = int((fh.read() or "0").strip() or 0)
+            except Exception:                                   # noqa: BLE001
+                cu = -1
+            if cu == os.getpid():
+                self._held = True
+                return
+            if cu < 0 or self._con_song(cu):
+                raise AlreadyRunning(
+                    f"da co farmer dang chay (pid={cu}, khoa={self.path}) — "
+                    "ban thu hai dung lai")
+            # Khoa mo coi cua mot tien trinh da chet.
+            try:
+                os.unlink(self.path)
+            except OSError:
+                pass
+        with open(self.path, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
+        self._held = True
+
+    def release(self) -> None:
+        if not self._held:
+            return
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                if int((fh.read() or "0").strip() or 0) != os.getpid():
+                    return          # khoa cua nguoi khac — khong dung toi
+            os.unlink(self.path)
+        except Exception:                                       # noqa: BLE001
+            pass
+        finally:
+            self._held = False
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
+
+
 def _int_env(name: str, mac_dinh: int) -> int:
     """Gia tri xau/am -> quay ve mac dinh, KHONG phai 'khong gioi han'.
 

@@ -1,0 +1,465 @@
+"""Ranh giới an toàn của API cục bộ — CI cưỡng chế.
+
+Một localhost server KHÔNG phải là riêng tư, và đó là điều tệp này tồn tại
+để canh. Ba lớp, mỗi lớp một nhóm bài kiểm:
+
+    token       mọi trang web bạn đang mở đều GỬI được request tới
+                127.0.0.1; không có token thì một quảng cáo ở tab khác
+                `POST /api/chat` được và điều khiển Router của bạn
+    Host        DNS rebinding: một tên miền của kẻ tấn công trỏ về
+                127.0.0.1 sẽ đi vòng qua phép kiểm origin
+    bind        `127.0.0.1` chứ không `0.0.0.0` — một ký tự khác biệt giữa
+                "công cụ cá nhân" và "mở cổng ra mạng LAN"
+
+Dùng `TestClient` của Starlette: nó gọi ASGI app trực tiếp, nên không mở
+cổng thật và không phụ thuộc mạng — chạy được trên CI Linux.
+"""
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+GOC = Path(__file__).resolve().parents[2]
+if str(GOC) not in sys.path:
+    sys.path.insert(0, str(GOC))
+
+try:
+    from fastapi.testclient import TestClient
+    CO_FASTAPI = True
+except ModuleNotFoundError:                                 # pragma: no cover
+    CO_FASTAPI = False
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 96
+PDF = b"%PDF-1.7\n" + b"x" * 96
+
+
+def _kho_git(goc: Path) -> None:
+    (goc / "docs").mkdir(parents=True, exist_ok=True)
+    (goc / "docs" / "seed.md").write_text("seed\n", encoding="utf-8")
+    for c in (["git", "init", "-q"],
+              ["git", "config", "user.email", "t@local"],
+              ["git", "config", "user.name", "t"],
+              ["git", "add", "-A"], ["git", "commit", "-q", "-m", "seed"]):
+        subprocess.run(c, cwd=goc, check=True, capture_output=True)
+
+
+@unittest.skipUnless(CO_FASTAPI, "chưa cài fastapi")
+class _Nen(unittest.TestCase):
+    def setUp(self):
+        from scripts.control_center.engine import ControlCenter
+        from scripts.control_center.model import Project
+        from scripts.control_center.webapi import PhienWeb, dung_app
+        self.goc = Path(tempfile.mkdtemp(prefix="cc-web-"))
+        _kho_git(self.goc)
+        self.cc = ControlCenter(root=self.goc, probe=False)
+        self.cc.them_project(Project(project_id="p", name="P",
+                                     repo_path=str(self.goc)))
+        self.phien = PhienWeb(self.cc, token="TOKEN-THU-NGHIEM", cong=8765)
+        self.app = dung_app(self.phien)
+        self.cl = TestClient(self.app, base_url="http://127.0.0.1:8765")
+
+    def tearDown(self):
+        try:
+            self.cc.shutdown()
+        except Exception:                                   # noqa: BLE001
+            pass
+        shutil.rmtree(self.goc, ignore_errors=True)
+
+    @property
+    def h(self):
+        return {"X-CC-Token": self.phien.token}
+
+
+class TestTokenBatBuoc(_Nen):
+    """Không token thì 401 — kể cả `GET`."""
+
+    DUONG_GET = ("/api/state", "/api/usage", "/api/task/p.t1/log")
+    DUONG_POST = ("/api/chat", "/api/task/p.t1/pause",
+                  "/api/task/p.t1/resume", "/api/task/p.t1/stop",
+                  "/api/task/p.t1/approve", "/api/project")
+
+    def test_GET_khong_token_thi_401(self):
+        for d in self.DUONG_GET:
+            with self.subTest(duong=d):
+                self.assertEqual(self.cl.get(d).status_code, 401)
+
+    def test_POST_khong_token_thi_401(self):
+        """Đây là bài quan trọng nhất của tệp.
+
+        Trình duyệt cho phép gửi request cross-origin (nó chỉ ngăn *đọc*
+        phản hồi). Nên nếu `POST /api/chat` không đòi token, một trang web
+        bất kỳ bạn đang mở có thể tạo việc trong Router của bạn — và bạn
+        sẽ không thấy request đó ở đâu cả.
+        """
+        for d in self.DUONG_POST:
+            with self.subTest(duong=d):
+                r = self.cl.post(d, json={"project_id": "p", "text": "x"})
+                self.assertEqual(r.status_code, 401, f"{d} không đòi token")
+
+    def test_tai_len_khong_token_thi_401(self):
+        r = self.cl.post("/api/attachments",
+                         data={"project_id": "p"},
+                         files={"file": ("a.png", PNG, "image/png")})
+        self.assertEqual(r.status_code, 401)
+
+    def test_xoa_dinh_kem_khong_token_thi_401(self):
+        self.assertEqual(
+            self.cl.delete("/api/attachments/att_x").status_code, 401)
+
+    def test_blob_khong_token_thi_401(self):
+        """Đọc byte tệp phải đòi token — nếu không, một trang khác có thể
+        rút ảnh chụp màn hình bạn vừa dán."""
+        self.assertEqual(
+            self.cl.get("/api/attachments/att_x/blob").status_code, 401)
+
+    def test_token_SAI_thi_401(self):
+        r = self.cl.get("/api/state", headers={"X-CC-Token": "sai-be-bet"})
+        self.assertEqual(r.status_code, 401)
+
+    def test_token_DUNG_thi_200(self):
+        self.assertEqual(self.cl.get("/api/state", headers=self.h)
+                         .status_code, 200)
+
+    def test_token_qua_query_cung_duoc(self):
+        """WebSocket không đặt được header, nên query cũng phải chấp nhận."""
+        r = self.cl.get(f"/api/state?t={self.phien.token}")
+        self.assertEqual(r.status_code, 200)
+
+    def test_so_sanh_token_theo_THOI_GIAN_HANG(self):
+        """Dùng `hmac.compare_digest`, không dùng `==`.
+
+        Với một bí mật cục bộ thì rủi ro timing là thấp, nhưng đây là chỗ
+        không có lý do gì để làm sai: `compare_digest` không đắt hơn.
+        """
+        import ast
+        ma = (GOC / "scripts" / "control_center" / "webapi.py").read_text(
+            encoding="utf-8")
+        cay = ast.parse(ma)
+        goi = [n for n in ast.walk(cay)
+               if isinstance(n, ast.Call)
+               and isinstance(n.func, ast.Attribute)
+               and n.func.attr == "compare_digest"]
+        self.assertTrue(goi, "không dùng hmac.compare_digest")
+
+    def test_trang_goc_va_tep_tinh_KHONG_doi_token(self):
+        """Trình duyệt phải tải được HTML/JS TRƯỚC khi nó biết token.
+
+        Chúng không chứa dữ liệu nào, nên miễn token là đúng — nhưng phải
+        là *chỉ* chúng.
+        """
+        self.assertEqual(self.cl.get("/").status_code, 200)
+
+
+class TestChanDNSRebinding(_Nen):
+    """`Host` lạ thì từ chối, dù token có đúng."""
+
+    def test_Host_la_thi_400_du_token_DUNG(self):
+        for host in ("evil.example.com", "attacker.test",
+                     "cc.local.attacker.com"):
+            with self.subTest(host=host):
+                r = self.cl.get("/api/state",
+                                headers={**self.h, "Host": host})
+                self.assertEqual(r.status_code, 400,
+                                 f"Host {host!r} phải bị từ chối")
+
+    def test_kiem_Host_TRUOC_khi_kiem_token(self):
+        """Host lạ + token SAI vẫn phải là 400 (Host), không phải 401.
+
+        Thứ tự này quan trọng: chính việc token *có thể* đúng là điều đang
+        được phòng, nên đừng để phép kiểm token quyết định trước.
+        """
+        r = self.cl.get("/api/state",
+                        headers={"X-CC-Token": "sai", "Host": "evil.test"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_127_va_localhost_deu_duoc(self):
+        for host in ("127.0.0.1:8765", "localhost:8765", "127.0.0.1"):
+            with self.subTest(host=host):
+                r = self.cl.get("/api/state",
+                                headers={**self.h, "Host": host})
+                self.assertEqual(r.status_code, 200)
+
+
+class TestKhongCORS(_Nen):
+    """Cố ý KHÔNG có CORS. Frontend là same-origin nên nó không cần."""
+
+    def test_khong_co_header_Access_Control_Allow_Origin(self):
+        r = self.cl.get("/api/state", headers={**self.h,
+                                               "Origin": "https://evil.test"})
+        self.assertNotIn("access-control-allow-origin",
+                         {k.lower() for k in r.headers})
+
+    def test_middleware_CORS_KHONG_duoc_gan(self):
+        import ast
+        ma = (GOC / "scripts" / "control_center" / "webapi.py").read_text(
+            encoding="utf-8")
+        self.assertNotIn("CORSMiddleware", ma)
+        cay = ast.parse(ma)
+        ten = []
+        for n in ast.walk(cay):
+            if isinstance(n, ast.ImportFrom) and n.module:
+                ten += [a.name for a in n.names]
+        self.assertNotIn("CORSMiddleware", ten)
+
+
+class TestChiBindLocalhost(unittest.TestCase):
+    """`127.0.0.1`, không bao giờ `0.0.0.0`."""
+
+    @staticmethod
+    def _ma_chay_duoc(p: Path) -> str:
+        """Mã nguồn ĐÃ BỎ chú thích và docstring.
+
+        Grep thô sẽ báo động vì chính docstring GIẢI THÍCH luật ("không bao
+        giờ `0.0.0.0`") — cùng cái bẫy đã gặp ở `cc_agent_tool`, nơi một
+        phép grep báo động vì đúng câu nói mã đó an toàn.
+        """
+        import ast
+        cay = ast.parse(p.read_text(encoding="utf-8"))
+        # Bo docstring cua module/lop/ham.
+        for n in ast.walk(cay):
+            if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                              ast.AsyncFunctionDef)):
+                if (n.body and isinstance(n.body[0], ast.Expr)
+                        and isinstance(n.body[0].value, ast.Constant)
+                        and isinstance(n.body[0].value.value, str)):
+                    n.body = n.body[1:] or [ast.Pass()]
+        return ast.unparse(ast.fix_missing_locations(cay))
+
+    def test_ma_CHAY_DUOC_KHONG_chua_0_0_0_0(self):
+        for ten in ("webapi.py", "webmain.py"):
+            p = GOC / "scripts" / "control_center" / ten
+            if not p.is_file():
+                continue
+            with self.subTest(tep=ten):
+                self.assertNotIn("0.0.0.0", self._ma_chay_duoc(p),
+                                 f"{ten} bind ra ngoài localhost")
+
+    def test_webmain_bind_dung_127(self):
+        p = GOC / "scripts" / "control_center" / "webmain.py"
+        if not p.is_file():
+            self.skipTest("chưa có webmain.py")
+        self.assertIn('"127.0.0.1"', p.read_text(encoding="utf-8"))
+
+
+@unittest.skipUnless(CO_FASTAPI, "chưa cài fastapi")
+class TestKhongRoBiMat(_Nen):
+    """Payload đi ra không được mang thứ giống credential."""
+
+    def test_state_di_qua_bo_loc_bi_mat(self):
+        self.cc.store.them_chat(
+            "p", "user",
+            "token cua toi la ghp_AbCdEfGhIjKlMnOpQrStUvWxYz012345 nhe")
+        r = self.cl.get("/api/state?project=p", headers=self.h)
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("ghp_AbCdEfGhIjKlMnOpQrStUvWxYz012345", r.text)
+
+    def test_token_phien_KHONG_nam_trong_payload_state(self):
+        r = self.cl.get("/api/state?project=p", headers=self.h)
+        self.assertNotIn(self.phien.token, r.text)
+
+    def test_khong_co_trang_docs_liet_ke_API(self):
+        for d in ("/docs", "/redoc", "/openapi.json"):
+            with self.subTest(duong=d):
+                self.assertIn(self.cl.get(d).status_code, (401, 404))
+
+
+@unittest.skipUnless(CO_FASTAPI, "chưa cài fastapi")
+class TestDinhKemQuaHTTP(_Nen):
+    """Tái dùng toàn bộ tầng đính kèm — API chỉ là một cửa vào nữa."""
+
+    def _tai_len(self, ten: str, noi: bytes):
+        return self.cl.post("/api/attachments", headers=self.h,
+                            data={"project_id": "p"},
+                            files={"file": (ten, noi,
+                                            "application/octet-stream")})
+
+    def test_tai_len_anh_roi_lay_lai_dung_BYTE(self):
+        r = self._tai_len("anh.png", PNG)
+        self.assertEqual(r.status_code, 200, r.text)
+        dk = r.json()
+        self.assertEqual(dk["media_type"], "image")
+        b = self.cl.get(f"/api/attachments/{dk['attachment_id']}/blob",
+                        headers=self.h)
+        self.assertEqual(b.status_code, 200)
+        self.assertEqual(b.content, PNG, "byte lấy về không khớp byte gửi lên")
+
+    def test_bam_va_kich_co_KHOP(self):
+        import hashlib
+        dk = self._tai_len("a.pdf", PDF).json()
+        self.assertEqual(dk["sha256"], hashlib.sha256(PDF).hexdigest())
+        self.assertEqual(dk["size_bytes"], len(PDF))
+
+    def test_loai_NGOAI_allowlist_bi_tu_choi_400(self):
+        r = self._tai_len("evil.exe", b"MZ\x90\x00" + b"\x00" * 64)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("không nằm trong danh sách", r.json()["error"])
+
+    def test_duoi_tep_KHONG_khop_noi_dung_bi_tu_choi(self):
+        r = self._tai_len("anh.png", b"MZ\x90\x00" + b"\x00" * 64)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("không khớp", r.json()["error"])
+
+    def test_ten_tep_co_DUONG_DAN_khong_thoat_ra_duoc(self):
+        r = self._tai_len(r"..\..\..\Windows\System32\evil.png", PNG)
+        self.assertEqual(r.status_code, 200, r.text)
+        dk = r.json()
+        self.assertNotIn("..", dk["filename"])
+        self.assertNotIn("System32", dk["rel_path"])
+        self.assertTrue(dk["rel_path"].startswith("objects/"))
+
+    def test_blob_cua_ma_KHONG_TON_TAI_thi_404(self):
+        r = self.cl.get("/api/attachments/att_khong_co/blob", headers=self.h)
+        self.assertEqual(r.status_code, 404)
+
+    def test_KHONG_co_tham_so_duong_dan_nao_o_endpoint_blob(self):
+        """Đọc byte chỉ đi qua `attachment_id`.
+
+        Không có tham số path nào để chen `../` vào — phép kiểm nằm ở
+        `KhoDinhKem.duong_dan()`, một chỗ duy nhất, và có bài kiểm riêng
+        ở `test_control_center_attachments.py`.
+        """
+        import ast
+        ma = (GOC / "scripts" / "control_center" / "webapi.py").read_text(
+            encoding="utf-8")
+        self.assertIn('"/api/attachments/{attachment_id}/blob"', ma)
+        cay = ast.parse(ma)
+        for n in ast.walk(cay):
+            # `async def` la `AsyncFunctionDef`, KHONG phai `FunctionDef` —
+            # ban dau chi tim `FunctionDef` nen bai kiem "khong tim thay
+            # endpoint" va bao hong ma khong noi gi ve an toan.
+            if (isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and n.name == "blob"):
+                ten = [a.arg for a in n.args.args]
+                self.assertEqual(ten, ["attachment_id"],
+                                 f"endpoint blob nhận thêm tham số: {ten}")
+                break
+        else:
+            self.fail("không tìm thấy endpoint blob")
+
+    def test_blob_co_nosniff(self):
+        """Không để trình duyệt tự đoán một `.txt` thành HTML rồi chạy nó."""
+        dk = self._tai_len("a.txt", b"xin chao").json()
+        r = self.cl.get(f"/api/attachments/{dk['attachment_id']}/blob",
+                        headers=self.h)
+        self.assertEqual(r.headers.get("x-content-type-options"), "nosniff")
+
+    def test_xoa_dinh_kem_thi_blob_mat_theo(self):
+        dk = self._tai_len("a.png", PNG).json()
+        aid = dk["attachment_id"]
+        self.assertEqual(
+            self.cl.delete(f"/api/attachments/{aid}",
+                           headers=self.h).status_code, 200)
+        self.assertEqual(
+            self.cl.get(f"/api/attachments/{aid}/blob",
+                        headers=self.h).status_code, 404)
+
+
+@unittest.skipUnless(CO_FASTAPI, "chưa cài fastapi")
+class TestChatVaQuyenAgent(_Nen):
+    """Đính kèm gửi qua web phải tới đúng việc, y như đường Qt."""
+
+    def test_gui_chat_kem_dinh_kem_thi_agent_duoc_cap(self):
+        dk = self.cl.post("/api/attachments", headers=self.h,
+                          data={"project_id": "p"},
+                          files={"file": ("a.png", PNG, "image/png")}).json()
+        r = self.cl.post("/api/chat", headers=self.h, json={
+            "project_id": "p",
+            "text": "update docs/seed.md with one line",
+            "attachment_ids": [dk["attachment_id"]]})
+        self.assertEqual(r.status_code, 200, r.text)
+        viec = self.cc.store.tasks("p")
+        self.assertTrue(viec)
+        for t in viec:
+            with self.subTest(task=t.task_id):
+                ds = self.cc.dinh_kem.cho_agent(t.task_id)
+                self.assertEqual([x.attachment_id for x in ds],
+                                 [dk["attachment_id"]])
+        self.assertEqual(self.cc.dinh_kem.cho_agent("p.khong_lien_quan"), [])
+
+    def test_ma_dinh_kem_cua_DU_AN_KHAC_bi_bo_qua(self):
+        """FAIL CLOSED: frontend chỉ gửi mã, và mã lạ không được cấp."""
+        from scripts.control_center.model import Project
+        self.cc.them_project(Project(project_id="q", name="Q",
+                                     repo_path=str(self.goc)))
+        dk = self.cl.post("/api/attachments", headers=self.h,
+                          data={"project_id": "q"},
+                          files={"file": ("a.png", PNG, "image/png")}).json()
+        self.cl.post("/api/chat", headers=self.h, json={
+            "project_id": "p", "text": "update docs/seed.md with one line",
+            "attachment_ids": [dk["attachment_id"]]})
+        for t in self.cc.store.tasks("p"):
+            with self.subTest(task=t.task_id):
+                self.assertEqual(self.cc.dinh_kem.cho_agent(t.task_id), [])
+        kinds = [e["kind"] for e in self.cc.store.su_kien(limit=50)]
+        self.assertIn("ATTACHMENT_REJECTED", kinds)
+
+    def test_chat_rong_va_khong_dinh_kem_thi_400(self):
+        r = self.cl.post("/api/chat", headers=self.h,
+                         json={"project_id": "p", "text": "   "})
+        self.assertEqual(r.status_code, 400)
+
+    def test_state_mang_theo_dinh_kem_theo_tin_nhan(self):
+        dk = self.cl.post("/api/attachments", headers=self.h,
+                          data={"project_id": "p"},
+                          files={"file": ("a.png", PNG, "image/png")}).json()
+        self.cl.post("/api/chat", headers=self.h, json={
+            "project_id": "p", "text": "xem anh nay",
+            "attachment_ids": [dk["attachment_id"]]})
+        d = self.cl.get("/api/state?project=p", headers=self.h).json()
+        gom = d.get("attachments_by_message") or {}
+        self.assertTrue(gom, "state không mang đính kèm nào")
+        moi = [x for ds in gom.values() for x in ds]
+        self.assertIn(dk["attachment_id"],
+                      [x["attachment_id"] for x in moi])
+
+
+@unittest.skipUnless(CO_FASTAPI, "chưa cài fastapi")
+class TestWebSocket(_Nen):
+    #: `TestClient` gui `Host: testserver` cho WebSocket BAT KE `base_url`
+    #: — da do. Nen phai dat Host tuong minh; KHONG noi long phep kiem Host
+    #: cua san pham cho tien bo kiem.
+    HDR = {"host": "127.0.0.1:8765"}
+
+    def test_khong_token_thi_bi_dong(self):
+        with self.assertRaises(Exception):
+            with self.cl.websocket_connect("/ws", headers=self.HDR) as s:
+                s.receive_text()
+
+    def test_Host_LA_thi_bi_dong_du_token_DUNG(self):
+        """Phát hiện được nhờ chính bộ kiểm: `TestClient` gửi
+        `Host: testserver`, và server đã từ chối — đúng như phải vậy.
+
+        Nếu WebSocket không kiểm Host thì nó thành lỗ để đi vòng qua toàn
+        bộ lớp phòng DNS rebinding của phía HTTP.
+        """
+        with self.assertRaises(Exception):
+            with self.cl.websocket_connect(
+                    f"/ws?t={self.phien.token}",
+                    headers={"host": "evil.example.com"}) as s:
+                s.receive_text()
+
+    def test_token_dung_thi_nhan_duoc_trang_thai(self):
+        with self.cl.websocket_connect(
+                f"/ws?t={self.phien.token}&project=p",
+                headers=self.HDR) as s:
+            goi = json.loads(s.receive_text())
+        self.assertEqual(goi["kind"], "state")
+        self.assertIn("tasks", goi["data"])
+
+    def test_trang_thai_qua_ws_cung_di_qua_bo_loc_bi_mat(self):
+        self.cc.store.them_chat(
+            "p", "user", "key ghp_ZzYyXxWwVvUuTtSsRrQqPpOoNn123456 day")
+        with self.cl.websocket_connect(
+                f"/ws?t={self.phien.token}&project=p",
+                headers=self.HDR) as s:
+            tho = s.receive_text()
+        self.assertNotIn("ghp_ZzYyXxWwVvUuTtSsRrQqPpOoNn123456", tho)
+
+
+if __name__ == "__main__":
+    unittest.main()

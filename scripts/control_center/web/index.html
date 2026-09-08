@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  Router Control Center — giao dien WEB (duong chinh tu V0.2).
+
+  KHONG CO BUOC BUILD, va do la mot quyet dinh ky thuat co ly do:
+
+  Launcher phai BAM DOI duoc, khong can PowerShell, khong can Node. Mot
+  bundler (Vite/Next) se doi `npm install` o lan chay dau — tuc la bam doi
+  xong phai cho vai phut va can mang. `web/` cua kho nay da la mot app
+  Next.js cua production fanfic.world; tron giao dien dieu hanh vao do se
+  keo ca chuoi cong cu ay vao mot cong cu ca nhan.
+
+  Nen day la mot SPA khong build: ES module + fetch + WebSocket that. Van
+  la mot frontend web thuc su — DOM that, clipboard that cua trinh duyet,
+  keo-tha that — chi khong co lop dich.
+
+  CSP: chi cho phep tai nguyen tu chinh origin nay. Khong CDN, khong font
+  ngoai, khong `unsafe-eval`. Mot cong cu dieu hanh cuc bo khong co ly do
+  gi de tai mot byte nao tu Internet.
+-->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Router Control Center</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header id="thanh-tren">
+  <span id="ten-project">—</span>
+  <span class="chip" id="chip-chay"><b>0</b> đang chạy</span>
+  <span class="chip do" id="chip-chan"><b>0</b> bị chặn</span>
+  <span class="chip xam" id="chip-pool"><b>—</b> pool</span>
+  <span class="day"></span>
+  <input id="o-tim" type="search" placeholder="Tìm việc, phiên, worktree…"
+         aria-label="Tìm">
+  <button id="nut-tro-giup" title="Hướng dẫn dùng">?</button>
+  <button id="nut-cai-dat" title="Cài đặt">Cài đặt</button>
+</header>
+
+<main>
+  <nav id="ben-trai">
+    <div class="nhan">DỰ ÁN</div>
+    <ul id="ds-project"></ul>
+    <button id="nut-project-moi">+ Dự án mới</button>
+    <div class="ghi-chu">
+      Giao diện Qt và TUI vẫn còn, làm đường gỡ lỗi:<br>
+      <code>router-cc-gui.cmd</code> · <code>router-cc.cmd</code>
+    </div>
+  </nav>
+
+  <section id="giua">
+    <div id="tabs" role="tablist">
+      <button class="tab dang-mo" data-khung="chat" role="tab">Chat</button>
+      <button class="tab" data-khung="tasks" role="tab">Tasks</button>
+      <button class="tab" data-khung="agents" role="tab">Agents</button>
+      <button class="tab" data-khung="logs" role="tab">Logs</button>
+      <button class="tab" data-khung="usage" role="tab">Usage</button>
+    </div>
+
+    <!-- CHAT -->
+    <div class="khung dang-mo" id="khung-chat">
+      <div id="ds-tin"></div>
+      <div id="o-gui">
+        <div id="dai-dinh-kem" hidden>
+          <div class="dai-dau">
+            <span id="dai-nhan"></span>
+            <button id="nut-bo-het">Bỏ hết</button>
+          </div>
+          <div id="dai-the"></div>
+        </div>
+        <!--
+          `contenteditable` KHONG duoc dung o day. Mot `<textarea>` cho
+          clipboard THAT cua trinh duyet: Ctrl+C/V/X/A, chon bang chuot,
+          menu chuot phai, undo — tat ca do trinh duyet lo. `contenteditable`
+          se keo theo ca mot dong viec xu ly HTML dan vao, va do dung la cho
+          cac app hay lam hong clipboard.
+        -->
+        <textarea id="o-soan" rows="3" spellcheck="false"
+          placeholder="Gõ mục tiêu cho Router… (Enter xuống dòng · nút Gửi hoặc Ctrl+Enter để gửi)"></textarea>
+        <div class="hang-nut">
+          <button id="nut-dinh-kem" title="Chọn tệp để gửi kèm.
+Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), hoặc kéo-thả tệp vào đây.">Đính kèm tệp…</button>
+          <input id="chon-tep" type="file" multiple hidden>
+          <span class="day"></span>
+          <span id="trang-thai-gui"></span>
+          <button id="nut-gui" class="chinh">Gửi</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TASKS -->
+    <div class="khung" id="khung-tasks">
+      <div class="thanh-bang">
+        <span>Việc trong dự án</span><span class="day"></span>
+        <button data-copy="bang-tasks">Copy bảng</button>
+      </div>
+      <div class="chia">
+        <table id="bang-tasks"><thead><tr>
+          <th>Việc</th><th>Trạng thái</th><th>Agent</th><th>Thời lượng</th>
+          <th>Ưu tiên</th><th>Phụ thuộc</th><th>Worktree</th><th>Cập nhật</th>
+        </tr></thead><tbody></tbody></table>
+        <aside id="chi-tiet-viec"><p class="mo">Chọn một việc để xem chi tiết</p></aside>
+      </div>
+    </div>
+
+    <!-- AGENTS -->
+    <div class="khung" id="khung-agents">
+      <div class="thanh-bang">
+        <span>Phiên agent</span><span class="day"></span>
+        <button data-copy="bang-agents">Copy bảng</button>
+      </div>
+      <table id="bang-agents"><thead><tr>
+        <th>Provider</th><th>Phiên</th><th>Trạng thái</th><th>Việc hiện tại</th>
+        <th>Thời lượng</th><th>Hoạt động cuối</th><th>Worktree</th><th>Usage</th>
+      </tr></thead><tbody></tbody></table>
+      <p class="ghi-chu">Usage chỉ hiện ACTUAL khi nhà cung cấp trả số đọc
+        được bằng máy. Không đo được thì ghi UNAVAILABLE — không suy ra 0.</p>
+    </div>
+
+    <!-- LOGS -->
+    <div class="khung" id="khung-logs">
+      <div class="thanh-bang">
+        <span id="log-nhan">Nhật ký — chọn một việc ở khung Tasks</span>
+        <span class="day"></span>
+        <input id="log-loc" type="search" placeholder="Lọc theo chữ…">
+        <button id="log-theo" class="bat">Theo dõi: BẬT</button>
+        <button data-copy="log-o">Copy</button>
+        <button id="log-copy-all">Copy All</button>
+      </div>
+      <pre id="log-o" tabindex="0"></pre>
+    </div>
+
+    <!-- USAGE -->
+    <div class="khung" id="khung-usage">
+      <p id="usage-tom"></p>
+      <div class="thanh-bang"><span>Usage</span><span class="day"></span>
+        <button data-copy="bang-usage">Copy bảng</button></div>
+      <table id="bang-usage"><thead><tr>
+        <th>Hạng mục</th><th>Giá trị</th><th>Đơn vị</th><th>Mức tin cậy</th>
+        <th>Ghi chú</th></tr></thead><tbody></tbody></table>
+      <p class="ghi-chu">ACTUAL = số nhà cung cấp trả về, đọc được bằng máy.
+        ESTIMATED = suy ra từ hoạt động cục bộ, có thể lệch.
+        UNAVAILABLE = không có cách đọc — cố ý để trống, không ghi 0.</p>
+    </div>
+  </section>
+
+  <aside id="ben-phai">
+    <div class="nhan">ĐANG CHẠY</div>
+    <pre id="inspector" tabindex="0">(chưa có việc nào chạy)</pre>
+  </aside>
+</main>
+
+<div id="trang-thai-duoi"><span id="tt-noi">Đang kết nối…</span></div>
+
+<!-- Hop thoai: co nut X va dong bang Esc (native <dialog>) -->
+<dialog id="hop-thoai">
+  <div class="ht-dau">
+    <b id="ht-ten"></b><span class="day"></span>
+    <button id="ht-dong" title="Đóng (Esc)">&times;</button>
+  </div>
+  <div id="ht-than"></div>
+</dialog>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

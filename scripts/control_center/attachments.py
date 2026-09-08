@@ -320,6 +320,29 @@ class KhoDinhKem:
                                message_id=message_id, task_id=task_id,
                                owner=owner)
 
+    def them_tu_luong(self, project_id: str, f: BinaryIO, ten: str, *,
+                      message_id: Optional[int] = None, task_id: str = "",
+                      owner: str = "") -> DinhKem:
+        """Nhận từ một LUỒNG đọc — đường của tải lên qua HTTP.
+
+        Tồn tại cho web UI: `UploadFile` của Starlette cho một đối tượng
+        giống tệp, và nạp nó vào RAM rồi mới đưa xuống kho sẽ phá đúng bất
+        biến dòng chảy mà `_nhan_dong` dựng lên. Nên luồng được chuyển
+        thẳng xuống, không qua `bytes` trung gian.
+
+        Kiểm tên/loại TRƯỚC khi đọc một byte nào: một tệp 200 MB sai đuôi
+        thì không có lý do gì phải đọc hết mới từ chối.
+        """
+        ten = lam_sach_ten(ten)
+        loai = loai_cua(ten)
+        if loai is None:
+            raise DinhKemLoi(
+                f"đuôi tệp {duoi_cua(ten)!r} không nằm trong danh sách được "
+                f"phép — từ chối để an toàn")
+        return self._nhan_dong(project_id, f, ten, loai,
+                               message_id=message_id, task_id=task_id,
+                               owner=owner)
+
     def _nhan_dong(self, project_id: str, f: BinaryIO, ten: str, loai: str,
                    *, message_id: Optional[int], task_id: str,
                    owner: str) -> DinhKem:

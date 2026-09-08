@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Router Control Center V0.2 — giao dien web (ban bash).
+# Tren Windows thi dung `router-cc-web.cmd` (bam doi duoc).
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "$DIR"
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+for p in \
+  "/c/Users/nguye/Documents/CapCut-TTS-App/.venv/Scripts/python.exe" \
+  "$DIR/.venv/Scripts/python.exe" \
+  "$DIR/.venv/bin/python"
+do
+  if [ -x "$p" ]; then exec "$p" -m scripts.control_center.webmain "$@"; fi
+done
+exec python -m scripts.control_center.webmain "$@"

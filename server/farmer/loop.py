@@ -380,13 +380,18 @@ class ProductionFarmer:
             #    tren hai tep `artwork/cover.webp` va `artwork/background.webp`
             #    co that trong kho chinh tac. Do la mot cong KIEM DUOC; buoc 5
             #    thi dang cho mot kho chua ton tai.
-            try:
-                self._covers.ensure_cover(novel_id=novel_id, title=c.title)
-                self._covers.assert_publishable(novel_id)
-            except Exception as exc:                            # noqa: BLE001
-                # Ghi lai de khong mat dau vet, roi DI TIEP: cong that o buoc 6.
-                m.note_error(f"bia duong phuc vu chua san sang {novel_id} "
-                             f"(khong chan): {type(exc).__name__}: {exc}")
+            if getattr(self._covers, "available", True):
+                try:
+                    self._covers.ensure_cover(novel_id=novel_id, title=c.title)
+                    self._covers.assert_publishable(novel_id)
+                except Exception as exc:                        # noqa: BLE001
+                    # Ghi lai de khong mat dau vet, roi DI TIEP: cong that o
+                    # buoc 6.
+                    m.note_error(f"bia duong phuc vu chua san sang {novel_id} "
+                                 f"(khong chan): {type(exc).__name__}: {exc}")
+            # Bi CACH LY thi khong goi, va khong bao lai o day: ly do da nam
+            # MOT dong trong `status.json`. Lap lai no cho tung tac pham moi
+            # vong chi lam nhung loi that kho thay hon.
 
             # 6. KHO SAN XUAT CHINH TAC — van ban chuan hoa, tranh, manifest,
             #    guong Drive. Cong READY nam o day chu khong o buoc 5: mot
@@ -451,23 +456,40 @@ class ProductionFarmer:
 
         from server.farmer.canonical import ARTIFACT_AUDIO_VI
 
-        if man.artifacts.get(ARTIFACT_AUDIO_VI):
-            return                                  # da co am thanh, xong
+        khoa_da_gan = man.artifacts.get(ARTIFACT_AUDIO_VI)
+        if khoa_da_gan and self._writer.audio_archived(man):
+            return                          # co tren ca hai duong, xong han
 
-        try:
-            khoa = self._dedup.finished_tts_output_key(man.novel_id)
-        except DedupError as exc:
-            m.note_error(f"hoan doi soat am thanh {man.novel_id}: {exc}")
-            return
+        # Da gan nhung CHUA len Drive van la viec chua xong. Do la trang thai
+        # cua moi tac pham duoc san xuat truoc khi buoc guong am thanh ton
+        # tai — chung co mp3 tren duong phuc vu va khong co ban sao ben vung
+        # nao. Duong nay la duong sua cho chung.
+        khoa = khoa_da_gan
+        if not khoa:
+            try:
+                khoa = self._dedup.finished_tts_output_key(man.novel_id)
+            except DedupError as exc:
+                m.note_error(f"hoan doi soat am thanh {man.novel_id}: {exc}")
+                return
 
         if khoa:
             try:
-                self._writer.attach_audio(bucket=bucket, url=c.url,
-                                          object_key=khoa)
-                m.audio_attached += 1
+                ket_qua = self._writer.attach_audio(
+                    bucket=bucket, url=c.url, object_key=khoa)
             except Exception as exc:                            # noqa: BLE001
                 m.note_error(f"gan am thanh that bai {man.novel_id}: "
                              f"{type(exc).__name__}: {exc}")
+                return
+            if ket_qua == "DA_GUONG":
+                m.audio_attached += 1
+                m.archived += 1
+            elif ket_qua == "GUONG_HOAN":
+                m.audio_attached += 1
+                m.archive_pending += 1
+                m.note_error(f"am thanh da gan nhung Drive chua nhan "
+                             f"{man.novel_id} — se thu lai vong sau")
+            elif ket_qua == "DA_GAN":
+                m.audio_attached += 1
             return
 
         # Chua co ban mp3. Neu cung chua co job nao thi xep — day la duong
@@ -530,7 +552,8 @@ class ProductionFarmer:
             self._metrics.write(
                 lanes=lanes, quotas=self._quotas.snapshot().as_dict(),
                 round_started=bat_dau, healthy=False, unhealthy_reason=ly_do,
-                archive=self._archive_status(), integrity=self._integrity)
+                archive=self._archive_status(), integrity=self._integrity,
+                serving_cover=self._serving_cover_status())
             return lanes
 
         lanes = {
@@ -542,8 +565,18 @@ class ProductionFarmer:
             lanes=lanes, quotas=self._quotas.snapshot().as_dict(),
             round_started=bat_dau, healthy=not co_loi,
             unhealthy_reason="co cong doan that bai trong vong nay" if co_loi else "",
-            archive=self._archive_status(), integrity=self._integrity)
+            archive=self._archive_status(), integrity=self._integrity,
+            serving_cover=self._serving_cover_status())
         return lanes
+
+    def _serving_cover_status(self) -> Dict[str, Any]:
+        """Bia duong PHUC VU — MOT dong trong status, khong phai mot dong loi
+        cho tung tac pham moi vong."""
+        if hasattr(self._covers, "status"):
+            return self._covers.status()
+        from server.farmer.covers import SERVING_COVER_OK
+
+        return {"state": SERVING_COVER_OK, "reason": ""}
 
     def _review(self, c: Candidate, body: str):
         """Goi cong danh gia.

@@ -107,6 +107,10 @@ class FarmerStatus:
     archive: Dict[str, Any] = field(default_factory=dict)
     #: Toan ven trinh thong dich luc khoi dong.
     integrity: Dict[str, Any] = field(default_factory=dict)
+    #: Bia duong PHUC VU (MediaAsset cua Appwrite). Mot khoang thieu DA BIET
+    #: va duoc noi ro MOT lan o day, thay vi mot dong loi cho tung tac pham
+    #: moi vong. Cong tranh THAT nam o kho chinh tac, khong o day.
+    serving_cover: Dict[str, Any] = field(default_factory=dict)
     #: Tong don gian tich luy tron doi tien trinh — de ve do thi.
     totals: Dict[str, int] = field(default_factory=dict)
 
@@ -126,6 +130,7 @@ class FarmerStatus:
             "quotas": self.quotas,
             "archive": self.archive,
             "integrity": self.integrity,
+            "serving_cover": self.serving_cover,
             "totals": dict(self.totals),
         }
 
@@ -161,11 +166,13 @@ class MetricsWriter:
               round_started: float, healthy: bool = True,
               unhealthy_reason: str = "",
               archive: Optional[Dict[str, Any]] = None,
-              integrity: Optional[Dict[str, Any]] = None) -> FarmerStatus:
+              integrity: Optional[Dict[str, Any]] = None,
+              serving_cover: Optional[Dict[str, Any]] = None) -> FarmerStatus:
         self._accumulate(lanes)
         status = FarmerStatus(
             archive=dict(archive or {}),
             integrity=dict(integrity or {}),
+            serving_cover=dict(serving_cover or {}),
             started_at=self._started_at,
             updated_at=_now(),
             round_number=self._round,

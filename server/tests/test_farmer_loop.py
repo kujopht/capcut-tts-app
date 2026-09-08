@@ -113,13 +113,19 @@ class _Harness:
         # Kho san xuat chinh tac, gia lap toan bo: R2 la mot dict, tranh la
         # hai chuoi byte, Drive la mot danh sach. Duong ma duoc chay THAT —
         # chi ba bien gioi ngoai la gia.
-        self.objects, self.archived = {}, []
+        self.objects, self.archived, self.downloaded = {}, [], []
 
         def put(key, data, content_type="application/octet-stream"):
             self.objects[key] = data
 
         def get(key):
             return self.objects[key]
+
+        def tai_xuong(key, dest):
+            # Ban mp3 duoc tai XUONG DIA (khong vao RAM) truoc khi guong len
+            # Drive — cung duong ma `R2StorageAdapter.get_file` di.
+            self.downloaded.append(key)
+            Path(dest).write_bytes(b"ID3fake-mp3:" + key.encode())
 
         def sinh_tranh(wid):
             return (b"COVER:" + wid.encode(), b"BG:" + wid.encode())
@@ -130,7 +136,8 @@ class _Harness:
                                   remote_path=f"fanfic-gdrive:{work_key}")
 
         self.writer = ProductionWriter(
-            put_object=put, get_object=get, generate_artwork=sinh_tranh,
+            put_object=put, get_object=get, download_object=tai_xuong,
+            generate_artwork=sinh_tranh,
             archive_file=luu_tru) if with_writer else None
 
         self.farmer = ProductionFarmer(
@@ -552,3 +559,94 @@ class AudioReconcileTest(unittest.TestCase):
         self.assertEqual(m.audio_attached, 0)
         self.assertEqual(h.tts, ["nov_1"])       # khong xep them
         self.assertFalse([e for e in m.errors if "xep bu" in e])
+
+    def test_audio_is_mirrored_to_drive_not_just_attached(self):
+        """Gan vao manifest KHAC voi co ban sao ben vung.
+
+        Bon tac pham dau tien co manifest ghi khoa mp3 ma tren Drive khong he
+        co tep audio nao — hai cau hoi bi gop lam mot.
+        """
+        import json as _json
+
+        with TemporaryDirectory() as d:
+            h, m = self._chay_xong_roi(d, [self._job()])
+            self.assertEqual(m.audio_attached, 1)
+            # Tep mp3 THAT SU di len Drive, vao dung thu muc con `audio`.
+            self.assertTrue([k for k in h.archived if k.endswith("/audio")],
+                            h.archived)
+            khoa = [k for k in h.objects
+                    if k.endswith("/manifest.json") and "/manifests/" not in k]
+            man = _json.loads(h.objects[khoa[0]])
+        self.assertIn("audio/vi.mp3", man["archive"]["artifacts"])
+
+    def test_an_already_complete_work_is_not_rewritten(self):
+        """Doi soat lan hai la mot lan DOC, khong phai mot lan ghi."""
+        with TemporaryDirectory() as d:
+            h, _ = self._chay_xong_roi(d, [self._job()])
+            truoc = len(h.archived)
+            m = h.farmer.run_text_lane()      # vong 3
+        self.assertEqual(m.audio_attached, 0)
+        self.assertEqual(len(h.archived), truoc, "khong duoc guong lai")
+
+    def test_audio_attached_but_never_mirrored_gets_repaired(self):
+        """Duong SUA cho tac pham san xuat truoc khi buoc guong ton tai."""
+        import json as _json
+
+        with TemporaryDirectory() as d:
+            h, _ = self._chay_xong_roi(d, [self._job()])
+            # Gia lap trang thai cu: da gan audio, chua guong bao gio.
+            khoa = [k for k in h.objects
+                    if k.endswith("/manifest.json") and "/manifests/" not in k][0]
+            man = _json.loads(h.objects[khoa])
+            man["archive"]["artifacts"] = [a for a in man["archive"]["artifacts"]
+                                           if a != "audio/vi.mp3"]
+            h.objects[khoa] = _json.dumps(man).encode("utf-8")
+            truoc = len(h.archived)
+
+            m = h.farmer.run_text_lane()
+            sau = _json.loads(h.objects[khoa])
+
+        self.assertEqual(m.audio_attached, 1)
+        self.assertGreater(len(h.archived), truoc, "phai guong bu ban mp3")
+        self.assertIn("audio/vi.mp3", sau["archive"]["artifacts"])
+
+
+class QuarantinedServingCoverTest(unittest.TestCase):
+    """Kho khong ho tro media asset => cong bia duong phuc vu bi CACH LY."""
+
+    def test_a_store_without_list_assets_is_quarantined(self):
+        from server.farmer.covers import (
+            SERVING_COVER_QUARANTINED, build_cover_gate,
+        )
+
+        gate = build_cover_gate(_Store())
+        self.assertFalse(gate.available)
+        self.assertEqual(gate.status()["state"], SERVING_COVER_QUARANTINED)
+        self.assertIn("media_assets", gate.status()["reason"])
+
+    def test_a_quarantined_gate_is_never_called_and_stays_quiet(self):
+        from server.farmer.covers import build_cover_gate
+
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d), covers=build_cover_gate(_Store()),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+
+        # Tac pham van di het duong...
+        self.assertEqual(m.published_candidates, 1)
+        # ...va KHONG co dong loi lap lai nao ve bia duong phuc vu.
+        self.assertFalse([e for e in m.errors if "bia duong phuc vu" in e],
+                         m.errors)
+
+    def test_a_capable_store_still_gets_a_real_gate(self):
+        from server.farmer.covers import CoverGate, build_cover_gate
+
+        class _CoAsset(_Store):
+            def list_assets(self, owner_id):
+                return []
+
+            def create_asset(self, asset):
+                return asset
+
+        gate = build_cover_gate(_CoAsset(), mock.Mock())
+        self.assertIsInstance(gate, CoverGate)

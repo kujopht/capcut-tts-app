@@ -62,6 +62,71 @@ class CoverRequired(RuntimeError):
     """Chan xuat ban vi thieu bia. KHONG phai loi ky thuat — la cong."""
 
 
+#: Trang thai cua bia duong PHUC VU, cho `status.json`.
+SERVING_COVER_OK = "SERVING_COVER_OK"
+SERVING_COVER_QUARANTINED = "SERVING_COVER_QUARANTINED"
+
+
+class QuarantinedCoverGate:
+    """Bia duong PHUC VU bi CACH LY — mot su that duoc noi RO MOT LAN.
+
+    `MediaAssetStore` la mot `Protocol` ma ban trien khai duy nhat la
+    `MockMediaAssetStore`. Khong co collection `media_assets` trong Appwrite
+    (xem `scripts/setup_appwrite.py`), va `AppwriteMetadataStore` khong co
+    `list_assets`. Tren may san xuat, `CoverGate` nem `AttributeError` MOI
+    LAN.
+
+    Cach ly chu khong "sua": cap phat mot collection san xuat moi la mot thay
+    doi luoc do that, va viec do khong nam trong dot don dep nay.
+
+    Vi sao mot cong CACH LY tot hon mot cong LUON NEM:
+
+        Truoc  — moi tac pham, moi vong, sinh mot dong `AttributeError` trong
+                 `errors[]`. Nhieu, lap lai, va lan vao giua nhung loi that.
+        Nay    — kiem MOT lan luc khoi dong, bao MOT dong trong `status.json`,
+                 va duong san xuat khong goi toi no nua.
+
+    Day KHONG phai noi long yeu cau tranh: `artwork/cover.webp` va
+    `artwork/background.webp` van la cong cung o `WorkManifest.publishable()`,
+    tren hai tep co that trong kho chinh tac.
+    """
+
+    available = False
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    def ensure_cover(self, **kwargs):
+        raise CoverRequired(self.reason)
+
+    def assert_publishable(self, novel_id: str):
+        raise CoverRequired(self.reason)
+
+    def status(self) -> dict:
+        return {"state": SERVING_COVER_QUARANTINED, "reason": self.reason}
+
+
+def build_cover_gate(store, pipeline=None):
+    """`CoverGate` that neu kho ho tro media asset; khong thi ban CACH LY.
+
+    Kiem KHA NANG chu khong doan theo ten lop: mot kho khac co the ho tro,
+    va mot ban `AppwriteMetadataStore` tuong lai co the duoc bo sung. Hoi
+    `hasattr` la hoi dung cai ma `CoverGate` se goi.
+    """
+    thieu = [ten for ten in ("list_assets", "create_asset")
+             if not hasattr(store, "list_assets" if ten == "list_assets"
+                            else ten)]
+    if thieu:
+        return QuarantinedCoverGate(
+            f"{type(store).__name__} khong co {', '.join(thieu)} — chua co "
+            f"collection 'media_assets' trong Appwrite. Bia duong phuc vu bi "
+            f"cach ly; cong tranh THAT nam o kho chinh tac "
+            f"(artwork/cover.webp + artwork/background.webp).")
+    if pipeline is None:
+        return None
+    return CoverGate(pipeline, media_asset_store=store)
+
+
 @dataclass(frozen=True)
 class CoverOutcome:
     asset_id: str

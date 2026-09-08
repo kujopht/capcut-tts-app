@@ -171,18 +171,30 @@ gì để đọc**.
 được. Nay báo `failed` kèm số ký tự thật và tên hạn mức, thay vì âm thầm đạt
 READY.
 
-**Hai tác phẩm đó vẫn đang ở trạng thái READY-nhưng-rỗng trên máy sản xuất.**
-Sửa chúng cần xoá bản ghi production, nên tôi để nguyên cho người vận hành
-quyết định.
+**ĐÃ DỌN (2026-09-08).** Người vận hành duyệt kế hoạch xoá từng mục; 20 mục
+bị xoá (10 object R2, 6 tệp Drive, 2 thư mục rỗng, 2 bản ghi novel). Bản án
+**72** và **74** điểm được **giữ lại** có chủ đích — chúng nói về chất lượng
+tác phẩm, không về lỗi cắt chương, nên một lần chạy lại sau này (khi có cắt
+chương) không phải trả tiền đánh giá lần hai. `READY-NHUNG-RONG` nay là **0**.
+
+## Đợt dọn dẹp cuối (2026-09-08)
+
+| Hạng mục | Trước khi sửa | Sau khi sửa |
+|---|---|---|
+| Bản mp3 trên Drive | không có | `audio/vi.mp3` trong cây chính tắc |
+| "đã gắn" vs "đã lưu bền" | một trường, lẫn lộn | `artifacts` vs `archived_artifacts` |
+| Tải mp3 để gương | — | `get_file` stream xuống đĩa (`MemoryMax=1G`) |
+| Bìa đường phục vụ | `AttributeError` mỗi tác phẩm mỗi vòng | một dòng `serving_cover` trong status |
+| Bản ghi READY-nhưng-rỗng | 2 | **0** |
+| Đếm bản farmer | `TasksCurrent` (đếm **luồng** → báo 7) | `cgroup.procs` (đếm **tiến trình** → 1) |
 
 ## Còn lại
 
 1. **Cắt chương cho tác phẩm > 100.000 ký tự.** Chưa có. Cho tới khi có, mọi
    tác phẩm dài sẽ dừng ở bước chương — nay dừng **ồn ào** thay vì âm thầm.
-2. **Bản mp3 không được gương lên Drive.** Phải tải từ R2 về trước, và kích
-   thước đáng kể. Manifest ghi khoá R2 nên vẫn truy nguyên được.
-2. **`MediaAssetStore` chưa có bản triển khai Appwrite.** Bìa đường phục vụ sẽ
-   còn báo lỗi (không chặn) cho tới khi có.
+2. **`MediaAssetStore` chưa có bản triển khai Appwrite.** Bìa đường phục vụ
+   **đã được cách ly tường minh** (`serving_cover` trong `status.json`); mở
+   lại cần cấp phát collection `media_assets`, một thay đổi lược đồ thật.
 3. **`StartLimitIntervalSec` đặt sai mục** trong `fanfic-farmer.service`
    (`[Service]` thay vì `[Unit]`) — systemd bỏ qua, đã in cảnh báo. Vô hại,
    chưa sửa.

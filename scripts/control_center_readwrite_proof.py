@@ -38,7 +38,8 @@ def _d(s: str = "") -> None:
     print(s, flush=True)
 
 
-def chay(*, root: Path, timeout: float, probe: bool) -> Dict:
+def chay(*, root: Path, timeout: float, probe: bool,
+         giu_lai: bool = False) -> Dict:
     _d("=" * 74)
     _d("LÁT CẮT ĐỌC + GHI — agent THẬT, allowlist đã bật")
     _d("=" * 74)
@@ -146,6 +147,23 @@ def chay(*, root: Path, timeout: float, probe: bool) -> Dict:
     _d(f"  khoá còn giữ: {bc['locks_left']} (phải là 0)")
     _d(f"  GATED chặn  : {'ĐẠT' if gate_ok else 'HỎNG'}")
     _d(f"  ĐỌC+GHI     : {'ĐẠT' if bc['ok'] else 'HỎNG'}")
+
+    # TU DON. Mot kich ban chung minh de lai du an demo trong so that la
+    # cach trang thai thu nghiem tich luy roi mot ngay nao do di theo ban
+    # phat hanh. Go bang DUNG duong hep danh cho viec do; worktree tren dia
+    # KHONG bi dung toi (bang chung cua lan chay van con de xem).
+    if not giu_lai:
+        try:
+            dem = cc.xoa_project(pid, xac_nhan=True)
+            _d(f"  đã tự dọn dự án {pid!r}: {dem or '(không có gì)'}")
+            _d("  (worktree trên đĩa giữ nguyên — bằng chứng vẫn xem được)")
+            bc["cleaned_up"] = True
+        except ValueError as exc:                 # pragma: no cover
+            _d(f"  !! không tự dọn được: {exc}")
+            bc["cleaned_up"] = False
+    else:
+        _d(f"  giữ lại dự án {pid!r} theo yêu cầu (--keep)")
+        bc["cleaned_up"] = False
     cc.shutdown()
     return bc
 
@@ -156,9 +174,13 @@ def main(argv=None) -> int:
     ap.add_argument("--timeout", type=float, default=900.0)
     ap.add_argument("--probe", action="store_true")
     ap.add_argument("--json-out", default="")
+    ap.add_argument("--keep", action="store_true",
+                    help=("giữ lại dự án chứng minh trong sổ để soi tay. "
+                          "Mặc định TỰ DỌN — trạng thái demo không được tích "
+                          "luỹ trong sổ thật."))
     a = ap.parse_args(argv)
     goc = Path(a.root).resolve() if a.root else Path.cwd()
-    bc = chay(root=goc, timeout=a.timeout, probe=a.probe)
+    bc = chay(root=goc, timeout=a.timeout, probe=a.probe, giu_lai=a.keep)
     if a.json_out:
         Path(a.json_out).write_text(
             json.dumps(bc, ensure_ascii=False, indent=2, default=str),

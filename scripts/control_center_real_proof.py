@@ -192,6 +192,15 @@ def chay(*, root: Path, cho_ghi: bool, timeout: float,
         "accounts": cc.fabric.dem_tai_khoan(),
         "usage": cc.usage.report("proof", probe_cli=False),
     }
+    # TU DON — xem ghi chu cung ten o `control_center_readwrite_proof.py`.
+    try:
+        dem = cc.xoa_project("proof", xac_nhan=True)
+        _dong("")
+        _dong(f"đã tự dọn dự án 'proof': {dem or '(không có gì)'}")
+        _dong("(worktree trên đĩa giữ nguyên)")
+    except (ValueError, AttributeError) as exc:   # pragma: no cover
+        _dong("")
+        _dong(f"!! không tự dọn được: {exc}")
     cc.shutdown()
     return bc
 

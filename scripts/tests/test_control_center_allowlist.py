@@ -117,6 +117,22 @@ class TestAllowlistHopLe(unittest.TestCase):
             with self.subTest(lenh=c):
                 self.assertIn(c.rsplit(" ", 1)[1], DONG_TU)
 
+    def test_dong_tu_THUC_THI_MA_khong_duoc_cap_cho_agent(self):
+        """`tests` nạp và CHẠY mọi module trong `scripts/tests/` của `cwd`,
+        và `cwd` hợp lệ là worktree agent ĐANG CÓ QUYỀN GHI.
+
+        Agent không cần thoát rào `cwd` — nó chỉ cần trồng một tệp vào bên
+        trong rồi chạy đúng dòng lệnh đã được duyệt. Cổng `scope`/`security`
+        chỉ chạy SAU lượt, lúc mã đã chạy xong. Đó chính là năng lực mà
+        `command(*)` bị cấm vì nó.
+        """
+        for c in LENH_CHO_PHEP:
+            with self.subTest(lenh=c):
+                self.assertNotEqual(
+                    c.rsplit(" ", 1)[1], "tests",
+                    "`tests` KHÔNG được nằm trong allowlist của agent")
+        self.assertIn("tests", " ".join(KHONG_CAP_CHO_AGENT))
+
     def test_wrapper_khong_dung_shell_True(self):
         """`shell=True` biến mọi phần tử argv thành một chuỗi shell diễn
         giải được — tức là mở lại đúng cánh cửa vừa đóng.
@@ -227,6 +243,36 @@ class TestDonTrangThaiThuNghiem(unittest.TestCase):
         self.assertEqual(self.cc.store.tasks("proof"), [])
         self.assertEqual(self.cc.store.chat("proof"), [])
         self.assertIsNone(self.cc.store.task("proof.t1"))
+
+    def test_TU_CHOI_xoa_du_an_con_viec_DANG_CHAY(self):
+        """Xoá giữa chừng thì agent vẫn chạy nhưng mọi hàng của nó biến mất.
+
+        `ghi_ket_qua` thành no-op, `doi_trang_thai` ném `StoreError`, kết quả
+        mất. Tệ hơn: `lm.tra()` nhả MỌI khoá của dự án — kể cả khoá
+        PRODUCTION mà `reclaim()` cố ý không bao giờ đụng — trong khi một
+        agent vẫn đang ghi.
+        """
+        from scripts.control_center.model import Task, TaskState
+        self.cc.store.luu_task(Task(task_id="proof.dangchay",
+                                    project_id="proof", title="x",
+                                    objective="y", state=TaskState.RUNNING))
+        with self.assertRaises(ValueError) as ctx:
+            self.cc.xoa_project("proof", xac_nhan=True)
+        self.assertIn("ĐANG CHẠY", str(ctx.exception))
+        self.assertIn("proof", [x.project_id
+                                for x in self.cc.store.projects()])
+
+    def test_xoa_du_an_quet_ca_su_kien_gan_theo_TASK(self):
+        """`TASK_CLAIMED` ghi KHÔNG kèm `project_id`, nên điều kiện
+        `project_id=?` không quét được nó — rác của một dự án đã xoá."""
+        from scripts.control_center.model import Task, TaskState
+        self.cc.store.luu_task(Task(task_id="proof.t9", project_id="proof",
+                                    title="x", objective="y"))
+        self.cc.store.claim_task("proof.t9", "s-x")
+        self.assertTrue(self.cc.store.su_kien(task_id="proof.t9"))
+        self.cc.store.doi_trang_thai("proof.t9", TaskState.FAILED, force=True)
+        self.cc.xoa_project("proof", xac_nhan=True)
+        self.assertEqual(self.cc.store.su_kien(task_id="proof.t9"), [])
 
     def test_KHONG_go_duoc_du_an_MAC_DINH(self):
         """`fanfic`/`router` là dự án THẬT, không phải đồ thử."""

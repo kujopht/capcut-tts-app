@@ -69,6 +69,13 @@ MAX_ATTEMPTS = 3
 #: cham de khong quay CPU khi khong co viec.
 TICK_SECONDS = 1.0
 
+#: Dau hieu NHAN DANG truong hop "khai rong ma dia co doi" cua cong `diff`.
+#:
+#: Lay tu `router_v3/pool/validation.cong_diff`. Chuoi nay chi duoc sinh o
+#: DUNG mot nhanh, nhanh doi hoi `status=="ok" and not khai and that` — nen
+#: no la dau hieu chinh xac, khong phai suy doan. Khoa lai bang bai kiem.
+DAU_HIEU_KHAI_THIEU = "worker không khai sửa gì nhưng đĩa đổi"
+
 
 @dataclass
 class ProjectContext:
@@ -174,6 +181,25 @@ class ControlCenter:
         p = self.store.project(project_id)
         if p is None:
             return {}
+        # TU CHOI khi con viec DANG CHAY.
+        #
+        # Xoa giua chung thi agent van chay tiep, nhung moi hang cua no da
+        # biet mat: `ghi_ket_qua` thanh no-op, `doi_trang_thai` nem
+        # `StoreError`, va toan bo ket qua mat. Te hon: `lm.tra()` o duoi
+        # nha MOI khoa cua du an — ke ca khoa PRODUCTION, thu ma `reclaim()`
+        # co y khong bao gio dung toi — trong khi mot agent van dang ghi.
+        # Worktree thi con nguyen tren dia nhung khong con hang nao noi ai
+        # so huu, nen lan `doi_soat()` sau dang ky lai no nhu mot cay RANH.
+        dang = [t.task_id for t in self.store.tasks(project_id)
+                if t.state is TaskState.RUNNING]
+        with self._khoa:
+            dang += [x for x in self._dang_chay if x.startswith(project_id + ".")]
+        if dang:
+            raise ValueError(
+                f"{project_id!r} còn {len(dang)} việc ĐANG CHẠY "
+                f"({sorted(set(dang))[:3]}) — dừng chúng trước "
+                f"(`stop`), nếu không kết quả của chúng sẽ mất và khoá của "
+                f"chúng bị nhả trong khi agent vẫn đang ghi.")
         # Nha khoa TRUOC khi xoa hang: neu du an bien mat truoc, `tra()`
         # khong con biet khoa nao thuoc ve no.
         lm = LockManager(self.store)
@@ -724,11 +750,29 @@ class ControlCenter:
         khai = {str(t).replace("\\", "/").strip("/") for t in pb.changes if t}
         that = sorted({str(t).replace("\\", "/").strip("/")
                        for t in bc.files_changed_observed if t})
-        # CHI trường hợp khai RỖNG mà đĩa CÓ đổi. Khai sai (khong rong) hoac
-        # dia sach deu khong thuoc dien nay.
+        # CHI trường hợp khai RỖNG mà đĩa CÓ đổi.
         if khai or not that:
             return False
-        if pb.status != "ok":
+        # KHONG duoc hoi `pb.status` o day — no da BI GHI DE.
+        #
+        # `Executor.run` dat `pb.status = "failed"` va
+        # `failure_reason = f"gate_{hong[0]}"` NGAY KHI bat ky cong nao hong
+        # (executor.py). Nen dieu kien "worker bao ok" khong bao gio con dung
+        # o dau ra cua Executor, va ban truoc cua ham nay CHET CUNG tren
+        # duong that: no luon thoat o day. Bai kiem cu khong bat duoc vi no
+        # tu dung mot `ResultEnvelope(status="ok")` canh mot cong `diff`
+        # hong — mot to hop production khong sinh ra.
+        #
+        # Nguon su that con lai la CHINH CONG `diff`: thong diep duoi day chi
+        # duoc sinh o DUNG mot nhanh cua `cong_diff`, nhanh doi hoi
+        # `kq.status == "ok" and not khai and that`. Nen khop no la khop
+        # chinh xac dieu kien can, khong phai doan.
+        #
+        # `test_thong_diep_cong_diff_khong_doi` khoa lai chuoi nay: neu V4
+        # doi loi van, bai kiem do hong NGAY thay vi doi soat am tham chet.
+        chi_tiet = next((g.detail for g in bc.gates
+                         if g.name == "diff" and not g.passed), "")
+        if not chi_tiet.startswith(DAU_HIEU_KHAI_THIEU):
             return False
 
         vi_pham = sorted(set(hd.scope_violations(that))
@@ -766,6 +810,25 @@ class ControlCenter:
                   "gates": [g.name for g in bc.gates if g.passed]})
         return True
 
+    def _viec_dang_co_lease(self, ctx: "ProjectContext") -> set:
+        """`task_id` nao dang giu mot lease Router V4 CON HAN.
+
+        Day la tin hieu LIEN TIEN TRINH dang tin duy nhat: lease song trong
+        SQLite, co TTL va nhip tim, va chu cua no dap nhip trong khi luot
+        agent dang bay. Mot tien trinh Control Center thu hai doc duoc no, va
+        nho vay biet dung dung vao viec cua tien trinh thu nhat.
+
+        Khong doc duoc so lease thi tra tap RONG co chu dich: luc do
+        `recover()` quay ve hanh vi cu (dua tren phien), tuc than trong theo
+        chieu "coi la mo coi". Chieu do chi mat mot luot; chieu nguoc lai la
+        hai agent cung ghi mot cay.
+        """
+        try:
+            return {l.task_id for l in ctx.leases.all()
+                    if l.task_id and l.con_han()}
+        except Exception:                                 # noqa: BLE001
+            return set()
+
     def _nha_khoa_mo_coi(self, project_id: str) -> List[str]:
         """BẤT BIẾN: một khoá chỉ được giữ bởi một việc ĐANG CHẠY.
 
@@ -786,6 +849,12 @@ class ControlCenter:
         """
         with self._khoa:
             bay = set(self._dang_chay)
+        # Viec dang co lease SONG = dang chay o mot tien trinh khac. Khoa cua
+        # no khong phai khoa mo coi.
+        try:
+            bay |= self._viec_dang_co_lease(self.ctx(project_id))
+        except Exception:                                 # noqa: BLE001
+            pass
         lm = LockManager(self.store)
         da_nha: List[str] = []
         for l in self.store.locks(project_id):
@@ -1253,7 +1322,25 @@ class ControlCenter:
 
         for p in self.projects():
             ctx = self.ctx(p.project_id)
-            bc["sessions"][p.project_id] = ctx.sessions.recover()
+            # VIEC DANG DUOC MOT TIEN TRINH KHAC CHAY -> KHONG DUOC DUNG VAO.
+            #
+            # `recover()` chay vo dieu kien moi lan mo Control Center, ke ca
+            # `--headless` chi de xem mot anh chup. Neu mot TUI khac dang
+            # chay mot viec, ban truoc se: thay `sessions.pid IS NULL` (pid
+            # chi duoc ghi luc KET THUC viec), dat phien ve IDLE va XOA
+            # `current_task`, roi coi viec RUNNING la mo coi -> dua ve QUEUED
+            # va NHA KHOA cua mot agent dang ghi. Hai agent giam chung mot
+            # cay; va khi luot that ket thuc, `QUEUED -> DONE` nem
+            # `TransitionError` nen ca viec lam dung bi ghi thanh FAILED.
+            #
+            # Lease cua Router V4 la tin hieu LIEN TIEN TRINH dung cho viec
+            # nay: no song trong SQLite, co TTL + nhip tim, va mang `task_id`.
+            # Viec nao con lease SONG thi that su dang chay o dau do — de yen.
+            dang_thue = self._viec_dang_co_lease(ctx)
+            if dang_thue:
+                bc.setdefault("leased", []).extend(sorted(dang_thue))
+            bc["sessions"][p.project_id] = ctx.sessions.recover(
+                bo_qua_viec=dang_thue)
             bc["worktrees"][p.project_id] = ctx.worktrees.doi_soat()
             bc.setdefault("stale_locks", []).extend(
                 self._nha_khoa_mo_coi(p.project_id))
@@ -1272,6 +1359,8 @@ class ControlCenter:
                 # goi `--headless` lien tiep, moi lan deu chay `recover()`.
                 # Day dung la che do hong ma `recover()` ton tai de chan, va
                 # no song sot duoc vi phep kiem hoi sai cau hoi.
+                if t.task_id in dang_thue:
+                    continue                  # tien trinh khac dang chay
                 s = (self.store.session(t.owner_session)
                      if t.owner_session else None)
                 if s is not None and s.state.alive and \

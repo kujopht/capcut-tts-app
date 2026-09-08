@@ -1097,6 +1097,61 @@ class TestVerticalSlice(unittest.TestCase):
             with self.cc._khoa:
                 self.cc._dang_chay.pop(tid, None)
 
+    def test_recover_KHONG_dung_vao_viec_dang_co_LEASE_song(self):
+        """Tiến trình thứ hai gọi `recover()` KHÔNG được cướp việc đang chạy.
+
+        LỖI THẬT: `bat_dau_viec` không ghi `pid` (pid chỉ có lúc KẾT THÚC),
+        nên trong suốt lượt đầu `sessions.pid IS NULL`. `sessions.recover()`
+        thấy pid None + BUSY thì đặt IDLE và XOÁ `current_task`; vòng lặp
+        việc ngay sau đó thấy `current_task != task_id` nên coi việc RUNNING
+        là mồ côi -> QUEUED + NHẢ KHOÁ của một agent đang ghi.
+
+        Chỉ cần mở `router-cc --headless` ở terminal thứ hai để xem một ảnh
+        chụp là đủ kích hoạt.
+        """
+        from scripts.control_center.locks import LockManager
+        from scripts.control_center.model import Session, SessionState
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        LockManager(self.cc.store).xin(
+            "demo", [(LockKind.FILESYSTEM, "web/admin/content-queue")],
+            task_id=tid)
+        self.cc.store.luu_session(Session(
+            session_id="s-dang-chay", project_id="demo",
+            provider="antigravity", runtime_id="RT01", model_id="m-re",
+            state=SessionState.BUSY, pid=None, current_task=tid))
+        t = self.cc.store.task(tid)
+        t.state, t.owner_session = TaskState.RUNNING, "s-dang-chay"
+        self.cc.store.luu_task(t)
+
+        ctx = self.cc.ctx("demo")
+        ctx.leases.acquire("RT01#0", "pid-khac-1234", task_id=tid)
+
+        bc = self.cc.recover()
+        self.assertIn(tid, bc.get("leased", []))
+        self.assertIs(self.cc.store.task(tid).state, TaskState.RUNNING,
+                      "việc đang chạy ở tiến trình khác phải được để yên")
+        self.assertTrue(self.cc.store.locks("demo"),
+                        "KHÔNG được nhả khoá của agent đang ghi")
+        self.assertEqual(
+            self.cc.store.session("s-dang-chay").current_task, tid,
+            "không được xoá `current_task` của phiên đang chạy")
+
+    def test_recover_VAN_cuu_viec_khi_KHONG_co_lease(self):
+        """Siết chặt không được biến `recover()` thành vô dụng."""
+        from scripts.control_center.model import Session, SessionState
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.luu_session(Session(
+            session_id="s-chet", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.IDLE,
+            pid=None, current_task=""))
+        t = self.cc.store.task(tid)
+        t.state, t.owner_session, t.attempts = TaskState.RUNNING, "s-chet", 1
+        self.cc.store.luu_task(t)
+        self.cc.recover()
+        self.assertIs(self.cc.store.task(tid).state, TaskState.QUEUED)
+
     def test_recover_CHAN_viec_da_can_luot_thu(self):
         from scripts.control_center.model import Session
         self.cc.chat("demo", "fix web/admin")
@@ -1166,14 +1221,58 @@ class TestDoiSoatKhaiThieu(unittest.TestCase):
         self.cc.shutdown()
 
     def _kq(self, *, declared, observed, gates, status="ok"):
+        """Dựng ExecutionResult ĐÚNG HÌNH DẠNG `Executor.run` thật sinh ra.
+
+        Bản đầu của bộ kiểm này tự dựng `ResultEnvelope(status="ok")` cạnh
+        một cổng `diff` hỏng — một tổ hợp production KHÔNG BAO GIỜ sinh ra,
+        vì `Executor.run` ghi đè `status="failed"` ngay khi bất kỳ cổng nào
+        hỏng. Bộ kiểm xanh trong khi tính năng chết cứng trên đường thật.
+
+        Nay: gọi `cong_diff` THẬT để lấy đúng thông điệp cổng, rồi áp đúng
+        phép ghi đè của Executor.
+        """
         from scripts.router_v3.pool import validation as V
+        from scripts.router_v3.packet import TaskResult
         from scripts.router_v4.envelope import ResultEnvelope
+
+        gs = []
+        for n, ok in gates:
+            if n == "diff" and not ok:
+                gs.append(V.cong_diff(
+                    TaskResult(task_id=self.tid, worker_id="w", status=status,
+                               summary="đã làm", files_changed=list(declared)),
+                    list(observed), la_viec_co_ghi=True))
+            else:
+                gs.append(V.GateResult(n, ok, ""))
+        bc = V.ValidationReport(
+            gates=gs, files_changed_observed=list(observed))
+
         pb = ResultEnvelope(task_id=self.tid, status=status,
                             summary="đã làm", changes=list(declared))
-        bc = V.ValidationReport(
-            gates=[V.GateResult(n, ok, "") for n, ok in gates],
-            files_changed_observed=list(observed))
+        # DUNG phep ghi de cua `Executor.run`.
+        if not bc.passed:
+            hong = bc.failed_gates
+            pb.status = "blocked" if "security" in hong else "failed"
+            pb.failure_reason = ("security_gate" if "security" in hong
+                                 else f"gate_{hong[0]}")
         return ExecutionResult(envelope=pb, validation=bc)
+
+    def test_thong_diep_cong_diff_khong_doi(self):
+        """Khoá lại chuỗi mà `_doi_soat_khai_thieu` dựa vào để nhận dạng.
+
+        Nếu Router V4 đổi lời văn của cổng `diff`, bài kiểm này hỏng NGAY —
+        thay vì để việc đối soát âm thầm ngừng chạy và không ai biết.
+        """
+        from scripts.router_v3.pool.validation import cong_diff
+        from scripts.router_v3.packet import TaskResult
+        from scripts.control_center.engine import DAU_HIEU_KHAI_THIEU
+        g = cong_diff(
+            TaskResult(task_id="t", worker_id="w", status="ok", summary="x",
+                       files_changed=[]),
+            ["web/admin/a.txt"], la_viec_co_ghi=True)
+        self.assertFalse(g.passed)
+        self.assertTrue(g.detail.startswith(DAU_HIEU_KHAI_THIEU),
+                        f"thông điệp cổng `diff` đã đổi: {g.detail[:80]!r}")
 
     #: Moi cong DAT tru `diff` — dung hinh dang cua truong hop khai thieu.
     CONG_OK = [("shape", True), ("diff", False), ("scope", True),

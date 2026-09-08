@@ -366,6 +366,13 @@ class ControlStore:
                 dem["lock_waiters"] = c.execute(
                     f"DELETE FROM lock_waiters WHERE task_id IN ({hoi})",
                     ids).rowcount
+                # Su kien gan voi VIEC nhung KHONG kem `project_id` (vd
+                # `TASK_CLAIMED` o `claim_task`) khong bi quet boi dieu kien
+                # `project_id=?` o duoi — chung o lai nhu rac cua mot du an
+                # khong con ton tai. Quet them theo `task_id`.
+                dem["cc_events_theo_task"] = c.execute(
+                    f"DELETE FROM cc_events WHERE task_id IN ({hoi})",
+                    ids).rowcount
             for bang in ("tasks", "sessions", "locks", "worktrees", "chat",
                          "cc_events"):
                 dem[bang] = c.execute(

@@ -445,7 +445,8 @@ class SessionManager:
 
     # -- 4. PHUC HOI --------------------------------------------------------
 
-    def recover(self) -> Dict[str, List[str]]:
+    def recover(self, *, bo_qua_viec: Optional[set] = None
+                ) -> Dict[str, List[str]]:
         """Đối soát phiên trên sổ với tiến trình THẬT. Chạy lúc khởi động.
 
         Ba nhóm:
@@ -462,7 +463,15 @@ class SessionManager:
         gan_lai: List[str] = []
         chet: List[str] = []
         khong_ro: List[str] = []
+        bo_qua = set(bo_qua_viec or ())
         for s in self.store.sessions(self.project_id, alive_only=True):
+            if s.current_task and s.current_task in bo_qua:
+                # Mot tien trinh KHAC dang chay dung viec nay (lease con
+                # han). Dung vao phien cua no — nhat la XOA `current_task` —
+                # se lam vong lap viec o `engine.recover()` tuong viec do mo
+                # coi, roi nha khoa cua mot agent dang ghi.
+                gan_lai.append(s.session_id)
+                continue
             if s.pid is None:
                 khong_ro.append(s.session_id)
                 if s.state is SessionState.BUSY:

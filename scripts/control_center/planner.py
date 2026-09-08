@@ -116,23 +116,30 @@ _TOOL = str((Path(__file__).resolve().parents[1] / "cc_agent_tool.py"))
 LENH_CHO_PHEP: Tuple[str, ...] = (
     f"python {_TOOL} changes",
     f"python {_TOOL} compile",
-    f"python {_TOOL} tests",
 )
 
-#: SUA MOT KET LUAN SAI CUA CHINH TOI (2026-09-08).
+#: `tests` BI RUT LAI vi ly do AN TOAN, khong phai vi cham.
 #:
-#: Ban truoc KHONG cap `tests` voi ly do "bo kiem chay ~430s trong khi mot
-#: luot headless co tran 180s". Ket luan do SAI: con so 180s la cua CHINH
-#: kich ban do cua toi (`--print-timeout 180s` go cung trong probe), khong
-#: phai cua san pham. Duong that:
+#: `python -m unittest discover -s scripts/tests -t .` NAP VA CHAY moi module
+#: trong `scripts/tests/` CUA CHINH `cwd`. Va `cwd` hop le la worktree ma
+#: agent DANG CO QUYEN GHI. Nen agent khong can di ra ngoai rao `cwd` — no
+#: chi can tu trong mot tep vao ben trong:
 #:
-#:     Executor      timeout = c.execution.max_wall_time   (2400s voi viec ghi)
-#:     WarmAgyWorker --print-timeout = turn_timeout * 4    (9600s)
-#:     WarmAgyWorker _cho("result", timeout=turn_timeout)  (2400s)
+#:     1. ghi `scripts/tests/test_zzz.py` trong worktree cua chinh no
+#:     2. chay nguyen van dong lenh DA DUOC DUYET `... cc_agent_tool.py tests`
+#:     3. ma o muc module chay voi TOAN QUYEN nguoi dung: mang, %USERPROFILE%,
+#:        credential cua agy/codex, `.env` cua kho khac
 #:
-#: Nen mot luot 430s nam thoai mai trong tran. Bai hoc: do tren SAN PHAM,
-#: dung do tren mot kich ban thu roi ket luan cho san pham.
-KHONG_CAP_CHO_AGENT: Tuple[str, ...] = ()
+#: Cong `scope`/`security` chi chay SAU luot — luc do ma da chay xong. Tuc la
+#: dung nang luc ma `command(*)` bi cam vi no, duoc cap lai qua hai buoc.
+#:
+#: `changes` (`git status`) va `compile` (`compileall`) KHONG co van de nay:
+#: ca hai doc/bien dich, khong thuc thi ma nguoi dung.
+#:
+#: Bo kiem day du van la viec cua CI va nguoi van hanh — dong tu `tests` giu
+#: lai trong wrapper cho HO, khong cap cho agent. Muon cap lai o V0.2 thi
+#: phai chay no o mot ban sao dung-mot-lan khong co credential/mang.
+KHONG_CAP_CHO_AGENT: Tuple[str, ...] = (f"python {_TOOL} tests",)
 
 #: Duong dan trong cau: `web/admin/content-queue`, `server/tts_bridge.py`.
 #: Doi hoi it nhat mot dau `/` de khong bat nham moi tu thuong.

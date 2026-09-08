@@ -103,6 +103,22 @@ def _kiem_cwd() -> Path:
         return cwd
     except (ValueError, OSError):
         pass
+    # WORKTREE CUA MOT DU AN KHAC cung hop le.
+    #
+    # `REPO_ROOT` suy ra tu vi tri cua tep nay, tuc kho control-center. Nhung
+    # du an `fanfic` tro toi KHO CHINH (thu muc khac), nen worktree cua no
+    # nam o `<kho chinh>/.router/worktrees/...`. Ban truoc chi chap nhan cay
+    # duoi `REPO_ROOT`, nen CA BA dong tu bi tu choi 100% tren dung du an
+    # MAC DINH cua ban phat hanh — chuoi cong cu hong tu dau toi cuoi ma bai
+    # kiem nao cung xanh.
+    #
+    # Dieu kien thay the van chat: duong dan phai co mot doan `.router` roi
+    # `worktrees` ke nhau trong to tien da RESOLVE. Junction khong lach duoc
+    # (da resolve), va no van giam trong cay do Router quan ly.
+    doan = [x.lower() for x in cwd.parts]
+    for i in range(len(doan) - 1):
+        if doan[i] == ".router" and doan[i + 1] == "worktrees":
+            return cwd
     raise TuChoi(
         f"TỪ CHỐI: thư mục hiện tại nằm ngoài kho do Router quản lý.\n"
         f"  cwd đang là : {cwd}\n"

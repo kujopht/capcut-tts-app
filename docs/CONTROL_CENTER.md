@@ -215,12 +215,15 @@ trong `.github/workflows/ci.yml`** — không phát minh lệnh mới.
 |---|---|---|
 | `changes` | `git status --porcelain -uall` | **có** |
 | `compile` | `python -m compileall -q server scripts` | **có** |
-| `tests` | `python -m unittest discover -s scripts/tests -t .` | **có** |
+| `tests` | `python -m unittest discover -s scripts/tests -t .` | **KHÔNG** (xem dưới) |
 
-**Đính chính một kết luận sai của bản trước.** Bản đầu KHÔNG cấp `tests`, lý
-do ghi là "bộ kiểm chạy ~430s trong khi một lượt headless có trần 180s". Con
-số 180s đó là của **kịch bản thử của chính tôi** (`--print-timeout 180s` gõ
-cứng trong probe), không phải của sản phẩm. Đường thật:
+**`tests` KHÔNG được cấp cho agent — và lý do đã đổi hai lần.** Đáng kể lại
+đủ, vì cả hai lần đều dạy một điều khác nhau.
+
+*Lần một, lý do SAI.* Bản đầu không cấp `tests`, ghi lý do là "bộ kiểm chạy
+~430s trong khi một lượt headless có trần 180s". Con số 180s là của **kịch
+bản thử của chính tôi** (`--print-timeout 180s` gõ cứng trong probe), không
+phải của sản phẩm. Đường thật:
 
 ```
 Executor       timeout = c.execution.max_wall_time    (2400s với việc có ghi)
@@ -228,9 +231,26 @@ WarmAgyWorker  --print-timeout = turn_timeout * 4     (9600s)
 WarmAgyWorker  _cho("result", timeout=turn_timeout)   (2400s)
 ```
 
-Một lượt 430s nằm thoải mái trong trần. Đo lại bằng tiến trình `agy` thật:
-`tests` chạy xong trong **239s**. Bài học đáng giữ hơn cả bản vá: đo trên
-SẢN PHẨM, đừng đo trên một kịch bản thử rồi kết luận cho sản phẩm.
+Một lượt 430s nằm thoải mái trong trần; đo lại bằng tiến trình `agy` thật,
+`tests` xong trong **239s**. Lý do cũ tan. Động từ được cấp.
+
+*Lần hai, lý do ĐÚNG — và nó chặn hẳn.* Bài review đối kháng trước phát hành
+chỉ ra: worktree của việc là nơi agent **được phép ghi**, và
+`unittest discover -s scripts/tests` **nạp rồi chạy** mọi tệp khớp `test_*.py`
+trong đó. Nên agent chỉ cần ghi `scripts/tests/test_x.py` vào cây của chính
+nó rồi gọi đúng chuỗi lệnh đã được duyệt — Python thực thi nội dung đó ngay,
+với toàn quyền của tiến trình. Các cổng `scope`/`diff`/`security` chạy **sau
+lượt**, nên chúng thấy tệp lạ quá muộn: mã đã chạy rồi.
+
+Đây không phải rủi ro lý thuyết mà là **thực thi mã tuỳ ý qua một allow-rule
+hẹp** — đúng thứ cả mục 4b này dựng lên để chặn. Rào `cwd` ở dưới không cứu
+được, vì cây độc hại chính là cây hợp lệ. Nên `tests` bị **rút khỏi
+allowlist**: động từ vẫn còn trong `cc_agent_tool.py` để *Control Center* (đã
+tin cậy) tự chạy, nhưng không có mục `command(...)` nào cấp nó cho agent —
+`planner.KHONG_CAP_CHO_AGENT` giữ đúng ranh giới đó và có bài kiểm khoá lại.
+
+Bài học chung của cả hai lần: một lệnh an toàn hay không **không nằm ở tên
+lệnh**, mà ở chỗ tệp nó đọc do ai ghi.
 
 Hai mục trong `~/.gemini/antigravity-cli/settings.json`:
 

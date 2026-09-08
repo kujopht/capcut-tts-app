@@ -16,7 +16,7 @@ allow-rule an toàn. Hai lối thoát, và chỉ một lối chấp nhận đư�
                            chính xác. Đây là thứ đang đọc.
 
 BA ĐỘNG TỪ, mỗi cái ánh xạ 1-1 tới một lệnh ĐÃ ĐỊNH NGHĨA SẴN trong kho —
-không phát minh lệnh mới:
+không phát minh lệnh mới. Nhưng CHỈ HAI được cấp cho agent; xem `tests`:
 
     changes  git status --porcelain -uall
              (agent PHẢI khai đúng đường dẫn đã sửa vào `changes`; cổng
@@ -29,6 +29,21 @@ không phát minh lệnh mới:
 
     tests    python -m unittest discover -s scripts/tests -t .
              (đúng lệnh CI chạy — `.github/workflows/ci.yml`)
+
+             KHÔNG CẤP CHO AGENT. Chỉ Control Center — vốn đã tin cậy — gọi
+             động từ này; không mục `command(...)` nào cấp nó cho agent, và
+             `planner.KHONG_CAP_CHO_AGENT` khoá ranh giới đó bằng bài kiểm.
+
+             Vì sao: worktree của việc là nơi agent ĐƯỢC PHÉP GHI, còn
+             `unittest discover -s scripts/tests` NẠP RỒI CHẠY mọi `test_*.py`
+             tìm thấy ở đó. Agent chỉ cần ghi `scripts/tests/test_x.py` vào
+             cây của chính nó rồi gọi đúng chuỗi lệnh đã duyệt — mã chạy ngay,
+             với toàn quyền tiến trình. Các cổng `scope`/`diff`/`security`
+             chạy SAU lượt nên thấy tệp lạ quá muộn. Rào `cwd` bên dưới không
+             cứu được: cây độc hại chính là cây hợp lệ.
+
+             Đó là thực thi mã tuỳ ý qua một allow-rule hẹp — đúng thứ tệp này
+             dựng lên để chặn. Nên nó ở lại đây, nhưng không ở trong allowlist.
 
 RÀO CHỐNG ĐI VÒNG BẰNG `cwd`, và đây là phần quan trọng nhất:
 

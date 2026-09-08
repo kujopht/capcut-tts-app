@@ -62,10 +62,11 @@ class TestAllowlistKhopSettings(unittest.TestCase):
     def test_dong_tu_bi_giu_lai_thi_KHONG_co_trong_settings(self):
         """Nếu có động từ nào bị giữ lại, nó phải vắng mặt thật sự.
 
-        Hiện `KHONG_CAP_CHO_AGENT` rỗng — cả ba động từ đều được cấp. Bài
-        kiểm vẫn giữ vì nó là chỗ khoá cho lần sau có ai đó muốn giữ lại một
-        động từ: giữ trong danh sách mà quên gỡ khỏi settings là đúng loại
-        lệch âm thầm mà tệp này tồn tại để chặn.
+        `tests` đang bị giữ lại (thực thi mã tuỳ ý — xem
+        `test_dong_tu_THUC_THI_MA_khong_duoc_cap_cho_agent`), nên bài kiểm
+        này canh đúng thứ nguy hiểm: giữ trong danh sách mà QUÊN GỠ khỏi
+        `settings.json` thì quyền vẫn còn sống, chỉ có tài liệu là sai. Đó
+        là loại lệch âm thầm tệp này tồn tại để chặn.
         """
         tho = SETTINGS.read_text(encoding="utf-8")
         for c in KHONG_CAP_CHO_AGENT:

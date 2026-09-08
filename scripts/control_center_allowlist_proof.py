@@ -45,11 +45,18 @@ def turn(instruction: str, marker: str, label: str,
     return ran
 
 
+# Nhac DUNG dieu hop dong that nhac (`planner._muc_tieu`): DUNG MO tep cong cu
+# ra doc. No nam NGOAI `--add-dir` nen moi lan doc deu bi tu choi va ca luot mat
+# trang. Thieu dong nay, bai chung minh khong phan anh duong that va HONG NGAU
+# NHIEN theo tinh y cua model — da thay that mot lan: cung ma nguon, lan chay
+# truoc `compile` bi tu choi vi agent tu y mo tep cong cu, lan sau thi khong.
 print("=== 1. ALLOWED commands must execute ===")
 allowed_ok = []
 for cmd in LENH_CHO_PHEP:
     verb = cmd.rsplit(" ", 1)[1]
     ins = (f"Run this exact shell command, nothing else:\n  {cmd}\n"
+           f"Do NOT open or read the tool script itself - it lives outside "
+           f"your allowed directory and reading it will be denied.\n"
            f"Then reply with the single line: VERB-{verb}-RAN followed by the "
            f"command's exit status. Do not run any other command.")
     # Dung DUNG tran cua san pham (`Executor` -> `max_wall_time`, mac dinh

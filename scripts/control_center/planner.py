@@ -88,6 +88,35 @@ _LOAI_VIEC: Tuple[Tuple[str, re.Pattern], ...] = (
 #: Viec CHI DOC — khong xin `repo_write`, khong can worktree.
 _CHI_DOC = frozenset({"analysis", "review"})
 
+#: BA lenh DUY NHAT mot agent do Router quan ly duoc chay, dung tung ky tu.
+#:
+#: Quyen `command(...)` cua `agy` khop CHUOI CHINH XAC (do 2026-09-08:
+#: `command(git)` va `command(git *)` deu KHONG cho chay `git status
+#: --porcelain`). Nen moi muc o day phai trung TUNG KY TU voi mot muc trong
+#: `permissions.allow` cua `~/.gemini/antigravity-cli/settings.json`.
+#:
+#: Duong dan tuyet doi la CO Y: no ghim *script nao* duoc chay, nen doi `cwd`
+#: khong doi duoc muc tieu. Xem `scripts/cc_agent_tool.py`.
+#:
+#: `scripts/tests/test_control_center_allowlist.py` khoa lai rang danh sach
+#: nay va tep settings that khong bao gio lech nhau.
+_TOOL = "\\".join((
+    "C:", "FanficWorkers", "router-control-center",
+    "scripts", "cc_agent_tool.py"))
+LENH_CHO_PHEP: Tuple[str, ...] = (
+    f"python {_TOOL} changes",
+    f"python {_TOOL} compile",
+)
+
+#: `tests` CO trong wrapper nhung CO Y KHONG duoc cap quyen cho agent.
+#:
+#: Do that 2026-09-08: bo `scripts/tests` chay ~430s, trong khi mot luot
+#: headless cua `agy` co tran 180s — lenh HET GIO truoc khi xong, dot mot
+#: luot ma khong cho ket qua nao. Bo kiem day du la viec cua CI va cua nguoi
+#: van hanh (`python -m unittest discover -s scripts/tests -t .`), khong phai
+#: cua mot luot agent. Giu dong tu lai cho nguoi dung; khong cap cho agent.
+KHONG_CAP_CHO_AGENT: Tuple[str, ...] = (f"python {_TOOL} tests",)
+
 #: Duong dan trong cau: `web/admin/content-queue`, `server/tts_bridge.py`.
 #: Doi hoi it nhat mot dau `/` de khong bat nham moi tu thuong.
 _DUONG_DAN = re.compile(r"\b([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)+/?)")
@@ -370,8 +399,26 @@ class RulePlanner:
             max_wall_time=900.0 if chi_doc else 2400.0,
             destructive_actions_allowed=False,   # KHONG BAO GIO tu bat
             worktree_required=not chi_doc)
+        # HIEN VAT PHAI CO = BANG CHUNG KHACH QUAN, va no bat mot che do
+        # hong da biet cua Router V4.
+        #
+        # `Executor._bang_chung_lan_at_loi_khai` NANG mot luot bi khai
+        # `failed` len `ok` khi moi cong kiem dinh xanh — NHUNG chi khi hop
+        # dong co it nhat mot `artifact_checks` hoac `tests` de kiem. Truoc
+        # ban nay bo lap ke hoach khong dat gi ca, nen duong do CHET: mot
+        # agent ghi DUNG tep roi ket thuc luot bang van xuoi khong co JSON
+        # van bi danh HONG (che do hong so 6 trong ROUTER_V4_REAL_PROOF).
+        #
+        # Chi lay muc nao TRONG cai la mot TEP (co duoi). Mot thu muc thi
+        # `Path.exists()` luon dung ngay ca khi agent chua ghi gi — dat no
+        # vao day se bien cong kiem hien vat thanh mot cong luon xanh, tuc
+        # la te hon khong co cong.
+        hien_vat = tuple(
+            p for p in (() if chi_doc else scope)
+            if "." in str(p).rsplit("/", 1)[-1])
         ve = Verification(
-            independent_review_required=rui_ro_cao and not chi_doc)
+            independent_review_required=rui_ro_cao and not chi_doc,
+            artifact_checks=hien_vat)
         c = TaskContract(
             task_id=task_id, objective=muc_tieu, type=kind,
             allowed_scope=() if chi_doc else tuple(scope),
@@ -473,11 +520,22 @@ class RulePlanner:
         # la BAO cho agent biet gioi han do truoc, chu khong phai noi long
         # quyen. `--dangerously-skip-permissions` khong bao gio la cau tra
         # loi (xem `docs/AI_ROUTER_V4.md` muc rao an toan).
-        d.append("CÔNG CỤ: môi trường chạy việc này KHÔNG có lệnh shell. "
-                 "Hãy dùng công cụ đọc/tìm tệp trực tiếp (đọc tệp, tìm theo "
-                 "mẫu), ĐỪNG gọi lệnh hệ thống — lệnh sẽ bị từ chối lặng lẽ "
-                 "và cả lượt của bạn mất trắng. Nếu việc BẮT BUỘC phải chạy "
-                 "lệnh mới xong được, trả `blocked` và nói rõ cần lệnh gì.")
+        d.append(
+            "CÔNG CỤ: môi trường này chỉ cho chạy ĐÚNG BA lệnh dưới đây, "
+            "từng ký tự. Mọi lệnh khác bị từ chối LẶNG LẼ và cả lượt của bạn "
+            "mất trắng — quyền được khớp theo chuỗi chính xác, không có tiền "
+            "tố, không có ký tự đại diện.")
+        d += [f"    {c}" for c in LENH_CHO_PHEP]
+        d.append(
+            "ĐỪNG MỞ tệp công cụ đó ra đọc. Nó nằm NGOÀI thư mục bạn được "
+            "cấp, nên mọi lần đọc nó đều bị từ chối và bạn mất trắng cả lượt "
+            "— đã xảy ra thật. Cứ chạy nguyên văn dòng lệnh ở trên; bạn không "
+            "cần biết bên trong nó có gì.")
+        d.append(
+            "Đọc/tìm tệp TRONG thư mục làm việc thì dùng công cụ đọc tệp trực "
+            "tiếp (không cần lệnh). Nếu việc BẮT BUỘC phải chạy một lệnh KHÁC "
+            "hai lệnh trên mới xong được, trả `blocked` và nói rõ cần lệnh gì "
+            "— ĐỪNG thử biến thể, mọi biến thể đều trượt.")
         if scope:
             # KHAI BAO `changes` KHONG PHAI THU TUC GIAY TO — no la dieu kien
             # de viec duoc tinh la xong.

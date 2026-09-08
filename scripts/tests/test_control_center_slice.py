@@ -999,6 +999,104 @@ class TestVerticalSlice(unittest.TestCase):
         self.cc.recover()
         self.assertIs(self.cc.store.task(tid).state, TaskState.QUEUED)
 
+    def test_recover_NHA_KHOA_cua_viec_mo_coi(self):
+        """Việc đã ra khỏi `RUNNING` thì khoá của nó phải về theo.
+
+        Không nhả thì khoá của một việc mồ côi còn giữ tới hết TTL (1 giờ),
+        và MỌI việc khác chạm cùng tài nguyên phải chờ hết giờ đó — trong
+        khi việc giữ khoá thì đã không còn chạy. Đo thật 2026-09-08: một
+        lượt chứng minh bị cắt giữa chừng để lại hai khoá, và lần chạy kế
+        tiếp kẹt ở `WAITING` vĩnh viễn.
+        """
+        from scripts.control_center.locks import LockManager
+        from scripts.control_center.model import Session, SessionState
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        LockManager(self.cc.store).xin(
+            "demo", [(LockKind.FILESYSTEM, "web/admin/content-queue")],
+            task_id=tid)
+        self.assertTrue(self.cc.store.locks("demo"))
+
+        self.cc.store.luu_session(Session(
+            session_id="s-mo", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.IDLE,
+            pid=None, current_task=""))
+        t = self.cc.store.task(tid)
+        t.state, t.owner_session, t.attempts = TaskState.RUNNING, "s-mo", 1
+        self.cc.store.luu_task(t)
+
+        self.cc.recover()
+        self.assertIs(self.cc.store.task(tid).state, TaskState.QUEUED)
+        self.assertEqual(self.cc.store.locks("demo"), [],
+                         "khoá của việc mồ côi phải được nhả")
+
+    def test_recover_NHA_KHOA_cua_chu_KHONG_con_RUNNING(self):
+        """Bất biến: một khoá chỉ được giữ bởi một việc ĐANG CHẠY.
+
+        Một lượt `recover()` TRƯỚC ĐÓ có thể đã chuyển việc sang `BLOCKED`
+        mà chưa nhả khoá. Từ đó việc không còn ở `RUNNING` nên vòng lặp việc
+        mồ côi không bao giờ thấy nó, và khoá kẹt lại tới hết TTL (1 giờ).
+        Đo thật 2026-09-08: hai khoá kẹt đúng như vậy và chặn mọi lượt sau.
+        """
+        from scripts.control_center.locks import LockManager
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        LockManager(self.cc.store).xin(
+            "demo", [(LockKind.FILESYSTEM, "web/admin/content-queue")],
+            task_id=tid)
+        # Chu khoa o BLOCKED — khong con chay, nhung cung khong con o RUNNING.
+        self.cc.store.doi_trang_thai(tid, TaskState.BLOCKED, force=True,
+                                     reason="mô phỏng lượt recover trước")
+        self.assertTrue(self.cc.store.locks("demo"))
+
+        self.cc.recover()
+        self.assertEqual(self.cc.store.locks("demo"), [],
+                         "khoá của chủ không-RUNNING phải được nhả")
+
+    def test_nha_khoa_mo_coi_KHONG_dung_toi_khoa_PRODUCTION(self):
+        """`tu_thu_hoi_duoc` là bất biến của cả hệ, không phải chi tiết của
+        `reclaim()`.
+
+        Một khoá production "mồ côi" có thể là một cutover đang chạy lâu hơn
+        dự kiến; đoán sai là thả việc thứ hai vào giữa nó. Bản đầu của
+        `_nha_khoa_mo_coi` nhả cả khoá production và làm hỏng đúng bài kiểm
+        giữ bất biến đó.
+        """
+        from scripts.control_center.locks import LockManager
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        LockManager(self.cc.store).xin(
+            "demo", [(LockKind.PRODUCTION, "fanfic.world")], task_id=tid)
+        self.cc.store.doi_trang_thai(tid, TaskState.BLOCKED, force=True,
+                                     reason="chủ không còn chạy")
+        self.cc.recover()
+        con = [l.kind for l in self.cc.store.locks("demo")]
+        self.assertIn(LockKind.PRODUCTION, con,
+                      "khoá PRODUCTION KHÔNG được tự nhả, kể cả khi mồ côi")
+
+    def test_recover_KHONG_cuop_khoa_cua_viec_dang_duoc_giao(self):
+        """`_giao()` giành khoá TRƯỚC khi `claim_task` lật sang RUNNING.
+
+        Nhả theo trạng thái mà quên `_dang_chay` sẽ cướp khoá ngay giữa lúc
+        một việc đang được giao.
+        """
+        from scripts.control_center.locks import LockManager
+        self.cc.chat("demo", "fix web/admin/content-queue")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        LockManager(self.cc.store).xin(
+            "demo", [(LockKind.FILESYSTEM, "web/admin/content-queue")],
+            task_id=tid)
+        # Viec van o QUEUED (chua claim) nhung DANG duoc giao.
+        with self.cc._khoa:
+            self.cc._dang_chay[tid] = None
+        try:
+            self.cc.recover()
+            self.assertTrue(self.cc.store.locks("demo"),
+                            "KHÔNG được cướp khoá của việc đang được giao")
+        finally:
+            with self.cc._khoa:
+                self.cc._dang_chay.pop(tid, None)
+
     def test_recover_CHAN_viec_da_can_luot_thu(self):
         from scripts.control_center.model import Session
         self.cc.chat("demo", "fix web/admin")

@@ -603,15 +603,35 @@ class TestRulePlanner(unittest.TestCase):
                     f"{cau!r} vô hại nhưng bị chặn vì "
                     f"{kq.tasks[0].envelope.gated_operations}")
 
-    def test_muc_tieu_van_noi_cho_agent_biet_khong_co_shell(self):
-        """Dòng khuôn mẫu vẫn phải còn — nó chặn một chế độ hỏng thật.
+    def test_muc_tieu_liet_ke_DUNG_ba_lenh_duoc_phep(self):
+        """Hợp đồng phải nói ĐÚNG ba chuỗi lệnh, từng ký tự.
 
-        Agent headless với lấy một lệnh shell, bị từ chối quyền lặng lẽ, và
-        kết thúc lượt với phản hồi rỗng sau 37 giây (đo thật 2026-09-08).
+        Quyền `command(...)` khớp chuỗi chính xác — không tiền tố, không ký
+        tự đại diện. Agent nào đoán một biến thể sẽ bị từ chối LẶNG LẼ và
+        mất trắng cả lượt (đo thật 2026-09-08: 37 giây, phản hồi rỗng). Cách
+        duy nhất để điều đó không xảy ra là đưa nguyên văn chuỗi cho nó.
         """
-        kq = self.pl.plan("investigate the provider registry", self.pj)
-        self.assertIn("shell", kq.tasks[0].objective.lower())
-        self.assertIn("blocked", kq.tasks[0].objective.lower())
+        from scripts.control_center.planner import LENH_CHO_PHEP
+        muc_tieu = self.pl.plan("investigate the provider registry",
+                                self.pj).tasks[0].objective
+        for lenh in LENH_CHO_PHEP:
+            self.assertIn(lenh, muc_tieu, f"thiếu nguyên văn {lenh!r}")
+        self.assertIn("blocked", muc_tieu.lower())
+
+    def test_moi_lenh_cho_phep_deu_tro_toi_WRAPPER_co_dinh(self):
+        """Không lệnh nào được là lệnh trần — tất cả đi qua wrapper.
+
+        Một lệnh trần (`git status ...`) giải đường dẫn theo `cwd`, nên đổi
+        `cwd` biến nó thành thao tác trên cây khác. Wrapper được ghim bằng
+        ĐƯỜNG DẪN TUYỆT ĐỐI nên `cwd` không đổi được script nào chạy.
+        """
+        from scripts.control_center.planner import LENH_CHO_PHEP
+        for lenh in LENH_CHO_PHEP:
+            with self.subTest(lenh=lenh):
+                self.assertIn("cc_agent_tool.py", lenh)
+                self.assertTrue(lenh.startswith("python C:\\"),
+                                "phải là đường dẫn TUYỆT ĐỐI")
+                self.assertNotIn("*", lenh)
 
     def test_viec_CO_GHI_duoc_bao_phai_khai_duong_dan_da_doi(self):
         """Việc có ghi phải nói rõ: khai `changes` bằng ĐƯỜNG DẪN thật.
@@ -644,6 +664,33 @@ class TestRulePlanner(unittest.TestCase):
     def test_vi_du_duong_dan_cho_pham_vi_THU_MUC_van_co_ten_tep(self):
         kq = self.pl.plan("fix the bug in web/admin", self.pj)
         self.assertIn("web/admin/vi-du.md", kq.tasks[0].objective)
+
+    def test_pham_vi_la_TEP_thi_thanh_hien_vat_phai_co(self):
+        """Bằng chứng khách quan phải có, nếu không đường "bằng chứng thắng
+        lời khai" của Router V4 nằm chết.
+
+        `Executor._bang_chung_lan_at_loi_khai` chỉ nâng một lượt bị khai
+        `failed` lên `ok` khi hợp đồng có `artifact_checks` hoặc `tests` để
+        kiểm. Không đặt gì thì một agent ghi ĐÚNG tệp rồi kết thúc bằng văn
+        xuôi không JSON vẫn bị đánh HỎNG — chế độ hỏng số 6 của V4.
+        """
+        kq = self.pl.plan("create docs/reports/note.md about the chunker",
+                          self.pj)
+        self.assertIn("docs/reports/note.md",
+                      kq.tasks[0].contract.verification.artifact_checks)
+
+    def test_pham_vi_la_THU_MUC_thi_KHONG_thanh_hien_vat(self):
+        """Một thư mục `exists()` ngay cả khi agent chưa ghi gì.
+
+        Đặt nó vào `artifact_checks` biến cổng hiện vật thành một cổng LUÔN
+        XANH — tệ hơn là không có cổng.
+        """
+        kq = self.pl.plan("fix the bug in web/admin", self.pj)
+        self.assertEqual(kq.tasks[0].contract.verification.artifact_checks, ())
+
+    def test_viec_CHI_DOC_khong_co_hien_vat(self):
+        kq = self.pl.plan("investigate why the build is slow", self.pj)
+        self.assertEqual(kq.tasks[0].contract.verification.artifact_checks, ())
 
     def test_viec_CHI_DOC_khong_bi_bat_khai_changes(self):
         """Việc chỉ đọc không ghi gì, nên đòi nó khai `changes` là nhiễu."""

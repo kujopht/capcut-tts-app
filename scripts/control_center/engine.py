@@ -633,6 +633,58 @@ class ControlCenter:
         "codex_security_shaped_refusal", "no_eligible_placement",
     })
 
+    def _nha_khoa_mo_coi(self, project_id: str) -> List[str]:
+        """BẤT BIẾN: một khoá chỉ được giữ bởi một việc ĐANG CHẠY.
+
+        Chủ khoá ở bất kỳ trạng thái nào khác — `BLOCKED`, `FAILED`, `DONE`,
+        `QUEUED`, `WAITING` — là khoá MỒ CÔI: việc giữ nó đã không còn chạy,
+        nhưng khoá vẫn chặn mọi việc khác cho tới hết TTL (1 giờ).
+
+        Vì sao cần RIÊNG chỗ này chứ không chỉ nhả lúc gỡ việc mồ côi khỏi
+        `RUNNING`: một lượt `recover()` TRƯỚC ĐÓ có thể đã chuyển việc sang
+        `BLOCKED` mà chưa nhả khoá (đúng thứ đã xảy ra 2026-09-08). Từ đó
+        việc không còn ở `RUNNING` nữa nên vòng lặp kia không bao giờ thấy
+        nó, và khoá kẹt lại vĩnh viễn. Kiểm theo TRẠNG THÁI CHỦ KHOÁ bắt
+        được cả hai trường hợp.
+
+        THẬN TRỌNG: `_giao()` giành khoá TRƯỚC khi `claim_task` lật việc
+        sang `RUNNING`. Nên chỉ nhả khi việc đó cũng KHÔNG nằm trong
+        `_dang_chay` — nếu không sẽ cướp khoá của một việc đang được giao.
+        """
+        with self._khoa:
+            bay = set(self._dang_chay)
+        lm = LockManager(self.store)
+        da_nha: List[str] = []
+        for l in self.store.locks(project_id):
+            # KHOA PRODUCTION KHONG BAO GIO TU VE — ke ca o day.
+            #
+            # `LockKind.tu_thu_hoi_duoc` la mot bat bien cua ca he, khong
+            # phai mot chi tiet cua `reclaim()`. Mot khoa production "mo coi"
+            # co the la mot cutover dang chay lau hon du kien; doan sai la
+            # tha viec thu hai vao giua no. Bao cho nguoi, dung tu nha.
+            # (Da vap: ban dau ham nay nha ca khoa production va lam hong
+            # dung bai kiem giu bat bien do.)
+            if not l.kind.tu_thu_hoi_duoc:
+                continue
+            if not l.holder_task or l.holder_task in bay:
+                continue
+            t = self.store.task(l.holder_task)
+            if t is None:
+                # Chu khoa khong con ton tai -> chac chan mo coi.
+                pass
+            elif t.state is TaskState.RUNNING:
+                continue
+            if self.store.xoa_lock(l.lock_id, holder_task=l.holder_task):
+                da_nha.append(l.lock_id)
+                self.store.ghi_su_kien(
+                    "LOCK_ORPHANED", project_id=project_id,
+                    task_id=l.holder_task, level="WARNING",
+                    detail=(f"nhả khoá mồ côi {l.kind.value} {l.resource!r} — "
+                            f"chủ đang ở "
+                            f"{t.state.value if t else '(không còn)'}, "
+                            f"không phải RUNNING"))
+        return da_nha
+
     def _thu_lai_neu_dang(self, ctx: ProjectContext, task_id: str, pb,
                           session_id: str) -> None:
         """Thử lại một việc hỏng — CÓ TRẦN, và đổi chỗ chạy.
@@ -1066,6 +1118,8 @@ class ControlCenter:
             ctx = self.ctx(p.project_id)
             bc["sessions"][p.project_id] = ctx.sessions.recover()
             bc["worktrees"][p.project_id] = ctx.worktrees.doi_soat()
+            bc.setdefault("stale_locks", []).extend(
+                self._nha_khoa_mo_coi(p.project_id))
 
             for t in self.store.tasks(p.project_id, states=(TaskState.RUNNING,)):
                 # "PHIEN CON SONG" KHONG DU — phai la "phien DANG CHAY DUNG
@@ -1096,6 +1150,24 @@ class ControlCenter:
                         t.task_id, TaskState.QUEUED, force=True,
                         reason=("phiên chủ không còn sau khởi động lại — đưa "
                                 "về hàng đợi để xét lại"))
+                # VIEC DA RA KHOI `RUNNING` THI KHOA CUA NO PHAI VE THEO.
+                #
+                # Khong nha o day thi khoa cua mot viec mo coi con giu toi
+                # het TTL (1 tieng), va MOI viec khac cham cung tai nguyen
+                # phai CHO het tieng do — trong khi viec giu khoa thi da
+                # khong con chay nua. Do that 2026-09-08: mot luot chung
+                # minh bi cat giua chung de lai hai khoa, va lan chay ke
+                # tiep ket o `WAITING` vinh vien.
+                #
+                # An toan vi ta VUA XAC MINH viec nay khong con phien nao
+                # dang chay no — day chinh la dieu kien de vao nhanh nay.
+                nha = LockManager(self.store).tra(p.project_id, t.task_id)
+                if nha:
+                    self.store.ghi_su_kien(
+                        "LOCK_RELEASED_ON_RECOVER", project_id=p.project_id,
+                        task_id=t.task_id, level="WARNING",
+                        detail=(f"nhả {nha} khoá của một việc mồ côi — nó "
+                                f"không còn chạy nữa"))
                 bc["tasks"].append(t.task_id)
         self.store.ghi_su_kien(
             "RECOVERED", level="WARNING",

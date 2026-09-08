@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from server.farmer.covers import CoverGate, build_cover_provider
 from server.farmer.integrity import InterpreterNotSecure, assert_interpreter_secure
 from server.farmer.loop import ProductionFarmer
 from server.farmer.metrics import MetricsWriter, status_path
-from server.farmer.quotas import FarmerQuotas
+from server.farmer.quotas import AlreadyRunning, FarmerQuotas, SingleInstanceLock
 from server.farmer.review import ReviewUnavailable, build_reviewer
 
 
@@ -39,6 +40,31 @@ class _ReviewerVangMat:
             "chua co FARMER_GEMINI_API_KEY tren may nay — cong danh gia dong")
 
 
+def _r2_io():
+    """(tai_len, tai_ve) tren R2.
+
+    Cung adapter ma worker/pipeline dang dung — khong mo mot duong R2 thu hai.
+    """
+    import os as _os
+
+    # Chi tro `FAS_ENV_FILE` vao tep .env.production khi no THAT SU ton tai
+    # (may Windows cua nguoi phat trien). Tren may san xuat, bi mat den bang
+    # duong systemd `EnvironmentFile=` va tep do khong co — tro vao mot duong
+    # dan khong ton tai la mot cach lam ro rang mot cau hinh dang chay tot.
+    _env_file = Path(__file__).resolve().parents[2] / "server" / ".env.production"
+    if _env_file.is_file():
+        _os.environ.setdefault("FAS_ENV_FILE", str(_env_file))
+    from server.config import get_settings
+    from server.r2_adapter import R2StorageAdapter
+
+    adapter = R2StorageAdapter(get_settings().r2)
+
+    def tai_len(key: str, data: bytes) -> None:
+        adapter.put(key, data, "application/json")
+
+    return tai_len, adapter.get
+
+
 def _build(dry_run: bool) -> ProductionFarmer:
     from server.appwrite_store import AppwriteMetadataStore
     from server.config import load_settings
@@ -54,20 +80,20 @@ def _build(dry_run: bool) -> ProductionFarmer:
     store = AppwriteMetadataStore(settings.appwrite)
     quotas = FarmerQuotas()
 
-    # `--dry-run` van chay duoc khi CHUA co khoa Gemini: no chi kham pha,
-    # khu trung lap, va do han muc — khong muc nao di toi cong danh gia vi
-    # khong muc nao duoc san xuat. Nho vay nguoi van hanh kiem duoc nua duoi
-    # cua duong day TRUOC khi dat khoa vao may.
-    #
-    # Duong CHAY THAT thi khong: `build_reviewer()` nem, va `main()` tra
-    # BLOCKED. Khong co khoa thi khong duyet, khong duyet thi khong san xuat.
-    if dry_run:
-        try:
-            reviewer = build_reviewer()
-        except ReviewUnavailable:
-            reviewer = _ReviewerVangMat()
-    else:
-        reviewer = build_reviewer()
+    # Cong danh gia MAC DINH la HANG DOI: may nay xep viec, may Windows
+    # (Router V4 + pool Antigravity da dang nhap) poll ra ngoai va tra ban an.
+    # Khong khoa Gemini o day, va khong co duong roi ve am tham nao sang mot
+    # han muc co tra phi — xem `review_provider.build_review_provider`.
+    from server.farmer import review_keys
+    from server.farmer.review_provider import build_review_provider
+
+    tai_len, tai_ve = _r2_io()
+    reviewer = build_review_provider(
+        store,
+        upload_sample=tai_len,
+        download_verdict=tai_ve,
+        sample_key_for=review_keys.sample_key,
+        verdict_key_for=review_keys.verdict_key)
 
     covers = CoverGate(
         CoverPipelineService(media_asset_store=store,
@@ -119,7 +145,14 @@ def _text_discovery():
         except ValueError:
             return []
         ra = []
-        for muc in (data.get("sources") or [])[:gioi_han]:
+        for muc in (data.get("sources") or []):
+            if len(ra) >= gioi_han:
+                break
+            # `_disabled: true` = tam tat MOT muc ma khong phai xoa no. Loc
+            # TRUOC khi cat theo `gioi_han`, neu khong mot muc da tat van
+            # chiem mot suat va lam vong do khong lam duoc gi.
+            if muc.get("_disabled"):
+                continue
             url = (muc.get("url") or "").strip()
             if not url:
                 continue
@@ -168,6 +201,37 @@ def _verify_credential() -> int:
     return 0
 
 
+def _check_review_queue() -> int:
+    """Kiem duong hang doi danh gia — CHI DOC, khong goi model nao.
+
+    Buoc nay thay cho `--verify-credential` khi che do la `queue`: cai can
+    kiem khong con la mot khoa API ma la "hang doi co doc duoc khong". Neu
+    collection chua duoc cap phat, bao ro o day thay vi de farmer phat hien
+    giua chung roi fail closed im lang.
+    """
+    from server.appwrite_store import AppwriteMetadataStore
+    from server.config import load_settings
+
+    try:
+        store = AppwriteMetadataStore(load_settings().appwrite)
+        cho = store.list_review_jobs(status="PENDING", limit=1)
+    except Exception as exc:                                    # noqa: BLE001
+        print(json.dumps({
+            "review_queue": "UNAVAILABLE",
+            "detail": f"{type(exc).__name__}: {exc}"[:300],
+            "hint": "collection 'review_jobs' co the chua duoc cap phat — xem "
+                    "docs/reports/OVERNIGHT_BLOCKERS.md muc B1",
+        }, ensure_ascii=False))
+        return 5
+
+    print(json.dumps({
+        "review_queue": "OK",
+        "provider": os.environ.get("FARMER_REVIEW_PROVIDER") or "queue",
+        "pending_visible": len(cho),
+    }, ensure_ascii=False))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--once", action="store_true", help="chay MOT vong roi thoat")
@@ -179,11 +243,17 @@ def main(argv=None) -> int:
                     help="in tep trang thai hien tai roi thoat")
     ap.add_argument("--verify-credential", action="store_true",
                     help="goi Gemini MOT lan de kiem khoa; in OK/FAIL, "
-                         "KHONG BAO GIO in khoa")
+                         "KHONG BAO GIO in khoa (chi khi bat gemini_direct)")
+    ap.add_argument("--check-review-queue", action="store_true",
+                    help="kiem hang doi danh gia doc duoc khong — KHONG goi "
+                         "model nao")
     args = ap.parse_args(argv)
 
     if args.verify_credential:
         return _verify_credential()
+
+    if args.check_review_queue:
+        return _check_review_queue()
 
     if args.status:
         p = status_path()
@@ -206,6 +276,23 @@ def main(argv=None) -> int:
                          ensure_ascii=False))
         return 2
 
+    # DUNG MOT farmer tai mot thoi diem — ke ca khi mot lan chay tay dam vao
+    # dich vu systemd dang chay.
+    khoa = SingleInstanceLock()
+    try:
+        khoa.acquire()
+    except AlreadyRunning as exc:
+        print(json.dumps({"status": "ALREADY_RUNNING", "reason": str(exc)},
+                         ensure_ascii=False))
+        return 6
+
+    try:
+        return _run(farmer, args)
+    finally:
+        khoa.release()
+
+
+def _run(farmer: ProductionFarmer, args) -> int:
     if args.once or args.dry_run:
         lanes = farmer.run_once()
         print(json.dumps(

@@ -39,14 +39,51 @@ def _api():
     return DEFAULT_API, goi
 
 
-def harvester_token() -> str:
-    """Token dich vu, lay tu broker — KHONG bao gio tu tep trong kho ma."""
-    import fanfic_credential_broker as broker
+ENV_HARVESTER_TOKEN = "FAS_HARVESTER_SERVICE_TOKEN"
 
-    tok = broker.fetch("FAS_HARVESTER_SERVICE_TOKEN") or ""
+
+def harvester_token() -> str:
+    """Token dich vu. MOI TRUONG truoc, broker sau.
+
+    Thu tu nay quan trong va truoc day toi da lam NGUOC, khien farmer sap lien
+    tuc tren may san xuat:
+
+        `fanfic_credential_broker` doc Windows Credential Manager qua DPAPI.
+        No la **chi-Windows** — tren Linux no nem
+        `BrokerEnvironmentError: this broker requires Windows Credential
+        Manager` ngay tu dong dau tien.
+
+    Tren may AWS, bi mat den bang duong cua systemd (`EnvironmentFile=`), giong
+    het cach hai worker production dang nhan cua chung. Tren may Windows cua
+    nguoi phat trien thi broker moi la duong dung. Nen: doc moi truong truoc,
+    va CHI hoi broker khi moi truong khong co.
+
+    Fail closed kem mot thong diep noi ro phai lam gi — mot `RuntimeError`
+    truong khong giup ai luc 5 gio sang.
+    """
+    import os
+
+    tok = (os.environ.get(ENV_HARVESTER_TOKEN) or "").strip()
+    if tok:
+        return tok
+
+    try:
+        import fanfic_credential_broker as broker
+
+        tok = (broker.fetch(ENV_HARVESTER_TOKEN) or "").strip()
+    except Exception:                                           # noqa: BLE001
+        # Broker khong dung duoc o day (vd Linux). KHONG phai loi — chi nghia
+        # la duong nay khong ap dung; loi that la "khong co token o dau ca".
+        tok = ""
+
     if not tok:
         raise RuntimeError(
-            "thieu FAS_HARVESTER_SERVICE_TOKEN — farmer khong ghi duoc gi")
+            f"thieu {ENV_HARVESTER_TOKEN} — farmer khong ghi duoc gi.\n"
+            f"  Tren may san xuat (Linux): them dong "
+            f"{ENV_HARVESTER_TOKEN}=... vao /etc/fanfic-audio/farmer.env "
+            f"(0600 fanfic:fanfic) roi `systemctl restart fanfic-farmer`.\n"
+            f"  Tren may Windows: luu no bang "
+            f"`fanfic_credential_broker.py store --name {ENV_HARVESTER_TOKEN}`.")
     return tok
 
 
@@ -149,6 +186,24 @@ def make_text_fetcher(fetcher: Optional[Any] = None
         from server.scraper.html_extract import extract
         from server.scraper.http_fetcher import HttpFetcher
 
+        # FanFicFare TRUOC, cho host no ho tro: no hieu phan trang chuong,
+        # sieu du lieu, va cach tung site dung HTML — mot phep trich xuat
+        # tong quat tren mot trang fanfic nhieu chuong se ra mot mo dieu
+        # huong lan van ban.
+        #
+        # `resolve_acquisition_route` la nguoi quyet dinh, khong phai mot danh
+        # sach host viet tay o day: no da biet host nao FanFicFare an duoc,
+        # va no KHONG BAO GIO tra ve mot duong can trinh duyet/cloudscraper.
+        if fetcher is None:
+            try:
+                van_ban = _thu_fanficfare(c.url)
+                if van_ban:
+                    return van_ban
+            except Exception:
+                # FanFicFare hong -> roi ve HTTP thuong. Mot nguon lay duoc
+                # bang duong tong quat van tot hon khong lay duoc gi.
+                pass
+
         client = fetcher or HttpFetcher()
         ket_qua = client.fetch(c.url)
         # 304 tra than RONG theo giao thuc — doc no nhu "trang rong that su"
@@ -157,6 +212,30 @@ def make_text_fetcher(fetcher: Optional[Any] = None
             raise RuntimeError(f"nguon tra 304 (khong doi): {c.url}")
         return extract(ket_qua.text).visible_text()
     return fetch
+
+
+def _thu_fanficfare(url: str) -> str:
+    """Lay truyen qua FanFicFare neu host duoc ho tro. Rong = khong dung duoc.
+
+    Ghep cac chuong thanh MOT van ban de dua qua cong danh gia — cong danh gia
+    cham diem tac pham, khong cham diem tung chuong.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+
+    from server.scraper.fanficfare_provider import (
+        parse_fanficfare_epub, resolve_acquisition_route, _run_fanficfare_cli,
+    )
+
+    if resolve_acquisition_route(url) != "fanficfare":
+        return ""
+    with tempfile.TemporaryDirectory(prefix="farmer-fff-") as tmp:
+        ket_qua = _run_fanficfare_cli(url, workdir=_Path(tmp))
+        if not ket_qua.ok or not ket_qua.epub_path:
+            return ""
+        acq = parse_fanficfare_epub(ket_qua.epub_path)
+        return "\n\n".join(
+            ch.content for ch in (acq.chapters or []) if (ch.content or "").strip())
 
 
 def make_text_publisher(token: str) -> Callable[[Candidate, str], str]:

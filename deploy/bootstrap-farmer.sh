@@ -112,22 +112,37 @@ ok "kho da dong bo bang root: $BEFORE_SHA -> $AFTER_SHA"
 [ -f "$REPO/deploy/fanfic-farmer.service" ] \
   || die "khong thay unit sau khi dong bo — ban trien khai khong dung"
 
-# --------------------------------------------------------------- 1. khoa --
-printf 'Dan FARMER_GEMINI_API_KEY (khong hien khi go, Enter de xac nhan):\n> '
-read -rs GEMINI_KEY
-printf '\n\n'
-[ -n "${GEMINI_KEY:-}" ] || die "khoa rong — dung lai, khong ghi gi"
+# --------------------------------------------------- 1. (khong con khoa) --
+# Danh gia noi dung DI QUA HANG DOI + pool Antigravity tren may Windows, nen
+# may nay KHONG can khoa Gemini nao ca. Doan hoi khoa da duoc bo co y: hoi
+# mot bi mat khong dung toi la mot cach de no bi ro ri ma khong duoc gi.
+info "che do danh gia: hang doi (FARMER_REVIEW_PROVIDER=queue) — khong can khoa Gemini"
 
 # ------------------------------------------------------- 2. tep cau hinh --
 info "ghi $ENV_FILE (0600 $SVC_USER)"
-install -o "$SVC_USER" -g "$SVC_USER" -m 600 /dev/null "$ENV_FILE"
+
+# Script nay SO HUU cac khoa `FARMER_*` va chi cac khoa do. Moi dong khac —
+# dac biet la bi mat do mot buoc khac dat vao, vd
+# `FAS_HARVESTER_SERVICE_TOKEN` — duoc GIU LAI.
+#
+# Truoc day o day la mot lan ghi de tron goi, va no da xoa mat token vua
+# duoc day sang (su co that 2026-09-08: finish-deploy xac nhan token co mat,
+# roi bootstrap ghi de len va chinh phep kiem cua bootstrap bao thieu token).
+# Mot script cai dat khong duoc pha thu no khong tao ra.
+#
+# Dong giu lai duoc chep TU TEP SANG TEP, khong bao gio di qua mot bien shell
+# — nen bi mat khong nam trong bo nho script, khong lo qua `set -x`, va khong
+# vao bat ky thong diep loi nao.
+ENV_TMP="$ENV_FILE.new.$$"
+install -o "$SVC_USER" -g "$SVC_USER" -m 600 /dev/null "$ENV_TMP"
 
 # `printf` la builtin cua bash => khoa KHONG di qua argv cua mot tien trinh
 # nao. Ghi qua stdin vao tep da tao san dung quyen.
 {
   printf '# Sinh boi deploy/bootstrap-farmer.sh — KHONG commit tep nay.\n'
-  printf 'FARMER_GEMINI_API_KEY=%s\n' "$GEMINI_KEY"
-  printf 'FARMER_REVIEW_MODEL=gemini-3.8-flash\n'
+  # Danh gia qua HANG DOI: may nay xep viec, may Windows (Router V4 + pool
+  # Antigravity) poll ra ngoai va tra ban an. Khong khoa Gemini o day.
+  printf 'FARMER_REVIEW_PROVIDER=queue\n'
   printf 'FARMER_REVIEW_MIN_SCORE=70\n'
   printf 'FARMER_MAX_CONCURRENT_DOWNLOADS=2\n'
   printf 'FARMER_MAX_REVIEW_REQUESTS=8\n'
@@ -138,22 +153,56 @@ install -o "$SVC_USER" -g "$SVC_USER" -m 600 /dev/null "$ENV_FILE"
   printf 'FARMER_WORK_DIR=/var/lib/fanfic-farmer/work\n'
   printf 'FARMER_STATUS_PATH=/var/lib/fanfic-farmer/status.json\n'
   printf 'FARMER_TEXT_SOURCES=%s\n' "$SRC_FILE"
-} > "$ENV_FILE"
+} > "$ENV_TMP"
 
-unset GEMINI_KEY   # khong giu trong bo nho script lau hon can thiet
-ok "cau hinh farmer da ghi (khoa khong bao gio duoc in ra)"
+# Giu lai moi dong KHONG phai `FARMER_*` va khong phai chu thich cua chinh
+# script nay (vd `FAS_HARVESTER_SERVICE_TOKEN=...`). Chep thang tep -> tep.
+GIU=0
+if [ -f "$ENV_FILE" ]; then
+  if grep -vE '^(#|FARMER_|[[:space:]]*$)' "$ENV_FILE" >> "$ENV_TMP" 2>/dev/null; then
+    GIU=$(grep -cvE '^(#|FARMER_|[[:space:]]*$)' "$ENV_FILE" 2>/dev/null || echo 0)
+  fi
+fi
+mv -f "$ENV_TMP" "$ENV_FILE"
+chown "$SVC_USER:$SVC_USER" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+
+ok "cau hinh farmer da ghi ($ENV_FILE); giu lai $GIU dong khong-FARMER_ (bi mat khong bi in)"
 
 # Nguon truyen chu — chi tao neu CHUA co, de khong de len danh sach that.
 if [ ! -f "$SRC_FILE" ]; then
   install -o "$SVC_USER" -g "$SVC_USER" -m 640 /dev/null "$SRC_FILE"
   cat > "$SRC_FILE" <<'JSON'
 {
-  "_note": "Nguon truyen chu cho lan B. Them muc vao day; khong can deploy lai.",
+  "_note": [
+    "Nguon truyen chu cho lan B. Them/bot muc o day; khong can deploy lai.",
+    "Cac host duoi day deu duoc FanFicFare ho tro (xem",
+    "server/scraper/fanficfare_provider.py::resolve_acquisition_route).",
+    "Host KHONG duoc ho tro van chay duoc — roi ve trich xuat HTTP tong quat.",
+    "Ba muc duoi day la van hoc THUOC PHAM VI CONG CONG tren Wikisource, da",
+    "kiem HTTP 200 truoc khi ghi vao day. Chung dung de mo may an toan; them",
+    "URL AO3/FFN/Wattpad that khi ban chon xong tac pham (dat `_disabled`:",
+    "true de tam tat mot muc ma khong xoa no).",
+    "CO Y de it: han muc bao thu (3 muc/lan/vong), va moi tac pham deu phai",
+    "qua cong danh gia Antigravity truoc khi ton mot dong nao cho TTS."
+  ],
   "sources": [
     {
       "url": "https://vi.wikisource.org/wiki/L%E1%BB%81u_ch%C3%B5ng",
       "title": "Leu chong",
       "author": "Ngo Tat To",
+      "language": "vi"
+    },
+    {
+      "url": "https://vi.wikisource.org/wiki/T%E1%BB%91_T%C3%A2m",
+      "title": "To Tam",
+      "author": "Hoang Ngoc Phach",
+      "language": "vi"
+    },
+    {
+      "url": "https://vi.wikisource.org/wiki/Vi%E1%BB%87t_Nam_s%E1%BB%AD_l%C6%B0%E1%BB%A3c",
+      "title": "Viet Nam su luoc",
+      "author": "Tran Trong Kim",
       "language": "vi"
     }
   ]
@@ -173,20 +222,48 @@ install -o root -g root -m 644 "$REPO/deploy/fanfic-farmer.service" "$UNIT"
 systemctl daemon-reload
 ok "unit da cai ($UNIT)"
 
-# ------------------------------------------- 4. kiem khoa (khong in khoa) --
-info "kiem khoa Gemini bang MOT lan goi that"
-# Khoa di tu tep -> moi truong cua CHINH tien trinh python, KHONG qua argv.
-# `runuser` doc tep env bang quyen cua `fanfic`, dung chu so huu that.
-CRED_OUT="$(runuser -u "$SVC_USER" -- env -i \
+# ---------------------------------------------- 4. kiem hang doi danh gia --
+# KHONG con kiem khoa Gemini: may nay khong danh gia. Thay vao do kiem thu
+# duong ma cong danh gia THAT SU se di — hang doi Appwrite. Neu collection
+# `review_jobs` chua duoc cap phat, buoc nay bao ro, va farmer se fail closed
+# thay vi san xuat noi dung chua ai duyet.
+info "kiem duong hang doi danh gia (khong goi model nao)"
+QUEUE_OUT="$(runuser -u "$SVC_USER" -- env -i \
   HOME="/var/lib/fanfic-farmer" PATH=/usr/bin:/bin \
   bash -c "set -a; . '$ENV_FILE'; . '$ETC/worker-prod.env'; set +a; \
-           cd '$REPO' && exec '$VENV' -m server.farmer --verify-credential" \
+           cd '$REPO' && exec '$VENV' -m server.farmer --check-review-queue" \
   2>&1 || true)"
 
-case "$CRED_OUT" in
-  *'"credential": "OK"'*) ok "khoa Gemini dung duoc — $CRED_OUT" ;;
-  *) die "khoa Gemini KHONG dung duoc: $CRED_OUT" ;;
+case "$QUEUE_OUT" in
+  *'"review_queue": "OK"'*) ok "hang doi danh gia san sang — $QUEUE_OUT" ;;
+  *) die "hang doi danh gia CHUA san sang: $QUEUE_OUT
+   Nhieu kha nang collection 'review_jobs' chua duoc cap phat. Xem
+   docs/reports/OVERNIGHT_BLOCKERS.md muc B1." ;;
 esac
+
+# ------------------------------------------ 4b. token dich vu CO MAT chua --
+# Farmer can `FAS_HARVESTER_SERVICE_TOKEN` de ghi ban nhap qua API. Thieu no
+# thi tien trinh sap NGAY o lan chay dau va systemd se dap lai mai — mot vong
+# lap sap im lang, dung kieu su co da gap 2026-09-08.
+#
+# KIEM o day, TRUOC khi bat dich vu. Chi kiem CO/KHONG, khong bao gio in
+# gia tri.
+info "kiem token dich vu co mat trong moi truong farmer"
+if runuser -u "$SVC_USER" -- bash -c \
+     "set -a; . '$ENV_FILE'; . '$ETC/worker-prod.env'; set +a; \
+      test -n \"\${FAS_HARVESTER_SERVICE_TOKEN:-}\""; then
+  ok "FAS_HARVESTER_SERVICE_TOKEN co mat (gia tri khong duoc in)"
+else
+  die "THIEU FAS_HARVESTER_SERVICE_TOKEN — farmer se khong ghi duoc gi.
+   Them mot dong vao $ENV_FILE (tep da la 0600 $SVC_USER):
+
+       FAS_HARVESTER_SERVICE_TOKEN=<token>
+
+   Tren may Windows, doc no ra bang:
+       python scripts/fanfic_credential_broker.py check --name FAS_HARVESTER_SERVICE_TOKEN
+
+   Roi chay lai script nay. KHONG bat dich vu khi con thieu."
+fi
 
 # ------------------------------------------------ 5. lo chay co kiem soat --
 info "chay MOT vong co kiem soat (--once, gioi han boi han muc)"

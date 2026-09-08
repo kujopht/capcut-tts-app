@@ -13,6 +13,7 @@ tu no that bai:
 """
 from __future__ import annotations
 
+import os
 import unittest
 from unittest import mock
 
@@ -160,6 +161,119 @@ class DiskGuardTest(unittest.TestCase):
         with mock.patch.object(FarmerQuotas, "free_disk_bytes", return_value=1):
             self.assertIsNone(q.try_slot(FarmerQuotas.DOWNLOAD, check_disk=True))
         self.assertEqual(q.snapshot().in_flight[FarmerQuotas.DOWNLOAD], 0)
+
+
+class HarvesterTokenTest(unittest.TestCase):
+    """Token dich vu phai lay duoc TREN LINUX.
+
+    Su co that (2026-09-08): farmer sap lien tuc tren may san xuat vi
+    `harvester_token()` hoi thang `fanfic_credential_broker`, von doc Windows
+    Credential Manager qua DPAPI va nem ngay tren Linux. `--dry-run` bo qua
+    token nen khong bai test cuc bo nao cham toi duong do.
+    """
+
+    def test_environment_is_read_before_the_windows_only_broker(self):
+        from server.farmer.adapters import ENV_HARVESTER_TOKEN, harvester_token
+
+        with mock.patch.dict("os.environ", {ENV_HARVESTER_TOKEN: "tok-tu-systemd"}):
+            with mock.patch.dict("sys.modules", {"fanfic_credential_broker": None}):
+                self.assertEqual(harvester_token(), "tok-tu-systemd")
+
+    def test_a_broker_that_cannot_run_here_is_not_fatal(self):
+        """Broker nem tren Linux — do KHONG phai loi, chi la duong khong ap
+        dung. Loi that la 'khong co token o dau ca'."""
+        from server.farmer import adapters
+
+        broker_gia = mock.Mock()
+        broker_gia.fetch.side_effect = RuntimeError(
+            "this broker requires Windows Credential Manager")
+        with mock.patch.dict("os.environ", {adapters.ENV_HARVESTER_TOKEN: ""}), \
+             mock.patch.dict("sys.modules",
+                             {"fanfic_credential_broker": broker_gia}):
+            with self.assertRaises(RuntimeError) as ctx:
+                adapters.harvester_token()
+        # Thong diep phai noi ro PHAI LAM GI, ca tren Linux lan Windows.
+        self.assertIn("farmer.env", str(ctx.exception))
+        self.assertIn("store --name", str(ctx.exception))
+
+    def test_the_broker_still_works_on_windows(self):
+        from server.farmer import adapters
+
+        broker_gia = mock.Mock()
+        broker_gia.fetch.return_value = "tok-tu-broker"
+        with mock.patch.dict("os.environ", {adapters.ENV_HARVESTER_TOKEN: ""}), \
+             mock.patch.dict("sys.modules",
+                             {"fanfic_credential_broker": broker_gia}):
+            self.assertEqual(adapters.harvester_token(), "tok-tu-broker")
+
+
+class SingleInstanceTest(unittest.TestCase):
+    """DUNG MOT farmer. Hai ban cung luc se gianh cung mot muc trong hang doi
+    va tra tien TTS hai lan cho mot tac pham — dieu `content_queue` khong tu
+    chan duoc (Appwrite khong co cap nhat co dieu kien)."""
+
+    def test_a_second_instance_is_refused(self):
+        """Hai farmer la hai TIEN TRINH khac nhau — nen mo phong mot PID khac
+        dang giu khoa, chu khong phai cung tien trinh nay xin hai lan."""
+        from server.farmer.quotas import AlreadyRunning, SingleInstanceLock
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as d:
+            khoa = SingleInstanceLock(work_dir=d)
+            with open(khoa.path, "w", encoding="utf-8") as fh:
+                fh.write(str(os.getpid() + 1))       # mot tien trinh KHAC
+            with mock.patch.object(SingleInstanceLock, "_con_song",
+                                   return_value=True):
+                with self.assertRaises(AlreadyRunning):
+                    khoa.acquire()
+
+    def test_reacquiring_in_the_same_process_is_idempotent(self):
+        """Mot tien trinh xin lai khoa CUA CHINH NO khong duoc tu khoa minh."""
+        from server.farmer.quotas import SingleInstanceLock
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as d:
+            a = SingleInstanceLock(work_dir=d)
+            a.acquire()
+            try:
+                SingleInstanceLock(work_dir=d).acquire()     # khong duoc nem
+            finally:
+                a.release()
+
+    def test_a_dead_holders_lock_is_reclaimed(self):
+        from server.farmer.quotas import SingleInstanceLock
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as d:
+            khoa = SingleInstanceLock(work_dir=d)
+            with open(khoa.path, "w", encoding="utf-8") as fh:
+                fh.write("999999")          # PID khong con song
+            with mock.patch.object(SingleInstanceLock, "_con_song",
+                                   return_value=False):
+                khoa.acquire()              # thu hoi duoc
+            khoa.release()
+
+    def test_an_unreadable_lock_fails_closed(self):
+        """Khong doc duoc PID -> coi nhu CON SONG. Thu hoi nham mot khoa dang
+        duoc giu la cach tao ra dung hai farmer."""
+        from server.farmer.quotas import AlreadyRunning, SingleInstanceLock
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as d:
+            khoa = SingleInstanceLock(work_dir=d)
+            with open(khoa.path, "w", encoding="utf-8") as fh:
+                fh.write("khong-phai-so")
+            with self.assertRaises(AlreadyRunning):
+                khoa.acquire()
+
+    def test_the_lock_releases_on_exit(self):
+        from server.farmer.quotas import SingleInstanceLock
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as d:
+            with SingleInstanceLock(work_dir=d) as khoa:
+                self.assertTrue(os.path.exists(khoa.path))
+            self.assertFalse(os.path.exists(khoa.path))
 
 
 class QuotaShapeTest(unittest.TestCase):

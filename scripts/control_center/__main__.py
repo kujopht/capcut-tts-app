@@ -52,10 +52,26 @@ def main(argv=None) -> int:
                     help="in ảnh chụp JSON rồi thoát, không mở giao diện")
     ap.add_argument("--chat", default="",
                     help="gửi một câu vào ô chat của dự án rồi thoát")
+    ap.add_argument("--remove-project", default="", metavar="ID",
+                    help=("GỠ một dự án thử nghiệm/demo khỏi sổ rồi thoát. "
+                          "Không đụng tới worktree trên đĩa; không gỡ được "
+                          "dự án mặc định của bản phát hành."))
     args = ap.parse_args(argv)
 
     cc = _dung(args)
     pid = args.project or (cc.projects()[0].project_id if cc.projects() else "")
+
+    if args.remove_project:
+        try:
+            dem = cc.xoa_project(args.remove_project, xac_nhan=True)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            cc.shutdown()
+            return 2
+        print(f"đã gỡ {args.remove_project!r}: {dem or '(không có gì để gỡ)'}")
+        print("worktree trên đĩa KHÔNG bị đụng tới.")
+        cc.shutdown()
+        return 0
 
     if args.chat:
         if not pid:

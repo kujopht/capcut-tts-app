@@ -145,6 +145,50 @@ class ControlCenter:
     def projects(self) -> List[Project]:
         return self.store.projects()
 
+    #: Du an MAC DINH cua ban phat hanh. `bootstrap.du_an_mac_dinh()` la
+    #: nguon su that; lap lai ten o day chi de `xoa_project` biet cai gi
+    #: KHONG duoc xoa nham.
+    DU_AN_MAC_DINH = ("fanfic", "router")
+
+    def xoa_project(self, project_id: str, *,
+                    xac_nhan: bool = False) -> Dict[str, int]:
+        """Gỡ MỘT dự án khỏi sổ. Dành cho dọn trạng thái thử nghiệm/demo.
+
+        `xac_nhan=True` là bắt buộc. Đây là thao tác không hoàn tác được, và
+        một tham số mặc định an toàn là thứ chặn nó xảy ra do gọi nhầm.
+
+        TỪ CHỐI xoá dự án mặc định của bản phát hành (`fanfic`, `router`) —
+        chúng là dự án THẬT của người dùng, không phải đồ thử. Muốn bỏ thì
+        `archived`, đừng xoá.
+
+        KHÔNG chạm tới worktree trên đĩa. Xem `ControlStore.xoa_project`.
+        """
+        if not xac_nhan:
+            raise ValueError(
+                f"xoá {project_id!r} là thao tác không hoàn tác được — "
+                f"truyền `xac_nhan=True` nếu thật sự muốn.")
+        if project_id in self.DU_AN_MAC_DINH:
+            raise ValueError(
+                f"{project_id!r} là dự án mặc định của bản phát hành, không "
+                f"phải trạng thái thử nghiệm. Dùng `archived` nếu muốn ẩn nó.")
+        p = self.store.project(project_id)
+        if p is None:
+            return {}
+        # Nha khoa TRUOC khi xoa hang: neu du an bien mat truoc, `tra()`
+        # khong con biet khoa nao thuoc ve no.
+        lm = LockManager(self.store)
+        for t in self.store.tasks(project_id):
+            lm.tra(project_id, t.task_id)
+        with self._khoa:
+            self._ctx.pop(project_id, None)
+        dem = self.store.xoa_project(project_id)
+        self.store.ghi_su_kien(
+            "PROJECT_REMOVED", level="WARNING",
+            detail=(f"đã gỡ dự án {project_id!r} ({p.name}) khỏi sổ: "
+                    f"{dem}. Worktree trên đĩa KHÔNG bị đụng tới."),
+            meta={"project_id": project_id, "deleted": dem})
+        return dem
+
     def ctx(self, project_id: str) -> ProjectContext:
         """Ngữ cảnh của một dự án. Dựng một lần, giữ lại."""
         with self._khoa:
@@ -633,6 +677,95 @@ class ControlCenter:
         "codex_security_shaped_refusal", "no_eligible_placement",
     })
 
+    def _doi_soat_khai_thieu(self, ctx: "ProjectContext", task_id: str,
+                             hd: TaskContract, kq: ExecutionResult) -> bool:
+        """ĐỐI SOÁT lời khai thiếu với TRẠNG THÁI THẬT — vẫn FAIL CLOSED.
+
+        Đây KHÔNG phải hạ cổng `diff` xuống mức cảnh báo. Cổng đó giữ nguyên
+        trong Router V4, không sửa một dòng. Ở đây Control Center làm một
+        việc KHÁC và CHẶT HƠN: thay vì tin danh sách worker khai, nó lấy
+        danh sách THẬT từ `git` rồi kiểm lại chính danh sách đó.
+
+        Chỉ áp đúng MỘT trường hợp hẹp — cái mà `cong_diff` gọi là "worker
+        không khai sửa gì nhưng đĩa đổi":
+
+            worker báo `ok`  +  `changes` RỖNG  +  đĩa CÓ đổi
+            +  cổng `diff` là cổng DUY NHẤT hỏng
+
+        Mọi trường hợp khác giữ nguyên `FAILED`. Đặc biệt KHÔNG đụng tới
+        chiều ngược lại ("khai có sửa mà đĩa SẠCH") — đó là thất bại im lặng
+        thật sự, và nó phải hỏng.
+
+        Điều kiện để CHẤP NHẬN, tất cả phải đúng:
+
+          1. mọi tệp đổi THẬT nằm trong `allowed_scope` và không chạm
+             `forbidden_scope` (`TaskContract.scope_violations`, hàm thuần);
+          2. `scope_violations` do tầng kiểm định tính cũng rỗng;
+          3. cổng `security` ĐẠT — nó vốn đã chạy trên diff THẬT của đĩa
+             (`_diff_van_ban` đọc cả tệp chưa theo dõi), nên nó là phán
+             quyết trên tập THẬT chứ không phải trên lời khai;
+          4. mọi cổng khác (`shape`, `scope`, `tests`, `artifacts`, …) ĐẠT.
+
+        Một tệp đổi ngoài phạm vi ⇒ TỪ CHỐI, việc ở lại `FAILED`. Đó chính
+        là chỗ bất biến được giữ: chấp nhận ở đây KHÔNG BAO GIỜ dựa vào lời
+        khai, và không bao giờ bỏ qua một thay đổi chưa được kiểm.
+
+        Trả `True` nghĩa là đã đối soát xong và việc được đi tiếp; lúc đó
+        `changes` trong phong bì được ĐIỀN LẠI bằng tập THẬT, để mọi báo cáo
+        về sau nói đúng thứ đã xảy ra.
+        """
+        bc = kq.validation
+        if bc is None or bc.passed:
+            return False
+        if bc.failed_gates != ["diff"]:
+            return False                    # con cong khac hong -> giu FAILED
+
+        pb = kq.envelope
+        khai = {str(t).replace("\\", "/").strip("/") for t in pb.changes if t}
+        that = sorted({str(t).replace("\\", "/").strip("/")
+                       for t in bc.files_changed_observed if t})
+        # CHI trường hợp khai RỖNG mà đĩa CÓ đổi. Khai sai (khong rong) hoac
+        # dia sach deu khong thuoc dien nay.
+        if khai or not that:
+            return False
+        if pb.status != "ok":
+            return False
+
+        vi_pham = sorted(set(hd.scope_violations(that))
+                         | set(bc.scope_violations))
+        if vi_pham:
+            self.store.ghi_su_kien(
+                "UNDERDECLARED_CHANGES_REJECTED",
+                project_id=ctx.project.project_id, task_id=task_id,
+                level="ALERT",
+                detail=(f"worker không khai gì, và {len(vi_pham)} tệp đổi "
+                        f"THẬT nằm NGOÀI phạm vi — giữ FAILED"),
+                meta={"actual": that[:50], "violations": vi_pham[:50]})
+            return False
+
+        # Bat buoc moi cong con lai DAT (gom `security`, da chay tren diff
+        # THAT cua dia). `failed_gates == ["diff"]` o tren da bao dam dieu
+        # nay; kiem lai tuong minh de mot lan sua ve sau khong lam mat no.
+        khong_dat = [g.name for g in bc.gates
+                     if not g.passed and g.name != "diff"]
+        if khong_dat:
+            return False
+
+        pb.changes = that                   # bao cao noi dung THAT
+        pb.warnings.append(
+            f"worker KHÔNG khai `changes` nhưng đĩa đổi {len(that)} tệp. "
+            f"Đã đối soát với `git`: mọi tệp đều trong phạm vi và mọi cổng "
+            f"khác đều đạt, nên việc được tính là xong. Danh sách `changes` "
+            f"đã được điền lại bằng tập THẬT.")
+        self.store.ghi_su_kien(
+            "UNDERDECLARED_CHANGES", project_id=ctx.project.project_id,
+            task_id=task_id, level="WARNING",
+            detail=(f"khai 0 tệp, đĩa đổi {len(that)} tệp — đã đối soát và "
+                    f"kiểm lại phạm vi/bảo mật trên tập THẬT"),
+            meta={"declared": [], "actual": that[:50],
+                  "gates": [g.name for g in bc.gates if g.passed]})
+        return True
+
     def _nha_khoa_mo_coi(self, project_id: str) -> List[str]:
         """BẤT BIẾN: một khoá chỉ được giữ bởi một việc ĐANG CHẠY.
 
@@ -885,6 +1018,10 @@ class ControlCenter:
             # qua mot cong `diff`/`scope` hong.
             if moi is not TaskState.BLOCKED and not kq.ok:
                 moi = TaskState.FAILED
+                if self._doi_soat_khai_thieu(ctx, task_id, hd, kq):
+                    moi = map_envelope_status(
+                        "ok",
+                        need_review=hd.verification.independent_review_required)
 
             # UPDATE HEP, khong phai doc-sua-ghi. Xem `store.ghi_ket_qua`:
             # `luu_task` ghi ca cot `state`, nen luu mot doi tuong doc tu

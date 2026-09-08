@@ -106,16 +106,23 @@ _TOOL = "\\".join((
 LENH_CHO_PHEP: Tuple[str, ...] = (
     f"python {_TOOL} changes",
     f"python {_TOOL} compile",
+    f"python {_TOOL} tests",
 )
 
-#: `tests` CO trong wrapper nhung CO Y KHONG duoc cap quyen cho agent.
+#: SUA MOT KET LUAN SAI CUA CHINH TOI (2026-09-08).
 #:
-#: Do that 2026-09-08: bo `scripts/tests` chay ~430s, trong khi mot luot
-#: headless cua `agy` co tran 180s — lenh HET GIO truoc khi xong, dot mot
-#: luot ma khong cho ket qua nao. Bo kiem day du la viec cua CI va cua nguoi
-#: van hanh (`python -m unittest discover -s scripts/tests -t .`), khong phai
-#: cua mot luot agent. Giu dong tu lai cho nguoi dung; khong cap cho agent.
-KHONG_CAP_CHO_AGENT: Tuple[str, ...] = (f"python {_TOOL} tests",)
+#: Ban truoc KHONG cap `tests` voi ly do "bo kiem chay ~430s trong khi mot
+#: luot headless co tran 180s". Ket luan do SAI: con so 180s la cua CHINH
+#: kich ban do cua toi (`--print-timeout 180s` go cung trong probe), khong
+#: phai cua san pham. Duong that:
+#:
+#:     Executor      timeout = c.execution.max_wall_time   (2400s voi viec ghi)
+#:     WarmAgyWorker --print-timeout = turn_timeout * 4    (9600s)
+#:     WarmAgyWorker _cho("result", timeout=turn_timeout)  (2400s)
+#:
+#: Nen mot luot 430s nam thoai mai trong tran. Bai hoc: do tren SAN PHAM,
+#: dung do tren mot kich ban thu roi ket luan cho san pham.
+KHONG_CAP_CHO_AGENT: Tuple[str, ...] = ()
 
 #: Duong dan trong cau: `web/admin/content-queue`, `server/tts_bridge.py`.
 #: Doi hoi it nhat mot dau `/` de khong bat nham moi tu thuong.
@@ -521,7 +528,7 @@ class RulePlanner:
         # quyen. `--dangerously-skip-permissions` khong bao gio la cau tra
         # loi (xem `docs/AI_ROUTER_V4.md` muc rao an toan).
         d.append(
-            "CÔNG CỤ: môi trường này chỉ cho chạy ĐÚNG BA lệnh dưới đây, "
+            "CÔNG CỤ: môi trường này chỉ cho chạy ĐÚNG những lệnh dưới đây, "
             "từng ký tự. Mọi lệnh khác bị từ chối LẶNG LẼ và cả lượt của bạn "
             "mất trắng — quyền được khớp theo chuỗi chính xác, không có tiền "
             "tố, không có ký tự đại diện.")
@@ -534,7 +541,7 @@ class RulePlanner:
         d.append(
             "Đọc/tìm tệp TRONG thư mục làm việc thì dùng công cụ đọc tệp trực "
             "tiếp (không cần lệnh). Nếu việc BẮT BUỘC phải chạy một lệnh KHÁC "
-            "hai lệnh trên mới xong được, trả `blocked` và nói rõ cần lệnh gì "
+            "những lệnh trên mới xong được, trả `blocked` và nói rõ cần lệnh gì "
             "— ĐỪNG thử biến thể, mọi biến thể đều trượt.")
         if scope:
             # KHAI BAO `changes` KHONG PHAI THU TUC GIAY TO — no la dieu kien

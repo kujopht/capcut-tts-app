@@ -59,17 +59,31 @@ class TestAllowlistKhopSettings(unittest.TestCase):
                 self.assertNotIn(x, tho)
 
     @unittest.skipUnless(SETTINGS.is_file(), "chưa có settings.json")
-    def test_dong_tu_CHAM_khong_duoc_cap_cho_agent(self):
-        """`tests` chạy ~430s; một lượt headless có trần 180s.
+    def test_dong_tu_bi_giu_lai_thi_KHONG_co_trong_settings(self):
+        """Nếu có động từ nào bị giữ lại, nó phải vắng mặt thật sự.
 
-        Cấp nó cho agent nghĩa là mỗi lần dùng đều hết giờ — đốt một lượt mà
-        không cho kết quả nào. Bộ kiểm đầy đủ là việc của CI và người vận
-        hành, không phải của một lượt agent.
+        Hiện `KHONG_CAP_CHO_AGENT` rỗng — cả ba động từ đều được cấp. Bài
+        kiểm vẫn giữ vì nó là chỗ khoá cho lần sau có ai đó muốn giữ lại một
+        động từ: giữ trong danh sách mà quên gỡ khỏi settings là đúng loại
+        lệch âm thầm mà tệp này tồn tại để chặn.
         """
         tho = SETTINGS.read_text(encoding="utf-8")
         for c in KHONG_CAP_CHO_AGENT:
             with self.subTest(lenh=c):
                 self.assertNotIn(c, tho)
+
+    def test_MOI_dong_tu_cua_wrapper_deu_duoc_cap_hoac_bi_giu_TUONG_MINH(self):
+        """Không động từ nào được rơi vào khoảng giữa.
+
+        Một động từ có trong wrapper mà không nằm ở `LENH_CHO_PHEP` cũng
+        không ở `KHONG_CAP_CHO_AGENT` là một quyết định chưa ai ra — agent
+        sẽ gọi nó, bị từ chối lặng lẽ, và mất trắng một lượt.
+        """
+        from scripts.cc_agent_tool import DONG_TU
+        cap = {c.rsplit(" ", 1)[1] for c in LENH_CHO_PHEP}
+        giu = {c.rsplit(" ", 1)[1] for c in KHONG_CAP_CHO_AGENT}
+        self.assertEqual(set(DONG_TU), cap | giu)
+        self.assertEqual(cap & giu, set(), "không được vừa cấp vừa giữ")
 
 
 class TestAllowlistHopLe(unittest.TestCase):
@@ -164,6 +178,103 @@ class TestWrapperChanDiVong(unittest.TestCase):
             with self.subTest(verb=verb):
                 self.assertTrue(all(isinstance(x, str) for x in argv))
                 self.assertNotIn("*", " ".join(argv))
+
+
+class TestDonTrangThaiThuNghiem(unittest.TestCase):
+    """Gỡ dự án demo/thử nghiệm bằng một đường HẸP, không phải búa tạ."""
+
+    def setUp(self):
+        import tempfile as _tf
+        from scripts.control_center.engine import ControlCenter
+        from scripts.control_center.model import Project
+        self.root = Path(_tf.mkdtemp(prefix="cc-clean-"))
+        self.cc = ControlCenter(root=self.root, fabric=None, probe=False)
+        for pid, ten in (("fanfic", "Fanfic"), ("router", "Router"),
+                         ("proof", "Proof")):
+            self.cc.them_project(Project(project_id=pid, name=ten,
+                                         repo_path=str(self.root)))
+
+    def tearDown(self):
+        try:
+            self.cc.shutdown()
+        except Exception:                                 # noqa: BLE001
+            pass
+
+    def test_go_du_an_thu_nghiem_xoa_HET_hang_cua_no(self):
+        from scripts.control_center.model import Task, TaskState
+        self.cc.store.luu_task(Task(task_id="proof.t1", project_id="proof",
+                                    title="x", objective="y",
+                                    state=TaskState.BLOCKED))
+        self.cc.store.them_chat("proof", "user", "hello")
+        self.assertTrue(self.cc.store.tasks("proof"))
+
+        self.cc.xoa_project("proof", xac_nhan=True)
+        self.assertNotIn("proof",
+                         [x.project_id for x in self.cc.store.projects()])
+        self.assertEqual(self.cc.store.tasks("proof"), [])
+        self.assertEqual(self.cc.store.chat("proof"), [])
+        self.assertIsNone(self.cc.store.task("proof.t1"))
+
+    def test_KHONG_go_duoc_du_an_MAC_DINH(self):
+        """`fanfic`/`router` là dự án THẬT, không phải đồ thử."""
+        for pid in ("fanfic", "router"):
+            with self.subTest(pid=pid):
+                with self.assertRaises(ValueError):
+                    self.cc.xoa_project(pid, xac_nhan=True)
+                self.assertIn(pid, [x.project_id
+                                    for x in self.cc.store.projects()])
+
+    def test_phai_XAC_NHAN_tuong_minh(self):
+        with self.assertRaises(ValueError):
+            self.cc.xoa_project("proof")
+        self.assertIn("proof",
+                      [x.project_id for x in self.cc.store.projects()])
+
+    def test_go_du_an_KHONG_dung_toi_du_an_khac(self):
+        from scripts.control_center.model import Task
+        self.cc.store.luu_task(Task(task_id="fanfic.keep",
+                                    project_id="fanfic", title="giữ",
+                                    objective="y"))
+        self.cc.xoa_project("proof", xac_nhan=True)
+        self.assertIsNotNone(self.cc.store.task("fanfic.keep"))
+
+
+class TestGoiKhongRoTrangThaiThuNghiem(unittest.TestCase):
+    """Trạng thái demo/thử KHÔNG được lọt vào gói phát hành."""
+
+    def test_danh_sach_dong_goi_KHONG_gom_so_hay_worktree(self):
+        from scripts.package_control_center import GOM, LOAI
+        for x in (".router", ".git", ".env", "__pycache__"):
+            self.assertIn(x, LOAI, f"{x} phải nằm trong danh sách loại trừ")
+        for muc in GOM:
+            with self.subTest(muc=muc):
+                self.assertFalse(muc.startswith(".router"))
+
+    def test_goi_that_KHONG_chua_control_db_hay_worktree(self):
+        """Kiểm trên GÓI THẬT nếu nó đã được dựng.
+
+        Một danh sách loại trừ đúng mà gói vẫn lẫn tệp lạ thì vô nghĩa —
+        kiểm hiện vật, không kiểm ý định.
+        """
+        import zipfile
+        goi = REPO / "dist" / "router-control-center-v0.1.0.zip"
+        if not goi.is_file():
+            self.skipTest("chưa dựng gói")
+        with zipfile.ZipFile(goi) as z:
+            ten = z.namelist()
+        for n in ten:
+            with self.subTest(tep=n):
+                self.assertNotIn(".router/", n)
+                self.assertFalse(n.endswith(".db"))
+                self.assertNotIn("__pycache__", n)
+                self.assertNotIn(".git/", n)
+
+    def test_du_an_mac_dinh_chi_gom_fanfic_va_router(self):
+        """Gói mới giải nén phải khởi động SẠCH — không dự án thử nào."""
+        from scripts.control_center.bootstrap import du_an_mac_dinh
+        self.assertEqual(
+            sorted(p.project_id for p in du_an_mac_dinh()),
+            ["fanfic", "router"])
 
 
 if __name__ == "__main__":

@@ -215,11 +215,22 @@ trong `.github/workflows/ci.yml`** — không phát minh lệnh mới.
 |---|---|---|
 | `changes` | `git status --porcelain -uall` | **có** |
 | `compile` | `python -m compileall -q server scripts` | **có** |
-| `tests` | `python -m unittest discover -s scripts/tests -t .` | **không** |
+| `tests` | `python -m unittest discover -s scripts/tests -t .` | **có** |
 
-`tests` không được cấp vì bộ kiểm chạy ~430s trong khi một lượt headless có
-trần 180s: cấp nó nghĩa là mỗi lần dùng đều hết giờ, đốt một lượt mà không
-cho kết quả. Bộ kiểm đầy đủ là việc của CI và người vận hành.
+**Đính chính một kết luận sai của bản trước.** Bản đầu KHÔNG cấp `tests`, lý
+do ghi là "bộ kiểm chạy ~430s trong khi một lượt headless có trần 180s". Con
+số 180s đó là của **kịch bản thử của chính tôi** (`--print-timeout 180s` gõ
+cứng trong probe), không phải của sản phẩm. Đường thật:
+
+```
+Executor       timeout = c.execution.max_wall_time    (2400s với việc có ghi)
+WarmAgyWorker  --print-timeout = turn_timeout * 4     (9600s)
+WarmAgyWorker  _cho("result", timeout=turn_timeout)   (2400s)
+```
+
+Một lượt 430s nằm thoải mái trong trần. Đo lại bằng tiến trình `agy` thật:
+`tests` chạy xong trong **239s**. Bài học đáng giữ hơn cả bản vá: đo trên
+SẢN PHẨM, đừng đo trên một kịch bản thử rồi kết luận cho sản phẩm.
 
 Hai mục trong `~/.gemini/antigravity-cli/settings.json`:
 
@@ -251,6 +262,46 @@ Kiểm bằng máy: `scripts/tests/test_control_center_allowlist.py` (offline, 1
 bài — khoá cả *lệch* lẫn *nới*) và `scripts/control_center_allowlist_proof.py`
 (tiến trình `agy` thật). Quyền được đọc **live**: `agy` nạp settings lúc
 sinh tiến trình, nên không cần khởi động lại gì.
+
+### Đối soát lời khai thiếu (B5) — vẫn FAIL CLOSED
+
+Cổng `diff` của Router V4 **không bị sửa một dòng nào**: nó vẫn hard-fail khi
+worker báo `ok`, để `changes` rỗng, mà đĩa có đổi. Có một bài kiểm khoá đúng
+điều đó lại.
+
+Control Center làm một việc KHÁC và CHẶT HƠN ở tầng trên: thay vì tin danh
+sách worker khai, nó lấy danh sách THẬT từ `git` rồi **kiểm lại chính danh
+sách đó**.
+
+Chỉ áp đúng một trường hợp hẹp — `changes` **rỗng**, đĩa **có** đổi, và
+`diff` là cổng **duy nhất** hỏng. Điều kiện để đi tiếp, tất cả phải đúng:
+
+1. mọi tệp đổi THẬT nằm trong `allowed_scope`, không chạm `forbidden_scope`;
+2. `scope_violations` của tầng kiểm định cũng rỗng;
+3. cổng `security` ĐẠT — nó vốn chạy trên diff THẬT của đĩa (kể cả tệp chưa
+   theo dõi), nên là phán quyết trên tập thật chứ không trên lời khai;
+4. mọi cổng khác ĐẠT.
+
+Một tệp ngoài phạm vi ⇒ **TỪ CHỐI**, việc ở lại `FAILED`, kèm sự kiện
+`UNDERDECLARED_CHANGES_REJECTED` mức ALERT. Chấp nhận thì ghi
+`UNDERDECLARED_CHANGES` (WARNING) và **điền lại `changes` bằng tập THẬT**, để
+mọi báo cáo về sau nói đúng thứ đã xảy ra.
+
+Đây không phải nới cổng: nó thay một phép kiểm dựa trên *lời khai* bằng một
+phép kiểm dựa trên *trạng thái đĩa*, và không bao giờ bỏ qua một thay đổi
+chưa được kiểm. Chiều ngược lại — khai có sửa mà đĩa SẠCH — **không bao giờ**
+được đối soát: đó là thất bại im lặng thật.
+
+### Dọn trạng thái thử nghiệm
+
+`./router-cc --remove-project <id>` gỡ MỘT dự án và mọi hàng của nó khỏi sổ,
+trong một giao dịch. **Không** phải `xoá control.db` — cách đó xoá luôn mọi
+dự án thật, mọi lịch sử, mọi khoá đang giữ.
+
+Từ chối gỡ `fanfic`/`router` (dự án thật của bản phát hành — dùng `archived`
+nếu muốn ẩn), đòi xác nhận tường minh ở tầng API, và **không đụng tới
+worktree trên đĩa** — luật "không bao giờ tự xoá worktree" áp ở đây như mọi
+nơi khác.
 
 ---
 

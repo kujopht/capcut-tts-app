@@ -337,6 +337,45 @@ class ControlStore:
                               (project_id,)).fetchone()
         return self._project_tu_hang(h) if h else None
 
+    def xoa_project(self, project_id: str) -> Dict[str, int]:
+        """Xoá MỘT dự án và mọi hàng thuộc về nó, trong MỘT giao dịch.
+
+        VÌ SAO CÓ HÀM NÀY: cách dọn duy nhất trước đây là xoá cả tệp
+        `control.db` — tức là xoá luôn mọi dự án THẬT, mọi lịch sử việc, mọi
+        khoá đang giữ. Đó là một búa tạ, và nó không bao giờ được là cơ chế
+        dọn dẹp của bản phát hành.
+
+        Xoá theo phạm vi HẸP và NGUYÊN TỬ: `giao_dich_ghi()` bảo đảm không
+        có trạng thái nửa vời (dự án biến mất mà việc của nó còn nằm lại,
+        hay ngược lại) nếu có gì hỏng giữa chừng.
+
+        KHÔNG chạm tới ĐĨA. Thư mục `git worktree` thật vẫn nguyên — luật
+        "không bao giờ tự xoá worktree" áp ở đây như mọi nơi khác. Hàm này
+        chỉ gỡ các HÀNG trong sổ; dọn cây làm việc là việc của người, có chủ
+        đích, sau khi đã nhìn.
+        """
+        dem: Dict[str, int] = {}
+        with self.giao_dich_ghi() as c:
+            ids = [h["task_id"] for h in c.execute(
+                "SELECT task_id FROM tasks WHERE project_id=?", (project_id,))]
+            if ids:
+                hoi = ",".join("?" * len(ids))
+                dem["task_deps"] = c.execute(
+                    f"DELETE FROM task_deps WHERE task_id IN ({hoi})",
+                    ids).rowcount
+                dem["lock_waiters"] = c.execute(
+                    f"DELETE FROM lock_waiters WHERE task_id IN ({hoi})",
+                    ids).rowcount
+            for bang in ("tasks", "sessions", "locks", "worktrees", "chat",
+                         "cc_events"):
+                dem[bang] = c.execute(
+                    f"DELETE FROM {bang} WHERE project_id=?",
+                    (project_id,)).rowcount
+            dem["projects"] = c.execute(
+                "DELETE FROM projects WHERE project_id=?",
+                (project_id,)).rowcount
+        return {k: v for k, v in dem.items() if v}
+
     def projects(self, *, include_archived: bool = False) -> List[Project]:
         sql = "SELECT * FROM projects"
         if not include_archived:

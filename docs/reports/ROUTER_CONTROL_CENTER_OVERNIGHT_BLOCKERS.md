@@ -125,7 +125,18 @@ Quy ước: mỗi mục ghi **cần gì / vì sao chặn / đã làm gì thay th
   (ví dụ chỉ `read_file`) để mở đường việc CÓ GHI không? Nếu có, nên hẹp
   tới mức nào.
 
-## B5. Cổng `diff` của Router V4 đánh HỎNG một lượt làm ĐÚNG
+## B5. ĐÃ GIẢI (2026-09-08) — đối soát, không nới cổng
+
+Giải bằng cách **giữ nguyên cổng `diff` của V4** và thêm một bước đối soát ở
+tầng Control Center: lấy danh sách tệp đổi THẬT từ `git`, kiểm lại phạm vi và
+bảo mật trên tập đó, và chỉ cho đi tiếp khi MỌI tệp thật đều hợp lệ. Một tệp
+ngoài phạm vi ⇒ vẫn FAILED. Xem `docs/CONTROL_CENTER.md` §4b.
+
+9 bài kiểm khoá lại, gồm một bài xác nhận `cong_diff` của V4 vẫn hard-fail.
+
+*(nguyên văn mục cũ giữ lại bên dưới để tra cứu)*
+
+## B5-cũ. Cổng `diff` của Router V4 đánh HỎNG một lượt làm ĐÚNG
 
 - **Quan sát (2026-09-08):** một lượt agent tạo đúng `docs/reports/cc-probe.md`,
   đúng phạm vi, nội dung đúng — rồi để `changes` **rỗng**. Cổng `diff` của
@@ -159,7 +170,18 @@ Quy ước: mỗi mục ghi **cần gì / vì sao chặn / đã làm gì thay th
 - **Quyết định buổi sáng:** thêm một dòng ghi ngày mới bên dưới §2.1 (không
   sửa dòng cũ), hoặc để nguyên nếu bạn coi 8 hồ sơ đó là chưa chính thức.
 
-## B7. Hai dự án THỬ NGHIỆM còn trong sổ Control Center
+## B7. ĐÃ GIẢI (2026-09-08) — dự án thử nghiệm đã gỡ sạch
+
+Đã gỡ `proof`, `rev`, `rev2`, `rw` bằng `./router-cc --remove-project <id>`
+(37 việc, 31 phiên, 51 hàng worktree, 64 tin nhắn, 496 sự kiện). Sổ nay chỉ
+còn `fanfic` và `router`. Worktree trên đĩa KHÔNG bị đụng tới.
+
+`xoá control.db` KHÔNG còn là cơ chế dọn dẹp. Có bài kiểm chặn trạng thái
+thử nghiệm lọt vào gói phát hành.
+
+*(nguyên văn mục cũ giữ lại bên dưới)*
+
+## B7-cũ. Hai dự án THỬ NGHIỆM còn trong sổ Control Center
 
 `proof` và `rev2` (tên hiển thị "ReviewProof") là dự án do các lượt chạy bằng
 chứng đêm nay tạo ra. Chúng nằm trong `.router/control_center/control.db`

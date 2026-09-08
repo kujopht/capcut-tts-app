@@ -1146,6 +1146,118 @@ class TestVerticalSlice(unittest.TestCase):
         self.assertEqual(s["selected"], "demo")
 
 
+class TestDoiSoatKhaiThieu(unittest.TestCase):
+    """B5 — đối soát lời khai thiếu, và nó phải FAIL CLOSED.
+
+    Cổng `diff` của Router V4 KHÔNG bị sửa. Control Center làm một việc khác
+    và chặt hơn: lấy danh sách tệp đổi THẬT từ `git` rồi kiểm lại chính danh
+    sách đó, thay vì tin lời khai của worker.
+    """
+
+    def setUp(self):
+        self.repo = kho_git_tam()
+        self.cc = _cc(self.repo)
+        self.ctx = self.cc.ctx("demo")
+        self.cc.chat("demo", "fix web/admin")
+        self.tid = self.cc.store.tasks("demo")[0].task_id
+        self.hd = TaskContract.from_dict(self.cc.store.task(self.tid).contract)
+
+    def tearDown(self):
+        self.cc.shutdown()
+
+    def _kq(self, *, declared, observed, gates, status="ok"):
+        from scripts.router_v3.pool import validation as V
+        from scripts.router_v4.envelope import ResultEnvelope
+        pb = ResultEnvelope(task_id=self.tid, status=status,
+                            summary="đã làm", changes=list(declared))
+        bc = V.ValidationReport(
+            gates=[V.GateResult(n, ok, "") for n, ok in gates],
+            files_changed_observed=list(observed))
+        return ExecutionResult(envelope=pb, validation=bc)
+
+    #: Moi cong DAT tru `diff` — dung hinh dang cua truong hop khai thieu.
+    CONG_OK = [("shape", True), ("diff", False), ("scope", True),
+               ("security", True), ("tests", True), ("artifacts", True)]
+
+    def test_khai_RONG_nhung_moi_tep_TRONG_pham_vi_thi_duoc_di_tiep(self):
+        kq = self._kq(declared=[], observed=["web/admin/a.txt"],
+                      gates=self.CONG_OK)
+        self.assertTrue(
+            self.cc._doi_soat_khai_thieu(self.ctx, self.tid, self.hd, kq))
+        self.assertEqual(kq.envelope.changes, ["web/admin/a.txt"],
+                         "`changes` phải được điền lại bằng tập THẬT")
+        e = [x for x in self.cc.store.su_kien(task_id=self.tid)
+             if x["kind"] == "UNDERDECLARED_CHANGES"]
+        self.assertEqual(len(e), 1, "phải có sự kiện kiểm toán")
+
+    def test_tep_doi_NGOAI_pham_vi_thi_VAN_HONG(self):
+        """Đây là vế fail-closed. Một tệp ngoài phạm vi ⇒ từ chối."""
+        kq = self._kq(declared=[],
+                      observed=["web/admin/a.txt", "server/secret.py"],
+                      gates=self.CONG_OK)
+        self.assertFalse(
+            self.cc._doi_soat_khai_thieu(self.ctx, self.tid, self.hd, kq))
+        e = [x for x in self.cc.store.su_kien(task_id=self.tid)
+             if x["kind"] == "UNDERDECLARED_CHANGES_REJECTED"]
+        self.assertEqual(len(e), 1)
+        self.assertEqual(e[0]["level"], "ALERT")
+
+    def test_cham_duong_CAM_thi_VAN_HONG(self):
+        kq = self._kq(declared=[], observed=[".git/config"],
+                      gates=self.CONG_OK)
+        self.assertFalse(
+            self.cc._doi_soat_khai_thieu(self.ctx, self.tid, self.hd, kq))
+
+    def test_cong_BAO_MAT_hong_thi_VAN_HONG(self):
+        gates = [(n, (ok if n != "security" else False))
+                 for n, ok in self.CONG_OK]
+        kq = self._kq(declared=[], observed=["web/admin/a.txt"], gates=gates)
+        self.assertFalse(
+            self.cc._doi_soat_khai_thieu(self.ctx, self.tid, self.hd, kq))
+
+    def test_cong_KHAC_hong_thi_VAN_HONG(self):
+        gates = [(n, (ok if n != "artifacts" else False))
+                 for n, ok in self.CONG_OK]
+        kq = self._kq(declared=[], observed=["web/admin/a.txt"], gates=gates)
+        self.assertFalse(
+            self.cc._doi_soat_khai_thieu(self.ctx, self.tid, self.hd, kq))
+
+    def test_KHAI_CO_SUA_ma_dia_SACH_thi_VAN_HONG(self):
+        """Chiều ngược lại là thất bại IM LẶNG thật — không bao giờ nới.
+
+        Worker khai có sửa nhưng `git` sạch nghĩa là lệnh ghi bị từ chối
+        hoặc worker bịa. Đối soát KHÔNG được chạm tới trường hợp này.
+        """
+        kq = self._kq(declared=["web/admin/a.txt"], observed=[],
+                      gates=self.CONG_OK)
+        self.assertFalse(
+            self.cc._doi_soat_khai_thieu(self.ctx, self.tid, self.hd, kq))
+
+    def test_khai_SAI_nhung_khong_rong_thi_KHONG_thuoc_dien_doi_soat(self):
+        kq = self._kq(declared=["mô tả chứ không phải đường dẫn"],
+                      observed=["web/admin/a.txt"], gates=self.CONG_OK)
+        self.assertFalse(
+            self.cc._doi_soat_khai_thieu(self.ctx, self.tid, self.hd, kq))
+
+    def test_worker_bao_KHONG_ok_thi_khong_doi_soat(self):
+        kq = self._kq(declared=[], observed=["web/admin/a.txt"],
+                      gates=self.CONG_OK, status="failed")
+        self.assertFalse(
+            self.cc._doi_soat_khai_thieu(self.ctx, self.tid, self.hd, kq))
+
+    def test_KHONG_sua_mot_dong_nao_cua_cong_diff_trong_V4(self):
+        """Bất biến V4 phải nguyên vẹn: cổng `diff` vẫn hard-fail ca này."""
+        from scripts.router_v3.pool.validation import cong_diff
+        from scripts.router_v3.packet import TaskResult
+        g = cong_diff(
+            TaskResult(task_id="t", worker_id="w", status="ok",
+                       summary="x", files_changed=[]),
+            ["web/admin/a.txt"], la_viec_co_ghi=True)
+        self.assertFalse(g.passed,
+                         "cổng `diff` của V4 PHẢI vẫn hỏng — đối soát nằm ở "
+                         "tầng trên, không phải bằng cách nới cổng")
+
+
 class TestHaiTienTrinh(unittest.TestCase):
     """HAI Control Center cùng một sổ — chuyện bình thường trong kho này.
 

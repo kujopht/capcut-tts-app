@@ -27,9 +27,10 @@ EXE = r"C:\Users\nguye\AppData\Local\agy\bin\agy.EXE"
 WT = sys.argv[1]
 
 
-def turn(instruction: str, marker: str, label: str) -> bool:
+def turn(instruction: str, marker: str, label: str,
+         print_timeout: str = "2400s") -> bool:
     argv = [EXE, "--model", "gemini-3.8-flash-high", "--output-format", "text",
-            "--print-timeout", "180s", "--add-dir", WT,
+            "--print-timeout", print_timeout, "--add-dir", WT,
             "--print=" + instruction]
     t0 = time.time()
     p = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
@@ -51,6 +52,10 @@ for cmd in LENH_CHO_PHEP:
     ins = (f"Run this exact shell command, nothing else:\n  {cmd}\n"
            f"Then reply with the single line: VERB-{verb}-RAN followed by the "
            f"command's exit status. Do not run any other command.")
+    # Dung DUNG tran cua san pham (`Executor` -> `max_wall_time`, mac dinh
+    # 2400s voi viec co ghi), khong phai mot tran cua rieng kich ban nay.
+    # Mot ket luan ve san pham do tren tran cua kich ban thu la ket luan sai
+    # — da mac dung loi do mot lan voi dong tu `tests`.
     allowed_ok.append(turn(ins, f"VERB-{verb}-RAN", verb))
 
 print()

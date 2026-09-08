@@ -248,6 +248,35 @@ bài chứng minh **hỏng ngẫu nhiên theo tính ý của model** — cùng m
 lần `compile` bị từ chối vì agent tự ý mở tệp công cụ, lần sau thì không. Đã
 đồng bộ prompt với hợp đồng.
 
+**Phát hiện thứ bảy, và là phát hiện nặng nhất của lượt này** — tìm được vì
+tôi chạy lại bằng chứng bằng **đúng cờ mặc định** thay vì cờ mà các lượt
+trước dùng:
+
+`probe=False` là mặc định có chủ đích ("dựng Control Center không gọi
+mạng"). Nhưng `dung_fabric` đặt mọi runtime ở `OFFLINE`, và
+`Scheduler.decide` loại sạch **cả 42 ứng viên** với lý do *"runtime KHÔNG
+nhận dispatch"*. Ghép lại: `router-cc` — đúng lệnh trong tài liệu và trong
+launcher — **không bao giờ giao được việc nào.** Mọi việc nằm `WAITING`
+vĩnh viễn.
+
+```
+probe=False -> selected=None   "runtime KHÔNG nhận dispatch x1; ..."
+probe=True  -> AG01/gemini-3.8-flash-high   (89.13 điểm, 42 ứng viên)
+```
+
+Mọi lượt chứng minh trước đây đều chạy **có** `--probe`, nên đường mặc định
+của bản phát hành chưa từng được chứng minh. Bài học: *chạy bằng chứng bằng
+đúng cờ người dùng sẽ dùng, không phải cờ làm nó chạy được.*
+
+Và một lần nữa, cùng loại lỗi bài kiểm: `fabric_gia()` dựng runtime ở
+`RuntimeStatus.IDLE` — mô phỏng một fabric **đã được dò**. Không bài kiểm
+nào đi qua trạng thái mà sản phẩm thật khởi động từ. Đã sửa bằng dò **lười**
+(dò khi thật sự có việc chờ, hạn 300s, không dò fabric dựng tay, dò hỏng thì
+fail closed) và 6 bài kiểm mới — trong đó có một bài **canh chính cái stub**,
+vì `_dam_bao_suc_khoe` bắt mọi ngoại lệ nên một stub viết sai hỏng âm thầm
+và bài kiểm vẫn xanh vì sai lý do. Đúng cái bẫy đó đã sập một lần khi tôi
+viết `for r in f.runtimes` (`runtimes` là **dict**).
+
 ## 5. Còn chặn (cần người) — xem `ROUTER_CONTROL_CENTER_OVERNIGHT_BLOCKERS.md`
 
 - **B4 ĐÃ ĐÓNG.** Hai mục `command(...)` khớp chuỗi chính xác, trỏ tuyệt đối

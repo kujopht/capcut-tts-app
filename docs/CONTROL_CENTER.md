@@ -35,7 +35,7 @@ python -m pip install -r requirements-control-room.txt
 | Cờ | Ý nghĩa |
 |---|---|
 | `--root` | thư mục giữ sổ `.router/control_center/control.db` (mặc định `cwd`) |
-| `--probe` | dò sức khoẻ provider lúc khởi động. **CHẬM và tốn một lượt mỗi provider** — mặc định TẮT |
+| `--probe` | dò sức khoẻ provider **ngay lúc khởi động**. CHẬM và tốn một lượt mỗi provider — mặc định TẮT. Tắt **không** có nghĩa là không bao giờ dò: xem dưới |
 | `--max-parallel` | trần việc chạy song song (mặc định 3, trùng trần WRITE worker của router toàn cục) |
 | `--no-recover` | bỏ qua đối soát phục hồi lúc khởi động |
 
@@ -198,6 +198,30 @@ xong. Đòi cha phải `DONE` trước thì hai bên khoá nhau vĩnh viễn. N�
 `parent_id` của chính việc đó; phụ thuộc thường vẫn phải `DONE` thật.
 
 ---
+
+### Dò sức khoẻ là LƯỜI, không phải không có
+
+`dung_fabric` đặt mọi runtime ở `OFFLINE`/`last_seen=0`, và
+`Scheduler.decide` loại sạch mọi ứng viên với lý do *"runtime KHÔNG nhận
+dispatch"*. Nên **`--probe` tắt mà không dò gì cả** đồng nghĩa với: không
+việc nào được giao, mãi mãi. Đã đo thật — một lượt chứng minh READ+WRITE chờ
+**901s, 0 lượt**, không placement nào.
+
+Nên Control Center dò **lười**: không dò lúc dựng (giữ đúng ý "mở app không
+gọi mạng"), mà dò lần đầu **khi thật sự có việc chờ giao**, rồi giữ kết quả
+trong **300s**.
+
+| Tình huống | Có gọi mạng? |
+|---|---|
+| Mở giao diện, xem sổ, không có việc chờ | **không** |
+| Có việc chờ giao, chưa dò lần nào | có — một lần |
+| Nhịp tiếp theo, còn trong hạn 300s | không |
+| Quá hạn 300s và vẫn cần placement | có — dò lại |
+| Fabric do bên gọi đưa vào (bộ kiểm) | **không bao giờ** |
+| Dò hỏng | ghi `FABRIC_PROBE_FAILED`, việc vẫn chờ — không đoán là sống |
+
+Ô cuối là chỗ dễ sai nhất: `do_suc_khoe` gọi thật ra `agy`/`codex`, nên dò
+một fabric dựng tay sẽ biến bộ kiểm offline thành bộ kiểm gọi mạng.
 
 ## 4b. Lệnh agent được phép — allowlist HẸP, khớp chuỗi CHÍNH XÁC
 

@@ -163,6 +163,50 @@ class DiskGuardTest(unittest.TestCase):
         self.assertEqual(q.snapshot().in_flight[FarmerQuotas.DOWNLOAD], 0)
 
 
+class HarvesterTokenTest(unittest.TestCase):
+    """Token dich vu phai lay duoc TREN LINUX.
+
+    Su co that (2026-09-08): farmer sap lien tuc tren may san xuat vi
+    `harvester_token()` hoi thang `fanfic_credential_broker`, von doc Windows
+    Credential Manager qua DPAPI va nem ngay tren Linux. `--dry-run` bo qua
+    token nen khong bai test cuc bo nao cham toi duong do.
+    """
+
+    def test_environment_is_read_before_the_windows_only_broker(self):
+        from server.farmer.adapters import ENV_HARVESTER_TOKEN, harvester_token
+
+        with mock.patch.dict("os.environ", {ENV_HARVESTER_TOKEN: "tok-tu-systemd"}):
+            with mock.patch.dict("sys.modules", {"fanfic_credential_broker": None}):
+                self.assertEqual(harvester_token(), "tok-tu-systemd")
+
+    def test_a_broker_that_cannot_run_here_is_not_fatal(self):
+        """Broker nem tren Linux — do KHONG phai loi, chi la duong khong ap
+        dung. Loi that la 'khong co token o dau ca'."""
+        from server.farmer import adapters
+
+        broker_gia = mock.Mock()
+        broker_gia.fetch.side_effect = RuntimeError(
+            "this broker requires Windows Credential Manager")
+        with mock.patch.dict("os.environ", {adapters.ENV_HARVESTER_TOKEN: ""}), \
+             mock.patch.dict("sys.modules",
+                             {"fanfic_credential_broker": broker_gia}):
+            with self.assertRaises(RuntimeError) as ctx:
+                adapters.harvester_token()
+        # Thong diep phai noi ro PHAI LAM GI, ca tren Linux lan Windows.
+        self.assertIn("farmer.env", str(ctx.exception))
+        self.assertIn("store --name", str(ctx.exception))
+
+    def test_the_broker_still_works_on_windows(self):
+        from server.farmer import adapters
+
+        broker_gia = mock.Mock()
+        broker_gia.fetch.return_value = "tok-tu-broker"
+        with mock.patch.dict("os.environ", {adapters.ENV_HARVESTER_TOKEN: ""}), \
+             mock.patch.dict("sys.modules",
+                             {"fanfic_credential_broker": broker_gia}):
+            self.assertEqual(adapters.harvester_token(), "tok-tu-broker")
+
+
 class SingleInstanceTest(unittest.TestCase):
     """DUNG MOT farmer. Hai ban cung luc se gianh cung mot muc trong hang doi
     va tra tien TTS hai lan cho mot tac pham — dieu `content_queue` khong tu

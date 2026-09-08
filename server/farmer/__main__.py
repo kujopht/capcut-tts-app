@@ -47,9 +47,13 @@ def _r2_io():
     """
     import os as _os
 
-    _os.environ.setdefault(
-        "FAS_ENV_FILE",
-        str(Path(__file__).resolve().parents[2] / "server" / ".env.production"))
+    # Chi tro `FAS_ENV_FILE` vao tep .env.production khi no THAT SU ton tai
+    # (may Windows cua nguoi phat trien). Tren may san xuat, bi mat den bang
+    # duong systemd `EnvironmentFile=` va tep do khong co — tro vao mot duong
+    # dan khong ton tai la mot cach lam ro rang mot cau hinh dang chay tot.
+    _env_file = Path(__file__).resolve().parents[2] / "server" / ".env.production"
+    if _env_file.is_file():
+        _os.environ.setdefault("FAS_ENV_FILE", str(_env_file))
     from server.config import get_settings
     from server.r2_adapter import R2StorageAdapter
 

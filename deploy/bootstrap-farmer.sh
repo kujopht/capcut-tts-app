@@ -215,6 +215,30 @@ case "$QUEUE_OUT" in
    docs/reports/OVERNIGHT_BLOCKERS.md muc B1." ;;
 esac
 
+# ------------------------------------------ 4b. token dich vu CO MAT chua --
+# Farmer can `FAS_HARVESTER_SERVICE_TOKEN` de ghi ban nhap qua API. Thieu no
+# thi tien trinh sap NGAY o lan chay dau va systemd se dap lai mai — mot vong
+# lap sap im lang, dung kieu su co da gap 2026-09-08.
+#
+# KIEM o day, TRUOC khi bat dich vu. Chi kiem CO/KHONG, khong bao gio in
+# gia tri.
+info "kiem token dich vu co mat trong moi truong farmer"
+if runuser -u "$SVC_USER" -- bash -c \
+     "set -a; . '$ENV_FILE'; . '$ETC/worker-prod.env'; set +a; \
+      test -n \"\${FAS_HARVESTER_SERVICE_TOKEN:-}\""; then
+  ok "FAS_HARVESTER_SERVICE_TOKEN co mat (gia tri khong duoc in)"
+else
+  die "THIEU FAS_HARVESTER_SERVICE_TOKEN — farmer se khong ghi duoc gi.
+   Them mot dong vao $ENV_FILE (tep da la 0600 $SVC_USER):
+
+       FAS_HARVESTER_SERVICE_TOKEN=<token>
+
+   Tren may Windows, doc no ra bang:
+       python scripts/fanfic_credential_broker.py check --name FAS_HARVESTER_SERVICE_TOKEN
+
+   Roi chay lai script nay. KHONG bat dich vu khi con thieu."
+fi
+
 # ------------------------------------------------ 5. lo chay co kiem soat --
 info "chay MOT vong co kiem soat (--once, gioi han boi han muc)"
 BATCH_OUT="$(runuser -u "$SVC_USER" -- env -i \

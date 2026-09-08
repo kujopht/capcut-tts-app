@@ -161,6 +161,23 @@ jobs:
         run: |
           "$RUNNER_TEMP/venv/bin/python" -m unittest discover -s server/tests -t . -v
 
+      # Phu thuoc cua ROUTER CONTROL CENTER, khong phai cua backend web.
+      #
+      # `scripts/tests/` gio co ca bai kiem cua Control Center, va API cuc bo
+      # cua no doi `python-multipart` cho `POST /api/attachments`. Cai o day —
+      # SAU buoc "Import ung dung chi voi phu thuoc runtime" o tren — de buoc
+      # ay van chung minh dung dieu no sinh ra de chung minh:
+      # `server/requirements.txt` TU NO du cho backend web. Dat truoc buoc do
+      # se lam phep chung minh kia rong.
+      #
+      # `server/requirements.txt` KHONG duoc nhan goi nay: `server/` khong
+      # dung mot `Form(`/`File(`/`UploadFile` nao cua FastAPI, va job nay ton
+      # tai dung de giu tap phu thuoc runtime cua backend khoi phinh ra.
+      - name: Cai phu thuoc giao dien web cua Control Center
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m pip install \
+            -r requirements-control-center-web.txt
+
       # scripts/tests/ da ton tai tu truoc (vd test_setup_appwrite_readiness.py)
       # nhung chua bao gio duoc CI THAT SU chay — buoc "Bien dich" ben duoi chi
       # kiem tra cu phap, khong chay assertion nao. Them buoc nay de cac test

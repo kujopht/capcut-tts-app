@@ -39,14 +39,51 @@ def _api():
     return DEFAULT_API, goi
 
 
-def harvester_token() -> str:
-    """Token dich vu, lay tu broker — KHONG bao gio tu tep trong kho ma."""
-    import fanfic_credential_broker as broker
+ENV_HARVESTER_TOKEN = "FAS_HARVESTER_SERVICE_TOKEN"
 
-    tok = broker.fetch("FAS_HARVESTER_SERVICE_TOKEN") or ""
+
+def harvester_token() -> str:
+    """Token dich vu. MOI TRUONG truoc, broker sau.
+
+    Thu tu nay quan trong va truoc day toi da lam NGUOC, khien farmer sap lien
+    tuc tren may san xuat:
+
+        `fanfic_credential_broker` doc Windows Credential Manager qua DPAPI.
+        No la **chi-Windows** — tren Linux no nem
+        `BrokerEnvironmentError: this broker requires Windows Credential
+        Manager` ngay tu dong dau tien.
+
+    Tren may AWS, bi mat den bang duong cua systemd (`EnvironmentFile=`), giong
+    het cach hai worker production dang nhan cua chung. Tren may Windows cua
+    nguoi phat trien thi broker moi la duong dung. Nen: doc moi truong truoc,
+    va CHI hoi broker khi moi truong khong co.
+
+    Fail closed kem mot thong diep noi ro phai lam gi — mot `RuntimeError`
+    truong khong giup ai luc 5 gio sang.
+    """
+    import os
+
+    tok = (os.environ.get(ENV_HARVESTER_TOKEN) or "").strip()
+    if tok:
+        return tok
+
+    try:
+        import fanfic_credential_broker as broker
+
+        tok = (broker.fetch(ENV_HARVESTER_TOKEN) or "").strip()
+    except Exception:                                           # noqa: BLE001
+        # Broker khong dung duoc o day (vd Linux). KHONG phai loi — chi nghia
+        # la duong nay khong ap dung; loi that la "khong co token o dau ca".
+        tok = ""
+
     if not tok:
         raise RuntimeError(
-            "thieu FAS_HARVESTER_SERVICE_TOKEN — farmer khong ghi duoc gi")
+            f"thieu {ENV_HARVESTER_TOKEN} — farmer khong ghi duoc gi.\n"
+            f"  Tren may san xuat (Linux): them dong "
+            f"{ENV_HARVESTER_TOKEN}=... vao /etc/fanfic-audio/farmer.env "
+            f"(0600 fanfic:fanfic) roi `systemctl restart fanfic-farmer`.\n"
+            f"  Tren may Windows: luu no bang "
+            f"`fanfic_credential_broker.py store --name {ENV_HARVESTER_TOKEN}`.")
     return tok
 
 

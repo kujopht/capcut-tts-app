@@ -47,10 +47,24 @@ WPE_BEFORE=""
 printf '\n=== Hoan tat trien khai farmer ===\n\n'
 
 # --------------------------------------------------------------- 1. token --
-printf 'Dan %s (khong hien khi go, Enter de xac nhan):\n> ' "$KEY"
-read -rs TOKEN
-printf '\n\n'
-[ -n "${TOKEN:-}" ] || die "token rong — dung lai, khong sua gi"
+# `--skip-token`: token DA duoc ghi boi mot buoc truoc (vd
+# `scripts/push_harvester_token.py` day thang tu Windows Credential Manager
+# qua stdin). Chi KIEM no co mat, khong hoi lai va khong bao gio in ra.
+if [ "${1:-}" = "--skip-token" ]; then
+  info "bo qua buoc nhap token (da duoc ghi truoc do) — chi kiem co mat"
+  if grep -q "^${KEY}=." "$ENV_FILE"; then
+    ok "$KEY co mat trong $ENV_FILE (gia tri khong duoc in)"
+  else
+    die "$KEY khong co (hoac rong) trong $ENV_FILE — dung lai"
+  fi
+else
+  printf 'Dan %s (khong hien khi go, Enter de xac nhan):\n> ' "$KEY"
+  read -rs TOKEN
+  printf '\n\n'
+  [ -n "${TOKEN:-}" ] || die "token rong — dung lai, khong sua gi"
+fi
+
+if [ "${1:-}" != "--skip-token" ]; then
 
 info "ghi $KEY vao $ENV_FILE (chi dong nay bi thay)"
 TMP="$ENV_FILE.new.$$"
@@ -65,6 +79,7 @@ mv -f "$TMP" "$ENV_FILE"
 chown "$SVC_USER:$SVC_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 ok "da ghi ($(stat -c '%U:%G %a' "$ENV_FILE")) — gia tri khong bao gio duoc in"
+fi
 
 # ------------------------------------------------------------ 2. bootstrap --
 info "chay bootstrap-farmer.sh"

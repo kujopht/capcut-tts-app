@@ -76,7 +76,13 @@ def drive_ls(duong):
     except Exception:
         return None
 
+from server.appwrite_store import AppwriteMetadataStore
+from server.config import load_settings
+
+store = AppwriteMetadataStore(load_settings().appwrite)
+
 san_sang = 0
+rong = []
 for wid in sorted(work_ids):
     man = WorkManifest.from_dict(json.loads(r2.get(chi_muc + wid + ".json")))
     d = man.canonical_dir
@@ -108,11 +114,29 @@ for wid in sorted(work_ids):
     else:
         print(f"    [{{'OK' if tren_drive else 'XX'}}] Drive: {{tren_drive}}")
 
+    # READY-nhung-rong: manifest bao san sang trong khi duong PHUC VU khong
+    # co gi doc duoc. Day la loi da an bon tac pham, va phep kiem nay ton tai
+    # de mot ban moi khong lot qua ma khong ai thay.
+    if man.ready and man.novel_id:
+        try:
+            so_chuong = len(store.list_chapters(man.novel_id))
+        except Exception:
+            so_chuong = -1
+        if so_chuong == 0:
+            rong.append((wid, man.source_title, man.novel_id))
+            print("    [XX] READY nhung novel KHONG CO CHUONG NAO")
+        elif so_chuong < 0:
+            print("    [??] khong doc duoc so chuong")
+
     if man.ready and co_van_ban and not thieu:
         san_sang += 1
 
 print()
 print(f"TONG: {{san_sang}} tac pham DAY DU bo hien vat va da READY")
+print(f"READY-NHUNG-RONG: {{len(rong)}}"
+      + ("  <- DA BIET, cho don dep" if rong else "  (khong co)"))
+for wid, tieu_de, nid in rong:
+    print(f"   {{wid}} {{nid}} {{(tieu_de or '')[:45]}}")
 
 # --- 6. Phep kiem AM: cay legacy khong bi cham -------------------------------
 legacy = drive_ls(f"{{drive_archive.remote_name()}}:{{drive_archive.LEGACY_ROOT}}")

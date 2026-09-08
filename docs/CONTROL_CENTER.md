@@ -199,6 +199,61 @@ xong. Đòi cha phải `DONE` trước thì hai bên khoá nhau vĩnh viễn. N�
 
 ---
 
+## 4b. Lệnh agent được phép — allowlist HẸP, khớp chuỗi CHÍNH XÁC
+
+Quyền `command(...)` của `agy` khớp **chuỗi lệnh chính xác**. Đo 2026-09-08:
+`command(git)` và `command(git *)` đều KHÔNG cho chạy `git status
+--porcelain`; không glob, không tiền tố. Hệ quả: một thao tác có **tham số
+thay đổi** không biểu diễn được bằng một allow-rule an toàn, và lối thoát
+duy nhất còn lại — `command(*)` — là truy cập hệ tệp tuỳ ý bằng shell.
+
+Nên agent đi qua **một wrapper cố định** với tập động từ **hữu hạn**:
+`scripts/cc_agent_tool.py`. Mỗi động từ ánh xạ 1-1 tới một lệnh **đã có
+trong `.github/workflows/ci.yml`** — không phát minh lệnh mới.
+
+| Động từ | Chạy thật | Cấp cho agent? |
+|---|---|---|
+| `changes` | `git status --porcelain -uall` | **có** |
+| `compile` | `python -m compileall -q server scripts` | **có** |
+| `tests` | `python -m unittest discover -s scripts/tests -t .` | **không** |
+
+`tests` không được cấp vì bộ kiểm chạy ~430s trong khi một lượt headless có
+trần 180s: cấp nó nghĩa là mỗi lần dùng đều hết giờ, đốt một lượt mà không
+cho kết quả. Bộ kiểm đầy đủ là việc của CI và người vận hành.
+
+Hai mục trong `~/.gemini/antigravity-cli/settings.json`:
+
+```json
+"permissions": { "allow": [
+  "command(python C:\FanficWorkers\router-control-center\scripts\cc_agent_tool.py changes)",
+  "command(python C:\FanficWorkers\router-control-center\scripts\cc_agent_tool.py compile)"
+]}
+```
+
+**Không có tệp allowlist theo từng dự án** — `agy` chỉ đọc một tệp cấu hình
+người dùng duy nhất. Đó là giới hạn của công cụ, không phải lựa chọn.
+
+### `cwd` không mở rộng được phạm vi
+
+`python -m unittest discover -s scripts/tests -t .` giải đường dẫn theo
+`cwd`. Đổi `cwd` sang một cây khác có `scripts/tests/` riêng sẽ khiến **cùng
+một chuỗi lệnh đã được duyệt** nạp và chạy mã ở đó. Chặn bằng hai lớp:
+
+1. allow-rule ghim **đường dẫn tuyệt đối** tới wrapper → `cwd` không đổi
+   được *script nào* chạy;
+2. `_kiem_cwd()` bắt buộc `cwd` là gốc kho hoặc trong `.router/worktrees/`,
+   ngoài ra **từ chối và thoát 2**.
+
+Thêm: argv của mỗi động từ là **hằng số**, không phần tử nào đến từ dòng
+lệnh; không `shell=True`; mọi đầu ra qua `packet.redact`.
+
+Kiểm bằng máy: `scripts/tests/test_control_center_allowlist.py` (offline, 11
+bài — khoá cả *lệch* lẫn *nới*) và `scripts/control_center_allowlist_proof.py`
+(tiến trình `agy` thật). Quyền được đọc **live**: `agy` nạp settings lúc
+sinh tiến trình, nên không cần khởi động lại gì.
+
+---
+
 ## 5. Khoá tài nguyên
 
 Ba lớp, **không cùng luật**:

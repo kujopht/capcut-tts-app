@@ -242,6 +242,77 @@ không liên quan tới sự cố này.
 
 ---
 
-## 10. Chưa gắn thẻ
+## 10. Một phụ thuộc chưa từng được khai — CI môi trường sạch bắt được
 
-`v0.2.0` **chưa** được gắn, đúng như yêu cầu.
+Lần đẩy đầu tiên của bản sửa này làm CI **HỎNG 37 lỗi**, tất cả cùng một gốc:
+
+```
+RuntimeError: Form data requires "python-multipart" to be installed.
+  ... webapi.py line 213, in dung_app
+      @app.post("/api/attachments")
+```
+
+`webapi.py` nhận `Form(...)` + `UploadFile` từ `9dff878` (giao diện web
+V0.2), và gói `python-multipart` **chưa từng được khai ở đâu cả**.
+
+**Nghiêm trọng hơn vẻ ngoài:** FastAPI kiểm gói này lúc **đăng ký route**,
+không phải lúc có request đầu tiên. Thiếu nó thì `dung_app()` ném ngay và
+**cả API chết** — không phải riêng đường đính kèm. Trên một máy cài sạch
+theo đúng tài liệu, cả giao diện web lẫn vỏ desktop đều không mở được.
+
+Vì sao nó không lộ ra sớm hơn: máy phát triển đã có sẵn gói (một gói khác
+kéo theo), bản EXE đóng gói cũng có (PyInstaller gom từ chính venv đó), và
+lượt CI ĐẠT gần nhất (`0449dcb1`) có **trước** `9dff878` — nên đây là lần
+đầu CI thật sự nạp route đính kèm.
+
+Cùng hình dạng với sự cố `boto3` mà `server/tests/test_dependencies.py` ghi
+lại: mã đã viết nhưng không tệp phụ thuộc nào được commit khai báo gói.
+
+**Sửa:** khai `python-multipart>=0.0.9,<1.0` trong
+`requirements-control-center-web.txt`, và cài tệp đó trong CI **sau** bước
+"Import ứng dụng chỉ với phụ thuộc runtime" để bước ấy vẫn chứng minh đúng
+điều nó sinh ra để chứng minh (`server/requirements.txt` **tự nó** đủ cho
+backend web). `server/` không dùng một `Form(`/`File(`/`UploadFile` nào của
+FastAPI, nên gói này **không** được bỏ vào tập phụ thuộc runtime của backend.
+
+**Bài kiểm** `scripts/tests/test_control_center_web_deps.py` (5 bài), tách
+đôi có ý: một nửa đọc **tệp phụ thuộc** (xanh/đỏ độc lập với máy đang
+chạy), một nửa dựng `dung_app()` **thật**. Chỉ nửa sau thì không đủ — trên
+máy đã có sẵn gói nó xanh dù tệp phụ thuộc rỗng, và đó đúng là cách sự cố
+lọt qua. Kèm một bài bắt trường hợp route bỏ multipart, để nghĩa vụ kia
+không thành vô cớ mà không ai biết.
+
+Chứng minh trên venv **sạch** (chỉ `fastapi`+`uvicorn`):
+
+| | Trước khi sửa | Sau khi sửa |
+|---|---|---|
+| `dung_app()` | `RuntimeError` — đúng lỗi của CI | dựng được |
+| `test_control_center_web_deps` | 4/5 | **5/5** |
+| `test_control_center_webapi` | 37 lỗi | **37/37** |
+| `test_control_center_attachments` | 37/37 | **37/37** |
+
+---
+
+## 11. Phát hành
+
+| Hạng mục | Giá trị |
+|---|---|
+| PR | [#180](https://github.com/kujopht/capcut-tts-app/pull/180) — đã gộp |
+| `main` SHA | `1f5c7338933cf9027465e14a4c1d1b003826ff1a` |
+| Thẻ | `router-control-center-v0.2.0` |
+| SHA đối tượng thẻ | `da8656917c18c111de185ec8619526bdd2373d23` |
+| CI | 3/3 ĐẠT (gitleaks · backend môi trường sạch · web) |
+| Tác phẩm dựng **từ thẻ** | `31dd5b22e064139499fb728b3cc2c720f0f22ba9689a13bc7172bd1b449b269f` |
+| Cỡ | 13.435.164 byte (thư mục 92 MB) |
+
+Bản **người dùng nghiệm thu tay** có sha256
+`1a5bd8786bc5950a1c3b5c255f1463a7a38f73c7d411a2fb4b0bdc1828fa9136`, cùng
+**đúng cỡ byte**. Hai băm khác nhau vì PyInstaller nhúng đường dẫn build,
+**không** vì mã khác nhau: đã đối chiếu bằng `git diff --name-only` giữa
+commit đã nghiệm thu (`538ceec`) và đích gắn thẻ — ba tệp đổi là
+`requirements-control-center-web.txt`, `.github/workflows/ci.yml` và một
+tệp kiểm mới. **Không một tệp nguồn nào nằm trong gói PyInstaller bị đổi.**
+
+Tác phẩm dựng từ thẻ đã được thử khởi động sạch dưới locale máy, không một
+biến môi trường nào: `--check` thoát 0, `--help` thoát 0 và in đủ tiếng
+Việt (`ứng dụng desktop`), không `UnicodeEncodeError`.

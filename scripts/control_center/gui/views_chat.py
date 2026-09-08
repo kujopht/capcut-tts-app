@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QToolButton, QVBoxLayout, QWidget)
 
 from scripts.control_center.gui.bridge import gop_ke_hoach
+from scripts.control_center.gui.attachments_ui import (DaiDinhKem,
+                                                       chon_tep)
 from scripts.control_center.gui.widgets import (HuyHieu, KhoiMa, OSoanThao,
                                                 VanBanChonDuoc, menu_copy)
 
@@ -236,11 +238,22 @@ class KhungChat(QWidget):
     mo_viec = Signal(str)
     #: Nguoi dung bam Duyet tren mot the bi chan.
     duyet_viec = Signal(str)
-    #: Nguoi dung gui mot muc tieu.
-    gui = Signal(str)
+    #: Nguoi dung gui mot muc tieu. (van_ban, danh_sach_ma_dinh_kem)
+    gui = Signal(str, list)
+    #: Nguoi dung dan/tha tep -> cua so nhan vao kho.
+    xin_nhan_tep = Signal(list)
+    #: Nguoi dung dan mot anh tho tu clipboard.
+    xin_nhan_anh = Signal(object)
+    #: Nguoi dung bo mot dinh kem ra khoi tin nhan CHUA gui.
+    xin_bo_dinh_kem = Signal(str)
+    #: Nguoi dung muon xem truoc mot dinh kem.
+    xin_xem_dinh_kem = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        #: `attachment_id -> Path`. Giu o day de `TheDinhKem` ve duoc
+        #: thumbnail ma khong phai tu hoi so.
+        self._duong_dan: Dict[str, object] = {}
         self._dau_tin = ""
         self._dau_viec = ""
         self._the_router: List["TheRouter"] = []
@@ -269,18 +282,30 @@ class KhungChat(QWidget):
         ngoai.setContentsMargins(14, 10, 14, 12)
         ngoai.setSpacing(6)
 
+        # Dai dinh kem nam TREN o soan: nguoi dung thay thu sap gui
+        # ngay canh cho dang go, khong o mot panel khac.
+        self.dai = DaiDinhKem(self._lay_duong_dan)
+        self.dai.xin_bo_mot.connect(self.xin_bo_dinh_kem.emit)
+        self.dai.xin_xem_mot.connect(self.xin_xem_dinh_kem.emit)
+        self.dai.nut_bo_het.clicked.connect(self._bo_het)
+        self.dai.doi.connect(self._cap_nhat_nhan_gui)
+        ngoai.addWidget(self.dai)
+
         self.o_soan = OSoanThao()
         self.o_soan.yeu_cau_gui.connect(self._bam_gui)
+        self.o_soan.co_tep.connect(self.xin_nhan_tep.emit)
+        self.o_soan.co_anh.connect(self.xin_nhan_anh.emit)
         ngoai.addWidget(self.o_soan)
 
         thanh = QHBoxLayout()
-        self.nut_ngu_canh = QPushButton("Thêm ngữ cảnh…")
-        self.nut_ngu_canh.setCursor(Qt.PointingHandCursor)
-        self.nut_ngu_canh.setToolTip(
-            "Chèn đường dẫn tệp trong kho vào yêu cầu, để Router biết chỗ "
-            "cần đọc/sửa")
-        self.nut_ngu_canh.clicked.connect(self._chon_tep)
-        thanh.addWidget(self.nut_ngu_canh)
+        self.nut_dinh_kem = QPushButton("Đính kèm tệp…")
+        self.nut_dinh_kem.setCursor(Qt.PointingHandCursor)
+        self.nut_dinh_kem.setToolTip(
+            "Chọn tệp để gửi kèm tin nhắn." + chr(10) +
+            "Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), "
+            "hoặc kéo-thả tệp từ Explorer vào ô soạn.")
+        self.nut_dinh_kem.clicked.connect(self._chon_tep)
+        thanh.addWidget(self.nut_dinh_kem)
         thanh.addStretch(1)
 
         self.nhan_trang_thai = QLabel("")
@@ -304,24 +329,45 @@ class KhungChat(QWidget):
     # -- hanh dong -----------------------------------------------------------
 
     def _chon_tep(self) -> None:
-        duong, _ = QFileDialog.getOpenFileNames(
-            self, "Chọn tệp làm ngữ cảnh", "", "Tất cả tệp (*.*)")
-        if not duong:
-            return
-        # Chen vao O SOAN chu khong gui ngay: nguoi dung con phai go muc
-        # tieu, va ho phai THAY duoc thu minh vua them.
-        hien = self.o_soan.toPlainText()
-        them = "\n".join(f"- {d}" for d in duong)
-        self.o_soan.setPlainText(
-            (hien + "\n" if hien else "") + "Ngữ cảnh:\n" + them + "\n")
+        duong = chon_tep(self)
+        if duong:
+            self.xin_nhan_tep.emit(duong)
         self.o_soan.setFocus()
+
+    def _bo_het(self) -> None:
+        for aid in list(self.dai.cac_ma()):
+            self.xin_bo_dinh_kem.emit(aid)
+
+    def them_dinh_kem(self, dk, duong_dan) -> None:
+        """Cua so goi vao day SAU KHI kho da nhan tep."""
+        self._duong_dan[dk.attachment_id] = duong_dan
+        self.dai.them(dk)
+
+    def bo_dinh_kem(self, attachment_id: str) -> None:
+        self._duong_dan.pop(attachment_id, None)
+        self.dai.bo(attachment_id)
+
+    def _lay_duong_dan(self, attachment_id: str):
+        return self._duong_dan.get(attachment_id)
+
+    def cac_ma_dinh_kem(self):
+        return self.dai.cac_ma()
+
+    def _cap_nhat_nhan_gui(self) -> None:
+        n = len(self.dai.cac_ma())
+        self.nut_gui.setText("Gửi" if not n else f"Gửi ({n} tệp)")
 
     def _bam_gui(self) -> None:
         text = self.o_soan.toPlainText().strip()
-        if not text:
+        ma = self.dai.cac_ma()
+        # Cho phep gui khi CHI co dinh kem: keo mot anh vao roi bam Gui
+        # la mot y dinh hop le ("xem cai nay").
+        if not text and not ma:
             return
-        self.gui.emit(text)
+        self.gui.emit(text, ma)
         self.o_soan.clear()
+        self._duong_dan.clear()
+        self.dai.xoa_het()
 
     def dat_dang_lam(self, dang: bool) -> None:
         self.nut_gui.setEnabled(not dang)

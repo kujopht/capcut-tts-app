@@ -173,6 +173,12 @@ class OSoanThao(QPlainTextEdit):
         sc2.setContext(Qt.WidgetWithChildrenShortcut)
         sc2.activated.connect(self.yeu_cau_gui.emit)
 
+    #: V0.2: nguoi dung dan/tha tep vao o soan. Mang duong dan tep cuc bo.
+    co_tep = Signal(list)
+    #: V0.2: nguoi dung dan mot ANH tho tu clipboard (Win+Shift+S).
+    #: Mang `QImage` — khong phai duong dan, vi anh chup khong co tep nao.
+    co_anh = Signal(object)
+
     def keyPressEvent(self, e):                             # noqa: N802
         # CHI Return + Ctrl duoc bat o day. Moi phim khac — dac biet la
         # Ctrl+C/V/X/A — phai di tiep xuong `super()`, neu khong ta vua tu
@@ -183,6 +189,90 @@ class OSoanThao(QPlainTextEdit):
             e.accept()
             return
         super().keyPressEvent(e)
+
+    # -- V0.2: dan va keo-tha tep -------------------------------------------
+    #
+    # LAM O `insertFromMimeData`, KHONG o `keyPressEvent`. Day la khac biet
+    # quan trong nhat cua ca tinh nang nay: Qt goi `insertFromMimeData` cho
+    # MOI duong dan (Ctrl+V, chuot phai > Paste, chuot giua tren X11), nen
+    # xu ly o day thi ca ba duong deu chay. Con chan `keyPressEvent` cho
+    # Ctrl+V thi vua bo sot hai duong kia, vua co nguy co an mat phim dan.
+
+    @staticmethod
+    def _duong_dan_cuc_bo(mime) -> list:
+        """Đường dẫn tệp CỤC BỘ trong mime, hoặc rỗng.
+
+        Chỉ nhận `file://` trỏ tới tệp thật trên máy. Một URL `http://`
+        kéo từ trình duyệt vào KHÔNG được biến thành lệnh tải về — tầng
+        này không gọi mạng, và im lặng tải một URL là đúng thứ người dùng
+        không yêu cầu.
+        """
+        if not mime.hasUrls():
+            return []
+        ra = []
+        for u in mime.urls():
+            if u.isLocalFile():
+                ra.append(u.toLocalFile())
+        return ra
+
+    def canInsertFromMimeData(self, mime) -> bool:          # noqa: N802
+        if self._duong_dan_cuc_bo(mime) or mime.hasImage():
+            return True
+        return super().canInsertFromMimeData(mime)
+
+    def insertFromMimeData(self, mime) -> None:             # noqa: N802
+        """Lấy HẾT những gì hiểu được, không phải if/elif rồi bỏ phần còn lại.
+
+        Clipboard Windows thường mang nhiều định dạng một lúc: một cú copy
+        trong Explorer đặt CF_HDROP *và* text; Win+Shift+S đặt CF_DIB *và*
+        có thể cả text. Nên tệp/ảnh và VĂN BẢN được xử lý ĐỘC LẬP — dán
+        một ảnh cùng lúc với một đoạn nhiều dòng phải giữ được cả hai.
+        """
+        tep = self._duong_dan_cuc_bo(mime)
+        if tep:
+            self.co_tep.emit(tep)
+        elif mime.hasImage():
+            # `elif`: mot cu copy tep ANH trong Explorer mang CA HDROP va
+            # anh. Uu tien tep vi no giu duoc ten that va dinh dang goc;
+            # di qua duong anh se doi ten thanh `dan-....png` va tai ma
+            # hoa lai.
+            anh = mime.imageData()
+            if anh is not None:
+                self.co_anh.emit(anh)
+        # VAN BAN: luon de Qt lam viec cua Qt. Neu mime khong co text thi
+        # `super()` khong chen gi — dung nhu mong doi.
+        if mime.hasText():
+            super().insertFromMimeData(mime)
+        elif not tep and not mime.hasImage():
+            super().insertFromMimeData(mime)
+
+    # Keo-tha: `QPlainTextEdit` mac dinh nhan tha VAN BAN. Phai nhan ca tep.
+
+    def dragEnterEvent(self, e):                            # noqa: N802
+        if self._duong_dan_cuc_bo(e.mimeData()) or e.mimeData().hasImage():
+            e.acceptProposedAction()
+            return
+        super().dragEnterEvent(e)
+
+    def dragMoveEvent(self, e):                             # noqa: N802
+        if self._duong_dan_cuc_bo(e.mimeData()) or e.mimeData().hasImage():
+            e.acceptProposedAction()
+            return
+        super().dragMoveEvent(e)
+
+    def dropEvent(self, e):                                 # noqa: N802
+        tep = self._duong_dan_cuc_bo(e.mimeData())
+        if tep:
+            self.co_tep.emit(tep)
+            e.acceptProposedAction()
+            return
+        if e.mimeData().hasImage():
+            anh = e.mimeData().imageData()
+            if anh is not None:
+                self.co_anh.emit(anh)
+                e.acceptProposedAction()
+                return
+        super().dropEvent(e)
 
 
 class KhoiMa(QFrame):

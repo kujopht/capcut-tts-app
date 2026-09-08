@@ -144,6 +144,22 @@ CREATE TABLE IF NOT EXISTS cc_events (
     detail     TEXT NOT NULL DEFAULT '',
     meta_json  TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS attachments (
+    attachment_id TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL,
+    message_id    INTEGER,
+    task_id       TEXT NOT NULL DEFAULT '',
+    filename      TEXT NOT NULL,
+    media_type    TEXT NOT NULL,
+    size_bytes    INTEGER NOT NULL,
+    sha256        TEXT NOT NULL,
+    rel_path      TEXT NOT NULL,
+    owner         TEXT NOT NULL DEFAULT '',
+    created_at    REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_att_msg  ON attachments(project_id, message_id);
+CREATE INDEX IF NOT EXISTS ix_att_task ON attachments(task_id);
+CREATE INDEX IF NOT EXISTS ix_att_sha  ON attachments(sha256);
 CREATE INDEX IF NOT EXISTS ix_tasks_proj  ON tasks(project_id, state);
 CREATE INDEX IF NOT EXISTS ix_sess_proj   ON sessions(project_id, state);
 CREATE INDEX IF NOT EXISTS ix_locks_res   ON locks(project_id, kind, resource);
@@ -741,6 +757,92 @@ class ControlStore:
         return [dict(h) for h in hs]
 
     # -- chat ---------------------------------------------------------------
+
+    # -- dinh kem ------------------------------------------------------------
+    #
+    # CHI METADATA. Byte cua tep nam ngoai SQLite — xem
+    # `scripts/control_center/attachments.py`, bat bien #1. Sổ giu duong dan
+    # TUONG DOI so voi kho dinh kem, khong bao gio duong dan tuyet doi: mot
+    # duong dan tuyet doi lam so vo ngay khi thu muc goc bi doi cho, va no
+    # ro ri cay thu muc cua may nguoi dung vao moi ban xuat.
+
+    def luu_dinh_kem(self, dk) -> None:
+        self._c().execute(
+            "INSERT OR REPLACE INTO attachments (attachment_id, project_id, "
+            "message_id, task_id, filename, media_type, size_bytes, sha256, "
+            "rel_path, owner, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (dk.attachment_id, dk.project_id, dk.message_id, dk.task_id,
+             dk.filename, dk.media_type, int(dk.size_bytes), dk.sha256,
+             dk.rel_path, dk.owner, float(dk.created_at)))
+
+    @staticmethod
+    def _dk(h):
+        from scripts.control_center.attachments import DinhKem
+        return DinhKem(
+            attachment_id=h["attachment_id"], project_id=h["project_id"],
+            filename=h["filename"], media_type=h["media_type"],
+            size_bytes=int(h["size_bytes"]), sha256=h["sha256"],
+            rel_path=h["rel_path"],
+            message_id=(int(h["message_id"])
+                        if h["message_id"] is not None else None),
+            task_id=h["task_id"], owner=h["owner"],
+            created_at=float(h["created_at"]))
+
+    def dinh_kem(self, attachment_id: str):
+        h = self._c().execute(
+            "SELECT * FROM attachments WHERE attachment_id=?",
+            (attachment_id,)).fetchone()
+        return self._dk(h) if h else None
+
+    def dinh_kem_cua_message(self, project_id: str, message_id: int) -> List:
+        hs = self._c().execute(
+            "SELECT * FROM attachments WHERE project_id=? AND message_id=? "
+            "ORDER BY created_at", (project_id, int(message_id)))
+        return [self._dk(h) for h in hs]
+
+    def dinh_kem_cua_project(self, project_id: str) -> List:
+        hs = self._c().execute(
+            "SELECT * FROM attachments WHERE project_id=? ORDER BY created_at",
+            (project_id,))
+        return [self._dk(h) for h in hs]
+
+    def dinh_kem_cua_task(self, task_id: str) -> List:
+        """Dung cho `cho_agent()` — ranh gioi quyen cua agent."""
+        if not task_id:
+            return []
+        hs = self._c().execute(
+            "SELECT * FROM attachments WHERE task_id=? ORDER BY created_at",
+            (task_id,))
+        return [self._dk(h) for h in hs]
+
+    def dinh_kem_theo_sha(self, sha: str) -> List:
+        hs = self._c().execute(
+            "SELECT * FROM attachments WHERE sha256=?", (sha,))
+        return [self._dk(h) for h in hs]
+
+    def gan_dinh_kem_cho_message(self, attachment_id: str,
+                                 message_id: int) -> bool:
+        cur = self._c().execute(
+            "UPDATE attachments SET message_id=? WHERE attachment_id=?",
+            (int(message_id), attachment_id))
+        return (cur.rowcount or 0) > 0
+
+    def gan_dinh_kem_cho_task(self, attachment_id: str,
+                              task_id: str) -> bool:
+        """Cap mot dinh kem cho MOT viec.
+
+        UPDATE HEP, khong doc-sua-ghi: chi cot `task_id`, va chi khi ban ghi
+        do that su ton tai. Tra `True` neu co dong bi doi.
+        """
+        cur = self._c().execute(
+            "UPDATE attachments SET task_id=? WHERE attachment_id=?",
+            (task_id, attachment_id))
+        return (cur.rowcount or 0) > 0
+
+    def xoa_dinh_kem(self, attachment_id: str) -> bool:
+        cur = self._c().execute(
+            "DELETE FROM attachments WHERE attachment_id=?", (attachment_id,))
+        return (cur.rowcount or 0) > 0
 
     def them_chat(self, project_id: str, role: str, text: str, *,
                   meta: Optional[Dict] = None) -> ChatMessage:

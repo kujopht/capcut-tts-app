@@ -101,9 +101,20 @@ class CCGia:
     def shutdown(self) -> None:
         self.da_goi.append(("shutdown",))
 
-    def chat(self, project_id: str, text: str) -> Dict:
-        self.da_goi.append(("chat", project_id, text))
-        return {"reply": "ok", "tasks": [], "plan": {}}
+    def chat(self, project_id: str, text: str, *,
+             attachment_ids=None) -> Dict:
+        """Chu ky PHAI khop `ControlCenter.chat` THAT.
+
+        V0.2 them `attachment_ids`. Ban gia thieu tham so do thi
+        `Cau.gui_chat` nem `TypeError` vao luong nen, loi bi day vao
+        `co_loi`, va bai kiem "bam Gui thi goi backend" hong voi mot thong
+        diep khong noi gi ve nguyen nhan. Do la ly do
+        `TestHopDongDuLieuVoiBackendTHAT` ton tai.
+        """
+        self.da_goi.append(("chat", project_id, text,
+                            tuple(attachment_ids or ())))
+        return {"reply": "ok", "tasks": [], "plan": {},
+                "message_id": 1, "attachment_ids": list(attachment_ids or ())}
 
     def pause(self, task_id: str, **_kw):
         self.da_goi.append(("pause", task_id))

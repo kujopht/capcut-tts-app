@@ -216,6 +216,10 @@ class CuaSoChinh(QMainWindow):
         self.cau.dang_lam.connect(self.khung_chat.dat_dang_lam)
 
         self.khung_chat.gui.connect(self.cau.gui_chat)
+        self.khung_chat.xin_nhan_tep.connect(self.nhan_tep_dinh_kem)
+        self.khung_chat.xin_nhan_anh.connect(self.nhan_anh_dinh_kem)
+        self.khung_chat.xin_bo_dinh_kem.connect(self.bo_dinh_kem)
+        self.khung_chat.xin_xem_dinh_kem.connect(self.xem_dinh_kem)
         self.khung_chat.duyet_viec.connect(self.xac_nhan_duyet)
         self.khung_chat.mo_viec.connect(self._mo_viec_tu_chat)
 
@@ -445,6 +449,52 @@ class CuaSoChinh(QMainWindow):
         tl.setDefaultButton(QMessageBox.Cancel)
         if tl.exec() == QMessageBox.Yes:
             self.cau.duyet_gated(task_id)
+
+    # -- V0.2: dinh kem ------------------------------------------------------
+
+    def nhan_tep_dinh_kem(self, duong_dan: list) -> None:
+        """Nhận tệp từ kéo-thả, dán, hoặc hộp chọn tệp.
+
+        Nhận vào kho NGAY, trước khi bấm Gửi: nhờ vậy thumbnail và `sha256`
+        có thật ngay lúc đó, và người dùng thấy đúng thứ sẽ được gửi thay
+        vì một cái tên chờ xác nhận.
+        """
+        ok, loi = self.cau.them_dinh_kem_tu_tep(list(duong_dan or []))
+        for dk in ok:
+            self.khung_chat.them_dinh_kem(
+                dk, self.cau.duong_dan_dinh_kem(dk.attachment_id))
+        if ok:
+            self.trang_thai.showMessage(
+                f"đã đính kèm {len(ok)} tệp", 4000)
+        for m in loi:
+            # Moi tep bi tu choi duoc noi RO RANG. Im lang bo qua mot tep
+            # nguoi dung vua keo vao la cach nhanh nhat lam ho mat tin.
+            self._bao_loi(f"không đính kèm được — {m}")
+
+    def nhan_anh_dinh_kem(self, anh) -> None:
+        """Ảnh thô từ clipboard — đường của Win+Shift+S."""
+        dk, loi = self.cau.them_dinh_kem_tu_anh(anh)
+        if dk is None:
+            self._bao_loi(f"không dán được ảnh — {loi}")
+            return
+        self.khung_chat.them_dinh_kem(
+            dk, self.cau.duong_dan_dinh_kem(dk.attachment_id))
+        self.trang_thai.showMessage(
+            f"đã dán ảnh {dk.filename} ({dk.co_doc_duoc()})", 4000)
+
+    def bo_dinh_kem(self, attachment_id: str) -> None:
+        """Bỏ một đính kèm CHƯA gửi — xoá luôn khỏi kho."""
+        self.cau.xoa_dinh_kem(attachment_id)
+        self.khung_chat.bo_dinh_kem(attachment_id)
+
+    def xem_dinh_kem(self, attachment_id: str) -> None:
+        from scripts.control_center.gui.attachments_ui import mo_xem
+        dk = self.cau.dinh_kem(attachment_id)
+        p = self.cau.duong_dan_dinh_kem(attachment_id)
+        if dk is None or p is None:
+            self._bao_loi("không mở được đính kèm — tệp không còn trên đĩa")
+            return
+        mo_xem(dk, p, self)
 
     def _bao_loi(self, msg: str) -> None:
         self.trang_thai.showMessage(msg, 8000)

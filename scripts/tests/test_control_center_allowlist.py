@@ -94,9 +94,17 @@ class TestAllowlistHopLe(unittest.TestCase):
         for c in LENH_CHO_PHEP:
             with self.subTest(lenh=c):
                 self.assertIn("cc_agent_tool.py", c)
-                self.assertTrue(c.startswith("python C:\\"),
-                                "đường dẫn tuyệt đối ghim SCRIPT NÀO chạy; "
-                                "đường dẫn tương đối để `cwd` đổi mục tiêu")
+                # Kiem TINH TUYET DOI, khong kiem "co bat dau bang C:\\".
+                # Ban truoc gan cung o dia Windows nen CI Linux bao hong
+                # tren mot duong dan `/home/runner/...` VON DA tuyet doi —
+                # bai kiem sai, khong phai san pham sai.
+                # Doi chieu voi `_TOOL` chu khong cat chuoi: cat theo dau
+                # cach se sai ngay khi duong dan co dau cach.
+                self.assertIn(_TOOL, c)
+                self.assertTrue(
+                    Path(_TOOL).is_absolute(),
+                    "đường dẫn tuyệt đối ghim SCRIPT NÀO chạy; "
+                    "đường dẫn tương đối để `cwd` đổi mục tiêu")
                 self.assertNotIn("*", c)
 
     def test_duong_dan_wrapper_SUY_RA_tu_vi_tri_module_khong_go_cung(self):

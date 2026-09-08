@@ -629,7 +629,13 @@ class TestRulePlanner(unittest.TestCase):
         for lenh in LENH_CHO_PHEP:
             with self.subTest(lenh=lenh):
                 self.assertIn("cc_agent_tool.py", lenh)
-                self.assertTrue(lenh.startswith("python C:\\"),
+                # `is_absolute()`, khong phai "bat dau bang C:\\": tren CI
+                # Linux duong dan la `/home/runner/...`, tuyet doi nhung
+                # khong co o dia. Bai kiem cu hong o day du san pham dung.
+                from pathlib import Path as _P
+                from scripts.control_center.planner import _TOOL
+                self.assertIn(_TOOL, lenh)
+                self.assertTrue(_P(_TOOL).is_absolute(),
                                 "phải là đường dẫn TUYỆT ĐỐI")
                 self.assertNotIn("*", lenh)
 

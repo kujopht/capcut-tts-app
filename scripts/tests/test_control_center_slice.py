@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from scripts.router_v3.pool import validation as V
+from scripts.router_v4 import fabric_config as FC
 from scripts.router_v4.contract import TaskContract
 from scripts.router_v4.envelope import ResultEnvelope
 from scripts.router_v4.executor import ExecutionResult
@@ -1355,6 +1356,152 @@ class TestDoiSoatKhaiThieu(unittest.TestCase):
         self.assertFalse(g.passed,
                          "cổng `diff` của V4 PHẢI vẫn hỏng — đối soát nằm ở "
                          "tầng trên, không phải bằng cách nới cổng")
+
+
+class TestDoSucKhoeLuoi(unittest.TestCase):
+    """Đường MẶC ĐỊNH của bản phát hành phải giao được việc.
+
+    `probe=False` là mặc định có chủ đích: dựng Control Center không được
+    gọi mạng. Nhưng `dung_fabric` đặt mọi runtime ở `OFFLINE`/`last_seen=0`,
+    và `Scheduler.decide` loại sạch mọi ứng viên với lý do "runtime KHÔNG
+    nhận dispatch". Ghép hai điều đó lại: `router-cc` (không `--probe`)
+    KHÔNG BAO GIỜ giao được việc nào — mọi việc nằm `WAITING` vĩnh viễn.
+
+    Đã đo thật: một lượt chứng minh READ+WRITE chờ **901s, 0 lượt**, không
+    placement nào, rồi tự dọn dấu vết.
+
+    **Vì sao không bài kiểm nào bắt được:** `fabric_gia()` dựng runtime ở
+    `RuntimeStatus.IDLE` — tức là mô phỏng một fabric ĐÃ ĐƯỢC DÒ. Không bài
+    kiểm nào đi qua trạng thái mà sản phẩm thật khởi động từ. Lại đúng loại
+    "bài kiểm xanh vì nó mô phỏng một thế giới không tồn tại".
+    """
+
+    def setUp(self):
+        self.repo = kho_git_tam()
+        self.goi: List[str] = []
+
+    def tearDown(self):
+        FC.do_suc_khoe = self._that
+
+    def _bat_do(self):
+        """Thay `do_suc_khoe` bằng bản ĐẾM, không gọi mạng."""
+        self._that = FC.do_suc_khoe
+
+        def gia(f, **kw):
+            self.goi.append("do")
+            # `.values()` — `runtimes` la DICT. Ban dau viet `for r in
+            # f.runtimes` nen stub NEM AttributeError, bi `except` cua
+            # `_dam_bao_suc_khoe` nuot, va bai kiem "do dung mot lan" van
+            # xanh VI SAI LY DO. Do la ly do co `test_stub_...` duoi day.
+            for r in f.runtimes.values():
+                r.status = RuntimeStatus.IDLE
+            return f
+        FC.do_suc_khoe = gia
+
+    def test_stub_do_suc_khoe_KHONG_duoc_nem_loi(self):
+        """Canh chính cái stub của bốn bài kiểm dưới đây.
+
+        `_dam_bao_suc_khoe` bắt mọi ngoại lệ (fail closed đúng chỗ), nên một
+        stub viết sai sẽ hỏng ÂM THẦM và các bài kiểm "đã dò" vẫn xanh vì
+        `self.goi` được ghi trước khi lỗi xảy ra. Đã mắc đúng lỗi đó: stub
+        duyệt `f.runtimes` (dict) thay vì `.values()`.
+        """
+        self._bat_do()
+        cc = ControlCenter(root=self.repo, probe=False,
+                           executor_factory=lambda p, f: FakeExecutor())
+        try:
+            FC.do_suc_khoe(cc.fabric)          # phai KHONG nem gi
+            self.assertEqual(self.goi, ["do"])
+            self.assertTrue(all(
+                r.status is RuntimeStatus.IDLE
+                for r in cc.fabric.runtimes.values()))
+        finally:
+            cc.shutdown()
+
+    def test_KHONG_do_khi_khong_co_viec_nao_cho_giao(self):
+        """Mở Control Center ra xem sổ thì không gọi mạng lần nào.
+
+        Đây là nửa còn lại của bản vá: nếu dò ở hàm dựng hay ở mỗi nhịp vô
+        điều kiện, thì chỉ mở giao diện ra xem cũng đốt một lượt mỗi provider.
+        """
+        self._bat_do()
+        cc = ControlCenter(root=self.repo, probe=False,
+                           executor_factory=lambda p, f: FakeExecutor())
+        try:
+            cc.tick()
+            cc.tick()
+            self.assertEqual(self.goi, [], "không có việc chờ mà vẫn dò")
+        finally:
+            cc.shutdown()
+
+    def test_CO_viec_cho_giao_thi_do_MOT_lan_roi_dung_lai(self):
+        self._bat_do()
+        cc = ControlCenter(root=self.repo, probe=False,
+                           executor_factory=lambda p, f: FakeExecutor())
+        try:
+            pj = cc.them_project(Project(project_id="p", name="P",
+                                         repo_path=str(self.repo)))
+            cc.chat(pj.project_id, "update docs/a.md with one line")
+            cc.tick()
+            self.assertEqual(len(self.goi), 1, "phải dò đúng một lần")
+            cc.tick()
+            self.assertEqual(len(self.goi), 1,
+                             "trong hạn thì KHÔNG được dò lại mỗi nhịp")
+        finally:
+            cc.shutdown()
+
+    def test_fabric_do_BEN_GOI_dua_vao_thi_KHONG_BAO_GIO_bi_do(self):
+        """Fabric dựng tay là fabric của bộ kiểm. Dò nó = bộ kiểm gọi mạng."""
+        self._bat_do()
+        cc = ControlCenter(root=self.repo, fabric=fabric_gia(), probe=False,
+                           executor_factory=lambda p, f: FakeExecutor())
+        try:
+            pj = cc.them_project(Project(project_id="p", name="P",
+                                         repo_path=str(self.repo)))
+            cc.chat(pj.project_id, "update docs/a.md with one line")
+            cc.tick()
+            self.assertEqual(self.goi, [], "đã dò một fabric dựng tay")
+        finally:
+            cc.shutdown()
+
+    def test_da_do_luc_NAP_thi_nhip_dau_khong_do_lai(self):
+        """`--probe` dò ngay lúc nạp; nhịp đầu không được dò lần thứ hai."""
+        self._bat_do()
+        cc = ControlCenter(root=self.repo, probe=True,
+                           executor_factory=lambda p, f: FakeExecutor())
+        try:
+            pj = cc.them_project(Project(project_id="p", name="P",
+                                         repo_path=str(self.repo)))
+            cc.chat(pj.project_id, "update docs/a.md with one line")
+            _ = cc.fabric                    # nap + do (qua `FC.nap`)
+            # `FC.nap(probe=True)` goi CHINH module-global `do_suc_khoe`,
+            # tuc la stub nay — nen MOT lan do o day la dung.
+            self.assertEqual(len(self.goi), 1, "`--probe` phải dò lúc nạp")
+            cc.tick()
+            self.assertEqual(len(self.goi), 1,
+                             "dò hai lần cho cùng một lần khởi động")
+        finally:
+            cc.shutdown()
+
+    def test_do_HONG_thi_KHONG_ket_luan_provider_dang_song(self):
+        """Fail closed: dò hỏng thì việc vẫn chờ, không đoán là sống."""
+        self._that = FC.do_suc_khoe
+
+        def no(f, **kw):
+            raise OSError("mạng chết")
+        FC.do_suc_khoe = no
+        cc = ControlCenter(root=self.repo, probe=False,
+                           executor_factory=lambda p, f: FakeExecutor())
+        try:
+            pj = cc.them_project(Project(project_id="p", name="P",
+                                         repo_path=str(self.repo)))
+            cc.chat(pj.project_id, "update docs/a.md with one line")
+            kq = cc.tick()
+            self.assertEqual(kq["dispatched"], [])
+            kinds = [e["kind"] for e in cc.store.su_kien(limit=50)]
+            self.assertIn("FABRIC_PROBE_FAILED", kinds)
+        finally:
+            cc.shutdown()
 
 
 class TestHaiTienTrinh(unittest.TestCase):

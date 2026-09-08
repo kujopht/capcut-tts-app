@@ -183,14 +183,80 @@ kiểm xanh, bất biến hỏng, và tôi đã đọc lại đoạn mã đó nh
 một cặp mắt độc lập tìm ra 5 lỗi khác mà tôi nhìn thẳng vào vẫn không thấy.
 Hai thứ đó không thay thế nhau.
 
+## 4e. Review đối kháng TRƯỚC PHÁT HÀNH — 6 phát hiện, 2 trong đó CHẶN TAG
+
+Lượt review cuối trước khi tag. Sáu phát hiện, cả sáu đều thật, và người
+review nói thẳng: **"chưa nên tag khi #1/#2 còn"**.
+
+| # | Phát hiện | Mức |
+|---|---|---|
+| 1 | Động từ `tests` = **thực thi mã tuỳ ý** qua một allow-rule hẹp | NGHIÊM TRỌNG |
+| 2 | `recover()` của tiến trình thứ hai **cướp** việc đang chạy của tiến trình thứ nhất | NGHIÊM TRỌNG |
+| 3 | `_doi_soat_khai_thieu` là **mã chết** — và bài kiểm của tôi dùng hình dạng bất khả | QUAN TRỌNG |
+| 4 | Cả ba động từ bị từ chối **100%** trên đúng dự án MẶC ĐỊNH | QUAN TRỌNG |
+| 5 | `xoa_project` không từ chối việc đang RUNNING ⇒ nhả khoá PRODUCTION giữa lúc ghi | QUAN TRỌNG |
+| 6 | Sự kiện `TASK_CLAIMED` thiếu `project_id` ⇒ gỡ dự án để lại rác | NHỎ |
+
+**#1 đáng kể chi tiết, vì nó là đúng thứ cả mục 4b dựng lên để chặn.**
+Worktree của việc là nơi agent **được phép ghi**, còn
+`unittest discover -s scripts/tests` **nạp rồi chạy** mọi `test_*.py` ở đó.
+Agent không cần thoát rào `cwd` — nó chỉ cần trồng `scripts/tests/test_x.py`
+vào cây của chính nó rồi gọi đúng chuỗi lệnh đã được duyệt. Các cổng
+`scope`/`diff`/`security` chạy **sau lượt**, nên thấy tệp lạ khi mã đã chạy
+xong. Động từ bị **rút khỏi allowlist**; nó ở lại trong wrapper cho Control
+Center (đã tin cậy) tự gọi.
+
+**#2 là một lỗi hai-tiến-trình mà một tiến trình không thể thấy.** Trong lượt
+đầu của một việc, `pid` của phiên còn NULL, nên đối soát phục hồi của một
+tiến trình thứ hai không phân biệt được "phiên chết" với "phiên vừa sinh ra
+và đang chạy". Nó đưa việc đang chạy về hàng đợi. Đã đổi sang dùng **lease
+V4 còn sống** làm dấu hiệu liên tiến trình.
+
+**#3 là lần thứ hai tôi mắc đúng một loại lỗi trong cùng bản phát hành:**
+viết bài kiểm cho một **hình dạng dữ liệu không tồn tại**. `Executor.run` ghi
+đè `pb.status` thành `"failed"`, nên nhánh đối soát không bao giờ chạy trên
+đường thật; bài kiểm của tôi xanh vì nó tự dựng một envelope mà sản phẩm
+không bao giờ sinh ra. Đã đổi sang phát hiện qua chuỗi chi tiết của cổng
+`diff`, với một bài kiểm **khoá đúng chuỗi đó**.
+
+**#4 là lỗi mà mọi bài kiểm đều xanh trong khi sản phẩm hỏng từ đầu tới
+cuối.** `REPO_ROOT` suy ra từ vị trí tệp wrapper, tức kho control-center;
+nhưng dự án `fanfic` trỏ tới **kho chính**, nên worktree của nó nằm ở
+`<kho chính>/.router/worktrees/`. Rào `cwd` chỉ nhận cây dưới `REPO_ROOT` ⇒
+từ chối 100%. Nới rào thành "có `.router` rồi `worktrees` kề nhau trong tổ
+tiên đã resolve".
+
+Việc nới đó **chỉ an toàn vì #1 đã được sửa** — không động từ nào được cấp
+còn nạp mã theo `cwd`. Ràng buộc đó trước giờ không được khoá ở đâu cả, nên
+đã thêm một bài kiểm dựng cây giả ở **chỗ khác trên đĩa**, xác minh rào thật
+sự cho qua, rồi đòi không động từ được cấp nào chạy tệp trong đó.
+
+**Bài kiểm đó, lần đầu viết, là một bài kiểm rỗng.** Kiểm bằng mutation (cấp
+lại `tests`) vẫn xanh: từ Python 3.11 `unittest discover` chỉ nạp thư mục
+**import được**, và cây giả thiếu `__init__.py` nên không tìm thấy gì. Cây
+thật của agent là một bản checkout của kho nên **có sẵn** hai tệp đó. Thêm
+vào cây giả thì mutation làm bài kiểm hỏng đúng như mong đợi.
+
+Ba lần trong một bản phát hành — #3 ở trên, và hai lần ở đây — cùng một loại
+lỗi: **bài kiểm xanh vì nó mô phỏng một thế giới không tồn tại.** Cách duy
+nhất tôi bắt được nó là chạy mutation, không phải đọc lại.
+
+**Một chỗ nữa lệch khỏi đường thật, tìm được lúc chạy lại bằng chứng:** prompt
+của `control_center_allowlist_proof.py` không nhắc agent ĐỪNG mở tệp công cụ
+ra đọc, trong khi hợp đồng thật (`planner.py:554`) có nhắc. Thiếu dòng đó,
+bài chứng minh **hỏng ngẫu nhiên theo tính ý của model** — cùng mã nguồn, một
+lần `compile` bị từ chối vì agent tự ý mở tệp công cụ, lần sau thì không. Đã
+đồng bộ prompt với hợp đồng.
+
 ## 5. Còn chặn (cần người) — xem `ROUTER_CONTROL_CENTER_OVERNIGHT_BLOCKERS.md`
 
-- **B4** `agy` headless tự chối quyền `command`/`read_file` ⇒ việc CÓ GHI
-  chưa chạy hết được. Hai đường sửa đều là quyết định của bạn; đường
-  `--dangerously-skip-permissions` **bị cấm** và không được dùng.
-- **B5** Cổng `diff` của V4 đánh hỏng một lượt làm đúng khi worker khai
-  thiếu. Đã sửa ở tầng hợp đồng; có nên hạ cổng xuống mức cảnh báo là quyết
-  định của bạn.
+- **B4 ĐÃ ĐÓNG.** Hai mục `command(...)` khớp chuỗi chính xác, trỏ tuyệt đối
+  tới wrapper hữu hạn động từ. Không `command(*)`, không
+  `--dangerously-skip-permissions`. Xem `docs/CONTROL_CENTER.md` §4b.
+- **B5 ĐÃ ĐÓNG, và VẪN FAIL CLOSED** — không hạ xuống mức cảnh báo. Khi
+  agent khai thiếu: ghi sự kiện `UNDERDECLARED_CHANGES`, suy ra tập tệp
+  thật từ `git`, **chạy lại** cổng `scope`/`diff`/`security` trên tập THẬT,
+  và chỉ cho hoàn thành nếu mọi thay đổi thật đều hợp lệ và trong phạm vi.
 - **B1** Hồ sơ router toàn cục `CLAUDE_CONSERVATION` đã quá hạn 11 ngày.
 - **B2** AG03–AG08 chưa cấp phát (cần đăng nhập Google từng hồ sơ Windows).
 

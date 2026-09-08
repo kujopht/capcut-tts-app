@@ -110,6 +110,24 @@ class ControlCenter:
         # no thuoc ve nut "lam moi", khong thuoc ve ham dung.
         self._fabric = fabric
         self._probe = probe
+        #: Moc lan do suc khoe gan nhat. `0.0` = CHUA BAO GIO do.
+        #:
+        #: Khong the de mac dinh `probe=False` co nghia la "khong bao gio do":
+        #: `dung_fabric` dat moi runtime o `OFFLINE`/`last_seen=0`, va
+        #: `Scheduler.decide` loai sach ca 42 ung vien voi ly do "runtime
+        #: KHONG nhan dispatch". Duong mac dinh cua ban phat hanh
+        #: (`router-cc`, khong co `--probe`) vi vay KHONG BAO GIO giao duoc
+        #: viec nao — moi viec nam `WAITING` vinh vien. Da do that: mot luot
+        #: chung minh READ+WRITE cho 901s, 0 luot, khong placement nao.
+        #:
+        #: Nen do LUOI: khong do luc dung (giu dung y "khong goi mang luc
+        #: khoi dong"), do lan dau khi THAT SU can mot placement.
+        self._lan_do_cuoi = 0.0
+        #: Fabric do BEN GOI dua vao (bo kiem, hoac mot phien dac biet). Ta
+        #: KHONG duoc do suc khoe cai do: no la fabric dung tay, va
+        #: `do_suc_khoe` goi that ra `agy`/`codex`. Mot bo kiem offline se
+        #: bien thanh bo kiem goi mang.
+        self._fabric_ngoai = fabric is not None
         self._executor_factory = executor_factory
         self._ctx: Dict[str, ProjectContext] = {}
         self._khoa = threading.Lock()
@@ -133,7 +151,52 @@ class ControlCenter:
         if self._fabric is None:
             f, _w, _e = FC.nap(root=self.root, probe=self._probe)
             self._fabric = f
+            if self._probe:
+                # Da do ngay luc nap: dung moc lai de nhip dau tien khong
+                # do lan thu hai (moi lan do ton mot luot moi provider).
+                self._lan_do_cuoi = time.time()
         return self._fabric
+
+    #: Han dung cua mot lan do suc khoe. Qua han thi do lai truoc khi ket
+    #: luan "khong co worker nao" — neu khong, mot provider vua song lai se
+    #: bi coi la chet cho tan phien.
+    HAN_DO_SUC_KHOE = 300.0
+
+    def _dam_bao_suc_khoe(self, ly_do: str) -> bool:
+        """Dò sức khoẻ nếu chưa từng dò, hoặc lần dò cuối đã quá hạn.
+
+        Gọi NGAY TRƯỚC khi cần một placement, không phải lúc dựng — dò thật
+        gọi ra `agy`/`codex` nên nó không thuộc về hàm dựng.
+
+        Trả `True` nếu vừa dò. Không bao giờ nâng ngoại lệ ra ngoài: dò hỏng
+        thì fabric giữ nguyên trạng thái cũ và việc vẫn `WAITING` với lý do
+        đọc được — fail closed, không đoán là provider đang sống.
+        """
+        if self._fabric_ngoai:
+            return False
+        if time.time() - self._lan_do_cuoi < self.HAN_DO_SUC_KHOE:
+            return False
+        try:
+            FC.do_suc_khoe(self.fabric)
+        except Exception as exc:                              # noqa: BLE001
+            self.store.ghi_su_kien(
+                "FABRIC_PROBE_FAILED", level="WARN",
+                detail=f"dò sức khoẻ hỏng ({ly_do}): "
+                       f"{type(exc).__name__}: {exc}"[:400])
+            # Van danh dau da do: neu khong, moi tick se lai goi ra mang.
+            self._lan_do_cuoi = time.time()
+            return False
+        self._lan_do_cuoi = time.time()
+        # `Fabric.runtimes` la DICT (`runtime_id -> WorkerRuntime`); duyet
+        # truc tiep se cho ra CHUOI. Da vap dung loi nay khi viet bai kiem.
+        rts = list(self.fabric.runtimes.values())
+        song = [r for r in rts if r.dispatchable
+                and str(getattr(r, "status", "")).upper().find("OFFLINE") < 0]
+        self.store.ghi_su_kien(
+            "FABRIC_PROBED",
+            detail=f"dò sức khoẻ ({ly_do}): {len(song)}/"
+                   f"{len(rts)} runtime nhận dispatch")
+        return True
 
     @property
     def usage(self) -> UsageReporter:
@@ -412,18 +475,23 @@ class ControlCenter:
             return {"dispatched": [], "waiting": [],
                     "note": f"đã chạm trần {self.max_parallel} việc song song"}
 
-        for p in self.projects():
-            for t in self._san_sang(p.project_id):
-                with self._khoa:
-                    if len(self._dang_chay) >= self.max_parallel:
-                        break
-                    if t.task_id in self._dang_chay:
-                        continue
-                kq = self._giao(t)
-                if kq.get("dispatched"):
-                    da_giao.append(t.task_id)
-                else:
-                    cho.append(kq)
+        san_sang = [(p.project_id, t) for p in self.projects()
+                    for t in self._san_sang(p.project_id)]
+        # Chi do khi THAT SU co viec cho giao. Mo Control Center ra xem sổ
+        # thi khong goi mang lan nao.
+        if san_sang:
+            self._dam_bao_suc_khoe(f"{len(san_sang)} việc chờ giao")
+        for _pid, t in san_sang:
+            with self._khoa:
+                if len(self._dang_chay) >= self.max_parallel:
+                    break
+                if t.task_id in self._dang_chay:
+                    continue
+            kq = self._giao(t)
+            if kq.get("dispatched"):
+                da_giao.append(t.task_id)
+            else:
+                cho.append(kq)
         return {"dispatched": da_giao, "waiting": cho}
 
     def _san_sang(self, project_id: str) -> List[Task]:

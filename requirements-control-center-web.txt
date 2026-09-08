@@ -1,0 +1,53 @@
+# ============================================================
+#  Router Control Center V0.2 — phu thuoc cua GIAO DIEN WEB (duong chinh)
+#
+#  Cai dat:
+#      .\.venv\Scripts\python.exe -m pip install -r requirements-control-center-web.txt
+#
+#  Chay:
+#      .\router-cc-web.cmd        (Windows, bam doi duoc)
+#      ./router-cc-web            (bash)
+#
+#  VI SAO CHI CO HAI DONG:
+#
+#  Frontend KHONG CO BUOC BUILD — no la mot SPA khong bundler (ES module +
+#  fetch + WebSocket), duoc chinh server nay phuc vu tinh. Nen o day khong
+#  co Node, khong co npm, khong co gi phai `install` truoc lan chay dau.
+#  Do la yeu cau nghiem thu: launcher phai BAM DOI duoc va khong can
+#  PowerShell.
+#
+#  `web/` cua kho nay la app Next.js cua production fanfic.world. Giao dien
+#  dieu hanh CO Y khong dung chung chuoi cong cu do: tron chung lai se keo
+#  ca mot buoc build vao mot cong cu ca nhan, va lam mot su co cua ben nay
+#  co the lam hong ben kia.
+#
+#  Ca hai goi duoi day DA co trong `server/requirements.txt` cua kho (backend
+#  web dung chung chung), nen may nao chay backend thi da co san.
+# ============================================================
+
+# --- Bat buoc: server ASGI + khung API ---
+#
+# Khoang phien ban giu DUNG nhu `server/requirements.txt` de hai noi khong
+# lech nhau roi sinh ra mot loi chi xuat hien o mot ben.
+fastapi>=0.115,<1.0
+uvicorn>=0.30,<1.0
+
+# --- Bat buoc: DINH KEM (multipart upload) ---
+#
+# `webapi.py` co `POST /api/attachments` nhan `Form(...)` + `UploadFile`, va
+# FastAPI doi `python-multipart` cho nhung thu do.
+#
+# VI SAO NO O DAY VA KHONG DUOC BO: FastAPI kiem goi nay luc DANG KY ROUTE,
+# khong phai luc co request dau tien. Thieu no thi `dung_app()` NEM ngay:
+#
+#     RuntimeError: Form data requires "python-multipart" to be installed.
+#
+# Nghia la CA API chet, khong phai rieng duong dinh kem — giao dien web va
+# vo desktop deu khong mo duoc. Da vap that: CI moi truong sach bao 37 loi
+# vi goi nay chua tung duoc khai o dau ca, trong khi may phat trien va ban
+# EXE dong goi van chay duoc (venv da co san no theo mot goi khac).
+#
+# Cung hinh dang voi su co `boto3` truoc day — xem
+# `server/tests/test_dependencies.py`. Co bai kiem khoa lai o
+# `scripts/tests/test_control_center_web_deps.py`.
+python-multipart>=0.0.9,<1.0

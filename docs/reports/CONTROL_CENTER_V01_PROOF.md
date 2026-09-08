@@ -365,6 +365,81 @@ gọi `bat_dau()` nên vòng điều phối không hề chạy. *Một bài ch�
 một cú gọi khởi động sẽ tố cáo sản phẩm thay vì tố cáo chính nó.*
 
 
+## 4g. V0.2 — giao diện WEB cục bộ là đường chính, và đính kèm hạng nhất
+
+Hai thứ được thêm, backend điều phối không đổi một dòng.
+
+### Đính kèm: bốn bất biến, và một lời hứa
+
+37 bài kiểm ở `scripts/tests` (CI cưỡng chế, vì tầng này không cần Qt).
+Bài đáng nói nhất là bài của bất biến #3: **mô hình đối thủ là kẻ tấn công
+GHI ĐƯỢC vào sổ.** Nên bài kiểm sửa tay `rel_path` thành
+`../../../Windows/System32/config/SAM` rồi đòi `duong_dan()` TỪ CHỐI. Một
+phép kiểm bằng chuỗi sẽ lọt bài này; phép kiểm đúng là so sánh sau
+`resolve()`.
+
+Lời hứa "không tải tệp lên đâu cả" được kiểm trên **cây cú pháp** — đòi
+tầng đính kèm không import `requests`/`urllib`/`socket`/`boto3`/… Grep văn
+bản sẽ báo động vì chính docstring nói về việc không tải lên; cùng cái bẫy
+đã gặp ở `cc_agent_tool`.
+
+Và một bài kiểm **đếm số lần gọi `read`**: dòng chảy 1 MiB phải là dòng
+chảy thật, nên nếu một ngày ai đổi sang `f.read()` thì bài kiểm hỏng — chứ
+không phải chờ tới lúc ai đó kéo một tệp 2 GB vào.
+
+### API cục bộ: localhost KHÔNG phải là riêng tư
+
+Đây là phần tôi dành nhiều công nhất, vì nó là rủi ro mà bản Qt không có.
+Ba lớp, 37 bài kiểm:
+
+| Đe doạ | Chặn bằng |
+|---|---|
+| mọi trang web đang mở đều GỬI được request tới `127.0.0.1` (trình duyệt chỉ ngăn *đọc* phản hồi) | token mọi request, **kể cả `GET`**; `hmac.compare_digest` |
+| DNS rebinding đi vòng qua phép kiểm origin | allowlist `Host`, kiểm **TRƯỚC** token |
+| CORS mở đường đọc cho origin khác | không CORS; bài kiểm đòi `CORSMiddleware` không được import |
+| lộ ra mạng LAN | bind `127.0.0.1`; bài kiểm đọc AST đã bỏ docstring |
+
+Thứ tự "Host trước token" không phải chi tiết: chính việc token *có thể*
+đúng là điều đang được phòng.
+
+### Ba lỗi tìm được bằng cách CHẠY THẬT, không bằng bài kiểm
+
+1. **`webmain.py` bỏ qua `khoi_tao()`** nên mở giao diện web trên một máy
+   mới ra một **sidebar rỗng** — không dự án nào. Hai launcher kia (TUI,
+   Qt) đều gọi nó. Phát hiện bằng cách chụp DOM thật bằng Chrome cục bộ.
+2. **Với `--khong-mo`, token không được in ở đâu cả** — tức là KHÔNG CÓ
+   CÁCH NÀO mở được giao diện. Và nếu đóng tab thì mất đường vào cho tới
+   khi khởi động lại server.
+3. **MCP Chrome không dùng được cho việc kiểm này.** Nó tải được
+   `https://example.com` nhưng KHÔNG tới được `127.0.0.1:8791` trong khi
+   Python trên máy này tới được — tức trình duyệt đó không ở cùng máy. Đã
+   đổi sang Chrome cục bộ qua DevTools Protocol, và nói rõ điều đó thay vì
+   báo "đã kiểm bằng trình duyệt".
+
+### Bằng chứng sống
+
+```
+scripts/tests/test_control_center_attachments.py   37 bài  (CI)
+scripts/tests/test_control_center_webapi.py        37 bài  (CI)
+tests/test_control_center_gui_attachments.py       20 bài
+smoke HTTP thật trên một cổng thật                 13/13
+smoke Chrome CỤC BỘ qua CDP                        18/18
+```
+
+Smoke CDP bắn đúng những sự kiện trình duyệt bắn khi người dùng dán/thả —
+`ClipboardEvent('paste')` và `DragEvent('drop')` với `DataTransfer` mang
+`File` thật — rồi đối chiếu `sha256` với server. Nó chứng minh: dán văn bản
+thuần KHÔNG bị handler chặn, dán ảnh ra thumbnail thật, kéo-thả PDF + tệp
+mã nguồn, bỏ một đính kèm trước khi gửi (server bỏ theo), agent được cấp
+đúng đính kèm của tin đó, việc không liên quan thấy 0, hộp thoại đóng bằng
+`×` **và** `Esc`, và không lỗi JS nào.
+
+**GIỚI HẠN, nói thẳng:** kịch bản KHÔNG tự bấm được `Win+Shift+S` hay
+`Ctrl+V` của hệ điều hành. Nó chứng minh *mã của ta* xử lý đúng sự kiện mà
+trình duyệt giao cho — không phải chuỗi phím Windows. Bước đó cần một cú
+bấm của con người.
+
+
 ## 5. Còn chặn (cần người) — xem `ROUTER_CONTROL_CENTER_OVERNIGHT_BLOCKERS.md`
 
 - **B4 ĐÃ ĐÓNG.** Hai mục `command(...)` khớp chuỗi chính xác, trỏ tuyệt đối

@@ -1,15 +1,20 @@
-# Router Control Center V0.1.1
+# Router Control Center V0.2
 
 Phòng điều khiển cho Router V4 **đã có**. Mở một dự án, gõ mục tiêu vào ô
 chat, và Router tự phân rã việc, chọn agent, dựng worktree, dựng/dùng lại
 phiên, khoá tài nguyên, chạy, báo cáo — không phải mở tay một terminal
 Claude/Codex/Antigravity nào.
 
-> **V0.1.1 là bản UI/UX.** Backend điều phối của V0.1 không đổi một dòng
-> nào. Cái đổi là **giao diện chính giờ là một app desktop dùng chuột**
-> (`router-cc-gui.cmd`, bấm đôi được), còn TUI terminal ở lại làm đường
-> dự phòng/gỡ lỗi. Lý do rất cụ thể: trong terminal, clipboard không đáng
-> tin, và dán một prompt nhiều dòng là việc thường ngày.
+> **V0.2: giao diện chính là một GIAO DIỆN WEB CỤC BỘ.** Bấm đôi
+> `router-cc-web.cmd` — nó tự chạy server trên `127.0.0.1` và tự mở trình
+> duyệt. Backend điều phối không đổi một dòng nào.
+>
+> Giao diện Qt (`router-cc-gui.cmd`) và TUI (`router-cc.cmd`) **ở lại làm
+> đường gỡ lỗi/dự phòng**. Cả ba dùng **chung một sổ SQLite**, nên mở cạnh
+> nhau vẫn thấy cùng dự án/việc/phiên.
+>
+> Vì sao đổi: clipboard và kéo-thả của **trình duyệt** là thứ người dùng
+> đã quen và tin, và nó không phải do ta cài đặt lại.
 
 > **Nó KHÔNG thiết kế lại Router V4.** Bốn thứ khó nhất — chấm điểm
 > placement theo năng lực, cô lập worktree, cổng kiểm định "không tin worker
@@ -21,7 +26,47 @@ Claude/Codex/Antigravity nào.
 
 ## 1. Chạy
 
-### Giao diện ĐỒ HOẠ (đường chính từ V0.1.1)
+### Giao diện WEB (đường chính từ V0.2)
+
+**Bấm đôi `router-cc-web.cmd` trong Explorer.** Hết. Không PowerShell,
+không Node, không cần tự khởi động backend, không cần đặt biến môi trường
+nào trước.
+
+Nó làm bốn việc, theo thứ tự: sinh token phiên → xin hệ điều hành một cổng
+rỗng trên `127.0.0.1` → mở trình duyệt tới `http://127.0.0.1:<cổng>/?t=…`
+→ chạy server.
+
+```bash
+# hoac tu dong lenh
+./router-cc-web
+python -m scripts.control_center.webmain
+
+# phu thuoc: chi fastapi + uvicorn (da co trong server/requirements.txt)
+python -m pip install -r requirements-control-center-web.txt
+```
+
+| Cờ | Ý nghĩa |
+|---|---|
+| `--root` | thư mục giữ sổ `.router/control_center/control.db` |
+| `--port N` | cổng cố định (mặc định: hệ điều hành cấp một cổng rỗng) |
+| `--khong-mo` | chạy server, KHÔNG tự mở trình duyệt |
+| `--check` | chỉ kiểm phụ thuộc rồi thoát (launcher gọi cờ này trước) |
+
+Cửa sổ console của launcher **là nhật ký server, và giữ nó lại là cố ý:
+đóng cửa sổ = tắt server.** Dòng đầu in cả URL kèm token, nên nếu bạn đóng
+tab thì mở lại được mà không phải khởi động lại.
+
+**Không có bước build.** Frontend là SPA không bundler (ES module + `fetch`
++ WebSocket) do chính server phục vụ tĩnh. Nếu dùng Vite/Next thì bấm đôi
+lần đầu sẽ phải `npm install` — cần mạng, cần chờ, và cần Node. Ngoài ra
+`web/` của kho này là app Next.js của production `fanfic.world`; trộn giao
+diện điều hành vào đó sẽ để một sự cố bên này làm hỏng bên kia.
+
+Bố cục: thanh trên (dự án · đang chạy · bị chặn · pool · tìm · `?` · Cài
+đặt), sidebar dự án bên trái, năm khung ở giữa (**Chat** mặc định · Tasks ·
+Agents · Logs · Usage), inspector "đang chạy" bên phải.
+
+### Giao diện ĐỒ HOẠ Qt (gỡ lỗi / dự phòng)
 
 Bấm đôi `router-cc-gui.cmd` trong Explorer. Hết. Không cần terminal, không
 cần đặt biến môi trường nào trước.
@@ -42,14 +87,14 @@ Agents · Logs · Usage), inspector "đang chạy" bên phải gấp lại đư�
 **Dùng được mà không cần nhớ phím nào.** Mọi thao tác có nút. Hai lối tắt
 duy nhất là *tuỳ chọn* và đều có nút tương đương: `Ctrl+Enter` gửi tin,
 `F1` mở trợ giúp. `Esc` đóng hộp thoại. Clipboard hoạt động đúng như mọi
-app Windows khác — xem mục 11.
+app Windows khác — xem mục 13.
 
 `router-cc-gui.cmd` chạy bằng `pythonw.exe` nên **không** nhảy ra một cửa
 sổ console đen kèm theo. Nếu không tìm thấy venv nào, nó rơi về `python`
 trên PATH và **giữ cửa sổ lại** khi lỗi, để câu "thiếu PySide6" còn đọc
 được thay vì nhấp nháy rồi mất.
 
-### Giao diện TERMINAL (dự phòng / gỡ lỗi)
+### Giao diện TERMINAL (gỡ lỗi / dự phòng)
 
 Vẫn nguyên vẹn, vẫn dùng **chung một sổ SQLite**, nên mở cạnh GUI vẫn thấy
 cùng dự án/việc/phiên.
@@ -538,7 +583,118 @@ bộ kiểm tự tiêu quota mỗi lần chạy là một bộ kiểm không ai 
 
 ---
 
-## 11. Clipboard và chuột — cổng nghiệm thu của V0.1.1
+## 11. API cục bộ — vì sao localhost KHÔNG phải là riêng tư
+
+Đây là ranh giới mới của V0.2, và nó mang một lớp rủi ro mà app desktop
+không có. Ba điều phải nói thẳng, vì mỗi điều là một cách người ta hay làm
+sai một localhost server:
+
+**1. Mọi trang web bạn đang mở đều GỬI được request tới
+`http://127.0.0.1:<cổng>`.** Trình duyệt cho phép request cross-origin; nó
+chỉ ngăn *đọc* phản hồi. Nghĩa là nếu không có gì chặn, một quảng cáo ở tab
+khác có thể `POST /api/chat` và tạo việc trong Router của bạn — và bạn sẽ
+không thấy request đó ở đâu cả.
+
+⇒ **Mỗi request phải mang token của phiên.** Không token thì `401`, **kể cả
+`GET`**. Token sinh mới mỗi lần chạy, so bằng `hmac.compare_digest`.
+
+**2. DNS rebinding đi vòng qua phép kiểm origin.** Một tên miền của kẻ tấn
+công có thể trỏ về `127.0.0.1`; lúc đó `Origin` là của họ nhưng request tới
+đúng server này.
+
+⇒ **`Host` được kiểm tường minh**, chỉ nhận `127.0.0.1`/`localhost`. Và
+kiểm `Host` **TRƯỚC** kiểm token: chính việc token *có thể* đúng là điều
+đang được phòng, nên đừng để phép kiểm token quyết định trước.
+
+**3. CORS là cửa, không phải khoá.** Frontend là same-origin (server tự
+phục vụ nó) nên nó **không cần** CORS. Thêm CORS chỉ mở cửa cho người khác.
+
+⇒ **Không có CORS**, và có bài kiểm đòi `CORSMiddleware` không được import.
+
+Cộng thêm:
+
+| Thứ | Vì sao |
+|---|---|
+| bind `127.0.0.1`, không bao giờ `0.0.0.0` | một ký tự khác biệt giữa "công cụ cá nhân" và "mở cổng điều khiển Router ra cả mạng LAN" |
+| cổng NGẪU NHIÊN do hệ điều hành cấp | cổng cố định làm một trang web đoán được đích; cổng đổi mỗi lần thì nó phải quét, và token vẫn chặn |
+| token đi qua URL rồi bị XOÁ khỏi URL | `history.replaceState` ngay khi trang nạp, nên nó không nằm lại trong lịch sử hay trong `Referer` |
+| `docs_url=None` | trang `/docs` của FastAPI liệt kê toàn bộ API — với công cụ cá nhân thì đó chỉ là bề mặt tấn công |
+| `nosniff` trên blob | không để trình duyệt tự đoán một `.txt` thành HTML rồi chạy nó |
+| CSP chỉ `'self'` | không CDN, không font ngoài, không `unsafe-eval` |
+| mọi payload qua `packet.redact` | có bài kiểm đòi API không bao giờ phát ra thứ giống credential |
+
+**Token phiên KHÔNG phải credential của nhà cung cấp.** Nó là bí mật cục bộ
+giữa trang và server của chính nó. Ranh giới "không rò bí mật ra frontend"
+vẫn giữ nguyên: không API key, không cookie, không mật khẩu nào đi ra.
+
+37 bài kiểm ở `scripts/tests/test_control_center_webapi.py` — đặt ở đó chứ
+không ở `tests/` vì tầng này không cần Qt, nên **CI cưỡng chế** chúng trên
+Linux mỗi PR. Một ranh giới an toàn không nên phụ thuộc vào việc ai đó có
+nhớ chạy bộ kiểm cục bộ hay không.
+
+---
+
+## 12. Tệp đính kèm — cục bộ, địa chỉ hoá theo nội dung
+
+Bốn đường vào, một đường xử lý: dán `Ctrl+V` (kể cả ảnh `Win+Shift+S`),
+kéo-thả, nút **Đính kèm tệp…**, và dán tệp copy từ Explorer. Trình duyệt
+biến cả bốn thành cùng một `multipart/form-data`, nên phía server chỉ có
+**một** cửa và **một** chỗ để kiểm.
+
+**Bốn bất biến**, mỗi cái có bài kiểm khoá lại ở
+`scripts/tests/test_control_center_attachments.py` (37 bài, CI cưỡng chế):
+
+1. **Nhị phân KHÔNG vào SQLite.** Sổ chỉ giữ metadata. Có bài kiểm đo kích
+   cỡ tệp `.db` trước/sau khi thêm một tệp 4 MB.
+2. **Đường dẫn lưu trữ do backend sinh:** `objects/<sha[:2]>/<sha>.<đuôi>`,
+   suy ra hoàn toàn từ băm nội dung + một đuôi lấy từ allowlist. **Không
+   một byte nào** của tên tệp người dùng đi vào đường dẫn, nên `../../`
+   không có chỗ chen vào. Tên gốc chỉ để hiển thị.
+3. **Đọc phải qua `attachment_id`.** `duong_dan()` kiểm lại containment
+   **sau `resolve()`**, mỗi lần. Mô hình đối thủ là *kẻ tấn công ghi được
+   vào sổ* — nên có bài kiểm sửa tay `rel_path` thành
+   `../../../Windows/System32/config/SAM` và đòi bị TỪ CHỐI. Kiểm bằng
+   chuỗi thì lọt.
+4. **Agent chỉ nhận đính kèm của ĐÚNG việc của nó.** `cho_agent(task_id)`
+   không bao giờ trả cả kho dự án; "cùng dự án" là phạm vi quá rộng để làm
+   ranh giới quyền. Mặc định là **không cấp cho ai**.
+
+Và một lời hứa: **tầng này không tải tệp lên đâu cả.** Có bài kiểm đọc cây
+cú pháp đòi nó không import `requests`/`urllib`/`socket`/`boto3`/… — grep
+văn bản sẽ báo động vì chính docstring nói về việc không tải lên, cùng cái
+bẫy đã gặp ở `cc_agent_tool`.
+
+An toàn khác:
+
+- **Đuôi tệp phải khớp CHỮ KÝ BYTE.** Đổi đuôi tệp là thao tác dễ nhất thế
+  giới; một tệp thi hành đổi tên thành `anh.png` bị từ chối.
+- **Allowlist fail-closed.** `.exe/.dll/.msi/.scr/.vbs/.lnk/.reg/.jar`
+  không bao giờ nhận được — nên đường "bấm để mở" không thể mở một thứ thi
+  hành.
+- **Tên tệp được làm sạch:** bỏ mọi thành phần thư mục (`\` và `/`), ký tự
+  điều khiển, ký tự Windows cấm, dấu chấm/khoảng trắng hai đầu (Windows tự
+  cắt chúng nên `..` là đường dẫn nguỵ trang), tên dành riêng của hệ điều
+  hành (`CON.txt` không mở được), cắt độ dài nhưng GIỮ đuôi.
+- **Dòng chảy thật:** băm và chép cùng một lượt, khối 1 MiB, vào tệp tạm
+  rồi mới đổi tên vào chỗ. Một tệp 2 GB thì tiến trình cũng chỉ giữ 1 MiB.
+  Có bài kiểm **đếm số lần gọi `read`**, để một ngày nào đó ai đổi sang
+  `f.read()` thì nó hỏng.
+- Trần 200 MB/tệp; tệp rỗng bị từ chối; tệp bị từ chối **không để lại rác**
+  trong kho.
+
+Định dạng hỗ trợ: ảnh (png/jpg/jpeg/webp/gif/bmp) · tài liệu
+(pdf/txt/md/docx/rtf/odt) · dữ liệu (csv/json/xlsx/tsv/xml/yaml) · mã &
+cấu hình & nhật ký (py/js/ts/sql/toml/ini/log/…) · nén (zip).
+
+**Mã đính kèm là TẤT ĐỊNH:** cùng phạm vi + cùng nội dung + cùng tên → cùng
+mã. Nên dán lại đúng một ảnh vào đúng một tin nhắn hai lần không sinh ra
+hai bản ghi. Cùng nội dung ở hai dự án thì **dùng chung blob** nhưng là
+**hai bản ghi** — vì quyền truy cập khác nhau. Xoá một bản ghi không làm
+hỏng bản ghi kia; blob chỉ bị dọn khi không còn ai tham chiếu.
+
+---
+
+## 13. Clipboard và chuột — cổng nghiệm thu của V0.1.1
 
 Bản V0.1 bị từ chối vì đúng một câu: *"ordinary clipboard interaction is not
 reliable"*. Nên đây không phải một mục tính năng, nó là **điều kiện phát
@@ -585,7 +741,83 @@ nháp. Nút **Gửi** là đường chính.
 
 ---
 
-## 12. Chưa làm (cố ý — ranh giới đã chọn)
+## 14. UTF-8 tường minh — vì sao locale không được quyết định codec
+
+**Sự cố:** `Router Control Center.exe` đã đóng gói **chết ngay khi bấm
+đôi**, trên máy Windows locale mặc định:
+
+```
+Failed to execute script 'desktop' due to unhandled exception:
+UnicodeEncodeError: 'charmap' codec can't encode character 'ư'
+character maps to <undefined>
+  ... desktop.py line 145 -> encodings/cp1252.py
+```
+
+`U+01B0` là chữ **ư**. Dòng gây lỗi là `print(f"[desktop] {kh.ly_do}")`,
+và ở lần mở đầu tiên `quyet_dinh()` trả về `ly_do = "chưa có backend nào
+— tự chạy"`. Câu ấy có bốn ký tự ngoài cp1252: `ư` `—` `ự` `ạ`.
+
+**Gốc rễ, nói cho đúng:** `print()` giao chuỗi cho **tầng văn bản** của
+luồng, và codec của tầng đó do **locale của Windows** quyết định. Lỗi
+không nằm ở tiếng Việt và không nằm ở console — lỗi là *để locale quyết
+định codec* cho dữ liệu ta đã biết chắc là Unicode.
+
+**Cách sửa:** `scripts/control_center/ghi_utf8.py`. Tự mã hoá sang UTF-8
+rồi ghi **BYTE** vào tầng nhị phân của luồng. UTF-8 biểu diễn được mọi
+điểm mã Unicode, nên phép mã hoá này **không thể thất bại** — không cần
+`errors=` gì cả, và không mất một byte tiếng Việt nào. Cùng đối tượng đó
+ghi thêm vào một tệp nhật ký mở với `encoding="utf-8"` tường minh, ở
+`.router/control_center/desktop.log` — với bản `--noconsole` thì đó là
+nơi DUY NHẤT đọc được chẩn đoán.
+
+### Những cách KHÔNG dùng, và vì sao
+
+| Cách | Vì sao không |
+|---|---|
+| `chcp 65001` | đổi console của người dùng, không sửa mã |
+| đổi locale Windows | bắt người dùng đổi hệ thống vì lỗi của ta |
+| đòi `PYTHONUTF8=1` | một biến bị quên là lỗi quay lại; bấm đôi trong Explorer thì không ai đặt |
+| bọc bằng `.cmd` | EXE phải tự đúng; launcher chỉ là tiện nghi |
+| `errors="replace"` / `"ignore"` | biến `ư` thành `?` hoặc mất hẳn — làm hỏng dữ liệu để giấu lỗi |
+| bỏ dấu / phiên âm | văn bản tiếng Việt phải nguyên vẹn từng byte |
+
+Bản trước **đã** dùng `sys.stdout.reconfigure(encoding="utf-8",
+errors="replace")` và nó vừa lossy vừa **không đủ**: trong bản build
+`--noconsole`, `sys.stdout` có thể là `None` hoặc không có
+`.reconfigure`, nên phép gọi bị bỏ qua âm thầm rồi `print()` vẫn đi qua
+codec của locale.
+
+### Luật cho mọi tệp Router sở hữu
+
+- `Path.read_text(encoding="utf-8")` / `write_text(..., encoding="utf-8")`
+- `open(..., encoding="utf-8")` — hoặc chế độ **nhị phân**, không có codec
+- `json.dumps(..., ensure_ascii=False)` cho mọi thứ người sẽ đọc
+- `subprocess.run(..., text=True)` **phải** kèm `encoding=` — nếu đầu ra
+  không ai đọc thì bỏ `text=True` và ở chế độ nhị phân
+
+Cưỡng chế bằng `scripts/tests/test_control_center_utf8_locale.py`: nó
+tính **bao đóng import** của `desktop.py` bằng AST rồi soi từng lời gọi
+trên đó, nên thêm một import mới không làm phạm vi lặng lẽ hụt đi. Miễn
+trừ phải ghi kèm lý do, và một miễn trừ **mồ côi** cũng làm bài kiểm đỏ.
+
+### Vì sao 19/19 bài kiểm cũ vẫn xanh khi EXE đang chết
+
+`control_center_desktop_acceptance.py` **tự tiêm `PYTHONUTF8=1` và
+`PYTHONIOENCODING=utf-8`** vào tiến trình con — đúng hai thứ không được
+phép dựa vào. Nó đo một môi trường không người dùng nào có: bấm đôi từ
+Explorer thì không ai đặt biến nào cả.
+
+Giờ bộ nghiệm thu **gỡ** các biến đó ra khỏi môi trường con, và có một
+bài kiểm quét bằng AST để nó không thể quay lại. Bài kiểm cp1252 thì làm
+điều ngược lại — nó **cưỡng chế** `PYTHONIOENCODING=cp1252:strict` cho
+tiến trình con *để làm hẹp*, và tự xác minh rằng mình đã làm hẹp được
+(mã cũ phải VẪN chết trong khung đó) trước khi tin bất kỳ kết quả nào.
+
+Bài học chung, và nó lớn hơn Unicode: **một bài kiểm chạy trong môi
+trường do chính nó dựng lên chỉ chứng minh được điều gì nếu môi trường ấy
+là môi trường người dùng có.**
+
+## 15. Chưa làm (cố ý — ranh giới đã chọn)
 
 Không phải thiếu sót — là ranh giới đã chọn:
 

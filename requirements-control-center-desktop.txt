@@ -1,0 +1,36 @@
+# ============================================================
+#  Router Control Center V0.2 — VO DESKTOP quanh giao dien web
+#
+#  Cai dat:
+#      .\.venv\Scripts\python.exe -m pip install -r requirements-control-center-desktop.txt
+#
+#  Chay:
+#      "Router Control Center.exe"        (bam doi — duong CHINH)
+#      .\router-cc-desktop.cmd            (chay tu ma nguon, khong can build)
+#
+#  VI SAO pywebview + WebView2, KHONG phai Electron/Tauri:
+#
+#    Backend da la Python va frontend da la web. pywebview la lop MONG NHAT
+#    noi hai thu do: no chi mo mot cua so WebView2 va tro vao
+#    `http://127.0.0.1:<cong>`. Khong mot dong logic dieu phoi nao chuyen
+#    sang vo desktop.
+#
+#    WebView2 la runtime cua Microsoft, DA CO SAN tren may nay
+#    (kiem: "C:\Program Files (x86)\Microsoft\EdgeWebView\Application").
+#    No la Chromium, nen clipboard, keo-tha tep, menu chuot phai, va
+#    WebSocket hoat dong y nhu trong Edge/Chrome — tuc la khong phai dung
+#    lai thu gi.
+#
+#    Electron/Tauri se keo theo Node hoac Rust vao mot cong cu ma ca hai
+#    dau (Python + HTML) da co san.
+#
+#  `pythonnet` la phu thuoc cua backend `edgechromium` cua pywebview tren
+#  Windows — pywebview tu keo theo, khai o day de biet no o dau.
+# ============================================================
+
+pywebview>=5.0,<6.0
+
+# --- Dong goi EXE ---
+# Da co trong `requirements-gui.txt` (>=6.0); ghim lai o day de goi desktop
+# dung duoc mot minh, khong phai cai ca phu thuoc cua app Fanfic.
+pyinstaller>=6.0

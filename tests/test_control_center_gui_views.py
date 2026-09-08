@@ -116,7 +116,7 @@ class TestChatVaPhanRa(unittest.TestCase):
         kc.nut_gui.click()
         QApplication.processEvents()
         goi = [g for g in self.cs.cau.cc.da_goi if g[0] == "chat"]
-        self.assertEqual(goi, [("chat", "fanfic", "nối hàng đợi")])
+        self.assertEqual(goi, [("chat", "fanfic", "nối hàng đợi", ())])
 
     def test_o_soan_duoc_xoa_sau_khi_gui(self):
         kc = self.cs.khung_chat

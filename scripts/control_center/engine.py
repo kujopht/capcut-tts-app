@@ -135,6 +135,7 @@ class ControlCenter:
         self._dung_lai = threading.Event()
         self._luong_vong: Optional[threading.Thread] = None
         self._usage: Optional[UsageReporter] = None
+        self._dinh_kem = None
 
     # -- 0. Fabric dung chung ------------------------------------------------
 
@@ -197,6 +198,14 @@ class ControlCenter:
             detail=f"dò sức khoẻ ({ly_do}): {len(song)}/"
                    f"{len(rts)} runtime nhận dispatch")
         return True
+
+    @property
+    def dinh_kem(self) -> "KhoDinhKem":
+        """Kho đính kèm. Dựng lười: mở app ra xem sổ thì không cần nó."""
+        if self._dinh_kem is None:
+            from scripts.control_center.attachments import KhoDinhKem
+            self._dinh_kem = KhoDinhKem(self.store, goc=self.root)
+        return self._dinh_kem
 
     @property
     def usage(self) -> UsageReporter:
@@ -351,16 +360,40 @@ class ControlCenter:
 
     # -- 2. O chat -----------------------------------------------------------
 
-    def chat(self, project_id: str, text: str) -> Dict:
+    def chat(self, project_id: str, text: str, *,
+             attachment_ids: Optional[Sequence[str]] = None) -> Dict:
         """Ý định người dùng -> việc được quản lý. Đây là CỔNG VÀO của V0.1.
 
         Việc GATED KHÔNG vào hàng đợi. Nó được tạo ở `BLOCKED` kèm câu hỏi
         cụ thể — người dùng phải mở khoá bằng `mo_khoa_gated()`. Cho phép nó
         `QUEUED` rồi chặn ở bước sau là để một lỗi lập lịch duy nhất đủ để
         nó chạy.
+
+        `attachment_ids` (V0.2): những đính kèm người dùng gửi CÙNG tin
+        nhắn này. Chúng được gán cho ĐÚNG những việc do tin nhắn này sinh
+        ra, và không cho việc nào khác — xem `attachments.py` bất biến #4.
+        Chỉ nhận **mã**, không nhận đường dẫn: frontend không có cách nào
+        bảo tầng này đọc một tệp tuỳ ý.
         """
         ctx = self.ctx(project_id)
-        self.store.them_chat(project_id, "user", text)
+        tin = self.store.them_chat(project_id, "user", text)
+
+        # Gan dinh kem vao TIN NHAN truoc khi phan ra, de neu phan ra hong
+        # thi dinh kem van con o tin nhan chu khong mo coi.
+        dk_hop_le: List[str] = []
+        for aid in (attachment_ids or ()):
+            dk = self.store.dinh_kem(aid)
+            if dk is None or dk.project_id != project_id:
+                # FAIL CLOSED: ma la, hoac ma cua DU AN KHAC -> bo qua va
+                # ghi lai. Khong nem ngoai le vi mot ma xau khong duoc lam
+                # mat ca tin nhan nguoi dung vua go.
+                self.store.ghi_su_kien(
+                    "ATTACHMENT_REJECTED", project_id=project_id,
+                    level="WARN",
+                    detail=f"mã đính kèm không thuộc dự án này: {aid!r}")
+                continue
+            self.store.gan_dinh_kem_cho_message(aid, tin.message_id)
+            dk_hop_le.append(aid)
 
         kh: PlanResult = ctx.planner.plan(text, ctx.project)
         tao: List[Task] = []
@@ -388,12 +421,25 @@ class ControlCenter:
                 meta={"permission": t.permission, "kind": pt.kind,
                       "scope": list(pt.contract.allowed_scope)})
 
+        # Cap dinh kem cho DUNG nhung viec vua sinh ra tu tin nhan nay.
+        for aid in dk_hop_le:
+            for t in tao:
+                self.store.gan_dinh_kem_cho_task(aid, t.task_id)
+            if tao:
+                self.store.ghi_su_kien(
+                    "ATTACHMENT_GRANTED", project_id=project_id,
+                    detail=f"{aid} -> {', '.join(t.task_id for t in tao)}",
+                    meta={"attachment_id": aid,
+                          "task_ids": [t.task_id for t in tao]})
+
         tra_loi = kh.render()
         self.store.them_chat(project_id, "router", tra_loi,
                              meta={"plan": kh.to_dict(),
-                                   "task_ids": [t.task_id for t in tao]})
+                                   "task_ids": [t.task_id for t in tao],
+                                   "attachment_ids": list(dk_hop_le)})
         return {"reply": tra_loi, "tasks": [t.to_dict() for t in tao],
-                "plan": kh.to_dict()}
+                "plan": kh.to_dict(), "message_id": tin.message_id,
+                "attachment_ids": list(dk_hop_le)}
 
     @staticmethod
     def _hop_dong_dict(pt: PlannedTask, project_id: str) -> Dict:
@@ -599,12 +645,38 @@ class ControlCenter:
                 except Exception:                         # noqa: BLE001
                     pass
 
+    def _hop_dong_kem_dinh_kem(self, t: Task) -> Dict:
+        """Hợp đồng + danh sách đính kèm ĐƯỢC CẤP cho đúng việc này.
+
+        Chèn ở lúc GIAO, không lúc tạo: đính kèm được gán sau khi việc đã
+        được tạo (`chat()` phải có `task_id` mới gán được), và người dùng
+        còn có thể cấp thêm về sau. Dựng lại đoạn này mỗi lượt giao thì nó
+        luôn khớp với quyền hiện tại.
+
+        Agent nhận **đường dẫn cục bộ** và tự đọc bằng công cụ đọc tệp của
+        nó. Không tệp nào được tải lên đâu.
+        """
+        hd = dict(t.contract or {})
+        try:
+            mo = self.dinh_kem.mo_ta_cho_agent(t.task_id)
+        except Exception as exc:                          # noqa: BLE001
+            # Khong de mot loi o tang dinh kem lam chet ca luot giao.
+            self.store.ghi_su_kien(
+                "ATTACHMENT_DESC_FAILED", project_id=t.project_id,
+                task_id=t.task_id, level="WARN",
+                detail=f"{type(exc).__name__}: {exc}"[:200])
+            return hd
+        if mo:
+            hd["objective"] = ((hd.get("objective") or "")
+                               + "\n" + mo)
+        return hd
+
     def _giao_khong_luoi(self, t: Task, ctx: "ProjectContext",
                          lm: LockManager) -> Dict:
         """Thân thật của `_giao`. Thứ tự giành tài nguyên cố định — xem
         docstring module."""
         try:
-            hd = TaskContract.from_dict(t.contract)
+            hd = TaskContract.from_dict(self._hop_dong_kem_dinh_kem(t))
         except (ContractError, KeyError, ValueError) as exc:
             self.store.doi_trang_thai(
                 t.task_id, TaskState.FAILED,

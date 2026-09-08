@@ -45,7 +45,17 @@ def _siet_quyen_tep(p: Path) -> None:
         subprocess.run(["icacls", str(p), "/inheritance:r", "/grant:r",
                         f"{os.environ.get('USERNAME', '')}:(F)",
                         "/grant:r", "SYSTEM:(F)"],
-                       capture_output=True, text=True, env=moi)
+                       # KHONG `text=True`: no giai ma dau ra cua
+                       # `icacls` bang codec cua LOCALE. `icacls` ghi
+                       # ra bang code page cua console (OEM) va thong
+                       # diep cua no da duoc dia phuong hoa, nen tren
+                       # may Viet phep giai ma do ra mojibake hoac
+                       # `UnicodeDecodeError` — va vi ca khoi nay nam
+                       # trong `except Exception: pass`, that bai do
+                       # se AM THAM lam ACL khong duoc siet. Dau ra
+                       # nay khong ai doc, nen che do NHI PHAN la dung:
+                       # khong co codec nao de sai.
+                       capture_output=True, env=moi)
     except Exception:
         pass
 
@@ -66,7 +76,8 @@ def doc(worker_id: str) -> Optional[DanhTinh]:
 def _luu(worker_id: str, danh_tinh: DanhTinh) -> None:
     p = duong_danh_tinh(worker_id)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(danh_tinh), encoding="utf-8")
+    p.write_text(json.dumps(danh_tinh, ensure_ascii=False),
+                 encoding="utf-8")
     _siet_quyen_tep(p)
 
 

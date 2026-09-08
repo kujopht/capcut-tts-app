@@ -191,13 +191,103 @@ class Cau(QObject):
             self.xong_viec.emit(nhan)
         self.lam_moi()
 
-    def gui_chat(self, text: str) -> None:
+    def gui_chat(self, text: str,
+                 attachment_ids: Optional[List[str]] = None) -> None:
         pid = self._dam_bao_pid()
         if not pid:
             # FAIL CLOSED: khong co du an thi KHONG ghi tin vao du an "".
             self.co_loi.emit("chưa có dự án nào — thêm một dự án trước khi gửi")
             return
-        self._nen(lambda: self.cc.chat(pid, text), "gửi yêu cầu")
+        ids = list(attachment_ids or ())
+        self._nen(lambda: self.cc.chat(pid, text, attachment_ids=ids),
+                  "gửi yêu cầu")
+
+    # -- V0.2: dinh kem ------------------------------------------------------
+    #
+    # Ba duong vao (tep tren dia, anh tho tu clipboard, hop chon tep) do
+    # ve DUNG MOT tang: `cc.dinh_kem`. Giao dien khong bao gio tu chep tep,
+    # tu bam, hay tu dung duong dan luu tru — xem `attachments.py` bat bien
+    # #2 va #3.
+
+    def them_dinh_kem_tu_tep(self, duong_dan: List[str]):
+        """Nhận nhiều tệp. Trả `(danh_sách_đã_nhận, danh_sách_lỗi)`.
+
+        KHÔNG dừng ở tệp lỗi đầu tiên: kéo 5 tệp vào mà một cái sai đuôi
+        thì 4 cái kia vẫn phải nhận được, và người dùng cần biết đúng cái
+        nào bị từ chối.
+        """
+        pid = self._dam_bao_pid()
+        if not pid:
+            return [], ["chưa có dự án nào"]
+        ok, loi = [], []
+        for d in duong_dan:
+            try:
+                ok.append(self.cc.dinh_kem.them_tu_tep(pid, d, owner=self.cc.owner))
+            except Exception as exc:                      # noqa: BLE001
+                from scripts.control_center.gui.attachments_ui import loi_doc_duoc
+                loi.append(f"{Path(d).name}: {loi_doc_duoc(exc)}")
+        return ok, loi
+
+    def them_dinh_kem_tu_anh(self, anh, *, ten: str = ""):
+        """Nhận một ảnh THÔ từ clipboard (Win+Shift+S) hoặc kéo-thả.
+
+        Ảnh chụp màn hình không có tệp nào trên đĩa, nên nó được mã hoá
+        PNG ngay tại đây rồi mới đưa xuống kho. PNG vì không mất dữ liệu —
+        một ảnh chụp chứa chữ, và JPEG sẽ làm chữ nhoè.
+        """
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+        from PySide6.QtGui import QImage, QPixmap
+        pid = self._dam_bao_pid()
+        if not pid:
+            return None, "chưa có dự án nào"
+        if isinstance(anh, QPixmap):
+            anh = anh.toImage()
+        if not isinstance(anh, QImage) or anh.isNull():
+            return None, "dữ liệu dán không phải một ảnh đọc được"
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        buf.open(QIODevice.WriteOnly)
+        if not anh.save(buf, "PNG"):
+            return None, "không mã hoá được ảnh sang PNG"
+        buf.close()
+        if not ten:
+            ten = time.strftime("dan-%Y%m%d-%H%M%S.png")
+        try:
+            dk = self.cc.dinh_kem.them_tu_bytes(
+                pid, bytes(ba.data()), ten, owner=self.cc.owner)
+        except Exception as exc:                          # noqa: BLE001
+            from scripts.control_center.gui.attachments_ui import loi_doc_duoc
+            return None, loi_doc_duoc(exc)
+        return dk, ""
+
+    def duong_dan_dinh_kem(self, attachment_id: str) -> Optional[Path]:
+        try:
+            return self.cc.dinh_kem.duong_dan(attachment_id)
+        except Exception:                                 # noqa: BLE001
+            return None
+
+    def dinh_kem(self, attachment_id: str):
+        try:
+            return self.cc.dinh_kem.lay(attachment_id)
+        except Exception:                                 # noqa: BLE001
+            return None
+
+    def xoa_dinh_kem(self, attachment_id: str) -> bool:
+        """Bỏ một đính kèm CHƯA gửi. Xoá luôn khỏi kho, không để blob mồ côi."""
+        try:
+            return self.cc.dinh_kem.xoa(attachment_id)
+        except Exception as exc:                          # noqa: BLE001
+            self.co_loi.emit(f"không bỏ được đính kèm: {exc}")
+            return False
+
+    def dinh_kem_cua_message(self, message_id: int) -> List:
+        pid = self._dam_bao_pid()
+        if not pid:
+            return []
+        try:
+            return self.cc.dinh_kem.cua_message(pid, int(message_id))
+        except Exception:                                 # noqa: BLE001
+            return []
 
     def tam_dung(self, task_id: str) -> None:
         self._nen(lambda: self.cc.pause(task_id), f"tạm dừng {task_id}")

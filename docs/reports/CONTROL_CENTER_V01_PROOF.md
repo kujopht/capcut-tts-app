@@ -277,6 +277,94 @@ vì `_dam_bao_suc_khoe` bắt mọi ngoại lệ nên một stub viết sai hỏ
 và bài kiểm vẫn xanh vì sai lý do. Đúng cái bẫy đó đã sập một lần khi tôi
 viết `for r in f.runtimes` (`runtimes` là **dict**).
 
+## 4f. V0.1.1 — giao diện đồ hoạ, và bảy lỗi của lượt review đối kháng
+
+Bản V0.1.1 không đổi một dòng backend nào. Nó thêm một GUI Qt và giữ TUI
+làm đường dự phòng. Nhưng lượt review đối kháng cho một bài học rõ hơn cả
+bản vá:
+
+> **Bốn lỗi clipboard, và không lỗi nào nằm trong mã clipboard.**
+
+Cả bốn do *nhịp làm mới giao diện* phá: `_Inspector.cap_nhat`,
+`_PanelChiTietViec.dat` và `KhungNhatKy._ve_lai` gọi `setPlainText()` vô
+điều kiện mỗi giây. Người dùng bôi đen rồi mới với tay bấm Ctrl+C — quá 1
+giây là chuyện thường — nên clipboard ra rỗng. Đo được **217 ký tự đang
+chọn → 0 sau đúng một nhịp**.
+
+Tệ nhất là ở nhật ký: mất vùng chọn khiến nút **Copy** rơi về nhánh "copy
+tất cả" và dán ra **cả** nhật ký thay vì 3 dòng người dùng đã chọn. Sai âm
+thầm, không báo gì.
+
+| # | Phát hiện | Mức |
+|---|---|---|
+| 1 | vùng đang bôi đen bị xoá mỗi giây ở Inspector + panel chi tiết | NGHIÊM TRỌNG |
+| 2 | nhật ký của việc ĐANG chạy: cùng lỗi, và nút Copy dán sai | NGHIÊM TRỌNG |
+| 3 | `_copy_bang` bỏ trắng cột dùng cell widget (Trạng thái, Usage) | QUAN TRỌNG |
+| 4 | tài liệu nói sai: Qt6 KHÔNG copy cả hàng bằng Ctrl+C | QUAN TRỌNG |
+| 5 | đổi trạng thái một việc dựng lại CẢ danh sách tin chat | QUAN TRỌNG |
+| 6 | mã dự án đúc từ tên thư mục + UPSERT ⇒ đè dự án thật | QUAN TRỌNG |
+| 7 | ô tìm ở thanh trên nối vào `lambda _: None` — điều khiển chết | NHỎ |
+
+### Và CỔNG NGHIỆM THU của chính bản này là một bài kiểm rỗng
+
+Đây là phát hiện đáng giá nhất của lượt review, nên nói đủ.
+
+`test_khong_QShortcut_nao_chiem_to_hop_clipboard` lọc
+`sc.context() == Qt.ApplicationShortcut`. Nhưng phạm vi **mặc định** của
+`QShortcut`/`QAction` là `WindowShortcut` — đã đo trên PySide6 6.11.2. Nên
+bộ lọc đó bỏ qua gần như **mọi cách người ta thật sự thêm một lối tắt**.
+
+Mutation: thêm `QShortcut(QKeySequence("Ctrl+C"), self)` vào cửa sổ.
+
+| Ô đang focus | Ctrl+C sau mutation |
+|---|---|
+| ô soạn (editable) | vẫn copy đúng — Qt gửi `ShortcutOverride` cho widget editable |
+| thẻ chat, nhật ký, panel chi tiết, Inspector, bảng Tasks | **bị ăn mất** |
+
+Tức là bài kiểm được quảng cáo "khoá cả sản phẩm" chỉ bảo vệ đúng cái ô mà
+Qt đã tự bảo vệ, và bỏ ngỏ **cả năm** vùng chỉ-đọc.
+
+Đã bỏ bộ lọc, và thêm một bài **bơm Ctrl+C bằng sự kiện thật** vào từng
+vùng. Bài bơm phím đó, **lần đầu viết, cũng rỗng**: thiếu
+`activateWindow()` + `processEvents()` thì máy lối tắt chưa vào cuộc và
+`QTest.keyClick` giao thẳng sự kiện cho widget. Phải mutation lại lần nữa
+mới thấy. Ba bài kiểm rỗng khác cùng lượt: nút Copy/Copy All được gọi bằng
+hàm chứ không bấm, `cs.isVisible() or True`, và hợp đồng dữ liệu kiểm trên
+**văn bản mã nguồn** của `snapshot()`.
+
+**Bài học, và nó lặp lại lần thứ tư trong hai bản phát hành:** một bài kiểm
+chỉ có giá trị khi đã thấy nó HỎNG đúng lúc cần hỏng. Đọc lại không bao giờ
+đủ; mutation thì đủ.
+
+### Chứng minh sống 10/10 tiêu chí
+
+`scripts/control_center_gui_proof.py --that` — `ControlCenter` THẬT, cửa sổ
+Qt THẬT (offscreen), bấm đúng những nút người dùng bấm, một lượt agent thật:
+
+```
+1. cửa sổ mở được                     ĐẠT
+2. mở được dự án Fanfic               ĐẠT
+3. gõ việc trong Chat rồi bấm Gửi     ĐẠT   1 việc được tạo
+4. Router tạo & quản lý việc          ĐẠT   bảng Tasks có 1 hàng
+5. agent/phiên/worktree cập nhật sống ĐẠT   phiên hiện ở Agents, worktree gán
+6. xem chi tiết + nhật ký bằng chuột  ĐẠT
+7. Copy nhật ký ra clipboard          ĐẠT   323 ký tự
+8. Pause/Resume bằng nút              ĐẠT
+9. hộp thoại đóng bằng X và Esc       ĐẠT
+10. khởi động lại, trạng thái còn     ĐẠT   1 việc + 2 tin chat từ SQLite
+```
+
+Lượt agent thật đó kết thúc ở `FAILED` (công việc của agent không qua cổng
+kiểm định). Tiêu chí 5 đo **giao diện có phản ánh trạng thái sống hay
+không**, và nó phản ánh đúng — nên ĐẠT. Nói rõ để không ai đọc bảng này
+tưởng lượt đó thành công.
+
+Một chi tiết nữa đáng ghi: lần chạy đầu, tiêu chí 5 báo HỎNG với
+`trạng thái cuối=QUEUED`. Đó là lỗi của **kịch bản chứng minh** — nó quên
+gọi `bat_dau()` nên vòng điều phối không hề chạy. *Một bài chứng minh thiếu
+một cú gọi khởi động sẽ tố cáo sản phẩm thay vì tố cáo chính nó.*
+
+
 ## 5. Còn chặn (cần người) — xem `ROUTER_CONTROL_CENTER_OVERNIGHT_BLOCKERS.md`
 
 - **B4 ĐÃ ĐÓNG.** Hai mục `command(...)` khớp chuỗi chính xác, trỏ tuyệt đối

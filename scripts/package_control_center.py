@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 #: Cay tep dua vao goi. Thu tu khong quan trong; noi dung thi co.
 GOM: Tuple[str, ...] = (

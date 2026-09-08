@@ -382,7 +382,11 @@ class TestGoiKhongRoTrangThaiThuNghiem(unittest.TestCase):
         kiểm hiện vật, không kiểm ý định.
         """
         import zipfile
-        goi = REPO / "dist" / "router-control-center-v0.1.0.zip"
+        # Lay TU `VERSION` cua chinh bo dong goi, khong go cung: go cung
+        # thi bump phien ban se lam bai kiem im lang bo qua (tep khong ton
+        # tai -> `skipTest`) thay vi kiem goi that.
+        from scripts.package_control_center import VERSION
+        goi = REPO / "dist" / f"router-control-center-v{VERSION}.zip"
         if not goi.is_file():
             self.skipTest("chưa dựng gói")
         with zipfile.ZipFile(goi) as z:

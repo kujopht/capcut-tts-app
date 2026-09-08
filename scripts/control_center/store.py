@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 import time
 import uuid
 from pathlib import Path
@@ -219,6 +220,43 @@ class ControlStore:
             c.close()
             self._local.conn = None
 
+    @contextmanager
+    def giao_dich_ghi(self):
+        """`BEGIN IMMEDIATE` — TUẦN TỰ HOÁ những người ghi.
+
+        VÌ SAO CẦN, và vì sao `ON CONFLICT` không đủ:
+
+        `INSERT ... ON CONFLICT(lock_id)` chỉ nguyên tử khi hai bên tranh
+        ĐÚNG MỘT khoá chính. Luật xung đột của khoá FILESYSTEM là **giao
+        nhau tiền tố**, nên `web/admin` và `web/admin/content-queue` — hai
+        tài nguyên đụng nhau thật — có HAI `lock_id` khác nhau. Không có
+        xung đột khoá chính nào để bắt, và cả hai `INSERT` cùng thành công.
+
+        Đã dựng lại được 3/3 lần bằng một `threading.Barrier`: hai việc cùng
+        giữ khoá chồng nhau, đúng chế độ hỏng mà `locks.py` tồn tại để chặn.
+        Bài kiểm đồng thời trước đó KHÔNG bắt được vì nó cho hai luồng tranh
+        CÙNG MỘT tài nguyên — trường hợp duy nhất mà khoá chính che được.
+
+        `BEGIN IMMEDIATE` giành khoá RESERVED ngay lúc mở, nên người ghi thứ
+        hai chờ (tới `busy_timeout`) thay vì đọc một ảnh chụp đã cũ. Đây là
+        cách đúng để làm nguyên tử một phép "đọc rồi ghi có điều kiện" trong
+        SQLite; `ON CONFLICT` chỉ giải được trường hợp trùng khoá chính.
+
+        Lồng nhau là AN TOÀN (không mở giao dịch thứ hai) — SQLite không có
+        giao dịch lồng, và một `BEGIN` thứ hai sẽ ném.
+        """
+        c = self._c()
+        if c.in_transaction:
+            yield c                     # da o trong mot giao dich — dung lai
+            return
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            yield c
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+        c.execute("COMMIT")
+
     # -- su kien ------------------------------------------------------------
 
     def ghi_su_kien(self, kind: str, *, project_id: str = "",
@@ -394,6 +432,27 @@ class ControlStore:
             worktree=h["worktree"], branch=h["branch"],
             created_at=h["created_at"], updated_at=h["updated_at"],
             started_at=h["started_at"], ended_at=h["ended_at"])
+
+    def ghi_ket_qua(self, task_id: str, *, result: Optional[Dict],
+                    worktree: str = "", branch: str = "") -> None:
+        """Ghi KẾT QUẢ của một việc bằng một `UPDATE` HẸP.
+
+        KHÔNG dùng `luu_task` cho đường này. `luu_task` là một UPSERT ghi ĐỦ
+        MỌI CỘT, gồm cả `state` — nên "đọc việc, gắn kết quả, lưu lại" là một
+        phép đọc–sửa–ghi kéo dài qua cả một lượt agent. Trong khe đó người
+        dùng có thể bấm `p`: `pause()` ghi `PAUSED`, rồi luồng `_chay` lưu
+        đối tượng CŨ và kéo trạng thái ngược về `RUNNING`. Lệnh `pause` biến
+        mất không dấu vết, và bảng điều khiển nói dối về một lệnh vừa ra.
+
+        `UPDATE` chỉ ba cột thì không đụng tới `state` của ai.
+        """
+        self._c().execute(
+            "UPDATE tasks SET result_json=?, updated_at=?, "
+            "  worktree=CASE WHEN ?<>'' THEN ? ELSE worktree END, "
+            "  branch=CASE WHEN ?<>'' THEN ? ELSE branch END "
+            "WHERE task_id=?",
+            (_js(result) if result is not None else "", time.time(),
+             worktree, worktree, branch, branch, task_id))
 
     def doi_trang_thai(self, task_id: str, moi: TaskState, *,
                        reason: str = "", session_id: str = "",

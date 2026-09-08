@@ -37,7 +37,7 @@ from scripts.router_v4.runtime import (Fabric, ModelCapability, Placement,
 from scripts.control_center.bootstrap import khoi_tao
 from scripts.control_center.engine import MAX_ATTEMPTS, ControlCenter
 from scripts.control_center.model import (LockKind, Project, SessionState,
-                                          TaskState)
+                                          TaskState, TransitionError)
 from scripts.control_center.store import ControlStore
 
 
@@ -765,11 +765,15 @@ class TestVerticalSlice(unittest.TestCase):
         self.assertIn("agent_killed", e["meta"])
 
     def test_reassign_nha_phien_cu_va_ve_hang_doi(self):
-        self.cc.chat("demo", "fix web/admin")
-        tid = self.cc.store.tasks("demo")[0].task_id
-        self.cc.tick()
-        _xong(self.cc, tid)
-        cu = self.cc.store.task(tid).owner_session
+        # Viec HONG (khong phai DONE): khong co ket qua nao dang giu, va
+        # "hong roi, thu cho khac" dung la viec `reassign` sinh ra de lam.
+        cc = _cc(kho_git_tam(), ex=FakeExecutor(status="failed"))
+        self.addCleanup(cc.shutdown)
+        cc.chat("demo", "fix web/admin")
+        tid = cc.store.tasks("demo")[0].task_id
+        self.assertTrue(_can_luot(cc, tid))
+        cu = cc.store.task(tid).owner_session
+        self.cc = cc                      # cac phep kiem con lai dung ban nay
 
         self.cc.reassign(tid)
         t = self.cc.store.task(tid)
@@ -778,8 +782,95 @@ class TestVerticalSlice(unittest.TestCase):
         self.assertIs(self.cc.store.session(cu).state, SessionState.STOPPED)
 
         self.cc.tick()
-        _xong(self.cc, tid)
+        _xong(self.cc, tid, giay=30)
         self.assertNotEqual(self.cc.store.task(tid).owner_session, cu)
+
+    def test_reassign_TU_CHOI_viec_da_DONE(self):
+        """`r` trên một việc DONE từng chạy lại nó và ghi đè mất kết quả.
+
+        `force=True` đi vòng qua TOÀN BỘ bảng chuyển trạng thái, nên `DONE`
+        thôi không còn là ngõ cụt. Báo cáo, `changes`, và cả `findings` mà
+        review độc lập vừa gộp vào đều biến mất — không một hộp xác nhận nào,
+        và `r` nằm ngay cạnh `o`/`s`.
+        """
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.tick()
+        _xong(self.cc, tid)
+        self.assertIs(self.cc.store.task(tid).state, TaskState.DONE)
+        truoc = self.cc.store.task(tid).result
+
+        with self.assertRaises(TransitionError):
+            self.cc.reassign(tid)
+        t = self.cc.store.task(tid)
+        self.assertIs(t.state, TaskState.DONE, "phải giữ nguyên DONE")
+        self.assertEqual(t.result, truoc, "kết quả cũ KHÔNG được ghi đè")
+
+    def test_reassign_TU_CHOI_viec_DANG_CHAY(self):
+        """`sessions.dung()` nhả chủ worktree trong khi agent vẫn đang ghi
+        vào đúng cây đó — `assert_exclusive` mất tác dụng đúng lúc cần nhất."""
+        cc = _cc(kho_git_tam(), ex=FakeExecutor(cham=2.0))
+        try:
+            cc.chat("demo", "fix web/admin")
+            tid = cc.store.tasks("demo")[0].task_id
+            cc.tick()
+            self.assertTrue(_cho(
+                lambda: cc.store.task(tid).state is TaskState.RUNNING, giay=10))
+            with self.assertRaises(TransitionError):
+                cc.reassign(tid)
+            _xong(cc, tid, giay=30)
+        finally:
+            cc.shutdown()
+
+    def test_reassign_VAN_chay_duoc_tren_viec_chua_ket_thuc(self):
+        """Siết chặt không được biến hàm thành vô dụng."""
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        t = self.cc.reassign(tid)
+        self.assertIs(t.state, TaskState.QUEUED)
+        self.assertEqual(t.owner_session, "")
+
+    def test_ghi_ket_qua_KHONG_dam_len_lenh_pause_cua_nguoi_dung(self):
+        """Đọc–sửa–ghi kéo dài qua cả một lượt agent sẽ nuốt mất một lệnh.
+
+        Luồng `_chay` đọc việc TRƯỚC lượt agent; người dùng bấm `p` ở giữa;
+        rồi luồng lưu đối tượng CŨ và kéo trạng thái ngược về RUNNING. Lệnh
+        `pause` biến mất không dấu vết.
+        """
+        self.cc.chat("demo", "fix web/admin")
+        tid = self.cc.store.tasks("demo")[0].task_id
+        self.cc.store.doi_trang_thai(tid, TaskState.RUNNING)
+        cu = self.cc.store.task(tid)          # ảnh chụp CŨ, state=RUNNING
+
+        self.cc.store.doi_trang_thai(tid, TaskState.PAUSED)   # người dùng bấm p
+        self.cc.store.ghi_ket_qua(tid, result={"envelope": {"status": "ok"}},
+                                  worktree="", branch="")
+        self.assertIs(self.cc.store.task(tid).state, TaskState.PAUSED,
+                      "ghi kết quả KHÔNG được đụng tới `state`")
+        self.assertIsNotNone(self.cc.store.task(tid).result)
+
+    def test_khoa_duoc_nha_ca_khi_giao_viec_nem_ngoai_le_LA(self):
+        """Lưới cuối: một ngoại lệ KHÔNG LƯỜNG TRƯỚC cũng không được rò khoá.
+
+        Với khoá PRODUCTION thì rò = treo vĩnh viễn, vì `reclaim()` cố ý
+        không nhả chúng.
+        """
+        cc = _cc(kho_git_tam())
+        try:
+            cc.chat("demo", "fix web/admin/content-queue")
+            t = cc.store.tasks("demo")[0]
+            ctx = cc.ctx("demo")
+
+            def _no(*a, **k):
+                raise RuntimeError("sổ nghẽn")
+            ctx.sessions.decide = _no
+
+            kq = cc._giao(t)
+            self.assertFalse(kq["dispatched"])
+            self.assertEqual(cc.store.locks("demo"), [],
+                             "khoá phải được nhả dù ngoại lệ không lường trước")
+        finally:
+            cc.shutdown()
 
     # -- 7. SONG SOT qua khoi dong lai --------------------------------------
 

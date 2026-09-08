@@ -417,6 +417,40 @@ class TestLocks(unittest.TestCase):
         b = self.lm.xin("demo", [(LockKind.FILESYSTEM, "web")], task_id="B")
         self.assertFalse(b.granted)
 
+    def test_hai_luong_xin_hai_tai_nguyen_GIAO_NHAU_thi_van_chi_MOT_ben_thang(self):
+        """LỖI THẬT, dựng lại được 3/3 lần trước khi sửa.
+
+        `INSERT ... ON CONFLICT(lock_id)` chỉ nguyên tử khi hai bên tranh
+        ĐÚNG MỘT khoá chính. Luật của khoá FILESYSTEM là **giao nhau tiền
+        tố**, nên `web/admin` và `web/admin/content-queue` — hai tài nguyên
+        đụng nhau thật — sinh ra HAI `lock_id` khác nhau. Không có xung đột
+        khoá chính nào để bắt, và cả hai `INSERT` cùng thành công.
+
+        Bài kiểm đồng thời cũ KHÔNG bắt được vì nó cho hai luồng tranh CÙNG
+        MỘT tài nguyên — đúng trường hợp duy nhất mà khoá chính che được.
+        """
+        ket_qua = []
+        rao = threading.Barrier(2)
+
+        def _xin(tid: str, res: str) -> None:
+            lm = LockManager(ControlStore(root=self.root))
+            # Cho ca hai doc BANG RONG truoc, roi moi cung ghi.
+            lm.tim_xung_dot("demo", LockKind.FILESYSTEM, res, bo_qua_task=tid)
+            rao.wait()
+            ket_qua.append(lm.xin("demo", [(LockKind.FILESYSTEM, res)],
+                                  task_id=tid).granted)
+
+        ts = [threading.Thread(target=_xin, args=("A", "web/admin")),
+              threading.Thread(target=_xin,
+                               args=("B", "web/admin/content-queue"))]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(timeout=30)
+        self.assertEqual(sorted(ket_qua), [False, True],
+                         "hai tài nguyên GIAO NHAU chỉ được cấp cho MỘT bên")
+        self.assertEqual(len(self.store.locks("demo")), 1)
+
     def test_hai_luong_cung_xin_thi_dung_MOT_ben_thang(self):
         """Đường đua thật: hai luồng cùng xin một tài nguyên.
 

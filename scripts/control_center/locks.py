@@ -159,6 +159,22 @@ class LockManager:
         # Loai trung + sap xep on dinh: chong deadlock kieu om cheo.
         can = sorted({(k, chuan_hoa(r)) for k, r in requests if chuan_hoa(r)},
                      key=lambda x: (x[0].value, x[1]))
+        if not can:
+            return LockGrant(granted=True)
+        # TOAN BO phep "do xung dot roi chen" phai nam trong MOT giao dich
+        # ghi. Xem `ControlStore.giao_dich_ghi`: `ON CONFLICT(lock_id)` chi
+        # che duoc truong hop hai ben tranh DUNG MOT khoa chinh, con luat
+        # giao nhau TIEN TO cua khoa FILESYSTEM sinh ra hai `lock_id` khac
+        # nhau cho hai tai nguyen dung nhau that. Da dung lai duoc 3/3 lan.
+        with self.store.giao_dich_ghi():
+            return self._xin_trong_giao_dich(project_id, can, task_id=task_id,
+                                             session_id=session_id, curr=curr,
+                                             han=han)
+
+    def _xin_trong_giao_dich(self, project_id: str,
+                             can: Sequence[Tuple[LockKind, str]], *,
+                             task_id: str, session_id: str,
+                             curr: float, han: float) -> LockGrant:
         da_lay: List[ResourceLock] = []
 
         for kind, res in can:

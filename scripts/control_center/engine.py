@@ -425,10 +425,46 @@ class ControlCenter:
     def _giao(self, t: Task) -> Dict:
         """Thử giao MỘT việc. Không chặn, không ném.
 
-        Thứ tự giành tài nguyên cố định — xem docstring module. Mỗi bước
-        hỏng đều nhả sạch những gì đã giành ở bước trước.
+        LƯỚI CUỐI CHO KHOÁ. Mọi lối thoát ĐÃ BIẾT bên trong `_giao_khong_luoi`
+        đều nhả khoá bằng tay, nhưng "đã biết" là chỗ hỏng: một
+        `sqlite3.OperationalError` lúc `claim_task`, hay một `KeyError` từ
+        `fabric.model()`, sẽ thoát ra ngoài, bị `tick()` nuốt thành
+        `TICK_FAILED`, và khoá đã giành KHÔNG BAO GIỜ được nhả.
+
+        Với khoá FILESYSTEM/SERVICE thì nó tự lành sau TTL. Với khoá
+        PRODUCTION thì KHÔNG — `reclaim()` cố ý không nhả chúng. Nghĩa là một
+        lỗi SQLite nhất thời có thể khoá vĩnh viễn một tài nguyên production
+        cho tới khi có người gỡ tay. Đó là cái giá quá đắt cho một ngoại lệ
+        không lường trước, nên ở đây có `finally`.
         """
         ctx = self.ctx(t.project_id)
+        lm = LockManager(self.store)
+        giao_duoc = False
+        try:
+            kq = self._giao_khong_luoi(t, ctx, lm)
+            giao_duoc = bool(kq.get("dispatched"))
+            return kq
+        except Exception as exc:                          # noqa: BLE001
+            self.store.ghi_su_kien(
+                "DISPATCH_CRASHED", project_id=t.project_id,
+                task_id=t.task_id, level="ERROR",
+                detail=f"{type(exc).__name__}: {exc}"[:400])
+            return {"task_id": t.task_id, "dispatched": False,
+                    "reason": f"{type(exc).__name__}: {exc}"[:200]}
+        finally:
+            # Giao ĐƯỢC thì luồng `_chay` sở hữu khoá và sẽ tự nhả trong
+            # `finally` của nó. Chỉ nhả ở đây khi việc KHÔNG được giao —
+            # nhả nhầm lúc agent đang chạy còn tệ hơn không nhả.
+            if not giao_duoc:
+                try:
+                    lm.tra(t.project_id, t.task_id)
+                except Exception:                         # noqa: BLE001
+                    pass
+
+    def _giao_khong_luoi(self, t: Task, ctx: "ProjectContext",
+                         lm: LockManager) -> Dict:
+        """Thân thật của `_giao`. Thứ tự giành tài nguyên cố định — xem
+        docstring module."""
         try:
             hd = TaskContract.from_dict(t.contract)
         except (ContractError, KeyError, ValueError) as exc:
@@ -439,7 +475,6 @@ class ControlCenter:
                     "reason": "hợp đồng hỏng"}
 
         # (1) khoa tai nguyen
-        lm = LockManager(self.store)
         xin = [(LockKind(r.split(":", 1)[0]), r.split(":", 1)[1])
                for r in t.resources if ":" in r]
         grant = lm.xin(t.project_id, xin, task_id=t.task_id) if xin else None
@@ -736,7 +771,16 @@ class ControlCenter:
                     con_giu = ctx.leases.heartbeat(khoa_lease, self.owner)
                     lm.gia_han(ctx.project.project_id, task_id)
                 except Exception:                         # noqa: BLE001
-                    return
+                    # `continue`, KHONG `return`. Ban dau cho nay thoat han
+                    # sau MOT ngoai le — va `sqlite3.OperationalError:
+                    # database is locked` la chuyen binh thuong khi hai tien
+                    # trinh Control Center cung ghi. Mot lan nghen o dia the
+                    # la giet luon ca vong nhip: `lm.gia_han` ngung chay,
+                    # sau LOCK_TTL (3600s) khoa cua viec het han, va mot viec
+                    # khac CUOP duoc khoa trong khi agent thu nhat VAN DANG
+                    # GHI. Hop dong cho phep `max_wall_time` 2400s cong thu
+                    # lai, nen viec chay qua mot tieng khong phai ngoai le.
+                    continue
                 if con_giu:
                     continue
                 # LEASE DA BI CUOP. Hop dong cua `LeaseStore.heartbeat` noi
@@ -790,12 +834,11 @@ class ControlCenter:
             if moi is not TaskState.BLOCKED and not kq.ok:
                 moi = TaskState.FAILED
 
-            t = self.store.task(task_id)
-            if t is not None:
-                t.result = kq.to_dict()
-                t.worktree = kq.worktree or t.worktree
-                t.branch = kq.branch or t.branch
-                self.store.luu_task(t)
+            # UPDATE HEP, khong phai doc-sua-ghi. Xem `store.ghi_ket_qua`:
+            # `luu_task` ghi ca cot `state`, nen luu mot doi tuong doc tu
+            # TRUOC luot agent se nuot mat mot lenh `pause` nguoi dung vua bam.
+            self.store.ghi_ket_qua(task_id, result=kq.to_dict(),
+                                   worktree=kq.worktree, branch=kq.branch)
 
             ly_do = pb.failure_reason or ""
             if pb.requires_decision:
@@ -948,10 +991,42 @@ class ControlCenter:
         Nhả phiên hiện tại rồi đưa việc về `QUEUED`. Lượt sau, `decide()` sẽ
         không thấy phiên cũ trong danh sách sống nữa nên tự chọn chỗ khác —
         không cần một đường định tuyến thứ hai.
+
+        HAI THỨ HÀM NÀY TỪ CHỐI LÀM, và cả hai đều từng làm được:
+
+        1. **Việc đã DONE.** Bản trước dùng `force=True`, tức đi vòng qua
+           TOÀN BỘ bảng chuyển trạng thái — `DONE` không còn là ngõ cụt nữa.
+           Bấm `r` trên một việc `DONE` sẽ chạy lại nó và `ghi_ket_qua()` ghi
+           đè kết quả cũ: báo cáo, danh sách `changes`, và cả phần `findings`
+           mà review độc lập vừa gộp vào đều biến mất. `r` nằm ngay cạnh
+           `o`/`s` trên một bảng dùng lúc 3 giờ sáng.
+
+           `FAILED` thì VẪN giao lại được: không có kết quả nào đáng giữ, và
+           "hỏng rồi, thử chỗ khác" đúng là việc `reassign` sinh ra để làm.
+           Bỏ `force=True` là đủ — bảng chuyển đã cho `FAILED -> QUEUED` và
+           đã cấm `DONE -> QUEUED`; để bảng đó lên tiếng thay vì dựng một
+           luật thứ hai song song với nó.
+        2. **Việc ĐANG chạy.** `sessions.dung()` gọi `worktrees.nha()`, tức
+           xoá chủ sở hữu cây làm việc TRONG KHI luồng `_chay` vẫn đang ghi
+           vào đúng cây đó — và `assert_exclusive` mất tác dụng ngay lúc nó
+           cần nhất. Muốn dừng một việc đang chạy thì dùng `stop()`, hàm có
+           cắt tiến trình thật và có hộp xác nhận.
         """
         t = self.store.task(task_id)
         if t is None:
             raise KeyError(task_id)
+        if t.state is TaskState.DONE:
+            raise TransitionError(
+                f"{task_id} đã DONE — `reassign` KHÔNG chạy lại một việc đã "
+                f"xong, vì làm vậy sẽ ghi đè mất kết quả và cả phát hiện của "
+                f"review độc lập. Muốn làm lại thì tạo một việc mới.")
+        with self._khoa:
+            dang_bay = task_id in self._dang_chay
+        if dang_bay or t.state is TaskState.RUNNING:
+            raise TransitionError(
+                f"{task_id} đang chạy — `reassign` sẽ nhả cây làm việc trong "
+                f"khi agent vẫn đang ghi vào đó. Dùng `stop()` trước.")
+
         ctx = self.ctx(t.project_id)
         if t.owner_session:
             ctx.sessions.dung(
@@ -964,7 +1039,7 @@ class ControlCenter:
             "TASK_REASSIGNED", project_id=t.project_id, task_id=task_id,
             detail=f"nhả phiên cũ; sẽ chọn chỗ mới ở nhịp sau")
         return self.store.doi_trang_thai(task_id, TaskState.QUEUED,
-                                         reason="giao lại", force=True)
+                                         reason="giao lại")
 
     # -- 6. Phuc hoi ---------------------------------------------------------
 

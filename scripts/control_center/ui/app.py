@@ -356,7 +356,11 @@ class ControlCenterApp(App):
             ham(tid)
             self.notify(f"Đã {ten} {tid}")
         except Exception as exc:                          # noqa: BLE001
-            self.notify(f"Không {ten} được: {exc}", severity="error")
+            # Mot lan TU CHOI (vd `reassign` tren viec da xong) khong phai
+            # loi he thong — no la cau tra loi, va phai doc duoc het. Cat con
+            # 60 ky tu se giau mat phan noi VI SAO va noi phai lam gi thay the.
+            self.notify(f"Không {ten} được: {exc}"[:400], severity="warning",
+                        timeout=12.0)
         self.lam_moi()
 
     def action_dung_han(self) -> None:

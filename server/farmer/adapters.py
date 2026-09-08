@@ -149,6 +149,24 @@ def make_text_fetcher(fetcher: Optional[Any] = None
         from server.scraper.html_extract import extract
         from server.scraper.http_fetcher import HttpFetcher
 
+        # FanFicFare TRUOC, cho host no ho tro: no hieu phan trang chuong,
+        # sieu du lieu, va cach tung site dung HTML — mot phep trich xuat
+        # tong quat tren mot trang fanfic nhieu chuong se ra mot mo dieu
+        # huong lan van ban.
+        #
+        # `resolve_acquisition_route` la nguoi quyet dinh, khong phai mot danh
+        # sach host viet tay o day: no da biet host nao FanFicFare an duoc,
+        # va no KHONG BAO GIO tra ve mot duong can trinh duyet/cloudscraper.
+        if fetcher is None:
+            try:
+                van_ban = _thu_fanficfare(c.url)
+                if van_ban:
+                    return van_ban
+            except Exception:
+                # FanFicFare hong -> roi ve HTTP thuong. Mot nguon lay duoc
+                # bang duong tong quat van tot hon khong lay duoc gi.
+                pass
+
         client = fetcher or HttpFetcher()
         ket_qua = client.fetch(c.url)
         # 304 tra than RONG theo giao thuc — doc no nhu "trang rong that su"
@@ -157,6 +175,30 @@ def make_text_fetcher(fetcher: Optional[Any] = None
             raise RuntimeError(f"nguon tra 304 (khong doi): {c.url}")
         return extract(ket_qua.text).visible_text()
     return fetch
+
+
+def _thu_fanficfare(url: str) -> str:
+    """Lay truyen qua FanFicFare neu host duoc ho tro. Rong = khong dung duoc.
+
+    Ghep cac chuong thanh MOT van ban de dua qua cong danh gia — cong danh gia
+    cham diem tac pham, khong cham diem tung chuong.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+
+    from server.scraper.fanficfare_provider import (
+        parse_fanficfare_epub, resolve_acquisition_route, _run_fanficfare_cli,
+    )
+
+    if resolve_acquisition_route(url) != "fanficfare":
+        return ""
+    with tempfile.TemporaryDirectory(prefix="farmer-fff-") as tmp:
+        ket_qua = _run_fanficfare_cli(url, workdir=_Path(tmp))
+        if not ket_qua.ok or not ket_qua.epub_path:
+            return ""
+        acq = parse_fanficfare_epub(ket_qua.epub_path)
+        return "\n\n".join(
+            ch.content for ch in (acq.chapters or []) if (ch.content or "").strip())
 
 
 def make_text_publisher(token: str) -> Callable[[Candidate, str], str]:

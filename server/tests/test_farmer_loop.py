@@ -211,6 +211,14 @@ class TextLaneOrderTest(unittest.TestCase):
                               novel_id="nov_cu")
                 return [n], 1
 
+            def list_chapters(self, novel_id):
+                # Ban nhap DUNG DUOC: co chuong that. Xem
+                # `test_a_draft_with_no_chapter_is_not_reusable` cho nhanh kia.
+                return [mock.Mock(chapter_id="ch_1")]
+
+            def list_jobs(self, owner_id, chapter_id=None):
+                return [mock.Mock(job_id="job_cu")]
+
         with TemporaryDirectory() as d:
             h = _Harness(tmp=Path(d), store=_CoNovel(),
                          text_candidates=[_text("https://e.com/a")])
@@ -412,19 +420,44 @@ class ResumeTtsTest(unittest.TestCase):
     """
 
     class _CoNovel(_Store):
-        def __init__(self, jobs):
+        def __init__(self, jobs, chapters=1):
             super().__init__()
             self._jobs = jobs
+            self._chapters = chapters
 
         def find_novels(self, owner_id=None, limit=None, **kw):
             return [mock.Mock(external_source_url="https://e.com/a",
                               novel_id="nov_cu")], 1
 
         def list_chapters(self, novel_id):
-            return [mock.Mock(chapter_id="ch_1")]
+            return [mock.Mock(chapter_id=f"ch_{i}")
+                    for i in range(self._chapters)]
 
         def list_jobs(self, owner_id, chapter_id=None):
             return list(self._jobs)
+
+    def test_a_draft_with_no_chapter_is_not_reusable(self):
+        """Ban nhap CO THAT khong dong nghia ban nhap DUNG DUOC.
+
+        `POST /api/novels` va `POST /api/chapters` la hai loi goi rieng. Da
+        xay ra that: hai tac pham 224k va 117k ky tu vuot MAX_CHAPTER_CHARS
+        (100.000), tao duoc novel roi truot o buoc chuong. Lan chay tiep dung
+        lai cai novel RONG do va van dat READY — mot tac pham "san sang" ma
+        tren trang khong co gi de doc.
+        """
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d),
+                         store=self._CoNovel(jobs=[], chapters=0),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+
+        self.assertEqual(m.failed, 1)
+        self.assertEqual(m.resumed, 0)
+        self.assertEqual(m.published_candidates, 0)
+        self.assertFalse([k for k in h.objects if k.endswith("/manifest.json")],
+                         "khong duoc ghi manifest cho mot ban nhap hong")
+        self.assertTrue(any("khong co chuong nao" in e for e in m.errors),
+                        m.errors)
 
     def test_resume_enqueues_tts_when_none_exists(self):
         with TemporaryDirectory() as d:

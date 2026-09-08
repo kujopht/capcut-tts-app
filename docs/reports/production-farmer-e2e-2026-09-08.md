@@ -147,9 +147,39 @@ Lại đúng khuôn mẫu *"xây xong rồi để đó"*: `attach_audio` là hà
 manifest và **nó không có người gọi** — ở chính module tôi vừa viết, ngay sau
 khi phê phán khuôn mẫu đó.
 
+### 6. Tác phẩm dài vượt `MAX_CHAPTER_CHARS`, và bản chạy tiếp giấu điều đó
+
+Đường cứu ở mục 5 làm lộ ra một sự thật khác: `Fire Bird` không xếp được TTS
+vì nó **không có chương nào**.
+
+`MAX_CHAPTER_CHARS = 100.000` (`server/main.py:601`, ràng buộc Pydantic cứng).
+Ranh giới khớp chính xác:
+
+| Tác phẩm | Ký tự | Chương |
+|---|---|---|
+| Fire Bird | 224.336 | ✗ bị từ chối |
+| With Sprinkles 2 | 116.951 | ✗ bị từ chối |
+| Let it Ride | 55.384 | ✓ |
+| Always Know Where Your Towel Is | 23.970 | ✓ |
+
+`POST /api/novels` và `POST /api/chapters` là **hai** lời gọi, và cái thứ hai
+trượt riêng. Lần chạy tiếp của tôi dùng lại cái novel **rỗng** đó, bỏ qua bước
+xuất bản, và vẫn đạt READY — **một tác phẩm "sẵn sàng" mà trên trang không có
+gì để đọc**.
+
+Đã chặn: `novel_has_chapter` — bản nháp có thật không đồng nghĩa bản nháp dùng
+được. Nay báo `failed` kèm số ký tự thật và tên hạn mức, thay vì âm thầm đạt
+READY.
+
+**Hai tác phẩm đó vẫn đang ở trạng thái READY-nhưng-rỗng trên máy sản xuất.**
+Sửa chúng cần xoá bản ghi production, nên tôi để nguyên cho người vận hành
+quyết định.
+
 ## Còn lại
 
-1. **Bản mp3 không được gương lên Drive.** Phải tải từ R2 về trước, và kích
+1. **Cắt chương cho tác phẩm > 100.000 ký tự.** Chưa có. Cho tới khi có, mọi
+   tác phẩm dài sẽ dừng ở bước chương — nay dừng **ồn ào** thay vì âm thầm.
+2. **Bản mp3 không được gương lên Drive.** Phải tải từ R2 về trước, và kích
    thước đáng kể. Manifest ghi khoá R2 nên vẫn truy nguyên được.
 2. **`MediaAssetStore` chưa có bản triển khai Appwrite.** Bìa đường phục vụ sẽ
    còn báo lỗi (không chặn) cho tới khi có.

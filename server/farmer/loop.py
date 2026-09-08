@@ -292,6 +292,26 @@ class ProductionFarmer:
             #    POST them mot novel thu hai cho cung mot tac pham chinh la
             #    dieu khu trung lap ton tai de ngan.
             if novel_co_san:
+                # Ban nhap co that KHONG dong nghia ban nhap DUNG DUOC. Mot
+                # novel khong co chuong la mot ban nhap hong: hai loi goi API
+                # rieng biet, va cai thu hai truot duoc rieng.
+                try:
+                    du_dung = self._dedup.novel_has_chapter(novel_co_san)
+                except DedupError as exc:
+                    m.note_error(f"bo qua (khong doc duoc chuong): {exc}")
+                    m.skipped_quota += 1
+                    continue
+                if not du_dung:
+                    # KHONG di tiep toi buoc dat READY. Mot tac pham "san
+                    # sang" ma tren trang khong co gi de doc con te hon mot
+                    # tac pham chua san sang, vi khong ai thay no hong.
+                    m.failed += 1
+                    m.note_error(
+                        f"ban nhap {novel_co_san} khong co chuong nao — "
+                        f"van ban {len(body):,} ky tu, gioi han moi chuong la "
+                        f"100.000 (FAS_MAX_CHAPTER_CHARS). Can cat chuong "
+                        f"truoc khi tac pham nay xuat ban duoc: {c.url}")
+                    continue
                 novel_id = novel_co_san
                 m.resumed += 1
             else:

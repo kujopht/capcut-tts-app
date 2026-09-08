@@ -36,7 +36,14 @@ nghẽn. Lằn A cố ý dừng ở bước nạp hàng đợi.
 ```
 khử trùng lặp TRƯỚC khi lấy  → không tải lại thứ đã có
 duyệt TRƯỚC khi sản xuất     → không trả tiền TTS cho rác
-bìa là cổng CUỐI và CỨNG     → không xuất bản ô trống
+kho chính tắc là cổng CUỐI   → không xuất bản ô trống
+```
+
+Đầy đủ, theo đúng thứ tự mã chạy:
+
+```
+khám phá → khử trùng lặp → lấy nội dung → DUYỆT → bản nháp → TTS
+        → bìa đường phục vụ (cố gắng) → KHO CHÍNH TẮC (cổng) → ứng viên
 ```
 
 ## Ba cổng fail closed
@@ -170,6 +177,27 @@ hoá đổi, còn đối chiếu được.
 
 `artwork/cover.webp` **và** `artwork/background.webp` đều phải có trước
 READY/PUBLISHABLE. Thiếu một cái → chưa xuất bản được.
+
+Sinh bằng **ffmpeg**, không phải Pillow: Pillow không có trong venv máy sản
+xuất, ffmpeg thì có trên cả hai máy. Thêm một gói Python vào một venv thuộc
+root trên máy đang chạy sản xuất là một thay đổi hạ tầng thật; gọi một nhị
+phân đã có thì không. Màu dẫn ra từ `sha256(work_id)` nên chạy lại ra đúng
+ảnh cũ.
+
+### Bìa đường phục vụ KHÁC cổng này, và không phải cổng
+
+`CoverGate` gắn một `MediaAsset` vào bản ghi novel bên Appwrite. Đó là một
+cơ chế **khác** và nó **cố gắng**, không chặn.
+
+Lý do là một sự thật khó chịu: `MediaAssetStore` là một `Protocol` mà bản
+triển khai duy nhất là `MockMediaAssetStore` — `AppwriteMetadataStore` không
+có `list_assets`. Trên máy sản xuất bước này ném `AttributeError` **mỗi
+lần**. Khi nó còn là cổng, hai tác phẩm đã được duyệt 82 và 78 điểm đã tạo
+novel, đã xếp TTS, rồi dừng im lặng — và vì khử trùng lặp xét theo novel đã
+tồn tại nên chúng **không bao giờ được thử lại**.
+
+Cổng thật phải **kiểm chứng được**: hai tệp `.webp` có thật trong kho chính
+tắc, đọc được bằng một lần liệt kê object.
 
 ## Lưu trữ Drive là gương, không phải đường phục vụ
 

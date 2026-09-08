@@ -23,7 +23,8 @@ from __future__ import annotations
 from typing import Callable, List, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import (QFont, QGuiApplication, QKeySequence,
+                           QShortcut, QTextCursor)
 from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel,
                                QLineEdit, QMenu, QPlainTextEdit, QPushButton,
                                QSizePolicy, QTextBrowser, QVBoxLayout, QWidget)
@@ -61,6 +62,41 @@ def dat_clipboard(text: str) -> None:
     cb = QGuiApplication.clipboard()
     if cb is not None:
         cb.setText(text or "")
+
+
+def dat_van_ban_giu_chon(o, text: str) -> bool:
+    """Đặt văn bản mà KHÔNG giết vùng đang bôi đen và chỗ đang cuộn.
+
+    ĐÂY LÀ MỘT LỖI CLIPBOARD, dù trông như lỗi hiệu năng. Giao diện làm mới
+    mỗi giây; nếu mỗi nhịp gọi `setPlainText()` vô điều kiện thì vùng người
+    dùng vừa bôi đen bị xoá sau tối đa 1 giây. Người ta bôi đen rồi mới với
+    tay bấm Ctrl+C — quá 1 giây là chuyện thường — nên Ctrl+C copy ra rỗng
+    (hoặc nội dung cũ). Đúng triệu chứng "clipboard không đáng tin" mà bản
+    V0.1.1 tồn tại để sửa.
+
+    Review đối kháng trước phát hành đo được ba chỗ mắc lỗi này: pane
+    "đang chạy" của Inspector, panel chi tiết việc, và nhật ký của một việc
+    ĐANG mọc log (217 ký tự đang chọn → 0 sau một nhịp).
+
+    Trả `True` nếu có ghi thật.
+    """
+    if o.toPlainText() == (text or ""):
+        return False                    # khong doi thi KHONG ghi lai
+    cur = o.textCursor()
+    neo, vi = cur.anchor(), cur.position()
+    thanh = o.verticalScrollBar()
+    cho = thanh.value()
+    o.setPlainText(text or "")
+    # Khoi phuc vung chon neu no con nam trong van ban moi. Neu van ban da
+    # ngan di, kep vao cuoi thay vi nem ngoai le.
+    het = len(o.toPlainText())
+    if neo != vi:
+        cur = o.textCursor()
+        cur.setPosition(min(neo, het))
+        cur.setPosition(min(vi, het), QTextCursor.MoveMode.KeepAnchor)
+        o.setTextCursor(cur)
+    thanh.setValue(min(cho, thanh.maximum()))
+    return True
 
 
 class HuyHieu(QLabel):
@@ -272,14 +308,15 @@ class KhungNhatKy(QWidget):
         dong = self._tho.splitlines()
         if loc:
             dong = [d for d in dong if loc in d.lower()]
-        # Giu cho dang doc khi nguoi dung da tat theo doi.
-        thanh_doc = self.o.verticalScrollBar()
-        cho = thanh_doc.value() if not self.nut_theo.isChecked() else None
-        self.o.setPlainText("\n".join(dong))
-        if cho is None:
+        # `dat_van_ban_giu_chon` giu VUNG DANG BOI DEN. Ban truoc goi
+        # `setPlainText()` tho, nen nhat ky cua mot viec DANG mọc log xoa
+        # vung chon moi lan co dong moi — nguoi dung boi den 3 dong roi bam
+        # Ctrl+C thi duoc rong, hoac nut Copy roi ve nhanh "copy tat ca" va
+        # dan ra CA nhat ky thay vi 3 dong ho chon. Sai am tham.
+        theo = self.nut_theo.isChecked()
+        co_doi = dat_van_ban_giu_chon(self.o, "\n".join(dong))
+        if theo and co_doi:
             self._cuoi_trang()
-        else:
-            thanh_doc.setValue(min(cho, thanh_doc.maximum()))
 
     def _cuoi_trang(self) -> None:
         sb = self.o.verticalScrollBar()

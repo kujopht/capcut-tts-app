@@ -34,7 +34,9 @@ from scripts.control_center.gui.views import (HopTroGiup, KhungAgent,
                                               KhungLog, KhungUsage, KhungViec)
 from scripts.control_center.gui.views_chat import KhungChat
 from scripts.control_center.gui.widgets import (HopThoai, HuyHieu,
-                                                VanBanChonDuoc, menu_copy)
+                                                VanBanChonDuoc,
+                                                dat_van_ban_giu_chon,
+                                                menu_copy)
 
 TEN_KHUNG = ("Chat", "Tasks", "Agents", "Logs", "Usage")
 
@@ -221,7 +223,34 @@ class CuaSoChinh(QMainWindow):
         ct.dung_lai.connect(self.xac_nhan_dung)
         ct.duyet.connect(self.xac_nhan_duyet)
 
-        self.o_tim.textChanged.connect(lambda _: None)
+        self.o_tim.textChanged.connect(self._loc_bang)
+
+    def _loc_bang(self, chu: str) -> None:
+        """Lọc bảng Tasks/Agents theo đoạn chữ ở thanh trên.
+
+        Bản đầu nối ô này vào `lambda _: None` — một điều khiển CHẾT, trong
+        khi placeholder hứa "Tìm việc, phiên, worktree…" và tooltip hứa
+        "Lọc nhanh mọi bảng". Người dùng gõ vào và không có gì xảy ra; đó
+        là loại chi tiết làm mất lòng tin vào cả giao diện.
+        """
+        chu = (chu or "").strip().lower()
+        for bang in (self.khung_viec.bang, self.khung_agent.bang):
+            for r in range(bang.rowCount()):
+                if not chu:
+                    bang.setRowHidden(r, False)
+                    continue
+                khop = False
+                for c in range(bang.columnCount()):
+                    it = bang.item(r, c)
+                    if it is not None and chu in it.text().lower():
+                        khop = True
+                        break
+                    w = bang.cellWidget(r, c)
+                    lay = getattr(w, "text", None) if w is not None else None
+                    if callable(lay) and chu in (lay() or "").lower():
+                        khop = True
+                        break
+                bang.setRowHidden(r, not khop)
 
     def _phim_tat_tuy_chon(self) -> None:
         """Chỉ hai lối tắt, cả hai đều có nút bấm tương đương.
@@ -266,6 +295,10 @@ class CuaSoChinh(QMainWindow):
         self.khung_viec.cap_nhat(d)
         self.khung_agent.cap_nhat(d)
         self.inspector.cap_nhat(d)
+        # Ve lai bang thi hang moi mac dinh HIEN — phai ap lai bo loc, neu
+        # khong o tim se "quen" sau mot nhip.
+        if self.o_tim.text().strip():
+            self._loc_bang(self.o_tim.text())
 
         if self.chong.currentIndex() == 4:
             self.khung_usage.cap_nhat(self.cau.bao_cao_usage())
@@ -346,6 +379,33 @@ class CuaSoChinh(QMainWindow):
         if not pid:
             self._bao_loi("tên thư mục không tạo được mã dự án")
             return
+
+        # `luu_project` la UPSERT (`ON CONFLICT DO UPDATE SET repo_path=...`),
+        # va ma du an o day duoc DUC TU TEN THU MUC. Ghep hai dieu do lai:
+        # chon mot thu muc khac cung ten "Fanfic" se lang le tro du an
+        # `fanfic` THAT sang kho khac, keo theo moi task/worktree cu treo o
+        # mot duong dan khong con dung. Khong hoi, khong canh bao.
+        #
+        # Nen: neu ma da co, va tro tới mot kho KHAC, thi hoi truoc.
+        dang_co = {p.project_id: p for p in self.cau.cac_project()}
+        if pid in dang_co:
+            cu = dang_co[pid]
+            if str(Path(cu.repo_path)) == str(Path(duong)):
+                self._bao_loi(f"dự án {pid!r} đã có, trỏ đúng thư mục này")
+                return
+            tl = QMessageBox(self)
+            tl.setIcon(QMessageBox.Warning)
+            tl.setWindowTitle("Mã dự án đã tồn tại")
+            tl.setText(f"Dự án {pid!r} đã có và đang trỏ tới một kho KHÁC.")
+            tl.setInformativeText(
+                f"đang trỏ  : {cu.repo_path}\n"
+                f"sẽ đổi sang: {duong}\n\n"
+                "Đổi sẽ khiến mọi việc/worktree cũ của dự án này trỏ tới "
+                "một kho không còn đúng. Việc đang chạy KHÔNG bị dừng.")
+            tl.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
+            tl.setDefaultButton(QMessageBox.Cancel)
+            if tl.exec() != QMessageBox.Yes:
+                return
         self.cau.them_project(pid, ten, duong)
 
     def xac_nhan_dung(self, task_id: str) -> None:
@@ -464,4 +524,6 @@ class _Inspector(QFrame):
             dong += ["KHOÁ ĐANG GIỮ"]
             for k in khoa:
                 dong.append(f"   {k.get('kind')}  {k.get('resource')}")
-        self.o.setPlainText("\n".join(dong) or "(chưa có việc nào chạy)")
+        # GIU vung dang boi den — xem `dat_van_ban_giu_chon`.
+        dat_van_ban_giu_chon(
+            self.o, "\n".join(dong) or "(chưa có việc nào chạy)")

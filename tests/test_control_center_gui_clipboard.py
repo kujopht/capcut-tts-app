@@ -197,9 +197,21 @@ class TestNutCopyNhinThayDuoc(unittest.TestCase):
                          "def f():\n    return 1\n")
 
     def test_nhat_ky_co_Copy_va_Copy_All(self):
+        """BAM NUT, khong goi ham.
+
+        Ban dau goi `nk.copy_tat_ca()` truc tiep — nen neu ai do xoa
+        dong `clicked.connect(...)`, hai nut thanh nut chet ma bai kiem
+        van xanh. Dong nghiem thu la "logs have Copy and Copy All",
+        tuc la ve CAI NUT, khong ve cai ham.
+        """
         nk = KhungNhatKy()
         nk.dat_van_ban("dòng 1\ndòng 2\ndòng 3")
-        nk.copy_tat_ca()
+        QGuiApplication.clipboard().setText("KHONG-DOI")
+        nk.nut_copy_all.click()
+        self.assertEqual(QGuiApplication.clipboard().text(),
+                         "dòng 1\ndòng 2\ndòng 3")
+        QGuiApplication.clipboard().setText("KHONG-DOI")
+        nk.nut_copy.click()
         self.assertEqual(QGuiApplication.clipboard().text(),
                          "dòng 1\ndòng 2\ndòng 3")
 
@@ -211,7 +223,7 @@ class TestNutCopyNhinThayDuoc(unittest.TestCase):
         nk = KhungNhatKy()
         nk.dat_van_ban("a\nb")
         QGuiApplication.clipboard().setText("CU")
-        nk.copy_chon()
+        nk.nut_copy.click()
         self.assertEqual(QGuiApplication.clipboard().text(), "a\nb")
 
     def test_copy_phan_DANG_CHON_doi_U2029_thanh_newline(self):
@@ -248,17 +260,31 @@ class TestKhongGianhPhimClipboard(unittest.TestCase):
         return CuaSoChinh(cau=cau_gia())
 
     def test_khong_QShortcut_nao_chiem_to_hop_clipboard(self):
+        """MỌI phạm vi, không riêng phạm vi ứng dụng.
+
+        BẢN ĐẦU CỦA BÀI KIỂM NÀY LÀ MỘT BÀI KIỂM RỖNG, và nó là bài kiểm
+        quan trọng nhất của cả bản phát hành — nên đáng ghi lại đủ.
+
+        Nó lọc `sc.context() == Qt.ApplicationShortcut`. Nhưng phạm vi MẶC
+        ĐỊNH của `QShortcut`/`QAction` là `WindowShortcut` (đo trên PySide6
+        6.11.2), nên bộ lọc đó bỏ qua gần như mọi cách người ta thật sự
+        thêm một lối tắt. Mutation: thêm `QShortcut(QKeySequence("Ctrl+C"),
+        self)` vào `_phim_tat_tuy_chon` — bài kiểm cũ VẪN XANH, trong khi
+        Ctrl+C bị ăn mất ở cả năm vùng chỉ-đọc (thẻ chat, nhật ký, panel
+        chi tiết, Inspector, bảng Tasks).
+
+        Ô soạn thì miễn nhiễm vì Qt gửi `ShortcutOverride` cho widget
+        editable đang focus — nên bài kiểm cũ chỉ bảo vệ đúng cái ô mà Qt
+        đã tự bảo vệ, và bỏ ngỏ toàn bộ phần còn lại.
+        """
         from PySide6.QtGui import QShortcut
         cs = self._cua_so()
         try:
             cam = set(cac_phim_tat_bi_cam())
-            thay = []
-            for sc in cs.findChildren(QShortcut):
-                s = sc.key().toString()
-                if s in cam and sc.context() == Qt.ApplicationShortcut:
-                    thay.append(s)
-            self.assertEqual(thay, [],
-                             f"lối tắt phạm vi ứng dụng đã chiếm: {thay}")
+            thay = [(sc.key().toString(), str(sc.context()))
+                    for sc in cs.findChildren(QShortcut)
+                    if sc.key().toString() in cam]
+            self.assertEqual(thay, [], f"lối tắt đã chiếm: {thay}")
         finally:
             cs.cau.dung()
 
@@ -267,10 +293,51 @@ class TestKhongGianhPhimClipboard(unittest.TestCase):
         cs = self._cua_so()
         try:
             cam = set(cac_phim_tat_bi_cam())
-            thay = [a.shortcut().toString() for a in cs.findChildren(QAction)
-                    if a.shortcut().toString() in cam
-                    and a.shortcutContext() == Qt.ApplicationShortcut]
+            thay = [(a.shortcut().toString(), str(a.shortcutContext()))
+                    for a in cs.findChildren(QAction)
+                    if a.shortcut().toString() in cam]
             self.assertEqual(thay, [], f"QAction đã chiếm: {thay}")
+        finally:
+            cs.cau.dung()
+
+    def test_Ctrl_C_THAT_copy_duoc_o_MOI_vung_chi_doc(self):
+        """Bơm Ctrl+C bằng sự kiện THẬT vào từng vùng chỉ-đọc.
+
+        Đây là bài bắt được thứ mà hai bài quét-shortcut ở trên không bắt
+        nổi: một lối tắt ở phạm vi cửa sổ ăn mất Ctrl+C *trước khi* nó tới
+        widget. Quét cấu trúc là điều kiện cần; bơm phím là điều kiện đủ.
+        """
+        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtTest import QTest
+        cs = self._cua_so()
+        try:
+            cs.show()
+            # `activateWindow()` + `processEvents()` la BAT BUOC, khong phai
+            # trang tri: thieu chung, may lối tắt của cửa sổ chưa vào cuộc va
+            # `QTest.keyClick` giao thang su kien cho widget — bai kiem se
+            # XANH ngay ca khi mot QShortcut Ctrl+C dang an mat phim.
+            # Da kiem bang mutation dung nghia: bo hai dong nay -> bai kiem
+            # khong con bat duoc ke cuop.
+            cs.activateWindow()
+            cs.raise_()
+            QApplication.processEvents()
+            vung = [
+                ("nhật ký", cs.khung_log.nk.o, "log A\nlog B"),
+                ("chi tiết việc", cs.khung_viec.chi_tiet.o, "ct A\nct B"),
+                ("inspector", cs.inspector.o, "insp A\ninsp B"),
+            ]
+            for nhan, o, mau in vung:
+                with self.subTest(vung=nhan):
+                    o.setPlainText(mau)
+                    o.selectAll()
+                    o.setFocus()
+                    QApplication.processEvents()
+                    QGuiApplication.clipboard().setText("KHONG-DOI")
+                    QTest.keyClick(o, Qt.Key_C, Qt.ControlModifier)
+                    QApplication.processEvents()
+                    self.assertEqual(
+                        QGuiApplication.clipboard().text(), mau,
+                        f"Ctrl+C bị ăn mất ở vùng {nhan!r}")
         finally:
             cs.cau.dung()
 

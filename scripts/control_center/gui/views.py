@@ -1,10 +1,16 @@
 """Bốn khung còn lại: Tasks / Agents / Logs / Usage.
 
 Một quyết định chung cho cả bốn: dùng `QTableWidget` với ô CHỈ-ĐỌC thay vì
-widget tự vẽ. Bảng của Qt cho sẵn: chọn hàng bằng chuột, Ctrl+A, Ctrl+C
-(copy hàng đang chọn), menu chuột phải, và cuộn bằng bánh xe. Tự vẽ thẻ
-trông đẹp hơn nhưng sẽ phải dựng lại toàn bộ những thứ đó — và đó đúng là
-chỗ các app hay làm hỏng clipboard.
+widget tự vẽ. Bảng của Qt cho sẵn chọn hàng bằng chuột, Ctrl+A, menu chuột
+phải và cuộn bằng bánh xe. Tự vẽ thẻ trông đẹp hơn nhưng sẽ phải dựng lại
+toàn bộ những thứ đó — và đó đúng là chỗ các app hay làm hỏng clipboard.
+
+MỘT ĐÍNH CHÍNH đáng ghi lại: bản trước tệp này viết rằng Qt "cho sẵn Ctrl+C
+copy hàng đang chọn". **Không đúng.** Qt6 copy `DisplayRole` của MỘT ô hiện
+tại; chọn ba hàng rồi Ctrl+C vẫn ra một ô. Không bài kiểm nào bơm Ctrl+C
+vào bảng nên câu sai đó sống sót tới lượt review đối kháng. Giờ có
+`_BangCopyDuoc` cài `keyPressEvent` để Ctrl+C copy cả hàng, và có bài kiểm
+bơm phím thật.
 
 `Tasks` vẫn có phần "thẻ" theo yêu cầu: mỗi hàng mang huy hiệu trạng thái
 có màu, và bấm vào hàng mở một panel chi tiết bên phải.
@@ -22,12 +28,13 @@ from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QHeaderVi
 from scripts.control_center.gui.bridge import mo_ta_thoi_luong
 from scripts.control_center.gui.widgets import (HuyHieu, KhoiMa, KhungNhatKy,
                                                 VanBanChonDuoc, dat_clipboard,
+                                                dat_van_ban_giu_chon,
                                                 menu_copy)
 
 
 def _bang(cot: List[str]) -> QTableWidget:
-    """Bảng chỉ-đọc, chọn theo hàng, copy được bằng Ctrl+C mặc định của Qt."""
-    b = QTableWidget(0, len(cot))
+    """Bảng chỉ-đọc, chọn theo hàng, Ctrl+C copy CẢ HÀNG (xem `_BangCopyDuoc`)."""
+    b = _BangCopyDuoc(0, len(cot))
     b.setHorizontalHeaderLabels(cot)
     b.setEditTriggers(QAbstractItemView.NoEditTriggers)   # chi doc...
     b.setSelectionBehavior(QAbstractItemView.SelectRows)  # ...nhung VAN chon duoc
@@ -52,18 +59,62 @@ def _o(text: str, *, tooltip: str = "") -> QTableWidgetItem:
     return it
 
 
+def _o_text(b: QTableWidget, r: int, c: int) -> str:
+    """Chữ của một ô, KỂ CẢ khi ô đó là một widget chứ không phải item.
+
+    Cột "Trạng thái" và cột "Usage" dùng `setCellWidget(HuyHieu)` để có màu,
+    nên `b.item(r, c)` trả `None` ở đó. Bản trước chỉ đọc `item()`, nên
+    "Copy hàng đang chọn" và "Copy All" dán ra một bảng **thiếu đúng cột
+    quan trọng nhất** — state ở bảng Tasks, và mức tin cậy ở bảng Agents,
+    tức là cột mà bất biến "không bịa số usage" đang bảo vệ. Mất dữ liệu
+    âm thầm: header vẫn ghi tên cột, giá trị thì rỗng.
+    """
+    it = b.item(r, c)
+    if it is not None:
+        return it.text()
+    w = b.cellWidget(r, c)
+    if w is not None:
+        # `HuyHieu` la mot QLabel; lay `text()` neu co.
+        lay = getattr(w, "text", None)
+        if callable(lay):
+            return lay() or ""
+    return ""
+
+
 def _copy_bang(b: QTableWidget) -> str:
     """Văn bản của các hàng đang chọn, dạng TSV — dán được vào Excel."""
     hang = sorted({i.row() for i in b.selectedIndexes()})
     if not hang:
         hang = list(range(b.rowCount()))
-    dong = []
-    dong.append("\t".join(b.horizontalHeaderItem(c).text()
-                          for c in range(b.columnCount())))
+    dong = ["\t".join(b.horizontalHeaderItem(c).text()
+                      for c in range(b.columnCount()))]
     for r in hang:
-        dong.append("\t".join((b.item(r, c).text() if b.item(r, c) else "")
+        dong.append("\t".join(_o_text(b, r, c)
                               for c in range(b.columnCount())))
     return "\n".join(dong)
+
+
+class _BangCopyDuoc(QTableWidget):
+    """Bảng mà **Ctrl+C copy CẢ HÀNG**, không phải một ô.
+
+    Qt6 mặc định cho Ctrl+C trên `QTableWidget` copy đúng `DisplayRole` của
+    MỘT ô hiện tại — chọn ba hàng rồi Ctrl+C vẫn ra một ô. Tài liệu của bản
+    trước nói ngược lại, và không bài kiểm nào bơm Ctrl+C vào bảng nên
+    khoảng cách đó không bị bắt.
+
+    Cài ở `keyPressEvent` chứ KHÔNG bằng `QShortcut`: một shortcut Ctrl+C
+    (dù ở phạm vi cửa sổ) sẽ giành mất Ctrl+C của mọi ô văn bản chỉ-đọc
+    khác trong cùng cửa sổ. Xử lý tại widget thì chỉ tác dụng khi chính
+    bảng đang có focus, và mọi phím khác vẫn xuống `super()`.
+    """
+
+    def keyPressEvent(self, e):                             # noqa: N802
+        if (e.key() == Qt.Key_C and (e.modifiers() & Qt.ControlModifier)
+                and not (e.modifiers() & Qt.ShiftModifier)):
+            dat_clipboard(_copy_bang(self))
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
 
 def _thanh_copy(b: QTableWidget, nhan: str) -> QWidget:
@@ -243,7 +294,10 @@ class _PanelChiTietViec(QFrame):
             dong += ["", "CỔNG", t["gate_reason"]]
         if t.get("blocked_reason"):
             dong += ["", "ĐANG CHỜ BẠN", t["blocked_reason"]]
-        self.o.setPlainText("\n".join(dong))
+        # GIU vung dang boi den: panel nay ve lai moi giay, va ghi tho
+        # bang `setPlainText` xoa vung chon nguoi dung vua boi de bam
+        # Ctrl+C. Do la mot loi CLIPBOARD, du trong nhu loi hieu nang.
+        dat_van_ban_giu_chon(self.o, "\n".join(dong))
         self.nut_duyet.setVisible(t.get("state") == "BLOCKED")
 
 

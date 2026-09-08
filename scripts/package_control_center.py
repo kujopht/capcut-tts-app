@@ -13,8 +13,10 @@ GÓI GỒM ĐÚNG NHỮNG GÌ CẦN ĐỂ CHẠY, không hơn:
     scripts/router_v4/**          fabric, scheduler, executor, lease
     scripts/cc_agent_tool.py      công cụ động từ hữu hạn cho agent
     scripts/__init__.py
-    router-cc, router-cc.cmd      lối vào
-    requirements-control-room.txt phụ thuộc TUI
+    router-cc-gui(.cmd)           lối vào GIAO DIỆN ĐỒ HOẠ (đường chính)
+    router-cc, router-cc.cmd      lối vào TUI (dự phòng/gỡ lỗi)
+    requirements-control-center-gui.txt  phụ thuộc GUI (chỉ PySide6)
+    requirements-control-room.txt phụ thuộc TUI (textual, rich)
     docs/CONTROL_CENTER.md        tài liệu
     MANIFEST.txt                  băm SHA-256 của TỪNG tệp trong gói
 
@@ -45,7 +47,14 @@ GOM: Tuple[str, ...] = (
     "scripts/router_v4",
     "router-cc",
     "router-cc.cmd",
+    # V0.1.1: loi vao GIAO DIEN DO HOA. `scripts/control_center` o tren da
+    # keo theo ca `gui/` (no la mot thu muc), nhung hai tep loi vao va tep
+    # phu thuoc nam o goc kho nen phai liet ke rieng — thieu chung thi goi
+    # van "chay duoc" bang TUI va khong ai phat hien duong chinh bi mat.
+    "router-cc-gui",
+    "router-cc-gui.cmd",
     "requirements-control-room.txt",
+    "requirements-control-center-gui.txt",
     "docs/CONTROL_CENTER.md",
 )
 

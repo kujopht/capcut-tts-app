@@ -386,18 +386,81 @@ class TestHopDongDuLieuVoiBackendTHAT(unittest.TestCase):
     bản V0.1.
     """
 
-    def test_khoa_cua_snapshot_gia_khop_snapshot_that(self):
+    def test_khoa_cua_snapshot_gia_khop_snapshot_THAT_chay_that(self):
+        """Đối chiếu với `snapshot()` CHẠY THẬT, không với mã nguồn của nó.
+
+        BẢN ĐẦU CỦA BÀI KIỂM NÀY GẦN NHƯ RỖNG: nó `assertIn('"tasks"', ma)`
+        trên **văn bản mã nguồn** của `ControlCenter.snapshot`. Mutation
+        cho thấy vấn đề: đổi `snapshot()` để `d["tasks"]` trả list
+        **dataclass** thay vì `to_dict()` → chuỗi `"tasks"` vẫn nằm trong
+        mã, bài kiểm vẫn xanh, còn giao diện thật vỡ ngay ở `t.get(...)`.
+
+        Nên giờ dựng một `ControlCenter` THẬT trên thư mục tạm, gọi
+        `snapshot()` thật, và đối chiếu **khoá + kiểu của phần tử** với
+        backend giả. Đây là bài kiểm giữ cho cả bộ kiểm giao diện khỏi
+        "mô phỏng một thế giới không tồn tại".
+        """
+        import shutil
+        import tempfile
         from scripts.control_center.engine import ControlCenter
-        import inspect
-        ma = inspect.getsource(ControlCenter.snapshot)
-        gia = set(CCGia().snapshot("fanfic"))
-        for khoa in ("projects", "selected", "ts", "tasks", "sessions",
-                     "locks", "worktrees", "events", "chat", "in_flight"):
-            with self.subTest(khoa=khoa):
-                self.assertIn(f'"{khoa}"', ma,
-                              f"`snapshot()` thật không còn khoá {khoa!r}")
-                self.assertIn(khoa, gia,
-                              f"backend giả thiếu khoá {khoa!r}")
+        from scripts.control_center.model import Project
+
+        goc = Path(tempfile.mkdtemp(prefix="cc-gui-contract-"))
+        try:
+            cc = ControlCenter(root=goc, probe=False)
+            cc.them_project(Project(project_id="p", name="P",
+                                    repo_path=str(goc)))
+            that = cc.snapshot("p")
+            gia = CCGia().snapshot("fanfic")
+
+            self.assertEqual(set(that), set(gia),
+                             "khoá của snapshot thật và giả phải khớp")
+            for khoa in ("tasks", "sessions", "locks", "worktrees",
+                         "events", "chat", "in_flight", "projects"):
+                with self.subTest(khoa=khoa):
+                    self.assertIsInstance(that[khoa], list)
+                    self.assertIsInstance(gia[khoa], list)
+            # Giao dien goi `.get()` tren tung phan tu -> chung PHAI la dict.
+            cc.chat("p", "update docs/a.md with one line")
+            that2 = cc.snapshot("p")
+            for khoa in ("tasks", "chat", "projects"):
+                with self.subTest(khoa=khoa):
+                    self.assertTrue(that2[khoa], f"{khoa} phải có dữ liệu")
+                    for x in that2[khoa]:
+                        self.assertIsInstance(
+                            x, dict,
+                            f"phần tử của {khoa!r} phải là dict — giao diện "
+                            f"gọi .get() trên nó")
+            cc.shutdown()
+        finally:
+            shutil.rmtree(goc, ignore_errors=True)
+
+    def test_snapshot_KHONG_co_du_an_tra_it_khoa_hon_va_giao_dien_chiu_duoc(self):
+        """Hình dạng mà backend giả không bao giờ tạo ra.
+
+        `snapshot()` thật trả về CHỈ 3 khoá khi không có dự án nào
+        (`engine.py`: `if not pid: return d`). Backend giả luôn trả đủ 10,
+        nên đường này chưa từng được bài kiểm nào chạm — và cửa sổ gọi
+        `d.get("tasks") or []` khắp nơi, nên nó phải chịu được.
+        """
+        import shutil
+        import tempfile
+        from scripts.control_center.engine import ControlCenter
+
+        goc = Path(tempfile.mkdtemp(prefix="cc-gui-rong-"))
+        try:
+            cc = ControlCenter(root=goc, probe=False)
+            d = cc.snapshot("")
+            self.assertEqual(set(d), {"projects", "selected", "ts"})
+            cs = _cua_so()
+            try:
+                cs.ve_lai(d)             # KHONG duoc nem ngoai le
+                self.assertEqual(cs.khung_viec.bang.rowCount(), 0)
+            finally:
+                cs.cau.dung()
+            cc.shutdown()
+        finally:
+            shutil.rmtree(goc, ignore_errors=True)
 
     def test_truong_cua_task_gia_khop_dataclass_THAT(self):
         import dataclasses as dc

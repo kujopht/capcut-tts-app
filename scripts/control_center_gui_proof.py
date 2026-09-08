@@ -89,8 +89,28 @@ def main(argv=None) -> int:
         cau = Cau(cc=cc)
         cs = CuaSoChinh(cau=cau)
         cs.show()
+
+        # VONG DIEU PHOI chi bat khi `--that`, va day la lua chon co
+        # chu dich, khong phai thieu sot:
+        #
+        #   * `bat_dau()` goi `cc.start()`, va tu V0.1.1 vong lap do
+        #     DO SUC KHOE LUOI ngay khi co viec cho giao — tuc la GOI
+        #     RA MANG. Mot bai chung minh "offline" ma lang le goi
+        #     provider thi khong con la offline.
+        #   * Nguoc lai, tieu chi 5 (agent/phien/worktree cap nhat
+        #     song) KHONG THE chung minh ma khong co vong lap. Ban dau
+        #     toi quen goi `bat_dau()` o CA HAI che do, nen tieu chi 5
+        #     bao HONG voi "trang thai cuoi=QUEUED" — mot loi cua
+        #     KICH BAN, khong phai cua san pham. Ghi lai vi no de tai
+        #     dien: mot bai chung minh thieu mot cu goi khoi dong se
+        #     to cao san pham thay vi to cao chinh no.
+        if a.that:
+            cs.bat_dau()
+        # `or True` DA BI BO. No lam tieu chi nay luon DAT, ke ca khi bo han
+        # `cs.show()` — mot dong "bang chung" khong kiem gi thi te hon la
+        # khong co dong nao, vi no chiem cho cua mot phep kiem thuc.
         bd.ghi("1. cửa sổ mở được (điểm vào một lệnh)",
-               cs.isVisible() or True, "router-cc-gui.cmd -> QMainWindow")
+               cs.isVisible(), "router-cc-gui.cmd -> QMainWindow")
 
         # -- 2. Mo du an -----------------------------------------------------
         cc.them_project(Project(project_id="fanfic", name="Fanfic",
@@ -186,8 +206,7 @@ def main(argv=None) -> int:
 
         # -- 5. Trang thai SONG (chi khi --that) -----------------------------
         if a.that:
-            print("\n  … chờ một lượt agent THẬT (tối đa "
-                  f"{a.timeout:.0f}s)")
+            print(f"\n  … chờ một lượt agent THẬT (tối đa {a.timeout:.0f}s)")
             thay_phien, thay_cay = False, False
             het = time.time() + a.timeout
             while time.time() < het:
@@ -208,7 +227,8 @@ def main(argv=None) -> int:
                    f"phiên hiện ở bảng Agents={thay_phien} "
                    f"worktree={thay_cay} trạng thái cuối={t.state.value}")
         else:
-            print("\n  (bỏ qua tiêu chí 5 — cần --that để chạy agent thật)")
+            print("\n  (bỏ qua tiêu chí 5 — cần --that: vòng điều phối phải "
+                  "chạy, và nó gọi ra provider thật)")
 
         # -- 10. Khoi dong lai, trang thai con nguyen ------------------------
         cau.dung()

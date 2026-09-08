@@ -126,14 +126,18 @@ class TheRouter(TheTin):
                  parent: Optional[QWidget] = None):
         super().__init__(nhan="ROUTER", text="", mau_vien="#6b46c1",
                          parent=parent)
+        #: `task_id -> _HangViec`, de cap nhat trang thai TAI CHO.
+        self.hang_viec: Dict[str, "_HangViec"] = {}
         if hang:
             tom = QLabel("Đã nhận mục tiêu — phân rã thành "
                          f"{len(hang)} việc:")
             tom.setStyleSheet("color:#2b3350; font-size:12px;")
             self.v.addWidget(tom)
             for h in hang:
-                self.v.addWidget(_HangViec(h, khi_duyet=khi_duyet,
-                                           khi_mo_viec=khi_mo_viec))
+                hv = _HangViec(h, khi_duyet=khi_duyet,
+                               khi_mo_viec=khi_mo_viec)
+                self.hang_viec[h.get("task_id", "")] = hv
+                self.v.addWidget(hv)
         else:
             # Khong co viec nao: van phai hien loi cua Router, khong im lang.
             o = VanBanChonDuoc()
@@ -202,7 +206,22 @@ class _HangViec(QFrame):
             nut.clicked.connect(lambda: khi_duyet(h.get("task_id", "")))
             r.addWidget(nut)
 
+        self.hh, self.nhan_agent = hh, None
+        if agent:
+            self.nhan_agent = a
         menu_copy(self, self._van_ban)
+
+    def cap_nhat(self, h: Dict) -> None:
+        """Cập nhật TẠI CHỖ, không dựng lại thẻ.
+
+        Dựng lại cả danh sách tin mỗi lần một việc đổi trạng thái sẽ huỷ
+        thẻ người dùng đang đọc và huỷ luôn vùng họ đang bôi đen. Trạng
+        thái việc đổi liên tục, nên đây là đường nóng.
+        """
+        self.h = h
+        self.hh.dat(h.get("state", "?"))
+        if self.nhan_agent is not None:
+            self.nhan_agent.setText(h.get("agent") or "")
 
     def _van_ban(self) -> str:
         h = self.h
@@ -222,7 +241,9 @@ class KhungChat(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self._dau_van = ""
+        self._dau_tin = ""
+        self._dau_viec = ""
+        self._the_router: List["TheRouter"] = []
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -309,32 +330,64 @@ class KhungChat(QWidget):
     # -- ve lai --------------------------------------------------------------
 
     def cap_nhat(self, d: Dict) -> None:
-        """Vẽ lại danh sách tin từ ảnh chụp.
+        """Vẽ lại danh sách tin — DỰNG LẠI CÀNG ÍT CÀNG TỐT.
 
-        Chỉ vẽ lại khi nội dung THẬT SỰ đổi: vẽ lại mỗi giây sẽ giết mất
-        vùng người dùng đang bôi đen — và mất vùng chọn thì Ctrl+C không
-        copy được gì. Đó là một lỗi clipboard, dù trông như lỗi hiệu năng.
+        Có HAI loại thay đổi, và gộp chúng lại là một lỗi thật:
+
+        * **tin mới** (bảng `chat` chỉ INSERT, text không bao giờ đổi) —
+          phải dựng thêm thẻ;
+        * **việc đổi trạng thái** — chỉ ảnh hưởng vài huy hiệu bên trong
+          các thẻ ĐÃ CÓ.
+
+        Bản đầu dùng MỘT dấu vân tay cho cả hai, nên mỗi lần một việc đổi
+        `RUNNING→DONE` là **toàn bộ** danh sách tin bị dựng lại: thẻ người
+        dùng đang đọc biến mất, vùng đang bôi đen mất theo (⇒ Ctrl+C ra
+        rỗng), và màn hình nhảy về cuối. Review đối kháng đo được: 19 thẻ,
+        người dùng cuộn ở đầu (scroll 0/2452), một việc đổi trạng thái ⇒
+        toàn bộ 19 thẻ mới và scroll 2452/2452.
+
+        Nên tách: tin mới thì dựng thêm; trạng thái đổi thì cập nhật TẠI
+        CHỖ. Và chỉ tự cuộn xuống khi người dùng vốn ĐANG ở cuối — ai đang
+        đọc lại tin cũ thì không bị kéo đi.
         """
         chat = d.get("chat") or []
         viec = {t.get("task_id"): t for t in (d.get("tasks") or [])}
-        dau = repr([(m.get("message_id"), m.get("role")) for m in chat]) + \
-            repr(sorted((k, v.get("state"), v.get("owner_session"))
-                        for k, v in viec.items()))
-        if dau == self._dau_van:
+
+        dau_tin = repr([(m.get("message_id"), m.get("role")) for m in chat])
+        dau_viec = repr(sorted((k, v.get("state"), v.get("owner_session"))
+                               for k, v in viec.items()))
+
+        if dau_tin != self._dau_tin:
+            sb = self.cuon.verticalScrollBar()
+            o_cuoi = sb.maximum() == 0 or sb.value() >= sb.maximum() - 4
+            while self.ds.count() > 1:
+                it = self.ds.takeAt(0)
+                w = it.widget()
+                if w is not None:
+                    w.setParent(None)
+            self._the_router = []
+            for m in chat:
+                w = self._the(m, viec)
+                if isinstance(w, TheRouter):
+                    self._the_router.append(w)
+                self.ds.insertWidget(self.ds.count() - 1, w)
+            self._dau_tin, self._dau_viec = dau_tin, dau_viec
+            if o_cuoi:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(0, self._cuoi_trang)
             return
-        self._dau_van = dau
 
-        while self.ds.count() > 1:
-            it = self.ds.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.setParent(None)
-
-        for m in chat:
-            self.ds.insertWidget(self.ds.count() - 1, self._the(m, viec))
-        # Cuon xuong tin moi nhat.
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(0, self._cuoi_trang)
+        if dau_viec != self._dau_viec:
+            # KHONG dung lai gi ca — chi doi huy hieu trong cac the da co.
+            for tr in self._the_router:
+                for tid, hv in tr.hang_viec.items():
+                    t = viec.get(tid)
+                    if t:
+                        moi_h = dict(hv.h)
+                        moi_h["state"] = t.get("state", "?")
+                        moi_h["agent"] = t.get("owner_session") or ""
+                        hv.cap_nhat(moi_h)
+            self._dau_viec = dau_viec
 
     def _the(self, m: Dict, viec: Dict[str, Dict]) -> QWidget:
         vai = (m.get("role") or "").lower()

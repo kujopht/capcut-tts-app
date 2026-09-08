@@ -81,6 +81,9 @@ class Cau(QObject):
         self._dong_ho = QTimer(self)
         self._dong_ho.setInterval(NHIP_MS)
         self._dong_ho.timeout.connect(self.lam_moi)
+        # Ket noi mac dinh (AutoConnection) => queued khi phat tu luong nen,
+        # tuc `_khi_nen_xong` luon chay tren luong cua `Cau` (luong GUI).
+        self._nen_xong.connect(self._khi_nen_xong)
 
     # -- vong doi ------------------------------------------------------------
 
@@ -150,27 +153,43 @@ class Cau(QObject):
 
     # -- ghi (chay tren luong nen) -------------------------------------------
 
+    #: Tin hieu NOI BO: mot thao tac nen vua ket thuc. Ton tai chi de dua
+    #: viec dem va viec lam moi VE LUONG GUI.
+    _nen_xong = Signal(str, str)          # (nhan, loi rong neu thanh cong)
+
     def _nen(self, ham: Callable, nhan: str) -> None:
         self._dang += 1
         self.dang_lam.emit(True)
+        self._pool.start(_Viec(
+            ham,
+            lambda _kq: self._nen_xong.emit(nhan, ""),
+            lambda exc: self._nen_xong.emit(
+                nhan, f"{type(exc).__name__}: {exc}")))
 
-        def xong(_kq):
-            self._giam()
-            self.xong_viec.emit(nhan)
+    @Slot(str, str)
+    def _khi_nen_xong(self, nhan: str, loi: str) -> None:
+        """Chạy trên LUỒNG GUI. Hai lý do phải như vậy:
 
-        def hong(exc):
-            self._giam()
-            self.co_loi.emit(f"{nhan} hỏng: {type(exc).__name__}: {exc}")
+        1. `self._dang -= 1` là đọc–sửa–ghi. Với `max_parallel` tác vụ chạy
+           song song, hai runnable có thể ghi đè nhau và bộ đếm không bao
+           giờ về 0 — khi đó `dang_lam(False)` không bao giờ phát, và nút
+           **Gửi** kẹt ở trạng thái vô hiệu cho tới khi có thao tác khác.
+        2. `QTimer.singleShot()` tạo trên một luồng của `QThreadPool` thì
+           nằm trên một luồng KHÔNG có event loop, nên nó không bao giờ
+           bắn. "Làm mới ngay sau khi xong" trước đây thực tế không chạy;
+           người dùng vẫn phải chờ hết nhịp 1s.
 
-        self._pool.start(_Viec(ham, xong, hong))
-
-    def _giam(self) -> None:
+        Tín hiệu Qt từ luồng nền tới slot ở luồng GUI là *queued* nên đây
+        là chỗ duy nhất cần đồng bộ — không cần mutex.
+        """
         self._dang = max(0, self._dang - 1)
         if self._dang == 0:
             self.dang_lam.emit(False)
-        # Lam moi ngay sau khi mot thao tac xong, dung cho het nhip 1s:
-        # nguoi vua bam nut thi phai thay ket qua ngay.
-        QTimer.singleShot(0, self.lam_moi)
+        if loi:
+            self.co_loi.emit(f"{nhan} hỏng: {loi}")
+        else:
+            self.xong_viec.emit(nhan)
+        self.lam_moi()
 
     def gui_chat(self, text: str) -> None:
         pid = self._dam_bao_pid()

@@ -158,6 +158,13 @@ class KhungViec(QWidget):
         v.setSpacing(8)
 
         self.bang = _bang(self.COT)
+        # Be rong ban dau: cot "Viec" phai du rong de KHONG cat ten viec.
+        # Mac dinh cua Qt chia deu, nen "Backend wiring" ra "Backend ..." —
+        # ten viec la thu nguoi dung quet mat de tim, cat no la lam mat
+        # chinh cong nang cua bang. Nguoi dung van keo lai duoc (Interactive).
+        for cot, rong in ((0, 210), (1, 96), (2, 110), (3, 92), (4, 62),
+                          (5, 78), (6, 120)):
+            self.bang.setColumnWidth(cot, rong)
         self.bang.itemSelectionChanged.connect(self._doi_chon)
         v.addWidget(_thanh_copy(self.bang, "Việc trong dự án"))
 
@@ -461,4 +468,9 @@ Lối tắt (tuỳ chọn, không bắt buộc):
         super().__init__(parent)
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
-        v.addWidget(KhoiMa(self.NOI_DUNG, tieu_de="hướng dẫn"))
+        km = KhoiMa(self.NOI_DUNG, tieu_de="hướng dẫn")
+        # `KhoiMa` gioi han cao 220px cho khoi ma trong chat. Trong hop thoai
+        # tro giup thi gioi han do de lai mot dai trong lon o tren, nen noi
+        # ra cho het hop.
+        km.o.setMaximumHeight(16777215)
+        v.addWidget(km)

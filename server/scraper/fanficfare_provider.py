@@ -89,9 +89,19 @@ def _fanficfare_binary() -> Optional[str]:
     found = shutil.which("fanficfare")
     if found:
         return found
-    venv_candidate = Path(sys.exec_prefix) / "Scripts" / "fanficfare.exe"
-    if venv_candidate.is_file():
-        return str(venv_candidate)
+    # CA HAI bo cuc venv. Truoc day chi co `Scripts/` (Windows), va do la mot
+    # gia dinh chi-Windows lang le lam hong may san xuat Linux: dich vu systemd
+    # chay voi PATH khong chua `<venv>/bin`, nen `shutil.which` truot; roi ban
+    # du phong duy nhat lai la mot duong dan Windows. Ket qua la
+    # `_supported_hostnames()` tra ve RONG va `resolve_acquisition_route()`
+    # KHONG BAO GIO chon FanFicFare — du no da duoc cai dat.
+    #
+    # Hong theo kieu im lang: khong loi, khong canh bao, chi la mot con duong
+    # tot hon khong bao gio duoc dung.
+    for ung_vien in (Path(sys.exec_prefix) / "Scripts" / "fanficfare.exe",
+                     Path(sys.exec_prefix) / "bin" / "fanficfare"):
+        if ung_vien.is_file():
+            return str(ung_vien)
     return None
 
 

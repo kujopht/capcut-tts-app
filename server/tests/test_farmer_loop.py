@@ -401,3 +401,59 @@ class RoundTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResumeTtsTest(unittest.TestCase):
+    """Lan chay tiep phai HOI xem da co job TTS chua, khong suy dien.
+
+    Suy dien "dang chay tiep tuc la lan truoc da xep TTS" nghe hop ly nhung
+    sai: xuat ban va TTS la hai buoc khac nhau. Hai tac pham that da READY
+    ma khong he co job TTS nao — chung se cam lang vinh vien.
+    """
+
+    class _CoNovel(_Store):
+        def __init__(self, jobs):
+            super().__init__()
+            self._jobs = jobs
+
+        def find_novels(self, owner_id=None, limit=None, **kw):
+            return [mock.Mock(external_source_url="https://e.com/a",
+                              novel_id="nov_cu")], 1
+
+        def list_chapters(self, novel_id):
+            return [mock.Mock(chapter_id="ch_1")]
+
+        def list_jobs(self, owner_id, chapter_id=None):
+            return list(self._jobs)
+
+    def test_resume_enqueues_tts_when_none_exists(self):
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d), store=self._CoNovel(jobs=[]),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+        self.assertEqual(m.resumed, 1)
+        self.assertEqual(h.tts, ["nov_cu"])          # DA xep
+        self.assertEqual(m.published_candidates, 1)
+
+    def test_resume_does_not_enqueue_a_second_tts_job(self):
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d),
+                         store=self._CoNovel(jobs=[mock.Mock(job_id="job_cu")]),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+        self.assertEqual(m.resumed, 1)
+        self.assertEqual(h.tts, [])                  # KHONG xep trung
+        self.assertEqual(m.published_candidates, 1)
+
+    def test_an_unreadable_job_list_defers_tts_instead_of_duplicating(self):
+        class _Hong(self._CoNovel):
+            def list_jobs(self, owner_id, chapter_id=None):
+                raise RuntimeError("Appwrite tu choi")
+
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d), store=_Hong(jobs=[]),
+                         text_candidates=[_text("https://e.com/a")])
+            m = h.farmer.run_text_lane()
+        self.assertEqual(h.tts, [])                  # hoan, khong doan
+        self.assertEqual(m.skipped_quota, 0)         # KHONG phai het han muc
+        self.assertTrue(any("hoan TTS" in e for e in m.errors), m.errors)

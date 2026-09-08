@@ -299,16 +299,30 @@ class ProductionFarmer:
 
             # 4. TTS qua Cloud Run — khong tong hop tren may nay.
             #
-            # Lan chay TIEP thi KHONG xep lai: lan truoc da xep roi (buoc nay
-            # nam truoc cho no hong). Xep lai moi vong se chat dong job trung
-            # cho cung mot chuong cho den khi tranh sinh duoc — mot vong lap
-            # tra tien cho cung mot ban thu am nhieu lan.
+            # Lan chay TIEP: HOI xem da co job TTS chua, khong suy dien.
+            #
+            # Xep lai mu quang se chat dong job trung cho cung mot chuong moi
+            # vong. Nhung BO QUA mu quang thi te hon: buoc xuat ban va buoc
+            # TTS la hai buoc khac nhau, nen mot tac pham co the da co ban
+            # nhap ma chua bao gio xep duoc TTS — va no se CAM LANG vinh vien.
+            # Da co that: hai tac pham READY o vong truoc khong he co job TTS.
             tts_job_id = ""
-            khe_tts = (None if novel_co_san
-                       else self._quotas.try_slot(FarmerQuotas.TTS))
+            can_tts = True
             if novel_co_san:
-                m.note_error(f"chay tiep {novel_id}: khong xep lai TTS "
-                             f"(lan truoc da xep)")
+                try:
+                    can_tts = not self._dedup.novel_has_tts_job(novel_id)
+                except DedupError as exc:
+                    # Khong hoi duoc -> bo qua VONG NAY roi thu lai. Su co
+                    # Appwrite la tam thoi; job TTS trung thi ton tien that.
+                    can_tts = False
+                    m.note_error(f"chay tiep {novel_id}: hoan TTS ({exc})")
+                else:
+                    m.note_error(
+                        f"chay tiep {novel_id}: "
+                        + ("xep TTS (chua co job nao)" if can_tts
+                           else "khong xep lai TTS (da co job)"))
+            khe_tts = (self._quotas.try_slot(FarmerQuotas.TTS) if can_tts
+                       else None)
             if khe_tts is not None:
                 try:
                     tts_job_id = self._enqueue_tts(novel_id) or ""
@@ -317,7 +331,9 @@ class ProductionFarmer:
                                  f"{type(exc).__name__}: {exc}")
                 finally:
                     khe_tts.__exit__(None, None, None)
-            elif not novel_co_san:
+            elif can_tts:
+                # Het han muc TTS that su. Khac han "khong can xep" (da co
+                # job roi) — gop hai cai lam mot se bao dong gia moi vong.
                 m.skipped_quota += 1
 
             m.produced += 1

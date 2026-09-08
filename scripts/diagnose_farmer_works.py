@@ -66,6 +66,20 @@ for n in farmer_novels:
     except Exception as exc:
         print(f"    media asset: LOI {type(exc).__name__}: {exc}")
 
+    # Job TTS: chung duoc xep o mot LAN CHAY TRUOC (truoc khi duong day duoc
+    # sua), nen manifest cua ban chay tiep khong ghi `tts_job_id`. Hoi thang
+    # kho de biet am thanh that su den dau.
+    try:
+        jobs = []
+        for ch in store.list_chapters(nid):
+            jobs += [j for j in store.list_jobs(FARMER_OWNER, ch.chapter_id)]
+        print(f"    job TTS : {len(jobs)}")
+        for j in jobs[:3]:
+            print(f"       {j.job_id} {getattr(j.status, 'value', j.status)} "
+                  f"key={getattr(j, 'output_object_key', '') or '(chua co)'}")
+    except Exception as exc:
+        print(f"    job TTS : LOI {type(exc).__name__}: {exc}")
+
     wid = work_id(BUCKET_FANFIC_TTS, url)
     d = canonical_dir(BUCKET_FANFIC_TTS, url)
     khoa = {o.key for o in r2.list_objects(d + "/")}

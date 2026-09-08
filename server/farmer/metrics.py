@@ -54,6 +54,9 @@ class LaneMetrics:
     #: Tac pham DANG DO duoc chay tiep: da co ban nhap tu mot lan truoc,
     #: nhung chua co bo hien vat. KHAC `deduped` (da xong that su).
     resumed: int = 0
+    #: Ban mp3 da xong duoc gan vao manifest trong vong nay. TTS chay bat
+    #: dong bo nen viec nay hau nhu luon xay ra o mot vong SAU vong duyet.
+    audio_attached: int = 0
     #: Da guong xong len Google Drive trong vong nay.
     archived: int = 0
     #: Ghi R2 xong nhung Drive chua nhan. KHAC `failed`: tac pham VAN hop le
@@ -76,6 +79,7 @@ class LaneMetrics:
             "blocked_no_cover": self.blocked_no_cover,
             "review_pending": self.review_pending,
             "resumed": self.resumed,
+            "audio_attached": self.audio_attached,
             "archived": self.archived,
             "archive_pending": self.archive_pending,
             "failed": self.failed, "skipped_quota": self.skipped_quota,

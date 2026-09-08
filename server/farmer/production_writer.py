@@ -116,6 +116,10 @@ class ProductionWriter:
         self._archive = archive_file or drive_archive.archive_file
         self._mirror = mirror_to_drive
 
+    def manifest_for(self, bucket: str, url: str):
+        """Manifest cua mot tac pham, hoac None. Duong doc, khong ghi gi."""
+        return self.read_manifest(canonical_dir(bucket, url))
+
     def work_complete(self, bucket: str, url: str) -> bool:
         """Tac pham nay DA XONG chua — do bang HIEN VAT, khong bang ban ghi.
 
@@ -239,7 +243,7 @@ class ProductionWriter:
         pham duoc duyet va khoanh khac co tep mp3 khong bao gio la mot.
         """
         thu_muc = canonical_dir(bucket, url)
-        man = self._read_manifest(thu_muc)
+        man = self.read_manifest(thu_muc)
         if man is None:
             return
         man.artifacts[ARTIFACT_AUDIO_VI] = object_key
@@ -300,7 +304,7 @@ class ProductionWriter:
                 f"khong ghi duoc manifest cho {man.work_id}: "
                 f"{type(exc).__name__}: {exc}") from exc
 
-    def _read_manifest(self, thu_muc: str) -> Optional[WorkManifest]:
+    def read_manifest(self, thu_muc: str) -> Optional[WorkManifest]:
         doc = self._get
         if doc is None:
             return None

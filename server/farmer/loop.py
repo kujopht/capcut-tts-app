@@ -221,6 +221,12 @@ class ProductionFarmer:
                 if self._writer is not None:
                     if self._writer.work_complete(bucket, c.url):
                         m.deduped += 1
+                        # DA XONG khong co nghia la KHONG CON VIEC GI.
+                        # READY khong doi hoi am thanh (TTS chay bat dong bo),
+                        # nen mot tac pham co the xong bo hien vat ma ban mp3
+                        # van dang chay — hoac chua tung duoc xep. Doi soat o
+                        # day, KHONG tai lai noi dung va KHONG danh gia lai.
+                        self._doi_soat_am_thanh(bucket, c, m)
                         continue
                     novel_co_san = self._dedup.existing_text_novel_id(
                         khoa.canonical_url)
@@ -395,6 +401,77 @@ class ProductionFarmer:
                 m.note_error(f"chua READY {ket_qua.work_id}: "
                              f"{ket_qua.blocked_reason}")
         return m
+
+    def _doi_soat_am_thanh(self, bucket: str, c: Candidate,
+                           m: LaneMetrics) -> None:
+        """Gan ban mp3 da xong vao manifest, hoac xep TTS neu chua tung xep.
+
+        Ton tai vi READY **khong** doi hoi am thanh: TTS chay bat dong bo tren
+        Cloud Run, nen khoanh khac bo hien vat day du va khoanh khac co tep
+        mp3 khong bao gio la mot. Ma "da xong" lai la dieu kien de vong lap
+        BO QUA mot tac pham — nen neu khong doi soat o day, mot tac pham dat
+        READY truoc khi co am thanh se khong bao gio duoc nhin lai.
+
+        Da xay ra that: hai tac pham dat READY ma khong he co job TTS nao
+        (ban va truoc cua chinh toi bo qua buoc TTS khi chay tiep). Chung se
+        cam lang vinh vien, va khong mot bo dem nao bao dieu do.
+
+        KHONG tai lai noi dung va KHONG danh gia lai — chi doc kho va gan.
+        """
+        if self._writer is None:
+            return
+        try:
+            man = self._writer.manifest_for(bucket, c.url)
+        except Exception as exc:                                # noqa: BLE001
+            m.note_error(f"khong doc duoc manifest {c.url}: "
+                         f"{type(exc).__name__}: {exc}")
+            return
+        if man is None or not man.novel_id:
+            return
+
+        from server.farmer.canonical import ARTIFACT_AUDIO_VI
+
+        if man.artifacts.get(ARTIFACT_AUDIO_VI):
+            return                                  # da co am thanh, xong
+
+        try:
+            khoa = self._dedup.finished_tts_output_key(man.novel_id)
+        except DedupError as exc:
+            m.note_error(f"hoan doi soat am thanh {man.novel_id}: {exc}")
+            return
+
+        if khoa:
+            try:
+                self._writer.attach_audio(bucket=bucket, url=c.url,
+                                          object_key=khoa)
+                m.audio_attached += 1
+            except Exception as exc:                            # noqa: BLE001
+                m.note_error(f"gan am thanh that bai {man.novel_id}: "
+                             f"{type(exc).__name__}: {exc}")
+            return
+
+        # Chua co ban mp3. Neu cung chua co job nao thi xep — day la duong
+        # cuu mot tac pham da READY nhung bi bo quen khong co TTS.
+        try:
+            if self._dedup.novel_has_tts_job(man.novel_id):
+                return                              # dang chay, cho vong sau
+        except DedupError as exc:
+            m.note_error(f"hoan xep TTS {man.novel_id}: {exc}")
+            return
+
+        khe = self._quotas.try_slot(FarmerQuotas.TTS)
+        if khe is None:
+            m.skipped_quota += 1
+            return
+        try:
+            self._enqueue_tts(man.novel_id)
+            m.note_error(f"da READY nhung thieu TTS — da xep bu "
+                         f"{man.novel_id}")
+        except Exception as exc:                                # noqa: BLE001
+            m.note_error(f"xep TTS bu that bai {man.novel_id}: "
+                         f"{type(exc).__name__}: {exc}")
+        finally:
+            khe.__exit__(None, None, None)
 
     def _ghi_ban_an(self, c: Candidate, body: str, verdict: Any,
                     m: LaneMetrics) -> None:

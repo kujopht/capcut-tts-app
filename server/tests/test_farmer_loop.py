@@ -457,3 +457,65 @@ class ResumeTtsTest(unittest.TestCase):
         self.assertEqual(h.tts, [])                  # hoan, khong doan
         self.assertEqual(m.skipped_quota, 0)         # KHONG phai het han muc
         self.assertTrue(any("hoan TTS" in e for e in m.errors), m.errors)
+
+
+class AudioReconcileTest(unittest.TestCase):
+    """Mot tac pham DA XONG van con viec: gan ban mp3 vao manifest.
+
+    READY khong doi hoi am thanh (TTS chay bat dong bo), nhung "da xong" lai
+    la dieu kien de vong lap BO QUA. Khong doi soat thi mot tac pham dat
+    READY truoc khi co am thanh se khong bao gio duoc nhin lai.
+    """
+
+    class _KhoTTS(_Store):
+        def __init__(self, jobs):
+            super().__init__()
+            self._jobs = jobs
+
+        def list_chapters(self, novel_id):
+            return [mock.Mock(chapter_id="ch_1")]
+
+        def list_jobs(self, owner_id, chapter_id=None):
+            return list(self._jobs)
+
+    @staticmethod
+    def _job(status="completed", key="audio/x/y.mp3"):
+        return mock.Mock(status=status, output_key=key)
+
+    def _chay_xong_roi(self, d, jobs):
+        """Chay mot vong cho tac pham hoan tat, roi chay vong hai."""
+        h = _Harness(tmp=Path(d), store=self._KhoTTS(jobs=jobs),
+                     text_candidates=[_text("https://e.com/a")])
+        h.farmer.run_text_lane()               # vong 1: san xuat, dat READY
+        return h, h.farmer.run_text_lane()     # vong 2: doi soat
+
+    def test_finished_audio_is_attached_to_the_manifest(self):
+        import json as _json
+
+        with TemporaryDirectory() as d:
+            h, m = self._chay_xong_roi(d, [self._job()])
+            self.assertEqual(m.deduped, 1)
+            self.assertEqual(m.audio_attached, 1)
+            khoa = [k for k in h.objects
+                    if k.endswith("/manifest.json") and "/manifests/" not in k]
+            man = _json.loads(h.objects[khoa[0]])
+        self.assertEqual(man["artifacts"]["audio/vi.mp3"], "audio/x/y.mp3")
+
+    def test_a_ready_work_with_no_tts_job_gets_one_queued(self):
+        """Duong cuu tac pham da READY nhung bi bo quen khong co TTS — dung
+        tinh huong ma ban va truoc cua toi tao ra tren may san xuat."""
+        with TemporaryDirectory() as d:
+            h, m = self._chay_xong_roi(d, [])
+        # Vong 1 xep mot lan (tac pham moi), vong 2 KHONG xep bu vi vong 1 da
+        # xep — nhung neu kho bao khong co job nao thi phai xep bu.
+        self.assertEqual(m.deduped, 1)
+        self.assertTrue(any("xep bu" in e for e in m.errors), m.errors)
+        self.assertEqual(h.tts, ["nov_1", "nov_1"])
+
+    def test_a_running_job_is_left_alone(self):
+        with TemporaryDirectory() as d:
+            h, m = self._chay_xong_roi(
+                d, [self._job(status="processing", key="")])
+        self.assertEqual(m.audio_attached, 0)
+        self.assertEqual(h.tts, ["nov_1"])       # khong xep them
+        self.assertFalse([e for e in m.errors if "xep bu" in e])

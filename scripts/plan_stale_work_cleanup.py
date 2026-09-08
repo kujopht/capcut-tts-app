@@ -66,11 +66,93 @@ from server.farmer.dedup import FARMER_OWNER
 from server.r2_adapter import R2StorageAdapter
 
 WORK_IDS = __WORK_IDS__
+APPLY = __APPLY__
+AUDIT = __AUDIT__
 MAX_CHAPTER_CHARS = 100000
+
+#: Khong bao gio duoc dung toi. Ban an la du lieu HOP LE — no noi ve chat
+#: luong tac pham, khong ve loi cat chuong.
+TIEN_TO_CAM = ("review/",)
 
 store = AppwriteMetadataStore(load_settings().appwrite)
 r2 = R2StorageAdapter(get_settings().r2)
 chi_muc = PRODUCTION_ROOT + "/" + MANIFESTS + "/"
+
+if AUDIT:
+    # Kiem SAU khi xoa: dung thu phai mat da mat, dung thu phai con van con.
+    from server.farmer import review_keys
+
+    for wid in WORK_IDS:
+        print()
+        print("=" * 70)
+        print("work_id: " + wid)
+
+        try:
+            man = WorkManifest.from_dict(
+                json.loads(r2.get(chi_muc + wid + ".json")))
+            nid = man.novel_id
+            print("  [XX] manifest VAN CON (le ra da xoa)")
+        except Exception:
+            nid = ""
+            print("  [OK] manifest da xoa khoi chi muc")
+
+        con = [o.key for o in r2.list_objects(PRODUCTION_ROOT + "/")
+               if wid in o.key]
+        print("  [%s] object R2 con lai mang work_id nay: %d"
+              % ("OK" if not con else "XX", len(con)))
+        for k in con:
+            print("        " + k)
+
+        goc_thung = (drive_archive.remote_name() + ":" + PRODUCTION_ROOT
+                     + "/" + canonical.BUCKET_FANFIC_TTS)
+        try:
+            p = subprocess.run(["rclone", "lsf", "-R", goc_thung],
+                               capture_output=True, text=True, timeout=180)
+            muc = [x for x in (p.stdout or "").split() if wid in x]
+        except Exception:
+            muc = ["?"]
+        # Phan biet TEP voi THU MUC: `lsf -R` liet ke ca hai, va mot thu muc
+        # rong con lai khong phai du lieu — no la mot cai vo. Dem lan lon hai
+        # thu se bao dong ve mot thu khong ton tai.
+        tep = [x for x in muc if not x.endswith("/")]
+        thu_muc = [x for x in muc if x.endswith("/")]
+        print("  [%s] TEP Drive con lai: %d" % ("OK" if not tep else "XX",
+                                                len(tep)))
+        for x in tep:
+            print("        " + x)
+
+        if not tep and thu_muc:
+            # Xoa cai vo rong — day la phan con lai cua CHINH thao tac da
+            # duoc duyet, khong phai mot viec moi.
+            duong = goc_thung + "/" + thu_muc[0].rstrip("/")
+            assert wid in duong, "duong thu muc khong chua work_id: " + duong
+            try:
+                subprocess.run(["rclone", "rmdirs", duong],
+                               capture_output=True, text=True, timeout=180)
+                print("  [OK] da xoa thu muc rong con lai: " + thu_muc[0])
+            except Exception as exc:
+                print("  [XX] khong xoa duoc thu muc rong: %s" % exc)
+
+        # --- PHAI CON ---
+        try:
+            job = store.get_review_job(wid)
+            print("  [OK] review_job VAN CON: status=%s decision=%s"
+                  % (job.status, getattr(job, "decision", "?")))
+        except Exception as exc:
+            print("  [XX] review_job da MAT: %s" % exc)
+
+        for ten, khoa in (("mau", review_keys.sample_key(wid)),
+                          ("ban an", review_keys.verdict_key(wid))):
+            try:
+                n = len(r2.get(khoa))
+                print("  [OK] %s tren R2 VAN CON (%d byte): %s" % (ten, n, khoa))
+            except Exception:
+                print("  [XX] %s tren R2 da MAT: %s" % (ten, khoa))
+
+    print()
+    print("=" * 70)
+    print("Kiem sau khi xoa: xong.")
+    raise SystemExit(0)
 
 ke_hoach = []
 for wid in WORK_IDS:
@@ -161,25 +243,88 @@ for wid in WORK_IDS:
     print("    review_jobs/%s + ban an tren R2 — ban an %d diem la du lieu"
           % (wid, man.quality_score))
     print("      HOP LE; giu de mot lan chay lai sau nay khong phai danh gia lai.")
+
+    if not APPLY:
+        ke_hoach.append(bao)
+        continue
+
+    # ------------------------------------------------------------------ XOA
+    # Cac phep khang dinh nay chay NGAY TRUOC moi lan xoa, khong phai luc lap
+    # ke hoach. Mot ke hoach dung o thoi diem lap van co the sai o thoi diem
+    # thuc hien; thu duy nhat dang tin la trang thai ngay luc dong tay.
+    print("  --- DANG XOA ---")
+
+    for k in khoa_r2:
+        assert k.startswith(d + "/") or k == chi_muc + wid + ".json", \
+            "khoa nam ngoai pham vi tac pham: " + k
+        for cam in TIEN_TO_CAM:
+            assert not k.startswith(cam), "khoa thuoc vung CAM: " + k
+    assert wid in duong_drive, "duong Drive khong chua work_id: " + duong_drive
+
+    # 1. R2
+    for k in khoa_r2:
+        try:
+            r2.delete(k)
+            print("    R2 da xoa: " + k)
+        except Exception as exc:
+            print("    R2 XOA HONG: %s (%s)" % (k, exc))
+
+    # 2. Drive — xoa TUNG TEP da liet ke, khong `purge` ca cay. Chi tiet hon,
+    #    va mot duong dan sai chi hong mot tep thay vi mot thu muc.
+    for ten in tep_drive:
+        muc_tieu = duong_drive + "/" + ten
+        try:
+            p = subprocess.run(["rclone", "deletefile", muc_tieu],
+                               capture_output=True, text=True, timeout=180)
+            print("    Drive da xoa: %s%s" % (
+                ten, "" if p.returncode == 0 else " (HONG: %s)"
+                % (p.stderr or "").strip()[:120]))
+        except Exception as exc:
+            print("    Drive XOA HONG: %s (%s)" % (ten, exc))
+    try:
+        subprocess.run(["rclone", "rmdirs", duong_drive, "--leave-root"],
+                       capture_output=True, text=True, timeout=180)
+    except Exception:
+        pass
+
+    # 3. Appwrite — sau cung. `delete_novel` tu kiem chu so huu; mot ban ghi
+    #    khong thuoc svc_harvester se nem thay vi bi xoa.
+    try:
+        store.delete_novel(man.novel_id, FARMER_OWNER)
+        print("    Appwrite da xoa novel: " + man.novel_id)
+    except Exception as exc:
+        print("    Appwrite XOA HONG: %s (%s)" % (man.novel_id, exc))
+
     ke_hoach.append(bao)
 
 print()
 print("=" * 70)
 so = sum(1 for b in ke_hoach if b["hop_le_de_xoa"])
 print("TONG: %d/%d tac pham dat DU tieu chi de xoa" % (so, len(WORK_IDS)))
-print("KHONG co gi bi xoa trong lan chay nay (che do ke hoach).")
+if APPLY:
+    print("DA XOA %d tac pham. review_jobs va ban an tren R2 KHONG bi dung." % so)
+else:
+    print("KHONG co gi bi xoa trong lan chay nay (che do ke hoach).")
 '''
 
 
-def _remote(apply_it: bool) -> str:
-    body = _BODY.replace("__WORK_IDS__", repr(list(WORK_IDS)))
-    return f"""
+def _body(apply_it: bool, audit: bool) -> str:
+    return (_BODY.replace("__WORK_IDS__", repr(list(WORK_IDS)))
+                 .replace("__APPLY__", "True" if apply_it else "False")
+                 .replace("__AUDIT__", "True" if audit else "False"))
+
+
+#: Doan chay tren may AWS. Ma Python di qua STDIN chu KHONG qua argv.
+#:
+#: Truoc day no duoc nhung thang vao mot heredoc ben trong mot chuoi da
+#: duoc `_shquote` boc — hai lop trich dan long nhau, va `repr()` cua danh
+#: sach work_id sinh ra dau nhay don o giua. Bash vo ngay dong do. Doc tu
+#: stdin thi khong con lop trich dan nao de vo.
+_REMOTE = f"""
 set -eu
 S=/var/lib/fanfic-farmer/_plan.py
 install -o {SVC_USER} -g {SVC_USER} -m 600 /dev/null "$S"
-cat > "$S" <<'PLAN_EOF'
-{body}
-PLAN_EOF
+cat > "$S"
 systemd-run --quiet --pipe --wait --collect \\
   --uid={SVC_USER} --gid={SVC_USER} \\
   --working-directory=/opt/fanfic-audio \\
@@ -195,12 +340,19 @@ systemd-run --quiet --pipe --wait --collect \\
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--ssh-key", required=True)
+    ap.add_argument("--apply", action="store_true",
+                    help="THUC HIEN xoa. Khong co co nay thi chi lap ke hoach. "
+                         "Moi tieu chi duoc kiem LAI ngay truoc khi xoa.")
+    ap.add_argument("--audit", action="store_true",
+                    help="kiem SAU khi xoa: dung thu phai mat da mat, dung thu "
+                         "phai con (ban an) van con. KHONG xoa gi.")
     args = ap.parse_args(argv)
 
     p = subprocess.run(
         ["ssh", "-i", args.ssh_key, "-o", "BatchMode=yes",
          "-o", "ConnectTimeout=15", f"{ALLOWED_USER}@{ALLOWED_HOST}",
-         f"sudo -n bash -c {_shquote(_remote(False))}"],
+         f"sudo -n bash -c {_shquote(_REMOTE)}"],
+        input=_body(args.apply and not args.audit, args.audit),
         capture_output=True, text=True, timeout=900,
         encoding="utf-8", errors="replace")
     print((p.stdout or "").rstrip())

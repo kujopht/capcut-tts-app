@@ -77,6 +77,7 @@ mới cho mỗi việc), và là lý do Control Center gọi thẳng `Executor.r
 | 15 | Ở tab Agent, phím vận hành tác động lên con trỏ bảng Việc — dừng nhầm việc, và `s` giết tiến trình thật | chọn theo tab đang mở |
 | 16 | **Việc mồ côi kẹt `RUNNING` VĨNH VIỄN** khi phiên chủ còn sống nhưng đang rảnh — `recover()` bỏ qua, bộ lập lịch không nhặt (nó không ở QUEUED). Đo thật: kẹt qua BA lần `recover()` liên tiếp | đòi cả ba: phiên tồn tại + còn sống + `current_task == task_id` |
 | 17 | Ví dụ đường dẫn trong hợp đồng sinh ra `docs/reports/note.md/vi-du.md` — một đường dẫn không tồn tại, đặt ngay trong câu đang dạy agent khai đường dẫn cho đúng | nhận biết phạm vi là tệp hay thư mục |
+| 18–22 | **5 lỗi từ review đối kháng độc lập** — xem §4d. Nghiêm trọng nhất: khoá FILESYSTEM giao nhau theo tiền tố KHÔNG nguyên tử (`ON CONFLICT` chỉ che được trùng khoá chính) | `BEGIN IMMEDIATE` + 4 bản vá khác |
 
 ## 4a. LỖI NGHIÊM TRỌNG NHẤT, tìm bằng cách TỰ TẤN CÔNG bất biến
 
@@ -151,20 +152,36 @@ Một điểm phụ đáng giữ: lượt đó cho thấy **AG01, AG02 và AG03 
 trên cả Gemini lẫn Claude. Câu "chỉ AG01 là thật" trong
 `docs/AI_ROUTER_V4.md` §2.1 (ghi 2026-09-03) nay đã **cũ**.
 
-## 4d. Review đối kháng ngoài — KHÔNG trả về
+## 4d. Review đối kháng độc lập — 5 phát hiện, CẢ NĂM đều thật
 
-Đã thử hai đường, cả hai đều không cho kết quả dùng được:
+`ai_router_dispatch.py --task-class SECURITY_REVIEW --risk HIGH` →
+`claude-opus-4-6-thinking` qua Antigravity **hỏng sau 9.4s** với đúng bức
+tường quyền của B4. Một `code-reviewer` (Claude, chỉ đọc) thì **trả về sau
+~4 giờ** với 5 phát hiện — tôi đã sớm kết luận nhầm rằng nó treo.
 
-1. `ai_router_dispatch.py --task-class SECURITY_REVIEW --risk HIGH` →
-   `claude-opus-4-6-thinking` qua Antigravity → hỏng sau 9.4s với đúng bức
-   tường quyền của B4.
-2. Một `code-reviewer` (Claude, chỉ đọc) chạy **hơn một tiếng** không trả
-   kết quả, kể cả sau khi được nhắc thu gọn.
+| # | Phát hiện | Trạng thái |
+|---|---|---|
+| 1 | Khoá FILESYSTEM giao nhau theo tiền tố **không nguyên tử** | THẬT — dựng lại 3/3 lần |
+| 2 | Luồng nhịp tim chết vĩnh viễn sau MỘT ngoại lệ (`return` thay vì `continue`) | THẬT |
+| 3 | `_giao()` không có `finally` ⇒ khoá PRODUCTION rò = treo vĩnh viễn | THẬT |
+| 4 | `reassign()` dùng `force=True` ⇒ `DONE` hết là ngõ cụt, ghi đè mất kết quả | THẬT |
+| 5 | Đọc–sửa–ghi trên `tasks` nuốt mất một lệnh `pause` | THẬT |
 
-Nên **phần review đối kháng của đêm nay là do tôi tự làm**, bằng cách viết
-kịch bản tấn công từng bất biến. Nó tìm ra lỗi #11 (lỗ hổng GATED) và #16
-(việc kẹt RUNNING) — hai lỗi nghiêm trọng nhất trong danh sách. Ghi rõ như
-vậy để không ai đọc báo cáo này mà tưởng đã có một cặp mắt độc lập.
+**#1 là lỗi nghiêm trọng nhất của cả đêm**, và nó đáng nói vì sao nó sống sót
+lâu đến thế: `INSERT ... ON CONFLICT(lock_id)` chỉ nguyên tử khi hai bên tranh
+**đúng một khoá chính**. Luật xung đột của khoá FILESYSTEM là *giao nhau tiền
+tố*, nên `web/admin` và `web/admin/content-queue` — hai tài nguyên đụng nhau
+thật — sinh ra **hai** `lock_id` khác nhau. Không có xung đột PK nào để bắt.
+
+Bài kiểm đồng thời tôi tự viết **không bắt được**, vì nó cho hai luồng tranh
+*cùng một* tài nguyên — đúng trường hợp duy nhất mà khoá chính che được. Bài
+kiểm xanh, bất biến hỏng, và tôi đã đọc lại đoạn mã đó nhiều lần trong đêm.
+
+Đã sửa cả 5, mỗi lỗi kèm một bài kiểm khoá lại (6 bài mới).
+
+**Bài học đáng giữ hơn cả bản vá:** vòng tự tấn công của tôi tìm ra #11 và #16;
+một cặp mắt độc lập tìm ra 5 lỗi khác mà tôi nhìn thẳng vào vẫn không thấy.
+Hai thứ đó không thay thế nhau.
 
 ## 5. Còn chặn (cần người) — xem `ROUTER_CONTROL_CENTER_OVERNIGHT_BLOCKERS.md`
 
@@ -180,11 +197,11 @@ vậy để không ai đọc báo cáo này mà tưởng đã có một cặp m�
 ## 6. Bài kiểm
 
 ```
-scripts/tests/test_control_center_core.py    78 bài — sổ, khoá, quyền, phân rã, rào tĩnh
-scripts/tests/test_control_center_slice.py   56 bài — lát cắt dọc, kho git thật, 2 tiến trình
+scripts/tests/test_control_center_core.py    81 bài — sổ, khoá, quyền, phân rã, rào tĩnh
+scripts/tests/test_control_center_slice.py   61 bài — lát cắt dọc, kho git thật, 2 tiến trình
 scripts/tests/test_control_center_ui.py      13 bài — 7 màn hình, Textual headless
                                             ─────
-toàn bộ scripts/tests                      1094 bài — OK (1 skipped)
+toàn bộ scripts/tests                      1100 bài — OK (1 skipped)
 tests/ (desktop, kiểm hồi quy)               397 bài — OK
 ```
 

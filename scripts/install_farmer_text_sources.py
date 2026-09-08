@@ -81,6 +81,8 @@ def main(argv=None) -> int:
     ap.add_argument("--ssh-key", required=True)
     ap.add_argument("--show", action="store_true", help="chi doc, khong ghi")
     ap.add_argument("--merge", help="tep JSON cuc bo can hop vao")
+    ap.add_argument("--enable", action="append", default=[],
+                    help="bo `_disabled` cho mot URL dang co (lap lai duoc)")
     ap.add_argument("--disable", action="append", default=[],
                     help="dat `_disabled` cho mot URL dang co (lap lai duoc). "
                          "TAT chu khong XOA: mot muc bi xoa se mat ca ly do no "
@@ -104,7 +106,7 @@ def main(argv=None) -> int:
         co = " [TAT]" if s.get("_disabled") else ""
         print(f"  {s.get('url','?')}{co}")
 
-    if args.show or (not args.merge and not args.disable):
+    if args.show or not (args.merge or args.disable or args.enable):
         return 0
 
     da_co = {_chuan(s.get("url", "")) for s in muc}
@@ -117,6 +119,13 @@ def main(argv=None) -> int:
             muc.append(s)
             da_co.add(_chuan(s.get("url", "")))
             moi += 1
+
+    bat = {_chuan(u) for u in args.enable}
+    da_bat = 0
+    for s in muc:
+        if _chuan(s.get("url", "")) in bat and s.get("_disabled"):
+            s["_disabled"] = False
+            da_bat += 1
 
     tat = {_chuan(u) for u in args.disable}
     da_tat = 0
@@ -137,7 +146,8 @@ def main(argv=None) -> int:
         print(f"RESULT=WRITE_FAILED exit={p.returncode} "
               f"stderr={(p.stderr or '')[-400:]}")
         return p.returncode
-    print(f"RESULT=MERGED added={moi} disabled={da_tat} total={len(muc)}")
+    print(f"RESULT=MERGED added={moi} enabled={da_bat} disabled={da_tat} "
+          f"total={len(muc)}")
     return 0
 
 

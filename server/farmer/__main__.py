@@ -19,6 +19,7 @@ from server.farmer.covers import CoverGate, build_cover_provider
 from server.farmer.integrity import InterpreterNotSecure, assert_interpreter_secure
 from server.farmer.loop import ProductionFarmer
 from server.farmer.metrics import MetricsWriter, status_path
+from server.farmer.production_writer import ProductionWriter
 from server.farmer.quotas import AlreadyRunning, FarmerQuotas, SingleInstanceLock
 from server.farmer.review import ReviewUnavailable, build_reviewer
 
@@ -62,7 +63,7 @@ def _r2_io():
     def tai_len(key: str, data: bytes) -> None:
         adapter.put(key, data, "application/json")
 
-    return tai_len, adapter.get
+    return tai_len, adapter.get, adapter.put
 
 
 def _build(dry_run: bool) -> ProductionFarmer:
@@ -87,7 +88,7 @@ def _build(dry_run: bool) -> ProductionFarmer:
     from server.farmer import review_keys
     from server.farmer.review_provider import build_review_provider
 
-    tai_len, tai_ve = _r2_io()
+    tai_len, tai_ve, dat_object = _r2_io()
     reviewer = build_review_provider(
         store,
         upload_sample=tai_len,
@@ -101,6 +102,12 @@ def _build(dry_run: bool) -> ProductionFarmer:
         media_asset_store=store)
 
     token = "" if dry_run else adapters.harvester_token()
+
+    # Kho san xuat CHINH TAC. `--dry-run` KHONG duoc ghi gi, nen no khong co
+    # writer — va `run_text_lane` cung khong bao gio den do vi buoc tao ban
+    # nhap da nem truoc.
+    writer = None if dry_run else ProductionWriter(
+        put_object=dat_object, get_object=tai_ve)
 
     if dry_run:
         def khong_ghi(*a, **k):
@@ -118,7 +125,7 @@ def _build(dry_run: bool) -> ProductionFarmer:
         discover_text=_text_discovery(),
         fetch_text=adapters.make_text_fetcher(),
         publish_text=publish, enqueue_tts=enqueue_tts,
-        enqueue_audio_item=enqueue_audio)
+        enqueue_audio_item=enqueue_audio, production_writer=writer)
     farmer._integrity = integrity.as_dict()
     return farmer
 

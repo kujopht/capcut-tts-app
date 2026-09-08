@@ -184,3 +184,61 @@ class NoCloudscraperOrBrowserLaunchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BinaryResolutionAcrossPlatformsTest(unittest.TestCase):
+    """Bo cuc venv POSIX phai duoc tim thay, khong chi bo cuc Windows.
+
+    Truoc day ban du phong duy nhat la `Scripts/fanficfare.exe`. Tren may san
+    xuat Linux, dich vu systemd chay voi PATH khong chua `<venv>/bin`, nen
+    `shutil.which` truot va ban du phong Windows khong bao gio khop —
+    `resolve_acquisition_route` lang le khong bao gio chon FanFicFare du no
+    da duoc cai.
+    """
+
+    def _venv_gia(self, thu_muc, bo_cuc, ten):
+        from unittest import mock
+        (thu_muc / bo_cuc).mkdir(parents=True, exist_ok=True)
+        binary = thu_muc / bo_cuc / ten
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        return mock.patch.multiple(
+            "server.scraper.fanficfare_provider",
+            shutil=mock.Mock(which=mock.Mock(return_value=None)),
+            sys=mock.Mock(exec_prefix=str(thu_muc)),
+        ), binary
+
+    def test_posix_venv_layout_is_found(self):
+        import tempfile
+        from pathlib import Path as _P
+
+        from server.scraper import fanficfare_provider as ffp
+
+        with tempfile.TemporaryDirectory() as d:
+            patcher, binary = self._venv_gia(_P(d), "bin", "fanficfare")
+            with patcher:
+                self.assertEqual(ffp._fanficfare_binary(), str(binary))
+
+    def test_windows_venv_layout_still_found(self):
+        import tempfile
+        from pathlib import Path as _P
+
+        from server.scraper import fanficfare_provider as ffp
+
+        with tempfile.TemporaryDirectory() as d:
+            patcher, binary = self._venv_gia(_P(d), "Scripts", "fanficfare.exe")
+            with patcher:
+                self.assertEqual(ffp._fanficfare_binary(), str(binary))
+
+    def test_absent_everywhere_is_none_not_a_crash(self):
+        import tempfile
+        from pathlib import Path as _P
+        from unittest import mock
+
+        from server.scraper import fanficfare_provider as ffp
+
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.multiple(
+                    "server.scraper.fanficfare_provider",
+                    shutil=mock.Mock(which=mock.Mock(return_value=None)),
+                    sys=mock.Mock(exec_prefix=str(_P(d)))):
+                self.assertIsNone(ffp._fanficfare_binary())

@@ -160,6 +160,26 @@ class DedupIndex:
                 f"khong kiem duoc job TTS cua {novel_id}: "
                 f"{type(exc).__name__}: {exc}") from exc
 
+    def novel_has_chapter(self, novel_id: str) -> bool:
+        """Ban nhap nay co chuong nao doc duoc khong.
+
+        Mot `novel` KHONG co chuong la mot ban nhap HONG, khong phai mot ban
+        nhap dung lai duoc: `POST /api/novels` va `POST /api/chapters` la hai
+        loi goi, va loi goi thu hai co the truot rieng.
+
+        Da xay ra that: `MAX_CHAPTER_CHARS` = 100.000 (server/main.py). Hai
+        tac pham 224k va 117k ky tu tao duoc novel roi bi tu choi o buoc
+        chuong. Lan chay tiep dung lai cai novel rong do, bo qua buoc xuat
+        ban, va van dat READY — mot tac pham "san sang" ma tren trang khong
+        co gi de doc.
+        """
+        try:
+            return bool(self._store.list_chapters(novel_id))
+        except Exception as exc:
+            raise DedupError(
+                f"khong doc duoc chuong cua {novel_id}: "
+                f"{type(exc).__name__}: {exc}") from exc
+
     def finished_tts_output_key(self, novel_id: str,
                                 owner_id: str = FARMER_OWNER):
         """`output_key` cua job TTS DA XONG, hoac None.

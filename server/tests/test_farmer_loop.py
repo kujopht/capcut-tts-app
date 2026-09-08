@@ -176,21 +176,58 @@ class TextLaneOrderTest(unittest.TestCase):
         # Da guong len Drive.
         self.assertTrue(h.archived, "chua guong tep nao len Drive")
 
-    def test_a_duplicate_is_never_fetched(self):
-        """Khu trung lap dat TRUOC khi tai — day la diem ca ranh gioi do ton
-        tai: khong tai lai thu da co."""
-        class _Co(_Store):
+    def test_a_finished_work_is_never_fetched_again(self):
+        """Khu trung lap dat TRUOC khi tai — khong tai lai thu da XONG.
+
+        "Xong" duoc do bang HIEN VAT (manifest da READY), khong bang ban ghi
+        novel. Xem `test_a_half_finished_work_is_resumed` ngay duoi de biet vi
+        sao su khac biet do quan trong.
+        """
+        with TemporaryDirectory() as d:
+            h = _Harness(tmp=Path(d),
+                         text_candidates=[_text("https://e.com/a")])
+            # Chay mot lan cho tac pham hoan tat that su...
+            h.farmer.run_text_lane()
+            self.assertEqual(h.fetched, ["https://e.com/a"])
+            # ...roi chay lai: khong duoc cham vao no nua.
+            m = h.farmer.run_text_lane()
+        self.assertEqual(m.deduped, 1)
+        self.assertEqual(h.fetched, ["https://e.com/a"])   # khong tai lan hai
+        self.assertEqual(len(h.published), 1)              # khong tao ban trung
+
+    def test_a_half_finished_work_is_resumed_not_skipped(self):
+        """Co novel nhung CHUA co hien vat = DANG DO, phai chay tiep.
+
+        Day la loi da khoa vinh vien bon tac pham fanfiction that tren may san
+        xuat: chung tao novel, xep TTS, roi hong o buoc bia — sau do chinh
+        novel cua chung lam chung "trung lap" voi chinh minh, mai mai.
+
+        Chay tiep phai DUNG LAI ban nhap cu (khong POST novel thu hai) va
+        KHONG xep lai TTS (lan truoc da xep).
+        """
+        class _CoNovel(_Store):
             def find_novels(self, owner_id=None, limit=None, **kw):
-                n = mock.Mock(external_source_url="https://e.com/a")
+                n = mock.Mock(external_source_url="https://e.com/a",
+                              novel_id="nov_cu")
                 return [n], 1
 
         with TemporaryDirectory() as d:
-            h = _Harness(tmp=Path(d), store=_Co(),
+            h = _Harness(tmp=Path(d), store=_CoNovel(),
                          text_candidates=[_text("https://e.com/a")])
             m = h.farmer.run_text_lane()
-        self.assertEqual(m.deduped, 1)
-        self.assertEqual(h.fetched, [])
-        self.assertEqual(h.published, [])
+
+        self.assertEqual(m.resumed, 1)
+        self.assertEqual(m.deduped, 0)
+        self.assertEqual(h.published, [])          # KHONG tao novel thu hai
+        self.assertEqual(h.tts, [])                # KHONG xep lai TTS
+        self.assertEqual(m.published_candidates, 1)
+        # Hien vat duoc ghi duoi work_id cua nguon, gan voi novel DA CO.
+        man = [k for k in h.objects if k.endswith("/manifest.json")]
+        self.assertTrue(man, sorted(h.objects))
+        import json as _json
+        noi_dung = _json.loads(h.objects[
+            [k for k in man if "/manifests/" not in k][0]])
+        self.assertEqual(noi_dung["serving"]["novel_id"], "nov_cu")
 
     def test_a_rejected_work_never_reaches_tts(self):
         """Duyet dat TRUOC san xuat — khong tra tien TTS cho rac."""
@@ -337,13 +374,28 @@ class RoundTest(unittest.TestCase):
         self.assertEqual(vong, 2)
 
     def test_usage_budget_resets_between_rounds(self):
+        """HAI tac pham, han muc MOT lan danh gia moi vong.
+
+        Phai dung hai nguon khac nhau chu khong lap lai mot nguon: khu trung
+        lap se chan lan thu hai cua CUNG mot tac pham (dung y — no da xong),
+        va luc do phep do se noi ve khu trung lap chu khong ve han muc.
+        """
         with TemporaryDirectory() as d:
             q = FarmerQuotas(max_concurrent_downloads=5, max_review_requests=1,
                              max_tts_jobs=5, min_free_disk_bytes=1, work_dir=d)
             h = _Harness(tmp=Path(d), quotas=q,
-                         text_candidates=[_text("https://e.com/a")])
-            h.farmer.run_once()
-            h.farmer.run_once()
+                         text_candidates=[_text("https://e.com/a"),
+                                          _text("https://e.com/b")])
+            mot = h.farmer.run_once()
+            hai = h.farmer.run_once()
+
+        # Vong 1: mot cai qua duoc, cai kia het han muc.
+        self.assertEqual(mot[LANE_TEXT].reviewed, 1)
+        self.assertEqual(mot[LANE_TEXT].skipped_quota, 1)
+        # Vong 2: cai da xong bi khu trung lap, cai con lai duoc danh gia —
+        # tuc la han muc DA duoc dat lai.
+        self.assertEqual(hai[LANE_TEXT].deduped, 1)
+        self.assertEqual(hai[LANE_TEXT].reviewed, 1)
         self.assertEqual(h.provider.calls, 2)
 
 

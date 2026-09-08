@@ -51,6 +51,9 @@ class LaneMetrics:
     #: gia va truot) va KHAC `failed` (hong). Mot con so lon o day nghia la
     #: may danh gia dang tat, khong phai nguon dang kem.
     review_pending: int = 0
+    #: Tac pham DANG DO duoc chay tiep: da co ban nhap tu mot lan truoc,
+    #: nhung chua co bo hien vat. KHAC `deduped` (da xong that su).
+    resumed: int = 0
     #: Da guong xong len Google Drive trong vong nay.
     archived: int = 0
     #: Ghi R2 xong nhung Drive chua nhan. KHAC `failed`: tac pham VAN hop le
@@ -72,6 +75,7 @@ class LaneMetrics:
             "published_candidates": self.published_candidates,
             "blocked_no_cover": self.blocked_no_cover,
             "review_pending": self.review_pending,
+            "resumed": self.resumed,
             "archived": self.archived,
             "archive_pending": self.archive_pending,
             "failed": self.failed, "skipped_quota": self.skipped_quota,

@@ -116,6 +116,34 @@ class ProductionWriter:
         self._archive = archive_file or drive_archive.archive_file
         self._mirror = mirror_to_drive
 
+    def work_complete(self, bucket: str, url: str) -> bool:
+        """Tac pham nay DA XONG chua — do bang HIEN VAT, khong bang ban ghi.
+
+        Day la dinh nghia "da gat roi" dung dan, va no thay cho phep kiem cu
+        ("co ban ghi novel chua"). Su khac biet khong hoc thuat chut nao:
+
+            Mot tac pham co novel nhung khong co manifest la mot tac pham
+            DANG DO. Phep kiem cu goi no la "xong", nen no khong bao gio
+            duoc thu lai — mot lan hong o giua duong bien thanh vinh vien.
+
+        Da xay ra HAI lan tren may san xuat: bon tac pham fanfiction that,
+        deu da qua cong danh gia, deu tao novel va xep TTS, roi dung o buoc
+        bia va bi khoa lai mai mai vi novel cua chinh chung lam chung "trung
+        lap" voi chinh minh.
+
+        Fail closed: khong doc duoc thi coi la CHUA xong. Doan "chac xong roi"
+        se lang le bo qua mot tac pham that; doan nguoc lai chi ton mot vong
+        lam lai, va buoc xuat ban da biet dung lai ban nhap cu.
+        """
+        if self._get is None:
+            return False
+        try:
+            man = WorkManifest.from_dict(json.loads(
+                self._get(f"{canonical_dir(bucket, url)}/{ARTIFACT_MANIFEST}")))
+        except Exception:                                       # noqa: BLE001
+            return False
+        return bool(man.ready)
+
     # -- duong chinh --------------------------------------------------------
     def write_approved(self, *, bucket: str, url: str, title: str, body: str,
                        verdict: Any, novel_id: str = "",

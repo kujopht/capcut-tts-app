@@ -56,11 +56,15 @@ set -eu
 echo "unit={UNIT} active=$(systemctl is-active {UNIT}) \
 MainPID=$(systemctl show {UNIT} -p MainPID --value) \
 NRestarts=$(systemctl show {UNIT} -p NRestarts --value)"
-# Dem bang cgroup cua unit, KHONG bang pgrep tren dong lenh: mot mau pgrep se
-# khop CHINH lenh ssh dang mang mau do, va bao thua mot ban khong ton tai.
-# Mot canh bao gia o bat bien mot-nguoi-tieu-thu se lam nguoi van hanh di san
-# mot con ma.
-echo "tasks_trong_unit=$(systemctl show {UNIT} -p TasksCurrent --value)"
+# Dem TIEN TRINH trong cgroup cua unit, khong `pgrep` va khong `TasksCurrent`:
+#   - `pgrep -f` khop CHINH lenh ssh dang mang mau do (bao thua mot ban ma).
+#   - `TasksCurrent` dem LUONG, khong dem tien trinh — boto3 tao vai luong,
+#     nen no bao 7 cho mot tien trinh duy nhat va trong nhu bay ban farmer.
+# `cgroup.procs` la danh sach PID that su thuoc unit. Do la con so tra loi
+# dung cau hoi "co dung mot farmer khong".
+CG=/sys/fs/cgroup/system.slice/{UNIT}.service/cgroup.procs
+echo "tien_trinh_trong_unit=$(wc -l < $CG 2>/dev/null || echo '?')"
+echo "luong_trong_unit=$(systemctl show {UNIT} -p TasksCurrent --value)"
 for u in {' '.join(PROD_UNITS)}; do
   echo "worker_production $u=$(systemctl is-active $u)"
 done

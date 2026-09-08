@@ -322,6 +322,69 @@ class WorktreeCoordinator:
 
     # -- doi soat -----------------------------------------------------------
 
+    def go_bo(self, path: str, *, xac_nhan: bool = False,
+              ly_do: str = "") -> Dict[str, object]:
+        """Gỡ MỘT worktree khỏi đĩa. CHỈ khi người vận hành yêu cầu.
+
+        Luật "KHÔNG TỰ XOÁ WORKTREE" của V0.1 không đổi: không đường tự động
+        nào gọi hàm này. Nó tồn tại cho đúng một việc — dọn cây làm việc của
+        các lượt chứng minh sau khi bằng chứng đã được ghi lại — và mọi lần
+        gọi đều phải nói rõ `xac_nhan=True` cùng một lý do.
+
+        BỐN RÀO, tất cả fail-closed:
+
+          1. đường dẫn phải nằm TRONG `.router/worktrees/` của kho này. Ngoài
+             ra: từ chối. (`resolve()` trước khi so, nên junction không lách
+             được — đã kiểm bằng bài kiểm.)
+          2. phải là một worktree Router BIẾT — có hàng trong sổ. Một thư mục
+             lạ nằm trong đó không phải thứ ta được phép xoá.
+          3. KHÔNG được có phiên nào còn sống đang sở hữu nó.
+          4. `xac_nhan=True` tường minh.
+
+        Trả về mô tả việc đã làm; `git worktree remove` lo phần metadata.
+        """
+        if not xac_nhan:
+            raise WorktreeError(
+                f"gỡ worktree {path!r} là thao tác không hoàn tác được — "
+                f"truyền `xac_nhan=True` nếu thật sự muốn.")
+        goc = self.manager.worktree_root.resolve()
+        try:
+            duong = Path(path).resolve()
+            duong.relative_to(goc)
+        except (ValueError, OSError) as exc:
+            raise WorktreeError(
+                f"TỪ CHỐI: {path!r} nằm ngoài {goc} — chỉ gỡ được worktree "
+                f"do Router quản lý.") from exc
+
+        hang = self.store.worktree(str(path)) or self.store.worktree(str(duong))
+        if hang is None:
+            raise WorktreeError(
+                f"TỪ CHỐI: {path!r} không có trong sổ Control Center. Một thư "
+                f"mục lạ nằm trong `.router/worktrees/` không phải thứ công "
+                f"cụ này được phép xoá.")
+
+        chu = (hang.get("owner_session") or "").strip()
+        if chu:
+            s = self.store.session(chu)
+            if s is not None and s.state.alive:
+                raise WorktreeError(
+                    f"TỪ CHỐI: phiên {chu} ({s.state.value}) vẫn còn sống và "
+                    f"đang sở hữu cây này. Dừng phiên trước đã.")
+
+        ban = self.is_dirty(str(duong))
+        self.manager.remove(duong, force=True)
+        self.store.luu_worktree(
+            path=str(path), project_id=self.project_id,
+            branch=hang.get("branch", ""), owner_session="", state=WT_STALE,
+            note=f"đã gỡ khỏi đĩa: {ly_do}"[:300])
+        self.store.ghi_su_kien(
+            "WORKTREE_REMOVED", project_id=self.project_id, level="WARNING",
+            detail=(f"gỡ {path} khỏi đĩa (bẩn={ban}) — {ly_do}"),
+            meta={"path": str(path), "branch": hang.get("branch", ""),
+                  "dirty": ban, "reason": ly_do})
+        return {"path": str(path), "branch": hang.get("branch", ""),
+                "was_dirty": ban}
+
     def doi_soat(self) -> Dict[str, List[str]]:
         """Đối soát sổ với thực tế trên đĩa. Chạy lúc khởi động.
 

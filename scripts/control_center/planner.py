@@ -35,6 +35,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from scripts.router_v4.capabilities import Priority, Reasoning, Requirements
@@ -100,9 +101,18 @@ _CHI_DOC = frozenset({"analysis", "review"})
 #:
 #: `scripts/tests/test_control_center_allowlist.py` khoa lai rang danh sach
 #: nay va tep settings that khong bao gio lech nhau.
-_TOOL = "\\".join((
-    "C:", "FanficWorkers", "router-control-center",
-    "scripts", "cc_agent_tool.py"))
+#: Suy ra tu VI TRI CUA CHINH MODULE NAY, khong go cung.
+#:
+#: Ban truoc go cung duong dan tuyet doi cua may dung goi vao mot hien
+#: vat phat hanh. Giai nen goi
+#: o cho khac thi `LENH_CHO_PHEP` tro toi mot duong dan khong ton tai: hop
+#: dong bao agent chay mot lenh sai, `agy` tu choi, va agent mat trang ca
+#: luot ma khong ai hieu vi sao.
+#:
+#: Suy ra tai cho thi chuoi luon dung voi noi dang chay. Neu no lech khoi
+#: `permissions.allow`, `test_control_center_allowlist` bao ngay — do la
+#: dung cho de bat, khong phai luc mot agent dang chay.
+_TOOL = str((Path(__file__).resolve().parents[1] / "cc_agent_tool.py"))
 LENH_CHO_PHEP: Tuple[str, ...] = (
     f"python {_TOOL} changes",
     f"python {_TOOL} compile",

@@ -52,6 +52,13 @@ def main(argv=None) -> int:
                     help="in ảnh chụp JSON rồi thoát, không mở giao diện")
     ap.add_argument("--chat", default="",
                     help="gửi một câu vào ô chat của dự án rồi thoát")
+    ap.add_argument("--remove-worktree", default="", metavar="PATH",
+                    help=("GỠ một worktree khỏi đĩa rồi thoát. Chỉ gỡ được "
+                          "cây do Router quản lý, có trong sổ, và không còn "
+                          "phiên sống nào sở hữu. Dùng để dọn bằng chứng của "
+                          "các lượt chứng minh SAU KHI đã ghi lại."))
+    ap.add_argument("--list-worktrees", action="store_true",
+                    help="liệt kê worktree Router đang biết rồi thoát")
     ap.add_argument("--remove-project", default="", metavar="ID",
                     help=("GỠ một dự án thử nghiệm/demo khỏi sổ rồi thoát. "
                           "Không đụng tới worktree trên đĩa; không gỡ được "
@@ -60,6 +67,40 @@ def main(argv=None) -> int:
 
     cc = _dung(args)
     pid = args.project or (cc.projects()[0].project_id if cc.projects() else "")
+
+    if args.list_worktrees:
+        for p_ in cc.projects():
+            for h in cc.store.worktrees(p_.project_id):
+                print(f"{p_.project_id:<10} {h['state']:<7} "
+                      f"chủ={h['owner_session'] or '-':<14} {h['path']}")
+        cc.shutdown()
+        return 0
+
+    if args.remove_worktree:
+        from scripts.router_v3.worktree import WorktreeError
+        got = False
+        for p_ in cc.projects():
+            if cc.store.worktree(args.remove_worktree) is None:
+                continue
+            try:
+                kq = cc.ctx(p_.project_id).worktrees.go_bo(
+                    args.remove_worktree, xac_nhan=True,
+                    ly_do="dọn bằng chứng sau khi đã ghi lại")
+            except WorktreeError as exc:
+                print(str(exc), file=sys.stderr)
+                cc.shutdown()
+                return 2
+            print(f"đã gỡ {kq['path']} (nhánh {kq['branch'] or '-'}, "
+                  f"bẩn={kq['was_dirty']})")
+            got = True
+            break
+        if not got:
+            print(f"không có worktree {args.remove_worktree!r} trong sổ",
+                  file=sys.stderr)
+            cc.shutdown()
+            return 2
+        cc.shutdown()
+        return 0
 
     if args.remove_project:
         try:

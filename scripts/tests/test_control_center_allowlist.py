@@ -27,7 +27,7 @@ import unittest
 from pathlib import Path
 
 from scripts.control_center.planner import (KHONG_CAP_CHO_AGENT,
-                                            LENH_CHO_PHEP)
+                                            LENH_CHO_PHEP, _TOOL)
 
 REPO = Path(__file__).resolve().parents[2]
 TOOL = REPO / "scripts" / "cc_agent_tool.py"
@@ -97,6 +97,19 @@ class TestAllowlistHopLe(unittest.TestCase):
                                 "đường dẫn tuyệt đối ghim SCRIPT NÀO chạy; "
                                 "đường dẫn tương đối để `cwd` đổi mục tiêu")
                 self.assertNotIn("*", c)
+
+    def test_duong_dan_wrapper_SUY_RA_tu_vi_tri_module_khong_go_cung(self):
+        """Gói phát hành KHÔNG được mang đường dẫn của máy dựng gói.
+
+        Bản trước gõ cứng một đường dẫn tuyệt đối. Giải nén gói ở chỗ khác
+        thì `LENH_CHO_PHEP` trỏ tới một đường dẫn không tồn tại: hợp đồng
+        bảo agent chạy một lệnh sai, `agy` từ chối, agent mất trắng cả lượt.
+        """
+        self.assertEqual(str(TOOL), _TOOL,
+                         "`_TOOL` phải bằng đúng vị trí thật của wrapper")
+        for c in LENH_CHO_PHEP:
+            with self.subTest(lenh=c):
+                self.assertIn(str(TOOL), c)
 
     def test_dong_tu_cua_moi_lenh_co_that_trong_wrapper(self):
         from scripts.cc_agent_tool import DONG_TU

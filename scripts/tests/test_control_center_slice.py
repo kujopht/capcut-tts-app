@@ -1398,6 +1398,59 @@ class TestWorktreeSafety(unittest.TestCase):
         self.assertFalse(b.created)
         self.assertEqual(a.path, b.path)
 
+    def test_go_bo_worktree_doi_XAC_NHAN_tuong_minh(self):
+        from scripts.router_v3.worktree import WorktreeError
+        wt = self.cc.ctx("demo").worktrees
+        lease = wt.tao_moi(session_id="s1", task_id="t1")
+        with self.assertRaises(WorktreeError):
+            wt.go_bo(lease.path)
+        self.assertTrue(Path(lease.path).exists(), "chưa xác nhận thì không xoá")
+
+    def test_go_bo_TU_CHOI_duong_dan_ngoai_worktree_root(self):
+        """Luật 'không tự xoá worktree' không đổi; đây là đường DUY NHẤT gỡ
+        được, và nó chỉ gỡ trong `.router/worktrees/`."""
+        import tempfile as _tf
+        from scripts.router_v3.worktree import WorktreeError
+        wt = self.cc.ctx("demo").worktrees
+        ngoai = Path(_tf.mkdtemp(prefix="cc-ngoai-"))
+        with self.assertRaises(WorktreeError):
+            wt.go_bo(str(ngoai), xac_nhan=True, ly_do="thử")
+        self.assertTrue(ngoai.exists(), "KHÔNG được đụng tới thư mục ngoài")
+
+    def test_go_bo_TU_CHOI_thu_muc_LA_trong_worktree_root(self):
+        """Một thư mục lạ nằm trong `.router/worktrees/` không phải thứ ta
+        được phép xoá — nó không có hàng nào trong sổ."""
+        from scripts.router_v3.worktree import WorktreeError
+        wt = self.cc.ctx("demo").worktrees
+        la = Path(wt.manager.worktree_root) / "khong-phai-cua-router"
+        la.mkdir(parents=True, exist_ok=True)
+        with self.assertRaises(WorktreeError):
+            wt.go_bo(str(la), xac_nhan=True, ly_do="thử")
+        self.assertTrue(la.exists())
+
+    def test_go_bo_TU_CHOI_khi_phien_chu_con_SONG(self):
+        from scripts.control_center.model import Session, SessionState
+        from scripts.router_v3.worktree import WorktreeError
+        wt = self.cc.ctx("demo").worktrees
+        lease = wt.tao_moi(session_id="s-song", task_id="t1")
+        self.cc.store.luu_session(Session(
+            session_id="s-song", project_id="demo", provider="antigravity",
+            runtime_id="RT01", model_id="m-re", state=SessionState.BUSY))
+        with self.assertRaises(WorktreeError):
+            wt.go_bo(lease.path, xac_nhan=True, ly_do="thử")
+        self.assertTrue(Path(lease.path).exists())
+
+    def test_go_bo_CHAY_DUOC_khi_du_dieu_kien(self):
+        """Siết chặt không được biến công cụ thành vô dụng."""
+        wt = self.cc.ctx("demo").worktrees
+        lease = wt.tao_moi(session_id="s1", task_id="t1")
+        wt.nha("s1", note="xong")
+        kq = wt.go_bo(lease.path, xac_nhan=True, ly_do="dọn bằng chứng")
+        self.assertFalse(Path(lease.path).exists())
+        self.assertEqual(kq["path"], lease.path)
+        self.assertTrue([e for e in self.cc.store.su_kien(project_id="demo")
+                         if e["kind"] == "WORKTREE_REMOVED"])
+
     def test_doi_soat_danh_dau_cay_bien_mat(self):
         import shutil
         wt = self.cc.ctx("demo").worktrees

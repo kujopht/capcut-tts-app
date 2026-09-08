@@ -41,7 +41,27 @@ Quy ước: mỗi mục ghi **cần gì / vì sao chặn / đã làm gì thay th
   `ACTUAL` cho thứ Control Center tự đếm được tại chỗ (số lượt dispatch,
   giây tường, số lượt trong cửa sổ trượt của `QuotaPool`).
 
-## B4. `agy` headless TỪ CHỐI QUYỀN CÔNG CỤ — chặn đường việc CÓ GHI
+## B4. ĐÃ GIẢI (2026-09-08) — allowlist HẸP, khớp chuỗi CHÍNH XÁC
+
+Giải bằng **hai** mục `command(...)` trỏ **tuyệt đối** tới một wrapper có
+tập động từ hữu hạn (`scripts/cc_agent_tool.py`), không phải bằng
+`command(*)` và không phải bằng `--dangerously-skip-permissions`:
+
+```json
+"command(python C:\\FanficWorkers\\router-control-center\\scripts\\cc_agent_tool.py changes)"
+"command(python C:\\FanficWorkers\\router-control-center\\scripts\\cc_agent_tool.py compile)"
+```
+
+Động từ thứ ba (`tests`) **cố ý KHÔNG được cấp** — nó là thực thi mã tuỳ ý
+qua một allow-rule hẹp. Xem `docs/CONTROL_CENTER.md` §4b và
+`CONTROL_CENTER_V01_PROOF.md` §4e.
+
+Chứng minh sống: việc CÓ GHI xong trong **60s / 1 lượt**, cả sáu cổng V4
+xanh; 4/4 lệnh bị cấm vẫn bị từ chối.
+
+*(nguyên văn mục cũ giữ lại bên dưới để tra cứu)*
+
+## B4-cũ. `agy` headless TỪ CHỐI QUYỀN CÔNG CỤ — chặn đường việc CÓ GHI
 
 **Đây là chặn thật, đo được, và nó cần một quyết định của bạn.**
 
@@ -201,3 +221,31 @@ việc tôi tự làm lúc bạn đang ngủ.**
 *(Không có mục nào khác tính tới lần cập nhật cuối. Đêm nay KHÔNG deploy,
 KHÔNG đổi tài nguyên AWS/GCP, KHÔNG tự động đăng nhập Google, KHÔNG dựng
 Browser Operator, KHÔNG thiết kế lại Router V4.)*
+
+## B8. CÒN CHẶN — merge/push/tag cần CHÍNH BẠN chạy
+
+Không phải lỗi kỹ thuật, và không có đường nào tôi đi vòng được: `git merge`
+bị từ chối ở tầng quyền của phiên này, và `git push` thì **không allow-rule
+hay hook nào cấp được** trên máy này. Đây là bước duy nhất còn lại của bản
+phát hành, và nó thuộc về bạn.
+
+Đã kiểm trước để bạn không phải kiểm lại:
+
+- Merge **sạch**, không xung đột — `git merge-tree --write-tree origin/main
+  HEAD` dựng được cây, giao giữa hai danh sách tệp đổi = **0**.
+- Push lên `main` **không** deploy production: cả
+  `production-deploy.yml` và `production-rollback.yml` đều chỉ chạy bằng
+  `workflow_dispatch`, và deploy còn đòi gõ đúng chữ `DEPLOY_PRODUCTION`.
+  Push `main` chỉ chạy `ci.yml`.
+- Điểm quay lui: `main` trước khi merge = `013e728`.
+
+```bash
+git merge origin/main --no-edit
+git push origin HEAD:main
+git tag router-control-center-v0.1.0 && git push origin router-control-center-v0.1.0
+```
+
+Sau ba lệnh đó: dựng lại hiện vật TỪ commit đã tag, ghi SHA phát hành +
+SHA256 hiện vật, rồi mới dọn 24 worktree bằng chứng và dự án demo `rw` bằng
+`--remove-worktree` / `--remove-project`. **Giữ nguyên chúng cho tới khi hai
+con số đó được ghi lại.**

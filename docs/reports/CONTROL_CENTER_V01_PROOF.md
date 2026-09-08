@@ -292,13 +292,18 @@ viết `for r in f.runtimes` (`runtimes` là **dict**).
 ## 6. Bài kiểm
 
 ```
-scripts/tests/test_control_center_core.py    81 bài — sổ, khoá, quyền, phân rã, rào tĩnh
-scripts/tests/test_control_center_slice.py   61 bài — lát cắt dọc, kho git thật, 2 tiến trình
-scripts/tests/test_control_center_ui.py      13 bài — 7 màn hình, Textual headless
-                                            ─────
-toàn bộ scripts/tests                      1100 bài — OK (1 skipped)
-tests/ (desktop, kiểm hồi quy)               397 bài — OK
+scripts/tests/test_control_center_core.py      80 bài — sổ, khoá, quyền, phân rã, rào tĩnh
+scripts/tests/test_control_center_slice.py     82 bài — lát cắt dọc, kho git thật, 2 tiến trình
+scripts/tests/test_control_center_ui.py        13 bài — 7 màn hình, Textual headless
+scripts/tests/test_control_center_allowlist.py 24 bài — allowlist, rào cwd, gỡ dự án, đóng gói
+                                              ─────
+toàn bộ scripts/tests                        1155 bài — OK (1 skipped)
+tests/ (desktop, kiểm hồi quy)                 397 bài — OK
 ```
+
+`skipped=1` là `test_router_v3_opencode_adapter`: bài đó chỉ nói về đường
+HỎNG nên nó tự bỏ qua khi trên máy CÓ server thật. Không liên quan tới
+Control Center, và đã `skipped=1` từ trước lượt này.
 
 Thay đổi duy nhất chạm Router V4 là **một tham số tuỳ chọn**
 (`Executor(worktree_provider=...)`), mặc định `None` = hành vi cũ nguyên vẹn.

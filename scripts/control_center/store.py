@@ -157,6 +157,24 @@ CREATE TABLE IF NOT EXISTS attachments (
     owner         TEXT NOT NULL DEFAULT '',
     created_at    REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ket_qua_da_bao (
+    task_id    TEXT NOT NULL,
+    state      TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    message_id INTEGER NOT NULL DEFAULT 0,
+    ts         REAL NOT NULL,
+    PRIMARY KEY (task_id, state)
+);
+CREATE TABLE IF NOT EXISTS leader (
+    project_id   TEXT PRIMARY KEY,
+    thread_id    TEXT NOT NULL,
+    che_do       TEXT NOT NULL DEFAULT 'AUTO',
+    provider     TEXT NOT NULL DEFAULT '',
+    model        TEXT NOT NULL DEFAULT '',
+    context_json TEXT NOT NULL DEFAULT '{}',
+    created_at   REAL NOT NULL,
+    updated_at   REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ix_att_msg  ON attachments(project_id, message_id);
 CREATE INDEX IF NOT EXISTS ix_att_task ON attachments(task_id);
 CREATE INDEX IF NOT EXISTS ix_att_sha  ON attachments(sha256);
@@ -866,3 +884,64 @@ class ControlStore:
                           meta=_un(h["meta_json"], {})) for h in hs]
         ra.reverse()
         return ra
+
+    # -- da bao ket qua chua ------------------------------------------------
+
+    def da_bao_ket_qua(self, task_id: str, state: str) -> bool:
+        """Đã thuật lại việc này Ở TRẠNG THÁI NÀY chưa.
+
+        Khoá theo `(task_id, state)`, không chỉ `task_id`, và đó là một
+        định chính: một việc GATED đi `BLOCKED` -> (người duyệt) -> `DONE`.
+        Khoá theo mã việc thôi thì lần `BLOCKED` chiếm chỗ, và kết quả
+        `DONE` THẬT không bao giờ tới được ô chat.
+
+        Là một BẢNG chứ không phải một phép quét N tin nhắn cuối: quét 200
+        tin gần nhất thì một dự án chạy vài ngày sẽ đẩy bản ghi cũ ra khỏi
+        cửa sổ, và lần mở app sau đổ lại một loạt kết quả cũ vào hội thoại.
+        """
+        h = self._c().execute(
+            "SELECT 1 FROM ket_qua_da_bao WHERE task_id=? AND state=?",
+            (task_id, state)).fetchone()
+        return h is not None
+
+    def ghi_da_bao_ket_qua(self, task_id: str, state: str, *,
+                           project_id: str = "", message_id: int = 0) -> None:
+        self._c().execute(
+            "INSERT OR REPLACE INTO ket_qua_da_bao "
+            "(task_id, state, project_id, message_id, ts) VALUES (?,?,?,?,?)",
+            (task_id, state, project_id, int(message_id), time.time()))
+
+    # -- Leader -------------------------------------------------------------
+
+    def leader(self, project_id: str) -> Optional[Dict]:
+        """Danh tính Leader của một dự án, hoặc `None`."""
+        h = self._c().execute("SELECT * FROM leader WHERE project_id=?",
+                              (project_id,)).fetchone()
+        if h is None:
+            return None
+        d = dict(h)
+        d["context"] = _un(d.pop("context_json", ""), {})
+        return d
+
+    def luu_leader(self, d: Dict) -> Dict:
+        """Ghi/đè danh tính Leader. Lịch sử hội thoại nằm ở bảng `chat`.
+
+        Tách đôi có chủ ý: hội thoại là thứ NGƯỜI đọc và phải sống sót qua
+        mọi thay đổi của tầng nhà cung cấp; còn danh tính/chế độ là thứ
+        Leader dùng để dựng lại chính nó. Nhét cả hai vào một chỗ thì đổi
+        nhà cung cấp là mất hội thoại.
+        """
+        now = time.time()
+        self._c().execute(
+            "INSERT INTO leader (project_id, thread_id, che_do, provider, "
+            "model, context_json, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(project_id) DO UPDATE SET thread_id=excluded.thread_id,"
+            " che_do=excluded.che_do, provider=excluded.provider,"
+            " model=excluded.model, context_json=excluded.context_json,"
+            " updated_at=excluded.updated_at",
+            (d["project_id"], d.get("thread_id", ""), d.get("che_do", "AUTO"),
+             d.get("provider", ""), d.get("model", ""),
+             redact(_js(d.get("context") or {})),
+             float(d.get("created_at") or now), now))
+        return self.leader(d["project_id"]) or d

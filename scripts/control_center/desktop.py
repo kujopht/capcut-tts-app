@@ -174,7 +174,10 @@ def main(argv=None) -> int:
             mot.nha()
             return 2
 
-        cc = ControlCenter(root=goc, max_parallel=a.max_parallel)
+        # `leader_bat=True`: day la mot diem vao THAT cua san pham, va o
+        # chat phai la mot tro ly chu khong phai mot bieu mau nop viec.
+        cc = ControlCenter(root=goc, max_parallel=a.max_parallel,
+                           leader_bat=True)
         khoi_tao(cc.store, root=goc)
         if not a.no_recover:
             try:

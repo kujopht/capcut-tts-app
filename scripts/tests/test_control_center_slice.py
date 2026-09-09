@@ -258,9 +258,13 @@ class TestVerticalSlice(unittest.TestCase):
         self.assertIn("Đã tách thành 2 việc", kq["reply"])
 
     def test_chat_duoc_ghi_lai_ca_hai_chieu(self):
+        # Vai tra loi doi tu `router` sang `assistant` o V0.3, va do la mot
+        # thay doi CO Y: o chat gio la mot tro ly noi chuyen, khong phai
+        # mot bo phan ra bao cao ket qua. Giao dien van doc duoc vai `router`
+        # cu de nhung hoi thoai da luu khong mat.
         self.cc.chat("demo", "fix web/admin")
         tin = self.cc.store.chat("demo")
-        self.assertEqual([m.role for m in tin], ["user", "router"])
+        self.assertEqual([m.role for m in tin], ["user", "assistant"])
 
     def test_viec_GATED_vao_BLOCKED_chu_KHONG_vao_hang_doi(self):
         """Việc chạm cổng KHÔNG được nằm ở `QUEUED`.

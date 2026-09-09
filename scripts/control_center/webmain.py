@@ -114,7 +114,8 @@ def main(argv=None) -> int:
     token = secrets.token_urlsafe(32)
     goc = Path(a.root).resolve() if a.root else Path.cwd()
     ghi.dat_tep(duong_nhat_ky(goc))
-    cc = ControlCenter(root=goc, max_parallel=a.max_parallel)
+    # Xem `desktop.py`: diem vao THAT thi Leader phai bat.
+    cc = ControlCenter(root=goc, max_parallel=a.max_parallel, leader_bat=True)
     # `khoi_tao` GIEO du an mac dinh cua ban phat hanh (`fanfic`, `router`).
     #
     # Ban dau webmain dung `ControlCenter` truc tiep va BO QUA buoc nay, nen

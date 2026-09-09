@@ -307,17 +307,24 @@ này vào `main` là bước còn lại để `tim.py` có mặt ở mọi workt
 
 Đo được, không suy:
 
-| Thay đổi | Có hiệu lực khi nào |
-|---|---|
-| `~/.claude/settings.json` (allow/deny) | **phiên MỚI**. Mỗi `claude -p` trong bộ đo là một phiên mới và đã thấy ngay luật vừa ghi. |
-| `~/.claude/hooks/guard_indirect_exec.py` (nội dung) | **ngay lần gọi sau** — hook là một tiến trình con, đọc lại tệp mỗi lần |
-| đăng ký hook trong `settings.json` | **phiên MỚI** |
-| `~/.claude.json` → `hasTrustDialogAccepted` | **phiên MỚI** |
-| `<kho>/.claude/settings.json` | **phiên MỚI**, và chỉ khi thư mục ĐƯỢC TIN |
+| Thay đổi | Có hiệu lực khi nào | Cách đo |
+|---|---|---|
+| `~/.claude/settings.json` — `permissions` | **NGAY, trong phiên đang chạy** | Sau khi ghi tầng cấm, chạy `echo "Set-Acl …"` trong **chính phiên đang mở** → *"Permission to use Bash … has been denied"*. Luật `Bash(*Set-Acl*)` được viết vài phút trước đó và chưa khởi động lại gì. |
+| `~/.claude/hooks/guard_indirect_exec.py` — nội dung | **ngay lần gọi sau** | hook là một tiến trình con, đọc lại tệp mỗi lần gọi; bản sửa `-C` có hiệu lực ở lần gọi tiếp theo |
+| đăng ký hook trong `settings.json` | **NGAY** (cùng cơ chế đọc lại `permissions`) | hook bắt đầu chặn ở hộp cát ngay sau khi `--ap-dung` ghi phần đăng ký |
+| `~/.claude.json` → `hasTrustDialogAccepted` | **phiên MỚI** — chưa đo được chiều ngược lại | trạng thái tin cậy được đọc lúc khởi tạo phiên |
+| `<kho>/.claude/settings.json` | như tầng người dùng, **và chỉ khi thư mục ĐƯỢC TIN** | |
 
-**Nên: phiên đang chạy phải khởi động lại để nhận tầng luật mới.** Nội
-dung hook thì không cần — nó đã có hiệu lực ngay (đo được: bản sửa `-C`
-chạy đúng ở phiên `claude -p` tiếp theo mà không khởi động lại gì).
+**Nên: KHÔNG cần khởi động lại để nhận tầng luật mới.** Đây là điểm đã
+sửa so với phỏng đoán ban đầu của báo cáo này: `permissions` được đọc lại
+trong phiên, không chỉ lúc khởi động. Chỉ **trạng thái tin cậy** là thứ
+cần một phiên mới — nên sau `--tin-cay` một worktree, phiên trong worktree
+đó phải mở lại để hồ sơ kho được nạp.
+
+*Ghi chú về `Bash(*Set-Acl*)`:* phép đo trên cũng cho thấy luật đó chặn cả
+một `echo` vô hại chỉ vì chuỗi xuất hiện trong lệnh — cùng lớp báo động
+sai với mục 3b. Ở tầng hệ thống/an ninh thì giữ neo thô là có chủ đích, và
+bề mặt chặn oan (`echo Set-Acl`) không đáng kể.
 
 ---
 

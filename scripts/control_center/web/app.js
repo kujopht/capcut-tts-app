@@ -157,25 +157,52 @@ function veChat() {
             href="/api/attachments/${esc(a.attachment_id)}/blob?t=${esc(TOKEN)}"
             >${esc(a.filename)} <i>${coDoc(a.size_bytes)}</i></a>`).join('');
 
-    if (m.role === 'router') {
+    const loai = (m.meta && m.meta.loai) || '';
+    // `router` la vai CU (truoc V0.3). Giu lai de nhung hoi thoai da luu
+    // van doc duoc — mot ban nang cap khong duoc lam mat lich su chat.
+    const uyThac = loai === 'delegation' || m.role === 'router';
+
+    if (uyThac) {
       const hang = keHoachTu(m);
-      const cay = hang.length ? `
-        <div class="tom">Đã nhận mục tiêu — phân rã thành ${hang.length} việc:</div>
-        ${hang.map((h) => `
+      // Loi cua LEADER dan dau; the viec la PHU. Nguoi dung doc mot cau,
+      // khong doc mot bang. Id phien/worktree nam duoi "Chi tiet".
+      const loiDan = m.role === 'router'
+        ? '' : `<div class="tho">${esc(m.text.split('\n\n')[0])}</div>`;
+      const the = hang.length ? `
+        <div class="the-viec">
+          ${hang.map((h) => `
           <div class="hang-viec ${h.state === 'BLOCKED' ? 'chan' : ''}">
-            <span class="nhanh">${h.cuoi ? '└─' : '├─'}</span>
             <button class="ten-viec" data-mo="${esc(h.task_id)}">${esc(h.title)}</button>
             ${hh(h.state)}
             ${h.agent ? `<span class="agent">${esc(h.agent)}</span>` : ''}
+            ${['RUNNING', 'QUEUED', 'WAITING'].includes(h.state)
+              ? `<button class="nho" data-dung="${esc(h.task_id)}">Dừng</button>` : ''}
             ${h.state === 'BLOCKED'
               ? `<button class="duyet" data-duyet="${esc(h.task_id)}"
                    title="${esc(h.blocked_reason)}">Duyệt…</button>` : ''}
-          </div>`).join('')}` : `<div class="tho">${esc(m.text)}</div>`;
-      return `<article class="tin router"><header>ROUTER</header>${cay}
-        <details><summary>Chi tiết quyết định</summary>
+          </div>`).join('')}
+        </div>` : '';
+      return `<article class="tin khac"><header>LEADER</header>
+        ${loiDan}${the}
+        <details><summary>Chi tiết</summary>
           <pre class="ma">${esc(m.text)}</pre></details>${anhHtml}</article>`;
     }
-    const nhan = m.role === 'user' ? 'BẠN' : String(m.role || 'hệ thống').toUpperCase();
+
+    if (loai === 'ket_qua') {
+      const md = m.meta || {};
+      const cho = [md.worker, md.model].filter(Boolean).join('/');
+      return `<article class="tin khac ket-qua"><header>LEADER</header>
+        <div class="tho">${esc(m.text)}</div>
+        ${md.task_id ? `<div class="hang-viec">
+            <button class="ten-viec" data-mo="${esc(md.task_id)}">Chi tiết việc</button>
+            ${hh(md.state || '')}
+            ${cho ? `<span class="agent">${esc(cho)}</span>` : ''}
+          </div>` : ''}${anhHtml}</article>`;
+    }
+
+    const nhan = m.role === 'user' ? 'BẠN'
+      : (m.role === 'assistant' ? 'LEADER'
+        : String(m.role || 'hệ thống').toUpperCase());
     return `<article class="tin ${m.role === 'user' ? 'user' : 'khac'}">
       <header>${esc(nhan)}</header><div class="tho">${esc(m.text)}</div>
       ${anhHtml}</article>`;
@@ -415,8 +442,21 @@ o.addEventListener('keydown', (e) => {
 // ------------------------------------------------------------ thao tac ----
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-pid],[data-tid],[data-mo],[data-duyet],'
-    + '[data-viec],[data-bo],[data-xem],[data-copy]');
+    + '[data-viec],[data-bo],[data-xem],[data-copy],[data-dung]');
   if (!t) return;
+
+  // Dung NGAY tu the viec trong chat — khong bat nguoi dung di sang tab
+  // Tasks roi tim lai dung dong. Van hoi xac nhan: dung han la mot hanh
+  // dong mat viec dang lam.
+  if (t.dataset.dung) {
+    const tid = t.dataset.dung;
+    if (!xacNhan(`Dừng hẳn việc ${tid}?`,
+        'Việc sẽ chuyển sang FAILED và không tự chạy lại. Worktree trên đĩa '
+        + 'KHÔNG bị xoá — công việc chưa commit vẫn còn đó.')) return;
+    try { await api(`/api/task/${tid}/stop`, { method: 'POST' }); }
+    catch (err) { noi(`dừng hỏng — ${err.message}`); }
+    await lamMoi(); return;
+  }
 
   if (t.dataset.pid) { S.selected = t.dataset.pid; dauTin = ''; await lamMoi(); return; }
   if (t.dataset.copy) {

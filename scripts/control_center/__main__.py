@@ -27,8 +27,9 @@ from scripts.control_center.engine import ControlCenter              # noqa: E40
 
 def _dung(args) -> ControlCenter:
     goc = Path(args.root).resolve() if args.root else Path.cwd()
+    # Xem `desktop.py`: diem vao THAT thi Leader phai bat.
     cc = ControlCenter(root=goc, probe=args.probe,
-                       max_parallel=args.max_parallel)
+                       max_parallel=args.max_parallel, leader_bat=True)
     khoi_tao(cc.store, root=goc)
     if not args.no_recover:
         cc.recover()

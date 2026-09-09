@@ -38,6 +38,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Union
 
+from scripts.router_v3.tien_trinh import an_cua_so
+
 #: Nơi chứa worktree. Trong kho nhưng bị `.gitignore` bỏ qua — cùng chỗ với
 #: các thư mục tạm khác để người vận hành biết tìm ở đâu.
 ROOT_DIR = ".router/worktrees"
@@ -199,9 +201,14 @@ class WorktreeManager:
         return p
 
     def _git(self, *args: str, check: bool = True):
+        # `an_cua_so()`: moi lenh `git` o day la mot cua so console nhap
+        # len trong ban `--noconsole`, va dung/tao worktree chay nhieu
+        # lenh lien tiep. Chi them khi `_run` la `subprocess.run` that —
+        # bo kiem tiem mot `runner` gia khong nhan kwargs nay.
+        kw = an_cua_so() if self._run is subprocess.run else {}
         p = self._run(["git", "-C", str(self._git_root), *args],
                       capture_output=True, text=True, encoding="utf-8",
-                      errors="replace")
+                      errors="replace", **kw)
         if check and p.returncode != 0:
             raise WorktreeError(
                 f"git {' '.join(args[:2])} thất bại: "

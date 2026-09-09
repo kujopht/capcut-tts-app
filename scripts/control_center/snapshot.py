@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional  # noqa: F401  (Optional dùng ở `chup`)
 
+from scripts.router_v3.tien_trinh import an_cua_so
+
 #: Trần cho mọi lệnh `git` ở đây. Một kho hỏng không được treo cả ô chat.
 HAN_GIT = 20.0
 
@@ -44,9 +46,12 @@ def _git(kho: str, *args: str) -> str:
     KHÔNG phải ném ra giữa một câu hỏi hội thoại.
     """
     try:
+        # `an_cua_so()`: ảnh chụp chạy ~6 lệnh `git` cho MỖI tin nhắn chat,
+        # và trong bản `--noconsole` mỗi lệnh sẽ nhấp một cửa sổ console
+        # rồi giành focus. Đây là chỗ nhấp nháy nhiều nhất trong app.
         p = subprocess.run(["git", "-C", kho, *args], capture_output=True,
                            text=True, encoding="utf-8", errors="replace",
-                           timeout=HAN_GIT)
+                           timeout=HAN_GIT, **an_cua_so())
     except (OSError, subprocess.SubprocessError):
         return ""
     return (p.stdout or "").strip() if p.returncode == 0 else ""

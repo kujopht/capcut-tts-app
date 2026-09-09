@@ -50,6 +50,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from scripts.router_v3.tien_trinh import an_cua_so
+
 DEFAULT_AGY = Path(os.environ.get("LOCALAPPDATA", "")) / "agy" / "bin" / "agy.exe"
 
 
@@ -135,6 +137,7 @@ def run_native(prompt: str, *, model: str, timeout: int = 300,
     try:
         p = subprocess.run(argv, input=prompt, capture_output=True, text=True,
                            timeout=timeout + 30, cwd=cwd, encoding="utf-8",
+                           **an_cua_so(),
                            errors="replace")
     except subprocess.TimeoutExpired:
         return NativeRun(status="timeout", wall_seconds=round(time.perf_counter() - t0, 3),
@@ -221,6 +224,7 @@ def run_warm_batch(prompts, *, model: str, timeout: int = 900,
     try:
         p = subprocess.run(argv, input=data, capture_output=True, text=True,
                            timeout=timeout + 60, cwd=cwd, encoding="utf-8",
+                           **an_cua_so(),
                            errors="replace")
     except subprocess.TimeoutExpired:
         return [WarmResult(ok=False, error=f"vượt {timeout}s") for _ in prompts]

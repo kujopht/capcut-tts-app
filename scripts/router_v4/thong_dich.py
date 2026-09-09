@@ -61,6 +61,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from scripts.router_v3.tien_trinh import an_cua_so
+
 #: Nhớ kết quả: phép dò có sinh tiến trình con, và nó không đổi giữa chừng.
 _NHO: Optional[Tuple[List[str], str]] = None
 
@@ -78,7 +80,7 @@ def _chay_duoc(argv: List[str]) -> bool:
     """
     try:
         p = subprocess.run(argv + ["--version"], capture_output=True,
-                           timeout=20)
+                           timeout=20, **an_cua_so())
     except (OSError, subprocess.SubprocessError):
         return False
     if p.returncode != 0:

@@ -24,6 +24,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional, TypedDict
 
+from scripts.router_v3.tien_trinh import an_cua_so
+
 
 class DanhTinh(TypedDict):
     port: int
@@ -55,7 +57,7 @@ def _siet_quyen_tep(p: Path) -> None:
                        # se AM THAM lam ACL khong duoc siet. Dau ra
                        # nay khong ai doc, nen che do NHI PHAN la dung:
                        # khong co codec nao de sai.
-                       capture_output=True, env=moi)
+                       capture_output=True, env=moi, **an_cua_so())
     except Exception:
         pass
 

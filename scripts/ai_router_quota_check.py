@@ -58,9 +58,11 @@ def _tim_codex() -> Optional[str]:
 
 def _chay(duong_dan_binary: str, *args: str, timeout: int = 30) -> str:
     try:
+        from scripts.router_v3.tien_trinh import an_cua_so
         ket_qua = subprocess.run(
             [duong_dan_binary, *args], capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout)
+            encoding="utf-8", errors="replace", timeout=timeout,
+            **an_cua_so())
         return (ket_qua.stdout or "") + (ket_qua.stderr or "")
     except Exception as exc:  # noqa: BLE001 - day la cong cu chan doan, muon thay loi ro
         return f"<lỗi khi gọi {os.path.basename(duong_dan_binary)}: {exc}>"

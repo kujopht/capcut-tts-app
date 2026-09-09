@@ -33,6 +33,7 @@ from scripts.router_v3.opencode_adapter import OpenCodeAdapter
 from scripts.router_v3.packet import TaskPacket, TaskResult, parse_result
 from scripts.router_v3.pool.identity import Identity, Transport
 from scripts.router_v3.registry import ExecutionType, Health, WorkerSpec
+from scripts.router_v3.tien_trinh import an_cua_so
 from scripts.router_v3.worker_adapter import (HealthReport, TransportKind,
                                               WorkerAdapter)
 from scripts.router_v3 import worker_identity
@@ -96,7 +97,7 @@ class CodexAdapter(WorkerAdapter):
         try:
             p = subprocess.run([exe, "login", "status"], capture_output=True,
                                text=True, timeout=30, encoding="utf-8",
-                               errors="replace")
+                               errors="replace", **an_cua_so())
         except (OSError, subprocess.TimeoutExpired) as exc:
             return HealthReport(Health.UNAVAILABLE, f"{type(exc).__name__}")
         ra = ((p.stdout or "") + (p.stderr or "")).strip()
@@ -170,7 +171,7 @@ class CodexAdapter(WorkerAdapter):
             self._p = subprocess.Popen(
                 argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, cwd=cwd, text=True, encoding="utf-8",
-                errors="replace")
+                errors="replace", **an_cua_so())
             out, err = self._p.communicate(input=van_ban, timeout=self._timeout)
             rc = self._p.returncode
         except subprocess.TimeoutExpired:

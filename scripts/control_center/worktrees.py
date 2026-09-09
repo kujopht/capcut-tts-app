@@ -39,6 +39,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from scripts.router_v3.worktree import (WorktreeError, WorktreeHandle,
                                         WorktreeManager)
 from scripts.control_center.store import ControlStore
+from scripts.router_v3.tien_trinh import an_cua_so
 
 #: Trang thai mot worktree theo goc nhin Control Center.
 WT_ACTIVE = "ACTIVE"      # co phien dang so huu
@@ -107,7 +108,7 @@ class WorktreeCoordinator:
             kq = subprocess.run(
                 ["git", "-C", str(p), "status", "--porcelain", "-uall"],
                 capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=60)
+                errors="replace", timeout=60, **an_cua_so())
         except (OSError, subprocess.SubprocessError):
             # Khong hoi duoc git thi coi nhu BAN. Doan "sach" o day nghia la
             # cho mot agent khac vao ghi de len cong viec chua luu cua agent
@@ -134,7 +135,7 @@ class WorktreeCoordinator:
             kq = subprocess.run(
                 ["git", "-C", str(p), "status", "--porcelain", "-uall"],
                 capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=60)
+                errors="replace", timeout=60, **an_cua_so())
         except (OSError, subprocess.SubprocessError):
             return None
         if kq.returncode != 0:

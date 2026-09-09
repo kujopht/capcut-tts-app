@@ -30,6 +30,7 @@ from queue import Empty, Queue
 from typing import Callable, List, Optional
 
 from scripts.router_v3.native_worker import find_agy
+from scripts.router_v3.tien_trinh import an_cua_so
 
 
 class WarmState(str, Enum):
@@ -204,10 +205,14 @@ class WarmAgyWorker:
 
         t0 = time.perf_counter()
         try:
+            # `an_cua_so()`: ban `--noconsole` khong co console, nen Windows
+            # cap cho `agy.exe` mot console MOI — kem mot cua so nhap len
+            # roi GIANH FOCUS. stdin/stdout/stderr khong doi gi, nen duong
+            # bat log van nguyen.
             self._p = subprocess.Popen(
                 argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, cwd=self._cwd, bufsize=0,
-                env=self._env)
+                env=self._env, **an_cua_so())
         except OSError as exc:
             self._state = WarmState.FAILED
             self.start_error = f"sinh tiến trình hỏng: {type(exc).__name__}: {exc}"

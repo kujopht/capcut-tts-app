@@ -159,6 +159,11 @@ class WarmAgyWorker:
         self.cold_starts = 0
         self.cold_start_seconds = 0.0
         self.recycles: List[str] = []
+        #: VI SAO `start()` tra False, bang tieng NGUOI. Rong = chua hong.
+        #: `start()` co BON nhanh hong khac han nhau va truoc day ca bon deu
+        #: tra dung mot `False` tran — nen mot loi cau hinh, mot binary
+        #: thieu, va mot man hinh tuong tac dang treo trong y het nhau.
+        self.start_error = ""
 
     # -- vong doi -----------------------------------------------------------
 
@@ -174,12 +179,17 @@ class WarmAgyWorker:
         # shell — thieu `--add-dir` no khong bi gioi han vao worktree nao
         # ca, worker se ghi duoc BAT CU DAU tai khoan he dieu hanh cho phep.
         # FAIL CLOSED thay vi tin nguoi goi luon nho truyen workspace.
+        self.start_error = ""
         if self._dangerously_skip_permissions and not self._workspace:
             self._state = WarmState.FAILED
+            self.start_error = ("từ chối `--dangerously-skip-permissions` khi "
+                                "không có workspace — sẽ ghi được bất cứ đâu")
             return False
         exe = self._binary or find_agy()
         if not exe:
             self._state = WarmState.FAILED
+            self.start_error = ("không tìm thấy `agy` trên PATH hay trong hồ "
+                                "sơ người dùng này")
             return False
         argv = [exe, "--model", self._model,
                 "--input-format", "stream-json",
@@ -200,6 +210,7 @@ class WarmAgyWorker:
                 env=self._env)
         except OSError as exc:
             self._state = WarmState.FAILED
+            self.start_error = f"sinh tiến trình hỏng: {type(exc).__name__}: {exc}"
             return False
         self._stderr_tail = []
         threading.Thread(target=self._doc_stdout, daemon=True).start()
@@ -209,6 +220,23 @@ class WarmAgyWorker:
         self.cold_starts += 1
         if d is None:
             self._state = WarmState.FAILED
+            # `_cho` tra None o HAI tinh huong khac han nhau, va gop chung
+            # lai la vut mat manh moi duy nhat: tien trinh CHET som (co ma
+            # thoat + stderr), hay no SONG ma khong phat `init` (treo o mot
+            # man hinh tuong tac — dung thu Router khong bao gio duoc gap).
+            ma = self._p.poll() if self._p is not None else None
+            duoi = (self.stderr_tail or "").strip()
+            if ma is not None:
+                self.start_error = (
+                    f"agy thoát ngay (mã {ma}) trước khi phát `init`"
+                    + (f"; stderr: {duoi[-500:]}" if duoi
+                       else "; stderr rỗng"))
+            else:
+                self.start_error = (
+                    f"agy không phát `init` trong {self._turn_timeout:.0f}s "
+                    f"nhưng vẫn sống — nhiều khả năng đang chờ ở một màn "
+                    f"hình TƯƠNG TÁC"
+                    + (f"; stderr: {duoi[-500:]}" if duoi else ""))
             return False
         self._state = WarmState.WARM_IDLE
         self.stats = SessionStats()

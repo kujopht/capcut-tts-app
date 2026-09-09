@@ -69,10 +69,13 @@ class CodexAdapter(WorkerAdapter):
     transport = TransportKind.STRUCTURED_CLI
 
     def __init__(self, worker_id: str, *, timeout: float = 900.0,
-                 workspace: str = ""):
+                 workspace: str = "", model: str = ""):
         self._worker_id = worker_id
         self._timeout = timeout
         self._workspace = workspace
+        #: TEN MODEL GHIM. Rong = KHONG chay, chu KHONG roi ve mac dinh cua
+        #: Codex — xem `send_task`.
+        self._model = (model or "").strip()
         self._last: Optional[TaskResult] = None
         self._p: Optional[subprocess.Popen] = None
         self._cancelled = False
@@ -124,6 +127,35 @@ class CodexAdapter(WorkerAdapter):
                         "mật và Codex trả kết quả RỖNG cho loại việc này "
                         "(bằng chứng 2026-08-28). Định tuyến sang worker khác.",
                 duration_seconds=round(time.perf_counter() - t0, 2))
+        # FAIL CLOSED khi chua ghim model. KHONG roi ve mac dinh cua Codex.
+        #
+        # Kiem TRUOC `find_codex()` co chu y: thieu model ghim la mot loi
+        # CAU HINH, dung dù may co cai `codex` hay khong. Kiem sau thi tren
+        # mot may chua cai CLI, loi cau hinh nay bi che boi
+        # "khong tim thay codex" va chi lo ra dung luc ai do cai CLI vao —
+        # tuc la dung luc no bat dau ton tien.
+        #
+        # `codex exec` khong co `-m` thi chay bat cu thu gi CLI dang dat lam
+        # mac dinh, va cai do doi duoc sau mot lan `codex update` — khong
+        # ai ben nay sua mot dong nao. Do that 2026-09-09: mac dinh tren may
+        # nay la `gpt-5.6-sol`, va cung ban CLI do phoi ra `gpt-6-astra`,
+        # dat hon han. Mot lan doi mac dinh o phia nha cung cap se bien moi
+        # viec vat cua Router thanh mot lan goi model cao cap ma khong co
+        # bat ky dau hieu nao.
+        #
+        # Nen: khong ghim thi KHONG CHAY. Mot viec hong co ly do ro rang re
+        # hon nhieu so voi mot hoa don khong ai giai thich duoc.
+        if not self._model:
+            return TaskResult(
+                task_id=packet.task_id, worker_id=self._worker_id,
+                status="failed", provider=self.provider,
+                failure_reason="no_model_pinned",
+                summary=("Router KHÔNG chạy Codex khi chưa ghim model: thiếu "
+                         "`-m` thì CLI dùng model mặc định của chính nó, và "
+                         "mặc định đó đổi được ở phía nhà cung cấp. Đặt "
+                         "`provider_model` cho model Codex trong "
+                         "`fabric.json`."),
+                duration_seconds=round(time.perf_counter() - t0, 2))
         exe = find_codex()
         if not exe:
             return TaskResult(task_id=packet.task_id, worker_id=self._worker_id,
@@ -131,7 +163,9 @@ class CodexAdapter(WorkerAdapter):
                               failure_reason="worker_unavailable",
                               summary="không tìm thấy codex")
         cwd = packet.workspace or self._workspace or None
-        argv = [exe, "exec", "--skip-git-repo-check", "-"]
+        # `--color never`: dau ra di vao bo doc JSON, khong vao mat nguoi.
+        argv = [exe, "exec", "--skip-git-repo-check",
+                "-m", self._model, "--color", "never", "-"]
         try:
             self._p = subprocess.Popen(
                 argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -448,8 +482,17 @@ def dung_adapter(idn: Identity, *, timeout: float = 1200.0
                                port=idn.port or 4096, model=idn.model,
                                timeout=timeout)
     if idn.provider == "codex":
+        # `model=idn.model` — dung nhu antigravity/opencode ngay tren.
+        #
+        # Bo qua no thi `_model` rong, va `send_task` FAIL CLOSED voi
+        # `no_model_pinned` cho MOI viec: ca mot nha cung cap chet ngay ma
+        # khong ai duoc bao. Te hon, thong diep loi bao nguoi van hanh dat
+        # `provider_model` trong `fabric.json` — nhung duong V3 pool nay
+        # KHONG doc `fabric.json`, nen lam theo huong dan cung khong sua
+        # duoc. Fail closed dung huong (khong tieu tien) nhung phai fail
+        # closed VI dung ly do.
         return CodexAdapter(idn.worker_id, timeout=timeout,
-                            workspace=idn.workspace)
+                            workspace=idn.workspace, model=idn.model)
     raise AdapterError(f"{idn.worker_id}: provider lạ {idn.provider!r}")
 
 

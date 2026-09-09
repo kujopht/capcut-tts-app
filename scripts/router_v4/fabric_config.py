@@ -120,6 +120,8 @@ def _model_tu_dict(d: Dict) -> ModelCapability:
         latency_profile=float(d.get("latency_profile", 30.0)),
         reliability=float(d.get("reliability", 0.9)),
         cost_profile=float(d.get("cost_profile", 0.5)),
+        provider_model=str(d.get("provider_model") or ""),
+        premium_tier=int(d.get("premium_tier", 0)),
         notes=str(d.get("notes") or ""))
 
 

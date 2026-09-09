@@ -31,6 +31,7 @@ Nhả thì theo thứ tự NGƯỢC LẠI, luôn luôn, trong `finally`.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 import uuid
@@ -843,6 +844,79 @@ class ControlCenter:
         "codex_security_shaped_refusal", "no_eligible_placement",
     })
 
+    #: Ly do KHONG PHU THUOC CHO CHAY — hong o day thi hong o mọi nơi.
+    #:
+    #: CHI nhung ly do nay moi bi phep "hong y het thi thoi" ap dung. Danh
+    #: sach HEP co chu y, va day la ly do:
+    #:
+    #: Mot lan hong LAP LAI chua chac la loi cau hinh. Hai tai khoan cung
+    #: het quota van co the con tai khoan thu ba; hai lan `timeout` van co
+    #: the do may ban nhat thoi. Chan thu lai trong nhung truong hop do
+    #: chinh la chế độ hỏng "bao FAILED trong khi mot nha cung cap khoe
+    #: khac dang lam duoc" — doi mot bao thu lai lay mot loi bo sot.
+    #:
+    #: Nen: chi chan khi ly do TU NO da noi "day la cau hinh".
+    LY_DO_KHONG_PHU_THUOC_CHO = frozenset({
+        "session_start_failed",     # switch/launcher/thong dich hong
+        "no_model_pinned",          # fabric chua ghim model
+        "executor_error",           # hop dong/worktree hong truoc khi chay
+        "no_session",               # ban cu cua `session_start_failed`
+    })
+
+    #: Thu PHAI bo khoi chu ky vi no doi theo TUNG CHO CHAY, khong theo
+    #: ban chat cua loi. Danh tinh tai khoan la cai quan trong nhat: thong
+    #: diep that cua adapter la "switch acc1 hỏng: …", nen cung mot loi cau
+    #: hinh o AG01/AG02/AG03 ra BA chu ky khac nhau va phep so KHONG BAO
+    #: GIO khop — tuc la rao chong bao thu lai chet lang le, dung cho lop
+    #: loi no duoc viet ra de chan.
+    _XOA_KHOI_CHU_KY = re.compile(
+        r"\bacc\d+\b"                      # acc1, acc2, … (danh tinh)
+        r"|\bAG\d{2}\b"                    # AG01, AG02, …  (khe)
+        r"|\bs-[0-9a-f]{6,}\b"             # id phien
+        r"|\b\d+(?:\.\d+)?s\b"             # so giay
+        r"|\b(?:19|20)\d{2}-\d{2}-\d{2}\b"  # ngay thang
+        r"|\b\d{4,}\b",                    # pid, cong, moc thoi gian
+        re.IGNORECASE)
+
+    @classmethod
+    def _chu_ky_hong(cls, pb) -> str:
+        """Chữ ký NGẮN của một lần hỏng, để so hai lượt với nhau.
+
+        Gồm `failure_reason` và phần ĐẦU của câu tóm tắt, sau khi đã **bỏ
+        mọi thứ đổi theo chỗ chạy** — tên tài khoản, mã khe, id phiên, số
+        giây, pid. Không chuẩn hoá thì phép so vô dụng: adapter Antigravity
+        ghi `f"switch {self._acc} hỏng: …"`, nên đúng một lỗi cấu hình ở
+        AG01/AG02/AG03 ra ba chữ ký khác nhau, không chữ ký nào khớp chữ ký
+        nào, và rào chống bão thử lại **không bao giờ nổ**.
+
+        Cắt phần đầu chứ không lấy cả câu cũng vì thế: đuôi câu hay mang
+        đường dẫn tạm và mã băm chỉ sống một lượt.
+        """
+        ly_do = (getattr(pb, "failure_reason", "") or "").strip()
+        tom = " ".join((getattr(pb, "summary", "") or "").split())
+        tom = cls._XOA_KHOI_CHU_KY.sub("·", tom)[:80]
+        return f"{ly_do}|{tom}" if (ly_do or tom) else ""
+
+    def _lan_hong_truoc(self, task_id: str) -> Dict:
+        """Meta của lần hỏng TRƯỚC lần vừa xong.
+
+        BỎ QUA bản ghi đầu tiên có chủ ý: `TASK_FINISHED` của lượt hiện tại
+        đã được ghi TRƯỚC khi đường thử lại chạy, nên bản ghi mới nhất
+        chính là lượt đang xét. So nó với chính nó thì lượt thử lại đầu
+        tiên nào cũng bị từ chối.
+        """
+        hong = []
+        for e in self.store.su_kien(task_id=task_id, limit=40):
+            if e.get("kind") != "TASK_FINISHED":
+                continue
+            m = e.get("meta") or {}
+            if m.get("ok") or not m.get("fail_sig"):
+                continue
+            hong.append(m)
+            if len(hong) >= 2:
+                break
+        return hong[1] if len(hong) >= 2 else {}
+
     def _doi_soat_khai_thieu(self, ctx: "ProjectContext", task_id: str,
                              hd: TaskContract, kq: ExecutionResult) -> bool:
         """ĐỐI SOÁT lời khai thiếu với TRẠNG THÁI THẬT — vẫn FAIL CLOSED.
@@ -1028,7 +1102,7 @@ class ControlCenter:
         return da_nha
 
     def _thu_lai_neu_dang(self, ctx: ProjectContext, task_id: str, pb,
-                          session_id: str) -> None:
+                          session_id: str, placement_key: str = "") -> None:
         """Thử lại một việc hỏng — CÓ TRẦN, và đổi chỗ chạy.
 
         VÌ SAO CẦN: `Executor.run()` chạy đúng MỘT lượt. Đường thử lại của
@@ -1050,6 +1124,35 @@ class ControlCenter:
         if t is None:
             return
         ly_do = (pb.failure_reason or "").strip()
+
+        # HONG Y HET O MOT CHO KHAC = loi khong phu thuoc placement.
+        #
+        # Thu lai co ich khi lan hong la CUC BO: mot tai khoan het quota,
+        # mot tien trinh chet. No vo ich — va ton dung mot luot quota moi
+        # lan — khi nguyen nhan nam o CAU HINH, vi luot sau se hong y het.
+        # Da vap that (2026-09-09): mot loi `sys.executable` trong ban dong
+        # goi lam ba runtime AG01/AG02/AG03 hong lien tiep trong 6 giay,
+        # cung mot cau chu.
+        #
+        # Khong doan xem ly do nao la "tat dinh" — DO. Neu chu ky hong cua
+        # lan nay trung lan truoc MA CHO CHAY DA KHAC, thi doi cho nua chi
+        # lap lai ket qua.
+        ck = self._chu_ky_hong(pb)
+        truoc = self._lan_hong_truoc(task_id)
+        cho_nay = placement_key or (pb.worker or "")
+        if ly_do in self.LY_DO_KHONG_PHU_THUOC_CHO \
+                and truoc and ck and truoc.get("fail_sig") == ck \
+                and truoc.get("placement") and truoc["placement"] != cho_nay:
+            self.store.ghi_su_kien(
+                "RETRY_REFUSED", project_id=t.project_id, task_id=task_id,
+                level="WARNING",
+                detail=(f"KHÔNG thử lại: đã hỏng Y HỆT ({ck}) ở "
+                        f"{truoc['placement']} rồi ở {cho_nay} — lỗi không "
+                        f"phụ thuộc chỗ chạy, đổi chỗ nữa chỉ tốn quota"),
+                meta={"fail_sig": ck,
+                      "placements": [truoc["placement"], cho_nay]})
+            return
+
         if ly_do in self.KHONG_THU_LAI or pb.requires_decision:
             self.store.ghi_su_kien(
                 "RETRY_REFUSED", project_id=t.project_id, task_id=task_id,
@@ -1255,10 +1358,12 @@ class ControlCenter:
                 meta={"status": pb.status, "ok": kq.ok,
                       "raw_log_ref": pb.raw_log_ref, "changes": pb.changes[:20],
                       "findings": pb.findings[:10], "risks": pb.risks[:10],
-                      "placement": p.key, "duration": round(pb.duration, 2)})
+                      "placement": p.key, "duration": round(pb.duration, 2),
+                      "fail_sig": self._chu_ky_hong(pb)})
             ctx.sessions.ket_thuc_viec(session_id, task_id, ok=kq.ok, pid=pid)
             if moi is TaskState.FAILED:
-                self._thu_lai_neu_dang(ctx, task_id, pb, session_id)
+                self._thu_lai_neu_dang(ctx, task_id, pb, session_id,
+                                       placement_key=p.key)
             # Viec vua xong la mot REVIEW -> khep viec CHA lai. Lam sau khi
             # da ghi trang thai/su kien cua chinh no, de neu buoc khep hong
             # thi ket qua review van con nguyen tren so.

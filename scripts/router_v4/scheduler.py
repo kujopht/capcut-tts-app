@@ -33,6 +33,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 from scripts.router_v4.capabilities import (Priority, Reasoning, Requirements,
                                             expand, missing, satisfies)
 from scripts.router_v4.contract import TaskContract
+from scripts.router_v4.premium import BAC_CAO_CAP, bac_cua
 from scripts.router_v4.runtime import (Fabric, ModelCapability, Placement,
                                        QuotaPool, RuntimeStatus, Source,
                                        WorkerRuntime)
@@ -196,6 +197,28 @@ class Scheduler:
         if not r.dispatchable:
             return ("runtime KHÔNG nhận dispatch (là phiên điều phối, không "
                     "phải tiến trình worker gọi ra được)")
+
+        # BAC CAO CAP (Astra) KHONG BAO GIO tu dong duoc chon.
+        #
+        # Rao nay phai nam O DAY, trong phep loai cua bo lap lich, chu khong
+        # chi nam trong `premium.py`. Ly do rat cu the: mot thoi gian rao
+        # DUY NHAT dang thuc su chan Astra la viec no vang mat khoi
+        # `supported_models` cua CODEX01 — trong khi `fabric.json` lai ghi
+        # rang "bat = them vao supported_models, premium.py van con la rao
+        # cuoi". Cau do SAI: `premium.py` khong duoc goi tu bat ky duong
+        # nao cua bo lap lich, nen ai lam dung theo huong dan se mo thang
+        # cua cho mot model bac 3 thang diem mot viec `grep`
+        # (benchmark_profile 0.9 > 0.82, va `expected_cost` nhe hon
+        # `benchmark_quality` + `capability_match` cong lai).
+        #
+        # Gio thi cau do dung: khong co duong tu dong nao di qua duoc.
+        # Cho phep tuong minh di qua `requirements.pin_model`, tuc la phai
+        # co ai do goi dich danh model do.
+        if bac_cua(m.model_id, getattr(m, "premium_tier", 0)) >= BAC_CAO_CAP \
+                and c.requirements.pin_model != m.model_id:
+            return (f"model bậc CAO CẤP ({m.model_id}) — không bao giờ được "
+                    f"chọn tự động; phải ghim tường minh qua `pin_model` và "
+                    f"đi qua rào leo thang ở `premium.py`")
         tt = r.trang_thai_hien_tai(now=now)
         if tt is RuntimeStatus.OFFLINE:
             return f"runtime OFFLINE ({r.needs_provisioning or r.health_detail or 'chưa cấp phát'})"[:160]

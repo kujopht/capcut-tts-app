@@ -24,6 +24,7 @@ dưới đây khẳng định chính cặp đó, vì nếu ai đó gỡ dòng `d
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import unittest
 from pathlib import Path
@@ -60,6 +61,12 @@ class TestSoiKhoKhongCanDuyet(unittest.TestCase):
         "git ls-files", "git ls-remote", "git worktree list",
         "git describe", "git blame", "git cat-file",
         "ls", "wc",
+        # V0.4: do thay tren mot phien that — 16 lenh doc/chay-kiem
+        # thong thuong KHONG co luat nao khop, nen chung roi vao "hoi
+        # nguoi" va mot phien khong nguoi trong dung lai o do.
+        "grep", "rg", "find", "cat", "head", "tail", "sed", "dir",
+        "python -m unittest", "python -m pytest", "python -m compileall",
+        "node --check",
     )
 
     def setUp(self):
@@ -79,7 +86,11 @@ class TestSoiKhoKhongCanDuyet(unittest.TestCase):
         Mở chúng cũng là cách bỏ được `cd && grep` và các đường ống
         `head`/`tail` — thứ vừa khó đọc vừa làm mất phạm vi đọc tường minh.
         """
-        for r in ("Read(**)", "Grep(**)"):
+        # `Glob(**)` TUNG THIEU o day va o cau hinh: bai kiem chi doi
+        # `Read`+`Grep`, nen cho thieu do khong ai thay. Ba cong cu nay
+        # la mot bo — mo hai cai roi de cai thu ba hoi nguoi thi phien
+        # khong nguoi trong van dung.
+        for r in ("Read(**)", "Grep(**)", "Glob(**)"):
             self.assertIn(r, self.allow)
 
     def test_bo_kiem_chay_duoc_bang_duong_venv_TUYET_DOI(self):
@@ -184,6 +195,57 @@ class TestViecNguyHiemVanBiChan(unittest.TestCase):
         self.assertIn("Edit(.claude/settings.json)", ask)
         self.assertIn("Edit(.claude/hooks/**)", ask)
 
+    def test_KHONG_mo_python_tran(self):
+        """`Bash(python:*)` se cho qua `python -c "<bat ky>"`.
+
+        Do dung la duong ma hook `guard_indirect_exec` ton tai de chan, va
+        mot luat `allow` tran o day se lam lop hook thanh vo nghia cho
+        truong hop pho bien nhat. Nen chi tung MODULE duoc mo.
+        """
+        al = set(_nap()["permissions"]["allow"])
+        for x in ("Bash(python:*)", "Bash(python3:*)", "Bash(py:*)",
+                  "Bash(node:*)", "Bash(python scripts/:*)"):
+            with self.subTest(luat=x):
+                self.assertNotIn(x, al)
+
+    def test_kich_ban_ops_KHONG_chay_duoc_du_kich_ban_kho_duoc_mo(self):
+        """`scripts/ops/*` cham vao Appwrite/R2/Drive/AWS THAT.
+
+        Cap allow/deny nay cung hinh dang voi `git push`/`--force`: danh
+        sach `allow` liet ke tung kich ban an toan, va dong `deny` giu
+        `scripts/ops/` ngoai cua ke ca khi ai do sau nay them mot luat
+        `python scripts/*` rong hon.
+
+        CHAN THEO HINH DANG THUC THI, khong chan viec DOC ma nguon do —
+        `grep`/`cat` trong `scripts/ops/` la viec phat trien binh thuong.
+        """
+        for x in ("Bash(python scripts/ops/*)",
+                  "Bash(*&& python scripts/ops/*)"):
+            with self.subTest(luat=x):
+                self.assertIn(x, self.deny)
+        al = set(_nap()["permissions"]["allow"])
+        self.assertIn("Bash(python scripts/build_desktop_exe.py:*)", al)
+
+    def test_Write_duoc_mo_thi_moi_cong_ASK_cua_Edit_phai_co_ban_song_sinh(self):
+        """`Write(**)` vua duoc mo, va do la mot lo neu `ask` khong theo.
+
+        Cac cong `ask` duoc viet cho `Edit(...)`. Neu `Write` mo ma khong
+        co ban song sinh thi mot lan `Write` di vong qua DUNG cai cong ma
+        `Edit` phai dung lai — sua `.claude/settings.json` hay
+        `web/wrangler.jsonc` ma khong ai duyet.
+        """
+        p = _nap()["permissions"]
+        if "Write(**)" not in set(p["allow"]):
+            self.skipTest("chưa mở Write(**)")
+        ask = set(p["ask"])
+        for r in p["ask"]:
+            if r.startswith("Edit("):
+                song_sinh = r.replace("Edit(", "Write(", 1)
+                with self.subTest(cong=r):
+                    self.assertIn(song_sinh, ask,
+                                  f"{r} có cổng ASK nhưng {song_sinh} thì "
+                                  f"không — Write đi vòng qua được")
+
     def test_hook_chan_thuc_thi_gian_tiep_van_duoc_gan(self):
         """Hook là lớp chặn `python -c`/`rm -rf` — không được rơi ra."""
         d = _nap()
@@ -192,6 +254,149 @@ class TestViecNguyHiemVanBiChan(unittest.TestCase):
         self.assertIn("guard_indirect_exec.py", arg)
         self.assertTrue((GOC / ".claude" / "hooks"
                          / "guard_indirect_exec.py").is_file())
+
+
+def _khop(mau: str, lenh: str) -> bool:
+    """Khớp MỘT luật `Bash(...)` với MỘT chuỗi lệnh.
+
+    Đây là một **mô hình** hai dạng khớp mà chính tệp cấu hình này đã dựa
+    vào từ đầu, không phải một bản cài lại đầy đủ của Claude Code:
+
+        `x:*`   -> tiền tố: lệnh là `x` hoặc bắt đầu bằng `x `
+        còn lại -> glob trên CẢ chuỗi lệnh (`Bash(head * *.env*)`)
+
+    Hai dạng đó là đủ để khoá lại điều cần khoá ở đây: `deny` thắng
+    `allow`, và một luật neo ở ĐẦU động từ không khớp khi có tiền tố
+    `cd ... &&`. Chính chỗ đó là DEFECT được sửa, nên nó phải được kiểm
+    bằng hành vi chứ không bằng phép "chuỗi có trong danh sách".
+    """
+    if mau.endswith(":*"):
+        goc = mau[:-2]
+        return lenh == goc or lenh.startswith(goc + " ")
+    return mau == lenh or fnmatch.fnmatchcase(lenh, mau)
+
+
+def _quyet(lenh: str) -> str:
+    """`deny` | `ask` | `allow` | `hoi` — đúng thứ tự ưu tiên của Claude Code."""
+    p = _nap()["permissions"]
+    for muc in ("deny", "ask", "allow"):
+        for r in p.get(muc, []):
+            if r.startswith("Bash(") and r.endswith(")"):
+                if _khop(r[5:-1], lenh):
+                    return muc
+    return "hoi"
+
+
+class TestTienToCdKhongConHoi(unittest.TestCase):
+    """`cd <kho> && grep ...` phải chạy — và phải chạy AN TOÀN.
+
+    VÌ SAO CÓ LỚP NÀY. Luật `Bash(...)` khớp trên CẢ chuỗi lệnh, nên một
+    lệnh bắt đầu bằng `cd` không thể khớp `Bash(grep:*)` — kể cả khi
+    `grep` đã được cho phép. Đo được trên một phiên thật: **mọi** dạng
+    `cd <kho> && ...` đều rơi vào "hỏi người", kể cả
+    `cd <kho> && git status` vốn đã nằm trong `allow`.
+
+    NHƯNG cách sửa dễ nhất lại là một cái lỗ. Các luật `deny` bảo vệ bí
+    mật được neo ở ĐẦU động từ (`Bash(cat *.env*)`), nên chúng KHÔNG khớp
+    khi có tiền tố `cd ... &&`. Đo được trước bản sửa:
+
+        cat .env                        -> CHẶN
+        cd <kho> && cat .env            -> chỉ HỎI (hook cũng im lặng)
+
+    Nên nếu chỉ thêm `allow` cho dạng `cd`, chỗ đó thành CHẠY NGAY. Hai
+    điều phải đi cùng nhau, và lớp này khoá cả hai lại:
+
+        1. `cd <cây FanficWorkers> && <động từ an toàn>` -> allow
+        2. luật `deny` NEO THEO BÍ MẬT (`*id_rsa*`, `* *.env`, …) khớp
+           bất kể tiền tố -> `cd <kho> && cat .env` thành CHẶN
+
+    Sau bản sửa, dạng có `cd` **an toàn hơn trước**: HỎI -> CHẶN.
+    """
+
+    KHO = "C:/FanficWorkers/router-control-center"
+
+    def test_dang_cd_cua_lenh_doc_thong_thuong_duoc_phep(self):
+        for lenh in (
+            f"cd {self.KHO} && grep -rn TODO scripts/",
+            f"cd {self.KHO} && rg -n TODO scripts/",
+            f"cd {self.KHO} && git status --short",
+            f"cd {self.KHO} && git diff --stat",
+            f"cd {self.KHO} && ls -la scripts",
+            f"cd {self.KHO} && python -m unittest scripts.tests.test_router_v3",
+            f"cd {self.KHO} && node --check scripts/control_center/web/app.js",
+            "cd /c/FanficWorkers/router-control-center && grep -rn x scripts/",
+        ):
+            with self.subTest(lenh=lenh):
+                self.assertEqual(_quyet(lenh), "allow", lenh)
+
+    def test_dang_cd_KHONG_mo_duong_toi_bi_mat(self):
+        """Phần không được phép mất: `deny` thắng luật `cd` ở trên."""
+        for lenh in (
+            f"cd {self.KHO} && cat .env",
+            f"cd {self.KHO} && grep -r AKIA server/.env",
+            f"cd {self.KHO} && head -5 ~/.ssh/id_rsa",
+            f"cd {self.KHO} && sed -n '1,3p' ~/.ssh/id_ed25519",
+            f"cd {self.KHO} && cat ~/.git-credentials",
+            f"cd {self.KHO} && python scripts/ops/appwrite_backup_to_drive.py",
+        ):
+            with self.subTest(lenh=lenh):
+                self.assertEqual(_quyet(lenh), "deny", lenh)
+
+    def test_luat_cd_KHONG_duoc_la_dau_hoa_TRAN(self):
+        """`Bash(cd <cây> && *)` sẽ cho qua MỌI thứ sau `cd`.
+
+        Đó là "tắt hệ thống an toàn cho một thư mục", không phải một luật
+        hẹp: `cd <kho> && cat .env` sẽ thành CHẠY NGAY. Luật `cd` phải
+        được viết THEO TỪNG ĐỘNG TỪ.
+        """
+        for r in _nap()["permissions"]["allow"]:
+            if r.startswith("Bash(cd "):
+                than = r[5:-1]
+                with self.subTest(luat=r):
+                    self.assertFalse(
+                        than.endswith("&& *") or than.endswith("&&*"),
+                        f"{r} mở mọi động từ sau `cd`")
+
+    def test_dang_cd_chi_ap_cho_cay_lam_viec_nay(self):
+        """`cd` sang chỗ khác trên đĩa thì KHÔNG được thừa hưởng gì."""
+        for lenh in (
+            "cd C:/Windows/System32 && grep -rn x .",
+            "cd C:/Users/nguye/Documents && cat notes.txt",
+            "cd /tmp && grep -rn x .",
+        ):
+            with self.subTest(lenh=lenh):
+                self.assertNotEqual(_quyet(lenh), "allow", lenh)
+
+    def test_luat_neo_theo_bi_mat_co_mat(self):
+        """Nửa thứ hai của cặp trên, khẳng định tường minh.
+
+        Gỡ những dòng này thì các luật `cd` ở trên lập tức thành một lỗ,
+        và không có gì khác báo động — cùng hình dạng với cặp
+        `git push`/`--force`.
+        """
+        den = set(_nap()["permissions"]["deny"])
+        for x in ("Bash(*id_rsa*)", "Bash(*id_ed25519*)",
+                  "Bash(*.git-credentials*)", "Bash(*.ssh/*)",
+                  "Bash(*.aws/credentials*)", "Bash(*rclone.conf*)",
+                  "Bash(* *.env)", "Bash(*/.env)", "Bash(*.env.*)",
+                  "Bash(*cmdkey*)", "Bash(*PasswordVault*)"):
+            with self.subTest(luat=x):
+                self.assertIn(x, den)
+
+    def test_doc_ma_nguon_co_chu_Cookies_VAN_chay_duoc(self):
+        """Luật chặn kho credential của trình duyệt không được rộng tới
+        mức chặn việc ĐỌC MÃ NGUỒN có chữ đó.
+
+        Bản đầu dùng `Bash(*Cookies*)` và nó chặn
+        `grep -rn Cookies scripts/` — một báo động sai mà người sau sẽ gỡ
+        cả dòng luật để hết bị chặn, và lúc đó mất luôn ranh giới thật.
+        """
+        self.assertEqual(_quyet("grep -rn Cookies scripts/control_center/"),
+                         "allow")
+        self.assertEqual(
+            _quyet('cat "C:/Users/x/AppData/Local/Google/Chrome/'
+                   'User Data/Default/Cookies"'),
+            "deny")
 
 
 if __name__ == "__main__":

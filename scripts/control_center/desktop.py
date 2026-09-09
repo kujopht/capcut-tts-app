@@ -125,7 +125,8 @@ def main(argv=None) -> int:
 
     from scripts.control_center.desktop_shell import (
         MotThucThe, ThongTinPhien, cho_backend_khoe, duong_giao_dien,
-        ghi_tep_khoa, quyet_dinh, ten_mutex_cua, xoa_tep_khoa)
+        duong_webview2, ghi_tep_khoa, quyet_dinh, ten_mutex_cua,
+        xoa_tep_khoa)
 
     goc = Path(a.root).resolve() if a.root else _goc_mac_dinh()
 
@@ -241,9 +242,25 @@ def main(argv=None) -> int:
     # pywebview tu chon: bo dong `mshtml` (IE11) cung nam trong danh sach
     # tu chon cua no tren Windows, va no khong chay duoc frontend nay —
     # khong ES module, khong `<dialog>`, khong WebSocket dang nay.
+    # `storage_path`: HO SO WEBVIEW2 RIENG THEO THU MUC GOC.
+    #
+    # Mac dinh cua pywebview la `%APPDATA%\pywebview\EBWebView` — MOT
+    # thu muc dung chung cho MOI ung dung pywebview tren may. WebView2
+    # chi cho nhieu tien trinh dung chung mot ho so khi
+    # `AdditionalBrowserArguments` GIONG NHAU, nen mot ban thu hai cua
+    # app nay (hoac mot app pywebview cua ben thu ba) du de lam
+    # `webview.start()` nem `0x8007139F` — "the group or resource is not
+    # in the correct state" — va nguoi dung khong the suy ra vi sao.
+    # Da gap that tren ban dong goi. Xem `duong_webview2`.
+    ho_so = duong_webview2(goc)
+    try:
+        ho_so.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        ghi(f"[desktop] không tạo được hồ sơ WebView2 {ho_so}: {exc}")
+    ghi(f"[desktop] hồ sơ WebView2: {ho_so}")
     try:
         webview.start(gui="edgechromium", debug=bool(a.debug_cdp),
-                      private_mode=False)
+                      private_mode=False, storage_path=str(ho_so))
     except Exception as exc:                                # noqa: BLE001
         _bao_loi(
             f"Không mở được cửa sổ WebView2: {type(exc).__name__}: {exc}\n\n"

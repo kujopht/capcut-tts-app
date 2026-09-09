@@ -47,6 +47,12 @@ models.json
 # --- Build / dong goi ---
 build/
 dist/
+# Thu muc dich khi dung `build_desktop_exe.py --dist <ten>`: mot ban dang
+# CHAY khoa chinh thu muc cua no, nen "dung ban moi de nghiem thu" va "giu
+# ban nguoi dung dang mo" phai o hai cho khac nhau. Cung la san pham build,
+# cung khong bao gio vao kho.
+dist-v04/
+dist-*/
 installer_output/
 *.spec
 !installer.iss

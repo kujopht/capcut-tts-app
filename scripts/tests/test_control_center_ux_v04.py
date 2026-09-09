@@ -46,6 +46,47 @@ MIEN_TRU = {
 }
 
 
+#: Chuong trinh CONSOLE ma ung dung nay co the goi. Mot loi goi mang
+#: mot trong nhung ten nay o dau danh sach tham so LA mot cho sinh tien
+#: trinh, bat ke ham duoc goi ten la gi.
+LENH_CONSOLE = {
+    "git", "agy", "agy.exe", "codex", "codex.exe", "python", "python.exe",
+    "py", "py.exe", "icacls", "tasklist", "taskkill", "where", "cmd",
+    "powershell", "pwsh", "node", "npm", "npx", "rclone", "gcloud",
+}
+
+
+def _la_sinh(n: ast.Call) -> bool:
+    """Lời gọi này có sinh một tiến trình con không?
+
+    HAI hình dạng, và hình dạng thứ hai là một lỗi đã vấp:
+
+    1. `subprocess.run(...)` / `subprocess.Popen(...)` — hiển nhiên.
+    2. `self._run(["git", ...])` — một **runner được tiêm**. Bản quét đầu
+       của V0.4 chỉ tìm hình dạng (1), nên `worktree.py::verify_scope`
+       lọt lưới và cửa sổ console vẫn nhấp lên trong bản đóng gói. Nhận
+       theo THAM SỐ (danh sách bắt đầu bằng tên một chương trình console)
+       thì tên hàm không còn quan trọng.
+    """
+    ten = (n.func.attr if isinstance(n.func, ast.Attribute)
+           else getattr(n.func, "id", ""))
+    if ten in SINH:
+        if isinstance(n.func, ast.Attribute):
+            if getattr(n.func.value, "id", "") == "subprocess":
+                return True
+        else:
+            return True
+    if not n.args:
+        return False
+    dau = n.args[0]
+    if not isinstance(dau, (ast.List, ast.Tuple)) or not dau.elts:
+        return False
+    p0 = dau.elts[0]
+    if not isinstance(p0, ast.Constant) or not isinstance(p0.value, str):
+        return False
+    return Path(p0.value).name.lower() in LENH_CONSOLE
+
+
 def _bao_dong_khoi_dong():
     """Mọi tệp `scripts/**` mà việc mở EXE có thể nạp tới."""
     def tep(mod):
@@ -102,19 +143,22 @@ class TestKhongNhapCuaSo(unittest.TestCase):
                 continue
             src = f.read_text(encoding="utf-8")
             dong = src.splitlines()
+            # MOT MODULE co the phu moi diem goi bang cach BOC runner mot
+            # lan (`_boc_an_cua_so`) thay vi them kwargs o tung cho. Do
+            # la hinh dang MANH HON — mot diem goi them ve sau cung duoc
+            # phu tu dong — nen phep quet phai chap nhan no, khong thi no
+            # se day nguoi sua ve lai cach de quen.
+            boc_ca_module = "_boc_an_cua_so" in src
             for n in ast.walk(ast.parse(src)):
                 if not isinstance(n, ast.Call):
                     continue
-                ten = (n.func.attr if isinstance(n.func, ast.Attribute)
-                       else getattr(n.func, "id", ""))
-                if ten not in SINH:
+                if not _la_sinh(n):
                     continue
-                if isinstance(n.func, ast.Attribute):
-                    if getattr(n.func.value, "id", "") != "subprocess":
-                        continue
                 d = ast.dump(n)
                 if ("an_cua_so" in d or "creationflags" in d
                         or "startupinfo" in d or "AN_HIEN" in d):
+                    continue
+                if boc_ca_module:
                     continue
                 loi.append(f"{rel}:{n.lineno}  "
                            f"{dong[n.lineno - 1].strip()[:80]}")
@@ -123,6 +167,36 @@ class TestKhongNhapCuaSo(unittest.TestCase):
             "Mỗi chỗ dưới đây nhấp một cửa sổ console trong bản "
             "`--noconsole` và giành focus của người dùng. Thêm "
             "`**an_cua_so()`:\n" + "\n".join(loi))
+
+    def test_bat_duoc_ca_RUNNER_DUOC_TIEM(self):
+        """Chứng cứ chống rỗng cho chính phép quét ở trên.
+
+        LỖI THẬT ĐÃ VẤP: `router_v3/worktree.py::verify_scope` gọi
+        `self._run(["git", …])` — một **runner được tiêm**, không phải
+        `subprocess.run` — nên bản quét cũ (chỉ tìm `subprocess.run`/
+        `Popen`) **không thấy nó**, và cửa sổ console vẫn nhấp lên trong
+        bản đóng gói. Hai lớp phòng vệ cùng trượt đúng một chỗ.
+
+        Bài này bắt phép quét phải nhận ra hình dạng đó: một lời gọi mà
+        THAM SỐ ĐẦU là danh sách bắt đầu bằng tên một chương trình
+        console, bất kể hàm được gọi tên là gì.
+        """
+        mau = ast.parse(
+            "def f(self):\n"
+            "    return self._run(['git', '-C', x, 'status'],\n"
+            "                     capture_output=True)\n")
+        goi = [n for n in ast.walk(mau) if isinstance(n, ast.Call)]
+        self.assertTrue(any(_la_sinh(n) for n in goi),
+                        "phép quét bỏ sót runner được tiêm — đúng lỗi đã "
+                        "làm cửa sổ console nhấp lên ở bản V0.4 đầu")
+
+    def test_khong_bat_bua_bai(self):
+        """Và nó KHÔNG được coi mọi lời gọi có danh sách là sinh tiến
+        trình — một phép quét báo động giả sẽ bị người sau tắt đi."""
+        mau = ast.parse("y = ham(['khong', 'phai', 'lenh'])\n"
+                        "z = self._run(cai_gi_do)\n")
+        goi = [n for n in ast.walk(mau) if isinstance(n, ast.Call)]
+        self.assertFalse(any(_la_sinh(n) for n in goi))
 
     def test_an_cua_so_dat_dung_co_tren_windows(self):
         kw = an_cua_so()
@@ -203,6 +277,78 @@ class TestMotManHinh(unittest.TestCase):
         h = self._html()
         for x in ("bang-tasks", "ds-tin", "o-soan"):
             self.assertIn(x, h)
+
+
+class TestHoSoWebView2(unittest.TestCase):
+    """Hồ sơ WebView2 theo THƯ MỤC GỐC, không dùng chung cả máy.
+
+    SỰ CỐ THẬT, đo được trên bản đóng gói của chính V0.4:
+
+        pywebview WebView2 initialization failed with exception:
+        (0x8007139F): The group or resource is not in the correct state
+        to perform the requested operation.
+
+    `pywebview` mặc định để hồ sơ ở `%APPDATA%/pywebview/EBWebView` —
+    MỘT thư mục dùng chung cho MỌI ứng dụng pywebview trên máy. WebView2
+    cho nhiều tiến trình dùng chung một hồ sơ nhưng CHỈ KHI
+    `AdditionalBrowserArguments` giống nhau, nên một bản thứ hai của app
+    (hoặc một app pywebview của bên thứ ba) đủ để `webview.start()` nổ
+    ngay lúc mở, với một thông điệp không ai suy ra được nguyên nhân.
+
+    Đây đúng là bất biến `ten_mutex_cua` đã chọn: "một thực thể" tính
+    theo thư mục gốc, để một bản KIỂM chạy được cạnh bản của người dùng.
+    Hồ sơ toàn máy phá lại đúng bảo đảm đó.
+    """
+
+    def test_hai_goc_khac_nhau_thi_KHAC_ho_so(self):
+        from scripts.control_center.desktop_shell import duong_webview2
+        a = Path(tempfile.mkdtemp(prefix="cc-wv-a-"))
+        b = Path(tempfile.mkdtemp(prefix="cc-wv-b-"))
+        self.assertNotEqual(duong_webview2(a), duong_webview2(b))
+
+    def test_cung_goc_thi_cung_ho_so(self):
+        from scripts.control_center.desktop_shell import duong_webview2
+        d = Path(tempfile.mkdtemp(prefix="cc-wv-c-"))
+        self.assertEqual(duong_webview2(d), duong_webview2(d))
+
+    def test_hoa_thuong_khong_lam_ra_hai_ho_so(self):
+        from scripts.control_center.desktop_shell import duong_webview2
+        d = Path(tempfile.mkdtemp(prefix="cc-wv-d-"))
+        self.assertEqual(duong_webview2(str(d).upper()),
+                         duong_webview2(str(d).lower()))
+
+    def test_KHONG_nam_duoi_goc_de_khong_vuot_MAX_PATH(self):
+        """WebView2 tạo cây sâu (`EBWebView/Default/…`). Đặt dưới một
+        `goc` đã dài — ví dụ thư mục tạm của bộ kiểm — sẽ đẩy tổng đường
+        dẫn qua `MAX_PATH` và lỗi hiện ra ở một chỗ không liên quan."""
+        from scripts.control_center.desktop_shell import duong_webview2
+        d = Path(tempfile.mkdtemp(prefix="cc-wv-e-"))
+        p = duong_webview2(d)
+        self.assertNotIn(str(d).lower(), str(p).lower())
+        # Còn chỗ cho `EBWebView/Default/...` bên trong.
+        self.assertLess(len(str(p)), 160, str(p))
+
+    def test_dung_cung_khoa_bam_voi_mutex(self):
+        """Một khoá, hai người dùng: đổi cách băm ở một chỗ mà quên chỗ
+        kia thì "một thực thể" và "một hồ sơ" lệch nhau."""
+        from scripts.control_center.desktop_shell import (duong_webview2,
+                                                          ten_mutex_cua)
+        d = Path(tempfile.mkdtemp(prefix="cc-wv-f-"))
+        self.assertTrue(ten_mutex_cua(d).endswith(duong_webview2(d).name))
+
+    def test_desktop_TRUYEN_storage_path_vao_webview_start(self):
+        src = (GOC / "scripts/control_center/desktop.py").read_text(
+            encoding="utf-8")
+        # `rfind`: chinh tep do GIAI THICH su co bang cach nhac ten
+        # `webview.start()` trong mot dong chu thich o tren, va
+        # `find` se dung vao do.
+        i = src.rfind("        webview.start(")
+        self.assertGreater(i, 0)
+        than = src[i:i + 260]
+        self.assertIn("storage_path=", than,
+                      "không truyền thì pywebview dùng thư mục CHUNG "
+                      "của cả máy và app chết lúc mở với 0x8007139F")
+        self.assertIn("duong_webview2(", src)
 
 
 class TestUsageDungHinhDang(unittest.TestCase):

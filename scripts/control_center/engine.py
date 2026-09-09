@@ -50,6 +50,7 @@ from scripts.router_v4.runtime import Fabric, Placement
 from scripts.router_v4.modes import hop_dong_review
 from scripts.router_v4.scheduler import Demand, Scheduler
 
+from scripts.control_center.bootstrap import la_kho_git
 from scripts.control_center.locks import LockManager
 from scripts.control_center.model import (LockKind, PermissionClass, Project,
                                           Session, SessionAction, SessionState,
@@ -842,6 +843,9 @@ class ControlCenter:
     KHONG_THU_LAI = frozenset({
         "security_gate", "requires_decision", "tool_permission_denied",
         "codex_security_shaped_refusal", "no_eligible_placement",
+        # `repo_path` khong phai kho git: doi nha cung cap khong sua duoc
+        # gi ca, va moi luot thu lai chi tao them mot phien vo ich.
+        "project_repo_invalid",
     })
 
     #: Ly do KHONG PHU THUOC CHO CHAY — hong o day thi hong o mọi nơi.
@@ -1309,14 +1313,56 @@ class ControlCenter:
                                name=f"cc-hb-{task_id}")
         tim.start()
         try:
+            # CONG VAO: `repo_path` cua du an phai la mot kho git THAT.
+            #
+            # Kiem o day, mot lan, voi mot cau doc duoc — thay vi de
+            # `git rev-parse HEAD` ne ra giua duong dieu phoi. Su co that
+            # (2026-09-09): mot du an duoc gieo tro vao chinh thu muc EXE
+            # (khong phai kho git), va viec dau tien nguoi dung go chet
+            # bang `WorktreeError: not a git repository` — mot cau khong
+            # noi cho ai biet phai sua gi, o mot cho khong ai ngo toi.
+            #
+            # Day KHONG phai loi cua nha cung cap: doi sang AG02 hay Codex
+            # deu hong y het. Nen no FAILED va khong fallback — nhung phai
+            # FAILED voi ly do dung.
+            if not la_kho_git(ctx.project.repo_path):
+                self.store.ghi_su_kien(
+                    "PROJECT_REPO_INVALID", project_id=ctx.project.project_id,
+                    task_id=task_id, session_id=session_id, level="ERROR",
+                    detail=(f"repo_path của dự án không phải kho git: "
+                            f"{ctx.project.repo_path!r}. Router làm việc "
+                            f"trên kho git — sửa đường dẫn dự án rồi gửi "
+                            f"lại. Không nhà cung cấp nào chạy được việc "
+                            f"này, nên KHÔNG chuyển sang chỗ khác."),
+                    meta={"repo_path": str(ctx.project.repo_path)})
+                self.store.doi_trang_thai(
+                    task_id, TaskState.FAILED, force=True,
+                    reason=(f"project_repo_invalid: {ctx.project.repo_path!r} "
+                            f"không phải kho git"))
+                ctx.sessions.ket_thuc_viec(session_id, task_id, ok=False)
+                return
+
             ctx.fabric.mark_started(p.runtime_id, task_id)
             self.store.ghi_su_kien(
                 "TASK_STARTED", project_id=ctx.project.project_id,
                 task_id=task_id, session_id=session_id,
                 detail=f"{p.key} @ {hd.execution.max_wall_time:.0f}s trần")
 
+            # `base_sha` CHI tinh khi viec that su can mot worktree.
+            #
+            # Truoc day no duoc tinh vo dieu kien, ngay trong danh sach doi
+            # so — nen `git rev-parse HEAD` chay cho CA nhung viec CHI DOC
+            # khong bao gio cham toi git. Hau qua that (2026-09-09): mot
+            # viec `analysis` voi `worktree_required=false` chet vi
+            # `WorktreeError: not a git repository` TRUOC KHI
+            # `Executor.run()` kip duoc vao — khong adapter nao duoc goi,
+            # khong tien trinh nao duoc sinh, `result_json` rong.
+            #
+            # Mot viec khong can git thi khong duoc phep chet vi git.
+            base = (ctx.worktrees.base_sha()
+                    if hd.execution.worktree_required else "")
             kq = ctx.executor.run(
-                hd, p, base_sha=ctx.worktrees.base_sha(),
+                hd, p, base_sha=base,
                 attempt=max(1, (self.store.task(task_id) or Task(
                     task_id, "", "", "")).attempts))
 

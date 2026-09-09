@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!--
-  Router Control Center — giao dien WEB (duong chinh tu V0.2).
+  Router Control Center — giao dien WEB (duong chinh tu V0.2, do lai V0.4).
 
   KHONG CO BUOC BUILD, va do la mot quyet dinh ky thuat co ly do:
 
@@ -20,7 +20,9 @@
 
   CSP: chi cho phep tai nguyen tu chinh origin nay. Khong CDN, khong font
   ngoai, khong `unsafe-eval`. Mot cong cu dieu hanh cuc bo khong co ly do
-  gi de tai mot byte nao tu Internet.
+  gi de tai mot byte nao tu Internet. Anh nen cung the: no di qua
+  `/api/attachments/<id>/blob` cua CHINH server nay, nen `img-src 'self'`
+  du — khong phai noi CSP ra de co anh nen.
 -->
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; form-action 'none'">
@@ -29,11 +31,21 @@
 </head>
 <body>
 
+<!--
+  ANH NEN: hai lop CO DINH nam duoi moi thu, khong phai `background` cua
+  `body`. Vi sao tach hai lop: `filter: blur()` tren mot phan tu se lam
+  nhoe CA con cua no, nen neu anh la nen cua `body` thi ca giao dien bi
+  nhoe theo. Lop rieng cung cho phep `scale(1.04)` de vien anh khong bi
+  ha nhat khi blur an vao trong.
+-->
+<div id="anh-nen" aria-hidden="true"></div>
+<div id="man-mo" aria-hidden="true"></div>
+
 <header id="thanh-tren">
   <span id="ten-project">—</span>
   <span class="chip" id="chip-chay"><b>0</b> đang chạy</span>
   <span class="chip do" id="chip-chan"><b>0</b> bị chặn</span>
-  <span class="chip xam" id="chip-pool"><b>—</b> pool</span>
+  <span class="chip xam" id="chip-che-do" title="Chế độ định tuyến"><b>—</b></span>
   <span class="day"></span>
   <input id="o-tim" type="search" placeholder="Tìm việc, phiên, worktree…"
          aria-label="Tìm">
@@ -53,6 +65,11 @@
   </nav>
 
   <section id="giua">
+    <!--
+      TAB o day KHONG con la duong doc chinh — moi thu quan sat duoc da
+      nam san o cot phai. Tab con lai cho luc can BANG DAY DU (loc, copy
+      ca bang, doc nhat ky tho), tuc la cho viec dieu tra.
+    -->
     <div id="tabs" role="tablist">
       <button class="tab dang-mo" data-khung="chat" role="tab">Chat</button>
       <button class="tab" data-khung="tasks" role="tab">Tasks</button>
@@ -64,6 +81,18 @@
     <!-- CHAT -->
     <div class="khung dang-mo" id="khung-chat">
       <div id="ds-tin"></div>
+      <!--
+        TIEN DO SONG: `chat()` chay dong bo va mot lan mo Leader lanh do
+        duoc 67.87s. Khong co dong nay thi trong suot khoang do man hinh
+        khong phan biet duoc "dang nghi" voi "treo". Nhan den tu SERVER
+        (`snapshot().buoc`) nen moi tab dang mo deu thay, khong chi tab
+        vua bam Gui.
+      -->
+      <div id="dang-lam" hidden>
+        <span class="xoay" aria-hidden="true"></span>
+        <span id="dang-lam-nhan"></span>
+        <span id="dang-lam-gio" class="mono"></span>
+      </div>
       <div id="o-gui">
         <div id="dai-dinh-kem" hidden>
           <div class="dai-dau">
@@ -80,7 +109,7 @@
           cac app hay lam hong clipboard.
         -->
         <textarea id="o-soan" rows="3" spellcheck="false"
-          placeholder="Gõ mục tiêu cho Router… (Enter xuống dòng · nút Gửi hoặc Ctrl+Enter để gửi)"></textarea>
+          placeholder="Gõ mục tiêu cho Router… (Enter để gửi · Shift+Enter xuống dòng)"></textarea>
         <div class="hang-nut">
           <button id="nut-dinh-kem" title="Chọn tệp để gửi kèm.
 Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), hoặc kéo-thả tệp vào đây.">Đính kèm tệp…</button>
@@ -140,17 +169,47 @@ Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), hoặc ké
       <div class="thanh-bang"><span>Usage</span><span class="day"></span>
         <button data-copy="bang-usage">Copy bảng</button></div>
       <table id="bang-usage"><thead><tr>
-        <th>Hạng mục</th><th>Giá trị</th><th>Đơn vị</th><th>Mức tin cậy</th>
-        <th>Ghi chú</th></tr></thead><tbody></tbody></table>
+        <th>Nguồn</th><th>Hạng mục</th><th>Giá trị</th><th>Đơn vị</th>
+        <th>Mức tin cậy</th><th>Ghi chú</th></tr></thead><tbody></tbody></table>
       <p class="ghi-chu">ACTUAL = số nhà cung cấp trả về, đọc được bằng máy.
         ESTIMATED = suy ra từ hoạt động cục bộ, có thể lệch.
         UNAVAILABLE = không có cách đọc — cố ý để trống, không ghi 0.</p>
     </div>
   </section>
 
+  <!--
+    INSPECTOR: nam luon canh o chat, khong nam sau mot tab.
+
+    Yeu cau V0.4 la "mot man hinh la biet he thong dang lam gi". Truoc
+    day cot nay chi co MOT `<pre>` liet ke viec dang chay, con Tasks /
+    Agents / Usage / anh chup du an deu phai doi tab — tuc la de biet
+    trang thai thi phai roi khoi o chat. Nam the RIENG de moi the tu
+    quyet dinh nhip lam moi cua no: `insp-snapshot` chay ~6 lenh `git`
+    nen no lam moi CHAM va roi rac, khong theo nhip WebSocket.
+  -->
   <aside id="ben-phai">
-    <div class="nhan">ĐANG CHẠY</div>
-    <pre id="inspector" tabindex="0">(chưa có việc nào chạy)</pre>
+    <section class="the-qs">
+      <div class="nhan">ĐANG CHẠY</div>
+      <div id="insp-dangchay"></div>
+    </section>
+    <section class="the-qs">
+      <div class="nhan">VIỆC GẦN ĐÂY</div>
+      <div id="insp-tasks"></div>
+    </section>
+    <section class="the-qs">
+      <div class="nhan">AGENT ĐANG SỐNG</div>
+      <div id="insp-agents"></div>
+    </section>
+    <section class="the-qs">
+      <div class="nhan">USAGE THEO AGENT / PROVIDER</div>
+      <div id="insp-usage"></div>
+    </section>
+    <section class="the-qs">
+      <div class="nhan">ẢNH CHỤP DỰ ÁN
+        <button id="nut-chup-lai" class="nho" title="Chụp lại (chạy git)">↻</button>
+      </div>
+      <div id="insp-snapshot"></div>
+    </section>
   </aside>
 </main>
 

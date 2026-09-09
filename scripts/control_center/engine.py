@@ -173,6 +173,15 @@ class ControlCenter:
         #: Viec DA bao ket qua ve o chat. Chan bao HAI LAN cung mot ket qua
         #: — vong lap dieu phoi co the thay lai mot viec da ket thuc.
         self._da_bao_ket_qua: set = set()
+        #: BUOC DANG LAM cua `chat()`, theo du an: `{pid: (nhan, tu_luc)}`.
+        #:
+        #: VI SAO CAN. `chat()` chay DONG BO trong mot luong; mot lan mo
+        #: Leader lanh do duoc 67.87s. Trong suot khoang do frontend chi
+        #: thay mot nut bi vo hieu hoa — khong phan biet duoc "dang nghi"
+        #: voi "treo", va nguoi dung bam lai hoac dong app. Nen BUOC duoc
+        #: ghi o day va di ra qua `snapshot()`, tuc la qua WebSocket: moi
+        #: tab dang mo deu thay, khong chi tab vua gui.
+        self._buoc: Dict[str, tuple] = {}
 
     # -- 0. Fabric dung chung ------------------------------------------------
 
@@ -419,6 +428,15 @@ class ControlCenter:
         Chỉ nhận **mã**, không nhận đường dẫn: frontend không có cách nào
         bảo tầng này đọc một tệp tuỳ ý.
         """
+        # `try/finally` bao CA than ham: bo dem tien do phai duoc xoa ke ca
+        # khi Leader nem, khong thi o chat treo mai o "dang suy nghi".
+        try:
+            return self._chat(project_id, text, attachment_ids)
+        finally:
+            self._dat_buoc(project_id, "")
+
+    def _chat(self, project_id: str, text: str,
+              attachment_ids: Optional[Sequence[str]] = None) -> Dict:
         ctx = self.ctx(project_id)
         tin = self.store.them_chat(project_id, "user", text)
 
@@ -445,6 +463,7 @@ class ControlCenter:
         # án được đính kèm sẵn, nên câu hỏi trạng thái không cần lượt thứ
         # hai và không cần một agent nào). Chỉ WORK mới xuống tới bộ phân
         # rã + Router V4 như cũ.
+        self._dat_buoc(project_id, "Leader đang đọc ảnh chụp dự án")
         qd = self._leader_quyet_dinh(ctx, text)
         if qd is not None and qd.y_dinh != leader.WORK:
             return self._leader_khong_uy_thac(ctx, qd, tin, dk_hop_le)
@@ -456,7 +475,9 @@ class ControlCenter:
                     goal = str(a.tham_so.get("objective") or text)
                     break
 
+        self._dat_buoc(project_id, "đang phân rã mục tiêu thành việc")
         kh: PlanResult = ctx.planner.plan(goal, ctx.project)
+        self._dat_buoc(project_id, "đang giao việc cho Router V4")
         tao: List[Task] = []
         for pt in kh.tasks:
             gated = pt.envelope.gated
@@ -509,6 +530,24 @@ class ControlCenter:
                 "plan": kh.to_dict(), "message_id": tin.message_id,
                 "attachment_ids": list(dk_hop_le),
                 "leader": (qd.to_dict() if qd else None)}
+
+    # -- buoc dang lam (tien do SONG cho o chat) -----------------------------
+
+    def _dat_buoc(self, project_id: str, nhan: str) -> None:
+        """Ghi bước đang làm. `nhan` rỗng = xong, xoá khỏi sổ."""
+        with self._khoa:
+            if nhan:
+                cu = self._buoc.get(project_id)
+                # Giu nguyen moc thoi gian cua BUOC DAU: dong ho tren man
+                # hinh phai dem tong thoi gian cho, khong reset moi buoc.
+                self._buoc[project_id] = (nhan, cu[1] if cu else time.time())
+            else:
+                self._buoc.pop(project_id, None)
+
+    def buoc_dang_lam(self, project_id: str) -> Optional[Dict]:
+        with self._khoa:
+            b = self._buoc.get(project_id)
+        return {"nhan": b[0], "tu_luc": b[1]} if b else None
 
     # -- Leader --------------------------------------------------------------
 
@@ -572,7 +611,13 @@ class ControlCenter:
             anh = self.anh_chup_du_an(pid)
             ls = [m.to_dict() for m in self.store.chat(pid, limit=40)]
             nn = leader.dung_nhac_nho(anh, ls, text)
+            # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
+            # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
+            # Gop chung lai thi thanh tien do noi doi o lan dau tien.
+            self._dat_buoc(pid, "đang mở phiên Leader" if pid not in
+                           self._leader_phien else "Leader đang suy nghĩ")
             ph = self._phien_leader(pid, bg)
+            self._dat_buoc(pid, "Leader đang suy nghĩ")
             van = ph.hoi(nn)
             qd = leader.doc_quyet_dinh(van)
             self.store.ghi_su_kien(
@@ -2212,6 +2257,8 @@ class ControlCenter:
         d["chat"] = [m.to_dict() for m in self.store.chat(pid, limit=100)]
         with self._khoa:
             d["in_flight"] = sorted(self._dang_chay)
+            b = self._buoc.get(pid)
+        d["buoc"] = {"nhan": b[0], "tu_luc": b[1]} if b else None
         return d
 
     def log_cua_viec(self, task_id: str, *, limit: int = 400) -> str:

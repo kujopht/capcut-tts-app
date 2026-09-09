@@ -157,6 +157,11 @@ CREATE TABLE IF NOT EXISTS attachments (
     owner         TEXT NOT NULL DEFAULT '',
     created_at    REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cai_dat_ui (
+    khoa       TEXT PRIMARY KEY,
+    gia_tri    TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS ket_qua_da_bao (
     task_id    TEXT NOT NULL,
     state      TEXT NOT NULL,
@@ -884,6 +889,40 @@ class ControlStore:
                           meta=_un(h["meta_json"], {})) for h in hs]
         ra.reverse()
         return ra
+
+    # -- cai dat giao dien --------------------------------------------------
+
+    def cai_dat_ui(self) -> Dict:
+        """Cài đặt giao diện (ảnh nền, độ tối, blur…). `{}` nếu chưa có.
+
+        MỘT BẢNG KHOÁ-GIÁ TRỊ, không phải một cột trong `projects`: cài đặt
+        này thuộc về NGƯỜI DÙNG trên máy này, không thuộc về một dự án —
+        đổi dự án không được đổi ảnh nền.
+
+        Lưu từng khoá riêng (không phải một khối JSON) để hai lần ghi khác
+        khoá không đè nhau: đổi độ tối không được xoá mất ảnh nền.
+        """
+        ra: Dict = {}
+        for h in self._c().execute("SELECT khoa, gia_tri FROM cai_dat_ui"):
+            ra[h["khoa"]] = _un(h["gia_tri"], None)
+        return ra
+
+    def luu_cai_dat_ui(self, d: Dict) -> Dict:
+        """Ghi/đè MỘT SỐ khoá. Khoá không gửi thì giữ nguyên.
+
+        Một giao dịch cho CẢ nhóm khoá: đặt ảnh nền kèm độ tối là MỘT ý
+        định của người dùng, không được để lộ ra trạng thái nửa vời (có
+        ảnh, chưa có độ tối) cho vòng vẽ đang đọc song song.
+        """
+        now = time.time()
+        with self.giao_dich_ghi() as c:
+            for k, v in (d or {}).items():
+                c.execute(
+                    "INSERT INTO cai_dat_ui (khoa, gia_tri, updated_at) "
+                    "VALUES (?,?,?) ON CONFLICT(khoa) DO UPDATE SET "
+                    "gia_tri=excluded.gia_tri, updated_at=excluded.updated_at",
+                    (str(k), _js(v), now))
+        return self.cai_dat_ui()
 
     # -- da bao ket qua chua ------------------------------------------------
 

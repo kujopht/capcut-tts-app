@@ -155,6 +155,68 @@ def dung_app(phien: PhienWeb) -> FastAPI:
         return {"task_id": task_id,
                 "text": redact(phien.cc.log_cua_viec(task_id))}
 
+    @app.get("/api/snapshot")
+    async def anh_chup(project: str = ""):
+        """`AnhChupDuAn` — nhánh/HEAD/sạch-bẩn/commit gần đây.
+
+        RIÊNG một endpoint, KHÔNG nhập vào `/api/state`, và đó là điểm
+        chính: hàm này chạy ~6 lệnh `git`, còn `/api/state` bị WebSocket
+        gọi mỗi nhịp. Trộn vào nhau là biến một ô quan sát thành ~6 tiến
+        trình con mỗi giây — chỗ nhấp cửa sổ nhiều nhất của bản V0.3.
+        Frontend gọi cái này khi ĐỔI DỰ ÁN và theo nhịp chậm.
+        """
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        try:
+            a = await asyncio.to_thread(phien.cc.anh_chup_du_an, project)
+        except Exception as exc:                          # noqa: BLE001
+            return _ma_loi(400, f"{type(exc).__name__}: {exc}")
+        return _sach(a.to_dict())
+
+    # -- cai dat giao dien -------------------------------------------------
+
+    @app.get("/api/ui")
+    async def doc_ui():
+        return _sach(await asyncio.to_thread(phien.cc.store.cai_dat_ui))
+
+    @app.post("/api/ui")
+    async def ghi_ui(payload: Dict):
+        """Ảnh nền / độ tối / độ nhoè. CHỈ nhận những khoá đã biết.
+
+        `wallpaper` là một **mã đính kèm**, KHÔNG phải đường dẫn tệp — và
+        đó là quyết định an toàn quan trọng nhất của tính năng này. Nhận
+        đường dẫn thì phải mở một endpoint đọc tệp tuỳ ý trên đĩa để vẽ
+        được nó, tức là dựng lại đúng lỗ mà `attachments.py` đã bịt.
+        Ảnh nền đi qua CÙNG đường tải lên như mọi đính kèm khác: kiểm
+        chữ ký byte, đường dẫn do băm nội dung sinh, đọc lại chỉ qua
+        `attachment_id` với phép kiểm containment sau `resolve()`.
+        """
+        d = payload or {}
+        ra: Dict = {}
+        if "wallpaper" in d:
+            aid = str(d.get("wallpaper") or "")
+            if aid:
+                dk = await asyncio.to_thread(phien.cc.dinh_kem.lay, aid)
+                if dk is None:
+                    return _ma_loi(400, "không có đính kèm đó")
+                if not dk.la_anh:
+                    return _ma_loi(400, "ảnh nền phải là một tệp ảnh")
+            ra["wallpaper"] = aid
+        for k, tran in (("dim", 1.0), ("blur", 40.0)):
+            if k in d:
+                try:
+                    v = float(d[k])
+                except (TypeError, ValueError):
+                    return _ma_loi(400, f"{k} phải là số")
+                ra[k] = max(0.0, min(tran, v))
+        for k in ("fit", "theme"):
+            if k in d:
+                ra[k] = str(d[k])[:32]
+        if not ra:
+            return _ma_loi(400, "không có khoá nào hợp lệ")
+        return _sach(await asyncio.to_thread(
+            phien.cc.store.luu_cai_dat_ui, ra))
+
     # -- ghi ---------------------------------------------------------------
 
     @app.post("/api/chat")
@@ -308,7 +370,11 @@ def dung_app(phien: PhienWeb) -> FastAPI:
                                   for s in (d.get("sessions") or [])],
                      "chat": [m.get("message_id")
                               for m in (d.get("chat") or [])],
-                     "locks": len(d.get("locks") or [])},
+                     "locks": len(d.get("locks") or []),
+                     # BUOC phai nam trong van tay, khong thi tien do
+                     # SONG khong bao gio duoc day di: mot lan `chat()`
+                     # dai khong doi task/session/chat nao ca.
+                     "buoc": (d.get("buoc") or {}).get("nhan", "")},
                     sort_keys=True)
                 if gon != dau:
                     dau = gon

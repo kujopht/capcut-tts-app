@@ -274,32 +274,228 @@ function veAgents() {
   }).join('');
 }
 
-function veInspector() {
-  const d = [];
-  for (const t of S.tasks.filter((x) => ['RUNNING', 'REVIEW', 'WAITING'].includes(x.state))) {
+// ------------------------------------------------------------- inspector ----
+// Cot phai: nam ngay canh o chat, khong sau mot tab. Yeu cau V0.4 la "mot
+// man hinh la biet he thong dang lam gi".
+//
+// `dat()` chi ghi khi noi dung THAT SU doi VA khong co vung nao dang boi
+// den — ghi lai vo co giet mat vung chon, va do la mot loi CLIPBOARD, du
+// no trong nhu loi hieu nang (bai hoc tu review doi khang cua V0.1.1).
+function dat(sel, html) {
+  const e = $(sel);
+  if (e.innerHTML === html) return;
+  if (window.getSelection().toString() && e.contains(
+      window.getSelection().anchorNode)) return;
+  e.innerHTML = html;
+}
+
+const trong = (t) => `<div class="qs-trong">${esc(t)}</div>`;
+
+function veInspDangChay() {
+  const ds = S.tasks.filter(
+    (x) => ['RUNNING', 'REVIEW', 'WAITING'].includes(x.state));
+  const bay = new Set(S.in_flight || []);
+  let h = ds.map((t) => {
     const s = S.sessions.find((y) => y.session_id === t.owner_session) || {};
-    d.push(`● ${t.title || t.task_id}`,
-      `   ${t.state}  ·  ${thoiLuong(t.started_at)}`,
-      `   agent: ${s.provider || '—'}${s.runtime_id ? '/' + s.runtime_id : ''}`,
-      `   phiên: ${t.owner_session || '—'}`,
-      `   cây  : ${(t.worktree || '—').split(/[\\/]/).pop()}`, '');
+    const cho = [s.provider, s.runtime_id].filter(Boolean).join('/');
+    return `<div class="qs-hang ${bay.has(t.task_id) ? 'song' : ''}">
+      <button class="qs-ten" data-mo="${esc(t.task_id)}"
+        title="${esc(t.objective || '')}">${esc(t.title || t.task_id)}</button>
+      ${hh(t.state)}
+      <span class="qs-phu">${esc(thoiLuong(t.started_at))}</span></div>
+      ${cho ? `<div class="qs-phu" style="padding-left:9px">${esc(cho)}
+        · ${esc((t.worktree || '—').split(/[\\/]/).pop())}</div>` : ''}`;
+  }).join('');
+  if (!ds.length) h = trong('chưa có việc nào chạy');
+  if ((S.locks || []).length) {
+    h += `<div class="nhan" style="margin-top:7px">KHOÁ ĐANG GIỮ</div>`
+      + S.locks.map((k) => `<div class="qs-phu">${esc(k.kind)} ·
+         ${esc(k.resource)}</div>`).join('');
   }
-  if (S.locks.length) {
-    d.push('KHOÁ ĐANG GIỮ');
-    for (const k of S.locks) d.push(`   ${k.kind}  ${k.resource}`);
+  dat('#insp-dangchay', h);
+}
+
+function veInspTasks() {
+  // Sap theo "vua doi gan day nhat" — cot nay tra loi "vua co gi xay ra",
+  // khong phai "liet ke het". Bang day du van o tab Tasks.
+  const ds = [...S.tasks].sort(
+    (a, b) => (b.updated_at || 0) - (a.updated_at || 0)).slice(0, 8);
+  dat('#insp-tasks', ds.length ? ds.map((t) => `
+    <div class="qs-hang">
+      <button class="qs-ten" data-mo="${esc(t.task_id)}"
+        >${esc(t.title || t.task_id)}</button>
+      ${hh(t.state)}
+      <span class="qs-phu">${esc(gio(t.updated_at))}</span></div>`).join('')
+    : trong('dự án này chưa có việc nào'));
+}
+
+function veInspAgents() {
+  const ds = S.sessions.filter((s) => s.state !== 'STOPPED');
+  dat('#insp-agents', ds.length ? ds.map((s) => `
+    <div class="qs-hang">
+      <span class="qs-ten" title="${esc(s.session_id || '')}"
+        >${esc([s.provider, s.runtime_id].filter(Boolean).join('/') || '—')}
+        <span class="qs-phu">${esc(s.model_id || '')}</span></span>
+      ${hh(s.state)}</div>
+    ${s.current_task ? `<div class="qs-phu" style="padding-left:9px"
+       >việc ${esc(s.current_task)}</div>` : ''}`).join('')
+    : trong('không có phiên agent nào đang sống'));
+}
+
+// Usage: KHONG BIA SO. Khong do duoc thi ghi UNAVAILABLE va de trong gia
+// tri — cung luat voi `usage.py` va voi anh chup cua Leader.
+//
+// `/api/usage` tra ve `{local, pools, runtimes, accounts, providers}`, KHONG
+// phai `{metrics}`. Ban truoc doc `bc.metrics` — mot khoa khong ton tai —
+// nen bang Usage LUON rong va dong tom tat luon la "0 hang muc". Mot loi
+// im lang: khong ngoai le, khong dong log, chi mot bang trang trong nhu
+// "chua co du lieu". Do la ly do o quan sat nay phai gom theo NGUON.
+let usageCache = null;
+
+function usageNhom(bc) {
+  // [{nguon, note, metrics}] — `local` la so cua chinh so Control Center
+  // (luon ACTUAL vi ta tu dem), `pools` la be quota theo provider/tai
+  // khoan, `providers` chi co khi nguoi dung BAM lam moi (goi CLI thật).
+  const ra = [];
+  if (!bc) return ra;
+  if ((bc.local || []).length) {
+    ra.push({ nguon: 'sổ Control Center', note: 'đếm trong sổ, luôn ACTUAL',
+              metrics: bc.local });
   }
-  const moi = d.join('\n') || '(chưa có việc nào chạy)';
-  const e = $('#inspector');
-  if (e.textContent !== moi) {
-    // Chi ghi khi THAT SU doi: ghi lai vo co se giet vung dang boi den, va
-    // do la mot loi CLIPBOARD (bai hoc tu review doi khang cua V0.1.1).
-    const chon = window.getSelection().toString();
-    if (!chon) e.textContent = moi;
+  for (const p of (bc.pools || [])) {
+    ra.push({ nguon: [p.provider, p.account_id].filter(Boolean).join(' · '),
+              note: p.note || '', metrics: p.metrics || [] });
   }
+  for (const p of (bc.providers || [])) {
+    ra.push({ nguon: `${p.provider || '?'} (đo bằng CLI)`,
+              note: p.note || '', metrics: p.metrics || [] });
+  }
+  return ra;
+}
+
+async function veInspUsage() {
+  if (!S.selected) return;
+  try {
+    usageCache = await api(
+      `/api/usage?project=${encodeURIComponent(S.selected)}`);
+  } catch (e) {
+    dat('#insp-usage', trong(`không đọc được usage: ${e.message}`));
+    return;
+  }
+  veInspUsageTuCache();
+  veUsageTuCache();
+}
+function usageHang(m) {
+  return `<div class="qs-hang">
+    <span class="qs-ten" title="${esc(m.note || '')}">${esc(m.label)}</span>
+    <span class="qs-phu">${m.value === null || m.value === undefined
+      ? '—' : esc(m.value)}${esc(m.unit || '')}</span>
+    ${hh(String(m.confidence || 'UNAVAILABLE').toUpperCase())}</div>`;
+}
+
+function veInspUsageTuCache() {
+  const nhom = usageNhom(usageCache);
+  if (!nhom.length) {
+    dat('#insp-usage', trong('chưa có hạng mục usage nào'));
+    return;
+  }
+  // Nhom DAU (sổ Control Center) mo san — do la so cua DU AN nay. Cac be
+  // quota gap vao `<details>`: chung la 2 hang gan nhu giong nhau cho MOI
+  // tai khoan, va o day co sau tai khoan. De mo het thi o quan sat dai
+  // hon man hinh va day "ảnh chụp dự án" xuong duoi mep — tuc la pha dung
+  // yeu cau "mot man hinh la biet he thong dang lam gi".
+  const [dau, ...be] = nhom;
+  const soBe = be.reduce((a, g) => a + g.metrics.length, 0);
+  dat('#insp-usage',
+    dau.metrics.map(usageHang).join('')
+    + (be.length ? `<details><summary>${be.length} bể quota ·
+        ${soBe} hạng mục</summary>`
+      + be.map((g) => `<div class="nhan" style="margin-top:5px"
+          >${esc(g.nguon)}</div>`
+        + (g.metrics.length ? g.metrics.map(usageHang).join('')
+          : trong('không đo được'))).join('')
+      + '</details>' : ''));
+}
+
+// Anh chup du an: nhanh/HEAD/sach-ban. NHIP CHAM RIENG, khong theo
+// WebSocket — no chay ~6 lenh `git`, va o bap `--noconsole` moi lenh la
+// mot tien trinh con. Gan vao nhip song la ~6 tien trinh moi giay.
+let anhChup = null;
+let chupDangChay = false;
+async function veInspSnapshot(batBuoc = false) {
+  if (!S.selected) { dat('#insp-snapshot', trong('chưa chọn dự án')); return; }
+  if (chupDangChay) return;
+  if (!batBuoc && anhChup && anhChup.project_id === S.selected
+      && Date.now() - (anhChup._layLuc || 0) < 30000) {
+    veInspSnapshotTuCache(); return;
+  }
+  chupDangChay = true;
+  try {
+    anhChup = await api(
+      `/api/snapshot?project=${encodeURIComponent(S.selected)}`);
+    anhChup._layLuc = Date.now();
+  } catch (e) {
+    dat('#insp-snapshot', trong(`không chụp được: ${e.message}`));
+    return;
+  } finally { chupDangChay = false; }
+  veInspSnapshotTuCache();
+}
+function veInspSnapshotTuCache() {
+  const a = anhChup;
+  if (!a) return;
+  const d = [];
+  if (!a.la_kho_git) {
+    d.push('(!) đường dẫn này KHÔNG phải kho git');
+  } else {
+    d.push(`nhánh : ${a.branch || '(không rõ)'}`,
+      `HEAD  : ${a.head_ngan || '(chưa có commit)'}`,
+      `cây   : ${a.sach ? 'sạch' : `CÓ THAY ĐỔI (${a.tep_doi.length} tệp)`}`);
+    if ((a.commit_gan_day || []).length) {
+      d.push('', 'commit gần đây:');
+      d.push(...a.commit_gan_day.slice(0, 4).map((c) => `  ${c}`));
+    }
+  }
+  d.push('', `định tuyến : ${a.che_do || '—'}`,
+    `backend    : ${bkDangChay(a)}`,
+    `chụp lúc   : ${gio(a.ts)}`);
+  dat('#insp-snapshot', `<pre>${esc(d.join('\n'))}</pre>`);
+  $('#chip-che-do').innerHTML = `<b>${esc(a.che_do || '—')}</b>`;
+}
+function bkDangChay(a) {
+  // "backend dang hoat dong" = provider/model cua nhung phien CON SONG,
+  // suy tu SO chu khong hoi nha cung cap. Khong co phien nao thi noi
+  // thang la khong co — khong doan mot cai ten cho dep man hinh.
+  const t = [...new Set((a.phien || []).map(
+    (s) => [s.provider, s.model_id].filter(Boolean).join('/')))].filter(Boolean);
+  return t.length ? t.join(', ') : '(không phiên nào đang sống)';
+}
+
+// ------------------------------------------------------------ dang lam gi ----
+// Nhan den tu SERVER (`snapshot().buoc`), khong phai tu trang thai cua tab
+// nay — nen hai tab dang mo cung thay, va tab moi mo giua mot luot Leader
+// dai cung thay ngay la he thong dang lam gi.
+let dhDangLam = null;
+function veDangLam() {
+  const b = S.buoc;
+  const e = $('#dang-lam');
+  if (!b) {
+    e.hidden = true;
+    if (dhDangLam) { clearInterval(dhDangLam); dhDangLam = null; }
+    return;
+  }
+  e.hidden = false;
+  $('#dang-lam-nhan').textContent = b.nhan;
+  const nhip = () => {
+    $('#dang-lam-gio').textContent = thoiLuong(b.tu_luc);
+  };
+  nhip();
+  if (!dhDangLam) dhDangLam = setInterval(nhip, 1000);
 }
 
 function veHet() {
-  veProjects(); veThanhTren(); veChat(); veTasks(); veAgents(); veInspector();
+  veProjects(); veThanhTren(); veChat(); veTasks(); veAgents();
+  veInspDangChay(); veInspTasks(); veInspAgents(); veInspUsageTuCache();
+  veDangLam();
 }
 
 // -------------------------------------------------------------- dinh kem ----
@@ -407,12 +603,19 @@ $('#nut-bo-het').onclick = async () => {
 };
 
 // --------------------------------------------------------------- gui tin ----
+// Mot lan gui dang chay. Chan gui hai lan cung mot cau khi nguoi dung bam
+// Enter lien tuc trong luc Leader dang nghi (co the ca phut o lan lanh).
+let dangGui = false;
+
 async function gui() {
+  if (dangGui) return;
   const text = o.value.trim();
   const ma = dinhKemChoGui.map((x) => x.attachment_id);
   if (!text && !ma.length) return;
+  if (!S.selected) { baoGui('chưa chọn dự án nào', true); return; }
+  dangGui = true;
   $('#nut-gui').disabled = true;
-  $('#trang-thai-gui').textContent = 'Router đang phân rã…';
+  baoGui('đang gửi…', false);
   try {
     await api('/api/chat', {
       method: 'POST',
@@ -420,23 +623,50 @@ async function gui() {
       body: JSON.stringify({ project_id: S.selected, text,
                              attachment_ids: ma }),
     });
+    // XOA O SOAN CHI SAU KHI SERVER DA NHAN.
+    //
+    // Xoa truoc (hoac xoa trong `finally`) la mot loi MAT DU LIEU: server
+    // tu choi vi mat token/mat mang, va cau nguoi dung vua go bien mat
+    // khong lay lai duoc. Nen thu tu la: goi API -> thanh cong -> xoa.
     o.value = '';
     dinhKemChoGui = [];
     veDaiDinhKem();
+    baoGui('', false);
     await lamMoi();
   } catch (e) {
+    // Loi hien ngay CANH o soan, khong chi o thanh duoi — thanh duoi nam
+    // xa cho nguoi dung dang nhin. Va van ban VAN CON trong o.
+    baoGui(`không gửi được — ${e.message}`, true);
     noi(`gửi hỏng — ${e.message}`);
   } finally {
+    dangGui = false;
     $('#nut-gui').disabled = false;
-    $('#trang-thai-gui').textContent = '';
+    // GIU FOCUS: gui xong la go tiep duoc ngay, khong phai bam lai vao o.
+    // `focus()` trong `finally` de ca duong thanh cong lan duong hong deu
+    // tra con tro ve cho nguoi dung dang go.
+    o.focus();
   }
+}
+function baoGui(msg, hong) {
+  const e = $('#trang-thai-gui');
+  e.textContent = msg;
+  e.classList.toggle('hong', !!hong);
 }
 $('#nut-gui').onclick = gui;
 
-// Enter xuong dong; Ctrl+Enter gui. Nut Gui la duong chinh — loi tat chi la
-// tuy chon, khong bao gio la kien thuc bat buoc.
+// Enter GUI; Shift+Enter xuong dong.
+//
+// Doi chieu voi V0.3 (Enter xuong dong, Ctrl+Enter gui): o nay la mot o
+// CHAT, va quy uoc chat o moi noi khac deu la Enter-gui. Nguoi dung go
+// "ê bro" roi bam Enter va cho — khong co gi xay ra ca. `isComposing`
+// duoc ton trong: bo go tieng Viet (Telex/VNI) dung Enter de chot chu,
+// va gui giua luc do la cat mat chu dang go.
 o.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); gui(); }
+  if (e.key !== 'Enter') return;
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.shiftKey) return;                       // xuong dong: de mac dinh
+  e.preventDefault();
+  gui();
 });
 
 // ------------------------------------------------------------ thao tac ----
@@ -458,7 +688,14 @@ document.addEventListener('click', async (e) => {
     await lamMoi(); return;
   }
 
-  if (t.dataset.pid) { S.selected = t.dataset.pid; dauTin = ''; await lamMoi(); return; }
+  if (t.dataset.pid) {
+    S.selected = t.dataset.pid;
+    dauTin = '';
+    anhChup = null; usageCache = null;    // cache cua DU AN CU, phai bo
+    await lamMoi();
+    veInspUsage(); veInspSnapshot(true);
+    return;
+  }
   if (t.dataset.copy) {
     const e2 = document.getElementById(t.dataset.copy);
     await navigator.clipboard.writeText(e2.innerText || e2.textContent || '');
@@ -543,21 +780,36 @@ $('#log-copy-all').onclick = async () => {
 
 // ----------------------------------------------------------------- usage ----
 async function veUsage() {
-  let bc;
-  try { bc = await api(`/api/usage?project=${encodeURIComponent(S.selected)}`); }
-  catch (e) { $('#usage-tom').textContent = `không đọc được usage: ${e.message}`; return; }
-  const ms = bc.metrics || [];
+  try {
+    usageCache = await api(
+      `/api/usage?project=${encodeURIComponent(S.selected)}`);
+  } catch (e) {
+    $('#usage-tom').textContent = `không đọc được usage: ${e.message}`;
+    return;
+  }
+  veUsageTuCache();
+  veInspUsageTuCache();
+}
+function veUsageTuCache() {
+  const nhom = usageNhom(usageCache);
   const dem = { ACTUAL: 0, ESTIMATED: 0, UNAVAILABLE: 0 };
-  $('#bang-usage tbody').innerHTML = ms.map((m) => {
+  let n = 0;
+  $('#bang-usage tbody').innerHTML = nhom.map((g) => g.metrics.map((m) => {
     const tin = String(m.confidence || 'UNAVAILABLE').toUpperCase();
     dem[tin] = (dem[tin] || 0) + 1;
-    return `<tr><td>${esc(m.label || '—')}</td>
+    n++;
+    return `<tr><td>${esc(g.nguon)}</td><td>${esc(m.label || '—')}</td>
       <td>${m.value === null || m.value === undefined ? '—' : esc(m.value)}</td>
       <td>${esc(m.unit || '')}</td><td>${hh(tin)}</td>
       <td>${esc(m.note || '')}</td></tr>`;
-  }).join('');
-  $('#usage-tom').textContent = `${ms.length} hạng mục — ${dem.ACTUAL || 0} `
-    + `ACTUAL, ${dem.ESTIMATED || 0} ESTIMATED, ${dem.UNAVAILABLE || 0} UNAVAILABLE.`;
+  }).join('')).join('');
+  $('#usage-tom').textContent = `${n} hạng mục — ${dem.ACTUAL || 0} `
+    + `ACTUAL, ${dem.ESTIMATED || 0} ESTIMATED, ${dem.UNAVAILABLE || 0} `
+    + `UNAVAILABLE.`
+    + (usageCache && usageCache.provider_probe_ran === false
+      ? ' Số của nhà cung cấp CHỈ có khi bấm làm mới — gọi CLI là thao'
+        + ' tác chậm và tốn một lượt, nên nó không chạy trong vòng vẽ.'
+      : '');
 }
 
 // ------------------------------------------------------------------- tab ----
@@ -574,8 +826,8 @@ Router Control Center — dùng bằng CHUỘT
 
 Bạn không cần nhớ phím nào. Mọi việc đều có nút.
 
-  Chat     Gõ mục tiêu vào ô dưới, bấm Gửi. Router tự phân rã thành việc,
-           chọn agent, dựng worktree, chạy, báo cáo.
+  Chat     Gõ mục tiêu vào ô dưới, bấm Gửi (hoặc Enter). Router tự phân
+           rã thành việc, chọn agent, dựng worktree, chạy, báo cáo.
            Đính kèm: bấm "Đính kèm tệp…", hoặc dán Ctrl+V (ảnh chụp
            Win+Shift+S cũng được), hoặc kéo-thả tệp vào ô soạn.
   Tasks    Bảng mọi việc. Bấm một hàng để xem chi tiết bên phải, kèm nút
@@ -584,27 +836,170 @@ Bạn không cần nhớ phím nào. Mọi việc đều có nút.
   Logs     Nhật ký đầy đủ. Bôi đen bằng chuột rồi Ctrl+C, hoặc bấm Copy.
   Usage    Số usage kèm mức tin cậy ACTUAL / ESTIMATED / UNAVAILABLE.
 
+CỘT PHẢI luôn hiện, không cần đổi tab: việc đang chạy, việc vừa đổi,
+agent đang sống, usage, và ảnh chụp dự án (nhánh / HEAD / sạch-bẩn).
+Ảnh chụp làm mới CHẬM có chủ ý — nó chạy git thật; nút ↻ để chụp ngay.
+
 Việc chạm lớp GATED (deploy production, đổi quyền, chạm bí mật) KHÔNG tự
 chạy. Nó dừng ở BLOCKED và chờ bạn bấm Duyệt — đúng như vậy là cố ý.
 
 Clipboard là clipboard của TRÌNH DUYỆT: bôi đen bằng chuột, Ctrl+C copy,
 Ctrl+V dán, chuột phải có Copy/Paste. Trang này không chiếm tổ hợp nào.
 
-Lối tắt (tuỳ chọn, không bắt buộc):
-  Ctrl+Enter   gửi tin trong ô soạn
-  Esc          đóng hộp thoại đang mở
+Bàn phím trong ô soạn:
+  Enter         gửi
+  Shift+Enter   xuống dòng
+  Esc           đóng hộp thoại đang mở
+Ô soạn chỉ được xoá SAU khi server đã nhận. Gửi hỏng thì câu bạn vừa gõ
+vẫn còn nguyên trong ô, kèm lý do hỏng hiện ngay cạnh nút Gửi.
+
+Ảnh nền: Cài đặt -> Ảnh nền. Ảnh được sao vào kho đính kèm cục bộ, có
+thanh trượt làm tối và làm nhoè, và bền qua khởi động lại.
 </pre>`);
 
-$('#nut-cai-dat').onclick = () => moHopThoai('Cài đặt', `<pre class="ma">
-V0.2 chưa có mục cài đặt nào đổi được từ giao diện — và nói thẳng như vậy
-thì tốt hơn là dựng một khung trống trông như làm được gì đó.
+// ------------------------------------------------------------- anh nen ----
+// `wallpaper` giu mot MA DINH KEM, khong phai duong dan tep tren dia.
+//
+// Do la quyet dinh an toan quan trong nhat cua tinh nang nay. Nhan duong
+// dan thi de VE duoc anh phai mo mot endpoint doc tep tuy y — dung lai
+// dung lo ma `attachments.py` ton tai de bit. Di qua duong dinh kem thi
+// duoc thua ca bon bat bien san co: kiem chu ky byte, duong luu do bam
+// noi dung sinh, doc lai chi qua `attachment_id`, va kiem containment
+// sau `resolve()`.
+let caiDatUI = {};
 
-API      http://127.0.0.1 (chỉ localhost; mọi request đòi token phiên)
-Đính kèm nằm cục bộ dưới .router/attachments/ — không tệp nào được tải lên
-         đâu cả.
-Quyền của agent nằm ở tệp cấu hình của agy và CỐ Ý không sửa được từ đây —
-         xem docs/CONTROL_CENTER.md §4b.
-</pre>`);
+function apDungNen() {
+  const g = document.documentElement.style;
+  const aid = caiDatUI.wallpaper || '';
+  if (aid) {
+    g.setProperty('--nen-anh',
+      `url("/api/attachments/${encodeURIComponent(aid)}/blob`
+      + `?t=${encodeURIComponent(TOKEN)}")`);
+    // `dim` la do TOI muon them. `--nen-mo` la do THAY anh, nen no la
+    // phan bu. Mac dinh 0.45 chu khong phai 0: chu tren mot anh chua bi
+    // lam toi thuong khong doc noi, va mot mac dinh khong doc duoc thi
+    // khong phai mot mac dinh.
+    const toi = caiDatUI.dim === undefined ? 0.45 : Number(caiDatUI.dim);
+    g.setProperty('--nen-mo', String(Math.max(0, Math.min(1, 1 - toi))));
+    g.setProperty('--nen-nhoe', `${Math.max(0, Number(caiDatUI.blur) || 0)}px`);
+    g.setProperty('--nen-fit', ['cover', 'contain', '100% 100%']
+      .includes(caiDatUI.fit) ? caiDatUI.fit : 'cover');
+  } else {
+    g.setProperty('--nen-anh', 'none');
+    g.setProperty('--nen-mo', '0');       // man phu DAC -> nen mot mau
+    g.setProperty('--nen-nhoe', '0px');
+  }
+}
+
+async function napCaiDatUI() {
+  try { caiDatUI = await api('/api/ui') || {}; }
+  catch { caiDatUI = {}; }                // thieu cai dat khong duoc chan app
+  apDungNen();
+}
+
+async function luuCaiDatUI(d) {
+  try {
+    caiDatUI = await api('/api/ui', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(d),
+    }) || caiDatUI;
+    apDungNen();
+    noi('đã lưu cài đặt giao diện');
+  } catch (e) { noi(`không lưu được — ${e.message}`); }
+}
+
+function veXemTruocNen() {
+  const aid = caiDatUI.wallpaper || '';
+  const e = $('#cd-xem');
+  if (!e) return;
+  e.style.backgroundImage = aid
+    ? `url("/api/attachments/${encodeURIComponent(aid)}/blob`
+      + `?t=${encodeURIComponent(TOKEN)}")`
+    : 'none';
+  e.style.backgroundSize = caiDatUI.fit || 'cover';
+  e.textContent = aid ? '' : 'chưa chọn ảnh';
+  e.style.color = 'var(--mo)';
+  e.style.display = 'flex';
+  e.style.alignItems = 'center';
+  e.style.justifyContent = 'center';
+}
+
+$('#nut-cai-dat').onclick = () => {
+  const dim = caiDatUI.dim === undefined ? 0.45 : Number(caiDatUI.dim);
+  const blur = Number(caiDatUI.blur) || 0;
+  moHopThoai('Cài đặt', `
+    <div class="nhan">ẢNH NỀN</div>
+    <div id="cd-xem"></div>
+    <div class="cd-hang">
+      <label for="cd-tep">Ảnh trên máy</label>
+      <input id="cd-tep" type="file" accept="image/*">
+      <button id="cd-bo">Bỏ ảnh</button>
+    </div>
+    <div class="cd-hang">
+      <label for="cd-dim">Làm tối</label>
+      <input id="cd-dim" type="range" min="0" max="1" step="0.05"
+             value="${dim}">
+      <span class="cd-so" id="cd-dim-so">${Math.round(dim * 100)}%</span>
+    </div>
+    <div class="cd-hang">
+      <label for="cd-blur">Làm nhoè</label>
+      <input id="cd-blur" type="range" min="0" max="24" step="1"
+             value="${blur}">
+      <span class="cd-so" id="cd-blur-so">${blur}px</span>
+    </div>
+    <div class="cd-hang">
+      <label for="cd-fit">Cách co giãn</label>
+      <select id="cd-fit">
+        <option value="cover">Phủ kín (cắt bớt)</option>
+        <option value="contain">Vừa khung (chừa viền)</option>
+        <option value="100% 100%">Kéo cho khớp (méo)</option>
+      </select>
+    </div>
+    <p class="ghi-chu">Ảnh được sao vào kho đính kèm cục bộ
+      (<code>.router/attachments/</code>) và đọc lại qua mã đính kèm — giao
+      diện KHÔNG có đường đọc một tệp tuỳ ý trên đĩa, và đó là cố ý.
+      Cài đặt này bền qua khởi động lại.</p>
+    <hr style="border:none;border-top:1px solid var(--vien);margin:12px 0">
+    <pre class="ma">API      http://127.0.0.1 (chỉ localhost; mọi request đòi token phiên)
+Đính kèm nằm cục bộ dưới .router/attachments/ — không tệp nào được tải
+         lên đâu cả.
+Quyền của agent nằm ở tệp cấu hình của agy và CỐ Ý không sửa được từ
+         đây — xem docs/CONTROL_CENTER.md §4b.
+Chế độ định tuyến ECO/AUTO/STRONG/MAX hiện đổi được ở tầng backend, chưa
+         có ô chọn ở đây — xem docs/HANDOFF.md.</pre>`);
+  $('#cd-fit').value = caiDatUI.fit || 'cover';
+  veXemTruocNen();
+
+  $('#cd-tep').onchange = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    if (!S.selected) { noi('chọn một dự án trước đã'); return; }
+    try {
+      const dk = await taiLenMotTep(f, f.name);
+      await luuCaiDatUI({ wallpaper: dk.attachment_id });
+      veXemTruocNen();
+    } catch (err) { noi(`không đặt được ảnh nền — ${err.message}`); }
+  };
+  $('#cd-bo').onclick = async () => {
+    await luuCaiDatUI({ wallpaper: '' });
+    veXemTruocNen();
+  };
+  // Keo thanh truot: xem NGAY tren ca giao dien, luu khi tha. Luu moi
+  // buoc keo la mot request moi 50ms.
+  const truot = (id, khoa, ve) => {
+    const el = $(id);
+    el.oninput = () => {
+      caiDatUI[khoa] = Number(el.value);
+      $(`${id}-so`).textContent = ve(el.value);
+      apDungNen();
+    };
+    el.onchange = () => luuCaiDatUI({ [khoa]: Number(el.value) });
+  };
+  truot('#cd-dim', 'dim', (v) => `${Math.round(Number(v) * 100)}%`);
+  truot('#cd-blur', 'blur', (v) => `${v}px`);
+  $('#cd-fit').onchange = (e) => luuCaiDatUI({ fit: e.target.value });
+};
 
 $('#nut-project-moi').onclick = () => moHopThoai('Dự án mới', `
   <p class="ghi-chu">Nhập đường dẫn tuyệt đối tới một kho git trên máy này.</p>
@@ -657,6 +1052,8 @@ function noiWs() {
   ws.onerror = () => { try { ws.close(); } catch { /* da dong */ } };
 }
 
+$('#nut-chup-lai').onclick = () => veInspSnapshot(true);
+
 (async function batDau() {
   if (!TOKEN) {
     document.body.innerHTML = '<main style="padding:40px"><h2>Thiếu token '
@@ -665,7 +1062,19 @@ function noiWs() {
       + 'chạy, và đó là cố ý.</p></main>';
     return;
   }
+  await napCaiDatUI();
   await lamMoi();
   noiWs();
   veDaiDinhKem();
+  veInspUsage();
+  veInspSnapshot(true);
+  // NHIP CHAM RIENG cho hai o dat: usage co the goi CLI cua nha cung cap,
+  // anh chup chay ~6 lenh `git`. Gan chung vao nhip WebSocket la bien mot
+  // o quan sat thanh mot nguon tien trinh con lien tuc — dung cai da lam
+  // cua so console nhap nhay o V0.3.
+  setInterval(() => { if (!document.hidden) veInspUsage(); }, 60000);
+  setInterval(() => { if (!document.hidden) veInspSnapshot(); }, 45000);
+  // Con tro nam san trong o soan khi mo app: dung duoc ngay, khong phai
+  // bam mot lan vao o truoc khi go.
+  o.focus();
 })();

@@ -31,6 +31,7 @@ Nhả thì theo thứ tự NGƯỢC LẠI, luôn luôn, trong `finally`.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 import uuid
@@ -862,17 +863,38 @@ class ControlCenter:
         "no_session",               # ban cu cua `session_start_failed`
     })
 
-    @staticmethod
-    def _chu_ky_hong(pb) -> str:
+    #: Thu PHAI bo khoi chu ky vi no doi theo TUNG CHO CHAY, khong theo
+    #: ban chat cua loi. Danh tinh tai khoan la cai quan trong nhat: thong
+    #: diep that cua adapter la "switch acc1 hỏng: …", nen cung mot loi cau
+    #: hinh o AG01/AG02/AG03 ra BA chu ky khac nhau va phep so KHONG BAO
+    #: GIO khop — tuc la rao chong bao thu lai chet lang le, dung cho lop
+    #: loi no duoc viet ra de chan.
+    _XOA_KHOI_CHU_KY = re.compile(
+        r"\bacc\d+\b"                      # acc1, acc2, … (danh tinh)
+        r"|\bAG\d{2}\b"                    # AG01, AG02, …  (khe)
+        r"|\bs-[0-9a-f]{6,}\b"             # id phien
+        r"|\b\d+(?:\.\d+)?s\b"             # so giay
+        r"|\b(?:19|20)\d{2}-\d{2}-\d{2}\b"  # ngay thang
+        r"|\b\d{4,}\b",                    # pid, cong, moc thoi gian
+        re.IGNORECASE)
+
+    @classmethod
+    def _chu_ky_hong(cls, pb) -> str:
         """Chữ ký NGẮN của một lần hỏng, để so hai lượt với nhau.
 
-        Gồm `failure_reason` và phần ĐẦU của câu tóm tắt. Lấy phần đầu chứ
-        không lấy cả câu là có ý: đuôi câu hay mang thứ đổi theo từng lượt
-        (id phiên, đường dẫn tạm, số giây), và so cả câu thì hai lần hỏng
-        giống hệt nhau về bản chất vẫn ra hai chữ ký khác nhau.
+        Gồm `failure_reason` và phần ĐẦU của câu tóm tắt, sau khi đã **bỏ
+        mọi thứ đổi theo chỗ chạy** — tên tài khoản, mã khe, id phiên, số
+        giây, pid. Không chuẩn hoá thì phép so vô dụng: adapter Antigravity
+        ghi `f"switch {self._acc} hỏng: …"`, nên đúng một lỗi cấu hình ở
+        AG01/AG02/AG03 ra ba chữ ký khác nhau, không chữ ký nào khớp chữ ký
+        nào, và rào chống bão thử lại **không bao giờ nổ**.
+
+        Cắt phần đầu chứ không lấy cả câu cũng vì thế: đuôi câu hay mang
+        đường dẫn tạm và mã băm chỉ sống một lượt.
         """
         ly_do = (getattr(pb, "failure_reason", "") or "").strip()
-        tom = " ".join((getattr(pb, "summary", "") or "").split())[:80]
+        tom = " ".join((getattr(pb, "summary", "") or "").split())
+        tom = cls._XOA_KHOI_CHU_KY.sub("·", tom)[:80]
         return f"{ly_do}|{tom}" if (ly_do or tom) else ""
 
     def _lan_hong_truoc(self, task_id: str) -> Dict:

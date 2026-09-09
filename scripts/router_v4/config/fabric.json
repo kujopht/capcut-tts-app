@@ -174,7 +174,7 @@
       "latency_profile": 90.0,
       "reliability": 0.9,
       "cost_profile": 1.0,
-      "notes": "BẬC 3 — CAO CẤP, LEO THANG TƯỜNG MINH. CỐ Ý KHÔNG có mặt trong `supported_models` của CODEX01, nên bộ lập lịch KHÔNG THỂ chọn nó: đây là 'đã chuẩn bị', chưa phải 'đã bật'. Bật = thêm `gpt-6-astra` vào `supported_models` của CODEX01, và khi đó `premium.py` vẫn còn là rào cuối (bậc 3 không bao giờ được chọn tự động). `capability_source` để `declared` vì CHƯA ĐO — không được nâng lên `probed` nếu chưa có lượt chạy thật. Không ghi giá ở đây: chưa có nguồn giá chính thức nào đọc được, và bịa một con số còn tệ hơn không có."
+      "notes": "BẬC 3 — CAO CẤP, LEO THANG TƯỜNG MINH. CỐ Ý KHÔNG có mặt trong `supported_models` của CODEX01, nên bộ lập lịch KHÔNG THỂ chọn nó: đây là 'đã chuẩn bị', chưa phải 'đã bật'. HAI rào độc lập, và cả hai đều THẬT (có bài kiểm): (1) vắng mặt trong `supported_models` nên không sinh ra placement nào; (2) `Scheduler._loai_vi` LOẠI mọi model `premium_tier >= 3` khỏi phép chọn tự động, chỉ cho qua khi `requirements.pin_model` gọi đích danh nó. Nên kể cả khi thêm vào `supported_models`, bộ lập lịch vẫn KHÔNG tự chọn. Ghi chú cũ ở đây từng hứa `premium.py` là rào cuối — lời hứa đó SAI khi viết, vì `premium.py` chưa được gọi từ đường nào của bộ lập lịch; rào (2) mới là thứ làm nó đúng. `capability_source` để `declared` vì CHƯA ĐO — không được nâng lên `probed` nếu chưa có lượt chạy thật. Không ghi giá ở đây: chưa có nguồn giá chính thức nào đọc được, và bịa một con số còn tệ hơn không có."
     },
     {
       "model_id": "opencode-default",

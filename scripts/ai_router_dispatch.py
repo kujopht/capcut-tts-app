@@ -87,6 +87,22 @@ POOLS = {
     NATIVE: (None, None),
 }
 
+# Codex model to pin, because `codex exec` without `-m` runs whatever the CLI
+# currently calls its default -- and that default moves on the provider's side,
+# with no change on ours.
+#
+# Measured 2026-09-09 (`codex doctor`, codex-cli 0.153.4): the default on this
+# machine is `gpt-5.6-sol`, and the SAME CLI build also exposes `gpt-6-astra`,
+# which is far more expensive. One `codex update` that flips the default would
+# turn every ORDINARY_REVIEW dispatched through this router into a premium-tier
+# call -- silently, with no marker in telemetry, because we would still be
+# logging "(provider default)".
+#
+# This mirrors the antigravity fail-closed a few lines below in `main()`, which
+# exists for exactly the same reason and was written after the same class of
+# near-miss. Override with ROUTER_CODEX_MODEL when the pinned id goes stale.
+CODEX_MODEL = os.environ.get("ROUTER_CODEX_MODEL", "gpt-5.6-sol").strip()
+
 # Classes that must never reach Codex, regardless of flags. Codex refused a
 # real permission-profile review on 2026-08-28 ("flagged for possible
 # cybersecurity risk") after being sent the identical packet that Antigravity
@@ -267,9 +283,16 @@ def run_worker(pool: str, model: Optional[str], prompt: str, timeout: int,
         binary = find_codex()
         if not binary:
             return {"status": "unavailable", "error": "codex not found"}
+        # Fail CLOSED, same rule as antigravity: never let the provider pick
+        # the model. See CODEX_MODEL for the measurement behind this.
+        if not CODEX_MODEL:
+            return {"status": "unavailable",
+                    "error": "no Codex model pinned (set ROUTER_CODEX_MODEL); "
+                             "refusing to run the provider's default model"}
         # Codex reads the prompt from stdin with a trailing '-'; this is the
         # workaround for its broken local-file prompt reading.
-        argv = [binary, "exec", "--skip-git-repo-check", "-"]
+        argv = [binary, "exec", "--skip-git-repo-check",
+                "-m", CODEX_MODEL, "--color", "never", "-"]
         stdin_data = prompt
     else:
         return {"status": "skipped", "error": "native Claude pool does not dispatch"}
@@ -391,8 +414,15 @@ def main(argv=None) -> int:
         print(json.dumps({"decision": decision, "result": {"status": "refused"}},
                          indent=2, ensure_ascii=False))
         return 2
-    decision["model"] = model or "(provider default)"
-    decision["model_resolution"] = model_note
+    # Telemetry must name the model that actually ran. "(provider default)" is
+    # exactly the string that would hide a silent switch to a premium model, so
+    # the Codex pool records its pinned id instead.
+    if POOLS[decision["pool"]][0] == "codex":
+        decision["model"] = CODEX_MODEL or "(unpinned - will refuse)"
+        decision["model_resolution"] = "pinned by CODEX_MODEL"
+    else:
+        decision["model"] = model or "(provider default)"
+        decision["model_resolution"] = model_note
 
     result = run_worker(decision["pool"], model, prompt, args.timeout, args.add_dir)
 

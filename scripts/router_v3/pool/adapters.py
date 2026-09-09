@@ -482,8 +482,17 @@ def dung_adapter(idn: Identity, *, timeout: float = 1200.0
                                port=idn.port or 4096, model=idn.model,
                                timeout=timeout)
     if idn.provider == "codex":
+        # `model=idn.model` — dung nhu antigravity/opencode ngay tren.
+        #
+        # Bo qua no thi `_model` rong, va `send_task` FAIL CLOSED voi
+        # `no_model_pinned` cho MOI viec: ca mot nha cung cap chet ngay ma
+        # khong ai duoc bao. Te hon, thong diep loi bao nguoi van hanh dat
+        # `provider_model` trong `fabric.json` — nhung duong V3 pool nay
+        # KHONG doc `fabric.json`, nen lam theo huong dan cung khong sua
+        # duoc. Fail closed dung huong (khong tieu tien) nhung phai fail
+        # closed VI dung ly do.
         return CodexAdapter(idn.worker_id, timeout=timeout,
-                            workspace=idn.workspace)
+                            workspace=idn.workspace, model=idn.model)
     raise AdapterError(f"{idn.worker_id}: provider lạ {idn.provider!r}")
 
 

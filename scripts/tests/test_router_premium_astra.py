@@ -227,5 +227,70 @@ class TestCodexKhongDungMacDinhNhaCungCap(unittest.TestCase):
                                  f"phải cố ý, không phải vô tình")
 
 
+class TestBoLapLichLoaiBacCaoCap(unittest.TestCase):
+    """Rào THẬT trong bộ lập lịch — không phải một lời hứa trong ghi chú.
+
+    Kịch bản người review dựng ra, và nó đúng: nếu rào duy nhất là "Astra
+    vắng mặt trong `supported_models`", thì một người làm ĐÚNG theo hướng
+    dẫn ("bật = thêm nó vào `supported_models`") sẽ mở thẳng cửa — Astra
+    có `benchmark_profile` 0.9 so với 0.82 của `codex-default`, và
+    `expected_cost` nhẹ hơn `benchmark_quality` + `capability_match` cộng
+    lại, nên nó THẮNG ĐIỂM một việc `grep` và chạy thật.
+    """
+
+    def _fabric_co_astra(self):
+        """Fabric có Astra ĐÃ ĐƯỢC BẬT trong `supported_models`."""
+        from scripts.router_v4.fabric_config import nap
+        f, _, _ = nap(probe=False)
+        r = f.runtimes["CODEX01"]
+        r.supported_models = tuple(list(r.supported_models) + [MODEL_ASTRA])
+        r.needs_provisioning = ""
+        r.status = type(r.status).IDLE
+        return f
+
+    def _hop_dong(self, **kw):
+        from scripts.router_v4.contract import TaskContract
+        return TaskContract(task_id="t1", objective="tìm chuỗi trong kho",
+                            **kw)
+
+    def test_da_BAT_trong_supported_models_van_KHONG_duoc_chon_tu_dong(self):
+        from scripts.router_v4.scheduler import Scheduler
+        f = self._fabric_co_astra()
+        cho = [p for p in f.placements() if p.model_id == MODEL_ASTRA]
+        self.assertTrue(cho, "phải có placement để bài kiểm nói lên điều gì")
+        s = Scheduler(f)
+        c = self._hop_dong()
+        for p in cho:
+            ly_do = s._loai_vi(p, c, exclude=set(), now=None)
+            self.assertIsNotNone(
+                ly_do, f"{p.key} lọt qua phép loại — Astra chọn được TỰ ĐỘNG")
+            self.assertIn("CAO CẤP", ly_do)
+
+    def test_ghim_dich_danh_thi_di_qua_duoc(self):
+        """Chứng cứ chống rỗng: rào không được chặn cả đường tường minh."""
+        from scripts.router_v4.capabilities import Requirements
+        from scripts.router_v4.scheduler import Scheduler
+        f = self._fabric_co_astra()
+        cho = [p for p in f.placements() if p.model_id == MODEL_ASTRA]
+        s = Scheduler(f)
+        c = self._hop_dong(requirements=Requirements(pin_model=MODEL_ASTRA))
+        ly_do = [s._loai_vi(p, c, exclude=set(), now=None) for p in cho]
+        self.assertTrue(
+            any(l is None or "CAO CẤP" not in l for l in ly_do),
+            f"ghim đích danh vẫn bị chặn vì lý do bậc: {ly_do}")
+
+    def test_model_thuong_khong_bi_rao_nay_cham_toi(self):
+        from scripts.router_v4.scheduler import Scheduler
+        f = self._fabric_co_astra()
+        s = Scheduler(f)
+        c = self._hop_dong()
+        for p in f.placements():
+            if p.model_id == MODEL_ASTRA:
+                continue
+            ly_do = s._loai_vi(p, c, exclude=set(), now=None) or ""
+            self.assertNotIn("CAO CẤP", ly_do,
+                             f"{p.key} bị chặn nhầm bởi rào bậc cao cấp")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

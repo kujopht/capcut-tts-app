@@ -343,18 +343,58 @@ class TestKhongThuLaiLoiKhongPhuThuocCho(unittest.TestCase):
                               failure_reason=ly_do, summary=tom,
                               worker=worker)
 
-    def test_chu_ky_hong_bo_duoi_cau_hay_doi(self):
+    def test_chu_ky_bo_DANH_TINH_TAI_KHOAN_ra_khoi_phep_so(self):
+        """Đây là bài kiểm của một khuyết tật THẬT trong chính rào này.
+
+        Adapter Antigravity ghi `f"switch {self._acc} hỏng: …"`, nên MỘT
+        lỗi cấu hình ở AG01/AG02/AG03 sinh ra BA câu khác nhau — `acc1`,
+        `acc2`, `acc3`. Không chuẩn hoá thì không chữ ký nào khớp chữ ký
+        nào, và rào chống bão thử lại **không bao giờ nổ** cho đúng lớp
+        lỗi nó được viết ra để chặn.
+
+        Bản đầu của bài kiểm này dùng `acc1` cho CẢ HAI lượt — một trạng
+        thái không tồn tại trong thực tế — nên nó xanh trong khi rào chết.
+        """
         from scripts.control_center.engine import ControlCenter
         a = ControlCenter._chu_ky_hong(
             self._pb("session_start_failed",
-                     "switch acc1 hỏng: unrecognized arguments X", "AG01"))
+                     "switch acc1 hỏng: KHÔNG tìm thấy thông dịch Python",
+                     "AG01"))
         b = ControlCenter._chu_ky_hong(
             self._pb("session_start_failed",
-                     "switch acc1 hỏng: unrecognized arguments X", "AG02"))
-        self.assertEqual(a, b, "cùng bản chất phải cùng chữ ký")
+                     "switch acc2 hỏng: KHÔNG tìm thấy thông dịch Python",
+                     "AG02"))
+        self.assertEqual(a, b,
+                         "cùng một lỗi cấu hình ở hai tài khoản PHẢI ra "
+                         "cùng chữ ký, nếu không rào không bao giờ nổ")
         c = ControlCenter._chu_ky_hong(
             self._pb("turn_failed", "hết quota", "AG01"))
         self.assertNotEqual(a, c)
+
+    def test_chu_ky_bo_ca_ma_khe_id_phien_pid_va_so_giay(self):
+        from scripts.control_center.engine import ControlCenter
+        cap = [
+            ("AG01 không mở được phiên sau 12.5s (pid 31548)",
+             "AG07 không mở được phiên sau 3.2s (pid 9144)"),
+            ("phiên s-0d9b580a4d hỏng", "phiên s-fdcaba4533 hỏng"),
+        ]
+        for x, y in cap:
+            with self.subTest(x=x):
+                self.assertEqual(
+                    ControlCenter._chu_ky_hong(self._pb("e", x, "AG01")),
+                    ControlCenter._chu_ky_hong(self._pb("e", y, "AG07")))
+
+    def test_chu_ky_van_PHAN_BIET_hai_loi_khac_ban_chat(self):
+        """Chứng cứ chống rỗng: chuẩn hoá không được xoá mất khác biệt thật."""
+        from scripts.control_center.engine import ControlCenter
+        a = ControlCenter._chu_ky_hong(
+            self._pb("session_start_failed",
+                     "switch acc1 hỏng: KHÔNG tìm thấy thông dịch Python",
+                     "AG01"))
+        b = ControlCenter._chu_ky_hong(
+            self._pb("session_start_failed",
+                     "switch acc1 hỏng: chưa lưu profile", "AG01"))
+        self.assertNotEqual(a, b)
 
     def test_chu_ky_rong_khi_khong_co_gi_de_so(self):
         from scripts.control_center.engine import ControlCenter
@@ -378,17 +418,21 @@ class TestKhongThuLaiLoiKhongPhuThuocCho(unittest.TestCase):
                                objective="ê", state=TaskState.FAILED,
                                attempts=2))
 
-        sig = "session_start_failed|switch acc1 hỏng: unrecognized arguments"
-        # Hai lan hong Y HET o HAI cho khac nhau, dung thu tu that.
-        for cho in ("AG01/m", "AG02/m"):
+        # HAI TAI KHOAN KHAC NHAU, dung nhu thuc te: adapter ghi ten accN
+        # vao cau. Chu ky phai tu chuan hoa chung ve mot.
+        pb1 = self._pb("session_start_failed",
+                       "switch acc1 hỏng: unrecognized arguments", "AG01")
+        pb2 = self._pb("session_start_failed",
+                       "switch acc2 hỏng: unrecognized arguments", "AG02")
+        from scripts.control_center.engine import ControlCenter as _CC
+        for cho, pbx in (("AG01/m", pb1), ("AG02/m", pb2)):
             cc.store.ghi_su_kien(
                 "TASK_FINISHED", project_id="p", task_id="p.t1",
                 level="ERROR", detail="hỏng",
-                meta={"ok": False, "fail_sig": sig, "placement": cho})
+                meta={"ok": False, "fail_sig": _CC._chu_ky_hong(pbx),
+                      "placement": cho})
 
-        pb = self._pb("session_start_failed",
-                      "switch acc1 hỏng: unrecognized arguments", "AG02")
-        cc._thu_lai_neu_dang(ctx, "p.t1", pb, "s-1", placement_key="AG02/m")
+        cc._thu_lai_neu_dang(ctx, "p.t1", pb2, "s-1", placement_key="AG02/m")
 
         kinds = [e["kind"] for e in cc.store.su_kien(task_id="p.t1", limit=20)]
         self.assertIn("RETRY_REFUSED", kinds,

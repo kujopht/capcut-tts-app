@@ -399,8 +399,22 @@ class AntigravityLauncherAdapter(WorkerAdapter):
                     self.start_error = (
                         getattr(self._worker, "start_error", "")
                         or f"agy ({self._model}) không khởi động được")
-                    # Tien trinh chet roi thi giu no lam gi — va giu lai se
-                    # lam `send_task` bao "turn_failed" thay vi ly do that.
+                    # DONG TIEN TRINH TRUOC KHI VUT THAM CHIEU.
+                    #
+                    # `start()` tra False o hai tinh huong khac han: tien
+                    # trinh CHET (khong con gi de dong) va tien trinh CON
+                    # SONG ma khong phat `init` — dang treo o mot man hinh
+                    # tuong tac. O tinh huong thu hai, bo `_worker = None`
+                    # ma khong `close()` la RO mot tien trinh `agy` song
+                    # mai, van giu `USERPROFILE` tro vao slot credential
+                    # cua accN. Voi duong thu lai doi cho AG01->AG02->AG03
+                    # thi mot viec de lai BA tien trinh nhu the.
+                    #
+                    # `close()` chiu duoc ca hai tinh huong.
+                    try:
+                        self._worker.close()
+                    except Exception:                       # noqa: BLE001
+                        pass
                     self._worker = None
                 return ok2
         except TimeoutError:

@@ -143,7 +143,14 @@ def argv_python(*, lam_moi: bool = False) -> Tuple[List[str], str]:
             return _NHO
         da_thu.append(f"{argv[0]} ({vi_sao})")
 
-    _NHO = ([], (
+    # CHI NHO KET QUA THANH CONG.
+    #
+    # Nho ca that bai thi thong diep loi ("cai Python 3 roi them vao PATH,
+    # hoac dat ROUTER_PYTHON") tro thanh mot loi noi doi: nguoi dung lam
+    # dung y het, roi ung dung desktop DANG CHAY van hong moi lan `switch`
+    # cho toi khi khoi dong lai. Voi mot app song ca ngay thi do la mot
+    # kich ban that, khong phai gia dinh.
+    return ([], (
         "KHÔNG tìm thấy thông dịch Python nào chạy được. Bản đóng gói không "
         "kèm `python.exe` (PyInstaller nhúng Python dưới dạng DLL), nên "
         "Router cần một Python của hệ thống để chạy launcher tài khoản. "
@@ -151,7 +158,6 @@ def argv_python(*, lam_moi: bool = False) -> Tuple[List[str], str]:
         "ROUTER_PYTHON trỏ vào `python.exe`."
         + (f" Đã thử: {', '.join(da_thu)}." if da_thu
            else " Không có ứng viên nào trên máy.")))
-    return _NHO
 
 
 def quen() -> None:

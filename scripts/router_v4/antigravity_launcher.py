@@ -58,6 +58,7 @@ from typing import Dict, FrozenSet, List, Optional
 
 from scripts.router_v3.packet import TaskPacket, TaskResult, parse_result
 from scripts.router_v3.registry import ExecutionType, Health, WorkerSpec
+from scripts.router_v4.thong_dich import argv_python
 from scripts.router_v3.warm_pool import RecyclePolicy, WarmAgyWorker, WarmState
 from scripts.router_v3.worker_adapter import (HealthReport, TransportKind,
                                               WorkerAdapter)
@@ -264,8 +265,17 @@ def switch(acc: str, *, timeout: float = 60.0) -> tuple[bool, str]:
     """
     if not LAUNCHER.is_file():
         return False, f"không tìm thấy launcher {LAUNCHER}"
+    # KHONG `sys.executable` o day, va do la mot dinh chinh sau mot su co
+    # that: trong ban da dong goi, `sys.executable` la chinh
+    # `Router Control Center.exe`, nen dong lenh nay tro thanh mot lan TU
+    # GOI LAI CHINH MINH, argparse cua ung dung desktop bat "unrecognized
+    # arguments" roi thoat 2 -> `switch` bao hong -> `no_session`. Xem
+    # `thong_dich.py` cho ca cau chuyen.
+    argv, vi_sao = argv_python()
+    if not argv:
+        return False, vi_sao
     try:
-        p = subprocess.run([sys.executable, str(LAUNCHER), "switch", acc],
+        p = subprocess.run(argv + [str(LAUNCHER), "switch", acc],
                            capture_output=True, text=True, timeout=timeout,
                            encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -302,6 +312,10 @@ class AntigravityLauncherAdapter(WorkerAdapter):
         self._last: Optional[TaskResult] = None
         self._cancelled = False
         self._cho_ghi = False
+        #: VI SAO `start_session` hong, bang tieng ngUOI. Rong = chua hong.
+        #: Ton tai vi mot `return False` tran da lam ca mot su co that chi
+        #: hien ra duoi cai ten vo nghia "no_session".
+        self.start_error = ""
 
     # -- hop dong chin phuong thuc -----------------------------------------
 
@@ -346,7 +360,11 @@ class AntigravityLauncherAdapter(WorkerAdapter):
         đè slot trước khi tiến trình này kịp đọc, và cả hai worker sẽ mang
         cùng một danh tính — xem docstring module, bằng chứng (4).
         """
+        self.start_error = ""
         if not profile_ton_tai(self._acc):
+            self.start_error = (
+                f"chưa lưu profile {self._acc} — chạy `acc login "
+                f"{self._acc[3:]}` một lần")
             return False
         if self._worker is not None:
             self.shutdown()
@@ -362,6 +380,10 @@ class AntigravityLauncherAdapter(WorkerAdapter):
             with self._khoa:
                 ok, chi_tiet = switch(self._acc)
                 if not ok:
+                    # GIU LAI `chi_tiet`. Ban truoc vut no di, nen mot loi
+                    # cau hinh ro rang ("unrecognized arguments: …") bien
+                    # thanh "no_session" va mat ca buoi de tim lai.
+                    self.start_error = f"switch {self._acc} hỏng: {chi_tiet}"
                     return False
                 self._worker = WarmAgyWorker(
                     self._runtime_id, model=self._model,
@@ -372,8 +394,19 @@ class AntigravityLauncherAdapter(WorkerAdapter):
                     env=env)
                 # `start()` cho tin `init` -> khoa duoc giu dung tron cua so
                 # nguy hiem, khong hon.
-                return self._worker.start()
+                ok2 = self._worker.start()
+                if not ok2:
+                    self.start_error = (
+                        getattr(self._worker, "start_error", "")
+                        or f"agy ({self._model}) không khởi động được")
+                    # Tien trinh chet roi thi giu no lam gi — va giu lai se
+                    # lam `send_task` bao "turn_failed" thay vi ly do that.
+                    self._worker = None
+                return ok2
         except TimeoutError:
+            self.start_error = (
+                f"quá hạn chờ khoá launcher ({KHOA_TTL:.0f}s) — một lần "
+                f"switch khác đang giữ khoá")
             return False
 
     def send_task(self, packet: TaskPacket) -> TaskResult:

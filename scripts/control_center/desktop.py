@@ -125,7 +125,7 @@ def main(argv=None) -> int:
 
     from scripts.control_center.desktop_shell import (
         MotThucThe, ThongTinPhien, cho_backend_khoe, duong_giao_dien,
-        ghi_tep_khoa, quyet_dinh, xoa_tep_khoa)
+        ghi_tep_khoa, quyet_dinh, ten_mutex_cua, xoa_tep_khoa)
 
     goc = Path(a.root).resolve() if a.root else _goc_mac_dinh()
 
@@ -142,7 +142,10 @@ def main(argv=None) -> int:
         os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (
             f"--remote-debugging-port={a.debug_cdp}")
 
-    mot = MotThucThe()
+    # Mot thuc the THEO THU MUC GOC, khong theo ca may — xem
+    # `ten_mutex_cua`. Bam doi cung mot EXE van ra cung mot goc, nen hanh
+    # vi cua nguoi dung khong doi mot chut nao.
+    mot = MotThucThe(ten_mutex_cua(goc))
     kh = quyet_dinh(goc, co_thuc_the_khac=mot.da_co, cong_muon=a.port)
 
     if kh.hanh_dong == "nhuong":

@@ -50,6 +50,29 @@ DIA_CHI = "127.0.0.1"
 #: chet. Dung ca hai: mutex de chan, tep khoa de BIET NOI MA NOI LAI.
 TEN_MUTEX = "Global\\RouterControlCenter.Desktop.SingleInstance"
 
+
+def ten_mutex_cua(goc) -> str:
+    """Tên mutex cho MỘT thư mục gốc.
+
+    "Một thực thể" phải hiểu theo NƠI LÀM VIỆC, không phải theo cả máy.
+    Thứ cần chặn là hai tiến trình cùng giành MỘT sổ SQLite và MỘT tệp
+    khoá; hai Control Center trỏ vào hai thư mục gốc khác nhau không tranh
+    nhau thứ gì cả.
+
+    Với người dùng thật thì KHÔNG có gì đổi: bấm đôi cùng một EXE luôn ra
+    cùng một thư mục gốc (`_goc_mac_dinh()` = thư mục cạnh EXE), nên lần
+    bấm thứ hai vẫn nhường đúng như trước.
+
+    Đổi cái này vì một lý do cụ thể: một mutex TOÀN MÁY làm không thể mở
+    một bản thứ hai trên một thư mục tạm để KIỂM trong khi bản của người
+    dùng đang mở — tức là không chứng minh được điều phối trên chính bản
+    đã đóng gói, mà không phải tắt ứng dụng của người khác.
+    """
+    import hashlib
+    duong = str(Path(goc).resolve()).lower()
+    ma = hashlib.sha256(duong.encode("utf-8")).hexdigest()[:16]
+    return f"{TEN_MUTEX}.{ma}"
+
 #: Cho backend khoe. 20s la du rong: khoi dong gom mo SQLite va doi soat
 #: phuc hoi, va may cham thi cham hon may nay.
 CHO_KHOE = 20.0

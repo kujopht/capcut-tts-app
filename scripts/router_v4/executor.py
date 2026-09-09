@@ -108,7 +108,13 @@ def dung_adapter(f: Fabric, p: Placement, *, timeout: float,
         else:
             raise ExecutorError(f"{p.key}: transport {r.transport!r} lạ")
     elif m.provider == "codex":
-        a = CodexAdapter(r.runtime_id, timeout=timeout, workspace=r.workspace)
+        # `m.ten_gui_nha_cung_cap` chu KHONG phai `m.model_id`: `model_id`
+        # o day la `codex-default`, mot cai TEN CHO CHO chu khong phai mot
+        # model that. Dua no cho `-m` thi Codex tu choi; bo `-m` di thi
+        # Codex chay MAC DINH CUA CHINH NO. Ca hai deu sai, va cai thu hai
+        # sai am tham. Adapter fail closed khi chuoi nay rong.
+        a = CodexAdapter(r.runtime_id, timeout=timeout, workspace=r.workspace,
+                         model=m.ten_gui_nha_cung_cap)
     elif m.provider == "opencode":
         a = OpenCodeAdapter(r.runtime_id, host=r.host, port=r.port or 4096,
                             model=m.model_id, timeout=timeout)
@@ -216,7 +222,21 @@ class Executor:
             doc = doc or str(self.root)
             if hasattr(adapter, "set_write_mode"):
                 adapter.set_write_mode(bool(handle))
-            adapter.start_session(workspace=doc)
+            # KIEM gia tri tra ve. Truoc day dong nay bo qua no, nen mot
+            # phien KHONG dung duoc van di tiep toi `send_task`, va o do
+            # `_worker is None` chi con noi duoc "no_session / chua
+            # start_session" — mot TRIEU CHUNG, khong phai ly do. Su co
+            # that (2026-09-09): `switch` hong vi `sys.executable` trong ban
+            # dong goi la chinh EXE; ly do that ("unrecognized arguments")
+            # bi vut o day.
+            if not adapter.start_session(workspace=doc):
+                chi_tiet = (getattr(adapter, "start_error", "") or "").strip()
+                return self._hong_som(
+                    c, p, m, t0, handle,
+                    ly_do="session_start_failed",
+                    tom_tat=(chi_tiet or "không mở được phiên agent, và "
+                                         "adapter không nói vì sao"),
+                    attempt=attempt)
             goi = _packet_gia(c, workspace=doc,
                               branch=handle.branch if handle else "",
                               deps=dependency_summaries)
@@ -273,6 +293,31 @@ class Executor:
                 started_at=t0, ended_at=time.time())
             self._ghi_lich_su(c, p, pb, None, reassigned=reassigned)
             return ExecutionResult(envelope=pb)
+
+    def _hong_som(self, c: TaskContract, p: Placement, m, t0: float,
+                  handle: Optional[WorktreeHandle], *, ly_do: str,
+                  tom_tat: str, attempt: int) -> ExecutionResult:
+        """Hỏng TRƯỚC khi worker chạy được lượt nào — và nói rõ vì sao.
+
+        Tách riêng vì loại hỏng này khác hẳn "worker chạy rồi trả kết quả
+        xấu": chưa có lượt nào được tiêu, chưa có tệp nào bị chạm, và lý do
+        gần như luôn là CẤU HÌNH chứ không phải nội dung việc. Gộp nó vào
+        đường kết quả bình thường là cách một lỗi cấu hình hoá trang thành
+        một việc "thất bại" rồi được thử lại trên ba runtime khác nhau.
+        """
+        giay = time.time() - t0
+        pb = ResultEnvelope(
+            task_id=c.task_id, status="failed", worker=p.runtime_id,
+            model=p.model_id, provider=m.provider, duration=giay,
+            failure_reason=ly_do, summary=tom_tat[:600],
+            started_at=t0, ended_at=time.time())
+        pb.branch = handle.branch if handle else ""
+        pb.resource_usage.wall_seconds = giay
+        pb.resource_usage.retries = max(0, attempt - 1)
+        self._ghi_lich_su(c, p, pb, None, reassigned=False)
+        return ExecutionResult(envelope=pb,
+                               worktree=str(handle.path) if handle else "",
+                               branch=pb.branch)
 
     def _lay_worktree(self, c: TaskContract, p: Placement, *, base_sha: str,
                       attempt: int) -> WorktreeHandle:

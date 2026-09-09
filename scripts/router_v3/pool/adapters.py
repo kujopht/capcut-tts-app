@@ -69,10 +69,13 @@ class CodexAdapter(WorkerAdapter):
     transport = TransportKind.STRUCTURED_CLI
 
     def __init__(self, worker_id: str, *, timeout: float = 900.0,
-                 workspace: str = ""):
+                 workspace: str = "", model: str = ""):
         self._worker_id = worker_id
         self._timeout = timeout
         self._workspace = workspace
+        #: TEN MODEL GHIM. Rong = KHONG chay, chu KHONG roi ve mac dinh cua
+        #: Codex — xem `send_task`.
+        self._model = (model or "").strip()
         self._last: Optional[TaskResult] = None
         self._p: Optional[subprocess.Popen] = None
         self._cancelled = False
@@ -130,8 +133,33 @@ class CodexAdapter(WorkerAdapter):
                               status="failed", provider=self.provider,
                               failure_reason="worker_unavailable",
                               summary="không tìm thấy codex")
+        # FAIL CLOSED khi chua ghim model. KHONG roi ve mac dinh cua Codex.
+        #
+        # `codex exec` khong co `-m` thi chay bat cu thu gi CLI dang dat lam
+        # mac dinh, va cai do doi duoc sau mot lan `codex update` — khong
+        # ai ben nay sua mot dong nao. Do that 2026-09-09: mac dinh tren may
+        # nay la `gpt-5.6-sol`, va cung ban CLI do phoi ra `gpt-6-astra`,
+        # dat hon han. Mot lan doi mac dinh o phia nha cung cap se bien moi
+        # viec vat cua Router thanh mot lan goi model cao cap ma khong co
+        # bat ky dau hieu nao.
+        #
+        # Nen: khong ghim thi KHONG CHAY. Mot viec hong co ly do ro rang re
+        # hon nhieu so voi mot hoa don khong ai giai thich duoc.
+        if not self._model:
+            return TaskResult(
+                task_id=packet.task_id, worker_id=self._worker_id,
+                status="failed", provider=self.provider,
+                failure_reason="no_model_pinned",
+                summary=("Router KHÔNG chạy Codex khi chưa ghim model: thiếu "
+                         "`-m` thì CLI dùng model mặc định của chính nó, và "
+                         "mặc định đó đổi được ở phía nhà cung cấp. Đặt "
+                         "`provider_model` cho model Codex trong "
+                         "`fabric.json`."),
+                duration_seconds=round(time.perf_counter() - t0, 2))
         cwd = packet.workspace or self._workspace or None
-        argv = [exe, "exec", "--skip-git-repo-check", "-"]
+        # `--color never`: dau ra di vao bo doc JSON, khong vao mat nguoi.
+        argv = [exe, "exec", "--skip-git-repo-check",
+                "-m", self._model, "--color", "never", "-"]
         try:
             self._p = subprocess.Popen(
                 argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,

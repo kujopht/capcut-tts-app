@@ -150,13 +150,31 @@
       "provider": "codex",
       "quota_pool": "codex_chatgpt",
       "reasoning": "high",
+      "provider_model": "gpt-5.6-sol",
+      "premium_tier": 2,
       "capabilities": ["coding", "repo_read", "repo_write", "shell", "multimodal", "image", "structured_output", "long_context"],
       "capability_source": {"coding": "probed", "repo_read": "probed", "image": "probed", "multimodal": "probed", "repo_write": "declared", "shell": "declared", "structured_output": "declared", "long_context": "declared"},
       "benchmark_profile": 0.82,
       "latency_profile": 50.0,
       "reliability": 0.9,
       "cost_profile": 0.5,
-      "notes": "image PROBED 2026-09-03 (đọc đúng screenshot thật). TỪ CHỐI việc hình dạng bảo mật — bằng chứng 2026-08-28: trả kết quả rỗng kèm 'flagged for possible cybersecurity risk'. Xem `security_refusal_family` bên dưới."
+      "notes": "`provider_model` GHIM TƯỜNG MINH và nó bắt buộc: thiếu `-m` thì `codex exec` chạy model mặc định của CHÍNH CLI, và mặc định đó đổi được ở phía nhà cung cấp sau một lần `codex update` — không ai bên này sửa một dòng nào. Đo 2026-09-09 (`codex doctor`, codex-cli 0.153.4): mặc định trên máy này là `gpt-5.6-sol`, và cùng bản CLI đó phơi ra `gpt-6-astra` đắt hơn hẳn. Adapter FAIL CLOSED khi trường này rỗng. Tên `model_id` giữ nguyên là `codex-default` để không phá lịch sử benchmark đã ghi — nhưng nó là một CÁI TÊN CHỖ, không phải một model thật. || image PROBED 2026-09-03 (đọc đúng screenshot thật). TỪ CHỐI việc hình dạng bảo mật — bằng chứng 2026-08-28: trả kết quả rỗng kèm 'flagged for possible cybersecurity risk'. Xem `security_refusal_family` bên dưới."
+    },
+    {
+      "model_id": "gpt-6-astra",
+      "model_family": "codex",
+      "provider": "codex",
+      "quota_pool": "codex_chatgpt",
+      "reasoning": "high",
+      "provider_model": "gpt-6-astra",
+      "premium_tier": 3,
+      "capabilities": ["coding", "repo_read", "repo_write", "shell", "structured_output", "long_context"],
+      "capability_source": {"coding": "declared", "repo_read": "declared", "repo_write": "declared", "shell": "declared", "structured_output": "declared", "long_context": "declared"},
+      "benchmark_profile": 0.9,
+      "latency_profile": 90.0,
+      "reliability": 0.9,
+      "cost_profile": 1.0,
+      "notes": "BẬC 3 — CAO CẤP, LEO THANG TƯỜNG MINH. CỐ Ý KHÔNG có mặt trong `supported_models` của CODEX01, nên bộ lập lịch KHÔNG THỂ chọn nó: đây là 'đã chuẩn bị', chưa phải 'đã bật'. Bật = thêm `gpt-6-astra` vào `supported_models` của CODEX01, và khi đó `premium.py` vẫn còn là rào cuối (bậc 3 không bao giờ được chọn tự động). `capability_source` để `declared` vì CHƯA ĐO — không được nâng lên `probed` nếu chưa có lượt chạy thật. Không ghi giá ở đây: chưa có nguồn giá chính thức nào đọc được, và bịa một con số còn tệ hơn không có."
     },
     {
       "model_id": "opencode-default",

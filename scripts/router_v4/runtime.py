@@ -180,7 +180,27 @@ class ModelCapability:
     reliability: float = 0.9
     #: Chi phi tuong doi trong [0,1] — 0 la re nhat.
     cost_profile: float = 0.5
+    #: TEN MODEL GUI CHO NHA CUNG CAP, khi no khac `model_id`.
+    #:
+    #: Ton tai vi mot ly do cu the: Router KHONG BAO GIO duoc dua vao model
+    #: MAC DINH cua mot CLI. `codex exec` khong co `-m` thi chay bat cu thu
+    #: gi Codex dang dat lam mac dinh — va cai do doi duoc sau mot lan
+    #: `codex update`, khong can ai sua mot dong nao ben nay. Do that
+    #: 2026-09-09: mac dinh tren may nay la `gpt-5.6-sol`, nhung ban CLI
+    #: cung phoi ra `gpt-6-astra` (dat hon nhieu).
+    #:
+    #: Rong = CHUA GHIM. Adapter nao bat buoc phai ghim thi FAIL CLOSED,
+    #: khong roi ve mac dinh cua nha cung cap.
+    provider_model: str = ""
+    #: Bac gia/nang luc: 0 re nhat … 3 CAO CAP (Astra). Xem `premium.py`.
+    #: Bac 3 khong bao gio duoc chon tu dong.
+    premium_tier: int = 0
     notes: str = ""
+
+    @property
+    def ten_gui_nha_cung_cap(self) -> str:
+        """Tên THẬT để đưa cho CLI. Rỗng nghĩa là chưa ghim."""
+        return (self.provider_model or "").strip()
 
     def validate(self) -> None:
         if not self.model_id.strip():

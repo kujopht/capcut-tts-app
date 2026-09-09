@@ -253,6 +253,27 @@ class TaskContract:
         if not self.execution.destructive_actions_allowed:
             d += ["", "KHÔNG được thực hiện thao tác phá huỷ (xoá, reset, "
                   "push, deploy, đổi cấu hình hệ thống)."]
+        # KHONG NGUOI TRUC — noi thang ra, vi worker khong doan duoc.
+        #
+        # Do that (2026-09-09, viec ghi mot tep vao worktree): worker chon
+        # mot lenh shell, `agy` headless TU CHOI vi khong hoi duoc ai, va
+        # luot ket thuc RONG. stderr noi dung ly do:
+        #   "a tool required the "command" permission that headless mode
+        #    cannot prompt for, so it was auto-denied"
+        # Viec that bai o cong `artifacts` du hop dong, worktree va pham vi
+        # deu dung — chi vi worker khong biet dieu kien no dang chay.
+        #
+        # Day la mot cau NOI CHO WORKER, khong phai mot lan noi rao: quyen
+        # khong doi mot chut nao, worker chi biet duong nao con di duoc.
+        d += ["",
+              "CHẾ ĐỘ KHÔNG NGƯỜI TRỰC — quan trọng:",
+              "  Sửa tệp bằng CÔNG CỤ ĐỌC/GHI TỆP.",
+              "  ĐỪNG dùng lệnh shell nếu còn cách khác: phiên này chạy",
+              "  headless, nên mọi công cụ cần quyền `command` bị TỰ ĐỘNG",
+              "  TỪ CHỐI (không có ai để hỏi) và lượt của bạn sẽ kết thúc",
+              "  rỗng. Không có gì hỏng ở phía bạn — chỉ là đường đó đóng.",
+              "  Cần chạy lệnh mà không có cách khác thì trả `blocked` kèm",
+              "  `decision_request` nói rõ lệnh nào và vì sao."]
         d += ["",
               f"Trần thời gian: {self.execution.max_wall_time:.0f}s.",
               "",

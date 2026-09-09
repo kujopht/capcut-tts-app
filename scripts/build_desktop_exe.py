@@ -32,6 +32,15 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clean", action="store_true",
                     help="xoá build/ và dist/ trước khi dựng")
+    # VI SAO CAN CO: mot ban dang CHAY khoa chinh thu muc cua no —
+    # `Router Control Center.exe` khong ghi de duoc khi con song, va
+    # `.router/control_center/control.db` bi giu boi tien trinh do. Nen
+    # "dung lai ban moi de kiem" va "giu ban nguoi dung dang mo" la hai
+    # viec khong the dung chung mot thu muc. Truoc day khong co co nay,
+    # nen cach duy nhat la tat ung dung cua nguoi khac.
+    ap.add_argument("--dist", default="",
+                    help=("thư mục đích (mặc định `dist/`). Dùng khi bản "
+                          "hiện tại đang chạy và giữ khoá thư mục của nó"))
     a = ap.parse_args(argv)
 
     try:
@@ -42,8 +51,8 @@ def main(argv=None) -> int:
             "requirements-control-center-desktop.txt\n")
         return 2
 
-    ra = GOC / "dist"
-    lam = GOC / "build" / "desktop"
+    ra = Path(a.dist).resolve() if a.dist else (GOC / "dist")
+    lam = GOC / "build" / ("desktop" if not a.dist else f"desktop-{ra.name}")
     if a.clean:
         shutil.rmtree(ra / TEN, ignore_errors=True)
         shutil.rmtree(lam, ignore_errors=True)

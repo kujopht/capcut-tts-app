@@ -127,13 +127,13 @@ class CodexAdapter(WorkerAdapter):
                         "mật và Codex trả kết quả RỖNG cho loại việc này "
                         "(bằng chứng 2026-08-28). Định tuyến sang worker khác.",
                 duration_seconds=round(time.perf_counter() - t0, 2))
-        exe = find_codex()
-        if not exe:
-            return TaskResult(task_id=packet.task_id, worker_id=self._worker_id,
-                              status="failed", provider=self.provider,
-                              failure_reason="worker_unavailable",
-                              summary="không tìm thấy codex")
         # FAIL CLOSED khi chua ghim model. KHONG roi ve mac dinh cua Codex.
+        #
+        # Kiem TRUOC `find_codex()` co chu y: thieu model ghim la mot loi
+        # CAU HINH, dung dù may co cai `codex` hay khong. Kiem sau thi tren
+        # mot may chua cai CLI, loi cau hinh nay bi che boi
+        # "khong tim thay codex" va chi lo ra dung luc ai do cai CLI vao —
+        # tuc la dung luc no bat dau ton tien.
         #
         # `codex exec` khong co `-m` thi chay bat cu thu gi CLI dang dat lam
         # mac dinh, va cai do doi duoc sau mot lan `codex update` — khong
@@ -156,6 +156,12 @@ class CodexAdapter(WorkerAdapter):
                          "`provider_model` cho model Codex trong "
                          "`fabric.json`."),
                 duration_seconds=round(time.perf_counter() - t0, 2))
+        exe = find_codex()
+        if not exe:
+            return TaskResult(task_id=packet.task_id, worker_id=self._worker_id,
+                              status="failed", provider=self.provider,
+                              failure_reason="worker_unavailable",
+                              summary="không tìm thấy codex")
         cwd = packet.workspace or self._workspace or None
         # `--color never`: dau ra di vao bo doc JSON, khong vao mat nguoi.
         argv = [exe, "exec", "--skip-git-repo-check",

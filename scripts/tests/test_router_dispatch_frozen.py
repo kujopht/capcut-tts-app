@@ -272,6 +272,24 @@ class TestWarmWorkerNoiViSaoHong(unittest.TestCase):
         from scripts.router_v3.warm_pool import WarmAgyWorker
         return WarmAgyWorker("AG01", model="m", **kw)
 
+    @staticmethod
+    def _gia_binary(ten: str, *, windows: str, posix: str) -> Path:
+        """Một `agy` GIẢ chạy được trên nền đang chạy bài kiểm.
+
+        Windows cần `.cmd`; POSIX cần shebang + bit thực thi. Viết một
+        `.cmd` rồi chạy nó trên Linux chỉ ra `PermissionError`, và bài
+        kiểm sẽ 'đạt' vì nhầm lý do — CI Linux đã bắt đúng chuyện đó.
+        """
+        d = Path(tempfile.mkdtemp(prefix="cc-agy-"))
+        if sys.platform == "win32":
+            p = d / f"{ten}.cmd"
+            p.write_text(windows, encoding="ascii")
+        else:
+            p = d / ten
+            p.write_text("#!/bin/sh\n" + posix, encoding="ascii")
+            p.chmod(0o755)
+        return p
+
     def test_khong_tim_thay_agy_noi_ro_la_khong_tim_thay(self):
         from scripts.router_v3 import warm_pool as wp
         that = wp.find_agy
@@ -290,11 +308,10 @@ class TestWarmWorkerNoiViSaoHong(unittest.TestCase):
         self.assertIn("FileNotFoundError", w.start_error)
 
     def test_tien_trinh_chet_som_thi_KEM_MA_THOAT_va_stderr(self):
-        d = Path(tempfile.mkdtemp(prefix="cc-agy-"))
-        gia = d / "gia.cmd"
-        gia.write_text("@echo off\r\n"
-                       "echo loi cau hinh gia 1>&2\r\n"
-                       "exit /b 7\r\n", encoding="ascii")
+        gia = self._gia_binary(
+            "gia",
+            windows="@echo off\r\necho loi cau hinh gia 1>&2\r\nexit /b 7\r\n",
+            posix="echo loi cau hinh gia 1>&2\nexit 7\n")
         w = self._worker(binary=str(gia), turn_timeout=20.0)
         self.assertFalse(w.start())
         self.assertIn("7", w.start_error)
@@ -302,12 +319,12 @@ class TestWarmWorkerNoiViSaoHong(unittest.TestCase):
 
     def test_treo_o_man_hinh_tuong_tac_duoc_goi_dung_ten(self):
         """Tiến trình SỐNG mà không phát `init` — màn hình tương tác."""
-        d = Path(tempfile.mkdtemp(prefix="cc-agy2-"))
-        gia = d / "treo.cmd"
         # Song, khong in `init`, khong thoat — dung hinh dang cua mot menu
         # chon model dang cho nguoi bam.
-        gia.write_text("@echo off\r\nping -n 30 127.0.0.1 >nul\r\n",
-                       encoding="ascii")
+        gia = self._gia_binary(
+            "treo",
+            windows="@echo off\r\nping -n 30 127.0.0.1 >nul\r\n",
+            posix="sleep 30\n")
         w = self._worker(binary=str(gia), turn_timeout=3.0)
         self.assertFalse(w.start())
         self.assertIn("TƯƠNG TÁC", w.start_error)

@@ -820,6 +820,111 @@ def check_delete(tokens: list[str], flat: str) -> str | None:
     return None
 
 
+#: Binaries that READ THE CONTENT of a file they are handed.
+#:
+#: This set exists because a settings.json glob cannot tell two very
+#: different commands apart. `Bash(* *.env)` -- the only glob shape that
+#: catches `cd x && cat .env` -- also catches `git check-ignore -v .env`,
+#: which reads no content at all: it answers whether a path is ignored.
+#: Denying that costs a genuinely safe, explicitly-requested operation.
+#:
+#: Here the verb is separable from its operands, so the rule can be what it
+#: always meant: a content-reading binary pointed at a secret-shaped path.
+CONTENT_READERS = {
+    "cat", "bat", "head", "tail", "more", "less", "nl", "od", "xxd",
+    "hexdump", "strings", "tac", "rev", "fold", "expand", "cut", "paste",
+    "join", "column", "sort", "uniq",
+    "grep", "egrep", "fgrep", "rg", "ag", "ack",
+    "sed", "awk", "gawk", "perl", "python", "python3", "py", "node",
+    "ruby", "php",
+    "type", "get-content", "gc", "select-string", "sls", "import-csv",
+    "base64", "gzip", "gunzip", "zip", "tar", "openssl",
+    "cp", "copy", "mv", "move", "tee", "dd",
+    "curl", "wget", "scp", "rsync",
+    "clip", "xclip", "xsel", "code", "notepad", "vim", "vi", "nano",
+}
+
+#: Path shapes that identify a SECRET. Matched against one operand at a
+#: time, never against the whole command string -- which is exactly why a
+#: flag or a subcommand cannot trip it.
+SECRET_PATH_SHAPES = (
+    re.compile(r"(^|[\\/])\.env(\.|$)"),
+    re.compile(r"(^|[\\/])[^\\/]*\.env$"),
+    re.compile(r"\.(pem|key|p12|pfx|ppk|jks|keystore|kdbx|asc|gpg)$", re.I),
+    re.compile(r"(^|[\\/])id_(rsa|dsa|ecdsa|ed25519)"),
+    re.compile(r"(^|[\\/])\.(ssh|aws|azure|gnupg|wrangler)([\\/]|$)", re.I),
+    re.compile(r"(^|[\\/])\.(netrc|npmrc|pypirc|git-credentials)$", re.I),
+    re.compile(r"(^|[\\/])_netrc$", re.I),
+    re.compile(r"(^|[\\/])credentials(\.json)?$", re.I),
+    re.compile(r"(^|[\\/])rclone\.conf$", re.I),
+    re.compile(r"(^|[\\/])hosts\.yml$", re.I),
+    re.compile(r"Login Data|(^|[\\/])Cookies$|(^|[\\/])Web Data$"),
+    re.compile(r"service-account[^\\/]*\.json$", re.I),
+)
+
+
+#: Binaries whose FIRST non-flag operand is a PATTERN or SCRIPT, not a path.
+#:
+#: Without this, `grep -c '\\* \\*\\.env' settings.json` denies -- the
+#: *search pattern* matches a secret path shape, while the only file being
+#: read is an ordinary one. A guard that cannot tell a pattern from a path
+#: blocks searching FOR the string ".env", which is a normal thing to do.
+PATTERN_FIRST_OPERAND = {
+    "grep", "egrep", "fgrep", "rg", "ag", "ack", "sed", "awk", "gawk",
+}
+
+#: Flags that supply the pattern/script separately, so the first operand
+#: goes back to being a path.
+PATTERN_FROM_FLAG = {"-e", "-f", "--regexp", "--file", "--expression"}
+
+
+def secret_file_read(tokens: list[str], name: str) -> str | None:
+    """`cat .env` denies. `git check-ignore -v .env` does not.
+
+    Runs per SEGMENT, so it also catches the shape a prefix-anchored glob
+    can never see: `cd somewhere && cat .env`.
+    """
+    if name not in CONTENT_READERS:
+        return None
+
+    # AUDITED WRAPPERS CARRY THEIR OWN BOUNDARY.
+    #
+    # `scripts/tim.py` never reads a secret-shaped path: it excludes them
+    # by construction (git `--exclude-standard`, plus a name/segment
+    # exclusion list, plus a resolve()+containment check), and it filters
+    # credential-shaped strings out of everything it prints. Its own tests
+    # lock all three down.
+    #
+    # Treating the interpreter as a generic content reader here therefore
+    # denies `python scripts/tim.py "\.env"` -- SEARCHING FOR the string
+    # ".env", the safest possible way to do it. The operand scanned is the
+    # FIRST non-flag one only, so `python attacker.py scripts/tim.py`
+    # cannot borrow this.
+    if name in ("python", "python3", "py"):
+        for tok in tokens[1:]:
+            if tok.startswith("-"):
+                continue
+            script = tok.strip("'\"").replace("\\", "/").lower()
+            if script.endswith(("scripts/tim.py", "scripts/kiem_quyen.py")):
+                return None
+            break
+
+    skip_first = (name in PATTERN_FIRST_OPERAND and not any(
+        t in PATTERN_FROM_FLAG or t.split("=", 1)[0] in PATTERN_FROM_FLAG
+        for t in tokens[1:]))
+    for tok in tokens[1:]:
+        if tok.startswith("-"):
+            continue
+        if skip_first:
+            skip_first = False        # this operand is the pattern/script
+            continue
+        cleaned = tok.strip("'\"")
+        for shape in SECRET_PATH_SHAPES:
+            if shape.search(cleaned):
+                return f"credential file read ({name} {cleaned})"
+    return None
+
+
 def evaluate(segment: str) -> str | None:
     flat = segment.strip()
     if not flat:
@@ -844,17 +949,47 @@ def evaluate(segment: str) -> str | None:
     name = binary_name(tokens[0])
     flags_lower = [t.lower() for t in tokens[1:] if t.startswith("-")]
 
+    reason = secret_file_read(tokens, name)
+    if reason:
+        return reason
+
     if name in MUTATION_BINARIES:
         return MUTATION_BINARIES[name]
 
     if name in INLINE_SOURCE_FLAGS:
         # `-m module` is legitimate; inline source is not.
+        #
+        # Two things here were wrong, and both produced FALSE POSITIVES on
+        # ordinary commands (measured 2026-09-10):
+        #
+        #   1. The comparison lower-cased the token first, so
+        #      `python tim.py -C 1` -- where `-C` is a flag belonging to
+        #      *the script* -- was read as `python -c`. `-C` is not a
+        #      Python option at all. `perl -E` is genuinely inline and is
+        #      already listed in its own case, so nothing needs folding.
+        #   2. The scan ran to the end of the command. An interpreter stops
+        #      parsing its OWN options at the first non-option argument;
+        #      everything after the script path belongs to the script. So
+        #      reading the whole token list mistakes a script's flags for
+        #      the interpreter's.
+        #
+        # A guard that blocks `python tim.py -C 1` teaches the operator to
+        # route around the guard, which costs more safety than the wrong
+        # deny ever bought.
         for tok in tokens[1:]:
-            t = tok.lower()
-            if t in ("-m", "--module"):
+            if tok in ("-m", "--module"):
                 break
-            if t in INLINE_SOURCE_FLAGS[name]:
-                return f"inline code execution ({name} {t})"
+            if not tok.startswith("-"):
+                break                 # script/module path -> flags are over
+            if tok in INLINE_SOURCE_FLAGS[name]:
+                return f"inline code execution ({name} {tok})"
+            # Clustered short flags -- `bash -lc 'cmd'`, `node -pe 'x'` --
+            # are real inline execution and must still be caught. Single
+            # leading dash only: `--check` is not a cluster.
+            if (len(tok) > 2 and not tok.startswith("--")
+                    and any(f"-{ch}" in INLINE_SOURCE_FLAGS[name]
+                            for ch in tok[1:])):
+                return f"inline code execution ({name} {tok})"
 
     if name in ("powershell", "pwsh", "powershell_ise"):
         for tok in flags_lower:

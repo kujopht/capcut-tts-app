@@ -209,6 +209,35 @@ Ba luật không được phá khi sửa gói này:
    phải `0`.
 3. **Không tự xoá worktree.** Chỉ đánh dấu.
 
+## Tìm/đọc trong kho: dùng `scripts/tim.py`, không dùng `cd && grep`
+
+```bash
+python scripts/tim.py "TrangThai"                      # tìm
+python scripts/tim.py "def thu" scripts/control_center # giới hạn phạm vi
+python scripts/tim.py --doc scripts/store.py --tu 1 --den 60   # đọc
+python scripts/tim.py --kiem                           # chính sách loại trừ
+git grep -n "TrangThai" -- scripts/                    # cửa thứ hai
+```
+
+**Đây không phải một quy ước cho ngoan — nó là cách duy nhất phạm vi đọc
+tự chứng minh được.** Claude Code phân giải những đường dẫn mà một lệnh
+Bash NHẮC TÊN rồi đối chiếu với các luật `Read(...)` deny. Sau một `cd`,
+thư mục hiệu lực không suy ra được TĨNH, nên nó không thể chứng minh phép
+tìm không chạm `.env` — và phải hỏi người. `tim.py` suy gốc kho từ **vị
+trí của chính tệp đó**, nên `cd` trở thành vô nghĩa thay vì bị cấm.
+
+Hai điều nữa đã đo được, và cả hai đổi cách làm việc:
+
+* **Thư mục CHƯA ĐƯỢC TIN làm hồ sơ quyền của kho biến mất** — cả 241
+  luật `allow` lẫn hook `PreToolUse` đều bị bỏ qua, và mỗi worktree Router
+  vừa dựng là một thư mục như thế. Sửa:
+  `python scripts/kiem_quyen.py --tin-cay <đường>`.
+* **Tầng an toàn sống ở `~/.claude/settings.json`**, không ở hồ sơ kho —
+  vì chỉ tầng đó luôn có hiệu lực. `python scripts/kiem_quyen.py --kiem`
+  kiểm cả hai tầng và in ma trận AN TOÀN / NGUY HIỂM.
+
+Đầy đủ, kèm số đo: `docs/reports/QUYEN_CLAUDE_TIN_CAY.md`.
+
 ## Trạng thái
 
 Xem `docs/HANDOFF.md` để biết mốc nào đã xong và việc tiếp theo.

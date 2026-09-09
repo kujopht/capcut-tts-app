@@ -160,3 +160,7 @@ scratchpad/
 # Worktree cua Router V3 khi dung goc MAC DINH (repo/.router/worktrees).
 # Goc DUNG CHUNG (C:\FanficWorkers) nam ngoai kho nen khong can o day.
 .router/
+
+# Ban luu truoc khi `scripts/kiem_quyen.py --ap-dung` ghi ho so quyen.
+# May-cu-the, khong phai cua kho.
+*.truoc-kiem-quyen

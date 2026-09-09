@@ -817,6 +817,54 @@ Bài học chung, và nó lớn hơn Unicode: **một bài kiểm chạy trong m
 trường do chính nó dựng lên chỉ chứng minh được điều gì nếu môi trường ấy
 là môi trường người dùng có.**
 
+## 14b. Không cửa sổ console nào được nhấp lên (V0.4)
+
+`Router Control Center.exe` build `--noconsole` nên tiến trình **không có
+console**. Trên Windows, một tiến trình không có console mà sinh ra một
+ứng dụng **console** (`git.exe`, `agy.exe`, `codex.exe`, `python.exe`,
+`icacls.exe`) thì hệ điều hành **cấp cho nó một console mới** — kèm một
+cửa sổ nhấp lên và **giành focus** của người đang gõ. Chạy từ mã nguồn
+thì cửa sổ đó trùng console sẵn có nên không ai thấy: lại đúng một lớp
+lỗi "chỉ lộ ra ở bản EXE", cùng họ với `sys.executable` (§ dispatch) và
+cp1252 (§14).
+
+Số lần nhấp tỉ lệ với số lệnh, và `AnhChupDuAn.chup()` chạy ~6 lệnh `git`
+cho **mỗi** tin nhắn chat — một câu "ê" cũng đủ thấy.
+
+**Luật:** mọi lời gọi `subprocess.run`/`Popen` trên đường của ứng dụng
+phải mang `**an_cua_so()` (`scripts/router_v3/tien_trinh.py`):
+`CREATE_NO_WINDOW` + `STARTUPINFO(SW_HIDE)` trên Windows, `{}` ở nơi
+khác. Ngoại lệ duy nhất được phép là `AN_HIEN` — dành cho đường mà
+**người dùng cố ý** muốn thấy cửa sổ.
+
+Ẩn cửa sổ **không** đánh đổi bằng mất log: `capture_output=True` giữ
+nguyên, đầu ra vẫn vào nhật ký app.
+
+Phép cưỡng chế là một bài kiểm **AST trên cả bao đóng khởi động**
+(`test_control_center_ux_v04.py`), không phải một lần rà tay: nó tính mọi
+tệp `scripts/**` mà việc mở EXE có thể nạp tới và đòi từng chỗ sinh tiến
+trình phải ẩn cửa sổ. Thêm adapter mới mà quên là đỏ, kèm số dòng.
+
+## 14c. Cài đặt giao diện và ảnh nền (V0.4)
+
+Bảng `cai_dat_ui` là khoá–giá trị, thuộc **người dùng trên máy này**,
+không thuộc một dự án — đổi dự án không đổi ảnh nền. Lưu từng khoá riêng
+(không phải một khối JSON) để hai lần ghi khác khoá không đè nhau: đổi độ
+tối không được xoá mất ảnh nền. Bảng thêm bằng `CREATE TABLE IF NOT
+EXISTS` nên sổ cũ tự có nó ở lần mở sau; không có bước di trú tay.
+
+**`wallpaper` giữ MỘT MÃ ĐÍNH KÈM, không phải đường dẫn tệp.** Đây là bất
+biến an toàn của tính năng: nhận đường dẫn thì để *vẽ* được ảnh phải mở
+một endpoint đọc tệp tuỳ ý trên đĩa, tức là dựng lại đúng lỗ mà §12 tồn
+tại để bịt. Đi qua đường đính kèm thì được thừa cả bốn bất biến ở §12 —
+kể cả phép kiểm **chữ ký byte**: `anh.png` mà không mở đầu bằng
+`\x89PNG` thì bị từ chối.
+
+`POST /api/ui` chỉ nhận allowlist khoá, xác minh mã đính kèm tồn tại và
+**là ảnh**, và kẹp `dim`/`blur` vào khoảng hợp lệ. Có bài kiểm đọc chính
+mã endpoint và đòi nó không chứa `open(`/`read_bytes`/`read_text`/
+`FileResponse`.
+
 ## 15. Chưa làm (cố ý — ranh giới đã chọn)
 
 Không phải thiếu sót — là ranh giới đã chọn:

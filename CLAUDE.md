@@ -186,6 +186,15 @@ Ba luật của tầng Qt, và cả ba đều có bài kiểm khoá lại
 Mã ở `scripts/control_center/`; đầy đủ ở `docs/CONTROL_CENTER.md`; bằng
 chứng chạy thật ở `docs/reports/CONTROL_CENTER_V01_PROOF.md`.
 
+**V0.3** thêm Project Leader (ô chat quyết CHAT/STATUS/CONTROL/WORK, kết
+quả phải chảy về chat) — `docs/reports/CONTROL_CENTER_V03_LEADER.md`.
+**V0.4** làm lại UX: không cửa sổ console nào được nhấp lên, một màn hình
+thấy hết, ô soạn tự trống + giữ focus, chủ đề tối, ảnh nền —
+`docs/reports/CONTROL_CENTER_V04_UX.md`, và luật ở
+`docs/CONTROL_CENTER.md` §14b/§14c. Luật quan trọng nhất của V0.4: **mọi
+`subprocess.run`/`Popen` trên đường của ứng dụng phải mang
+`**an_cua_so()`** — có bài kiểm AST trên cả bao đóng khởi động cưỡng chế.
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,

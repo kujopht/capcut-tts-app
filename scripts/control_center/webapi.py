@@ -204,6 +204,14 @@ def dung_app(phien: PhienWeb) -> FastAPI:
             return _ma_loi(400, "thiếu project_id hoặc repo_path")
         if not Path(duong).is_dir():
             return _ma_loi(400, f"không phải thư mục: {duong}")
+        # Cung mot cong voi buoc gieo: Router lam viec tren KHO GIT. Nhan
+        # mot thu muc thuong o day chi doi cho luc hong sang viec dau tien,
+        # va luc do thong diep la `WorktreeError: not a git repository` —
+        # o mot cho khong ai noi duoc no lien quan gi toi o nhap nay.
+        from scripts.control_center.bootstrap import la_kho_git
+        if not await asyncio.to_thread(la_kho_git, duong):
+            return _ma_loi(400, f"không phải kho git: {duong} — Router làm "
+                                f"việc trên kho git (cần có .git)")
         p = Project(project_id=pid, name=ten, repo_path=duong)
         return _sach(await asyncio.to_thread(
             lambda: phien.cc.them_project(p).to_dict()))

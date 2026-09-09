@@ -26,6 +26,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -44,6 +45,20 @@ MIEN_TRU = {
     # CREATE_NO_WINDOW) va co ly do rieng duoc ghi trong docstring.
     "scripts/router_v3/pool/daemon.py",
 }
+
+
+def _ma_js(van: str) -> str:
+    """Bỏ dòng chú thích `//` trước khi phân tích VỊ TRÍ.
+
+    ĐÃ VẤP HAI LẦN trong chính tệp này: một chú thích GIẢI THÍCH lỗi
+    cũ bằng cách dẫn lại đoạn mã sai (`o.value = ''` SAU
+    `await api(...)`, hay `if (!document.hidden) veInspUsage()`), và
+    phép `find()` khớp vào chú thích đó chứ không vào mã. Bài kiểm khi
+    ấy xanh/đỏ vì lời văn, không vì hành vi — và cách sửa nó tệ nhất
+    là đi xoá lời giải thích.
+    """
+    return chr(10).join(d for d in van.splitlines()
+                        if not d.lstrip().startswith('//'))
 
 
 #: Chuong trinh CONSOLE ma ung dung nay co the goi. Mot loi goi mang
@@ -247,16 +262,117 @@ class TestOSoanTuTrong(unittest.TestCase):
         self.assertIn("shiftKey", js,
                       "Shift+Enter phải xuống dòng, không gửi")
 
-    def test_gui_HONG_thi_KHONG_xoa_o_soan(self):
-        """Xoá trước khi biết kết quả = người dùng mất câu vừa gõ."""
+    def test_gui_HONG_thi_ban_nhap_KHONG_bi_mat(self):
+        """Bài này TỪNG đòi điều ngược lại — "xoá SAU khi gọi API thành
+        công" — và chính điều đó là DEFECT 1: tin nhắn hiện trong chat
+        mà chữ còn trong ô soạn suốt cả lượt Leader (6.12s ấm / 67.87s
+        lạnh). Xem `TestOSoanXoaNGAY`.
+
+        Yêu cầu thật không phải "xoá muộn" mà là "xoá ngay VÀ không mất
+        bản nháp nếu gửi hỏng". Hai điều đó không xung đột: giữ bản nháp
+        trong biến rồi trả lại ở nhánh lỗi.
+        """
         js = self._js()
         i = js.find("async function gui(")
-        than = js[i:i + 2600]
-        i_api = than.find("await api(")
-        i_xoa = than.replace('"', "'").find("o.value = ''")
-        self.assertGreater(i_api, 0)
-        self.assertGreater(i_xoa, i_api,
-                           "phải xoá SAU khi gọi API thành công")
+        than = _ma_js(js[i:i + 3600])
+        self.assertIn("const nhap = {", than,
+                      "phải giữ bản nháp trước khi xoá")
+        self.assertIn("tra_lai_nhap(nhap", than,
+                      "nhánh lỗi phải trả bản nháp lại")
+        self.assertNotIn("o.value = ''", than.split("await api(")[-1],
+                         "không được còn chỗ xoá nào SAU lời gọi API")
+
+
+class TestOSoanXoaNGAY(unittest.TestCase):
+    """DEFECT 1 — ô soạn phải trống NGAY, không đợi lượt Leader.
+
+    HÌNH DẠNG LỖI, và vì sao bài kiểm cũ không bắt được nó:
+
+    `POST /api/chat` chạy trọn một lượt `chat()` ĐỒNG BỘ ở server (Leader
+    quyết định, phân rã, giao việc cho Router V4) — 6.12s khi Leader đã
+    ấm, 67.87s ở lần mở lạnh. Nhưng server ghi dòng chat của NGƯỜI DÙNG ở
+    dòng đầu `_chat()`, nên WebSocket đẩy tin nhắn lên dòng thời gian
+    trong ~1s.
+
+    Bản trước xoá ô soạn SAU `await api(...)`. Kết quả người dùng thấy:
+    tin nhắn đã hiện trong chat, mà câu vừa gõ VẪN CÒN trong ô soạn, rồi
+    vài giây (hoặc cả phút) sau mới biến mất.
+
+    Bài kiểm cũ chỉ đòi "xoá SAU khi gọi API thành công" — nên nó CHẤM
+    ĐẠT đúng cái hành vi bị báo lỗi. Bài dưới đây phân biệt được:
+
+        tin nhắn đã hiện + ô soạn CÒN chữ      -> HỎNG
+        tin nhắn đã hiện + ô soạn TRỐNG ĐỒNG BỘ -> ĐẠT
+    """
+
+    def _than_gui(self) -> str:
+        js = (GOC / "scripts/control_center/web/app.js").read_text(
+            encoding="utf-8")
+        i = js.find("async function gui(")
+        self.assertGreater(i, 0, "không tìm thấy hàm gửi")
+        j = js.find("\nfunction tra_lai_nhap(", i)
+        self.assertGreater(j, i, "không tìm thấy hàm trả lại bản nháp")
+        return _ma_js(js[i:j])
+
+    def test_xoa_o_soan_TRUOC_moi_await(self):
+        """Phép kiểm cốt lõi: `o.value = ''` phải nằm TRƯỚC `await` đầu
+        tiên trong thân hàm — tức là trong cùng lượt tương tác."""
+        than = self._than_gui().replace('"', "'")
+        i_xoa = than.find("o.value = ''")
+        i_await = than.find("await api(")
+        self.assertGreater(i_xoa, 0, "không thấy chỗ xoá ô soạn")
+        self.assertGreater(i_await, 0, "không thấy `await api(`")
+        self.assertLess(
+            i_xoa, i_await,
+            "ô soạn bị xoá SAU một `await` — người dùng sẽ thấy tin nhắn "
+            "hiện trong chat mà chữ vẫn còn trong ô soạn cho tới khi cả "
+            "lượt Leader xong (đo được 6.12s ấm / 67.87s lạnh)")
+
+    def test_khay_dinh_kem_cung_trong_NGAY(self):
+        than = self._than_gui()
+        i_dk = than.find("dinhKemChoGui = []")
+        i_await = than.find("await api(")
+        self.assertGreater(i_dk, 0)
+        self.assertLess(i_dk, i_await,
+                        "khay đính kèm cũng phải trống ngay, không thì ô "
+                        "soạn trống mà thẻ tệp vẫn còn")
+
+    def test_giu_focus_NGAY_khong_doi_finally(self):
+        than = self._than_gui()
+        i_focus = than.find("o.focus()")
+        i_await = than.find("await api(")
+        self.assertGreater(i_focus, 0)
+        self.assertLess(i_focus, i_await,
+                        "phải trả con trỏ về ô soạn ngay, để gõ tiếp được "
+                        "trong lúc Leader còn đang nghĩ")
+
+    def test_ban_nhap_duoc_GIU_de_lay_lai(self):
+        than = self._than_gui()
+        self.assertIn("const nhap = {", than,
+                      "xoá đồng bộ thì phải giữ bản nháp lại")
+        self.assertIn("tra_lai_nhap(nhap", than,
+                      "đường hỏng phải gọi bộ trả lại bản nháp")
+
+    def test_tra_lai_KHONG_de_len_van_ban_moi(self):
+        js = (GOC / "scripts/control_center/web/app.js").read_text(
+            encoding="utf-8")
+        i = js.find("function tra_lai_nhap(")
+        self.assertGreater(i, 0)
+        than = js[i:i + 1200]
+        self.assertIn("o.value.trim() === ''", than,
+                      "chỉ được trả bản nháp vào ô soạn khi ô ĐANG TRỐNG")
+        self.assertIn("nhapChuaGui = nhap", than,
+                      "ô soạn có chữ mới thì phải giữ bản nháp ở chỗ khác")
+
+    def test_chan_gui_trung_khi_giu_Enter(self):
+        js = (GOC / "scripts/control_center/web/app.js").read_text(
+            encoding="utf-8")
+        self.assertIn("if (dangGui) return;", js)
+        i = js.find("o.addEventListener('keydown'")
+        than = js[i:i + 900]
+        self.assertIn("e.repeat", than,
+                      "giữ Enter làm bàn phím bắn ra một chuỗi keydown")
+        self.assertIn("shiftKey", than)
 
 
 class TestMotManHinh(unittest.TestCase):
@@ -416,6 +532,170 @@ class TestUsageDungHinhDang(unittest.TestCase):
             encoding="utf-8")
         j = h.find('id="bang-usage"')
         self.assertIn("Nguồn", h[j:j + 400], "bảng thiếu cột Nguồn")
+
+
+class TestUsageDemThat(unittest.TestCase):
+    """DEFECT 2 — số Usage phải phản ánh sổ Router thật.
+
+    Bằng chứng tay trên bản đóng gói: một việc được tạo và tới DONE, AG01
+    được giao, phiên BUSY rồi IDLE, kết quả báo ~57s — mà bảng Usage vẫn
+    hiện 0/0/0/0/0.
+
+    Bài kiểm cũ chỉ đếm SỐ HẠNG MỤC ("43 hạng mục"), nên nó vẫn ĐẠT khi
+    mọi giá trị bằng 0. Bài dưới đây đòi GIÁ TRỊ.
+    """
+
+    def setUp(self):
+        from scripts.control_center.store import ControlStore
+        self.goc = Path(tempfile.mkdtemp(prefix="cc-usg-"))
+        self.st = ControlStore(root=self.goc)
+        self.addCleanup(self.st.close)
+
+    def _gieo_mot_luot_that(self, *, pid=None, tuoi=0.0):
+        """Một việc ĐÃ CHẠY XONG + một phiên, đúng hình dạng sổ thật."""
+        from scripts.control_center.model import (Project, Session,
+                                                  SessionState, Task,
+                                                  TaskState)
+        now = time.time()
+        self.st.luu_project(Project(project_id="p", name="Dự án",
+                                    repo_path=str(self.goc)))
+        self.st.luu_task(Task(
+            task_id="p.t1", project_id="p", title="Việc thật",
+            objective="chạy thật", state=TaskState.DONE,
+            owner_session="s-1", attempts=1,
+            started_at=now - 57.0, ended_at=now))
+        self.st.luu_session(Session(
+            session_id="s-1", project_id="p", provider="antigravity",
+            runtime_id="AG01", model_id="gemini-3.8-flash-high",
+            state=SessionState.IDLE, pid=pid,
+            created_at=now - 60, last_activity=now - tuoi))
+        # `luu_session` LUON dat `last_activity = time.time()` (no ghi
+        # nhan mot lan cham vao phien), nen phai ha tuoi hang bang mot
+        # UPDATE — dung hinh dang mot hang con lai tu lan chay truoc.
+        if tuoi:
+            self.st._c().execute(
+                "UPDATE sessions SET last_activity=? WHERE session_id=?",
+                (now - tuoi, "s-1"))
+
+    def _so(self, project="p"):
+        from scripts.control_center.usage import UsageReporter
+        return {m.label: m.value
+                for m in UsageReporter(self.st).cuc_bo(project)}
+
+    def test_sau_mot_luot_THAT_moi_con_so_deu_LON_HON_0(self):
+        self._gieo_mot_luot_that()
+        d = self._so()
+        self.assertGreater(d["việc đã tạo"], 0)
+        self.assertGreater(d["lượt dispatch agent"], 0)
+        self.assertGreater(d["phiên đã dựng"], 0)
+        self.assertGreater(d["giây agent tích luỹ"], 0,
+                           "việc chạy 57s mà tích luỹ 0s là lỗi kế toán")
+        self.assertGreaterEqual(d["giây agent tích luỹ"], 56.0)
+
+    def test_phien_con_song_KHONG_dem_hang_LICH_SU(self):
+        """`recover()` để phiên không PID ở `IDLE` — CỐ Ý, để không dựng
+        phiên thứ hai chồng lên một tiến trình có thể còn sống. Nhưng một
+        hàng như thế nằm lại trong sổ MÃI MÃI, nên đếm nó là "còn sống"
+        biến một con số hiện tại thành một con số lịch sử."""
+        self._gieo_mot_luot_that(pid=None, tuoi=4000.0)   # im lặng 66 phút
+        d = self._so()
+        self.assertEqual(d["phiên còn sống"], 0,
+                         "phiên không PID, im lặng hơn 15 phút, là một "
+                         "hàng cũ — không phải phiên đang sống")
+        self.assertGreater(d["phiên đã dựng"], 0,
+                           "tổng lịch sử thì VẪN phải đếm")
+
+    def test_phien_vua_hoat_dong_thi_VAN_tinh_la_song(self):
+        """Và phép siết không được siết quá: một phiên không PID vừa hoạt
+        động là phiên đang dùng được, phải đếm."""
+        self._gieo_mot_luot_that(pid=None, tuoi=5.0)
+        self.assertEqual(self._so()["phiên còn sống"], 1)
+
+    def test_phien_co_PID_da_chet_thi_khong_tinh(self):
+        # PID chac chan khong ton tai.
+        self._gieo_mot_luot_that(pid=4294967294, tuoi=1.0)
+        self.assertEqual(self._so()["phiên còn sống"], 0)
+
+    def test_ben_qua_dong_mo_lai(self):
+        """Số đếm nằm trong SQLite nên phải sống qua một vòng đóng/mở."""
+        from scripts.control_center.store import ControlStore
+        self._gieo_mot_luot_that()
+        truoc = self._so()
+        self.st.close()
+        st2 = ControlStore(root=self.goc)
+        self.addCleanup(st2.close)
+        from scripts.control_center.usage import UsageReporter
+        sau = {m.label: m.value for m in UsageReporter(st2).cuc_bo("p")}
+        for k in ("việc đã tạo", "lượt dispatch agent", "phiên đã dựng",
+                  "giây agent tích luỹ"):
+            self.assertEqual(truoc[k], sau[k], k)
+            self.assertGreater(sau[k], 0, k)
+
+    def test_KHONG_dieu_phoi_nao_doi_theo(self):
+        """Phép siết chỉ ở tầng BÁO CÁO. `SessionManager` vẫn dùng
+        `state.alive` để quyết REUSE/CREATE/WAIT — đổi chỗ đó là đổi
+        semantics điều phối, đúng thứ bị cấm."""
+        src = (GOC / "scripts/control_center/sessions.py").read_text(
+            encoding="utf-8")
+        self.assertNotIn("_phien_that_su_song", src)
+        usg = (GOC / "scripts/control_center/usage.py").read_text(
+            encoding="utf-8")
+        self.assertIn("_phien_that_su_song", usg)
+
+
+class TestUsageLamMoiKhiDoi(unittest.TestCase):
+    """DEFECT 2, phần frontend: vì sao thẻ Usage đứng ở 0 mãi.
+
+    Bản trước lam moi usage bằng
+    `setInterval(() => { if (!document.hidden) veInspUsage(); }, 60000)`.
+    `document.hidden` KHÔNG đáng tin trong cửa sổ WebView2 đóng gói — đo
+    được 1/10 lần lấy mẫu trên bản EXE cho `visibilityState === "hidden"`
+    trong khi cửa sổ đang mở. Nên phép làm mới không bao giờ chạy và thẻ
+    giữ nguyên ảnh chụp lúc khởi động (toàn số 0), trong khi thẻ
+    Tasks/Agents vẫn sống vì chúng đi theo WebSocket.
+    """
+
+    def _js(self) -> str:
+        return (GOC / "scripts/control_center/web/app.js").read_text(
+            encoding="utf-8")
+
+    def test_KHONG_con_gate_document_hidden_tren_usage(self):
+        js = self._js()
+        i = js.find("setInterval(veInspUsage")
+        self.assertGreater(i, 0,
+                           "usage phải có một đồng hồ KHÔNG điều kiện")
+        # Khong con dong nao gate usage theo `document.hidden`.
+        # Chi xet DONG HO. `visibilitychange` cung nhac
+        # `document.hidden`, nhung do la lam moi KHI HIEN LAI — dung
+        # huong, khong phai mot cai gate.
+        for d in _ma_js(js).splitlines():
+            if ("setInterval" in d and "veInspUsage" in d
+                    and "document.hidden" in d):
+                self.fail(f"đồng hồ usage vẫn bị gate: {d}")
+
+    def test_lam_moi_usage_khi_van_tay_viec_phien_DOI(self):
+        js = self._js()
+        i = js.find("function veHet(")
+        than = js[i:i + 1400]
+        self.assertIn("dauUsage", than,
+                      "phải lấy lại usage khi trạng thái đổi, không chỉ "
+                      "theo đồng hồ")
+        self.assertIn("veInspUsage()", than)
+        self.assertIn("attempts", than,
+                      "vân tay phải gồm số lượt thử — `lượt dispatch "
+                      "agent` đếm đúng thứ đó")
+
+    def test_lam_moi_khi_cua_so_hien_lai(self):
+        self.assertIn("visibilitychange", self._js())
+
+    def test_anh_chup_git_VAN_giu_nhip_cham(self):
+        """Và phép sửa không được nới cả ô đắt: ảnh chụp dự án chạy ~6
+        lệnh `git` mỗi lần, tức ~6 tiến trình con — nó phải ở lại nhịp
+        chậm, không theo vân tay."""
+        js = self._js()
+        self.assertIn("if (!document.hidden) veInspSnapshot();", js)
+        i = js.find("function veHet(")
+        self.assertNotIn("veInspSnapshot", js[i:i + 1400])
 
 
 class TestTienDoSong(unittest.TestCase):

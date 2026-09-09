@@ -492,10 +492,29 @@ function veDangLam() {
   if (!dhDangLam) dhDangLam = setInterval(nhip, 1000);
 }
 
+//: Van tay cua thu USAGE dem: so viec, tong luot thu, so phien, trang
+//: thai phien. Doi mot trong nhung thu do la usage DA doi.
+let dauUsage = '';
+
 function veHet() {
   veProjects(); veThanhTren(); veChat(); veTasks(); veAgents();
   veInspDangChay(); veInspTasks(); veInspAgents(); veInspUsageTuCache();
   veDangLam();
+
+  // LAY LAI USAGE KHI TRANG THAI DOI — day la duong lam moi CHINH, khong
+  // phai dong ho. `cuc_bo()` dem dung nhung thu duoi day tu sổ SQLite,
+  // nen van tay nay doi CHINH XAC khi con so usage doi. Cach nay cung
+  // dung mot nguon su that voi the Tasks/Agents, nen khong con canh "the
+  // nay song, the kia dong bang".
+  const van = JSON.stringify([
+    (S.tasks || []).length,
+    (S.tasks || []).reduce((a, t) => a + (t.attempts || 0), 0),
+    (S.sessions || []).map((s) => [s.session_id, s.state]),
+  ]);
+  if (van !== dauUsage) {
+    dauUsage = van;
+    veInspUsage();
+  }
 }
 
 // -------------------------------------------------------------- dinh kem ----
@@ -607,12 +626,42 @@ $('#nut-bo-het').onclick = async () => {
 // Enter lien tuc trong luc Leader dang nghi (co the ca phut o lan lanh).
 let dangGui = false;
 
+//: Ban nhap DA GUI nhung server CHUA nhan. Chi khac rong khi mot lan gui
+//: that bai va khong tra lai duoc vao o soan (vi nguoi dung da go cau moi).
+let nhapChuaGui = null;
+
 async function gui() {
   if (dangGui) return;
   const text = o.value.trim();
   const ma = dinhKemChoGui.map((x) => x.attachment_id);
   if (!text && !ma.length) return;
   if (!S.selected) { baoGui('chưa chọn dự án nào', true); return; }
+
+  // ============ XOA NGAY, TRONG CUNG MOT LUOT TUONG TAC ============
+  //
+  // TRUOC MOI `await`. Day la ca ban sua, va day la vi sao:
+  //
+  // `POST /api/chat` chay TRON MOT LUOT `chat()` dong bo o server —
+  // Leader quyet dinh, phan ra muc tieu, giao viec cho Router V4. Do
+  // duoc 6.12s khi Leader da am, va 67.87s o lan mo lanh. Nhung server
+  // ghi dong chat CUA NGUOI DUNG ngay dong dau cua `_chat()`, nen
+  // WebSocket day tin nhan len dong thoi gian trong ~1s.
+  //
+  // Ban truoc dat `o.value = ''` SAU `await api(...)`, nen nguoi dung
+  // thay: tin nhan da hien trong chat, ma cau vua go VAN CON trong o
+  // soan — roi vai giay (hoac ca phut) sau moi bien mat. Dung hinh dang
+  // "app dang treo".
+  //
+  // Xoa dong bo thi mat cau nguoi dung vua go NEU gui hong; nen ban nhap
+  // duoc GIU LAI o `nhapChuaGui` va tra ve o duoi.
+  const nhap = { text, ma, dinh_kem: dinhKemChoGui };
+  o.value = '';
+  dinhKemChoGui = [];
+  veDaiDinhKem();
+  // Giu focus NGAY — khong doi `finally`, de nguoi dung go tiep duoc
+  // trong luc Leader con dang nghi.
+  o.focus();
+
   dangGui = true;
   $('#nut-gui').disabled = true;
   baoGui('đang gửi…', false);
@@ -623,34 +672,58 @@ async function gui() {
       body: JSON.stringify({ project_id: S.selected, text,
                              attachment_ids: ma }),
     });
-    // XOA O SOAN CHI SAU KHI SERVER DA NHAN.
-    //
-    // Xoa truoc (hoac xoa trong `finally`) la mot loi MAT DU LIEU: server
-    // tu choi vi mat token/mat mang, va cau nguoi dung vua go bien mat
-    // khong lay lai duoc. Nen thu tu la: goi API -> thanh cong -> xoa.
-    o.value = '';
-    dinhKemChoGui = [];
-    veDaiDinhKem();
     baoGui('', false);
     await lamMoi();
   } catch (e) {
-    // Loi hien ngay CANH o soan, khong chi o thanh duoi — thanh duoi nam
-    // xa cho nguoi dung dang nhin. Va van ban VAN CON trong o.
-    baoGui(`không gửi được — ${e.message}`, true);
+    tra_lai_nhap(nhap, e.message);
     noi(`gửi hỏng — ${e.message}`);
   } finally {
     dangGui = false;
     $('#nut-gui').disabled = false;
-    // GIU FOCUS: gui xong la go tiep duoc ngay, khong phai bam lai vao o.
-    // `focus()` trong `finally` de ca duong thanh cong lan duong hong deu
-    // tra con tro ve cho nguoi dung dang go.
     o.focus();
   }
 }
-function baoGui(msg, hong) {
+
+function tra_lai_nhap(nhap, ly_do) {
+  // KHONG DE LEN VAN BAN MOI. Mot lan gui hong co the mat ca phut moi
+  // biet, va trong khoang do nguoi dung da go cau tiep theo — ghi de len
+  // no la mat du lieu lan thu hai, o dung cho vua hua se khong mat.
+  if (o.value.trim() === '') {
+    o.value = nhap.text;
+    dinhKemChoGui = nhap.dinh_kem;
+    veDaiDinhKem();
+    nhapChuaGui = null;
+    baoGui(`không gửi được — ${ly_do} · bản nháp đã trả lại ô soạn`, true);
+    o.focus();
+    return;
+  }
+  nhapChuaGui = nhap;
+  baoGui(`không gửi được — ${ly_do} · giữ bản nháp cũ`, true, true);
+}
+
+function baoGui(msg, hong, co_lay_lai) {
   const e = $('#trang-thai-gui');
   e.textContent = msg;
   e.classList.toggle('hong', !!hong);
+  if (co_lay_lai && nhapChuaGui) {
+    const b = document.createElement('button');
+    b.className = 'nho';
+    b.id = 'nut-lay-lai';
+    b.textContent = 'Lấy lại bản nháp';
+    b.title = nhapChuaGui.text.slice(0, 200);
+    b.onclick = () => {
+      if (!nhapChuaGui) return;
+      // Chen vao TRUOC van ban dang co, khong xoa gi ca.
+      o.value = nhapChuaGui.text
+        + (o.value ? String.fromCharCode(10) + o.value : '');
+      dinhKemChoGui = nhapChuaGui.dinh_kem.concat(dinhKemChoGui);
+      nhapChuaGui = null;
+      veDaiDinhKem();
+      baoGui('', false);
+      o.focus();
+    };
+    e.append(' ', b);
+  }
 }
 $('#nut-gui').onclick = gui;
 
@@ -666,6 +739,10 @@ o.addEventListener('keydown', (e) => {
   if (e.isComposing || e.keyCode === 229) return;
   if (e.shiftKey) return;                       // xuong dong: de mac dinh
   e.preventDefault();
+  // `repeat`: giu Enter lam ban phim ban ra mot chuoi keydown. `gui()` da
+  // co cua `dangGui`, nhung chan ngay o day thi mot lan giu phim khong
+  // con sinh ra hang chuc lan goi vo ich.
+  if (e.repeat) return;
   gui();
 });
 
@@ -1068,11 +1145,35 @@ $('#nut-chup-lai').onclick = () => veInspSnapshot(true);
   veDaiDinhKem();
   veInspUsage();
   veInspSnapshot(true);
-  // NHIP CHAM RIENG cho hai o dat: usage co the goi CLI cua nha cung cap,
-  // anh chup chay ~6 lenh `git`. Gan chung vao nhip WebSocket la bien mot
-  // o quan sat thanh mot nguon tien trinh con lien tuc — dung cai da lam
-  // cua so console nhap nhay o V0.3.
-  setInterval(() => { if (!document.hidden) veInspUsage(); }, 60000);
+  // USAGE lam moi khi TRANG THAI DOI, khong theo dong ho co dieu kien.
+  //
+  // Ban truoc: `setInterval(() => { if (!document.hidden) veInspUsage(); },
+  // 60000)`. Hai sai lam trong mot dong:
+  //
+  // 1. `document.hidden` KHONG DANG TIN trong cua so WebView2 dong goi.
+  //    Do duoc: 1/10 lan lay mau tren ban EXE cho `visibilityState ===
+  //    "hidden"` trong khi cua so dang mo va nguoi dung dang nhin. Cua
+  //    so app khong phai mot tab trinh duyet; no "an" ngay khi khong con
+  //    la cua so truoc. Nen phep lam moi KHONG BAO GIO chay, va the
+  //    Usage giu nguyen anh chup luc khoi dong — tuc la TOAN SO 0 — trong
+  //    khi the Tasks/Agents van song vi chung di theo WebSocket. Dung cai
+  //    nguoi dung bao: viec DONE, AG01 BUSY roi IDLE, ma Usage van 0.
+  //
+  // 2. 60s la qua cham cho mot phep do RE. `/api/usage` chi doc SQLite +
+  //    fabric trong bo nho (`provider_probe_ran=false`, so nha cung cap
+  //    CHI lay khi bam lam moi), nen no khong dat. Bop nhip xuong 60s la
+  //    de phong mot chi phi khong co that.
+  //
+  // Gio: lam moi khi van tay viec/phien DOI (nguon su that giong het cai
+  // Tasks/Agents dung), cong mot dong ho AN TOAN khong dieu kien, cong
+  // mot lan khi cua so hien lai.
+  setInterval(veInspUsage, 20000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { veInspUsage(); veInspSnapshot(); }
+  });
+  // ANH CHUP DU AN thi VAN cham va VAN co dieu kien — no chay ~6 lenh
+  // `git`, tuc la ~6 tien trinh con moi lan. Do la chi phi that, khac
+  // han usage. Nut ↻ de chup ngay.
   setInterval(() => { if (!document.hidden) veInspSnapshot(); }, 45000);
   // Con tro nam san trong o soan khi mo app: dung duoc ngay, khong phai
   // bam mot lan vao o truoc khi go.

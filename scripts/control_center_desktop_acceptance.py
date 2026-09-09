@@ -27,6 +27,7 @@ import ctypes
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -134,6 +135,28 @@ class CDP:
             g = json.loads(self.ws.recv(timeout=10))
             if g.get("id") == self.n:
                 return
+
+    def phim(self, key: str, ma_vk: int, *, shift: bool = False) -> None:
+        """Bắn một phím THẬT qua `Input.dispatchKeyEvent`.
+
+        Khác `dispatchEvent(new KeyboardEvent(...))`: sự kiện tổng hợp
+        bằng JS không `isTrusted` và không đi qua đường nhập của
+        Chromium, nên nó không chứng minh được phím Enter thật sự gửi
+        được tin. `Input.*` là đường của người dùng.
+        """
+        for loai in ("keyDown", "keyUp"):
+            self.n += 1
+            self.ws.send(json.dumps({
+                "id": self.n, "method": "Input.dispatchKeyEvent",
+                "params": {"type": loai, "key": key, "code": key,
+                           "windowsVirtualKeyCode": ma_vk,
+                           "nativeVirtualKeyCode": ma_vk,
+                           "modifiers": 8 if shift else 0}}))
+            het = time.time() + 10
+            while time.time() < het:
+                g = json.loads(self.ws.recv(timeout=10))
+                if g.get("id") == self.n:
+                    break
 
     def cho(self, ma: str, han: float = 30.0):
         het = time.time() + han
@@ -682,13 +705,35 @@ def main(argv=None) -> int:
         # Dua cua so len TRUOC: nguoi dung dang go vao o chat thi cua
         # so cua ho DANG la cua so truoc. Xem `CDP.dua_len_truoc`.
         cdp.dua_len_truoc()
-        cdp.js("const o=document.querySelector('#o-soan');"
+        # GO THAT roi bam ENTER THAT (`Input.dispatchKeyEvent`).
+        cdp.js("const o=document.querySelector('#o-soan'); o.focus();"
                + NL + "o.value='dự án này đang tới đâu rồi?';"
-               + NL + "document.querySelector('#nut-gui').click(); return 1;")
-        trong_lai = cdp.cho("return document.querySelector('#o-soan')"
-                            ".value === '' && "
-                            "!document.querySelector('#nut-gui').disabled",
-                            han=180)
+               + NL + "return 1;")
+        cdp.phim("Enter", 13)
+
+        # ====== DEFECT 1: TRONG NGAY, KHONG DOI LUOT LEADER ======
+        #
+        # Doc MOT LAN, ngay sau phim Enter. Phep phan biet nam o
+        # cho `disabled` VAN con `true`: luc do request `/api/chat`
+        # DANG BAY (ca luot Leader dai 6.12s am / 67.87s lanh). Neu
+        # o soan da trong TRONG khi request con bay thi no da duoc
+        # xoa dong bo; neu con chu thi day dung la loi nguoi dung
+        # bao — tin nhan hien trong chat ma o soan chua trong.
+        ngay = json.loads(cdp.js(
+            "return JSON.stringify(["
+            + NL + "  document.querySelector('#o-soan').value,"
+            + NL + "  document.querySelector('#nut-gui').disabled,"
+            + NL + "  document.activeElement.id]);") or '["?",false,""]')
+        bd.ghi("V4a1. DEFECT 1 — ô soạn TRỐNG NGAY, trong lúc request "
+               "còn đang bay",
+               ngay[0] == "" and ngay[1] is True,
+               f"value={ngay[0]!r} nút-bị-vô-hiệu={ngay[1]} "
+               f"(True = còn đang gửi) focus={ngay[2]!r}")
+        bd.ghi("V4a2. và con trỏ đã ở ô soạn NGAY, không đợi `finally`",
+               ngay[2] == "o-soan", f"activeElement={ngay[2]!r}")
+
+        trong_lai = cdp.cho("return !document.querySelector("
+                            "'#nut-gui').disabled", han=240)
         con_lai = cdp.js("return JSON.stringify("
                          "document.querySelector('#o-soan').value)")
         bd.ghi("V4a. ô soạn TRỐNG ngay sau khi gửi thành công", bool(trong_lai),
@@ -787,6 +832,53 @@ def main(argv=None) -> int:
                bool(co_usage),
                (cdp.js("return document.querySelector('#usage-tom')"
                        ".textContent") or "")[:88])
+
+        # ====== DEFECT 2: GIA TRI, khong chi SO HANG MUC ======
+        #
+        # Bai kiem cu chi doi "43 hang muc", nen no VAN DAT khi moi
+        # gia tri bang 0 — dung cai nguoi dung bao: viec DONE, AG01
+        # BUSY roi IDLE, ket qua ~57s, ma Usage van 0/0/0/0/0.
+        #
+        # Doi chieu BA nguon: `/api/usage`, so SQLite doc truc tiep,
+        # va CHU tren the da ve. Ba nguon khop nhau moi la ke toan
+        # dung; API dung ma the sai la loi lam moi o frontend.
+        cdp.js("const b=document.querySelector("
+               + NL + f"  {chr(39)}[data-khung=\"chat\"]{chr(39)});"
+               + NL + "if (b) b.click(); return 1;")
+        api_usage = json.loads(cdp.js(
+            "const t=sessionStorage.getItem('cc_token');"
+            + NL + "const p=document.querySelector("
+            + NL + f"  {chr(39)}#ds-project li.dang-mo{chr(39)}).dataset.pid;"
+            + NL + "const r=await fetch('/api/usage?project='"
+            + NL + "  + encodeURIComponent(p),"
+            + NL + "  {headers:{'X-CC-Token':t}});"
+            + NL + "const j=await r.json();"
+            + NL + "return JSON.stringify(Object.fromEntries("
+            + NL + "  (j.local||[]).map(m => [m.label, m.value])));")
+            or "{}")
+        so_db = _dem_so(goc)
+        thieu = [k for k, v in api_usage.items()
+                 if k != "phiên còn sống" and not (v and v > 0)]
+        bd.ghi("V4i2. DEFECT 2 — mọi hạng mục ACTUAL đều > 0 sau một "
+               "lượt THẬT",
+               not thieu and api_usage.get("việc đã tạo", 0) > 0,
+               "; ".join(f"{k}={v}" for k, v in api_usage.items())
+               + (f" · CÒN 0: {thieu}" if thieu else ""))
+        bd.ghi("V4i3. và số đó KHỚP sổ SQLite đọc trực tiếp",
+               api_usage.get("việc đã tạo") == so_db["tasks"]
+               and api_usage.get("phiên đã dựng") == so_db["sessions"],
+               f"API việc={api_usage.get('việc đã tạo')} "
+               f"phiên={api_usage.get('phiên đã dựng')} · "
+               f"sổ việc={so_db['tasks']} phiên={so_db['sessions']}")
+        the_usage = cdp.js(
+            "return (document.querySelector('#insp-usage')"
+            + NL + r"  .textContent||'').replace(/\s+/g,' ');") or ""
+        so_tren_the = [int(x) for x in re.findall(
+            r"(\d+)\s*ACTUAL", the_usage)]
+        bd.ghi("V4i4. và THẺ đã vẽ cũng hiện số > 0 (không đứng ở "
+               "ảnh chụp lúc khởi động)",
+               bool(so_tren_the) and max(so_tren_the) > 0,
+               the_usage[:140])
         bd.ghi("V4j. làm mới usage KHÔNG nhấp cửa sổ nào",
                len(gs.ket_qua.vi_pham) == v_truoc,
                f"{len(gs.ket_qua.vi_pham) - v_truoc} cửa sổ mới")
@@ -1049,6 +1141,27 @@ def main(argv=None) -> int:
             bd.ghi("V4w. ảnh nền TỰ hiện lại ở lần mở mới (bền, không phải bộ đệm)",
                    n2_lop not in ("", "none") and "attachments" in n2_lop,
                    f"lớp={n2_lop} phủ={n2_mo}")
+
+            # DEFECT 2, phan BEN: so Usage phai song qua vong dong/mo
+            # va van > 0. Doc lai tu API cua LAN MO MOI, khong tu bo
+            # dem cua lan truoc.
+            usage2 = json.loads(cdp2.js(
+                "const t=sessionStorage.getItem('cc_token');"
+                + NL + "const p=document.querySelector("
+                + NL + "  '#ds-project li.dang-mo').dataset.pid;"
+                + NL + "const r=await fetch('/api/usage?project='"
+                + NL + "  + encodeURIComponent(p),"
+                + NL + "  {headers:{'X-CC-Token':t}});"
+                + NL + "const j=await r.json();"
+                + NL + "return JSON.stringify(Object.fromEntries("
+                + NL + "  (j.local||[]).map(m => [m.label, m.value])));")
+                or "{}")
+            bd.ghi("V4y. DEFECT 2 — số Usage BỀN qua đóng/mở lại và "
+                   "vẫn > 0",
+                   usage2.get("việc đã tạo", 0) > 0
+                   and usage2.get("lượt dispatch agent", 0) > 0
+                   and usage2.get("giây agent tích luỹ", 0) > 0,
+                   "; ".join(f"{k}={v}" for k, v in usage2.items()))
 
             kq2 = gs2.ket_qua
             bd.ghi("V4x. lần mở THỨ HAI cũng không nhấp cửa sổ console nào",

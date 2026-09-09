@@ -76,6 +76,45 @@ class ProviderUsage:
                 "has_actual": self.co_so_that}
 
 
+#: Phiên KHÔNG có PID được coi là còn sống trong bao lâu kể từ lần hoạt
+#: động cuối. Trùng `sessions.NGUONG_NGUOI` (900s) có chủ ý: đó đã là mốc
+#: "im lặng quá lâu thì cần người xem lại" của tầng phiên.
+HAN_PHIEN_KHONG_PID = 900.0
+
+
+def _phien_that_su_song(s) -> bool:
+    """Phiên này có CÒN SỐNG THẬT không — không chỉ là trạng thái trong sổ.
+
+    VÌ SAO KHÔNG DÙNG `s.state.alive`, và đây là một lỗi đo được:
+
+    Hàng `sessions` BỀN qua khởi động lại. `recover()` đối soát chúng với
+    tiến trình thật, nhưng phiên Antigravity **không ghi PID** (`pid`
+    chỉ được ghi lúc kết thúc việc), nên chúng rơi vào nhóm `unknown` và
+    được đưa về `IDLE` — CỐ Ý, để Control Center không dựng phiên thứ hai
+    chồng lên một tiến trình có thể còn sống.
+
+    Hệ quả cho một con số USAGE: một phiên `IDLE` không PID nằm lại trong
+    sổ **mãi mãi**, nên "phiên còn sống" đếm cả phiên của những lần chạy
+    trước. Đo được: một sổ có `('antigravity','AG01','BUSY', pid=None)`
+    trong khi ứng dụng sinh ra nó đã tắt từ lâu.
+
+    "Còn sống" ở đây là: trạng thái nói còn sống **VÀ** chứng minh được —
+    có PID thì tiến trình phải đang chạy; không có PID thì phải có hoạt
+    động trong `HAN_PHIEN_KHONG_PID` gần đây. Một phiên không PID và im
+    lặng 15 phút không phải một phiên "đang sống"; nó là một hàng cũ.
+
+    KHÔNG đổi hành vi điều phối: `SessionManager` vẫn dùng `state.alive`
+    như cũ để quyết REUSE/CREATE/WAIT. Đây chỉ là phép đếm cho báo cáo.
+    """
+    from scripts.control_center.sessions import tien_trinh_con_song
+
+    if not s.state.alive:
+        return False
+    if s.pid is not None:
+        return tien_trinh_con_song(s.pid)
+    return (time.time() - (s.last_activity or 0.0)) <= HAN_PHIEN_KHONG_PID
+
+
 class UsageReporter:
     """Gom usage từ những nguồn THẬT có, và nói rõ chỗ nào không có."""
 
@@ -106,10 +145,13 @@ class UsageReporter:
                         UsageConfidence.ACTUAL,
                         note="mỗi lượt thử của mỗi việc, kể cả lượt hỏng"),
             UsageMetric("phiên đã dựng", float(len(sessions)),
-                        UsageConfidence.ACTUAL),
+                        UsageConfidence.ACTUAL,
+                        note="tổng số phiên từng dựng — số LỊCH SỬ"),
             UsageMetric("phiên còn sống", float(
-                sum(1 for s in sessions if s.state.alive)),
-                UsageConfidence.ACTUAL),
+                sum(1 for s in sessions if _phien_that_su_song(s))),
+                UsageConfidence.ACTUAL,
+                note="đã đối chiếu với tiến trình thật, không chỉ đọc trạng "
+                     "thái trong sổ"),
             UsageMetric("giây agent tích luỹ", round(giay, 1),
                         UsageConfidence.ACTUAL, unit="s",
                         note="tổng thời gian tường của các việc đã chạy"),

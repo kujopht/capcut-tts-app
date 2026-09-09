@@ -290,7 +290,46 @@ người dùng ở cuối mới là yêu cầu thật.
 """
 
 
-def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str) -> str:
+#: Luat THAM QUYEN nhet vao nhac nho khi co bang chung SONG.
+#:
+#: VI SAO PHAI VIET RA — mot loi dung dan da gap:
+#:
+#:     "production farmer con chay khong?"
+#:     -> Router co 0 viec dang chay
+#:     -> Leader tra loi "khong co gi dang chay"
+#:     -> SAI: `fanfic-farmer` tren AWS dang chay va khoe.
+#:
+#: So viec cua Router va trang thai mot systemd service tren may khac la
+#: HAI THU KHONG LIEN QUAN. Rao chinh la o ma (`engine` chi dinh kem khoi
+#: SONG khi cau hoi doi no, va `AnhChupSong.trang_thai_chung` CO Y bo qua
+#: nhom `router`); doan duoi day la lop thu hai, dat dung nhan len dung
+#: khoi du lieu.
+LUAT_SONG = """LUẬT THẨM QUYỀN CHO LƯỢT NÀY — đọc trước khi trả lời:
+
+Câu hỏi này là về TRẠNG THÁI HIỆN TẠI, nên bậc thẩm quyền là:
+  1. KHỐI "TRẠNG THÁI SỐNG" dưới đây (vừa đo)  <- dùng cái này
+  2. sổ/kho ở hiện tại
+  3. ký ức, sự kiện cũ, ảnh chụp cũ
+  4. suy luận của chính bạn
+
+BỐN ĐIỀU KHÔNG ĐƯỢC LÀM:
+
+* KHÔNG suy trạng thái một dịch vụ BÊN NGOÀI từ số việc của Router.
+  Router đếm việc do CHÍNH nó điều phối. Một dịch vụ trên máy khác chạy
+  độc lập, không đi qua Router. "Router rảnh" KHÔNG kéo theo "dịch vụ
+  ngoài đã dừng".
+* KHÔNG đọc UNKNOWN/UNAVAILABLE/STALE thành DOWN. Chỉ `DOWN` là khẳng
+  định "nó không chạy". Ba cái kia nghĩa là ta CHƯA BIẾT, và câu trả lời
+  đúng lúc đó là nói rõ chưa biết, kèm lý do đã cho.
+* KHÔNG bịa số cho một trường UNAVAILABLE.
+* KHÔNG trả lời từ ký ức khi khối SỐNG có số cho đúng thứ được hỏi.
+
+KHI TRẢ LỜI: nói kèm nguồn và độ tươi ("live probe vừa kiểm tra…, N giây
+trước"), và nêu các con số thật đã đo (PID, restarts, round, …)."""
+
+
+def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
+                  khoi_song: str = "") -> str:
     """Gói một lượt: hướng dẫn + trạng thái + hội thoại + câu mới.
 
     RANH GIỚI TIN CẬY, và bản đầu làm sai đúng chỗ này:
@@ -310,10 +349,18 @@ def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str) -> str:
     duyệt cổng). Việc rào ở đây chỉ là lớp thứ hai — nhãn đúng thay vì
     nhãn sai — vì một rào dựa vào việc model ngoan thì không phải rào.
     """
-    d = [HUONG_DAN, "", RANH_GIOI,
-         "--- BẮT ĐẦU DỮ LIỆU: TRẠNG THÁI DỰ ÁN (đo từ sổ và git) ---",
-         anh_chup.tom_tat(),
-         "--- HẾT DỮ LIỆU ---", ""]
+    d = [HUONG_DAN, "", RANH_GIOI]
+    # KHOI SONG dat TRUOC anh chup tinh, va kem luat tham quyen: thu tu
+    # doc anh huong den thu duoc dung, va bang chung vua do phai den
+    # truoc bang chung cu.
+    if khoi_song:
+        d += [LUAT_SONG, "",
+              "--- BẮT ĐẦU DỮ LIỆU: TRẠNG THÁI SỐNG (vừa đo lần này) ---",
+              khoi_song,
+              "--- HẾT DỮ LIỆU ---", ""]
+    d += ["--- BẮT ĐẦU DỮ LIỆU: TRẠNG THÁI DỰ ÁN (đo từ sổ và git) ---",
+          anh_chup.tom_tat(),
+          "--- HẾT DỮ LIỆU ---", ""]
     if lich_su:
         d.append("--- BẮT ĐẦU DỮ LIỆU: HỘI THOẠI GẦN ĐÂY ---")
         for m in lich_su[-SO_LUOT_NGU_CANH:]:

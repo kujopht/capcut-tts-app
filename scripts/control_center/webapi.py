@@ -173,6 +173,38 @@ def dung_app(phien: PhienWeb) -> FastAPI:
             return _ma_loi(400, f"{type(exc).__name__}: {exc}")
         return _sach(a.to_dict())
 
+    @app.get("/api/live")
+    async def trang_thai_song(project: str = "", refresh: int = 0):
+        """`ProjectLiveSnapshot` — trạng thái SỐNG của dự án (V0.5).
+
+        CHỈ ĐỌC. Không một tham số nào ở đây chọn được một hành động: cả
+        gói `observability` không có đường tác động (xem
+        `observability/provider.py::KHONG_DUOC_CO` và bài kiểm quét cả
+        gói). `refresh=1` chỉ bỏ qua bộ đệm, không đổi gì ở hệ thống
+        được quan sát.
+
+        RIÊNG một endpoint, KHÔNG nhập vào `/api/state`: probe SSH mất
+        vài giây, còn `/api/state` bị WebSocket gọi mỗi nhịp. Trộn vào
+        nhau là biến một ô quan sát thành một trận spam SSH vào máy
+        production.
+        """
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        try:
+            a = await asyncio.to_thread(
+                phien.cc.quan_sat.anh_chup, project,
+                buoc_moi=bool(refresh))
+        except Exception as exc:                          # noqa: BLE001
+            return _ma_loi(400, f"{type(exc).__name__}: {exc}")
+        return _sach(a.to_dict())
+
+    @app.get("/api/live/capabilities")
+    async def kha_nang_song(project: str = ""):
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        return _sach(await asyncio.to_thread(
+            phien.cc.quan_sat.kha_nang, project))
+
     # -- cai dat giao dien -------------------------------------------------
 
     @app.get("/api/ui")

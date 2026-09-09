@@ -507,3 +507,16 @@ dialog::backdrop { background: rgba(3, 5, 10, .68); }
   #ben-phai { width: 100%; border-left: none;
               border-top: 1px solid var(--vien); }
 }
+
+/* -------------------------------------------------- V0.5: trang thai song */
+/* Ô SỐNG nằm trên cùng cột phải và có viền riêng: nó trả lời câu hỏi khác
+   với các ô Router bên dưới, nên nó phải ĐỌC RA là khác — gộp hai thứ đó
+   về mặt thị giác là mời đúng cái nhầm mà V0.5 tồn tại để sửa. */
+#the-song { border-color: var(--vien-sang); }
+#the-song .nhan { color: var(--neon); }
+#song-tuoi { margin-left: auto; font-weight: 400; letter-spacing: 0; }
+/* Số quá cũ thì ĐỔI MÀU, không im lặng: một con số cũ trông y như số mới
+   là cách một giao diện nói dối mà không ai phát hiện. */
+#song-tuoi.cu { color: var(--vang); }
+#insp-song { max-height: 300px; overflow: auto; }
+#insp-song i { font-style: normal; opacity: .75; }

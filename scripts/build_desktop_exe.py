@@ -96,6 +96,13 @@ def main(argv=None) -> int:
         # thao tac cham vao no.
         "--add-data", f"{GOC / 'scripts' / 'router_v4' / 'config'}"
                       f";scripts/router_v4/config",
+        # V0.5: cau hinh QUAN SAT SONG. Cung ly do voi `fabric.json` —
+        # PyInstaller chi goi module Python, tep du lieu phai khai tuong
+        # minh. Thieu no thi ban EXE chay duoc, nhung moi du an mat
+        # probe rieng va chi con quan sat chung; loi do KHONG the thay
+        # tu ma nguon, vi chay `python -m` thi tep nam san canh module.
+        "--add-data", f"{GOC / 'scripts' / 'control_center' / 'config'}"
+                      f";scripts/control_center/config",
         "--add-data",
         f"{GOC / 'scripts' / 'router_v3' / 'control_room' / 'PROOF_SCREEN.txt'}"
         f";scripts/router_v3/control_room",

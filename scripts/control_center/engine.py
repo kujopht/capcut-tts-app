@@ -173,6 +173,8 @@ class ControlCenter:
         #: Viec DA bao ket qua ve o chat. Chan bao HAI LAN cung mot ket qua
         #: — vong lap dieu phoi co the thay lai mot viec da ket thuc.
         self._da_bao_ket_qua: set = set()
+        #: `DichVuQuanSat`, dung muon (V0.5). Xem property `quan_sat`.
+        self._quan_sat = None
         #: BUOC DANG LAM cua `chat()`, theo du an: `{pid: (nhan, tu_luc)}`.
         #:
         #: VI SAO CAN. `chat()` chay DONG BO trong mot luong; mot lan mo
@@ -258,6 +260,21 @@ class ControlCenter:
         if self._usage is None:
             self._usage = UsageReporter(self.store, fabric=self.fabric)
         return self._usage
+
+    @property
+    def quan_sat(self):
+        """`DichVuQuanSat` — trạng thái SỐNG của dự án (V0.5).
+
+        TÁCH HẲN khỏi `usage`/`snapshot`: hai cái đó đọc sổ của CHÍNH
+        Control Center, còn cái này đo những hệ thống BÊN NGOÀI mà Router
+        không điều phối. Gộp chúng lại là đúng lỗi V0.5 tồn tại để sửa —
+        xem `observability/model.py`.
+        """
+        if getattr(self, "_quan_sat", None) is None:
+            from scripts.control_center.observability.service import \
+                DichVuQuanSat
+            self._quan_sat = DichVuQuanSat(self.store)
+        return self._quan_sat
 
     # -- 1. Du an ------------------------------------------------------------
 
@@ -595,6 +612,51 @@ class ControlCenter:
         # anh chup khong duoc pha luat do o tang tren.
         return {m.label: m.value for m in ds if m.value is not None}
 
+    def _khoi_song(self, project_id: str, text: str) -> str:
+        """Khối TRẠNG THÁI SỐNG cho nhắc nhở Leader, hoặc `""`.
+
+        Chỉ đo khi câu hỏi ĐÒI trạng thái hiện tại (`xet_cau_hoi`). Đo
+        mọi lượt là tự thêm vài giây SSH vào từng tin nhắn — kể cả "viết
+        cho tôi bài kiểm này", thứ chẳng cần biết farmer có chạy hay
+        không.
+
+        Probe hỏng KHÔNG được làm vỡ lượt chat: khi đó vẫn trả về một
+        khối, nhưng khối đó nói rõ là chưa xác minh được và kèm lý do —
+        `cau_tu_choi_bia()` viết sẵn hình dạng câu đó.
+        """
+        from scripts.control_center.observability import (cau_tu_choi_bia,
+                                                          tom_tat_cho_leader,
+                                                          xet_cau_hoi)
+        yc = xet_cau_hoi(text)
+        if not yc.can_live:
+            return ""
+        try:
+            a = self.quan_sat.anh_chup(project_id)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "LIVE_PROBE_FAILED", project_id=project_id, level="WARNING",
+                detail=f"{type(exc).__name__}: {exc}"[:200])
+            return ("TRẠNG THÁI SỐNG: KHÔNG đo được lần này — "
+                    f"{type(exc).__name__}: {exc}\n"
+                    + cau_tu_choi_bia(0, [str(exc)]))
+        van = tom_tat_cho_leader(a)
+        self.store.ghi_su_kien(
+            "LIVE_PROBE", project_id=project_id,
+            detail=(f"{a.trang_thai_chung.value} · bằng chứng sống="
+                    f"{a.co_bang_chung_song()}"),
+            meta={"dau_hieu": yc.dau_hieu[:6],
+                  "nhat_ky": a.nhat_ky_provider})
+        if not a.co_bang_chung_song():
+            # KHONG mot probe ngoai nao do duoc. Noi thang, va noi luon
+            # cau khong duoc bia — de model khong tu dien vao cho trong.
+            r = a.router.get("router")
+            sv = r.lay("running_tasks") if r else None
+            van += "\n\n" + cau_tu_choi_bia(
+                int(sv.gia_tri or 0) if sv and sv.gia_tri is not None else 0,
+                [k.ly_do or f"{k.khoa}: {k.trang_thai.value}"
+                 for k in a.khoi_ngoai()])
+        return van
+
     def _leader_quyet_dinh(self, ctx, text: str):
         """Hỏi Leader. `None` nghĩa là KHÔNG hỏi được — rơi về đường cũ.
 
@@ -610,7 +672,13 @@ class ControlCenter:
             bg = self.leader_ban_ghi(pid)
             anh = self.anh_chup_du_an(pid)
             ls = [m.to_dict() for m in self.store.chat(pid, limit=40)]
-            nn = leader.dung_nhac_nho(anh, ls, text)
+            # V0.5 — CAU HOI VE HIEN TAI THI PHAI DI DO.
+            #
+            # Truoc ban nay, moi cau deu chi thay `anh_chup_du_an()` (so +
+            # git). Nen "production farmer con chay khong?" duoc tra loi
+            # bang so viec cua Router, va cau tra loi la SAI.
+            khoi_song = self._khoi_song(pid, text)
+            nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song)
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.

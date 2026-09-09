@@ -417,6 +417,97 @@ function veInspUsageTuCache() {
       + '</details>' : ''));
 }
 
+// ==================== V0.5: TRANG THAI SONG CUA DU AN ====================
+//
+// TACH HAN khoi cac o Router o duoi. Router dem viec do CHINH Control
+// Center dieu phoi; o nay do nhung he thong BEN NGOAI (systemd tren may
+// khac, luu tru, ung dung) chay doc lap. Gop hai thu do lai chinh la loi
+// V0.5 ton tai de sua — xem `observability/model.py`.
+//
+// SAU trang thai, ba cai cuoi la ba cach "khong biet" KHAC NHAU, va
+// khong cai nao duoc ve nhu DOWN:
+//   ACTIVE / DEGRADED / DOWN  -> do duoc
+//   UNKNOWN     -> co probe, lan do nay that bai
+//   UNAVAILABLE -> khong co probe nao cho thu nay
+//   STALE       -> co so, nhung cu hon nguong tin duoc
+const MAU_SONG = {
+  ACTIVE: 'luc', DEGRADED: 'vang', DOWN: 'do',
+  UNKNOWN: 'xam', UNAVAILABLE: 'xam', STALE: 'vang',
+};
+
+let songCache = null;
+let songDangDo = false;
+
+function tuoiChu(giay) {
+  const g = Math.max(0, Math.round(Number(giay) || 0));
+  if (g < 60) return `${g}s trước`;
+  if (g < 3600) return `${Math.floor(g / 60)}m trước`;
+  return `${Math.floor(g / 3600)}h trước`;
+}
+
+async function veSong(buocMoi = false) {
+  if (!S.selected || songDangDo) return;
+  songDangDo = true;
+  if (buocMoi) dat('#insp-song', trong('đang đo…'));
+  try {
+    songCache = await api(`/api/live?project=${encodeURIComponent(S.selected)}`
+      + (buocMoi ? '&refresh=1' : ''));
+  } catch (e) {
+    dat('#insp-song', trong(`không đo được: ${e.message}`));
+    $('#song-tuoi').textContent = '';
+    return;
+  } finally { songDangDo = false; }
+  veSongTuCache();
+}
+
+function veSongTuCache() {
+  const a = songCache;
+  if (!a) { dat('#insp-song', trong('chưa đo')); return; }
+  const hang = [];
+  // Phan NGOAI truoc, va no la phan tra loi cau "con chay khong".
+  for (const nhom of ['dich_vu', 'ung_dung', 'luu_tru', 'kho']) {
+    for (const k of Object.values(a[nhom] || {})) {
+      hang.push(`<div class="qs-hang">
+        <span class="qs-ten" title="${esc(k.ly_do || '')}"
+          >${esc(k.nhan || k.khoa)}</span>
+        <span class="hh ${MAU_SONG[k.trang_thai] || 'xam'}"
+          >${esc(k.trang_thai)}</span></div>`);
+      for (const q of (k.quan_sat || [])) {
+        const doDuoc = ['ACTIVE', 'DEGRADED', 'DOWN'].includes(q.trang_thai);
+        // KHONG bao gio ve mot gia tri cho o UNKNOWN/UNAVAILABLE: mot so
+        // 0 o do la mot khang dinh ve production ma khong ai do.
+        const phai = doDuoc && q.gia_tri !== null && q.gia_tri !== undefined
+          ? esc(q.gia_tri)
+          : `<i>${esc(q.trang_thai)}</i>`;
+        hang.push(`<div class="qs-hang" style="padding-left:9px">
+          <span class="qs-ten qs-phu" title="${esc(q.ly_do || q.nguon || '')}"
+            >${esc(q.nhan || q.khoa)}</span>
+          <span class="qs-phu">${phai}</span></div>`);
+      }
+    }
+  }
+  if (!hang.length) hang.push(trong('dự án này chưa khai probe ngoài nào'));
+  // Router dat CUOI va co nhan ro, de khong ai doc no thanh trang thai
+  // cua he thong ngoai.
+  const r = (a.router || {}).router;
+  if (r) {
+    const g = (khoa) => {
+      const q = (r.quan_sat || []).find((x) => x.khoa === khoa);
+      return q && q.gia_tri !== null ? q.gia_tri : '—';
+    };
+    hang.push(`<div class="nhan" style="margin-top:6px">ROUTER (nội bộ —
+      không nói gì về dịch vụ ngoài)</div>`);
+    hang.push(`<div class="qs-hang"><span class="qs-ten">Router tasks</span>
+      <span class="qs-phu">${esc(g('running_tasks'))}</span></div>`);
+    hang.push(`<div class="qs-hang"><span class="qs-ten">Agents</span>
+      <span class="qs-phu">${esc(g('live_agents'))}</span></div>`);
+  }
+  dat('#insp-song', hang.join(''));
+  const cu = Number(a.tuoi || 0) > 60;
+  $('#song-tuoi').textContent = `${a.trang_thai_chung} · ${tuoiChu(a.tuoi)}`;
+  $('#song-tuoi').classList.toggle('cu', cu);
+}
+
 // Anh chup du an: nhanh/HEAD/sach-ban. NHIP CHAM RIENG, khong theo
 // WebSocket — no chay ~6 lenh `git`, va o bap `--noconsole` moi lenh la
 // mot tien trinh con. Gan vao nhip song la ~6 tien trinh moi giay.
@@ -499,6 +590,7 @@ let dauUsage = '';
 function veHet() {
   veProjects(); veThanhTren(); veChat(); veTasks(); veAgents();
   veInspDangChay(); veInspTasks(); veInspAgents(); veInspUsageTuCache();
+  veSongTuCache();
   veDangLam();
 
   // LAY LAI USAGE KHI TRANG THAI DOI — day la duong lam moi CHINH, khong
@@ -769,8 +861,9 @@ document.addEventListener('click', async (e) => {
     S.selected = t.dataset.pid;
     dauTin = '';
     anhChup = null; usageCache = null;    // cache cua DU AN CU, phai bo
+    songCache = null;
     await lamMoi();
-    veInspUsage(); veInspSnapshot(true);
+    veInspUsage(); veInspSnapshot(true); veSong();
     return;
   }
   if (t.dataset.copy) {
@@ -1130,6 +1223,7 @@ function noiWs() {
 }
 
 $('#nut-chup-lai').onclick = () => veInspSnapshot(true);
+$('#nut-song-lai').onclick = () => veSong(true);
 
 (async function batDau() {
   if (!TOKEN) {
@@ -1145,6 +1239,7 @@ $('#nut-chup-lai').onclick = () => veInspSnapshot(true);
   veDaiDinhKem();
   veInspUsage();
   veInspSnapshot(true);
+  veSong();
   // USAGE lam moi khi TRANG THAI DOI, khong theo dong ho co dieu kien.
   //
   // Ban truoc: `setInterval(() => { if (!document.hidden) veInspUsage(); },
@@ -1169,8 +1264,12 @@ $('#nut-chup-lai').onclick = () => veInspSnapshot(true);
   // mot lan khi cua so hien lai.
   setInterval(veInspUsage, 20000);
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { veInspUsage(); veInspSnapshot(); }
+    if (!document.hidden) { veInspUsage(); veInspSnapshot(); veSong(); }
   });
+  // TRANG THAI SONG: nhip CHAM NHAT trong ca giao dien. Moi lan la
+  // mot phien SSH that ra may production, nen 90s + bo dem o server
+  // (`TUOI_TUOI`/`TUOI_CON_DUNG`) la du. Nut ↻ de do ngay.
+  setInterval(() => { if (!document.hidden) veSong(); }, 90000);
   // ANH CHUP DU AN thi VAN cham va VAN co dieu kien — no chay ~6 lenh
   // `git`, tuc la ~6 tien trinh con moi lan. Do la chi phi that, khac
   // han usage. Nut ↻ de chup ngay.

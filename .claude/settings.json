@@ -699,6 +699,7 @@
       "Bash(python scripts/control_center_desktop_acceptance.py:*)",
       "Bash(python scripts/control_center_web_smoke.py:*)",
       "Bash(python scripts/control_center_web_anh.py:*)",
+      "Bash(python scripts/control_center_v05_acceptance.py:*)",
       "Bash(python scripts/control_center_allowlist_proof.py:*)",
       "Bash(python scripts/control_center_attachment_proof.py:*)",
       "Bash(python scripts/ai_router_quota_check.py:*)",

@@ -188,8 +188,25 @@ Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), hoặc ké
     nen no lam moi CHAM va roi rac, khong theo nhip WebSocket.
   -->
   <aside id="ben-phai">
+    <!--
+      V0.5 — TRANG THAI SONG cua DU AN, dat TRUOC "DANG CHAY" cua Router
+      va co nhan rieng, vi hai thu do tra loi hai cau hoi khac nhau.
+      Gop chung lai la dung loi V0.5 ton tai de sua: Router ranh KHONG co
+      nghia la dich vu ngoai da dung.
+
+      Nhip lam moi CHAM va co nut tay: moi lan la mot phien SSH ra may
+      production, khong phai mot phep doc sổ.
+    -->
+    <section class="the-qs" id="the-song">
+      <div class="nhan">TRẠNG THÁI SỐNG (DỰ ÁN)
+        <span id="song-tuoi" class="qs-phu"></span>
+        <button id="nut-song-lai" class="nho"
+                title="Đo lại ngay (mỗi lần là một phiên SSH thật)">↻</button>
+      </div>
+      <div id="insp-song"></div>
+    </section>
     <section class="the-qs">
-      <div class="nhan">ĐANG CHẠY</div>
+      <div class="nhan">ĐANG CHẠY <span class="qs-phu">(ROUTER)</span></div>
       <div id="insp-dangchay"></div>
     </section>
     <section class="the-qs">

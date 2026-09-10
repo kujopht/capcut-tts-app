@@ -207,6 +207,22 @@ hỏi hiện tại khi có probe sống. Sổ ở `<gốc>/.router/memory/<ns>/`
 `control.db`, KHÔNG trong cây git của dự án), mỗi dự án một sổ. Không xoá
 gì ở V0.6. `docs/reports/PROJECT_MEMORY_V06.md`, mã ở
 `scripts/control_center/memory/`.
+**V0.6.1** sửa khuyết tật V0.6 (tuyên bố tường minh của người dùng nằm ở L0
+mà `Decisions = 0`): ĐỀ BẠT TẤT ĐỊNH (không LLM) tuyên bố → quyết định /
+ràng buộc / yêu cầu / sự cố / quy trình / sự thật, `authority =
+user_explicit`, thay thế kiểu ADR hai chiều, nguồn gốc trỏ về L0; NHẬP LỊCH
+SỬ (backfill) từ sổ Router, git, tài liệu, phiên Claude CỦA ĐÚNG KHO (theo
+`git worktree list`) — idempotent, chỉ đọc, lịch sử luôn `backfill` không
+bao giờ `user_explicit`; KIỂM TOÁN bể Antigravity (8 khe chứng minh từ sổ
+đăng ký, Leader ghim AG01 nay HIỆN RA với bộ lập lịch); PROVIDER NGOÀI + KHO
+BÍ MẬT (Windows Credential Manager, `credential_ref` trong sổ, giá trị
+không bao giờ vào SQLite/ký ức/log/prompt; provider vào fabric ở trạng thái
+KHÔNG nhận dispatch). Nút **Providers** ở thanh trên. Báo cáo:
+`docs/reports/PROJECT_MEMORY_V061.md`,
+`docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`,
+`docs/reports/ANTIGRAVITY_POOL_AUDIT_V061.md`; mã ở
+`scripts/control_center/memory/{de_bat,nhap_khau}.py` và
+`scripts/control_center/providers/`.
 
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission

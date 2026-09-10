@@ -182,9 +182,12 @@ class TestMaNguon(unittest.TestCase):
         self.assertNotIn("@app.delete", vung)
         self.assertNotIn("@app.put", vung)
         self.assertNotIn("@app.patch", vung)
+        # V0.6.1 them `/api/memory/backfill` — NHAP lich su, chi-them vao L0
+        # (idempotent, khong ghi de, khong xoa). Van khong co endpoint xoa.
         for m in re.finditer(r'@app\.post\("(/api/memory/[a-z_]+)"\)', vung):
             self.assertIn(m.group(1), ("/api/memory/checkpoint", "/api/memory/decision",
-                                       "/api/memory/record", "/api/memory/capsule"))
+                                       "/api/memory/record", "/api/memory/capsule",
+                                       "/api/memory/backfill"))
         self.assertNotIn("def blob", vung)
         # Moi `return` O MUC HANDLER (8 khoang trang) deu qua `_sach` hoac
         # `_ma_loi`. Ham con ben trong (12+ khoang) tra ve du lieu tho cho

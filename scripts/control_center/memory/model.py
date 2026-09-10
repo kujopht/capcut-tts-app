@@ -90,25 +90,55 @@ def khong_gian_ten(project_id: str) -> str:
 
 class LoaiKyUc(str, Enum):
     """Lớp logic của một bản ghi L1. KHÔNG gộp vào một bảng vector chung."""
-    EPISODIC = "episodic"        # hội thoại, lần chạy agent, sự kiện, sự cố
-    SEMANTIC = "semantic"        # kiến trúc, API, hạ tầng, khái niệm, sự thật
+    EPISODIC = "episodic"        # hội thoại, lần chạy agent, sự kiện
+    SEMANTIC = "semantic"        # kiến trúc, API, hạ tầng, khái niệm
     DECISION = "decision"        # quyết định + lý do + thay thế/bị thay thế
     PROCEDURAL = "procedural"    # SOP, cách sửa lặp lại, quy trình build/test
     INCIDENT = "incident"        # sự cố / lỗi — tách khỏi episodic để lọc UI
     ARCHITECTURE = "architecture"  # mô tả kiến trúc — tách để "Architecture" tab
+    # V0.6.1 — ba loai nguoi dung tuyen bo TUONG MINH ma V0.6 chua co cho.
+    CONSTRAINT = "constraint"    # "không được…", "luôn luôn…", ràng buộc dự án
+    REQUIREMENT = "requirement"  # "phải có…", yêu cầu của dự án
+    FACT = "fact"                # "hãy ghi nhớ…" — sự thật quan trọng, không thuộc loại khác
 
     @property
     def ben(self) -> bool:
-        """Loại BỀN không có TTL mặc định: quyết định/quy trình/kiến trúc."""
+        """Loại BỀN không có TTL mặc định — thứ người ta tuyên bố, không phải
+        thứ xảy ra."""
         return self in (LoaiKyUc.DECISION, LoaiKyUc.PROCEDURAL,
-                        LoaiKyUc.ARCHITECTURE, LoaiKyUc.SEMANTIC)
+                        LoaiKyUc.ARCHITECTURE, LoaiKyUc.SEMANTIC,
+                        LoaiKyUc.CONSTRAINT, LoaiKyUc.REQUIREMENT,
+                        LoaiKyUc.FACT)
+
+    @property
+    def tuyen_bo(self) -> bool:
+        """Loại có thể được TUYÊN BỐ tường minh (và bị thay thế)."""
+        return self in (LoaiKyUc.DECISION, LoaiKyUc.CONSTRAINT,
+                        LoaiKyUc.REQUIREMENT, LoaiKyUc.PROCEDURAL,
+                        LoaiKyUc.FACT, LoaiKyUc.INCIDENT)
 
 
 class TinCay(str, Enum):
-    """Nguồn gốc của một bản ghi — hiển thị, không bao giờ ngầm."""
+    """Nguồn gốc / THẨM QUYỀN của một bản ghi — hiển thị, không bao giờ ngầm.
+
+    Thứ tự tin cậy GIẢM dần: `USER_EXPLICIT` (người dùng nói thẳng "hãy ghi
+    nhớ…") > `DO_DUOC` (sự kiện hệ thống) > `GHI_NHAN` (ghi qua API) >
+    `BACKFILL` (nhập từ lịch sử) > `LEADER` (Leader đề nghị ghi) >
+    `SUY_LUAN` (model tóm tắt).
+    """
+    USER_EXPLICIT = "user_explicit"  # tuyên bố tường minh của người dùng
     DO_DUOC = "do_duoc"      # từ một phép đo/sự kiện hệ thống (bậc 1-2)
-    GHI_NHAN = "ghi_nhan"    # người dùng hoặc Leader ghi rõ
+    GHI_NHAN = "ghi_nhan"    # người dùng hoặc Leader ghi rõ qua API/nút
+    BACKFILL = "backfill"    # nhập từ lịch sử (tài liệu, git, phiên cũ)
+    LEADER = "leader"        # Leader đề nghị ghi trong một lượt chat
     SUY_LUAN = "suy_luan"    # do model tóm tắt/suy ra — thấp nhất
+
+
+class TrangThaiKyUc(str, Enum):
+    """Trạng thái của MỌI bản ghi L1 (V0.6.1 — trước đó chỉ quyết định có)."""
+    HIEU_LUC = "hieu_luc"    # ACTIVE
+    THAY_THE = "thay_the"    # SUPERSEDED — vẫn tra được, không còn hiệu lực
+    BO = "bo"                # rút lại
 
 
 class TrangThaiQuyetDinh(str, Enum):
@@ -188,6 +218,13 @@ class KyUc:
     da_loc: int = 0
     ma: str = ""
     id: int = 0
+    # V0.6.1 — trang thai + thay the o MOI ban ghi, va nguon goc TUONG MINH.
+    trang_thai: TrangThaiKyUc = TrangThaiKyUc.HIEU_LUC
+    thay_the_cho: Tuple[str, ...] = ()   # supersedes (mã ký ức)
+    bi_thay_the: str = ""                # superseded_by
+    ts_sua: float = 0.0                  # updated_at
+    nguon_loai: str = ""                 # "chat_user" | "api" | "backfill:doc" | "event" | "leader"
+    nguon_id: str = ""                   # id sự kiện L0 / mã nguồn nhập
 
     #: TTL mặc định cho loại KHÔNG bền — 90 ngày. Không phải để xoá (V0.6
     #: không xoá gì) mà để xếp hạng: một mẩu episodic 4 tháng tuổi phải
@@ -199,6 +236,9 @@ class KyUc:
             self.loai = LoaiKyUc(self.loai)
         if isinstance(self.tin_cay, str) and not isinstance(self.tin_cay, TinCay):
             self.tin_cay = TinCay(self.tin_cay)
+        if isinstance(self.trang_thai, str) and not isinstance(
+                self.trang_thai, TrangThaiKyUc):
+            self.trang_thai = TrangThaiKyUc(self.trang_thai)
         self.noi_dung = chuan_hoa(self.noi_dung).strip()
         self.tieu_de = chuan_hoa(self.tieu_de).strip()
         if not self.noi_dung:
@@ -212,6 +252,9 @@ class KyUc:
             self.ts_su_kien = self.ts
         if not self.ts_cham:
             self.ts_cham = self.ts
+        if not self.ts_sua:
+            self.ts_sua = self.ts
+        self.thay_the_cho = tuple(x for x in self.thay_the_cho if x)
         if self.han_tuoi == 0.0 and not self.loai.ben:
             self.han_tuoi = self.HAN_TUOI_MAC_DINH
         self.the = tuple(chuan_hoa(t).strip().lower() for t in self.the if t)
@@ -228,13 +271,23 @@ class KyUc:
     def het_han(self) -> bool:
         return bool(self.han_tuoi) and self.tuoi > self.han_tuoi
 
+    @property
+    def hieu_luc(self) -> bool:
+        return (self.trang_thai is TrangThaiKyUc.HIEU_LUC
+                and not self.bi_thay_the)
+
     def to_dict(self) -> Dict:
         return {"ma": self.ma, "id": self.id, "loai": self.loai.value,
                 "tieu_de": self.tieu_de, "noi_dung": self.noi_dung,
                 "quan_trong": self.quan_trong, "tin_cay": self.tin_cay.value,
                 "ts": self.ts, "ts_su_kien": self.ts_su_kien,
-                "ts_cham": self.ts_cham, "han_tuoi": self.han_tuoi,
+                "ts_cham": self.ts_cham, "ts_sua": self.ts_sua,
+                "han_tuoi": self.han_tuoi,
                 "tuoi": round(self.tuoi, 1), "het_han": self.het_han,
+                "trang_thai": self.trang_thai.value, "hieu_luc": self.hieu_luc,
+                "thay_the_cho": list(self.thay_the_cho),
+                "bi_thay_the": self.bi_thay_the,
+                "nguon_loai": self.nguon_loai, "nguon_id": self.nguon_id,
                 "the": list(self.the), "meta": self.meta, "da_loc": self.da_loc,
                 "bang_chung": [b.to_dict() for b in self.bang_chung]}
 

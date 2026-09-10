@@ -349,6 +349,28 @@ def dung_app(phien: PhienWeb) -> FastAPI:
             ly_do=str(p.get("ly_do") or "cập nhật từ giao diện"))
         return _sach(r or {"loi": "không ghi được"})
 
+    # -- nhap khau lich su (V0.6.1) -------------------------------------------
+    # CHI DOC nguon (so, git log, tai lieu, phien Claude cua dung kho nay);
+    # ghi vao SO KY UC cua chinh Control Center. Khong sua tep nguon nao.
+
+    @app.get("/api/memory/backfill/sources")
+    async def ky_uc_nguon_nhap(project: str = ""):
+        kc = _ky_uc()
+        if kc is None or not project:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        return _sach(await asyncio.to_thread(kc.nguon_nhap_khau, project))
+
+    @app.post("/api/memory/backfill")
+    async def ky_uc_nhap_khau(payload: Dict):
+        kc = _ky_uc()
+        p = payload or {}
+        pid = str(p.get("project") or "")
+        if kc is None or not pid:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        chi = [str(x) for x in (p.get("chi") or [])] or None
+        return _sach(await asyncio.to_thread(
+            kc.nhap_khau, pid, thu_kho=bool(p.get("thu_kho", True)), chi=chi))
+
     # -- cai dat giao dien -------------------------------------------------
 
     @app.get("/api/ui")
@@ -392,6 +414,117 @@ def dung_app(phien: PhienWeb) -> FastAPI:
             return _ma_loi(400, "không có khoá nào hợp lệ")
         return _sach(await asyncio.to_thread(
             phien.cc.store.luu_cai_dat_ui, ra))
+
+    # -- provider ngoai + kho bi mat (V0.6.1) ----------------------------------
+    # Gia tri credential di vao DUY NHAT qua POST .../accounts (mot lan, tren
+    # 127.0.0.1, co token) va vao thang KhoBiMat. Khong endpoint nao tra no ra.
+
+    def _providers():
+        try:
+            return phien.cc.providers
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def _loi_provider(exc: Exception) -> JSONResponse:
+        from scripts.control_center.providers.kho_bi_mat import LoiKhoBiMat
+        from scripts.control_center.providers.so import LoiSoProvider
+        ma = 400 if isinstance(exc, (ValueError, LoiKhoBiMat, LoiSoProvider, KeyError)) else 500
+        return _ma_loi(ma, redact(f"{type(exc).__name__}: {exc}"[:300]))
+
+    @app.get("/api/providers")
+    async def providers_doc():
+        dv = _providers()
+        if dv is None:
+            return _ma_loi(503, "dịch vụ provider không sẵn")
+        return _sach(await asyncio.to_thread(dv.trang_thai))
+
+    @app.post("/api/providers")
+    async def providers_them(payload: Dict):
+        dv = _providers()
+        if dv is None:
+            return _ma_loi(503, "dịch vụ provider không sẵn")
+        p = payload or {}
+        try:
+            return _sach(await asyncio.to_thread(
+                dv.them_provider, str(p.get("provider_id") or ""), str(p.get("preset") or ""),
+                base_url=str(p.get("base_url") or ""), ten=str(p.get("ten") or "")))
+        except Exception as exc:                            # noqa: BLE001
+            return _loi_provider(exc)
+
+    @app.delete("/api/providers/{provider_id}")
+    async def providers_xoa(provider_id: str, xac_nhan: bool = False):
+        dv = _providers()
+        if dv is None:
+            return _ma_loi(503, "dịch vụ provider không sẵn")
+        try:
+            return _sach(await asyncio.to_thread(dv.xoa_provider, provider_id,
+                                                 xac_nhan=bool(xac_nhan)))
+        except Exception as exc:                            # noqa: BLE001
+            return _loi_provider(exc)
+
+    @app.post("/api/providers/{provider_id}/accounts")
+    async def providers_them_tai_khoan(provider_id: str, payload: Dict):
+        dv = _providers()
+        if dv is None:
+            return _ma_loi(503, "dịch vụ provider không sẵn")
+        p = payload or {}
+        gia_tri = p.pop("gia_tri", None)
+        try:
+            return _sach(await asyncio.to_thread(
+                dv.them_tai_khoan, provider_id, str(p.get("alias") or ""), gia_tri,
+                project_id=str(p.get("project") or "")))
+        except Exception as exc:                            # noqa: BLE001
+            return _loi_provider(exc)
+        finally:
+            del gia_tri
+
+    @app.delete("/api/providers/accounts/{account_id}")
+    async def providers_xoa_tai_khoan(account_id: str, xac_nhan: bool = False):
+        dv = _providers()
+        if dv is None:
+            return _ma_loi(503, "dịch vụ provider không sẵn")
+        try:
+            return _sach(await asyncio.to_thread(dv.xoa_tai_khoan, account_id,
+                                                 xac_nhan=bool(xac_nhan)))
+        except Exception as exc:                            # noqa: BLE001
+            return _loi_provider(exc)
+
+    @app.post("/api/providers/accounts/{account_id}/toggle")
+    async def providers_bat_tat(account_id: str, payload: Dict):
+        dv = _providers()
+        if dv is None:
+            return _ma_loi(503, "dịch vụ provider không sẵn")
+        try:
+            return _sach(await asyncio.to_thread(dv.bat_tat_tai_khoan, account_id,
+                                                 bool((payload or {}).get("bat", True))))
+        except Exception as exc:                            # noqa: BLE001
+            return _loi_provider(exc)
+
+    @app.post("/api/providers/accounts/{account_id}/test")
+    async def providers_thu(account_id: str, payload: Optional[Dict] = None):
+        dv = _providers()
+        if dv is None:
+            return _ma_loi(503, "dịch vụ provider không sẵn")
+        try:
+            return _sach(await asyncio.to_thread(
+                dv.thu_ket_noi, account_id, project_id=str((payload or {}).get("project") or "")))
+        except Exception as exc:                            # noqa: BLE001
+            return _loi_provider(exc)
+
+    @app.post("/api/providers/accounts/{account_id}/ask")
+    async def providers_hoi_thu(account_id: str, payload: Dict):
+        """ĐỊNH TUYẾN THỦ CÔNG: một lượt, người bấm. Không phải đường AUTO."""
+        dv = _providers()
+        if dv is None:
+            return _ma_loi(503, "dịch vụ provider không sẵn")
+        p = payload or {}
+        try:
+            return _sach(await asyncio.to_thread(
+                dv.hoi_thu, account_id, model=str(p.get("model") or ""),
+                cau=str(p.get("cau") or ""), project_id=str(p.get("project") or ""),
+                max_tokens=int(p.get("max_tokens") or 128)))
+        except Exception as exc:                            # noqa: BLE001
+            return _loi_provider(exc)
 
     # -- ghi ---------------------------------------------------------------
 

@@ -1302,7 +1302,53 @@ EXE `dist-v06` nghiệm thu 22/22. Đầy đủ: `docs/reports/PROJECT_MEMORY_V0
 Việc tiếp theo hợp lý: consolidation có kiểm chứng + đường vector tuỳ chọn
 (mục 18 của báo cáo). Không xoá lịch sử ở V0.6.
 
+## Router Control Center V0.6.1 — đề bạt ký ức · nhập lịch sử · bể AG · provider + kho bí mật (2026-09-10)
+
+Đã xong, nhánh `feat/v061-memory-provider-vault`, chưa tag/merge; `dist-v04/05/06`
+giữ nguyên, bản mới `dist-v061`. Bốn việc, ba báo cáo:
+
+* **Khuyết tật V0.6 đã sửa** — "hãy ghi nhớ đây là một quyết định của project: …"
+  gõ trong chat nay thành `qd_*` NGAY tại cổng vào (tất định, không LLM),
+  `authority = user_explicit`, bằng chứng trỏ về dòng L0; thay thế kiểu ADR hai
+  chiều ("thay cho qd_0001, …"), bản cũ SUPERSEDED vẫn truy được; "khi nào / ai
+  nói / vì sao nhớ" trả lời từ `ts_su_kien`/`nguon_loai`/`bang_chung`. Lược đồ ký ức
+  v2 (tự nâng). Leader chỉ XÁC NHẬN bằng mã, có `record_memory` (authority `leader`).
+  `docs/reports/PROJECT_MEMORY_V061.md`.
+* **Nhập lịch sử** (sổ Router, git, tài liệu, phiên Claude CỦA ĐÚNG KHO theo
+  `git worktree list`): idempotent, chỉ đọc, resumable, thử khô; lịch sử luôn
+  `backfill` (không bao giờ `user_explicit`); phiên đang mở bị bỏ qua. Chạy thật
+  trên kho này: 7 360 sự kiện, 93 ký ức, 0 `user_explicit`, 32 s. Sự cố khoá SSH
+  Fanfic: nguồn CÓ bằng chứng "`fanficappwrite.pem` không tồn tại, tệp thật là
+  `fanficappwrrite.pem`" → INCIDENT backfill; **không** có bằng chứng "tạo canonical /
+  sửa ACL" trong nguồn được phép → không bịa.
+* **Bể Antigravity** — 8 khe chứng minh từ sổ đăng ký (8 cấp phát, 8 hồ sơ riêng,
+  10 chỗ); chọn/trải tải/cooldown/failover có bài kiểm; Leader ghim AG01 và **chỗ
+  đó nay hiện ra với bộ lập lịch**. `docs/reports/ANTIGRAVITY_POOL_AUDIT_V061.md`.
+* **Provider ngoài + kho bí mật** — Windows Credential Manager (đo thật), sổ chỉ giữ
+  `credential_ref`, tay cầm mờ `BiMat`, preset OpenAI-compatible/Alibaba/Tencent
+  (khai báo, chưa đo; **chưa cấu hình khoá nào** — người vận hành thêm qua nút
+  Providers), thử kết nối chi phí tối thiểu, hỏi thử thủ công, provider vào fabric
+  KHÔNG nhận dispatch. `docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`.
+
+Bộ kiểm mới: 78 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
+provider webapi 3). Nghiệm thu EXE `dist-v061`: **31/31** (lần 4; sha256
+`bfc25e37…`, `dist-v061/BAN_TOT_v061.txt`) — chi tiết và ba lần chạy trước ở
+`PROJECT_MEMORY_V061.md` mục 10. Việc tiếp theo: bật AUTO cho provider ngoài (adapter thực
+thi + ngân sách), người vận hành duyệt các sự cố `backfill`, nhập tiếp phần còn lại.
+
 ## Bẫy đã gặp
+
+- **Vai "user" trong tệp phiên Claude KHÔNG chứng minh người gõ.** Bản tóm tắt
+  nén ngữ cảnh ("This session is being continued…"), thân skill, đầu ra lệnh
+  `/…`, `<system-reminder>` đều mang `role: user`. Lần nhập lịch sử đầu đã đề
+  bạt một bản tóm tắt nén thành "quyết định user_explicit". Luật: lịch sử luôn
+  `backfill`, và lọc các dạng đó trước khi xét.
+- **Phiên Claude đang mở là HIỆN TẠI, không phải lịch sử.** Đề bài của một task
+  mô tả một sự cố cũ nằm trong phiên đang chạy; nhập nó là bịa nguồn gốc. Bỏ qua
+  tệp `.jsonl` có mtime < 600 s, nói rõ, lần sau nhập tiếp.
+- **Báo cáo cuối phiên nào cũng có "fixed"/"failed".** Đề bạt sự cố từ tin trợ
+  lý cần ≥1 dấu hiệu MẠNH (root cause, typo, permission denied, ACL…) hoặc một
+  tên tệp viết hai cách lệch một ký tự — không thì 115 "sự cố" toàn "Done.".
 
 - **pywebview phát `events.closed` trên luồng NỀN, còn `webview.start()`
   trả về ngay khi cửa sổ đóng.** `main()` kết thúc → trình thông dịch tắt →

@@ -38,7 +38,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from scripts.router_v4.runtime import Fabric, Source
+from scripts.router_v4.runtime import Fabric, RuntimeStatus, Source
 from scripts.control_center.model import UsageConfidence, UsageMetric
 from scripts.control_center.store import ControlStore
 
@@ -211,11 +211,50 @@ class UsageReporter:
             ra.append({
                 "runtime_id": r.runtime_id, "provider": r.provider,
                 "account_id": r.account_id,
+                # NHAN chi cho ("agy-launcher:acc3"), khong phai credential.
+                "auth_profile": r.auth_profile, "transport": r.transport,
                 "status": r.trang_thai_hien_tai().value,
                 "provisioned": r.provisioned,
                 "needs_provisioning": r.needs_provisioning,
+                "health_detail": r.health_detail,
                 "concurrency": r.concurrency, "in_flight": r.in_flight,
+                "running_tasks": list(r.running_tasks),
+                "consecutive_failures": r.consecutive_failures,
+                "cooldown_until": r.cooldown_until or None,
+                "drained": r.drained,
                 "dispatchable": r.dispatchable})
+        return ra
+
+    def be_tai_khoan(self) -> Dict[str, Dict]:
+        """Tóm tắt BỂ TÀI KHOẢN theo nhà cung cấp — mọi số đếm từ sổ đăng ký
+        đang chạy, không giả định. `khoe` = IDLE/BUSY/DEGRADED (nhận việc
+        được); `leader_chiem` = khe đang có phiên Leader ấm (V0.6.1)."""
+        if self.fabric is None:
+            return {}
+        ra: Dict[str, Dict] = {}
+        for r in self.fabric.runtimes.values():
+            t = ra.setdefault(r.provider, {
+                "dang_ky": 0, "cap_phat": 0, "nhan_dispatch": 0, "khoe": 0,
+                "cooldown": 0, "offline": 0, "tong_cho": 0, "dang_dung": 0,
+                "ho_so_rieng": set(), "leader_chiem": []})
+            tt = r.trang_thai_hien_tai()
+            t["dang_ky"] += 1
+            t["cap_phat"] += int(r.provisioned)
+            t["nhan_dispatch"] += int(r.dispatchable and r.provisioned)
+            if tt in (RuntimeStatus.IDLE, RuntimeStatus.BUSY, RuntimeStatus.DEGRADED):
+                t["khoe"] += 1
+                t["tong_cho"] += r.concurrency
+                t["dang_dung"] += r.in_flight
+            elif tt is RuntimeStatus.COOLDOWN:
+                t["cooldown"] += 1
+            elif tt is RuntimeStatus.OFFLINE:
+                t["offline"] += 1
+            if r.auth_profile:
+                t["ho_so_rieng"].add(r.auth_profile)
+            if any(x.startswith("LEADER:") for x in r.running_tasks):
+                t["leader_chiem"].append(r.runtime_id)
+        for t in ra.values():
+            t["ho_so_rieng"] = len(t["ho_so_rieng"])
         return ra
 
     def dem_tai_khoan(self) -> Dict[str, int]:
@@ -326,6 +365,7 @@ class UsageReporter:
             "pools": [u.to_dict() for u in self.be_quota()],
             "runtimes": self.runtime_that(),
             "accounts": self.dem_tai_khoan(),
+            "pool": self.be_tai_khoan(),
             "providers": ([u.to_dict() for u in self.do_nha_cung_cap()]
                           if probe_cli else []),
             "provider_probe_ran": probe_cli,

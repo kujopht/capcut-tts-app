@@ -75,6 +75,7 @@ HANH_DONG_HOP_LE: Dict[str, Tuple[str, ...]] = {
     "get_agent_status": (),
     "get_usage": (),
     "delegate_work": ("objective",),
+    "record_memory": ("loai", "noi_dung"),
     "pause_task": ("task_id",),
     "resume_task": ("task_id",),
     "cancel_task": ("task_id",),
@@ -107,7 +108,13 @@ HANH_DONG_DIEU_KHIEN = frozenset({
 #: `cancel_task`/`reassign_task` làm mất lượt agent đang bay.
 #:
 #: Cả ba thành ĐỀ XUẤT: Leader nói ra, người bấm.
-HANH_DONG_TU_CHAY = frozenset({"pause_task", "resume_task"})
+#: V0.6.1 — `record_memory` TU CHAY duoc: no chi ghi vao SO KY UC cua chinh
+#: Control Center (khong cham viec, khong cham production), va ban ghi mang
+#: `tin_cay = leader` — thap hon tuyen bo tuong minh cua nguoi dung, hien ro
+#: trong UI. Rao cau truc: `de_bat.py` da ghi MOI tuyen bo tuong minh TRUOC
+#: khi Leader doc tin nhan, nen hanh dong nay chi danh cho thu noi len tu hoi
+#: thoai ma nguoi dung khong noi thanh mot tuyen bo.
+HANH_DONG_TU_CHAY = frozenset({"pause_task", "resume_task", "record_memory"})
 
 #: Hành động chỉ được ĐỀ XUẤT — phải có người bấm mới xảy ra.
 HANH_DONG_DE_XUAT = HANH_DONG_DIEU_KHIEN - HANH_DONG_TU_CHAY
@@ -257,6 +264,14 @@ Hành động dùng được:
   get_agent_status      hỏi agent nào đang chạy
   get_usage             hỏi mức dùng
   delegate_work         {"objective": "...", "hints": "...", "che_do": "ECO|AUTO|STRONG|MAX"}
+  record_memory         {"loai": "decision|constraint|requirement|incident|procedural|fact",
+                         "noi_dung": "...", "tieu_de": "...", "ly_do": "..."}
+                        — ghi một điều nổi lên từ HỘI THOẠI vào ký ức dự án.
+                        KHÔNG dùng khi tin nhắn người dùng ĐÃ là một tuyên bố
+                        ("hãy ghi nhớ…", "đây là quyết định…"): hệ thống đã ghi
+                        nó TRƯỚC khi bạn đọc, và khối KÝ ỨC bên dưới sẽ ghi
+                        "VỪA GHI TỰ ĐỘNG… qd_xxxx" — lúc đó chỉ XÁC NHẬN bằng
+                        mã, không ghi lại.
   pause_task | resume_task | cancel_task | reassign_task | approve_gate
                         {"task_id": "..."}
 
@@ -422,6 +437,42 @@ def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
 
 
 # -------------------------------------------------------------- phien Leader --
+
+def chiem_cho_fabric(fabric, runtime_id: str, nhan: str) -> bool:
+    """Ghi vào fabric rằng Leader ĐANG CHIẾM một chỗ của `runtime_id`.
+
+    Leader là một tiến trình `agy` ấm chạy trên đúng tài khoản mà bộ lập lịch
+    cũng giao việc cho worker (mặc định AG01). Trước V0.6.1 chỗ đó VÔ HÌNH
+    với `Scheduler`: AG01 khai 3 chỗ, Leader dùng 1, bộ lập lịch vẫn xếp đủ 3
+    worker lên — bốn tiến trình `agy` trên một tài khoản. Ghi nó vào
+    `running_tasks` dưới nhãn `LEADER:<project>` thì `con_cho`/`availability`
+    thấy đúng thực tế, và bảng điều khiển đọc được vì sao AG01 bận.
+
+    Không ném: fabric thiếu runtime → `False`. Nhãn KHÔNG phải một việc —
+    không đi qua `mark_finished` nên không tính vào completed/failed.
+    """
+    try:
+        r = fabric.runtimes.get(runtime_id)
+        if r is None:
+            return False
+        if nhan not in r.running_tasks:
+            r.running_tasks.append(nhan)
+        return True
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
+def tra_cho_fabric(fabric, runtime_id: str, nhan: str) -> bool:
+    """Trả chỗ đã chiếm bằng `chiem_cho_fabric`. Không ném."""
+    try:
+        r = fabric.runtimes.get(runtime_id)
+        if r is None or nhan not in r.running_tasks:
+            return False
+        r.running_tasks.remove(nhan)
+        return True
+    except Exception:                                       # noqa: BLE001
+        return False
+
 
 class PhienLeader:
     """Một phiên `agy` ẤM dùng riêng cho hội thoại Leader.

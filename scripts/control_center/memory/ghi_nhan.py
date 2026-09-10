@@ -34,7 +34,7 @@ from scripts.control_center.memory.model import (BangChung, KyUc, LoaiKyUc,
 BO_QUA = {"FABRIC_PROBED", "LOCK_RENEWED", "SESSION_HEARTBEAT",
           "MEMORY_RECORDED", "MEMORY_CHECKPOINT", "MEMORY_ERROR",
           "MEMORY_CONTEXT", "MEMORY_UNAVAILABLE", "MEMORY_RESUMED",
-          "ENGINE_STOPPED"}
+          "MEMORY_PROMOTED", "MEMORY_BACKFILL", "ENGINE_STOPPED"}
 
 #: Quan trong mac dinh theo loai su kien (1..10). Con lai = 4.
 QUAN_TRONG = {
@@ -144,7 +144,10 @@ class NguoiGhi:
                              han_tuoi=7 * 24 * 3600.0))
             return
         if kind in ("LIVE_PROBE_FAILED", "LEADER_UNAVAILABLE", "GATE_REASSERTED",
-                    "FABRIC_PROBE_FAILED"):
+                    "FABRIC_PROBE_FAILED", "PROVIDER_TEST_FAILED"):
+            # PROVIDER_TEST_FAILED (V0.6.1): ky uc giu "tai khoan X hong xac
+            # thuc luc Y" — `detail` da qua bo loc o DichVuProvider VA qua
+            # `bi_mat.loc` o cong vao L0; khoa/cookie/token khong bao gio vao.
             p.luu_ky_uc(KyUc(loai=LoaiKyUc.INCIDENT, quan_trong=qt or 5,
                              tin_cay=TinCay.DO_DUOC, tieu_de=kind.lower(),
                              noi_dung=f"{kind}: {detail}", the=("incident",),
@@ -183,6 +186,16 @@ class NguoiGhi:
         if sk is None:
             return
         self.so_ghi += 1
+        # V0.6.1 — DE BAT tuyen bo tuong minh cua NGUOI DUNG thanh ky uc co
+        # cau truc (quyet dinh / rang buoc / yeu cau / su co / quy trinh /
+        # su that). Tat dinh, khong LLM; xem `de_bat.py`. Loi o day khong
+        # duoc lam mat dong L0 vua ghi.
+        if role == "user":
+            try:
+                self.dv.de_bat_tu_chat(project_id, text or "", sk)
+            except Exception as exc:                        # noqa: BLE001
+                self.so_loi += 1
+                self.loi_cuoi = f"đề bạt: {type(exc).__name__}: {exc}"[:200]
         # Ket qua worker bao ve chat: dang nho, keo theo bang chung day.
         if role != "user" and str(meta.get("loai")) == "ket_qua":
             p.luu_ky_uc(KyUc(

@@ -193,6 +193,16 @@ class LocalMemoryProvider:
             self._that_bai("đọc ký ức", exc)
             return None
 
+    def thay_the(self, ma_moi: str, ma_cu: str, *, ai: str = "",
+                 ly_do: str = "") -> bool:
+        if self._kho is None:
+            return False
+        try:
+            return self._kho.thay_the_ky_uc(ma_moi, ma_cu, ai=ai, ly_do=ly_do)
+        except Exception as exc:                            # noqa: BLE001
+            self._that_bai("thay thế ký ức", exc)
+            return False
+
     def cham(self, ma: str) -> None:
         if self._kho is not None:
             try:

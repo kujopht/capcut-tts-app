@@ -404,7 +404,9 @@ class TestBenQuaMoLai(_Nen):
         st2 = ControlStore(root=self.goc); dv2 = DichVuKyUc(st2, self.goc)
         p = dv2.provider("fanfic")
         self.assertEqual(p.thong_ke()["dem"]["su_kien"], 30)
-        self.assertEqual(p.kho.phien_ban_luoc_do, 1)
+        from scripts.control_center.memory.kho import PHIEN_BAN_LUOC_DO
+        self.assertEqual(p.kho.phien_ban_luoc_do, PHIEN_BAN_LUOC_DO)
+        self.assertGreaterEqual(PHIEN_BAN_LUOC_DO, 2)
         self.assertTrue(p.kho.kiem_toan_ven()["fts"])
         dv2.close(); st2.close()
         self.st = ControlStore(root=self.goc); self.dv = DichVuKyUc(self.st, self.goc)

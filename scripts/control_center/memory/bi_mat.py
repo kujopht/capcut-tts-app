@@ -42,6 +42,15 @@ _MAU_THEM: Sequence[re.Pattern] = (
     re.compile(r"\bnpm_[A-Za-z0-9]{30,}"),
     re.compile(r"\bhf_[A-Za-z0-9]{30,}"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{20,}={0,2}"),
+    # V0.6.1 — khoa API nha cung cap ngoai + cookie/phien. `sk-` la hinh
+    # dang cua OpenAI, DashScope va phan lon endpoint OpenAI-compatible;
+    # `AKID` la SecretId cua Tencent Cloud; JWT `eyJ…`.
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
+    re.compile(r"\bAKID[A-Za-z0-9]{13,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    re.compile(r"(?i)\b((?:set-)?cookie\s*[:=]\s*)([^\r\n]{8,})"),
+    re.compile(r"(?i)\b((?:session(?:[_-]?id)?|sid|csrf[_-]?token|x-api-key|api-key)"
+               r"\s*[:=]\s*['\"]?)([^\s'\"#,;]{8,})"),
     # KEY=value / key: value voi ten khoa nhay cam. Giu ten, loc gia tri.
     re.compile(r"(?i)\b((?:[A-Z0-9_]*(?:PASS(?:WORD)?|PASSWD|SECRET|TOKEN|"
                r"API[_-]?KEY|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTH)[A-Z0-9_]*)"

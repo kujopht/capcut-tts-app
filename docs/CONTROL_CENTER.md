@@ -918,3 +918,40 @@ mỗi dự án một tệp, **không** trong cây git của dự án được qu
 `unicode61 remove_diacritics 2` (bắt buộc ghi rõ — mặc định gấp dấu tiếng
 Việt nửa vời), external content, dự phòng `LIKE` trên cột `chuan` (gấp
 dấu + `đ→d`). Không vector, không trigram, không LLM trong đường chọn lọc.
+
+## 17. Đề bạt ký ức, nhập lịch sử, provider ngoài + kho bí mật (V0.6.1)
+
+Ba báo cáo: `docs/reports/PROJECT_MEMORY_V061.md`,
+`docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`,
+`docs/reports/ANTIGRAVITY_POOL_AUDIT_V061.md`. Mã:
+`scripts/control_center/memory/{de_bat,nhap_khau}.py`,
+`scripts/control_center/nguon_git.py` (`git log`/`git worktree list` chỉ-đọc —
+đặt NGOÀI `memory/` vì gói đó không được có `subprocess`),
+`scripts/control_center/providers/`.
+
+Sáu luật thêm vào bốn luật của §16:
+
+5. **Tuyên bố tường minh của người dùng thành bản ghi NGAY tại cổng vào, tất
+   định, không LLM.** `de_bat.xet()` cần một dấu hiệu TUYÊN BỐ ("ghi nhớ…",
+   "quyết định của project:", "từ giờ rule là"…); một câu chỉ có "không được"
+   không phải quyết định. Bản ghi mang `authority = user_explicit`,
+   `nguon_loai = chat_user`, bằng chứng trỏ về đúng dòng L0. Leader nhận
+   "VỪA GHI TỰ ĐỘNG … `qd_xxxx`" và chỉ XÁC NHẬN, không ghi lại.
+6. **Thay thế kiểu ADR, hai chiều, không xoá.** `thay_the_ky_uc` một giao dịch:
+   bản cũ `thay_the` + `bi_thay_the`, bản mới `thay_the_cho`; cả hai truy được.
+   Mã `qd_*` người dùng nêu được quy về ký ức đứng sau trước khi so khớp.
+7. **Lịch sử nhập luôn `backfill`, không bao giờ `user_explicit`.** Vai "user"
+   trong tệp phiên không chứng minh người gõ (tóm tắt nén, skill, nhắc hệ
+   thống). Chỉ đề bạt trước mốc ký ức; phiên đang mở (mtime < 600 s) bị bỏ
+   qua; chỉ phiên của các worktree của ĐÚNG kho (`git worktree list`);
+   idempotent, chỉ đọc nguồn, resumable, thử khô.
+8. **Giá trị credential chỉ đi qua `KhoBiMat`.** Sổ (`providers.db`) giữ
+   `credential_ref`; mọi chuỗi giống khoá bị từ chối ghi. `BiMat` là tay cầm
+   mờ (`dung(fn)`), không pickle/json/repr ra giá trị. Không kho an toàn →
+   `luu()` NÉM, không rơi về tệp thường.
+9. **Provider ngoài vào fabric ở trạng thái KHÔNG nhận dispatch.**
+   `AUTO_ROUTING = False` là hằng trong mã; định tuyến thủ công = "Hỏi thử"
+   do người bấm. Bật AUTO là bước tiếp theo, có adapter thực thi + ngân sách.
+10. **Chỗ Leader chiếm trên AG01 HIỆN RA với bộ lập lịch.**
+    `leader.chiem_cho_fabric` ghi nhãn `LEADER:<project>` vào `running_tasks`
+    khi mở phiên, `tra_cho_fabric` ở `shutdown`; không đi qua `mark_finished`.

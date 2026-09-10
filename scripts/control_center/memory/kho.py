@@ -41,11 +41,26 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from scripts.control_center.memory.bi_mat import loc, loc_dict
 from scripts.control_center.memory.model import (BangChung, DiemDung, KyUc,
                                                  LoaiKyUc, QuyetDinh, SuKien,
-                                                 TinCay, TrangThaiQuyetDinh,
+                                                 TinCay, TrangThaiKyUc,
+                                                 TrangThaiQuyetDinh,
                                                  VienNang, bam, chuan_hoa,
                                                  gap_dau)
 
-PHIEN_BAN_LUOC_DO = 1
+#: V2 (V0.6.1): `ky_uc` them trang_thai / thay_the_cho / bi_thay_the / ts_sua /
+#: nguon_loai / nguon_id — trang thai va thay the o MOI ban ghi, nguon goc
+#: TUONG MINH. Nang cap bang `ALTER TABLE ADD COLUMN` (idempotent, kiem
+#: `PRAGMA table_info` truoc), khong dung lai bang: L0 la chi-them va FTS
+#: external-content khong duoc DROP.
+PHIEN_BAN_LUOC_DO = 2
+
+COT_V2 = (
+    ("trang_thai", "TEXT NOT NULL DEFAULT 'hieu_luc'"),
+    ("thay_the_cho", "TEXT NOT NULL DEFAULT ''"),
+    ("bi_thay_the", "TEXT NOT NULL DEFAULT ''"),
+    ("ts_sua", "REAL NOT NULL DEFAULT 0"),
+    ("nguon_loai", "TEXT NOT NULL DEFAULT ''"),
+    ("nguon_id", "TEXT NOT NULL DEFAULT ''"),
+)
 
 #: Tran INLINE cho `tom_tat` cua su kien: dai hon thi vao blob, so chi giu
 #: phan dau. 2000 khop voi `cc_events.detail` cua store.py.
@@ -246,9 +261,14 @@ class KhoKyUc:
             self.co_fts = False
             self.ly_do_khong_fts = f"{type(exc).__name__}: {exc}"[:200]
         pb = int(c.execute("PRAGMA user_version").fetchone()[0] or 0)
+        # V1 -> V2: them cot cho `ky_uc`. Kiem tung cot chu khong tin
+        # `user_version`: mot so bi dong giua chung (crash sau ALTER truoc
+        # PRAGMA) van hoi tu ve dung hinh dang.
+        co = {r[1] for r in c.execute("PRAGMA table_info(ky_uc)")}
+        for ten, kieu in COT_V2:
+            if ten not in co:
+                c.execute(f"ALTER TABLE ky_uc ADD COLUMN {ten} {kieu}")
         if pb < PHIEN_BAN_LUOC_DO:
-            # Cho moi ban di len: them cac buoc `if pb < N:` o day. V0.6 la
-            # phien ban dau nen chi dong dau.
             c.execute(f"PRAGMA user_version={PHIEN_BAN_LUOC_DO}")
 
     @property
@@ -339,29 +359,39 @@ class KhoKyUc:
         meta, n3 = loc_dict(k.meta)
         k.noi_dung, k.tieu_de, k.meta = nd, td, meta
         k.da_loc = int(k.da_loc) + n1 + n2 + n3
+        now = time.time()
         with self.giao_dich() as c:
-            cu = c.execute("SELECT id FROM ky_uc WHERE ma=?", (k.ma,)).fetchone()
+            cu = c.execute("SELECT id, nguon_loai, nguon_id FROM ky_uc WHERE ma=?",
+                           (k.ma,)).fetchone()
             if cu:
+                # Nguon goc KHONG bi ghi de bang rong: ban ghi dau tien giu
+                # nguon cua no.
                 c.execute(
                     "UPDATE ky_uc SET quan_trong=?, tin_cay=?, ts_cham=?, "
-                    "han_tuoi=?, the_json=?, meta_json=?, da_loc=? WHERE ma=?",
-                    (int(k.quan_trong), k.tin_cay.value, time.time(),
-                     k.han_tuoi, _js(list(k.the)), _js(meta), k.da_loc, k.ma))
+                    "han_tuoi=?, the_json=?, meta_json=?, da_loc=?, ts_sua=?, "
+                    "nguon_loai=COALESCE(NULLIF(?, ''), nguon_loai), "
+                    "nguon_id=COALESCE(NULLIF(?, ''), nguon_id) WHERE ma=?",
+                    (int(k.quan_trong), k.tin_cay.value, now,
+                     k.han_tuoi, _js(list(k.the)), _js(meta), k.da_loc, now,
+                     k.nguon_loai, k.nguon_id, k.ma))
                 k.id = int(cu["id"])
+                k.ts_sua = now
                 c.execute("INSERT INTO nhat_ky_sua (ts, bang, ma, hanh_dong, ai, "
                           "ghi_chu) VALUES (?,?,?,?,?,?)",
-                          (time.time(), "ky_uc", k.ma, "cap_nhat", ai,
+                          (now, "ky_uc", k.ma, "cap_nhat", ai,
                            "ghi lại cùng nội dung"))
             else:
                 cur = c.execute(
                     "INSERT INTO ky_uc (ma, loai, tieu_de, noi_dung, chuan, "
                     "quan_trong, tin_cay, ts, ts_su_kien, ts_cham, han_tuoi, "
-                    "the_json, meta_json, da_loc) VALUES "
-                    "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "the_json, meta_json, da_loc, trang_thai, thay_the_cho, "
+                    "bi_thay_the, ts_sua, nguon_loai, nguon_id) VALUES "
+                    "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (k.ma, k.loai.value, td, nd, gap_dau(f"{td} {nd}"),
                      int(k.quan_trong), k.tin_cay.value, k.ts, k.ts_su_kien,
                      k.ts_cham, k.han_tuoi, _js(list(k.the)), _js(meta),
-                     k.da_loc))
+                     k.da_loc, k.trang_thai.value, ",".join(k.thay_the_cho),
+                     k.bi_thay_the, k.ts_sua or k.ts, k.nguon_loai, k.nguon_id))
                 k.id = int(cur.lastrowid or 0)
             for b in k.bang_chung:
                 c.execute("INSERT OR IGNORE INTO bang_chung (ky_uc_ma, su_kien_id, "
@@ -386,17 +416,77 @@ class KhoKyUc:
                        for x in self._c().execute(
                            "SELECT * FROM bang_chung WHERE ky_uc_ma=?",
                            (h["ma"],)))
+        keys = h.keys()
         return KyUc(loai=LoaiKyUc(h["loai"]), noi_dung=h["noi_dung"],
                     tieu_de=h["tieu_de"], quan_trong=int(h["quan_trong"]),
                     tin_cay=TinCay(h["tin_cay"]), ts=h["ts"],
                     ts_su_kien=h["ts_su_kien"], ts_cham=h["ts_cham"],
                     han_tuoi=h["han_tuoi"], the=tuple(_un(h["the_json"], [])),
                     meta=_un(h["meta_json"], {}), bang_chung=bc,
-                    da_loc=int(h["da_loc"] or 0), ma=h["ma"], id=int(h["id"]))
+                    da_loc=int(h["da_loc"] or 0), ma=h["ma"], id=int(h["id"]),
+                    trang_thai=TrangThaiKyUc(h["trang_thai"] or "hieu_luc")
+                    if "trang_thai" in keys else TrangThaiKyUc.HIEU_LUC,
+                    thay_the_cho=tuple(x for x in (h["thay_the_cho"] or "").split(",")
+                                       if x) if "thay_the_cho" in keys else (),
+                    bi_thay_the=(h["bi_thay_the"] or "") if "bi_thay_the" in keys else "",
+                    ts_sua=float(h["ts_sua"] or 0) if "ts_sua" in keys else 0.0,
+                    nguon_loai=(h["nguon_loai"] or "") if "nguon_loai" in keys else "",
+                    nguon_id=(h["nguon_id"] or "") if "nguon_id" in keys else "")
+
+    def thay_the_ky_uc(self, ma_moi: str, ma_cu: str, *, ai: str = "",
+                       ly_do: str = "") -> bool:
+        """`ma_moi` THAY THẾ `ma_cu` — hai chiều, một giao dịch, mọi loại.
+
+        Bản cũ chỉ đổi trạng thái + `bi_thay_the`; nội dung nguyên vẹn và
+        vẫn tra được. Nếu một trong hai là quyết định `qd_*` thì bảng
+        `quyet_dinh` cũng được cập nhật cùng lúc — hai sổ không được lệch.
+        """
+        if not ma_moi or not ma_cu or ma_moi == ma_cu:
+            return False
+        now = time.time()
+        with self.giao_dich() as c:
+            moi = c.execute("SELECT thay_the_cho FROM ky_uc WHERE ma=?",
+                            (ma_moi,)).fetchone()
+            cu = c.execute("SELECT bi_thay_the FROM ky_uc WHERE ma=?",
+                           (ma_cu,)).fetchone()
+            if moi is None or cu is None:
+                return False
+            ds = [x for x in (moi["thay_the_cho"] or "").split(",") if x]
+            if ma_cu not in ds:
+                ds.append(ma_cu)
+            c.execute("UPDATE ky_uc SET thay_the_cho=?, ts_sua=? WHERE ma=?",
+                      (",".join(ds), now, ma_moi))
+            c.execute("UPDATE ky_uc SET bi_thay_the=?, trang_thai=?, ts_sua=? "
+                      "WHERE ma=? AND bi_thay_the=''",
+                      (ma_moi, TrangThaiKyUc.THAY_THE.value, now, ma_cu))
+            c.execute("INSERT INTO nhat_ky_sua (ts, bang, ma, hanh_dong, ai, "
+                      "ghi_chu) VALUES (?,?,?,?,?,?)",
+                      (now, "ky_uc", ma_cu, "thay_the", ai,
+                       f"bị {ma_moi} thay thế" + (f" — {ly_do[:120]}" if ly_do else "")))
+            # Dong bo bang quyet dinh (neu la quyet dinh).
+            q_moi = c.execute("SELECT ma, thay_the_cho FROM quyet_dinh WHERE ky_uc_ma=?",
+                              (ma_moi,)).fetchone()
+            q_cu = c.execute("SELECT ma FROM quyet_dinh WHERE ky_uc_ma=?",
+                             (ma_cu,)).fetchone()
+            if q_cu is not None:
+                c.execute("UPDATE quyet_dinh SET trang_thai=?, bi_thay_the=? "
+                          "WHERE ky_uc_ma=? AND bi_thay_the=''",
+                          (TrangThaiQuyetDinh.THAY_THE.value,
+                           q_moi["ma"] if q_moi else ma_moi, ma_cu))
+            if q_moi is not None and q_cu is not None:
+                qs = [x for x in (q_moi["thay_the_cho"] or "").split(",") if x]
+                if q_cu["ma"] not in qs:
+                    qs.append(q_cu["ma"])
+                c.execute("UPDATE quyet_dinh SET thay_the_cho=? WHERE ma=?",
+                          (",".join(qs), q_moi["ma"]))
+        return True
 
     def liet_ke_ky_uc(self, *, loai: Optional[LoaiKyUc] = None, limit: int = 100,
-                      tu: float = 0.0, den: float = 0.0) -> List[KyUc]:
+                      tu: float = 0.0, den: float = 0.0,
+                      chi_hieu_luc: bool = False) -> List[KyUc]:
         dk, ts = [], []
+        if chi_hieu_luc:
+            dk.append("trang_thai='hieu_luc' AND bi_thay_the=''")
         if loai is not None:
             dk.append("loai=?"); ts.append(loai.value)
         if tu:
@@ -460,23 +550,30 @@ class KhoKyUc:
         k.loai = LoaiKyUc.DECISION
         with self.giao_dich() as c:
             self.luu_ky_uc(k, ai=ai)
-            so = int(c.execute("SELECT COALESCE(MAX(so),0)+1 FROM quyet_dinh")
-                     .fetchone()[0])
-            ma = f"qd_{so:04d}"
-            ly, _ = loc(ly_do)
-            c.execute("INSERT INTO quyet_dinh (ma, so, ky_uc_ma, trang_thai, "
-                      "thay_the_cho, bi_thay_the, ly_do, ts) VALUES "
-                      "(?,?,?,?,?,?,?,?)",
-                      (ma, so, k.ma, TrangThaiQuyetDinh.HIEU_LUC.value,
-                       ",".join(thay_the_cho), "", ly[:1000], time.time()))
+            da = c.execute("SELECT ma FROM quyet_dinh WHERE ky_uc_ma=?",
+                           (k.ma,)).fetchone()
+            if da:
+                ma = da["ma"]          # cung noi dung -> cung quyet dinh
+            else:
+                so = int(c.execute("SELECT COALESCE(MAX(so),0)+1 FROM quyet_dinh")
+                         .fetchone()[0])
+                ma = f"qd_{so:04d}"
+                ly, _ = loc(ly_do)
+                c.execute("INSERT INTO quyet_dinh (ma, so, ky_uc_ma, trang_thai, "
+                          "thay_the_cho, bi_thay_the, ly_do, ts) VALUES "
+                          "(?,?,?,?,?,?,?,?)",
+                          (ma, so, k.ma, TrangThaiQuyetDinh.HIEU_LUC.value,
+                           "", "", ly[:1000], time.time()))
+            # `thay_the_cho` nhan ca ma `qd_*` lan ma `ku_*`: quy ve ky uc.
             for cu in thay_the_cho:
-                c.execute("UPDATE quyet_dinh SET trang_thai=?, bi_thay_the=? "
-                          "WHERE ma=? AND bi_thay_the=''",
-                          (TrangThaiQuyetDinh.THAY_THE.value, ma, cu))
-                c.execute("INSERT INTO nhat_ky_sua (ts, bang, ma, hanh_dong, ai, "
-                          "ghi_chu) VALUES (?,?,?,?,?,?)",
-                          (time.time(), "quyet_dinh", cu, "thay_the", ai,
-                           f"bị {ma} thay thế"))
+                ku_cu = cu
+                if str(cu).startswith("qd_"):
+                    h = c.execute("SELECT ky_uc_ma FROM quyet_dinh WHERE ma=?",
+                                  (cu,)).fetchone()
+                    if h is None:
+                        continue
+                    ku_cu = h["ky_uc_ma"]
+                self.thay_the_ky_uc(k.ma, ku_cu, ai=ai, ly_do=ly_do)
         return self.quyet_dinh(ma)  # type: ignore[return-value]
 
     def quyet_dinh(self, ma: str) -> Optional[QuyetDinh]:
@@ -583,6 +680,17 @@ class KhoKyUc:
             ra[f"ky_uc_{loai.value}"] = int(c.execute(
                 "SELECT count(*) FROM ky_uc WHERE loai=?",
                 (loai.value,)).fetchone()[0])
+            ra[f"ky_uc_{loai.value}_hieu_luc"] = int(c.execute(
+                "SELECT count(*) FROM ky_uc WHERE loai=? AND trang_thai='hieu_luc' "
+                "AND bi_thay_the=''", (loai.value,)).fetchone()[0])
+        ra["ky_uc_thay_the"] = int(c.execute(
+            "SELECT count(*) FROM ky_uc WHERE bi_thay_the<>''").fetchone()[0])
+        ra["ky_uc_user_explicit"] = int(c.execute(
+            "SELECT count(*) FROM ky_uc WHERE tin_cay='user_explicit'").fetchone()[0])
+        ra["ky_uc_backfill"] = int(c.execute(
+            "SELECT count(*) FROM ky_uc WHERE tin_cay='backfill'").fetchone()[0])
+        ra["su_kien_backfill"] = int(c.execute(
+            "SELECT count(*) FROM su_kien WHERE loai LIKE 'backfill:%'").fetchone()[0])
         ra["su_kien_trung_dau"] = int(c.execute(
             "SELECT COALESCE(SUM(n-1),0) FROM (SELECT count(*) AS n FROM su_kien "
             "GROUP BY dau HAVING n>1)").fetchone()[0])

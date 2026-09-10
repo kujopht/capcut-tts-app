@@ -119,9 +119,15 @@ class ControlCenter:
                  executor_factory=None,
                  probe: bool = False,
                  max_parallel: int = 3,
-                 leader_bat: bool = False):
+                 leader_bat: bool = False,
+                 kho_bi_mat=None):
         self.root = Path(root) if root else Path.cwd()
         self.store = store if store is not None else ControlStore(root=self.root)
+        #: `DichVuProvider` (V0.6.1) — dung muon; `kho_bi_mat` chi de bo kiem
+        #: cam `KhoBiMatBoNho` vao. Mac dinh la kho an toan cua may (hoac
+        #: "khong san" — KHONG BAO GIO la tep thuong).
+        self._providers = None
+        self._kho_bi_mat = kho_bi_mat
         self.max_parallel = max(1, max_parallel)
         self.owner = owner_id()
         # `probe=False` mac dinh: dung Control Center KHONG duoc goi mang.
@@ -211,7 +217,31 @@ class ControlCenter:
                 # Da do ngay luc nap: dung moc lai de nhip dau tien khong
                 # do lan thu hai (moi lan do ton mot luot moi provider).
                 self._lan_do_cuoi = time.time()
+            # V0.6.1: provider ngoai vao so dinh tuyen o trang thai KHONG
+            # nhan dispatch — `explain` thay, khong duong tu dong nao giao.
+            try:
+                self.providers.dang_ky_vao_fabric(f)
+            except Exception:                               # noqa: BLE001
+                pass
         return self._fabric
+
+    @property
+    def providers(self):
+        """`DichVuProvider` — provider ngoài + kho bí mật (V0.6.1)."""
+        if self._providers is None:
+            from scripts.control_center.providers import DichVuProvider
+            self._providers = DichVuProvider(self.store, self.root,
+                                             kho_bi_mat=self._kho_bi_mat,
+                                             sau_khi_doi=self._dong_bo_provider_fabric)
+        return self._providers
+
+    def _dong_bo_provider_fabric(self) -> None:
+        """Sổ provider vừa đổi → đồng bộ vào fabric ĐANG SỐNG (không dựng mới,
+        không dò). Fabric chưa dựng thì lần dựng đầu tự đăng ký."""
+        f = self._fabric
+        if f is None or self._providers is None:
+            return
+        self._providers.dang_ky_vao_fabric(f)
 
     #: Han dung cua mot lan do suc khoe. Qua han thi do lai truoc khi ket
     #: luan "khong co worker nao" — neu khong, mot provider vua song lai se
@@ -782,6 +812,14 @@ class ControlCenter:
                     bac = 0
                 ph = leader.PhienLeader(model=bg.model, premium_tier=bac)
                 self._leader_phien[project_id] = ph
+                # Leader va worker dung CUNG be tai khoan AG (mac dinh AG01).
+                # Cho Leader chiem phai HIEN ra voi bo lap lich — xem
+                # `leader.chiem_cho_fabric`. Tra lai o `shutdown`.
+                try:
+                    leader.chiem_cho_fabric(self.fabric, ph.runtime_id,
+                                            f"LEADER:{project_id}")
+                except Exception:                           # noqa: BLE001
+                    pass
             return ph
 
     def _leader_khong_uy_thac(self, ctx, qd, tin, dk_hop_le) -> Dict:
@@ -978,6 +1016,31 @@ class ControlCenter:
 
     def _chay_dieu_khien(self, project_id: str, a) -> Dict:
         """Thực hiện MỘT hành động điều khiển. Fail closed, có dấu vết."""
+        if a.loai == "record_memory":
+            # V0.6.1 — Leader de nghi ghi mot ky uc noi len tu hoi thoai.
+            # Chi cham SO KY UC; `tin_cay=leader`; co dau vet.
+            if self._ky_uc is None:
+                return {"loi": "ký ức không sẵn — không ghi được"}
+            loai = str(a.tham_so.get("loai") or "fact").lower()
+            nd = str(a.tham_so.get("noi_dung") or "").strip()
+            if not nd:
+                return {"loi": "record_memory thiếu nội dung"}
+            try:
+                if loai == "decision":
+                    r = self._ky_uc.ghi_quyet_dinh(
+                        project_id, nd, ly_do=str(a.tham_so.get("ly_do") or ""),
+                        tieu_de=str(a.tham_so.get("tieu_de") or ""),
+                        thay_the_cho=[str(x) for x in (a.tham_so.get("thay_the_cho") or [])],
+                        ai="leader", tin_cay="leader")
+                else:
+                    r = self._ky_uc.ghi_ky_uc(
+                        project_id, loai, nd, tieu_de=str(a.tham_so.get("tieu_de") or ""),
+                        quan_trong=6, ai="leader", tin_cay="leader", nguon_loai="leader")
+            except Exception as exc:                        # noqa: BLE001
+                return {"loi": f"record_memory: {type(exc).__name__}: {exc}"[:300]}
+            if not r or r.get("loi"):
+                return {"loi": f"record_memory: {(r or {}).get('loi', 'không ghi được')}"}
+            return {"ok": f"đã ghi {loai} {r.get('ma', '')} (nguồn: Leader)"}
         tid = str(a.tham_so.get("task_id") or "")
         t = self.store.task(tid)
         if t is None or t.project_id != project_id:
@@ -2390,9 +2453,12 @@ class ControlCenter:
         # Phien Leader la tien trinh `agy` AM cua CHINH ta — dong no la
         # dung, khac han voi mot luot agent dang bay cua worker.
         with self._khoa_leader:
-            ph = list(self._leader_phien.values())
+            ph = list(self._leader_phien.items())
             self._leader_phien.clear()
-        for x in ph:
+        for pid, x in ph:
+            if self._fabric is not None:
+                leader.tra_cho_fabric(self._fabric, getattr(x, "runtime_id", ""),
+                                      f"LEADER:{pid}")
             try:
                 x.dong()
             except Exception:                             # noqa: BLE001
@@ -2402,6 +2468,11 @@ class ControlCenter:
         for c in ctxs:
             try:
                 c.leases.close()
+            except Exception:                             # noqa: BLE001
+                pass
+        if self._providers is not None:
+            try:
+                self._providers.close()
             except Exception:                             # noqa: BLE001
                 pass
 

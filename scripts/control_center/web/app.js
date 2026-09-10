@@ -1010,12 +1010,18 @@ async function veKyUcThongKe() {
   const o = (nhan, gt, phu = '') => `<div class="kyuc-o"><div class="kyuc-so">${esc(gt)}</div>
     <div class="kyuc-nhan">${esc(nhan)}${phu ? `<span class="qs-phu"> ${esc(phu)}</span>` : ''}</div></div>`;
   dat('#kyuc-thongke', [
-    o('Sự kiện (lịch sử thô)', d.su_kien ?? '—', coDocKyUc(b.lich_su_tho || 0)),
-    o('Ký ức có cấu trúc', d.ky_uc ?? '—', coDocKyUc(b.co_cau_truc || 0)),
-    o('Quyết định', d.quyet_dinh ?? '—', `${d.ky_uc_decision ?? 0} bản ghi`),
+    o('Sự kiện (lịch sử thô)', d.su_kien ?? '—',
+      `${coDocKyUc(b.lich_su_tho || 0)}${d.su_kien_backfill ? ` · ${d.su_kien_backfill} nhập lịch sử` : ''}`),
+    o('Ký ức có cấu trúc', d.ky_uc ?? '—',
+      `${coDocKyUc(b.co_cau_truc || 0)} · ${d.ky_uc_user_explicit ?? 0} người dùng tuyên bố`),
+    o('Quyết định', d.quyet_dinh ?? '—',
+      `${d.ky_uc_decision_hieu_luc ?? 0} hiệu lực · ${d.ky_uc_thay_the ?? 0} đã thay thế`),
     o('Sự cố', d.ky_uc_incident ?? '—'),
+    o('Ràng buộc', d.ky_uc_constraint ?? '—', `${d.ky_uc_constraint_hieu_luc ?? 0} hiệu lực`),
+    o('Yêu cầu', d.ky_uc_requirement ?? '—', `${d.ky_uc_requirement_hieu_luc ?? 0} hiệu lực`),
+    o('Quy trình', d.ky_uc_procedural ?? '—'),
     o('Điểm dừng', d.diem_dung ?? '—'),
-    o('Bằng chứng (blob)', tk.so_blob ?? '—', coDocKyUc(b.bang_chung || 0)),
+    o('Mắt xích bằng chứng', d.bang_chung ?? '—', `${tk.so_blob ?? 0} blob · ${coDocKyUc(b.bang_chung || 0)}`),
     o('Chỉ mục', coDocKyUc(b.chi_muc || 0), tk.che_do_tim || ''),
     o('Tổng trên đĩa', coDocKyUc(b.tong || 0), `db ${coDocKyUc(b.tep_db || 0)}`),
   ].join('') + `<div class="kyuc-o kyuc-rong"><div class="qs-phu">sổ: ${esc(tk.ns || '')}
@@ -1068,6 +1074,8 @@ async function veKyUcDanhSach() {
         ${esc(r.chon ? r.chon.length : 0)} chọn · ${esc(r.bo_qua ?? 0)} bỏ qua ·
         ${esc(r.lich_su_so_su_kien ?? 0)} sự kiện trong sổ</div>
         <pre class="kyuc-goi">${esc(r.van || '(rỗng — chưa có gì để nhớ)')}</pre>`;
+    } else if (kyUcLoc === 'backfill') {
+      html = veBackfillPanel(await api(`/api/memory/backfill/sources?project=${pid}`), null);
     } else {
       const r = await api(`/api/memory/list?project=${pid}&loai=${encodeURIComponent(kyUcLoc)}`);
       if (kyUcLoc === 'decision') {
@@ -1092,6 +1100,61 @@ async function veKyUcDanhSach() {
     dat('#kyuc-ds', trong(`không đọc được: ${e.message}`));
   } finally { kyUcDangTai = false; }
 }
+
+// Nguon lich su: quet / thu kho / nhap. Moi hanh dong la MOT nut bam ro rang;
+// khong tu nhap gi khi mo tab.
+function veBackfillPanel(ng, kq) {
+  const hang = (ng.nguon || []).map((n) => {
+    const lc = n.lan_cuoi;
+    const tk = lc ? lc.thong_ke || {} : null;
+    return `<div class="kyuc-hang" data-nguon="${esc(n.nguon)}">
+      <span class="hh ${n.san ? 'luc' : 'xam'}">${n.san ? 'sẵn' : 'không sẵn'}</span>
+      <span class="kyuc-td"><b>${esc(n.nhan)}</b>${n.ly_do ? ` — ${esc(n.ly_do)}` : ''}</span>
+      <span class="qs-phu">đã nhập ${esc(n.da_nhap)}${tk ? ` · lần cuối: ${tk.thu_kho ? 'thử khô' : 'nhập'}
+        ${esc(tk.kham_pha ?? 0)} khám phá / ${esc(tk.da_nhap ?? 0)} nhập / ${esc(tk.trung ?? 0)} trùng /
+        ${esc(tk.de_bat ?? 0)} đề bạt · ${esc(tuoiChu((Date.now() / 1000) - lc.ts))}` : ''}</span></div>`;
+  }).join('') || trong('không có nguồn nào');
+  let kqHtml = '';
+  if (kq) {
+    const t = kq.tong || {};
+    kqHtml = `<div class="nhan" style="margin-top:8px">${kq.thu_kho ? 'THỬ KHÔ' : 'ĐÃ NHẬP'} —
+      ${esc(kq.giay)}s</div>
+      <div class="kyuc-thongke" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+        ${[['khám phá', t.kham_pha], ['nhập', t.da_nhap], ['trùng (bỏ)', t.trung], ['bỏ qua', t.bo_qua],
+           ['đã lọc bí mật', t.da_loc], ['đề bạt', t.de_bat], ['còn lại', t.con_lai], ['nguồn không sẵn', t.khong_san]]
+          .map(([n, v]) => `<div class="kyuc-o"><div class="kyuc-so">${esc(v ?? 0)}</div><div class="kyuc-nhan">${esc(n)}</div></div>`).join('')}
+      </div>
+      ${(kq.nguon || []).map((s) => `<div class="qs-phu">· ${esc(s.nguon)}: khám phá ${esc(s.kham_pha)},
+        nhập ${esc(s.da_nhap)}, trùng ${esc(s.trung)}, đề bạt ${esc(s.de_bat)}${s.khong_san ? `, không sẵn: ${esc(s.khong_san)}` : ''}
+        ${(s.ghi_chu || []).length ? ` · ${esc(s.ghi_chu[0])}` : ''}</div>`).join('')}`;
+  }
+  return `<div class="nhan">NGUỒN LỊCH SỬ CỦA DỰ ÁN <span class="qs-phu">— chỉ đọc nguồn; ghi vào sổ ký ức;
+      chỉ đề bạt lịch sử trước mốc ký ức ${ng.moc_ky_uc ? esc(new Date(ng.moc_ky_uc * 1000).toLocaleString()) : ''}</span></div>
+    ${hang}
+    <div class="hang-nut" style="margin-top:8px">
+      <button id="bf-scan" class="nho">Quét lại</button>
+      <button id="bf-dry" class="nho" title="Chỉ đếm, không ghi">Thử khô</button>
+      <button id="bf-import" title="Ghi vào sổ ký ức (idempotent, resumable)">Nhập</button>
+    </div>${kqHtml}`;
+}
+
+async function chayBackfill(thuKho) {
+  const pid = encodeURIComponent(S.selected);
+  dat('#kyuc-ds', trong(thuKho ? 'đang thử khô…' : 'đang nhập lịch sử… (có thể mất vài phút)'));
+  try {
+    const kq = await api('/api/memory/backfill', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: S.selected, thu_kho: thuKho }) });
+    const ng = await api(`/api/memory/backfill/sources?project=${pid}`);
+    dat('#kyuc-ds', veBackfillPanel(ng, kq));
+    if (!thuKho) veKyUcThongKe();
+  } catch (e) { dat('#kyuc-ds', trong(`không chạy được: ${e.message}`)); }
+}
+$('#kyuc-ds').addEventListener('click', (e) => {
+  if (e.target.id === 'bf-scan') veKyUcDanhSach();
+  else if (e.target.id === 'bf-dry') chayBackfill(true);
+  else if (e.target.id === 'bf-import') chayBackfill(false);
+});
 
 function veBangChung(bcs) {
   if (!bcs || !bcs.length) return '<p class="ghi-chu">không có mắt xích bằng chứng (bản ghi gốc)</p>';
@@ -1124,11 +1187,18 @@ async function moBanGhiKyUc(ma) {
   let html = '';
   if (k) {
     html += `<div class="nhan">${esc(k.ma)} <span class="hh ${MAU_KYUC[k.loai] || 'xam'}">${esc(k.loai)}</span></div>
-      <div class="kyuc-meta">ghi ${esc(new Date(k.ts * 1000).toLocaleString())} ·
-        chuyện xảy ra ${esc(new Date(k.ts_su_kien * 1000).toLocaleString())} ·
-        quan trọng ${esc(k.quan_trong)}/10 · nguồn <b>${esc(k.tin_cay)}</b>
+      <div class="kyuc-meta">
+        <span class="hh ${k.hieu_luc ? 'luc' : (k.trang_thai === 'thay_the' ? 'xam' : 'vang')}">${
+          k.hieu_luc ? 'HIỆU LỰC' : esc(String(k.trang_thai || '').toUpperCase())}</span>
+        ghi ${esc(new Date(k.ts * 1000).toLocaleString())} ·
+        chuyện xảy ra ${esc(new Date(k.ts_su_kien * 1000).toLocaleString())}
+        ${k.ts_sua && Math.abs(k.ts_sua - k.ts) > 1 ? ` · sửa ${esc(new Date(k.ts_sua * 1000).toLocaleString())}` : ''} ·
+        quan trọng ${esc(k.quan_trong)}/10 · thẩm quyền <b>${esc(k.tin_cay)}</b>
+        ${k.nguon_loai ? ` · nguồn <b>${esc(k.nguon_loai)}</b>${k.nguon_id ? ` #${esc(k.nguon_id)}` : ''}` : ''}
         ${k.het_han ? ' · <span class="hh vang">QUÁ TTL</span>' : ''}
         ${k.da_loc ? ` · đã lọc ${esc(k.da_loc)}` : ''}</div>
+      ${(k.thay_the_cho || []).length ? `<div class="qs-phu">thay thế cho: ${esc(k.thay_the_cho.join(', '))}</div>` : ''}
+      ${k.bi_thay_the ? `<div class="qs-phu">bị thay thế bởi: <a href="#" data-ma="${esc(k.bi_thay_the)}" class="kyuc-link">${esc(k.bi_thay_the)}</a></div>` : ''}
       ${k.tieu_de ? `<h4>${esc(k.tieu_de)}</h4>` : ''}
       <pre class="kyuc-goi">${esc(k.noi_dung)}</pre>
       ${k.the.length ? `<div class="qs-phu">thẻ: ${esc(k.the.join(', '))}</div>` : ''}`;
@@ -1400,6 +1470,197 @@ Chế độ định tuyến ECO/AUTO/STRONG/MAX hiện đổi được ở tần
   truot('#cd-blur', 'blur', (v) => `${v}px`);
   $('#cd-fit').onchange = (e) => luuCaiDatUI({ fit: e.target.value });
 };
+
+// ==================== V0.6.1: PROVIDERS & ACCOUNTS ====================
+//
+// Mot hop thoai, ba phan: KHO BI MAT (kieu, san hay khong), BE TAI KHOAN
+// ANTIGRAVITY (so dem tu so dang ky dang chay — khong gia dinh "8"), NHA
+// CUNG CAP NGOAI (provider / tai khoan / model). Gia tri khoa di vao DUY
+// NHAT o o `type=password` cua form "Them tai khoan", gui MOT LAN toi
+// 127.0.0.1 kem token, va khong bao gio quay lai: moi phan hoi chi mang
+// `credential_ref`. Khong nut nao o day dinh tuyen AUTO — "Hoi thu" la
+// duong THU CONG, nguoi bam, mot luot.
+let pvState = { d: null, u: null };
+
+function pvBadgeTaiKhoan(t) {
+  if (!t.bat) return hh('OFF');
+  if (t.cooldown_den && t.cooldown_den * 1000 > Date.now()) return hh('COOLDOWN');
+  if (t.lan_thu_ok === true) return hh('OK');
+  if (t.lan_thu_ok === false) return hh('DOWN');
+  return hh('UNKNOWN');
+}
+
+function veProvidersHtml(d, u) {
+  const kho = d.kho_bi_mat || {};
+  const pool = (u && u.pool) || {};
+  const rts = ((u && u.runtimes) || []).filter((r) => r.provider === 'antigravity');
+  const ag = pool.antigravity;
+  const models = d.models || {};
+  const tks = d.tai_khoan || [];
+  const presets = d.presets || [];
+  const cs = d.chinh_sach || {};
+
+  const khoHtml = `<div class="nhan">KHO BÍ MẬT</div>
+    <div class="qs-hang"><span class="qs-ten">${esc(kho.kieu || '?')}</span>
+      <span class="qs-phu">${esc(kho.chi_tiet || '')}</span>
+      ${hh(kho.san ? (kho.ben ? 'OK' : 'DEGRADED') : 'DOWN')}</div>
+    <p class="ghi-chu">Giá trị khoá chỉ đi vào kho này (vùng tên <code>${esc(kho.vung_ten || '')}</code>).
+      Sổ <code>providers.db</code> chỉ giữ <b>credential_ref</b>, alias, trạng thái; sổ Control
+      Center và ký ức dự án chỉ giữ sự kiện đã lọc. Không có kho an toàn thì KHÔNG thêm được tài
+      khoản — không rơi về tệp thường.</p>`;
+
+  const agHtml = `<div class="nhan" style="margin-top:10px">BỂ TÀI KHOẢN ANTIGRAVITY
+      <span class="qs-phu">— đếm từ sổ đăng ký đang chạy${u ? '' : ' (chọn một dự án để đọc)'}</span></div>
+    ${ag ? `<div class="kyuc-thongke" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+      ${[['đăng ký', ag.dang_ky], ['cấp phát', ag.cap_phat], ['nhận dispatch', ag.nhan_dispatch],
+         ['khoẻ', ag.khoe], ['cooldown', ag.cooldown], ['offline', ag.offline],
+         ['chỗ đang dùng / tổng', `${ag.dang_dung}/${ag.tong_cho}`], ['hồ sơ riêng', ag.ho_so_rieng]]
+        .map(([n, v]) => `<div class="kyuc-o"><div class="kyuc-so">${esc(v)}</div>
+          <div class="kyuc-nhan">${esc(n)}</div></div>`).join('')}</div>
+      <div class="qs-phu">Leader đang chiếm chỗ ở: ${(ag.leader_chiem || []).length
+        ? esc(ag.leader_chiem.join(', ')) : 'không'} · Leader và worker dùng CÙNG bể (Leader ghim AG01);
+        từ V0.6.1 chỗ Leader chiếm hiện ra với bộ lập lịch.</div>
+      <details><summary>${rts.length} khe</summary>
+        ${rts.map((r) => `<div class="qs-hang">
+          <span class="qs-ten">${esc(r.runtime_id)} <span class="qs-phu">${esc(r.auth_profile || '')}</span></span>
+          <span class="qs-phu">${esc(r.in_flight)}/${esc(r.concurrency)}${(r.running_tasks || []).length
+            ? ' · ' + esc(r.running_tasks.join(', ')) : ''}${r.consecutive_failures
+            ? ` · hỏng liên tiếp ${esc(r.consecutive_failures)}` : ''}${r.health_detail
+            ? ` · ${esc(r.health_detail)}` : ''}${r.needs_provisioning ? ` · ${esc(r.needs_provisioning)}` : ''}</span>
+          ${hh(r.status)}</div>`).join('')}</details>` : trong('chưa đọc được bể — chọn dự án rồi mở lại')}`;
+
+  const pvs = (d.providers || []).map((p) => {
+    const ms = models[p.provider_id] || [];
+    const tk = tks.filter((t) => t.provider_id === p.provider_id);
+    const be = (d.be || {})[p.provider_id] || {};
+    return `<div class="pv-khoi" data-pid="${esc(p.provider_id)}" style="border:1px solid var(--vien);border-radius:6px;padding:8px;margin-top:8px">
+      <div class="qs-hang"><span class="qs-ten"><b>${esc(p.provider_id)}</b> — ${esc(p.ten)}</span>
+        <span class="qs-phu">${esc(p.preset)} · <code>${esc(p.base_url)}</code></span>
+        ${hh(p.bat ? 'OK' : 'OFF')}
+        <button class="nho" data-act="pv-xoa" data-pid="${esc(p.provider_id)}" title="Xoá provider + mọi tài khoản + credential của nó">Xoá</button></div>
+      <div class="qs-phu">${esc(ms.filter((m) => m.nguon === 'probed').length)} model đo được ·
+        ${esc(ms.filter((m) => m.nguon === 'preset').length)} gợi ý (chưa đo) ·
+        bể: ${esc(be.bat ?? 0)} bật / ${esc(be.khoe ?? 0)} khoẻ / ${esc(be.cooldown ?? 0)} cooldown</div>
+      ${tk.length ? tk.map((t) => `<div class="qs-hang" data-acc="${esc(t.account_id)}">
+          <span class="qs-ten">${esc(t.alias)} <span class="qs-phu">ref ${esc(t.credential_ref)}</span></span>
+          <span class="qs-phu">${t.lan_thu_ts ? `thử ${esc(tuoiChu(Date.now() / 1000 - t.lan_thu_ts))}: ` : ''}${esc(t.lan_thu_chi_tiet || 'chưa thử')}</span>
+          ${pvBadgeTaiKhoan(t)}
+          <button class="nho" data-act="tk-thu" data-acc="${esc(t.account_id)}" title="GET /models (miễn phí) hoặc chat max_tokens=1">Thử kết nối</button>
+          <button class="nho" data-act="tk-bat" data-acc="${esc(t.account_id)}" data-bat="${t.bat ? '0' : '1'}">${t.bat ? 'Tắt' : 'Bật'}</button>
+          <button class="nho" data-act="tk-hoi" data-acc="${esc(t.account_id)}" data-pid="${esc(p.provider_id)}" title="Định tuyến THỦ CÔNG một lượt">Hỏi thử</button>
+          <button class="nho" data-act="tk-xoa" data-acc="${esc(t.account_id)}" title="Xoá tài khoản + credential khỏi kho">Xoá</button>
+        </div>`).join('') : trong('chưa có tài khoản — thêm bên dưới (khoá không rời máy này)')}
+      <div class="cd-hang" style="margin-top:6px">
+        <input type="text" class="pv-alias" placeholder="alias (vd prod)" style="width:30%">
+        <input type="password" class="pv-khoa" placeholder="API key — chỉ gửi MỘT lần tới 127.0.0.1" autocomplete="off" style="flex:1">
+        <button class="nho" data-act="tk-them" data-pid="${esc(p.provider_id)}">Thêm tài khoản</button>
+      </div>
+      <div class="pv-ket-qua qs-phu"></div>
+    </div>`;
+  }).join('') || trong('chưa có nhà cung cấp ngoài nào');
+
+  const themHtml = `<div class="nhan" style="margin-top:10px">THÊM NHÀ CUNG CẤP</div>
+    <div class="cd-hang">
+      <select id="pv-preset">${presets.map((p) => `<option value="${esc(p.ma)}" data-url="${esc(p.base_url_mac_dinh)}">${esc(p.ten)}</option>`).join('')}</select>
+      <input id="pv-id" type="text" placeholder="mã (vd alibaba)" style="width:22%">
+    </div>
+    <div class="cd-hang">
+      <input id="pv-url" type="text" placeholder="base_url (https://…/v1)" style="flex:1"
+        value="${esc((presets[0] || {}).base_url_mac_dinh || '')}">
+      <button id="pv-them" class="chinh nho">Thêm</button>
+    </div>
+    <p class="ghi-chu" id="pv-preset-ghi-chu">${esc((presets[0] || {}).ghi_chu || '')}</p>
+    <p class="ghi-chu">Định tuyến AUTO cho provider ngoài: <b>${cs.auto_routing ? 'BẬT' : 'TẮT'}</b>. ${esc(cs.ly_do || '')}</p>`;
+
+  return khoHtml + agHtml + `<div class="nhan" style="margin-top:10px">NHÀ CUNG CẤP NGOÀI</div>` + pvs + themHtml;
+}
+
+async function veProviders() {
+  try { pvState.d = await api('/api/providers'); }
+  catch (e) { dat('#pv-than', trong(`không đọc được providers: ${e.message}`)); return; }
+  try { pvState.u = S.selected ? await api(`/api/usage?project=${encodeURIComponent(S.selected)}`) : null; }
+  catch { pvState.u = null; }
+  dat('#pv-than', veProvidersHtml(pvState.d, pvState.u));
+  const sel = $('#pv-preset');
+  if (sel) {
+    sel.onchange = () => {
+      const o = sel.options[sel.selectedIndex];
+      $('#pv-url').value = o.dataset.url || '';
+      const p = (pvState.d.presets || []).find((x) => x.ma === sel.value) || {};
+      $('#pv-preset-ghi-chu').textContent = p.ghi_chu || '';
+      if (!$('#pv-id').value) $('#pv-id').value = (sel.value.split('_')[0] || '').slice(0, 24);
+    };
+  }
+}
+
+async function pvGoi(duong, opt, ketQuaEl) {
+  try {
+    const r = await api(duong, opt);
+    await veProviders();
+    return r;
+  } catch (e) {
+    noi(`provider: ${e.message}`);
+    if (ketQuaEl) ketQuaEl.textContent = e.message;
+    return null;
+  }
+}
+
+$('#nut-providers').onclick = async () => {
+  moHopThoai('Providers & Accounts', `<div id="pv-than">${trong('đang tải…')}</div>`);
+  await veProviders();
+};
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b || !$('#pv-than')) return;
+  const json = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body) });
+  const pid = b.dataset.pid, acc = b.dataset.acc;
+  const khoi = b.closest('.pv-khoi');
+  const kq = khoi ? khoi.querySelector('.pv-ket-qua') : null;
+  if (b.id === 'pv-them') {
+    const r = await pvGoi('/api/providers', json({ provider_id: $('#pv-id').value.trim(),
+      preset: $('#pv-preset').value, base_url: $('#pv-url').value.trim() }));
+    if (r) noi(`đã thêm provider ${r.provider_id}`);
+  } else if (b.dataset.act === 'pv-xoa') {
+    if (!window.confirm(`Xoá provider ${pid} cùng MỌI tài khoản và credential của nó?`)) return;
+    await pvGoi(`/api/providers/${encodeURIComponent(pid)}?xac_nhan=true`, { method: 'DELETE' });
+  } else if (b.dataset.act === 'tk-them') {
+    const alias = khoi.querySelector('.pv-alias').value.trim();
+    const oKhoa = khoi.querySelector('.pv-khoa');
+    const gia_tri = oKhoa.value;
+    oKhoa.value = '';                                  // xoa khoi DOM ngay
+    if (!alias || !gia_tri) { noi('cần alias và khoá'); return; }
+    const r = await pvGoi(`/api/providers/${encodeURIComponent(pid)}/accounts`,
+      json({ alias, gia_tri, project: S.selected || '' }), kq);
+    if (r) noi(`đã lưu vào kho bí mật — ref ${r.credential_ref}`);
+  } else if (b.dataset.act === 'tk-thu') {
+    if (kq) kq.textContent = 'đang thử kết nối…';
+    const r = await pvGoi(`/api/providers/accounts/${encodeURIComponent(acc)}/test`,
+      json({ project: S.selected || '' }), kq);
+    const el = $('#pv-than') && $('#pv-than').querySelector(`[data-acc="${acc}"]`);
+    if (r && el) noi(`${r.ket_qua.ok ? 'OK' : 'HỎNG'} · ${r.ket_qua.chi_tiet}`);
+  } else if (b.dataset.act === 'tk-bat') {
+    await pvGoi(`/api/providers/accounts/${encodeURIComponent(acc)}/toggle`,
+      json({ bat: b.dataset.bat === '1' }), kq);
+  } else if (b.dataset.act === 'tk-xoa') {
+    if (!window.confirm(`Xoá tài khoản ${acc} và credential của nó khỏi kho?`)) return;
+    await pvGoi(`/api/providers/accounts/${encodeURIComponent(acc)}?xac_nhan=true`, { method: 'DELETE' });
+  } else if (b.dataset.act === 'tk-hoi') {
+    const ms = ((pvState.d || {}).models || {})[pid] || [];
+    const model = window.prompt('Model (định tuyến THỦ CÔNG, một lượt):',
+      (ms.find((m) => m.nguon === 'probed') || ms[0] || {}).model_id || '');
+    if (!model) return;
+    const cau = window.prompt('Câu hỏi:', 'Trả lời một từ: ping?');
+    if (!cau) return;
+    if (kq) kq.textContent = 'đang hỏi…';
+    try {
+      const r = await api(`/api/providers/accounts/${encodeURIComponent(acc)}/ask`,
+        json({ model, cau, project: S.selected || '', max_tokens: 128 }));
+      if (kq) kq.textContent = r.ok ? `[${model}] ${r.noi_dung}` : `HỎNG: ${r.chi_tiet}`;
+    } catch (err) { if (kq) kq.textContent = err.message; }
+  }
+});
 
 $('#nut-project-moi').onclick = () => moHopThoai('Dự án mới', `
   <p class="ghi-chu">Nhập đường dẫn tuyệt đối tới một kho git trên máy này.</p>

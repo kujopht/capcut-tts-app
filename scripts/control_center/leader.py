@@ -256,7 +256,7 @@ phiên này chạy headless nên mọi công cụ cần duyệt quyền sẽ b�
 CHỐI và lượt của bạn kết thúc RỖNG (đo thật 2026-09-10: `read_file` và
 `read_url` đều bị chối, và người dùng nhận một worker 200s cho một câu hỏi
 mà sổ đã trả lời được). Mọi thứ bạn cần ĐÃ NẰM trong các khối dữ liệu bên
-dưới: trạng thái dự án, TRẠNG THÁI SỐNG, KÝ ỨC DỰ ÁN + bằng chứng L0, NỘI
+dưới: trạng thái dự án, TRẠNG THÁI SỐNG, khối ký ức + bằng chứng L0, và NỘI
 DUNG WEB do Router đọc hộ. Thiếu dữ liệu thì HỎI người dùng hoặc uỷ thác —
 đừng thử tự đọc.
 

@@ -376,12 +376,28 @@ class TestBonConDocSongSong(_Nen):
         vi_pham: List[str] = []
         goc_tong_hop = cc._tong_hop_toa
 
-        def _tong_hop_soi(ctx, cha_id):
+        def _giu_khoa_du(cha_id) -> List[str]:
+            ra = []
             for x in cc.store.tasks("demo"):
                 if x.parent_id == cha_id and x.state in (TaskState.DONE, TaskState.FAILED):
                     for l in cc.store.locks("demo"):
                         if l.holder_task == x.task_id:
-                            vi_pham.append(f"{x.task_id} {x.state.value} còn giữ {l.resource}")
+                            ra.append(f"{x.task_id} {x.state.value} còn giữ {l.resource}")
+            return ra
+
+        def _tong_hop_soi(ctx, cha_id):
+            # KIEM LAI SAU MOT NHIP. `doi_trang_thai(DONE)` va `lm.tra()` la HAI
+            # cau lenh trong luong CUA CHINH con do, khong phai mot giao dich;
+            # nen luong cua con KHAC goi `_tong_hop_toa` co the chen vao dung
+            # khe giua chung va thay "DONE ma con giu khoa" — hong GIA (do duoc
+            # khi chay chung nhieu bo kiem). Ro khoa THAT thi ton lai; khe
+            # tranh chap thi tan. Bat bien cuoi cung (`locks == []` sau khi moi
+            # thu xong) van khang dinh o duoi, khong noi long.
+            xau = _giu_khoa_du(cha_id)
+            if xau:
+                time.sleep(0.4)
+                xau = _giu_khoa_du(cha_id)
+            vi_pham.extend(xau)
             return goc_tong_hop(ctx, cha_id)
         cc._tong_hop_toa = _tong_hop_soi
         cc.tick()
@@ -430,7 +446,11 @@ class TestBonConDocSongSong(_Nen):
         self.assertEqual(cc.store.locks("demo"), [])
 
     def test_con_hong_khong_ro_khoa_va_anh_em_van_song_song(self):
-        ex = ExecTuyBien(cham=0.6, hong_neu=lambda tid: tid.endswith("-2"))
+        # `cham` DAI hon test khac co chu y: phep do `song_song_toi_da >= 3` la
+        # do WALL-CLOCK tren luong that. Voi 0.6s, chay CUNG nhieu bo kiem khac
+        # trong mot tien trinh co the lam lich luong trai ra va so giao nhau
+        # tut xuong 2 — hong GIA. Keo dai cua so thay vi noi long khang dinh.
+        ex = ExecTuyBien(cham=1.5, hong_neu=lambda tid: tid.endswith("-2"))
         cc = self._cc(ex, max_parallel=4)
         cc.chat("demo", CAU_KIEM_TRA)
         cha, con = self._cha_con()

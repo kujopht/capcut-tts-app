@@ -390,6 +390,50 @@ class ControlCenter:
         """`DichVuKyUc` hoặc `None` khi không mở được (đã ghi sự kiện)."""
         return self._ky_uc
 
+    #: Cache VIEN NANG theo du an: ((muc, phien_ban), luc). Giu `muc` chu
+    #: KHONG giu van ban da render — ban gon cat theo TUNG CAU HOI. Doc so moi
+    #: luot chat la mot truy van SQLite + phep so mocs: re, nhung khong can
+    #: lam moi giay.
+    _NANG_TTL = 30.0
+
+    def _khoi_vien_nang(self, project_id: str, text: str = "") -> str:
+        """Khối VIÊN NANG DỰ ÁN (bản GỌN, có trần token) cho nhắc nhở Leader.
+
+        Phần I của V0.7: Leader phải hydrate RẺ. Viên nang đầy của một dự án
+        thật ~3.9k token; bản gọn ~0.9k. KHÔNG nạp hàng nghìn sự kiện lịch sử —
+        đó là việc của truy hồi sâu khi lượt cần.
+
+        Bản gọn chọn mục THEO CÂU HỎI (`text`), nên bộ đệm phải giữ `muc` —
+        thứ đắt vì phải đọc sổ — chứ KHÔNG giữ văn bản đã render: giữ văn bản
+        thì lượt sau nhận đúng bản cắt của câu hỏi trước.
+        """
+        if not project_id:
+            return ""
+        now = time.time()
+        with self._khoa:
+            cu = getattr(self, "_nang_cache", {}).get(project_id)
+        goi = None
+        if cu and now - cu[1] < self._NANG_TTL:
+            goi = cu[0]
+        try:
+            from scripts.control_center import vien_nang_du_an as VN
+            if goi is None:
+                goi = VN.nap(self, project_id)
+                with self._khoa:
+                    if not hasattr(self, "_nang_cache"):
+                        self._nang_cache = {}
+                    self._nang_cache[project_id] = (goi, now)
+            muc, pb = goi
+            if not muc:
+                return ""
+            van = VN.render_gon(muc, cau_hoi=text or "")
+            return (f"(Viên nang v{pb})\n" + van) if van else ""
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "MEMORY_ERROR", project_id=project_id, level="WARNING",
+                detail=f"dựng khối viên nang: {type(exc).__name__}: {exc}"[:200])
+            return ""
+
     def _khoi_ky_uc(self, project_id: str, text: str, *,
                     kem_su_kien: bool = False) -> str:
         """Khối KÝ ỨC DỰ ÁN cho nhắc nhở Leader, hoặc `""`.
@@ -1149,9 +1193,12 @@ class ControlCenter:
             # nay la gi" -> Leader tra tu day, KHONG dispatch mot worker chi de
             # doc mot trang (agent headless bi tu choi `read_url`).
             khoi_web = self._khoi_web(text, pid)
+            # V0.7 — VIEN NANG: mo hinh du an GON, nap MOI luot (co cache TTL).
+            khoi_nang = self._khoi_vien_nang(pid, text)
             nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
                                       khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa,
-                                      la_lich_su=la_lich_su, khoi_web=khoi_web)
+                                      la_lich_su=la_lich_su, khoi_web=khoi_web,
+                                      khoi_nang=khoi_nang)
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.

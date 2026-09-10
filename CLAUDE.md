@@ -272,6 +272,19 @@ Báo cáo:
 `scripts/control_center/memory/{de_bat,nhap_khau}.py` và
 `scripts/control_center/providers/`.
 
+**V0.7 Phase 1** (nhánh `feat/v07-fanfic-adoption`, chưa merge/tag) thêm
+NHẬN DỰ ÁN CÓ SẴN + VIÊN NANG DỰ ÁN: `nhan_du_an()` nhận một kho THẬT
+**chỉ đọc** (không sao chép/dời/khởi tạo lại/ghi gì vào kho; danh tính suy
+từ gốc worktree + commit gốc, KHÔNG từ nhánh); `vien_nang_du_an.py` dựng 19
+mục có `{gia_tri, trang_thai, nguon, bang_chung}` với UNKNOWN là giá trị
+hợp lệ và giá trị SỐNG không bị đóng băng; `kiem_lien_tuc.py` kiểm toán 13
+hạng mục. Luật quan trọng nhất của V0.7: **bản gọn nạp cho Leader chọn mục
+THEO CÂU HỎI**, và **dòng báo cắt phải NÊU TÊN mục chưa nạp** — bảng ưu
+tiên cố định + dòng chỉ-đếm là lý do đo được khiến Leader BỊA ("5
+Antigravity account" trong khi sổ ghi 8). Xem
+`docs/reports/NHAN_DU_AN_VIEN_NANG_V07.md` và `docs/CONTROL_CENTER.md` §18
+(luật 13–17).
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,

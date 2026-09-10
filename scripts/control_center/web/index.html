@@ -73,6 +73,7 @@
     -->
     <div id="tabs" role="tablist">
       <button class="tab dang-mo" data-khung="chat" role="tab">Chat</button>
+      <button class="tab" data-khung="tongquan" role="tab">Tổng quan</button>
       <button class="tab" data-khung="tasks" role="tab">Tasks</button>
       <button class="tab" data-khung="agents" role="tab">Agents</button>
       <button class="tab" data-khung="logs" role="tab">Logs</button>
@@ -184,6 +185,32 @@ Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), hoặc ké
       nguoi dung bam — khong nam trong vong ve 1 Hz, vi mot lan thong ke
       la vai truy van count(*) tren mot so co the rat lon.
     -->
+    <div class="khung" id="khung-tongquan">
+      <div id="tq-dau" class="kyuc-thongke"></div>
+      <div class="thanh-bang">
+        <button id="nut-tq-dunglai" class="nho"
+                title="Dựng lại Viên nang từ nguồn (chỉ sinh phiên bản khi có mục ĐỔI)">
+          Dựng lại Viên nang</button>
+        <button id="nut-tq-kiem" class="nho"
+                title="Chạy lại Kiểm liên tục">Kiểm liên tục</button>
+        <span class="day"></span>
+        <input id="tq-duong" type="text" spellcheck="false"
+               placeholder="Nhận dự án hiện có — dán đường dẫn thư mục…"
+               autocomplete="off">
+        <button id="nut-tq-xemtruoc" class="nho" title="Dò thư mục, KHÔNG ghi gì">Dò</button>
+        <button id="nut-tq-nhan" class="nho" title="Nhận dự án (chỉ đọc kho đích)">Nhận</button>
+      </div>
+      <div id="tq-nhan-kq" class="ghi-chu"></div>
+      <div class="kyuc-hai-cot">
+        <div id="tq-noi-dung" class="kyuc-ds"></div>
+        <div id="tq-chitiet" class="kyuc-chitiet"><p class="ghi-chu">Bấm một mục để xem
+          nguồn và bằng chứng lần về được.</p></div>
+      </div>
+      <p class="ghi-chu">Viên nang là MÔ HÌNH GỌN có nguồn gốc — không phải trạng thái sống.
+        <b>UNKNOWN</b> nghĩa là dự án chưa có bằng chứng cho mục đó (Router sẽ hỏi, không đoán);
+        <b>CŨ</b> nghĩa là mục có thể đã lạc hậu. Trạng thái hiện tại luôn đo ở ô TRẠNG THÁI SỐNG.</p>
+    </div>
+
     <div class="khung" id="khung-kyuc">
       <div id="kyuc-thongke" class="kyuc-thongke"></div>
       <div class="thanh-bang">

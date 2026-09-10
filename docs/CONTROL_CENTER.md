@@ -1058,3 +1058,54 @@ Tám luật (5–12) thêm vào bốn luật của §16:
     NHẬT KÝ GIT do Router đọc (`nguon_git.git_nhat_ky_doc`, lọc bí mật) — agent
     headless không chạy được lệnh shell và quyền của nó KHÔNG được nới.
     `MULTI_AGENT_FANOUT_V061.md` §7, `scripts/tests/test_khoa_doc_ghi_v061.py`.
+
+## 18. Nhận dự án có sẵn + Viên nang dự án (V0.7 Phase 1)
+
+Báo cáo: `docs/reports/NHAN_DU_AN_VIEN_NANG_V07.md`. Mã:
+`scripts/control_center/nhan_du_an.py` (nhận, CHỈ ĐỌC),
+`scripts/control_center/vien_nang_du_an.py` (19 mục + bản gọn có trần),
+`scripts/control_center/kiem_lien_tuc.py` (13 hạng mục kiểm toán).
+
+Năm luật (13–17) thêm vào §16–§17:
+
+13. **NHẬN không được đụng vào kho.** `nhan_du_an()` chỉ đọc: không sao
+    chép, không dời, không `git init` lại, không ghi tệp nào vào kho được
+    nhận, không tạo sổ ký ức bên trong cây git của nó. Đo bằng
+    `git status --porcelain` trước/sau và bằng ảnh chụp cây `.router`
+    (127.279 mục, không đổi). Nhận lại là idempotent, không sinh dự án thứ
+    hai.
+
+14. **Danh tính suy từ GỐC WORKTREE + COMMIT GỐC, không từ nhánh.** Đổi
+    nhánh không được đổi danh tính. Hai cái bẫy đã đo được: `git log
+    --reverse -n1` trả về commit MỚI NHẤT (giới hạn áp trước khi đảo) —
+    phải dùng `git rev-list --max-parents=0 HEAD`; và khoá chống trùng phải
+    đặt trên gốc worktree chứ KHÔNG phải `--git-common-dir`, vì Fanfic và
+    Router dùng chung một `.git`. URL remote bị lọc credential trước khi
+    lưu.
+
+15. **UNKNOWN là một giá trị hợp lệ; giá trị SỐNG không được đóng băng.**
+    Mỗi mục mang `{gia_tri, trang_thai, nguon, bang_chung, ghi_chu, ts}`;
+    ưu tiên nguồn `quyet_dinh > kho > ky_uc > tai_lieu > git > suy_luan`.
+    Mục *Tham chiếu trạng thái SỐNG* chỉ ghi ĐO ĐƯỢC CÁI GÌ và BẰNG
+    PROVIDER NÀO, không ghi phán quyết — "bây giờ còn chạy không" vẫn phải
+    đi đo. Phiên bản viên nang chỉ tăng khi có mục ĐỔI THẬT, và bản cũ
+    không bao giờ bị ghi đè.
+
+16. **Bản gọn nạp cho Leader chọn mục THEO CÂU HỎI, không theo bảng ưu
+    tiên cố định.** Đo được ở nghiệm thu: bảng cố định cắt mất đúng mục
+    đang bị hỏi, và Leader lấp chỗ trống bằng cách BỊA (trả lời "5
+    Antigravity account" trong khi sổ ghi 8). Đổi thứ tự cố định chỉ làm
+    lỗi nhảy sang câu khác (mục `luu_tru`, câu R2/Drive) — đó là trò đuổi
+    bắt, không phải cách sửa. `thu_tu_nap(cau_hoi)` giữ đầu bảng, xếp phần
+    đuôi theo độ khớp từ khoá (không phụ thuộc dấu), và chen MỘT mục khớp
+    mạnh nhất lên ngay sau danh tính để nó sống cả khi ngân sách chật.
+
+17. **Dòng báo cắt phải NÊU TÊN mục chưa nạp, và được nhường chỗ TRƯỚC.**
+    Dòng chỉ ĐẾM ("còn 10 mục nữa") không cho Leader phân biệt "dự án không
+    có bằng chứng" với "có mà lượt này chưa nạp", nên nó đoán. Nêu tên biến
+    câu bịa thành câu "mục X có trong viên nang nhưng chưa nạp ở lượt này".
+    Dòng chân CŨNG tốn token: cộng sau khi đã đóng ngân sách thì trần thành
+    lời nói dối (đo được 900 → 922), còn trừ-sau thì đuổi đúng mục liên
+    quan nhất ra để lấy chỗ. Thứ được phép hy sinh là TÊN trong dòng cắt,
+    không bao giờ là MỤC. Bộ đệm giữ `muc` chứ không giữ văn bản đã render —
+    giữ văn bản thì lượt sau nhận bản cắt của câu hỏi trước.

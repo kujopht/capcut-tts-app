@@ -1310,6 +1310,187 @@ async function moBanGhiKyUc(ma) {
 
 function veKyUc() { veKyUcThongKe(); veKyUcDanhSach(); }
 
+// -------------------------------------------------- V0.7 Tong quan / Nang --
+//
+// Viên nang là MÔ HÌNH GỌN có nguồn gốc. Ba điều bắt buộc ở tầng này:
+//   * KHÔNG dội JSON thô vào mặt người dùng — mục có nhãn tiếng Việt, nhóm lại;
+//   * UNKNOWN và CŨ phải THẤY ĐƯỢC (đó là thông tin, không phải lỗi);
+//   * bấm được vào từng mục để xem nguồn + bằng chứng lần về được.
+const TQ = { muc: {}, nhan: {}, nhom: {}, thu_tu: [], pb: 0, lt: null, chon: '' };
+const TQ_NHOM = [
+  ['tong_quan', 'Tổng quan'], ['kien_truc', 'Kiến trúc'],
+  ['production', 'Production'], ['quyet_dinh', 'Quyết định'],
+  ['rang_buoc', 'Ràng buộc'], ['su_co', 'Sự cố'], ['issue', 'Issue đang mở'],
+  ['roadmap', 'Roadmap'], ['tai_nguyen', 'Tài nguyên'], ['lich_su', 'Lịch sử'],
+  ['song', 'Trạng thái sống'],
+];
+const TQ_HH = { co: 'luc', khong_ro: 'xam', cu: 'vang' };
+const TQ_TEN_TT = { co: 'CÓ', khong_ro: 'UNKNOWN', cu: 'CŨ' };
+const LT_HH = { PASS: 'luc', PARTIAL: 'vang', FAIL: 'do' };
+const SS_HH = { YES: 'luc', PARTIAL: 'vang', NO: 'do' };
+
+async function veTongQuan() {
+  if (!S.selected) { dat('#tq-dau', trong('chưa chọn dự án')); return; }
+  let vn; let lt;
+  try {
+    vn = await api(`/api/capsule?project=${encodeURIComponent(S.selected)}`);
+  } catch (e) { dat('#tq-dau', trong(`không đọc được Viên nang: ${e.message}`)); return; }
+  try {
+    lt = await api(`/api/continuity?project=${encodeURIComponent(S.selected)}`);
+  } catch { lt = null; }
+  TQ.muc = vn.muc || {}; TQ.nhan = vn.nhan || {}; TQ.nhom = vn.nhom || {};
+  TQ.thu_tu = vn.thu_tu || []; TQ.pb = vn.phien_ban || 0; TQ.lt = lt;
+  const o = (nhan, gt, phu = '') => `<div class="kyuc-o"><div class="kyuc-so">${esc(gt)}</div>
+    <div class="kyuc-nhan">${esc(nhan)}${phu ? `<span class="qs-phu"> ${esc(phu)}</span>` : ''}</div></div>`;
+  if (!TQ.pb) {
+    dat('#tq-dau', `<div class="kyuc-o vang">Chưa có Viên nang cho dự án này.
+      Bấm <b>Dựng lại Viên nang</b> để Router dựng mô hình dự án từ nguồn có thật.</div>`);
+  } else {
+    dat('#tq-dau', [
+      o('Viên nang', `v${TQ.pb}`),
+      o('Mục có nội dung', `${vn.so_muc_co}/${vn.so_muc}`),
+      o('UNKNOWN', vn.so_khong_ro ?? '—', 'chưa có bằng chứng'),
+      o('CŨ', vn.so_cu ?? '—', 'có thể lạc hậu'),
+      o('Token (gọn / đầy)', `${vn.token_gon} / ${vn.token_day}`, 'Leader nạp bản gọn'),
+      lt ? o('Sẵn sàng', lt.san_sang, `bằng chứng ${lt.phu_bang_chung_phan_tram}%`) : '',
+    ].join(''));
+  }
+  veTongQuanNoiDung();
+}
+
+function veTongQuanNoiDung() {
+  const d = [];
+  const lt = TQ.lt;
+  const nhomTieu = (t) => `<div class="kyuc-meta"><b>${esc(t)}</b></div>`;
+  if (lt) {
+    d.push(nhomTieu(`KIỂM LIÊN TỤC — ${(lt.project_id || '').toUpperCase()}`));
+    (lt.hang || []).forEach((h) => {
+      d.push(`<div class="kyuc-hang" data-lt="${esc(h.khoa)}">
+        <span class="hh ${LT_HH[h.ket_qua] || 'xam'}">${esc(h.ket_qua)}</span>
+        <span class="kyuc-td" title="${esc(h.ly_do || '')}">${esc(h.nhan)}${
+          h.bat_buoc ? ' *' : ''}</span>
+        <span class="qs-phu">${esc((h.ly_do || '').slice(0, 90))}</span></div>`);
+    });
+    d.push(`<div class="kyuc-hang">
+      <span class="hh ${SS_HH[lt.san_sang] || 'xam'}">READY</span>
+      <span class="kyuc-td">${esc(lt.san_sang)} · bằng chứng ${esc(lt.phu_bang_chung_phan_tram)}%</span>
+      <span class="qs-phu">${esc((lt.vi_sao || '').slice(0, 120))}</span></div>`);
+  }
+  TQ_NHOM.forEach(([nhomKhoa, nhomNhan]) => {
+    const ks = (TQ.thu_tu || []).filter((k) => TQ.nhom[k] === nhomKhoa);
+    if (!ks.length) return;
+    d.push(nhomTieu(nhomNhan));
+    ks.forEach((k) => {
+      const m = TQ.muc[k] || {};
+      const tt = m.trang_thai || 'khong_ro';
+      const gt = m.gia_tri;
+      let tom = '';
+      if (tt === 'khong_ro') tom = m.ghi_chu || 'chưa có bằng chứng';
+      else if (Array.isArray(gt)) tom = gt.length ? String(gt[0]) : '(rỗng)';
+      else tom = String(gt ?? '');
+      d.push(`<div class="kyuc-hang${TQ.chon === k ? ' dang-mo' : ''}" data-nang="${esc(k)}">
+        <span class="hh ${TQ_HH[tt] || 'xam'}">${esc(TQ_TEN_TT[tt] || tt)}</span>
+        <span class="kyuc-td" title="${esc(TQ.nhan[k] || k)}">${esc(TQ.nhan[k] || k)}${
+          Array.isArray(gt) && gt.length > 1 ? ` (${gt.length})` : ''}</span>
+        <span class="qs-phu">${esc(tom.slice(0, 110))}</span></div>`);
+    });
+  });
+  dat('#tq-noi-dung', d.join('') || trong('chưa có gì'));
+  $$('#tq-noi-dung .kyuc-hang[data-nang]').forEach((e) => {
+    e.onclick = () => { TQ.chon = e.dataset.nang; veTongQuanNoiDung(); moMucNang(e.dataset.nang); };
+  });
+}
+
+function moMucNang(khoa) {
+  const m = TQ.muc[khoa] || {};
+  const gt = m.gia_tri;
+  const dong = Array.isArray(gt) ? gt : (gt ? [gt] : []);
+  const d = [`<h3>${esc(TQ.nhan[khoa] || khoa)}</h3>`];
+  const tt = m.trang_thai || 'khong_ro';
+  d.push(`<p><span class="hh ${TQ_HH[tt] || 'xam'}">${esc(TQ_TEN_TT[tt] || tt)}</span>
+    ${m.nguon ? `<span class="qs-phu">nguồn: ${esc(m.nguon)}</span>` : ''}</p>`);
+  if (m.ghi_chu) d.push(`<p class="ghi-chu">${esc(m.ghi_chu)}</p>`);
+  if (dong.length) {
+    d.push('<ul class="kyuc-goi">');
+    dong.forEach((x) => d.push(`<li>${esc(String(x))}</li>`));
+    d.push('</ul>');
+  } else if (tt !== 'khong_ro') {
+    d.push('<p class="ghi-chu">(rỗng — và đó có thể là câu trả lời đúng)</p>');
+  }
+  const bc = m.bang_chung || [];
+  d.push(`<h4>Bằng chứng (${bc.length})</h4>`);
+  if (!bc.length) {
+    d.push('<p class="ghi-chu">Không có bằng chứng lần về được cho mục này.</p>');
+  } else {
+    d.push('<ul class="kyuc-goi">');
+    bc.forEach((x) => {
+      const s = String(x);
+      const laMa = /^(qd_|ku_|dd_)/.test(s);
+      d.push(`<li>${laMa
+        ? `<a href="#" data-bc="${esc(s)}">${esc(s)}</a>`
+        : esc(s)}</li>`);
+    });
+    d.push('</ul>');
+    d.push('<p class="ghi-chu">Mã <b>qd_/ku_/dd_</b> mở được trong tab Memory.</p>');
+  }
+  dat('#tq-chitiet', d.join(''));
+  $$('#tq-chitiet a[data-bc]').forEach((a) => {
+    a.onclick = (ev) => { ev.preventDefault(); doiKhung('kyuc'); moBanGhiKyUc(a.dataset.bc); };
+  });
+}
+
+// -- nut cua tab Tong quan (V0.7) -------------------------------------------
+$('#nut-tq-dunglai').onclick = async () => {
+  if (!S.selected) return;
+  dat('#tq-nhan-kq', 'đang dựng lại Viên nang…');
+  try {
+    const r = await api('/api/capsule/rebuild', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: S.selected, ly_do: 'dựng lại từ giao diện' }),
+    });
+    dat('#tq-nhan-kq', r.luu
+      ? `Viên nang <b>v${esc(r.phien_ban)}</b> — đổi ${esc((r.doi || []).length)} mục ·
+         ${esc(r.so_muc_co)}/${esc(r.so_muc)} mục có nội dung ·
+         token gọn ${esc(r.token_gon)}`
+      : `Không sinh phiên bản mới: ${esc(r.ly_do || 'không có mục nào đổi')}`);
+  } catch (e) { dat('#tq-nhan-kq', `<span class="do">lỗi: ${esc(e.message)}</span>`); }
+  veTongQuan();
+};
+$('#nut-tq-kiem').onclick = () => veTongQuan();
+$('#nut-tq-xemtruoc').onclick = async () => {
+  const duong = ($('#tq-duong').value || '').trim();
+  if (!duong) { dat('#tq-nhan-kq', 'dán đường dẫn thư mục dự án trước'); return; }
+  dat('#tq-nhan-kq', 'đang dò…');
+  try {
+    const r = await api(`/api/project/adopt/preview?duong=${encodeURIComponent(duong)}`);
+    const k = r.kho || {};
+    dat('#tq-nhan-kq', [
+      `<b>${esc(k.goc_worktree || duong)}</b>`,
+      k.la_git ? `git · nhánh ${esc(k.nhanh || '?')} · ${esc(k.so_commit)} commit`
+               : `<span class="vang">KHÔNG phải kho git — ${esc(k.ly_do_khong_git || '')}</span>`,
+      k.remote_url ? `remote ${esc(k.remote_url)}` : '',
+      r.da_co ? `<span class="luc">Router ĐÃ có dự án <b>${esc(r.da_co)}</b> trỏ vào đây —
+                 bấm Nhận sẽ LIÊN KẾT LẠI, không tạo bản thứ hai.</span>`
+              : '<span class="qs-phu">chưa có dự án nào trỏ vào đây</span>',
+    ].filter(Boolean).join(' · '));
+  } catch (e) { dat('#tq-nhan-kq', `<span class="do">lỗi: ${esc(e.message)}</span>`); }
+};
+$('#nut-tq-nhan').onclick = async () => {
+  const duong = ($('#tq-duong').value || '').trim();
+  if (!duong) { dat('#tq-nhan-kq', 'dán đường dẫn thư mục dự án trước'); return; }
+  dat('#tq-nhan-kq', 'đang nhận (chỉ đọc kho đích)…');
+  try {
+    const r = await api('/api/project/adopt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duong }),
+    });
+    if (!r.ok) { dat('#tq-nhan-kq', `<span class="do">${esc(r.ly_do || 'không nhận được')}</span>`); return; }
+    dat('#tq-nhan-kq', `${r.lien_ket_lai ? 'LIÊN KẾT LẠI' : 'ĐÃ NHẬN'}
+      dự án <b>${esc(r.project_id)}</b> — ${esc(r.ly_do || '')}`);
+    await lamMoi();
+  } catch (e) { dat('#tq-nhan-kq', `<span class="do">lỗi: ${esc(e.message)}</span>`); }
+};
+
 $('#nut-kyuc-tim').onclick = veKyUcDanhSach;
 $('#kyuc-tim').addEventListener('keydown', (e) => { if (e.key === 'Enter') veKyUcDanhSach(); });
 $$('.kyuc-chip').forEach((b) => {
@@ -1374,6 +1555,7 @@ function doiKhung(ten) {
   $$('.khung').forEach((k) => k.classList.toggle('dang-mo', k.id === `khung-${ten}`));
   if (ten === 'usage') veUsage();
   if (ten === 'kyuc') veKyUc();
+  if (ten === 'tongquan') veTongQuan();
 }
 $$('.tab').forEach((b) => { b.onclick = () => doiKhung(b.dataset.khung); });
 $('#o-tim').oninput = () => { veTasks(); veAgents(); };

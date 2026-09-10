@@ -1501,6 +1501,55 @@ WebSocket không theo dự án đang chọn — đã sửa. Nghiệm thu EXE `di
 `PROJECT_MEMORY_V061.md` mục 10. Việc tiếp theo: bật AUTO cho provider ngoài (adapter thực
 thi + ngân sách), người vận hành duyệt các sự cố `backfill`, nhập tiếp phần còn lại.
 
+## Router Control Center V0.7 Phase 1 — NHẬN dự án + Viên nang (2026-09-11)
+
+Đã xong, nhánh `feat/v07-fanfic-adoption`, **chưa merge/tag/release**. Đầy
+đủ: `docs/reports/NHAN_DU_AN_VIEN_NANG_V07.md`, luật 13–17 ở
+`docs/CONTROL_CENTER.md` §18. Mã: `scripts/control_center/nhan_du_an.py`,
+`vien_nang_du_an.py`, `kiem_lien_tuc.py`.
+
+* **NHẬN kho thật, chỉ đọc.** Fanfic được nhận mà **không đổi một byte nào**
+  (`git status` sạch trước/sau, cây `.router` 127.279 mục không đổi, không
+  tạo sổ ký ức trong kho). Nhận lại idempotent. Danh tính suy từ **gốc
+  worktree + commit gốc**, không từ nhánh.
+* **Viên nang Fanfic**: 19 mục, **18 có nội dung / 1 UNKNOWN**, **18/18 mục
+  có nội dung đều mang bằng chứng**, 7 phiên bản giữ nguyên (không ghi đè).
+  Đầy 3.754 token → bản gọn cho Leader **890 token**.
+* **Kiểm liên tục**: 13/13 PASS, phủ bằng chứng **95%**, `READY FOR PRIMARY
+  WORKSPACE: YES`. *Live observability* chỉ PASS khi sổ có phép đo sống
+  thật; khai suông là PARTIAL.
+* **Nghiệm thu thật trên app source-mode**: `--chi nhan` **10/10**,
+  `--chi nang` **9/9**, `--chi hoi` **17/17**. **12 câu hỏi lịch sử → 0
+  worker phái đi**; câu hỏi hiện tại vẫn **đo sống thật**
+  (`ssh:13.212.224.218`). Sửa kho production: **0**.
+* **Ba khuyết tật THẬT do chính bài nghiệm thu bắt được** (mục 2 của báo
+  cáo): (1) Leader trả lời **"5 Antigravity account"** trong khi sổ ghi
+  **8**, vì mục `tai_nguyen_agent` bị cắt khỏi bản gọn 900 token; (2) dòng
+  báo cắt chỉ **đếm** nên Leader không phân biệt được "không có bằng chứng"
+  với "có mà chưa nạp"; (3) mục **CÓ MẶT nhưng MỎNG** (mục `luu_tru` chỉ có
+  tên tài liệu Appwrite + ba trích đoạn không liên quan) cũng bị lấp bằng
+  **kiến thức chung**, nói như thể đó là sự thật của dự án. Đổi thứ tự ưu
+  tiên **không phải cách sửa** — làm thế thì lỗi nhảy sang câu R2/Drive.
+  Cách sửa: chọn mục **theo câu hỏi** (`vien_nang_du_an.thu_tu_nap`, khớp
+  không phụ thuộc dấu), chen mục khớp mạnh nhất lên ngay sau danh tính, dòng
+  cắt **nêu tên** mục chưa nạp và được **nhường chỗ trước** (trần 900 nay là
+  trần THẬT — trước đó là 922), và `leader.LUAT_NANG` nói rõ tên tài liệu là
+  **chỗ để tra, không phải câu trả lời** + mỗi khẳng định phải kèm mã. Đo
+  lại câu R2/Drive sau khi sửa: **4/4 lượt đạt**, trả lời "hồ sơ có mục
+  Kiến trúc lưu trữ nhưng chưa ghi rõ vai trò của R2 và Drive" kèm tài liệu
+  đáng tra.
+* **Hồi quy**: **2.194 đạt** (+1.742 subtest), 175 bỏ qua, **10 hỏng — toàn
+  bộ là `No module named 'PySide6'`** trong `tests/test_output_manager.py`
+  (bài kiểm của ứng dụng **desktop**, không phải Router; tệp đó `import
+  PySide6` trong thân bài nên hỏng thay vì bỏ qua, và pha này không sửa nó).
+  Không bài kiểm Router nào hỏng. Bài mới: `test_nhan_du_an_v07.py` **30
+  bài**, trong đó `test_dong_CAT_khong_duoc_hy_sinh_muc_LIEN_QUAN_NHAT` thất
+  bại lần đầu và bắt được lỗi thật.
+* Việc tiếp theo hợp lý: Phase 2 (Strategist/Reviewer, browser automation,
+  Artifact Vault, GitHub Stars Vault, tự cập nhật) — tất cả **cố ý chưa làm**
+  ở pha này.
+
+
 ## Bẫy đã gặp
 
 - **Vai "user" trong tệp phiên Claude KHÔNG chứng minh người gõ.** Bản tóm tắt

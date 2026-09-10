@@ -488,10 +488,50 @@ Câu này có URL công khai và Router ĐÃ ĐỌC HỘ (khối "NỘI DUNG WEB
   toàn), đừng dispatch một worker để thử lại — headless cũng bị chặn quyền."""
 
 
+#: Luat cho VIEN NANG DU AN (V0.7) — mo hinh gon, CO NGUON GOC.
+LUAT_NANG = """VIÊN NANG DỰ ÁN — đọc trước khi trả lời:
+
+Khối "VIÊN NANG DỰ ÁN" bên dưới là MÔ HÌNH GỌN của dự án, dựng từ nguồn có
+thật (quyết định tường minh > trạng thái kho > ký ức > tài liệu > git) và mỗi
+mục mang nguồn + bằng chứng lần về được.
+
+* DÙNG viên nang làm điểm khởi đầu cho câu hỏi VỀ DỰ ÁN ("làm tới đâu", "kiến
+  trúc ra sao", "production ở đâu", "bước tiếp theo hợp lý là gì"). Nó đã tóm
+  đúng những gì dự án CÓ BẰNG CHỨNG — đừng uỷ thác một worker đi khám phá lại.
+* `UNKNOWN` nghĩa là DỰ ÁN CHƯA CÓ BẰNG CHỨNG cho mục đó. Nói thẳng "chưa có
+  trong hồ sơ dự án" và HỎI, ĐỪNG suy ra một câu trả lời nghe hợp lý.
+* `[CŨ]` nghĩa là mục đó có thể đã lạc hậu (HEAD/nhánh đổi, có bản ghi mới).
+  Nêu rõ điều đó khi dùng.
+* Viên nang KHÔNG phải trạng thái sống. Mục "Tham chiếu trạng thái SỐNG" chỉ
+  nói ĐO ĐƯỢC CÁI GÌ và BẰNG PROVIDER NÀO — câu hỏi "bây giờ còn chạy không"
+  vẫn phải đi đo, và khối TRẠNG THÁI SỐNG (nếu có) mới là câu trả lời.
+* Cần chi tiết sâu hơn viên nang thì tra KÝ ỨC DỰ ÁN / bằng chứng L0 bên dưới.
+* Dòng "(viên nang CÒN các mục CHƯA NẠP lượt này: …)" liệt kê ĐÚNG TÊN những
+  mục bị cắt cho vừa trần token. Nó **KHÔNG phải giấy phép để đoán** — trái
+  lại: mục có tên ở đó nghĩa là dự án CÓ dữ liệu, chỉ là lượt này chưa nạp.
+  Bị hỏi về một mục nằm trong danh sách đó thì nói "mục <tên> có trong viên
+  nang nhưng chưa nạp ở lượt này" rồi HỎI, TUYỆT ĐỐI không tự dựng số/danh
+  sách. Đo thật (nghiệm thu v0.7): khi "Tài nguyên agent" bị cắt và dòng cắt
+  chỉ ĐẾM chứ không NÊU TÊN, một lượt đã trả lời "5 account" trong khi sổ ghi
+  8; đổi thứ tự nạp thì lỗi y hệt nhảy sang câu R2/Drive.
+* **Mục CÓ MẶT nhưng MỎNG cũng là CHƯA CÓ BẰNG CHỨNG.** Nhiều mục chỉ chứa
+  TÊN TÀI LIỆU và trích đoạn ký ức; đó là CHỖ ĐỂ TRA, không phải câu trả
+  lời. Nếu nội dung thật sự nạp được không nói ra điều đang được hỏi, thì
+  trả lời đúng là "hồ sơ dự án có <mục> nhưng chưa ghi rõ <điều đang hỏi>"
+  kèm danh sách tài liệu/mã đáng tra — TUYỆT ĐỐI không lấy kiến thức chung
+  về công nghệ đó mà nói như thể đó là sự thật của dự án này. Đo thật: mục
+  "Kiến trúc lưu trữ" chỉ có tên tài liệu Appwrite và ba trích đoạn không
+  liên quan, vậy mà một lượt vẫn khẳng định chắc nịch vai trò của R2 và
+  Google Drive — không mã bằng chứng nào, không một chữ ngập ngừng.
+* Mỗi khẳng định về dự án phải KÈM MÃ (`qd_…`, `ku_…`, `sk#…`, `doc:…`) lấy
+  từ khối bên dưới. Không có mã cho một ý thì hoặc bỏ ý đó, hoặc nói rõ đó
+  là suy đoán của bạn chứ không phải hồ sơ dự án."""
+
+
 def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
                   khoi_song: str = "", khoi_ky_uc: str = "",
                   khoi_toa: str = "", la_lich_su: bool = False,
-                  khoi_web: str = "") -> str:
+                  khoi_web: str = "", khoi_nang: str = "") -> str:
     """Gói một lượt: hướng dẫn + trạng thái + hội thoại + câu mới.
 
     RANH GIỚI TIN CẬY, và bản đầu làm sai đúng chỗ này:
@@ -526,6 +566,14 @@ def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
     # V0.6 — KY UC dat SAU anh chup tinh: vi tri ma hoa bac tham quyen
     # (song > tinh > ky uc), va luat di kem O MOI LUOT co khoi. Nhan KHONG
     # bat dau bang "TRANG THAI" de khong bi doc nham thanh hien tai.
+    if khoi_nang:
+        # V0.7 — VIEN NANG dat TRUOC khoi ky uc: no la mo hinh GON (nap moi
+        # luot, ~900 token), con ky uc la chi tiet (tra khi can). Ca hai deu
+        # duoi TRANG THAI SONG ve tham quyen.
+        d += [LUAT_NANG, "",
+              "--- BẮT ĐẦU DỮ LIỆU: VIÊN NANG DỰ ÁN (mô hình gọn, có nguồn "
+              "gốc — KHÔNG phải trạng thái sống) ---",
+              khoi_nang, "--- HẾT DỮ LIỆU ---", ""]
     if khoi_ky_uc:
         # Cau hoi lich su -> LUAT_LICH_SU dat NGAY TRUOC khoi ky uc: no lat mac
         # dinh "khong biet thi dispatch" thanh "tra tu ky uc, chi hoi lai khi

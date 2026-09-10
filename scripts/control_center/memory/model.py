@@ -364,6 +364,21 @@ class VienNang:
     ts: float = 0.0
     ly_do: str = ""
     bang_chung: Tuple[str, ...] = ()               # ma ký ức / id sự kiện
+    #: V0.7 — CÁC MỤC CÓ NGUỒN GỐC của Viên nang dự án.
+    #:
+    #: Bảy trường trên là bản V0.6: đủ cho "nạp rẻ mỗi lượt" nhưng không nói
+    #: được ĐIỀU NÀY BIẾT TỪ ĐÂU, và không có chỗ cho topology production /
+    #: kho lưu trữ / issue đang mở / roadmap. `muc` bổ sung đúng hai thứ đó mà
+    #: KHÔNG đổi lược đồ SQL (bảng `vien_nang` lưu cả nội dung dưới dạng MỘT
+    #: khối JSON, nên thêm khoá là tương thích ngược hoàn toàn).
+    #:
+    #: Hình dạng mỗi mục — xem `control_center/vien_nang_du_an.py`:
+    #:   {"gia_tri": str|list, "trang_thai": "co"|"khong_ro"|"cu",
+    #:    "nguon": "quyet_dinh|kho|ky_uc|tai_lieu|git|suy_luan|song",
+    #:    "bang_chung": [...], "ts": float}
+    #: `trang_thai="khong_ro"` là CÁCH DUY NHẤT ĐÚNG để nói "chưa có bằng
+    #: chứng" — không bao giờ bịa một giá trị cho đủ mục.
+    muc: Dict[str, Any] = field(default_factory=dict)
 
     #: Trần TOKEN của viên nang khi hiện ra trong gói ngữ cảnh.
     TRAN_TOKEN = 700
@@ -376,7 +391,8 @@ class VienNang:
                 "van_de_da_biet": list(self.van_de_da_biet),
                 "moc_gan_day": list(self.moc_gan_day),
                 "phien_ban": self.phien_ban, "ts": self.ts,
-                "ly_do": self.ly_do, "bang_chung": list(self.bang_chung)}
+                "ly_do": self.ly_do, "bang_chung": list(self.bang_chung),
+                "muc": dict(self.muc or {})}
 
     @classmethod
     def tu_dict(cls, d: Dict, project_id: str = "") -> "VienNang":
@@ -390,12 +406,13 @@ class VienNang:
                    moc_gan_day=tuple(d.get("moc_gan_day") or ()),
                    phien_ban=int(d.get("phien_ban") or 0),
                    ts=float(d.get("ts") or 0.0), ly_do=d.get("ly_do", ""),
-                   bang_chung=tuple(d.get("bang_chung") or ()))
+                   bang_chung=tuple(d.get("bang_chung") or ()),
+                   muc=dict(d.get("muc") or {}))
 
     def rong(self) -> bool:
         return not any((self.muc_tieu, self.kien_truc, self.moc_hien_tai,
                         self.quyet_dinh_hieu_luc, self.rang_buoc,
-                        self.van_de_da_biet, self.moc_gan_day))
+                        self.van_de_da_biet, self.moc_gan_day, self.muc))
 
 
 # --------------------------------------------------------------- L3 ----

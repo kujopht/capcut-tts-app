@@ -385,17 +385,20 @@ class ControlCenter:
         """`DichVuKyUc` hoặc `None` khi không mở được (đã ghi sự kiện)."""
         return self._ky_uc
 
-    def _khoi_ky_uc(self, project_id: str, text: str) -> str:
+    def _khoi_ky_uc(self, project_id: str, text: str, *,
+                    kem_su_kien: bool = False) -> str:
         """Khối KÝ ỨC DỰ ÁN cho nhắc nhở Leader, hoặc `""`.
 
         Có trần token riêng (`memory.json`), độc lập với kích thước lịch
         sử. Đi kèm `leader.LUAT_KY_UC` ở MỌI lượt có khối — xem lý do ở
-        `leader.py`. Lỗi ở đây không được làm vỡ lượt chat.
+        `leader.py`. Lỗi ở đây không được làm vỡ lượt chat. `kem_su_kien`
+        (câu hỏi lịch sử) đính thêm dòng L0 khớp câu hỏi làm bằng chứng.
         """
         if self._ky_uc is None:
             return ""
         try:
-            van = self._ky_uc.khoi_cho_leader(project_id, text)
+            van = self._ky_uc.khoi_cho_leader(project_id, text,
+                                              kem_su_kien=kem_su_kien)
         except Exception as exc:                            # noqa: BLE001
             self.store.ghi_su_kien("MEMORY_ERROR", project_id=project_id,
                                    level="WARNING",
@@ -1000,11 +1003,17 @@ class ControlCenter:
             # git). Nen "production farmer con chay khong?" duoc tra loi
             # bang so viec cua Router, va cau tra loi la SAI.
             khoi_song = self._khoi_song(pid, text)
+            # V0.6.1 — CAU HOI LICH SU/KIEN THUC DU AN: tra tu KY UC truoc,
+            # dinh kem bang chung L0, va bat `LUAT_LICH_SU` de Leader KHONG
+            # dispatch mot worker cho cau hoi ma so da tra loi duoc (khuyet tat
+            # nghiem thu tay: "cai vu SSH ... truoc day bi gi" -> AG02 200s).
+            la_lich_su, _dh_ls = leader.la_cau_hoi_lich_su(text)
             # V0.6 — KY UC DU AN dat SAU anh chup tinh, kem luat rieng.
-            khoi_ky_uc = self._khoi_ky_uc(pid, text)
+            khoi_ky_uc = self._khoi_ky_uc(pid, text, kem_su_kien=la_lich_su)
             khoi_toa = self._khoi_toa(pid, text)
             nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
-                                      khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa)
+                                      khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa,
+                                      la_lich_su=la_lich_su)
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.

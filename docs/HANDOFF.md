@@ -1389,6 +1389,27 @@ giữ nguyên, bản mới `dist-v061`. Bốn việc, ba báo cáo:
   CA công cộng (Artifact Signing **không mở cho Việt Nam**); dev dùng
   `router-cc-desktop.cmd` hoặc chấp nhận xổ số với báo cáo. Bản cũ nguyên
   băm. EXE mở được lúc đo: `dist-v0612`. `docs/reports/SMART_APP_CONTROL_V061.md`.
+* **Khuyết tật Project Memory — không phải lớp liên tục có thẩm quyền.** Sổ ký
+  ức LIVE của Fanfic là `…\router-control-center\.router\memory\fanfic-dcf29d1141\
+  memory.db` (project_id=`fanfic`, repo trỏ `C:\Users\nguye\Documents\CapCut-TTS-App`).
+  Nguyên nhân gốc "Decisions=0 sau khi người dùng tuyên bố": đề bạt V0.6.1
+  chạy ĐÚNG (đo: `qd_0001` user_explicit + provenance) — UI báo 0 vì tuyên bố
+  Astra gõ vào bản CŨ `dist-v06` (không có `de_bat`) + **tách kho theo gốc
+  `.router`** (đóng gói cạnh EXE ≠ source-mode ở checkout). Sổ live CHƯA BAO GIỜ
+  backfill (`da_nhap=0`) — "8.089" cũ là dry-run/sổ tạm. Đã: backfill THẬT vào
+  sổ live qua API app đang chạy (su_kien 75→7.647, incident 1→**55**, 0 rò bí
+  mật, decision vẫn 0 vì backfill không `user_explicit`); sự cố SSH
+  (`fanficappwrrite.pem` typo, `prod_cutover.py:96`, commit `b8b2592`) chứng
+  minh từ git — không từ đề bài. Sửa Leader MEMORY-FIRST: `leader.
+  la_cau_hoi_lich_su` + `LUAT_LICH_SU` + `khoi_cho_leader(kem_su_kien=)` đính
+  bằng chứng L0 + wiring `engine._giao_leader` — câu hỏi lịch sử/kiến thức dự
+  án trả TỪ ký ức, KHÔNG dispatch worker chỉ vì từ khoá vắng trong chat; giữ
+  bậc SỐNG > KÝ ỨC (câu hỏi hiện tại vẫn đo sống). Bộ kiểm
+  `test_ky_uc_first_v061.py` (11) gồm NHẤT QUÁN KHO (ghi/backfill/UI/Leader một
+  namespace + một tệp). **LUÔN mở app từ CÙNG một nơi (`router-cc-desktop.cmd`
+  ở worktree này) để dùng đúng sổ live.** `docs/reports/PROJECT_MEMORY_RECALL_V061.md`.
+  Nghiệm thu Leader thật (đóng/mở + turn agy): CHƯA chạy (mã Leader đang chạy
+  là bản cũ) — chạy cùng nghiệm thu WebReader để đỡ khởi động lại app hai lần.
 
 Bộ kiểm mới: 100 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
 provider webapi 3 · toả 22). **Bản EXE cuối: `dist-v061`, build lại SẠCH từ

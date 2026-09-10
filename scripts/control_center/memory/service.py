@@ -104,14 +104,34 @@ class DichVuKyUc:
             return None
         return BoMayNguCanh(p, self.ngan_sach).dung(cau)
 
-    def khoi_cho_leader(self, project_id: str, cau: str) -> str:
-        """Khối chữ dán vào nhắc nhở, hoặc `""` nếu không có gì / không sẵn."""
+    def khoi_cho_leader(self, project_id: str, cau: str, *,
+                        kem_su_kien: bool = False, so_su_kien: int = 6) -> str:
+        """Khối chữ dán vào nhắc nhở, hoặc `""` nếu không có gì / không sẵn.
+
+        `kem_su_kien=True` (câu hỏi LỊCH SỬ) đính thêm các dòng L0 khớp câu hỏi
+        theo FTS — bằng chứng thô để Leader trả lời trực tiếp thay vì dispatch
+        một worker. Xem `leader.la_cau_hoi_lich_su` / `engine._giao_leader`.
+        """
         g = self.goi_ngu_canh(project_id, cau)
         if g is None:
             return ""
         van = g.render()
         vua = self._vua_de_bat(project_id)
-        if not van.strip() and not vua:
+        # BANG CHUNG L0 khop cau hoi — chi cho cau hoi lich su. `tim_su_kien`
+        # da qua bo loc bi mat o cong vao L0; day chi la doc lai.
+        khoi_sk = ""
+        if kem_su_kien:
+            p = self.provider(project_id)
+            evs = p.tim_su_kien(cau, limit=so_su_kien) if p is not None else []
+            if evs:
+                dong = ["BẰNG CHỨNG L0 KHỚP CÂU HỎI (dòng lịch sử thô — mỗi dòng "
+                        "có mã sk#, dùng để trả lời trực tiếp):"]
+                for s in evs:
+                    tuoi = tuoi_chu(time.time() - s.ts)
+                    dong.append(f"[sk#{s.id} · {s.loai} · {tuoi}] "
+                                + (s.tom_tat or "")[:240])
+                khoi_sk = "\n".join(dong)
+        if not van.strip() and not vua and not khoi_sk:
             return ""
         dau = (f"KÝ ỨC DỰ ÁN (lịch sử đã ghi — {g.lich_su_so_su_kien} sự kiện "
                f"trong sổ, gói này {g.token_uoc}/{g.token_tran} token, "
@@ -123,7 +143,10 @@ class DichVuKyUc:
             dau += ("\nVỪA GHI TỰ ĐỘNG TỪ TIN NHẮN NÀY (đã có bản ghi, hãy xác nhận "
                     "bằng mã, KHÔNG ghi lại): "
                     + ", ".join(f"{ma} ({loai})" for ma, loai, _ in vua))
-        return dau + "\n" + van
+        ra = dau + "\n" + van
+        if khoi_sk:
+            ra += ("\n" if van.strip() else "") + "\n" + khoi_sk
+        return ra
 
     # -- de bat (V0.6.1) -----------------------------------------------------
 

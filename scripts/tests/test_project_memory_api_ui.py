@@ -232,6 +232,35 @@ class TestMaNguon(unittest.TestCase):
         self.assertIn("khoi_ky_uc=khoi_ky_uc", src)
 
 
+class TestDesktopDongNhe(unittest.TestCase):
+    """Đóng cửa sổ PHẢI tới được `cc.shutdown()` — khuyết tật V0.2 lộ ở V0.6.
+
+    Đo thật trên bản EXE: nhật ký có "đang tắt backend…" nhưng KHÔNG có
+    `ENGINE_STOPPED` — `webview.start()` trả về ngay khi cửa sổ đóng, còn
+    `events.closed` chạy trên luồng nền và bị giết khi `main()` kết thúc.
+    Hai điều phải giữ: `main()` CHỜ (có hạn) luồng đóng; và `shutdown()`
+    đứng TRƯỚC `join` uvicorn trong `_khi_dong`.
+    """
+
+    def setUp(self):
+        self.src = (GOC / "scripts" / "control_center" / "desktop.py").read_text(
+            encoding="utf-8")
+
+    def test_main_cho_luong_dong_sau_webview_start(self):
+        i = self.src.index("webview.start(gui=")
+        duoi = self.src[i:i + 1200]
+        self.assertIn("da_dong.wait(timeout=", duoi,
+                      "main() phải chờ `_khi_dong` xong sau `webview.start()`")
+
+    def test_khi_dong_goi_shutdown_TRUOC_join_uvicorn(self):
+        i = self.src.index("def _khi_dong():")
+        than = self.src[i:i + 2000]
+        self.assertLess(than.index("cc.shutdown()"), than.index("luong.join("),
+                        "shutdown (điểm dừng, Leader) phải chạy trước khi chờ uvicorn")
+        self.assertIn("da_dong.set()", than)
+        self.assertIn("finally:", than)
+
+
 class TestEngineTichHop(_Nen):
     def test_engine_mo_ky_uc_va_ghi_MEMORY_RESUMED_khi_co_gi(self):
         self.cc.ky_uc.diem_dung_tuong_minh("p", "x", {"muc_tieu": "tiếp"})

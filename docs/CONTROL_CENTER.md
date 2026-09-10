@@ -888,3 +888,33 @@ Không phải thiếu sót — là ranh giới đã chọn:
   việc ở `QUEUED`/`WAITING`; `BLOCKED` (gồm mọi việc GATED) đứng yên cho tới
   khi có người duyệt.
 - **Chưa có Browser Operator, chưa có app di động, chưa có cloud.**
+
+## 16. Ký ức dự án vô hạn + ảo hoá ngữ cảnh (V0.6)
+
+Một phiên LLM không còn là vòng đời của dự án. Lịch sử được giữ **trọn**,
+chỉ-thêm, trên đĩa cục bộ; Leader nhận một **gói ngữ cảnh** có trần token
+độc lập với kích thước lịch sử (đo: 20 k → 200 k sự kiện, gói 1 047 → 1 056
+token). Đầy đủ ở `docs/reports/PROJECT_MEMORY_V06.md`; mã ở
+`scripts/control_center/memory/`.
+
+Bốn luật không được phá:
+
+1. **Ký ức ở bậc 3, không bao giờ trả lời câu hỏi HIỆN TẠI khi có probe
+   sống.** `leader.LUAT_KY_UC` đi kèm khối ký ức ở MỌI lượt có khối, đặt
+   SAU ảnh chụp tĩnh; nhãn khối không bắt đầu bằng "TRẠNG THÁI"; một lần
+   `LIVE_PROBE` được nhớ là "kết quả một lần đo sống (ĐÃ CŨ)". Bài kiểm so
+   vị trí bằng `index()` và cấm cụm "LUẬT THẨM QUYỀN"/"tin được".
+2. **L0 (`su_kien`) chỉ-thêm.** Không có đường sửa/xoá trong mã — bài kiểm
+   quét `kho.py`. Không có endpoint xoá, không có nút "xoá lịch sử".
+3. **Không bí mật vào sổ.** `bi_mat.loc()` ở cổng vào, phủ `packet.redact`
+   và lọc cả khối PEM, AKIA, KEY=value…; thứ tự mẫu THÊM trước mẫu gốc.
+   `da_loc=N` được ghi, nội dung thì không.
+4. **Ký ức không được giết Router.** Provider không phương thức nào ném;
+   sổ không mở được → `MEMORY_UNAVAILABLE`, chat/live vẫn chạy; người ghi
+   hỏng → sổ chính vẫn ghi (`ControlStore._bao` nuốt).
+
+Vị trí sổ: `<gốc>/.router/memory/<ns>/memory.db` — cạnh `control.db`,
+mỗi dự án một tệp, **không** trong cây git của dự án được quản. FTS5
+`unicode61 remove_diacritics 2` (bắt buộc ghi rõ — mặc định gấp dấu tiếng
+Việt nửa vời), external content, dự phòng `LIKE` trên cột `chuan` (gấp
+dấu + `đ→d`). Không vector, không trigram, không LLM trong đường chọn lọc.

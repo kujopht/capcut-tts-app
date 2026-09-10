@@ -2364,10 +2364,25 @@ class ControlCenter:
                 if (self._ky_uc.cau_hinh.get("diem_dung") or {}).get(
                         "khi_tat_app", True):
                     for p in self.projects():
-                        self._ky_uc.diem_dung_tu_dong(
+                        dd = self._ky_uc.diem_dung_tu_dong(
                             p.project_id, "tắt ứng dụng", ep=True)
-            except Exception:                             # noqa: BLE001
-                pass
+                        if dd is None:
+                            # KHONG nuot im lang: mot diem dung khong ghi
+                            # duoc luc tat la thu phien sau se thieu, va
+                            # khong ai biet neu day chi la `pass`.
+                            pv = self._ky_uc.provider(p.project_id)
+                            self.store.ghi_su_kien(
+                                "MEMORY_ERROR", project_id=p.project_id,
+                                level="WARNING",
+                                detail="điểm dừng lúc tắt KHÔNG ghi được: "
+                                       + (pv.loi_cuoi if pv else "provider None")[:200])
+            except Exception as exc:                      # noqa: BLE001
+                try:
+                    self.store.ghi_su_kien(
+                        "MEMORY_ERROR", level="WARNING",
+                        detail=f"điểm dừng lúc tắt: {type(exc).__name__}: {exc}"[:300])
+                except Exception:                         # noqa: BLE001
+                    pass
             try:
                 self._ky_uc.close()
             except Exception:                             # noqa: BLE001

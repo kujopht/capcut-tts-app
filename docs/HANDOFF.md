@@ -1291,8 +1291,38 @@ Nếu sau này muốn cho nó tự xoá, điều kiện tối thiểu:
 4. Không bao giờ xoá `audio_track`; metadata mồ côi phải do người xem xét, vì
    nó nghĩa là **đã mất dữ liệu** chứ không phải thừa dữ liệu.
 
+## Router Control Center V0.6 — ký ức dự án (2026-09-10)
+
+Đã xong, nhánh `feat/v06-project-memory`, chưa tag/merge: lịch sử dự án
+chỉ-thêm trên đĩa cục bộ (`<gốc>/.router/memory/<ns>/`), ký ức có cấu trúc
+trỏ về bằng chứng, quyết định kiểu ADR, viên nang, điểm dừng để phiên sau
+tiếp tục không cần dán handoff; Leader nhận gói ngữ cảnh có trần token độc
+lập kích thước lịch sử (đo 20 k → 200 k sự kiện: 1 047 → 1 056 token). Bản
+EXE `dist-v06` nghiệm thu 22/22. Đầy đủ: `docs/reports/PROJECT_MEMORY_V06.md`.
+Việc tiếp theo hợp lý: consolidation có kiểm chứng + đường vector tuỳ chọn
+(mục 18 của báo cáo). Không xoá lịch sử ở V0.6.
+
 ## Bẫy đã gặp
 
+- **pywebview phát `events.closed` trên luồng NỀN, còn `webview.start()`
+  trả về ngay khi cửa sổ đóng.** `main()` kết thúc → trình thông dịch tắt →
+  luồng đang chạy handler bị giết giữa chừng. Triệu chứng: nhật ký có dòng
+  đầu của handler nhưng không có gì sau đó, không `ENGINE_STOPPED`, phiên
+  Leader `agy` bị bỏ rơi. Có từ V0.2, chỉ lộ ở V0.6 khi điểm dừng "tắt ứng
+  dụng" phụ thuộc vào `shutdown()`. Sửa: `threading.Event` do handler set
+  trong `finally`, `main()` chờ có hạn (45 s) sau `start()`; việc quan
+  trọng đứng TRƯỚC `join` uvicorn.
+- **`terminate()` trong bài nghiệm thu KHÔNG phải "người dùng đóng app".**
+  TerminateProcess bỏ qua mọi handler đóng; bài đo "đóng/mở lại" đạt về
+  bền dữ liệu nhưng không đo gì về đường tắt sạch. Đóng như người dùng =
+  `PostMessageW(hwnd, WM_CLOSE)` tới cửa sổ chính, rồi chờ tiến trình tự
+  thoát (rơi về terminate có nói rõ). Hai lần nghiệm thu V0.6 đầu đã đo
+  sai vì điều này.
+- **Thư mục chưa được Claude Code TIN thì cả `.claude/settings.json` lẫn
+  hook của kho đều bị bỏ qua lặng lẽ** — mỗi worktree mới là một thư mục
+  như thế. Tầng an toàn phải ở `~/.claude/settings.json`;
+  `python scripts/kiem_quyen.py --kiem` kiểm cả hai tầng,
+  `--tin-cay <đường>` cho worktree mới. `docs/reports/QUYEN_CLAUDE_TIN_CAY.md`.
 - **Heredoc trong bash nuốt mất một dấu gạch chéo** — kể cả dạng đã trích dẫn `<<'EOF'`. Đã mắc hai lần: `\\b` thành `\b` (backspace), và `\\${cls}` thành `\${cls}` — mà `\$` trong template literal JS là **đô-la thoát**, nên regex biến thành chuỗi văn bản `${cls}` không bao giờ khớp, tức là một assertion rỗng. Viết file test bằng công cụ Write, đừng dùng heredoc. Và đừng ghép chuỗi vào `new RegExp` khi có cách so khớp trực tiếp.
 - **Assertion phủ định dễ đạt vì lý do sai.** `!src.includes("api.getChapter(")` từng đạt cả trên code cũ, vì code cũ viết `api` xuống dòng rồi `.getChapter(`. Sau khi viết test mới, hãy chạy chính assertion đó lên bản code CŨ (`git show <commit>:<file>`) và xác nhận nó **thất bại** — không làm bước này thì không biết test có răng hay không.
 - **`uvicorn --reload` bỏ sót thay đổi.** Đã gặp ba lần: WatchFiles in ra "detected changes... Reloading..." rồi worker không khởi động lại, backend tiếp tục phục vụ code cũ. Triệu chứng là API thiếu hẳn trường vừa thêm. Cách chắc ăn: dừng hẳn rồi chạy lại. Lưu ý tiến trình **con** có thể sống sót sau khi giết tiến trình cha và vẫn giữ cổng 8000 — phải giết cả cây.

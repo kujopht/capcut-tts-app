@@ -214,24 +214,50 @@ def main(argv=None) -> int:
     if a.project:
         duong += f"#project={a.project}"
 
+    #: `_khi_dong` da chay xong. `main()` CHO co nay sau `webview.start()`.
+    #:
+    #: VI SAO — mot khuyet tat co tu V0.2, V0.6 moi lo ra: pywebview phat
+    #: `events.closed` tren MOT LUONG NEN, con luong chinh thi tro ve tu
+    #: `webview.start()` ngay khi cua so dong -> `main()` ket thuc -> trinh
+    #: thong dich tat -> luong nen bi giet giua chung. Do that tren ban EXE
+    #: (2026-09-10): nhat ky co "dang tat backend…" nhung KHONG co
+    #: `ENGINE_STOPPED`, tuc `cc.shutdown()` chua bao gio duoc goi toi —
+    #: phien Leader `agy` bi bo roi, va diem dung "tat ung dung" cua ky uc
+    #: khong duoc ghi. Cho co han (45 s) chu khong cho vo han: mot backend
+    #: treo khong duoc giu cua so ma da bien mat.
+    da_dong = threading.Event()
+
     def _khi_dong():
-        """Đóng cửa sổ = tắt backend, TRỪ KHI ta không sở hữu nó."""
-        if not kh.so_huu:
-            ghi("[desktop] backend do tiến trình khác sở hữu — để nguyên.")
+        """Đóng cửa sổ = tắt backend, TRỪ KHI ta không sở hữu nó.
+
+        Thứ tự CÓ CHỦ ĐÍCH: `cc.shutdown()` TRƯỚC (điểm dừng ký ức, dừng
+        vòng lặp, đóng phiên Leader — thứ quan trọng và nhanh), rồi mới
+        tắt uvicorn. Uvicorn có thể chờ WebSocket của chính giao diện
+        đóng, nên `join` của nó có trần; đặt nó sau để một lần chờ không
+        đẩy phần quan trọng ra khỏi 45 giây.
+        """
+        if da_dong.is_set():
+            return                      # duong loi cua `start()` goi lai
+        try:
+            if not kh.so_huu:
+                ghi("[desktop] backend do tiến trình khác sở hữu — để nguyên.")
+                mot.nha()
+                return
+            ghi("[desktop] đang tắt backend…")
+            if cc is not None:
+                try:
+                    cc.shutdown()
+                    ghi("[desktop] backend đã tắt sạch (shutdown xong)")
+                except Exception as exc:                    # noqa: BLE001
+                    ghi(f"[desktop] shutdown: {exc}")
+            if sv is not None:
+                sv.should_exit = True
+            if luong is not None:
+                luong.join(timeout=8)
+            xoa_tep_khoa(goc)
             mot.nha()
-            return
-        ghi("[desktop] đang tắt backend…")
-        if sv is not None:
-            sv.should_exit = True
-        if luong is not None:
-            luong.join(timeout=8)
-        if cc is not None:
-            try:
-                cc.shutdown()
-            except Exception as exc:                        # noqa: BLE001
-                ghi(f"[desktop] shutdown: {exc}")
-        xoa_tep_khoa(goc)
-        mot.nha()
+        finally:
+            da_dong.set()
 
     cua_so = webview.create_window(
         TIEU_DE, duong, width=1440, height=920, min_size=(980, 640),
@@ -270,6 +296,10 @@ def main(argv=None) -> int:
             "Hoặc dùng đường gỡ lỗi:\n    router-cc-web.cmd")
         _khi_dong()
         return 4
+    # `webview.start()` tro ve khi cua so DONG — khong phai khi `_khi_dong`
+    # xong. Cho no; xem ghi chu o `da_dong`.
+    if not da_dong.wait(timeout=45):
+        ghi("[desktop] cảnh báo: tắt backend chưa xong sau 45 s — thoát.")
     return 0
 
 

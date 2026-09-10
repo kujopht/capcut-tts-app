@@ -568,6 +568,11 @@ class KhoKyUc:
 
     # -- thong ke / toan ven --------------------------------------------------
 
+    def so_su_kien(self) -> int:
+        """Chỉ `count(*)` — cho đường nóng. `dem()` còn có một GROUP BY trên
+        toàn bộ vân tay (~200 ms ở 200 k dòng), không thuộc về mỗi lượt chat."""
+        return int(self._c().execute("SELECT count(*) FROM su_kien").fetchone()[0])
+
     def dem(self) -> Dict[str, int]:
         c = self._c()
         ra = {}

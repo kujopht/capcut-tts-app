@@ -192,9 +192,11 @@ class BoMayNguCanh:
         goi.vien_nang = self.p.vien_nang()
         goi.diem_dung = self.p.nap_diem_dung()
         try:
-            # `dem()` chu khong phai `thong_ke()`: cai sau quet toan ven ca
-            # so, khong thuoc ve duong nong cua mot luot chat.
-            goi.lich_su_so_su_kien = int(self.p.dem().get("su_kien", 0))
+            # `so_su_kien()` — mot `count(*)`. Khong phai `thong_ke()` (quet
+            # toan ven ca so) va cung khong phai `dem()` (GROUP BY tren moi
+            # van tay: ~200 ms o 200 k dong, do duoc). Duong nong cua mot
+            # luot chat chi can biet so lon bao nhieu.
+            goi.lich_su_so_su_kien = int(self.p.so_su_kien())
         except Exception:                                   # noqa: BLE001
             goi.lich_su_so_su_kien = 0
 

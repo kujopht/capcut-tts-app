@@ -357,8 +357,18 @@ class LocalMemoryProvider:
 
     # -- thong ke ---------------------------------------------------------
 
+    def so_su_kien(self) -> int:
+        """Một `count(*)` — thứ duy nhất đường nóng cần biết về kích cỡ L0."""
+        if self._kho is None:
+            return 0
+        try:
+            return self._kho.so_su_kien()
+        except Exception as exc:                            # noqa: BLE001
+            self._that_bai("đếm sự kiện", exc)
+            return 0
+
     def dem(self) -> Dict[str, int]:
-        """Chỉ số lượng — RẺ. Dùng trên đường nóng (mỗi lượt Leader).
+        """Chỉ số lượng — RẺ hơn `thong_ke()`, nhưng vẫn có một GROUP BY.
 
         `thong_ke()` còn chạy `quick_check` + FTS integrity-check, là hai
         phép quét cả sổ; chạy chúng mỗi lượt chat là biến một sổ 300 MB

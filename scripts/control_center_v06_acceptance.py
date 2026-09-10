@@ -113,6 +113,43 @@ def _tat(ph) -> None:
     time.sleep(2)
 
 
+def _dong_nhe(ph) -> str:
+    """Đóng app NHƯ NGƯỜI DÙNG: gửi WM_CLOSE tới cửa sổ chính.
+
+    `terminate()` là TerminateProcess — app chết không kịp chạy
+    `events.closed -> cc.shutdown()`, nên không có điểm dừng "tắt ứng
+    dụng" và bài nghiệm thu đo sai thứ nó định đo. Lần đầu chạy bản này
+    đúng là đã vấp thế. Rơi về `terminate()` nếu app không tự thoát trong
+    40 giây, và nói rõ đã rơi.
+    """
+    import ctypes
+    from ctypes import wintypes
+    u32 = ctypes.WinDLL("user32", use_last_error=True)
+    WM_CLOSE = 0x0010
+    hwnds: list = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _mot(hwnd, _l):
+        pid = wintypes.DWORD()
+        u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == ph.pid and u32.IsWindowVisible(hwnd) \
+                and u32.GetParent(hwnd) == 0:
+            hwnds.append(hwnd)
+        return True
+
+    u32.EnumWindows(_mot, 0)
+    for h in hwnds:
+        u32.PostMessageW(h, WM_CLOSE, 0, 0)
+    t0 = time.time()
+    while time.time() - t0 < 40 and ph.poll() is None:
+        time.sleep(0.5)
+    if ph.poll() is None:
+        _tat(ph)
+        return f"WM_CLOSE tới {len(hwnds)} cửa sổ nhưng không thoát trong 40s -> terminate"
+    time.sleep(2)
+    return f"WM_CLOSE tới {len(hwnds)} cửa sổ · thoát sau {time.time() - t0:.1f}s"
+
+
 def _so_ky_uc(goc: Path) -> dict:
     """Đọc thẳng sổ ký ức trên đĩa: đếm + quick_check. Không qua app."""
     ra = {}
@@ -125,6 +162,9 @@ def _so_ky_uc(goc: Path) -> dict:
                 "ky_uc": c.execute("SELECT count(*) FROM ky_uc").fetchone()[0],
                 "quyet_dinh": c.execute("SELECT count(*) FROM quyet_dinh").fetchone()[0],
                 "diem_dung": c.execute("SELECT count(*) FROM diem_dung").fetchone()[0],
+                "diem_dung_tat": c.execute(
+                    "SELECT count(*) FROM diem_dung WHERE ly_do LIKE ?",
+                    ("tắt ứng dụng%",)).fetchone()[0],
                 "quick_check": c.execute("PRAGMA quick_check").fetchone()[0],
             }
         finally:
@@ -242,16 +282,17 @@ def main(argv=None) -> int:
                                if kq.vi_pham else ""))
         cdp.dong()
 
-        # -- 4. tat app ------------------------------------------------------
+        # -- 4. tat app NHU NGUOI DUNG (WM_CLOSE -> events.closed -> shutdown)
         gs.dat_pha("A: tắt")
-        _tat(ph); ph = None
+        cach = _dong_nhe(ph); ph = None
         so_tat = _so_ky_uc(goc)
-        r_a = so_a.get(next(iter(so_a), ""), {}) if so_a else {}
-        r_t = so_tat.get(next(iter(so_tat), ""), {}) if so_tat else {}
+        ns_r = next((k for k in so_tat if k.startswith("router-")), "")
+        r_a = so_a.get(ns_r, {}); r_t = so_tat.get(ns_r, {})
         bd.ghi("4. tắt app -> có ĐIỂM DỪNG 'tắt ứng dụng' trên đĩa",
-               any(v.get("diem_dung", 0) > r_a.get("diem_dung", 0)
-                   for v in so_tat.values()) if so_tat else False,
-               f"điểm dừng: {r_a.get('diem_dung')} -> {r_t.get('diem_dung')}")
+               r_t.get("diem_dung_tat", 0) >= 1
+               and r_t.get("diem_dung", 0) > r_a.get("diem_dung", 0),
+               f"{cach} · điểm dừng: {r_a.get('diem_dung')} -> {r_t.get('diem_dung')} "
+               f"(trong đó 'tắt ứng dụng': {r_t.get('diem_dung_tat')})")
 
         # ================= PHIEN B =====================================
         gs2 = GiamSatCuaSo(); gs2.__enter__()
@@ -268,9 +309,13 @@ def main(argv=None) -> int:
                    f"sự kiện={d_b.get('su_kien')} · ký ức={d_b.get('ky_uc')} · "
                    f"quyết định={d_b.get('quyet_dinh')} · điểm dừng={d_b.get('diem_dung')}")
             tt = _api(cdp2, "/api/memory/continue?project=router")
+            # Diem dung MOI NHAT la cai duoc nap — co the la "tat ung dung"
+            # hoac "viec ... DONE" (neu viec ket thuc ngay truoc luc tat);
+            # ca hai deu dung. Dieu bat buoc: CO diem dung, va CO quyet
+            # dinh hieu luc.
             bd.ghi("7b. điểm dừng + quyết định hiệu lực NẠP được cho phiên mới",
                    bool(tt.get("co_gi_de_tiep_tuc"))
-                   and (tt.get("diem_dung") or {}).get("ly_do") == "tắt ứng dụng"
+                   and bool((tt.get("diem_dung") or {}).get("ma"))
                    and len(tt.get("quyet_dinh_hieu_luc") or []) >= 1,
                    f"điểm dừng={(tt.get('diem_dung') or {}).get('ma')} "
                    f"({(tt.get('diem_dung') or {}).get('ly_do')}) · "
@@ -322,14 +367,22 @@ def main(argv=None) -> int:
             tl_s = _gui_chat(cdp2, CAU_SONG, han=360)
             n_lp1 = len(_su_kien(cdp2, "fanfic", "LIVE_PROBE"))
             n_mc3 = len(_su_kien(cdp2, "fanfic", "MEMORY_CONTEXT"))
-            tls = (tl_s or "").lower()
-            song = any(k in tls for k in ("live probe", "vừa đo", "active", "đang chạy",
-                                          "chạy", "ssh"))
+            tls = " ".join((tl_s or "").lower().split())
+            # Tra loi phai NEU NGUON DO SONG (live probe / vua kiem tra / vua
+            # do) — do la dau hieu no dung khoi SONG. Va KHONG duoc KET LUAN
+            # nguoc voi phep do. Khong soi chu "down" tran: Leader duoc phep
+            # giai thich tu vung DOWN/UNKNOWN, dieu do khong phai mot ket luan.
+            neu_nguon = any(k in tls for k in ("live probe", "vừa kiểm tra", "vừa đo",
+                                               "probe", "ssh"))
+            ket_luan_nguoc = any(k in tls for k in ("không chạy", "đã dừng",
+                                                    "không hoạt động", "đang down",
+                                                    "bị down", "hiện down"))
             bd.ghi("11. câu HIỆN TẠI -> Leader đo SỐNG (LIVE_PROBE tăng)",
                    n_lp1 > n_lp0, f"LIVE_PROBE {n_lp0}->{n_lp1} · " + (tl_s or "")[:160])
-            bd.ghi("12. và trả lời từ phép đo, không từ ký ức",
-                   song and "down" not in tls and "không chạy" not in tls,
-                   f"khối ký ức có mặt: {n_mc3 > n_mc2} · trả lời: " + (tl_s or "")[:140])
+            bd.ghi("12. và trả lời từ phép đo (nêu nguồn live), không kết luận từ ký ức",
+                   neu_nguon and not ket_luan_nguoc,
+                   f"khối ký ức có mặt: {n_mc3 > n_mc2} · nêu nguồn đo: {neu_nguon} · "
+                   f"kết luận ngược: {ket_luan_nguoc} · " + (tl_s or "")[:400])
 
             # -- 14. khong hong ---------------------------------------------
             sau = _dem_so(goc)
@@ -344,10 +397,13 @@ def main(argv=None) -> int:
                               for k, v in so_b.items()))
             kq2 = gs2.ket_qua
             bd.ghi("13b. phiên B: không cửa sổ console nào DO APP nhấp lên",
-                   not vi_pham_cua_app(kq2.vi_pham), kq2.tom_tat())
+                   not vi_pham_cua_app(kq2.vi_pham),
+                   kq2.tom_tat() + (NL + "      " + _ta_vi_pham(kq2.vi_pham)
+                                    if kq2.vi_pham else ""))
             cdp2.dong()
         finally:
-            _tat(ph); ph = None
+            if ph is not None:
+                _dong_nhe(ph); ph = None
             gs2.dung()
     finally:
         gs.dung()

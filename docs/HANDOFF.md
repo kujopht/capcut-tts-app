@@ -1330,8 +1330,24 @@ giữ nguyên, bản mới `dist-v061`. Bốn việc, ba báo cáo:
   Providers), thử kết nối chi phí tối thiểu, hỏi thử thủ công, provider vào fabric
   KHÔNG nhận dispatch. `docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`.
 
-Bộ kiểm mới: 78 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
-provider webapi 3). Nghiệm thu EXE `dist-v061`: **31/31** (lần 4; sha256
+* **Toả đa agent** (khuyết tật nghiệm thu tay: "gọi 8 agent gemini 3.8…" thành
+  MỘT việc, giao AG02) — nguyên nhân: `_chat()` chỉ dùng lời diễn đạt lại của
+  Leader, không tầng nào mang số agent; cộng `max_parallel=3` mặc định. Sửa:
+  `toa.py` đọc cardinality từ câu người dùng → 1 cha + N con (không trùng),
+  sức chứa đo từ fabric (trừ Leader), câu trả lời nói đúng "K chạy ngay, N−K
+  chờ", con tránh runtime anh em, gộp có nguồn gốc, UI cha/con, trần tự theo
+  bể. `docs/reports/MULTI_AGENT_FANOUT_V061.md`.
+
+Bộ kiểm mới: 100 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
+provider webapi 3 · toả 22). Bản EXE có toả: **`dist-v0611`** (sha256
+`3cdb5438…`, `dist-v0611/BAN_TOT_v0611.txt`; nghiệm thu
+`control_center_v061_toa_acceptance.py`, xem `MULTI_AGENT_FANOUT_V061.md` mục 6 —
+lần 3 bắt được lỗi giao diện thật: WebSocket không theo dự án đang chọn, đã sửa).
+**`dist-v061` bị hỏng một phần**: lần rebuild `--clean` chạy khi hai bản EXE
+từ thư mục đó còn mở (nghiệm thu tay) — `control.db` bị khoá làm `rmtree`
+dừng giữa chừng, `_internal` chỉ còn 36 tệp. Bản đang mở vẫn chạy; mở mới
+sẽ hỏng cho tới khi build lại (`--dist dist-v061`, sau khi đóng app). Bài
+học: kiểm `tasklist` trước khi `--clean` một thư mục dist. Nghiệm thu EXE `dist-v061`: **31/31** (lần 4; sha256
 `bfc25e37…`, `dist-v061/BAN_TOT_v061.txt`) — chi tiết và ba lần chạy trước ở
 `PROJECT_MEMORY_V061.md` mục 10. Việc tiếp theo: bật AUTO cho provider ngoài (adapter thực
 thi + ngân sách), người vận hành duyệt các sự cố `backfill`, nhập tiếp phần còn lại.

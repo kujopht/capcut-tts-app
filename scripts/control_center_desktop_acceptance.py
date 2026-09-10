@@ -367,7 +367,8 @@ class TienTrinhShell:
         raise subprocess.TimeoutExpired(str(self.exe), timeout)
 
 
-def _mo_qua_explorer(p_exe: Path, goc: Path, cdp: int) -> TienTrinhShell:
+def _mo_qua_explorer(p_exe: Path, goc: Path, cdp: int,
+                     them: str = "") -> TienTrinhShell:
     shell32 = ctypes.WinDLL("shell32", use_last_error=True)
     shell32.ShellExecuteW.restype = wintypes.HINSTANCE
     shell32.ShellExecuteW.argtypes = [
@@ -376,7 +377,7 @@ def _mo_qua_explorer(p_exe: Path, goc: Path, cdp: int) -> TienTrinhShell:
 
     truoc = {q for q, (_, t) in _anh_chup_tien_trinh().items()
              if t.lower() == p_exe.name.lower()}
-    tham = f'--root "{goc}" --debug-cdp {cdp}'
+    tham = f'--root "{goc}" --debug-cdp {cdp}' + (f" {them}" if them else "")
     r = int(shell32.ShellExecuteW(None, "open", str(p_exe), tham,
                                   str(p_exe.parent), 1))   # SW_SHOWNORMAL
     if r <= 32:

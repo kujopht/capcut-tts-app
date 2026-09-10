@@ -88,7 +88,9 @@ def main(argv=None) -> int:
     ap.add_argument("--root", default="", help="thư mục gốc giữ sổ .router/")
     ap.add_argument("--project", default="", help="dự án mở sẵn")
     ap.add_argument("--port", type=int, default=0)
-    ap.add_argument("--max-parallel", type=int, default=3)
+    ap.add_argument("--max-parallel", type=int, default=0,
+                    help=("trần việc song song; 0 = tự theo bể tài khoản "
+                          "(tổng khe runtime đã cấp phát, 3..12)"))
     ap.add_argument("--no-recover", action="store_true")
     ap.add_argument("--debug-cdp", type=int, default=0,
                     help=("mở cổng DevTools của WebView2 (chỉ để KIỂM; "

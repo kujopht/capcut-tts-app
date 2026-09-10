@@ -44,8 +44,8 @@ def main(argv=None) -> int:
     ap.add_argument("--project", default="", help="dự án mở sẵn")
     ap.add_argument("--probe", action="store_true",
                     help="dò sức khoẻ provider lúc khởi động (CHẬM, tốn lượt)")
-    ap.add_argument("--max-parallel", type=int, default=3,
-                    help="trần việc chạy song song (mặc định 3)")
+    ap.add_argument("--max-parallel", type=int, default=0,
+                    help="trần việc chạy song song; 0 = tự theo bể tài khoản (3..12)")
     ap.add_argument("--refresh-interval", type=float, default=1.0)
     ap.add_argument("--no-recover", action="store_true",
                     help="bỏ qua đối soát phục hồi lúc khởi động")

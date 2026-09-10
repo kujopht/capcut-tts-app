@@ -67,6 +67,11 @@ from scripts.control_center.worktrees import WorktreeCoordinator
 #: Bao nhieu luot cho MOI viec truoc khi bo cuoc. Trung `MAX_ATTEMPTS` cua
 #: `router_v4/orchestrator.py` co chu dich — hai tang dem cung mot cach.
 MAX_ATTEMPTS = 3
+#: Tran song song khi `max_parallel=0` (tu dong) ma fabric chua dung, va san
+#: duoi cua gia tri tu dong. 3 la con so V0.1 da chon.
+TRAN_SONG_SONG_MAC_DINH = 3
+#: San tren cua gia tri tu dong: moi khe la mot tien trinh agent that.
+TRAN_SONG_SONG_TOI_DA = 12
 
 #: Nhip vong lap dieu phoi. Du nhanh de bang dieu khien thay thay doi, du
 #: cham de khong quay CPU khi khong co viec.
@@ -128,7 +133,21 @@ class ControlCenter:
         #: "khong san" — KHONG BAO GIO la tep thuong).
         self._providers = None
         self._kho_bi_mat = kho_bi_mat
-        self.max_parallel = max(1, max_parallel)
+        #: Tran viec song song. `0` = TU DONG theo be tai khoan (tong khe cua
+        #: runtime da cap phat + nhan dispatch, ke tu TRAN_SONG_SONG_MAC_DINH
+        #: den TRAN_SONG_SONG_TOI_DA). Nghiem thu tay V0.6.1: "goi 8 agent"
+        #: bi tran 3 (mac dinh cu) chan con 3 du be co 10 khe — tran cua
+        #: Control Center va so agent nguoi dung xin la HAI khai niem, va
+        #: tran phai theo be that chu khong theo mot hang so viet tu V0.1.
+        self._max_parallel_cau_hinh = max(0, int(max_parallel))
+        #: Khoa cho buoc TONG HOP viec cha (hai con xong cung luc).
+        self._khoa_toa = threading.Lock()
+        #: Khoa cho "ket qua ve chat DUNG MOT LAN": phep kiem `da_bao_ket_qua`
+        #: + ghi tin + ghi dau phai NGUYEN TU giua cac luong. Luong `_chay`
+        #: (hoac `_tong_hop_toa`) va luoi an toan trong `tick()` cung thay mot
+        #: viec vua DONE — khong khoa thi ca hai deu qua phep kiem va nguoi
+        #: dung doc HAI lan cung mot ket qua (do that o bai kiem toa).
+        self._khoa_bao = threading.Lock()
         self.owner = owner_id()
         # `probe=False` mac dinh: dung Control Center KHONG duoc goi mang.
         # Do suc khoe that la mot thao tac cham va ton mot luot moi provider;
@@ -199,6 +218,25 @@ class ControlCenter:
         self._buoc: Dict[str, tuple] = {}
 
     # -- 0. Fabric dung chung ------------------------------------------------
+
+    @property
+    def max_parallel(self) -> int:
+        """Trần việc song song ĐANG HIỆU LỰC.
+
+        Cấu hình > 0 thì đúng số đó. `0` (tự động): tổng khe của các runtime
+        đã cấp phát và nhận dispatch trong fabric — kẹp giữa
+        `TRAN_SONG_SONG_MAC_DINH` và `TRAN_SONG_SONG_TOI_DA`. Fabric chưa dựng
+        (chưa việc nào cần) thì tạm là mặc định; KHÔNG dựng fabric chỉ để
+        đọc con số này.
+        """
+        if self._max_parallel_cau_hinh > 0:
+            return self._max_parallel_cau_hinh
+        f = self._fabric
+        if f is None:
+            return TRAN_SONG_SONG_MAC_DINH
+        n = sum(int(r.concurrency) for r in f.runtimes.values()
+                if r.provisioned and r.dispatchable)
+        return max(TRAN_SONG_SONG_MAC_DINH, min(n, TRAN_SONG_SONG_TOI_DA))
 
     @property
     def fabric(self) -> Fabric:
@@ -589,7 +627,21 @@ class ControlCenter:
         kh: PlanResult = ctx.planner.plan(goal, ctx.project)
         self._dat_buoc(project_id, "đang giao việc cho Router V4")
         tao: List[Task] = []
-        for pt in kh.tasks:
+        # V0.6.1 — TOA: nguoi dung noi ro "goi N agent…"/"moi agent mot…" ->
+        # MOT viec cha + N viec con doc lap, khong phai mot viec to. Doc tu
+        # CAU NGUOI DUNG GO (`text`), khong tu loi dien dat lai cua Leader —
+        # chinh cho do lam mat so 8 o nghiem thu tay. Xem `toa.py`.
+        from scripts.control_center import toa as TOA
+        yc = TOA.xet_toa(text)
+        thong_bao_toa = ""
+        toa_meta: Optional[Dict] = None
+        if yc is not None and kh.tasks:
+            cha, con, sc = self._tao_toa(ctx, project_id, yc, kh, goal)
+            tao = [cha] + con
+            thong_bao_toa = TOA.cau_thong_bao(sc, cha_id=cha.task_id)
+            toa_meta = {"cha": cha.task_id, "con": [c.task_id for c in con],
+                        "yeu_cau": yc.to_dict(), "suc_chua": sc.to_dict()}
+        for pt in ([] if toa_meta else kh.tasks):
             gated = pt.envelope.gated
             t = Task(
                 task_id=f"{project_id}.{pt.task_id}",
@@ -627,19 +679,141 @@ class ControlCenter:
         # Loi cua LEADER dan dau, ke hoach cua bo phan ra di sau. Nguoi dung
         # can biet "chuyen gi sap xay ra" bang mot cau, khong phai bang mot
         # bang ke hoach.
-        tra_loi = kh.render()
+        if toa_meta:
+            # Cau ve suc chua do ENGINE viet tu fabric that — khong phai loi
+            # hua cua Leader. Leader co the noi gi cung duoc o tren; dong nay
+            # la su that ve so viec va so khe.
+            tra_loi = thong_bao_toa + "\n" + "\n".join(
+                f"  • [{t.task_id}] {t.title}" for t in tao[1:])
+        else:
+            tra_loi = kh.render()
         if qd is not None and qd.reply:
             tra_loi = qd.reply + "\n\n" + tra_loi
         self.store.them_chat(project_id, "assistant", tra_loi,
-                             meta={"plan": kh.to_dict(),
+                             meta={"plan": kh.to_dict(), "toa": toa_meta,
                                    "task_ids": [t.task_id for t in tao],
                                    "attachment_ids": list(dk_hop_le),
                                    "leader": (qd.to_dict() if qd else None),
                                    "loai": "delegation"})
         return {"reply": tra_loi, "tasks": [t.to_dict() for t in tao],
-                "plan": kh.to_dict(), "message_id": tin.message_id,
+                "plan": kh.to_dict(), "toa": toa_meta, "message_id": tin.message_id,
                 "attachment_ids": list(dk_hop_le),
                 "leader": (qd.to_dict() if qd else None)}
+
+    def _tao_toa(self, ctx: ProjectContext, project_id: str, yc, kh: PlanResult,
+                 goal: str):
+        """MỘT việc cha (vật chứa, không chạy agent) + N việc con độc lập.
+
+        Mẫu hợp đồng/phong bì quyền lấy từ việc đầu của bộ phân rã — loại việc,
+        phạm vi, khoá tài nguyên, cổng GATED đều giữ nguyên, chỉ NHÂN ra N bản
+        với phân vùng khác nhau. Sức chứa được ĐO từ fabric đang sống (có dò
+        sức khoẻ nếu đã cũ) ngay lúc tách, để câu trả lời nói đúng số.
+        """
+        from scripts.control_center import toa as TOA
+        mau = kh.tasks[0]
+        tien_to = mau.task_id.rsplit("-", 1)[0]
+        ma_cha = f"{project_id}.{tien_to}-cha"
+        try:
+            self._dam_bao_suc_khoe(f"tách {yc.so_agent} việc song song")
+        except Exception:                                   # noqa: BLE001
+            pass
+        with self._khoa:
+            dang = len([x for x in self._dang_chay.values() if x.is_alive()])
+        sc = TOA.tinh_suc_chua(self.fabric, yc, max_parallel=self.max_parallel,
+                               dang_chay=dang)
+        # Muc tieu con = CA CAU cua nguoi dung (khong phai menh de dau ma bo
+        # phan ra cat ra — "goi 4 agent" khong phai viec). Hop dong/phong bi
+        # lay tu viec mau; van ban muc tieu dung lai khuon `_muc_tieu` de agent
+        # van nhan dung cac rao cong cu.
+        from scripts.control_center.planner import _tieu_de
+        try:
+            muc_tieu_goc = ctx.planner._muc_tieu(goal, mau.kind, mau.contract.allowed_scope,
+                                                 suy_ra=mau.scope_inferred)
+        except Exception:                                   # noqa: BLE001
+            muc_tieu_goc = mau.objective
+        tieu_de_goc = _tieu_de(goal)
+        cac_con = TOA.chia_con(yc, muc_tieu_goc, tieu_de_goc)
+        con_ids = [f"{project_id}.{tien_to}-{c.chi_so}" for c in cac_con]
+        gated = mau.envelope.gated
+
+        hd_cha = self._hop_dong_dict(mau, project_id)
+        hd_cha["task_id"] = ma_cha
+        hd_cha["_toa"] = {"cha": True, "so": yc.so_agent, "con": con_ids,
+                          "yeu_cau": yc.to_dict(), "suc_chua": sc.to_dict()}
+        cha = Task(task_id=ma_cha, project_id=project_id,
+                   title=f"[cha · {yc.so_agent} agent] {tieu_de_goc}"[:120],
+                   objective=goal, state=TaskState.WAITING, priority=mau.priority,
+                   contract=hd_cha, permission=mau.envelope.decision.value,
+                   gate_reason=mau.envelope.ly_do())
+        self.store.luu_task(cha)
+        self.store.ghi_su_kien(
+            "TASK_CREATED", project_id=project_id, task_id=ma_cha,
+            detail=f"toa: cha của {yc.so_agent} việc con — {tieu_de_goc}",
+            meta={"permission": cha.permission, "kind": mau.kind, "toa": hd_cha["_toa"]})
+
+        con_tasks: List[Task] = []
+        for c, cid in zip(cac_con, con_ids):
+            hd = self._hop_dong_dict(mau, project_id)
+            hd["task_id"] = cid
+            hd["dependencies"] = []
+            hd["objective"] = c.muc_tieu + "\n\n" + mau.envelope.render_for_agent()
+            if sc.provider or sc.model:
+                req = dict(hd.get("requirements") or {})
+                if sc.provider:
+                    req["pin_provider"] = sc.provider
+                if sc.model:
+                    req["pin_model"] = sc.model
+                hd["requirements"] = req
+            hd["_toa"] = {"cha": False, "cha_id": ma_cha, "chi_so": c.chi_so,
+                          "so": yc.so_agent, "phan_vung": c.phan_vung}
+            t = Task(task_id=cid, project_id=project_id, title=c.tieu_de,
+                     objective=c.muc_tieu,
+                     state=TaskState.BLOCKED if gated else TaskState.QUEUED,
+                     priority=mau.priority, parent_id=ma_cha, contract=hd,
+                     permission=mau.envelope.decision.value,
+                     gate_reason=mau.envelope.ly_do(),
+                     blocked_reason=(mau.envelope.cau_hoi_cho_nguoi_dung()
+                                     if gated else ""),
+                     resources=tuple(f"{k.value}:{r}" for k, r in mau.resources))
+            self.store.luu_task(t)
+            con_tasks.append(t)
+            self.store.ghi_su_kien(
+                "TASK_CREATED", project_id=project_id, task_id=cid,
+                level="WARNING" if gated else "INFO",
+                detail=f"{mau.kind}: {c.tieu_de}",
+                meta={"permission": t.permission, "kind": mau.kind,
+                      "scope": list(mau.contract.allowed_scope), "toa": hd["_toa"]})
+        self.store.ghi_su_kien(
+            "TOA_SPLIT", project_id=project_id, task_id=ma_cha,
+            detail=TOA.cau_thong_bao(sc, cha_id=ma_cha)[:500],
+            meta={"yeu_cau": yc.to_dict(), "suc_chua": sc.to_dict(), "con": con_ids})
+        return cha, con_tasks, sc
+
+    def _khoi_toa(self, project_id: str, text: str) -> str:
+        """Khối cho nhắc nhở Leader khi câu có cardinality tường minh — để
+        `reply` của Leader nói ĐÚNG số việc/số khe mà engine sẽ tạo."""
+        from scripts.control_center import toa as TOA
+        yc = TOA.xet_toa(text)
+        if yc is None:
+            return ""
+        try:
+            self._dam_bao_suc_khoe(f"tính sức chứa cho {yc.so_agent} agent")
+        except Exception:                                   # noqa: BLE001
+            pass
+        with self._khoa:
+            dang = len([x for x in self._dang_chay.values() if x.is_alive()])
+        try:
+            sc = TOA.tinh_suc_chua(self.fabric, yc, max_parallel=self.max_parallel,
+                                   dang_chay=dang)
+        except Exception:                                   # noqa: BLE001
+            return ""
+        return ("YÊU CẦU SONG SONG TƯỜNG MINH: người dùng xin "
+                f"{yc.so_agent} agent" + (" (mỗi agent một mục)" if yc.moi_agent_mot else "")
+                + ". Hệ thống SẼ tự tách thành 1 việc cha + "
+                f"{yc.so_agent} việc con độc lập khi bạn trả WORK + delegate_work. "
+                + TOA.cau_thong_bao(sc)
+                + " Trong `reply` hãy nói đúng các con số này; KHÔNG nói chế độ "
+                  "MAX/STRONG thay cho số agent; KHÔNG hứa nhiều hơn số slot khả dụng.")
 
     # -- buoc dang lam (tien do SONG cho o chat) -----------------------------
 
@@ -773,8 +947,9 @@ class ControlCenter:
             khoi_song = self._khoi_song(pid, text)
             # V0.6 — KY UC DU AN dat SAU anh chup tinh, kem luat rieng.
             khoi_ky_uc = self._khoi_ky_uc(pid, text)
+            khoi_toa = self._khoi_toa(pid, text)
             nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
-                                      khoi_ky_uc=khoi_ky_uc)
+                                      khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa)
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.
@@ -890,27 +1065,39 @@ class ControlCenter:
         # `DONE`) se bi lan `BLOCKED` chiem cho, va ket qua `DONE` THAT
         # khong bao gio toi duoc o chat. Ben tren dia vi bo nho trong rong
         # sau moi lan khoi dong lai.
-        if self.store.da_bao_ket_qua(task_id, tt):
-            return None
+        # NGUYEN TU giua cac luong: kiem "da bao" + ghi tin + ghi dau trong
+        # MOT khoa. Xem `_khoa_bao` o `__init__`.
+        with self._khoa_bao:
+            if self.store.da_bao_ket_qua(task_id, tt):
+                return None
 
-        pb = ((t.result or {}).get("envelope") or {}) if t.result else {}
-        van = self._soan_ket_qua(t, tt, pb)
-        # GHI TRUOC, DANH DAU SAU. Danh dau truoc roi `them_chat` nem (dia
-        # day, so hong) thi ket qua mat vinh vien — dau da danh, chat thi
-        # rong.
-        #
-        # `t.project_id`, KHONG phai `ctx` — xem docstring.
-        tin = self.store.them_chat(
-            t.project_id, "assistant", van,
-            meta={"loai": "ket_qua", "task_id": task_id, "state": tt,
-                  "worker": pb.get("worker"), "model": pb.get("model"),
-                  "provider": pb.get("provider"),
-                  "duration": pb.get("duration"),
-                  "raw_log_ref": pb.get("raw_log_ref"),
-                  "failure_reason": pb.get("failure_reason") or ""})
-        self.store.ghi_da_bao_ket_qua(task_id, tt,
-                                      project_id=t.project_id,
-                                      message_id=tin.message_id)
+            # Con cua mot lan TOA: ket qua DONE/FAILED di vao TONG HOP cua
+            # cha, khong rai N tin nhan rieng. BLOCKED van bao rieng — no can
+            # nguoi.
+            toa = (t.contract or {}).get("_toa") or {}
+            if toa and not toa.get("cha") and tt in ("DONE", "FAILED"):
+                self.store.ghi_da_bao_ket_qua(task_id, tt, project_id=t.project_id,
+                                              message_id=0)
+                return None
+
+            pb = ((t.result or {}).get("envelope") or {}) if t.result else {}
+            van = self._soan_ket_qua(t, tt, pb)
+            # GHI TRUOC, DANH DAU SAU. Danh dau truoc roi `them_chat` nem (dia
+            # day, so hong) thi ket qua mat vinh vien — dau da danh, chat thi
+            # rong.
+            #
+            # `t.project_id`, KHONG phai `ctx` — xem docstring.
+            tin = self.store.them_chat(
+                t.project_id, "assistant", van,
+                meta={"loai": "ket_qua", "task_id": task_id, "state": tt,
+                      "worker": pb.get("worker"), "model": pb.get("model"),
+                      "provider": pb.get("provider"),
+                      "duration": pb.get("duration"),
+                      "raw_log_ref": pb.get("raw_log_ref"),
+                      "failure_reason": pb.get("failure_reason") or ""})
+            self.store.ghi_da_bao_ket_qua(task_id, tt,
+                                          project_id=t.project_id,
+                                          message_id=tin.message_id)
         self.store.ghi_su_kien(
             "RESULT_TO_CHAT", project_id=t.project_id, task_id=task_id,
             detail=f"{tt} -> tin nhắn #{tin.message_id}")
@@ -1180,6 +1367,10 @@ class ControlCenter:
         for t in tat_ca.values():
             if t.state not in (TaskState.QUEUED, TaskState.WAITING):
                 continue
+            # Viec CHA cua mot lan toa la VAT CHUA: khong giao cho agent nao;
+            # no ket thuc khi `_tong_hop_toa` gop xong cac con.
+            if ((t.contract or {}).get("_toa") or {}).get("cha"):
+                continue
             # LƯỚI CUỐI CỦA CỔNG AN TOÀN, và nó nằm ĐÚNG ở đây có lý do.
             #
             # `chat()` đã đặt việc GATED vào thẳng `BLOCKED`, nhưng đó là MỘT
@@ -1332,11 +1523,18 @@ class ControlCenter:
         except (ContractError, ValueError):
             nhu_cau = None
 
+        # TOA: anh em dang chay o runtime nao thi con nay TRANH runtime do
+        # (khi con cho khac) — "8 agent" phai la 8 tai khoan khi be du, khong
+        # phai 8 luot xep chong len mot tai khoan ranh nhat. Bo lap lich V4
+        # khong doi: chi nhan them `exclude`, va `decide()` tu roi ve khong
+        # tranh khi khong con ai.
+        tranh = self._runtime_anh_em_dang_chay(t)
         qd = ctx.sessions.decide(
             t, hd, demand=nhu_cau,
             conflicting_task=(grant.conflict_holder_task
                               if grant is not None and not grant.granted
-                              else ""))
+                              else ""),
+            tranh_runtime=tranh)
         self.store.ghi_su_kien(
             "SESSION_DECISION", project_id=t.project_id, task_id=t.task_id,
             detail=f"{qd.action.value}: {qd.reason}"[:400], meta=qd.to_dict())
@@ -1393,6 +1591,16 @@ class ControlCenter:
         t.owner_session = s.session_id
         self.store.luu_task(t)
         ctx.sessions.bat_dau_viec(s.session_id, t.task_id)
+        # CHIEM KHE NGAY LUC GIAO, khong doi luong `_chay` chay toi
+        # `mark_started`. Mot nhip `tick()` giao nhieu viec lien tiep (toa N
+        # con): neu khe chi duoc danh dau trong luong, viec ke tiep trong CUNG
+        # nhip van thay runtime do "con cho" va bo lap lich xep hai con len
+        # mot tai khoan da day (RT01 + Leader) — do that o bai kiem toa.
+        # `mark_started` idempotent, nen lan goi lai trong `_chay` vo hai.
+        try:
+            ctx.fabric.mark_started(s.runtime_id, t.task_id)
+        except Exception:                                   # noqa: BLE001
+            pass
 
         luong = threading.Thread(
             target=self._chay, name=f"cc-{t.task_id}", daemon=True,
@@ -1404,6 +1612,115 @@ class ControlCenter:
         return {"task_id": t.task_id, "dispatched": True,
                 "session_id": s.session_id, "placement": s.placement_key,
                 "action": qd.action.value}
+
+    def _runtime_anh_em_dang_chay(self, t: Task) -> tuple:
+        """Runtime mà các việc con CÙNG CHA đang chạy — để con này tránh."""
+        toa = (t.contract or {}).get("_toa") or {}
+        if not toa or toa.get("cha") or not t.parent_id:
+            return ()
+        ra = set()
+        try:
+            for x in self.store.tasks(t.project_id, states=(TaskState.RUNNING,)):
+                if x.parent_id != t.parent_id or not x.owner_session:
+                    continue
+                s = self.store.session(x.owner_session)
+                if s is not None and s.runtime_id:
+                    ra.add(s.runtime_id)
+        except Exception:                                   # noqa: BLE001
+            return ()
+        return tuple(sorted(ra))
+
+    def _tong_hop_toa(self, ctx: ProjectContext, cha_id: str) -> Optional[Dict]:
+        """Mọi con đã kết thúc -> gộp vào cha, khử trùng, giữ nguồn gốc.
+
+        Con BLOCKED (cần người) hay còn chạy/chờ thì cha CHỜ — không gộp nửa
+        chừng. Hai con xong cùng lúc gọi vào đây cùng lúc: khoá + kiểm lại
+        trạng thái cha, chỉ một lượt gộp.
+        """
+        from scripts.control_center import toa as TOA
+        with self._khoa_toa:
+            cha = self.store.task(cha_id)
+            if cha is None:
+                return None
+            toa = (cha.contract or {}).get("_toa") or {}
+            if not toa.get("cha") or cha.state in (TaskState.DONE, TaskState.FAILED):
+                return None
+            con = [self.store.task(cid) for cid in (toa.get("con") or [])]
+            con = [c for c in con if c is not None]
+            if not con or any(c.state not in (TaskState.DONE, TaskState.FAILED) for c in con):
+                return None
+            ds = []
+            for c in con:
+                s = self.store.session(c.owner_session) if c.owner_session else None
+                ds.append({"task_id": c.task_id, "state": c.state.value, "result": c.result,
+                           "chi_so": ((c.contract or {}).get("_toa") or {}).get("chi_so"),
+                           "runtime": s.runtime_id if s else "",
+                           "owner_session": c.owner_session})
+            th = TOA.tong_hop(cha.to_dict(), ds)
+            kq = dict(cha.result or {})
+            kq["toa"] = th
+            kq["envelope"] = {
+                "status": "ok" if th["xong"] else "failed",
+                "summary": TOA.soan_tong_hop(th),
+                "worker": "control-center", "model": "", "provider": "control-center",
+                "failure_reason": "" if th["xong"] else "moi_con_deu_hong",
+                "findings": [m["ung_vien"] for m in th["ung_vien"]][:20]}
+            self.store.ghi_ket_qua(cha_id, result=kq)
+            moi = TaskState.DONE if th["xong"] > 0 else TaskState.FAILED
+            try:
+                self.store.doi_trang_thai(cha_id, TaskState.RUNNING, force=True,
+                                          reason="tổng hợp việc con")
+                self.store.doi_trang_thai(cha_id, moi,
+                                          reason=f"{th['xong']}/{th['so_con']} việc con xong")
+            except TransitionError:
+                self.store.doi_trang_thai(cha_id, moi, force=True,
+                                          reason=f"{th['xong']}/{th['so_con']} việc con xong")
+            self.store.ghi_su_kien(
+                "TOA_AGGREGATED", project_id=cha.project_id, task_id=cha_id,
+                level="INFO" if th["xong"] else "ERROR",
+                detail=(f"{th['xong']}/{th['so_con']} con xong · {len(th['ung_vien'])} kết quả "
+                        f"· khử {th['trung_da_bo']} trùng"),
+                meta={"xong": th["xong"], "hong": th["hong"], "ung_vien": len(th["ung_vien"]),
+                      "trung": th["trung_da_bo"],
+                      "runtimes": sorted({c["runtime"] for c in th["con"] if c["runtime"]})})
+        try:
+            self._bao_ket_qua_ve_chat(ctx, cha_id)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "RESULT_TO_CHAT_FAILED", project_id=cha.project_id, task_id=cha_id,
+                level="WARNING", detail=f"{type(exc).__name__}: {exc}"[:300])
+        try:
+            self._leader_tom_tat_toa(cha.project_id, th)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "TOA_LEADER_SUMMARY_FAILED", project_id=cha.project_id, task_id=cha_id,
+                level="WARNING", detail=f"{type(exc).__name__}: {exc}"[:300])
+        return th
+
+    def _leader_tom_tat_toa(self, project_id: str, th: Dict) -> None:
+        """Leader (nếu đang mở) tóm tắt kết quả cuối cho người dùng — MỘT lượt,
+        trên phiên ấm đã có. Không mở phiên mới chỉ để tóm tắt."""
+        from scripts.control_center import toa as TOA
+        if not self.leader_bat:
+            return
+        with self._khoa_leader:
+            ph = self._leader_phien.get(project_id)
+        if ph is None or not getattr(ph, "song", False):
+            return
+        nn = (leader.HUONG_DAN + "\n\n" + leader.RANH_GIOI
+              + "\n--- BẮT ĐẦU DỮ LIỆU: TỔNG HỢP KẾT QUẢ CÁC VIỆC CON (do worker sinh) ---\n"
+              + TOA.soan_tong_hop(th)
+              + "\n--- HẾT DỮ LIỆU ---\n\n=== TIN NHẮN MỚI CỦA NGƯỚI DÙNG (đây là yêu cầu THẬT) ===\n"
+              + f"Tóm tắt cho tôi {th['xong']}/{th['so_con']} kết quả ở trên thành vài dòng: "
+                "giữ đúng số, nêu từng kết quả kèm mã việc con, nói rõ con nào hỏng. "
+                "KHÔNG bịa thêm kết quả. y_dinh CHAT, actions [reply_only].\n\n"
+                "Trả lời bằng ĐÚNG một khối JSON như đã mô tả.")
+        van = ph.hoi(nn)
+        qd = leader.doc_quyet_dinh(van)
+        if qd.reply:
+            self.store.them_chat(project_id, "assistant", qd.reply,
+                                 meta={"loai": "toa_tom_tat", "cha": th.get("cha"),
+                                       "so_con": th.get("so_con"), "xong": th.get("xong")})
 
     def _dat_review(self, ctx: ProjectContext, task_id: str,
                     hd: TaskContract, p: Placement) -> None:
@@ -2064,6 +2381,10 @@ class ControlCenter:
             xong = self.store.task(task_id)
             if xong is not None and xong.parent_id:
                 self._khep_review(xong)
+                # Con cua mot lan TOA: neu day la con cuoi cung ket thuc thi
+                # gop vao cha. Con con dang chay/cho thi ham nay tu tra ve.
+                if ((xong.contract or {}).get("_toa") or {}).get("cha_id"):
+                    self._tong_hop_toa(ctx, xong.parent_id)
 
         except Exception as exc:                          # noqa: BLE001
             self.store.ghi_su_kien(

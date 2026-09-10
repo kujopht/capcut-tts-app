@@ -955,3 +955,13 @@ Sáu luật thêm vào bốn luật của §16:
 10. **Chỗ Leader chiếm trên AG01 HIỆN RA với bộ lập lịch.**
     `leader.chiem_cho_fabric` ghi nhãn `LEADER:<project>` vào `running_tasks`
     khi mở phiên, `tra_cho_fabric` ở `shutdown`; không đi qua `mark_finished`.
+11. **Số agent người dùng xin là một trường riêng, đọc từ CÂU NGƯỒI DÙNG.**
+    `toa.xet_toa(text)` (tất định) → 1 việc cha (vật chứa) + N việc con độc
+    lập, mỗi con `AGENT i/N` với ràng buộc không trùng. Sức chứa đo từ fabric
+    lúc tách (khe rảnh đã trừ `LEADER:`, tài khoản rảnh, trần song song) và
+    câu trả lời nói đúng "K chạy ngay, N−K chờ" — không bao giờ cắt yêu cầu
+    trong im lặng, không bao giờ nói "8" khi tạo 1. Con tránh runtime anh em
+    đang chạy (`SessionManager.decide(tranh_runtime=)`), khe được đánh dấu
+    NGAY lúc giao. Gộp kết quả khi mọi con xong: khử trùng, giữ nguồn gốc,
+    MỘT tin tổng hợp. `che_do` (chất lượng) ≠ `so_agent` ≠ `max_parallel`
+    (trần; `0` = tự theo bể). `docs/reports/MULTI_AGENT_FANOUT_V061.md`.

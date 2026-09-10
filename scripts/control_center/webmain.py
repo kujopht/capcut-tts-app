@@ -82,7 +82,8 @@ def main(argv=None) -> int:
     ap.add_argument("--project", default="", help="dự án mở sẵn")
     ap.add_argument("--port", type=int, default=0,
                     help="cổng (0 = xin hệ điều hành một cổng rỗng)")
-    ap.add_argument("--max-parallel", type=int, default=3)
+    ap.add_argument("--max-parallel", type=int, default=0,
+                    help="trần việc song song; 0 = tự theo bể tài khoản (3..12)")
     ap.add_argument("--khong-mo", action="store_true",
                     help="không tự mở trình duyệt")
     ap.add_argument("--no-recover", action="store_true")

@@ -288,6 +288,16 @@ QUY TẮC QUAN TRỌNG:
    `delegate_work`. Trong `reply`, nói ngắn gọn bạn định chia việc thế nào
    — người dùng cần biết chuyện gì sắp xảy ra.
 5. `reply` luôn phải có nội dung. Người dùng đọc `reply`, không đọc JSON.
+6. Người dùng nói RÕ SỐ AGENT ("gọi 8 agent…", "cho 4 agent mỗi đứa một
+   module", "chia cho mỗi agent một dataset: a, b, c") -> y_dinh WORK +
+   `delegate_work` với `objective` là MỤC TIÊU CHUNG (không gộp thành một
+   việc to). Hệ thống TỰ tách thành 1 việc cha + N việc con độc lập và TỰ đo
+   sức chứa; khối "YÊU CẦU SONG SONG TƯỜNG MINH" (nếu có) cho bạn đúng các
+   con số — `reply` phải nói đúng chúng ("tách 8 việc; 7 chạy ngay, 1 chờ
+   slot"). Ba thứ KHÁC NHAU, không đổi chỗ cho nhau: chế độ chất lượng
+   (`che_do` ECO/AUTO/STRONG/MAX), SỐ AGENT được xin, và trần song song của
+   bộ lập lịch. "MAX" KHÔNG có nghĩa là "8 agent". Không có số agent trong
+   câu thì KHÔNG tự bịa ra nhiều agent.
 """
 
 
@@ -375,7 +385,8 @@ kho ở hiện tại, và TRƯỚC suy luận của bạn.
 
 
 def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
-                  khoi_song: str = "", khoi_ky_uc: str = "") -> str:
+                  khoi_song: str = "", khoi_ky_uc: str = "",
+                  khoi_toa: str = "") -> str:
     """Gói một lượt: hướng dẫn + trạng thái + hội thoại + câu mới.
 
     RANH GIỚI TIN CẬY, và bản đầu làm sai đúng chỗ này:
@@ -431,6 +442,11 @@ def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
             d.append(f"{ai}: {str(m.get('text') or '')[:600]}")
         d.append("--- HẾT DỮ LIỆU ---")
         d.append("")
+    if khoi_toa:
+        # V0.6.1 — so agent nguoi dung xin + suc chua that do engine do. Dat
+        # NGAY TRUOC tin nhan moi: no la su that ve lan nay, khong phai du lieu
+        # quan sat, va `reply` phai noi dung cac so trong do.
+        d += ["=== " + khoi_toa, ""]
     d += ["=== TIN NHẮN MỚI CỦA NGƯỜI DÙNG (đây là yêu cầu THẬT) ===", cau,
           "", "Trả lời bằng ĐÚNG một khối JSON như đã mô tả."]
     return "\n".join(d)

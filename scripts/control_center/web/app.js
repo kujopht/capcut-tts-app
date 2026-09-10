@@ -211,25 +211,62 @@ function veChat() {
   if (oCuoi) $('#ds-tin').scrollTop = $('#ds-tin').scrollHeight;
 }
 
+// V0.6.1 — TOA: viec CHA (vat chua) hien tren, N viec CON thut vao duoi no,
+// kem dem chay/cho/xong/hong. Nghiem thu tay: "goi 8 agent" phai THAY 8 dong,
+// khong phai mot viec to. Khong doi cot bang.
+const toaCua = (t) => ((t.contract || {})._toa || {});
+function toaDem(con) {
+  const d = { chay: 0, cho: 0, xong: 0, hong: 0, chan: 0 };
+  for (const c of con) {
+    if (['RUNNING', 'REVIEW'].includes(c.state)) d.chay += 1;
+    else if (['QUEUED', 'WAITING', 'PAUSED'].includes(c.state)) d.cho += 1;
+    else if (c.state === 'DONE') d.xong += 1;
+    else if (c.state === 'FAILED') d.hong += 1;
+    else if (c.state === 'BLOCKED') d.chan += 1;
+  }
+  return d;
+}
 function veTasks() {
   const loc = $('#o-tim').value.trim().toLowerCase();
   const tb = $('#bang-tasks tbody');
-  tb.innerHTML = S.tasks.map((t) => {
+  const theoCha = {};
+  for (const t of S.tasks) if (t.parent_id) (theoCha[t.parent_id] ||= []).push(t);
+  const coCha = new Set(S.tasks.map((t) => t.task_id));
+  const laCon = (t) => t.parent_id && coCha.has(t.parent_id);
+  const hangCua = (t, con) => {
     const wt = (t.worktree || '').split(/[\\/]/).pop();
+    const cs = theoCha[t.task_id] || [];
+    let ten = t.title || t.task_id;
+    let phu = '';
+    if (cs.length) {
+      const d = toaDem(cs);
+      phu = ` <span class="qs-phu">· ${cs.length} con: ${d.chay} chạy · ${d.cho} chờ · ${d.xong} xong`
+        + `${d.hong ? ` · ${d.hong} hỏng` : ''}${d.chan ? ` · ${d.chan} chặn` : ''}</span>`;
+    }
+    if (con) ten = `↳ ${ten}`;
     const hang = [
       t.title || t.task_id, t.state, t.owner_session || '—',
       thoiLuong(t.started_at, t.ended_at), t.priority,
       (t.dependencies || []).length || '—', wt || '—', gio(t.updated_at)];
     if (loc && !hang.join(' ').toLowerCase().includes(loc)) return '';
-    return `<tr data-tid="${esc(t.task_id)}"
-      class="${t.task_id === viecDangChon ? 'dang-mo' : ''}">
-      <td title="${esc(t.objective || '')}">${esc(hang[0])}</td>
+    return `<tr data-tid="${esc(t.task_id)}" data-cha="${esc(t.parent_id || '')}"
+      class="${t.task_id === viecDangChon ? 'dang-mo' : ''}${con ? ' viec-con' : ''}${cs.length ? ' viec-cha' : ''}">
+      <td title="${esc(t.objective || '')}" style="${con ? 'padding-left:18px' : ''}">${esc(ten)}${phu}</td>
       <td>${hh(t.state)}</td><td>${esc(hang[2])}</td><td>${esc(hang[3])}</td>
       <td>${esc(hang[4])}</td>
       <td title="${esc((t.dependencies || []).join('\n'))}">${esc(hang[5])}</td>
       <td title="${esc(t.worktree || '')}">${esc(hang[6])}</td>
       <td>${esc(hang[7])}</td></tr>`;
-  }).join('');
+  };
+  const rows = [];
+  for (const t of S.tasks) {
+    if (laCon(t)) continue;                     // ve duoi cha cua no
+    rows.push(hangCua(t, false));
+    const cs = (theoCha[t.task_id] || []).slice().sort((a, b) =>
+      ((toaCua(a).chi_so || 0) - (toaCua(b).chi_so || 0)) || (a.created_at - b.created_at));
+    for (const c of cs) rows.push(hangCua(c, true));
+  }
+  tb.innerHTML = rows.join('');
   veChiTiet();
 }
 
@@ -249,6 +286,7 @@ function veChiTiet() {
       'MỤC TIÊU', t.objective || '—',
       ...(t.gate_reason ? ['', 'CỔNG', t.gate_reason] : []),
       ...(t.blocked_reason ? ['', 'ĐANG CHỜ BẠN', t.blocked_reason] : []),
+      ...veToaChiTiet(t),
     ].join('\n'))}</pre>
     <div class="hang-nut">
       <button data-viec="pause">Tạm dừng</button>
@@ -259,6 +297,39 @@ function veChiTiet() {
     ${t.state === 'BLOCKED'
       ? '<button class="duyet rong" data-viec="approve">Duyệt cổng GATED…</button>'
       : ''}`;
+}
+
+// Chi tiet mot lan TOA: cha -> tung con (trang thai, runtime/model, ung vien);
+// con -> chi so i/N + cha. Doc tu `contract._toa` va `result.toa`.
+function veToaChiTiet(t) {
+  const toa = toaCua(t);
+  if (!toa || (!toa.cha && !toa.cha_id)) return [];
+  if (!toa.cha) {
+    return ['', `TOẢ: việc con ${toa.chi_so}/${toa.so} của ${toa.cha_id}`,
+      toa.phan_vung ? `phân vùng: ${toa.phan_vung}` : ''];
+  }
+  const con = S.tasks.filter((x) => x.parent_id === t.task_id)
+    .sort((a, b) => (toaCua(a).chi_so || 0) - (toaCua(b).chi_so || 0));
+  const d = toaDem(con);
+  const sc = toa.suc_chua || {};
+  const ra = ['', `TOẢ: ${toa.so} việc con — ${d.chay} chạy · ${d.cho} chờ · ${d.xong} xong`
+    + `${d.hong ? ` · ${d.hong} hỏng` : ''}${d.chan ? ` · ${d.chan} chặn` : ''}`,
+  `sức chứa lúc tách: ${sc.chay_ngay ?? '?'}/${sc.yeu_cau ?? '?'} chạy ngay, ${sc.cho ?? '?'} chờ`
+    + ` (khe rảnh ${sc.khe_ranh ?? '?'}, tài khoản rảnh ${sc.tai_khoan_ranh ?? '?'},`
+    + ` trần ${sc.tran_song_song ?? '?'}${(sc.leader_chiem || []).length ? `, Leader chiếm ${sc.leader_chiem.join(',')}` : ''})`];
+  for (const c of con) {
+    const s = S.sessions.find((y) => y.session_id === c.owner_session) || {};
+    ra.push(`  [${toaCua(c).chi_so}] ${c.state.padEnd(7)} ${s.runtime_id || '—'}${s.model_id ? '/' + s.model_id : ''}  ${c.task_id}`);
+  }
+  const th = (t.result || {}).toa;
+  if (th) {
+    ra.push('', `TỔNG HỢP: ${th.xong}/${th.so_con} xong · ${(th.ung_vien || []).length} kết quả · khử ${th.trung_da_bo} trùng`);
+    for (const m of (th.ung_vien || [])) {
+      const ng = m.nguon || {};
+      ra.push(`  • ${m.ung_vien}  ← [${ng.chi_so}] ${ng.runtime || '?'}/${ng.model || '?'} ${ng.task_id || ''}`);
+    }
+  }
+  return ra;
 }
 
 function veAgents() {
@@ -863,6 +934,8 @@ document.addEventListener('click', async (e) => {
     anhChup = null; usageCache = null;    // cache cua DU AN CU, phai bo
     songCache = null;
     await lamMoi();
+    // Day SONG phai theo du an MOI — xem `noiWs`.
+    if (wsDuAn !== S.selected) noiWs();
     veInspUsage(); veInspSnapshot(true); veSong();
     return;
   }
@@ -1693,20 +1766,37 @@ async function lamMoi() {
   } catch (e) { noi(`không đọc được trạng thái — ${e.message}`); }
 }
 
+// WebSocket THEO DU AN DANG CHON. Loi that (nghiem thu toa V0.6.1): ket noi
+// duoc mo MOT lan luc tai trang voi `project=` cua du an dau tien, va doi du
+// an chi goi `lamMoi()` (mot lan fetch) — moi day SONG sau do van la cua du an
+// cu, ma du an cu khong doi gi nen server KHONG day gi ca. Ket qua: bang
+// Tasks/Agents cua du an dang xem dung hinh sau lan fetch, du API co 3 phien
+// BUSY. Nen: doi du an -> dong ket noi cu (khong tu noi lai) -> mo ket noi
+// moi; va bo qua goi cua du an khac neu con den tre.
+let wsDangMo = null;
+let wsDuAn = '';
 function noiWs() {
+  if (wsDangMo) {
+    const cu = wsDangMo;
+    wsDangMo = null;                       // `onclose` cua cu thay khac -> khong noi lai
+    try { cu.close(); } catch { /* da dong */ }
+  }
+  wsDuAn = S.selected;
   const u = `ws://${location.host}/ws?t=${encodeURIComponent(TOKEN)}`
     + `&project=${encodeURIComponent(S.selected)}`;
   const ws = new WebSocket(u);
+  wsDangMo = ws;
   ws.onopen = () => noi('đã kết nối · trạng thái sống');
   ws.onmessage = (ev) => {
     const goi = JSON.parse(ev.data);
-    if (goi.kind === 'state') {
-      S = { ...S, ...goi.data };
-      S.selected = goi.data.selected || S.selected;
-      veHet();
-    }
+    if (goi.kind !== 'state') return;
+    if (goi.data.selected && S.selected && goi.data.selected !== S.selected) return;
+    S = { ...S, ...goi.data };
+    S.selected = goi.data.selected || S.selected;
+    veHet();
   };
   ws.onclose = () => {
+    if (wsDangMo !== ws) return;           // dong CO Y khi doi du an
     noi('mất kết nối — thử lại sau 2s');
     setTimeout(noiWs, 2000);
   };

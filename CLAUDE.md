@@ -217,7 +217,12 @@ bao giờ `user_explicit`; KIỂM TOÁN bể Antigravity (8 khe chứng minh t�
 đăng ký, Leader ghim AG01 nay HIỆN RA với bộ lập lịch); PROVIDER NGOÀI + KHO
 BÍ MẬT (Windows Credential Manager, `credential_ref` trong sổ, giá trị
 không bao giờ vào SQLite/ký ức/log/prompt; provider vào fabric ở trạng thái
-KHÔNG nhận dispatch). Nút **Providers** ở thanh trên. Báo cáo:
+KHÔNG nhận dispatch). Nút **Providers** ở thanh trên. TOẢ ĐA AGENT: "gọi N
+agent…"/"mỗi agent một…" (đọc từ câu người dùng, tất định — `toa.py`) → 1
+việc cha + N việc con độc lập có ràng buộc không trùng, sức chứa đo từ
+fabric (trừ chỗ Leader chiếm), con tránh runtime anh em, gộp kết quả có
+nguồn gốc; `--max-parallel 0` = trần tự theo bể (3..12);
+`docs/reports/MULTI_AGENT_FANOUT_V061.md`. Báo cáo:
 `docs/reports/PROJECT_MEMORY_V061.md`,
 `docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`,
 `docs/reports/ANTIGRAVITY_POOL_AUDIT_V061.md`; mã ở

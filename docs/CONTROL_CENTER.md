@@ -895,6 +895,49 @@ Bốn luật:
 `docs/reports/SMART_APP_CONTROL_V061.md` có nhật ký sự kiện, bảng sáu bản,
 thí nghiệm mở có kiểm soát, và đánh giá bốn phương án launcher.
 
+## 14e. V0.6.1 — TRẠNG THÁI ĐÓNG BĂNG (canonical, 2026-09-10)
+
+Nhân V0.6.1 được **đóng băng** ở đây. Mười năng lực dưới đây đã được nghiệm thu
+trên ứng dụng THẬT (source-mode và/hoặc bản đóng gói), không phải chỉ bằng bài
+kiểm đơn vị. Sau mốc này: sửa lỗi và tài liệu — **không thêm tính năng vào nhân
+V0.6.1**.
+
+| Năng lực | Trạng thái | Bằng chứng |
+|---|---|---|
+| Gốc dữ liệu bền theo NGƯỜI DÙNG, chính tắc | ĐÓNG BĂNG | `GOC_DU_LIEU_CHINH_TAC_V061.md`; 27 bài |
+| Liên tục ký ức QUA CÁCH KHỞI CHẠY (source ⇄ đóng gói) | ĐÓNG BĂNG | nghiệm thu hai chiều 15/15 |
+| Leader LÀM ĐẦU bằng ký ức | ĐÓNG BĂNG | `PROJECT_MEMORY_RECALL_V061.md`; 10/10 |
+| Nhập lịch sử (backfill) có nguồn gốc | ĐÓNG BĂNG | 7.557 mục vào sổ live; 0 rò bí mật |
+| WebReader (đọc web công khai, an toàn SSRF) | ĐÓNG BĂNG | `WEB_READER_V061.md`; 9/9 + 19 bài |
+| Toả đa agent tường minh ("gọi N agent…") | ĐÓNG BĂNG | `MULTI_AGENT_FANOUT_V061.md`; 8 con thật |
+| Đồng thời READ/READ thật (khoá có chế độ) | ĐÓNG BĂNG | `MULTI_AGENT_FANOUT_V061.md` §7; 4 con song song đo bằng mốc thời gian |
+| Bể đa tài khoản Antigravity (AG01..AG08) | ĐÓNG BĂNG | `ANTIGRAVITY_POOL_AUDIT_V061.md` |
+| Nền móng credential provider | ĐÓNG BĂNG | `PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md` |
+| Quan sát SỐNG dự án Fanfic | ĐÓNG BĂNG | probe SSH thật, `PROJECT_OBSERVABILITY_V05.md` |
+
+**Bốn bất biến của nhân đã đóng băng** — phá một cái là phá nhân:
+
+1. **Gốc dữ liệu KHÔNG suy từ vị trí mã.** `duong_du_lieu.py` là nơi duy nhất
+   định nghĩa; `%LOCALAPPDATA%\RouterControlCenter`. Không `__file__`, không
+   `cwd`, không `sys.executable`, không thư mục dist. Mọi điểm vào đi qua nó.
+2. **Bậc thẩm quyền: SỐNG > SỔ/KHO > KÝ ỨC > SUY LUẬN.** Câu hỏi hiện tại phải
+   đi đo; ký ức không bao giờ trả lời thay một phép đo sống.
+3. **Không nới quyền cho agent.** `agy --print` tự chối mọi công cụ cần prompt
+   (`command`, `read_file`, `read_url`) — kể cả khi LEADER gọi. Cách sửa duy
+   nhất được phép: **Router tự làm phép đọc an toàn rồi đính BẰNG CHỨNG**
+   (`nguon_git`, `web_reader`, ký ức). Không `--dangerously-skip-permissions`.
+4. **Một người ghi trên một kho.** `KhoaKho` (khoá OS) + phiên bản KHO tách
+   khỏi phiên bản ứng dụng; sổ mới hơn mã thì DỪNG, không hạ cấp âm thầm.
+
+**Hồi quy đóng băng:** 931 bài xanh, 0 hỏng (95 bài Qt GUI BỎ QUA — python hệ
+thống không có PySide6). Chạy theo TỆP RIÊNG cho các bộ chậm/đa luồng
+(`slice`, `ui`, `utf8_locale`) — gộp hết vào một tiến trình từng làm treo và
+từng cho hỏng GIẢ do định thời lượng.
+
+**Giữ nguyên, không xoá:** `dist-v04/v05/v06` (+ `v0611/v0612/v0613`) và mọi sổ
+`.router` cũ đã đánh mốc `DA_DI_TRU.json`. Việc dọn dẹp là quyết định của người
+vận hành, không tự động.
+
 ## 15. Chưa làm (cố ý — ranh giới đã chọn)
 
 Không phải thiếu sót — là ranh giới đã chọn:

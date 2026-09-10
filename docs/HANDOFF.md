@@ -1302,6 +1302,27 @@ EXE `dist-v06` nghiệm thu 22/22. Đầy đủ: `docs/reports/PROJECT_MEMORY_V0
 Việc tiếp theo hợp lý: consolidation có kiểm chứng + đường vector tuỳ chọn
 (mục 18 của báo cáo). Không xoá lịch sử ở V0.6.
 
+## Router Control Center V0.6.1 — ĐÓNG BĂNG (2026-09-10)
+
+Nhân V0.6.1 **đã đóng băng**. Sau mốc này: sửa lỗi + tài liệu, **không thêm
+tính năng vào nhân**. Chi tiết bất biến: `docs/CONTROL_CENTER.md` §14e.
+
+* **Gốc dữ liệu bền, chính tắc theo người dùng**:
+  `%LOCALAPPDATA%\RouterControlCenter\.router` — mở app bằng CÁCH NÀO cũng ra
+  đúng một quyển sổ (source-mode, đóng gói, bản dựng mới, worktree khác).
+  `scripts/control_center/duong_du_lieu.py` là nơi DUY NHẤT định nghĩa.
+* **Sổ Fanfic live** (`project_id=fanfic`, ns `fanfic-dcf29d1141`): ~7.8k sự
+  kiện L0, ~103 ký ức, 3 quyết định (`user_explicit`), 56 sự cố, 114 mắt xích
+  bằng chứng, 70 bản ghi `backfill`.
+* **Đã nghiệm thu THẬT**: liên tục hai chiều source ⇄ đóng gói **15/15**;
+  memory-first **10/10**; WebReader **9/9**; toả 8 agent + READ/READ song song
+  đo bằng mốc thời gian.
+* **Hồi quy đóng băng**: **931 bài xanh, 0 hỏng** (95 Qt GUI bỏ qua — thiếu
+  PySide6). Bộ chậm/đa luồng chạy theo TỆP RIÊNG.
+* **Giữ nguyên**: `dist-v04/v05/v06` (+ `v0611/v0612/v0613`) và mọi sổ `.router`
+  cũ đã đánh mốc `DA_DI_TRU.json` — KHÔNG xoá.
+* **Tag**: `router-control-center-v0.6.1` (theo đúng lối `router-control-center-vX.Y.Z`).
+
 ## Router Control Center V0.6.1 — đề bạt ký ức · nhập lịch sử · bể AG · provider + kho bí mật (2026-09-10)
 
 Đã xong, nhánh `feat/v061-memory-provider-vault`, chưa tag/merge; `dist-v04/05/06`

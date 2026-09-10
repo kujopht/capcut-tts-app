@@ -1,0 +1,22 @@
+{
+  "phien_ban": 1,
+  "kich_hoat": true,
+  "ngan_sach": {
+    "tong": 2500,
+    "vien_nang": 700,
+    "diem_dung": 600,
+    "truy_hoi": 1000,
+    "chi_muc": 200,
+    "inline_toi_da": 400
+  },
+  "diem_dung": {
+    "khi_viec_ket_thuc": true,
+    "khi_tat_app": true,
+    "toi_thieu_cach_giay": 20
+  },
+  "truy_hoi": {
+    "toi_da_ung_vien": 60,
+    "gan_day": 12
+  },
+  "ghi_chu": "Tham chiếu credential chỉ bằng BÍ DANH (credential_alias), không bao giờ là giá trị. Gốc ký ức luôn là <gốc>/.router/memory, cạnh control.db."
+}

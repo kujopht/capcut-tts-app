@@ -195,6 +195,19 @@ thấy hết, ô soạn tự trống + giữ focus, chủ đề tối, ảnh n�
 `subprocess.run`/`Popen` trên đường của ứng dụng phải mang
 `**an_cua_so()`** — có bài kiểm AST trên cả bao đóng khởi động cưỡng chế.
 
+**V0.5** thêm quan sát SỐNG: bậc thẩm quyền LIVE > kho/bền > ký ức > suy
+luận, sáu trạng thái mà chỉ `DOWN` là khẳng định xấu —
+`docs/reports/PROJECT_OBSERVABILITY_V05.md`.
+**V0.6** thêm KÝ ỨC DỰ ÁN vô hạn + ảo hoá ngữ cảnh: lịch sử thô chỉ-thêm
+(L0) trên đĩa cục bộ, ký ức có cấu trúc trỏ về bằng chứng (L1), viên nang
+(L2), điểm dừng để phiên sau tiếp tục không cần dán handoff (L3); Leader
+nhận một GÓI NGỮ CẢNH có trần token ĐỘC LẬP với kích thước lịch sử, kèm
+`leader.LUAT_KY_UC` ở mọi lượt có khối — ký ức KHÔNG BAO GIỜ trả lời câu
+hỏi hiện tại khi có probe sống. Sổ ở `<gốc>/.router/memory/<ns>/` (cạnh
+`control.db`, KHÔNG trong cây git của dự án), mỗi dự án một sổ. Không xoá
+gì ở V0.6. `docs/reports/PROJECT_MEMORY_V06.md`, mã ở
+`scripts/control_center/memory/`.
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,

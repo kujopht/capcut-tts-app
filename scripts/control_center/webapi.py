@@ -205,6 +205,150 @@ def dung_app(phien: PhienWeb) -> FastAPI:
         return _sach(await asyncio.to_thread(
             phien.cc.quan_sat.kha_nang, project))
 
+    # -- ky uc du an (V0.6) --------------------------------------------------
+    #
+    # Moi duong DOC la GET va di qua `_sach`. Duong GHI (POST) chi ghi vao
+    # SO KY UC cua chinh Control Center — khong mot cai nao cham production,
+    # cham kho git, hay xoa lich su L0 (khong co endpoint xoa; xem
+    # `memory/provider.py::KHONG_DUOC_CO`). `project` la tham so bat buoc:
+    # ky uc la theo du an, va khong co duong "moi du an".
+
+    def _ky_uc():
+        kc = getattr(phien.cc, "ky_uc", None)
+        if kc is None:
+            return None
+        return kc
+
+    @app.get("/api/memory/stats")
+    async def ky_uc_thong_ke(project: str = ""):
+        kc = _ky_uc()
+        if kc is None:
+            return _sach({"san_sang": False,
+                          "ly_do": getattr(phien.cc, "_ky_uc_loi", "") or
+                          "ký ức không mở được"})
+        if not project:
+            return _sach(await asyncio.to_thread(kc.thong_ke_toan_cuc))
+        return _sach(await asyncio.to_thread(kc.thong_ke, project))
+
+    @app.get("/api/memory/search")
+    async def ky_uc_tim(project: str = "", q: str = "", loai: str = "",
+                        limit: int = 30):
+        kc = _ky_uc()
+        if kc is None or not project:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        return _sach(await asyncio.to_thread(
+            kc.tim, project, q or "", loai=loai, limit=max(1, min(int(limit), 100))))
+
+    @app.get("/api/memory/timeline")
+    async def ky_uc_dong_thoi_gian(project: str = "", limit: int = 80,
+                                   truoc_id: int = 0, loai: str = ""):
+        kc = _ky_uc()
+        if kc is None or not project:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        return _sach(await asyncio.to_thread(
+            kc.dong_thoi_gian, project, limit=max(1, min(int(limit), 300)),
+            truoc_id=int(truoc_id or 0), loai=loai))
+
+    @app.get("/api/memory/list")
+    async def ky_uc_liet_ke(project: str = "", loai: str = "", limit: int = 100):
+        kc = _ky_uc()
+        if kc is None or not project:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        return _sach(await asyncio.to_thread(
+            kc.liet_ke, project, loai, limit=max(1, min(int(limit), 300))))
+
+    @app.get("/api/memory/record")
+    async def ky_uc_ban_ghi(project: str = "", ma: str = ""):
+        kc = _ky_uc()
+        if kc is None or not project or not ma:
+            return _ma_loi(400, "thiếu project/ma hoặc ký ức không sẵn")
+        return _sach(await asyncio.to_thread(kc.ban_ghi, project, ma))
+
+    @app.get("/api/memory/evidence")
+    async def ky_uc_bang_chung(project: str = "", su_kien_id: int = 0,
+                               blob_sha: str = ""):
+        kc = _ky_uc()
+        if kc is None or not project:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        return _sach(await asyncio.to_thread(
+            kc.bang_chung, project, su_kien_id=int(su_kien_id or 0),
+            blob_sha=blob_sha or ""))
+
+    @app.get("/api/memory/continue")
+    async def ky_uc_tiep_tuc(project: str = ""):
+        kc = _ky_uc()
+        if kc is None or not project:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        return _sach(await asyncio.to_thread(kc.tiep_tuc, project))
+
+    @app.get("/api/memory/context")
+    async def ky_uc_goi(project: str = "", q: str = ""):
+        """Xem trước GÓI NGỮ CẢNH đúng như Leader sẽ nhận — để soi ngân sách."""
+        kc = _ky_uc()
+        if kc is None or not project:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+
+        def _lam():
+            g = kc.goi_ngu_canh(project, q or "")
+            if g is None:
+                return {"san_sang": False}
+            d = g.to_dict()
+            d["van"] = kc.khoi_cho_leader(project, q or "")
+            return d
+        return _sach(await asyncio.to_thread(_lam))
+
+    @app.post("/api/memory/checkpoint")
+    async def ky_uc_diem_dung(payload: Dict):
+        kc = _ky_uc()
+        pid = str((payload or {}).get("project") or "")
+        if kc is None or not pid:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        dd = await asyncio.to_thread(
+            kc.diem_dung_tuong_minh, pid,
+            str((payload or {}).get("ly_do") or "handoff"),
+            dict((payload or {}).get("noi_dung") or {}))
+        return _sach(dd.to_dict() if dd else {"loi": "không ghi được điểm dừng"})
+
+    @app.post("/api/memory/decision")
+    async def ky_uc_quyet_dinh(payload: Dict):
+        kc = _ky_uc()
+        p = payload or {}
+        pid = str(p.get("project") or "")
+        if kc is None or not pid or not str(p.get("noi_dung") or "").strip():
+            return _ma_loi(400, "thiếu project/noi_dung hoặc ký ức không sẵn")
+        r = await asyncio.to_thread(
+            kc.ghi_quyet_dinh, pid, str(p.get("noi_dung")),
+            ly_do=str(p.get("ly_do") or ""), tieu_de=str(p.get("tieu_de") or ""),
+            thay_the_cho=[str(x) for x in (p.get("thay_the_cho") or [])],
+            ai="web")
+        return _sach(r or {"loi": "không ghi được"})
+
+    @app.post("/api/memory/record")
+    async def ky_uc_ghi(payload: Dict):
+        kc = _ky_uc()
+        p = payload or {}
+        pid = str(p.get("project") or "")
+        if kc is None or not pid or not str(p.get("noi_dung") or "").strip():
+            return _ma_loi(400, "thiếu project/noi_dung hoặc ký ức không sẵn")
+        r = await asyncio.to_thread(
+            kc.ghi_ky_uc, pid, str(p.get("loai") or "semantic"),
+            str(p.get("noi_dung")), tieu_de=str(p.get("tieu_de") or ""),
+            quan_trong=int(p.get("quan_trong") or 6),
+            the=[str(x) for x in (p.get("the") or [])], ai="web")
+        return _sach(r or {"loi": "không ghi được"})
+
+    @app.post("/api/memory/capsule")
+    async def ky_uc_vien_nang(payload: Dict):
+        kc = _ky_uc()
+        p = payload or {}
+        pid = str(p.get("project") or "")
+        if kc is None or not pid:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+        r = await asyncio.to_thread(
+            kc.cap_nhat_vien_nang, pid, dict(p.get("thay_doi") or {}),
+            ly_do=str(p.get("ly_do") or "cập nhật từ giao diện"))
+        return _sach(r or {"loi": "không ghi được"})
+
     # -- cai dat giao dien -------------------------------------------------
 
     @app.get("/api/ui")

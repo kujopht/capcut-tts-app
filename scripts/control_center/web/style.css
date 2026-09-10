@@ -520,3 +520,41 @@ dialog::backdrop { background: rgba(3, 5, 10, .68); }
 #song-tuoi.cu { color: var(--vang); }
 #insp-song { max-height: 300px; overflow: auto; }
 #insp-song i { font-style: normal; opacity: .75; }
+
+/* ------------------------------------------------------- V0.6: ky uc du an */
+/* Tab Memory: thống kê dạng ô, một hàng chip lọc, hai cột (danh sách /
+   chi tiết). Dùng lại token màu và `.hh` sẵn có — không có ngôn ngữ thị
+   giác mới; đây là một tab điều tra, không phải một sản phẩm riêng. */
+.kyuc-thongke { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 8px; margin-bottom: 8px; }
+.kyuc-o { border: 1px solid var(--vien); border-radius: 6px; padding: 8px 10px;
+          background: var(--nen-the, transparent); }
+.kyuc-o.do { grid-column: 1 / -1; color: var(--do); }
+.kyuc-o.kyuc-rong { grid-column: 1 / -1; padding: 4px 10px; }
+.kyuc-so { font-size: 1.35em; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kyuc-nhan { font-size: .85em; opacity: .85; }
+.kyuc-loc { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 8px; }
+.kyuc-chip { border: 1px solid var(--vien); background: transparent; color: inherit;
+             border-radius: 999px; padding: 3px 10px; cursor: pointer; font: inherit;
+             font-size: .9em; }
+.kyuc-chip.dang-mo { border-color: var(--neon); color: var(--neon); }
+.kyuc-hai-cot { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+                gap: 10px; min-height: 0; }
+.kyuc-ds, .kyuc-chitiet { border: 1px solid var(--vien); border-radius: 6px; padding: 6px;
+                          max-height: 62vh; overflow: auto; }
+.kyuc-hang { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px;
+             padding: 5px 4px; border-bottom: 1px solid var(--vien); cursor: pointer;
+             align-items: baseline; }
+.kyuc-hang:hover { background: var(--nen-hover, rgba(255,255,255,.04)); }
+.kyuc-hang .qs-phu { grid-column: 2; }
+.kyuc-td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kyuc-goi { white-space: pre-wrap; word-break: break-word; font-size: .85em;
+            max-height: 40vh; overflow: auto; margin: 4px 0; padding: 6px;
+            border: 1px dashed var(--vien); border-radius: 4px; }
+.kyuc-bc { border-top: 1px solid var(--vien); padding-top: 6px; margin-top: 6px; }
+.kyuc-meta { font-size: .85em; opacity: .85; margin-bottom: 6px; }
+#kyuc-tim { flex: 1 1 260px; min-width: 160px; }
+@media (max-width: 900px) {
+  .kyuc-thongke { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kyuc-hai-cot { grid-template-columns: 1fr; }
+}

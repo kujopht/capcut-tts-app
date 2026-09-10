@@ -175,6 +175,13 @@ class ControlCenter:
         self._da_bao_ket_qua: set = set()
         #: `DichVuQuanSat`, dung muon (V0.5). Xem property `quan_sat`.
         self._quan_sat = None
+        #: `DichVuKyUc` (V0.6). KHONG dung muon nhu `quan_sat`: nguoi ghi
+        #: cua no phai duoc cam vao `store` TRUOC su kien dau tien, khong
+        #: thi lich su bo lo dung nhung gi xay ra luc khoi dong. Hong thi
+        #: `None` va Router chay tiep — ky uc khong duoc giet Router.
+        self._ky_uc = None
+        self._ky_uc_loi = ""
+        self._bat_ky_uc()
         #: BUOC DANG LAM cua `chat()`, theo du an: `{pid: (nhan, tu_luc)}`.
         #:
         #: VI SAO CAN. `chat()` chay DONG BO trong mot luong; mot lan mo
@@ -275,6 +282,62 @@ class ControlCenter:
                 DichVuQuanSat
             self._quan_sat = DichVuQuanSat(self.store)
         return self._quan_sat
+
+    def _bat_ky_uc(self) -> None:
+        """Mở `DichVuKyUc` và cắm người ghi vào sổ. Không bao giờ ném."""
+        try:
+            from scripts.control_center.memory.service import DichVuKyUc
+            self._ky_uc = DichVuKyUc(self.store, self.root)
+            # HYDRAT: phien MOI biet ngay minh dang tiep tuc cai gi. Ghi
+            # mot su kien de nghiem thu dem duoc, va de Logs noi thang
+            # "da nap diem dung X" thay vi im lang.
+            for p in self.store.projects():
+                tt = self._ky_uc.tiep_tuc(p.project_id)
+                if tt.get("co_gi_de_tiep_tuc"):
+                    dd = tt.get("diem_dung") or {}
+                    self.store.ghi_su_kien(
+                        "MEMORY_RESUMED", project_id=p.project_id,
+                        detail=(f"nạp ký ức: {tt.get('so_su_kien', 0)} sự kiện, "
+                                f"{tt.get('so_ky_uc', 0)} ký ức, điểm dừng "
+                                f"{dd.get('ma', '-')} ({dd.get('ly_do', '')})"),
+                        meta={"diem_dung": dd.get("ma", ""),
+                              "so_su_kien": tt.get("so_su_kien", 0)})
+        except Exception as exc:                            # noqa: BLE001
+            self._ky_uc = None
+            self._ky_uc_loi = f"{type(exc).__name__}: {exc}"[:300]
+            try:
+                self.store.ghi_su_kien("MEMORY_UNAVAILABLE", level="WARNING",
+                                       detail=f"ký ức không mở được: {self._ky_uc_loi}")
+            except Exception:                               # noqa: BLE001
+                pass
+
+    @property
+    def ky_uc(self):
+        """`DichVuKyUc` hoặc `None` khi không mở được (đã ghi sự kiện)."""
+        return self._ky_uc
+
+    def _khoi_ky_uc(self, project_id: str, text: str) -> str:
+        """Khối KÝ ỨC DỰ ÁN cho nhắc nhở Leader, hoặc `""`.
+
+        Có trần token riêng (`memory.json`), độc lập với kích thước lịch
+        sử. Đi kèm `leader.LUAT_KY_UC` ở MỌI lượt có khối — xem lý do ở
+        `leader.py`. Lỗi ở đây không được làm vỡ lượt chat.
+        """
+        if self._ky_uc is None:
+            return ""
+        try:
+            van = self._ky_uc.khoi_cho_leader(project_id, text)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien("MEMORY_ERROR", project_id=project_id,
+                                   level="WARNING",
+                                   detail=f"dựng khối ký ức: {type(exc).__name__}: {exc}"[:200])
+            return ""
+        if van:
+            from scripts.control_center.memory.model import uoc_token
+            self.store.ghi_su_kien("MEMORY_CONTEXT", project_id=project_id,
+                                   detail=f"khối ký ức {uoc_token(van)} token",
+                                   meta={"token": uoc_token(van)})
+        return van
 
     # -- 1. Du an ------------------------------------------------------------
 
@@ -678,7 +741,10 @@ class ControlCenter:
             # git). Nen "production farmer con chay khong?" duoc tra loi
             # bang so viec cua Router, va cau tra loi la SAI.
             khoi_song = self._khoi_song(pid, text)
-            nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song)
+            # V0.6 — KY UC DU AN dat SAU anh chup tinh, kem luat rieng.
+            khoi_ky_uc = self._khoi_ky_uc(pid, text)
+            nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
+                                      khoi_ky_uc=khoi_ky_uc)
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.
@@ -2289,6 +2355,23 @@ class ControlCenter:
         nghĩa gì đó.
         """
         self.stop_engine()
+        # V0.6 — DIEM DUNG KHI TAT: mot phien sau mo len phai biet dang lam
+        # gi. Dung tren trang thai THAT trong so (viec dang chay/con chan),
+        # sau khi vong lap da dung nen khong con gi doi duoi chan. `ep=True`
+        # bo qua gian cach toi thieu — day la lan cuoi cua phien nay.
+        if self._ky_uc is not None:
+            try:
+                if (self._ky_uc.cau_hinh.get("diem_dung") or {}).get(
+                        "khi_tat_app", True):
+                    for p in self.projects():
+                        self._ky_uc.diem_dung_tu_dong(
+                            p.project_id, "tắt ứng dụng", ep=True)
+            except Exception:                             # noqa: BLE001
+                pass
+            try:
+                self._ky_uc.close()
+            except Exception:                             # noqa: BLE001
+                pass
         # Phien Leader la tien trinh `agy` AM cua CHINH ta — dong no la
         # dung, khac han voi mot luot agent dang bay cua worker.
         with self._khoa_leader:

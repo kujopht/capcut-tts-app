@@ -311,11 +311,14 @@ CAM_GIAN_TIEP = (
     "python -c*", "python3 -c*", "py -c*", "py -3 -c*", "python -c *",
     "node -e*", "node --eval*", "perl -e*", "perl -E*", "ruby -e*",
     "*powershell -Command*", "*powershell -c *", "*pwsh -Command*",
-    "*-EncodedCommand*", "*-enc *", "*Invoke-Expression*", "*IEX(*",
+    # Dang CAN BANG ngoac `(*)*`: mot than luat co `(` khong dong bi Claude
+    # Code bo lang le luc khoi dong (do duoc 2026-08-28, va lai 2026-09-10
+    # khi `--kiem` bao thieu dung hai luat nay sau mot phien moi).
+    "*-EncodedCommand*", "*-enc *", "*Invoke-Expression*", "*IEX(*)*",
     "cmd /c*", "cmd.exe /c*", "cmd /k*",
     "*| bash*", "*|bash*", "*| sh -*", "*|sh -*", "*| sh\n*",
     "*curl* | *", "*wget* | *", "*Invoke-WebRequest*|*",
-    "awk*system(*", "awk*|*getline*",
+    "awk*system(*)*", "awk*|*getline*",
     "*Start-Process*-Verb RunAs*",
 )
 

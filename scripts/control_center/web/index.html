@@ -76,6 +76,7 @@
       <button class="tab" data-khung="agents" role="tab">Agents</button>
       <button class="tab" data-khung="logs" role="tab">Logs</button>
       <button class="tab" data-khung="usage" role="tab">Usage</button>
+      <button class="tab" data-khung="kyuc" role="tab">Memory</button>
     </div>
 
     <!-- CHAT -->
@@ -174,6 +175,40 @@ Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), hoặc ké
       <p class="ghi-chu">ACTUAL = số nhà cung cấp trả về, đọc được bằng máy.
         ESTIMATED = suy ra từ hoạt động cục bộ, có thể lệch.
         UNAVAILABLE = không có cách đọc — cố ý để trống, không ghi 0.</p>
+    </div>
+
+    <!--
+      MEMORY (V0.6) — ky uc du an: lich su tho L0, ky uc co cau truc L1,
+      quyet dinh, diem dung, vien nang. Chi lam moi khi MO tab hoac khi
+      nguoi dung bam — khong nam trong vong ve 1 Hz, vi mot lan thong ke
+      la vai truy van count(*) tren mot so co the rat lon.
+    -->
+    <div class="khung" id="khung-kyuc">
+      <div id="kyuc-thongke" class="kyuc-thongke"></div>
+      <div class="thanh-bang">
+        <input id="kyuc-tim" type="search" placeholder="Tìm trong lịch sử dự án… (không dấu cũng được)"
+               autocomplete="off">
+        <button id="nut-kyuc-tim">Tìm</button>
+        <span class="day"></span>
+        <button id="nut-kyuc-checkpoint" class="nho" title="Ghi điểm dừng handoff cho phiên sau">Điểm dừng</button>
+        <button id="nut-kyuc-quyetdinh" class="nho" title="Ghi một quyết định (có lý do)">+ Quyết định</button>
+      </div>
+      <div id="kyuc-loc" class="kyuc-loc">
+        <button class="kyuc-chip dang-mo" data-loc="timeline">Timeline</button>
+        <button class="kyuc-chip" data-loc="decision">Decisions</button>
+        <button class="kyuc-chip" data-loc="incident">Incidents</button>
+        <button class="kyuc-chip" data-loc="checkpoint">Checkpoints</button>
+        <button class="kyuc-chip" data-loc="architecture">Architecture</button>
+        <button class="kyuc-chip" data-loc="context" title="Gói ngữ cảnh Leader sẽ nhận, đúng ngân sách">Context pack</button>
+      </div>
+      <div class="kyuc-hai-cot">
+        <div id="kyuc-ds" class="kyuc-ds"></div>
+        <div id="kyuc-chitiet" class="kyuc-chitiet"><p class="ghi-chu">Bấm một bản ghi để xem
+          thời gian, nguồn, bằng chứng gốc và trạng thái thay thế.</p></div>
+      </div>
+      <p class="ghi-chu">Ký ức là LỊCH SỬ đã ghi — không phải trạng thái hiện tại. Trạng thái
+        hiện tại đo ở ô TRẠNG THÁI SỐNG. Bí mật bị lọc ở cổng vào; số lần lọc hiện là
+        <code>đã lọc N</code>, nội dung thì không.</p>
     </div>
   </section>
 

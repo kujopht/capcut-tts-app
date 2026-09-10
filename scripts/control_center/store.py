@@ -230,8 +230,24 @@ class ControlStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._ghi = threading.Lock()
+        #: Nguoi theo (V0.6): duoc goi SAU moi `ghi_su_kien`/`them_chat`.
+        #: Day la cach lop ky uc nghe duoc MOI thu ma khong cham 60 cho goi
+        #: trong engine. Goi trong `try/except` nuot het — mot nguoi theo
+        #: hong khong duoc lam so chinh ghi hong.
+        self._nguoi_theo: List[Any] = []
         with self._c() as c:
             c.executescript(SCHEMA)
+
+    def dang_ky_nguoi_theo(self, cb) -> None:
+        if cb not in self._nguoi_theo:
+            self._nguoi_theo.append(cb)
+
+    def _bao(self, loai: str, **kw) -> None:
+        for cb in list(self._nguoi_theo):
+            try:
+                cb(loai, **kw)
+            except Exception:                               # noqa: BLE001
+                pass
 
     # -- ket noi ------------------------------------------------------------
 
@@ -323,6 +339,10 @@ class ControlStore:
                     (MAX_EVENTS,))
             except sqlite3.Error:
                 pass
+        if self._nguoi_theo:
+            self._bao("su_kien", kind=kind, project_id=project_id,
+                      task_id=task_id, session_id=session_id, level=level,
+                      detail=detail or "", meta=meta or {}, eid=eid)
         return eid
 
     def su_kien(self, *, project_id: str = "", task_id: str = "",
@@ -875,9 +895,13 @@ class ControlStore:
             "INSERT INTO chat (project_id, ts, role, text, meta_json) "
             "VALUES (?,?,?,?,?)",
             (project_id, now, role, sach, redact(_js(meta or {}))))
-        return ChatMessage(message_id=int(cur.lastrowid or 0),
-                           project_id=project_id, role=role, text=sach,
-                           ts=now, meta=meta or {})
+        tin = ChatMessage(message_id=int(cur.lastrowid or 0),
+                          project_id=project_id, role=role, text=sach,
+                          ts=now, meta=meta or {})
+        if self._nguoi_theo:
+            self._bao("chat", project_id=project_id, role=role, text=sach,
+                      message_id=tin.message_id, meta=meta or {})
+        return tin
 
     def chat(self, project_id: str, *, limit: int = 200) -> List[ChatMessage]:
         hs = self._c().execute(

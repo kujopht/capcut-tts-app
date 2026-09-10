@@ -982,11 +982,241 @@ function veUsageTuCache() {
       : '');
 }
 
+// ------------------------------------------------------------ ky uc (V0.6) ----
+// KHONG nam trong `veHet()`: mot lan thong ke la vai `count(*)` tren mot so
+// co the rat lon, va tim kiem la mot truy van FTS. Chi lam moi khi MO tab,
+// khi doi bo loc, hoac khi nguoi dung bam.
+let kyUcLoc = 'timeline';
+let kyUcDangTai = false;
+const MAU_KYUC = {
+  episodic: 'xam', semantic: 'xanh', decision: 'tim', procedural: 'luc',
+  incident: 'do', architecture: 'vang',
+};
+
+function coDocKyUc(b) { return coDoc(b); }
+
+async function veKyUcThongKe() {
+  if (!S.selected) { dat('#kyuc-thongke', trong('chưa chọn dự án')); return; }
+  let tk;
+  try {
+    tk = await api(`/api/memory/stats?project=${encodeURIComponent(S.selected)}`);
+  } catch (e) { dat('#kyuc-thongke', trong(`không đọc được: ${e.message}`)); return; }
+  if (!tk.san_sang) {
+    dat('#kyuc-thongke', `<div class="kyuc-o do">Ký ức KHÔNG SẴN — ${esc(tk.loi_cuoi || tk.ly_do || '')}
+      <br><i>Router vẫn chạy bình thường; chỉ phần nhớ lâu bị tắt.</i></div>`);
+    return;
+  }
+  const d = tk.dem || {}, b = tk.byte || {};
+  const o = (nhan, gt, phu = '') => `<div class="kyuc-o"><div class="kyuc-so">${esc(gt)}</div>
+    <div class="kyuc-nhan">${esc(nhan)}${phu ? `<span class="qs-phu"> ${esc(phu)}</span>` : ''}</div></div>`;
+  dat('#kyuc-thongke', [
+    o('Sự kiện (lịch sử thô)', d.su_kien ?? '—', coDocKyUc(b.lich_su_tho || 0)),
+    o('Ký ức có cấu trúc', d.ky_uc ?? '—', coDocKyUc(b.co_cau_truc || 0)),
+    o('Quyết định', d.quyet_dinh ?? '—', `${d.ky_uc_decision ?? 0} bản ghi`),
+    o('Sự cố', d.ky_uc_incident ?? '—'),
+    o('Điểm dừng', d.diem_dung ?? '—'),
+    o('Bằng chứng (blob)', tk.so_blob ?? '—', coDocKyUc(b.bang_chung || 0)),
+    o('Chỉ mục', coDocKyUc(b.chi_muc || 0), tk.che_do_tim || ''),
+    o('Tổng trên đĩa', coDocKyUc(b.tong || 0), `db ${coDocKyUc(b.tep_db || 0)}`),
+  ].join('') + `<div class="kyuc-o kyuc-rong"><div class="qs-phu">sổ: ${esc(tk.ns || '')}
+    · lược đồ v${esc((tk.toan_ven || {}).phien_ban_luoc_do ?? '?')}
+    · quick_check ${esc((tk.toan_ven || {}).quick_check || '?')}
+    · trùng nội dung đã khử: ${esc(d.su_kien_trung_dau ?? 0)}</div></div>`);
+}
+
+function theKyUc(k, phu = '') {
+  const loai = k.loai || 'episodic';
+  return `<div class="kyuc-hang" data-ma="${esc(k.ma)}">
+    <span class="hh ${MAU_KYUC[loai] || 'xam'}">${esc(loai)}</span>
+    <span class="kyuc-td" title="${esc(k.ma)}">${esc(k.tieu_de || k.noi_dung.slice(0, 80))}</span>
+    <span class="qs-phu">${esc(k.tuoi_chu || '')}${phu ? ` · ${esc(phu)}` : ''}${
+      k.da_loc ? ` · đã lọc ${esc(k.da_loc)}` : ''}</span></div>`;
+}
+
+function theSuKien(s) {
+  return `<div class="kyuc-hang" data-sk="${esc(s.id)}">
+    <span class="hh xam">${esc(String(s.loai || '').replace('event:', ''))}</span>
+    <span class="kyuc-td">${esc((s.tom_tat || '').slice(0, 120))}</span>
+    <span class="qs-phu">#${esc(s.id)} · ${esc(s.tuoi_chu || '')}${
+      s.blob_sha ? ' · có blob' : ''}${s.da_loc ? ` · đã lọc ${esc(s.da_loc)}` : ''}</span></div>`;
+}
+
+async function veKyUcDanhSach() {
+  if (!S.selected || kyUcDangTai) return;
+  kyUcDangTai = true;
+  const pid = encodeURIComponent(S.selected);
+  const q = ($('#kyuc-tim').value || '').trim();
+  try {
+    let html = '';
+    if (q) {
+      const r = await api(`/api/memory/search?project=${pid}&q=${encodeURIComponent(q)}`
+        + (kyUcLoc !== 'timeline' && kyUcLoc !== 'context' && kyUcLoc !== 'checkpoint'
+          ? `&loai=${encodeURIComponent(kyUcLoc)}` : ''));
+      html += `<div class="nhan">KÝ ỨC KHỚP (${r.ket_qua.length}) · ${esc(r.che_do_tim || '')}</div>`;
+      html += r.ket_qua.map((k) => theKyUc(k, `điểm ${Number(k.diem).toFixed(2)}`)).join('')
+        || trong('không có ký ức khớp');
+      if (r.su_kien && r.su_kien.length) {
+        html += `<div class="nhan" style="margin-top:8px">LỊCH SỬ THÔ KHỚP (${r.su_kien.length})</div>`;
+        html += r.su_kien.map(theSuKien).join('');
+      }
+    } else if (kyUcLoc === 'timeline') {
+      const r = await api(`/api/memory/timeline?project=${pid}&limit=80`);
+      html = r.su_kien.map(theSuKien).join('') || trong('chưa có lịch sử');
+    } else if (kyUcLoc === 'context') {
+      const r = await api(`/api/memory/context?project=${pid}&q=`);
+      html = `<div class="nhan">GÓI NGỮ CẢNH — ${esc(r.token_uoc)}/${esc(r.token_tran)} token ·
+        ${esc(r.chon ? r.chon.length : 0)} chọn · ${esc(r.bo_qua ?? 0)} bỏ qua ·
+        ${esc(r.lich_su_so_su_kien ?? 0)} sự kiện trong sổ</div>
+        <pre class="kyuc-goi">${esc(r.van || '(rỗng — chưa có gì để nhớ)')}</pre>`;
+    } else {
+      const r = await api(`/api/memory/list?project=${pid}&loai=${encodeURIComponent(kyUcLoc)}`);
+      if (kyUcLoc === 'decision') {
+        html = r.ket_qua.map((q) => `<div class="kyuc-hang" data-ma="${esc(q.ma)}">
+          <span class="hh ${q.hieu_luc ? 'tim' : 'xam'}">${esc(q.ma)}</span>
+          <span class="kyuc-td">${esc(q.ky_uc ? (q.ky_uc.tieu_de || q.ky_uc.noi_dung.slice(0, 90)) : '')}</span>
+          <span class="qs-phu">${q.hieu_luc ? 'HIỆU LỰC' : `THAY THẾ bởi ${esc(q.bi_thay_the)}`}${
+            q.thay_the_cho.length ? ` · thay ${esc(q.thay_the_cho.join(','))}` : ''}</span></div>`).join('')
+          || trong('chưa có quyết định — bấm “+ Quyết định” để ghi');
+      } else if (kyUcLoc === 'checkpoint') {
+        html = r.ket_qua.map((d) => `<div class="kyuc-hang" data-ma="${esc(d.ma)}">
+          <span class="hh luc">${esc(d.ma.slice(0, 10))}</span>
+          <span class="kyuc-td">${esc(d.muc_tieu || d.ly_do)}</span>
+          <span class="qs-phu">${esc(tuoiChu((Date.now() / 1000) - d.ts))} · ${esc(d.ly_do)}</span></div>`).join('')
+          || trong('chưa có điểm dừng');
+      } else {
+        html = r.ket_qua.map((k) => theKyUc(k)).join('') || trong(`chưa có bản ghi ${kyUcLoc}`);
+      }
+    }
+    dat('#kyuc-ds', html);
+  } catch (e) {
+    dat('#kyuc-ds', trong(`không đọc được: ${e.message}`));
+  } finally { kyUcDangTai = false; }
+}
+
+function veBangChung(bcs) {
+  if (!bcs || !bcs.length) return '<p class="ghi-chu">không có mắt xích bằng chứng (bản ghi gốc)</p>';
+  return bcs.map((b) => {
+    const sk = b.su_kien;
+    let s = `<div class="kyuc-bc">`;
+    if (sk) {
+      s += `<div><b>sự kiện #${esc(sk.id)}</b> · ${esc(sk.loai)} · ${esc(sk.nguon)} ·
+        ${esc(new Date(sk.ts * 1000).toLocaleString())}</div>
+        <pre class="kyuc-goi">${esc(sk.tom_tat)}</pre>`;
+    }
+    if (b.blob) {
+      s += `<div><b>nội dung đầy đủ</b> · sha ${esc(b.blob.sha.slice(0, 12))} ·
+        toàn vẹn ${b.blob.toan_ven ? 'OK' : 'HỎNG'}</div>
+        <pre class="kyuc-goi">${esc(String(b.blob.noi_dung).slice(0, 4000))}</pre>`;
+    }
+    if (!b.co) s += `<div class="qs-phu">bằng chứng thiếu: ${esc(b.ly_do || '')}</div>`;
+    return s + '</div>';
+  }).join('');
+}
+
+async function moBanGhiKyUc(ma) {
+  if (!S.selected) return;
+  let r;
+  try {
+    r = await api(`/api/memory/record?project=${encodeURIComponent(S.selected)}&ma=${encodeURIComponent(ma)}`);
+  } catch (e) { dat('#kyuc-chitiet', trong(e.message)); return; }
+  if (!r.co) { dat('#kyuc-chitiet', trong(r.ly_do || 'không có')); return; }
+  const k = r.ky_uc, q = r.quyet_dinh, d = r.diem_dung;
+  let html = '';
+  if (k) {
+    html += `<div class="nhan">${esc(k.ma)} <span class="hh ${MAU_KYUC[k.loai] || 'xam'}">${esc(k.loai)}</span></div>
+      <div class="kyuc-meta">ghi ${esc(new Date(k.ts * 1000).toLocaleString())} ·
+        chuyện xảy ra ${esc(new Date(k.ts_su_kien * 1000).toLocaleString())} ·
+        quan trọng ${esc(k.quan_trong)}/10 · nguồn <b>${esc(k.tin_cay)}</b>
+        ${k.het_han ? ' · <span class="hh vang">QUÁ TTL</span>' : ''}
+        ${k.da_loc ? ` · đã lọc ${esc(k.da_loc)}` : ''}</div>
+      ${k.tieu_de ? `<h4>${esc(k.tieu_de)}</h4>` : ''}
+      <pre class="kyuc-goi">${esc(k.noi_dung)}</pre>
+      ${k.the.length ? `<div class="qs-phu">thẻ: ${esc(k.the.join(', '))}</div>` : ''}`;
+  }
+  if (q) {
+    html += `<div class="nhan" style="margin-top:8px">QUYẾT ĐỊNH ${esc(q.ma)} —
+      ${q.hieu_luc ? '<span class="hh tim">HIỆU LỰC</span>' : `<span class="hh xam">THAY THẾ</span> bởi ${esc(q.bi_thay_the)}`}</div>
+      ${q.thay_the_cho.length ? `<div class="qs-phu">thay thế cho: ${esc(q.thay_the_cho.join(', '))}</div>` : ''}
+      ${q.ly_do ? `<div><b>vì sao:</b> ${esc(q.ly_do)}</div>` : ''}`;
+  }
+  if (d) {
+    html += `<div class="nhan">ĐIỂM DỪNG ${esc(d.ma)}</div>
+      <pre class="kyuc-goi">${esc(JSON.stringify(d, null, 1))}</pre>`;
+  }
+  if (r.su_kien) {
+    html += `<div class="nhan">SỰ KIỆN #${esc(r.su_kien.id)}</div>` + veBangChung([r]);
+  } else if (r.bang_chung) {
+    html += `<div class="nhan" style="margin-top:8px">VÌ SAO NHỚ — BẰNG CHỨNG GỐC</div>` + veBangChung(r.bang_chung);
+  }
+  dat('#kyuc-chitiet', html);
+}
+
+function veKyUc() { veKyUcThongKe(); veKyUcDanhSach(); }
+
+$('#nut-kyuc-tim').onclick = veKyUcDanhSach;
+$('#kyuc-tim').addEventListener('keydown', (e) => { if (e.key === 'Enter') veKyUcDanhSach(); });
+$$('.kyuc-chip').forEach((b) => {
+  b.onclick = () => {
+    kyUcLoc = b.dataset.loc;
+    $$('.kyuc-chip').forEach((x) => x.classList.toggle('dang-mo', x === b));
+    veKyUcDanhSach();
+  };
+});
+$('#kyuc-ds').addEventListener('click', (e) => {
+  const h = e.target.closest('.kyuc-hang');
+  if (!h) return;
+  if (h.dataset.ma) moBanGhiKyUc(h.dataset.ma);
+  else if (h.dataset.sk) moBanGhiKyUc(`sk#${h.dataset.sk}`);
+});
+$('#nut-kyuc-checkpoint').onclick = () => moHopThoai('Ghi điểm dừng (handoff)', `
+  <p class="ghi-chu">Điểm dừng là thứ phiên SAU đọc để tiếp tục mà không cần dán handoff.
+  Trạng thái việc được lấy từ sổ; ở đây bạn ghi phần máy không tự biết.</p>
+  <label>Đang làm gì<textarea id="dd-muc-tieu" rows="2"></textarea></label>
+  <label>Giả thuyết hiện tại<textarea id="dd-gia-thuyet" rows="2"></textarea></label>
+  <label>Chưa xong (mỗi dòng một mục)<textarea id="dd-chua-xong" rows="3"></textarea></label>
+  <div class="hang-nut"><button id="dd-luu">Ghi điểm dừng</button></div>`, () => {
+  $('#dd-luu').onclick = async () => {
+    try {
+      const r = await api('/api/memory/checkpoint', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: S.selected, ly_do: 'handoff từ giao diện',
+          noi_dung: { muc_tieu: $('#dd-muc-tieu').value, gia_thuyet: $('#dd-gia-thuyet').value,
+                      chua_xong: $('#dd-chua-xong').value } }) });
+      dongHopThoai(); kyUcLoc = 'checkpoint';
+      $$('.kyuc-chip').forEach((x) => x.classList.toggle('dang-mo', x.dataset.loc === 'checkpoint'));
+      veKyUc(); if (r && r.ma) moBanGhiKyUc(r.ma);
+    } catch (e) { alert(`không ghi được: ${e.message}`); }
+  };
+});
+$('#nut-kyuc-quyetdinh').onclick = () => moHopThoai('Ghi quyết định', `
+  <p class="ghi-chu">Quyết định là BẤT BIẾN: đổi ý thì ghi quyết định mới và nêu nó thay
+  thế cái nào. Cái cũ chỉ đổi trạng thái, không bị sửa.</p>
+  <label>Tiêu đề<input id="qd-tieu-de"></label>
+  <label>Quyết định gì<textarea id="qd-noi-dung" rows="3"></textarea></label>
+  <label>Vì sao<textarea id="qd-ly-do" rows="2"></textarea></label>
+  <label>Thay thế cho (mã qd_…, cách nhau bởi dấu phẩy, để trống nếu không)
+    <input id="qd-thay-the" placeholder="qd_0001"></label>
+  <div class="hang-nut"><button id="qd-luu">Ghi quyết định</button></div>`, () => {
+  $('#qd-luu').onclick = async () => {
+    try {
+      const r = await api('/api/memory/decision', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project: S.selected, tieu_de: $('#qd-tieu-de').value,
+          noi_dung: $('#qd-noi-dung').value, ly_do: $('#qd-ly-do').value,
+          thay_the_cho: $('#qd-thay-the').value.split(',').map((x) => x.trim()).filter(Boolean) }) });
+      dongHopThoai(); kyUcLoc = 'decision';
+      $$('.kyuc-chip').forEach((x) => x.classList.toggle('dang-mo', x.dataset.loc === 'decision'));
+      veKyUc(); if (r && r.ma) moBanGhiKyUc(r.ma);
+    } catch (e) { alert(`không ghi được: ${e.message}`); }
+  };
+});
+
 // ------------------------------------------------------------------- tab ----
 function doiKhung(ten) {
   $$('.tab').forEach((b) => b.classList.toggle('dang-mo', b.dataset.khung === ten));
   $$('.khung').forEach((k) => k.classList.toggle('dang-mo', k.id === `khung-${ten}`));
   if (ten === 'usage') veUsage();
+  if (ten === 'kyuc') veKyUc();
 }
 $$('.tab').forEach((b) => { b.onclick = () => doiKhung(b.dataset.khung); });
 $('#o-tim').oninput = () => { veTasks(); veAgents(); };

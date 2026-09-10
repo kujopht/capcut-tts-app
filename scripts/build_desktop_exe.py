@@ -22,6 +22,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 GOC = Path(__file__).resolve().parents[1]
@@ -146,7 +147,28 @@ def main(argv=None) -> int:
     ghi(f"  EXE  : {exe}")
     ghi(f"  cỡ   : {co:,} byte (thư mục: {tong / 1048576:.0f} MB)")
     ghi("")
+    # BAO CAO DONG GOI (2026-09-10): SHA256, chu ky/nguoi ky, MOTW, du doan
+    # Smart App Control. Mot ban dung lai SACH bi SAC chan ("we could not
+    # verify its publisher") trong khi ban truoc chay duoc — khong co bao cao
+    # o day thi khong ai biet vi sao. Khong ky o day; ky la viec cua
+    # `scripts/ky_ban_dong_goi.py`. Bao cao hong khong lam build hong.
+    try:
+        sys.path.insert(0, str(GOC))
+        from scripts.kiem_ban_dong_goi import dong_bao_cao, kiem_exe
+        bc = dong_bao_cao(kiem_exe(exe))
+        ghi("  --- kiểm bản đóng gói (scripts/kiem_ban_dong_goi.py) ---")
+        for dong in bc.splitlines():
+            ghi("  " + dong)
+        (ra / "KIEM_DONG_GOI.txt").write_text(
+            "Kiểm bản đóng gói (chỉ đọc) — " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n" + bc + "\n",
+            encoding="utf-8")
+        ghi(f"  -> {ra / 'KIEM_DONG_GOI.txt'}")
+    except Exception as exc:                                # noqa: BLE001
+        ghi(f"  (không kiểm được bản đóng gói: {type(exc).__name__}: {exc})")
+    ghi("")
     ghi("  Bấm đôi tệp EXE ở trên. Không cần console, không cần trình duyệt.")
+    ghi("  Smart App Control đang bật: bản KHÔNG KÝ có thể bị chặn — xem dòng "
+        "'Smart App Control' ở trên và docs/reports/SMART_APP_CONTROL_V061.md.")
     return 0
 
 

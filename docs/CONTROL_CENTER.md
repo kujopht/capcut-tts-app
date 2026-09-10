@@ -865,6 +865,36 @@ kể cả phép kiểm **chữ ký byte**: `anh.png` mà không mở đầu bằ
 mã endpoint và đòi nó không chứa `open(`/`read_bytes`/`read_text`/
 `FileResponse`.
 
+## 14d. Smart App Control và bản đóng gói (2026-09-10)
+
+Máy phát triển bật Smart App Control cưỡng chế. Bản EXE PyInstaller **không
+ký** chỉ mở được khi đám mây ISG trả "known good" cho **đúng băm** của tệp —
+đạt thì Code Integrity ghi EA `$KERNEL.PURGE.ESBCACHE` lên tệp và không hỏi
+lại; không đạt thì chặn (3033/3077, "we could not verify its publisher").
+Mỗi lần dựng là một băm mới (mốc dựng trong đầu PE + overlay), nên với bản
+không ký, "mở được" là kết quả xổ số, không phải thuộc tính của mã. Đo thật:
+`dist-v0612` chạy, `dist-v061` dựng lại 50 phút sau từ cùng commit bị chặn.
+
+Bốn luật:
+
+1. **Sau khi dựng, đọc `KIEM_DONG_GOI.txt`** (`build_desktop_exe.py` tự gọi
+   `scripts/kiem_ban_dong_goi.py`): SHA256, chữ ký/người ký, MOTW, dự đoán
+   SAC. Không có báo cáo thì mọi so sánh "bản cũ chạy, bản mới không" là đoán.
+2. **Không tự ký, không cài gốc tự ký, không tắt SAC, không sửa chính sách/
+   registry, không tự ghi EA.** SAC chỉ tin CA trong Microsoft Trusted Root
+   Program và không tra kho gốc cục bộ; ba việc sau là nới rào không hoàn tác.
+3. **Đường dev chắc chắn không cần chứng chỉ**: `router-cc-desktop.cmd` —
+   `pythonw.exe` của PSF (đã ký, đã tin) chạy `scripts.control_center.desktop`
+   từ mã nguồn; mã Python không thuộc phạm vi kiểm của SAC ở cả hai cách đóng
+   gói, nên không có gì bị nới.
+4. **Phát hành thì ký bằng chứng chỉ của CA công cộng** qua
+   `scripts/ky_ban_dong_goi.py --thumbprint <sha1>` (khoá trên token/HSM, kho
+   chỉ biết vân tay) hoặc Artifact Signing nơi được hỗ trợ. Giữ nguyên các
+   thư mục `dist-v*` đã chạy được — EA nằm trên tệp.
+
+`docs/reports/SMART_APP_CONTROL_V061.md` có nhật ký sự kiện, bảng sáu bản,
+thí nghiệm mở có kiểm soát, và đánh giá bốn phương án launcher.
+
 ## 15. Chưa làm (cố ý — ranh giới đã chọn)
 
 Không phải thiếu sót — là ranh giới đã chọn:

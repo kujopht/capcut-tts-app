@@ -70,7 +70,19 @@ Backend web bọc thêm một lớp mỏng ở `server/tts_bridge.py` — **khô
 
 ## Đặc thù môi trường máy này
 
-- Smart App Control **đang bật cưỡng chế**. EXE/DLL chưa ký có thể bị Code Integrity chặn ở lần chạy đầu (sự kiện 3033/3077). Ký số là việc sau MVP. **Không tắt Smart App Control** — thao tác này không thể hoàn tác.
+- Smart App Control **đang bật cưỡng chế** (`VerifiedAndReputablePolicyState=1`,
+  policy `{0283ac0f-…}`). Cơ chế đo được 2026-09-10: EXE **không ký** chỉ chạy nếu
+  đám mây ISG trả "known good" cho ĐÚNG băm đó; đạt thì Code Integrity ghi EA
+  `$KERNEL.PURGE.ESBCACHE` lên tệp và các lần sau không hỏi lại; không đạt thì
+  chặn (sự kiện 3033/3077, "we could not verify its publisher") — **mỗi bản
+  PyInstaller dựng lại là một băm mới nên là một lần xổ số**: `dist-v0612` chạy,
+  `dist-v061` dựng lại 50 phút sau từ CÙNG mã bị chặn vĩnh viễn. Chứng chỉ TỰ KÝ
+  không giải quyết được (SAC chỉ tin CA trong Microsoft Trusted Root Program,
+  không tra kho gốc cục bộ). Sau khi dựng luôn đọc `KIEM_DONG_GOI.txt`
+  (`scripts/kiem_ban_dong_goi.py`); đường chạy chắc chắn không cần ký là
+  `pythonw.exe` (PSF ký) chạy `scripts.control_center.desktop` từ mã nguồn.
+  Đầy đủ: `docs/reports/SMART_APP_CONTROL_V061.md`. **Không tắt Smart App
+  Control**, không sửa chính sách/registry — thao tác này không thể hoàn tác.
 - `Documents` bị OneDrive chuyển hướng.
 - ffmpeg/ffprobe ở `%LOCALAPPDATA%\Microsoft\WinGet\Links\`.
 - Inno Setup nằm ở phạm vi người dùng, không phải `Program Files`.

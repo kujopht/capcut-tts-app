@@ -1370,6 +1370,25 @@ giữ nguyên, bản mới `dist-v061`. Bốn việc, ba báo cáo:
   DONE trong worktree cô lập, gốc kho tạm không đổi. Bước hỏng duy nhất ở cả
   hai: cửa sổ Windows Terminal lúc `agy` sinh (đã biết, §6.2). Production/kho
   thật bị chạm: 0.
+* **Khuyết tật đóng gói — Smart App Control chặn bản `dist-v061` dựng lại**
+  ("we could not verify its publisher", sự kiện 3033/3077, policy
+  `{0283ac0f-…}`). Nguyên nhân gốc đo được: EXE **không ký**; SAC chỉ còn đường
+  tra băm ở đám mây ISG; mỗi bản PyInstaller là một băm mới (mốc dựng trong đầu
+  PE + overlay) nên là một lần tra mới; năm bản chạy được đều mang EA
+  `$KERNEL.PURGE.ESBCACHE` (câu trả lời thuận được ghi lên tệp), bản bị chặn
+  không có EA; `dist-v0612` (18:15) chạy, `dist-v061` (19:05, cùng commit
+  `7b9e377`, cùng PyInstaller 6.22.2, cùng `.rsrc`) bị chặn 7 lần trong 100
+  phút. Không phải cách mở, không MOTW (0/6), không công cụ. **Tự ký không
+  thoả SAC** (chỉ tin CA trong Microsoft Trusted Root Program). Đã thêm:
+  `scripts/kiem_ban_dong_goi.py` (SHA256/chữ ký/người ký/MOTW/dự đoán SAC,
+  `--so-sanh`, `--dll`; `build_desktop_exe.py` tự gọi và ghi
+  `<dist>/KIEM_DONG_GOI.txt`), `scripts/ky_ban_dong_goi.py` (vỏ `signtool`:
+  vân tay CA hoặc Artifact Signing, không PFX/tự ký); `router-cc-desktop.cmd`
+  (có từ V0.2) thành đường dev khuyến nghị — vỏ desktop từ mã nguồn qua
+  `pythonw.exe` PSF ký, đo 0 sự kiện Code Integrity; 12 bài kiểm. Khuyến nghị: phát hành ký bằng chứng chỉ IV/OV của
+  CA công cộng (Artifact Signing **không mở cho Việt Nam**); dev dùng
+  `router-cc-desktop.cmd` hoặc chấp nhận xổ số với báo cáo. Bản cũ nguyên
+  băm. EXE mở được lúc đo: `dist-v0612`. `docs/reports/SMART_APP_CONTROL_V061.md`.
 
 Bộ kiểm mới: 100 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
 provider webapi 3 · toả 22). **Bản EXE cuối: `dist-v061`, build lại SẠCH từ

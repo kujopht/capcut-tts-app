@@ -37,6 +37,7 @@ gỡ được.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -48,6 +49,26 @@ from scripts.control_center.store import ControlStore
 #: dien hinh; nho hon mot dem.
 LOCK_TTL = 3600.0
 
+#: V0.6.1 — CHE DO TRUY CAP. Khuyet tat nghiem thu tay #2: bon viec CHI DOC
+#: bon pham vi khac nhau bi tuan tu hoa vi khoa khong co che do — moi khoa
+#: la doc quyen. Luat:
+#:     READ  + READ , cung/giao pham vi  -> song chung
+#:     READ  + WRITE, giao pham vi       -> tranh chap
+#:     WRITE + WRITE, giao pham vi       -> tranh chap
+#:     khong giao pham vi                -> song chung
+#: Khong bao gio noi long cho GHI: khoa cu (khong che do) doc thanh WRITE.
+READ = "read"
+WRITE = "write"
+#: Tai nguyen "goc kho" — giao voi MOI duong dan. Dung "." tuong minh; chuoi
+#: rong nghia la KHONG khoa (xem `xin`).
+GOC = "."
+
+_DUOI_MAU = re.compile(r"(?:/\*\*|/\*|\*\*|\*)+$")
+
+
+def chuan_mode(mode) -> str:
+    return READ if str(mode or "").strip().lower() in ("read", "r", "doc", "đọc") else WRITE
+
 
 def chuan_hoa(resource: str) -> str:
     """Chuẩn hoá định danh tài nguyên trước khi so sánh.
@@ -55,29 +76,83 @@ def chuan_hoa(resource: str) -> str:
     Không chuẩn hoá thì `web/admin/`, `web\\admin` và `/web/admin` thành ba
     tài nguyên khác nhau, và hai việc cùng ghi một thư mục sẽ cùng lấy được
     khoá — đúng chế độ hỏng mà module này tồn tại để chặn.
+
+    V0.6.1: `docs/**`, `docs/*` → `docs` (mẫu glob là cả cây); `.`, `./`,
+    `*` → `.` (gốc kho). Chuỗi rỗng giữ rỗng = không khoá.
     """
-    return str(resource or "").strip().replace("\\", "/").strip("/").lower()
+    s = str(resource or "").strip().replace("\\", "/")
+    if s in (".", "./", "*", "**"):
+        return GOC
+    s = _DUOI_MAU.sub("", s).strip("/").lower()
+    if s.startswith("./"):
+        s = s[2:]
+    if s in (".", ""):
+        return GOC if s == "." else ""
+    return s
+
+
+def tuong_thich(mode_a: str, mode_b: str) -> bool:
+    """Hai chế độ có sống chung được trên tài nguyên GIAO NHAU không."""
+    return chuan_mode(mode_a) == READ and chuan_mode(mode_b) == READ
 
 
 def xung_dot(kind: LockKind, a: str, b: str) -> bool:
-    """Hai tài nguyên cùng lớp có tranh chấp nhau không.
+    """Hai tài nguyên cùng lớp có GIAO NHAU không (chưa xét chế độ).
 
     FILESYSTEM dùng giao nhau tiền tố THEO ĐOẠN. So chuỗi trần
     (`b.startswith(a)`) sẽ báo `web/admin` xung đột với `web/administration`
-    — hai thư mục hoàn toàn khác nhau — nên phải so theo dấu `/`.
+    — hai thư mục hoàn toàn khác nhau — nên phải so theo dấu `/`. Gốc kho
+    (`.`) giao với mọi đường dẫn. GIT: trùng tên trạng thái (`history`,
+    `worktree`) hoặc `*`. SERVICE/PRODUCTION: trùng định danh.
     """
     x, y = chuan_hoa(a), chuan_hoa(b)
     if not x or not y:
         return False
     if x == y:
         return True
-    if kind is not LockKind.FILESYSTEM:
-        return False
-    return x.startswith(y + "/") or y.startswith(x + "/")
+    if kind is LockKind.FILESYSTEM:
+        if x == GOC or y == GOC:
+            return True
+        return x.startswith(y + "/") or y.startswith(x + "/")
+    if kind is LockKind.GIT:
+        return GOC in (x, y)                # `*`/`.` = moi trang thai git
+    return False
 
 
-def lock_id_cua(project_id: str, kind: LockKind, resource: str) -> str:
-    return f"{project_id}:{kind.value}:{chuan_hoa(resource)}"
+def tranh_chap(kind: LockKind, a: str, mode_a: str, b: str, mode_b: str) -> bool:
+    """Giao nhau VÀ không tương thích chế độ."""
+    return xung_dot(kind, a, b) and not tuong_thich(mode_a, mode_b)
+
+
+def lock_id_cua(project_id: str, kind: LockKind, resource: str, mode: str = WRITE,
+                task_id: str = "") -> str:
+    """Khoá WRITE: một hàng cho một tài nguyên (như cũ). Khoá READ: một hàng
+    MỖI người đọc — nhiều việc cùng đọc một chỗ là điểm chính của V0.6.1."""
+    goc = f"{project_id}:{kind.value}:{chuan_hoa(resource)}"
+    return goc if chuan_mode(mode) == WRITE else f"{goc}#r:{task_id}"
+
+
+def chuoi_tai_nguyen(kind: LockKind, resource: str, mode: str = WRITE) -> str:
+    """Dạng lưu trong `Task.resources`: `READ:FILESYSTEM:docs`, `WRITE:GIT:worktree`."""
+    return f"{chuan_mode(mode).upper()}:{kind.value}:{resource}"
+
+
+def doc_chuoi_tai_nguyen(chuoi: str) -> Optional[Tuple[LockKind, str, str]]:
+    """Đọc `Task.resources`. Dạng cũ `FILESYSTEM:web` (không chế độ) = WRITE —
+    không bao giờ đọc dạng cũ thành READ."""
+    s = str(chuoi or "").strip()
+    if not s or ":" not in s:
+        return None
+    phan = s.split(":", 2)
+    if phan[0].upper() in ("READ", "WRITE") and len(phan) == 3:
+        mode, kind_s, res = chuan_mode(phan[0]), phan[1], phan[2]
+    else:
+        kind_s, res, mode = phan[0], ":".join(phan[1:]), WRITE
+    try:
+        kind = LockKind(kind_s.upper())
+    except ValueError:
+        return None
+    return kind, res, mode
 
 
 @dataclass(frozen=True)
@@ -119,13 +194,14 @@ class LockManager:
         return self.store.locks(project_id)
 
     def tim_xung_dot(self, project_id: str, kind: LockKind, resource: str, *,
-                     bo_qua_task: str = "",
+                     mode: str = WRITE, bo_qua_task: str = "",
                      now: Optional[float] = None) -> Optional[ResourceLock]:
-        """Khoá ĐANG SỐNG nào tranh chấp với `resource`.
+        """Khoá ĐANG SỐNG nào tranh chấp với `resource` ở chế độ `mode`.
 
         Khoá đã hết hạn của lớp tự thu hồi được coi như không tồn tại — nếu
         không, một tiến trình chết sẽ chặn vĩnh viễn. Khoá production hết
-        hạn thì VẪN TÍNH LÀ XUNG ĐỘT: xem docstring module.
+        hạn thì VẪN TÍNH LÀ XUNG ĐỘT: xem docstring module. Hai khoá READ
+        giao nhau KHÔNG tranh chấp (V0.6.1).
         """
         curr = time.time() if now is None else now
         for l in self.store.locks(project_id):
@@ -135,13 +211,13 @@ class LockManager:
                 continue
             if not l.con_han(now=curr) and l.kind.tu_thu_hoi_duoc:
                 continue
-            if xung_dot(kind, resource, l.resource):
+            if tranh_chap(kind, resource, mode, l.resource, l.mode):
                 return l
         return None
 
     # -- xin / tra ----------------------------------------------------------
 
-    def xin(self, project_id: str, requests: Sequence[Tuple[LockKind, str]], *,
+    def xin(self, project_id: str, requests: Sequence[Tuple], *,
             task_id: str, session_id: str = "",
             ttl: Optional[float] = None) -> LockGrant:
         """Xin MỘT TẬP khoá — tất cả hoặc không cái nào.
@@ -156,9 +232,19 @@ class LockManager:
         """
         curr = time.time()
         han = curr + (self.ttl if ttl is None else ttl)
-        # Loai trung + sap xep on dinh: chong deadlock kieu om cheo.
-        can = sorted({(k, chuan_hoa(r)) for k, r in requests if chuan_hoa(r)},
-                     key=lambda x: (x[0].value, x[1]))
+        # Loai trung + sap xep on dinh: chong deadlock kieu om cheo. Moi yeu
+        # cau la `(kind, resource)` (= WRITE, tuong thich cu) hoac
+        # `(kind, resource, mode)`. Cung tai nguyen xin ca READ va WRITE thi
+        # chi giu WRITE.
+        bo = set()
+        for r in requests:
+            kind, res = r[0], chuan_hoa(r[1])
+            mode = chuan_mode(r[2]) if len(r) > 2 else WRITE
+            if res:
+                bo.add((kind, res, mode))
+        can = sorted({(k, r, m) for k, r, m in bo
+                      if not (m == READ and (k, r, WRITE) in bo)},
+                     key=lambda x: (x[0].value, x[1], x[2]))
         if not can:
             return LockGrant(granted=True)
         # TOAN BO phep "do xung dot roi chen" phai nam trong MOT giao dich
@@ -172,27 +258,27 @@ class LockManager:
                                              han=han)
 
     def _xin_trong_giao_dich(self, project_id: str,
-                             can: Sequence[Tuple[LockKind, str]], *,
+                             can: Sequence[Tuple[LockKind, str, str]], *,
                              task_id: str, session_id: str,
                              curr: float, han: float) -> LockGrant:
         da_lay: List[ResourceLock] = []
 
-        for kind, res in can:
-            va = self.tim_xung_dot(project_id, kind, res, bo_qua_task=task_id,
-                                   now=curr)
+        for kind, res, mode in can:
+            va = self.tim_xung_dot(project_id, kind, res, mode=mode,
+                                   bo_qua_task=task_id, now=curr)
             if va is not None:
                 self._tra_lai(da_lay, task_id)
                 self.store.them_waiter(va.lock_id, task_id)
                 return LockGrant(
                     granted=False, conflict_resource=va.resource,
                     conflict_holder_task=va.holder_task, conflict_kind=va.kind,
-                    reason=(f"{kind.value} {res!r} tranh chấp với khoá "
-                            f"{va.kind.value} {va.resource!r} do việc "
+                    reason=(f"{kind.value} {res!r} ({mode.upper()}) tranh chấp với khoá "
+                            f"{va.kind.value} {va.resource!r} ({va.mode.upper()}) do việc "
                             f"{va.holder_task or '(không rõ)'} đang giữ"))
 
             l = ResourceLock(
-                lock_id=lock_id_cua(project_id, kind, res),
-                project_id=project_id, kind=kind, resource=res,
+                lock_id=lock_id_cua(project_id, kind, res, mode, task_id),
+                project_id=project_id, kind=kind, resource=res, mode=mode,
                 holder_task=task_id, holder_session=session_id,
                 acquired_at=curr,
                 # Khoa PRODUCTION CO dau thoi gian het han, nhung no la
@@ -223,8 +309,8 @@ class LockManager:
             da_lay.append(l)
             self.store.ghi_su_kien(
                 "LOCK_ACQUIRED", project_id=project_id, task_id=task_id,
-                session_id=session_id, detail=f"{kind.value} {res}",
-                meta={"kind": kind.value, "resource": res})
+                session_id=session_id, detail=f"{kind.value} {res} ({mode.upper()})",
+                meta={"kind": kind.value, "resource": res, "mode": mode})
 
         self.store.xoa_waiter(task_id)
         return LockGrant(granted=True, locks=tuple(da_lay))
@@ -247,7 +333,7 @@ class LockManager:
                 n += 1
                 self.store.ghi_su_kien(
                     "LOCK_RELEASED", project_id=project_id, task_id=task_id,
-                    detail=f"{l.kind.value} {l.resource}")
+                    detail=f"{l.kind.value} {l.resource} ({l.mode.upper()})")
         self.store.xoa_waiter(task_id)
         return n
 

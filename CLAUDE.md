@@ -221,7 +221,10 @@ KHÔNG nhận dispatch). Nút **Providers** ở thanh trên. TOẢ ĐA AGENT: "g
 agent…"/"mỗi agent một…" (đọc từ câu người dùng, tất định — `toa.py`) → 1
 việc cha + N việc con độc lập có ràng buộc không trùng, sức chứa đo từ
 fabric (trừ chỗ Leader chiếm), con tránh runtime anh em, gộp kết quả có
-nguồn gốc; `--max-parallel 0` = trần tự theo bể (3..12);
+nguồn gốc; `--max-parallel 0` = trần tự theo bể (3..12); khoá tài nguyên có
+CHẾ ĐỘ READ/WRITE (đọc song song, ghi độc quyền, chuỗi cũ = WRITE), tài
+nguyên theo TỪNG con, việc đọc git nhận nhật ký do Router đọc (agent headless
+không chạy được shell — quyền của nó KHÔNG được nới);
 `docs/reports/MULTI_AGENT_FANOUT_V061.md`. Báo cáo:
 `docs/reports/PROJECT_MEMORY_V061.md`,
 `docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`,

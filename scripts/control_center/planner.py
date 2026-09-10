@@ -63,13 +63,41 @@ _DOC_LAP = re.compile(
 #: Dau tach cung — xuong dong, gach dau dong, dau cham phay.
 _TACH_CUNG = re.compile(r"(?:\r?\n\s*[-*•]\s*|\r?\n{2,}|;\s*)")
 
+#: V0.6.1 — Y DINH DOC vs Y DINH GHI, xet TRUOC bang loai viec theo danh tu.
+#:
+#: Khuyet tat nghiem thu tay #2: "moi agent KIEM TRA mot phan khac nhau cua
+#: repo: README/docs, tests, source architecture, git history" bi xep vao
+#: `testing` (vi chu "tests") -> repo_write=True, worktree, khoa FILESYSTEM
+#: doc quyen -> bon viec chi doc bi tuan tu hoa, va agent chet trong worktree
+#: vi `read_file` bi tu choi. Danh tu "tests"/"readme" KHONG phai dong tu:
+#: mot cau chi co dong tu DOC (kiem tra, xem, luc, khao sat...) va khong co
+#: dong tu GHI nao thi la viec CHI DOC, du no nhac toi test hay README.
+_Y_DOC = re.compile(
+    r"\b(kiểm tra|kiem tra|check|inspect|xem|đọc|lục|luc|rà soát|ra soat|đánh giá|"
+    r"danh gia|so sánh|so sanh|liệt kê|liet ke|list|tìm|tim|search|scan|khảo sát|"
+    r"khao sat|analy[sz]e|review|audit|investigate|explore|survey|đối chiếu|"
+    r"doi chieu|thống kê|thong ke|báo cáo|bao cao|summari[sz]e|tóm tắt|tom tat|"
+    r"phân tích|phan tich|tìm hiểu|tim hieu|chẩn đoán|chan doan|diagnose)\b", re.I)
+_Y_GHI = re.compile(
+    r"\b(sửa|sua|fix|viết|viet|write|implement|thêm|them|add|tạo|tao|create|"
+    r"cập nhật|cap nhat|update|refactor|xoá|xóa|xoa|delete|remove|commit|deploy|"
+    r"migrate|dọn|don|clean ?up|generate|sinh|chạy test|chay test|run tests?|"
+    r"viết test|viet test|hoàn thiện|hoan thien|hoàn thành|hoan thanh|"
+    r"triển khai|trien khai|rename|đổi tên|doi ten|move|di chuyển|di chuyen|"
+    r"patch|edit|chỉnh|chinh|apply|install|cài|cai)\b", re.I)
+
 #: Loai viec suy ra tu dong tu. Thu tu QUAN TRONG: mau dung truoc thang.
 _LOAI_VIEC: Tuple[Tuple[str, re.Pattern], ...] = (
     ("review", re.compile(
         r"\b(review|audit|kiểm tra lại|kiem tra lai|soát|soat|thẩm định)\b", re.I)),
+    # `testing` can DONG TU quanh chu test ("run tests", "viet test", "test
+    # it") hoac tu chuyen mon (kiem thu, coverage, pytest). Danh tu "tests"
+    # tran ("thu muc tests") khong con la viec testing.
     ("testing", re.compile(
-        r"\b(test|tests|testing|unit test|viết test|viet test|kiểm thử|"
-        r"kiem thu|coverage)\b", re.I)),
+        r"\b(?:(?:run|chạy|chay|write|viết|viet|add|thêm|them|fix|sửa|sua|generate|"
+        r"sinh|làm|lam)\s+(?:the |unit |các |cac |thêm |them |lại |lai )*tests?"
+        r"|test\s+(?:it|this|them|that|these|the|all|again|lại|lai)"
+        r"|unit tests?|testing|kiểm thử|kiem thu|coverage|pytest|unittest)\b", re.I)),
     ("analysis", re.compile(
         r"\b(investigate|analy[sz]e|analysis|research|explore|survey|"
         r"look into|find out|figure out|diagnose|inspect|assess|"
@@ -88,6 +116,11 @@ _LOAI_VIEC: Tuple[Tuple[str, re.Pattern], ...] = (
 
 #: Viec CHI DOC — khong xin `repo_write`, khong can worktree.
 _CHI_DOC = frozenset({"analysis", "review"})
+
+#: Cau nhac toi TRANG THAI GIT (doc): lich su, log, blame, show, rev-parse.
+_GIT_DOC = re.compile(
+    r"\b(git (?:history|log|blame|show|status|diff|rev-parse)|lịch sử git|lich su git|"
+    r"commit history|lịch sử commit|lich su commit|git history)\b", re.I)
 
 #: BA lenh DUY NHAT mot agent do Router quan ly duoc chay, dung tung ky tu.
 #:
@@ -187,7 +220,8 @@ class PlannedTask:
     contract: TaskContract
     envelope: PermissionEnvelope
     dependencies: Tuple[str, ...] = ()
-    resources: Tuple[Tuple[LockKind, str], ...] = ()
+    #: (kind, resource, mode) — mode "read"|"write" (V0.6.1).
+    resources: Tuple[Tuple[LockKind, str, str], ...] = ()
     priority: int = 50
     scope_inferred: bool = False
     note: str = ""
@@ -200,7 +234,7 @@ class PlannedTask:
         return {"task_id": self.task_id, "title": self.title, "kind": self.kind,
                 "objective": self.objective,
                 "dependencies": list(self.dependencies),
-                "resources": [[k.value, r] for k, r in self.resources],
+                "resources": [[k.value, r, m] for k, r, m in self.resources],
                 "permission": self.envelope.decision.value,
                 "scope": list(self.contract.allowed_scope),
                 "scope_inferred": self.scope_inferred,
@@ -351,6 +385,10 @@ class RulePlanner:
 
     @staticmethod
     def loai_viec(s: str) -> str:
+        # Y dinh DOC ma khong co dong tu GHI -> viec chi doc, bat ke danh tu
+        # ("tests", "readme", "docs") xuat hien trong cau. Xem `_Y_DOC`.
+        if _Y_DOC.search(s or "") and not _Y_GHI.search(s or ""):
+            return "review" if _LOAI_VIEC[0][1].search(s) else "analysis"
         for ten, mau in _LOAI_VIEC:
             if mau.search(s):
                 return ten
@@ -369,17 +407,29 @@ class RulePlanner:
             ra.append(p)
         return tuple(dict.fromkeys(ra))
 
-    def tai_nguyen(self, s: str, project: Project,
-                   scope: Sequence[str]) -> Tuple[Tuple[LockKind, str], ...]:
-        """Tài nguyên việc này cần khoá.
+    def tai_nguyen(self, s: str, project: Project, scope: Sequence[str], *,
+                   chi_doc: bool = False, inputs: Sequence[str] = ()
+                   ) -> Tuple[Tuple[LockKind, str, str], ...]:
+        """Tài nguyên việc này cần khoá — kèm CHẾ ĐỘ (V0.6.1).
 
-        Mọi phạm vi GHI đều thành khoá FILESYSTEM — đó là điều kiện đủ để
-        chặn hai agent cùng ghi một thư mục. Tài nguyên khai trong cấu hình
-        dự án được khớp theo TÊN xuất hiện trong câu, và bất kỳ tài nguyên
-        nào có chữ `prod` thành khoá PRODUCTION (không tự thu hồi).
+        Việc GHI: mọi phạm vi ghi thành khoá FILESYSTEM WRITE — điều kiện đủ
+        để chặn hai agent cùng ghi một thư mục. Việc CHỈ ĐỌC: khoá FILESYSTEM
+        READ trên các đường dẫn nó đọc (không nêu đường dẫn → gốc kho `.`), và
+        READ `GIT history` khi câu nhắc tới lịch sử git. Hai khoá READ sống
+        chung; READ chỉ chặn một việc GHI giẫm lên đúng chỗ đang đọc. Tài
+        nguyên khai trong cấu hình dự án được khớp theo TÊN xuất hiện trong
+        câu; tài nguyên có chữ `prod` thành khoá PRODUCTION (WRITE, không tự
+        thu hồi).
         """
-        ra: List[Tuple[LockKind, str]] = [(LockKind.FILESYSTEM, p)
-                                          for p in scope if p]
+        from scripts.control_center.locks import GOC, READ, WRITE
+        ra: List[Tuple[LockKind, str, str]] = []
+        if chi_doc:
+            duong = [p for p in inputs if p] or [GOC]
+            ra += [(LockKind.FILESYSTEM, p, READ) for p in duong]
+            if _GIT_DOC.search(s or ""):
+                ra.append((LockKind.GIT, "history", READ))
+        else:
+            ra += [(LockKind.FILESYSTEM, p, WRITE) for p in scope if p]
         thap = (s or "").lower()
         for r in project.resources:
             ten = str(r).strip()
@@ -398,7 +448,7 @@ class RulePlanner:
             loai = (LockKind.PRODUCTION
                     if ten.lower().startswith("prod")
                     or "production" in ten.lower() else LockKind.SERVICE)
-            ra.append((loai, ten))
+            ra.append((loai, ten, WRITE))
         return tuple(dict.fromkeys(ra))
 
     # -- dung hop dong ------------------------------------------------------
@@ -510,7 +560,9 @@ class RulePlanner:
             kq.tasks.append(PlannedTask(
                 task_id=tid, title=_tieu_de(md.text), objective=muc_tieu,
                 kind=kind, contract=hd, envelope=pb, dependencies=deps,
-                resources=self.tai_nguyen(md.text, project, hd.allowed_scope),
+                resources=self.tai_nguyen(md.text, project, hd.allowed_scope,
+                                          chi_doc=kind in _CHI_DOC,
+                                          inputs=hd.inputs),
                 priority=30 if kind in ("implementation", "testing") else 50,
                 scope_inferred=suy_ra,
                 note=("phạm vi ghi lấy từ `default_write_scope` của dự án, "

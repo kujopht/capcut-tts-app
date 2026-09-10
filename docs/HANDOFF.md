@@ -1337,6 +1337,39 @@ giữ nguyên, bản mới `dist-v061`. Bốn việc, ba báo cáo:
   sức chứa đo từ fabric (trừ Leader), câu trả lời nói đúng "K chạy ngay, N−K
   chờ", con tránh runtime anh em, gộp có nguồn gốc, UI cha/con, trần tự theo
   bể. `docs/reports/MULTI_AGENT_FANOUT_V061.md`.
+* **Khuyết tật nghiệm thu tay #2 — toả đúng số nhưng chạy TUẦN TỰ** ("gọi 4
+  agent gemini 3.8, mỗi agent kiểm tra một phần khác nhau của repo này: 1.
+  README/docs 2. tests 3. source architecture 4. git history"). Nguyên nhân
+  gốc đo từ sổ lần chạy tay, bốn chặng: `loai_viec` xếp câu vào `testing` vì
+  DANH TỪ trần `tests` (→ việc GHI + worktree); phạm vi GHI lấy token đường
+  dẫn duy nhất `README/docs`; `_tao_toa` sao chép khoá mẫu cho CẢ 4 con; khoá
+  không có chế độ nên độc quyền → con 1 giữ, con 2–4 WAITING, chỉ AG02 được
+  dùng. Con [1/4] hỏng `tool_permission_denied` (`read_file` bị tự chối trong
+  worktree) — hệ quả của xếp sai lớp, không phải lỗi đồng thời. Sửa
+  (`MULTI_AGENT_FANOUT_V061.md` §7, luật 12 `CONTROL_CENTER.md` §17): khoá
+  READ/WRITE (`locks.py`, `ResourceLock.mode`, cột `mode` tự nâng; chuỗi cũ =
+  WRITE), giao nhau tất định sau chuẩn hoá + `LockKind.GIT` (`history` đọc ≠
+  `worktree` ghi), bộ phân rã xét Ý ĐỌC trước, tài nguyên THEO TỪNG CON (`READ
+  FS README/docs` · `READ FS tests` · `READ FS .` · `READ GIT history`), cha
+  không khoá và `RUNNING` khi con chạy, song song ĐO bằng khoảng chạy thật
+  (`song_song_toi_da`), UI hiện chế độ/tài nguyên từng con. Hai phát hiện thêm
+  từ nghiệm thu đóng gói: con "git history" chết vì agent headless không chạy
+  được `git log` → Router đọc thay (`nguon_git.git_nhat_ky_doc`, lọc bí mật,
+  quyền agent KHÔNG đổi); khoá con nhả trong `finally` SAU khi cha DONE → nhả
+  ngay khi việc ở trạng thái cuối. Bộ kiểm mới
+  `scripts/tests/test_khoa_doc_ghi_v061.py` (23 bài, fabric giả 4 tài khoản).
+  **Bản EXE: `dist-v0612`** (sha256 `5e6d0ab7…`) vì `dist-v061` đang được MỞ
+  lúc làm (một PID thật + ba `agy` con — `dist-v061` vẫn là bản CŨ, dựng lại
+  bằng `python scripts/build_desktop_exe.py --dist dist-v061 --clean` sau khi
+  đóng app; kiểm tiến trình bằng `MSYS_NO_PATHCONV=1 tasklist /FO CSV | grep`,
+  KHÔNG dùng `tasklist /FI` trong Git Bash — nó bị đổi thành đường dẫn và in
+  rỗng). Nghiệm thu `--kich-ban kiem-tra --max-parallel 4`: 21/22 — 4/4 con
+  DONE trên AG02–AG05 cùng lúc, `song_song_toi_da = 4`, 0 tranh chấp, cha
+  4/4, 0 khoá còn giữ; `--kich-ban ghi`: 20/21 — 2 con GHI cùng tệp tuần tự
+  (con 2 WAITING với sự kiện tranh chấp WRITE, `song_song_toi_da = 1`), cả hai
+  DONE trong worktree cô lập, gốc kho tạm không đổi. Bước hỏng duy nhất ở cả
+  hai: cửa sổ Windows Terminal lúc `agy` sinh (đã biết, §6.2). Production/kho
+  thật bị chạm: 0.
 
 Bộ kiểm mới: 100 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
 provider webapi 3 · toả 22). **Bản EXE cuối: `dist-v061`, build lại SẠCH từ

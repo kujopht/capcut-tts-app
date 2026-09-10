@@ -52,7 +52,8 @@ from scripts.router_v4.scheduler import Demand, Scheduler
 
 from scripts.control_center import leader
 from scripts.control_center.bootstrap import la_kho_git
-from scripts.control_center.locks import LockManager
+from scripts.control_center.locks import (LockManager, chuoi_tai_nguyen,
+                                          doc_chuoi_tai_nguyen)
 from scripts.control_center.model import (LockKind, PermissionClass, Project,
                                           Session, SessionAction, SessionState,
                                           Task, TaskState, TransitionError,
@@ -643,6 +644,11 @@ class ControlCenter:
                         "yeu_cau": yc.to_dict(), "suc_chua": sc.to_dict()}
         for pt in ([] if toa_meta else kh.tasks):
             gated = pt.envelope.gated
+            hd_pt = self._hop_dong_dict(pt, project_id)
+            if any(k is LockKind.GIT for k, _r, _m in pt.resources):
+                # Viec doc lich su git (khong toa): cung mot cach — Router doc
+                # `git log` va dinh vao muc tieu, agent khong can lenh shell.
+                self._kem_nhat_ky_git(ctx.project.repo_path, hd_pt)
             t = Task(
                 task_id=f"{project_id}.{pt.task_id}",
                 project_id=project_id, title=pt.title, objective=pt.objective,
@@ -650,12 +656,12 @@ class ControlCenter:
                 priority=pt.priority,
                 dependencies=tuple(f"{project_id}.{d}"
                                    for d in pt.dependencies),
-                contract=self._hop_dong_dict(pt, project_id),
+                contract=hd_pt,
                 permission=pt.envelope.decision.value,
                 gate_reason=pt.envelope.ly_do(),
                 blocked_reason=(pt.envelope.cau_hoi_cho_nguoi_dung()
                                 if gated else ""),
-                resources=tuple(f"{k.value}:{r}" for k, r in pt.resources))
+                resources=tuple(chuoi_tai_nguyen(k, r, m) for k, r, m in pt.resources))
             self.store.luu_task(t)
             tao.append(t)
             self.store.ghi_su_kien(
@@ -663,7 +669,8 @@ class ControlCenter:
                 level="WARNING" if gated else "INFO",
                 detail=f"{pt.kind}: {pt.title}",
                 meta={"permission": t.permission, "kind": pt.kind,
-                      "scope": list(pt.contract.allowed_scope)})
+                      "scope": list(pt.contract.allowed_scope),
+                      "resources": list(t.resources)})
 
         # Cap dinh kem cho DUNG nhung viec vua sinh ra tu tin nhan nay.
         for aid in dk_hop_le:
@@ -732,7 +739,10 @@ class ControlCenter:
         except Exception:                                   # noqa: BLE001
             muc_tieu_goc = mau.objective
         tieu_de_goc = _tieu_de(goal)
-        cac_con = TOA.chia_con(yc, muc_tieu_goc, tieu_de_goc)
+        chi_doc = not mau.contract.requirements.repo_write
+        cac_con = TOA.chia_con(yc, muc_tieu_goc, tieu_de_goc, chi_doc=chi_doc,
+                               pham_vi_mau=tuple(mau.contract.allowed_scope),
+                               nhac_git=bool(TOA.NHAC_GIT.search(goal or "")))
         con_ids = [f"{project_id}.{tien_to}-{c.chi_so}" for c in cac_con]
         gated = mau.envelope.gated
 
@@ -765,7 +775,21 @@ class ControlCenter:
                     req["pin_model"] = sc.model
                 hd["requirements"] = req
             hd["_toa"] = {"cha": False, "cha_id": ma_cha, "chi_so": c.chi_so,
-                          "so": yc.so_agent, "phan_vung": c.phan_vung}
+                          "so": yc.so_agent, "phan_vung": c.phan_vung,
+                          "che_do": c.che_do, "tai_nguyen": list(c.tai_nguyen)}
+            # Pham vi/tai nguyen THEO TUNG CON, khong sao chep cua viec mau:
+            # bon con doc bon cho khac nhau phai xin bon khoa READ khac nhau
+            # (song chung), khong phai bon lan cung mot khoa WRITE (tuan tu).
+            if chi_doc:
+                hd["inputs"] = list(c.pham_vi)
+            elif c.pham_vi:
+                hd["allowed_scope"] = list(c.pham_vi)
+            # Con "git history": Router doc `git log` thay agent va dinh vao
+            # muc tieu — agent headless khong chay duoc lenh shell (do that:
+            # con nay chet `tool_permission_denied`). Quyen agent KHONG doi.
+            if any((doc_chuoi_tai_nguyen(r) or (None,))[0] is LockKind.GIT
+                   for r in c.tai_nguyen):
+                self._kem_nhat_ky_git(ctx.project.repo_path, hd)
             t = Task(task_id=cid, project_id=project_id, title=c.tieu_de,
                      objective=c.muc_tieu,
                      state=TaskState.BLOCKED if gated else TaskState.QUEUED,
@@ -774,7 +798,7 @@ class ControlCenter:
                      gate_reason=mau.envelope.ly_do(),
                      blocked_reason=(mau.envelope.cau_hoi_cho_nguoi_dung()
                                      if gated else ""),
-                     resources=tuple(f"{k.value}:{r}" for k, r in mau.resources))
+                     resources=tuple(c.tai_nguyen))
             self.store.luu_task(t)
             con_tasks.append(t)
             self.store.ghi_su_kien(
@@ -788,6 +812,37 @@ class ControlCenter:
             detail=TOA.cau_thong_bao(sc, cha_id=ma_cha)[:500],
             meta={"yeu_cau": yc.to_dict(), "suc_chua": sc.to_dict(), "con": con_ids})
         return cha, con_tasks, sc
+
+    #: Dau khoi nhat ky git trong muc tieu — bai kiem va UI nhan ra bang chuoi nay.
+    DAU_NHAT_KY_GIT = "NHẬT KÝ GIT DO ROUTER CUNG CẤP"
+
+    def _kem_nhat_ky_git(self, repo_path: str, hd: Dict) -> bool:
+        """Đính bản tóm tắt `git log` (chỉ đọc, đã lọc bí mật) vào mục tiêu của
+        một việc đọc lịch sử git. Trả `True` nếu có đính.
+
+        VÌ SAO: agent chạy headless bị TỰ CHỐI quyền `command` (không ai để
+        hỏi), nên "lục git history" là việc không thể tự làm — con [4/4] của
+        nghiệm thu toả 2026-09-10 chết `tool_permission_denied` đúng vì thế.
+        Router có sẵn đường đọc git an toàn (`nguon_git`: ba lệnh đọc, tham
+        số cố định, có timeout, không cửa sổ) nên đọc thay và đưa dữ liệu
+        cho agent phân tích. KHÔNG nới quyền của agent, không thêm cờ nào.
+        Không phải kho git / git hỏng -> không đính, việc vẫn chạy như cũ.
+        """
+        try:
+            from scripts.control_center.nguon_git import git_nhat_ky_doc
+            van = git_nhat_ky_doc(Path(repo_path))
+        except Exception:                                   # noqa: BLE001
+            return False
+        if not van:
+            return False
+        hd["objective"] = (
+            (hd.get("objective") or "").rstrip()
+            + f"\n\n{self.DAU_NHAT_KY_GIT} (chỉ đọc). Phân tích NGAY trên dữ liệu "
+              "dưới đây. KHÔNG chạy lệnh git/shell: phiên headless từ chối quyền "
+              "`command` và lượt của bạn sẽ kết thúc rỗng. Cần thêm chi tiết của "
+              "một commit thì nói rõ mã commit trong findings thay vì chạy lệnh.\n"
+            + van)
+        return True
 
     def _khoi_toa(self, project_id: str, text: str) -> str:
         """Khối cho nhắc nhở Leader khi câu có cardinality tường minh — để
@@ -1504,9 +1559,9 @@ class ControlCenter:
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": "hợp đồng hỏng"}
 
-        # (1) khoa tai nguyen
-        xin = [(LockKind(r.split(":", 1)[0]), r.split(":", 1)[1])
-               for r in t.resources if ":" in r]
+        # (1) khoa tai nguyen — kem CHE DO (READ/WRITE, V0.6.1). Dang cu
+        # `FILESYSTEM:web` doc thanh WRITE, khong bao gio noi long cho ghi.
+        xin = [x for x in (doc_chuoi_tai_nguyen(r) for r in t.resources) if x]
         grant = lm.xin(t.project_id, xin, task_id=t.task_id) if xin else None
         if grant is not None and not grant.granted:
             self._sang_waiting(t, grant.reason)
@@ -1601,6 +1656,18 @@ class ControlCenter:
             ctx.fabric.mark_started(s.runtime_id, t.task_id)
         except Exception:                                   # noqa: BLE001
             pass
+        # Con dau tien cua mot lan TOA chay -> viec cha sang RUNNING (no la
+        # vat chua, khong co phien; `recover()` biet dieu do). Bang dieu khien
+        # thay "cha RUNNING, con AG02/AG03/... RUNNING" dung nhu thuc te.
+        if t.parent_id:
+            try:
+                cha = self.store.task(t.parent_id)
+                if cha is not None and cha.state is TaskState.WAITING and \
+                        ((cha.contract or {}).get("_toa") or {}).get("cha"):
+                    self.store.doi_trang_thai(cha.task_id, TaskState.RUNNING, force=True,
+                                              reason="việc con đầu tiên bắt đầu chạy")
+            except Exception:                               # noqa: BLE001
+                pass
 
         luong = threading.Thread(
             target=self._chay, name=f"cc-{t.task_id}", daemon=True,
@@ -2207,6 +2274,7 @@ class ControlCenter:
         t0 = time.time()
         kq: Optional[ExecutionResult] = None
         lm = LockManager(self.store)
+        da_nha_khoa = False          # khoa da nha som (sau trang thai cuoi)?
         nhip = threading.Event()
 
         def _dap_nhip() -> None:
@@ -2305,10 +2373,15 @@ class ControlCenter:
             # Mot viec khong can git thi khong duoc phep chet vi git.
             base = (ctx.worktrees.base_sha()
                     if hd.execution.worktree_required else "")
+            t_chay0 = time.time()
             kq = ctx.executor.run(
                 hd, p, base_sha=base,
                 attempt=max(1, (self.store.task(task_id) or Task(
                     task_id, "", "", "")).attempts))
+            # KHOANG CHAY THAT cua luot agent (V0.6.1): de do song song thuc
+            # su giua cac con — khong suy tu trang thai RUNNING trong so.
+            khoang_chay = {"bat_dau": t_chay0, "ket_thuc": time.time(),
+                           "runtime": p.runtime_id, "model": p.model_id}
 
             pb = kq.envelope
             pid = dao_pid(ctx.executor._cache.get(p.key))
@@ -2328,7 +2401,9 @@ class ControlCenter:
             # UPDATE HEP, khong phai doc-sua-ghi. Xem `store.ghi_ket_qua`:
             # `luu_task` ghi ca cot `state`, nen luu mot doi tuong doc tu
             # TRUOC luot agent se nuot mat mot lenh `pause` nguoi dung vua bam.
-            self.store.ghi_ket_qua(task_id, result=kq.to_dict(),
+            kq_dict = kq.to_dict()
+            kq_dict["khoang_chay"] = khoang_chay
+            self.store.ghi_ket_qua(task_id, result=kq_dict,
                                    worktree=kq.worktree, branch=kq.branch)
 
             ly_do = pb.failure_reason or ""
@@ -2351,6 +2426,19 @@ class ControlCenter:
                       "placement": p.key, "duration": round(pb.duration, 2),
                       "fail_sig": self._chu_ky_hong(pb)})
             ctx.sessions.ket_thuc_viec(session_id, task_id, ok=kq.ok, pid=pid)
+            # NHA KHOA NGAY KHI VIEC DA O TRANG THAI CUOI — truoc khi thu lai,
+            # truoc khi bao chat, truoc khi gop vao cha. Hai ly do do that:
+            #   * Toa: `_tong_hop_toa` chay TRONG luong cua con cuoi, nen neu
+            #     chi nha o `finally` thi cha DONE truoc khi khoa cua con nha
+            #     vai ms — bang dieu khien/nghiem thu thay "cha xong ma khoa
+            #     con giu" (do 2026-09-10: khoa READ `.` cua con [3/4]).
+            #   * Thu lai: `_thu_lai_neu_dang` xep lai viec trong khi luong nay
+            #     con giu khoa; luot sau xin lai (cung chu -> duoc), roi
+            #     `finally` cua luong nay nha SACH — ke ca khoa luot sau vua
+            #     xin. Nha truoc thi khong con cua so do.
+            # `tra()` idempotent; `finally` chi nha lai neu chua nha o day.
+            lm.tra(ctx.project.project_id, task_id)
+            da_nha_khoa = True
             if moi is TaskState.FAILED:
                 self._thu_lai_neu_dang(ctx, task_id, pb, session_id,
                                        placement_key=p.key)
@@ -2408,7 +2496,8 @@ class ControlCenter:
             except Exception:                             # noqa: BLE001
                 pass
             ctx.leases.release(khoa_lease, self.owner)
-            lm.tra(ctx.project.project_id, task_id)
+            if not da_nha_khoa:
+                lm.tra(ctx.project.project_id, task_id)
             with self._khoa:
                 self._dang_chay.pop(task_id, None)
 
@@ -2621,6 +2710,15 @@ class ControlCenter:
                 # no song sot duoc vi phep kiem hoi sai cau hoi.
                 if t.task_id in dang_thue:
                     continue                  # tien trinh khac dang chay
+                if ((t.contract or {}).get("_toa") or {}).get("cha"):
+                    # Viec CHA cua mot lan toa: vat chua, khong co phien theo
+                    # thiet ke — khong phai mo coi. Neu moi con da ket thuc
+                    # trong luc app tat thi gop luon.
+                    try:
+                        self._tong_hop_toa(ctx, t.task_id)
+                    except Exception:                       # noqa: BLE001
+                        pass
+                    continue
                 s = (self.store.session(t.owner_session)
                      if t.owner_session else None)
                 if s is not None and s.state.alive and \

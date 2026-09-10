@@ -268,7 +268,9 @@ class TestToaEngine(_Nen):
         self.assertIn("không có trong fabric", kq["reply"])
         # Va van giao duoc: provider antigravity co 4 khe trong fabric gia.
         self.cc.tick()
-        self.assertEqual(len(self.cc.store.tasks("demo", states=(TaskState.RUNNING,))), 4)
+        # Chi dem CON: tu V0.6.1 cha cung RUNNING khi con dau tien duoc nhan.
+        self.assertEqual(len([t for t in self.cc.store.tasks("demo", states=(TaskState.RUNNING,))
+                              if t.parent_id]), 4)
         self.assertTrue(_chay_toi_xong(self.cc, cha[0].task_id))
 
     def test_giao_nhieu_tai_khoan_va_tong_hop(self):
@@ -277,8 +279,10 @@ class TestToaEngine(_Nen):
         self.cc.chat("demo", CAU_4)
         cha, con = self._cha_con()
         self.cc.tick()
-        dang = [t for t in self.cc.store.tasks("demo", states=(TaskState.RUNNING,))]
+        dang = [t for t in self.cc.store.tasks("demo", states=(TaskState.RUNNING,)) if t.parent_id]
         self.assertEqual(len(dang), 4, "4 khe, 4 con -> 4 chạy ngay")
+        self.assertEqual(self.cc.store.task(cha[0].task_id).state, TaskState.RUNNING,
+                         "cha RUNNING (bọc) trong khi con chạy")
         rts = {self.cc.store.session(t.owner_session).runtime_id for t in dang}
         self.assertEqual(rts, {"RT01", "RT02"}, "trải trên HAI tài khoản, mỗi cái 2 khe")
         self.assertTrue(_chay_toi_xong(self.cc, cha[0].task_id))
@@ -328,7 +332,7 @@ class TestToaEngine(_Nen):
         self.assertIn("Leader đang chiếm 1 chỗ ở RT01", kq["reply"])
         cha, con = self._cha_con()
         self.cc.tick()
-        dang = self.cc.store.tasks("demo", states=(TaskState.RUNNING,))
+        dang = [t for t in self.cc.store.tasks("demo", states=(TaskState.RUNNING,)) if t.parent_id]
         self.assertEqual(len(dang), 3)
         tren_rt01 = [t for t in dang if self.cc.store.session(t.owner_session).runtime_id == "RT01"]
         self.assertLessEqual(len(tren_rt01), 1, "RT01 còn đúng 1 khe cho worker")

@@ -148,3 +148,190 @@ Sửa (`web/app.js`): `wsDuAn` theo dõi dự án của kết nối; chọn dự
 nối cũ có chủ ý (không tự nối lại) → mở kết nối mới; gói `state` có
 `selected` khác dự án đang chọn bị bỏ qua. Bài kiểm nguồn
 `TestUIToa.test_websocket_theo_du_an_dang_chon` khoá ba điều đó.
+
+## 7. Khuyết tật nghiệm thu tay #2 — toả đúng số nhưng chạy TUẦN TỰ vì khoá tài nguyên
+
+Câu thật (2026-09-10, bản `dist-v061` sha `d0c04e92…`):
+
+```
+gọi 4 agent gemini 3.8, mỗi agent kiểm tra một phần khác nhau của repo này:
+1. README/docs
+2. tests
+3. source architecture
+4. git history
+không được trùng phạm vi nhau
+```
+
+Quan sát: 1 cha + 4 con được tạo đúng, nhưng chỉ MỘT con chạy; ba con còn lại
+`WAITING` với lý do "tranh chấp với khoá `FILESYSTEM · readme/docs` do việc
+`…-1` đang giữ"; con [1/4] `FAILED`. `max_parallel` lúc đó là 12, sự kiện
+`TOA_SPLIT` ghi 9 khe rỗi — trần song song **không** phải giới hạn.
+
+### 7.1 Nguyên nhân gốc — đọc từ sổ `control.db` của lần chạy tay (chỉ đọc)
+
+Chuỗi hỏng đi qua **bốn** chặng, chặng nào cũng cần thiết:
+
+| Chặng | Điều đã xảy ra | Bằng chứng |
+|---|---|---|
+| Phân loại việc (`planner.loai_viec`) | Câu bị xếp `testing` vì mẫu cũ khớp DANH TỪ trần `tests` (mục 2 của danh sách). `testing` là lớp GHI: `repo_write=True`, `worktree_required=True`. | `contract.requirements.repo_write = true`, `execution.worktree_required = true` trong cả 4 con |
+| Phạm vi (`planner.tai_nguyen`) | Lớp GHI lấy `allowed_scope` từ token giống đường dẫn duy nhất trong câu → `['README/docs']`; sinh **một** khoá `FILESYSTEM:README/docs`. | `resources = ["FILESYSTEM:README/docs"]` |
+| Toả (`engine._tao_toa`) | Sao chép `resources` của MẪU vào **cả bốn** con — con "tests", con "source architecture", con "git history" đều xin khoá `readme/docs`. | 4 con cùng `resources`, 4 hợp đồng cùng `allowed_scope` |
+| Khoá (`locks.py`) | Khoá không có CHẾ ĐỘ: mọi khoá đều độc quyền. Con 1 giữ → con 2–4 `WAITING`. Khi con 1 kết thúc, con 2 nhận khoá, con 3–4 vẫn chờ. | `LOCK_ACQUIRED` một lần, ba `TASK_WAITING "tranh chấp…"` |
+
+Hậu quả kéo theo: vì tuần tự nên bộ lập lịch chỉ dùng **AG02** (rồi AG03 khi
+con 2 được giao lại) — REUSE theo phạm vi, không có anh em nào chạy cùng lúc
+để "tránh runtime anh em" phát huy. Cha KHÔNG giữ khoá nào (`resources: []`) —
+đã kiểm tường minh.
+
+**Con [1/4] hỏng vì sao:** `failure_reason = tool_permission_denied`; stderr
+của `agy`: *"a tool required the `read_file` permission that headless mode
+cannot prompt for, so it was auto-denied"*. Con chạy trong worktree
+`.router/worktrees/AG02/…` (vì bị coi là việc GHI). Đây **không** phải lỗi
+đồng thời; nó là hệ quả trực tiếp của việc xếp sai lớp: một việc chỉ đọc bị
+đẩy vào đường GHI (worktree + phong bì quyền GHI) mà nó không cần. Con 2 chạy
+lại thì hỏng `gate_diff` ("báo ok cho một việc CÓ GHI nhưng không tệp nào
+đổi") — cũng cùng gốc: việc đọc bị đo bằng thước của việc ghi. Không tự động
+"cho qua" lỗi nào; sửa gốc là xếp lớp đúng.
+
+### 7.2 Sửa — không tắt khoá, không nới an toàn GHI
+
+1. **Khoá có chế độ READ/WRITE** (`locks.py`, `model.ResourceLock.mode`, cột
+   `locks.mode` tự nâng cho sổ cũ). Ma trận: READ+READ sống chung (mỗi người
+   đọc một hàng `…#r:<task>`); READ+WRITE giao nhau tranh chấp (cả hai
+   chiều); WRITE+WRITE giao nhau tranh chấp; không giao nhau thì song song.
+   Chuỗi cũ `FILESYSTEM:x` không chế độ = WRITE (không nới gì cho dữ liệu cũ).
+2. **Phạm vi chính xác, giao nhau tất định** (`locks.chuan_hoa/xung_dot`):
+   `docs/`, `docs/**`, `Docs\sub` → `docs`, `docs/sub`; gốc kho `.`/`*` giao
+   với mọi đường dẫn; giao nhau theo ĐOẠN (`web/admin` ≠ `web/administration`);
+   tệp là một đường dẫn (`web/index.txt` giao `web`). Lớp mới `LockKind.GIT`:
+   `history` (đọc: log/show/blame/status/diff/rev-parse) tách khỏi `worktree`
+   (ghi); `*` giao mọi trạng thái git. Đọc lịch sử git **không** giữ khoá hệ tệp.
+3. **Phân loại đọc trước khi phân loại lớp** (`planner._Y_DOC/_Y_GHI`): có ý
+   đọc (kiểm tra/xem/lục/review/audit/…) mà không có động từ GHI → `analysis`/
+   `review` (chỉ đọc, không worktree, khoá READ). Mẫu `testing` chỉ còn khớp
+   ĐỘNG TỪ quanh "test" hoặc từ chuyên môn — danh từ `tests` trần không còn là
+   việc testing. Có động từ GHI thì vẫn là lớp GHI như cũ (bài kiểm khoá lại).
+4. **Tài nguyên theo TỪNG con** (`toa.chia_con`): đọc danh sách nhiều dòng
+   `1. … 2. …`, mỗi mục một con; mục có đường dẫn → `READ FILESYSTEM <đường>`,
+   mục không đường dẫn → `READ FILESYSTEM .`, mục "git history" → `READ GIT
+   history` **duy nhất**. Việc GHI: `WRITE FILESYSTEM <đường của mục>` hay
+   phạm vi mẫu — vẫn tuần tự khi trùng chỗ. Mỗi con nhận dòng "Tài nguyên/phạm
+   vi của bạn: …" trong mục tiêu.
+5. **Cha là hộp chứa**: không xin khoá, không chiếm khe, chuyển `RUNNING` khi
+   con đầu tiên được nhận (trước đó cha `WAITING` trong khi con chạy — sai về
+   nghĩa), `recover()` không coi cha là mồ côi.
+6. **Đo song song THẬT**: mỗi con ghi `khoang_chay {bat_dau, ket_thuc,
+   runtime, model}` đúng lúc `executor.run` bắt đầu/kết thúc; tổng hợp của cha
+   tính `song_song_toi_da` bằng quét mốc (sweep-line) — con số này là "số
+   khoảng chạy giao nhau nhiều nhất", không phải đếm trạng thái `RUNNING`.
+7. **UI**: hàng con hiện `· AG0x · READ docs, READ git:history`; chi tiết cha
+   hiện "song song thực đo tối đa k/N".
+8. **Con "git history" nhận NHẬT KÝ GIT do Router đọc** (`nguon_git.
+   git_nhat_ky_doc` → `engine._kem_nhat_ky_git`). Lần chạy đóng gói đầu
+   (§7.5, lần 1) cho thấy: ba con đọc tệp xong, riêng con [4/4] chết
+   `tool_permission_denied` — agent headless bị TỰ CHỐI quyền `command`
+   (không ai để hỏi) nên không có cách nào tự `git log`. Router có sẵn đường
+   đọc git an toàn (ba lệnh đọc, tham số cố định, timeout, không cửa sổ) nên
+   đọc thay: nhánh, tổng số commit, 80 commit mới nhất (mã · ngày · tác giả ·
+   tiêu đề), cắt ở 6 000 ký tự, **lọc bí mật** (`memory.bi_mat.loc`) trước
+   khi vào payload việc. Quyền của agent KHÔNG đổi, không thêm cờ nào; kho
+   không phải git → không đính, việc chạy như cũ. Cùng cách cho việc đọc git
+   không toả (đường planner).
+9. **Nhả khoá ngay khi việc ở trạng thái cuối**, trước thử lại / báo chat /
+   gộp cha — không đợi `finally` của luồng. Lần chạy đóng gói đầu bắt được
+   "cha DONE mà khoá READ `.` của con [3/4] còn giữ": `_tong_hop_toa` chạy
+   TRONG luồng của con cuối, vài ms trước `finally`. Nhả sớm cũng đóng một
+   cửa sổ cũ: `_thu_lai_neu_dang` xếp lại việc trong khi luồng còn giữ khoá,
+   lượt sau xin lại (cùng chủ → được), rồi `finally` nhả sạch — kể cả khoá
+   lượt sau. Bài kiểm bọc `_tong_hop_toa` và khẳng định mọi con đã ở trạng
+   thái cuối đều KHÔNG còn khoá tại thời điểm gộp.
+
+### 7.3 Bốn con của câu thật sinh ra gì (đo bằng bài kiểm, không phải mô tả)
+
+| Con | Lớp | Tài nguyên | Chế độ | Worktree |
+|---|---|---|---|---|
+| [1/4] README/docs | analysis | `READ:FILESYSTEM:README/docs` | READ | không |
+| [2/4] tests | analysis | `READ:FILESYSTEM:tests` | READ | không |
+| [3/4] source architecture | analysis | `READ:FILESYSTEM:.` (không có đường dẫn → gốc kho, chỉ đọc) | READ | không |
+| [4/4] git history | analysis | `READ:GIT:history` | READ | không |
+
+Cha: `resources = ()`. Bốn khoá READ cùng sống trong sổ, `0` sự kiện tranh chấp.
+
+### 7.4 Bộ kiểm mới — `scripts/tests/test_khoa_doc_ghi_v061.py`
+
+Fabric giả **4 runtime × 1 khe, 4 tài khoản** (để "bốn tài khoản phân biệt
+cùng lúc" là điều đo được):
+
+* `TestKhoaDocGhi` (10): READ+READ cùng chỗ; READ+WRITE giao nhau hai chiều;
+  WRITE+WRITE giao/không giao; gốc kho giao mọi đường dẫn; chuẩn hoá phạm vi;
+  git đọc không giữ khoá hệ tệp và không giao `worktree`; chuỗi cũ = WRITE;
+  cùng tài nguyên xin cả READ và WRITE thì giữ WRITE; trả/reclaim không rò
+  khoá READ; sổ cũ được nâng cột `mode`.
+* `TestPhanLoaiDoc` (4): câu thật → chỉ đọc, không worktree, mọi khoá READ;
+  danh từ `tests`/`README` không thành việc ghi; động từ GHI không bao giờ rơi
+  về lớp chỉ đọc; việc ghi khoá WRITE, việc đọc git khoá GIT.
+* `TestToaTaiNguyenCon` (3): danh sách nhiều dòng → 4 phân vùng, 4 tài nguyên
+  riêng; con GHI giữ WRITE theo đường dẫn riêng; `song_song_toi_da` quét mốc.
+* `TestBonConDocSongSong` (4): **4 con chỉ đọc chạy đồng thời trên RT01–RT04**,
+  cha `RUNNING`, 4 khoá READ, 0 tranh chấp, `song_song_toi_da == 4` từ khoảng
+  chạy thật, không rò khoá, không `RUNNING/WAITING` tồn; **2 con GHI cùng tệp
+  vẫn tuần tự** (1 chạy + 1 chờ với sự kiện tranh chấp WRITE, `song_song_toi_da
+  == 1`); một con hỏng không rò khoá và anh em vẫn song song; `recover()` không
+  coi cha là mồ côi.
+
+Các bài cũ về an toàn đồng thời giữ nguyên (`test_control_center_core` chỉ
+đổi hình dạng bộ ba `(kind, resource, mode)`; `test_toa_v061` đếm CON khi cha
+cũng `RUNNING`).
+
+### 7.5 Nghiệm thu bản EXE đóng gói — `dist-v0612`
+
+Bản `dist-v061` **đang được người vận hành mở** lúc làm việc này (PID thật,
+ba `agy` con — kiểm bằng ảnh chụp tiến trình, không phải `tasklist /FI`, vốn
+bị Git Bash đổi `/FI` thành đường dẫn và in rỗng), nên bản mới dựng vào
+`dist-v0612` (`build_desktop_exe.py --dist dist-v0612 --clean`); `dist-v061`
+vẫn là bản CŨ cho tới khi app đóng và dựng lại. Harness:
+`control_center_v061_toa_acceptance.py --kich-ban kiem-tra|ghi --max-parallel 4`
+(kịch bản `kiem-tra` = câu NGUYÊN VĂN ở đầu §7; `ghi` = 2 agent thêm một dòng
+vào CÙNG một tệp `docs/ghi_chu_nghiem_thu.md` trên kho tạm).
+
+**Lần 1 (`kiem-tra`, sha `e6ef4afe…`) — 19/22**, và hai bước hỏng là hai
+phát hiện thật:
+
+| Bước | Kết quả | Vì sao |
+|---|---|---|
+| 2e · 4 tài nguyên READ riêng, không worktree | ĐẠT | `READ:FILESYSTEM:README/docs` · `READ:FILESYSTEM:tests` · `READ:FILESYSTEM:.` · `READ:GIT:history` |
+| 3 · nhiều tài khoản AG thật | ĐẠT | AG02, AG03, AG04, AG05 — cùng lúc 4 |
+| 3d/3e/3f · cha RUNNING, 0 tranh chấp, 4 chạy cùng lúc | ĐẠT | |
+| 5e · khoảng chạy thật giao nhau | ĐẠT | `song_song_toi_da = 4`; bốn khoảng đều bắt đầu 17:56:33 |
+| 5d · không con hỏng | **HỎNG** | con [4/4] git history `tool_permission_denied` — agent headless không được chạy `git log` (§7.2 mục 8) |
+| 5f · không rò khoá | **HỎNG** | `FILESYSTEM . read` của con [3/4] còn giữ đúng lúc cha DONE — `_tong_hop_toa` chạy trước `finally` của luồng con (§7.2 mục 9) |
+| 6 · cửa sổ console | HỎNG | 5 cửa sổ `WindowsTerminal.exe` (chủ `svchost`) lúc `agy` sinh — vấn đề đã biết từ §6.2, không do Router |
+
+**Lần 2 (`kiem-tra`, dựng lại sạch, sha `5e6d0ab7…`) — 21/22**: 4/4 con
+DONE (con git history trả "commit 225b012 … commit duy nhất trên nhánh
+main" — đọc từ nhật ký Router đính), AG02–AG05 cùng lúc, `song_song_toi_da =
+4` (bốn khoảng 18:16:39 → 18:17:13/18:18:04/18:17:22/18:17:13), 0 tranh chấp,
+cha RUNNING → DONE 4/4, **0 khoá còn giữ** (đo sau khi cha DONE), kho tạm
+sạch trước/sau. Bước duy nhất còn hỏng là 6 (cửa sổ Windows Terminal, như
+trên). Sổ của lần chạy giữ ở `%TEMP%\cc-desk-acc-3uuwoguo\.router\…`.
+
+**Kịch bản `ghi` (2 con GHI cùng tệp) — khoá WRITE độc quyền còn nguyên:**
+con 1 `LOCK_ACQUIRED … (WRITE)` 18:19:14; con 2 `QUEUED → WAITING (… tranh
+chấp với khoá FILESYSTEM 'docs/ghi_chu_nghiem_thu.md' (WRITE) do việc …-1
+đang giữ)`; con 2 chỉ nhận khoá lúc 18:20:23, MỘT giây sau `LOCK_RELEASED`
+của con 1; không lúc nào 2 con cùng RUNNING; `song_song_toi_da = 1`; cả hai
+DONE; tệp trong worktree cô lập `.router/worktrees/AG02/…` có ĐỦ hai dòng
+(Agent 1 rồi Agent 2), tệp ở gốc kho tạm KHÔNG đổi; không khoá còn giữ. Con
+2 DÙNG LẠI phiên/worktree của con 1 (REUSE theo phạm vi — đúng, vì tuần tự);
+hai bước "nhiều tài khoản"/"nhiều hàng Agents" của harness viết cho kịch bản
+song song đã được ghi đúng nghĩa cho kịch bản tuần tự; lần chạy lại
+(`%TEMP%\cc-desk-acc-9pwv5p7q`) **20/21**, bước hỏng duy nhất là 6 (một cửa
+sổ Windows Terminal lúc `agy` sinh — lần chạy trước đó 0 vi phạm, nên đây là
+chuyện ngẫu nhiên ở phía `agy`/Windows Terminal, không phải Router). Quan sát phụ, không
+thuộc khuyết tật này: agent không khai `changes`, engine đối soát đĩa
+(`UNDERDECLARED_CHANGES`, 1 tệp trong phạm vi) rồi DONE — phong bì vẫn mang
+`failure_reason=gate_diff`, chỉ là nhãn.
+
+**Số lần đụng vào production / kho thật: 0** — mọi việc chạy trên kho git
+tạm của harness; việc đọc không đổi gì (bước 8 sạch trước/sau), việc ghi chỉ
+đổi tệp trong worktree cô lập của kho tạm.

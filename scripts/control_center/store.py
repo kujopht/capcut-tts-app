@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS locks (
     holder_session TEXT NOT NULL DEFAULT '',
     acquired_at    REAL NOT NULL,
     expires_at     REAL NOT NULL DEFAULT 0,
-    note           TEXT NOT NULL DEFAULT ''
+    note           TEXT NOT NULL DEFAULT '',
+    mode           TEXT NOT NULL DEFAULT 'write'
 );
 CREATE TABLE IF NOT EXISTS lock_waiters (
     lock_id   TEXT NOT NULL,
@@ -237,6 +238,13 @@ class ControlStore:
         self._nguoi_theo: List[Any] = []
         with self._c() as c:
             c.executescript(SCHEMA)
+            # V0.6.1 — so cu (V0.1..V0.6) chua co cot `mode` cua khoa. Them
+            # bang ALTER co canh `table_info`: idempotent, an toan neu chet
+            # giua chung (cung khuon voi `memory/kho.py`).
+            co = {r[1] for r in c.execute("PRAGMA table_info(locks)")}
+            if "mode" not in co:
+                c.execute("ALTER TABLE locks ADD COLUMN mode TEXT NOT NULL "
+                          "DEFAULT 'write'")
 
     def dang_ky_nguoi_theo(self, cb) -> None:
         if cb not in self._nguoi_theo:
@@ -735,19 +743,20 @@ class ControlStore:
         curr = time.time() if now is None else now
         cur = self._c().execute(
             "INSERT INTO locks (lock_id, project_id, kind, resource, "
-            "holder_task, holder_session, acquired_at, expires_at, note) "
-            "VALUES (?,?,?,?,?,?,?,?,?) "
+            "holder_task, holder_session, acquired_at, expires_at, note, mode) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(lock_id) DO UPDATE SET "
             "  holder_task=excluded.holder_task, "
             "  holder_session=excluded.holder_session, "
             "  acquired_at=excluded.acquired_at, "
-            "  expires_at=excluded.expires_at, note=excluded.note "
+            "  expires_at=excluded.expires_at, note=excluded.note, "
+            "  mode=excluded.mode "
             "WHERE (locks.kind <> 'PRODUCTION' AND locks.expires_at <> 0 "
             "       AND locks.expires_at <= ?) "
             "   OR locks.holder_task = ?",
             (l.lock_id, l.project_id, l.kind.value, l.resource, l.holder_task,
              l.holder_session, l.acquired_at, l.expires_at, l.note[:300],
-             curr, l.holder_task))
+             l.mode or "write", curr, l.holder_task))
         return cur.rowcount == 1
 
     def locks(self, project_id: str = "") -> List[ResourceLock]:
@@ -762,7 +771,9 @@ class ControlStore:
             kind=LockKind(h["kind"]), resource=h["resource"],
             holder_task=h["holder_task"], holder_session=h["holder_session"],
             acquired_at=h["acquired_at"], expires_at=h["expires_at"],
-            note=h["note"]) for h in hs]
+            note=h["note"],
+            mode=(h["mode"] if "mode" in h.keys() and h["mode"] else "write"))
+            for h in hs]
 
     def xoa_lock(self, lock_id: str, *, holder_task: str = "") -> bool:
         if holder_task:

@@ -44,6 +44,16 @@ def _cau(so: int) -> str:
 
 #: Cau NGUYEN VAN cua nguoi dung o nghiem thu tay (kich ban `--kich-ban fanfic`).
 CAU_FANFIC = "gọi 8 agent gemini 3.8 và phân mỗi đứa đi lục cho t 1 bộ fanfic audio"
+#: Cau NGUYEN VAN cua khuyet tat #2 (kich ban `--kich-ban kiem-tra`): bon con
+#: CHI DOC bon pham vi khac nhau — phai chay DONG THOI, khoa READ song chung.
+CAU_KIEM_TRA = ("gọi 4 agent gemini 3.8, mỗi agent kiểm tra một phần khác nhau của repo này:\n"
+                "1. README/docs\n2. tests\n3. source architecture\n4. git history\n"
+                "không được trùng phạm vi nhau")
+#: Kich ban GHI (`--kich-ban ghi`): hai con sua CUNG mot tep -> phai TUAN TU
+#: (khoa WRITE doc quyen khong duoc noi). Tep nam trong kho tam; agent ghi
+#: trong worktree co lap — goc kho tam khong doi.
+CAU_GHI = ("gọi 2 agent gemini 3.8, mỗi agent thêm đúng một dòng ghi chú mới vào cuối tệp "
+           "docs/ghi_chu_nghiem_thu.md (dòng có số thứ tự agent của mình), không sửa gì khác.")
 
 
 def _gieo_fanfic_audio(goc: Path, so_bo: int = 12) -> None:
@@ -99,22 +109,31 @@ def main(argv=None) -> int:
     ap.add_argument("--max-parallel", type=int, default=3,
                     help="trần song song truyền cho EXE (nhỏ hơn --so để có con phải chờ)")
     ap.add_argument("--keep", action="store_true")
-    ap.add_argument("--kich-ban", default="dong", choices=("dong", "fanfic"),
+    ap.add_argument("--kich-ban", default="dong", choices=("dong", "fanfic", "kiem-tra", "ghi"),
                     help=("`dong`: mỗi agent trả một dòng (mặc định); `fanfic`: câu "
-                          "NGUYÊN VĂN của người dùng trên kho tạm có 12 bộ fanfic audio "
-                          "tổng hợp — --so bị đặt 8 theo câu"))
+                          "NGUYÊN VĂN 8 agent trên kho tạm có 12 bộ fanfic audio tổng hợp; "
+                          "`kiem-tra`: câu NGUYÊN VĂN khuyết tật #2 — 4 con CHỈ ĐỌC 4 phạm "
+                          "vi (phải song song); `ghi`: 2 con GHI cùng một tệp (phải tuần tự)"))
     a = ap.parse_args(argv)
     kich_ban = a.kich_ban
-    so = 8 if kich_ban == "fanfic" else int(a.so)
+    so = {"fanfic": 8, "kiem-tra": 4, "ghi": 2}.get(kich_ban, int(a.so))
     mp = int(a.max_parallel)
     chay_ngay = min(so, mp)
-    cau = CAU_FANFIC if kich_ban == "fanfic" else _cau(so)
+    if kich_ban == "ghi":
+        chay_ngay = min(chay_ngay, 1)          # GHI cung tep: bao lap lich chi cho 1 chay
+    cau = {"fanfic": CAU_FANFIC, "kiem-tra": CAU_KIEM_TRA, "ghi": CAU_GHI}.get(kich_ban) or _cau(so)
 
     bd = Bang()
     goc = kho_git_tam()
     _gieo(goc)
     if kich_ban == "fanfic":
         _gieo_fanfic_audio(goc)
+    if kich_ban == "ghi":
+        import subprocess
+        (goc / "docs" / "ghi_chu_nghiem_thu.md").write_text("# Ghi chú nghiệm thu\n",
+                                                           encoding="utf-8")
+        for c in (["git", "add", "-A"], ["git", "commit", "-q", "-m", "gieo tep ghi chu"]):
+            subprocess.run(c, cwd=goc, check=True, capture_output=True)
     dau_git = _git_sach(goc)
     p_exe = Path(a.exe)
     if not p_exe.is_absolute():
@@ -163,12 +182,28 @@ def main(argv=None) -> int:
         tin_dg = [m for m in (st.get("chat") or [])
                   if (m.get("meta") or {}).get("loai") == "delegation"]
         tll = (tin_dg[-1].get("text") if tin_dg else tl) or ""
-        mong = (f"{chay_ngay}/{so} worker slots khả dụng" if chay_ngay < so
+        k_slot = min(so, mp)                    # suc chua theo KHE (khoa khong tinh o day)
+        mong = (f"{k_slot}/{so} worker slots khả dụng" if k_slot < so
                 else f"dispatch {so} worker song song")
         bd.ghi("2c. câu trả lời nói đúng số: tách N việc + K chạy ngay / N−K chờ",
                f"Đã tách thành {so} tác vụ" in tll and mong in tll
-               and (chay_ngay >= so or f"{so - chay_ngay} chờ slot" in tll),
+               and (k_slot >= so or f"{so - k_slot} chờ slot" in tll),
                " ".join(tll.split())[:420])
+        # Tai nguyen + che do cua tung con — de loi khoa doc ra ngay tren bang.
+        tn = {t["task_id"]: list(t.get("resources") or []) for t in con}
+        moi_doc = all(all(str(r).upper().startswith("READ:") for r in v) and v for v in tn.values())
+        moi_ghi = all(all(str(r).upper().startswith("WRITE:") for r in v) and v for v in tn.values())
+        rieng = len({tuple(v) for v in tn.values()})
+        if kich_ban == "kiem-tra":
+            bd.ghi("2e. 4 con CHỈ ĐỌC: 4 tài nguyên READ riêng (docs/tests/gốc/git-history), không worktree",
+                   moi_doc and rieng == 4
+                   and all(not ((t.get("contract") or {}).get("execution") or {}).get("worktree_required")
+                           for t in con),
+                   " | ".join(f"[{((t.get('contract') or {}).get('_toa') or {}).get('chi_so')}] "
+                              + ", ".join(tn[t['task_id']]) for t in con))
+        elif kich_ban == "ghi":
+            bd.ghi("2e. 2 con GHI cùng một tệp: cùng một khoá WRITE", moi_ghi and rieng == 1,
+                   " | ".join(", ".join(v) for v in tn.values()))
         bd.ghi("2d. không dùng 'MAX' thay cho số agent", "MAX" not in tll.split("Đã tách")[0].upper()
                or f"{so} " in tll, "")
 
@@ -181,11 +216,15 @@ def main(argv=None) -> int:
         nhieu_nhat = 0
         rts_thay = set()
         cho_thay = False
+        cha_running_thay = False
         het = time.time() + 150
         while time.time() < het:
             s, ts2 = _dang()
             dang = [t for t in ts2 if t["state"] == "RUNNING"]
             cho = [t for t in ts2 if t["state"] in ("QUEUED", "WAITING")]
+            if any(t["task_id"] == cha[0]["task_id"] and t["state"] == "RUNNING"
+                   for t in (s.get("tasks") or [])):
+                cha_running_thay = True
             ss = {x["session_id"]: x for x in (s.get("sessions") or [])}
             for t in dang:
                 sx = ss.get(t.get("owner_session") or "")
@@ -199,14 +238,35 @@ def main(argv=None) -> int:
             if all(t["state"] in ("DONE", "FAILED") for t in ts2):
                 break
             time.sleep(1.0)
-        bd.ghi("3. >1 tài khoản AG THẬT được chọn cho các con",
-               len(rts_thay) >= 2 and all(r.startswith("AG") for r in rts_thay),
-               f"runtime thấy={sorted(rts_thay)} · đang chạy nhiều nhất={nhieu_nhat}")
+        if kich_ban == "ghi":
+            # GHI cung tep -> tuan tu; con thu hai DUNG LAI phien ranh cua con
+            # thu nhat (REUSE theo pham vi) la dung, khong phai loi — "nhieu
+            # tai khoan" la thuoc do cua kich ban SONG SONG.
+            bd.ghi("3. tài khoản AG THẬT được chọn (tuần tự → dùng lại 1 phiên là đúng)",
+                   len(rts_thay) >= 1 and all(r.startswith("AG") for r in rts_thay),
+                   f"runtime thấy={sorted(rts_thay)} · đang chạy nhiều nhất={nhieu_nhat}")
+        else:
+            bd.ghi("3. >1 tài khoản AG THẬT được chọn cho các con",
+                   len(rts_thay) >= 2 and all(r.startswith("AG") for r in rts_thay),
+                   f"runtime thấy={sorted(rts_thay)} · đang chạy nhiều nhất={nhieu_nhat}")
         bd.ghi(f"3b. đúng sức chứa: không bao giờ quá {chay_ngay} con chạy cùng lúc",
                nhieu_nhat <= chay_ngay, f"nhiều nhất={nhieu_nhat}")
         if chay_ngay < so:
             bd.ghi(f"3c. hàng đợi: có lúc {chay_ngay} chạy + {so - chay_ngay} chờ",
                    cho_thay, "")
+        bd.ghi("3d. cha RUNNING trong khi con chạy", cha_running_thay, "")
+        su_kien = _state(cdp, "router").get("events") or []
+        tranh = [e for e in su_kien if "tranh chấp" in (e.get("detail") or "")
+                 and (e.get("task_id") or "") in tn]
+        if kich_ban == "kiem-tra":
+            bd.ghi("3e. không con nào bị khoá READ chặn (0 sự kiện tranh chấp)", not tranh,
+                   f"tranh chấp={len(tranh)}" + (f" · {tranh[0].get('detail', '')[:160]}" if tranh else ""))
+            bd.ghi(f"3f. {so} con giao nhau THỰC (đang chạy cùng lúc ≥ {min(so, chay_ngay)})",
+                   nhieu_nhat >= min(so, chay_ngay), f"nhiều nhất cùng lúc={nhieu_nhat}")
+        elif kich_ban == "ghi":
+            bd.ghi("3e. khoá WRITE ĐỘC QUYỀN: con thứ hai chờ với sự kiện tranh chấp WRITE",
+                   bool(tranh) and any("WRITE" in (e.get("detail") or "") for e in tranh) and nhieu_nhat <= 1,
+                   f"tranh chấp={len(tranh)} · nhiều nhất cùng lúc={nhieu_nhat}")
 
         # -- 4. UI: bang viec co cha + con thut vao; Agents co tung worker -----------
         gs.dat_pha("UI")
@@ -219,16 +279,18 @@ def main(argv=None) -> int:
         bd.ghi(f"4. UI Tasks: 1 dòng cha (đếm con) + {so} dòng con thụt vào", bool(co_bang),
                " ".join(str(chu).split())[:260])
         cdp.js("document.querySelector('.tab[data-khung=\"agents\"]').click(); return 1;")
-        # Bang Agents ve theo nhip WebSocket (1 s) — cho toi khi co >= 2 dong AG.
+        # Bang Agents ve theo nhip WebSocket (1 s) — cho toi khi co >= 2 dong AG
+        # (kich ban GHI tuan tu: con 2 dung lai phien con 1 -> 1 dong la dung).
+        toi_thieu = 1 if kich_ban == "ghi" else 2
         cdp.cho("return [...document.querySelectorAll('#bang-agents tbody tr')]"
-                + ".filter(r=>/AG\\d\\d/.test(r.children[0].textContent)).length>=2;", han=20)
+                + f".filter(r=>/AG\\d\\d/.test(r.children[0].textContent)).length>={toi_thieu};", han=20)
         ag = cdp.js("return [...document.querySelectorAll('#bang-agents tbody tr')]"
                     + ".map(r=>r.children[0].textContent.trim()).join(' | ');") or ""
         ss_api = [(x.get("runtime_id"), x.get("state")) for x in
                   (_state(cdp, "router").get("sessions") or [])]
         loi_js = cdp.js("return JSON.stringify(window.__loi||[]);") or "[]"
         bd.ghi("4b. UI Agents: từng worker (runtime) hiện riêng",
-               sum(1 for r in sorted(rts_thay) if r in str(ag)) >= 2,
+               sum(1 for r in sorted(rts_thay) if r in str(ag)) >= toi_thieu,
                f"bảng={str(ag)[:160] or '(rỗng)'} · API sessions={ss_api} · lỗi JS={loi_js[:200]}")
         cdp.js("document.querySelector('.tab[data-khung=\"chat\"]').click(); return 1;")
 
@@ -248,7 +310,36 @@ def main(argv=None) -> int:
                and th.get("xong", 0) >= 1,
                f"cha={(cha_x or {}).get('state')} · xong={th.get('xong')}/{th.get('so_con')} · "
                f"hỏng={th.get('hong')} · ứng viên={len(th.get('ung_vien') or [])} · "
-               f"khử trùng={th.get('trung_da_bo')}")
+               f"khử trùng={th.get('trung_da_bo')} · song song thực đo={th.get('song_song_toi_da')}")
+        if kich_ban == "kiem-tra":
+            bd.ghi(f"5d. không con nào hỏng bất thường: {so}/{so} xong", th.get("xong") == so,
+                   " | ".join(f"[{c.get('chi_so')}] {c.get('state')} {c.get('failure_reason') or ''}"
+                              for c in (th.get("con") or [])))
+            bd.ghi(f"5e. SONG SONG THỰC: khoảng chạy của ≥{min(so, chay_ngay)} con giao nhau (đo mốc thời gian)",
+                   int(th.get("song_song_toi_da") or 0) >= min(so, chay_ngay),
+                   f"song_song_toi_da={th.get('song_song_toi_da')} · khoảng="
+                   + "; ".join(f"[{time.strftime('%H:%M:%S', time.localtime(k['bat_dau']))}–"
+                               f"{time.strftime('%H:%M:%S', time.localtime(k['ket_thuc']))} {k.get('runtime')}]"
+                               for k in (th.get("khoang_chay") or [])))
+        elif kich_ban == "ghi":
+            bd.ghi("5e. GHI cùng tệp: khoảng chạy KHÔNG giao nhau (song song thực đo = 1)",
+                   int(th.get("song_song_toi_da") or 0) <= 1 and th.get("so_con") == so,
+                   f"song_song_toi_da={th.get('song_song_toi_da')} · "
+                   + " | ".join(f"[{c.get('chi_so')}] {c.get('state')} {c.get('failure_reason') or ''}"
+                                for c in (th.get("con") or [])))
+        # Khoa cua con CUOI duoc nha trong `finally` cua luong con — vai ms
+        # SAU khi cha DONE. Cho toi da 10 s roi moi ket luan "ro khoa".
+        het_khoa = time.time() + 10
+        while True:
+            khoa_con = _state(cdp, "router").get("locks") or []
+            if not khoa_con or time.time() > het_khoa:
+                break
+            time.sleep(0.5)
+        bd.ghi("5f. không rò khoá sau khi xong", not khoa_con,
+               "khoá còn giữ=" + "; ".join(
+                   f"{l.get('kind')} {l.get('resource')} {l.get('mode')} giữ bởi {l.get('holder_task')} "
+                   f"(id={l.get('lock_id')}, cấp {time.strftime('%H:%M:%S', time.localtime(l.get('acquired_at') or 0))})"
+                   for l in khoa_con))
         rts_con = sorted({c.get("runtime") for c in (th.get("con") or []) if c.get("runtime")})
         bd.ghi("5b. nguồn gốc từng con: runtime/model/việc được giữ trong tổng hợp",
                all(c.get("runtime") and c.get("task_id") for c in (th.get("con") or [])),

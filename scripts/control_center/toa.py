@@ -60,6 +60,22 @@ _MOI_MOT = re.compile(
     r"|\beach\s+(?:agent|worker|bot|one)\b|\bper\s+(?:agent|worker)\b")
 #: Liet ke sau dau hai cham: "…: a, b, c" hoac "…: a; b; c"
 _LIET_KE = re.compile(r":\s*([^\n]+)$")
+#: Mot dong muc trong danh sach nhieu dong: "1. README/docs", "- tests", "• x".
+_MUC_DONG = re.compile(r"^\s*(?:\d{1,2}[.)]|[-*•])\s+(.+?)\s*$")
+#: Nhac toi TRANG THAI GIT (doc): git history/log/blame/show, lich su git/commit.
+NHAC_GIT = re.compile(
+    r"\b(git (?:history|log|blame|show|status|diff|rev-parse)|lịch sử git|lich su git|"
+    r"commit history|lịch sử commit|lich su commit|git history)\b", re.I)
+#: Duong dan trong mot muc: "docs/", "web/admin", "scripts/tim.py", "tests".
+_DUONG_MUC = re.compile(r"(?<![\w./-])((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.*-]*|[A-Za-z0-9_.-]+/)")
+#: Tu khoa muc -> thu muc quen thuoc (khi muc khong co duong dan tuong minh).
+_TU_KHOA_THU_MUC = (
+    (re.compile(r"\b(tests?|unit tests?|kiểm thử|kiem thu)\b", re.I), "tests"),
+    (re.compile(r"\b(docs?|documentation|tài liệu|tai lieu|readme)\b", re.I), "docs"),
+    (re.compile(r"\b(scripts?)\b", re.I), "scripts"),
+    (re.compile(r"\b(web|frontend)\b", re.I), "web"),
+    (re.compile(r"\b(server|backend|api)\b", re.I), "server"),
+)
 #: Goi y model / nha cung cap.
 _MODEL = (
     (re.compile(r"gemini\s*3[.,]?8\s*(?:flash)?\s*(?:medium)"), "gemini-3.8-flash-medium"),
@@ -107,12 +123,45 @@ def _so(tu: str) -> int:
 
 
 def _liet_ke(van: str) -> Tuple[str, ...]:
-    m = _LIET_KE.search(van.strip())
-    if not m:
+    """Danh sách mục người dùng liệt kê — nhiều dòng đánh số/gạch đầu dòng sau
+    một dòng kết bằng `:`, hoặc một dòng "…: a, b, c"."""
+    dong = [d for d in van.strip().splitlines()]
+    for i, d in enumerate(dong):
+        if not d.rstrip().endswith(":"):
+            continue
+        muc: List[str] = []
+        for d2 in dong[i + 1:]:
+            m = _MUC_DONG.match(d2)
+            if m:
+                muc.append(m.group(1).strip(" .;"))
+            elif not d2.strip():
+                continue
+            else:
+                break
+        if len(muc) >= 2:
+            return tuple(x for x in muc if x and len(x) <= 120)[:TRAN_SO_AGENT]
+    dau = dong[0] if dong else ""
+    m = _LIET_KE.search(dau.strip()) or _LIET_KE.search(van.strip())
+    if not m or "\n" in m.group(1):
         return ()
     phan = [p.strip(" .") for p in re.split(r"[;,]|\bvà\b|\bva\b|\band\b", m.group(1))]
     phan = [p for p in phan if p and len(p) <= 120]
     return tuple(phan) if len(phan) >= 2 else ()
+
+
+def _duong_dan_cua_muc(muc: str) -> Tuple[str, ...]:
+    """Đường dẫn/thư mục mà một mục liệt kê nhắc tới, hoặc rỗng."""
+    ra: List[str] = []
+    for m in _DUONG_MUC.finditer(muc or ""):
+        p = m.group(1).strip("/")
+        if p and not p.lower().startswith(("http", "https")) and "://" not in p:
+            ra.append(p)
+    if not ra:
+        for mau, thu_muc in _TU_KHOA_THU_MUC:
+            if mau.search(muc or ""):
+                ra.append(thu_muc)
+                break
+    return tuple(dict.fromkeys(ra))
 
 
 def xet_toa(text: str) -> Optional[YeuCauToa]:
@@ -135,12 +184,14 @@ def xet_toa(text: str) -> Optional[YeuCauToa]:
     moi = bool(_MOI_MOT.search(gap))
     if moi:
         dau.append("moi_agent_mot")
-    muc: Tuple[str, ...] = ()
-    if not so and moi:
-        muc = _liet_ke(text)
-        if muc:
-            so = len(muc)
-            dau.append(f"liet_ke:{so}")
+    # Danh sach muc: dung lam PHAN VUNG cho tung con khi so muc = so agent
+    # (hoac lam chinh so agent khi cau chi noi "moi agent mot…").
+    muc: Tuple[str, ...] = _liet_ke(text) if (moi or so) else ()
+    if not so and moi and muc:
+        so = len(muc)
+        dau.append(f"liet_ke:{so}")
+    if so and muc and len(muc) != so:
+        muc = ()                                     # khong khop -> phan vung chung
     if not so:
         return None
     if so < 2 or so > TRAN_SO_AGENT:
@@ -170,31 +221,74 @@ class ConToa:
     tieu_de: str
     muc_tieu: str
     phan_vung: str
+    #: Che do truy cap cua con: "read" | "write".
+    che_do: str = "read"
+    #: Duong dan/thu muc rieng cua con (rong = ca kho).
+    pham_vi: Tuple[str, ...] = ()
+    #: Chuoi tai nguyen cho `Task.resources`: "READ:FILESYSTEM:docs", ...
+    tai_nguyen: Tuple[str, ...] = ()
 
 
-def chia_con(yc: YeuCauToa, muc_tieu_goc: str, tieu_de_goc: str) -> List[ConToa]:
-    """N việc con, mỗi con một phân vùng và ràng buộc KHÔNG TRÙNG tường minh."""
+def chia_con(yc: YeuCauToa, muc_tieu_goc: str, tieu_de_goc: str, *,
+             chi_doc: bool = True, pham_vi_mau: Sequence[str] = (),
+             nhac_git: bool = False) -> List[ConToa]:
+    """N việc con, mỗi con một phân vùng, ràng buộc KHÔNG TRÙNG, và TÀI NGUYÊN
+    RIÊNG kèm CHẾ ĐỘ TRUY CẬP (V0.6.1).
+
+    Con CHỈ ĐỌC: khoá `READ FILESYSTEM` trên thư mục của mục mình (không có thì
+    gốc kho `.`), `READ GIT history` nếu mục là lịch sử git — mọi khoá READ sống
+    chung, nên N con chạy đồng thời. Con GHI: `WRITE FILESYSTEM` trên đường dẫn
+    riêng của mục (không có thì phạm vi ghi của việc mẫu — lúc đó các con GIẪM
+    NHAU và bị tuần tự hoá, ĐÚNG như phải thế).
+    """
+    from scripts.control_center.locks import GOC, READ, WRITE, chuoi_tai_nguyen
+    from scripts.control_center.model import LockKind
     n = yc.so_agent
+    co_muc = bool(yc.muc_liet_ke) and len(yc.muc_liet_ke) == n
     ra: List[ConToa] = []
     for i in range(1, n + 1):
-        if yc.muc_liet_ke and len(yc.muc_liet_ke) == n:
-            pv = f"mục được giao riêng cho bạn: «{yc.muc_liet_ke[i - 1]}»"
+        muc = yc.muc_liet_ke[i - 1] if co_muc else ""
+        if co_muc:
+            pv = f"mục được giao riêng cho bạn: «{muc}»"
         else:
             pv = (f"phân vùng {i}/{n}: liệt kê mọi ứng viên theo MỘT thứ tự ổn định "
                   f"(đường dẫn/tên theo bảng chữ cái), rồi lấy ứng viên thứ {i}, "
                   f"{i + n}, {i + 2 * n}… (bước {n}); bỏ qua mọi ứng viên không thuộc "
                   f"dãy của bạn")
+        la_git = bool(muc and NHAC_GIT.search(muc))
+        duong = () if la_git else _duong_dan_cua_muc(muc)
+        tai_nguyen: List[str] = []
+        if chi_doc:
+            if la_git:
+                # Muc "git history": chi doc TRANG THAI GIT — khong cham cay
+                # lam viec, nen khong giu READ goc kho (se chan vo ich mot
+                # anh em GHI o bat ky duong dan nao).
+                tai_nguyen.append(chuoi_tai_nguyen(LockKind.GIT, "history", READ))
+            else:
+                for p in (duong or (GOC,)):
+                    tai_nguyen.append(chuoi_tai_nguyen(LockKind.FILESYSTEM, p, READ))
+                if not co_muc and nhac_git:
+                    tai_nguyen.append(chuoi_tai_nguyen(LockKind.GIT, "history", READ))
+            che_do = READ
+        else:
+            for p in (duong or tuple(pham_vi_mau)):
+                tai_nguyen.append(chuoi_tai_nguyen(LockKind.FILESYSTEM, p, WRITE))
+            che_do = WRITE
+        mo_ta_tn = ", ".join(f"{x.split(':', 2)[0]} {x.split(':', 2)[2]}" for x in tai_nguyen) \
+            or "(không khoá)"
         muc_tieu = (
             f"{muc_tieu_goc.strip()}\n\n"
             f"BẠN LÀ AGENT {i}/{n} TRONG MỘT NHÓM {n} AGENT CHẠY SONG SONG, CÙNG MỤC TIÊU.\n"
             f"* Chỉ trả về ĐÚNG MỘT kết quả (một bộ/một mục) — không phải danh sách.\n"
             f"* KHÔNG TRÙNG với các agent anh em: {pv}.\n"
+            f"* Tài nguyên/phạm vi của bạn: {mo_ta_tn}. Không đụng phạm vi của anh em.\n"
             f"* Trong `summary`, dòng đầu ghi `KẾT QUẢ [{i}/{n}]: <tên/đường dẫn kết quả>` "
             f"rồi một câu vì sao nó thuộc phân vùng của bạn.\n"
             f"* Không thấy ứng viên nào trong phân vùng của mình thì nói rõ "
             f"`KẾT QUẢ [{i}/{n}]: KHÔNG CÓ` thay vì lấy của người khác.")
         ra.append(ConToa(chi_so=i, tong=n, tieu_de=f"[{i}/{n}] {tieu_de_goc}"[:120],
-                         muc_tieu=muc_tieu, phan_vung=pv))
+                         muc_tieu=muc_tieu, phan_vung=pv, che_do=che_do,
+                         pham_vi=tuple(duong), tai_nguyen=tuple(tai_nguyen)))
     return ra
 
 
@@ -367,9 +461,34 @@ def tong_hop(cha: Dict[str, Any], cac_con: Sequence[Dict[str, Any]]) -> Dict[str
         da_thay[khoa] = muc
         ung.append(muc)
     trung = sum(len(m.get("trung_voi") or []) for m in ung)
+    khoang = [dict((c.get("result") or {}).get("khoang_chay") or {}, task_id=c.get("task_id"))
+              for c in cac_con if (c.get("result") or {}).get("khoang_chay")]
     return {"so_con": len(cac_con), "xong": xong, "hong": hong, "khac": khac,
             "ung_vien": ung, "trung_da_bo": trung, "con": con_ra,
-            "cha": cha.get("task_id"), "muc_tieu": str(cha.get("title") or "")}
+            "cha": cha.get("task_id"), "muc_tieu": str(cha.get("title") or ""),
+            "khoang_chay": khoang, "song_song_toi_da": song_song_toi_da(khoang)}
+
+
+def song_song_toi_da(khoang: Sequence[Dict[str, Any]]) -> int:
+    """Số khoảng chạy THẬT giao nhau nhiều nhất tại một thời điểm (quét mốc).
+    Đây là số đo "song song thực" — không phải đếm trạng thái RUNNING trong sổ."""
+    moc: List[Tuple[float, int]] = []
+    for k in khoang:
+        try:
+            a, b = float(k.get("bat_dau")), float(k.get("ket_thuc"))
+        except (TypeError, ValueError):
+            continue
+        if b <= a:
+            continue
+        moc.append((a, +1))
+        moc.append((b, -1))
+    # Ket thuc truoc bat dau khi trung moc: hai khoang cham nhau khong tinh la giao.
+    moc.sort(key=lambda x: (x[0], x[1]))
+    hien = cao = 0
+    for _, d in moc:
+        hien += d
+        cao = max(cao, hien)
+    return cao
 
 
 def soan_tong_hop(th: Dict[str, Any]) -> str:
@@ -377,7 +496,9 @@ def soan_tong_hop(th: Dict[str, Any]) -> str:
     d = [f"🧩 Tổng hợp {th['xong']}/{th['so_con']} tác vụ con xong"
          + (f", {th['hong']} hỏng" if th.get("hong") else "")
          + (f", {th['khac']} chưa kết thúc" if th.get("khac") else "")
-         + f" — {th['muc_tieu']}"]
+         + f" — {th['muc_tieu']}"
+         + (f" · song song thực đo tối đa {th['song_song_toi_da']}/{th['so_con']}"
+            if th.get("song_song_toi_da") else "")]
     if th["ung_vien"]:
         d.append("")
         d.append(f"{len(th['ung_vien'])} kết quả (đã khử {th['trung_da_bo']} trùng):")

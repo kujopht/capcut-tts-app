@@ -243,7 +243,20 @@ function veTasks() {
       phu = ` <span class="qs-phu">· ${cs.length} con: ${d.chay} chạy · ${d.cho} chờ · ${d.xong} xong`
         + `${d.hong ? ` · ${d.hong} hỏng` : ''}${d.chan ? ` · ${d.chan} chặn` : ''}</span>`;
     }
-    if (con) ten = `↳ ${ten}`;
+    if (con) {
+      // Con cua mot lan toa: runtime dang chay + tai nguyen/che do (READ docs,
+      // READ git:history…) — de mot con dung hinh vi khoa doc ra ngay tren bang.
+      const s = S.sessions.find((y) => y.session_id === t.owner_session) || {};
+      const tn = (t.resources || []).map((r) => {
+        const p = String(r).split(':');
+        if (p.length >= 3 && /^(READ|WRITE)$/i.test(p[0])) {
+          return `${p[0].toUpperCase()} ${p[1] === 'FILESYSTEM' ? '' : p[1].toLowerCase() + ':'}${p.slice(2).join(':')}`;
+        }
+        return `WRITE ${p.slice(1).join(':')}`;
+      });
+      ten = `↳ ${ten}`;
+      phu = ` <span class="qs-phu">${s.runtime_id ? `· ${esc(s.runtime_id)} ` : ''}${tn.length ? `· ${esc(tn.join(', '))}` : ''}</span>`;
+    }
     const hang = [
       t.title || t.task_id, t.state, t.owner_session || '—',
       thoiLuong(t.started_at, t.ended_at), t.priority,
@@ -323,7 +336,8 @@ function veToaChiTiet(t) {
   }
   const th = (t.result || {}).toa;
   if (th) {
-    ra.push('', `TỔNG HỢP: ${th.xong}/${th.so_con} xong · ${(th.ung_vien || []).length} kết quả · khử ${th.trung_da_bo} trùng`);
+    ra.push('', `TỔNG HỢP: ${th.xong}/${th.so_con} xong · ${(th.ung_vien || []).length} kết quả · khử ${th.trung_da_bo} trùng`
+      + (th.song_song_toi_da ? ` · song song thực đo tối đa ${th.song_song_toi_da}/${th.so_con}` : ''));
     for (const m of (th.ung_vien || [])) {
       const ng = m.nguon || {};
       ra.push(`  • ${m.ung_vien}  ← [${ng.chi_so}] ${ng.runtime || '?'}/${ng.model || '?'} ${ng.task_id || ''}`);

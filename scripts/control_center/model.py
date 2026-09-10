@@ -177,6 +177,10 @@ class LockKind(str, Enum):
     FILESYSTEM = "FILESYSTEM"
     SERVICE = "SERVICE"
     PRODUCTION = "PRODUCTION"
+    #: V0.6.1 — trang thai git cua kho: `history` (log/show/blame/rev-parse —
+    #: DOC), `worktree` (commit/checkout/reset — GHI). Doc lich su git khong
+    #: phai la giu doc quyen ca he tep.
+    GIT = "GIT"
 
     @property
     def tu_thu_hoi_duoc(self) -> bool:
@@ -369,6 +373,9 @@ class ResourceLock:
     acquired_at: float = field(default_factory=time.time)
     expires_at: float = 0.0
     note: str = ""
+    #: V0.6.1 — che do truy cap: "read" | "write". Hai khoa READ cung pham vi
+    #: song chung; READ/WRITE hay WRITE/WRITE giao nhau thi tranh chap.
+    mode: str = "write"
 
     def con_han(self, *, now: Optional[float] = None) -> bool:
         if not self.expires_at:
@@ -378,6 +385,7 @@ class ResourceLock:
     def to_dict(self) -> Dict:
         return {"lock_id": self.lock_id, "project_id": self.project_id,
                 "kind": self.kind.value, "resource": self.resource,
+                "mode": self.mode,
                 "holder_task": self.holder_task,
                 "holder_session": self.holder_session,
                 "acquired_at": self.acquired_at, "expires_at": self.expires_at,

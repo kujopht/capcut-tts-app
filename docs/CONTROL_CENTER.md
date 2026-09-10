@@ -929,7 +929,7 @@ Ba báo cáo: `docs/reports/PROJECT_MEMORY_V061.md`,
 đặt NGOÀI `memory/` vì gói đó không được có `subprocess`),
 `scripts/control_center/providers/`.
 
-Sáu luật thêm vào bốn luật của §16:
+Tám luật (5–12) thêm vào bốn luật của §16:
 
 5. **Tuyên bố tường minh của người dùng thành bản ghi NGAY tại cổng vào, tất
    định, không LLM.** `de_bat.xet()` cần một dấu hiệu TUYÊN BỐ ("ghi nhớ…",
@@ -965,3 +965,23 @@ Sáu luật thêm vào bốn luật của §16:
     NGAY lúc giao. Gộp kết quả khi mọi con xong: khử trùng, giữ nguồn gốc,
     MỘT tin tổng hợp. `che_do` (chất lượng) ≠ `so_agent` ≠ `max_parallel`
     (trần; `0` = tự theo bể). `docs/reports/MULTI_AGENT_FANOUT_V061.md`.
+12. **Khoá tài nguyên có CHẾ ĐỘ; việc chỉ đọc không bao giờ đi đường GHI.**
+    `ResourceLock.mode ∈ {read, write}` (`locks.py`): READ+READ sống chung (một
+    hàng `…#r:<task>` mỗi người đọc), READ+WRITE và WRITE+WRITE giao nhau thì
+    tranh chấp, không giao nhau thì song song. Chuỗi cũ `FILESYSTEM:x` không
+    chế độ = WRITE — không nới gì cho dữ liệu cũ. Giao nhau tất định sau
+    `chuan_hoa` (`docs/`, `docs/**`, `Docs\sub` → `docs`, `docs/sub`; `.`/`*` =
+    gốc kho giao mọi đường dẫn; so theo ĐOẠN). `LockKind.GIT`: `history` (đọc)
+    tách `worktree` (ghi); đọc lịch sử git không giữ khoá hệ tệp. Bộ phân rã
+    xét Ý ĐỌC trước (`_Y_DOC` mà không `_Y_GHI` → `analysis/review`, không
+    `repo_write`, không worktree, khoá READ); danh từ `tests`/`README` trần
+    không còn là việc `testing`. Toả: tài nguyên theo TỪNG con từ mục của nó
+    (`READ FILESYSTEM <đường>` · `READ FILESYSTEM .` · `READ GIT history` ·
+    việc GHI `WRITE FILESYSTEM <đường>`), KHÔNG sao chép khoá mẫu cho mọi con;
+    cha không xin khoá, `RUNNING` khi con đầu được nhận. Song song được ĐO bằng
+    khoảng chạy thật (`khoang_chay` → `song_song_toi_da` quét mốc), không đếm
+    trạng thái. Khoá được nhả NGAY khi việc ở trạng thái cuối (trước thử
+    lại/báo chat/gộp cha), `finally` chỉ là lưới. Việc đọc lịch sử git nhận
+    NHẬT KÝ GIT do Router đọc (`nguon_git.git_nhat_ky_doc`, lọc bí mật) — agent
+    headless không chạy được lệnh shell và quyền của nó KHÔNG được nới.
+    `MULTI_AGENT_FANOUT_V061.md` §7, `scripts/tests/test_khoa_doc_ghi_v061.py`.

@@ -463,9 +463,26 @@ lần khảo sát kho mới.
    không phải câu trả lời cuối."""
 
 
+#: Luat cho cau hoi co URL — Router DA doc trang cong khai, dinh o khoi WEB.
+LUAT_WEB = """NỘI DUNG WEB — đọc trước khi trả lời:
+
+Câu này có URL công khai và Router ĐÃ ĐỌC HỘ (khối "NỘI DUNG WEB DO ROUTER
+ĐỌC" bên dưới). Dùng chính nội dung đó để trả lời.
+
+* Câu hỏi ĐƠN GIẢN ("URL này là gì", "repo/release này nói gì") -> trả lời
+  TRỰC TIẾP từ khối WEB, y_dinh = CHAT. KHÔNG uỷ thác một worker chỉ để đọc
+  một trang — Router đã đọc rồi, một AG slot cho việc đó là lãng phí.
+* Chỉ uỷ thác (WORK) khi người dùng muốn việc NẶNG dựa trên trang đó ("đọc
+  repo này rồi SO SÁNH kiến trúc / ĐỀ XUẤT tích hợp / VIẾT …"): lúc đó nội
+  dung web là điểm khởi đầu, và worker sẽ nhận cùng bằng chứng đó.
+* Nếu khối WEB báo ĐỌC THẤT BẠI: nói rõ lý do (ví dụ URL nội bộ bị chặn an
+  toàn), đừng dispatch một worker để thử lại — headless cũng bị chặn quyền."""
+
+
 def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
                   khoi_song: str = "", khoi_ky_uc: str = "",
-                  khoi_toa: str = "", la_lich_su: bool = False) -> str:
+                  khoi_toa: str = "", la_lich_su: bool = False,
+                  khoi_web: str = "") -> str:
     """Gói một lượt: hướng dẫn + trạng thái + hội thoại + câu mới.
 
     RANH GIỚI TIN CẬY, và bản đầu làm sai đúng chỗ này:
@@ -526,6 +543,14 @@ def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
             d.append(f"{ai}: {str(m.get('text') or '')[:600]}")
         d.append("--- HẾT DỮ LIỆU ---")
         d.append("")
+    if khoi_web:
+        # V0.6.1 — NOI DUNG WEB Router doc ho (WebReader, chi doc, an toan SSRF).
+        # Dat cung vung DU LIEU: no la van ban tu trang cong khai, KHONG phai
+        # loi cua Leader. Luat WEB noi ro: cau don gian -> tra truc tiep, dung
+        # dispatch mot worker chi de doc mot trang.
+        d += [LUAT_WEB, "",
+              "--- BẮT ĐẦU DỮ LIỆU: NỘI DUNG WEB (Router đọc hộ, công khai) ---",
+              khoi_web, "--- HẾT DỮ LIỆU ---", ""]
     if khoi_toa:
         # V0.6.1 — so agent nguoi dung xin + suc chua that do engine do. Dat
         # NGAY TRUOC tin nhan moi: no la su that ve lan nay, khong phai du lieu

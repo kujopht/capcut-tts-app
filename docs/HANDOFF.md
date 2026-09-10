@@ -1408,8 +1408,35 @@ giữ nguyên, bản mới `dist-v061`. Bốn việc, ba báo cáo:
   `test_ky_uc_first_v061.py` (11) gồm NHẤT QUÁN KHO (ghi/backfill/UI/Leader một
   namespace + một tệp). **LUÔN mở app từ CÙNG một nơi (`router-cc-desktop.cmd`
   ở worktree này) để dùng đúng sổ live.** `docs/reports/PROJECT_MEMORY_RECALL_V061.md`.
-  Nghiệm thu Leader thật (đóng/mở + turn agy): CHƯA chạy (mã Leader đang chạy
-  là bản cũ) — chạy cùng nghiệm thu WebReader để đỡ khởi động lại app hai lần.
+  **Nghiệm thu source-mode THẬT đã chạy** (`control_center_v061_ky_uc_web_acceptance.py`):
+  pha A 7/7 (decisions 0→1 trong 9.1s, `qd_0001` user_explicit, provenance,
+  0 worker), pha B 9/9 sau đóng/mở app — tuyên bố bị đẩy ra **17 tin** khỏi cửa
+  sổ 14 tin của Leader nên recall KHÔNG thể từ transcript; recall chéo phiên
+  bằng diễn giải khác trả đúng kèm `qd_0001`/`ku_…`/`sk#7654`; **sự cố SSH trả
+  từ ký ức với 0 worker dispatch** (trước: AG02 200s); câu hỏi hiện tại vẫn đo
+  sống (live > ký ức). Production bị chạm: 0.
+* **Khuyết tật `read_url` headless — WebReader.** "URL github này là gì?" →
+  worker AG02 FAILED 17s `tool_permission_denied`: `agy --print` tự chối mọi
+  công cụ cần prompt quyền (`read_url`, như `command`/`read_file` trước đó), và
+  Router KHÔNG có đường đọc web nào. Sửa theo đúng mẫu `nguon_git`: **Router
+  đọc hộ** — `scripts/control_center/web_reader.py` (`WebReader.read/metadata/
+  extract_text`, `doc_web`), chỉ đọc, nguồn gốc đầy đủ (url gốc/cuối, ts,
+  status, content-type, sha256, chuyển hướng), chuyển hướng ≤5 **kiểm SSRF lại
+  mỗi bước**, trần 3 MB, timeout 12s, rút text HTML/JSON. **SSRF**: chặn
+  scheme lạ, `user:pass@`, host nội bộ theo tên, loopback/RFC1918/link-local/
+  ULA/multicast/reserved/**metadata đám mây**, kiểm **MỌI** IP `getaddrinfo`
+  trả về, và **ghim kết nối vào IP đã kiểm** (SNI theo tên) chống rebinding.
+  Adapter **GitHub công khai không token** (release/issue/repo+README qua REST
+  API — 72 KB JSON sạch thay 471 KB HTML). Tích hợp: `engine._khoi_web` (Leader
+  + `leader.LUAT_WEB`: câu đơn giản trả trực tiếp, **không tốn AG slot**) và
+  `engine._kem_web_vao_hd` (đính bằng chứng vào hợp đồng worker, đọc 1 lần cho
+  cả toả) + sự kiện `WEB_READ`. **Quyền agent KHÔNG đổi** — AG01..AG08 giữ hồ
+  sơ cũ, không `--dangerously-skip-permissions`. Bộ kiểm
+  `test_web_reader_v061.py` (19) — bắt được một lỗi THẬT: `SSRFLoi` là con của
+  `ValueError` nên `raise` trong `try/except ValueError` bị nuốt. Nghiệm thu
+  thật 9/9: 0 `tool_permission_denied`, 0 worker cho câu đơn giản, trả lời
+  grounded (v2.10.0 World Monitor), và việc NẶNG `fanfic.t6006-1` **DONE trên
+  AG02 61s** với bằng chứng web trong hợp đồng. `docs/reports/WEB_READER_V061.md`.
 
 Bộ kiểm mới: 100 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
 provider webapi 3 · toả 22). **Bản EXE cuối: `dist-v061`, build lại SẠCH từ

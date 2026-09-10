@@ -652,6 +652,9 @@ class ControlCenter:
                 # Viec doc lich su git (khong toa): cung mot cach — Router doc
                 # `git log` va dinh vao muc tieu, agent khong can lenh shell.
                 self._kem_nhat_ky_git(ctx.project.repo_path, hd_pt)
+            # Viec co URL cong khai -> Router doc trang HO va dinh bang chung,
+            # agent headless khong dung duoc `read_url`. Quyen agent KHONG doi.
+            self._kem_web_vao_hd(text, hd_pt)
             t = Task(
                 task_id=f"{project_id}.{pt.task_id}",
                 project_id=project_id, title=pt.title, objective=pt.objective,
@@ -764,6 +767,22 @@ class ControlCenter:
             detail=f"toa: cha của {yc.so_agent} việc con — {tieu_de_goc}",
             meta={"permission": cha.permission, "kind": mau.kind, "toa": hd_cha["_toa"]})
 
+        # URL cong khai trong muc tieu chung: doc MOT lan, dinh cho moi con
+        # (tranh N lan doc cung trang). `web_khoi` rong neu khong co URL.
+        web_khoi = ""
+        try:
+            from scripts.control_center.web_reader import rut_url
+            _urls = rut_url(goal or "")
+            if _urls:
+                _kqs = [k for k in self._doc_web_nhieu(_urls, toi_da=2)
+                        if k.ok and k.van_ban]
+                if _kqs:
+                    web_khoi = ("\n\n" + self.DAU_WEB + " (chỉ đọc, công khai). "
+                                "KHÔNG dùng read_url/lệnh (headless bị từ chối "
+                                "quyền) — phân tích NGAY trên nội dung dưới đây.\n"
+                                + "\n\n".join(k.khoi_bang_chung() for k in _kqs))
+        except Exception:                                   # noqa: BLE001
+            web_khoi = ""
         con_tasks: List[Task] = []
         for c, cid in zip(cac_con, con_ids):
             hd = self._hop_dong_dict(mau, project_id)
@@ -793,6 +812,10 @@ class ControlCenter:
             if any((doc_chuoi_tai_nguyen(r) or (None,))[0] is LockKind.GIT
                    for r in c.tai_nguyen):
                 self._kem_nhat_ky_git(ctx.project.repo_path, hd)
+            # URL cong khai trong muc tieu chung -> dinh noi dung web (doc MOT
+            # lan o tren, tai dung cho moi con) — agent headless khong doc URL.
+            if web_khoi:
+                hd["objective"] = (hd.get("objective") or "").rstrip() + web_khoi
             t = Task(task_id=cid, project_id=project_id, title=c.tieu_de,
                      objective=c.muc_tieu,
                      state=TaskState.BLOCKED if gated else TaskState.QUEUED,
@@ -845,6 +868,75 @@ class ControlCenter:
               "`command` và lượt của bạn sẽ kết thúc rỗng. Cần thêm chi tiết của "
               "một commit thì nói rõ mã commit trong findings thay vì chạy lệnh.\n"
             + van)
+        return True
+
+    #: Dau khoi noi dung web trong muc tieu worker — bai kiem/UI nhan ra.
+    DAU_WEB = "NỘI DUNG WEB DO ROUTER CUNG CẤP"
+
+    def _doc_web_nhieu(self, urls, *, toi_da: int = 2):
+        """Đọc tối đa `toi_da` URL bằng WebReader (chỉ đọc, an toàn SSRF).
+        Trả list `KetQuaDoc`. Không bao giờ ném."""
+        ra = []
+        try:
+            from scripts.control_center.web_reader import doc_web
+        except Exception:                                   # noqa: BLE001
+            return ra
+        for u in list(urls)[:toi_da]:
+            try:
+                ra.append(doc_web(u))
+            except Exception:                               # noqa: BLE001
+                pass
+        return ra
+
+    def _khoi_web(self, text: str, project_id: str = "") -> str:
+        """Khối NỘI DUNG WEB cho nhắc nhở Leader khi câu có URL công khai.
+
+        Router đọc trang HỘ (WebReader) rồi đính bằng chứng — worker/Leader
+        headless KHÔNG dùng được `read_url` (bị tự chối quyền). `""` nếu câu
+        không có URL. Ghi sự kiện để bảng điều khiển/nghiệm thu thấy.
+        """
+        try:
+            from scripts.control_center.web_reader import rut_url
+        except Exception:                                   # noqa: BLE001
+            return ""
+        urls = rut_url(text or "")
+        if not urls:
+            return ""
+        kqs = self._doc_web_nhieu(urls, toi_da=2)
+        if not kqs:
+            return ""
+        for kq in kqs:
+            self.store.ghi_su_kien(
+                "WEB_READ", project_id=project_id,
+                level="INFO" if kq.ok else "WARNING",
+                detail=(f"{kq.url_goc} -> {kq.trang_thai} {kq.content_type} "
+                        f"{kq.so_byte}B" if kq.ok else f"{kq.url_goc}: {kq.loi}")[:300],
+                meta={"url": kq.url_goc, "url_cuoi": kq.url_cuoi, "ok": kq.ok,
+                      "trang_thai": kq.trang_thai, "bam": kq.bam_noi_dung,
+                      "nguon": kq.nguon})
+        return "\n\n".join(kq.khoi_bang_chung() for kq in kqs)
+
+    def _kem_web_vao_hd(self, text: str, hd: Dict) -> bool:
+        """Đính nội dung web (Router đọc) vào MỤC TIÊU một việc worker có URL —
+        như `_kem_nhat_ky_git`. Agent headless không đọc được URL; Router đọc
+        hộ, quyền agent KHÔNG đổi. Trả `True` nếu có đính."""
+        try:
+            from scripts.control_center.web_reader import rut_url
+        except Exception:                                   # noqa: BLE001
+            return False
+        urls = rut_url((hd.get("objective") or "") + " " + (text or ""))
+        if not urls:
+            return False
+        kqs = self._doc_web_nhieu(urls, toi_da=2)
+        kem = [kq for kq in kqs if kq.ok and kq.van_ban]
+        if not kem:
+            return False
+        khoi = "\n\n".join(kq.khoi_bang_chung() for kq in kem)
+        hd["objective"] = (
+            (hd.get("objective") or "").rstrip()
+            + f"\n\n{self.DAU_WEB} (chỉ đọc, công khai). KHÔNG dùng read_url/lệnh: "
+              "phiên headless từ chối quyền và lượt của bạn sẽ kết thúc rỗng — "
+              "phân tích NGAY trên nội dung dưới đây.\n" + khoi)
         return True
 
     def _khoi_toa(self, project_id: str, text: str) -> str:
@@ -1011,9 +1103,14 @@ class ControlCenter:
             # V0.6 — KY UC DU AN dat SAU anh chup tinh, kem luat rieng.
             khoi_ky_uc = self._khoi_ky_uc(pid, text, kem_su_kien=la_lich_su)
             khoi_toa = self._khoi_toa(pid, text)
+            # V0.6.1 — cau co URL cong khai: Router doc trang HO (WebReader,
+            # chi doc, an toan SSRF) va dinh vao nhac nho. Cau don gian "URL
+            # nay la gi" -> Leader tra tu day, KHONG dispatch mot worker chi de
+            # doc mot trang (agent headless bi tu choi `read_url`).
+            khoi_web = self._khoi_web(text, pid)
             nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
                                       khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa,
-                                      la_lich_su=la_lich_su)
+                                      la_lich_su=la_lich_su, khoi_web=khoi_web)
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.

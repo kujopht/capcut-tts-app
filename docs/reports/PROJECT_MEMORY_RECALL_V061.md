@@ -167,10 +167,47 @@ LUÔN mở app từ CÙNG một nơi — `router-cc-desktop.cmd` ở worktree n�
 | Bậc SỐNG > KÝ ỨC | GIỮ (câu hỏi hiện tại vẫn đo sống; bộ nhận diện tách bạch) |
 | Số production/kho thật bị chạm | 0 (đọc git chỉ đọc; backfill ghi vào sổ ký ức cục bộ) |
 
-## 11. Nghiệm thu source-mode thật
+## 11. Nghiệm thu source-mode THẬT (đã chạy)
 
-Chạy sau khi đóng/mở lại app với mã mới (mã Leader hiện đang chạy là bản cũ).
-Kịch bản: tạo quyết định tường minh → Decisions +1 → đóng/mở phiên Leader mới →
-hỏi diễn giải khác (paraphrase) → recall trực tiếp 0 dispatch → hỏi sự cố SSH →
-recall 0 dispatch → "production farmer còn chạy không?" → vẫn đo sống. Ghi kết
-quả ở cuối báo cáo này khi chạy.
+`scripts/control_center_v061_ky_uc_web_acceptance.py`, app mở bằng đường
+source-mode (`pythonw -m scripts.control_center.desktop`, không `--root` — y
+như `router-cc-desktop.cmd`), **gốc dữ liệu THẬT** của người dùng
+(`C:\FanficWorkers\router-control-center`), dự án `fanfic`.
+
+### Pha A — tuyên bố quyết định (app pid 27700, cổng 64852): **7/7 ĐẠT**
+
+| Bước | Kết quả |
+|---|---|
+| Tuyên bố tường minh → Decision đề bạt NGAY (không job nền) | ĐẠT — decisions **0 → 1** trong 9.1s |
+| Đủ trường | ĐẠT — `qd_0001`, `tin_cay=user_explicit`, nguồn `chat_user#7654`, 1 mắt xích bằng chứng |
+| Provenance tra được | ĐẠT — ID + `ts=1789048282` + nguồn + bằng chứng L0 |
+| Tuyên bố KHÔNG sinh việc worker | ĐẠT — việc 7 → 7 |
+| UI đếm | ĐẠT — `decision=1`, `incident=55` |
+
+### Pha B — phiên Leader MỚI sau đóng/mở (pid 3552, cổng 59425): **9/9 ĐẠT**
+
+Đóng sạch bằng WM_CLOSE, mở lại, rồi **đẩy tuyên bố ra khỏi cửa sổ hội thoại**
+của Leader bằng 8 câu đệm — đo được: tuyên bố cách cuối **17 tin nhắn**, ngoài
+trần `SO_LUOT_NGU_CANH = 14`. Nên câu trả lời đúng **không thể** đến từ
+transcript được phục hồi; nó đến từ ký ức.
+
+| Bước | Kết quả |
+|---|---|
+| Tuyên bố đã ra khỏi cửa sổ hội thoại | ĐẠT — cách cuối 17 tin (cần ≥ 14) |
+| Recall CHÉO PHIÊN bằng diễn giải khác, 0 việc mới | ĐẠT — *"Theo quyết định `qd_0001` (bản ghi `ku_dd605f187deff41e`, ghi nhận 2 phút trước từ `sk#7654`), chính sách hiện tại của dự án là: GPT-6 Astra chỉ được dùng cho các task đặc biệt khó hoặc cần reasoning cao, không dùng mặc định…"* · việc 7 → 7 |
+| Trả lời nêu MÃ bản ghi | ĐẠT — `qd_0001` + `ku_dd605f…` + `sk#7654` |
+| **Sự cố SSH lịch sử → recall trực tiếp, 0 worker dispatch** | ĐẠT — *"Theo ký ức sự cố của dự án (bản ghi `ku_903075d957b3c8ae`, 18 ngày trước)…"* · **việc mới = 0** (trước: AG02 chạy 200s) |
+| Câu hỏi HIỆN TẠI vẫn đo SỐNG | ĐẠT — 1 sự kiện `LIVE_PROBE`; *"fanfic-farmer vẫn ĐANG CHẠY (ACTIVE)… live probe vừa kiểm tra qua SSH, 10 giây trước"* → **live > ký ức giữ nguyên** |
+
+Ghi chú trung thực: bản ghi SSH mà Leader nêu (`ku_903075d957b3c8ae`) là một
+sự cố khoá/xoay khoá production 18 ngày trước, KHÔNG phải bản ghi typo
+`fanficappwrrite.pem`. Cả hai cùng tồn tại như **bản ghi riêng** (đúng yêu cầu
+"không gộp mọi vấn đề SSH vào một sự kiện"); bản typo là
+`ku_e89c32e257818256` / `ku_4020d7924251a1ac`, tìm lại được qua
+`/api/memory/search`. Điều được chứng minh ở đây là: câu hỏi lịch sử được trả
+TỪ KÝ ỨC, có mã, **không dispatch worker**.
+
+### Số lần sửa production trong toàn bộ nghiệm thu: **0**
+
+Kho Fanfic (`C:\Users\nguye\Documents\CapCut-TTS-App`) không có tệp tracked
+nào đổi. Quét toàn bộ state dự án: **0** chuỗi giống credential.

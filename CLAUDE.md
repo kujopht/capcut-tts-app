@@ -237,7 +237,19 @@ nguồn gốc; `--max-parallel 0` = trần tự theo bể (3..12); khoá tài ng
 CHẾ ĐỘ READ/WRITE (đọc song song, ghi độc quyền, chuỗi cũ = WRITE), tài
 nguyên theo TỪNG con, việc đọc git nhận nhật ký do Router đọc (agent headless
 không chạy được shell — quyền của nó KHÔNG được nới);
-`docs/reports/MULTI_AGENT_FANOUT_V061.md`. Báo cáo:
+`docs/reports/MULTI_AGENT_FANOUT_V061.md`.
+
+**LUẬT CHUNG đã trả giá ba lần — `agy --print` (headless) TỰ CHỐI mọi công cụ
+cần prompt quyền** (`command`, `read_file`, `read_url`). Đừng cấp quyền rộng,
+đừng `--dangerously-skip-permissions`: **Router làm phép đọc an toàn rồi đính
+BẰNG CHỨNG vào hợp đồng/nhắc nhở**. Ba hiện thực cùng mẫu: `nguon_git.
+git_nhat_ky_doc` (lịch sử git), `web_reader.doc_web` (web công khai, an toàn
+SSRF, `docs/reports/WEB_READER_V061.md`), và ký ức dự án (`memory/`). Câu hỏi
+LỊCH SỬ/KIẾN THỨC DỰ ÁN và câu hỏi có URL đơn giản **không được** tốn một AG
+slot — xem `leader.LUAT_LICH_SU` / `leader.LUAT_WEB`;
+`docs/reports/PROJECT_MEMORY_RECALL_V061.md`.
+
+Báo cáo:
 `docs/reports/PROJECT_MEMORY_V061.md`,
 `docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`,
 `docs/reports/ANTIGRAVITY_POOL_AUDIT_V061.md`; mã ở

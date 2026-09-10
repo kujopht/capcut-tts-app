@@ -108,6 +108,27 @@ Kết luận nghiệm thu: mọi bước về TOẢ (2, 2b, 2c, 2d, 3, 3b, 3c, 4
 5c, 7) ĐẠT trên bản đóng gói ở lần 4; bước 6 ĐẠT ở lần 2 và 3. Chi phí: mỗi lần
 4 lượt Gemini Flash một dòng + 2 lượt Leader.
 
+### 6.2 Bản cuối — `dist-v061` build lại SẠCH từ `d59accd` (sau khi người vận hành đóng app)
+
+`dist-v061/Router Control Center/Router Control Center.exe` — 11 653 545 byte,
+sha256 `d0c04e9262d2d8e430ef97df8033c36b2984e1c2aaa8d0b0071e15873588c877`,
+`_internal` 278 tệp (`dist-v061/BAN_TOT_v061.txt`). Mở bình thường qua
+`ShellExecuteW` (bước 1 của cả hai lần). Harness thêm bước 8: kho git tạm sạch
+trước/sau (việc CHỈ ĐỌC; `.router/` của chính app được loại).
+
+| Kịch bản | Kết quả | Đo được |
+|---|---|---|
+| A — `--so 4 --max-parallel 3` (mỗi agent một dòng) | **15/16** | 1 cha + 4 con, yêu cầu giữ 4; Leader: *"tách 4 việc; 3 chạy ngay, 1 chờ slot (… hiện 3/4 worker slots khả dụng)"*; AG02/AG03/AG04; ≤3 cùng lúc; 3+1 chờ; Tasks + Agents sống; cha DONE 4/4; MỘT tin tổng hợp; **6 ĐẠT: 0 vi phạm / 102 s**; kho sạch. Bước 8 hỏng lần này chỉ vì harness chưa loại `.router/` (sửa ngay). |
+| B — câu NGUYÊN VĂN *"gọi 8 agent gemini 3.8 và phân mỗi đứa đi lục cho t 1 bộ fanfic audio"*, `--max-parallel 6`, kho tạm gieo 12 bộ fanfic audio tổng hợp | **15/16** | **1 cha + 8 con, yêu cầu giữ nguyên 8**; Leader: *"tách thành 8 việc độc lập cho 8 agent (Gemini 3.8 Flash High) tìm fanfic audio: 6 việc chạy ngay, 2 việc chờ slot do trần song song của Control Center là 6"* + dòng engine *"8 tài khoản rảnh / 8 đủ điều kiện, 8 slot trống (Leader đang chiếm 1 chỗ ở AG01)"*; **6 tài khoản thật AG02–AG07** cùng lúc, không bao giờ >6, có lúc 6 chạy + 2 chờ; Tasks 1 cha + 8 con, Agents 6 dòng sống; cha DONE **8/8, 8 ứng viên, 0 trùng**, nguồn gốc từng con; MỘT tin tổng hợp; kho git sạch trước/sau. Hỏng: **6** — 7 cửa sổ chủ `WindowsTerminal.exe` lúc `agy` sinh (4.1 s, 22 s), trong khi **22/22 console do Router tạo đều ẩn**; không lệnh nào của phiên làm việc chạy cạnh. |
+
+Về bước 6: bộ đo không quy được cửa sổ của Windows Terminal (tiến trình
+phiên-toàn-cục, "ứng dụng terminal mặc định") về app; mọi console mà Router
+sinh ra đều ẩn (`an_cua_so()` hoạt động — bộ đo đếm `console ẩn`). Hiện tượng
+đã ghi từ V0.4/V0.6, tần suất tăng theo số lần sinh `agy` (4 agent: 0/102 s;
+8 agent: 7). Nó nằm ở đường sinh tiến trình của `agy`/launcher, không phải ở
+toả, và **không sửa trong đợt này** (đề bài: không thêm tính năng) — để lại
+làm việc tiếp theo có bài đo riêng.
+
 Sổ ký ức/`control.db` của mỗi lần nằm trong kho tạm và bị xoá sau bài; không
 kho thật nào bị sửa; không tài khoản nào bị đăng nhập lại hay xoay.
 

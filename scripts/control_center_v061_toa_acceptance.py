@@ -42,6 +42,39 @@ def _cau(so: int) -> str:
             f"tệp nào, không chạy lệnh nào, không làm gì khác.")
 
 
+#: Cau NGUYEN VAN cua nguoi dung o nghiem thu tay (kich ban `--kich-ban fanfic`).
+CAU_FANFIC = "gọi 8 agent gemini 3.8 và phân mỗi đứa đi lục cho t 1 bộ fanfic audio"
+
+
+def _gieo_fanfic_audio(goc: Path, so_bo: int = 12) -> None:
+    """Gieo `so_bo` bộ fanfic audio TỔNG HỢP vào kho git tạm — việc của agent là
+    ĐỌC kho và mỗi đứa chọn một bộ; dữ liệu giả, không tệp âm thanh thật, không
+    kho thật. Commit để `git status` sạch và bước 'không sửa gì' đo được."""
+    import subprocess
+    d = goc / "fanfic_audio"
+    d.mkdir(exist_ok=True)
+    for i in range(1, so_bo + 1):
+        b = d / f"bo_{i:02d}"
+        b.mkdir(exist_ok=True)
+        (b / "README.md").write_text(
+            f"# Bộ fanfic audio {i:02d}\n\nTruyện: Fanfic số {i}. Giọng đọc: mẫu {i}.\n"
+            f"Chương: {3 + i % 4}. Định dạng: mp3 (giả, không có tệp âm thanh trong kho).\n",
+            encoding="utf-8")
+    for c in (["git", "add", "-A"], ["git", "commit", "-q", "-m", "gieo fanfic audio gia"]):
+        subprocess.run(c, cwd=goc, check=True, capture_output=True)
+
+
+def _git_sach(goc: Path) -> str:
+    """`git status --porcelain` của kho tạm, BỎ `.router/` — đó là sổ của chính
+    Control Center (harness dùng kho tạm làm gốc app), không phải agent ghi."""
+    import subprocess
+    p = subprocess.run(["git", "status", "--porcelain"], cwd=goc, capture_output=True,
+                       text=True, encoding="utf-8", errors="replace")
+    dong = [d for d in p.stdout.splitlines()
+            if d.strip() and not d.split(None, 1)[-1].startswith(".router")]
+    return "\n".join(dong).strip()
+
+
 def _mo(p_exe: Path, goc: Path, cong: int, gs, them: str):
     ph = _mo_qua_explorer(p_exe, goc, cong, them)
     gs.theo(ph.pid)
@@ -66,21 +99,33 @@ def main(argv=None) -> int:
     ap.add_argument("--max-parallel", type=int, default=3,
                     help="trần song song truyền cho EXE (nhỏ hơn --so để có con phải chờ)")
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--kich-ban", default="dong", choices=("dong", "fanfic"),
+                    help=("`dong`: mỗi agent trả một dòng (mặc định); `fanfic`: câu "
+                          "NGUYÊN VĂN của người dùng trên kho tạm có 12 bộ fanfic audio "
+                          "tổng hợp — --so bị đặt 8 theo câu"))
     a = ap.parse_args(argv)
-    so, mp = int(a.so), int(a.max_parallel)
+    kich_ban = a.kich_ban
+    so = 8 if kich_ban == "fanfic" else int(a.so)
+    mp = int(a.max_parallel)
     chay_ngay = min(so, mp)
+    cau = CAU_FANFIC if kich_ban == "fanfic" else _cau(so)
 
     bd = Bang()
     goc = kho_git_tam()
     _gieo(goc)
+    if kich_ban == "fanfic":
+        _gieo_fanfic_audio(goc)
+    dau_git = _git_sach(goc)
     p_exe = Path(a.exe)
     if not p_exe.is_absolute():
         p_exe = (GOC / a.exe).resolve()
 
     ghi("=" * 78)
-    ghi(f"NGHIỆM THU TOẢ — {so} agent, trần song song {mp}, trên BẢN EXE ĐÓNG GÓI")
+    ghi(f"NGHIỆM THU TOẢ — {so} agent, trần song song {mp}, kịch bản {kich_ban}, "
+        f"trên BẢN EXE ĐÓNG GÓI")
     ghi(f"  exe : {p_exe}")
     ghi(f"  gốc : {goc}")
+    ghi(f"  câu : {cau}")
     ghi("=" * 78)
 
     gs = GiamSatCuaSo(); gs.__enter__()
@@ -94,14 +139,19 @@ def main(argv=None) -> int:
         # -- 2. cau "goi N agent" qua o chat ----------------------------------
         gs.dat_pha("chat: gọi N agent")
         t0 = time.time()
-        tl = _gui_chat(cdp, _cau(so), han=420)
+        tl = _gui_chat(cdp, cau, han=420)
         st = _state(cdp, "router")
         ts = st.get("tasks") or []
         cha = [t for t in ts if ((t.get("contract") or {}).get("_toa") or {}).get("cha")]
         con = [t for t in ts if t.get("parent_id") and cha and t["parent_id"] == cha[0]["task_id"]]
+        toa_cha = ((cha[0].get("contract") or {}).get("_toa") or {}) if cha else {}
         bd.ghi(f"2. cardinality: {so} agent -> 1 việc cha + {so} việc con (không việc 'to')",
-               len(cha) == 1 and len(con) == so and len(ts) == so + 1,
-               f"cha={len(cha)} · con={len(con)} · tổng việc={len(ts)} · {time.time() - t0:.0f}s")
+               len(cha) == 1 and len(con) == so and len(ts) == so + 1
+               and toa_cha.get("so") == so
+               and (toa_cha.get("yeu_cau") or {}).get("so_agent") == so
+               and (toa_cha.get("suc_chua") or {}).get("yeu_cau") == so,
+               f"cha={len(cha)} · con={len(con)} · tổng việc={len(ts)} · yêu cầu giữ nguyên="
+               f"{(toa_cha.get('yeu_cau') or {}).get('so_agent')} · {time.time() - t0:.0f}s")
         chi_so = sorted(((t.get("contract") or {}).get("_toa") or {}).get("chi_so") for t in con)
         bd.ghi("2b. mỗi con một chỉ số i/N và ràng buộc KHÔNG TRÙNG",
                chi_so == list(range(1, so + 1))
@@ -184,7 +234,7 @@ def main(argv=None) -> int:
 
         # -- 5. cho tat ca con xong -> cha tong hop ---------------------------------------
         gs.dat_pha("chờ xong")
-        het = time.time() + 480
+        het = time.time() + (600 if so > 4 else 480)
         cha_x = None
         while time.time() < het:
             s = _state(cdp, "router")
@@ -220,6 +270,10 @@ def main(argv=None) -> int:
                kq.tom_tat() + (NL + "      " + _ta_vi_pham(kq.vi_pham) if kq.vi_pham else ""))
         sau = _dem_so(goc)
         bd.ghi("7. sổ lành", sau["nguyen_ven"] == "ok", f"control.db={sau['nguyen_ven']}")
+        cuoi_git = _git_sach(goc)
+        bd.ghi("8. không sửa gì: kho git tạm sạch trước và sau (việc CHỈ ĐỌC), không kho thật nào bị chạm",
+               dau_git == "" and cuoi_git == "",
+               f"git status trước={dau_git or '(sạch)'} · sau={cuoi_git or '(sạch)'}")
         cdp.dong()
     finally:
         gs.dung()

@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 from scripts.control_center.model import Project
 from scripts.control_center.store import ControlStore
+from scripts.router_v3.tien_trinh import an_cua_so
 
 
 def goc_kho_chinh(start: Optional[Path] = None) -> Optional[Path]:
@@ -55,7 +56,7 @@ def goc_kho_chinh(start: Optional[Path] = None) -> Optional[Path]:
         p = subprocess.run(["git", "-C", str(goc), "worktree", "list",
                             "--porcelain"],
                            capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=30)
+                           errors="replace", timeout=30, **an_cua_so())
         if p.returncode == 0:
             for dong in (p.stdout or "").splitlines():
                 if dong.startswith("worktree "):
@@ -75,7 +76,7 @@ def worktree_hien_tai(start: Optional[Path] = None) -> Optional[Path]:
         p = subprocess.run(["git", "-C", str(goc), "rev-parse",
                             "--show-toplevel"],
                            capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=30)
+                           errors="replace", timeout=30, **an_cua_so())
         if p.returncode == 0 and (p.stdout or "").strip():
             return Path(p.stdout.strip())
     except (OSError, subprocess.SubprocessError):
@@ -98,7 +99,7 @@ def la_kho_git(duong) -> bool:
         p = subprocess.run(["git", "-C", str(d), "rev-parse",
                             "--is-inside-work-tree"],
                            capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=30)
+                           errors="replace", timeout=30, **an_cua_so())
     except (OSError, subprocess.SubprocessError):
         return False
     return p.returncode == 0 and (p.stdout or "").strip() == "true"

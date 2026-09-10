@@ -386,7 +386,33 @@ class TestGhiUTF8(unittest.TestCase):
         ghi("Người dùng")                  # đạt = không nâng gì cả
 
     def test_hop_thoai_loi_khong_no_ngoai_windows(self):
-        hop_thoai_loi("Router Control Center", "Đường dẫn thử nghiệm")
+        """Đúng như TÊN của nó: đường NGOÀI Windows phải trả về im lặng.
+
+        BẢN TRƯỚC TREO CẢ BỘ KIỂM (đo 2026-09-10, `pytest` hết giờ ở đúng bài
+        này, exit 124, lặp lại được). Nó gọi `hop_thoai_loi` THẲNG trên
+        Windows, nên `MessageBoxW` bật một hộp thoại MODAL và chặn luồng gọi
+        cho tới khi có người BẤM — một bài kiểm không thể chạy không người
+        trực. Nay: nhánh ngoài-Windows kiểm bằng cách ép `sys.platform`
+        (đúng tên bài), nhánh Windows kiểm bằng cách thay `MessageBoxW` để
+        khẳng định "không nâng ngoại lệ" mà không dựng hộp thoại nào.
+        """
+        import ctypes
+        from unittest import mock
+        from scripts.control_center import ghi_utf8 as G
+
+        # 1. NGOÀI Windows: trả về ngay, không chạm ctypes.
+        with mock.patch.object(G.sys, "platform", "linux"):
+            hop_thoai_loi("Router Control Center", "Đường dẫn thử nghiệm")
+
+        # 2. TRÊN Windows: gọi đúng MessageBoxW, không nâng gì — hộp thoại
+        #    được thay nên không có gì chặn.
+        if sys.platform == "win32":
+            goi = []
+            with mock.patch.object(ctypes.windll.user32, "MessageBoxW",
+                                   lambda *a: goi.append(a) or 1):
+                hop_thoai_loi("Router Control Center", "Đường dẫn thử nghiệm")
+            self.assertEqual(len(goi), 1, "phải gọi MessageBoxW đúng một lần")
+            self.assertIn("Đường dẫn thử nghiệm", goi[0])
 
     def test_ghi_utf8_khong_dung_cach_bi_cam(self):
         than = _than_ma("scripts/control_center/ghi_utf8.py")

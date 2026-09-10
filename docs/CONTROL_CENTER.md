@@ -817,6 +817,127 @@ Bài học chung, và nó lớn hơn Unicode: **một bài kiểm chạy trong m
 trường do chính nó dựng lên chỉ chứng minh được điều gì nếu môi trường ấy
 là môi trường người dùng có.**
 
+## 14b. Không cửa sổ console nào được nhấp lên (V0.4)
+
+`Router Control Center.exe` build `--noconsole` nên tiến trình **không có
+console**. Trên Windows, một tiến trình không có console mà sinh ra một
+ứng dụng **console** (`git.exe`, `agy.exe`, `codex.exe`, `python.exe`,
+`icacls.exe`) thì hệ điều hành **cấp cho nó một console mới** — kèm một
+cửa sổ nhấp lên và **giành focus** của người đang gõ. Chạy từ mã nguồn
+thì cửa sổ đó trùng console sẵn có nên không ai thấy: lại đúng một lớp
+lỗi "chỉ lộ ra ở bản EXE", cùng họ với `sys.executable` (§ dispatch) và
+cp1252 (§14).
+
+Số lần nhấp tỉ lệ với số lệnh, và `AnhChupDuAn.chup()` chạy ~6 lệnh `git`
+cho **mỗi** tin nhắn chat — một câu "ê" cũng đủ thấy.
+
+**Luật:** mọi lời gọi `subprocess.run`/`Popen` trên đường của ứng dụng
+phải mang `**an_cua_so()` (`scripts/router_v3/tien_trinh.py`):
+`CREATE_NO_WINDOW` + `STARTUPINFO(SW_HIDE)` trên Windows, `{}` ở nơi
+khác. Ngoại lệ duy nhất được phép là `AN_HIEN` — dành cho đường mà
+**người dùng cố ý** muốn thấy cửa sổ.
+
+Ẩn cửa sổ **không** đánh đổi bằng mất log: `capture_output=True` giữ
+nguyên, đầu ra vẫn vào nhật ký app.
+
+Phép cưỡng chế là một bài kiểm **AST trên cả bao đóng khởi động**
+(`test_control_center_ux_v04.py`), không phải một lần rà tay: nó tính mọi
+tệp `scripts/**` mà việc mở EXE có thể nạp tới và đòi từng chỗ sinh tiến
+trình phải ẩn cửa sổ. Thêm adapter mới mà quên là đỏ, kèm số dòng.
+
+## 14c. Cài đặt giao diện và ảnh nền (V0.4)
+
+Bảng `cai_dat_ui` là khoá–giá trị, thuộc **người dùng trên máy này**,
+không thuộc một dự án — đổi dự án không đổi ảnh nền. Lưu từng khoá riêng
+(không phải một khối JSON) để hai lần ghi khác khoá không đè nhau: đổi độ
+tối không được xoá mất ảnh nền. Bảng thêm bằng `CREATE TABLE IF NOT
+EXISTS` nên sổ cũ tự có nó ở lần mở sau; không có bước di trú tay.
+
+**`wallpaper` giữ MỘT MÃ ĐÍNH KÈM, không phải đường dẫn tệp.** Đây là bất
+biến an toàn của tính năng: nhận đường dẫn thì để *vẽ* được ảnh phải mở
+một endpoint đọc tệp tuỳ ý trên đĩa, tức là dựng lại đúng lỗ mà §12 tồn
+tại để bịt. Đi qua đường đính kèm thì được thừa cả bốn bất biến ở §12 —
+kể cả phép kiểm **chữ ký byte**: `anh.png` mà không mở đầu bằng
+`\x89PNG` thì bị từ chối.
+
+`POST /api/ui` chỉ nhận allowlist khoá, xác minh mã đính kèm tồn tại và
+**là ảnh**, và kẹp `dim`/`blur` vào khoảng hợp lệ. Có bài kiểm đọc chính
+mã endpoint và đòi nó không chứa `open(`/`read_bytes`/`read_text`/
+`FileResponse`.
+
+## 14d. Smart App Control và bản đóng gói (2026-09-10)
+
+Máy phát triển bật Smart App Control cưỡng chế. Bản EXE PyInstaller **không
+ký** chỉ mở được khi đám mây ISG trả "known good" cho **đúng băm** của tệp —
+đạt thì Code Integrity ghi EA `$KERNEL.PURGE.ESBCACHE` lên tệp và không hỏi
+lại; không đạt thì chặn (3033/3077, "we could not verify its publisher").
+Mỗi lần dựng là một băm mới (mốc dựng trong đầu PE + overlay), nên với bản
+không ký, "mở được" là kết quả xổ số, không phải thuộc tính của mã. Đo thật:
+`dist-v0612` chạy, `dist-v061` dựng lại 50 phút sau từ cùng commit bị chặn.
+
+Bốn luật:
+
+1. **Sau khi dựng, đọc `KIEM_DONG_GOI.txt`** (`build_desktop_exe.py` tự gọi
+   `scripts/kiem_ban_dong_goi.py`): SHA256, chữ ký/người ký, MOTW, dự đoán
+   SAC. Không có báo cáo thì mọi so sánh "bản cũ chạy, bản mới không" là đoán.
+2. **Không tự ký, không cài gốc tự ký, không tắt SAC, không sửa chính sách/
+   registry, không tự ghi EA.** SAC chỉ tin CA trong Microsoft Trusted Root
+   Program và không tra kho gốc cục bộ; ba việc sau là nới rào không hoàn tác.
+3. **Đường dev chắc chắn không cần chứng chỉ**: `router-cc-desktop.cmd` —
+   `pythonw.exe` của PSF (đã ký, đã tin) chạy `scripts.control_center.desktop`
+   từ mã nguồn; mã Python không thuộc phạm vi kiểm của SAC ở cả hai cách đóng
+   gói, nên không có gì bị nới.
+4. **Phát hành thì ký bằng chứng chỉ của CA công cộng** qua
+   `scripts/ky_ban_dong_goi.py --thumbprint <sha1>` (khoá trên token/HSM, kho
+   chỉ biết vân tay) hoặc Artifact Signing nơi được hỗ trợ. Giữ nguyên các
+   thư mục `dist-v*` đã chạy được — EA nằm trên tệp.
+
+`docs/reports/SMART_APP_CONTROL_V061.md` có nhật ký sự kiện, bảng sáu bản,
+thí nghiệm mở có kiểm soát, và đánh giá bốn phương án launcher.
+
+## 14e. V0.6.1 — TRẠNG THÁI ĐÓNG BĂNG (canonical, 2026-09-10)
+
+Nhân V0.6.1 được **đóng băng** ở đây. Mười năng lực dưới đây đã được nghiệm thu
+trên ứng dụng THẬT (source-mode và/hoặc bản đóng gói), không phải chỉ bằng bài
+kiểm đơn vị. Sau mốc này: sửa lỗi và tài liệu — **không thêm tính năng vào nhân
+V0.6.1**.
+
+| Năng lực | Trạng thái | Bằng chứng |
+|---|---|---|
+| Gốc dữ liệu bền theo NGƯỜI DÙNG, chính tắc | ĐÓNG BĂNG | `GOC_DU_LIEU_CHINH_TAC_V061.md`; 27 bài |
+| Liên tục ký ức QUA CÁCH KHỞI CHẠY (source ⇄ đóng gói) | ĐÓNG BĂNG | nghiệm thu hai chiều 15/15 |
+| Leader LÀM ĐẦU bằng ký ức | ĐÓNG BĂNG | `PROJECT_MEMORY_RECALL_V061.md`; 10/10 |
+| Nhập lịch sử (backfill) có nguồn gốc | ĐÓNG BĂNG | 7.557 mục vào sổ live; 0 rò bí mật |
+| WebReader (đọc web công khai, an toàn SSRF) | ĐÓNG BĂNG | `WEB_READER_V061.md`; 9/9 + 19 bài |
+| Toả đa agent tường minh ("gọi N agent…") | ĐÓNG BĂNG | `MULTI_AGENT_FANOUT_V061.md`; 8 con thật |
+| Đồng thời READ/READ thật (khoá có chế độ) | ĐÓNG BĂNG | `MULTI_AGENT_FANOUT_V061.md` §7; 4 con song song đo bằng mốc thời gian |
+| Bể đa tài khoản Antigravity (AG01..AG08) | ĐÓNG BĂNG | `ANTIGRAVITY_POOL_AUDIT_V061.md` |
+| Nền móng credential provider | ĐÓNG BĂNG | `PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md` |
+| Quan sát SỐNG dự án Fanfic | ĐÓNG BĂNG | probe SSH thật, `PROJECT_OBSERVABILITY_V05.md` |
+
+**Bốn bất biến của nhân đã đóng băng** — phá một cái là phá nhân:
+
+1. **Gốc dữ liệu KHÔNG suy từ vị trí mã.** `duong_du_lieu.py` là nơi duy nhất
+   định nghĩa; `%LOCALAPPDATA%\RouterControlCenter`. Không `__file__`, không
+   `cwd`, không `sys.executable`, không thư mục dist. Mọi điểm vào đi qua nó.
+2. **Bậc thẩm quyền: SỐNG > SỔ/KHO > KÝ ỨC > SUY LUẬN.** Câu hỏi hiện tại phải
+   đi đo; ký ức không bao giờ trả lời thay một phép đo sống.
+3. **Không nới quyền cho agent.** `agy --print` tự chối mọi công cụ cần prompt
+   (`command`, `read_file`, `read_url`) — kể cả khi LEADER gọi. Cách sửa duy
+   nhất được phép: **Router tự làm phép đọc an toàn rồi đính BẰNG CHỨNG**
+   (`nguon_git`, `web_reader`, ký ức). Không `--dangerously-skip-permissions`.
+4. **Một người ghi trên một kho.** `KhoaKho` (khoá OS) + phiên bản KHO tách
+   khỏi phiên bản ứng dụng; sổ mới hơn mã thì DỪNG, không hạ cấp âm thầm.
+
+**Hồi quy đóng băng:** 931 bài xanh, 0 hỏng (95 bài Qt GUI BỎ QUA — python hệ
+thống không có PySide6). Chạy theo TỆP RIÊNG cho các bộ chậm/đa luồng
+(`slice`, `ui`, `utf8_locale`) — gộp hết vào một tiến trình từng làm treo và
+từng cho hỏng GIẢ do định thời lượng.
+
+**Giữ nguyên, không xoá:** `dist-v04/v05/v06` (+ `v0611/v0612/v0613`) và mọi sổ
+`.router` cũ đã đánh mốc `DA_DI_TRU.json`. Việc dọn dẹp là quyết định của người
+vận hành, không tự động.
+
 ## 15. Chưa làm (cố ý — ranh giới đã chọn)
 
 Không phải thiếu sót — là ranh giới đã chọn:
@@ -840,3 +961,100 @@ Không phải thiếu sót — là ranh giới đã chọn:
   việc ở `QUEUED`/`WAITING`; `BLOCKED` (gồm mọi việc GATED) đứng yên cho tới
   khi có người duyệt.
 - **Chưa có Browser Operator, chưa có app di động, chưa có cloud.**
+
+## 16. Ký ức dự án vô hạn + ảo hoá ngữ cảnh (V0.6)
+
+Một phiên LLM không còn là vòng đời của dự án. Lịch sử được giữ **trọn**,
+chỉ-thêm, trên đĩa cục bộ; Leader nhận một **gói ngữ cảnh** có trần token
+độc lập với kích thước lịch sử (đo: 20 k → 200 k sự kiện, gói 1 047 → 1 056
+token). Đầy đủ ở `docs/reports/PROJECT_MEMORY_V06.md`; mã ở
+`scripts/control_center/memory/`.
+
+Bốn luật không được phá:
+
+1. **Ký ức ở bậc 3, không bao giờ trả lời câu hỏi HIỆN TẠI khi có probe
+   sống.** `leader.LUAT_KY_UC` đi kèm khối ký ức ở MỌI lượt có khối, đặt
+   SAU ảnh chụp tĩnh; nhãn khối không bắt đầu bằng "TRẠNG THÁI"; một lần
+   `LIVE_PROBE` được nhớ là "kết quả một lần đo sống (ĐÃ CŨ)". Bài kiểm so
+   vị trí bằng `index()` và cấm cụm "LUẬT THẨM QUYỀN"/"tin được".
+2. **L0 (`su_kien`) chỉ-thêm.** Không có đường sửa/xoá trong mã — bài kiểm
+   quét `kho.py`. Không có endpoint xoá, không có nút "xoá lịch sử".
+3. **Không bí mật vào sổ.** `bi_mat.loc()` ở cổng vào, phủ `packet.redact`
+   và lọc cả khối PEM, AKIA, KEY=value…; thứ tự mẫu THÊM trước mẫu gốc.
+   `da_loc=N` được ghi, nội dung thì không.
+4. **Ký ức không được giết Router.** Provider không phương thức nào ném;
+   sổ không mở được → `MEMORY_UNAVAILABLE`, chat/live vẫn chạy; người ghi
+   hỏng → sổ chính vẫn ghi (`ControlStore._bao` nuốt).
+
+Vị trí sổ: `<gốc>/.router/memory/<ns>/memory.db` — cạnh `control.db`,
+mỗi dự án một tệp, **không** trong cây git của dự án được quản. FTS5
+`unicode61 remove_diacritics 2` (bắt buộc ghi rõ — mặc định gấp dấu tiếng
+Việt nửa vời), external content, dự phòng `LIKE` trên cột `chuan` (gấp
+dấu + `đ→d`). Không vector, không trigram, không LLM trong đường chọn lọc.
+
+## 17. Đề bạt ký ức, nhập lịch sử, provider ngoài + kho bí mật (V0.6.1)
+
+Ba báo cáo: `docs/reports/PROJECT_MEMORY_V061.md`,
+`docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`,
+`docs/reports/ANTIGRAVITY_POOL_AUDIT_V061.md`. Mã:
+`scripts/control_center/memory/{de_bat,nhap_khau}.py`,
+`scripts/control_center/nguon_git.py` (`git log`/`git worktree list` chỉ-đọc —
+đặt NGOÀI `memory/` vì gói đó không được có `subprocess`),
+`scripts/control_center/providers/`.
+
+Tám luật (5–12) thêm vào bốn luật của §16:
+
+5. **Tuyên bố tường minh của người dùng thành bản ghi NGAY tại cổng vào, tất
+   định, không LLM.** `de_bat.xet()` cần một dấu hiệu TUYÊN BỐ ("ghi nhớ…",
+   "quyết định của project:", "từ giờ rule là"…); một câu chỉ có "không được"
+   không phải quyết định. Bản ghi mang `authority = user_explicit`,
+   `nguon_loai = chat_user`, bằng chứng trỏ về đúng dòng L0. Leader nhận
+   "VỪA GHI TỰ ĐỘNG … `qd_xxxx`" và chỉ XÁC NHẬN, không ghi lại.
+6. **Thay thế kiểu ADR, hai chiều, không xoá.** `thay_the_ky_uc` một giao dịch:
+   bản cũ `thay_the` + `bi_thay_the`, bản mới `thay_the_cho`; cả hai truy được.
+   Mã `qd_*` người dùng nêu được quy về ký ức đứng sau trước khi so khớp.
+7. **Lịch sử nhập luôn `backfill`, không bao giờ `user_explicit`.** Vai "user"
+   trong tệp phiên không chứng minh người gõ (tóm tắt nén, skill, nhắc hệ
+   thống). Chỉ đề bạt trước mốc ký ức; phiên đang mở (mtime < 600 s) bị bỏ
+   qua; chỉ phiên của các worktree của ĐÚNG kho (`git worktree list`);
+   idempotent, chỉ đọc nguồn, resumable, thử khô.
+8. **Giá trị credential chỉ đi qua `KhoBiMat`.** Sổ (`providers.db`) giữ
+   `credential_ref`; mọi chuỗi giống khoá bị từ chối ghi. `BiMat` là tay cầm
+   mờ (`dung(fn)`), không pickle/json/repr ra giá trị. Không kho an toàn →
+   `luu()` NÉM, không rơi về tệp thường.
+9. **Provider ngoài vào fabric ở trạng thái KHÔNG nhận dispatch.**
+   `AUTO_ROUTING = False` là hằng trong mã; định tuyến thủ công = "Hỏi thử"
+   do người bấm. Bật AUTO là bước tiếp theo, có adapter thực thi + ngân sách.
+10. **Chỗ Leader chiếm trên AG01 HIỆN RA với bộ lập lịch.**
+    `leader.chiem_cho_fabric` ghi nhãn `LEADER:<project>` vào `running_tasks`
+    khi mở phiên, `tra_cho_fabric` ở `shutdown`; không đi qua `mark_finished`.
+11. **Số agent người dùng xin là một trường riêng, đọc từ CÂU NGƯỒI DÙNG.**
+    `toa.xet_toa(text)` (tất định) → 1 việc cha (vật chứa) + N việc con độc
+    lập, mỗi con `AGENT i/N` với ràng buộc không trùng. Sức chứa đo từ fabric
+    lúc tách (khe rảnh đã trừ `LEADER:`, tài khoản rảnh, trần song song) và
+    câu trả lời nói đúng "K chạy ngay, N−K chờ" — không bao giờ cắt yêu cầu
+    trong im lặng, không bao giờ nói "8" khi tạo 1. Con tránh runtime anh em
+    đang chạy (`SessionManager.decide(tranh_runtime=)`), khe được đánh dấu
+    NGAY lúc giao. Gộp kết quả khi mọi con xong: khử trùng, giữ nguồn gốc,
+    MỘT tin tổng hợp. `che_do` (chất lượng) ≠ `so_agent` ≠ `max_parallel`
+    (trần; `0` = tự theo bể). `docs/reports/MULTI_AGENT_FANOUT_V061.md`.
+12. **Khoá tài nguyên có CHẾ ĐỘ; việc chỉ đọc không bao giờ đi đường GHI.**
+    `ResourceLock.mode ∈ {read, write}` (`locks.py`): READ+READ sống chung (một
+    hàng `…#r:<task>` mỗi người đọc), READ+WRITE và WRITE+WRITE giao nhau thì
+    tranh chấp, không giao nhau thì song song. Chuỗi cũ `FILESYSTEM:x` không
+    chế độ = WRITE — không nới gì cho dữ liệu cũ. Giao nhau tất định sau
+    `chuan_hoa` (`docs/`, `docs/**`, `Docs\sub` → `docs`, `docs/sub`; `.`/`*` =
+    gốc kho giao mọi đường dẫn; so theo ĐOẠN). `LockKind.GIT`: `history` (đọc)
+    tách `worktree` (ghi); đọc lịch sử git không giữ khoá hệ tệp. Bộ phân rã
+    xét Ý ĐỌC trước (`_Y_DOC` mà không `_Y_GHI` → `analysis/review`, không
+    `repo_write`, không worktree, khoá READ); danh từ `tests`/`README` trần
+    không còn là việc `testing`. Toả: tài nguyên theo TỪNG con từ mục của nó
+    (`READ FILESYSTEM <đường>` · `READ FILESYSTEM .` · `READ GIT history` ·
+    việc GHI `WRITE FILESYSTEM <đường>`), KHÔNG sao chép khoá mẫu cho mọi con;
+    cha không xin khoá, `RUNNING` khi con đầu được nhận. Song song được ĐO bằng
+    khoảng chạy thật (`khoang_chay` → `song_song_toi_da` quét mốc), không đếm
+    trạng thái. Khoá được nhả NGAY khi việc ở trạng thái cuối (trước thử
+    lại/báo chat/gộp cha), `finally` chỉ là lưới. Việc đọc lịch sử git nhận
+    NHẬT KÝ GIT do Router đọc (`nguon_git.git_nhat_ky_doc`, lọc bí mật) — agent
+    headless không chạy được lệnh shell và quyền của nó KHÔNG được nới.
+    `MULTI_AGENT_FANOUT_V061.md` §7, `scripts/tests/test_khoa_doc_ghi_v061.py`.

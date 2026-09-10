@@ -33,7 +33,9 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 from scripts.router_v3.packet import TaskResult, scan_for_secrets
-from scripts.router_v3.worktree import WorktreeError, WorktreeHandle, WorktreeManager
+from scripts.router_v3.worktree import (WorktreeError, WorktreeHandle,
+                                        WorktreeManager,
+                                        _boc_an_cua_so)
 
 #: Duong dan KHONG worker nao duoc sua, du `write_scope` co noi gi. Day la
 #: rao cuoi: mot goi viec dung sai (hoac mot worker tu y mo rong pham vi) van
@@ -89,8 +91,15 @@ class ValidationReport:
 
 
 def _git(cwd: Path, *args: str, runner=subprocess.run):
-    return runner(["git", "-C", str(cwd), *args], capture_output=True,
-                  text=True, encoding="utf-8", errors="replace")
+    # `_boc_an_cua_so`: moi lenh o day chay trong tien trinh cua ung dung
+    # desktop, va ban do build `--noconsole` — khong co console, nen
+    # Windows cap cho `git.exe` mot console MOI kem mot cua so nhap len
+    # va GIANH FOCUS. Boc runner (thay vi them kwargs o tung diem goi) vi
+    # `runner` la mot tham so TIEM DUOC: bo kiem truyen ham gia khong
+    # nhan `creationflags`, nen phep boc phai tu nhan ra dieu do.
+    return _boc_an_cua_so(runner)(
+        ["git", "-C", str(cwd), *args], capture_output=True,
+        text=True, encoding="utf-8", errors="replace")
 
 
 def tep_da_doi(worktree: Path, *, runner=subprocess.run) -> List[str]:
@@ -246,8 +255,11 @@ def cong_test(lenh_test: Sequence[Sequence[str]], worktree: Path, *,
                               f"{lenh[0]!r} (cho phép: "
                               f"{list(_LENH_TEST_CHO_PHEP)})"), da_chay
         try:
-            p = runner(lenh, cwd=str(worktree), capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=timeout)
+            # Lenh test la mot tien trinh CONSOLE (`python -m unittest`,
+            # `npm test`…), nen no cung nhap cua so nhu `git`.
+            p = _boc_an_cua_so(runner)(
+                lenh, cwd=str(worktree), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=timeout)
         except subprocess.TimeoutExpired:
             return GateResult("tests", False,
                               f"{' '.join(lenh)} vượt {timeout}s"), da_chay

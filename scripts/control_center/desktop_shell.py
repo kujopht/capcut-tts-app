@@ -68,10 +68,57 @@ def ten_mutex_cua(goc) -> str:
     dùng đang mở — tức là không chứng minh được điều phối trên chính bản
     đã đóng gói, mà không phải tắt ứng dụng của người khác.
     """
+    return f"{TEN_MUTEX}.{_ma_goc(goc)}"
+
+
+def _ma_goc(goc) -> str:
     import hashlib
     duong = str(Path(goc).resolve()).lower()
-    ma = hashlib.sha256(duong.encode("utf-8")).hexdigest()[:16]
-    return f"{TEN_MUTEX}.{ma}"
+    return hashlib.sha256(duong.encode("utf-8")).hexdigest()[:16]
+
+
+def duong_webview2(goc) -> Path:
+    """Thư mục hồ sơ WebView2 cho MỘT thư mục gốc.
+
+    VÌ SAO CẦN — một sự cố thật, đo được, trên bản đã đóng gói:
+
+        pywebview WebView2 initialization failed with exception:
+        (0x8007139F): The group or resource is not in the correct state
+        to perform the requested operation.
+
+    `pywebview` mặc định đặt hồ sơ WebView2 ở `%APPDATA%\\pywebview\\
+    EBWebView` — **một thư mục DÙNG CHUNG cho mọi ứng dụng pywebview trên
+    máy**. WebView2 cho nhiều tiến trình dùng chung một hồ sơ, nhưng CHỈ
+    KHI `AdditionalBrowserArguments` giống nhau; khác một cờ là nó từ chối
+    với đúng HRESULT ở trên. Nghĩa là:
+
+    * mở bản thứ hai của app này với `--debug-cdp` trong khi bản của
+      người dùng đang chạy -> KHÔNG mở được cửa sổ nào;
+    * một ứng dụng pywebview KHÁC của bên thứ ba cũng đủ làm app này chết
+      lúc mở, với một thông điệp không ai suy ra được nguyên nhân.
+
+    Đây là ĐÚNG bất biến mà `ten_mutex_cua` đã chọn cho mutex: "một thực
+    thể" tính theo **thư mục gốc**, không theo cả máy, để một bản KIỂM
+    chạy được cạnh bản của người dùng mà không phải tắt ứng dụng của
+    người khác. Hồ sơ WebView2 toàn máy phá lại đúng bảo đảm đó, nên nó
+    được băm theo cùng một khoá.
+
+    Không đặt dưới chính `goc`: WebView2 tạo cây thư mục sâu bên trong
+    (`EBWebView/Default/...`), và một `goc` đã dài — ví dụ một thư mục
+    tạm của bộ kiểm — sẽ đẩy tổng đường dẫn qua `MAX_PATH`. Đặt dưới
+    `%LOCALAPPDATA%` cho đường ngắn và cố định, cùng quy ước với
+    `router_v3/worker_identity.py`.
+
+    KHÔNG cần di trú: app không giữ gì đáng kể trong hồ sơ WebView2 —
+    token phiên nằm ở `sessionStorage` (mất khi đóng tab), mọi trạng thái
+    thật nằm trong sổ SQLite. Đổi thư mục chỉ làm mất cache của trình
+    duyệt nhúng.
+    """
+    base = Path(os.environ.get("LOCALAPPDATA")
+                or os.environ.get("APPDATA")
+                or str(Path.home()))
+    return (base / "FanficAudioStudio" / "router" / "webview2"
+            / _ma_goc(goc))
 
 #: Cho backend khoe. 20s la du rong: khoi dong gom mo SQLite va doi soat
 #: phuc hoi, va may cham thi cham hon may nay.

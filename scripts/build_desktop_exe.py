@@ -22,10 +22,24 @@ import argparse
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 GOC = Path(__file__).resolve().parents[1]
+if str(GOC) not in sys.path:
+    sys.path.insert(0, str(GOC))
+
+from scripts.control_center.ghi_utf8 import GhiUTF8  # noqa: E402
+
 TEN = "Router Control Center"
+
+#: KHONG `print()`. Mọi câu kịch bản này in ra là tiếng Việt, và `print()`
+#: giao chuỗi cho tầng VĂN BẢN của luồng — codec do locale quyết định,
+#: cp1252 trên máy này. Đúng luật ở `docs/CONTROL_CENTER.md` §14, và
+#: không phải giả thuyết: dòng `cỡ : …` (chữ **ỡ**, U+1EE1) nổ
+#: `UnicodeEncodeError` NGAY SAU khi build xong, tức là làm mất báo cáo
+#: của một lần dựng mất vài phút.
+ghi = GhiUTF8()
 
 
 def main(argv=None) -> int:
@@ -46,7 +60,7 @@ def main(argv=None) -> int:
     try:
         import PyInstaller                                  # noqa: F401
     except ModuleNotFoundError:
-        sys.stderr.write(
+        ghi(
             "thiếu pyinstaller — cài: python -m pip install -r "
             "requirements-control-center-desktop.txt\n")
         return 2
@@ -83,6 +97,13 @@ def main(argv=None) -> int:
         # thao tac cham vao no.
         "--add-data", f"{GOC / 'scripts' / 'router_v4' / 'config'}"
                       f";scripts/router_v4/config",
+        # V0.5: cau hinh QUAN SAT SONG. Cung ly do voi `fabric.json` —
+        # PyInstaller chi goi module Python, tep du lieu phai khai tuong
+        # minh. Thieu no thi ban EXE chay duoc, nhung moi du an mat
+        # probe rieng va chi con quan sat chung; loi do KHONG the thay
+        # tu ma nguon, vi chay `python -m` thi tep nam san canh module.
+        "--add-data", f"{GOC / 'scripts' / 'control_center' / 'config'}"
+                      f";scripts/control_center/config",
         "--add-data",
         f"{GOC / 'scripts' / 'router_v3' / 'control_room' / 'PROOF_SCREEN.txt'}"
         f";scripts/router_v3/control_room",
@@ -111,22 +132,43 @@ def main(argv=None) -> int:
         "--exclude-module", "tkinter",
         str(GOC / "scripts" / "control_center" / "desktop.py"),
     ]
-    print("  " + " ".join(f'"{x}"' if " " in x else x for x in lenh))
+    ghi("  " + " ".join(f'"{x}"' if " " in x else x for x in lenh))
     r = subprocess.run(lenh, cwd=str(GOC))
     if r.returncode != 0:
         return r.returncode
 
     exe = ra / TEN / f"{TEN}.exe"
     if not exe.is_file():
-        sys.stderr.write(f"build xong nhưng không thấy {exe}\n")
+        ghi(f"build xong nhưng không thấy {exe}")
         return 3
     co = exe.stat().st_size
     tong = sum(p.stat().st_size for p in (ra / TEN).rglob("*") if p.is_file())
-    print()
-    print(f"  EXE  : {exe}")
-    print(f"  cỡ   : {co:,} byte (thư mục: {tong / 1048576:.0f} MB)")
-    print()
-    print("  Bấm đôi tệp EXE ở trên. Không cần console, không cần trình duyệt.")
+    ghi("")
+    ghi(f"  EXE  : {exe}")
+    ghi(f"  cỡ   : {co:,} byte (thư mục: {tong / 1048576:.0f} MB)")
+    ghi("")
+    # BAO CAO DONG GOI (2026-09-10): SHA256, chu ky/nguoi ky, MOTW, du doan
+    # Smart App Control. Mot ban dung lai SACH bi SAC chan ("we could not
+    # verify its publisher") trong khi ban truoc chay duoc — khong co bao cao
+    # o day thi khong ai biet vi sao. Khong ky o day; ky la viec cua
+    # `scripts/ky_ban_dong_goi.py`. Bao cao hong khong lam build hong.
+    try:
+        sys.path.insert(0, str(GOC))
+        from scripts.kiem_ban_dong_goi import dong_bao_cao, kiem_exe
+        bc = dong_bao_cao(kiem_exe(exe))
+        ghi("  --- kiểm bản đóng gói (scripts/kiem_ban_dong_goi.py) ---")
+        for dong in bc.splitlines():
+            ghi("  " + dong)
+        (ra / "KIEM_DONG_GOI.txt").write_text(
+            "Kiểm bản đóng gói (chỉ đọc) — " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n" + bc + "\n",
+            encoding="utf-8")
+        ghi(f"  -> {ra / 'KIEM_DONG_GOI.txt'}")
+    except Exception as exc:                                # noqa: BLE001
+        ghi(f"  (không kiểm được bản đóng gói: {type(exc).__name__}: {exc})")
+    ghi("")
+    ghi("  Bấm đôi tệp EXE ở trên. Không cần console, không cần trình duyệt.")
+    ghi("  Smart App Control đang bật: bản KHÔNG KÝ có thể bị chặn — xem dòng "
+        "'Smart App Control' ở trên và docs/reports/SMART_APP_CONTROL_V061.md.")
     return 0
 
 

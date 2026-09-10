@@ -40,6 +40,7 @@ from typing import FrozenSet, Optional
 
 from scripts.router_v3.packet import TaskPacket, TaskResult, parse_result
 from scripts.router_v3.registry import ExecutionType, Health, WorkerSpec
+from scripts.router_v3.tien_trinh import an_cua_so
 from scripts.router_v3.worker_adapter import HealthReport, TransportKind, WorkerAdapter
 
 _LOCALAPPDATA = __import__("os").environ.get("LOCALAPPDATA", "")
@@ -88,7 +89,8 @@ class GrokBuildAdapter(WorkerAdapter):
             return HealthReport(Health.UNAVAILABLE, "không tìm thấy `grok` trên máy này")
         try:
             p = subprocess.run([exe, "models"], capture_output=True, text=True,
-                               timeout=15, encoding="utf-8", errors="replace")
+                               timeout=15, encoding="utf-8", errors="replace",
+                               **an_cua_so())
         except (subprocess.TimeoutExpired, OSError) as exc:
             return HealthReport(Health.UNAVAILABLE, f"{type(exc).__name__}: {exc}"[:200])
         ra = (p.stdout or "") + (p.stderr or "")
@@ -122,7 +124,8 @@ class GrokBuildAdapter(WorkerAdapter):
         try:
             p = subprocess.run(argv, capture_output=True, text=True,
                                timeout=self._timeout + 30, cwd=self._workspace,
-                               encoding="utf-8", errors="replace")
+                               encoding="utf-8", errors="replace",
+                               **an_cua_so())
             giay = time.perf_counter() - t0
         except subprocess.TimeoutExpired:
             giay = time.perf_counter() - t0

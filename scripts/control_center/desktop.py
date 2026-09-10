@@ -65,15 +65,20 @@ def _bao_loi(thong_diep: str) -> None:
 
 
 def _goc_mac_dinh() -> Path:
-    """Thư mục giữ sổ.
+    """Thư mục giữ sổ — GỐC DỮ LIỆU CHÍNH TẮC theo người dùng.
 
-    Khi chạy từ EXE đã đóng gói, `cwd` là bất kỳ đâu Explorer đang mở, nên
-    KHÔNG dùng `Path.cwd()`. Dùng thư mục cạnh chính EXE — đúng như
-    `cc_agent_tool.py` neo `REPO_ROOT` vào vị trí tệp thay vì vào `cwd`.
+    ĐÃ ĐỔI (2026-09-10, khuyết tật liên tục). Bản trước neo gốc vào VỊ TRÍ MÃ:
+    cạnh EXE khi đóng gói, `parents[2]` khi chạy từ nguồn. Hệ quả đo được:
+    cùng `project_id="fanfic"` mà bản `dist-v06` và bản source-mode có HAI
+    quyển ký ức độc lập, nên tuyên bố "GPT-6 Astra…" gõ ở bản này không bao
+    giờ hiện ra ở bản kia.
+
+    Nay gốc là `%LOCALAPPDATA%\\RouterControlCenter` — không phụ thuộc
+    `__file__`, `cwd`, `sys.executable` hay thư mục dist. Xem
+    `duong_du_lieu.py`. `--root` vẫn ghi đè (bài kiểm/nghiệm thu cần).
     """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[2]
+    from scripts.control_center.duong_du_lieu import goc_du_lieu
+    return goc_du_lieu()
 
 
 def main(argv=None) -> int:
@@ -88,7 +93,9 @@ def main(argv=None) -> int:
     ap.add_argument("--root", default="", help="thư mục gốc giữ sổ .router/")
     ap.add_argument("--project", default="", help="dự án mở sẵn")
     ap.add_argument("--port", type=int, default=0)
-    ap.add_argument("--max-parallel", type=int, default=3)
+    ap.add_argument("--max-parallel", type=int, default=0,
+                    help=("trần việc song song; 0 = tự theo bể tài khoản "
+                          "(tổng khe runtime đã cấp phát, 3..12)"))
     ap.add_argument("--no-recover", action="store_true")
     ap.add_argument("--debug-cdp", type=int, default=0,
                     help=("mở cổng DevTools của WebView2 (chỉ để KIỂM; "
@@ -125,9 +132,21 @@ def main(argv=None) -> int:
 
     from scripts.control_center.desktop_shell import (
         MotThucThe, ThongTinPhien, cho_backend_khoe, duong_giao_dien,
-        ghi_tep_khoa, quyet_dinh, ten_mutex_cua, xoa_tep_khoa)
+        duong_webview2, ghi_tep_khoa, quyet_dinh, ten_mutex_cua,
+        xoa_tep_khoa)
 
-    goc = Path(a.root).resolve() if a.root else _goc_mac_dinh()
+    # GOC DU LIEU CHINH TAC (mot noi dinh nghia: `duong_du_lieu.py`). `--root`
+    # ghi de cho bai kiem/nghiem thu; khong co thi la `%LOCALAPPDATA%`.
+    from scripts.control_center.duong_du_lieu import (KhoLoi, dam_bao_kho,
+                                                      goc_du_lieu)
+    goc = goc_du_lieu(a.root)
+    try:
+        # Mo/dung kho + dat-hoac-NANG phien ban BO CUC (tach khoi phien ban
+        # ung dung). So moi hon ma thi DUNG, khong ha cap am tham.
+        dam_bao_kho(goc, ung_dung="V0.6.1")
+    except KhoLoi as exc:
+        _bao_loi(str(exc))
+        return 2
 
     # Tu day chan doan cung duoc ghi vao mot TEP UTF-8 canh so. Voi ban
     # `--noconsole` thi day la NOI DUY NHAT doc duoc chan doan, nen no
@@ -160,6 +179,7 @@ def main(argv=None) -> int:
     cc = None
     sv = None
     luong = None
+    khoa_kho = None            # khoa MOT-NGUOI-GHI, chi giu khi ta so huu so
 
     if kh.hanh_dong == "tu_chay":
         try:
@@ -173,6 +193,18 @@ def main(argv=None) -> int:
                      "requirements-control-center-web.txt")
             mot.nha()
             return 2
+
+        # MOT NGUOI GHI tren mot kho. Moi ban dung nay tro CUNG mot goc, nen
+        # nhanh `tu_chay` (tep khoa tro pid con song ma backend khong tra loi
+        # token cua ta) truoc day vo hai — nay se la nguoi ghi THU HAI tren
+        # cung mot SQLite. Khoa OS dong cua so do; noi RO thay vi mo so thu hai.
+        from scripts.control_center.duong_du_lieu import KhoaKho
+        _kk = KhoaKho(goc)
+        if not _kk.thu_giu():
+            _bao_loi(_kk.cau_bao_dang_dung())
+            mot.nha()
+            return 4
+        khoa_kho = _kk
 
         # `leader_bat=True`: day la mot diem vao THAT cua san pham, va o
         # chat phai la mot tro ly chu khong phai mot bieu mau nop viec.
@@ -213,24 +245,52 @@ def main(argv=None) -> int:
     if a.project:
         duong += f"#project={a.project}"
 
+    #: `_khi_dong` da chay xong. `main()` CHO co nay sau `webview.start()`.
+    #:
+    #: VI SAO — mot khuyet tat co tu V0.2, V0.6 moi lo ra: pywebview phat
+    #: `events.closed` tren MOT LUONG NEN, con luong chinh thi tro ve tu
+    #: `webview.start()` ngay khi cua so dong -> `main()` ket thuc -> trinh
+    #: thong dich tat -> luong nen bi giet giua chung. Do that tren ban EXE
+    #: (2026-09-10): nhat ky co "dang tat backend…" nhung KHONG co
+    #: `ENGINE_STOPPED`, tuc `cc.shutdown()` chua bao gio duoc goi toi —
+    #: phien Leader `agy` bi bo roi, va diem dung "tat ung dung" cua ky uc
+    #: khong duoc ghi. Cho co han (45 s) chu khong cho vo han: mot backend
+    #: treo khong duoc giu cua so ma da bien mat.
+    da_dong = threading.Event()
+
     def _khi_dong():
-        """Đóng cửa sổ = tắt backend, TRỪ KHI ta không sở hữu nó."""
-        if not kh.so_huu:
-            ghi("[desktop] backend do tiến trình khác sở hữu — để nguyên.")
+        """Đóng cửa sổ = tắt backend, TRỪ KHI ta không sở hữu nó.
+
+        Thứ tự CÓ CHỦ ĐÍCH: `cc.shutdown()` TRƯỚC (điểm dừng ký ức, dừng
+        vòng lặp, đóng phiên Leader — thứ quan trọng và nhanh), rồi mới
+        tắt uvicorn. Uvicorn có thể chờ WebSocket của chính giao diện
+        đóng, nên `join` của nó có trần; đặt nó sau để một lần chờ không
+        đẩy phần quan trọng ra khỏi 45 giây.
+        """
+        if da_dong.is_set():
+            return                      # duong loi cua `start()` goi lai
+        try:
+            if not kh.so_huu:
+                ghi("[desktop] backend do tiến trình khác sở hữu — để nguyên.")
+                mot.nha()
+                return
+            ghi("[desktop] đang tắt backend…")
+            if cc is not None:
+                try:
+                    cc.shutdown()
+                    ghi("[desktop] backend đã tắt sạch (shutdown xong)")
+                except Exception as exc:                    # noqa: BLE001
+                    ghi(f"[desktop] shutdown: {exc}")
+            if sv is not None:
+                sv.should_exit = True
+            if luong is not None:
+                luong.join(timeout=8)
+            xoa_tep_khoa(goc)
+            if khoa_kho is not None:
+                khoa_kho.nha()      # nha kho SAU khi so da dong sach
             mot.nha()
-            return
-        ghi("[desktop] đang tắt backend…")
-        if sv is not None:
-            sv.should_exit = True
-        if luong is not None:
-            luong.join(timeout=8)
-        if cc is not None:
-            try:
-                cc.shutdown()
-            except Exception as exc:                        # noqa: BLE001
-                ghi(f"[desktop] shutdown: {exc}")
-        xoa_tep_khoa(goc)
-        mot.nha()
+        finally:
+            da_dong.set()
 
     cua_so = webview.create_window(
         TIEU_DE, duong, width=1440, height=920, min_size=(980, 640),
@@ -241,9 +301,25 @@ def main(argv=None) -> int:
     # pywebview tu chon: bo dong `mshtml` (IE11) cung nam trong danh sach
     # tu chon cua no tren Windows, va no khong chay duoc frontend nay —
     # khong ES module, khong `<dialog>`, khong WebSocket dang nay.
+    # `storage_path`: HO SO WEBVIEW2 RIENG THEO THU MUC GOC.
+    #
+    # Mac dinh cua pywebview la `%APPDATA%\pywebview\EBWebView` — MOT
+    # thu muc dung chung cho MOI ung dung pywebview tren may. WebView2
+    # chi cho nhieu tien trinh dung chung mot ho so khi
+    # `AdditionalBrowserArguments` GIONG NHAU, nen mot ban thu hai cua
+    # app nay (hoac mot app pywebview cua ben thu ba) du de lam
+    # `webview.start()` nem `0x8007139F` — "the group or resource is not
+    # in the correct state" — va nguoi dung khong the suy ra vi sao.
+    # Da gap that tren ban dong goi. Xem `duong_webview2`.
+    ho_so = duong_webview2(goc)
+    try:
+        ho_so.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        ghi(f"[desktop] không tạo được hồ sơ WebView2 {ho_so}: {exc}")
+    ghi(f"[desktop] hồ sơ WebView2: {ho_so}")
     try:
         webview.start(gui="edgechromium", debug=bool(a.debug_cdp),
-                      private_mode=False)
+                      private_mode=False, storage_path=str(ho_so))
     except Exception as exc:                                # noqa: BLE001
         _bao_loi(
             f"Không mở được cửa sổ WebView2: {type(exc).__name__}: {exc}\n\n"
@@ -253,6 +329,10 @@ def main(argv=None) -> int:
             "Hoặc dùng đường gỡ lỗi:\n    router-cc-web.cmd")
         _khi_dong()
         return 4
+    # `webview.start()` tro ve khi cua so DONG — khong phai khi `_khi_dong`
+    # xong. Cho no; xem ghi chu o `da_dong`.
+    if not da_dong.wait(timeout=45):
+        ghi("[desktop] cảnh báo: tắt backend chưa xong sau 45 s — thoát.")
     return 0
 
 

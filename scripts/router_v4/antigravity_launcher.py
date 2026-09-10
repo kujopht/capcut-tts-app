@@ -58,6 +58,7 @@ from typing import Dict, FrozenSet, List, Optional
 
 from scripts.router_v3.packet import TaskPacket, TaskResult, parse_result
 from scripts.router_v3.registry import ExecutionType, Health, WorkerSpec
+from scripts.router_v3.tien_trinh import an_cua_so
 from scripts.router_v4.thong_dich import argv_python
 from scripts.router_v3.warm_pool import RecyclePolicy, WarmAgyWorker, WarmState
 from scripts.router_v3.worker_adapter import (HealthReport, TransportKind,
@@ -277,7 +278,8 @@ def switch(acc: str, *, timeout: float = 60.0) -> tuple[bool, str]:
     try:
         p = subprocess.run(argv + [str(LAUNCHER), "switch", acc],
                            capture_output=True, text=True, timeout=timeout,
-                           encoding="utf-8", errors="replace")
+                           encoding="utf-8", errors="replace",
+                           **an_cua_so())
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"{type(exc).__name__}: {exc}"[:200]
     ra = ((p.stdout or "") + (p.stderr or "")).strip()

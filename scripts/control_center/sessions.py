@@ -210,16 +210,23 @@ class SessionManager:
 
     def decide(self, task: Task, contract: TaskContract, *,
                demand: Optional[Demand] = None,
-               conflicting_task: str = "") -> SessionDecision:
+               conflicting_task: str = "",
+               tranh_runtime: Sequence[str] = ()) -> SessionDecision:
         """REUSE / CREATE / WAIT cho một việc. Hàm THUẦN với sổ hiện tại.
 
         Thứ tự các luật KHÔNG tuỳ tiện — luật chặn đứng trước luật cấp phát,
         vì một việc bị xung đột mà lại được cấp phiên trước rồi mới phát
         hiện xung đột sẽ để lại một phiên mồ côi ở mỗi lần va chạm.
+
+        `tranh_runtime` (V0.6.1, toả): runtime các việc con ANH EM đang chạy.
+        Ưu tiên phiên/placement ở runtime KHÁC để N agent thật sự là N tài
+        khoản; không còn chỗ khác thì rơi về như cũ — tránh là ưu tiên,
+        không phải rào.
         """
         vet: List[str] = []
         pham_vi = tuple(contract.allowed_scope)
         chi_doc = not contract.requirements.repo_write
+        tranh = set(tranh_runtime or ())
 
         # Luat 0 — xung dot tai nguyen da duoc tang tren xac dinh.
         if conflicting_task:
@@ -258,6 +265,16 @@ class SessionManager:
         # Luat 2 — DUNG LAI mot phien RANH tuong thich.
         ung_vien = [s for s in phien if s.state is SessionState.IDLE]
         vet.append(f"{len(ung_vien)} phiên RẢNH để xét dùng lại")
+        if tranh:
+            khac = [s for s in ung_vien if s.runtime_id not in tranh]
+            if khac or self.scheduler is not None:
+                # Con phien o runtime khac (hoac con dung duoc phien moi) ->
+                # bo qua phien tren runtime anh em dang dung.
+                bo = [s.session_id for s in ung_vien if s.runtime_id in tranh]
+                if bo:
+                    vet.append(f"toả: bỏ qua {len(bo)} phiên rảnh ở runtime anh em "
+                               f"đang chạy {sorted(tranh)}")
+                ung_vien = khac
         for s in sorted(ung_vien, key=lambda x: -x.last_activity):
             if s.idle_seconds > NGUONG_NGUOI:
                 vet.append(f"bỏ qua {s.session_id}: nguội "
@@ -296,7 +313,13 @@ class SessionManager:
                 trace=tuple(vet))
 
         # Luat 4 — CREATE. Chon placement THEO NANG LUC.
-        qd = self.scheduler.decide(contract, demand=demand)
+        qd = self.scheduler.decide(contract, demand=demand, exclude=tuple(sorted(tranh)))
+        if qd.selected is None and tranh:
+            # Het runtime PHAN BIET: roi ve cho phep trung tai khoan anh em,
+            # con hon xep hang trong khi be van con khe.
+            vet.append(f"toả: không còn runtime ngoài {sorted(tranh)} — cho phép "
+                       f"dùng chung tài khoản anh em")
+            qd = self.scheduler.decide(contract, demand=demand)
         if qd.selected is None:
             vet.append("bộ lập lịch không tìm được placement đủ điều kiện")
             return SessionDecision(

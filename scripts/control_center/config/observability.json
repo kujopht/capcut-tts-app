@@ -1,0 +1,62 @@
+{
+  "_doc": [
+    "Cau hinh QUAN SAT SONG cua tung du an — Router Control Center V0.5.",
+    "",
+    "KHONG BAO GIO dat noi dung bi mat o day. Chi duong dan/bi danh toi",
+    "khoa DA CO tren may (`key_path`). `config.kiem_cau_hinh()` tu choi ca",
+    "tep neu thay chu ky khoa rieng hay token, va tu choi moi khoa ten",
+    "`secret`/`password`/`token`/`credential` — vi tep nay nam trong kho",
+    "git, va mot khoa rieng lot vao day la mot su co khong hoan tac duoc",
+    "bang mot lan commit.",
+    "",
+    "Moi du an deu duoc quan sat chung (Router + git) DU KHONG khai gi o",
+    "day. Phan khai them la CONG vao, khong phai thay the.",
+    "",
+    "`type` hop le: router | git | ssh_service | unavailable."
+  ],
+  "projects": {
+    "fanfic": {
+      "label": "Fanfic Audio Studio",
+      "providers": [
+        {
+          "type": "ssh_service",
+          "id": "fanfic_farmer",
+          "label": "AWS farmer (fanfic-farmer)",
+          "group": "dich_vu",
+          "host": "13.212.224.218",
+          "user": "ubuntu",
+          "unit": "fanfic-farmer",
+          "status_file": "/var/lib/fanfic-farmer/status.json",
+          "disk_path": "/",
+          "key_path": "%USERPROFILE%\\.ssh\\fanficappwrite.pem",
+          "timeout": 12,
+          "max_age": 120
+        },
+        {
+          "type": "unavailable",
+          "id": "appwrite",
+          "label": "Appwrite (hàng đợi review)",
+          "group": "ung_dung",
+          "capabilities": ["review_queue", "status_counts"],
+          "reason": "chua co duong DOC an toan: moi truy van Appwrite production doi API key production, va V0.5 bi cam doc/tao credential. Khai giao dien de mot ban sau cam vao ma khong doi Leader."
+        },
+        {
+          "type": "unavailable",
+          "id": "r2",
+          "label": "R2 (artifact production)",
+          "group": "luu_tru",
+          "capabilities": ["artifact_count", "bucket_status"],
+          "reason": "chua co duong DOC an toan: `wrangler`/S3 API doi token production. `wrangler secret`/`delete` da bi deny o .claude/settings.json va o day cung khong duoc goi."
+        },
+        {
+          "type": "unavailable",
+          "id": "drive",
+          "label": "Google Drive (mirror/archive)",
+          "group": "luu_tru",
+          "capabilities": ["archive_status", "mirror_count"],
+          "reason": "chua co duong DOC an toan: `rclone.conf` chua credential va da bi deny doc. Trang thai archive hien lay tu status.json cua farmer (khoa `archive_status`) khi co."
+        }
+      ]
+    }
+  }
+}

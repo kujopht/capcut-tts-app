@@ -82,7 +82,8 @@ def main(argv=None) -> int:
     ap.add_argument("--project", default="", help="dự án mở sẵn")
     ap.add_argument("--port", type=int, default=0,
                     help="cổng (0 = xin hệ điều hành một cổng rỗng)")
-    ap.add_argument("--max-parallel", type=int, default=3)
+    ap.add_argument("--max-parallel", type=int, default=0,
+                    help="trần việc song song; 0 = tự theo bể tài khoản (3..12)")
     ap.add_argument("--khong-mo", action="store_true",
                     help="không tự mở trình duyệt")
     ap.add_argument("--no-recover", action="store_true")
@@ -112,7 +113,12 @@ def main(argv=None) -> int:
 
     cong = a.port or cong_rong()
     token = secrets.token_urlsafe(32)
-    goc = Path(a.root).resolve() if a.root else Path.cwd()
+    # GOC DU LIEU CHINH TAC — KHONG `Path.cwd()`. `cwd` doi theo cho bam doi
+    # tep .cmd / cho mo terminal, nen no tung sinh MOT SO RIENG cho moi thu
+    # muc — dung khuyet tat lien tuc da do (xem `duong_du_lieu.py`).
+    from scripts.control_center.duong_du_lieu import dam_bao_kho, goc_du_lieu
+    goc = goc_du_lieu(a.root)
+    dam_bao_kho(goc, ung_dung="V0.6.1")
     ghi.dat_tep(duong_nhat_ky(goc))
     # Xem `desktop.py`: diem vao THAT thi Leader phai bat.
     cc = ControlCenter(root=goc, max_parallel=a.max_parallel, leader_bat=True)

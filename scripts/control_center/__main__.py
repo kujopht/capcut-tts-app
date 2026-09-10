@@ -26,7 +26,10 @@ from scripts.control_center.engine import ControlCenter              # noqa: E40
 
 
 def _dung(args) -> ControlCenter:
-    goc = Path(args.root).resolve() if args.root else Path.cwd()
+    # GOC DU LIEU CHINH TAC — KHONG `Path.cwd()`; xem `duong_du_lieu.py`.
+    from scripts.control_center.duong_du_lieu import dam_bao_kho, goc_du_lieu
+    goc = goc_du_lieu(args.root)
+    dam_bao_kho(goc, ung_dung="V0.6.1")
     # Xem `desktop.py`: diem vao THAT thi Leader phai bat.
     cc = ControlCenter(root=goc, probe=args.probe,
                        max_parallel=args.max_parallel, leader_bat=True)
@@ -44,8 +47,8 @@ def main(argv=None) -> int:
     ap.add_argument("--project", default="", help="dự án mở sẵn")
     ap.add_argument("--probe", action="store_true",
                     help="dò sức khoẻ provider lúc khởi động (CHẬM, tốn lượt)")
-    ap.add_argument("--max-parallel", type=int, default=3,
-                    help="trần việc chạy song song (mặc định 3)")
+    ap.add_argument("--max-parallel", type=int, default=0,
+                    help="trần việc chạy song song; 0 = tự theo bể tài khoản (3..12)")
     ap.add_argument("--refresh-interval", type=float, default=1.0)
     ap.add_argument("--no-recover", action="store_true",
                     help="bỏ qua đối soát phục hồi lúc khởi động")

@@ -38,7 +38,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from scripts.router_v4.runtime import Fabric, Source
+from scripts.router_v4.runtime import Fabric, RuntimeStatus, Source
 from scripts.control_center.model import UsageConfidence, UsageMetric
 from scripts.control_center.store import ControlStore
 
@@ -76,6 +76,45 @@ class ProviderUsage:
                 "has_actual": self.co_so_that}
 
 
+#: Phiên KHÔNG có PID được coi là còn sống trong bao lâu kể từ lần hoạt
+#: động cuối. Trùng `sessions.NGUONG_NGUOI` (900s) có chủ ý: đó đã là mốc
+#: "im lặng quá lâu thì cần người xem lại" của tầng phiên.
+HAN_PHIEN_KHONG_PID = 900.0
+
+
+def _phien_that_su_song(s) -> bool:
+    """Phiên này có CÒN SỐNG THẬT không — không chỉ là trạng thái trong sổ.
+
+    VÌ SAO KHÔNG DÙNG `s.state.alive`, và đây là một lỗi đo được:
+
+    Hàng `sessions` BỀN qua khởi động lại. `recover()` đối soát chúng với
+    tiến trình thật, nhưng phiên Antigravity **không ghi PID** (`pid`
+    chỉ được ghi lúc kết thúc việc), nên chúng rơi vào nhóm `unknown` và
+    được đưa về `IDLE` — CỐ Ý, để Control Center không dựng phiên thứ hai
+    chồng lên một tiến trình có thể còn sống.
+
+    Hệ quả cho một con số USAGE: một phiên `IDLE` không PID nằm lại trong
+    sổ **mãi mãi**, nên "phiên còn sống" đếm cả phiên của những lần chạy
+    trước. Đo được: một sổ có `('antigravity','AG01','BUSY', pid=None)`
+    trong khi ứng dụng sinh ra nó đã tắt từ lâu.
+
+    "Còn sống" ở đây là: trạng thái nói còn sống **VÀ** chứng minh được —
+    có PID thì tiến trình phải đang chạy; không có PID thì phải có hoạt
+    động trong `HAN_PHIEN_KHONG_PID` gần đây. Một phiên không PID và im
+    lặng 15 phút không phải một phiên "đang sống"; nó là một hàng cũ.
+
+    KHÔNG đổi hành vi điều phối: `SessionManager` vẫn dùng `state.alive`
+    như cũ để quyết REUSE/CREATE/WAIT. Đây chỉ là phép đếm cho báo cáo.
+    """
+    from scripts.control_center.sessions import tien_trinh_con_song
+
+    if not s.state.alive:
+        return False
+    if s.pid is not None:
+        return tien_trinh_con_song(s.pid)
+    return (time.time() - (s.last_activity or 0.0)) <= HAN_PHIEN_KHONG_PID
+
+
 class UsageReporter:
     """Gom usage từ những nguồn THẬT có, và nói rõ chỗ nào không có."""
 
@@ -106,10 +145,13 @@ class UsageReporter:
                         UsageConfidence.ACTUAL,
                         note="mỗi lượt thử của mỗi việc, kể cả lượt hỏng"),
             UsageMetric("phiên đã dựng", float(len(sessions)),
-                        UsageConfidence.ACTUAL),
+                        UsageConfidence.ACTUAL,
+                        note="tổng số phiên từng dựng — số LỊCH SỬ"),
             UsageMetric("phiên còn sống", float(
-                sum(1 for s in sessions if s.state.alive)),
-                UsageConfidence.ACTUAL),
+                sum(1 for s in sessions if _phien_that_su_song(s))),
+                UsageConfidence.ACTUAL,
+                note="đã đối chiếu với tiến trình thật, không chỉ đọc trạng "
+                     "thái trong sổ"),
             UsageMetric("giây agent tích luỹ", round(giay, 1),
                         UsageConfidence.ACTUAL, unit="s",
                         note="tổng thời gian tường của các việc đã chạy"),
@@ -169,11 +211,50 @@ class UsageReporter:
             ra.append({
                 "runtime_id": r.runtime_id, "provider": r.provider,
                 "account_id": r.account_id,
+                # NHAN chi cho ("agy-launcher:acc3"), khong phai credential.
+                "auth_profile": r.auth_profile, "transport": r.transport,
                 "status": r.trang_thai_hien_tai().value,
                 "provisioned": r.provisioned,
                 "needs_provisioning": r.needs_provisioning,
+                "health_detail": r.health_detail,
                 "concurrency": r.concurrency, "in_flight": r.in_flight,
+                "running_tasks": list(r.running_tasks),
+                "consecutive_failures": r.consecutive_failures,
+                "cooldown_until": r.cooldown_until or None,
+                "drained": r.drained,
                 "dispatchable": r.dispatchable})
+        return ra
+
+    def be_tai_khoan(self) -> Dict[str, Dict]:
+        """Tóm tắt BỂ TÀI KHOẢN theo nhà cung cấp — mọi số đếm từ sổ đăng ký
+        đang chạy, không giả định. `khoe` = IDLE/BUSY/DEGRADED (nhận việc
+        được); `leader_chiem` = khe đang có phiên Leader ấm (V0.6.1)."""
+        if self.fabric is None:
+            return {}
+        ra: Dict[str, Dict] = {}
+        for r in self.fabric.runtimes.values():
+            t = ra.setdefault(r.provider, {
+                "dang_ky": 0, "cap_phat": 0, "nhan_dispatch": 0, "khoe": 0,
+                "cooldown": 0, "offline": 0, "tong_cho": 0, "dang_dung": 0,
+                "ho_so_rieng": set(), "leader_chiem": []})
+            tt = r.trang_thai_hien_tai()
+            t["dang_ky"] += 1
+            t["cap_phat"] += int(r.provisioned)
+            t["nhan_dispatch"] += int(r.dispatchable and r.provisioned)
+            if tt in (RuntimeStatus.IDLE, RuntimeStatus.BUSY, RuntimeStatus.DEGRADED):
+                t["khoe"] += 1
+                t["tong_cho"] += r.concurrency
+                t["dang_dung"] += r.in_flight
+            elif tt is RuntimeStatus.COOLDOWN:
+                t["cooldown"] += 1
+            elif tt is RuntimeStatus.OFFLINE:
+                t["offline"] += 1
+            if r.auth_profile:
+                t["ho_so_rieng"].add(r.auth_profile)
+            if any(x.startswith("LEADER:") for x in r.running_tasks):
+                t["leader_chiem"].append(r.runtime_id)
+        for t in ra.values():
+            t["ho_so_rieng"] = len(t["ho_so_rieng"])
         return ra
 
     def dem_tai_khoan(self) -> Dict[str, int]:
@@ -284,6 +365,7 @@ class UsageReporter:
             "pools": [u.to_dict() for u in self.be_quota()],
             "runtimes": self.runtime_that(),
             "accounts": self.dem_tai_khoan(),
+            "pool": self.be_tai_khoan(),
             "providers": ([u.to_dict() for u in self.do_nha_cung_cap()]
                           if probe_cli else []),
             "provider_probe_ran": probe_cli,

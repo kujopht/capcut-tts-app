@@ -38,6 +38,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Union
 
+from scripts.router_v3.tien_trinh import an_cua_so
+
 #: Nơi chứa worktree. Trong kho nhưng bị `.gitignore` bỏ qua — cùng chỗ với
 #: các thư mục tạm khác để người vận hành biết tìm ở đâu.
 ROOT_DIR = ".router/worktrees"
@@ -56,6 +58,37 @@ class WorktreeHandle:
     path: Path
     branch: str
     base_sha: str
+
+
+def _boc_an_cua_so(runner):
+    """Bọc một `runner` để MỌI lệnh nó chạy đều ẩn cửa sổ console.
+
+    VÌ SAO BỌC MỘT LẦN Ở ĐÂY thay vì thêm `**an_cua_so()` ở từng điểm
+    gọi — và đây là một lỗi ĐÃ VẤP, không phải một sở thích:
+
+    Bản V0.4 đầu tiên thêm cờ ẩn ngay trong `_git()`. Nhưng `verify_scope()`
+    gọi `self._run(["git", …])` **trực tiếp**, không qua `_git()`, nên nó
+    vẫn nhấp một cửa sổ console trong bản `--noconsole`. Và bài kiểm AST
+    cũng không bắt được: nó tìm `subprocess.run`/`Popen`, còn đây là một
+    **runner được tiêm** nên tên hàm không khớp. Hai lớp phòng vệ cùng
+    trượt một chỗ.
+
+    Bọc ở constructor thì mọi điểm gọi — kể cả điểm thêm về sau — đều
+    được phủ, và không còn chỗ nào để quên.
+
+    Chỉ bọc khi runner LÀ `subprocess.run` thật: bộ kiểm tiêm một runner
+    giả không nhận `creationflags`/`startupinfo`, và truyền vào đó sẽ nổ
+    `TypeError` — biến một bản sửa cửa sổ thành một bộ kiểm đỏ.
+    """
+    if runner is not subprocess.run:
+        return runner
+
+    def _chay(argv, **kw):
+        for k, v in an_cua_so().items():
+            kw.setdefault(k, v)
+        return subprocess.run(argv, **kw)
+
+    return _chay
 
 
 def _kiem_ten(ten: str, nhan: str) -> None:
@@ -174,7 +207,18 @@ class WorktreeManager:
             chia sẻ với tài khoản khác.
         """
         self._root = Path(repo_root)
-        self._run = runner
+        # MOT CHO DUY NHAT them co an cua so, khong phai moi diem goi.
+        #
+        # Ban truoc them `**an_cua_so()` ngay trong `_git()`, va do la mot
+        # ban sua KHONG DU: `verify_scope()` goi `self._run(["git", ...])`
+        # TRUC TIEP, khong qua `_git()`, nen no van nhap mot cua so console
+        # trong ban `--noconsole`. Bai kiem AST cua V0.4 cung khong bat
+        # duoc: no tim `subprocess.run`/`Popen`, con day la mot runner
+        # DUOC TIEM (`self._run`) nen ten ham khong khop.
+        #
+        # Boc mot lan o day thi moi diem goi — ke ca diem them ve sau —
+        # deu duoc phu, va khong con cho nao de quen.
+        self._run = _boc_an_cua_so(runner)
         # Moi lenh git deu chay tren KHO NAO: bare neu co, khong thi kho chinh.
         self._git_root = Path(git_dir) if git_dir else self._root
         self._wt_root = (Path(worktree_root) if worktree_root
@@ -199,6 +243,7 @@ class WorktreeManager:
         return p
 
     def _git(self, *args: str, check: bool = True):
+        # Co an cua so da duoc `_boc_an_cua_so` them o constructor.
         p = self._run(["git", "-C", str(self._git_root), *args],
                       capture_output=True, text=True, encoding="utf-8",
                       errors="replace")

@@ -70,7 +70,19 @@ Backend web bọc thêm một lớp mỏng ở `server/tts_bridge.py` — **khô
 
 ## Đặc thù môi trường máy này
 
-- Smart App Control **đang bật cưỡng chế**. EXE/DLL chưa ký có thể bị Code Integrity chặn ở lần chạy đầu (sự kiện 3033/3077). Ký số là việc sau MVP. **Không tắt Smart App Control** — thao tác này không thể hoàn tác.
+- Smart App Control **đang bật cưỡng chế** (`VerifiedAndReputablePolicyState=1`,
+  policy `{0283ac0f-…}`). Cơ chế đo được 2026-09-10: EXE **không ký** chỉ chạy nếu
+  đám mây ISG trả "known good" cho ĐÚNG băm đó; đạt thì Code Integrity ghi EA
+  `$KERNEL.PURGE.ESBCACHE` lên tệp và các lần sau không hỏi lại; không đạt thì
+  chặn (sự kiện 3033/3077, "we could not verify its publisher") — **mỗi bản
+  PyInstaller dựng lại là một băm mới nên là một lần xổ số**: `dist-v0612` chạy,
+  `dist-v061` dựng lại 50 phút sau từ CÙNG mã bị chặn vĩnh viễn. Chứng chỉ TỰ KÝ
+  không giải quyết được (SAC chỉ tin CA trong Microsoft Trusted Root Program,
+  không tra kho gốc cục bộ). Sau khi dựng luôn đọc `KIEM_DONG_GOI.txt`
+  (`scripts/kiem_ban_dong_goi.py`); đường chạy chắc chắn không cần ký là
+  `pythonw.exe` (PSF ký) chạy `scripts.control_center.desktop` từ mã nguồn.
+  Đầy đủ: `docs/reports/SMART_APP_CONTROL_V061.md`. **Không tắt Smart App
+  Control**, không sửa chính sách/registry — thao tác này không thể hoàn tác.
 - `Documents` bị OneDrive chuyển hướng.
 - ffmpeg/ffprobe ở `%LOCALAPPDATA%\Microsoft\WinGet\Links\`.
 - Inno Setup nằm ở phạm vi người dùng, không phải `Program Files`.
@@ -186,6 +198,80 @@ Ba luật của tầng Qt, và cả ba đều có bài kiểm khoá lại
 Mã ở `scripts/control_center/`; đầy đủ ở `docs/CONTROL_CENTER.md`; bằng
 chứng chạy thật ở `docs/reports/CONTROL_CENTER_V01_PROOF.md`.
 
+**V0.3** thêm Project Leader (ô chat quyết CHAT/STATUS/CONTROL/WORK, kết
+quả phải chảy về chat) — `docs/reports/CONTROL_CENTER_V03_LEADER.md`.
+**V0.4** làm lại UX: không cửa sổ console nào được nhấp lên, một màn hình
+thấy hết, ô soạn tự trống + giữ focus, chủ đề tối, ảnh nền —
+`docs/reports/CONTROL_CENTER_V04_UX.md`, và luật ở
+`docs/CONTROL_CENTER.md` §14b/§14c. Luật quan trọng nhất của V0.4: **mọi
+`subprocess.run`/`Popen` trên đường của ứng dụng phải mang
+`**an_cua_so()`** — có bài kiểm AST trên cả bao đóng khởi động cưỡng chế.
+
+**V0.5** thêm quan sát SỐNG: bậc thẩm quyền LIVE > kho/bền > ký ức > suy
+luận, sáu trạng thái mà chỉ `DOWN` là khẳng định xấu —
+`docs/reports/PROJECT_OBSERVABILITY_V05.md`.
+**V0.6** thêm KÝ ỨC DỰ ÁN vô hạn + ảo hoá ngữ cảnh: lịch sử thô chỉ-thêm
+(L0) trên đĩa cục bộ, ký ức có cấu trúc trỏ về bằng chứng (L1), viên nang
+(L2), điểm dừng để phiên sau tiếp tục không cần dán handoff (L3); Leader
+nhận một GÓI NGỮ CẢNH có trần token ĐỘC LẬP với kích thước lịch sử, kèm
+`leader.LUAT_KY_UC` ở mọi lượt có khối — ký ức KHÔNG BAO GIỜ trả lời câu
+hỏi hiện tại khi có probe sống. Sổ ở `<gốc>/.router/memory/<ns>/` (cạnh
+`control.db`, KHÔNG trong cây git của dự án), mỗi dự án một sổ. Không xoá
+gì ở V0.6. `docs/reports/PROJECT_MEMORY_V06.md`, mã ở
+`scripts/control_center/memory/`.
+**V0.6.1** sửa khuyết tật V0.6 (tuyên bố tường minh của người dùng nằm ở L0
+mà `Decisions = 0`): ĐỀ BẠT TẤT ĐỊNH (không LLM) tuyên bố → quyết định /
+ràng buộc / yêu cầu / sự cố / quy trình / sự thật, `authority =
+user_explicit`, thay thế kiểu ADR hai chiều, nguồn gốc trỏ về L0; NHẬP LỊCH
+SỬ (backfill) từ sổ Router, git, tài liệu, phiên Claude CỦA ĐÚNG KHO (theo
+`git worktree list`) — idempotent, chỉ đọc, lịch sử luôn `backfill` không
+bao giờ `user_explicit`; KIỂM TOÁN bể Antigravity (8 khe chứng minh từ sổ
+đăng ký, Leader ghim AG01 nay HIỆN RA với bộ lập lịch); PROVIDER NGOÀI + KHO
+BÍ MẬT (Windows Credential Manager, `credential_ref` trong sổ, giá trị
+không bao giờ vào SQLite/ký ức/log/prompt; provider vào fabric ở trạng thái
+KHÔNG nhận dispatch). Nút **Providers** ở thanh trên. TOẢ ĐA AGENT: "gọi N
+agent…"/"mỗi agent một…" (đọc từ câu người dùng, tất định — `toa.py`) → 1
+việc cha + N việc con độc lập có ràng buộc không trùng, sức chứa đo từ
+fabric (trừ chỗ Leader chiếm), con tránh runtime anh em, gộp kết quả có
+nguồn gốc; `--max-parallel 0` = trần tự theo bể (3..12); khoá tài nguyên có
+CHẾ ĐỘ READ/WRITE (đọc song song, ghi độc quyền, chuỗi cũ = WRITE), tài
+nguyên theo TỪNG con, việc đọc git nhận nhật ký do Router đọc (agent headless
+không chạy được shell — quyền của nó KHÔNG được nới);
+`docs/reports/MULTI_AGENT_FANOUT_V061.md`.
+
+**LUẬT CHUNG đã trả giá BỐN lần — `agy --print` (headless) TỰ CHỐI mọi công cụ
+cần prompt quyền** (`command`, `read_file`, `read_url`) — **kể cả khi chính
+LEADER gọi chúng** (lượt trả về rỗng → `LeaderLoi` → rơi về bộ phân rã → tạo
+việc, đúng thứ ta muốn tránh). Đừng cấp quyền rộng, đừng
+`--dangerously-skip-permissions`: **Router làm phép đọc an toàn rồi đính BẰNG
+CHỨNG vào hợp đồng/nhắc nhở**, và `HUONG_DAN` nói thẳng với Leader rằng nó
+KHÔNG CÓ CÔNG CỤ NÀO. Ba hiện thực cùng mẫu: `nguon_git.git_nhat_ky_doc` (lịch
+sử git), `web_reader.doc_web` (web công khai, an toàn SSRF,
+`docs/reports/WEB_READER_V061.md`), và ký ức dự án (`memory/`). Câu hỏi LỊCH
+SỬ/KIẾN THỨC DỰ ÁN và câu hỏi có URL đơn giản **không được** tốn một AG slot —
+xem `leader.LUAT_LICH_SU` / `leader.LUAT_WEB`;
+`docs/reports/PROJECT_MEMORY_RECALL_V061.md`.
+
+**GỐC DỮ LIỆU CHÍNH TẮC — `scripts/control_center/duong_du_lieu.py` là NƠI DUY
+NHẤT định nghĩa nó.** Dữ liệu bền nằm ở `%LOCALAPPDATA%\RouterControlCenter`
+(+`.router/`), **không** cạnh EXE, **không** `parents[2]`, **không** `cwd`.
+Trước 2026-09-10 gốc neo vào vị trí mã nên cùng `project_id` ra nhiều quyển sổ
+độc lập — đúng lý do tuyên bố "GPT-6 Astra…" gõ ở `dist-v06` không hiện ra ở
+bản source-mode. Thứ tự: `--root` (bài kiểm) → `$ROUTER_CC_DATA_ROOT` → chính
+tắc. Thêm: `kho.json` giữ **phiên bản KHO tách khỏi phiên bản ứng dụng** (sổ
+mới hơn mã thì DỪNG), `KhoaKho` cho **một người ghi** (bản thứ hai nhận câu
+"Kho dữ liệu Router đang được dùng"), và `di_tru.py` +
+`scripts/router_cc_di_tru.py` để gộp sổ cũ (xem trước → sao lưu → khử trùng →
+idempotent → không xoá gì). Đầy đủ:
+`docs/reports/GOC_DU_LIEU_CHINH_TAC_V061.md`.
+
+Báo cáo:
+`docs/reports/PROJECT_MEMORY_V061.md`,
+`docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`,
+`docs/reports/ANTIGRAVITY_POOL_AUDIT_V061.md`; mã ở
+`scripts/control_center/memory/{de_bat,nhap_khau}.py` và
+`scripts/control_center/providers/`.
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,
@@ -199,6 +285,35 @@ Ba luật không được phá khi sửa gói này:
 2. **Không bịa số usage.** Không đo được thì `UNAVAILABLE` + `None`, không
    phải `0`.
 3. **Không tự xoá worktree.** Chỉ đánh dấu.
+
+## Tìm/đọc trong kho: dùng `scripts/tim.py`, không dùng `cd && grep`
+
+```bash
+python scripts/tim.py "TrangThai"                      # tìm
+python scripts/tim.py "def thu" scripts/control_center # giới hạn phạm vi
+python scripts/tim.py --doc scripts/store.py --tu 1 --den 60   # đọc
+python scripts/tim.py --kiem                           # chính sách loại trừ
+git grep -n "TrangThai" -- scripts/                    # cửa thứ hai
+```
+
+**Đây không phải một quy ước cho ngoan — nó là cách duy nhất phạm vi đọc
+tự chứng minh được.** Claude Code phân giải những đường dẫn mà một lệnh
+Bash NHẮC TÊN rồi đối chiếu với các luật `Read(...)` deny. Sau một `cd`,
+thư mục hiệu lực không suy ra được TĨNH, nên nó không thể chứng minh phép
+tìm không chạm `.env` — và phải hỏi người. `tim.py` suy gốc kho từ **vị
+trí của chính tệp đó**, nên `cd` trở thành vô nghĩa thay vì bị cấm.
+
+Hai điều nữa đã đo được, và cả hai đổi cách làm việc:
+
+* **Thư mục CHƯA ĐƯỢC TIN làm hồ sơ quyền của kho biến mất** — cả 241
+  luật `allow` lẫn hook `PreToolUse` đều bị bỏ qua, và mỗi worktree Router
+  vừa dựng là một thư mục như thế. Sửa:
+  `python scripts/kiem_quyen.py --tin-cay <đường>`.
+* **Tầng an toàn sống ở `~/.claude/settings.json`**, không ở hồ sơ kho —
+  vì chỉ tầng đó luôn có hiệu lực. `python scripts/kiem_quyen.py --kiem`
+  kiểm cả hai tầng và in ma trận AN TOÀN / NGUY HIỂM.
+
+Đầy đủ, kèm số đo: `docs/reports/QUYEN_CLAUDE_TIN_CAY.md`.
 
 ## Trạng thái
 

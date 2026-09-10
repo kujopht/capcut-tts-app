@@ -181,8 +181,58 @@ def chay(dong_tu: str) -> Tuple[int, str]:
     return p.returncode, _loc((p.stdout or "") + (p.stderr or ""))
 
 
+def _ra(luong, van_ban: str) -> None:
+    """Ghi UTF-8 bằng BYTE, không qua codec của locale.
+
+    ĐÂY LÀ CHỖ THỨ BA của đúng một sự cố (xem `control_center/ghi_utf8.py`
+    cho hai chỗ đầu). Mọi câu công cụ này in ra là tiếng Việt, và
+    `sys.stdout.write()` giao chuỗi cho **tầng văn bản** của luồng — codec
+    do locale Windows quyết định, cp1252 trên máy này.
+
+    Hai chế độ hỏng KHÁC NHAU, và cả hai đều xấu:
+
+    * `stdout` nối vào pipe -> `errors='strict'` -> `UnicodeEncodeError`,
+      công cụ chết giữa lúc báo kết quả.
+    * `stderr` -> CPython mặc định `errors='backslashreplace'` trên Windows
+      -> câu "TỪ CHỐI: …" ra thành `T\\u1eea CH\\u1ed0I: …`. KHÔNG chết,
+      nên nó lặng lẽ đúng ở CI (Linux/UTF-8) và lặng lẽ sai trên máy người
+      dùng — bài kiểm `test_cwd_NGOAI_kho_bi_tu_choi` bắt được đúng cái
+      này khi chạy dưới locale thật.
+
+    Mã hoá sang UTF-8 rồi ghi vào tầng nhị phân thì không thể thất bại
+    (UTF-8 biểu diễn được mọi điểm mã), nên không cần `errors=` gì cả và
+    không mất một byte tiếng Việt nào.
+    """
+    b = getattr(luong, "buffer", None)
+    if b is not None and hasattr(b, "write"):
+        try:
+            b.write(van_ban.encode("utf-8"))
+            b.flush()
+            return
+        except (OSError, ValueError):
+            pass
+    # Khong co tang nhi phan: van phai in duoc gi do. `errors="replace"`
+    # o day KHONG phai duong chinh — no la nhanh cuoi khi da khong con
+    # tang byte nao, va tha mot dau `?` con hon mat ca thong diep tu choi.
+    try:
+        luong.write(van_ban)
+    except UnicodeEncodeError:
+        luong.write(van_ban.encode("utf-8", "replace").decode("ascii",
+                                                              "replace"))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(
+    # `BoDocUTF8`: `argparse` ghi usage/help/loi ra tang VAN BAN, va moi
+    # chuoi `description=`/`help=` duoi day la tieng Viet. Cung mot goc
+    # ro nhu tren, chi khac cho phat sinh.
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from scripts.control_center.ghi_utf8 import BoDocUTF8
+        _Doc = BoDocUTF8
+    except Exception:                           # noqa: BLE001
+        _Doc = argparse.ArgumentParser
+    ap = _Doc(
         prog="cc_agent_tool",
         description=("Công cụ cố định cho agent do Router quản lý. Tập động "
                      "từ hữu hạn; không nhận tham số tuỳ ý."))
@@ -194,11 +244,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         ma, ra = chay(a.verb)
     except TuChoi as exc:
-        sys.stderr.write(str(exc) + "\n")
+        _ra(sys.stderr, str(exc) + "\n")
         return 2
-    sys.stdout.write(ra)
+    _ra(sys.stdout, ra)
     if a.verb == "changes" and not ra.strip():
-        sys.stdout.write("(không có tệp nào thay đổi)\n")
+        _ra(sys.stdout, "(không có tệp nào thay đổi)\n")
     return ma
 
 

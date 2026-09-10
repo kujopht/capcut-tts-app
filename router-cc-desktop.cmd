@@ -8,6 +8,16 @@ rem Duong CHINH cho nguoi dung la "Router Control Center.exe" (bam doi).
 rem Tep nay de chay khi CHUA build EXE, va de go loi vo desktop.
 rem
 rem Dung `pythonw.exe` nen KHONG co cua so console nao — giong EXE.
+rem
+rem 2026-09-10 — VI SAO TEP NAY CUNG LA DUONG DEV KHUYEN NGHI DUOI SMART APP
+rem CONTROL: may nay bat Smart App Control cuong che. Ban EXE PyInstaller KHONG
+rem KY chi mo duoc neu dam may ISG tra "known good" cho DUNG bam cua ban do; moi
+rem lan dung lai la mot bam moi, nen "mo duoc" la xo so (dist-v0612 chay,
+rem dist-v061 dung lai tu cung ma bi chan). `pythonw.exe` cua Python Software
+rem Foundation (ke ca launcher trong venv) da KY hop le boi CA cong cong nen
+rem Smart App Control cho chay; ma Python (payload) khong thuoc pham vi kiem
+rem cua no o ca hai cach dong goi — khong co gi bi noi. Do that: cua so len
+rem sau 4 s, 0 su kien Code Integrity. Xem docs/reports/SMART_APP_CONTROL_V061.md.
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 

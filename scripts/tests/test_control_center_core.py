@@ -710,12 +710,12 @@ class TestRulePlanner(unittest.TestCase):
 
     def test_pham_vi_ghi_thanh_khoa_FILESYSTEM(self):
         kq = self.pl.plan("fix web/admin/content-queue", self.pj)
-        loai = {k for k, _ in kq.tasks[0].resources}
-        self.assertIn(LockKind.FILESYSTEM, loai)
+        loai = {(k, m) for k, _, m in kq.tasks[0].resources}
+        self.assertIn((LockKind.FILESYSTEM, "write"), loai)   # GHI -> khoa WRITE
 
     def test_tai_nguyen_prod_thanh_khoa_PRODUCTION(self):
         kq = self.pl.plan("investigate fanfic.world latency", self.pj)
-        self.assertIn((LockKind.PRODUCTION, "prod:fanfic.world"),
+        self.assertIn((LockKind.PRODUCTION, "prod:fanfic.world", "write"),
                       kq.tasks[0].resources)
 
     def test_khai_bao_write_KHONG_thanh_khoa_SERVICE(self):
@@ -725,7 +725,7 @@ class TestRulePlanner(unittest.TestCase):
         SERVICE tên `write:web` — khoá một tài nguyên không tồn tại.
         """
         kq = self.pl.plan("update the web styling", self.pj)
-        ten = {r for _, r in kq.tasks[0].resources}
+        ten = {r for _, r, _m in kq.tasks[0].resources}
         self.assertNotIn("write:web", ten)
 
     def test_viec_rui_ro_cao_doi_review_doc_lap(self):

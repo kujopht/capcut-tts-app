@@ -1291,8 +1291,249 @@ Nếu sau này muốn cho nó tự xoá, điều kiện tối thiểu:
 4. Không bao giờ xoá `audio_track`; metadata mồ côi phải do người xem xét, vì
    nó nghĩa là **đã mất dữ liệu** chứ không phải thừa dữ liệu.
 
+## Router Control Center V0.6 — ký ức dự án (2026-09-10)
+
+Đã xong, nhánh `feat/v06-project-memory`, chưa tag/merge: lịch sử dự án
+chỉ-thêm trên đĩa cục bộ (`<gốc>/.router/memory/<ns>/`), ký ức có cấu trúc
+trỏ về bằng chứng, quyết định kiểu ADR, viên nang, điểm dừng để phiên sau
+tiếp tục không cần dán handoff; Leader nhận gói ngữ cảnh có trần token độc
+lập kích thước lịch sử (đo 20 k → 200 k sự kiện: 1 047 → 1 056 token). Bản
+EXE `dist-v06` nghiệm thu 22/22. Đầy đủ: `docs/reports/PROJECT_MEMORY_V06.md`.
+Việc tiếp theo hợp lý: consolidation có kiểm chứng + đường vector tuỳ chọn
+(mục 18 của báo cáo). Không xoá lịch sử ở V0.6.
+
+## Router Control Center V0.6.1 — ĐÓNG BĂNG (2026-09-10)
+
+Nhân V0.6.1 **đã đóng băng**. Sau mốc này: sửa lỗi + tài liệu, **không thêm
+tính năng vào nhân**. Chi tiết bất biến: `docs/CONTROL_CENTER.md` §14e.
+
+* **Gốc dữ liệu bền, chính tắc theo người dùng**:
+  `%LOCALAPPDATA%\RouterControlCenter\.router` — mở app bằng CÁCH NÀO cũng ra
+  đúng một quyển sổ (source-mode, đóng gói, bản dựng mới, worktree khác).
+  `scripts/control_center/duong_du_lieu.py` là nơi DUY NHẤT định nghĩa.
+* **Sổ Fanfic live** (`project_id=fanfic`, ns `fanfic-dcf29d1141`): ~7.8k sự
+  kiện L0, ~103 ký ức, 3 quyết định (`user_explicit`), 56 sự cố, 114 mắt xích
+  bằng chứng, 70 bản ghi `backfill`.
+* **Đã nghiệm thu THẬT**: liên tục hai chiều source ⇄ đóng gói **15/15**;
+  memory-first **10/10**; WebReader **9/9**; toả 8 agent + READ/READ song song
+  đo bằng mốc thời gian.
+* **Hồi quy đóng băng**: **931 bài xanh, 0 hỏng** (95 Qt GUI bỏ qua — thiếu
+  PySide6). Bộ chậm/đa luồng chạy theo TỆP RIÊNG.
+* **Giữ nguyên**: `dist-v04/v05/v06` (+ `v0611/v0612/v0613`) và mọi sổ `.router`
+  cũ đã đánh mốc `DA_DI_TRU.json` — KHÔNG xoá.
+* **Tag**: `router-control-center-v0.6.1` (theo đúng lối `router-control-center-vX.Y.Z`).
+
+## Router Control Center V0.6.1 — đề bạt ký ức · nhập lịch sử · bể AG · provider + kho bí mật (2026-09-10)
+
+Đã xong, nhánh `feat/v061-memory-provider-vault`, chưa tag/merge; `dist-v04/05/06`
+giữ nguyên, bản mới `dist-v061`. Bốn việc, ba báo cáo:
+
+* **Khuyết tật V0.6 đã sửa** — "hãy ghi nhớ đây là một quyết định của project: …"
+  gõ trong chat nay thành `qd_*` NGAY tại cổng vào (tất định, không LLM),
+  `authority = user_explicit`, bằng chứng trỏ về dòng L0; thay thế kiểu ADR hai
+  chiều ("thay cho qd_0001, …"), bản cũ SUPERSEDED vẫn truy được; "khi nào / ai
+  nói / vì sao nhớ" trả lời từ `ts_su_kien`/`nguon_loai`/`bang_chung`. Lược đồ ký ức
+  v2 (tự nâng). Leader chỉ XÁC NHẬN bằng mã, có `record_memory` (authority `leader`).
+  `docs/reports/PROJECT_MEMORY_V061.md`.
+* **Nhập lịch sử** (sổ Router, git, tài liệu, phiên Claude CỦA ĐÚNG KHO theo
+  `git worktree list`): idempotent, chỉ đọc, resumable, thử khô; lịch sử luôn
+  `backfill` (không bao giờ `user_explicit`); phiên đang mở bị bỏ qua. Chạy thật
+  trên kho này: 7 360 sự kiện, 93 ký ức, 0 `user_explicit`, 32 s. Sự cố khoá SSH
+  Fanfic: nguồn CÓ bằng chứng "`fanficappwrite.pem` không tồn tại, tệp thật là
+  `fanficappwrrite.pem`" → INCIDENT backfill; **không** có bằng chứng "tạo canonical /
+  sửa ACL" trong nguồn được phép → không bịa.
+* **Bể Antigravity** — 8 khe chứng minh từ sổ đăng ký (8 cấp phát, 8 hồ sơ riêng,
+  10 chỗ); chọn/trải tải/cooldown/failover có bài kiểm; Leader ghim AG01 và **chỗ
+  đó nay hiện ra với bộ lập lịch**. `docs/reports/ANTIGRAVITY_POOL_AUDIT_V061.md`.
+* **Provider ngoài + kho bí mật** — Windows Credential Manager (đo thật), sổ chỉ giữ
+  `credential_ref`, tay cầm mờ `BiMat`, preset OpenAI-compatible/Alibaba/Tencent
+  (khai báo, chưa đo; **chưa cấu hình khoá nào** — người vận hành thêm qua nút
+  Providers), thử kết nối chi phí tối thiểu, hỏi thử thủ công, provider vào fabric
+  KHÔNG nhận dispatch. `docs/reports/PROVIDER_CREDENTIAL_ARCHITECTURE_V061.md`.
+
+* **Toả đa agent** (khuyết tật nghiệm thu tay: "gọi 8 agent gemini 3.8…" thành
+  MỘT việc, giao AG02) — nguyên nhân: `_chat()` chỉ dùng lời diễn đạt lại của
+  Leader, không tầng nào mang số agent; cộng `max_parallel=3` mặc định. Sửa:
+  `toa.py` đọc cardinality từ câu người dùng → 1 cha + N con (không trùng),
+  sức chứa đo từ fabric (trừ Leader), câu trả lời nói đúng "K chạy ngay, N−K
+  chờ", con tránh runtime anh em, gộp có nguồn gốc, UI cha/con, trần tự theo
+  bể. `docs/reports/MULTI_AGENT_FANOUT_V061.md`.
+* **Khuyết tật nghiệm thu tay #2 — toả đúng số nhưng chạy TUẦN TỰ** ("gọi 4
+  agent gemini 3.8, mỗi agent kiểm tra một phần khác nhau của repo này: 1.
+  README/docs 2. tests 3. source architecture 4. git history"). Nguyên nhân
+  gốc đo từ sổ lần chạy tay, bốn chặng: `loai_viec` xếp câu vào `testing` vì
+  DANH TỪ trần `tests` (→ việc GHI + worktree); phạm vi GHI lấy token đường
+  dẫn duy nhất `README/docs`; `_tao_toa` sao chép khoá mẫu cho CẢ 4 con; khoá
+  không có chế độ nên độc quyền → con 1 giữ, con 2–4 WAITING, chỉ AG02 được
+  dùng. Con [1/4] hỏng `tool_permission_denied` (`read_file` bị tự chối trong
+  worktree) — hệ quả của xếp sai lớp, không phải lỗi đồng thời. Sửa
+  (`MULTI_AGENT_FANOUT_V061.md` §7, luật 12 `CONTROL_CENTER.md` §17): khoá
+  READ/WRITE (`locks.py`, `ResourceLock.mode`, cột `mode` tự nâng; chuỗi cũ =
+  WRITE), giao nhau tất định sau chuẩn hoá + `LockKind.GIT` (`history` đọc ≠
+  `worktree` ghi), bộ phân rã xét Ý ĐỌC trước, tài nguyên THEO TỪNG CON (`READ
+  FS README/docs` · `READ FS tests` · `READ FS .` · `READ GIT history`), cha
+  không khoá và `RUNNING` khi con chạy, song song ĐO bằng khoảng chạy thật
+  (`song_song_toi_da`), UI hiện chế độ/tài nguyên từng con. Hai phát hiện thêm
+  từ nghiệm thu đóng gói: con "git history" chết vì agent headless không chạy
+  được `git log` → Router đọc thay (`nguon_git.git_nhat_ky_doc`, lọc bí mật,
+  quyền agent KHÔNG đổi); khoá con nhả trong `finally` SAU khi cha DONE → nhả
+  ngay khi việc ở trạng thái cuối. Bộ kiểm mới
+  `scripts/tests/test_khoa_doc_ghi_v061.py` (23 bài, fabric giả 4 tài khoản).
+  **Bản EXE: `dist-v0612`** (sha256 `5e6d0ab7…`) vì `dist-v061` đang được MỞ
+  lúc làm (một PID thật + ba `agy` con — `dist-v061` vẫn là bản CŨ, dựng lại
+  bằng `python scripts/build_desktop_exe.py --dist dist-v061 --clean` sau khi
+  đóng app; kiểm tiến trình bằng `MSYS_NO_PATHCONV=1 tasklist /FO CSV | grep`,
+  KHÔNG dùng `tasklist /FI` trong Git Bash — nó bị đổi thành đường dẫn và in
+  rỗng). Nghiệm thu `--kich-ban kiem-tra --max-parallel 4`: 21/22 — 4/4 con
+  DONE trên AG02–AG05 cùng lúc, `song_song_toi_da = 4`, 0 tranh chấp, cha
+  4/4, 0 khoá còn giữ; `--kich-ban ghi`: 20/21 — 2 con GHI cùng tệp tuần tự
+  (con 2 WAITING với sự kiện tranh chấp WRITE, `song_song_toi_da = 1`), cả hai
+  DONE trong worktree cô lập, gốc kho tạm không đổi. Bước hỏng duy nhất ở cả
+  hai: cửa sổ Windows Terminal lúc `agy` sinh (đã biết, §6.2). Production/kho
+  thật bị chạm: 0.
+* **Khuyết tật đóng gói — Smart App Control chặn bản `dist-v061` dựng lại**
+  ("we could not verify its publisher", sự kiện 3033/3077, policy
+  `{0283ac0f-…}`). Nguyên nhân gốc đo được: EXE **không ký**; SAC chỉ còn đường
+  tra băm ở đám mây ISG; mỗi bản PyInstaller là một băm mới (mốc dựng trong đầu
+  PE + overlay) nên là một lần tra mới; năm bản chạy được đều mang EA
+  `$KERNEL.PURGE.ESBCACHE` (câu trả lời thuận được ghi lên tệp), bản bị chặn
+  không có EA; `dist-v0612` (18:15) chạy, `dist-v061` (19:05, cùng commit
+  `7b9e377`, cùng PyInstaller 6.22.2, cùng `.rsrc`) bị chặn 7 lần trong 100
+  phút. Không phải cách mở, không MOTW (0/6), không công cụ. **Tự ký không
+  thoả SAC** (chỉ tin CA trong Microsoft Trusted Root Program). Đã thêm:
+  `scripts/kiem_ban_dong_goi.py` (SHA256/chữ ký/người ký/MOTW/dự đoán SAC,
+  `--so-sanh`, `--dll`; `build_desktop_exe.py` tự gọi và ghi
+  `<dist>/KIEM_DONG_GOI.txt`), `scripts/ky_ban_dong_goi.py` (vỏ `signtool`:
+  vân tay CA hoặc Artifact Signing, không PFX/tự ký); `router-cc-desktop.cmd`
+  (có từ V0.2) thành đường dev khuyến nghị — vỏ desktop từ mã nguồn qua
+  `pythonw.exe` PSF ký, đo 0 sự kiện Code Integrity; 12 bài kiểm. Khuyến nghị: phát hành ký bằng chứng chỉ IV/OV của
+  CA công cộng (Artifact Signing **không mở cho Việt Nam**); dev dùng
+  `router-cc-desktop.cmd` hoặc chấp nhận xổ số với báo cáo. Bản cũ nguyên
+  băm. EXE mở được lúc đo: `dist-v0612`. `docs/reports/SMART_APP_CONTROL_V061.md`.
+* **Khuyết tật Project Memory — không phải lớp liên tục có thẩm quyền.** Sổ ký
+  ức LIVE của Fanfic là `…\router-control-center\.router\memory\fanfic-dcf29d1141\
+  memory.db` (project_id=`fanfic`, repo trỏ `C:\Users\nguye\Documents\CapCut-TTS-App`).
+  Nguyên nhân gốc "Decisions=0 sau khi người dùng tuyên bố": đề bạt V0.6.1
+  chạy ĐÚNG (đo: `qd_0001` user_explicit + provenance) — UI báo 0 vì tuyên bố
+  Astra gõ vào bản CŨ `dist-v06` (không có `de_bat`) + **tách kho theo gốc
+  `.router`** (đóng gói cạnh EXE ≠ source-mode ở checkout). Sổ live CHƯA BAO GIỜ
+  backfill (`da_nhap=0`) — "8.089" cũ là dry-run/sổ tạm. Đã: backfill THẬT vào
+  sổ live qua API app đang chạy (su_kien 75→7.647, incident 1→**55**, 0 rò bí
+  mật, decision vẫn 0 vì backfill không `user_explicit`); sự cố SSH
+  (`fanficappwrrite.pem` typo, `prod_cutover.py:96`, commit `b8b2592`) chứng
+  minh từ git — không từ đề bài. Sửa Leader MEMORY-FIRST: `leader.
+  la_cau_hoi_lich_su` + `LUAT_LICH_SU` + `khoi_cho_leader(kem_su_kien=)` đính
+  bằng chứng L0 + wiring `engine._giao_leader` — câu hỏi lịch sử/kiến thức dự
+  án trả TỪ ký ức, KHÔNG dispatch worker chỉ vì từ khoá vắng trong chat; giữ
+  bậc SỐNG > KÝ ỨC (câu hỏi hiện tại vẫn đo sống). Bộ kiểm
+  `test_ky_uc_first_v061.py` (11) gồm NHẤT QUÁN KHO (ghi/backfill/UI/Leader một
+  namespace + một tệp). **LUÔN mở app từ CÙNG một nơi (`router-cc-desktop.cmd`
+  ở worktree này) để dùng đúng sổ live.** `docs/reports/PROJECT_MEMORY_RECALL_V061.md`.
+  **Nghiệm thu source-mode THẬT đã chạy** (`control_center_v061_ky_uc_web_acceptance.py`):
+  pha A 7/7 (decisions 0→1 trong 9.1s, `qd_0001` user_explicit, provenance,
+  0 worker), pha B 9/9 sau đóng/mở app — tuyên bố bị đẩy ra **17 tin** khỏi cửa
+  sổ 14 tin của Leader nên recall KHÔNG thể từ transcript; recall chéo phiên
+  bằng diễn giải khác trả đúng kèm `qd_0001`/`ku_…`/`sk#7654`; **sự cố SSH trả
+  từ ký ức với 0 worker dispatch** (trước: AG02 200s); câu hỏi hiện tại vẫn đo
+  sống (live > ký ức). Production bị chạm: 0.
+* **Khuyết tật `read_url` headless — WebReader.** "URL github này là gì?" →
+  worker AG02 FAILED 17s `tool_permission_denied`: `agy --print` tự chối mọi
+  công cụ cần prompt quyền (`read_url`, như `command`/`read_file` trước đó), và
+  Router KHÔNG có đường đọc web nào. Sửa theo đúng mẫu `nguon_git`: **Router
+  đọc hộ** — `scripts/control_center/web_reader.py` (`WebReader.read/metadata/
+  extract_text`, `doc_web`), chỉ đọc, nguồn gốc đầy đủ (url gốc/cuối, ts,
+  status, content-type, sha256, chuyển hướng), chuyển hướng ≤5 **kiểm SSRF lại
+  mỗi bước**, trần 3 MB, timeout 12s, rút text HTML/JSON. **SSRF**: chặn
+  scheme lạ, `user:pass@`, host nội bộ theo tên, loopback/RFC1918/link-local/
+  ULA/multicast/reserved/**metadata đám mây**, kiểm **MỌI** IP `getaddrinfo`
+  trả về, và **ghim kết nối vào IP đã kiểm** (SNI theo tên) chống rebinding.
+  Adapter **GitHub công khai không token** (release/issue/repo+README qua REST
+  API — 72 KB JSON sạch thay 471 KB HTML). Tích hợp: `engine._khoi_web` (Leader
+  + `leader.LUAT_WEB`: câu đơn giản trả trực tiếp, **không tốn AG slot**) và
+  `engine._kem_web_vao_hd` (đính bằng chứng vào hợp đồng worker, đọc 1 lần cho
+  cả toả) + sự kiện `WEB_READ`. **Quyền agent KHÔNG đổi** — AG01..AG08 giữ hồ
+  sơ cũ, không `--dangerously-skip-permissions`. Bộ kiểm
+  `test_web_reader_v061.py` (19) — bắt được một lỗi THẬT: `SSRFLoi` là con của
+  `ValueError` nên `raise` trong `try/except ValueError` bị nuốt. Nghiệm thu
+  thật 9/9: 0 `tool_permission_denied`, 0 worker cho câu đơn giản, trả lời
+  grounded (v2.10.0 World Monitor), và việc NẶNG `fanfic.t6006-1` **DONE trên
+  AG02 61s** với bằng chứng web trong hợp đồng. `docs/reports/WEB_READER_V061.md`.
+* **Khuyết tật LIÊN TỤC cuối — GỐC DỮ LIỆU CHÍNH TẮC.** Danh tính dự án ổn định
+  nhưng chỗ lưu neo vào VỊ TRÍ MÃ (cạnh EXE / `parents[2]` / `cwd`), nên cùng
+  `project_id` ra nhiều quyển sổ. Sửa: **`scripts/control_center/duong_du_lieu.py`
+  là NƠI DUY NHẤT** định nghĩa gốc = `%LOCALAPPDATA%\RouterControlCenter`
+  (thứ tự: `--root` → `$ROUTER_CC_DATA_ROOT` → chính tắc); đã bỏ nhánh
+  `frozen`→cạnh-EXE ở `desktop.py`, `Path.cwd()` ở `webmain.py`/`__main__.py`,
+  và `ControlCenter.__init__` mặc định về chính tắc. Thêm `kho.json` (**phiên
+  bản KHO tách khỏi phiên bản app**; sổ mới hơn mã thì DỪNG), `KhoaKho` (**một
+  người ghi**, câu "Kho dữ liệu Router đang được dùng"), `di_tru.py` +
+  `scripts/router_cc_di_tru.py` (khám phá tường minh — KHÔNG quét máy, xem
+  trước, sao lưu, khử trùng theo vân tay/`ma`, ánh xạ id giữ nguồn gốc, không
+  ghi đè bản mới hơn, `qd_` trùng thì đánh số lại giữ cả hai, idempotent,
+  KHÔNG xoá sổ cũ — chỉ `DA_DI_TRU.json`). **Đã di trú thật**: 3 nguồn →
+  gieo 7.710 L0 + 95 ký ức, gộp thêm 23 L0 mới / 21 khử trùng; **Astra
+  `qd_0001` còn nguyên** và dòng L0 GỐC gõ ở `dist-v06` được CỨU (`sk#7722`);
+  39 L0 + 4 ký ức SSH còn nguyên. Nghiệm thu **liên tục hai chiều 15/15**
+  (source→đóng gói `qd_0002`, đóng gói→source `qd_0003`, 0 việc mới, bản đóng
+  gói `dist-v0613` ghi khoá ở GỐC CHÍNH TẮC — không copy tay tệp nào). Hồi quy
+  memory-first **10/10**, WebReader **9/9**. Bắt + sửa hai lỗi thật: khoá kho
+  khoá SAI BYTE (mở `"a+"` → `msvcrt.locking` tại EOF nên bản thứ hai không
+  xung đột) và **Leader tự gọi `read_file` bị chối → rơi về dispatch** (sửa:
+  `HUONG_DAN` nói Leader KHÔNG CÓ CÔNG CỤ + câu hỏi lịch sử khi Leader chết thì
+  trả lời từ ký ức, KHÔNG dispatch). 27 bài kiểm mới. Production bị chạm: 0.
+  `docs/reports/GOC_DU_LIEU_CHINH_TAC_V061.md`.
+  **Sổ live nay ở `%LOCALAPPDATA%\RouterControlCenter\.router` — mở app bằng
+  cách nào cũng ra đúng nó.**
+
+Bộ kiểm mới: 100 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
+provider webapi 3 · toả 22). **Bản EXE cuối: `dist-v061`, build lại SẠCH từ
+`d59accd`** sau khi đóng app — sha256 `d0c04e92…`, `dist-v061/BAN_TOT_v061.txt`.
+Nghiệm thu `control_center_v061_toa_acceptance.py` trên bản đó: kịch bản A
+(4 agent, trần 3) 15/16; kịch bản B — câu NGUYÊN VĂN "gọi 8 agent gemini 3.8 và
+phân mỗi đứa đi lục cho t 1 bộ fanfic audio", trần 6 — 15/16: 1 cha + 8 con,
+yêu cầu giữ 8, AG02–AG07, 6 chạy + 2 chờ, cha DONE 8/8; bước hỏng duy nhất là
+cửa sổ Windows Terminal lúc `agy` sinh (22/22 console của Router đều ẩn) — xem
+`MULTI_AGENT_FANOUT_V061.md` 6.2. `dist-v0611` là bản tạm khi `dist-v061` bị
+khoá bởi hai bản EXE đang mở (có thể xoá). Bài học: kiểm `tasklist` trước khi
+`--clean` một thư mục dist. Lần 3 nghiệm thu bắt được lỗi giao diện thật —
+WebSocket không theo dự án đang chọn — đã sửa. Nghiệm thu EXE `dist-v061`: **31/31** (lần 4; sha256
+`bfc25e37…`, `dist-v061/BAN_TOT_v061.txt`) — chi tiết và ba lần chạy trước ở
+`PROJECT_MEMORY_V061.md` mục 10. Việc tiếp theo: bật AUTO cho provider ngoài (adapter thực
+thi + ngân sách), người vận hành duyệt các sự cố `backfill`, nhập tiếp phần còn lại.
+
 ## Bẫy đã gặp
 
+- **Vai "user" trong tệp phiên Claude KHÔNG chứng minh người gõ.** Bản tóm tắt
+  nén ngữ cảnh ("This session is being continued…"), thân skill, đầu ra lệnh
+  `/…`, `<system-reminder>` đều mang `role: user`. Lần nhập lịch sử đầu đã đề
+  bạt một bản tóm tắt nén thành "quyết định user_explicit". Luật: lịch sử luôn
+  `backfill`, và lọc các dạng đó trước khi xét.
+- **Phiên Claude đang mở là HIỆN TẠI, không phải lịch sử.** Đề bài của một task
+  mô tả một sự cố cũ nằm trong phiên đang chạy; nhập nó là bịa nguồn gốc. Bỏ qua
+  tệp `.jsonl` có mtime < 600 s, nói rõ, lần sau nhập tiếp.
+- **Báo cáo cuối phiên nào cũng có "fixed"/"failed".** Đề bạt sự cố từ tin trợ
+  lý cần ≥1 dấu hiệu MẠNH (root cause, typo, permission denied, ACL…) hoặc một
+  tên tệp viết hai cách lệch một ký tự — không thì 115 "sự cố" toàn "Done.".
+
+- **pywebview phát `events.closed` trên luồng NỀN, còn `webview.start()`
+  trả về ngay khi cửa sổ đóng.** `main()` kết thúc → trình thông dịch tắt →
+  luồng đang chạy handler bị giết giữa chừng. Triệu chứng: nhật ký có dòng
+  đầu của handler nhưng không có gì sau đó, không `ENGINE_STOPPED`, phiên
+  Leader `agy` bị bỏ rơi. Có từ V0.2, chỉ lộ ở V0.6 khi điểm dừng "tắt ứng
+  dụng" phụ thuộc vào `shutdown()`. Sửa: `threading.Event` do handler set
+  trong `finally`, `main()` chờ có hạn (45 s) sau `start()`; việc quan
+  trọng đứng TRƯỚC `join` uvicorn.
+- **`terminate()` trong bài nghiệm thu KHÔNG phải "người dùng đóng app".**
+  TerminateProcess bỏ qua mọi handler đóng; bài đo "đóng/mở lại" đạt về
+  bền dữ liệu nhưng không đo gì về đường tắt sạch. Đóng như người dùng =
+  `PostMessageW(hwnd, WM_CLOSE)` tới cửa sổ chính, rồi chờ tiến trình tự
+  thoát (rơi về terminate có nói rõ). Hai lần nghiệm thu V0.6 đầu đã đo
+  sai vì điều này.
+- **Thư mục chưa được Claude Code TIN thì cả `.claude/settings.json` lẫn
+  hook của kho đều bị bỏ qua lặng lẽ** — mỗi worktree mới là một thư mục
+  như thế. Tầng an toàn phải ở `~/.claude/settings.json`;
+  `python scripts/kiem_quyen.py --kiem` kiểm cả hai tầng,
+  `--tin-cay <đường>` cho worktree mới. `docs/reports/QUYEN_CLAUDE_TIN_CAY.md`.
 - **Heredoc trong bash nuốt mất một dấu gạch chéo** — kể cả dạng đã trích dẫn `<<'EOF'`. Đã mắc hai lần: `\\b` thành `\b` (backspace), và `\\${cls}` thành `\${cls}` — mà `\$` trong template literal JS là **đô-la thoát**, nên regex biến thành chuỗi văn bản `${cls}` không bao giờ khớp, tức là một assertion rỗng. Viết file test bằng công cụ Write, đừng dùng heredoc. Và đừng ghép chuỗi vào `new RegExp` khi có cách so khớp trực tiếp.
 - **Assertion phủ định dễ đạt vì lý do sai.** `!src.includes("api.getChapter(")` từng đạt cả trên code cũ, vì code cũ viết `api` xuống dòng rồi `.getChapter(`. Sau khi viết test mới, hãy chạy chính assertion đó lên bản code CŨ (`git show <commit>:<file>`) và xác nhận nó **thất bại** — không làm bước này thì không biết test có răng hay không.
 - **`uvicorn --reload` bỏ sót thay đổi.** Đã gặp ba lần: WatchFiles in ra "detected changes... Reloading..." rồi worker không khởi động lại, backend tiếp tục phục vụ code cũ. Triệu chứng là API thiếu hẳn trường vừa thêm. Cách chắc ăn: dừng hẳn rồi chạy lại. Lưu ý tiến trình **con** có thể sống sót sau khi giết tiến trình cha và vẫn giữ cổng 8000 — phải giết cả cây.

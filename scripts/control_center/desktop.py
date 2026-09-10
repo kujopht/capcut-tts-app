@@ -65,15 +65,20 @@ def _bao_loi(thong_diep: str) -> None:
 
 
 def _goc_mac_dinh() -> Path:
-    """Thư mục giữ sổ.
+    """Thư mục giữ sổ — GỐC DỮ LIỆU CHÍNH TẮC theo người dùng.
 
-    Khi chạy từ EXE đã đóng gói, `cwd` là bất kỳ đâu Explorer đang mở, nên
-    KHÔNG dùng `Path.cwd()`. Dùng thư mục cạnh chính EXE — đúng như
-    `cc_agent_tool.py` neo `REPO_ROOT` vào vị trí tệp thay vì vào `cwd`.
+    ĐÃ ĐỔI (2026-09-10, khuyết tật liên tục). Bản trước neo gốc vào VỊ TRÍ MÃ:
+    cạnh EXE khi đóng gói, `parents[2]` khi chạy từ nguồn. Hệ quả đo được:
+    cùng `project_id="fanfic"` mà bản `dist-v06` và bản source-mode có HAI
+    quyển ký ức độc lập, nên tuyên bố "GPT-6 Astra…" gõ ở bản này không bao
+    giờ hiện ra ở bản kia.
+
+    Nay gốc là `%LOCALAPPDATA%\\RouterControlCenter` — không phụ thuộc
+    `__file__`, `cwd`, `sys.executable` hay thư mục dist. Xem
+    `duong_du_lieu.py`. `--root` vẫn ghi đè (bài kiểm/nghiệm thu cần).
     """
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[2]
+    from scripts.control_center.duong_du_lieu import goc_du_lieu
+    return goc_du_lieu()
 
 
 def main(argv=None) -> int:
@@ -130,7 +135,18 @@ def main(argv=None) -> int:
         duong_webview2, ghi_tep_khoa, quyet_dinh, ten_mutex_cua,
         xoa_tep_khoa)
 
-    goc = Path(a.root).resolve() if a.root else _goc_mac_dinh()
+    # GOC DU LIEU CHINH TAC (mot noi dinh nghia: `duong_du_lieu.py`). `--root`
+    # ghi de cho bai kiem/nghiem thu; khong co thi la `%LOCALAPPDATA%`.
+    from scripts.control_center.duong_du_lieu import (KhoLoi, dam_bao_kho,
+                                                      goc_du_lieu)
+    goc = goc_du_lieu(a.root)
+    try:
+        # Mo/dung kho + dat-hoac-NANG phien ban BO CUC (tach khoi phien ban
+        # ung dung). So moi hon ma thi DUNG, khong ha cap am tham.
+        dam_bao_kho(goc, ung_dung="V0.6.1")
+    except KhoLoi as exc:
+        _bao_loi(str(exc))
+        return 2
 
     # Tu day chan doan cung duoc ghi vao mot TEP UTF-8 canh so. Voi ban
     # `--noconsole` thi day la NOI DUY NHAT doc duoc chan doan, nen no
@@ -163,6 +179,7 @@ def main(argv=None) -> int:
     cc = None
     sv = None
     luong = None
+    khoa_kho = None            # khoa MOT-NGUOI-GHI, chi giu khi ta so huu so
 
     if kh.hanh_dong == "tu_chay":
         try:
@@ -176,6 +193,18 @@ def main(argv=None) -> int:
                      "requirements-control-center-web.txt")
             mot.nha()
             return 2
+
+        # MOT NGUOI GHI tren mot kho. Moi ban dung nay tro CUNG mot goc, nen
+        # nhanh `tu_chay` (tep khoa tro pid con song ma backend khong tra loi
+        # token cua ta) truoc day vo hai — nay se la nguoi ghi THU HAI tren
+        # cung mot SQLite. Khoa OS dong cua so do; noi RO thay vi mo so thu hai.
+        from scripts.control_center.duong_du_lieu import KhoaKho
+        _kk = KhoaKho(goc)
+        if not _kk.thu_giu():
+            _bao_loi(_kk.cau_bao_dang_dung())
+            mot.nha()
+            return 4
+        khoa_kho = _kk
 
         # `leader_bat=True`: day la mot diem vao THAT cua san pham, va o
         # chat phai la mot tro ly chu khong phai mot bieu mau nop viec.
@@ -257,6 +286,8 @@ def main(argv=None) -> int:
             if luong is not None:
                 luong.join(timeout=8)
             xoa_tep_khoa(goc)
+            if khoa_kho is not None:
+                khoa_kho.nha()      # nha kho SAU khi so da dong sach
             mot.nha()
         finally:
             da_dong.set()

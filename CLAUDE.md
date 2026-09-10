@@ -239,15 +239,31 @@ nguyên theo TỪNG con, việc đọc git nhận nhật ký do Router đọc (a
 không chạy được shell — quyền của nó KHÔNG được nới);
 `docs/reports/MULTI_AGENT_FANOUT_V061.md`.
 
-**LUẬT CHUNG đã trả giá ba lần — `agy --print` (headless) TỰ CHỐI mọi công cụ
-cần prompt quyền** (`command`, `read_file`, `read_url`). Đừng cấp quyền rộng,
-đừng `--dangerously-skip-permissions`: **Router làm phép đọc an toàn rồi đính
-BẰNG CHỨNG vào hợp đồng/nhắc nhở**. Ba hiện thực cùng mẫu: `nguon_git.
-git_nhat_ky_doc` (lịch sử git), `web_reader.doc_web` (web công khai, an toàn
-SSRF, `docs/reports/WEB_READER_V061.md`), và ký ức dự án (`memory/`). Câu hỏi
-LỊCH SỬ/KIẾN THỨC DỰ ÁN và câu hỏi có URL đơn giản **không được** tốn một AG
-slot — xem `leader.LUAT_LICH_SU` / `leader.LUAT_WEB`;
+**LUẬT CHUNG đã trả giá BỐN lần — `agy --print` (headless) TỰ CHỐI mọi công cụ
+cần prompt quyền** (`command`, `read_file`, `read_url`) — **kể cả khi chính
+LEADER gọi chúng** (lượt trả về rỗng → `LeaderLoi` → rơi về bộ phân rã → tạo
+việc, đúng thứ ta muốn tránh). Đừng cấp quyền rộng, đừng
+`--dangerously-skip-permissions`: **Router làm phép đọc an toàn rồi đính BẰNG
+CHỨNG vào hợp đồng/nhắc nhở**, và `HUONG_DAN` nói thẳng với Leader rằng nó
+KHÔNG CÓ CÔNG CỤ NÀO. Ba hiện thực cùng mẫu: `nguon_git.git_nhat_ky_doc` (lịch
+sử git), `web_reader.doc_web` (web công khai, an toàn SSRF,
+`docs/reports/WEB_READER_V061.md`), và ký ức dự án (`memory/`). Câu hỏi LỊCH
+SỬ/KIẾN THỨC DỰ ÁN và câu hỏi có URL đơn giản **không được** tốn một AG slot —
+xem `leader.LUAT_LICH_SU` / `leader.LUAT_WEB`;
 `docs/reports/PROJECT_MEMORY_RECALL_V061.md`.
+
+**GỐC DỮ LIỆU CHÍNH TẮC — `scripts/control_center/duong_du_lieu.py` là NƠI DUY
+NHẤT định nghĩa nó.** Dữ liệu bền nằm ở `%LOCALAPPDATA%\RouterControlCenter`
+(+`.router/`), **không** cạnh EXE, **không** `parents[2]`, **không** `cwd`.
+Trước 2026-09-10 gốc neo vào vị trí mã nên cùng `project_id` ra nhiều quyển sổ
+độc lập — đúng lý do tuyên bố "GPT-6 Astra…" gõ ở `dist-v06` không hiện ra ở
+bản source-mode. Thứ tự: `--root` (bài kiểm) → `$ROUTER_CC_DATA_ROOT` → chính
+tắc. Thêm: `kho.json` giữ **phiên bản KHO tách khỏi phiên bản ứng dụng** (sổ
+mới hơn mã thì DỪNG), `KhoaKho` cho **một người ghi** (bản thứ hai nhận câu
+"Kho dữ liệu Router đang được dùng"), và `di_tru.py` +
+`scripts/router_cc_di_tru.py` để gộp sổ cũ (xem trước → sao lưu → khử trùng →
+idempotent → không xoá gì). Đầy đủ:
+`docs/reports/GOC_DU_LIEU_CHINH_TAC_V061.md`.
 
 Báo cáo:
 `docs/reports/PROJECT_MEMORY_V061.md`,

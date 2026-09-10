@@ -162,28 +162,39 @@ def _con_song(pid: int) -> bool:
     return ma.value == 259            # STILL_ACTIVE
 
 
-def mo_source_mode(goc: Path, han: float = 90.0) -> App:
-    """Mở app SOURCE-MODE như `router-cc-desktop.cmd` (pythonw, không --root)."""
+def mo_source_mode(goc: Path, han: float = 90.0,
+                   goc_kho: Optional[Path] = None) -> App:
+    """Mở app SOURCE-MODE như `router-cc-desktop.cmd` (pythonw, không --root).
+
+    `goc` = thư mục MÃ (cwd để `-m scripts.control_center.desktop` phân giải).
+    `goc_kho` = gốc DỮ LIỆU nơi tệp khoá xuất hiện. Từ 2026-09-10 hai thứ này
+    KHÁC NHAU: mã ở checkout, dữ liệu ở `%LOCALAPPDATA%` (gốc chính tắc). Bản
+    trước gộp chúng làm một nên chờ khoá ở sai chỗ và báo "không sẵn sàng"
+    trong khi app đã chạy.
+    """
+    from scripts.control_center.duong_du_lieu import goc_du_lieu as _gdl
+    kho = Path(goc_kho) if goc_kho else _gdl()
     pyw = Path(sys.executable).with_name("pythonw.exe")
     if not pyw.is_file():
         pyw = Path(sys.executable)
-    cu = doc_lock(goc)
+    cu = doc_lock(kho)
     cu_pid = (cu or {}).get("pid")
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     subprocess.Popen([str(pyw), "-m", "scripts.control_center.desktop"],
                      cwd=str(goc), env=env, close_fds=True)
     het = time.time() + han
     while time.time() < het:
-        lk = doc_lock(goc)
+        lk = doc_lock(kho)
         if lk and lk.get("pid") != cu_pid:
             try:
-                a = App(goc)
+                a = App(kho)
                 if a.song():
                     return a
             except SystemExit:
                 pass
         time.sleep(1.0)
-    raise SystemExit("mở app source-mode nhưng không thấy backend sẵn sàng")
+    raise SystemExit(f"mở app source-mode nhưng không thấy backend sẵn sàng "
+                     f"(chờ tệp khoá ở {kho})")
 
 
 # --------------------------------------------------------------- kich ban ---
@@ -354,7 +365,7 @@ def kich_ban_web(app: App, pid: str, bd: Bang) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--goc", default=str(GOC), help="gốc dữ liệu (mặc định: checkout này)")
+    ap.add_argument("--goc", default="", help="gốc dữ liệu (mặc định: CHÍNH TẮC %LOCALAPPDATA%)")
     ap.add_argument("--project", default="fanfic")
     ap.add_argument("--mo-lai", action="store_true", help="đóng app đang chạy rồi mở lại")
     ap.add_argument("--chi", default="", choices=("", "qd", "recall", "web"),
@@ -367,10 +378,13 @@ def main(argv=None) -> int:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:                                   # noqa: BLE001
             pass
-    goc = Path(a.goc).resolve()
+    # `--goc` = gốc DỮ LIỆU (mặc định: CHÍNH TẮC), khác thư mục MÃ (`GOC`).
+    from scripts.control_center.duong_du_lieu import goc_du_lieu as _gdl
+    goc = _gdl(a.goc or None)
     bd = Bang()
     ghi("=" * 78)
     ghi("NGHIỆM THU SOURCE-MODE — KÝ ỨC DỰ ÁN + WEBREADER")
+    ghi(f"  thư mục mã  : {GOC}")
     ghi(f"  gốc dữ liệu : {goc}")
     ghi(f"  dự án       : {a.project}")
     ghi("=" * 78)
@@ -381,7 +395,7 @@ def main(argv=None) -> int:
             ok = dong_nhe(int(lk["pid"]))
             bd.ghi("0. đóng app đang chạy (WM_CLOSE, sạch)", ok, f"pid {lk['pid']}")
             time.sleep(2.0)
-        app = mo_source_mode(goc)
+        app = mo_source_mode(GOC, goc_kho=goc)
         bd.ghi("0b. mở lại SOURCE-MODE (pythonw, mã mới) + backend sẵn sàng",
                app.song(), f"pid {app.pid} cổng {app.port}")
     else:

@@ -26,7 +26,10 @@ from scripts.control_center.engine import ControlCenter              # noqa: E40
 
 
 def _dung(args) -> ControlCenter:
-    goc = Path(args.root).resolve() if args.root else Path.cwd()
+    # GOC DU LIEU CHINH TAC — KHONG `Path.cwd()`; xem `duong_du_lieu.py`.
+    from scripts.control_center.duong_du_lieu import dam_bao_kho, goc_du_lieu
+    goc = goc_du_lieu(args.root)
+    dam_bao_kho(goc, ung_dung="V0.6.1")
     # Xem `desktop.py`: diem vao THAT thi Leader phai bat.
     cc = ControlCenter(root=goc, probe=args.probe,
                        max_parallel=args.max_parallel, leader_bat=True)

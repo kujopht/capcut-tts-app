@@ -1437,6 +1437,32 @@ giữ nguyên, bản mới `dist-v061`. Bốn việc, ba báo cáo:
   thật 9/9: 0 `tool_permission_denied`, 0 worker cho câu đơn giản, trả lời
   grounded (v2.10.0 World Monitor), và việc NẶNG `fanfic.t6006-1` **DONE trên
   AG02 61s** với bằng chứng web trong hợp đồng. `docs/reports/WEB_READER_V061.md`.
+* **Khuyết tật LIÊN TỤC cuối — GỐC DỮ LIỆU CHÍNH TẮC.** Danh tính dự án ổn định
+  nhưng chỗ lưu neo vào VỊ TRÍ MÃ (cạnh EXE / `parents[2]` / `cwd`), nên cùng
+  `project_id` ra nhiều quyển sổ. Sửa: **`scripts/control_center/duong_du_lieu.py`
+  là NƠI DUY NHẤT** định nghĩa gốc = `%LOCALAPPDATA%\RouterControlCenter`
+  (thứ tự: `--root` → `$ROUTER_CC_DATA_ROOT` → chính tắc); đã bỏ nhánh
+  `frozen`→cạnh-EXE ở `desktop.py`, `Path.cwd()` ở `webmain.py`/`__main__.py`,
+  và `ControlCenter.__init__` mặc định về chính tắc. Thêm `kho.json` (**phiên
+  bản KHO tách khỏi phiên bản app**; sổ mới hơn mã thì DỪNG), `KhoaKho` (**một
+  người ghi**, câu "Kho dữ liệu Router đang được dùng"), `di_tru.py` +
+  `scripts/router_cc_di_tru.py` (khám phá tường minh — KHÔNG quét máy, xem
+  trước, sao lưu, khử trùng theo vân tay/`ma`, ánh xạ id giữ nguồn gốc, không
+  ghi đè bản mới hơn, `qd_` trùng thì đánh số lại giữ cả hai, idempotent,
+  KHÔNG xoá sổ cũ — chỉ `DA_DI_TRU.json`). **Đã di trú thật**: 3 nguồn →
+  gieo 7.710 L0 + 95 ký ức, gộp thêm 23 L0 mới / 21 khử trùng; **Astra
+  `qd_0001` còn nguyên** và dòng L0 GỐC gõ ở `dist-v06` được CỨU (`sk#7722`);
+  39 L0 + 4 ký ức SSH còn nguyên. Nghiệm thu **liên tục hai chiều 15/15**
+  (source→đóng gói `qd_0002`, đóng gói→source `qd_0003`, 0 việc mới, bản đóng
+  gói `dist-v0613` ghi khoá ở GỐC CHÍNH TẮC — không copy tay tệp nào). Hồi quy
+  memory-first **10/10**, WebReader **9/9**. Bắt + sửa hai lỗi thật: khoá kho
+  khoá SAI BYTE (mở `"a+"` → `msvcrt.locking` tại EOF nên bản thứ hai không
+  xung đột) và **Leader tự gọi `read_file` bị chối → rơi về dispatch** (sửa:
+  `HUONG_DAN` nói Leader KHÔNG CÓ CÔNG CỤ + câu hỏi lịch sử khi Leader chết thì
+  trả lời từ ký ức, KHÔNG dispatch). 27 bài kiểm mới. Production bị chạm: 0.
+  `docs/reports/GOC_DU_LIEU_CHINH_TAC_V061.md`.
+  **Sổ live nay ở `%LOCALAPPDATA%\RouterControlCenter\.router` — mở app bằng
+  cách nào cũng ra đúng nó.**
 
 Bộ kiểm mới: 100 bài (memory_v061 18 · backfill 18 · pool 11 · credentials 28 ·
 provider webapi 3 · toả 22). **Bản EXE cuối: `dist-v061`, build lại SẠCH từ

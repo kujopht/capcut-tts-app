@@ -127,7 +127,12 @@ class ControlCenter:
                  max_parallel: int = 3,
                  leader_bat: bool = False,
                  kho_bi_mat=None):
-        self.root = Path(root) if root else Path.cwd()
+        # GOC DU LIEU CHINH TAC khi nguoi goi khong noi ro. KHONG `Path.cwd()`:
+        # `cwd` doi theo cho mo terminal / cho bam doi, nen mac dinh cu sinh
+        # MOT SO RIENG cho moi thu muc — dung khuyet tat lien tuc 2026-09-10
+        # (cung `project_id` ma nhieu quyen so). Xem `duong_du_lieu.py`.
+        from scripts.control_center.duong_du_lieu import goc_du_lieu
+        self.root = Path(root) if root else goc_du_lieu()
         self.store = store if store is not None else ControlStore(root=self.root)
         #: `DichVuProvider` (V0.6.1) — dung muon; `kho_bi_mat` chi de bo kiem
         #: cam `KhoBiMatBoNho` vao. Mac dinh la kho an toan cua may (hoac
@@ -619,6 +624,42 @@ class ControlCenter:
         qd = self._leader_quyet_dinh(ctx, text)
         if qd is not None and qd.y_dinh != leader.WORK:
             return self._leader_khong_uy_thac(ctx, qd, tin, dk_hop_le)
+
+        # LEADER KHONG DUNG DUOC + CAU HOI LICH SU -> KHONG dispatch.
+        #
+        # Do that 2026-09-10: Leader (chay qua `agy` headless) tu chon cong cu
+        # `read_file` de di doc kho, chi do bi TU CHOI QUYEN (headless khong
+        # hoi duoc ai), luot tra ve RONG -> `LeaderLoi` -> engine roi ve bo
+        # phan ra va TAO MOT VIEC. Nguoi dung thay dung cai minh khong muon:
+        # mot worker 200s cho mot cau hoi ma so da tra loi duoc.
+        #
+        # Nguyen tac "mat Leader khong duoc mat kha nang giao viec" GIU NGUYEN
+        # cho viec THAT. Nhung mot cau hoi LICH SU khong phai viec: rot ve
+        # dispatch o day la sai theo nghia, khong chi ton kem. Tra ve dung
+        # nhung gi KY UC co, kem ma ban ghi, va noi ro Leader dang khong dung
+        # duoc — 0 khe AG.
+        if qd is None:
+            la_ls, _dh = leader.la_cau_hoi_lich_su(text)
+            if la_ls:
+                khoi = self._khoi_ky_uc(project_id, text, kem_su_kien=True)
+                if khoi.strip():
+                    loi = ("Leader tạm thời không dùng được (phiên headless bị "
+                           "từ chối quyền công cụ), nên tôi trả lời TRỰC TIẾP từ "
+                           "ký ức dự án — không tạo việc nào:\n\n" + khoi
+                           + "\n\nCần điều tra sâu hơn trong kho thì nói rõ, tôi "
+                             "sẽ uỷ thác.")
+                    t2 = self.store.them_chat(project_id, role="assistant",
+                                              text=loi, meta={"loai": "ky_uc"})
+                    self.store.ghi_su_kien(
+                        "MEMORY_ANSWER_FALLBACK", project_id=project_id,
+                        detail=("Leader không dùng được; trả lời câu hỏi lịch sử "
+                                "từ ký ức, KHÔNG dispatch")[:300])
+                    return {"reply": loi, "tasks": [], "plan": None,
+                            "message_id": tin.message_id,
+                            "attachment_ids": list(dk_hop_le),
+                            "leader": None, "control": [],
+                            "ky_uc_fallback": True,
+                            "assistant_message_id": getattr(t2, "message_id", 0)}
 
         goal = text
         if qd is not None:

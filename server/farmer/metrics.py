@@ -185,6 +185,28 @@ class MetricsWriter:
             totals=dict(self._totals),
         )
         self._write_atomic(status.as_dict())
+        # V0.7 — ANH CHUP QUAN SAT DA LOC cho Router Control Center.
+        #
+        # Tep rieng, mode 644, CHI sieu du lieu van hanh: `status.json` co hai
+        # duong van ban tu do cua ben thu ba (`archive.detail` <- stderr tho
+        # cua rclone, `lanes[*].errors[]` <- ngoai le bat ky) nen KHONG chung
+        # minh duoc la sach va KHONG duoc noi quyen. Xem `observer.py`.
+        #
+        # Boc kin tuyet doi: mot loi o lop QUAN SAT khong bao gio duoc lam
+        # chet vong san xuat. `publish` da tu nuot loi, day la luoi thu hai
+        # cho ca buoc `import`.
+        try:
+            from server.farmer.observer import publish
+
+            publish(status.as_dict(), archive_totals={
+                # CHI bo dem RIENG cua archive. KHONG map `failed` chung cua
+                # lane vao day: mot lan TTS hong khong phai mot lan archive
+                # hong, va gop lai se lam Router ket luan sai nguyen nhan.
+                "done": int(self._totals.get("archived", 0)),
+                "pending": int(self._totals.get("archive_pending", 0)),
+            })
+        except Exception:                                   # noqa: BLE001
+            pass
         return status
 
     def _write_atomic(self, payload: Dict[str, Any]) -> None:

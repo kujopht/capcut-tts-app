@@ -394,6 +394,112 @@ class Test04KhongDemTrung(unittest.TestCase):
         self.assertTrue(b.da_bao_ket_qua("exec:ex_9", "DONE"))
 
 
+class Test07BuocDocKhongThanhViecGhi(unittest.TestCase):
+    """`CheDoGhi.DOC` là một TUYÊN BỐ, không phải một gợi ý.
+
+    Đo được trên Fanfic THẬT (2026-09-11): bước "đọc tài liệu bàn giao" khai
+    `CheDoGhi.DOC` bị `_loai_viec_cua` xếp `documentation` (vì chữ "tài
+    liệu"), thành một việc CÓ GHI, và cổng `diff` của Router V4 đánh hỏng ba
+    lần liên tiếp với "báo ok cho một việc CÓ GHI nhưng không tệp nào đổi" —
+    trong khi agent đã đọc đúng và tóm tắt đúng.
+    """
+
+    def _b(self, ma, tieu_de, muc_tieu, ghi=False):
+        return KH.BuocKeHoach(buoc_id=ma, tieu_de=tieu_de, muc_tieu=muc_tieu,
+                              che_do_ghi=KH.CheDoGhi.GHI if ghi
+                              else KH.CheDoGhi.DOC)
+
+    def test_buoc_DOC_luon_ra_loai_CHI_DOC(self):
+        from scripts.control_center.engine import _loai_viec_cua
+        from scripts.control_center.planner import _CHI_DOC
+        for ten, muc in (
+                ("đọc tài liệu bàn giao", "ĐỌC docs/HANDOFF.md và tóm tắt"),
+                ("đọc cấu trúc bộ kiểm thử", "ĐỌC tests/ và tóm tắt"),
+                ("đọc readme", "ĐỌC README.md"),
+                ("khảo sát kho", "ĐỌC và tóm tắt")):
+            with self.subTest(ten=ten):
+                k = _loai_viec_cua(self._b("b", ten, muc))
+                self.assertIn(k, _CHI_DOC, f"{ten} -> {k}")
+
+    def test_buoc_GHI_van_ra_dung_loai_cu(self):
+        from scripts.control_center.engine import _loai_viec_cua
+        self.assertEqual(
+            _loai_viec_cua(self._b("b", "viết tài liệu", "viết docs/X.md",
+                                   ghi=True)), "documentation")
+        self.assertEqual(
+            _loai_viec_cua(self._b("b", "thêm bài kiểm", "viết test cho X",
+                                   ghi=True)), "testing")
+        self.assertEqual(
+            _loai_viec_cua(self._b("b", "sửa store", "sửa scripts/store.py",
+                                   ghi=True)), "implementation")
+
+    def test_hop_dong_cua_buoc_DOC_KHONG_xin_repo_write(self):
+        """Chứng cứ đi tới tận `TaskContract` — nơi cổng `diff` đọc."""
+        from scripts.control_center.engine import _loai_viec_cua
+        from scripts.control_center.planner import RulePlanner
+        b = self._b("b", "đọc tài liệu bàn giao", "ĐỌC docs/HANDOFF.md")
+        hd = RulePlanner(default_write_scope=("scripts",))._hop_dong(
+            "t1", b.muc_tieu, _loai_viec_cua(b), (),
+            cau_goc="ok làm đi", deps=())
+        self.assertFalse(hd.requirements.repo_write)
+        self.assertFalse(hd.execution.worktree_required)
+        self.assertEqual(hd.allowed_scope, ())
+
+
+class Test06TrienKhaiKhongPhaiDeploy(unittest.TestCase):
+    """Một TỪ ĐƠN không được làm trọng tài — luật 22-24, nay cho cổng quyền.
+
+    Đo được ở nghiệm thu thật V0.9: câu uỷ quyền tiếng Việt tự nhiên
+    "ok triển khai phần repo-local đó đi" bị xếp `production_deploy`, nên
+    KHÔNG CÒN cách nào cho phép một việc trong kho bằng tiếng Việt.
+    """
+
+    REPO_LOCAL = (
+        "ok triển khai phần repo-local đó đi",
+        "triển khai hướng đó",
+        "triển khai tính năng tìm kiếm",
+        "ok trien khai phan do di",
+        "triển khai lại bộ kiểm thử cho gọn",
+    )
+    VAN_GATED = (
+        "triển khai lên production",
+        "triển khai worker mới",
+        "triển khai bản mới lên máy chủ",
+        "trien khai len prod",
+        "triển khai fanfic.world",
+        "deploy the web",
+        "npm run cf:deploy:production",
+        "wrangler deploy",
+        "cutover sang hạ tầng mới",
+        "đẩy lên prod",
+    )
+
+    def test_trien_khai_repo_local_KHONG_bi_gated(self):
+        from scripts.control_center import permissions as P
+        for c in self.REPO_LOCAL:
+            with self.subTest(cau=c):
+                self.assertEqual(P.classify(c), P.PermissionClass.AUTO, c)
+
+    def test_deploy_THAT_van_bi_gated(self):
+        from scripts.control_center import permissions as P
+        for c in self.VAN_GATED:
+            with self.subTest(cau=c):
+                self.assertEqual(P.classify(c), P.PermissionClass.GATED, c)
+
+    def test_y_dinh_repo_local_KHONG_cho_tham_quyen(self):
+        y = YD.tao_y_dinh(project_id=PID,
+                          goal="dọn nợ kỹ thuật ở scripts/",
+                          cau_nguoi_dung="ok triển khai phần repo-local đó đi")
+        self.assertIs(y.tham_quyen, YD.LopThamQuyen.REPO_LOCAL)
+        self.assertFalse(y.can_tham_quyen_moi)
+
+    def test_y_dinh_cham_production_VAN_cho_tham_quyen(self):
+        y = YD.tao_y_dinh(project_id=PID, goal="triển khai lên production",
+                          cau_nguoi_dung="ok làm đi")
+        self.assertIs(y.tham_quyen, YD.LopThamQuyen.NGOAI)
+        self.assertTrue(y.tac_dong_production)
+
+
 class Test05DeXuatMangNguonGoc(unittest.TestCase):
 
     def test_so_giu_provider_model_cua_de_xuat(self):

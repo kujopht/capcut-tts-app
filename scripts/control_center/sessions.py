@@ -58,6 +58,12 @@ NGUONG_NGUOI = 900.0
 #: Trung voi tran "3 WRITE worker" cua router toan cuc.
 MAX_SESSIONS_MOI_DU_AN = 3
 
+#: Bao lau mot phien duoc phep o `STARTING` ma chua co PID truoc khi
+#: `recover()` coi no la CHET. Rong rai co chu dich: mot phien Leader lanh
+#: do duoc 67,87s (ghi trong `CLAUDE.md`), nen 15 phut khong the reap nham
+#: mot phien dang khoi dong that. Xem `SessionManager.recover`.
+HAN_KHOI_DONG = 900.0
+
 
 def _giao_nhau_pham_vi(a: Sequence[str], b: Sequence[str]) -> bool:
     """Hai phạm vi ghi có giẫm lên nhau không — so THEO ĐOẠN đường dẫn."""
@@ -518,6 +524,30 @@ class SessionManager:
                 gan_lai.append(s.session_id)
                 continue
             if s.pid is None:
+                # `STARTING` KHÔNG có PID và đã quá hạn khởi động -> `DEAD`.
+                #
+                # Đây là NGOẠI LỆ DUY NHẤT của luật "không PID thì không kết
+                # luận là chết" ở docstring, và nó có lý do riêng: `IDLE`/
+                # `BUSY` không PID có thể là một adapter nhiều khe hoặc cầu
+                # nối HTTP đang chạy thật, còn `STARTING` nghĩa là "đã bắt
+                # đầu sinh tiến trình và CHƯA BÁO SẴN SÀNG". Một phiên ở
+                # trạng thái đó suốt `HAN_KHOI_DONG` thì đã không khởi động
+                # được — không có adapter nào mất 15 phút để báo sẵn sàng.
+                #
+                # VÌ SAO PHẢI REAP: `SessionState.STARTING.alive` là `True`,
+                # nên một phiên như thế CHIẾM MỘT KHE VĨNH VIỄN. Đo được trên
+                # sổ chính tắc 2026-09-11: 12/12 khe bị giữ bởi các phiên
+                # `STARTING`/`pid=None` treo ~50 phút, và MỌI lần giao việc
+                # sau đó trả về `WAIT: đã có 12/12 phiên sống` — cả Router
+                # đứng im mà không một thứ gì báo lỗi.
+                if (s.state is SessionState.STARTING
+                        and s.idle_seconds > HAN_KHOI_DONG):
+                    chet.append(s.session_id)
+                    self.dung(s.session_id, state=SessionState.DEAD,
+                              reason=(f"kẹt ở STARTING {s.idle_seconds:.0f}s "
+                                      f"mà chưa từng có PID — không khởi động "
+                                      f"được; nhả khe cho việc khác"))
+                    continue
                 khong_ro.append(s.session_id)
                 if s.state is SessionState.BUSY:
                     self.store.dat_trang_thai_session(

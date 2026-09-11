@@ -116,16 +116,26 @@ def _loai_viec_cua(b) -> str:
 
     Một từ vựng thứ hai ở đây sẽ làm `_hop_dong` chọn sai `Requirements`, và
     hậu quả là một bước viết mã bị xếp lên một model không có `coding`.
+
+    `che_do_ghi` THẮNG MỌI TỪ KHOÁ, và nó phải được hỏi TRƯỚC. Bản đầu để
+    phép kiểm `not b.ghi` ở CUỐI, nên một bước CHỈ ĐỌC có chữ "tài liệu"
+    trong mục tiêu ("đọc tài liệu bàn giao") bị xếp `documentation` — một
+    loại CÓ GHI. Hậu quả đo được trên Fanfic thật (2026-09-11): agent đọc
+    đúng, tóm tắt đúng, rồi cổng `diff` của Router V4 đánh hỏng với
+    "báo ok cho một việc CÓ GHI nhưng không tệp nào đổi" — ba lần liên tiếp,
+    cho một việc mà đề bài nói rõ là chỉ đọc.
+
+    Kế hoạch KHAI `CheDoGhi.DOC` là một tuyên bố, không phải một gợi ý.
     """
+    if not b.ghi:
+        return "review" if any(
+            x in (b.tieu_de + " " + b.muc_tieu).lower()
+            for x in ("review", "phản biện", "soi")) else "analysis"
     van = (b.tieu_de + " " + b.muc_tieu).lower()
     if any(x in van for x in ("test", "bài kiểm", "kiểm thử")):
         return "testing"
     if any(x in van for x in ("tài liệu", "doc", "readme")):
         return "documentation"
-    if any(x in van for x in ("review", "phản biện", "soi")):
-        return "review"
-    if not b.ghi:
-        return "analysis"
     return "implementation"
 
 
@@ -2307,8 +2317,18 @@ class ControlCenter:
         from scripts.control_center import permissions as PERM
         pid = y.project_id
         ctx = self.ctx(pid)
-        scope = tuple(x for _k, x, m in b.tai_nguyen if m == "write") or \
-            self._scope_mac_dinh(ctx.project)
+        # PHẠM VI GHI CHỈ TỒN TẠI CHO BƯỚC GHI.
+        #
+        # Bước CHỈ ĐỌC phải có phạm vi RỖNG: `RulePlanner._hop_dong` suy
+        # `chi_doc = kind in _CHI_DOC or not scope`, nên một phạm vi mặc định
+        # không rỗng đủ để biến một bước đọc thành một việc đòi `repo_write`
+        # + worktree, và rồi cổng `diff` đánh hỏng nó vì "không tệp nào đổi".
+        # Bản đầu viết `scope if b.ghi else scope` — một phép chọn vô nghĩa
+        # do gõ nhầm, và nó che đúng lỗi này.
+        scope: Tuple[str, ...] = ()
+        if b.ghi:
+            scope = tuple(x for _k, x, m in b.tai_nguyen if m == "write") or \
+                self._scope_mac_dinh(ctx.project)
         # MÃ VIỆC MANG CẢ BẢN KẾ HOẠCH. Không mang thì lượt đầu của bản v2
         # trùng mã với bản v1, `luu_task` ghi đè một việc đã kết thúc về
         # `QUEUED`, và lịch sử của bản trước biến mất — đúng thứ §10 tồn tại
@@ -2320,7 +2340,7 @@ class ControlCenter:
                                intent=y.nguon_cau_nguoi_dung or y.goal,
                                owned_scope=scope if b.ghi else ())
         hd = ctx.planner._hop_dong(                         # noqa: SLF001
-            tid, b.muc_tieu, _loai_viec_cua(b), scope if b.ghi else scope,
+            tid, b.muc_tieu, _loai_viec_cua(b), scope,
             cau_goc=y.nguon_cau_nguoi_dung or y.goal, deps=())
         d = hd.to_dict()
         d["task_id"] = tid
@@ -2458,13 +2478,32 @@ class ControlCenter:
                 f"trạng thái {st['state']}, xác minh {st['xac_minh']}")
         buoc = ELK.buoc_sua_chua(kh, hong) if hong else []
         if not buoc:
+            # HAI LÝ DO KHÁC HẲN NHAU, và gộp chúng là nói dối người đọc.
+            #
+            # `hong` rỗng nghĩa là MỌI BƯỚC ĐỀU ĐẠT và thứ không đạt là TIÊU
+            # CHÍ NGHIỆM THU của cả mục tiêu. Không có bước nào để sửa, nên
+            # câu "đã sửa hết số lần cho phép" vừa sai vừa dẫn người đọc đi
+            # nhầm hướng — đo được ở nghiệm thu thật (kịch bản D, 2026-09-11):
+            # sổ ghi "đã được sửa hết số lần cho phép" trong khi số lần sửa
+            # thật sự là 0.
+            #
+            # Sinh MỘT BƯỚC MỚI để thoả một tiêu chí chưa đạt là một năng lực
+            # khác (lập kế hoạch lại từ mục tiêu, không phải sửa một bước) —
+            # v0.9 cố ý KHÔNG có nó, và nói thẳng điều đó thay vì giả vờ đã
+            # thử.
+            if hong:
+                ly = ("lập lại kế hoạch không thêm được gì — bước hỏng đã "
+                      "được sửa hết số lần cho phép. Cần bạn xem: "
+                      + "; ".join(f"{k}: {v[:120]}"
+                                  for k, v in list(hong.items())[:3]))
+            else:
+                ly = ("MỌI BƯỚC ĐỀU ĐẠT nhưng TIÊU CHÍ NGHIỆM THU của mục "
+                      "tiêu không đạt — không có bước nào để sửa. Cần bạn "
+                      "quyết: sửa tiêu chí, hay thêm việc để thoả nó. "
+                      "(Router v0.9 không tự sinh bước mới từ một tiêu chí "
+                      "chưa đạt.)")
             self.so_thuc_thi.doi_trang_thai(
-                eid, TrangThaiThucThi.BLOCKED,
-                ly_do=("lập lại kế hoạch không thêm được gì — bước hỏng đã "
-                       "được sửa hết số lần cho phép. Cần bạn xem: "
-                       + "; ".join(f"{k}: {v[:120]}"
-                                   for k, v in list(hong.items())[:3])),
-                pha="cần bạn xem")
+                eid, TrangThaiThucThi.BLOCKED, ly_do=ly, pha="cần bạn xem")
             bd.nha_tai_nguyen(self.so_thuc_thi.y_dinh(eid) or y)
             return None
         try:

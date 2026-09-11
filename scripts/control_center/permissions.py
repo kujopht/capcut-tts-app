@@ -72,11 +72,36 @@ GATED_OPERATIONS: Tuple[str, ...] = (
 #: Moi mau ANH XA toi mot thao tac GATED co ten, de cau hoi gui nguoi dung
 #: noi duoc CU THE viec gi bi chan chu khong chi "co gi do nguy hiem".
 _MAU_GATED: Tuple[Tuple[str, re.Pattern], ...] = (
+    # "TRIỂN KHAI" MỘT MÌNH KHÔNG PHẢI MỘT LẦN DEPLOY.
+    #
+    # Trong tiếng Việt kỹ thuật, "triển khai" gần như luôn nghĩa là
+    # *implement* — "triển khai tính năng", "ok triển khai phần repo-local đó
+    # đi". Nghĩa *deploy* chỉ xuất hiện khi có một ĐÍCH production đi kèm:
+    # "triển khai lên production", "triển khai worker".
+    #
+    # Bản trước liệt kê `triển khai` như một lựa chọn TRẦN, và hậu quả đo
+    # được ở nghiệm thu thật V0.9 (2026-09-11): câu uỷ quyền
+    # "ok triển khai phần repo-local đó đi" bị xếp `production_deploy` và
+    # dừng ở `WAITING_AUTHORITY` — tức là KHÔNG CÒN cách nào nói bằng tiếng
+    # Việt để cho phép một việc trong kho. Vòng kín mất đúng lối vào chính
+    # của nó.
+    #
+    # Đây là CÙNG MỘT LỚP LỖI mà `docs/CONTROL_CENTER.md` §20 (luật 22-24) đã
+    # sửa một lần cho phân loại bảo mật: **một TỪ ĐƠN không được làm trọng
+    # tài**. Nay nó được phân loại bằng CỤM TỪ, đúng nguyên tắc đó.
+    #
+    # KHÔNG nới cho các dạng nguy hiểm: `deploy`, `cutover`, `go-live`,
+    # `wrangler deploy`, `cf:deploy`, `lên production` vẫn khớp TRẦN như cũ;
+    # và tầng dưới (`Bash(npx wrangler deploy)` deny, hook, cổng GATED của
+    # việc) không đổi một dòng nào.
     ("production_deploy", re.compile(
         r"\b(deploy|deployment|cutover|go[\s-]?live|ship to prod|"
         r"publish to production|wrangler\s+deploy|cf:deploy|"
-        r"trien khai|triển khai|len production|lên production|"
-        r"day len prod|đẩy lên prod)\b", re.I)),
+        r"len production|lên production|day len prod|đẩy lên prod)\b"
+        r"|\btri[eể]n\s+khai\b(?:\s+\w+){0,3}\s+"
+        r"(?:production|prod|staging|server|m[aá]y\s+ch[uủ]|worker|farmer|"
+        r"fanfic\.world|cloudflare|render|r2|appwrite|drive|gce|ec2)\b",
+        re.I)),
     ("production_mutation", re.compile(
         r"\b(drop\s+(table|database)|truncate\s+table|delete\s+from\s+prod|"
         r"prod(uction)?\s+(db|database|data)\s+(wipe|reset|delete|purge)|"

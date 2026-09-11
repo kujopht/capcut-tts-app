@@ -215,6 +215,12 @@ class DeXuat:
     rui_ro: str = "LOW"
     tac_dong_production: bool = False
     tu_vai: str = "strategist"
+    #: AI đã đề xuất — nguồn gốc định tuyến của chính lời khuyên này (§B).
+    #: Không lưu thì vòng phản hồi `chiến lược -> kết quả` không gắn được kết
+    #: quả vào model nào, và mọi quan sát về sau là vô danh.
+    provider: str = ""
+    model: str = ""
+    runtime_id: str = ""
     execution_id: str = ""
     ts: float = field(default_factory=time.time)
 
@@ -227,7 +233,9 @@ class DeXuat:
                 "message_id": self.message_id, "tom_tat": self.tom_tat,
                 "cac_buoc": list(self.cac_buoc), "rui_ro": self.rui_ro,
                 "tac_dong_production": self.tac_dong_production,
-                "tu_vai": self.tu_vai, "execution_id": self.execution_id,
+                "tu_vai": self.tu_vai, "provider": self.provider,
+                "model": self.model, "runtime_id": self.runtime_id,
+                "execution_id": self.execution_id,
                 "da_dung": self.da_dung, "ts": self.ts}
 
 

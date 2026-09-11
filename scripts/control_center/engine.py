@@ -1139,13 +1139,23 @@ class ControlCenter:
         van = tom + " " + " ".join(buoc)
         lop, hits = EYD.phan_lop_tham_quyen(van)
         ma = f"dx_{uuid.uuid4().hex[:10]}"
+        # AI ĐÃ ĐỀ XUẤT (§B). `nguon_goc` là danh sách `NguonGocVai`; lấy của
+        # đúng vai STRATEGIST. Không ghim được thì để rỗng — và lúc đó
+        # `phan_hoi.dung_quan_sat` trả `None`, tức là KHÔNG sinh một mẫu vô
+        # danh. Thà không có dữ liệu còn hơn có dữ liệu không gắn được vào ai.
+        nv = next((x for x in (ng.get("nguon_goc") or [])
+                   if isinstance(x, dict) and x.get("vai") == "strategist"), {})
+        chon = (nv.get("chon") or {}) if isinstance(nv, dict) else {}
         self.so_thuc_thi.luu_de_xuat(ETN.DeXuat(
             ma=ma, project_id=project_id, message_id=int(message_id or 0),
             tom_tat=tom, cac_buoc=tuple(buoc),
             rui_ro=("HIGH" if hits else "LOW"),
             tac_dong_production=bool(
                 {h.operation for h in hits} & EYD.GATED_PRODUCTION),
-            tu_vai="strategist"))
+            tu_vai="strategist",
+            provider=str(chon.get("provider") or ""),
+            model=str(chon.get("model_id") or ""),
+            runtime_id=str(chon.get("runtime_id") or "")))
         self.store.ghi_su_kien(
             "RECOMMENDATION_SAVED", project_id=project_id,
             detail=f"{ma}: {tom[:160]}",
@@ -2164,13 +2174,97 @@ class ControlCenter:
                 dung_viec=self._dung_viec_cua_thuc_thi,
                 nha_tai_nguyen=lambda pid, tid: LockManager(self.store).tra(
                     pid, tid),
-                moi_gioi=mg, song_song=self.max_parallel)
+                moi_gioi=mg, goi_phan_bien=self._phan_bien_ket_qua,
+                song_song=self.max_parallel)
             self._dieu_phoi[project_id] = bd
             return bd
 
     def _trang_thai_viec(self, task_id: str) -> str:
         t = self.store.task(task_id)
         return t.state.value if t is not None else ""
+
+    def _phan_bien_ket_qua(self, y, kh, bc) -> Optional[Dict]:
+        """Gọi Reviewer NGỮ NGHĨA trên một kết quả đã chạy — V0.9 §A.
+
+        Bộ điều phối đã quyết ĐỊNH CÓ GỌI HAY KHÔNG (`nen_goi_reviewer`);
+        hàm này chỉ lo chạy. Ba điều nó phải làm đúng:
+
+        1. **Đưa BẰNG CHỨNG, không đưa lời khai.** Khối gửi Reviewer là mục
+           tiêu gốc + tiêu chí nghiệm thu + phán quyết từng phép kiểm tất
+           định + tệp đã đổi. Không có tóm tắt tự khen của worker.
+        2. **ĐỘC LẬP THẬT.** `ho_tac_gia` là họ model ĐÃ LÀM VIỆC, lấy từ
+           chính hợp đồng kết quả. Không truyền thì `doi_doc_lap=True` không
+           có gì để tránh và "độc lập" thành một nhãn dán.
+        3. **Hỏng thì trả `None`.** Mất Reviewer là SUY GIẢM, và bộ điều phối
+           nói ra điều đó — không phải một lần kiểm định bị vỡ.
+        """
+        from scripts.control_center.reasoning.phan_loai import phan_loai_luot
+        pid = y.project_id
+        try:
+            hd = self.hoi_dong
+        except Exception:                                   # noqa: BLE001
+            return None
+        if hd is None:
+            return None
+
+        # HO MODEL DA LAM VIEC — de bo dinh tuyen tranh dung ho do.
+        ho = ""
+        tep: List[str] = []
+        for st in self.so_thuc_thi.buoc(y.execution_id, kh.phien_ban):
+            d = st.get("ket_qua") or {}
+            tep += list(d.get("files_changed") or ())
+            if not ho and d.get("model"):
+                try:
+                    m = self.fabric.models.get(str(d.get("model")))
+                    ho = str(getattr(m, "model_family", "") or "")
+                except Exception:                           # noqa: BLE001
+                    ho = ""
+
+        d = [f"MỤC TIÊU GỐC NGƯỜI DÙNG ĐÃ UỶ QUYỀN: {y.goal}", "",
+             "TIÊU CHÍ NGHIỆM THU (thứ phải đạt, không phải thứ đã làm):"]
+        d += [f"  [{'bắt buộc' if t.bat_buoc else 'nên có'}] {t.mo_ta}"
+              for t in kh.nghiem_thu] or ["  (kế hoạch không khai tiêu chí nào)"]
+        d += ["", "PHÉP KIỂM TẤT ĐỊNH ĐÃ CHẠY (máy đo, không phải lời khai):"]
+        for t in bc.tieu_chi:
+            d.append(f"  [{t.trang_thai.value}] {t.mo_ta}")
+            d += [f"      {'✓' if k.dat else '✗'} {k.cach}: {k.chi_tiet[:160]}"
+                  for k in t.kiem[:4]]
+        d += ["", f"BƯỚC ĐẠT: {', '.join(bc.buoc_dat) or '(không)'}",
+              f"BƯỚC CHƯA CHỨNG MINH: "
+              f"{', '.join(bc.buoc_thieu_bang_chung) or '(không)'}",
+              f"TỆP ĐÃ ĐỔI ({len(set(tep))}): "
+              f"{', '.join(sorted(set(tep))[:25]) or '(không)'}",
+              "", "CÂU HỎI CHO BẠN: công việc trên có THỰC SỰ đạt mục tiêu gốc "
+              "và không vi phạm ràng buộc nào đang hiệu lực không?"]
+
+        khoi_rb, gon_rb = self._khoi_rang_buoc(pid)
+        try:
+            self._dam_bao_suc_khoe("phản biện ngữ nghĩa kết quả")
+            ban, ng = hd.phan_bien_ket_qua(
+                cau=y.goal, ban_ket_qua="\n".join(d),
+                phan_loai=phan_loai_luot(y.goal),
+                che_do=self.leader_ban_ghi(pid).che_do_enum(),
+                khoi_san_co={"rang_buoc": khoi_rb,
+                             "vien_nang": self._khoi_vien_nang(pid, y.goal)},
+                khoi_gon={"rang_buoc": gon_rb},
+                ho_tac_gia=ho, chinh_sach=self.chinh_sach_cao_cap(pid),
+                project_id=pid)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "REVIEW_ERROR", project_id=pid, level="WARNING",
+                detail=f"{type(exc).__name__}: {exc}"[:300])
+            return None
+        if ban is None:
+            return None
+        chon = ng.chon
+        return {"phan_xu": ban.phan_xu.value,
+                "doc_lap": bool(chon.doc_lap) if chon else False,
+                "suy_giam": bool(chon.suy_giam) if chon else True,
+                "provider": (chon.provider if chon else ""),
+                "model": (chon.model_id if chon else ""),
+                "ho_model": (chon.model_family if chon else ""),
+                "ho_tac_gia": ho,
+                "ly_do": ban.to_khoi_leader()[:1500]}
 
     def _dung_viec_cua_thuc_thi(self, task_id: str, ly_do: str) -> None:
         """Dừng một việc con THAY MẶT tầng bước — và CẤM tầng việc thử lại nó.
@@ -2422,6 +2516,11 @@ class ControlCenter:
             except Exception:                               # noqa: BLE001
                 bc = None
             ghi = self._ghi_ky_uc_thuc_thi(y, bc)
+            # §B — VÒNG PHẢN HỒI CHẤT LƯỢNG. Nằm TRONG khối đã khoá chống
+            # trùng của `_ket_luan_thuc_thi`, nên một lần thực thi sinh ĐÚNG
+            # MỘT quan sát kể cả khi app khởi động lại giữa chừng: khoá là
+            # bảng `ket_qua_da_bao` trên đĩa, không phải một `set` trong RAM.
+            qs = self._phan_hoi_chat_luong(y, bc)
             van = DP.cau_ket_thuc(y, bc, ghi_nho=ghi)
             tin = self.store.them_chat(
                 y.project_id, "assistant", van,
@@ -2429,7 +2528,7 @@ class ControlCenter:
                       "execution_id": y.execution_id,
                       "trang_thai": y.trang_thai.value,
                       "kiem_dinh": (bc.to_dict() if bc else None),
-                      "ky_uc": ghi})
+                      "ky_uc": ghi, "phan_hoi": qs})
             self.store.ghi_da_bao_ket_qua(khoa, y.trang_thai.value,
                                           project_id=y.project_id,
                                           message_id=tin.message_id)
@@ -2440,6 +2539,66 @@ class ControlCenter:
                    f"tin nhắn #{tin.message_id}")
         return {"execution_id": y.execution_id,
                 "message_id": tin.message_id, "text": van}
+
+    def _phan_hoi_chat_luong(self, y: EYD.YDinhThucThi, bc) -> Optional[Dict]:
+        """§B — kết quả đã kiểm định -> MỘT quan sát trong lịch sử VAI.
+
+        Nối `chiến lược -> kế hoạch -> thực thi -> kiểm định -> kết quả` bằng
+        `de_xuat` mà `_khoi_dong_tu_de_xuat` đã ghim vào ý định. Không có đề
+        xuất (người dùng gõ thẳng một việc, không qua một lời khuyên nào) thì
+        KHÔNG có ai để gắn kết quả vào, và `dung_quan_sat` trả `None` — im
+        lặng là câu trả lời đúng, không phải một mẫu vô danh.
+
+        Hỏng ở đây KHÔNG được làm hỏng câu kết luận: một dòng telemetry
+        không đáng đổi lấy việc người dùng không biết việc đã xong.
+        """
+        from scripts.control_center.execution import phan_hoi as EPH
+        try:
+            dx = self.so_thuc_thi.de_xuat_theo_ma(y.nguon_de_xuat)
+            giay = None
+            try:
+                giay = self.dieu_phoi(y.project_id).chi_phi(
+                    y.execution_id).tong_giay or None
+            except Exception:                               # noqa: BLE001
+                giay = None
+            pb = None
+            for e in self.so_thuc_thi.su_kien(y.execution_id, limit=80):
+                if e["kind"] == "REVIEW_VERDICT":
+                    pb = e.get("meta") or {}
+                    break
+            qs = EPH.dung_quan_sat(y, bc, de_xuat=dx, phan_bien=pb, giay=giay)
+            if qs is None:
+                return None
+            ra = EPH.ghi_phan_hoi(self._lich_su_vai(), qs,
+                                  rubric="docs/reports/CLOSED_LOOP_V09.md")
+            if ra:
+                self.so_thuc_thi.ghi_su_kien(
+                    y.execution_id, "QUALITY_OBSERVED",
+                    project_id=y.project_id,
+                    detail=(f"{qs.task_type} · {qs.provider}/{qs.model_id} · "
+                            f"{'ĐẠT' if qs.thanh_cong else 'KHÔNG ĐẠT'} · "
+                            f"lập lại {qs.so_lan_lap_lai}")[:300],
+                    meta=ra)
+            return ra
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "QUALITY_FEEDBACK_ERROR", project_id=y.project_id,
+                level="WARNING",
+                detail=f"{y.execution_id}: {type(exc).__name__}: {exc}"[:300])
+            return None
+
+    def _lich_su_vai(self):
+        """`BenchmarkStore` của tệp VAI — CÙNG tệp mà `HoiDong` đang ghi.
+
+        Lấy qua `self.hoi_dong` chứ không dựng một kho thứ hai: hai
+        `BenchmarkStore` trỏ cùng một tệp sẽ có hai bộ đệm lệch nhau, và
+        `summary_for` sẽ trả hai con số khác nhau cho cùng một câu hỏi.
+        """
+        try:
+            hd = self.hoi_dong
+        except Exception:                                   # noqa: BLE001
+            return None
+        return getattr(hd, "lich_su", None) if hd is not None else None
 
     def _ghi_ky_uc_thuc_thi(self, y: EYD.YDinhThucThi, bc) -> List[Dict]:
         """§14 — kết quả đã kiểm định -> ký ức. Hỏng thì bỏ qua, không nổ."""

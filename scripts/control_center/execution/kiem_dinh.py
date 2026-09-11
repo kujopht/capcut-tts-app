@@ -546,8 +546,16 @@ def _tong_hop(dat: Sequence[str], hong: Sequence[str], thieu: Sequence[str],
         return (TrangThaiXacMinh.KHONG_DAT,
                 f"{len(xau)}/{len(bb)} tiêu chí nghiệm thu BẮT BUỘC không đạt: "
                 + "; ".join(t.mo_ta[:60] for t in xau[:3]))
+    # TIEU CHI CHUA CO BANG CHUNG: mot phan xu NGU NGHIA co the tra loi cho
+    # chung — nhung CHI khi phan xu do ton tai. Nen phep kiem nay bi HOAN lai
+    # tới sau khoi `phan_bien` (xem `elif mo` ở dưới) thay vì trả về ngay.
+    #
+    # Truoc V0.9 no tra ve NGAY o day, va hau qua la: goi Reviewer xong roi
+    # VUT câu tra loi di — mot tieu chi nhu "ban redesign co thuc su giai
+    # quyet muc tieu khong" khong bao gio buoc duoc vao `git diff`, nen no
+    # vinh vien `THIEU_BANG_CHUNG` du Reviewer da tra `ACCEPT`.
     mo = [t for t in bb if t.trang_thai is TrangThaiXacMinh.THIEU_BANG_CHUNG]
-    if mo:
+    if mo and not phan_bien:
         return (TrangThaiXacMinh.THIEU_BANG_CHUNG,
                 f"{len(mo)}/{len(bb)} tiêu chí nghiệm thu BẮT BUỘC chưa có "
                 f"bằng chứng: " + "; ".join(t.mo_ta[:60] for t in mo[:3]))
@@ -572,8 +580,80 @@ def _tong_hop(dat: Sequence[str], hong: Sequence[str], thieu: Sequence[str],
             return (TrangThaiXacMinh.SUY_GIAM,
                     "mọi phép kiểm đạt, nhưng phản biện KHÔNG độc lập về họ "
                     "model — không giả vờ đó là bằng chứng")
+        # ACCEPT + ĐỘC LẬP -> tiêu chí ngữ nghĩa coi như ĐÃ ĐƯỢC CHẤM.
+        #
+        # Không có nhánh này thì một tiêu chí ngữ nghĩa (`cach_kiem` rỗng) ở
+        # `mo` phía trên đã trả `THIEU_BANG_CHUNG` trước khi tới đây, và lượt
+        # Reviewer vừa chạy không đổi được gì — tức là gọi nó xong rồi vứt
+        # câu trả lời đi. Đây là chỗ phán xử ngữ nghĩa THẬT SỰ có hiệu lực.
+        if mo:
+            return (TrangThaiXacMinh.DAT,
+                    f"{len(dat)} bước đạt; {len(mo)} tiêu chí ngữ nghĩa được "
+                    f"Reviewer ĐỘC LẬP chấm ACCEPT: "
+                    + "; ".join(t.mo_ta[:60] for t in mo[:2]))
     return (TrangThaiXacMinh.DAT,
             f"{len(dat)} bước đạt, {len(bb)} tiêu chí nghiệm thu bắt buộc đạt")
+
+
+def tieu_chi_can_ngu_nghia(kh: KeHoachThucThi) -> List[str]:
+    """Tiêu chí nghiệm thu ĐÒI phán đoán ngữ nghĩa. Tất định.
+
+    Hai hình dạng, và cả hai đều là "máy không trả lời được":
+
+    * khai tường minh `CachKiem.REVIEWER`;
+    * **không có phép kiểm tất định nào** — tức là kế hoạch nói được "thế nào
+      là xong" bằng chữ nhưng không buộc được nó vào một phép đo.
+
+    Hình dạng thứ hai là lý do §8 không tự mâu thuẫn: một tiêu chí như "bản
+    redesign có thật sự giải quyết mục tiêu không" KHÔNG BAO GIỜ buộc được
+    vào `git diff`, nên nếu không có đường ngữ nghĩa thì nó vĩnh viễn
+    `THIEU_BANG_CHUNG` và lần thực thi vĩnh viễn không đạt.
+    """
+    ra: List[str] = []
+    for t in kh.nghiem_thu:
+        if any(c is CachKiem.REVIEWER for c, _ in t.cach_kiem) \
+                or not t.co_kiem_tat_dinh:
+            ra.append(t.mo_ta)
+    return ra
+
+
+def nen_goi_reviewer(kh: KeHoachThucThi, y: YDinhThucThi,
+                     bc: "BaoCaoKiemDinh") -> Tuple[bool, str]:
+    """`(có gọi không, vì sao)` — quyết định SAU khi kiểm tất định đã chạy.
+
+    Chính sách §A, và thứ tự các mệnh đề dưới đây LÀ chính sách đó:
+
+    1. **Tất định trước, luôn luôn.** Hàm này chỉ được gọi sau khi `bc` đã
+       dựng xong từ phép kiểm tất định.
+    2. **Máy đã bắt được lỗi thì KHÔNG gọi Reviewer.** Một bước hỏng, một
+       tiêu chí có phép kiểm tất định mà KHÔNG ĐẠT — đó là câu trả lời rồi.
+       Hỏi thêm một model chỉ tốn hạn mức để nghe lại điều đã biết, và tệ
+       hơn: nó mở đường cho một `ACCEPT` che mất một phép đo đã đỏ.
+    3. **Không gọi cho việc máy móc.** Không tiêu chí ngữ nghĩa nào, không
+       chạm production, rủi ro thấp -> im lặng. Đây là vế "Do NOT invoke
+       Reviewer for trivial mechanical verification".
+    4. Chạm production hoặc rủi ro CAO thì gọi, kể cả khi mọi phép đo đều
+       xanh: ở mức đó, "mọi phép kiểm đạt" và "việc này an toàn" là hai câu
+       khác nhau.
+    """
+    if bc.buoc_hong:
+        return False, ("phép kiểm tất định đã bắt được lỗi ở bước "
+                       f"{', '.join(bc.buoc_hong[:3])} — không cần phán đoán "
+                       f"ngữ nghĩa để biết là chưa đạt")
+    do_may = [t for t in bc.tieu_chi
+              if t.trang_thai is TrangThaiXacMinh.KHONG_DAT and t.kiem]
+    if do_may:
+        return False, (f"{len(do_may)} tiêu chí KHÔNG ĐẠT theo phép đo tất "
+                       f"định — máy đã trả lời")
+    nn = tieu_chi_can_ngu_nghia(kh)
+    if nn:
+        return True, ("tiêu chí nghiệm thu đòi phán đoán ngữ nghĩa: "
+                      + "; ".join(x[:70] for x in nn[:3]))
+    if y.tac_dong_production:
+        return True, "lần thực thi chạm production — soi ngữ nghĩa trước khi kết"
+    if y.rui_ro.rank >= 2:
+        return True, "rủi ro CAO — soi ngữ nghĩa trước khi kết"
+    return False, "chỉ có kiểm định máy móc — không cần một lượt model"
 
 
 def can_phan_bien(kh: KeHoachThucThi, y: YDinhThucThi) -> bool:

@@ -217,6 +217,11 @@ CREATE TABLE IF NOT EXISTS execution_plans (
     execution_id  TEXT NOT NULL,
     phien_ban     INTEGER NOT NULL,
     buoc_json     TEXT NOT NULL DEFAULT '[]',
+    -- TIEU CHI NGHIEM THU cua CA muc tieu (§8). Thieu cot nay thi chung
+    -- bien mat khi doc lai ke hoach, va `_tong_hop` roi vao nhanh "khong co
+    -- tieu chi nao" -> SUY_GIAM -> DONE. Tuc la §8 bi vo hieu hoa mot cach
+    -- IM LANG. Do duoc 2026-09-11 boi bai kiem §A.
+    nghiem_thu_json TEXT NOT NULL DEFAULT '[]',
     ly_do_sua     TEXT NOT NULL DEFAULT '',
     thay_doi_json TEXT NOT NULL DEFAULT '[]',
     bang_chung_json TEXT NOT NULL DEFAULT '[]',
@@ -257,6 +262,11 @@ CREATE TABLE IF NOT EXISTS de_xuat (
     rui_ro        TEXT NOT NULL DEFAULT 'LOW',
     tac_dong_prod INTEGER NOT NULL DEFAULT 0,
     tu_vai        TEXT NOT NULL DEFAULT 'strategist',
+    -- V0.9 §B: AI da de xuat. Khong co ba cot nay thi vong phan hoi
+    -- `chien luoc -> ket qua` khong gan duoc ket qua vao model nao.
+    provider      TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    runtime_id    TEXT NOT NULL DEFAULT '',
     execution_id  TEXT NOT NULL DEFAULT '',
     ts            REAL NOT NULL
 );

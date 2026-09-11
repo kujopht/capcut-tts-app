@@ -263,16 +263,19 @@ class SoThucThi:
                           "WHERE execution_id = ?", (kh.execution_id,))
             c.execute(
                 "INSERT INTO execution_plans(execution_id, phien_ban, "
-                " buoc_json, ly_do_sua, thay_doi_json, bang_chung_json, "
-                " dang_hieu_luc, created_at) VALUES(?,?,?,?,?,?,?,?) "
+                " buoc_json, nghiem_thu_json, ly_do_sua, thay_doi_json, "
+                " bang_chung_json, dang_hieu_luc, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(execution_id, phien_ban) DO UPDATE SET "
                 " buoc_json=excluded.buoc_json, "
+                " nghiem_thu_json=excluded.nghiem_thu_json, "
                 " ly_do_sua=excluded.ly_do_sua, "
                 " thay_doi_json=excluded.thay_doi_json, "
                 " bang_chung_json=excluded.bang_chung_json, "
                 " dang_hieu_luc=excluded.dang_hieu_luc",
                 (kh.execution_id, kh.phien_ban,
-                 _js([b.to_dict() for b in kh.buoc]), kh.ly_do_sua,
+                 _js([b.to_dict() for b in kh.buoc]),
+                 _js([t.to_dict() for t in kh.nghiem_thu]), kh.ly_do_sua,
                  _js(list(kh.thay_doi)), _js(list(kh.bang_chung_gay_ra)),
                  int(bool(kh.dang_hieu_luc)), kh.created_at))
             c.execute("UPDATE executions SET ban_ke_hoach = ?, updated_at = ? "
@@ -285,7 +288,10 @@ class SoThucThi:
     def _kh_tu_hang(h) -> KeHoachThucThi:
         return KeHoachThucThi.tu_dict({
             "execution_id": h["execution_id"], "phien_ban": h["phien_ban"],
-            "buoc": _un(h["buoc_json"], []), "ly_do_sua": h["ly_do_sua"],
+            "buoc": _un(h["buoc_json"], []),
+            "nghiem_thu": _un(h["nghiem_thu_json"]
+                              if "nghiem_thu_json" in h.keys() else "", []),
+            "ly_do_sua": h["ly_do_sua"],
             "thay_doi": _un(h["thay_doi_json"], []),
             "bang_chung_gay_ra": _un(h["bang_chung_json"], []),
             "dang_hieu_luc": bool(h["dang_hieu_luc"]),
@@ -446,18 +452,21 @@ class SoThucThi:
         with self.store.giao_dich_ghi() as c:
             c.execute(
                 "INSERT INTO de_xuat(ma, project_id, message_id, tom_tat, "
-                " cac_buoc_json, rui_ro, tac_dong_prod, tu_vai, execution_id, "
-                " ts) VALUES(?,?,?,?,?,?,?,?,?,?) "
+                " cac_buoc_json, rui_ro, tac_dong_prod, tu_vai, provider, "
+                " model, runtime_id, execution_id, ts) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(ma) DO UPDATE SET tom_tat=excluded.tom_tat, "
                 " cac_buoc_json=excluded.cac_buoc_json, "
                 " rui_ro=excluded.rui_ro, "
                 " tac_dong_prod=excluded.tac_dong_prod, "
+                " provider=excluded.provider, model=excluded.model, "
+                " runtime_id=excluded.runtime_id, "
                 " execution_id=excluded.execution_id",
                 (d.ma, d.project_id, int(d.message_id),
                  khong_suy_nghi(d.tom_tat, toi_da=2000),
                  _js([khong_suy_nghi(x, toi_da=300) for x in d.cac_buoc]),
                  d.rui_ro, int(bool(d.tac_dong_production)), d.tu_vai,
-                 d.execution_id, d.ts))
+                 d.provider, d.model, d.runtime_id, d.execution_id, d.ts))
         return d
 
     @staticmethod
@@ -469,8 +478,20 @@ class SoThucThi:
                       rui_ro=h["rui_ro"] or "LOW",
                       tac_dong_production=bool(h["tac_dong_prod"]),
                       tu_vai=h["tu_vai"] or "strategist",
+                      provider=(h["provider"] if "provider" in h.keys() else "") or "",
+                      model=(h["model"] if "model" in h.keys() else "") or "",
+                      runtime_id=(h["runtime_id"] if "runtime_id" in h.keys()
+                                  else "") or "",
                       execution_id=h["execution_id"] or "",
                       ts=float(h["ts"] or 0))
+
+    def de_xuat_theo_ma(self, ma: str) -> Optional[DeXuat]:
+        """Một đề xuất theo mã — §B cần nó để gắn kết quả về đúng model."""
+        if not ma:
+            return None
+        h = self.store.ket_noi().execute(
+            "SELECT * FROM de_xuat WHERE ma = ?", (ma,)).fetchone()
+        return self._dx_tu_hang(h) if h else None
 
     def de_xuat(self, project_id: str, *, limit: int = 20,
                 chua_dung: bool = False) -> List[DeXuat]:

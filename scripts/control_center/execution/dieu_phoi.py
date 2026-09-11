@@ -40,7 +40,8 @@ from scripts.control_center.execution.ke_hoach import (BuocKeHoach,
 from scripts.control_center.execution.kiem_dinh import (BaoCaoKiemDinh,
                                                         MoiGioiKiem,
                                                         kiem_dinh_buoc,
-                                                        kiem_dinh_thuc_thi)
+                                                        kiem_dinh_thuc_thi,
+                                                        nen_goi_reviewer)
 from scripts.control_center.execution.ket_qua import (HopDongKetQua,
                                                       TrangThaiXacMinh)
 from scripts.control_center.execution.phuc_hoi import (ChanDoan,
@@ -105,6 +106,7 @@ class BoDieuPhoi:
                  dung_viec: Optional[Callable[[str, str], None]] = None,
                  nha_tai_nguyen: Optional[Callable[[str, str], int]] = None,
                  moi_gioi: Optional[MoiGioiKiem] = None,
+                 goi_phan_bien: Optional[Callable[..., Optional[Dict]]] = None,
                  song_song: int = SONG_SONG_MAC_DINH) -> None:
         self.so = so
         self._tao_viec = tao_viec
@@ -112,6 +114,12 @@ class BoDieuPhoi:
         self._dung_viec = dung_viec
         self._nha_tai_nguyen = nha_tai_nguyen
         self.moi_gioi = moi_gioi
+        #: `(y_dinh, ke_hoach, bao_cao) -> {phan_xu, doc_lap, ly_do, …}` hoặc
+        #: `None`. MỘT CALLABLE, không phải `HoiDong`: bộ điều phối không được
+        #: biết về fabric/`Scheduler`, và bài kiểm tất định của tầng này dựng
+        #: một hàm giả thay vì cả ứng dụng. `None` = không có đường ngữ nghĩa,
+        #: và lúc đó kết luận cao nhất là `SUY_GIAM` — trung thực.
+        self._goi_phan_bien = goi_phan_bien
         self.song_song = max(1, int(song_song or 1))
         self._chi_phi: Dict[str, SoChiPhi] = {}
 
@@ -518,6 +526,54 @@ class BoDieuPhoi:
                 if m2 is not self.moi_gioi:
                     mg = m2
         bc = kiem_dinh_thuc_thi(y, kh, kqb, moi_gioi=mg, phan_bien=phan_bien)
+
+        # --- PHẢN BIỆN NGỮ NGHĨA, TỰ ĐỘNG (§A) -----------------------------
+        #
+        # TẤT ĐỊNH TRƯỚC, LUÔN LUÔN: `bc` ở trên đã dựng xong từ phép kiểm
+        # máy. Chỉ khi máy KHÔNG trả lời được — tiêu chí đòi phán đoán ngữ
+        # nghĩa, hoặc lần thực thi chạm production/rủi ro cao — mới tiêu một
+        # lượt model. `nen_goi_reviewer` là chỗ duy nhất giữ chính sách đó,
+        # và nó TỪ CHỐI gọi khi phép đo đã bắt được lỗi: hỏi thêm một model
+        # để nghe lại điều đã biết vừa tốn hạn mức vừa mở đường cho một
+        # `ACCEPT` che mất một phép đo đã đỏ.
+        if phan_bien is None and self._goi_phan_bien is not None:
+            nen, vi_sao = nen_goi_reviewer(kh, y, bc)
+            self.so.ghi_su_kien(
+                execution_id, "REVIEW_GATE", project_id=y.project_id,
+                detail=f"{'GỌI' if nen else 'BỎ QUA'} Reviewer: {vi_sao}"[:300],
+                meta={"goi": nen, "ly_do": vi_sao})
+            if nen:
+                pb = None
+                try:
+                    pb = self._goi_phan_bien(y, kh, bc)
+                except Exception as exc:                    # noqa: BLE001
+                    self.so.ghi_su_kien(
+                        execution_id, "REVIEW_ERROR", project_id=y.project_id,
+                        level="WARNING",
+                        detail=f"{type(exc).__name__}: {exc}"[:300])
+                if pb:
+                    # Chấm LẠI với phán xử trong tay. KHÔNG vá `bc` tại chỗ:
+                    # `_tong_hop` là chỗ duy nhất biết luật hợp nhất, và sửa
+                    # kết quả bên ngoài nó sẽ làm hai đường kết luận lệch nhau.
+                    bc = kiem_dinh_thuc_thi(y, kh, kqb, moi_gioi=mg,
+                                            phan_bien=pb)
+                    self.so.ghi_su_kien(
+                        execution_id, "REVIEW_VERDICT",
+                        project_id=y.project_id,
+                        level=("INFO" if str(pb.get("phan_xu")) == "ACCEPT"
+                               else "WARNING"),
+                        detail=(f"{pb.get('phan_xu')} · "
+                                f"{pb.get('provider')}/{pb.get('model')} · "
+                                f"độc lập={pb.get('doc_lap')}")[:300],
+                        meta={k2: pb.get(k2) for k2 in
+                              ("phan_xu", "provider", "model", "doc_lap",
+                               "suy_giam", "ly_do")})
+                else:
+                    # KHÔNG GIẢ VỜ ĐỘC LẬP, và cũng không giả vờ đã soi.
+                    # Thiếu Reviewer là một THIẾU SÓT phải hiện ra ở kết luận.
+                    bc.ly_do += (" — (!) cần phản biện ngữ nghĩa nhưng Reviewer "
+                                 "không chạy được: SUY GIẢM")
+                    bc.doc_lap = False
         self.so.ghi_su_kien(
             execution_id, "EXEC_VERIFIED", project_id=y.project_id,
             level=("INFO" if bc.dat else "WARNING"),

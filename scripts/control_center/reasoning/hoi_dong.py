@@ -385,6 +385,56 @@ class HoiDong:
 
     # -- toan hoi dong -------------------------------------------------------
 
+    def phan_bien_ket_qua(self, *, cau: str, ban_ket_qua: str,
+                          phan_loai: PhanLoai, che_do: CheDo,
+                          khoi_san_co: Optional[Dict[str, str]] = None,
+                          nguon_khoi: Optional[Dict[str, str]] = None,
+                          khoi_gon: Optional[Dict[str, str]] = None,
+                          ho_tac_gia: str = "",
+                          chinh_sach: Optional[ChinhSachCaoCap] = None,
+                          project_id: str = "",
+                          thu_lai: Optional[ChinhSachThuLai] = None
+                          ) -> Tuple[Optional[HD.BanPhanBien], NguonGocVai]:
+        """CHỈ Reviewer, soi một KẾT QUẢ đã chạy — V0.9 §A.
+
+        VÌ SAO MỘT ĐƯỜNG RIÊNG, VÀ VÌ SAO NÓ KHÔNG GỌI STRATEGIST:
+
+        `chay()` là đường của một lượt HỘI THOẠI: Strategist đề xuất, Reviewer
+        soi đề xuất đó. Ở pha `VERIFYING` thì thứ cần soi đã tồn tại rồi — nó
+        là công việc ĐÃ LÀM cùng bằng chứng của nó. Gọi `chay()` ở đây sẽ tiêu
+        một lượt Strategist để sinh ra một bản chiến lược mà không ai dùng,
+        rồi mới tới Reviewer. Đó là đốt hạn mức cho một bước thừa.
+
+        `ho_tac_gia` là HỌ MODEL ĐÃ LÀM VIỆC (worker/Strategist), và truyền nó
+        vào là điều kiện để `doi_doc_lap=True` có nghĩa: không truyền thì bộ
+        định tuyến không biết phải tránh ai, và "độc lập" thành một nhãn dán.
+        Không tránh được thì `chon.suy_giam` bật và bên gọi báo DEGRADED —
+        không giả vờ.
+
+        Trả `(bản phản biện hoặc None, nguồn gốc)`. KHÔNG ném: mất Reviewer là
+        một thiếu sót được ghi lại, không phải một lần kiểm định bị vỡ.
+        """
+        khoi = dict(khoi_san_co or {})
+        khoi["yeu_cau_nguoi_dung"] = cau or ""
+        # Tai dung khe `ban_chien_luoc` cho KET QUA da chay: do la khoi ma
+        # `THU_TU_NAP[REVIEWER]` da xep ngay sau cau nguoi dung, tuc la thu
+        # Reviewer duoc doc truoc tien. Mot ten khoi moi se khong co thu tu uu
+        # tien nao va bi cat dau tien mot cach im lang — dung lop loi ma
+        # `ngu_canh.KHOI_BIET` ton tai de chan.
+        khoi["ban_chien_luoc"] = ban_ket_qua
+        ng_khoi = dict(nguon_khoi or {})
+        ng_khoi.setdefault("ban_chien_luoc",
+                           "kết quả đã chạy + bằng chứng kiểm định (V0.9)")
+        return self._chay_vai(
+            VaiTro.REVIEWER, p=phan_loai, che_do=che_do, khoi_san_co=khoi,
+            nguon_khoi=ng_khoi, khoi_gon=dict(khoi_gon or {}),
+            huong_dan=HD.NHAC_REVIEWER, doc=HD.doc_ban_phan_bien,
+            thu_lai=thu_lai or ChinhSachThuLai(), so=SoDinhTuyen(
+                project_id=project_id, che_do=che_do),
+            ho_tac_gia=ho_tac_gia, doi_doc_lap=True,
+            nguoi_yeu_cau_cao_cap=False, project_id=project_id,
+            chinh_sach=chinh_sach)
+
     def chay(self, *, cau: str, phan_loai: PhanLoai, che_do: CheDo,
              khoi_san_co: Dict[str, str],
              nguon_khoi: Optional[Dict[str, str]] = None,

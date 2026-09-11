@@ -45,7 +45,27 @@
   <span id="ten-project">—</span>
   <span class="chip" id="chip-chay"><b>0</b> đang chạy</span>
   <span class="chip do" id="chip-chan"><b>0</b> bị chặn</span>
-  <span class="chip xam" id="chip-che-do" title="Chế độ định tuyến"><b>—</b></span>
+  <!--
+    V0.8 — CHON CHE DO CHAT LUONG. Mot `<select>` that, khong phai mot chip
+    chi-doc: day la thu duy nhat trong ca kien truc suy luan ma nguoi dung
+    dieu khien truc tiep, va no phai BEN (bang `leader.che_do`).
+
+    Chip cu duoc GIU lam nhan phu ben canh — no hien che do dang co hieu luc
+    theo ANH CHUP tu server, nen neu hai tab dang mo va mot tab doi che do,
+    tab kia van thay dung.
+  -->
+  <label id="o-che-do" title="Chế độ chất lượng suy luận.
+ECO: rẻ/nhanh, ít leo thang · AUTO: Router tự quyết theo độ khó và tác động
+STRONG: ưu tiên suy luận mạnh · MAX: chất lượng cao nhất, vẫn theo rào an toàn">
+    <span>Chất lượng</span>
+    <select id="chon-che-do" aria-label="Chế độ chất lượng">
+      <option value="ECO">ECO</option>
+      <option value="AUTO">AUTO</option>
+      <option value="STRONG">STRONG</option>
+      <option value="MAX">MAX</option>
+    </select>
+  </label>
+  <span class="chip xam" id="chip-che-do" title="Chế độ định tuyến đang hiệu lực (theo server)"><b>—</b></span>
   <span class="day"></span>
   <input id="o-tim" type="search" placeholder="Tìm việc, phiên, worktree…"
          aria-label="Tìm">
@@ -271,6 +291,24 @@ Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), hoặc ké
                 title="Đo lại ngay (mỗi lần là một phiên SSH thật)">↻</button>
       </div>
       <div id="insp-song"></div>
+    </section>
+    <!--
+      V0.8 — SUY LUAN: vai nao da chay luot vua roi, tren model nao, vi sao.
+      Dat NGAY SAU trang thai song va TRUOC "dang chay" cua Router: no tra
+      loi cau "vua roi ai nghi ho toi", tuc la thu nguoi dung muon biet ngay
+      sau khi doc cau tra loi.
+
+      Ban GON den tu `snapshot().suy_luan` (cung nhip WebSocket, khong ton
+      them mot lan goi). Nut ↻ mo ban DAY DU qua `/api/reasoning` — trong do
+      co ca phep DO han muc that, va do la thao tac CHAM nen no phai do
+      nguoi bam.
+    -->
+    <section class="the-qs" id="the-suy-luan">
+      <div class="nhan">SUY LUẬN <span id="sl-che-do" class="qs-phu"></span>
+        <button id="nut-suy-luan" class="nho"
+                title="Xem đầy đủ: năng lực từng model, chính sách cao cấp, hạn mức đo được">↻</button>
+      </div>
+      <div id="insp-suyluan"></div>
     </section>
     <section class="the-qs">
       <div class="nhan">ĐANG CHẠY <span class="qs-phu">(ROUTER)</span></div>

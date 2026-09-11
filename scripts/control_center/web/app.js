@@ -400,6 +400,82 @@ function veInspDangChay() {
   dat('#insp-dangchay', h);
 }
 
+// ------------------------------------------------------------- suy luan ----
+// V0.8 §12 — DINH TUYEN GIAI THICH DUOC.
+//
+// Hien MO TA QUYET DINH, khong hien chuoi suy nghi: vai, model/provider, ly
+// do, trang thai, usage DO DUOC. Dau ra tho cua Strategist/Reviewer KHONG
+// den day — nguoi dung doc cau tra loi cua Leader, khong doc bien ban.
+//
+// Nguon la `snapshot().suy_luan` (ban GON, cung nhip WebSocket). Ban day du
+// — nang luc tung model, chinh sach cao cap, han muc do duoc — nam sau nut ↻.
+function veInspSuyLuan() {
+  const s = S.suy_luan;
+  const nhan = $('#sl-che-do');
+  if (!s) {
+    if (nhan) nhan.textContent = '';
+    dat('#insp-suyluan', trong('chưa có lượt nào'));
+    return;
+  }
+  if (nhan) nhan.textContent = s.che_do || '';
+  const dong = s.dong || [];
+  let h = '';
+  if (s.suy_giam) {
+    // SUY GIAM phai NOI RA, khong duoc chi la mot mau chu nhat. §9: tha bao
+    // DEGRADED con hon trinh mot ban tu doc lai nhu mot ban phan bien.
+    h += `<div class="qs-hang do"><b>SUY GIẢM</b><span class="qs-phu">
+      phản biện không độc lập hoặc một vai hỏng</span></div>`;
+  }
+  h += dong.map((d, i) => `<div class="${i === 0 ? 'qs-phu' : 'qs-hang'}"
+      style="${i === 0 ? '' : 'font-family:var(--mono,monospace);font-size:11px'}"
+      >${esc(d)}</div>`).join('');
+  if (!s.da_chay && dong.length <= 2) {
+    h += `<div class="qs-phu">Không gọi vai suy luận nào — lượt này rẻ.</div>`;
+  }
+  dat('#insp-suyluan', h || trong('chưa có lượt nào'));
+}
+
+async function moSuyLuanDayDu() {
+  if (!S.selected) return;
+  dat('#insp-suyluan', trong('đang đo hạn mức thật…'));
+  let r;
+  try {
+    r = await api(`/api/reasoning?project=${encodeURIComponent(S.selected)}`
+      + '&refresh=1');
+  } catch (e) {
+    veInspSuyLuan();
+    moHopThoai('Suy luận', `<p>không đọc được: ${esc(e.message)}</p>`);
+    return;
+  }
+  veInspSuyLuan();
+  const cs = r.chinh_sach_cao_cap || {};
+  const d = [];
+  d.push(`chế độ        : ${r.che_do}`);
+  d.push(`chính sách cao cấp: ${cs.han_che ? 'HẠN CHẾ' : 'không hạn chế'}`
+    + `  (nguồn ${cs.nguon}${cs.ma ? ', ' + cs.ma : ''})`);
+  d.push(`  ${cs.ly_do || ''}`);
+  const hm = r.han_muc_do_duoc || {};
+  d.push('', 'HẠN MỨC ĐO ĐƯỢC (agy --print /usage):');
+  if (!Object.keys(hm).length) {
+    d.push('  — KHÔNG ĐO ĐƯỢC (không suy ra 0)');
+  } else {
+    for (const [k, v] of Object.entries(hm)) {
+      d.push(`  ${k}: còn ${v.con_lai_phan_tram}% (${v.cua_so}, reset `
+        + `${v.reset_luc || '?'})`);
+    }
+    d.push(`  đã áp cho bể: ${(r.han_muc_da_ap || []).join(', ') || '(không)'}`);
+  }
+  d.push('', 'NĂNG LỰC ĐANG BAY (placement · trạng thái · suy luận · giá · hạn mức):');
+  for (const n of (r.nang_luc || []).slice(0, 40)) {
+    const q = n.quota_con_lai === null || n.quota_con_lai === undefined
+      ? 'KHÔNG ĐO ĐƯỢC' : `${n.quota_con_lai}% (${n.quota_nguon})`;
+    d.push(`  ${n.placement.padEnd(34)} ${n.trang_thai.padEnd(9)} `
+      + `${n.reasoning.padEnd(7)} ${n.bac_gia.padEnd(8)} ${q}`);
+  }
+  moHopThoai('Suy luận — định tuyến & năng lực',
+    `<pre style="white-space:pre-wrap">${esc(d.join('\n'))}</pre>`);
+}
+
 function veInspTasks() {
   // Sap theo "vua doi gan day nhat" — cot nay tra loi "vua co gi xay ra",
   // khong phai "liet ke het". Bang day du van o tab Tasks.
@@ -636,6 +712,9 @@ function veInspSnapshotTuCache() {
     `chụp lúc   : ${gio(a.ts)}`);
   dat('#insp-snapshot', `<pre>${esc(d.join('\n'))}</pre>`);
   $('#chip-che-do').innerHTML = `<b>${esc(a.che_do || '—')}</b>`;
+  // O CHON theo SERVER, khong theo lan bam cuoi cua tab nay.
+  const oc = $('#chon-che-do');
+  if (oc && a.che_do && oc.value !== a.che_do) oc.value = a.che_do;
 }
 function bkDangChay(a) {
   // "backend dang hoat dong" = provider/model cua nhung phien CON SONG,
@@ -676,6 +755,7 @@ function veHet() {
   veProjects(); veThanhTren(); veChat(); veTasks(); veAgents();
   veInspDangChay(); veInspTasks(); veInspAgents(); veInspUsageTuCache();
   veSongTuCache();
+  veInspSuyLuan();
   veDangLam();
 
   // LAY LAI USAGE KHI TRANG THAI DOI — day la duong lam moi CHINH, khong
@@ -2001,6 +2081,34 @@ function noiWs() {
 
 $('#nut-chup-lai').onclick = () => veInspSnapshot(true);
 $('#nut-song-lai').onclick = () => veSong(true);
+$('#nut-suy-luan').onclick = () => moSuyLuanDayDu();
+
+// CHE DO CHAT LUONG — ghi BEN o server, khong giu trong tab.
+//
+// Hai tab dang mo phai thay cung mot chế độ: nguon su that la cot
+// `leader.che_do`, va `veThanhTren()` dong bo lai o moi nhip. Giu trang thai
+// nay trong bien cua tab se cho ra hai tab noi hai dieu khac nhau ve cung
+// mot du an — dung kieu loi ma "mot so SQLite dung chung" cua V0.2 ton tai
+// de chan.
+$('#chon-che-do').onchange = async (ev) => {
+  const cd = ev.target.value;
+  if (!S.selected) return;
+  try {
+    // `Content-Type` PHAI co: `api()` chi gan token, con FastAPI doi
+    // `application/json` moi phan tich than request thanh `Dict`. Thieu no
+    // thi request di toi noi va tra 422 — o chon nhay ve gia tri cu mot
+    // cach im lang. Do that bang Chrome that truoc khi sua.
+    await api('/api/reasoning/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: S.selected, che_do: cd }),
+    });
+    noi(`chế độ chất lượng: ${cd}`);
+    veInspSnapshot(true);
+  } catch (e) {
+    noi(`không đổi được chế độ: ${e.message}`);
+  }
+};
 
 (async function batDau() {
   if (!TOKEN) {

@@ -153,6 +153,24 @@ a { color: var(--xanh); }
   background: rgba(148, 161, 192, .12); color: var(--mo);
   border-color: var(--vien);
 }
+/* V0.8 — chon che do chat luong. Giu nguyen ngon ngu toi cua V0.4: khong
+   mau moi, khong vien sang hon cac chip ben canh — day la mot o dieu khien
+   binh thuong, khong phai mot canh bao. */
+#o-che-do {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; letter-spacing: .9px; color: var(--mo); font-weight: 700;
+}
+#chon-che-do {
+  background: rgba(148, 161, 192, .12); color: var(--neon);
+  border: 1px solid var(--vien); border-radius: 9px;
+  padding: 2px 6px; font-size: 11px; font-weight: 700;
+  font-family: inherit;
+}
+#chon-che-do:focus-visible { outline: 1px solid var(--neon); }
+/* Danh sach xo xuong do he dieu hanh ve: ep nen toi de chu khong thanh
+   trang-tren-trang o Windows. */
+#chon-che-do option { background: #0d1220; color: #e8ecf6; }
+
 #o-tim { width: 260px; }
 
 /* ---------------------------------------------------------------- khung */

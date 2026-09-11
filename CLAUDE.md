@@ -272,7 +272,10 @@ Báo cáo:
 `scripts/control_center/memory/{de_bat,nhap_khau}.py` và
 `scripts/control_center/providers/`.
 
-**V0.7 Phase 1** (nhánh `feat/v07-fanfic-adoption`, chưa merge/tag) thêm
+**V0.7 Phase 1** (ĐÃ merge vào `main` và gắn thẻ
+`router-control-center-v0.7.0` @ `88a2056` — dòng này trước đây ghi "chưa
+merge/tag", sai kể từ lúc `1b575aa` merge nhánh vào; xem
+`docs/CONTROL_CENTER.md` §21) thêm
 NHẬN DỰ ÁN CÓ SẴN + VIÊN NANG DỰ ÁN: `nhan_du_an()` nhận một kho THẬT
 **chỉ đọc** (không sao chép/dời/khởi tạo lại/ghi gì vào kho; danh tính suy
 từ gốc worktree + commit gốc, KHÔNG từ nhánh); `vien_nang_du_an.py` dựng 19
@@ -316,6 +319,31 @@ một nguồn duy nhất (`router_v3.policy`); runtime khai báo thứ nó từ 
 xếp chỗ là RÀO CỨNG (`cam_runtime`); từ chối vì CHÍNH SÁCH thì định tuyến
 lại có trần + nguồn gốc. `docs/reports/LAM_CUNG_V07.md`,
 `docs/CONTROL_CENTER.md` §20 (luật 22–24).
+
+**V0.8** (nhánh `feat/v08-strategist-reviewer-model-router`, chưa merge/tag)
+thêm KIẾN TRÚC SUY LUẬN NHIỀU VAI: Leader vẫn là người duy nhất người dùng
+nói chuyện, nhưng nó gọi thêm **STRATEGIST** (kiến trúc/lộ trình/đánh đổi) và
+**REVIEWER** (phản biện ĐỘC LẬP, accept/revise/reject) khi lượt đủ khó, rồi
+TỔNG HỢP. `EXECUTOR` vẫn là Router V4 nguyên vẹn. Mã ở
+`scripts/control_center/reasoning/`; đầy đủ ở `docs/reports/REASONING_V08.md`
+và `docs/CONTROL_CENTER.md` §22 (luật 25–28). Bốn điều hay vấp nhất:
+
+* **CỔNG TẦM THƯỜNG là rào CỨNG.** Câu chào / tra cứu `git` / hỏi trạng thái
+  sống / hỏi lịch sử → KHÔNG vai nào chạy, ở MỌI chế độ **kể cả MAX**. Và
+  hai bộ nhận dạng cũ phải bị ĐẢO khi lượt có tín hiệu suy luận:
+  `la_cau_hoi_van_hanh` bắt chữ "production", `la_cau_hoi_lich_su` bắt chữ
+  "tại sao" — cả hai từng nuốt mất một câu hỏi kiến trúc thật.
+* **THẢO LUẬN ≠ THỰC THI.** Một đề xuất của Strategist KHÔNG tự thành việc;
+  chỉ câu NGƯỜI DÙNG xin làm mới mở cửa `delegate_work`. Chiều ngược lại:
+  một yêu cầu thực thi rõ ràng dưới bậc `KHO` đi thẳng Router V4.
+* **KHÔNG GIẢ VỜ ĐỘC LẬP.** Reviewer khác họ model là rào CỨNG; không thoả
+  được thì báo `suy_giam=True`/DEGRADED. Và **bất đồng ý kiến của model
+  KHÔNG phải lỗi vận chuyển** — `LoaiThatBai.VIEC` không bao giờ định tuyến
+  lại (đi tìm model khác cho cùng câu hỏi là đi mua một ý kiến dễ chịu hơn).
+* **Chính sách model cao cấp TRA TỪ KÝ ỨC** (`qd_0001` của Fanfic), không
+  chép vào mã; không tra được thì HẠN CHẾ kèm `nguon=fail_closed`. Hạn mức
+  Antigravity thì ĐO THẬT (`agy --print /usage`) và **chỉ áp cho đúng tài
+  khoản đã đo** — áp cho cả tám là biến một phép đo thành bảy con số bịa.
 
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission

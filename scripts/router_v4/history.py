@@ -51,6 +51,22 @@ class Record:
     tokens: Optional[int] = None
     cost_usd: Optional[float] = None
 
+    # -- V0.8: ba truong TUY CHON, them de luot VAI SUY LUAN ghi duoc --------
+    #
+    # Cong them chu khong sua gi: ban ghi cu khong co chung van doc duoc
+    # (`all()` dung `.get()`), va ban ghi worker van bo trong ca ba.
+    #: Du an — de mot kho nhieu du an khong tron lich su cua chung.
+    project: str = ""
+    #: Ket qua CO CAU TRUC cua luot: `ACCEPT`/`REVISE`/`REJECT` cua Reviewer,
+    #: hoac rong. KHONG phai noi dung, chi mot nhan trong bo DONG.
+    verdict: str = ""
+    #: Diem rubric do NGUOI/kich ban nghiem thu cham. `None` = CHUA CHAM —
+    #: khong bao gio suy tu do tin model tu khai, vi do la lời khai chu khong
+    #: phai phep do.
+    quality: Optional[float] = None
+    #: Tro toi cho ghi rubric (tep + muc). Chuoi tham chieu, khong phai noi dung.
+    rubric: str = ""
+
     def to_dict(self) -> Dict:
         return asdict(self)
 
@@ -58,6 +74,21 @@ class Record:
 def duong(root: Optional[Path] = None) -> Path:
     goc = Path(root) if root else Path.cwd()
     return goc / TEN_TEP
+
+
+#: Lich su cua VAI SUY LUAN nam o TEP RIENG, khong tron vao lich su worker.
+#:
+#: VI SAO TACH: `summary_for` co duong NOI — thieu mau cho `(model, task_type)`
+#: thi no lui ve chi-`model`. Neu hai loai ghi chung mot tep, thong ke cua mot
+#: luot Strategist (mot lan hoi, khong worktree, khong test) se chay sang duong
+#: dinh tuyen cua mot viec `implement` co test that, va nguoc lai. Hai cau hoi
+#: khac nhau thi hai so cai.
+TEN_TEP_VAI = ".router/v4/benchmark-reasoning.jsonl"
+
+
+def duong_vai(root: Optional[Path] = None) -> Path:
+    goc = Path(root) if root else Path.cwd()
+    return goc / TEN_TEP_VAI
 
 
 class BenchmarkStore:
@@ -118,7 +149,11 @@ class BenchmarkStore:
                         review_findings=int(d.get("review_findings") or 0),
                         retry_count=int(d.get("retry_count") or 0),
                         reassigned=bool(d.get("reassigned")),
-                        tokens=d.get("tokens"), cost_usd=d.get("cost_usd")))
+                        tokens=d.get("tokens"), cost_usd=d.get("cost_usd"),
+                        project=str(d.get("project") or ""),
+                        verdict=str(d.get("verdict") or ""),
+                        quality=d.get("quality"),
+                        rubric=str(d.get("rubric") or "")))
                 except (TypeError, ValueError):
                     continue
         self._cache = ra

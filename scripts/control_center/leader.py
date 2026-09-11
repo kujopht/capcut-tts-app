@@ -314,6 +314,14 @@ QUY TẮC QUAN TRỌNG:
    trong hội thoại hiện tại — ký ức là nơi tra lịch sử. Thiếu trong ký ức thì
    NÓI RÕ và HỎI có muốn điều tra không, đừng tự dựng việc. (Khi có khối, một
    luật "CÂU HỎI LỊCH SỬ" đi kèm nói rõ điều này.)
+8. THẢO LUẬN KHÔNG PHẢI THỰC THI. Người dùng được quyền BÀN về hướng đi của
+   dự án mà không phải lượt nào cũng biến thành việc. Một câu hỏi tư vấn
+   ("theo m thì nên làm gì tiếp", "có nên migrate không", "kiến trúc nên đổi
+   thế nào") -> TRẢ LỜI (y_dinh CHAT), rồi MỜI: "muốn tôi triển khai phần nào
+   thì nói". TUYỆT ĐỐI không `delegate_work` chỉ vì bạn vừa đề xuất ra một
+   danh sách việc — kể cả khi khối HỘI ĐỒNG SUY LUẬN bên dưới có mục "Việc sẽ
+   cần". Chỉ uỷ thác khi CHÍNH NGƯỜI DÙNG xin làm ("sửa giúp…", "chạy test
+   đi", "triển khai luôn").
 """
 
 
@@ -597,7 +605,7 @@ def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
                   khoi_song: str = "", khoi_ky_uc: str = "",
                   khoi_toa: str = "", la_lich_su: bool = False,
                   khoi_web: str = "", khoi_nang: str = "",
-                  khoi_probe: str = "") -> str:
+                  khoi_probe: str = "", khoi_hoi_dong: str = "") -> str:
     """Gói một lượt: hướng dẫn + trạng thái + hội thoại + câu mới.
 
     RANH GIỚI TIN CẬY, và bản đầu làm sai đúng chỗ này:
@@ -658,6 +666,20 @@ def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
               "hiện tại) ---",
               khoi_ky_uc,
               "--- HẾT DỮ LIỆU ---", ""]
+    if khoi_hoi_dong:
+        # V0.8 — KET QUA HOI DONG SUY LUAN (Strategist/Reviewer).
+        #
+        # Dat SAU moi khoi BANG CHUNG (song, probe, vien nang, ky uc) co chu
+        # dich, va do la mot phat bieu ve THAM QUYEN: day la DAU RA CUA MODEL,
+        # khong phai mot phep do. Mot ban chien luoc khong duoc dung lam nguon
+        # de tra loi "farmer con chay khong" — bang chung vua do moi duoc.
+        #
+        # `khoi_hoi_dong` DA mang `LUAT_HOI_DONG` o dau (xem
+        # `reasoning/hoi_dong.KetQuaHoiDong.khoi_leader`), cung khuon voi
+        # `LUAT_KY_UC` di kem khoi ky uc o MOI luot co khoi.
+        d += ["--- BẮT ĐẦU DỮ LIỆU: HỘI ĐỒNG SUY LUẬN (đầu ra của model, "
+              "KHÔNG phải phép đo) ---",
+              khoi_hoi_dong, "--- HẾT DỮ LIỆU ---", ""]
     if lich_su:
         d.append("--- BẮT ĐẦU DỮ LIỆU: HỘI THOẠI GẦN ĐÂY ---")
         for m in lich_su[-SO_LUOT_NGU_CANH:]:

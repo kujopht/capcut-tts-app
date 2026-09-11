@@ -75,13 +75,92 @@ class _Nen(unittest.TestCase):
         return {"X-CC-Token": self.phien.token}
 
 
+class TestSuyLuanV08(_Nen):
+    """§12 — định tuyến giải thích được, và §4 — chế độ chất lượng BỀN."""
+
+    def test_doc_dinh_tuyen_khong_do_han_muc(self):
+        r = self.cl.get("/api/reasoning?project=p", headers=self.h)
+        self.assertEqual(r.status_code, 200, r.text)
+        d = r.json()
+        self.assertEqual(d["che_do"], "AUTO")
+        self.assertEqual(d["che_do_hop_le"], ["ECO", "AUTO", "STRONG", "MAX"])
+        self.assertFalse(d["da_do_han_muc"],
+                         "không được gọi CLI nhà cung cấp khi chưa ai bấm")
+        self.assertEqual(d["han_muc_do_duoc"], {})
+        self.assertEqual(len(d["vai"]), 3)
+
+    def test_thieu_project_thi_400(self):
+        self.assertEqual(
+            self.cl.get("/api/reasoning", headers=self.h).status_code, 400)
+
+    def test_chinh_sach_cao_cap_FAIL_CLOSED_khi_khong_co_ky_uc(self):
+        d = self.cl.get("/api/reasoning?project=p", headers=self.h).json()
+        cs = d["chinh_sach_cao_cap"]
+        self.assertTrue(cs["han_che"])
+        self.assertNotEqual(cs["nguon"], "ky_uc")
+
+    def test_han_muc_khong_doc_duoc_thi_None_khong_phai_0(self):
+        d = self.cl.get("/api/reasoning?project=p", headers=self.h).json()
+        for n in d["nang_luc"]:
+            with self.subTest(p=n["placement"]):
+                self.assertTrue(n["quota_con_lai"] is None
+                                or isinstance(n["quota_con_lai"], (int, float)))
+
+    def test_doi_che_do_BEN(self):
+        r = self.cl.post("/api/reasoning/mode",
+                         json={"project": "p", "che_do": "MAX"}, headers=self.h)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["che_do"], "MAX")
+        # BEN: doc lai tu so, khong tu bo nho cua mot lan goi.
+        self.assertEqual(
+            self.cl.get("/api/reasoning?project=p", headers=self.h).json()["che_do"],
+            "MAX")
+        self.assertEqual(self.cc.leader_ban_ghi("p").che_do, "MAX")
+
+    def test_che_do_LA_thi_400_khong_am_tham_ve_AUTO(self):
+        """Một chế độ gõ sai không được lặng lẽ thành AUTO — người dùng sẽ
+        tưởng họ đang ở MAX."""
+        r = self.cl.post("/api/reasoning/mode",
+                         json={"project": "p", "che_do": "TURBO"},
+                         headers=self.h)
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.cc.leader_ban_ghi("p").che_do, "AUTO")
+
+    def test_snapshot_mang_ban_GON_cua_dinh_tuyen(self):
+        d = self.cl.get("/api/state?project=p", headers=self.h).json()
+        self.assertIn("suy_luan", d)
+
+    def test_che_do_di_theo_NHIP_NHANH_cua_state(self):
+        """Đo bằng Chrome thật: thanh trên chỉ đồng bộ ở đường ảnh chụp `git`
+        (bộ đệm 30s), nên đổi chế độ ở một tab không hiện ra ở tab kia."""
+        self.assertEqual(
+            self.cl.get("/api/state?project=p", headers=self.h).json()["che_do"],
+            "AUTO")
+        self.cl.post("/api/reasoning/mode",
+                     json={"project": "p", "che_do": "MAX"}, headers=self.h)
+        self.assertEqual(
+            self.cl.get("/api/state?project=p", headers=self.h).json()["che_do"],
+            "MAX")
+
+    def test_dinh_tuyen_di_qua_bo_loc_bi_mat(self):
+        r = self.cl.get("/api/reasoning?project=p", headers=self.h)
+        self.assertNotIn(self.phien.token, r.text)
+
+
 class TestTokenBatBuoc(_Nen):
     """Không token thì 401 — kể cả `GET`."""
 
-    DUONG_GET = ("/api/state", "/api/usage", "/api/task/p.t1/log")
+    DUONG_GET = ("/api/state", "/api/usage", "/api/task/p.t1/log",
+                 # V0.8 — dinh tuyen suy luan. `/api/reasoning` doc ra ca ten
+                 # model, chinh sach du an va han muc do duoc; mot trang web
+                 # bat ky KHONG duoc doc no.
+                 "/api/reasoning")
     DUONG_POST = ("/api/chat", "/api/task/p.t1/pause",
                   "/api/task/p.t1/resume", "/api/task/p.t1/stop",
-                  "/api/task/p.t1/approve", "/api/project")
+                  "/api/task/p.t1/approve", "/api/project",
+                  # V0.8 — doi che do chat luong la mot thao tac GHI: no doi
+                  # model nao chay cho moi luot sau do.
+                  "/api/reasoning/mode")
 
     def test_GET_khong_token_thi_401(self):
         for d in self.DUONG_GET:

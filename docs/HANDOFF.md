@@ -18,6 +18,16 @@ Cập nhật: 2026-08-08 · Branch `feature/web-mvp` · HEAD `14f4a31`
 > Không viết lại toàn bộ file này trong đợt
 > hardening này (rủi ro/khối lượng vượt phạm vi "tài liệu lỗi thời, sửa nhỏ
 > an toàn") — để nguyên làm hồ sơ lịch sử của mốc `feature/web-mvp`.
+>
+> **ROUTER CONTROL CENTER là sản phẩm THỨ HAI của kho này và có dòng phát
+> hành RIÊNG — file này KHÔNG theo dõi nó.** Trạng thái phát hành canonical
+> nằm ở `docs/CONTROL_CENTER.md`: §14e (v0.6.1), §21 (v0.7.0), **§23
+> (v0.8.0 — ĐÃ PHÁT HÀNH 2026-09-11, thẻ `router-control-center-v0.8.0`)**.
+> v0.8 thêm kiến trúc suy luận nhiều vai (Leader / Strategist / Reviewer /
+> Executor) + bộ định tuyến model động; nghiệm thu MODEL THẬT ở
+> `docs/reports/REASONING_V08_REAL.md`. **Pha tiếp theo: v0.9 — Closed-Loop
+> Autonomous Project Execution** (chưa bắt đầu; bảy hạng mục ưu tiên ở cuối
+> §23).
 
 Tài liệu này để một phiên khác tiếp tục được khi phiên hiện tại hết context.
 

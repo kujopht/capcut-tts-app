@@ -1231,5 +1231,135 @@ Bốn bất biến của nhân v0.7 (thêm vào §14e của v0.6.1):
 cũ đã đánh mốc `DA_DI_TRU.json`, hai nhánh tính năng
 `feat/v07-fanfic-adoption` và `feat/farmer-sanitized-observability`.
 
-**Pha tiếp theo: v0.8 — Strategist + Reviewer + Dynamic Model Router.** Chưa
-bắt đầu.
+**Pha tiếp theo: v0.8 — Strategist + Reviewer + Dynamic Model Router.** Xem
+§22 (nhánh `feat/v08-strategist-reviewer-model-router`, chưa merge/tag).
+
+## 22. Kiến trúc suy luận nhiều vai (V0.8)
+
+Báo cáo: `docs/reports/REASONING_V08.md` (kiến trúc) và
+`docs/reports/REASONING_V08_REAL.md` (**nghiệm thu MODEL THẬT**). Mã:
+`scripts/control_center/reasoning/`. Bài kiểm:
+`scripts/tests/test_reasoning_v08.py`. Nghiệm thu tất định:
+`scripts/control_center_v08_acceptance.py` (25/25); nghiệm thu thật:
+`scripts/control_center_v08_real_acceptance.py` (27/28 ở lần chạy đầy đủ —
+mục hỏng là một khuyết tật UI đã sửa và xác minh lại riêng; rubric nội dung
+37/38).
+
+Bốn vai, và chỉ ba trong số đó đi qua gói này: **LEADER** (sở hữu hội thoại,
+tổng hợp), **STRATEGIST** (kiến trúc/lộ trình/đánh đổi), **REVIEWER** (phản
+biện độc lập), **EXECUTOR** = Router V4 nguyên vẹn — `vai.ho_so()` NÉM cho
+`EXECUTOR` có chủ ý, để không ai gọi Router V4 qua bộ định tuyến vai và bỏ
+qua worktree/khoá/kiểm định.
+
+Bốn luật (25–28) thêm vào §16–§20:
+
+25. **CỔNG TẦM THƯỜNG là rào CỨNG, không phải một ưu tiên mềm.** Một câu
+    chào, một câu tra cứu `git`, một câu hỏi trạng thái sống đơn, một câu hỏi
+    lịch sử — KHÔNG vai suy luận nào được gọi, ở MỌI chế độ, **kể cả MAX**.
+    Đây là chỗ duy nhất chặn "MAX biến `ê bro` thành một hội đồng ba model",
+    và nó nằm ở `phan_loai.py` TRƯỚC cả tầng định tuyến, nên một lượt tầm
+    thường không chạm tới fabric và không thêm một token nào vào nhắc nhở của
+    Leader. Hai bộ nhận dạng cũ phải bị ĐẢO khi có tín hiệu suy luận:
+    `la_cau_hoi_van_hanh` bắt chữ "production" (nên câu "redesign production
+    architecture" từng bị nuốt) và `la_cau_hoi_lich_su` bắt chữ "tại sao"
+    (nên câu "nên ưu tiên phần nào tiếp theo **và tại sao**" từng bị nuốt) —
+    cả hai đo được trên chính bộ hiệu chuẩn A–F.
+
+26. **THẢO LUẬN KHÔNG PHẢI THỰC THI.** `KetQuaHoiDong` không có đường nào
+    tạo việc; nó trả về một khối văn bản và một bản ghi định tuyến. Mục "Việc
+    sẽ cần" của Strategist đi vào khối đó dưới nhãn "CHƯA tạo việc nào", và
+    `LUAT_HOI_DONG` + `HUONG_DAN` luật 8 nói thẳng với Leader rằng một đề
+    xuất của model không phải một yêu cầu của người dùng. Việc chỉ sinh ra
+    khi người dùng XIN LÀM. Chiều ngược lại cũng đúng: một yêu cầu thực thi
+    rõ ràng dưới bậc `KHO` đi thẳng Router V4, không qua hội đồng — cân nhắc
+    kiến trúc cho một việc đã rõ hình dạng là tiêu hai lượt model để nói lại
+    đúng thứ người dùng vừa nói.
+
+27. **KHÔNG GIẢ VỜ ĐỘC LẬP.** Với Reviewer, đa dạng họ model là **rào CỨNG**
+    (`exclude_families`), không phải điểm thưởng — `Scheduler.
+    independence_bonus` là một tín hiệu cho điểm, và một bản phản biện do
+    CÙNG model viết chỉ là một lần tự đọc lại. Vòng MỘT loại trừ họ của
+    Strategist; không ai thoả thì vòng HAI bỏ rào và bản ghi mang
+    `doc_lap=False, suy_giam=True`, khối gửi Leader mang một dòng `(!)` tường
+    minh, giao diện hiện DEGRADED. Và: **bất đồng ý kiến của model KHÔNG phải
+    lỗi vận chuyển** — `LoaiThatBai.VIEC` không bao giờ được định tuyến lại,
+    vì đi tìm một model khác cho cùng câu hỏi là đi mua một ý kiến dễ chịu
+    hơn, và lúc nào cũng còn một model nữa.
+
+28. **Chính sách model cao cấp TRA TỪ KÝ ỨC, mặc định FAIL CLOSED.** Quyết
+    định "GPT-6 Astra chỉ dành cho việc đặc biệt khó" là của NGƯỜI DÙNG: nó
+    có mã (`qd_0001`), có nguồn gốc L0, `tin_cay=user_explicit`, và **thay
+    thế được**. Chép nó thành một hằng số trong mã làm mất cả ba tính chất.
+    `chinh_sach.doc_chinh_sach()` tra nó; không tra được thì HẠN CHẾ kèm
+    `nguon=fail_closed` — thận trọng, và HIỆN RA, khác hẳn việc im lặng thừa
+    kế thói quen của một dự án khác. Bốn rào phải cùng mở mới tới được bậc
+    cao cấp: chính sách dự án, `GacAstra.xin_phep`, một `LyDoLeoThang` tường
+    minh, và bậc độ khó — cộng rào TƯƠNG XỨNG CHI PHÍ (`ngan_sach.
+    kiem_tuong_xung`) chặn một model đắt nhận một lượt thường.
+
+## 23. V0.8.0 — TRẠNG THÁI PHÁT HÀNH (canonical, 2026-09-11)
+
+Nhân V0.8 **đã phát hành**: `main` mang nhánh
+`feat/v08-strategist-reviewer-model-router`, thẻ
+`router-control-center-v0.8.0`. Sau mốc này: sửa lỗi + tài liệu; tính năng
+mới thuộc về v0.9.
+
+**v0.8 = Strategist + Reviewer + Dynamic Model Router.**
+
+Phạm vi ĐÃ ĐÓNG BĂNG, không mở rộng: kiến trúc vai Leader/Strategist/
+Reviewer/Executor · phân loại độ khó + tác động CÓ CẤU TRÚC · ảo hoá ngữ
+cảnh theo vai (có trần, có kê khai) · bốn chế độ ECO/AUTO/STRONG/MAX · chọn
+model ĐỘNG · ghép năng lực provider/model · định tuyến theo CHÍNH SÁCH DỰ ÁN
+· chính sách GPT-6 Astra TRA TỪ KÝ ỨC · ngữ nghĩa UNKNOWN cho chi phí/hạn
+mức · nhận biết bể tài khoản Antigravity · ưu tiên Reviewer ĐỘC LẬP · trạng
+thái DEGRADED trung thực khi không có độc lập · tách THẢO LUẬN khỏi THỰC THI
+· nguồn gốc định tuyến · dự phòng provider CÓ TRẦN · ghi lịch sử lượt vai
+THẬT · đường ống quan sát benchmark · giao diện vai/chế độ/nguồn gốc · điểm
+mở rộng ChatGPT-Web (ĐÃ ĐÁNH GIÁ, HOÃN).
+
+Bốn bất biến của nhân v0.8 (thêm vào §14e của v0.6.1 và §21 của v0.7):
+
+1. **CỔNG TẦM THƯỜNG là rào CỨNG** — câu chào / tra cứu `git` / trạng thái
+   sống / lịch sử gọi **0 vai**, ở MỌI chế độ kể cả MAX.
+2. **THẢO LUẬN ≠ THỰC THI** — một đề xuất của model không tự thành việc;
+   chỉ câu NGƯỜI DÙNG xin làm mới mở `delegate_work`.
+3. **KHÔNG GIẢ VỜ ĐỘC LẬP** — không có họ model khác thì báo DEGRADED; và
+   bất đồng ý kiến của model KHÔNG BAO GIỜ được định tuyến lại.
+4. **KHÔNG BỊA SỐ** — chính sách cao cấp tra từ ký ức (fail closed khi
+   không tra được); hạn mức đo được thì ĐO và chỉ áp cho đúng tài khoản đã
+   đo; `tokens`/`cost_usd` không đo được thì `None`, không bao giờ `0`.
+
+**Nghiệm thu MODEL THẬT** (`docs/reports/REASONING_V08_REAL.md`): bảy lượt
+model thật trên ứng dụng thật + sổ chính tắc + dự án Fanfic thật. Rubric nội
+dung **37/38**; **6/6** khẳng định trạng thái xác minh bằng một lần ĐO LẠI
+độc lập; Reviewer `claude-opus-4-6-thinking` (KHÁC HỌ) trả `REVISE` với 6
+phát hiện. **0 việc tạo ra, 0 thay đổi production.**
+
+**Vòng phản hồi**: lượt vai ghi vào `.router/v4/benchmark-reasoning.jsonl`
+(tệp RIÊNG) và `BoDinhTuyenVai` đọc lại chính tệp đó. Hiện có **2 Strategist
++ 1 Reviewer** — CHƯA đủ `MAU_TOI_THIEU = 3` cho cùng `(model, task_type)`,
+nên tổng hợp thống kê **CHƯA DÙNG ĐƯỢC** và tiên nghiệm cấu hình vẫn đang
+được dùng. Đó là ĐÚNG THIẾT KẾ. **Không được hạ ngưỡng chỉ để tuyên bố có
+dữ liệu** — một model thắng một lần không phải "100% đáng tin". Số liệu sẽ
+tích luỹ tự nhiên theo lần dùng thật.
+
+**Giữ nguyên, không xoá:** `dist-v04/v05/v06` (+ `v061*`), mọi sổ `.router`
+cũ đã đánh mốc, và các nhánh tính năng đã merge.
+
+**Pha tiếp theo: v0.9 — Closed-Loop Autonomous Project Execution.** Chưa bắt
+đầu. Bảy hạng mục ưu tiên cao nhất, theo thứ tự:
+
+1. **Đóng vòng phản hồi chất lượng chiến lược** bằng lịch sử vai THẬT đã
+   tích luỹ — để `benchmark_quality` chuyển từ tiên nghiệm cấu hình sang số
+   ĐO ĐƯỢC.
+2. **Giữ RÀNG BUỘC quan trọng của dự án trong ngữ cảnh Reviewer khi trần
+   chật.** Đo được ở nghiệm thu thật: gói Reviewer `2724/3400` token, các
+   khối `vien_nang`/`ky_uc`/`trang_thai_kho` bị cắt, nên nó không xác minh
+   được `ku_668f6cce0b6de423`. Nó xử lý ĐÚNG (nói ra, hạ REVISE) nên đây
+   KHÔNG phải một lần nghiệm thu hỏng — nhưng chất lượng phản biện đang bị
+   một hằng số trong `vai.HO_SO_VAI` giới hạn.
+3. **chiến lược -> kế hoạch ĐƯỢC DUYỆT -> việc cho Executor.**
+4. **Tự kiểm định kết quả.**
+5. **kết quả -> Ký ức dự án / Quyết định / Sự cố.**
+6. **Leader tiếp tục hội thoại TỪ kết quả đã kiểm định.**
+7. **Phục hồi khi hỏng / lập lại kế hoạch, không cần người dán tay.**

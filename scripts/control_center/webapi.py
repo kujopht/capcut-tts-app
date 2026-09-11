@@ -501,6 +501,91 @@ def dung_app(phien: PhienWeb) -> FastAPI:
             return PV.kiem_duong_ong(PV.tu_du_an(project), gio=gio).to_dict()
         return _sach(await asyncio.to_thread(_chay))
 
+    # -- suy luan nhieu vai (V0.8) -----------------------------------------
+
+    @app.get("/api/reasoning")
+    async def suy_luan(project: str = "", refresh: int = 0):
+        """Nguồn gốc định tuyến của lượt gần nhất + năng lực đang bay (§12).
+
+        RIÊNG một endpoint, KHÔNG nhập vào `/api/state` — cùng lý do
+        `/api/live` và `/api/snapshot` tách ra: `nang_luc_bay()` duyệt mọi
+        placement (51 trên fabric thật, đo 2026-09-11), và `/api/state` bị
+        WebSocket gọi mỗi nhịp. Bản GỌN đã đi kèm `snapshot()` cho ô quan
+        sát; đây là bản đầy đủ cho lúc người dùng mở ra xem.
+
+        `refresh=1` ĐO hạn mức thật (`agy --print /usage`) rồi áp vào bể của
+        ĐÚNG tài khoản đang đăng nhập. CHẬM (vài giây, tốn một lượt), nên nó
+        chỉ chạy khi người bấm — không bao giờ trong vòng lặp vẽ.
+        """
+        if not project:
+            return _ma_loi(400, "thiếu project")
+
+        def _chay():
+            from scripts.control_center.reasoning import ngan_sach as NS
+            from scripts.control_center.reasoning.dinh_tuyen import BoDinhTuyenVai
+            from scripts.control_center.reasoning.vai import HO_SO_VAI
+            from scripts.router_v4.premium import CheDo
+
+            cc = phien.cc
+            do_duoc: Dict = {}
+            da_ap: List[str] = []
+            if refresh:
+                # Dung lai `UsageReporter` — no da biet tim binary o dau, da
+                # co timeout, va da co gioi han nhip 300s. Goi `agy` lan nua
+                # o day se tao mot nguon su that thu hai cho cung cau hoi.
+                for u in cc.usage.do_nha_cung_cap(force=False):
+                    if u.provider != "antigravity" or not u.raw_text:
+                        continue
+                    hm = NS.doc_han_muc_agy(u.raw_text)
+                    if not hm:
+                        continue
+                    do_duoc = {k: v.to_dict() for k, v in hm.items()}
+                    # TAI KHOAN NAO: `agy` bao han muc cua tai khoan DANG
+                    # dang nhap — mot cai, khong phai tam. Ap cho ca tam se
+                    # bien mot phep do that thanh bay con so bia mang nhan
+                    # `probed`. Tai khoan mac dinh la ho so Windows dang
+                    # chay, tuc runtime AG01.
+                    r = cc.fabric.runtimes.get("AG01")
+                    if r is not None:
+                        da_ap = NS.ap_han_muc(cc.fabric, hm,
+                                              account_id=r.account_id)
+            bdt = BoDinhTuyenVai(cc.fabric)
+            bg = cc.leader_ban_ghi(project)
+            cs = cc.chinh_sach_cao_cap(project)
+            return {
+                "project": project,
+                "che_do": bg.che_do,
+                "che_do_hop_le": [c.value for c in CheDo],
+                "vai": [h.to_dict() for h in HO_SO_VAI.values()],
+                "chinh_sach_cao_cap": cs.to_dict(),
+                "nguon_goc": cc.nguon_goc_suy_luan(project),
+                "nang_luc": bdt.nang_luc_bay(),
+                "han_muc_do_duoc": do_duoc,
+                "han_muc_da_ap": da_ap,
+                "da_do_han_muc": bool(refresh),
+                "ghi_chu": ("Hạn mức chỉ ĐO khi bấm làm mới. Bể không đo được "
+                            "mang `quota_con_lai = null` — KHÔNG suy ra 0."),
+            }
+        try:
+            return _sach(await asyncio.to_thread(_chay))
+        except Exception as exc:                            # noqa: BLE001
+            return _ma_loi(400, f"{type(exc).__name__}: {exc}")
+
+    @app.post("/api/reasoning/mode")
+    async def dat_che_do(payload: Dict):
+        """ECO / AUTO / STRONG / MAX cho một dự án. Bền trong bảng `leader`."""
+        p = payload or {}
+        pid = str(p.get("project") or p.get("project_id") or "")
+        if not pid:
+            return _ma_loi(400, "thiếu project")
+        try:
+            return _sach(await asyncio.to_thread(
+                phien.cc.dat_che_do, pid, str(p.get("che_do") or "")))
+        except ValueError as exc:
+            return _ma_loi(400, str(exc))
+        except Exception as exc:                            # noqa: BLE001
+            return _ma_loi(400, f"{type(exc).__name__}: {exc}")
+
     # -- cai dat giao dien -------------------------------------------------
 
     @app.get("/api/ui")
@@ -813,7 +898,15 @@ def dung_app(phien: PhienWeb) -> FastAPI:
                      # BUOC phai nam trong van tay, khong thi tien do
                      # SONG khong bao gio duoc day di: mot lan `chat()`
                      # dai khong doi task/session/chat nao ca.
-                     "buoc": (d.get("buoc") or {}).get("nhan", "")},
+                     "buoc": (d.get("buoc") or {}).get("nhan", ""),
+                     # V0.8 — y HET ly do tren, cho NGUON GOC DINH TUYEN:
+                     # mot luot thao luan khong tao viec nao va co the
+                     # chua ghi tin nhan nao khi hoi dong vua xong, nen
+                     # neu dau nay vang mat thi the SUY LUAN khong bao gio
+                     # duoc day di. Do that bang Chrome that.
+                     "suy_luan": (d.get("suy_luan") or {}).get("ts", 0),
+                     # Doi che do o mot tab phai hien ra o tab kia NGAY.
+                     "che_do": d.get("che_do", "")},
                     sort_keys=True)
                 if gon != dau:
                     dau = gon

@@ -126,7 +126,8 @@ class ControlCenter:
                  probe: bool = False,
                  max_parallel: int = 3,
                  leader_bat: bool = False,
-                 kho_bi_mat=None):
+                 kho_bi_mat=None,
+                 bo_goi_vai=None):
         # GOC DU LIEU CHINH TAC khi nguoi goi khong noi ro. KHONG `Path.cwd()`:
         # `cwd` doi theo cho mo terminal / cho bam doi, nen mac dinh cu sinh
         # MOT SO RIENG cho moi thu muc — dung khuyet tat lien tuc 2026-09-10
@@ -213,6 +214,19 @@ class ControlCenter:
         self._ky_uc = None
         self._ky_uc_loi = ""
         self._bat_ky_uc()
+        #: HOI DONG SUY LUAN (V0.8). Dung muon: dung no keo theo
+        #: `BoDinhTuyenVai` + mot `Scheduler` rieng cho moi (vai, che do), va
+        #: mot phien chat tam thuong khong duoc tra gia cho thu no khong dung.
+        self._hoi_dong = None
+        #: `BoGoi` — bom duoc vao de bo kiem chay tat dinh, khong sinh tien
+        #: trinh nao. `None` = dung `BoGoiThat` khi that su can.
+        self._bo_goi_vai = bo_goi_vai
+        #: Chinh sach model cao cap theo du an, DOC TU KY UC, co bo dem.
+        #: `{pid: (ChinhSachCaoCap, moc_doc)}`.
+        self._chinh_sach_cache: Dict[str, tuple] = {}
+        #: Nguon goc dinh tuyen cua LUOT GAN NHAT, theo du an — thu §12 hien
+        #: len giao dien. Chi giu luot cuoi: lich su dai da co o `cc_events`.
+        self._nguon_goc_suy_luan: Dict[str, Dict] = {}
         #: BUOC DANG LAM cua `chat()`, theo du an: `{pid: (nhan, tu_luc)}`.
         #:
         #: VI SAO CAN. `chat()` chay DONG BO trong mot luong; mot lan mo
@@ -395,6 +409,119 @@ class ControlCenter:
     #: luot chat la mot truy van SQLite + phep so mocs: re, nhung khong can
     #: lam moi giay.
     _NANG_TTL = 30.0
+
+    # -- 0b. Hoi dong suy luan (V0.8) -----------------------------------------
+
+    #: Bao lau moi doc lai chinh sach model cao cap tu ky uc. Mot quyet dinh
+    #: du an khong doi theo giay; doc lai moi luot chat la mot truy van FTS
+    #: thua cho MOI tin nhan.
+    HAN_CHINH_SACH = 120.0
+
+    def chinh_sach_cao_cap(self, project_id: str):
+        """`ChinhSachCaoCap` của dự án — TRA TỪ KÝ ỨC, có bộ đệm ngắn.
+
+        Không bao giờ ném: mọi đường hỏng ra `fail_closed` + HẠN CHẾ. Xem
+        `reasoning/chinh_sach.py` cho lý do mặc định là hạn chế.
+        """
+        from scripts.control_center.reasoning import chinh_sach as CS
+
+        now = time.time()
+        with self._khoa:
+            cu = self._chinh_sach_cache.get(project_id)
+        if cu and now - cu[1] < self.HAN_CHINH_SACH:
+            return cu[0]
+        try:
+            # `self._fabric` (RIÊNG, có thể `None`) chứ KHÔNG phải `self.fabric`:
+            # đọc chính sách không được kéo theo một lần dựng fabric. Fabric
+            # chưa dựng thì `ten_model_cao_cap` rơi về `MODEL_ASTRA` — đủ cho
+            # phép tra, vì `_khoi_hoi_dong` đã gọi `_dam_bao_suc_khoe()` (tức
+            # đã dựng fabric) TRƯỚC khi hỏi tới hàm này.
+            cs = CS.doc_chinh_sach(self._ky_uc, project_id,
+                                   ten_model=CS.ten_model_cao_cap(self._fabric))
+        except Exception as exc:                            # noqa: BLE001
+            cs = CS.ChinhSachCaoCap(
+                han_che=True, nguon="fail_closed",
+                ghi_chu=f"{type(exc).__name__}: {exc}"[:160])
+        with self._khoa:
+            self._chinh_sach_cache[project_id] = (cs, now)
+        return cs
+
+    @property
+    def hoi_dong(self):
+        """`HoiDong` dùng chung. Dựng muộn — xem ghi chú ở `__init__`."""
+        if self._hoi_dong is None:
+            from scripts.control_center.reasoning.dinh_tuyen import BoDinhTuyenVai
+            from scripts.control_center.reasoning.goi import BoGoiThat
+            from scripts.control_center.reasoning.hoi_dong import HoiDong
+
+            # TRONG SO cua kho, va no KHONG duoc lam vo hoi dong khi thieu.
+            #
+            # `_khoi_hoi_dong` nuot moi ngoai le vao `REASONING_ERROR` de mot
+            # luot chat khong bao gio vo — nghia la bat ky thu gi nem o day
+            # se TAT hoi dong mot cach cam. Da mat mot lan vi dung ly le do
+            # (xem `BenchmarkStore` ngay duoi), nen duong nay rot ve trong so
+            # mac dinh thay vi nem.
+            try:
+                _f, w, _e = FC.nap(root=self.root, probe=False)
+            except Exception as exc:                        # noqa: BLE001
+                from scripts.router_v4.scheduler import Weights
+                w = Weights()
+                self.store.ghi_su_kien(
+                    "REASONING_WEIGHTS_FALLBACK", level="WARNING",
+                    detail=(f"không nạp được trọng số fabric "
+                            f"({type(exc).__name__}) — dùng mặc định")[:200])
+            # `root=` CHU KHONG phai vi tri dau: tham so vi tri dau cua
+            # `BenchmarkStore` la mot DUONG DAN TEP, con `self.root` la mot
+            # THU MUC — truyen nham thi no mo thu muc nhu mot tep va nem
+            # `PermissionError: [Errno 13]`, ma `_khoi_hoi_dong` nuot vao
+            # `REASONING_ERROR`. Hau qua: hoi dong KHONG BAO GIO chay, va
+            # giao dien chi thay ban ghi cu cua luot truoc. Do that o phep
+            # kiem duong day cua engine truoc khi commit.
+            # LICH SU CUA VAI nam o TEP RIENG (`history.duong_vai`) — KHONG
+            # tron voi lich su worker. Cung mot kho doc no de cho diem VA ghi
+            # vao no sau moi luot: do la ca vong phan hoi, va no la thu bien
+            # `benchmark_profile` tu tien nghiem cau hinh thanh so DO DUOC.
+            from scripts.router_v4.history import duong_vai
+            ls_vai = BenchmarkStore(path=duong_vai(self.root))
+            bdt = BoDinhTuyenVai(self.fabric, weights=w, history=ls_vai)
+            bo_goi = self._bo_goi_vai
+            if bo_goi is None:
+                bo_goi = BoGoiThat(providers=self._providers)
+            self._hoi_dong = HoiDong(bo_dinh_tuyen=bdt, bo_goi=bo_goi,
+                                     ghi_su_kien=self.store.ghi_su_kien,
+                                     lich_su=ls_vai,
+                                     rubric="docs/reports/REASONING_V08_REAL.md#rubric")
+        return self._hoi_dong
+
+    def nguon_goc_suy_luan(self, project_id: str) -> Dict:
+        """Nguồn gốc định tuyến của lượt gần nhất — §12. `{}` khi chưa có."""
+        with self._khoa:
+            return dict(self._nguon_goc_suy_luan.get(project_id) or {})
+
+    def dat_che_do(self, project_id: str, che_do: str) -> Dict:
+        """Đặt chế độ chất lượng ECO/AUTO/STRONG/MAX cho một dự án. BỀN.
+
+        FAIL CLOSED trên một giá trị lạ: một chế độ gõ sai không được âm
+        thầm thành AUTO, vì người dùng sẽ tưởng họ đang ở MAX.
+        """
+        from scripts.router_v4.premium import CheDo
+
+        try:
+            cd = CheDo(str(che_do or "").strip().upper())
+        except ValueError as exc:
+            raise ValueError(
+                f"chế độ {che_do!r} không hợp lệ — chỉ nhận "
+                f"{[c.value for c in CheDo]}") from exc
+        bg = self.leader_ban_ghi(project_id)
+        cu = bg.che_do
+        bg.che_do = cd.value
+        bg.updated_at = time.time()
+        self.store.luu_leader(bg.to_dict())
+        self.store.ghi_su_kien(
+            "QUALITY_MODE", project_id=project_id,
+            detail=f"chế độ chất lượng {cu} -> {cd.value}",
+            meta={"tu": cu, "sang": cd.value})
+        return {"project_id": project_id, "che_do": cd.value, "truoc": cu}
 
     def _khoi_vien_nang(self, project_id: str, text: str = "") -> str:
         """Khối VIÊN NANG DỰ ÁN (bản GỌN, có trần token) cho nhắc nhở Leader.
@@ -1270,10 +1397,22 @@ class ControlCenter:
             khoi_probe = self._khoi_probe(text, pid)
             # V0.7 — VIEN NANG: mo hinh du an GON, nap MOI luot (co cache TTL).
             khoi_nang = self._khoi_vien_nang(pid, text)
+            # V0.8 — HOI DONG SUY LUAN. Chay TRUOC luot Leader, vi ket qua cua
+            # no la mot khoi du lieu NUA trong nhac nho cua Leader: mot luot,
+            # khong phai hai. Cau tam thuong khong goi vai nao va khoi nay rong
+            # — xem `reasoning/phan_loai.py` mục CONG TAM THUONG.
+            khoi_hd = self._khoi_hoi_dong(
+                pid, text, bg,
+                khoi={"vien_nang": khoi_nang, "ky_uc": khoi_ky_uc,
+                      "trang_thai_song": khoi_song,
+                      "bang_chung_van_hanh": khoi_probe,
+                      "noi_dung_web": khoi_web,
+                      "trang_thai_kho": anh.tom_tat()})
             nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
                                       khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa,
                                       la_lich_su=la_lich_su, khoi_web=khoi_web,
-                                      khoi_nang=khoi_nang, khoi_probe=khoi_probe)
+                                      khoi_nang=khoi_nang, khoi_probe=khoi_probe,
+                                      khoi_hoi_dong=khoi_hd)
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.
@@ -1295,6 +1434,76 @@ class ControlCenter:
                 detail=(f"{type(exc).__name__}: {exc}"[:400]
                         + " — rơi về phân rã trực tiếp"))
             return None
+
+    def _khoi_hoi_dong(self, project_id: str, text: str, bg,
+                       khoi: Dict[str, str]) -> str:
+        """Chạy hội đồng suy luận và trả KHỐI cho nhắc nhở Leader, hoặc `""`.
+
+        Ba tính chất, mỗi cái ứng với một chế độ hỏng thật:
+
+        * **Lượt tầm thường không tốn gì.** `phan_loai_luot` chạy trong vài
+          chục micro-giây và cổng tầm thường trả về ngay — "ê bro" không
+          chạm tới fabric, không dựng `Scheduler`, không thêm một token nào
+          vào nhắc nhở của Leader.
+        * **Hỏng ở đây KHÔNG được làm vỡ lượt chat.** Mất hội đồng thì mất
+          chiều sâu; Leader vẫn trả lời. Cùng nguyên tắc `_khoi_ky_uc`.
+        * **KHÔNG tạo việc** (§11). Hàm này chỉ trả về văn bản.
+        """
+        from scripts.control_center.reasoning.phan_loai import (
+            lap_ke_hoach_vai, phan_loai_luot)
+
+        try:
+            pl = phan_loai_luot(text)
+            cd = bg.che_do_enum()
+            kh = lap_ke_hoach_vai(pl, cd)
+            if not kh.co_strategist:
+                # KHONG cham `self.hoi_dong` o nhanh nay, va do la ca diem:
+                # property do dung fabric + mot `Scheduler` cho moi (vai, che
+                # do). Mot cau chao khong duoc tra gia cho thu no khong dung.
+                #
+                # Van ghi nguon goc lai — mot lan KHONG leo thang cung phai
+                # giai thich duoc, khong thi nguoi dung chi thay im lang.
+                with self._khoa:
+                    self._nguon_goc_suy_luan[project_id] = {
+                        "phan_loai": pl.to_dict(), "ke_hoach": kh.to_dict(),
+                        "nguon_goc": [], "so": {"che_do": cd.value,
+                                                "ban_ghi": [], "tong_giay": None},
+                        "da_chay": False, "suy_giam": False, "loi": [],
+                        "dong_nguon_goc": [
+                            f"{cd.value}  [{pl.bac.value}/{pl.tac_dong.value}]  "
+                            f"{kh.ly_do}",
+                            "Leader      (một mình — không gọi vai suy luận nào)"],
+                        "ts": time.time()}
+                return ""
+            # DO SUC KHOE TRUOC KHI CAN MOT PLACEMENT — cung khuon `_san_sang`.
+            #
+            # Khong co dong nay thi tren duong mac dinh (`probe=False`) moi
+            # runtime nam o OFFLINE, `Scheduler` loai sach 51 ung vien, va
+            # hoi dong bao `KHONG_CO_CHO` cho MOI cau hoi kho — dung khuyet
+            # tat ma `_lan_do_cuoi` da ghi lai cho duong giao viec, lap lai
+            # nguyen ven o mot cua moi. Do that o ban nghiem thu dau tien.
+            self._dam_bao_suc_khoe("hội đồng suy luận")
+            self._dat_buoc(project_id, "hội đồng suy luận đang chạy "
+                           f"({', '.join(v.nhan for v in kh.vai if v.value != 'leader')})")
+            kq = self.hoi_dong.chay(
+                cau=text, phan_loai=pl, che_do=cd,
+                khoi_san_co={k: v for k, v in (khoi or {}).items() if v},
+                nguon_khoi={"vien_nang": "viên nang dự án (V0.7)",
+                            "ky_uc": "ký ức dự án (V0.6)",
+                            "trang_thai_song": "probe sống (V0.5)",
+                            "bang_chung_van_hanh": "ProductionProbeBroker (V0.7)",
+                            "trang_thai_kho": "git + sổ Control Center"},
+                chinh_sach=self.chinh_sach_cao_cap(project_id),
+                project_id=project_id)
+            with self._khoa:
+                self._nguon_goc_suy_luan[project_id] = {
+                    **kq.to_dict(), "ts": time.time()}
+            return kq.khoi_leader()
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "REASONING_ERROR", project_id=project_id, level="WARNING",
+                detail=f"hội đồng suy luận: {type(exc).__name__}: {exc}"[:300])
+            return ""
 
     def _phien_leader(self, project_id: str, bg):
         with self._khoa_leader:
@@ -3326,6 +3535,13 @@ class ControlCenter:
                 self._providers.close()
             except Exception:                             # noqa: BLE001
                 pass
+        # V0.8 — phien AM cua cac vai suy luan. Cung ly le nhu phien Leader:
+        # chung la tien trinh cua CHINH ta, nen dong chung la dung.
+        if self._hoi_dong is not None:
+            try:
+                self._hoi_dong.bo_goi.dong()
+            except Exception:                             # noqa: BLE001
+                pass
 
     # -- 8. Doc trang thai ---------------------------------------------------
 
@@ -3346,7 +3562,34 @@ class ControlCenter:
         with self._khoa:
             d["in_flight"] = sorted(self._dang_chay)
             b = self._buoc.get(pid)
+            ngg = self._nguon_goc_suy_luan.get(pid)
         d["buoc"] = {"nhan": b[0], "tu_luc": b[1]} if b else None
+        # V0.8 — CHE DO CHAT LUONG di theo NHIP NHANH.
+        #
+        # No cung co trong `AnhChupDuAn` (`/api/snapshot`), nhung duong do
+        # chay ~6 lenh `git` nen frontend goi no CHAM va co bo dem 30 giay.
+        # Hau qua do duoc bang Chrome that: doi che do o mot tab thi thanh
+        # tren cua tab kia giu gia tri cu toi 30 giay — nguoi dung tuong minh
+        # dang o MAX trong khi so ghi AUTO. Nguon su that phai toi theo dung
+        # nhip ma no doi.
+        try:
+            d["che_do"] = self.leader_ban_ghi(pid).che_do
+        except Exception:                                   # noqa: BLE001
+            d["che_do"] = ""
+        # V0.8 — §12 ĐỊNH TUYẾN GIẢI THÍCH ĐƯỢC. Đi qua `snapshot` nên nó tới
+        # giao diện qua CÙNG nhịp WebSocket, không cần một lần gọi nữa.
+        #
+        # Chỉ phần GỌN: `nguon_goc` đầy đủ mang cả `Decision` với 60+ ứng viên
+        # và điểm từng chiều — đó là dữ liệu gỡ lỗi, và nhồi nó vào mỗi nhịp
+        # một giây sẽ biến một ô quan sát thành một vòi dữ liệu. Bản đầy đủ ở
+        # `GET /api/reasoning`.
+        d["suy_luan"] = ({
+            "che_do": (ngg.get("so") or {}).get("che_do") or "",
+            "da_chay": bool(ngg.get("da_chay")),
+            "suy_giam": bool(ngg.get("suy_giam")),
+            "dong": list(ngg.get("dong_nguon_goc") or []),
+            "ts": ngg.get("ts") or 0.0,
+        } if ngg else None)
         return d
 
     def log_cua_viec(self, task_id: str, *, limit: int = 400) -> str:

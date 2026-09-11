@@ -1676,6 +1676,49 @@ phân biệt được A–E.
 (13). Đột biến production: **0**.
 
 
+## Router V0.7 — HOÀ GIẢI NGUỒN FANFIC + ĐÓNG BĂNG (2026-09-11)
+
+**Một kho, hai worktree — không phải hai kho.** `C:\Users\nguye\Documents\
+CapCut-TTS-App` và `C:\FanficWorkers\router-control-center` dùng CHUNG một
+`.git`; nhánh v0.7 cũng chứa `server/farmer/`. Nên "đưa observer vào kho
+Fanfic" = commit lên một nhánh của chính kho này, tách khỏi nhánh Router.
+
+* **Nhánh Fanfic**: `feat/farmer-sanitized-observability` @ `5baa8c7`,
+  tách từ `main` (`a913fd2`), worktree `C:\FanficWorkers\farmer-observer`.
+  **Chưa merge vào `main`.**
+* **Hoà giải có ĐỐI CHIẾU, không chép mù**: cả hai tệp khớp **từng byte**
+  với bản đang chạy trên production (sau chuẩn hoá LF) —
+  `observer.py` `e13eea6a…c9e434`, `metrics.py` `7fab65d5…95952a`. Bản gốc
+  trong kho cũng khớp bản gốc trên host (`46a9fbe4…`), nên bản vá đặt lên
+  đúng nền đã kiểm chứng.
+* **Quét trước khi vào kho nguồn**: không khoá AWS/Google/refresh token,
+  không khoá riêng, không đường dẫn Windows, không IP máy thật, không tên
+  máy, không `/home/…`, không `/var/backups/…`. Đúng MỘT đường dẫn tuyệt
+  đối (`/var/lib/fanfic-farmer/observability.json`) — cùng họ hằng số sản
+  phẩm với `DEFAULT_STATUS_PATH` vốn có.
+* **PARITY host ⇄ nguồn: GIỐNG HỆT.** Không tệp nào khác. **Không cần
+  triển khai lại.**
+* **Bài kiểm Fanfic**: `server/tests/test_farmer_observer.py` **26 bài**;
+  7 module farmer **163 bài**; toàn bộ backend **4641 bài OK** (8 bỏ qua).
+* **Kiểm liên tục sau khi dựng lại viên nang (v10)**: **13/13 PASS**, phủ
+  bằng chứng 95%, `READY FOR PRIMARY WORKSPACE: YES`. (Trước khi dựng lại
+  nó là PARTIAL vì *Known incidents* bị đánh dấu CŨ — bộ dò lạc hậu làm
+  đúng việc của nó, sổ đã có 58 bản ghi trong khi viên nang dựng lúc 56.)
+* **Chẩn đoán Drive cuối cùng: `A`** — 0 việc phái đi, 0 việc chết vì
+  quyền, 42s. Sau 5 vòng: **discovered 10, deduped 10, produced 0** — mọi
+  ứng viên tìm được đều đã xong từ trước, nên không có gì mới để mirror.
+  Đường archive **khoẻ**: `reachable=true`, `ARCHIVE_DONE`,
+  `last_error_class` rỗng, remote `fanfic-gdrive:FanficWorld/production`,
+  `failed=0`.
+
+**Hai giới hạn CÒN LẠI, cố ý giữ cho v0.8+ (không bịa giá trị):**
+
+1. bộ đếm cộng dồn **từ lúc tiến trình khởi động** và bị đặt lại khi farmer
+   khởi động lại — nên mọi kết luận đều mang cửa sổ đó trong câu lý do;
+2. `archive.last_attempt_at` / `last_success_at` luôn rỗng vì farmer chưa
+   theo dõi hai mốc đó.
+
+
 ## Bẫy đã gặp
 
 - **Vai "user" trong tệp phiên Claude KHÔNG chứng minh người gõ.** Bản tóm tắt

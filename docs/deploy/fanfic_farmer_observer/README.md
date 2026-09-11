@@ -149,20 +149,30 @@ fanfic-farmer`. `observer.py` là tệp MỚI, xoá nó là đủ để quay l�
 Router phía này **đã sẵn sàng** từ trước: chỉ cần `telemetry_file` trong
 `scripts/control_center/config/observability.json` (đã có), không đổi mã.
 
-## 6. Trôi mã so với kho Fanfic — CẦN THEO DÕI
+## 6. Trôi mã so với kho Fanfic — ĐÃ HOÀ GIẢI
 
-Hai tệp nằm trên host **chưa có trong kho Fanfic**. Kho Fanfic hoàn toàn
-không bị sửa (đúng ràng buộc), nên bây giờ host và kho **lệch nhau**:
+Đã xong ngày 2026-09-11. Hai tệp nay nằm trong kho nguồn trên nhánh
+`feat/farmer-sanitized-observability` @ `5baa8c7` (tách từ `main`
+`a913fd2`), **chưa merge vào `main`**.
 
-| Tệp | Host | Kho Fanfic |
-|---|---|---|
-| `server/farmer/observer.py` | có (mới) | **chưa có** |
-| `server/farmer/metrics.py` | đã vá (+1173 byte) | bản gốc |
+Một chi tiết đáng ghi: **đây không phải hai kho.**
+`C:\Users\nguye\Documents\CapCut-TTS-App` và
+`C:\FanficWorkers\router-control-center` dùng CHUNG một `.git` (xem
+`git worktree list`), và nhánh v0.7 cũng chứa `server/farmer/`. Nên "đưa
+vào kho Fanfic" nghĩa là commit lên một nhánh của chính kho này, tách khỏi
+nhánh Router — không phải một lần sao chép liên kho.
 
-Việc tiếp theo nên làm (một quyết định riêng, chưa làm): commit đúng hai
-thay đổi này vào kho Fanfic, để một lần phát hành sau không ghi đè mất
-chúng. Bản gốc host đã sao lưu, và bản vá sinh ra tất định từ
-`docs/deploy/fanfic_farmer_observer/observer.py`.
+Hoà giải **có đối chiếu, không chép mù**:
+
+| Kiểm | Kết quả |
+|---|---|
+| `observer.py` kho ⇄ host | `e13eea6a…c9e434` — **giống hệt** |
+| `metrics.py` kho ⇄ host | `7fab65d5…95952a` — **giống hệt** |
+| bản gốc trong kho ⇄ bản gốc host | `46a9fbe4…193fbe` — khớp, nên bản vá đặt đúng nền |
+| quét bí mật / đường dẫn máy | sạch (không khoá, không IP, không tên máy, không đường Windows) |
+| đường dẫn tuyệt đối còn lại | đúng MỘT hằng số sản phẩm, cùng họ `DEFAULT_STATUS_PATH` |
+
+**Cần triển khai lại: KHÔNG** — nguồn và host đã giống hệt nhau.
 
 ## 7. Nhật ký lần triển khai thật (2026-09-11T03:43Z)
 

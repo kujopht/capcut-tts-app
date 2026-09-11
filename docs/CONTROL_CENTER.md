@@ -1196,3 +1196,40 @@ Ba luật (22–24) thêm vào §16–§19:
     SÁCH thì **định tuyến lại** — nhả phiên, cấm chỗ đã từ chối, xếp lại, trần
     2 lần, giữ nguồn gốc trong `_dinh_tuyen_lai`. Lỗi THẬT của việc không bao
     giờ được định tuyến lại.
+
+## 21. V0.7.0 — TRẠNG THÁI PHÁT HÀNH (canonical, 2026-09-11)
+
+Nhân V0.7 **đã phát hành**: `main` mang cả hai nhánh tính năng, thẻ
+`router-control-center-v0.7.0`. Sau mốc này: sửa lỗi + tài liệu; tính năng
+mới thuộc về v0.8.
+
+**v0.7 = Fanfic.world Primary Workspace Readiness — Phase 1.**
+
+Phạm vi đã nghiệm thu, không mở rộng: NHẬN dự án có sẵn (chỉ đọc) · danh
+tính ổn định · Viên nang dự án + phiên bản/nguồn gốc · nạp GỌN có trần cho
+Leader · Kiểm toán liên tục · Gốc dữ liệu chính tắc · Ký ức dự án + nhập
+lịch sử · Leader làm đầu bằng ký ức · bậc thẩm quyền LIVE > kho/bền > ký ức
+> suy luận · WebReader an toàn SSRF · toả N agent tường minh · chạy READ song
+song thật · khoá READ/WRITE · bể đa tài khoản Antigravity · nền móng
+credential provider · Môi giới probe vận hành an toàn · telemetry Fanfic đã
+lọc · mô hình năng lực runtime · định tuyến lại có trần.
+
+Bốn bất biến của nhân v0.7 (thêm vào §14e của v0.6.1):
+
+1. **Gốc dữ liệu KHÔNG suy từ vị trí mã** — `duong_du_lieu.py` là nơi duy
+   nhất định nghĩa nó.
+2. **NHẬN dự án là CHỈ ĐỌC** — không sao chép/dời/khởi tạo lại/ghi gì vào
+   kho được nhận; danh tính từ gốc worktree + commit gốc, không từ nhánh.
+3. **Không đo được thì nói không đo được** — `UNKNOWN`/`UNAVAILABLE` không
+   bao giờ mang giá trị, phân loại đường ống chỉ khẳng định A–E khi có bộ
+   đếm chống lưng, còn lại là `F` kèm danh sách thiếu gì.
+4. **Lớp quan sát không bao giờ ghi và không bao giờ nâng quyền** — probe
+   chỉ có thao tác CÓ KIỂU, danh sách CẤM tệp bí mật thắng danh sách cho
+   phép, và không `sudo` dù tài khoản quan sát có quyền đó.
+
+**Giữ nguyên, không xoá:** `dist-v04/v05/v06` (+ `v061*`), mọi sổ `.router`
+cũ đã đánh mốc `DA_DI_TRU.json`, hai nhánh tính năng
+`feat/v07-fanfic-adoption` và `feat/farmer-sanitized-observability`.
+
+**Pha tiếp theo: v0.8 — Strategist + Reviewer + Dynamic Model Router.** Chưa
+bắt đầu.

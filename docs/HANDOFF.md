@@ -1719,6 +1719,80 @@ Fanfic" = commit lên một nhánh của chính kho này, tách khỏi nhánh Ro
    theo dõi hai mốc đó.
 
 
+## Router Control Center v0.7.0 — PHÁT HÀNH (2026-09-11)
+
+**v0.7 = Fanfic.world Primary Workspace Readiness — Phase 1.** Đã tích hợp
+vào `main` và gắn thẻ `router-control-center-v0.7.0`.
+
+### Kiến trúc chốt ở v0.7
+
+* **Gốc dữ liệu chính tắc (Project Vault)** —
+  `%LOCALAPPDATA%\RouterControlCenter\.router`, định nghĩa ở ĐÚNG MỘT nơi
+  (`duong_du_lieu.py`). Mở app bằng cách nào cũng ra cùng một quyển sổ.
+* **NHẬN dự án có sẵn** (`nhan_du_an.py`) — CHỈ ĐỌC: không sao chép, không
+  dời, không khởi tạo lại, không ghi gì vào kho được nhận. Danh tính suy từ
+  **gốc worktree + commit gốc**, KHÔNG từ nhánh.
+* **Viên nang dự án** (`vien_nang_du_an.py`) — 19 mục, mỗi mục mang
+  `{gia_tri, trang_thai, nguon, bang_chung}`; `UNKNOWN` là giá trị hợp lệ;
+  giá trị SỐNG không bị đóng băng; phiên bản chỉ tăng khi có mục đổi thật.
+  Bản nạp cho Leader **chọn mục theo CÂU HỎI** và **nêu TÊN mục chưa nạp**.
+* **Kiểm toán liên tục** (`kiem_lien_tuc.py`) — 13 hạng mục, PASS/PARTIAL/FAIL
+  có lý do. Kết quả lúc phát hành: **13/13 PASS, phủ bằng chứng 95%,
+  READY FOR PRIMARY WORKSPACE: YES** (viên nang v10).
+* **Ký ức dự án + nhập lịch sử**, Leader **làm đầu bằng ký ức**, và bậc thẩm
+  quyền **LIVE > kho/bền > ký ức > suy luận**.
+* **WebReader** đọc web công khai, an toàn SSRF.
+* **Toả đa agent tường minh**, chạy READ song song THẬT, **khoá READ/WRITE**.
+* **Bể đa tài khoản Antigravity** + nền móng credential provider (giá trị bí
+  mật không bao giờ vào SQLite/ký ức/log/prompt).
+* **MÔI GIỚI PROBE VẬN HÀNH** (`probe_van_hanh.py`) — đọc production có
+  KIỂU, **không có lối thoát ra shell**, tham số kiểm theo cấu hình dự án,
+  lưới thứ hai chặn động từ đột biến, **không nâng quyền**.
+* **Telemetry Fanfic ĐÃ LỌC** — farmer ghi `observability.json` (`644`,
+  danh sách CHO PHÉP, lỗi quy về mã trong bộ ĐÓNG); `status.json` và
+  `rclone.conf` giữ nguyên `600`. Mã observer nay **nằm trên `main`**
+  (`server/farmer/observer.py`), nên một lần phát hành sau không xoá mất nó.
+* **Mô hình năng lực runtime + định tuyến lại có trần** — chỗ chạy khai báo
+  thứ nó từ chối, xếp chỗ là RÀO CỨNG, từ chối vì chính sách thì xếp lại chỗ
+  khác (trần 2, giữ nguồn gốc). Phân loại bảo mật dùng **cụm từ chuyên môn**
+  trên phần NGƯỜI VIẾT, ở một nguồn duy nhất (`router_v3.policy`).
+
+### Chẩn đoán Drive production — nguyên nhân gốc: **A**
+
+Câu hỏi thật: *"vì sao từ hôm qua tới giờ không có production artifact mới
+trên Drive?"*
+
+**A — chưa có việc nào đạt chuẩn production.** Farmer tìm được ứng viên
+nhưng **tất cả đều trùng / đã hoàn thành từ trước** (đo tại thời điểm phát
+hành: `discovered 14, deduped 14, produced 0` qua 7 vòng), nên không có sản
+phẩm mới nào để mirror. Đường archive **khoẻ**: `reachable=true`,
+`ARCHIVE_DONE`, `last_error_class` rỗng, `failed=0`, remote
+`fanfic-gdrive:FanficWorld/production`.
+
+Trả lời bằng **0 việc phái đi, 0 việc chết vì quyền**, không cần công cụ
+`command`, không rò bí mật, **0 đột biến production**.
+
+### Giới hạn ĐÃ BIẾT còn lại (không bịa giá trị)
+
+1. **Bộ đếm observer bị đặt lại khi farmer khởi động lại** — chúng cộng dồn
+   từ lúc tiến trình khởi động, không phải 24h. Mọi kết luận đều mang cửa sổ
+   đó trong chính câu lý do.
+2. **`archive.last_attempt_at` / `last_success_at` chưa được lưu** — farmer
+   chưa theo dõi hai mốc đó, và observer CỐ Ý để rỗng thay vì bịa.
+3. **Bản đóng gói chưa ký vẫn chịu hành vi danh tiếng của Smart App Control**
+   — mỗi lần dựng lại là một băm mới, tức một lần xổ số. Đường chạy chắc
+   chắn là `pythonw.exe` (PSF ký) chạy từ mã nguồn.
+   `docs/reports/SMART_APP_CONTROL_V061.md`.
+4. **Giới hạn môi trường kiểm thử PySide6** — 10 bài của ứng dụng desktop
+   (`tests/test_output_manager.py`) hỏng vì máy này không cài PySide6. Tệp đó
+   `import PySide6` trong thân bài nên hỏng thay vì bỏ qua. Không liên quan
+   tới Router.
+
+### Pha tiếp theo
+
+**v0.8 — Strategist + Reviewer + Dynamic Model Router.** Chưa bắt đầu.
+
+
 ## Bẫy đã gặp
 
 - **Vai "user" trong tệp phiên Claude KHÔNG chứng minh người gõ.** Bản tóm tắt

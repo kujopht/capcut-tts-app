@@ -390,6 +390,50 @@ class ControlCenter:
         """`DichVuKyUc` hoặc `None` khi không mở được (đã ghi sự kiện)."""
         return self._ky_uc
 
+    #: Cache VIEN NANG theo du an: ((muc, phien_ban), luc). Giu `muc` chu
+    #: KHONG giu van ban da render — ban gon cat theo TUNG CAU HOI. Doc so moi
+    #: luot chat la mot truy van SQLite + phep so mocs: re, nhung khong can
+    #: lam moi giay.
+    _NANG_TTL = 30.0
+
+    def _khoi_vien_nang(self, project_id: str, text: str = "") -> str:
+        """Khối VIÊN NANG DỰ ÁN (bản GỌN, có trần token) cho nhắc nhở Leader.
+
+        Phần I của V0.7: Leader phải hydrate RẺ. Viên nang đầy của một dự án
+        thật ~3.9k token; bản gọn ~0.9k. KHÔNG nạp hàng nghìn sự kiện lịch sử —
+        đó là việc của truy hồi sâu khi lượt cần.
+
+        Bản gọn chọn mục THEO CÂU HỎI (`text`), nên bộ đệm phải giữ `muc` —
+        thứ đắt vì phải đọc sổ — chứ KHÔNG giữ văn bản đã render: giữ văn bản
+        thì lượt sau nhận đúng bản cắt của câu hỏi trước.
+        """
+        if not project_id:
+            return ""
+        now = time.time()
+        with self._khoa:
+            cu = getattr(self, "_nang_cache", {}).get(project_id)
+        goi = None
+        if cu and now - cu[1] < self._NANG_TTL:
+            goi = cu[0]
+        try:
+            from scripts.control_center import vien_nang_du_an as VN
+            if goi is None:
+                goi = VN.nap(self, project_id)
+                with self._khoa:
+                    if not hasattr(self, "_nang_cache"):
+                        self._nang_cache = {}
+                    self._nang_cache[project_id] = (goi, now)
+            muc, pb = goi
+            if not muc:
+                return ""
+            van = VN.render_gon(muc, cau_hoi=text or "")
+            return (f"(Viên nang v{pb})\n" + van) if van else ""
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "MEMORY_ERROR", project_id=project_id, level="WARNING",
+                detail=f"dựng khối viên nang: {type(exc).__name__}: {exc}"[:200])
+            return ""
+
     def _khoi_ky_uc(self, project_id: str, text: str, *,
                     kem_su_kien: bool = False) -> str:
         """Khối KÝ ỨC DỰ ÁN cho nhắc nhở Leader, hoặc `""`.
@@ -696,6 +740,10 @@ class ControlCenter:
             # Viec co URL cong khai -> Router doc trang HO va dinh bang chung,
             # agent headless khong dung duoc `read_url`. Quyen agent KHONG doi.
             self._kem_web_vao_hd(text, hd_pt)
+            # Viec CHAN DOAN VAN HANH -> dinh bang chung probe. Day chinh la
+            # cho `fanfic.t2efd-1` chet: khong co dong nay thi worker phai xin
+            # `command` va headless tu choi.
+            self._kem_probe_vao_hd(self._khoi_probe(text, project_id), hd_pt)
             t = Task(
                 task_id=f"{project_id}.{pt.task_id}",
                 project_id=project_id, title=pt.title, objective=pt.objective,
@@ -929,6 +977,74 @@ class ControlCenter:
                 pass
         return ra
 
+    #: Dau khoi bang chung van hanh — bai kiem/UI nhan ra.
+    DAU_PROBE = "BẰNG CHỨNG VẬN HÀNH DO ROUTER ĐO"
+    #: Bao lau thi mot lan kiem toan duong ong con dung lai duoc. Gom probe
+    #: la ~11s va co ban chat la SPAM vao may production, nen khong lam moi
+    #: luot chat — nhung cung khong duoc de cu: cau hoi van hanh la cau hoi
+    #: "bay gio the nao".
+    _PROBE_TTL = 45.0
+
+    def _khoi_probe(self, text: str, project_id: str = "") -> str:
+        """Khối BẰNG CHỨNG VẬN HÀNH cho nhắc nhở Leader, hoặc `""`.
+
+        VÌ SAO: `fanfic.t2efd-1` (2026-09-11) chết `tool_permission_denied` vì
+        câu hỏi production bị biến thành một việc phân tích kho, rồi worker
+        phải xin công cụ `command` — thứ mà `agy --print` tự chối. Router có
+        đường đọc production an toàn (`probe_van_hanh`: thao tác CÓ KIỂU,
+        tham số theo cấu hình, chỉ đọc, không sudo) nên nó đo TRƯỚC và đưa
+        số cho Leader. Quyền của agent KHÔNG đổi.
+
+        Chỉ chạy cho câu hỏi CHẨN ĐOÁN vận hành: một câu trạng thái đơn
+        ("farmer chạy không?") đã có `DichVuQuanSat` của V0.5 lo, và gom 11
+        probe cho nó là phí.
+        """
+        from scripts.control_center import leader as _ld
+        la_vh, la_chan, _dau = _ld.la_cau_hoi_van_hanh(text or "")
+        if not (la_vh and la_chan):
+            return ""
+        now = time.time()
+        with self._khoa:
+            cu = getattr(self, "_probe_cache", {}).get(project_id)
+        if cu and now - cu[1] < self._PROBE_TTL:
+            return cu[0]
+        try:
+            from scripts.control_center import probe_van_hanh as PV
+            mg = PV.tu_du_an(project_id)
+            if not mg.kha_dung().get("san_sang"):
+                return ""
+            bao = PV.kiem_duong_ong(mg)
+            van = PV.goi_bang_chung(bao)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "PROBE_ERROR", project_id=project_id, level="WARNING",
+                detail=f"gom bằng chứng vận hành: {type(exc).__name__}: {exc}"[:200])
+            return ""
+        do_duoc = sum(1 for b in bao.bang_chung if b.hieu_luc().do_duoc)
+        self.store.ghi_su_kien(
+            "PROBE_AUDIT", project_id=project_id, level="INFO",
+            detail=(f"kiểm toán đường ống -> {bao.phan_loai} "
+                    f"({do_duoc}/{len(bao.bang_chung)} quan sát đo được)")[:300],
+            meta={"phan_loai": bao.phan_loai, "so_quan_sat": len(bao.bang_chung),
+                  "do_duoc": do_duoc, "thieu": bao.thieu[:6]})
+        with self._khoa:
+            if not hasattr(self, "_probe_cache"):
+                self._probe_cache = {}
+            self._probe_cache[project_id] = (van, now)
+        return van
+
+    def _kem_probe_vao_hd(self, khoi: str, hd: Dict) -> bool:
+        """Đính khối bằng chứng vận hành vào mục tiêu của một việc.
+
+        Cùng khuôn với `_kem_nhat_ky_git`/`_kem_web_vao_hd`: worker headless
+        nhận DỮ LIỆU, không nhận quyền chạy lệnh.
+        """
+        if not khoi:
+            return False
+        hd["objective"] = ((hd.get("objective") or "").rstrip()
+                           + "\n\n" + khoi)
+        return True
+
     def _khoi_web(self, text: str, project_id: str = "") -> str:
         """Khối NỘI DUNG WEB cho nhắc nhở Leader khi câu có URL công khai.
 
@@ -1149,9 +1265,15 @@ class ControlCenter:
             # nay la gi" -> Leader tra tu day, KHONG dispatch mot worker chi de
             # doc mot trang (agent headless bi tu choi `read_url`).
             khoi_web = self._khoi_web(text, pid)
+            # V0.7 — BANG CHUNG VAN HANH: cau hoi chan doan production duoc
+            # DO TRUOC, thay vi bien thanh mot viec doi quyen `command`.
+            khoi_probe = self._khoi_probe(text, pid)
+            # V0.7 — VIEN NANG: mo hinh du an GON, nap MOI luot (co cache TTL).
+            khoi_nang = self._khoi_vien_nang(pid, text)
             nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
                                       khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa,
-                                      la_lich_su=la_lich_su, khoi_web=khoi_web)
+                                      la_lich_su=la_lich_su, khoi_web=khoi_web,
+                                      khoi_nang=khoi_nang, khoi_probe=khoi_probe)
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.
@@ -1730,13 +1852,19 @@ class ControlCenter:
         # phai 8 luot xep chong len mot tai khoan ranh nhat. Bo lap lich V4
         # khong doi: chi nhan them `exclude`, va `decide()` tu roi ve khong
         # tranh khi khong con ai.
-        tranh = self._runtime_anh_em_dang_chay(t)
+        tranh = tuple(self._runtime_anh_em_dang_chay(t))
+        cam, ly_do_cam = self._cam_runtime_theo_nang_luc(ctx, hd)
+        da_tu_choi = self._cam_runtime_da_tu_choi(t.contract)
+        if da_tu_choi:
+            cam = tuple(sorted(set(cam) | set(da_tu_choi)))
+            ly_do_cam = ((ly_do_cam + "; ") if ly_do_cam else "") + \
+                f"đã từ chối việc này ở lượt trước: {list(da_tu_choi)}"
         qd = ctx.sessions.decide(
             t, hd, demand=nhu_cau,
             conflicting_task=(grant.conflict_holder_task
                               if grant is not None and not grant.granted
                               else ""),
-            tranh_runtime=tranh)
+            tranh_runtime=tranh, cam_runtime=cam, ly_do_cam=ly_do_cam)
         self.store.ghi_su_kien(
             "SESSION_DECISION", project_id=t.project_id, task_id=t.task_id,
             detail=f"{qd.action.value}: {qd.reason}"[:400], meta=qd.to_dict())
@@ -1826,6 +1954,101 @@ class ControlCenter:
         return {"task_id": t.task_id, "dispatched": True,
                 "session_id": s.session_id, "placement": s.placement_key,
                 "action": qd.action.value}
+
+    def _cau_hinh_fabric(self) -> Dict:
+        """Cấu hình fabric THÔ (có khối `security`), đọc một lần rồi nhớ.
+
+        `Fabric` đã dựng không giữ khối `security`, mà đó lại là nơi
+        `security_refusal_family` được KHAI BÁO. Đọc lại tệp là rẻ và chỉ
+        xảy ra khi có việc thực sự đòi một năng lực đặc biệt.
+        """
+        cu = getattr(self, "_fabric_cfg_cache", None)
+        if cu is not None:
+            return cu
+        try:
+            cfg = FC.doc_cau_hinh(root=self.root)
+        except Exception:                                   # noqa: BLE001
+            cfg = {}
+        self._fabric_cfg_cache = cfg if isinstance(cfg, dict) else {}
+        return self._fabric_cfg_cache
+
+    def _cam_runtime_theo_nang_luc(self, ctx, hd) -> Tuple[Tuple[str, ...], str]:
+        """`(runtime bị CẤM, lý do)` theo NĂNG LỰC việc đòi hỏi.
+
+        Đây là bản thay thế đúng tầng cho `_runtime_codex_neu_hinh_dang_bao_mat`:
+        thay vì quét từ khoá trên cả gói việc đã render (nơi chữ "quyền" của
+        lời nhắc công cụ làm MỌI việc thành "bảo mật"), nó hỏi
+        `nang_luc.nang_luc_viec()` — thứ chỉ đọc phần NGƯỜI VIẾT và dùng cụm
+        từ chuyên môn — rồi đối chiếu với khai báo TỪ CHỐI của từng chỗ chạy.
+
+        Rào này là CỨNG: gửi việc tới một chỗ đã khai từ chối nó là tốn một
+        lượt để nhận về đúng một lời từ chối.
+        """
+        try:
+            from scripts.control_center import nang_luc as NL
+            can = NL.nang_luc_viec(hd if isinstance(hd, dict) else {})
+            if not can:
+                return (), ""
+            fab = getattr(getattr(ctx, "sessions", None), "fabric", None)
+            if fab is None:
+                return (), ""
+            cam = NL.runtime_khong_tuong_thich(fab, can, self._cau_hinh_fabric())
+            if not cam:
+                return (), ""
+            return cam, NL.ly_do_khong_hop(", ".join(cam), can)
+        except (ImportError, AttributeError, TypeError):
+            return (), ""
+
+    def _cam_runtime_da_tu_choi(self, hd) -> Tuple[str, ...]:
+        """Chỗ chạy đã TỪ CHỐI việc này ở một lượt trước — cấm hẳn.
+
+        Nguồn là `_cam_runtime` do `_dinh_tuyen_lai` ghi vào hợp đồng. Một
+        chỗ đã từ chối sẽ từ chối y hệt; gửi lại là tốn một lượt để nhận về
+        cùng một câu.
+        """
+        if not isinstance(hd, dict):
+            return ()
+        return tuple(sorted({str(x) for x in (hd.get("_cam_runtime") or [])
+                             if str(x)}))
+
+    def _runtime_codex_neu_hinh_dang_bao_mat(self, ctx, hd) -> tuple:
+        """Runtime Codex cần TRÁNH khi gói việc mang hình dạng bảo mật.
+
+        Codex TỪ CHỐI loại việc này (bằng chứng 2026-08-28, và
+        `pool/adapters.py` chặn sẵn ở phía Router). Trước bản này, phép chặn
+        đó chỉ xảy ra SAU khi đã xếp chỗ: việc bị `blocked` với lý do
+        `codex_security_shaped_refusal`, mà lý do đó lại nằm trong
+        `KHONG_THU_LAI` — nên việc CHẾT ở đó, dù thông báo hứa "định tuyến
+        sang worker khác". Đo được ở nghiệm thu probe: `fanfic.t78ce-1`
+        BLOCKED, 0 việc chạy.
+
+        Nặng hơn thế: lời nhắc công cụ tiêu chuẩn của mọi việc đều chứa chữ
+        "quyền", nên GẦN NHƯ MỌI việc xếp vào Codex đều rơi vào đây.
+
+        Nên: kiểm hình dạng TRƯỚC khi xếp chỗ và tránh Codex ngay — tránh là
+        ưu tiên chứ không phải rào, `decide()` vẫn rơi về như cũ khi không
+        còn chỗ nào khác.
+        """
+        try:
+            from scripts.router_v3.pool.adapters import _HINH_DANG_BAO_MAT
+        except ImportError:
+            return ()
+        # `str(dict)` la du de quet TU KHOA, va khong keo theo mot import
+        # `json` ma tep nay khong co — ban dau dung `json.dumps` o day, va
+        # `except Exception` da NUOT gon NameError, tat lang le ca tinh nang.
+        # Bai kiem `test_hop_dong_bao_mat_thi_TRANH_codex` bat duoc.
+        tho = str(hd or "").lower()
+        if not any(k in tho for k in _HINH_DANG_BAO_MAT):
+            return ()
+        fab = getattr(getattr(ctx, "sessions", None), "fabric", None)
+        if fab is None:
+            return ()
+        try:
+            return tuple(sorted(
+                r.runtime_id for r in fab.runtimes.values()
+                if str(getattr(r, "provider", "")).lower() == "codex"))
+        except (AttributeError, TypeError):
+            return ()
 
     def _runtime_anh_em_dang_chay(self, t: Task) -> tuple:
         """Runtime mà các việc con CÙNG CHA đang chạy — để con này tránh."""
@@ -2263,6 +2486,55 @@ class ControlCenter:
                             f"không phải RUNNING"))
         return da_nha
 
+    #: Lý do TỪ CHỐI vì CHÍNH SÁCH/NĂNG LỰC — an toàn để định tuyến lại.
+    #:
+    #: Khác hẳn một lần việc hỏng thật: chỗ chạy không hề THỬ làm việc, nó từ
+    #: chối nhận. Chạy lại y hệt ở chỗ ĐÓ thì vô ích, nhưng chạy ở chỗ KHÁC
+    #: thì đúng — và thông báo từ chối vốn đã hứa như vậy.
+    LY_DO_DINH_TUYEN_LAI = frozenset({"codex_security_shaped_refusal"})
+
+    #: Trần định tuyến lại. Hẹp có chủ ý: nếu hai chỗ khác nhau đều từ chối
+    #: thì đó là chuyện của phân loại việc, không phải chuyện thiếu chỗ chạy.
+    MAX_DINH_TUYEN_LAI = 2
+
+    def _dinh_tuyen_lai(self, ctx: ProjectContext, t: Task, ly_do: str,
+                        cho_cu: str) -> bool:
+        """Nhả chỗ rồi xếp lại việc sang chỗ chạy TƯƠNG THÍCH. `True` nếu đã xếp.
+
+        Giữ NGUỒN GỐC đầy đủ trong hợp đồng (`_dinh_tuyen_lai`): chỗ ban đầu,
+        lý do từ chối, lần thứ mấy — để người đọc sau biết việc đã đi qua đâu
+        chứ không thấy một việc "tự nhiên chạy ở chỗ khác".
+        """
+        hd = dict(t.contract or {})
+        ls = list(hd.get("_dinh_tuyen_lai") or [])
+        if len(ls) >= self.MAX_DINH_TUYEN_LAI:
+            return False
+        ls.append({"tu_runtime": cho_cu, "ly_do": ly_do,
+                   "lan": len(ls) + 1, "luc": time.time()})
+        hd["_dinh_tuyen_lai"] = ls
+        # Cho da TU CHOI thi lan sau CAM, khong phai "tranh": no se tu choi
+        # y het, va mot luot nua chi de nhan lai mot loi tu choi.
+        hd["_cam_runtime"] = sorted({str(x.get("tu_runtime") or "")
+                                     for x in ls if x.get("tu_runtime")})
+        t.contract = hd
+        if t.owner_session:
+            ctx.sessions.dung(
+                t.owner_session, state=SessionState.STOPPED,
+                reason=f"định tuyến lại {t.task_id}: {cho_cu} từ chối ({ly_do})")
+        t.owner_session = ""
+        self.store.luu_task(t)
+        self.store.doi_trang_thai(
+            t.task_id, TaskState.QUEUED, force=True,
+            reason=(f"định tuyến lại lần {len(ls)}/{self.MAX_DINH_TUYEN_LAI} — "
+                    f"{cho_cu} từ chối vì {ly_do}"))
+        self.store.ghi_su_kien(
+            "REROUTE_QUEUED", project_id=t.project_id, task_id=t.task_id,
+            detail=(f"{cho_cu} TỪ CHỐI ({ly_do}) — nhả phiên, cấm chỗ đó và "
+                    f"xếp lại (lần {len(ls)}/{self.MAX_DINH_TUYEN_LAI})"),
+            meta={"tu_runtime": cho_cu, "ly_do": ly_do, "lan": len(ls),
+                  "cam": hd["_cam_runtime"]})
+        return True
+
     def _thu_lai_neu_dang(self, ctx: ProjectContext, task_id: str, pb,
                           session_id: str, placement_key: str = "") -> None:
         """Thử lại một việc hỏng — CÓ TRẦN, và đổi chỗ chạy.
@@ -2313,6 +2585,19 @@ class ControlCenter:
                         f"phụ thuộc chỗ chạy, đổi chỗ nữa chỉ tốn quota"),
                 meta={"fail_sig": ck,
                       "placements": [truoc["placement"], cho_nay]})
+            return
+
+        # ĐỊNH TUYẾN LẠI: chỗ chạy TỪ CHỐI vì chính sách/năng lực, không phải
+        # vì việc hỏng. Chạy lại ở chỗ KHÁC là đúng và rẻ; điều sai là để việc
+        # chết tại chỗ — đúng thứ đã xảy ra với `fanfic.t78ce-1`.
+        if ly_do in self.LY_DO_DINH_TUYEN_LAI:
+            if self._dinh_tuyen_lai(ctx, t, ly_do, cho_nay):
+                return
+            self.store.ghi_su_kien(
+                "REROUTE_EXHAUSTED", project_id=t.project_id, task_id=task_id,
+                level="WARNING",
+                detail=(f"đã định tuyến lại {self.MAX_DINH_TUYEN_LAI} lần vì "
+                        f"{ly_do!r} mà vẫn bị từ chối — để người xem"))
             return
 
         if ly_do in self.KHONG_THU_LAI or pb.requires_decision:

@@ -1501,6 +1501,224 @@ WebSocket không theo dự án đang chọn — đã sửa. Nghiệm thu EXE `di
 `PROJECT_MEMORY_V061.md` mục 10. Việc tiếp theo: bật AUTO cho provider ngoài (adapter thực
 thi + ngân sách), người vận hành duyệt các sự cố `backfill`, nhập tiếp phần còn lại.
 
+## Router Control Center V0.7 Phase 1 — NHẬN dự án + Viên nang (2026-09-11)
+
+Đã xong, nhánh `feat/v07-fanfic-adoption`, **chưa merge/tag/release**. Đầy
+đủ: `docs/reports/NHAN_DU_AN_VIEN_NANG_V07.md`, luật 13–17 ở
+`docs/CONTROL_CENTER.md` §18. Mã: `scripts/control_center/nhan_du_an.py`,
+`vien_nang_du_an.py`, `kiem_lien_tuc.py`.
+
+* **NHẬN kho thật, chỉ đọc.** Fanfic được nhận mà **không đổi một byte nào**
+  (`git status` sạch trước/sau, cây `.router` 127.279 mục không đổi, không
+  tạo sổ ký ức trong kho). Nhận lại idempotent. Danh tính suy từ **gốc
+  worktree + commit gốc**, không từ nhánh.
+* **Viên nang Fanfic**: 19 mục, **18 có nội dung / 1 UNKNOWN**, **18/18 mục
+  có nội dung đều mang bằng chứng**, 7 phiên bản giữ nguyên (không ghi đè).
+  Đầy 3.754 token → bản gọn cho Leader **890 token**.
+* **Kiểm liên tục**: 13/13 PASS, phủ bằng chứng **95%**, `READY FOR PRIMARY
+  WORKSPACE: YES`. *Live observability* chỉ PASS khi sổ có phép đo sống
+  thật; khai suông là PARTIAL.
+* **Nghiệm thu thật trên app source-mode**: `--chi nhan` **10/10**,
+  `--chi nang` **9/9**, `--chi hoi` **17/17**. **12 câu hỏi lịch sử → 0
+  worker phái đi**; câu hỏi hiện tại vẫn **đo sống thật**
+  (`ssh:13.212.224.218`). Sửa kho production: **0**.
+* **Ba khuyết tật THẬT do chính bài nghiệm thu bắt được** (mục 2 của báo
+  cáo): (1) Leader trả lời **"5 Antigravity account"** trong khi sổ ghi
+  **8**, vì mục `tai_nguyen_agent` bị cắt khỏi bản gọn 900 token; (2) dòng
+  báo cắt chỉ **đếm** nên Leader không phân biệt được "không có bằng chứng"
+  với "có mà chưa nạp"; (3) mục **CÓ MẶT nhưng MỎNG** (mục `luu_tru` chỉ có
+  tên tài liệu Appwrite + ba trích đoạn không liên quan) cũng bị lấp bằng
+  **kiến thức chung**, nói như thể đó là sự thật của dự án. Đổi thứ tự ưu
+  tiên **không phải cách sửa** — làm thế thì lỗi nhảy sang câu R2/Drive.
+  Cách sửa: chọn mục **theo câu hỏi** (`vien_nang_du_an.thu_tu_nap`, khớp
+  không phụ thuộc dấu), chen mục khớp mạnh nhất lên ngay sau danh tính, dòng
+  cắt **nêu tên** mục chưa nạp và được **nhường chỗ trước** (trần 900 nay là
+  trần THẬT — trước đó là 922), và `leader.LUAT_NANG` nói rõ tên tài liệu là
+  **chỗ để tra, không phải câu trả lời** + mỗi khẳng định phải kèm mã. Đo
+  lại câu R2/Drive sau khi sửa: **4/4 lượt đạt**, trả lời "hồ sơ có mục
+  Kiến trúc lưu trữ nhưng chưa ghi rõ vai trò của R2 và Drive" kèm tài liệu
+  đáng tra.
+* **Hồi quy**: **2.194 đạt** (+1.742 subtest), 175 bỏ qua, **10 hỏng — toàn
+  bộ là `No module named 'PySide6'`** trong `tests/test_output_manager.py`
+  (bài kiểm của ứng dụng **desktop**, không phải Router; tệp đó `import
+  PySide6` trong thân bài nên hỏng thay vì bỏ qua, và pha này không sửa nó).
+  Không bài kiểm Router nào hỏng. Bài mới: `test_nhan_du_an_v07.py` **30
+  bài**, trong đó `test_dong_CAT_khong_duoc_hy_sinh_muc_LIEN_QUAN_NHAT` thất
+  bại lần đầu và bắt được lỗi thật.
+* Việc tiếp theo hợp lý: Phase 2 (Strategist/Reviewer, browser automation,
+  Artifact Vault, GitHub Stars Vault, tự cập nhật) — tất cả **cố ý chưa làm**
+  ở pha này.
+
+
+## Router Control Center V0.7 — PROBE VẬN HÀNH chỉ đọc (2026-09-11)
+
+Đã xong, nhánh `feat/v07-fanfic-adoption`, **chưa merge/tag**. Đầy đủ:
+`docs/reports/PROBE_VAN_HANH_V07.md`, luật 18–21 ở `docs/CONTROL_CENTER.md`
+§19. Mã: `scripts/control_center/probe_van_hanh.py`.
+
+* **Nguyên nhân gốc của khuyết tật chặn đường** (lần từ `control.db`, không
+  đoán): câu hỏi production *"vì sao Drive chưa có artifact mới"* bị bộ phân
+  rã (`planner=rule`) xếp thành **việc phân tích KHO** `fanfic.t2efd-1`
+  (`type=analysis`, `shell=false`), mà danh sách lệnh của việc kho chỉ có
+  `cc_agent_tool.py changes|compile` — **không lệnh nào chạm tới production**.
+  Worker phải gọi công cụ **`command`** chung, `agy --print` tự chối (headless
+  không hiện được hộp thoại), lượt kết thúc rỗng → `tool_permission_denied`.
+  Đây là **lần thứ tư** cùng bài học; lời giải vẫn là: Router đo hộ, đính
+  **bằng chứng có cấu trúc**, KHÔNG nới quyền agent.
+* **`probe_van_hanh.py`**: môi giới probe CÓ KIỂU, 9 thao tác chỉ đọc
+  (`systemd.*`, `filesystem.*`, `rclone.*`). API **không nhận chuỗi lệnh**;
+  tham số kiểm theo **cấu hình dự án** (unit đã khai, đường dẫn dưới gốc đã
+  khai — so theo ĐOẠN, thuộc tính systemd theo bảng và **không có**
+  `Environment*`); `_kiem_chi_doc()` là lưới thứ hai chặn mọi động từ đột
+  biến + ký tự nối. **Không nâng quyền** dù tài khoản quan sát có thể.
+  Phơi shell tuỳ ý cho worker: **KHÔNG**.
+* **Probe dùng được trên Fanfic**: trạng thái service, MainPID/NRestarts/mốc
+  khởi động, journald, `stat` (chạy được **cả khi nội dung bị từ chối**), liệt
+  kê thư mục, dung lượng đĩa, nhịp tim `status.json`.
+  **Chưa dùng được, và chính xác vì sao**: nội dung `status.json` và
+  `rclone.conf` đều `600 fanfic:fanfic` (tài khoản quan sát không thuộc nhóm
+  `fanfic`); Appwrite/R2 chưa có adapter đọc. **Thứ chặn đường là quyền tệp
+  phía máy chủ, không phải thiếu mã** — sửa đúng chỗ là cho hai tệp đó đọc
+  được theo nhóm, và đó là **quyết định của người vận hành**, Router không tự
+  làm.
+* **Chẩn đoán thật cho câu hỏi Drive: `F` — chưa đủ bằng chứng.** Đo được:
+  farmer **active**, MainPID 350714, **NRestarts=0**, chạy từ 2026-09-08
+  15:55:31 UTC; `status.json` **vẫn đang được ghi**; **không một dòng nhật ký
+  nào** về archive/rclone/drive trong 48h; `work/` chỉ có `farmer.lock`.
+  Thiếu bộ đếm archive/round + Appwrite + R2 + listing Drive nên **không phân
+  biệt được A/B/C/D/E** — nói thẳng thay vì chọn bừa một nguyên nhân.
+* **Nghiệm thu thật**: hỏi lại ĐÚNG câu đã hỏng → **0 việc chết vì quyền**,
+  Leader trả lời thẳng từ bằng chứng (0 dispatch). Worker headless thật
+  `fanfic.tc093-1` → **DONE** 18,9s trên **AG02/antigravity**, nhận khối bằng
+  chứng 10,7 KB, tự kết luận **F**, **không** cần `command`, **không** dùng cờ
+  bỏ qua kiểm quyền, **không** rò bí mật, **0** đột biến production.
+* **Khuyết tật CÓ SẴN bắt được trong lúc nghiệm thu**: `pool/adapters.py` từ
+  chối gói việc "hình dạng bảo mật" trước khi gửi Codex, nhưng
+  `codex_security_shaped_refusal` nằm trong `KHONG_THU_LAI` nên việc **chết ở
+  `BLOCKED`** dù thông báo hứa định tuyến lại (đo được: `fanfic.t78ce-1`). Và
+  vì danh sách từ khoá có chữ **"quyền"** — thứ nằm trong lời nhắc công cụ
+  **tiêu chuẩn của mọi việc** — nên gần như MỌI việc xếp vào Codex đều chết
+  như thế. Sửa: kiểm hình dạng **trước khi xếp chỗ**, thêm runtime Codex vào
+  `tranh_runtime` (cơ chế sẵn có của toả). Sau khi sửa, đúng việc đó chạy ở
+  AG02 và DONE.
+* Bài kiểm mới: `scripts/tests/test_probe_van_hanh_v07.py` — **48 bài, 82
+  subtest**, không bài nào chạm mạng. Ba bài bắt được lỗi thật lúc viết: bộ lọc
+  của `packet.redact` **thiếu khoá AWS**; cắt chuỗi JSON đã tuần tự hoá tạo
+  **JSON gãy**; và một `NameError` bị `except Exception` **nuốt mất**, tắt lặng
+  lẽ cả tính năng tránh Codex.
+
+
+## Router Control Center V0.7 — LÀM CỨNG trước đóng băng (2026-09-11)
+
+Đã xong, nhánh `feat/v07-fanfic-adoption`, **chưa merge/tag**. Đầy đủ:
+`docs/reports/LAM_CUNG_V07.md`, luật 22–24 ở `docs/CONTROL_CENTER.md` §20.
+
+**A. Telemetry production đã lọc**
+
+* **`status.json` KHÔNG an toàn để phơi** — và đây là kết luận đọc từ mã
+  farmer thật, không phải phỏng đoán: `archive.detail` nhận `stderr` THÔ của
+  `rclone` (`drive_archive.py`, nhánh `else` của `probe()`), còn
+  `lanes[*].errors[]` nhận văn bản ngoại lệ bất kỳ (`metrics.py`,
+  `note_error`). Hai ống dẫn mở → **không chứng minh được là sạch** → không
+  nới quyền. (Ghi chú: nó đang `600` chỉ vì `mkstemp` tạo `600` rồi
+  `os.replace` giữ nguyên mode — một tác dụng phụ, không phải quyết định.)
+* **`rclone.conf` vẫn `600 fanfic:fanfic`, không đổi**, và nay có **hai**
+  lớp chặn: quyền của host, cộng danh sách CẤM tệp bí mật ở Router
+  (`la_tep_bi_mat`) — sinh ra vì một bài kiểm phát hiện `read_paths` khai
+  theo THƯ MỤC nên `filesystem.read_text` **được phép** `tail` `rclone.conf`.
+  Để quyền máy chủ làm rào duy nhất là sai.
+* **Ảnh chụp quan sát đã lọc** (`/var/lib/fanfic-farmer/observability.json`,
+  `644`, danh sách CHO PHÉP, văn bản lỗi quy về mã trong bộ ĐÓNG). Router lọc
+  lại lần nữa khi đọc. Có ảnh chụp thì phân loại A–E dựa trên **bộ đếm thật**.
+* **ĐỘT BIẾN HOST: ĐÃ LÀM** `2026-09-11T03:43Z`, sau khi người dùng duyệt
+  tường minh. Hai tệp cài trực tiếp (`/opt/fanfic-audio` **không phải kho
+  git** — bản kế hoạch đầu ghi `git pull` là SAI, tiền kiểm bắt được), có
+  sao lưu `/var/backups/fanfic-farmer-observer-20260911T034128Z/metrics.py`
+  và đối chiếu sha256 hai đầu. Dịch vụ: `active/running`, MainPID
+  350714→**684324**, **NRestarts=0** (khởi động lại do NGƯỜI, không phải tự
+  phục hồi). `rclone.conf` và `status.json` **vẫn 600, không đổi**;
+  `observability.json` **644**, đang cập nhật. Kiểm rò bí mật chạy NGAY TRÊN
+  HOST trước khi khởi động lại → `RO RI: KHONG`. Kho Fanfic **không bị sửa
+  một tệp nào** — nên host đang TRÔI so với kho, xem README mục 6.
+* **Chẩn đoán Drive: F → A.** Có telemetry rồi thì Router phân biệt được:
+  **A — chưa có việc nào đạt chuẩn production** ("tìm 2 ứng viên, cả 2 đều
+  trùng/đã xong, produced=0"), 12/13 quan sát đo được. Ảnh chụp cũng **loại
+  trừ** C và E: `reachable=true`, `ARCHIVE_DONE`, không lỗi, remote
+  `fanfic-gdrive`. Số đo thật ép ra một tinh chỉnh: vòng đầu bị đọc nhầm
+  thành D cho tới khi trừ `deduped` khỏi `discovered`. Bộ đếm cộng dồn **từ
+  lúc tiến trình khởi động** (lần restart đã đặt lại), nên mọi kết luận đều
+  mang cửa sổ đó trong câu lý do.
+
+**B. Năng lực runtime + định tuyến lại**
+
+* **Nguyên nhân gốc**: adapter Codex quét danh sách TỪ ĐƠN trên cả gói việc
+  đã render, và danh sách có chữ **"quyền"** — thứ nằm sẵn trong lời nhắc
+  công cụ TIÊU CHUẨN của mọi việc. Cộng với `codex_security_shaped_refusal`
+  nằm trong `KHONG_THU_LAI` → **mọi** việc xếp vào Codex đều chết ở `BLOCKED`.
+* **Sửa ở ba tầng**: phân loại bằng **cụm từ chuyên môn** chỉ trên phần NGƯỜI
+  VIẾT, ở **một nguồn sự thật duy nhất** (`router_v3.policy`); runtime KHAI
+  BÁO thứ nó từ chối (lấy từ `security.security_refusal_family` vốn có trong
+  `fabric.json`); xếp chỗ dùng khai báo đó làm **rào CỨNG** (`cam_runtime`,
+  khác `tranh_runtime` vốn chỉ là ưu tiên — hết chỗ tương thích thì CHỜ).
+* **Định tuyến lại** có trần 2 lần, nhả phiên, cấm chỗ đã từ chối, giữ nguồn
+  gốc (`_dinh_tuyen_lai`: chỗ cũ, lý do, lần thứ mấy). Lỗi THẬT của việc
+  (`tool_permission_denied`, `security_gate`, `executor_error`…) **không** bao
+  giờ được định tuyến lại.
+
+**Chẩn đoán Drive thật sau khi làm cứng**: hỏi lại đúng câu → **0 việc mới, 0
+việc chết vì quyền**, Leader trả lời từ bằng chứng trong 47s, phân loại **F**
+kèm lý do chính xác cho từng mục chưa đo được (gồm cả
+`observability.json: No such file or directory`). **HOST CHANGE REQUIRED** để
+phân biệt được A–E.
+
+**Bài kiểm mới**: `test_nang_luc_reroute_v07.py` (20), mở rộng
+`test_probe_van_hanh_v07.py` (63), `test_farmer_observer_contract_v07.py`
+(13). Đột biến production: **0**.
+
+
+## Router V0.7 — HOÀ GIẢI NGUỒN FANFIC + ĐÓNG BĂNG (2026-09-11)
+
+**Một kho, hai worktree — không phải hai kho.** `C:\Users\nguye\Documents\
+CapCut-TTS-App` và `C:\FanficWorkers\router-control-center` dùng CHUNG một
+`.git`; nhánh v0.7 cũng chứa `server/farmer/`. Nên "đưa observer vào kho
+Fanfic" = commit lên một nhánh của chính kho này, tách khỏi nhánh Router.
+
+* **Nhánh Fanfic**: `feat/farmer-sanitized-observability` @ `5baa8c7`,
+  tách từ `main` (`a913fd2`), worktree `C:\FanficWorkers\farmer-observer`.
+  **Chưa merge vào `main`.**
+* **Hoà giải có ĐỐI CHIẾU, không chép mù**: cả hai tệp khớp **từng byte**
+  với bản đang chạy trên production (sau chuẩn hoá LF) —
+  `observer.py` `e13eea6a…c9e434`, `metrics.py` `7fab65d5…95952a`. Bản gốc
+  trong kho cũng khớp bản gốc trên host (`46a9fbe4…`), nên bản vá đặt lên
+  đúng nền đã kiểm chứng.
+* **Quét trước khi vào kho nguồn**: không khoá AWS/Google/refresh token,
+  không khoá riêng, không đường dẫn Windows, không IP máy thật, không tên
+  máy, không `/home/…`, không `/var/backups/…`. Đúng MỘT đường dẫn tuyệt
+  đối (`/var/lib/fanfic-farmer/observability.json`) — cùng họ hằng số sản
+  phẩm với `DEFAULT_STATUS_PATH` vốn có.
+* **PARITY host ⇄ nguồn: GIỐNG HỆT.** Không tệp nào khác. **Không cần
+  triển khai lại.**
+* **Bài kiểm Fanfic**: `server/tests/test_farmer_observer.py` **26 bài**;
+  7 module farmer **163 bài**; toàn bộ backend **4641 bài OK** (8 bỏ qua).
+* **Kiểm liên tục sau khi dựng lại viên nang (v10)**: **13/13 PASS**, phủ
+  bằng chứng 95%, `READY FOR PRIMARY WORKSPACE: YES`. (Trước khi dựng lại
+  nó là PARTIAL vì *Known incidents* bị đánh dấu CŨ — bộ dò lạc hậu làm
+  đúng việc của nó, sổ đã có 58 bản ghi trong khi viên nang dựng lúc 56.)
+* **Chẩn đoán Drive cuối cùng: `A`** — 0 việc phái đi, 0 việc chết vì
+  quyền, 42s. Sau 5 vòng: **discovered 10, deduped 10, produced 0** — mọi
+  ứng viên tìm được đều đã xong từ trước, nên không có gì mới để mirror.
+  Đường archive **khoẻ**: `reachable=true`, `ARCHIVE_DONE`,
+  `last_error_class` rỗng, remote `fanfic-gdrive:FanficWorld/production`,
+  `failed=0`.
+
+**Hai giới hạn CÒN LẠI, cố ý giữ cho v0.8+ (không bịa giá trị):**
+
+1. bộ đếm cộng dồn **từ lúc tiến trình khởi động** và bị đặt lại khi farmer
+   khởi động lại — nên mọi kết luận đều mang cửa sổ đó trong câu lý do;
+2. `archive.last_attempt_at` / `last_success_at` luôn rỗng vì farmer chưa
+   theo dõi hai mốc đó.
+
+
 ## Bẫy đã gặp
 
 - **Vai "user" trong tệp phiên Claude KHÔNG chứng minh người gõ.** Bản tóm tắt

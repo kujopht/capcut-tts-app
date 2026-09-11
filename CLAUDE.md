@@ -272,6 +272,51 @@ Báo cáo:
 `scripts/control_center/memory/{de_bat,nhap_khau}.py` và
 `scripts/control_center/providers/`.
 
+**V0.7 Phase 1** (nhánh `feat/v07-fanfic-adoption`, chưa merge/tag) thêm
+NHẬN DỰ ÁN CÓ SẴN + VIÊN NANG DỰ ÁN: `nhan_du_an()` nhận một kho THẬT
+**chỉ đọc** (không sao chép/dời/khởi tạo lại/ghi gì vào kho; danh tính suy
+từ gốc worktree + commit gốc, KHÔNG từ nhánh); `vien_nang_du_an.py` dựng 19
+mục có `{gia_tri, trang_thai, nguon, bang_chung}` với UNKNOWN là giá trị
+hợp lệ và giá trị SỐNG không bị đóng băng; `kiem_lien_tuc.py` kiểm toán 13
+hạng mục. Luật quan trọng nhất của V0.7: **bản gọn nạp cho Leader chọn mục
+THEO CÂU HỎI**, và **dòng báo cắt phải NÊU TÊN mục chưa nạp** — bảng ưu
+tiên cố định + dòng chỉ-đếm là lý do đo được khiến Leader BỊA ("5
+Antigravity account" trong khi sổ ghi 8). Xem
+`docs/reports/NHAN_DU_AN_VIEN_NANG_V07.md` và `docs/CONTROL_CENTER.md` §18
+(luật 13–17).
+
+**V0.7 — PROBE VẬN HÀNH** (`scripts/control_center/probe_van_hanh.py`): câu
+hỏi về PRODUCTION (systemd/rclone/Drive/R2) không được biến thành việc phân
+tích KHO — đo được ở `fanfic.t2efd-1`: worker phải gọi công cụ `command` và
+`agy --print` tự chối (`tool_permission_denied`). Router đo hộ bằng MÔI GIỚI
+CÓ KIỂU: 9 thao tác chỉ đọc, API **không nhận chuỗi lệnh**, tham số kiểm theo
+cấu hình dự án, lưới thứ hai chặn động từ đột biến, **không nâng quyền**. Ai
+thiếu bằng chứng thì phân loại **F** kèm danh sách thiếu gì, không đoán
+nguyên nhân. Việc mang "hình dạng bảo mật" nay tránh Codex NGAY LÚC XẾP CHỖ
+(trước đây chết ở `BLOCKED`, và lời nhắc công cụ tiêu chuẩn của mọi việc đều
+chứa chữ "quyền" nên gần như mọi việc xếp vào Codex đều chết).
+`docs/reports/PROBE_VAN_HANH_V07.md`, `docs/CONTROL_CENTER.md` §19 (luật
+18–21).
+
+**V0.7 — LÀM CỨNG**: (a) KHÔNG nới quyền `status.json` của farmer — nó có
+hai ống dẫn văn bản tự do (`archive.detail` ← `stderr` thô của `rclone`,
+`lanes[*].errors[]` ← ngoại lệ bất kỳ) nên không chứng minh được là sạch;
+đường đúng là ẢNH CHỤP ĐÃ LỌC riêng (`observability.json`, `644`, danh sách
+CHO PHÉP, lỗi quy về mã trong bộ ĐÓNG) — mã đề xuất + kế hoạch triển khai ở
+`docs/deploy/fanfic_farmer_observer/`, **đã triển khai 2026-09-11T03:43Z sau
+khi người dùng duyệt** — `observability.json` `644`, `rclone.conf` và
+`status.json` vẫn `600`; chẩn đoán Drive nhờ đó đi từ `F` sang **`A`**. Lưu
+ý: hai tệp trên host CHƯA có trong kho Fanfic (host đang trôi so với kho).
+`rclone.conf` giữ `600`, và Router tự chặn thêm một lớp
+(`la_tep_bi_mat` — danh sách CẤM thắng danh sách cho phép). (b) Một TỪ ĐƠN
+không được làm trọng tài phân loại bảo mật: chữ "quyền" trong lời nhắc công
+cụ tiêu chuẩn từng làm MỌI việc xếp vào Codex bị từ chối rồi chết ở
+`BLOCKED`. Nay phân loại bằng CỤM TỪ chuyên môn, chỉ trên phần NGƯỜI VIẾT, ở
+một nguồn duy nhất (`router_v3.policy`); runtime khai báo thứ nó từ chối;
+xếp chỗ là RÀO CỨNG (`cam_runtime`); từ chối vì CHÍNH SÁCH thì định tuyến
+lại có trần + nguồn gốc. `docs/reports/LAM_CUNG_V07.md`,
+`docs/CONTROL_CENTER.md` §20 (luật 22–24).
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,

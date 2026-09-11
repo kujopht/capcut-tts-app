@@ -30,7 +30,30 @@
           "disk_path": "/",
           "key_path": "%USERPROFILE%\\.ssh\\fanficappwrite.pem",
           "timeout": 12,
-          "max_age": 120
+          "max_age": 120,
+          "_doc_read_paths": [
+            "Goc DOC cho probe_van_hanh (V0.7). Chi thu muc/tep duoc liet ke",
+            "o day moi cho phep stat/ls/tail — va CHI DOC. Do that tren farmer",
+            "2026-09-11: /var/lib/fanfic-farmer la 755 fanfic:fanfic nen doc",
+            "duoc, con status.json va rclone.conf la 600 fanfic:fanfic nen tai",
+            "khoan quan sat `ubuntu` KHONG doc noi noi dung (mtime/size van lay",
+            "duoc bang `stat`). Khong dung sudo de vuot: lop quan sat khong",
+            "duoc nang quyen tren may production."
+          ],
+          "read_paths": [
+            "/var/lib/fanfic-farmer",
+            "/var/log/fanfic-prod-admin.log"
+          ],
+          "rclone_config": "/var/lib/fanfic-farmer/rclone.conf",
+          "_doc_telemetry": [
+            "ANH CHUP QUAN SAT DA LOC (V0.7). Farmer ghi tep nay o mode 644,",
+            "chi gom sieu du lieu van hanh — KHONG co van ban loi tho, nen doc",
+            "duoc bang tai khoan quan sat ma khong phai noi quyen status.json",
+            "(tep do co `archive.detail` <- stderr rclone va `lanes[*].errors`",
+            "<- ngoai le bat ky, tuc la hai ong dan mo). rclone.conf VAN 600.",
+            "CHUA TRIEN KHAI: xem docs/deploy/fanfic_farmer_observer/README.md."
+          ],
+          "telemetry_file": "/var/lib/fanfic-farmer/observability.json"
         },
         {
           "type": "unavailable",

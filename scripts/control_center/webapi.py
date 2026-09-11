@@ -371,6 +371,136 @@ def dung_app(phien: PhienWeb) -> FastAPI:
         return _sach(await asyncio.to_thread(
             kc.nhap_khau, pid, thu_kho=bool(p.get("thu_kho", True)), chi=chi))
 
+    # -- V0.7: nhan du an + vien nang + kiem lien tuc ----------------------
+
+    @app.post("/api/project/adopt")
+    async def nhan_du_an_api(payload: Dict):
+        """NHẬN một dự án hiện có. CHỈ ĐỌC kho đích, idempotent."""
+        p = payload or {}
+        duong = str(p.get("duong") or p.get("path") or "").strip()
+        if not duong:
+            return _ma_loi(400, "thiếu `duong` (thư mục dự án)")
+        from scripts.control_center.nhan_du_an import nhan_du_an
+
+        def _chay():
+            return nhan_du_an(phien.cc, duong,
+                              ten=str(p.get("ten") or ""),
+                              project_id=str(p.get("project_id") or "")).to_dict()
+        return _sach(await asyncio.to_thread(_chay))
+
+    @app.get("/api/project/adopt/preview")
+    async def nhan_xem_truoc(duong: str = ""):
+        """Dò một thư mục TRƯỚC khi nhận — không ghi gì, không đăng ký gì."""
+        if not duong:
+            return _ma_loi(400, "thiếu `duong`")
+        from scripts.control_center.nhan_du_an import (kham_pha_kho,
+                                                       tim_du_an_trung)
+
+        def _chay():
+            d = kham_pha_kho(duong)
+            return {"kho": d.to_dict(),
+                    "da_co": tim_du_an_trung(phien.cc.store, d.goc_worktree) or ""}
+        return _sach(await asyncio.to_thread(_chay))
+
+    @app.get("/api/capsule")
+    async def doc_vien_nang(project: str = ""):
+        """Viên nang ĐANG LƯU + nhãn mục CŨ. Không dựng lại (rẻ)."""
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        from scripts.control_center import vien_nang_du_an as VN
+
+        def _chay():
+            muc, pb = VN.nap(phien.cc, project)
+            return {"project_id": project, "phien_ban": pb, "muc": muc,
+                    "so_muc": len(VN.KHOA_MUC),
+                    "so_muc_co": sum(1 for k in VN.KHOA_MUC
+                                     if (muc.get(k) or {}).get("trang_thai") == VN.CO),
+                    "so_khong_ro": sum(1 for k in VN.KHOA_MUC
+                                       if (muc.get(k) or {}).get("trang_thai") == VN.KHONG_RO),
+                    "so_cu": sum(1 for k in VN.KHOA_MUC
+                                 if (muc.get(k) or {}).get("trang_thai") == VN.CU),
+                    "token_day": (VN.uoc_token(muc) if muc else 0),
+                    "token_gon": (VN._ut_gon(muc) if muc else 0),
+                    "nhan": VN.NHAN_MUC, "nhom": VN.NHOM_MUC,
+                    "thu_tu": list(VN.KHOA_MUC)}
+        return _sach(await asyncio.to_thread(_chay))
+
+    @app.post("/api/capsule/rebuild")
+    async def dung_lai_vien_nang(payload: Dict):
+        """Dựng lại viên nang từ nguồn; chỉ sinh phiên bản khi có mục ĐỔI."""
+        p = payload or {}
+        pid = str(p.get("project") or "")
+        if not pid:
+            return _ma_loi(400, "thiếu project")
+        from scripts.control_center import vien_nang_du_an as VN
+
+        def _chay():
+            kq = VN.dung_va_luu(phien.cc, pid, ly_do=str(p.get("ly_do") or ""))
+            kq.pop("muc", None)          # tra ban gon; UI doc /api/capsule
+            return kq
+        return _sach(await asyncio.to_thread(_chay))
+
+    @app.get("/api/capsule/versions")
+    async def cac_phien_ban_nang(project: str = "", limit: int = 20):
+        """Lịch sử phiên bản viên nang — trả lời "đổi gì, khi nào, vì sao"."""
+        kc = _ky_uc()
+        if kc is None or not project:
+            return _ma_loi(400, "thiếu project hoặc ký ức không sẵn")
+
+        def _chay():
+            p = kc.provider(project)
+            if p is None:
+                return {"ket_qua": []}
+            return {"ket_qua": p.cac_phien_ban_vien_nang(int(limit))}
+        return _sach(await asyncio.to_thread(_chay))
+
+    @app.get("/api/continuity")
+    async def kiem_lien_tuc_api(project: str = ""):
+        """Kiểm liên tục — Router hiểu dự án này tới đâu."""
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        from scripts.control_center import kiem_lien_tuc as KL
+        return _sach(await asyncio.to_thread(KL.kiem, phien.cc, project))
+
+    # -- V0.7: probe van hanh (CHI DOC) ------------------------------------
+
+    @app.get("/api/probe/capabilities")
+    async def probe_kha_nang(project: str = ""):
+        """Thao tác probe nào dùng được cho dự án này, cái nào KHÔNG và vì sao.
+
+        Chỉ liệt kê năng lực — không chạy phép đo nào.
+        """
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        from scripts.control_center import probe_van_hanh as PV
+
+        def _chay():
+            mg = PV.tu_du_an(project)
+            d = mg.kha_dung()
+            d["ops"] = list(mg.ops())
+            return d
+        return _sach(await asyncio.to_thread(_chay))
+
+    @app.post("/api/probe/audit")
+    async def probe_kiem_toan(payload: Dict):
+        """Kiểm toán đường ống production — CHỈ ĐỌC, phân loại A–F.
+
+        Không nhận chuỗi lệnh: thân yêu cầu chỉ có `project` và cửa sổ giờ.
+        """
+        p = payload or {}
+        project = str(p.get("project") or "").strip()
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        try:
+            gio = max(1, min(168, int(p.get("gio") or 24)))
+        except (TypeError, ValueError):
+            return _ma_loi(400, "`gio` phải là số nguyên")
+        from scripts.control_center import probe_van_hanh as PV
+
+        def _chay():
+            return PV.kiem_duong_ong(PV.tu_du_an(project), gio=gio).to_dict()
+        return _sach(await asyncio.to_thread(_chay))
+
     # -- cai dat giao dien -------------------------------------------------
 
     @app.get("/api/ui")

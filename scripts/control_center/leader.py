@@ -431,6 +431,71 @@ _MAU_LICH_SU_KY_UC = (
 _LICH_SU_KY_UC = [re.compile(m, re.I) for m in _MAU_LICH_SU_KY_UC]
 
 
+#: Câu hỏi VẬN HÀNH PRODUCTION — hỏi về hệ thống thật ĐANG chạy (service,
+#: artifact, archive, Drive/R2/Appwrite), không phải về kho mã và cũng không
+#: phải về quá khứ đã ghi. Đây là lớp mà `fanfic.t2efd-1` rơi vào và chết:
+#: nó bị xếp thành việc PHÂN TÍCH KHO, nên worker phải xin `command` và bị
+#: headless tự chối.
+_MAU_VAN_HANH = (
+    r"\b(farmer|worker|service|systemd|daemon|unit)\b",
+    r"\b(production|prod)\b",
+    r"\b(artifact|artefact)\b",
+    r"\b(archive|mirror|sao lưu|lưu trữ)\b.{0,30}\b(drive|r2|s3|bucket)\b",
+    r"\b(google )?drive\b", r"\brclone\b", r"\bappwrite\b", r"\br2\b",
+    r"\b(đang|còn) (chạy|sống|hoạt động)\b",
+    r"\b(chưa|không) thấy\b.{0,40}\b(mới|lên|upload|mirror)\b",
+    r"\bpipeline\b", r"\bđường ống\b",
+    r"\b(ready|pending|failed)\b.{0,20}\b(work|job|queue|hàng đợi)\b",
+)
+_VAN_HANH = [re.compile(m, re.I) for m in _MAU_VAN_HANH]
+
+#: Dấu hiệu CHẨN ĐOÁN (cần suy luận nhiều bước), khác với một câu hỏi trạng
+#: thái đơn ("farmer chạy không?"). Câu chẩn đoán mới đáng gom nhiều probe.
+_MAU_CHAN_DOAN = (
+    r"\bvì sao\b", r"\btại sao\b", r"\bwhy\b", r"\bnguyên nhân\b",
+    r"\bkiểm tra\b", r"\bđiều tra\b", r"\brà soát\b", r"\bend-to-end\b",
+    r"\bchưa (thấy|có)\b", r"\bkhông (thấy|có)\b", r"\bstuck\b", r"\bstall\b",
+)
+_CHAN_DOAN = [re.compile(m, re.I) for m in _MAU_CHAN_DOAN]
+
+
+def la_cau_hoi_van_hanh(cau: str) -> Tuple[bool, bool, List[str]]:
+    """`(có phải câu hỏi vận hành, có phải CHẨN ĐOÁN, dấu hiệu khớp)`.
+
+    Tất định, không LLM. Dùng để gom BẰNG CHỨNG VẬN HÀNH bằng
+    `probe_van_hanh` trước khi Leader trả lời, và để đính bằng chứng đó vào
+    hợp đồng worker — thay cho việc worker phải xin quyền `command`.
+    """
+    van = (cau or "").strip()
+    if not van:
+        return False, False, []
+    dau = [r.pattern for r in _VAN_HANH if r.search(van)]
+    chan = bool(dau) and any(r.search(van) for r in _CHAN_DOAN)
+    return bool(dau), chan, dau
+
+
+#: Luật cho khối BẰNG CHỨNG VẬN HÀNH.
+LUAT_VAN_HANH = """BẰNG CHỨNG VẬN HÀNH — đọc trước khi trả lời:
+
+Khối "BẰNG CHỨNG VẬN HÀNH DO ROUTER ĐO" bên dưới là phép đo THẬT, vừa lấy
+từ hệ thống production qua đường CHỈ ĐỌC có kiểu (`probe_van_hanh`). Mỗi
+dòng mang nguồn, mốc đo và tuổi.
+
+* Đây là bậc thẩm quyền CAO NHẤT cho câu hỏi "bây giờ thế nào" — cao hơn ký
+  ức, cao hơn viên nang, cao hơn suy luận của bạn.
+* `UNAVAILABLE`/`UNKNOWN` nghĩa là CHƯA ĐO ĐƯỢC, **không** phải là `DOWN` và
+  cũng không phải "không có gì xảy ra". Nói thẳng "chưa đo được <cái gì> vì
+  <lý do>" và nêu mục "CHƯA ĐO ĐƯỢC" của khối.
+* Phân loại nguyên nhân chỉ được chọn A–E khi có số đo chống lưng. Thiếu số
+  thì phân loại đúng là **F (chưa đủ bằng chứng)** — đừng chọn bừa một
+  nguyên nhân nghe hợp lý.
+* KHÔNG đề xuất và KHÔNG tự làm thao tác ĐỘT BIẾN (restart/deploy/xoá/
+  upload/chmod). Lớp này chỉ đọc. Cần một thao tác như thế thì nói rõ nó cần
+  QUYẾT ĐỊNH CỦA NGƯỜI.
+* Nếu việc cần phân tích sâu hơn thì worker sẽ nhận ĐÚNG khối bằng chứng
+  này — đừng tạo việc chỉ để đi chạy lại mấy lệnh đó."""
+
+
 def la_cau_hoi_lich_su(cau: str) -> Tuple[bool, List[str]]:
     """`(có phải câu hỏi lịch sử/kiến thức dự án, dấu hiệu khớp)`.
 
@@ -488,10 +553,51 @@ Câu này có URL công khai và Router ĐÃ ĐỌC HỘ (khối "NỘI DUNG WEB
   toàn), đừng dispatch một worker để thử lại — headless cũng bị chặn quyền."""
 
 
+#: Luat cho VIEN NANG DU AN (V0.7) — mo hinh gon, CO NGUON GOC.
+LUAT_NANG = """VIÊN NANG DỰ ÁN — đọc trước khi trả lời:
+
+Khối "VIÊN NANG DỰ ÁN" bên dưới là MÔ HÌNH GỌN của dự án, dựng từ nguồn có
+thật (quyết định tường minh > trạng thái kho > ký ức > tài liệu > git) và mỗi
+mục mang nguồn + bằng chứng lần về được.
+
+* DÙNG viên nang làm điểm khởi đầu cho câu hỏi VỀ DỰ ÁN ("làm tới đâu", "kiến
+  trúc ra sao", "production ở đâu", "bước tiếp theo hợp lý là gì"). Nó đã tóm
+  đúng những gì dự án CÓ BẰNG CHỨNG — đừng uỷ thác một worker đi khám phá lại.
+* `UNKNOWN` nghĩa là DỰ ÁN CHƯA CÓ BẰNG CHỨNG cho mục đó. Nói thẳng "chưa có
+  trong hồ sơ dự án" và HỎI, ĐỪNG suy ra một câu trả lời nghe hợp lý.
+* `[CŨ]` nghĩa là mục đó có thể đã lạc hậu (HEAD/nhánh đổi, có bản ghi mới).
+  Nêu rõ điều đó khi dùng.
+* Viên nang KHÔNG phải trạng thái sống. Mục "Tham chiếu trạng thái SỐNG" chỉ
+  nói ĐO ĐƯỢC CÁI GÌ và BẰNG PROVIDER NÀO — câu hỏi "bây giờ còn chạy không"
+  vẫn phải đi đo, và khối TRẠNG THÁI SỐNG (nếu có) mới là câu trả lời.
+* Cần chi tiết sâu hơn viên nang thì tra KÝ ỨC DỰ ÁN / bằng chứng L0 bên dưới.
+* Dòng "(viên nang CÒN các mục CHƯA NẠP lượt này: …)" liệt kê ĐÚNG TÊN những
+  mục bị cắt cho vừa trần token. Nó **KHÔNG phải giấy phép để đoán** — trái
+  lại: mục có tên ở đó nghĩa là dự án CÓ dữ liệu, chỉ là lượt này chưa nạp.
+  Bị hỏi về một mục nằm trong danh sách đó thì nói "mục <tên> có trong viên
+  nang nhưng chưa nạp ở lượt này" rồi HỎI, TUYỆT ĐỐI không tự dựng số/danh
+  sách. Đo thật (nghiệm thu v0.7): khi "Tài nguyên agent" bị cắt và dòng cắt
+  chỉ ĐẾM chứ không NÊU TÊN, một lượt đã trả lời "5 account" trong khi sổ ghi
+  8; đổi thứ tự nạp thì lỗi y hệt nhảy sang câu R2/Drive.
+* **Mục CÓ MẶT nhưng MỎNG cũng là CHƯA CÓ BẰNG CHỨNG.** Nhiều mục chỉ chứa
+  TÊN TÀI LIỆU và trích đoạn ký ức; đó là CHỖ ĐỂ TRA, không phải câu trả
+  lời. Nếu nội dung thật sự nạp được không nói ra điều đang được hỏi, thì
+  trả lời đúng là "hồ sơ dự án có <mục> nhưng chưa ghi rõ <điều đang hỏi>"
+  kèm danh sách tài liệu/mã đáng tra — TUYỆT ĐỐI không lấy kiến thức chung
+  về công nghệ đó mà nói như thể đó là sự thật của dự án này. Đo thật: mục
+  "Kiến trúc lưu trữ" chỉ có tên tài liệu Appwrite và ba trích đoạn không
+  liên quan, vậy mà một lượt vẫn khẳng định chắc nịch vai trò của R2 và
+  Google Drive — không mã bằng chứng nào, không một chữ ngập ngừng.
+* Mỗi khẳng định về dự án phải KÈM MÃ (`qd_…`, `ku_…`, `sk#…`, `doc:…`) lấy
+  từ khối bên dưới. Không có mã cho một ý thì hoặc bỏ ý đó, hoặc nói rõ đó
+  là suy đoán của bạn chứ không phải hồ sơ dự án."""
+
+
 def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
                   khoi_song: str = "", khoi_ky_uc: str = "",
                   khoi_toa: str = "", la_lich_su: bool = False,
-                  khoi_web: str = "") -> str:
+                  khoi_web: str = "", khoi_nang: str = "",
+                  khoi_probe: str = "") -> str:
     """Gói một lượt: hướng dẫn + trạng thái + hội thoại + câu mới.
 
     RANH GIỚI TIN CẬY, và bản đầu làm sai đúng chỗ này:
@@ -526,6 +632,21 @@ def dung_nhac_nho(anh_chup, lich_su: List[Dict], cau: str,
     # V0.6 — KY UC dat SAU anh chup tinh: vi tri ma hoa bac tham quyen
     # (song > tinh > ky uc), va luat di kem O MOI LUOT co khoi. Nhan KHONG
     # bat dau bang "TRANG THAI" de khong bi doc nham thanh hien tai.
+    if khoi_probe:
+        # V0.7 — BANG CHUNG VAN HANH dat NGAY SAU khoi song va TRUOC vien
+        # nang/ky uc: no la phep do THAT vua lay tu production, tuc la bac
+        # tham quyen cao nhat cho cau hoi "bay gio the nao".
+        d += [LUAT_VAN_HANH, "",
+              "--- BẮT ĐẦU DỮ LIỆU: BẰNG CHỨNG VẬN HÀNH (vừa đo, chỉ đọc) ---",
+              khoi_probe, "--- HẾT DỮ LIỆU ---", ""]
+    if khoi_nang:
+        # V0.7 — VIEN NANG dat TRUOC khoi ky uc: no la mo hinh GON (nap moi
+        # luot, ~900 token), con ky uc la chi tiet (tra khi can). Ca hai deu
+        # duoi TRANG THAI SONG ve tham quyen.
+        d += [LUAT_NANG, "",
+              "--- BẮT ĐẦU DỮ LIỆU: VIÊN NANG DỰ ÁN (mô hình gọn, có nguồn "
+              "gốc — KHÔNG phải trạng thái sống) ---",
+              khoi_nang, "--- HẾT DỮ LIỆU ---", ""]
     if khoi_ky_uc:
         # Cau hoi lich su -> LUAT_LICH_SU dat NGAY TRUOC khoi ky uc: no lat mac
         # dinh "khong biet thi dispatch" thanh "tra tu ky uc, chi hoi lai khi

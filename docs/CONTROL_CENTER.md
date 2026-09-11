@@ -1058,3 +1058,141 @@ Tám luật (5–12) thêm vào bốn luật của §16:
     NHẬT KÝ GIT do Router đọc (`nguon_git.git_nhat_ky_doc`, lọc bí mật) — agent
     headless không chạy được lệnh shell và quyền của nó KHÔNG được nới.
     `MULTI_AGENT_FANOUT_V061.md` §7, `scripts/tests/test_khoa_doc_ghi_v061.py`.
+
+## 18. Nhận dự án có sẵn + Viên nang dự án (V0.7 Phase 1)
+
+Báo cáo: `docs/reports/NHAN_DU_AN_VIEN_NANG_V07.md`. Mã:
+`scripts/control_center/nhan_du_an.py` (nhận, CHỈ ĐỌC),
+`scripts/control_center/vien_nang_du_an.py` (19 mục + bản gọn có trần),
+`scripts/control_center/kiem_lien_tuc.py` (13 hạng mục kiểm toán).
+
+Năm luật (13–17) thêm vào §16–§17:
+
+13. **NHẬN không được đụng vào kho.** `nhan_du_an()` chỉ đọc: không sao
+    chép, không dời, không `git init` lại, không ghi tệp nào vào kho được
+    nhận, không tạo sổ ký ức bên trong cây git của nó. Đo bằng
+    `git status --porcelain` trước/sau và bằng ảnh chụp cây `.router`
+    (127.279 mục, không đổi). Nhận lại là idempotent, không sinh dự án thứ
+    hai.
+
+14. **Danh tính suy từ GỐC WORKTREE + COMMIT GỐC, không từ nhánh.** Đổi
+    nhánh không được đổi danh tính. Hai cái bẫy đã đo được: `git log
+    --reverse -n1` trả về commit MỚI NHẤT (giới hạn áp trước khi đảo) —
+    phải dùng `git rev-list --max-parents=0 HEAD`; và khoá chống trùng phải
+    đặt trên gốc worktree chứ KHÔNG phải `--git-common-dir`, vì Fanfic và
+    Router dùng chung một `.git`. URL remote bị lọc credential trước khi
+    lưu.
+
+15. **UNKNOWN là một giá trị hợp lệ; giá trị SỐNG không được đóng băng.**
+    Mỗi mục mang `{gia_tri, trang_thai, nguon, bang_chung, ghi_chu, ts}`;
+    ưu tiên nguồn `quyet_dinh > kho > ky_uc > tai_lieu > git > suy_luan`.
+    Mục *Tham chiếu trạng thái SỐNG* chỉ ghi ĐO ĐƯỢC CÁI GÌ và BẰNG
+    PROVIDER NÀO, không ghi phán quyết — "bây giờ còn chạy không" vẫn phải
+    đi đo. Phiên bản viên nang chỉ tăng khi có mục ĐỔI THẬT, và bản cũ
+    không bao giờ bị ghi đè.
+
+16. **Bản gọn nạp cho Leader chọn mục THEO CÂU HỎI, không theo bảng ưu
+    tiên cố định.** Đo được ở nghiệm thu: bảng cố định cắt mất đúng mục
+    đang bị hỏi, và Leader lấp chỗ trống bằng cách BỊA (trả lời "5
+    Antigravity account" trong khi sổ ghi 8). Đổi thứ tự cố định chỉ làm
+    lỗi nhảy sang câu khác (mục `luu_tru`, câu R2/Drive) — đó là trò đuổi
+    bắt, không phải cách sửa. `thu_tu_nap(cau_hoi)` giữ đầu bảng, xếp phần
+    đuôi theo độ khớp từ khoá (không phụ thuộc dấu), và chen MỘT mục khớp
+    mạnh nhất lên ngay sau danh tính để nó sống cả khi ngân sách chật.
+
+17. **Dòng báo cắt phải NÊU TÊN mục chưa nạp, và được nhường chỗ TRƯỚC.**
+    Dòng chỉ ĐẾM ("còn 10 mục nữa") không cho Leader phân biệt "dự án không
+    có bằng chứng" với "có mà lượt này chưa nạp", nên nó đoán. Nêu tên biến
+    câu bịa thành câu "mục X có trong viên nang nhưng chưa nạp ở lượt này".
+    Dòng chân CŨNG tốn token: cộng sau khi đã đóng ngân sách thì trần thành
+    lời nói dối (đo được 900 → 922), còn trừ-sau thì đuổi đúng mục liên
+    quan nhất ra để lấy chỗ. Thứ được phép hy sinh là TÊN trong dòng cắt,
+    không bao giờ là MỤC. Bộ đệm giữ `muc` chứ không giữ văn bản đã render —
+    giữ văn bản thì lượt sau nhận bản cắt của câu hỏi trước.
+
+## 19. Môi giới probe vận hành — đọc production, không có shell (V0.7)
+
+Báo cáo: `docs/reports/PROBE_VAN_HANH_V07.md`. Mã:
+`scripts/control_center/probe_van_hanh.py`, luật Leader ở
+`leader.LUAT_VAN_HANH` + `leader.la_cau_hoi_van_hanh()`, đính bằng chứng ở
+`engine._khoi_probe` / `engine._kem_probe_vao_hd`.
+
+Bốn luật (18–21) thêm vào §16–§18:
+
+18. **Câu hỏi VẬN HÀNH không được biến thành việc PHÂN TÍCH KHO.** Đo được
+    (`fanfic.t2efd-1`, 2026-09-11): câu "vì sao Drive chưa có artifact mới"
+    bị xếp `type=analysis` với danh sách lệnh chỉ có
+    `cc_agent_tool.py changes|compile` — không lệnh nào chạm được tới
+    production, nên worker gọi công cụ `command` chung và `agy --print` tự
+    chối (`tool_permission_denied`), lượt kết thúc rỗng. Lời giải vẫn là lời
+    giải cũ, lần thứ tư: **Router đo hộ rồi đính BẰNG CHỨNG**, không nới
+    quyền agent, không bỏ qua kiểm quyền.
+
+19. **Không có lối thoát ra shell, và có LƯỚI THỨ HAI.** `MoiGioiProbe.chay`
+    nhận TÊN THAO TÁC + tham số, không bao giờ nhận chuỗi lệnh; chín thao
+    tác `systemd.*`/`filesystem.*`/`rclone.*` đều CHỈ ĐỌC. Tham số kiểm theo
+    CẤU HÌNH dự án: unit phải đã khai, đường dẫn phải nằm dưới gốc đã khai
+    (so theo ĐOẠN — `/var/lib/x-evil` không lọt qua `/var/lib/x`), thuộc
+    tính systemd theo bảng và bảng KHÔNG có `Environment*`. Ngoài ra
+    `_kiem_chi_doc()` quét chuỗi lệnh cuối và từ chối mọi động từ đột biến +
+    mọi ký tự nối/chuyển hướng. **Không nâng quyền** — trên farmer thật tài
+    khoản quan sát CÓ quyền nâng không mật khẩu, và lớp này vẫn không dùng;
+    chỗ sửa đúng nằm ở phía máy chủ và được BÁO CÁO chứ không tự làm.
+
+20. **Thiếu bằng chứng thì phân loại là F, không phải một nguyên nhân nghe
+    hợp lý.** `kiem_duong_ong()` chỉ khẳng định A–E khi có quan sát ĐO ĐƯỢC
+    chống lưng; thiếu thì trả `F` KÈM danh sách đúng thứ còn thiếu. `grep`
+    trả mã 1 là "không có dòng khớp" — một phép đo THẬT, không phải một lần
+    đo hỏng, nên không được ghi thành `UNKNOWN`. Bộ lọc bí mật dùng
+    `memory.bi_mat.loc` chứ không dùng `packet.redact`: bộ sau KHÔNG có khoá
+    AWS `AKIA…`/`ASIA…`, đúng hình dạng dễ gặp nhất trong log EC2.
+
+21. **Việc mang hình dạng bảo mật KHÔNG được xếp vào Codex.** Codex từ chối
+    loại đó (bằng chứng 2026-08-28), `pool/adapters.py` chặn sẵn, nhưng
+    `codex_security_shaped_refusal` lại nằm trong `KHONG_THU_LAI` — nên việc
+    CHẾT ở `BLOCKED` dù thông báo hứa "định tuyến sang worker khác" (đo được:
+    `fanfic.t78ce-1`). Nặng hơn: lời nhắc công cụ tiêu chuẩn của MỌI việc đều
+    chứa chữ "quyền", nên gần như mọi việc xếp vào Codex đều chết như thế.
+    Nay kiểm hình dạng TRƯỚC khi xếp chỗ và thêm runtime Codex vào
+    `tranh_runtime` — tránh là ưu tiên, không phải rào.
+
+## 20. Telemetry đã lọc + năng lực runtime (V0.7, làm cứng trước đóng băng)
+
+Báo cáo: `docs/reports/LAM_CUNG_V07.md`. Mã đề xuất phía farmer + kế hoạch
+triển khai: `docs/deploy/fanfic_farmer_observer/`. Mã Router:
+`scripts/control_center/nang_luc.py`, `probe_van_hanh.loc_telemetry`,
+`router_v3/policy.la_hinh_dang_bao_mat`.
+
+Ba luật (22–24) thêm vào §16–§19:
+
+22. **Không phơi một tệp trạng thái có ống dẫn văn bản tự do.**
+    `status.json` của farmer phần lớn là số đếm, nhưng `archive.detail` nhận
+    `stderr` THÔ của `rclone` và `lanes[*].errors[]` nhận văn bản ngoại lệ
+    bất kỳ — nên nó **không chứng minh được là sạch**, và không được nới
+    quyền. Đường đúng là một ẢNH CHỤP ĐÃ LỌC riêng (`observability.json`,
+    `644`) theo **danh sách CHO PHÉP**, trong đó văn bản lỗi bị quy về một mã
+    trong bộ ĐÓNG. Router **lọc lại lần nữa** khi đọc: hai kho là hai nhịp
+    phát hành, không bên nào tin tuyệt đối bên kia. `rclone.conf` giữ nguyên
+    `600` — ảnh chụp chỉ nêu BÍ DANH remote, không nêu cấu hình.
+
+23. **Danh sách CẤM tệp bí mật THẮNG danh sách cho phép.** `read_paths` khai
+    theo THƯ MỤC, nên một tệp bí mật nằm trong đó vẫn lọt nếu chỉ có
+    allowlist — bài kiểm bắt được `filesystem.read_text` được phép `tail`
+    `rclone.conf`. Quyền của máy chủ KHÔNG được là rào duy nhất: một lần đổi
+    quyền trên host sẽ lặng lẽ mở đường. `probe_van_hanh.la_tep_bi_mat()`
+    chặn theo tên tệp; `stat` (siêu dữ liệu) vẫn cho phép vì nó không lộ gì.
+
+24. **Một TỪ ĐƠN không bao giờ được làm trọng tài phân loại bảo mật.** Danh
+    sách từ đơn của adapter Codex chứa chữ "quyền", mà lời nhắc công cụ TIÊU
+    CHUẨN của mọi việc lại có "quyền được khớp theo chuỗi chính xác" — nên
+    MỌI việc xếp vào Codex đều bị từ chối rồi chết ở `BLOCKED`
+    (`fanfic.t78ce-1`). Nay: phân loại bằng **cụm từ chuyên môn**, chỉ áp lên
+    phần văn bản DO NGƯỜI VIẾT (`policy.phan_nguoi_viet` cắt bỏ boilerplate),
+    và ở **một nguồn sự thật duy nhất** (`router_v3.policy`) — hai danh sách
+    song song là cách đúng để chúng lệch nhau trở lại. Runtime KHAI BÁO thứ
+    nó từ chối (lấy từ `security.security_refusal_family` vốn có trong
+    `fabric.json`), xếp chỗ dùng khai báo đó làm **rào CỨNG** (`cam_runtime`,
+    khác `tranh_runtime` vốn chỉ là ưu tiên), và một lần từ chối vì CHÍNH
+    SÁCH thì **định tuyến lại** — nhả phiên, cấm chỗ đã từ chối, xếp lại, trần
+    2 lần, giữ nguồn gốc trong `_dinh_tuyen_lai`. Lỗi THẬT của việc không bao
+    giờ được định tuyến lại.

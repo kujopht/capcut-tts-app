@@ -1550,6 +1550,64 @@ thi + ngân sách), người vận hành duyệt các sự cố `backfill`, nh�
   ở pha này.
 
 
+## Router Control Center V0.7 — PROBE VẬN HÀNH chỉ đọc (2026-09-11)
+
+Đã xong, nhánh `feat/v07-fanfic-adoption`, **chưa merge/tag**. Đầy đủ:
+`docs/reports/PROBE_VAN_HANH_V07.md`, luật 18–21 ở `docs/CONTROL_CENTER.md`
+§19. Mã: `scripts/control_center/probe_van_hanh.py`.
+
+* **Nguyên nhân gốc của khuyết tật chặn đường** (lần từ `control.db`, không
+  đoán): câu hỏi production *"vì sao Drive chưa có artifact mới"* bị bộ phân
+  rã (`planner=rule`) xếp thành **việc phân tích KHO** `fanfic.t2efd-1`
+  (`type=analysis`, `shell=false`), mà danh sách lệnh của việc kho chỉ có
+  `cc_agent_tool.py changes|compile` — **không lệnh nào chạm tới production**.
+  Worker phải gọi công cụ **`command`** chung, `agy --print` tự chối (headless
+  không hiện được hộp thoại), lượt kết thúc rỗng → `tool_permission_denied`.
+  Đây là **lần thứ tư** cùng bài học; lời giải vẫn là: Router đo hộ, đính
+  **bằng chứng có cấu trúc**, KHÔNG nới quyền agent.
+* **`probe_van_hanh.py`**: môi giới probe CÓ KIỂU, 9 thao tác chỉ đọc
+  (`systemd.*`, `filesystem.*`, `rclone.*`). API **không nhận chuỗi lệnh**;
+  tham số kiểm theo **cấu hình dự án** (unit đã khai, đường dẫn dưới gốc đã
+  khai — so theo ĐOẠN, thuộc tính systemd theo bảng và **không có**
+  `Environment*`); `_kiem_chi_doc()` là lưới thứ hai chặn mọi động từ đột
+  biến + ký tự nối. **Không nâng quyền** dù tài khoản quan sát có thể.
+  Phơi shell tuỳ ý cho worker: **KHÔNG**.
+* **Probe dùng được trên Fanfic**: trạng thái service, MainPID/NRestarts/mốc
+  khởi động, journald, `stat` (chạy được **cả khi nội dung bị từ chối**), liệt
+  kê thư mục, dung lượng đĩa, nhịp tim `status.json`.
+  **Chưa dùng được, và chính xác vì sao**: nội dung `status.json` và
+  `rclone.conf` đều `600 fanfic:fanfic` (tài khoản quan sát không thuộc nhóm
+  `fanfic`); Appwrite/R2 chưa có adapter đọc. **Thứ chặn đường là quyền tệp
+  phía máy chủ, không phải thiếu mã** — sửa đúng chỗ là cho hai tệp đó đọc
+  được theo nhóm, và đó là **quyết định của người vận hành**, Router không tự
+  làm.
+* **Chẩn đoán thật cho câu hỏi Drive: `F` — chưa đủ bằng chứng.** Đo được:
+  farmer **active**, MainPID 350714, **NRestarts=0**, chạy từ 2026-09-08
+  15:55:31 UTC; `status.json` **vẫn đang được ghi**; **không một dòng nhật ký
+  nào** về archive/rclone/drive trong 48h; `work/` chỉ có `farmer.lock`.
+  Thiếu bộ đếm archive/round + Appwrite + R2 + listing Drive nên **không phân
+  biệt được A/B/C/D/E** — nói thẳng thay vì chọn bừa một nguyên nhân.
+* **Nghiệm thu thật**: hỏi lại ĐÚNG câu đã hỏng → **0 việc chết vì quyền**,
+  Leader trả lời thẳng từ bằng chứng (0 dispatch). Worker headless thật
+  `fanfic.tc093-1` → **DONE** 18,9s trên **AG02/antigravity**, nhận khối bằng
+  chứng 10,7 KB, tự kết luận **F**, **không** cần `command`, **không** dùng cờ
+  bỏ qua kiểm quyền, **không** rò bí mật, **0** đột biến production.
+* **Khuyết tật CÓ SẴN bắt được trong lúc nghiệm thu**: `pool/adapters.py` từ
+  chối gói việc "hình dạng bảo mật" trước khi gửi Codex, nhưng
+  `codex_security_shaped_refusal` nằm trong `KHONG_THU_LAI` nên việc **chết ở
+  `BLOCKED`** dù thông báo hứa định tuyến lại (đo được: `fanfic.t78ce-1`). Và
+  vì danh sách từ khoá có chữ **"quyền"** — thứ nằm trong lời nhắc công cụ
+  **tiêu chuẩn của mọi việc** — nên gần như MỌI việc xếp vào Codex đều chết
+  như thế. Sửa: kiểm hình dạng **trước khi xếp chỗ**, thêm runtime Codex vào
+  `tranh_runtime` (cơ chế sẵn có của toả). Sau khi sửa, đúng việc đó chạy ở
+  AG02 và DONE.
+* Bài kiểm mới: `scripts/tests/test_probe_van_hanh_v07.py` — **48 bài, 82
+  subtest**, không bài nào chạm mạng. Ba bài bắt được lỗi thật lúc viết: bộ lọc
+  của `packet.redact` **thiếu khoá AWS**; cắt chuỗi JSON đã tuần tự hoá tạo
+  **JSON gãy**; và một `NameError` bị `except Exception` **nuốt mất**, tắt lặng
+  lẽ cả tính năng tránh Codex.
+
+
 ## Bẫy đã gặp
 
 - **Vai "user" trong tệp phiên Claude KHÔNG chứng minh người gõ.** Bản tóm tắt

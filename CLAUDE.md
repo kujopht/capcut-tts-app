@@ -285,6 +285,19 @@ Antigravity account" trong khi sổ ghi 8). Xem
 `docs/reports/NHAN_DU_AN_VIEN_NANG_V07.md` và `docs/CONTROL_CENTER.md` §18
 (luật 13–17).
 
+**V0.7 — PROBE VẬN HÀNH** (`scripts/control_center/probe_van_hanh.py`): câu
+hỏi về PRODUCTION (systemd/rclone/Drive/R2) không được biến thành việc phân
+tích KHO — đo được ở `fanfic.t2efd-1`: worker phải gọi công cụ `command` và
+`agy --print` tự chối (`tool_permission_denied`). Router đo hộ bằng MÔI GIỚI
+CÓ KIỂU: 9 thao tác chỉ đọc, API **không nhận chuỗi lệnh**, tham số kiểm theo
+cấu hình dự án, lưới thứ hai chặn động từ đột biến, **không nâng quyền**. Ai
+thiếu bằng chứng thì phân loại **F** kèm danh sách thiếu gì, không đoán
+nguyên nhân. Việc mang "hình dạng bảo mật" nay tránh Codex NGAY LÚC XẾP CHỖ
+(trước đây chết ở `BLOCKED`, và lời nhắc công cụ tiêu chuẩn của mọi việc đều
+chứa chữ "quyền" nên gần như mọi việc xếp vào Codex đều chết).
+`docs/reports/PROBE_VAN_HANH_V07.md`, `docs/CONTROL_CENTER.md` §19 (luật
+18–21).
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,

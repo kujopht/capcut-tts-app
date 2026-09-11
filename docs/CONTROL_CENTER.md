@@ -1109,3 +1109,49 @@ Năm luật (13–17) thêm vào §16–§17:
     quan nhất ra để lấy chỗ. Thứ được phép hy sinh là TÊN trong dòng cắt,
     không bao giờ là MỤC. Bộ đệm giữ `muc` chứ không giữ văn bản đã render —
     giữ văn bản thì lượt sau nhận bản cắt của câu hỏi trước.
+
+## 19. Môi giới probe vận hành — đọc production, không có shell (V0.7)
+
+Báo cáo: `docs/reports/PROBE_VAN_HANH_V07.md`. Mã:
+`scripts/control_center/probe_van_hanh.py`, luật Leader ở
+`leader.LUAT_VAN_HANH` + `leader.la_cau_hoi_van_hanh()`, đính bằng chứng ở
+`engine._khoi_probe` / `engine._kem_probe_vao_hd`.
+
+Bốn luật (18–21) thêm vào §16–§18:
+
+18. **Câu hỏi VẬN HÀNH không được biến thành việc PHÂN TÍCH KHO.** Đo được
+    (`fanfic.t2efd-1`, 2026-09-11): câu "vì sao Drive chưa có artifact mới"
+    bị xếp `type=analysis` với danh sách lệnh chỉ có
+    `cc_agent_tool.py changes|compile` — không lệnh nào chạm được tới
+    production, nên worker gọi công cụ `command` chung và `agy --print` tự
+    chối (`tool_permission_denied`), lượt kết thúc rỗng. Lời giải vẫn là lời
+    giải cũ, lần thứ tư: **Router đo hộ rồi đính BẰNG CHỨNG**, không nới
+    quyền agent, không bỏ qua kiểm quyền.
+
+19. **Không có lối thoát ra shell, và có LƯỚI THỨ HAI.** `MoiGioiProbe.chay`
+    nhận TÊN THAO TÁC + tham số, không bao giờ nhận chuỗi lệnh; chín thao
+    tác `systemd.*`/`filesystem.*`/`rclone.*` đều CHỈ ĐỌC. Tham số kiểm theo
+    CẤU HÌNH dự án: unit phải đã khai, đường dẫn phải nằm dưới gốc đã khai
+    (so theo ĐOẠN — `/var/lib/x-evil` không lọt qua `/var/lib/x`), thuộc
+    tính systemd theo bảng và bảng KHÔNG có `Environment*`. Ngoài ra
+    `_kiem_chi_doc()` quét chuỗi lệnh cuối và từ chối mọi động từ đột biến +
+    mọi ký tự nối/chuyển hướng. **Không nâng quyền** — trên farmer thật tài
+    khoản quan sát CÓ quyền nâng không mật khẩu, và lớp này vẫn không dùng;
+    chỗ sửa đúng nằm ở phía máy chủ và được BÁO CÁO chứ không tự làm.
+
+20. **Thiếu bằng chứng thì phân loại là F, không phải một nguyên nhân nghe
+    hợp lý.** `kiem_duong_ong()` chỉ khẳng định A–E khi có quan sát ĐO ĐƯỢC
+    chống lưng; thiếu thì trả `F` KÈM danh sách đúng thứ còn thiếu. `grep`
+    trả mã 1 là "không có dòng khớp" — một phép đo THẬT, không phải một lần
+    đo hỏng, nên không được ghi thành `UNKNOWN`. Bộ lọc bí mật dùng
+    `memory.bi_mat.loc` chứ không dùng `packet.redact`: bộ sau KHÔNG có khoá
+    AWS `AKIA…`/`ASIA…`, đúng hình dạng dễ gặp nhất trong log EC2.
+
+21. **Việc mang hình dạng bảo mật KHÔNG được xếp vào Codex.** Codex từ chối
+    loại đó (bằng chứng 2026-08-28), `pool/adapters.py` chặn sẵn, nhưng
+    `codex_security_shaped_refusal` lại nằm trong `KHONG_THU_LAI` — nên việc
+    CHẾT ở `BLOCKED` dù thông báo hứa "định tuyến sang worker khác" (đo được:
+    `fanfic.t78ce-1`). Nặng hơn: lời nhắc công cụ tiêu chuẩn của MỌI việc đều
+    chứa chữ "quyền", nên gần như mọi việc xếp vào Codex đều chết như thế.
+    Nay kiểm hình dạng TRƯỚC khi xếp chỗ và thêm runtime Codex vào
+    `tranh_runtime` — tránh là ưu tiên, không phải rào.

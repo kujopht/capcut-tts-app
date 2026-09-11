@@ -462,6 +462,45 @@ def dung_app(phien: PhienWeb) -> FastAPI:
         from scripts.control_center import kiem_lien_tuc as KL
         return _sach(await asyncio.to_thread(KL.kiem, phien.cc, project))
 
+    # -- V0.7: probe van hanh (CHI DOC) ------------------------------------
+
+    @app.get("/api/probe/capabilities")
+    async def probe_kha_nang(project: str = ""):
+        """Thao tác probe nào dùng được cho dự án này, cái nào KHÔNG và vì sao.
+
+        Chỉ liệt kê năng lực — không chạy phép đo nào.
+        """
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        from scripts.control_center import probe_van_hanh as PV
+
+        def _chay():
+            mg = PV.tu_du_an(project)
+            d = mg.kha_dung()
+            d["ops"] = list(mg.ops())
+            return d
+        return _sach(await asyncio.to_thread(_chay))
+
+    @app.post("/api/probe/audit")
+    async def probe_kiem_toan(payload: Dict):
+        """Kiểm toán đường ống production — CHỈ ĐỌC, phân loại A–F.
+
+        Không nhận chuỗi lệnh: thân yêu cầu chỉ có `project` và cửa sổ giờ.
+        """
+        p = payload or {}
+        project = str(p.get("project") or "").strip()
+        if not project:
+            return _ma_loi(400, "thiếu project")
+        try:
+            gio = max(1, min(168, int(p.get("gio") or 24)))
+        except (TypeError, ValueError):
+            return _ma_loi(400, "`gio` phải là số nguyên")
+        from scripts.control_center import probe_van_hanh as PV
+
+        def _chay():
+            return PV.kiem_duong_ong(PV.tu_du_an(project), gio=gio).to_dict()
+        return _sach(await asyncio.to_thread(_chay))
+
     # -- cai dat giao dien -------------------------------------------------
 
     @app.get("/api/ui")

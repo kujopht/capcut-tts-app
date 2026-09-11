@@ -345,6 +345,20 @@ và `docs/CONTROL_CENTER.md` §22 (luật 25–28). Bốn điều hay vấp nh�
   Antigravity thì ĐO THẬT (`agy --print /usage`) và **chỉ áp cho đúng tài
   khoản đã đo** — áp cho cả tám là biến một phép đo thành bảy con số bịa.
 
+**NGHIỆM THU MODEL THẬT (V0.8)** — `docs/reports/REASONING_V08_REAL.md`,
+`scripts/control_center_v08_real_acceptance.py` (27/28 ở lần chạy đầy đủ; mục
+hỏng là khuyết tật UI đã sửa + xác minh lại riêng). Bảy lượt model thật
+trên ứng dụng THẬT + sổ chính tắc + dự án Fanfic thật; rubric nội dung
+**37/38**; **6/6** khẳng định trạng thái được xác minh bằng một lần ĐO LẠI
+độc lập (MainPID, NRestarts, disk, `status.json: Permission denied`,
+appwrite/r2 UNAVAILABLE). Reviewer (`claude-opus-4-6-thinking`, KHÁC HỌ với
+Strategist `gemini-3.8-flash-high`) trả `REVISE` với 6 phát hiện — trong đó
+bắt được việc Strategist dựa vào một mã ràng buộc mà chính Reviewer không
+được cấp để xác minh. **0 việc tạo ra, 0 thay đổi production.** Lượt vai nay
+ghi vào `.router/v4/benchmark-reasoning.jsonl` (tệp RIÊNG, không trộn lịch sử
+worker) và `BoDinhTuyenVai` đọc lại chính tệp đó — vòng phản hồi đã đóng,
+chỉ chờ đủ `MAU_TOI_THIEU = 3` mẫu để lấn át tiên nghiệm.
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,

@@ -904,7 +904,9 @@ def dung_app(phien: PhienWeb) -> FastAPI:
                      # chua ghi tin nhan nao khi hoi dong vua xong, nen
                      # neu dau nay vang mat thi the SUY LUAN khong bao gio
                      # duoc day di. Do that bang Chrome that.
-                     "suy_luan": (d.get("suy_luan") or {}).get("ts", 0)},
+                     "suy_luan": (d.get("suy_luan") or {}).get("ts", 0),
+                     # Doi che do o mot tab phai hien ra o tab kia NGAY.
+                     "che_do": d.get("che_do", "")},
                     sort_keys=True)
                 if gon != dau:
                     dau = gon

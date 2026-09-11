@@ -130,6 +130,18 @@ class TestSuyLuanV08(_Nen):
         d = self.cl.get("/api/state?project=p", headers=self.h).json()
         self.assertIn("suy_luan", d)
 
+    def test_che_do_di_theo_NHIP_NHANH_cua_state(self):
+        """Đo bằng Chrome thật: thanh trên chỉ đồng bộ ở đường ảnh chụp `git`
+        (bộ đệm 30s), nên đổi chế độ ở một tab không hiện ra ở tab kia."""
+        self.assertEqual(
+            self.cl.get("/api/state?project=p", headers=self.h).json()["che_do"],
+            "AUTO")
+        self.cl.post("/api/reasoning/mode",
+                     json={"project": "p", "che_do": "MAX"}, headers=self.h)
+        self.assertEqual(
+            self.cl.get("/api/state?project=p", headers=self.h).json()["che_do"],
+            "MAX")
+
     def test_dinh_tuyen_di_qua_bo_loc_bi_mat(self):
         r = self.cl.get("/api/reasoning?project=p", headers=self.h)
         self.assertNotIn(self.phien.token, r.text)

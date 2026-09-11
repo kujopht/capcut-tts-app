@@ -944,6 +944,46 @@ class Test12HoiDong(unittest.TestCase):
         self.assertEqual(len(gia.da_goi), 1, "đầu ra không đọc được = VIEC, "
                                              "không định tuyến lại")
 
+    def test_NANG_LUC_khong_hop_thi_dinh_tuyen_lai(self):
+        """Codex từ chối việc "hình dạng bảo mật" (bằng chứng 2026-08-28).
+        Đó là NĂNG LỰC không hợp — thử lại cùng chỗ là vô nghĩa."""
+        hd, gia = self._hd({VaiTro.STRATEGIST: [
+            LuotVai(ok=False, loi="codex_security_shaped_refusal"),
+            LuotVai(ok=True, van_ban=CL_OK)]})
+        kq = hd.chay(cau=G_SCALE, phan_loai=phan_loai_luot(G_SCALE),
+                     che_do=CheDo.AUTO, khoi_san_co={})
+        self.assertIsNotNone(kq.chien_luoc)
+        # CHI dem luot cua STRATEGIST: G_SCALE o AUTO goi ca Reviewer, va
+        # Reviewer khong co kich ban nen no cung sinh luot — dem gop lai se
+        # do mot con so khong lien quan gi toi phep dinh tuyen lai dang kiem.
+        st = [x for x in gia.da_goi if x[0] is VaiTro.STRATEGIST]
+        self.assertEqual(len(st), 2)
+        self.assertNotEqual(st[0][2], st[1][2],
+                            "phải đổi placement sau khi năng lực không hợp")
+
+    def test_XAC_THUC_bao_dung_va_KHONG_thu_cho_khac(self):
+        """Mất xác thực cần NGƯỜI. Thử chỗ khác chỉ che mất việc đó."""
+        hd, gia = self._hd({VaiTro.STRATEGIST: [
+            LuotVai(ok=False, loi="not logged in"),
+            LuotVai(ok=True, van_ban=CL_OK)]})
+        kq = hd.chay(cau=G_SCALE, phan_loai=phan_loai_luot(G_SCALE),
+                     che_do=CheDo.AUTO, khoi_san_co={})
+        self.assertIsNone(kq.chien_luoc)
+        self.assertEqual(len(gia.da_goi), 1, "KHÔNG được thử chỗ khác")
+        ng = kq.nguon_goc[0]
+        self.assertEqual(ng.loai_that_bai, "XAC_THUC")
+        self.assertIn("đăng nhập", ng.ghi_chu)
+
+    def test_thu_lai_CO_TRAN_khong_thanh_thac_nha_cung_cap(self):
+        """Hỏng liên tục KHÔNG được biến thành một chuỗi vô tận."""
+        hd, gia = self._hd({VaiTro.STRATEGIST: [
+            LuotVai(ok=False, loi="429 rate limit") for _ in range(9)]})
+        kq = hd.chay(cau=G_SCALE, phan_loai=phan_loai_luot(G_SCALE),
+                     che_do=CheDo.AUTO, khoi_san_co={})
+        self.assertIsNone(kq.chien_luoc)
+        self.assertLessEqual(len(gia.da_goi), 2,
+                             "trần mỗi vai là 2 lượt — không được vượt")
+
     def test_nguon_goc_ghi_du_de_giai_thich(self):
         hd, _ = self._hd({VaiTro.STRATEGIST: [LuotVai(ok=True, van_ban=CL_OK,
                                                       giay=4.0)],
@@ -1155,6 +1195,62 @@ class Test14DuongDayEngine(unittest.TestCase):
         cs = self.cc.chinh_sach_cao_cap("w")
         self.assertTrue(cs.han_che)
         self.assertNotEqual(cs.nguon, "ky_uc")
+
+    def test_luot_vai_DUOC_GHI_vao_lich_su_benchmark(self):
+        """Vòng phản hồi: `benchmark_profile` phải chuyển từ tiên nghiệm cấu
+        hình sang số ĐO ĐƯỢC. Không có dòng ghi này thì tiên nghiệm là vĩnh
+        viễn — đúng giới hạn v0.8 tự nêu."""
+        from scripts.router_v4.history import BenchmarkStore, duong_vai
+
+        bg = self.cc.leader_ban_ghi("w")
+        self.cc._khoi_hoi_dong("w", E, bg, khoi={"vien_nang": "vn"})
+
+        ls = BenchmarkStore(path=duong_vai(self.goc))
+        ds = ls.all()
+        self.assertEqual(len(ds), 2, "một bản ghi cho MỖI vai đã chạy")
+        loai = {r.task_type for r in ds}
+        self.assertEqual(loai, {"reasoning_strategist", "reasoning_reviewer"})
+        for r in ds:
+            with self.subTest(t=r.task_type):
+                self.assertTrue(r.success)
+                self.assertTrue(r.model_id and r.provider and r.runtime_id)
+                self.assertEqual(r.project, "w")
+                self.assertGreater(r.wall_seconds, 0.0)
+                # KHONG DO DUOC -> None, khong bao gio 0.
+                self.assertIsNone(r.tokens)
+                self.assertIsNone(r.cost_usd)
+                self.assertIsNone(r.quality, "rubric do người chấm, không tự bịa")
+                self.assertTrue(r.rubric, "phải trỏ tới chỗ ghi rubric")
+        rv = next(r for r in ds if r.task_type == "reasoning_reviewer")
+        self.assertEqual(rv.verdict, "REVISE")
+        self.assertGreater(rv.review_findings, 0)
+
+    def test_lich_su_vai_KHONG_tron_vao_lich_su_worker(self):
+        from scripts.router_v4.history import BenchmarkStore, duong, duong_vai
+
+        bg = self.cc.leader_ban_ghi("w")
+        self.cc._khoi_hoi_dong("w", E, bg, khoi={"vien_nang": "vn"})
+        self.assertTrue(duong_vai(self.goc).exists())
+        self.assertEqual(BenchmarkStore(path=duong(self.goc)).all(), [],
+                         "lịch sử worker phải KHÔNG bị lượt suy luận chạm vào")
+
+    def test_du_mau_thi_lich_su_LAN_AT_tien_nghiem(self):
+        """Ba mẫu là `MAU_TOI_THIEU`; từ đó `summary_for` trả số thật."""
+        from scripts.router_v4.history import BenchmarkStore, duong_vai
+
+        bg = self.cc.leader_ban_ghi("w")
+        for _ in range(3):
+            self.gia.kich_ban[VaiTro.STRATEGIST] = [
+                LuotVai(ok=True, van_ban=CL_OK, giay=3.0)]
+            self.gia.kich_ban[VaiTro.REVIEWER] = [
+                LuotVai(ok=True, van_ban=PB_OK, giay=2.0)]
+            self.cc._khoi_hoi_dong("w", E, bg, khoi={"vien_nang": "vn"})
+        ls = BenchmarkStore(path=duong_vai(self.goc))
+        s = ls.summary_for(task_type="reasoning_strategist",
+                           model_id=ls.all()[0].model_id)
+        self.assertIsNotNone(s, "≥3 mẫu thì phải có tổng hợp ĐO ĐƯỢC")
+        self.assertGreaterEqual(s["samples"], 3)
+        self.assertEqual(s["success_rate"], 1.0)
 
 
 if __name__ == "__main__":                                  # pragma: no cover

@@ -192,10 +192,60 @@ class HoiDong:
     """Chạy các vai suy luận cho MỘT lượt hội thoại."""
 
     def __init__(self, *, bo_dinh_tuyen: BoDinhTuyenVai, bo_goi,
-                 ghi_su_kien: Optional[Callable[..., Any]] = None):
+                 ghi_su_kien: Optional[Callable[..., Any]] = None,
+                 lich_su=None, rubric: str = ""):
         self.bo_dinh_tuyen = bo_dinh_tuyen
         self.bo_goi = bo_goi
         self._ghi = ghi_su_kien
+        #: `BenchmarkStore` cho VAI (tệp riêng — xem `history.duong_vai`).
+        #: `None` = không ghi; mọi bài kiểm chạy ở chế độ đó.
+        self.lich_su = lich_su
+        #: Tham chiếu tới chỗ ghi rubric. CHUỖI, không phải nội dung.
+        self.rubric = rubric
+
+    def _ghi_lich_su(self, *, vai: VaiTro, chon: ChonVai, lv, thanh_cong: bool,
+                     so_lan: int, project_id: str, ban) -> None:
+        """Một lượt vai -> một `Record` trong lịch sử VAI.
+
+        ĐÂY LÀ VÒNG PHẢN HỒI. `Scheduler._cham_diem` gọi
+        `history.summary_for(model_id, task_type)` và, khi đủ `MAU_TOI_THIEU`
+        mẫu, dùng `quality`/`success_rate` ĐO ĐƯỢC thay cho
+        `benchmark_profile` tiên nghiệm trong `fabric.json`. Không có dòng
+        này thì mọi tiên nghiệm là vĩnh viễn.
+
+        KHÔNG GHI NỘI DUNG: chỉ nhãn và số. `verdict` là một giá trị trong bộ
+        ĐÓNG `ACCEPT/REVISE/REJECT`; `quality` để `None` vì độ tin model tự
+        khai là LỜI KHAI, không phải phép đo — điểm rubric do kịch bản nghiệm
+        thu ghi riêng.
+        """
+        if self.lich_su is None:
+            return
+        from scripts.router_v4.history import Record
+
+        px = ""
+        pd = 0
+        if ban is not None and isinstance(ban, HD.BanPhanBien):
+            px = ban.phan_xu.value
+            pd = (len(ban.khang_dinh_khong_chung) + len(ban.bang_chung_thieu)
+                  + len(ban.xung_dot_rang_buoc) + len(ban.phat_hien_rui_ro))
+        try:
+            self.lich_su.record(Record(
+                ts=time.time(), task_type=f"reasoning_{vai.value}",
+                provider=chon.provider, model_id=chon.model_id,
+                runtime_id=chon.runtime_id,
+                wall_seconds=float(getattr(lv, "giay", 0.0) or 0.0),
+                success=bool(thanh_cong),
+                review_findings=pd,
+                retry_count=max(0, int(so_lan) - 1),
+                reassigned=bool(so_lan > 1),
+                tokens=None, cost_usd=None,      # KHONG do duoc -> None, khong 0
+                project=project_id, verdict=px, quality=None,
+                rubric=self.rubric))
+        except Exception as exc:                            # noqa: BLE001
+            # Mot dong telemetry hong KHONG duoc lam hong mot luot hoi thoai.
+            self._sk("REASONING_HISTORY_ERROR", project_id=project_id,
+                     level="WARNING",
+                     detail=f"{type(exc).__name__}: {exc}"[:200])
 
     def _sk(self, kind: str, **kw) -> None:
         if self._ghi is None:
@@ -287,6 +337,10 @@ class HoiDong:
                 astra_ly_do=chon.astra_ly_do,
                 loai_that_bai=""))
             ng.ban_ghi = bg
+
+            self._ghi_lich_su(vai=vai, chon=chon, lv=lv,
+                              thanh_cong=ban is not None, so_lan=ng.so_lan,
+                              project_id=project_id, ban=ban)
 
             if ban is not None:
                 ng.trang_thai = "OK"

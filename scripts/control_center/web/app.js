@@ -409,6 +409,25 @@ function veInspDangChay() {
 //
 // Nguon la `snapshot().suy_luan` (ban GON, cung nhip WebSocket). Ban day du
 // — nang luc tung model, chinh sach cao cap, han muc do duoc — nam sau nut ↻.
+// CHE DO theo NHIP NHANH (`snapshot().che_do`), khong theo anh chup git.
+//
+// Thanh tren cu chi dong bo trong `veInspSnapshotTuCache()` — duong do co bo
+// dem 30 giay vi no chay ~6 lenh `git`. Do bang Chrome that: doi che do o
+// mot tab thi tab kia giu gia tri cu toi 30 giay. Nguon su that phai toi
+// theo dung nhip ma no doi.
+function veCheDo() {
+  const cd = S.che_do;
+  if (!cd) return;
+  const chip = $('#chip-che-do');
+  if (chip && chip.textContent.trim() !== cd) {
+    chip.innerHTML = `<b>${esc(cd)}</b>`;
+  }
+  const oc = $('#chon-che-do');
+  // KHONG ghi de khi o dang duoc mo: ghi de giua luc nguoi dung dang chon
+  // se dong danh sach xo xuong ngay duoi tay ho.
+  if (oc && oc.value !== cd && document.activeElement !== oc) oc.value = cd;
+}
+
 function veInspSuyLuan() {
   const s = S.suy_luan;
   const nhan = $('#sl-che-do');
@@ -756,6 +775,7 @@ function veHet() {
   veInspDangChay(); veInspTasks(); veInspAgents(); veInspUsageTuCache();
   veSongTuCache();
   veInspSuyLuan();
+  veCheDo();
   veDangLam();
 
   // LAY LAI USAGE KHI TRANG THAI DOI — day la duong lam moi CHINH, khong

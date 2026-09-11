@@ -360,14 +360,16 @@ source-mode: `router-cc-web.cmd`.
 
 ## 13. Giới hạn còn lại
 
-1. **Chưa có lượt model THẬT nào của Strategist/Reviewer được đo.** Đường
-   `BoGoiThat` (agy ấm / codex một lượt) đã viết và biên dịch, nhưng phép đo
-   đầu-cuối với model thật chưa chạy — nó tiêu hạn mức Antigravity, và bể
-   Claude/GPT đang ở 10% tuần. Đây là giới hạn LỚN NHẤT của v0.8: chất lượng
-   *nội dung* của bản chiến lược và bản phản biện chưa có số liệu.
-2. **`benchmark_profile` vẫn là tiên nghiệm cấu hình.** `router_v4/history.py`
-   sẽ lấn át dần khi có ≥3 mẫu thật cho mỗi (model, loại việc); hiện chưa có
-   mẫu nào cho `reasoning_*`.
+1. ~~**Chưa có lượt model THẬT nào của Strategist/Reviewer được đo.**~~
+   **ĐÃ ĐÓNG** — xem `docs/reports/REASONING_V08_REAL.md`: bảy lượt model
+   thật trên ứng dụng thật + sổ chính tắc + dự án Fanfic thật, rubric
+   **37/38 = 0.974**, và 6/6 khẳng định trạng thái được xác minh bằng một
+   lần ĐO LẠI độc lập.
+2. ~~**`benchmark_profile` vẫn là tiên nghiệm cấu hình.**~~ **CƠ CHẾ ĐÃ
+   SỐNG** — lượt vai nay ghi vào `.router/v4/benchmark-reasoning.jsonl` và
+   `BoDinhTuyenVai` đọc chính tệp đó. Chưa đủ `MAU_TOI_THIEU = 3` mẫu cho
+   cùng `(model, task_type)` nên tiên nghiệm vẫn đang được dùng — đúng thiết
+   kế, không phải thiếu sót.
 3. **`gpt-6-astra` chưa có placement nào.** Đường leo thang đã kiểm được đầu
    -cuối bằng fabric của bài kiểm, nhưng chưa bật trên fabric thật.
 4. **Bộ phân loại là tất định và tiếng Việt/Anh.** Một cách diễn đạt lạ sẽ

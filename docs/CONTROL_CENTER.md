@@ -1236,9 +1236,14 @@ cũ đã đánh mốc `DA_DI_TRU.json`, hai nhánh tính năng
 
 ## 22. Kiến trúc suy luận nhiều vai (V0.8)
 
-Báo cáo: `docs/reports/REASONING_V08.md`. Mã: `scripts/control_center/
-reasoning/`. Bài kiểm: `scripts/tests/test_reasoning_v08.py` (100 bài).
-Nghiệm thu: `scripts/control_center_v08_acceptance.py` (25/25 ĐẠT).
+Báo cáo: `docs/reports/REASONING_V08.md` (kiến trúc) và
+`docs/reports/REASONING_V08_REAL.md` (**nghiệm thu MODEL THẬT**). Mã:
+`scripts/control_center/reasoning/`. Bài kiểm:
+`scripts/tests/test_reasoning_v08.py`. Nghiệm thu tất định:
+`scripts/control_center_v08_acceptance.py` (25/25); nghiệm thu thật:
+`scripts/control_center_v08_real_acceptance.py` (27/28 ở lần chạy đầy đủ —
+mục hỏng là một khuyết tật UI đã sửa và xác minh lại riêng; rubric nội dung
+37/38).
 
 Bốn vai, và chỉ ba trong số đó đi qua gói này: **LEADER** (sở hữu hội thoại,
 tổng hợp), **STRATEGIST** (kiến trúc/lộ trình/đánh đổi), **REVIEWER** (phản

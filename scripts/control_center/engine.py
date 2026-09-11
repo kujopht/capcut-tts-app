@@ -477,13 +477,20 @@ class ControlCenter:
             # `REASONING_ERROR`. Hau qua: hoi dong KHONG BAO GIO chay, va
             # giao dien chi thay ban ghi cu cua luot truoc. Do that o phep
             # kiem duong day cua engine truoc khi commit.
-            bdt = BoDinhTuyenVai(self.fabric, weights=w,
-                                 history=BenchmarkStore(root=self.root))
+            # LICH SU CUA VAI nam o TEP RIENG (`history.duong_vai`) — KHONG
+            # tron voi lich su worker. Cung mot kho doc no de cho diem VA ghi
+            # vao no sau moi luot: do la ca vong phan hoi, va no la thu bien
+            # `benchmark_profile` tu tien nghiem cau hinh thanh so DO DUOC.
+            from scripts.router_v4.history import duong_vai
+            ls_vai = BenchmarkStore(path=duong_vai(self.root))
+            bdt = BoDinhTuyenVai(self.fabric, weights=w, history=ls_vai)
             bo_goi = self._bo_goi_vai
             if bo_goi is None:
                 bo_goi = BoGoiThat(providers=self._providers)
             self._hoi_dong = HoiDong(bo_dinh_tuyen=bdt, bo_goi=bo_goi,
-                                     ghi_su_kien=self.store.ghi_su_kien)
+                                     ghi_su_kien=self.store.ghi_su_kien,
+                                     lich_su=ls_vai,
+                                     rubric="docs/reports/REASONING_V08_REAL.md#rubric")
         return self._hoi_dong
 
     def nguon_goc_suy_luan(self, project_id: str) -> Dict:
@@ -3557,6 +3564,18 @@ class ControlCenter:
             b = self._buoc.get(pid)
             ngg = self._nguon_goc_suy_luan.get(pid)
         d["buoc"] = {"nhan": b[0], "tu_luc": b[1]} if b else None
+        # V0.8 — CHE DO CHAT LUONG di theo NHIP NHANH.
+        #
+        # No cung co trong `AnhChupDuAn` (`/api/snapshot`), nhung duong do
+        # chay ~6 lenh `git` nen frontend goi no CHAM va co bo dem 30 giay.
+        # Hau qua do duoc bang Chrome that: doi che do o mot tab thi thanh
+        # tren cua tab kia giu gia tri cu toi 30 giay — nguoi dung tuong minh
+        # dang o MAX trong khi so ghi AUTO. Nguon su that phai toi theo dung
+        # nhip ma no doi.
+        try:
+            d["che_do"] = self.leader_ban_ghi(pid).che_do
+        except Exception:                                   # noqa: BLE001
+            d["che_do"] = ""
         # V0.8 — §12 ĐỊNH TUYẾN GIẢI THÍCH ĐƯỢC. Đi qua `snapshot` nên nó tới
         # giao diện qua CÙNG nhịp WebSocket, không cần một lần gọi nữa.
         #

@@ -261,6 +261,7 @@ class HoiDong:
                   khoi_san_co: Dict[str, str], nguon_khoi: Dict[str, str],
                   huong_dan: str, doc: Callable[[str], Any],
                   thu_lai: ChinhSachThuLai, so: SoDinhTuyen,
+                  khoi_gon: Optional[Dict[str, str]] = None,
                   ho_tac_gia: str = "", doi_doc_lap: bool = False,
                   nguoi_yeu_cau_cao_cap: bool = False,
                   project_id: str = "",
@@ -302,7 +303,8 @@ class HoiDong:
             goi_kem = dict(khoi_san_co)
             goi = NC.dung_goi(vai, khoi_san_co=goi_kem, nguon=nguon_khoi,
                               huong_dan=huong_dan,
-                              tran_token=h.tran_token_ngu_canh)
+                              tran_token=h.tran_token_ngu_canh,
+                              khoi_gon=dict(khoi_gon or {}))
             ng.ke_khai = goi.ke_khai()
 
             ten_gui = ""
@@ -386,6 +388,7 @@ class HoiDong:
     def chay(self, *, cau: str, phan_loai: PhanLoai, che_do: CheDo,
              khoi_san_co: Dict[str, str],
              nguon_khoi: Optional[Dict[str, str]] = None,
+             khoi_gon: Optional[Dict[str, str]] = None,
              chinh_sach: Optional[ChinhSachCaoCap] = None,
              project_id: str = "",
              thu_lai: Optional[ChinhSachThuLai] = None) -> KetQuaHoiDong:
@@ -415,13 +418,14 @@ class HoiDong:
         tl = thu_lai or ChinhSachThuLai()
         nguon_khoi = dict(nguon_khoi or {})
         khoi = dict(khoi_san_co or {})
+        gon = dict(khoi_gon or {})
         khoi.setdefault("yeu_cau_nguoi_dung", cau or "")
 
         # -- STRATEGIST --
         bcl, ng_s = self._chay_vai(
             VaiTro.STRATEGIST, p=phan_loai, che_do=che_do, khoi_san_co=khoi,
             nguon_khoi=nguon_khoi, huong_dan=HD.NHAC_STRATEGIST,
-            doc=HD.doc_ban_chien_luoc, thu_lai=tl, so=kq.so,
+            doc=HD.doc_ban_chien_luoc, thu_lai=tl, so=kq.so, khoi_gon=gon,
             nguoi_yeu_cau_cao_cap=(che_do is CheDo.MAX),
             project_id=project_id, chinh_sach=chinh_sach)
         kq.nguon_goc.append(ng_s)
@@ -457,6 +461,7 @@ class HoiDong:
                     khoi_san_co=khoi_r, nguon_khoi=nguon_r,
                     huong_dan=HD.NHAC_REVIEWER, doc=HD.doc_ban_phan_bien,
                     thu_lai=tl, so=kq.so, ho_tac_gia=ho, doi_doc_lap=True,
+                    khoi_gon=gon,
                     nguoi_yeu_cau_cao_cap=False, project_id=project_id,
                     chinh_sach=chinh_sach)
                 kq.nguon_goc.append(ng_r)

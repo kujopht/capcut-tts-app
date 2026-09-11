@@ -1401,13 +1401,21 @@ class ControlCenter:
             # no la mot khoi du lieu NUA trong nhac nho cua Leader: mot luot,
             # khong phai hai. Cau tam thuong khong goi vai nao va khoi nay rong
             # — xem `reasoning/phan_loai.py` mục CONG TAM THUONG.
+            # V0.9 (§16) — KHOI RANG BUOC: quyet dinh dang hieu luc + rang
+            # buoc an toan + yeu cau, xep theo THAM QUYEN va co SAN ngan sach
+            # rieng trong goi cua moi vai. V0.8 khong dung khoi nay, nen rang
+            # buoc phai canh tranh voi lich su du an trong cung mot cuc van
+            # ban — do la ly do do duoc cua 2724/3400 o nghiem thu that.
+            khoi_rb, gon_rb = self._khoi_rang_buoc(pid)
             khoi_hd = self._khoi_hoi_dong(
                 pid, text, bg,
                 khoi={"vien_nang": khoi_nang, "ky_uc": khoi_ky_uc,
                       "trang_thai_song": khoi_song,
                       "bang_chung_van_hanh": khoi_probe,
                       "noi_dung_web": khoi_web,
-                      "trang_thai_kho": anh.tom_tat()})
+                      "rang_buoc": khoi_rb,
+                      "trang_thai_kho": anh.tom_tat()},
+                khoi_gon={"rang_buoc": gon_rb})
             nn = leader.dung_nhac_nho(anh, ls, text, khoi_song=khoi_song,
                                       khoi_ky_uc=khoi_ky_uc, khoi_toa=khoi_toa,
                                       la_lich_su=la_lich_su, khoi_web=khoi_web,
@@ -1435,8 +1443,43 @@ class ControlCenter:
                         + " — rơi về phân rã trực tiếp"))
             return None
 
+    def _khoi_rang_buoc(self, project_id: str) -> Tuple[str, str]:
+        """`(bản đầy đủ, bản gọn)` của khối ràng buộc — V0.9 §16.
+
+        Bản GỌN được dựng SẴN ở đây chứ không để `ngu_canh.py` tự cắt: cắt
+        một khối văn xuôi làm đôi thì nửa còn lại trông y như một khối đầy
+        đủ. Bản gọn của `rang_buoc.KhoiRangBuoc` là một khối hoàn chỉnh
+        khác — nó tự NÊU TÊN những mã nó đã lược.
+
+        Hỏng ở đây KHÔNG được làm vỡ lượt chat, cùng nguyên tắc
+        `_khoi_ky_uc`: mất khối ràng buộc thì phản biện kém đi, không phải
+        cả cuộc trò chuyện hỏng.
+        """
+        try:
+            from scripts.control_center.reasoning import rang_buoc as RB
+            from scripts.control_center.reasoning.ngu_canh import san_cua
+            from scripts.control_center.reasoning.vai import VaiTro, ho_so
+            k = RB.dung_khoi(self.ky_uc, project_id)
+            if k.rong:
+                return "", ""
+            day, _ = k.render()
+            # San CHAT NHAT trong ba vai — mot ban gon vua san hep nhat thi
+            # vua moi san.
+            hep = min(san_cua(v, "rang_buoc", ho_so(v).tran_token_ngu_canh)
+                      for v in (VaiTro.LEADER, VaiTro.STRATEGIST,
+                                VaiTro.REVIEWER))
+            gon, _luoc = k.render(tran_token=hep)
+            return day, gon
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "CONSTRAINT_BLOCK_ERROR", project_id=project_id,
+                level="WARNING",
+                detail=f"khối ràng buộc: {type(exc).__name__}: {exc}"[:300])
+            return "", ""
+
     def _khoi_hoi_dong(self, project_id: str, text: str, bg,
-                       khoi: Dict[str, str]) -> str:
+                       khoi: Dict[str, str],
+                       khoi_gon: Optional[Dict[str, str]] = None) -> str:
         """Chạy hội đồng suy luận và trả KHỐI cho nhắc nhở Leader, hoặc `""`.
 
         Ba tính chất, mỗi cái ứng với một chế độ hỏng thật:
@@ -1488,11 +1531,14 @@ class ControlCenter:
             kq = self.hoi_dong.chay(
                 cau=text, phan_loai=pl, che_do=cd,
                 khoi_san_co={k: v for k, v in (khoi or {}).items() if v},
-                nguon_khoi={"vien_nang": "viên nang dự án (V0.7)",
+                nguon_khoi={"rang_buoc": "ký ức dự án — quyết định/ràng buộc "
+                                         "đang hiệu lực (V0.9)",
+                            "vien_nang": "viên nang dự án (V0.7)",
                             "ky_uc": "ký ức dự án (V0.6)",
                             "trang_thai_song": "probe sống (V0.5)",
                             "bang_chung_van_hanh": "ProductionProbeBroker (V0.7)",
                             "trang_thai_kho": "git + sổ Control Center"},
+                khoi_gon={k: v for k, v in (khoi_gon or {}).items() if v},
                 chinh_sach=self.chinh_sach_cao_cap(project_id),
                 project_id=project_id)
             with self._khoa:

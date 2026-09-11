@@ -248,6 +248,14 @@ Một bài học nhỏ đi kèm: bản đầu của phép kiểm này dùng `jso
 gọn** `NameError`, tắt lặng lẽ cả tính năng. Bài kiểm bắt được; nay dùng
 `str(dict)` và `except` hẹp lại.
 
+**Rủi ro còn lại, nói rõ:** `tranh_runtime` là một **ưu tiên, không phải một
+rào** (`sessions.decide` cố ý như vậy, để toả đa agent vẫn chạy được khi bể
+cạn chỗ). Nghĩa là nếu MỌI runtime khác đều bận, một việc mang hình dạng bảo
+mật vẫn có thể rơi vào Codex và chết ở `BLOCKED` như cũ. Sửa triệt để là làm
+cho `codex_security_shaped_refusal` **định tuyến lại thật** thay vì nằm trong
+`KHONG_THU_LAI` — việc đó chạm bộ lập lịch nên **cố ý để ngoài** phạm vi lần
+này, và ghi lại ở đây để không bị quên.
+
 ## 7. Bài kiểm
 
 `scripts/tests/test_probe_van_hanh_v07.py` — **48 bài, 82 subtest**, không bài

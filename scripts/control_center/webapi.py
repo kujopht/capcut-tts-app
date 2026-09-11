@@ -781,6 +781,59 @@ def dung_app(phien: PhienWeb) -> FastAPI:
         xác nhận trước khi gọi, và việc này được ghi vào sổ kiểm toán."""
         return await asyncio.to_thread(_viec, phien.cc.mo_khoa_gated, task_id)
 
+    # ---- V0.9 — VONG KIN THUC THI -------------------------------------
+    #
+    # Moi tuyen o day di qua DUNG hai canh cong cua §11 muc "API cuc bo":
+    # kiem `Host` TRUOC kiem token, va token o MOI request ke ca `GET`.
+    # Chung nam trong `canh_cong` nen khong tuyen nao tu mo duoc.
+
+    @app.get("/api/executions")
+    async def cac_thuc_thi(project: str = "", dang_song: int = -1):
+        ds = None if dang_song < 0 else bool(dang_song)
+        return {"ket_qua": await asyncio.to_thread(
+            phien.cc.thuc_thi_danh_sach, project, ds)}
+
+    @app.get("/api/execution")
+    async def mot_thuc_thi(id: str = ""):
+        if not id:
+            return _ma_loi(400, "thiếu `id`")
+        d = await asyncio.to_thread(phien.cc.thuc_thi_anh_chup, id)
+        if not d:
+            return _ma_loi(404, f"không có lần thực thi {id!r}")
+        return _sach(d)
+
+    def _tt(ham, eid: str, **kw):
+        try:
+            return {"ok": True, "y_dinh": ham(eid, **kw)}
+        except Exception as exc:                          # noqa: BLE001
+            return _ma_loi(400, f"{type(exc).__name__}: {exc}")
+
+    @app.post("/api/execution/{eid}/approve")
+    async def duyet_thuc_thi(eid: str, payload: Optional[Dict] = None):
+        """Duyệt cổng thẩm quyền. HÀNH ĐỘNG CỦA NGƯỜI, không có đường tự động.
+
+        Frontend PHẢI hỏi xác nhận trước khi gọi, và phải hiện rõ thao tác
+        GATED nào đang được mở — `cau_hoi_tham_quyen` đã soạn sẵn câu đó.
+        """
+        dong_y = bool((payload or {}).get("dong_y", True))
+        return await asyncio.to_thread(
+            _tt, phien.cc.thuc_thi_duyet, eid,
+            boi=str((payload or {}).get("boi") or "user")[:80], dong_y=dong_y)
+
+    @app.post("/api/execution/{eid}/pause")
+    async def tam_dung_thuc_thi(eid: str):
+        return await asyncio.to_thread(_tt, phien.cc.thuc_thi_tam_dung, eid)
+
+    @app.post("/api/execution/{eid}/resume")
+    async def tiep_tuc_thuc_thi(eid: str):
+        return await asyncio.to_thread(_tt, phien.cc.thuc_thi_tiep_tuc, eid)
+
+    @app.post("/api/execution/{eid}/cancel")
+    async def huy_thuc_thi(eid: str, payload: Optional[Dict] = None):
+        return await asyncio.to_thread(
+            _tt, phien.cc.thuc_thi_huy, eid,
+            ly_do=str((payload or {}).get("ly_do") or "")[:200])
+
     @app.post("/api/project")
     async def them_project(payload: Dict):
         pid = (payload or {}).get("project_id") or ""

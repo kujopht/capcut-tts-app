@@ -83,9 +83,9 @@ class ViecGia:
         self.da_nha: List[str] = []
         self._n = 0
 
-    def tao_viec(self, y, b, lan) -> str:
+    def tao_viec(self, y, b, lan, phien_ban=1) -> str:
         self._n += 1
-        tid = f"{y.project_id}.{b.buoc_id}#{self._n}"
+        tid = f"{y.project_id}.{b.buoc_id}-v{phien_ban}#{self._n}"
         self.tao.append(tid)
         self.trang_thai[tid] = "RUNNING"
         return tid

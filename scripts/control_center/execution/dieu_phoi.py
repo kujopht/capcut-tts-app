@@ -49,7 +49,8 @@ from scripts.control_center.execution.phuc_hoi import (ChanDoan,
                                                        NganSachPhucHoi,
                                                        ap_tran, phan_loai_hong)
 from scripts.control_center.execution.so import SoThucThi, tien_do
-from scripts.control_center.execution.trang_thai import TrangThaiThucThi as TT
+from scripts.control_center.execution.trang_thai import (TrangThaiThucThi as TT,
+                                                         co_the_chuyen)
 from scripts.control_center.execution.y_dinh import (TrangThaiDuyet,
                                                      YDinhThucThi,
                                                      cau_hoi_tham_quyen)
@@ -99,7 +100,7 @@ class BoDieuPhoi:
     """Đẩy một lần thực thi đi tiếp. Không sở hữu luồng nào — bộ gọi gọi `tick`."""
 
     def __init__(self, so: SoThucThi, *,
-                 tao_viec: Callable[[YDinhThucThi, BuocKeHoach, int], str],
+                 tao_viec: Callable[[YDinhThucThi, BuocKeHoach, int, int], str],
                  trang_thai_viec: Callable[[str], str],
                  dung_viec: Optional[Callable[[str, str], None]] = None,
                  nha_tai_nguyen: Optional[Callable[[str, str], int]] = None,
@@ -171,8 +172,15 @@ class BoDieuPhoi:
         y = self.so.y_dinh(execution_id)
         if y is None:
             return KetQuaTick(execution_id, ghi_chu="không có lần thực thi này")
-        if y.trang_thai in (TT.PAUSED, TT.BLOCKED, TT.WAITING_AUTHORITY) \
-                or y.trang_thai.ket_thuc:
+        # REPLANNING nằm trong danh sách này, và nó là một LỖI THẬT đã vấp:
+        # một lần thực thi đang chờ kế hoạch mới mà bị `tick` đẩy tiếp sẽ rơi
+        # vào `_sang_kiem_dinh` (không bước nào `CHUA_CHAY`) rồi xin
+        # `REPLANNING -> VERIFYING` — một chuyển bảng chuyển CẤM. `tick` ném,
+        # vòng lặp điều phối nuốt ngoại lệ vào `EXEC_TICK_ERROR`, và lần thực
+        # thi kẹt vĩnh viễn ở `REPLANNING` mà không ai được báo. Đo được ở
+        # lát cắt dọc đầu tiên của V0.9.
+        if y.trang_thai in (TT.PAUSED, TT.BLOCKED, TT.WAITING_AUTHORITY,
+                            TT.REPLANNING) or y.trang_thai.ket_thuc:
             return KetQuaTick(execution_id, trang_thai=y.trang_thai.value,
                               ghi_chu=y.trang_thai.nhan)
         kh = self.so.ke_hoach(execution_id)
@@ -242,7 +250,13 @@ class BoDieuPhoi:
             if cu.get("task_id") and self._con_song(cu["task_id"]):
                 continue
             try:
-                tid = self._tao_viec(y, b, int(cu.get("so_lan_thu") or 0))
+                # `phien_ban` ĐI CÙNG: mã việc phải duy nhất qua các bản kế
+                # hoạch. Không có nó thì lượt đầu của bản v2 sinh ra ĐÚNG mã
+                # việc của bản v1, `luu_task` ghi đè một việc đã kết thúc về
+                # `QUEUED`, và `buoc_theo_task` không còn nói được kết quả
+                # thuộc bản nào. Đo được 2026-09-11.
+                tid = self._tao_viec(y, b, int(cu.get("so_lan_thu") or 0),
+                                     kh.phien_ban)
             except Exception as exc:                        # noqa: BLE001
                 self.so.ghi_su_kien(
                     execution_id, "STEP_DISPATCH_ERROR",
@@ -302,7 +316,7 @@ class BoDieuPhoi:
         kq.buoc_id = m
         self.so.luu_buoc(eid, pb, m, ket_qua=kq,
                          state=TrangThaiBuoc.CHO_KIEM.value)
-        tt, ds = kiem_dinh_buoc(b, kq, moi_gioi=self.moi_gioi)
+        tt, ds = kiem_dinh_buoc(b, kq, moi_gioi=self._moi_gioi_cua(kq))
         self.so.luu_buoc(eid, pb, m, xac_minh=tt,
                          kiem=[k.to_dict() for k in ds])
         self._so_chi_phi(eid).them(
@@ -330,21 +344,87 @@ class BoDieuPhoi:
                   "kiem": [k.to_dict() for k in ds]})
         return self._xu_ly_chan_doan(y, kh, m, cd)
 
+    def _moi_gioi_cua(self, kq: HopDongKetQua) -> Optional[MoiGioiKiem]:
+        """Môi giới kiểm neo vào ĐÚNG worktree mà bước đó chạy trong.
+
+        KHÔNG phải gốc kho. Agent ghi vào một worktree cô lập, nên `git
+        status` ở gốc kho thấy một cây SẠCH và `GIT_CO_THAY_DOI` trả lời sai
+        cho mọi bước ghi — việc làm đúng bị chấm là hỏng, rồi thử lại, rồi
+        lập lại kế hoạch, rồi kẹt. Đó là bốn bài kiểm hỏng ở lát cắt dọc đầu
+        tiên của V0.9, và nó là một lỗi KIỂM ĐỊNH chứ không phải lỗi việc.
+
+        Không có worktree (bước chỉ đọc, hoặc executor không cấp) thì dùng
+        môi giới gốc — ở đó phép kiểm đọc-lời-khai vẫn đúng.
+        """
+        w = str(getattr(kq, "worktree", "") or "").strip()
+        if not w:
+            return self.moi_gioi
+        try:
+            from pathlib import Path as _P
+            if not _P(w).is_dir():
+                return self.moi_gioi
+            return MoiGioiKiem(w)
+        except Exception:                                   # noqa: BLE001
+            return self.moi_gioi
+
     def _phu_thuoc_hong(self, eid: str, pb: int, b: BuocKeHoach) -> bool:
         bs = {x["buoc_id"]: x for x in self.so.buoc(eid, pb)}
         return any((bs.get(d) or {}).get("state") in
                    (TrangThaiBuoc.HONG.value, TrangThaiBuoc.BO_QUA.value)
                    for d in b.phu_thuoc)
 
+    def bo_viec(self, task_id: str, ly_do: str) -> None:
+        """BỎ một việc con — và NHẢ thứ nó đang giữ. Không chỉ quên mã của nó.
+
+        LỖI THẬT ĐÃ VẤP (đo 2026-09-11): bản đầu chỉ xoá `task_id` khỏi hàng
+        bước rồi giao việc mới. Việc cũ vẫn sống trong LADDER THỬ LẠI CỦA
+        TẦNG VIỆC (`engine._thu_lai_neu_dang`) và vẫn GIỮ khoá ghi của nó,
+        nên việc mới xin cùng tài nguyên và nằm ở `WAITING`. Sau hai lượt,
+        mọi việc đều `WAITING`, `in_flight` rỗng, và cả lần thực thi đứng im
+        vĩnh viễn — trông y hệt một agent treo, nhưng không agent nào chạy.
+
+        Hai tầng cùng thử lại một việc là một lỗi kiến trúc, không phải một
+        cuộc đua: tầng bước sở hữu vòng lặp phục hồi (§9), nên khi nó quyết
+        định bỏ một lượt thì lượt đó phải CHẾT HẲN.
+        """
+        if not task_id or self._dung_viec is None:
+            return
+        # KHÔNG kiểm `_con_song` ở đây, và đó là điểm tinh tế nhất của hàm:
+        # một việc vừa `FAILED` trông như đã chết, nhưng tầng việc có vòng
+        # thử lại riêng và sẽ đưa nó về `QUEUED` ngay nhịp sau. Bỏ qua nó vì
+        # "nó đã terminal rồi" chính là cách việc bị bỏ sống lại và giành
+        # khoá với lượt mới. Gọi vô điều kiện; bên nhận tự lo trường hợp việc
+        # đã thật sự kết thúc.
+        try:
+            self._dung_viec(task_id, ly_do)
+        except Exception:                                   # noqa: BLE001
+            pass
+
+    def _bo_moi_viec_con_song(self, eid: str, phien_ban: int,
+                              ly_do: str) -> List[str]:
+        ra: List[str] = []
+        for st in self.so.buoc(eid, phien_ban):
+            tid = st.get("task_id") or ""
+            if tid:
+                self.bo_viec(tid, ly_do)
+                ra.append(tid)
+        return ra
+
     def _xu_ly_chan_doan(self, y: YDinhThucThi, kh: KeHoachThucThi,
                          buoc_id: str, cd: ChanDoan) -> KetQuaTick:
         eid, pb = y.execution_id, kh.phien_ban
         hd = cd.hanh_dong
+        cu = next((x for x in self.so.buoc(eid, pb)
+                   if x["buoc_id"] == buoc_id), {}) or {}
         if hd in (HanhDongPhucHoi.THU_LAI, HanhDongPhucHoi.DINH_TUYEN_LAI,
                   HanhDongPhucHoi.TAO_VIEC_SUA):
+            # BỎ HẲN lượt cũ TRƯỚC khi giao lượt mới — xem `bo_viec`. Bằng
+            # chứng KHÔNG mất: nó nằm trong `ket_qua_json` của hàng bước, và
+            # việc cũ vẫn ở trong sổ việc với trạng thái cuối của nó.
+            self.bo_viec(cu.get("task_id") or "",
+                         f"bước {buoc_id} được giao lại ({hd.value})")
             # Ve `CHUA_CHAY` de nhip sau giao lai. `task_id` bi XOA de
-            # `_con_song` khong chan viec moi — nhung ban ghi ket qua cu VAN
-            # con trong `ket_qua_json`, nen bang chung khong mat.
+            # `_con_song` khong chan viec moi.
             self.so.luu_buoc(eid, pb, buoc_id, task_id="",
                              state=TrangThaiBuoc.CHUA_CHAY.value)
             self.so.dem_thu_lai(eid, tang=1)
@@ -355,6 +435,17 @@ class BoDieuPhoi:
             return self.tick(eid)
         if hd is HanhDongPhucHoi.LAP_LAI_KE_HOACH:
             self.so.luu_buoc(eid, pb, buoc_id, state=TrangThaiBuoc.HONG.value)
+            # MỌI việc con của bản cũ phải chết trước khi bản mới chạy. Một
+            # việc sót lại vẫn giữ khoá ghi của nó và bản mới sẽ nằm ở
+            # `WAITING` mãi — xem `bo_viec`.
+            bo = self._bo_moi_viec_con_song(
+                eid, pb, f"lập lại kế hoạch v{pb} -> v{pb + 1}")
+            if bo:
+                self.so.ghi_su_kien(
+                    eid, "TASKS_ABANDONED", project_id=y.project_id,
+                    level="WARNING",
+                    detail=f"bỏ {len(bo)} việc của bản v{pb} trước khi lập lại",
+                    meta={"task_ids": bo})
             self.so.doi_trang_thai(eid, TT.REPLANNING,
                                    ly_do=cd.ly_do, pha="lập lại kế hoạch")
             return KetQuaTick(eid, trang_thai=TT.REPLANNING.value,
@@ -364,6 +455,7 @@ class BoDieuPhoi:
             return self.tick(eid)
         # DUNG_CHO_NGUOI
         self.so.luu_buoc(eid, pb, buoc_id, state=TrangThaiBuoc.HONG.value)
+        self._bo_moi_viec_con_song(eid, pb, "lần thực thi dừng chờ người")
         y2 = self.so.doi_trang_thai(
             eid, TT.BLOCKED,
             ly_do=(f"[{cd.loai.value}] {cd.ly_do}"
@@ -385,6 +477,16 @@ class BoDieuPhoi:
             return KetQuaTick(y.execution_id, trang_thai=y.trang_thai.value,
                               ghi_chu=f"{len(chua)} bước chờ phụ thuộc/tài nguyên")
         if y.trang_thai is not TT.VERIFYING:
+            # LƯỚI THỨ HAI cho cùng lỗi ở `tick`: chỉ vào `VERIFYING` từ một
+            # trạng thái đi được tới đó. Không kiểm thì một đường gọi KHÁC —
+            # ví dụ `nhan_ket_qua` của một bước anh em ngay sau khi bộ điều
+            # phối vừa chuyển sang `REPLANNING` — sẽ ném ở đây thay vì ở
+            # `tick`, và lỗi chỉ đổi chỗ chứ không biến mất.
+            if not co_the_chuyen(y.trang_thai, TT.VERIFYING):
+                return KetQuaTick(y.execution_id,
+                                  trang_thai=y.trang_thai.value,
+                                  ghi_chu=(f"không kiểm định từ "
+                                           f"{y.trang_thai.value}"))
             y = self.so.doi_trang_thai(y.execution_id, TT.VERIFYING,
                                        pha="đang kiểm định mục tiêu gốc")
         bc = self.kiem_dinh(y.execution_id)
@@ -403,11 +505,19 @@ class BoDieuPhoi:
         if y is None or kh is None:
             return None
         kqb: Dict[str, Optional[HopDongKetQua]] = {}
+        mg = self.moi_gioi
         for st in self.so.buoc(execution_id, kh.phien_ban):
             d = st.get("ket_qua")
-            kqb[st["buoc_id"]] = HopDongKetQua.tu_dict(d) if d else None
-        bc = kiem_dinh_thuc_thi(y, kh, kqb, moi_gioi=self.moi_gioi,
-                                phan_bien=phan_bien)
+            k = HopDongKetQua.tu_dict(d) if d else None
+            kqb[st["buoc_id"]] = k
+            # Tieu chi NGHIEM THU cham tren CA lan thuc thi, nen no can mot
+            # goc duy nhat. Lay worktree cua buoc GHI dau tien — do la cho
+            # thay doi that su nam.
+            if k is not None and getattr(k, "worktree", "") and mg is self.moi_gioi:
+                m2 = self._moi_gioi_cua(k)
+                if m2 is not self.moi_gioi:
+                    mg = m2
+        bc = kiem_dinh_thuc_thi(y, kh, kqb, moi_gioi=mg, phan_bien=phan_bien)
         self.so.ghi_su_kien(
             execution_id, "EXEC_VERIFIED", project_id=y.project_id,
             level=("INFO" if bc.dat else "WARNING"),
@@ -647,10 +757,12 @@ class BoDieuPhoi:
         """
         ns = NganSachPhucHoi(
             so_lan_lap_ke_hoach=max(0, kh.phien_ban - 1))
-        for st in self.so.buoc(execution_id, kh.phien_ban):
-            n = int(st.get("so_lan_thu") or 0)
+        # CỘNG QUA MỌI BẢN KẾ HOẠCH — xem `SoThucThi.tong_lan_thu`. Đếm theo
+        # từng bản làm mỗi lần lập lại kế hoạch cấp lại trọn ngân sách, và
+        # một bước hỏng vĩnh viễn tiêu 9 lần gọi worker thật.
+        for ma, n in self.so.tong_lan_thu(execution_id).items():
             if n > 1:
-                ns.so_lan_thu_theo_buoc[st["buoc_id"]] = n - 1
+                ns.so_lan_thu_theo_buoc[ma] = n - 1
         return ns
 
     def ngan_sach(self, execution_id: str) -> Optional[NganSachPhucHoi]:

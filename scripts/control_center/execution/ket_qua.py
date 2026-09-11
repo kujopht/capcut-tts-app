@@ -104,6 +104,12 @@ class HopDongKetQua:
     commit: str = ""
     branch: str = ""
     raw_log_ref: str = ""
+    #: WORKTREE mà bước này thực sự chạy trong đó. Bắt buộc cho kiểm định —
+    #: xem `dieu_phoi.BoDieuPhoi._moi_gioi_cua`. Agent ghi vào worktree cô
+    #: lập, nên chạy `git status` ở gốc kho sẽ thấy MỘT CÂY SẠCH và mọi phép
+    #: kiểm "có thay đổi không" đều trả lời SAI. Đã vấp thật ở lát cắt dọc
+    #: đầu tiên của V0.9: bốn bài kiểm kẹt vì lý do đó.
+    worktree: str = ""
     ts: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:
@@ -164,7 +170,7 @@ class HopDongKetQua:
                 "duration": round(float(self.duration or 0.0), 2),
                 "exit_code": self.exit_code, "commit": self.commit,
                 "branch": self.branch, "raw_log_ref": self.raw_log_ref,
-                "ts": self.ts}
+                "worktree": self.worktree, "ts": self.ts}
 
     @classmethod
     def tu_dict(cls, d: Dict) -> "HopDongKetQua":
@@ -189,6 +195,7 @@ class HopDongKetQua:
                    commit=str(d.get("commit") or ""),
                    branch=str(d.get("branch") or ""),
                    raw_log_ref=str(d.get("raw_log_ref") or ""),
+                   worktree=str(d.get("worktree") or ""),
                    ts=float(d.get("ts") or time.time()))
 
 

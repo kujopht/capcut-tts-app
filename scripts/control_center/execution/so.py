@@ -380,6 +380,30 @@ class SoThucThi:
             "phien_ban = ? ORDER BY buoc_id", (execution_id, int(phien_ban))
         ).fetchall()]
 
+    def tong_lan_thu(self, execution_id: str) -> Dict[str, int]:
+        """`{buoc_id: tổng số lần đã giao}` — CỘNG QUA MỌI BẢN KẾ HOẠCH.
+
+        VÌ SAO CỘNG DỒN chứ không đếm theo từng bản, và đây là một lỗi thật
+        đã đo (2026-09-11): `luu_buoc` tạo hàng MỚI cho mỗi `(bản, bước)`, nên
+        một bộ đếm theo bản sẽ về 0 mỗi lần lập lại kế hoạch. Hậu quả là mỗi
+        bản mới CẤP LẠI trọn vẹn ngân sách thử lại, và một bước hỏng vĩnh
+        viễn tiêu 3 bản × 3 lượt = **9 lần gọi worker thật**.
+
+        §19 cấm đúng điều đó (*"Avoid burning premium quota through repeated
+        failed attempts"*), và §9 nói trần là 2. Cộng dồn thì một bước đã cạn
+        lượt ở bản v1 chỉ còn ĐÚNG MỘT lượt sửa ở mỗi bản sau: 3 + 1 + 1 = 5,
+        rồi `BLOCKED`. Lập lại kế hoạch vẫn là một cơ hội THẬT (mục tiêu bước
+        mang thêm bằng chứng hỏng), nhưng nó không còn là một cách nạp lại
+        ngân sách.
+        """
+        ra: Dict[str, int] = {}
+        for h in self.store.ket_noi().execute(
+                "SELECT buoc_id, SUM(so_lan_thu) AS n FROM execution_steps "
+                "WHERE execution_id = ? GROUP BY buoc_id",
+                (execution_id,)).fetchall():
+            ra[h["buoc_id"]] = int(h["n"] or 0)
+        return ra
+
     def buoc_theo_task(self, task_id: str) -> Optional[Dict]:
         """Việc Router V4 nào thuộc bước nào. Bộ điều phối gọi lúc việc xong."""
         h = self.store.ket_noi().execute(

@@ -84,6 +84,62 @@ _HOAN = _c(
 )
 
 
+#: HỎI TRẠNG THÁI của việc ĐANG CHẠY — §12. Tách khỏi
+#: `leader.la_cau_hoi_van_hanh` (hỏi về production) và
+#: `la_cau_hoi_lich_su` (hỏi về quá khứ): ba câu hỏi khác nhau, ba nguồn sự
+#: thật khác nhau, và trộn chúng là cách một câu "xong chưa bro?" biến thành
+#: một probe SSH hoặc một việc khảo sát kho.
+_HOI_TRANG_THAI = _c(
+    r"\b(?:xong|đã xong|da xong|done)\s*(?:chưa|chua|hết chưa|yet)\b",
+    r"\b(?:đang|dang)\s+(?:làm|lam|chạy|chay)\s+(?:tới|toi|đến|den)\s+đâu\b",
+    r"\b(?:tới|toi|đến|den)\s+đâu\s+rồi\b",
+    r"\bagent\s+nào\s+(?:đang|dang)\s+(?:chạy|chay|làm|lam)\b",
+    r"\b(?:sao|vì sao|vi sao|tại sao|tai sao)\s+(?:task|việc|viec|bước|buoc|"
+    r"cái|cai)\s+(?:này|nay|đó|do)\s+(?:lâu|lau|chậm|cham)\b",
+    r"\bcó\s+lỗi\s+gì\s+(?:không|khong)\b",
+    r"\b(?:tiến độ|tien do|progress|status)\b",
+    r"\b(?:còn|con)\s+(?:bao lâu|bao lau|mấy bước|may buoc)\b",
+    r"\bwhat'?s\s+(?:the\s+)?status\b",
+)
+
+#: LỆNH ĐIỀU KHIỂN lần thực thi đang chạy — §13.
+_DIEU_KHIEN: Tuple[Tuple[str, Tuple[re.Pattern, ...]], ...] = (
+    ("huy", _c(r"\b(?:huỷ|huy|hủy|cancel|bỏ|bo)\s+(?:task|việc|viec|cái|cai|"
+               r"lần|lan|nó|no|đi|di)\b",
+               r"\b(?:dừng|dung)\s+(?:hẳn|han|luôn|luon)\b",
+               r"\bdừng\s+(?:task|việc|viec)\s+(?:này|nay|đó|do)\b",
+               r"\bstop\s+(?:it|that|this)\b")),
+    ("tam_dung", _c(r"\b(?:dừng|dung)\s+(?:đi|di|lại|lai)\b",
+                    r"\b(?:tạm dừng|tam dung|pause|hoãn|hoan)\b",
+                    r"\b(?:đừng|dung)\s+làm\s+(?:bước|buoc)\s+(?:đó|do)\b")),
+    ("tiep_tuc", _c(r"\b(?:tiếp tục|tiep tuc|resume|chạy tiếp|chay tiep|"
+                    r"làm tiếp|lam tiep)\b")),
+)
+
+
+def la_cau_hoi_trang_thai(cau: str) -> bool:
+    """Câu này hỏi TRẠNG THÁI của việc đang chạy? Tất định.
+
+    §12 đòi câu trả lời đến TỪ SỔ và tốn **0** việc khảo sát. Hàm này là cổng
+    đó: nó chạy trong vài chục micro-giây, trước cả lượt Leader.
+    """
+    return bool(_bat(_HOI_TRANG_THAI, str(cau or "")))
+
+
+def lenh_dieu_khien(cau: str) -> str:
+    """`"huy"` | `"tam_dung"` | `"tiep_tuc"` | `""`. Thứ tự kiểm quan trọng.
+
+    `huy` được kiểm TRƯỚC `tam_dung`: "dừng hẳn" chứa "dừng", và dừng nhầm
+    một lần thực thi thành tạm dừng thì người dùng tưởng đã huỷ trong khi
+    nó vẫn còn sống chờ `resume`.
+    """
+    van = str(cau or "")
+    for ten, mau in _DIEU_KHIEN:
+        if _bat(mau, van):
+            return ten
+    return ""
+
+
 @dataclass(frozen=True)
 class TinHieuTiepNoi:
     """Kết quả dò trên MỘT câu người dùng."""

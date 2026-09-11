@@ -171,6 +171,62 @@ def _buoc_cho_tieu_chi(mo_ta: str, pham_vi: Sequence[str]
     return ()
 
 
+#: Bao nhiêu lần một bước được SỬA bằng cách lập lại kế hoạch. Thấp có chủ
+#: đích: quá số này thì giả thuyết "bước sai" đã sai, và cái sai nằm ở đâu
+#: khác — dừng cho người xem còn rẻ hơn một vòng nữa.
+TRAN_SUA_MOI_BUOC = 2
+
+
+def buoc_sua_chua(kh: KeHoachThucThi, hong: Dict[str, str]) -> List[BuocKeHoach]:
+    """Danh sách bước cho BẢN KẾ HOẠCH KẾ TIẾP — §9 "create repair task".
+
+    Giữ nguyên bước đã đạt; bước hỏng được thay bằng MỘT bước cùng mã nhưng
+    mục tiêu mang THÊM bằng chứng hỏng. Đó là điểm khác giữa "lập lại kế
+    hoạch" và "chạy lại": chạy lại gửi cùng một lời nhắc cho cùng một model
+    và mong một kết quả khác; lập lại kế hoạch gửi thêm thông tin.
+
+    Trả về danh sách RỖNG khi không bước nào sửa được — bộ gọi phải hiểu đó
+    là "dừng cho người", không phải "kế hoạch trống".
+    """
+    ra: List[BuocKeHoach] = []
+    doi = False
+    for b in kh.buoc:
+        ly = str(hong.get(b.buoc_id) or "").strip()
+        if not ly:
+            ra.append(b)
+            continue
+        if b.muc_tieu.count(NHAN_SUA) >= TRAN_SUA_MOI_BUOC:
+            return []
+        doi = True
+        ra.append(BuocKeHoach(
+            buoc_id=b.buoc_id, tieu_de=b.tieu_de,
+            muc_tieu=(b.muc_tieu + f"\n\n{NHAN_SUA} Lần trước bước này KHÔNG "
+                                   f"qua kiểm định. Bằng chứng:\n  " + ly[:800]
+                      + "\nSửa ĐÚNG nguyên nhân đó. Đừng làm lại từ đầu, và "
+                        "đừng nới phạm vi."),
+            phu_thuoc=b.phu_thuoc, nang_luc=b.nang_luc,
+            tai_nguyen=b.tai_nguyen, che_do_ghi=b.che_do_ghi,
+            artifact_mong_doi=b.artifact_mong_doi,
+            tieu_chi_dat=b.tieu_chi_dat, cach_kiem=b.cach_kiem,
+            rui_ro=b.rui_ro, lop_model=_nang_lop(b.lop_model)))
+    return ra if doi else []
+
+
+#: Mốc đánh dấu một bước ĐÃ là bước sửa. Đếm nó trong mục tiêu là cách biết
+#: một bước đã được sửa mấy lần mà không cần thêm một cột trong sổ.
+NHAN_SUA = "[SỬA LẦN TRƯỚC]"
+
+
+def _nang_lop(lop: str) -> str:
+    """Bước sửa xin một lớp model MẠNH HƠN một bậc — §18.
+
+    Không nhảy thẳng lên lớp cao nhất: §19 cấm đốt hạn mức cao cấp qua những
+    lần thử hỏng liên tiếp, và `chi_phi.xet_ngan_sach` sẽ đòi hạ bậc nếu lớp
+    mạnh cũng hỏng hai lần.
+    """
+    return {"re": "thuong", "thuong": "manh", "": "thuong"}.get(lop, lop)
+
+
 def cat_theo_pham_vi(kq: PlanResult, pham_vi_noi_ro: str) -> PlanResult:
     """Giữ lại bước khớp `pham_vi_noi_ro` — "ok triển khai phần repo-local đó".
 

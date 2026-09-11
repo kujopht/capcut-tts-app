@@ -91,7 +91,48 @@ Có ảnh chụp thì `kiem_duong_ong` phân biệt được A–E **bằng bộ
 `pending > 0` → **B**; không ứng viên nào → **A**; có ứng viên mà không ra
 tác phẩm → **D**. Không nhánh nào đoán.
 
-### A4. Đột biến máy chủ: **CÓ — và CHƯA LÀM**
+### A4. Đột biến máy chủ: **ĐÃ LÀM, sau khi người dùng duyệt tường minh**
+
+Triển khai lúc `2026-09-11T03:43Z`. Nhật ký đầy đủ + trình tự ở
+`docs/deploy/fanfic_farmer_observer/README.md` mục 5–7. Tóm tắt:
+
+| Mục | Trước | Sau |
+|---|---|---|
+| `ActiveState` / `SubState` | `active` / `running` | `active` / `running` |
+| `MainPID` | 350714 | **684324** (đổi vì khởi động lại) |
+| `NRestarts` | 0 | **0** — khởi động lại do NGƯỜI, không phải tự phục hồi sau lỗi |
+| `metrics.py` | `46a9fbe4…` | `7fab65d5…` (+1173 byte, ĐÚNG một chỗ chèn) |
+| `observer.py` | không có | `e13eea6a…`, 644 root:root |
+| `observability.json` | không có | **644** fanfic:fanfic, ~2 KB, đang cập nhật |
+| `rclone.conf` | 600 fanfic:fanfic | **600 fanfic:fanfic — KHÔNG đổi** |
+| `status.json` | 600 fanfic:fanfic | **600 fanfic:fanfic — KHÔNG đổi** |
+| `work/` | `farmer.lock` | `farmer.lock` — không đổi |
+
+Sao lưu: `/var/backups/fanfic-farmer-observer-20260911T034128Z/metrics.py`,
+sha256 khớp bản gốc.
+
+Ba điều đáng ghi lại vì chúng đổi cách làm lần sau:
+
+* **Bản kế hoạch đầu ghi sai cơ chế.** Nó nói `git pull`, nhưng tiền kiểm
+  cho thấy `/opt/fanfic-audio` **không phải kho git**. Triển khai thật dùng
+  cài trực tiếp, có sao lưu và đối chiếu sha256 hai đầu. Tiền kiểm tồn tại
+  đúng để bắt những chỗ như thế.
+* **Lần chạy đầu DỪNG LẠI đúng chỗ nó nên dừng.** Bước kiểm cú pháp trên
+  host hỏng vì `ubuntu` không ghi được `__pycache__` trong thư mục root —
+  lỗi của PHÉP KIỂM, không phải của mã. Kịch bản dừng, **chưa** khởi động
+  lại dịch vụ, nên ma cũ vẫn chạy nguyên. Sửa bằng `PYTHONPYCACHEPREFIX`
+  rồi mới đi tiếp.
+* **Kiểm rò bí mật chạy NGAY TRÊN HOST trước khi khởi động lại**: nhét một
+  token Google giả và một khoá AWS giả vào đúng hai trường văn bản tự do rồi
+  chạy `build_snapshot` thật. Kết quả `RO RI: KHONG`, mà mã lớp lỗi vẫn đúng
+  (`quota_exceeded`, `auth_invalid_grant`). Chứng minh tại chỗ, không suy từ
+  một bài kiểm chạy ở máy khác.
+
+**Trôi mã cần theo dõi:** hai tệp đang nằm trên host **chưa có trong kho
+Fanfic** (kho Fanfic không bị sửa, đúng ràng buộc). Một lần phát hành sau có
+thể ghi đè mất chúng — xem README mục 6.
+
+### A4b. Thiết kế gốc: đột biến máy chủ **CÓ CẦN**
 
 Mã đề xuất + kế hoạch nằm ở `docs/deploy/fanfic_farmer_observer/`
 (`observer.py` + `README.md`). Thay đổi ở kho Fanfic là **hai bước nhỏ**:
@@ -208,25 +249,51 @@ Hai bài bắt được lỗi thật khi viết:
 * `test_hop_dong_bao_mat_thi_TRANH_codex` (bản trước) — bắt `NameError` bị
   `except Exception` nuốt mất.
 
-## D. Chẩn đoán Drive thật, sau khi làm cứng
+## D. Chẩn đoán Drive thật — F trước, **A** sau khi có telemetry
 
-Hỏi lại đúng câu trên app thật: **0 việc mới, 0 việc chết vì quyền**, Leader
-trả lời thẳng từ bằng chứng trong 47s.
+Cùng một câu hỏi, hai lần đo, và đó là điểm đáng xem nhất của mục này.
 
-```
-Phân loại: F — Chưa đủ bằng chứng để kết luận.
-```
+**Trước khi triển khai** — `F, chưa đủ bằng chứng`, 11/13 quan sát đo được.
+Không phải một câu trả lời kém: nó là câu trả lời ĐÚNG khi bộ đếm
+archive/round nằm sau một tệp `600`.
 
-Đo được: `fanfic-farmer` **ACTIVE**, `MainPID=350714`, `NRestarts=0`, chạy
-liên tục từ `2026-09-08 15:55:31 UTC`; `status.json` vẫn đang được ghi;
-**không một dòng nhật ký nào** về archive/rclone/drive trong cửa sổ đã soi.
+**Sau khi triển khai** — `A, chưa có việc nào đạt chuẩn production`,
+**12/13** quan sát đo được, 0 việc phái đi, 43s:
 
-Chưa đo được, kèm lý do chính xác: bộ đếm archive/round (`status.json`
-`600`, **và ảnh chụp đã lọc chưa được triển khai** —
-`observability.json: No such file or directory`); listing Drive
-(`rclone.conf` `600`); hàng đợi Appwrite và artifact R2 (chưa có adapter).
+> *"Không có ứng viên MỚI nào: tìm 2 ứng viên nhưng cả 2 đều trùng hoặc đã
+> hoàn thành từ trước, `produced = 0` (bộ đếm tính từ khi tiến trình khởi
+> động `2026-09-11T03:43:18 UTC`, vòng 1)."*
 
-**HOST CHANGE REQUIRED** — thay đổi tối thiểu đã chuẩn bị sẵn ở
-`docs/deploy/fanfic_farmer_observer/README.md` mục 4–5. Cho tới khi nó được
-duyệt và triển khai, `F` là câu trả lời **đúng**, không phải một câu trả lời
-thiếu.
+Và quan trọng không kém — ảnh chụp cho thấy **đường archive HOÀN TOÀN KHOẺ**:
+`enabled=true`, `rclone_installed=true`, `reachable=true`,
+`status=ARCHIVE_DONE`, `last_error_class=""`, remote `fanfic-gdrive`, gốc
+`fanfic-gdrive:FanficWorld/production`. Đó là bằng chứng **loại trừ** C
+(archive hỏng) và E (sai remote/đường dẫn) — thứ trước đây chỉ đoán được.
+
+### Một tinh chỉnh mà chính số đo thật ép ra
+
+Vòng đầu tiên trả `discovered=2, deduped=2, produced=0`. Bản phân loại lúc
+đó đọc thành **D** ("có ứng viên mà không ra tác phẩm" → đường ống tắc). Sai.
+`deduped` theo chính chú thích của farmer nghĩa là **"đã xong thật sự"** — 2
+thứ tìm được đều là bản trùng, nên đây là **A** ("không có việc mới"), không
+phải tắc nghẽn. Nay `_phan_loai_tu_telemetry` trừ `deduped` khỏi `discovered`
+trước khi phán, và xét `review_pending` TRƯỚC vì "đang chờ đánh giá" là câu
+trả lời cụ thể hơn.
+
+### Cửa sổ bộ đếm — nói rõ, không lờ đi
+
+`MetricsWriter._totals` cộng dồn **từ lúc tiến trình khởi động**, không phải
+24h. Lần khởi động lại vừa rồi đã **đặt lại** bộ đếm, nên con số hiện tại mô
+tả vài phút chứ không mô tả "từ hôm qua tới giờ". Mọi kết luận sinh ra từ ảnh
+chụp đều **mang theo cửa sổ đó trong chính câu lý do**, và Leader lặp lại nó
+cho người đọc. Muốn trả lời trọn vẹn cho cửa sổ 24h thì phải để farmer chạy
+đủ một ngày — hoặc thêm bộ đếm bền ở phía farmer, một thay đổi khác.
+
+Bằng chứng độc lập với bộ đếm vẫn ủng hộ A: 48h nhật ký **không một dòng**
+về archive/rclone/drive, và `work/` chỉ có `farmer.lock`.
+
+### Còn lại chưa đo được
+
+`rclone listremotes` vẫn `permission denied` (đúng như thiết kế — không nới
+quyền `rclone.conf`); hàng đợi Appwrite và artifact R2 vẫn chưa có adapter.
+Cả hai đều được nêu tên trong câu trả lời thay vì bỏ lửng.

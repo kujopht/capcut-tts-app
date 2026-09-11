@@ -577,6 +577,32 @@ class TestPhanLoaiTuAnhChup(unittest.TestCase):
         pl, _ = PV._phan_loai_tu_telemetry(self._tm(lanes={"discovered": 9}))
         self.assertEqual(pl, "D")
 
+    def test_A_khi_MOI_ung_vien_deu_TRUNG_khong_phai_D(self):
+        # Do that o vong dau sau khi trien khai observer: discovered=2,
+        # deduped=2 — tim thay 2 thu nhung ca hai DA XONG TU TRUOC. Do la
+        # "khong co viec moi" (A), KHONG phai "duong ong tac" (D).
+        pl, vi = PV._phan_loai_tu_telemetry(
+            self._tm(lanes={"discovered": 2, "deduped": 2}))
+        self.assertEqual(pl, "A")
+        self.assertIn("trùng", vi)
+
+    def test_D_khi_dang_CHO_DANH_GIA(self):
+        pl, vi = PV._phan_loai_tu_telemetry(
+            self._tm(lanes={"discovered": 5, "deduped": 5,
+                            "review_pending": 3}))
+        self.assertEqual(pl, "D")
+        self.assertIn("ĐÁNH GIÁ", vi)
+
+    def test_ket_luan_LUON_mang_CUA_SO_bo_dem(self):
+        # Bo dem cong don tu luc tien trinh khoi dong, khong phai 24h. Tra
+        # loi "tu hom qua toi gio" bang mot cua so hai phut la noi doi.
+        tm = self._tm(lanes={"discovered": 2, "deduped": 2})
+        tm["farmer"] = {"started_at": "2026-09-11T03:43:18+00:00"}
+        tm["round"] = {"number": 1}
+        _pl, vi = PV._phan_loai_tu_telemetry(tm)
+        self.assertIn("bộ đếm tính từ khi tiến trình khởi động", vi)
+        self.assertIn("vòng 1", vi)
+
     def test_E_khi_khong_voi_toi_remote(self):
         pl, vi = PV._phan_loai_tu_telemetry(
             self._tm(archive={"reachable": False,

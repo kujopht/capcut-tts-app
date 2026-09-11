@@ -303,8 +303,11 @@ hai ống dẫn văn bản tự do (`archive.detail` ← `stderr` thô của `rc
 `lanes[*].errors[]` ← ngoại lệ bất kỳ) nên không chứng minh được là sạch;
 đường đúng là ẢNH CHỤP ĐÃ LỌC riêng (`observability.json`, `644`, danh sách
 CHO PHÉP, lỗi quy về mã trong bộ ĐÓNG) — mã đề xuất + kế hoạch triển khai ở
-`docs/deploy/fanfic_farmer_observer/`, **chưa triển khai, cần người vận hành
-duyệt**. `rclone.conf` giữ `600`, và Router tự chặn thêm một lớp
+`docs/deploy/fanfic_farmer_observer/`, **đã triển khai 2026-09-11T03:43Z sau
+khi người dùng duyệt** — `observability.json` `644`, `rclone.conf` và
+`status.json` vẫn `600`; chẩn đoán Drive nhờ đó đi từ `F` sang **`A`**. Lưu
+ý: hai tệp trên host CHƯA có trong kho Fanfic (host đang trôi so với kho).
+`rclone.conf` giữ `600`, và Router tự chặn thêm một lớp
 (`la_tep_bi_mat` — danh sách CẤM thắng danh sách cho phép). (b) Một TỪ ĐƠN
 không được làm trọng tài phân loại bảo mật: chữ "quyền" trong lời nhắc công
 cụ tiêu chuẩn từng làm MỌI việc xếp vào Codex bị từ chối rồi chết ở

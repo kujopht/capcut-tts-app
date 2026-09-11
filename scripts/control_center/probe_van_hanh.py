@@ -871,6 +871,15 @@ def _phan_loai_tu_telemetry(tm: Dict[str, Any]) -> Tuple[str, str]:
     ar = tm.get("archive") or {}
     lanes = (tm.get("lanes") or {}).values()
 
+    # CUA SO CUA BO DEM. `MetricsWriter._totals` cong don TU LUC TIEN TRINH
+    # KHOI DONG, khong phai 24h. Sau mot lan khoi dong lai, bo dem chi noi ve
+    # vai phut vua qua — va tra loi cau "tu hom qua toi gio" bang mot cua so
+    # hai phut thi la noi doi. Nen moi ket luan deu mang cua so di kem.
+    vong = (tm.get("round") or {}).get("number")
+    tu = (tm.get("farmer") or {}).get("started_at") or ""
+    cua_so = (f" [bộ đếm tính từ khi tiến trình khởi động {tu}"
+              + (f", vòng {vong}" if vong else "") + "]") if tu else ""
+
     def tong(khoa: str) -> int:
         return sum(int(l.get(khoa) or 0) for l in lanes
                    if isinstance(l, dict))
@@ -895,13 +904,23 @@ def _phan_loai_tu_telemetry(tm: Dict[str, Any]) -> Tuple[str, str]:
     san_sang = tong("produced") + tong("audio_attached")
     if cho > 0 and san_sang > 0:
         return "B", (f"production có {san_sang} tác phẩm nhưng "
-                     f"{cho} bản đang CHỜ archive")
-    if san_sang == 0 and tong("discovered") == 0:
-        return "A", ("không tác phẩm nào đạt chuẩn production trong ảnh chụp "
-                     "(discovered = 0, produced = 0)")
-    if san_sang == 0 and tong("discovered") > 0:
-        return "D", (f"đường ống tắc TRƯỚC archive: tìm được "
-                     f"{tong('discovered')} ứng viên nhưng produced = 0")
+                     f"{cho} bản đang CHỜ archive{cua_so}")
+    # `deduped` = tim thay nhung DA XONG TU TRUOC. Tru no ra moi biet co viec
+    # MOI nao khong. Khong tru thi mot vong toan ban trung se bi doc thanh
+    # "duong ong tac" (D) trong khi su that la "khong co viec moi" (A) — do
+    # duoc o vong dau tien sau khi trien khai: discovered=2, deduped=2.
+    moi = tong("discovered") - tong("deduped")
+    # `review_pending` xet TRUOC: "dang cho danh gia" la mot cau tra loi CU
+    # THE hon "khong co ung vien moi", va no chi ra dung mat xich dang tac.
+    if san_sang == 0 and tong("review_pending") > 0:
+        return "D", (f"đường ống tắc TRƯỚC archive: {tong('review_pending')} "
+                     f"tác phẩm đang CHỜ ĐÁNH GIÁ, produced = 0{cua_so}")
+    if san_sang == 0 and moi <= 0:
+        return "A", (f"không có ứng viên MỚI nào: tìm {tong('discovered')}, "
+                     f"trùng/đã xong {tong('deduped')}, produced = 0{cua_so}")
+    if san_sang == 0 and moi > 0:
+        return "D", (f"đường ống tắc TRƯỚC archive: {moi} ứng viên MỚI "
+                     f"nhưng produced = 0{cua_so}")
     return "", ""
 
 

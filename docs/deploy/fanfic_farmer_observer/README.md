@@ -1,12 +1,15 @@
-# Ảnh chụp quan sát đã lọc cho farmer — KẾ HOẠCH TRIỂN KHAI (chưa chạy)
+# Ảnh chụp quan sát đã lọc cho farmer — ĐÃ TRIỂN KHAI
 
-**Trạng thái: CHỜ NGƯỜI VẬN HÀNH DUYỆT. Chưa có thay đổi nào trên máy
-production, và chưa có thay đổi nào trong kho Fanfic.**
+**Trạng thái: ĐÃ TRIỂN KHAI 2026-09-11T03:43Z, sau khi người dùng duyệt
+tường minh.** Xem mục 7 cho nhật ký lần chạy thật.
 
-Thư mục này chứa mã ĐỀ XUẤT (`observer.py`) + các bước triển khai chính xác.
-Router đã sẵn sàng đọc ảnh chụp; tới khi nó được triển khai, probe
-`telemetry.snapshot` trả `UNAVAILABLE` kèm lý do, và chẩn đoán Drive vẫn là
-`F — chưa đủ bằng chứng`.
+Thư mục này chứa mã đã triển khai (`observer.py`) + các bước chính xác.
+
+> **Sửa một chỗ sai trong bản kế hoạch đầu:** bản đầu ghi `git pull` để cập
+> nhật mã trên host. **Sai** — tiền kiểm cho thấy `/opt/fanfic-audio`
+> **không phải một kho git** (`fatal: not a git repository`). Triển khai
+> thật dùng **cài trực tiếp** hai tệp, có sao lưu và đối chiếu sha256; xem
+> mục 5.
 
 ---
 
@@ -101,36 +104,93 @@ Tuỳ chọn: truyền `archive_totals={"done":…, "pending":…, "failed":…}
 farmer có sẵn bộ đếm tích luỹ — không có thì ba số đó là `0` và Router vẫn
 phân loại được từ `lanes[*]`.
 
-## 5. Triển khai lên máy production
+## 5. Triển khai lên máy production — trình tự ĐÃ DÙNG
 
-Đây là **thay đổi trên máy production**, cần người vận hành chạy:
+`/opt/fanfic-audio` không phải kho git, nên cài **trực tiếp** hai tệp. Trình
+tự dừng-khi-hỏng, sao lưu trước khi ghi, đối chiếu sha256 hai đầu:
 
 ```bash
-# 1. cập nhật mã trên host
-cd /opt/fanfic-audio && git pull        # hoặc quy trình phát hành đang dùng
+# 1. tải lên /tmp (ubuntu ghi được) rồi ĐỐI CHIẾU sha256
+#    (đưa qua stdin: `base64 -d > /tmp/_deploy_<tên>`)
+sha256sum /tmp/_deploy_observer.py /tmp/_deploy_metrics.py
 
-# 2. khởi động lại farmer để nạp module mới
-systemctl restart fanfic-farmer
+# 2. SAO LƯU tệp sẽ đổi — TRƯỚC mọi lần ghi
+sudo install -d -m 700 -o root -g root /var/backups/fanfic-farmer-observer-<MỐC>
+sudo cp -a /opt/fanfic-audio/server/farmer/metrics.py \
+          /var/backups/fanfic-farmer-observer-<MỐC>/metrics.py
 
-# 3. xác nhận ảnh chụp ra đúng chỗ, đúng quyền
-stat -c '%n %a %U:%G' /var/lib/fanfic-farmer/observability.json
-#   mong đợi: /var/lib/fanfic-farmer/observability.json 644 fanfic:fanfic
+# 3. cài, giữ nguyên 644 root:root như các tệp anh em
+sudo install -m 644 -o root -g root /tmp/_deploy_observer.py \
+     /opt/fanfic-audio/server/farmer/observer.py
+sudo install -m 644 -o root -g root /tmp/_deploy_metrics.py \
+     /opt/fanfic-audio/server/farmer/metrics.py
 
-# 4. xác nhận KHÔNG có bí mật trong đó
-cat /var/lib/fanfic-farmer/observability.json
+# 4. KIỂM TẠI CHỖ trước khi khởi động lại — cú pháp, import, và một lần
+#    `build_snapshot` thật có bí mật giả cài vào để xem có lọt không.
+#    `PYTHONPYCACHEPREFIX` là BẮT BUỘC: thư mục là root:root nên `ubuntu`
+#    không ghi được `__pycache__`, và đó là lỗi của PHÉP KIỂM chứ không
+#    phải của mã — lần đầu đã dừng đúng ở đây.
+cd /opt/fanfic-audio && PYTHONPYCACHEPREFIX=/tmp/pyc \
+  .venv/bin/python -m py_compile server/farmer/observer.py server/farmer/metrics.py
 
-# 5. xác nhận rclone.conf VẪN riêng tư
-stat -c '%n %a %U:%G' /var/lib/fanfic-farmer/rclone.conf
-#   mong đợi: 600 fanfic:fanfic  (KHÔNG đổi)
+# 5. chỉ khi 4 sạch mới khởi động lại
+sudo systemctl restart fanfic-farmer
 ```
 
-Bước 2 khởi động lại một dịch vụ production. Router **không** tự làm, và
-cũng không có thao tác nào trong `probe_van_hanh` làm được điều đó — lớp
-probe chỉ đọc.
+Khởi động lại một dịch vụ production là **đột biến**. Router **không** tự
+làm: không thao tác nào trong `probe_van_hanh` làm được điều đó — lớp probe
+chỉ đọc, và `_kiem_chi_doc()` từ chối đúng những động từ này. Lần triển khai
+thật đi qua một đường RIÊNG, tường minh, chỉ dùng cho lần đó.
 
-Router phía này **đã sẵn sàng**: chỉ cần thêm `telemetry_file` vào
-`scripts/control_center/config/observability.json` (đã thêm sẵn), không cần
-đổi mã Router nào nữa.
+**Khôi phục** (nếu cần): `sudo cp -a <backup>/metrics.py
+/opt/fanfic-audio/server/farmer/metrics.py && sudo systemctl restart
+fanfic-farmer`. `observer.py` là tệp MỚI, xoá nó là đủ để quay lại hoàn toàn.
+
+Router phía này **đã sẵn sàng** từ trước: chỉ cần `telemetry_file` trong
+`scripts/control_center/config/observability.json` (đã có), không đổi mã.
+
+## 6. Trôi mã so với kho Fanfic — CẦN THEO DÕI
+
+Hai tệp nằm trên host **chưa có trong kho Fanfic**. Kho Fanfic hoàn toàn
+không bị sửa (đúng ràng buộc), nên bây giờ host và kho **lệch nhau**:
+
+| Tệp | Host | Kho Fanfic |
+|---|---|---|
+| `server/farmer/observer.py` | có (mới) | **chưa có** |
+| `server/farmer/metrics.py` | đã vá (+1173 byte) | bản gốc |
+
+Việc tiếp theo nên làm (một quyết định riêng, chưa làm): commit đúng hai
+thay đổi này vào kho Fanfic, để một lần phát hành sau không ghi đè mất
+chúng. Bản gốc host đã sao lưu, và bản vá sinh ra tất định từ
+`docs/deploy/fanfic_farmer_observer/observer.py`.
+
+## 7. Nhật ký lần triển khai thật (2026-09-11T03:43Z)
+
+| Mục | Trước | Sau |
+|---|---|---|
+| `ActiveState` | `active` | `active` |
+| `SubState` | `running` | `running` |
+| `MainPID` | 350714 | **684324** (đổi vì khởi động lại) |
+| `NRestarts` | 0 | **0** (khởi động lại do người, không phải tự phục hồi) |
+| `Result` | `success` | `success` |
+| `metrics.py` sha256 | `46a9fbe4…193fbe` | `7fab65d5…95952a` |
+| `observer.py` | không có | `e13eea6a…c9e434`, 644 root:root |
+| `observability.json` | không có | **644** fanfic:fanfic, ~2 KB |
+| `rclone.conf` | 600 fanfic:fanfic | **600 fanfic:fanfic** (không đổi) |
+| `status.json` | 600 fanfic:fanfic | **600 fanfic:fanfic** (không đổi) |
+| `work/` | `farmer.lock` | `farmer.lock` (không đổi) |
+
+Sao lưu: `/var/backups/fanfic-farmer-observer-20260911T034128Z/metrics.py`
+(sha256 `46a9fbe4…193fbe` — khớp bản gốc).
+
+Kiểm rò bí mật **chạy ngay trên host** trước khi khởi động lại: nhét một
+token Google giả và một khoá AWS giả vào đúng hai trường văn bản tự do, rồi
+khẳng định ảnh chụp không mang chữ nào của chúng — kết quả `RO RI: KHONG`,
+mà mã lớp lỗi vẫn đúng (`quota_exceeded`, `auth_invalid_grant`).
+
+**Khoảng trống đã biết:** `archive.last_attempt_at` / `last_success_at` hiện
+luôn rỗng — farmer chưa theo dõi hai mốc đó, và `observer.py` cố ý KHÔNG bịa
+chúng. Muốn có thì phải thêm ở phía farmer; đó là một thay đổi khác.
 
 ## 6. Kiểm chứng sau khi triển khai
 

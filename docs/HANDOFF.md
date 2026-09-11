@@ -1630,11 +1630,24 @@ thi + ngân sách), người vận hành duyệt các sự cố `backfill`, nh�
 * **Ảnh chụp quan sát đã lọc** (`/var/lib/fanfic-farmer/observability.json`,
   `644`, danh sách CHO PHÉP, văn bản lỗi quy về mã trong bộ ĐÓNG). Router lọc
   lại lần nữa khi đọc. Có ảnh chụp thì phân loại A–E dựa trên **bộ đếm thật**.
-* **ĐỘT BIẾN HOST: CÓ, và CHƯA LÀM.** Mã đề xuất + kế hoạch ở
-  `docs/deploy/fanfic_farmer_observer/` (2 bước: thêm `server/farmer/
-  observer.py`, thêm một dòng `publish(...)` cuối `MetricsWriter.write`; rồi
-  `git pull` + `systemctl restart fanfic-farmer` trên host). Router dừng
-  trước bước đó. Kho Fanfic **không bị sửa một tệp nào**.
+* **ĐỘT BIẾN HOST: ĐÃ LÀM** `2026-09-11T03:43Z`, sau khi người dùng duyệt
+  tường minh. Hai tệp cài trực tiếp (`/opt/fanfic-audio` **không phải kho
+  git** — bản kế hoạch đầu ghi `git pull` là SAI, tiền kiểm bắt được), có
+  sao lưu `/var/backups/fanfic-farmer-observer-20260911T034128Z/metrics.py`
+  và đối chiếu sha256 hai đầu. Dịch vụ: `active/running`, MainPID
+  350714→**684324**, **NRestarts=0** (khởi động lại do NGƯỜI, không phải tự
+  phục hồi). `rclone.conf` và `status.json` **vẫn 600, không đổi**;
+  `observability.json` **644**, đang cập nhật. Kiểm rò bí mật chạy NGAY TRÊN
+  HOST trước khi khởi động lại → `RO RI: KHONG`. Kho Fanfic **không bị sửa
+  một tệp nào** — nên host đang TRÔI so với kho, xem README mục 6.
+* **Chẩn đoán Drive: F → A.** Có telemetry rồi thì Router phân biệt được:
+  **A — chưa có việc nào đạt chuẩn production** ("tìm 2 ứng viên, cả 2 đều
+  trùng/đã xong, produced=0"), 12/13 quan sát đo được. Ảnh chụp cũng **loại
+  trừ** C và E: `reachable=true`, `ARCHIVE_DONE`, không lỗi, remote
+  `fanfic-gdrive`. Số đo thật ép ra một tinh chỉnh: vòng đầu bị đọc nhầm
+  thành D cho tới khi trừ `deduped` khỏi `discovered`. Bộ đếm cộng dồn **từ
+  lúc tiến trình khởi động** (lần restart đã đặt lại), nên mọi kết luận đều
+  mang cửa sổ đó trong câu lý do.
 
 **B. Năng lực runtime + định tuyến lại**
 

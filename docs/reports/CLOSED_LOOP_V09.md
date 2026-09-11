@@ -152,22 +152,109 @@ thật: lệnh `python -c` bị chặn đã khiến agent đổi cách làm ngay
 Hạn chế đã biết: hook chia đoạn theo dòng, nên **thân** một heredoc bị đọc
 như lệnh. Câu commit mô tả chính luật này phải đi qua `git commit -F <tệp>`.
 
-## 7. Giới hạn còn lại
+## 7. Đợt hoàn tất — §A, §B, và nghiệm thu MODEL THẬT
 
-* **Chưa nghiệm thu MODEL THẬT.** Mọi con số ở trên đến từ lát cắt dọc với
-  worker giả (ghi tệp thật vào worktree thật). Bảy kịch bản A–H đã có bài
-  kiểm tất định, nhưng chưa có bản chạy bảy lượt model thật như
-  `REASONING_V08_REAL.md` đã làm cho v0.8.
-* **`kiem_dinh` chưa tự gọi Reviewer.** `can_phan_bien()` quyết định KHI NÀO
-  cần, và `kiem_dinh_thuc_thi` nhận một phán xử đã có; nhưng bộ điều phối
-  chưa nối `hoi_dong` vào pha `VERIFYING`. Khi thiếu, kết quả cao nhất là
-  `SUY_GIAM` — trung thực, nhưng chưa phải thứ §7 mô tả đầy đủ.
+### 7.1 Reviewer ngữ nghĩa TỰ ĐỘNG (§A)
+
+Hạ tầng Reviewer đã có từ V0.8 nhưng bộ điều phối **không bao giờ gọi nó**.
+Nay `kiem_dinh.nen_goi_reviewer` giữ chính sách ở MỘT chỗ, và thứ tự các
+mệnh đề CHÍNH LÀ chính sách:
+
+1. **tất định trước, luôn luôn** — `bc` đã dựng xong khi hàm này chạy;
+2. **máy đã bắt được lỗi -> KHÔNG gọi** — hỏi thêm một model để nghe lại
+   điều đã biết vừa tốn hạn mức vừa mở đường cho một `ACCEPT` che mất một
+   phép đo đã đỏ;
+3. **việc máy móc -> KHÔNG gọi**;
+4. **chạm production / rủi ro CAO -> gọi** dù mọi phép đo đều xanh.
+
+`hoi_dong.phan_bien_ket_qua` là đường CHỈ-REVIEWER: thứ cần soi đã tồn tại
+rồi, nên gọi `chay()` ở đây sẽ tiêu một lượt Strategist cho một bản chiến
+lược không ai dùng. `REVISE` vào đường sửa có trần, `REJECT` không DONE, và
+**không lượt nào định tuyến lại provider** — bất đồng không phải lỗi vận
+chuyển.
+
+Kèm theo là một khuyết tật phải sửa để §A có nghĩa: `_tong_hop` trả
+`THIEU_BANG_CHUNG` **trước** khối `phan_bien`, tức là gọi Reviewer xong rồi
+vứt câu trả lời đi. Một tiêu chí như "bản redesign có thực sự giải quyết mục
+tiêu không" không bao giờ buộc được vào `git diff`.
+
+### 7.2 Vòng phản hồi chất lượng (§B)
+
+`execution/phan_hoi.py` nối `chiến lược -> kế hoạch -> thực thi -> kiểm định
+-> kết quả cuối`. **Cùng** `BenchmarkStore`, **cùng** tệp
+`benchmark-reasoning.jsonl`, **cùng** `Record`, **cùng** `MAU_TOI_THIEU` —
+không có hệ thống thứ hai. Chỉ `task_type` khác: `ketqua_<vai>` thay vì
+`reasoning_<vai>`, vì "model này trả lời được không" và "lời khuyên của nó
+đem làm thật có đạt không" là hai câu hỏi khác nhau.
+
+Ba thứ **không** được tính: một lần HUỶ (người đổi ý không đo được gì về
+chất lượng lời khuyên), một cuộc trò chuyện chưa ai làm, và một quan sát
+không gắn được vào model nào. Một lần thực thi = ĐÚNG MỘT quan sát, khoá
+chống trùng BỀN trên đĩa nên khởi động lại không đếm trùng.
+
+### 7.3 Nghiệm thu MODEL THẬT trên Fanfic
+
+`scripts/control_center_v09_real_acceptance.py`, chạy trên ứng dụng
+source-mode thật + sổ chính tắc + dự án Fanfic thật.
+**59/60 khẳng định** ở lần chạy đầy đủ; kịch bản D chạy lại sau khi sửa →
+**20/20**. **0 thay đổi production**, và kho Fanfic thật sạch (`main` @
+`03b6652`).
+
+| Kịch bản | Bằng chứng |
+|---|---|
+| A thảo luận | Strategist thật, 2151 ký tự, **0** thực thi, **0** việc, lưu `dx_9222901772` |
+| B tiếp nối | nối đúng `dx_9222901772` → `ex_88a0d88dfbb3`, kế hoạch v1, `REPO_LOCAL/KHONG_CAN` |
+| C đa agent | lớp 1 = `doc_kiemthu ‖ doc_tailieu`, giao song song 2 bước, cả hai trả hợp đồng `ok`, qua `VERIFYING`, **không** nhảy `RUNNING→DONE` |
+| D hỏng có kiểm soát | **không** false-DONE; `BLOCKED` với lý do chính xác; bản v1 giữ nguyên; trần không bị vượt |
+| E khởi động lại | sống sót, **0** nhân đôi việc/thực thi, trả lời tiến độ TỪ SỔ, **0** việc khảo sát |
+| F dừng/tiếp/huỷ | `PAUSED` → `RUNNING` → `CANCELLED`, **0** khoá còn giữ, bằng chứng giữ nguyên |
+| G ranh giới | `WAITING_AUTHORITY`/`CHO_NGUOI`, nhận diện `production_deploy`+`iam_change`, **0** việc được giao |
+| H Reviewer | bộ điều phối **TỰ gọi**; phán xử **REJECT** từ `codex/codex-default`; **độc lập = True** |
+
+Lịch sử vai: **3 → 17** bản ghi, trong đó **1** `ketqua_strategist`.
+`MAU_TOI_THIEU` giữ nguyên **3**, nên tổng hợp vẫn trả `None` — đúng thiết
+kế, và **không hạ ngưỡng để tuyên bố có dữ liệu**.
+
+### 7.4 Bốn khuyết tật CHỈ lộ ra khi chạy thật
+
+Không cái nào lộ ở bộ kiểm tất định — đó là lý do §C tồn tại.
+
+| # | Khuyết tật | Triệu chứng đo được | Sửa |
+|---|---|---|---|
+| 1 | Phiên kẹt `STARTING` không bao giờ được thu hồi | 12/12 khe bị giữ ~50 phút, MỌI lần giao việc trả `WAIT: 12/12`, cả Router đứng im mà không gì báo lỗi | `STARTING` + không PID + quá `HAN_KHOI_DONG` → `DEAD`; `IDLE`/`BUSY` giữ nguyên luật cũ. Sau khi sửa: 12 sống → 2 |
+| 2 | "triển khai" một mình bị coi là deploy production | "ok triển khai phần repo-local đó đi" → `WAITING_AUTHORITY`; **không còn cách nào** cho phép việc trong kho bằng tiếng Việt | phân loại bằng CỤM TỪ (đòi một đích production đi kèm) — đúng luật 22-24 |
+| 3 | Bước CHỈ ĐỌC bị giao như việc CÓ GHI | agent đọc đúng, tóm tắt đúng, rồi cổng `diff` đánh hỏng 3 lần: "báo ok cho một việc CÓ GHI nhưng không tệp nào đổi" | `che_do_ghi` hỏi TRƯỚC mọi từ khoá; bước đọc có phạm vi RỖNG (`scope if b.ghi else scope` là một phép chọn vô nghĩa che đúng lỗ đó) |
+| 4 | Lý do dừng nói sai | sổ ghi "bước hỏng đã được sửa hết số lần cho phép" trong khi số lần sửa thật là **0** | tách hai trường hợp; trường hợp thứ hai nói thẳng rằng v0.9 KHÔNG tự sinh bước mới từ một tiêu chí chưa đạt |
+
+Và một khuyết tật **của chính bài nghiệm thu** (không phải sản phẩm):
+`_mo_cc` ban đầu quên `leader_bat=True`. Ba điểm vào THẬT đều bật nó; thiếu
+nó thì `chat()` không gọi Leader mà rơi thẳng xuống bộ phân rã — một câu hỏi
+THẢO LUẬN biến thành một việc worker. Một bài nghiệm thu tự nhận "chạy trên
+ứng dụng thật" mà không bật cờ đó đang đo một ứng dụng khác.
+
+## 8. Giới hạn còn lại
+
+* **Không tự sinh bước từ một tiêu chí chưa đạt.** Khi MỌI BƯỚC đều đạt mà
+  tiêu chí nghiệm thu không đạt, Router dừng ở `BLOCKED` và nói thẳng điều
+  đó. Nó KHÔNG nghĩ ra một bước mới để thoả tiêu chí — đó là lập kế hoạch
+  lại từ mục tiêu, một năng lực khác. Kịch bản D chứng minh đường dừng này
+  an toàn và trung thực, không chứng minh Router tự sửa được.
 * **Bộ lập lại kế hoạch là TẤT ĐỊNH, không phải một lượt Strategist.**
   `buoc_sua_chua` giữ bước đạt và bổ sung bằng chứng hỏng vào bước hỏng. Nó
   thêm THÔNG TIN thật (khác hẳn "chạy lại"), nhưng nó không nghĩ lại kiến
   trúc. Một bản lập lại kế hoạch do Strategist soạn là việc của v0.10.
-* **Vòng phản hồi chất lượng chiến lược chưa đủ mẫu.** Vẫn 2 Strategist +
-  1 Reviewer, dưới `MAU_TOI_THIEU = 3`. Đúng thiết kế — số liệu phải tích
-  luỹ theo lần dùng thật, **không được hạ ngưỡng để tuyên bố có dữ liệu**.
-* **Fanfic: 0 thay đổi production.** Kịch bản G dừng ở `WAITING_AUTHORITY`
-  đúng như yêu cầu; không lệnh production nào chạy trong phiên này.
+* **Vòng phản hồi chất lượng mới có 1 mẫu `ketqua_strategist`.** Dưới
+  `MAU_TOI_THIEU = 3`, nên tổng hợp vẫn trả `None` và bộ định tuyến vẫn dùng
+  tiên nghiệm cấu hình. Đúng thiết kế — số liệu phải tích luỹ theo lần dùng
+  thật, **không được hạ ngưỡng để tuyên bố có dữ liệu**.
+* **Bước thực thi trong nghiệm thu là CHỈ ĐỌC.** Fan-out, khoá, worktree,
+  hợp đồng kết quả, kiểm định và phục hồi đều chạy thật, nhưng chưa có một
+  lần nghiệm thu nào để agent thật GHI vào kho Fanfic. Đó là lựa chọn có ý:
+  một bài nghiệm thu không được sửa kho thật của người dùng để tự chứng minh
+  mình đúng.
+* **Bể phiên vẫn tích luỹ.** `recover()` nay thu hồi được phiên kẹt
+  `STARTING`, nhưng sổ chính tắc vẫn giữ 76 hàng phiên lịch sử. Chúng vô hại
+  (đã `DEAD`/`STOPPED`) nhưng chưa có đường dọn định kỳ.
+* **Fanfic: 0 thay đổi production, kho thật SẠCH.** Kịch bản G dừng ở
+  `WAITING_AUTHORITY` đúng như yêu cầu; `main` @ `03b6652`, không một tệp
+  nào đổi.

@@ -366,7 +366,10 @@ Router V4 → HỢP ĐỒNG KẾT QUẢ → KIỂM ĐỊNH theo MỤC TIÊU GỐ
 điểm dừng, (hỏng) lập lại kế hoạch CÓ TRẦN → Leader nói tiếp mà không cần ai
 hỏi. Mã ở `scripts/control_center/execution/`; đầy đủ ở
 `docs/reports/CLOSED_LOOP_V09.md` và `docs/CONTROL_CENTER.md` §24 (luật
-29–33). Năm điều hay vấp nhất:
+29–35). **Nghiệm thu MODEL THẬT trên Fanfic: 59/60 (D chạy lại 20/20),
+0 thay đổi production, kho thật SẠCH.** Reviewer ngữ nghĩa được bộ điều phối
+TỰ gọi (phán xử `REJECT` từ `codex/codex-default`, độc lập=True). Năm điều
+hay vấp nhất:
 
 * **`RUNNING -> DONE` bị CẤM CỨNG.** Mọi đường tới `DONE` đi qua
   `VERIFYING`, và `force=True` cũng không mở được. Mã thoát 0 không phải

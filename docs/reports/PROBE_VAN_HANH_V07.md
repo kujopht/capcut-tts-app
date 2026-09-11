@@ -248,13 +248,16 @@ Một bài học nhỏ đi kèm: bản đầu của phép kiểm này dùng `jso
 gọn** `NameError`, tắt lặng lẽ cả tính năng. Bài kiểm bắt được; nay dùng
 `str(dict)` và `except` hẹp lại.
 
-**Rủi ro còn lại, nói rõ:** `tranh_runtime` là một **ưu tiên, không phải một
-rào** (`sessions.decide` cố ý như vậy, để toả đa agent vẫn chạy được khi bể
-cạn chỗ). Nghĩa là nếu MỌI runtime khác đều bận, một việc mang hình dạng bảo
-mật vẫn có thể rơi vào Codex và chết ở `BLOCKED` như cũ. Sửa triệt để là làm
-cho `codex_security_shaped_refusal` **định tuyến lại thật** thay vì nằm trong
-`KHONG_THU_LAI` — việc đó chạm bộ lập lịch nên **cố ý để ngoài** phạm vi lần
-này, và ghi lại ở đây để không bị quên.
+**Rủi ro còn lại khi viết mục này — NAY ĐÃ SỬA.** Bản đầu chỉ thêm Codex vào
+`tranh_runtime`, mà `tranh_runtime` là một **ưu tiên, không phải một rào**
+(`sessions.decide` cố ý vậy để toả đa agent vẫn chạy khi bể cạn chỗ) — nên
+khi mọi runtime khác đều bận, việc vẫn có thể rơi vào Codex và chết như cũ.
+
+Đã xử lý trọn ở `docs/reports/LAM_CUNG_V07.md` mục B: nay có **rào CỨNG**
+(`cam_runtime`, hết chỗ tương thích thì CHỜ chứ không rơi về), khai báo năng
+lực lấy từ `fabric.json`, và `codex_security_shaped_refusal` **định tuyến lại
+thật** — có trần, có nguồn gốc, nhả tài nguyên. Giữ đoạn này lại để thấy vấn
+đề đã đi từ đâu tới đâu.
 
 ## 7. Bài kiểm
 

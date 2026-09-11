@@ -18,8 +18,15 @@ from pathlib import Path
 
 from scripts.control_center import probe_van_hanh as PV
 
-_DUONG = (Path(__file__).resolve().parents[2] / "docs" / "deploy"
-          / "fanfic_farmer_observer" / "observer.py")
+#: Trỏ vào MODULE THẬT đang chạy trên production, không vào một bản sao.
+#:
+#: Bản đầu trỏ vào `docs/deploy/fanfic_farmer_observer/observer.py` — một bản
+#: chép, vì lúc đó mã chưa được phép vào cây Fanfic. Sau khi
+#: `feat/farmer-sanitized-observability` vào `main`, giữ hai bản giống hệt
+#: nhau là đúng cách để chúng lệch nhau — nên bản chép đã bị xoá và bài kiểm
+#: hợp đồng nay soi thẳng thứ thật sự được triển khai.
+_DUONG = (Path(__file__).resolve().parents[2] / "server" / "farmer"
+          / "observer.py")
 
 
 def _nap_observer():

@@ -3,7 +3,9 @@
 **Trạng thái: ĐÃ TRIỂN KHAI 2026-09-11T03:43Z, sau khi người dùng duyệt
 tường minh.** Xem mục 7 cho nhật ký lần chạy thật.
 
-Thư mục này chứa mã đã triển khai (`observer.py`) + các bước chính xác.
+Thư mục này chứa **kế hoạch + nhật ký** triển khai. Mã thật nay nằm ở
+`server/farmer/observer.py` trên `main` — thư mục này KHÔNG còn giữ một bản
+chép của nó nữa, vì hai bản giống hệt nhau là đúng cách để chúng lệch nhau.
 
 > **Sửa một chỗ sai trong bản kế hoạch đầu:** bản đầu ghi `git pull` để cập
 > nhật mã trên host. **Sai** — tiền kiểm cho thấy `/opt/fanfic-audio`
@@ -83,8 +85,8 @@ khác nhau, nên không bên nào tin tuyệt đối bên kia.
 
 Hai bước, đều nhỏ:
 
-**(a)** Thêm tệp `server/farmer/observer.py` — chép nguyên `observer.py`
-trong thư mục này.
+**(a)** Thêm tệp `server/farmer/observer.py` — nay đã có sẵn trên `main`
+(merge `feat/farmer-sanitized-observability`).
 
 **(b)** Gọi nó ở cuối `MetricsWriter.write`, `server/farmer/metrics.py`:
 

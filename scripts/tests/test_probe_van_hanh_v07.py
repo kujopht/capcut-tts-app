@@ -27,6 +27,7 @@ CAU_HINH = {
     "disk_path": "/",
     "read_paths": ["/var/lib/fanfic-farmer", "/var/log/fanfic-prod-admin.log"],
     "rclone_config": "/var/lib/fanfic-farmer/rclone.conf",
+    "telemetry_file": "/var/lib/fanfic-farmer/observability.json",
 }
 
 
@@ -63,7 +64,8 @@ class TestDanhSachOp(unittest.TestCase):
             set(mg.ops()),
             {"systemd.is_active", "systemd.show", "systemd.journal_tail",
              "filesystem.stat", "filesystem.list_dir", "filesystem.read_text",
-             "filesystem.disk_usage", "rclone.listremotes", "rclone.lsjson"})
+             "filesystem.disk_usage", "rclone.listremotes", "rclone.lsjson",
+             "telemetry.snapshot"})
 
     def test_KHONG_co_op_chay_lenh_tuy_y(self):
         mg = moi_gioi()
@@ -244,6 +246,54 @@ class TestThamSoTheoCauHinh(unittest.TestCase):
         self.assertIn("'", lenh.split("grep -iE ")[1][:2])
 
 
+class TestDanhSachCamTepBiMat(unittest.TestCase):
+    """Danh sách CẤM thắng danh sách cho phép.
+
+    `read_paths` khai theo THƯ MỤC, nên một tệp bí mật nằm trong đó vẫn lọt
+    nếu chỉ dựa vào allowlist. Hôm nay hệ điều hành chặn (`rclone.conf` là
+    `600`), nhưng để quyền của máy chủ làm rào DUY NHẤT là sai.
+    """
+
+    def test_rclone_conf_KHONG_doc_duoc_du_nam_trong_goc_da_khai(self):
+        mg = moi_gioi()
+        # Khang dinh tien de: no THAT SU nam duoi mot goc da khai.
+        self.assertTrue(
+            PV._duoi_goc("/var/lib/fanfic-farmer/rclone.conf",
+                         "/var/lib/fanfic-farmer"))
+        with self.assertRaises(PV.ThamSoKhongHopLe):
+            mg.chay("filesystem.read_text",
+                    duong="/var/lib/fanfic-farmer/rclone.conf")
+        self.assertEqual(mg.truyen.da_chay, [])
+
+    def test_cac_dang_tep_bi_mat_khac_cung_bi_chan(self):
+        mg = moi_gioi()
+        for ten in ("rclone.conf", "worker-prod.env", ".env", "farmer.pem",
+                    "id_rsa", "credentials.json", "token_cache.json",
+                    "service_account.json", ".netrc"):
+            with self.subTest(ten=ten):
+                self.assertTrue(PV.la_tep_bi_mat(ten))
+                with self.assertRaises(PV.ThamSoKhongHopLe):
+                    mg.chay("filesystem.read_text",
+                            duong=f"/var/lib/fanfic-farmer/{ten}")
+
+    def test_tep_thuong_van_doc_duoc(self):
+        mg = moi_gioi()
+        for ten in ("status.json", "farmer.log", "observability.json",
+                    "notes.txt"):
+            with self.subTest(ten=ten):
+                self.assertFalse(PV.la_tep_bi_mat(ten))
+        mg.chay("filesystem.read_text",
+                duong="/var/log/fanfic-prod-admin.log")
+        self.assertEqual(len(mg.truyen.da_chay), 1)
+
+    def test_SIEU_DU_LIEU_van_lay_duoc_cho_tep_bi_mat(self):
+        # `stat` chi doc sieu du lieu, khong doc noi dung — va no la thu tra
+        # loi "tep con duoc ghi khong". Khong duoc chan nham.
+        mg = moi_gioi()
+        mg.chay("filesystem.stat", duong="/var/lib/fanfic-farmer/rclone.conf")
+        self.assertIn("stat -c", mg.truyen.da_chay[-1])
+
+
 class TestRcloneChiDoc(unittest.TestCase):
 
     def test_chi_co_thao_tac_DOC(self):
@@ -402,6 +452,145 @@ class TestGoiBangChungChoWorker(unittest.TestCase):
         json.JSONDecoder().raw_decode(tho.lstrip())
 
 
+class TestAnhChupDaLoc(unittest.TestCase):
+    """Ảnh chụp quan sát: danh sách CHO PHÉP, không phải danh sách cấm."""
+
+    DAY_DU = {
+        "schema_version": 1, "generated_at": "2026-09-11T10:00:00Z",
+        "farmer": {"started_at": "x", "updated_at": "y", "healthy": True,
+                   "unhealthy_reason": ""},
+        "round": {"number": 42, "started_at": "z", "seconds": 12.5},
+        "lanes": {"A": {"discovered": 3, "produced": 1, "archived": 1,
+                        "archive_pending": 0, "error_count": 0,
+                        "last_error_class": ""}},
+        "totals": {"produced": 100},
+        "quotas": {"daily": 50},
+        "archive": {"remote_alias": "gdrive",
+                    "root": "gdrive:FanficWorld/production",
+                    "enabled": True, "rclone_installed": True,
+                    "reachable": True, "status": "ARCHIVE_DONE",
+                    "last_error_class": "", "last_attempt_at": "t",
+                    "last_success_at": "t", "done": 10, "pending": 0,
+                    "failed": 0},
+        "integrity": {"ok": True},
+    }
+
+    def test_khoa_LA_bi_bo_chu_khong_di_tiep(self):
+        d = dict(self.DAY_DU)
+        d["rclone_conf"] = "[gdrive]\ntoken = {\"access_token\":\"ya29.secret\"}"
+        d["archive"] = dict(d["archive"], authorization="Bearer abc123")
+        sach, bo = PV.loc_telemetry(d)
+        self.assertNotIn("rclone_conf", sach)
+        self.assertNotIn("authorization", sach["archive"])
+        self.assertIn("rclone_conf", bo)
+        import json as _j
+        tho = _j.dumps(sach, ensure_ascii=False)
+        self.assertNotIn("ya29.secret", tho)
+        self.assertNotIn("Bearer abc123", tho)
+
+    def test_lop_loi_LA_thanh_unknown_chu_khong_truyen_nguyen_van(self):
+        d = dict(self.DAY_DU)
+        d["archive"] = dict(d["archive"],
+                            last_error_class="token=ya29.abcdefghijklmnop")
+        sach, _ = PV.loc_telemetry(d)
+        self.assertEqual(sach["archive"]["last_error_class"], "unknown")
+
+    def test_truong_van_ban_tu_do_bi_LOC_va_CAT(self):
+        d = dict(self.DAY_DU)
+        d["farmer"] = dict(d["farmer"],
+                           unhealthy_reason="key AKIAIOSFODNN7EXAMPLE " + "x" * 500)
+        sach, _ = PV.loc_telemetry(d)
+        vi = sach["farmer"]["unhealthy_reason"]
+        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", vi)
+        self.assertLessEqual(len(vi), 200)
+
+    def test_lane_chi_giu_SO_NGUYEN(self):
+        d = dict(self.DAY_DU)
+        d["lanes"] = {"A": {"discovered": 3, "errors": ["traceback: token=x"]}}
+        sach, bo = PV.loc_telemetry(d)
+        self.assertEqual(sach["lanes"]["A"], {"discovered": 3})
+        self.assertIn("lanes.A.errors", bo)
+
+    def test_anh_chup_MOI_HON_ma_thi_KHONG_doan_nghia(self):
+        mg = moi_gioi(ra='{"schema_version": 99}')
+        tm, r = PV.doc_telemetry(mg)
+        self.assertEqual(tm, {})
+        self.assertIs(r.trang_thai, TrangThai.UNKNOWN)
+        self.assertIn("mới hơn", r.ly_do)
+
+    def test_khong_phai_JSON_thi_UNKNOWN_co_ly_do(self):
+        mg = moi_gioi(ra="khong phai json")
+        tm, r = PV.doc_telemetry(mg)
+        self.assertEqual(tm, {})
+        self.assertIs(r.trang_thai, TrangThai.UNKNOWN)
+
+    def test_chua_khai_telemetry_thi_UNAVAILABLE_noi_ro(self):
+        mg = PV.MoiGioiProbe({k: v for k, v in CAU_HINH.items()
+                              if k != "telemetry_file"}, truyen=TruyenGia())
+        tm, r = PV.doc_telemetry(mg)
+        self.assertEqual(tm, {})
+        self.assertIs(r.trang_thai, TrangThai.UNAVAILABLE)
+        self.assertIn("telemetry_file", r.ly_do)
+
+    def test_doc_anh_chup_KHONG_cham_rclone_conf(self):
+        mg = moi_gioi(ra="{}")
+        PV.doc_telemetry(mg)
+        for lenh in mg.truyen.da_chay:
+            self.assertNotIn("rclone.conf", lenh)
+
+
+class TestPhanLoaiTuAnhChup(unittest.TestCase):
+    """A–E chỉ được khẳng định khi có BỘ ĐẾM chống lưng."""
+
+    def _tm(self, **ar):
+        goc = {"archive": {"enabled": True, "reachable": True,
+                           "done": 0, "pending": 0, "failed": 0,
+                           "last_error_class": "", "remote_alias": "gdrive"},
+               "lanes": {"A": {"discovered": 0, "produced": 0,
+                               "audio_attached": 0}}}
+        goc["archive"].update(ar.pop("archive", {}))
+        goc["lanes"]["A"].update(ar.pop("lanes", {}))
+        return goc
+
+    def test_C_khi_archive_hong_co_lop_loi(self):
+        pl, vi = PV._phan_loai_tu_telemetry(
+            self._tm(archive={"failed": 3, "last_error_class": "network"}))
+        self.assertEqual(pl, "C")
+        self.assertIn("network", vi)
+
+    def test_C_khi_token_Drive_het_han(self):
+        pl, vi = PV._phan_loai_tu_telemetry(
+            self._tm(archive={"last_error_class": "auth_invalid_grant"}))
+        self.assertEqual(pl, "C")
+        self.assertIn("reconnect", vi)
+
+    def test_B_khi_co_tac_pham_nhung_archive_dang_cho(self):
+        pl, _ = PV._phan_loai_tu_telemetry(
+            self._tm(archive={"pending": 4}, lanes={"produced": 2}))
+        self.assertEqual(pl, "B")
+
+    def test_A_khi_khong_co_ung_vien_nao(self):
+        pl, _ = PV._phan_loai_tu_telemetry(self._tm())
+        self.assertEqual(pl, "A")
+
+    def test_D_khi_co_ung_vien_nhung_khong_ra_tac_pham(self):
+        pl, _ = PV._phan_loai_tu_telemetry(self._tm(lanes={"discovered": 9}))
+        self.assertEqual(pl, "D")
+
+    def test_E_khi_khong_voi_toi_remote(self):
+        pl, vi = PV._phan_loai_tu_telemetry(
+            self._tm(archive={"reachable": False,
+                              "last_error_class": "not_found"}))
+        self.assertEqual(pl, "E")
+        self.assertIn("gdrive", vi)
+
+    def test_KHONG_co_anh_chup_thi_van_la_F(self):
+        mg = moi_gioi(ra="active")
+        bao = PV.kiem_duong_ong(mg)
+        self.assertEqual(bao.phan_loai, "F")
+        self.assertTrue(any("ảnh chụp" in x for x in bao.thieu))
+
+
 class TestPhatHienCauHoiVanHanh(unittest.TestCase):
 
     def test_cau_hoi_CHAN_DOAN_production_duoc_nhan(self):
@@ -546,6 +735,7 @@ class TestKhongDotBienProduction(unittest.TestCase):
             "filesystem.disk_usage": {"duong": "/"},
             "rclone.listremotes": {},
             "rclone.lsjson": {"remote": "gdrive"},
+            "telemetry.snapshot": {},
         }
         self.assertEqual(set(goi), set(mg.ops()), "có op mới chưa được kiểm")
         for op, kw in goi.items():

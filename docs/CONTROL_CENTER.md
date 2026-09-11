@@ -1155,3 +1155,44 @@ Bốn luật (18–21) thêm vào §16–§18:
     chứa chữ "quyền", nên gần như mọi việc xếp vào Codex đều chết như thế.
     Nay kiểm hình dạng TRƯỚC khi xếp chỗ và thêm runtime Codex vào
     `tranh_runtime` — tránh là ưu tiên, không phải rào.
+
+## 20. Telemetry đã lọc + năng lực runtime (V0.7, làm cứng trước đóng băng)
+
+Báo cáo: `docs/reports/LAM_CUNG_V07.md`. Mã đề xuất phía farmer + kế hoạch
+triển khai: `docs/deploy/fanfic_farmer_observer/`. Mã Router:
+`scripts/control_center/nang_luc.py`, `probe_van_hanh.loc_telemetry`,
+`router_v3/policy.la_hinh_dang_bao_mat`.
+
+Ba luật (22–24) thêm vào §16–§19:
+
+22. **Không phơi một tệp trạng thái có ống dẫn văn bản tự do.**
+    `status.json` của farmer phần lớn là số đếm, nhưng `archive.detail` nhận
+    `stderr` THÔ của `rclone` và `lanes[*].errors[]` nhận văn bản ngoại lệ
+    bất kỳ — nên nó **không chứng minh được là sạch**, và không được nới
+    quyền. Đường đúng là một ẢNH CHỤP ĐÃ LỌC riêng (`observability.json`,
+    `644`) theo **danh sách CHO PHÉP**, trong đó văn bản lỗi bị quy về một mã
+    trong bộ ĐÓNG. Router **lọc lại lần nữa** khi đọc: hai kho là hai nhịp
+    phát hành, không bên nào tin tuyệt đối bên kia. `rclone.conf` giữ nguyên
+    `600` — ảnh chụp chỉ nêu BÍ DANH remote, không nêu cấu hình.
+
+23. **Danh sách CẤM tệp bí mật THẮNG danh sách cho phép.** `read_paths` khai
+    theo THƯ MỤC, nên một tệp bí mật nằm trong đó vẫn lọt nếu chỉ có
+    allowlist — bài kiểm bắt được `filesystem.read_text` được phép `tail`
+    `rclone.conf`. Quyền của máy chủ KHÔNG được là rào duy nhất: một lần đổi
+    quyền trên host sẽ lặng lẽ mở đường. `probe_van_hanh.la_tep_bi_mat()`
+    chặn theo tên tệp; `stat` (siêu dữ liệu) vẫn cho phép vì nó không lộ gì.
+
+24. **Một TỪ ĐƠN không bao giờ được làm trọng tài phân loại bảo mật.** Danh
+    sách từ đơn của adapter Codex chứa chữ "quyền", mà lời nhắc công cụ TIÊU
+    CHUẨN của mọi việc lại có "quyền được khớp theo chuỗi chính xác" — nên
+    MỌI việc xếp vào Codex đều bị từ chối rồi chết ở `BLOCKED`
+    (`fanfic.t78ce-1`). Nay: phân loại bằng **cụm từ chuyên môn**, chỉ áp lên
+    phần văn bản DO NGƯỜI VIẾT (`policy.phan_nguoi_viet` cắt bỏ boilerplate),
+    và ở **một nguồn sự thật duy nhất** (`router_v3.policy`) — hai danh sách
+    song song là cách đúng để chúng lệch nhau trở lại. Runtime KHAI BÁO thứ
+    nó từ chối (lấy từ `security.security_refusal_family` vốn có trong
+    `fabric.json`), xếp chỗ dùng khai báo đó làm **rào CỨNG** (`cam_runtime`,
+    khác `tranh_runtime` vốn chỉ là ưu tiên), và một lần từ chối vì CHÍNH
+    SÁCH thì **định tuyến lại** — nhả phiên, cấm chỗ đã từ chối, xếp lại, trần
+    2 lần, giữ nguồn gốc trong `_dinh_tuyen_lai`. Lỗi THẬT của việc không bao
+    giờ được định tuyến lại.

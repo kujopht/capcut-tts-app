@@ -298,6 +298,22 @@ chứa chữ "quyền" nên gần như mọi việc xếp vào Codex đều ch�
 `docs/reports/PROBE_VAN_HANH_V07.md`, `docs/CONTROL_CENTER.md` §19 (luật
 18–21).
 
+**V0.7 — LÀM CỨNG**: (a) KHÔNG nới quyền `status.json` của farmer — nó có
+hai ống dẫn văn bản tự do (`archive.detail` ← `stderr` thô của `rclone`,
+`lanes[*].errors[]` ← ngoại lệ bất kỳ) nên không chứng minh được là sạch;
+đường đúng là ẢNH CHỤP ĐÃ LỌC riêng (`observability.json`, `644`, danh sách
+CHO PHÉP, lỗi quy về mã trong bộ ĐÓNG) — mã đề xuất + kế hoạch triển khai ở
+`docs/deploy/fanfic_farmer_observer/`, **chưa triển khai, cần người vận hành
+duyệt**. `rclone.conf` giữ `600`, và Router tự chặn thêm một lớp
+(`la_tep_bi_mat` — danh sách CẤM thắng danh sách cho phép). (b) Một TỪ ĐƠN
+không được làm trọng tài phân loại bảo mật: chữ "quyền" trong lời nhắc công
+cụ tiêu chuẩn từng làm MỌI việc xếp vào Codex bị từ chối rồi chết ở
+`BLOCKED`. Nay phân loại bằng CỤM TỪ chuyên môn, chỉ trên phần NGƯỜI VIẾT, ở
+một nguồn duy nhất (`router_v3.policy`); runtime khai báo thứ nó từ chối;
+xếp chỗ là RÀO CỨNG (`cam_runtime`); từ chối vì CHÍNH SÁCH thì định tuyến
+lại có trần + nguồn gốc. `docs/reports/LAM_CUNG_V07.md`,
+`docs/CONTROL_CENTER.md` §20 (luật 22–24).
+
 **Nó KHÔNG thay Router V4** — nó gọi `Scheduler`/`Executor` của V4 nguyên
 vẹn và chỉ thêm thứ V4 cố ý không có: trạng thái sống lâu hơn một mission
 (dự án, phiên dùng lại được, khoá tài nguyên, phong bì quyền AUTO/GATED,

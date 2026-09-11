@@ -38,9 +38,14 @@ from scripts.router_v3.worker_adapter import (HealthReport, TransportKind,
                                               WorkerAdapter)
 from scripts.router_v3 import worker_identity
 
-#: Tu khoa lam mot goi viec mang HINH DANG bao mat. Co y RONG hon can:
-#: mot lan tu choi nham chi ton mot lan dinh tuyen lai; mot lan gui nham
-#: tra ve ket qua rong ma khong ai biet vi sao.
+#: GIỮ LẠI cho tương thích ngược (bài kiểm cũ/mã ngoài còn trỏ vào).
+#:
+#: KHÔNG DÙNG ĐỂ PHÂN LOẠI NỮA. Danh sách TỪ ĐƠN này là nguyên nhân gốc của
+#: một khuyết tật đo được: chữ "quyền" cũng nằm trong lời nhắc công cụ TIÊU
+#: CHUẨN của mọi việc ("quyền được khớp theo chuỗi chính xác"), nên MỌI việc
+#: xếp vào Codex đều bị từ chối rồi chết ở `BLOCKED` (`fanfic.t78ce-1`).
+#: Nay dùng `policy.la_hinh_dang_bao_mat` — cụm từ chuyên môn, và chỉ áp lên
+#: phần văn bản DO NGƯỜI VIẾT.
 _HINH_DANG_BAO_MAT = ("security", "credential", "auth", "permission", "secret",
                       "token", "bảo mật", "xác thực", "quyền")
 
@@ -118,8 +123,13 @@ class CodexAdapter(WorkerAdapter):
     def send_task(self, packet: TaskPacket) -> TaskResult:
         t0 = time.perf_counter()
         van_ban = packet.render()
-        thap = van_ban.lower()
-        if any(k in thap for k in _HINH_DANG_BAO_MAT):
+        # Phan loai theo CUM TU chuyen mon, va CHI tren phan nguoi viet —
+        # xem `policy.la_hinh_dang_bao_mat`. Ban cu quet tu don tren ca goi
+        # da render, nen chu "quyen" trong loi nhac cong cu tieu chuan lam
+        # MOI viec bi tu choi.
+        from scripts.router_v3.policy import la_hinh_dang_bao_mat
+        if la_hinh_dang_bao_mat(packet.objective) or \
+                la_hinh_dang_bao_mat(getattr(packet, "title", "") or ""):
             return TaskResult(
                 task_id=packet.task_id, worker_id=self._worker_id,
                 status="blocked", provider=self.provider,

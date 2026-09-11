@@ -211,7 +211,9 @@ class SessionManager:
     def decide(self, task: Task, contract: TaskContract, *,
                demand: Optional[Demand] = None,
                conflicting_task: str = "",
-               tranh_runtime: Sequence[str] = ()) -> SessionDecision:
+               tranh_runtime: Sequence[str] = (),
+               cam_runtime: Sequence[str] = (),
+               ly_do_cam: str = "") -> SessionDecision:
         """REUSE / CREATE / WAIT cho một việc. Hàm THUẦN với sổ hiện tại.
 
         Thứ tự các luật KHÔNG tuỳ tiện — luật chặn đứng trước luật cấp phát,
@@ -227,6 +229,13 @@ class SessionManager:
         pham_vi = tuple(contract.allowed_scope)
         chi_doc = not contract.requirements.repo_write
         tranh = set(tranh_runtime or ())
+        # `cam` KHAC `tranh`: `tranh` la uu tien (het cho thi roi ve), con
+        # `cam` la RAO CUNG — chay o do thi chac chan bi tu choi, nen tha
+        # CHO con hon dispatch mot luot biet truoc la hong.
+        cam = set(cam_runtime or ())
+        if cam:
+            vet.append(f"năng lực: CẤM {sorted(cam)}"
+                       + (f" — {ly_do_cam}" if ly_do_cam else ""))
 
         # Luat 0 — xung dot tai nguyen da duoc tang tren xac dinh.
         if conflicting_task:
@@ -264,6 +273,8 @@ class SessionManager:
 
         # Luat 2 — DUNG LAI mot phien RANH tuong thich.
         ung_vien = [s for s in phien if s.state is SessionState.IDLE]
+        if cam:
+            ung_vien = [s for s in ung_vien if s.runtime_id not in cam]
         vet.append(f"{len(ung_vien)} phiên RẢNH để xét dùng lại")
         if tranh:
             khac = [s for s in ung_vien if s.runtime_id not in tranh]
@@ -313,13 +324,24 @@ class SessionManager:
                 trace=tuple(vet))
 
         # Luat 4 — CREATE. Chon placement THEO NANG LUC.
-        qd = self.scheduler.decide(contract, demand=demand, exclude=tuple(sorted(tranh)))
+        qd = self.scheduler.decide(contract, demand=demand,
+                                   exclude=tuple(sorted(tranh | cam)))
         if qd.selected is None and tranh:
             # Het runtime PHAN BIET: roi ve cho phep trung tai khoan anh em,
-            # con hon xep hang trong khi be van con khe.
+            # con hon xep hang trong khi be van con khe. `cam` VAN giu —
+            # no la rao nang luc, khong phai mot uu tien cho de chiu.
             vet.append(f"toả: không còn runtime ngoài {sorted(tranh)} — cho phép "
                        f"dùng chung tài khoản anh em")
-            qd = self.scheduler.decide(contract, demand=demand)
+            qd = self.scheduler.decide(contract, demand=demand,
+                                       exclude=tuple(sorted(cam)))
+        if qd.selected is None and cam:
+            vet.append(f"không còn runtime nào TƯƠNG THÍCH ngoài {sorted(cam)}")
+            return SessionDecision(
+                action=SessionAction.WAIT, routing=qd,
+                reason=(f"mọi chỗ chạy còn lại đều từ chối năng lực việc này "
+                        f"({ly_do_cam or 'không tương thích'}) — chờ thay vì "
+                        f"gửi một lượt biết chắc sẽ bị từ chối"),
+                trace=tuple(vet))
         if qd.selected is None:
             vet.append("bộ lập lịch không tìm được placement đủ điều kiện")
             return SessionDecision(

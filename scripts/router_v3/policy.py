@@ -15,9 +15,65 @@ from dataclasses import dataclass, fields
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
+import re
+
 from scripts.router_v3.dag import RiskClass, TaskNode
 from scripts.router_v3.registry import Health, WorkerRegistry, WorkerSpec
 from scripts.router_v3.routing_history import TongHop
+
+# ------------------------------------------------- hình dạng bảo mật -------
+#
+# MỘT nguồn sự thật duy nhất cho câu "việc này có hình dạng bảo mật không".
+# Trước bản này có hai chỗ trả lời câu đó và chúng lệch nhau: `policy` dùng
+# `required_capabilities` (đúng), còn adapter Codex quét một danh sách TỪ ĐƠN
+# trên cả gói việc đã render — danh sách đó có chữ "quyền", mà lời nhắc công
+# cụ TIÊU CHUẨN của mọi việc lại chứa "quyền được khớp theo chuỗi chính xác".
+# Kết quả: MỌI việc xếp vào Codex đều bị từ chối (đo được: `fanfic.t78ce-1`).
+#
+# Nên: từ vựng ở đây là CỤM TỪ chuyên môn, và nó chỉ được áp lên phần văn bản
+# DO NGƯỜI VIẾT — không áp lên lời nhắc/phong bì/bằng chứng do Router gắn.
+
+#: Mốc BOILERPLATE do Router tự gắn. Văn bản từ mốc đầu tiên trở đi KHÔNG
+#: phải do người viết, nên không được dùng để phân loại việc.
+MOC_BOILERPLATE: Tuple[str, ...] = (
+    "\nLoại việc:", "\nCÔNG CỤ:", "\nPERMISSION_ENVELOPE",
+    "\nNHẬT KÝ GIT DO ROUTER", "\nNỘI DUNG WEB DO ROUTER",
+    "\nBẰNG CHỨNG VẬN HÀNH DO ROUTER",
+)
+
+_MAU_BAO_MAT: Tuple[str, ...] = (
+    r"\bsecurity (review|audit|assessment|hardening)\b",
+    r"\b(đánh giá|rà soát|kiểm định|kiểm toán) bảo mật\b",
+    r"\b(lỗ hổng|vulnerabilit|exploit|CVE-\d{4})",
+    r"\b(credential|api[ _-]?key|private key|secret key|khoá riêng|"
+    r"khóa riêng|mật khẩu)\b",
+    r"\b(oauth|iam policy|rbac|acl)\b",
+    r"\b(phân quyền|authorization model|permission model|escalat)\b",
+    r"\b(rotate|rotation) (the )?(secret|credential|key)\b",
+    r"\b(xoay|luân chuyển|thu hồi) (khoá|khóa|bí mật|chứng chỉ)\b",
+    r"\bpenetration test|pentest\b",
+)
+_BAO_MAT = [re.compile(m, re.I) for m in _MAU_BAO_MAT]
+
+
+def phan_nguoi_viet(van: str) -> str:
+    """Cắt bỏ phần BOILERPLATE do Router gắn, giữ phần người viết."""
+    ra = str(van or "")
+    for moc in MOC_BOILERPLATE:
+        i = ra.find(moc)
+        if i >= 0:
+            ra = ra[:i]
+    return ra
+
+
+def la_hinh_dang_bao_mat(van: str) -> bool:
+    """Văn bản NGƯỜI VIẾT này có phải việc bảo mật không. Tất định.
+
+    Chỉ nhận CỤM TỪ chuyên môn. Một chữ "quyền"/"auth"/"token" đứng một mình
+    KHÔNG phải dấu hiệu — đó là bài học đắt nhất của bản trước.
+    """
+    nv = phan_nguoi_viet(van)
+    return bool(nv) and any(r.search(nv) for r in _BAO_MAT)
 
 
 class SpeedMode(str, Enum):

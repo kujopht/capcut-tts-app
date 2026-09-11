@@ -1608,6 +1608,61 @@ thi + ngân sách), người vận hành duyệt các sự cố `backfill`, nh�
   lẽ cả tính năng tránh Codex.
 
 
+## Router Control Center V0.7 — LÀM CỨNG trước đóng băng (2026-09-11)
+
+Đã xong, nhánh `feat/v07-fanfic-adoption`, **chưa merge/tag**. Đầy đủ:
+`docs/reports/LAM_CUNG_V07.md`, luật 22–24 ở `docs/CONTROL_CENTER.md` §20.
+
+**A. Telemetry production đã lọc**
+
+* **`status.json` KHÔNG an toàn để phơi** — và đây là kết luận đọc từ mã
+  farmer thật, không phải phỏng đoán: `archive.detail` nhận `stderr` THÔ của
+  `rclone` (`drive_archive.py`, nhánh `else` của `probe()`), còn
+  `lanes[*].errors[]` nhận văn bản ngoại lệ bất kỳ (`metrics.py`,
+  `note_error`). Hai ống dẫn mở → **không chứng minh được là sạch** → không
+  nới quyền. (Ghi chú: nó đang `600` chỉ vì `mkstemp` tạo `600` rồi
+  `os.replace` giữ nguyên mode — một tác dụng phụ, không phải quyết định.)
+* **`rclone.conf` vẫn `600 fanfic:fanfic`, không đổi**, và nay có **hai**
+  lớp chặn: quyền của host, cộng danh sách CẤM tệp bí mật ở Router
+  (`la_tep_bi_mat`) — sinh ra vì một bài kiểm phát hiện `read_paths` khai
+  theo THƯ MỤC nên `filesystem.read_text` **được phép** `tail` `rclone.conf`.
+  Để quyền máy chủ làm rào duy nhất là sai.
+* **Ảnh chụp quan sát đã lọc** (`/var/lib/fanfic-farmer/observability.json`,
+  `644`, danh sách CHO PHÉP, văn bản lỗi quy về mã trong bộ ĐÓNG). Router lọc
+  lại lần nữa khi đọc. Có ảnh chụp thì phân loại A–E dựa trên **bộ đếm thật**.
+* **ĐỘT BIẾN HOST: CÓ, và CHƯA LÀM.** Mã đề xuất + kế hoạch ở
+  `docs/deploy/fanfic_farmer_observer/` (2 bước: thêm `server/farmer/
+  observer.py`, thêm một dòng `publish(...)` cuối `MetricsWriter.write`; rồi
+  `git pull` + `systemctl restart fanfic-farmer` trên host). Router dừng
+  trước bước đó. Kho Fanfic **không bị sửa một tệp nào**.
+
+**B. Năng lực runtime + định tuyến lại**
+
+* **Nguyên nhân gốc**: adapter Codex quét danh sách TỪ ĐƠN trên cả gói việc
+  đã render, và danh sách có chữ **"quyền"** — thứ nằm sẵn trong lời nhắc
+  công cụ TIÊU CHUẨN của mọi việc. Cộng với `codex_security_shaped_refusal`
+  nằm trong `KHONG_THU_LAI` → **mọi** việc xếp vào Codex đều chết ở `BLOCKED`.
+* **Sửa ở ba tầng**: phân loại bằng **cụm từ chuyên môn** chỉ trên phần NGƯỜI
+  VIẾT, ở **một nguồn sự thật duy nhất** (`router_v3.policy`); runtime KHAI
+  BÁO thứ nó từ chối (lấy từ `security.security_refusal_family` vốn có trong
+  `fabric.json`); xếp chỗ dùng khai báo đó làm **rào CỨNG** (`cam_runtime`,
+  khác `tranh_runtime` vốn chỉ là ưu tiên — hết chỗ tương thích thì CHỜ).
+* **Định tuyến lại** có trần 2 lần, nhả phiên, cấm chỗ đã từ chối, giữ nguồn
+  gốc (`_dinh_tuyen_lai`: chỗ cũ, lý do, lần thứ mấy). Lỗi THẬT của việc
+  (`tool_permission_denied`, `security_gate`, `executor_error`…) **không** bao
+  giờ được định tuyến lại.
+
+**Chẩn đoán Drive thật sau khi làm cứng**: hỏi lại đúng câu → **0 việc mới, 0
+việc chết vì quyền**, Leader trả lời từ bằng chứng trong 47s, phân loại **F**
+kèm lý do chính xác cho từng mục chưa đo được (gồm cả
+`observability.json: No such file or directory`). **HOST CHANGE REQUIRED** để
+phân biệt được A–E.
+
+**Bài kiểm mới**: `test_nang_luc_reroute_v07.py` (20), mở rộng
+`test_probe_van_hanh_v07.py` (63), `test_farmer_observer_contract_v07.py`
+(13). Đột biến production: **0**.
+
+
 ## Bẫy đã gặp
 
 - **Vai "user" trong tệp phiên Claude KHÔNG chứng minh người gõ.** Bản tóm tắt

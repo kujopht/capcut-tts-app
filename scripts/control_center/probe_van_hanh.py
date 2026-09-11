@@ -164,6 +164,111 @@ LOC_JOURNAL: Dict[str, str] = {
 DON_VI_THOI_GIAN: Tuple[str, ...] = ("minutes", "hours", "days")
 
 
+# ------------------------------------------ ảnh chụp quan sát ĐÃ LỌC -------
+
+#: Phiên bản HỢP ĐỒNG ảnh chụp quan sát. Farmer ghi, Router đọc.
+TELEMETRY_SCHEMA = 1
+
+#: Khoá được phép có trong ảnh chụp, theo TỪNG TẦNG. Đây là một DANH SÁCH
+#: CHO PHÉP, không phải danh sách cấm: một khoá lạ bị BỎ, không được đi tiếp.
+#:
+#: Vì sao Router vẫn lọc dù farmer đã lọc: hai bên là hai kho khác nhau, và
+#: một bản farmer cũ/mới hơn có thể ghi thêm trường. Tin tuyệt đối vào máy
+#: bên kia là đúng cái lỗi mà lớp này tồn tại để tránh.
+KHOA_TELEMETRY: Dict[str, Tuple[str, ...]] = {
+    "": ("schema_version", "generated_at", "farmer", "round", "lanes",
+         "totals", "quotas", "archive", "integrity"),
+    "farmer": ("started_at", "updated_at", "healthy", "unhealthy_reason"),
+    "round": ("number", "started_at", "seconds"),
+    "archive": ("remote_alias", "root", "enabled", "rclone_installed",
+                "reachable", "status", "last_error_class", "last_attempt_at",
+                "last_success_at", "done", "pending", "failed"),
+    "integrity": ("ok",),
+}
+
+#: Lớp lỗi ĐÓNG. Ảnh chụp chỉ được mang MÃ LỖI, không bao giờ mang văn bản
+#: lỗi thô của bên thứ ba — đó chính là đường mà một token lọt ra.
+LOP_LOI: Tuple[str, ...] = (
+    "", "auth_invalid_grant", "quota_exceeded", "network", "not_found",
+    "permission_denied", "timeout", "rclone_missing", "disabled", "unknown",
+)
+
+#: Trường số nguyên của một lane. Mọi thứ khác trong lane đều bị bỏ.
+DEM_LANE: Tuple[str, ...] = (
+    "discovered", "deduped", "reviewed", "approved", "rejected", "produced",
+    "published_candidates", "blocked_no_cover", "review_pending", "resumed",
+    "audio_attached", "archived", "archive_pending", "failed",
+    "skipped_quota", "error_count",
+)
+
+
+def loc_telemetry(d: Any) -> Tuple[Dict[str, Any], List[str]]:
+    """Lọc ảnh chụp theo DANH SÁCH CHO PHÉP. Trả `(sạch, [khoá đã bỏ])`.
+
+    Chuỗi tự do duy nhất được giữ là `unhealthy_reason` (đã cắt ngắn và đi
+    qua bộ lọc bí mật); `last_error_class` phải nằm trong `LOP_LOI`, nếu lạ
+    thì thành `"unknown"` chứ không được truyền nguyên văn.
+    """
+    bo: List[str] = []
+    if not isinstance(d, dict):
+        return {}, ["gốc không phải object"]
+    ra: Dict[str, Any] = {}
+    for k, v in d.items():
+        if k not in KHOA_TELEMETRY[""]:
+            bo.append(k)
+            continue
+        if k in ("farmer", "round", "archive", "integrity"):
+            if not isinstance(v, dict):
+                bo.append(k)
+                continue
+            con: Dict[str, Any] = {}
+            for k2, v2 in v.items():
+                if k2 not in KHOA_TELEMETRY[k]:
+                    bo.append(f"{k}.{k2}")
+                    continue
+                if k2 == "unhealthy_reason":
+                    con[k2] = _loc(str(v2))[:200]
+                elif k2 == "last_error_class":
+                    con[k2] = (str(v2) if str(v2) in LOP_LOI else "unknown")
+                elif k2 in ("remote_alias", "root", "status"):
+                    con[k2] = _loc(str(v2))[:120]
+                elif k2 in ("started_at", "updated_at", "last_attempt_at",
+                            "last_success_at"):
+                    con[k2] = str(v2)[:40]
+                else:
+                    con[k2] = v2
+            ra[k] = con
+        elif k == "lanes":
+            if not isinstance(v, dict):
+                bo.append(k)
+                continue
+            lanes: Dict[str, Any] = {}
+            for ten, lm in v.items():
+                if not isinstance(lm, dict):
+                    bo.append(f"lanes.{ten}")
+                    continue
+                sach: Dict[str, Any] = {}
+                for k2, v2 in lm.items():
+                    if k2 in DEM_LANE and isinstance(v2, int):
+                        sach[k2] = v2
+                    elif k2 == "last_error_class":
+                        sach[k2] = (str(v2) if str(v2) in LOP_LOI
+                                    else "unknown")
+                    else:
+                        bo.append(f"lanes.{ten}.{k2}")
+                lanes[str(ten)[:40]] = sach
+            ra["lanes"] = lanes
+        elif k in ("totals", "quotas"):
+            if not isinstance(v, dict):
+                bo.append(k)
+                continue
+            ra[k] = {str(a)[:40]: b for a, b in v.items()
+                     if isinstance(b, (int, float))}
+        else:
+            ra[k] = v
+    return ra, bo
+
+
 def _kiem_chuoi(gt: Any, ten: str) -> str:
     s = str(gt or "").strip()
     if not s:
@@ -196,6 +301,31 @@ def _chuan_hoa_duong(d: str) -> str:
     if any(x == ".." for x in doan):
         raise ThamSoKhongHopLe("duong: không được chứa `..`")
     return "/" + "/".join(doan)
+
+
+#: Tệp KHÔNG BAO GIỜ được đọc nội dung, kể cả khi nó nằm dưới một gốc đã
+#: khai. Danh sách CẤM này THẮNG danh sách cho phép.
+#:
+#: Vì sao cần: `read_paths` khai theo THƯ MỤC, và `rclone.conf` (chứa token
+#: OAuth) nằm ngay trong `/var/lib/fanfic-farmer`. Không có lớp này thì
+#: `filesystem.read_text` được phép `tail` nó — hôm nay hệ điều hành chặn
+#: (mode 600), nhưng để quyền của máy chủ làm rào DUY NHẤT là sai: một lần
+#: đổi quyền trên host sẽ lặng lẽ mở đường. Bài kiểm
+#: `test_probe_KHONG_co_thao_tac_doc_noi_dung_rclone_conf` bắt được.
+_MAU_TEP_BI_MAT: Tuple[str, ...] = (
+    r"^rclone\.conf$", r"\.env$", r"^\.env", r"\.pem$", r"\.key$",
+    r"\.p12$", r"\.pfx$", r"\.jks$", r"^id_(rsa|dsa|ecdsa|ed25519)",
+    r"^\.netrc$", r"^credentials?$", r"^credentials?\.json$",
+    r"^token.*\.json$", r"^service[_-]account.*\.json$",
+    r"^\.htpasswd$", r"^shadow$", r"\.kdbx$",
+)
+_TEP_BI_MAT = [re.compile(m, re.I) for m in _MAU_TEP_BI_MAT]
+
+
+def la_tep_bi_mat(duong: str) -> bool:
+    """Tệp này có thuộc loại KHÔNG BAO GIỜ đọc nội dung không."""
+    ten = str(duong or "").rstrip("/").rsplit("/", 1)[-1]
+    return any(r.search(ten) for r in _TEP_BI_MAT)
 
 
 def _duoi_goc(duong: str, goc: str) -> bool:
@@ -359,6 +489,7 @@ class MoiGioiProbe:
         self._don_vi = tuple(x for x in [str(c.get("unit") or "")] if x)
         self._rclone_config = str(c.get("rclone_config") or "")
         self._rclone_remote = str(c.get("rclone_remote") or "")
+        self._telemetry = str(c.get("telemetry_file") or "")
 
         goc: List[str] = []
         for k in ("status_file", "disk_path"):
@@ -467,6 +598,12 @@ class MoiGioiProbe:
 
     def _op_read_text(self, p: Dict) -> Tuple[str, str]:
         d = self.kiem_duong(p.get("duong"))
+        # Danh sach CAM thang danh sach cho phep: mot tep bi mat nam trong
+        # mot thu muc da khai van KHONG duoc doc noi dung.
+        if la_tep_bi_mat(d):
+            raise ThamSoKhongHopLe(
+                f"{d!r} thuộc loại tệp BÍ MẬT — lớp probe không bao giờ đọc "
+                f"nội dung nó, kể cả khi nó nằm dưới gốc đã khai")
         so = _kiem_so(p.get("so_dong", 40), "so_dong", nho_nhat=1,
                       lon_nhat=400)
         return f"tail -n {so} {d}", d
@@ -474,6 +611,19 @@ class MoiGioiProbe:
     def _op_disk(self, p: Dict) -> Tuple[str, str]:
         d = self.kiem_duong(p.get("duong", "/"), cho_dia=True)
         return f"df -Pk {d} | tail -n 1", d
+
+    def _op_telemetry(self, p: Dict) -> Tuple[str, str]:
+        """Đọc ẢNH CHỤP QUAN SÁT ĐÃ LỌC do farmer ghi.
+
+        Đây là đường thay thế cho việc nới quyền `status.json`: farmer ghi
+        một tệp RIÊNG chỉ chứa siêu dữ liệu vận hành, `644`, không có trường
+        văn bản lỗi thô nào. Xem `docs/deploy/fanfic_farmer_observer/`.
+        """
+        if not self._telemetry:
+            raise ThamSoKhongHopLe(
+                "chưa khai `telemetry_file` cho dự án này")
+        d = _chuan_hoa_duong(self._telemetry)
+        return f"cat {d}", d
 
     def _op_rclone_remotes(self, p: Dict) -> Tuple[str, str]:
         if not self._rclone_config:
@@ -519,6 +669,9 @@ class MoiGioiProbe:
             "filesystem.disk_usage": DinhNghiaOp(
                 "filesystem.disk_usage", "dung lượng đĩa", "filesystem",
                 lambda s, p: s._op_disk(p), 300.0),
+            "telemetry.snapshot": DinhNghiaOp(
+                "telemetry.snapshot", "ảnh chụp quan sát đã lọc", "telemetry",
+                lambda s, p: s._op_telemetry(p), 180.0),
             "rclone.listremotes": DinhNghiaOp(
                 "rclone.listremotes", "danh sách remote", "rclone",
                 lambda s, p: s._op_rclone_remotes(p), 600.0),
@@ -594,6 +747,8 @@ class MoiGioiProbe:
             ra["ly_do"] = vi
         if not self._rclone_config:
             ra["khong_kha_dung"]["rclone"] = "chưa khai `rclone_config`"
+        if not self._telemetry:
+            ra["khong_kha_dung"]["telemetry"] = "chưa khai `telemetry_file`"
         ra["khong_kha_dung"].update(self._khong_kha_dung)
         ra["don_vi"] = list(self._don_vi)
         ra["goc_doc"] = list(self._goc_doc)
@@ -669,6 +824,87 @@ class BaoCaoDuongOng:
         return "\n".join(d)
 
 
+def doc_telemetry(mg: MoiGioiProbe) -> Tuple[Dict[str, Any], KetQuaProbe]:
+    """Đọc + lọc ảnh chụp quan sát. Trả `({} , KetQuaProbe)` khi chưa có.
+
+    Không bao giờ ném: chưa triển khai phía host là một trạng thái BÌNH
+    THƯỜNG của hệ thống, không phải một lỗi.
+    """
+    try:
+        r = mg.chay("telemetry.snapshot")
+    except ProbeLoi as exc:
+        return {}, KetQuaProbe(op="telemetry.snapshot", dich="",
+                               trang_thai=TrangThai.UNAVAILABLE,
+                               nguon=mg._nguon(), ly_do=str(exc)[:200])
+    if not r.hieu_luc().do_duoc or not r.gia_tri:
+        return {}, r
+    try:
+        tho = json.loads(str(r.gia_tri))
+    except (ValueError, TypeError) as exc:
+        return {}, KetQuaProbe(
+            op="telemetry.snapshot", dich=r.dich,
+            trang_thai=TrangThai.UNKNOWN, nguon=r.nguon,
+            ly_do=f"ảnh chụp không phải JSON hợp lệ: {exc}"[:200])
+    sach, bo = loc_telemetry(tho)
+    pb = sach.get("schema_version")
+    if pb is not None and int(pb) > TELEMETRY_SCHEMA:
+        return {}, KetQuaProbe(
+            op="telemetry.snapshot", dich=r.dich,
+            trang_thai=TrangThai.UNKNOWN, nguon=r.nguon,
+            ly_do=(f"ảnh chụp phiên bản {pb} mới hơn mã Router "
+                   f"({TELEMETRY_SCHEMA}) — không đoán nghĩa trường mới"))
+    ghi = f"{len(sach)} nhóm"
+    if bo:
+        ghi += f" · bỏ {len(bo)} khoá lạ: {bo[:5]}"
+    return sach, KetQuaProbe(
+        op="telemetry.snapshot", dich=r.dich, trang_thai=TrangThai.ACTIVE,
+        gia_tri=ghi, nguon=r.nguon, do_luc=r.do_luc, han_tuoi=180.0,
+        bang_chung=_loc(json.dumps(sach, ensure_ascii=False))[:1200])
+
+
+def _phan_loai_tu_telemetry(tm: Dict[str, Any]) -> Tuple[str, str]:
+    """`(phân loại, lý do)` từ ảnh chụp ĐÃ LỌC, hoặc `("", "")`.
+
+    Chỉ khẳng định A–E khi có BỘ ĐẾM chống lưng. Mọi nhánh dưới đây đều đọc
+    từ một con số có thật, không nhánh nào suy từ "nghe hợp lý".
+    """
+    ar = tm.get("archive") or {}
+    lanes = (tm.get("lanes") or {}).values()
+
+    def tong(khoa: str) -> int:
+        return sum(int(l.get(khoa) or 0) for l in lanes
+                   if isinstance(l, dict))
+
+    hong = int(ar.get("failed") or 0)
+    cho = int(ar.get("pending") or 0)
+    lop_loi = str(ar.get("last_error_class") or "")
+    bat = bool(ar.get("enabled", True))
+    toi = bool(ar.get("reachable", False))
+
+    if not bat:
+        return "C", "archive Drive đang TẮT (`enabled=false`) trong ảnh chụp"
+    if lop_loi == "auth_invalid_grant":
+        return "C", ("xác thực Drive không còn hiệu lực "
+                     "(`last_error_class=auth_invalid_grant`) — cần người vận "
+                     "hành chạy `rclone config reconnect` một lần")
+    if hong > 0 and lop_loi:
+        return "C", f"archive hỏng: {hong} việc, lớp lỗi `{lop_loi}`"
+    if not toi and lop_loi:
+        return "E", (f"không với tới remote đã khai "
+                     f"`{ar.get('remote_alias', '?')}` — lớp lỗi `{lop_loi}`")
+    san_sang = tong("produced") + tong("audio_attached")
+    if cho > 0 and san_sang > 0:
+        return "B", (f"production có {san_sang} tác phẩm nhưng "
+                     f"{cho} bản đang CHỜ archive")
+    if san_sang == 0 and tong("discovered") == 0:
+        return "A", ("không tác phẩm nào đạt chuẩn production trong ảnh chụp "
+                     "(discovered = 0, produced = 0)")
+    if san_sang == 0 and tong("discovered") > 0:
+        return "D", (f"đường ống tắc TRƯỚC archive: tìm được "
+                     f"{tong('discovered')} ứng viên nhưng produced = 0")
+    return "", ""
+
+
 def kiem_duong_ong(mg: MoiGioiProbe, *, gio: int = 24) -> BaoCaoDuongOng:
     """Thu thập bằng chứng CÓ THẬT rồi phân loại A–F.
 
@@ -717,6 +953,14 @@ def kiem_duong_ong(mg: MoiGioiProbe, *, gio: int = 24) -> BaoCaoDuongOng:
         if r2 is not None:
             bc.append(r2)
 
+    # ANH CHUP DA LOC: duong DUNG de co bo dem archive/round ma khong phai
+    # noi quyen `status.json` (tep do co truong van ban loi tho — xem
+    # `docs/deploy/fanfic_farmer_observer/`).
+    tm, r_tm = doc_telemetry(mg)
+    bc.append(r_tm)
+    if not tm:
+        thieu.append(f"ảnh chụp quan sát đã lọc — {r_tm.ly_do or 'chưa có'}")
+
     r = thu("rclone.listremotes")
     if r is not None:
         bc.append(r)
@@ -752,9 +996,18 @@ def kiem_duong_ong(mg: MoiGioiProbe, *, gio: int = 24) -> BaoCaoDuongOng:
             "trạng thái Drive/rclone (liệt kê remote) — "
             + (rclone_ok.ly_do if rclone_ok and rclone_ok.ly_do
                else "chưa có đường đọc"))
-    thieu.append("bộ đếm archive/round của farmer (`status.json`) — "
-                 "tệp không đọc được bằng tài khoản quan sát")
+    if not tm:
+        thieu.append("bộ đếm archive/round của farmer — `status.json` không "
+                     "đọc được bằng tài khoản quan sát, và ảnh chụp đã lọc "
+                     "chưa được triển khai phía host")
     thieu.append("hàng đợi Appwrite và artifact R2 — chưa có adapter đọc")
+
+    # Co anh chup -> co the phan biet A-E bang BO DEM THAT.
+    if tm:
+        pl, vi = _phan_loai_tu_telemetry(tm)
+        if pl:
+            return BaoCaoDuongOng(project_id="", phan_loai=pl, bang_chung=bc,
+                                  thieu=thieu, ly_do=vi)
 
     if dv_state is not None and dv_state.hieu_luc() is TrangThai.ACTIVE \
             and str(dv_state.gia_tri or "").strip() != "active":

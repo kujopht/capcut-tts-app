@@ -44,7 +44,16 @@
             "/var/lib/fanfic-farmer",
             "/var/log/fanfic-prod-admin.log"
           ],
-          "rclone_config": "/var/lib/fanfic-farmer/rclone.conf"
+          "rclone_config": "/var/lib/fanfic-farmer/rclone.conf",
+          "_doc_telemetry": [
+            "ANH CHUP QUAN SAT DA LOC (V0.7). Farmer ghi tep nay o mode 644,",
+            "chi gom sieu du lieu van hanh — KHONG co van ban loi tho, nen doc",
+            "duoc bang tai khoan quan sat ma khong phai noi quyen status.json",
+            "(tep do co `archive.detail` <- stderr rclone va `lanes[*].errors`",
+            "<- ngoai le bat ky, tuc la hai ong dan mo). rclone.conf VAN 600.",
+            "CHUA TRIEN KHAI: xem docs/deploy/fanfic_farmer_observer/README.md."
+          ],
+          "telemetry_file": "/var/lib/fanfic-farmer/observability.json"
         },
         {
           "type": "unavailable",

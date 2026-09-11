@@ -310,6 +310,26 @@ Hoặc: dán bằng Ctrl+V (ảnh chụp Win+Shift+S cũng được), hoặc ké
       </div>
       <div id="insp-suyluan"></div>
     </section>
+    <!--
+      V0.9 — VONG KIN THUC THI. Dat NGAY SAU suy luan va TRUOC "dang chay"
+      cua Router, vi no tra loi cau hoi o mot bac cao hon: "muc tieu cua toi
+      dang o dau", chu khong phai "viec nao dang bay".
+
+      O CHAT VAN LA CHINH (§20): the nay chi hien thu ma mot cau tra loi
+      khong noi gon duoc — thanh tien do, cay buoc, va NUT cho ranh gioi
+      tham quyen. Moi thao tac o day deu co ban tuong duong bang cau noi
+      trong chat ("dung task nay", "tiep tuc"), nen khong ai bi ep phai hoc
+      mot bang dieu khien de noi chuyen voi Leader.
+
+      Nguon la `snapshot().thuc_thi` (ban GON, cung nhip WebSocket). Ban day
+      du — ke hoach, lich su ban, bang chung, ngan sach — nam sau khi bam
+      vao mot lan thuc thi (`GET /api/execution?id=…`).
+    -->
+    <section class="the-qs" id="the-thuc-thi" hidden>
+      <div class="nhan">VÒNG KÍN — THỰC THI
+        <span id="tt-dem" class="qs-phu"></span></div>
+      <div id="insp-thucthi"></div>
+    </section>
     <section class="the-qs">
       <div class="nhan">ĐANG CHẠY <span class="qs-phu">(ROUTER)</span></div>
       <div id="insp-dangchay"></div>

@@ -576,3 +576,39 @@ dialog::backdrop { background: rgba(3, 5, 10, .68); }
   .kyuc-thongke { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kyuc-hai-cot { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------ V0.9 — vong kin thuc thi ---- */
+/*
+ * The nay song trong thanh ben phai, canh "dang chay" cua Router. No KHONG
+ * doi bo cuc: o chat van la duong chinh (§20), va moi nut o day deu co ban
+ * tuong duong bang cau noi trong chat.
+ */
+.tt-lan { padding: 6px 0; border-bottom: 1px solid var(--vien, #2a2a33); }
+.tt-lan:last-child { border-bottom: 0; }
+
+/* Thanh tien do: nen la TONG, phan to la so buoc DA KIEM DINH XONG —
+   khong phai so buoc da chay. Mot buoc chay xong ma chua kiem dinh khong
+   duoc to o day, vi do chinh la cho "DONE gia" tung lot qua. */
+.tt-thanh { height: 4px; border-radius: 2px; margin: 4px 0 2px;
+            background: var(--vien, #2a2a33); overflow: hidden; }
+.tt-thanh > span { display: block; height: 100%; background: var(--luc, #3fb950);
+                   transition: width .3s ease; }
+
+.tt-buoc { display: flex; align-items: center; gap: 5px;
+           padding-left: 8px; font-size: 11px; }
+.tt-buoc .qs-ten { flex: 0 1 auto; min-width: 0; overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap; }
+
+/* Cham READ/WRITE: mot buoc GHI phai nhin ra duoc ngay, vi no la buoc duy
+   nhat co the doi trang thai kho. */
+.tt-ghi { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.tt-ghi.w { background: var(--vang, #d29922); }
+.tt-ghi.r { background: var(--vien, #3a3a44); }
+
+.tt-canh { margin: 4px 0 2px; padding: 4px 6px; border-radius: 3px;
+           font-size: 11px; line-height: 1.45;
+           background: rgba(210,153,34,.12);
+           border-left: 2px solid var(--vang, #d29922); }
+.tt-nut { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.tt-nut .canh-bao { border-color: var(--vang, #d29922);
+                    color: var(--vang, #d29922); }

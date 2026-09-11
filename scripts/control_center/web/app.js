@@ -400,6 +400,158 @@ function veInspDangChay() {
   dat('#insp-dangchay', h);
 }
 
+// --------------------------------------------------------- vong kin (V0.9) --
+// §20 — BE MAT THUC THI, THEM chu khong thay the.
+//
+// Ba dieu the nay phai noi duoc, va chung la ba cau nguoi dung thuc su hoi:
+//
+//   "toi dang o dau"      -> muc tieu + trang thai + thanh tien do
+//   "dang lam buoc nao"   -> cay buoc, kem phu thuoc va ket qua kiem dinh
+//   "no dang cho gi"      -> RANH GIOI THAM QUYEN, hien thanh mot NUT
+//
+// Thu KHONG hien o day: ke hoach day du, lich su ban ke hoach, bang chung
+// tung phep kiem. Chung nam sau mot cu bam (`/api/execution`) vi nhoi ca
+// vao moi nhip mot giay se bien mot o quan sat thanh mot voi du lieu —
+// cung bai hoc `suy_luan` cua V0.8.
+const TTMAU = {
+  DRAFT: 'xam', PLANNED: 'xam', WAITING_AUTHORITY: 'vang', READY: 'xam',
+  RUNNING: 'xanh', VERIFYING: 'tim', REPLANNING: 'vang', BLOCKED: 'do',
+  PAUSED: 'xam', DONE: 'luc', FAILED: 'do', CANCELLED: 'xam',
+};
+const XMMAU = { DAT: 'luc', SUY_GIAM: 'vang', KHONG_DAT: 'do',
+                THIEU_BANG_CHUNG: 'vang', CHUA_KIEM: 'xam' };
+
+function veInspThucThi() {
+  const ds = S.thuc_thi || [];
+  const the = $('#the-thuc-thi');
+  if (the) the.hidden = !ds.length;
+  if (!ds.length) { dat('#insp-thucthi', ''); return; }
+  const song = ds.filter((x) => !x.ket_thuc).length;
+  dat('#tt-dem', song ? `${song} đang mở` : 'không có cái nào đang mở');
+
+  dat('#insp-thucthi', ds.map((x) => {
+    const td = x.tien_do || {};
+    const pt = Math.max(0, Math.min(100, td.phan_tram || 0));
+    const buoc = (x.buoc || []).map((b) => {
+      const pt2 = (b.phu_thuoc || []).length
+        ? `<span class="qs-phu"> ← ${esc((b.phu_thuoc || []).join(', '))}</span>`
+        : '';
+      const xm = b.xac_minh && b.xac_minh !== 'CHUA_KIEM'
+        ? `<span class="hh ${XMMAU[b.xac_minh] || 'xam'}">${esc(b.xac_minh)}</span>`
+        : '';
+      return `<div class="tt-buoc">
+        <span class="tt-ghi ${b.che_do_ghi === 'WRITE' ? 'w' : 'r'}"
+              title="${b.che_do_ghi === 'WRITE' ? 'ghi' : 'chỉ đọc'}"></span>
+        <button class="qs-ten" data-mo="${esc(b.task_id || '')}"
+           title="${esc(b.buoc_id)}">${esc(b.tieu_de || b.buoc_id)}</button>
+        ${hh(b.state)} ${xm}${pt2}</div>`;
+    }).join('');
+
+    // RANH GIOI THAM QUYEN LA MOT NUT, KHONG PHAI MOT DONG CHU.
+    //
+    // `confirm()` truoc khi goi: duyet mot cong NGOAI KHO la mot hanh vi cua
+    // NGUOI, va no phai doi mot cu bam co y thuc — cung luat
+    // `mo_khoa_gated`. Frontend KHONG bao gio tu goi duong nay.
+    const nut = [];
+    if (x.can_tham_quyen_moi) {
+      nut.push(`<button class="nho canh-bao" data-tt-duyet="${esc(x.execution_id)}"
+        title="Duyệt cổng thẩm quyền — thao tác NGOÀI KHO">Duyệt…</button>`);
+      nut.push(`<button class="nho" data-tt-tuchoi="${esc(x.execution_id)}"
+        >Từ chối</button>`);
+    }
+    if (!x.ket_thuc && x.trang_thai !== 'PAUSED') {
+      nut.push(`<button class="nho" data-tt-dung="${esc(x.execution_id)}"
+        title="Tạm dừng: lượt agent đang bay vẫn chạy nốt">Tạm dừng</button>`);
+    }
+    if (x.trang_thai === 'PAUSED' || x.trang_thai === 'BLOCKED') {
+      nut.push(`<button class="nho" data-tt-tiep="${esc(x.execution_id)}"
+        >Tiếp tục</button>`);
+    }
+    if (!x.ket_thuc) {
+      nut.push(`<button class="nho" data-tt-huy="${esc(x.execution_id)}"
+        title="Huỷ — bằng chứng và lịch sử GIỮ NGUYÊN">Huỷ</button>`);
+    }
+
+    return `<div class="tt-lan">
+      <div class="qs-hang">
+        <button class="qs-ten" data-tt-mo="${esc(x.execution_id)}"
+           title="${esc(x.goal)}">${esc(x.goal.slice(0, 70))}</button>
+        <span class="hh ${TTMAU[x.trang_thai] || 'xam'}">${esc(x.trang_thai)}</span>
+      </div>
+      <div class="qs-phu">kế hoạch v${x.ban_ke_hoach} · ${esc(x.pha || '')}
+        ${x.so_lan_lap_lai ? ` · lập lại ${x.so_lan_lap_lai}×` : ''}
+        ${x.tac_dong_production ? ' · <b class="do">CHẠM PRODUCTION</b>' : ''}</div>
+      <div class="tt-thanh" title="${td.xong || 0}/${td.tong || 0} bước đã kiểm định">
+        <span style="width:${pt}%"></span></div>
+      <div class="qs-phu">${td.xong || 0}/${td.tong || 0} bước đã kiểm định
+        ${td.chua_kiem ? ` · ${td.chua_kiem} chờ kiểm` : ''}
+        ${td.hong ? ` · <b class="do">${td.hong} chưa đạt</b>` : ''}</div>
+      ${buoc}
+      ${x.ly_do_dung ? `<div class="tt-canh">${esc(x.ly_do_dung)}</div>` : ''}
+      <div class="tt-nut">${nut.join(' ')}</div>
+    </div>`;
+  }).join(''));
+}
+
+async function ttGoi(eid, duong, than) {
+  try {
+    await api(`/api/execution/${encodeURIComponent(eid)}/${duong}`,
+              { method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(than || {}) });
+  } catch (e) { alert(`Không đổi được trạng thái: ${e.message}`); }
+}
+
+document.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-tt-duyet],[data-tt-tuchoi],[data-tt-dung],'
+                              + '[data-tt-tiep],[data-tt-huy],[data-tt-mo]');
+  if (!b) return;
+  const d = b.dataset;
+  if (d.ttDuyet) {
+    // Cong NGOAI KHO: phai co mot cu bam CO Y THUC. Xem chu thich tren.
+    if (confirm('Duyệt cổng thẩm quyền?\n\nLần thực thi này chạm thao tác '
+                + 'NGOÀI KHO (deploy / production / bí mật / hoá đơn). '
+                + 'Duyệt nghĩa là bạn cho phép nó chạy thật.')) {
+      ttGoi(d.ttDuyet, 'approve', { dong_y: true, boi: 'user' });
+    }
+  } else if (d.ttTuchoi) {
+    ttGoi(d.ttTuchoi, 'approve', { dong_y: false, boi: 'user' });
+  } else if (d.ttDung) { ttGoi(d.ttDung, 'pause');
+  } else if (d.ttTiep) { ttGoi(d.ttTiep, 'resume');
+  } else if (d.ttHuy) {
+    if (confirm('Huỷ lần thực thi này?\n\nViệc con đang bay sẽ được dừng và '
+                + 'khoá được nhả. Lịch sử và bằng chứng GIỮ NGUYÊN.')) {
+      ttGoi(d.ttHuy, 'cancel', { ly_do: 'người dùng huỷ ở giao diện' });
+    }
+  } else if (d.ttMo) { ttXemChiTiet(d.ttMo); }
+});
+
+async function ttXemChiTiet(eid) {
+  try {
+    const d = await api(`/api/execution?id=${encodeURIComponent(eid)}`);
+    const kh = d.ke_hoach || {};
+    const ban = (d.ban_ke_hoach || []).map(
+      (p) => `  v${p.phien_ban}${p.dang_hieu_luc ? ' (đang dùng)' : ''}: `
+             + `${p.so_buoc} bước${p.ly_do_sua ? ` — ${p.ly_do_sua}` : ''}`
+             + ((p.thay_doi || []).length
+                ? `\n      ${p.thay_doi.join('\n      ')}` : ''));
+    const nt = (kh.nghiem_thu || []).map(
+      (t) => `  ${t.bat_buoc ? '[bắt buộc]' : '[nên có]'} ${t.mo_ta}`
+             + (t.cach_kiem || []).map((c) => `\n      kiểm: ${c[0]}`).join(''));
+    const u = ((d.chi_phi || {}).usage || []).map(
+      (m) => `  ${m.label}: ${m.value === null ? '— (KHÔNG ĐO ĐƯỢC)' : m.value}`
+             + ` [${m.confidence}]`);
+    alert([`MỤC TIÊU: ${(d.y_dinh || {}).goal}`,
+           `trạng thái: ${(d.y_dinh || {}).trang_thai}`
+           + ` · thẩm quyền: ${(d.y_dinh || {}).tham_quyen}`
+           + ` · duyệt: ${(d.y_dinh || {}).duyet}`,
+           '', 'TIÊU CHÍ NGHIỆM THU (mục tiêu GỐC, không phải tổng các bước):',
+           nt.join('\n') || '  (không có)',
+           '', 'LỊCH SỬ BẢN KẾ HOẠCH:', ban.join('\n') || '  v1',
+           '', 'CHI PHÍ ĐO ĐƯỢC:', u.join('\n')].join('\n'));
+  } catch (e) { alert(`Không đọc được: ${e.message}`); }
+}
+
 // ------------------------------------------------------------- suy luan ----
 // V0.8 §12 — DINH TUYEN GIAI THICH DUOC.
 //
@@ -772,6 +924,7 @@ let dauUsage = '';
 
 function veHet() {
   veProjects(); veThanhTren(); veChat(); veTasks(); veAgents();
+  veInspThucThi();
   veInspDangChay(); veInspTasks(); veInspAgents(); veInspUsageTuCache();
   veSongTuCache();
   veInspSuyLuan();

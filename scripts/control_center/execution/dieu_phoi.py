@@ -463,6 +463,31 @@ class BoDieuPhoi:
             return self.tick(eid)
         # DUNG_CHO_NGUOI
         self.so.luu_buoc(eid, pb, buoc_id, state=TrangThaiBuoc.HONG.value)
+
+        # TRƯỚC KHI CHẶN: MỤC TIÊU GỐC CÓ THỂ ĐÃ ĐẠT RỒI.
+        #
+        # §8 nói kiểm định phải chấm MỤC TIÊU GỐC, không chấm tổng các việc
+        # con. Cho tới đây ta mới cưỡng chế MỘT CHIỀU (mọi con DONE vẫn chưa
+        # đủ). Chiều còn lại cũng đúng và bị bỏ sót: một worker có thể ĐÃ
+        # làm xong việc rồi mới hỏng ở lượt kể chuyện, và lúc đó phép đo
+        # trên ĐĨA vẫn xanh.
+        #
+        # ĐO ĐƯỢC (Fanfic, 2026-09-12): hai bước GHI tạo đúng hai tệp với
+        # đúng hai chuỗi bắt buộc — kiểm lại trên đĩa thấy đủ — nhưng lượt
+        # worker CUỐI trả về rỗng, nên bước bị đánh hỏng và lần thực thi
+        # `BLOCKED` trong khi mục tiêu đã hoàn thành.
+        #
+        # Đây KHÔNG phải nới lỏng: đường này chỉ mở khi MỌI tiêu chí nghiệm
+        # thu BẮT BUỘC đều đạt theo phép đo TẤT ĐỊNH. Nó tin BẰNG CHỨNG hơn
+        # lời khai — đúng nguyên tắc của cả §6 lẫn §8, chỉ áp theo chiều
+        # người ta hay quên.
+        bc = self._thu_ket_theo_muc_tieu(y, kh)
+        if bc is not None and bc.dat:
+            return KetQuaTick(eid, trang_thai=TT.DONE.value,
+                              ghi_chu=(f"bước {buoc_id} hỏng nhưng MỤC TIÊU "
+                                       f"GỐC đã đạt theo phép đo: {bc.ly_do}"),
+                              bao_cao=bc.to_dict())
+
         self._bo_moi_viec_con_song(eid, pb, "lần thực thi dừng chờ người")
         y2 = self.so.doi_trang_thai(
             eid, TT.BLOCKED,
@@ -472,6 +497,37 @@ class BoDieuPhoi:
             pha="cần bạn xem")
         self.nha_tai_nguyen(y2)
         return KetQuaTick(eid, trang_thai=TT.BLOCKED.value, ghi_chu=cd.ly_do)
+
+    def _thu_ket_theo_muc_tieu(self, y: YDinhThucThi,
+                               kh: KeHoachThucThi) -> Optional[BaoCaoKiemDinh]:
+        """Chấm MỤC TIÊU GỐC khi một bước hỏng. `None` = không chấm được.
+
+        CHỈ chạy khi kế hoạch có tiêu chí nghiệm thu BẮT BUỘC **và** mọi tiêu
+        chí đó đo được bằng phép kiểm TẤT ĐỊNH. Không có phép đo thì không
+        có bằng chứng, và lúc đó im lặng chặn lại là đúng — ta không đổi một
+        lời khai hỏng lấy một lời khai tốt.
+        """
+        bb = [t for t in kh.nghiem_thu if t.bat_buoc]
+        if not bb or not all(t.co_kiem_tat_dinh for t in bb):
+            return None
+        if not co_the_chuyen(y.trang_thai, TT.VERIFYING):
+            return None
+        # HỎI TRƯỚC, ĐỔI TRẠNG THÁI SAU. Chấm ở chế độ CHỈ ĐỌC: nếu mục tiêu
+        # chưa đạt thì đường gọi bên ngoài phải đi tiếp NGUYÊN VẸN (nhả khoá,
+        # rồi `BLOCKED`). Đổi trạng thái ngay trong phép hỏi sẽ làm chuyển
+        # `BLOCKED` sau đó thành bất hợp lệ, hàm ném, và khoá của các việc bị
+        # bỏ không bao giờ được nhả — đo được là một deadlock `WAITING` vĩnh
+        # viễn với `in_flight` rỗng.
+        thu = self.kiem_dinh(y.execution_id, chi_doc=True)
+        if thu is None or not thu.dat:
+            return thu
+        self.so.ghi_su_kien(
+            y.execution_id, "GOAL_RECHECK", project_id=y.project_id,
+            detail=("một bước hỏng nhưng MỤC TIÊU GỐC đạt theo phép đo thật "
+                    "— kết theo bằng chứng, không theo lời khai"))
+        self.so.doi_trang_thai(y.execution_id, TT.VERIFYING,
+                               pha="kiểm định mục tiêu gốc")
+        return self.kiem_dinh(y.execution_id)
 
     # ---------------------------------------------------------- kiem dinh ----
 
@@ -505,27 +561,49 @@ class BoDieuPhoi:
                           bao_cao=bc.to_dict() if bc else None)
 
     def kiem_dinh(self, execution_id: str, *,
-                  phan_bien: Optional[Dict] = None
-                  ) -> Optional[BaoCaoKiemDinh]:
-        """Chấm CẢ lần thực thi theo mục tiêu gốc, rồi kết luận — §8."""
+                  phan_bien: Optional[Dict] = None,
+                  chi_doc: bool = False) -> Optional[BaoCaoKiemDinh]:
+        """Chấm CẢ lần thực thi theo mục tiêu gốc, rồi kết luận — §8.
+
+        `chi_doc=True` CHỈ CHẤM, không đổi trạng thái, không ghi sự kiện,
+        không gọi Reviewer. Dùng cho phép hỏi "mục tiêu đã đạt chưa?" ở giữa
+        một đường xử lý khác — xem `_thu_ket_theo_muc_tieu`.
+
+        VÌ SAO CẦN MỘT CHẾ ĐỘ CHỈ ĐỌC: bản đầu của phép hỏi đó gọi thẳng
+        `kiem_dinh()`, và khi kết quả KHÔNG đạt thì hàm này đã kịp đẩy trạng
+        thái sang `REPLANNING`/`FAILED`. Đường gọi bên ngoài sau đó tiếp tục
+        nhả khoá và xin `BLOCKED` — một chuyển không còn hợp lệ, nên nó ném,
+        và KHOÁ CỦA CÁC VIỆC BỊ BỎ KHÔNG BAO GIỜ ĐƯỢC NHẢ. Đo được ngay:
+        lượt kế tiếp nằm `WAITING` vĩnh viễn với `in_flight` rỗng. Một phép
+        hỏi không được có tác dụng phụ.
+        """
         y = self.so.y_dinh(execution_id)
         kh = self.so.ke_hoach(execution_id)
         if y is None or kh is None:
             return None
         kqb: Dict[str, Optional[HopDongKetQua]] = {}
         mg = self.moi_gioi
+        khac: List[MoiGioiKiem] = []
+        da_thay: set = set()
         for st in self.so.buoc(execution_id, kh.phien_ban):
             d = st.get("ket_qua")
             k = HopDongKetQua.tu_dict(d) if d else None
             kqb[st["buoc_id"]] = k
-            # Tieu chi NGHIEM THU cham tren CA lan thuc thi, nen no can mot
-            # goc duy nhat. Lay worktree cua buoc GHI dau tien — do la cho
-            # thay doi that su nam.
-            if k is not None and getattr(k, "worktree", "") and mg is self.moi_gioi:
+            # MỌI worktree của MỌI bước, không chỉ cái đầu tiên. Hai bước
+            # song song sống ở hai cây khác nhau, và một tiêu chí của cả lần
+            # thực thi phải nhìn được HỢP của chúng — xem `_cham_tieu_chi`.
+            w = str(getattr(k, "worktree", "") or "") if k is not None else ""
+            if w and w not in da_thay:
+                da_thay.add(w)
                 m2 = self._moi_gioi_cua(k)
                 if m2 is not self.moi_gioi:
-                    mg = m2
-        bc = kiem_dinh_thuc_thi(y, kh, kqb, moi_gioi=mg, phan_bien=phan_bien)
+                    khac.append(m2)
+                    if mg is self.moi_gioi:
+                        mg = m2
+        bc = kiem_dinh_thuc_thi(y, kh, kqb, moi_gioi=mg, moi_gioi_khac=khac,
+                                phan_bien=phan_bien)
+        if chi_doc:
+            return bc
 
         # --- PHẢN BIỆN NGỮ NGHĨA, TỰ ĐỘNG (§A) -----------------------------
         #

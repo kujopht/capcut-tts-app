@@ -419,6 +419,7 @@ class BaoCaoKiemDinh:
 def kiem_dinh_thuc_thi(y: YDinhThucThi, kh: KeHoachThucThi,
                        ket_qua_buoc: Dict[str, Optional[HopDongKetQua]], *,
                        moi_gioi: Optional[MoiGioiKiem] = None,
+                       moi_gioi_khac: Sequence[MoiGioiKiem] = (),
                        phan_bien: Optional[Dict] = None) -> BaoCaoKiemDinh:
     """Chấm CẢ lần thực thi theo MỤC TIÊU GỐC — §8.
 
@@ -445,7 +446,8 @@ def kiem_dinh_thuc_thi(y: YDinhThucThi, kh: KeHoachThucThi,
     kq_bat_ky = next((k for k in ket_qua_buoc.values() if k is not None), None)
     cham: List[ChamTieuChi] = []
     for tc in kh.nghiem_thu:
-        cham.append(_cham_tieu_chi(tc, moi_gioi, kq_bat_ky, ket_qua_buoc))
+        cham.append(_cham_tieu_chi(tc, moi_gioi, kq_bat_ky, ket_qua_buoc,
+                                   khac=moi_gioi_khac))
 
     # TIEU CHI CUA NGUOI DUNG MA KE HOACH KHONG BUOC VAO PHEP KIEM NAO.
     #
@@ -472,8 +474,24 @@ def kiem_dinh_thuc_thi(y: YDinhThucThi, kh: KeHoachThucThi,
 
 def _cham_tieu_chi(tc: TieuChiNghiemThu, moi_gioi: Optional[MoiGioiKiem],
                    kq: Optional[HopDongKetQua],
-                   ket_qua_buoc: Dict[str, Optional[HopDongKetQua]]
-                   ) -> ChamTieuChi:
+                   ket_qua_buoc: Dict[str, Optional[HopDongKetQua]],
+                   *, khac: Sequence[MoiGioiKiem] = ()) -> ChamTieuChi:
+    """Chấm MỘT tiêu chí, thử LẦN LƯỢT từng worktree của lần thực thi.
+
+    VÌ SAO NHIỀU WORKTREE, và đây là một gap ĐO ĐƯỢC của bản v0.9 đầu:
+
+    Hai bước GHI chạy song song được đặt vào HAI worktree cô lập khác nhau —
+    đó chính là điều làm chúng chạy song song an toàn. Nhưng một tiêu chí
+    nghiệm thu của CẢ lần thực thi ("tệp X phải có") thì được chấm trong MỘT
+    worktree, nên tệp do bước anh em tạo ra là VÔ HÌNH. Đo được trên Fanfic
+    thật (2026-09-12): bước `ghi_tailieu` tạo đúng tệp và đúng chuỗi, nhưng
+    tiêu chí của bước `ghi_kiemthu` không bao giờ đạt được vì nó nhìn nhầm
+    cây.
+
+    Ngữ nghĩa đúng theo mô hình cô lập: công việc của một lần thực thi là
+    HỢP của các worktree bước của nó. Nên một tiêu chí ĐẠT nếu nó đạt ở BẤT
+    KỲ worktree nào — và bằng chứng ghi lại là của đúng cây đã thoả nó.
+    """
     tat = [(c, p) for c, p in tc.cach_kiem if c.tat_dinh]
     if not tat:
         return ChamTieuChi(
@@ -486,17 +504,34 @@ def _cham_tieu_chi(tc: TieuChiNghiemThu, moi_gioi: Optional[MoiGioiKiem],
         return ChamTieuChi(tc.mo_ta, TrangThaiXacMinh.THIEU_BANG_CHUNG,
                            tc.bat_buoc,
                            ghi_chu="không có môi giới kiểm để chạy")
-    ds: List[KetQuaKiem] = []
-    for c, p in tat:
-        # Mot phep kiem doc LOI KHAI (`TEST_DA_CHAY`, `CO_ARTIFACT`) o muc
-        # NGHIEM THU phai nhin CA lan chay, khong chi mot buoc: nen ta gop
-        # loi khai cua moi buoc lai truoc khi cham.
-        nguon = kq if c not in (CachKiem.TEST_DA_CHAY, CachKiem.CO_ARTIFACT) \
-            else _gop_ket_qua(ket_qua_buoc)
-        try:
-            ds.append(moi_gioi.chay(c, p, ket_qua=nguon))
-        except KiemLoi as exc:
-            ds.append(KetQuaKiem(c.value, False, f"THAM SỐ SAI: {exc}", p))
+
+    def _chay_voi(mg: MoiGioiKiem) -> List[KetQuaKiem]:
+        ra: List[KetQuaKiem] = []
+        for c, p in tat:
+            # Mot phep kiem doc LOI KHAI (`TEST_DA_CHAY`, `CO_ARTIFACT`) o muc
+            # NGHIEM THU phai nhin CA lan chay, khong chi mot buoc: nen ta gop
+            # loi khai cua moi buoc lai truoc khi cham.
+            nguon = (kq if c not in (CachKiem.TEST_DA_CHAY,
+                                     CachKiem.CO_ARTIFACT)
+                     else _gop_ket_qua(ket_qua_buoc))
+            try:
+                ra.append(mg.chay(c, p, ket_qua=nguon))
+            except KiemLoi as exc:
+                ra.append(KetQuaKiem(c.value, False, f"THAM SỐ SAI: {exc}", p))
+        return ra
+
+    ds = _chay_voi(moi_gioi)
+    if not all(k.dat for k in ds):
+        for mg in khac:
+            if mg is moi_gioi:
+                continue
+            ds2 = _chay_voi(mg)
+            if all(k.dat for k in ds2):
+                for k in ds2:
+                    k.chi_tiet = (k.chi_tiet
+                                  + f"  [worktree {Path(mg.repo).name}]")
+                ds = ds2
+                break
     return ChamTieuChi(
         tc.mo_ta,
         TrangThaiXacMinh.DAT if all(k.dat for k in ds)

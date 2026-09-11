@@ -27,7 +27,8 @@ from scripts.control_center.execution.ke_hoach import (BuocKeHoach, CachKiem,
                                                        CheDoGhi,
                                                        KeHoachThucThi,
                                                        TieuChiNghiemThu)
-from scripts.control_center.execution.y_dinh import YDinhThucThi
+from scripts.control_center.execution.y_dinh import (YDinhThucThi,
+                                                     khong_suy_nghi)
 from scripts.control_center.model import LockKind, Project
 from scripts.control_center.planner import PlannedTask, PlanResult
 
@@ -225,6 +226,111 @@ def _nang_lop(lop: str) -> str:
     mạnh cũng hỏng hai lần.
     """
     return {"re": "thuong", "thuong": "manh", "": "thuong"}.get(lop, lop)
+
+
+#: Tham số của phép kiểm có mang một ĐƯỜNG DẪN. Dùng để suy phạm vi ghi của
+#: một bước sửa — xem `buoc_sua_tieu_chi`.
+_KHOA_DUONG: Tuple[str, ...] = ("duong",)
+
+
+def duong_cua_tieu_chi(cach_kiem: Sequence[Tuple[CachKiem, Dict]]
+                       ) -> Tuple[str, ...]:
+    """Những đường dẫn mà một tiêu chí ĐO. Rỗng khi nó không đo đường nào."""
+    ra: List[str] = []
+    for _c, p in cach_kiem or ():
+        for k in _KHOA_DUONG:
+            v = (p or {}).get(k)
+            if isinstance(v, str) and v.strip():
+                ra.append(v.strip())
+            elif isinstance(v, (list, tuple)):
+                ra += [str(x).strip() for x in v if str(x or "").strip()]
+    return tuple(dict.fromkeys(ra))
+
+
+def buoc_sua_tieu_chi(kh: KeHoachThucThi,
+                      tieu_chi_hong: Sequence[Tuple[str, Sequence]],
+                      *, lan: int = 1) -> List[BuocKeHoach]:
+    """Bước SỬA cho một TIÊU CHÍ NGHIỆM THU chưa đạt — V0.9 §1.
+
+    Đây là đường mà v0.9 bản đầu KHÔNG có, và thiếu nó thì vòng kín dừng ở
+    `BLOCKED` ngay cả khi hỏng hóc hoàn toàn sửa được: mọi bước đều đạt,
+    chỉ có mục tiêu GỐC là chưa đạt, và không có bước nào để sửa vì không
+    bước nào hỏng.
+
+    GIỮ NGUYÊN mọi bước cũ — chúng đã đạt, chạy lại là phí và là một cách
+    làm mất công việc đã đúng. Bước sửa được THÊM VÀO, phụ thuộc vào toàn
+    bộ bước cũ, nên nó chạy SAU và nhìn thấy kết quả của chúng.
+
+    PHẠM VI GHI CỦA BƯỚC SỬA SUY TỪ CHÍNH TIÊU CHÍ. Một tiêu chí đo
+    `docs/x.md` thì bước sửa nó chỉ được ghi `docs/x.md`. Đây không phải sự
+    gọn gàng: nó là rào chặn một bước "sửa cho đạt" đi lang thang khắp kho.
+    Tiêu chí không đo đường nào thì KHÔNG sinh được bước sửa tất định —
+    trả về rỗng, và bên gọi phải hỏi Strategist hoặc dừng.
+
+    `cach_kiem` của bước sửa CHÍNH LÀ `cach_kiem` của tiêu chí: bước chỉ
+    được coi là xong khi đúng phép đo đã đánh trượt nó nay xanh.
+    """
+    ra: List[BuocKeHoach] = list(kh.buoc)
+    phu = tuple(b.buoc_id for b in kh.buoc)
+    them = 0
+    for i, (mo_ta, cach) in enumerate(tieu_chi_hong):
+        tat = tuple((c, dict(p)) for c, p in (cach or ()) if c.tat_dinh)
+        duong = duong_cua_tieu_chi(tat)
+        if not tat or not duong:
+            continue                    # khong suy duoc -> de Strategist lo
+        ma = f"sua{lan}_{i + 1}"
+        if any(b.buoc_id == ma for b in ra):
+            continue
+        ra.append(BuocKeHoach(
+            buoc_id=ma, tieu_de=f"sửa để đạt tiêu chí #{i + 1}",
+            muc_tieu=(
+                f"TIÊU CHÍ NGHIỆM THU SAU ĐÂY CHƯA ĐẠT:\n  {mo_ta}\n\n"
+                f"Việc của bạn là làm cho nó ĐẠT, và CHỈ thế. Phép đo sẽ "
+                f"chạy lại đúng như cũ.\n"
+                f"Chỉ được sửa trong: {', '.join(duong)}\n"
+                f"ĐỪNG làm lại phần đã xong ở các bước trước, ĐỪNG nới phạm "
+                f"vi, ĐỪNG đổi tiêu chí.\n"
+                f"Dùng CÔNG CỤ GHI/SỬA TỆP của bạn — KHÔNG dùng lệnh shell "
+                f"(phiên headless từ chối shell, lượt sẽ trả về rỗng)."),
+            phu_thuoc=phu,
+            nang_luc=("coding", "repo_write", "structured_output"),
+            tai_nguyen=tuple((LockKind.FILESYSTEM, d, "write") for d in duong),
+            che_do_ghi=CheDoGhi.GHI,
+            artifact_mong_doi=tuple(duong),
+            cach_kiem=tat, rui_ro="MEDIUM",
+            lop_model=_nang_lop("")))
+        them += 1
+    return ra if them else []
+
+
+def buoc_tu_de_xuat_sua(kh: KeHoachThucThi, *, muc_tieu: str,
+                        duong: Sequence[str], lan: int = 1
+                        ) -> List[BuocKeHoach]:
+    """Bước sửa do STRATEGIST đề xuất — dùng khi tiêu chí là NGỮ NGHĨA.
+
+    Vẫn BỊ RÀNG BUỘC y như bước sửa tất định: giữ nguyên bước cũ, phụ thuộc
+    vào chúng, và phạm vi ghi do BÊN GỌI cấp (không phải do model tự chọn).
+    Một đề xuất của model KHÔNG được tự mở rộng phạm vi ghi — đó là cách một
+    lần "sửa cho đạt" trở thành một lần viết lại kho.
+    """
+    duong = tuple(dict.fromkeys(
+        str(d).strip() for d in duong if str(d or "").strip()))
+    if not duong or not str(muc_tieu or "").strip():
+        return []
+    ma = f"suacl{lan}"
+    if any(b.buoc_id == ma for b in kh.buoc):
+        return []
+    return list(kh.buoc) + [BuocKeHoach(
+        buoc_id=ma, tieu_de="sửa theo đề xuất của Strategist",
+        muc_tieu=khong_suy_nghi(muc_tieu, toi_da=2500)
+        + (f"\n\nChỉ được sửa trong: {', '.join(duong)}"),
+        phu_thuoc=tuple(b.buoc_id for b in kh.buoc),
+        nang_luc=("coding", "repo_write", "structured_output"),
+        tai_nguyen=tuple((LockKind.FILESYSTEM, d, "write") for d in duong),
+        che_do_ghi=CheDoGhi.GHI, artifact_mong_doi=duong,
+        cach_kiem=((CachKiem.GIT_CO_THAY_DOI, {"so_voi": "HEAD"}),
+                   (CachKiem.GIT_TRONG_PHAM_VI, {"pham_vi": list(duong)})),
+        rui_ro="MEDIUM", lop_model="manh")]
 
 
 def cat_theo_pham_vi(kq: PlanResult, pham_vi_noi_ro: str) -> PlanResult:

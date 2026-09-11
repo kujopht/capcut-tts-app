@@ -53,6 +53,7 @@ from scripts.control_center.execution.dieu_phoi import (         # noqa: E402
     TrangThaiBuoc, cau_trang_thai)
 from scripts.control_center.execution.trang_thai import (        # noqa: E402
     TrangThaiThucThi as TT)
+from scripts.control_center.model import LockKind                # noqa: E402
 from scripts.router_v4.history import (MAU_TOI_THIEU,            # noqa: E402
                                        BenchmarkStore, duong_vai)
 
@@ -63,7 +64,14 @@ PID = "fanfic"
 #: Trần thời gian cho một lượt chat THẬT (Leader + có thể cả hội đồng).
 HAN_CHAT = 900.0
 #: Trần cho một lần thực thi chạy hết.
-HAN_THUC_THI = 1500.0
+#:
+#: RỘNG có chủ đích. Một thang phục hồi ĐẦY ĐỦ trên agent thật là: 2 bước ×
+#: 3 lượt × tối đa 3 bản kế hoạch, cộng thời gian chờ khe phiên khi bể đang
+#: bận. Một trần chật biến bài kiểm về TÍNH CÓ ĐÁY thành một bài kiểm về tốc
+#: độ nhà cung cấp — đo được 2026-09-12: ba lần chạy bị cắt trong khi một
+#: bước vẫn đang chạy, và bài kiểm báo "không đứng lại" cho một hệ thống
+#: hoàn toàn đang tiến triển.
+HAN_THUC_THI = 2700.0
 
 
 def _in(s: str = "") -> None:
@@ -165,6 +173,75 @@ def _du_an(cc) -> bool:
     return cc.store.project(PID) is not None
 
 
+def _cac_worktree(cc, eid: str) -> List[str]:
+    """MỌI worktree của MỌI bước. Hai bước song song sống ở hai cây khác nhau."""
+    ra: List[str] = []
+    for st in cc.so_thuc_thi.buoc(eid):
+        w = str((st.get("ket_qua") or {}).get("worktree") or "")
+        if w and w not in ra and Path(w).is_dir():
+            ra.append(w)
+    return ra
+
+
+def _bang_chung_ghi(cc, eid: str):
+    """`(các worktree, [tệp đã đổi])` — đọc TỪ ĐĨA, không từ lời khai worker.
+
+    `git status --porcelain` trong TỪNG worktree của lần thực thi. Lời khai
+    `files_changed` của agent là một tuyên bố; đây là phép đo.
+    """
+    import subprocess
+    from scripts.router_v3.tien_trinh import an_cua_so
+    wts = _cac_worktree(cc, eid)
+    tep: List[str] = []
+    for wt in wts:
+        try:
+            r = subprocess.run(["git", "status", "--porcelain"], cwd=wt,
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace",
+                               timeout=60, **an_cua_so())
+        except Exception:                                   # noqa: BLE001
+            continue
+        for x in (r.stdout or "").splitlines():
+            if len(x) > 3:
+                t = x[3:].strip()
+                if t not in tep:
+                    tep.append(t)
+    return wts, tep
+
+
+def _tep_chua(wts, duong: str, chuoi: str) -> bool:
+    """Tệp có ở BẤT KỲ worktree nào của lần thực thi và chứa `chuoi` không."""
+    if isinstance(wts, str):
+        wts = [wts] if wts else []
+    for wt in wts:
+        p = Path(wt) / duong
+        if not p.is_file():
+            continue
+        try:
+            if chuoi in p.read_text(encoding="utf-8", errors="replace"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _kho_that_sach(cc) -> bool:
+    """Cây làm việc CHÍNH của Fanfic phải KHÔNG đổi — worktree là cô lập."""
+    import subprocess
+    from scripts.router_v3.tien_trinh import an_cua_so
+    p = cc.store.project(PID)
+    if p is None:
+        return False
+    try:
+        r = subprocess.run(["git", "status", "--porcelain"],
+                           cwd=p.repo_path, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60,
+                           **an_cua_so())
+    except Exception:                                       # noqa: BLE001
+        return False
+    return not (r.stdout or "").strip()
+
+
 # --------------------------------------------------------------- kich ban ----
 
 def kb_A(cc, bc: BaoCao) -> Optional[str]:
@@ -236,39 +313,108 @@ def kb_B(cc, bc: BaoCao, ma_dx: Optional[str]) -> Optional[str]:
     return eid
 
 
+#: Tệp bằng chứng của nghiệm thu. Đặt dưới `docs/reports/` và mang tiền tố
+#: `_v09_` để người sau nhận ra ngay đây là hiện vật của một lần nghiệm thu,
+#: không phải tài liệu dự án. Chúng nằm trong WORKTREE CÔ LẬP, không bao giờ
+#: vào `main` của Fanfic.
+#: Câu dặn CHỌN ĐÚNG CÔNG CỤ. Không phải lời khuyên phong cách — nó nhắm vào
+#: một chế độ hỏng đã ghi trong `router_v3/pool/adapters.py`:
+#:
+#:     "`accept-edits` chỉ phủ công cụ GHI TỆP. Bằng chứng thật (2026-08-30):
+#:      một model đôi khi chọn công cụ LỆNH SHELL để tạo tệp; lượt đó sẽ bị
+#:      headless tự động từ chối và việc trả về 'không sửa gì'."
+#:
+#: Đo lại ở chính bài nghiệm thu này (2026-09-12): cùng một bước, có lượt ghi
+#: được tệp, có lượt trả về RỖNG. Nói thẳng cho agent dùng công cụ ghi tệp là
+#: cách rẻ nhất để không rơi vào nhánh bị chối quyền — KHÔNG nới quyền một ly.
+HUONG_DAN_GHI = (
+    "QUAN TRỌNG: dùng CÔNG CỤ GHI/TẠO TỆP của bạn để tạo tệp này. "
+    "TUYỆT ĐỐI KHÔNG dùng lệnh shell (echo/cat/heredoc/PowerShell) — phiên "
+    "này chạy headless và mọi lệnh shell đều bị từ chối, lượt sẽ trả về rỗng.")
+
+TEP_A = "docs/reports/_v09_ghi_chu_handoff.md"
+TEP_B = "docs/reports/_v09_ghi_chu_kiemthu.md"
+MARKER_A = "V09-ACCEPT-HANDOFF"
+MARKER_B = "V09-ACCEPT-KIEMTHU"
+
+
 def kb_C(cc, bc: BaoCao) -> Optional[str]:
-    """FAN-OUT THẬT — hai bước ĐỘC LẬP, CHỈ ĐỌC, agent THẬT, kiểm định thật."""
-    _tieu_de("KỊCH BẢN C — thực thi đa agent (agent THẬT, việc CHỈ ĐỌC)")
-    p = cc.store.project(PID)
+    """FAN-OUT THẬT + GHI THẬT — hai bước ĐỘC LẬP, agent THẬT ghi vào kho.
+
+    Việc GHI, không phải chỉ đọc: đây là điều §3 đòi và là thứ bản nghiệm
+    thu trước còn thiếu. Hai tệp KHÁC NHAU nên hai bước không tranh khoá và
+    chạy song song thật. Mọi thay đổi nằm trong WORKTREE CÔ LẬP của Router —
+    `main` của Fanfic không bị đụng tới.
+    """
+    _tieu_de("KỊCH BẢN C — đa agent GHI THẬT vào kho Fanfic (worktree cô lập)")
     y = YD.tao_y_dinh(
         project_id=PID,
-        goal=("khảo sát kho Fanfic: đọc tài liệu bàn giao và đọc cấu trúc bộ "
-              "kiểm thử, rồi tóm tắt"),
+        goal=("viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho "
+              "Fanfic: một về tài liệu bàn giao, một về bộ kiểm thử"),
         cau_nguoi_dung="ok làm đi")
     y.tieu_chi_dat = ()
     kh = KH.KeHoachThucThi(
         execution_id=y.execution_id,
         buoc=(
+            # MỤC TIÊU KHÔNG ĐƯỢC PHỤ THUỘC MỘT CÔNG CỤ BỊ CHỐI QUYỀN.
+            #
+            # `agy --print` (headless) TỰ CHỐI `read_file`/`command` và trả
+            # về lượt RỖNG — `CLAUDE.md` gọi đó là "LUẬT CHUNG đã trả giá
+            # BỐN lần". Đo lại lần thứ năm ở chính bài nghiệm thu này: bước
+            # bảo agent "ĐỌC docs/HANDOFF.md" trả rỗng ba lượt liền, trong
+            # khi bước chỉ GHI thì chạy ngay.
+            #
+            # Nên bước chỉ đòi thứ agent LÀM ĐƯỢC: ghi một tệp. Muốn agent
+            # cần dữ liệu đọc thì Router phải ĐỌC HỘ rồi đính bằng chứng —
+            # đúng khuôn `nguon_git`/`web_reader`/`probe_van_hanh`, và đó là
+            # việc của đường `_chat`, không phải của một bài nghiệm thu.
             KH.BuocKeHoach(
-                buoc_id="doc_tailieu", tieu_de="đọc tài liệu bàn giao",
-                muc_tieu=("ĐỌC tệp docs/HANDOFF.md trong kho này và tóm tắt "
-                          "trong 5 gạch đầu dòng: mốc nào đã xong, việc tiếp "
-                          "theo là gì. CHỈ ĐỌC — không sửa, không tạo tệp nào."),
-                che_do_ghi=KH.CheDoGhi.DOC),
+                buoc_id="ghi_tailieu", tieu_de="ghi chú về tài liệu bàn giao",
+                muc_tieu=(
+                    f"TẠO tệp `{TEP_A}` trong kho này. Nội dung: một tiêu đề "
+                    f"Markdown, 3-5 gạch đầu dòng ghi chú về tài liệu bàn "
+                    f"giao của dự án, và MỘT DÒNG RIÊNG chứa đúng chuỗi:\n"
+                    f"{MARKER_A}\n\n"
+                    f"CHỈ được tạo/sửa đúng tệp `{TEP_A}`. Không đọc tệp nào "
+                    f"khác, không sửa tệp nào khác, không commit.\n"
+                    f"{HUONG_DAN_GHI}"),
+                che_do_ghi=KH.CheDoGhi.GHI,
+                tai_nguyen=((LockKind.FILESYSTEM, TEP_A, "write"),),
+                artifact_mong_doi=(TEP_A,),
+                cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_A}),)),
             KH.BuocKeHoach(
-                buoc_id="doc_kiemthu", tieu_de="đọc cấu trúc bộ kiểm thử",
-                muc_tieu=("ĐỌC thư mục tests/ và server/tests/ trong kho này "
-                          "và tóm tắt trong 5 gạch đầu dòng: có bao nhiêu tệp "
-                          "kiểm thử, chúng phủ những phần nào. CHỈ ĐỌC — không "
-                          "sửa, không tạo tệp nào."),
-                che_do_ghi=KH.CheDoGhi.DOC),
+                buoc_id="ghi_kiemthu", tieu_de="ghi chú về bộ kiểm thử",
+                muc_tieu=(
+                    f"TẠO tệp `{TEP_B}` trong kho này. Nội dung: một tiêu đề "
+                    f"Markdown, 3-5 gạch đầu dòng ghi chú về bộ kiểm thử của "
+                    f"dự án, và MỘT DÒNG RIÊNG chứa đúng chuỗi:\n"
+                    f"{MARKER_B}\n\n"
+                    f"CHỈ được tạo/sửa đúng tệp `{TEP_B}`. Không đọc tệp nào "
+                    f"khác, không sửa tệp nào khác, không commit.\n"
+                    f"{HUONG_DAN_GHI}"),
+                che_do_ghi=KH.CheDoGhi.GHI,
+                tai_nguyen=((LockKind.FILESYSTEM, TEP_B, "write"),),
+                artifact_mong_doi=(TEP_B,),
+                cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_B}),)),
         ),
-        # TIEU CHI NGU NGHIA — day la thu keo Reviewer vao mot cach TU NHIEN
-        # (kich ban H), khong phai mot loi goi tay ben ngoai vong kin.
         nghiem_thu=(
+            # KHACH QUAN, do duoc bang may — day la thu bien C thanh DONE.
             KH.TieuChiNghiemThu(
-                mo_ta=("hai bản tóm tắt có thực sự mô tả đúng kho Fanfic và "
-                       "đủ để người đọc biết nên làm gì tiếp không")),))
+                mo_ta=f"{TEP_A} tồn tại và chứa {MARKER_A}",
+                cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_A}),
+                           (KH.CachKiem.CHUOI_TRONG_TEP,
+                            {"duong": TEP_A, "chuoi": MARKER_A}))),
+            KH.TieuChiNghiemThu(
+                mo_ta=f"{TEP_B} tồn tại và chứa {MARKER_B}",
+                cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_B}),
+                           (KH.CachKiem.CHUOI_TRONG_TEP,
+                            {"duong": TEP_B, "chuoi": MARKER_B}))),
+            # TIEU CHI NGU NGHIA — thu keo Reviewer vao MOT CACH TU NHIEN
+            # (kich ban H), khong phai mot loi goi tay ngoai vong kin.
+            KH.TieuChiNghiemThu(
+                mo_ta=("hai ghi chú có thực sự mô tả đúng kho Fanfic và đủ "
+                       "để người đọc biết nên làm gì tiếp không"),
+                bat_buoc=False)))
     bd = cc.dieu_phoi(PID)
     y = bd.bat_dau(y, kh)
     eid = y.execution_id
@@ -296,12 +442,31 @@ def kb_C(cc, bc: BaoCao) -> Optional[str]:
             f"{b['xac_minh']:<18} {b['task_id']}")
     bc.khang_dinh("C", "lần thực thi ĐỨNG LẠI trong hạn", ok,
                   f"trạng thái cuối = {y.trang_thai.value}")
+    bc.khang_dinh("C", "kết thúc ở DONE", y.trang_thai is TT.DONE,
+                  f"{y.trang_thai.value} — {y.ly_do_dung[:160]}")
     bc.khang_dinh("C", "mọi bước có hợp đồng kết quả CÓ CẤU TRÚC",
                   all((b.get("ket_qua") or {}).get("status") for b in bs),
                   json.dumps([{(b['buoc_id']): (b.get('ket_qua') or {})
                                .get('status')} for b in bs],
                              ensure_ascii=False))
-    sk = [e["kind"] for e in cc.so_thuc_thi.su_kien(eid, limit=120)]
+
+    # BANG CHUNG GHI THAT: worktree + tep tren dia + noi dung.
+    wt, tep = _bang_chung_ghi(cc, eid)
+    for w in (wt or []):
+        _in(f"  worktree: {w}")
+    for t in tep:
+        _in(f"    {t}")
+    bc.khang_dinh("C", "agent GHI THẬT vào worktree cô lập", bool(tep),
+                  f"{len(tep)} tệp: {', '.join(tep[:4])}")
+    ok_a = _tep_chua(wt, TEP_A, MARKER_A)
+    ok_b = _tep_chua(wt, TEP_B, MARKER_B)
+    bc.khang_dinh("C", f"{TEP_A} có {MARKER_A}", ok_a)
+    bc.khang_dinh("C", f"{TEP_B} có {MARKER_B}", ok_b)
+    bc.khang_dinh("C", "git diff của worktree KHÔNG rỗng", bool(tep))
+    bc.khang_dinh("C", "kho Fanfic THẬT vẫn sạch", _kho_that_sach(cc),
+                  "git status của cây làm việc chính")
+
+    sk = [e["kind"] for e in cc.so_thuc_thi.su_kien(eid, limit=400)]
     bc.khang_dinh("C", "đã qua pha KIỂM ĐỊNH", "EXEC_VERIFIED" in sk)
     bc.khang_dinh("C", "KHÔNG nhảy thẳng RUNNING -> DONE",
                   not any("RUNNING -> DONE" in e["detail"]
@@ -309,8 +474,14 @@ def kb_C(cc, bc: BaoCao) -> Optional[str]:
                           if e["kind"] == "EXEC_STATE"))
     bc.khang_dinh("C", "0 thay đổi production", _prod_mutations(cc) == 0)
     bc.ghi("C", execution_id=eid, trang_thai=y.trang_thai.value,
+           worktree=wt, tep_da_ghi=tep,
            buoc=[{k: b[k] for k in ("buoc_id", "state", "xac_minh", "task_id")}
                  for b in bs],
+           worker=[{"buoc": b["buoc_id"],
+                    "provider": (b.get("ket_qua") or {}).get("provider"),
+                    "model": (b.get("ket_qua") or {}).get("model"),
+                    "runtime": (b.get("ket_qua") or {}).get("runtime_id")}
+                   for b in bs],
            su_kien=sk[:40], so_viec=len(bs))
     return eid
 
@@ -349,72 +520,109 @@ def kb_H(cc, bc: BaoCao, eid: Optional[str]) -> None:
         bc.ghi("H", phan_xu=None, ghi_chu="Reviewer không chạy được")
 
 
+TEP_D = "docs/reports/_v09_ghi_chu_sua.md"
+MARKER_D = "V09-REPAIR-OK"
+
+
 def kb_D(cc, bc: BaoCao) -> Optional[str]:
-    """KIỂM ĐỊNH HỎNG CÓ KIỂM SOÁT — không false-DONE, sửa/lập lại CÓ TRẦN."""
-    _tieu_de("KỊCH BẢN D — tiêu chí nghiệm thu hỏng có kiểm soát (agent THẬT)")
+    """VÒNG TỰ SỬA THẬT — v1 trượt một tiêu chí, v2 sửa, rồi DONE.
+
+    Thất bại được DÀN DỰNG một cách an toàn và TRUNG THỰC: bước v1 được bảo
+    tạo tệp, nhưng KHÔNG được nói gì về chuỗi `MARKER_D` mà tiêu chí nghiệm
+    thu đòi. Nên v1 làm đúng phần việc của nó và vẫn trượt mục tiêu GỐC —
+    đúng hình dạng mà §1 phải xử được, và không cần phá hỏng thứ gì.
+    """
+    _tieu_de("KỊCH BẢN D — v1 trượt tiêu chí -> SỬA -> v2 -> DONE (agent THẬT)")
     y = YD.tao_y_dinh(
         project_id=PID,
-        goal="khảo sát kho Fanfic và sinh một báo cáo (tiêu chí cố ý không đạt)",
+        goal=f"viết ghi chú khảo sát vào {TEP_D} đạt tiêu chí nghiệm thu",
         cau_nguoi_dung="ok làm đi")
     y.tieu_chi_dat = ()
-    # TIEU CHI KHONG THE DAT, va no TAT DINH: mot tep KHONG ton tai. Day la
-    # mot that bai NGHIEM THU an toan — khong pha gi, khong sua gi.
     kh = KH.KeHoachThucThi(
         execution_id=y.execution_id,
         buoc=(KH.BuocKeHoach(
-            buoc_id="khaosat", tieu_de="khảo sát",
-            muc_tieu=("ĐỌC tệp README.md của kho này và tóm tắt trong 3 gạch "
-                      "đầu dòng. CHỈ ĐỌC — không sửa, không tạo tệp nào."),
-            che_do_ghi=KH.CheDoGhi.DOC),),
+            buoc_id="ghi_v1", tieu_de="viết ghi chú",
+            muc_tieu=(
+                f"TẠO tệp `{TEP_D}` trong kho này, gồm một tiêu đề Markdown "
+                f"và 3 gạch đầu dòng ghi chú ngắn về dự án.\n"
+                f"CHỈ được tạo/sửa đúng tệp `{TEP_D}`. Không đọc tệp nào "
+                f"khác, không commit.\n{HUONG_DAN_GHI}"),
+            che_do_ghi=KH.CheDoGhi.GHI,
+            tai_nguyen=((LockKind.FILESYSTEM, TEP_D, "write"),),
+            artifact_mong_doi=(TEP_D,),
+            cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_D}),)),),
+        # Tieu chi doi THEM mot chuoi ma buoc v1 KHONG duoc bao — nen v1 dat
+        # o muc BUOC nhung truot o muc MUC TIEU GOC.
         nghiem_thu=(KH.TieuChiNghiemThu(
-            mo_ta="tệp bằng chứng docs/reports/_KHONG_TON_TAI_V09.md phải có",
-            cach_kiem=((KH.CachKiem.TEP_TON_TAI,
-                        {"duong": "docs/reports/_KHONG_TON_TAI_V09.md"}),)),))
+            mo_ta=f"{TEP_D} phải chứa dòng {MARKER_D}",
+            cach_kiem=((KH.CachKiem.TEP_TON_TAI, {"duong": TEP_D}),
+                       (KH.CachKiem.CHUOI_TRONG_TEP,
+                        {"duong": TEP_D, "chuoi": MARKER_D}))),))
     bd = cc.dieu_phoi(PID)
     y = bd.bat_dau(y, kh)
     eid = y.execution_id
     _in(f"  execution_id = {eid}")
     bd.tick(eid)
-    _in("  … chờ vòng sửa/lập lại kế hoạch chạy hết (CÓ TRẦN)")
+    _in("  … chờ v1 chạy, trượt tiêu chí, rồi vòng SỬA chạy tiếp")
     ok = _cho(lambda: (cc.so_thuc_thi.y_dinh(eid).trang_thai.ket_thuc
                        or cc.so_thuc_thi.y_dinh(eid).trang_thai.can_nguoi),
               giay=HAN_THUC_THI, nhip=3.0, tick=cc.tick)
     y = cc.so_thuc_thi.y_dinh(eid)
     ban = cc.so_thuc_thi.cac_ban_ke_hoach(eid)
-    sk = cc.so_thuc_thi.su_kien(eid, limit=200)
+    sk = cc.so_thuc_thi.su_kien(eid, limit=300)
     kinds = [e["kind"] for e in sk]
+    for p in ban:
+        _in(f"    kế hoạch v{p.phien_ban} ({len(p.buoc)} bước)"
+            f"{' [đang dùng]' if p.dang_hieu_luc else ''}"
+            f"{': ' + p.ly_do_sua[:90] if p.ly_do_sua else ''}")
+    for b in cc.so_thuc_thi.buoc(eid):
+        _in(f"    bước {b['buoc_id']:<12} {b['state']:<10} {b['xac_minh']}")
 
-    bc.khang_dinh("D", "KHÔNG false-DONE", y.trang_thai is not TT.DONE,
-                  f"trạng thái cuối = {y.trang_thai.value}")
     bc.khang_dinh("D", "dừng lại trong hạn (vòng lặp CÓ ĐÁY)", ok,
                   f"{y.trang_thai.value}")
-    bc.khang_dinh("D", "phân loại được nguyên nhân", "STEP_FAILED" in kinds
-                  or "EXEC_VERIFIED" in kinds)
-    # HAI ĐƯỜNG HỢP LỆ, và bài kiểm phải chấp nhận cả hai:
-    #   * bước HỎNG  -> sửa/lập lại kế hoạch (có bước để sửa);
-    #   * bước ĐẠT nhưng TIÊU CHÍ NGHIỆM THU không đạt -> KHÔNG có bước nào
-    #     để sửa, và dừng cho người là hành vi ĐÚNG. Đòi "phải lập lại kế
-    #     hoạch" ở đây là đòi Router bịa ra một bước từ một tiêu chí chưa
-    #     đạt — một năng lực v0.9 cố ý không có.
-    # Thứ BẮT BUỘC ở cả hai đường là: LÝ DO phải nói đúng chuyện gì đã xảy ra.
-    co_sua = len(ban) > 1 or "STEP_RETRY" in kinds
-    bc.khang_dinh("D", "vào đường phục hồi, HOẶC dừng với lý do CHÍNH XÁC",
-                  co_sua or ("TIÊU CHÍ NGHIỆM THU" in y.ly_do_dung),
-                  f"{len(ban)} bản kế hoạch, lập lại {y.so_lan_lap_lai}; "
-                  f"lý do: {y.ly_do_dung[:120]}")
-    bc.khang_dinh("D", "lý do KHÔNG khai sai số lần sửa",
-                  co_sua or ("sửa hết số lần" not in y.ly_do_dung),
-                  y.ly_do_dung[:160])
+    bc.khang_dinh("D", "có bản kế hoạch v2 (đã SỬA, không bỏ cuộc)",
+                  len(ban) >= 2, f"các bản: {[p.phien_ban for p in ban]}")
     bc.khang_dinh("D", "LỊCH SỬ bản v1 được giữ",
-                  any(p.phien_ban == 1 for p in ban),
-                  f"các bản: {[p.phien_ban for p in ban]}")
+                  any(p.phien_ban == 1 for p in ban)
+                  and not next(p for p in ban if p.phien_ban == 1).dang_hieu_luc)
+    v2 = next((p for p in ban if p.phien_ban == 2), None)
+    bc.khang_dinh("D", "v2 tham chiếu BẰNG CHỨNG hỏng",
+                  bool(v2 and (v2.bang_chung_gay_ra or v2.ly_do_sua)),
+                  (f"ly_do={v2.ly_do_sua[:90]} bang_chung={list(v2.bang_chung_gay_ra)[:2]}"
+                   if v2 else "(không có v2)"))
+    bc.khang_dinh("D", "v2 GIỮ NGUYÊN tiêu chí nghiệm thu (không hạ chuẩn)",
+                  bool(v2) and [t.mo_ta for t in v2.nghiem_thu]
+                  == [t.mo_ta for t in ban[0].nghiem_thu],
+                  f"{len(v2.nghiem_thu) if v2 else 0} tiêu chí")
+    bc.khang_dinh("D", "v2 có thêm BƯỚC SỬA",
+                  bool(v2) and len(v2.buoc) > len(ban[0].buoc),
+                  f"v1={len(ban[0].buoc)} bước, v2={len(v2.buoc) if v2 else 0}")
+    bc.khang_dinh("D", "KẾT THÚC Ở DONE sau khi kiểm định lại ĐẠT",
+                  y.trang_thai is TT.DONE,
+                  f"{y.trang_thai.value} — {y.ly_do_dung[:140]}")
+    bc.khang_dinh("D", "KHÔNG false-DONE: có ít nhất một lần kiểm định TRƯỢT",
+                  sum(1 for e in sk if e["kind"] == "EXEC_VERIFIED"
+                      and "KHONG_DAT" in str(e["detail"])) >= 1,
+                  f"{kinds.count('EXEC_VERIFIED')} lần kiểm định")
+    bc.khang_dinh("D", "KHÔNG nhân đôi bước đã đạt",
+                  len([b for b in cc.so_thuc_thi.buoc(eid)
+                       if b["buoc_id"] == "ghi_v1"]) == 1)
     bc.khang_dinh("D", "trần lập lại kế hoạch KHÔNG bị vượt",
                   y.so_lan_lap_lai <= 2, f"lập lại {y.so_lan_lap_lai} lần")
+    wt, tep = _bang_chung_ghi(cc, eid)
+    bc.khang_dinh("D", f"{TEP_D} có {MARKER_D} sau khi sửa",
+                  _tep_chua(wt, TEP_D, MARKER_D), f"worktree={wt}")
+    bc.khang_dinh("D", "kho Fanfic THẬT vẫn sạch", _kho_that_sach(cc))
     bc.khang_dinh("D", "0 thay đổi production", _prod_mutations(cc) == 0)
     bc.ghi("D", execution_id=eid, trang_thai=y.trang_thai.value,
            so_ban_ke_hoach=len(ban), lap_lai=y.so_lan_lap_lai,
            thu_lai=y.so_lan_thu_lai, ly_do=y.ly_do_dung[:300],
-           su_kien=kinds[:40])
+           worktree=wt, tep_da_ghi=tep,
+           ban=[{"phien_ban": p.phien_ban, "so_buoc": len(p.buoc),
+                 "ly_do_sua": p.ly_do_sua[:160],
+                 "bang_chung": list(p.bang_chung_gay_ra)[:4],
+                 "dang_hieu_luc": p.dang_hieu_luc} for p in ban],
+           su_kien=kinds[:60])
     return eid
 
 

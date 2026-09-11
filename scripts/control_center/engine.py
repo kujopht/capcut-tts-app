@@ -2398,6 +2398,21 @@ class ControlCenter:
                 t = self.store.task(st["task_id"]) if st["task_id"] else None
                 if t is None or not t.state.terminal:
                     continue
+                # TIÊU THỤ KẾT QUẢ NGAY KHI VIỆC KẾT THÚC — KHÔNG chờ tầng
+                # việc cạn lượt.
+                #
+                # Đã thử chiều ngược lại (chờ `attempts >= MAX_ATTEMPTS` rồi
+                # mới đọc) để tránh vứt đi một lượt thử sau đó thành công.
+                # Nó gây DEADLOCK đo được: tầng bước không tiêu thụ nên không
+                # gọi `bo_viec`, không ai nhả khoá ghi, và lượt kế tiếp nằm
+                # `WAITING` vĩnh viễn với `in_flight` rỗng — thang phục hồi
+                # từ 4,0 giây thành không bao giờ dừng.
+                #
+                # Cuộc đua "tầng việc thử lại sau khi tầng bước đã bỏ" đã
+                # được chặn ở NGUỒN: `_dung_viec_cua_thuc_thi` làm CẠN lượt
+                # thử của việc bị bỏ, nên tầng việc không thể hồi sinh nó.
+                # Chặn ở một chỗ là đủ; chặn ở cả hai thì hai tầng cùng chờ
+                # nhau.
                 pb = ((t.result or {}).get("envelope") or {}) if t.result else {}
                 kq = EKQ.HopDongKetQua(
                     task_id=t.task_id, buoc_id=st["buoc_id"],
@@ -2453,6 +2468,113 @@ class ControlCenter:
                 ra["ket_luan"].append(k)
         return ra
 
+    def _tieu_chi_chua_dat(self, eid: str):
+        """`[(mô tả, cách kiểm)]` của tiêu chí nghiệm thu CHƯA ĐẠT.
+
+        Đọc từ sự kiện `EXEC_VERIFIED` gần nhất — đó là bản chấm THẬT vừa
+        chạy, nên bước sửa nhắm vào đúng thứ đã trượt chứ không vào một bản
+        chấm dựng lại có thể khác đi.
+        """
+        from scripts.control_center.execution.ke_hoach import CachKiem
+        bc = None
+        for e in self.so_thuc_thi.su_kien(eid, limit=120):
+            if e["kind"] == "EXEC_VERIFIED":
+                bc = e.get("meta") or {}
+                break
+        if not bc:
+            return []
+        kh = self.so_thuc_thi.ke_hoach(eid)
+        theo_mo = {t.mo_ta: t for t in (kh.nghiem_thu if kh else ())}
+        ra = []
+        for t in (bc.get("tieu_chi") or []):
+            if str(t.get("trang_thai")) in ("DAT", "SUY_GIAM"):
+                continue
+            if not t.get("bat_buoc", True):
+                continue
+            mo = str(t.get("mo_ta") or "")
+            goc = theo_mo.get(mo)
+            ra.append((mo, tuple(goc.cach_kiem) if goc is not None else ()))
+        del CachKiem
+        return ra
+
+    def _sua_theo_chien_luoc(self, y, kh, tieu_chi, *, lan: int):
+        """(B) Tiêu chí NGỮ NGHĨA -> hỏi Strategist một bản sửa CÓ BIÊN.
+
+        KHÔNG phải mọi lần sửa đều gọi model: đường này chỉ chạy khi
+        `buoc_sua_tieu_chi` đã từ chối, tức là tiêu chí không đo một đường
+        dẫn nào và máy không suy ra được việc cần làm.
+
+        HAI RÀO giữ cho một đề xuất của model không nở ra thành một lần viết
+        lại kho:
+
+        * **phạm vi ghi do TA cấp, không do model chọn** — lấy từ phạm vi
+          ghi mà kế hoạch hiện tại đã khai. Model chỉ nói LÀM GÌ, không nói
+          ĐƯỢC GHI Ở ĐÂU.
+        * **vẫn qua `lap_lai_ke_hoach`**, nên nó chịu đúng `TRAN_LAP_KE_HOACH`
+          như mọi bản sửa khác.
+
+        Hỏng/không có hội đồng -> trả rỗng, và bên gọi dừng cho người.
+        """
+        from scripts.control_center.reasoning.phan_loai import phan_loai_luot
+        pid = y.project_id
+        duong = sorted({r for b in kh.buoc for _k, r, m in b.tai_nguyen
+                        if m == "write"})
+        if not duong:
+            duong = list(self._scope_mac_dinh(self.ctx(pid).project))
+        try:
+            hd = self.hoi_dong
+        except Exception:                                   # noqa: BLE001
+            hd = None
+        if hd is None or not duong:
+            return [], "", []
+
+        cau = (f"Mục tiêu gốc: {y.goal}\n\n"
+               "TIÊU CHÍ NGHIỆM THU CHƯA ĐẠT:\n"
+               + "\n".join(f"  - {m}" for m, _ in tieu_chi)
+               + "\n\nKế hoạch hiện tại đã chạy xong và MỌI BƯỚC ĐỀU ĐẠT, "
+                 "nhưng tiêu chí trên vẫn chưa đạt. Đề xuất MỘT việc sửa CÓ "
+                 "BIÊN để đạt nó. Chỉ được sửa trong: "
+               + ", ".join(duong)
+               + ".\nĐừng đề xuất đổi tiêu chí, đừng đề xuất nới phạm vi.")
+        try:
+            self._dam_bao_suc_khoe("chiến lược sửa")
+            kq = hd.chay(cau=cau, phan_loai=phan_loai_luot(cau),
+                         che_do=self.leader_ban_ghi(pid).che_do_enum(),
+                         khoi_san_co={"rang_buoc": self._khoi_rang_buoc(pid)[0],
+                                      "vien_nang": self._khoi_vien_nang(pid, cau)},
+                         chinh_sach=self.chinh_sach_cao_cap(pid),
+                         project_id=pid)
+        except Exception as exc:                            # noqa: BLE001
+            self.store.ghi_su_kien(
+                "REPAIR_STRATEGY_ERROR", project_id=pid, level="WARNING",
+                detail=f"{type(exc).__name__}: {exc}"[:300])
+            return [], "", []
+        cl = kq.chien_luoc
+        if cl is None or not cl.dung_duoc:
+            return [], "", []
+        muc = (cl.de_xuat or "").strip()
+        if cl.viec_can_lam:
+            muc += "\n\nViệc cần làm:\n" + "\n".join(
+                f"  - {x}" for x in cl.viec_can_lam[:6])
+        buoc = ELK.buoc_tu_de_xuat_sua(kh, muc_tieu=muc, duong=duong, lan=lan)
+        if not buoc:
+            return [], "", []
+        ng = next((x for x in kq.nguon_goc
+                   if getattr(x, "vai", None) and x.vai.value == "strategist"),
+                  None)
+        chon = getattr(ng, "chon", None)
+        self.so_thuc_thi.ghi_su_kien(
+            y.execution_id, "REPAIR_STRATEGY", project_id=pid,
+            detail=(f"Strategist đề xuất bản sửa · "
+                    f"{getattr(chon, 'provider', '?')}/"
+                    f"{getattr(chon, 'model_id', '?')}")[:300],
+            meta={"provider": getattr(chon, "provider", ""),
+                  "model": getattr(chon, "model_id", ""),
+                  "pham_vi": duong})
+        return (buoc,
+                "tiêu chí NGỮ NGHĨA chưa đạt — Strategist đề xuất bản sửa",
+                [f"tieu_chi:{m[:60]}" for m, _ in tieu_chi])
+
     def _lap_lai_ke_hoach(self, y: EYD.YDinhThucThi, kh) -> Optional[Dict]:
         """`REPLANNING` -> bản kế hoạch kế tiếp, hoặc `BLOCKED`. §9, §10.
 
@@ -2477,41 +2599,63 @@ class ControlCenter:
             hong[st["buoc_id"]] = ly or (
                 f"trạng thái {st['state']}, xác minh {st['xac_minh']}")
         buoc = ELK.buoc_sua_chua(kh, hong) if hong else []
+        ly_do_sua = (f"{len(hong)} bước không qua kiểm định: "
+                     + ", ".join(sorted(hong)))
+        bang_chung = [f"buoc:{k}" for k in sorted(hong)]
+
+        # --- TIÊU CHÍ NGHIỆM THU CHƯA ĐẠT: SỬA, chứ không bỏ cuộc (§1) ------
+        #
+        # `hong` rỗng nghĩa là MỌI BƯỚC ĐỀU ĐẠT và thứ chưa đạt là TIÊU CHÍ
+        # của mục tiêu GỐC. Bản đầu dừng luôn ở `BLOCKED` — và đó là một lần
+        # bỏ cuộc quá sớm: nếu tiêu chí ĐO MỘT ĐƯỜNG DẪN và lần thực thi đã
+        # có thẩm quyền ghi ở đó, thì việc cần làm rất cụ thể và hoàn toàn
+        # nằm trong quyền đã cấp.
         if not buoc:
-            # HAI LÝ DO KHÁC HẲN NHAU, và gộp chúng là nói dối người đọc.
-            #
-            # `hong` rỗng nghĩa là MỌI BƯỚC ĐỀU ĐẠT và thứ không đạt là TIÊU
-            # CHÍ NGHIỆM THU của cả mục tiêu. Không có bước nào để sửa, nên
-            # câu "đã sửa hết số lần cho phép" vừa sai vừa dẫn người đọc đi
-            # nhầm hướng — đo được ở nghiệm thu thật (kịch bản D, 2026-09-11):
-            # sổ ghi "đã được sửa hết số lần cho phép" trong khi số lần sửa
-            # thật sự là 0.
-            #
-            # Sinh MỘT BƯỚC MỚI để thoả một tiêu chí chưa đạt là một năng lực
-            # khác (lập kế hoạch lại từ mục tiêu, không phải sửa một bước) —
-            # v0.9 cố ý KHÔNG có nó, và nói thẳng điều đó thay vì giả vờ đã
-            # thử.
+            tc = self._tieu_chi_chua_dat(eid)
+            if tc:
+                lan = kh.phien_ban
+                # (C) CẦN THẨM QUYỀN MỚI -> KHÔNG tự sửa.
+                if y.can_tham_quyen_moi:
+                    self.so_thuc_thi.doi_trang_thai(
+                        eid, TrangThaiThucThi.WAITING_AUTHORITY,
+                        ly_do=(EYD.cau_hoi_tham_quyen(y)
+                               or "cần bạn cho phép trước khi sửa"),
+                        pha="chờ bạn cho phép")
+                    return None
+                # (A) SỬA TẤT ĐỊNH — tiêu chí đo một đường dẫn cụ thể.
+                buoc = ELK.buoc_sua_tieu_chi(kh, tc, lan=lan)
+                if buoc:
+                    ly_do_sua = ("tiêu chí nghiệm thu chưa đạt, sửa có mục "
+                                 "tiêu: " + "; ".join(m[:80] for m, _ in tc[:2]))
+                    bang_chung = [f"tieu_chi:{m[:60]}" for m, _ in tc]
+                else:
+                    # (B) TIÊU CHÍ NGỮ NGHĨA -> để STRATEGIST đề xuất.
+                    buoc, ly_do_sua, bang_chung = self._sua_theo_chien_luoc(
+                        y, kh, tc, lan=lan)
+
+        if not buoc:
+            tc = self._tieu_chi_chua_dat(eid)
             if hong:
                 ly = ("lập lại kế hoạch không thêm được gì — bước hỏng đã "
                       "được sửa hết số lần cho phép. Cần bạn xem: "
                       + "; ".join(f"{k}: {v[:120]}"
                                   for k, v in list(hong.items())[:3]))
+            elif tc:
+                ly = ("MỌI BƯỚC ĐỀU ĐẠT nhưng tiêu chí nghiệm thu chưa đạt, "
+                      "và Router KHÔNG suy ra được một việc sửa CÓ BIÊN cho "
+                      "nó (tiêu chí không đo một đường dẫn nào, và Strategist "
+                      "cũng không đề xuất được). Cần bạn quyết: "
+                      + "; ".join(m[:90] for m, _ in tc[:2]))
             else:
-                ly = ("MỌI BƯỚC ĐỀU ĐẠT nhưng TIÊU CHÍ NGHIỆM THU của mục "
-                      "tiêu không đạt — không có bước nào để sửa. Cần bạn "
-                      "quyết: sửa tiêu chí, hay thêm việc để thoả nó. "
-                      "(Router v0.9 không tự sinh bước mới từ một tiêu chí "
-                      "chưa đạt.)")
+                ly = ("kiểm định không đạt nhưng không xác định được thứ gì "
+                      "để sửa — cần bạn xem")
             self.so_thuc_thi.doi_trang_thai(
                 eid, TrangThaiThucThi.BLOCKED, ly_do=ly, pha="cần bạn xem")
             bd.nha_tai_nguyen(self.so_thuc_thi.y_dinh(eid) or y)
             return None
         try:
-            moi = bd.lap_lai_ke_hoach(
-                eid, buoc,
-                ly_do=(f"{len(hong)} bước không qua kiểm định: "
-                       + ", ".join(sorted(hong))),
-                bang_chung=[f"buoc:{k}" for k in sorted(hong)])
+            moi = bd.lap_lai_ke_hoach(eid, buoc, ly_do=ly_do_sua,
+                                      bang_chung=bang_chung)
         except RuntimeError as exc:
             self.so_thuc_thi.doi_trang_thai(
                 eid, TrangThaiThucThi.BLOCKED, ly_do=str(exc)[:400],

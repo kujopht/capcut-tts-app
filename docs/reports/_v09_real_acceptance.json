@@ -1,50 +1,158 @@
 {
-  "ts": 1789151209.9544466,
-  "tong": 20,
-  "dat": 20,
-  "hong": 0,
+  "ts": 1789165440.168548,
+  "tong": 38,
+  "dat": 21,
+  "hong": 17,
   "khang_dinh": [
     {
-      "kich_ban": "D",
-      "ten": "KHÔNG false-DONE",
+      "kich_ban": "C",
+      "ten": "kế hoạch có LỚP song song (fan-out)",
       "dat": true,
-      "chi_tiet": "trạng thái cuối = BLOCKED"
+      "chi_tiet": "lớp 1 = ['ghi_kiemthu', 'ghi_tailieu']"
     },
     {
-      "kich_ban": "D",
-      "ten": "dừng lại trong hạn (vòng lặp CÓ ĐÁY)",
+      "kich_ban": "C",
+      "ten": "giao SONG SONG ≥2 bước trong một nhịp",
       "dat": true,
-      "chi_tiet": "BLOCKED"
+      "chi_tiet": "đã giao ['ghi_tailieu', 'ghi_kiemthu']"
     },
     {
-      "kich_ban": "D",
-      "ten": "phân loại được nguyên nhân",
+      "kich_ban": "C",
+      "ten": "lần thực thi ĐỨNG LẠI trong hạn",
+      "dat": false,
+      "chi_tiet": "trạng thái cuối = RUNNING"
+    },
+    {
+      "kich_ban": "C",
+      "ten": "kết thúc ở DONE",
+      "dat": false,
+      "chi_tiet": "RUNNING — nhà cung cấp/tiến trình: lượt trả về RỖNG — tiến trình không nói được gì (thường là công cụ bị chối quyền trong phiên headless) — đã thử lại 2 lần ở bước ghi_ki"
+    },
+    {
+      "kich_ban": "C",
+      "ten": "mọi bước có hợp đồng kết quả CÓ CẤU TRÚC",
+      "dat": false,
+      "chi_tiet": "[{\"ghi_kiemthu\": null}, {\"ghi_tailieu\": null}]"
+    },
+    {
+      "kich_ban": "C",
+      "ten": "agent GHI THẬT vào worktree cô lập",
+      "dat": false,
+      "chi_tiet": "0 tệp: "
+    },
+    {
+      "kich_ban": "C",
+      "ten": "docs/reports/_v09_ghi_chu_handoff.md có V09-ACCEPT-HANDOFF",
+      "dat": false,
+      "chi_tiet": ""
+    },
+    {
+      "kich_ban": "C",
+      "ten": "docs/reports/_v09_ghi_chu_kiemthu.md có V09-ACCEPT-KIEMTHU",
+      "dat": false,
+      "chi_tiet": ""
+    },
+    {
+      "kich_ban": "C",
+      "ten": "git diff của worktree KHÔNG rỗng",
+      "dat": false,
+      "chi_tiet": ""
+    },
+    {
+      "kich_ban": "C",
+      "ten": "kho Fanfic THẬT vẫn sạch",
+      "dat": true,
+      "chi_tiet": "git status của cây làm việc chính"
+    },
+    {
+      "kich_ban": "C",
+      "ten": "đã qua pha KIỂM ĐỊNH",
+      "dat": false,
+      "chi_tiet": ""
+    },
+    {
+      "kich_ban": "C",
+      "ten": "KHÔNG nhảy thẳng RUNNING -> DONE",
+      "dat": true,
+      "chi_tiet": ""
+    },
+    {
+      "kich_ban": "C",
+      "ten": "0 thay đổi production",
       "dat": true,
       "chi_tiet": ""
     },
     {
       "kich_ban": "D",
-      "ten": "vào đường phục hồi, HOẶC dừng với lý do CHÍNH XÁC",
-      "dat": true,
-      "chi_tiet": "1 bản kế hoạch, lập lại 0; lý do: MỌI BƯỚC ĐỀU ĐẠT nhưng TIÊU CHÍ NGHIỆM THU của mục tiêu không đạt — không có bước nào để sửa. Cần bạn quyết: sửa tiêu ch"
+      "ten": "dừng lại trong hạn (vòng lặp CÓ ĐÁY)",
+      "dat": false,
+      "chi_tiet": "RUNNING"
     },
     {
       "kich_ban": "D",
-      "ten": "lý do KHÔNG khai sai số lần sửa",
-      "dat": true,
-      "chi_tiet": "MỌI BƯỚC ĐỀU ĐẠT nhưng TIÊU CHÍ NGHIỆM THU của mục tiêu không đạt — không có bước nào để sửa. Cần bạn quyết: sửa tiêu chí, hay thêm việc để thoả nó. (Router v0."
+      "ten": "có bản kế hoạch v2 (đã SỬA, không bỏ cuộc)",
+      "dat": false,
+      "chi_tiet": "các bản: [1]"
     },
     {
       "kich_ban": "D",
       "ten": "LỊCH SỬ bản v1 được giữ",
+      "dat": false,
+      "chi_tiet": ""
+    },
+    {
+      "kich_ban": "D",
+      "ten": "v2 tham chiếu BẰNG CHỨNG hỏng",
+      "dat": false,
+      "chi_tiet": "(không có v2)"
+    },
+    {
+      "kich_ban": "D",
+      "ten": "v2 GIỮ NGUYÊN tiêu chí nghiệm thu (không hạ chuẩn)",
+      "dat": false,
+      "chi_tiet": "0 tiêu chí"
+    },
+    {
+      "kich_ban": "D",
+      "ten": "v2 có thêm BƯỚC SỬA",
+      "dat": false,
+      "chi_tiet": "v1=1 bước, v2=0"
+    },
+    {
+      "kich_ban": "D",
+      "ten": "KẾT THÚC Ở DONE sau khi kiểm định lại ĐẠT",
+      "dat": false,
+      "chi_tiet": "RUNNING — "
+    },
+    {
+      "kich_ban": "D",
+      "ten": "KHÔNG false-DONE: có ít nhất một lần kiểm định TRƯỢT",
+      "dat": false,
+      "chi_tiet": "0 lần kiểm định"
+    },
+    {
+      "kich_ban": "D",
+      "ten": "KHÔNG nhân đôi bước đã đạt",
       "dat": true,
-      "chi_tiet": "các bản: [1]"
+      "chi_tiet": ""
     },
     {
       "kich_ban": "D",
       "ten": "trần lập lại kế hoạch KHÔNG bị vượt",
       "dat": true,
       "chi_tiet": "lập lại 0 lần"
+    },
+    {
+      "kich_ban": "D",
+      "ten": "docs/reports/_v09_ghi_chu_sua.md có V09-REPAIR-OK sau khi sửa",
+      "dat": false,
+      "chi_tiet": "worktree=[]"
+    },
+    {
+      "kich_ban": "D",
+      "ten": "kho Fanfic THẬT vẫn sạch",
+      "dat": true,
+      "chi_tiet": ""
     },
     {
       "kich_ban": "D",
@@ -56,7 +164,7 @@
       "kich_ban": "D-synth",
       "ten": "có câu kết luận TỰ ĐỘNG",
       "dat": true,
-      "chi_tiet": "9 câu"
+      "chi_tiet": "19 câu"
     },
     {
       "kich_ban": "D-synth",
@@ -92,13 +200,13 @@
       "kich_ban": "E-mem",
       "ten": "phiên MỚI thấy lịch sử thực thi",
       "dat": true,
-      "chi_tiet": "17 lần thực thi trong sổ"
+      "chi_tiet": "20 lần thực thi trong sổ"
     },
     {
       "kich_ban": "E-mem",
       "ten": "nhớ NGƯỜI DÙNG đã uỷ quyền gì",
       "dat": true,
-      "chi_tiet": "khảo sát kho Fanfic và sinh một báo cáo (tiêu chí cố ý không đạt)"
+      "chi_tiet": "viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao, một về bộ kiểm thử"
     },
     {
       "kich_ban": "E-mem",
@@ -110,7 +218,7 @@
       "kich_ban": "E-mem",
       "ten": "nhớ KẾT QUẢ kiểm định",
       "dat": true,
-      "chi_tiet": "MỌI BƯỚC ĐỀU ĐẠT nhưng TIÊU CHÍ NGHIỆM THU của mục tiêu không đạt — không có bước nào để sửa. Cần bạn quyết: sửa tiêu chí, hay thêm việc để thoả nó. (Router v0."
+      "chi_tiet": "nhà cung cấp/tiến trình: lượt trả về RỖNG — tiến trình không nói được gì (thường là công cụ bị chối quyền trong phiên headless) — đã thử lại 2 lần ở bước ghi_ki"
     },
     {
       "kich_ban": "E-mem",
@@ -126,20 +234,112 @@
     }
   ],
   "kich_ban": {
+    "C": {
+      "da_giao": [
+        "ghi_tailieu",
+        "ghi_kiemthu"
+      ],
+      "lop": [
+        [
+          "ghi_kiemthu",
+          "ghi_tailieu"
+        ]
+      ],
+      "execution_id": "ex_eaf42b47ee54",
+      "trang_thai": "RUNNING",
+      "worktree": [],
+      "tep_da_ghi": [],
+      "buoc": [
+        {
+          "buoc_id": "ghi_kiemthu",
+          "state": "RUNNING",
+          "xac_minh": "CHUA_KIEM",
+          "task_id": "fanfic.ghi_kiemthu-v3"
+        },
+        {
+          "buoc_id": "ghi_tailieu",
+          "state": "RUNNING",
+          "xac_minh": "CHUA_KIEM",
+          "task_id": "fanfic.ghi_tailieu-v3"
+        }
+      ],
+      "worker": [
+        {
+          "buoc": "ghi_kiemthu",
+          "provider": null,
+          "model": null,
+          "runtime": null
+        },
+        {
+          "buoc": "ghi_tailieu",
+          "provider": null,
+          "model": null,
+          "runtime": null
+        }
+      ],
+      "su_kien": [
+        "EXEC_STATE",
+        "STEP_DISPATCHED",
+        "STEP_DISPATCHED",
+        "EXEC_STATE",
+        "EXEC_STATE",
+        "PLAN_REVISED",
+        "EXEC_STATE",
+        "TASKS_ABANDONED",
+        "STEP_FAILED",
+        "EXEC_STATE",
+        "TASKS_ABANDONED",
+        "STEP_FAILED",
+        "EXEC_STATE",
+        "STEP_DISPATCHED",
+        "STEP_DISPATCHED",
+        "EXEC_STATE",
+        "EXEC_STATE",
+        "PLAN_REVISED",
+        "EXEC_STATE",
+        "TASKS_ABANDONED",
+        "STEP_FAILED",
+        "EXEC_STATE",
+        "TASKS_ABANDONED",
+        "STEP_FAILED",
+        "STEP_DISPATCHED",
+        "STEP_RETRY",
+        "STEP_FAILED",
+        "STEP_DISPATCHED",
+        "STEP_RETRY",
+        "STEP_FAILED",
+        "STEP_DISPATCHED",
+        "STEP_RETRY",
+        "STEP_FAILED",
+        "STEP_DISPATCHED",
+        "STEP_RETRY",
+        "STEP_FAILED",
+        "EXEC_STATE",
+        "STEP_DISPATCHED",
+        "STEP_DISPATCHED",
+        "EXEC_STATE"
+      ],
+      "so_viec": 2
+    },
     "D": {
-      "execution_id": "ex_7dd8c0709198",
-      "trang_thai": "BLOCKED",
+      "execution_id": "ex_67780357dccd",
+      "trang_thai": "RUNNING",
       "so_ban_ke_hoach": 1,
       "lap_lai": 0,
       "thu_lai": 0,
-      "ly_do": "MỌI BƯỚC ĐỀU ĐẠT nhưng TIÊU CHÍ NGHIỆM THU của mục tiêu không đạt — không có bước nào để sửa. Cần bạn quyết: sửa tiêu chí, hay thêm việc để thoả nó. (Router v0.9 không tự sinh bước mới từ một tiêu chí chưa đạt.)",
+      "ly_do": "",
+      "worktree": [],
+      "tep_da_ghi": [],
+      "ban": [
+        {
+          "phien_ban": 1,
+          "so_buoc": 1,
+          "ly_do_sua": "",
+          "bang_chung": [],
+          "dang_hieu_luc": true
+        }
+      ],
       "su_kien": [
-        "EXEC_STATE",
-        "EXEC_STATE",
-        "EXEC_VERIFIED",
-        "REVIEW_GATE",
-        "EXEC_STATE",
-        "STEP_VERIFIED",
         "EXEC_STATE",
         "STEP_DISPATCHED",
         "EXEC_STATE",
@@ -148,8 +348,8 @@
       ]
     },
     "D-synth": {
-      "so_cau": 9,
-      "cau_cuoi": "Đã huỷ theo yêu cầu.\n\nMục tiêu: khảo sát tổng hợp kho Fanfic (việc an toàn để dừng)\n\nKiểm định: THIEU_BANG_CHUNG — 1 bước chưa chứng minh được: khaosat_f\n\nChưa chứng minh được: khaosat_f\n\nĐã lưu vào Ký ức dự án: incident."
+      "so_cau": 19,
+      "cau_cuoi": "Đã huỷ theo yêu cầu.\n\nMục tiêu: viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao, một về bộ kiểm thử\n\nKiểm định: KHONG_DAT — 1 bước hỏng: ghi_kiemthu\n- [KHONG_DAT] docs/reports/_v09_ghi_chu_handoff.md tồn tại và chứa V09-ACCEPT-HANDOFF\n- [KHONG_DAT] docs/reports/_v09_ghi_chu_kiemthu.md tồn tại và chứa V09-ACCEPT-KIEMTHU\n- [THIEU_BANG_CHUNG] hai ghi chú có thực sự mô tả đúng kho Fanfic và đủ để người đọc biết nên làm gì tiếp không\n\nChưa chứng minh được: ghi_tailieu\n\nĐã lưu vào Ký ức dự án: incident."
     },
     "B-fb": {
       "truoc": 17,
@@ -166,8 +366,8 @@
       ]
     },
     "E-mem": {
-      "so_thuc_thi": 17,
-      "tra_loi": "`ex_7dd8c0709198` [BLOCKED] khảo sát kho Fanfic và sinh một báo cáo (tiêu chí cố ý không đạt)\n  kế hoạch v1 — 1/1 bước đã kiểm định xong (100%)\n  (!) CẦN BẠN: MỌI BƯỚC ĐỀU ĐẠT nhưng TIÊU CHÍ NGHIỆM THU của mục tiêu không đạt — không có bước nào để sửa. Cần bạn quyết: sửa tiêu chí, hay thêm việc để thoả nó. (Router v0.9 không tự sinh bước mới từ một tiêu chí\n\n`ex_a943028fee92` [WAITING_AUTHORITY] Khuyên chọn Phương án A. Hiện tại hồ sơ dự án chưa ghi rõ quy trình deploy fanfic.world cũ\n  kế hoạch",
+      "so_thuc_thi": 20,
+      "tra_loi": "`ex_67780357dccd` [RUNNING] viết ghi chú khảo sát vào docs/reports/_v09_ghi_chu_sua.md đạt tiêu chí nghiệm thu\n  kế hoạch v1 — 0/1 bước đã kiểm định xong (0%)\n  đang chạy: ghi_v1\n\n`ex_eaf42b47ee54` [RUNNING] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v3 — 0/2 bước đã kiểm định xong (0%)\n  đang chạy: ghi_kiemthu, ghi_tailieu\n\n`ex_a943028fee92` [WAITING_AUTHORITY] Khuyên chọn Phương án A. Hiện tại hồ sơ dự án chưa ghi rõ quy trình deploy f",
       "episodic": 50
     }
   },

@@ -52,6 +52,26 @@ import re as _re
 _TEN_MODULE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 
+def _boc_an_cua_so(argv: Sequence[str], *, cwd: str,
+                   han_giay: float) -> "subprocess.CompletedProcess":
+    """MỘT chỗ duy nhất trong module này sinh tiến trình con — V0.4 §14b.
+
+    Bọc một lần thay vì thêm `**an_cua_so()` ở từng điểm gọi, và đó là hình
+    dạng MẠNH HƠN: một phép kiểm thêm về sau được phủ tự động, không phụ
+    thuộc người viết có nhớ hay không. `test_control_center_ux_v04` nhận ra
+    khuôn này bằng chính tên hàm — nó bắt được cả một *runner được tiêm*
+    (`self._chay([...])`), nên một bản quét đúng sẽ báo động nếu ai đó gọi
+    thẳng `subprocess.run` ở đây về sau.
+
+    Không có cửa sổ console nào được nhấp lên: bản `--noconsole` chạy đúng
+    những lệnh này mỗi lần kiểm định một bước, và mỗi lần nhấp là một lần
+    giành focus của người dùng.
+    """
+    return subprocess.run(list(argv), cwd=cwd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace",
+                          timeout=han_giay, **an_cua_so())
+
+
 class KiemLoi(RuntimeError):
     """Phép kiểm không chạy được vì THAM SỐ sai. Khác hẳn "kiểm xong, hỏng"."""
 
@@ -106,18 +126,15 @@ class MoiGioiKiem:
         return p
 
     def _chay(self, argv: Sequence[str]) -> Tuple[int, str]:
-        t0 = time.time()
+        """Chạy một `argv` ĐÃ DỰNG SẴN. Mọi điểm gọi đi qua `_boc_an_cua_so`."""
         try:
-            r = subprocess.run(list(argv), cwd=str(self.repo),
-                               capture_output=True, text=True,
-                               encoding="utf-8", errors="replace",
-                               timeout=self.han_giay, **an_cua_so())
+            r = _boc_an_cua_so(argv, cwd=str(self.repo),
+                               han_giay=self.han_giay)
         except subprocess.TimeoutExpired:
             return 124, f"quá hạn {self.han_giay:.0f}s"
         except OSError as exc:
             return 127, f"không chạy được: {exc}"
         out = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
-        del t0
         return int(r.returncode), out[-4000:]
 
     # -------------------------------------------------------- phep kiem ----

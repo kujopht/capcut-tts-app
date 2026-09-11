@@ -1363,3 +1363,59 @@ cũ đã đánh mốc, và các nhánh tính năng đã merge.
 5. **kết quả -> Ký ức dự án / Quyết định / Sự cố.**
 6. **Leader tiếp tục hội thoại TỪ kết quả đã kiểm định.**
 7. **Phục hồi khi hỏng / lập lại kế hoạch, không cần người dán tay.**
+
+## 24. Vòng kín thực thi (V0.9) — luật 29–33
+
+Nhánh `feat/v09-closed-loop-execution`, dựng từ `main` đã phát hành
+(`03b6652`). **CHƯA merge, CHƯA gắn thẻ.** Đầy đủ:
+`docs/reports/CLOSED_LOOP_V09.md`. Mã: `scripts/control_center/execution/`.
+
+Bảy hạng mục của "pha tiếp theo" ở §23 đã có mã và bài kiểm; hạng mục 1
+(vòng phản hồi chất lượng) vẫn **chưa đủ mẫu** và đó là đúng thiết kế.
+
+**Sổ:** năm bảng THÊM VÀO `control.db` (`executions`, `execution_plans`,
+`execution_steps`, `execution_events`, `de_xuat`). Không cột nào của V0.8
+đổi, nên `PHIEN_BAN_KHO` **giữ nguyên 1** — một bản V0.8 mở cùng một sổ vẫn
+chạy bình thường, nó chỉ không thấy năm bảng đó.
+
+29. **KHÔNG CÓ `RUNNING -> DONE`.** Bảng chuyển
+    (`execution/trang_thai.py`) cấm cứng, và `force=True` cũng không mở
+    được. Mọi đường tới `DONE` đi qua `VERIFYING`. Mã thoát 0 không phải
+    bằng chứng; "không sinh ra gì" không phải DONE; một bước GHI không chạm
+    đĩa và không khai phép kiểm tất định nào là `THIEU_BANG_CHUNG`, không
+    phải `DAT`.
+
+30. **KIỂM ĐỊNH CHẤM MỤC TIÊU GỐC, KHÔNG CHẤM TỔNG CÁC BƯỚC.** Bốn việc con
+    cùng báo `DONE` không chứng minh mục tiêu đã đạt.
+    `KeHoachThucThi.nghiem_thu` giữ tiêu chí của CẢ lần thực thi, và một
+    tiêu chí không buộc được vào phép kiểm nào là `THIEU_BANG_CHUNG` — nó
+    KHÔNG mặc nhiên đạt. Tiêu chí NGƯỜI DÙNG nói thẳng luôn hiện ra kể cả
+    khi bộ lập kế hoạch bỏ sót nó.
+
+31. **MÔI GIỚI KIỂM CÓ KIỂU, VÀ NEO VÀO ĐÚNG WORKTREE.** API không nhận
+    chuỗi lệnh (cùng khuôn `probe_van_hanh` §19); đường dẫn ra ngoài kho và
+    tệp hình dạng bí mật bị từ chối; `UNITTEST_MODULE` chỉ nhận một tên
+    module. Và nó chạy TRONG worktree của bước, không ở gốc kho — chạy sai
+    chỗ thì `git status` thấy cây sạch và mọi bước ghi bị chấm là hỏng.
+
+32. **PHỤC HỒI CÓ ĐÁY, VÀ MỘT TẦNG DUY NHẤT SỞ HỮU NÓ.** Hai trần
+    (`TRAN_THU_LAI_BUOC = 2`, `TRAN_LAP_KE_HOACH = 2`), lượt thử **cộng dồn
+    qua mọi bản kế hoạch** — đếm theo từng bản làm mỗi lần lập lại kế hoạch
+    cấp lại trọn ngân sách. Tầng BƯỚC sở hữu vòng phục hồi, nên việc nó bỏ
+    phải **chết hẳn**: hai tầng cùng thử lại một việc đã khoá chết một lần
+    thực thi thật (cả hai việc `WAITING` trên cùng một khoá ghi, `in_flight`
+    rỗng, đứng im vĩnh viễn). Lỗi CẤU HÌNH/QUYỀN được phân loại RIÊNG, không
+    lẫn lỗi việc, và không bao giờ được "thử nhà cung cấp khác".
+
+33. **"OK LÀM ĐI" KHÔNG MỞ ĐƯỢC CỔNG NGOÀI KHO.** `tiep_noi` chỉ chạy trên
+    chuỗi NGƯỜI DÙNG gõ; `tao_y_dinh` quét CẢ mục tiêu lẫn câu gốc bằng đúng
+    `permissions.do_gated` của V0.1; một lần chạm là `WAITING_AUTHORITY` và
+    chỉ một POST tường minh của người mới mở. Một đề xuất đã dùng không nối
+    lại được (gõ hai lần không tạo hai lần thực thi). Huỷ thì **giữ nguyên**
+    bằng chứng và lịch sử.
+
+**Hai hình dạng lệnh bị CHẶN CỨNG kể từ 2026-09-11** —
+`cd <đường> && grep/cat/sed/…` và `python - <<EOF`. Đây là một sửa **hồ sơ
+quyền**, không phải một tính năng v0.9, nhưng nó ra đời trong phiên dựng
+v0.9 vì chính phiên đó lặp lại hình dạng thứ nhất nhiều lần. Xem `CLAUDE.md`
+mục "Tìm/đọc trong kho" và `guard_indirect_exec.cwd_laundered_read`.

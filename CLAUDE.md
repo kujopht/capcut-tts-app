@@ -383,12 +383,42 @@ python scripts/tim.py --kiem                           # chính sách loại tr�
 git grep -n "TrangThai" -- scripts/                    # cửa thứ hai
 ```
 
+**HAI HÌNH DẠNG BỊ CHẶN CỨNG — hook từ chối, không phải hỏi:**
+
+```bash
+cd <đường> && grep ...        # và find / sed / awk / cat / head / tail /
+cd <đường> ;  grep ...        # ls / wc / rg / strings / stat / type …
+python - <<'EOF' … EOF        # và bash/sh/node <<EOF, `python -`, `<<<`
+```
+
+Gặp một trong hai, `guard_indirect_exec.py` trả `deny` kèm dòng
+`REMEDIATION:` nói thẳng phải dùng gì thay thế. **Đừng xin duyệt, đừng đổi
+cách gõ dấu nháy, đừng `--dangerously-skip-permissions`, và đừng thêm
+`Bash(grep:*)` / `Bash(find:*)` / `Bash(sed:*)` vào `allow`** — luật cuối
+thay phép cho-phép-CÓ-KIỂM-CỜ của Claude Code bằng một phép vô điều kiện và
+mở lại `find -delete` / `sed -i` thật (đo 2026-08-28).
+
+Thay bằng, theo thứ tự ưu tiên:
+
+1. công cụ **Read / Grep / Glob** với đường dẫn tường minh;
+2. `python scripts/tim.py …` (ở trên);
+3. `git grep -n "…" -- <đường>` — **không** `cd` trong cùng lệnh;
+4. sửa tệp bằng **Edit / Write**, không bằng heredoc/`sed -i`.
+
 **Đây không phải một quy ước cho ngoan — nó là cách duy nhất phạm vi đọc
 tự chứng minh được.** Claude Code phân giải những đường dẫn mà một lệnh
 Bash NHẮC TÊN rồi đối chiếu với các luật `Read(...)` deny. Sau một `cd`,
 thư mục hiệu lực không suy ra được TĨNH, nên nó không thể chứng minh phép
 tìm không chạm `.env` — và phải hỏi người. `tim.py` suy gốc kho từ **vị
 trí của chính tệp đó**, nên `cd` trở thành vô nghĩa thay vì bị cấm.
+
+**Vì sao phải CHẶN chứ không chỉ dặn** (sự cố 2026-09-11): mục này đã tồn
+tại và đã được đọc, mà một phiên làm việc thật vẫn sinh ra `cd <kho> &&
+grep …` nhiều lần trong một buổi — vì `cd <kho> &&` là một **phản xạ**, không
+phải một quyết định. Một lời nhắc `ask` không sửa được điều đó: người dùng
+bấm Yes rồi agent gõ lại y hệt một phút sau. Một `deny` thì tới ngay trong
+lượt đó và agent sửa được liền. Thư mục làm việc của phiên **đã là gốc kho**,
+nên tiền tố `cd` không mua được gì ngay cả khi nó được phép.
 
 Hai điều nữa đã đo được, và cả hai đổi cách làm việc:
 

@@ -293,8 +293,18 @@ def _guard():
 
 
 def _hook_chan(lenh: str):
-    """Chia đoạn ĐÚNG NHƯ `main()`: `expand()` rồi `SEGMENT_SPLIT`."""
+    """Chia đoạn ĐÚNG NHƯ `main()`: tier 1c, rồi `expand()` + `SEGMENT_SPLIT`.
+
+    `cwd_laundered_read` xét QUAN HỆ giữa các đoạn (`cd` đoạn này, `grep`
+    đoạn sau) nên nó KHÔNG nằm trong `evaluate()`; `main()` gọi nó tách ra,
+    trước vòng lặp. Quên nó ở đây làm bài kiểm nói dối theo đúng chiều nguy
+    hiểm: báo "chạy được" cho một hình dạng mà hook thật đang chặn.
+    """
     g = _guard()
+    if hasattr(g, "cwd_laundered_read"):
+        r = g.cwd_laundered_read(lenh)
+        if r:
+            return r
     for chunk in g.expand(lenh):
         for doan in g.SEGMENT_SPLIT.split(chunk):
             if doan.strip() and g.evaluate(doan):
@@ -346,23 +356,90 @@ class TestTienToCdKhongConHoi(unittest.TestCase):
            bất kể tiền tố -> `cd <kho> && cat .env` thành CHẶN
 
     Sau bản sửa, dạng có `cd` **an toàn hơn trước**: HỎI -> CHẶN.
+
+    CẬP NHẬT 2026-09-11 — LẬP TRƯỜNG ĐỔI MỘT NỬA. Nửa "bí mật vẫn bị chặn"
+    giữ NGUYÊN. Nửa "`cd <kho> && grep` được allow" thì KHÔNG còn:
+
+        cd <kho> && git status        -> allow   (như cũ)
+        cd <kho> && python -m unittest -> allow  (như cũ)
+        cd <kho> && grep / cat / sed  -> DENY    (đổi, có chủ đích)
+
+    Vì sao: luật `allow` chỉ khớp khi CẢ chuỗi lệnh khớp glob, nên nó chỉ cứu
+    được dạng `cd X && grep …` đứng MỘT MÌNH. Một chuỗi thật —
+    `cd X && python -m compileall … && echo OK && grep -n sym a.py` — không
+    khớp glob nào và rơi xuống bộ phân loại, bộ này không phân giải tĩnh được
+    thư mục sau `cd` nên nó HỎI NGƯỜI. Kết quả: một lời nhắc giữa một lượt
+    chạy lẽ ra không cần người (đo 2026-09-11, lặp lại nhiều lần trong một
+    phiên).
+
+    Nên hình dạng đó nay bị hook chặn thẳng kèm `REMEDIATION:` — xem
+    `guard_indirect_exec.cwd_laundered_read`. Không phải siết quyền đọc: mọi
+    phép đọc vẫn làm được bằng Read/Grep/Glob, `scripts/tim.py`, `git grep`,
+    hoặc cùng lệnh đó KHÔNG có `cd`.
     """
 
     KHO = "C:/FanficWorkers/router-control-center"
 
-    def test_dang_cd_cua_lenh_doc_thong_thuong_duoc_phep(self):
+    def test_dang_cd_cua_lenh_KHONG_doc_pham_vi_mo_van_duoc_phep(self):
+        """`cd` + động từ không nhắc một đường đọc mơ hồ nào -> vẫn allow."""
         for lenh in (
-            f"cd {self.KHO} && grep -rn TODO scripts/",
-            f"cd {self.KHO} && rg -n TODO scripts/",
             f"cd {self.KHO} && git status --short",
             f"cd {self.KHO} && git diff --stat",
-            f"cd {self.KHO} && ls -la scripts",
             f"cd {self.KHO} && python -m unittest scripts.tests.test_router_v3",
             f"cd {self.KHO} && node --check scripts/control_center/web/app.js",
-            "cd /c/FanficWorkers/router-control-center && grep -rn x scripts/",
         ):
             with self.subTest(lenh=lenh):
                 self.assertEqual(_quyet(lenh), "allow", lenh)
+
+    def test_tim_doc_sau_mot_cd_bi_CHAN_chu_khong_hoi(self):
+        """Hình dạng gây ra sự cố 2026-09-11. `deny`, ở MỌI dạng viết."""
+        for lenh in (
+            f"cd {self.KHO} && grep -rn TODO scripts/",
+            f"cd {self.KHO} && rg -n TODO scripts/",
+            f"cd {self.KHO} && ls -la scripts",
+            f"cd {self.KHO} && cat README.md",
+            f"cd {self.KHO} && sed -n '1,40p' scripts/x.py",
+            f'cd {self.KHO} && find scripts -name "*.py"',
+            f"cd {self.KHO} ; grep -rn TODO scripts/",
+            "cd /c/FanficWorkers/router-control-center && grep -rn x scripts/",
+            # Chuỗi dài — dạng THẬT đã gây ra lời nhắc, không khớp glob nào.
+            f"cd {self.KHO} && python -m compileall -q scripts && echo OK "
+            f'&& grep -n "sym" a.py',
+        ):
+            with self.subTest(lenh=lenh):
+                self.assertEqual(_quyet(lenh), "deny", lenh)
+
+    def test_moi_lan_chan_deu_KEM_duong_di_thay_the(self):
+        """Một `deny` không có bước tiếp theo chỉ dời chỗ tắc nghẽn."""
+        for lenh in (f"cd {self.KHO} && grep -rn TODO scripts/",
+                     f"cd {self.KHO} && cat README.md",
+                     "python - <<'EOF'\nprint(1)\nEOF"):
+            with self.subTest(lenh=lenh):
+                ly = _hook_chan(lenh) or ""
+                self.assertIn("REMEDIATION:", ly, lenh)
+        ly = _hook_chan(f"cd {self.KHO} && grep -rn TODO scripts/") or ""
+        for ten in ("scripts/tim.py", "git grep", "Read/Grep/Glob"):
+            self.assertIn(ten, ly)
+
+    def test_ma_noi_tuyen_qua_heredoc_bi_CHAN(self):
+        """Cùng lớp với `python -c`, chỉ khác đường vào."""
+        for lenh in ("python - <<'EOF'\nprint(1)\nEOF",
+                     "python3 - <<EOF\nprint(1)\nEOF",
+                     "bash <<'EOF'\nls\nEOF",
+                     "echo 'print(1)' | python -"):
+            with self.subTest(lenh=lenh):
+                self.assertEqual(_quyet(lenh), "deny", lenh)
+
+    def test_KHONG_chan_oan_cong_cu_an_toan(self):
+        """Chống rỗng: bộ chặn mới không được chạm vào đường sạch."""
+        for lenh in ('python scripts/tim.py "TrangThai"',
+                     "python scripts/tim.py --doc scripts/x.py --tu 1 --den 60",
+                     'git grep -n "TrangThai" -- scripts/',
+                     'grep -rn "TrangThai" scripts/control_center/',
+                     "python -m unittest scripts.tests.test_router_v3",
+                     "python -m json.tool <<EOF\n{}\nEOF"):
+            with self.subTest(lenh=lenh):
+                self.assertNotEqual(_quyet(lenh), "deny", lenh)
 
     def test_dang_cd_KHONG_mo_duong_toi_bi_mat(self):
         """Phần không được phép mất: `deny` thắng luật `cd` ở trên."""

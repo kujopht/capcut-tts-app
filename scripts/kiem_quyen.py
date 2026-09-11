@@ -416,7 +416,17 @@ def hook_chan(g, lenh: str) -> Optional[str]:
 
     Một bản mô hình chia đoạn khác bản thật sẽ báo an toàn ở đúng chỗ hệ
     thống thật đang chặn (hoặc ngược lại), nên phép chia phải giống hệt.
+
+    TIER 1c ĐƯỢC GỌI RIÊNG, và đó không phải một ngoại lệ: `cwd_laundered_
+    read` xét QUAN HỆ GIỮA các đoạn (`cd` ở đoạn này, `grep` ở đoạn sau),
+    nên nó không nằm trong `evaluate()` — `main()` cũng gọi nó tách ra,
+    trước vòng lặp. Quên nó ở đây là tái tạo đúng lỗi mà docstring trên
+    cảnh báo, chỉ ở một tầng khác.
     """
+    if hasattr(g, "cwd_laundered_read"):
+        r = g.cwd_laundered_read(lenh)
+        if r:
+            return r
     for chunk in g.expand(lenh):
         for doan in g.SEGMENT_SPLIT.split(chunk):
             if not doan.strip():
@@ -718,7 +728,41 @@ MA_TRAN_AN_TOAN_NEN = (
     "ls scripts/control_center",
     'find scripts -name "*.py"',
     "cd C:/FanficWorkers/router-control-center && git status --porcelain",
-    'cd C:/FanficWorkers/router-control-center && grep -rn "x" scripts/',
+)
+
+#: CHẶN CÓ CHỦ ĐÍCH — hồ sơ PHẢI từ chối, và phải kèm đường đi thay thế.
+#:
+#: `cd <kho> && grep …` nằm ở đây từ 2026-09-11, và nó ĐÃ TỪNG nằm ở
+#: `MA_TRAN_AN_TOAN_NEN` ngay trên. Đổi chỗ là một đổi LẬP TRƯỜNG, không
+#: phải một sửa lỗi gõ:
+#:
+#:   trước: "an toàn, có thể bị hỏi — lớp nền lo"
+#:   nay  : "TỪ CHỐI NGAY, kèm câu chỉ đường"
+#:
+#: Vì sao đổi: lời văn không giữ nổi. `CLAUDE.md` đã dặn dùng `tim.py` từ
+#: 2026-09-10; `KHONG_SUA_DUOC` ngay dưới đã ghi rõ cơ chế (một `cd` làm
+#: đường dẫn không phân giải tĩnh được, nên Claude Code hạ xuống ASK). Vậy
+#: mà một phiên làm việc thật vẫn sinh ra đúng hình dạng đó nhiều lần trong
+#: một buổi, vì `cd <kho> &&` là một PHẢN XẠ chứ không phải một quyết định.
+#: Hậu quả là một lời nhắc giữa một lượt chạy lẽ ra không cần người.
+#:
+#: Một `ask` không dạy được gì: người dùng bấm Yes rồi agent gõ lại y hệt
+#: một phút sau. Một `deny` thì tới NGAY trong lượt đó, kèm dòng
+#: `REMEDIATION:` mà agent đọc và sửa được — đo thật trong chính phiên đó:
+#: lệnh `python -c` bị chặn đã khiến agent đổi cách làm ngay lần đầu.
+#:
+#: ĐÂY KHÔNG PHẢI SIẾT QUYỀN ĐỌC. Mọi phép đọc trên vẫn làm được: bằng
+#: `Read`/`Grep`/`Glob`, bằng `python scripts/tim.py`, bằng `git grep`, hoặc
+#: bằng chính lệnh đó với đường dẫn tường minh và KHÔNG có `cd`.
+MA_TRAN_CHAN_CO_CHU_DICH = (
+    ('cd C:/FanficWorkers/router-control-center && grep -rn "x" scripts/',
+     "tìm trong kho sau một `cd` — dùng tim.py / git grep / Grep"),
+    ("cd C:/FanficWorkers/router-control-center && cat README.md",
+     "đọc tệp sau một `cd` — dùng Read hoặc `tim.py --doc`"),
+    ("cd C:/FanficWorkers/router-control-center && sed -n '1,40p' a.py",
+     "đọc dải dòng sau một `cd` — dùng `tim.py --doc --tu --den`"),
+    ("python - <<'EOF'\nprint(1)\nEOF",
+     "mã nội tuyến qua heredoc — dùng Edit/Write, hoặc lưu script rồi chạy"),
 )
 
 #: KHÔNG SỬA ĐƯỢC BẰNG HỒ SƠ — và vì sao. Danh sách này là DỮ LIỆU, không
@@ -822,11 +866,12 @@ def ma_tran(*, gom_kho: bool):
     an = [(c, quyet_dinh(c, p)) for c in MA_TRAN_AN_TOAN]
     nen = [(c, quyet_dinh(c, p)) for c in MA_TRAN_AN_TOAN_NEN]
     ng = [(c, quyet_dinh(c, p)) for c in MA_TRAN_NGUY_HIEM]
-    return an, nen, ng
+    ch = [(c, quyet_dinh(c, p), vi) for c, vi in MA_TRAN_CHAN_CO_CHU_DICH]
+    return an, nen, ng, ch
 
 
 def _in_ma_tran(nhan: str, *, gom_kho: bool) -> int:
-    an, nen, ng = ma_tran(gom_kho=gom_kho)
+    an, nen, ng, ch = ma_tran(gom_kho=gom_kho)
     RA.write(f"\n===== {nhan} =====\n")
     xau = 0
     RA.write("-- AN TOÀN, ĐƯỢC BẢO ĐẢM (phải 'allow') --\n")
@@ -852,7 +897,16 @@ def _in_ma_tran(nhan: str, *, gom_kho: bool) -> int:
         ok = q == "deny"
         xau += 0 if ok else 1
         RA.write(f"  {'PASS' if ok else 'FAIL'}  {q:<6}  {c}\n")
-    tong = len(an) + len(nen) + len(ng)
+    # CHAN CO CHU DICH: an toan ve noi dung, nhung hinh dang sai. Tach khoi
+    # "NGUY HIEM" co chu dich — gop lai thi bao cao doc thanh "doc README.md
+    # la nguy hiem", va do la mot cau sai lam nguoi ta bo qua ca bang.
+    RA.write("-- CHẶN CÓ CHỦ ĐÍCH (phải 'deny' KÈM đường đi thay thế) --\n")
+    for c, q, vi in ch:
+        ok = q == "deny"
+        xau += 0 if ok else 1
+        RA.write(f"  {'PASS' if ok else 'FAIL'}  {q:<6}  {c.splitlines()[0][:64]}"
+                 f"\n           -> {vi}\n")
+    tong = len(an) + len(nen) + len(ng) + len(ch)
     RA.write(f"-- {tong - xau}/{tong} PASS\n")
     RA.write(f"-- {len(KHONG_SUA_DUOC)} lệnh KHÔNG sửa được bằng hồ sơ "
              f"(cơ chế của Claude Code, xem `KHONG_SUA_DUOC`)\n")

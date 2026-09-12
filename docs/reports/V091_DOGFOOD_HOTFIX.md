@@ -112,3 +112,28 @@ phỏng đoán.
 **Khoảng trống còn lại (khai báo, không giấu):** phần lịch sử Fanfic chỉ tồn
 tại trong hội thoại ChatGPT Project nằm ngoài tầm với của Router. Câu trả
 lời nào chạm vùng đó đều nói rõ là khoảng trống.
+
+---
+
+## Vấn đề ĐÃ BIẾT (không chặn phát hành v0.9.1)
+
+**Một cuộc đua ở tầng KHOÁ, phụ thuộc tải.** Trong một lần chạy hồi quy đầy
+đủ, `test_con_hong_khong_ro_khoa_va_anh_em_van_song_song` hỏng một lần: sau
+khi MỘT việc con của một lượt toả hỏng, một khoá `FILESYSTEM ... mode=read`
+còn sót lại thay vì được nhả.
+
+Bằng chứng hai chiều, ghi cả hai:
+
+* **hỏng**: 1 lần, trong hồi quy đầy đủ 2462 bài;
+* **không tái hiện**: 23/23 khi chạy riêng bộ đó, 3×4 khi lặp riêng lớp đó,
+  và **2462/2462 ở lần chạy đầy đủ THỨ HAI** (cùng số bài, cùng nhánh).
+
+Kết luận: cuộc đua có THẬT nhưng phụ thuộc tải, và nó nằm ở tầng khoá —
+không phải do các thay đổi của v0.9.1 (nhánh này đã xanh 2453 bài trước khi
+có ba bản sửa, và xanh 2462 sau). **Cố ý KHÔNG mở rộng phạm vi để sửa trong
+lần phát hành này.**
+
+Đáng biết trước khi chạy dogfood SONG SONG nặng: nếu thấy một khoá `read`
+mồ côi, `MoiGioiBaoTri.nha_khoa_mo_coi()` (v0.9.1) nhả được nó một cách an
+toàn — nó chỉ nhả khoá mà CHỦ đã kết thúc, và không bao giờ nhả khoá
+`PRODUCTION`.

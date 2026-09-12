@@ -931,9 +931,14 @@ def cau_trang_thai(so: SoThucThi, project_id: str) -> str:
     qua một agent thì Leader vừa tạo thêm một việc chỉ để biết trạng thái của
     chính mình — đúng thứ yêu cầu cấm.
     """
+    # Ô TRẠNG THÁI là chỗ đọc THƯỜNG XUYÊN nhất, nên nó lọc lần nghiệm thu
+    # ĐÃ KẾT THÚC: sau đợt v0.9, "gần nhất" toàn là `ex_…` của kịch bản test
+    # và việc THẬT bị đẩy khuất. Lịch sử KHÔNG mất — `danh_sach()` mặc định
+    # vẫn trả đủ, và `/lich_su` đọc được nguyên vẹn.
     ds = so.dang_chay(project_id)
     if not ds:
-        xong = so.danh_sach(project_id, dang_song=False, limit=3)
+        xong = so.danh_sach(project_id, dang_song=False, limit=3,
+                            gom_nghiem_thu=False)
         if not xong:
             return "Hiện không có lần thực thi nào đang chạy."
         d = ["Không có lần thực thi nào đang chạy. Gần nhất:"]

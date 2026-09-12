@@ -1403,6 +1403,92 @@ class ControlCenter:
             self._probe_cache[project_id] = (van, now)
         return van
 
+    def _khoi_thanh_phan(self, text: str, project_id: str = "") -> str:
+        """Khối TRA CỨU THÀNH PHẦN cho câu hỏi gọi tên dân dã.
+
+        Cùng khuôn `nguon_git`/`web_reader`/`probe_van_hanh`: Router làm phép
+        đọc an toàn rồi đính BẰNG CHỨNG; quyền của agent KHÔNG đổi, và câu
+        hỏi này KHÔNG được biến thành một việc worker.
+        """
+        from scripts.control_center import leader as _ld
+        la_tp, _dh = _ld.la_cau_hoi_thanh_phan(text or "")
+        if not la_tp or not project_id:
+            return ""
+        try:
+            from scripts.control_center import tim_thanh_phan as TTP
+            p = self.store.project(project_id)
+            if p is None:
+                return ""
+            bt = TTP.BoTimThanhPhan(
+                project_id, Path(p.repo_path), store=self.store,
+                ky_uc=self._ky_uc, so_thuc_thi=self.so_thuc_thi,
+                vien_nang=self._vien_nang_muc(project_id))
+            kq = bt.tim(text)
+        except Exception as exc:                              # noqa: BLE001
+            self.store.ghi_su_kien(
+                "RECALL_ERROR", project_id=project_id, level="WARNING",
+                detail=f"tra cứu thành phần: {type(exc).__name__}: {exc}"[:200])
+            return ""
+        self.store.ghi_su_kien(
+            "RECALL_AUDIT", project_id=project_id, level="INFO",
+            detail=(f"tra cứu {text[:60]!r} -> "
+                    f"{len(kq.ung_vien)} ứng viên, chắc={kq.chac}")[:300],
+            meta=kq.to_dict())
+        self._va_ky_uc_thanh_phan(project_id, text, kq)
+        return TTP.goi_tra_loi(kq)
+
+    def _va_ky_uc_thanh_phan(self, project_id: str, text: str, kq) -> None:
+        """VÁ KÝ ỨC: thứ vừa tra ra từ kho phải được NHỚ, khỏi tra lại.
+
+        Hai rào, và cả hai đều quan trọng:
+
+        * **Chỉ ghi khi CHẮC.** Còn mơ hồ mà đã đóng đinh một bí danh thì
+          lần sau ta trả lời sai một cách tự tin — tệ hơn là không biết.
+        * **Ghi BẰNG CHỨNG, không ghi suy luận.** Bản ghi là "bí danh X trỏ
+          tới thành phần Y, thấy ở những đường dẫn này" — một sự thật tra lại
+          được, không phải dòng suy nghĩ của model.
+        """
+        if self._ky_uc is None or not getattr(kq, "chac", False):
+            return
+        if not kq.ung_vien:
+            return
+        u = kq.ung_vien[0]
+        bi_danh = (text or "").strip()[:80]
+        thanh_phan = str(u.get("ten") or "")
+        if not thanh_phan:
+            return
+        try:
+            pv = self._ky_uc.provider(project_id)
+            if pv is not None:
+                # Idempotent: đã có bản ghi cho đúng thành phần này thì thôi.
+                for m in (pv.tim(thanh_phan, limit=5) or ()):
+                    if "bí danh" in str(getattr(m, "tieu_de", "")).lower():
+                        return
+            bc = "; ".join(str(v)[:120] for v in (u.get("vi_sao") or [])[:3])
+            self._ky_uc.ghi_ky_uc(
+                project_id, "semantic",
+                (f"Bí danh dự án: người dùng gọi «{bi_danh}» — đó là thành "
+                 f"phần `{thanh_phan}`. Bằng chứng: {bc}"),
+                tieu_de=f"bí danh → {thanh_phan}",
+                the=("bi_danh", "thanh_phan"), tin_cay="do_duoc",
+                ai="router:tra_cuu_thanh_phan", nguon_loai="recall")
+            self.store.ghi_su_kien(
+                "RECALL_MEMORY_REPAIR", project_id=project_id, level="INFO",
+                detail=f"ghi bí danh «{bi_danh}» -> {thanh_phan}"[:300],
+                meta={"bi_danh": bi_danh, "thanh_phan": thanh_phan})
+        except Exception as exc:                              # noqa: BLE001
+            self.store.ghi_su_kien(
+                "RECALL_ERROR", project_id=project_id, level="WARNING",
+                detail=f"vá ký ức bí danh: {type(exc).__name__}: {exc}"[:200])
+
+    def _vien_nang_muc(self, project_id: str) -> Dict:
+        """Mục viên nang dạng thô cho bộ tra cứu. Rỗng nếu dựng không được."""
+        try:
+            from scripts.control_center import vien_nang_du_an as VN
+            return VN.dung_muc(self, project_id)
+        except Exception:                                     # noqa: BLE001
+            return {}
+
     def _kem_probe_vao_hd(self, khoi: str, hd: Dict) -> bool:
         """Đính khối bằng chứng vận hành vào mục tiêu của một việc.
 
@@ -1638,6 +1724,12 @@ class ControlCenter:
             # V0.7 — BANG CHUNG VAN HANH: cau hoi chan doan production duoc
             # DO TRUOC, thay vi bien thanh mot viec doi quyen `command`.
             khoi_probe = self._khoi_probe(text, pid)
+            # V0.9.1 — TRA CỨU THÀNH PHẦN. Người dùng gọi thành phần bằng tên
+            # dân dã ("tool cạo audio"); Router leo thang tra cứu HỘ (ký ức →
+            # viên nang → kho → git → tài liệu → lịch sử Router) rồi đính ứng
+            # viên CÓ BẰNG CHỨNG. Thiếu khối này, Leader trượt Ký ức rồi hỏi
+            # ngược người dùng tên script — đo được ở dogfood thật.
+            khoi_tp = self._khoi_thanh_phan(text, pid)
             # V0.7 — VIEN NANG: mo hinh du an GON, nap MOI luot (co cache TTL).
             khoi_nang = self._khoi_vien_nang(pid, text)
             # V0.8 — HOI DONG SUY LUAN. Chay TRUOC luot Leader, vi ket qua cua
@@ -1664,6 +1756,10 @@ class ControlCenter:
                                       la_lich_su=la_lich_su, khoi_web=khoi_web,
                                       khoi_nang=khoi_nang, khoi_probe=khoi_probe,
                                       khoi_hoi_dong=khoi_hd)
+            if khoi_tp:
+                # Đặt LUẬT ngay trước khối, cùng khuôn `LUAT_LICH_SU`: luật
+                # phải đứng cạnh dữ liệu nó nói về, không trôi lên đầu.
+                nn = nn + "\n\n" + leader.LUAT_THANH_PHAN + "\n" + khoi_tp
             # Hai buoc RIENG vi chung lech nhau mot bac do lon: mo phien
             # lanh do duoc 67.87s, con mot luot hoi khi da am la 2.40s.
             # Gop chung lai thi thanh tien do noi doi o lan dau tien.

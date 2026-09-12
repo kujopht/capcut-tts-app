@@ -160,12 +160,35 @@ test("giao dien noi RO treo KHONG xoa gi", () => {
 });
 
 test("KHONG co nut xoa truyen o khu quan tri", () => {
-  // Backend chua co luong takedown an toan; mot cai nut o day se di truoc thiet ke.
-  const src = codeOnly(read("../src/app/admin/stories/page.tsx"));
-  assert.ok(!/xo[áa]|delete|remove|takedown/i.test(src),
-    "khu duyệt truyện có thao tác phá huỷ");
-  assert.ok(!api().includes("/api/admin/novels/"),
-    "API quản trị có đường ghi lên truyện");
+  /*
+    Rang buoc THAT SU la "khong PHA HUY", khong phai "khong ghi gi".
+
+    Ban dau bai nay cam MOI duong ghi (`!api().includes("/api/admin/novels/")`).
+    Do la mot cach viet tat dung o thoi diem chua co thao tac quan tri nao —
+    nhung no cam ca nhung thao tac DAO NGUOC DUOC, va vi the no chan chinh cai
+    lam dut luong SCRAPED -> DUYET -> XUAT BAN: ban nhap cua may gat thuoc
+    `svc_harvester`, nen khong con nguoi nao xuat ban duoc chung.
+
+    Nay: XOA van bi cam tuyet doi. Xuat ban / go xuong thi duoc, vi chung dao
+    nguoc duoc va deu di qua mot hop thoai xac nhan.
+  */
+  for (const p of ["../src/app/admin/stories/page.tsx",
+                   "../src/app/admin/stories/[id]/page.tsx"]) {
+    const src = codeOnly(read(p));
+    assert.ok(!/delete|takedown|xo[áa] truy[eệ]n/i.test(src),
+      `${p} có thao tác phá huỷ`);
+  }
+
+  // Va client quan tri KHONG duoc co mot ham xoa truyen nao.
+  const src = api();
+  assert.ok(!/deleteNovel\s*:/.test(src.slice(src.indexOf("adminApi"))),
+    "adminApi có đường xoá truyện");
+
+  // Ba duong ghi duoc phep — danh sach DONG.
+  for (const duong of ["/publish", "/unpublish"]) {
+    assert.ok(src.includes(`/api/admin/novels/\${novelId}${duong}`),
+      `adminApi thiếu đường ${duong}`);
+  }
 });
 
 /* ==================================================== rieng tu */

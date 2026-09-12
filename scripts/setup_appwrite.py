@@ -181,6 +181,11 @@ SCHEMA: Dict[str, Dict[str, Any]] = {
               "user_role_change", "user_delete",
               # Kiem duyet noi dung ngoai pham vi bai dang/binh luan (A4).
               "content_unpublish", "content_restore",
+              # Kiem duyet TRUYEN: nguoi quan tri xuat ban mot ban nhap sau
+              # khi da doc no. `content_unpublish` o tren la nua con lai —
+              # khong them mot ten rieng cho no de nhat ky khong co hai chuoi
+              # cho cung mot hanh dong.
+              "content_publish",
               # Nguon tin cay YouTube va anh xa series (Phan B).
               "trusted_source_add", "trusted_source_disable",
               "trusted_source_enable", "youtube_mapping_create",

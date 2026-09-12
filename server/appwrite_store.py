@@ -643,7 +643,7 @@ class AppwriteMetadataStore(AppwriteSocialStore):
     def find_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False, query: str = "",
                     tag: str = "", limit: Optional[int] = None,
-                    offset: int = 0) -> Tuple[List[Novel], int]:
+                    offset: int = 0, state: str = "") -> Tuple[List[Novel], int]:
         """
         Loc va phan trang HOAN TOAN o phia Appwrite.
 
@@ -655,7 +655,16 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         queries: List[str] = [q_order_desc("created_at")]
         if owner_id:
             queries.append(q_equal("owner_id", owner_id))
-        if published_only:
+        # `state` LOC O KHO, khong loc sau khi da phan trang.
+        #
+        # Truoc day chi co `published_only`, nen `state="draft"` phai loc o
+        # Python SAU `find_novels` — tuc la loc mot TRANG da cat san. Hau qua
+        # do duoc: trang tra ve ngan hon `limit` (ban nhap bi lan trong trang),
+        # va `total` la tong CHUA loc, nen bang quan tri hien mot con so khong
+        # khop voi so dong no ve. Dua dieu kien xuong day thi ca hai dung.
+        if state:
+            queries.append(q_equal("state", state))
+        elif published_only:
             queries.append(q_equal("state", "published"))
         if tag:
             # `tags` la mang -> phai `contains`, `equal` bi Appwrite tu choi
@@ -710,8 +719,30 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         do. PATCH khong tao ban ghi trung, va viec ap lai quyen giup TU CHUA
         neu quyen bi lech vi mot lan sua tay tren console Appwrite.
         """
-        current = self.owned_novel(novel_id, owner_id)    # 404 / 403 o day
+        return self._dat_xuat_ban(self.owned_novel(novel_id, owner_id))
 
+    def admin_publish_novel(self, novel_id: str) -> Novel:
+        """Xuat ban KHONG qua cong so huu — chi cho duong QUAN TRI.
+
+        Ton tai vi ban nhap do may gat tao ra thuoc `svc_harvester`, mot danh
+        tinh DICH VU khong ai dang nhap duoc. `publish_novel` doi dung chu so
+        huu, nen khong mot con nguoi nao xuat ban duoc chung — day chinh la
+        cho lam dut luong SCRAPED -> DUYET -> XUAT BAN.
+
+        PHAN QUYEN KHONG NAM O DAY. Kho khong biet vai tro; route goi toi day
+        (`server/main.py`) phai di qua `admin_or_owner_profile` truoc. Tach
+        thanh mot phuong thuc RIENG thay vi them co `bo_qua_chu_so_huu=True`
+        vao `publish_novel` la co y: mot tham so nhu vay se song ngay canh
+        duong cua nguoi dung thuong, va chi can mot lan truyen nham la cong
+        so huu bien mat ma khong ai thay.
+
+        Than ham dung CHUNG voi `publish_novel` — khac nhau DUNG mot dieu:
+        cach tim ra novel. Nho vay quyen Appwrite, tinh nguyen tu va tinh
+        idempotent khong the lech nhau giua hai duong.
+        """
+        return self._dat_xuat_ban(self.get_novel(novel_id))
+
+    def _dat_xuat_ban(self, current: Novel) -> Novel:
         # Dung `replace()` thay vi doi tai cho: chi cong bo ban `published`
         # SAU KHI PATCH thanh cong. Neu `_update` nem loi thi khong co object
         # nao mang trang thai `published` duoc tra ve.
@@ -796,10 +827,21 @@ class AppwriteMetadataStore(AppwriteSocialStore):
         Nguyen tu nhu publish: hoac ca trang thai lan quyen cung doi, hoac
         khong gi doi ca. Idempotent.
         """
-        current = self.owned_novel(novel_id, owner_id)
+        return self._go_xuat_ban(self.owned_novel(novel_id, owner_id))
+
+    def admin_unpublish_novel(self, novel_id: str) -> Novel:
+        """Go xuong KHONG qua cong so huu — chi cho duong QUAN TRI.
+
+        Doi xung voi `admin_publish_novel`, va la nua thu hai BAT BUOC phai
+        co: mot nguoi quan tri xuat ban duoc ma khong go xuong duoc thi lan
+        bam dau tien la mot canh cua mot chieu.
+        """
+        return self._go_xuat_ban(self.get_novel(novel_id))
+
+    def _go_xuat_ban(self, current: Novel) -> Novel:
         reverted = replace(current, state=PublishState.DRAFT, updated_at=now_iso())
         self._update(
-            COL_NOVELS, novel_id,
+            COL_NOVELS, current.novel_id,
             {"state": reverted.state.value, "updated_at": reverted.updated_at},
             permissions=self._owner_permissions(current.owner_id, public_read=False),
         )

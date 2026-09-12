@@ -54,6 +54,7 @@ from server.config import get_settings
 from server.r2_adapter import R2StorageAdapter
 from server.creator import (
     AuthorStateError,
+    NovelKhongTheXuatBan,
     RANK_TIERS,
     UsernameError,
     UsernameTaken,
@@ -5497,18 +5498,111 @@ def admin_user_terminate_all_sessions(
 
 
 @app.get("/api/admin/novels")
-def admin_novels(q: str = "", state: str = "", limit: int = 25, offset: int = 0,
+def admin_novels(q: str = "", state: str = "", kind: str = "", limit: int = 25,
+                 offset: int = 0,
                  admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
     """
     Duyet truyen — CHI DOC.
 
-    Khong co route go xuong hay xoa: backend chua co luong takedown nao an toan,
-    va dat mot nut xoa len mot luong chua thiet ke la cach nhanh nhat de mat noi
-    dung cua nguoi khac. Xem `docs/ADMIN.md` muc "Viec con lai".
+    `kind="story"` bo HA TANG (kho chua Audio Studio, ban ghi kiem thu) ra
+    khoi danh sach — xem `server/novel_kind.py`. Mac dinh giu nguyen hanh vi
+    cu cho moi cho dang goi.
+
+    XOA van KHONG co: backend chua co luong takedown nao an toan, va dat mot
+    nut xoa len mot luong chua thiet ke la cach nhanh nhat de mat noi dung cua
+    nguoi khac. Xem `docs/ADMIN.md` muc "Viec con lai". Xuat ban / go xuong
+    thi CO — hai route ben duoi — vi chung dao nguoc duoc.
     """
-    return creators.admin_novels(query=q, state=state,
+    return creators.admin_novels(query=q, state=state, kind=kind,
                                  limit=max(1, min(100, limit)),
                                  offset=max(0, offset))
+
+
+# --------------------------------------------------------------------------
+# KIEM DUYET TRUYEN (SCRAPED -> DUYET -> XUAT BAN).
+#
+# Bon route duoi day la duong DUY NHAT mot con nguoi xuat ban duoc mot ban
+# nhap khong thuoc ve minh. Chung ton tai vi may gat tao ban nhap duoi danh
+# tinh DICH VU `svc_harvester`, va `POST /api/novels/{id}/publish` doi dung
+# chu so huu — nen truoc ban nay khong ai xuat ban duoc chung.
+#
+# BA DIEU KHONG DUOC PHA:
+#
+#   1. Duong CONG KHAI khong doi. `_may_read` van chi mo cho truyen da xuat
+#      ban hoac cho chinh chu so huu. Khong co nhanh "neu la admin" nao duoc
+#      them vao do — neu co, moi route doc cong khai lap tuc thua ke no.
+#      Quan tri doc ban nhap qua `/api/admin/novels/{id}` o duoi, mot be mat
+#      RIENG, da khoa bang `Depends`.
+#
+#   2. Doc va GHI khong cung mot bac quyen. Xem `admin_profile` cho doc va
+#      `admin_or_owner_profile` cho ghi ben duoi.
+#
+#   3. Khong xuat ban mot trang trong. Cong o `creators.admin_publish_novel`.
+# --------------------------------------------------------------------------
+
+@app.get("/api/admin/novels/{novel_id}")
+def admin_novel_detail(novel_id: str,
+                       admin: Profile = Depends(admin_profile)) -> Dict[str, Any]:
+    """Toan bo tac pham, KEM noi dung chuong, de nguoi kiem duyet DOC.
+
+    `admin_profile` (gom ca MODERATOR): xem la viec cua kiem duyet vien. Bam
+    thi khong — xem hai route ghi ben duoi.
+    """
+    try:
+        return creators.admin_novel_detail(novel_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+@app.patch("/api/admin/novels/{novel_id}")
+def admin_update_novel(novel_id: str, payload: NovelPatch,
+                       admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """Sua sieu du lieu an toan. Dung DUNG danh sach truong cua chu so huu."""
+    fields = payload.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Không có trường nào để sửa.")
+    try:
+        return {"novel": creators.admin_update_novel(
+            novel_id, fields, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value)}
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+
+@app.post("/api/admin/novels/{novel_id}/publish")
+def admin_publish_novel(novel_id: str, payload: NoteIn | None = None,
+                        admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """Xuat ban sau khi NGUOI da xem. Idempotent.
+
+    `admin_or_owner_profile` (ADMIN tro len), KHONG phai `admin_profile`:
+    xuat ban la dua noi dung ra truoc cong chung, va bac quyen cua no phai
+    bang bac quan ly noi dung/nguoi dung — MODERATOR xem duoc, khong bam duoc.
+    """
+    try:
+        return {"novel": creators.admin_publish_novel(
+            novel_id, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value,
+            note=(payload.note if payload else ""))}
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except NovelKhongTheXuatBan as exc:
+        # 409, khong phai 400: yeu cau hop le, TRANG THAI cua tac pham moi la
+        # thu chua cho phep. Giao dien doc duoc thong diep nay.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+
+@app.post("/api/admin/novels/{novel_id}/unpublish")
+def admin_unpublish_novel(novel_id: str, payload: NoteIn | None = None,
+                          admin: Profile = Depends(admin_or_owner_profile)) -> Dict[str, Any]:
+    """Go xuong. Idempotent — goi lai tren ban nhap khong loi."""
+    try:
+        return {"novel": creators.admin_unpublish_novel(
+            novel_id, actor_id=admin.user_id,
+            actor_role=settings.admin_role_of(admin.user_id).value,
+            note=(payload.note if payload else ""))}
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
 
 # --------------------------------------------------------------------------

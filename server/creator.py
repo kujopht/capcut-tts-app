@@ -171,6 +171,15 @@ class AuthorStateError(ValueError):
     """Buoc chuyen trang thai khong hop le. Thong bao doc duoc cho nguoi dung."""
 
 
+class NovelKhongTheXuatBan(ValueError):
+    """Truyen chua du dieu kien de len song. Thong bao doc duoc cho nguoi dung.
+
+    Hien chi mot dieu kien: phai co it nhat MOT chuong co van ban. Mot truyen
+    khong co gi doc duoc ma dat trang thai `published` la mot trang trong tren
+    duong phuc vu — dung hinh dang loi da an bon tac pham cua may gat.
+    """
+
+
 def can_transition(cu: AuthorStatus, moi: AuthorStatus) -> bool:
     return moi in TRANSITIONS.get(cu, frozenset())
 

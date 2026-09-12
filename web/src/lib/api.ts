@@ -1795,8 +1795,17 @@ export interface ModerationEvent {
   created_at: string;
 }
 
+/**
+ * Loại bản ghi — backend phân loại, giao diện KHÔNG tự đoán lại từ `tags`.
+ * Ba nguồn phân loại song song chắc chắn sẽ lệch nhau; xem
+ * `server/novel_kind.py`.
+ */
+export type AdminNovelKind =
+  | "workspace" | "test" | "farmer" | "media" | "story";
+
 export interface AdminNovel extends Novel {
   chapters: number;
+  kind?: AdminNovelKind;
   /**
    * So chuong DA co audio. Quan tri can con so nay de quyet dinh xuat ban:
    * 0/15 va 15/15 la hai tinh huong rat khac nhau, va truoc day bang quan tri
@@ -2373,11 +2382,48 @@ export const adminApi = {
       { method: "POST", body: JSON.stringify({ note }) },
     ),
 
-  novels: (q = "", state = "", limit = 25, offset = 0) =>
+  /**
+   * `kind="story"` bỏ HẠ TẦNG (kho chứa Audio Studio, bản ghi kiểm thử) ra
+   * khỏi danh sách. Đo trên kho sản xuất: 43 "bản nháp" thực ra là 11 tác
+   * phẩm cộng 32 bản ghi hạ tầng — xem `server/novel_kind.py`.
+   */
+  novels: (q = "", state = "", limit = 25, offset = 0, kind = "") =>
     request<{ novels: AdminNovel[]; total: number }>(
       `/api/admin/novels?q=${encodeURIComponent(q)}&state=${state}` +
-        `&limit=${limit}&offset=${offset}`,
+        `&kind=${kind}&limit=${limit}&offset=${offset}`,
     ),
+
+  /** Tác phẩm ĐẦY ĐỦ kèm nội dung chương — để người kiểm duyệt ĐỌC. */
+  novel: (novelId: string) =>
+    request<{
+      novel: AdminNovel;
+      chapters: {
+        chapter_id: string;
+        title: string;
+        order_index: number;
+        char_count: number;
+        content: string;
+      }[];
+      total_chars: number;
+    }>(`/api/admin/novels/${novelId}`),
+
+  publishNovel: (novelId: string, note = "") =>
+    request<{ novel: AdminNovel }>(`/api/admin/novels/${novelId}/publish`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
+  unpublishNovel: (novelId: string, note = "") =>
+    request<{ novel: AdminNovel }>(`/api/admin/novels/${novelId}/unpublish`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
+  updateNovelMeta: (novelId: string, fields: Record<string, unknown>) =>
+    request<{ novel: AdminNovel }>(`/api/admin/novels/${novelId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    }),
 
   events: (
     limit = 50,
@@ -2739,6 +2785,32 @@ export const adminApi = {
     request<{ run: ScrapeRun; progress: ScrapeRunProgress }>(
       `/api/admin/scraper/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(itemId)}/skip`,
       { method: "POST", body: JSON.stringify({ reason }) },
+    ),
+
+  /**
+   * Biến mục `REVIEW_READY` thành Novel/Chapter THẬT — ở trạng thái `draft`.
+   *
+   * TÊN CỦA ENDPOINT GÂY HIỂU NHẦM. Nó **không** đưa gì ra công khai: mọi
+   * Novel/Chapter tạo ra đều là bản nháp, và bước công khai là một hành động
+   * RIÊNG của con người ở `/admin/stories/{id}`. Xem docstring của
+   * `ScraperOpsService.publish_reviewed_items` — nó tải lại nội dung từ nguồn
+   * và so `content_hash` với lúc duyệt, từ chối mục nào đã đổi.
+   *
+   * Idempotent ở cả hai cấp (đợt và từng mục).
+   */
+  publishScrapeRun: (
+    runId: string,
+    opts: { itemIds?: string[]; maxItems?: number } = {},
+  ) =>
+    request<{ run: ScrapeRun; progress: ScrapeRunProgress }>(
+      `/api/admin/scraper/runs/${encodeURIComponent(runId)}/publish`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          item_ids: opts.itemIds ?? null,
+          max_items: opts.maxItems ?? null,
+        }),
+      },
     ),
 };
 

@@ -382,9 +382,14 @@ class MetadataStore(Protocol):
     def find_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False, query: str = "",
                     tag: str = "", limit: Optional[int] = None,
-                    offset: int = 0) -> Tuple[List[Novel], int]:
+                    offset: int = 0, state: str = "") -> Tuple[List[Novel], int]:
         """
         Tim truyen co LOC va PHAN TRANG, tra ve `(trang_hien_tai, tong_so)`.
+
+        `state`: loc theo trang thai xuat ban ("draft"/"published") NGAY O KHO,
+        truoc khi cat trang. Dat `state` thi `published_only` bi bo qua. Loc
+        sau khi da phan trang lam trang ngan di va lam `total` sai — xem ghi
+        chu o `AppwriteMetadataStore.find_novels`.
 
         `tong_so` la so ban ghi KHOP DIEU KIEN, khong phai so ban ghi tra ve —
         giao dien can no de biet con trang sau hay khong.
@@ -444,6 +449,33 @@ class MetadataStore(Protocol):
 
     def unpublish_novel(self, novel_id: str, owner_id: str) -> Novel:
         """Dua truyen ve ban nhap VA thu hoi quyen doc cong khai. Idempotent."""
+        ...
+
+    def admin_publish_novel(self, novel_id: str) -> Novel:
+        """Xuat ban KHONG qua cong so huu — CHI cho duong quan tri.
+
+        Ton tai vi ban nhap do may gat tao ra thuoc `svc_harvester`, mot danh
+        tinh DICH VU khong ai dang nhap duoc; `publish_novel` doi dung chu so
+        huu nen khong con nguoi nao xuat ban duoc chung.
+
+        KHO KHONG KIEM VAI TRO. Phan quyen thuoc ve route
+        (`admin_or_owner_profile`). Mot phuong thuc RIENG thay vi mot co
+        `bo_qua_chu_so_huu=` tren `publish_novel` la co y: mot tham so nhu
+        vay song ngay canh duong cua nguoi dung thuong, va chi mot lan truyen
+        nham la cong so huu bien mat ma khong ai thay.
+
+        Moi tinh chat khac giu nguyen `publish_novel`: nguyen tu, idempotent,
+        va (ban Appwrite) mo `read("any")` con update/delete van thuoc chu so
+        huu.
+        """
+        ...
+
+    def admin_unpublish_novel(self, novel_id: str) -> Novel:
+        """Go xuong KHONG qua cong so huu — CHI cho duong quan tri.
+
+        Nua thu hai bat buoc cua `admin_publish_novel`: xuat ban duoc ma
+        khong go xuong duoc thi lan bam dau tien la mot canh cua mot chieu.
+        """
         ...
 
     def delete_novel(self, novel_id: str, owner_id: str) -> None: ...
@@ -1331,13 +1363,16 @@ class MockMetadataStore(MockSocialStore):
     def find_novels(self, owner_id: Optional[str] = None,
                     published_only: bool = False, query: str = "",
                     tag: str = "", limit: Optional[int] = None,
-                    offset: int = 0) -> Tuple[List[Novel], int]:
+                    offset: int = 0, state: str = "") -> Tuple[List[Novel], int]:
         """Xem contract o `MetadataStore.find_novels`."""
         with self._lock:
             items = list(self.novels.values())
         if owner_id:
             items = [n for n in items if n.owner_id == owner_id]
-        if published_only:
+        # `state` TRUOC khi cat trang — xem ghi chu o ban Appwrite.
+        if state:
+            items = [n for n in items if n.state.value == state]
+        elif published_only:
             items = [n for n in items if n.state.value == "published"]
         if tag:
             items = [n for n in items if tag in n.tags]
@@ -1371,15 +1406,23 @@ class MockMetadataStore(MockSocialStore):
         (PATCH thanh cong hoac khong doi gi ca).
         """
         with self._lock:
-            current = self.owned_novel(novel_id, owner_id)
-            # Idempotent: da `published` thi khong co gi de doi
-            if current.state == PublishState.PUBLISHED:
-                return current
-            published = replace(
-                current, state=PublishState.PUBLISHED, updated_at=now_iso()
-            )
-            self.novels[published.novel_id] = published
-            return published
+            return self._dat_xuat_ban(self.owned_novel(novel_id, owner_id))
+
+    def admin_publish_novel(self, novel_id: str) -> Novel:
+        """Xem hop dong o `MetadataStore.admin_publish_novel`."""
+        with self._lock:
+            return self._dat_xuat_ban(self.get_novel(novel_id))
+
+    def _dat_xuat_ban(self, current: Novel) -> Novel:
+        # Goi trong `self._lock`.
+        # Idempotent: da `published` thi khong co gi de doi
+        if current.state == PublishState.PUBLISHED:
+            return current
+        published = replace(
+            current, state=PublishState.PUBLISHED, updated_at=now_iso()
+        )
+        self.novels[published.novel_id] = published
+        return published
 
     #: Chi nhung truong nay moi cho nguoi dung sua. `state`, `owner_id`,
     #: `novel_id` deu do SERVER quyet dinh.
@@ -1429,14 +1472,22 @@ class MockMetadataStore(MockSocialStore):
 
     def unpublish_novel(self, novel_id: str, owner_id: str) -> Novel:
         with self._lock:
-            current = self.owned_novel(novel_id, owner_id)
-            if current.state != PublishState.PUBLISHED:
-                return current
-            reverted = replace(
-                current, state=PublishState.DRAFT, updated_at=now_iso()
-            )
-            self.novels[novel_id] = reverted
-            return reverted
+            return self._go_xuat_ban(self.owned_novel(novel_id, owner_id))
+
+    def admin_unpublish_novel(self, novel_id: str) -> Novel:
+        """Xem hop dong o `MetadataStore.admin_unpublish_novel`."""
+        with self._lock:
+            return self._go_xuat_ban(self.get_novel(novel_id))
+
+    def _go_xuat_ban(self, current: Novel) -> Novel:
+        # Goi trong `self._lock`.
+        if current.state != PublishState.PUBLISHED:
+            return current
+        reverted = replace(
+            current, state=PublishState.DRAFT, updated_at=now_iso()
+        )
+        self.novels[current.novel_id] = reverted
+        return reverted
 
     def delete_novel(self, novel_id: str, owner_id: str) -> None:
         with self._lock:

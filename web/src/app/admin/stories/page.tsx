@@ -27,6 +27,15 @@ const TRANG_THAI = [
   { khoa: "draft", nhan: "Bản nháp" },
 ];
 
+/** Nhãn cho loại bản ghi KHÔNG phải truyện thường — xem `novel_kind.py`. */
+const NHAN_LOAI: Record<string, string> = {
+  workspace: "kho chứa Audio Studio",
+  test: "bản ghi kiểm thử",
+  farmer: "máy gặt",
+  media: "lằn media",
+  story: "",
+};
+
 /**
  * Ten mien cua nguon, de o "Nguồn" doc duoc trong mot bang.
  *
@@ -49,13 +58,25 @@ export default function AdminStories() {
   const [go, setGo] = useState("");
   const [tu, setTu] = useState("");
   const [tt, setTt] = useState("");
+  /*
+    Mặc định CHỈ tác phẩm. Đo trên kho sản xuất: 56 bản ghi trong `novels`,
+    trong đó 10 là kho chứa Audio Studio (mỗi người dùng một cái, không bao
+    giờ được xuất bản) và 1 là bản ghi QA. Hiện chúng lẫn vào hàng đợi kiểm
+    duyệt làm con số "43 bản nháp chờ duyệt" vô nghĩa.
+
+    Vẫn xem được hạ tầng khi cần — nút "Tất cả bản ghi" ở dưới.
+  */
+  const [chiTacPham, setChiTacPham] = useState(true);
 
   useEffect(() => {
     const hen = window.setTimeout(() => setTu(go.trim()), 250);
     return () => window.clearTimeout(hen);
   }, [go]);
 
-  const nap = useCallback(() => adminApi.novels(tu, tt, 50), [tu, tt]);
+  const nap = useCallback(
+    () => adminApi.novels(tu, tt, 50, 0, chiTacPham ? "story" : ""),
+    [tu, tt, chiTacPham],
+  );
   const { data, loading, error, reload } = useAsyncData(nap);
   const ds = data?.novels ?? [];
 
@@ -91,6 +112,21 @@ export default function AdminStories() {
         ))}
       </div>
 
+      <div className="seg admin-loc" role="group" aria-label="Lọc theo loại bản ghi">
+        <button
+          type="button" className="seg-item" aria-pressed={chiTacPham}
+          onClick={() => setChiTacPham(true)}
+        >
+          Chỉ tác phẩm
+        </button>
+        <button
+          type="button" className="seg-item" aria-pressed={!chiTacPham}
+          onClick={() => setChiTacPham(false)}
+        >
+          Tất cả bản ghi
+        </button>
+      </div>
+
       <DanhSachTrangThai
         dangTai={loading}
         loi={error}
@@ -114,8 +150,19 @@ export default function AdminStories() {
             <tbody>
               {ds.map((n) => (
                 <tr key={n.novel_id}>
+                  {/*
+                    Trỏ tới trang KIỂM DUYỆT, không tới `/novels/{id}`.
+
+                    Đường công khai trả 404 cho mọi bản nháp — tức là cho
+                    đúng những dòng người quản trị cần mở nhất. Bảng này từng
+                    liên kết tới đó, nên mỗi lần bấm vào một bản nháp là một
+                    trang "không tìm thấy".
+                  */}
                   <td>
-                    <Link href={`/novels/${n.novel_id}`}>{n.title}</Link>
+                    <Link href={`/admin/stories/${n.novel_id}`}>{n.title}</Link>
+                    {n.kind && n.kind !== "story" ? (
+                      <span className="hint admin-loai"> · {NHAN_LOAI[n.kind]}</span>
+                    ) : null}
                   </td>
                   <td>
                     {n.owner ? (
@@ -190,7 +237,8 @@ export default function AdminStories() {
         </div>
 
         <p className="hint">
-          Khu này <strong>chỉ để xem</strong>. Chưa có thao tác gỡ xuống — cần
+          Bấm vào tên truyện để <strong>đọc và duyệt</strong>. Xuất bản và gỡ
+          xuống đều đảo ngược được. <strong>Xoá</strong> thì vẫn chưa có — cần
           một trạng thái “bị gỡ” tách khỏi “bản nháp”, một bản ghi lý do, một
           đường khiếu nại và một cách hoàn tác trước khi thêm cái nút đó.
         </p>

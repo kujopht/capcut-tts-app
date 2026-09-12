@@ -737,6 +737,25 @@ class NovelBrowserTest(Base):
         Backend chua co luong takedown nao an toan. Dat mot nut xoa len mot luong
         chua thiet ke la cach nhanh nhat de mat noi dung cua nguoi khac.
 
+        RANG BUOC THAT SU LA "KHONG PHA HUY", khong phai "chi GET".
+
+        Ban dau bai nay khang dinh `methods == {"GET"}`. Do la mot cach VIET
+        TAT dung o thoi diem chua co thao tac quan tri nao — nhung no cam ca
+        nhung thao tac DAO NGUOC DUOC, va vi the no chan chinh cai lam dut
+        luong SCRAPED -> DUYET -> XUAT BAN: ban nhap cua may gat thuoc
+        `svc_harvester`, nen khong con nguoi nao xuat ban duoc chung.
+
+        Nay: `DELETE` van bi CAM tuyet doi tren moi route quan tri cham
+        `novel`. Ghi thi cho, nhung chi nhung dong tu dao nguoc duoc va chi
+        tren danh sach TRUONG ma chinh chu so huu cung sua duoc
+        (`NOVEL_EDITABLE`) — quan tri khong bao gio nhieu quyen hon chu so huu
+        o day.
+
+        `docs/ADMIN.md` muc "Viec con lai" van dung: takedown (mot trang thai
+        `removed` tach khoi `draft`, co ly do, co duong khieu nai, co hoan tac)
+        VAN chua lam. Go xuat ban KHAC takedown: no tra tac pham ve dung trang
+        thai ma chu so huu tu dat duoc, va chu so huu tu xuat ban lai duoc.
+
         MIEN TRU DUY NHAT: `/api/admin/canary/novels/*`. Ly do cua bai test nay
         la "mat noi dung cua NGUOI KHAC" — be mat canary khong the cham toi noi
         dung cua ai ca:
@@ -773,7 +792,14 @@ class NovelBrowserTest(Base):
                     continue
                 methods = {m for m in getattr(r, "methods", set())
                            if m not in ("HEAD", "OPTIONS")}
-                self.assertEqual(methods, {"GET"}, d)
+                self.assertNotIn("DELETE", methods,
+                                 f"{d} mo duong XOA truyen o khu quan tri")
+                # Dong tu ghi duoc phep — danh sach DONG. Them mot dong tu
+                # moi vao day phai la mot quyet dinh co y, khong phai mot
+                # tac dung phu cua viec them route.
+                self.assertLessEqual(
+                    methods, {"GET", "POST", "PATCH"},
+                    f"{d} dung mot dong tu ngoai danh sach cho phep")
 
 
 class DashboardMoRongTest(Base):

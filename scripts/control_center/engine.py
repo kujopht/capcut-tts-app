@@ -3445,7 +3445,29 @@ class ControlCenter:
         """
         try:
             from scripts.control_center import nang_luc as NL
-            can = NL.nang_luc_viec(hd if isinstance(hd, dict) else {})
+            # `hd` O DAY LA MOT `TaskContract`, KHONG PHAI dict.
+            #
+            # Ban cu viet `hd if isinstance(hd, dict) else {}`. Cho goi DUY
+            # NHAT cua ham nay (`_giao_khong_luoi`) binh `hd =
+            # TaskContract.from_dict(...)`, nen ve `else` LUON dung, va ca rao
+            # can nay im lang tra ve () — no chua bao gio chan mot lan xep cho
+            # nao.
+            #
+            # Do duoc 2026-09-13: mot viec GHI bi xep (roi DUNG LAI phien) o
+            # CODEX01 ba lan lien tiep du CODEX01 da khai `refuses:
+            # ["repo_write"]`. Vet quyet dinh khong he co dong "nang luc: CAM".
+            #
+            # Nang hon: rao nay cung la duong thi hanh `security_review` cua
+            # V0.7 — thu giu cho viec hinh dang bao mat khong roi vao Codex.
+            # No cung da chet cung mot cach, va im lang y het.
+            #
+            # Mot phep phong thu bien mot rao an toan thanh mot ham rong la
+            # kieu hong te nhat: moi thu trong nhu binh thuong.
+            d = hd if isinstance(hd, dict) else None
+            if d is None:
+                lay = getattr(hd, "to_dict", None)
+                d = lay() if callable(lay) else {}
+            can = NL.nang_luc_viec(d if isinstance(d, dict) else {})
             if not can:
                 return (), ""
             fab = getattr(getattr(ctx, "sessions", None), "fabric", None)

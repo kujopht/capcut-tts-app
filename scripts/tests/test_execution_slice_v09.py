@@ -55,14 +55,37 @@ def _chay_het(cc: ControlCenter, eid: str, *, giay: float = 40.0) -> bool:
     lặp không có đáy" trong khi sản phẩm đã dừng sau 4 giây. Một hàm chờ
     thiếu một trạng thái dừng là một bài kiểm nói dối.
     """
-    het = time.time() + giay
-    while time.time() < het:
+    # NHỊP THEO TIẾN TRIỂN, không theo đồng hồ.
+    #
+    # Bản trước ngủ CỐ ĐỊNH 0,08s sau MỖI `tick()`, nên thời gian chạy tỉ lệ
+    # với SỐ nhịp cần thiết chứ không với việc thật. Với `test_tran_thu_lai`
+    # (2 bản kế hoạch × 2 lượt thử mỗi bước) số nhịp lên tới hàng trăm, và
+    # trên runner CI — chậm hơn, nhiều việc tranh CPU — tổng vượt 180s, nên
+    # một bài kiểm về TRẦN LẶP đỏ như thể vòng lặp không có đáy.
+    #
+    # Nay: chỉ ngủ khi KHÔNG có gì thay đổi. Máy nhanh chạy hết trong vài
+    # trăm mili-giây; máy chậm vẫn nhường CPU cho luồng nền. `monotonic` vì
+    # đồng hồ tường có thể bị NTP kéo lùi trên máy ảo vừa khởi động.
+    het = time.monotonic() + giay
+    dau_cu = None
+    while time.monotonic() < het:
         y = cc.so_thuc_thi.y_dinh(eid)
         if y is not None and (y.trang_thai.ket_thuc or y.trang_thai.can_nguoi):
             return True
         cc.tick()
-        time.sleep(0.08)
-    return False
+        # Dấu tiến triển: trạng thái + số sự kiện đã ghi. Đổi ⇒ còn việc để
+        # làm ngay, không có lý do gì để ngủ.
+        y = cc.so_thuc_thi.y_dinh(eid)
+        dau = (getattr(getattr(y, "trang_thai", None), "value", None),
+               getattr(y, "so_lan_lap_lai", None),
+               len(cc.so_thuc_thi.su_kien(eid)))
+        if dau == dau_cu:
+            time.sleep(0.02)
+        dau_cu = dau
+    # Một lần đọc cuối: nhịp cuối có thể vừa đưa nó tới đích.
+    y = cc.so_thuc_thi.y_dinh(eid)
+    return bool(y is not None
+                and (y.trang_thai.ket_thuc or y.trang_thai.can_nguoi))
 
 
 class _Nen(unittest.TestCase):

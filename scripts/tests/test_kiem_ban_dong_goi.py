@@ -24,6 +24,11 @@ PYTHON_EXE = Path(sys.executable)
 
 class TestPE(unittest.TestCase):
 
+    @unittest.skipUnless(
+        WINDOWS,
+        "oracle của bài này là `python.exe` — một PE do PSF ký. Trên Linux "
+        "`sys.executable` là ELF, nên không có PE nào để đọc; hai bài còn "
+        "lại trong lớp tự dựng dữ liệu nên vẫn chạy ở mọi nền.")
     def test_python_exe_la_pe_co_thu_muc_security(self):
         pe = KB.pe_thong_tin(PYTHON_EXE)
         self.assertTrue(pe["la_pe"])

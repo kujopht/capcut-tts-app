@@ -64,12 +64,39 @@ def _cc(repo: Path, *, ex, max_parallel: int = 4) -> ControlCenter:
 
 
 def _cho(dk, giay: float = 30.0, nhip: float = 0.05) -> bool:
-    het = time.time() + giay
-    while time.time() < het:
+    """Chờ MỘT ĐIỀU KIỆN THẬT, có biên — không ngủ một khoảng đoán trước.
+
+    `time.monotonic` chứ không `time.time`: đồng hồ tường có thể bị NTP kéo
+    lùi giữa chừng (hay gặp trên máy ảo CI vừa khởi động), và khi đó hạn chót
+    lùi theo — vòng chờ dài ra hoặc kết thúc sớm mà không ai hiểu vì sao.
+    """
+    het = time.monotonic() + giay
+    while time.monotonic() < het:
         if dk():
             return True
         time.sleep(nhip)
-    return False
+    return dk()
+
+
+def _cho_con_chay(cc: ControlCenter, so: int, giay: float = 30.0) -> int:
+    """`tick()` tới khi ĐỦ `so` việc con ở RUNNING, trả về số đếm được.
+
+    Điều phối xảy ra ở luồng khác, nên "một `tick()` rồi đọc ngay" đo tốc độ
+    của bộ lập lịch chứ không đo hành vi. Trên máy lập trình 4 con kịp vào
+    RUNNING; trên runner CI (chậm hơn, nhiều việc tranh CPU) chỉ 1 kịp — và
+    bài kiểm đỏ với `1 != 4` dù không có gì hỏng.
+    """
+    dem = [0]
+
+    def _du():
+        cc.tick()
+        dem[0] = len([t for t in cc.store.tasks("demo",
+                                                states=(TaskState.RUNNING,))
+                      if t.parent_id])
+        return dem[0] >= so
+
+    _cho(_du, giay=giay, nhip=0.05)
+    return dem[0]
 
 
 def _chay_toi_xong(cc: ControlCenter, cha_id: str, giay: float = 40.0) -> bool:
@@ -267,10 +294,9 @@ class TestToaEngine(_Nen):
             self.assertIsNone(req.get("pin_model"), "model gợi ý không có trong fabric giả -> không ghim")
         self.assertIn("không có trong fabric", kq["reply"])
         # Va van giao duoc: provider antigravity co 4 khe trong fabric gia.
-        self.cc.tick()
         # Chi dem CON: tu V0.6.1 cha cung RUNNING khi con dau tien duoc nhan.
-        self.assertEqual(len([t for t in self.cc.store.tasks("demo", states=(TaskState.RUNNING,))
-                              if t.parent_id]), 4)
+        self.assertEqual(_cho_con_chay(self.cc, 4), 4,
+                         "4 khe antigravity nhưng không đủ 4 con vào RUNNING")
         self.assertTrue(_chay_toi_xong(self.cc, cha[0].task_id))
 
     def test_giao_nhieu_tai_khoan_va_tong_hop(self):

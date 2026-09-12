@@ -145,16 +145,46 @@ thứ agent THẬT SỰ tạo ra, không phải thứ Router chép lại hộ.
 Nếu chế độ C (lượt thật sự rỗng) xuất hiện với tần suất đáng kể ở thanh lặp
 lại, hướng đó nên được xét lại — với số đo, không với phỏng đoán.
 
-## PHẦN B — THANH LẶP LẠI
-
-Đang chạy. Kết quả sẽ được ghi vào đây với **từng lần**, không chỉ bản tóm
-tắt, và không có lần nào bị giấu đi.
+## PHẦN B — THANH LẶP LẠI: **KHÔNG ĐẠT**
 
 | Bài | Yêu cầu | Kết quả |
 |---|---|---|
-| Kịch bản C kết thúc `DONE` | 5/5 | _đang đo_ |
-| Kịch bản D `v1 → v2 → DONE` | 5/5 | _đang đo_ |
-| Khởi động lại giữa lúc sửa chữa | 3/3 | _đang đo_ |
-| Nhắc quyền tương tác | 0 | _đang đo_ |
-| Thay đổi production | 0 | _đang đo_ |
-| Kho Fanfic `main` sạch | mọi lần | _đang đo_ |
+| Kịch bản C kết thúc `DONE` | 5/5 | **0/5 — HỎNG** |
+| Kịch bản D `v1 → v2 → DONE` | 5/5 | chưa chạy (chặn bởi C) |
+| Khởi động lại giữa lúc sửa chữa | 3/3 | chưa chạy (chặn bởi C) |
+| Nhắc quyền tương tác | 0 | **0** ✓ |
+| Thay đổi production | 0 | **0** ✓ |
+
+Từng lần, không giấu lần nào:
+
+| Lần | Mã thoát | Khẳng định | Phút | Production |
+|---|---|---|---|---|
+| 1 | 1 | 23/25 | 3.0 | 0 |
+| 2 | 1 | 21/25 | 2.9 | 0 |
+| 3 | 1 | 21/25 | 11.6 | 0 |
+| 4 | 1 | 21/25 | 4.1 | 0 |
+| 5 | 1 | 21/25 | 12.1 | 0 |
+
+Cùng một chữ ký mọi lần: `LOI_HIEN_THUC` → sửa chữa ×2 → lập lại kế hoạch
+→ cạn ngân sách → `BLOCKED`.
+
+### Mâu thuẫn CÒN MỞ (chưa giải thích được)
+
+Trên `ex_b6072e6a1522`, việc `fanfic.ghi_tailieu-r2`:
+
+* `UNDERDECLARED_CHANGES` có ghi → đối soát ĐÃ chạy và ĐÃ trả `True`;
+* `TASK_STATE RUNNING -> DONE` → bên gọi đã nâng trạng thái;
+* cảnh báo của đối soát **có** trong phong bì đã lưu;
+* nhưng `envelope.status` vẫn là `'failed'`, `failure_reason='gate_diff'`.
+
+`pb.status = "ok"` nằm ở `engine.py:3712`, **trước** dòng ghi cảnh báo ở
+3714 — và cảnh báo thì đã được lưu. `ghi_ket_qua` ghi đè nguyên `result_json`
+chứ không trộn. `ExecutionResult.to_dict()` đọc phong bì sống. Mỗi mắt xích
+đều đã kiểm và đều đúng, nhưng dữ liệu quan sát nói ngược lại.
+
+**Chưa kết luận.** Tôi đã suy đoán sai hai lần liên tiếp về chỗ này (một lần
+đổ cho "bản ghi cũ", một lần đổ cho "trạng thái bị ghi đè"), nên sẽ KHÔNG
+đoán lần thứ ba. Bước tiếp theo là một **bài kiểm tích hợp tất định** chạy
+đúng đường `_chay` với một Executor giả trả về đúng hình dạng này, rồi đọc
+lại `store.task(...).result["envelope"]["status"]` — thay vì đọc thêm nhật ký
+của trạng thái dùng chung.

@@ -68,7 +68,9 @@ from scripts.control_center.model import (LockKind, PermissionClass, Project,
                                           Session, SessionAction, SessionState,
                                           Task, TaskState, TransitionError,
                                           map_envelope_status)
-from scripts.control_center.permissions import PermissionEnvelope, envelope_for
+from scripts.control_center.permissions import (PermissionEnvelope,
+                                                ThamQuyenGhi, envelope_for,
+                                                tham_quyen_ghi_repo)
 from scripts.control_center.planner import PlannedTask, PlanResult, RulePlanner
 from scripts.control_center.sessions import SessionManager, dao_pid
 from scripts.control_center.store import ControlStore
@@ -896,14 +898,28 @@ class ControlCenter:
                             "assistant_message_id": getattr(t2, "message_id", 0)}
 
         goal = text
+        da_uy_thac = False
         if qd is not None:
             for a in qd.actions:
                 if a.loai == "delegate_work":
                     goal = str(a.tham_so.get("objective") or text)
+                    da_uy_thac = True
                     break
 
+        # V0.9.3 — THAM QUYEN GHI DI CUNG KE HOACH, khong bi vut o day.
+        #
+        # Doc `text` — CAU NGUOI DUNG GO — chu khong phai `goal`, vi `goal` la
+        # loi Leader dien dat lai. De Leader tu viet ra quyen cua chinh no la
+        # dung cai vong lap ma `envelope_for` da tu choi (no quet CA HAI vi ly
+        # do nguoc lai: Leader co the lam mot cau "deploy" nghe vo hai di).
+        #
+        # Truoc V0.9.3 dong duoi chi nhan `goal`, nen su that "nguoi dung vua
+        # cho phep ghi trong kho" chet o day va bo lap ke hoach phai tu doan
+        # lai tu regex. Do la khuyet tat da chan RouterDogfood02.
+        quyen_ghi = tham_quyen_ghi_repo(text, da_uy_thac=da_uy_thac)
         self._dat_buoc(project_id, "đang phân rã mục tiêu thành việc")
-        kh: PlanResult = ctx.planner.plan(goal, ctx.project)
+        kh: PlanResult = ctx.planner.plan(goal, ctx.project,
+                                          quyen_ghi=quyen_ghi)
         self._dat_buoc(project_id, "đang giao việc cho Router V4")
         tao: List[Task] = []
         # V0.6.1 — TOA: nguoi dung noi ro "goi N agent…"/"moi agent mot…" ->
@@ -1084,7 +1100,20 @@ class ControlCenter:
             project_id=project_id, goal=kn.muc_tieu, cau_nguoi_dung=text,
             message_id=tin.message_id, de_xuat=(dx.ma if dx else ""),
             rang_buoc=tuple(dx.cac_buoc[:0]) if dx else ())
-        kq: PlanResult = ctx.planner.plan(kn.muc_tieu, ctx.project)
+        # V0.9.3 — Ý ĐỊNH đã tính thẩm quyền ngay dòng trên; ĐỪNG để bộ lập
+        # kế hoạch tự suy lại. `y.tham_quyen is REPO_LOCAL` CHÍNH LÀ "người
+        # dùng đã cho phép sửa trong worktree của nó" (xem `LopThamQuyen`), và
+        # trước V0.9.3 sự thật đó nằm ngay cạnh lời gọi mà không đi vào.
+        #
+        # `NGOAI` thì KHÔNG cấp gì: ý định đó đang chờ người duyệt, và câu
+        # "ok làm đi" không bao giờ mở được lớp ngoài kho.
+        kq: PlanResult = ctx.planner.plan(
+            kn.muc_tieu, ctx.project,
+            quyen_ghi=(ThamQuyenGhi(cho_phep=True, nguon="y_dinh",
+                                    bang_chung=y.tham_quyen.value)
+                       if y.da_duyet_repo_local else
+                       ThamQuyenGhi(nguon="ngoai_kho",
+                                    bang_chung=y.tham_quyen.value)))
         if kn.tin_hieu.pham_vi_noi_ro:
             kq = ELK.cat_theo_pham_vi(kq, kn.tin_hieu.pham_vi_noi_ro)
         if not kq.tasks:

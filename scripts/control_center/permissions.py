@@ -210,7 +210,16 @@ class PermissionEnvelope:
         """
         d = ["PERMISSION_ENVELOPE (phong bì quyền của việc này):",
              "  ĐƯỢC TỰ LÀM, không phải hỏi:"]
-        d += [f"    - {o}" for o in self.auto_operations]
+        # V0.9.3 — DUNG QUANG CAO MOT QUYEN MA PHONG BI NAY KHONG CAP.
+        #
+        # `AUTO_OPERATIONS` la danh sach CO DINH de hien thi, nen mot viec chi
+        # doc van in ra `edit_in_owned_worktree` ngay tren dong "KHONG so huu
+        # pham vi ghi nao — chi doc". Hai dong canh nhau noi nguoc nhau, va
+        # agent phai tu doan dong nao that. Thay vi bat no doan: viec khong co
+        # pham vi ghi thi khong liet ke thao tac ghi.
+        _ghi = {"edit_in_owned_worktree", "local_commit"}
+        d += [f"    - {o}" for o in self.auto_operations
+              if self.owned_scope or o not in _ghi]
         if self.owned_scope:
             d += ["  Chỉ được GHI trong phạm vi sở hữu:"]
             d += [f"    - {p}" for p in self.owned_scope]
@@ -263,9 +272,126 @@ def envelope_for(task_id: str, *, objective: str = "", intent: str = "",
     tiêu nghe vô hại ("cập nhật cấu hình worker") trong khi câu gốc của
     người dùng nói rõ "deploy". Chỉ quét mục tiêu là bỏ lọt đúng trường hợp
     nguy hiểm nhất.
+
+    KHOẢNG TRỐNG ĐÃ BIẾT (đo 2026-09-12, V0.9.3, **chưa sửa** — có chủ ý):
+    khi Leader uỷ thác việc, `engine` truyền `intent` = mục tiêu **do Leader
+    viết lại**, nên cả hai tham số trên đều là văn bản của Leader và câu gốc
+    người dùng chưa bao giờ được quét ở đây. Đúng cái Leader có thể làm dịu
+    đi lại là thứ duy nhất không ai đọc.
+
+    Vì sao chưa vá trong V0.9.3: vá bằng cách quét thêm câu người dùng làm
+    câu THẬT của họ — *"Chỉ repo-local, KHÔNG deploy"* — thành GATED, vì chữ
+    `deploy` khớp mẫu bất kể chữ "không" đứng ngay trước. Sửa cho đúng thì
+    phải dạy `do_gated` hiểu phủ định, tức là NỚI một bộ lọc an toàn — việc
+    đó cần một lần xem xét riêng, không đi kèm một bản vá phạm vi ghi. Ghi
+    lại ở `docs/reports/V093_WRITE_SCOPE.md`.
     """
     hits = do_gated(objective, intent)
     return PermissionEnvelope(
         task_id=task_id,
         decision=PermissionClass.GATED if hits else PermissionClass.AUTO,
         gate_hits=hits, owned_scope=tuple(owned_scope))
+
+
+# ==========================================================================
+# THAM QUYEN GHI REPO-LOCAL — V0.9.3
+# ==========================================================================
+#
+# KHUYET TAT DO DUOC (RouterDogfood02, 2026-09-12): nguoi dung go
+#
+#     "ok trien khai luon web todo theo ke hoach vua lap. Tu code, chay test
+#      va verify tu dau toi cuoi. Chi repo-local, khong deploy."
+#
+# Leader hieu DUNG (y_dinh=WORK, `delegate_work`). Nhung goi viec gui worker
+# ra `type: analysis` + `ALLOWED_SCOPE: (khong)`, nen worker BI CHAN — dung
+# dieu kien dung "phai ghi ra ngoai ALLOWED_SCOPE de lam xong viec". Worker
+# lam DUNG; tang tren cap SAI quyen.
+#
+# VI SAO: `engine` goi `planner.plan(goal, project)` — CHI mot chuoi muc
+# tieu. Su that "nguoi dung vua cho phep ghi trong kho" duoc tinh o tang
+# Leader roi VUT DI, va bo lap ke hoach tu suy lai pham vi ghi bang regex
+# tren mot menh de. Khong co duong dan trong cau + du an chua khai
+# `default_write_scope` -> ha xuong CHI DOC.
+#
+# Voi du an TAO MOI bang V0.9.2 thi `default_write_scope` LUON rong, nen moi
+# du an moi deu KHONG BAO GIO trien khai duoc. Do la mot NGO CUT.
+#
+# LAI LA HAI CAI NHIN VE MOT SU THAT: `planner._Y_GHI` da biet "trien khai"
+# la dong tu GHI, va `y_dinh.LopThamQuyen.REPO_LOCAL` da dinh nghia dung
+# "sua trong worktree cua minh" la thu nguoi dung cho phep khi noi "lam di" —
+# ma tang cap quyen lai tin mot thu thu ba: co duong dan trong cau hay khong.
+
+#: Cau NGUOI DUNG go de CHO PHEP trien khai trong kho. Co y HEP: day la mot
+#: phep CAP QUYEN, khong phai mot bo doan y. Khong khop thi giu nguyen hanh
+#: vi cu (ha xuong chi doc) — an toan van la mac dinh.
+_CHO_PHEP_GHI = re.compile(
+    r"(?:"
+    r"triển khai|trien khai|"
+    r"implement|"
+    r"tự code|tu code|code nó|code no|code luôn|code luon|"
+    r"viết code|viet code|"
+    r"làm luôn|lam luon|làm đi|lam di|làm tiếp|lam tiep|"
+    r"xây dựng|xay dung|"
+    r"go ahead|just do it"
+    r")", re.I)
+
+
+@dataclass(frozen=True)
+class ThamQuyenGhi:
+    """Người dùng có cho phép GHI TRONG KHO ở lượt này không, và vì sao.
+
+    Mang theo BẰNG CHỨNG chứ không chỉ một cờ: phạm vi ghi suy ra từ đây đi
+    thẳng vào hợp đồng gửi agent, nên bản kiểm toán phải nói được *câu nào*
+    của người dùng đã mở nó.
+    """
+
+    cho_phep: bool = False
+    #: cau_nguoi_dung | khong_co | ngoai_kho | chua_uy_thac
+    nguon: str = "khong_co"
+    bang_chung: str = ""
+
+    def to_dict(self) -> Dict:
+        return {"cho_phep": self.cho_phep, "nguon": self.nguon,
+                "bang_chung": self.bang_chung}
+
+
+def tham_quyen_ghi_repo(cau_nguoi_dung: str, *,
+                        da_uy_thac: bool = False) -> ThamQuyenGhi:
+    """Giải quyền GHI REPO-LOCAL từ CHÍNH câu người dùng gõ.
+
+    BA điều kiện, thiếu một là KHÔNG cấp:
+
+    1. **Leader đã quyết uỷ thác việc.** Một câu bàn luận có chữ "triển khai"
+       không được tự mở quyền ghi — §22, *THẢO LUẬN ≠ THỰC THI*.
+    2. **Câu người dùng có lời cho phép tường minh.** Quét câu NGƯỜI DÙNG gõ,
+       KHÔNG quét lời Leader diễn đạt lại: để Leader tự viết ra quyền của
+       chính nó là đúng cái vòng lặp mà `envelope_for` đã từ chối.
+
+    RANH GIỚI NGOÀI KHO **KHÔNG** ĐƯỢC XỬ Ở ĐÂY, và đó là quyết định quan
+    trọng nhất của hàm này. Chủ sở hữu duy nhất của sự thật "việc này chạm
+    lớp GATED" là `envelope_for`/`do_gated`, chấm trên TỪNG VIỆC. Dựng thêm
+    một phép kiểm thứ hai ở đây chính là tái tạo đúng căn bệnh V0.9.3 sinh ra
+    để chữa — và bản nháp đầu của chính hàm này đã mắc: nó `do_gated` câu
+    người dùng, rồi từ chối cấp quyền cho câu THẬT
+
+        "…Chỉ repo-local, KHÔNG deploy."
+
+    vì chữ `deploy` khớp mẫu, bất kể chữ "không" ngay trước. Người dùng nói
+    *đừng* deploy và bị đọc thành *hãy* deploy.
+
+    Bỏ phép kiểm đó là AN TOÀN vì phạm vi ghi chỉ có nghĩa khi việc được
+    chạy: một việc chạm GATED bị `envelope_for` chặn thành `BLOCKED` kèm
+    `requires_decision` và không bao giờ được giao. Phạm vi cấp ở đây cũng
+    chưa bao giờ nới được một thao tác GATED — nó chỉ là repo-local.
+
+    Cấp rồi thì phạm vi vẫn CÓ TRẦN: gốc cây làm việc CỦA CHÍNH VIỆC ĐÓ (một
+    worktree cô lập), không phải quyền ghi không giới hạn.
+    """
+    cau = cau_nguoi_dung or ""
+    if not da_uy_thac:
+        return ThamQuyenGhi(nguon="chua_uy_thac")
+    m = _CHO_PHEP_GHI.search(cau)
+    if not m:
+        return ThamQuyenGhi(nguon="khong_co")
+    return ThamQuyenGhi(cho_phep=True, nguon="cau_nguoi_dung",
+                        bang_chung=m.group(0)[:80])

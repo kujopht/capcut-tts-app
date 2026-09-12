@@ -20,9 +20,56 @@ năm, theo đúng thứ tự gặp.
 | 3 | `tool_permission_denied`, 27s, `changes=[]` | phong bì quảng cáo quyền runtime không có | ĐÃ SỬA |
 | 4 | sản phẩm nằm trong `repair/replan/` | đọc văn xuôi thành đường dẫn | ĐÃ SỬA |
 | 5 | `gate_scope` / `gate_contract_scope` trên việc làm ĐÚNG | ba tầng hiểu `.` khác nhau | ĐÃ SỬA |
+| 6 | "Sandbox chặn mọi thao tác ghi" | Codex khai `implement` nhưng chạy sandbox CHỈ ĐỌC | ĐÃ SỬA |
+| 7 | rào năng lực chưa bao giờ chặn một lần xếp chỗ nào | `isinstance(hd, dict)` LUÔN sai ở chỗ gọi thật | ĐÃ SỬA |
+| 8 | hoàn tác để lại thư mục mồ côi | `rmtree` không xoá được `.git/objects` CHỈ ĐỌC | ĐÃ SỬA |
 
-**Bốn trong năm khuyết tật là cùng một hình dạng**: hai (hoặc ba) chỗ cùng
-giữ một sự thật, và chúng nói ngược nhau.
+**Sáu trong tám khuyết tật là cùng một hình dạng**: hai (hoặc ba) chỗ cùng
+giữ một sự thật, và chúng nói ngược nhau. Khuyết tật #8 là hồi quy do CHÍNH
+bản vá #2 gây ra, và bộ hồi quy bắt được.
+
+## 6. Codex khai một năng lực nó không có
+
+Việc Todo bị xếp sang `CODEX01`. Sau 226 giây:
+
+> Sandbox hệ thống chặn mọi thao tác ghi và không cho phép yêu cầu nâng
+> quyền. … workspace đang ở chế độ read-only.
+
+`CodexAdapter` gọi `codex exec --skip-git-repo-check -m <model> --color
+never -` — KHÔNG cờ sandbox, và `codex exec` mặc định chạy sandbox CHỈ ĐỌC.
+Nhưng nó khai `capabilities={"review", "implement"}`.
+
+**Sửa:** rút `implement` (giữ `review` — thế mạnh thật, và review không cần
+ghi), cộng `refuses: ["repo_write"]` trong `fabric.json`.
+
+**KHÔNG bật `--sandbox workspace-write`.** Đó là CẤP THÊM quyền ghi cho một
+CLI ngoài; nó cần một probe có giới hạn và một lần duyệt của chủ sở hữu, chứ
+không phải một dòng lọt vào giữa bản vá phạm vi ghi. `test_04` khoá lại rằng
+không cờ nào len vào.
+
+## 7. Rào năng lực CHƯA BAO GIỜ CHẠY
+
+Lượt tiếp theo **vẫn** vào CODEX01, lần này vì phiên còn ấm và luật DÙNG LẠI
+chỉ xét phạm vi. Thêm `refuses` vẫn không đổi gì. Vết quyết định không hề có
+dòng `năng lực: CẤM`.
+
+Nguyên nhân:
+
+```python
+can = NL.nang_luc_viec(hd if isinstance(hd, dict) else {})
+```
+
+Chỗ gọi **duy nhất** (`_giao_khong_luoi`) bình `hd = TaskContract.from_dict(…)`
+— một ĐỐI TƯỢNG. Nên vế `else` luôn đúng, và hàm trả `()` mọi lần. Rào chưa
+bao giờ chặn một lần xếp chỗ nào, kể từ V0.7.
+
+**Nặng hơn phạm vi bản vá này:** cùng rào đó là đường thi hành
+`security_review` — thứ giữ cho việc hình dạng bảo mật không rơi vào Codex
+(Codex trả kết quả RỖNG cho loại việc đó, bằng chứng 2026-08-28). Nó cũng đã
+chết, cũng im lặng y hệt.
+
+Một phép phòng thủ biến rào an toàn thành hàm rỗng là kiểu hỏng tệ nhất: mọi
+thứ trông như bình thường, và không có gì để đọc.
 
 ---
 
@@ -138,6 +185,85 @@ chúng là mở toang một rào. Rào THẬT vẫn là bản thân worktree cô
 
 ---
 
+## KẾT QUẢ — chạy THẬT, sổ CHÍNH TẮC
+
+```
+việc      routerdogfood02.t2ff8-1   DONE   type=implementation
+phạm vi   allowed_scope=['.']  WRITE:FILESYSTEM:.
+kết quả   status=ok
+tệp       index.html · style.css · script.js · test.html · test.js
+```
+
+### Sản phẩm — DÙNG THẬT, không chỉ đọc sổ
+
+Phục vụ repo-local qua `http.server` trên `127.0.0.1` (localStorage không
+chạy đúng trên `file://`), bấm thật bằng Chrome + CDP. **20/20 đạt**:
+
+```
+giao diện     tiêu đề · ô nhập · nút Add · danh sách
+dark mode     BẬT sẵn, nền thật sự tối (đo `getComputedStyle`)
+thêm việc     2 việc hiện đúng thứ tự, ô nhập tự trống
+hoàn thành    tick -> class `completed` + ghi vào localStorage
+TẢI LẠI       2 việc còn nguyên, trạng thái hoàn thành còn nguyên
+xoá           còn 1, và BỀN sau khi tải lại
+theme         toggle -> sáng, BỀN sau tải lại, bấm lại -> tối
+```
+
+### Bộ kiểm của CHÍNH dự án — và một phát hiện
+
+`test.html` chạy **2 lần**, và khác biệt giữa hai lần mới là phát hiện:
+
+```
+kho lưu trữ CÒN DỮ LIỆU CŨ : 2 đạt / 3 HỎNG
+kho lưu trữ SẠCH           : 5 đạt / 0 hỏng
+```
+
+Ứng dụng ĐÚNG. Bộ kiểm agent viết ra thì **phụ thuộc trạng thái trước**: nó
+gọi `localStorage.clear()` 500ms sau khi trang tải, trong khi ứng dụng đã đọc
+localStorage vào một biến closure lúc `DOMContentLoaded`. Xoá kho lưu trữ
+không reset biến đó, nên mọi phép đếm lệch đúng bằng số việc còn sót.
+
+Đây là khuyết tật CHẤT LƯỢNG của sản phẩm worker giao ra, không phải của
+Router — nhưng Router đánh `DONE` mà **không chạy bộ kiểm đó lần nào**, vì
+cổng `tests` không có lệnh test nào được cấu hình. Đúng điều mục A3 cảnh báo:
+*DONE trong sổ Router KHÔNG đủ.*
+
+**Một khẳng định của tôi đã SAI và đã sửa:** bản kiểm đầu tìm chữ `"fail"`
+trong kết quả, trong khi báo cáo dùng dấu ❌ — nó XANH vì lý do SAI. Nay đếm
+dấu ❌.
+
+### Liên tục — ngữ cảnh Leader MỚI, 7/7
+
+Hỏi *"ê bro cái Todo project làm tới đâu rồi?"* trong một tiến trình mới:
+
+* nêu đúng `routerdogfood02.t2ff8-1` DONE kèm HTML/CSS/JS, Dark Mode,
+  localStorage;
+* liệt kê việc còn WAITING;
+* tóm tắt đúng lịch sử hỏng đêm nay ("4 task từng bị BLOCKED … do sandbox
+  read-only và gate scope");
+* **0 execution tạo thêm, 0 việc sinh thêm**, không một chữ Fanfic.
+
+### Cổng an toàn — ĐO, không khẳng định suông
+
+```
+thao tác chạm production      0
+khoá PRODUCTION được cấp      0
+việc GATED chờ người duyệt    0   (không việc repo-local nào bị hỏi thừa)
+việc fanfic tạo mới đêm nay   0   (76 -> 76, không đụng)
+hồi quy đầy đủ                2580 đạt · 4 bỏ qua · 0 hỏng (117 module)
+```
+
+## Giới hạn TÀI NGUYÊN gặp phải (không phải khuyết tật)
+
+Một lượt trên `AG02/claude-sonnet-4-6` chạy 596 giây rồi trả:
+
+> Individual quota reached. Please upgrade your subscription to increase your
+> limits. Resets in 48h57m19s.
+
+Hạn mức thật của bể Antigravity Claude. **Không mua thêm credit, không bật
+overage** (`CLAUDE.md`: cấm tuyệt đối). Router định tuyến sang bể khác, và
+lượt thành công cuối cùng chạy trên Gemini.
+
 ## Khoảng trống ĐÃ BIẾT, chưa vá (ghi lại, không tự ý mở rộng phạm vi)
 
 1. **Không có đường XẾP LẠI một việc bị chặn vì môi trường.** Sau khi sửa
@@ -154,3 +280,12 @@ chúng là mở toang một rào. Rào THẬT vẫn là bản thân worktree cô
 3. **Khởi động lại harness ĐỐT `attempts`.** Một tiến trình điều phối thoát
    giữa lúc agent đang chạy để lại việc ở `RUNNING`; lần `recover()` sau
    tính thêm một lượt. Ba lần là việc chết, dù agent chưa hỏng lần nào.
+4. **Cổng `tests` không chạy gì.** Việc có tiêu chí "viết test và verify"
+   được đánh `DONE` mà bộ kiểm của chính dự án chưa từng được chạy — và khi
+   chạy thì nó đỏ 3/5 (do chính bộ kiểm phụ thuộc trạng thái). Router cần
+   một đường CHẠY ĐƯỢC bộ kiểm của dự án, hoặc phải báo `THIEU_BANG_CHUNG`
+   thay vì `DONE`. Đây đúng là luật V0.9 đã có ("tiêu chí không buộc được
+   vào phép kiểm nào thì KHÔNG mặc nhiên đạt") nhưng không được thi hành cho
+   trường hợp này.
+5. **Cấp quyền ghi cho Codex** (`--sandbox workspace-write`) — đề xuất, cần
+   probe có giới hạn + duyệt của chủ sở hữu. Chưa làm.

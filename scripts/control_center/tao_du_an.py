@@ -27,9 +27,12 @@ BA ĐIỀU FILE NÀY KHÔNG LÀM:
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
 import subprocess
+import sys
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -338,6 +341,35 @@ def _hoan_tac(da_tao: List[Path]) -> None:
     """
     for p in reversed(da_tao):
         try:
-            shutil.rmtree(p, ignore_errors=True)
+            _xoa_cay(p)
         except Exception:                                     # noqa: BLE001
             pass
+
+
+def _xoa_cay(p: Path) -> None:
+    """Xoá một cây thư mục, kể cả khi git để lại tệp CHỈ ĐỌC.
+
+    `git commit` ghi `.git/objects/**` ở chế độ CHỈ ĐỌC, và trên Windows
+    `shutil.rmtree` KHÔNG xoá được tệp chỉ đọc — nó ném `PermissionError`.
+    Với `ignore_errors=True` thì nó nuốt lỗi và **để lại cả thư mục**.
+
+    Hồi quy đo được 2026-09-13, do chính bản vá "commit đầu tiên" của V0.9.3
+    gây ra: `test_17_dang_ky_hong_thi_HOAN_TAC_sach` chuyển sang đỏ —
+    "để lại thư mục mồ côi sau khi đăng ký hỏng". Trước bản vá, `git init`
+    trần không tạo object nào nên không có tệp chỉ đọc, và phép xoá may mắn
+    chạy được.
+
+    Cách đúng là gỡ cờ chỉ đọc rồi thử lại, không phải nuốt lỗi: một lần
+    hoàn tác im lặng thất bại để lại đúng thứ nó hứa dọn.
+    """
+    def _thu_lai(ham, duong, _loi):
+        try:
+            os.chmod(duong, stat.S_IWRITE)
+            ham(duong)
+        except Exception:                                     # noqa: BLE001
+            pass
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(p, onexc=lambda h, d, e: _thu_lai(h, d, e))
+    else:                                                     # pragma: no cover
+        shutil.rmtree(p, onerror=lambda h, d, e: _thu_lai(h, d, e))

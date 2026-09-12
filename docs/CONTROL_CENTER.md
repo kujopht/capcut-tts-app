@@ -1346,6 +1346,12 @@ tích luỹ tự nhiên theo lần dùng thật.
 **Giữ nguyên, không xoá:** `dist-v04/v05/v06` (+ `v061*`), mọi sổ `.router`
 cũ đã đánh mốc, và các nhánh tính năng đã merge.
 
+> **CẬP NHẬT 2026-09-12 — v0.9 ĐÃ PHÁT HÀNH.** Thẻ
+> `router-control-center-v0.9.0`, merge vào `main` @ `86ab00b`. Danh sách
+> "chưa bắt đầu" bên dưới là bản ghi LỊCH SỬ của lúc lập kế hoạch, giữ
+> nguyên để đối chiếu. Trạng thái phát hành và bằng chứng: **§24** ở cuối
+> tài liệu này và `docs/reports/V09_NGHIEM_THU_THAT.md`.
+
 **Pha tiếp theo: v0.9 — Closed-Loop Autonomous Project Execution.** Chưa bắt
 đầu. Bảy hạng mục ưu tiên cao nhất, theo thứ tự:
 
@@ -1454,3 +1460,44 @@ khai sai số lần sửa. Đầy đủ ở `docs/reports/CLOSED_LOOP_V09.md` §
 quyền**, không phải một tính năng v0.9, nhưng nó ra đời trong phiên dựng
 v0.9 vì chính phiên đó lặp lại hình dạng thứ nhất nhiều lần. Xem `CLAUDE.md`
 mục "Tìm/đọc trong kho" và `guard_indirect_exec.cwd_laundered_read`.
+
+## §24 — v0.9.0 ĐÃ PHÁT HÀNH (2026-09-12)
+
+Thẻ `router-control-center-v0.9.0`, `main` @ `86ab00b` (merge
+`feat/v09-closed-loop-execution`, cây giống hệt HEAD đã nghiệm thu
+`80e9717`). v0.8 vẫn là tổ tiên.
+
+**VÒNG KÍN ĐÃ ĐÓNG, chứng minh trên agent THẬT + sổ CHÍNH TẮC + dự án
+Fanfic THẬT:**
+
+```
+thảo luận -> uỷ quyền -> Ý ĐỊNH bền -> KẾ HOẠCH DAG có tiêu chí nghiệm thu
+-> agent THẬT (worktree cô lập) -> HỢP ĐỒNG KẾT QUẢ -> KIỂM ĐỊNH theo MỤC
+TIÊU GỐC -> sửa chữa / lập lại kế hoạch CÓ TRẦN -> phục hồi sau KHỞI ĐỘNG
+LẠI -> ký ức -> Leader nói tiếp
+```
+
+| Thanh chắn | Kết quả |
+|---|---|
+| C — đa agent GHI thật, worktree cô lập | **5/5 · 25/25** |
+| D — v1 trượt tiêu chí → sửa → v2 → DONE | **5/5 · 25/25** |
+| R — khởi động lại GIỮA LÚC sửa chữa | **3/3 · 28/28** |
+| Hồi quy tất định | **2422 đạt · 4 bỏ qua · 0 hỏng** |
+| Thay đổi / khởi động lại production | **0 / 0** |
+| Nhắc quyền tương tác ngoài ý muốn | **0** |
+
+Bằng chứng đầy đủ — gồm 6 khuyết tật sản phẩm đã sửa, 1 khuyết tật phát
+hiện khi chạy R, ô nhiễm do hai tiến trình Control Center cũ chạy MÃ CŨ trên
+cùng sổ, và 7 khuyết tật của chính giàn giáo nghiệm thu — ở
+`docs/reports/V09_NGHIEM_THU_THAT.md` và `docs/reports/V09_MAT_HONG_THAT.md`.
+
+**Bài học kiến trúc lặp lại suốt v0.9, đáng giữ:** gần như mọi khuyết tật
+đều cùng một hình dạng — **hai cái nhìn về CÙNG một sự thật, nói ngược
+nhau**, và tầng trên tin cái sai. Cổng chấm trên một trường ta không xin;
+luật 2 từ chối một phiên mà luật 3 vẫn chờ nó; việc `DONE` mà phong bì nói
+`failed`; bước bị chấm trong cây của anh em; tiêu chí "nên có" mượn được
+quyền chặn. Khi sửa gói này, hỏi trước: *ai là nguồn thẩm quyền cho sự thật
+này, và còn chỗ nào khác đang tự suy ra nó?*
+
+**PHA TIẾP THEO: KHÔNG phải v0.10.** Dùng THẬT Router đã phát hành để làm
+tiếp việc phát triển fanfic.world qua Project Leader (dogfood).

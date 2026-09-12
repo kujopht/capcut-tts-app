@@ -21,13 +21,20 @@ Cập nhật: 2026-08-08 · Branch `feature/web-mvp` · HEAD `14f4a31`
 >
 > **ROUTER CONTROL CENTER là sản phẩm THỨ HAI của kho này và có dòng phát
 > hành RIÊNG — file này KHÔNG theo dõi nó.** Trạng thái phát hành canonical
-> nằm ở `docs/CONTROL_CENTER.md`: §14e (v0.6.1), §21 (v0.7.0), **§23
-> (v0.8.0 — ĐÃ PHÁT HÀNH 2026-09-11, thẻ `router-control-center-v0.8.0`)**.
+> nằm ở `docs/CONTROL_CENTER.md`: §14e (v0.6.1), §21 (v0.7.0), §23 (v0.8.0),
+> **§24 (v0.9.0 — ĐÃ PHÁT HÀNH 2026-09-12, thẻ
+> `router-control-center-v0.9.0`)**.
 > v0.8 thêm kiến trúc suy luận nhiều vai (Leader / Strategist / Reviewer /
 > Executor) + bộ định tuyến model động; nghiệm thu MODEL THẬT ở
-> `docs/reports/REASONING_V08_REAL.md`. **Pha tiếp theo: v0.9 — Closed-Loop
-> Autonomous Project Execution** (chưa bắt đầu; bảy hạng mục ưu tiên ở cuối
-> §23).
+> `docs/reports/REASONING_V08_REAL.md`.
+> **v0.9 đóng VÒNG KÍN** — thảo luận → uỷ quyền → ý định bền → DAG có tiêu
+> chí nghiệm thu → agent THẬT → kiểm định theo mục tiêu gốc → sửa chữa/lập
+> lại kế hoạch CÓ TRẦN → phục hồi sau khởi động lại → ký ức → Leader nói
+> tiếp. Nghiệm thu THẬT: C 5/5, D 5/5, khởi-động-lại-giữa-lúc-sửa 3/3, hồi
+> quy 2422 đạt / 0 hỏng, 0 thay đổi production —
+> `docs/reports/V09_NGHIEM_THU_THAT.md`.
+> **Pha tiếp theo KHÔNG phải v0.10** mà là DÙNG THẬT Router đã phát hành để
+> phát triển fanfic.world qua Project Leader.
 
 Tài liệu này để một phiên khác tiếp tục được khi phiên hiện tại hết context.
 

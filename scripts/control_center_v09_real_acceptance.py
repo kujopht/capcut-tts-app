@@ -837,8 +837,16 @@ def kb_R(cc, bc: BaoCao):
 
     def _toi() -> bool:
         yy = cc.so_thuc_thi.y_dinh(eid)
-        ok, vs = diem_dung_sua(cc.so_thuc_thi.cac_ban_ke_hoach(eid),
-                               cc.so_thuc_thi.buoc(eid),
+        ban = cc.so_thuc_thi.cac_ban_ke_hoach(eid)
+        # LẤY BƯỚC THEO ĐÚNG BẢN MỚI NHẤT, không dùng "bản đang hiệu lực".
+        #
+        # `SoThucThi.buoc(eid)` mặc định lọc theo bản ĐANG HIỆU LỰC, và có một
+        # khoảng ngắn sau `PLAN_REVISED` mà v2 đã BỀN nhưng v1 vẫn còn là bản
+        # hiệu lực. Trong khoảng đó, hàm trả về bước của v1 trong khi `mv` đã
+        # là 2, nên điểm dừng luôn báo "chưa có bước nào của v2" và cửa sổ bị
+        # bỏ lỡ — đúng điều đã xảy ra ở hai lần chạy R đầu.
+        mv = max([int(p.phien_ban) for p in ban] or [1])
+        ok, vs = diem_dung_sua(ban, cc.so_thuc_thi.buoc(eid, mv),
                                cc.so_thuc_thi.su_kien(eid, limit=300))
         moc["vi_sao"] = vs
         if ok:

@@ -258,5 +258,75 @@ class TestDoiSoatSongSotTangBuoc(unittest.TestCase):
                         "hợp đồng kết quả mà tầng bước đọc vẫn nói HỎNG")
 
 
+class TestTienKiemNghiemThu(unittest.TestCase):
+    """Nghiệm thu phải TỪ CHỐI CHẠY khi còn Control Center khác trên sổ.
+
+    KHÔNG cấm hai tiến trình — `TestHaiTienTrinh` khoá lại rằng hai Control
+    Center trên một sổ là chuyện BÌNH THƯỜNG, và các bất biến loại trừ được
+    thiết kế cho đúng cảnh đó. Thứ không chấp nhận được là ĐO trong lúc đó:
+    một tiến trình khác giành việc rồi chạy bằng mã CỦA NÓ — có thể là bản
+    cũ — nên mọi khẳng định mất nghĩa.
+
+    Đo được 2026-09-12: `desktop` pid 11620 và `webmain` pid 34188 còn sống
+    từ hôm trước làm hỏng NĂM lần chạy liên tiếp.
+    """
+
+    def _tim(self, ds, pid_minh=999):
+        from scripts.control_center_v09_real_acceptance import (
+            tien_trinh_cc_khac)
+        return tien_trinh_cc_khac(liet_ke=lambda: ds, pid_minh=pid_minh)
+
+    def test_08_bat_duoc_desktop_va_webmain_con_song(self):
+        thay = self._tim([
+            (11620, r'"C:\pythonw.exe" -m scripts.control_center.desktop'),
+            (34188, r'"C:\python.exe" -m scripts.control_center.webmain '
+                    r'--khong-mo --port 55523'),
+        ])
+        self.assertEqual(sorted(x[0] for x in thay), [11620, 34188])
+
+    def test_09_KHONG_bat_nham_tien_trinh_khong_lien_quan(self):
+        """Chữ "desktop" một mình từng khớp cả ChatGPT Desktop."""
+        thay = self._tim([
+            (4292, r'"C:\Program Files\WindowsApps\OpenAI.ChatGPT-Desktop'
+                   r'\ChatGPT Classic.exe"'),
+            (28460, r'".venv\Scripts\python.exe" -m server.worker '
+                    r'--require-env production'),
+            (777, "notepad.exe"),
+        ])
+        self.assertEqual(thay, [], thay)
+
+    def test_10_khong_tu_dem_chinh_no(self):
+        """Bộ nghiệm thu và bài kiểm của nó không phải "tiến trình khác"."""
+        thay = self._tim([
+            (999, "python scripts/control_center_v09_real_acceptance.py"),
+            (1000, "python -m unittest scripts.tests.test_x"),
+            (1001, "python scripts/control_center_v09_real_acceptance.py "
+                   "--kich-ban C"),
+        ], pid_minh=999)
+        self.assertEqual(thay, [], thay)
+
+    def test_11_hai_Control_Center_VAN_duoc_phep_cung_ton_tai(self):
+        """Bất biến CŨ không được phá: hai bản trên một sổ vẫn mở được.
+
+        Đây là vế đối xứng của bài kiểm trên. Một bản sửa "cấm người ghi thứ
+        hai" sẽ làm bài kiểm này hỏng — và nó đã hỏng thật một lần, làm rơi
+        năm bài của `TestHaiTienTrinh`.
+        """
+        repo = kho_git_tam()
+        try:
+            a = ControlCenter(root=repo, fabric=fabric_gia(), probe=False,
+                              executor_factory=lambda p, f: ExecutorKhaiThieu())
+            b = ControlCenter(root=repo, fabric=fabric_gia(), probe=False,
+                              executor_factory=lambda p, f: ExecutorKhaiThieu())
+            try:
+                a.chat("demo2", "x") if False else None
+                self.assertIsNotNone(b.store)
+            finally:
+                a.shutdown()
+                b.shutdown()
+        finally:
+            shutil.rmtree(repo, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

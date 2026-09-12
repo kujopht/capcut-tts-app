@@ -168,7 +168,50 @@ Từng lần, không giấu lần nào:
 Cùng một chữ ký mọi lần: `LOI_HIEN_THUC` → sửa chữa ×2 → lập lại kế hoạch
 → cạn ngân sách → `BLOCKED`.
 
-### Mâu thuẫn CÒN MỞ (chưa giải thích được)
+### NGUYÊN NHÂN GỐC của 0/5 — **đã đo, không phải suy đoán**
+
+Loại **G** (không phải A–F): **một tiến trình NGOÀI, chạy MÃ CŨ, cùng ghi vào
+sổ chính tắc.**
+
+Hai tiến trình Control Center còn sống từ HÔM TRƯỚC:
+
+| PID | Lệnh | Khởi động |
+|---|---|---|
+| 11620 | `pythonw -m scripts.control_center.desktop` | 2026-09-11 11:50 |
+| 34188 | `python -m scripts.control_center.webmain --port 55523` | 2026-09-11 16:20 |
+
+Cả hai có TRƯỚC bản sửa sớm nhất (07:56 hôm nay), và cả ba cửa vào dùng CHUNG
+một sổ SQLite. Ba bằng chứng độc lập:
+
+1. **Hai cái trần trong CÙNG một nhật ký**: `X/12` ×295 và `X/3` ×105. Một
+   tiến trình không thể in ra hai `max_sessions`. 12 = bộ nghiệm thu
+   (`--max-parallel 0` → tự theo bể); 3 = `MAX_SESSIONS_MOI_DU_AN`, mặc định
+   của desktop/webmain.
+2. **150 phiên được tạo trong đêm** (23h, 00h, 01h, 02h, 03h giờ máy) —
+   những giờ KHÔNG có lần chạy nào của ta.
+3. **Đã loại trừ che khuất module**: bộ nghiệm thu nạp đúng `engine.py` đã
+   sửa (có kiểm `inspect.getsource`). Nên cách duy nhất để hai bản sửa trông
+   như vô hiệu là một TIẾN TRÌNH KHÁC chạy `_chay`.
+
+Điều này giải thích trọn vẹn mọi quan sát từng đánh lừa tôi: vì sao hai bản
+sửa trong `engine.py` như không tồn tại, vì sao `SESSION_IDLE` vẫn in "việc
+hỏng", vì sao bể phiên đầy bằng những phiên tôi không giải thích được, và vì
+sao bài kiểm cô lập XANH trong khi lần chạy thật hỏng 5/5.
+
+### Khuyết tật thứ hai — MỘT NGƯỜI GHI không được cưỡng chế
+
+`KhoaKho` (V0.6.1) **đúng về cơ chế**: khoá dải byte ở tầng OS
+(`msvcrt.locking`/`fcntl.flock`), gắn với HANDLE nên tự tan khi tiến trình
+chết — **không có khoá mồ côi, không cần dò chủ cũ, chủ cũ không thể chặn
+nhầm**. Khuyết tật nằm ở chỗ GỌI: chỉ `desktop.py` gọi nó. `webmain.py`,
+TUI (`__main__.py`) và MỌI chỗ dựng `ControlCenter(...)` thẳng — gồm cả bộ
+nghiệm thu — đi thẳng qua.
+
+**Sửa:** giành khoá trong `ControlCenter.__init__` (nơi THẬT SỰ sở hữu sổ) và
+nhả tường minh trong `shutdown()`. Người ghi thứ hai nhận `KhoLoi` nói rõ ai
+đang giữ. Khoá theo GỐC DỮ LIỆU nên hai gốc khác nhau không chặn nhau.
+
+### Mâu thuẫn trước đây coi là "còn mở" — ĐÃ GIẢI THÍCH
 
 Trên `ex_b6072e6a1522`, việc `fanfic.ghi_tailieu-r2`:
 
@@ -182,9 +225,17 @@ Trên `ex_b6072e6a1522`, việc `fanfic.ghi_tailieu-r2`:
 chứ không trộn. `ExecutionResult.to_dict()` đọc phong bì sống. Mỗi mắt xích
 đều đã kiểm và đều đúng, nhưng dữ liệu quan sát nói ngược lại.
 
-**Chưa kết luận.** Tôi đã suy đoán sai hai lần liên tiếp về chỗ này (một lần
-đổ cho "bản ghi cũ", một lần đổ cho "trạng thái bị ghi đè"), nên sẽ KHÔNG
-đoán lần thứ ba. Bước tiếp theo là một **bài kiểm tích hợp tất định** chạy
-đúng đường `_chay` với một Executor giả trả về đúng hình dạng này, rồi đọc
-lại `store.task(...).result["envelope"]["status"]` — thay vì đọc thêm nhật ký
-của trạng thái dùng chung.
+Bài kiểm tích hợp tất định (`test_doi_soat_ben_vung_v09.py`) **đi đúng đường
+`_chay` và KHÔNG tái hiện được** — 7/7 xanh. Chính chỗ "không tái hiện được"
+là manh mối: mã thì đúng, nên thứ chạy lần đó KHÔNG PHẢI mã này. Từ đó mới
+tìm ra hai tiến trình cũ ở trên.
+
+Bài kiểm **có cắn**: bỏ tạm hai dòng `pb.status`/`failure_reason` thì 3/7 hỏng
+với đúng chữ ký đã đo (`['failed','failed','failed'] != ['ok','ok','ok']`);
+khôi phục thì 7/7 đạt. Nên bản sửa bất biến là đúng và cần — nó chỉ không
+phải thứ gây ra 0/5.
+
+Tôi đã suy đoán sai **ba lần** trước khi đo được nguyên nhân thật (đổ cho
+"bản ghi cũ", cho "trạng thái bị ghi đè", cho "che khuất module"). Cả ba đều
+là suy luận từ nhật ký của một trạng thái DÙNG CHUNG — đúng loại bằng chứng
+mà một người ghi thứ hai làm cho vô nghĩa.

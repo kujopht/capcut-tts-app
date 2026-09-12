@@ -74,6 +74,85 @@ HAN_CHAT = 900.0
 HAN_THUC_THI = 2700.0
 
 
+#: Dấu hiệu một tiến trình Control Center KHÁC đang sống. Hẹp có chủ đích:
+#: chữ "desktop" một mình khớp cả ChatGPT Desktop, nên chỉ nhận cụm CÓ
+#: không gian tên của gói này.
+DAU_HIEU_CC = ("scripts.control_center", "control_center.desktop",
+               "control_center.webmain", "router-cc", "router_cc_",
+               "routercontrolcenter")
+
+
+def tien_trinh_cc_khac(liet_ke=None, pid_minh: int = 0):
+    """Còn tiến trình Control Center NÀO khác đang sống không?
+
+    KHÔNG phải để cấm hai tiến trình — `TestHaiTienTrinh` khoá lại rằng hai
+    Control Center trên một sổ là chuyện BÌNH THƯỜNG, và các bất biến loại
+    trừ (`claim_task` nguyên tử, khoá tài nguyên) được thiết kế cho đúng
+    cảnh đó. Cái KHÔNG chấp nhận được là chạy NGHIỆM THU trong lúc đó.
+
+    VÌ SAO (đo được 2026-09-12): một `desktop` (pid 11620) và một `webmain`
+    (pid 34188) còn sống từ hôm trước, chạy MÃ CŨ, cùng đạp nhịp trên sổ
+    chính tắc. Chúng giành việc rồi chạy bằng bản chưa có bản sửa, nên NĂM
+    lần nghiệm thu liên tiếp cho ra cùng một chữ ký hỏng và hai bản sửa đúng
+    trông như vô hiệu. Sổ còn giữ dấu vân tay: cùng một nhật ký có cả `X/12`
+    (trần của bộ nghiệm thu) lẫn `X/3` (trần mặc định của desktop/webmain) —
+    một tiến trình không thể in ra hai trần.
+
+    Nghiệm thu đo HÀNH VI CỦA MÃ NÀY. Một tiến trình khác — nhất là bản cũ —
+    làm mọi khẳng định mất nghĩa. Nên bài kiểm phải TỪ CHỐI CHẠY, chứ không
+    phải chạy rồi báo một con số không tin được.
+
+    `liet_ke` tiêm được để bài kiểm không phải dựng tiến trình thật.
+    """
+    import os
+    import subprocess
+    from scripts.router_v3.tien_trinh import an_cua_so
+
+    if liet_ke is None:
+        def liet_ke():
+            if os.name != "nt":
+                p = subprocess.run(["ps", "-eo", "pid=,args="],
+                                   capture_output=True, text=True,
+                                   **an_cua_so())
+                ra = []
+                for d in (p.stdout or "").splitlines():
+                    d = d.strip()
+                    if not d:
+                        continue
+                    so, _, cmd = d.partition(" ")
+                    try:
+                        ra.append((int(so), cmd))
+                    except ValueError:
+                        pass
+                return ra
+            ps = ("Get-CimInstance Win32_Process | ForEach-Object "
+                  "{ \"$($_.ProcessId)`t$($_.CommandLine)\" }")
+            p = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, text=True, **an_cua_so())
+            ra = []
+            for d in (p.stdout or "").splitlines():
+                so, _, cmd = d.partition("\t")
+                try:
+                    ra.append((int(so.strip()), cmd))
+                except ValueError:
+                    pass
+            return ra
+
+    minh = pid_minh or os.getpid()
+    thay = []
+    for so, cmd in (liet_ke() or ()):
+        if so == minh or not cmd:
+            continue
+        thap = cmd.lower()
+        # Bỏ chính bộ nghiệm thu (và bài kiểm của nó) ra khỏi phép đếm.
+        if "v09_real_acceptance" in thap or "unittest" in thap:
+            continue
+        if any(m.lower() in thap for m in DAU_HIEU_CC):
+            thay.append((so, cmd.strip()[:160]))
+    return thay
+
+
 def _in(s: str = "") -> None:
     RA.write(s + "\n")
 
@@ -849,6 +928,23 @@ def main() -> int:
     _tieu_de("NGHIỆM THU MODEL THẬT — VÒNG KÍN V0.9")
     _in(f"gốc dữ liệu chính tắc : {goc}")
     _in(f"kho mã                : {GOC}")
+
+    # TIỀN KIỂM: không đo gì cả khi còn một Control Center khác trên sổ này.
+    khac = tien_trinh_cc_khac()
+    if khac:
+        _in("")
+        _in("(!) DỪNG — còn tiến trình Control Center KHÁC đang sống:")
+        for so, cmd in khac:
+            _in(f"      pid {so}: {cmd}")
+        _in("")
+        _in("    Nghiệm thu đo hành vi của MÃ NÀY. Một tiến trình khác dùng")
+        _in("    chung sổ chính tắc sẽ giành việc và chạy bằng mã CỦA NÓ —")
+        _in("    có thể là một bản cũ — nên mọi khẳng định ở đây mất nghĩa.")
+        _in("    Đo được 2026-09-12: đúng cảnh này làm hỏng NĂM lần chạy liên")
+        _in("    tiếp và khiến hai bản sửa đúng trông như vô hiệu.")
+        _in("    Đóng các tiến trình trên rồi chạy lại.")
+        return 3
+    _in("tiến trình CC khác    : 0 (đã kiểm)")
 
     kho_vai = BenchmarkStore(duong_vai(goc))
     truoc = len(kho_vai.all())

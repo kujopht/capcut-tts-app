@@ -351,23 +351,40 @@ class SessionManager:
         # sau dung lai mat them mot lan khoi dong, con be khoa thi mat ca lan
         # chay.
         if len(phien) >= self.max_sessions:
-            # Chi thu hoi phien RANH that su va KHONG giu viec nao. Thu tu:
-            # nguoi truoc (chac chan vo dung), roi den LRU trong so bi luat 2
-            # tu choi.
-            thu = [s for s in tu_choi
-                   if s.state is SessionState.IDLE and not s.current_task]
-            thu.sort(key=lambda x: (x.idle_seconds <= NGUONG_NGUOI,
-                                    x.last_activity))
-            for s in thu:
+            # Hai hang, theo thu tu CHAC CHAN VO DUNG truoc.
+            #
+            # Hang 1 — `STARTING` khong PID va qua han khoi dong: phien RO.
+            # Khong adapter nao mat 15 phut de bao san sang. `recover()` cung
+            # don loai nay, nhung no CHI chay luc khoi dong — vo dung giua
+            # mot lan chay dai, tuc dung luc be can khe.
+            ket = sorted((s for s in phien
+                          if s.state is SessionState.STARTING and s.pid is None
+                          and s.idle_seconds > HAN_KHOI_DONG),
+                         key=lambda x: x.last_activity)
+            # Hang 2 — phien RANH khong giu viec song, ma luat 2 vua tu choi.
+            # Nguoi truoc (chac chan vo dung), roi den LRU.
+            ranh = sorted((s for s in tu_choi
+                           if s.state is SessionState.IDLE
+                           and not self._dang_giu_viec(s)),
+                          key=lambda x: (x.idle_seconds <= NGUONG_NGUOI,
+                                         x.last_activity))
+            for s in [*ket, *ranh]:
                 if len(phien) < self.max_sessions:
                     break
-                self.dung(s.session_id, state=SessionState.STOPPED,
-                          reason=(f"rảnh {s.idle_seconds:.0f}s và luật 2 đã từ "
-                                  f"chối dùng lại cho việc này — nhả khe thay "
-                                  f"vì giữ chỗ mà không ai dùng được"))
+                chet = s.state is SessionState.STARTING
+                self.dung(
+                    s.session_id,
+                    state=SessionState.DEAD if chet else SessionState.STOPPED,
+                    reason=((f"kẹt ở STARTING {s.idle_seconds:.0f}s mà chưa "
+                             f"từng có PID — không khởi động được")
+                            if chet else
+                            (f"rảnh {s.idle_seconds:.0f}s và luật 2 đã từ chối "
+                             f"dùng lại cho việc này — nhả khe thay vì giữ chỗ "
+                             f"mà không ai dùng được")))
                 phien = [x for x in phien if x.session_id != s.session_id]
-                vet.append(f"thu hồi {s.session_id}: rảnh {s.idle_seconds:.0f}s, "
-                           f"không dùng lại được, nhả khe")
+                vet.append(f"thu hồi {s.session_id} "
+                           f"({'kẹt STARTING' if chet else 'rảnh'} "
+                           f"{s.idle_seconds:.0f}s): nhả khe")
 
         # Luat 3 — het tran phien -> CHO, khong dung them.
         if len(phien) >= self.max_sessions:
@@ -511,6 +528,32 @@ class SessionManager:
             session_id=session_id,
             detail=f"việc {'xong' if ok else 'hỏng'}; phiên giữ ấm để dùng lại")
 
+    def _dang_giu_viec(self, s: Session) -> bool:
+        """Phiên này có đang thật sự giữ một việc SỐNG không?
+
+        `current_task` khác rỗng là CHƯA ĐỦ để kết luận. Đo được trên sổ
+        chính tắc 2026-09-12: ba phiên `IDLE` nguội hơn BỐN TIẾNG vẫn mang
+        `current_task` trỏ tới những việc đã `FAILED` từ lâu — không đường
+        nào xoá, vì `recover()` chỉ dọn `current_task` cho phiên `BUSY`.
+        Tin vào một mình `current_task` thì ba phiên xác đó giữ ba khe vĩnh
+        viễn, và luật 2b vừa thêm cũng không gỡ được.
+
+        Nguồn thẩm quyền đúng là TRẠNG THÁI CỦA VIỆC, không phải cái nhãn
+        phiên còn nhớ: chỉ `TaskState.active` (RUNNING/REVIEW) mới nghĩa là
+        có một agent đang chiếm phiên này. Không tra được việc thì FAIL
+        CLOSED — coi như còn giữ, thà chờ hơn là cắt một agent đang ghi.
+        """
+        ma = str(s.current_task or "").strip()
+        if not ma:
+            return False
+        try:
+            t = self.store.task(ma)
+        except Exception:
+            return True
+        if t is None:
+            return False
+        return bool(t.state.active)
+
     def dung(self, session_id: str, *, reason: str = "",
              state: SessionState = SessionState.STOPPED) -> Optional[Session]:
         """Dừng một phiên. KHÔNG xoá worktree của nó."""
@@ -604,6 +647,14 @@ class SessionManager:
                     self.store.dat_trang_thai_session(
                         s.session_id, SessionState.IDLE, current_task="",
                         note="phục hồi: không có PID để kiểm, coi như rảnh")
+                elif s.current_task and not self._dang_giu_viec(s):
+                    # `IDLE` mà vẫn mang nhãn một việc đã kết thúc. Nhánh
+                    # trên chỉ dọn cho `BUSY`, nên cái nhãn này ở lại mãi và
+                    # bảng điều khiển báo một việc đang chạy mà không có.
+                    self.store.dat_trang_thai_session(
+                        s.session_id, SessionState.IDLE, current_task="",
+                        note=(f"phục hồi: việc {s.current_task} đã kết thúc, "
+                              f"xoá nhãn còn sót"))
                 continue
             if tien_trinh_con_song(s.pid):
                 gan_lai.append(s.session_id)

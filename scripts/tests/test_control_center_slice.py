@@ -24,6 +24,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -37,8 +38,9 @@ from scripts.router_v4.runtime import (Fabric, ModelCapability, Placement,
                                        WorkerRuntime)
 from scripts.control_center.bootstrap import khoi_tao
 from scripts.control_center.engine import MAX_ATTEMPTS, ControlCenter
-from scripts.control_center.model import (LockKind, Project, SessionState,
-                                          TaskState, TransitionError)
+from scripts.control_center.model import (LockKind, Project, SessionAction,
+                                          SessionState, TaskState,
+                                          TransitionError)
 from scripts.control_center.store import ControlStore
 
 
@@ -874,6 +876,61 @@ class TestVerticalSlice(unittest.TestCase):
             self.assertFalse(kq["dispatched"])
             self.assertEqual(cc.store.locks("demo"), [],
                              "khoá phải được nhả dù ngoại lệ không lường trước")
+        finally:
+            cc.shutdown()
+
+    def test_phien_vua_dung_khong_ro_khi_HET_LEASE(self):
+        """Mỗi lần giao hỏng sau bước (2) từng ĂN VĨNH VIỄN một khe phiên.
+
+        `_giao_khong_luoi` dựng phiên ở (2); bước (3) hết lease runtime thì
+        `return` mà chỉ trả KHOÁ và LEASE — phiên vừa dựng ở lại sổ mãi ở
+        `STARTING`, và `SessionState.STARTING.alive` là `True`. Đo được trên
+        sổ chính tắc 2026-09-12: 8 phiên rò trong MỘT lần chạy, rồi mọi lần
+        giao sau đó trả `WAIT: đã có 12/12 phiên sống` — lần nghiệm thu tự
+        bóp cổ nó giữa chừng, và triệu chứng trông y hệt "provider hỏng".
+        """
+        cc = _cc(kho_git_tam())
+        try:
+            cc.chat("demo", "fix web/admin/content-queue")
+            t = cc.store.tasks("demo")[0]
+            ctx = cc.ctx("demo")
+            ctx.leases.acquire = lambda *a, **k: None   # hết khe runtime
+            kq = cc._giao(t)
+            self.assertFalse(kq["dispatched"])
+            song = [s for s in cc.store.sessions("demo", alive_only=True)]
+            self.assertEqual(song, [], f"phiên rò: {[s.session_id for s in song]}")
+            self.assertEqual(cc.store.locks("demo"), [])
+        finally:
+            cc.shutdown()
+
+    def test_phien_DUNG_LAI_khong_bi_dung_khi_giao_hong(self):
+        """Chỉ phiên do CHÍNH lần giao này dựng mới được trả lại.
+
+        Một phiên DÙNG LẠI đã sống từ trước và có thể vừa nhận việc khác —
+        dừng nó là cắt ngang một agent không liên quan.
+        """
+        cc = _cc(kho_git_tam())
+        try:
+            cc.chat("demo", "fix web/admin/content-queue")
+            t = cc.store.tasks("demo")[0]
+            ctx = cc.ctx("demo")
+            goc = ctx.sessions.decide
+
+            def _dung_lai(*a, **k):
+                qd = goc(*a, **k)
+                return replace(qd, action=SessionAction.REUSE,
+                               session_id=cu.session_id,
+                               placement=Placement(cu.runtime_id, cu.model_id))
+
+            cu = ctx.sessions.create(goc(t, TaskContract.from_dict(t.contract)),
+                                     t, contract=TaskContract.from_dict(
+                                         t.contract))
+            ctx.sessions.decide = _dung_lai
+            ctx.leases.acquire = lambda *a, **k: None
+            cc._giao(t)
+            self.assertIsNotNone(cc.store.session(cu.session_id))
+            self.assertTrue(cc.store.session(cu.session_id).state.alive,
+                            "phiên dùng lại bị dừng oan")
         finally:
             cc.shutdown()
 

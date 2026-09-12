@@ -31,7 +31,8 @@ from scripts.control_center.execution.ket_qua import HopDongKetQua
 from scripts.control_center.execution.phuc_hoi import (HanhDongPhucHoi,
                                                        LoaiHong,
                                                        phan_loai_hong)
-from scripts.control_center.sessions import (NGUONG_NGUOI, SessionManager)
+from scripts.control_center.sessions import (HAN_KHOI_DONG, NGUONG_NGUOI,
+                                             SessionManager)
 from scripts.control_center.store import ControlStore, duong_so
 from scripts.control_center.worktrees import WorktreeCoordinator
 from scripts.router_v4.contract import (Execution, Requirements, TaskContract)
@@ -91,14 +92,20 @@ class TestKhePhien(unittest.TestCase):
 
     # -- tien ich ----------------------------------------------------------
     def _phien(self, sid, *, state=SessionState.IDLE, scope=(), nguoi=0.0,
-               viec=""):
+               viec="", pid=4242):
         s = Session(session_id=sid, project_id="demo", provider="antigravity",
                     runtime_id=f"AG{sid[-2:]}", model_id="m", state=state,
-                    scope=tuple(scope), current_task=viec, pid=4242,
+                    scope=tuple(scope), current_task=viec, pid=pid,
                     worktree=str(self.tmp / sid))
-        s.last_activity = time.time() - nguoi
         self.store.luu_session(s)
-        return s
+        # `luu_session()` DẤU thời gian bằng `time.time()`, nên phải đặt tuổi
+        # phiên SAU khi lưu — không thì mọi phiên đều "vừa hoạt động" và bài
+        # kiểm tuổi tác lặng lẽ mất hiệu lực.
+        if nguoi:
+            self.store.ket_noi().execute(
+                "UPDATE sessions SET last_activity=? WHERE session_id=?",
+                (time.time() - nguoi, sid))
+        return self.store.session(sid)
 
     def _viec(self):
         t = Task(task_id="t-moi", project_id="demo", title="ghi mot tep",
@@ -136,14 +143,71 @@ class TestKhePhien(unittest.TestCase):
         self.assertEqual(len(self._song()), 2,
                          "không được dừng một phiên đang chạy việc")
 
-    def test_03_khong_bao_gio_thu_hoi_phien_dang_giu_viec(self):
-        """`current_task` khác rỗng = có việc, dù trạng thái ghi là IDLE.
-
-        Một phiên vừa nhận việc nhưng chưa kịp chuyển BUSY vẫn phải được
-        miễn trừ — thu hồi nó là nhả khoá của một agent đang ghi.
-        """
+    def test_03_khong_thu_hoi_phien_giu_viec_con_SONG(self):
+        """Việc RUNNING = có agent đang ghi. Thu hồi phiên là cắt nó giữa chừng."""
+        for ma in ("t-dang-chay", "t-dang-chay-2"):
+            self.store.luu_task(Task(task_id=ma, project_id="demo", title=ma,
+                                     objective=ma, state=TaskState.RUNNING))
         self._phien("s-01", scope=("docs/a.md",), viec="t-dang-chay")
         self._phien("s-02", scope=("docs/b.md",), viec="t-dang-chay-2")
+        qd = self.sm.decide(self._viec(), _hop_dong(("docs/c.md",)))
+        self.assertIs(qd.action, SessionAction.WAIT)
+        self.assertEqual(len(self._song()), 2)
+
+    def test_03b_phien_XAC_giu_nhan_viec_da_CHET_thi_van_thu_hoi(self):
+        """Đo được trên sổ thật: ba phiên IDLE nguội >4 tiếng vẫn mang
+        `current_task` trỏ tới việc đã FAILED. Tin vào một mình cái nhãn đó
+        thì ba khe bị giữ vĩnh viễn."""
+        for ma, tt in (("t-xong", TaskState.DONE), ("t-hong", TaskState.FAILED)):
+            self.store.luu_task(Task(task_id=ma, project_id="demo", title=ma,
+                                     objective=ma, state=tt))
+        self._phien("s-01", scope=("docs/a.md",), viec="t-xong",
+                    nguoi=NGUONG_NGUOI + 9000)
+        self._phien("s-02", scope=("docs/b.md",), viec="t-hong",
+                    nguoi=NGUONG_NGUOI + 9000)
+        qd = self.sm.decide(self._viec(), _hop_dong(("docs/c.md",)))
+        self.assertIsNot(qd.action, SessionAction.WAIT,
+                         f"phiên xác vẫn giữ khe: {qd.reason}")
+        self.assertEqual(len(self._song()), 1)
+
+    def test_03c_viec_khong_tra_cuu_duoc_thi_FAIL_CLOSED(self):
+        """Không biết việc còn sống không -> coi như còn. Thà chờ hơn cắt nhầm."""
+        def _no(_ma):
+            raise RuntimeError("sổ hỏng")
+        self.sm.store = type("S", (), {
+            "task": staticmethod(_no),
+            "sessions": self.store.sessions,
+            "session": self.store.session,
+            "luu_session": self.store.luu_session,
+            "ghi_su_kien": self.store.ghi_su_kien})()
+        self._phien("s-01", scope=("docs/a.md",), viec="t-?",
+                    nguoi=NGUONG_NGUOI + 60)
+        self._phien("s-02", scope=("docs/b.md",), viec="t-?",
+                    nguoi=NGUONG_NGUOI + 60)
+        qd = self.sm.decide(self._viec(), _hop_dong(("docs/c.md",)))
+        self.assertIs(qd.action, SessionAction.WAIT)
+
+    def test_03d_STARTING_ro_qua_han_bi_thu_hoi_GIUA_lan_chay(self):
+        """8 phiên `STARTING` rò trong MỘT lần chạy thật đã bóp cổ nó.
+
+        `recover()` có dọn loại này nhưng chỉ chạy lúc khởi động — vô dụng
+        đúng lúc cần, tức giữa một lần chạy dài.
+        """
+        self._phien("s-01", state=SessionState.STARTING, pid=None,
+                    scope=("docs/a.md",), nguoi=HAN_KHOI_DONG + 60)
+        self._phien("s-02", state=SessionState.STARTING, pid=None,
+                    scope=("docs/b.md",), nguoi=HAN_KHOI_DONG + 30)
+        qd = self.sm.decide(self._viec(), _hop_dong(("docs/c.md",)))
+        self.assertIsNot(qd.action, SessionAction.WAIT, qd.reason)
+        self.assertIs(self.store.session("s-01").state, SessionState.DEAD,
+                      "phiên kẹt STARTING phải là DEAD, không phải STOPPED")
+
+    def test_03e_STARTING_con_PID_thi_KHONG_bi_dung(self):
+        """Có PID = có thể là adapter nhiều khe đang chạy thật. Không kết luận."""
+        self._phien("s-01", state=SessionState.STARTING,
+                    scope=("docs/a.md",), nguoi=HAN_KHOI_DONG + 60)
+        self._phien("s-02", state=SessionState.STARTING,
+                    scope=("docs/b.md",), nguoi=HAN_KHOI_DONG + 60)
         qd = self.sm.decide(self._viec(), _hop_dong(("docs/c.md",)))
         self.assertIs(qd.action, SessionAction.WAIT)
         self.assertEqual(len(self._song()), 2)

@@ -3040,6 +3040,38 @@ class ControlCenter:
                                + "\n" + mo)
         return hd
 
+    def _nha_phien_moi(self, ctx: "ProjectContext", session_id: str,
+                       ly_do: str) -> None:
+        """Trả lại một phiên VỪA DỰNG khi lần giao hỏng sau đó.
+
+        KHUYẾT TẬT ĐÃ RÒ (đo trên sổ chính tắc 2026-09-12, 8 phiên `STARTING`
+        rò trong MỘT lần chạy): `_giao_khong_luoi` dựng phiên ở bước (2), rồi
+        bước (3) (hết lease runtime) và bước (4) (việc bị vòng khác nhận
+        trước) `return` mà chỉ trả KHOÁ và LEASE — phiên vừa dựng ở lại sổ
+        mãi ở `STARTING`.
+
+        `SessionState.STARTING.alive` là `True`, nên mỗi lần giao hỏng ĂN
+        VĨNH VIỄN một khe. Sau ~12 lần thì `WAIT: đã có 12/12 phiên sống` và
+        không việc nào được giao nữa. `recover()` có dọn `STARTING` quá hạn
+        nhưng nó CHỈ chạy lúc khởi động, nên trong một lần chạy dài thì vô
+        nghĩa — đó là lý do một lần nghiệm thu tự bóp cổ chính nó giữa chừng.
+
+        Chỉ gọi cho phiên do CHÍNH lần giao này dựng. Phiên DÙNG LẠI thì
+        không được đụng: nó đã sống từ trước và có thể vừa được giao việc
+        khác.
+        """
+        if not session_id:
+            return
+        try:
+            ctx.sessions.dung(session_id, state=SessionState.STOPPED,
+                              reason=f"lần giao không thành: {ly_do}"[:280])
+        except Exception as exc:                              # noqa: BLE001
+            # Không để việc dọn dẹp làm hỏng đường trả lời của lần giao.
+            self.store.ghi_su_kien(
+                "SESSION_RELEASE_FAILED", project_id=ctx.project.project_id,
+                session_id=session_id, level="WARNING",
+                detail=f"{type(exc).__name__}: {exc}"[:200])
+
     def _giao_khong_luoi(self, t: Task, ctx: "ProjectContext",
                          lm: LockManager) -> Dict:
         """Thân thật của `_giao`. Thứ tự giành tài nguyên cố định — xem
@@ -3104,7 +3136,7 @@ class ControlCenter:
             if qd.action is SessionAction.REUSE:
                 s = ctx.sessions.reuse(qd.session_id, t, contract=hd)
             else:
-                s = ctx.sessions.create(qd, t, contract=hd)
+                s = ctx.sessions.create(qd, t, contract=hd)  # RÒ ở (3)/(4)
         except (WorktreeError, ValueError) as exc:
             lm.tra(t.project_id, t.task_id)
             self.store.doi_trang_thai(
@@ -3113,12 +3145,17 @@ class ControlCenter:
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": str(exc)[:200]}
 
+        # Phien VUA DUNG cho lan giao nay. Neu lan giao hong o (3) hoac (4)
+        # thi no chua tung chay gi, va phai duoc tra lai — xem `_nha_phien_moi`.
+        moi = s.session_id if qd.action is not SessionAction.REUSE else ""
+
         # (3) lease KHE runtime cua Router V4
         khoa_lease = self._muon_lease(ctx, s.runtime_id, t.task_id)
         if khoa_lease is None:
             lm.tra(t.project_id, t.task_id)
             ly_do = (f"runtime {s.runtime_id} hết khe đồng thời — chờ lượt "
                      f"sau thay vì đẩy thêm vào một tài khoản đã đầy")
+            self._nha_phien_moi(ctx, moi, ly_do)
             self._sang_waiting(t, ly_do)
             return {"task_id": t.task_id, "dispatched": False, "reason": ly_do}
 
@@ -3126,6 +3163,8 @@ class ControlCenter:
         if not self.store.claim_task(t.task_id, s.session_id):
             ctx.leases.release(khoa_lease, self.owner)
             lm.tra(t.project_id, t.task_id)
+            self._nha_phien_moi(
+                ctx, moi, "việc đã bị một vòng lập lịch khác nhận trước")
             return {"task_id": t.task_id, "dispatched": False,
                     "reason": "việc đã bị một vòng lập lịch khác nhận trước"}
 
@@ -3591,12 +3630,20 @@ class ControlCenter:
         # nó báo khai thiếu, còn hàm này thấy CÓ nên nó từ chối đối soát —
         # và một việc LÀM ĐÚNG bị đánh hỏng.
         #
-        # ĐO ĐƯỢC (Fanfic thật, 2026-09-12): 5/6 lượt worker ghi ĐÚNG tệp,
+        # ĐO ĐƯỢC (Fanfic thật, 2026-09-12): 9/9 lượt worker ghi ĐÚNG tệp,
         # đúng phạm vi, `scope`/`security`/`artifacts` đều xanh, `diff` là
-        # cổng DUY NHẤT hỏng — và cả 5 đều `FAILED`. Việc một lần chạy có
-        # xanh hay không phụ thuộc vào việc model TÌNH CỜ viết `changes`
-        # dưới dạng đường dẫn hay dưới dạng câu văn. Đó chính là thứ "may
-        # rủi theo nhà cung cấp" mà thực ra là một mâu thuẫn nội bộ.
+        # cổng DUY NHẤT hỏng — và cả 9 đều `FAILED`.
+        #
+        # GỐC RỄ của 9 lần đó đã được sửa Ở CHỖ KHÁC và nó còn tầm thường
+        # hơn: `parse_result` của V3 chỉ đọc `files_changed`, trong khi lời
+        # nhắc của Control Center BẮT BUỘC worker khai vào `changes`. Cổng
+        # chấm worker trên một trường mà chính ta không bao giờ yêu cầu nó
+        # điền, nên MỌI việc ghi đều hỏng một cách tất định — không phải may
+        # rủi theo nhà cung cấp. Xem `router_v3/packet.py::parse_result`.
+        #
+        # Hàm này VẪN cần thiết sau khi sửa gốc: khi model điền `changes`
+        # bằng một CÂU MÔ TẢ thay vì đường dẫn (đã thấy thật), lời khai và
+        # đĩa vẫn lệch nhau, và đây là nơi đối soát trên tập THẬT.
         #
         # Nguồn sự thật DUY NHẤT về việc worker đã khai gì LÚC QUA CỔNG là
         # chính thông điệp của cổng, và nó được khớp ngay dưới đây.

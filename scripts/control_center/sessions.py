@@ -292,10 +292,13 @@ class SessionManager:
                     vet.append(f"toả: bỏ qua {len(bo)} phiên rảnh ở runtime anh em "
                                f"đang chạy {sorted(tranh)}")
                 ung_vien = khac
+        # Phien RANH ma luat 2 TU CHOI dung lai — giu lai de luat 2b thu hoi.
+        tu_choi: List[Session] = []
         for s in sorted(ung_vien, key=lambda x: -x.last_activity):
             if s.idle_seconds > NGUONG_NGUOI:
                 vet.append(f"bỏ qua {s.session_id}: nguội "
                            f"{s.idle_seconds:.0f}s > {NGUONG_NGUOI:.0f}s")
+                tu_choi.append(s)
                 continue
             if chi_doc:
                 vet.append(f"dùng lại {s.session_id}: việc CHỈ ĐỌC, mọi phiên "
@@ -317,6 +320,54 @@ class SessionManager:
                     trace=tuple(vet))
             vet.append(f"bỏ qua {s.session_id}: phạm vi {list(pham_vi)} vượt "
                        f"ra ngoài {list(s.scope)}")
+            tu_choi.append(s)
+
+        # Luat 2b — THU HOI khe cua phien RANH ma luat 2 vua TU CHOI.
+        #
+        # KHUYET TAT DO DUOC (so chinh tac, 2026-09-12): luat 2 va luat 3 doc
+        # CUNG mot phien theo hai cach TRAI NGUOC nhau.
+        #   - Luat 2 noi: "bỏ qua {id}: nguội 1200s > 900s" / "phạm vi vượt ra
+        #     ngoài" -> KHONG dung lai duoc.
+        #   - Luat 3 lai DEM chinh phien do vao `len(phien)` -> no VAN chiem
+        #     mot khe, roi CHO no.
+        # Va cai cho do khong bao gio ket thuc: luat 3 cho `min(last_activity)`,
+        # nhung mot phien RANH da rANH roi — no khong "xong viec" de nha khe
+        # cho ai ca. Chi phien BAN moi co the tu do ra. Cho mot phien RANH la
+        # be khoa. `recover()` cung khong go duoc: no chi reap PID chet va
+        # `STARTING` qua han, con day la `IDLE` PID-con-song.
+        #
+        # HAU QUA do duoc: moi buoc GHI co pham vi rieng nen khong bao gio
+        # dung lai duoc phien cua buoc khac -> moi lan thu tao MOT phien moi
+        # -> sau ~12 luot (2 buoc x 3 phien ban x sua chua) thi cham tran, va
+        # MOI lan giao viec sau do tra ve `WAIT: đã có 12/12 phiên sống`. Viec
+        # khong bao gio duoc giao -> tang buoc doc ra "lượt trả về RỖNG" ->
+        # can bac thang -> BLOCKED. Day la ly do THAT cua nhung luot bi goi
+        # nham la "loi provider": lan chay do KHONG HE goi provider lan nao.
+        #
+        # Sua o dung cho: mot phien ma luat 2 vua tuyen bo la KHONG dung lai
+        # duoc thi cung khong duoc tinh la dang chiem cho. Thu hoi no (chi
+        # DANH DAU; `dung()` khong xoa worktree) roi dem lai. An toan vi mot
+        # phien chi la mot tien trinh AM dung lai duoc — dung no di thi lan
+        # sau dung lai mat them mot lan khoi dong, con be khoa thi mat ca lan
+        # chay.
+        if len(phien) >= self.max_sessions:
+            # Chi thu hoi phien RANH that su va KHONG giu viec nao. Thu tu:
+            # nguoi truoc (chac chan vo dung), roi den LRU trong so bi luat 2
+            # tu choi.
+            thu = [s for s in tu_choi
+                   if s.state is SessionState.IDLE and not s.current_task]
+            thu.sort(key=lambda x: (x.idle_seconds <= NGUONG_NGUOI,
+                                    x.last_activity))
+            for s in thu:
+                if len(phien) < self.max_sessions:
+                    break
+                self.dung(s.session_id, state=SessionState.STOPPED,
+                          reason=(f"rảnh {s.idle_seconds:.0f}s và luật 2 đã từ "
+                                  f"chối dùng lại cho việc này — nhả khe thay "
+                                  f"vì giữ chỗ mà không ai dùng được"))
+                phien = [x for x in phien if x.session_id != s.session_id]
+                vet.append(f"thu hồi {s.session_id}: rảnh {s.idle_seconds:.0f}s, "
+                           f"không dùng lại được, nhả khe")
 
         # Luat 3 — het tran phien -> CHO, khong dung them.
         if len(phien) >= self.max_sessions:

@@ -154,6 +154,32 @@ class HopDongKetQua:
                     or self.files_changed or self.evidence
                     or self.co_test or self.commit)
 
+    @property
+    def chua_chay(self) -> bool:
+        """KHÔNG CÓ LƯỢT NÀO — khác hẳn "có lượt nhưng lượt đó rỗng".
+
+        `rong` một mình KHÔNG phân biệt được hai chuyện rất khác nhau:
+
+        1. Agent đã chạy thật và trả về rỗng (headless tự chối một công cụ,
+           lượt bị cắt, tiến trình chết) — đó là chuyện của NHÀ CUNG CẤP.
+        2. Chưa hề có agent nào được giao việc — hết khe phiên, hết lease,
+           xếp hàng mãi không tới lượt. Không nhà cung cấp nào được gọi.
+
+        Phân biệt bằng dấu vết ĐỊNH TUYẾN: chỉ khi một lượt thật sự được
+        gửi đi thì `provider`/`model`/`runtime_id` mới được điền và `duration`
+        mới khác 0. Rỗng SẠCH cả ba trường đó nghĩa là không có lượt nào.
+
+        Vì sao phải tách: gộp chúng lại đã làm cả một vòng chẩn đoán đi sai
+        hướng — báo cáo kết luận "provider hỏng, phải giảm phụ thuộc nhà cung
+        cấp" trong khi lần chạy đó KHÔNG gọi provider lần nào; thứ hỏng là
+        luật cấp khe phiên (`sessions.py` luật 2b).
+        """
+        return (self.rong and not str(self.provider or "").strip()
+                and not str(self.model or "").strip()
+                and not str(self.runtime_id or "").strip()
+                and not (self.duration or 0) > 0
+                and self.exit_code is None)
+
     def to_dict(self) -> Dict:
         return {"task_id": self.task_id, "buoc_id": self.buoc_id,
                 "status": self.status, "summary": self.summary,

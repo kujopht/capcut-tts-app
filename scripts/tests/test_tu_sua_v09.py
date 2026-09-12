@@ -254,5 +254,129 @@ class Test04VongSuaDauCuoi(unittest.TestCase):
         self.assertEqual(b[0].muc_tieu, kh.buoc[0].muc_tieu)
 
 
+class Test05DoiSoatKhaiThieuTheoCONG(unittest.TestCase):
+    """`_doi_soat_khai_thieu` phải tin CỔNG, không tự suy lại từ `pb.changes`.
+
+    KHUYẾT TẬT ĐÃ LÀM HỎNG CẢ MỘT ĐỢT NGHIỆM THU THẬT (2026-09-12), và nó
+    nằm trong mã của ta chứ không ở nhà cung cấp:
+
+    `cong_diff` phán "worker không khai sửa gì" dựa trên `TaskResult.
+    files_changed` — bản ĐÃ LỌC, chỉ giữ thứ trông như đường dẫn. Hàm đối
+    soát lại đọc `pb.changes` THÔ. Khi model điền một CÂU MÔ TẢ thay vì
+    đường dẫn, hai cái nhìn lệch nhau: cổng thấy rỗng (nên báo khai thiếu),
+    hàm đối soát thấy có (nên từ chối) — và một việc LÀM ĐÚNG bị đánh hỏng.
+
+    Đo thật: 5/6 lượt worker ghi đúng tệp, đúng phạm vi, mọi cổng khác xanh,
+    `diff` là cổng DUY NHẤT hỏng — cả 5 đều `FAILED`.
+    """
+
+    def _dung(self, *, changes, observed=("docs/reports/a.md",),
+              scope=("docs/reports/a.md",), gates_khac_dat=True):
+        from scripts.router_v3.pool.validation import GateResult
+        from scripts.router_v4.envelope import ResultEnvelope
+        from scripts.control_center.engine import DAU_HIEU_KHAI_THIEU
+
+        class _BC:
+            def __init__(s):
+                s.passed = False
+                s.files_changed_observed = list(observed)
+                s.scope_violations = []
+                s.gates = [
+                    GateResult("shape", True, "status=ok"),
+                    GateResult("diff", False,
+                               f"{DAU_HIEU_KHAI_THIEU} {list(observed)}"),
+                    GateResult("scope", gates_khac_dat, "trong phạm vi"),
+                    GateResult("security", True, "không thấy bí mật"),
+                    GateResult("artifacts", True, "đủ hiện vật"),
+                ]
+
+            @property
+            def failed_gates(s):
+                return [g.name for g in s.gates if not g.passed]
+
+        class _KQ:
+            pass
+
+        kq = _KQ()
+        kq.validation = _BC()
+        kq.envelope = ResultEnvelope(task_id="t1", status="failed",
+                                     summary="đã tạo tệp",
+                                     changes=list(changes))
+        from scripts.control_center.planner import RulePlanner
+        hd = RulePlanner(default_write_scope=("docs",))._hop_dong(
+            "t1", "tạo tệp", "documentation", list(scope),
+            cau_goc="ok làm đi", deps=())
+        return kq, hd
+
+    def _cc(self):
+        from scripts.control_center.engine import ControlCenter
+        return ControlCenter(root=_tmp(), probe=False)
+
+    def test_CAU_MO_TA_trong_changes_van_duoc_doi_soat(self):
+        """Hình dạng ĐÚNG đã làm hỏng nghiệm thu thật."""
+        cc = self._cc()
+        try:
+            kq, hd = self._dung(changes=[
+                "Tạo docs/reports/a.md với tiêu đề, 4 gạch đầu dòng và "
+                "chuỗi xác nhận bắt buộc."])
+            self.assertTrue(cc._doi_soat_khai_thieu(_CtxGia(cc), "t1", hd, kq))
+            # `changes` được ĐIỀN LẠI bằng tập THẬT
+            self.assertEqual(list(kq.envelope.changes), ["docs/reports/a.md"])
+        finally:
+            cc.shutdown()
+
+    def test_DUONG_DAN_DUNG_trong_changes_cung_duoc_doi_soat(self):
+        cc = self._cc()
+        try:
+            kq, hd = self._dung(changes=["docs/reports/a.md"])
+            self.assertTrue(cc._doi_soat_khai_thieu(_CtxGia(cc), "t1", hd, kq))
+        finally:
+            cc.shutdown()
+
+    def test_changes_RONG_van_duoc_doi_soat_nhu_cu(self):
+        cc = self._cc()
+        try:
+            kq, hd = self._dung(changes=[])
+            self.assertTrue(cc._doi_soat_khai_thieu(_CtxGia(cc), "t1", hd, kq))
+        finally:
+            cc.shutdown()
+
+    def test_DIA_SACH_thi_VAN_TU_CHOI(self):
+        """Bất biến không được nới: khai có sửa mà đĩa SẠCH phải HỎNG."""
+        cc = self._cc()
+        try:
+            kq, hd = self._dung(changes=["docs/reports/a.md"], observed=())
+            self.assertFalse(cc._doi_soat_khai_thieu(_CtxGia(cc), "t1", hd, kq))
+        finally:
+            cc.shutdown()
+
+    def test_TEP_NGOAI_PHAM_VI_thi_VAN_TU_CHOI(self):
+        cc = self._cc()
+        try:
+            kq, hd = self._dung(changes=["mô tả gì đó"],
+                                observed=("docs/reports/a.md", "server/.env"),
+                                scope=("docs/reports/a.md",))
+            self.assertFalse(cc._doi_soat_khai_thieu(_CtxGia(cc), "t1", hd, kq))
+        finally:
+            cc.shutdown()
+
+    def test_CONG_KHAC_HONG_thi_VAN_TU_CHOI(self):
+        cc = self._cc()
+        try:
+            kq, hd = self._dung(changes=["mô tả"], gates_khac_dat=False)
+            self.assertFalse(cc._doi_soat_khai_thieu(_CtxGia(cc), "t1", hd, kq))
+        finally:
+            cc.shutdown()
+
+
+class _CtxGia:
+    """`ProjectContext` tối thiểu — `_doi_soat_khai_thieu` chỉ cần `project`."""
+
+    def __init__(self, cc):
+        from scripts.control_center.model import Project
+        self.project = Project(project_id="demo", name="D",
+                               repo_path=str(_tmp()))
+
+
 if __name__ == "__main__":                      # pragma: no cover
     unittest.main(verbosity=2)

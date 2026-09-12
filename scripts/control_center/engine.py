@@ -3571,12 +3571,35 @@ class ControlCenter:
             return False                    # con cong khac hong -> giu FAILED
 
         pb = kq.envelope
-        khai = {str(t).replace("\\", "/").strip("/") for t in pb.changes if t}
         that = sorted({str(t).replace("\\", "/").strip("/")
                        for t in bc.files_changed_observed if t})
-        # CHI trường hợp khai RỖNG mà đĩa CÓ đổi.
-        if khai or not that:
+        # ĐĨA PHẢI CÓ ĐỔI. Chiều ngược lại ("khai có sửa mà đĩa SẠCH") là
+        # thất bại im lặng thật sự và KHÔNG BAO GIỜ được chấp nhận ở đây —
+        # nhánh đó đã bị `cong_diff` chặn và ta không đụng tới.
+        if not that:
             return False
+        # KHÔNG tự suy lại "worker có khai gì không" từ `pb.changes`.
+        #
+        # ĐÂY LÀ KHUYẾT TẬT ĐÃ LÀM HỎNG CẢ MỘT ĐỢT NGHIỆM THU THẬT, và nó
+        # nằm hoàn toàn trong mã của ta chứ không phải ở nhà cung cấp:
+        #
+        # `cong_diff` phán "worker không khai sửa gì" dựa trên `TaskResult.
+        # files_changed` — một bản ĐÃ LỌC, chỉ giữ thứ trông như đường dẫn.
+        # Hàm này lại đọc `pb.changes` THÔ. Khi model điền vào `changes` một
+        # CÂU MÔ TẢ ("Tạo docs/reports/x.md với tiêu đề, 4 gạch đầu dòng…")
+        # thay vì một đường dẫn, hai cái nhìn lệch nhau: cổng thấy RỖNG nên
+        # nó báo khai thiếu, còn hàm này thấy CÓ nên nó từ chối đối soát —
+        # và một việc LÀM ĐÚNG bị đánh hỏng.
+        #
+        # ĐO ĐƯỢC (Fanfic thật, 2026-09-12): 5/6 lượt worker ghi ĐÚNG tệp,
+        # đúng phạm vi, `scope`/`security`/`artifacts` đều xanh, `diff` là
+        # cổng DUY NHẤT hỏng — và cả 5 đều `FAILED`. Việc một lần chạy có
+        # xanh hay không phụ thuộc vào việc model TÌNH CỜ viết `changes`
+        # dưới dạng đường dẫn hay dưới dạng câu văn. Đó chính là thứ "may
+        # rủi theo nhà cung cấp" mà thực ra là một mâu thuẫn nội bộ.
+        #
+        # Nguồn sự thật DUY NHẤT về việc worker đã khai gì LÚC QUA CỔNG là
+        # chính thông điệp của cổng, và nó được khớp ngay dưới đây.
         # KHONG duoc hoi `pb.status` o day — no da BI GHI DE.
         #
         # `Executor.run` dat `pb.status = "failed"` va

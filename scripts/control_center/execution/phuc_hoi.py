@@ -54,6 +54,12 @@ class LoaiHong(str, Enum):
     NANG_LUC = "NANG_LUC"
     CAU_HINH_QUYEN = "CAU_HINH_QUYEN"
     THAM_QUYEN = "THAM_QUYEN"
+    #: KHONG PHAI mot lan hong cua VIEC — viec chua tung duoc giao cho ai.
+    #: Tach rieng vi da bi lan voi `PROVIDER` mot lan va ton nhieu ngay chan
+    #: doan: het khe phien thi khong mot luot nao duoc goi, ket qua rong y
+    #: het mot luot provider chet, va bao cao di ket luan "provider hong"
+    #: trong khi lan chay do khong he goi provider. Xem `sessions.py` luat 2b.
+    CHUA_GIAO = "CHUA_GIAO"
 
     @property
     def mo_ta(self) -> str:
@@ -66,6 +72,7 @@ class LoaiHong(str, Enum):
             "NANG_LUC": "chỗ chạy không làm được loại việc này",
             "CAU_HINH_QUYEN": "hồ sơ quyền / cấu hình chặn — KHÔNG phải lỗi việc",
             "THAM_QUYEN": "chạm ranh giới người dùng phải duyệt",
+            "CHUA_GIAO": "việc CHƯA TỪNG được giao — không có lượt nào để đánh giá",
         }[self.value]
 
     @property
@@ -139,7 +146,8 @@ def _khop(mau: Sequence[_re.Pattern], van: str) -> List[str]:
 
 def phan_loai_hong(*, ket_qua: Optional[HopDongKetQua] = None,
                    xac_minh: Optional[TrangThaiXacMinh] = None,
-                   loi: str = "", phu_thuoc_hong: bool = False) -> ChanDoan:
+                   loi: str = "", phu_thuoc_hong: bool = False,
+                   chua_giao: bool = False) -> ChanDoan:
     """Một lần hỏng -> loại. TẤT ĐỊNH, không LLM.
 
     Thứ tự kiểm có nghĩa và mỗi bước đứng trước một bước khác vì một lý do:
@@ -159,6 +167,19 @@ def phan_loai_hong(*, ket_qua: Optional[HopDongKetQua] = None,
     if phu_thuoc_hong:
         return ChanDoan(LoaiHong.PHU_THUOC, HanhDongPhucHoi.BO_QUA,
                         "bước phụ thuộc đã hỏng — không thử lại bước này")
+
+    # CHUA_GIAO đứng ngay sau PHU_THUOC và TRƯỚC mọi phép đọc văn bản: khi
+    # không có lượt nào chạy thì `van` rỗng, và mọi bộ nhận dạng bên dưới sẽ
+    # đoán mò trên một chuỗi rỗng. Riêng `rong=True` còn đoán THẲNG ra
+    # `RUNTIME` -> `PROVIDER`, tức là đổ lỗi cho một nhà cung cấp chưa hề
+    # được gọi. ĐỊNH TUYẾN LẠI ở đây là vô nghĩa (không chỗ chạy nào "tốt
+    # hơn" khi vấn đề là hết khe), nên hành động đúng là THỬ LẠI.
+    if chua_giao or (ket_qua is not None and ket_qua.chua_chay):
+        return ChanDoan(LoaiHong.CHUA_GIAO, HanhDongPhucHoi.THU_LAI,
+                        ("việc chưa từng được giao cho một phiên nào — không "
+                         "có lượt agent nào để đánh giá; đây là chuyện SỨC "
+                         "CHỨA, không phải chất lượng của việc hay của nhà "
+                         "cung cấp"))
 
     bc = _khop(_MAU_CAU_HINH, van)
     if bc:

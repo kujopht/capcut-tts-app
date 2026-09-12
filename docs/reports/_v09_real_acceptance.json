@@ -1,8 +1,8 @@
 {
-  "ts": 1789179316.3882115,
+  "ts": 1789182607.5120506,
   "tong": 25,
-  "dat": 21,
-  "hong": 4,
+  "dat": 24,
+  "hong": 1,
   "khang_dinh": [
     {
       "kich_ban": "C",
@@ -26,19 +26,19 @@
       "kich_ban": "C",
       "ten": "kết thúc ở DONE",
       "dat": false,
-      "chi_tiet": "BLOCKED — [LOI_HIEN_THUC] phép kiểm tất định KHÔNG đạt — lỗi hiện thực — đã sửa 2 lần mà vẫn không đạt và cạn cả ngân sách kế hoạch"
+      "chi_tiet": "BLOCKED — kiểm định không đạt nhưng không xác định được thứ gì để sửa — cần bạn xem"
     },
     {
       "kich_ban": "C",
       "ten": "mọi bước có hợp đồng kết quả CÓ CẤU TRÚC",
-      "dat": false,
-      "chi_tiet": "[{\"ghi_kiemthu\": null}, {\"ghi_tailieu\": \"failed\"}]"
+      "dat": true,
+      "chi_tiet": "[{\"ghi_kiemthu\": \"ok\"}, {\"ghi_tailieu\": \"ok\"}]"
     },
     {
       "kich_ban": "C",
       "ten": "agent GHI THẬT vào worktree cô lập",
       "dat": true,
-      "chi_tiet": "1 tệp: docs/reports/_v09_ghi_chu_handoff.md"
+      "chi_tiet": "2 tệp: docs/reports/_v09_ghi_chu_kiemthu.md, docs/reports/_v09_ghi_chu_handoff.md"
     },
     {
       "kich_ban": "C",
@@ -49,7 +49,7 @@
     {
       "kich_ban": "C",
       "ten": "docs/reports/_v09_ghi_chu_kiemthu.md có V09-ACCEPT-KIEMTHU",
-      "dat": false,
+      "dat": true,
       "chi_tiet": ""
     },
     {
@@ -67,7 +67,7 @@
     {
       "kich_ban": "C",
       "ten": "đã qua pha KIỂM ĐỊNH",
-      "dat": false,
+      "dat": true,
       "chi_tiet": ""
     },
     {
@@ -140,7 +140,7 @@
       "kich_ban": "E-mem",
       "ten": "nhớ KẾT QUẢ kiểm định",
       "dat": true,
-      "chi_tiet": "[LOI_HIEN_THUC] phép kiểm tất định KHÔNG đạt — lỗi hiện thực — đã sửa 2 lần mà vẫn không đạt và cạn cả ngân sách kế hoạch"
+      "chi_tiet": "kiểm định không đạt nhưng không xác định được thứ gì để sửa — cần bạn xem"
     },
     {
       "kich_ban": "E-mem",
@@ -167,83 +167,58 @@
           "ghi_tailieu"
         ]
       ],
-      "execution_id": "ex_b6072e6a1522",
+      "execution_id": "ex_8cb881f8d88e",
       "trang_thai": "BLOCKED",
       "worktree": [
-        "C:\\Users\\nguye\\Documents\\CapCut-TTS-App\\.router\\worktrees\\AG04\\fanfic.ghi_tailieu-v3-8680b9"
+        "C:\\Users\\nguye\\Documents\\CapCut-TTS-App\\.router\\worktrees\\AG02\\fanfic.ghi_kiemthu-d32476",
+        "C:\\Users\\nguye\\Documents\\CapCut-TTS-App\\.router\\worktrees\\AG01\\fanfic.ghi_tailieu-176ffe"
       ],
       "tep_da_ghi": [
+        "docs/reports/_v09_ghi_chu_kiemthu.md",
         "docs/reports/_v09_ghi_chu_handoff.md"
       ],
       "buoc": [
         {
           "buoc_id": "ghi_kiemthu",
-          "state": "RUNNING",
-          "xac_minh": "CHUA_KIEM",
-          "task_id": "fanfic.ghi_kiemthu-v3"
+          "state": "DONE",
+          "xac_minh": "DAT",
+          "task_id": "fanfic.ghi_kiemthu"
         },
         {
           "buoc_id": "ghi_tailieu",
-          "state": "FAILED",
-          "xac_minh": "KHONG_DAT",
-          "task_id": "fanfic.ghi_tailieu-v3"
+          "state": "DONE",
+          "xac_minh": "DAT",
+          "task_id": "fanfic.ghi_tailieu"
         }
       ],
       "worker": [
         {
           "buoc": "ghi_kiemthu",
-          "provider": null,
-          "model": null,
-          "runtime": null
+          "provider": "antigravity",
+          "model": "gemini-3.1-pro-low",
+          "runtime": "AG02"
         },
         {
           "buoc": "ghi_tailieu",
           "provider": "antigravity",
-          "model": "gemini-3.8-flash-medium",
-          "runtime": "AG04"
+          "model": "gemini-3.1-pro-low",
+          "runtime": "AG01"
         }
       ],
       "su_kien": [
         "EXEC_STATE",
-        "STEP_FAILED",
+        "EXEC_STATE",
+        "EXEC_VERIFIED",
+        "REVIEW_GATE",
+        "EXEC_STATE",
+        "STEP_VERIFIED",
+        "STEP_VERIFIED",
         "EXEC_STATE",
         "STEP_DISPATCHED",
         "STEP_DISPATCHED",
         "EXEC_STATE",
         "EXEC_STATE",
-        "PLAN_REVISED",
-        "EXEC_STATE",
-        "TASKS_ABANDONED",
-        "STEP_FAILED",
-        "EXEC_STATE",
-        "TASKS_ABANDONED",
-        "STEP_FAILED",
-        "EXEC_STATE",
-        "STEP_DISPATCHED",
-        "STEP_DISPATCHED",
-        "EXEC_STATE",
-        "EXEC_STATE",
-        "PLAN_REVISED",
-        "EXEC_STATE",
-        "TASKS_ABANDONED",
-        "STEP_FAILED",
-        "EXEC_STATE",
-        "TASKS_ABANDONED",
-        "STEP_FAILED",
-        "STEP_DISPATCHED",
-        "STEP_RETRY",
-        "STEP_FAILED",
-        "STEP_DISPATCHED",
-        "STEP_RETRY",
-        "STEP_FAILED",
-        "STEP_DISPATCHED",
-        "STEP_RETRY",
-        "STEP_FAILED",
-        "STEP_DISPATCHED",
-        "STEP_RETRY",
-        "STEP_FAILED",
-        "EXEC_STATE",
-        "STEP_DISPATCHED"
+        "EXEC_CREATED"
       ],
       "so_viec": 2
     },
@@ -267,7 +242,7 @@
     },
     "E-mem": {
       "so_thuc_thi": 20,
-      "tra_loi": "`ex_b6072e6a1522` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v3 — 0/2 bước đã kiểm định xong (0%)\n  đang chạy: ghi_kiemthu\n  (!) 1 bước chưa đạt\n  (!) CẦN BẠN: [LOI_HIEN_THUC] phép kiểm tất định KHÔNG đạt — lỗi hiện thực — đã sửa 2 lần mà vẫn không đạt và cạn cả ngân sách kế hoạch\n\n`ex_8f153029f6e2` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v3 — 0/2 bước đã k",
+      "tra_loi": "`ex_8cb881f8d88e` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v1 — 2/2 bước đã kiểm định xong (100%)\n  (!) CẦN BẠN: kiểm định không đạt nhưng không xác định được thứ gì để sửa — cần bạn xem\n\n`ex_b6072e6a1522` [BLOCKED] viết hai ghi chú khảo sát ngắn vào docs/reports/ cho kho Fanfic: một về tài liệu bàn giao,\n  kế hoạch v3 — 0/2 bước đã kiểm định xong (0%)\n  (!) 2 bước chưa đạt\n  (!) CẦN BẠN: [CHUA_GIAO] việc chưa từng được giao ",
       "episodic": 50
     }
   },

@@ -87,12 +87,20 @@ class KetQuaKiem:
     tat_dinh: bool = True
     giay: float = 0.0
     ts: float = field(default_factory=time.time)
+    #: WORKTREE đã cung cấp bằng chứng này. Rỗng = chưa chạy trong cây nào
+    #: (phép kiểm hình dạng/bằng chứng, hoặc không có môi giới).
+    #:
+    #: Có mặt để phán quyết TỰ GIẢI THÍCH ĐƯỢC: hai bước song song sống ở hai
+    #: cây khác nhau, nên câu "tệp X: CÓ" là vô nghĩa nếu không nói CÓ Ở ĐÂU.
+    #: Đúng chỗ mù đó đã cho một bước ĐÃ ĐẠT bị chấm lại là hỏng.
+    nguon: str = ""
 
     def to_dict(self) -> Dict:
         return {"cach": self.cach, "dat": self.dat,
                 "chi_tiet": khong_suy_nghi(self.chi_tiet, toi_da=1200),
                 "tham_so": dict(self.tham_so), "tat_dinh": self.tat_dinh,
-                "giay": round(self.giay, 2), "ts": self.ts}
+                "giay": round(self.giay, 2), "ts": self.ts,
+                "nguon": self.nguon}
 
 
 class MoiGioiKiem:
@@ -298,7 +306,8 @@ def _co_artifact(kq: Optional[HopDongKetQua], tp: Dict) -> KetQuaKiem:
 # ------------------------------------------------------------ kiem mot buoc --
 
 def kiem_dinh_buoc(buoc: BuocKeHoach, kq: Optional[HopDongKetQua], *,
-                   moi_gioi: Optional[MoiGioiKiem] = None
+                   moi_gioi: Optional[MoiGioiKiem] = None,
+                   khac: Sequence[MoiGioiKiem] = ()
                    ) -> Tuple[TrangThaiXacMinh, List[KetQuaKiem]]:
     """Phán quyết cho MỘT bước. Bằng chứng trước, phép kiểm sau.
 
@@ -306,6 +315,23 @@ def kiem_dinh_buoc(buoc: BuocKeHoach, kq: Optional[HopDongKetQua], *,
     ích — ta sẽ kiểm một thay đổi không tồn tại và có thể "đạt" nhờ trạng
     thái sẵn có của cây. Đây đúng là cách một DONE giả lọt qua một tầng kiểm
     định trông có vẻ nghiêm.
+
+    `moi_gioi` là cây của CHÍNH bước này và luôn được thử TRƯỚC; `khac` là
+    các worktree KHÁC CỦA ĐÚNG LẦN THỰC THI NÀY, thử sau và chỉ khi cây của
+    chính nó không thoả.
+
+    VÌ SAO CẦN `khac`, và đây là một khuyết tật ĐO ĐƯỢC (Fanfic thật,
+    `ex_8cb881f8d88e`, 2026-09-12): `kiem_dinh_thuc_thi` chấm lại TỪNG bước
+    nhưng chỉ đưa xuống MỘT môi giới — cái của bước ĐẦU TIÊN nó gặp. Hai bước
+    GHI song song sống ở hai cây cô lập, nên bước kia bị chấm trong cây của
+    anh em nó, không thấy tệp của mình, và bị kết luận HỎNG — trong khi sổ
+    bước của chính nó ghi `DONE / DAT / TEP_TON_TAI: CÓ`. Lần thực thi đi
+    thẳng tới `BLOCKED` với lý do "không xác định được thứ gì để sửa", vì
+    thật sự chẳng có gì hỏng để sửa cả.
+
+    Danh sách `khac` là ĐÓNG — chỉ các cây của lần thực thi này. Không bao
+    giờ quét thư mục tuỳ ý: một bước thiếu hiện vật ở MỌI cây được phép thì
+    vẫn phải HỎNG.
     """
     ds: List[KetQuaKiem] = []
     if kq is None:
@@ -329,11 +355,33 @@ def kiem_dinh_buoc(buoc: BuocKeHoach, kq: Optional[HopDongKetQua], *,
             "bước khai có phép kiểm tất định nhưng không có môi giới để chạy",
             tat_dinh=True))
         return TrangThaiXacMinh.THIEU_BANG_CHUNG, ds
-    for c, p in can:
-        try:
-            ds.append(moi_gioi.chay(c, p, ket_qua=kq))    # type: ignore[union-attr]
-        except KiemLoi as exc:
-            ds.append(KetQuaKiem(c.value, False, f"THAM SỐ SAI: {exc}", p))
+    def _chay_voi(mg: MoiGioiKiem) -> List[KetQuaKiem]:
+        ra: List[KetQuaKiem] = []
+        for c, p in can:
+            try:
+                k = mg.chay(c, p, ket_qua=kq)
+            except KiemLoi as exc:
+                k = KetQuaKiem(c.value, False, f"THAM SỐ SAI: {exc}", p)
+            # NGUON GOC: nói rõ cây nào đã trả lời, để phán quyết tự giải
+            # thích được thay vì chỉ nói "CÓ"/"KHÔNG CÓ".
+            k.nguon = str(mg.repo)
+            ra.append(k)
+        return ra
+
+    kiem = _chay_voi(moi_gioi)                   # type: ignore[arg-type]
+    if not all(k.dat for k in kiem):
+        # Chỉ thử các cây KHÁC CỦA CHÍNH lần thực thi này, và chỉ nhận khi
+        # TOÀN BỘ phép kiểm đạt ở đó — không ghép nửa cây này nửa cây kia.
+        for mg in khac:
+            if mg is moi_gioi:
+                continue
+            k2 = _chay_voi(mg)
+            if all(k.dat for k in k2):
+                for k in k2:
+                    k.chi_tiet += f"  [worktree {Path(mg.repo).name}]"
+                kiem = k2
+                break
+    ds.extend(kiem)
     if any(not k.dat for k in ds):
         return TrangThaiXacMinh.KHONG_DAT, ds
     # BUOC GHI PHAI CO IT NHAT MOT PHEP KIEM TAT DINH.
@@ -433,9 +481,17 @@ def kiem_dinh_thuc_thi(y: YDinhThucThi, kh: KeHoachThucThi,
     dat: List[str] = []
     hong: List[str] = []
     thieu: List[str] = []
+    # MỌI môi giới của lần thực thi này, KHÔNG trộn thành một vùng tên mờ:
+    # mỗi bước vẫn được chấm trong cây CỦA CHÍNH NÓ trước, và `khac` chỉ là
+    # đường lui có giới hạn cho tiêu chí định nghĩa trên hợp các đầu ra.
+    ung: List[MoiGioiKiem] = [m for m in (moi_gioi, *moi_gioi_khac)
+                              if m is not None]
     for b in kh.buoc:
-        tt, _ = kiem_dinh_buoc(b, ket_qua_buoc.get(b.buoc_id),
-                               moi_gioi=moi_gioi)
+        k = ket_qua_buoc.get(b.buoc_id)
+        rieng = _moi_gioi_cua_buoc(k, ung) or moi_gioi
+        tt, _ = kiem_dinh_buoc(
+            b, k, moi_gioi=rieng,
+            khac=[m for m in ung if m is not rieng])
         if tt is TrangThaiXacMinh.DAT:
             dat.append(b.buoc_id)
         elif tt is TrangThaiXacMinh.THIEU_BANG_CHUNG:
@@ -470,6 +526,31 @@ def kiem_dinh_thuc_thi(y: YDinhThucThi, kh: KeHoachThucThi,
         tieu_chi=tuple(cham),
         doc_lap=(None if not phan_bien else bool(phan_bien.get("doc_lap"))),
         ly_do=ly, giay=time.time() - t0)
+
+
+def _moi_gioi_cua_buoc(kq: Optional[HopDongKetQua],
+                       ung: Sequence[MoiGioiKiem]) -> Optional[MoiGioiKiem]:
+    """Môi giới neo vào ĐÚNG worktree mà bước này đã chạy trong.
+
+    Giữ NGUỒN GỐC THEO TỪNG BƯỚC: hợp đồng kết quả của bước đã ghi lại cây
+    của nó (`HopDongKetQua.worktree`), nên ta khớp theo đường dẫn thay vì
+    đoán. Không khớp được thì trả `None` và bên gọi rơi về môi giới chung —
+    đó là hành vi cũ, không tệ hơn.
+    """
+    w = str(getattr(kq, "worktree", "") or "") if kq is not None else ""
+    if not w:
+        return None
+    try:
+        d = Path(w).resolve()
+    except OSError:
+        return None
+    for m in ung:
+        try:
+            if Path(m.repo).resolve() == d:
+                return m
+        except OSError:
+            continue
+    return None
 
 
 def _cham_tieu_chi(tc: TieuChiNghiemThu, moi_gioi: Optional[MoiGioiKiem],

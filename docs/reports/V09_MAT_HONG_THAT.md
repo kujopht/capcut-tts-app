@@ -207,9 +207,35 @@ nhầm**. Khuyết tật nằm ở chỗ GỌI: chỉ `desktop.py` gọi nó. `w
 TUI (`__main__.py`) và MỌI chỗ dựng `ControlCenter(...)` thẳng — gồm cả bộ
 nghiệm thu — đi thẳng qua.
 
-**Sửa:** giành khoá trong `ControlCenter.__init__` (nơi THẬT SỰ sở hữu sổ) và
-nhả tường minh trong `shutdown()`. Người ghi thứ hai nhận `KhoLoi` nói rõ ai
-đang giữ. Khoá theo GỐC DỮ LIỆU nên hai gốc khác nhau không chặn nhau.
+**Bốn cửa vào, và cửa nào gọi `KhoaKho`:**
+
+| Cửa vào | Gọi `KhoaKho`? |
+|---|---|
+| `desktop.py` (Qt) | **CÓ** (`desktop.py:201`) |
+| `webmain.py` (web cục bộ) | không |
+| `__main__.py` (TUI) | không |
+| dựng `ControlCenter(...)` thẳng — bộ nghiệm thu, proof script, bài kiểm | không |
+
+**Lần sửa ĐẦU TIÊN của tôi đã SAI.** Tôi cưỡng chế khoá ngay trong
+`ControlCenter.__init__` để "không cửa nào quên được". Nó làm hỏng năm bài
+kiểm, **và những bài kiểm đó ĐÚNG**: `TestHaiTienTrinh` khoá lại rằng HAI
+Control Center trên một sổ là chuyện BÌNH THƯỜNG trong kho này — giao diện
+mở một cửa sổ, CLI chạy ở cửa sổ khác — và các bất biến loại trừ
+(`claim_task` nguyên tử, khoá tài nguyên READ/WRITE) được thiết kế cho đúng
+cảnh đó. Đã hoàn nguyên.
+
+Và bằng chứng cũng không đòi hơn thế: trong cả năm lần chạy hỏng, các bất
+biến ấy **vẫn đúng** — không việc nào chạy hai lần, không khoá nào rò. Thứ
+hỏng không phải "hai người ghi", mà là **ĐO trong lúc một tiến trình khác
+chạy MÃ CỦA NÓ**.
+
+**Sửa (đúng phạm vi):** rào ở RANH GIỚI NGHIỆM THU, không ở động cơ.
+`tien_trinh_cc_khac()` liệt kê tiến trình Control Center đang sống; `main()`
+in pid/dòng lệnh rồi **thoát 3** thay vì cho ra một con số không tin được.
+Bộ nhận dạng HẸP có chủ đích — chữ "desktop" một mình từng khớp cả ChatGPT
+Desktop (13 dương nhiễu trong lần quét tay đầu tiên).
+
+Không redesign thêm ở đây trừ khi xuất hiện một ca HỎNG DỮ LIỆU đo được.
 
 ### Mâu thuẫn trước đây coi là "còn mở" — ĐÃ GIẢI THÍCH
 

@@ -175,7 +175,7 @@ export default function AdminStoryReview() {
             </div>
 
             {/* ------------------------------------------- nội dung thật */}
-            <h3 className="section-title-sm">Nội dung</h3>
+            <h3 className="section-title-sm admin-noi-dung">Nội dung</h3>
             {chuong.length === 0 ? (
               <p className="hint">Chưa có chương nào.</p>
             ) : (

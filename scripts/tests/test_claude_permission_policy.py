@@ -549,8 +549,49 @@ class TestTienToCdKhongConHoi(unittest.TestCase):
             "deny")
 
 
+def _co_tang_nguoi_dung() -> bool:
+    """Máy này CÓ tầng người dùng để mà kiểm hay không.
+
+    `scripts/kiem_quyen.py` phân giải tầng người dùng qua `CLAUDE_CONFIG_DIR`
+    hoặc `~/.claude`. Nhập ở đây chứ không ở đầu tệp: sáu lớp còn lại trong
+    tệp này chỉ đọc `.claude/settings.json` CỦA KHO (đã nằm trong git) và
+    phải chạy được ở mọi nơi, kể cả khi `kiem_quyen` vì lý do nào đó không
+    nạp được.
+    """
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "cc_kiem_quyen_probe", str(GOC / "scripts" / "kiem_quyen.py"))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m.CAU_HINH_NGUOI_DUNG.is_file()
+    except Exception:                                           # noqa: BLE001
+        return False
+
+
+@unittest.skipUnless(
+    _co_tang_nguoi_dung(),
+    "không có tầng người dùng (~/.claude/settings.json) trên máy này — "
+    "lớp này kiểm CẤU HÌNH MÁY LÀM VIỆC, không kiểm sản phẩm",
+)
 class TestTangNguoiDungTuDung(unittest.TestCase):
     """Tầng NGƯỜI DÙNG phải tự đứng được — không dựa vào hồ sơ kho.
+
+    BỎ QUA Ở CI, CHẠY THẬT Ở MÁY LẬP TRÌNH — và sự khác biệt đó là CỐ Ý.
+
+    Thứ lớp này khẳng định (`~/.claude/settings.json` + hook người dùng) nằm
+    NGOÀI kho một cách có chủ đích: chỉ tầng đó mới có hiệu lực ở một thư mục
+    chưa được tin, nên nó không thể được commit vào đây. Một runner CI không
+    có tệp đó, nên MỌI luật rơi về `hoi` và cả lớp đỏ — đo được: 50 failures
+    + 1 error với `CLAUDE_CONFIG_DIR` trỏ vào một thư mục rỗng.
+
+    Đỏ như vậy không nói lên điều gì về sản phẩm, nhưng nó chặn mọi PR web
+    vì "Backend tests" là một check BẮT BUỘC. Nên: bỏ qua khi không có gì để
+    kiểm, và kiểm đầy đủ khi có.
+
+    Sáu lớp còn lại trong tệp này KHÔNG bị bỏ qua — chúng đọc hồ sơ kho, đã
+    nằm trong git, và phải xanh ở CI. Đã kiểm từng lớp một dưới điều kiện CI
+    mô phỏng: chỉ DUY NHẤT lớp này phụ thuộc môi trường.
 
     VÌ SAO ĐÂY LÀ BÀI KIỂM QUAN TRỌNG NHẤT TRONG TỆP NÀY.
 

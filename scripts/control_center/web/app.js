@@ -1889,6 +1889,11 @@ async function napCaiDatUI() {
   apDungNen();
 }
 
+// TRA VE co/khong, va do la phan quan trong: ham nay NUOT loi (dung y — mot
+// lan luu hong khong duoc lam gay tay keo thanh truot). Nguoi goi nao can
+// biet ket qua thi phai doc gia tri tra ve; `try/catch` quanh no KHONG BAO
+// GIO chay, nen mot lan luu bi backend TU CHOI van se bao "da luu" neu
+// nguoi goi doan theo `catch`.
 async function luuCaiDatUI(d) {
   try {
     caiDatUI = await api('/api/ui', {
@@ -1897,7 +1902,8 @@ async function luuCaiDatUI(d) {
     }) || caiDatUI;
     apDungNen();
     noi('đã lưu cài đặt giao diện');
-  } catch (e) { noi(`không lưu được — ${e.message}`); }
+    return true;
+  } catch (e) { noi(`không lưu được — ${e.message}`); return false; }
 }
 
 function veXemTruocNen() {
@@ -1952,6 +1958,24 @@ $('#nut-cai-dat').onclick = () => {
       diện KHÔNG có đường đọc một tệp tuỳ ý trên đĩa, và đó là cố ý.
       Cài đặt này bền qua khởi động lại.</p>
     <hr style="border:none;border-top:1px solid var(--vien);margin:12px 0">
+    <div class="nhan">THƯ MỤC DỰ ÁN MẶC ĐỊNH</div>
+    <div class="cd-hang">
+      <label for="cd-goc">Thư mục</label>
+      <input id="cd-goc" type="text" style="flex:1"
+             value="${esc(caiDatUI.thu_muc_du_an_mac_dinh || '')}"
+             placeholder="C:\\RouterProjects">
+      <button id="cd-goc-luu">Lưu</button>
+    </div>
+    <p class="ghi-chu">Chỉ là nơi đặt dự án TẠO MỚI. Dự án đã nhận nuôi nằm
+      nguyên chỗ của nó, và đổi ô này KHÔNG di chuyển gì cả. Thư mục chưa có
+      thì Router tự tạo lúc tạo dự án đầu tiên. Để trống = dùng mặc định
+      <code>C:\\RouterProjects</code>.</p>
+    <p class="ghi-chu">Không có nút «Chọn…» mở hộp thoại thư mục, và đó là cố
+      ý: trình duyệt KHÔNG cho trang web đọc đường dẫn thật của một thư mục
+      được chọn — nó chỉ đưa tên tệp bên trong. Một nút như vậy sẽ phải có
+      một endpoint duyệt đĩa tuỳ ý ở backend, tức là dựng lại đúng lỗ mà
+      <code>attachments.py</code> đã bịt.</p>
+    <hr style="border:none;border-top:1px solid var(--vien);margin:12px 0">
     <pre class="ma">API      http://127.0.0.1 (chỉ localhost; mọi request đòi token phiên)
 Đính kèm nằm cục bộ dưới .router/attachments/ — không tệp nào được tải
          lên đâu cả.
@@ -1991,6 +2015,20 @@ Chế độ định tuyến ECO/AUTO/STRONG/MAX hiện đổi được ở tần
   truot('#cd-dim', 'dim', (v) => `${Math.round(Number(v) * 100)}%`);
   truot('#cd-blur', 'blur', (v) => `${v}px`);
   $('#cd-fit').onchange = (e) => luuCaiDatUI({ fit: e.target.value });
+  // THU MUC DU AN MAC DINH. Luu khi bam, khong luu theo tung phim go —
+  // mot duong dan go do dang khong duoc ghi de len cai dat dang dung.
+  const nutGoc = $('#cd-goc-luu');
+  if (nutGoc) {
+    nutGoc.onclick = async () => {
+      const v = ($('#cd-goc')?.value || '').trim();
+      // CHI bao thanh cong khi backend THAT SU nhan — `luuCaiDatUI` da dat
+      // cau tu choi vao thanh trang thai roi, ghi de len no la noi doi.
+      if (await luuCaiDatUI({ thu_muc_du_an_mac_dinh: v })) {
+        noi(v ? `thư mục dự án mặc định: ${v}`
+              : 'đã bỏ thiết lập — dùng mặc định C:\\RouterProjects');
+      }
+    };
+  }
 };
 
 // ==================== V0.6.1: PROVIDERS & ACCOUNTS ====================
@@ -2184,26 +2222,134 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-$('#nut-project-moi').onclick = () => moHopThoai('Dự án mới', `
-  <p class="ghi-chu">Nhập đường dẫn tuyệt đối tới một kho git trên máy này.</p>
-  <input id="np-duong" type="text" placeholder="C:\\duong\\dan\\den\\kho" style="width:100%">
-  <div class="hang-nut"><span class="day"></span>
-    <button id="np-luu" class="chinh">Thêm dự án</button></div>`);
-document.addEventListener('click', async (e) => {
-  if (e.target.id !== 'np-luu') return;
-  const duong = $('#np-duong').value.trim();
-  if (!duong) return;
-  const ten = duong.split(/[\\/]/).filter(Boolean).pop() || 'du-an';
-  const pid = ten.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 24);
-  try {
-    await api('/api/project', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: pid, name: ten, repo_path: duong }),
-    });
-    $('#hop-thoai').close();
-    await lamMoi();
-  } catch (err) { noi(`không thêm được dự án — ${err.message}`); }
+// ------------------------------------------------------------ du an moi ----
+//
+// HAI LUONG TACH BACH (V0.9.2). Ban truoc chi co MOT o: duong dan tuyet doi
+// toi mot kho DA CO — tot cho nhan nuoi, nhung de bat dau tu so khong thi
+// nguoi dung phai tu mkdir + `git init` roi moi quay lai day.
+//
+// Va ban truoc con TU SUY `project_id` bang JS (`ten.toLowerCase()...`) roi
+// goi thang `/api/project`. Do la mot BAN SAO thu hai cua logic dat ten, dat
+// o tang khong bao gio duoc kiem — nay ca hai tab deu goi API backend va
+// KHONG tu suy gi ca.
+$('#nut-project-moi').onclick = () => {
+  moHopThoai('Dự án mới', `
+    <div class="np-tab">
+      <button id="np-tab-moi" class="np-tab-nut chon">Tạo mới</button>
+      <button id="np-tab-nhap" class="np-tab-nut">Nhập repo</button>
+    </div>
+    <div id="np-pane-moi">
+      <div class="nhan">TÊN DỰ ÁN</div>
+      <input id="np-ten" type="text" placeholder="VD: RouterDogfood02"
+             style="width:100%" autocomplete="off">
+      <p class="ghi-chu" id="np-xem">Dự án sẽ được tạo tại…</p>
+      <p class="ghi-chu">Router tạo thư mục, <code>git init</code>, và một
+        khung tối thiểu (<code>README.md</code>, <code>.gitignore</code>,
+        <code>docs/</code>). Sổ dữ liệu của Router KHÔNG nằm trong kho.</p>
+      <div id="np-loi" class="np-loi" hidden></div>
+      <div class="hang-nut"><span class="day"></span>
+        <button id="np-tao" class="chinh">Tạo dự án</button></div>
+    </div>
+    <div id="np-pane-nhap" hidden>
+      <div class="nhan">ĐƯỜNG DẪN KHO CÓ SẴN</div>
+      <input id="np-duong" type="text" placeholder="C:\\duong\\dan\\den\\kho"
+             style="width:100%" autocomplete="off">
+      <p class="ghi-chu">Kho được nhận nuôi TẠI CHỖ — Router không di chuyển,
+        không sao chép, không ghi gì vào kho của bạn.</p>
+      <div id="np-loi2" class="np-loi" hidden></div>
+      <div class="hang-nut"><span class="day"></span>
+        <button id="np-nhap" class="chinh">Nhập dự án</button></div>
+    </div>`);
+  xemTruocTen('');
+};
+
+function npTab(moi) {
+  $('#np-tab-moi')?.classList.toggle('chon', moi);
+  $('#np-tab-nhap')?.classList.toggle('chon', !moi);
+  const a = $('#np-pane-moi'), b = $('#np-pane-nhap');
+  if (a) a.hidden = !moi;
+  if (b) b.hidden = moi;
+}
+
+// `json()` cua khoi providers la bien CUC BO cua ham do — khong dung lai
+// duoc o day, va tham chieu nham thi loi chi lo ra luc bam nut.
+const npGui = (body) => ({
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
 });
+
+function npLoi(id, van) {
+  const o = $(id);
+  if (!o) return;
+  o.textContent = van || '';
+  o.hidden = !van;
+}
+
+// XEM TRUOC duong dan — hoi BACKEND, khong tu suy slug o day.
+let xemTruocHen = null;
+async function xemTruocTen(ten) {
+  const o = $('#np-xem');
+  if (!o) return;
+  try {
+    const r = await api(`/api/project/create/preview?ten=${encodeURIComponent(ten)}`);
+    o.textContent = r.duong
+      ? `Sẽ tạo tại:  ${r.duong}`
+      : `Thư mục dự án mặc định:  ${r.goc}`;
+  } catch { o.textContent = 'Dự án sẽ được tạo tại…'; }
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'np-ten') return;
+  npLoi('#np-loi', '');
+  clearTimeout(xemTruocHen);
+  const v = e.target.value;
+  xemTruocHen = setTimeout(() => xemTruocTen(v), 180);
+});
+
+document.addEventListener('click', async (e) => {
+  if (e.target.id === 'np-tab-moi') { npTab(true); return; }
+  if (e.target.id === 'np-tab-nhap') { npTab(false); return; }
+
+  if (e.target.id === 'np-tao') {
+    const ten = ($('#np-ten')?.value || '').trim();
+    if (!ten) { npLoi('#np-loi', 'Hãy đặt tên cho dự án.'); return; }
+    e.target.disabled = true;
+    try {
+      const r = await api('/api/project/create', npGui({ ten }));
+      if (!r.ok) { npLoi('#np-loi', r.ly_do || 'không tạo được dự án'); return; }
+      $('#hop-thoai').close();
+      await moDuAnMoi(r.project_id);
+    } catch (err) {
+      // KHONG do stack trace ra man hinh — chi cau nguoi doc duoc.
+      npLoi('#np-loi', `Không tạo được dự án — ${err.message}`);
+    } finally { e.target.disabled = false; }
+    return;
+  }
+
+  if (e.target.id === 'np-nhap') {
+    const duong = ($('#np-duong')?.value || '').trim();
+    if (!duong) { npLoi('#np-loi2', 'Hãy nhập đường dẫn kho.'); return; }
+    e.target.disabled = true;
+    try {
+      const r = await api('/api/project/adopt', npGui({ duong }));
+      if (!r.ok) { npLoi('#np-loi2', r.ly_do || 'không nhận được dự án'); return; }
+      $('#hop-thoai').close();
+      await moDuAnMoi(r.project_id);
+    } catch (err) {
+      npLoi('#np-loi2', `Không nhận được dự án — ${err.message}`);
+    } finally { e.target.disabled = false; }
+  }
+});
+
+// Chon du an vua tao/nhan roi mo o chat cua no NGAY — de nguoi dung go duoc
+// cau dau tien ma khong phai tu di tim trong thanh ben.
+async function moDuAnMoi(pid) {
+  if (pid) S.selected = pid;
+  await lamMoi();
+  try { noiWs(); } catch { /* ws se tu noi lai */ }
+  $('#o-soan')?.focus();
+  noi(`đã mở dự án ${pid}`);
+}
 
 // ---------------------------------------------------------- noi va lam moi --
 async function lamMoi() {

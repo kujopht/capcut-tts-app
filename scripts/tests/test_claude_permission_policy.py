@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import os
 import unittest
 from pathlib import Path
 
@@ -552,21 +553,30 @@ class TestTienToCdKhongConHoi(unittest.TestCase):
 def _co_tang_nguoi_dung() -> bool:
     """Máy này CÓ tầng người dùng để mà kiểm hay không.
 
-    `scripts/kiem_quyen.py` phân giải tầng người dùng qua `CLAUDE_CONFIG_DIR`
-    hoặc `~/.claude`. Nhập ở đây chứ không ở đầu tệp: sáu lớp còn lại trong
-    tệp này chỉ đọc `.claude/settings.json` CỦA KHO (đã nằm trong git) và
-    phải chạy được ở mọi nơi, kể cả khi `kiem_quyen` vì lý do nào đó không
-    nạp được.
+    TỰ phân giải đường dẫn, CỐ Ý KHÔNG nhập `scripts/kiem_quyen.py`.
+
+    Bản đầu của hàm này có nhập, và nó làm hỏng 85 bài kiểm ở CI — không phải
+    ở tệp này mà rải khắp `scripts/tests/`, với
+    `ValueError: I/O operation on closed file` phát ra từ một `print()` bình
+    thường ở `chinese_media_pipeline.py`.
+
+    Cơ chế: `kiem_quyen` dựng `RA = io.TextIOWrapper(sys.stdout.buffer, ...)`
+    ngay lúc nhập. Hàm này chạy ở thời điểm ĐỊNH NGHĨA LỚP (bộ trang trí
+    `skipUnless` được tính khi nhập mô-đun), rồi bỏ tham chiếu tới mô-đun
+    vừa tạo. Bộ đếm tham chiếu dọn mô-đun → dọn `RA` → `TextIOWrapper` đóng
+    luôn buffer BÊN DƯỚI nó, tức `sys.stdout.buffer`. Mọi `print()` sau đó
+    trong CÙNG tiến trình đều nổ.
+
+    Lớp ở dưới vẫn nhập `kiem_quyen` trong `setUpClass` và điều đó AN TOÀN:
+    nó giữ mô-đun ở `cls.kq` suốt vòng đời lớp, nên `RA` không bị dọn.
+
+    Hai dòng dưới đây phải khớp `kiem_quyen.NGUOI_DUNG`/`CAU_HINH_NGUOI_DUNG`.
+    Nếu lệch, `TestTangNguoiDungTuDung` sẽ bị bỏ qua ở máy lập trình và điều
+    đó lộ ra ngay: `python -m unittest ...` sẽ báo `skipped=12` thay vì chạy
+    đủ 57 bài.
     """
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "cc_kiem_quyen_probe", str(GOC / "scripts" / "kiem_quyen.py"))
-        m = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(m)
-        return m.CAU_HINH_NGUOI_DUNG.is_file()
-    except Exception:                                           # noqa: BLE001
-        return False
+    goc = os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")
+    return (Path(goc) / "settings.json").is_file()
 
 
 @unittest.skipUnless(

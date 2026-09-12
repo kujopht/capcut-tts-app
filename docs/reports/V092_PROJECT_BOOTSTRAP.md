@@ -114,6 +114,41 @@ và **cả bốn đã được thử bằng ĐỘT BIẾN** — đặt lại l�
 Không có trình duyệt ở CI, nên chỗ duy nhất còn lại bắt được chúng là ngón
 tay người dùng.
 
+### Diễn tập đường bấm (Chrome thật, CDP)
+
+Bộ công cụ trình duyệt **không với tới được** máy chủ loopback trên máy này
+(đã đo). Chrome + CDP thì với tới được, và cho ra cú **bấm thật**
+(`Input.dispatchMouseEvent`) chứ không phải một lời gọi API đội lốt. DOM chỉ
+dùng để TÌM TOẠ ĐỘ và ĐỌC LẠI kết quả.
+
+Diễn tập chạy trên một **gốc dữ liệu cách ly** (không phải sổ chính tắc),
+thư mục dự án riêng, tên dự án riêng — `C:\RouterProjects\RouterDogfood02`
+không bị đụng tới, nó dành cho lần thật. **31/31 ngay lần đầu**:
+
+```
+[2] ô Cài đặt   giá trị hỏng BỊ TỪ CHỐI kèm câu người đọc được
+                ("'kho-tuong-doi' là đường dẫn tương đối — hãy gõ đường dẫn
+                 đầy đủ, ví dụ C:\RouterProjects.")
+                giá trị đúng được nhận · mở lại hộp thoại thì giá trị CÒN ĐÓ
+[3] modal       hai tab · «Tạo mới» chọn sẵn · khung «Nhập repo» đang ẩn
+[4] đổi tab     bấm thật qua lại, đúng khung hiện/ẩn, đúng tab đỏ sáng
+[5] xem trước   "Sẽ tạo tại:  …\DuAn\DienTap01"   (hỏi backend, không tự suy)
+[6] tạo         hộp thoại tự đóng
+[7] trên đĩa    .git · README.md · .gitignore · docs · KHÔNG có .router/
+[8] sau khi tạo hiện ở thanh bên · được CHỌN sẵn · con trỏ ở #o-soan · 0 việc
+[9] «Nhập repo» đường CŨ vẫn chạy
+```
+
+Cái diễn tập này bắt được một khuyết tật thật **trước khi** có trình duyệt
+nào mở: nút Lưu báo «đã lưu» cho giá trị backend vừa từ chối (bảng trên).
+
+**Dogfood thật trên sổ chính tắc còn NỢ**, và nó nợ vì một lý do nêu thẳng
+ra: một tiến trình Control Center CŨ (có trước V0.9.2 —
+`/api/project/create/preview` trả 404) đang giữ sổ chính tắc, và chạy một
+người ghi THỨ HAI bên cạnh nó đúng là thứ đã làm hỏng năm lần chạy ở V0.9.
+Đóng cửa sổ đó rồi chạy lại là xong. **Không được** báo READY TO RELEASE
+trước khi lần đó chạy thật.
+
 ## Kiểm
 
 23 bài `test_tao_du_an_v092.py` — phần lớn là những lần phải từ chối (trùng

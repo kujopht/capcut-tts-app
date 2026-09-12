@@ -487,6 +487,28 @@ dialog::backdrop { background: rgba(3, 5, 10, .68); }
 #ht-than { padding: 12px 14px 14px; overflow: auto; max-height: 78vh; }
 .xem-to { max-width: 88vw; max-height: 68vh; display: block; margin: 0 auto; }
 
+/* ----------------------------------------------------------- du an moi */
+/* Hai luong TACH BACH: tao mot kho moi, hay nhan nuoi mot kho da co. Tab
+   duoc chon phai thay ro tu xa — nham tab la nham HANH VI (mot ben tao thu
+   muc tren dia, mot ben khong dung gi den kho cua nguoi dung). */
+.np-tab {
+  display: flex; gap: 4px; margin: 0 0 12px;
+  border-bottom: 1px solid var(--vien);
+}
+.np-tab-nut {
+  border: none; border-bottom: 2px solid transparent; border-radius: 0;
+  background: none; color: var(--mo); padding: 7px 14px; margin-bottom: -1px;
+}
+.np-tab-nut:hover { color: var(--chu); background: rgba(255, 255, 255, .04); }
+.np-tab-nut.chon {
+  color: var(--neon); border-bottom-color: var(--neon); background: none;
+}
+.np-loi {
+  margin: 9px 0 0; padding: 8px 10px; border-radius: 7px; font-size: 12px;
+  color: #ffc9c9; background: rgba(255, 107, 107, .12);
+  border: 1px solid rgba(255, 107, 107, .34);
+}
+
 /* --------------------------------------------------------- cai dat nen */
 .cd-hang {
   display: flex; align-items: center; gap: 10px; margin: 9px 0;

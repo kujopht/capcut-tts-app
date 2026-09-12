@@ -151,6 +151,46 @@ def thu_muc_goc(store=None) -> Path:
     return Path(GOC_MAC_DINH_WIN)
 
 
+def kiem_thu_muc_goc(d: str) -> str:
+    """Giá trị người dùng gõ vào ô «Thư mục dự án mặc định» -> giá trị lưu.
+
+    Rỗng là HỢP LỆ và có nghĩa "bỏ thiết lập, quay về mặc định" — không phải
+    lỗi. Ngoài ra đây là cài đặt DUY NHẤT quyết định Router tạo thư mục ở
+    ĐÂU, nên nó được kiểm ở một chỗ chứ không phải ở mỗi người gọi:
+
+    * phải TUYỆT ĐỐI — đường tương đối sẽ giải theo thư mục làm việc của
+      tiến trình server, một khái niệm người dùng không nhìn thấy và không
+      điều khiển được;
+    * không có đoạn `..` — gốc phải là một chỗ nói thẳng ra được, vì mọi
+      phép kiểm containment về sau đều đo từ nó;
+    * không được là gốc ổ đĩa — một gốc như `C:\\` biến `_trong_goc()` thành
+      phép kiểm luôn đúng;
+    * không được trỏ vào một TỆP đang tồn tại.
+
+    Thư mục chưa tồn tại thì CHẤP NHẬN: `tao_du_an()` tự tạo khi cần, và bắt
+    người dùng đi tạo tay trước là đúng cái phiền mà V0.9.2 xoá đi.
+    """
+    x = (d or "").strip().strip('"')
+    if not x:
+        return ""
+    if len(x) > 240:
+        raise TaoDuAnLoi("Đường dẫn quá dài.")
+    p = Path(x)
+    if not p.is_absolute():
+        raise TaoDuAnLoi(
+            f"{x!r} là đường dẫn tương đối — hãy gõ đường dẫn đầy đủ, "
+            f"ví dụ {GOC_MAC_DINH_WIN}.")
+    if ".." in p.parts:
+        raise TaoDuAnLoi("Đường dẫn không được chứa `..`.")
+    if p.parent == p:
+        raise TaoDuAnLoi(
+            f"{x!r} là gốc ổ đĩa — hãy chọn một thư mục con, "
+            f"ví dụ {GOC_MAC_DINH_WIN}.")
+    if p.is_file():
+        raise TaoDuAnLoi(f"{x!r} là một tệp, không phải thư mục.")
+    return str(p)
+
+
 def duong_xem_truoc(ten: str, store=None) -> str:
     """Chỗ dự án SẼ nằm — để UI hiện trước khi người dùng bấm."""
     try:

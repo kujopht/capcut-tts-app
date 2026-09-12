@@ -659,6 +659,18 @@ def dung_app(phien: PhienWeb) -> FastAPI:
         for k in ("fit", "theme"):
             if k in d:
                 ra[k] = str(d[k])[:32]
+        # Thu muc du an mac dinh (V0.9.2). Kiem o `tao_du_an` chu khong o
+        # day: day la cai dat DUY NHAT quyet dinh Router tao thu muc o dau,
+        # nen no phai co MOT dinh nghia hop le, dung chung voi moi nguoi goi.
+        from scripts.control_center.tao_du_an import (KHOA_THU_MUC_GOC,
+                                                      TaoDuAnLoi,
+                                                      kiem_thu_muc_goc)
+        if KHOA_THU_MUC_GOC in d:
+            try:
+                ra[KHOA_THU_MUC_GOC] = kiem_thu_muc_goc(
+                    str(d[KHOA_THU_MUC_GOC] or ""))
+            except TaoDuAnLoi as exc:
+                return _ma_loi(400, str(exc))
         if not ra:
             return _ma_loi(400, "không có khoá nào hợp lệ")
         return _sach(await asyncio.to_thread(

@@ -325,12 +325,25 @@ class Test03KhongFalseDone(_Nen):
         # thay vì treo mãi.
         #
         # Đo thật, vì 180s cũ không đủ và đã đỏ ở CI:
-        #     máy rảnh                       6–9s
-        #     4 luồng đốt CPU, 20 lượt       ~23s trung bình (18/20 đạt)
-        #     đuôi dài                       2/20 vượt 180s
-        # Bài này giao việc THẬT ~8 lần, mỗi lần tạo một worktree git
-        # (subprocess + I/O đĩa), nên nó phụ thuộc máy chứ không phụ thuộc
-        # logic. Runner GitHub 2 nhân còn chật hơn cái mô phỏng trên.
+        #     máy rảnh                       4–9s
+        #     4 tiến trình đốt CPU, 30 lượt  ~10s trung vị (30/30 đạt)
+        #     đuôi dài                       4/30 trong khoảng 311–372s
+        #
+        # LỜI GIẢI THÍCH CŨ Ở ĐÂY LÀ SAI, và ghi lại cho đúng: nó nói đuôi
+        # dài "phụ thuộc máy chứ không phụ thuộc logic". Không phải. Đo
+        # 2026-09-13 bằng mốc thời gian sự kiện cho thấy đuôi dài là một
+        # vòng quay ĐÓI CHỖ XẾP, không phải máy chậm:
+        #
+        #     mỗi lượt hỏng -> `SESSION_STOPPED ... thử lại ở chỗ khác`
+        #     -> tập runtime bị loại DỒN lại
+        #     -> `WAIT: KHÔNG placement nào đủ điều kiện`
+        #     -> xin khoá / quyết WAIT / nhả khoá, lặp ~0,26s một vòng
+        #
+        # Đếm được 222 vòng như vậy trong MỘT lượt chạy 65s. Khoá được cấp
+        # ở MỌI vòng — đây không phải chuyện khoá (0 sự kiện `LOCK_ORPHANED`
+        # trong cả lượt). Vì thế hạn này CHƯA hạ xuống được: hạ về 180s là
+        # bắt bài kiểm đỏ vì một khuyết tật KHÁC, chưa sửa, ở tầng xếp chỗ.
+        # Runner GitHub 2 nhân còn chật hơn cái mô phỏng trên.
         self.assertTrue(
             _chay_het(self.cc, eid, giay=600.0),
             "vòng lặp phục hồi KHÔNG có đáy — vẫn chạy sau 600s"

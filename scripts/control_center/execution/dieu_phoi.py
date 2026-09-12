@@ -444,8 +444,14 @@ class BoDieuPhoi:
         # `nha_tai_nguyen` CHI chay o cac duong KET THUC (`_ket_thuc`,
         # `BLOCKED`), nen khoa cua nhung viec vua bo khong ai nha. Ban ke
         # hoach moi xin lai dung `WRITE:FILESYSTEM:web` va nam o `WAITING`
-        # VINH VIEN — `_nha_khoa_mo_coi` chi chay o `recover()` (khoi dong
-        # lai) nen trong mot phien dang chay khong gi thu hoi no.
+        # VINH VIEN — luc do `_nha_khoa_mo_coi` chi chay o `recover()` (khoi
+        # dong lai) nen trong mot phien dang chay khong gi thu hoi no.
+        #
+        # Tang lap lich nay DA co luoi thu hai (xem `_giao_khong_luoi`: gap
+        # xung dot voi mot chu khoa da chet thi thu hoi roi xin lai). Nhung
+        # nha DUNG HEN o day van la duong chinh: luoi kia chi cuu duoc khi
+        # da co mot viec khac den xin: cho no lam viec cua minh la doi mot
+        # luot lap lich thua va mot su kien `LOCK_ORPHANED` khong can thiet.
         #
         # Bang chung tu runner: `TASKS_ABANDONED` x2 -> 4 viec FAILED + 1 viec
         # WAITING, `so_lan_lap_lai=2` (da het tran), lan thuc thi ket o

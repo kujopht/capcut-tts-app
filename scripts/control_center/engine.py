@@ -3227,6 +3227,22 @@ class ControlCenter:
         # `FILESYSTEM:web` doc thanh WRITE, khong bao gio noi long cho ghi.
         xin = [x for x in (doc_chuoi_tai_nguyen(r) for r in t.resources) if x]
         grant = lm.xin(t.project_id, xin, task_id=t.task_id) if xin else None
+        # BẾ TẮC TRONG PHIÊN: chủ khoá đã kết thúc mà khoá còn đó.
+        #
+        # `_nha_khoa_mo_coi` xử đúng ca này từ V0.9.1, nhưng nó chỉ chạy ở
+        # `recover()` — tức lúc KHỞI ĐỘNG LẠI. Trong một phiên đang chạy,
+        # việc kia bị giam hết `LOCK_TTL` (1 GIỜ) và bộ lập lịch chỉ lặng lẽ
+        # đẩy nó sang `WAITING` mỗi lượt. Đúng lớp lỗi mà
+        # `docs/reports/V091_DOGFOOD_HOTFIX.md` ghi là "cuộc đua ở tầng
+        # KHOÁ, phụ thuộc tải" và hoãn lại ở lần phát hành đó.
+        #
+        # Thu hồi rồi xin LẠI ĐÚNG MỘT LẦN. Không lặp: nếu lượt thứ hai vẫn
+        # bị từ chối thì chủ khoá còn sống thật, và `WAITING` là câu trả lời
+        # đúng. Mọi lưới an toàn vẫn nằm nguyên trong `_nha_khoa_mo_coi`.
+        if (grant is not None and not grant.granted
+                and self._chu_khoa_co_the_da_chet(grant.conflict_holder_task)
+                and self._nha_khoa_mo_coi(t.project_id)):
+            grant = lm.xin(t.project_id, xin, task_id=t.task_id)
         if grant is not None and not grant.granted:
             self._sang_waiting(t, grant.reason)
             return {"task_id": t.task_id, "dispatched": False,
@@ -3939,6 +3955,23 @@ class ControlCenter:
                             f"{t.state.value if t else '(không còn)'}, "
                             f"không phải RUNNING"))
         return da_nha
+
+    def _chu_khoa_co_the_da_chet(self, holder_task: str) -> bool:
+        """Phép thử RẺ: chủ khoá đang chặn có dấu hiệu KHÔNG còn chạy không?
+
+        Chỉ là một cái cổng để khỏi quét toàn bộ khoá của dự án ở mọi lượt
+        bị từ chối — quyết định NHẢ vẫn hoàn toàn thuộc về
+        `_nha_khoa_mo_coi`, nơi giữ đủ ba lưới an toàn (miễn trừ
+        PRODUCTION, `_dang_chay`, lease còn sống). Sai ở đây chỉ tốn thêm
+        một lần quét, không bao giờ nhả nhầm.
+        """
+        if not holder_task:
+            return False
+        with self._khoa:
+            if holder_task in self._dang_chay:
+                return False
+        t = self.store.task(holder_task)
+        return t is None or t.state is not TaskState.RUNNING
 
     #: Lý do TỪ CHỐI vì CHÍNH SÁCH/NĂNG LỰC — an toàn để định tuyến lại.
     #:

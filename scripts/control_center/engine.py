@@ -2687,15 +2687,15 @@ class ControlCenter:
             try:
                 kh = self.so_thuc_thi.ke_hoach(y.execution_id)
                 if kh is not None:
-                    kqb = {}
-                    for st in self.so_thuc_thi.buoc(y.execution_id,
-                                                    kh.phien_ban):
-                        d = st.get("ket_qua")
-                        kqb[st["buoc_id"]] = (EKQ.HopDongKetQua.tu_dict(d)
-                                              if d else None)
+                    # CÙNG bối cảnh kiểm định với tầng điều phối — kể cả
+                    # `moi_gioi_khac`. Bản trước chỉ đưa `moi_gioi` chung,
+                    # nên phán quyết ghi vào KÝ ỨC và vào vòng phản hồi chất
+                    # lượng có thể nói một bước ĐÃ ĐẠT là hỏng, chỉ vì nó
+                    # sống ở cây của bước anh em.
+                    dp = self.dieu_phoi(y.project_id)
+                    kqb, mg, khac = dp.canh_kiem(y.execution_id, kh)
                     bc = EKD.kiem_dinh_thuc_thi(
-                        y, kh, kqb,
-                        moi_gioi=self.dieu_phoi(y.project_id).moi_gioi)
+                        y, kh, kqb, moi_gioi=mg, moi_gioi_khac=khac)
             except Exception:                               # noqa: BLE001
                 bc = None
             ghi = self._ghi_ky_uc_thuc_thi(y, bc)

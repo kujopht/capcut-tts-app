@@ -596,9 +596,14 @@ def _cham_tieu_chi(tc: TieuChiNghiemThu, moi_gioi: Optional[MoiGioiKiem],
                                      CachKiem.CO_ARTIFACT)
                      else _gop_ket_qua(ket_qua_buoc))
             try:
-                ra.append(mg.chay(c, p, ket_qua=nguon))
+                k = mg.chay(c, p, ket_qua=nguon)
             except KiemLoi as exc:
-                ra.append(KetQuaKiem(c.value, False, f"THAM SỐ SAI: {exc}", p))
+                k = KetQuaKiem(c.value, False, f"THAM SỐ SAI: {exc}", p)
+            # NGUON GOC cho CA tiêu chí, không chỉ cho bước: một tiêu chí đạt
+            # "ở đâu đó trong hợp các cây" mà không nói ở CÂY NÀO thì không
+            # dựng lại được phán quyết.
+            k.nguon = str(mg.repo)
+            ra.append(k)
         return ra
 
     ds = _chay_voi(moi_gioi)

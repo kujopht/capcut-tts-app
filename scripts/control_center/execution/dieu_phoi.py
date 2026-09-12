@@ -352,6 +352,35 @@ class BoDieuPhoi:
                   "kiem": [k.to_dict() for k in ds]})
         return self._xu_ly_chan_doan(y, kh, m, cd)
 
+    def canh_kiem(self, execution_id: str, kh: KeHoachThucThi):
+        """`(kết quả từng bước, môi giới chính, môi giới các cây khác)`.
+
+        MỘT nơi dựng bối cảnh kiểm định, vì đã có BA nơi cần nó và hai trong
+        số đó từng quên `moi_gioi_khac` — mỗi lần quên là một bước ĐÃ ĐẠT bị
+        chấm lại trong cây của anh em rồi kết luận HỎNG. Gom lại để lần thêm
+        chỗ gọi thứ tư không tái lập khuyết tật ấy.
+        """
+        kqb: Dict[str, Optional[HopDongKetQua]] = {}
+        mg = self.moi_gioi
+        khac: List[MoiGioiKiem] = []
+        da_thay: set = set()
+        for st in self.so.buoc(execution_id, kh.phien_ban):
+            d = st.get("ket_qua")
+            k = HopDongKetQua.tu_dict(d) if d else None
+            kqb[st["buoc_id"]] = k
+            # MỌI worktree của MỌI bước, không chỉ cái đầu tiên. Hai bước
+            # song song sống ở hai cây khác nhau, và một tiêu chí của cả lần
+            # thực thi phải nhìn được HỢP của chúng — xem `_cham_tieu_chi`.
+            w = str(getattr(k, "worktree", "") or "") if k is not None else ""
+            if w and w not in da_thay:
+                da_thay.add(w)
+                m2 = self._moi_gioi_cua(k)
+                if m2 is not self.moi_gioi:
+                    khac.append(m2)
+                    if mg is self.moi_gioi:
+                        mg = m2
+        return kqb, mg, khac
+
     def _moi_gioi_cua(self, kq: HopDongKetQua) -> Optional[MoiGioiKiem]:
         """Môi giới kiểm neo vào ĐÚNG worktree mà bước đó chạy trong.
 
@@ -581,25 +610,7 @@ class BoDieuPhoi:
         kh = self.so.ke_hoach(execution_id)
         if y is None or kh is None:
             return None
-        kqb: Dict[str, Optional[HopDongKetQua]] = {}
-        mg = self.moi_gioi
-        khac: List[MoiGioiKiem] = []
-        da_thay: set = set()
-        for st in self.so.buoc(execution_id, kh.phien_ban):
-            d = st.get("ket_qua")
-            k = HopDongKetQua.tu_dict(d) if d else None
-            kqb[st["buoc_id"]] = k
-            # MỌI worktree của MỌI bước, không chỉ cái đầu tiên. Hai bước
-            # song song sống ở hai cây khác nhau, và một tiêu chí của cả lần
-            # thực thi phải nhìn được HỢP của chúng — xem `_cham_tieu_chi`.
-            w = str(getattr(k, "worktree", "") or "") if k is not None else ""
-            if w and w not in da_thay:
-                da_thay.add(w)
-                m2 = self._moi_gioi_cua(k)
-                if m2 is not self.moi_gioi:
-                    khac.append(m2)
-                    if mg is self.moi_gioi:
-                        mg = m2
+        kqb, mg, khac = self.canh_kiem(execution_id, kh)
         bc = kiem_dinh_thuc_thi(y, kh, kqb, moi_gioi=mg, moi_gioi_khac=khac,
                                 phan_bien=phan_bien)
         if chi_doc:
@@ -633,8 +644,15 @@ class BoDieuPhoi:
                     # Chấm LẠI với phán xử trong tay. KHÔNG vá `bc` tại chỗ:
                     # `_tong_hop` là chỗ duy nhất biết luật hợp nhất, và sửa
                     # kết quả bên ngoài nó sẽ làm hai đường kết luận lệch nhau.
+                    # `moi_gioi_khac` PHẢI đi cùng — y hệt lần chấm đầu ở
+                    # trên. Thiếu nó, mỗi bước bị chấm lại trong MỘT cây duy
+                    # nhất và bước sống ở cây anh em bị kết luận HỎNG dù sổ
+                    # bước của nó ghi `DAT`. Đo được (`ex_77828ea9f708`):
+                    # lần chấm ĐẦU đúng, rồi Reviewer trả `REVISE`, rồi lần
+                    # chấm LẠI ở đây báo "1 bước hỏng: ghi_tailieu" — một
+                    # bước vừa `STEP_VERIFIED DAT` vài giây trước.
                     bc = kiem_dinh_thuc_thi(y, kh, kqb, moi_gioi=mg,
-                                            phan_bien=pb)
+                                            moi_gioi_khac=khac, phan_bien=pb)
                     self.so.ghi_su_kien(
                         execution_id, "REVIEW_VERDICT",
                         project_id=y.project_id,

@@ -2230,22 +2230,64 @@ class ControlCenter:
                 except Exception:                           # noqa: BLE001
                     ho = ""
 
-        d = [f"MỤC TIÊU GỐC NGƯỜI DÙNG ĐÃ UỶ QUYỀN: {y.goal}", "",
-             "TIÊU CHÍ NGHIỆM THU (thứ phải đạt, không phải thứ đã làm):"]
-        d += [f"  [{'bắt buộc' if t.bat_buoc else 'nên có'}] {t.mo_ta}"
-              for t in kh.nghiem_thu] or ["  (kế hoạch không khai tiêu chí nào)"]
-        d += ["", "PHÉP KIỂM TẤT ĐỊNH ĐÃ CHẠY (máy đo, không phải lời khai):"]
-        for t in bc.tieu_chi:
-            d.append(f"  [{t.trang_thai.value}] {t.mo_ta}")
-            d += [f"      {'✓' if k.dat else '✗'} {k.cach}: {k.chi_tiet[:160]}"
-                  for k in t.kiem[:4]]
-        d += ["", f"BƯỚC ĐẠT: {', '.join(bc.buoc_dat) or '(không)'}",
-              f"BƯỚC CHƯA CHỨNG MINH: "
-              f"{', '.join(bc.buoc_thieu_bang_chung) or '(không)'}",
-              f"TỆP ĐÃ ĐỔI ({len(set(tep))}): "
+        # GOI TIN CO NHAN NGUON GOC.
+        #
+        # Ban truoc tron ba loai noi dung vao mot danh sach phang, va Reviewer
+        # da chi ra dung cho do (`ex_181f8dd29fbe`): no che dong
+        # "BƯỚC CHƯA CHỨNG MINH: (không)" mau thuan voi dong
+        # "[THIEU_BANG_CHUNG] <tieu chi ngu nghia>" ngay ben tren. Ca hai deu
+        # do ROUTER sinh, va ca hai deu dung theo nghia rieng cua chung — "khong
+        # buoc nao thieu bang chung" va "mot TIEU CHI thieu bang chung" — nhung
+        # khong co nhan nguon goc thi chung doc nhu mot loi khai tu mau thuan
+        # cua agent. Reviewer cham cai mau thuan do cho AGENT, va mot lan chay
+        # dung bi danh REVISE.
+        #
+        # Nen: tach MUC ro rang, noi thang muc nao do AI sinh, va khong bao gio
+        # dat van ban cua Router canh van ban cua worker nhu the chung cung
+        # loai.
+        ngu = [t.mo_ta for t in kh.nghiem_thu
+               if not any(c.tat_dinh for c, _ in t.cach_kiem)]
+        d = ["=== MỤC TIÊU GỐC (NGƯỜI DÙNG viết) ===", y.goal, "",
+             "=== TIÊU CHÍ NGHIỆM THU (siêu dữ liệu của KẾ HOẠCH) ==="]
+        d += [f"  [{i + 1}] {'BẮT BUỘC' if t.bat_buoc else 'NÊN CÓ'} · "
+              f"{'NGỮ NGHĨA' if t.mo_ta in ngu else 'TẤT ĐỊNH'} · {t.mo_ta}"
+              for i, t in enumerate(kh.nghiem_thu)] or \
+             ["  (kế hoạch không khai tiêu chí nào)"]
+        d += ["",
+              "=== HIỆN VẬT DO AGENT TẠO (worker-produced) ===",
+              f"  tệp đã đổi ({len(set(tep))}): "
               f"{', '.join(sorted(set(tep))[:25]) or '(không)'}",
-              "", "CÂU HỎI CHO BẠN: công việc trên có THỰC SỰ đạt mục tiêu gốc "
-              "và không vi phạm ràng buộc nào đang hiệu lực không?"]
+              "",
+              "=== BẰNG CHỨNG THỰC THI (MÁY đo, không phải lời khai) ==="]
+        for t in bc.tieu_chi:
+            d.append(f"  [{t.trang_thai.value}] {t.mo_ta}"
+                     + ("" if t.bat_buoc else "  (nên có)"))
+            for k in t.kiem[:4]:
+                goc = (f" @ {Path(k.nguon).name}" if getattr(k, "nguon", "")
+                       else "")
+                d.append(f"      {'✓' if k.dat else '✗'} {k.cach}: "
+                         f"{k.chi_tiet[:160]}{goc}")
+            if not t.kiem:
+                d.append("      (không có phép kiểm tất định nào — tiêu chí "
+                         "này CHỜ CHÍNH BẠN phán đoán)")
+        d += ["",
+              "=== SIÊU DỮ LIỆU CỦA ROUTER (do Router sinh, KHÔNG phải lời "
+              "khai của agent) ===",
+              f"  bước đã qua kiểm định: {', '.join(bc.buoc_dat) or '(không)'}",
+              f"  bước chưa chứng minh được: "
+              f"{', '.join(bc.buoc_thieu_bang_chung) or '(không)'}"]
+        if ngu:
+            # NOI RO vi sao hai dong tren KHONG mau thuan voi cac dong
+            # `[THIEU_BANG_CHUNG]` o muc bang chung.
+            d.append("  lưu ý: 'bước' và 'tiêu chí' là HAI thứ khác nhau — "
+                     "mọi BƯỚC có thể đã chứng minh xong trong khi một TIÊU "
+                     "CHÍ ngữ nghĩa vẫn chờ bạn chấm. Hai dòng trên nói về "
+                     "BƯỚC.")
+        d += ["", "=== CÂU HỎI CHO BẠN ===",
+              "Công việc trên có THỰC SỰ đạt mục tiêu gốc không?",
+              "Chấm theo TIÊU CHÍ ở trên. Nếu lời chê của bạn nhắm vào chính "
+              "các mục 'SIÊU DỮ LIỆU CỦA ROUTER' (cách Router trình bày), "
+              "hãy nói rõ — đó là lỗi của Router, không phải của agent."]
 
         khoi_rb, gon_rb = self._khoi_rang_buoc(pid)
         try:

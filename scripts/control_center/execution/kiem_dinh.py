@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -398,6 +399,159 @@ def kiem_dinh_buoc(buoc: BuocKeHoach, kq: Optional[HopDongKetQua], *,
     return TrangThaiXacMinh.DAT, ds
 
 
+# ------------------------------------------------ PHAM VI cua phan xu vai --
+
+class PhamViPhanXu(str, Enum):
+    """Một phán xử Reviewer nói về CÁI GÌ. Danh sách ĐÓNG.
+
+    Tồn tại vì một phán xử KHÔNG CÓ phạm vi là một phán xử có quyền lực vô
+    hạn. Đo được (`ex_181f8dd29fbe`): tiêu chí *"hai ghi chú có thực sự mô tả
+    đúng kho Fanfic"* khai `bat_buoc=False`, nhưng `REVISE` của Reviewer bị
+    áp TOÀN CỤC nên nó chặn cả lần thực thi — trong khi một tiêu chí TẤT
+    ĐỊNH không bắt buộc mà hỏng thì không chặn được gì. Cùng một mức thẩm
+    quyền khai báo, hai cách đối xử.
+    """
+
+    #: Nói về MỘT tiêu chí nghiệm thu. Thẩm quyền = thẩm quyền của tiêu chí.
+    TIEU_CHI = "CRITERION"
+    #: Nói về CẢ lần thực thi (mục tiêu gốc không đạt, chứ không phải một
+    #: tiêu chí lẻ nào).
+    TOAN_CUC = "EXECUTION_GLOBAL"
+    #: An toàn / toàn vẹn. LUÔN chặn, bất kể tiêu chí nào bắt buộc hay không.
+    AN_TOAN = "SAFETY"
+
+
+class NguonPhatHien(str, Enum):
+    """Phát hiện này nói về CÔNG VIỆC, hay về GÓI TIN ta tự dựng?"""
+
+    WORKER = "WORKER"
+    #: Reviewer chê phần văn bản do CHÍNH ROUTER sinh (khung báo cáo, dòng
+    #: trạng thái, ghi chú cắt ngữ cảnh). Đó là lỗi của ta, KHÔNG phải của
+    #: agent — và không bao giờ được tính là "worker trượt nghiệm thu".
+    ROUTER_PACKET = "ROUTER_PACKET"
+
+
+#: Dấu hiệu AN TOÀN / TOÀN VẸN. Danh sách ĐÓNG, khớp trên phần lý do của
+#: Reviewer. Một phát hiện loại này CHẶN kể cả khi tiêu chí sinh ra nó chỉ là
+#: "nên có" — xoá credential production không trở nên chấp nhận được chỉ vì
+#: tiêu chí tài liệu là tuỳ chọn.
+_MAU_AN_TOAN: Tuple[Any, ...] = tuple(_re.compile(m, _re.I) for m in (
+    r"\bxo[áa]\b.{0,40}\b(credential|bí mật|secret|khoá riêng|private key)\b",
+    r"\b(credential|secret|private key|khoá riêng)s?\b.{0,30}\b(bị )?(xoá|lộ|rò|leak)",
+    r"\bleak(s|ed)?\b.{0,30}\b(secret|credential|token|key)\b",
+    r"\b\.env\b.{0,40}\b(xoá|ghi|sửa|commit|lộ)\b",
+    r"\bxoá\b.{0,30}\bproduction\b", r"\bdrop\s+table\b",
+    r"\brm\s+-rf\b", r"\bforce[- ]push\b",
+))
+
+#: Dấu hiệu Reviewer đang chê KHUNG BÁO CÁO của Router, không chê công việc.
+_MAU_GOI_ROUTER: Tuple[Any, ...] = tuple(_re.compile(m, _re.I) for m in (
+    r"BƯỚC CHƯA CHỨNG MINH", r"BƯỚC ĐẠT\b", r"\bgói tin\b.{0,30}\bmâu thuẫn\b",
+    r"\bchưa (được )?nạp\b", r"\bkhông (được )?nạp\b",
+    r"\bbị (cắt|lược|elide)\b",
+))
+
+
+@dataclass(frozen=True)
+class PhatHienPhanBien:
+    """MỘT phát hiện của Reviewer, ĐÃ CÓ phạm vi và thẩm quyền.
+
+    Không mang suy luận nội bộ của model — chỉ kết luận, lý do ngắn, và trỏ
+    về bằng chứng.
+    """
+
+    pham_vi: PhamViPhanXu
+    phan_xu: str                       # ACCEPT | REVISE | REJECT
+    ly_do: str = ""
+    tieu_chi: str = ""                 # mô tả/định danh tiêu chí, nếu có
+    bat_buoc: bool = False
+    bang_chung: Tuple[str, ...] = ()
+    nguon: NguonPhatHien = NguonPhatHien.WORKER
+
+    @property
+    def chan_duoc(self) -> bool:
+        """Phát hiện này CÓ QUYỀN chặn lần thực thi không?
+
+        Luật thẩm quyền, và nó giống hệt luật của tiêu chí tất định:
+
+        * `AN_TOAN` — luôn chặn;
+        * `TIEU_CHI` — chỉ khi tiêu chí đó BẮT BUỘC;
+        * `TOAN_CUC` — chặn (nó nói về chính mục tiêu gốc);
+        * bất kể loại nào, phát hiện về GÓI TIN của Router KHÔNG chặn:
+          đó là lỗi của ta, và sửa nó không phải việc của agent.
+        """
+        if self.nguon is NguonPhatHien.ROUTER_PACKET:
+            return False
+        if self.pham_vi is PhamViPhanXu.AN_TOAN:
+            return True
+        if self.pham_vi is PhamViPhanXu.TOAN_CUC:
+            return True
+        return bool(self.bat_buoc)
+
+    def to_dict(self) -> Dict:
+        return {"pham_vi": self.pham_vi.value, "phan_xu": self.phan_xu,
+                "ly_do": khong_suy_nghi(self.ly_do, toi_da=600),
+                "tieu_chi": self.tieu_chi, "bat_buoc": self.bat_buoc,
+                "bang_chung": list(self.bang_chung),
+                "nguon": self.nguon.value, "chan_duoc": self.chan_duoc}
+
+
+def _khop(mau, van: str) -> List[str]:
+    ra = []
+    for m in mau:
+        x = m.search(van or "")
+        if x:
+            ra.append(x.group(0)[:80])
+    return ra
+
+
+def chuan_hoa_phan_bien(pb: Optional[Dict], kh: KeHoachThucThi
+                        ) -> Tuple[PhatHienPhanBien, ...]:
+    """MỘT phán xử toàn cục -> các PHÁT HIỆN CÓ PHẠM VI.
+
+    Reviewer trả về một phán xử + văn bản lý do. Tầng này gán phạm vi cho nó
+    một cách TẤT ĐỊNH, để `_tong_hop` không phải đoán:
+
+    1. dấu hiệu AN TOÀN trong lý do -> một phát hiện `AN_TOAN` (luôn chặn);
+    2. phán xử được quy về CÁC TIÊU CHÍ NGỮ NGHĨA đã gọi Reviewer — mỗi tiêu
+       chí giữ NGUYÊN `bat_buoc` của nó, nên một tiêu chí "nên có" không
+       mượn được quyền chặn;
+    3. không có tiêu chí ngữ nghĩa nào -> phán xử nói về CẢ lần thực thi;
+    4. lý do có chê KHUNG BÁO CÁO của Router -> thêm một phát hiện
+       `ROUTER_PACKET` (cảnh báo, không chặn, không tính cho worker).
+    """
+    if not pb:
+        return ()
+    px = str(pb.get("phan_xu") or "").strip().upper() or "REVISE"
+    ly = str(pb.get("ly_do") or "")
+    ra: List[PhatHienPhanBien] = []
+
+    at = _khop(_MAU_AN_TOAN, ly)
+    if at:
+        ra.append(PhatHienPhanBien(
+            PhamViPhanXu.AN_TOAN, "REJECT",
+            "Reviewer nêu dấu hiệu AN TOÀN/TOÀN VẸN", bat_buoc=True,
+            bang_chung=tuple(at)))
+
+    ngu = [t for t in kh.nghiem_thu
+           if not any(c.tat_dinh for c, _ in t.cach_kiem)]
+    if px != "ACCEPT":
+        for t in ngu:
+            ra.append(PhatHienPhanBien(
+                PhamViPhanXu.TIEU_CHI, px, ly, tieu_chi=t.mo_ta,
+                bat_buoc=bool(t.bat_buoc)))
+        if not ngu:
+            ra.append(PhatHienPhanBien(PhamViPhanXu.TOAN_CUC, px, ly))
+        goi = _khop(_MAU_GOI_ROUTER, ly)
+        if goi:
+            ra.append(PhatHienPhanBien(
+                PhamViPhanXu.TIEU_CHI, px,
+                "Reviewer chê KHUNG BÁO CÁO do Router sinh, không chê công "
+                "việc của agent — sửa gói tin, không tính cho worker",
+                bang_chung=tuple(goi), nguon=NguonPhatHien.ROUTER_PACKET))
+    return tuple(ra)
+
+
 # ------------------------------------------------------- kiem ca lan chay --
 
 @dataclass
@@ -430,10 +584,20 @@ class BaoCaoKiemDinh:
     doc_lap: Optional[bool] = None
     ly_do: str = ""
     giay: float = 0.0
+    #: Phát hiện của Reviewer, ĐÃ CÓ phạm vi. Giữ lại CẢ những phát hiện
+    #: không chặn: một lời chê không đủ quyền chặn vẫn phải ĐỌC ĐƯỢC, chứ
+    #: không bị nuốt đi cho báo cáo xanh.
+    phat_hien: Tuple[PhatHienPhanBien, ...] = ()
 
     @property
     def dat(self) -> bool:
         return self.trang_thai.dat
+
+    @property
+    def canh_bao(self) -> Tuple[PhatHienPhanBien, ...]:
+        """Phát hiện KHÔNG chặn — phải hiện ra ở kết luận và ở ký ức."""
+        return tuple(p for p in self.phat_hien
+                     if not p.chan_duoc and p.phan_xu != "ACCEPT")
 
     def to_dict(self) -> Dict:
         return {"execution_id": self.execution_id,
@@ -443,7 +607,9 @@ class BaoCaoKiemDinh:
                 "buoc_thieu_bang_chung": list(self.buoc_thieu_bang_chung),
                 "tieu_chi": [t.to_dict() for t in self.tieu_chi],
                 "doc_lap": self.doc_lap, "ly_do": self.ly_do,
-                "giay": round(self.giay, 2)}
+                "giay": round(self.giay, 2),
+                "phat_hien": [p.to_dict() for p in self.phat_hien],
+                "canh_bao": [p.to_dict() for p in self.canh_bao]}
 
     def render(self) -> str:
         d = [f"KIỂM ĐỊNH: {self.trang_thai.value} — {self.ly_do}"]
@@ -461,6 +627,14 @@ class BaoCaoKiemDinh:
                 d.append(f"      {'✓' if k.dat else '✗'} {k.cach}: {k.chi_tiet}")
         if self.doc_lap is False:
             d.append("  (!) phản biện KHÔNG độc lập về họ model — SUY GIẢM")
+        # CANH BAO KHONG CHAN VAN PHAI DOC DUOC. Mot loi che khong du quyen
+        # chan lan thuc thi khong co nghia la no bien mat — giau no di la
+        # lam bao cao xanh bang cach im lang.
+        for p in self.canh_bao:
+            nhan = ("KHUNG BÁO CÁO của Router"
+                    if p.nguon is NguonPhatHien.ROUTER_PACKET
+                    else f"tiêu chí NÊN CÓ: {p.tieu_chi[:70]}")
+            d.append(f"  (cảnh báo, không chặn) Reviewer {p.phan_xu} — {nhan}")
         return "\n".join(d)
 
 
@@ -525,7 +699,8 @@ def kiem_dinh_thuc_thi(y: YDinhThucThi, kh: KeHoachThucThi,
         buoc_hong=tuple(hong), buoc_thieu_bang_chung=tuple(thieu),
         tieu_chi=tuple(cham),
         doc_lap=(None if not phan_bien else bool(phan_bien.get("doc_lap"))),
-        ly_do=ly, giay=time.time() - t0)
+        ly_do=ly, giay=time.time() - t0,
+        phat_hien=chuan_hoa_phan_bien(phan_bien, kh))
 
 
 def _moi_gioi_cua_buoc(kq: Optional[HopDongKetQua],
@@ -689,13 +864,53 @@ def _tong_hop(dat: Sequence[str], hong: Sequence[str], thieu: Sequence[str],
                 "nào cho một lần thực thi có ghi — không chấm được mục tiêu gốc")
     if phan_bien:
         px = str(phan_bien.get("phan_xu") or "").strip().upper()
-        if px == "REJECT":
-            return (TrangThaiXacMinh.KHONG_DAT,
-                    "Reviewer REJECT: "
-                    + str(phan_bien.get("ly_do") or "")[:200])
-        if px == "REVISE":
+        # PHAN XU CO PHAM VI. Ban truoc ap phan xu TOAN CUC cho moi truong
+        # hop, nen mot tieu chi "nen co" (`bat_buoc=False`) muon duoc quyen
+        # CHAN ca lan thuc thi — trong khi mot tieu chi TAT DINH khong bat
+        # buoc ma hong thi khong chan duoc gi. Do duoc: `ex_181f8dd29fbe`,
+        # hai tieu chi bat buoc DAT, tieu chi ngu nghia TUY CHON nhan REVISE,
+        # ket qua `BLOCKED`.
+        #
+        # Luat tham quyen nay GIONG HET luat cua tieu chi tat dinh o tren:
+        # chi cai BAT BUOC moi chan duoc. Ngoai le duy nhat la AN_TOAN.
+        ph = chuan_hoa_phan_bien(phan_bien, kh)
+        chan = [p for p in ph if p.chan_duoc and p.phan_xu != "ACCEPT"]
+        canh = [p for p in ph if not p.chan_duoc and p.phan_xu != "ACCEPT"]
+        if chan:
+            at = [p for p in chan if p.pham_vi is PhamViPhanXu.AN_TOAN]
+            nang = at or [p for p in chan if p.phan_xu == "REJECT"]
+            if nang:
+                return (TrangThaiXacMinh.KHONG_DAT,
+                        ("Reviewer nêu vấn đề AN TOÀN/TOÀN VẸN: "
+                         if at else "Reviewer REJECT: ")
+                        + (nang[0].ly_do or "")[:200])
             return (TrangThaiXacMinh.THIEU_BANG_CHUNG,
-                    "Reviewer REVISE: "
+                    "Reviewer REVISE trên tiêu chí BẮT BUỘC: "
+                    + (chan[0].ly_do or "")[:200])
+        if canh:
+            # Chỉ tiêu chí TUỲ CHỌN (hoặc lời chê KHUNG BÁO CÁO của Router)
+            # bị phản đối. Lần thực thi XONG — nhưng SUY GIẢM, và lời chê
+            # được GIỮ LẠI nguyên văn chứ không bị nuốt cho xanh báo cáo.
+            rt = [p for p in canh if p.nguon is NguonPhatHien.ROUTER_PACKET]
+            tc = [p for p in canh if p.nguon is NguonPhatHien.WORKER]
+            phan = []
+            if tc:
+                phan.append(
+                    f"{len(tc)} tiêu chí NÊN CÓ bị Reviewer "
+                    f"{tc[0].phan_xu}: "
+                    + "; ".join(p.tieu_chi[:60] for p in tc[:2]))
+            if rt:
+                phan.append("Reviewer còn chê KHUNG BÁO CÁO của Router "
+                            "(lỗi gói tin, KHÔNG tính cho agent)")
+            return (TrangThaiXacMinh.SUY_GIAM,
+                    f"{len(dat)} bước đạt, mọi tiêu chí BẮT BUỘC đạt — "
+                    + "; ".join(phan)
+                    + " — xong nhưng SUY GIẢM: " + (canh[0].ly_do or "")[:300])
+        if px in ("REJECT", "REVISE"):
+            # Có phán xử xấu nhưng KHÔNG quy được về phạm vi nào — không
+            # nuốt im lặng.
+            return (TrangThaiXacMinh.SUY_GIAM,
+                    f"Reviewer {px} nhưng không quy được về tiêu chí nào: "
                     + str(phan_bien.get("ly_do") or "")[:200])
         if not phan_bien.get("doc_lap"):
             return (TrangThaiXacMinh.SUY_GIAM,

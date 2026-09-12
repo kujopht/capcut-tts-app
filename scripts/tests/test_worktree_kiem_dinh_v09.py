@@ -346,6 +346,13 @@ class TestChamLaiSauReviewer(unittest.TestCase):
             moi_gioi=KD.MoiGioiKiem(str(self.b)),   # cây "chung" = B
             goi_phan_bien=_reviewer)
         self.dp.bat_dau(self.y, self.kh)
+        # Đưa lần thực thi tới ĐÚNG pha mà production gọi `kiem_dinh`:
+        # `VERIFYING`. Gọi từ `READY` thì một kết luận DONE là chuyển CẤM —
+        # và đó là bảng chuyển đang làm đúng việc của nó.
+        from scripts.control_center.execution.trang_thai import (
+            TrangThaiThucThi as TT)
+        self.so.doi_trang_thai(self.y.execution_id, TT.RUNNING)
+        self.so.doi_trang_thai(self.y.execution_id, TT.VERIFYING)
         for ma, tep, cay in (("a", TEP_A, self.a), ("b", TEP_B, self.b)):
             self.so.luu_buoc(self.y.execution_id, self.kh.phien_ban, ma,
                              ket_qua=_kq_ghi(ma, tep, cay),

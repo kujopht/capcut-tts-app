@@ -771,7 +771,14 @@ def diem_dung_sua(ban_ke_hoach, cac_buoc, su_kien) -> Tuple[bool, str]:
     if not pb:
         return False, "bản kế hoạch v2 chưa bền trên đĩa"
     mv = max(int(getattr(p, "phien_ban", 1)) for p in pb)
-    cua_v2 = [b for b in cac_buoc if int(b.get("plan_version") or 1) == mv]
+    # CỘT LÀ `phien_ban`, KHÔNG phải `plan_version` — và `SoThucThi.buoc()`
+    # vốn ĐÃ lọc theo bản đang hiệu lực. Bản đầu của hàm này đọc một khoá
+    # không tồn tại, nên `cua_v2` luôn rỗng và điểm dừng KHÔNG BAO GIỜ tới:
+    # lần chạy R đầu tiên báo "chưa có bước nào của v2" rồi VÔ HIỆU. Đó là
+    # lỗi của bài kiểm, không phải của sản phẩm — nhưng nó đúng là lý do
+    # phải có cả bài kiểm cho chính điểm dừng.
+    cua_v2 = [b for b in cac_buoc
+              if int(b.get("phien_ban") or b.get("plan_version") or mv) == mv]
     if not cua_v2:
         return False, f"chưa có bước nào của v{mv}"
     dang = [b for b in cua_v2 if b.get("state") not in _BUOC_KET_THUC]
@@ -1211,6 +1218,9 @@ def main() -> int:
             return 0
 
         chon = set(x.upper() for x in (a.kich_ban or list("ABCDEFGH")))
+        bc = BaoCao()
+        ma_dx = eid_b = eid_c = eid_d = None
+
         if "R" in chon:
             # Kịch bản R tự sở hữu vòng đời `ControlCenter` (nó TẮT rồi MỞ
             # lại giữa chừng), nên nó chạy RIÊNG và trả về bản mới.
@@ -1218,8 +1228,6 @@ def main() -> int:
             if moi is not None:
                 cc = moi
             chon.discard("R")
-        bc = BaoCao()
-        ma_dx = eid_b = eid_c = eid_d = None
 
         if "A" in chon:
             ma_dx = kb_A(cc, bc)

@@ -25,7 +25,11 @@ class _Ban:
 
 
 def _buoc(ma: str, pb: int, state: str):
-    return {"buoc_id": ma, "plan_version": pb, "state": state}
+    # TÊN CỘT THẬT là `phien_ban`. Bản đầu của bài kiểm này dùng
+    # `plan_version` — một khoá KHÔNG TỒN TẠI — nên nó xanh với dữ liệu giả
+    # trong khi hàm thật không bao giờ tìm thấy bước nào, và lần chạy R đầu
+    # tiên VÔ HIỆU. Bài kiểm dùng đúng hình dạng hàng của `SoThucThi.buoc()`.
+    return {"buoc_id": ma, "phien_ban": pb, "state": state}
 
 
 TRUOT = {"kind": "EXEC_VERIFIED", "detail": "KHONG_DAT: 1/1 tiêu chí ..."}
@@ -101,6 +105,42 @@ class TestDiemDungSua(unittest.TestCase):
     def test_10_khong_co_gi_thi_KHONG_duoc_tat(self):
         ok, _ = diem_dung_sua([], [], [])
         self.assertFalse(ok)
+
+
+class TestHinhDangHangThat(unittest.TestCase):
+    """Bài kiểm phải dùng ĐÚNG hình dạng hàng mà sổ thật trả về.
+
+    Lần chạy R đầu tiên VÔ HIỆU vì `diem_dung_sua` đọc khoá `plan_version`
+    trong khi cột thật tên `phien_ban`; bài kiểm lúc đó cũng dựng dữ liệu giả
+    bằng khoá sai nên nó XANH. Hai cái sai khớp nhau thì không ai bắt được —
+    nên bài kiểm này neo vào chính `SoThucThi.buoc()`.
+    """
+
+    def test_16_hang_that_co_khoa_phien_ban(self):
+        import inspect
+        from scripts.control_center.execution.so import SoThucThi
+        src = inspect.getsource(SoThucThi.buoc)
+        self.assertIn("phien_ban", src)
+        self.assertNotIn("plan_version", src)
+
+    def test_17_doc_duoc_hang_that_tu_so_that(self):
+        """Dựng một sổ THẬT, ghi một bước, rồi cho qua chính hàm điểm dừng."""
+        import shutil
+        import tempfile
+        from pathlib import Path
+        from scripts.control_center.execution.so import SoThucThi
+        from scripts.control_center.store import ControlStore
+
+        d = Path(tempfile.mkdtemp(prefix="hang-that-"))
+        try:
+            so = SoThucThi(ControlStore(d / "control.db"))
+            hang = {"buoc_id": "b", "phien_ban": 2, "state": "DANG_CHAY"}
+            ok, vs = diem_dung_sua([_Ban(1), _Ban(2, True)], [hang],
+                                   [TRUOT, SUA])
+            self.assertTrue(ok, f"không đọc nổi hàng thật: {vs}")
+            so.store.close()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 class TestDanhTinhTheoLanChay(unittest.TestCase):

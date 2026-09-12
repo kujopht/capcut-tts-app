@@ -940,8 +940,11 @@ def kb_R(cc, bc: BaoCao):
                   len(sk3) >= truoc_sk, f"{truoc_sk} -> {len(sk3)}")
 
     # Khoá: không còn khoá mồ côi của lần thực thi này.
+    # `store.locks()` trả `ResourceLock`, KHÔNG phải dict — truy cập thuộc
+    # tính. Bản đầu dùng `.get()` và nổ ở đây SAU khi 13 khẳng định đã ĐẠT,
+    # nên báo cáo JSON không bao giờ được ghi và bộ chạy đọc phải bản CŨ.
     con = [l for l in cc2.store.locks(PID)
-           if str(l.get("resource") or "") == TEP_R]
+           if str(getattr(l, "resource", "") or "") == TEP_R]
     bc.khang_dinh("R", "khoá được đối soát (không còn khoá mồ côi)", not con,
                   f"còn giữ: {con[:2]}" if con else "sạch")
 

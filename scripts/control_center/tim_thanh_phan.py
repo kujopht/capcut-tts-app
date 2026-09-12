@@ -70,6 +70,17 @@ _BO_QUA = ("node_modules", ".git", "__pycache__", ".router", "dist", "build",
 #: Gốc chứa MÃ — nơi một "thành phần" thật sự sống.
 _GOC_MA = ("server", "web", "desktop_app", "capcut_tts_api")
 
+#: Từ CHUNG CHUNG — có mặt khắp nơi nên không phân biệt được gì. Giữ chúng
+#: lại chỉ làm loãng bằng chứng: "tool" một mình kéo về 16 ứng viên.
+_TU_CHUNG = frozenset((
+    "tool", "tools", "cai", "con", "cua", "thang", "phan", "module", "code",
+    "file", "files", "script", "scripts", "test", "tests", "main", "src",
+    "app", "core", "util", "utils", "common", "base", "data", "info",
+    "service", "services", "manager", "handler", "config", "setup",
+    "sao", "roi", "the", "nao", "gio", "con", "still", "what", "how",
+    "about", "with", "that", "this", "your", "have", "does",
+))
+
 #: Thư mục là BẰNG CHỨNG *về* thành phần, không phải thành phần. Giữ chúng
 #: ở ngoài danh sách ứng viên: tên tệp báo cáo khớp gần như mọi từ khoá, nên
 #: để chúng dự thi thì `docs` luôn thắng và câu trả lời thành vô dụng.
@@ -125,9 +136,15 @@ def mo_rong_tu_khoa(cau: str) -> List[str]:
     for k, dm in _MO_RONG:
         if k in t:
             ra.extend(dm)
-    # Giữ lại cả từ dài của chính câu hỏi (tên riêng, tên module).
+    # Giữ lại cả từ dài của chính câu hỏi (tên riêng, tên module) — TRỪ từ
+    # chung chung.
+    #
+    # Đo được ở dogfood: "tool" khớp hàng chục tệp nên câu "tool cạo audio"
+    # ra **16 ứng viên** và `chắc=False`, dù `server/scraper` rõ ràng trội.
+    # Một từ có mặt ở khắp nơi không phân biệt được gì — nó chỉ pha loãng
+    # bằng chứng.
     for w in re.findall(r"[A-Za-z_][A-Za-z0-9_\-]{3,}", t):
-        if w not in ra:
+        if w not in ra and w not in _TU_CHUNG:
             ra.append(w)
     return ra[:12]
 
@@ -207,15 +224,48 @@ class BoTimThanhPhan:
     def _bac_kho(self, cau: str, tu: Sequence[str], kq: KetQuaTim) -> None:
         """Tìm trong KHO: tên tệp/thư mục TRƯỚC, rồi nội dung."""
         tep = self._ls_files()
+        da_cham: set = set()
         for t in tu:
             tl = t.lower()
             khop = [p for p in tep if tl in p.lower()]
+            # LỌC TRƯỚC, CẮT SAU. Bản trước cắt `khop[:8]` rồi mới bỏ
+            # `docs/`/`deploy/` — nên với từ khoá phổ biến như "web", cả 8 chỗ
+            # đều là tài liệu và `web/` KHÔNG BAO GIỜ được chấm. Đo được:
+            # `web` chỉ 4 điểm, thua `scripts/cloudflare_request_monitor` (9).
             for p in khop[:TRAN_MOI_BAC]:
-                goi = self._goi_cua(p)
                 kq.bang_chung.append(BangChungTim("kho", f"tệp khớp {t!r}", p, p))
-                if goi:
-                    self._them(kq, goi, bac="kho", diem=3, duong=goi,
-                               vi_sao=f"tên tệp khớp {t!r}: {p}")
+            # XÉT THEO ĐỘ MẠNH, không theo thứ tự bảng chữ cái.
+            #
+            # `git ls-files` trả theo alphabet, nên với "web" thì tám chỗ đầu
+            # đều là `scripts/*web*` và **`web/` không bao giờ được chấm**.
+            # Xếp ứng viên mạnh lên trước rồi mới cắt.
+            cv = []
+            for x in khop:
+                g = self._goi_cua(x)
+                if not g:
+                    continue
+                ten = g.rsplit("/", 1)[-1].lower()
+                manh = 2 if ten == tl else (1 if tl in g.lower() else 0)
+                cv.append((-manh, len(g), g, x))
+            cv.sort()
+            for _, _, goi, p in cv[:TRAN_MOI_BAC]:
+                # CHẤM MỘT LẦN cho mỗi (thành phần, từ khoá).
+                #
+                # Cộng dồn theo TỆP thổi phồng những thứ tình cờ có nhiều tệp:
+                # đo được, "web fanfic" cho `scripts/cloudflare_request_monitor`
+                # (9) trội hơn `web` (8) chỉ vì `web/` có bốn tệp khớp yếu.
+                # Điểm phải đo ĐỘ LIÊN QUAN, không đo số tệp.
+                if (goi, tl) in da_cham:
+                    continue
+                da_cham.add((goi, tl))
+                ten = goi.rsplit("/", 1)[-1].lower()
+                if ten == tl:
+                    diem, vs = 15, f"TÊN THÀNH PHẦN là {t!r}"
+                elif tl in goi.lower():
+                    diem, vs = 9, f"tên thành phần chứa {t!r}"
+                else:
+                    diem, vs = 2, f"tên tệp khớp {t!r}: {p}"
+                self._them(kq, goi, bac="kho", diem=diem, duong=goi, vi_sao=vs)
         # Nội dung — chỉ khi tên chưa cho ứng viên nào.
         if not kq.ung_vien:
             for t in list(tu)[:4]:
@@ -225,7 +275,8 @@ class BoTimThanhPhan:
                     continue
                 for p in [x for x in ra.splitlines() if x][:TRAN_MOI_BAC]:
                     goi = self._goi_cua(p)
-                    if goi:
+                    if goi and (goi, t.lower()) not in da_cham:
+                        da_cham.add((goi, t.lower()))
                         self._them(kq, goi, bac="kho", diem=1, duong=goi,
                                    vi_sao=f"nội dung nhắc {t!r}: {p}")
 
@@ -261,7 +312,20 @@ class BoTimThanhPhan:
     # ------------------------------------------------------------- tiện ích --
 
     def _xep_hang(self, kq: KetQuaTim) -> None:
+        """Xếp hạng rồi CẮT ĐUÔI.
+
+        Một danh sách 16 ứng viên không phải "trung thực về sự mơ hồ" — nó
+        là chưa xếp hạng. Người dùng hỏi một câu, đáp án hữu ích là 1 (nếu
+        rõ) hoặc 2–3 (nếu thật sự mơ hồ), không bao giờ là 16.
+        """
         kq.ung_vien.sort(key=lambda u: -int(u.get("diem") or 0))
+        if not kq.ung_vien:
+            return
+        dau = int(kq.ung_vien[0].get("diem") or 0)
+        # Giữ lại thứ CÙNG HẠNG với đầu bảng; bỏ phần nhiễu ở đuôi.
+        nguong = max(2, dau * 0.25)
+        kq.ung_vien = [u for u in kq.ung_vien
+                       if int(u.get("diem") or 0) >= nguong][:3]
 
     def _goi_cua(self, duong: str) -> str:
         """Quy một tệp về THÀNH PHẦN chứa nó. `""` = KHÔNG phải thành phần.
@@ -277,6 +341,11 @@ class BoTimThanhPhan:
         """
         p = [x for x in duong.replace("\\", "/").split("/") if x]
         if not p:
+            return ""
+        # Một TỆP ở gốc kho không phải một thành phần. Bản trước trả về chính
+        # tên tệp, nên "web" cho ra `requirements-control-center-web.txt` và
+        # `router-cc-web.cmd` — nhiễu thuần tuý.
+        if len(p) == 1:
             return ""
         if p[0] in _KHONG_PHAI_THANH_PHAN:
             return ""
@@ -309,6 +378,64 @@ class BoTimThanhPhan:
         except (OSError, subprocess.TimeoutExpired):
             return 127, ""
         return int(r.returncode), (r.stdout or "")
+
+
+#: BẢN ĐỒ VAI TRÒ -> dấu hiệu trong kho. Chỉ NHẬN DẠNG thứ có thật; không
+#: có dấu hiệu thì vai trò đó KHÔNG xuất hiện trong viên nang.
+#:
+#: Vì sao cần: viên nang Fanfic mô tả dự án là "Fanfic Audio Studio — pipeline
+#: TTS", trong khi dự án thật là cả hệ fanfic.world (web, thu thập, farmer,
+#: duyệt, Appwrite, R2, Drive, triển khai, Router). Leader vì thế trả lời hẹp,
+#: và phải nhờ tra cứu lúc-hỏi mới biết `server/scraper` tồn tại.
+VAI_TRO: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
+    ("web", "web / frontend", ("web/package.json", "web/next.config.mjs")),
+    ("thu_thap", "thu thập & bóc tách nội dung (scraping/ingestion)",
+     ("server/scraper/", "scripts/story_harvester", "server/harvest")),
+    ("tts", "TTS / âm thanh",
+     ("desktop_app/tts_service.py", "capcut_tts_api/", "server/tts_bridge.py")),
+    ("farmer", "farmer (worker nền trên máy chủ)",
+     ("server/farmer/", "deploy/bootstrap-farmer", "scripts/farmer_service_ctl")),
+    ("duyet", "hàng đợi duyệt / kiểm duyệt nội dung",
+     ("server/review", "content_queue", "server/moderation")),
+    ("appwrite", "Appwrite (dữ liệu / xác thực)",
+     ("server/appwrite", "docs/APPWRITE_SCHEMA.md")),
+    ("r2", "R2 (lưu trữ đối tượng)", ("server/r2", "docs/R2", "boto3")),
+    ("drive", "Drive / kho lưu trữ nguội",
+     ("rclone", "scripts/rclone_archive_copy", "docs/DRIVE")),
+    ("trien_khai", "triển khai & runtime",
+     ("web/wrangler.jsonc", "deploy/", "docs/DEPLOY")),
+    ("router", "Router Control Center (tích hợp)",
+     ("scripts/control_center/", "scripts/router_v4/")),
+)
+
+
+def topo_thanh_phan(goc: Path, *, tep: Optional[Sequence[str]] = None
+                    ) -> List[Dict]:
+    """Bản đồ thành phần dự án, SUY TỪ BẰNG CHỨNG trong kho.
+
+    Một vai trò chỉ xuất hiện khi có tệp/thư mục CHỨNG MINH nó. Không có
+    dấu hiệu thì im lặng — thà thiếu một vai còn hơn bịa một vai.
+    """
+    if tep is None:
+        bt = BoTimThanhPhan("", goc)
+        tep = bt._ls_files()
+    thap = [t.lower() for t in tep]
+    ra: List[Dict] = []
+    for ma, nhan, dau in VAI_TRO:
+        bc = []
+        for d in dau:
+            dl = d.lower()
+            bc += [t for t in thap if dl in t][:2]
+            if len(bc) >= 3:
+                break
+        if bc:
+            ra.append({"ma": ma, "nhan": nhan, "bang_chung": sorted(set(bc))[:3]})
+    return ra
+
+
+def goi_topo(ds: Sequence[Dict]) -> List[str]:
+    """Dòng ngắn cho viên nang: vai trò + một đường dẫn làm bằng chứng."""
+    return [f"{d['nhan']} — {d['bang_chung'][0]}" for d in ds]
 
 
 def goi_tra_loi(kq: KetQuaTim) -> str:

@@ -37,6 +37,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 #: (khoá, nhãn hiển thị, nhóm UI). Nhóm dùng cho tab Tổng quan (Phần H).
 SO_MUC: Tuple[Tuple[str, str, str], ...] = (
     ("danh_tinh",          "Danh tính",                      "tong_quan"),
+    # BẢN ĐỒ THÀNH PHẦN đứng ngay sau danh tính: nó trả lời "dự án này GỒM
+    # NHỮNG GÌ", và thiếu nó thì `muc_tieu` (một câu chép từ `CLAUDE.md`) trở
+    # thành định nghĩa duy nhất về phạm vi dự án — đo được là nó lạc hậu.
+    ("thanh_phan",         "Bản đồ thành phần",              "tong_quan"),
     ("muc_tieu",           "Mục tiêu / nhiệm vụ",            "tong_quan"),
     ("moc_hien_tai",       "Mốc hiện tại",                   "tong_quan"),
     ("kien_truc",          "Kiến trúc hiện tại",             "kien_truc"),
@@ -101,6 +105,9 @@ _TRUY_HOI: Dict[str, str] = {
 #: nang đã lưu. Phủ cả 19 mục, vì mục nào cũng có thể là mục bị hỏi.
 _TU_KHOA_NAP: Dict[str, str] = {
     "danh_tinh": "tên dự án repo kho branch nhánh remote identity",
+    "thanh_phan": ("thành phần component phần module gồm những gì hệ thống "
+                   "web frontend scraper cạo cào thu thập tts audio farmer "
+                   "duyệt review appwrite r2 drive triển khai deploy router"),
     "muc_tieu": "mục tiêu nhiệm vụ mission để làm gì tại sao",
     "moc_hien_tai": "tiến độ mốc trạng thái hiện tại đang ở đâu milestone",
     "kien_truc": "kiến trúc architecture module service tầng thiết kế",
@@ -225,6 +232,25 @@ def dung_muc(cc, project_id: str, *, kho=None, gioi_han_doc: int = 6) -> Dict[st
                 dt.append(f"remote: {d.remote_url}")
         else:
             dt.append("KHÔNG phải kho git — phần lịch sử git là UNKNOWN")
+        # ---- BẢN ĐỒ THÀNH PHẦN: suy TỪ KHO, không từ một câu mô tả -------
+        #
+        # Đo được (dogfood 2026-09-12): `muc_tieu` lấy từ `CLAUDE.md` nói dự
+        # án là "Fanfic Audio Studio — pipeline TTS", nên Leader khung hẹp và
+        # không biết `server/scraper` tồn tại cho tới khi có tra cứu lúc-hỏi.
+        # Một câu mô tả lạc hậu thì cả viên nang lạc hậu theo; bản đồ suy từ
+        # tệp THẬT thì tự đúng theo kho.
+        try:
+            from scripts.control_center import tim_thanh_phan as _TTP
+            topo = _TTP.topo_thanh_phan(Path(d.goc_worktree))
+            if topo:
+                muc["thanh_phan"] = _muc(
+                    _TTP.goi_topo(topo), nguon="kho",
+                    bang_chung=[b for t in topo for b in t["bang_chung"]][:8],
+                    ghi_chu=("vai trò chỉ hiện khi có tệp CHỨNG MINH — "
+                             "không suy diễn từ tên dự án"))
+        except Exception as exc:                              # noqa: BLE001
+            muc["thanh_phan"] = _khong_ro(f"không dựng được bản đồ: {exc}")
+
         muc["danh_tinh"] = _muc(dt, nguon="kho",
                                 bang_chung=[f"repo:{d.goc_worktree}"],
                                 ghi_chu=("danh tính KHÔNG suy từ nhánh: nhánh/HEAD "
@@ -637,10 +663,14 @@ def uoc_token(muc: Dict) -> int:
 #: Chỉ còn là thứ tự MẶC ĐỊNH (khi không có câu hỏi) và thứ tự PHÁ HOÀ cho
 #: phần đuôi — `thu_tu_nap()` mới là thứ quyết định lượt cụ thể nạp mục nào.
 UU_TIEN_NAP: Tuple[str, ...] = (
-    "danh_tinh", "moc_hien_tai", "muc_tieu", "quyet_dinh", "rang_buoc",
-    "tham_chieu_song", "issue_mo", "kien_truc", "topo_production", "su_co",
-    "gioi_han", "luu_tru", "dich_vu", "roadmap", "tai_nguyen_agent",
-    "yeu_cau", "no_ky_thuat", "thay_doi_gan_day", "lich_su_quan_trong",
+    # `thanh_phan` nằm trong ĐẦU BẢNG (luôn nạp): câu hỏi rộng nào cũng cần
+    # biết dự án GỒM NHỮNG GÌ, và đó chính là thứ đã thiếu khi Leader trả lời
+    # hẹp về "pipeline TTS".
+    "danh_tinh", "thanh_phan", "moc_hien_tai", "muc_tieu", "quyet_dinh",
+    "rang_buoc", "tham_chieu_song", "issue_mo", "kien_truc",
+    "topo_production", "su_co", "gioi_han", "luu_tru", "dich_vu", "roadmap",
+    "tai_nguyen_agent", "yeu_cau", "no_ky_thuat", "thay_doi_gan_day",
+    "lich_su_quan_trong",
 )
 
 

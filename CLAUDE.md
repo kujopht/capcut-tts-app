@@ -320,7 +320,8 @@ xếp chỗ là RÀO CỨNG (`cam_runtime`); từ chối vì CHÍNH SÁCH thì �
 lại có trần + nguồn gốc. `docs/reports/LAM_CUNG_V07.md`,
 `docs/CONTROL_CENTER.md` §20 (luật 22–24).
 
-**V0.8** (nhánh `feat/v08-strategist-reviewer-model-router`, chưa merge/tag)
+**V0.8** (ĐÃ merge vào `main` @ `03b6652`, thẻ `router-control-center-v0.8.0`
+— dòng này trước ghi "chưa merge/tag", sai kể từ lúc phát hành)
 thêm KIẾN TRÚC SUY LUẬN NHIỀU VAI: Leader vẫn là người duy nhất người dùng
 nói chuyện, nhưng nó gọi thêm **STRATEGIST** (kiến trúc/lộ trình/đánh đổi) và
 **REVIEWER** (phản biện ĐỘC LẬP, accept/revise/reject) khi lượt đủ khó, rồi
@@ -359,8 +360,9 @@ ghi vào `.router/v4/benchmark-reasoning.jsonl` (tệp RIÊNG, không trộn l�
 worker) và `BoDinhTuyenVai` đọc lại chính tệp đó — vòng phản hồi đã đóng,
 chỉ chờ đủ `MAU_TOI_THIEU = 3` mẫu để lấn át tiên nghiệm.
 
-**V0.9** (nhánh `feat/v09-closed-loop-execution`, dựng từ `main` đã phát
-hành `03b6652`; **chưa merge/tag**) đóng nốt VÒNG: thảo luận → "ok làm đi"
+**V0.9** (ĐÃ merge vào `main` @ `86ab00b`, thẻ `router-control-center-v0.9.0`
+— dòng này trước ghi "chưa merge/tag", sai kể từ lúc phát hành; xem tiếp
+v0.9.1/v0.9.2 ở `docs/CONTROL_CENTER.md` §25) đóng nốt VÒNG: thảo luận → "ok làm đi"
 → Ý ĐỊNH THỰC THI bền → KẾ HOẠCH có DAG + TIÊU CHÍ NGHIỆM THU → việc cho
 Router V4 → HỢP ĐỒNG KẾT QUẢ → KIỂM ĐỊNH theo MỤC TIÊU GỐC → (đạt) ký ức +
 điểm dừng, (hỏng) lập lại kế hoạch CÓ TRẦN → Leader nói tiếp mà không cần ai

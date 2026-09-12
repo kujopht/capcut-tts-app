@@ -755,9 +755,18 @@ class TestCuaTimAnToan(unittest.TestCase):
                 self.assertIn("RA.write", dong,
                               f"`cwd` không được quyết định phạm vi: {dong}")
 
+    #: Đường TUYỆT ĐỐI nằm ngoài kho — phải hợp với HỆ ĐANG CHẠY.
+    #:
+    #: Bản trước ghi cứng `C:/Windows` và `C:/Users/nguye/.ssh`. Trên Linux
+    #: (runner CI) hai chuỗi đó KHÔNG tuyệt đối, nên nhánh `else` biến chúng
+    #: thành `GOC / "C:/Windows"` — một đường NẰM TRONG kho — và `trong_kho`
+    #: đúng ra không được từ chối. Bài kiểm đỏ ở CI trong khi cửa an toàn vẫn
+    #: chạy đúng: một bài kiểm chỉ-đúng-trên-Windows, không phải một lỗ hổng.
+    NGOAI_KHO = (("C:/Windows", "C:/Users/nguye/.ssh") if os.name == "nt"
+                 else ("/etc", "/root/.ssh"))
+
     def test_khong_ra_ngoai_kho_duoc(self):
-        for d in ("../..", "C:/Windows", "C:/Users/nguye/.ssh",
-                  "scripts/../../..", "/"):
+        for d in ("../..", "scripts/../../..", "/") + self.NGOAI_KHO:
             with self.subTest(duong=d):
                 with self.assertRaises(self.tim.BiTuChoi):
                     self.tim.trong_kho(Path(d) if Path(d).is_absolute()

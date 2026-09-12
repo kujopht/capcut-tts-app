@@ -373,6 +373,40 @@ def dung_app(phien: PhienWeb) -> FastAPI:
 
     # -- V0.7: nhan du an + vien nang + kiem lien tuc ----------------------
 
+    @app.post("/api/project/create")
+    async def tao_du_an_api(payload: Dict):
+        """TẠO một dự án MỚI từ một cái TÊN — V0.9.2.
+
+        Luồng song song với `/adopt`, không thay nó: `/adopt` nhận một kho ĐÃ
+        CÓ tại đường dẫn tuyệt đối (và vẫn là đường của Fanfic), còn cái này
+        dựng thư mục mới dưới thư mục dự án mặc định rồi ĐI QUA CHÍNH
+        `nhan_du_an()` để đăng ký — một máy móc đăng ký, không phải hai.
+        """
+        p = payload or {}
+        ten = str(p.get("ten") or p.get("name") or "").strip()
+        if not ten:
+            return _ma_loi(400, "thiếu `ten` (tên dự án)")
+        from scripts.control_center.tao_du_an import tao_du_an
+
+        def _chay():
+            return tao_du_an(phien.cc, ten,
+                             goc=(str(p.get("goc")).strip()
+                                  if p.get("goc") else None),
+                             project_id=str(p.get("project_id") or "")).to_dict()
+        return _sach(await asyncio.to_thread(_chay))
+
+    @app.get("/api/project/create/preview")
+    async def tao_xem_truoc(ten: str = ""):
+        """Chỗ dự án SẼ nằm. Không chạm đĩa, không đăng ký gì."""
+        from scripts.control_center.tao_du_an import (duong_xem_truoc,
+                                                      thu_muc_goc)
+
+        def _chay():
+            goc = str(thu_muc_goc(phien.cc.store))
+            return {"goc": goc, "duong": duong_xem_truoc(ten, phien.cc.store),
+                    "ten": ten}
+        return _sach(await asyncio.to_thread(_chay))
+
     @app.post("/api/project/adopt")
     async def nhan_du_an_api(payload: Dict):
         """NHẬN một dự án hiện có. CHỈ ĐỌC kho đích, idempotent."""
